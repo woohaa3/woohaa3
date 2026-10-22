@@ -92,6 +92,7 @@ import {
   createRemoteSessionSource,
   isSessionUsable,
   parseSessionExpiry,
+  resolveServerUrl,
   type RemoteSession,
   type RemoteSessionStore
 } from "./session.js";
@@ -102,7 +103,7 @@ import {
   type RemoteSyncScope
 } from "./sync-pending-store.js";
 import { createServerStorageBackend, type ServerStorageBackendOptions } from "./storage/backend.js";
-import { resolveServerStorageConfig } from "./storage/config.js";
+import { resolveServerStorageConfig, type ServerStorageConfig } from "./storage/config.js";
 
 export type { RemoteSession, RemoteSessionStore };
 export { createMemorySessionStore };
@@ -476,7 +477,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
   return {
     extensionId: REMOTE_SERVER_EXTENSION_ID,
     capabilities: REMOTE_SERVER_METADATA.capabilities,
-    activate(host) {
+    async activate(host) {
       // 部署配置每次现读：`config.local.json` 与设置面的非秘密项都可能被改，
       // 而地址是热重载的语义（与 canvas.syncUpstream.url 一致），不该锁在启动值上。
       const readDeployment =
@@ -582,6 +583,9 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           // 服务端托管生成的目录随会话变化收敛（登录后拉目录、登出/切服清空）。
           // 刷新自身绝不抛错；这里再兜一层，避免未处理的 rejection。
           void generationBridge.refresh().catch(() => undefined);
+          // 存储后端跟着会话走：登录成功前没有地址（注册被跳过），登录后才该出现；
+          // 登出后地址随会话消失（部署配置没配时），后端要撤掉，别留一个打不通的实现。
+          void syncStorageBackendWithSession().catch(() => undefined);
         }
       });
 
@@ -1980,17 +1984,54 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       /**
        * 把「服务端掌管的字节」注册成存储后端（`storage.primary = server` 即可选用）。
        *
-       * 放在最后：它依赖上面那份会话来源与部署配置。两种情况只记日志、不注册——存储后端可以
-       * 由 local / cos 顶上，缺配置或缺扩展点都不该让宿主启动失败：
-       * 1. 部署配置里缺 `serverUrl`（**复用** remote-server 那一份，不为存储再造一套）。设备凭证
-       *    **不是**门槛：没有凭证也注册，调用期由共享会话报 `unconfigured` / `unauthenticated`，
-       *    运行期还能靠网关断言或设备码登录补上；
+       * **地址是「连哪台服务端」这一个指针，被两处共用**：交互式登录用它连一次，存储后端用它
+       * 读写字节。因此地址有两个来源，优先级固定——部署配置（`config.local.json` /
+       * `WOOHAA3_REMOTE_SERVER_URL` / 设置面）**权威**，其次才是**已登录会话自带的地址**
+       * （人登录时认可过它，随后随会话一起持久化）。只认部署配置会让「登录过、但没写配置文件」
+       * 的部署在下次启动时注册不上这个后端，媒体静默回落主存储：同一个客户端，同步走远端、
+       * 字节走本地。
+       *
+       * 以下情况只记日志、不注册——存储后端可以由 local / cos 顶上，缺配置不该让宿主启动失败：
+       * 1. 两个来源都没有地址（= 纯本地，也还没登录过）；
        * 2. 宿主没提供 `registerStorage` 接缝（纯本地宿主没有存储扩展点时本来就没有这个后端）。
+       *
+       * 设备凭证**不是**门槛：没有凭证也注册，调用期由共享会话报 `unconfigured` /
+       * `unauthenticated`，运行期还能靠网关断言或设备码登录补上。
+       *
+       * 生命周期：**同一个 id 只有一份实现**。首次注册后，地址变化（首次登录补上、改部署）只
+       * 原地改配置对象；地址消失（登出，且部署配置本来没配）时注销。不重建后端是为了不打断
+       * 在途请求，也不给「同 id 两份注册」留窗口（宿主的 `register` 对重复 id 直接抛错）。
        */
-      const registerStorageBackend = (): void => {
+      /**
+       * 后端持有的**活引用**：`createServerStorageBackend` 只读这个对象，客户端每次调用现算
+       * 基址，所以换地址是改字段，不换实例。
+       */
+      const storageBackendConfig: ServerStorageConfig = { serverUrl: "", keyPrefix: "" };
+      /** 已注册的后端实例（惰性创建）；`null` 表示当前没注册。 */
+      let registeredStorageBackend: ReturnType<typeof createServerStorageBackend> | null = null;
+
+      /**
+       * 按当前「部署配置 + 会话」把存储后端对齐到正确目标。
+       *
+       * - 没有地址（纯本地 / 未登录）：只记 `server-storage-unconfigured`，不注册；
+       * - 地址出现且未注册：注册一份；
+       * - 已注册但地址变了：原地改活引用（客户端每次调用现算基址）；
+       * - 已注册但地址消失（登出且部署配置本来没配）：注销——留着一个空地址的实现，
+       *   每次调用都会抛，界面只能看到一串「存储不可用」，说不清是没登录还是没配置。
+       */
+      const registerStorageBackend = async (): Promise<void> => {
         const deployment = readDeployment();
-        const resolved = resolveServerStorageConfig(deployment);
+        const session = await sessionSource.current();
+        const serverUrl = resolveServerUrl(deployment.serverUrl, session);
+        const resolved = resolveServerStorageConfig(deployment, serverUrl);
         if (!resolved.ok) {
+          if (registeredStorageBackend !== null) {
+            host.unregisterStorage?.(registeredStorageBackend.backendId);
+            registeredStorageBackend = null;
+            storageBackendConfig.serverUrl = "";
+            host.logger({ event: "server-storage-released", reason: "地址已不可用（登出且部署未配地址）" });
+            return;
+          }
           // 日志只写缺哪个字段，绝不写值（deviceToken 是凭据）。
           host.logger({
             event: "server-storage-unconfigured",
@@ -2003,9 +2044,19 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           host.logger({ event: "server-storage-unavailable", reason: "宿主没有提供存储扩展点" });
           return;
         }
+        const source = deployment.serverUrl === null ? "session" : "deployment";
+        if (registeredStorageBackend !== null) {
+          if (storageBackendConfig.serverUrl === resolved.config.serverUrl) return;
+          storageBackendConfig.serverUrl = resolved.config.serverUrl;
+          storageBackendConfig.keyPrefix = resolved.config.keyPrefix;
+          host.logger({ event: "server-storage-retargeted", source, serverHost: serverHostOf(resolved.config.serverUrl) });
+          return;
+        }
+        storageBackendConfig.serverUrl = resolved.config.serverUrl;
+        storageBackendConfig.keyPrefix = resolved.config.keyPrefix;
         const transport = options.storageTransport ?? {};
         const backend = createServerStorageBackend({
-          config: resolved.config,
+          config: storageBackendConfig,
           session: sessionSource,
           now,
           ...(transport.fetchImpl ?? options.fetchImpl
@@ -2016,15 +2067,29 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           ...(transport.transferTimeoutMs ? { transferTimeoutMs: transport.transferTimeoutMs } : {})
         });
         host.registerStorage(backend);
+        registeredStorageBackend = backend;
         host.logger({
           event: "server-storage-activated",
           backendId: backend.backendId,
+          // 地址来自部署配置还是已登录会话：排障时这是「配置有没有生效」的第一问。
+          source,
           // 只记「有没有部署凭证」这个事实（与登录日志的 `method` 同口径），不记值。
           credential: deployment.deviceToken === null ? "none" : "device-token"
         });
       };
 
-      registerStorageBackend();
+      /**
+       * 会话变化后的存储后端同步（`onSessionChanged` 的第二种用途）。
+       *
+       * 登录成功 → 地址从无到有 → 注册；登出 → 地址可能随会话消失 → 注销。
+       */
+      const syncStorageBackendWithSession = async (): Promise<void> => {
+        await registerStorageBackend();
+      };
+
+      // 激活末尾就注册一次：activate 返回的 Promise 会被宿主 await，因此这一步是确定的，
+      // 不依赖「ready 之后」的时序猜测。此时文档存储已可用，能读到上次持久化的会话。
+      await registerStorageBackend();
     }
   };
 }

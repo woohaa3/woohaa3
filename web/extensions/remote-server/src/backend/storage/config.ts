@@ -10,9 +10,13 @@
  * 配置不全**不抛错**：返回缺项由调用方记日志并跳过注册——存储后端可以由 local / cos 顶上，
  * 缺配置不该让宿主启动失败。
  *
- * 注册门槛只有 `serverUrl`：设备凭证是**可选**的。没有凭证时后端照样注册，调用期由共享会话
+ * 注册门槛只有「地址」：设备凭证是**可选**的。没有凭证时后端照样注册，调用期由共享会话
  * （`../session.js`）报 `unconfigured` / `unauthenticated`——与登录、同步上游同一口径：
  * 「还没登录」是运行期状态，不是启动期配置错误；而且运行期还可以用网关断言或设备码登录。
+ *
+ * 地址也不只来自部署配置：部署配置是权威来源，但「已登录会话自带的地址」同样是一份可信的
+ * 地址（人在登录时认可过它）。因此本函数接收调用方算好的 `serverUrl`，而不是自己去读部署
+ * 文件——存储后端是这条连接的服务端一侧，不该拥有比登录更强的地址判据。
  */
 import type { RemoteServerDeployment } from "../../deployment.js";
 
@@ -52,21 +56,22 @@ export type ServerStorageConfigResolution =
  * （`unconfigured` / `unauthenticated`）；在这里拒绝注册只会让「先配地址、后登录」的部署
  * 永远没有服务端存储可用。
  *
- * 校验口径与 `deployment.ts` 完全一致（它已经对 `serverUrl` 做过有界校验），因此这里只处理
- * 「缺项」，不再重复实现一套 URL 规则——两套规则迟早会不一致。
+ * 校验口径与 `deployment.ts` 完全一致（它已经对 `serverUrl` 做过有界校验；会话里的地址更是
+ * 登录时由 `parseServerUrl` 产出），因此这里只处理「缺项」，不再重复实现一套 URL 规则
+ * ——两套规则迟早会不一致。
  */
 export function resolveServerStorageConfig(
-  deployment: RemoteServerDeployment,
+  deployment: Pick<RemoteServerDeployment, "keyPrefix">,
+  serverUrl: string | null,
   options: { keyPrefix?: string } = {}
 ): ServerStorageConfigResolution {
-  const missing: string[] = [];
-  if (deployment.serverUrl === null) missing.push("serverUrl");
-  if (missing.length > 0) return { ok: false, missing };
+  const normalized = serverUrl?.trim() ?? "";
+  if (normalized === "") return { ok: false, missing: ["serverUrl"] };
 
   return {
     ok: true,
     config: {
-      serverUrl: deployment.serverUrl!,
+      serverUrl: normalized,
       keyPrefix: normalizeKeyPrefix(options.keyPrefix ?? deployment.keyPrefix)
     }
   };
