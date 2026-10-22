@@ -18,6 +18,13 @@ import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
 import type { VideoElementLike } from "./video-frame-session.js";
 
+/**
+ * 导出取帧时片场媒体平面的纹理边长上限（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）。
+ *
+ * 与 Rust `protocol::MAX_TEXTURE_EDGE` 一致；交互预览仍用 1024，避免常驻显存翻四倍。
+ */
+export const EXPORT_TEXTURE_MAX_DIMENSION = 2048;
+
 /** 同时存在的片场媒体会话上限。 */
 export const COMPOSITE_ASSET_MEDIA_SESSION_LIMIT = 24;
 /** 视频帧上传间隔下限 ≈ 30fps。 */
@@ -71,6 +78,13 @@ export type CompositeAssetMediaSessions = {
   ): Promise<boolean>;
   /** 释放全部会话（切画布/runtime 重建/dispose）。 */
   dispose(): void;
+  /**
+   * 导出取帧期间的纹理质量开关（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）。
+   *
+   * 交互预览用 1024 上限控制常驻显存；导出（浏览器取帧）临时改用 2048，让近景文字/图片平面
+   * 在 1080p 成片里不发虚。只影响后续上传的帧尺寸，不改业务内容。
+   */
+  setExportQuality(enabled: boolean): void;
 };
 
 type MediaSession = {
@@ -132,11 +146,13 @@ export function createCompositeAssetMediaSessions(
   let retryVersion = options.runtime.retryVersion?.() ?? 0;
   let generationSeq = 1;
   let disposed = false;
+  /** 导出取帧时的纹理上限（D5）：交互预览 1024，导出 2048。 */
+  let maxTextureEdge = TEXTURE_MAX_DIMENSION;
 
   const uploadFrame = (session: MediaSession, drawable: unknown, size: { width: number; height: number }) => {
     if (session.disposed || sessions.get(session.planeId) !== session) return false;
     const accepted = uploads.run(`plane:${session.planeId}`, session.sourceUrl, session.nodeId, () => {
-      const raster = rasterizeDrawable(drawable, size, createCanvas, TEXTURE_MAX_DIMENSION);
+      const raster = rasterizeDrawable(drawable, size, createCanvas, maxTextureEdge);
       if (!raster) throw new Error("媒体平面预览无法读取像素");
       return options.runtime.setModelMediaTexture(session.planeId, raster.width, raster.height, raster.pixels,
         { sourceKey: session.sourceUrl, nodeId: session.nodeId }) !== false;
@@ -498,6 +514,23 @@ export function createCompositeAssetMediaSessions(
       disposed = true;
       for (const session of sessions.values()) disposeSession(session);
       sessions.clear();
+    },
+
+    setExportQuality(enabled: boolean) {
+      const next = enabled ? EXPORT_TEXTURE_MAX_DIMENSION : TEXTURE_MAX_DIMENSION;
+      if (next === maxTextureEdge) return;
+      maxTextureEdge = next;
+      // 尺寸上限变了：已上传的纹理仍是旧的。
+      // - 视频：清掉 uploadedTime，下一次取帧重新上传；
+      // - 图片：只上传过一次且不再重载元素，丢弃会话让下一次 sync 按新上限重新光栅化。
+      for (const [planeId, session] of [...sessions]) {
+        if (session.kind === "image") {
+          disposeSession(session);
+          sessions.delete(planeId);
+          continue;
+        }
+        session.uploadedTime = null;
+      }
     }
   };
 }

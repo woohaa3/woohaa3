@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveFilmSetAssistantTarget } from "../src/frontend/assistant-target.js";
+import { resolveFilmSetAssistantTarget } from "../src/authoring/browser/assistant-target.js";
 
 describe("film-set task target", () => {
   const context: Parameters<typeof resolveFilmSetAssistantTarget>[0] = { tab: "camera", clip: undefined, selectedItemId: "object-a", selectedCameraId: "camera-a", cameras: [{ id: "camera-a", name: "Camera A", order: 0, azimuth: 0, elevation: 0, distance: 5, aspect: "16:9" }] };

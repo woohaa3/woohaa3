@@ -57,6 +57,14 @@ export type McpRuntimeDeps = {
   access?: CanvasAccessPort;
   /** 资源发现目录（懒解析）：注入后 Agent `list_canvases` 走策略目录；缺失时为空（fail closed）。 */
   resourceDirectory?: () => ResourceDirectory | null;
+  /**
+   * 宿主原生录制端口的延迟读取（D8）：注入后 `export_film_set_clip` 才能提交任务。
+   *
+   * 录制端口在画布创建后才装配，且宿主持有唯一实例，因此用 getter 而不是实例。
+   */
+  recording?: () => import("@woohaa3/contracts").CanvasRecordingPort | undefined;
+  /** 当前主题的镜头预览清屏色（D6）；镜头背景为 `theme` 时解析成它。 */
+  themeBackdrop?: () => string;
 };
 
 type ContentMcpNodeService = ReturnType<
@@ -68,11 +76,16 @@ type ContentMcpImportService = ReturnType<
 type ContentMcpItemService = ReturnType<
   NonNullable<NonNullable<import("@woohaa3/contracts").CanvasContentRuntime["mcp"]>["createItemService"]>
 >;
+type ContentMcpExportService = ReturnType<
+  NonNullable<NonNullable<import("@woohaa3/contracts").CanvasContentRuntime["mcp"]>["createExportService"]>
+>;
 
 export type McpRuntime = {
   filmSetNodeService: ContentMcpNodeService | undefined;
   filmSetImportService: ContentMcpImportService | undefined;
   filmSetItemService: ContentMcpItemService | undefined;
+  /** agent 导出端口（D8）；未装配时为 undefined，工具返回 `recording-unavailable`。 */
+  filmSetExportService?: ContentMcpExportService | undefined;
   modelMcpInternalService: ModelMcpService | undefined;
   agentAuthoringService: AgentCanvasInternalService | undefined;
   modelMcpHandler: ((req: unknown, res: ServerResponse) => Promise<boolean>) | null;
@@ -114,6 +127,15 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
   const filmSetNodeService = modelMcpEnabled && mcpRuntime ? mcpRuntime.createNodeService(mcpDeps) : undefined;
   const filmSetImportService = modelMcpEnabled && mcpRuntime ? mcpRuntime.createImportService(mcpDeps) : undefined;
   const filmSetItemService = modelMcpEnabled && mcpRuntime ? mcpRuntime.createItemService(mcpDeps) : undefined;
+  // agent 导出（D8）：端口只在有内容扩展且宿主注入了录制端口时可用；缺失时工具明确返回
+  // `recording-unavailable`，不尝试驱动浏览器页面。
+  const filmSetExportService = modelMcpEnabled && mcpRuntime?.createExportService && deps.recording
+    ? mcpRuntime.createExportService({
+        ...mcpDeps,
+        recording: () => deps.recording?.(),
+        ...(deps.themeBackdrop ? { themeBackdrop: deps.themeBackdrop } : {})
+      })
+    : undefined;
 
   const modelMcpService = modelMcpEnabled ? buildModelMcpService("canvas-model-mcp") : undefined;
   const modelMcpHandler = modelMcpEnabled
@@ -174,6 +196,7 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
     filmSetNodeService,
     filmSetImportService,
     filmSetItemService,
+    filmSetExportService,
     modelMcpInternalService,
     agentAuthoringService,
     modelMcpHandler: modelMcpHandler as McpRuntime["modelMcpHandler"],

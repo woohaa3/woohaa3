@@ -10,13 +10,16 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { defaultFilmSetConversionPrompt } from "@woohaa3/contracts";
+import { readFilmSetConversionAssistant, type AgentConnectionView } from "@woohaa3/contracts";
+import "../../../frontend/src/cordis/test-support/dom-setup.js";
 import { createEmptyWoohaa3ServerCanvas, type FilmSetConversionModelCandidate, type ServerCanvas } from "@woohaa3/contracts";
-import { createFilmSetConversionDialog, createFilmSetConversionSettings } from "../src/frontend/film-set-conversion/settings.js";
+import { createFilmSetConversionDialog, createFilmSetConversionSettings } from "../src/authoring/browser/film-set-conversion/settings.js";
 import { DialogService } from "../../../frontend/src/cordis/services/dialogs/service.js";
 import { DialogHost } from "../../../frontend/src/cordis/services/dialogs/DialogHost.js";
-import { defaultFilmSetConversionEntry, type FilmSetConversionController, type FilmSetConversionEntry } from "../src/frontend/film-set-conversion/controller.js";
-import type { FilmSetConversionActionDependencies } from "../src/frontend/film-set-conversion/action.js";
 import { UiProvider } from "../../../frontend/src/shared/ui/UiProvider.js";
+import { createFilmSetConversionController, defaultFilmSetConversionEntry, type FilmSetConversionController, type FilmSetConversionEntry } from "../src/authoring/browser/film-set-conversion/controller.js";
+import type { FilmSetConversionClient } from "../src/authoring/browser/film-set-conversion/client.js";
+import type { FilmSetConversionActionDependencies } from "../src/authoring/browser/film-set-conversion/action.js";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -227,4 +230,96 @@ it("候选模型仍在加载时不锁住助手选择，并保留管理与刷新�
   act(() => { trigger().dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })); });
   expect(document.querySelector("[role=menuitemradio][aria-label=Assistant]")).toBeTruthy();
   expect(startButton()!.disabled).toBe(true);
+});
+
+it("真实弹窗内的模型选项可点选，保留提示词并按选中模型提交", async () => {
+  const alternative = { ...model, modelKey: "p:alternative", label: "另一视觉模型", isDefault: false };
+  const submit = vi.fn<FilmSetConversionClient["submit"]>(async () => ({ ok: false as const, code: "test-rejected", error: "测试拒绝提交" }));
+  const client = {
+    models: async () => ({ ok: true, value: { models: [model, alternative] } }),
+    submit
+  } as unknown as FilmSetConversionClient;
+  const canvas = canvasWithImage();
+  const controller = createFilmSetConversionController({
+    canvasId: "c1", client, getCanvas: () => canvas, isWritable: () => true,
+    preferences: { read: () => ({}), write: () => true }
+  });
+  const dialogs = new DialogService();
+  dialogs.registerDialog("film-set-creation", {
+    definition: { dismissible: true, singleton: true, validatePayload: payload => ({ ok: true, payload }) },
+    renderer: createFilmSetConversionDialog(deps(controller), dialogs)
+  });
+  dialogs.open({ dialogId: "film-set-creation", payload: { nodeId: "img", nodeType: "image" } });
+  const element = document.createElement("div");
+  document.body.appendChild(element);
+  root = createRoot(element);
+  await act(async () => { root!.render(<UiProvider><DialogHost dialogs={dialogs} /></UiProvider>); });
+
+  const prompt = document.querySelector("textarea")!.value;
+  const trigger = () => document.querySelector<HTMLButtonElement>(".film-set-conversion-settings__model button")!;
+  act(() => { trigger().click(); });
+  const listbox = document.querySelector('[role="listbox"]')!;
+  // 应用级 portal 位于模态遮罩外，即使 jsdom 可派发 click，真实鼠标也无法命中。
+  expect(document.querySelector('.dlg[role="dialog"]')!.contains(listbox)).toBe(true);
+  const option = [...listbox.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === alternative.label)!;
+  act(() => { option.click(); });
+
+  expect(document.querySelector('[role="listbox"]')).toBeNull();
+  expect(trigger().textContent).toContain(alternative.label);
+  expect(document.querySelector("textarea")!.value).toBe(prompt);
+  expect(dialogs.top()?.dialogId).toBe("film-set-creation");
+  act(() => { trigger().click(); });
+  expect(document.querySelector('[role="option"][aria-selected="true"]')!.textContent).toBe(alternative.label);
+  act(() => { document.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]')!.click(); });
+  await act(async () => { startButton()!.click(); });
+  expect(submit).toHaveBeenCalledWith(expect.objectContaining({ settings: { modelKey: alternative.modelKey, instruction: prompt } }));
+});
+
+it("转片场列出统一目录的全部助手，支持本机默认模型与 API 模型/Variant，提交保持图片来源和提示词", async () => {
+  const connections = [
+    { connectionId: "codex", adapterId: "codex-appserver", name: "Codex 本机", authMode: "local-login", models: [] },
+    { connectionId: "opencode", adapterId: "opencode-server", name: "OpenCode 本机", authMode: "local-login", models: [] },
+    { connectionId: "api", adapterId: "anthropic", name: "自定义 API 助手", authMode: "api-key", models: [{ id: "vision", label: "视觉模型", reasoningEfforts: ["high"] }] },
+    { connectionId: "oauth", adapterId: "chatgpt", name: "ChatGPT 授权", authMode: "oauth", models: [{ id: "gpt", label: "GPT" }] }
+  ].map(c => ({ configRevision: 1, credentialEpoch: 2, ready: true, ...c })) as unknown as AgentConnectionView[];
+  const listConnections = vi.fn(async () => ({ ok: true, value: connections }));
+  const catalog = vi.fn(async () => ({ ok: true, value: { models: [] } }));
+  const user = { dataScopeId: "instance-test" };
+  const assistant = { service: { listConnections, catalog, invalidateDirectory: vi.fn() }, currentUser: { subscribe: () => () => {}, getSnapshot: () => user } } as unknown as NonNullable<FilmSetConversionActionDependencies["assistant"]>;
+  const submit = vi.fn<FilmSetConversionClient["submit"]>(async () => ({ ok: false as const, code: "test-rejected", error: "测试拒绝提交" }));
+  const legacyModels = vi.fn();
+  const canvas = canvasWithImage();
+  const controller = createFilmSetConversionController({ canvasId: "c1", client: { submit, models: legacyModels } as unknown as FilmSetConversionClient,
+    preferences: { read: () => ({}), write: () => true }, getCanvas: () => canvas, isWritable: () => true });
+  const dialogs = new DialogService();
+  dialogs.registerDialog("film-set-creation", { definition: { dismissible: true, singleton: true, validatePayload: payload => ({ ok: true, payload }) }, renderer: createFilmSetConversionDialog({ ...deps(controller), assistant }, dialogs) });
+  dialogs.open({ dialogId: "film-set-creation", payload: { nodeId: "img", nodeType: "image" } });
+  const element = document.createElement("div"); document.body.appendChild(element); root = createRoot(element);
+  await act(async () => { root!.render(<UiProvider><DialogHost dialogs={dialogs} /></UiProvider>); });
+  const prompt = document.querySelector("textarea")!.value;
+  const open = async (label: string) => { await act(async () => { document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); }); };
+  const choose = async (label: string) => { const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.textContent === label)!; expect(item).toBeTruthy(); await act(async () => item.click()); };
+  await open("选择助手");
+  expect([...document.querySelectorAll('[role="menuitemradio"]')].map(item => item.textContent)).toEqual(connections.map(c => c.name));
+  expect(document.querySelector('.dlg[role="dialog"]')!.contains(document.querySelector('[role="menu"]'))).toBe(true);
+  await choose("Codex 本机");
+  expect(startButton()!.disabled).toBe(false);
+  await act(async () => startButton()!.click());
+  expect(readFilmSetConversionAssistant(submit.mock.calls[0]![0].settings!.modelKey)).toEqual({ connection: { connectionId: "codex", adapterId: "codex-appserver", configRevision: 1, credentialEpoch: 2 } });
+  await open("选择助手"); await choose("自定义 API 助手");
+  expect(startButton()!.disabled).toBe(true);
+  await open("选择助手模型"); await choose("视觉模型");
+  const modelMenu = document.querySelector('[role="menu"]');
+  expect(modelMenu).not.toBeNull();
+  await choose("high");
+  expect(document.querySelector('[role="menu"]')).toBe(modelMenu);
+  await act(async () => document.querySelector<HTMLElement>('[role="menu"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  await act(async () => startButton()!.click());
+  const request = submit.mock.calls[1]![0];
+  expect(readFilmSetConversionAssistant(request.settings!.modelKey)).toEqual({ connection: { connectionId: "api", adapterId: "anthropic", configRevision: 1, credentialEpoch: 2 }, model: "vision", reasoningEffort: "high" });
+  expect(request.sourceNodeId).toBe("img");
+  expect(request.settings!.instruction).toBe(prompt);
+  expect(document.querySelector("textarea")!.value).toBe(prompt);
+  expect(legacyModels).not.toHaveBeenCalled();
+  expect(listConnections).toHaveBeenCalledOnce();
 });

@@ -19,7 +19,7 @@ import {
   planFilmSetImportCommand,
   resolveFilmSetDrop,
   filmSetImportPatchValue
-} from "../src/shared/drop-planner.js";
+} from "../src/authoring/shared/drop-planner.js";
 
 const NOW = "2026-10-08T00:00:00.000Z";
 const SCRIPT = `scene.box({ id: "a" });`;

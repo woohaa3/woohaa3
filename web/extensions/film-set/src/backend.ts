@@ -1,9 +1,10 @@
-import { createFilmSetCanvasContentRuntime } from "./backend/content-runtime.js";
+import { createFilmSetCanvasContentRuntime } from "./integration/backend/content-runtime.js";
+
 export { FilmSetNodeService,
   readFilmSet,
   resolveNodeModelSource,
   defaultCameraForCreate,
-  DEFAULT_MOTION_SCRIPT } from "./backend/service.js";
+  DEFAULT_MOTION_SCRIPT } from "./authoring/backend/service.js";
 export type { FilmSetNodeServiceDependencies,
   FilmSetNodeOutcome,
   ModelSourceInput,
@@ -12,22 +13,22 @@ export type { FilmSetNodeServiceDependencies,
   EditModelInput,
   ConfirmAdaptationInput,
   CommitFilmSetInput,
-  ReadFilmSetOutcome } from "./backend/service.js";
-export { FilmSetImportService } from "./backend/film-set-import.js";
+  ReadFilmSetOutcome } from "./authoring/backend/service.js";
+export { FilmSetImportService } from "./authoring/backend/film-set-import.js";
 export type {
   FilmSetImportServiceDependencies,
   ImportFilmSetContentInput,
   ImportFilmSetContentOutcome,
   FilmSetImportRequestItem
-} from "./backend/film-set-import.js";
-export { FilmSetItemService, filmSetItemTransformOp } from "./backend/film-set-item.js";
+} from "./authoring/backend/film-set-import.js";
+export { FilmSetItemService, filmSetItemTransformOp } from "./authoring/backend/film-set-item.js";
 export type {
   FilmSetItemServiceDependencies,
   FilmSetItemCommandInput,
   FilmSetItemCommandOutcome
-} from "./backend/film-set-item.js";
+} from "./authoring/backend/film-set-item.js";
 
-export { FilmSetConversionService, conversionCommandId, buildModelCopyCandidate } from "./backend/film-set-conversion.js";
+export { FilmSetConversionService, conversionCommandId, buildModelCopyCandidate } from "./authoring/backend/film-set-conversion.js";
 export type {
   FilmSetConversionServiceDependencies,
   FilmSetConversionSubmitOutcome,
@@ -35,24 +36,24 @@ export type {
   FilmSetConversionGenerator,
   FilmSetConversionGenerationInput,
   FilmSetConversionGenerationResult
-} from "./backend/film-set-conversion.js";
-export { InMemoryFilmSetConversionRegistry } from "./backend/conversion-registry.js";
+} from "./authoring/backend/film-set-conversion.js";
+export { InMemoryFilmSetConversionRegistry } from "./authoring/backend/conversion-registry.js";
 export type { FilmSetConversionRegistry } from "@woohaa3/contracts";
 
-export { prepareFilmSetNativeMedia } from "./backend/media-frame.js";
-export type { FilmSetNativeMediaFrame, FilmSetMediaReader } from "./backend/media-frame.js";
+export { prepareFilmSetNativeMedia } from "./preview/backend/media-frame.js";
+export type { FilmSetNativeMediaFrame, FilmSetMediaReader } from "./preview/backend/media-frame.js";
 
-export { probeFilmSetVideoDuration, extractFilmSetVideoFrames, videoRangeFitsBudget } from "./backend/video-frames.js";
-export type { FilmSetVideoFrame } from "./backend/video-frames.js";
+export { probeFilmSetVideoDuration, extractFilmSetVideoFrames, videoRangeFitsBudget } from "./authoring/backend/video-frames.js";
+export type { FilmSetVideoFrame } from "./authoring/backend/video-frames.js";
 
-export { createFilmSetConversionMediaReader, FILM_SET_CONVERSION_MAX_ASSET_BYTES } from "./backend/conversion-media.js";
-export type { FilmSetConversionAssetReader, FilmSetConversionMediaReaderOptions } from "./backend/conversion-media.js";
+export { createFilmSetConversionMediaReader, FILM_SET_CONVERSION_MAX_ASSET_BYTES } from "./authoring/backend/conversion-media.js";
+export type { FilmSetConversionAssetReader, FilmSetConversionMediaReaderOptions } from "./authoring/backend/conversion-media.js";
 
-export { nativeFilmSetFrame } from "./backend/native-frame.js";
-export { prepareFilmSetHistoryFrame } from "./backend/history-frame.js";
-export { filmSetCanvasContentRuntime } from "./backend/content-runtime.js";
-export { filmSetMcpRuntime } from "./backend/mcp-runtime.js";
-export { filmSetFrameRuntime } from "./backend/frame-runtime.js";
+export { nativeFilmSetFrame } from "./preview/backend/native-frame.js";
+export { prepareFilmSetHistoryFrame } from "./preview/backend/history-frame.js";
+export { filmSetCanvasContentRuntime } from "./integration/backend/content-runtime.js";
+export { filmSetMcpRuntime } from "./integration/backend/mcp-runtime.js";
+export { filmSetFrameRuntime } from "./integration/backend/frame-runtime.js";
 
 /**
  * 画布内容扩展工厂（`extension.json` 的 `canvasContent.factory`）：返回预览/历史帧 + 转片场端口。
@@ -61,6 +62,6 @@ export { filmSetFrameRuntime } from "./backend/frame-runtime.js";
  */
 export { createFilmSetCanvasContentRuntime };
 
-export { compileMotionTracks, previewAnimationMetadata, previewIdentityMatches } from "./backend/preview-identity.js";
+export { compileMotionTracks, previewAnimationMetadata, previewIdentityMatches } from "./preview/backend/preview-identity.js";
 
-export { prepareFilmSetPreviewFrame } from "./backend/preview-frame.js";
+export { prepareFilmSetPreviewFrame } from "./preview/backend/preview-frame.js";

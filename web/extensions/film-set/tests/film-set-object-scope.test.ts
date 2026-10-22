@@ -15,8 +15,8 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, createModelSnapshot, type ServerCanvas } from "@woohaa3/contracts";
-import type { FilmSetContext as Context } from "../src/frontend/context.js";
-import { installFilmSetObjectFeature } from "../src/frontend/film-set-object-feature.js";
+import type { FilmSetContext as Context } from "../src/integration/browser/context.js";
+import { installFilmSetObjectFeature } from "../src/integration/browser/film-set-object-feature.js";
 
 type Bounds = { itemId: string; center: [number, number, number]; radius: number; unit: number; yaw: number };
 

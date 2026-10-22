@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { furnaceUploadFile } from "../src/frontend/upload-file.js";
+import { furnaceUploadFile } from "../src/authoring/browser/upload-file.js";
 
 describe("保留无 decoder 原件", () => {
   it("未知 MIME 转为惰性 binary，字节/名称/时间不变", async () => {

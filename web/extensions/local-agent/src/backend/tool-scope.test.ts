@@ -24,6 +24,12 @@ describe("本机 Agent 工具面", () => {
     expect(tools).toEqual(expect.arrayContaining(["get_model_api", "get_film_set_clips", "mutate_film_set_clip", "submit_film_set", "import_model_snapshot"]));
     expect(tools).not.toContain("submit_model_script");
     expect(tools).not.toContain("submit_model_scripts");
+    expect(tools).toEqual(expect.arrayContaining(["add_film_set_media", "export_film_set_clip", "get_film_set_export"]));
     expect(tools).not.toContain("update_model_camera");
+  });
+
+  it("只有 film-set 模式可导出成片", () => {
+    expect(localAgentToolsForMode("model3d")).not.toContain("export_film_set_clip");
+    expect(localAgentToolsForMode("camera")).not.toContain("add_film_set_media");
   });
 });

@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 import { canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, decodeFilmSetNodeData, filmSetAnimationsOf, type NodeGenerationHistoryDetail } from "@woohaa3/contracts";
-import { HistoryFilmSetSnapshots } from "../src/frontend/history-preview.js";
+import { HistoryFilmSetSnapshots } from "../src/preview/browser/history-preview.js";
 const historyFilmSetSnapshots = new HistoryFilmSetSnapshots();
 afterEach(() => historyFilmSetSnapshots.clear("film"));
 it("history preview isolates the complete scene and clip collection, then restores the live view", () => {

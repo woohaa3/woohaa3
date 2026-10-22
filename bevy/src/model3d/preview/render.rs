@@ -69,7 +69,8 @@ pub(super) fn high_mesh(
 
 /// 构建模型 entity tree：真实层级 + material/persistent mesh 缓存。
 ///
-/// 返回稳定部件 id → entity 与 base transform，供动画采样应用增量。
+/// 返回稳定部件 id → entity、base transform 与共享材质，供动画采样应用增量与透明度。
+#[allow(clippy::type_complexity)]
 fn spawn_model(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -79,12 +80,14 @@ fn spawn_model(
 ) -> (
     std::collections::HashMap<String, Entity>,
     std::collections::HashMap<String, Transform>,
+    std::collections::HashMap<String, Handle<StandardMaterial>>,
 ) {
     let specs = scene::build_entity_specs(model);
     let material_specs = scene::collect_materials(model);
     let root = commands.spawn((root_transform, Visibility::default())).id();
     let mut entities = std::collections::HashMap::new();
     let mut bases = std::collections::HashMap::new();
+    let mut part_materials = std::collections::HashMap::new();
     let mut resources = super::super::resources::SharedResources::default();
 
     for spec in &specs {
@@ -96,6 +99,7 @@ fn spawn_model(
                 let material = resources.material(materials, scene::standard_material_for(
                     &spec.material_key, &material_specs,
                 ));
+                part_materials.insert(spec.id.clone(), material.clone());
                 commands
                     .spawn((Mesh3d(mesh), MeshMaterial3d(material), transform))
                     .id()
@@ -114,7 +118,7 @@ fn spawn_model(
             commands.entity(entity).insert(ChildOf(parent));
         }
     }
-    (entities, bases)
+    (entities, bases, part_materials)
 }
 
 fn local_transform(spec: &ModelEntitySpec) -> Transform {
@@ -123,6 +127,39 @@ fn local_transform(spec: &ModelEntitySpec) -> Transform {
         rotation: scene::quat_from_xyz_radians(spec.rotation_radians),
         scale: Vec3::from_array(spec.scale),
     }
+}
+
+/// 离屏预览/录制帧的透明度应用：与可见播放同一条规则
+/// （change: 2026-10-19-extend-film-set-for-motion-graphics，D2）。
+///
+/// 离屏帧只渲染一次，不需要事后回收：`=1` 保持原材质；`<1` 克隆一份 Blend 实例写入 alpha；
+/// `=0` 直接隐藏，不参与绘制。
+fn apply_preview_opacity(
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+    entity: Entity,
+    shared: &Handle<StandardMaterial>,
+    opacity: f32,
+) {
+    if !opacity.is_finite() || opacity >= 1.0 {
+        return;
+    }
+    let opacity = opacity.max(0.0);
+    if opacity <= 0.0 {
+        commands.entity(entity).insert(Visibility::Hidden);
+        return;
+    }
+    let source = materials.get(shared).cloned().unwrap_or_default();
+    let static_alpha = if source.alpha_mode == bevy::material::AlphaMode::Blend {
+        source.base_color.alpha()
+    } else {
+        1.0
+    };
+    let mut instance = source;
+    instance.alpha_mode = bevy::material::AlphaMode::Blend;
+    instance.base_color.set_alpha((static_alpha * opacity).clamp(0.0, 1.0));
+    let handle = materials.add(instance);
+    commands.entity(entity).insert(MeshMaterial3d(handle));
 }
 
 /// 受控 dimetric 相机 + 按 extent 自动取景，渲染到离屏 image。
@@ -346,14 +383,14 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
             let image = images.add(image);
 
             setup_lights(&mut commands);
-            let (entities, bases) = spawn_model(
+            let (entities, bases, part_materials) = spawn_model(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
                 &model,
                 root_transform,
             );
-            super::media::spawn_media(
+            let media_planes = super::media::spawn_media(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
@@ -361,8 +398,10 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                 &native_media,
                 &root_transform,
             );
-            // 应用部件增量（旋转乘基础旋转，平移/缩放叠加）。
+            // 应用部件增量（旋转乘基础旋转，平移/缩放叠加）与透明度。
+            // 透明度规则与可见播放同源：1 = 原透明模式、<1 = 专属材质 Blend、0 = 隐藏。
             if let Some((_, deltas)) = &sampled {
+                let mut opacities: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
                 for (part_id, delta) in deltas {
                     let (Some(entity), Some(base)) = (entities.get(part_id), bases.get(part_id))
                     else {
@@ -370,6 +409,59 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                     };
                     let transform = compose_delta(*base, delta);
                     commands.entity(*entity).insert(transform);
+                    if !delta.opacity.is_finite() || delta.opacity >= 1.0 {
+                        continue;
+                    }
+                    let opacity = delta.opacity.max(0.0);
+                    if let Some(item_root) = super::super::part_id::decode_part_id(part_id)
+                        .filter(|decoded| decoded.part_id.is_empty())
+                    {
+                        // 对象根：该对象名下全部块一起变透明（不拆块）。
+                        for (candidate, _) in &part_materials {
+                            if !super::super::part_id::belongs_to_item(candidate, item_root.item_id) {
+                                continue;
+                            }
+                            if let Some(target) = entities.get(candidate).copied() {
+                                *opacities.entry(target).or_insert(1.0) *= opacity;
+                            }
+                        }
+                        continue;
+                    }
+                    if part_materials.contains_key(part_id) {
+                        *opacities.entry(*entity).or_insert(1.0) *= opacity;
+                    }
+                }
+                for (entity, value) in opacities {
+                    let Some(material) = part_materials
+                        .iter()
+                        .find(|(id, _)| entities.get(*id).copied() == Some(entity))
+                        .map(|(_, handle)| handle.clone())
+                    else {
+                        continue;
+                    };
+                    apply_preview_opacity(&mut commands, &mut materials, entity, &material, value);
+                }
+                // 媒体平面：本身就有专属材质，直接写它的 alpha（对象根透明度同样生效）。
+                for plane in &media_planes {
+                    let Some(item_root) = deltas
+                        .iter()
+                        .find(|(part_id, _)| {
+                            super::super::part_id::decode_part_id(part_id)
+                                .is_some_and(|decoded| decoded.part_id.is_empty()
+                                    && super::super::part_id::belongs_to_item(&plane.item_id, decoded.item_id))
+                        })
+                        .map(|(_, delta)| delta.opacity)
+                    else {
+                        continue;
+                    };
+                    if let Some(mut material) = materials.get_mut(&plane.material) {
+                        if item_root <= 0.0 {
+                            commands.entity(plane.entity).insert(Visibility::Hidden);
+                        } else if item_root < 1.0 {
+                            material.alpha_mode = bevy::material::AlphaMode::Blend;
+                            material.base_color.set_alpha(item_root.clamp(0.0, 1.0));
+                        }
+                    }
                 }
             }
             match &animation_camera {

@@ -1,3 +1,4 @@
+import { nativeFilmSetFrame } from "../src/preview/backend/native-frame.js";
 /**
  * 镜头参考冻结与登记测试（任务 8.6 / design D9）。
  *
@@ -16,9 +17,9 @@ import {
   type CanvasNodeData,
   type ServerCanvas
 } from "@woohaa3/contracts";
-import { freezeFilmSetRecording, planFilmSetRecordingCommit } from "../src/backend/recording-compile.js";
-import { ShotReferenceVersionCache, hydrateShotReferenceCacheFromCanvas } from "../src/frontend/shot-reference-version-cache.js";
-import { planShotReferenceFreeze } from "../src/frontend/shot-reference-canonical.js";
+import { freezeFilmSetRecording, planFilmSetRecordingCommit } from "../src/authoring/backend/recording-compile.js";
+import { ShotReferenceVersionCache, hydrateShotReferenceCacheFromCanvas } from "../src/authoring/browser/shot-reference-version-cache.js";
+import { planShotReferenceFreeze } from "../src/authoring/browser/shot-reference-canonical.js";
 
 const CHECKSUM = "a".repeat(64);
 const STORAGE_KEY = `sha256-${CHECKSUM}`;
@@ -53,7 +54,7 @@ function fixture() {
 describe("planShotReferenceFreeze（冻结与登记）", () => {
   it("原生参考成片按下游身份回填，刷新后可冻结且不再等待", () => {
     const { canvas, clipId, nodeData } = fixture();
-    const frozen = freezeFilmSetRecording({
+    const frozen = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
       request: { requestId: "native-reference", purpose: "reference", canvasId: canvas.id,
         nodeId: "film", clipId, profileKey: "" },
       nodeData: nodeData.film!, assets: [], canvasRevision: 1, sourceIncarnation: "i1"

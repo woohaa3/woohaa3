@@ -22,7 +22,7 @@ test('shared actor clips: real camera playback, seek, copy, capture, responsive 
   await expect.poll(async()=> (await scene(page))?.nodes.find((n:any)=>n.id==='film')?.model?.resourceKey).toBeTruthy();
   const point=await page.evaluate(()=>{const s=(window as any).__bevyRuntime.lastScene(); const n=s.nodes.find((n:any)=>n.id==='film'); const v=s.viewport; const r=document.querySelector('#bevy-canvas')!.getBoundingClientRect(); return {x:r.left+(n.x+n.width/2)*v.zoom+v.x,y:r.top+(n.y+n.height/2)*v.zoom+v.y};});
   console.log("clip-e2e: geometry ready", point);
-  await page.mouse.dblclick(point.x,point.y); await page.getByRole('tab',{name:'动画',exact:true}).click(); await expect(page.locator('[aria-label="片场动画"]')).toBeVisible();
+  await page.mouse.dblclick(point.x,point.y); await expect(page.locator(".film-set-animation-controls")).toBeVisible(); await expect(page.locator('.film-set-animation-controls')).toBeVisible();
   console.log("clip-e2e: focus ready"); const before=await readStoredCanvas(page); await page.getByRole('button',{name:'动画预览',exact:true}).click();
   await expect.poll(async()=> (await scene(page))?.animationPlayback?.viewMode).toBe('focus-preview');
   console.log("clip-e2e: preview ready"); expect((await scene(page)).animationPlayback.time).toBe(0); expect(await pixels(page)).toBeGreaterThan(150); await page.screenshot({path:info.outputPath('parkour-first.png')}); await cameraFrame(page,info.outputPath('browser-0.png'));
@@ -36,8 +36,8 @@ test('shared actor clips: real camera playback, seek, copy, capture, responsive 
   await page.getByRole('button',{name:'保存当前帧'}).click(); await expect.poll(async()=> (await readStoredCanvas(page))?.document.nodes.filter(n=>n.type==='image').length).toBe(1);
   const image=(await readStoredCanvas(page))!.document.nodes.find(n=>n.type==='image')!; expect((await readStoredCanvas(page))!.nodeData[image.id]).toMatchObject({filmSetShotOrigin:{clipId:'portrait',timeSeconds:0}});
   await page.setViewportSize({width:600,height:900}); await page.screenshot({path:info.outputPath('narrow.png')}); expect(await pixels(page)).toBeGreaterThan(50);
-  await page.keyboard.press('Escape'); await expect(page.getByRole('button',{name:'动画预览',exact:true})).toHaveAttribute('aria-pressed','false');
-  await page.setViewportSize({width:1440,height:900}); await page.getByRole('button',{name:'复制',exact:true}).click(); await waitForCommandsSettled(page);
+  await page.keyboard.press('Escape'); await expect(page.getByRole('button',{name:'动画预览',exact:true})).toBeVisible();
+  await page.setViewportSize({width:1440,height:900}); await page.getByRole('button',{name:'拍摄镜头操作',exact:true}).click(); await page.getByRole('button',{name:'复制',exact:true}).click(); await waitForCommandsSettled(page);
   const after=await readStoredCanvas(page); expect((after!.nodeData.film as any).filmSetAnimations.clips.length).toBe(3); expect((after!.nodeData.film as any).filmSetContent).toEqual((before!.nodeData.film as any).filmSetContent);
   // Sustained playback and seeking must reuse geometry and precompiled tracks.
   const animations=(after!.nodeData.film as any).filmSetAnimations;
@@ -75,8 +75,8 @@ test('shared actor clips: real camera playback, seek, copy, capture, responsive 
   await expect.poll(async()=>(await scene(page))?.viewport?.x).not.toBe(panBefore.x);
   const viewport=(await scene(page)).viewport; const node=(await scene(page)).nodes.find((n:any)=>n.id==='bad-film');
   await page.mouse.dblclick((node.x+node.width/2)*viewport.zoom+viewport.x,(node.y+node.height/2)*viewport.zoom+viewport.y);
-  await expect(page.getByRole('tab',{name:'动画',exact:true})).toBeVisible();
-  await page.getByRole('tab',{name:'动画',exact:true}).click();
+  await expect(page.locator(".film-set-animation-controls")).toBeVisible();
+  await expect(page.locator(".film-set-animation-controls")).toBeVisible();
   await expect(page.getByRole('button',{name:'动画预览',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'动画预览',exact:true}).click();
   await expect(page.locator('.film-set-animation-player')).toContainText('无法播放');

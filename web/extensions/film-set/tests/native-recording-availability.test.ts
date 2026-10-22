@@ -4,8 +4,8 @@
  * 关键约束：**不静默回退**、**不误导用户换浏览器**、浏览器版不假装支持宿主录制。
  */
 import { describe, expect, it } from "vitest";
-import { isDesktopShell, nativeRecordingAvailable } from "../src/frontend/native-recording-availability.js";
-import type {} from "../src/frontend/native-recording-availability.js";
+import { isDesktopShell, nativeRecordingAvailable } from "../src/authoring/browser/native-recording-availability.js";
+import type {} from "../src/authoring/browser/native-recording-availability.js";
 
 describe("isDesktopShell", () => {
   it("detects the native bridge", () => {

@@ -79,6 +79,8 @@ pub struct Staging {
     root: Option<Entity>,
     part_entities: HashMap<String, Entity>,
     part_bases: HashMap<String, Transform>,
+    /// 部件 id → 有效材质（对象根透明度据此为全部块克隆实例；D2）。
+    part_materials: HashMap<String, Handle<StandardMaterial>>,
     spawned: Vec<Entity>,
     batches: Vec<BatchBinding>,
     geometries: Vec<(Entity, String, Arc<super::super::scene::ModelGeometry>)>,
@@ -111,6 +113,7 @@ impl Staging {
             root: None,
             part_entities: HashMap::new(),
             part_bases: HashMap::new(),
+            part_materials: HashMap::new(),
             spawned: Vec::new(),
             batches: Vec::new(),
             geometries: Vec::new(),
@@ -535,7 +538,8 @@ fn spawn_part(
     }
     let entity = entity.id();
     staging.mesh_handles.push(handle);
-    staging.material_handles.push(material);
+    staging.material_handles.push(material.clone());
+    record_part_material(staging, part, material);
     staging
         .geometries
         .push((entity, part.base.clone(), shared_geometry));
@@ -547,6 +551,13 @@ fn record_part(staging: &mut Staging, part: &PreparedPart, entity: Entity) {
     staging.part_entities.insert(part.id.clone(), entity);
     staging.part_bases.insert(part.id.clone(), part.transform);
     staging.spawned.push(entity);
+}
+
+/// 记录部件与其有效材质；对象根动作需要按部件查材质来克隆实例。
+fn record_part_material(staging: &mut Staging, part: &PreparedPart, material: Handle<StandardMaterial>) {
+    staging
+        .part_materials
+        .insert(part.id.clone(), material);
 }
 
 /// 一条批次：登记共享批次资产，创建实体并连接父级；映射逐部件写入。
@@ -584,12 +595,16 @@ fn spawn_batch(
         ))
         .id();
     staging.mesh_handles.push(asset.handle.clone());
-    staging.material_handles.push(material);
+    staging.material_handles.push(material.clone());
     staging
         .batches
         .push(BatchBinding::new(entity, batch.source.clone(), asset));
     for spec in &batch.source.specs {
         staging.part_batches.insert(spec.id.clone(), entity);
+        // 对象根透明度按部件查有效材质；合批块同样要为每个 spec 记录同一材质。
+        staging
+            .part_materials
+            .insert(spec.id.clone(), material.clone());
     }
     staging.spawned.push(entity);
     Some(())
@@ -672,7 +687,11 @@ fn publish(
     let generation = previous
         .as_ref()
         .map_or(0, |root| root.representation_generation.wrapping_add(1));
-    if let Some(previous) = previous {
+    if let Some(mut previous) = previous {
+        // 替换表示时旧根的透明度实例也要从材质资产中回收（D2）。
+        previous.opacity.release_instances(
+            &mut world.resource_mut::<Assets<StandardMaterial>>(),
+        );
         for entity in &previous.entities {
             world.entity_mut(*entity).insert(Visibility::Hidden);
         }
@@ -718,6 +737,8 @@ fn publish(
         animation_entities: std::mem::take(&mut staging.animation_entities),
         part_entities: std::mem::take(&mut staging.part_entities),
         part_bases: std::mem::take(&mut staging.part_bases),
+        opacity: Default::default(),
+        part_materials: std::mem::take(&mut staging.part_materials),
     };
     root_state.active_mesh_handles = dedup_handles(&root_state.mesh_handles);
     models.roots.insert(staging.node.clone(), root_state);

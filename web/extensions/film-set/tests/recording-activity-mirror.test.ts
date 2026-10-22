@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { BackgroundActivityJob, RecordingStatusView } from "@woohaa3/contracts";
-import { startRecordingActivityMirror, toActivityInput } from "../src/frontend/recording-activity-mirror.js";
+import { startRecordingActivityMirror, toActivityInput } from "../src/integration/browser/recording-activity-mirror.js";
 
 function status(overrides: Partial<RecordingStatusView> = {}): RecordingStatusView {
   return {

@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, canonicalFilmSetFields } from "@woohaa3/contracts";
 import { CompositeAssetRegistry } from "@woohaa3/frontend/extension-api";
-import { createFilmSetModelAdapter, filmSetExecutionKey } from "../src/frontend/model-adapter.js";
+import { createFilmSetModelAdapter, filmSetExecutionKey } from "../src/preview/browser/model-adapter.js";
 
 describe("片场总览 LOD 策略声明（change: 2026-10-15-add-film-set-overview-lod）", () => {
   it("片场 adapter 显式声明 overview-primitives-v1，宿主 registry 投影到该节点", () => {

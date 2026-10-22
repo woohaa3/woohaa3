@@ -21,7 +21,7 @@ import {
   stableAssetFromUpload,
   stableUploadMetadata,
   uploadStatusLabel
-} from "../src/frontend/collection.js";
+} from "../src/authoring/browser/collection.js";
 import { MAX_INLINE_SNAPSHOT_CHARS, MAX_INLINE_TEXT_CHARS, createGameFurnaceState, reduceGameFurnace, type GameResource } from "../src/shared.js";
 
 const T = "2026-10-10T00:00:00.000Z";

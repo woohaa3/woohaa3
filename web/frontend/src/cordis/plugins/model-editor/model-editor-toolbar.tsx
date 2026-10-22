@@ -44,6 +44,8 @@ export type ModelEditorToolbarProps = {
   /** 添加一个镜头（默认 auto-fit pose 由宿主按当前模型 AABB 计算）。 */
   onAddCamera: () => void;
   cameraCollectionMutable?: boolean;
+  /** 嵌入拍摄构图区域时，只展示视角参数和截图，省略镜头集合及生成入口。 */
+  presentation?: "composition";
   /** 截图当前选中镜头。 */
   onCapture: () => void;
   /** 重试失败截图。 */
@@ -81,9 +83,10 @@ export function ModelEditorToolbar(props: ModelEditorToolbarProps) {
   const readOnly = props.readOnly === true;
   const disabled = readOnly || !props.writable || props.rendererReady === false;
   const busy = props.session.captureBusy;
+  const composition = props.presentation === "composition";
 
   const cameraControls = (<>
-        <div className="model-editor__cameras-header">
+        {!composition ? <><div className="model-editor__cameras-header">
           <span className="model-editor__cameras-title">镜头</span>
           <Tooltip content={disabled ? "只读会话无法添加镜头" : "添加镜头"}>
             <Button
@@ -135,6 +138,8 @@ export function ModelEditorToolbar(props: ModelEditorToolbarProps) {
           </ul>
         )}
 
+        </> : null}
+
         {selected && pose ? (
           <div className="model-editor__pose" data-model-editor-pose="true">
             <span>方位 {(pose.azimuth * 180 / Math.PI).toFixed(0)}°</span>
@@ -175,7 +180,7 @@ export function ModelEditorToolbar(props: ModelEditorToolbarProps) {
           </div>
         ) : null}
 
-        {selected ? (
+        {selected && !composition ? (
           <div className="model-editor__camera-actions">
             <label className="model-editor__rename">
               <span>名称</span>
@@ -263,7 +268,7 @@ export function ModelEditorToolbar(props: ModelEditorToolbarProps) {
 
       <div className="model-editor__body" data-model-editor-tool="camera">
         {cameraControls}
-        {generationRegion}
+        {!composition ? generationRegion : null}
       </div>
     </div>
   );

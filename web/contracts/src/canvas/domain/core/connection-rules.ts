@@ -40,7 +40,7 @@ export function isValidWoohaa3CanvasConnection(
   // 纯模型节点（片场 animation3d + 通用扩展节点 extension3d）不能作为持久化边端点
   // （change: 2026-10-08-make-film-set-model-only，design D8；
   //  change: 2026-10-10-add-game-furnace-extension 泛化）。
-  if (isPureModelNodeType(sourceNode.type) || isPureModelNodeType(targetNode.type)) return false;
+  if (isPureModelNodeType(sourceNode.type, nodeDataOf(sourceNode.id, nodes, data)) || isPureModelNodeType(targetNode.type, nodeDataOf(targetNode.id, nodes, data))) return false;
 
   const duplicate = edges.some(
     (edge) =>
@@ -138,7 +138,7 @@ export function explainWoohaa3CanvasConnectionBlock(
   if (connection.source === connection.target) return "不能连接到自己";
   if (!sourceNode || !targetNode) return "连线端点不存在";
   if (targetNode.type === "group") return "分组不能作为连线目标";
-  if (isPureModelNodeType(sourceNode.type) || isPureModelNodeType(targetNode.type)) return "片场模型不能作为连线端点";
+  if (isPureModelNodeType(sourceNode.type, nodeDataOf(sourceNode.id, nodes, data)) || isPureModelNodeType(targetNode.type, nodeDataOf(targetNode.id, nodes, data))) return "片场模型不能作为连线端点";
   if (!isValidHandleConnection(connection)) return "连线端口非法";
   return "重复连线或角色不兼容";
 }

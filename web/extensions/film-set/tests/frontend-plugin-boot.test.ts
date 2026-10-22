@@ -26,12 +26,13 @@ import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/cont
 import { filmSetExtension } from "../src/frontend/index.js";
 
 /** 最小 Slot registry 替身：覆盖 register/list/version/subscribe 语义。 */
-function fakeSlots(): SlotsService {
+function fakeSlots(failAt?: string): SlotsService {
   const slots = new Map<string, SlotContribution<SlotName>[]>();
   const listeners = new Set<() => void>();
   let revision = 0;
   return {
     register(slot: SlotName, contribution: SlotContribution<SlotName>) {
+      if (contribution.id === failAt) throw Error("installation-failed");
       const list = slots.get(slot) ?? [];
       if (list.some((entry) => entry.id === contribution.id)) {
         throw new Error(`slot "${slot}" 已存在 contribution "${contribution.id}"`);
@@ -65,9 +66,9 @@ function fakeSlots(): SlotsService {
 }
 
 /** 装配一个具有 film-set 所需全部注入 service 的真实 Cordis Context。 */
-function bootFilmSet(canvas: ServerCanvas | null = null): { ctx: Context; fiber: Fiber; slots: SlotsService; dialogs: DialogService } {
+function bootFilmSet(canvas: ServerCanvas | null = null, failAt?: string): { ctx: Context; fiber: Fiber; slots: SlotsService; dialogs: DialogService } {
   const ctx = new Context();
-  const slots = fakeSlots();
+  const slots = fakeSlots(failAt);
   const dialogs = new DialogService();
   ctx.provide("dialogs" as never, dialogs as never);
   ctx.provide("slots" as never, slots as never);
@@ -156,6 +157,15 @@ describe("film-set 入口在真实 Cordis Context 上装配（白屏回归）", 
     })).toEqual(expect.objectContaining({ reason: "当前会话不可写，无法创建片场" }));
   });
 
+  it("中途注册失败时回滚已装配贡献，重复释放无残留", async () => {
+    const { ctx, fiber, slots, dialogs } = bootFilmSet(null, "film-set-conversion-focus");
+    disposers.push(() => ctx.fiber.dispose());
+    await expect(fiber.await()).rejects.toThrow("installation-failed");
+    for (const slot of ["canvas.node-template", "canvas.node-action", "canvas.context-menu", "canvas.overlay"] as const) expect(slots.list(slot)).toHaveLength(0);
+    expect(dialogs.open({ dialogId: "film-set-creation", payload: { nodeId: "img", nodeType: "image" } }).ok).toBe(false);
+    await ctx.fiber.dispose();
+    await ctx.fiber.dispose();
+  });
   it("装配成功：fiber active，转换入口与片场模板均已注册", async () => {
     const { ctx, fiber, slots, dialogs } = bootFilmSet();
     disposers.push(() => ctx.fiber.dispose());

@@ -7,8 +7,11 @@
  */
 import {
   decodeMcpApplyCommandsRequest,
+  decodeMcpAddFilmSetMediaRequest,
   decodeMcpCreateFilmSetNodeRequest,
   decodeMcpCommitAnimationRequest,
+  decodeMcpExportFilmSetClipRequest,
+  decodeMcpGetFilmSetExportRequest,
   decodeMcpGetNodeRequest,
   decodeMcpGetModelNodesRequest,
   decodeMcpImportModelSnapshotRequest,
@@ -107,6 +110,11 @@ export type CanvasMcpClient = {
   importModelSnapshot(input: McpImportModelSnapshotRequest & { canvasId: string }): Promise<McpCreateFilmSetNodeOutcome>;
   /** 片场对象级权威变更（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
   mutateFilmSetItem(input: McpMutateFilmSetItemRequest & { canvasId: string }): Promise<McpMutateFilmSetItemResult>;
+  /** 片场媒体条目受控导入（D5）。 */
+  addFilmSetMedia(input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }): Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>;
+  /** agent 发起显式导出与查询（D8）。 */
+  exportFilmSetClip(input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }): Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>;
+  getFilmSetExport(input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }): Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>;
   /** readiness 探针：Canvas 内部面可达且协议兼容。 */
   ready(): Promise<{ ready: boolean; reason?: string }>;
 };
@@ -214,6 +222,12 @@ export function createCanvasMcpClient(options: CanvasMcpClientOptions): CanvasMc
       call<McpCreateFilmSetNodeOutcome>(MCP_INTERNAL_PATHS.importModelSnapshot, decodeMcpImportModelSnapshotRequest(input)),
     mutateFilmSetItem: (input) =>
       call<McpMutateFilmSetItemResult>(MCP_INTERNAL_PATHS.mutateFilmSetItem, decodeMcpMutateFilmSetItemRequest(input)),
+    addFilmSetMedia: (input) =>
+      call<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>(MCP_INTERNAL_PATHS.addFilmSetMedia, decodeMcpAddFilmSetMediaRequest(input)),
+    exportFilmSetClip: (input) =>
+      call<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>(MCP_INTERNAL_PATHS.exportFilmSetClip, decodeMcpExportFilmSetClipRequest(input)),
+    getFilmSetExport: (input) =>
+      call<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>(MCP_INTERNAL_PATHS.getFilmSetExport, decodeMcpGetFilmSetExportRequest(input)),
     async ready() {
       const reachable = await probe(MCP_INTERNAL_PATHS.listNodes);
       return reachable ? { ready: true } : { ready: false, reason: "Canvas 内部协议不可达或认证失败" };

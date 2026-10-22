@@ -21,6 +21,7 @@ import type { TaskActivityFinished, TaskActivityStarted, TaskActivityUpdated } f
 export type FrontendEventPayloads = {
   "ui.task-activity.open-requested": { nodeId: string };
   "ui.media-preview.open-requested": { assetId: string; nodeId: string; title: string };
+  "ui.text-preview.open-requested": { nodeId: string };
   "ui.video-frame-capture.open-requested": { nodeId: string };
   "ui.node-history.open-requested": { nodeId: string };
   "ui.node-history.switch-requested": { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string; viewOnly?: boolean };
@@ -77,6 +78,9 @@ export const frontendEventCatalog = {
     kind: "request",
     producers: ["canvas-runtime"],
     consumers: ["media-preview"]
+  },
+  "ui.text-preview.open-requested": {
+    scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["media-preview"]
   },
   "ui.video-frame-capture.open-requested": {
     scope: "canvas",

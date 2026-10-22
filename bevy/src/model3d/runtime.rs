@@ -201,6 +201,11 @@ pub(crate) struct ModelRoot {
     pub(super) part_entities: HashMap<String, Entity>,
     /// 稳定部件 id → **基础** transform（不含 motion 增量），供运动求值合成。
     pub(super) part_bases: HashMap<String, Transform>,
+    /// 透明度动作的专属材质实例（实体 → 实例），随根复用并在实体消失时回收
+    /// （change: 2026-10-19-extend-film-set-for-motion-graphics，D2）。
+    pub(super) opacity: super::opacity::OpacityMaterials,
+    /// 稳定部件 id → 该部件当前使用的**共享**材质句柄，供透明度动作克隆实例。
+    pub(super) part_materials: HashMap<String, Handle<StandardMaterial>>,
 }
 
 /// 根 transform 布局（change: 2026-10-07-remove-residual-compatibility —— V2-only）。
@@ -236,8 +241,10 @@ fn apply_root_transform(
 /// 释放一个模型根持有的 entity 与资源。
 ///
 /// Bevy 0.16 的 `despawn` 会递归销毁后代，因此先销毁根即可。统一用 `try_despawn`
-/// 避免对已随根销毁的实体重复告警。
-fn despawn_root(commands: &mut Commands, root: ModelRoot) {
+/// 避免对已随根销毁的实体重复告警。透明度动作克隆出的专属材质实例不进入共享缓存，
+/// 必须在这里显式回收（change: 2026-10-19-extend-film-set-for-motion-graphics，D2）。
+fn despawn_root(commands: &mut Commands, materials: &mut Assets<StandardMaterial>, mut root: ModelRoot) {
+    root.opacity.release_instances(materials);
     for entity in &root.entities {
         commands.entity(*entity).try_despawn();
     }
@@ -376,7 +383,7 @@ pub(crate) fn sync_models(
                 .get(&node.id)
                 .map_or(0, |root| root.representation_generation.wrapping_add(1));
             if let Some(previous) = models.roots.remove(&node.id) {
-                despawn_root(commands, previous);
+                despawn_root(commands, materials, previous);
             }
             let mut root = spawn_model(
                 commands,
@@ -444,7 +451,9 @@ pub(crate) fn sync_models(
         .cloned()
         .collect();
     for id in stale {
-        if let Some(root) = models.roots.remove(&id) {
+        if let Some(mut root) = models.roots.remove(&id) {
+            // 透明度实例不随实体销毁自动回收（不在共享缓存里），两条路径都要显式移除。
+            root.opacity.release_instances(materials);
             if super::preparation::enabled() {
                 // Native：旧根先隐藏，再按全局预算分帧退役，避免一次递归销毁整场。
                 for entity in &root.entities {
@@ -452,7 +461,7 @@ pub(crate) fn sync_models(
                 }
                 models.retiring.extend(root.entities.iter().copied());
             } else {
-                despawn_root(commands, root);
+                despawn_root(commands, materials, root);
             }
         }
     }

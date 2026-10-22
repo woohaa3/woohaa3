@@ -16,7 +16,7 @@ const MODEL_READ_TOOLS = ["get_model_api", "get_model_node", "get_model_statisti
 const CAMERA_READ_TOOLS = ["get_model_node", "get_model_cameras"] as const;
 
 /** 片场目标的读取面。 */
-const FILM_SET_READ_TOOLS = ["get_model_api", "get_model_node", "get_film_set_clips"] as const;
+const FILM_SET_READ_TOOLS = ["get_model_api", "get_model_node", "get_film_set_clips", "get_film_set_export"] as const;
 
 /** 写入 3D 模型脚本。 */
 const MODEL_WRITE_TOOLS = ["submit_model_script", "submit_model_scripts"] as const;
@@ -36,6 +36,8 @@ const FILM_SET_WRITE_TOOLS = [
   "submit_film_set",
   "mutate_film_set_item",
   "mutate_film_set_clip",
+  "add_film_set_media",
+  "export_film_set_clip",
   "create_film_set_node",
   "import_model_snapshot"
 ] as const;

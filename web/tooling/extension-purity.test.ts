@@ -67,7 +67,7 @@ function walkFiles(rel: string, out: string[] = []): string[] {
     for (const entry of readdirSync(abs)) walkFiles(path.join(rel, entry), out);
     return out;
   }
-  out.push(rel);
+  out.push(rel.replaceAll("\\", "/"));
   return out;
 }
 

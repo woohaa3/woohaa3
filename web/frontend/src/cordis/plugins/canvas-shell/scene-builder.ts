@@ -85,7 +85,8 @@ export function buildSceneWithResources(
   if (focusNode) {
     const history = options.compositeAssets?.resolve(canvasState, focusNode)?.historyProjection?.(focusNode);
     if (history) {
-      byNode.set(focusNode, history.resource);
+      if (history.resource) byNode.set(focusNode, history.resource);
+      else byNode.delete(focusNode);
       if (history.composition) compositions.set(focusNode, history.composition);
     }
   }

@@ -69,6 +69,10 @@ pub(crate) struct MaterialSpec {
     pub(crate) emissive: [f32; 4],
     pub(crate) alpha_mode: String,
     pub(crate) double_sided: bool,
+    /// 不受光照（平面色）；参与 `StandardMaterial::unlit` 与材质缓存键。
+    pub(crate) unlit: bool,
+    /// blend 模式的静态透明度；opaque 下恒为 1（不参与呈现）。
+    pub(crate) opacity: f32,
 }
 
 impl MaterialSpec {
@@ -83,10 +87,13 @@ impl MaterialSpec {
                 emissive_strength,
                 alpha_mode,
                 double_sided,
+                unlit,
+                opacity,
             } => {
                 let base = parse_hex(base_color).to_srgba();
                 let em = parse_hex(emissive).to_srgba();
                 let strength = emissive_strength.max(0.0);
+                let blend = alpha_mode == "blend";
                 Some((
                     id.clone(),
                     Self {
@@ -101,6 +108,15 @@ impl MaterialSpec {
                         ],
                         alpha_mode: alpha_mode.clone(),
                         double_sided: *double_sided,
+                        unlit: *unlit,
+                        opacity: if blend {
+                            opacity
+                                .filter(|value| value.is_finite())
+                                .map(|value| value.clamp(0.0, 1.0))
+                                .unwrap_or(crate::protocol::DEFAULT_BLEND_OPACITY)
+                        } else {
+                            1.0
+                        },
                     },
                 ))
             }
@@ -119,6 +135,7 @@ impl MaterialSpec {
                 self.emissive[2],
                 self.emissive[3],
             ),
+            unlit: self.unlit,
             cull_mode: if self.double_sided {
                 None
             } else {
@@ -128,10 +145,20 @@ impl MaterialSpec {
         };
         if self.alpha_mode == "blend" {
             // 首版只提供基础 blend；不承诺复杂多层透明正确排序。
-            material.base_color.set_alpha(0.6);
+            material.base_color.set_alpha(self.opacity.clamp(0.0, 1.0));
             material.alpha_mode = bevy::material::AlphaMode::Blend;
         }
         material
+    }
+
+    /// 该材质的**静态**透明度（opaque 为 1）；供模型透明度动作与材质相乘。
+    #[allow(dead_code)]
+    pub(crate) fn static_opacity(&self) -> f32 {
+        if self.alpha_mode == "blend" {
+            self.opacity.clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
     }
 }
 

@@ -20,6 +20,7 @@ describe("Frontend Event Catalog（任务 2.1）", () => {
       "task.activity.started",
       "task.activity.updated",
       "ui.media-preview.open-requested",
+      "ui.text-preview.open-requested",
       "ui.node-download.save-requested",
       "ui.node-history.open-requested",
       "ui.node-history.switch-requested",

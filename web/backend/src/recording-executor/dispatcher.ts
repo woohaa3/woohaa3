@@ -84,6 +84,7 @@ export function toSubmitJobMessage(input: {
         motionJson: Buffer.from(snapshot.motionJson, "utf8").toString("base64"),
         initialCamera: snapshot.initialCamera,
         aspect: snapshot.aspect,
+        background: snapshot.background,
         resources: snapshot.resources.map(resource => ({
           resourceId: resource.resourceId,
           storageKey: resource.storageKey,

@@ -59,7 +59,22 @@ export type SceneV2MaterialOp = {
   emissiveStrength: number;
   alphaMode: SceneV2MaterialAlphaMode;
   doubleSided: boolean;
+  /**
+   * 不受光照，呈平面色（change: 2026-10-19-extend-film-set-for-motion-graphics，D4）。
+   *
+   * 可选：缺失即受光照，保持旧场景内容身份与材质缓存键不变。
+   */
+  unlit?: boolean;
+  /**
+   * blend 模式下的静态透明度（0..1，缺省 0.6）；其它模式出现即拒绝。
+   *
+   * 可选：缺失时按 [`SCENE_V2_DEFAULT_BLEND_OPACITY`] 呈现，且不写入规范 op。
+   */
+  opacity?: number;
 };
+
+/** blend 模式下未声明 `opacity` 时的静态透明度（与改动前的固定值一致）。 */
+export const SCENE_V2_DEFAULT_BLEND_OPACITY = 0.6;
 
 export type SceneV2ShapeBase = {
   id: string;

@@ -287,6 +287,8 @@ fn material_maps_to_pbr_subset() {
             emissive_strength: 0.0,
             alpha_mode: "opaque".into(),
             double_sided: false,
+            unlit: false,
+            opacity: None,
         }],
     ));
     let spec = materials.get("armor").expect("material");

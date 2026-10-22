@@ -24,7 +24,7 @@ test('real video frame follows selected clip binding and rapid seek without stal
   collection.clips.push(second);collection.defaultClipId=first.id;
   expect((await sendCommands(page,[{type:'asset.upsert',asset:{id:'video-asset',title:'视频',mediaKind:'video',source:'uploaded',status:'ready',createdAt:new Date().toISOString(),url:`/api/media/${storageKey}`,metadata:{storageKey,checksum:storageKey.replace('sha256-',''),contentType:'video/webm',size:bytes.length,durationSeconds:2}}},{type:'node.add',node:{id:'film',type:'composite-asset',position:{x:200,y:180},width:400,height:300},nodeData:canonicalFilmSetFields({...snapshot,filmSetAnimations:collection}) as never}])).ok).toBe(true);
   await expect.poll(()=>page.evaluate(()=>(window as any).__bevyRuntime?.lastScene()?.nodes.find((n:any)=>n.id==='film')?.compositeAsset?.media?.[0]?.hasTexture)).toBe(true);
-  await page.mouse.dblclick(400,330);await page.getByRole('tab',{name:'动画',exact:true}).click();await page.getByRole('button',{name:'动画预览',exact:true}).click();
+  await page.mouse.dblclick(400,330);await expect(page.locator(".film-set-animation-controls")).toBeVisible();await page.getByRole('button',{name:'动画预览',exact:true}).click();
   await page.getByRole('slider',{name:'动画进度'}).fill('0.8');
   await expect.poll(async()=>{const p=await colors(page);return p.blue>200&&p.blue>p.red*3;}).toBe(true);
   await page.screenshot({path:info.outputPath('video-normal-blue.png')});

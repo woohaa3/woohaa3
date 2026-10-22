@@ -32,6 +32,17 @@ export const FILM_SET_SHOT_KINDS = ["static", "dynamic"] as const;
 export type FilmSetShotKind = (typeof FILM_SET_SHOT_KINDS)[number];
 
 export type FilmSetAnimationBinding = { itemId: string; motion?: MotionDefinition; playback: FilmSetPlayback };
+/**
+ * 拍摄镜头背景（change: 2026-10-19-extend-film-set-for-motion-graphics，D6）。
+ *
+ * `theme` 表示跟随主题（镜头预览清屏色）；自定义值必须是六位 `#rrggbb`。背景只作用于该镜头的
+ * 预览、拍摄与导出画面，编辑片场的工作区视图不受影响。
+ */
+export const FILM_SET_BACKDROP_THEME = "theme" as const;
+export type FilmSetBackdrop = typeof FILM_SET_BACKDROP_THEME | string;
+/** 严格六位十六进制（大写统一为小写；与渲染侧 `parse_hex` 一致）。 */
+const BACKDROP_HEX = /^#[0-9a-f]{6}$/;
+
 export type FilmSetAnimationClip = {
   id: string;
   name: string;
@@ -42,6 +53,11 @@ export type FilmSetAnimationClip = {
   /** D10：本镜头独立、严格版本化且仅允许镜头的运动定义（空脚本表示静态镜头）。 */
   cameraMotion: MotionDefinition;
   bindings: FilmSetAnimationBinding[];
+  /**
+   * D6：可选背景。缺失等价于 `theme`（因此旧镜头解码后逐字节不变、身份不失效）；
+   * 只有自定义颜色才写入。
+   */
+  backdrop?: string;
 };
 /** 唯一业务类型名：拍摄镜头（机器协议沿用 `clip`）。 */
 export type FilmSetShootingShot = FilmSetAnimationClip;
@@ -65,9 +81,40 @@ export function isFilmSetShotKind(value: unknown): value is FilmSetShotKind {
   return typeof value === "string" && (FILM_SET_SHOT_KINDS as readonly string[]).includes(value);
 }
 
+/**
+ * 校验并规范化镜头背景（D6）。
+ *
+ * 缺失 / `theme` → `undefined`（不写入规范数据，旧镜头身份不变）；自定义色只接受六位
+ * `#rrggbb`（统一小写）。其它值（`#0008`、颜色名、3 位短写）一律拒绝，不静默回退。
+ */
+export function readFilmSetBackdrop(input: unknown): { ok: true; value: string | undefined } | { ok: false; reason: string } {
+  if (input === undefined || input === null) return { ok: true, value: undefined };
+  if (typeof input !== "string") return { ok: false, reason: "backdrop 必须是字符串" };
+  if (input === FILM_SET_BACKDROP_THEME) return { ok: true, value: undefined };
+  const normalized = input.trim().toLowerCase();
+  if (!BACKDROP_HEX.test(normalized)) {
+    return { ok: false, reason: "backdrop 必须是 theme 或六位十六进制颜色（如 #000000）" };
+  }
+  return { ok: true, value: normalized };
+}
+
+/** 镜头背景是否已显式设为自定义颜色。 */
+export function filmSetBackdropIsCustom(clip: { backdrop?: string }): boolean {
+  return typeof clip.backdrop === "string" && clip.backdrop !== FILM_SET_BACKDROP_THEME;
+}
+
 /** 是否静态拍摄镜头（零时长、非循环、空镜头动作）。 */
 export function isStaticShot(clip: { kind: FilmSetShotKind }): boolean {
   return clip.kind === "static";
+}
+
+/**
+ * 复制拍摄镜头为另一身份（D6：背景随镜头一起继承）。
+ *
+ * 深拷贝全部字段，只替换 `id` 与 `name`；新建/复制镜头都经过它，避免两处各写一份字段表。
+ */
+export function cloneFilmSetShotForNewId(clip: FilmSetAnimationClip, id: string, name: string): FilmSetAnimationClip {
+  return { ...(JSON.parse(JSON.stringify(clip)) as FilmSetAnimationClip), id, name };
 }
 
 /**
@@ -131,6 +178,8 @@ export function decodeFilmSetAnimations(input: unknown, content: FilmSetContent)
     if (typeof raw.name !== "string" || !raw.name.trim() || raw.name.trim().length > 80) return fail(`拍摄镜头 ${raw.id} 名称非法`);
     if (raw.motion !== undefined) return fail(`拍摄镜头 ${raw.id} 不得保留旧 clip.motion，镜头动作请写入 cameraMotion`);
     if (!isFilmSetShotKind(raw.kind)) return fail(`拍摄镜头 ${raw.id} kind 必须是 static 或 dynamic`);
+    const backdrop = readFilmSetBackdrop(raw.backdrop);
+    if (!backdrop.ok) return fail(`拍摄镜头 ${raw.id} ${backdrop.reason}`);
     const timeline = decodeAnimationTimeline(raw.timeline);
     const camera = decodeInitialShotCamera(raw.initialCamera);
     const cameraMotion = decodeFilmSetMotion(raw.cameraMotion, raw.id);
@@ -167,7 +216,7 @@ export function decodeFilmSetAnimations(input: unknown, content: FilmSetContent)
       bindings.push({ itemId: binding.itemId, playback: playback.value, ...(childMotion.value ? { motion: childMotion.value } : {}) });
     }
     ids.add(raw.id);
-    clips.push({ id: raw.id, name: raw.name.trim(), kind: raw.kind, timeline: timeline.value, initialCamera: camera.value, cameraMotion: cameraMotion.value, bindings });
+    clips.push({ id: raw.id, name: raw.name.trim(), kind: raw.kind, timeline: timeline.value, initialCamera: camera.value, cameraMotion: cameraMotion.value, bindings, ...(backdrop.value ? { backdrop: backdrop.value } : {}) });
   }
   if ((clips.length === 0) !== (input.defaultClipId === null) || (input.defaultClipId !== null && !ids.has(input.defaultClipId as string))) return fail("defaultClipId 必须引用存在的拍摄镜头");
   const value: FilmSetAnimations = { schemaVersion: FILM_SET_ANIMATIONS_VERSION, defaultClipId: input.defaultClipId as string | null, clips };

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { languageModelSelection, modelInputCapabilities } from "../src/frontend/model-selection.js";
+import { languageModelSelection, modelInputCapabilities } from "../src/authoring/browser/model-selection.js";
 
 const catalog = { status: "ready" as const, catalog: { available: true,
   models: [{ modelKey: "image", modelType: "image" }, { modelKey: "language-a", modelType: "language" }, { modelKey: "language-b", modelType: "language" }],

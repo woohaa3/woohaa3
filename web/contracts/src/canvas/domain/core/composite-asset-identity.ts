@@ -18,9 +18,11 @@ export const COMPOSITE_ASSET_NODE_TYPE = "composite-asset" as const;
 export const FILM_SET_EXTENSION_ID = "film-set" as const;
 /** 游戏炼丹炉业务扩展标识（规范判别值）。 */
 export const GAME_FURNACE_EXTENSION_ID = "game-furnace" as const;
+/** 生物视频资产制作扩展。 */
+export const CREATURE_VIDEO_ASSETS_EXTENSION_ID = "creature-video-assets" as const;
 
 /** 受信任的业务 extensionId 集合（用于严格 nodeData 校验与未知业务识别）。 */
-export const COMPOSITE_ASSET_EXTENSION_IDS = [FILM_SET_EXTENSION_ID, GAME_FURNACE_EXTENSION_ID] as const;
+export const COMPOSITE_ASSET_EXTENSION_IDS = [FILM_SET_EXTENSION_ID, GAME_FURNACE_EXTENSION_ID, CREATURE_VIDEO_ASSETS_EXTENSION_ID] as const;
 
 export type CompositeAssetExtensionId = (typeof COMPOSITE_ASSET_EXTENSION_IDS)[number];
 

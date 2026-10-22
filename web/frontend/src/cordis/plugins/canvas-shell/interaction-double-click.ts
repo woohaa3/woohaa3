@@ -109,6 +109,12 @@ export function createDoubleClickHandler(core: InteractionCore) {
     const outputId = typeof data?.outputAssetId === "string" ? data.outputAssetId : "";
     const asset = outputId ? canvasState.assets.find((candidate) => candidate.id === outputId) : undefined;
 
+    if (entry.type === "text") {
+      event.preventDefault();
+      options.onTextPreviewIntent?.({ nodeId: entry.id });
+      return;
+    }
+
     // 视频节点：优先原地聚焦（change: 2026-10-10-add-video-node-focus-workspace）；先暂停
     // 画布 hover 播放。缺省回落到既有截帧 Dialog（测试/未迁移宿主）。
     if (entry.type === "video") {

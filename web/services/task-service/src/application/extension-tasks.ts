@@ -46,7 +46,12 @@ export function createExtensionTaskFacade(
     async result(workerTaskKey) {
       if (!owns(workerTaskKey)) return null;
       const detail = deps.history.get(workerTaskKey, { fullText: true });
-      return detail ? { workerTaskKey, state: detail.state, ...(detail.result ? { result: detail.result } : {}) } : null;
+      return detail ? {
+        workerTaskKey,
+        state: detail.state,
+        ...(detail.result ? { result: detail.result } : {}),
+        ...(detail.error ? { error: detail.error } : {})
+      } : null;
     },
     async cancel(workerTaskKey) {
       if (!owns(workerTaskKey)) return null;

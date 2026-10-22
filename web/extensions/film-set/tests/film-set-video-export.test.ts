@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FilmSetVideoExportSession, videoSize, type FilmSetVideoExportDeps, type FilmSetVideoTarget } from '../src/frontend/film-set-video-export.js';
+import { FilmSetVideoExportSession, videoSize, type FilmSetVideoExportDeps, type FilmSetVideoTarget } from '../src/authoring/browser/film-set-video-export.js';
 const target: FilmSetVideoTarget = {canvasId:'canvas',nodeId:'film',clipId:'parkour',sourceIdentity:'scene-v1',generation:3,title:'屋顶跑酷',duration:.105,aspect:'16:9',time:.06,playing:true,layoutIdentity:'layout'};
 function fixture() {
   const encoder={add:vi.fn(async()=>{}),finish:vi.fn(async()=>new Blob(['encoded-video'],{type:'video/mp4'})),cancel:vi.fn(async()=>{})};
@@ -61,5 +61,17 @@ describe('film set video export',()=>{
  });
  it('preserves even output dimensions for all camera orientations',()=>{
   expect(videoSize('16:9')).toEqual({width:1280,height:720});expect(videoSize('9:16')).toEqual({width:720,height:1280});expect(videoSize('1:1')).toEqual({width:720,height:720});
+ });
+ it('hd60 按 60fps 采样并记录 1920×1080/60 的成片元数据',async()=>{
+  const f=fixture();
+  const result=await f.session.run({...target,profile:'hd60'},vi.fn());
+  expect(result.ok).toBe(true);
+  // ceil(0.105 * 60) = 7 帧；末端停在 duration。
+  expect(f.encoder.add.mock.calls).toHaveLength(7);
+  const commands=vi.mocked(f.deps.submit).mock.calls[0][0];
+  const asset=commands.find(c=>c.type==='asset.upsert');
+  expect(asset).toMatchObject({asset:{metadata:{width:1920,height:1080,frameRate:60}}});
+  const node=commands.find(c=>c.type==='node.add');
+  expect(node).toMatchObject({nodeData:{filmSetVideoOrigin:{profile:'hd60',frameRate:60,aspect:'16:9'}}});
  });
 });

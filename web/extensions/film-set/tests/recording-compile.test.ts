@@ -1,3 +1,4 @@
+import { nativeFilmSetFrame } from "../src/preview/backend/native-frame.js";
 /**
  * 片场原生录制的冻结与提交计划（任务 2.2 / 2.3 / 2.4）。
  *
@@ -29,7 +30,7 @@ import {
   recordingSnapshotHash,
   validateRecordingResources,
   type recordingVideoSize
-} from "../src/backend/recording-compile.js";
+} from "../src/authoring/backend/recording-compile.js";
 
 const CHECKSUM_A = "a".repeat(64);
 const CHECKSUM_B = "b".repeat(64);
@@ -118,16 +119,23 @@ function freeze(
     readOnly?: boolean;
     hasPendingDraft?: boolean;
     request?: Partial<Parameters<typeof freezeFilmSetRecording>[0]["request"]>;
+    /** 主题镜头背景色（D6）。 */
+    themeBackdrop?: string;
   } = {}
 ) {
   const { request } = requestFor(fixture, overrides.request);
-  return freezeFilmSetRecording({
-    request,
+  // profile 与 profileKey 必须自洽：调用方给了档位就按该档位算 key（与浏览器/原生提交一致）。
+  const profileKey = overrides.request?.profile && !overrides.request.profileKey
+    ? nativeRecordingProfileKey("16:9", overrides.request.purpose === "reference" ? "standard" : overrides.request.profile)
+    : request.profileKey;
+  return freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
+    request: { ...request, profileKey },
     nodeData: fixture.nodeData,
     assets: overrides.assets ?? [],
     ...(overrides.node ? { node: overrides.node } : {}),
     canvasRevision: 7,
     sourceIncarnation: "incarnation-1",
+    ...(overrides.themeBackdrop ? { themeBackdrop: overrides.themeBackdrop } : {}),
     ...(overrides.readOnly !== undefined ? { readOnly: overrides.readOnly } : {}),
     ...(overrides.hasPendingDraft !== undefined ? { hasPendingDraft: overrides.hasPendingDraft } : {})
   });
@@ -225,14 +233,14 @@ describe("freezeFilmSetRecording", () => {
 
   it("does not change identity when only canvas layout changes", () => {
     const fixture = makeAnimation();
-    const a = freezeFilmSetRecording({
+    const a = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
       request: requestFor(fixture).request,
       nodeData: fixture.nodeData,
       assets: [],
       canvasRevision: 1,
       sourceIncarnation: "i1"
     });
-    const b = freezeFilmSetRecording({
+    const b = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
       request: requestFor(fixture).request,
       nodeData: fixture.nodeData,
       assets: [],
@@ -265,7 +273,7 @@ describe("freezeFilmSetRecording", () => {
     };
     for (const clip of nodeData.filmSetAnimations?.clips ?? []) clip.timeline.duration = 0;
     const request = requestFor(fixture).request;
-    const result = freezeFilmSetRecording({
+    const result = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
       request,
       nodeData,
       assets: [],
@@ -309,7 +317,7 @@ describe("freezeFilmSetRecording", () => {
 
   it("enforces per-file and total resource budgets", () => {
     const fixture = withVideo(makeAnimation());
-    const perFile = freezeFilmSetRecording({
+    const perFile = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
       request: requestFor(fixture).request,
       nodeData: fixture.nodeData,
       assets: [mediaAsset({ size: 10_000 })],
@@ -320,7 +328,7 @@ describe("freezeFilmSetRecording", () => {
     expect("ok" in perFile && perFile.ok).toBe(false);
     if ("ok" in perFile && !perFile.ok) expect(perFile.code).toBe("recording-budget-exceeded");
 
-    const total = freezeFilmSetRecording({
+    const total = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
       request: requestFor(fixture).request,
       nodeData: fixture.nodeData,
       assets: [mediaAsset({ size: 900 })],
@@ -499,6 +507,66 @@ describe("recording helpers", () => {
     ).map(describeRecordingUnavailable);
     expect(new Set(messages).size).toBe(messages.length);
     for (const message of messages) expect(message.length).toBeGreaterThan(0);
+  });
+});
+
+describe("导出 profile 与镜头背景（D6/D7）", () => {
+  it("standard 与改动前完全一致；hd/hd60 按 profile 输出", () => {
+    const fixture = makeAnimation();
+    const standard = freeze(fixture, { request: { profile: "standard" } });
+    expect(standard.ok).toBe(true);
+    if (!standard.ok) return;
+    expect(standard.snapshot.profile).toMatchObject({ width: 1280, height: 720, bitrate: 4_000_000 });
+    expect(standard.snapshot.timing.frameRateNumer).toBe(30);
+
+    const hd = freeze(fixture, { request: { profile: "hd" } });
+    expect(hd.ok).toBe(true);
+    if (!hd.ok) return;
+    expect(hd.snapshot.profile).toMatchObject({ width: 1920, height: 1080, bitrate: 8_000_000 });
+    expect(hd.snapshot.timing.frameRateNumer).toBe(30);
+
+    const hd60 = freeze(fixture, { request: { profile: "hd60" } });
+    expect(hd60.ok).toBe(true);
+    if (!hd60.ok) return;
+    expect(hd60.snapshot.profile).toMatchObject({ width: 1920, height: 1080, bitrate: 12_000_000 });
+    expect(hd60.snapshot.timing.frameRateNumer).toBe(60);
+  });
+
+  it("参考录制固定 standard，不随显式导出档位变化", () => {
+    const fixture = makeAnimation();
+    const reference = freeze(fixture, { request: { purpose: "reference", profile: "hd60" } });
+    expect(reference.ok).toBe(true);
+    if (!reference.ok) return;
+    expect(reference.snapshot.profile.width).toBe(1280);
+    expect(reference.snapshot.timing.frameRateNumer).toBe(30);
+  });
+
+  it("镜头背景 theme 解析为具体主题色；自定义色原样进入录制输入", () => {
+    const fixture = makeAnimation();
+    const themed = freeze(fixture, { themeBackdrop: "#101418" });
+    expect(themed.ok).toBe(true);
+    if (!themed.ok) return;
+    expect(themed.snapshot.background).toBe("#101418");
+
+    const nodeData = structuredClone(fixture.nodeData) as unknown as { filmSetAnimations: { clips: Array<Record<string, unknown>> } };
+    nodeData.filmSetAnimations.clips[0]!.backdrop = "#000000";
+    const decoded = decodeFilmSetNodeData(nodeData);
+    expect(decoded.ok).toBe(true);
+    const custom = freeze({ nodeData: nodeData as unknown as CanvasNodeData, animation: decoded.ok ? decoded.value : fixture.animation }, { themeBackdrop: "#101418" });
+    expect(custom.ok).toBe(true);
+    if (!custom.ok) return;
+    expect(custom.snapshot.background).toBe("#000000");
+  });
+
+  it("旧镜头（无 backdrop）解码为 theme，身份与改动前一致", () => {
+    const fixture = makeAnimation();
+    const clip = filmSetAnimationsOf(fixture.animation).clips[0]!;
+    expect(clip.backdrop).toBeUndefined();
+    const frozen = freeze(fixture);
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) return;
+    // 默认主题色来自应用默认主题的 webSubtle。
+    expect(frozen.snapshot.background).toMatch(/^#[0-9a-f]{6}$/);
   });
 });
 

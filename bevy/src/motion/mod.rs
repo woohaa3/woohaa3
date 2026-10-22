@@ -11,7 +11,7 @@
 
 mod evaluate;
 mod keyframes;
-pub use keyframes::{MOTION_MAX_KEYFRAMES_PER_TRACK, RawModelKeyframe};
+pub use keyframes::{MOTION_MAX_KEYFRAMES_PER_TRACK, RawModelKeyframe, RawKeyframeValue};
 mod validate;
 
 pub use evaluate::{clamp_elevation, evaluate};
@@ -58,6 +58,9 @@ impl CameraProperty {
 pub enum MotionEasing {
     Linear,
     Smoothstep,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
 }
 
 impl MotionEasing {
@@ -65,7 +68,32 @@ impl MotionEasing {
         match value {
             "linear" => Some(Self::Linear),
             "smoothstep" => Some(Self::Smoothstep),
+            "easeIn" => Some(Self::EaseIn),
+            "easeOut" => Some(Self::EaseOut),
+            "easeInOut" => Some(Self::EaseInOut),
             _ => None,
+        }
+    }
+}
+
+/// 进度曲线：边界精确为 0 与 1；与 contracts `easingProgress` 同一公式。
+pub(crate) fn easing_progress(easing: MotionEasing, t: f32) -> f32 {
+    let clamped = t.clamp(0.0, 1.0);
+    match easing {
+        MotionEasing::Linear => clamped,
+        MotionEasing::Smoothstep => clamped * clamped * (3.0 - 2.0 * clamped),
+        MotionEasing::EaseIn => clamped * clamped * clamped,
+        MotionEasing::EaseOut => {
+            let inverse = 1.0 - clamped;
+            1.0 - inverse * inverse * inverse
+        }
+        MotionEasing::EaseInOut => {
+            if clamped < 0.5 {
+                4.0 * clamped * clamped * clamped
+            } else {
+                let shifted = -2.0 * clamped + 2.0;
+                1.0 - shifted * shifted * shifted / 2.0
+            }
         }
     }
 }
@@ -122,10 +150,38 @@ impl OscillateMode {
     }
 }
 
+/// 模型轨道属性（change: 2026-10-19-extend-film-set-for-motion-graphics，D1）。
+///
+/// `opacity` 为标量通道，只有 tween/keyframes 可以使用；其余是三维向量。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelTrackProperty {
+    Position,
+    Rotation,
+    Scale,
+    Opacity,
+}
+
+impl ModelTrackProperty {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "position" => Some(Self::Position),
+            "rotation" => Some(Self::Rotation),
+            "scale" => Some(Self::Scale),
+            "opacity" => Some(Self::Opacity),
+            _ => None,
+        }
+    }
+
+    /// 是否为标量（opacity）通道。
+    pub(crate) fn is_scalar(self) -> bool {
+        matches!(self, Self::Opacity)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ModelMotion {
     Keyframes {
-        property: OscillateMode,
+        property: ModelTrackProperty,
         frames: Vec<ModelKeyframe>,
     },
     Rotate {
@@ -146,20 +202,28 @@ pub enum ModelMotion {
     },
 }
 
+/// 单个关键帧：三维属性用 `value`，opacity 用 `opacity`（二选一，由轨道属性决定）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelKeyframe {
     pub time: f32,
+    /// 三维属性（position/rotation/scale）的值。
     pub value: Vec3,
+    /// opacity 通道的值（0..=1）；三维属性固定为 1。
+    pub opacity: f32,
     pub easing: MotionEasing,
 }
 
 impl ModelMotion {
-    pub fn property(&self) -> OscillateMode {
+    pub fn property(&self) -> ModelTrackProperty {
         match self {
             Self::Keyframes { property, .. } => *property,
-            Self::Rotate { .. } => OscillateMode::Rotation,
-            Self::Move { .. } => OscillateMode::Position,
-            Self::Oscillate { mode, .. } => *mode,
+            Self::Rotate { .. } => ModelTrackProperty::Rotation,
+            Self::Move { .. } => ModelTrackProperty::Position,
+            Self::Oscillate { mode, .. } => match mode {
+                OscillateMode::Position => ModelTrackProperty::Position,
+                OscillateMode::Rotation => ModelTrackProperty::Rotation,
+                OscillateMode::Scale => ModelTrackProperty::Scale,
+            },
         }
     }
 }
@@ -206,12 +270,14 @@ pub struct CameraState {
     pub focus_offset: Vec3,
 }
 
-/// 部位增量（相对基础姿态）：旋转乘在基础旋转之后，平移/缩放叠加。
+/// 部位增量（相对基础姿态）：旋转乘在基础旋转之后，平移/缩放叠加，透明度相乘。
 #[derive(Clone, Copy, Debug)]
 pub struct ModelDelta {
     pub rotation: Quat,
     pub translation: Vec3,
     pub scale: Vec3,
+    /// 透明度乘数（0..=1，缺省 1）。
+    pub opacity: f32,
 }
 
 /// 由分量数组构造初始镜头状态；供 protocol（不依赖 Bevy 类型）复用。
@@ -235,6 +301,7 @@ impl Default for ModelDelta {
             rotation: Quat::IDENTITY,
             translation: Vec3::ZERO,
             scale: Vec3::ONE,
+            opacity: 1.0,
         }
     }
 }

@@ -235,6 +235,11 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
         const current = resolveBackend(namespace, scope);
         await current.backend.put(keyOf(key), bytes, contentType, scope);
       },
+      async putStream(key, bytes, contentType, options) {
+        const { backend } = resolveBackend(namespace, scope);
+        if (!backend.putStream) throw new Error("当前存储后端不支持流式写入");
+        await backend.putStream(keyOf(key), bytes, contentType, options, scope);
+      },
       async delete(key) {
         const current = resolveBackend(namespace, scope);
         // 不支持删除是能力缺失，不是「删了但没删掉」：明确报错，别让调用方以为数据没了。

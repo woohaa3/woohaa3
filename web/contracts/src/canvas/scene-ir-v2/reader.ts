@@ -36,7 +36,7 @@ export function readMaterial(
   if (!id) return fail("invalid-material", `第 ${index} 个 material 缺少合法 id`);
   if (existing.has(id)) return fail("duplicate-material", `重复的 material id：${id}`);
   for (const key of Object.keys(raw)) {
-    if (!["t", "id", "baseColor", "roughness", "metallic", "emissive", "emissiveStrength", "alphaMode", "doubleSided"].includes(key)) {
+    if (!["t", "id", "baseColor", "roughness", "metallic", "emissive", "emissiveStrength", "alphaMode", "doubleSided", "unlit", "opacity"].includes(key)) {
       return fail("invalid-material", `material ${id} 含未知字段 ${key}`);
     }
   }
@@ -60,6 +60,22 @@ export function readMaterial(
   if (raw.doubleSided !== undefined && typeof raw.doubleSided !== "boolean") {
     return fail("invalid-material", `material ${id} 的 doubleSided 必须是布尔值`);
   }
+  if (raw.unlit !== undefined && typeof raw.unlit !== "boolean") {
+    return fail("invalid-material", `material ${id} 的 unlit 必须是布尔值`);
+  }
+  // opacity 只在 blend 下有意义：其它模式出现即拒绝，避免「看起来半透明却按不透明绘制」。
+  const blend = alphaMode === "blend";
+  let opacity: number | undefined;
+  if (raw.opacity !== undefined && raw.opacity !== null) {
+    if (!blend) {
+      return fail("invalid-material", `material ${id} 的 opacity 只用于 alphaMode=blend`);
+    }
+    const value = readNumber(raw.opacity, null);
+    if (value === null || value < 0 || value > 1) {
+      return fail("invalid-material", `material ${id} 的 opacity 必须在 0..1`);
+    }
+    opacity = value;
+  }
   return {
     ok: true,
     value: {
@@ -71,7 +87,10 @@ export function readMaterial(
       emissive: emissive.value,
       emissiveStrength: strength,
       alphaMode: alphaMode as SceneV2MaterialAlphaMode,
-      doubleSided: raw.doubleSided === true
+      doubleSided: raw.doubleSided === true,
+      // 只在显式声明时写入规范 op：旧场景的 Scene IR 与内容身份逐字节不变（D4）。
+      ...(raw.unlit === true ? { unlit: true } : {}),
+      ...(opacity === undefined ? {} : { opacity })
     }
   };
 }

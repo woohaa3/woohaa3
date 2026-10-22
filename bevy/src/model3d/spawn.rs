@@ -89,6 +89,9 @@ fn spawn_v2(
     let mut material_cache: HashMap<String, Handle<StandardMaterial>> = HashMap::new();
     let mut entities: HashMap<String, Entity> = HashMap::new();
     let mut base_transforms: HashMap<String, Transform> = HashMap::new();
+    // 稳定部件 id → 该部件当前使用的共享材质（透明度动作据此克隆实例）。
+    let mut part_materials: HashMap<String, Handle<StandardMaterial>> = HashMap::new();
+
     let mut spawned = vec![root];
     let mut geometries = Vec::new();
     let opaque = specs
@@ -150,12 +153,17 @@ fn spawn_v2(
         let entity = commands
             .spawn((
                 Mesh3d(asset.handle.clone()),
-                MeshMaterial3d(material),
+                MeshMaterial3d(material.clone()),
                 Transform::default(),
                 super::model_render_layers(),
                 bevy::camera::primitives::Aabb::from_min_max(asset.min, asset.max),
             ))
             .id();
+        for &index in &plan.parts {
+            if let Some(spec) = specs.get(index) {
+                part_materials.insert(spec.id.clone(), material.clone());
+            }
+        }
         batched_parts.extend(plan.parts);
         mesh_cache.insert(format!("batch:{}", batches.len()), asset.handle.clone());
         spawned.push(entity);
@@ -213,12 +221,13 @@ fn spawn_v2(
                 let entity = commands
                     .spawn((
                         Mesh3d(mesh),
-                        MeshMaterial3d(material),
+                        MeshMaterial3d(material.clone()),
                         transform,
                         super::model_render_layers(),
 
                     ))
                     .id();
+                part_materials.insert(spec.id.clone(), material);
                 geometries.push((entity, base, shared_geometry));
                 entity
             }
@@ -281,6 +290,8 @@ fn spawn_v2(
         animation_entities,
         part_entities: entities,
         part_bases: base_transforms,
+        opacity: Default::default(),
+        part_materials,
     }
 }
 

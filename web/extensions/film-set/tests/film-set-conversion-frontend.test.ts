@@ -8,19 +8,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { defaultFilmSetConversionPrompt } from "@woohaa3/contracts";
 import { createEmptyWoohaa3ServerCanvas, createModel3DNodeData, filmSetConversionNodeTaskStatus, model3DNodeDataFields, readFilmSetConversionNodeStatus, type FilmSetConversionModelCandidate, type ServerCanvas } from "@woohaa3/contracts";
-import { resolveFilmSetConversionAvailability, filmSetConversionNeedsSettings } from "../src/frontend/film-set-conversion/view.js";
-import { resolveConversionNodeStatuses } from "../src/frontend/film-set-conversion/presentation.js";
+import { resolveFilmSetConversionAvailability, filmSetConversionNeedsSettings } from "../src/authoring/browser/film-set-conversion/view.js";
+import { resolveConversionNodeStatuses } from "../src/authoring/browser/film-set-conversion/presentation.js";
 import {
   describeFilmSetConversionFailure,
   presentFilmSetConversionStatus,
   resolveFilmSetConversionDirectStart,
   resolveFilmSetConversionPreferredModelKey,
   summarizeFilmSetConversionModel
-} from "../src/frontend/film-set-conversion/presentation.js";
-import { createFilmSetConversionIdentity, buildFilmSetConversionRequest } from "../src/frontend/film-set-conversion/client.js";
-import { createFilmSetConversionController } from "../src/frontend/film-set-conversion/controller.js";
-import { createFilmSetConversionPreferenceStore } from "../src/frontend/film-set-conversion/preference.js";
-import type { FilmSetConversionClient } from "../src/frontend/film-set-conversion/client.js";
+} from "../src/authoring/browser/film-set-conversion/presentation.js";
+import { createFilmSetConversionIdentity, buildFilmSetConversionRequest } from "../src/authoring/browser/film-set-conversion/client.js";
+import { createFilmSetConversionController } from "../src/authoring/browser/film-set-conversion/controller.js";
+import { createFilmSetConversionPreferenceStore } from "../src/authoring/browser/film-set-conversion/preference.js";
+import type { FilmSetConversionClient } from "../src/authoring/browser/film-set-conversion/client.js";
 
 const NOW = "2026-10-13T00:00:00.000Z";
 

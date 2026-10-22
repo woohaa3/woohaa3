@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  collectResourceReferences,
-  decodeGameResult,
-  decodeSourcePackage,
-  encodeSourcePackage,
-  injectAssetMap,
-  resourceRelativePath,
-  validateGameHtml
-} from "../src/package.js";
+import { collectResourceReferences, decodeGameResult, injectAssetMap, validateGameHtml } from "../src/authoring/shared/output.js";
+import { decodeSourcePackage, encodeSourcePackage, resourceRelativePath } from "../src/state/shared/package.js";
 import { normalizeResource } from "../src/shared.js";
 
 const png = normalizeResource({

@@ -539,6 +539,13 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           modelRenderer,
           mediaClient: mediaClient ?? null,
           ...(options.contentRuntime ? { contentRuntime: options.contentRuntime } : {}),
+          // agent 导出（D8）：端口延迟读取（录制服务在画布创建后才装配）。
+          ...(options.recording
+            ? {
+                recording: () => options.recording,
+                ...(options.themeBackdrop ? { themeBackdrop: options.themeBackdrop } : {})
+              }
+            : {}),
           agentDeltaJournal,
           modelMcpEnabled,
           env,
@@ -555,6 +562,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     filmSetNodeService,
     filmSetImportService,
     filmSetItemService,
+    filmSetExportService,
     modelMcpInternalService,
     agentAuthoringService,
     modelMcpHandler,
@@ -564,6 +572,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     filmSetNodeService: undefined,
     filmSetImportService: undefined,
     filmSetItemService: undefined,
+    filmSetExportService: undefined,
     modelMcpInternalService: undefined,
     agentAuthoringService: undefined,
     modelMcpHandler: null,
@@ -796,6 +805,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         filmSetNodeService,
         filmSetImportService,
         filmSetItemService,
+        filmSetExportService,
         internalModelMcp: modelMcpInternalService ?? null,
         agent: agentAuthoringService ?? null
       }) as ReturnType<CanvasService["mcpServices"]>,

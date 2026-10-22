@@ -18,11 +18,11 @@ import {
   type CanvasNodeData,
   type FilmSetNodeData
 } from "@woohaa3/contracts";
-import { animationPlaybackExtension } from "../src/frontend/playback-plugin.js";
-import { HOVER_PLAYBACK_DELAY_MS } from "../src/frontend/hover-delay.js";
+import { animationPlaybackExtension } from "../src/integration/browser/playback-plugin.js";
+import { HOVER_PLAYBACK_DELAY_MS } from "../src/preview/browser/hover-delay.js";
 import { CompositeAssetRegistry } from "@woohaa3/frontend/extension-api";
-import { FilmSetPlaybackService } from "../src/frontend/playback-service.js";
-import { AnimationPlaybackController } from "../src/shared.js";
+import { FilmSetPlaybackService } from "../src/preview/browser/playback-service.js";
+import { AnimationPlaybackController } from "../src/preview/shared/playback-controller.js";
 import { createTestHoverState } from "./canvas-state.js";
 const hoverNodeStore = createTestHoverState();
 import { createTestCanvasState } from "./canvas-state.js";

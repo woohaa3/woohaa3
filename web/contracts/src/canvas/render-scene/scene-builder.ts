@@ -465,7 +465,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   // canonical 已由 reducer/规范化保证；映射层再做一次防御过滤，避免异常帧绘制纯模型连线
   // （change: 2026-10-08-make-film-set-model-only；change: 2026-10-10 泛化）。
   const filmSetNodeIds = new Set(
-    canvas.document.nodes.filter((node) => isPureModelNodeType(node.type)).map((node) => node.id)
+    canvas.document.nodes.filter((node) => isPureModelNodeType(node.type, nodeData[node.id] as Record<string, unknown> | undefined)).map((node) => node.id)
   );
   const edges = canvas.document.edges
     .filter((edge) => !filmSetNodeIds.has(edge.source) && !filmSetNodeIds.has(edge.target))

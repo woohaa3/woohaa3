@@ -1,7 +1,7 @@
 import { isBoundedId, isJsonObject } from "../validation.js";
 import type { FilmSetNodeData, AnimationTimeline, InitialShotCamera } from "./canvas-node-model.js";
 import { filmSetAnimationsOf } from "./film-set-clip-view.js";
-import { cloneFilmSetAnimations, decodeFilmSetAnimations, filmSetBindingHash, filmSetClipHash, isFilmSetShotKind, staticShotCameraMotion, type FilmSetAnimationBinding, type FilmSetAnimationClip, type FilmSetAnimations, type FilmSetShotKind } from "./film-set-animations.js";
+import { cloneFilmSetShotForNewId, cloneFilmSetAnimations, decodeFilmSetAnimations, filmSetBindingHash, filmSetClipHash, isFilmSetShotKind, readFilmSetBackdrop, staticShotCameraMotion, type FilmSetAnimationBinding, type FilmSetAnimationClip, type FilmSetAnimations, type FilmSetShotKind } from "./film-set-animations.js";
 import { filmSetItemAdapterHash, establishItemMotionAdapter, decodeFilmSetPlayback } from "./film-set-content.js";
 import { hashMotionScript, type MotionDefinition } from "./motion-script.js";
 import { fnv1a64Hex } from "./content-hash.js";
@@ -16,6 +16,8 @@ export type FilmSetClipPatchOp =
   | { kind: "camera"; initialCamera: InitialShotCamera }
   /** D10：片段独立、仅允许镜头的运动定义。 */
   | { kind: "camera-motion"; cameraMotion: MotionDefinition }
+  /** D6：镜头背景；`theme` 表示跟随主题。 */
+  | { kind: "backdrop"; backdrop: string }
   /**
    * 显式类型转换（change D1）。`toKind` 为 `dynamic` 时必须携带合法正时长
    * （`confirmClearContent` 用于 dynamic→static 且有动作/时序时，明确表示用户已确认清除）。
@@ -35,6 +37,7 @@ export function isFilmSetClipPatchOp(value: unknown): value is FilmSetClipPatchO
     case "timeline": return isJsonObject(value.timeline);
     case "camera": return isJsonObject(value.initialCamera);
     case "camera-motion": return isJsonObject(value.cameraMotion);
+    case "backdrop": return typeof value.backdrop === "string";
     case "set-kind":
       return isFilmSetShotKind(value.toKind)
         && (value.duration === undefined || typeof value.duration === "number")
@@ -78,6 +81,7 @@ export function filmSetClipPrecondition(collection: FilmSetAnimations, clipId: s
   if (op.kind === "timeline") return fnv1a64Hex(JSON.stringify(clip.timeline));
   if (op.kind === "camera") return fnv1a64Hex(JSON.stringify(clip.initialCamera));
   if (op.kind === "camera-motion") return fnv1a64Hex(JSON.stringify(clip.cameraMotion));
+  if (op.kind === "backdrop") return fnv1a64Hex(JSON.stringify(clip.backdrop ?? null));
   return filmSetClipHash(clip);
 }
 
@@ -125,7 +129,7 @@ export function applyFilmSetClipPatch(input: {
     switch (op.kind) {
       case "duplicate":
         if (value.clips.some(candidate => candidate.id === op.newClipId)) return fail("clip-conflict", "复制拍摄镜头 ID 已存在");
-        value.clips.push({ ...JSON.parse(JSON.stringify(clip)) as FilmSetAnimationClip, id: op.newClipId, name: op.name });
+        value.clips.push(cloneFilmSetShotForNewId(clip, op.newClipId, op.name));
         break;
       case "delete":
         value.clips = value.clips.filter(candidate => candidate.id !== input.clipId);
@@ -143,6 +147,14 @@ export function applyFilmSetClipPatch(input: {
         if (clip.kind === "static" && op.cameraMotion.motionScript.trim()) return fail("invalid-payload", "静态拍摄镜头不得有镜头动作；请先转为动态镜头");
         clip.cameraMotion = JSON.parse(JSON.stringify(op.cameraMotion)) as MotionDefinition;
         break;
+      case "backdrop": {
+        // D6：背景属于拍摄镜头；`theme` 等于删除自定义值（旧镜头因此逐字节不变）。
+        const backdrop = readFilmSetBackdrop(op.backdrop);
+        if (!backdrop.ok) return fail("invalid-payload", backdrop.reason);
+        if (backdrop.value === undefined) delete clip.backdrop;
+        else clip.backdrop = backdrop.value;
+        break;
+      }
       case "set-kind": {
         if (op.toKind === clip.kind) break;
         const conversionError = op.toKind === "dynamic"
@@ -189,7 +201,7 @@ export function applyFilmSetClipPatch(input: {
       }
     }
   }
-  if (["create", "camera-motion", "replace", "binding", "set-kind"].includes(op.kind)) {
+  if (["create", "camera-motion", "replace", "binding", "set-kind", "backdrop"].includes(op.kind)) {
     const changedClip = value.clips.find(clip => clip.id === input.clipId);
     const motions = changedClip ? [changedClip.cameraMotion, ...(Array.isArray(changedClip.bindings) ? changedClip.bindings : []).flatMap(binding => binding?.motion ? [binding.motion] : [])] : [];
     for (const motion of motions) if (motion && typeof motion.motionScript === "string") motion.sourceHash = hashMotionScript(motion.motionScript);

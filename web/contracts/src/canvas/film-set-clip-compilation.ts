@@ -36,7 +36,9 @@ export function compileFilmSetClip(nodeId: string, view: FilmSetClipView): Compi
     ir: execution.ir,
     time: 0,
     playing: false,
-    compiledObjects: objects
+    compiledObjects: objects,
+    // 镜头背景随投影下发：预览与浏览器导出清屏使用同一具体色（D6）。
+    ...(view.clip.backdrop ? { backdrop: view.clip.backdrop } : {})
   });
   return { ok: true, projection, diagnostics: objects.diagnostics };
 }

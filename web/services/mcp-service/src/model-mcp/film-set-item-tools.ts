@@ -3,6 +3,7 @@
  * （自 `mcp-http.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R11）。
  */
 import { z } from "zod";
+import { createToolRegistrar } from "./guide.js";
 import { jsonResult, toolError } from "./tool-results.js";
 import type { ModelMcpHttpOptions, ToolRegistration } from "./http-types.js";
 
@@ -38,6 +39,52 @@ export function registerFilmSetItemTool(reg: ToolRegistration, options: ModelMcp
       } catch (error) {
         return toolError(error instanceof Error ? error.message : "片场对象操作非法", "malformed-request");
       }
+    }
+  );
+
+  /**
+   * 片场媒体条目受控导入（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）。
+   *
+   * 画布拖放仍只接受普通模型；这是 agent 放入图片/视频（含文字图片）的唯一入口。
+   */
+  const registerWithGrant = createToolRegistrar(reg);
+  registerWithGrant(
+    "add_film_set_media",
+    {
+      title: "把图片或视频加入片场",
+      description:
+        "把同一画布上 ready 的图片或视频节点复制导入为片场媒体平面（保留固有宽高比、默认竖直双面；视频跟随片场时钟）。文字请先做成图片节点再导入，不新增 3D 文字。画布拖放仍只接受模型。可用 expectedContentHash（片场内容身份）做并发 precondition；导入后可被 mutate_film_set_item 改变换/删除，也可被镜头 binding 绑定 opacity/scale 动作。",
+      inputSchema: z.object({
+        canvasId: z.string().min(1).describe("画布 ID"),
+        nodeId: z.string().min(1).describe("目标片场（composite-asset）节点 ID"),
+        requestId: z.string().min(1).describe("幂等请求身份；重试返回同一结果"),
+        sourceNodeId: z.string().min(1).describe("来源 ready 图片或视频节点 ID"),
+        expectedContentHash: z.string().min(1).optional().describe("当前片场内容身份；不一致时拒绝"),
+        itemId: z.string().min(1).optional().describe("新条目稳定 ID；省略时由 requestId 与来源派生"),
+        name: z.string().min(1).optional().describe("条目名；省略时用资产标题或种类名"),
+        transform: z
+          .object({
+            offset: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+            scale: z.number().positive(),
+            yaw: z.number()
+          })
+          .optional()
+          .describe("可选基础局部变换；省略时按导入布局错开")
+      })
+    },
+    async ({ canvasId, nodeId, requestId, sourceNodeId, expectedContentHash, itemId, name, transform }) => {
+      if (!options.service?.addFilmSetMedia) return toolError("片场媒体导入能力当前不可用");
+      const outcome = await options.service.addFilmSetMedia({
+        canvasId,
+        nodeId,
+        requestId,
+        sourceNodeId,
+        ...(expectedContentHash ? { expectedContentHash } : {}),
+        ...(itemId ? { itemId } : {}),
+        ...(name ? { name } : {}),
+        ...(transform ? { transform } : {})
+      });
+      return outcome.ok ? jsonResult(outcome) : toolError(outcome.message, outcome.code);
     }
   );
 }

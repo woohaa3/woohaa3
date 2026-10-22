@@ -71,6 +71,7 @@ fn base_scene() -> Scene {
         time: 1.0,
         duration: 4.0,
         looped: false,
+        backdrop: None,
         playing: true,
         initial_camera: PlaybackCamera {
             aspect: "16:9".into(),
@@ -113,10 +114,14 @@ fn entity_of(world: &World, part: &str) -> Entity {
 
 fn run_motion(world: &mut World, scene: &Scene) {
     let mut visuals = world.remove_resource::<ModelVisuals>().unwrap();
+    let mut materials = world
+        .remove_resource::<Assets<StandardMaterial>>()
+        .unwrap_or_default();
     let mut commands = world.commands();
-    let camera = apply_motion_playback(&mut commands, &mut visuals, scene);
+    let camera = apply_motion_playback(&mut commands, &mut visuals, &mut materials, scene);
     world.flush();
     world.insert_resource(visuals);
+    world.insert_resource(materials);
     assert!(camera.is_some());
 }
 
@@ -176,10 +181,14 @@ fn leaving_animation_node_restores_base_pose() {
 
 fn run_motion_expect_none(world: &mut World, scene: &Scene) {
     let mut visuals = world.remove_resource::<ModelVisuals>().unwrap();
+    let mut materials = world
+        .remove_resource::<Assets<StandardMaterial>>()
+        .unwrap_or_default();
     let mut commands = world.commands();
-    let camera = apply_motion_playback(&mut commands, &mut visuals, scene);
+    let camera = apply_motion_playback(&mut commands, &mut visuals, &mut materials, scene);
     world.flush();
     world.insert_resource(visuals);
+    world.insert_resource(materials);
     assert!(camera.is_none());
 }
 
@@ -338,4 +347,200 @@ fn switching_clip_resets_properties_absent_from_the_new_clip() {
     assert_eq!(changed.scale, base.scale);
     assert!(changed.rotation.abs_diff_eq(moved.rotation, 1e-6));
     assert_eq!(entity_of(&world, "body"), entity);
+}
+
+/// 透明度动作：目标部件获得专属材质实例、透明度为 0 时隐藏，回到 1 时写回共享材质
+/// （change: 2026-10-19-extend-film-set-for-motion-graphics，D2）。
+#[test]
+fn opacity_track_uses_a_material_instance_and_restores_the_shared_material() {
+    let resources = resource_table([(
+        "woohaa-model-scene-ir-v2:sig-anim".to_owned(),
+        rig_snapshot(),
+    )]);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &base_scene_no_playback(), &resources);
+    let entity = entity_of(&world, "body");
+    let shared = world
+        .entity(entity)
+        .get::<MeshMaterial3d<StandardMaterial>>()
+        .expect("shared material")
+        .0
+        .clone();
+
+    let mut scene = base_scene();
+    let playback = scene.animation_playback.as_mut().unwrap();
+    playback.model_motion = vec![serde_json::from_value(serde_json::json!({
+        "targetId":"body","startTime":0,"endTime":2,
+        "motion":{"kind":"keyframes","property":"opacity","frames":[
+            {"time":0,"value":0,"easing":"linear"},
+            {"time":2,"value":1,"easing":"linear"}
+        ]}
+    }))
+    .unwrap()];
+    run_motion(&mut world, &scene);
+
+    // 半透明：材质被换成专属实例，共享材质仍按原样存在。
+    let instance = world
+        .entity(entity)
+        .get::<MeshMaterial3d<StandardMaterial>>()
+        .expect("instance material")
+        .0
+        .clone();
+    assert_ne!(instance, shared, "局部目标必须获得专属材质实例");
+    let instance_alpha = world
+        .resource::<Assets<StandardMaterial>>()
+        .get(&instance)
+        .expect("instance asset")
+        .base_color
+        .alpha();
+    assert!(instance_alpha < 1.0, "opacity 应写入实例 alpha，实际 {instance_alpha}");
+    assert_eq!(
+        world
+            .resource::<Assets<StandardMaterial>>()
+            .get(&shared)
+            .expect("shared asset")
+            .base_color
+            .alpha(),
+        1.0,
+        "共享材质不得被就地改写"
+    );
+    // 半透明不等于隐藏：不要因透明度动作改变可见性。
+    assert_ne!(
+        world.entity(entity).get::<Visibility>().copied(),
+        Some(Visibility::Hidden)
+    );
+
+    // 终值 1：写回原共享材质、保持可见。
+    scene.animation_playback.as_mut().unwrap().time = 2.0;
+    run_motion(&mut world, &scene);
+    assert_eq!(
+        world.entity(entity).get::<MeshMaterial3d<StandardMaterial>>().expect("restored").0,
+        shared
+    );
+    assert_ne!(
+        world.entity(entity).get::<Visibility>().copied(),
+        Some(Visibility::Hidden)
+    );
+}
+
+/// 透明度 0：部件不可见且不参与绘制。
+#[test]
+fn zero_opacity_hides_the_part() {
+    let resources = resource_table([(
+        "woohaa-model-scene-ir-v2:sig-anim".to_owned(),
+        rig_snapshot(),
+    )]);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &base_scene_no_playback(), &resources);
+    let entity = entity_of(&world, "body");
+    let mut scene = base_scene();
+    scene.animation_playback.as_mut().unwrap().model_motion = vec![serde_json::from_value(serde_json::json!({
+        "targetId":"body","startTime":0,"endTime":2,
+        "motion":{"kind":"keyframes","property":"opacity","frames":[
+            {"time":0,"value":0,"easing":"linear"},
+            {"time":2,"value":0,"easing":"linear"}
+        ]}
+    }))
+    .unwrap()];
+    run_motion(&mut world, &scene);
+    assert_eq!(
+        world.entity(entity).get::<Visibility>().copied(),
+        Some(Visibility::Hidden)
+    );
+}
+
+/// 对象根透明度：该对象名下全部块同步淡出，实体与 mesh handle 不变（不拆合并块）。
+#[test]
+fn object_root_opacity_applies_to_every_part_without_touching_meshes() {
+    let resources = resource_table([(
+        "woohaa-model-scene-ir-v2:sig-anim".to_owned(),
+        rig_snapshot(),
+    )]);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &base_scene_no_playback(), &resources);
+    let entities = [entity_of(&world, "body"), entity_of(&world, "hand")];
+    let meshes: Vec<_> = entities
+        .iter()
+        .map(|entity| world.entity(*entity).get::<Mesh3d>().expect("mesh").0.clone())
+        .collect();
+    let mut scene = base_scene();
+    let playback = scene.animation_playback.as_mut().unwrap();
+    playback.model_motion.clear();
+    playback.duration = 4.0;
+    playback.time = 2.0;
+    // `partIds` 把对象根映射到本夹具的 `body` 实体；两个部件共用同一对象根编码。
+    playback.objects = vec![serde_json::from_value(serde_json::json!({
+        "itemId":"hero",
+        "playback":{"startTime":0,"duration":4,"timeScale":1,"loop":false},
+        "partIds":{"root":"hero-root","body":"hero-body","hand":"hero-hand"},
+        "modelMotion":[
+            {"targetId":"root","startTime":0,"endTime":2,"motion":{"kind":"keyframes","property":"opacity","frames":[
+                {"time":0,"value":1,"easing":"linear"},
+                {"time":2,"value":0.25,"easing":"linear"}
+            ]}}
+        ]
+    }))
+    .unwrap()];
+    // 夹具里对象根与部件共用同一 itemId：让组合作用域编码与实体 id 对齐。
+    for (runtime, entity_id) in [("hero-root", "body"), ("hero-body", "body"), ("hero-hand", "hand")] {
+        let objects = &mut scene.animation_playback.as_mut().unwrap().objects;
+        if let Some(object) = objects.first_mut() {
+            object.part_ids.insert(runtime.to_owned(), entity_id.to_owned());
+        }
+    }
+    run_motion(&mut world, &scene);
+    for (index, entity) in entities.into_iter().enumerate() {
+        assert_eq!(
+            world.entity(entity).get::<Mesh3d>().expect("mesh").0,
+            meshes[index],
+            "合并块 mesh handle 不得因透明度动作改变"
+        );
+    }
+}
+
+/// 反复播放不增长透明度材质实例；根释放时实例从材质资产中回收（D2 / 任务 2.6）。
+#[test]
+fn opacity_material_instances_are_reused_and_released_with_the_root() {
+    let resources = resource_table([(
+        "woohaa-model-scene-ir-v2:sig-anim".to_owned(),
+        rig_snapshot(),
+    )]);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &base_scene_no_playback(), &resources);
+    let baseline = world.resource::<Assets<StandardMaterial>>().len();
+
+    let mut scene = base_scene();
+    scene.animation_playback.as_mut().unwrap().model_motion =
+        vec![serde_json::from_value(serde_json::json!({
+            "targetId":"body","startTime":0,"endTime":2,
+            "motion":{"kind":"keyframes","property":"opacity","frames":[
+                {"time":0,"value":0.2,"easing":"linear"},
+                {"time":2,"value":0.8,"easing":"linear"}
+            ]}
+        }))
+        .unwrap()];
+    // 跨多帧反复 seek：同一实体只应持有一份实例。
+    for step in 0..12 {
+        scene.animation_playback.as_mut().unwrap().time = 0.2 + (step % 6) as f32 * 0.3;
+        run_motion(&mut world, &scene);
+    }
+    let playing = world.resource::<Assets<StandardMaterial>>().len();
+    assert_eq!(
+        playing,
+        baseline + 1,
+        "同一实体的透明度实例必须复用，不得逐帧增长"
+    );
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["anim"].opacity.len(),
+        1,
+        "透明度实例表只应有该目标的唯一实例"
+    );
+
+    let root = world.resource::<ModelVisuals>().roots["anim"].entities.clone();
+    run_sync(&mut world, &Scene::default(), &resources);
+    let released = world.resource::<Assets<StandardMaterial>>().len();
+    assert_eq!(released, 0, "根释放后克隆实例必须从材质资产中回收");
+    for entity in root {
+        assert!(world.get_entity(entity).is_err(), "根实体应已销毁");
+    }
 }

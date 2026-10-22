@@ -51,6 +51,7 @@ function snapshot(): ContentRecordingSnapshot {
     motionJson: "{}",
     initialCamera: { azimuth: 0, elevation: 0.5, distance: 4, focusOffset: [0, 0, 0] },
     aspect: "16:9",
+    background: "#000000",
     resources: []
   };
 }

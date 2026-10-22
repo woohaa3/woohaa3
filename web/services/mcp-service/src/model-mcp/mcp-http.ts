@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { registerModelBatchTools } from "./batch-tools.js";
 import { registerExtensionTools } from "./extension-tools.js";
 import { registerFilmSetClipTools } from "./film-set-clip-tools.js";
+import { registerFilmSetExportTools } from "./film-set-export-tools.js";
 /**
  * Model Canvas MCP 的 Streamable HTTP 入口公共入口
  * （change: 2026-10-09-refactor-large-source-files-and-remove-compatibility R11 —— 拆分为
@@ -178,6 +179,7 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
   registerAnimationTools(reg, options);
   registerFilmSetItemTool(reg, options);
   registerFilmSetClipTools(reg, options);
+  registerFilmSetExportTools(reg, options);
 
   if (options.agentAuthoring) registerAgentAuthoringTools(server, options.agentAuthoring);
   registerExtensionTools(server, options, { bearerToken, loopback });
@@ -189,6 +191,8 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
 const GRANTED_TOOLS = new Set([
   "submit_film_set",
   "mutate_film_set_clip",
+  "add_film_set_media",
+  "export_film_set_clip",
   "submit_model_script",
   "submit_model_scripts",
   "validate_model_scripts",

@@ -3,8 +3,8 @@
 use super::{
     Axis3, CameraProperty, CameraTrack, MOTION_COORD_LIMIT, MOTION_IR_VERSION,
     MOTION_MAX_CAMERA_TRACKS, MOTION_MAX_DURATION_SECONDS, MOTION_MAX_MODEL_TRACKS,
-    MOTION_MAX_TRACKS, ModelMotion, ModelTrack, MotionEasing, MotionIr, MotionIrError,
-    OscillateMode, fail,
+    MOTION_MAX_TRACKS, ModelMotion, ModelTrack, ModelTrackProperty, MotionEasing, MotionIr,
+    MotionIrError, OscillateMode, fail,
 };
 
 /// 校验原始 JSON 轨道，构造受控 `MotionIr`。
@@ -196,11 +196,11 @@ impl RawModelMotion {
             let property = self
                 .property
                 .as_deref()
-                .and_then(OscillateMode::parse)
+                .and_then(ModelTrackProperty::parse)
                 .ok_or_else(|| {
                     fail(
                         "invalid-motion",
-                        "关键帧 property 必须是 position/rotation/scale".into(),
+                        "关键帧 property 必须是 position/rotation/scale/opacity".into(),
                     )
                 })?;
             let frames = super::keyframes::parse_frames(&self.frames, property)?;

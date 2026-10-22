@@ -55,6 +55,7 @@ export type MediaStorage = {
   get(key: string, scope?: MediaStorageScope): Promise<MediaObject>;
   exists(key: string, scope?: MediaStorageScope): Promise<boolean>;
   stat?(key: string, scope?: MediaStorageScope): Promise<MediaObjectStat>;
+  putStream?(key:string,bytes:AsyncIterable<Uint8Array>,contentType:string,options:{size:number;signal?:AbortSignal},scope?:MediaStorageScope):Promise<void>;
   /** 区间为包含两端的字节偏移；省略时读取完整对象，仍按流返回。 */
   openRead?(key: string, range?: { start: number; end: number }, scope?: MediaStorageScope): Promise<MediaObjectStream>;
   getHttpsUrl?(key: string, options?: { expiresSeconds?: number }, scope?: MediaStorageScope): Promise<string>;

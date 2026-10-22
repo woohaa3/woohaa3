@@ -1,7 +1,13 @@
 import type { MediaMetadata } from '../media/protocol.js';
-import type { TaskResultSummary } from '../task/history.js';
+import type { TaskErrorSummary, TaskResultSummary } from '../task/history.js';
 
-export type ApplicationExtensionTaskResult = {workerTaskKey:string;state:string;result?:TaskResultSummary};
+export type ApplicationExtensionTaskResult = {
+  workerTaskKey: string;
+  state: string;
+  result?: TaskResultSummary;
+  /** 已由 Task 历史白名单裁剪的失败摘要，供扩展给出可操作的错误。 */
+  error?: TaskErrorSummary;
+};
 
 export type ApplicationExtensionMediaResourcesFacade = {
   /**
@@ -20,6 +26,8 @@ export type ApplicationExtensionMediaResourcesFacade = {
    * 与换机后的自己都读不到；省略表示与画布无关。
    */
   write(input:{bytes:Uint8Array;contentType:string;canvasId?:string}):Promise<MediaMetadata>;
+  openRead?(storageKey:string,canvasId?:string):Promise<{bytes:AsyncIterable<Uint8Array>;contentType:string;size:number;cancel():void}>;
+  writeStream?(input:{bytes:AsyncIterable<Uint8Array>;contentType:string;maxBytes?:number;signal?:AbortSignal;canvasId?:string}):Promise<MediaMetadata>;
 };
 
 /**

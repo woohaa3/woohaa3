@@ -347,6 +347,21 @@ describe("model-scene plugin version dispatch", () => {
     expect((runtime!.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider).getResources().get("m2")?.ops).toHaveLength(2);
   });
 
+  it("无模型的复合内容成功加载，缺少 adapter 仍失败", async () => {
+    const harness = await makeHarness();
+    runtime = harness.runtime;
+    const stop = harness.registry.register({ extensionId: "content-only", owner: "content-only", executionKey: () => "v1", prepare: () => ({}) });
+    const canvas = createEmptyWoohaa3ServerCanvas("c1");
+    canvas.document.nodes.push({ id: "asset", type: "composite-asset", position: { x: 0, y: 0 } });
+    canvas.nodeData.asset = { extensionId: "content-only" } as never;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+    await expect.poll(() => harness.reports.at(-1)?.status).toBe("ok");
+    expect((runtime!.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider).getResources().size).toBe(0);
+    expect(harness.registry.projection("asset")).toEqual({});
+    stop();
+    await expect.poll(() => harness.reports.at(-1)?.status).toBe("failed");
+  });
+
   it("第三种复合资产业务仅通过 adapter 接入并在释放后失效", async () => {
     const harness = await makeHarness();
     runtime = harness.runtime;

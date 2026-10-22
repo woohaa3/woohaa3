@@ -37,3 +37,21 @@ it('body.canvasId 变成存储作用域；省略无作用域；非法 id 400 且
  expect(rejected.status).toBe(400);expect(rejected.body.code).toBe('malformed-request');
  expect({writes:writes.length,reads:reads.length,exists:existsCalls}).toEqual(before);
 });
+
+it('binary HTTP streams >16 MiB, preserves metadata and rejects wrong service scope',async()=>{
+ const objects=new Map<string,MediaObject>();
+ const handler=createMediaInternalHandler({identities:{tokens:{'application-service':'app','canvas-service':'canvas'}},storage:{
+  exists:async k=>objects.has(k),get:async()=>{throw Error('small read forbidden');},put:async()=>{throw Error('small write forbidden');},
+  stat:async k=>({size:objects.get(k)!.bytes.length,contentType:objects.get(k)!.contentType}),
+  openRead:async k=>({bytes:(async function*(){const bytes=objects.get(k)!.bytes;for(let i=0;i<bytes.length;i+=65536)yield bytes.subarray(i,i+65536);})(),cancel(){}}),
+  putStream:async(k,bytes,contentType)=>{const chunks:Buffer[]=[];for await(const chunk of bytes)chunks.push(Buffer.from(chunk));objects.set(k,{bytes:Buffer.concat(chunks),contentType});}
+ }});
+ const server=http.createServer((req,res)=>void handler(req,res).then(ok=>{if(!ok)res.end();}));await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));cleanup.push(()=>new Promise<void>(r=>server.close(()=>r())));
+ const base=`http://127.0.0.1:${(server.address() as {port:number}).port}/internal/v1/media/`,headers={'x-woohaa3-protocol-version':'1','x-woohaa3-service-token':'app','x-woohaa3-extension-id':'creature-video-assets'};
+ const denied=await fetch(base+'extension-stream-write',{method:'POST',headers:{...headers,'x-woohaa3-service-token':'canvas','content-type':'video/mp4'},body:'no'});expect(denied.status).toBe(403);await denied.text();expect(objects.size).toBe(0);
+ const {Readable}=await import('node:stream');
+ const source=Readable.from((async function*(){for(let i=0;i<17;i++)yield Buffer.alloc(1024**2,71);})());
+ const write=await fetch(base+'extension-stream-write',{method:'POST',headers:{...headers,'content-type':'video/mp4'},body:source as unknown as BodyInit,duplex:'half'} as RequestInit);expect(write.status).toBe(200);const saved=await write.json();expect(saved.size).toBe(17*1024**2);
+ const read=await fetch(base+'extension-stream-read',{method:'POST',headers:{...headers,'x-woohaa3-storage-key':saved.storageKey}});expect(read.status).toBe(200);expect(read.headers.get('content-length')).toBe(String(saved.size));expect(read.headers.get('content-type')).toBe('video/mp4');
+ let size=0;for await(const chunk of read.body as unknown as AsyncIterable<Uint8Array>){expect(chunk.every(b=>b===71)).toBe(true);size+=chunk.length;}expect(size).toBe(saved.size);expect(objects.size).toBe(1);
+});

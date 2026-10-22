@@ -65,6 +65,8 @@ mod preparation;
 pub(crate) mod demand;
 mod motion_reset;
 mod motion_plan;
+mod opacity;
+mod part_id;
 mod playback_prepare;
 mod spawn;
 mod batching;

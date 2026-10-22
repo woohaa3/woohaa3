@@ -14,9 +14,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   decodeMcpApplyCommandsRequest,
+  decodeMcpAddFilmSetMediaRequest,
   decodeMcpCommitAnimationRequest,
   decodeMcpConfirmAdaptationRequest,
   decodeMcpCreateFilmSetNodeRequest,
+  decodeMcpExportFilmSetClipRequest,
+  decodeMcpGetFilmSetExportRequest,
   decodeMcpGetNodeRequest,
   decodeMcpGetModelNodesRequest,
   decodeMcpImportFilmSetContentRequest,
@@ -64,9 +67,15 @@ import type {
 } from "@woohaa3/contracts";
 import type { ModelBatchContext } from "./batch-service.js";
 import type {
+  McpAddFilmSetMediaOutcome,
+  McpAddFilmSetMediaRequest,
   McpCommitAnimationRequest,
   McpConfirmAdaptationRequest,
   McpCreateFilmSetNodeRequest,
+  McpExportFilmSetClipOutcome,
+  McpExportFilmSetClipRequest,
+  McpGetFilmSetExportOutcome,
+  McpGetFilmSetExportRequest,
   McpImportModelSnapshotRequest,
   McpImportFilmSetContentRequest,
   McpMutateFilmSetItemRequest
@@ -130,6 +139,11 @@ export type ModelMcpInternalService = {
   confirmAdaptation?: (input: McpConfirmAdaptationRequest & { canvasId: string; nodeId: string; requestId: string }) => Promise<FilmSetNodeOutcome>;
   /** 片场对象级权威变更；省略时相应路由返回 503。 */
   mutateFilmSetItem?: (input: McpMutateFilmSetItemRequest & { canvasId: string }) => Promise<MutateFilmSetItemOutcome>;
+  /** 片场媒体条目受控导入（D5）；省略时对应路由 503。 */
+  addFilmSetMedia?: (input: McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<McpAddFilmSetMediaOutcome>;
+  /** agent 发起显式导出（D8）；省略时对应路由 503（`recording-unavailable` 语义）。 */
+  exportFilmSetClip?: (input: McpExportFilmSetClipRequest & { canvasId: string }) => Promise<McpExportFilmSetClipOutcome>;
+  getFilmSetExport?: (input: McpGetFilmSetExportRequest & { canvasId: string }) => Promise<McpGetFilmSetExportOutcome>;
 };
 
 export type ModelMcpInternalHandlerOptions = {
@@ -174,6 +188,9 @@ export function createModelMcpInternalHandler(
       && pathname !== MCP_INTERNAL_PATHS.importModelSnapshot
       && pathname !== MCP_INTERNAL_PATHS.importFilmSetContent
       && pathname !== MCP_INTERNAL_PATHS.mutateFilmSetItem
+      && pathname !== MCP_INTERNAL_PATHS.addFilmSetMedia
+      && pathname !== MCP_INTERNAL_PATHS.exportFilmSetClip
+      && pathname !== MCP_INTERNAL_PATHS.getFilmSetExport
       && pathname !== MCP_INTERNAL_PATHS.modelStatistics) {
       sendJson(res, 404, { error: "not-found" });
       return true;
@@ -409,6 +426,35 @@ export function createModelMcpInternalHandler(
         ...decoded.value,
         canvasId: decoded.value.canvasId
       });
+      return sendOutcome(res, outcome, log);
+    }
+
+    // 片场媒体条目受控导入（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）
+    if (pathname === MCP_INTERNAL_PATHS.addFilmSetMedia) {
+      const decoded = decodeMcpAddFilmSetMediaRequest(body);
+      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
+      if (!options.service?.addFilmSetMedia) return unavailable(res, "片场媒体导入能力当前不可用");
+      const outcome = await options.service.addFilmSetMedia({ ...decoded.value, canvasId: decoded.value.canvasId });
+      return sendOutcome(res, outcome, log);
+    }
+
+    // agent 发起显式导出与查询（D8）
+    if (pathname === MCP_INTERNAL_PATHS.exportFilmSetClip) {
+      const decoded = decodeMcpExportFilmSetClipRequest(body);
+      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
+      if (!options.service?.exportFilmSetClip) {
+        return unavailable(res, "当前宿主未提供原生录制能力，无法经 MCP 导出");
+      }
+      const outcome = await options.service.exportFilmSetClip({ ...decoded.value, canvasId: decoded.value.canvasId });
+      return sendOutcome(res, outcome, log);
+    }
+    if (pathname === MCP_INTERNAL_PATHS.getFilmSetExport) {
+      const decoded = decodeMcpGetFilmSetExportRequest(body);
+      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
+      if (!options.service?.getFilmSetExport) {
+        return unavailable(res, "当前宿主未提供原生录制能力，无法查询导出任务");
+      }
+      const outcome = await options.service.getFilmSetExport({ ...decoded.value, canvasId: decoded.value.canvasId });
       return sendOutcome(res, outcome, log);
     }
 

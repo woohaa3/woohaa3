@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import type { BackgroundActivityJob } from "@woohaa3/contracts";
-import { ShotReferenceActivity } from "../src/frontend/shot-reference-activity.js";
-import type { ShotReferenceRecordingJob } from "../src/frontend/shot-reference-recording-queue.js";
+import { ShotReferenceActivity } from "../src/authoring/browser/shot-reference-activity.js";
+import type { ShotReferenceRecordingJob } from "../src/authoring/browser/shot-reference-recording-queue.js";
 
 const job = (patch: Partial<ShotReferenceRecordingJob> = {}): ShotReferenceRecordingJob => ({
   canvasId: "c1",

@@ -81,7 +81,8 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
             scopedScenes.delete(nodeId);
             return "fail:compile:unavailable-composite-asset";
           }
-          scopedScenes.set(nodeId, projection.resource);
+          if (projection.resource) scopedScenes.set(nodeId, projection.resource);
+          else scopedScenes.delete(nodeId);
           return projection.diagnostic ? `ok:partial:${projection.diagnostic}` : "ok";
         }
         return applyWithBevy(nodeId, source, version, data, nodeType, scopedScenes);

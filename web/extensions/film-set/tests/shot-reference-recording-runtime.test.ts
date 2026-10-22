@@ -11,9 +11,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createShotReferenceRecordDeps,
   type ShotReferencePlaybackPort
-} from "../src/frontend/shot-reference-recording-runtime.js";
-import type { ShotReferenceRecordTarget } from "../src/frontend/shot-reference-recorder.js";
-import type { FilmSetContext } from "../src/frontend/context.js";
+} from "../src/authoring/browser/shot-reference-recording-runtime.js";
+import type { ShotReferenceRecordTarget } from "../src/authoring/browser/shot-reference-recorder.js";
+import type { FilmSetContext } from "../src/integration/browser/context.js";
 
 const target: ShotReferenceRecordTarget = {
   canvasId: "c1",
@@ -121,7 +121,7 @@ describe("createShotReferenceRecordDeps（生产接线）", () => {
   });
 
   it("运行时接线不再引用 ctx.filmSetPlayback（本插件不声明该 inject）", async () => {
-    const source = (await readFile(new URL("../src/frontend/shot-reference-recording-runtime.ts", import.meta.url), "utf8"))
+    const source = (await readFile(new URL("../src/authoring/browser/shot-reference-recording-runtime.ts", import.meta.url), "utf8"))
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\/\/[^\n]*/g, "");
     expect(source).not.toContain("ctx.filmSetPlayback");

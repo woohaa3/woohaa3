@@ -24,6 +24,17 @@ afterEach(async () => {
 });
 
 describe("put / head / get 往返", () => {
+  it("流式写入只提交完整文件，中断及取消保留原对象并清理临时文件", async () => {
+    const key="media/stream.bin", source=async function*(){for(let i=0;i<17;i++)yield new Uint8Array(1024**2).fill(71);};
+    await backend.putStream!(key,source(),"application/zip",{size:17*1024**2});
+    expect(await backend.head(key)).toEqual({size:17*1024**2,contentType:"application/zip"});
+    const read=await backend.openRead!(key);let count=0;for await(const chunk of read.bytes)count+=chunk.length;read.cancel();expect(count).toBe(17*1024**2);
+    await expect(backend.putStream!(key,(async function*(){yield Uint8Array.of(1);throw Error("disconnected");})(),"video/mp4",{size:2})).rejects.toThrow("disconnected");
+    const controller=new AbortController();
+    await expect(backend.putStream!(key,(async function*(){yield Uint8Array.of(1);controller.abort();yield Uint8Array.of(2);})(),"video/mp4",{size:2,signal:controller.signal})).rejects.toThrow();
+    expect(await backend.head(key)).toEqual({size:17*1024**2,contentType:"application/zip"});
+    expect((await readdir(path.join(root,"media"))).sort()).toEqual(["stream.bin","stream.bin.meta.json"]);
+  });
   it("put 后 head 与 get 都能拿到字节与 contentType", async () => {
     await backend.put("media/sha256-abc.png", Uint8Array.of(1, 2, 3), "image/png");
 

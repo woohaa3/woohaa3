@@ -90,6 +90,10 @@ function createServicesFactory(
       stat: async (storageKey: string) => {
         const result = await media.port().verify(storageKey);
         return { exists: result.exists, ...(result.metadata?.contentType ? { contentType: result.metadata.contentType } : {}) };
+      },
+      verify: async (storageKey: string, canvasId?: string) => {
+        const result = await media.port().verify(storageKey, undefined, canvasId ? { canvasId } : undefined);
+        return result.exists && result.metadata ? { exists: true, metadata: result.metadata } : { exists: false };
       }
     },
     canvas: {

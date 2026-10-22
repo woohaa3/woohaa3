@@ -289,6 +289,13 @@ export type BevyAnimationPlayback = {
   duration: number;
   looped: boolean;
   playing: boolean;
+  /**
+   * 所播放镜头背景的具体色（`#rrggbb`）；缺省即跟随主题。
+   *
+   * 只影响该镜头的预览与导出清屏，不改编辑片场的工作区视图
+   * （change: 2026-10-19-extend-film-set-for-motion-graphics，D6）。
+   */
+  backdrop?: string;
   /** 初始镜头（第 0 秒）。 */
   initialCamera: {
     aspect?: string;

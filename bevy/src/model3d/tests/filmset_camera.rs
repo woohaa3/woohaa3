@@ -71,6 +71,7 @@ fn playback(node_id: &str, view_mode: &str, target: Option<&str>) -> AnimationPl
         time: 1.0,
         duration: 4.0,
         looped: true,
+        backdrop: None,
         playing: true,
         initial_camera: PlaybackCamera {
             aspect: "16:9".into(),

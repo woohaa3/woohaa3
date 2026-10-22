@@ -102,6 +102,8 @@ export function shotReferenceContentIdentity(input: {
     view.timeline,
     view.initialCamera,
     view.cameraMotion,
+    // 背景属于拍摄镜头身份：改背景必须让该镜头的参考视频失效重录（D6）。
+    view.clip.backdrop ?? "theme",
     shotAspectValue(view.clip),
     items
   ];

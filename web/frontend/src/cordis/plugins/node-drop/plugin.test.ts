@@ -90,7 +90,7 @@ it("coalesces inputs and invalidations, using latest ancestor, viewport and owne
   expect(element.style.width).toBe("800px");
   expect(element.dataset.active).toBe("true");
   host.disableOwner(); host.notify("targets"); host.flush();
-  expect(element.dataset.unavailable).toBe("true");
+  expect(document.querySelector(".node-drop-overlays")).toBeNull();
   host.removeTarget(); host.notify("canvas"); host.flush();
   expect(document.querySelector(".node-drop-overlays")).toBeNull();
 });

@@ -34,7 +34,7 @@ export const PENDING_SPLIT: ReadonlySet<string> = new Set<string>([
   // 扩展协议实现（1）：RunningHub 协议已从 vendor 迁回本扩展（747 行），待按 App/API 两条链路拆分。
   "web/extensions/runninghub-provider/src/provider/provider.ts",
   // 扩展自身（2）
-  "web/extensions/film-set/src/backend/film-set-conversion.ts",
+  "web/extensions/film-set/src/authoring/backend/film-set-conversion.ts",
   "web/extensions/tokenhub-provider/src/routes.ts",
   // 前端宿主（13）
   "web/frontend/src/cordis/contract/platform.ts",
