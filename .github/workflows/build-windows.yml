@@ -1,0 +1,237 @@
+name: Build Windows desktop
+
+# Builds the standalone Windows x64 client described in desktop/WINDOWS.md: an
+# unsigned, current-user NSIS installer plus the packaging manifest.
+#
+# The packaging scripts assemble the native host, a pinned Node runtime and the
+# native renderer/recorder for the runner's own platform; cross-compilation is
+# not supported, so this job must run on a Windows x64 runner.
+#
+# Authenticode signing, notarization and update-channel publishing need the
+# publisher's own credentials and are out of scope here. See desktop/WINDOWS.md
+# for the signed update channel and the lifecycle checks that remain manual.
+#
+# Third-party actions are pinned to full commit SHAs; update them deliberately.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Desktop version override in semver form (for example 0.1.2). Leave empty to use desktop/tauri.conf.json."
+        required: false
+        type: string
+  push:
+    tags:
+      - "v[0-9]*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Matches the Node runtime bundled into the installer (scripts/lib/desktop-host-package.mjs).
+  NODE_VERSION: "24.22.0"
+  PNPM_VERSION: "11.17.0"
+  RUST_VERSION: "1.97.1"
+  WASM_BINDGEN_VERSION: "0.2.128"
+  BINARYEN_VERSION: "version_133"
+  BINARYEN_SHA256: "17a2cbeac6b5693c5fbafab3838d3c65fd9c1eb38b05f5baec6c657e8c84995b"
+  RELEASE_ID: standalone-windows-x64
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Workflow-dispatch input, passed through the environment so it is never
+  # interpolated into a shell program.
+  INPUT_VERSION: ${{ inputs.version }}
+
+jobs:
+  windows-x64:
+    name: Windows x64 installer
+    # Pin the image so released installers stay reproducible; bump deliberately.
+    # windows-2022 keeps ample disk headroom for the three Rust target trees, unlike
+    # the reported windows-2025 space pressure (actions/runner-images#12199).
+    runs-on: windows-2022
+    # Five Rust builds (Bevy WASM, native renderer/recorder, the recorder again from
+    # desktop/build.rs, and Tauri) plus a cold cache can take over two hours.
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Resolve desktop version
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION}"
+          if [ -z "${version}" ] && [[ "${GITHUB_REF}" == refs/tags/v[0-9]* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -n "${version}" ] && ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid desktop version; expected semver such as 1.2.3 or 1.2.3-rc.1."
+            echo "Invalid desktop version: ${version}" >&2
+            exit 1
+          fi
+          echo "DESKTOP_VERSION=${version}" >> "${GITHUB_ENV}"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            api/pnpm-lock.yaml
+            locks/web/pnpm-lock.yaml
+            photocraft/pnpm-lock.yaml
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; explicit toolchain input
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: |
+            bevy -> target
+            desktop -> target
+          cache-on-failure: true
+
+      - name: Install wasm-bindgen
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
+        with:
+          tool: wasm-bindgen@${{ env.WASM_BINDGEN_VERSION }}
+
+      - name: Install Binaryen (wasm-opt)
+        run: |
+          set -euo pipefail
+          archive="binaryen-${BINARYEN_VERSION}-x86_64-windows.tar.gz"
+          base="https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}"
+          temp="$(cygpath --unix "${RUNNER_TEMP}")"
+          cd "${temp}"
+          curl --fail --location --retry 3 --output "${archive}" "${base}/${archive}"
+          echo "${BINARYEN_SHA256}  ${archive}" | sha256sum --check -
+          tar --extract --gzip --file "${archive}"
+          wasm_opt="$(find "${temp}/binaryen-${BINARYEN_VERSION}" -name wasm-opt.exe -print -quit)"
+          test -n "${wasm_opt}"
+          # GITHUB_PATH entries are read by Windows processes, so convert the MSYS path.
+          cygpath --windows "$(dirname "${wasm_opt}")" >> "${GITHUB_PATH}"
+
+      - name: Locate LLVM
+        run: |
+          set -euo pipefail
+          # The image ships LLVM and normally puts it on PATH; add the standard install
+          # root as a fallback for images that only expose the Visual Studio copy.
+          # scripts/lib/wasm-compiler.mjs also probes this root.
+          if [ -x "/c/Program Files/LLVM/bin/clang.exe" ]; then
+            printf '%s\n' 'C:\Program Files\LLVM\bin' >> "${GITHUB_PATH}"
+          fi
+
+      - name: Enable long paths
+        run: |
+          set -euo pipefail
+          # The image normally enables long paths already; git's setting still helps
+          # tools that enforce MAX_PATH. MSYS2_ARG_CONV_EXCL stops MSYS from rewriting
+          # reg.exe's /v /t /d /f switches into filesystem paths.
+          if ! MSYS2_ARG_CONV_EXCL='*' reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f >/dev/null 2>&1; then
+            echo "::warning::Could not enable system long paths; continuing without them."
+          fi
+          git config --system core.longpaths true \
+            || echo "::warning::Could not set core.longpaths; continuing without it."
+
+      - name: Verify build toolchain
+        run: |
+          set -euo pipefail
+          node --version
+          pnpm --version
+          rustc --version
+          wasm-bindgen --version
+          wasm-opt --version
+          # Disk headroom is the usual failure mode for a cold native + WASM build.
+          df -h .
+          # Run the build's own compiler probe so a missing WASM-capable LLVM fails
+          # here with its actionable message instead of an hour into the build.
+          node --input-type=module -e "import { wasmCompilerEnvironment } from './scripts/lib/wasm-compiler.mjs'; console.log(wasmCompilerEnvironment({ env: process.env }));"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          # PhotoCraft is a separate workspace that the root prepare hook also installs
+          # and builds; installing it first reports its own failure clearly and keeps
+          # the ordering visible.
+          pnpm -C photocraft install --frozen-lockfile
+          pnpm install --frozen-lockfile
+          pnpm -C web install --frozen-lockfile
+          pnpm -C api install --frozen-lockfile
+
+      - name: Configure build parallelism
+        run: |
+          set -euo pipefail
+          echo "CARGO_BUILD_JOBS=${NUMBER_OF_PROCESSORS:-4}" >> "${GITHUB_ENV}"
+
+      - name: Preflight checks
+        run: |
+          set -euo pipefail
+          # Fail on extension inventory or public-boundary mistakes before the long build.
+          # extensions:check reads the built contracts output. The web install hook
+          # normally builds it already; rebuild explicitly so this stays self-contained.
+          pnpm -C web run build:contracts
+          pnpm extensions:check
+          pnpm boundary:check
+
+      - name: Build Windows installer
+        run: |
+          set -euo pipefail
+          # desktop/target is cached, so an older NSIS build could otherwise be copied
+          # into this run's artifacts and manifest.
+          rm -rf desktop/target/release/bundle "artifacts/desktop/${RELEASE_ID}"
+          args=(--build-frontend --bundles nsis --release-id "${RELEASE_ID}" --out "artifacts/desktop/${RELEASE_ID}" --copy)
+          if [ -n "${DESKTOP_VERSION}" ]; then
+            args+=(--version "${DESKTOP_VERSION}")
+          fi
+          echo "pnpm desktop:bundle ${args[*]}"
+          pnpm desktop:bundle "${args[@]}"
+
+      - name: Record build summary
+        run: |
+          set -euo pipefail
+          node - "artifacts/desktop/${RELEASE_ID}/manifest.json" <<'NODE'
+          const fs = require("node:fs");
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const mib = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+          const host = manifest.hostPackage;
+          const lines = [
+            `### WooHaa3 ${manifest.product.version} — Windows x64`,
+            "",
+            `Release id: \`${manifest.releaseId}\` · Bundled host: \`${host.status}\`${host.nodeVersion ? ` (Node ${host.nodeVersion})` : ""}`,
+            "",
+            "| Artifact | Kind | Size | SHA-256 |",
+            "| --- | --- | --- | --- |",
+            ...manifest.artifacts.map((artifact) => `| ${artifact.name} | ${artifact.kind} | ${mib(artifact.bytes)} | \`${artifact.sha256}\` |`),
+            "",
+            "Unsigned installer: Authenticode signing and updater signatures are not configured.",
+            "",
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+          NODE
+
+      - name: Upload installer and manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: woohaa-desktop-windows-x64-${{ github.run_number }}
+          path: artifacts/desktop/${{ env.RELEASE_ID }}/
+          if-no-files-found: error
+          # run_number is stable across re-runs and artifacts are immutable.
+          overwrite: true
+          retention-days: 14

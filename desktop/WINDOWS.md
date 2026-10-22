@@ -11,6 +11,17 @@ pnpm desktop:bundle --build-frontend
 
 The complete current-user NSIS installer is written under `desktop/target/release/bundle/nsis/`. It bundles Node, the local host, extensions and native tools. Users do not need development tools or symbolic-link privileges. WebView2 installation may need network access; Tauri also downloads NSIS tools during builds. Authenticode signing requires the publisher's own certificate.
 
+## Continuous integration
+
+[`.github/workflows/build-windows.yml`](../.github/workflows/build-windows.yml) builds the same unsigned installer on a GitHub-hosted Windows x64 runner (`windows-2022`). It runs on manual dispatch and on version tags; a tag such as `v0.1.2` supplies version `0.1.2`, and a manual run can override it.
+
+```sh
+gh workflow run build-windows.yml -f version=0.1.2
+gh run download --name woohaa-desktop-windows-x64-<run-number>
+```
+
+The job pins Node 24.22.0, pnpm 11.17.0, Rust 1.97.1, wasm-bindgen 0.2.128 and Binaryen 133, then uploads the installer, the packaging manifest and the copied bundles as the `woohaa-desktop-windows-x64-<run-number>` artifact, kept for 14 days. It does not sign, notarize or publish: Authenticode and updater signing still require the publisher's own credentials, and the lifecycle checks below remain manual. A successful CI build alone does not establish installation, rendering or update behavior on Windows.
+
 ## Signed update channel
 
 Keep the updater private key on the release machine, with its matching `.pub` file alongside it. Increase `desktop/tauri.conf.json`'s version before building an update. Set the update endpoint explicitly; the client has no default publisher CDN.
