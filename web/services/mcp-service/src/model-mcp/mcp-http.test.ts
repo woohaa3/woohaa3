@@ -660,3 +660,119 @@ describe("模型规模统计 MCP（change: 2026-10-18-align-model-statistics-wit
     expect(result.structuredContent).toMatchObject({ ok: true, source: "candidate" });
   });
 });
+
+describe("片场媒体导入与原生导出 MCP（change: 2026-10-19-extend-film-set-for-motion-graphics）", () => {
+  it("add_film_set_media 把请求原样转给下游并回执新条目", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const { base } = await start({
+      async getModelNode() {
+        return { ok: true, canvasId: "x", nodeId: "x", title: "", prompt: "", source: "", references: [], cameras: [] };
+      },
+      async submitScript(input) {
+        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "c", idempotent: false };
+      },
+      async addFilmSetMedia(input) {
+        calls.push(input as unknown as Record<string, unknown>);
+        return {
+          ok: true,
+          canvasId: input.canvasId,
+          nodeId: input.nodeId,
+          itemId: input.itemId ?? "derived",
+          itemKind: "image",
+          commandId: "cmd-media",
+          duplicate: false,
+          noop: false,
+          contentHash: "hash",
+          itemCount: 1
+        };
+      }
+    });
+    const response = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 40,
+      method: "tools/call",
+      params: {
+        name: "add_film_set_media",
+        arguments: { canvasId: "canvas-a", nodeId: "film", requestId: "r1", sourceNodeId: "img-1", expectedContentHash: "h0" }
+      }
+    });
+    const result = response.body.result as { isError?: boolean; structuredContent?: Record<string, unknown> };
+    expect(result.isError).toBeUndefined();
+    expect(calls[0]).toMatchObject({ canvasId: "canvas-a", nodeId: "film", requestId: "r1", sourceNodeId: "img-1", expectedContentHash: "h0" });
+    expect(result.structuredContent).toMatchObject({ ok: true, itemId: "derived" });
+  });
+
+  it("原生录制不可用时 export_film_set_clip 返回 recording-unavailable，不创建任务", async () => {
+    const { base } = await start();
+    const response = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 41,
+      method: "tools/call",
+      params: {
+        name: "export_film_set_clip",
+        arguments: { canvasId: "canvas-a", nodeId: "film", clipId: "clip-1", requestId: "r1", profile: "hd" }
+      }
+    });
+    const result = response.body.result as { isError?: boolean; structuredContent?: Record<string, unknown> };
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ ok: false, code: "recording-unavailable" });
+  });
+
+  it("export_film_set_clip 提交 profile 并返回 jobId，get_film_set_export 透传阶段与成片身份", async () => {
+    const exported: Array<Record<string, unknown>> = [];
+    const { base } = await start({
+      async getModelNode() {
+        return { ok: true, canvasId: "x", nodeId: "x", title: "", prompt: "", source: "", references: [], cameras: [] };
+      },
+      async submitScript(input) {
+        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "c", idempotent: false };
+      },
+      async exportFilmSetClip(input) {
+        exported.push(input as unknown as Record<string, unknown>);
+        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, clipId: input.clipId, jobId: "job-1", state: "queued", duplicate: false };
+      },
+      async getFilmSetExport(input) {
+        return { ok: true, canvasId: input.canvasId, jobId: input.jobId, state: "succeeded", completedFrames: 60, totalFrames: 60, nodeId: "video-1", assetId: "asset-1" };
+      }
+    });
+    const started = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 42,
+      method: "tools/call",
+      params: {
+        name: "export_film_set_clip",
+        arguments: { canvasId: "canvas-a", nodeId: "film", clipId: "clip-1", requestId: "r1", profile: "hd60", expectedContentHash: "h0" }
+      }
+    });
+    const startResult = started.body.result as { structuredContent?: Record<string, unknown> };
+    expect(exported[0]).toMatchObject({ profile: "hd60", clipId: "clip-1", expectedContentHash: "h0" });
+    expect(startResult.structuredContent).toMatchObject({ ok: true, jobId: "job-1" });
+
+    const polled = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 43,
+      method: "tools/call",
+      params: { name: "get_film_set_export", arguments: { canvasId: "canvas-a", jobId: "job-1" } }
+    });
+    const pollResult = polled.body.result as { structuredContent?: Record<string, unknown> };
+    expect(pollResult.structuredContent).toMatchObject({ ok: true, state: "succeeded", nodeId: "video-1", assetId: "asset-1" });
+  });
+
+  it("导出工具清单与指南覆盖透明度、新缓动、材质、媒体、镜头背景与导出 profile", async () => {
+    const { base } = await start();
+    const listed = await mcpPost(base, { jsonrpc: "2.0", id: 44, method: "tools/list", params: {} });
+    const names = ((listed.body.result as { tools: Array<{ name: string }> }).tools).map(tool => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["add_film_set_media", "export_film_set_clip", "get_film_set_export"]));
+
+    const guide = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 45,
+      method: "tools/call",
+      params: { name: "get_model_api", arguments: {} }
+    });
+    const text = ((guide.body.result as { content: Array<{ text: string }> }).content[0]?.text) ?? "";
+    for (const expected of ["opacity", "easeInOut", "unlit", "add_film_set_media", "backdrop", "hd60", "recording-unavailable"]) {
+      expect(text).toContain(expected);
+    }
+  });
+});

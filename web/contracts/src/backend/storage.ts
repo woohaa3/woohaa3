@@ -112,6 +112,7 @@ export type StorageBackend = {
   put(key: string, bytes: Uint8Array, contentType: string, scope?: StorageScope): Promise<void>;
   delete?(key: string, scope?: StorageScope): Promise<void>;
   presign?(key: string, options?: { expiresSeconds?: number }, scope?: StorageScope): Promise<string>;
+  putStream?(key:string,bytes:AsyncIterable<Uint8Array>,contentType:string,options:{size:number;signal?:AbortSignal},scope?:StorageScope):Promise<void>;
 };
 
 /** namespace 视图：使用方给 key，core 拼上 namespace，后端再加自己的前缀。 */
@@ -125,6 +126,7 @@ export type StorageBucket = {
   get(key: string): Promise<StorageObject>;
   openRead?(key: string, range?: { start: number; end: number }): Promise<StorageObjectStream>;
   put(key: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  putStream?(key:string,bytes:AsyncIterable<Uint8Array>,contentType:string,options:{size:number;signal?:AbortSignal}):Promise<void>;
   delete?(key: string): Promise<void>;
   /** 是否能给出外部地址（主存储有 presign，或配置了可签名的 expose 后端）。 */
   canExpose(): boolean;

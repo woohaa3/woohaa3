@@ -10,6 +10,7 @@
  *
  * 任务只允许提交**自己拥有的非画布任务**；画布节点 run/cancel 必须经 Canvas。
  */
+import { Readable } from "node:stream";
 import {
   buildInternalHeaders,
   createCorrelationId,
@@ -170,8 +171,49 @@ export type MediaDomainClientOptions = DomainClientOptions & { baseUrl: string }
 
 /** 插件只能查询稳定媒体引用是否存在；不接触 COS 凭据或签出长期 URL。 */
 export function createApplicationMediaFacade(options: MediaDomainClientOptions, principal?: ApplicationExtensionPrincipal): ApplicationExtensionMediaFacade {
+  const verify = async (storageKey: string, canvasId?: string) => {
+    if (principal) requireCapability(principal, "media:stat");
+    const result = await callInternal<import("@woohaa3/contracts").MediaVerifyResponse>(
+      options,
+      "POST",
+      "/internal/v1/media/verify",
+      { storageKey, ...(canvasId !== undefined ? {canvasId} : {}) }
+    );
+    return result.exists ? { exists: true as const, metadata: result.metadata } : { exists: false as const };
+  };
   return {
     ...(principal ? {resources: {
+      async openRead(storageKey: string, canvasId?: string) {
+        requireCapability(principal, "media:read");
+        const controller = new AbortController();
+        const response = await (options.fetchImpl ?? fetch)(`${options.baseUrl.replace(/\/$/, "")}/internal/v1/media/extension-stream-read`, {
+          method: "POST", headers: { ...buildInternalHeaders({ serviceToken: options.serviceToken, correlationId: createCorrelationId() }),
+            "x-woohaa3-extension-id": principal.extensionId, "x-woohaa3-storage-key": storageKey, ...(canvasId !== undefined ? { "x-woohaa3-canvas-id": canvasId } : {}) }, signal: AbortSignal.any([controller.signal,AbortSignal.timeout(45*60_000)])
+        });
+        if (!response.ok || !response.body) throw new DomainClientError("storage-failed", "媒体流式读取失败", response.status);
+        const reader = response.body.getReader();
+        const size = Number(response.headers.get("content-length"));
+        if (!response.headers.has("content-length") || !Number.isSafeInteger(size) || size < 0 || size > 2 * 1024 ** 3) { await reader.cancel(); throw new DomainClientError("limit-exceeded", "媒体大小非法"); }
+        return { contentType: response.headers.get("content-type") ?? "application/octet-stream", size,
+          bytes: (async function* () { let received = 0; try { for (;;) { const item = await reader.read(); if (item.done) break; received += item.value.length; if (received > size) throw new DomainClientError("limit-exceeded", "媒体内容超限"); yield item.value; } if (received !== size) throw new DomainClientError("storage-failed", "媒体内容不完整"); } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); } })(),
+          cancel: () => controller.abort() };
+      },
+      async writeStream(input: { bytes: AsyncIterable<Uint8Array>; contentType: string; maxBytes?: number; signal?: AbortSignal; canvasId?: string }) {
+        requireCapability(principal, "media:write");
+        const limit = Math.min(input.maxBytes ?? 2 * 1024 ** 3, 2 * 1024 ** 3);
+        if (!Number.isSafeInteger(limit) || limit <= 0) throw new DomainClientError("limit-exceeded","资源上限非法");
+        const signal = input.signal ? AbortSignal.any([input.signal,AbortSignal.timeout(45*60_000)]) : AbortSignal.timeout(45*60_000);
+        const body = Readable.from((async function* () { let size = 0; for await (const chunk of input.bytes) { input.signal?.throwIfAborted(); size += chunk.length; if (size > limit) throw new DomainClientError("limit-exceeded", "资源字节超限"); yield chunk; } })());
+        try {
+          const response = await (options.fetchImpl ?? fetch)(`${options.baseUrl.replace(/\/$/, "")}/internal/v1/media/extension-stream-write`, {
+            method: "POST", headers: { ...buildInternalHeaders({ serviceToken: options.serviceToken, correlationId: createCorrelationId() }),
+              "x-woohaa3-extension-id": principal.extensionId, "Content-Type": input.contentType, ...(input.canvasId !== undefined ? { "x-woohaa3-canvas-id": input.canvasId } : {}) }, body: body as unknown as BodyInit,
+            duplex: "half", signal
+          } as RequestInit);
+          if (!response.ok) throw new DomainClientError("storage-failed", "媒体流式写入失败", response.status);
+          return await response.json() as import("@woohaa3/contracts").MediaMetadata;
+        } finally { body.destroy(); }
+      },
       async read(storageKey: string, canvasId?: string) {
         requireCapability(principal,"media:read");
         // canvasId 只透传，由 media-service 校验后交给存储路由：远端画布的字节只在托管存储里。
@@ -185,15 +227,13 @@ export function createApplicationMediaFacade(options: MediaDomainClientOptions, 
       }
     }} : {}),
     async stat(storageKey) {
-      const result = await callInternal<{ exists: boolean; matches: boolean; metadata?: { contentType: string; size: number } }>(
-        options,
-        "POST",
-        "/internal/v1/media/verify",
-        { storageKey }
-      );
+      const result = await verify(storageKey);
       return result.exists
-        ? { exists: true, ...(result.metadata ? { contentType: result.metadata.contentType, size: result.metadata.size } : {}) }
+        ? { exists: true, contentType: result.metadata.contentType, size: result.metadata.size }
         : { exists: false };
+    },
+    async verify(storageKey, canvasId) {
+      return verify(storageKey, canvasId);
     }
   };
 }

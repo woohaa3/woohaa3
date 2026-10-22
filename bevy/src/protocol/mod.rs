@@ -40,9 +40,9 @@ pub(crate) use focus_transition::{FOCUS_TRANSITION_VERSION, FocusTransitionProgr
 pub(crate) use image_focus::{IMAGE_FOCUS_VERSION, ImageFocus, ImageFocusViewport};
 #[allow(unused_imports)]
 pub(crate) use model::{
-    CANVAS_RENDER_SCENE_VERSION, MODEL_ASSET_VERSION, MODEL_SCENE_IR_V2, ModelAabbDto,
-    ModelAssetDescriptor, ModelOffset, ModelOp, ModelPlacement, ModelReference, ModelSnapshot,
-    canonical_signature, fnv1a64_utf16,
+    CANVAS_RENDER_SCENE_VERSION, DEFAULT_BLEND_OPACITY, MODEL_ASSET_VERSION, MODEL_SCENE_IR_V2,
+    ModelAabbDto, ModelAssetDescriptor, ModelOffset, ModelOp, ModelPlacement, ModelReference,
+    ModelSnapshot, canonical_signature, fnv1a64_utf16,
 };
 #[allow(unused_imports)]
 pub(crate) use position::{

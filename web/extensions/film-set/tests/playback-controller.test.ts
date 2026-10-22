@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createFilmSetSnapshot, filmSetAnimationsOf, type FilmSetNodeData, type BevyAnimationPlayback } from "@woohaa3/contracts";
-import { AnimationPlaybackController } from "../src/shared.js";
+import { AnimationPlaybackController } from "../src/preview/shared/playback-controller.js";
 
 const MODEL = `scene.group({ id: "body" });
 scene.box({ id: "torso", parent: "body", size: [1, 2, 0.5] });`;

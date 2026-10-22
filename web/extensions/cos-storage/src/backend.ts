@@ -16,7 +16,7 @@
  * - 两种 bucket URL 形式的 region 解析规则（含 `cos-<region>` → `ap-<region>` 的不对称前缀规则）。
  */
 import COS from "cos-nodejs-sdk-v5";
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import {
   defineConfigSchema,
   StorageObjectNotFoundError,
@@ -172,6 +172,27 @@ export function createCosBackend(
     backendId: COS_STORAGE_BACKEND_ID,
     label: COS_STORAGE_LABEL,
     ownerExtensionId: COS_STORAGE_PLUGIN_ID,
+    async putStream(key, bytes, contentType, options) {
+      options.signal?.throwIfAborted();
+      let size = 0;
+      const checked = async function* () {
+        for await (const chunk of bytes) { options.signal?.throwIfAborted(); size += chunk.length; if (size > options.size) throw new Error("流式对象长度不符"); yield chunk; }
+        if (size !== options.size) throw new Error("流式对象长度不符");
+      };
+      const body = Readable.from(checked());
+      const abort = () => body.destroy(new Error("媒体写入已取消"));
+      options.signal?.addEventListener("abort", abort, { once: true });
+      try {
+        await new Promise<void>((resolve,reject) => {
+          body.once("error",reject);
+          cos.putObject({ ...base(), Key: keyFor(key), Body: body, ContentType: contentType, ContentLength: options.size }, error => {
+            if(error)reject(error);
+            else if(!body.readableEnded || size !== options.size)reject(new Error("流式对象未完整上传"));
+            else resolve();
+          });
+        });
+      } finally { options.signal?.removeEventListener("abort", abort); body.destroy(); }
+    },
     async put(key, bytes, contentType) {
       // cos-nodejs-sdk-v5 接受 Buffer/Stream/String，不接受 Uint8Array。
       await runCos((callback) =>

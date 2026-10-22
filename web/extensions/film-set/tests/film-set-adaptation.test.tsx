@@ -25,11 +25,11 @@ import {
   type FilmSetModelItem,
   type ServerCanvas
 } from "@woohaa3/contracts";
-import type { FilmSetContext as Context } from "../src/frontend/context.js";
+import type { FilmSetContext as Context } from "../src/integration/browser/context.js";
 import { CompositeAssetRegistry } from "@woohaa3/frontend/extension-api";
 import { createTestCanvasState } from "./canvas-state.js";
 const woohaa3CanvasStore = createTestCanvasState();
-import { FilmSetAdaptationConfirm, resolveAdaptation } from "../src/frontend/film-set-adaptation.js";
+import { FilmSetAdaptationConfirm, resolveAdaptation } from "../src/authoring/browser/film-set-adaptation.js";
 import type { CanvasCommand } from "@woohaa3/contracts";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

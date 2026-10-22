@@ -1,0 +1,11 @@
+.text-preview-dialog { width: min(860px, calc(100vw - 48px)); }
+.text-preview-dialog__body { max-height: min(72vh, 760px); overflow: auto; line-height: 1.7; overflow-wrap: anywhere; }
+.text-preview-dialog__body h1, .text-preview-dialog__body h2, .text-preview-dialog__body h3 { margin: 1.35em 0 .55em; line-height: 1.3; }
+.text-preview-dialog__body h1:first-child, .text-preview-dialog__body h2:first-child, .text-preview-dialog__body h3:first-child { margin-top: 0; }
+.text-preview-dialog__body p, .text-preview-dialog__body ul, .text-preview-dialog__body ol, .text-preview-dialog__body blockquote { margin: .7em 0; }
+.text-preview-dialog__body pre { overflow: auto; max-width: 100%; padding: 12px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-surface); }
+.text-preview-dialog__body code { font-family: var(--app-font-mono, ui-monospace, monospace); font-size: .92em; }
+.text-preview-dialog__body :not(pre) > code { padding: 1px 4px; border-radius: 3px; background: var(--app-web-surface); }
+.text-preview-dialog__body blockquote { padding: 1px 12px; border-radius: 4px; background: var(--app-web-surface); color: var(--app-web-text-muted); }
+.text-preview-dialog__body table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; }
+.text-preview-dialog__body th, .text-preview-dialog__body td { padding: 6px 9px; border: 1px solid var(--app-web-border); text-align: left; }

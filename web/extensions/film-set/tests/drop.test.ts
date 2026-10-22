@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields } from "@woohaa3/contracts";
-import { extendFilmSetDrop } from "../src/frontend/drop.js";
-import type { FilmSetContext } from "../src/frontend/context.js";
+import { extendFilmSetDrop } from "../src/integration/browser/drop.js";
+import type { FilmSetContext } from "../src/integration/browser/context.js";
 
 type DropInput = { canvas: ReturnType<typeof createEmptyWoohaa3ServerCanvas>; targetNodeId: string; sourceNodeIds: readonly string[]; point: { x: number; y: number } };
 type Contribution = {

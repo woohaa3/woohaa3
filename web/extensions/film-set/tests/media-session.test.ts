@@ -1,4 +1,4 @@
-import { filmSetMediaSources } from "../src/frontend/media-sources.js";
+import { filmSetMediaSources } from "../src/preview/browser/media-sources.js";
 /**
  * 片场媒体会话测试
  * （change: 2026-10-08-make-film-set-model-only，任务 4.1/4.2/6.2）。

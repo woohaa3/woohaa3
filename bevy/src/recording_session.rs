@@ -45,6 +45,11 @@ fn fail(code: &'static str, message: impl Into<String>) -> ProbeFailure {
     ProbeFailure { stage: "RECORDING_ERROR_STAGE_COMPILE", code, message: message.into() }
 }
 
+/// `#rrggbb` 背景校验（与渲染侧 `parse_hex` 接受的形式一致）。
+fn is_hex_color(value: &str) -> bool {
+    value.len() == 7 && value.starts_with('#') && value[1..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
 /// 读取必需的正整数（ProtoJSON 用字符串承载 64 位整数）。
 fn required_u64(payload: &Value, path: &[&str]) -> Result<u64, ProbeFailure> {
     let mut cursor = payload;
@@ -120,7 +125,15 @@ pub fn prepare_submit(payload: &Value, work_dir: Option<&Path>) -> Result<Prepar
         .get("snapshot")
         .and_then(|snapshot| snapshot.get("background"))
         .and_then(|value| value.as_str())
-        .unwrap_or("#000000");
+        .filter(|value| is_hex_color(value))
+        .ok_or_else(|| {
+            // 背景由编译器从镜头背景解析成具体色；缺失或非法都是输入错误，不自行回退黑色
+            // （change: 2026-10-19-extend-film-set-for-motion-graphics，D6）。
+            fail(
+                "recording-snapshot-invalid",
+                "快照缺少合法的背景色（snapshot.background 必须是 #rrggbb）",
+            )
+        })?;
     let mut plan = prepare_render_plan(&scene_ir_json, &motion_json, width, height, background)?;
     // 媒体声明：把冻结的 playback 映射与真实内容类型带进渲染计划。
     let resources = payload
@@ -358,6 +371,27 @@ mod tests {
         assert_eq!(
             output_path_for(Path::new("/tmp/x"), "../../escape"),
             Path::new("/tmp/x/artifact-______escape.mp4")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_or_invalid_background() {
+        // 背景必须由编译器冻结成具体色；缺失即输入错误，不自行回退黑色（D6）。
+        let mut missing = payload();
+        missing["snapshot"]
+            .as_object_mut()
+            .expect("snapshot")
+            .remove("background");
+        assert_eq!(
+            prepare_submit(&missing, None).expect_err("background").code,
+            "recording-snapshot-invalid"
+        );
+
+        let mut invalid = payload();
+        invalid["snapshot"]["background"] = json!("black");
+        assert_eq!(
+            prepare_submit(&invalid, None).expect_err("background").code,
+            "recording-snapshot-invalid"
         );
     }
 

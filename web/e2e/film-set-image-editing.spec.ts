@@ -21,7 +21,7 @@ test("图片直接点选、三轴实时移动、缩放和持久化，整体与�
   ] as never, "image-film-seed");
   await expect.poll(() => page.evaluate(() => (window as any).__bevyRuntime?.lastScene()?.nodes.find((n: any) => n.id === "film")?.compositeAsset?.media?.[0]?.hasTexture)).toBe(true);
   await page.mouse.dblclick(330, 217);
-  await page.getByRole("tab", { name: "对象", exact: true }).click();
+  await expect(page.locator(".film-set-animation-controls")).toBeVisible();
   await expect(page.locator(".film-set-object-dock")).toBeVisible();
   await expect(page.getByRole("radio", { name: "对象", exact: true })).toHaveCount(0);
   await page.waitForTimeout(700);

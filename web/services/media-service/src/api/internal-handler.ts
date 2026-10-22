@@ -1,4 +1,4 @@
-import { handleExtensionResources } from "./extension-resources.js";
+import { handleExtensionResources, handleExtensionStream } from "./extension-resources.js";
 /**
  * Media Service 内部 v1 协议 handler（change: split-web-runtime-services，任务 3.2 / 3.3）。
  *
@@ -106,6 +106,10 @@ export function createMediaInternalHandler(options: MediaInternalOptions): Media
     if (req.method !== "POST") return methodNotAllowed(res);
 
     const suffix = pathname.slice(basePath.length + 1);
+    if (suffix === "extension-stream-read" || suffix === "extension-stream-write") {
+      if (!hasScope(identity, suffix === "extension-stream-write" ? "write" : "read")) return forbidden(res, suffix);
+      return handleExtensionStream(req, res, options.storage, suffix === "extension-stream-write");
+    }
     if (suffix === "extension-read" || suffix === "extension-write") {
       if (!hasScope(identity, suffix === "extension-write" ? "write" : "read")) return forbidden(res, suffix);
       // 画布作用域由 handler 自己解析：它的 body 上限是 24 MiB（base64 图片），不能在这里预读；

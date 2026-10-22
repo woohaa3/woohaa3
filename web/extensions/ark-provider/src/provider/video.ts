@@ -1,5 +1,5 @@
 import type { PptaskDescription } from '@sdppp/pptask';
-import { aspectRatioField, resolutionField } from '@woohaa3/contracts';
+import { aspectRatioField, resolutionField, referenceInputCapabilityFromDescription } from '@woohaa3/contracts';
 import {
   ARK_PROVIDER_ID,
   assertArkModel,
@@ -178,6 +178,9 @@ export function describeArkVideo(modelId: string, model: ArkCatalogModel): Pptas
       mediaKind: 'video',
       operations: ['text-to-video', 'image-to-video'],
       cancel: false,
+      referenceInput: { bindings: referenceInputCapabilityFromDescription({inputSchema:{properties}}).bindings.map(binding=>
+        binding.field === 'urls' ? {...binding,roles:['reference_image','first_frame',...(spec.maxImages > 1 ? ['last_frame'] : [])],valueFormat:'reference'} : binding
+      ) },
     },
   };
 }

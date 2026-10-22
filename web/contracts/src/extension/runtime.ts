@@ -252,7 +252,7 @@ export type ApplicationExtensionMediaFacade = {
    * 返回真实 size/checksum/contentType 或 `{ exists: false }`；只读，不接触 COS 凭据。
    * 可选：未实现的宿主下插件 MUST 按能力降级（不得用 stat 冒充已具备完整 metadata）。
    */
-  verify?(storageKey: string): Promise<ApplicationExtensionMediaVerifyResult>;
+  verify?(storageKey: string, canvasId?: string): Promise<ApplicationExtensionMediaVerifyResult>;
 };
 
 /** 插件可调用的 Canvas facade：画布节点的 run/cancel 仍由 Canvas 生成权威 run identity。 */

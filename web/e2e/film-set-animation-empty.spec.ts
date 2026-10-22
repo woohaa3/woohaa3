@@ -17,9 +17,10 @@ test('empty collection and zero-duration clip remain editable at DPR 2', async (
     return { x: rect.left + (n.x + n.width / 2) * s.viewport.zoom + s.viewport.x, y: rect.top + (n.y + n.height / 2) * s.viewport.zoom + s.viewport.y };
   });
   await page.mouse.dblclick(point.x, point.y);
-  await page.getByRole('tab', { name: '动画', exact: true }).click();
+  await expect(page.locator(".film-set-animation-controls")).toBeVisible();
   await expect(page.getByLabel('拍摄镜头')).toContainText('还没有拍摄镜头');
   await expect(page.getByRole('button', { name: '动画预览', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '新建拍摄镜头', exact: true }).click();
   await page.getByRole('button', { name: '新建静态镜头', exact: true }).click();
   await waitForCommandsSettled(page);
   await expect(page.getByLabel('拍摄镜头')).toContainText('新静态镜头');

@@ -17,7 +17,7 @@ import {
   createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, decodeFilmSetNodeData, filmSetNodeDataFields,
   type BevyAnimationPlayback, type ServerCanvas
 } from "@woohaa3/contracts";
-import { filmSetMediaSources } from "../src/frontend/media-sources.js";
+import { filmSetMediaSources } from "../src/preview/browser/media-sources.js";
 import { createCompositeAssetMediaSessions } from "../../../frontend/src/cordis/plugins/canvas-runtime/composite-asset-media-session.js";
 import type { BevyRuntime } from "../../../frontend/src/cordis/plugins/canvas-runtime/bevy-runtime.js";
 

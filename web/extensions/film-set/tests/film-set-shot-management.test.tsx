@@ -20,11 +20,11 @@ import {
   type FilmSetAnimations,
   type ServerCanvas
 } from "@woohaa3/contracts";
-import type { FilmSetContext as Context } from "../src/frontend/context.js";
+import type { FilmSetContext as Context } from "../src/integration/browser/context.js";
 import { createTestCanvasState } from "./canvas-state.js";
 const store = createTestCanvasState();
-import { FilmSetAnimationControls } from "../src/frontend/film-set-animation-controls.js";
-import { FilmSetPlaybackService } from "../src/frontend/playback-service.js";
+import { FilmSetAnimationControls } from "../src/authoring/browser/film-set-animation-controls.js";
+import { FilmSetPlaybackService } from "../src/preview/browser/playback-service.js";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -94,7 +94,7 @@ function render(animations: FilmSetAnimations, options: { writable?: boolean } =
   root = createRoot(element);
   const writable = options.writable ?? true;
   act(() => root!.render(<FilmSetAnimationControls ctx={ctx} nodeId="film" writable={writable} cameraId={null} />));
-  const button = (name: string) => [...document.querySelectorAll("button")].find(entry => entry.textContent === name);
+  const button = (name: string) => [...document.querySelectorAll("button")].find(entry => entry.textContent === name || entry.getAttribute("aria-label") === name);
   return { submitted, playback, button, writable };
 }
 
@@ -103,6 +103,7 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
     const h = render({ schemaVersion: 3, defaultClipId: null, clips: [] });
     expect(document.querySelector(".film-set-animation-controls")?.textContent).toContain("还没有拍摄镜头");
     expect(h.button("动画预览")?.disabled).toBe(true);
+    act(() => h.button("新建拍摄镜头")!.click());
     expect(h.button("新建静态镜头")?.disabled).toBe(false);
     expect(h.button("新建动态镜头")?.disabled).toBe(false);
     expect(h.submitted).toHaveLength(0);
@@ -111,8 +112,8 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
   it("静态镜头隐藏时长/循环，显示转换入口，新建保持零时长", () => {
     const h = render({ schemaVersion: 3, defaultClipId: "s1", clips: [staticClip("s1", "定妆照")] });
     const text = document.querySelector(".film-set-animation-controls")!.textContent!;
-    expect(text).toContain("当前：静态镜头");
     expect(text).toContain("静态镜头保持零时长");
+    act(() => h.button("拍摄镜头操作")!.click());
     expect(h.button("转为动态镜头")).toBeTruthy();
     expect(document.querySelector(".film-set-animation-controls input[type=checkbox]")).toBeNull();
     expect(h.submitted).toHaveLength(0);
@@ -121,6 +122,7 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
   it("动态→静态先呈现清除影响，确认后才提交 set-kind", async () => {
     const h = render({ schemaVersion: 3, defaultClipId: "d1", clips: [dynamicClip("d1", "运镜", `motion.camera.orbit({ speed: 1 });`)] });
     expect(document.querySelector(".film-set-animation-controls")!.textContent).toContain("动态镜头");
+    act(() => h.button("拍摄镜头操作")!.click());
     act(() => h.button("转为静态镜头")!.click());
     expect(document.querySelector(".film-set-animation-controls")!.textContent).toContain("镜头运动");
     expect(h.submitted).toHaveLength(0);
@@ -131,6 +133,7 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
 
   it("静态→动态要求显式正时长后提交", async () => {
     const h = render({ schemaVersion: 3, defaultClipId: "s1", clips: [staticClip("s1", "定妆照")] });
+    act(() => h.button("拍摄镜头操作")!.click());
     act(() => h.button("转为动态镜头")!.click());
     const duration = document.querySelector(".film-set-animation-controls input[type=number]") as HTMLInputElement;
     expect(duration).not.toBeNull();
@@ -141,6 +144,7 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
 
   it("新建动态镜头携带 kind 与正时长，选择只改本地播放状态", async () => {
     const h = render({ schemaVersion: 3, defaultClipId: null, clips: [] });
+    act(() => h.button("新建拍摄镜头")!.click());
     await act(async () => { h.button("新建动态镜头")!.click(); });
     expect(h.submitted).toHaveLength(1);
     const op = h.submitted[0]!.op as { kind: string; clip: { kind: string; timeline: { duration: number } } };
@@ -156,7 +160,9 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
 
   it("只读时写入口禁用但查看与选择仍可用", () => {
     const h = render({ schemaVersion: 3, defaultClipId: "s1", clips: [staticClip("s1", "定妆照")] }, { writable: false });
-    for (const name of ["新建静态镜头", "新建动态镜头", "复制", "删除", "设为默认", "转为动态镜头"]) {
+    expect(h.button("新建拍摄镜头")?.disabled).toBe(true);
+    act(() => h.button("拍摄镜头操作")!.click());
+    for (const name of ["复制", "删除", "设为默认", "转为动态镜头"]) {
       expect(h.button(name)?.disabled).toBe(true);
     }
     expect(h.button("动画预览")?.disabled).toBe(false);

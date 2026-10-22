@@ -6,10 +6,14 @@
  * 按权威画布裁定。
  */
 import { isBoundedId, isFiniteNumber, isJsonObject } from "../../validation.js";
+import { isFilmSetExportProfile } from "../film-set-export-profile.js";
 import type { FilmSetLocalTransform, FilmSetPlayback } from "../film-set-content.js";
 import { fail, ok, readRequiredId, type McpDecodeResult } from "./common-codec.js";
 import type {
+  McpAddFilmSetMediaRequest,
+  McpExportFilmSetClipRequest,
   McpFilmSetImportItem,
+  McpGetFilmSetExportRequest,
   McpImportFilmSetContentRequest,
   McpMutateFilmSetItemRequest
 } from "./types.js";
@@ -164,4 +168,82 @@ export function decodeMcpPlayback(input: unknown): McpDecodeResult<FilmSetPlayba
     timeScale: timeScale as number,
     loop
   });
+}
+
+/**
+ * 解码片场媒体条目导入请求（D5）。
+ *
+ * 结构校验只做字段形态；来源节点是否 ready、资产身份与 precondition 由 Canvas 侧按权威画布
+ * 裁定。`itemId` / `name` / `transform` 都是可选的调用方偏好。
+ */
+export function decodeMcpAddFilmSetMediaRequest(body: unknown): McpDecodeResult<McpAddFilmSetMediaRequest> {
+  if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是对象");
+  const canvasId = readRequiredId(body, "canvasId");
+  if (typeof canvasId === "object") return fail("malformed-request", canvasId.error);
+  if (!isBoundedId(body.nodeId)) return fail("malformed-request", "nodeId 必须是非空字符串");
+  if (!isBoundedId(body.requestId)) return fail("malformed-request", "requestId 必须是非空字符串");
+  if (!isBoundedId(body.sourceNodeId)) return fail("malformed-request", "sourceNodeId 必须是非空字符串");
+  if (body.expectedContentHash !== undefined && !isBoundedId(body.expectedContentHash)) {
+    return fail("malformed-request", "expectedContentHash 必须是字符串");
+  }
+  if (body.itemId !== undefined && !isBoundedId(body.itemId)) {
+    return fail("malformed-request", "itemId 必须是非空字符串");
+  }
+  if (body.name !== undefined && (typeof body.name !== "string" || body.name.trim() === "")) {
+    return fail("malformed-request", "name 必须是非空字符串");
+  }
+  let transform: import("../film-set-content.js").FilmSetLocalTransform | undefined;
+  if (body.transform !== undefined) {
+    const decoded = decodeMcpLocalTransform(body.transform);
+    if (!decoded.ok) return decoded;
+    transform = decoded.value;
+  }
+  return ok({
+    canvasId,
+    nodeId: body.nodeId,
+    requestId: body.requestId,
+    sourceNodeId: body.sourceNodeId,
+    ...(body.expectedContentHash === undefined ? {} : { expectedContentHash: body.expectedContentHash }),
+    ...(body.itemId === undefined ? {} : { itemId: body.itemId }),
+    ...(body.name === undefined ? {} : { name: body.name.trim() }),
+    ...(transform ? { transform } : {})
+  });
+}
+
+/**
+ * 解码 agent 发起的显式导出请求（D8）。
+ *
+ * `profile` 必须是受支持档位；未知档位在这里拒绝，而不是悄悄降到 720p。像素、播放状态与
+ * 浏览器句柄都不会出现在这个请求里。
+ */
+export function decodeMcpExportFilmSetClipRequest(body: unknown): McpDecodeResult<McpExportFilmSetClipRequest> {
+  if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是对象");
+  const canvasId = readRequiredId(body, "canvasId");
+  if (typeof canvasId === "object") return fail("malformed-request", canvasId.error);
+  if (!isBoundedId(body.nodeId)) return fail("malformed-request", "nodeId 必须是非空字符串");
+  if (!isBoundedId(body.clipId)) return fail("malformed-request", "clipId 必须是非空字符串");
+  if (!isBoundedId(body.requestId)) return fail("malformed-request", "requestId 必须是非空字符串");
+  if (!isFilmSetExportProfile(body.profile)) {
+    return fail("malformed-request", "profile 必须是 standard / hd / hd60");
+  }
+  if (body.expectedContentHash !== undefined && !isBoundedId(body.expectedContentHash)) {
+    return fail("malformed-request", "expectedContentHash 必须是字符串");
+  }
+  return ok({
+    canvasId,
+    nodeId: body.nodeId,
+    clipId: body.clipId,
+    requestId: body.requestId,
+    profile: body.profile,
+    ...(body.expectedContentHash === undefined ? {} : { expectedContentHash: body.expectedContentHash })
+  });
+}
+
+/** 解码导出任务查询请求。 */
+export function decodeMcpGetFilmSetExportRequest(body: unknown): McpDecodeResult<McpGetFilmSetExportRequest> {
+  if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是对象");
+  const canvasId = readRequiredId(body, "canvasId");
+  if (typeof canvasId === "object") return fail("malformed-request", canvasId.error);
+  if (!isBoundedId(body.jobId)) return fail("malformed-request", "jobId 必须是非空字符串");
+  return ok({ canvasId, jobId: body.jobId });
 }

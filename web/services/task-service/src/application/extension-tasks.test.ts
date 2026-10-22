@@ -38,6 +38,18 @@ describe("进程内扩展任务端口", () => {
     expect(h.deps.submit).toHaveBeenCalledTimes(1);
     expect(h.ownership.get("work")).toBe("owner");
   });
+  it("向任务所属扩展返回已脱敏的失败摘要", async () => {
+    const h = harness();
+    await h.facade("owner").submit(input);
+    h.deps.history.get.mockReturnValueOnce({
+      state: "failed",
+      error: { name: "ProviderHttpError", message: "request rejected", status: 400, code: "InputTextSensitiveContentDetected" }
+    } as never);
+    expect(await h.facade("owner").result!("work")).toMatchObject({
+      state: "failed",
+      error: { status: 400, code: "InputTextSensitiveContentDetected" }
+    });
+  });
   it("非法画布关联、无可用模型和不支持的媒体不触发 submit", async () => {
     const h = harness();
     const f = h.facade("game-furnace");

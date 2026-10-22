@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MediaObject } from "@woohaa3/contracts";
 import { gameFurnaceArchiveDefinition } from "../src/archive.js";
 import { createGameFurnaceState, GAME_POLICY_VERSION, type GameFurnaceState } from "../src/shared.js";
-import { buildRecordFromManifest, encodeSourcePackage, type GamePackageManifest } from "../src/package.js";
+import { buildRecordFromManifest, encodeSourcePackage, type GamePackageManifest } from "../src/state/shared/package.js";
 
 async function fixture() {
   const objects = new Map<string, MediaObject>();

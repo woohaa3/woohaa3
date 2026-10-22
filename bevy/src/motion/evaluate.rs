@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use super::{
     CameraProperty, CameraState, InitialCameraState, ModelDelta, ModelMotion, ModelTrack,
-    MotionEasing, MotionIr, OscillateMode,
+    ModelTrackProperty, MotionIr, OscillateMode, easing_progress,
 };
 
 /// 在 `time` 秒对运动求值（确定性纯函数）。
@@ -50,9 +50,10 @@ pub fn evaluate(
         if let Some(delta) = evaluate_model_track(track, now) {
             if let Some((_, previous)) = model.iter_mut().find(|(id, _)| id == &track.target_id) {
                 match track.motion.property() {
-                    OscillateMode::Position => previous.translation = delta.translation,
-                    OscillateMode::Rotation => previous.rotation = delta.rotation,
-                    OscillateMode::Scale => previous.scale = delta.scale,
+                    ModelTrackProperty::Position => previous.translation = delta.translation,
+                    ModelTrackProperty::Rotation => previous.rotation = delta.rotation,
+                    ModelTrackProperty::Scale => previous.scale = delta.scale,
+                    ModelTrackProperty::Opacity => previous.opacity = delta.opacity,
                 }
             } else {
                 model.push((track.target_id.clone(), delta));
@@ -142,12 +143,4 @@ pub fn clamp_elevation(elevation: f32) -> f32 {
         return std::f32::consts::FRAC_PI_4;
     }
     elevation.clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2)
-}
-
-fn easing_progress(easing: MotionEasing, t: f32) -> f32 {
-    let clamped = t.clamp(0.0, 1.0);
-    match easing {
-        MotionEasing::Linear => clamped,
-        MotionEasing::Smoothstep => clamped * clamped * (3.0 - 2.0 * clamped),
-    }
 }

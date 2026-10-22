@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createModelSnapshot, type FilmSetContent } from "@woohaa3/contracts";
-import { FilmSetObjectSession } from "../src/shared.js";
-import { createFilmSetObjectGesture } from "../src/frontend/film-set-object-gesture.js";
+import { FilmSetObjectSession } from "../src/authoring/browser/object-session.js";
+import { createFilmSetObjectGesture } from "../src/authoring/browser/film-set-object-gesture.js";
 
 function fixture(handle: "x" | "y" | "z" | "center", yaw = 0, worldToLocal?: number[]) {
   const content: FilmSetContent = { schemaVersion: 3, items: ["a", "b"].map(id => ({

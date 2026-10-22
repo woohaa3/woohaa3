@@ -37,7 +37,7 @@ const V2 = MODEL_SCRIPT_V2_VERSION;
 
 /** V2 场景方法集合。 */
 export const MODEL_API_METHODS: readonly ModelApiMethod[] = [
-  { name: "material", signature: "scene.material({ id?, baseColor?, roughness?, metallic?, emissive?, emissiveStrength?, alphaMode?, doubleSided? }) => materialId", versions: [V2] },
+  { name: "material", signature: "scene.material({ id?, baseColor?, roughness?, metallic?, emissive?, emissiveStrength?, alphaMode?: 'opaque'|'blend', doubleSided?, unlit?: boolean, opacity?: 0..1 }) => materialId", versions: [V2] },
   { name: "group", signature: "scene.group({ id?, parent?, position?, rotation?, scale? }) => id", versions: [V2] },
   { name: "box", signature: "scene.box({ id?, parent?, size: [x,y,z], position?, rotation?, scale?, color? | material? }) => id", versions: [V2] },
   { name: "cylinder", signature: "scene.cylinder({ id?, parent?, radius, height, position?, rotation?, scale?, color? | material? }) => id", versions: [V2] },
@@ -104,6 +104,8 @@ export function modelPrimitiveConstraintsText(): string {
     "a segment's from and to MUST differ (no zero-length segment);",
     "a mesh MUST declare at least one vertex and one face;",
     "a shape MUST NOT set both material and color;",
+    "material.opacity (0..1) is only valid with alphaMode 'blend'; it defaults to 0.6;",
+    "material.unlit renders a flat unlit color;",
     "object ids MUST be unique, and a parent MUST be created before its children."
   ].join(" ");
 }

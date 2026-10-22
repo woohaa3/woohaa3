@@ -20,23 +20,23 @@ export type ExtensionImportDebt = {
 export const EXTENSION_IMPORT_DEBT: readonly ExtensionImportDebt[] = [
   {
     file: "web/backend/package.json",
-    packages: ["@woohaa3/extension-oauth-agent", "@woohaa3/extension-sample-site"],
-    reason: "宿主核心的站点插件（OAuth Agent）与测试 fixture 的 workspace 依赖；application-extension-runtime 规范允许后端入口来自静态可信清单。"
+    packages: ["@woohaa3/extension-oauth-agent", "@woohaa3/extension-infinspire-migration", "@woohaa3/extension-sample-site"],
+    reason: "宿主核心的站点插件（ChatGPT、迁移部署绑定）与测试 fixture 的 workspace 依赖；application-extension-runtime 规范允许后端入口来自静态可信清单。"
   },
   {
     file: "web/backend/src/composition.ts",
     packages: ["@woohaa3/extension-oauth-agent"],
-    reason: "同上：OAuth Agent 是宿主核心站点插件的类型/服务选项来源。"
+    reason: "同上：ChatGPT 是宿主核心站点插件的类型/服务选项来源。"
   },
   {
     file: "web/backend/src/composition/instance-scope.ts",
     packages: ["@woohaa3/extension-oauth-agent"],
-    reason: "同上：站点插件实例作用域按 OAuth Agent 的服务形状收窄。"
+    reason: "同上：站点插件实例作用域按 ChatGPT 的服务形状收窄。"
   },
   {
     file: "web/backend/src/host/core/application.ts",
     packages: ["@woohaa3/extension-oauth-agent"],
-    reason: "OAuth Agent 服务选项的类型引用；扩展实现由目录宿主装载。"
+    reason: "ChatGPT 服务选项的类型引用；扩展实现由目录宿主装载。"
   },
   {
     file: "web/services/application-service/package.json",
@@ -71,7 +71,22 @@ export type RegistrationSurfaceDebt = {
 export const PLUGIN_REGISTRATION_DEBT: readonly RegistrationSurfaceDebt[] = [
   {
     file: "scripts/lib/ingress.mjs",
-    literals: ["local-agent", "oauth-agent", "prompt-snippets", "remote-server", "sdk-agent"],
-    reason: "现有 ingress 为 Agent、远端接入和片段目录的公开 API 指定目标领域服务。保留精确路由债：后续让扩展声明路由目标，避免新增扩展修改宿主。"
+    literals: ["prompt-snippets", "oauth-agent", "sdk-agent", "local-agent", "remote-server"],
+    reason: "宿主已有公开 API 路由前缀（片段库及 OAuth/SDK/本机 Agent 来源）；Windows 路径归一化后同步现有清单，不新增业务装配。"
+  },
+  {
+    file: "scripts/assemble-release.mjs",
+    literals: ["local-agent"],
+    reason: "既有发行脚本打包本机 Agent 运行依赖的显式例外；Windows 路径归一化后补录已存在的发行耦合，后续由扩展产物清单承载。"
+  },
+  {
+    file: "scripts/canvas-legacy-migration.mjs",
+    literals: ["infinspire-migration"],
+    reason: "离线迁移工具按扩展目录取旧画布迁移实现；工具不参与宿主装配。"
+  },
+  {
+    file: "web/frontend/src/cordis/plugins/settings/ark-endpoints.tsx",
+    literals: ["providers.ark"],
+    reason: "Tier C 债（在途）：Ark 接入点的宿主专属设置区块硬编码 `providers.ark`；去向是让扩展声明自己的设置区块，宿主只按声明渲染。"
   }
 ];

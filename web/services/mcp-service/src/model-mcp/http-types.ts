@@ -78,6 +78,11 @@ export type ModelMcpToolService = {
     requestId: string;
     op: import("@woohaa3/contracts").FilmSetItemPatchOp;
   }) => Promise<McpMutateFilmSetItemResult>;
+  /** 片场媒体条目受控导入（D5）；省略时工具明确不可用。 */
+  addFilmSetMedia?: (input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>;
+  /** agent 发起显式导出（D8）；省略时工具返回 `recording-unavailable`。 */
+  exportFilmSetClip?: (input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>;
+  getFilmSetExport?: (input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>;
 };
 
 export type ModelMcpHttpHandler = {

@@ -53,9 +53,11 @@ ${methods}
 - mesh 只用于 primitive 无法表达的轮廓，不要用它重复生成球面或圆柱。
 
 材质与约束：
-- material 只支持受控 PBR 子集（baseColor/roughness/metallic/emissive/emissiveStrength/alphaMode/doubleSided）；
+- material 只支持受控 PBR 子集（baseColor/roughness/metallic/emissive/emissiveStrength/alphaMode/doubleSided/unlit/opacity）；
   不接受纹理 URL、本机路径、任意 shader 或未知字段；
-- 同一 shape 不得同时提供 material 与 color；颜色使用 #rrggbb。
+- unlit:true 呈现不受光照影响的平面色，适合线框画布、示意卡片与文字图；
+- opacity 是 0–1 的数字，只在 alphaMode:"blend" 下合法（缺省 0.6）；opaque 材质带 opacity 会被拒绝；
+- 同一 shape 不得同时提供 material 与 color；颜色与镜头背景一律只写 6 位 #rrggbb。
 
 渲染预算：
 - ${modelRenderBudgetText()}
@@ -83,6 +85,9 @@ ${guide.example}
 - 类型转换用 op={kind:"set-kind",toKind:"static"|"dynamic"}：static→dynamic 可用 duration 指定正时长；dynamic→static 且有动作/时序时必须带 confirmClearContent:true 明确确认原子清除，否则拒绝。使用 identities 里的 kind 字段身份。
 - 人物 op={kind:"binding",itemId,expectedAdapterHash:adapterHash,binding:{itemId,playback:{startTime:0,duration:8,timeScale:1,loop:false},motion:<完整 MotionDefinition>}}。使用对应 binding hash，无绑定用 missingBindingHash；静态镜头加对象动作会拒绝，先转 dynamic。
 - 修改 timeline/camera/name 分别使用同名字段 hash。create 用 missingClipHash；duplicate/delete/replace 用 clipHash，create/replace 的 clip 必须含合法 kind。
+- 背景用 op={kind:"backdrop",backdrop:"theme"|"#rrggbb"}（用 backgrounds 里的 hash）。theme 表示跟随主题并删除自定义值；只写 6 位颜色。背景属于该镜头，只影响它的预览/拍摄/导出，不影响工作区的主题背景；新建与复制镜头继承当前所选镜头的背景，「使用选中镜头构图」不改背景。
+- 图片/视频/文字图用 add_film_set_media({canvasId,nodeId,requestId,sourceNodeId,expectedContentHash?,transform?}) 从同一画布 ready 的 image/video 节点复制导入；拖放仍只接受模型。导入后用 mutate_film_set_item 摆位、用 binding 绑定 opacity/scale 等动作。
+- 传视频用 export_film_set_clip({canvasId,nodeId,clipId,requestId,profile,expectedContentHash?}) 提交本机宿主原生录制任务，再以 get_film_set_export({canvasId,jobId}) 轮询；成功只在视频节点原子提交后返回其 id。profile 取 standard（720p30，缺省）/ hd（1080p30）/ hd60（1080p60）。原生录制不可用时返回 recording-unavailable 与具体原因，此时让用户点界面上的「生成视频」走浏览器导出，不要假装已经导出。
 - 人物移动用 binding.motion 中的 root 位置关键帧；每个模型保留一个 itemId，不能按帧复制模型或用显隐模拟运动。
 - 跟拍镜头的 focusOffset/distance 是渲染世界单位，focusOffset 相对片场静态包围盒中心；不能直接复制人物局部位置关键帧作为镜头偏移，必须转换片场适配缩放与 placement。
 - 背后过肩镜头：模型正面 +Z，镜头 azimuth=人物世界 yaw±PI；注视上身并略偏肩侧，位置和转身都须连续跟随。不要用固定 azimuth 冒充跟拍，也不要调用尚不存在的 motion.camera.follow。

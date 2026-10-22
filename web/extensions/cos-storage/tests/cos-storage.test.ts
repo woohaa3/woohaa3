@@ -25,6 +25,16 @@ const CONFIG: CosConfig = {
   prefix: "seedance-assets"
 };
 
+it("流式上传等待输入读完；来源中断或取消不能被成功回调覆盖", async()=>{
+  const client=fakeCos({}).client;
+  client.putObject=(params,callback)=>{void (async()=>{try{for await(const _ of params.Body as AsyncIterable<Uint8Array>){/* SDK consumes the body */}callback(null);}catch(error){callback(error);}})();};
+  const backend=createCosBackend(CONFIG,client as never);
+  await backend.putStream!("media/stream",(async function*(){yield Uint8Array.of(1,2);})(),"video/mp4",{size:2});
+  await expect(backend.putStream!("media/stream",(async function*(){yield Uint8Array.of(1);throw Error("disconnected");})(),"video/mp4",{size:2})).rejects.toThrow("disconnected");
+  const controller=new AbortController();
+  await expect(backend.putStream!("media/stream",(async function*(){yield Uint8Array.of(1);controller.abort();yield Uint8Array.of(2);})(),"video/mp4",{size:2,signal:controller.signal})).rejects.toThrow();
+});
+
 type Call = { op: string; params: Record<string, unknown> };
 
 function fakeCos(options: {

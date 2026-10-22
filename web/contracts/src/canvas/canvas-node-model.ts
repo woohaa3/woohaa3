@@ -329,6 +329,8 @@ export function buildAnimationPlayback(input: {
   time: number;
   playing: boolean;
   compiledObjects?: ReturnType<typeof buildFilmSetObjectMotions>;
+  /** 该镜头背景的具体色（`#rrggbb`）；缺省即跟随主题（D6）。 */
+  backdrop?: string;
 }): import("./render-scene.js").BevyAnimationPlayback {
   const camera = input.camera;
   const objects = input.compiledObjects ?? { motions: [], diagnostics: [] };
@@ -339,6 +341,7 @@ export function buildAnimationPlayback(input: {
     duration: input.timeline.duration,
     looped: input.timeline.loop,
     playing: input.playing,
+    ...(input.backdrop ? { backdrop: input.backdrop } : {}),
     initialCamera: {
       aspect: camera.aspect,
       azimuth: camera.azimuth,

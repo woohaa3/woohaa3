@@ -100,6 +100,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     onModelFocusChange: deps.onModelFocusChange,
     onViewportChange: deps.onViewportChange,
     onImagePreview: (request) => options.emit("ui.media-preview.open-requested", request as never),
+    onTextPreviewIntent: (request) => options.emit("ui.text-preview.open-requested", request),
     ...(options.onImageFocusIntent ? { onImageFocusIntent: options.onImageFocusIntent } : {}),
     ...(options.onVideoFocusIntent ? { onVideoFocusIntent: options.onVideoFocusIntent } : {}),
     onVideoFrameCapture: (request) => options.emit("ui.video-frame-capture.open-requested", request as never),

@@ -356,6 +356,7 @@ export class HostRecordingService implements CanvasRecordingPort {
     }
     const described = runtime.describe({ nodeData: canvas.nodeData, clipId: body.clipId });
     const profileKey = body.profileKey ?? "";
+    const themeBackdrop = body.themeBackdrop;
     const frozen = await runtime.freeze({
       requestId: body.requestId,
       purpose,
@@ -363,6 +364,7 @@ export class HostRecordingService implements CanvasRecordingPort {
       nodeId: body.nodeId,
       clipId: body.clipId,
       profileKey,
+      ...(body.profile === undefined ? {} : { profile: body.profile }),
       sourceIncarnation: canvas.sourceIncarnation,
       readOnly: canvas.readOnly === true,
       hasPendingDraft: canvas.hasPendingDraft === true,
@@ -372,6 +374,7 @@ export class HostRecordingService implements CanvasRecordingPort {
         assets: canvas.assets,
         nodeData: canvas.nodeData,
         ...(canvas.node ? { node: canvas.node } : {}),
+        ...(themeBackdrop === undefined ? {} : { themeBackdrop }),
         // 素材读取必须带上本次积木所属画布：远端画布的素材只在托管存储里，绑错作用域会 404。
         // freeze 还没产出快照，所以用请求的 canvasId（它随后写入 snapshot.origin.canvasId）。
         ...(this.options.canvas.readMedia

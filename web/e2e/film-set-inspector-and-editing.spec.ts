@@ -7,8 +7,8 @@
  * - 场景选中对象后 Delete/Backspace 只删除该 item、片场节点保留，可撤销/重做；无选中不回退
  *   删除整个片场；数值输入内 Backspace 不误删；
  * - Escape 分层：活动手势取消（后续 pointerup 不提交）→ 清对象选择 → 退出聚焦；
- * - 对象/镜头/动画任务页签可达、选中联动且切页零命令；
- * - 390px 窄屏无横向溢出、页签与删除可用。
+ * - 镜头与对象单栏可达，构图展开与 AI 目标切换不提交命令；
+ * - 桌面与 Pad 下 AI 面板居中、临时收起恢复保留草稿。
  *
  * 像素判定用容差，不做逐像素哈希。
  */
@@ -19,7 +19,8 @@ import {
   readStoredCanvas,
   resetCanvasStorage,
   sendCommands,
-  waitForCanvasSession
+  waitForCanvasSession,
+  waitForCommandsSettled
 } from "./helpers.js";
 
 type SceneNode = {
@@ -354,78 +355,77 @@ test.describe("片场标题、编辑与检查面板（change: 2026-10-10）", ()
     expect(errors).toEqual([]);
   });
 
-  test("对象/镜头/动画任务页签可达、选中联动、切页零命令（含 390px 窄屏）", async ({ page }, info) => {
-    test.setTimeout(150_000);
+  test("single sidebar and collapsible AI dock preserve drafts on desktop and Pad", async ({ page }, info) => {
+    test.setTimeout(120_000);
     const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("pageerror", error => errors.push(error.message));
     await page.setViewportSize({ width: 1440, height: 900 });
     await installPageHelpers(page);
     await resetCanvasStorage(page);
     await waitForCanvasSession(page);
-
-    await sendCommands(page, [
-      {
-        type: "node.add",
-        node: { id: "film", type: "composite-asset", position: { x: 260, y: 160 }, width: 320, height: 240 },
-        nodeData: filmSetFields("页签片场", [modelItem("body", "角色", "#3b6fe2"), groundItem()])
-      }
-    ] as never, "tabs-seed");
+    const gpu = await page.evaluate(async () => {
+      const adapter = await (navigator as any).gpu?.requestAdapter();
+      return adapter ? { ...adapter.info, vendor: adapter.info.vendor, architecture: adapter.info.architecture,
+        device: adapter.info.device, description: adapter.info.description, isFallbackAdapter: adapter.info.isFallbackAdapter } : null;
+    });
+    await info.attach("webgpu-adapter", { body: JSON.stringify(gpu, null, 2), contentType: "application/json" });
+    await sendCommands(page, [{ type: "node.add",
+      node: { id: "film", type: "composite-asset", position: { x: 260, y: 160 }, width: 320, height: 240 },
+      nodeData: filmSetFields("创意片场", [modelItem("body", "角色", "#3b6fe2"), groundItem()])
+    }] as never, "single-sidebar-seed");
     await waitForFilmSet(page, "film");
-
     const { centerX, centerY } = await scopeClient(page, "film");
     await page.mouse.dblclick(centerX, centerY);
     await expect(objectDock(page)).toBeVisible();
-    await expect(page.getByRole("tab", { name: "对象", exact: true })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tab", { name: "镜头", exact: true })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "动画", exact: true })).toBeVisible();
-
+    await expect(page.getByRole("tab")).toHaveCount(0);
+    await expect(page.locator(".film-set-animation-controls")).toBeVisible();
+    await page.getByRole("button", { name: "新建拍摄镜头", exact: true }).click();
+    await page.getByRole("button", { name: "新建动态镜头", exact: true }).click();
+    await waitForCommandsSettled(page);
     const revision = (await readStoredCanvas(page))!.revision;
-    // 切到镜头页：真实镜头面板出现；切到动画页：片场动画面板出现；均为零命令。
-    await page.getByRole("tab", { name: "镜头", exact: true }).click();
+    const dock = page.locator(".film-set-generate-dock");
+    const prompt = dock.getByRole("textbox", { name: "提示词" });
+    await expect(prompt).toBeEnabled();
+    await prompt.fill("Keep my draft while arranging the scene");
+    await page.locator(".film-set-composition summary").click();
     await expect(page.locator(".model-editor")).toBeVisible();
-    await page.getByRole("tab", { name: "动画", exact: true }).click();
-    await expect(page.locator('[aria-label="片场动画"]')).toBeVisible();
+    await expect(prompt).toBeHidden();
+    await dock.getByRole("button", { name: "AI 修改", exact: true }).click();
+    await expect(page.locator(".film-set-composition")).not.toHaveAttribute("open");
+    await expect(page.locator(".model-camera-preview")).toHaveCount(0);
+    await expect(prompt).toHaveValue("Keep my draft while arranging the scene");
+    await page.screenshot({ path: info.outputPath("film-set-desktop-expanded.png") });
+    await page.getByRole("button", { name: "收起 AI 修改", exact: true }).click();
+    await expect(prompt).toBeHidden();
+    await page.screenshot({ path: info.outputPath("film-set-desktop-collapsed.png") });
+    await dock.getByRole("button", { name: "AI 修改", exact: true }).click();
+    await expect(prompt).toHaveValue("Keep my draft while arranging the scene");
+    // Switching the AI scope preserves the actual selection and submits no command.
+    await page.getByRole("option", { name: "模型 · 角色", exact: true }).click();
+    const target = dock.getByRole("combobox", { name: "AI 修改目标" });
+    await expect(target).toHaveValue("body");
+    await target.selectOption("");
+    await expect(page.getByRole("option", { name: "模型 · 角色", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(prompt).toHaveValue("Keep my draft while arranging the scene");
     expect((await readStoredCanvas(page))!.revision).toBe(revision);
-
-    // 选择对象 → 联动回对象页且不提交命令。
-    // 对象列表只在对象页渲染；先回对象页再选择（场景点选路径由单测覆盖联动）。
-    await page.getByRole("tab", { name: "对象", exact: true }).click();
-    await page.getByRole("option", { name: "模型 · 角色" }).click();
-    await expect(page.getByRole("tab", { name: "对象", exact: true })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("option", { name: "模型 · 角色" })).toHaveAttribute("aria-selected", "true");
-    expect((await readStoredCanvas(page))!.revision).toBe(revision);
-
-    // 640px 窄屏：无横向溢出、面板在视口内、页签可达。
-    await page.setViewportSize({ width: 640, height: 800 });
-    await page.waitForTimeout(500);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
-    const dock640 = await page.locator(".model-editor-dock").boundingBox();
-    expect(dock640).not.toBeNull();
-    expect(dock640!.x).toBeGreaterThanOrEqual(-1);
-    expect(dock640!.x + dock640!.width).toBeLessThanOrEqual(641);
-    await expect(page.getByRole("tab", { name: "对象", exact: true })).toBeVisible();
-    await page.screenshot({ path: info.outputPath("inspector-narrow-640.png") });
-
-    // 390px 窄屏：无横向溢出、面板在视口内、页签可达。
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(600);
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    expect(overflow).toBeLessThanOrEqual(1);
-    const dock = await page.locator(".model-editor-dock").boundingBox();
-    expect(dock).not.toBeNull();
-    expect(dock!.x).toBeGreaterThanOrEqual(-1);
-    expect(dock!.x + dock!.width).toBeLessThanOrEqual(391);
-    await expect(page.getByRole("tab", { name: "对象", exact: true })).toBeVisible();
-    await page.screenshot({ path: info.outputPath("inspector-narrow-390.png") });
-
-    // 窄屏下对象删除仍可用。
-    await page.getByRole("option", { name: "模型 · 角色" }).click();
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await page.keyboard.press("Delete");
-    await expect
-      .poll(async () => ((await readStoredCanvas(page))!.nodeData.film as any).filmSetContent.items.map((item: any) => item.id), { timeout: 20_000 })
-      .toEqual(["ground"]);
-
+    // Preview uses the bottom player; the composer stays mounted and returns with its draft.
+    await page.getByRole("button", { name: "动画预览", exact: true }).click();
+    await expect(dock).toBeHidden();
+    await expect(page.locator(".film-set-animation-player")).toBeVisible();
+    await page.locator(".film-set-animation-player").getByRole("button", { name: "返回编辑", exact: true }).click();
+    await expect(prompt).toHaveValue("Keep my draft while arranging the scene");
+    for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
+      await page.setViewportSize(size);
+      await expect(dock).toHaveCount(1);
+      await expect(prompt).toBeVisible();
+      await expect(page.locator(".model-camera-preview")).toHaveCount(0);
+      await expect.poll(async () => {
+        const ai = await dock.boundingBox();
+        const inspector = await page.locator(".model-editor-dock").boundingBox();
+        return !!ai && !!inspector && ai.x >= 0 && ai.x + ai.width <= inspector.x + 1 && ai.y + ai.height <= size.height;
+      }).toBe(true);
+      await page.screenshot({ path: info.outputPath(`film-set-${size.width}.png`) });
+    }
     expect(errors).toEqual([]);
   });
 });

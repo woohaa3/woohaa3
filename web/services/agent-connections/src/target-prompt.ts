@@ -57,6 +57,8 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "生成或增添场景对象用 submit_film_set，在现有节点保存完整 filmSetContent 与 filmSetAnimations，expectedSnapshotHash 使用读取到的 snapshotHash；片场只有地面或为空也能生成。主要对象分别建模，新 model item 的 model 提供 modelScript、modelScriptLanguage=javascript、modelScriptVersion=woohaa-model-js-v2，版本和哈希由宿主派生。",
       "片场不保存顶层模型脚本。修改已有模型用 import_model_snapshot 并指定 itemId；片场对象变换/绑定/片段用 mutate_film_set_item / mutate_film_set_clip。仅有 clipId/itemId 的动作目标必须使用局部工具，不得整体提交。",
       "只有明确要求在另一节点新建片场时才使用 create_film_set_node。",
+      "图片/视频（含做成图片的文字）用 add_film_set_media 放入片场，画布拖放仍只接受模型；",
+      "成片导出用 export_film_set_clip（standard / hd / hd60）并以 get_film_set_export 轮询；原生不可用时它会返回 recording-unavailable，请如实告知用户改用界面上的「生成视频」。",
       "保留未提及的对象、片段、运动、镜头与时间线；修改后核对运动适配状态。"
     );
   } else {

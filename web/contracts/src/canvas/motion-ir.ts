@@ -16,7 +16,12 @@ import {
   DEFAULT_MODEL_CAMERA_ASPECT,
   type ModelCameraAspect
 } from "./model-cameras.js";
-import { modelMotionProperty, readKeyframeMotion, type KeyframeMotion } from "./motion-keyframes.js";
+import {
+  isMotionEasing,
+  modelMotionProperty,
+  readKeyframeMotion,
+  type KeyframeMotion
+} from "./motion-keyframes.js";
 import { evaluateModelTrack, mergeModelTrackDelta } from "./motion-model-evaluation.js";
 export * from "./motion-keyframes.js";
 import type { Quat, Vec3 } from "./model-transform.js";
@@ -44,7 +49,7 @@ export const CAMERA_TRACK_PROPERTIES = [
 ] as const;
 export type CameraTrackProperty = (typeof CAMERA_TRACK_PROPERTIES)[number];
 
-export type MotionEasing = "linear" | "smoothstep";
+export type MotionEasing = "linear" | "smoothstep" | "easeIn" | "easeOut" | "easeInOut";
 
 export type Axis3 = "x" | "y" | "z";
 export type OscillateMode = "position" | "rotation" | "scale";
@@ -125,22 +130,22 @@ export type MotionEvalResult =
     }
   | { ok: false; code: MotionIrErrorCode; message: string };
 
-/** 部位当前增量：旋转乘在基础旋转之后，平移/缩放叠加在基础值上。 */
+/** 部位当前增量：旋转乘在基础旋转之后，平移/缩放叠加在基础值上，opacity 为透明度乘数。 */
 export type ModelMotionDelta = {
   rotation: Quat;
   translation: Vec3;
   scale: Vec3;
+  /** 透明度乘数（0..1，缺省 1）；与材质静态透明度及所属对象透明度相乘。 */
+  opacity: number;
 };
 
-
-const EASINGS: ReadonlySet<string> = new Set(["linear", "smoothstep"]);
 const OSCILLATE_MODES: ReadonlySet<string> = new Set(["position", "rotation", "scale"]);
 
 /** 同一镜头属性可动画的最小时间粒度（相接边界容差）。 */
 const TIME_EPSILON = 1e-9;
 
 export function identityModelDelta(): ModelMotionDelta {
-  return { rotation: [0, 0, 0, 1], translation: [0, 0, 0], scale: [1, 1, 1] };
+  return { rotation: [0, 0, 0, 1], translation: [0, 0, 0], scale: [1, 1, 1], opacity: 1 };
 }
 
 /**
@@ -234,7 +239,7 @@ function readCameraTrack(
   const to = readFinite(raw.to);
   if (from === null || to === null) return fail("invalid-track", `镜头轨道 ${id} 的 from/to 非法`);
   const easing = raw.easing ?? "linear";
-  if (typeof easing !== "string" || !EASINGS.has(easing)) {
+  if (!isMotionEasing(easing)) {
     return fail("invalid-track", `镜头轨道 ${id} 的 easing 非法`);
   }
   return {
@@ -376,9 +381,28 @@ function applyCameraProperty(camera: InitialCameraState, property: CameraTrackPr
   }
 }
 
-function easingProgress(easing: MotionEasing, t: number): number {
+/** 缓动进度：输入按 [0,1] 钳制；边界值精确为 0 与 1（与 Rust `easing_progress` 同一公式）。 */
+export function easingProgress(easing: MotionEasing, t: number): number {
   const clamped = Math.max(0, Math.min(1, t));
-  return easing === "smoothstep" ? clamped * clamped * (3 - 2 * clamped) : clamped;
+  const inverse = 1 - clamped;
+  switch (easing) {
+    case "smoothstep":
+      return clamped * clamped * (3 - 2 * clamped);
+    case "easeIn":
+      // t³：起步慢、末尾快。
+      return clamped * clamped * clamped;
+    case "easeOut":
+      // 1-(1-t)³：起步快、末尾减速（「弹出后减速」）。
+      return 1 - inverse * inverse * inverse;
+    case "easeInOut":
+      // 分段三次：前半加速、后半减速；边界精确为 0 与 1。
+      return clamped < 0.5
+        ? 4 * clamped * clamped * clamped
+        : 1 - Math.pow(-2 * clamped + 2, 3) / 2;
+    case "linear":
+    default:
+      return clamped;
+  }
 }
 
 /** 初始镜头画幅读取（与模型镜头集合同一套受支持值）。 */

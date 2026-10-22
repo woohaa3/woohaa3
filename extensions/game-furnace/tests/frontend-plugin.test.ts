@@ -15,9 +15,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { CANVAS_MENU_SECTION } from "@woohaa3/contracts";
 import { descriptor } from "../src/frontend/index.js";
-import { gameFurnaceExtension, GAME_FURNACE_NODE_TEMPLATE_ID, GAME_FURNACE_FOCUS_WORKSPACE_ID, GAME_FURNACE_NODE_DROP_ID, GAME_FURNACE_FOCUS_KIND } from "../src/frontend/plugin.js";
+import { gameFurnaceExtension, GAME_FURNACE_NODE_TEMPLATE_ID, GAME_FURNACE_FOCUS_WORKSPACE_ID, GAME_FURNACE_NODE_DROP_ID, GAME_FURNACE_FOCUS_KIND } from "../src/integration/browser/plugin.js";
 import { GAME_FURNACE_NODE_TYPE, GAME_FURNACE_GEOMETRY_SCRIPT, createGameFurnaceNodeData } from "../src/geometry.js";
-import { gameFurnaceNodeIds, isGameFurnaceNodeData, startTargetDetachWatcher, type TargetDetachResult } from "../src/frontend/target-watcher.js";
+import { gameFurnaceNodeIds, isGameFurnaceNodeData, startTargetDetachWatcher, type TargetDetachResult } from "../src/integration/browser/target-watcher.js";
 
 type Disposer = () => void;
 

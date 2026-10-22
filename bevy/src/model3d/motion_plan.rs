@@ -83,7 +83,7 @@ pub(super) fn resolve(models: &mut ModelVisuals, input: &AnimationPlayback) -> A
                 .flatten()
                 .flat_map(|motion| &motion.model_motion),
         )
-        .any(|track| track.motion.property() == crate::motion::OscillateMode::Scale);
+        .any(|track| track.motion.property() == crate::motion::ModelTrackProperty::Scale);
     let plan = Arc::new(MotionPlan {
         input: input.clone(),
         top,

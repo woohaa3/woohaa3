@@ -12,7 +12,7 @@ import {
   ShotReferenceVersionCache,
   shotReferenceVersionKey,
   type ShotReferenceVersionRef
-} from "../src/frontend/shot-reference-version-cache.js";
+} from "../src/authoring/browser/shot-reference-version-cache.js";
 
 const ref = (extra: Partial<ShotReferenceVersionRef> = {}): ShotReferenceVersionRef => ({
   canvasId: "c1", filmSetNodeId: "film", clipId: "clip-1",

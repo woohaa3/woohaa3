@@ -54,6 +54,11 @@ export type CanvasServiceOptions = {
    */
   recording?: import("@woohaa3/contracts").CanvasRecordingPort;
   /**
+   * 当前主题的镜头预览清屏色（`#rrggbb`）；镜头背景为 `theme` 且 agent 经 MCP 导出时使用
+   * （change: 2026-10-19-extend-film-set-for-motion-graphics，D6）。
+   */
+  themeBackdrop?: () => string;
+  /**
    * 资源/身份运行时开关（change: 2026-10-13-add-enterprise-access-and-production-deployment）。
    *
    * `{ enabled: true }` 表示由注入的 `authenticate`/`access` 接管入口授权，禁用历史
@@ -287,5 +292,8 @@ export type CanvasService = {
     confirmAdaptation: ((input: McpConfirmAdaptationRequest & { canvasId: string; nodeId: string; requestId: string }) => Promise<FilmSetNodeOutcome>) | null;
     readAnimation: ((input: { canvasId: string; nodeId: string }) => Promise<ReadFilmSetOutcome>) | null;
     mutateFilmSetItem: ((input: McpMutateFilmSetItemRequest & { canvasId: string }) => Promise<MutateFilmSetItemOutcome>) | null;
+    addFilmSetMedia?: ((input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>) | null;
+    exportFilmSetClip?: ((input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>) | null;
+    getFilmSetExport?: ((input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>) | null;
   };
 };

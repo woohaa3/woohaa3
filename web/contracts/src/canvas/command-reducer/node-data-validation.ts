@@ -10,7 +10,7 @@ import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeModelCameras } from "../model-cameras.js";
 import { decodeImageEditDocument } from "../image-edit.js";
 import { decodeFilmSetNodeData, decodeModel3DNodeData, type FilmSetNodeData } from "../canvas-node-model.js";
-import { GAME_FURNACE_EXTENSION_ID, isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
+import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, GAME_FURNACE_EXTENSION_ID, isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
 import { decodeModelContentVersion, modelSourceHash, normalizeModelDefinition } from "../model-definition.js";
 import { animationSnapshotHash } from "../animation-snapshot.js";
 import { decodeFilmSetLocalTransform } from "../film-set-content.js";
@@ -114,6 +114,13 @@ export function validateSelfContained3DNodePatch(
     if (extensionId === null) {
       return reject("invalid-self-contained-node", "复合资产节点缺少受信任的业务 extensionId，拒绝业务写入");
     }
+    // 非模型复合资产仅保存扩展内容引用；业务正文与校验由其拥有者负责。
+    // 保持已知业务白名单，且禁止以引用绕过既有模型定义校验。
+    const ref = mergedData.extensionContentRef;
+    if (extensionId === CREATURE_VIDEO_ASSETS_EXTENSION_ID && ref && typeof ref === "object" && !Array.isArray(ref)
+      && ref.schemaVersion === 1 && typeof ref.instanceId === "string"
+      && /^[A-Za-z0-9_-]{8,128}$/.test(ref.instanceId)
+      && !mergedData.modelScript && !mergedData.modelScriptLanguage && !mergedData.modelScriptVersion) return null;
     // 已知其它业务（炉体）保留其真实节点级 V2 模型定义；片场 items-only 不适用于此。
     if (extensionId === GAME_FURNACE_EXTENSION_ID) {
       const root = decodeFilmSetLocalTransform(mergedData.scenePlacement);
@@ -145,6 +152,7 @@ export function normalizeSelfContained3D(
   merged: CanvasNodeData
 ): CommandApplyResult | null {
   const targetNode = work.nodes.find((entry) => entry.id === nodeId);
+  if (isCompositeAssetNodeType(targetNode?.type) && readCompositeAssetExtensionId(merged) === CREATURE_VIDEO_ASSETS_EXTENSION_ID) return null;
   if (isFilmSetNode(targetNode?.type, merged)) {
     // items-only 片场：不得归一化/写入任何顶层 authored 模型字段（D8）。
     // 完整内容标识只覆盖独立根 + items + 全部片段（不含顶层模型）。

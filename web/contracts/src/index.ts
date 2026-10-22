@@ -50,6 +50,7 @@ export * from "./canvas/film-set-mcp.js";
 export * from "./canvas/content-runtime.js";
 export * from "./canvas/content-recording.js";
 export * from "./canvas/content-recording-port.js";
+export * from "./canvas/film-set-export-profile.js";
 export * from "./canvas/recording-protocol.js";
 export * from "./canvas/model-definition.js";
 export * from "./canvas/scene-ir-v2.js";

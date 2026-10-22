@@ -3,9 +3,9 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Simulate } from "react-dom/test-utils";
 import { afterEach, expect, it, vi } from "vitest";
-import type { GameFurnaceWorkspaceProps } from "../src/frontend/workspace.js";
-import { GameFurnaceWorkspace } from "../src/frontend/workspace.js";
-import { GAME_FURNACE_PREVIEW_START_TIMEOUT_MS } from "../src/frontend/use-preview.js";
+import type { GameFurnaceWorkspaceProps } from "../src/integration/browser/workspace.js";
+import { GameFurnaceWorkspace } from "../src/integration/browser/workspace.js";
+import { GAME_FURNACE_PREVIEW_START_TIMEOUT_MS } from "../src/preview/browser/use-preview.js";
 import { createGameFurnaceState, type GameFurnaceState } from "../src/shared.js";
 
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

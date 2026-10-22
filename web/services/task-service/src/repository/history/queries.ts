@@ -60,7 +60,7 @@ export function getHistoryDetail(
   if (!row) return undefined;
   const summary = toSummary(row);
   const result = options.fullText && row.full_text !== null && summary.result
-    ? { ...summary.result, text: row.full_text }
+    ? { ...summary.result, text: row.full_text, textTruncated: false }
     : summary.result;
   const events = ctx.events(taskKey);
   const eventsTruncated = (row.last_event_sequence ?? -1) > ctx.maxEventsPerRecord;

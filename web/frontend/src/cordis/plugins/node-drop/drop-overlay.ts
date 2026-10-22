@@ -55,6 +55,8 @@ export function createNodeDropOverlay(deps: NodeDropOverlayDeps) {
           owners = targets.filter((target) => target.nodeType === node.type
             && (!target.matchesTarget || target.matchesTarget({ canvas, targetNodeId: node.id })));
         } catch { /* Invalid extension ownership must not interrupt the pointer lifecycle. */ }
+        // 没有接收方的复合节点不是素材容器，不展示接收提示。
+        if (!owners.length) continue;
         const owner = owners.length === 1 ? owners[0] : undefined;
         // 该接收方不接受这批来源（如片场收到图片/视频）时不点亮目标、不显示接收提示
         // （change: 2026-10-18-restrict-film-set-drop-to-models）。

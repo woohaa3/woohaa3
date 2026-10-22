@@ -11,8 +11,8 @@ import {
   PREVIEW_HTML_HEADERS,
   readSourcePackageForPreview,
   type GamePreviewHost
-} from "../src/preview.js";
-import { encodeSourcePackage, type GamePackageManifest } from "../src/package.js";
+} from "../src/preview/backend/host.js";
+import { encodeSourcePackage, type GamePackageManifest } from "../src/state/shared/package.js";
 
 const HTML = "<!doctype html><html><body><script>1</script></body></html>";
 

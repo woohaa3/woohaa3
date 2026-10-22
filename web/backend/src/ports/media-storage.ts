@@ -29,6 +29,11 @@ export function createMediaStorageFromStorage(
     storage.bucket(namespace, scope ? { canvasId: scope.canvasId } : undefined);
   return {
     put: (key, bytes, contentType, scope) => bucket(scope).put(key, bytes, contentType),
+    async putStream(key, bytes, contentType, options, scope) {
+      const current = bucket(scope);
+      if (!current.putStream) throw new Error("当前存储后端不支持流式写入");
+      await current.putStream(key, bytes, contentType, options);
+    },
     async get(key, scope) {
       try {
         return await bucket(scope).get(key);

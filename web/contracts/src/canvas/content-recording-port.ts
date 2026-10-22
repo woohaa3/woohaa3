@@ -13,6 +13,14 @@
  *
  * 实现由宿主装配注入（`CanvasServiceOptions.recording`），本文件只定义形状与解码。
  */
+import {
+  DEFAULT_FILM_SET_EXPORT_PROFILE,
+  FILM_SET_EXPORT_PROFILE_SPECS,
+  filmSetExportFrameRate,
+  filmSetExportVideoSize,
+  isFilmSetExportProfile,
+  type FilmSetExportProfile
+} from "./film-set-export-profile.js";
 
 /** 提交请求：稳定身份 + 用途 + profile；不包含任何像素或播放状态。 */
 export type RecordingSubmitRequest = {
@@ -23,6 +31,15 @@ export type RecordingSubmitRequest = {
   clipId: string;
   /** 期望的 profile key（扩展决定是否支持）。 */
   profileKey?: string;
+  /** 显式导出 profile（D7）；缺省 `standard`，参考录制固定 `standard`。 */
+  profile?: FilmSetExportProfile;
+  /**
+   * 提交时页面的主题镜头预览清屏色（`#rrggbb`）。
+   *
+   * 镜头背景为 `theme` 时由扩展解析成该具体色（D6）；前端是唯一持有当前主题的一方，
+   * 缺失时回退应用默认主题的 `webSubtle`。
+   */
+  themeBackdrop?: string;
   /** 提交时前端已知的内容版本（仅用于「提交时版本」展示，不作为权威）。 */
   displayVersion?: string;
 };
@@ -102,44 +119,82 @@ export function decodeRecordingSubmitRequest(value: unknown): RecordingSubmitReq
   if (!requestId || !nodeId || !clipId || !purpose) return null;
   const profileKey = text("profileKey");
   const displayVersion = text("displayVersion");
+  const profile = record.profile;
+  if (profile !== undefined && !isFilmSetExportProfile(profile)) return null;
+  const themeBackdrop = text("themeBackdrop").trim().toLowerCase();
+  if (themeBackdrop !== "" && !/^#[0-9a-f]{6}$/.test(themeBackdrop)) return null;
   return {
     requestId,
     purpose,
     nodeId,
     clipId,
     ...(profileKey ? { profileKey } : {}),
-    ...(displayVersion ? { displayVersion } : {})
+    ...(displayVersion ? { displayVersion } : {}),
+    ...(profile === undefined ? {} : { profile }),
+    ...(themeBackdrop === "" ? {} : { themeBackdrop })
   };
 }
 
 /**
- * Native 录制的 profile 身份（change: 2026-10-17-add-native-offscreen-film-set-recording）。
+ * 提交请求的 profile 解析：参考录制固定 `standard`，显式导出缺省 `standard`。
+ *
+ * 浏览器与原生路径都用它决定尺寸/帧率/码率，避免「界面上选了 hd60、任务却按 720p」。
+ */
+export function recordingSubmitProfile(request: Pick<RecordingSubmitRequest, "purpose" | "profile">): FilmSetExportProfile {
+  if (request.purpose === "reference") return DEFAULT_FILM_SET_EXPORT_PROFILE;
+  return request.profile ?? DEFAULT_FILM_SET_EXPORT_PROFILE;
+}
+
+/** 提交请求档位的录制尺寸、帧率与码率（单一来源）。 */
+export function recordingSubmitProfileSpec(request: Pick<RecordingSubmitRequest, "purpose" | "profile">) {
+  const profile = recordingSubmitProfile(request);
+  return { profile, ...FILM_SET_EXPORT_PROFILE_SPECS[profile] };
+}
+
+/**
+ * Native 录制的 profile 身份（change: 2026-10-17-add-native-offscreen-film-set-recording；
+ * change: 2026-10-19-extend-film-set-for-motion-graphics，D7 增加导出 profile）。
  *
  * 与浏览器侧 `shotReferenceProfileKey`（`…-r2`）**不共享**：旧缓存仍是合法历史引用，但不会被
  * native 任务命中，native 产物也不会覆盖浏览器缓存。渲染/编译/编码语义版本都进入 key，
  * 任一变化即产生新版本。
+ *
+ * 渲染语义在 2026-10-19 因透明度动作、三维缓动、unlit/opacity 材质与镜头背景改变，渲染与
+ * 编译版本各前进一位：旧参考视频按既有版本政策重录，不混用。
  */
-export const NATIVE_RECORDING_RENDERER_VERSION = "bevy-shot-recorder-1";
-export const NATIVE_RECORDING_COMPILER_VERSION = "film-set-compiler-1";
+export const NATIVE_RECORDING_RENDERER_VERSION = "bevy-shot-recorder-2";
+export const NATIVE_RECORDING_COMPILER_VERSION = "film-set-compiler-2";
 export const NATIVE_RECORDING_CODEC_VERSION = "openh264-0.9.9";
 export const NATIVE_RECORDING_COLOR_REVISION = "srgb-bt709-limited-1";
-export const NATIVE_RECORDING_FRAME_RATE = 30;
+/** 参考视频固定使用的帧率（等于 `standard` profile）。 */
+export const NATIVE_RECORDING_FRAME_RATE = FILM_SET_EXPORT_PROFILE_SPECS.standard.frameRate;
 
-/** 录制输出尺寸：短边 720、偶数、保持镜头画幅（与浏览器导出同一规则）。 */
+/** 参考视频尺寸：短边 720、偶数、保持镜头画幅（等于 `standard` profile）。 */
 export function nativeRecordingVideoSize(aspect: string): { width: number; height: number } {
-  const [width, height] = aspect.split(":").map(Number);
-  const ratio = width > 0 && height > 0 ? width / height : 16 / 9;
-  return ratio >= 1
-    ? { width: Math.round((720 * ratio) / 2) * 2, height: 720 }
-    : { width: 720, height: Math.round(720 / ratio / 2) * 2 };
+  return filmSetExportVideoSize(aspect, "standard");
 }
 
-/** native profile key：尺寸 + 帧率 + 渲染/编译/编码/色彩版本。 */
-export function nativeRecordingProfileKey(aspect: string): string {
-  const size = nativeRecordingVideoSize(aspect);
+/** 显式导出 profile 的输出尺寸（与浏览器路径同一份规则）。 */
+export function nativeRecordingVideoSizeForProfile(
+  aspect: string,
+  profile: FilmSetExportProfile
+): { width: number; height: number } {
+  return filmSetExportVideoSize(aspect, profile);
+}
+
+/**
+ * native profile key：尺寸 + 帧率 + 渲染/编译/编码/色彩版本。
+ *
+ * 省略 profile 即参考视频的 `standard`，key 格式与改动前逐字节一致（只有版本段前进）。
+ */
+export function nativeRecordingProfileKey(
+  aspect: string,
+  profile: FilmSetExportProfile = DEFAULT_FILM_SET_EXPORT_PROFILE
+): string {
+  const size = filmSetExportVideoSize(aspect, profile);
   return [
     "native-v1",
-    `${size.width}x${size.height}@${NATIVE_RECORDING_FRAME_RATE}`,
+    `${size.width}x${size.height}@${filmSetExportFrameRate(profile)}`,
     NATIVE_RECORDING_RENDERER_VERSION,
     NATIVE_RECORDING_COMPILER_VERSION,
     NATIVE_RECORDING_CODEC_VERSION,

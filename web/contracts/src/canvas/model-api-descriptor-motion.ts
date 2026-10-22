@@ -33,7 +33,8 @@ export const MOTION_API_CONVENTIONS = {
   defaultEndTime: "timeline duration",
   cameraTarget: "本动画节点保存的初始镜头",
   modelTarget: "顶层动作用 modelScript 声明的稳定部件 id；片场对象动作的 root 表示该 itemId 的整个人物，其他 partId 只引用该对象自身部件",
-  modelProperties: "position/rotation/scale；position 为相对基础摆放的局部位移，rotation 为局部 Y-X-Z 弧度，scale 为基础缩放的乘数",
+  modelProperties: "position/rotation/scale/opacity；position 为相对基础摆放的局部位移，rotation 为局部 Y-X-Z 弧度，scale 为基础缩放的乘数，opacity 为 0–1 的透明度乘数（只用于 tween/keyframes，与材质静态透明度及所属对象透明度相乘）",
+  easings: "linear/smoothstep/easeIn/easeOut/easeInOut（后三者是三次曲线：easeIn 起步慢、easeOut 起步快后减速、easeInOut 两端缓）；边界进度精确为 0 与 1",
   modelIntervals: "同一目标同一属性的区间不得重叠；不同属性可同时运动，相接片段可串联；后一片段开始时接管，结束后保持终值",
   keyframeTime: "对象局部时间（秒），frames 的首末 time 默认为 startTime/endTime；每个点的 easing 控制到下一个点的插值"
 } as const;
@@ -46,9 +47,9 @@ export type MotionApiMethod = {
 
 /** 运动方法集合（与 `MotionRecorder` 的实现一一对应）。 */
 export const MOTION_API_METHODS: readonly MotionApiMethod[] = [
-  { name: "model.tween", signature: "motion.model.tween(targetId, { id?, property: 'position'|'rotation'|'scale', from: [x,y,z], to: [x,y,z], startTime?, endTime?, easing?: 'linear'|'smoothstep' }) => id" },
-  { name: "model.keyframes", signature: "motion.model.keyframes(targetId, { id?, property: 'position'|'rotation'|'scale', frames: [{ time, value: [x,y,z], easing? }], startTime?, endTime?, easing? }) => id" },
-  { name: "camera.tween", signature: "motion.camera.tween({ id?, property, startTime?, endTime?, from, to, easing? }) => id" },
+  { name: "model.tween", signature: "motion.model.tween(targetId, { id?, property: 'position'|'rotation'|'scale'|'opacity', from, to, startTime?, endTime?, easing?: 'linear'|'smoothstep'|'easeIn'|'easeOut'|'easeInOut' }) => id（opacity 的 from/to 是 0–1 数字，其它属性是 [x,y,z]）" },
+  { name: "model.keyframes", signature: "motion.model.keyframes(targetId, { id?, property: 'position'|'rotation'|'scale'|'opacity', frames: [{ time, value, easing? }], startTime?, endTime?, easing? }) => id（opacity 的 value 是 0–1 数字）" },
+  { name: "camera.tween", signature: "motion.camera.tween({ id?, property, startTime?, endTime?, from, to, easing?: 'linear'|'smoothstep'|'easeIn'|'easeOut'|'easeInOut' }) => id" },
   { name: "model.rotate", signature: "motion.model.rotate(targetId, { id?, axis?, speed, startTime?, endTime? }) => id" },
   { name: "model.move", signature: "motion.model.move(targetId, { id?, axis?, speed, range, startTime?, endTime? }) => id" },
   {
@@ -141,9 +142,12 @@ export function motionApiMethodNames(): string[] {
 export const MOTION_AUTHORING_RULES = [
   "一个人物在整段动作中保持同一 itemId/部件 id，只创建一套静态几何。严禁按时间复制人物并通过缩放或显隐轮换来模拟连续运动。",
   "定点移动、跳跃、落地和停住使用 model.tween/keyframes(position)；model.move 是循环移动，不能用它表达单次到达。",
+  "淡入淡出使用 model.tween/keyframes(opacity)：值必须是 0–1 的数字；透明度轨道可与 position/scale 同时运动。",
+  "「弹出」用两个 scale 关键帧表达（例如 1 → 1.08 → 1，分段 easeOut），不要期待回弹/overshoot 曲线。",
   "修改已有片场人物时，用 mutate_film_set_item(kind=motion, itemId=现有对象, motionScript, playback)，整个人物的 targetId 用 root；摆放坐标与缩放由应用叠加处理。",
   "动作与几何独立：只修改 motionScript/playback，不因路径、时间线、镜头变化重写模型或追加人物；非循环 playback.loop=false 且 duration 覆盖末帧。",
   "位置、转身、缩放可以同时进行，但同目标同属性片段不能重叠；相接片段的 from 应等于上一段 to，路径关键点应连续。",
+  "半透明卡片之间要留出深度间隔：透明排序按距离，同平面叠放不保证正确。",
   "能力不足或校验失败时报告具体原因，保留已有场景；不要通过复制大量网格绕过动作限制。"
 ] as const;
 
@@ -165,6 +169,49 @@ motion.model.tween("root", {
   startTime: 6, endTime: 8, easing: "smoothstep"
 });`;
 
+/**
+ * 宣传动效的完整范例：卡片淡入 + 弹出、连线伸长、镜头 easeOut 推近
+ * （change: 2026-10-19-extend-film-set-for-motion-graphics，任务 6.1）。
+ *
+ * 两段脚本写入**不同位置**，不能混写（对象脚本含镜头轨道会被拒绝，镜头脚本含模型轨道也会）：
+ * - `objectScript` → 该 item 的 binding `motion`（targetId 用 `root`，连线是它自己的部件 id）；
+ * - `cameraScript` → 片场镜头的 `cameraMotion`。
+ *
+ * 几何只建一次：三张卡片是三个独立 item，共享同一段对象脚本并各自错开
+ * `playback.startTime`，不要按帧复制几何。
+ */
+export const MOTION_GRAPHICS_SHOWCASE = {
+  /** 对象脚本：卡片根淡入 + scale 0.6→1.08→1 弹出；连线沿 X 伸长。 */
+  objectScript: `motion.model.tween("root", {
+  property: "opacity", from: 0, to: 1,
+  startTime: 0, endTime: 0.6, easing: "easeOut"
+});
+motion.model.keyframes("root", {
+  property: "scale",
+  frames: [
+    { time: 0, value: [0.6, 0.6, 0.6], easing: "easeOut" },
+    { time: 0.35, value: [1.08, 1.08, 1.08], easing: "easeOut" },
+    { time: 0.6, value: [1, 1, 1], easing: "easeOut" }
+  ]
+});
+motion.model.tween("connector", {
+  property: "scale", from: [0.05, 1, 1], to: [1, 1, 1],
+  startTime: 1.4, endTime: 2.4, easing: "easeInOut"
+});`,
+  /** 镜头脚本：distance 从 26 用 easeOut 推到 14（推近画布边缘）。 */
+  cameraScript: `motion.camera.tween({
+  property: "distance", from: 26, to: 14,
+  startTime: 1.2, endTime: 3.2, easing: "easeOut"
+});`
+} as const;
+
+/** 范例的纯文本形式（指南与提示词共用，说明两段脚本各自写到哪里）。 */
+export const MOTION_GRAPHICS_SHOWCASE_TEXT = `对象脚本（写到卡片 item 的 binding.motion；同一脚本复用到另外两张卡片，只错开 playback.startTime）：
+${MOTION_GRAPHICS_SHOWCASE.objectScript}
+
+镜头脚本（写到片场镜头的 cameraMotion）：
+${MOTION_GRAPHICS_SHOWCASE.cameraScript}`;
+
 /** MCP 与 ChatGPT 共用完整的动作能力说明。 */
 export function motionApiGuideText(): string {
   const guide = motionApiGuide();
@@ -175,6 +222,8 @@ export function motionApiGuideText(): string {
     ...guide.authoringRules,
     `每条轨道最多 ${guide.limits.maxKeyframesPerTrack} 个关键帧；最多 ${guide.limits.maxModelTracks} 条模型轨道。`,
     "片场单人物跑酷示例（通过 mutate_film_set_item 写到对应 itemId 的 child motion，playback.duration=8、loop=false）：",
-    guide.parkourExample
+    guide.parkourExample,
+    "宣传动效示例（卡片淡入 + 弹出、连线伸长、镜头 easeOut 推近）：",
+    MOTION_GRAPHICS_SHOWCASE_TEXT
   ].join("\n");
 }

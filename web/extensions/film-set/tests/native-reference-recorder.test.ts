@@ -6,12 +6,12 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { RecordingStatusView } from "@woohaa3/contracts";
-import type { ShotReferenceRecordTarget } from "../src/frontend/shot-reference-recorder.js";
+import type { ShotReferenceRecordTarget } from "../src/authoring/browser/shot-reference-recorder.js";
 import {
   createNativeReferenceRecorder,
   isTransientCode,
   selectReferenceRecorder
-} from "../src/frontend/native-reference-recorder.js";
+} from "../src/authoring/browser/native-reference-recorder.js";
 
 function target(): ShotReferenceRecordTarget {
   return {
@@ -65,7 +65,7 @@ function driver(states: RecordingStatusView[], submitResult?: { ok: true; jobId:
   };
 }
 
-import { createRecordingDriver } from "../src/frontend/native-recording-client.js";
+import { createRecordingDriver } from "../src/authoring/browser/native-recording-client.js";
 
 describe("createNativeReferenceRecorder", () => {
   it("submits a reference job and reports success", async () => {

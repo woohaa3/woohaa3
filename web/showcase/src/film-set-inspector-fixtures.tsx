@@ -137,8 +137,8 @@ export type FilmSetInspectorStageProps = {
 };
 
 /**
- * 生产 `ModelEditorOverlay` 舞台（对象/镜头/动画三页 + 生成宿主）。挂载时写入画布 store，
- * 卸载时清空。切页仅切换本地 tab，不写内容。
+ * 生产 `FilmSetInspector` 舞台（镜头与对象单栏 + 独立生成宿主）。挂载时写入画布 store，
+ * 卸载时清空。构图展开与对象选择只修改本地状态。
  */
 export function FilmSetInspectorStage({ fixtureId, selectedItemId = null, writable = true, readOnly = false, width = 380 }: FilmSetInspectorStageProps) {
   const [{ canvas, content }] = useState(() => filmSetInspectorCanvas(fixtureId));

@@ -12,7 +12,11 @@
  * 对 `StorageScope` 无感：画布维度只有需要它的后端（server 按 `<canvasId>/...` 拼键）才用，
  * 本地键布局与已存对象保持不变，所以这里刻意不接 scope 参数。
  */
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import {
   defineConfigSchema,
@@ -144,6 +148,29 @@ export function createLocalBackend(config: LocalStorageConfig = {}): StorageBack
         throw error;
       }
       return { bytes, contentType: (await readSidecarContentType(metaPath)) ?? inferContentType(key) };
+    },
+    async openRead(key, range) {
+      const { objectPath } = paths(key);
+      const stream = createReadStream(objectPath, range);
+      return { bytes: stream, cancel: () => stream.destroy() };
+    },
+    async putStream(key, bytes, contentType, options) {
+      const { objectPath, metaPath } = paths(key);
+      await mkdir(path.dirname(objectPath), { recursive: true });
+      const temporary = `${objectPath}.${randomUUID()}.tmp`;
+      try {
+        let size = 0;
+        const checked = async function* () {
+          for await (const chunk of bytes) { options.signal?.throwIfAborted(); size += chunk.length; if (size > options.size) throw new Error("流式对象长度不符"); yield chunk; }
+          if (size !== options.size) throw new Error("流式对象长度不符");
+        };
+        await pipeline(Readable.from(checked()), createWriteStream(temporary, { flags: "wx" }), { signal: options.signal });
+        await writeFile(`${temporary}.meta`, JSON.stringify({ contentType }), "utf8");
+        await rename(`${temporary}.meta`, metaPath);
+        await rename(temporary, objectPath);
+      } finally {
+        await rm(temporary, { force: true }); await rm(`${temporary}.meta`, { force: true });
+      }
     },
     async put(key, bytes, contentType): Promise<void> {
       const { objectPath, metaPath } = paths(key);

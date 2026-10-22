@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPreviewNonce, previewEntryWithBridge, validatePreviewBridgeMessage } from "../src/frontend/preview-bridge.js";
+import { createPreviewNonce, previewEntryWithBridge, validatePreviewBridgeMessage } from "../src/preview/browser/preview-bridge.js";
 
 const frameWindow = {};
 const context = { frameWindow, nonce: "nonce-1", generation: 7, maxSize: 4096 };

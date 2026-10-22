@@ -11,7 +11,7 @@ import {
   SHOT_REFERENCE_FPS,
   type ShotReferenceRecordDeps,
   type ShotReferenceRecordTarget
-} from "../src/frontend/shot-reference-recorder.js";
+} from "../src/authoring/browser/shot-reference-recorder.js";
 
 const target: ShotReferenceRecordTarget = {
   canvasId: "c1", filmSetNodeId: "film", clipId: "clip-1",

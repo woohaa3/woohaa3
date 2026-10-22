@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { HoverPlaybackDelay, HOVER_PLAYBACK_DELAY_MS } from "../src/frontend/hover-delay.js";
+import { HoverPlaybackDelay, HOVER_PLAYBACK_DELAY_MS } from "../src/preview/browser/hover-delay.js";
 function fixture() {
   let time = 0, count = 0;
   const tasks = new Map<number, () => void>();

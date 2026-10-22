@@ -14,12 +14,12 @@ import {
   hasOpenableProject,
   isGameFurnaceNode,
   readGameFurnaceAssociation
-} from "../src/frontend/associations.js";
+} from "../src/state/browser/associations.js";
 import {
   createGameFurnaceRemote,
   handlerPath,
   remoteFailureMessage
-} from "../src/frontend/remote.js";
+} from "../src/integration/browser/remote.js";
 import {
   dirtyRequirementFields,
   generationPhase,
@@ -27,7 +27,7 @@ import {
   phaseLabel,
   planSaveState,
   workspaceView
-} from "../src/frontend/workspace-session.js";
+} from "../src/state/browser/workspace-session.js";
 import {
   clearResourceDraft,
   dirtyResourceFields,
@@ -35,7 +35,7 @@ import {
   mergedResource,
   planResourceUpdate,
   resourceConflicts
-} from "../src/frontend/resource-draft.js";
+} from "../src/state/browser/resource-draft.js";
 import { normalizeResource, type GameResource } from "../src/shared.js";
 
 describe("节点项目关联（任务 5.x）", () => {

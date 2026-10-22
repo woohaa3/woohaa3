@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createFilmSetSnapshot, filmSetAnimationsOf } from "@woohaa3/contracts";
-import { prepareFilmSetHistoryFrame } from "../src/backend/history-frame.js";
+import { prepareFilmSetHistoryFrame } from "../src/preview/backend/history-frame.js";
 const saved = () => {
   const scene = createFilmSetSnapshot({ title: "history", timeline: { duration: 0, loop: false }, model: { modelScript: "scene.box({id:'saved-part'});", modelScriptVersion: "woohaa-model-js-v2" }, modelItemId: "saved-item" });
   return { schemaVersion: 3 as const, scenePlacement: scene.scenePlacement, sceneCamera: scene.sceneCamera, filmSetContent: scene.filmSetContent, filmSetAnimations: filmSetAnimationsOf(scene) };

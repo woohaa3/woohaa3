@@ -155,6 +155,9 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               case "ui.media-preview.open-requested":
                 ctx.emit("ui.media-preview.open-requested", payload as never);
                 return;
+              case "ui.text-preview.open-requested":
+                ctx.emit("ui.text-preview.open-requested", payload as never);
+                return;
               case "ui.video-frame-capture.open-requested":
                 ctx.emit("ui.video-frame-capture.open-requested", payload as never);
                 return;

@@ -65,7 +65,7 @@ export const mediaImportExtension: Plugin.Function<void> = definePlugin(
       service.dispose();
     };
   },
-  { name: MEDIA_IMPORT_PLUGIN_ID, inject: ["mediaRemote", "canvasSession", "canvasRuntime", "slots"] }
+  { name: MEDIA_IMPORT_PLUGIN_ID, inject: ["mediaRemote", "canvasSession", "canvasRuntime", "canvasScope", "slots"] }
 );
 
 export type { ImportAnchor, ImportState };

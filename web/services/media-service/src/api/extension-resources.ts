@@ -2,6 +2,41 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { MediaStorage } from "@woohaa3/contracts";
 import { createExtensionMediaResources, ExtensionResourceError } from "../application/extension-resources.js";
 import { decodeCanvasScope } from "../application/media-scope.js";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
+/** 内部协议已完成服务认证；流式路径不走 base64 JSON。 */
+export async function handleExtensionStream(req: IncomingMessage, res: ServerResponse, storage: MediaStorage, write: boolean): Promise<boolean> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  req.on("aborted", abort); res.on("close", abort);
+  try {
+    const extensionId = req.headers["x-woohaa3-extension-id"];
+    if (typeof extensionId !== "string" || !/^[a-z][a-z0-9-]{0,127}$/.test(extensionId)) throw new ExtensionResourceError("malformed-request", 400, "插件身份非法");
+    const canvasHeader = req.headers["x-woohaa3-canvas-id"];
+     const decoded = decodeCanvasScope(canvasHeader);
+     if (!decoded.ok) throw new ExtensionResourceError("malformed-request", 400, decoded.message);
+     const canvasId = decoded.scope?.canvasId;
+     const resources = createExtensionMediaResources(storage);
+    if (write) {
+      const value = await resources.writeStream!({ bytes: req, canvasId, contentType: String(req.headers["content-type"] ?? ""), signal: controller.signal });
+      res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(value));
+    } else {
+      const key = req.headers["x-woohaa3-storage-key"];
+      if (typeof key !== "string") throw new ExtensionResourceError("malformed-request", 400, "缺少媒体引用");
+      const object = await resources.openRead!(key, canvasId);
+      res.setHeader("Content-Type", object.contentType); res.setHeader("Content-Length", object.size);
+      try { await pipeline(Readable.from(object.bytes), res, { signal: controller.signal }); } finally { object.cancel(); }
+    }
+  } catch (error) {
+    if (!res.headersSent && !res.destroyed) {
+      res.statusCode = error instanceof ExtensionResourceError ? error.status : 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ code: error instanceof ExtensionResourceError ? error.code : "storage-failed", message: "媒体流式传输未完成" }));
+    } else if (!res.destroyed) res.destroy();
+  } finally { req.off("aborted", abort); res.off("close", abort); }
+  return true;
+}
 
 export async function handleExtensionResources(req: IncomingMessage, res: ServerResponse, storage: MediaStorage, write: boolean): Promise<boolean> {
   const send = (status: number, body: unknown) => {

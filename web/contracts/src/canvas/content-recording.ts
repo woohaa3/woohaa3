@@ -31,6 +31,12 @@ export type ContentRecordingRequest = {
   clipId: string;
   /** 调用方期望的 profile key；扩展可拒绝不支持的 profile。 */
   profileKey: string;
+  /**
+   * 显式导出 profile（D7）。省略即 `standard`；参考录制固定 `standard`。
+   *
+   * 扩展据此选择尺寸/帧率/码率，并把它写进 profile key 与冻结快照。
+   */
+  profile?: import("./film-set-export-profile.js").FilmSetExportProfile;
 };
 
 /**
@@ -76,6 +82,13 @@ export type ContentRecordingSnapshot = {
   sceneIrJson: string;
   /** 编译后的动作/镜头轨道。 */
   motionJson: string;
+  /**
+   * 冻结时解析出的**具体**镜头背景色（`#rrggbb`）。
+   *
+   * 片场镜头背景为 `theme` 时由编译器解析为当前主题的镜头预览清屏色；worker 只消费这个值，
+   * 缺字段视为输入错误，不再自行回退黑色（change: 2026-10-19-extend-film-set-for-motion-graphics，D6）。
+   */
+  background: string;
   initialCamera: {
     azimuth: number;
     elevation: number;
@@ -232,6 +245,12 @@ export type ContentRecordingRuntime = {
       node?: { width?: number; height?: number };
       /** 读取稳定媒体字节（有界、经授权）。 */
       read?: (storageKey: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
+      /**
+       * 当前主题的镜头预览清屏色（`#rrggbb`）；镜头背景为 `theme` 时解析成它。
+       *
+       * 缺失时使用应用默认主题的 `webSubtle`，与镜头预览的清屏色同源。
+       */
+      themeBackdrop?: string;
     };
   }): Promise<ContentRecordingFreezeResult>;
   /**

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { findAdaptiveOption } from '@woohaa3/contracts';
+import { findAdaptiveOption, referenceInputCapabilityFromDescription } from '@woohaa3/contracts';
 import {
   ARK_CATALOG,
   ARK_SEEDREAM_5_PRO_MODEL,
@@ -17,6 +17,13 @@ const SEEDANCE_FAST = 'doubao-seedance-2-0-fast-260128';
 const SEEDREAM_LITE = 'doubao-seedream-5-0-260128';
 
 describe('Ark catalog', () => {
+  it('declares the frame roles that Seedance actually forwards', () => {
+    const inputs=referenceInputCapabilityFromDescription(describeArkModel(SEEDANCE_25));
+    expect(inputs.bindings.find(b=>b.field==='urls')?.roles).toEqual(['reference_image','first_frame','last_frame']);
+    expect(inputs.bindings.some(b=>b.field==='videoUrls')).toBe(true);
+    const fast=referenceInputCapabilityFromDescription(describeArkModel('doubao-seedance-1-0-pro-fast-251015'));
+    expect(fast.roles).not.toContain('last_frame');
+  });
   it('covers language, image and video with public model ids', () => {
     const kinds = new Set(ARK_CATALOG.map((model) => model.kind));
     expect(kinds).toEqual(new Set(['language', 'image', 'video']));

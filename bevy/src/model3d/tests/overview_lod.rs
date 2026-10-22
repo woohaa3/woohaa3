@@ -404,8 +404,17 @@ fn local_motion_split_keeps_low_and_pose() {
         scene.animation_playback = Some(playback.clone());
         run_sync(&mut world, &scene, &resources);
         let mut models = world.remove_resource::<ModelVisuals>().unwrap();
-        super::super::runtime::apply_motion_playback(&mut world.commands(), &mut models, &scene);
+        let mut materials = world
+            .remove_resource::<Assets<StandardMaterial>>()
+            .unwrap_or_default();
+        super::super::runtime::apply_motion_playback(
+            &mut world.commands(),
+            &mut models,
+            &mut materials,
+            &scene,
+        );
         world.flush();
+        world.insert_resource(materials);
         world.insert_resource(models);
     }
     let root = &world.resource::<ModelVisuals>().roots["film"];

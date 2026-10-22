@@ -40,6 +40,9 @@ pub(crate) struct AnimationPlayback {
     #[serde(default)]
     #[allow(dead_code)] // 线格式字段：随 scene 下发；循环语义由 playback 时钟消费，Rust 侧暂不读取。
     pub(crate) looped: bool,
+    /// 所播放镜头背景的具体色（`#rrggbb`）；缺省即跟随主题（change: 2026-10-19，D6）。
+    #[serde(default)]
+    pub(crate) backdrop: Option<String>,
     /// 是否正在播放（false 表示已暂停在 `time`）。
     #[serde(default)]
     pub(crate) playing: bool,

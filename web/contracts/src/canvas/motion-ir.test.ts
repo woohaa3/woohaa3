@@ -174,7 +174,7 @@ describe("运动求值（任务 1.5）", () => {
   });
 
   it("identityModelDelta 是单位姿态", () => {
-    expect(identityModelDelta()).toEqual({ rotation: [0, 0, 0, 1], translation: [0, 0, 0], scale: [1, 1, 1] });
+    expect(identityModelDelta()).toEqual({ rotation: [0, 0, 0, 1], translation: [0, 0, 0], scale: [1, 1, 1], opacity: 1 });
   });
 });
 

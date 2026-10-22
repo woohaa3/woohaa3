@@ -373,3 +373,16 @@ it("片场镜头页在镜头控件之后渲染生成入口（change: 2026-10-18-
   expect(cameras.compareDocumentPosition(draft) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(draft.value).toBe("保留构思");
 });
+
+it("构图呈现复用参数与截图，省略镜头集合和生成入口", () => {
+  const { session } = makeSession([camera()]);
+  session.enter("m1");
+  render(<ModelEditorToolbar session={session} writable presentation="composition" onAddCamera={() => undefined} onCapture={() => undefined} renderGenerate={() => <textarea />} />);
+  expect(document.querySelector(".model-editor__cameras-header")).toBeNull();
+  expect(document.querySelector(".model-editor__camera-list")).toBeNull();
+  expect(document.querySelector(".model-editor__rename")).toBeNull();
+  expect(document.querySelector("textarea")).toBeNull();
+  expect(document.querySelector('[data-model-editor-mcp-guide="true"]')).toBeNull();
+  expect(document.querySelector('input[aria-label="镜头方位角"]')).not.toBeNull();
+  expect(document.querySelector(".model-editor__capture-button")).not.toBeNull();
+});

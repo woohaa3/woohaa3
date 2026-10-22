@@ -133,6 +133,9 @@ pub(super) fn prepare(
             ));
             for spec in &source.specs {
                 root.part_batches.insert(spec.id.clone(), entity);
+                // 剩余合批块的部件仍映射到该块的材质（对象根透明度按此克隆实例，D2）。
+                root.part_materials
+                    .insert(spec.id.clone(), material.clone());
             }
             root.mesh_handles.push(asset.handle.clone());
             root.batches.push(BatchBinding::new(entity, source, asset));
@@ -165,6 +168,8 @@ pub(super) fn prepare(
             root.entities.push(entity);
             root.part_entities.insert(spec.id.clone(), entity);
             root.part_bases.insert(spec.id.clone(), transform);
+            root.part_materials
+                .insert(spec.id.clone(), material.clone());
             root.prepared_targets.insert(spec.id);
             root.geometries.push((entity, base, geometry));
             root.mesh_handles.push(mesh);

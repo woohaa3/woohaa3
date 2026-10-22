@@ -11,9 +11,13 @@ import { AlertDialog } from "../../services/dialogs/AlertDialog.js";
 const MediaDialog = lazy(() => import("../../services/dialogs/MediaDialog.js").then(module => ({ default: module.MediaDialog })));
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import { resolveAudioPreview, resolveImagePreview } from "./media-preview.js";
+import { resolveTextPreview } from "./text-preview.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { DialogsService } from "../../contracts.js";
 import type { ServerCanvas } from "@woohaa3/contracts";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { DialogBody, DialogContent, DialogHeader, DialogTitle } from "../../services/dialogs/Dialog.js";
 
 type AlertPayload = {
   title: string;
@@ -51,6 +55,20 @@ export function createMediaPreviewRenderer() {
         onClose={requestClose}
       /></Suspense>
     );
+  };
+}
+
+export function createTextPreviewRenderer() {
+  return function TextPreviewRenderer({ instance, requestClose }: DialogRendererProps) {
+    const canvas = useCanonicalCanvas();
+    const payload = instance.payload as { nodeId: string };
+    const resolved = resolveTextPreview(canvas, payload.nodeId);
+    return <DialogContent size="lg" className="text-preview-dialog" ariaLabel={resolved?.title ?? "文本预览"} instanceId={instance.instanceId}>
+      <DialogHeader onClose={requestClose}><DialogTitle>{resolved?.title ?? "文本预览"}</DialogTitle></DialogHeader>
+      <DialogBody className="text-preview-dialog__body">
+        {resolved ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{resolved.text}</ReactMarkdown> : <p>文本内容已不可用。</p>}
+      </DialogBody>
+    </DialogContent>;
   };
 }
 

@@ -206,7 +206,15 @@ pub(crate) fn sync_shot_adapter(
     if let Some(surface_size) = &scene.surface {
         viewport.pixel_ratio = surface_size.pixel_ratio;
     }
-    clear.0 = clear_color;
+    // 镜头背景（D6）：活动播放投影带具体色时用它清屏，否则用主题色。
+    // 只作用于镜头预览/拍摄，编辑片场的工作区视图不受影响。
+    clear.0 = scene
+        .animation_playback
+        .as_ref()
+        .and_then(|playback| playback.backdrop.as_deref())
+        .filter(|value| is_hex_color(value))
+        .map(crate::model3d::scene::parse_hex)
+        .unwrap_or(clear_color);
 
     let Some((node_id, camera_id, aspect, pose)) = desired_shot(scene) else {
         if let Some(rig) = state.rig.take() {
@@ -288,6 +296,11 @@ fn target_for(bounds: Option<ModelBounds>) -> ShotCameraTarget {
 /// `protocol::is_supported_shot_aspect` 守卫。
 pub(crate) fn aspect_ratio(aspect: &str) -> f32 {
     crate::protocol::parse_shot_aspect_ratio(aspect).unwrap_or(16.0 / 9.0)
+}
+
+/// `#rrggbb` 背景校验；非法值不参与清屏色覆盖（回落主题色）。
+fn is_hex_color(value: &str) -> bool {
+    value.len() == 7 && value.starts_with('#') && value[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 

@@ -1,6 +1,6 @@
 /** 共享模型动作采样；浏览器检查与原生拍摄烘焙均使用这份语义。 */
 import { axisAngle, quatMul, type Vec3 } from "./model-transform.js";
-import { identityModelDelta, type ModelMotionDelta, type ModelTrack } from "./motion-ir.js";
+import { easingProgress, identityModelDelta, type ModelMotionDelta, type ModelTrack } from "./motion-ir.js";
 import { modelMotionProperty, type KeyframeMotion } from "./motion-keyframes.js";
 
 const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } satisfies Record<string, Vec3>;
@@ -11,6 +11,10 @@ export function evaluateModelTrack(track: ModelTrack, time: number): ModelMotion
   const motion = track.motion;
   const delta = identityModelDelta();
   if (motion.kind === "keyframes") {
+    if (motion.property === "opacity") {
+      delta.opacity = sampleScalarKeyframes(motion, now);
+      return delta;
+    }
     const value = sampleKeyframes(motion, now);
     if (motion.property === "position") delta.translation = value;
     else if (motion.property === "scale") delta.scale = value;
@@ -39,16 +43,35 @@ export function mergeModelTrackDelta(base: ModelMotionDelta, next: ModelMotionDe
     case "position": return { ...base, translation: next.translation };
     case "rotation": return { ...base, rotation: next.rotation };
     case "scale": return { ...base, scale: next.scale };
+    case "opacity": return { ...base, opacity: next.opacity };
   }
 }
 
 function sampleKeyframes(motion: KeyframeMotion, now: number): Vec3 {
   const frames = motion.frames;
-  if (now >= frames[frames.length - 1]!.time) return [...frames[frames.length - 1]!.value];
+  const last = frames[frames.length - 1]!;
+  if (now >= last.time) return [...last.value as Vec3];
   const index = frames.findIndex((point, i) => i > 0 && now < point.time);
   const a = frames[Math.max(0, index - 1)]!;
   const b = frames[Math.max(1, index)]!;
   const progress = Math.max(0, Math.min(1, (now - a.time) / (b.time - a.time)));
-  const t = a.easing === "smoothstep" ? progress * progress * (3 - 2 * progress) : progress;
-  return a.value.map((v, i) => v + (b.value[i]! - v) * t) as Vec3;
+  const t = easingProgress(a.easing, progress);
+  const from = a.value as Vec3;
+  const to = b.value as Vec3;
+  return from.map((v, i) => v + (to[i]! - v) * t) as Vec3;
+}
+
+/** 标量通道（opacity）采样：与三维关键帧同一分段与缓动语义。 */
+function sampleScalarKeyframes(motion: KeyframeMotion, now: number): number {
+  const frames = motion.frames;
+  const last = frames[frames.length - 1]!;
+  if (now >= last.time) return last.value as number;
+  const index = frames.findIndex((point, i) => i > 0 && now < point.time);
+  const a = frames[Math.max(0, index - 1)]!;
+  const b = frames[Math.max(1, index)]!;
+  const progress = Math.max(0, Math.min(1, (now - a.time) / (b.time - a.time)));
+  const t = easingProgress(a.easing, progress);
+  const from = a.value as number;
+  const to = b.value as number;
+  return from + (to - from) * t;
 }

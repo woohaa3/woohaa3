@@ -48,6 +48,11 @@ export const MCP_INTERNAL_PATHS = {
   importModelSnapshot: `${MCP_INTERNAL_BASE_PATH}/animation/import-model`,
   importFilmSetContent: `${MCP_INTERNAL_BASE_PATH}/film-set/import-content`,
   mutateFilmSetItem: `${MCP_INTERNAL_BASE_PATH}/film-set/item`,
+  /** 片场媒体条目受控导入（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）。 */
+  addFilmSetMedia: `${MCP_INTERNAL_BASE_PATH}/film-set/media`,
+  /** agent 发起显式导出与查询（change 同上，D8）。 */
+  exportFilmSetClip: `${MCP_INTERNAL_BASE_PATH}/film-set/export`,
+  getFilmSetExport: `${MCP_INTERNAL_BASE_PATH}/film-set/export-status`,
   /**
    * 模型规模统计（与聚焦面板同源；可为候选脚本预检）。
    * change: 2026-10-18-align-model-statistics-with-agent。
@@ -288,6 +293,87 @@ export type McpMutateFilmSetItemRequest = {
   requestId: string;
   op: import("../commands.js").FilmSetItemPatchOp;
 };
+
+/**
+ * 片场媒体条目受控导入请求
+ * （change: 2026-10-19-extend-film-set-for-motion-graphics，D5）。
+ *
+ * 来源必须是同一画布内 ready 的图片或视频节点；服务端从权威画布解析 `assetId`、固有宽高比与
+ * 视频时长，调用方只给来源节点与可选摆放；`expectedContentHash` 为片场内容 precondition。
+ */
+export type McpAddFilmSetMediaRequest = {
+  canvasId: string;
+  nodeId: string;
+  requestId: string;
+  sourceNodeId: string;
+  /** 片场内容身份 precondition（`filmSetContentHash`）；不一致时拒绝。 */
+  expectedContentHash?: string;
+  /** 新条目 id（省略时由服务端按 requestId 派生稳定 id）。 */
+  itemId?: string;
+  /** 条目名（省略时用来源节点标题或种类名）。 */
+  name?: string;
+  /** 可选基础局部变换；缺省按导入布局错开。 */
+  transform?: import("../film-set-content.js").FilmSetLocalTransform;
+};
+
+/** 媒体导入结果。 */
+export type McpAddFilmSetMediaOutcome =
+  | {
+      ok: true;
+      canvasId: string;
+      nodeId: string;
+      itemId: string;
+      itemKind: "image" | "video";
+      commandId: string;
+      duplicate: boolean;
+      noop: boolean;
+      contentHash: string;
+      itemCount: number;
+    }
+  | { ok: false; code: string; message: string };
+
+/**
+ * agent 发起显式导出的请求（D8）。
+ *
+ * 只携带稳定身份、profile 与内容 precondition；像素与播放状态一概不传，任务由本机宿主原生
+ * 录制完成。
+ */
+export type McpExportFilmSetClipRequest = {
+  canvasId: string;
+  nodeId: string;
+  clipId: string;
+  requestId: string;
+  profile: import("../film-set-export-profile.js").FilmSetExportProfile;
+  /** 片场内容身份 precondition（`filmSetContentHash`）；不一致时拒绝。 */
+  expectedContentHash?: string;
+};
+
+/** 导出提交结果：`jobId` 用于后续轮询（按 requestId 幂等）。 */
+export type McpExportFilmSetClipOutcome =
+  | { ok: true; canvasId: string; nodeId: string; clipId: string; jobId: string; state: string; duplicate: boolean }
+  | { ok: false; code: string; message: string };
+
+/** 查询导出任务。 */
+export type McpGetFilmSetExportRequest = {
+  canvasId: string;
+  jobId: string;
+};
+
+/** 导出任务状态（成功时带节点与资产身份）。 */
+export type McpGetFilmSetExportOutcome =
+  | {
+      ok: true;
+      canvasId: string;
+      jobId: string;
+      state: string;
+      completedFrames: number;
+      totalFrames: number;
+      progress?: number;
+      nodeId?: string;
+      assetId?: string;
+      error?: { code: string; message: string; stage?: string };
+    }
+  | { ok: false; code: string; message: string };
 
 // ---------------------------------------------------------------------------
 // 响应 DTO

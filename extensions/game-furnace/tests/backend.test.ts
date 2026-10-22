@@ -19,12 +19,12 @@ import type {
   ApplicationExtensionTaskFacade
 } from "@woohaa3/contracts";
 import { createGameFurnaceBackend } from "../src/backend.js";
-import { createGamePreviewHost } from "../src/preview.js";
+import { createGamePreviewHost } from "../src/preview/backend/host.js";
 import { computeInputHash, reduceGameFurnace, projectIdFor, type GameFurnaceState, MAX_INLINE_TEXT_CHARS, MAX_INLINE_SNAPSHOT_CHARS } from "../src/shared.js";
-import { planGameFurnaceDrop } from "../src/collection.js";
+import { planGameFurnaceDrop } from "../src/authoring/shared/collection.js";
 import { gameFurnaceArchiveDefinition } from "../src/archive.js";
-import { pendingFinalizations } from "../src/backend/finalize-worker.js";
-import { resourceDependencyPaths, decodeSourcePackage } from "../src/package.js";
+import { pendingFinalizations } from "../src/authoring/backend/finalize-worker.js";
+import { resourceDependencyPaths, decodeSourcePackage } from "../src/state/shared/package.js";
 
 const VALID_HTML = `<!doctype html><html><head></head><body><canvas id="g"></canvas>
 <img src="assets/res-hero.png"><script>let score=0;function loop(){score++;requestAnimationFrame(loop)}loop();</script></body></html>`;

@@ -14,7 +14,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
-use openh264::encoder::{Encoder, EncoderConfig, FrameType};
+use openh264::encoder::{Encoder, EncoderConfig, FrameType, Level};
 use crate::recording_encode::{
     ArtifactFile, EncodedArtifact, EncodeFailure, EncodeStage, EncoderFrame, EncoderProfile,
     MAX_ARTIFACT_BYTES, VideoEncoder, rgba_to_yuv420, sha256_hex, verify_mp4,
@@ -37,6 +37,34 @@ pub struct OpenH264EncoderOptions {
     pub profile: EncoderProfile,
     /// 强制关键帧间隔（帧数）；默认按 2 秒换算。
     pub keyframe_interval_frames: Option<u32>,
+}
+
+/// H.264 level 的 `level_idc`（`spec` 章节 1 byte）。
+///
+/// OpenH264 的 `EncoderConfig` 不暴露 level 参数，因此这里按输出尺寸与帧率推导**最低够用**
+/// 的 level 并在产物校验里确认 SPS 报告的 level 不低于它：
+/// - ≤720p30：Level 3.1；
+/// - ≤1080p30：Level 4.0；
+/// - 更高（例如 1080p60）：Level 4.2。
+///
+/// 1080p60 的宏块率约 489 600 MB/s，Level 4.0 的 `MaxMBPS` 是 245 760，因此必须 4.2。
+pub fn required_h264_level_idc(width: u32, height: u32, fps_numer: u32, fps_denom: u32) -> u8 {
+    let fps = if fps_denom == 0 {
+        0.0
+    } else {
+        f64::from(fps_numer) / f64::from(fps_denom)
+    };
+    let mb_width = f64::from(width.div_ceil(16));
+    let mb_height = f64::from(height.div_ceil(16));
+    let mb_rate = mb_width * mb_height * fps;
+    // Level 上限（MaxMBPS）：3.1 = 108 000，4.0 = 245 760，4.2 = 522 240。
+    if mb_rate <= 108_000.0 {
+        31
+    } else if mb_rate <= 245_760.0 {
+        40
+    } else {
+        42
+    }
 }
 
 /// OpenH264 编码器 + 最小 MP4 封装。
@@ -69,6 +97,7 @@ impl OpenH264Encoder {
         let config = EncoderConfig::new()
             .bitrate(bitrate)
             .max_frame_rate(frame_rate)
+            .level(h264_level(&options.profile))
             .skip_frames(false)
             .intra_frame_period(openh264::encoder::IntraFramePeriod::from_num_frames(
                 options
@@ -170,6 +199,29 @@ impl OpenH264Encoder {
         } else {
             nal.strip_prefix(&[0, 0, 1])
         }
+    }
+}
+
+/// 按输出尺寸与帧率选择**足够**的 H.264 level（D7：1080p60 至少 4.2）。
+///
+/// - ≤720p30：Level 3.1（宏块率 ≤108 000）；
+/// - ≤1080p30：Level 4.0（≤245 760）；
+/// - 更高（1080p60 等）：Level 4.2（≤522 240）。
+pub fn h264_level(profile: &EncoderProfile) -> Level {
+    let fps = if profile.fps_denom == 0 {
+        0.0
+    } else {
+        f64::from(profile.fps_numer) / f64::from(profile.fps_denom)
+    };
+    let mb_rate = f64::from(profile.width.div_ceil(16))
+        * f64::from(profile.height.div_ceil(16))
+        * fps;
+    if mb_rate <= 108_000.0 {
+        Level::Level_3_1
+    } else if mb_rate <= 245_760.0 {
+        Level::Level_4_0
+    } else {
+        Level::Level_4_2
     }
 }
 
@@ -300,6 +352,26 @@ impl VideoEncoder for OpenH264Encoder {
                 "编码器未产出 SPS/PPS，无法写样本描述",
             ));
         }
+        // 编码级别必须满足该尺寸/帧率：否则 1080p60 会被低 level 的宏块率上限截断。
+        let profile = &self.options.profile;
+        let required = match h264_level(profile) {
+            Level::Level_3_1 => 31,
+            Level::Level_4_0 => 40,
+            _ => 42,
+        };
+        let actual = self.sps.get(3).copied().unwrap_or(0);
+        if actual != 0 && actual < required {
+            return Err(EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-encoder-level-insufficient",
+                format!(
+                    "编码级别 {actual} 不足以覆盖 {}x{}@{}fps（至少需要 {required}）",
+                    profile.width,
+                    profile.height,
+                    profile.fps_numer / profile.fps_denom.max(1)
+                ),
+            ));
+        }
         self.spool
             .flush()
             .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
@@ -420,6 +492,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
         dir
+    }
+
+    #[test]
+    fn h264_level_covers_1080p60_and_keeps_720p30_low() {
+        // 720p30：80 × 45 × 30 = 108 000 → Level 3.1
+        assert!(matches!(
+            h264_level(&EncoderProfile { width: 1280, height: 720, bitrate: 4_000_000, fps_numer: 30, fps_denom: 1 }),
+            Level::Level_3_1
+        ));
+        // 1080p30：120 × 68 × 30 = 244 800 → Level 4.0
+        assert!(matches!(
+            h264_level(&EncoderProfile { width: 1920, height: 1080, bitrate: 8_000_000, fps_numer: 30, fps_denom: 1 }),
+            Level::Level_4_0
+        ));
+        // 1080p60：489 600 → 必须 Level 4.2（D7）。
+        assert!(matches!(
+            h264_level(&EncoderProfile { width: 1920, height: 1080, bitrate: 12_000_000, fps_numer: 60, fps_denom: 1 }),
+            Level::Level_4_2
+        ));
+        // 竖屏 1080x1920@60 同样需要 4.2。
+        assert!(matches!(
+            h264_level(&EncoderProfile { width: 1080, height: 1920, bitrate: 12_000_000, fps_numer: 60, fps_denom: 1 }),
+            Level::Level_4_2
+        ));
     }
 
     #[test]

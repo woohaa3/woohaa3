@@ -3,7 +3,7 @@
  * （change: 2026-10-10-improve-film-set-editing-and-inspector，任务 7.1 / showcase-acceptance）。
  *
  * 组合生产 `ModelEditorOverlay` / `FilmSetObjectToolbar` / `FilmSetAdaptationConfirm` 与内存
- * fixture，断言状态矩阵（多对象/长名称/空集合/只读/失配）、切页零命令与可访问性；不复制
+ * fixture，断言状态矩阵（多对象/长名称/空集合/只读/失配）与本地交互零命令；不复制
  * 生产 markup。
  *
  * @vitest-environment jsdom
@@ -49,7 +49,8 @@ describe("片场检查面板 Showcase（任务 7.1）", () => {
   it("多对象 + 选中：生产 shell、三任务页、对象列表与受限属性", async () => {
     await mount(<FilmSetInspectorStage fixtureId="mixed" selectedItemId="a" />);
     expect(document.querySelector(".model-editor-dock")).not.toBeNull();
-    expect(tabs().map((t) => t.textContent)).toEqual(["对象", "镜头", "动画"]);
+    expect(tabs()).toHaveLength(0);
+    expect(document.querySelector(".film-set-animation-controls")).not.toBeNull();
     expect(options().map((o) => o.getAttribute("aria-label"))).toEqual([
       "模型 · 角色 A",
       "模型 · 角色 B",
@@ -65,13 +66,13 @@ describe("片场检查面板 Showcase（任务 7.1）", () => {
     await mount(<FilmSetInspectorStage fixtureId="mixed" selectedItemId={null} />);
     expect(options()).toHaveLength(3);
     expect(document.querySelector(".film-set-object-fields")).toBeNull();
-    expect(document.querySelector(".film-set-object-hint")?.textContent).toContain("点选");
+    expect(document.querySelector(".film-set-object-dock .film-set-object-hint")?.textContent).toContain("点选");
   });
 
   it("空集合：稳定空态，无假对象", async () => {
     await mount(<FilmSetInspectorStage fixtureId="empty" selectedItemId={null} />);
     expect(options()).toHaveLength(0);
-    expect(document.querySelector(".film-set-object-list__empty")?.textContent).toContain("片场为空");
+    expect(document.querySelector(".film-set-object-dock .film-set-object-list__empty")?.textContent).toContain("片场为空");
   });
 
   it("长名称：完整名称可读（title 回退）", async () => {
@@ -98,14 +99,12 @@ describe("片场检查面板 Showcase（任务 7.1）", () => {
     expect(commandCount()).toBe(1);
   });
 
-  it("切页零命令：对象/镜头/动画页签可切换且不提交内容", async () => {
-    await mount(<FilmSetInspectorStage fixtureId="mixed" selectedItemId="a" />);
-    const list = tabs();
-    expect(list.map((t) => t.textContent)).toEqual(["对象", "镜头", "动画"]);
-    await act(async () => { list[1]!.focus(); });
-    expect(list[1]!.getAttribute("aria-selected")).toBe("true");
-    await act(async () => { list[2]!.focus(); });
-    expect(list[2]!.getAttribute("aria-selected")).toBe("true");
+  it("展开构图不提交内容，对象和拍摄镜头同时可达", async () => {
+    await mount(<FilmSetInspectorStage fixtureId="adaptation" selectedItemId="a" />);
+    expect(tabs()).toHaveLength(0);
+    const composition = document.querySelector<HTMLDetailsElement>(".film-set-composition")!;
+    await act(async () => { composition.querySelector("summary")!.click(); });
+    expect(composition.open).toBe(true);
     expect(commandCount()).toBe(0);
   });
 });

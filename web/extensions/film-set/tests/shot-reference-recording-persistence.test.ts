@@ -5,9 +5,9 @@ import {
   DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, shotReferenceProfileKey,
   type CanvasCommand
 } from "@woohaa3/contracts";
-import { persistShotReferenceRecording } from "../src/frontend/shot-reference-recording-persistence.js";
-import { ShotReferenceVersionCache, hydrateShotReferenceCacheFromCanvas } from "../src/frontend/shot-reference-version-cache.js";
-import { ShotReferenceRecordingScheduler } from "../src/frontend/shot-reference-recording-scheduler.js";
+import { persistShotReferenceRecording } from "../src/authoring/browser/shot-reference-recording-persistence.js";
+import { ShotReferenceVersionCache, hydrateShotReferenceCacheFromCanvas } from "../src/authoring/browser/shot-reference-version-cache.js";
+import { ShotReferenceRecordingScheduler } from "../src/authoring/browser/shot-reference-recording-scheduler.js";
 
 const asset = { storageKey: `sha256-${"a".repeat(64)}`, checksum: "a".repeat(64), mediaType: "video/mp4", size: 10 };
 

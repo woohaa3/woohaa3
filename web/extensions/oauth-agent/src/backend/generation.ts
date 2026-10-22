@@ -155,8 +155,8 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     controller: AbortController,
     onProgress?: GenerationProgress
   ): Promise<GenerationOutcome> => {
-    const WRITE_TOOLS = new Set(input.mode === "camera" ? (input.selectedCameraId ? ["update_model_camera", "reset_model_camera"] : ["create_model_camera"]) : input.clipId && input.mode === "film-set" ? ["mutate_film_set_clip"] : [
-      ...(input.mode === "film-set" ? ["submit_film_set", "mutate_film_set_item", "mutate_film_set_clip"] : ["submit_model_script"]),
+    const WRITE_TOOLS = new Set(input.mode === "camera" ? (input.selectedCameraId ? ["update_model_camera", "reset_model_camera"] : ["create_model_camera"]) : input.clipId && input.mode === "film-set" ? ["mutate_film_set_clip", "export_film_set_clip"] : [
+      ...(input.mode === "film-set" ? ["submit_film_set", "add_film_set_media", "export_film_set_clip", "mutate_film_set_item", "mutate_film_set_clip"] : ["submit_model_script"]),
       "create_model_camera",
       "update_model_camera",
       "delete_model_camera",
@@ -164,6 +164,8 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
       "reset_model_camera",
       "set_model_camera",
       "create_film_set_node",
+      "add_film_set_media",
+      "export_film_set_clip",
       "import_model_snapshot"
     ]);
     const applied: string[] = [];

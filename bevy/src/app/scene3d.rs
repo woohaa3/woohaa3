@@ -96,7 +96,7 @@ pub(super) fn sync_models(
     model3d::apply_animation_playback(&mut commands, models, &scene.0);
     // 活动动画节点的运动求值（change: 2026-10-05-bind-model-animation-to-shots）：独立模型
     // 姿态与唯一时钟；相机姿态写入共享资源供 shot adapter / 聚焦相机复用。
-    animation_camera.0 = model3d::apply_motion_playback(&mut commands, models, &scene.0);
+    animation_camera.0 = model3d::apply_motion_playback(&mut commands, models, &mut materials, &scene.0);
     // 质量档位只替换共享 handle，不重建 hierarchy、不执行脚本、不改 canonical AABB。
     let quality_changed = model3d::sync_quality(
         &mut commands,

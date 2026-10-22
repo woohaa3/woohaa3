@@ -1,7 +1,8 @@
 /** Trusted, scope-owned composite asset adapters. Business identity is never inferred from content. */
 import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape } from "@woohaa3/contracts";
 export type CompositeAssetMediaSource = { planeId: string; nodeId: string; assetId: string; kind: "image" | "video"; playback?: ModelMediaTimeMap; sourceIdentity: string };
-export type CompositeAssetProjection = { resource: PreparedModelResource; composition?: BevyCompositeAssetCompositionInfo; diagnostic?: string };
+/** A valid content projection may have no 3D resource; null prepare means unavailable. */
+export type CompositeAssetProjection = { resource?: PreparedModelResource; composition?: BevyCompositeAssetCompositionInfo; diagnostic?: string };
 export type CompositeAssetAdapter = {
   extensionId: string;
   owner: string;

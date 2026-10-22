@@ -5,7 +5,7 @@ import { CanvasRoom, InMemoryYjsDocumentRepository, ModelMcpService } from "@woo
 import { createModelMcpHttpHandler } from "@woohaa3/mcp-service";
 import { modelMcpServiceToClient } from "./mcp-adapters.js";
 import { createFilmSetSnapshot, defaultFilmSetContent, filmSetNodeDataFields } from "@woohaa3/contracts";
-import { filmSetMcpRuntime } from "../../../extensions/film-set/src/backend/mcp-runtime.js";
+import { filmSetMcpRuntime } from "../../../extensions/film-set/src/integration/backend/mcp-runtime.js";
 import { createToolGrantRegistry } from "./authoring-adapters.js";
 
 it("真实 MCP 在只有地面的片场生成独立模型；原子拒绝非法脚本、旧快照和局部授权", async () => {

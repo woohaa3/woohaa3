@@ -135,6 +135,8 @@ fn humanoid_ops() -> Vec<ModelOp> {
             emissive_strength: 0.0,
             alpha_mode: "opaque".into(),
             double_sided: false,
+            unlit: false,
+            opacity: None,
         },
         ModelOp::Group {
             id: "arm".into(),

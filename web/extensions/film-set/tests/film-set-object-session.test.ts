@@ -12,7 +12,7 @@ import {
   type FilmSetItem,
   type FilmSetItemPatchOp
 } from "@woohaa3/contracts";
-import { FilmSetObjectSession } from "../src/shared.js";
+import { FilmSetObjectSession } from "../src/authoring/browser/object-session.js";
 
 function item(id: string): FilmSetItem {
   return {

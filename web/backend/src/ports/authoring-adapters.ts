@@ -102,7 +102,7 @@ export function createToolGrantRegistry(now: () => number = () => Date.now()): T
       if (grant.cameraId && !input.tool.startsWith("get_") && input.cameraId !== grant.cameraId) return { ok: false, reason: "camera-not-allowed" };
       if (input.tool === "submit_film_set" && (grant.itemId || grant.clipId || grant.cameraId)) return { ok: false, reason: "whole-film-set-not-allowed" };
       if (grant.itemId && input.tool === "mutate_film_set_clip" && input.itemId !== grant.itemId) return { ok: false, reason: "item-not-allowed" };
-      if (grant.clipId && input.tool === "mutate_film_set_clip" && input.clipId !== grant.clipId) return { ok: false, reason: "clip-not-allowed" };
+      if (grant.clipId && (input.tool === "mutate_film_set_clip" || input.tool === "export_film_set_clip") && input.clipId !== grant.clipId) return { ok: false, reason: "clip-not-allowed" };
       grant.calls += 1;
       return { ok: true };
     }

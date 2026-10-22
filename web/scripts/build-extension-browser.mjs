@@ -212,22 +212,40 @@ async function collectSdkRequirements(entryFiles, baseDir) {
   return { names: [...names].sort(), namespaceImports };
 }
 
-/** 递归收集 frontend 源码文件（排除测试）。 */
-async function collectFrontendSources(dir) {
-  const out = [];
-  const walk = async (current) => {
-    for (const entry of await fs.readdir(current, { withFileTypes: true })) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === "node_modules") continue;
-        await walk(full);
-      } else if (/\.(ts|tsx)$/.test(entry.name) && !/\.test\./.test(entry.name)) {
-        out.push(full);
-      }
-    }
+/** Follow local runtime dependencies from the stable facade across responsibility directories. */
+async function collectFrontendSources(entrySource, baseDir) {
+  const ts = await loadTypescript(baseDir);
+  const visited = new Set();
+  const compilerOptions = {
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    module: ts.ModuleKind.ESNext,
+    allowJs: true,
+    jsx: ts.JsxEmit.ReactJSX
   };
-  if (existsSync(dir)) await walk(dir);
-  return out;
+  const visit = (file) => {
+    if (visited.has(file)) return;
+    visited.add(file);
+    const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+    const follow = (specifier) => {
+      if (!specifier.startsWith(".")) return;
+      const resolved = ts.resolveModuleName(specifier, file, compilerOptions, ts.sys).resolvedModule;
+      if (resolved && !resolved.resolvedFileName.endsWith(".d.ts")) visit(resolved.resolvedFileName);
+    };
+    const walk = (node) => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+        if (!node.importClause?.isTypeOnly) follow(node.moduleSpecifier.text);
+      } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+        if (!node.isTypeOnly) follow(node.moduleSpecifier.text);
+      } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+        && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
+        follow(node.arguments[0].text);
+      }
+      ts.forEachChild(node, walk);
+    };
+    walk(source);
+  };
+  visit(entrySource);
+  return [...visited].sort();
 }
 
 function sha256Hex(buffer) {
@@ -259,7 +277,7 @@ export async function buildExtensionBrowser(options = {}) {
   if (!existsSync(entrySource)) throw new Error(`缺少约定前端入口：${entrySource}`);
   if (!existsSync(metadataSource)) throw new Error(`缺少纯 metadata：${metadataSource}`);
 
-  const sources = await collectFrontendSources(path.join(dir, "src", "frontend"));
+  const sources = await collectFrontendSources(entrySource, dir);
   const { names: sdkNames, namespaceImports } = await collectSdkRequirements(sources, dir);
   if (namespaceImports.length > 0) {
     throw new Error(

@@ -12,7 +12,7 @@ import { createSqliteAgentConversationStore } from "../../../services/applicatio
 import { CanvasRoom } from "../../../services/canvas-service/src/sync/room.js";
 import { InMemoryYjsDocumentRepository } from "../../../services/canvas-service/src/sync/index.js";
 import { SqliteFilmSetConversionRegistry } from "../../../services/canvas-service/src/storage/sqlite/film-set-conversion.js";
-import { FilmSetConversionService } from "../../../extensions/film-set/src/backend/film-set-conversion.js";
+import { FilmSetConversionService } from "../../../extensions/film-set/src/authoring/backend/film-set-conversion.js";
 import { createAssistantDeliveryPort } from "./assistant-delivery.js";
 
 const cleanup: Array<() => void> = [];

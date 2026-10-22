@@ -17,6 +17,7 @@ import { createEmptyWoohaa3ServerCanvas,
   type CanvasAggregateIssue,
   type ServerCanvas } from "./index";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./core/composite-asset-identity.js";
+import { buildCanvasRenderScene } from "../render-scene.js";
 
 import emptyFixture from "./__fixtures__/empty-canvas.json";
 import fullFixture from "./__fixtures__/full-canvas.json";
@@ -188,6 +189,27 @@ describe("M4–M7 不受信任输入规范化", () => {
     expect(parsed.document.nodes.find((node) => node.id === "n-ext")?.type).toBe(COMPOSITE_ASSET_NODE_TYPE);
     // 纯模型节点不能作为边端点：相关边在规范化阶段清除。
     expect(parsed.document.edges.map((edge) => edge.id)).toEqual([]);
+  });
+
+  it("引用容器的依赖线在规范化与重新加载后保留，模型节点仍清理连线", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("reference-container", NOW);
+    canvas.document.nodes.push(
+      { id: "container", type: "composite-asset", position: { x: 0, y: 0 } },
+      { id: "model", type: "composite-asset", position: { x: 0, y: 300 } },
+      { id: "output", type: "text", position: { x: 400, y: 0 } }
+    );
+    canvas.nodeData.container = { compositeAssetRole: "reference-container" };
+    canvas.document.edges.push(
+      { id: "reference", source: "container", target: "output", sourceHandle: null, targetHandle: null, data: { kind: "dependency" } },
+      { id: "model-edge", source: "model", target: "output", sourceHandle: null, targetHandle: null, data: { kind: "dependency" } }
+    );
+    const normalized = normalizeCanvas(canvas);
+    expect(normalized.document.edges.map(edge => edge.id)).toEqual(["reference"]);
+    expect(normalizeCanvas(JSON.parse(JSON.stringify(normalized))).document.edges).toEqual(normalized.document.edges);
+    const scene = buildCanvasRenderScene({ canvas: normalized, compositeAssetScopeShapes: new Map([["container", "rect"]]) });
+    expect(scene.edges.map(edge => edge.id)).toEqual(["reference"]);
+    expect(scene.nodes.find(node => node.id === "container")?.compositeAsset).toBeDefined();
+    expect(scene.nodes.find(node => node.id === "container")?.compositeAsset).not.toHaveProperty("scopeGround");
   });
 
   it("M5 丢弃缺少端点或 data 非对象的边", () => {    const { canvas, issues } = parseOk(partialFixture);

@@ -11,7 +11,7 @@ import {
   describeRecordingFailure,
   isTerminal,
   recordingStageLabel
-} from "../src/frontend/native-recording-client.js";
+} from "../src/authoring/browser/native-recording-client.js";
 
 function status(overrides: Partial<RecordingStatusView> = {}): RecordingStatusView {
   return {

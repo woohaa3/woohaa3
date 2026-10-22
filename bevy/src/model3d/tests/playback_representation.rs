@@ -33,9 +33,13 @@ pub(super) fn playback(target: Option<&str>) -> AnimationPlayback {
 }
 fn apply(world: &mut World, scene: &Scene) {
     let mut models = world.remove_resource::<ModelVisuals>().unwrap();
-    apply_motion_playback(&mut world.commands(), &mut models, scene);
+    let mut materials = world
+        .remove_resource::<Assets<StandardMaterial>>()
+        .unwrap_or_default();
+    apply_motion_playback(&mut world.commands(), &mut models, &mut materials, scene);
     world.flush();
     world.insert_resource(models);
+    world.insert_resource(materials);
 }
 fn bindings(world: &World) -> Vec<(Entity, bevy::asset::AssetId<Mesh>)> {
     world.resource::<ModelVisuals>().roots["film"]

@@ -13,9 +13,9 @@ import {
   filmSetAnimationsOf,
   type ServerCanvas
 } from "@woohaa3/contracts";
-import { ShotReferenceRecordingQueue } from "../src/frontend/shot-reference-recording-queue.js";
-import { observeFilmSets, shotReferenceJobForClip } from "../src/frontend/shot-reference-observation.js";
-import { ShotReferenceRecordingScheduler } from "../src/frontend/shot-reference-recording-scheduler.js";
+import { ShotReferenceRecordingQueue } from "../src/authoring/browser/shot-reference-recording-queue.js";
+import { observeFilmSets, shotReferenceJobForClip } from "../src/authoring/browser/shot-reference-observation.js";
+import { ShotReferenceRecordingScheduler } from "../src/authoring/browser/shot-reference-recording-scheduler.js";
 
 function filmSetCanvas(options: { motionScript?: string; duration?: number; extraClips?: number; canvasId?: string } = {}): ServerCanvas {
   const snapshot = createFilmSetSnapshot({
@@ -163,7 +163,7 @@ describe("ShotReferenceRecordingScheduler（串行执行与触发，任务 8.3�
   function makeScheduler(options: {
     canvas: ServerCanvas | null;
     focused?: string | null;
-    recorder?: ((job: import("../src/frontend/shot-reference-recording-queue.js").ShotReferenceRecordingJob) => Promise<{ ok: true } | { ok: false; error: string }>) | null;
+    recorder?: ((job: import("../src/authoring/browser/shot-reference-recording-queue.js").ShotReferenceRecordingJob) => Promise<{ ok: true } | { ok: false; error: string }>) | null;
   }) {
     let canvas = options.canvas;
     let focused = options.focused ?? null;

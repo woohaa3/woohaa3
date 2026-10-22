@@ -37,6 +37,18 @@ function deps(overrides: Partial<Parameters<typeof createNodeDropOverlay>[0]> = 
 
 afterEach(() => document.body.replaceChildren());
 
+it("only advertises registered receivers, never an unrelated composite subject", () => {
+  const overlay = createNodeDropOverlay(deps());
+  const drag = { sourceNodeIds: ["source"], point: { x: 600, y: 200 } };
+  overlay.update(canvas, targets, drag);
+  expect(document.querySelector('[data-node-id="game"]')).not.toBeNull();
+  overlay.update(canvas, [targets[0]!], drag);
+  expect(document.querySelector('[data-node-id="game"]')).toBeNull();
+  expect(document.querySelector('[data-node-id="film"]')?.textContent).toBe(targets[0]!.dropLabel);
+  overlay.update(canvas, [], drag);
+  expect(document.querySelector(".node-drop-overlays")).toBeNull();
+});
+
 it("draws each destination polygon from accepted scope geometry and tracks active target", () => {
   const overlay = createNodeDropOverlay(deps());
   overlay.update(canvas, targets, { sourceNodeIds: ["source"], point: { x: 20, y: 50 } });

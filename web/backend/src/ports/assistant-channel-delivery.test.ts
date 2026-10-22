@@ -19,7 +19,7 @@ import { createSqliteAgentConversationStore } from "../../../services/applicatio
 import { CanvasRoom } from "../../../services/canvas-service/src/sync/room.js";
 import { InMemoryYjsDocumentRepository } from "../../../services/canvas-service/src/sync/index.js";
 import { SqliteFilmSetConversionRegistry } from "../../../services/canvas-service/src/storage/sqlite/film-set-conversion.js";
-import { FilmSetConversionService } from "../../../extensions/film-set/src/backend/film-set-conversion.js";
+import { FilmSetConversionService } from "../../../extensions/film-set/src/authoring/backend/film-set-conversion.js";
 import { createAssistantDeliveryPort } from "./assistant-delivery.js";
 
 it.each(["oauth", "local", "sdk"].flatMap(channel => ["image", "video"].flatMap(kind => [false, true].map(repair => [channel, kind, repair] as const))))("%s %s repair=%s enters the parent ledger, validates native candidate and commits the same target", async (channel, kind, repair) => {

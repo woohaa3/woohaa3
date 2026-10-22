@@ -65,7 +65,7 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   const groupIds = new Set(sanitizedNodes.filter((node) => node.type === "group").map((node) => node.id));
   // 纯模型节点（片场 animation3d + 通用扩展节点 extension3d）不能作为边端点；加载/升级时
   // 同批清除已有相关边（change D8；change: 2026-10-10-add-game-furnace-extension 泛化）。
-  const filmSetIds = new Set(sanitizedNodes.filter((node) => isPureModelNodeType(node.type)).map((node) => node.id));
+  const filmSetIds = new Set(sanitizedNodes.filter((node) => isPureModelNodeType(node.type, sanitizedNodeData[node.id] as Record<string, unknown> | undefined)).map((node) => node.id));
   // 拍摄镜头预览是归属呈现，不是普通边端点（change 2026-10-15 D2/D5）：同批清除相关边。
   // 唯一例外是合法镜头参考边（D9 / 任务 8.1）：动态镜头预览 → 视频生成节点。
   const shotPreviewIds = new Set(

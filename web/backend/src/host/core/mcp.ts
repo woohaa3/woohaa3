@@ -37,6 +37,9 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
         ...(services.createFilmSetNode ? { createFilmSetNode: services.createFilmSetNode } : {}),
         ...(services.importModelSnapshot ? { importModelSnapshot: services.importModelSnapshot } : {}),
         ...(services.commitAnimation ? { commitAnimation: services.commitAnimation } : {}),
+        ...(services.addFilmSetMedia ? { addFilmSetMedia: services.addFilmSetMedia } : {}),
+        ...(services.exportFilmSetClip ? { exportFilmSetClip: services.exportFilmSetClip } : {}),
+        ...(services.getFilmSetExport ? { getFilmSetExport: services.getFilmSetExport } : {}),
         ...(services.mutateFilmSetItem ? { mutateFilmSetItem: services.mutateFilmSetItem } : {})
       }), ctx.canvas),
       // 只共享显式配置的 Canvas 身份；缺省/空值不得凭空造身份。

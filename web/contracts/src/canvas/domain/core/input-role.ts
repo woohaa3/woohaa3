@@ -113,9 +113,10 @@ export function isFilmSetNodeType(type: string | undefined): boolean {
 /**
  * 无卡片、无端口、不能作为持久化边端点的纯模型节点类型（复合资产类别）。
  *
- * 单一事实源：连接规则、规范化清理、渲染范围过滤与 MCP 提示共用它，避免同一规则在多处
- * 分叉。
+ * 类别判断仍供范围呈现使用；连接规则、规范化与边呈现传入 nodeData，允许显式声明
+ * compositeAssetRole="reference-container" 的引用容器作为依赖端点。缺省不改变模型行为。
  */
-export function isPureModelNodeType(type: string | undefined): boolean {
-  return isCompositeAssetNodeType(type);
+export function isPureModelNodeType(type: string | undefined, data?: Record<string, unknown>): boolean {
+  // 复用 composite 范围的引用容器可以作为依赖端点；默认模型行为保持不变。
+  return isCompositeAssetNodeType(type) && data?.compositeAssetRole !== "reference-container";
 }

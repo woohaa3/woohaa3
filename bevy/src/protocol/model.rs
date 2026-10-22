@@ -263,6 +263,12 @@ pub(crate) enum ModelOp {
         alpha_mode: String,
         #[serde(default, rename = "doubleSided")]
         double_sided: bool,
+        /// 不受光照，呈平面色（change: 2026-10-19-extend-film-set-for-motion-graphics，D4）。
+        #[serde(default)]
+        unlit: bool,
+        /// blend 模式下的静态透明度（0..=1）；缺失按 [`DEFAULT_BLEND_OPACITY`]。
+        #[serde(default)]
+        opacity: Option<f32>,
     },
     Group {
         id: String,
@@ -428,6 +434,9 @@ fn default_roughness() -> f32 {
 fn default_alpha_mode() -> String {
     "opaque".to_owned()
 }
+
+/// blend 模式下未声明 `opacity` 时的静态透明度（与改动前写死的 0.6 一致）。
+pub(crate) const DEFAULT_BLEND_OPACITY: f32 = 0.6;
 
 fn default_segment_shape() -> String {
     "capsule".to_owned()

@@ -10,9 +10,9 @@ import { describe, expect, it } from "vitest";
 import type { ApplicationBackendHost, ApplicationExtensionHandlerResult } from "@woohaa3/contracts";
 import { createGameFurnaceBackendDefinition } from "../src/backend-extension.js";
 import { createGameFurnaceBackend } from "../src/backend.js";
-import { createGamePreviewHost } from "../src/preview.js";
+import { createGamePreviewHost } from "../src/preview/backend/host.js";
 import { computeInputHash, type GameFurnaceState } from "../src/shared.js";
-import { planGameFurnaceDrop } from "../src/collection.js";
+import { planGameFurnaceDrop } from "../src/authoring/shared/collection.js";
 import type { ServerCanvas } from "@woohaa3/contracts";
 
 const VALID_HTML = `<!doctype html><html><body><script>let s=0;function l(){s++;requestAnimationFrame(l)}l();</script></body></html>`;

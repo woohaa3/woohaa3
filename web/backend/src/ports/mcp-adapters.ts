@@ -34,6 +34,11 @@ export function modelMcpServiceToClient(
     importModelSnapshot?: (input: McpImportModelSnapshotRequest & { canvasId: string }) => Promise<CreateFilmSetNodeOutcome>;
     /** 片场对象级权威变更（change: 2026-10-09-add-film-set-object-motion-and-editing）。 */
     mutateFilmSetItem?: (input: McpMutateFilmSetItemRequest & { canvasId: string }) => Promise<MutateFilmSetItemOutcome>;
+    /** 片场媒体条目受控导入（D5）。 */
+    addFilmSetMedia?: (input: import("@woohaa3/contracts").McpAddFilmSetMediaRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpAddFilmSetMediaOutcome>;
+    /** agent 发起显式导出与查询（D8）。 */
+    exportFilmSetClip?: (input: import("@woohaa3/contracts").McpExportFilmSetClipRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpExportFilmSetClipOutcome>;
+    getFilmSetExport?: (input: import("@woohaa3/contracts").McpGetFilmSetExportRequest & { canvasId: string }) => Promise<import("@woohaa3/contracts").McpGetFilmSetExportOutcome>;
   }
 ): CanvasMcpClient {
   const unavailable = { ok: false as const, code: "unavailable", message: "模型 MCP 当前不可用" };
@@ -135,6 +140,22 @@ export function modelMcpServiceToClient(
     async mutateFilmSetItem(input) {
       if (!options.mutateFilmSetItem) return unavailable as never;
       return options.mutateFilmSetItem({ ...input, canvasId: canvasId(input.canvasId) }) as never;
+    },
+    async addFilmSetMedia(input) {
+      if (!options.addFilmSetMedia) return unavailable as never;
+      return options.addFilmSetMedia({ ...input, canvasId: canvasId(input.canvasId) }) as never;
+    },
+    async exportFilmSetClip(input) {
+      if (!options.exportFilmSetClip) {
+        return { ok: false, code: "recording-unavailable", message: "当前宿主未提供原生录制能力" } as never;
+      }
+      return options.exportFilmSetClip({ ...input, canvasId: canvasId(input.canvasId) }) as never;
+    },
+    async getFilmSetExport(input) {
+      if (!options.getFilmSetExport) {
+        return { ok: false, code: "recording-unavailable", message: "当前宿主未提供原生录制能力" } as never;
+      }
+      return options.getFilmSetExport({ ...input, canvasId: canvasId(input.canvasId) }) as never;
     },
     async ready() {
       return service ? { ready: true } : { ready: false, reason: "模型 MCP 当前不可用" };

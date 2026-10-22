@@ -114,7 +114,7 @@ export function createTaskExtensionTaskApiHandler(deps: TaskExtensionTaskApiDepe
       const detail=deps.history.get(workerTaskKey,{fullText:true});
       if(!detail){sendError(res,404,"task-not-found","任务不存在");return true;}
       const result=detail.result ? {...detail.result,textTruncated:false} : undefined;
-      sendJson(res,200,{workerTaskKey,state:detail.state,...(result?{result}: {})});return true;
+      sendJson(res,200,{workerTaskKey,state:detail.state,...(result?{result}: {}),...(detail.error?{error:detail.error}: {})});return true;
     }
 
     if (isCancel && req.method === "POST") return handleCancel(res, extensionId, workerTaskKey, deps, log);
