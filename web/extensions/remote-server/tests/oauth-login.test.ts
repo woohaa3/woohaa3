@@ -8,7 +8,7 @@
  * 3. loopback 之外的 origin、站内相对地址、没有公开回调的宿主一律 unsupported（回退短码）。
  */
 import { describe, expect, it } from "vitest";
-import { createRemoteServerExtension } from "../src/backend/index.js";
+import { createMemorySessionStore, createRemoteServerExtension, type RemoteSessionStore } from "../src/backend/index.js";
 import {
   REMOTE_SERVER_OAUTH_CALLBACK_ROUTE,
   REMOTE_SERVER_OAUTH_DONE_ROUTE,
@@ -94,6 +94,7 @@ function activate(options: {
   basePath?: string;
   raw?: boolean;
   canvas?: Record<string, unknown>;
+  store?: RemoteSessionStore;
 }) {
   const fixture = createHost({
     ...(options.basePath !== undefined ? { basePath: options.basePath } : {}),
@@ -103,7 +104,8 @@ function activate(options: {
   const definition = createRemoteServerExtension({
     deployment: () => options.deployment,
     fetchImpl: options.fetchImpl,
-    ...(options.now ? { now: options.now } : {})
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.store ? { store: options.store } : {})
   });
   definition.activate(fixture.host as never);
   return fixture;
@@ -208,6 +210,27 @@ describe("oauth-start", () => {
     // 32 字节 base64url = 43 字符（RFC 7636 的挑战长度）。
     expect(params.challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it("部署文件缺失但已登录时，浏览器登录用会话地址（不再报「还没有配置服务端地址」）", async () => {
+    const fake = createFakeServer();
+    const store = createMemorySessionStore();
+    await store.save({
+      serverUrl: "https://canvas.example.com",
+      token: "session-1",
+      subject: "ops-admin",
+      displayName: null,
+      expiresAt: Date.now() + 3_600_000
+    });
+    const fixture = activate({
+      deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" },
+      fetchImpl: fake.fetch,
+      store
+    });
+
+    const { params } = await startAttempt(fixture);
+    expect(params.url.origin).toBe("https://canvas.example.com");
+    expect(params.url.pathname).toBe("/tof/authorize");
   });
 
   it("响应体里没有 verifier（只有 challenge 能出门）", async () => {

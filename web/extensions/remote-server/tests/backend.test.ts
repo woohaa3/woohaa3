@@ -118,6 +118,35 @@ describe("remote-server 后端", () => {
     expect(result.body).toMatchObject({ phase: "local", serverUrl: null, subject: null });
   });
 
+  it("部署文件缺失但已登录时，登录的默认目标地址取会话里那个服务端", async () => {
+    const fake = createFakeServer();
+    const store = createMemorySessionStore();
+    await store.save({
+      serverUrl: "https://canvas.example.com",
+      token: "session-1",
+      subject: "ops-admin",
+      displayName: null,
+      expiresAt: Date.now() + 3_600_000
+    });
+    // 记录出站地址：要证明的是「打到会话里那个服务端」，而不是「恰好登录成功了」。
+    const outbound: string[] = [];
+    const host = activate({
+      deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" },
+      fetchImpl: ((input: RequestInfo | URL, init?: RequestInit) => {
+        outbound.push(String(input));
+        return fake.fetch(input as never, init);
+      }) as typeof globalThis.fetch,
+      store
+    });
+
+    const login = await host.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "device-token" });
+    // 不再是「还没有配置服务端地址」的 400：默认目标来自已登录会话。
+    expect(login.status).toBe(200);
+    expect((login.body as { ok: boolean }).ok).toBe(true);
+    expect(outbound.length).toBeGreaterThan(0);
+    expect(outbound.every((url) => url.startsWith("https://canvas.example.com"))).toBe(true);
+  });
+
   it("一键登录：用部署凭证换会话，并把主体收敛到 WhoAmI 的答案", async () => {
     const fake = createFakeServer({ identities: { "device-token": "channel-alice" }, whoAmIOverride: "alice@example.com" });
     const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
