@@ -11,8 +11,8 @@ import { LOCAL_AGENT_PLUGIN_ID } from "../shared.js";
 export const LOCAL_AGENT_FRONTEND_METADATA: ExtensionFrontendMetadata = {
   extensionId: LOCAL_AGENT_PLUGIN_ID,
   version: "0.1.0",
-  label: "本机 Agent 来源",
-  description: "连接后端机器上的 Codex App Server / OpenCode / CodeBuddy 本机服务（默认关闭）。",
+  label: "本地 agent",
+  description: "连接运行本应用的电脑上的本地 ChatGPT / 本地 OpenCode / 本地 CodeBuddy（默认关闭）。",
   icon: "agent",
   activation: "server-active",
   configScope: "site",

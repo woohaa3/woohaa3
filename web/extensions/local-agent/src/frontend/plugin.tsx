@@ -54,7 +54,7 @@ export function localAgentExtension(options: LocalAgentExtensionOptions = {}): P
         owner: LOCAL_AGENT_PLUGIN_ID,
         priority: 20,
         kind: "installed",
-        label: "使用已安装工具",
+        label: "我有本地 agent",
         render: (props) => <LocalAgentSettingsPanel remote={remote} {...props} onOpenRuntimes={() => {
           void (ctx.get("settingsOpen" as never) as { open(input: { section: "runtimes" }): Promise<unknown> } | undefined)?.open({ section: "runtimes" });
         }} />

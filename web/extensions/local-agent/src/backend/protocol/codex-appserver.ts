@@ -75,7 +75,7 @@ export function initializeRequest(id: number, input: { clientName: string; clien
 export function checkInitializeResult(result: Record<string, unknown>, expectedProtocolVersion: string): { ok: true } | { ok: false; code: "protocol-mismatch"; message: string } {
   const version = typeof result.protocolVersion === "string" ? result.protocolVersion : "";
   if (version !== "" && version !== expectedProtocolVersion) {
-    return { ok: false, code: "protocol-mismatch", message: `Codex App Server 协议版本不匹配（期望 ${expectedProtocolVersion}，实际 ${version}）` };
+    return { ok: false, code: "protocol-mismatch", message: `本地 ChatGPT 协议版本不匹配（期望 ${expectedProtocolVersion}，实际 ${version}）` };
   }
   return { ok: true };
 }

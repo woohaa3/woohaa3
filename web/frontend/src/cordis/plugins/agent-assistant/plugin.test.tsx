@@ -20,7 +20,7 @@ afterEach(async () => { act(() => root?.unmount()); await runtime?.dispose(); do
 async function render(connections: AgentConnectionView[] = [], configure = false, settingsStore?: ReturnType<typeof createBackendSettingsStore>, payload: {canvasId?: string; nodeId?: string; kind?: string} = {canvasId: "canvas", nodeId: "node"}) {
   const slots = new SlotRegistry();
   if (configure) slots.register("agent-assistant.configuration", { id: "api", owner: "sdk-agent", kind: "api-key", label: "API Key", render: ({ onSaved }) => <><DraftInput /><button onClick={() => onSaved?.("c1")}>保存测试连接</button><SelectInput label="配置类型" value="one" onValueChange={() => {}} options={[{value:"one",label:"类型一"},{value:"two",label:"类型二"}]} /></> });
-  if (configure) slots.register("agent-assistant.configuration", { id: "local", owner: "local-agent", kind: "installed", label: "调用本机 Agent", render: () => <p>本机工具配置</p> });
+  if (configure) slots.register("agent-assistant.configuration", { id: "local", owner: "local-agent", kind: "installed", label: "我有本地 agent", render: () => <p>本机工具配置</p> });
   const listConnections = vi.fn(async () => ({ ok: true as const, value: connections }));
   const service = { listConnections } as unknown as AgentConversationService;
   runtime = await startFrontendRuntime({ installPlatform: (ctx) => { ctx.provide("slots" as never, slots as never); }, plugins: [] });
@@ -40,20 +40,20 @@ it("全部扩展缺失仍能添加和读取外部指引，打开不推理", asyn
   expect(f.el.textContent).toContain("安装这个 MCP 服务：");
   await f.click("助手");
   await f.click("添加助手");
-  for (const text of ["授权", "调用本机 Agent", "API Key"]) expect(f.el.textContent).toContain(text);
+  for (const text of ["我有 ChatGPT 账号", "我有本地 agent", "我有 API Key"]) expect(f.el.textContent).toContain(text);
   expect(f.el.querySelectorAll("button:disabled")).toHaveLength(3);
   expect(f.listConnections).toHaveBeenCalledTimes(1);
 });
 it("配置贡献的下拉浮层归属助手弹窗，不落到应用背景层", async () => {
   const f = await render([], true);
-  await f.click("添加助手"); await f.click("API Key");
+  await f.click("添加助手"); await f.click("我有 API Key");
   await act(async () => f.el.querySelector<HTMLButtonElement>('button[aria-label="配置类型"]')!.click());
   const option = [...document.querySelectorAll('[role="option"]')].find((item) => item.textContent === "类型二");
   expect(option?.closest(".agent-assistant")).toBe(f.el.querySelector(".agent-assistant"));
   expect(option?.closest("[data-ui-portal-scope]")).not.toBeNull();
-  await f.click("调用本机 Agent");
+  await f.click("我有本地 agent");
   expect(option?.closest("[hidden]")).not.toBeNull();
-  await f.click("API Key");
+  await f.click("我有 API Key");
   await f.click("MCP");
   for (const popup of f.el.querySelectorAll('[data-ui-portal-scope] [data-ui-popover]')) expect(popup.closest("[hidden]")).not.toBeNull();
   expect(f.el.querySelector('[data-ai-tab="intelligence"]')?.hasAttribute("hidden")).toBe(true);
@@ -61,7 +61,7 @@ it("配置贡献的下拉浮层归属助手弹窗，不落到应用背景层", a
 it("同一容器内添加、诊断并显式用于作品；关闭不执行", async () => {
   const connection = { connectionId: "c1", extensionId: "sdk-agent", name: "我的 API", authMode: "api-key", ready: false, status: { transport: { state: "unknown" }, credential: { state: "ready" }, modelAccess: { state: "unknown" }, tools: { state: "unknown" } } } as AgentConnectionView;
   const f = await render([connection], true);
-  await f.click("添加助手"); await f.click("API Key");
+  await f.click("添加助手"); await f.click("我有 API Key");
   expect(f.el.querySelectorAll(".agent-assistant")).toHaveLength(1);
   await f.click("保存测试连接");
   expect(f.el.textContent).toContain("我的 API");
@@ -202,12 +202,12 @@ it("仅点击选择完整宽度表单，悬停与移开不改变选择，跨方�
     });
     expect(api.dataset.selected).toBe("true");
     expect(field.closest("[hidden]")).toBeNull();
-    await f.click("API Key"); // Selecting the same method does not collapse it.
+    await f.click("我有 API Key"); // Selecting the same method does not collapse it.
     expect(field.closest("[hidden]")).toBeNull();
-    await f.click("调用本机 Agent");
+    await f.click("我有本地 agent");
     expect(field.closest("[hidden]")).not.toBeNull();
     expect(f.el.querySelectorAll("[data-form-kind]:not([hidden])")).toHaveLength(1);
-    await f.click("API Key");
+    await f.click("我有 API Key");
     expect(f.el.querySelector("input")).toBe(field);
     expect(field.value).toBe("draft-key");
     for (const tab of ["MCP", "生成服务"]) {
