@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "node": {"minimum": "22", "license": "MIT", "source": "https://nodejs.org/"},
+  "ffmpeg": {"minimum": "6", "license": "LGPL-2.1-or-later / GPL depending on build", "source": "https://ffmpeg.org/download.html", "binaries": ["ffmpeg", "ffprobe"]},
+  "python": {"minimum": "3.11", "license": "PSF-2.0", "requirements": "requirements.txt"},
+  "toktx": {
+    "version": "4.4.2", "license": "Apache-2.0", "source": "https://github.com/KhronosGroup/KTX-Software/releases/tag/v4.4.2",
+    "windows-x64-installer-sha256": "1f323b0fec19794f5e6c0425a61d4b1da396872a10be862d105f4f4b2d2957fe",
+    "windows-x64": "https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Windows-x64.exe",
+    "darwin-arm64": "https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Darwin-arm64.pkg"
+  }
+}
