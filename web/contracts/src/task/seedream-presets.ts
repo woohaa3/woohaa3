@@ -9,9 +9,14 @@
  * 2. 官方像素值（`WIDTHxHEIGHT`）——用来**固定宽高比**，每个档位有一张官方像素表。
  *
  * 网关（LiteLLM / TokenHub）与 Ark 原生接口共用这一套取值，所以档位、像素表与参考图上限
- * 放在 contracts，Provider 只负责把面板语义翻译成自己的请求字段（原生 Ark 的 `size`、
+ * 放在 contracts，Provider 只负责把面板语义翻译到自己的请求字段（原生 Ark 的 `size`、
  * OpenAI 兼容网关的 `size` 都一样，翻译层只查表）。组图、图层拆分、输出格式这类
  * **模型级能力**仍由 Ark 目录（`ark-provider/src/provider/catalog.ts`）声明，不在这里重复。
+ *
+ * 档位以官方文档为准，但**网关与原生接口的能力并不总是对齐**：5.0 pro 的官方档位是
+ * 1K / 1.5K / 2K，经 LiteLLM 网关调用时上游却只放行 1K / 2K（见 `gatewayResolutions`）。
+ * 因此 `resolutions` 保留官方语义给原生 Ark 用，网关链路按 `gatewayResolutions` 收窄——
+ * 面板与请求映射都取收窄后的档位，避免「面板能选 1.5K、请求被上游挡回」。
  *
  * 数据来自火山方舟图片生成文档的「模型参数」节（Seedream 5.0 pro / flash、5.0 lite、
  * 4.5、4.0 各有一页；`size` 的两种方式、总像素窗口与宽高比范围在那里）：
@@ -38,6 +43,14 @@ export type SeedreamSizePreset = {
   prefixes?: readonly string[];
   /** 官方 `size` 档位。 */
   resolutions: readonly string[];
+  /**
+   * 经 LiteLLM 网关（OpenAI 兼容图片接口）调用时**再收窄**的档位，缺省与官方一致。
+   *
+   * 被收窄的只有「档位串」：官方方式 2 的像素值不受影响，所以像素表仍按官方数据保留。
+   * 目前只有 5.0 pro 需要——上游对 `doubao-seedream-5-0-pro-260628` 返回
+   * `size ... must be one of 1K, 2K or a custom WIDTHxHEIGHT value.`。
+   */
+  gatewayResolutions?: readonly string[];
   defaultResolution: string;
   /**
    * 官方像素表：档位 → 宽高比 → `WIDTHxHEIGHT`。
@@ -131,11 +144,31 @@ const FOUR_K_SIZES = {
 
 const PRO_ASPECT_RATIOS = SEEDREAM_ASPECT_RATIOS;
 
-/** 5.0 Pro / 5.0 Flash：1K–2K，像素表按档位给出。 */
+/**
+ * 5.0 Pro：官方档位 1K / 1.5K / 2K，像素表按档位给出。
+ *
+ * 官方（Ark / BytePlus）给 pro 与 flash 都列了 1.5K，但**经 LiteLLM 网关调用时 pro 只放行
+ * 1K / 2K**，所以网关链路收窄到 `gatewayResolutions`；原生 Ark 直连不受此限，仍按官方
+ * `resolutions` 提供 1.5K。
+ */
 const SEEDREAM_5_PRO: SeedreamSizePreset = {
-  id: "seedream-5",
-  aliases: ["seedream-5-pro", "doubao-seedream-5.0-pro", "doubao-seedream-5.0-flash"],
-  prefixes: ["seedream-5", "seedream-image-5", "doubao-seedream-5-0-pro", "doubao-seedream-5-0-flash"],
+  id: "seedream-5-pro",
+  aliases: ["seedream-5-pro", "doubao-seedream-5.0-pro", "doubao-seedream-5-0-pro"],
+  prefixes: ["seedream-5-pro", "seedream-image-5-pro", "doubao-seedream-5-0-pro"],
+  resolutions: ["1K", "1.5K", "2K"],
+  gatewayResolutions: ["1K", "2K"],
+  defaultResolution: "2K",
+  sizes: PRO_SIZES,
+  aspectRatios: PRO_ASPECT_RATIOS,
+  pixelWindow: { minTotalPixels: 921_600, maxTotalPixels: 4_624_220, minAspectRatio: 1 / 16, maxAspectRatio: 16 },
+  maxReferenceImages: 10,
+};
+
+/** 5.0 Flash：1K–2K，像素表与 pro 相同（官方两个版本共用同一张表），网关未收窄。 */
+const SEEDREAM_5_FLASH: SeedreamSizePreset = {
+  id: "seedream-5-flash",
+  aliases: ["seedream-5-flash", "doubao-seedream-5.0-flash", "doubao-seedream-5-0-flash"],
+  prefixes: ["seedream-5-flash", "seedream-image-5-flash", "doubao-seedream-5-0-flash"],
   resolutions: ["1K", "1.5K", "2K"],
   defaultResolution: "2K",
   sizes: PRO_SIZES,
@@ -204,6 +237,7 @@ const SEEDREAM_GENERIC: SeedreamSizePreset = {
 export const SEEDREAM_SIZE_PRESETS: readonly SeedreamSizePreset[] = [
   SEEDREAM_5_LITE,
   SEEDREAM_5_PRO,
+  SEEDREAM_5_FLASH,
   SEEDREAM_4_5,
   SEEDREAM_4_0,
   SEEDREAM_GENERIC,
@@ -236,6 +270,14 @@ export function seedreamPixelSize(
   const tiers = preset.sizes[tier];
   if (!tiers) return undefined;
   return tiers[ratio];
+}
+
+/**
+ * 经 LiteLLM 网关调用时可用的档位：声明了 `gatewayResolutions` 的版本以它为准，
+ * 其余与官方一致。面板与请求映射都取这里，保证「能选的」与「发得出去的」一致。
+ */
+export function seedreamGatewayResolutions(preset: SeedreamSizePreset): readonly string[] {
+  return preset.gatewayResolutions ?? preset.resolutions;
 }
 
 /** 该版本是否有官方比例表（决定面板是否提供「比例」控件）。 */

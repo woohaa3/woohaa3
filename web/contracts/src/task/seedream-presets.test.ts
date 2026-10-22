@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SEEDREAM_SIZE_PRESETS,
+  seedreamGatewayResolutions,
   seedreamPixelSize,
   seedreamSizePresetFor,
   seedreamSupportsAspectRatio,
@@ -10,9 +11,10 @@ describe("即梦（Seedream）官方 size 语义", () => {
   it("按模型 id 命中版本，Lite 不会被 5.0 通用前缀吞掉", () => {
     expect(seedreamSizePresetFor("doubao-seedream-5-0-260128")?.id).toBe("seedream-5-lite");
     expect(seedreamSizePresetFor("doubao-seedream-5-0-lite-260128")?.id).toBe("seedream-5-lite");
-    expect(seedreamSizePresetFor("doubao-seedream-5-0-pro-260628")?.id).toBe("seedream-5");
-    expect(seedreamSizePresetFor("doubao-seedream-5-0-flash-260915")?.id).toBe("seedream-5");
-    expect(seedreamSizePresetFor("seedream-5-pro")?.id).toBe("seedream-5");
+    expect(seedreamSizePresetFor("doubao-seedream-5-0-pro-260628")?.id).toBe("seedream-5-pro");
+    expect(seedreamSizePresetFor("doubao-seedream-5-0-flash-260915")?.id).toBe("seedream-5-flash");
+    expect(seedreamSizePresetFor("seedream-5-pro")?.id).toBe("seedream-5-pro");
+    expect(seedreamSizePresetFor("seedream-5-flash")?.id).toBe("seedream-5-flash");
     expect(seedreamSizePresetFor("doubao-seedream-4-5-251128")?.id).toBe("seedream-4.5");
     expect(seedreamSizePresetFor("doubao-seedream-4-0-250828")?.id).toBe("seedream-4.0");
     expect(seedreamSizePresetFor("qwen-image-2512")).toBeUndefined();
@@ -21,11 +23,28 @@ describe("即梦（Seedream）官方 size 语义", () => {
 
   it("档位与默认分辨率按版本区分", () => {
     expect(seedreamSizePresetFor("seedream-5-pro")?.resolutions).toEqual(["1K", "1.5K", "2K"]);
+    expect(seedreamSizePresetFor("seedream-5-flash")?.resolutions).toEqual(["1K", "1.5K", "2K"]);
     expect(seedreamSizePresetFor("seedream-5-lite")?.resolutions).toEqual(["2K", "3K", "4K"]);
     expect(seedreamSizePresetFor("seedream-4.5")?.resolutions).toEqual(["2K", "4K"]);
     expect(seedreamSizePresetFor("seedream-4.0")?.resolutions).toEqual(["1K", "2K", "4K"]);
     for (const preset of SEEDREAM_SIZE_PRESETS) {
       expect(preset.resolutions).toContain(preset.defaultResolution);
+    }
+  });
+
+  it("网关链路按 gatewayResolutions 收窄（5.0 pro 只放行 1K / 2K）", () => {
+    const pro = seedreamSizePresetFor("seedream-5-pro")!;
+    expect(seedreamGatewayResolutions(pro)).toEqual(["1K", "2K"]);
+    // 官方语义仍保留，供原生 Ark 直连使用。
+    expect(pro.resolutions).toEqual(["1K", "1.5K", "2K"]);
+
+    for (const id of ["seedream-5-flash", "seedream-5-lite", "seedream-4.5", "seedream-4.0"]) {
+      const preset = seedreamSizePresetFor(id)!;
+      expect(seedreamGatewayResolutions(preset)).toEqual(preset.resolutions);
+    }
+    // 收窄后的档位必须仍覆盖默认分辨率。
+    for (const preset of SEEDREAM_SIZE_PRESETS) {
+      expect(seedreamGatewayResolutions(preset)).toContain(preset.defaultResolution);
     }
   });
 

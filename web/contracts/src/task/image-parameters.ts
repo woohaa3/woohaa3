@@ -37,6 +37,7 @@ import {
   imageModelPresetFor
 } from './model-presets.js';
 import {
+  seedreamGatewayResolutions,
   seedreamPixelSize,
   seedreamSizePresetFor,
   seedreamSupportsAspectRatio
@@ -200,6 +201,9 @@ export function imageFamilyParameters(modelId: string): {
     const spec = seedreamSizePresetFor(modelId)!;
     // 即梦没有 `aspect_ratio`：能不能固定比例取决于该版本有没有官方像素表。
     const supportsRatio = seedreamSupportsAspectRatio(spec);
+    // 网关链路按收窄后的档位出面板（5.0 pro 经 LiteLLM 只有 1K / 2K）。
+    const tiers = seedreamGatewayResolutions(spec);
+    const defaultResolution = seedreamDefaultTier(spec, tiers);
     return {
       maxReferenceImages: spec.maxReferenceImages,
       schemaVersion: 'litellm-seedream/v1',
@@ -216,13 +220,13 @@ export function imageFamilyParameters(modelId: string): {
             }
           : {}),
         resolution: resolutionField({
-          tiers: spec.resolutions,
-          fallback: spec.defaultResolution,
+          tiers,
+          fallback: defaultResolution,
           title: '图片分辨率',
         }),
       },
       defaults: {
-        resolution: spec.defaultResolution,
+        resolution: defaultResolution,
         ...(supportsRatio ? { aspectRatio: ADAPTIVE_PARAMETER_VALUE } : {}),
       },
     };
@@ -252,21 +256,32 @@ export function imageRequestFields(
 function seedreamImageFields(modelId: string, input: Record<string, unknown>): Record<string, string | number> {
   const spec = seedreamSizePresetFor(modelId);
   if (!spec) return { size: '2K' };
+  const tiers = seedreamGatewayResolutions(spec);
+  const defaultTier = seedreamDefaultTier(spec, tiers);
   const requestedResolution = readText(input.resolution);
-  const tier = requestedResolution && spec.resolutions.includes(requestedResolution)
-    ? requestedResolution
-    : spec.defaultResolution;
+  // 旧草稿可能还留着网关不认的档位（如 5.0 pro 的 1.5K），这里按默认档收敛，
+  // 不把注定被上游 400 的值发出去。
+  const tier = requestedResolution && tiers.includes(requestedResolution) ? requestedResolution : defaultTier;
   const ratio = readText(input.aspectRatio ?? input.aspect_ratio);
   const normalizedRatio = ratio && !isAdaptiveParameterValue(ratio) ? ratio : undefined;
   const pixel = normalizedRatio ? seedreamPixelSize(spec, normalizedRatio, tier) : undefined;
   if (pixel) return { size: pixel };
   // 没有官方比例表（如 4.0）或比例不在表里：下发档位，由模型决定宽高比。
-  if (requestedResolution && spec.resolutions.includes(requestedResolution)) {
+  if (requestedResolution && tiers.includes(requestedResolution)) {
     return { size: requestedResolution };
   }
   const explicit = readText(input.size);
   if (explicit && /^\d{3,5}x\d{3,5}$/.test(explicit)) return { size: explicit };
-  return { size: spec.defaultResolution };
+  return { size: defaultTier };
+}
+
+/** 默认档位始终落在可用档位里（收窄后的档位集合可能不含官方默认值）。 */
+function seedreamDefaultTier(
+  spec: { defaultResolution: string },
+  tiers: readonly string[],
+): string {
+  if (tiers.includes(spec.defaultResolution)) return spec.defaultResolution;
+  return tiers[tiers.length - 1] ?? spec.defaultResolution;
 }
 
 function geminiImageFields(modelId: string, input: Record<string, unknown>): Record<string, string | number> {

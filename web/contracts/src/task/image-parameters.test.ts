@@ -36,6 +36,16 @@ describe("imageFamilyParameters", () => {
     expect(family.properties).not.toHaveProperty("n");
   });
 
+  it("seedream 网关档位收窄：5.0 pro 只给 1K / 2K，flash 保留 1.5K", () => {
+    const pro = imageFamilyParameters("seedream-5-pro")!;
+    const proResolution = pro.properties.resolution as { enum: Array<{ value: string }> };
+    expect(proResolution.enum.map((item) => item.value)).toEqual(["1K", "2K"]);
+
+    const flash = imageFamilyParameters("seedream-5-flash")!;
+    const flashResolution = flash.properties.resolution as { enum: Array<{ value: string }> };
+    expect(flashResolution.enum.map((item) => item.value)).toEqual(["1K", "1.5K", "2K"]);
+  });
+
   it("gemini 与 gpt-image 的默认值/取值域随模型代际变化", () => {
     const gemini = imageFamilyParameters("gemini-2.5-flash-image")!;
     expect(gemini.defaults.resolution).toBe("1K");
@@ -54,8 +64,17 @@ describe("imageRequestFields", () => {
   it("seedream 查官方像素表；自适应只发档位", () => {
     expect(imageRequestFields("seedream-5-pro", { resolution: "2K", aspectRatio: "16:9" }))
       .toEqual({ size: "2848x1600" });
-    expect(imageRequestFields("seedream-5-pro", { resolution: "1.5K", aspectRatio: "auto" }))
+    // flash 的 1.5K 档位官方支持，自适应时原样下发。
+    expect(imageRequestFields("seedream-5-flash", { resolution: "1.5K", aspectRatio: "auto" }))
       .toEqual({ size: "1.5K" });
+  });
+
+  it("seedream 网关不认的档位按默认档收敛（5.0 pro 的 1.5K 变 2K）", () => {
+    // 旧草稿里可能残留 1.5K：网关只放行 1K / 2K，发出去会被上游 400，这里收敛到默认 2K。
+    expect(imageRequestFields("seedream-5-pro", { resolution: "1.5K", aspectRatio: "auto" }))
+      .toEqual({ size: "2K" });
+    expect(imageRequestFields("seedream-5-pro", { resolution: "1.5K", aspectRatio: "16:9" }))
+      .toEqual({ size: "2848x1600" });
   });
 
   it("gemini 发 flat 字段，自适应不下发比例", () => {
