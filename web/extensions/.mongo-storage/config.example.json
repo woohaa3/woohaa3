@@ -1,0 +1,4 @@
+{
+  "uri": "mongodb://<user>:<password>@<host>:27017/?authSource=admin",
+  "database": "woohaa3"
+}

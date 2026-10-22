@@ -1,0 +1,49 @@
+{
+  "name": "@sdppp/pptask-worker-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./history": {
+      "types": "./dist/history/index.d.ts",
+      "import": "./dist/history/index.js"
+    },
+    "./direct": {
+      "types": "./dist/history/direct.d.ts",
+      "import": "./dist/history/direct.js"
+    },
+    "./direct-node": {
+      "types": "./dist/history/direct-node.d.ts",
+      "import": "./dist/history/direct-node.js"
+    },
+    "./conformance": {
+      "types": "./dist/conformance/task-store.d.ts",
+      "import": "./dist/conformance/task-store.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sdppp/pptask": "workspace:*"
+  },
+  "peerDependencies": {
+    "ai": "^7.0.0"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "^4.0.14",
+    "@types/node": "^20.11.25",
+    "ai": "^7.0.99",
+    "typescript": "^5.6.2",
+    "vitest": "^2.0.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "extensions": [
+    "sqlite-storage",
+    "local-storage",
+    "cos-storage",
+    "ark-provider",
+    "fal-provider",
+    "grsai-provider",
+    "replicate-provider",
+    "runninghub-provider",
+    "tokenhub-provider",
+    "film-set",
+    "game-furnace",
+    "local-agent",
+    "oauth-agent",
+    "sdk-agent",
+    "remote-server",
+    "prompt-snippets",
+    "task-activity"
+  ]
+}

@@ -1,0 +1,115 @@
+# node
+node_modules/
+# 软链形式的依赖目录（worktree 指向主仓 node_modules）不被 `node_modules/` 匹配
+node_modules
+dist/
+server-dist/
+
+# rust / wasm
+bevy/target/
+bevy/target-host/
+bevy/core/target/
+photocraft/rust/target/
+desktop/target/
+desktop/supervisor/target/
+# Tauri 构建生成的能力/权限 schema（tauri-build 每次构建重写，不入库）
+desktop/gen/
+# 桌面打包时生成的输入（bundle 默认值等），不入库
+desktop/build/
+# wasm-bindgen 产物：js/wasm 由 scripts/build-bevy-wasm.mjs 生成，不入库；
+# 同名 .d.ts 保持入库以便未构建时 tsc 也能解析模块。
+web/frontend/src/bevy-wasm/*.js
+web/frontend/src/bevy-wasm/*.wasm
+web/frontend/src/bevy-wasm/*.wasm.d.ts
+# 字体由构建脚本从 bevy/assets/fonts/ 复制到 public/，不入库（源文件在 bevy/ 下）。
+web/frontend/public/assets/
+# PhotoCraft WASM 由根构建复制进前端源码图，产物不入库（唯一构建者仍是 photocraft/）。
+web/frontend/src/photocraft-wasm/
+# PhotoCraft 内核/核验产物由子项目构建到各包 `dist/`（已被上面的 `dist/` 覆盖）；
+# 编译缓存固定在子项目 `.local/`（已被下面的 `.local/` 覆盖）。旧路径不再生成。
+
+# env / secrets
+.env
+.env.local
+# 本地服务端热重启用的环境变量（从 dev 实例 runtime.env 复制而来，含数据库与存储凭据）
+web/woohaa.config.yml
+web/woohaa.secrets.yml
+
+# 本地对象存储（storage.local 的缺省根目录，相对进程 cwd）
+.woohaa3/
+
+# os
+.DS_Store
+
+# core dumps（仅根目录，避免误伤 `src/**/core/` 源码目录）
+/core
+/core.[0-9]*
+# 任意子目录下的 core dump 文件（如 bevy/core.<pid>）
+core.[0-9]*
+
+# ts build info
+# 本地扩展预检输出，不随代码提交
+.local-extcheck*.log
+*.tsbuildinfo
+
+# local dev runtime (sqlite dev database, probes)
+.local/
+# 本地 dev/preview 从仓库根启动后端时，generation 存储缺省落在 cwd
+/generation-models.sqlite
+
+# local build, verification and performance artifacts
+/artifacts/
+
+# extension independent browser builds（生成物，不入库；release 由 assembly 组合）
+web/extensions/*/browser-dist/
+web/extensions/*/.browser-build/
+web/extensions/*/.browser-test/
+# 第二扩展根（仓库根 extensions/）的同名生成物
+extensions/*/browser-dist/
+extensions/*/.browser-build/
+extensions/*/.browser-test/
+# assembled release output（host dist 内组合的扩展资源与发布目录）
+web/frontend/dist/extensions/
+web/frontend/dist/extension-releases/
+
+# goal tracking
+.pi/
+.codebuddy/
+test-results/
+playwright-report/
+
+# impeccable-ignore-start
+# Temporary output, runtime state, and per-developer overrides.
+# Keep shared config, design specifications, surface briefs, and reports tracked.
+**/.impeccable/config.local.json
+**/.impeccable/hook.cache.json
+**/.impeccable/hook.pending.json
+**/.impeccable/*.png
+**/.impeccable/review/
+**/.impeccable/questions/
+**/.impeccable/live/server.json
+**/.impeccable/live/sessions/
+**/.impeccable/live/previews/
+**/.impeccable/live/annotations/
+**/.impeccable/live/cache/
+**/.impeccable/live/manual-edit-apply-transaction.json
+**/.impeccable/live/manual-edit-events.jsonl
+**/.impeccable/live/manual-edit-evidence/
+**/.impeccable/live/pending-manual-edits.json
+**/.impeccable/live/deferred-svelte-component-accepts.json
+**/.impeccable/live/*.png
+# impeccable-ignore-end
+
+# Private local configuration and ad hoc diagnostics
+.env.*
+!.env.example
+config.local.json
+*.secrets.yml
+.dbg-*
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+
+# Locally injected private provider branding
+/web/frontend/public/plugin-icons/litellm-provider.png

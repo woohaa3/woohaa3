@@ -1,0 +1,32 @@
+/* Selectors work in dialogs and portals without an execution-panel ancestor. */
+.assistant-model-selector { position: relative; }
+:where(.assistant-model-selector) .mc-panel__model-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+  color: var(--app-web-text-primary);
+  font: 12px/18px var(--app-font, system-ui, sans-serif);
+  cursor: pointer;
+}
+:where(.assistant-model-selector) .mc-panel__model-icon,
+:where(.assistant-model-selector) .mc-panel__chevron { width: 13px; height: 13px; flex-shrink: 0; }
+:where(.assistant-model-selector) .mc-panel__model-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-menu.assistant-model-menu {
+  z-index: 66;
+  min-width: min(420px, calc(100vw - 32px));
+  max-width: min(640px, calc(100vw - 32px));
+  padding: 5px;
+  border: 1px solid var(--app-web-border);
+  background: var(--app-web-panel);
+  color: var(--app-web-text-primary);
+  backdrop-filter: none;
+  font-family: var(--app-font, system-ui, sans-serif);
+}
+.assistant-model-menu .ui-menu__item { color: var(--app-web-text-primary); }
+.assistant-model-menu .mc-panel__model-name { font-size: 12px; font-weight: 500; line-height: 1.4; }
+.assistant-model-menu .mc-panel__model-provider { color: var(--app-web-text-muted); font-size: 11px; line-height: 1.5; }
+.assistant-model-menu .mc-panel__model-section { padding: 6px 8px; color: var(--app-web-text-muted); font-size: 12px; }

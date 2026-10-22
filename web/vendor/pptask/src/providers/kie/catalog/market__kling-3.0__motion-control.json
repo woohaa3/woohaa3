@@ -1,0 +1,55 @@
+{
+  "locator": "kie://market/kling-3.0/motion-control",
+  "modelId": "kling-3.0/motion-control",
+  "providerId": "kie",
+  "outputType": "video",
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/jobs/createTask"
+  },
+  "requestSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "description": "(Optional) Text prompt words, used to guide the generation of animation content. Can be empty or 0 - 2500 characters long.",
+        "type": "string"
+      },
+      "input_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "(Required) Include a URL of an image"
+      },
+      "video_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "(Required) Include a video URL"
+      },
+      "mode": {
+        "description": "(Optional) Video Quality Mode. std: Standard Mode (720p). pro: Professional Mode (1080p)",
+        "type": "string"
+      },
+      "character_orientation": {
+        "description": "(Optional) Reference source for character orientation. video: Refer to video (recommended); image: Refer to image. Default value: video",
+        "type": "string"
+      },
+      "background_source": {
+        "description": "(Optional) Background source. input_video: Use video background; input_image: Use image background. Default value: input_video",
+        "type": "string"
+      }
+    },
+    "required": [
+      "input_urls",
+      "video_urls"
+    ]
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "inputField": "input",
+    "callbackField": "callBackUrl"
+  },
+  "label": "Kling 3 Motion Control"
+}

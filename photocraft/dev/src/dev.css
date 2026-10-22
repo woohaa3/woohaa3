@@ -1,0 +1,55 @@
+/* 独立开发宿主的自有布局与最小设计变量；不复制宿主应用样式表。 */
+:root {
+  color-scheme: dark;
+  --app-web-bg: #17191d;
+  --app-web-panel: #1f2228;
+  --app-web-subtle: #262a31;
+  --app-web-border: #343943;
+  --app-web-text-primary: #e8e9ec;
+  --app-web-text-muted: #9aa0aa;
+  --app-interaction-accent: #4f8cff;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--app-web-bg); color: var(--app-web-text-primary); }
+code { font-family: ui-monospace, monospace; }
+
+.dev-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.dev-header {
+  display: flex; align-items: center; gap: 16px; padding: 10px 16px;
+  border-bottom: 1px solid var(--app-web-border); background: var(--app-web-panel);
+  font-size: 13px;
+}
+.dev-file { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--app-web-text-muted); }
+.dev-file input { max-width: 180px; font: inherit; color: inherit; }
+.dev-status { margin-left: auto; color: var(--app-web-text-muted); font-variant-numeric: tabular-nums; }
+.dev-status[data-dev-status="failed"] { color: #ff8d8d; }
+.dev-error {
+  padding: 8px 16px; background: #4a2024; color: #ffd9d9;
+  border-bottom: 1px solid #6a2c32; font-size: 13px;
+}
+.dev-main { flex: 1; min-height: 0; display: flex; }
+.dev-stage { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.dev-stage .photo-editor-app, .dev-stage .image-edit-workspace { flex: 1; min-height: 0; }
+.dev-empty {
+  margin: auto; max-width: 520px; padding: 32px; text-align: center;
+  border: 1px dashed var(--app-web-border); border-radius: 12px; color: var(--app-web-text-muted);
+}
+.dev-empty h1 { font-size: 18px; color: var(--app-web-text-primary); margin: 0 0 8px; }
+.dev-empty p { margin: 0; line-height: 1.7; }
+.dev-preview { image-rendering: auto; box-shadow: 0 8px 40px rgb(0 0 0 / 45%); }
+.dev-dialog-layer {
+  position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+  background: rgb(0 0 0 / 45%);
+}
+.dev-dialog-frame { min-width: 320px; max-width: 90vw; }
+.dlg {
+  display: flex; flex-direction: column; gap: 12px; padding: 16px;
+  background: var(--app-web-panel); border: 1px solid var(--app-web-border); border-radius: 10px;
+}
+.dlg__header { display: flex; align-items: center; justify-content: space-between; }
+.dlg__title { margin: 0; font-size: 15px; }
+.dlg__body { display: grid; gap: 8px; font-size: 13px; }
+.dlg__footer { display: flex; justify-content: flex-end; gap: 8px; }
+.dlg--sm { width: 340px; }

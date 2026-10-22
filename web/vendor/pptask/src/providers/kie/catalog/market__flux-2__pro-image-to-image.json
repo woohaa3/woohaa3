@@ -1,0 +1,66 @@
+{
+  "locator": "kie://market/flux-2/pro-image-to-image",
+  "modelId": "flux-2/pro-image-to-image",
+  "providerId": "kie",
+  "outputType": "image",
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/jobs/createTask"
+  },
+  "requestSchema": {
+    "type": "object",
+    "description": "Input parameters for the generation task",
+    "properties": {
+      "input_urls": {
+        "description": "Input reference images (1-8 images). (File URL after upload, not file content; Accepted types: image/jpeg, image/png, image/webp; Max size: 10.0MB)",
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "maxItems": 8
+      },
+      "prompt": {
+        "description": " Must be between 3 and 5000 characters. (Max length: 5000 characters)",
+        "type": "string",
+        "maxLength": 5000
+      },
+      "aspect_ratio": {
+        "description": "Aspect ratio for the generated image. Select 'auto' to match the first input image ratio (requires input image).",
+        "type": "string",
+        "enum": [
+          "1:1",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "3:2",
+          "2:3",
+          "auto"
+        ],
+        "default": "1:1"
+      },
+      "resolution": {
+        "description": "Output image resolution.",
+        "type": "string",
+        "enum": [
+          "1K",
+          "2K"
+        ],
+        "default": "1K"
+      }
+    },
+    "required": [
+      "input_urls",
+      "prompt",
+      "aspect_ratio",
+      "resolution"
+    ]
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "inputField": "input",
+    "callbackField": "callBackUrl"
+  },
+  "label": "Flux 2 Pro I2I"
+}

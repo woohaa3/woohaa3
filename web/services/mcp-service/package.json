@@ -1,0 +1,40 @@
+{
+  "name": "@woohaa3/mcp-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Woohaa3 MCP Service — stateless MCP transport, tool definitions and orchestration. All canvas authority stays in Canvas Service; this unit only calls the authenticated internal protocol.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --platform node",
+    "server:build": "node ../../scripts/build-package.mjs --platform node --entry src/server.ts --outdir server-dist",
+    "watch": "node ../../scripts/build-package.mjs --platform node --watch",
+    "start": "node server-dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "2.1.0",
+    "@modelcontextprotocol/server": "2.1.0",
+    "@woohaa3/contracts": "workspace:*",
+    "hono": "4.11.4",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

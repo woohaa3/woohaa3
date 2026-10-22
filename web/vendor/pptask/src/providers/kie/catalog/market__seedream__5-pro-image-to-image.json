@@ -1,0 +1,76 @@
+{
+  "locator": "kie://market/seedream/5-pro-image-to-image",
+  "modelId": "seedream/5-pro-image-to-image",
+  "providerId": "kie",
+  "outputType": "image",
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/jobs/createTask"
+  },
+  "requestSchema": {
+    "type": "object",
+    "description": "Input parameters for the generation task",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "A text description of the image you want to generate (Max length: 3-5000 characters)",
+        "maxLength": 5000,
+        "minLength": 3
+      },
+      "image_urls": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "Upload an image file to use as input for the API (File URL after upload, not file content; Accepted types: image/jpeg, image/png, image/webp; Max size: 10.0MB)",
+        "maxItems": 10
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "description": "Width-height ratio of the image, determining its visual form. ",
+        "enum": [
+          "1:1",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "2:3",
+          "3:2",
+          "21:9"
+        ],
+        "default": "1:1"
+      },
+      "quality": {
+        "description": "Basic outputs 1K images, while High outputs 2K images.",
+        "type": "string",
+        "enum": [
+          "basic",
+          "high"
+        ],
+        "default": "basic"
+      },
+      "output_format": {
+        "type": "string",
+        "description": "Format of the output image",
+        "enum": [
+          "png",
+          "jpeg"
+        ],
+        "default": "png"
+      }
+    },
+    "required": [
+      "prompt",
+      "image_urls",
+      "aspect_ratio",
+      "quality"
+    ]
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "inputField": "input",
+    "callbackField": "callBackUrl"
+  },
+  "label": "Seedream 5 Pro I2I"
+}

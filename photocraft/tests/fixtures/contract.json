@@ -1,0 +1,56 @@
+{
+  "$comment": "PhotoCraft 跨语言语义 fixture 的**唯一权威来源**（change: 2026-10-21-extract-photocraft-subproject，任务 2.3 / design D2）。Rust 内核（rust/crates/editor-core/tests/contract_fixture.rs）与 TypeScript 协议包（packages/protocol/src/contract-fixture.test.ts）都读这一份文件，任何一边都不再读取另一端或宿主的源码。修改引擎版本、来源提交、格式版本或内容指纹基线时必须同时更新本文件并让两端测试重新通过。",
+  "upstreamRepository": "storytold/photocraft",
+  "upstreamCommit": "4e7a17cd5d5723313f459753663d0d155f047e19",
+  "upstreamVersion": "0.9.0",
+  "engineVersion": "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-patterns-v1",
+  "supportedEngineVersions": [
+    "4e7a17cd5d5723313f459753663d0d155f047e19",
+    "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-groups-v1",
+    "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-blends-v1",
+    "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-fill-v1",
+    "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-styles-v1",
+    "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-patterns-v1"
+  ],
+  "formatVersion": 1,
+  "supportedFormatVersions": [
+    1
+  ],
+  "contentType": "application/vnd.woohaa.photocraft-project",
+  "documentVersions": {
+    "legacy": "woohaa-image-edit-v1",
+    "project": "woohaa-image-project-v1"
+  },
+  "capabilities": [
+    "layers.composite",
+    "layers.fill-opacity",
+    "layers.styles.resource-free",
+    "layers.styles.patterns",
+    "layers.groups",
+    "layers.blend.pass-through",
+    "layers.blend.photoshop",
+    "layers.blend.normal",
+    "layers.blend.multiply",
+    "layers.blend.screen",
+    "compose.transform",
+    "selection.rect",
+    "selection.lasso",
+    "selection.feather",
+    "mask.pixel",
+    "paint.brush",
+    "paint.eraser",
+    "text.horizontal",
+    "adjust.brightness-contrast",
+    "adjust.hue-saturation",
+    "adjust.curves"
+  ],
+  "contentHashes": {
+    "$comment": "迁移前实测基线；Rust 与 TS 都必须复现同一值，否则宿主「是否净变化」会两端不一致。",
+    "fnv1a64UnicodeFloatProbe": "ceaa511cf4eec910",
+    "fnv1a64ProbeText": "中文\u0000float1.0000001\u0000a",
+    "projectContentCanonical": "canvas:800x600\nlayer|background|背景|pixel|1|1|normal|0,0,1,0,0,0|none|pixel:asset-base:0123456789abcdef",
+    "projectContentHash": "42d710c4700e1a13",
+    "legacyShapesHash": "817ce5cef58d5c0b",
+    "legacyDefinitionHash": "e3965b32e8f54f53"
+  }
+}

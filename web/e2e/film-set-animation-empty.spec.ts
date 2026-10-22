@@ -1,0 +1,41 @@
+import { expect, test } from '@playwright/test';
+import { canonicalFilmSetFields } from '@woohaa3/contracts';
+import { base } from './fixtures/film-set-animation-clips.js';
+import { installPageHelpers, resetCanvasStorage, waitForCanvasSession, sendCommands, readStoredCanvas, waitForCommandsSettled } from './helpers.js';
+
+test.use({ deviceScaleFactor: 2 });
+test('empty collection and zero-duration clip remain editable at DPR 2', async ({ page }, info) => {
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await installPageHelpers(page); await resetCanvasStorage(page); await waitForCanvasSession(page);
+  const fields = canonicalFilmSetFields({ ...base, filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] } });
+  expect((await sendCommands(page, [{ type: 'node.add', node: { id: 'empty-film', type: 'composite-asset', position: { x: 200, y: 180 }, width: 400, height: 300 }, nodeData: fields as never }])).ok).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as any).__bevyRuntime.lastScene()?.nodes.find((n: any) => n.id === 'empty-film')?.model?.resourceKey)).toBeTruthy();
+  const point = await page.evaluate(() => {
+    const s = (window as any).__bevyRuntime.lastScene(); const n = s.nodes.find((n: any) => n.id === 'empty-film');
+    const rect = document.querySelector('#bevy-canvas')!.getBoundingClientRect();
+    return { x: rect.left + (n.x + n.width / 2) * s.viewport.zoom + s.viewport.x, y: rect.top + (n.y + n.height / 2) * s.viewport.zoom + s.viewport.y };
+  });
+  await page.mouse.dblclick(point.x, point.y);
+  await page.getByRole('tab', { name: '动画', exact: true }).click();
+  await expect(page.getByLabel('拍摄镜头')).toContainText('还没有拍摄镜头');
+  await expect(page.getByRole('button', { name: '动画预览', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '新建静态镜头', exact: true }).click();
+  await waitForCommandsSettled(page);
+  await expect(page.getByLabel('拍摄镜头')).toContainText('新静态镜头');
+  await page.getByRole('button', { name: '动画预览', exact: true }).click();
+  await expect(page.getByRole('button', { name: '播放', exact: true })).toBeDisabled();
+  await expect(page.getByRole('slider', { name: '动画进度', exact: true })).toBeDisabled();
+  await expect(page.locator('.film-set-animation-player')).toContainText('0.00 / 0.00 秒');
+  await expect.poll(() => page.evaluate(() => (window as any).__bevyRuntime.lastScene().surface.pixelRatio)).toBe(2);
+  await page.screenshot({ path: info.outputPath('zero-duration-dpr2.png') });
+  await page.getByRole('button', { name: '返回编辑', exact: true }).click();
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await waitForCommandsSettled(page);
+  await expect(page.getByLabel('拍摄镜头')).toContainText('还没有拍摄镜头');
+  const saved = await readStoredCanvas(page);
+  expect((saved!.nodeData['empty-film'] as any).filmSetAnimations.clips).toEqual([]);
+  expect((saved!.nodeData['empty-film'] as any).filmSetContent).toEqual(fields.filmSetContent);
+  await page.keyboard.press('Escape');
+  await expect.poll(() => page.evaluate(() => (window as any).__canvasModelFocus.focused())).toBe(false);
+});

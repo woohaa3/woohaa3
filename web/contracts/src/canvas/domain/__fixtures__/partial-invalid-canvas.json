@@ -1,0 +1,158 @@
+{
+  "id": "canvas-partial-invalid",
+  "revision": 3,
+  "document": {
+    "schemaVersion": "asset-canvas-v1",
+    "nodes": [
+      {
+        "id": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "type": "image",
+        "position": {
+          "x": 85,
+          "y": 95
+        },
+        "width": 512,
+        "height": 742
+      },
+      {
+        "id": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+        "type": "text",
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "type": "image",
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "image-missing-type",
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "image-broken-position",
+        "type": "image",
+        "position": {
+          "x": "not-a-number",
+          "y": 120
+        }
+      },
+      {
+        "id": "task-legacy-unknown-type",
+        "type": "task",
+        "position": {
+          "x": 320,
+          "y": 0
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-9f0c2b71-3a44-4c8e-8d55-0b7a6e5f4d31",
+        "source": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+        "target": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "data": {
+          "role": "prompt"
+        }
+      },
+      {
+        "id": "edge-missing-target",
+        "source": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+        "data": {}
+      },
+      {
+        "id": "edge-broken-data",
+        "source": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+        "target": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "data": "not-an-object"
+      }
+    ],
+    "viewport": {
+      "x": "not-a-number",
+      "y": -40,
+      "zoom": 999
+    },
+    "updatedAt": "2026-09-21T00:00:00.000Z"
+  },
+  "nodeData": {
+    "image-43200b04-00af-443d-a591-decff3e3a014": {
+      "title": "主视觉",
+      "taskKind": "image-generation",
+      "panelPrompt": "一只猫坐在窗台上",
+      "parameters": {
+        "ratio": "1:1"
+      }
+    },
+    "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f": {
+      "prompt": "一只猫坐在窗台上"
+    },
+    "task-legacy-unknown-type": {
+      "taskKind": "text-generation"
+    },
+    "node-orphan-not-in-document": {
+      "prompt": "这个节点已不存在"
+    },
+    "": {
+      "prompt": "空 nodeId 必须被丢弃"
+    },
+    "image-not-an-object": "not-an-object"
+  },
+  "assets": [
+    {
+      "id": "asset-legacy-generated",
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "result": {
+        "kind": "image",
+        "url": "asset://asset-legacy-generated"
+      },
+      "createdAt": "2026-09-21T00:00:00.000Z"
+    },
+    {
+      "id": "asset-image-mtpb4p43",
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "title": "生成图",
+      "mediaKind": "image",
+      "source": "generated",
+      "status": "ready",
+      "url": "asset://asset-image-mtpb4p43",
+      "createdAt": "2026-09-21T00:00:00.000Z"
+    },
+    {
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "title": "没有 id 的资产",
+      "mediaKind": "image",
+      "source": "uploaded",
+      "status": "ready",
+      "createdAt": "2026-09-21T00:00:00.000Z"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "job-5d2c8e14",
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "taskId": "task-2f61a4c9",
+      "status": "success",
+      "updatedAt": "2026-09-21T00:00:00.000Z"
+    },
+    {
+      "id": "job-missing-node",
+      "taskId": "task-2f61a4c9",
+      "status": "running",
+      "updatedAt": "2026-09-21T00:00:00.000Z"
+    },
+    {
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "taskId": "task-2f61a4c9",
+      "status": "running",
+      "updatedAt": "2026-09-21T00:00:00.000Z"
+    }
+  ],
+  "updatedAt": "2026-09-21T00:00:00.000Z"
+}

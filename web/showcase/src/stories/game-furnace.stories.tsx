@@ -1,0 +1,13 @@
+import type { StoryDefault } from "@ladle/react";
+import { FurnaceFixture } from "../game-furnace-fixtures.js";
+export default { title: "画布组件/游戏炼丹炉" } satisfies StoryDefault;
+export const Empty = () => <FurnaceFixture />;
+export const Materials = () => <FurnaceFixture state="materials" />;
+export const Readonly = () => <FurnaceFixture state="readonly" />;
+export const NoModel = () => <FurnaceFixture state="no-model" />;
+export const Running = () => <FurnaceFixture state="running" />;
+export const Failed = () => <FurnaceFixture state="failed" />;
+export const Candidate = () => <FurnaceFixture state="candidate" />;
+export const Playable = () => <FurnaceFixture state="playable" />;
+export const Narrow = () => <FurnaceFixture state="materials" narrow />;
+export const InvalidVersion = () => <FurnaceFixture state="invalid" />;

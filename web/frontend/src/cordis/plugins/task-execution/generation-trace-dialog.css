@@ -1,0 +1,14 @@
+/* 画布内「生成溯源」浮窗（change: 生成溯源改为画布内浮窗）。
+   只做浮窗布局；正文样式来自 shared/task-trace/task-trace.css，不在这里重复。
+   只消费 canonical --app-* 语义 token。 */
+.generation-trace .generation-trace__body {
+  /* 加载态与详情切换时高度不跳；长内容在 dialog body 内滚动。 */
+  min-height: 240px;
+  max-height: min(70vh, 720px);
+  overflow: auto;
+  color: var(--app-web-text-primary);
+}
+
+.generation-trace .dlg__footer {
+  gap: 8px;
+}

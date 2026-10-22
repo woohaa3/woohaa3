@@ -1,0 +1,50 @@
+{
+  "name": "@woohaa3/extension-film-set",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "复合资产节点的片场业务：items、片段、工作区、组合与受控创作。",
+  "exports": {
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    },
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    },
+    "./frontend": {
+      "types": "./src/frontend/index.ts",
+      "import": "./dist/frontend.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/shared.ts --entry-name shared --outdir dist --platform neutral && node ../../scripts/build-package.mjs --entry src/backend.ts --entry-name backend --outdir dist --platform node && node ../../scripts/build-package.mjs --entry src/frontend/index.ts --entry-name frontend --outdir dist --platform browser",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build:browser": "node ../../scripts/build-extension-browser.mjs"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/frontend": "workspace:*",
+    "react": "^18.3.1",
+    "mediabunny": "^1.61.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@types/node": "^22.15.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0",
+    "jsdom": "^30.1.1",
+    "react-dom": "^18.3.1"
+  }
+}

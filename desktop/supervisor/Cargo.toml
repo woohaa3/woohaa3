@@ -1,0 +1,18 @@
+[package]
+name = "woohaa_recording_supervisor"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Woohaa3 原生录制执行器 supervisor（change: 2026-10-17-add-native-offscreen-film-set-recording）"
+license = "UNLICENSED"
+publish = false
+
+[lib]
+name = "woohaa_recording_supervisor"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]

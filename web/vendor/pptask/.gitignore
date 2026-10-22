@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build and test artifacts
+dist/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# Tool caches
+.vite/
+vitest.config.*.timestamp-*.mjs
+
+# Local environment overrides
+.env
+.env.*
+!.env.example

@@ -1,0 +1,66 @@
+/* A single inspector shell and scroll owner for scene objects and camera tools. */
+.model-editor-dock[data-inspector] {
+  width: min(320px, calc(80vw - 56px));
+  background: var(--app-web-panel);
+  color: var(--app-web-text-primary);
+  border-left: 1px solid var(--app-web-border);
+  box-shadow: -8px 0 28px var(--app-web-shadow);
+  overflow: hidden;
+}
+.model-inspector-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex: 0 0 auto; padding: 16px; border-bottom: 1px solid var(--app-web-border);
+}
+.model-inspector-header h2 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.5; }
+.model-inspector-header p { margin: 3px 0 0; font-size: 11px; color: var(--app-web-text-muted); }
+.model-inspector-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.model-editor-dock[data-inspector] .model-editor {
+  width: 100%; height: auto; min-height: 0; overflow: visible; padding: 16px;
+  border: 0; box-shadow: none; background: transparent;
+}
+.model-editor-dock[data-inspector] .model-editor__camera { min-height: 38px; border-color: transparent; padding-left: 10px; }
+.model-editor-dock[data-inspector] .model-editor__camera.is-selected { border-color: var(--app-interaction-accent); }
+.model-editor-dock[data-inspector] .model-editor__camera-remove { opacity: 0.4; }
+.model-editor-dock[data-inspector] .model-editor__camera:hover .model-editor__camera-remove,
+.model-editor-dock[data-inspector] .model-editor__camera:focus-within .model-editor__camera-remove { opacity: 1; }
+.model-editor-dock[data-inspector] .model-editor__pose-fields { margin-top: 4px; padding: 12px; background: var(--app-web-subtle); }
+.model-editor-dock[data-inspector] .model-editor__mcp-guide { margin-top: 10px; display: block; }
+.model-editor__mcp-guide > summary { color: var(--app-web-text-muted); font-size: 11px; cursor: pointer; padding: 6px 0; }
+.model-editor__mcp-guide[open] .model-editor__mcp-guide-heading { margin-top: 8px; }
+.model-editor__mcp-guide > summary:focus-visible { outline: 2px solid var(--app-interaction-accent); outline-offset: 2px; }
+.model-editor-dock[data-inspector] .model-editor__add { border-color: var(--app-web-border); background: transparent; color: var(--app-web-text-primary); }
+.model-editor-dock[data-inspector] .model-editor__add:hover:not(:disabled) { background: var(--app-web-subtle); border-color: var(--app-web-border-strong); }
+.model-editor-dock[data-inspector] .model-editor__capture-button { width: 100%; min-height: 34px; }
+
+
+/* 普通模型聚焦信息面板（change: 2026-10-18-simplify-model-focus-panel）。
+   镜头控制已移除：面板只保留 AI 修改入口与只读规模信息。 */
+.model-info {
+  display: flex; flex-direction: column; gap: 10px; padding: 16px;
+  border-bottom: 1px solid var(--app-web-border);
+}
+.model-info__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.model-info__title { font-size: 12px; font-weight: 650; letter-spacing: 0.02em; }
+.model-info__state {
+  font-size: 11px; color: var(--app-web-text-muted);
+  border: 1px solid var(--app-web-border); border-radius: 999px; padding: 1px 8px;
+}
+.model-info__state[data-state="error"] { color: var(--app-status-danger); border-color: currentColor; }
+.model-info__rows { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.model-info__row {
+  margin: 0; display: flex; flex-direction: column; gap: 2px;
+  background: var(--app-web-subtle); border-radius: 8px; padding: 8px 10px; min-width: 0;
+}
+.model-info__row dt { font-size: 11px; color: var(--app-web-text-muted); }
+.model-info__row dd {
+  margin: 0; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.model-info__empty { margin: 0; font-size: 12px; color: var(--app-web-text-muted); line-height: 1.5; }
+.model-info__hint { margin: 0; font-size: 11px; color: var(--app-web-text-muted); line-height: 1.5; }
+
+/* 延迟加载时也使用检查器的平面布局，避免先闪现外侧 dock 卡片。 */
+.model-inspector-generate > .authoring-generate-placeholder { border: 0; border-radius: 0; box-shadow: none; padding: 16px; }
+.model-inspector-generate .authoring-generate-placeholder__footer { flex-direction: column; align-items: stretch; }
+.model-inspector-generate .authoring-generate-placeholder__footer > span { width: 100%; }
+.model-inspector-generate .authoring-generate-placeholder__footer > span:last-child { margin-left: 0; }

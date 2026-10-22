@@ -1,0 +1,213 @@
+/**
+ * Canvas Switcher Plugin（Canvas page scope chrome）
+ * （change: 2026-09-29-add-multi-canvas-workspace，任务 4.1–4.4 / design D7）。
+ *
+ * 只消费 App scope 的 `canvasCatalog`/`canvasSelection` 与当前 page scope 的
+ * `canvasSession`/`canvasNavigation`；切换与创建经 App Router 走统一 scope transition 路径。
+ * 不直接持有 `/api/canvases` 路径，也不缓存目录。
+ */
+import type { Context } from "@deepseek-ai/cordis";
+import type { Plugin } from "@deepseek-ai/cordis";
+import { definePlugin } from "../../plugin.js";
+import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
+import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
+import { submitCanvasRename } from "./rename.js";
+import type { CanvasSummary } from "../../contract/canvas-catalog.js";
+import type { CanvasSessionStatus } from "../../contract/session.js";
+import {
+  CANVAS_SWITCHER_DIALOG_ID,
+  CanvasSwitcherTrigger,
+  canvasSwitcherDefinition,
+  createCanvasSwitcherRenderer
+} from "./chrome.js";
+import type { CanvasLiveSync } from "./chrome.js";
+
+export const CANVAS_SWITCHER_PLUGIN_ID = "canvas-switcher";
+
+/**
+ * 由会话同步状态派生顶栏胶囊的实时连接态。
+ *
+ * 目录快照（`CanvasSummary.sync`）可能已经过期（服务端断开后仍写着「已同步」），
+ * 顶栏必须回答和右下角气泡同一个问题：这条画布连接现在到底通不通。
+ */
+function deriveLiveSync(status: CanvasSessionStatus): CanvasLiveSync {
+  const remote = status.remote;
+  if (remote.mode === "offline" || remote.phase === "offline") return "offline";
+  // disabled 是「同步不可用」（纯本地部署），不是断线：胶囊回落目录标签。
+  if (remote.mode === "remote" && remote.phase !== "synced") return "connecting";
+  return "ready";
+}
+
+export type CanvasSwitcherExtensionOptions = {
+  canvasId?: string;
+};
+
+export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions = {}): Plugin.Function<void> {
+  return definePlugin(
+    (ctx: Context) => {
+      const canvasId = options.canvasId ?? DEFAULT_CANVAS_ID;
+      const catalog = ctx.canvasCatalog;
+      const selection = ctx.canvasSelection;
+      const session = ctx.canvasSession;
+      const preparation = ctx.canvasPreparation;
+
+      // 通用外部来源目录（可选）：只透传来源摘要/分页；关闭扩展不影响已导入作品
+      // （change: 2026-10-12-add-extension-online-canvas-migration，任务 5.7）。
+      const sources = {
+        list: async () => {
+          await preparation.listSources(true);
+          return preparation.getState().sources.map((source) => ({ sourceId: source.sourceId, displayName: source.displayName }));
+        },
+        listAccessible: async (sourceId: string, cursor: string | null) => {
+          const page = await preparation.listAccessible({ sourceId, cursor });
+          return {
+            items: page.items,
+            nextCursor: page.nextCursor
+          };
+        }
+      };
+
+      const titleListeners = new Set<() => void>();
+      let currentTitle = "";
+      /** 当前画布的目录同步状态（文档 + 媒体合并后的结论）。 */
+      let currentSync: CanvasSummary["sync"] | undefined;
+      /** 当前画布会话的实时连接态：断线/建连优先于目录快照。 */
+      let currentLiveSync: CanvasLiveSync | undefined;
+      /** 目录与会话共用同一组监听者：触发器据此同时重读标题、目录状态与实时态。 */
+      const refreshTitle = () => {
+        const entry = catalog.getState().entries.find((item) => item.id === canvasId);
+        const nextTitle = entry?.title ?? currentTitle;
+        const nextSync = entry?.sync;
+        const nextLiveSync = deriveLiveSync(session.getStatus());
+        if (nextTitle === currentTitle && nextSync === currentSync && nextLiveSync === currentLiveSync) return;
+        currentTitle = nextTitle;
+        currentSync = nextSync;
+        currentLiveSync = nextLiveSync;
+        for (const listener of titleListeners) listener();
+      };
+      // 先结算一次首帧：目录还没回来时，断线/建连也要立刻显示。
+      refreshTitle();
+      const unsubscribeCatalog = catalog.subscribe(() => {
+        refreshTitle();
+      });
+      // 会话状态变化同样推动触发器；订阅已有的推送，不额外轮询。
+      const unsubscribeSession = session.subscribe(() => {
+        refreshTitle();
+      });
+      ctx.effect(() => () => {
+        unsubscribeCatalog();
+        unsubscribeSession();
+      }, "canvas-switcher-title");
+      // 进入新的画布 page scope：使目录缓存失效，下一次读取得到最新标题/列表。
+      catalog.invalidate();
+      void catalog.load();
+
+      const openSwitcher = () => {
+        ctx.canvasNavigation.openDialog({ dialogId: CANVAS_SWITCHER_DIALOG_ID, payload: {} });
+      };
+
+      /**
+       * 切换画布：先让页面级 feature 结算未保存文档（change: 2026-10-21，design D6）。
+       *
+       * 失败或用户取消时**不**导航，页面与草稿保留；返回画布/关闭 tab 不经过这里。
+       */
+      const switchTo = (targetCanvasId: string) => {
+        if (targetCanvasId === canvasId) return;
+        const navigate = () => {
+          selection.setRecentCanvasId(targetCanvasId);
+          ctx.appRouter.navigate({ page: "canvas", canvasId: targetCanvasId });
+        };
+        if (!ctx.pageLeave.hasUnsaved()) {
+          navigate();
+          return;
+        }
+        void ctx.pageLeave.settle().then((result) => {
+          if (!result.ok) {
+            // 只报告，不导航：用户仍停在原画布与原文档。
+            ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法切换画布", description: result.reason } });
+            return;
+          }
+          navigate();
+        });
+      };
+
+      const create = async () => {
+        const result = await catalog.create({});
+        if (!result.ok) return { ok: false, error: result.error };
+        selection.setRecentCanvasId(result.canvasId);
+        ctx.appRouter.navigate({ page: "canvas", canvasId: result.canvasId });
+        return { ok: true, canvasId: result.canvasId };
+      };
+
+      const rename = async (title: string) => {
+        const result = await submitCanvasRename({ session, title });
+        if (!result.ok) return { ok: false, error: result.error };
+        // committed/observed：失效并刷新 Catalog，使标题来自 published projection。
+        catalog.invalidate();
+        await catalog.load(true);
+        refreshTitle();
+        return { ok: true };
+      };
+
+      const disposeDialog = ctx.dialogs.registerDialog(CANVAS_SWITCHER_DIALOG_ID, {
+        definition: canvasSwitcherDefinition,
+        renderer: createCanvasSwitcherRenderer({
+          catalog,
+          selection,
+          session,
+          // 条目动作 slot（change: canvas 同步显式化）：宿主只透传 registry，
+          // 由扩展自行决定每个条目是否呈现动作。
+          slots: ctx.slots,
+          currentCanvasId: () => canvasId,
+          switchTo,
+          create,
+          rename,
+          sources
+        })
+      });
+      ctx.effect(() => () => disposeDialog(), "canvas-switcher-dialog");
+
+      // 左上角触发器：显示当前标题，点击打开切换器（模型聚焦时让位返回按钮）。
+      const removeOverlay = ctx.slots.register("canvas.topbar", {
+        id: "canvas-switcher-trigger",
+        owner: CANVAS_SWITCHER_PLUGIN_ID,
+        priority: 1,
+        render: () => (
+          <CanvasSwitcherTrigger
+            getTitle={() => currentTitle}
+            getSync={() => currentSync}
+            getLiveSync={() => currentLiveSync}
+            subscribeTitle={(listener) => {
+              titleListeners.add(listener);
+              return () => {
+                titleListeners.delete(listener);
+              };
+            }}
+            onOpen={openSwitcher}
+            onRefreshCatalog={() => {
+              // 媒体补传完成后目录徽标要自己收敛：失效缓存再读一次（服务端现算同步状态）。
+              catalog.invalidate();
+              void catalog.load(true);
+            }}
+            navigation={ctx.canvasNavigation}
+          />
+        )
+      });
+      ctx.effect(() => () => removeOverlay(), "canvas-switcher-trigger-slot");
+
+      // E2E/排障：确定性打开切换器（生产无副作用）。
+      (globalThis as unknown as { __openCanvasSwitcher?: unknown }).__openCanvasSwitcher = openSwitcher;
+
+      return () => {
+        unsubscribeCatalog();
+        unsubscribeSession();
+        disposeDialog();
+        removeOverlay();
+      };
+    },
+    {
+      name: CANVAS_SWITCHER_PLUGIN_ID,
+      inject: ["slots", "dialogs", "canvasNavigation", "canvasSession", "canvasCatalog", "canvasSelection", "canvasPreparation", "appRouter", "pageLeave"]
+    }
+  );
+}

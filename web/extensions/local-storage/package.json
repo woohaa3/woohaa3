@@ -1,0 +1,30 @@
+{
+  "name": "@woohaa3/extension-local-storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "本地对象存储后端插件：向 ctx.storage 注册 backendId=local 的本地文件后端（无 presign，缺省主存储）。",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "local-agent",
+  "site": {
+    "name": "本机 Agent 来源",
+    "description": "连接后端机器上的 Codex App Server / OpenCode / CodeBuddy 本机服务（默认关闭，线上默认不安装）。",
+    "version": "0.1.0",
+    "configSchema": { "schemaId": "local-agent-config", "schemaVersion": 1 },
+    "capabilities": [
+      { "id": "agent-connection-provider:local-agent", "kind": "capability", "description": "本机 Agent 来源连接发现" }
+    ],
+    "defaultEnabled": false,
+    "order": 70
+  },
+  "backend": { "module": "./backend", "factory": "createLocalAgentExtension", "optionsType": "LocalAgentExtensionOptions", "order": 70 },
+  "publicRoutes": [
+    {
+      "publicPath": "/api/local-agent",
+      "route": "local-agent",
+      "methods": ["GET", "POST"]
+    }
+  ]
+}

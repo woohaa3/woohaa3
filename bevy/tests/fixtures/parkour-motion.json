@@ -1,0 +1,111 @@
+{
+  "version": "woohaa-motion-ir-v1",
+  "cameraMotion": [],
+  "modelMotion": [
+    {
+      "id": "keyframes_1",
+      "targetId": "root",
+      "startTime": 0,
+      "endTime": 8,
+      "motion": {
+        "kind": "keyframes",
+        "property": "position",
+        "frames": [
+          {
+            "time": 0,
+            "value": [
+              0,
+              0,
+              0
+            ],
+            "easing": "linear"
+          },
+          {
+            "time": 2,
+            "value": [
+              4,
+              0,
+              0
+            ],
+            "easing": "linear"
+          },
+          {
+            "time": 3,
+            "value": [
+              6,
+              3,
+              0
+            ],
+            "easing": "linear"
+          },
+          {
+            "time": 4,
+            "value": [
+              8,
+              1,
+              0
+            ],
+            "easing": "linear"
+          },
+          {
+            "time": 6,
+            "value": [
+              12,
+              1,
+              0
+            ],
+            "easing": "linear"
+          },
+          {
+            "time": 7,
+            "value": [
+              14,
+              5,
+              0
+            ],
+            "easing": "linear"
+          },
+          {
+            "time": 8,
+            "value": [
+              16,
+              3,
+              0
+            ],
+            "easing": "linear"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tween_2",
+      "targetId": "root",
+      "startTime": 6,
+      "endTime": 8,
+      "motion": {
+        "kind": "keyframes",
+        "property": "rotation",
+        "frames": [
+          {
+            "time": 6,
+            "value": [
+              0,
+              0,
+              0
+            ],
+            "easing": "smoothstep"
+          },
+          {
+            "time": 8,
+            "value": [
+              0,
+              1.57,
+              0
+            ],
+            "easing": "smoothstep"
+          }
+        ]
+      }
+    }
+  ]
+}

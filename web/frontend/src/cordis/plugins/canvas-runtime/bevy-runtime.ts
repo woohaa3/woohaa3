@@ -1,0 +1,598 @@
+import { hoverNodeStore } from "../../services/hover-store.js";
+import { beginLifecycleSpan, measureLifecycle } from "../../performance/lifecycle-performance.js";
+import { RuntimeIssues } from "./runtime-issues.js";
+import { protectWasmModule } from "./wasm-call-boundary.js";
+import { TextureUploadBoundary } from "./texture-upload-boundary.js";
+import { ModelResourceFailures } from "./model-resource-failures.js";
+import { PositionSceneMirror } from "./position-scene-mirror.js";
+import { createRuntimeRealm, type RuntimeRealm } from "./runtime-realm.js";
+import { RuntimeSupervisor, readRuntimeHealth } from "./runtime-supervisor.js";
+/**
+ * Bevy WASM 运行时宿主
+ * （change: replace-godot-canvas-runtime-with-bevy）。
+ *
+ * 运行时实现移植自 `xyflow-bevy`：单向快照入口 `set_scene`、keyed 纹理 `set_texture`、
+ * `is_ready` / `rendered_revision`。3D 模型随节点快照的 `model` 字段下发，没有独立的
+ * `set_model_scene` / shot capture API。
+ *
+ * 模块/查询/运行时类型契约在 `bevy-runtime-types.ts`（文件体积守卫），此处重导出保持既有
+ * 导入路径不变。
+ */
+import type {
+  CanvasRenderScene,
+  PreparedModelMetadata,
+  PreparedModelResource
+} from "@woohaa3/contracts";
+import { canvasPositionUpdateRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
+
+import { sceneDiagnostics, measureSceneWork } from "./scene-diagnostics.js";
+import { createWorkDiagnosticsCollector } from "./work-diagnostics-collector.js";
+import { createRuntimeViewport } from "./runtime-viewport.js";
+import { createRuntimeObserver } from "./runtime-observer.js";
+import {FocusDetailEncoder} from "./focus-details.js";
+import { pollShotCapture } from "./shot-capture-poll.js";
+import {
+  createQueryBridge,
+  encodeCompositeAssetScopesRequest,
+  encodeDropTargetRequest,
+  encodeGizmoRequest,
+  encodeMarqueeRequest,
+  encodeModelPickRequest,
+  encodePointRequest,
+  encodeProbeRequest,
+  parseGizmoResult,
+  projectCompositeAssetScopes,
+  projectDropTarget,
+  projectMarquee,
+  projectModelPick,
+  projectPoint,
+  projectProbe,
+  projectFilmSetItemPick,
+  queryCompositeAssetItemBoundsRaw,
+  queryCompositeAssetItemPickRaw
+} from "./query-bridge.js";
+import type {
+  BevyModule,
+  BevyRuntime
+} from "./bevy-runtime-types.js";
+
+export type {
+  AxisDragConstraint,
+  BevyModule,
+  BevyRuntime,
+  CompositeAssetScopeGeometryEntry,
+  GizmoHitResult,
+  PointHit,
+  ProbeCandidate,
+  QueryResult,
+  QueryUnavailableReason
+} from "./bevy-runtime-types.js";
+
+/** 截图输出尺寸（与 Bevy `capture.rs` 一致）。 */
+export const CAPTURE_WIDTH = 1280;
+export const CAPTURE_HEIGHT = 720;
+
+/** 进程内单调的截图 request id（用于匹配迟到/切换后的旧结果）。 */
+let captureRequestSeq = 1;
+function nextCaptureRequestId(): number {
+  captureRequestSeq += 1;
+  return captureRequestSeq;
+}
+
+/** 稳定模块诊断标识；实际 glue 在 runtime-realm-entry 通过字面量 import 打包。 */
+export const BEVY_WASM_MODULE = "../bevy-wasm/woohaa_bevy_canvas.js";
+
+/**
+ * 初始化时校验当前必需 WASM 能力（change: 2026-10-07-remove-residual-compatibility）。
+ *
+ * 缺失当前资源注册或 Shot Camera capture 导出时抛稳定错误，使宿主呈现明确的版本/能力不匹配，
+ * 而不是把能力缺失伪装成截图超时或回退旧边界。
+ */
+export function assertRequiredCapabilities(module: BevyModule): void {
+  const missing: string[] = [];
+  if (!module.prepare_and_register_model_resource) missing.push("prepare_and_register_model_resource");
+  if (!module.request_shot_capture) missing.push("request_shot_capture");
+  if (!module.poll_shot_capture) missing.push("poll_shot_capture");
+  // change: 2026-10-10-optimize-canvas-interaction-hot-path —— 新 Frontend 必须有视口增量
+  // 边界；缺失时明确能力不匹配，不静默回退旧 full-scene 接口（design D3 / spec）。
+  if (!module.set_viewport) missing.push("set_viewport");
+  if (!module.base_scene_generation) missing.push("base_scene_generation");
+  if (!module.viewport_capability) missing.push("viewport_capability");
+  if (!module.set_positions) missing.push("set_positions");
+  if (!module.position_capability) missing.push("position_capability");
+  // change: 2026-10-12-align-film-set-scope-with-isometric-grid —— 片场菱形范围要求 drop
+  // 目标查询与范围几何读取；缺失时明确能力不匹配，不静默回退 TS 矩形几何（design D5/D8）。
+  if (!module.query_drop_target) missing.push("query_drop_target");
+  if (!module.query_composite_asset_scopes) missing.push("query_composite_asset_scopes");
+  // change: 2026-10-15-add-film-set-overview-lod —— 片场总览 LOD 要求 scene wire 版本同步；
+  // 缺失 scene 能力字符串时明确能力不匹配，不静默忽略新增 `compositeAsset.geometryQuality`。
+  if (!module.scene_capability) missing.push("scene_capability");
+  if (missing.length > 0) {
+    throw new Error(`Bevy WASM 缺少必需能力：${missing.join(", ")}`);
+  }
+  // 场景 wire 版本必须逐字节一致：结构变化时必须同步升级，旧 WASM 明确拒绝。
+  const scene = module.scene_capability!();
+  if (scene !== CANVAS_RENDER_SCENE_VERSION) {
+    throw new Error(`Bevy WASM 场景能力不匹配：${scene || "(空)"} != ${CANVAS_RENDER_SCENE_VERSION}`);
+  }
+  // 视口 wire 版本必须逐字节一致：结构变化时必须同步升级，旧 WASM 明确拒绝。
+  const capability = module.viewport_capability!();
+  if (capability !== CANVAS_VIEWPORT_UPDATE_VERSION) {
+    throw new Error(`Bevy WASM 视口能力不匹配：${capability || "(空)"} != ${CANVAS_VIEWPORT_UPDATE_VERSION}`);
+  }
+  const positions = module.position_capability!();
+  if (positions !== CANVAS_POSITION_UPDATE_VERSION) {
+    throw new Error(`Bevy WASM 位置能力不匹配：${positions || "(空)"} != ${CANVAS_POSITION_UPDATE_VERSION}`);
+  }
+  // 观察镜头增量是可选能力：旧 WASM 缺导出时调度器回退 full，不阻断装载。
+  if (module.observer_capability) {
+    const observer = module.observer_capability();
+    if (observer !== CANVAS_OBSERVER_UPDATE_VERSION) {
+      throw new Error(`Bevy WASM 观察镜头能力不匹配：${observer || "(空)"} != ${CANVAS_OBSERVER_UPDATE_VERSION}`);
+    }
+  }
+}
+
+export type BevyLoaderOptions = {
+  /** 动态 import 实现；测试可注入。 */
+  importModule?: () => Promise<BevyModule>;
+  /** 状态镜像目标；默认 `globalThis`。 */
+  target?: typeof globalThis;
+  /** 页面退出时取消尚未完成的 renderer 装载。 */
+  signal?: AbortSignal;
+};
+
+/** 运行时 generation 计数器（进程内单调递增）。 */
+let runtimeGeneration = 0;
+
+function nextRuntimeGeneration(): number {
+  runtimeGeneration += 1;
+  return runtimeGeneration;
+}
+
+/** 创建当前页面独占的运行时；同页重复装载由 CanvasRuntimeHost 合并。 */
+export function loadBevyRuntime(options: BevyLoaderOptions = {}): Promise<BevyRuntime> {
+  return createBevyRuntime(options);
+}
+
+async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntime> {
+  const target = options.target ?? (globalThis as typeof globalThis);
+  options.signal?.throwIfAborted();
+
+  const issues = new RuntimeIssues();
+  let supervisor: RuntimeSupervisor | null = null;
+  let realm: RuntimeRealm | null = null;
+  let realmFault: string | null = null;
+  /** 浏览器 realm 的 iframe 在首个 themed scene 绘制前保持透明，避免切换画布时白闪。 */
+  let revealScheduled = false;
+  let endReady: ReturnType<typeof beginLifecycleSpan> = () => {};
+  let endFirstRender: ReturnType<typeof beginLifecycleSpan> = () => {};
+  const fault = (reason: string) => {
+    realmFault = reason; endReady("error"); endFirstRender("error"); supervisor?.fail(reason);
+  };
+  const disposeRealm = () => realm?.dispose();
+  const callsAllowed = () => !supervisor || supervisor.phase === "running";
+  const loadModule = async (candidate = false) => {
+    if (options.importModule) return protectWasmModule(await options.importModule(), issues);
+    realmFault = null;
+    realm = await createRuntimeRealm(target, fault, options.signal);
+    return protectWasmModule(realm.module, issues, () => candidate || callsAllowed());
+  };
+  let module = await measureLifecycle("wasm-module", () => loadModule());
+  try {
+    await measureLifecycle("wasm-init", () => module.default());
+    options.signal?.throwIfAborted();
+    if (!options.importModule && (!module.runtime_health || !module.seed_runtime_generation)) throw new Error("Bevy WASM 缺少恢复健康协议");
+
+    // 初始化时校验当前必需 WASM 能力（change: 2026-10-07-remove-residual-compatibility）：
+    // 缺失必需导出时明确失败，不回退旧注册/把能力缺失伪装成截图超时。
+    assertRequiredCapabilities(module);
+    if (!options.importModule) readRuntimeHealth(module.runtime_health!());
+    module.start();
+
+  } catch (error) { disposeRealm(); throw error; }
+
+  endReady = beginLifecycleSpan("renderer-ready");
+  endFirstRender = beginLifecycleSpan("renderer-first-render");
+  let firstRenderPending = import.meta.env.DEV && import.meta.env.VITE_WOOHAA_PERFORMANCE !== "0" && !options.importModule;
+  let disposed = false;
+  /** 最近一次提交的快照（E2E/排障观察用；change: add-node-endpoint-hover）。 */
+  let lastScene: CanvasRenderScene | null = null;
+  const workDiagnostics = createWorkDiagnosticsCollector(target, () => module);
+  const positionMirror = new PositionSceneMirror();
+  /** 当前运行时 generation；每次创建 runtime 递增（WASM 重启后资源需重放）。 */
+  let generation = nextRuntimeGeneration();
+  /**
+   * 最近接受的 interaction generation
+   * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）：由 Rust `set_scene` 返回值更新。
+   * 未接受任何场景时为 0，查询应返回 unavailable。
+   */
+  let interactionGeneration = 0;
+  /**
+   * 最近一次**完整场景**接受的 generation（base 身份）
+   * （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3）。
+   * `setScene` 成功后更新为返回的 generation；`setViewport` 不改动它。
+   */
+  let baseSceneGeneration = 0;
+  /** 本 generation 内已成功注册的 resource key；重启后清空重放。 */
+  const registeredKeys = new Set<string>();
+  const replayModels = new Map<string, string>();
+  const resourceFailures = new ModelResourceFailures();
+  const textures = new TextureUploadBoundary(issues);
+  const focusDetails=new FocusDetailEncoder();
+  let retryVersion = 0;
+  const retryListeners = new Set<() => void>();
+  const registerModelResource = (resource: PreparedModelResource): void => {
+    if (registeredKeys.has(resource.resourceKey)) return;
+    // 唯一资源注册边界：prepared-and-register（Rust 派生 signature/AABB/extent 并注册）。
+    // change: 2026-10-07-remove-residual-compatibility —— 缺少该必需导出时初始化明确失败，
+    // 不回退 register_model_resource 或空 metadata。
+    if (!module.prepare_and_register_model_resource) {
+      throw new Error("Bevy 运行时缺少 prepare_and_register_model_resource 边界");
+    }
+    const metadata = prepareAndRegisterModelResource({
+      sceneVersion: resource.sceneVersion,
+      ops: resource.ops as readonly unknown[],
+      // 复用同一份规范化 ops JSON，保持 signature 逐字节兼容。
+      opsJson: JSON.stringify(resource.ops),
+      expectedSignature: resource.signature
+    });
+    if (!metadata) {
+      throw new Error("Bevy 运行时未返回模型资源 metadata");
+    }
+    if (metadata.resourceKey !== resource.resourceKey) {
+      throw new Error(`模型资源 key 不一致：${metadata.resourceKey} != ${resource.resourceKey}`);
+    }
+  };
+
+  /**
+   * 合并准备与注册：Rust 派生兼容 signature/AABB/extent 并注册，只返回轻量 metadata
+   * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 6.6）。
+   * 缺新导出时返回 `null`；调用方保留最近合法资源并隔离诊断，不回落 TS 派生。
+   */
+  const prepareAndRegisterModelResource = (input: {
+    sceneVersion: string;
+    ops: readonly unknown[];
+    opsJson?: string;
+    expectedSignature?: string;
+    expectedExtent?: number;
+  }): PreparedModelMetadata | null => {
+    if (!module.prepare_and_register_model_resource) return null;
+    const json = modelPrepareRequest({
+      sceneVersion: input.sceneVersion,
+      ops: input.ops as never,
+      ...(input.opsJson ? { opsJson: input.opsJson } : {}),
+      ...(input.expectedSignature ? { expectedSignature: input.expectedSignature } : {}),
+      ...(input.expectedExtent !== undefined ? { expectedExtent: input.expectedExtent } : {})
+    });
+    const metadata = JSON.parse(module.prepare_and_register_model_resource(json)) as PreparedModelMetadata;
+    // 注册在 Rust 侧完成；记录 key 以保持 setScene 的幂等重放语义。
+    registeredKeys.add(metadata.resourceKey);
+    replayModels.set(metadata.resourceKey, json);
+    sceneDiagnostics.modelRegistrations += 1;
+    sceneDiagnostics.boundaryBytes += json.length;
+    return metadata;
+  };
+
+  const queryBridge = createQueryBridge(() => interactionGeneration);
+  const { runQuery, guardGeneration } = queryBridge;
+
+  const mergeRustWorkCounters = workDiagnostics.refresh;
+  const now = () => target.performance?.now() ?? performance.now();
+
+  const runtime: BevyRuntime = {
+    ...(import.meta.env.DEV ? { getFrameCounters: () => {
+      if (disposed || !module.runtime_health || (supervisor && supervisor.phase !== "running")) return undefined;
+      try {
+        const health = readRuntimeHealth(module.runtime_health());
+        const drawCalls3d = health.drawCalls3d;
+        return { generation, renders: health.renders, updates: health.updates,
+          ...(typeof drawCalls3d === "number" && Number.isSafeInteger(drawCalls3d) && drawCalls3d >= 0 ? { drawCalls3d } : {}) };
+      } catch { return undefined; }
+    } } : {}),
+    getRuntimeIssues: issues.getSnapshot,
+    subscribeRuntimeIssues: issues.subscribe,
+    reportRuntimeIssue: issues.report,
+    clearRuntimeIssue: issues.clear,
+    recoverRuntime: () => supervisor?.retry(),
+    retryVersion: () => retryVersion,
+    subscribeRuntimeRetry: listener => { retryListeners.add(listener); return () => { retryListeners.delete(listener); }; },
+    retryRuntimeIssues: () => {
+      textures.retry(); retryVersion += 1;
+      for (const listener of retryListeners) { try { listener(); } catch { /* Retry observers cannot interrupt the runtime. */ } }
+    },
+    getRenderIssues: resourceFailures.getSnapshot,
+    subscribeRenderIssues: resourceFailures.subscribe,
+    retryFailedModels: resourceFailures.retry,
+    /** 最近一次（JS 读取的）不可变资源诊断；只读缓存，不触发 WASM 调用。 */
+    getResourceDiagnostics: workDiagnostics.resources,
+    backgroundWorkDiagnostics: () => !!module.async_canvas_work_diagnostics,
+    /** 开发采集边界刷新 Rust 累计诊断；生产保持缓存读取（不增加接口）。 */
+    ...(import.meta.env.DEV ? { refreshWorkDiagnostics: mergeRustWorkCounters } : {}),
+    acceptsPlayback: () => !disposed && (!supervisor || supervisor.phase === "running"),
+    isReady: () => {
+      try {
+        const ready = !disposed && (!supervisor || supervisor.phase === "running") && module.is_ready();
+        if (ready) {
+          endReady();
+          if (firstRenderPending && module.runtime_health && readRuntimeHealth(module.runtime_health()).renders > 0) {
+            endFirstRender(); firstRenderPending = false;
+          }
+        }
+        return ready;
+      } catch { return false; }
+    },
+    renderedRevision: () => module.rendered_revision(),
+    generation: () => generation,
+    interactionGeneration: () => interactionGeneration,
+    baseSceneGeneration: () => baseSceneGeneration,
+    getWorkDiagnostics: () => !disposed && module.canvas_work_diagnostics ? JSON.parse(module.canvas_work_diagnostics()) as Record<string, unknown> : {},
+    setPositions: (input) => {
+      if (disposed) throw new Error("Bevy runtime disposed");
+      if (!module.set_positions) throw new Error("Bevy 运行时缺少 set_positions 边界");
+      const json = measureSceneWork("stringifyMs", now, () => canvasPositionUpdateRequest(input));
+      const accepted = measureSceneWork("wasmAcceptMs", now, () => module.set_positions!(json));
+      sceneDiagnostics.positionSubmits += 1;
+      sceneDiagnostics.boundaryBytes += new TextEncoder().encode(json).byteLength;
+      interactionGeneration = accepted;
+      if (lastScene) lastScene = positionMirror.apply(lastScene, input);
+      return accepted;
+    },
+    ...createRuntimeViewport({ module: () => module, now, accepted: (input, accepted) => {
+      if (disposed) return;
+      interactionGeneration = accepted;
+      if (lastScene) supervisor?.accepted(lastScene.revision, accepted);
+      if (lastScene) lastScene = { ...lastScene, viewport: { ...input.viewport } };
+    } }),
+    ...createRuntimeObserver({ module: () => module, now, lastScene: () => lastScene, accepted: (scene, accepted) => {
+      if (disposed) return;
+      interactionGeneration = accepted;
+      if (scene) { lastScene = scene; supervisor?.accepted(scene.revision, accepted); }
+    } }),
+    setTexture: (id, width, height, rgba, source) => textures.upload("node", id, width, height, rgba,
+      () => module.set_texture(id, width, height, rgba), source),
+    setImageFocusDetails:frame=>{
+      if(!module.set_image_focus_details) {if(frame)throw new Error("画布内核缺少图片细节纹理接口");return;}
+      focusDetails.upload(frame,(manifest,pixels)=>module.set_image_focus_details!(manifest,pixels));
+    },
+    setModelMediaTexture: (id, width, height, rgba, source) => textures.upload("plane", id, width, height, rgba,
+      () => { if (!module.set_model_media_texture) throw new Error("缺少媒体平面纹理能力"); module.set_model_media_texture(id, width, height, rgba); }, source),
+    registerModelResource,
+    prepareAndRegisterModelResource,
+    setScene: (scene, resources) => {
+      const accepted = resources ? resourceFailures.project(scene, resources, lastScene, registerModelResource) : scene;
+      sceneDiagnostics.sceneStringify += 1;
+      const json = measureSceneWork("stringifyMs", now, () => JSON.stringify(accepted));
+      sceneDiagnostics.sceneSubmits += 1;
+      sceneDiagnostics.boundaryBytes += json.length;
+      sceneDiagnostics.lastSceneJsonCodeUnits = json.length;
+      // Rust 在接受点同步发布 interaction snapshot 并返回新的 generation。
+      interactionGeneration = measureSceneWork("wasmAcceptMs", now, () => module.set_scene(json));
+      // full 接受同时刷新 base 身份；纯视口增量沿用该身份直到下次 full。
+      baseSceneGeneration = interactionGeneration;
+      // 接受点后合并 Rust 实际工作计数（世界索引/模型候选 AABB 重建）
+      // （change: 2026-10-10-optimize-canvas-interaction-hot-path，任务 1.2）。
+      mergeRustWorkCounters();
+      lastScene = positionMirror.reset(accepted);
+      supervisor?.accepted(scene.revision, interactionGeneration);
+      // 首个完整 scene 已提交：等 Bevy 的健康协议确认该 generation 已应用且完成 render
+      // schedule（与恢复路径同一判据），再揭示 iframe。否则首帧 shader/管线准备期间仍可能
+      // 露出默认浅色清屏，暗色画布切换就会白闪。只对浏览器 realm 生效（原生 reveal 是 no-op）。
+      if (!revealScheduled && realm) {
+        revealScheduled = true;
+        const activeRealm = realm;
+        const targetGeneration = interactionGeneration;
+        let attempts = 0;
+        const afterPaint = (callback: () => void) => {
+          if (typeof target.requestAnimationFrame === "function") target.requestAnimationFrame(callback);
+          else target.setTimeout(callback, 16);
+        };
+        const revealWhenRendered = () => {
+          if (disposed) return;
+          attempts += 1;
+          let rendered = false;
+          try {
+            if (module.runtime_health) {
+              const health = readRuntimeHealth(module.runtime_health());
+              rendered =
+                (health.appliedGeneration ?? 0) >= targetGeneration &&
+                (health.renderedGeneration ?? 0) >= targetGeneration;
+            }
+          } catch {
+            // 健康读取失败不应让画布永久隐藏；错误由 supervisor/告警面显示。
+            rendered = true;
+          }
+          if (rendered || attempts > 240) {
+            activeRealm.reveal();
+            return;
+          }
+          afterPaint(revealWhenRendered);
+        };
+        afterPaint(revealWhenRendered);
+      }
+      const required = new Set(scene.nodes.map(node => node.model?.resourceKey).filter(Boolean));
+      for (const key of replayModels.keys()) if (!required.has(key)) { replayModels.delete(key); registeredKeys.delete(key); }
+      textures.retain(new Set(scene.nodes.map(node => node.id)),
+        new Set(scene.nodes.flatMap(node => node.compositeAsset?.media?.map(plane => plane.id) ?? [])));
+    },
+    queryPoint: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => module.query_point_hit(encodePointRequest(input)),
+          projectPoint
+        )
+      ),
+    queryMarquee: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => module.query_marquee(encodeMarqueeRequest(input)),
+          projectMarquee
+        )
+      ),
+    queryProbe: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => module.query_probe(encodeProbeRequest(input)),
+          projectProbe
+        )
+      ),
+    queryDropTarget: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => (module.query_drop_target ?? (() => ""))(encodeDropTargetRequest(input)),
+          projectDropTarget
+        )
+      ),
+    queryCompositeAssetScopes: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => (module.query_composite_asset_scopes ?? (() => ""))(encodeCompositeAssetScopesRequest(input)),
+          projectCompositeAssetScopes
+        )
+      ),
+    queryModelPick: (input) =>
+      guardGeneration(input.generation, () =>
+        runQuery(
+          () => (module.query_model_pick ?? (() => ""))(encodeModelPickRequest(input)),
+          projectModelPick
+        )
+      ),
+    queryCompositeAssetItemPick: (input) =>
+      runQuery(
+        () => queryCompositeAssetItemPickRaw(module, input),
+        projectFilmSetItemPick
+      ),
+    queryCompositeAssetItemBounds: (nodeId) => queryCompositeAssetItemBoundsRaw(module, nodeId),
+    queryGizmoHit: (input) => {
+      if (!module.query_gizmo_hit) return null;
+      try {
+        return parseGizmoResult(module.query_gizmo_hit(encodeGizmoRequest(input)));
+      } catch {
+        return null;
+      }
+    },
+    requestCapture: async (input) => {
+      const releaseOwner = hoverNodeStore.acquirePlaybackOwner();
+      const captureGeneration = generation;
+      try { return await pollShotCapture(module, {
+        requestId: nextCaptureRequestId(),
+        nodeId: input.nodeId,
+        generation: input.generation,
+        ...(input.width ? { width: input.width } : {}),
+        ...(input.height ? { height: input.height } : {})
+      }, () => !disposed && captureGeneration === generation && (!supervisor || supervisor.phase === "running"));
+      } finally { releaseOwner(); }
+    },
+    shotDiagnostics: () => {
+      const empty = { rigs: 0, previewImages: 0, gizmoEntities: 0, capturesInFlight: 0, capturesQueued: 0 };
+      if (!module.shot_diagnostics) return empty;
+      try {
+        const parsed = JSON.parse(module.shot_diagnostics()) as Partial<typeof empty>;
+        return { ...empty, ...parsed };
+      } catch {
+        return empty;
+      }
+    },
+    dispose: () => {
+      if (disposed) return;
+      endReady("cancelled"); endFirstRender("cancelled");
+      disposed = true;
+      workDiagnostics.dispose();
+      focusDetails.reset();
+      retryListeners.clear();
+      supervisor?.dispose();
+      if (healthTimer !== null) target.clearInterval(healthTimer);
+      target.document?.removeEventListener("visibilitychange", visibilityChanged);
+      disposeRealm();
+    }
+  };
+  const visibilityChanged = () => { if (supervisor?.phase === "running") supervisor.sample(supervisor.snapshot().health, false); };
+  let healthTimer: ReturnType<typeof setInterval> | null = null;
+  if (!options.importModule) {
+    supervisor = new RuntimeSupervisor({ issues, recover: async () => {
+      const previousInteraction = interactionGeneration;
+      generation = nextRuntimeGeneration();
+      focusDetails.reset();
+      const abandoned = realm; realm = null;
+      module = new Proxy({} as BevyModule, { get: () => () => { throw new Error("渲染器正在重建"); } });
+      abandoned?.dispose();
+      try {
+        const replacement = await loadModule(true);
+        await replacement.default();
+        if (disposed) { disposeRealm(); throw new Error("Runtime disposed"); }
+        assertRequiredCapabilities(replacement);
+        if (!replacement.runtime_health || !replacement.seed_runtime_generation) throw new Error("Bevy WASM 缺少恢复健康协议");
+        replacement.seed_runtime_generation(previousInteraction);
+        replacement.start();
+        for (const json of replayModels.values()) replacement.prepare_and_register_model_resource!(json);
+        const recoveredInteraction = lastScene ? replacement.set_scene(JSON.stringify(lastScene)) : 0;
+        let remaining = 30000; let sampledAt = performance.now();
+        while (!disposed && remaining > 0) {
+          const now = performance.now();
+          if (target.document.visibilityState === "visible") remaining -= now - sampledAt;
+          sampledAt = now;
+          if (realmFault) throw new Error(realmFault);
+          const health = readRuntimeHealth(replacement.runtime_health());
+          if (replacement.is_ready() && health.renders > 0 && (!lastScene || (health.appliedGeneration! >= recoveredInteraction && health.renderedGeneration! >= recoveredInteraction))) {
+            module = protectWasmModule(replacement, issues, callsAllowed); interactionGeneration = recoveredInteraction; baseSceneGeneration = recoveredInteraction; textures.reset(); return;
+          }
+          await new Promise(resolve => target.setTimeout(resolve, 50));
+        }
+        throw new Error("渲染器重建未通过健康检查");
+      } catch (error) { disposeRealm(); throw error; }
+    }, invalidate: () => { try { resourceFailures.retry(); } finally { runtime.retryRuntimeIssues?.(); } } });
+    if (realmFault) { endReady("error"); endFirstRender("error"); supervisor.fail(realmFault); }
+    target.document.addEventListener("visibilitychange", visibilityChanged);
+    healthTimer = target.setInterval(() => {
+      if (disposed || supervisor?.phase !== "running") return;
+      if (!target.document.getElementById("bevy-canvas")) return;
+      if (!realm?.connected()) { supervisor?.fail("surface-detached"); return; }
+      try {
+        const health = readRuntimeHealth(module.runtime_health!());
+        if (module.is_ready()) endReady();
+        if (firstRenderPending && health.renders > 0) { endFirstRender(); firstRenderPending = false; }
+        supervisor?.sample(health, target.document.visibilityState === "visible");
+      }
+      catch (error) { endReady("error"); endFirstRender("error"); supervisor?.fail(error instanceof Error ? error.message : "health"); }
+    }, 1000);
+  }
+
+  // 页面级镜像：供 E2E / 排障观察运行时状态（生产无副作用）。
+  (target as unknown as { __bevyRuntime?: unknown }).__bevyRuntime = {
+    isReady: () => runtime.isReady(),
+    renderedRevision: () => runtime.renderedRevision(),
+    lastScene: () => lastScene,
+    getWorkDiagnostics: runtime.getWorkDiagnostics,
+    setViewport: runtime.setViewport,
+    setObserver: runtime.setObserver,
+    setPositions: runtime.setPositions,
+    baseSceneGeneration: runtime.baseSceneGeneration,
+    modelResourceErrors: resourceFailures.getSnapshot,
+    runtimeIssues: issues.getSnapshot,
+    runtimeHealth: () => supervisor?.snapshot(),
+    generation: runtime.generation,
+    recover: runtime.recoverRuntime,
+    setTexture: runtime.setTexture,
+    queryGizmoHit: runtime.queryGizmoHit,
+    queryCompositeAssetItemBounds: runtime.queryCompositeAssetItemBounds,
+    queryCompositeAssetItemPick: runtime.queryCompositeAssetItemPick,
+    // 真实 WASM 命中查询：E2E 用它验证 Rust 侧 serde 确实读到 camelCase 键
+    // （change: 2026-10-08-make-film-set-model-only）。
+    queryPoint: (input: { x: number; y: number; zoom: number; hoveredEdgeId?: string | null }) =>
+      runtime.queryPoint?.({
+        generation: interactionGeneration,
+        x: input.x,
+        y: input.y,
+        zoom: input.zoom,
+        hoveredEdgeId: input.hoveredEdgeId ?? null
+      }) ?? { ok: false, reason: "unsupported" },
+    // accepted drop/scope 查询镜像：E2E 用它验证真实 WASM 的范围几何与目标固定
+    // （change: 2026-10-12-align-film-set-scope-with-isometric-grid）。生产无副作用。
+    queryCompositeAssetScopes: () =>
+      runtime.queryCompositeAssetScopes?.({ generation: interactionGeneration }) ?? { ok: false, reason: "unsupported" },
+    queryDropTarget: (point: { x: number; y: number }, excludedIds: readonly string[] = []) =>
+      runtime.queryDropTarget?.({ generation: interactionGeneration, x: point.x, y: point.y, excludedIds }) ??
+      { ok: false, reason: "unsupported" }
+  };
+  return runtime;
+}

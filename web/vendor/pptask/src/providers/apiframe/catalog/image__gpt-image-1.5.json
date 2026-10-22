@@ -1,0 +1,114 @@
+{
+  "locator": "apiframe://image/gpt-image-1.5",
+  "modelId": "gpt-image-1.5",
+  "providerId": "apiframe",
+  "modality": "image",
+  "label": "GPT Image 1.5",
+  "outputType": "image",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/images/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "gpt-image-1.5"
+        ],
+        "type": "string"
+      },
+      "gptImageParams": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "enum": [
+              "1:1",
+              "3:2",
+              "2:3"
+            ],
+            "type": "string"
+          },
+          "background": {
+            "enum": [
+              "auto",
+              "transparent",
+              "opaque"
+            ],
+            "type": "string"
+          },
+          "input_fidelity": {
+            "enum": [
+              "low",
+              "high"
+            ],
+            "type": "string"
+          },
+          "input_images": {
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "number_of_images": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "output_format": {
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ],
+            "type": "string"
+          },
+          "quality": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "auto"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "gptImageParams",
+    "wirePath": "gptImageParams"
+  }
+}

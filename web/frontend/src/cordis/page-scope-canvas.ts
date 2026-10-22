@@ -1,0 +1,218 @@
+/**
+ * Canvas page scope 启动器（自 `page-scope.ts` 拆出）
+ * （change: 2026-10-13-add-enterprise-access-and-production-deployment，
+ *  规模门禁 ≤500 行；沿用 change: 2026-10-09-... 的分层方式）。
+ *
+ * 只负责**在创建 scope 之前**读取一次有效 optional 选择并装配 Canvas page scope：
+ * - 获取并固定发布目录（App 级缓存；缺失视为无扩展能力，不禁用核心）；
+ * - 读一次本地选择，派生启动选择（always + 已启用 browser-local optional）；
+ * - required 资源加载失败即 page 失败；optional 失败隔离并进入诊断；
+ * - server-active 只登记 metadata（由 reconciler 按服务端状态驱动加载）。
+ *
+ * 不拥有 App scope 生命周期或路由；调用方（page-scope）拥有返回 runtime 的 dispose。
+ */
+import type { Context } from "@deepseek-ai/cordis";
+import type {
+  ApplicationExtensionFrontendAsyncEntry,
+  ExtensionLoadDiagnostic
+} from "@woohaa3/contracts";
+import { startFrontendScope, type FrontendExtensionDefinition, type FrontendRuntime } from "./kernel.js";
+import { installCanvasPageServices } from "./install-services.js";
+import { createCanvasExtensionManifest, canvasExtensionCatalogMetadata, resolveConfigurableOptionalIds } from "./manifest.js";
+import { isAssembledAtStartup } from "./services/extension-preferences/selector.js";
+import { ExtensionPreferenceStore } from "./services/extension-preferences/store.js";
+import type { PreferenceStorage } from "./services/extension-preferences/codec.js";
+import type { ExtensionRuntimeService } from "./extension-runtime/service.js";
+import { resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
+import type { CanvasExtensionMetadata } from "./plugins/extension-manager/contract.js";
+import { createCanvasSettingsAssembly } from "./plugins/settings/extension-settings-assembly.js";
+import { settingsPlugin, SETTINGS_PLUGIN_ID } from "./plugins/settings/plugin.js";
+import type { ExtensionFrontendMetadata } from "@woohaa3/contracts";
+
+/** 业务 extension 的展示元数据投影（纯数据；不含实现）。 */
+export function extensionCatalogMetadata(metadata: readonly ExtensionFrontendMetadata[]): CanvasExtensionMetadata[] {
+  return metadata.map((entry) => ({
+    id: entry.extensionId,
+    name: entry.label,
+    description: entry.description,
+    directory: entry.directory,
+    required: entry.required,
+    configurable: entry.configScope === "browser-local" && !entry.required
+  }));
+}
+
+export type CanvasPageScopeStarterInput = {
+  /** App scope 的 Cordis Context（page scope 的 parent）。 */
+  appCtx: Context;
+  runtimeService: ExtensionRuntimeService;
+  /** 测试注入的偏好存储（缺省 globalThis.localStorage；null 表示无存储）。 */
+  preferenceStorage?: PreferenceStorage | null | undefined;
+  /** 测试注入的刷新适配；缺省页面 reload。 */
+  extensionManagerReload?: () => void;
+};
+/**
+ * 构造 `startCanvasPageScope(canvasId)`：装配并返回 Canvas page scope runtime。
+ * 返回的 runtime 的 `dispose` 同时释放本页创建的偏好存储。
+ */
+export function createCanvasPageScopeStarter(
+  input: CanvasPageScopeStarterInput
+): (canvasId: string) => Promise<FrontendRuntime> {
+  const { appCtx, runtimeService } = input;
+  return async (canvasId: string): Promise<FrontendRuntime> => {
+    // 1. 获取并固定发布目录（App 级缓存；缺失视为无扩展能力，不禁用核心）。
+    const release = await runtimeService.ensureCatalog();
+    const metadata = release?.entries.map((entry) => entry.metadata) ?? [];
+    const runtimeCatalogIds = release?.browserLocalIds() ?? [];
+    const configurableIds = resolveConfigurableOptionalIds(runtimeCatalogIds);
+    const catalogMetadata = canvasExtensionCatalogMetadata(extensionCatalogMetadata(metadata));
+
+    // 2. 读一次本地选择，派生启动选择。
+    const preferenceStore = new ExtensionPreferenceStore({
+      ids: configurableIds,
+      ...(input.preferenceStorage !== undefined ? { storage: input.preferenceStorage } : {})
+    });
+    const desired = preferenceStore.getSnapshot().preferences;
+    const selectionResult = resolveExtensionStartupSelection({ metadata, desired });
+    // 内置 optional（node-history）沿用既有 selector 语义。
+    const builtinAssembled: Record<string, boolean> = {};
+    for (const entry of catalogMetadata) {
+      if (!entry.configurable) continue;
+      builtinAssembled[entry.id] = desired[entry.id] ?? true;
+    }
+
+    // 3. 只加载 always + 已启用 browser-local optional；required 失败即 page 失败，optional 失败隔离。
+    const loadedDefinitions: FrontendExtensionDefinition[] = [];
+    const loadDiagnostics: ExtensionLoadDiagnostic[] = [];
+    const loadResults = await Promise.all(
+      selectionResult.load.map(async (entry) => {
+        try {
+          const descriptor = await runtimeService.loadDescriptor(entry.extensionId);
+          return { entry, descriptor, error: null as Error | null };
+        } catch (error) {
+          return { entry, descriptor: null, error: error instanceof Error ? error : new Error(String(error)) };
+        }
+      })
+    );
+    for (const result of loadResults) {
+      if (result.descriptor) {
+        loadedDefinitions.push({
+          id: result.entry.extensionId,
+          required: result.entry.required,
+          configurable: result.entry.configScope === "browser-local",
+          name: result.entry.label,
+          description: result.entry.description,
+          plugin: result.descriptor.plugin()
+        });
+      } else if (result.entry.required) {
+        // required 资源加载失败：进入稳定 page error，不挂载半可用画布。
+        throw new Error(`required extension "${result.entry.extensionId}" 资源加载失败：${result.error?.message ?? "未知错误"}`);
+      } else {
+        loadDiagnostics.push({
+          extensionId: result.entry.extensionId,
+          status: "load-failed",
+          artifactId: null,
+          releaseId: release?.releaseId ?? null,
+          errorCode: "network",
+          message: "功能加载失败，请重试"
+        });
+      }
+    }
+
+    // 4. server-active 只登记 metadata（由 reconciler 按服务端状态驱动加载）。
+    const serverActiveEntries: ApplicationExtensionFrontendAsyncEntry[] = selectionResult.registered.map((entry) => ({
+      metadata: entry,
+      async loadDescriptor() {
+        return runtimeService.loadDescriptor(entry.extensionId);
+      }
+    }));
+
+    // 可选入口加载失败必须在管理面板显示「启动失败」，不能沿用目标启用显示为「已启用」。
+    const failedOptionalIds = new Set(loadDiagnostics.map((diagnostic) => diagnostic.extensionId));
+
+    // 设置专项扩展装配：只允许未激活扩展按需装配 settings-only 贡献
+    // （change: 2026-10-17-move-settings-into-canvas-dialog，任务 5.2）。
+    const staticallyAssembled = new Set([
+      ...loadedDefinitions.map((definition) => definition.id),
+      ...selectionResult.registered.map((entry) => entry.extensionId)
+    ]);
+    const settingsAssembly = createCanvasSettingsAssembly({
+      runtime: runtimeService,
+      staticallyAssembled
+    });
+
+    const manifest = createCanvasExtensionManifest({
+      canvasId,
+      catalogMetadata,
+      configurableOptionalIds: configurableIds,
+      extensions: loadedDefinitions,
+      settingsAssembly: settingsAssembly.assembly,
+      extensionManager: {
+        assembled: { ...builtinAssembled, ...selectionResult.assembled },
+        failed: failedOptionalIds,
+        catalog: catalogMetadata,
+        ids: configurableIds,
+        preferenceStore,
+        ...(input.extensionManagerReload ? { reload: input.extensionManagerReload } : {})
+      }
+    });
+    const assembled = { ...builtinAssembled, ...selectionResult.assembled };
+    const plugins = manifest.filter((definition) => isAssembledAtStartup(definition, assembled));
+    const disabled = Object.entries(assembled)
+      .filter(([, enabled]) => !enabled)
+      .map(([id]) => ({ id, reason: "用户已禁用该可选插件" }));
+
+    const runtime = await startFrontendScope(appCtx, {
+      install: async (ctx) => {
+        await installCanvasPageServices(ctx, {
+          canvasId,
+          extensionRuntime: runtimeService,
+          serverActiveEntries,
+          loadDiagnostics
+        });
+        // 设置装配在 scope install 之后才可能真正加载（此时 ctx 已有 settingsRemote 等）。
+        settingsAssembly.attach(ctx);
+      },
+      plugins,
+      disabled,
+      isolate: [
+        "canvasRemote",
+        "taskRemote",
+        "applicationRemote",
+        "mediaRemote",
+        "canvasSession",
+        "canvasScope",
+        "canvasState",
+        "inputScopes",
+        "taskCatalog",
+        "selection",
+        "parameterPreview",
+        "modelInteractions",
+        "canvasNavigation"
+      ]
+    });
+    const disposeRuntime = runtime.dispose;
+    return {
+      ...runtime,
+      async dispose() {
+        settingsAssembly.assembly.dispose();
+        await disposeRuntime();
+        preferenceStore.dispose();
+      }
+    };
+  };
+}
+
+/**
+ * 画布壳（空壳 / 准备中 / 恢复页）的设置能力
+ * （change: 2026-10-17-move-settings-into-canvas-dialog，design D1）。
+ *
+ * 无法打开画布（目录失败、显式不存在或旧 ID 迁移中）时仍要能读配置：只装配设置插件与其所需
+ * 的最小 remote，不创建作品、Canvas Session、sync socket 或 Bevy。
+ */
+export function createCanvasShellSettingsPlugin(): FrontendExtensionDefinition {
+  return {
+    id: SETTINGS_PLUGIN_ID,
+    required: false,
+    plugin: settingsPlugin({})
+  };
+}

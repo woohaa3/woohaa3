@@ -1,0 +1,66 @@
+{
+  "name": "@woohaa3/extension-game-furnace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "游戏炼丹炉 extension（change: 2026-10-10-add-game-furnace-extension，按 integration 新架构重实现）：独立收集画布素材、编辑分类/描述与游戏需求，经真实文本模型生成可站内试玩的 HTML 游戏。",
+  "exports": {
+    "./archive": {
+      "types": "./src/archive.ts",
+      "import": "./dist/archive.js"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    },
+    "./frontend": {
+      "types": "./src/frontend/index.ts",
+      "import": "./dist/frontend.js"
+    },
+    "./geometry": {
+      "types": "./src/geometry.ts",
+      "import": "./dist/geometry.js"
+    },
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    },
+    "./backend-extension": {
+      "types": "./src/backend-extension.ts",
+      "import": "./dist/backend-extension.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../web/scripts/build-package.mjs --entry src/shared.ts --entry-name shared --outdir dist --platform neutral && node ../../web/scripts/build-package.mjs --entry src/archive.ts --entry-name archive --outdir dist --platform neutral && node ../../web/scripts/build-package.mjs --entry src/frontend/index.ts --entry-name frontend --outdir dist --platform browser && node ../../web/scripts/build-package.mjs --entry src/geometry.ts --entry-name geometry --outdir dist --platform neutral && node ../../web/scripts/build-package.mjs --entry src/backend.ts --entry-name backend --outdir dist --platform node && node ../../web/scripts/build-package.mjs --entry src/backend-extension.ts --entry-name backend-extension --outdir dist --platform node",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build:browser": "node ../../web/scripts/build-extension-browser.mjs"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/frontend": "workspace:*",
+    "react": "^18.3.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@types/node": "^22.15.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "jsdom": "^30.1.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@woohaa3/extension-runtime-foundation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Storage 共享实现库。SQLite 与 Mongo 扩展分别声明存储槽位。",
+  "exports": {
+    "./bootstrap": {
+      "types": "./src/bootstrap.ts",
+      "import": "./dist/bootstrap.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/bootstrap.ts --outdir dist --platform node --entry-name bootstrap",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/application-service": "workspace:*",
+    "@woohaa3/canvas-service": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

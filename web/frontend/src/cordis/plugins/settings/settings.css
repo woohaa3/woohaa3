@@ -1,0 +1,771 @@
+/* 设置专属样式：颜色与字体消费 `--mc-*` / `--app-*` token，不复制主题。 */
+/*
+ * change: 2026-10-17-move-settings-into-canvas-dialog：设置不再是独立整页，而是画布内的大弹窗。
+ * 下面这一段只描述弹窗外框（固定 Header + 左栏 + 右栏正文滚动），沿用共享 Dialog primitives；
+ * 尺寸用设置专属 class，不改所有 `lg` 弹窗宽度。
+ * 桌面目标宽 1160px（1100–1200 可调），最大宽为视口减 48px，高约 85vh、上限 850px。
+ */
+.dlg.settings-dialog {
+	max-width: min(1160px, calc(100vw - 48px));
+	height: min(850px, 85vh);
+	position: relative;
+}
+
+.settings-dialog .dlg__body {
+	padding-bottom: 0;
+}
+
+.settings-workbench {
+	display: grid;
+	grid-template-columns: 180px minmax(0, 1fr);
+	gap: 0;
+	flex: 1;
+	min-height: 0;
+	border-top: 1px solid var(--mc-border);
+}
+
+.settings-workbench__nav {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 16px 12px;
+	min-height: 0;
+	overflow: auto;
+	border-right: 1px solid var(--mc-border);
+}
+.settings-workbench__nav-item {
+	text-align: left;
+	padding: 8px 12px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--mc-text-muted);
+	cursor: pointer;
+	font: inherit;
+}
+.settings-workbench__nav-item:hover { color: var(--mc-text); background: var(--app-web-subtle); }
+.settings-workbench__nav-item.is-active { color: var(--mc-text); background: var(--mc-panel); border-color: var(--mc-border); }
+
+/* 右栏：唯一滚动容器。`min-width: 0` 防止长键名/路径把列撑开导致横向裁切。 */
+.settings-workbench__body {
+	min-width: 0;
+	min-height: 0;
+	overflow: auto;
+	padding: 20px 24px 24px;
+	background: var(--mc-panel);
+}
+
+/* 表单分区保持可读行宽；`is-wide` 的卡片网格分区用满内容列。 */
+.settings-workbench__panel {
+	max-width: 860px;
+	padding: 0;
+}
+.settings-workbench__panel.is-wide { max-width: none; }
+.settings-workbench__panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.settings-workbench__panel h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+
+/* 首次加载占位：只占右栏，不铺满屏幕（对话窗外壳保持可见）。 */
+.settings-workbench__loading {
+	margin: 0;
+	padding: 24px 0;
+	font-size: 13px;
+	color: var(--mc-text-muted);
+}
+/* 左栏在内容就绪前用等宽占位撑住列宽，避免加载完成时布局跳动。 */
+.settings-workbench__nav-placeholder {
+	height: 34px;
+	border-radius: 8px;
+	background: var(--app-web-subtle);
+	opacity: 0.5;
+}
+
+/* 插件详情：同一右栏内的内部导航，不再叠加第二张弹窗。 */
+.settings-workbench__detail { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.settings-workbench__detail-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.settings-workbench__detail-title { margin: 0; font-size: 16px; font-weight: 600; }
+.settings-workbench__detail-head .plugin-config__meta { flex: 1 1 100%; }
+.settings-workbench__section {
+	display: block;
+	margin-top: 18px;
+	padding-top: 14px;
+	border-top: 1px solid var(--mc-border);
+}
+
+.settings-page__header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.settings-page__header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+
+.settings-page__hint { margin: 0 0 12px; font-size: 12px; color: var(--mc-text-muted); line-height: 1.6; }
+.settings-page__hint code,
+.settings-page__item-key { font-size: 11px; padding: 1px 4px; border-radius: 4px; background: var(--app-web-subtle); }
+.settings-page__error { margin: 6px 0 0; font-size: 12px; color: var(--app-status-danger); }
+
+/* Provider 凭据弹窗的紧凑卡片（画布 scope）；设置页不再用这套，见 .settings-plugin。 */
+.provider-settings__card + .provider-settings__card { margin-top: 12px; }
+.provider-settings__card .settings-page__group-title { margin: 0 0 8px; }
+
+.settings-page__group-title { margin: 16px 0 8px; font-size: 13px; font-weight: 600; }
+/* 配置项是分隔线切开的行，不是套在面板/卡片里的第二层卡片。 */
+.settings-page__list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; }
+.settings-page__item { padding: 12px 0; }
+.settings-page__item:first-child { padding-top: 0; }
+.settings-page__item:last-child { padding-bottom: 0; }
+.settings-page__item + .settings-page__item { border-top: 1px solid var(--mc-border); }
+.settings-page__item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.settings-page__item-label { font-weight: 600; }
+.settings-page__item-description { margin: 4px 0 8px; font-size: 12px; color: var(--mc-text-muted); }
+.settings-page__item-control { display: flex; align-items: center; gap: 8px; }
+.settings-page__badge {
+	font-size: 11px;
+	padding: 1px 8px;
+	border-radius: 999px;
+	border: 1px solid var(--mc-border);
+	color: var(--mc-text);
+}
+.settings-page__badge.is-muted { color: var(--mc-text-muted); }
+.settings-page__badge.is-warning { color: var(--app-status-warning); border-color: var(--app-status-warning); }
+
+.settings-page__input {
+	flex: 1;
+	min-width: 0;
+	border: 1px solid var(--mc-border);
+	background: var(--app-web-subtle);
+	color: var(--mc-text);
+	border-radius: 8px;
+	padding: 6px 10px;
+	font: inherit;
+}
+.settings-page__input:disabled { opacity: 0.6; }
+
+.settings-page__pending { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 12px; }
+/* 扩展点选择项：选择器占满输入位，关联提供者跟在控件下方。 */
+.settings-page__select {
+	flex: 1;
+	min-width: 0;
+	height: 38px;
+	padding: 0 10px;
+	border: 1px solid var(--mc-border);
+	border-radius: 8px;
+	background: var(--app-web-subtle);
+	color: var(--mc-text);
+	font: inherit;
+	font-size: 13px;
+}
+.settings-page__select:disabled { opacity: 0.6; }
+.settings-page__related {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 8px 0 0;
+	font-size: 12px;
+	line-height: 1.6;
+	color: var(--mc-text-muted);
+}
+.settings-page__related-missing { color: var(--app-status-warning); }
+
+/* ------------------------------------------------------------------ *
+ * 核心服务：服务页签（只渲染有配置的服务）、服务说明与插件指引
+ * ------------------------------------------------------------------ */
+.settings-services__tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: 2px 0 0;
+	padding: 0 0 12px;
+	border-bottom: 1px solid var(--mc-border);
+}
+.settings-services__tab {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 10px;
+	border-radius: 7px;
+	border: 1px solid transparent;
+	background: transparent;
+	color: var(--mc-text-muted);
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+.settings-services__tab:hover { color: var(--mc-text); background: var(--app-web-subtle); }
+.settings-services__tab.is-active { color: var(--mc-text); background: var(--app-web-subtle); border-color: var(--mc-border); }
+.settings-services__count-badge {
+	min-width: 18px;
+	padding: 0 6px;
+	border-radius: 999px;
+	font-size: 11px;
+	line-height: 16px;
+	text-align: center;
+	background: var(--app-web-subtle);
+	color: var(--mc-text-muted);
+}
+.settings-services__tab.is-active .settings-services__count-badge {
+	background: var(--app-interaction-accent-soft);
+	color: var(--app-interaction-accent);
+}
+.settings-services__ctx { display: flex; align-items: baseline; gap: 12px; margin: 14px 0; }
+.settings-services__desc { margin: 0; font-size: 12px; line-height: 1.6; color: var(--mc-text-muted); }
+.settings-services__count { margin-left: auto; font-size: 11px; color: var(--mc-text-muted); white-space: nowrap; }
+.settings-services__pointer {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 0 0 6px;
+	padding: 10px 12px;
+	border: 1px dashed var(--mc-border);
+	border-radius: 8px;
+	background: var(--app-web-surface);
+	font-size: 12px;
+	line-height: 1.6;
+	color: var(--mc-text-muted);
+}
+.settings-services__pointer > span { flex: 1; min-width: 0; }
+.settings-services__empty {
+	margin: 8px 0 0;
+	padding: 20px 16px;
+	border: 1px dashed var(--mc-border);
+	border-radius: 10px;
+	background: var(--app-web-surface);
+}
+.settings-services__empty-title { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.settings-services__empty .settings-page__hint { margin: 0; }
+
+/* ------------------------------------------------------------------ *
+ * 插件配置：一节一个分层的卡片网格，点卡片进入配置弹窗
+ * 卡片只放基本信息与启停；表单在设置弹窗右栏的插件详情里
+ * （cordis/plugins/settings/workspace/plugin-config-content.tsx）。
+ * ------------------------------------------------------------------ */
+.settings-plugins__summary { display: block; margin: 0 0 4px; font-size: 12px; color: var(--mc-text-muted); font-variant-numeric: tabular-nums; }
+
+.settings-plugins__section { margin-top: 22px; }
+.settings-plugins__head { display: flex; align-items: center; gap: 8px; }
+.settings-plugins__heading { margin: 0; font-size: 13px; font-weight: 600; }
+/* 整节没有可操作内容时，标题本身是展开/收起入口。 */
+.settings-plugins__toggle {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 2px 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+.settings-plugins__toggle:focus-visible { outline: 2px solid var(--app-interaction-focus); outline-offset: 2px; }
+.settings-plugins__toggle svg { color: var(--mc-text-muted); }
+.settings-plugins__count {
+	min-width: 18px;
+	height: 18px;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: var(--app-web-subtle);
+	color: var(--mc-text-muted);
+	font-size: 11px;
+	line-height: 18px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.settings-plugins__section > .settings-page__hint { margin: 4px 0 10px; }
+.settings-plugins__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+
+.plugin-card {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--mc-border);
+	border-radius: 12px;
+	background: var(--mc-panel);
+	transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.plugin-card.is-openable:hover { border-color: var(--mc-border-strong); box-shadow: 0 4px 14px var(--app-web-shadow); }
+.plugin-card__open {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+	padding: 14px;
+	border: 0;
+	border-radius: 12px 12px 0 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.plugin-card__open:disabled { cursor: default; }
+.plugin-card__open:focus-visible { outline: 2px solid var(--app-interaction-focus); outline-offset: -2px; }
+.plugin-card__head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+/* 插件图标：语义图形名（PLUGIN_ICON_NAMES）在这里落成图形，品牌图形路径（/plugin-icons/*.png）
+   落成图片；未声明时回退通用插件图标，格子照样对齐，卡片不至于只是一行字。 */
+.plugin-card__icon {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	border: 1px solid var(--mc-border);
+	border-radius: 9px;
+	background: var(--app-web-subtle);
+	color: var(--mc-accent);
+}
+.plugin-card__icon[data-plugin-icon="plugin"] { color: var(--mc-text-muted); }
+/* 品牌图自带底色，不再套一层灰底/描边，直接当品牌芯片显示。 */
+.plugin-card__icon.is-image { border: 0; background: transparent; }
+.plugin-card__icon-image {
+	display: block;
+	width: 30px;
+	height: 30px;
+	border-radius: 8px;
+	object-fit: contain;
+}
+.plugin-card__name { font-weight: 600; }
+.plugin-card__badge {
+	font-size: 11px;
+	padding: 1px 7px;
+	border-radius: 999px;
+	border: 1px solid var(--mc-border);
+	color: var(--mc-text-muted);
+}
+.plugin-card__badge.is-provider {
+	color: var(--mc-accent);
+	border-color: color-mix(in srgb, var(--mc-accent) 40%, transparent);
+}
+/* 版本是身份信息，不做成徽标：右侧对齐、低对比、等宽数字，免得和分层/Provider 标记抢注意力。 */
+.plugin-card__version {
+	margin-left: auto;
+	max-width: 45%;
+	overflow: hidden;
+	font-size: 11px;
+	color: var(--mc-text-muted);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+.plugin-card__description {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	font-size: 12px;
+	line-height: 1.6;
+	color: var(--mc-text-muted);
+}
+.plugin-card__meta {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	font-size: 11px;
+	color: var(--mc-text-muted);
+	font-variant-numeric: tabular-nums;
+}
+.plugin-card.is-openable .plugin-card__meta { color: var(--mc-accent); }
+.plugin-card__meta svg { flex: 0 0 auto; }
+.plugin-card__foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 8px 14px;
+	border-top: 1px solid var(--mc-border);
+}
+.plugin-card__diagnostics { margin: 0; padding: 0 14px 10px; font-size: 11px; color: var(--mc-text-muted); }
+
+/* 启停控制：卡片脚与配置弹窗头共用同一份状态。 */
+.plugin-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.plugin-state__label { font-size: 11px; color: var(--mc-text-muted); }
+.plugin-state__label[data-actual-state="active"] { color: var(--app-status-success); }
+.plugin-state__label[data-actual-state="degraded"],
+.plugin-state__label[data-pending="true"] { color: var(--app-status-warning); }
+
+/* 插件配置弹窗 */
+.plugin-config__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.plugin-config__description { font-size: 12px; color: var(--mc-text-muted); }
+.plugin-config__status { display: flex; justify-content: flex-end; margin-top: 8px; }
+.plugin-config__status .plugin-state { margin-left: 0; }
+/* 生成的模型：标题/启用比例、工具栏、列表、批量确认与撤销共用一块面板。 */
+.plugin-config__model-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; }
+.plugin-config__model-head .settings-page__group-title { margin: 0; }
+.plugin-config__model-meter { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.plugin-config__model-meter-track {
+	width: 64px;
+	height: 5px;
+	flex: none;
+	border-radius: 999px;
+	background: var(--app-web-subtle);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-web-border) 55%, transparent);
+	overflow: hidden;
+}
+.plugin-config__model-meter-fill {
+	display: block;
+	width: 0;
+	height: 100%;
+	border-radius: 999px;
+	background: var(--app-interaction-accent);
+	transition: width 220ms ease;
+}
+.plugin-config__model-meter .settings-page__hint {
+	margin: 0;
+	font-size: 11.5px;
+	line-height: 1.4;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+.plugin-config__model-meter .settings-page__hint strong { color: var(--app-web-text-primary); font-weight: 600; }
+
+.plugin-config__model-panel {
+	margin-top: 10px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 10px;
+	background: var(--app-web-surface);
+	overflow: hidden;
+}
+.plugin-config__model-toolbar {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--app-web-border);
+	background: color-mix(in srgb, var(--app-web-subtle) 36%, transparent);
+}
+.plugin-config__model-toolbar-hint { margin-right: auto; font-size: 11.5px; color: var(--app-web-text-muted); }
+
+.plugin-config__model-search {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	flex: 1 1 210px;
+	min-width: 178px;
+	height: 32px;
+	padding: 0 8px 0 10px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 8px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-muted);
+	transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.plugin-config__model-search:focus-within {
+	border-color: color-mix(in srgb, var(--app-interaction-accent) 62%, var(--app-web-border));
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-interaction-accent) 16%, transparent);
+}
+.plugin-config__model-search > svg { width: 15px; height: 15px; flex: none; }
+.plugin-config__model-search input {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: var(--app-web-text-primary);
+	font: inherit;
+	font-size: 12.5px;
+}
+.plugin-config__model-search input::placeholder { color: var(--app-web-text-muted); opacity: 0.86; }
+.plugin-config__model-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.plugin-config__model-search-clear {
+	flex: none;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	border: 0;
+	border-radius: 999px;
+	display: grid;
+	place-items: center;
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-muted);
+	cursor: pointer;
+}
+.plugin-config__model-search-clear:hover { color: var(--app-web-text-primary); background: var(--app-web-border); }
+.plugin-config__model-search-clear svg { width: 11px; height: 11px; }
+.plugin-config__model-search-kbd {
+	flex: none;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 9.5px;
+	line-height: 1;
+	padding: 3px 5px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 4px;
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-muted);
+}
+
+.plugin-config__model-filter {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+	height: 32px;
+	padding: 0 9px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--app-web-text-muted);
+	font: inherit;
+	font-size: 11.5px;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+.plugin-config__model-filter:hover { color: var(--app-web-text-primary); background: var(--app-web-subtle); }
+.plugin-config__model-filter.is-active {
+	color: var(--app-interaction-accent);
+	background: var(--app-interaction-accent-soft);
+	border-color: color-mix(in srgb, var(--app-interaction-accent) 42%, transparent);
+}
+.plugin-config__model-filter svg { width: 14px; height: 14px; }
+.plugin-config__model-filter-count {
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 999px;
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-muted);
+	font-size: 10px;
+	line-height: 16px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.plugin-config__model-filter.is-active .plugin-config__model-filter-count {
+	background: color-mix(in srgb, var(--app-interaction-accent) 18%, transparent);
+	color: var(--app-interaction-accent);
+}
+
+.plugin-config__model-bulk {
+	display: flex;
+	align-items: stretch;
+	flex: none;
+	height: 32px;
+	margin-left: auto;
+	border: 1px solid var(--app-web-border);
+	border-radius: 8px;
+	background: var(--app-web-panel);
+	overflow: hidden;
+}
+.plugin-config__model-bulk-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 0 10px;
+	border: 0;
+	background: transparent;
+	color: var(--app-web-text-primary);
+	font: inherit;
+	font-size: 11.5px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+.plugin-config__model-bulk-btn + .plugin-config__model-bulk-btn { border-left: 1px solid var(--app-web-border); }
+.plugin-config__model-bulk-btn svg { width: 14px; height: 14px; color: var(--app-web-text-muted); }
+.plugin-config__model-bulk-btn:hover:not(:disabled) { background: var(--app-web-subtle); }
+.plugin-config__model-bulk-btn--danger:hover:not(:disabled) { color: var(--app-status-danger); background: var(--app-status-danger-background); }
+.plugin-config__model-bulk-btn--danger:hover:not(:disabled) svg { color: var(--app-status-danger); }
+.plugin-config__model-bulk-btn:disabled { color: var(--app-interaction-disabled); cursor: not-allowed; }
+.plugin-config__model-bulk-btn:disabled svg { color: var(--app-interaction-disabled); }
+.plugin-config__model-bulk-btn:focus-visible,
+.plugin-config__model-filter:focus-visible,
+.plugin-config__model-search-clear:focus-visible,
+.plugin-config__model-scope-clear:focus-visible,
+.plugin-config__model-toast-undo:focus-visible {
+	outline: 2px solid var(--app-interaction-focus);
+	outline-offset: 2px;
+}
+
+.plugin-config__model-scope {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 4px 10px;
+	padding: 7px 12px;
+	border-bottom: 1px solid var(--app-web-border);
+	background: color-mix(in srgb, var(--app-interaction-accent-soft) 42%, transparent);
+	font-size: 11.5px;
+	color: var(--app-web-text-primary);
+}
+.plugin-config__model-scope-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-config__model-scope-hint { color: var(--app-web-text-muted); }
+.plugin-config__model-scope-clear {
+	margin-left: auto;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--app-interaction-accent);
+	font: inherit;
+	font-size: 11.5px;
+	cursor: pointer;
+}
+.plugin-config__model-scope-clear:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+.plugin-config__model-confirm {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px 9px;
+	padding: 9px 12px;
+	border-bottom: 1px solid var(--app-status-danger-soft);
+	background: var(--app-status-danger-background);
+}
+.plugin-config__model-confirm-icon {
+	flex: none;
+	width: 20px;
+	height: 20px;
+	border-radius: 999px;
+	display: grid;
+	place-items: center;
+	background: color-mix(in srgb, var(--app-status-danger) 16%, transparent);
+	color: var(--app-status-danger);
+}
+.plugin-config__model-confirm-icon svg { width: 13px; height: 13px; }
+.plugin-config__model-confirm-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 12px; }
+.plugin-config__model-confirm-text strong { font-weight: 600; color: var(--app-web-text-primary); }
+.plugin-config__model-confirm-text span { font-size: 11px; color: color-mix(in srgb, var(--app-status-danger) 64%, var(--app-web-text-muted)); }
+.plugin-config__model-confirm-actions { margin-left: auto; display: flex; gap: 6px; flex: none; }
+
+.plugin-config__models { max-height: 376px; margin: 0; overflow: auto; background: var(--app-web-surface); }
+.plugin-config__model { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 47px; padding: 8px 12px; }
+.plugin-config__model + .plugin-config__model { border-top: 1px solid var(--app-web-border); }
+.plugin-config__model:hover { background: color-mix(in srgb, var(--app-web-subtle) 48%, transparent); }
+.plugin-config__model-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.plugin-config__model-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.plugin-config__model-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-config__model-default {
+	flex: none;
+	font-size: 9.5px;
+	line-height: 15px;
+	padding: 0 5px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 4px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-muted);
+}
+.plugin-config__model-meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: var(--app-web-text-muted); }
+.plugin-config__model-type {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 16px;
+	padding: 0 5px;
+	border-radius: 4px;
+	font-size: 10px;
+	line-height: 16px;
+}
+.plugin-config__model-type::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.plugin-config__model-type.is-text { color: var(--app-node-text-foreground); background: var(--app-node-text-tint); }
+.plugin-config__model-type.is-image { color: var(--app-node-image-foreground); background: var(--app-node-image-tint); }
+.plugin-config__model-type.is-audio { color: var(--app-node-audio-foreground); background: var(--app-node-audio-tint); }
+.plugin-config__model-type.is-video { color: var(--app-node-video-foreground); background: var(--app-node-video-tint); }
+.plugin-config__model-type.is-default { color: var(--app-node-default-foreground); background: var(--app-node-default-tint); }
+.plugin-config__model-flag { font-size: 10px; color: var(--app-status-warning); }
+
+.plugin-config__model-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	padding: 30px 16px 34px;
+	text-align: center;
+	background: var(--app-web-surface);
+}
+.plugin-config__model-empty > svg { color: var(--app-web-text-muted); margin-bottom: 4px; }
+.plugin-config__model-empty-title { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--app-web-text-primary); }
+.plugin-config__model-empty-hint { margin: 0 0 8px; font-size: 11.5px; color: var(--app-web-text-muted); }
+
+/* 撤销提示：相对设置弹窗定位，覆盖底部内容 6 秒。 */
+.plugin-config__model-toast {
+	position: absolute;
+	left: 50%;
+	bottom: 18px;
+	z-index: 10;
+	width: max-content;
+	max-width: calc(100% - 48px);
+	transform: translateX(-50%);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 10px 9px 12px;
+	border: 1px solid color-mix(in srgb, var(--app-web-border-strong) 55%, var(--app-web-border));
+	border-radius: 10px;
+	background: var(--app-web-elevated);
+	box-shadow: 0 10px 30px var(--app-web-shadow);
+	overflow: hidden;
+	animation: settings-model-toast-in 180ms ease-out both;
+}
+.plugin-config__model-toast-icon {
+	flex: none;
+	width: 22px;
+	height: 22px;
+	border-radius: 999px;
+	display: grid;
+	place-items: center;
+	background: var(--app-status-success-background);
+	color: var(--app-status-success);
+}
+.plugin-config__model-toast-icon svg { width: 13px; height: 13px; }
+.plugin-config__model-toast-text { font-size: 12.5px; white-space: nowrap; }
+.plugin-config__model-toast-undo {
+	height: 24px;
+	padding: 0 7px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--app-interaction-accent);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+.plugin-config__model-toast-undo:hover { background: var(--app-interaction-accent-soft); }
+.plugin-config__model-toast-progress {
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	width: 100%;
+	height: 2px;
+	background: var(--app-interaction-accent);
+	transform-origin: left;
+	animation: settings-model-toast-progress 6s linear forwards;
+}
+@keyframes settings-model-toast-in {
+	from { opacity: 0; transform: translate(-50%, 8px); }
+	to { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes settings-model-toast-progress {
+	from { transform: scaleX(1); }
+	to { transform: scaleX(0); }
+}
+.ark-endpoints { max-height: 420px; overflow: auto; }
+.ark-endpoints__kind { margin: 12px 0 0; font-size: 12px; color: var(--mc-text-muted); }
+.ark-endpoints__row { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+.ark-endpoints__row + .ark-endpoints__row { border-top: 1px solid var(--mc-border); }
+.ark-endpoints__main { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* 插件目录完整换行，允许鼠标选择和复制。 */
+.plugin-directory {
+	margin: 0;
+	padding: 0 14px 12px;
+	font-size: 11px;
+	line-height: 1.6;
+	color: var(--mc-text-muted);
+	user-select: text;
+}
+.plugin-directory > span { display: block; }
+.plugin-directory > code { overflow-wrap: anywhere; white-space: normal; }
+.plugin-config__meta + .plugin-directory { padding: 8px 0; }
+
+/* AI 面板的 Provider 连接表单：常用凭据在前，扩展选项按需展开。 */
+.provider-connection { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+.provider-settings__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.provider-settings__grid > .provider-settings__card { min-width: 0; margin: 0; padding: 20px; border: 1px solid var(--app-web-border); border-radius: 12px; }
+.provider-settings__grid .settings-page__group-title { margin-bottom: 16px; }
+.provider-settings__grid .settings-page__hint { overflow-wrap: anywhere; }
+.provider-settings__grid .provider-connection__confirmation { flex-wrap: wrap; }
+.provider-connection > .provider-connection__field, .provider-connection__advanced, .provider-connection > .settings-page__error { grid-column: 1 / -1; }
+.provider-connection > .provider-connection__field:first-child { grid-column: 1; }
+.provider-connection__field { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.provider-connection__field > label { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.provider-connection__field .settings-page__input { width: 100%; }
+.provider-connection__advanced > summary { cursor: pointer; color: var(--app-web-text-muted); }
+.provider-connection__advanced[open] > .provider-connection__field { margin-top: 16px; }
+.provider-connection__actions, .provider-connection__confirmation { display: flex; align-items: center; gap: 8px; }
+.provider-connection__actions { grid-column: 2; grid-row: 1; align-self: start; margin-top: 34px; }

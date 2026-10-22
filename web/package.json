@@ -1,0 +1,41 @@
+{
+  "name": "@woohaa/web-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Woohaa web pnpm workspace",
+  "scripts": {
+    "icons:sync": "node ../scripts/sync-extension-icons.mjs",
+    "build:contracts": "pnpm --filter @woohaa3/contracts run build",
+    "build:sdk": "pnpm --filter @sdppp/pptask run build && pnpm --filter @sdppp/pptask-worker-server run build && pnpm --filter @woohaa3/provider-sdk run build",
+    "theme:check": "node ../scripts/generate-theme-tokens.mjs --check",
+    "build:plugins": "node scripts/build-extension-packages.mjs",
+    "build:services": "pnpm --filter @woohaa3/agent-connections --filter @woohaa3/media-service --filter @woohaa3/task-service --filter @woohaa3/canvas-service --filter @woohaa3/mcp-service --filter @woohaa3/application-service --filter @woohaa3/telemetry-service --filter @woohaa3/extension-oauth-agent --filter @woohaa3/extension-sdk-agent --filter @woohaa3/extension-local-agent run build && pnpm --filter @woohaa3/task-service --filter @woohaa3/canvas-service --filter @woohaa3/mcp-service --filter @woohaa3/application-service run server:build",
+    "build:backend": "pnpm --filter @woohaa3/backend run build && pnpm --filter @woohaa3/backend run server:build",
+    "build:units": "pnpm run icons:sync && pnpm run build:contracts && pnpm run build:sdk && pnpm run build:plugins && pnpm run build:services && pnpm run build:backend",
+    "extensions:check": "node ../scripts/extensions-preflight.mjs",
+    "typecheck": "pnpm -r --filter \"./contracts\" --filter \"./provider-sdk\" --filter \"./services/*\" --filter \"./backend\" --filter \"./extensions/*\" --filter \"../extensions/*\" --filter \"./frontend\" run typecheck",
+    "test": "pnpm run build:units && pnpm -r run test",
+    "test:units": "pnpm -r --filter \"./contracts\" --filter \"./provider-sdk\" --filter \"./services/*\" --filter \"./backend\" --filter \"./extensions/*\" --filter \"../extensions/*\" --filter \"./frontend\" run test",
+    "prepare": "node ../scripts/sync-bevy-assets.mjs && pnpm run build:contracts",
+    "build:frontend": "pnpm --filter @woohaa3/frontend run build",
+    "build:showcase": "pnpm -C showcase run build",
+    "report:line-counts": "node scripts/report-business-line-counts.mjs",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
+    "e2e:yjs": "playwright test -c playwright.yjs.config.ts",
+    "e2e:telemetry": "playwright test -c playwright.telemetry.config.ts",
+    "build:browser": "node scripts/build-extension-browser.mjs --all",
+    "assemble:extensions": "node ../scripts/assemble-extension-release.mjs",
+    "dev:extensions": "node scripts/build-extension-browser.mjs --all"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "esbuild": "^0.21.5",
+    "mitt": "^3.0.1",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.5.13",
+    "yjs": "^13.6.32",
+    "@woohaa3/contracts": "workspace:*"
+  }
+}

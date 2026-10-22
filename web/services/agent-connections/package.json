@@ -1,0 +1,31 @@
+{
+  "name": "@woohaa3/agent-connections",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent 连接共享内核（change: 2026-10-16-add-agent-appserver-and-sdk-connections）：owner-scoped 连接元数据、凭据生命周期、原生会话索引与 adapter 装配。local-agent / sdk-agent 共用；不含任何厂商 SDK。",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --platform node",
+    "watch": "node ../../scripts/build-package.mjs --platform node --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

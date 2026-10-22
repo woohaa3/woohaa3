@@ -1,0 +1,20 @@
+{
+  "id": "canvas-empty",
+  "title": "空画布",
+  "revision": 0,
+  "document": {
+    "schemaVersion": "asset-canvas-v1",
+    "nodes": [],
+    "edges": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "updatedAt": "2026-09-22T00:00:00.000Z"
+  },
+  "nodeData": {},
+  "assets": [],
+  "jobs": [],
+  "updatedAt": "2026-09-22T00:00:00.000Z"
+}

@@ -1,0 +1,129 @@
+syntax = "proto3";
+package woohaa.rbac.v1alpha1;
+option go_package = "woohaa3/api/gen/go/woohaa/rbac/v1alpha1;rbacv1alpha1";
+
+// RBACService manages roles and bindings. Roles live in the roles table (built-in roles
+// are synced from code at startup; custom roles are rows in the same table). Management
+// requires global admin.
+service RBACService {
+  // ListRoles 列出服务端 roles 表里的角色（内置与自定义）。
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  rpc ListBindings(ListBindingsRequest) returns (ListBindingsResponse);
+  rpc GrantBinding(GrantBindingRequest) returns (GrantBindingResponse);
+  rpc RevokeBinding(RevokeBindingRequest) returns (RevokeBindingResponse);
+  rpc GetSelf(GetSelfRequest) returns (GetSelfResponse);
+  // ListPermissions 返回权限码目录：每个码的含义，以及直接声明它的角色。
+  // 通配与角色继承不在这里展开——那是判定时的事，目录只回答"有哪些码、谁声明了它"。
+  rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
+  // 人员目录与治理。四个方法都要求全局 admin；读面不返回任何凭证或渠道键。
+  rpc ListActors(ListActorsRequest) returns (ListActorsResponse);
+  // CreateActor registers a subject that has not logged in yet. The id must match the
+  // channel identifier exactly, otherwise the person gets a second subject on first login.
+  rpc CreateActor(CreateActorRequest) returns (CreateActorResponse);
+  rpc UpdateActor(UpdateActorRequest) returns (UpdateActorResponse);
+  // SetActorStatus disables or enables a subject. Disabling also revokes its sessions.
+  rpc SetActorStatus(SetActorStatusRequest) returns (SetActorStatusResponse);
+}
+// Role 是 roles 表里的一行，以及它在 role_permissions 里声明的权限码。
+message Role {
+  string name = 1;
+  // 兼容字段：与 permissions 同值。新调用方请读 permissions。
+  repeated string actions = 2;
+  // 该角色直接声明的权限码。
+  repeated string permissions = 3;
+  // 展示名，例如「普通用户」。
+  string display_name = 4;
+  // 一句话说明这个角色是什么、由谁使用。
+  string description = 5;
+  // true 表示由代码定义、启动时同步进表；false 表示表里的自定义角色。
+  bool builtin = 6;
+}
+// Permission 是权限目录中的一条。
+message Permission {
+  string code = 1;
+  string description = 2;
+  // 直接声明该码的角色标识（按角色清单顺序）；通配与继承不在这里展开。
+  repeated string roles = 3;
+}
+// Scope is either * (global) or an exact canvas ID.
+message Binding {
+  string actor_id = 1;
+  // 角色标识，必须存在于服务端 roles 表；当前内置 user/admin，也允许自定义角色。
+  string role = 2;
+  string scope = 3;
+}
+message ListRolesRequest {}
+message ListRolesResponse { repeated Role roles = 1; }
+message ListPermissionsRequest {}
+message ListPermissionsResponse { repeated Permission permissions = 1; }
+message ListBindingsRequest { string actor_id = 1; }
+message ListBindingsResponse {
+  repeated Binding bindings = 1;
+  // anchor_actor_ids 是部署配置（CANVAS_ADMIN_ANCHORS）固定的管理员锚点。
+  // 服务端保证这些主体始终持有 admin/* 绑定且不可撤销，管理端据此渲染只读态。
+  repeated string anchor_actor_ids = 2;
+}
+message GrantBindingRequest { Binding binding = 1; }
+message GrantBindingResponse {}
+message RevokeBindingRequest { Binding binding = 1; }
+message RevokeBindingResponse {}
+// ActorStatus 是主体的生命周期状态。
+enum ActorStatus {
+  ACTOR_STATUS_UNSPECIFIED = 0;
+  ACTOR_STATUS_ACTIVE = 1;
+  ACTOR_STATUS_DISABLED = 2;
+}
+// ActorSummary 是登记表里的一个主体。
+message ActorSummary {
+  string actor_id = 1;
+  // 已由服务端按 管理员显示名 → 本人昵称 → 配置展示标识 → 主体标识 回退，永不为空。
+  string display_name = 2;
+  // configured / machine / gateway。
+  repeated string sources = 3;
+  // 仅全局（scope = *）角色。
+  repeated string roles = 4;
+  uint32 authored_canvas_count = 5;
+  uint32 shared_canvas_count = 6;
+  // Unix 秒；0 表示未知。
+  int64 first_seen_at = 7;
+  // 最近一次会话签发时间，Unix 秒；会话过期清理后为 0（未知，不表示从未登录）。
+  int64 last_session_at = 8;
+  // 由部署配置 CANVAS_ADMIN_ANCHORS 固定的管理员锚点：不可停用。
+  bool anchor = 9;
+  ActorStatus status = 10;
+  // configured / login / admin / backfill。
+  string origin = 11;
+  string note = 12;
+  // 本人自填的昵称。与 display_name（管理员称呼）分开显示：管理员改名不应让人以为
+  // 自己的昵称被删了。
+  string nickname = 13;
+}
+message ListActorsRequest {}
+message ListActorsResponse {
+  repeated ActorSummary actors = 1;
+  // 超过服务端上限时为 true：界面必须提示"仅显示前 N 个"，不能表现成完整清单。
+  bool truncated = 2;
+}
+message CreateActorRequest {
+  string actor_id = 1;
+  string display_name = 2;
+  string note = 3;
+}
+message CreateActorResponse { ActorSummary actor = 1; }
+message UpdateActorRequest {
+  string actor_id = 1;
+  string display_name = 2;
+  string note = 3;
+}
+message UpdateActorResponse { ActorSummary actor = 1; }
+message SetActorStatusRequest {
+  string actor_id = 1;
+  ActorStatus status = 2;
+}
+message SetActorStatusResponse { ActorSummary actor = 1; }
+message GetSelfRequest { string scope = 1; }
+message GetSelfResponse {
+  string actor_id = 1;
+  repeated Binding bindings = 2;
+  repeated string allowed_actions = 3;
+}

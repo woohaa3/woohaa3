@@ -1,0 +1,37 @@
+{
+  "name": "@woohaa3/photocraft-project-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PhotoCraft 工程核验（Node-only）：有界 ZIP/manifest/资源核验与可释放的原生子进程适配。浏览器不可达。",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./test-support": {
+      "types": "./src/test-support/project-fixtures.ts",
+      "import": "./src/test-support/project-fixtures.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --platform node",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/photocraft-protocol": "link:../protocol"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

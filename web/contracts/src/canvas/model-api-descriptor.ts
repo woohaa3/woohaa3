@@ -1,0 +1,145 @@
+/**
+ * 版本化模型 API descriptor（change: enhance-model-scene-authoring-api，任务 5.1 / design D8；
+ *  change: 2026-10-07-remove-residual-compatibility —— 收敛到 V2）。
+ *
+ * 单一事实来源：MCP `get_model_api` 指南的方法集合、默认版本与单位说明都由这里生成，
+ * 避免文档与 executor 漂移。contract test 会让指南代码块真的过 V2 executor。
+ */
+import {
+  MODEL_SCRIPT_LANGUAGE,
+  MODEL_SCRIPT_V2_VERSION,
+  PREFERRED_MODEL_SCRIPT_VERSION,
+  SUPPORTED_MODEL_SCRIPT_VERSIONS,
+  type SupportedModelScriptVersion
+} from "./model-script.js";
+import { QUALITY_VERTEX_COUNTS, SCENE_IR_V2_MAX_ESTIMATED_VERTICES } from "./scene-ir-v2/types.js";
+
+/** 坐标 / 旋转单位与朝向约定。 */
+export const MODEL_API_AXIS_CONVENTIONS = {
+  up: "+Y",
+  front: "+Z",
+  left: "+X",
+  rotationUnit: "degrees",
+  rotationOrder: "local Y-X-Z (intrinsic)",
+  positionSpace: "parent local space",
+  timeUnit: "seconds"
+} as const;
+
+/** 一个 SceneBuilder 方法签名（供指南与一致性测试共用）。 */
+export type ModelApiMethod = {
+  name: string;
+  signature: string;
+  /** 该方法在哪些版本可用。 */
+  versions: readonly SupportedModelScriptVersion[];
+};
+
+const V2 = MODEL_SCRIPT_V2_VERSION;
+
+/** V2 场景方法集合。 */
+export const MODEL_API_METHODS: readonly ModelApiMethod[] = [
+  { name: "material", signature: "scene.material({ id?, baseColor?, roughness?, metallic?, emissive?, emissiveStrength?, alphaMode?, doubleSided? }) => materialId", versions: [V2] },
+  { name: "group", signature: "scene.group({ id?, parent?, position?, rotation?, scale? }) => id", versions: [V2] },
+  { name: "box", signature: "scene.box({ id?, parent?, size: [x,y,z], position?, rotation?, scale?, color? | material? }) => id", versions: [V2] },
+  { name: "cylinder", signature: "scene.cylinder({ id?, parent?, radius, height, position?, rotation?, scale?, color? | material? }) => id", versions: [V2] },
+  { name: "sphere", signature: "scene.sphere({ id?, parent?, radius, position?, rotation?, scale?, color? | material? }) => id", versions: [V2] },
+  { name: "capsule", signature: "scene.capsule({ id?, parent?, radius, height, position?, rotation?, scale?, color? | material? }) => id（height 含两端半球）", versions: [V2] },
+  { name: "segment", signature: "scene.segment({ id?, parent?, from, to, width, depth?, shape?: 'box'|'capsule'（缺省 capsule）, overlap?, color? | material? }) => id", versions: [V2] },
+  { name: "mesh", signature: "scene.mesh({ id?, parent?, vertices: [[x,y,z],...], faces: [[i,j,k],...], position?, rotation?, scale?, color? | material? }) => id", versions: [V2] },
+  { name: "oscillate", signature: "scene.oscillate(id, { axis, mode?, amplitude?, speed?, phase? }) => id", versions: [V2] },
+  { name: "move", signature: "scene.move(id, { axis, range: [min,max], speed? }) => id", versions: [V2] },
+  { name: "rotate", signature: "scene.rotate(id, { axis, speed? }) => id", versions: [V2] }
+];
+
+/** 某个版本可用的方法名集合（一致性测试据此比对指南文本）。 */
+export function modelApiMethodNames(version: SupportedModelScriptVersion): string[] {
+  return MODEL_API_METHODS.filter((method) => method.versions.includes(version)).map((method) => method.name);
+}
+
+/**
+ * 渲染预算：单场景**所有 primitive 的估算 tessellation 顶点之和**上限
+ * （change: 2026-10-13-add-node-to-film-set-shortcut —— 模型作者/转换提示词必须在生成前声明该上限，
+ * 否则会产出结构合法但超预算的候选，被 `SCENE_IR_V2_MAX_ESTIMATED_VERTICES` 整份拒绝）。
+ *
+ * 由 Scene IR V2 的估算常量派生，是提示词的单一事实来源，避免文档与校验漂移。
+ */
+export const MODEL_RENDER_BUDGET = {
+  maxEstimatedVertices: SCENE_IR_V2_MAX_ESTIMATED_VERTICES,
+  /** 单个 primitive 的估算顶点成本（segment 按自身 shape 取 box/capsule）。 */
+  vertexCost: {
+    box: QUALITY_VERTEX_COUNTS.box,
+    cylinder: QUALITY_VERTEX_COUNTS.cylinder,
+    sphere: QUALITY_VERTEX_COUNTS.sphere,
+    capsule: QUALITY_VERTEX_COUNTS.capsule
+  }
+} as const;
+
+/**
+ * 供生成提示词使用的英文渲染预算说明。
+ *
+ * 数字全部由常量派生、输出稳定（无随机/时间），可直接放进提示词并被断言。
+ */
+export function modelRenderBudgetText(): string {
+  const { maxEstimatedVertices, vertexCost } = MODEL_RENDER_BUDGET;
+  const maxBoxes = Math.floor(maxEstimatedVertices / vertexCost.box);
+  return [
+    `Render budget: the summed estimated tessellation vertices over ALL primitives MUST stay <= ${maxEstimatedVertices}.`,
+    `Per-primitive cost: box=${vertexCost.box}, segment(box)=${vertexCost.box}, cylinder=${vertexCost.cylinder}, sphere=${vertexCost.sphere}, capsule=${vertexCost.capsule}, segment(capsule)=${vertexCost.capsule}, mesh=its declared vertex count.`,
+    "A segment WITHOUT shape is a capsule, not a box: it costs the capsule count above. Pass shape:'box' explicitly for boxy limbs.",
+    `Do NOT reconstruct a scene by instancing thousands of tiny primitives — ${maxBoxes} plain boxes ALONE reach the budget. Use few, larger, well-proportioned parts, share materials, and stay comfortably under ${maxEstimatedVertices}.`
+  ].join(" ");
+}
+
+/**
+ * 供生成提示词使用的**图元合法性约束**说明（English，稳定输出）。
+ *
+ * 这些是 Scene IR 读取/校验的隐式几何约束：不写进提示词时，模型会产出结构合法但违反约束的候选
+ * 而被整份拒绝（例如 `capsule` 总高度小于直径）。与 `modelRenderBudgetText()` 一样，是提示词与
+ * 执行器/校验之间的单一事实来源；服务端另有回喂修复作为兜底。
+ */
+export function modelPrimitiveConstraintsText(): string {
+  return [
+    "Primitive constraints (violating ANY of them fails validation):",
+    "every box size, cylinder/sphere/capsule radius and cylinder/capsule height MUST be > 0;",
+    "a capsule's total height (including both hemispheres) MUST be >= 2*radius;",
+    "a segment's from and to MUST differ (no zero-length segment);",
+    "a mesh MUST declare at least one vertex and one face;",
+    "a shape MUST NOT set both material and color;",
+    "object ids MUST be unique, and a parent MUST be created before its children."
+  ].join(" ");
+}
+
+/**
+ * 指南里的最短连续人物示例：上臂 box、前臂 box、共享肘坐标 + 关节 sphere、金属材质。
+ *
+ * contract test 会把它交给 V2 executor 执行并校验 Scene IR。
+ */
+export const HUMAN_FIXTURE_SCRIPT = `const armor = scene.material({ id: "armor", baseColor: "#26343a", metallic: 0.85, roughness: 0.35 });
+scene.box({ id: "torso", size: [0.9, 1.5, 0.5], position: [0, 1.8, 0], color: "#cc8844" });
+const shoulder = [-0.6, 2.25, 0];
+const elbow = [-1.0, 1.6, 0];
+const wrist = [-1.0, 0.95, 0];
+scene.sphere({ id: "shoulder-joint", radius: 0.22, position: shoulder, material: armor });
+scene.segment({ id: "upper-arm", from: shoulder, to: elbow, width: 0.26, shape: "box", material: armor });
+scene.segment({ id: "forearm", from: elbow, to: wrist, width: 0.24, shape: "box", material: armor });
+scene.sphere({ id: "hand", radius: 0.16, position: wrist, color: "#e8c39e" });`;
+
+export type ModelApiGuide = {
+  language: typeof MODEL_SCRIPT_LANGUAGE;
+  preferredVersion: SupportedModelScriptVersion;
+  supportedVersions: readonly SupportedModelScriptVersion[];
+  conventions: typeof MODEL_API_AXIS_CONVENTIONS;
+  methods: readonly ModelApiMethod[];
+  example: string;
+};
+
+/** 结构化 API 指南（由 MCP 渲染为文本，测试据此比对方法集合）。 */
+export function modelApiGuide(): ModelApiGuide {
+  return {
+    language: MODEL_SCRIPT_LANGUAGE,
+    preferredVersion: PREFERRED_MODEL_SCRIPT_VERSION,
+    supportedVersions: SUPPORTED_MODEL_SCRIPT_VERSIONS,
+    conventions: MODEL_API_AXIS_CONVENTIONS,
+    methods: MODEL_API_METHODS,
+    example: HUMAN_FIXTURE_SCRIPT
+  };
+}

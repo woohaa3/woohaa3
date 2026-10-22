@@ -1,0 +1,373 @@
+#!/usr/bin/env node
+/**
+ * Tauri 桌面发行打包入口
+ * （change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，任务 6.7 / 6.9）。
+ *
+ *   pnpm desktop:bundle                       # 未签名 bundle + manifest
+ *   pnpm desktop:bundle --ui-url http://127.0.0.1:5180/
+ *   pnpm desktop:bundle --bundles app --debug --dry-run
+ *   pnpm desktop:icons                        # 由 desktop/icons/source.png 重建图标集
+ *
+ * 边界（不夸大）：
+ * - 只产出**未签名**产物；没有 Developer ID、公证、apt/rpm 仓库或更新源。
+ * - Apple Silicon 默认装配 Node、本机宿主、扩展与工具；显式 --ui-url 保留外部服务调试。
+ * - 不采集渲染/合成/性能结论：打包过程不验收画面，这些项保持「待人工验证」。
+ * - 不启用 `gpu-debug`（design D8 要求发行构建不携带 Bevy pass 名称）。
+ */
+import { prepareDesktopHost } from "./prepare-desktop-host.mjs";
+import { standaloneBundleConfig, createHostArchive, nodeArtifact } from "./lib/desktop-host-package.mjs";
+import { spawnSync } from "node:child_process";
+import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
+import { createRequire } from "node:module";
+import fs from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  DEFAULT_ARTIFACTS_ROOT,
+  DESKTOP_DEFAULTS_RESOURCE,
+  FRONTEND_BUILD_STEPS,
+  buildDefaultsDocument,
+  buildDesktopManifest,
+  collectBundleArtifacts,
+  formatCommand,
+  hashPath,
+  missingBundleKinds,
+  missingIcons,
+  parseDesktopArgs,
+  platformSupportError,
+  nativeTargetError,
+  releaseIdFor,
+  resolveBundleKinds,
+  tauriBuildArgs,
+  tauriConfigOverride,
+  validateIconSource
+} from "./lib/desktop-release.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, "..");
+const desktopDir = path.join(root, "desktop");
+const iconsDir = path.join(desktopDir, "icons");
+const configPath = path.join(desktopDir, "tauri.conf.json");
+const defaultsPath = path.join(process.env.WOOHAA_DESKTOP_PACKAGING_DIR ?? path.join(desktopDir, "build", "packaging"), DESKTOP_DEFAULTS_RESOURCE);
+const require = createRequire(import.meta.url);
+
+const usage = `Tauri 桌面发行打包（未签名）
+
+用法：
+  pnpm desktop:bundle [选项]
+  pnpm desktop:icons [--icon-source desktop/icons/source.png]
+
+选项：
+  --ui-url <url>       写入 bundle 默认界面地址（同源 loopback）；未给则启动随包宿主并同源加载界面
+  --backend-url <url>  只写 origin 时用；等价于 --ui-url <url>/
+  --bundles <list>     收窄 bundle 种类（darwin: app,dmg；win32: nsis；linux: deb,rpm,appimage）
+  --no-bundle          只编译 release 可执行文件，不产出安装包
+  --debug              用 debug profile（复用已有调试产物，用于验证打包链路）
+  --target <triple>    指定本机 target；不支持跨平台或跨架构装配
+  --frontend <dir>     前端 dist 目录（默认 web/frontend/dist）
+  --build-frontend     先构建前端与扩展发布产物（包含前端所需的两套 WASM 绑定）
+  --identifier <id>    覆盖 bundle identifier
+  --version <semver>   覆盖应用版本
+  --out <dir>          manifest（及 --copy 时的产物副本）输出目录
+  --copy               把 bundle 复制到 <out>/bundles/
+  --release-id <id>    覆盖 release 标识
+  --dry-run            只打印将执行的步骤与配置，不写盘、不编译
+  --help               显示帮助
+`;
+
+function fail(message) {
+  console.error(`[desktop] ${message}`);
+  process.exit(1);
+}
+
+/** cargo/rustup 通常不在 GUI/CI 的 PATH 里；与其它桌面脚本同一处理方式。 */
+function childEnv() {
+  return {
+    ...process.env,
+    PATH: `${path.join(homedir(), ".cargo", "bin")}${path.delimiter}${process.env.PATH ?? ""}`
+  };
+}
+
+/** 包管理器入口：优先调用方的 npm_execpath，避免依赖 PATH 里的 pnpm shim。 */
+function managerCommand(args) {
+  return packageManagerInvocation(args);
+}
+
+function run(command, args, options = {}) {
+  console.log(`[desktop] $ ${formatCommand(command, args)}`);
+  const result = spawnSync(command, args, { cwd: root, env: childEnv(), stdio: "inherit", ...options });
+  if (result.error) throw new Error(`无法启动 ${command}：${result.error.message}`);
+  if (result.status !== 0) throw new Error(`${command} 退出码 ${result.status ?? "null"}`);
+}
+
+function runManager(args) {
+  const { command, args: commandArgs } = managerCommand(args);
+  run(command, commandArgs);
+}
+
+function resolveTauriCli() {
+  let packagePath;
+  try {
+    packagePath = require.resolve("@tauri-apps/cli/package.json");
+  } catch {
+    throw new Error("未找到 @tauri-apps/cli；先执行 pnpm install（根 package.json 已固定版本）。");
+  }
+  const cliDir = path.dirname(packagePath);
+  const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  const entry = path.join(cliDir, pkg.bin?.tauri ?? "tauri.js");
+  if (!fs.existsSync(entry)) throw new Error(`@tauri-apps/cli 入口不存在：${entry}`);
+  return { entry, version: pkg.version };
+}
+
+function readConfig() {
+  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  delete config.$schema;
+  return config;
+}
+
+/**
+ * 实际参与编译的 Rust 版本。
+ *
+ * 必须在 `desktop/` 下探测：`desktop/rust-toolchain.toml` 固定 1.97.1，而仓库根用的可能是
+ * 另一个全局 toolchain。在根目录探测会把错误版本写进 manifest（首次真实构建即出现）。
+ */
+function rustVersion() {
+  const result = spawnSync("rustc", ["--version"], { cwd: desktopDir, env: childEnv(), encoding: "utf8" });
+  if (result.error || result.status !== 0) throw new Error("未找到 rustc；桌面打包需要 Rust 工具链。");
+  return result.stdout.trim();
+}
+
+/**
+ * 实际会被嵌入的前端 dist：`--frontend` 优先，否则解析 tauri.conf.json 的 `build.frontendDist`
+ * （相对 `desktop/`），并把绝对路径写回配置覆盖，保证「校验的产物」与「打入包的产物」一致。
+ */
+function frontendDistPath(options, config) {
+  if (options.frontend) return path.resolve(root, options.frontend);
+  const declared = config.build?.frontendDist;
+  if (!declared) throw new Error("tauri.conf.json 缺少 build.frontendDist，且未给出 --frontend。");
+  return path.resolve(desktopDir, declared);
+}
+
+function outDirPath(options) {
+  return path.resolve(root, options.out ?? path.join(DEFAULT_ARTIFACTS_ROOT, options.resolvedReleaseId));
+}
+
+/** 平台与图标集检查：这两项在任何前端构建之前就能判定。 */
+function assertPlatformAndIcons({ platform }) {
+  const unsupported = platformSupportError(platform);
+  if (unsupported) throw new Error(unsupported);
+  const missing = missingIcons({ iconsDir, platform });
+  if (missing.length > 0) {
+    throw new Error(`图标集不完整（缺 ${missing.join(" / ")}）；先执行 \`pnpm desktop:icons\`。`);
+  }
+}
+
+/** 前端产物检查：在（可选的）前端构建之后执行。 */
+function assertFrontend(frontendDist) {
+  if (!fs.existsSync(path.join(frontendDist, "index.html"))) {
+    throw new Error(
+      `前端产物缺失：${path.join(frontendDist, "index.html")}。` +
+        " 先执行 `pnpm build`，或加 `--build-frontend` 由本脚本构建。"
+    );
+  }
+}
+
+function buildNativeTools() {
+  const probe = spawnSync("rustc", ["-vV"], { cwd: path.join(root, "bevy"), env: childEnv(), encoding: "utf8" });
+  const triple = /host:\s*(\S+)/.exec(probe.stdout ?? "")?.[1];
+  if (probe.error || probe.status !== 0 || !triple) throw new Error("无法探测原生 Rust host triple");
+  if (triple !== nodeArtifact().triple) throw new Error(`Rust host ${triple} 与本机宿主目标 ${nodeArtifact().triple} 不匹配，请使用对应原生工具链`);
+  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer,recording-worker", "--bin", "model-renderer", "--bin", "shot-recorder"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
+}
+
+function buildFrontend() {
+  console.log("[desktop] 构建前端与扩展发布产物（含 Bevy 与图像编辑器 WASM 绑定）");
+  for (const step of FRONTEND_BUILD_STEPS) runManager(step);
+}
+
+function writeDefaults(uiUrl) {
+  fs.mkdirSync(path.dirname(defaultsPath), { recursive: true });
+  const document = buildDefaultsDocument({ uiUrl });
+  fs.writeFileSync(defaultsPath, `${JSON.stringify(document, null, 2)}\n`);
+  return document;
+}
+
+/** 图标模式：由 1024 源图重建桌面图标集，并清掉手机/Windows Store 专用产物。 */
+function runIcons(options) {
+  const sourcePath = path.resolve(root, options.iconSource ?? path.join("desktop", "icons", "source.png"));
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`图标源不存在：${sourcePath}。请提供 ≥1024×1024 的正方形 PNG。`);
+  }
+  const size = validateIconSource({ buffer: fs.readFileSync(sourcePath), label: sourcePath });
+  console.log(`[desktop] 图标源 ${sourcePath}（${size.width}×${size.height}）`);
+  const cli = resolveTauriCli();
+  run(process.execPath, [cli.entry, "icon", sourcePath, "--output", iconsDir], { cwd: desktopDir });
+  // 本应用只面向电脑与平板：手机图标树与 Windows Store 资源不入库。
+  const removed = [];
+  for (const entry of ["android", "ios"]) {
+    const target = path.join(iconsDir, entry);
+    if (fs.existsSync(target)) {
+      fs.rmSync(target, { recursive: true, force: true });
+      removed.push(`${entry}/`);
+    }
+  }
+  for (const entry of fs.readdirSync(iconsDir)) {
+    if (/^Square\d+x\d+Logo\.png$/.test(entry) || entry === "StoreLogo.png") {
+      fs.rmSync(path.join(iconsDir, entry), { force: true });
+      removed.push(entry);
+    }
+  }
+  console.log(`[desktop] 已重建 ${iconsDir}${removed.length ? `（清理 ${removed.join(" / ")}）` : ""}`);
+}
+
+async function runBuild(options) {
+  const platform = process.platform;
+  const arch = process.arch;
+  const config = readConfig();
+  const cli = resolveTauriCli();
+  const frontendDist = frontendDistPath(options, config);
+  const resolvedReleaseId = options.releaseId ?? releaseIdFor({ platform, arch });
+  const resolved = { ...options, resolvedReleaseId };
+  const kindList = resolveBundleKinds({ platform, requested: options.bundles, bundle: options.bundle });
+  const targetError = nativeTargetError({ platform, arch, target: options.target });
+  if (targetError) throw new Error(targetError);
+  assertPlatformAndIcons({ platform });
+  if (options.buildFrontend && !options.dryRun) buildFrontend();
+  if (!options.dryRun) assertFrontend(frontendDist);
+
+  const override = tauriConfigOverride({
+    identifier: options.identifier,
+    version: options.version,
+    frontendDist: options.frontend ? frontendDist : null,
+    defaultsPath
+  });
+  let hostPackage = null;
+  if (!options.dryRun && !options.uiUrl) {
+    buildNativeTools();
+    const prepared = await prepareDesktopHost({ frontend: frontendDist, build: resolvedReleaseId, ...(process.env.WOOHAA_DESKTOP_HOST_STAGING ? { output: path.resolve(process.env.WOOHAA_DESKTOP_HOST_STAGING) } : {}) });
+    const endpoint = process.env.WOOHAA_DESKTOP_UPDATE_ENDPOINT ?? null;
+    const publicKey = process.env.WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY ?? null;
+    const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey });
+    override.plugins = standalone.plugins;
+    const hostArchive = createHostArchive(prepared.resourceRoot, path.join(path.dirname(defaultsPath), "desktop-host.tar.gz"));
+    const runtimeFile = path.join(path.dirname(defaultsPath), "desktop-runtime.json");
+    fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
+    fs.writeFileSync(runtimeFile, JSON.stringify({ hostArchiveSha256: hostArchive.sha256, nodeVersion: prepared.nodeVersion, ...(endpoint ? { updater: { endpoint, publicKey } } : {}) }));
+    override.bundle = { ...override.bundle, ...standalone.bundle, resources: { ...override.bundle?.resources, ...standalone.bundle.resources, [runtimeFile]: "desktop-runtime.json", [hostArchive.path]: "desktop-host.tar.gz", [path.join(root, "bevy/assets/")]: "native-assets/" } };
+    hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: endpoint ? "configured" : "unconfigured" };
+  }
+  const args = tauriBuildArgs({ options, kinds: kindList, config: override });
+
+  if (options.dryRun) {
+    console.log("[desktop] dry-run：以下步骤不会执行");
+    console.log(`  平台/架构：${platform}/${arch}`);
+    if (options.buildFrontend) for (const step of FRONTEND_BUILD_STEPS) console.log(`  pnpm ${step.join(" ")}`);
+    if (!options.uiUrl) console.log("  cargo build 原生 model-renderer + shot-recorder (--release)，然后装配宿主运行时");
+    console.log(`  前端 dist：${relative(frontendDist)}`);
+    console.log(`  bundle 种类：${kindList.length > 0 ? kindList.join(", ") : "（--no-bundle）"}`);
+    console.log(`  默认值资源：${relative(defaultsPath)}`);
+    console.log(`  ${JSON.stringify(buildDefaultsDocument({ uiUrl: options.uiUrl }), null, 2).split("\n").join("\n  ")}`);
+    console.log(`  manifest：${relative(outDirPath(resolved))}/manifest.json`);
+    console.log(`  $ ${formatCommand(process.execPath, [cli.entry, ...args])}   (cwd=${relative(desktopDir)})`);
+    console.log(`  提示：运行未给出 --ui-url 时，app 打开内置前端资源，需要同源 loopback 时再注入。`);
+    return;
+  }
+
+  writeDefaults(options.uiUrl);
+  run(process.execPath, [cli.entry, ...args], { cwd: desktopDir });
+
+  const outDir = outDirPath(resolved);
+  fs.mkdirSync(outDir, { recursive: true });
+  const collected = collectBundleArtifacts({ desktopDir, target: options.target, debug: options.debug, kinds: kindList });
+  const missing = missingBundleKinds({
+    desktopDir,
+    target: options.target,
+    debug: options.debug,
+    kinds: kindList,
+    artifacts: collected
+  });
+  if (missing.length > 0) {
+    throw new Error(
+      `以下 bundle 未产出任何产物：${missing.map(entry => `${entry.kind}（期望 ${relative(entry.dir)}）`).join("，")}；请检查 tauri build 输出。`
+    );
+  }
+  const artifacts = [];
+  for (const artifact of collected) {
+    const { sha256, bytes } = await hashPath(artifact.path);
+    artifacts.push({
+      kind: artifact.kind,
+      name: artifact.name,
+      path: relative(artifact.path),
+      sha256,
+      bytes
+    });
+  }
+  if (options.copy) {
+    for (const artifact of collected) {
+      const destination = path.join(outDir, "bundles", artifact.kind, artifact.name);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.cpSync(artifact.path, destination, { recursive: true });
+    }
+    console.log(`[desktop] 已复制产物到 ${relative(path.join(outDir, "bundles"))}`);
+  }
+
+  const indexSha256 = (await hashPath(path.join(frontendDist, "index.html"))).sha256;
+  const manifest = buildDesktopManifest({
+    releaseId: resolved.resolvedReleaseId,
+    createdAt: new Date().toISOString(),
+    product: {
+      name: config.productName ?? null,
+      version: options.version ?? config.version ?? null,
+      identifier: options.identifier ?? config.identifier ?? null
+    },
+    platform: { os: platform, arch },
+    toolchain: { rust: rustVersion(), tauriCli: cli.version },
+    frontend: {
+      dist: relative(frontendDist),
+      indexSha256,
+      source: options.buildFrontend ? "built-by-script" : "prebuilt"
+    },
+    bootstrap: {
+      uiUrl: options.uiUrl,
+      defaultsResource: DESKTOP_DEFAULTS_RESOURCE,
+      precedence: ["--ui-url", "WOOHAA_DESKTOP_URL", "bundle 默认值", "内置前端资源"]
+    },
+    artifacts,
+    hostPackage,
+    bundles: kindList,
+    target: options.target,
+    debug: options.debug,
+    notes: [
+      "未签名：没有 Developer ID / 公证（macOS）、Authenticode（Windows）或 apt/rpm 仓库与签名（Linux）。",
+      "未启用 gpu-debug：发行构建不携带 Bevy pass 资源名。",
+      hostPackage ? "本机宿主已装配；真实启动验收记录独立保存。" : "显式外部 UI 调试模式：本机宿主未装配。"
+    ]
+  });
+  const manifestPath = path.join(outDir, "manifest.json");
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  console.log(`[desktop] 产物：${artifacts.length ? artifacts.map(entry => entry.path).join(", ") : "（未产出安装包）"}`);
+  console.log(`[desktop] manifest：${relative(manifestPath)}`);
+  console.log("[desktop] 渲染/合成/性能未在本环境采集，保持「待人工验证」。");
+}
+
+function relative(target) {
+  const value = path.relative(root, target);
+  return value.startsWith("..") ? target : value;
+}
+
+async function main() {
+  const options = parseDesktopArgs(process.argv.slice(2));
+  if (options.mode === "help") {
+    console.log(usage);
+    return;
+  }
+  if (options.mode === "icons") {
+    runIcons(options);
+    return;
+  }
+  await runBuild(options);
+}
+
+main().catch(error => fail(error.message));

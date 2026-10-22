@@ -1,0 +1,57 @@
+{
+  "name": "@woohaa3/extension-runninghub-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RunningHub 生成 Provider 与 App 专用交互插件（change: 2026-10-04-add-runninghub-and-extensionize-litellm）：后端经 ctx.generation 注册 API/App 模型；前端经 server-active 入口注册 App 专用交互面板。",
+  "exports": {
+    "./frontend": {
+      "types": "./src/frontend/index.ts",
+      "import": "./dist/frontend.js"
+    },
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/frontend/index.ts --outdir dist --platform browser --entry-name frontend && node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build:browser": "node ../../scripts/build-extension-browser.mjs"
+  },
+  "dependencies": {
+    "@sdppp/pptask": "workspace:*",
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/frontend": "workspace:*",
+    "react": "^18.3.1",
+    "@ai-sdk/provider": "^4.0.14"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@types/node": "^22.15.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "jsdom": "^30.1.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0",
+    "ai": "^7.0.99"
+  }
+}

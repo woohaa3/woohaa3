@@ -1,0 +1,265 @@
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createSettingsService, resolveSettingsFiles, type SettingsService } from "./settings-service.js";
+
+const services: SettingsService[] = [];
+const dirs: string[] = [];
+afterEach(() => {
+  for (const service of services.splice(0)) service.close();
+  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function tempFiles() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-settings-"));
+  dirs.push(dir);
+  return { configFile: path.join(dir, "woohaa.config.yml"), secretsFile: path.join(dir, "woohaa.secrets.yml") };
+}
+
+async function start(files: ReturnType<typeof tempFiles>, options: { env?: Record<string, string>; watch?: boolean } = {}) {
+  const events: Array<Record<string, unknown>> = [];
+  const service = await createSettingsService({
+    ...files,
+    env: options.env ?? {},
+    watch: options.watch ?? false,
+    debounceMs: 20,
+    logger: (event) => events.push(event)
+  });
+  services.push(service);
+  return { service, events };
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 3_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("waitFor 超时");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** 测试用的“扩展配置段”：替代已移除的 canvas.syncUpstream.*，保留 url / secret / 旧环境变量语义。 */
+const DEMO_PREFIX = "providers.demo";
+const demoFields = {
+  url: {
+    kind: "url",
+    protocols: ["ws:", "wss:"],
+    reload: "hot",
+    label: "中继地址",
+    description: "ws(s) 基址",
+    legacyEnv: "WOOHAA3_CANVAS_SYNC_UPSTREAM_URL"
+  },
+  token: {
+    kind: "string",
+    secret: true,
+    reload: "hot",
+    label: "令牌",
+    description: "会话令牌",
+    legacyEnv: "WOOHAA3_CANVAS_SYNC_UPSTREAM_TOKEN"
+  }
+} as const;
+
+describe("createSettingsService", () => {
+  it("文件不存在时取默认值；默认位置在 web/ 下，可由环境变量指定", async () => {
+    const { service } = await start(tempFiles());
+    expect(service.get("storage.primary")).toBe("local");
+    expect(resolveSettingsFiles({}, "/repo").configFile).toBe("/repo/web/woohaa.config.yml");
+    expect(resolveSettingsFiles({ WOOHAA3_SECRETS_FILE: "/etc/woohaa/secrets.yml" }, "/repo").secretsFile).toBe("/etc/woohaa/secrets.yml");
+  });
+
+  it("启动时配置非法直接失败", async () => {
+    const files = tempFiles();
+    fs.writeFileSync(files.configFile, "telemetry:\n  local:\n    retentionDays: 0\n");
+    await expect(start(files)).rejects.toThrow(/retentionDays/);
+  });
+
+  it("旧环境变量生效时告警迁移", async () => {
+    const { service, events } = await start(tempFiles(), { env: { WOOHAA3_CANVAS_SYNC_UPSTREAM_URL: "ws://relay" } });
+    service.register(DEMO_PREFIX, demoFields, "演示", "demo-extension");
+    expect(service.get((DEMO_PREFIX + ".url") as never)).toBe("ws://relay");
+    expect(events.some((event) => event.event === "settings-legacy-env")).toBe(true);
+  });
+
+  it("监听文件变化热重载并通知订阅者；改坏后保留上一份生效值", async () => {
+    const files = tempFiles();
+    const { service, events } = await start(files, { watch: true });
+    service.register(DEMO_PREFIX, demoFields, "演示", "demo-extension");
+    const urlKey = DEMO_PREFIX + ".url";
+    const notified: string[][] = [];
+    service.subscribe([urlKey] as never, (changed) => {
+      notified.push([...changed]);
+    });
+
+    fs.writeFileSync(files.configFile, "providers:\n  demo:\n    url: ws://relay-a\n");
+    await waitFor(() => service.get(urlKey as never) === "ws://relay-a");
+    expect(notified).toEqual([[urlKey]]);
+
+    fs.writeFileSync(files.configFile, "providers:\n  demo:\n    url: http://wrong\n");
+    await waitFor(() => events.some((event) => event.event === "settings-reload-rejected"));
+    expect(service.get(urlKey as never)).toBe("ws://relay-a");
+  });
+
+  it("update 写回时保留注释，敏感项写入 0600 的密钥文件", async () => {
+    const files = tempFiles();
+    const { service } = await start(files);
+    service.register(DEMO_PREFIX, demoFields, "演示", "demo-extension");
+    fs.writeFileSync(files.configFile, "# 团队中继\nproviders:\n  demo:\n    url: ws://old # 旧地址\n");
+    await service.reload();
+    const urlKey = DEMO_PREFIX + ".url";
+    const tokenKey = DEMO_PREFIX + ".token";
+    const notified: string[][] = [];
+    service.subscribe([urlKey, tokenKey] as never, (changed) => {
+      notified.push([...changed]);
+    });
+
+    const result = await service.update({ [urlKey]: "wss://new", [tokenKey]: "alice" });
+    expect(result).toEqual({ ok: true, changed: [urlKey, tokenKey] });
+    expect(notified).toHaveLength(1);
+    const written = fs.readFileSync(files.configFile, "utf8");
+    expect(written).toContain("# 团队中继");
+    expect(written).toContain("wss://new");
+    expect(written).not.toContain("alice");
+    expect(fs.readFileSync(files.secretsFile, "utf8")).toContain("alice");
+    expect(fs.statSync(files.secretsFile).mode & 0o777).toBe(0o600);
+
+    const described = service.describe().find((entry) => entry.key === tokenKey);
+    expect(described).toMatchObject({ value: null, configured: true });
+
+    expect(await service.update({ [urlKey]: null })).toMatchObject({ ok: true });
+    expect(service.get(urlKey as never)).toBeUndefined();
+  });
+
+  it("扩展登记的配置段：未登记前只记为未知键，登记后按定义校验、可读写，注销后撤出", async () => {
+    const files = tempFiles();
+    fs.writeFileSync(files.configFile, "providers:\n  demo:\n    timeoutMs: 5\n");
+    const { service } = await start(files);
+    expect(service.unknownKeys()).toEqual(["providers.demo.timeoutMs"]);
+
+    const fields = {
+      timeoutMs: { kind: "integer", label: "超时", description: "毫秒", reload: "hot", min: 1 },
+      apiKey: { kind: "string", secret: true, label: "API Key", description: "密钥", reload: "hot" }
+    } as const;
+    const unregister = service.register("providers.demo", fields, "演示", "demo-extension");
+    expect(service.unknownKeys()).toEqual([]);
+    expect(service.section("providers.demo")).toEqual({ timeoutMs: 5 });
+    expect(() => service.register("providers.demo", fields, "演示")).toThrow();
+    expect(service.describe().find((entry) => entry.key === "providers.demo.apiKey")).toMatchObject({
+      group: "演示",
+      ownerExtensionId: "demo-extension",
+      value: null,
+      configured: false
+    });
+
+    expect(await service.update({ "providers.demo.timeoutMs": 0 })).toMatchObject({ ok: false });
+    expect(await service.update({ "providers.demo.apiKey": "sk-demo" })).toMatchObject({ ok: true });
+    expect(service.section("providers.demo").apiKey).toBe("sk-demo");
+    expect(fs.readFileSync(files.secretsFile, "utf8")).toContain("sk-demo");
+    expect(fs.statSync(files.secretsFile).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(files.configFile, "utf8")).not.toContain("sk-demo");
+    expect(service.describe().find((entry) => entry.key === "providers.demo.apiKey")).toMatchObject({ value: null, configured: true });
+
+    unregister();
+    expect(service.describe().some((entry) => entry.key.startsWith("providers.demo."))).toBe(false);
+  });
+
+  it("插件清单：分层与配置段前缀推导 settingCount / provider，注销只删自己的登记", async () => {
+    const { service } = await start(tempFiles());
+    const unregisterLog = service.registerPlugin({ id: "log", label: "日志", description: "结构化日志出口", layer: "base" });
+    const unregisterSample = service.registerPlugin({ id: "sample", label: "样例", layer: "extension", configPrefix: "providers.sample", directory: "/opt/woohaa/extensions/sample", siteManaged: true });
+    const unregisterStorage = service.registerPlugin({ id: "storage-local", label: "本地存储", description: "本机读写", layer: "extension", configPrefix: "storage.local" });
+
+    // 没有 configPrefix 的插件不带该键，也没可配置项；description 缺省为空串。
+    expect(service.plugins()).toEqual([
+      { id: "log", label: "日志", description: "结构化日志出口", layer: "base", settingCount: 0, siteManaged: false, provider: false },
+      { id: "sample", label: "样例", description: "", layer: "extension", configPrefix: "providers.sample", directory: "/opt/woohaa/extensions/sample", settingCount: 0, siteManaged: true, provider: true },
+      { id: "storage-local", label: "本地存储", description: "本机读写", layer: "extension", configPrefix: "storage.local", settingCount: 0, siteManaged: false, provider: false }
+    ]);
+
+    const unregisterSampleConfig = service.register(
+      "providers.sample",
+      { timeoutMs: { kind: "integer", label: "超时", description: "毫秒", reload: "hot" } },
+      "样例",
+      "sample"
+    );
+    const unregisterStorageConfig = service.register("storage.local", { dir: { kind: "string", label: "目录", description: "字节存放位置", reload: "restart" } }, "本地存储", "storage-local");
+    // 前缀相近的兄弟段（storage.localBackup.*）不算进 storage.local。
+    const unregisterBackupConfig = service.register("storage.localBackup", { dir: { kind: "string", label: "备份目录", description: "备份位置", reload: "restart" } }, "本地备份", "storage-local");
+    const counts = () => Object.fromEntries(service.plugins().map((plugin) => [plugin.id, plugin.settingCount]));
+    expect(counts()).toEqual({ log: 0, sample: 1, "storage-local": 1 });
+
+    unregisterSampleConfig();
+    expect(counts().sample).toBe(0);
+
+    // 同一 id 重新登记即替换；旧注销函数不会误删后来者。
+    unregisterSample();
+    const replacement = service.registerPlugin({ id: "sample", label: "样例 v2", layer: "extension", configPrefix: "providers.sample" });
+    unregisterSample();
+    expect(service.plugins().find((plugin) => plugin.id === "sample")).toMatchObject({ label: "样例 v2" });
+    replacement();
+    expect(service.plugins().some((plugin) => plugin.id === "sample")).toBe(false);
+
+    unregisterBackupConfig();
+    unregisterStorageConfig();
+    unregisterStorage();
+    unregisterLog();
+    expect(service.plugins()).toEqual([]);
+  });
+
+  it("插件清单带上声明的图标（语义名或品牌图形路径）；未声明时不带该字段", async () => {
+    const { service } = await start(tempFiles());
+    service.registerPlugin({ id: "ark-provider", label: "Ark（火山方舟）", layer: "extension", configPrefix: "providers.ark", icon: "provider" });
+    service.registerPlugin({
+      id: "litellm-provider",
+      label: "LiteLLM",
+      layer: "extension",
+      configPrefix: "providers.litellm",
+      icon: "/plugin-icons/litellm.png"
+    });
+    service.registerPlugin({ id: "legacy", label: "旧插件", layer: "extension" });
+    expect(service.plugins()).toEqual([
+      {
+        id: "ark-provider",
+        label: "Ark（火山方舟）",
+        description: "",
+        layer: "extension",
+        icon: "provider",
+        configPrefix: "providers.ark",
+        settingCount: 0,
+        siteManaged: false,
+        provider: true
+      },
+      {
+        id: "litellm-provider",
+        label: "LiteLLM",
+        description: "",
+        layer: "extension",
+        icon: "/plugin-icons/litellm.png",
+        configPrefix: "providers.litellm",
+        settingCount: 0,
+        siteManaged: false,
+        provider: true
+      },
+      { id: "legacy", label: "旧插件", description: "", layer: "extension", settingCount: 0, siteManaged: false, provider: false }
+    ]);
+  });
+
+  it("登记时现有值不合法则拒绝登记", async () => {
+    const files = tempFiles();
+    fs.writeFileSync(files.configFile, "providers:\n  demo:\n    timeoutMs: 0\n");
+    const { service } = await start(files);
+    expect(() =>
+      service.register("providers.demo", { timeoutMs: { kind: "integer", label: "超时", description: "毫秒", reload: "hot", min: 1 } }, "演示")
+    ).toThrow();
+    expect(service.describe().some((entry) => entry.key === "providers.demo.timeoutMs")).toBe(false);
+  });
+
+  it("非法值与被环境变量锁定的项拒绝写入，文件不变", async () => {
+    const files = tempFiles();
+    const { service } = await start(files, { env: { WOOHAA3_CANVAS_SYNC_UPSTREAM_TOKEN: "deploy" } });
+    service.register(DEMO_PREFIX, demoFields, "演示", "demo-extension");
+    expect(await service.update({ [DEMO_PREFIX + ".url"]: "http://wrong" })).toMatchObject({ ok: false });
+    expect(await service.update({ [DEMO_PREFIX + ".token"]: "mine" })).toMatchObject({ ok: false });
+    expect(fs.existsSync(files.configFile)).toBe(false);
+    expect(fs.existsSync(files.secretsFile)).toBe(false);
+  });
+});

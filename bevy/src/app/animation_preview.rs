@@ -1,0 +1,60 @@
+//! Consume the sampled camera after rig derivation and before preview rendering.
+use bevy::prelude::*;
+use super::{AnimationCameraState, CurrentScene, ModelAssetTable, FrameFlags};
+use crate::model3d::{ModelVisuals, shot_adapter::{ShotAdapterState, focused_model_bounds, sampled_camera_pose}};
+use crate::shot_camera::ShotCameraDerived;
+
+pub(super) fn apply_sampled_camera(
+    scene: Res<CurrentScene>,
+    sampled: Res<AnimationCameraState>,
+    adapter: Res<ShotAdapterState>,
+    models: Res<ModelVisuals>,
+    resources: Res<ModelAssetTable>,
+    mut rigs: Query<&mut ShotCameraDerived>,
+    flags: Res<FrameFlags>,
+    mut last_sample: Local<Option<(u32, u32)>>,
+) {
+    let Some(playback) = scene.0.animation_playback.as_ref().filter(|p| p.view_mode == "focus-preview") else { *last_sample = None; return; };
+    let (Some(camera), Some(entity), Some(bounds)) = (sampled.0, adapter.rig, focused_model_bounds(&scene.0, &models, &resources.0)) else { return; };
+    // 与 overview 辅助实体共用同一 pose 派生（design D2），避免第二套取景公式。
+    let Some((focus, position)) = sampled_camera_pose(bounds, &camera) else { return; };
+    let Ok(mut derived) = rigs.get_mut(entity) else { return; };
+    let key = (playback.generation, playback.time.to_bits());
+    if derived.focus != focus || derived.position != position || *last_sample != Some(key) || flags.film_set_media_changed {
+        derived.focus = focus;
+        derived.position = position;
+        derived.generation = derived.generation.wrapping_add(1);
+        *last_sample = Some(key);
+    }
+}
+
+/// 同步拍摄镜头相机标记集合
+/// （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.1 / design D5）。
+///
+/// 在运动求值（`sync_models` 写入 `AnimationCameraState`）之后、渲染预览之前运行；为每个可见
+/// 拍摄镜头派生稳定标记（静态/非活动用零点封面相机，活动动态用同一 T 的采样相机）。只消费已
+/// 接受场景与共享姿态派生，不订阅 hover、不自行开播。聚焦隔离与不合法目标都不显示标记。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn sync_film_set_camera(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut assets: ResMut<crate::model3d::filmset_camera::FilmSetCameraAssets>,
+    mut visual: ResMut<crate::model3d::filmset_camera::FilmSetCameraVisual>,
+    scene: Res<CurrentScene>,
+    sampled: Res<AnimationCameraState>,
+    models: Res<ModelVisuals>,
+    resources: Res<ModelAssetTable>,
+) {
+    crate::model3d::filmset_camera::sync(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut assets,
+        &mut visual,
+        &scene.0,
+        sampled.0,
+        &models,
+        &resources.0,
+    );
+}

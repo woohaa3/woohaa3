@@ -1,0 +1,30 @@
+[package]
+name = "photocraft-project-verify"
+description = "无 UI 的 .pcraft 工程核验工具（Media ingest 内部适配调用）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "photocraft_project_verify"
+path = "src/lib.rs"
+
+[[bin]]
+name = "photocraft-project-verify"
+path = "src/main.rs"
+
+[dependencies]
+photocraft-format = { workspace = true }
+photocraft-doc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+ruzstd = "0.9"
+
+[dev-dependencies]
+serde_json = { workspace = true }

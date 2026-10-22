@@ -1,0 +1,503 @@
+/**
+ * Application 后端插件宿主公共入口
+ * （change: 2026-10-05-extract-application-plugin-host，任务 2.2 / design D2/D3；
+ *  change: 2026-10-09-refactor-large-source-files-and-remove-compatibility R16 —— 拆分为
+ *  类型/facade 与 dispatch 子模块，本文件保留唯一 owner 表与 activation 编排）。
+ *
+ * 宿主声明受控扩展点：typed capability、命名空间 request handler、后台 resource。插件只在
+ * activation 内贡献；宿主负责依赖解析、owner-scoped disposer、反序回滚、认证边界与停用清理。
+ *
+ * 安全边界：
+ * - 插件不能注册任意公网路由、替换根 server 或访问其它服务数据库（注册面只有下列三类）；
+ * - handler 的认证等级由宿主在进入插件逻辑**之前**强制；
+ * - 相同 capability id / handler route 冲突使后注册 stable 失败；activation 中途失败反序回滚。
+ */
+import type {
+  ApplicationBackendActivation,
+  ApplicationBackendConfigFacade,
+  ApplicationBackendExtensionDefinition,
+  ApplicationBackendHost,
+  ApplicationBackendWorkFacade
+} from "./contract.js";
+import type { ApplicationExtensionHostIdentity } from "@woohaa3/contracts";
+import {
+  EMPTY_CONFIG_FACADE,
+  ExtensionHostError,
+  REJECTING_SERVICES,
+  REJECTING_WORK_FACADE,
+  httpHandlerKey,
+  toSummary,
+  type ApplicationExtensionHostOptions,
+  type ExtensionActivationHandle,
+  type ExtensionActivationResult,
+  type ExtensionDispatchContext,
+  type ExtensionRegistrationSummary,
+  type OwnerState
+} from "./host-types.js";
+import {
+  dispatchHttp,
+  dispatchHandler,
+  dispatchRawHttp,
+  resolvePublicRoute,
+  type HostRegistryContext
+} from "./host-dispatch.js";
+
+export { ExtensionHostError } from "./host-types.js";
+export type {
+  ExtensionHostErrorCode,
+  ExtensionRegistrationSummary,
+  ExtensionActivationHandle,
+  ExtensionActivationResult,
+  ExtensionDispatchContext,
+  ApplicationExtensionHostOptions
+} from "./host-types.js";
+
+export type ApplicationExtensionHost = {
+  activate: (definition: ApplicationBackendExtensionDefinition) => Promise<ExtensionActivationResult>;
+  activateVersioned: (
+    definition: ApplicationBackendExtensionDefinition,
+    configVersion: number,
+    mode: "public" | "recovery"
+  ) => Promise<ExtensionActivationResult>;
+  activateManifest: (
+    definitions: readonly ApplicationBackendExtensionDefinition[]
+  ) => Promise<Array<{ extensionId: string; result: ExtensionActivationResult }>>;
+  resolveCapability: (id: string) => unknown;
+  hasCapability: (id: string) => boolean;
+  /**
+   * 解析 capability 的当前 owner（extensionId/configVersion/mode）；不存在返回 null。
+   *
+   * 供受控来源注册表等宿主级调用方在每次调用时校验 owner 与配置版本，避免裸缓存
+   * `resolveCapability()` 绕过停用/升级检查（change: 2026-10-12-add-extension-online-canvas-migration）。
+   */
+  resolveCapabilityOwner: (id: string) => { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
+  dispatch: (
+    route: string,
+    input: { body: unknown; context: ExtensionDispatchContext; extensionId?: string }
+  ) => Promise<import("./contract.js").ApplicationExtensionHandlerResult>;
+  dispatchHttp: (input: {
+    method: import("./contract.js").ApplicationExtensionHttpMethod;
+    route: string;
+    req: import("./contract.js").ApplicationExtensionHttpRequest;
+    res: import("./contract.js").ApplicationExtensionHttpResponse;
+    context: ExtensionDispatchContext;
+  }) => Promise<{ registration: import("./contract.js").ApplicationBackendHttpHandlerRegistration } | undefined>;
+  dispatchRawHttp: (input: {
+    method: import("./contract.js").ApplicationExtensionHttpMethod;
+    route: string;
+    req: import("./contract.js").ApplicationExtensionRawRequest;
+    res: import("./contract.js").ApplicationExtensionRawResponse;
+    context: ExtensionDispatchContext;
+  }) => Promise<{ registration: import("./contract.js").ApplicationBackendRawHttpHandlerRegistration } | undefined>;
+  resolvePublicRoute: (
+    extensionId: string,
+    route: string,
+    method: import("./contract.js").ApplicationExtensionHttpMethod
+  ) => { owned: boolean };
+  snapshot: () => Array<{ extensionId: string } & ExtensionRegistrationSummary>;
+  disposeExtension: (extensionId: string) => Promise<void>;
+  disposeVersion: (extensionId: string, configVersion: number) => Promise<void>;
+  activeVersions: (extensionId: string) => number[];
+  dispose: () => Promise<void>;
+};
+
+export function createApplicationExtensionHost(options: ApplicationExtensionHostOptions = {}): ApplicationExtensionHost {
+  const log = options.logger ?? (() => undefined);
+  const owners = new Map<string, OwnerState>();
+  const globalCapabilities = new Map<string, string>();
+  const globalHandlers = new Map<string, string>();
+  const globalHttpHandlers = new Map<string, string>();
+  const globalRawHttpHandlers = new Map<string, string>();
+  let orderCounter = 0;
+  let disposed = false;
+
+  const registry: HostRegistryContext = {
+    owners,
+    globalHandlers,
+    globalHttpHandlers,
+    globalRawHttpHandlers,
+    log
+  };
+
+  const keyFor = (extensionId: string, configVersion: number): string => `${extensionId}::${configVersion}`;
+  const publicKeyFor = (extensionId: string): string | undefined => {
+    for (const [key, owner] of owners) {
+      if (owner.extensionId === extensionId && owner.mode === "public") return key;
+    }
+    return undefined;
+  };
+
+  /** 反序释放一次 activation 的贡献（幂等；容忍重复调用）。 */
+  const rollback = async (owner: OwnerState, handle: string): Promise<void> => {
+    for (const providerId of [...owner.generationProviderIds].reverse()) {
+      owner.releaseGeneration?.(providerId);
+    }
+    owner.generationProviderIds = [];
+    for (const resource of [...owner.startedResources].reverse()) {
+      await Promise.resolve(resource.stop()).catch((error) =>
+        log({ event: "extension-resource-stop-failed", extensionId: owner.extensionId, message: String(error) })
+      );
+    }
+    owner.startedResources = [];
+    // 存储后端在资源 stop 之后才收回：扩展自己的资源在 stop 时可能还要读写字节，
+    // 提前注销会让收尾路径撞上「主存储后端未注册」。注销本身按 backendId 幂等。
+    for (const backendId of [...owner.storageBackendIds].reverse()) {
+      owner.releaseStorage?.(backendId);
+    }
+    owner.storageBackendIds = [];
+    // 遥测出口紧随其后收回：出口里通常带着自己的队列与在途请求，先让它停、再收回注册，
+    // 顺序与存储相反（存储是"资源停完才注销"，出口是"先注销再让资源停"都不出错，
+    // 这里跟着存储走同一段收尾，避免两处先后不一致）。
+    for (const exportId of [...owner.telemetryExportIds].reverse()) {
+      owner.releaseTelemetryExport?.(exportId);
+    }
+    owner.telemetryExportIds = [];
+    for (const [route] of [...owner.handlers].reverse()) {
+      if (globalHandlers.get(route) === handle) globalHandlers.delete(route);
+    }
+    owner.handlers.clear();
+    for (const [key] of [...owner.httpHandlers].reverse()) {
+      if (globalHttpHandlers.get(key) === handle) globalHttpHandlers.delete(key);
+    }
+    owner.httpHandlers.clear();
+    for (const [key] of [...owner.rawHttpHandlers].reverse()) {
+      if (globalRawHttpHandlers.get(key) === handle) globalRawHttpHandlers.delete(key);
+    }
+    owner.rawHttpHandlers.clear();
+    for (const [id] of [...owner.capabilities].reverse()) {
+      if (globalCapabilities.get(id) === handle) globalCapabilities.delete(id);
+    }
+    owner.capabilities.clear();
+    owner.resources.clear();
+    const activation = owner.activation;
+    owner.activation = undefined;
+    if (activation?.dispose) {
+      await Promise.resolve(activation.dispose()).catch((error) =>
+        log({ event: "extension-activation-dispose-failed", extensionId: owner.extensionId, message: String(error) })
+      );
+    }
+    // 基础提供者随 activation 释放：provider registry 不保留已回滚 owner 的登记。
+    owner.releaseProviders?.();
+  };
+
+  const resolveDependencies = (
+    definition: ApplicationBackendExtensionDefinition
+  ): { ok: true } | { ok: false; missing: string[] } => {
+    const missing: string[] = [];
+    for (const dependency of definition.requiredDependencies ?? []) {
+      if (!globalCapabilities.has(dependency)) missing.push(dependency);
+    }
+    return missing.length === 0 ? { ok: true } : { ok: false, missing };
+  };
+
+  const activateInternal = async (
+    definition: ApplicationBackendExtensionDefinition,
+    configVersion: number,
+    mode: "public" | "recovery",
+    options2: { allowExistingPublic: boolean }
+  ): Promise<ExtensionActivationResult> => {
+    if (disposed) return { ok: false, code: "activation-failed", message: "宿主已释放" };
+    const key = keyFor(definition.extensionId, configVersion);
+    if (owners.has(key)) {
+      return { ok: false, code: "activation-failed", message: `插件 ${definition.extensionId}@${configVersion} 已激活` };
+    }
+    if (mode === "public") {
+      const existingPublic = publicKeyFor(definition.extensionId);
+      if (existingPublic && !options2.allowExistingPublic) {
+        return { ok: false, code: "activation-failed", message: `插件 ${definition.extensionId} 已有活动的公共实例` };
+      }
+      if (existingPublic) {
+        const existingOwner = owners.get(existingPublic)!;
+        await rollback(existingOwner, existingPublic);
+        owners.delete(existingPublic);
+      }
+    }
+    const dependencies = resolveDependencies(definition);
+    if (!dependencies.ok) {
+      log({ event: "extension-activation-missing-deps", extensionId: definition.extensionId, missing: dependencies.missing });
+      return {
+        ok: false,
+        code: "activation-failed",
+        message: `缺少必需依赖：${dependencies.missing.join("、")}`,
+        missingDependencies: dependencies.missing
+      };
+    }
+
+    const owner: OwnerState = {
+      extensionId: definition.extensionId,
+      configVersion,
+      mode,
+      capabilities: new Map(),
+      handlers: new Map(),
+      httpHandlers: new Map(),
+      rawHttpHandlers: new Map(),
+      resources: new Map(),
+      startedResources: [],
+      generationProviderIds: [],
+      storageBackendIds: [],
+      telemetryExportIds: [],
+      order: ++orderCounter
+    };
+    owners.set(key, owner);
+    const handle = key;
+
+    // recovery 实例贡献隔离到恢复命名空间：不能成为公共新工作入口（design D6）。
+    const capabilityKey = (id: string) => (mode === "public" ? id : `_recovery/${definition.extensionId}/${configVersion}/${id}`);
+    const handlerKey = (route: string) => (mode === "public" ? route : `_recovery/${definition.extensionId}/${configVersion}/${route}`);
+    // 普通 JSON handler 全局键额外按 extensionId 命名空间隔离（change: 2026-10-13-...，任务 1.1）：
+    // 不同扩展可各自声明同名 route（如 `me`）。HTTP/raw HTTP handler 仍按公开路径匹配，不前缀。
+    const namedHandlerKey = (route: string) =>
+      mode === "public" ? `${definition.extensionId}/${route}` : `_recovery/${definition.extensionId}/${configVersion}/${route}`;
+
+    const configFacade: ApplicationBackendConfigFacade = options.configFacadeFor?.(definition.extensionId) ?? EMPTY_CONFIG_FACADE;
+    const workFacade: ApplicationBackendWorkFacade = options.workFacadeFor?.(definition.extensionId) ?? REJECTING_WORK_FACADE;
+    const services = options.servicesFor?.(definition.extensionId, configVersion) ?? REJECTING_SERVICES;
+    const hostIdentity: ApplicationExtensionHostIdentity = options.hostIdentity ?? "application";
+
+    const fail = async (error: ExtensionHostError): Promise<ExtensionActivationResult> => {
+      await rollback(owner, handle);
+      owners.delete(key);
+      log({ event: "extension-activation-rolled-back", extensionId: definition.extensionId, code: error.code });
+      return { ok: false, code: error.code, message: error.message };
+    };
+
+    const host: ApplicationBackendHost = {
+      extensionId: definition.extensionId,
+      host: hostIdentity,
+      ...(options.deployment ? { deployment: options.deployment } : {}),
+      ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
+      config: configFacade,
+      work: workFacade,
+      services,
+      logger: (event: Record<string, unknown>) => log({ extensionId: definition.extensionId, ...event }),
+      registerCapability: (registration) => {
+        if (typeof registration.id !== "string" || registration.id === "") {
+          throw new ExtensionHostError("duplicate-capability", "capability id 必须是非空字符串");
+        }
+        const id = capabilityKey(registration.id);
+        if (globalCapabilities.has(id)) {
+          throw new ExtensionHostError("duplicate-capability", `capability 已注册：${registration.id}`);
+        }
+        globalCapabilities.set(id, handle);
+        owner.capabilities.set(id, registration.value);
+      },
+      registerHandler: (registration) => {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "handler route 必须是非空相对路由");
+        }
+        // 全局键按 `extensionId/route` 命名空间隔离：不同扩展可各自声明同名 route（如 `me`）。
+        const route = namedHandlerKey(registration.route);
+        if (globalHandlers.has(route)) {
+          throw new ExtensionHostError("duplicate-handler", `handler route 已注册：${registration.route}`);
+        }
+        globalHandlers.set(route, handle);
+        owner.handlers.set(route, registration);
+      },
+      registerHttpHandler: (registration) => {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "HTTP handler route 必须是非空相对路由");
+        }
+        const route = handlerKey(registration.route);
+        const key = httpHandlerKey(registration.method, route);
+        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
+          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
+        }
+        globalHttpHandlers.set(key, handle);
+        owner.httpHandlers.set(key, registration);
+      },
+      registerRawHttpHandler: (registration) => {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "原始 HTTP handler route 必须是非空相对路由");
+        }
+        const route = handlerKey(registration.route);
+        const key = httpHandlerKey(registration.method, route);
+        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
+          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
+        }
+        globalRawHttpHandlers.set(key, handle);
+        owner.rawHttpHandlers.set(key, registration);
+      },
+      registerResource: (resource) => {
+        if (typeof resource.id !== "string" || resource.id === "") {
+          throw new ExtensionHostError("duplicate-resource", "resource id 必须是非空字符串");
+        }
+        if (owner.resources.has(resource.id)) {
+          throw new ExtensionHostError("duplicate-resource", `resource 已注册：${resource.id}`);
+        }
+        owner.resources.set(resource.id, resource);
+      }
+    };
+
+    const registerGeneration = options.registerGenerationFor?.(definition.extensionId);
+    if (registerGeneration) {
+      host.registerGeneration = (provider) => {
+        registerGeneration(provider);
+        owner.generationProviderIds.push(provider.providerId);
+      };
+    }
+    const releaseGeneration = options.releaseGenerationFor?.(definition.extensionId);
+    if (releaseGeneration) {
+      owner.releaseGeneration = releaseGeneration;
+      host.unregisterGeneration = releaseGeneration;
+    }
+
+    // 存储后端注册面（与 registerGeneration 同形）：站点插件在 activation 里把存储后端注册进
+    // `ctx.storage`，宿主只记 owner 与 id，停用/卸载时按反序注销。两侧都缺失时不伪造注册表，
+    // 插件拿不到 `host.registerStorage`，自己记日志跳过。
+    const registerStorage = options.registerStorageFor?.(definition.extensionId);
+    if (registerStorage) {
+      host.registerStorage = (backend) => {
+        registerStorage(backend);
+        owner.storageBackendIds.push(backend.backendId);
+      };
+    }
+    // 遥测出口注册面（与 registerStorage 同形）：出口自带部署地址/会话与在途批次，
+    // 因此谁注册谁收回，停用后 `ctx.telemetry` 里不留一个指向已释放资源的出口。
+    const registerTelemetryExport = options.registerTelemetryExportFor?.(definition.extensionId);
+    if (registerTelemetryExport) {
+      host.registerTelemetryExport = (provider) => {
+        registerTelemetryExport(provider);
+        owner.telemetryExportIds.push(provider.exportId);
+      };
+    }
+    const releaseTelemetryExport = options.releaseTelemetryExportFor?.(definition.extensionId);
+    if (releaseTelemetryExport) {
+      owner.releaseTelemetryExport = releaseTelemetryExport;
+      host.unregisterTelemetryExport = (exportId) => {
+        const index = owner.telemetryExportIds.lastIndexOf(exportId);
+        if (index >= 0) owner.telemetryExportIds.splice(index, 1);
+        releaseTelemetryExport(exportId);
+      };
+    }
+    const releaseStorage = options.releaseStorageFor?.(definition.extensionId);
+    if (releaseStorage) {
+      // 释放走同一份 owner 记录：显式 `unregisterStorage` 也只注销本 activation 注册过的 id，
+      // 避免扩展误把别的 owner 的后端注销掉。重复注销直接交给 core（幂等）。
+      owner.releaseStorage = releaseStorage;
+      host.unregisterStorage = (backendId) => {
+        const index = owner.storageBackendIds.lastIndexOf(backendId);
+        if (index >= 0) owner.storageBackendIds.splice(index, 1);
+        releaseStorage(backendId);
+      };
+    }
+
+    // 基础提供者注册面（change: 2026-10-13-...，任务 1.1）：插件在 activation 中登记类型化
+    // identity/site/resource/lifecycle provider；registry 在开放入口前按 profile 校验唯一 owner。
+    const providerRegistry = options.registerProviderFor?.(definition.extensionId);
+    if (providerRegistry) {
+      owner.releaseProviders = () => providerRegistry.releaseExtension(definition.extensionId);
+      host.providers = {
+        registerIdentityProvider: (provider) =>
+          providerRegistry.register({ slot: "identity", extensionId: definition.extensionId, providerId: provider.providerId, value: provider }),
+        registerSiteAccessPolicy: (policy) =>
+          providerRegistry.register({ slot: "site-access", extensionId: definition.extensionId, providerId: policy.policyId, value: policy }),
+        registerResourceAccessPolicy: (policy) =>
+          providerRegistry.register({ slot: "resource-access", extensionId: definition.extensionId, providerId: policy.policyId, value: policy }),
+        registerResourceLifecyclePolicy: (policy) =>
+          providerRegistry.register({ slot: "resource-lifecycle", extensionId: definition.extensionId, providerId: policy.policyId, value: policy }),
+        registerResourceDirectory: (directory) =>
+          providerRegistry.register({ slot: "resource-directory", extensionId: definition.extensionId, providerId: directory.directoryId, value: directory })
+      };
+    }
+
+    try {
+      const activation: ApplicationBackendActivation | void = await definition.activate(host);
+      owner.activation = activation ?? {};
+      for (const resource of owner.resources.values()) {
+        if (resource.start) {
+          await resource.start();
+          owner.startedResources.push(resource);
+        }
+      }
+    } catch (error) {
+      const hostError = error instanceof ExtensionHostError
+        ? error
+        : new ExtensionHostError("activation-failed", error instanceof Error ? error.message : String(error));
+      return fail(hostError);
+    }
+
+    log({ event: "extension-activated", extensionId: definition.extensionId, configVersion, mode });
+    const activationHandle: ExtensionActivationHandle = {
+      extensionId: definition.extensionId,
+      summary: () => toSummary(owner),
+      dispose: async () => {
+        const current = owners.get(key);
+        if (!current) return;
+        await rollback(current, handle);
+        owners.delete(key);
+        log({ event: "extension-disposed", extensionId: definition.extensionId, configVersion, mode });
+      }
+    };
+    return { ok: true, handle: activationHandle };
+  };
+
+  const activate = (definition: ApplicationBackendExtensionDefinition): Promise<ExtensionActivationResult> =>
+    activateInternal(definition, 0, "public", { allowExistingPublic: false });
+
+  const activateVersioned: ApplicationExtensionHost["activateVersioned"] = (definition, configVersion, mode) =>
+    activateInternal(definition, configVersion, mode, { allowExistingPublic: true });
+
+  const activateManifest: ApplicationExtensionHost["activateManifest"] = async (definitions) => {
+    const results: Array<{ extensionId: string; result: ExtensionActivationResult }> = [];
+    for (const definition of definitions) {
+      results.push({ extensionId: definition.extensionId, result: await activate(definition) });
+    }
+    return results;
+  };
+
+  const disposeVersion = async (extensionId: string, configVersion: number): Promise<void> => {
+    const key = keyFor(extensionId, configVersion);
+    const owner = owners.get(key);
+    if (!owner) return;
+    await rollback(owner, key);
+    owners.delete(key);
+  };
+
+  return {
+    activate,
+    activateVersioned,
+    activateManifest,
+    resolveCapability: (id) => globalCapabilities.get(id) !== undefined ? owners.get(globalCapabilities.get(id)!)?.capabilities.get(id) : undefined,
+    hasCapability: (id) => globalCapabilities.has(id),
+    resolveCapabilityOwner: (id) => {
+      const handle = globalCapabilities.get(id);
+      if (handle === undefined) return null;
+      const owner = owners.get(handle);
+      if (!owner) return null;
+      return { extensionId: owner.extensionId, configVersion: owner.configVersion, mode: owner.mode };
+    },
+    dispatch: (route, input) => dispatchHandler(registry, route, input),
+    dispatchHttp: (input) => dispatchHttp(registry, input),
+    dispatchRawHttp: (input) => dispatchRawHttp(registry, input),
+    resolvePublicRoute: (extensionId, route, method) => resolvePublicRoute(registry, extensionId, route, method),
+    snapshot: () =>
+      [...owners.values()]
+        .sort((a, b) => a.order - b.order)
+        .map((owner) => ({ extensionId: owner.extensionId, ...toSummary(owner) })),
+    disposeExtension: async (extensionId) => {
+      for (const [key, owner] of [...owners]) {
+        if (owner.extensionId === extensionId) {
+          await rollback(owner, key);
+          owners.delete(key);
+        }
+      }
+    },
+    disposeVersion,
+    activeVersions: (extensionId) =>
+      [...owners.values()]
+        .filter((owner) => owner.extensionId === extensionId)
+        .map((owner) => owner.configVersion)
+        .sort((a, b) => a - b),
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      const all = [...owners.entries()].sort(([, a], [, b]) => b.order - a.order);
+      for (const [key, owner] of all) await rollback(owner, key);
+      owners.clear();
+      globalCapabilities.clear();
+      globalHandlers.clear();
+      globalHttpHandlers.clear();
+      globalRawHttpHandlers.clear();
+    }
+  };
+}

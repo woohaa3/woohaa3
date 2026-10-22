@@ -1,0 +1,27 @@
+{
+  "name": "@woohaa3/tooling",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Woohaa3 workspace tooling — dependency boundary gates and shared build/test helpers.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/media-service": "workspace:*",
+    "@woohaa3/task-service": "workspace:*",
+    "@woohaa3/canvas-service": "workspace:*",
+    "@woohaa3/mcp-service": "workspace:*",
+    "@woohaa3/application-service": "workspace:*",
+    "@woohaa3/extension-sample-site": "workspace:*",
+    "@sdppp/pptask-worker-server": "workspace:*",
+    "yjs": "^13.6.32"
+  }
+}

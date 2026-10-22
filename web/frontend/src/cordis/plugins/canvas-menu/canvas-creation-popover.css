@@ -1,0 +1,111 @@
+.canvas-create.ui-popover {
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  max-height: min(620px, calc(100vh - 24px));
+  box-sizing: border-box;
+  padding: 0;
+  overflow: auto;
+  color: var(--app-web-text-primary);
+  font: 13px/1.5 var(--app-font);
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-web-border-strong) transparent;
+}
+
+.canvas-create__input { padding: 10px 12px; }
+.canvas-create__field {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.canvas-create__field:focus-within {
+  border-color: var(--app-web-border-strong);
+  background: var(--app-web-panel);
+}
+.canvas-create__field > svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 10px;
+  flex: none;
+  color: var(--app-web-text-muted);
+}
+.canvas-create__field .ui-text-area {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  max-height: 160px;
+  box-sizing: border-box;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  padding: 7px 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  font: inherit;
+  line-height: 22px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-web-border-strong) transparent;
+}
+.canvas-create__field .ui-text-area:hover:not(:disabled),
+.canvas-create__field .ui-text-area:disabled { background: transparent; }
+
+.canvas-create__materials { max-height: 240px; overflow: auto; padding: 2px 12px 10px; scrollbar-width: thin; scrollbar-color: var(--app-web-border-strong) transparent; }
+.canvas-create__materials section + section { margin-top: 10px; }
+.canvas-create h3 { margin: 0 0 6px; padding: 0 4px; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--app-web-text-muted); }
+.canvas-create__grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.canvas-create__grid button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: 12px/18px var(--app-font);
+  overflow-wrap: anywhere;
+  transition: background 120ms ease;
+}
+.canvas-create__grid button:hover:not(:disabled) { background: var(--app-web-subtle); }
+.canvas-create__grid button:active:not(:disabled) { background: var(--app-interaction-accent-soft); }
+.canvas-create__grid button:disabled { opacity: .45; cursor: default; }
+.canvas-create__grid svg { width: 20px; height: 20px; flex: none; }
+.canvas-create [data-section="other"] .canvas-create__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.canvas-create [data-section="other"] button { flex-direction: row; justify-content: flex-start; min-height: 34px; gap: 8px; padding: 7px 10px; text-align: left; }
+.canvas-create [data-section="other"] svg { width: 18px; height: 18px; }
+
+.canvas-create__ai-entry {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-top: 1px solid var(--app-web-border);
+  padding: 12px 16px;
+  background: var(--app-web-subtle);
+  color: var(--app-interaction-accent);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: background 120ms ease;
+}
+.canvas-create__ai-entry:hover { background: var(--app-interaction-accent-soft); }
+.canvas-create__ai-entry:active { color: var(--app-interaction-accent-pressed); }
+.canvas-create__ai-entry > svg { width: 20px; height: 20px; flex: none; }
+.canvas-create__ai-entry span { display: grid; gap: 2px; }
+.canvas-create__ai-entry strong { font-size: 13px; line-height: 20px; font-weight: 600; }
+.canvas-create__ai-entry small { font-size: 12px; line-height: 18px; color: var(--app-web-text-primary); }
+.canvas-create__ai-entry .canvas-create__entry-arrow { width: 16px; height: 16px; margin-left: auto; color: var(--app-web-text-muted); }
+
+.canvas-create__composer { padding: 2px 12px 12px; }
+.canvas-create__ai-heading { display: flex; align-items: center; gap: 6px; margin: 0 4px 8px; font-size: 12px; font-weight: 500; color: var(--app-interaction-accent); }
+.canvas-create__ai-heading svg { width: 16px; height: 16px; flex: none; }
+.canvas-create__notice { margin: 8px 4px 0; color: var(--app-web-text-muted); font-size: 12px; overflow-wrap: anywhere; }

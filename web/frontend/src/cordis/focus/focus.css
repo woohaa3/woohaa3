@@ -1,0 +1,154 @@
+/**
+ * 公共聚焦区域样式（change: 2026-10-12-unify-node-editors-and-focus-transitions，design D2/D4）。
+ *
+ * 从 `cordis/ui/ui.css` 迁出的**公共**聚焦框架：单一 contentRect 变量、顶部栏、连接栏、
+ * 通用面板占位与错误提示。各 editor 的专用工具/播放器/检查器样式迁入各自 `*-editor.css`。
+ *
+ * 由生产入口（`src/index.css`）统一加载；公共层不 import 具体 editor。
+ */
+
+/* 唯一布局容器：rails/tools/inspector/footer 不重叠，contentRect 由 JS 投影为变量。 */
+.app[data-focus-kind] {
+	--focus-rail: 0px;
+	--focus-header: 56px;
+	--focus-footer: 44px;
+}
+
+.app[data-focus-kind] .model-focus-chrome {
+	position: absolute;
+	inset: 0 0 auto;
+	height: var(--focus-header);
+	padding: 0 16px;
+	flex-wrap: nowrap;
+	gap: 12px;
+	border-bottom: 1px solid var(--mc-border);
+	background: var(--mc-panel);
+	z-index: 45;
+}
+.app[data-focus-kind] .model-focus-back,
+.app[data-focus-kind] .model-focus-history { flex-shrink: 0; box-shadow: none; border-color: transparent; background: transparent; border-radius: 8px; min-height: 36px; }
+.app[data-focus-kind] .model-focus-back:hover,
+.app[data-focus-kind] .model-focus-history:hover { background: var(--app-web-subtle); }
+.app[data-focus-kind] .model-focus-history[aria-pressed="true"] { color: var(--app-interaction-accent); background: var(--app-interaction-accent-soft); }
+.focus-workspace__context { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; gap: 12px; }
+.focus-workspace__identity { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; flex: 0 1 200px; padding: 0 12px; }
+.focus-workspace__title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.3; font-weight: 600; }
+.focus-workspace__version { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--mc-text); opacity: .72; font-size: 10px; line-height: 1.2; }
+.focus-workspace__version::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--app-interaction-accent); }
+.focus-workspace__version[data-readonly="true"]::before { background: var(--app-status-warning); }
+.focus-workspace__toolbar { display: flex; align-items: center; min-width: 0; max-width: 36%; }
+.focus-workspace__actions { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; }
+.focus-workspace__actions > * { flex-shrink: 0; }
+.app[data-focus-kind] .focus-workspace__help { flex-shrink: 0; border: 0; background: transparent; }
+.app[data-focus-kind] .model-focus-navigation-hint { display: none; }
+
+.focus-workspace__error {
+	position: absolute;
+	top: var(--focus-header);
+	left: var(--focus-content-x);
+	width: var(--focus-content-width);
+	padding: 8px 12px;
+	z-index: 50;
+	background: var(--mc-panel);
+	color: var(--app-status-danger);
+	font-size: 12px;
+}
+
+/* 前序 → 当前节点 → 后序：关系导航围绕标题，编辑动作位于外围。 */
+.focus-connections { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; }
+.focus-connections__direction { color: var(--app-web-border-strong); flex-shrink: 0; }
+.focus-connections__toggle { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 44px; max-width: 220px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--mc-text); cursor: pointer; font: inherit; }
+.focus-connections__toggle:hover, .focus-connections__toggle[data-state="open"] { background: var(--app-web-subtle); }
+.focus-connections__toggle:focus-visible, .focus-connections__dot:focus-visible { outline: 2px solid var(--app-interaction-focus); outline-offset: -2px; }
+.focus-connections__toggle:disabled { cursor: default; opacity: .5; }
+.focus-connections__toggle:disabled:hover { background: transparent; }
+.focus-connections__label { font-size: 11px; white-space: nowrap; }
+.focus-connections__disclosure { color: var(--app-web-border-strong); flex-shrink: 0; }
+.focus-connections__toggle:disabled .focus-connections__disclosure { display: none; }
+.focus-connections__stack { display: flex; align-items: center; flex-shrink: 0; padding: 0 2px; }
+.focus-connections__mini { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; overflow: hidden; border-radius: 6px; border: 2px solid var(--mc-panel); position: relative; background: var(--app-node-default-tint); color: var(--app-node-default-foreground); }
+.focus-connections__mini + .focus-connections__mini { margin-left: -8px; }
+.focus-connections__mini:nth-child(1) { z-index: 3; }
+.focus-connections__mini:nth-child(2) { z-index: 2; }
+.focus-connections__mini:nth-child(3) { z-index: 1; }
+.focus-connections__mini[data-node-type="text"], .focus-connections__thumbnail[data-node-type="text"] { background: var(--app-node-text-tint); color: var(--app-node-text-foreground); }
+.focus-connections__mini[data-node-type="image"], .focus-connections__thumbnail[data-node-type="image"] { background: var(--app-node-image-tint); color: var(--app-node-image-foreground); }
+.focus-connections__mini[data-node-type="video"], .focus-connections__thumbnail[data-node-type="video"] { background: var(--app-node-video-tint); color: var(--app-node-video-foreground); }
+.focus-connections__mini[data-node-type="audio"], .focus-connections__thumbnail[data-node-type="audio"] { background: var(--app-node-audio-tint); color: var(--app-node-audio-foreground); }
+.focus-connections__mini[data-node-type="model3d"], .focus-connections__thumbnail[data-node-type="model3d"] { background: var(--app-node-model-tint); color: var(--app-node-model-foreground); }
+.focus-connections__summary { max-width: 88px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.focus-connections__count { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.focus-connections__dot { height: 48px; min-height: 48px; flex-shrink: 0; border: 0; border-radius: 6px; background: transparent; color: var(--mc-text); display: inline-flex; align-items: center; cursor: pointer; padding: 6px 8px; }
+.focus-connections__dot:hover { background: var(--app-web-subtle); }
+.focus-connections__thumbnail { width: 32px; height: 32px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 6px; background: var(--app-node-default-tint); color: var(--app-node-default-foreground); }
+.focus-connections__thumb { width: 100%; height: 100%; object-fit: cover; }
+.focus-connections__glyph { flex-shrink: 0; }
+.focus-connections__list-popover { width: min(320px, calc(100vw - 24px)); padding: 8px; }
+.focus-connections__list-heading { padding: 8px 8px 12px; margin-bottom: 4px; border-bottom: 1px solid var(--mc-border); font-size: 12px; font-weight: 600; }
+.focus-connections__list { max-height: min(360px, 50dvh); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; }
+.focus-connections__row { width: 100%; justify-content: flex-start; gap: 12px; text-align: left; }
+.focus-connections__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.focus-connections__row-arrow { flex-shrink: 0; color: var(--app-web-border-strong); }
+.focus-connections__detail { max-height: 60dvh; overflow-y: auto; }
+.focus-connections__detail:focus { outline: none; }
+.focus-connections__preview-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 8px; }
+.focus-connections__preview-media { max-width: 100%; max-height: 320px; object-fit: contain; }
+.focus-connections__preview-text { margin: 0; font-size: 13px; color: var(--mc-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.focus-connections__preview-empty, .focus-connections__preview-title { font-size: 12px; color: var(--mc-text); }
+
+/* 通用检查面板占位（模型编辑器 dock、节点历史 drawer、视频检查器共用）。 */
+.app[data-focus-kind] .model-editor-dock,
+.app[data-focus-kind] .node-history--drawer,
+.app[data-focus-kind] .focus-workspace__panel {
+	position: absolute;
+	top: var(--focus-header);
+	bottom: var(--focus-footer);
+	right: var(--focus-rail);
+	width: var(--focus-panel-width);
+	height: auto;
+	max-height: none;
+	border-radius: 0;
+	transition: none;
+	z-index: 30;
+}
+.app[data-focus-kind] .model-editor { width: 100%; height: 100%; box-shadow: none; padding: 16px; }
+.app[data-focus-panel="history"] .model-editor-dock,
+.app[data-focus-panel="detail"] .model-editor-dock,
+.app[data-focus-panel="closed"] .model-editor-dock { display: none; }
+/* 详情占用侧栏时，随检查器一并隐藏其镜头取景预览（不叠在详情之上）。 */
+.app[data-focus-panel="detail"] .model-camera-preview { display: none; }
+.app[data-focus-panel="history"] .focus-workspace__panel { display: none; }
+/* 详情侧栏置于活动浮层之上（概览/聚焦通用：`task-activity` 浮层 z-index 32/33）。 */
+.app[data-focus-panel="detail"] .focus-workspace__panel { z-index: 40; }
+
+
+.app[data-focus-narrow="true"] .model-focus-chrome { gap: 0 6px; padding: 4px 8px; flex-wrap: wrap; align-content: center; }
+.app[data-focus-narrow="true"] .focus-workspace__context { order: 1; flex: 0 0 100%; height: 48px; gap: 8px; }
+.app[data-focus-narrow="true"] .focus-workspace__identity { flex: 1; padding: 0 4px; }
+.app[data-focus-narrow="true"] .focus-workspace__toolbar { flex: 1; max-width: none; height: 44px; }
+.app[data-focus-narrow="true"] .focus-workspace__actions { flex: 1; }
+.app[data-focus-narrow="true"] .focus-connections__toggle { padding: 4px; gap: 6px; }
+@media (max-width: 1199px) {
+  .focus-connections__summary { display: none; }
+}
+@media (max-width: 599px) {
+  .focus-connections__mini:not(:first-child) { display: none; }
+  .focus-connections__direction { display: none; }
+  .focus-connections__disclosure { display: none; }
+  .focus-connections__label { font-size: 10px; }
+  .focus-workspace__version { font-size: 9px; }
+}
+.app[data-focus-narrow="true"] .focus-workspace__help { display: none; }
+.app[data-focus-narrow="true"] .model-editor-dock,
+.app[data-focus-narrow="true"] .node-history--drawer,
+.app[data-focus-narrow="true"] .focus-workspace__panel {
+	left: var(--focus-rail);
+	right: var(--focus-rail);
+	top: auto;
+	bottom: 44px;
+	width: auto;
+	height: var(--focus-panel-height);
+	border-top: 1px solid var(--mc-border);
+}
+
+@media (prefers-reduced-motion: reduce) { .model-editor-dock { transition: none; } }

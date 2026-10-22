@@ -1,0 +1,55 @@
+{
+  "locator": "kie://market/flux-2/pro-text-to-image",
+  "modelId": "flux-2/pro-text-to-image",
+  "providerId": "kie",
+  "outputType": "image",
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/jobs/createTask"
+  },
+  "requestSchema": {
+    "type": "object",
+    "description": "Input parameters for the generation task",
+    "properties": {
+      "prompt": {
+        "description": " Must be between 3 and 5000 characters. (Max length: 5000 characters)",
+        "type": "string",
+        "maxLength": 5000
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "description": "Aspect ratio for the generated image. Select 'auto' to match the first input image ratio (requires input image).",
+        "enum": [
+          "1:1",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "3:2",
+          "2:3"
+        ],
+        "default": "1:1"
+      },
+      "resolution": {
+        "description": "Output image resolution.",
+        "type": "string",
+        "enum": [
+          "1K",
+          "2K"
+        ],
+        "default": "1K"
+      }
+    },
+    "required": [
+      "prompt",
+      "aspect_ratio",
+      "resolution"
+    ]
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "inputField": "input",
+    "callbackField": "callBackUrl"
+  },
+  "label": "Flux 2 Pro T2I"
+}

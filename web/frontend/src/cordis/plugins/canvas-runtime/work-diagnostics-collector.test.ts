@@ -1,0 +1,51 @@
+import { afterEach, expect, it, vi } from "vitest";
+import type { BevyModule } from "./bevy-runtime-types.js";
+import { createWorkDiagnosticsCollector } from "./work-diagnostics-collector.js";
+import { resetSceneDiagnostics, sceneDiagnostics } from "./scene-diagnostics.js";
+
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); resetSceneDiagnostics(); });
+it("never synchronously reads native diagnostics during input/scene submission and bounds pending polls", async () => {
+  vi.useFakeTimers();
+  let resolve!: (json: string) => void;
+  const asyncRead = vi.fn(() => new Promise<string>(done => { resolve = done; }));
+  const syncRead = vi.fn();
+  const module = { async_canvas_work_diagnostics: asyncRead, canvas_work_diagnostics: syncRead } as unknown as BevyModule;
+  const collector = createWorkDiagnosticsCollector(globalThis, () => module);
+  for (let n = 0; n < 100; n++) collector.refresh();
+  expect(syncRead).not.toHaveBeenCalled();
+  expect(asyncRead).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(asyncRead).toHaveBeenCalledTimes(1);
+  resolve(JSON.stringify({ renderStages: { work: { renderMs: 8, renderFrames: 2 } } }));
+  await Promise.resolve();
+  expect(sceneDiagnostics.rustRenderMs).toBe(8);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(asyncRead).toHaveBeenCalledTimes(2);
+  collector.dispose();
+  resolve(JSON.stringify({ renderStages: { work: { renderMs: 50, renderFrames: 10 } } }));
+  await Promise.resolve();
+  expect(sceneDiagnostics.rustRenderMs).toBe(8);
+  expect(vi.getTimerCount()).toBe(0);
+});
+it("discards old renderer results and retries failed polls without synchronous fallback", async () => {
+  vi.useFakeTimers();
+  let resolve!: (json: string) => void;
+  const old = { async_canvas_work_diagnostics: () => new Promise<string>(done => { resolve = done; }) } as BevyModule;
+  const read = vi.fn().mockRejectedValueOnce(new Error("timeout")).mockResolvedValue('{"snapshotBuilds":3}');
+  let module = old;
+  const collector = createWorkDiagnosticsCollector(globalThis, () => module);
+  await vi.advanceTimersByTimeAsync(1000);
+  module = { async_canvas_work_diagnostics: read } as unknown as BevyModule;
+  resolve('{"snapshotBuilds":100}'); await Promise.resolve();
+  expect(sceneDiagnostics.worldSnapshotBuilds).toBe(0);
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(sceneDiagnostics.worldSnapshotBuilds).toBe(3);
+  collector.dispose();
+});
+it("does not start background collection when disabled", () => {
+  vi.useFakeTimers(); vi.stubEnv("VITE_WOOHAA_PERFORMANCE", "0");
+  const collector = createWorkDiagnosticsCollector(globalThis, () => ({ async_canvas_work_diagnostics: vi.fn() }) as unknown as BevyModule);
+  expect(vi.getTimerCount()).toBe(0);
+  collector.dispose();
+});

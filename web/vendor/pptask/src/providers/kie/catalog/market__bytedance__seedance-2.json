@@ -1,0 +1,108 @@
+{
+  "locator": "kie://market/bytedance/seedance-2",
+  "modelId": "bytedance/seedance-2",
+  "providerId": "kie",
+  "outputType": "video",
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/jobs/createTask"
+  },
+  "requestSchema": {
+    "type": "object",
+    "description": "Input parameters for the generation task",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "The text prompt used to generate the video. Required field. (Min length: 3, Max length: 20000 characters)",
+        "minLength": 3,
+        "maxLength": 20000
+      },
+      "first_frame_url": {
+        "type": "string",
+        "description": "First frame image url or asset://{assetId} \n(for example: asset://asset-20260404242101-76djj)"
+      },
+      "last_frame_url": {
+        "type": "string",
+        "description": "End frame image url or asset://{assetId} \n(for example: asset://asset-20260404242101-76djj)"
+      },
+      "reference_image_urls": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "Enter a list of image URLs or asset://{assetId} (for example: asset://asset-20260404242101-76djj).\nSingle image requirements:\nFormat: jpeg, png, webp, bmp, tiff, gif.\nAspect ratio (width/height): (0.4, 2.5)\nWidth and height (px): (300, 6000)\nSize: Single image less than 30 MB.\nMaximum number of files: The sum of the number of frames at the beginning and end must not exceed 9..",
+        "maxItems": 9
+      },
+      "reference_video_urls": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "Enter a list of video URLs or asset://{assetId} (for example: asset://asset-20260404242101-76djj) .\nSingle video requirements:\nVideo format: mp4, mov.\nResolution: 480p, 720p\nDuration: Single video duration [2, 15] s, maximum 3 reference videos, total duration of all videos not exceeding 15 seconds.\nDimensions:\nAspect ratio (width/height): [0.4, 2.5]\nWidth/height (px): [300, 6000]\nTotal pixels: [640×640=409600, 834×1112=927408], i.e., the product of width and height must meet the range requirement of [409600, 927408].\nSize: Single video not exceeding 50 MB.\nFrame rate (FPS): [24, 60]",
+        "maxItems": 3
+      },
+      "reference_audio_urls": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "Enter a list of audio URLs or asset://{assetId} (for example: asset://asset-20260404242101-76djj) .\nSingle audio requirements:\nFormat: wav, mp3\nDuration: Single audio duration [2, 15] s, maximum 3 reference audios, total duration of all audios not exceeding 15 s.\nSize: Single audio file size not exceeding 15 MB.",
+        "maxItems": 3
+      },
+      "return_last_frame": {
+        "type": "boolean",
+        "description": "Whether to return the last frame of the video as an image.",
+        "default": false,
+        "deprecated": true
+      },
+      "generate_audio": {
+        "description": "Whether to generate audio for the video.\n\n- **true**: Generate with audio\n- **false**: Generate without audio",
+        "type": "boolean",
+        "default": true
+      },
+      "resolution": {
+        "type": "string",
+        "description": "Video resolution - 480p for faster generation, 720p for balance, 1080p for High-quality video, 4K Ultra-High Definition, delivering perfect visual details.",
+        "enum": [
+          "480p",
+          "720p",
+          "1080p",
+          "4k"
+        ],
+        "default": "720p"
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "description": "Video aspect ratio configuration. Required field.",
+        "enum": [
+          "1:1",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "21:9",
+          "adaptive"
+        ],
+        "default": "16:9"
+      },
+      "duration": {
+        "type": "integer",
+        "description": "Video duration in 4-15 seconds.",
+        "default": 5
+      },
+      "web_search": {
+        "type": "boolean",
+        "description": "Use online search"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "inputField": "input",
+    "callbackField": "callBackUrl"
+  },
+  "label": "Seedance 2"
+}

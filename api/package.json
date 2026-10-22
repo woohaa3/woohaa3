@@ -1,0 +1,25 @@
+{
+  "name": "@woohaa3/api",
+  "private": true,
+  "type": "module",
+  "description": "共享 proto 契约（开源侧）：定义加两种语言的生成绑定（gen/es、gen/go）。消费者引用对应的包，闭源服务端通过 go.mod replace 引用 Go 侧。",
+  "scripts": {
+    "gen": "buf generate && go run ./tools/generrors",
+    "gen:check": "pnpm run gen && git diff --exit-code --stat -- gen",
+    "lint": "buf lint",
+    "breaking": "buf breaking --against \"${BUF_BASELINE:-../.git#ref=origin/master}\"",
+    "typecheck": "tsc --noEmit",
+    "docs:gen": "node scripts/openapi.mjs --write",
+    "docs:check": "node --test scripts/openapi.test.mjs && node scripts/openapi.mjs --check",
+    "check": "pnpm run lint && pnpm run gen:check && pnpm run typecheck && pnpm run docs:check"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.16.0"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.73.0",
+    "@bufbuild/protoc-gen-es": "^2.16.0",
+    "@seriousme/openapi-schema-validator": "2.11.0",
+    "typescript": "^5.9.3"
+  }
+}

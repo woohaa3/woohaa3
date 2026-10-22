@@ -1,0 +1,432 @@
+syntax = "proto3";
+
+package woohaa.identity.v1alpha1;
+
+option go_package = "woohaa3/api/gen/go/woohaa/identity/v1alpha1;identityv1alpha1";
+
+// IdentityService answers "who are you". It never answers "what may you do":
+// permissions stay with RBACService. Every method is either public (the caller
+// has no credential yet) or authenticated; none of them returns another
+// subject's data.
+service IdentityService {
+  // Exchange an existing credential for a short-lived session.
+  //
+  // Public on purpose: the caller has no session yet. Two credential shapes are
+  // accepted, distinguished by the deployment configuration, not by the caller:
+  // a machine credential (the deployment's own token), or a gateway identity
+  // assertion (see GatewayLogin). The response is the same either way: the
+  // caller gets a session and nothing else.
+  rpc Login(LoginRequest) returns (LoginResponse);
+
+  // Describe the sign-in methods this deployment enabled.
+  //
+  // Public: a caller that has no session is exactly who needs this answer. It
+  // carries only values that would already be visible to anyone opening the
+  // page, so nothing here may be secret.
+  //
+  // Clients must render entries from this list rather than hardcoding the
+  // methods they know about: a method that is not listed is not enabled, and
+  // rendering an entry for it turns a configuration gap into a UI bug.
+  rpc GetAuthMethods(GetAuthMethodsRequest) returns (GetAuthMethodsResponse);
+
+  // Begin a sign-in against the configured identity provider.
+  //
+  // Public: the caller has no session yet. Only the URL to navigate to is
+  // returned; the state that ties the callback to this browser lives on the
+  // server and is never handed to the client as a credential.
+  //
+  // Available only when browser sign-in is configured. The site is not behind
+  // the gateway login, so the browser must be sent to the
+  // upstream sign-in page explicitly.
+  rpc BeginTofLogin(BeginTofLoginRequest) returns (BeginTofLoginResponse);
+
+  // Complete a sign-in started by BeginTofLogin.
+  //
+  // Public: from the caller's point of view the session does not exist yet.
+  // `exchange_code` is minted by the server-side callback after it exchanged the
+  // upstream authorization code. The exchange code is one-time and short-lived;
+  // it is not an upstream credential. The response has the same shape as Login.
+  rpc CompleteTofLogin(CompleteTofLoginRequest) returns (CompleteTofLoginResponse);
+
+  // Exchange a local authorization code for a session.
+  //
+  // Public: the caller has no session yet. Used by a local host that completed
+  // the browser authorization (authorization code + PKCE with a loopback
+  // redirect). The code is minted by this service after the upstream sign-in;
+  // it is NOT the upstream provider code, and the session token never passes through the
+  // browser.
+  rpc ExchangeLocalLogin(ExchangeLocalLoginRequest) returns (ExchangeLocalLoginResponse);
+
+  // Exchange a still-valid session for a new one. The old session is revoked
+  // in the same transaction, so no two sessions issued to the same holder stay
+  // valid at once.
+  rpc Refresh(RefreshRequest) returns (RefreshResponse);
+
+  // Revoke a session. Idempotent: an already invalid credential is accepted.
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+
+  // List the sign-in methods bound to the calling subject.
+  //
+  // A subject can be reachable through more than one method; this answers "which
+  // ones", so a person can see how they get in and remove one they no longer
+  // control. Every method acts on the caller only: there is no shape that takes
+  // another subject.
+  rpc ListIdentities(ListIdentitiesRequest) returns (ListIdentitiesResponse);
+
+  // Unbind one sign-in method from the calling subject.
+  //
+  // Refused when it is the last one: a subject with no method has no way in, and
+  // its role bindings would be unreachable. Logging in again with that method
+  // afterwards registers a NEW zero-permission subject — clients must say so,
+  // otherwise it reads as "my permissions were cleared".
+  rpc UnbindIdentity(UnbindIdentityRequest) returns (UnbindIdentityResponse);
+
+  // Bind another sign-in method to the calling subject.
+  //
+  // Credential shape mirrors Login: the caller proves control of the identity in
+  // the same two ways, but the result is a binding instead of a session.
+  //
+  // **Ownership is decided by the caller, never by the credential.** The request
+  // carries a credential proving "I control this identity"; the target subject is
+  // always the caller's current session. There is deliberately no shape that
+  // names another subject: if there were, anyone holding someone else's channel
+  // credential could attach it to their own account — or worse, attach their own
+  // identity to someone else's subject.
+  //
+  // If the identity already belongs to a different subject, binding is refused
+  // and the response does not reveal who owns it: revealing it would turn a
+  // failed bind into a probe for "which subject is this channel".
+  rpc BindIdentity(BindIdentityRequest) returns (BindIdentityResponse);
+
+  // Start a device-code login.
+  //
+  // Public on purpose: the caller has no credential yet — that is exactly the
+  // situation this flow exists for. A client that cannot show a login page
+  // (a desktop app, a CLI, a daemon) starts one of these, shows the user code
+  // and verification URI to a human, and polls until that human approves it
+  // from a browser that is already signed in.
+  //
+  // The response carries two credentials of different kinds and one address:
+  //   - device_code: high entropy, held by the client, never typed by a human;
+  //   - user_code: short and human-readable, typed into the approval page;
+  //   - verification_uri: the approval page, deliberately WITHOUT the user
+  //     code embedded (see ApproveDeviceLogin).
+  // Neither code may be logged: one buys an approval, the other a session.
+  rpc StartDeviceLogin(StartDeviceLoginRequest) returns (StartDeviceLoginResponse);
+
+  // Poll one device-code login.
+  //
+  // Public for the same reason as StartDeviceLogin. **The result is a state,
+  // not an error**: expressing "not approved yet" as an error would make
+  // "this poll has no answer yet" and "you are unauthenticated" the same
+  // conclusion, while they call for opposite behaviour.
+  //
+  // The session is issued at the moment of delivery, and delivered exactly
+  // once; polling again with the same device code yields a non-approved state.
+  rpc PollDeviceLogin(PollDeviceLoginRequest) returns (PollDeviceLoginResponse);
+
+  // Approve a device-code login from an already authenticated session.
+  //
+  // **Ownership comes only from the caller's credential.** The request carries
+  // a user code and nothing else: there is deliberately no shape that names a
+  // subject. If there were, anyone holding someone else's user code could make
+  // that person's client sign in as the attacker.
+  rpc ApproveDeviceLogin(ApproveDeviceLoginRequest) returns (ApproveDeviceLoginResponse);
+
+  // Deny a device-code login. Same ownership rule as ApproveDeviceLogin;
+  // denying also requires authentication, otherwise "guess a code and deny it"
+  // would be an interruption anyone could perform.
+  rpc DenyDeviceLogin(DenyDeviceLoginRequest) returns (DenyDeviceLoginResponse);
+
+  // Report the subject behind the current credential. Used by clients to check
+  // whether their credential is still alive.
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
+}
+
+message LoginRequest {
+  // The credential to exchange. Never logged, never echoed back.
+  //
+  // Same shape as BindIdentityRequest.credential on purpose: signing in and
+  // binding another method both mean "prove you control this identity"; only the
+  // outcome differs (a session vs. a binding). Clients can therefore drive both
+  // through one form.
+  string token = 1;
+}
+
+// GetAuthMethodsRequest is empty: the answer depends only on deployment
+// configuration, not on who is asking.
+message GetAuthMethodsRequest {}
+
+// AuthMethodKind identifies how a caller obtains a credential. Clients select
+// the entry to render from this value; they must not infer availability from
+// anything else.
+enum AuthMethodKind {
+  AUTH_METHOD_KIND_UNSPECIFIED = 0;
+
+  // The caller types a credential issued by this deployment. Works everywhere
+  // the deployment configured machine credentials.
+  AUTH_METHOD_KIND_MACHINE_TOKEN = 1;
+
+  // The caller is already authenticated by an upstream gateway that forwards a
+  // signed, encrypted identity assertion. The browser carries no credential of
+  // its own: the deployment's authorization proxy supplies the assertion, and
+  // this service verifies it. There is no credential input in the UI.
+  AUTH_METHOD_KIND_GATEWAY_ASSERTION = 2;
+
+  // The browser is sent to the upstream sign-in page, and the deployment
+  // exchanges the returned code with that provider on the server side. There is nothing for the person to type on this page; unlike
+  // GATEWAY_ASSERTION, the request that lists the methods is not authenticated
+  // yet, so `ambient` is always false for this kind.
+  AUTH_METHOD_KIND_TOF_SSO = 3;
+}
+
+message AuthMethod {
+  AuthMethodKind kind = 1;
+  // Stable machine-readable identifier for the method within this deployment,
+  // e.g. "machine-token" or "gateway". Display text lives in the client so that
+  // this contract stays language-neutral.
+  string id = 2;
+  // True when a caller becomes authenticated without entering anything here,
+  // because an upstream proxy already asserted the identity. Clients use it to
+  // decide whether to offer a sign-in form or to sign in automatically.
+  //
+  // Always false for browser SSO: that flow starts with a browser
+  // navigation, so the listing request itself carries no identity.
+  bool ambient = 3;
+}
+
+message GetAuthMethodsResponse {
+  // Enabled methods, in a stable order. Empty means the deployment offers no
+  // sign-in at all, which clients must render as "nothing to do here" rather
+  // than as an error.
+  repeated AuthMethod methods = 1;
+  // Whether device-code login is available.
+  //
+  // A separate boolean rather than a third AuthMethodKind on purpose:
+  // AuthMethodKind describes *interactive sign-in methods* (a person types a
+  // credential, or a proxy already asserted one). Device-code login is not a
+  // method a person uses on this page — it is what a client uses to obtain a
+  // session for a person who signs in elsewhere. Clients that render the
+  // methods list must not suddenly grow an entry they cannot satisfy.
+  bool device_login_enabled = 2;
+}
+
+message BeginTofLoginRequest {
+  // Where to send the browser back inside this application after the callback.
+  //
+  // Must be a site path with a single leading slash; anything else is rejected
+  // rather than silently replaced, so an open-redirect attempt is visible.
+  // Empty means the client's default landing page.
+  string return_to = 1;
+}
+
+message BeginTofLoginResponse {
+  // Absolute upstream sign-in URL. Contains the deployment's app key and the
+  // callback address; contains no secret and no session.
+  string login_url = 1;
+}
+
+message CompleteTofLoginRequest {
+  // One-time exchange code minted by the server-side callback.
+  // This is not the upstream authorization code: that code
+  // never leaves the server.
+  string exchange_code = 1;
+}
+
+// ExchangeLocalLoginRequest carries the three values the local host kept: the
+// one-time code, its PKCE verifier, and the redirect URI used to obtain the code.
+message ExchangeLocalLoginRequest {
+  // One-time authorization code, delivered to the loopback redirect.
+  string code = 1;
+  // PKCE verifier: 43..128 characters of [A-Za-z0-9-._~]. The server checks its
+  // S256 digest against the challenge fixed at authorize time.
+  string code_verifier = 2;
+  // Must equal the redirect_uri sent to the authorization endpoint, byte for byte.
+  string redirect_uri = 3;
+}
+
+// Same shape as LoginResponse, under its own name so the RPC surface says which
+// exchange produced the session.
+message ExchangeLocalLoginResponse {
+  // Opaque session token. Bearer credential: never logged.
+  string session_token = 1;
+  string subject_id = 2;
+  // RFC 3339 UTC instant after which the session stops working.
+  string expires_at = 3;
+}
+
+// Same shape as LoginResponse, under its own name so the RPC surface says which
+// exchange produced the session.
+message CompleteTofLoginResponse {
+  // Opaque session token. Bearer credential: never logged.
+  string session_token = 1;
+  string subject_id = 2;
+  // RFC 3339 UTC instant after which the session stops working.
+  string expires_at = 3;
+}
+
+message LoginResponse {
+  // Opaque session token. Bearer credential: never logged.
+  string session_token = 1;
+  string subject_id = 2;
+  // RFC 3339 UTC instant after which the session stops working.
+  string expires_at = 3;
+}
+
+message RefreshRequest {
+  string session_token = 1;
+}
+
+message RefreshResponse {
+  string session_token = 1;
+  string expires_at = 2;
+}
+
+message LogoutRequest {
+  // The session to revoke. It must match the credential presented in the
+  // Authorization header when both are present, so one caller cannot revoke
+  // another subject's session.
+  string session_token = 1;
+}
+
+message LogoutResponse {}
+
+message WhoAmIRequest {}
+
+// SubjectType distinguishes a human user from a machine credential. It affects
+// display and audit grouping only; it never participates in a decision.
+enum SubjectType {
+  SUBJECT_TYPE_UNSPECIFIED = 0;
+  SUBJECT_TYPE_USER = 1;
+  SUBJECT_TYPE_MACHINE = 2;
+}
+
+message WhoAmIResponse {
+  string subject_id = 1;
+  SubjectType subject_type = 2;
+  // Session expiry; empty for a machine credential that does not expire.
+  string expires_at = 3;
+}
+
+message ListIdentitiesRequest {}
+
+// BoundIdentity is one sign-in method bound to a subject.
+//
+// No field participates in any decision; they exist for display and to address
+// the method when unbinding.
+message BoundIdentity {
+  // Sign-in method identifier, e.g. "machine" or "gateway".
+  string source = 1;
+  // The immutable identifier this method uses, e.g. the configured actor id or
+  // the verified gateway identity. It is not a secret: knowing it does not let
+  // anyone impersonate the subject, since login still verifies the method.
+  string external_id = 2;
+}
+
+message ListIdentitiesResponse {
+  repeated BoundIdentity identities = 1;
+}
+
+message UnbindIdentityRequest {
+  string source = 1;
+  string external_id = 2;
+}
+
+message UnbindIdentityResponse {
+  // The remaining methods after the change. Empty would mean the subject lost
+  // its last way in, which is refused, so this is never empty on success.
+  repeated BoundIdentity identities = 1;
+}
+
+message BindIdentityRequest {
+  // Which method to bind. Required; unknown values are rejected.
+  //
+  // Mirrors GetAuthMethods: the client shows what the deployment enabled and the
+  // person picks one, instead of the UI inventing its own list.
+  string source = 1;
+  // Credential proving control of the identity on that method.
+  //
+  // Identical in meaning to LoginRequest.token — for source=machine it is the
+  // deployment's token, for source=gateway the assertion travels in the request
+  // headers just as it does for Login (this field is then empty).
+  string credential = 2;
+}
+
+message BindIdentityResponse {
+  // The subject's methods after the change.
+  repeated BoundIdentity identities = 1;
+  // True when the identity previously belonged to a subject that held nothing
+  // else — it was merged into the caller. Clients can tell the person "this
+  // method used to sign in separately and is now part of your account". No
+  // subject identifier is returned, so this does not reveal who owned it.
+  bool claimed = 2;
+}
+
+message StartDeviceLoginRequest {}
+
+// StartDeviceLoginResponse carries two credentials of different kinds plus a
+// human-facing address.
+message StartDeviceLoginResponse {
+  // Held by the client and used to poll. Not typeable by a human, therefore no
+  // readability requirement. Never logged: it can be exchanged for a session.
+  string device_code = 1;
+  // Short, human-readable, case-insensitive; hyphens optional. Same secrecy
+  // class as the device code: it can be exchanged for one approval.
+  string user_code = 2;
+  // The approval page. **Does not contain the user code**: the human must carry
+  // it over by hand, because the comparison between "what my client shows" and
+  // "what this page is about" is the only thing standing between a user and a
+  // client signed in as an attacker.
+  string verification_uri = 3;
+  // Suggested polling interval in seconds.
+  int32 interval_seconds = 4;
+  // RFC 3339 UTC. Polling must not continue past this instant.
+  string expires_at = 5;
+}
+
+message PollDeviceLoginRequest {
+  string device_code = 1;
+}
+
+// DeviceLoginState is the outcome of one poll.
+//
+// It is a state rather than a set of error codes: the caller decides to keep
+// waiting, stop, or start over. The four values are mutually exclusive and
+// exhaustive — an unclassifiable value would leave the caller guessing.
+enum DeviceLoginState {
+  DEVICE_LOGIN_STATE_UNSPECIFIED = 0;
+  // Not approved yet. Keep waiting.
+  DEVICE_LOGIN_STATE_PENDING = 1;
+  // Approved. **Only this poll** returns the credential; later polls with the
+  // same device code return EXPIRED.
+  DEVICE_LOGIN_STATE_APPROVED = 2;
+  // The person denied it.
+  DEVICE_LOGIN_STATE_DENIED = 3;
+  // Expired, already delivered, or never existed. All the same to the caller:
+  // start over.
+  //
+  // Merging the three is deliberate: distinguishing them would turn a failed
+  // poll into a probe for "did this device code ever exist".
+  DEVICE_LOGIN_STATE_EXPIRED = 4;
+}
+
+message PollDeviceLoginResponse {
+  DeviceLoginState state = 1;
+  // Present only when state is APPROVED.
+  string session_token = 2;
+  string expires_at = 3;
+}
+
+message ApproveDeviceLoginRequest {
+  // The code to approve. **Not an ownership input** — the target subject is
+  // always the caller's current credential.
+  string user_code = 1;
+}
+
+message ApproveDeviceLoginResponse {}
+
+message DenyDeviceLoginRequest {
+  string user_code = 1;
+}
+
+message DenyDeviceLoginResponse {}

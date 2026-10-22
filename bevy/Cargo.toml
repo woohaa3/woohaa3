@@ -1,0 +1,110 @@
+[package]
+name = "woohaa_bevy_canvas"
+version = "0.1.0"
+edition = "2024"
+description = "Woohaa3 canvas runtime, ported from xyflow-bevy (change: replace-godot-canvas-runtime-with-bevy)"
+license = "UNLICENSED"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Opt-in comparison renderer; default production stays on spatial/automatic.
+explicit-instancing = []
+default = ["wasm"]
+# 浏览器与原生宿主共用画布系统；平台事件循环由各 adapter 提供。
+canvas-core = [
+  "bevy/bevy_window", "bevy/bevy_sprite", "bevy/bevy_sprite_render",
+  "bevy/bevy_text", "bevy/bevy_ui",
+]
+# Tauri 提供真实窗口句柄与 OS 事件循环，不启用 bevy_winit。
+native-canvas = ["canvas-core", "bevy/multi_threaded"]
+# GPU 调试构建（change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，design D8，任务 2.6）。
+# 仅开启 Bevy 的 `debug` feature，让 pass/资源/系统名进入 GPU 抓帧标记；默认与 release
+# 构建不携带，避免诊断开销和名称泄露。它是**独立开关**，不改变 canvas-core/native-canvas 语义。
+gpu-debug = ["bevy/debug"]
+# 浏览器 WASM 运行时（默认）：需要窗口/winit 与 WebGPU 后端。
+wasm = [
+  "canvas-core",
+  "bevy/bevy_winit",
+  "bevy/webgpu",
+  "dep:wasm-bindgen",
+  "dep:js-sys",
+  "dep:wasm-bindgen-futures",
+  "dep:console_error_panic_hook",
+]
+# 原生无窗口离屏渲染（model-renderer binary）：不创建窗口，不依赖 winit。
+# 只做 Scene IR → 离屏 Image → PNG，与浏览器 adapter 共用 model3d 构建逻辑。
+# 仍启用 bevy_window 抽象（WindowPlugin primary_window: None），因为 render 的
+# camera_system 依赖 WindowResized 事件；但不启用 bevy_winit，因此不会有真实窗口。
+native-renderer = [
+  "bevy/bevy_window",
+  "bevy/multi_threaded",
+  "dep:png",
+]
+# 原生录制 worker：无窗口 Bevy + 原生 H.264 编码（OpenH264，非 GPL）。
+# 不含 winit/窗口 UI，也不依赖用户 PATH 或 ffmpeg。
+recording-worker = [
+  "native-renderer",
+  "recording-codec",
+  "recording-gpu",
+  "recording-media",
+]
+# 只启用原生编码器（不链接 Bevy）：供无 GPU 的编码回归使用。
+recording-codec = ["dep:openh264"]
+# 真实 GPU 取帧：复用预览渲染入口（需要 Bevy 渲染后端，不需要窗口）。
+recording-gpu = ["native-renderer"]
+# 原生媒体解码（图片保留 alpha；视频按 PTS 选帧）。
+recording-media = ["recording-codec", "dep:image"]
+
+[dependencies]
+base64 = "0.22"
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen-futures = { version = "=0.4.78", optional = true }
+bevy = { version = "=0.20.0", default-features = false, features = [
+  "std", "async_executor", "bevy_asset", "bevy_color", "bevy_core_pipeline",
+  "bevy_pbr", "bevy_render", "bevy_log",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+meshopt = "=0.6.2"
+wasm-bindgen = { version = "=0.2.128", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+png = { version = "0.17", optional = true }
+# 固定版本的 H.264 软件编码器（OpenH264，Cisco 许可，非 GPL）。
+# `source` 表示随包编译，不依赖系统库或用户安装。
+openh264 = { version = "=0.9.9", features = ["source"], optional = true }
+# 图片解码（PNG/JPEG/WebP/GIF/AVIF），保留 alpha。
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "avif"], optional = true }
+
+[[bin]]
+name = "model-renderer"
+path = "src/bin/model-renderer.rs"
+required-features = ["native-renderer"]
+
+[[bin]]
+name = "mesh-lod-benchmark"
+path = "src/bin/mesh-lod-benchmark.rs"
+required-features = ["native-renderer"]
+
+[[bin]]
+name = "shot-recorder"
+path = "src/bin/shot-recorder.rs"
+required-features = ["recording-worker"]
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 8
+strip = "debuginfo"
+
+# Keep dependency profiles stable; shrink only our runtime's growing control code.
+# A single codegen unit avoids duplicated helpers across runtime modules.
+[profile.release.package.woohaa_bevy_canvas]
+opt-level = "z"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
+debug = 0

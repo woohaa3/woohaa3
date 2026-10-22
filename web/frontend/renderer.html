@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}canvas{width:100%;height:100%;display:block;touch-action:none}</style>
+</head><body>
+<script>
+	// 在 renderer 模块与 Bevy 首帧之前，从同源父页面读取当前主题底色，先给 iframe 文档铺底。
+	// 否则新建 iframe 的文档默认白底会在暗色画布切换时露出一瞬。
+	(function () {
+		try {
+			var parentRoot = parent.document.documentElement;
+			var background = parent.getComputedStyle(parentRoot).getPropertyValue("--app-web-backdrop").trim();
+			if (background) {
+				document.documentElement.style.background = background;
+				document.body.style.background = background;
+			}
+			document.documentElement.style.colorScheme =
+				parentRoot.dataset.appTheme === "dark" ? "dark" : "light";
+		} catch (_error) {
+			/* 父页面不可访问时保持透明，由父级 canvas surface 兜底 */
+		}
+	})();
+</script>
+<canvas id="bevy-canvas"></canvas>
+<script type="module" src="/src/cordis/plugins/canvas-runtime/runtime-realm-entry.ts"></script></body></html>

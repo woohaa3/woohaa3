@@ -1,0 +1,135 @@
+//! 2D 画布渲染域：`Visuals`、2D camera/font/material setup、纹理上传、label 生命周期
+//! 与 2D scene 重建（change: refactor-bevy-runtime-modules，任务 3.3 / 3.4 / design D5；
+//! change: refactor-bevy-rust-file-size 拆分为 facade + 子模块）。
+//!
+//! 本模块独占 2D mesh/material、font、node labels、edge labels 与纹理 Sprite/Image 映射，
+//! 不导入 `bridge` / `model3d`。
+//!
+//! 子模块边界（design D3）：
+//! - [`init`]：2D camera、字体与共享 mesh/material 初始化、字体就绪判定；
+//! - [`textures`]：纹理批次消费与 Sprite 生命周期；
+//! - [`camera`]：2D camera 跟随 viewport；
+//! - [`render`]：2D scene 重建（labels、edges、cards、共享 mesh 替换）。
+
+pub(crate) mod geometry;
+
+mod aggregate;
+mod attach;
+mod camera;
+mod card_cache;
+mod cards;
+mod container_cache;
+mod dash;
+mod decoration_cache;
+#[cfg(test)]
+mod draw_order;
+mod edge_cache;
+mod film_set;
+mod focus_backdrop;
+mod generation;
+mod group;
+mod group_motion;
+mod group_outline;
+mod history_strip;
+pub(crate) mod history_pulse;
+pub(crate) mod image_focus;
+pub(crate) mod focus_details;
+mod init;
+mod labels;
+mod marquee;
+mod node_action;
+mod render;
+mod render_edges;
+mod shared_key;
+mod textures;
+
+/// 共享纯布局函数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）：渲染与查询复用
+/// `canvas_query::layout` 的同一实现，保持既有 `super::layout` 路径与常量。
+pub(crate) mod layout {
+    pub(crate) use crate::canvas_query::layout::*;
+}
+
+/// 共享复合资产范围几何（change: 2026-10-12-align-film-set-scope-with-isometric-grid）：
+/// 绘制与命中复用 `canvas_query::scope` 的同一派生，保持既有 `super::scope` 路径。
+pub(crate) mod scope {
+    pub(crate) use crate::canvas_query::scope::*;
+}
+
+/// 共享边曲线函数（同上）：渲染与命中查询共用同一采样/距离实现。
+pub(crate) mod curve {
+    pub(crate) use crate::canvas_query::curve::*;
+}
+
+/// 拍摄镜头预览卡片内容区/状态/进度条的共享纯几何
+/// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D8）：
+/// 卡片绘制、GPU Sprite 摆放与归属线终点复用 `canvas_query::shot_preview` 的同一实现。
+pub(crate) mod shot_preview {
+    pub(crate) use crate::canvas_query::shot_preview::*;
+}
+
+use std::collections::HashMap;
+
+use bevy::prelude::*;
+
+pub(crate) use attach::sync_attach_probe;
+pub(crate) use camera::sync_camera;
+pub(crate) use focus_backdrop::sync as sync_focus_backdrop;
+pub(crate) use generation::{GenerationClock, sync_generation};
+pub(crate) use group_motion::sync as sync_group_motion;
+pub(crate) use init::{font_ready, setup};
+pub(crate) use node_action::sync_node_action_bars;
+pub(crate) use render::sync_scene;
+pub(crate) use textures::sync_textures;
+
+/// 2D 渲染的共享资源与生命周期状态：共享几何 mesh/material、font handle、节点标签、
+/// 纹理 Sprite 与边标签实体映射。
+///
+/// 字段保持私有：仅有本模块的子孙（`init` / `textures` / `render` / `generation`）访问。
+#[derive(Resource)]
+pub(crate) struct Visuals {
+    card_blocks: Vec<card_cache::Block>,
+    card_decorations: Vec<decoration_cache::Block>,
+    container_blocks: Vec<container_cache::Block>,
+    mesh: Handle<Mesh>,
+    material: Handle<ColorMaterial>,
+    /// 共享 2D 几何实体；首个非空快照到达后才生成（避免 0 顶点 mesh 触发 wgpu panic）。
+    ///
+    /// 该 mesh 为**不透明**几何（卡片外壳、边、把手），材质开深度写入，使每个节点的真实
+    /// z 参与深度测试：上层卡片能正确遮挡下层卡片的纹理/预览 Sprite
+    /// （change: 2026-10-09-fix-model-preview-layering-and-projection）。
+    mesh_entity: Option<Entity>,
+    /// 半透明叠加层共享 mesh（group 底、框选、聚合选区、粘连高亮）：Blend 材质、不写深度，
+    /// 仅深度测试，因此被上层不透明卡片正确遮挡。
+    blend_mesh: Handle<Mesh>,
+    blend_material: Handle<ColorMaterial>,
+    blend_mesh_entity: Option<Entity>,
+    font: Handle<Font>,
+    labels: HashMap<String, Vec<Entity>>,
+    textures: HashMap<String, (Entity, Handle<Image>, Vec2)>,
+    edge_blocks: Vec<edge_cache::Block>,
+    shared_key: Option<shared_key::SharedKey>,
+    /// 拖动粘连操作条的复用文字实体（按角色 key；change: add-drag-touch-connections）。
+    attach_labels: HashMap<String, Entity>,
+    /// 拖动粘连触须的逐帧动画覆盖层（独立于主 card mesh，避免每帧重建整场几何）。
+    attach_probe_mesh: Handle<Mesh>,
+    attach_probe_entity: Option<Entity>,
+    /// 触须覆盖层当前是否含非空几何（用于从「有触须」到「无」时清空一次）。
+    attach_probe_active: bool,
+    /// 运行中节点的逐帧进度覆盖层（change: add-node-running-progress）：
+    /// 独立于主 card mesh，避免逐帧重建时影响边标签。
+    running_mesh: Handle<Mesh>,
+    running_mesh_entity: Option<Entity>,
+    running_labels: HashMap<String, Entity>,
+    /// 覆盖层当前是否含非空几何（用于从「有运行节点」到「无」时清空一次）。
+    running_active: bool,
+    /// 节点顶部操作横条覆盖层（change: 2026-10-13-add-node-to-film-set-shortcut）：
+    /// 逐帧重建，锚定节点上方并随位置/视口顶部碰撞变化，独立于主 card mesh 与标签池。
+    node_action_mesh: Handle<Mesh>,
+    node_action_entity: Option<Entity>,
+    node_action_labels: HashMap<String, Entity>,
+    /// 横条覆盖层当前是否含非空几何（用于从「有横条」到「无」时清空一次）。
+    node_action_active: bool,
+}
+
+#[derive(Component)]
+pub(crate) struct MainCanvasCamera;

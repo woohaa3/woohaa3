@@ -1,0 +1,93 @@
+{
+  "locator": "apiframe://image/nano-banana-pro",
+  "modelId": "nano-banana-pro",
+  "providerId": "apiframe",
+  "modality": "image",
+  "label": "Nano Banana Pro",
+  "outputType": "image",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/images/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "nano-banana-pro"
+        ],
+        "type": "string"
+      },
+      "nanoBananaParams": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "type": "string"
+          },
+          "google_search": {
+            "type": "boolean"
+          },
+          "image_input": {
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 14,
+            "type": "array"
+          },
+          "image_search": {
+            "type": "boolean"
+          },
+          "output_format": {
+            "enum": [
+              "jpg",
+              "png",
+              "webp"
+            ],
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "512px",
+              "1K",
+              "2K",
+              "4K"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "nanoBananaParams",
+    "wirePath": "nanoBananaParams"
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "locator": "apiframe://video/kling-3.0",
+  "modelId": "kling-3.0",
+  "providerId": "apiframe",
+  "modality": "video",
+  "label": "Kling 3.0",
+  "outputType": "video",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/videos/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "kling-3.0"
+        ],
+        "type": "string"
+      },
+      "klingParams": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ],
+            "type": "string"
+          },
+          "duration": {
+            "maximum": 15,
+            "minimum": 3,
+            "type": "integer"
+          },
+          "end_image": {
+            "format": "uri",
+            "type": "string"
+          },
+          "generate_audio": {
+            "type": "boolean"
+          },
+          "mode": {
+            "enum": [
+              "standard",
+              "pro",
+              "4k"
+            ],
+            "type": "string"
+          },
+          "multi_prompt": {
+            "type": "string"
+          },
+          "negative_prompt": {
+            "maxLength": 2500,
+            "type": "string"
+          },
+          "start_image": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "klingParams",
+    "wirePath": "klingParams"
+  }
+}

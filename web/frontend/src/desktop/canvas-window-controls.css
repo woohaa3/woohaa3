@@ -1,0 +1,71 @@
+/* 窗口横栏是**占位**的窗口装饰，不是覆盖层：`.app` 从横栏下方开始，内容区高度随之缩小，
+ * 画布输入表面、聚焦标题栏、面板与抽屉全部落在横栏下面，不会被盖住，也不需要各自叠加
+ * 横栏偏移。`:has(> …)` 只命中真正渲染横栏的内层画布 `.app`；浏览器没有横栏，不产生占位。
+ *
+ * 只有 `position: fixed` 的浮层不随 `.app` 位移（它们的包含块是视口），仍需显式让位。 */
+.app:has(> .desktop-canvas-bar) {
+	--canvas-chrome-height: 26px;
+	top: var(--canvas-chrome-height);
+}
+.app:has(> .desktop-canvas-bar) .agent-detail { top: var(--canvas-chrome-height); }
+.app:has(> .desktop-canvas-bar) .canvas-search { top: calc(var(--canvas-chrome-height) + 16px); }
+
+.desktop-canvas-bar {
+	/* 横栏固定在窗口顶端，属于窗口装饰层；页面内容在它下方的占位区内。 */
+	position: fixed;
+	inset: 0 0 auto;
+	z-index: 44;
+	height: var(--canvas-chrome-height);
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 0 4px 0 10px;
+	border-bottom: 1px solid var(--app-web-border);
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-primary);
+	user-select: none;
+}
+.desktop-canvas-bar__brand {
+	flex-shrink: 0;
+	padding-right: 10px;
+	border-right: 1px solid var(--app-web-border);
+	font-size: 12px;
+	font-weight: 700;
+	line-height: 14px;
+	letter-spacing: -0.03em;
+}
+.desktop-canvas-bar__content { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; align-self: stretch; }
+/* 顶栏右侧读数（开发性能等）：紧邻窗口按钮，不与左侧画布控件争宽。 */
+.desktop-canvas-bar__trailing { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 100%; padding-right: 4px; }
+.desktop-canvas-bar__readouts { display: flex; align-items: center; gap: 6px; }
+.desktop-canvas-bar__readouts:empty { display: none; }
+.desktop-canvas-bar__actions { display: flex; align-items: center; gap: 0; height: 16px; flex-shrink: 0; padding-left: 6px; border-left: 1px solid var(--app-web-border); }
+.desktop-canvas-bar__actions .ui-icon-button { width: 26px; height: 22px; border-radius: 4px; }
+.desktop-canvas-bar :is(.canvas-switcher-trigger, .identity-badge) {
+	height: 22px;
+	padding: 0 6px;
+	gap: 4px;
+	border-color: transparent;
+	border-radius: 4px;
+	background: transparent;
+	box-shadow: none;
+	font-size: 11px;
+}
+.desktop-canvas-bar .canvas-switcher-trigger__icon { width: 12px; height: 12px; }
+.desktop-canvas-bar .canvas-switcher-trigger .ui-button__label { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.desktop-canvas-bar .canvas-switcher-trigger__caret { display: flex; }
+.desktop-canvas-bar .canvas-switcher-trigger__caret svg { width: 12px; height: 12px; }
+.desktop-canvas-bar .canvas-switcher-trigger:hover { background: var(--app-interaction-accent-soft); }
+.desktop-canvas-bar__close:hover { color: var(--app-status-on-danger); background: var(--app-status-danger); }
+.desktop-canvas-bar__error {
+	position: absolute;
+	top: calc(100% + 8px);
+	right: 12px;
+	padding: 8px 12px;
+	border: 1px solid var(--app-status-danger-soft);
+	border-radius: 8px;
+	background: var(--app-status-danger-background);
+	color: var(--app-status-danger);
+	font-size: 12px;
+	white-space: nowrap;
+}

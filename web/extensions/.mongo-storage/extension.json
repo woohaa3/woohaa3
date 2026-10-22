@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "mongo-storage",
+  "icon": { "glyph": "storage" },
+  "bootstrap": { "module": "./bootstrap", "export": "createMongoStorageBootstrap" }
+}

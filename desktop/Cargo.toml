@@ -1,0 +1,105 @@
+[package]
+name = "woohaa_desktop_host"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+# 两个 bin（overlay 宿主与 native-only 调试入口）：Tauri CLI 需要一个明确的默认入口。
+default-run = "woohaa-desktop"
+description = "Woohaa3 Tauri 桌面宿主原型（change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，阶段 P0）"
+license = "UNLICENSED"
+publish = false
+
+[lib]
+name = "woohaa_desktop_host"
+path = "src/lib.rs"
+
+[features]
+default = []
+# GPU 调试构建（change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，design D8，任务 2.6）。
+# 让 Bevy pass/资源/系统名进入 Metal 抓帧；默认与 release 构建不携带。
+gpu-debug = ["woohaa_bevy_canvas/gpu-debug"]
+# 截帧/无 WebView 的调试入口。默认不编译：`tauri build` 用 `cargo build --bins`，
+# 若该 bin 默认可构建，发行 `.app` 里会多出一个 240MB+ 的调试可执行文件（真实构建中确认过）。
+# 需要时显式 `--features native-only-entry`，或直接 `pnpm desktop:native`。
+native-only-entry = []
+
+[dependencies]
+woohaa_recording_supervisor = { path = "supervisor" }
+# 与 Bevy lock 中的 raw-window-handle 0.6.2 一致（避免第二个不兼容版本）。
+raw-window-handle = "=0.6.2"
+# 保留 Bevy =0.20.0 与 wgpu 30.0.1 候选，避免同时升级引擎（design D1）。
+# 不启用 bevy_winit：native adapter 不接管 OS loop。
+woohaa_bevy_canvas = { path = "../bevy", default-features = false, features = ["native-canvas"] }
+bevy = { version = "=0.20.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
+# 精确锁定（P0 任务 1.1）：见 notes/dependency-lock.md 与 desktop/Cargo.lock。
+tauri = { version = "=2.12.3", default-features = false, features = ["wry", "x11", "common-controls-v6", "unstable", "macos-private-api", "devtools"] }
+gtk = "0.18"
+gdkx11 = "0.18"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri = { version = "=2.12.3", default-features = false, features = ["wry", "unstable", "macos-private-api", "devtools"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# 直接依赖同样是 tauri-build 读取 DEP_TAURI_DEV 的前提；只靠通知插件的传递依赖
+# 会触发 “missing cargo:dev instruction” 构建脚本 panic。
+tauri = { version = "=2.12.3", default-features = false, features = ["wry", "common-controls-v6", "unstable", "macos-private-api", "devtools"] }
+
+# 系统通知（change: 2026-10-17-move-settings-into-canvas-dialog，任务 8.1 / design D9）。
+# 2.7.0 要求 rust 1.90，与 desktop/rust-toolchain.toml 的 1.97.1 兼容；只在桌面目标启用。
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+tauri-plugin-notification = "2.7.0"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2]
+version = "0.6.5"
+[target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
+version = "0.3.2"
+[target.'cfg(target_os = "macos")'.dependencies.objc2-foundation]
+version = "0.3.2"
+[target.'cfg(target_os = "macos")'.dependencies.objc2-web-kit]
+version = "0.3.2"
+default-features = false
+features = ["std", "WKUserContentController", "WKWebViewConfiguration"]
+[target.'cfg(target_os = "macos")'.dependencies.objc2-quartz-core]
+version = "0.3.2"
+default-features = false
+features = ["std", "CADisplayLink", "CAFrameRateRange", "objc2-core-foundation"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[[bin]]
+name = "woohaa-desktop"
+path = "src/main.rs"
+
+# 调试入口默认不参与构建（`required-features`）：`tauri build` 会构建所有 bin，不带该 feature
+# 时它不会进入发行 bundle。`scripts/desktop-native.mjs` 与 `scripts/desktop-gpu-capture.mjs`
+# 的提示显式带上 `--features native-only-entry`。
+[[bin]]
+name = "woohaa-desktop-native"
+path = "src/bin/native_only.rs"
+required-features = ["native-only-entry"]
+
+# Native Bevy renders inside the dev host too: opt-level 0 makes ECS/render
+# preparation much slower than the release WASM used by dev:web.
+[profile.dev]
+debug = 0
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# 发行打包（任务 6.7 / 6.9）：按发行目标优化，但**不 strip 符号**，以便后续 Metal/驱动抓帧
+# 仍能解析栈。design D8 要求 `gpu-debug` 的 Bevy pass 资源名不出现在发行构建里，这里只是保留
+# 符号表，不启用该 feature。
+[profile.release]
+lto = "thin"
+incremental = false

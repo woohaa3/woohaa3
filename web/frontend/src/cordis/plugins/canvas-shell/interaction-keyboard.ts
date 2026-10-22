@@ -1,0 +1,295 @@
+/**
+ * 画布键盘与剪贴板快捷键
+ * （change: 2026-09-28-split-frontend-god-plugins，task 3；从 interaction-2d-input 拆出）。
+ *
+ * Space 平移门禁、聚焦飞行键、2D copy/delete/Escape；paste 不在此处理（交给 Input Scope Host）。
+ *
+ * Mod+C 的落点有两层（change: fix-desktop-native-menu-clipboard-shortcuts）：
+ * - 浏览器/Safari 没有登记该组合的系统菜单，`keydown` 正常到达，走 `onKeyDown` → `runClipboardShortcut`；
+ * - Tauri/macOS 窗口默认带 App 菜单，`Cmd+C` 先被原生 Edit > Copy 的快捷键吃掉，页面只收到
+ *   DOM `copy` 事件。因此复制必须同时挂 `copy` 监听：只依赖 `keydown` 会让桌面端完全复制不出节点。
+ */
+import { isEditableElement, isMacPlatform, resolveCanvasShortcut } from "./input/shortcuts.js";
+import { buildCanvasCopyPayload, serializeCanvasCopyPayload } from "./clipboard/payload.js";
+import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { nodeSelectionStore } from "../../services/selection-store.js";
+import { planDeleteNodes } from "../../../extension-api/command-planner.js";
+import {
+  partitionShotPreviewSelection,
+  SHOT_PREVIEW_CLIPBOARD_HINT,
+  SHOT_PREVIEW_DELETE_HINT,
+  PARTITION_SELECTION_DELETE_HINT
+} from "./shot-preview-protection.js";
+import type { InteractionCore } from "./interaction-core.js";
+
+/** 页内剪贴板 fallback 的全局键。 */
+export const MEMORY_CLIPBOARD_KEY = "__canvasMemoryClipboard";
+
+/** 有真实文本选区时，Mod+C 应由浏览器复制选中文本，而不是复制画布节点。 */
+function hasSelectedText(target: { getSelection?: () => Selection | null }): boolean {
+  const selection = target.getSelection?.();
+  return selection != null && selection.toString().trim().length > 0;
+}
+
+export function createKeyboardShortcuts(core: InteractionCore) {
+  const { options, target, writable, state, model, schedule } = core;
+
+  /** 当前选择可复制的节点（已剔除受保护预览）；无普通节点时返回 `null`。 */
+  const copyableSelection = () => {
+    const canvasState = woohaa3CanvasStore.getState().canvas;
+    if (!canvasState) return null;
+    const snapshot = nodeSelectionStore.getSnapshot();
+    // 拍摄镜头预览保护（change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.5 / design D2）：
+    // 预览不能单独复制/剪切；删除选择集过滤受保护预览（可删除其余普通节点），只含预览时明确拒绝。
+    const protection = partitionShotPreviewSelection({
+      selectedNodeIds: snapshot.nodeIds,
+      nodes: canvasState.document.nodes.map((node) => ({ id: node.id, type: node.type })),
+      nodeData: canvasState.nodeData
+    });
+    if (protection.others.length === 0) {
+      if (protection.previewIds.length > 0) notifyShotPreviewRejected(SHOT_PREVIEW_CLIPBOARD_HINT);
+      return null;
+    }
+    return { canvasState, others: protection.others };
+  };
+
+  /**
+   * 序列化当前选择为剪贴板文本，并写入页内 fallback。
+   *
+   * 剪贴板只有一个 writer 入口：`keydown` 路径（浏览器）与 DOM `copy` 事件（桌面原生菜单）
+   * 都调用这里，避免两套载荷构造逻辑漂移。
+   */
+  const buildClipboardText = (): string | null => {
+    const copyable = copyableSelection();
+    if (!copyable) return null;
+    // 只复制普通节点；预览闭包由 payload 依据被复制的片场补齐（不单独复制受保护预览）。
+    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    if (!payload) return null;
+    const text = serializeCanvasCopyPayload(payload);
+    (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
+    return text;
+  };
+
+  const runClipboardShortcut = async (action: "copy" | "delete") => {
+    if (core.modalActive()) return;
+    const canvasState = woohaa3CanvasStore.getState().canvas;
+    const session = options.getSession();
+    if (!canvasState || !session) return;
+    const snapshot = nodeSelectionStore.getSnapshot();
+    const protection = partitionShotPreviewSelection({
+      selectedNodeIds: snapshot.nodeIds,
+      nodes: canvasState.document.nodes.map((node) => ({ id: node.id, type: node.type })),
+      nodeData: canvasState.nodeData
+    });
+    const clip = target as unknown as {
+      navigator?: { clipboard?: { writeText?: (text: string) => Promise<void> } };
+    };
+    if (action === "copy") {
+      const text = buildClipboardText();
+      if (text === null) return;
+      try {
+        await clip.navigator?.clipboard?.writeText?.(text);
+      } catch {
+        // 保留页内 fallback。
+      }
+      return;
+    }
+    const deletable = protection.others;
+    if (deletable.length === 0) {
+      if (protection.previewIds.length > 0) notifyShotPreviewRejected(SHOT_PREVIEW_DELETE_HINT);
+      return;
+    }
+    if (!writable()) return;
+    // 删除经页面编辑历史（可撤销）；回退直接提交（任务 1.5/1.7）。
+    const label = deletable.length > 1 ? `删除 ${deletable.length} 个作品` : "删除作品";
+    if (protection.previewIds.length > 0) notifyShotPreviewRejected(PARTITION_SELECTION_DELETE_HINT);
+    if (options.onEditCommands) {
+      void options.onEditCommands(planDeleteNodes(deletable), label);
+      return;
+    }
+    session.submitCommands(planDeleteNodes(deletable), `web-delete-${Date.now().toString(36)}-${core.nextSeq()}`);
+  };
+
+  /** 预览保护提示：走同一交互诊断出口，不静默丢弃用户操作。 */
+  const notifyShotPreviewRejected = (message: string): void => {
+    options.onInteractionError?.(new Error(message));
+  };
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || core.modalActive()) return;
+    if (model.active && !isEditableElement(event.target) && options.compositeAssets?.keydown(event, woohaa3CanvasStore.getState().working ?? woohaa3CanvasStore.getState().canvas, options.getModelFocus?.()?.nodeId ?? null)) return;
+    // 画布快捷键在 modal/panel 打开时不参与；但聚焦相机的飞行/退出只被真正 modal 阻断
+    // （change: fix-model-focus-navigation-and-camera-parity，design D6）。
+    const imageFocused = options.isImageFocused?.() ?? !!options.getImageFocus?.();
+    const videoFocused = options.isVideoFocused?.() ?? !!options.getVideoFocus?.();
+    // Space 临时平移只在**普通画布**握着输入时武装：编辑面（prompt / 输入框 / 菜单）、图片、
+    // 视频与模型聚焦里的 Space 是输入字符或播放暂停，武装平移会让之后的左键点击全部变成
+    // 平移、无法再点选节点（change: fix-space-pan-latch-after-focus-exit）。
+    if (event.code === "Space") {
+      state.spacePressed = !isEditableElement(event.target) && !model.active && !imageFocused && !videoFocused;
+    }
+    if (core.modalActive() && (!(model.active || imageFocused || videoFocused) || core.focusInputBlocked())) return;
+    if (imageFocused) {
+      if (event.key === "Escape" && !isEditableElement(event.target) && !core.focusInputBlocked()) {
+        event.preventDefault();
+        core.options.onModelFocusIntent?.({ type: "exit" });
+      }
+      return;
+    }
+    // 视频聚焦：Escape 退出（经统一退出协调）；Space 播放/暂停由聚焦 overlay 消费。
+    if (videoFocused) {
+      if (event.key === "Escape" && !isEditableElement(event.target) && !core.focusInputBlocked()) {
+        event.preventDefault();
+        options.onModelFocusIntent?.({ type: "exit" });
+      }
+      return;
+    }
+    // 聚焦查看：W/A/S/D/Q/E 飞行、Escape 退出；DOM 编辑面优先（design D4/D5）。
+    if (model.active && !isEditableElement(event.target)) {
+      // 片场对象局部 action 优先（change: 2026-10-10-improve-film-set-editing-and-inspector，
+      // 任务 5.1/5.4 / design D3）：Delete/Backspace 删除选中对象（无选中时消费为无动作，
+      // 绝不回退删除整个片场）；Escape 分层取消手势/选择，高于退出。输入/IME/菜单/Dialog
+      // 已由 `isEditableElement` 排除。
+      const objectAction = core.filmSetObjectAction?.() ?? options.filmSetObjectAction;
+      if (objectAction?.active()) {
+        if (
+          (event.key === "Delete" || event.key === "Backspace") &&
+          !event.metaKey && !event.ctrlKey && !event.altKey
+        ) {
+          // 无选中也消费该键（preventDefault），避免回退到普通节点删除或浏览器后退。
+          event.preventDefault();
+          if (!event.repeat && !objectAction.pending() && objectAction.hasSelection()) objectAction.deleteSelected();
+          return;
+        }
+        if (event.key === "Escape") {
+          // 分层只处理最高优先的一层：取消活动手势 → 清对象选择 → 回落退出聚焦。
+          // repeat 只消费不推进层级（任务 5.3 去重），避免长按 Escape 一次按键连续退层。
+          event.preventDefault();
+          if (event.repeat) return;
+          if (objectAction.cancelGesture()) return;
+          if (objectAction.clearSelection()) return;
+          if (core.options.onModelFocusIntent) core.options.onModelFocusIntent({ type: "exit" });
+          else model.exitModelFocus();
+          return;
+        }
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (core.options.onModelFocusIntent) core.options.onModelFocusIntent({ type: "exit" });
+        else model.exitModelFocus();
+        return;
+      }
+      model.applyFlyKey(event, true);
+      if (model.flyKeyName(event.code)) event.preventDefault();
+      return;
+    }
+    // 拖动粘连 Q/E（change: add-drag-touch-connections，design D2）：只在带 attach 子状态的
+    // 拖动中消费，按物理 code 路由。模型聚焦分支已在上方独占（更高优先级）。
+    if ((event.code === "KeyQ" || event.code === "KeyE") && core.attachActive() && !isEditableElement(event.target)) {
+      if (core.onAttachKey(event.code, true)) {
+        event.preventDefault();
+        return;
+      }
+    }
+    const selection = nodeSelectionStore.getSnapshot();
+    const action = resolveCanvasShortcut(
+      {
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        editableTarget: isEditableElement(event.target),
+        textSelectionActive: hasSelectedText(target)
+      },
+      {
+        keyboardActive: selection.keyboardActive,
+        editingFocus: selection.editingFocus,
+        isMac: isMacPlatform(target.navigator),
+        writable: writable()
+      }
+    );
+    if (action) {
+      // Mod+V 不 preventDefault：让原生 paste event 抵达 Input Scope Host（文件/内部载荷）。
+      // 内部载荷粘贴由 `input.paste` contribution 处理，页内 fallback 也在那里。
+      if (action === "find") {
+        // Ctrl/⌘+F：只有主画布拥有输入且无编辑器/模态时才打开查找（任务 4.2）。
+        event.preventDefault();
+        options.onFindRequest?.();
+        return;
+      }
+      if (action === "undo" || action === "redo") {
+        // 撤销/重做由页面编辑历史处理（read-only 下也可回放本地参数）（任务 1.7）。
+        event.preventDefault();
+        if (action === "undo") options.onUndoRequest?.();
+        else options.onRedoRequest?.();
+        return;
+      }
+      if (action !== "paste") {
+        event.preventDefault();
+        void runClipboardShortcut(action);
+      }
+      return;
+    }
+    if (event.key === "Escape") {
+      // 拖动粘连手势：Escape 取消整次手势（清 held/preview 且不提交），
+      // change: add-drag-touch-connections，design D6。
+      if (core.attachActive()) {
+        event.preventDefault();
+        core.cancelDragGesture();
+        return;
+      }
+      state.draft = null;
+      state.localPositions = new Map();
+      state.localSizes = new Map();
+      state.viewportPreview = null;
+      state.gesture = { kind: "none" };
+      schedule();
+    }
+  };
+
+  const onKeyUp = (event: KeyboardEvent) => {
+    if (event.code === "Space") state.spacePressed = false;
+    if (model.active) model.applyFlyKey(event, false);
+    // 拖动粘连 Q/E held 释放（change: add-drag-touch-connections，design D2）。
+    if ((event.code === "KeyQ" || event.code === "KeyE") && core.attachActive()) {
+      core.onAttachKey(event.code, false);
+    }
+  };
+
+  /**
+   * 捕获阶段的 Space 释放（change: fix-space-pan-latch-after-focus-exit）。
+   *
+   * 只在捕获阶段清一个布尔闩锁，不消费事件、不影响 DOM 优先的按键契约。挂捕获阶段是因为
+   * 冒泡阶段的 `keyup` 会被浮层/编辑面 `stopPropagation` 吞掉（如文字输入层
+   * `onKeyUp={event => event.stopPropagation()}`）；吞掉后 `spacePressed` 永久为真，
+   * 之后普通画布上每次左键按下都在命中查询前短路成 pan，节点再也点不中。
+   */
+  const onSpaceRelease = (event: KeyboardEvent) => {
+    if (event.code === "Space") state.spacePressed = false;
+  };
+
+  /**
+   * DOM `copy` 事件兜底（桌面原生菜单派发的复制路径）。
+   *
+   * Tauri/macOS 默认 App 菜单登记了 `Cmd+C`，按键先被原生 Edit > Copy 消费，页面收不到
+   * `keydown`；WebKit 随后仍会在非编辑焦点的元素上派发 `copy`。这里把载荷写进事件的
+   * `clipboardData`，让同一次复制既进系统剪贴板又保留页内 fallback：
+   * - 编辑面（input/textarea/contenteditable/菜单/弹窗）或存在真实文本选区时完全不介入，
+   *   文本框的原生复制仍然由浏览器处理；
+   * - 只有 `keyboardActive` 且画布持有输入时认领，无普通选中节点时不改写剪贴板。
+   */
+  const onCopy = (event: ClipboardEvent) => {
+    if (event.defaultPrevented || core.modalActive()) return;
+    if (!nodeSelectionStore.getSnapshot().keyboardActive) return;
+    if (isEditableElement(event.target) || hasSelectedText(target)) return;
+    const text = buildClipboardText();
+    if (text === null) return;
+    const data = event.clipboardData;
+    if (!data) return;
+    data.setData("text/plain", text);
+    event.preventDefault();
+  };
+
+  return { onKeyDown, onKeyUp, onCopy, onSpaceRelease };
+}

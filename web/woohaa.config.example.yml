@@ -1,0 +1,47 @@
+# Woohaa 本地后端配置示例。复制为 web/woohaa.config.yml 后修改（该文件不提交）。
+# 位置可由 WOOHAA3_CONFIG_FILE 指定；修改后自动热重载，标注「需重启」的项重启后生效。
+# 密钥不要写在这里，放 web/woohaa.secrets.yml（0600；或 WOOHAA3_SECRETS_FILE 指定的文件），例如：
+#   providers:
+#     runninghub:
+#       apiKey: ...
+#     ark:
+#       apiKey: ...
+#       assetAccessKeyId: ...
+#       assetSecretAccessKey: ...
+#   storage:
+#     cos:
+#       secretId: ...
+#       secretKey: ...
+# 设置页写入密钥项时会自动落到密钥文件。
+# 宿主自带的配置项定义见 web/contracts/src/settings/index.ts；
+# providers.* 由各 Provider 扩展自己声明（web/extensions/<id>-provider/src/backend.ts），
+# storage.local / storage.cos 由存储后端扩展声明（web/extensions/<id>-storage/src/backend.ts）。
+
+# 远端服务端接入不在这里配置：在设置 →「插件配置」启用「服务端接入」并登录。
+# 旧的 canvas.syncUpstream.* 已移除（绕过插件会破坏「逐画布显式启用远端同步」）。
+
+# 存储扩展点：主存储与对外后端都由后端插件注册，这里只选谁在用（都热重载）。
+# 缺省 local 即完全本地（不需要下面任何存储配置）；需要给远端生成 API 签出参考图地址时，
+# 再配一个能签名的 expose 后端（如 cos）。
+storage:
+  primary: local
+  # 留空表示只用主存储的签名能力；主存储没有签名能力又需要外部地址时会明确报错。
+  expose: ""
+  local:
+    # 本地对象存储根目录；相对路径按进程 cwd 解析。
+    root: .woohaa3/storage
+  # COS（自备 bucket，有签名能力）。密钥项 storage.cos.secretId / secretKey 见密钥文件。
+  # cos:
+  #   bucketName: bucket-1234567890
+  #   bucketUrl: https://bucket-1234567890.cos.ap-beijing.myqcloud.com
+  #   prefix: p-canvas
+
+# Provider 的非密钥配置；密钥（apiKey 等）见上方密钥文件。设置页「模型 Provider」可编辑。
+# 以下都是缺省值，可整段省略。热重载。
+providers:
+  ark:
+    baseUrl: https://ark.cn-beijing.volces.com/api/v3
+    # 接入点在设置页按模型勾选后填写，也可以写在这里：
+    # ep:
+    #   video:
+    #     doubao-seedance-2-5-260628: ep-20260101000000-xxxxx

@@ -1,0 +1,387 @@
+/**
+ * 插件详情内容（设置弹窗右栏）
+ * （change: 2026-10-17-move-settings-into-canvas-dialog，任务 2.2 / design D2）。
+ *
+ * 原来这里是独立的 `settings-plugin-config` 大弹窗外壳（自带 Dialog.Content/Header）；
+ * 现在设置工作区自己就是唯一弹窗，插件详情只是右栏的内部视图：
+ * - 顶部「返回插件列表」+ 插件名；
+ * - 内容仍是同一份权威数据（配置项、模型策略、安全诊断与扩展面板）；
+ * - 扩展面板的 `requestClose` 在此语境表示「返回列表」，与 Header 关闭设置分开。
+ */
+import { Component, useEffect, useMemo, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
+import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
+import { Button } from "../../../../shared/ui/Button.js";
+import { BackIcon } from "../../../../shared/ui/icons.js";
+import { appPublicUrl } from "../../../services/app-base-path.js";
+import type { BackendSettingsStore } from "../backend-settings-store.js";
+import {
+  PLUGIN_LAYER_LABELS,
+  diagnosticsOf,
+  inactiveStateOf,
+  indexPlugins,
+  modelsOf,
+  versionLabel,
+  type PluginSettingsGroup
+} from "../plugin-groups.js";
+import { PluginStateControl } from "../plugin-state-control.js";
+import { PluginIconMark } from "../plugin-icons.js";
+import { SettingRow } from "../setting-row.js";
+import { ArkEndpointSection, isArkEndpointEntry } from "../ark-endpoints.js";
+import {
+  EMPTY_SETTINGS_PANELS,
+  settingsPanelsOf,
+  type SettingsPanelSource
+} from "../plugin-panels.js";
+import type { SettingsEditSession } from "../edit-session.js";
+import type { ExtensionSettingsAssembly } from "../plugin.js";
+import { useSettingsEditReport } from "./use-settings-edit-report.js";
+import type { SettingsPanelRenderProps } from "../plugin-panels.js";
+import { GeneratedModelsSection } from "./model-catalog.js";
+import "../settings.css";
+
+export type PluginConfigContentProps = {
+  pluginId: string;
+  store: BackendSettingsStore;
+  manager: ExtensionManagerFacade;
+  /** 扩展自带设置面板（`settings.plugin-config`）；缺省无面板。 */
+  settingsPanels?: SettingsPanelSource;
+  /** 「返回插件列表」（作为内部导航，遵守草稿门禁；不关闭设置）。 */
+  onBack: () => void;
+  /** 设置编辑会话：插件详情的扩展面板把 dirty/pending 汇总进同一门禁。 */
+  editSession?: SettingsEditSession;
+  /** 设置专项扩展装配：打开未激活扩展详情时按需加载其设置贡献。 */
+  extensionSettings?: ExtensionSettingsAssembly;
+};
+
+/** 单个插件的详情内容；插件不存在或清单未读到给提示，不打开其它插件。 */
+export function PluginConfigContent({
+  pluginId,
+  store,
+  manager,
+  settingsPanels,
+  onBack,
+  editSession,
+  extensionSettings
+}: PluginConfigContentProps) {
+  const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
+  const view = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
+  const panels = settingsPanels ?? EMPTY_SETTINGS_PANELS;
+  // slot 全局版本变化即重算该插件的面板；扩展前端按需加载后也能立即出现。
+  const panelsVersion = useSyncExternalStore(panels.subscribe, panels.version, panels.version);
+  const pluginPanels = useMemo(() => settingsPanelsOf(panels, pluginId), [panels, pluginId, panelsVersion]);
+  const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view);
+  const group = index.groups.find((candidate) => candidate.id === pluginId);
+  const [panelError, setPanelError] = useState<string | null>(null);
+  /**
+   * 未激活扩展的设置贡献按需加载（change: 2026-10-17-move-settings-into-canvas-dialog，任务 5.2）。
+   *
+   * 只调用可信发布声明的 settings-only 工厂；加载失败/旧 artifact 缺入口只显示真实原因，
+   * **不回退执行完整 plugin**。迟到结果在卸载后不复活（cancelled 标记）。
+   */
+  const active = extensionSettings ? extensionSettings.activeIds().has(pluginId) : true;
+  const [loadState, setLoadState] = useState<{ status: "idle" | "loading" | "failed"; reason?: string }>({
+    status: "idle"
+  });
+  useEffect(() => {
+    if (!extensionSettings || active || pluginPanels.length > 0) return undefined;
+    let cancelled = false;
+    setLoadState({ status: "loading" });
+    void extensionSettings.load(pluginId).then((result) => {
+      if (cancelled) return;
+      setLoadState(result.ok ? { status: "idle" } : { status: "failed", reason: result.reason });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [extensionSettings, active, pluginId, pluginPanels.length]);
+
+  if (!group) {
+    return (
+      <div className="settings-workbench__detail" data-testid="plugin-config-missing">
+        <PluginDetailHeader title="插件详情" onBack={onBack} />
+        <p className="settings-page__hint">
+          找不到插件 <code>{pluginId}</code>：它可能已被移除，或插件清单还没读到。
+        </p>
+      </div>
+    );
+  }
+
+  const layer = PLUGIN_LAYER_LABELS[group.layer];
+  const inactive = inactiveStateOf(index, group);
+  const diagnostics = diagnosticsOf(index, group);
+  const models = modelsOf(index, group);
+  // 刷新入口由 Provider 插件自己声明（路径由插件注册、鉴权）：宿主不硬编码具体 Provider。
+  const modelRefresh = group.modelRefresh;
+  const endpointEntries = group.entries.filter(isArkEndpointEntry);
+  const configEntries = group.entries.filter((entry) => !isArkEndpointEntry(entry));
+
+  return (
+    <div className="settings-workbench__detail" data-testid={`plugin-config-${group.id}`}>
+      <PluginDetailHeader title={group.label} onBack={onBack}>
+        <PluginIconMark icon={group.icon} testId={`plugin-config-icon-${group.id}`} />
+        <span className="plugin-card__badge">{layer.badge}</span>
+        {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
+        {group.version ? (
+          <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
+            {versionLabel(group.version)}
+          </span>
+        ) : null}
+      </PluginDetailHeader>
+
+      {group.directory ? (
+        <p className="plugin-directory" title={group.directory}>
+          <span>所在目录</span><code>{group.directory}</code>
+        </p>
+      ) : null}
+      <div className="plugin-config__status">
+        <PluginStateControl
+          index={index}
+          group={group}
+          manager={manager}
+          store={store}
+          siteManageable={view.siteManageable}
+          testId={`plugin-config-switch-${group.id}`}
+        />
+      </div>
+      {group.description ? <p className="settings-page__hint">{group.description}</p> : null}
+      {inactive ? (
+        <p className="settings-page__hint" data-testid={`plugin-config-inactive-${group.id}`}>
+          该插件当前未运行（{inactive}）：这里保存的配置要等启用后才生效。
+        </p>
+      ) : null}
+      {diagnostics.length > 0 ? (
+        <p className="settings-page__hint" role="status">{diagnostics.join("；")}</p>
+      ) : null}
+
+      {pluginPanels.length > 0 ? (
+        inactive !== null ? (
+          <p className="settings-page__hint" data-testid={`plugin-config-panel-inactive-${group.id}`}>
+            该插件当前未运行（{inactive}）：先用上方开关启用它，再配置来源连接。
+          </p>
+        ) : (
+          <section className="settings-workbench__section">
+            <div className="plugin-config__panels" data-testid={`plugin-config-panels-${group.id}`}>
+              {pluginPanels.map((panel) => (
+                <ExtensionSettingsPanelHost
+                  key={panel.id}
+                  id={panel.id}
+                  pluginId={group.id}
+                  render={panel.render}
+                  {...(editSession ? { editSession } : {})}
+                  onRequestClose={onBack}
+                  onError={setPanelError}
+                />
+              ))}
+            </div>
+            {panelError ? (
+              <p className="settings-page__error" role="alert" data-testid={`plugin-config-panel-error-${group.id}`}>
+                {panelError} 声明式配置仍可在下方修改。
+              </p>
+            ) : null}
+          </section>
+        )
+      ) : loadState.status === "loading" ? (
+        <p className="settings-page__hint" role="status" data-testid={`plugin-config-panel-loading-${group.id}`}>
+          正在加载该插件的设置面板…
+        </p>
+      ) : loadState.status === "failed" ? (
+        <p className="settings-page__hint" data-testid={`plugin-config-panel-unavailable-${group.id}`}>
+          该插件没有可用的专用设置面板（{loadState.reason ?? "扩展未声明设置入口"}）；下方声明式配置仍可读写。
+        </p>
+      ) : null}
+
+      {modelRefresh ? (
+        <section className="settings-workbench__section">
+          <h3 className="settings-page__group-title">可用模型</h3>
+          <p className="settings-page__hint">{modelRefresh.hint}</p>
+          <ModelRefresh
+            path={modelRefresh.path}
+            testId={modelRefreshTestId(group)}
+            onDiscovered={() => manager.refreshModels()}
+            {...(editSession ? { editSession } : {})}
+            entryId={`plugin-model-refresh:${group.id}`}
+          />
+        </section>
+      ) : null}
+      {configEntries.length > 0 ? (
+        <section className="settings-workbench__section">
+          <h3 className="settings-page__group-title">配置项</h3>
+          <ul className="settings-page__list" data-testid={`plugin-config-entries-${group.id}`}>
+            {configEntries.map((entry) => (
+              <SettingRow
+                key={`${entry.key}:${String(entry.value)}:${entry.configured}`}
+                entry={entry}
+                store={store}
+                inactive={inactive !== null}
+                {...(editSession ? { editSession } : {})}
+              />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {endpointEntries.length > 0 ? (
+        <section className="settings-workbench__section">
+          <ArkEndpointSection entries={endpointEntries} store={store} inactive={inactive !== null} />
+        </section>
+      ) : null}
+      {models.length > 0 || modelRefresh ? (
+        <section className="settings-workbench__section">
+          <GeneratedModelsSection
+            groupId={group.id}
+            models={models}
+            manager={manager}
+            siteManageable={view.siteManageable}
+          />
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+/** 详情头部：返回列表（内部导航）+ 插件身份。 */
+function PluginDetailHeader({
+  title,
+  onBack,
+  children
+}: {
+  title: string;
+  onBack: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <header className="settings-workbench__detail-head">
+      <Button size="sm" tone="ghost" icon={<BackIcon />} onClick={onBack} data-testid="plugin-config-back">
+        返回插件列表
+      </Button>
+      <h2 className="settings-workbench__detail-title">{title}</h2>
+      {children ? <div className="plugin-config__meta">{children}</div> : null}
+    </header>
+  );
+}
+
+/**
+ * 扩展设置面板宿主：把面板的 dirty/pending 上报与渲染错误隔离放在同一处。
+ *
+ * 面板 `requestClose` 在设置语境表示「返回插件列表」（经同一草稿门禁），不是关闭整个设置。
+ * 面板可选调用 `reportEditState` 把异步动作（保存/检测/断开）计入设置工作区的退出保护。
+ */
+function ExtensionSettingsPanelHost({
+  id,
+  pluginId,
+  render,
+  editSession,
+  onRequestClose,
+  onError
+}: {
+  id: string;
+  pluginId: string;
+  render: ComponentType<SettingsPanelRenderProps>;
+  editSession?: SettingsEditSession;
+  onRequestClose: () => void;
+  onError: (message: string | null) => void;
+}) {
+  const [failed, setFailed] = useState<string | null>(null);
+  const reportEditState = useMemo(() => {
+    if (!editSession) return { report: undefined, dispose: () => undefined };
+    return editSession.register({ id: `panel:${pluginId}:${id}` });
+  }, [editSession, pluginId, id]);
+  useEffect(() => () => reportEditState.dispose(), [reportEditState]);
+  const onReport = reportEditState.report
+    ? (state: { dirty?: boolean; pending?: boolean }) =>
+        reportEditState.report?.({ dirty: state.dirty ?? false, pending: state.pending ?? false })
+    : undefined;
+
+  if (failed) {
+    return (
+      <p className="settings-page__hint" data-testid={`plugin-config-panel-failed-${pluginId}`}>
+        该扩展的设置面板加载失败（{failed}）；声明式配置仍可用。
+      </p>
+    );
+  }
+  const Render = render;
+  return (
+    <ErrorIsolatingPanel
+      onError={(message) => {
+        setFailed(message);
+        onError(message);
+      }}
+    >
+      <Render requestClose={onRequestClose} {...(onReport ? { reportEditState: onReport } : {})} />
+    </ErrorIsolatingPanel>
+  );
+}
+
+class ErrorIsolatingPanel extends Component<
+  {
+    onError: (message: string) => void;
+    children: ReactNode;
+  },
+  { failed: boolean }
+> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: unknown): void {
+    this.props.onError(error instanceof Error ? error.message : String(error));
+  }
+
+  override render(): ReactNode {
+    if (this.state.failed) return null;
+    return this.props.children;
+  }
+}
+
+/** 刷新按钮的测试锚点：按 Provider id 派生，新增 Provider 不需要在前端登记。 */
+function modelRefreshTestId(group: PluginSettingsGroup): string {
+  return `${group.providerId ?? group.id}-refresh-models`;
+}
+
+function ModelRefresh({
+  path,
+  testId,
+  onDiscovered,
+  editSession,
+  entryId
+}: {
+  path: string;
+  testId: string;
+  onDiscovered: () => Promise<void>;
+  editSession?: SettingsEditSession;
+  entryId: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  // 刷新是写请求（会写模型目录）：计入设置工作区的 pending 门禁。
+  useSettingsEditReport(editSession, entryId, { dirty: false, pending: busy });
+  const refresh = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await globalThis.fetch(appPublicUrl(path), { method: "POST" });
+      const body = (await response.json().catch(() => null)) as { modelCount?: unknown; message?: unknown } | null;
+      if (!response.ok) {
+        setMessage(typeof body?.message === "string" ? body.message : "刷新模型目录失败");
+        return;
+      }
+      const count = typeof body?.modelCount === "number" ? body.modelCount : 0;
+      const detail = typeof body?.message === "string" ? body.message.trim() : "";
+      await onDiscovered();
+      setMessage(detail ? `已发现 ${count} 个模型。${detail}` : `已发现 ${count} 个模型`);
+    } catch {
+      setMessage("无法连接后端");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="settings-page__item-control">
+      <Button size="sm" disabled={busy} onClick={() => void refresh()} data-testid={testId}>
+        {busy ? "正在刷新…" : "刷新可用模型"}
+      </Button>
+      {message ? <p className="settings-page__hint" role="status">{message}</p> : null}
+    </div>
+  );
+}

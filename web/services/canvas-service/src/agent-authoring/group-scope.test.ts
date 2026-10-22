@@ -1,0 +1,68 @@
+import { describe, expect, it } from "vitest";
+import { createEmptyWoohaa3ServerCanvas, type CanvasCommand } from "@woohaa3/contracts";
+import { CanvasRoom } from "../sync/room.js";
+import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
+import { withCanvasGroupScope, canvasGroupEpoch } from "./group-scope.js";
+import { CanvasScriptService } from "../canvas-script/service.js";
+
+async function setup() {
+  const room = new CanvasRoom({ canvasId: "scope-test", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
+  const canvas = createEmptyWoohaa3ServerCanvas("scope-test", new Date().toISOString());
+  canvas.document.nodes = [{ id: "root", type: "group", position: { x: 0, y: 0 }, width: 600, height: 400 }, { id: "a", type: "text", position: { x: 40, y: 40 }, parentId: "root" }, { id: "outside", type: "text", position: { x: 800, y: 0 } }];
+  canvas.nodeData = { root: { retainWhenEmpty: true }, a: { prompt: "old" }, outside: { prompt: "private" } };
+  await room.initialize({ canvas, roomEpoch: "epoch" });
+  let id = 0;
+  const submit = (commands: CanvasCommand[]) => room.submit({ protocolVersion: 1, canvasId: canvas.id, commandId: `group-scope-${++id}`, baseRevision: room.currentRevision, actorId: "user", commands });
+  return { room, submit, canvas };
+}
+describe("group authority queue", () => {
+  it("runs nested scripts through the same authority scope and rejects root/outside bypasses", async () => {
+    const { room, canvas } = await setup();
+    const service = new CanvasScriptService({ resolveRoom: async () => room, authorizer: { authorize: async () => ({ allowed: true }) } });
+    const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };
+    const input = { principalId: "u", canvasId: canvas.id, version: "woohaa-canvas-js-v1" };
+    const submit = (requestId: string, source: string) => withCanvasGroupScope(scope, () => service.submit({ ...input, requestId, source }));
+    const good = await submit("nested", `const a = canvas.node("image", {key:"image", placement:{mode:"absolute",position:{x:80,y:90}}}); const b = canvas.node("text",{key:"brief"}); canvas.group([a,b],{key:"nested",title:"Nested",layout:{mode:"grid",columns:2}}); canvas.connect(b,a,{key:"reference"});`);
+    expect(good.ok, JSON.stringify(good)).toBe(true);
+    const revision = room.currentRevision;
+    for (const [id, source] of [
+      ["outside", 'canvas.setPrompt(canvas.existing("outside"), "bad");'],
+      ["delete-root", 'canvas.remove(canvas.existing("root"));'],
+      ["ungroup-root", 'canvas.ungroup(canvas.existing("root"));'],
+      ["move-root", 'canvas.move(canvas.existing("root"),{x:50,y:50});']
+    ]) expect((await submit(id!, source!)).ok).toBe(false);
+    expect(room.currentRevision).toBe(revision);
+  });
+  it("rechecks membership after a queued user move, rejecting the whole batch", async () => {
+    const { room, submit, canvas } = await setup();
+    const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };
+    const moved = submit([{ type: "node.update", nodeId: "a", parentId: null }]);
+    const write = withCanvasGroupScope(scope, () => submit([{ type: "nodeData.patch", nodeId: "a", value: { prompt: "bad" } }, { type: "nodeData.patch", nodeId: "outside", value: { prompt: "bad" } }]));
+    expect((await moved).ok).toBe(true);
+    expect((await write).ok).toBe(false);
+    const result = room.exportCanvas();
+    expect(result.ok && result.canvas.nodeData.a.prompt).toBe("old");
+  });
+  it("rejects deleting a member with a cross-boundary edge without removing any entity", async () => {
+    const { room, submit, canvas } = await setup();
+    expect((await submit([{ type: "edge.add", edge: { id: "cross", source: "a", target: "outside" } }])).ok).toBe(true);
+    const result = await withCanvasGroupScope({ owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: 0, valid: () => true }, () => submit([{ type: "node.remove", nodeIds: ["a"] }]));
+    expect(result.ok).toBe(false);
+    expect(room.currentRevision).toBe(1);
+  });
+  it("deletion and restoration of the same ID never revive the old grant", async () => {
+    const { submit, canvas } = await setup();
+    const epoch = canvasGroupEpoch(canvas.id, "root");
+    const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: epoch, valid: () => canvasGroupEpoch(canvas.id, "root") === epoch };
+    await submit([{ type: "node.remove", nodeIds: ["root"] }]);
+    await submit([{ type: "node.add", node: canvas.document.nodes[0]!, nodeData: { retainWhenEmpty: true } }]);
+    expect(scope.valid()).toBe(false);
+    expect((await withCanvasGroupScope(scope, () => submit([{ type: "node.update", nodeId: "root", width: 900 }]))).ok).toBe(false);
+  });
+  it("checks revoked write access in the authority queue and records actual receipts only", async () => {
+    const { submit, canvas } = await setup();
+    const actions: unknown[] = [];
+    const result = await withCanvasGroupScope({ owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: 0, valid: () => true, authorize: async () => false, onAction: action => actions.push(action) }, () => submit([{ type: "nodeData.patch", nodeId: "a", value: { prompt: "bad" } }]));
+    expect(result.ok).toBe(false); expect(actions).toEqual([]);
+  });
+});

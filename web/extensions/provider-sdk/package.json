@@ -1,0 +1,33 @@
+{
+  "name": "@woohaa3/provider-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "生成 Provider 插件的宿主侧公共能力：出网守卫、模型目录刷新路由、模型名单解析。插件只写自己的协议差异。",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --platform node",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

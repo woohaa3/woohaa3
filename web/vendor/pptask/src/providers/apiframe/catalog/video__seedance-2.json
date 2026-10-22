@@ -1,0 +1,166 @@
+{
+  "locator": "apiframe://video/seedance-2",
+  "modelId": "seedance-2",
+  "providerId": "apiframe",
+  "modality": "video",
+  "label": "Seedance 2",
+  "outputType": "video",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/videos/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "seedance-2"
+        ],
+        "type": "string"
+      },
+      "seedanceParams": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "enum": [
+                  "21:9"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "16:9"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "4:3"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "1:1"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "3:4"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "9:16"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "adaptive"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "camera_fixed": {
+            "type": "boolean"
+          },
+          "duration": {
+            "maximum": 15,
+            "minimum": 4,
+            "type": "integer"
+          },
+          "end_image": {
+            "format": "uri",
+            "type": "string"
+          },
+          "generate_audio": {
+            "type": "boolean"
+          },
+          "reference_audio_urls": {
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
+          "reference_image_urls": {
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 9,
+            "type": "array"
+          },
+          "reference_video_urls": {
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
+          "resolution": {
+            "enum": [
+              "480p",
+              "720p",
+              "1080p",
+              "4k"
+            ],
+            "type": "string"
+          },
+          "return_last_frame": {
+            "type": "boolean"
+          },
+          "seed": {
+            "type": "integer"
+          },
+          "start_image": {
+            "format": "uri",
+            "type": "string"
+          },
+          "web_search": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "seedanceParams",
+    "wirePath": "seedanceParams"
+  }
+}

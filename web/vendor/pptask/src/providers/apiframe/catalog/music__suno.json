@@ -1,0 +1,111 @@
+{
+  "locator": "apiframe://music/suno",
+  "modelId": "suno",
+  "providerId": "apiframe",
+  "modality": "music",
+  "label": "Suno",
+  "outputType": "music",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/music/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "suno"
+        ],
+        "type": "string"
+      },
+      "sunoParams": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_lyrics": {
+            "type": "boolean"
+          },
+          "custom_mode": {
+            "default": false,
+            "type": "boolean"
+          },
+          "instrumental": {
+            "default": false,
+            "type": "boolean"
+          },
+          "model_version": {
+            "default": "V4_5PLUS",
+            "enum": [
+              "V4",
+              "V4_5",
+              "V4_5ALL",
+              "V4_5PLUS",
+              "V5",
+              "V5_5"
+            ],
+            "type": "string"
+          },
+          "negative_tags": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "style": {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "style_weight": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "title": {
+            "maxLength": 80,
+            "type": "string"
+          },
+          "vocal_gender": {
+            "enum": [
+              "m",
+              "f"
+            ],
+            "type": "string"
+          },
+          "weirdness_constraint": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 5000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "sunoParams",
+    "wirePath": "sunoParams"
+  }
+}

@@ -1,0 +1,338 @@
+/* /admin/tasks 任务监控页样式（change: 2026-10-13-...，任务 8.7；桌面优先、1280/1440 窗口）。
+   只消费 canonical --app-* 语义 token（不复制品牌色 literal）；见 unify-application-theme-tokens。
+
+   正文（摘要/请求摘要/结果/时间线/技术信息）样式已随共享组件迁至
+   shared/task-trace/task-trace.css（change: 生成溯源改为画布内浮窗）；本文件只保留
+   列表、筛选工具栏与页级侧栏布局。 */
+.task-monitor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  min-height: 0;
+  color: var(--app-web-text-primary);
+}
+
+.task-monitor__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-monitor__title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.task-monitor__observed {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.task-monitor__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-monitor__count {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 88px;
+  padding: 8px 12px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-surface);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.task-monitor__count.is-active {
+  border-color: var(--app-interaction-accent);
+  box-shadow: inset 0 0 0 1px var(--app-interaction-accent);
+}
+
+.task-monitor__count-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.task-monitor__count-label {
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.task-monitor__toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+}
+
+.task-monitor__toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.task-monitor__toolbar-row--advanced {
+  border-top: 1px dashed var(--app-web-border);
+  padding-top: 12px;
+}
+
+.task-monitor__toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.task-monitor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  min-width: 120px;
+}
+
+.task-monitor__field input,
+.task-monitor__field select {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 6px;
+  background: var(--app-web-surface);
+  color: inherit;
+}
+
+.task-monitor__time {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.task-monitor__time-shortcuts {
+  display: flex;
+  gap: 6px;
+}
+
+.task-monitor__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-monitor__tags button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  padding: 2px 8px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 999px;
+  background: var(--app-web-surface);
+  cursor: pointer;
+  color: inherit;
+}
+
+.task-monitor__dirty {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.task-monitor__body {
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+  align-items: flex-start;
+}
+
+.task-monitor__list {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  max-height: calc(100vh - 320px);
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+}
+
+.task-monitor__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.task-monitor__table th,
+.task-monitor__table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--app-web-border);
+  vertical-align: top;
+}
+
+.task-monitor__table th {
+  position: sticky;
+  top: 0;
+  background: var(--app-web-subtle);
+  font-weight: 600;
+  z-index: 1;
+}
+
+.task-monitor__table tr.is-selected {
+  background: var(--app-interaction-accent-soft);
+}
+
+.task-monitor__model {
+  display: block;
+  font-weight: 600;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-monitor__secondary {
+  display: block;
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.task-monitor__error-inline {
+  display: block;
+  font-size: 12px;
+  color: var(--app-status-danger);
+}
+
+.task-monitor__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.task-monitor__state-glyph {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.task-monitor__state.is-succeeded { color: var(--app-status-success); }
+.task-monitor__state.is-failed { color: var(--app-status-danger); }
+.task-monitor__state.is-cancelled { color: var(--app-web-text-muted); }
+.task-monitor__state.is-running { color: var(--app-interaction-accent); }
+.task-monitor__state.is-queued,
+.task-monitor__state.is-pending { color: var(--app-status-warning); }
+
+/* 页级错误条（列表查询失败）。正文内的错误块样式在 shared/task-trace/task-trace.css。 */
+.task-monitor__error {
+  color: var(--app-status-danger);
+  font-size: 13px;
+}
+
+/* 详情侧栏容器只是页面布局；正文内容样式来自 shared/task-trace/task-trace.css。 */
+.task-monitor__detail {
+  flex: 0 0 380px;
+  max-width: 40vw;
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--app-web-surface);
+}
+
+.task-monitor__detail-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 标题与主要动作：返回画布是进详情后最常见的去处，放在标题旁并保持主按钮观感。 */
+.task-monitor__detail-top h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.task-monitor__detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.task-monitor__empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--app-web-text-muted);
+}
+
+.task-monitor__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-monitor__skeleton-row {
+  height: 40px;
+  border-radius: 6px;
+  background: var(--app-web-subtle);
+}
+
+/* 屏幕阅读器专用文本：视觉隐藏但仍可被辅助技术读取（任务 8.7）。 */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 紧凑桌面窗口（<=1280）：详情降级为覆盖，不产生整页横向滚动。 */
+@media (max-width: 1280px) {
+  .task-monitor__body {
+    flex-direction: column;
+  }
+  .task-monitor__detail {
+    flex: 1 1 auto;
+    max-width: none;
+    width: 100%;
+  }
+}
+
+/* 宽屏桌面窗口（>=1440）：加宽详情栏并让摘要用三列，充分利用横向空间（任务 8.7）。
+   摘要的基础网格在 shared/task-trace/task-trace.css，这里只做页面宽屏提级。 */
+@media (min-width: 1440px) {
+  .task-monitor {
+    padding: 24px 32px;
+  }
+  .task-monitor__detail {
+    flex-basis: 460px;
+    max-width: 36vw;
+  }
+  .task-monitor__summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .task-monitor__model {
+    max-width: 420px;
+  }
+}

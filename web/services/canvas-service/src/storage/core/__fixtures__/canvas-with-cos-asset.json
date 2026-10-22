@@ -1,0 +1,87 @@
+{
+  "id": "canvas-with-cos-asset",
+  "title": "带 COS 引用的画布",
+  "revision": 3,
+  "document": {
+    "schemaVersion": "asset-canvas-v1",
+    "nodes": [
+      {
+        "id": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+        "type": "text",
+        "position": { "x": 0, "y": 0 },
+        "width": 360,
+        "height": 220,
+        "zIndex": 1
+      },
+      {
+        "id": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "type": "image",
+        "position": { "x": 640, "y": 0 },
+        "width": 512,
+        "height": 742,
+        "zIndex": 2
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-9f0c2b71-3a44-4c8e-8d55-0b7a6e5f4d31",
+        "source": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+        "target": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "sourceHandle": "out-0",
+        "targetHandle": "in-0",
+        "data": { "kind": "dependency" }
+      }
+    ],
+    "viewport": { "x": 80, "y": 100, "zoom": 0.52 },
+    "updatedAt": "2026-09-23T00:00:00.000Z"
+  },
+  "nodeData": {
+    "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f": {
+      "title": "提示词",
+      "prompt": "一只猫坐在窗台上"
+    },
+    "image-43200b04-00af-443d-a591-decff3e3a014": {
+      "title": "主视觉",
+      "taskKind": "image-generation",
+      "panelPrompt": "一只猫坐在窗台上",
+      "taskStatus": "successed",
+      "outputAssetId": "asset-image-mtpb4p43",
+      "resourceKind": "image"
+    }
+  },
+  "assets": [
+    {
+      "id": "asset-image-mtpb4p43",
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "title": "生成图",
+      "mediaKind": "image",
+      "source": "generated",
+      "status": "ready",
+      "url": "/api/media/generation-outputs/4f2c8a1e5b9d3f6a7c0e1d2b3a4f5e6c7d8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c.png",
+      "createdAt": "2026-09-23T00:00:00.000Z",
+      "provenance": {
+        "taskNodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "taskKind": "image-generation",
+        "runId": "run-6b3e91d7",
+        "outputIndex": 0
+      },
+      "metadata": {
+        "storageKey": "generation-outputs/4f2c8a1e5b9d3f6a7c0e1d2b3a4f5e6c7d8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c.png",
+        "checksum": "4f2c8a1e5b9d3f6a7c0e1d2b3a4f5e6c7d8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c",
+        "contentType": "image/png",
+        "size": 2048
+      }
+    }
+  ],
+  "jobs": [
+    {
+      "id": "job-5d2c8e14",
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "taskId": "task-2f61a4c9",
+      "runId": "run-6b3e91d7",
+      "status": "success",
+      "updatedAt": "2026-09-23T00:00:00.000Z"
+    }
+  ],
+  "updatedAt": "2026-09-23T00:00:00.000Z"
+}

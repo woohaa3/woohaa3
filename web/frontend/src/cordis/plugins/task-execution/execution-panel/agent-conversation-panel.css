@@ -1,0 +1,341 @@
+/**
+ * Agent 对话详情侧栏样式
+ * （change: 2026-10-12-add-agent-conversation-panel，任务 5.5/5.6 / design D6a）。
+ *
+ * 桌面 400px / 宽屏 420px；标题栏、正文 14px、辅助至少 12px、回复框初始 52px。全部使用
+ * 共享 `--app-*` token，不新增视觉世界。仅桌面；不新增手机/触屏布局。
+ */
+/* 概览：固定贴右的定宽侧栏，置于画布与活动浮层之上（`.bevy-canvas-surface` 为绝对定位，
+   静态内容会被其覆盖；`task-activity` 浮层 z-index 32/33，与 `node-history` 抽屉同级取 40）。 */
+.agent-detail {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 400px;
+  height: auto;
+  min-height: 0;
+  border-left: 1px solid var(--app-web-border);
+  background: var(--app-web-surface);
+  color: var(--app-web-text-primary);
+  font-size: 14px;
+  --agent-secondary: color-mix(
+    in srgb,
+    var(--app-web-text-primary) 76%,
+    var(--app-web-surface)
+  );
+}
+@media (min-width: 1440px) {
+  .agent-detail {
+    width: 420px;
+  }
+}
+
+/* 聚焦：与工作区检查器共用公共侧栏容器（`.focus-workspace__panel` 提供定位与宽度），
+   面板本身填充容器；打开时检查器经 `data-focus-panel="detail"` 隐藏（design D6a）。 */
+.app[data-focus-kind] .agent-detail {
+  position: static;
+  width: 100%;
+  height: 100%;
+  z-index: auto;
+}
+
+/* 标题与动作同排：会话标题取首条提示词，可能很长。收缩 MUST 只作用在标题上（省略号），动作行
+   不被压缩——否则「返回生成面板」会被挤出面板右边界（聚焦侧栏贴右、`body{overflow:hidden}` 直接
+   裁掉，用户只看得到「清空上下文」）；极窄面板下动作整行换行，也不裁掉返回入口。 */
+.agent-detail__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--app-web-border);
+}
+.agent-detail__title {
+  margin: 0;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-detail__title:focus-visible {
+  outline: 2px solid var(--app-interaction-focus);
+  outline-offset: 2px;
+}
+.agent-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.agent-detail__clear {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--app-status-danger);
+  border-radius: 6px;
+  background: var(--app-web-surface);
+  color: var(--app-status-danger);
+  font: inherit;
+  cursor: pointer;
+}
+.agent-detail__clear:hover {
+  background: var(--app-status-danger-soft);
+}
+.agent-detail__back {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--app-web-border-strong);
+  border-radius: 6px;
+  background: var(--app-web-surface);
+  color: var(--agent-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.agent-detail__back:hover {
+  background: var(--app-interaction-accent-soft);
+  color: var(--app-web-text-primary);
+}
+
+.agent-detail__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--agent-secondary);
+}
+.agent-detail__target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-detail__stage {
+  flex-shrink: 0;
+}
+
+/* 消息、工具与结果共用一个滚动容器，回复区始终可见。 */
+.agent-detail__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  line-height: 1.6;
+}
+.agent-detail__body > * {
+  flex-shrink: 0;
+  min-width: 0;
+}
+.agent-detail__message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-detail__message[data-role="user"] {
+  align-self: flex-end;
+  max-width: 90%;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--app-web-subtle);
+}
+.agent-detail__message:first-child {
+  margin-top: 0;
+}
+.agent-detail__message-role {
+  font-size: 12px;
+  color: var(--agent-secondary);
+}
+.agent-detail__message-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-detail__message-truncated {
+  font-size: 12px;
+  color: var(--agent-secondary);
+}
+.agent-detail__loading {
+  color: var(--agent-secondary);
+  font-size: 12px;
+}
+
+.agent-detail__tool {
+  font-size: 12px;
+  color: var(--agent-secondary);
+}
+.agent-detail__tool summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  list-style: none;
+  cursor: pointer;
+}
+.agent-detail__tool summary::-webkit-details-marker,
+.agent-detail__receipt summary::-webkit-details-marker {
+  display: none;
+}
+.agent-detail__tool summary:hover,
+.agent-detail__receipt summary:hover {
+  background: var(--app-web-subtle);
+}
+.agent-detail__tool summary > svg {
+  flex-shrink: 0;
+}
+.agent-detail__tool-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--app-web-text-primary);
+}
+.agent-detail__tool-status {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.agent-detail__tool[data-status="failed"] .agent-detail__tool-status {
+  color: var(--app-status-danger);
+}
+.agent-detail__tool-chevron {
+  transition: transform 140ms ease-out;
+}
+.agent-detail__tool[open] .agent-detail__tool-chevron {
+  transform: rotate(90deg);
+}
+.agent-detail__tool-summary {
+  margin: 4px 6px 8px 28px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-detail__working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--agent-secondary);
+}
+.agent-detail__tool[data-status="started"] summary > svg:first-child,
+.agent-detail__working > svg {
+  animation: agent-detail-spin 1.2s linear infinite;
+}
+.agent-detail__progress-text {
+  margin: 8px 0;
+  color: var(--app-web-text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-detail__progress-note {
+  margin: 4px 0;
+  color: var(--agent-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes agent-detail-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.agent-detail__receipt {
+  font-size: 12px;
+  color: var(--agent-secondary);
+}
+.agent-detail__receipt summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  list-style: none;
+  cursor: pointer;
+}
+.agent-detail__receipt summary > svg {
+  flex-shrink: 0;
+}
+.agent-detail__receipt[open] summary > svg {
+  transform: rotate(90deg);
+}
+.agent-detail__receipt pre {
+  margin: 4px 0 0;
+  padding: 8px;
+  max-height: 200px;
+  overflow: auto;
+  background: var(--app-web-subtle);
+  color: var(--app-web-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-detail__result[data-status="failed"] summary,
+.agent-detail__error {
+  color: var(--app-status-danger);
+}
+.agent-detail__error {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.agent-detail__reply {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--app-web-border);
+}
+.agent-detail__reply-input {
+  flex: 1 1 100%;
+  min-height: 52px;
+}
+.agent-detail__reply-send {
+  margin-left: auto;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--app-interaction-accent);
+  color: var(--app-interaction-on-accent);
+  font: inherit;
+  cursor: pointer;
+}
+.agent-detail__reply-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.agent-detail__reply-error {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--app-status-danger);
+  font-size: 12px;
+}
+
+.agent-detail :focus-visible {
+  outline: 2px solid var(--app-interaction-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-detail * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@woohaa3/extension-sample-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Woohaa3 样例站点插件（仅测试）：同目录前后端入口、共享 metadata 与配置校验。生产可信清单不登记本包。",
+  "exports": {
+    "./frontend": {
+      "types": "./src/frontend.ts",
+      "import": "./dist/frontend.js"
+    },
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/frontend.ts --outdir dist --platform neutral --entry-name frontend && node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

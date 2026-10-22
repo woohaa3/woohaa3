@@ -1,0 +1,33 @@
+{
+  "id": "canvas-unsupported-schema",
+  "title": "未来 schema 画布",
+  "revision": 12,
+  "document": {
+    "schemaVersion": "asset-canvas-v99",
+    "nodes": [
+      {
+        "id": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "type": "image",
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    ],
+    "edges": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "updatedAt": "2026-09-22T00:00:00.000Z"
+  },
+  "nodeData": {
+    "image-43200b04-00af-443d-a591-decff3e3a014": {
+      "panelPrompt": "来自未来的字段"
+    }
+  },
+  "assets": [],
+  "jobs": [],
+  "updatedAt": "2026-09-22T00:00:00.000Z"
+}

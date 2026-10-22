@@ -1,0 +1,120 @@
+{
+  "locator": "apiframe://video/sora-2-pro",
+  "modelId": "sora-2-pro",
+  "providerId": "apiframe",
+  "modality": "video",
+  "label": "Sora 2 Pro",
+  "outputType": "video",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/videos/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "sora-2-pro"
+        ],
+        "type": "string"
+      },
+      "soraParams": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "enum": [
+                  "16:9"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "9:16"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "enum": [
+                  4
+                ],
+                "type": "number"
+              },
+              {
+                "enum": [
+                  8
+                ],
+                "type": "number"
+              },
+              {
+                "enum": [
+                  10
+                ],
+                "type": "number"
+              },
+              {
+                "enum": [
+                  12
+                ],
+                "type": "number"
+              },
+              {
+                "enum": [
+                  15
+                ],
+                "type": "number"
+              }
+            ]
+          },
+          "resolution": {
+            "enum": [
+              "standard",
+              "high"
+            ],
+            "type": "string"
+          },
+          "start_image": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "soraParams",
+    "wirePath": "soraParams"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@woohaa3/media-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Woohaa3 Media Service — 内容寻址的媒体读写与取外部地址，存储由宿主经 ctx.storage 注入。Public /api/media upload/GET/HEAD plus authenticated internal v1 stat/verify/sign/import for Canvas and Task.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --platform node",
+    "watch": "node ../../scripts/build-package.mjs --platform node --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/photocraft-project-verifier": "link:../../../photocraft/packages/project-verifier"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

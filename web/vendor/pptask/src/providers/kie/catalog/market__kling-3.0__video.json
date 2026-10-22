@@ -1,0 +1,164 @@
+{
+  "locator": "kie://market/kling-3.0/video",
+  "modelId": "kling-3.0/video",
+  "providerId": "kie",
+  "outputType": "video",
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/jobs/createTask"
+  },
+  "requestSchema": {
+    "type": "object",
+    "description": "Input parameters for the generation task",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Video generation prompt. Takes effect when multi_shots is false."
+      },
+      "image_urls": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "First and last frame image URLs. Required when elements are referenced in the prompt (using @element_name syntax). When multi_shots is false: if length is 2, index 0 is the first frame and index 1 is the last frame; if length is 1, the array item serves as the first frame. When multi_shots is true: only the first frame is supported."
+      },
+      "sound": {
+        "type": "boolean",
+        "description": "Whether to enable sound effects. true enables sound effects, false disables them. When multi_shots is true, this field defaults to true.",
+        "default": false
+      },
+      "duration": {
+        "type": "string",
+        "description": "Total video duration in seconds. Integer value, range: 3 to 15.",
+        "enum": [
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15"
+        ],
+        "default": "5"
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "description": "Video aspect ratio. Options: 16:9, 9:16, 1:1. When image_urls(first and last frame images) is provided, this parameter is optional and the aspect ratio will be automatically adapted based on the uploaded images.",
+        "enum": [
+          "16:9",
+          "9:16",
+          "1:1"
+        ],
+        "default": "16:9"
+      },
+      "mode": {
+        "type": "string",
+        "description": "Generation mode. std has standard resolution, pro has higher resolution, 4K has 4K resolution.\n\nResolution mapping:\n- **std mode**: 16:9 (1280×720), 9:16 (720×1280), 1:1 (720×720)\n- **pro mode**: 16:9 (1920×1080), 9:16 (1080×1920), 1:1 (1080×1080)\n- **4K mode**: 16:9 (3840×2160), 9:16 (2160×3840), 1:1 (2160×2160)",
+        "enum": [
+          "std",
+          "pro",
+          "4K"
+        ],
+        "default": "pro"
+      },
+      "multi_shots": {
+        "type": "boolean",
+        "description": "Whether to use multi-shot mode. true enables multi-shot mode, false enables single-shot mode.",
+        "default": false
+      },
+      "multi_prompt": {
+        "type": "array",
+        "description": "Shot prompts. Takes effect when multi_shots is true. Used to describe the text and duration of each shot. Supports up to 5 shots. Each shot duration is 1-12 seconds. If you need to use elements, add them after the prompt.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Prompt text for this shot, a maximum of 500 characters per shot. Each @element will occupy 37 characters.",
+              "maxLength": 500
+            },
+            "duration": {
+              "type": "integer",
+              "description": "Duration of this shot in seconds. Range: 1-12.",
+              "minimum": 1,
+              "maximum": 12
+            }
+          },
+          "required": [
+            "prompt",
+            "duration"
+          ]
+        }
+      },
+      "kling_elements": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Element name, used in prompt with @ prefix (e.g., @element_dog)"
+            },
+            "description": {
+              "type": "string",
+              "description": "Element description"
+            },
+            "element_input_urls": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              },
+              "description": "Image URLs for the element. 2-4 URLs required. Accepted formats: JPG, PNG. Maximum file size: 10MB per image."
+            },
+            "element_input_audio_urls": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              },
+              "description": "Optional. List of audio material URLs for characters. The audio duration must be between 5 and 30 seconds."
+            },
+            "start_time": {
+              "type": "integer",
+              "description": "Start time for video character material capture (in milliseconds). Only effective when uploading videos through element_input_urls. If not uploaded, it defaults to 0."
+            },
+            "end_time": {
+              "type": "integer",
+              "description": "End time for video character material capture (in milliseconds). Only effective when uploading videos through element_input_urls. Must be greater than start_time, and the difference between end_time and start_time must be within 3000 to 8000 milliseconds."
+            }
+          },
+          "required": [
+            "name",
+            "description",
+            "element_input_urls"
+          ]
+        },
+        "description": "Referenced elements. Detailed information about elements referenced in the prompt. A single task can reference a maximum of three elements.",
+        "maxItems": 3
+      }
+    },
+    "required": [
+      "prompt",
+      "sound",
+      "duration",
+      "aspect_ratio",
+      "mode",
+      "multi_shots",
+      "multi_prompt"
+    ]
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "inputField": "input",
+    "callbackField": "callBackUrl"
+  },
+  "label": "Kling 3 Video"
+}

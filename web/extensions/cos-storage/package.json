@@ -1,0 +1,31 @@
+{
+  "name": "@woohaa3/extension-cos-storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "COS / S3 对象存储后端插件：向 ctx.storage 注册 backendId=cos 的后端，保留既有对象键布局与签名行为。",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "cos-nodejs-sdk-v5": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

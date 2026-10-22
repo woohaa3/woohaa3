@@ -1,0 +1,398 @@
+/* 组件库样式（Dialog primitives / 右键菜单 / 右下角控件 / mention / 片段库）。
+ * 任务历史页专属样式由 `pages/task-history` 公开入口加载（change: 2026-10-10-extract-task-history-page）。 */
+@import "./cordis/ui/ui.css";
+/* 公共聚焦区域样式（change: 2026-10-12-unify-node-editors-and-focus-transitions）：由生产入口
+   统一加载；editor 专用样式各自在其工作区入口加载。 */
+@import "./cordis/focus/focus.css";
+
+/**
+ * 宿主页面样式（change: add-image-text-node-execution，任务 2.1 / 3.5）。
+ *
+ * 只保留：基础重置、全屏画布、必要的状态提示与底部执行面板布局。主题变量（`--mc-*`）
+ * 与组件样式（Dialog / 右键菜单 / 右下角控件 / mention / 片段库）由顶部 `@import`
+ * 的组件库样式表提供。
+ */
+* {
+	box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+	margin: 0;
+	padding: 0;
+	width: 100%;
+	height: 100%;
+}
+
+body {
+	background: var(--app-web-backdrop);
+	color: var(--app-web-text-primary);
+	font-family: var(--app-font);
+	overflow: hidden;
+	touch-action: none;
+}
+
+/* Native Bevy draws beneath the DOM interface in the same window. */
+html[data-native-canvas="true"] body {
+	background: transparent;
+}
+
+/* The Metal NSView is a sibling *under* WKWebView. Browser WASM paints inside
+ * an iframe child of `.bevy-canvas-surface`, so a themed fill there is a
+ * backdrop; the same fill in native mode hides the real canvas. Punch a hole
+ * for the input surface; chrome/panels keep their own opaque backgrounds.
+ * The curtain still covers until realm.reveal(). */
+html[data-native-canvas="true"] .bevy-canvas-surface,
+html[data-native-canvas="true"] #bevy-canvas {
+	background: transparent;
+}
+
+/* WebKit backdrop filters cannot sample the sibling Metal surface. Filtering
+ * nested translucent UI in a transparent WebView can produce opaque fringes.
+ * Keep alpha fills/shadows; browser rendering retains each filter's fallback. */
+html[data-native-canvas="true"] {
+	--app-backdrop-filter: none;
+}
+
+.app {
+	position: fixed;
+	inset: 0;
+}
+
+/*
+ * 单例 Bevy canvas 的宿主容器（fix: 切换画布白屏）。
+ * canvas 元素跨 page scope 存活，由 CanvasHost 命令式挂入本容器；容器负责尺寸。
+ */
+.bevy-canvas-surface {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	/* iframe/首个 Bevy frame 到达前透出当前主题底色，暗色下不露出默认浅色 */
+	background: var(--app-web-backdrop);
+}
+
+/* The native surface is a sibling below WebKit; the curtain alone owns the
+ * startup fill so revealing it also reveals the Metal-rendered canvas. */
+html[data-native-canvas="true"] .bevy-canvas-surface {
+	background: transparent;
+}
+
+/*
+ * 画布主题 curtain：iframe/原生 surface 在首个 themed 画面 render 完成前用当前主题底色
+ * 整块盖住。realm 的 reveal() 在画布宿主上加 data-canvas-presented="true" 后淡出；
+ * 切画布创建新宿主时属性不存在，curtain 自动重新出现，避免默认浅色清屏闪一帧。
+ */
+.bevy-canvas-curtain {
+	position: absolute;
+	inset: 0;
+	background: var(--app-web-backdrop);
+	pointer-events: none;
+	opacity: 1;
+	transition: opacity 120ms linear;
+}
+
+.bevy-canvas-surface[data-canvas-presented="true"] + .bevy-canvas-curtain {
+	opacity: 0;
+}
+
+#bevy-canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+	outline: none;
+	touch-action: none;
+}
+
+/* 启动 / 加载失败状态：只显示必要信息，不含旧站点骨架与徽标。 */
+.status-overlay {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	background: var(--app-web-backdrop);
+	text-align: center;
+	z-index: 30;
+}
+
+/*
+ * 旧 `/settings` 兼容打开失败提示（change: 2026-10-17-move-settings-into-canvas-dialog）：
+ * 底部一条可识别错误 + 显式重试，不遮挡画布、不自动重试、不形成跳转循环。
+ */
+.settings-intent-error {
+	position: fixed;
+	left: 50%;
+	bottom: 24px;
+	transform: translateX(-50%);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	max-width: min(720px, 90vw);
+	padding: 10px 14px;
+	border: 1px solid var(--app-status-warning);
+	border-radius: 10px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-primary);
+	box-shadow: 0 8px 24px var(--app-web-shadow);
+	font-size: 12px;
+	z-index: 40;
+}
+
+.status-title {
+	font-size: 20px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+}
+
+.status-detail {
+	max-width: min(680px, 80vw);
+	margin: 0;
+	padding: 14px 18px;
+	background: var(--app-web-panel);
+	border: 1px solid var(--app-web-border);
+	border-radius: 14px;
+	color: var(--app-status-danger);
+	font-size: 13px;
+	line-height: 1.5;
+	text-align: left;
+	white-space: pre-wrap;
+	overflow: auto;
+}
+
+/*
+ * 持久化/上传状态气泡。当前仅由 media-import 的上传叠加层使用
+ * （画布同步状态已迁到右下角控件面板，change: move-sync-status-to-corner-panel）。
+ */
+.persist-status {
+	position: fixed;
+	top: 14px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 20;
+	padding: 6px 14px;
+	background: var(--app-web-panel);
+	border: 1px solid var(--app-web-border);
+	border-radius: 999px;
+	font-size: 12px;
+	color: var(--app-web-text-muted);
+	pointer-events: none;
+	backdrop-filter: var(--app-backdrop-filter, blur(8px));
+}
+
+/**
+ * 底部执行面板：固定贴底并避让安全区；宽度随视口收缩但不超过 760px。
+ * 桌面与窄屏都不产生横向溢出（100vw - 32px 留出两侧各 16px）。
+ */
+.node-execution-dock {
+	position: fixed;
+	left: 50%;
+	transform: translateX(-50%);
+	bottom: max(16px, env(safe-area-inset-bottom));
+	width: min(760px, calc(100vw - 32px));
+	z-index: 25;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.node-execution-dock__error {
+	margin: 0;
+	padding: 8px 12px;
+	background: var(--app-status-danger-background);
+	border: 1px solid var(--app-status-danger-soft);
+	border-radius: 10px;
+	color: var(--app-status-danger);
+	font-size: 13px;
+}
+
+/*
+ * Panel 级渲染失败兜底（change: fix-delete-node-crash-and-white-screen）。
+ * 只在面板位置显示；不遮挡 Canvas，因此其它 panel 仍可用。
+ */
+.render-error-fallback {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 12px 14px;
+	background: var(--app-status-danger-background);
+	border: 1px solid var(--app-status-danger-soft);
+	border-radius: 10px;
+}
+
+.render-error-fallback__message {
+	margin: 0;
+	color: var(--app-status-danger);
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+/* 诊断卡片里的恢复动作（例如「刷新页面」）。 */
+.node-execution-dock__diagnostic-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.node-execution-dock__retry {
+	align-self: flex-end;
+	padding: 6px 14px;
+	background: var(--app-interaction-accent-soft);
+	border: 1px solid var(--app-interaction-accent-soft);
+	border-radius: 999px;
+	color: var(--app-interaction-accent);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.node-execution-dock__dialog {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	display: grid;
+	place-items: center;
+	background: var(--app-web-overlay);
+}
+
+.node-execution-dock__dialog-card {
+	min-width: 280px;
+	padding: 20px 22px;
+	border-radius: 14px;
+	background: var(--app-web-panel);
+	border: 1px solid var(--app-web-border);
+	color: var(--app-web-text-primary);
+	box-shadow: 0 16px 40px var(--app-web-shadow);
+}
+
+.node-execution-dock__dialog-card p {
+	margin: 0 0 16px;
+	font-size: 15px;
+}
+
+.node-execution-dock__dialog-card button {
+	padding: 6px 14px;
+	border-radius: 999px;
+	border: 1px solid var(--app-web-border-strong);
+	background: var(--app-web-surface);
+	color: inherit;
+	cursor: pointer;
+}
+
+/* 全局任务历史页（change: split-web-runtime-services，任务 6.5）。 */
+
+/* DOM 3D 参数内容（复用底部 ExecutionPanel 外壳）与图片编辑器（任务 6.6）。 */
+.mc-panel.mc-panel--model {
+	height: auto;
+	overflow: hidden;
+}
+
+.node-param-panel {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 16px;
+	width: 100%;
+	min-width: 0;
+	align-items: start;
+}
+
+.node-param-panel__reason {
+	grid-column: 1 / -1;
+	color: var(--app-web-text-muted);
+	font-size: 12px;
+	margin: 6px 0 0;
+}
+
+.node-param-panel__mcp {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+}
+
+.node-param-panel__mcp-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: 12px;
+}
+
+.node-param-panel__mcp-heading strong {
+	font-weight: 600;
+}
+
+.node-param-panel__mcp-heading span {
+	color: var(--app-web-text-muted);
+	font-size: 11px;
+}
+
+.node-param-panel__mcp-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	color: var(--app-web-text-muted);
+	font-size: 11px;
+}
+
+.node-param-panel__mcp-control {
+	display: flex;
+	align-items: stretch;
+	gap: 6px;
+	min-width: 0;
+}
+
+.node-param-panel__mcp-field input,
+.node-param-panel__mcp-field textarea {
+	width: 100%;
+	min-width: 0;
+	box-sizing: border-box;
+	padding: 6px 7px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 6px;
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-primary);
+	font-family: var(--mc-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 11px;
+}
+
+.node-param-panel__mcp-control textarea {
+	flex: 1 1 auto;
+}
+
+.node-param-panel__mcp-control button {
+	flex: 0 0 auto;
+	align-self: center;
+	border: 1px solid var(--app-web-border);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--app-web-text-primary);
+	padding: 4px 7px;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.node-param-panel__mcp-control button:hover {
+	background: var(--app-web-subtle);
+}
+
+.node-param-panel__mcp-field textarea {
+	resize: none;
+	overflow: hidden;
+	line-height: 1.45;
+}
+
+.node-param-panel__mcp-field input:disabled,
+.node-param-panel__mcp-field textarea:disabled {
+	opacity: 0.68;
+	cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+	.node-param-panel {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 12px;
+	}
+}

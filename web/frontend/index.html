@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<!--
+			首帧主题引导：模块与样式表执行前，把已保存的暗色选择写到 <html data-app-theme="dark">，
+			让 generated-theme.css 的 dark 块先于 React 生效，避免暗色用户看到一帧白底。
+			存储键与 ThemeService 的 THEME_SELECTION_STORAGE_KEY 同源（测试校验两处一致）。
+		-->
+		<script>
+			try {
+				if (localStorage.getItem("woohaa3-app-theme-selection") === "dark") {
+					document.documentElement.dataset.appTheme = "dark";
+				}
+			} catch (_error) {
+				/* localStorage 不可用时保持默认浅色 */
+			}
+		</script>
+		<title>WooHaa3</title>
+	</head>
+	<body>
+		<div id="root"></div>
+		<!--
+			The Bevy WASM runtime is staged into /bevy by scripts/build-bevy-wasm.mjs
+			and loaded dynamically by web/frontend/src/canvas/bevy-runtime.ts.
+		-->
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

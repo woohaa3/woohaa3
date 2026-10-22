@@ -1,0 +1,72 @@
+{
+  "name": "@sdppp/pptask",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./providers/kie": {
+      "types": "./dist/types/providers/kie/index.d.ts",
+      "import": "./dist/providers/kie.js"
+    },
+    "./providers/apiframe": {
+      "types": "./dist/types/providers/apiframe/index.d.ts",
+      "import": "./dist/providers/apiframe.js"
+    },
+    "./providers/grsai": {
+      "types": "./dist/types/providers/grsai/index.d.ts",
+      "import": "./dist/providers/grsai.js"
+    },
+    "./providers/comfy": {
+      "types": "./dist/types/providers/comfy/index.d.ts",
+      "import": "./dist/providers/comfy.js"
+    },
+    "./providers/openai": {
+      "types": "./dist/types/providers/openai/index.d.ts",
+      "import": "./dist/providers/openai.js"
+    },
+    "./providers/gemini": {
+      "types": "./dist/types/providers/gemini/index.d.ts",
+      "import": "./dist/providers/gemini.js"
+    },
+    "./providers/modern": {
+      "types": "./dist/types/providers/modern/index.d.ts",
+      "import": "./dist/providers/modern.js"
+    },
+    "./providers/shared": {
+      "types": "./dist/types/providers/shared/index.d.ts",
+      "import": "./dist/providers/shared.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:integration": "PPTASK_INTEGRATION=1 vitest run tests/integration/providers.integration.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "ai": "^7.0.0"
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "^4.0.14"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "ai": "^7.0.99",
+    "typescript": "5.9.3",
+    "vite": "^8.3.0",
+    "vitest": "^4.1.11"
+  }
+}

@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package woohaa.ops.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "woohaa3/api/gen/go/woohaa/ops/v1;opsv1";
+
+message GetServerInfoRequest {}
+
+// 部署形态的自述。只含"开了哪些能力、用的是哪种实现"，**不含任何密钥、桶地址或凭据**：
+// 这个接口是公开的，它的用途是让运维和管理端回答"这台机器现在到底启用了什么"。
+message DeploymentCapability {
+  // 能力名，稳定标识：storage / access_control / sessions / device_login / object_fanout。
+  string name = 1;
+  // 是否启用。
+  bool enabled = 2;
+  // 实现或形态的短标识，例如 storage 的 `cos` / `local`。
+  // 不含地址、桶名与凭据——排障需要知道"哪种实现"，不需要知道"连的哪里"。
+  string variant = 3;
+  // 关键参数的只读摘要（例如有效期、上限），同样不含任何机密。
+  repeated string detail = 4;
+}
+
+message GetServerInfoResponse {
+  // 构建期注入；本机未注入时为 dev。
+  string version = 1;
+  string commit = 2;
+  google.protobuf.Timestamp build_time = 3;
+  google.protobuf.Timestamp started_at = 4;
+  // 多实例部署时区分是哪一个实例在应答。
+  string instance_id = 5;
+  string go_version = 6;
+  // 本实例实际启用的能力。顺序稳定，便于界面与脚本比对。
+  //
+  // 为什么放在这个公开接口上：部署排障里最常见的一句话是"我明明配了怎么没生效"。
+  // 服务端自己的启动日志能回答，但日志要登机器才能看；管理端能读这个接口，于是
+  // "配了没有 / 生效没有"在界面上一眼可见。
+  repeated DeploymentCapability capabilities = 7;
+}
+
+// 部署实例的自述。公开、只读。
+service OpsService {
+  rpc GetServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}

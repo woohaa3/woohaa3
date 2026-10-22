@@ -1,0 +1,44 @@
+{
+  "locator": "kie://market/grok-imagine/text-to-image",
+  "modelId": "grok-imagine/text-to-image",
+  "providerId": "kie",
+  "outputType": "image",
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/jobs/createTask"
+  },
+  "requestSchema": {
+    "type": "object",
+    "description": "Input parameters for the image generation task",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Text prompt describing the desired image. Required field.\n\n- Should be detailed and specific about the desired visual elements\n- Describe composition, style, lighting, mood, and other visual details\n- Maximum length: 5000 characters\n- Supports English language prompts"
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "description": "Specifies the width-to-height ratio of the generated image. Controls the aspect ratio of the output.\n\n- **2:3**: Portrait orientation (vertical)\n- **3:2**: Landscape orientation (horizontal) \n- **1:1**: Square format\n- **16:9**: Wide screen format\n- **9:16**: Tall screen format\n\nDefault: 1:1",
+        "enum": [
+          "2:3",
+          "3:2",
+          "1:1",
+          "16:9",
+          "9:16"
+        ]
+      },
+      "enable_pro": {
+        "type": "boolean",
+        "description": "Controls the request processing strategy.  \n  - `false`: Corresponds to **speed mode**. The system prioritizes response time and throughput, suitable for latency-sensitive scenarios.  \n  - `true`: Corresponds to **quality mode**. The system prioritizes processing quality and precision, suitable for scenarios requiring higher accuracy."
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "inputField": "input",
+    "callbackField": "callBackUrl"
+  },
+  "label": "Grok Imagine T2I"
+}

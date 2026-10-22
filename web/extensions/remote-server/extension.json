@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "remote-server",
+  "site": {
+    "name": "服务端接入",
+    "description": "一键接入远端 woohaa-server：登录、连接状态与断开。未配置时保持纯本地运行。",
+    "version": "1.0.0",
+    "configSchema": { "schemaId": "remote-server-config", "schemaVersion": 1 },
+    "capabilities": [
+      { "id": "remote-server.session", "kind": "handler", "description": "连接状态与会话读模型", "auth": "authenticated" },
+      { "id": "remote-server.login", "kind": "handler", "description": "用部署凭证换远端会话", "auth": "authenticated" },
+      { "id": "remote-server.logout", "kind": "handler", "description": "撤销远端会话", "auth": "authenticated" },
+      { "id": "remote-server.probe", "kind": "handler", "description": "探测远端可达性与登录方式", "auth": "authenticated" },
+      { "id": "remote-server.canvas-sync-enable", "kind": "handler", "description": "把一张本地画布显式启用为同步到远端", "auth": "authenticated" },
+      { "id": "remote-server.canvas-members", "kind": "handler", "description": "读取一张远端画布的协作者名单", "auth": "authenticated" },
+      { "id": "remote-server.canvas-member-upsert", "kind": "handler", "description": "新增或调整一名协作者（作者/部署管理员）", "auth": "authenticated" },
+      { "id": "remote-server.canvas-member-remove", "kind": "handler", "description": "移除一名协作者（作者/部署管理员）", "auth": "authenticated" },
+      { "id": "remote-server.canvas-share", "kind": "handler", "description": "读取画布的链接分享模式与修订号", "auth": "authenticated" },
+      { "id": "remote-server.canvas-share-update", "kind": "handler", "description": "修改画布的链接分享模式（作者/部署管理员）", "auth": "authenticated" },
+      { "id": "remote-server.canvas-invites", "kind": "handler", "description": "列出一张远端画布的协作邀请（作者/部署管理员）", "auth": "authenticated" },
+      { "id": "remote-server.canvas-invite-create", "kind": "handler", "description": "创建一条协作邀请并返回服务端签发的链接（作者/部署管理员）", "auth": "authenticated" },
+      { "id": "remote-server.canvas-invite-revoke", "kind": "handler", "description": "撤销一条协作邀请（作者/部署管理员）", "auth": "authenticated" },
+      { "id": "remote-server.generation-refresh", "kind": "handler", "description": "重新探测服务端托管生成目录并返回模型状态", "auth": "authenticated" },
+      { "id": "remote-server.diagnostics", "kind": "handler", "description": "读取已脱敏的服务端接入诊断事件", "auth": "authenticated" },
+      { "id": "remote-server.diagnostics-report", "kind": "handler", "description": "把诊断事件上报到已连接的服务端", "auth": "authenticated" },
+      { "id": "remote-server.oauth-start", "kind": "handler", "description": "发起浏览器授权码登录（本机 loopback 回调）", "auth": "authenticated" },
+      { "id": "remote-server.oauth-poll", "kind": "handler", "description": "轮询浏览器授权码登录结果", "auth": "authenticated" }
+    ],
+    "defaultEnabled": false,
+    "order": 80
+  },
+  "backend": { "module": "./backend", "factory": "createRemoteServerExtension", "optionsType": "RemoteServerExtensionOptions", "order": 80 },
+  "publicRoutes": [
+    {
+      "publicPath": "/api/remote-server",
+      "route": "remote-server",
+      "methods": ["GET"]
+    }
+  ],
+  "metadata": { "module": "./shared", "export": "REMOTE_SERVER_METADATA", "order": 80 }
+}

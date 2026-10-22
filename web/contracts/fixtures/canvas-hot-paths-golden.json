@@ -1,0 +1,28 @@
+{
+  "comment": "跨语言 golden（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 7.2）。Rust canvas_query 与 web/contracts 派生结果必须与这些固定值一致。",
+  "modelV2": {
+    "sceneVersion": "woohaa-model-scene-ir-v2",
+    "opsJson": "[{\"t\":\"group\",\"id\":\"root\",\"parent\":null,\"position\":[0,0,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"material\":null,\"color\":\"#cccccc\"},{\"t\":\"sphere\",\"id\":\"s\",\"parent\":\"root\",\"position\":[1,2,3],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"material\":null,\"color\":\"#ffffff\",\"radius\":2},{\"t\":\"box\",\"id\":\"b\",\"parent\":\"root\",\"position\":[0,0,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"material\":null,\"color\":\"#ff0000\",\"size\":[1,2,3]}]",
+    "signature": "db83340ea472618b",
+    "aabb": { "min": [-1, -1, -1.5], "max": [3, 4, 5] },
+    "extent": 10
+  },
+  "fnv": {
+    "empty": "cbf29ce484222325",
+    "abc": "e71fa2190541574b",
+    "unicode": { "text": "中文:😀", "hash": "d92c6886f040b9e8" }
+  },
+  "pointHit": {
+    "zoom": 1,
+    "surface": { "width": 1000, "height": 800 },
+    "nodes": [
+      { "id": "n", "type": "image", "x": 0, "y": 0, "width": 100, "height": 50 }
+    ],
+    "edges": [],
+    "cases": [
+      { "world": [10, 10], "expect": { "kind": "node", "nodeId": "n" } },
+      { "world": [100, 25], "expect": { "kind": "port", "nodeId": "n", "side": "output" } },
+      { "world": [500, 500], "expect": null }
+    ]
+  }
+}

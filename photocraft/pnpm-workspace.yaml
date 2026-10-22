@@ -1,0 +1,15 @@
+# PhotoCraft 独立工作区（change: 2026-10-21-extract-photocraft-subproject，design D1）。
+#
+# 只包含核心包与独立开发宿主。**不含** `integrations/woohaa`：宿主适配包通过
+# `web/pnpm-workspace.yaml` 的精确成员路径加入 Woohaa workspace 并依赖宿主 contracts，
+# 因此它不能出现在这里，否则核心会被迫与宿主共用安装与锁文件。
+packages:
+  - packages/*
+  - dev
+
+# 只允许 esbuild 的安装脚本（它自带平台二进制，必须允许）；其余一律不执行。
+onlyBuiltDependencies:
+  - esbuild
+
+allowBuilds:
+  esbuild: true

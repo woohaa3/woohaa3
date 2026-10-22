@@ -1,0 +1,36 @@
+{
+  "name": "@woohaa3/extension-grsai-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "grsai Provider：纳米香蕉 / GPT Image 绘图走原生绘图接口，Gemini/GPT 文本走 OpenAI 兼容对话接口，参考图由插件自己上传。",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sdppp/pptask": "workspace:*",
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/provider-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

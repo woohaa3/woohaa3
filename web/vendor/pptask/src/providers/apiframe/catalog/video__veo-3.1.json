@@ -1,0 +1,118 @@
+{
+  "locator": "apiframe://video/veo-3.1",
+  "modelId": "veo-3.1",
+  "providerId": "apiframe",
+  "modality": "video",
+  "label": "Veo 3.1",
+  "outputType": "video",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/videos/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "veo-3.1"
+        ],
+        "type": "string"
+      },
+      "veoParams": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "pattern": "^\\d+:\\d+$",
+            "type": "string"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "enum": [
+                  4
+                ],
+                "type": "number"
+              },
+              {
+                "enum": [
+                  6
+                ],
+                "type": "number"
+              },
+              {
+                "enum": [
+                  8
+                ],
+                "type": "number"
+              }
+            ]
+          },
+          "generate_audio": {
+            "type": "boolean"
+          },
+          "image": {
+            "format": "uri",
+            "type": "string"
+          },
+          "last_frame": {
+            "format": "uri",
+            "type": "string"
+          },
+          "negative_prompt": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "reference_images": {
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
+          "resolution": {
+            "enum": [
+              "720p",
+              "1080p"
+            ],
+            "type": "string"
+          },
+          "seed": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "veoParams",
+    "wirePath": "veoParams"
+  }
+}

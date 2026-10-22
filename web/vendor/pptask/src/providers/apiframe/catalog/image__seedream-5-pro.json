@@ -1,0 +1,107 @@
+{
+  "locator": "apiframe://image/seedream-5-pro",
+  "modelId": "seedream-5-pro",
+  "providerId": "apiframe",
+  "modality": "image",
+  "label": "Seedream 5 Pro",
+  "outputType": "image",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/images/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "seedream-5-pro"
+        ],
+        "type": "string"
+      },
+      "seedreamParams": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect_ratio": {
+            "type": "string"
+          },
+          "enhance_prompt": {
+            "type": "boolean"
+          },
+          "guidance_scale": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "number"
+          },
+          "height": {
+            "maximum": 4096,
+            "minimum": 512,
+            "type": "integer"
+          },
+          "image_input": {
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 14,
+            "type": "array"
+          },
+          "output_format": {
+            "enum": [
+              "jpg",
+              "png"
+            ],
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "seed": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "string"
+          },
+          "use_pre_llm": {
+            "type": "boolean"
+          },
+          "width": {
+            "maximum": 4096,
+            "minimum": 512,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "seedreamParams",
+    "wirePath": "seedreamParams"
+  }
+}

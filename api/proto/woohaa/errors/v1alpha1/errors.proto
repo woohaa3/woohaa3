@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package woohaa.errors.v1alpha1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "woohaa3/api/gen/go/woohaa/errors/v1alpha1;errorsv1alpha1";
+
+// FailureDetail 是挂在 Connect 错误详情里的失败原因。
+//
+// 服务端把 code / reason / message 都记在错误值本身（api/errs.Error），
+// 这里只把其中**客户端需要分支**的部分搬上线。客户端按 reason 分支，不得匹配 message。
+message FailureDetail {
+  // 稳定业务码，点分命名：canvas.not_found。
+  string reason = 1;
+
+  // 面向用户的说明，与服务端分发的文案同源。
+  string message = 2;
+
+  // 结构化补充：canvas_id、field、retryable 等。
+  map<string, string> metadata = 3;
+}
+
+// 分类上的选项：编译期由 api/tools/generrors 读出来生成本语言的错误值。
+extend google.protobuf.EnumValueOptions {
+  // 用户可见文案。
+  string text = 50001;
+  // Connect/gRPC 传输码（not_found / failed_precondition / ...）。
+  string connect_code = 50002;
+}
+
+// FailureReason 是失败分类的唯一来源。
+//
+// 新增一种失败：在这里加一个值（带文案与传输码），跑 pnpm -C api run gen，
+// 就会生成 errorsv1alpha1.ErrXxx；领域代码用它 + fmt.Errorf 包装即可。
+// 分段编号让两个人同时在不同域加分类时不会撞号。
+enum FailureReason {
+  FAILURE_REASON_UNSPECIFIED = 0;
+
+  FAILURE_REASON_CANVAS_NOT_FOUND = 100 [(text) = "画布不存在", (connect_code) = "not_found"];
+  FAILURE_REASON_CANVAS_DELETED = 101 [(text) = "画布已删除", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_CANVAS_CONFLICT = 102 [(text) = "画布已被其他人修改，请刷新后重试", (connect_code) = "aborted"];
+  FAILURE_REASON_CANVAS_INVALID = 103 [(text) = "请求参数不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_CANVAS_INVITE_EXPIRED = 104 [(text) = "邀请链接已过期", (connect_code) = "not_found"];
+  FAILURE_REASON_CANVAS_INVITE_REVOKED = 105 [(text) = "邀请链接已撤销", (connect_code) = "not_found"];
+  FAILURE_REASON_CANVAS_ID_TAKEN = 106 [(text) = "画布 id 已被占用", (connect_code) = "already_exists"];
+  FAILURE_REASON_CANVAS_OWNER_MISSING = 107 [(text) = "画布没有登记属主", (connect_code) = "internal"];
+  FAILURE_REASON_CANVAS_STORAGE_UNAVAILABLE = 108 [(text) = "画布存储读取失败", (connect_code) = "internal"];
+  FAILURE_REASON_CANVAS_MEMBER_API_REQUIRED = 109 [(text) = "画布维度权限请用 CanvasService 的成员接口", (connect_code) = "unimplemented"];
+  FAILURE_REASON_CANVAS_PUBLIC_URL_MISSING = 110 [(text) = "服务端未配置对外地址，无法生成邀请链接", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_SUBJECT_NOT_FOUND = 200 [(text) = "主体不存在", (connect_code) = "not_found"];
+  FAILURE_REASON_SUBJECT_EXISTS = 201 [(text) = "主体已存在", (connect_code) = "already_exists"];
+  FAILURE_REASON_SUBJECT_INVALID = 202 [(text) = "主体参数不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_SUBJECT_LAST_ADMIN = 203 [(text) = "不能停用最后一名启用的全局管理员", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_SUBJECT_ANCHOR_IMMUTABLE = 204 [(text) = "管理员锚点主体不能停用", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_SUBJECT_REGISTRY_DISABLED = 205 [(text) = "主体登记表未启用", (connect_code) = "unimplemented"];
+  FAILURE_REASON_RBAC_LAST_ADMIN = 300 [(text) = "不能撤销最后一名全局管理员", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_RBAC_INVALID_BINDING = 301 [(text) = "角色绑定不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_RBAC_ANCHOR_IMMUTABLE = 302 [(text) = "不能撤销管理员锚点", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_RBAC_NO_ADMIN_ANCHOR = 303 [(text) = "没有配置管理员锚点，且库中没有全局管理员", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_AUTH_UNAUTHENTICATED = 400 [(text) = "请先登录", (connect_code) = "unauthenticated"];
+  FAILURE_REASON_AUTH_PERMISSION_DENIED = 401 [(text) = "没有这个操作的权限", (connect_code) = "permission_denied"];
+  FAILURE_REASON_AUTH_SUBJECT_DISABLED = 402 [(text) = "账号已停用", (connect_code) = "permission_denied"];
+  FAILURE_REASON_AUTH_STORE_UNAVAILABLE = 403 [(text) = "认证服务暂时不可用，请稍后重试", (connect_code) = "unavailable"];
+  FAILURE_REASON_AUTH_SERVICE_UNAVAILABLE = 404 [(text) = "认证服务内部错误", (connect_code) = "internal"];
+  FAILURE_REASON_AUTH_AUTHORIZATION_UNAVAILABLE = 405 [(text) = "鉴权服务不可用", (connect_code) = "internal"];
+  FAILURE_REASON_IDENTITY_INVALID_CREDENTIAL = 500 [(text) = "凭证无效", (connect_code) = "unauthenticated"];
+  FAILURE_REASON_IDENTITY_STORE_UNAVAILABLE = 501 [(text) = "身份存储暂时不可用，请稍后重试", (connect_code) = "unavailable"];
+  FAILURE_REASON_IDENTITY_LAST_IDENTITY = 502 [(text) = "不能解绑最后一个登录方式", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_IDENTITY_ALIAS_OWNED = 503 [(text) = "该身份已被使用", (connect_code) = "already_exists"];
+  FAILURE_REASON_IDENTITY_ALIAS_INVALID = 504 [(text) = "身份别名不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_IDENTITY_BINDING_NOT_CLAIMABLE = 505 [(text) = "该身份属于另一个主体，不能转移", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_IDENTITY_METHOD_MANAGEMENT_DISABLED = 506 [(text) = "此部署未启用登录方式管理", (connect_code) = "unimplemented"];
+  FAILURE_REASON_IDENTITY_UNKNOWN_METHOD = 507 [(text) = "未知的登录方式", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_IDENTITY_GATEWAY_NOT_CONFIGURED = 508 [(text) = "此部署未接入身份网关", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_IDENTITY_DEVICE_LOGIN_DISABLED = 509 [(text) = "设备码登录未启用", (connect_code) = "unimplemented"];
+  FAILURE_REASON_IDENTITY_DEVICE_CODE_INVALID = 510 [(text) = "短码无效或已失效", (connect_code) = "not_found"];
+  FAILURE_REASON_IDENTITY_DEVICE_CODE_REQUIRED = 511 [(text) = "device_code 不能为空", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_IDENTITY_LOGIN_CODE_INVALID = 512 [(text) = "登录码无效或已过期", (connect_code) = "unauthenticated"];
+  FAILURE_REASON_IDENTITY_TOF_LOGIN_DISABLED = 513 [(text) = "企业统一登录未启用", (connect_code) = "unimplemented"];
+  FAILURE_REASON_IDENTITY_INVALID_REQUEST = 514 [(text) = "登录请求参数不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_PROFILE_TOO_LONG = 600 [(text) = "档案字段超出长度上限", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_PROFILE_INVALID_SUBJECT = 601 [(text) = "非法的档案主体", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_PROFILE_STORE_UNAVAILABLE = 602 [(text) = "档案存储不可用", (connect_code) = "internal"];
+  FAILURE_REASON_STORAGE_OBJECT_MISSING = 700 [(text) = "对象不存在", (connect_code) = "not_found"];
+  FAILURE_REASON_STORAGE_INVALID_KEY = 701 [(text) = "对象键不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_STORAGE_INVALID_CONTENT_TYPE = 702 [(text) = "内容类型不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_STORAGE_INVALID_SUBJECT = 703 [(text) = "签名主体不合法", (connect_code) = "unauthenticated"];
+  FAILURE_REASON_STORAGE_UNAVAILABLE = 704 [(text) = "对象存储不可用", (connect_code) = "internal"];
+  FAILURE_REASON_STORAGE_INVALID_METHOD = 705 [(text) = "method 必须是 GET 或 PUT", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_GENERATION_TASK_NOT_FOUND = 800 [(text) = "任务不存在", (connect_code) = "not_found"];
+  FAILURE_REASON_GENERATION_IDEMPOTENCY_CONFLICT = 801 [(text) = "同一提交键已用于不同的请求", (connect_code) = "already_exists"];
+  FAILURE_REASON_GENERATION_REFERENCE_MISSING = 802 [(text) = "参考对象不存在", (connect_code) = "not_found"];
+  FAILURE_REASON_GENERATION_REFERENCE_TOO_LARGE = 803 [(text) = "参考对象超过读取上限", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_GENERATION_UNAVAILABLE = 804 [(text) = "生成服务不可用", (connect_code) = "internal"];
+  FAILURE_REASON_GENERATION_CATALOG_CHANGED = 805 [(text) = "模型目录已变化，请重新选择模型", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_GENERATION_KEY_REUSED = 806 [(text) = "同一提交键已用于不同的请求", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_GENERATION_INPUT_UNSUPPORTED = 807 [(text) = "该模型不接受参考输入", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_GENERATION_LIMIT_EXCEEDED = 808 [(text) = "参考输入超过服务端上限", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_GENERATION_INVALID_REQUEST = 809 [(text) = "生成请求不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_TELEMETRY_INVALID = 900 [(text) = "遥测请求不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_TELEMETRY_RATE_LIMITED = 901 [(text) = "上报过于频繁，请稍后重试", (connect_code) = "resource_exhausted"];
+  FAILURE_REASON_TELEMETRY_TOO_LARGE = 902 [(text) = "遥测请求过大", (connect_code) = "resource_exhausted"];
+  FAILURE_REASON_TELEMETRY_STORE_UNAVAILABLE = 903 [(text) = "遥测存储不可用", (connect_code) = "internal"];
+  FAILURE_REASON_DIAGNOSTICS_INVALID = 1000 [(text) = "诊断请求不合法", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_DIAGNOSTICS_RATE_LIMITED = 1001 [(text) = "上报过于频繁，请稍后重试", (connect_code) = "resource_exhausted"];
+  FAILURE_REASON_DIAGNOSTICS_TOO_LARGE = 1002 [(text) = "诊断请求过大", (connect_code) = "resource_exhausted"];
+  FAILURE_REASON_DIAGNOSTICS_STORE_UNAVAILABLE = 1003 [(text) = "诊断存储不可用", (connect_code) = "internal"];
+  FAILURE_REASON_TOF_INVALID_CODE = 1100 [(text) = "登录授权码无效", (connect_code) = "invalid_argument"];
+  FAILURE_REASON_TOF_REJECTED = 1101 [(text) = "统一登录拒绝了这次登录", (connect_code) = "unauthenticated"];
+  FAILURE_REASON_TOF_UNAVAILABLE = 1102 [(text) = "统一登录服务暂时不可用", (connect_code) = "unavailable"];
+  FAILURE_REASON_COMPACTION_NOT_CONFIGURED = 1200 [(text) = "未配置快照合并命令", (connect_code) = "failed_precondition"];
+  FAILURE_REASON_ADMIN_AUTHORIZATION_REQUIRED = 1300 [(text) = "需要管理员权限", (connect_code) = "permission_denied"];
+  FAILURE_REASON_ADMIN_AUTHORIZATION_UNAVAILABLE = 1301 [(text) = "管理员鉴权不可用", (connect_code) = "internal"];
+  FAILURE_REASON_INTERNAL_UNEXPECTED = 1900 [(text) = "服务暂时不可用", (connect_code) = "internal"];
+  FAILURE_REASON_INTERNAL_PANIC = 1901 [(text) = "服务暂时不可用", (connect_code) = "internal"];
+}

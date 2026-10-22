@@ -1,0 +1,66 @@
+{
+  "locator": "kie://market/seedream/5-pro-text-to-image",
+  "modelId": "seedream/5-pro-text-to-image",
+  "providerId": "kie",
+  "outputType": "image",
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/v1/jobs/createTask"
+  },
+  "requestSchema": {
+    "type": "object",
+    "description": "Input parameters for the generation task",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "A text description of the image you want to generate (Max length: 3-5000 characters)",
+        "maxLength": 5000,
+        "minLength": 3
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "description": "Width-height ratio of the image, determining its visual form.",
+        "enum": [
+          "1:1",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "2:3",
+          "3:2",
+          "21:9"
+        ],
+        "default": "1:1"
+      },
+      "quality": {
+        "description": "Basic outputs 1K images, while High outputs 2K images.",
+        "type": "string",
+        "enum": [
+          "basic",
+          "high"
+        ],
+        "default": "basic"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "png",
+          "jpeg"
+        ],
+        "default": "png",
+        "description": "Format of the output image"
+      }
+    },
+    "required": [
+      "prompt",
+      "aspect_ratio",
+      "quality"
+    ]
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "inputField": "input",
+    "callbackField": "callBackUrl"
+  },
+  "label": "Seedream 5 Pro T2I"
+}

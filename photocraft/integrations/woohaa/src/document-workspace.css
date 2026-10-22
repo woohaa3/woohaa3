@@ -1,0 +1,206 @@
+/*
+ * 多文档工作区样式
+ * （change: 2026-10-21-add-photocraft-document-workspace，任务 2.2/2.4 / design D2/D4）。
+ *
+ * - tab 条：标题区下方、菜单与工具之上；横向滚动 + 文档列表；
+ * - 独立文件文档：不透明主题背景覆盖整个内容区，透明像素显示棋盘格；
+ * - 全部复用现有主题变量与共享控件，电脑与 Pad 共用同一布局。
+ */
+
+.photo-document-tabs {
+  /* 在内容区的文档流内占据自身高度；编辑器把菜单/工具栏绝对定位到内容矩形上方
+     （`--focus-toolbar` 已含 tab 高度），因此三者不会重叠。 */
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  background: var(--app-web-panel-muted, var(--app-web-panel));
+  border-bottom: 1px solid var(--app-web-border, rgba(127, 127, 127, 0.25));
+  z-index: 2;
+}
+
+.photo-document-tabs__strip {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.photo-document-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-width: 240px;
+  padding: 4px 4px 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.photo-document-tab:hover { background: var(--app-web-hover, rgba(127, 127, 127, 0.12)); }
+
+.photo-document-tab--active {
+  background: var(--app-web-panel);
+  border-color: var(--app-web-border, rgba(127, 127, 127, 0.35));
+  color: var(--app-web-text-primary);
+}
+
+.photo-document-tab__icon {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--app-web-text-muted);
+}
+
+.photo-document-tab__icon[data-source="node"] { border-radius: 50%; background: var(--app-web-accent, #4c8dff); }
+.photo-document-tab__icon[data-source="file"] { background: var(--app-web-text-muted); }
+
+.photo-document-tab__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 同名项才显示来源补充，避免每条都背一段噪音。 */
+.photo-document-tab__detail {
+  flex: 0 0 auto;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+.photo-document-tab__status {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 16px;
+  background: rgba(127, 127, 127, 0.18);
+}
+
+.photo-document-tab__status[data-tone="dirty"] { background: rgba(230, 160, 30, 0.22); color: var(--app-web-text-primary); }
+.photo-document-tab__status[data-tone="saving"] { background: rgba(76, 141, 255, 0.2); }
+.photo-document-tab__status[data-tone="error"] { background: rgba(230, 70, 70, 0.24); color: var(--app-web-text-primary); }
+.photo-document-tab__status[data-tone="warn"] { background: rgba(230, 160, 30, 0.18); }
+
+.photo-document-tab__close {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.photo-document-tab__close:hover { background: rgba(127, 127, 127, 0.24); }
+
+.photo-document-tabs__gate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -22px;
+  z-index: 12;
+  padding: 2px 10px;
+  background: rgba(230, 160, 30, 0.16);
+  color: var(--app-web-text-primary);
+  font-size: 11px;
+}
+
+/*
+ * 独立文件文档的内容背景（design D4）。
+ *
+ * 覆盖整个内容区的不透明主题底色，含透明像素后方；编辑器的透明像素由 CSS 棋盘格承接，
+ * 因此底层画布不会透出，也不会与节点呈现争夺主图。
+ */
+.photo-document-surface {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--app-web-background, #1b1d21);
+}
+
+.photo-document-surface__body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background-color: var(--app-web-background, #1b1d21);
+  background-image:
+    linear-gradient(45deg, rgba(127, 127, 127, 0.16) 25%, transparent 25%, transparent 75%, rgba(127, 127, 127, 0.16) 75%),
+    linear-gradient(45deg, rgba(127, 127, 127, 0.16) 25%, transparent 25%, transparent 75%, rgba(127, 127, 127, 0.16) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.photo-document-surface__preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.photo-document-surface__notice {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  color: var(--app-web-text-muted);
+  pointer-events: none;
+}
+
+.photo-document-surface__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--app-web-border, rgba(127, 127, 127, 0.25));
+  background: var(--app-web-panel);
+}
+
+.photo-document-surface__status {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-web-text-muted);
+  font-size: 11px;
+}
+
+.photo-document-surface__status[data-tone="error"] { color: var(--app-web-danger, #e64646); }

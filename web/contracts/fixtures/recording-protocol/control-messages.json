@@ -1,0 +1,196 @@
+{
+  "$comment": "Cross-language fixtures for the recording control protocol. Consumed by bevy/src/recording_protocol.rs and web/contracts/src/canvas/recording-protocol.test.ts. Do not add cases that require a second schema.",
+  "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+  "identity": {
+    "jobId": "job-1",
+    "attemptId": "attempt-1",
+    "executorInstanceId": "executor-1",
+    "executionEpoch": "3",
+    "snapshotHash": "snapshot-abc",
+    "contentIdentity": "content-def",
+    "profileKey": "native-v1-1280x720@30"
+  },
+  "cases": [
+    {
+      "name": "capability request",
+      "expect": "accepted",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "1",
+        "capabilityRequest": {
+          "sequence": "1",
+          "requestId": "req-cap",
+          "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+          "registrationNonce": "nonce"
+        }
+      }
+    },
+    {
+      "name": "progress with complete identity",
+      "expect": "accepted",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "42",
+        "progress": {
+          "sequence": "42",
+          "job": {
+            "jobId": "job-1",
+            "attemptId": "attempt-1",
+            "executorInstanceId": "executor-1",
+            "executionEpoch": "3",
+            "snapshotHash": "snapshot-abc",
+            "contentIdentity": "content-def",
+            "profileKey": "native-v1-1280x720@30"
+          },
+          "state": "RECORDING_JOB_STATE_RENDERING",
+          "completedFrames": "12",
+          "totalFrames": "90",
+          "sampleTime": 0.4
+        }
+      }
+    },
+    {
+      "name": "state changed to terminal",
+      "expect": "accepted",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "43",
+        "stateChanged": {
+          "sequence": "43",
+          "job": {
+            "jobId": "job-1",
+            "attemptId": "attempt-1",
+            "executorInstanceId": "executor-1",
+            "executionEpoch": "3",
+            "snapshotHash": "snapshot-abc",
+            "contentIdentity": "content-def",
+            "profileKey": "native-v1-1280x720@30"
+          },
+          "state": "RECORDING_JOB_STATE_SUCCEEDED"
+        }
+      }
+    },
+    {
+      "name": "unsupported protocol version",
+      "expect": "rejected",
+      "code": "recording-protocol-version-mismatch",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_2",
+        "sequence": "1",
+        "capabilityRequest": {}
+      }
+    },
+    {
+      "name": "missing protocol version",
+      "expect": "rejected",
+      "code": "recording-protocol-version-mismatch",
+      "message": {
+        "sequence": "1",
+        "capabilityRequest": {}
+      }
+    },
+    {
+      "name": "two payloads in one envelope",
+      "expect": "rejected",
+      "code": "recording-unknown-payload",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "1",
+        "capabilityRequest": {},
+        "listJobs": {}
+      }
+    },
+    {
+      "name": "unknown payload name",
+      "expect": "rejected",
+      "code": "recording-unknown-payload",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "1",
+        "teleportJob": {}
+      }
+    },
+    {
+      "name": "job scoped message without identity",
+      "expect": "rejected",
+      "code": "recording-identity-incomplete",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "1",
+        "cancelJob": {
+          "sequence": "1",
+          "requestId": "req-cancel",
+          "reason": "user"
+        }
+      }
+    },
+    {
+      "name": "job scoped message with partial identity",
+      "expect": "rejected",
+      "code": "recording-identity-incomplete",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "1",
+        "cancelJob": {
+          "sequence": "1",
+          "requestId": "req-cancel",
+          "job": { "jobId": "job-1", "attemptId": "attempt-1" },
+          "reason": "user"
+        }
+      }
+    },
+    {
+      "name": "unknown error stage enum",
+      "expect": "rejected",
+      "code": "recording-unknown-enum",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "2",
+        "stateChanged": {
+          "sequence": "2",
+          "job": {
+            "jobId": "job-1",
+            "attemptId": "attempt-1",
+            "executorInstanceId": "executor-1",
+            "executionEpoch": "3",
+            "snapshotHash": "snapshot-abc",
+            "contentIdentity": "content-def",
+            "profileKey": "native-v1-1280x720@30"
+          },
+          "state": "RECORDING_JOB_STATE_FAILED",
+          "error": { "stage": "RECORDING_ERROR_STAGE_VIBES", "code": "x", "message": "y" }
+        }
+      }
+    },
+    {
+      "name": "known error stage enum",
+      "expect": "accepted",
+      "message": {
+        "protocolVersion": "RECORDING_PROTOCOL_VERSION_1_ALPHA_1",
+        "sequence": "3",
+        "stateChanged": {
+          "sequence": "3",
+          "job": {
+            "jobId": "job-1",
+            "attemptId": "attempt-1",
+            "executorInstanceId": "executor-1",
+            "executionEpoch": "3",
+            "snapshotHash": "snapshot-abc",
+            "contentIdentity": "content-def",
+            "profileKey": "native-v1-1280x720@30"
+          },
+          "state": "RECORDING_JOB_STATE_FAILED",
+          "error": {
+            "stage": "RECORDING_ERROR_STAGE_FRAME_READY",
+            "code": "capture-readiness-timeout",
+            "message": "frame 7 not ready",
+            "frameIndex": "7",
+            "sampleTime": 0.23333333333333334,
+            "subjectId": "camera-1",
+            "transient": true
+          }
+        }
+      }
+    }
+  ]
+}

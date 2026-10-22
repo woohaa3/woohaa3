@@ -1,0 +1,13 @@
+.execution-launch-particle {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+  border-radius: 50%;
+  background: var(--app-status-warning-soft);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--app-status-warning-soft) 60%, transparent);
+  pointer-events: none;
+  z-index: 1000;
+}

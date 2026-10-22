@@ -1,0 +1,177 @@
+/* 由 scripts/generate-theme-tokens.mjs 生成，请勿手工编辑。 */
+/* canonical source: web/contracts/src/theme/app-theme.default.json（:root） */
+/* canonical source: web/contracts/src/theme/app-theme.dark.json（:root[data-app-theme="dark"]） */
+/* 根级语义 token：Theme Provider 会用当前 preset 覆盖这些值。 */
+:root {
+  color-scheme: light;
+  /* web */
+  --app-web-backdrop: #f8faf9;
+  --app-web-surface: #ffffff;
+  --app-web-panel: #ffffff;
+  --app-web-elevated: #ffffff;
+  --app-web-subtle: #f6f8f6;
+  --app-web-text-primary: #30443a;
+  --app-web-text-muted: #849188;
+  --app-web-text-inverse: #ffffff;
+  --app-web-border: #e2e8e4;
+  --app-web-border-strong: #7f9389;
+  --app-web-overlay: #141e1a80;
+  --app-web-shadow: #2d423933;
+  /* interaction */
+  --app-interaction-accent: #16846c;
+  --app-interaction-accent-hover: #12755f;
+  --app-interaction-accent-pressed: #0f6553;
+  --app-interaction-accent-soft: #d6ece2;
+  --app-interaction-focus: #16846c;
+  --app-interaction-on-accent: #ffffff;
+  --app-interaction-disabled: #b6c2bb;
+  /* status */
+  --app-status-success: #238569;
+  --app-status-success-soft: #8fd3bf;
+  --app-status-success-background: #e9f5ef;
+  --app-status-on-success: #ffffff;
+  --app-status-warning: #a07627;
+  --app-status-warning-soft: #e7c98a;
+  --app-status-warning-background: #fbf3e5;
+  --app-status-on-warning: #ffffff;
+  --app-status-danger: #bb5464;
+  --app-status-danger-soft: #e0a7b0;
+  --app-status-danger-background: #f7edef;
+  --app-status-on-danger: #ffffff;
+  --app-status-info: #3b7299;
+  --app-status-info-soft: #a9c9dd;
+  --app-status-info-background: #eaf3fa;
+  --app-status-on-info: #ffffff;
+  /* canvas */
+  --app-canvas-node-surface: #ffffff;
+  --app-canvas-node-content: #f1f5f6;
+  --app-canvas-node-border: #d9e1dd;
+  --app-canvas-node-border-selected: #16846c;
+  --app-canvas-node-shadow: #e4e9e6;
+  --app-canvas-node-selected-halo: #d6ece2;
+  --app-canvas-edge-default: #9aaea4;
+  --app-canvas-edge-selected: #16846c;
+  --app-canvas-edge-draft: #16846c;
+  --app-canvas-edge-label-background: #f8faf9;
+  --app-canvas-edge-label-text: #526b5e;
+  --app-canvas-port-default: #abbdb3;
+  --app-canvas-port-fill: #ffffff;
+  --app-canvas-resize-handle: #526b5e;
+  --app-canvas-resize-handle-stripe: #ffffff;
+  --app-canvas-progress-track: #e2e8e7;
+  --app-canvas-progress-fill: #16846c;
+  --app-canvas-close-icon: #8a9a91;
+  --app-canvas-body-text: #526b65;
+  /* nodeKind */
+  --app-node-text-foreground: #3b7299;
+  --app-node-text-tint: #eaf3fa;
+  --app-node-image-foreground: #a45378;
+  --app-node-image-tint: #fbedf2;
+  --app-node-model-foreground: #247f71;
+  --app-node-model-tint: #e9f5ef;
+  --app-node-audio-foreground: #a07627;
+  --app-node-audio-tint: #fbf3e5;
+  --app-node-video-foreground: #986a44;
+  --app-node-video-tint: #faf0e9;
+  --app-node-default-foreground: #526b5e;
+  --app-node-default-tint: #f1f5f3;
+  /* grid */
+  --app-grid-minor: #e2ead7;
+  --app-grid-major: #cee0cc;
+  --app-grid-selection: #16846c;
+  --app-grid-gizmo: #3b7299;
+  /* mediaDialog */
+  --app-media-dialog-backdrop: #101814f0;
+  --app-media-dialog-surface: #101814f0;
+  --app-media-dialog-text: #f1f5f2;
+  --app-media-dialog-text-muted: #cfdad4;
+  --app-media-dialog-control: #ffffff;
+  --app-media-dialog-control-border: #cbd7cf;
+}
+
+:root[data-app-theme="dark"] {
+  color-scheme: dark;
+  /* web */
+  --app-web-backdrop: #101614;
+  --app-web-surface: #151c19;
+  --app-web-panel: #18201c;
+  --app-web-elevated: #1d2722;
+  --app-web-subtle: #202a25;
+  --app-web-text-primary: #e6efe9;
+  --app-web-text-muted: #93a69b;
+  --app-web-text-inverse: #f5faf7;
+  --app-web-border: #2b3731;
+  --app-web-border-strong: #6b8175;
+  --app-web-overlay: #050908cc;
+  --app-web-shadow: #00000066;
+  /* interaction */
+  --app-interaction-accent: #2fb99b;
+  --app-interaction-accent-hover: #3fc9ab;
+  --app-interaction-accent-pressed: #27a88d;
+  --app-interaction-accent-soft: #173b32;
+  --app-interaction-focus: #2fb99b;
+  --app-interaction-on-accent: #07120e;
+  --app-interaction-disabled: #5d6e66;
+  /* status */
+  --app-status-success: #35a686;
+  --app-status-success-soft: #1e4a3b;
+  --app-status-success-background: #12332a;
+  --app-status-on-success: #06120e;
+  --app-status-warning: #d9a93f;
+  --app-status-warning-soft: #4a3a18;
+  --app-status-warning-background: #33270f;
+  --app-status-on-warning: #1a1305;
+  --app-status-danger: #d76d7c;
+  --app-status-danger-soft: #4a2730;
+  --app-status-danger-background: #33181f;
+  --app-status-on-danger: #1f0b10;
+  --app-status-info: #6aa6d6;
+  --app-status-info-soft: #1f3850;
+  --app-status-info-background: #142739;
+  --app-status-on-info: #08141f;
+  /* canvas */
+  --app-canvas-node-surface: #1b2420;
+  --app-canvas-node-content: #202b26;
+  --app-canvas-node-border: #34443c;
+  --app-canvas-node-border-selected: #2fb99b;
+  --app-canvas-node-shadow: #00000055;
+  --app-canvas-node-selected-halo: #1d4a3e;
+  --app-canvas-edge-default: #546b60;
+  --app-canvas-edge-selected: #2fb99b;
+  --app-canvas-edge-draft: #2fb99b;
+  --app-canvas-edge-label-background: #101614;
+  --app-canvas-edge-label-text: #c5d5cc;
+  --app-canvas-port-default: #63796e;
+  --app-canvas-port-fill: #1b2420;
+  --app-canvas-resize-handle: #c5d5cc;
+  --app-canvas-resize-handle-stripe: #101614;
+  --app-canvas-progress-track: #2b3731;
+  --app-canvas-progress-fill: #2fb99b;
+  --app-canvas-close-icon: #93a69b;
+  --app-canvas-body-text: #c3d2c9;
+  /* nodeKind */
+  --app-node-text-foreground: #7fb9e8;
+  --app-node-text-tint: #162b3b;
+  --app-node-image-foreground: #e08fb0;
+  --app-node-image-tint: #3a1f2b;
+  --app-node-model-foreground: #5ecbb8;
+  --app-node-model-tint: #12312c;
+  --app-node-audio-foreground: #e0b45e;
+  --app-node-audio-tint: #3a2d14;
+  --app-node-video-foreground: #d99a6c;
+  --app-node-video-tint: #3a2619;
+  --app-node-default-foreground: #a9bdb1;
+  --app-node-default-tint: #232f29;
+  /* grid */
+  --app-grid-minor: #1f2a25;
+  --app-grid-major: #2b3a32;
+  --app-grid-selection: #2fb99b;
+  --app-grid-gizmo: #7fb9e8;
+  /* mediaDialog */
+  --app-media-dialog-backdrop: #070b09f2;
+  --app-media-dialog-surface: #070b09f2;
+  --app-media-dialog-text: #eef5f0;
+  --app-media-dialog-text-muted: #b5c7bc;
+  --app-media-dialog-control: #18201c;
+  --app-media-dialog-control-border: #52685c;
+}

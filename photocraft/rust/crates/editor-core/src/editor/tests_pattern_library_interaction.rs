@@ -1,0 +1,42 @@
+use super::*;
+use photocraft_doc::{Pattern,Surface};
+#[test]
+fn library_changes_preserve_active_style_snapshot_history_and_document_resources() {
+    let mut editor=Editor::new();
+    editor.execute("file.new",json!({"width":32,"height":32})).unwrap();
+    editor.execute("layer.new.layer",json!({})).unwrap();
+    let layer=editor.active_layer_id().unwrap();
+    let pattern=Pattern{id:"user-one".into(),name:"原图案".into(),width:16,height:16,surface:Surface::new(editor.active_doc().unwrap().doc.pixel_format())};
+    editor.pattern_library.append(vec![pattern],&editor.session.patterns.items).unwrap();
+    let original=editor.pattern_library.patterns()[0].clone();
+    let before=editor.state();let hash=editor.content_hash().unwrap();
+    editor.begin_layer_properties(layer.0).unwrap();
+    let mut fx=json!(photocraft_engine::layer_style::effect_from_params("patternOverlay",&Value::Null).unwrap());
+    fx["PatternOverlay"]["id"]=json!(original.id);fx["PatternOverlay"]["name"]=json!(original.name);
+    editor.preview_layer_properties(json!({"style":{"enabled":true,"items":[fx.clone()]}})).unwrap();
+    let state=editor.rename_pattern_preset("user-one","新名字").unwrap();
+    let renamed=editor.pattern_library.patterns()[0].clone();
+    assert!(state["patternPresets"].as_array().unwrap().iter().any(|p|p["id"]==original.id));
+    assert!(state["patternPresets"].as_array().unwrap().iter().any(|p|p["id"]==renamed.id));
+    assert_eq!(editor.preview_document().unwrap().patterns,vec![original.clone()]);
+    assert_eq!(editor.state(),before);assert_eq!(editor.content_hash().unwrap(),hash);
+    fx["PatternOverlay"]["id"]=json!(renamed.id);fx["PatternOverlay"]["name"]=json!(renamed.name);
+    editor.preview_layer_properties(json!({"style":{"enabled":true,"items":[fx]}})).unwrap();
+    editor.delete_pattern_preset("user-one").unwrap();
+    assert_eq!(editor.preview_document().unwrap().patterns,vec![renamed.clone()]);
+    assert!(editor.import_pattern_presets(b"bad").is_err());
+    assert_eq!(editor.state(),before);assert_eq!(editor.content_hash().unwrap(),hash);
+    editor.commit_layer_properties().unwrap();
+    assert_eq!(editor.active_doc().unwrap().doc.patterns,vec![renamed]);
+    let saved=photocraft_format::save_to_bytes(&editor.active_doc().unwrap().doc,&Default::default()).unwrap();
+    let mut reopened=Editor::new();reopened.open_project(&saved,None).unwrap();
+    assert_eq!(reopened.content_hash().unwrap(),editor.content_hash().unwrap());
+    assert_eq!(reopened.pattern_library()["presets"],json!([]));
+    editor.undo().unwrap();assert_eq!(editor.content_hash().unwrap(),hash);
+    editor.redo().unwrap();assert_ne!(editor.content_hash().unwrap(),hash);
+    editor.pattern_library.append(vec![original],&[]).unwrap();
+    let snapshot=editor.pattern_library_snapshot().unwrap();
+    editor.begin_layer_properties(layer.0).unwrap();
+    editor.restore_pattern_library(&snapshot).unwrap();editor.cancel_layer_properties();
+    assert_eq!(editor.pattern_library()["presets"].as_array().unwrap().len(),1);
+}

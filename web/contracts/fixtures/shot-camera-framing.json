@@ -1,0 +1,103 @@
+{
+  "version": "woohaa-shot-camera-framing-v2",
+  "note": "Rust shot_camera::framing 与 Web contracts/canvas/shot-camera.ts 共用的取景数值 fixture；两侧用同一容差断言。`aspect` 是 canonical 画幅字符串（Web），`aspectRatio` 是其数值比例（Rust）。`elevation` 为竖直半圆仰角（弧度，change: add-shot-camera-elevation-control 引入）。拍摄镜头改透视后派生携带 `fov` 而非 `orthoSize`（change: switch-shot-camera-to-perspective）。",
+  "tolerance": 0.000002,
+  "cases": [
+    {
+      "name": "unit-box-16-9",
+      "aabb": { "min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0] },
+      "azimuth": 0.0,
+      "elevation": 0.7853981633974483,
+      "distance": 100.0,
+      "aspect": "16:9",
+      "aspectRatio": 1.7777777777777777,
+      "focusOffset": [0.0, 0.0, 0.0],
+      "expected": {
+        "boundingRadius": 1.7320508075688772,
+        "fitDistance": 4.590187126526446,
+        "distance": 10.09841167835818,
+        "focus": [0.0, 0.0, 0.0],
+        "position": [0.0, 7.140655376980494, 7.140655376980495],
+        "fov": 0.8726646259971648
+      }
+    },
+    {
+      "name": "offset-box-1-1",
+      "aabb": { "min": [0.0, 0.0, 0.0], "max": [2.0, 4.0, 2.0] },
+      "azimuth": 1.5707963267948966,
+      "elevation": 0.7853981633974483,
+      "distance": 10.0,
+      "aspect": "1:1",
+      "aspectRatio": 1.0,
+      "focusOffset": [0.0, 1.0, 0.0],
+      "expected": {
+        "boundingRadius": 2.449489742783178,
+        "fitDistance": 6.491504888164086,
+        "distance": 10.0,
+        "focus": [1.0, 3.0, 1.0],
+        "position": [8.071067811865476, 10.071067811865476, 1.0000000000000004],
+        "fov": 0.8726646259971648
+      }
+    },
+    {
+      "name": "flat-box-4-5",
+      "aabb": { "min": [-3.0, -0.2, -3.0], "max": [3.0, 0.2, 3.0] },
+      "azimuth": -0.7,
+      "elevation": 0.7853981633974483,
+      "distance": 3.0,
+      "aspect": "4:5",
+      "aspectRatio": 0.8,
+      "focusOffset": [0.5, 0.0, -0.5],
+      "expected": {
+        "boundingRadius": 4.24735211631906,
+        "fitDistance": 13.610270862243638,
+        "distance": 3.0,
+        "focus": [0.5, 0.0, -0.5],
+        "position": [-0.8665920856182572, 2.1213203435596424, 1.1224752914992397],
+        "fov": 0.8726646259971648
+      }
+    },
+    {
+      "name": "variable-elevation-16-9",
+      "aabb": { "min": [-2.0, -1.0, -2.0], "max": [2.0, 3.0, 2.0] },
+      "azimuth": 0.9,
+      "elevation": -0.3,
+      "distance": 8.0,
+      "aspect": "16:9",
+      "aspectRatio": 1.7777777777777777,
+      "focusOffset": [0.0, 0.0, 0.0],
+      "expected": {
+        "boundingRadius": 3.4641016151377544,
+        "fitDistance": 9.180374253052891,
+        "distance": 8.0,
+        "focus": [0.0, 1.0, 0.0],
+        "position": [5.986726237449047, -1.3641616532907164, 4.7507734775454065],
+        "fov": 0.8726646259971648
+      }
+    }
+  ],
+  "dragCases": [
+    {
+      "name": "orbit-half-screen",
+      "startAzimuth": 0.3,
+      "deltaX": 120.0,
+      "surfaceWidth": 800.0,
+      "expectedAzimuth": 1.242477796076938
+    },
+    {
+      "name": "distance-in",
+      "startDistance": 10.0,
+      "deltaPixels": 50.0,
+      "surfaceHeight": 600.0,
+      "fitDistance": 5.0,
+      "expectedDistance": 9.22282056974167
+    },
+    {
+      "name": "elevation-up",
+      "startElevation": 0.5,
+      "deltaPixels": -25.0,
+      "surfaceHeight": 100.0,
+      "expectedElevation": 1.2853981633974483
+    }
+  ]
+}

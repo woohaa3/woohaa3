@@ -1,0 +1,54 @@
+/**
+ * video-editor 专用样式（change: 2026-10-12-unify-node-editors-and-focus-transitions，design D2/D4）。
+ *
+ * 从 `cordis/ui/ui.css` 迁出的视频内容命中面、底部播放/截帧控制、右侧截帧检查器与本地
+ * 加载提示。公共框架（contentRect 变量、顶部栏、连接栏、面板占位）保留在
+ * `cordis/focus/focus.css`。由 video-editor 工作区入口加载。
+ */
+
+.app[data-focus-kind] .video-focus-workspace__stage {
+	position: absolute; inset: auto; left: var(--focus-content-x); top: var(--focus-content-y);
+	width: var(--focus-content-width); height: var(--focus-content-height);
+	z-index: 20; touch-action: none; cursor: grab;
+}
+.app[data-focus-kind] .video-focus-workspace__stage:active { cursor: grabbing; }
+.video-focus-workspace__loading { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 8px 12px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--mc-text); background: var(--mc-panel); font-size: 13px; pointer-events: none; }
+.video-focus-workspace__loading-ring { width: 28px; height: 28px; border: 3px solid var(--mc-border); border-top-color: currentColor; border-radius: 50%; animation: video-focus-loading-spin 1s linear infinite; }
+@keyframes video-focus-loading-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .video-focus-workspace__loading-ring { animation: none; } }
+.app[data-focus-kind] .video-focus-workspace__player {
+	position: absolute; left: 0; right: 0; bottom: 44px; height: var(--focus-player-height); box-sizing: border-box;
+	display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 8px;
+	background: var(--mc-panel); border-top: 1px solid var(--mc-border); z-index: 35;
+}
+.app[data-focus-kind] .video-focus-workspace__player input[type="range"] { flex: 1 1 120px; min-width: 80px; }
+.app[data-focus-kind] .video-focus-workspace__controls { display: flex; gap: 4px; flex-shrink: 0; }
+.app[data-focus-kind] .video-focus-workspace__player .video-frame-dialog__capture { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 0; }
+.app[data-focus-kind] .video-focus-workspace__inspector {
+	position: absolute; top: var(--focus-header); bottom: var(--focus-footer); right: var(--focus-rail);
+	width: var(--focus-panel-width); height: auto; display: flex; flex-direction: column; gap: 8px;
+	padding: 12px; box-sizing: border-box; background: var(--mc-panel); border-left: 1px solid var(--mc-border);
+	overflow-y: auto; z-index: 30;
+}
+.app[data-focus-kind] .video-focus-workspace__inspector .video-frame-dialog__frames { position: static; width: auto; height: auto; max-height: none; border: 0; padding: 0; }
+.app[data-focus-kind] .video-focus-workspace__actions { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.app[data-focus-kind] .video-focus-workspace__actions .video-frame-dialog__footer-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.app[data-focus-kind] .video-focus-workspace__readonly { font-size: 12px; color: var(--mc-text-muted); }
+.app[data-focus-kind] .video-focus-workspace__meta { position: absolute; right: calc(var(--focus-rail) + 8px); bottom: calc(var(--focus-footer) + 6px); font-size: 11px; color: var(--mc-text-muted); font-variant-numeric: tabular-nums; z-index: 36; pointer-events: none; }
+.app[data-focus-kind] .video-focus-workspace__busy { position: absolute; left: 50%; top: var(--focus-header); transform: translateX(-50%); margin-top: 8px; padding: 4px 10px; border-radius: 999px; background: var(--mc-panel); border: 1px solid var(--mc-border); font-size: 12px; z-index: 40; }
+.app[data-focus-kind] .video-focus-workspace__error { position: absolute; top: var(--focus-header); left: var(--focus-content-x); width: var(--focus-content-width); padding: 8px 12px; z-index: 50; background: var(--mc-panel); color: var(--app-status-danger); font-size: 12px; }
+.app[data-focus-panel="history"] .video-focus-workspace__inspector { display: none; }
+.app[data-focus-narrow="true"] .video-focus-workspace__inspector {
+	left: var(--focus-rail); right: var(--focus-rail); top: auto; bottom: 44px;
+	width: auto; height: var(--focus-panel-height); border-top: 1px solid var(--mc-border); border-left: 0;
+}
+.app[data-focus-narrow="true"] .video-focus-workspace__player { bottom: calc(44px + var(--focus-panel-height)); }
+.app[data-focus-kind="video"][data-focus-narrow="true"] .focus-connections { bottom: calc(var(--focus-footer) + var(--focus-panel-height)); }
+.app[data-focus-narrow="true"] .video-focus-workspace__meta { display: none; }
+
+@media (max-width: 479px) {
+  .app[data-focus-kind] .video-focus-workspace__player { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(3, 1fr); gap: 4px; }
+  .app[data-focus-kind] .video-focus-workspace__controls { justify-content: center; }
+  .app[data-focus-kind] .video-focus-workspace__player .video-frame-dialog__capture { justify-content: center; flex-wrap: nowrap; }
+  .video-focus-workspace__player .ui-button, .video-focus-workspace__player .ui-icon-button { min-height: 44px; min-width: 44px; }
+}

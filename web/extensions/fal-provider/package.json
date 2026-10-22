@@ -1,0 +1,36 @@
+{
+  "name": "@woohaa3/extension-fal-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "fal.ai Provider：按 endpoint id 读取队列 OpenAPI 定义，图片、视频、音频与文本都走队列接口。",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sdppp/pptask": "workspace:*",
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/provider-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

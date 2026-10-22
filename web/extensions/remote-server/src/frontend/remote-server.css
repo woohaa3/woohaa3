@@ -1,0 +1,557 @@
+/* 顶栏连接状态徽标：只消费主题生成的 `--app-*` token，不写死色值。
+   token 名必须与 web/frontend/src/cordis/ui/generated-theme.css 一致；
+   写错的表现是样式静默失效（CSS 变量取不到值不会报错）。 */
+
+.remote-server-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--app-web-text-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.remote-server-badge.is-clickable {
+  cursor: pointer;
+}
+
+.remote-server-badge.is-clickable:hover {
+  background: var(--app-web-subtle);
+}
+
+.remote-server-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--app-web-text-muted);
+}
+
+/* 本地是正常形态：中性色，不用警示色，避免把「我就是只用本地」表现成故障。 */
+.remote-server-badge.is-local .remote-server-badge__dot {
+  background: var(--app-web-text-muted);
+}
+
+.remote-server-badge.is-connected {
+  color: var(--app-status-success);
+  border-color: color-mix(in srgb, var(--app-status-success) 40%, transparent);
+}
+
+.remote-server-badge.is-connected .remote-server-badge__dot {
+  background: var(--app-status-success);
+}
+
+.remote-server-badge.is-connecting .remote-server-badge__dot {
+  background: var(--app-status-warning);
+}
+
+.remote-server-badge.is-error {
+  color: var(--app-status-danger);
+  border-color: color-mix(in srgb, var(--app-status-danger) 40%, transparent);
+}
+
+.remote-server-badge.is-error .remote-server-badge__dot {
+  background: var(--app-status-danger);
+}
+
+/* 服务端接入日志调试窗口。同样只消费 `--app-*` token，不写死色值；
+   级别色复用状态 token，保证与顶栏徽标、设置面板的语义一致。 */
+
+.remote-server-debug__note {
+  margin: 0 0 12px;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-debug__summary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-debug__summary dt {
+  color: var(--app-web-text-muted);
+}
+
+.remote-server-debug__summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--app-web-text-primary);
+}
+
+.remote-server-debug__summary dd[data-phase="connected"] {
+  color: var(--app-status-success);
+}
+
+.remote-server-debug__summary dd[data-phase="error"] {
+  color: var(--app-status-danger);
+}
+
+.remote-server-debug__summary dd[data-phase="connecting"] {
+  color: var(--app-status-warning);
+}
+
+.remote-server-debug__unavailable {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--app-status-warning) 40%, transparent);
+  border-radius: 8px;
+  background: var(--app-status-warning-soft);
+  color: var(--app-web-text-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-debug__status {
+  margin: 0 0 8px;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-debug__status[data-state="error"] {
+  color: var(--app-status-danger);
+}
+
+.remote-server-debug__empty {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--app-web-border);
+  border-radius: 8px;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.remote-server-debug__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+  list-style: none;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.remote-server-debug__entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--app-web-text-primary);
+}
+
+.remote-server-debug__entry[data-level="warn"] .remote-server-debug__level {
+  color: var(--app-status-warning);
+}
+
+.remote-server-debug__entry[data-level="error"] .remote-server-debug__level {
+  color: var(--app-status-danger);
+}
+
+.remote-server-debug__time {
+  color: var(--app-web-text-muted);
+}
+
+.remote-server-debug__level {
+  min-width: 44px;
+  color: var(--app-status-info);
+}
+
+.remote-server-debug__category {
+  color: var(--app-web-text-muted);
+}
+
+.remote-server-debug__event {
+  font-weight: 600;
+}
+
+.remote-server-debug__code,
+.remote-server-debug__message {
+  color: var(--app-web-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* 键值细节：key 弱化、value 用主文本色，形成 `status=200` 的视觉分组；
+   允许在窄窗口里换行，长 host / 长值用 anywhere 断开，避免把整行撑出横向滚动。 */
+.remote-server-debug__attributes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.remote-server-debug__attribute {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--app-web-subtle);
+}
+
+.remote-server-debug__attribute-key {
+  color: var(--app-web-text-muted);
+}
+
+.remote-server-debug__attribute-value {
+  color: var(--app-web-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.remote-server-debug__feedback {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--app-web-text-muted);
+}
+
+.remote-server-debug__feedback[data-tone="success"] {
+  color: var(--app-status-success);
+}
+
+.remote-server-debug__feedback[data-tone="danger"] {
+  color: var(--app-status-danger);
+}
+
+/* 设备码登录：短码是给人抄/复制的，等宽字体 + 字距让它不容易读错。 */
+.remote-server-device {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+}
+
+.remote-server-device__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.remote-server-device__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  /* 短码可能被复制进剪贴板后又被粘贴：关掉选择高亮以外的一切装饰，保持可读。 */
+  user-select: all;
+}
+
+/* 浏览器授权登录：与设备码同一块「正在等待对方完成」的容器形态，
+   但内容只有说明与「改用短码」出口——这里不需要人抄任何东西。 */
+.remote-server-oauth {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+}
+
+/* 探测成功：这条地址确实可达。中性偏绿，不是警示也不是"已连接"。 */
+.remote-server-ok {
+  font-size: 12px;
+  color: var(--app-status-success);
+}
+
+/* 画布切换器条目上的「同步远端」动作。
+   形态刻意接近顶栏徽标（描边胶囊、12px、透明底）：它是条目旁的次要显式动作，不该比
+   条目本身（画布标题）更抢眼；错误就地显示在按钮旁，不弹窗、不改变条目布局。 */
+.remote-server-catalog-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.remote-server-catalog-action__button {
+  padding: 1px 8px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--app-web-text-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.remote-server-catalog-action__button:hover:not(:disabled) {
+  background: var(--app-web-subtle);
+  color: var(--app-web-text-primary);
+}
+
+/* 同步中保持原位、只降不透明度：禁用但不消失，否则条目会跳一下。 */
+.remote-server-catalog-action__button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.remote-server-catalog-action__syncing {
+  color: var(--woohaa-muted-fg, #666);
+  font-size: 12px;
+}
+
+.remote-server-catalog-action__error {
+  color: var(--app-status-danger);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+/* 「协作」窗口：服务端签发的协作邀请与只读协作者名单。
+   与调试窗口同一组织方式：只消费 --app-* token；表头弱化、主体用主文本色，
+   让「谁在哪一档」成为一眼能扫出的两组信息。邀请区把可写控件与语义说明收在同一块里。 */
+
+.remote-server-collaborators__note {
+  margin: 0 0 12px;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-collaborators__status {
+  margin: 0 0 8px;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 作者 / 我的角色：与调试窗口的连接摘要同一份「标签列 + 值列」网格。 */
+.remote-server-collaborators__summary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-collaborators__summary dt {
+  color: var(--app-web-text-muted);
+}
+
+.remote-server-collaborators__summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--app-web-text-primary);
+}
+
+/* 分区小标题：分享区与名单区各一个；比正文稍重，但不抢窗口标题。 */
+.remote-server-collaborators__section-title {
+  margin: 16px 0 8px;
+  color: var(--app-web-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.remote-server-collaborators__section-title:first-of-type {
+  margin-top: 0;
+}
+
+/* 邀请区：一整块「角色 / 有效期 / 创建 / 链接 / 已创建列表 / 语义说明」。
+   与调试窗口的信息块同一形态（描边 + subtle 底），把可写控件与长说明收在一起。 */
+.remote-server-collaborators__invite {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 10px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+}
+
+/* 角色 / 有效期 / 创建按钮横排：三样都是短语，竖排会让人多滚一屏。 */
+.remote-server-collaborators__invite-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+}
+
+.remote-server-collaborators__invite-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-collaborators__invite-label {
+  color: var(--app-web-text-muted);
+}
+
+.remote-server-collaborators__invite-select {
+  min-width: 120px;
+  padding: 4px 8px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 6px;
+  background: var(--app-web-surface);
+  color: var(--app-web-text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-collaborators__invite-select:focus {
+  outline: 2px solid color-mix(in srgb, var(--app-status-info) 40%, transparent);
+  outline-offset: 1px;
+}
+
+.remote-server-collaborators__invite-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.remote-server-collaborators__invite-link-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 6px;
+  background: var(--app-web-surface);
+  color: var(--app-web-text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+}
+
+.remote-server-collaborators__invite-link-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--app-status-info) 40%, transparent);
+  outline-offset: 1px;
+}
+
+.remote-server-collaborators__invite-expires {
+  margin: 0;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-collaborators__invite-feedback {
+  margin: 0;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-collaborators__invite-feedback[data-tone="success"] {
+  color: var(--app-status-success);
+}
+
+.remote-server-collaborators__invite-feedback[data-tone="danger"] {
+  color: var(--app-status-danger);
+}
+
+/* 语义边界写在控件旁边：链接由服务端生成、要登录本部署、撤销不动已接受的人。 */
+.remote-server-collaborators__invite-note {
+  margin: 0;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 已创建邀请的小标题：比分区标题再轻一档，只用来分组，不与「邀请协作者」抢层级。 */
+.remote-server-collaborators__invite-subtitle {
+  margin: 4px 0 0;
+  color: var(--app-web-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.remote-server-collaborators__table {
+  width: 100%;
+  margin: 0;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+}
+
+.remote-server-collaborators__table th,
+.remote-server-collaborators__table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--app-web-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.remote-server-collaborators__table th {
+  color: var(--app-web-text-muted);
+  font-weight: 500;
+  background: var(--app-web-subtle);
+}
+
+.remote-server-collaborators__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.remote-server-collaborators__table td {
+  color: var(--app-web-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* 主体标识与账号体系一致，用等宽更易区分相似 id。 */
+.remote-server-collaborators__actor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.remote-server-collaborators__empty {
+  margin: 8px 0 0;
+  padding: 12px;
+  border: 1px dashed var(--app-web-border);
+  border-radius: 8px;
+  color: var(--app-web-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 受限视图：不是错误，是「这张名单本来就不完整」，用警示色但不说成失败。 */
+.remote-server-collaborators__notice {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--app-status-warning) 40%, transparent);
+  border-radius: 8px;
+  background: var(--app-status-warning-soft);
+  color: var(--app-web-text-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.remote-server-collaborators__error {
+  margin: 8px 0 0;
+  color: var(--app-status-danger);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}

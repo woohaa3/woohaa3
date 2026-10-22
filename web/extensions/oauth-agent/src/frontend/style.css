@@ -1,0 +1,161 @@
+/*
+ * ChatGPT extension 专属样式
+ * （change: 2026-10-10-unify-extension-frontend-entry，任务 5.1 / design D5；由宿主
+ * `cordis/ui/ui.css` 迁入）。
+ *
+ * 只包含本 extension 自有的授权行与生成面板样式；生产 `ExecutionPanel` 的 `mc-panel__*` 与
+ * 宿主 tabs 布局仍由业务宿主 owner 持有。包构建以 copy loader 保留本文件，消费方打包器
+ * （Vite）按相对 import 加载，行为与 source-first 一致。
+ */
+
+/* 账号授权工作区；沿用共享设置表面。 */
+.chatgpt-auth-row__account { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.chatgpt-auth-row__name { font-size: 13px; font-weight: 600; }
+.chatgpt-auth-row__account > div:first-child { flex: 1; min-width: 0; }
+.chatgpt-auth-row__account .ui-button { min-height: 30px; font-size: 12px; }
+
+.chatgpt-auth-row__authorization-link {
+	color: var(--app-interaction-accent);
+	text-underline-offset: 3px;
+}
+
+.chatgpt-generate {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 100%;
+	min-width: 0;
+}
+
+/* 授权降级视图：与本面板同款外观，不出现不能工作的生成按钮。 */
+.chatgpt-generate--auth .mc-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.chatgpt-generate__hint {
+	margin: 0;
+	color: var(--mc-text-muted);
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+
+.chatgpt-generate__actions {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+}
+
+.chatgpt-generate__models-error {
+	margin: 0;
+	color: var(--app-status-danger);
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+
+/* 生成过程状态条（内联状态槽；宿主 `ExecutionPanel` 以 `mc-panel__inline-status` 包裹）。 */
+.chatgpt-generate__status {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 28px;
+	padding: 4px 2px;
+	font-size: 13px;
+	color: var(--mc-text-muted, var(--app-web-text-muted));
+	overflow-wrap: anywhere;
+}
+
+.chatgpt-generate__status[data-phase="failed"] {
+	color: var(--app-status-danger);
+}
+
+.chatgpt-generate__spinner {
+	width: 14px;
+	height: 14px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	border: 2px solid color-mix(in srgb, var(--app-interaction-accent) 30%, transparent);
+	border-top-color: var(--app-interaction-accent);
+	animation: chatgpt-spin 0.8s linear infinite;
+}
+
+@keyframes chatgpt-spin {
+	to { transform: rotate(360deg); }
+}
+
+.chatgpt-generate__stage {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.chatgpt-generate__elapsed {
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+	color: var(--mc-text-muted, var(--app-web-text-muted));
+}
+
+.chatgpt-generate__badge {
+	flex: 0 0 auto;
+	padding: 1px 8px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.chatgpt-generate__badge[data-tone="success"] {
+	color: var(--app-status-success);
+	background: var(--app-status-success-soft);
+}
+
+.chatgpt-generate__badge[data-tone="danger"] {
+	color: var(--app-status-danger);
+	background: color-mix(in srgb, var(--app-status-danger) 14%, transparent);
+}
+
+.chatgpt-generate__badge[data-tone="warn"] {
+	color: var(--app-status-warning);
+	background: var(--app-status-warning-soft);
+}
+
+/*
+ * 常驻 MCP 文字入口（change: 2026-10-12-add-agent-conversation-panel，任务 5.3 / design D4）。
+ *
+ * 不依赖展开详情，位于生成面板底部；缺工具阻止动作时就近强化原因（`data-blocked`）。
+ * 复制地址只反馈「已复制」，不表示外部客户端已连接（状态由外部心跳决定）。
+ */
+.chatgpt-generate__mcp {
+	margin-top: 6px;
+	padding-top: 6px;
+	border-top: 1px solid var(--app-web-border);
+	font-size: 12px;
+	color: var(--mc-text-muted, var(--app-web-text-muted));
+}
+
+.chatgpt-generate__mcp-blocked {
+	margin: 0 0 4px;
+	color: var(--app-status-warning);
+	overflow-wrap: anywhere;
+}
+
+.chatgpt-generate__mcp-guide > summary {
+	cursor: pointer;
+}
+
+.chatgpt-generate__mcp-text {
+	margin: 6px 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.chatgpt-generate__mcp-note {
+	margin: 4px 0 0;
+	color: var(--mc-text-muted, var(--app-web-text-muted));
+	font-style: italic;
+	overflow-wrap: anywhere;
+}
+
+/* 内置就绪状态：只来自真实发现，颜色仅辅助，文字已表达状态。 */
+.chatgpt-generate__mcp[data-builtin="ready"] .chatgpt-generate__mcp-guide > summary {
+	color: var(--app-status-success);
+}

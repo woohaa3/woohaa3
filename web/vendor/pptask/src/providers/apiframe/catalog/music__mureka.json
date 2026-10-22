@@ -1,0 +1,84 @@
+{
+  "locator": "apiframe://music/mureka",
+  "modelId": "mureka",
+  "providerId": "apiframe",
+  "modality": "music",
+  "label": "Mureka",
+  "outputType": "music",
+  "endpoint": {
+    "method": "POST",
+    "path": "/v2/music/generate"
+  },
+  "requestSchema": {
+    "type": "object",
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "properties": {
+      "model": {
+        "enum": [
+          "mureka"
+        ],
+        "type": "string"
+      },
+      "murekaParams": {
+        "additionalProperties": false,
+        "properties": {
+          "instrumental": {
+            "default": false,
+            "type": "boolean"
+          },
+          "lyrics": {
+            "maxLength": 3000,
+            "type": "string"
+          },
+          "model_version": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "mureka-7.6",
+              "mureka-o2",
+              "mureka-8",
+              "mureka-9"
+            ],
+            "type": "string"
+          },
+          "n": {
+            "default": 2,
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "type": "string"
+      },
+      "webhookUrl": {
+        "format": "uri",
+        "type": "string"
+      },
+      "webhookEvents": {
+        "items": {
+          "enum": [
+            "progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    }
+  },
+  "wireMetadata": {
+    "modelField": "model",
+    "paramsField": "murekaParams",
+    "wirePath": "murekaParams"
+  }
+}

@@ -1,0 +1,198 @@
+.settings-section {
+  --settings-secondary: color-mix(
+    in srgb,
+    var(--app-web-text-primary) 72%,
+    var(--app-web-panel)
+  );
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  color: var(--app-web-text-primary);
+  font-family: var(--app-font);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.settings-section__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.settings-section__header > .ui-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.settings-section h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.settings-section p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.settings-section__header p,
+.settings-section__hint {
+  color: var(--settings-secondary);
+  font-size: 12px;
+}
+.settings-section__fields {
+  display: grid;
+  gap: 14px;
+}
+.settings-section__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.settings-section__field > span:first-child {
+  font-weight: 500;
+}
+.settings-section__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-section__actions--end {
+  justify-content: flex-end;
+}
+.settings-section__divider {
+  padding-top: 18px;
+  border-top: 1px solid var(--app-web-border);
+}
+.settings-section__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.settings-section__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--app-web-border);
+}
+.settings-section__list > li:first-child > .settings-section__item {
+  padding-top: 0;
+}
+.settings-section__item-main {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings-section__item-main strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-section__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 24px 0;
+}
+.settings-section__empty strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+.settings-section__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--settings-secondary);
+  font-size: 12px;
+}
+.settings-section__badge[data-ready="true"] {
+  color: var(--app-status-success);
+}
+.settings-section__feedback {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+  color: var(--settings-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.settings-section__feedback[data-tone="success"] {
+  color: var(--app-status-success);
+  background: var(--app-status-success-background);
+}
+.settings-section__feedback[data-tone="danger"] {
+  color: var(--app-status-danger);
+  background: var(--app-status-danger-background);
+}
+.settings-section__feedback[data-tone="warning"] {
+  color: var(--app-status-warning);
+  background: var(--app-status-warning-background);
+}
+.settings-section__evidence {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 20px;
+  margin: 0;
+}
+.settings-section__evidence > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-section__evidence dt {
+  color: var(--settings-secondary);
+}
+.settings-section__evidence dd {
+  margin: 0;
+}
+.settings-section ::selection {
+  background: var(--app-interaction-accent-soft);
+}
+
+.settings-section__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+}
+.settings-section__empty {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  gap: 20px;
+}
+.settings-section__empty strong {
+  font-size: 13px;
+}
+.settings-section .ui-collapsible__trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.settings-section .ui-collapsible__trigger svg {
+  transition: transform 160ms ease-out;
+}
+.settings-section .ui-collapsible__trigger[data-state="open"] svg {
+  transform: rotate(180deg);
+}
+.settings-section .ui-collapsible__content {
+  padding-top: 12px;
+}

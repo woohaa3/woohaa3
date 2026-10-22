@@ -1,0 +1,6 @@
+[toolchain]
+# 上游 PhotoCraft 快照要求 rustc >= 1.95（`rust-version`）。
+# 固定 1.97.1 与仓库 Bevy 工作区一致，避免两套工具链在同一台机器上互相覆盖。
+channel = "1.97.1"
+profile = "minimal"
+targets = ["wasm32-unknown-unknown"]

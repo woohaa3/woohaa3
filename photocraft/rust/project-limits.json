@@ -1,0 +1,19 @@
+{
+  "$comment": "首期图片工程上限的**唯一权威来源**（notes/scope.md「首期资源上限」）。Rust 核验工具与 TypeScript 契约（IMAGE_PROJECT_LIMITS）都必须与本文件一致：Rust 侧 rust/crates/project-verify/tests/limits_agree.rs 与 protocol 侧 src/image-project.test.ts 各有一个交叉核对测试。change: 2026-10-16-integrate-photocraft-image-editing。",
+  "maxCanvasSide": 8192,
+  "maxCanvasPixels": 67108864,
+  "maxLayers": 64,
+  "maxProjectBytes": 67108864,
+  "maxDecompressedResourceBytes": 268435456,
+  "maxEntries": 4096,
+  "maxDocumentDepth": 16,
+  "maxEntryDecompressedBytes": 134217728,
+  "maxSourceAssetIds": 64,
+  "maxFeatherSourcePixels": 100,
+  "minBrushSizeSourcePixels": 1,
+  "maxBrushSizeSourcePixels": 512,
+  "maxSerializedBytes": 262144,
+  "maxPatterns": 64,
+  "maxPatternSide": 1024,
+  "maxPatternPixels": 4194304
+}

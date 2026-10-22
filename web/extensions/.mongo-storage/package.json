@@ -1,0 +1,32 @@
+{
+  "name": "@woohaa3/extension-mongo-storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MongoDB 存储槽位实现（change: 2026-10-15-scan-bootstrap-slots-as-extension-directories）：声明 storage 槽位，工厂复用 runtime-foundation 的共享实现。",
+  "exports": {
+    "./bootstrap": {
+      "types": "./src/bootstrap.ts",
+      "import": "./dist/bootstrap.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "extension.json"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/bootstrap.ts --outdir dist --platform node --entry-name bootstrap",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/extension-runtime-foundation": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.6.3",
+    "vitest": "^2.0.0"
+  }
+}

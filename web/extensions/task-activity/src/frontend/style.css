@@ -1,0 +1,360 @@
+/* 任务活动浮层专属样式（change: 2026-10-10-extract-optional-feature-extensions，
+ * 任务 5.1）：随 task-activity 前端入口加载，公共 token 与 primitives 样式由平台提供。
+ */
+/* ------------------------------------------------------------------ *
+ * 画布任务活动栈（change: 2026-09-29-add-canvas-task-activity-feed）
+ *
+ * 固定左下角、贴合安全区、向上增长（最新任务在顶部）。容器宽度与高度受限，超出后
+ * 内部滚动；最多展示 10 条、进行中优先。任务名与状态单行，模型、原因与结果 hover/focus 显示，
+ * 成功项 hover/focus 时以受控浮层向右预览。右下角工具面板与左下角活动栈互不重叠。
+ * ------------------------------------------------------------------ */
+.task-activity-feed {
+	--activity-secondary: color-mix(in srgb, var(--app-web-text-primary) 78%, var(--app-web-panel));
+	--activity-accent: color-mix(in srgb, var(--app-interaction-accent) 85%, var(--app-web-text-primary));
+	--activity-danger: color-mix(in srgb, var(--app-status-danger) 85%, var(--app-web-text-primary));
+	position: fixed;
+	left: max(18px, env(safe-area-inset-left));
+	bottom: max(16px, env(safe-area-inset-bottom));
+	z-index: 32;
+	display: flex;
+	flex-direction: column;
+	width: min(300px, calc(100vw - 32px));
+	text-align: left;
+	max-height: min(45vh, 480px);
+	background: transparent;
+	overflow: hidden;
+}
+
+.task-activity-feed__entry {
+	position: fixed;
+	left: max(18px, env(safe-area-inset-left));
+	bottom: max(16px, env(safe-area-inset-bottom));
+	z-index: 32;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 12px;
+	border: 0;
+	background: transparent;
+	color: var(--app-web-text-primary);
+	font-size: 12px;
+	border-radius: 8px;
+	cursor: pointer;
+}
+
+.task-activity-feed__entry:hover {
+	color: color-mix(in srgb, var(--app-interaction-accent) 85%, var(--app-web-text-primary));
+	background: var(--app-web-subtle);
+}
+
+.task-activity-feed__entry:focus-visible {
+	outline: 2px solid var(--app-interaction-focus);
+	outline-offset: 2px;
+}
+
+.task-activity-feed__entry-icon svg { width: 16px; height: 16px; }
+
+.task-activity-feed__badge {
+	min-width: 18px;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: var(--app-interaction-accent);
+	color: var(--app-web-panel);
+	font-size: 11px;
+	line-height: 18px;
+	text-align: center;
+}
+
+.task-activity-feed__footer {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 2px;
+	padding: 8px 10px 0;
+}
+
+.task-activity-feed__clear,
+.task-activity-feed__history {
+	padding: 2px 6px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--activity-secondary);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.task-activity-feed__clear:hover:not(:disabled),
+.task-activity-feed__history:hover:not(:disabled) {
+	background: var(--app-web-subtle);
+	color: var(--activity-accent);
+}
+
+.task-activity-feed__collapse,
+.task-activity-feed__close,
+.task-activity-feed__play {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--activity-secondary);
+	cursor: pointer;
+}
+
+.task-activity-feed__collapse svg,
+.task-activity-feed__close svg,
+.task-activity-feed__play svg {
+	width: 15px;
+	height: 15px;
+}
+
+.task-activity-feed__collapse:hover:not(:disabled),
+.task-activity-feed__close:hover:not(:disabled),
+.task-activity-feed__play:hover:not(:disabled) {
+	background: var(--app-web-subtle);
+	color: var(--app-interaction-accent);
+}
+
+.task-activity-feed__empty {
+	margin: 0;
+	padding: 12px;
+	font-size: 12px;
+	color: var(--activity-secondary);
+}
+
+.task-activity-feed__collapse-content,
+.task-activity-feed__scroll {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	min-height: 0;
+	min-width: 0;
+}
+
+.task-activity-feed__scroll .ui-scroll-area__viewport {
+	flex: 1 1 auto;
+	min-height: 0;
+	height: auto;
+}
+
+/* Radix 的内层默认 display: table，会被 nowrap 标题撑宽。
+ * 此处只纵向滚动，内容必须受视口宽度约束，否则文字与动作会被裁掉。 */
+.task-activity-feed__scroll .ui-scroll-area__viewport > div {
+	display: block !important;
+}
+
+.task-activity-feed__list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 0;
+	padding: 6px;
+	list-style: none;
+	overflow-y: auto;
+}
+
+/* 主标题拥有完整信息列，摘要与播放器不挤占标题的横向空间。 */
+.task-activity-feed__card {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	min-height: 32px;
+	padding: 2px 6px 2px 4px;
+	border-radius: 8px;
+	color: var(--app-web-text-primary);
+	outline: none;
+}
+
+.task-activity-feed__card:hover,
+.task-activity-feed__card:focus-within {
+	background: color-mix(in srgb, var(--app-interaction-accent) 6%, transparent);
+}
+
+.task-activity-feed__card[data-exiting] {
+	animation: task-activity-exit var(--activity-exit-duration) cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.task-activity-feed__card[data-exiting],
+.task-activity-feed__card[data-exiting] * { pointer-events: none; }
+
+@keyframes task-activity-exit {
+	to { transform: translateY(100%); opacity: 0; }
+}
+
+.task-activity-feed__close { flex-shrink: 0; }
+
+.task-activity-feed__card:focus-visible {
+	outline: 2px solid var(--app-interaction-focus);
+	outline-offset: -2px;
+}
+
+.task-activity-feed__close {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.task-activity-feed__card:hover .task-activity-feed__close,
+.task-activity-feed__card:focus-within .task-activity-feed__close {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.task-activity-feed__dot {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--app-web-text-muted);
+	cursor: help;
+}
+
+.task-activity-feed__card[data-state="queued"] .task-activity-feed__dot,
+.task-activity-feed__card[data-state="pending"] .task-activity-feed__dot {
+	background: var(--app-interaction-accent);
+	opacity: 0.5;
+}
+
+.task-activity-feed__card[data-state="running"] .task-activity-feed__dot {
+	background: var(--app-interaction-accent);
+}
+
+.task-activity-feed__card[data-state="succeeded"] .task-activity-feed__dot {
+	background: var(--app-status-success, var(--app-interaction-accent));
+}
+
+.task-activity-feed__card[data-state="failed"] .task-activity-feed__dot {
+	background: var(--app-status-danger);
+}
+
+.task-activity-feed__card[data-state="cancelled"] .task-activity-feed__dot {
+	background: var(--activity-secondary);
+}
+
+.task-activity-feed__state {
+  flex-shrink: 0;
+  color: var(--activity-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.task-activity-feed__card[data-state="running"] .task-activity-feed__state { color: var(--activity-accent); }
+.task-activity-feed__card[data-state="failed"] .task-activity-feed__state { color: var(--activity-danger); }
+.task-activity-feed__primary {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: hidden;
+  font: inherit;
+  font-size: 12px;
+  line-height: 28px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.task-activity-feed__primary:hover { color: var(--activity-accent); }
+.task-activity-feed__primary:focus-visible { outline: 2px solid var(--app-interaction-focus); outline-offset: -2px; border-radius: 4px; }
+.task-activity-feed__hover { display: grid; gap: 6px; padding: 8px; font-size: 12px; line-height: 1.5; text-align: left; overflow-wrap: anywhere; }
+.task-activity-feed__hover strong { font-weight: 600; }
+.task-activity-feed__hover p { margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+	.task-activity-feed__progress > span { transition: none; }
+	.task-activity-feed__card[data-exiting] { animation-name: task-activity-exit-fade; }
+}
+
+@keyframes task-activity-exit-fade {
+	to { opacity: 0; }
+}
+
+@media (pointer: coarse) {
+	.task-activity-feed__collapse,
+	.task-activity-feed__close,
+	.task-activity-feed__play { width: 44px; height: 44px; }
+	.task-activity-feed__close { opacity: 1; pointer-events: auto; }
+	.task-activity-feed__entry,
+	.task-activity-feed__clear,
+	.task-activity-feed__history { min-height: 44px; }
+	.task-activity-feed__primary { min-height: 44px; }
+
+}
+
+/* 受控悬浮预览：fixed 定位，避免被列表滚动裁切。 */
+.task-activity-feed__pop {
+	position: fixed;
+	z-index: 33;
+	max-width: min(280px, calc(100vw - 40px));
+	padding: 4px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 10px;
+	background: var(--app-web-panel);
+	box-shadow: 0 10px 26px var(--app-web-shadow);
+	pointer-events: none;
+}
+
+.task-activity-feed__preview {
+	display: block;
+	max-width: min(272px, calc(100vw - 48px));
+	max-height: 200px;
+	border-radius: 6px;
+	object-fit: contain;
+}
+
+.task-activity-feed__video {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.task-activity-feed__duration {
+	font-size: 11px;
+	color: var(--app-web-text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+	.task-activity-feed {
+		width: min(280px, calc(100vw - 24px));
+		max-height: min(40vh, 360px);
+		/* 窄屏右下角工具面板较高：活动栈整体上移，避免与其在底部重叠。 */
+		bottom: max(104px, calc(env(safe-area-inset-bottom) + 104px));
+	}
+
+	.task-activity-feed__entry {
+		bottom: max(104px, calc(env(safe-area-inset-bottom) + 104px));
+	}
+}
+
+/* 聚焦工作区隐藏浮层（change: 2026-10-09，迁自宿主 ui.css）。 */
+.app[data-focus-kind] .task-activity-feed,
+.app[data-focus-kind] .task-activity-feed__entry { display: none; }
+
+/* Keep the entry clear of the generation dock on phones. The expanded feed
+   opens above it instead of covering model and parameter controls. */
+@media (max-width: 480px) {
+  .app:has(.node-execution-dock) .task-activity-feed__entry {
+    top: max(16px, env(safe-area-inset-top)); bottom: auto;
+  }
+  .app:has(.node-execution-dock) .task-activity-feed {
+    top: max(56px, calc(env(safe-area-inset-top) + 56px)); bottom: auto;
+  }
+}
+
+/* 组创作沿用原活动行与预览样式，仅补充选中态和交互按钮。 */
+.task-activity-feed__card[data-selected] { background: color-mix(in srgb, var(--app-interaction-accent) 6%, transparent); }
+.task-activity-feed__card[data-state="unknown"] .task-activity-feed__dot,
+.task-activity-feed__card[data-state="partial"] .task-activity-feed__dot { background: var(--app-status-warning); }
+.task-activity-feed__pop--group { position: relative; pointer-events: auto; }
+.task-activity-feed__group-actions { display: flex; flex-wrap: wrap; gap: 2px; }

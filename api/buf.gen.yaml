@@ -1,0 +1,16 @@
+version: v2
+# 契约树里同时生成两种语言的绑定，消费者按需引用对应包：
+#   gen/es → 客户端（protobuf-es；闭源 e2e/demo 目前也用它）
+#   gen/go → Go 侧（connect-go；闭源 server 通过 go.mod replace 引用）
+plugins:
+  - local: protoc-gen-go
+    out: gen/go
+    opt: paths=source_relative
+  - local: protoc-gen-connect-go
+    out: gen/go
+    opt: paths=source_relative
+  - local: protoc-gen-es
+    out: gen/es
+    opt:
+      - target=ts
+      - import_extension=js

@@ -1,0 +1,106 @@
+{
+  "id": "canvas-full",
+  "title": "完整画布",
+  "revision": 7,
+  "document": {
+    "schemaVersion": "asset-canvas-v1",
+    "nodes": [
+      {
+        "id": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "type": "image",
+        "position": {
+          "x": 640,
+          "y": 0
+        },
+        "width": 512,
+        "height": 742,
+        "zIndex": 2
+      },
+      {
+        "id": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+        "type": "text",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "width": 360,
+        "height": 220,
+        "zIndex": 1
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-9f0c2b71-3a44-4c8e-8d55-0b7a6e5f4d31",
+        "source": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+        "target": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "sourceHandle": "out-0",
+        "targetHandle": "in-0",
+        "data": {
+          "role": "prompt"
+        }
+      }
+    ],
+    "viewport": {
+      "x": 80,
+      "y": 100,
+      "zoom": 0.52
+    },
+    "updatedAt": "2026-09-22T00:00:00.000Z"
+  },
+  "nodeData": {
+    "image-43200b04-00af-443d-a591-decff3e3a014": {
+      "title": "主视觉",
+      "taskKind": "image-generation",
+      "panelPrompt": "一只猫坐在窗台上",
+      "taskStatus": "successed",
+      "parameters": {
+        "ratio": "1:1",
+        "resolution": "1K"
+      },
+      "outputAssetId": "asset-image-mtpb4p43",
+      "resourceKind": "image"
+    },
+    "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f": {
+      "title": "提示词",
+      "prompt": "一只猫坐在窗台上",
+      "inputMapping": [
+        {
+          "slotId": "in-0",
+          "sourceNodeId": "text-7c1d9f52-2f6e-4a1b-9c3d-1a2b3c4d5e6f",
+          "role": "prompt",
+          "sortKey": "0"
+        }
+      ]
+    }
+  },
+  "assets": [
+    {
+      "id": "asset-image-mtpb4p43",
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "title": "生成图",
+      "mediaKind": "image",
+      "source": "generated",
+      "status": "ready",
+      "prompt": "一只猫坐在窗台上",
+      "url": "asset://asset-image-mtpb4p43",
+      "createdAt": "2026-09-22T00:00:00.000Z",
+      "providerTaskId": "task-2f61a4c9",
+      "provenance": {
+        "taskNodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+        "taskKind": "image-generation",
+        "runId": "run-6b3e91d7",
+        "outputIndex": 0
+      }
+    }
+  ],
+  "jobs": [
+    {
+      "id": "job-5d2c8e14",
+      "nodeId": "image-43200b04-00af-443d-a591-decff3e3a014",
+      "taskId": "task-2f61a4c9",
+      "status": "success",
+      "updatedAt": "2026-09-22T00:00:00.000Z"
+    }
+  ],
+  "updatedAt": "2026-09-22T00:00:00.000Z"
+}

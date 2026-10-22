@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package woohaa.profile.v1alpha1;
+
+option go_package = "woohaa3/api/gen/go/woohaa/profile/v1alpha1;profilev1alpha1";
+
+// ProfileService is a subject's own display information: nickname and bio.
+//
+// Boundary: it answers "what is this subject called", not "who are you"
+// (IdentityService) and not "what may you do" (RBACService). No profile field
+// participates in any decision, and display_name is not a lookup key.
+//
+// Every method acts on the caller only. The interface deliberately has no
+// method taking a target subject, so the bar is "authenticated" rather than a
+// permission code: there is no shape that could be abused against others.
+service ProfileService {
+  // Read the caller's profile. Succeeds even when the subject never saved one.
+  rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
+
+  // Set the caller's nickname and bio.
+  //
+  // The request expresses the desired complete state, not a delta: an empty
+  // string clears that field. There is no "change only one field" shape, so
+  // "absent" and "empty" never need distinguishing.
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+}
+
+// Profile is a subject's display information. No field participates in a
+// decision, and no field is an identity key.
+message Profile {
+  string subject_id = 1;
+
+  // Nickname set by the subject. Empty means unset, so display_name falls back.
+  string nickname = 2;
+
+  // The name to show, computed server-side by the fallback rule: nickname,
+  // then the subject's configured display label, then the subject id.
+  //
+  // Clients must not reimplement this rule. Two copies drift, and the drift
+  // shows up as the same person named differently in the header and the logs.
+  string display_name = 3;
+
+  // Free-form introduction. Empty means not filled in.
+  string bio = 4;
+}
+
+message GetProfileRequest {}
+
+message GetProfileResponse {
+  Profile profile = 1;
+}
+
+message UpdateProfileRequest {
+  // Desired complete state. Empty clears and falls back.
+  string nickname = 1;
+  // Desired complete state. Empty clears.
+  string bio = 2;
+}
+
+// Returns the complete profile after the change rather than a success flag:
+// the client just mutated state, so it should see the new state in the same
+// round trip. display_name is recomputed.
+message UpdateProfileResponse {
+  Profile profile = 1;
+}

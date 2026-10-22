@@ -1,0 +1,509 @@
+/* 本机遥测复盘页样式（change: 2026-10-20-add-local-client-telemetry，任务 5.2 / design D9）。
+   只消费 canonical `--app-*` 语义 token，不复制品牌色 literal；桌面与 Pad 窗口优先。 */
+.telemetry {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  min-height: 0;
+  /* 应用外壳是 `position: fixed; inset: 0`（画布全屏、外壳本身不滚动），而复盘页有四段内容，
+     正常窗口高度下一定超过一屏。**页面根必须自己滚动**，否则事件区落在视口外、键盘与鼠标都
+     够不到（E2E 里表现为 click 一直重试 "element is outside of the viewport"）。 */
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  color: var(--app-web-text-primary);
+}
+
+.telemetry__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 返回按钮与标题横排：复盘页是整页路由，返回出口必须和标题在同一视线高度。 */
+.telemetry__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.telemetry__title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.telemetry__subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__tz {
+  margin-left: 8px;
+}
+
+.telemetry__notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.telemetry__notice {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid var(--app-web-border);
+  background: var(--app-web-subtle);
+}
+
+.telemetry__notice.is-export {
+  border-color: var(--app-status-warning);
+  color: var(--app-web-text-primary);
+}
+
+.telemetry__notice.is-dropped {
+  border-color: var(--app-status-danger);
+}
+
+/* 开关开着但发不出去（没有出口/出口不可用）：用警告色，与"正常上报中"的提示区分开。 */
+.telemetry__notice.is-export-unrouted {
+  border-color: var(--app-status-warning);
+  color: var(--app-web-text-primary);
+}
+
+.telemetry__content {
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+  align-items: flex-start;
+  /* 页面根是固定高度的滚动容器，子项如果可收缩（`flex-shrink: 1`，默认值），内容会被压到
+     容器高度以内、溢出部分画到 footer 上（实测：content 高 762 但内部表格容器延伸到 1218）。
+     滚动容器里的直接子项必须按自然高度排布，由根负责滚动。 */
+  flex: 0 0 auto;
+}
+
+.telemetry__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.telemetry__section {
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--app-web-surface);
+  min-width: 0;
+}
+
+.telemetry__section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.telemetry__section-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.telemetry__section-hint {
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__anomalies {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.telemetry__anomaly {
+  border: 1px solid var(--app-web-border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--app-web-subtle);
+}
+
+.telemetry__anomaly.is-error { border-left-color: var(--app-status-danger); }
+.telemetry__anomaly.is-warn { border-left-color: var(--app-status-warning); }
+.telemetry__anomaly.is-info { border-left-color: var(--app-status-info); }
+
+.telemetry__anomaly-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.telemetry__severity {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.telemetry__anomaly.is-error .telemetry__severity { color: var(--app-status-danger); }
+.telemetry__anomaly.is-warn .telemetry__severity { color: var(--app-status-warning); }
+.telemetry__anomaly.is-info .telemetry__severity { color: var(--app-status-info); }
+
+.telemetry__anomaly-rule {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.telemetry__anomaly-name {
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__anomaly-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.telemetry__anomaly-metrics div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.telemetry__anomaly-metrics dt {
+  font-size: 11px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__anomaly-metrics dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.telemetry__anomaly-rule-id {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__table-wrap {
+  overflow: auto;
+  max-height: 420px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+}
+
+.telemetry__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.telemetry__table th,
+.telemetry__table td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--app-web-border);
+  vertical-align: top;
+}
+
+.telemetry__table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--app-web-subtle);
+  font-weight: 600;
+  z-index: 1;
+}
+
+.telemetry__table tr.is-selected {
+  background: var(--app-interaction-accent-soft);
+}
+
+.telemetry__table--compact {
+  max-height: none;
+}
+
+.telemetry__cell-time {
+  white-space: nowrap;
+}
+
+.telemetry__cell-code code,
+.telemetry__codes code,
+.telemetry__detail code,
+.telemetry__state code {
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--app-web-subtle);
+  border: 1px solid var(--app-web-border);
+}
+
+.telemetry__cell-results {
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__secondary {
+  display: block;
+  font-size: 11px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__codes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.telemetry__codes li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.telemetry__result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.telemetry__result::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.telemetry__result.is-success { color: var(--app-status-success); }
+.telemetry__result.is-failure { color: var(--app-status-danger); }
+.telemetry__result.is-cancelled { color: var(--app-web-text-muted); }
+.telemetry__result.is-rejected { color: var(--app-status-warning); }
+
+.telemetry__trend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.telemetry__trend-row {
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.telemetry__trend-time {
+  color: var(--app-web-text-muted);
+  white-space: nowrap;
+}
+
+.telemetry__trend-bar {
+  display: block;
+  height: 8px;
+  min-width: 2px;
+  border-radius: 999px;
+  background: var(--app-interaction-accent);
+}
+
+.telemetry__trend-value {
+  white-space: nowrap;
+}
+
+.telemetry__filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+  margin-bottom: 10px;
+}
+
+.telemetry__filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.telemetry__filter-spacer {
+  flex: 1 1 auto;
+}
+
+.telemetry__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  min-width: 160px;
+}
+
+.telemetry__field-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.telemetry__detail {
+  flex: 0 0 380px;
+  max-width: 42vw;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--app-web-surface);
+}
+
+.telemetry__detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.telemetry__detail-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.telemetry__detail-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__detail-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 12px 0;
+}
+
+.telemetry__detail-list div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.telemetry__detail-list dt {
+  font-size: 11px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__detail-list dd {
+  margin: 0;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.telemetry__detail-title {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.telemetry__state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 24px;
+  border: 1px dashed var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-subtle);
+}
+
+.telemetry__state.is-error {
+  border-style: solid;
+  border-color: var(--app-status-danger-background);
+}
+
+.telemetry__state-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.telemetry__state-body {
+  margin: 0;
+  font-size: 13px;
+  max-width: 62ch;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__state-path {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+  word-break: break-all;
+}
+
+.telemetry__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.telemetry__skeleton span {
+  display: block;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--app-web-border);
+}
+
+.telemetry__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--app-web-text-muted);
+}
+
+.telemetry__path {
+  word-break: break-all;
+}
