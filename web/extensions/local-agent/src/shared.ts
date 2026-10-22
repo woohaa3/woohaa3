@@ -40,7 +40,7 @@ export type LocalAgentAdapterDescriptor = {
 export const LOCAL_AGENT_ADAPTERS: readonly LocalAgentAdapterDescriptor[] = [
   {
     adapterId: "codex-appserver",
-    label: "Codex App Server（本机）",
+    label: "本地 ChatGPT",
     runCategory: "local-appserver",
     authMode: "local-login",
     transport: "stdio-jsonrpc",
@@ -50,7 +50,7 @@ export const LOCAL_AGENT_ADAPTERS: readonly LocalAgentAdapterDescriptor[] = [
   },
   {
     adapterId: "opencode-server",
-    label: "OpenCode Server（本机）",
+    label: "本地 OpenCode",
     runCategory: "local-appserver",
     authMode: "local-login",
     transport: "http-sse",
@@ -60,7 +60,7 @@ export const LOCAL_AGENT_ADAPTERS: readonly LocalAgentAdapterDescriptor[] = [
   },
   {
     adapterId: "codebuddy-server",
-    label: "CodeBuddy Server（本机）",
+    label: "本地 CodeBuddy",
     runCategory: "local-appserver",
     authMode: "local-login",
     transport: "http-acp",
@@ -72,6 +72,16 @@ export const LOCAL_AGENT_ADAPTERS: readonly LocalAgentAdapterDescriptor[] = [
 
 export function findLocalAgentAdapter(adapterId: string): LocalAgentAdapterDescriptor | undefined {
   return LOCAL_AGENT_ADAPTERS.find((adapter) => adapter.adapterId === adapterId);
+}
+
+/** 更新历史默认名称的展示，保留用户自定义名称与持久连接身份。 */
+export function localAgentConnectionName(adapterId: string, name: string): string {
+  const legacyNames: Record<string, string> = {
+    "codex-appserver": "Codex App Server（本机）",
+    "opencode-server": "OpenCode Server（本机）",
+    "codebuddy-server": "CodeBuddy Server（本机）",
+  };
+  return name === legacyNames[adapterId] ? findLocalAgentAdapter(adapterId)!.label : name;
 }
 
 /**

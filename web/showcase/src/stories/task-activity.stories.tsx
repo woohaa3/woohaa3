@@ -6,11 +6,18 @@ import { objectPayload } from "../../../frontend/src/cordis/services/dialogs/reg
 import { DialogHost } from "../../../frontend/src/cordis/ui/index.js";
 import { useShowcaseDialogs } from "../dialog-fixtures.js";
 import type { Story, StoryDefault } from "@ladle/react";
-import { TaskActivityFeed, type TaskActivityFeedProps, resolveTaskActivityDisplay } from "@woohaa3/extension-task-activity/frontend";
+import {
+  TaskActivityFeed,
+  resolveTaskActivityDisplay,
+  type ActivityRow,
+  type ActivityRowCapabilities,
+  type TaskActivityFeedProps
+} from "@woohaa3/extension-task-activity/frontend";
 import {
   activityFixtureMediaUrl,
   activityRecord,
   defaultActivitySeed,
+  groupActivitySeed,
   showcaseActivityNodes,
   useActivityStoreFixture
 } from "../fixtures/activity-fixtures.js";
@@ -40,10 +47,10 @@ function makeResolveDisplay() {
 }
 
 /** Use the production dialog renderer and host; clicking never leaves this page. */
-function StoryFeed(props: TaskActivityFeedProps) {
+function StoryFeed({ onOpenHistory: _ignored, ...props }: TaskActivityFeedProps) {
   const controller = useMemo(() => new CanvasHistoryController({ listCanvas: async () => {
     const items = props.store.getSnapshot().items.filter((item) => item.state === "succeeded").map((item) => ({
-      entryId: item.taskKey, nodeId: item.nodeId, nodeTitle: props.resolveDisplay?.(item).primary ?? item.nodeId,
+      entryId: item.taskKey, nodeId: item.nodeId, nodeTitle: item.modelKey ?? item.nodeId,
       kind: "text" as const, createdAt: item.createdAt, current: false, recoverable: false, previewable: true,
       source: { label: "生成结果" }, preview: { kind: "text" as const, excerpt: item.result?.text || "历史结果预览" }
     }));
@@ -72,10 +79,13 @@ function Stage({ children, note }: { children: React.ReactNode; note: string }) 
 
 /** 默认：并发运行、成功媒体、失败混排；最近提交在顶部。 */
 export const Ready: Story = () => {
-  const controls = useActivityStoreFixture({ seed: defaultActivitySeed() });
+  const controls = useActivityStoreFixture({
+    seed: defaultActivitySeed(),
+    capabilities: { resolveTaskDisplay: makeResolveDisplay() }
+  });
   return (
     <Stage note="运行中 + 成功视频 + 失败">
-      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} onLocateNode={() => undefined} resolveDisplay={makeResolveDisplay()} />
+      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
     </Stage>
   );
 };
@@ -89,11 +99,12 @@ export const Results: Story = () => {
       activityRecord({ taskKey: "w-vid", runId: "r-vid", nodeId: "video-1", state: "succeeded", result: { mediaKind: "video", storageKey: "sha256-vid", durationSeconds: 8, poster: { storageKey: "sha256-vid-poster" } } }),
       activityRecord({ taskKey: "w-aud", runId: "r-aud", nodeId: "audio-1", state: "succeeded", result: { mediaKind: "audio", storageKey: "sha256-aud", durationSeconds: 21 } }),
       activityRecord({ taskKey: "w-txt", runId: "r-txt", nodeId: "text-1", state: "succeeded", result: { mediaKind: "text", text: "这是一段生成文本结果的安全摘要。" } })
-    ]
+    ],
+    capabilities: { resolveTaskDisplay: makeResolveDisplay() }
   });
   return (
     <Stage note="图片 / 视频海报 / 音频 / 文本">
-      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} onLocateNode={() => undefined} resolveDisplay={makeResolveDisplay()} />
+      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
     </Stage>
   );
 };
@@ -101,10 +112,13 @@ Results.storyName = "成功结果";
 
 /** 长中英文名称：主行作品优先、模型次行、状态与操作不被挤掉（任务 5.2）。 */
 export const LongNames: Story = () => {
-  const controls = useActivityStoreFixture({ seed: defaultActivitySeed() });
+  const controls = useActivityStoreFixture({
+    seed: defaultActivitySeed(),
+    capabilities: { resolveTaskDisplay: makeResolveDisplay() }
+  });
   return (
     <Stage note="长作品名 + 长模型名 · 状态与操作可达">
-      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} onLocateNode={() => undefined} resolveDisplay={makeResolveDisplay()} />
+      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
     </Stage>
   );
 };
@@ -115,16 +129,14 @@ export const MissingTargets: Story = () => {
   const controls = useActivityStoreFixture({
     seed: [
       activityRecord({ taskKey: "w-gone", runId: "r-gone", nodeId: "deleted-node", state: "running", modelType: "image", modelKey: "some-model-key", progress: 0.3 })
-    ]
+    ],
+    capabilities: {
+      resolveTaskDisplay: (item) => resolveTaskActivityDisplay({ item: item as never, node: null, catalog: null })
+    }
   });
   return (
     <Stage note="节点已删除 · 定位禁用并说明原因">
-      <StoryFeed
-        store={controls.store}
-        resolveMediaUrl={activityFixtureMediaUrl}
-        onLocateNode={() => undefined}
-        resolveDisplay={(item) => resolveTaskActivityDisplay({ item: item as never, node: null, catalog: null })}
-      />
+      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
     </Stage>
   );
 };
@@ -132,10 +144,13 @@ MissingTargets.storyName = "失效目标";
 
 /** 空：无任务时收起为入口。 */
 export const Empty: Story = () => {
-  const controls = useActivityStoreFixture({ seed: [] });
+  const controls = useActivityStoreFixture({
+    seed: [],
+    capabilities: { resolveTaskDisplay: makeResolveDisplay() }
+  });
   return (
     <Stage note="空状态（折叠入口）">
-      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} onLocateNode={() => undefined} resolveDisplay={makeResolveDisplay()} />
+      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
     </Stage>
   );
 };
@@ -143,7 +158,10 @@ Empty.storyName = "空";
 
 /** 实时推进 + 断线恢复。 */
 export const LiveUpdate: Story = () => {
-  const controls = useActivityStoreFixture({ seed: [] });
+  const controls = useActivityStoreFixture({
+    seed: [],
+    capabilities: { resolveTaskDisplay: makeResolveDisplay() }
+  });
   const [events, setEvents] = useState(0);
   return (
     <div className="showcase__stage">
@@ -180,7 +198,7 @@ export const LiveUpdate: Story = () => {
         </button>
       </div>
       <div className="showcase__activity-stage">
-        <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} onLocateNode={() => undefined} resolveDisplay={makeResolveDisplay()} />
+        <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
       </div>
     </div>
   );
@@ -189,14 +207,17 @@ LiveUpdate.storyName = "实时更新";
 
 /** 窄屏 390px：活动栈在窄视口收窄且不横向溢出。 */
 export const Narrow: Story = () => {
-  const controls = useActivityStoreFixture({ seed: defaultActivitySeed() });
+  const controls = useActivityStoreFixture({
+    seed: defaultActivitySeed(),
+    capabilities: { resolveTaskDisplay: makeResolveDisplay() }
+  });
   return (
     <div className="showcase__stage">
       <div className="showcase__caption">
         <code>TaskActivityFeed</code> · 390px 窄屏
       </div>
       <div className="showcase__frame showcase__frame--narrow showcase__activity-stage">
-        <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} onLocateNode={() => undefined} resolveDisplay={makeResolveDisplay()} />
+        <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
       </div>
     </div>
   );
@@ -212,11 +233,12 @@ export const States: Story = () => {
       activityRecord({ taskKey: "s-ok", runId: "ok", nodeId: "text-1", state: "succeeded", modelType: "language", result: { mediaKind: "text", text: "生成结果摘要" } }),
       activityRecord({ taskKey: "s-f", runId: "f", nodeId: "audio-1", state: "failed", modelType: "audio", error: { name: "ProviderError", message: "上游超时" } }),
       activityRecord({ taskKey: "s-c", runId: "c", nodeId: "image-1", state: "cancelled", modelType: "image" })
-    ]
+    ],
+    capabilities: { resolveTaskDisplay: makeResolveDisplay() }
   });
   return (
     <Stage note="queued / running / succeeded / failed / cancelled">
-      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} onLocateNode={() => undefined} resolveDisplay={makeResolveDisplay()} />
+      <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
     </Stage>
   );
 };
@@ -224,14 +246,74 @@ States.storyName = "状态覆盖";
 
 /** 超过展示上限时保留最早运行项，完整列表由宿主历史承接。 */
 export const Overflow: Story = () => {
-  const controls = useActivityStoreFixture({ seed: Array.from({ length: 13 }, (_, index) => activityRecord({
-    taskKey: `overflow-${index}`, runId: `overflow-run-${index}`, nodeId: "image-1",
-    modelType: "image", modelKey: "gpt-image-2", state: index === 0 ? "running" : "succeeded",
-    ...(index === 0 ? { progress: 0.28 } : {}),
-    createdAt: `2026-09-29T08:00:${String(index).padStart(2, "0")}.000Z`
-  })) });
+  const controls = useActivityStoreFixture({
+    seed: Array.from({ length: 13 }, (_, index) => activityRecord({
+      taskKey: `overflow-${index}`, runId: `overflow-run-${index}`, nodeId: "image-1",
+      modelType: "image", modelKey: "gpt-image-2", state: index === 0 ? "running" : "succeeded",
+      ...(index === 0 ? { progress: 0.28 } : {}),
+      createdAt: `2026-09-29T08:00:${String(index).padStart(2, "0")}.000Z`
+    })),
+    capabilities: { resolveTaskDisplay: makeResolveDisplay() }
+  });
   return <Stage note="13 条记录 · 最早任务仍在运行 · 全部任务入口">
-    <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} onLocateNode={() => undefined} resolveDisplay={makeResolveDisplay()} />
+    <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
   </Stage>;
 };
 Overflow.storyName = "超出展示上限";
+
+/**
+ * 三种来源同一列表（change: 2026-10-22-unify-task-activity-rows，任务 3.4）。
+ *
+ * 生成任务、扩展后台活动与组创作按开始时间从新到旧交错；终态记录在同一停留时长后一起
+ * 下滑淡出。这里用 `data-testid` 暴露「推进组创作到终态」的按钮，便于人工复核滑出。
+ */
+export const MixedSources: Story = () => {
+  const capabilities = useMemo<ActivityRowCapabilities>(() => ({
+    locateNode: () => undefined,
+    resolveTaskDisplay: makeResolveDisplay(),
+    group: {
+      writable: () => true,
+      resolveTitle: (nodeId) => nodeId === "group-running" ? "故事分镜（创作组）" : "人物设定（创作组）",
+      action: async () => undefined,
+      openConversation: () => undefined
+    }
+  }), []);
+  const controls = useActivityStoreFixture({
+    seed: defaultActivitySeed(),
+    groups: groupActivitySeed(),
+    capabilities
+  });
+  const [kinds, setKinds] = useState<string[]>([]);
+  return (
+    <div className="showcase__stage">
+      <div className="showcase__caption">
+        <code>TaskActivityFeed</code> · 任务 / 后台活动 / 组创作同列表交错
+      </div>
+      <div className="showcase__actions">
+        <button
+          type="button"
+          data-testid="activity-inspect"
+          onClick={() => setKinds(controls.store.getSnapshot().rows.map((row: ActivityRow) => row.key))}
+        >
+          读取统一记录
+        </button>
+        <button
+          type="button"
+          data-testid="activity-finish-group"
+          onClick={() => controls.store.replaceGroupRuns({
+            rows: groupActivitySeed().map((run) => run.active
+              ? { ...run, status: "succeeded", label: "已完成", active: false }
+              : run),
+            error: ""
+          })}
+        >
+          推进组创作到终态
+        </button>
+      </div>
+      <div className="showcase__activity-stage" data-row-keys={kinds.join(",")}>
+        <StoryFeed store={controls.store} resolveMediaUrl={activityFixtureMediaUrl} />
+      </div>
+    </div>
+  );
+};
+MixedSources.storyName = "三种来源同列表";

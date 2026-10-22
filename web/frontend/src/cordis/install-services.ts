@@ -404,6 +404,15 @@ export async function installCanvasPageServices(
       openPanel: (route) => (ctx.get("canvasNavigation" as never) as CanvasNavigationService | undefined)?.openPanel(route),
       closePanel: (panelType) => (ctx.get("canvasNavigation" as never) as CanvasNavigationService | undefined)?.closePanel(panelType),
       panelAvailable: (route) => (ctx.get("canvasNavigation" as never) as CanvasNavigationService | undefined)?.panelAvailable(route) ?? false
+    },
+    // 生成目标身份：聚焦时就是聚焦节点（生成面板在聚焦工作区检查器里，没有 panel route），
+    // 概览时是画布主选中节点。详情头部据此判断「返回生成面板」是否仍成立——
+    // 用户换选节点或取消选中后，收起详情只剩关闭语义。
+    currentTarget: () => {
+      const mode = (ctx.get("canvasNavigation" as never) as CanvasNavigationService | undefined)?.getSnapshot().mode;
+      if (mode?.type === "node-focus") return { nodeId: mode.nodeId, focus: true };
+      const selected = nodeSelectionStore.getSnapshot().primaryNodeId;
+      return selected ? { nodeId: selected, focus: false } : null;
     }
   });
   ctx.provide("agentConversationService" as never, agentConversations as never);

@@ -75,7 +75,7 @@ function mountCountingRenders(store: TaskActivityStore) {
   act(() =>
     root.render(
       <UiProvider>
-        <TaskActivityFeed store={store} resolveMediaUrl={(key) => `/api/media/${key}`} onLocateNode={() => undefined} />
+        <TaskActivityFeed store={store} resolveMediaUrl={(key) => `/api/media/${key}`} />
       </UiProvider>
     )
   );
@@ -101,9 +101,11 @@ describe("Task Activity 输入边界（任务 5.3）", () => {
     // 不 import 事件目录 / 不注册事件监听。
     expect(source).not.toMatch(/events\/catalog|events\/task-activity/);
     expect(source).not.toMatch(/\.on\(|\.emit\(|addEventListener/);
-    // 只从 store 公开 snapshot 读取；本地 state 只承载展开态与预览锚点。
+    // 只从 store 公开 snapshot 读取；本地 state 只承载展开态、预览锚点与动作执行态。
     expect(source).toContain("useSyncExternalStore(store.subscribe, store.getSnapshot");
     expect(source).not.toMatch(/useState<.*CanvasTaskActivity/);
+    // 单行渲染器只消费统一记录，不再有按来源的独立行组件（change: 2026-10-22）。
+    expect(source).not.toMatch(/GroupRunRow|JobRow/);
   });
 
   it("started -> 多个 updated -> finished 每个 store transition 只触发一次通知", () => {

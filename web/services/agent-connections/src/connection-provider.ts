@@ -31,6 +31,8 @@ export type ConnectionDescribeContext = {
 };
 
 export type ConnectionDescribeResult = {
+  /** 公开展示名称；省略时使用用户保存的名称。 */
+  name?: string;
   runtime?: AgentConnectionRuntime;
   capabilities: AgentConnectionCapabilities;
   models: readonly AgentConnectionModel[];
@@ -92,7 +94,7 @@ export function createConnectionProvider(options: ConnectionProviderOptions): Ag
           }
         : base;
     return projectConnectionView({
-      record,
+      record: described.name === undefined ? record : { ...record, name: described.name },
       ...(described.runtime ? { runtime: described.runtime } : {}),
       extensionId: options.extensionId,
       capabilities: described.capabilities,

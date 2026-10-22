@@ -162,7 +162,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(rememberedSelection?.sourceId ?? null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(rememberedSelection?.connectionId ?? null);
   const [connectionsResult, setConnectionsResult] = useState<{ sourceId: string; connections: AgentConnectionView[] } | null>(null);
-  const [connectionsLoading, setConnectionsLoading] = useState(false);
+  const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [switching, setSwitching] = useState(false);
@@ -261,10 +261,8 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
 
   const service = conversation as { navigateToDetail?: (input: { conversationId: string; requestId: string; nodeId?: string }) => void } | undefined;
 
-  // 来源/连接选择归宿主（design D10）：只要存在来源就注入选择模型，面板据此提交并展示原因；
-  // 来源由连接推导；单连接仍展示 Provider 选择器。
-  const hostSourceSelection: import("./contract/authoring.js").AuthoringGenerationProps["sourceSelection"] = props.sourceSelection ?? (sources.length > 0 || selectedSourceId
-    ? {
+  // 即使没有来源也传递读取状态，避免把尚未加载或读取失败误报为未配置助手。
+  const hostSourceSelection: import("./contract/authoring.js").AuthoringGenerationProps["sourceSelection"] = props.sourceSelection ?? {
         sources: [
           ...sources.map((source) => ({ sourceId: source.sourceId, label: source.label })),
           ...(selectedSourceId && !activeSource ? [{ sourceId: selectedSourceId, label: "先前来源（已停用）" }] : [])
@@ -311,8 +309,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
         error: selectedSourceId && !activeSource ? "先前使用的来源已停用。请选择其他来源，或在插件管理中重新启用。" : connectionsError,
         blockedReason: switching ? "正在切换连接…" : null,
         onRefresh: () => { conversation.invalidateDirectory?.(); setRefreshRevision(value => value + 1); }
-      }
-    : undefined);
+      };
 
   useEffect(() => {
     const apply = (event: Event) => {
@@ -481,6 +478,7 @@ export type ControlPanelAction = {
   icon: ComponentType<{ className?: string }>;
   /** 面板主操作用 primary（强调色实底）；缺省 ghost。 */
   tone?: "primary";
+  tooltip?: ComponentType<{ children: ReactNode }>;
   onActivate: () => void;
   disabled?: boolean;
 };
@@ -572,18 +570,18 @@ export function CanvasControlPanel({
           <div className="canvas-control-panel__actions" role="group" aria-label="功能">
             {actions.map((action) => {
               const Icon = action.icon;
-              return (
-                <Tooltip key={action.id} content={action.label}>
-                  <IconButton
-                    className={`canvas-control-panel__icon${action.tone === "primary" ? " canvas-control-panel__icon--primary" : ""}`}
-                    label={action.label}
-                    disabled={action.disabled ?? false}
-                    onClick={() => action.onActivate()}
-                  >
-                    <Icon className="canvas-control-panel__icon-svg" />
-                  </IconButton>
-                </Tooltip>
+              const Guidance = action.tooltip;
+              const button = (
+                <IconButton
+                  className={`canvas-control-panel__icon${action.tone === "primary" ? " canvas-control-panel__icon--primary" : ""}`}
+                  label={action.label}
+                  disabled={action.disabled ?? false}
+                  onClick={() => action.onActivate()}
+                >
+                  <Icon className="canvas-control-panel__icon-svg" />
+                </IconButton>
               );
+              return Guidance ? <Guidance key={action.id}>{button}</Guidance> : <Tooltip key={action.id} content={action.label}>{button}</Tooltip>;
             })}
           </div>
           {statusContent ?? (status ? <CanvasControlStatus status={status} onReconnect={onReconnect} /> : null)}
@@ -636,6 +634,7 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
         label: entry.label,
         icon: entry.icon,
         tone: entry.tone,
+        tooltip: entry.tooltip,
         onActivate: entry.onActivate,
         disabled: entry.available ? !entry.available() : false
       }))}

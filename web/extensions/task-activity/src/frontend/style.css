@@ -216,25 +216,34 @@
 	cursor: help;
 }
 
+/* 状态灯按统一记录的语义色着色，不再按来源种类分支。 */
+.task-activity-feed__card[data-tone="active"] .task-activity-feed__dot {
+	background: var(--app-interaction-accent);
+}
+
 .task-activity-feed__card[data-state="queued"] .task-activity-feed__dot,
-.task-activity-feed__card[data-state="pending"] .task-activity-feed__dot {
+.task-activity-feed__card[data-state="pending"] .task-activity-feed__dot,
+.task-activity-feed__card[data-state="preparing"] .task-activity-feed__dot,
+.task-activity-feed__card[data-state="root-created"] .task-activity-feed__dot {
 	background: var(--app-interaction-accent);
 	opacity: 0.5;
 }
 
-.task-activity-feed__card[data-state="running"] .task-activity-feed__dot {
-	background: var(--app-interaction-accent);
-}
-
-.task-activity-feed__card[data-state="succeeded"] .task-activity-feed__dot {
+.task-activity-feed__card[data-tone="success"] .task-activity-feed__dot {
 	background: var(--app-status-success, var(--app-interaction-accent));
 }
 
-.task-activity-feed__card[data-state="failed"] .task-activity-feed__dot {
+.task-activity-feed__card[data-tone="danger"] .task-activity-feed__dot {
 	background: var(--app-status-danger);
 }
 
-.task-activity-feed__card[data-state="cancelled"] .task-activity-feed__dot {
+/* 组创作的结果待核对 / 部分完成需要用户确认，保持既有告警色而不是失败色。 */
+.task-activity-feed__card[data-state="unknown"] .task-activity-feed__dot,
+.task-activity-feed__card[data-state="partial"] .task-activity-feed__dot {
+	background: var(--app-status-warning);
+}
+
+.task-activity-feed__card[data-tone="muted"] .task-activity-feed__dot {
 	background: var(--activity-secondary);
 }
 
@@ -245,8 +254,8 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.task-activity-feed__card[data-state="running"] .task-activity-feed__state { color: var(--activity-accent); }
-.task-activity-feed__card[data-state="failed"] .task-activity-feed__state { color: var(--activity-danger); }
+.task-activity-feed__card[data-tone="active"] .task-activity-feed__state { color: var(--activity-accent); }
+.task-activity-feed__card[data-tone="danger"] .task-activity-feed__state { color: var(--activity-danger); }
 .task-activity-feed__primary {
   flex: 1 1 auto;
   min-width: 0;
@@ -354,7 +363,5 @@
 
 /* 组创作沿用原活动行与预览样式，仅补充选中态和交互按钮。 */
 .task-activity-feed__card[data-selected] { background: color-mix(in srgb, var(--app-interaction-accent) 6%, transparent); }
-.task-activity-feed__card[data-state="unknown"] .task-activity-feed__dot,
-.task-activity-feed__card[data-state="partial"] .task-activity-feed__dot { background: var(--app-status-warning); }
 .task-activity-feed__pop--group { position: relative; pointer-events: auto; }
 .task-activity-feed__group-actions { display: flex; flex-wrap: wrap; gap: 2px; }

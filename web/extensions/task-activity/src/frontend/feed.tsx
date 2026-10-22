@@ -2,30 +2,25 @@
  * TaskActivityFeed overlay
  * （change: 2026-09-29-add-canvas-task-activity-feed，任务 3.2 / 3.3 / 3.4 / design D4 / D5；
  *  change: adopt-radix-lucide-canvas-ui 任务 5.1/5.2：迁移到 Collapsible / ScrollArea /
- *  IconButton / Tooltip / 受控 Popover 与 Lucide facade）。
+ *  IconButton / Tooltip / 受控 Popover 与 Lucide facade；
+ *  change: 2026-10-22-unify-task-activity-rows，任务 3.1–3.3 / design D4：
+ *  **单行渲染器**——生成任务、扩展后台活动与组创作共用 `ActivityListRow`，差异只来自
+ *  `ActivityRow.actions` 与 `ActivityRow.source`，不再有按种类的行组件）。
  *
- * 左下角透明、左对齐的紧凑 activity feed：状态灯在左，单行显示任务名与状态/进度。
+ * 左下角透明、左对齐的紧凑 activity feed：状态灯在左，单行显示主行文案与状态/进度。
  * 组内 AI 创作沿用同一活动列表，组节点右上角状态可展开对应记录。
- * 模型、失败原因与结果悬停/聚焦可见；标题打开作品生成历史弹窗，终态关闭在 hover/focus 或触屏时可达。
- * 全部活动按开始时间从新到旧交错排列；终态项 10 秒后向下滑出并移除，也可手动关闭。
- * 成功项在 hover/focus 时以受控
- * 媒体浮层预览：图片/视频海报经同源 storageKey、音频只显示类型/时长且**不自动播放**、
- * 文本悬停显示有界安全摘要。所有 URL 只经 `resolveMediaUrl`（Media Remote）。
+ * 模型、失败原因与结果悬停/聚焦可见；标题打开详情，终态关闭在 hover/focus 或触屏时可达。
+ * 全部活动按开始时间从新到旧交错排列；终态记录统一停留时长后向下滑出并移除，也可手动关闭。
+ * 成功项在 hover/focus 时以受控媒体浮层预览：图片/视频海报经同源 storageKey、音频只显示
+ * 类型/时长且**不自动播放**、文本悬停显示有界安全摘要。所有 URL 只经 `resolveMediaUrl`。
  *
- * items 始终从 TaskActivityStore snapshot 读取；primitive 不监听任务事件、不保存记录，
- * 也不改变 store 的合并顺序（design D6）。
+ * rows 始终从 TaskActivityStore snapshot 读取；primitive 不监听任务事件、不保存记录，也不改变
+ * store 的合并与排序（design D6）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import {
-  isActiveTaskState,
-  isTerminalTaskState,
-  type BackgroundActivityJob,
-  type CanvasTaskActivity,
-  type TaskResultSummary
-} from "@woohaa3/contracts";
-import type { ActivityFeedItem, TaskActivityStore } from "./store.js";
-import { ACTIVITY_EXIT_DURATION_MS } from "./store.js";
-import { GroupRunRow, type GroupRunActions } from "./group-run-row.js";
+import type { TaskResultSummary } from "@woohaa3/contracts";
+import type { ActivityRow, ActivityRowActions } from "./rows.js";
+import { ACTIVITY_EXIT_DURATION_MS, type TaskActivityStore } from "./store.js";
 import {
   CollapsibleContent,
   CollapsibleRoot,
@@ -40,82 +35,38 @@ import {
   MenuListIcon
 } from "@woohaa3/frontend/extension-api";
 
-export type TaskActivityFeedProps = GroupRunActions & {
+export type TaskActivityFeedProps = {
   store: TaskActivityStore;
   /** 稳定 storageKey → 同源受控 URL（Media Remote）。绝不接受 provider/签名 URL。 */
   resolveMediaUrl: (storageKey: string) => string;
-  /** 定位到权威节点（selection 由宿主处理）。 */
-  onLocateNode: (nodeId: string) => void;
   /** 打开宿主已有的作品生成历史弹窗，绝不导航至全局监控页。 */
-  onOpenHistory?: (item?: ActivityFeedItem) => void;
-  /**
-   * 活动中的 Agent 记录：按确切的领域运行关联打开同一 Agent 详情
-   * （change: 2026-10-12-add-agent-conversation-panel，任务 5.7 / design D7）。
-   *
-   * 返回 `true` 表示已由宿主定位到确切 request/run 的 Agent 详情；返回 `false` 表示该 run
-   * 没有 Agent 回合关联，调用方保留原任务详情（普通 Task 不伪造对话）。只在提供时优先尝试。
-   */
-  onOpenAgentDetail?: (item: ActivityFeedItem) => Promise<boolean>;
-  /**
-   * 主/次行展示解析（change: 2026-10-09-improve-canvas-workflow，任务 5.1）。
-   * 缺省时按 modelKey 简单展示，保持既有 story 可用。
-   */
-  resolveDisplay?: (item: ActivityFeedItem) => { primary: string; secondary: string; locatable: boolean; locateReason: string | null };
+  onOpenHistory?: () => void;
 };
 
-const STATE_LABELS: Record<CanvasTaskActivity["state"], string> = {
-  queued: "排队中",
-  pending: "准备中",
-  running: "运行中",
-  succeeded: "已完成",
-  failed: "失败",
-  cancelled: "已取消"
-};
-
-const JOB_STATE_LABELS: Record<BackgroundActivityJob["status"], string> = {
-  queued: "排队中",
-  running: "录制中",
-  succeeded: "已录制",
-  failed: "失败",
-  cancelled: "已取消"
-};
-
-const JOB_KIND_LABELS: Record<BackgroundActivityJob["kind"], string> = {
-  "shot-reference-recording": "录制镜头参考"
-};
-
-function isActiveJob(job: BackgroundActivityJob): boolean {
-  return job.status === "queued" || job.status === "running";
-}
-
-export function TaskActivityFeed({ store, resolveMediaUrl, resolveDisplay, onLocateNode, onOpenHistory, onOpenAgentDetail, ...groupActions }: TaskActivityFeedProps) {
+export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory }: TaskActivityFeedProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  // 统一按活动开始时间排序；状态和种类都不改变位置，进度更新不会让记录跳动。
-  const entries = [
-    ...snapshot.items.map((item) => ({ kind: "task" as const, key: `task:${item.runId}`, time: item.createdAt, item })),
-    ...snapshot.jobs.map((job) => ({ kind: "job" as const, key: `job:${job.id}`, time: job.createdAt, job })),
-    ...snapshot.groups.map((row) => ({ kind: "group" as const, key: `group:${row.creation.requestId}`, time: row.createdAt, row }))
-  ].sort((a, b) => b.time.localeCompare(a.time) || a.key.localeCompare(b.key));
-  const total = entries.length;
+  const rows = snapshot.rows;
+  const total = rows.length;
+
   // 初始展开状态取决于启动时是否已有记录；后续新项由 effect 自动展开（SSR/静态渲染
-  // 不执行 effect，因此这里必须按首帧快照决定）。
-  const [expanded, setExpanded] = useState(() => {
-    const first = store.getSnapshot();
-    return first.items.length + first.jobs.length > 0 || first.groups.some(row => row.active);
-  });
-  const previousCount = useRef(total);
-  const previousGroups = useRef(new Set(snapshot.groups.map(row => row.requestId)));
+  // 不执行 effect，因此这里必须按首帧快照决定）。只有已结算的组记录不抢开面板。
+  const [expanded, setExpanded] = useState(() =>
+    store.getSnapshot().rows.some((row) => row.kind !== "group" || row.active)
+  );
+  const previousRows = useRef({ count: rows.length, groupKeys: new Set(rows.filter((row) => row.kind === "group").map((row) => row.key)) });
 
   // 有新项时自动展开；清空后收起。后台录制随画布加载自动开始，不因它的首条记录抢开面板。
   useEffect(() => {
-    const tasks = snapshot.items.length;
-    const jobs = snapshot.jobs.length;
-    const count = tasks + jobs + snapshot.groups.length;
-    if ((tasks > 0 && previousCount.current === 0) || snapshot.groups.some(row => row.active && !previousGroups.current.has(row.requestId))) setExpanded(true);
-    if (count === 0) setExpanded(false);
-    previousCount.current = count;
-    previousGroups.current = new Set(snapshot.groups.map(row => row.requestId));
-  }, [snapshot.items.length, snapshot.jobs.length, snapshot.groups]);
+    const tasks = rows.filter((row) => row.kind === "task").length;
+    const previous = previousRows.current;
+    const newlyActiveGroup = rows.some((row) => row.kind === "group" && row.active && !previous.groupKeys.has(row.key));
+    if ((tasks > 0 && previous.count === 0) || newlyActiveGroup) setExpanded(true);
+    if (rows.length === 0) setExpanded(false);
+    previousRows.current = {
+      count: rows.length,
+      groupKeys: new Set(rows.filter((row) => row.kind === "group").map((row) => row.key))
+    };
+  }, [rows]);
   useEffect(() => {
     if (snapshot.openRevision > 0) setExpanded(true);
   }, [snapshot.openRevision]);
@@ -154,7 +105,7 @@ export function TaskActivityFeed({ store, resolveMediaUrl, resolveDisplay, onLoc
     );
   }
 
-  const hasTerminal = snapshot.items.some((item) => isTerminalTaskState(item.state)) || snapshot.jobs.some((job) => !isActiveJob(job)) || snapshot.groups.some(row => !row.active);
+  const hasTerminal = rows.some((row) => !row.active);
 
   return (
     <CollapsibleRoot
@@ -174,20 +125,14 @@ export function TaskActivityFeed({ store, resolveMediaUrl, resolveDisplay, onLoc
         ) : (
           <ScrollArea className="task-activity-feed__scroll" label="任务活动列表">
             <ul className="task-activity-feed__list">
-              {entries.map((entry) => entry.kind === "group" ? (
-                <GroupRunRow key={entry.key} row={entry.row} selected={snapshot.selectedGroupId === entry.row.creation.rootGroupId} openRevision={snapshot.openRevision} onLocateNode={onLocateNode} onDismiss={() => store.dismissGroup(entry.row.creation.requestId)} {...groupActions} />
-              ) : entry.kind === "job" ? (
-                <JobRow key={entry.key} job={entry.job} exiting={snapshot.exitingKeys.includes(entry.key)} store={store} onLocateNode={onLocateNode} />
-              ) : (
-                <ActivityRow
-                  key={entry.key}
-                  item={entry.item}
-                  exiting={snapshot.exitingKeys.includes(entry.key)}
+              {rows.map((row) => (
+                <ActivityListRow
+                  key={row.key}
+                  row={row}
+                  exiting={snapshot.exitingKeys.includes(row.key)}
+                  openRevision={snapshot.openRevision}
                   store={store}
                   resolveMediaUrl={resolveMediaUrl}
-                  {...(onOpenHistory ? { onOpenHistory } : {})}
-                  {...(onOpenAgentDetail ? { onOpenAgentDetail } : {})}
-                  {...(resolveDisplay ? { resolveDisplay } : {})}
                 />
               ))}
             </ul>
@@ -215,87 +160,146 @@ export function TaskActivityFeed({ store, resolveMediaUrl, resolveDisplay, onLoc
   );
 }
 
-function ActivityRow(props: {
-  item: ActivityFeedItem;
+/** 组记录详情保留的交互延迟：离开 150ms 后关闭，允许鼠标在行与浮层之间移动。 */
+const GROUP_PREVIEW_CLOSE_DELAY_MS = 150;
+
+/**
+ * 单行渲染器：主行结构（状态灯、主行文案、状态文案、关闭按钮）对全部来源共用，
+ * 差异只有两处——`ActivityRow.actions` 决定可点动作，`ActivityRow.source` 决定详情内容。
+ */
+function ActivityListRow(props: {
+  row: ActivityRow;
   exiting: boolean;
+  openRevision: number;
   store: TaskActivityStore;
   resolveMediaUrl: (storageKey: string) => string;
-  onOpenHistory?: (item?: ActivityFeedItem) => void;
-  onOpenAgentDetail?: (item: ActivityFeedItem) => Promise<boolean>;
-  resolveDisplay?: (item: ActivityFeedItem) => { primary: string; secondary: string; locatable: boolean; locateReason: string | null };
 }) {
-  const { item, store, resolveMediaUrl } = props;
+  const { row, store, resolveMediaUrl } = props;
+  const actions = row.actions;
   const [preview, setPreview] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
   const rowRef = useRef<HTMLLIElement | null>(null);
-  const terminal = isTerminalTaskState(item.state);
+  const pinned = useRef(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+  /** 组记录的详情可交互（点击锁定、内部按钮可点）；任务/后台活动的详情只是只读预览。 */
+  const interactive = actions.pinOnOpen === true;
 
-  /**
-   * 打开该记录：Agent 记录优先定位**确切** request/run 详情；无 Agent 关联（普通 Task）保留
-   * 原任务详情（change: 2026-10-12-add-agent-conversation-panel，任务 5.7）。绝不按 nodeId
-   * 跳到同节点较新会话，也不为普通 Task 伪造对话。
-   */
-  const openRecord = useCallback(() => {
-    const openAgent = props.onOpenAgentDetail;
-    if (openAgent) {
-      void openAgent(item).then((opened) => {
-        if (!opened) props.onOpenHistory?.(item);
-      });
+  const cancelClose = useCallback(() => clearTimeout(closeTimer.current), []);
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  const openPreview = useCallback(() => {
+    cancelClose();
+    if (rowRef.current) setPreview(true);
+  }, [cancelClose]);
+
+  const closePreview = useCallback(() => {
+    cancelClose();
+    // 可交互详情在锁定或执行动作期间保持打开（离开后短暂延迟，允许指针在行与浮层之间移动）；
+    // 只读预览（任务 / 后台活动）离开即关闭。
+    if (!interactive) {
+      setPreview(false);
       return;
     }
-    props.onOpenHistory?.(item);
-  }, [item, props.onOpenAgentDetail, props.onOpenHistory]);
+    if (pinned.current || busy) return;
+    closeTimer.current = setTimeout(() => setPreview(false), GROUP_PREVIEW_CLOSE_DELAY_MS);
+  }, [busy, cancelClose, interactive]);
 
-  // 标题是画布上唯一的任务描述；模型和完整原因只在悬停层显示。
-  const display = props.resolveDisplay?.(item) ?? {
-    primary: labelForModel(item),
-    secondary: "",
-    locatable: true,
-    locateReason: null
+  /** 点击主行锁定详情（组记录）；只读记录立刻显示预览。 */
+  const openDetails = useCallback(() => {
+    cancelClose();
+    pinned.current = true;
+    setPreview(true);
+  }, [cancelClose]);
+
+  // 组节点入口选中该记录时展开详情并滚动到可视区（change: 2026-10-22，design D4 保留项）。
+  useEffect(() => {
+    if (!interactive || !row.selected) return;
+    rowRef.current?.scrollIntoView?.({ block: "nearest" });
+    pinned.current = true;
+    setPreview(true);
+  }, [interactive, row.selected, props.openRevision]);
+
+  const act = useCallback(async (action: "stop" | "retry" | "verify" | "openConversation") => {
+    if (busy) return;
+    const run = action === "openConversation" ? actions.openConversation : actions[action];
+    if (!run) {
+      setError(action === "openConversation" ? "对话详情暂不可用" : "运行状态服务不可用");
+      return;
+    }
+    setBusy(action);
+    setError("");
+    try {
+      await run();
+      if (action === "openConversation") {
+        pinned.current = false;
+        setPreview(false);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "操作未确认，请核对状态");
+    } finally {
+      setBusy("");
+    }
+  }, [actions, busy]);
+
+  const progressText = row.progress !== undefined
+    ? ` · ${Math.round(row.progress * 100)}%`
+    : "";
+  const stateText = `${row.status}${progressText}`;
+
+  /** 主行点击：组记录锁定详情；有详情能力时打开详情；否则退回节点定位（后台活动）。 */
+  const activatePrimary = () => {
+    if (interactive) return openDetails();
+    if (actions.openDetail) return actions.openDetail();
+    actions.locate?.();
   };
-
-  // hover/focus 显示信息，不抢占焦点或要求点击。
-  const openPreview = useCallback(() => {
-    if (rowRef.current) setPreview(true);
-  }, []);
-
-  const closePreview = useCallback(() => setPreview(false), []);
-
-  const progressText =
-    isActiveTaskState(item.state) && item.progress !== undefined
-      ? ` · ${Math.round(Math.max(0, Math.min(1, item.progress)) * 100)}%`
-      : "";
+  /**
+   * 任务行始终保留可点击主行（历史行为：打开详情，缺省无副作用）；组行可锁定详情；
+   * 后台活动仅在可定位时才是按钮。
+   */
+  const primaryInteractive = interactive || row.kind === "task" || actions.locate !== undefined;
+  /** 主行动作文案：锁定详情 / 打开详情 / 定位节点，与真实点击行为一致。 */
+  const primaryActionLabel = interactive || actions.openDetail ? "查看详情" : "定位节点";
 
   return (
     <li
       ref={rowRef}
       className="task-activity-feed__card"
       data-exiting={props.exiting || undefined}
-      data-state={item.state}
-      data-optimistic={item.optimistic || undefined}
-      data-local-failure={item.localFailure || undefined}
+      data-state={row.state}
+      data-tone={row.tone}
+      data-kind={row.kind}
+      {...(row.kind === "group" ? { "data-group-id": row.nodeId } : {})}
+      {...(row.selected ? { "data-selected": true } : {})}
+      {...(row.source.kind === "task" && row.source.item.optimistic ? { "data-optimistic": true } : {})}
+      {...(row.source.kind === "task" && row.source.item.localFailure ? { "data-local-failure": true } : {})}
       onMouseEnter={openPreview}
       onMouseLeave={closePreview}
       onFocus={openPreview}
       onBlur={closePreview}
-      aria-label={`${display.primary}：${STATE_LABELS[item.state]}${progressText}`}
+      aria-label={`${row.title}：${stateText}`}
     >
       <span className="task-activity-feed__dot" aria-hidden="true" />
-      <button
-        type="button"
-        className="task-activity-feed__primary"
-        aria-label={`${display.primary}：${STATE_LABELS[item.state]}${progressText}，查看任务`}
-        onClick={() => openRecord()}
-      >
-        {display.primary}
-      </button>
-      <span className="task-activity-feed__state">{STATE_LABELS[item.state]}{progressText}</span>
-      {terminal ? (
+      {primaryInteractive ? (
+        <button
+          type="button"
+          className="task-activity-feed__primary"
+          aria-label={`${row.title}：${stateText}，${primaryActionLabel}`}
+          onClick={activatePrimary}
+        >
+          {row.title}
+        </button>
+      ) : (
+        <span className="task-activity-feed__primary">{row.title}</span>
+      )}
+      <span className="task-activity-feed__state">{stateText}</span>
+      {actions.close ? (
         <Tooltip content="关闭">
           <IconButton
             className="task-activity-feed__close"
             label="关闭该记录"
             size="sm"
-            onClick={() => store.dismiss(item.taskKey)}
+            onClick={() => store.dismissRow(row.key)}
           >
             <CloseIcon />
           </IconButton>
@@ -306,28 +310,32 @@ function ActivityRow(props: {
         <Popover
           open
           onOpenChange={(next) => {
-            if (!next) closePreview();
+            cancelClose();
+            if (interactive) pinned.current = false;
+            setPreview(next);
           }}
           anchor={<span aria-hidden="true" style={{ position: "absolute", right: 0, top: 0, width: 0, height: 0 }} />}
           side="right"
           align="start"
           sideOffset={8}
-          className="task-activity-feed__pop"
-          dismissOnOutside={false}
-          dismissOnEscape={false}
+          className={interactive ? "task-activity-feed__pop task-activity-feed__pop--group" : "task-activity-feed__pop"}
+          dismissOnOutside={interactive}
+          dismissOnEscape={interactive}
           restoreFocus={false}
           autoFocus={false}
         >
-          <div className="task-activity-feed__hover">
-            <strong>{display.primary}</strong>
-            <span>{display.secondary || item.modelKey || "模型信息暂不可用"}</span>
-            <span>{STATE_LABELS[item.state]}{progressText}</span>
-            {item.state === "failed" ? <p>{item.error?.message || "任务未能完成，请检查输入后重试。"}</p> : null}
-            {item.state === "succeeded" && item.result ? <>
-              <PreviewBody result={item.result} resolveMediaUrl={resolveMediaUrl} />
-              {item.result.mediaKind === "text" ? <p>{truncate(item.result.text ?? "", 200)}</p> : null}
-              {item.result.mediaKind === "audio" ? <span>音频{item.result.durationSeconds !== undefined ? ` · ${formatDuration(item.result.durationSeconds)}` : ""}</span> : null}
-            </> : null}
+          <div
+            className="task-activity-feed__hover"
+            {...(interactive ? { onMouseEnter: cancelClose, onMouseLeave: closePreview } : {})}
+          >
+            <strong>{row.title}</strong>
+            {row.secondary ? <span>{row.secondary}</span> : null}
+            <span>{stateText}</span>
+            <RowDetail row={row} resolveMediaUrl={resolveMediaUrl} />
+            {row.detail || error ? <p>{error || row.detail}</p> : null}
+            {row.kind === "group" ? (
+              <GroupRunActionsPanel actions={actions} busy={busy} onActivate={(action) => void act(action)} />
+            ) : null}
           </div>
         </Popover>
       ) : null}
@@ -335,80 +343,68 @@ function ActivityRow(props: {
   );
 }
 
-/**
- * 后台活动行（扩展发布的非任务活动）：
- *
- * 只表达状态与进度，可定位所属画布节点，但**不**打开任务历史或 Agent 详情；
- * 失败原因放在与普通任务一致的悬停详情中，不挤占单行布局。
- */
-function JobRow(props: {
-  job: BackgroundActivityJob;
-  exiting: boolean;
-  store: TaskActivityStore;
-  onLocateNode: (nodeId: string) => void;
+/** 来源详情：只有这里按 `source.kind` 分支，且只读。 */
+function RowDetail(props: { row: ActivityRow; resolveMediaUrl: (storageKey: string) => string }) {
+  const { row, resolveMediaUrl } = props;
+  switch (row.source.kind) {
+    case "task": {
+      const item = row.source.item;
+      if (item.state === "failed") {
+        return <p>{item.error?.message || "任务未能完成，请检查输入后重试。"}</p>;
+      }
+      const result = item.result;
+      if (item.state !== "succeeded" || !result) return null;
+      return (
+        <>
+          <PreviewBody result={result} resolveMediaUrl={resolveMediaUrl} />
+          {result.mediaKind === "text" ? <p>{truncate(result.text ?? "", 200)}</p> : null}
+          {result.mediaKind === "audio" ? (
+            <span>音频{result.durationSeconds !== undefined ? ` · ${formatDuration(result.durationSeconds)}` : ""}</span>
+          ) : null}
+        </>
+      );
+    }
+    case "job":
+      // 后台活动的失败原因已由适配器放进 `row.detail`，与任务一致地显示在统一详情里。
+      return null;
+    case "group":
+      return null;
+  }
+}
+
+/** 组创作的动作集合：只由记录声明的动作决定，不再从组件 props 逐层透传。 */
+function GroupRunActionsPanel(props: {
+  actions: ActivityRowActions;
+  busy: string;
+  onActivate: (action: "stop" | "retry" | "verify" | "openConversation") => void;
 }) {
-  const { job, store, onLocateNode } = props;
-  const [preview, setPreview] = useState(false);
-  const active = isActiveJob(job);
-  const progressText =
-    active && job.progress !== undefined
-      ? ` · ${Math.round(Math.max(0, Math.min(1, job.progress)) * 100)}%`
-      : "";
-  const primary = `${JOB_KIND_LABELS[job.kind]} · ${job.title}`;
-  const state = `${JOB_STATE_LABELS[job.status]}${progressText}`;
+  const { actions, busy, onActivate } = props;
+  const writable = actions.writable !== false;
+  if (!actions.locate && !actions.stop && !actions.retry && !actions.verify && !actions.openConversation) return null;
   return (
-    <li
-      className="task-activity-feed__card"
-      data-exiting={props.exiting || undefined}
-      data-state={job.status}
-      data-kind={job.kind}
-      onMouseEnter={() => setPreview(true)}
-      onMouseLeave={() => setPreview(false)}
-      aria-label={`${primary}：${state}${job.detail ? `，${job.detail}` : ""}`}
-    >
-      <span className="task-activity-feed__dot" aria-hidden="true" />
-      {job.nodeId ? (
-        <button
-          type="button"
-          className="task-activity-feed__primary"
-          aria-label={`${primary}：${state}，定位节点`}
-          onClick={() => onLocateNode(job.nodeId!)}
-        >
-          {primary}
-        </button>
-      ) : (
-        <span className="task-activity-feed__primary">{primary}</span>
-      )}
-      <span className="task-activity-feed__state">{state}</span>
-      {preview && !props.exiting ? (
-        <Popover
-          open
-          onOpenChange={setPreview}
-          anchor={<span aria-hidden="true" style={{ position: "absolute", right: 0, top: 0, width: 0, height: 0 }} />}
-          side="right"
-          align="start"
-          sideOffset={8}
-          className="task-activity-feed__pop"
-          dismissOnOutside={false}
-          dismissOnEscape={false}
-          restoreFocus={false}
-          autoFocus={false}
-        >
-          <div className="task-activity-feed__hover">
-            <strong>{primary}</strong>
-            <span>{state}</span>
-            {job.detail ? <p>{job.detail}</p> : job.status === "failed" ? <p>镜头录制失败，未返回具体原因。</p> : null}
-          </div>
-        </Popover>
+    <div className="task-activity-feed__group-actions">
+      {actions.locate ? <Button size="sm" tone="ghost" onClick={() => actions.locate!()}>定位创作组</Button> : null}
+      {actions.openConversation ? (
+        <Button size="sm" tone="ghost" disabled={!!busy} onClick={() => onActivate("openConversation")}>
+          {busy === "openConversation" ? "正在打开…" : "查看对话"}
+        </Button>
       ) : null}
-      {active ? null : (
-        <Tooltip content="关闭">
-          <IconButton className="task-activity-feed__close" label="关闭该记录" size="sm" onClick={() => store.dismissJob(job.id)}>
-            <CloseIcon />
-          </IconButton>
-        </Tooltip>
-      )}
-    </li>
+      {actions.stop ? (
+        <Button size="sm" tone="ghost" disabled={!!busy || !writable} onClick={() => onActivate("stop")}>
+          {busy === "stop" ? "正在停止…" : "停止"}
+        </Button>
+      ) : null}
+      {actions.retry ? (
+        <Button size="sm" tone="ghost" disabled={!!busy || !writable} onClick={() => onActivate("retry")}>
+          {busy === "retry" ? "正在重试…" : "重试原请求"}
+        </Button>
+      ) : null}
+      {actions.verify ? (
+        <Button size="sm" tone="ghost" disabled={!!busy} onClick={() => onActivate("verify")}>
+          {busy === "verify" ? "正在核对…" : "核对状态"}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -429,19 +425,6 @@ function PreviewBody(props: { result: TaskResultSummary; resolveMediaUrl: (stora
   }
   return null;
 }
-
-function labelForModel(item: CanvasTaskActivity): string {
-  if (item.modelKey) return item.modelKey;
-  if (item.modelType) return MODEL_TYPE_LABELS[item.modelType];
-  return "任务";
-}
-
-const MODEL_TYPE_LABELS: Record<NonNullable<CanvasTaskActivity["modelType"]>, string> = {
-  language: "文本",
-  image: "图片",
-  video: "视频",
-  audio: "音频"
-};
 
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();

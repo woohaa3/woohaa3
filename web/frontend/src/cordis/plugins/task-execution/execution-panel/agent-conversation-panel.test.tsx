@@ -418,6 +418,85 @@ describe("AgentConversationPanel · 运行中刷新", () => {
   });
 });
 
+describe("AgentConversationPanel · 收起动作语义", () => {
+  it.each([true, undefined])("来源仍是当前目标时显示「返回生成面板」（canReturnToSource=%s）", async (canReturnToSource) => {
+    const onClose = vi.fn();
+    const { navigation } = navStub(DETAIL);
+    const service = createAgentConversationService({ remote: fakeRemote(), navigation });
+    const { el, root, act } = await mount(
+      <AgentConversationPanel
+        conversationId="conv-1"
+        requestId="req-1"
+        nodeId="n1"
+        service={service}
+        onClose={onClose}
+        {...(canReturnToSource === undefined ? {} : { canReturnToSource })}
+      />
+    );
+    await act(async () => undefined);
+    const back = el.querySelector(".agent-detail__back") as HTMLButtonElement;
+    expect(back.textContent).toBe("返回生成面板");
+    await act(async () => back.click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
+
+  it("选中节点已改变时只是一个关闭按钮", async () => {
+    const onClose = vi.fn();
+    const { navigation } = navStub(DETAIL);
+    const service = createAgentConversationService({ remote: fakeRemote(), navigation });
+    const { el, root, act } = await mount(
+      <AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} canReturnToSource={false} onClose={onClose} />
+    );
+    await act(async () => undefined);
+    const back = el.querySelector(".agent-detail__back") as HTMLButtonElement;
+    expect(back.textContent).toBe("关闭");
+    await act(async () => back.click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
+
+  it("实时来源变化时按钮当场改写（不重挂面板）", async () => {
+    let canReturn = true;
+    const listeners = new Set<() => void>();
+    const returnToSource = {
+      subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+      canReturn: () => canReturn
+    };
+    const { navigation } = navStub(DETAIL);
+    const service = createAgentConversationService({ remote: fakeRemote(), navigation });
+    const { el, root, act } = await mount(
+      <AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} onClose={() => undefined} returnToSource={returnToSource} />
+    );
+    await act(async () => undefined);
+    const back = () => el.querySelector(".agent-detail__back") as HTMLButtonElement;
+    expect(back().textContent).toBe("返回生成面板");
+    await act(async () => { canReturn = false; listeners.forEach(listener => listener()); });
+    expect(back().textContent).toBe("关闭");
+    await act(async () => { canReturn = true; listeners.forEach(listener => listener()); });
+    expect(back().textContent).toBe("返回生成面板");
+    await act(async () => root.unmount());
+  });
+
+  it("关闭语义下未知组回合的说明也不宣称返回生成面板", async () => {
+    const remote = fakeRemote();
+    remote.read = async () => ({ ok: true, value: {
+      ...snapshot(),
+      conversation: { ...snapshot().conversation, nodeId: "n1" },
+      turns: [{ ...turn(), status: "unknown", stage: "unknown", target: { canvasId: "cv", nodeId: "n1", mode: "canvas-group" } }]
+    } });
+    const { navigation } = navStub(DETAIL);
+    const service = createAgentConversationService({ remote, navigation });
+    const { el, root, act } = await mount(
+      <AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} canReturnToSource={false} onClose={() => undefined} />
+    );
+    await act(async () => undefined);
+    expect(el.textContent).toContain("再关闭详情继续搭建");
+    expect(el.textContent).not.toContain("返回生成面板继续搭建");
+    await act(async () => root.unmount());
+  });
+});
+
 describe("AgentConversationPanel · 清空上下文（design D8）", () => {
   it("终态回合时显示入口，二次确认后清空并按 id 归档后收起", async () => {
     const remote = fakeRemote();

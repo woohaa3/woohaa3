@@ -51,11 +51,39 @@ function render(ui: React.ReactElement) {
 const media = (key: string) => `/api/media/${key}`;
 
 describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
+  it("进行中的组记录自动展开面板，单纯的后台录制不抢开", () => {
+    const store = new TaskActivityStore();
+    try {
+      const container = render(<UiProvider><TaskActivityFeed store={store} resolveMediaUrl={media} /></UiProvider>);
+      expect(container.querySelector(".task-activity-feed__entry")).not.toBeNull();
+      // 只有后台录制：面板保持收起（画布加载即自动录制，不应抢开）。
+      act(() => store.applyJob({
+        id: "attempt-1", canvasId: "c1", kind: "shot-reference-recording",
+        title: "镜头 1", status: "running", updatedAt: "2026-01-01T00:00:00Z"
+      }));
+      expect(container.querySelector(".task-activity-feed")).toBeNull();
+      expect(container.querySelector(".task-activity-feed__entry")).not.toBeNull();
+      // 新的进行中组记录：自动展开。
+      act(() => store.replaceGroupRuns({
+        rows: [{
+          creation: {
+            requestId: "creation-g1", canvasId: "c", rootGroupId: "g1", commandId: "cmd",
+            turnRequestId: "request-g1", scopeEpoch: 1, stage: "accepted"
+          },
+          requestId: "request-g1", status: "running", label: "创作中", active: true,
+          createdAt: "2026-01-01T00:00:01Z"
+        }],
+        error: ""
+      }));
+      expect(container.querySelector(".task-activity-feed")).not.toBeNull();
+    } finally { store.dispose(); }
+  });
+
   it("到期时关闭预览并保留退出行，最后一项退出后才收起面板", () => {
     vi.useFakeTimers();
     const store = storeWith([record({ taskKey: "t", runId: "r", nodeId: "n" })]);
     try {
-      const container = render(<UiProvider><TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={() => undefined} /></UiProvider>);
+      const container = render(<UiProvider><TaskActivityFeed store={store} resolveMediaUrl={media} /></UiProvider>);
       const row = container.querySelector<HTMLElement>(".task-activity-feed__card")!;
       act(() => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
       expect(container.querySelector(".task-activity-feed__pop")).not.toBeNull();
@@ -78,16 +106,17 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
       detail: "第 0 秒镜头捕捉失败或超时", nodeId: "film",
       updatedAt: "2026-01-01T00:00:00Z"
     };
+    const locate = vi.fn();
+    store.configure({ locateNode: locate });
     store.applyJob(failed);
     store.applyJob({ ...failed, id: "attempt-2", status: "running", detail: undefined });
-    const locate = vi.fn();
     const container = render(
       <UiProvider>
-        <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={locate} />
+        <TaskActivityFeed store={store} resolveMediaUrl={media} />
       </UiProvider>
     );
     expect(container.querySelectorAll(".task-activity-feed__card")).toHaveLength(2);
-    const card = container.querySelector<HTMLElement>('[data-state="failed"]')!;
+    const card = container.querySelector<HTMLElement>('[data-kind="job"][data-state="failed"]')!;
     act(() => card.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
     expect(container.querySelector(".task-activity-feed__pop")?.textContent).toContain(failed.detail);
     act(() => card.querySelector<HTMLButtonElement>(".task-activity-feed__primary")!.click());
@@ -104,7 +133,8 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
       record({ taskKey: "cancelled", runId: "rc", nodeId: "nc", state: "cancelled" })
     ]);
     const history = vi.fn();
-    const container = render(<UiProvider><TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={() => undefined} onOpenHistory={history} /></UiProvider>);
+    store.configure({ openHistory: history });
+    const container = render(<UiProvider><TaskActivityFeed store={store} resolveMediaUrl={media} onOpenHistory={history} /></UiProvider>);
     const row = container.querySelector<HTMLElement>('[data-state="failed"]')!;
     expect(container.querySelector("summary")).toBeNull();
     act(() => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
@@ -126,20 +156,14 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
     ]);
     const locate = vi.fn();
     const open = vi.fn();
+    store.configure({
+      locateNode: locate,
+      openHistory: open,
+      resolveTaskDisplay: (item) => ({ primary: item.nodeId, secondary: "" })
+    });
     const container = render(
       <UiProvider>
-        <TaskActivityFeed
-          store={store}
-          resolveMediaUrl={media}
-          onLocateNode={locate}
-          onOpenHistory={open}
-          resolveDisplay={(item) => ({
-            primary: item.nodeId,
-            secondary: "",
-            locatable: item.nodeId !== "missing",
-            locateReason: item.nodeId === "missing" ? "作品已删除" : null
-          })}
-        />
+        <TaskActivityFeed store={store} resolveMediaUrl={media} />
       </UiProvider>
     );
     const titles = [...container.querySelectorAll<HTMLButtonElement>(".task-activity-feed__primary")];
@@ -161,16 +185,14 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
     ]);
     const openHistory = vi.fn();
     const openAgent = vi.fn(async (item: { runId: string }) => item.runId === "run-agent");
+    store.configure({
+      openTaskDetail: openAgent,
+      openHistory,
+      resolveTaskDisplay: (item) => ({ primary: item.runId, secondary: "" })
+    });
     const container = render(
       <UiProvider>
-        <TaskActivityFeed
-          store={store}
-          resolveMediaUrl={media}
-          onLocateNode={() => undefined}
-          onOpenHistory={openHistory}
-          onOpenAgentDetail={openAgent}
-          resolveDisplay={(item) => ({ primary: item.runId, secondary: "", locatable: true, locateReason: null })}
-        />
+        <TaskActivityFeed store={store} resolveMediaUrl={media} />
       </UiProvider>
     );
     const click = (label: string) => {
@@ -196,7 +218,7 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
     ]);
     const container = render(
       <UiProvider>
-        <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={() => undefined} />
+        <TaskActivityFeed store={store} resolveMediaUrl={media} />
       </UiProvider>
     );
     expect(container.querySelector(".task-activity-feed__pop")).toBeNull();
@@ -227,7 +249,7 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
     ]);
     const container = render(
       <UiProvider>
-        <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={() => undefined} />
+        <TaskActivityFeed store={store} resolveMediaUrl={media} />
       </UiProvider>
     );
     const card = container.querySelector<HTMLElement>(".task-activity-feed__card")!;
@@ -246,7 +268,7 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
     ]);
     const container = render(
       <UiProvider>
-        <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={() => undefined} />
+        <TaskActivityFeed store={store} resolveMediaUrl={media} />
       </UiProvider>
     );
     const card = container.querySelector<HTMLElement>(".task-activity-feed__card")!;

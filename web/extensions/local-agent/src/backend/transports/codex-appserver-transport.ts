@@ -95,7 +95,7 @@ function createCodexRpc(
         const id = (requestIds.get(connection) ?? 0) + 1;
         requestIds.set(connection, id);
         const timer = setTimeout(() => {
-          if (pending.delete(id)) reject(new Error(`Codex App Server 在 ${method} 超时`));
+          if (pending.delete(id)) reject(new Error(`本地 ChatGPT 在 ${method} 超时`));
         }, timeoutMs);
         pending.set(id, {
           resolve: (value) => {
@@ -244,7 +244,7 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
       finally { rpc.dispose(); }
     },
     async models(input): Promise<{ models: AgentModelView[]; error?: string }> {
-      if (!input.stdio) return { models: [], error: "Codex App Server 专用进程未提供 stdio" };
+      if (!input.stdio) return { models: [], error: "本地 ChatGPT 专用进程未提供 stdio" };
       const rpc = createCodexRpc(input.stdio, { logger: log, requestTimeoutMs });
       try {
         const versionCheck = await ensureInitialized(input.stdio, rpc, options);
@@ -261,7 +261,7 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
         }
         return {
           models: [...models.values()],
-          ...(models.size === 0 ? { error: "Codex App Server 未返回模型目录，可手动填写模型 ID" } : {})
+          ...(models.size === 0 ? { error: "本地 ChatGPT 未返回模型目录，可手动填写模型 ID" } : {})
         };
       } catch (error) {
         return { models: [], error: error instanceof Error ? error.message : "Codex 模型目录读取失败" };
@@ -271,7 +271,7 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
     },
     async run(input: LocalAgentTransportInput): Promise<LocalAgentTransportResult> {
       const connection = input.stdio;
-      if (!connection) return { ok: false, code: "runtime-missing", message: "Codex App Server 专用进程未提供 stdio" };
+      if (!connection) return { ok: false, code: "runtime-missing", message: "本地 ChatGPT 专用进程未提供 stdio" };
 
       const decoder = createCodexAppServerDecoder();
       let nativeThread: string | null = null;
@@ -294,7 +294,7 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
           if (startingTurn && message.method === "turn/started" && typeof turnId === "string") nativeTurn = turnId;
           for (const event of decoder.onMessage(message)) emit(event);
         },
-        onInvalid: () => decoder.onError("protocol-mismatch", "Codex App Server 输出非 JSON 帧")
+        onInvalid: () => decoder.onError("protocol-mismatch", "本地 ChatGPT 输出非 JSON 帧")
       });
       const interrupt = () => {
         if (!nativeThread || !nativeTurn || interrupted) return;
@@ -361,7 +361,7 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
         }
         let threadId = threadIdFromResult(thread, resumedNativeId ?? decoder.threadId());
         if (!threadId) {
-          return { ok: false, code: "protocol-mismatch", message: "Codex App Server 未返回 threadId，已拒绝发送回合" };
+          return { ok: false, code: "protocol-mismatch", message: "本地 ChatGPT 未返回 threadId，已拒绝发送回合" };
         }
         nativeThread = threadId;
         if (input.mcpEndpoint && input.toolToken) {
@@ -377,7 +377,7 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
             const fresh = await rpc.call("thread/start", threadParams);
             const freshId = threadIdFromResult(fresh, null);
             if (!freshId) {
-              return { ok: false, code: "protocol-mismatch", message: "Codex App Server 未返回新 threadId，已拒绝发送回合" };
+              return { ok: false, code: "protocol-mismatch", message: "本地 ChatGPT 未返回新 threadId，已拒绝发送回合" };
             }
             threadId = freshId;
             nativeThread = threadId;
@@ -415,7 +415,7 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
         if (outcome.status === "cancelled") return { ok: false, code: "cancelled", message: "回合已取消", nativeId: threadId };
         return { ok: true, outcome, nativeId: threadId };
       } catch (error) {
-        return { ok: false, code: input.signal.aborted ? "cancelled" : "transport-unavailable", message: error instanceof Error ? error.message : "Codex App Server 运行失败" };
+        return { ok: false, code: input.signal.aborted ? "cancelled" : "transport-unavailable", message: error instanceof Error ? error.message : "本地 ChatGPT 运行失败" };
       } finally {
         input.signal.removeEventListener("abort", onAbort);
         rpc.dispose();

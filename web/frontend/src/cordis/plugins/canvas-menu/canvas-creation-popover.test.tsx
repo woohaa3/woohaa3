@@ -42,6 +42,17 @@ async function render(key = canvasId) {
 function button(text: string) { return [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!; }
 const view = { requestId: "request", canvasId: "canvas", rootGroupId: "root", commandId: "cmd", turnRequestId: "turn", scopeEpoch: 0, stage: "accepted" };
 describe("blank creation lifecycle", () => {
+  it("offers configuration when the directory is empty and preserves the creation draft", async () => {
+    const service = mocks.services.agentConversationService as AgentConversationService;
+    service.listConnections = vi.fn(async () => ({ ok: true as const, value: [] }));
+    await render();
+    expect(button("创建").disabled).toBe(true);
+    expect(document.body.textContent).toContain("尚未配置助手。连接一个助手即可开始，创作描述会保留在这里。");
+    await act(async () => button("配置助手").click());
+    expect((mocks.services.canvasNavigation as { openDialog: ReturnType<typeof vi.fn> }).openDialog).toHaveBeenCalledWith({ dialogId: "agent-assistant", payload: { canvasId } });
+    expect(creationDraft(transport, "space", canvasId).prompt).toBe("创建场景");
+    expect(request).not.toHaveBeenCalled();
+  });
   it("uses the preloaded directory on the first AI render and when reopening without a loading flash", async () => {
     const service = mocks.services.agentConversationService as AgentConversationService;
     const connections = vi.spyOn(service, "listConnections");

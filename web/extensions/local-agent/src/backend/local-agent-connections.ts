@@ -24,7 +24,7 @@ import type {
 } from "@woohaa3/contracts";
 import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnBudget, createTurnOutcomeJournal, preflightInput, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
 import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
-import { LOCAL_AGENT_ADAPTERS, LOCAL_AGENT_PLUGIN_ID, type LocalAgentAdapterDescriptor } from "../shared.js";
+import { LOCAL_AGENT_ADAPTERS, LOCAL_AGENT_PLUGIN_ID, localAgentConnectionName, type LocalAgentAdapterDescriptor } from "../shared.js";
 import type { ProcessManager } from "./process-manager.js";
 import type { LocalAgentTransport } from "./transports/transport.js";
 import { buildTargetPrompt } from "./target-prompt.js";
@@ -88,6 +88,7 @@ export function createLocalAgentDescriptors(): Record<string, ConnectionDescript
   for (const adapter of LOCAL_AGENT_ADAPTERS) {
     descriptors[adapter.adapterId] = {
       describe: ({ record }) => ({
+        name: localAgentConnectionName(adapter.adapterId, record.name),
         capabilities: capabilitiesFor(),
         // 不在连接描述里伪造 `app-server-default`：它不是 App Server 的真实模型 id，提交后会被
         // 上游拒绝。用户手填过的模型作为 user-provided 保留；没有时交给 adapter 读取真实目录。
