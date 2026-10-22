@@ -29,4 +29,8 @@ Canvas image editing prepares only after a direct edit request. `web/frontend/sr
 
 Local tool setup lives in `web/extensions/local-agent/src/frontend/settings-panel.tsx`: missing tools expose installation actions, including the shared runtime settings for Codex. `src/backend/runtime-executable.ts` bridges managed Codex and local executables; `process-manager.ts` holds the managed executable lease until process exit. Discovery stays read-only.
 
+Assistant entry points share `web/frontend/src/cordis/ui/assistant-execution/model-selector.tsx` for selection and the empty-directory configuration action. `web/frontend/src/cordis/plugins/agent-assistant/setup-tooltip.tsx` supplies the corner toolbar's first-connection guidance through the optional `canvas.toolbar-action.tooltip` wrapper; it subscribes to the existing data-space-scoped directory and suppresses guidance during loading, errors, and dialogs.
+
+`web/frontend/src/cordis/plugins/agent-assistant/first-use.ts` observes the same directory from the page plugin and opens the assistant dialog at `page: "add"` on the first successful empty result after canvas readiness. A data-space-scoped localStorage marker respects dismissal across reloads; failures, pending dialogs, scope changes and disposal do not create duplicate or stale prompts.
+
 Runtime release layout: `scripts/lib/runtime-release-layout.mjs` owns platform/App-version directory and CDN URL resolution. `build-desktop.mjs` passes the effective App version into host staging; `package-runtime-components.mjs` writes the same platform/version upload directory and atomic signed catalog. Component/cache identities stay unchanged.

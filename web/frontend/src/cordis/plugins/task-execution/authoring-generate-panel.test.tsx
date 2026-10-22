@@ -408,12 +408,12 @@ describe("统一 Agent 创作入口", () => {
       },
     });
     await input("textarea", "先记录构思");
-    expect(generate()).toBeUndefined();
+    expect(generate().disabled).toBe(true);
     expect(el.textContent).not.toContain("Ctrl / ⌘ + Enter");
     expect(el.querySelector('[data-testid="authoring-generate-empty"]')).not.toBeNull();
     await act(async () =>
       [...el.querySelectorAll<HTMLButtonElement>("button")]
-        .find((entry) => entry.textContent === "连接助手")!
+        .find((entry) => entry.textContent === "配置助手")!
         .click(),
     );
     expect(configure).toHaveBeenCalledOnce();

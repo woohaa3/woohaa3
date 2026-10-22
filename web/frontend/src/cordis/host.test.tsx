@@ -487,6 +487,15 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
     expect(el.querySelector('[data-testid="authoring-generate-empty"]')?.textContent).toContain("连接一个助手即可开始");
   });
 
+  it("没有来源时仍区分目录读取失败与尚未配置助手", async () => {
+    const { el } = await renderAuthoring({ contributions: [], serviceOverrides: {
+      listConnections: async () => ({ ok: false, code: "unavailable", error: "连接读取失败，请重试" }),
+    } });
+    expect(el.querySelector('[data-testid="authoring-generate-empty"]')).toBeNull();
+    expect(el.textContent).toContain("连接读取失败，请重试");
+    expect([...el.querySelectorAll("button")].some(button => button.textContent === "配置助手")).toBe(false);
+  });
+
   it("日常列表查询全部已配置连接，没有技术来源预选层", async () => {
     const { el, listedAdapters } = await renderAuthoring({
       contributions: [{ id: "sdk", sourceId: "openai-responses", sourceLabel: "OpenAI" }, { id: "oauth", sourceId: "chatgpt", sourceLabel: "ChatGPT" }],

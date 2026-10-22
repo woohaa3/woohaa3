@@ -3,7 +3,7 @@ import type { FilmSetConversionModelCandidate, FilmSetConversionSettings, FilmSe
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { agentDirectory } from "../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, readAssistantPreference, rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
-import { AssistantModelSelector } from "./model-selector.js";
+import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "./model-selector.js";
 
 /** Same owner directory as ordinary authoring; unsupported delivery capabilities remain visible. */
 export function AssistantDeliverySelection({ service, candidates, sourceKind, value, disabled, onChange, onValidityChange, onManage }: {
@@ -33,6 +33,7 @@ export function AssistantDeliverySelection({ service, candidates, sourceKind, va
     onChange(next);
   };
   const connection = snapshot.connections.find(candidate => candidate.connectionId === value.connection?.connectionId);
+  const emptyDirectory = snapshot.ready && !snapshot.loadingMessage && !snapshot.error && !snapshot.connections.length;
   const catalog = connection ? snapshot.catalogs[connection.adapterId] : undefined;
   // Registered candidate ports advertise delivery-specific vision/schema support; ordinary
   // discussion attachment capabilities may differ for the same owner connection.
@@ -45,7 +46,7 @@ export function AssistantDeliverySelection({ service, candidates, sourceKind, va
   const selection = agentModelSelection(models, model, value.reasoningEffort ?? "", true);
   const matching = (id: string) => candidates.find(candidate => candidate.assistant && candidate.assistant.adapterId === connection?.adapterId && candidate.assistant.model === id && candidate.supports.includes(sourceKind))
     ?? (connection && nativeCandidate(connection.adapterId) && models.some(model => model.id === id) ? { modelKey: `${connection.adapterId}:${id}` } : undefined);
-  const reason = !connection ? "请选择助手连接" : !connection.ready ? connection.reason ?? "助手尚未就绪"
+  const reason = emptyDirectory ? ASSISTANT_SETUP_HINT : !connection ? "请选择助手连接" : !connection.ready ? connection.reason ?? "助手尚未就绪"
     : !supports(connection.adapterId) ? "此助手暂不支持从素材创建片场"
     : value.connection?.configRevision !== connection.configRevision || value.connection?.credentialEpoch !== connection.credentialEpoch ? "助手连接版本已变更，请重新选择"
     : selection.invalidModel || selection.missingRequiredModel || !matching(model) ? "请选择支持此素材的助手模型"
@@ -53,7 +54,7 @@ export function AssistantDeliverySelection({ service, candidates, sourceKind, va
   const valid = snapshot.ready && !reason;
   useEffect(() => { onValidityChange(valid); }, [valid, onValidityChange]);
   return <>
-    <AssistantModelSelector label="选择助手" placeholder={snapshot.loadingMessage ? "正在读取助手…" : "选择助手"} model={value.connection?.connectionId ?? ""} options={snapshot.connections.map(connection => ({ value: connection.connectionId, label: connection.name,
+    <AssistantConnectionSelector empty={emptyDirectory} loading={Boolean(snapshot.loadingMessage)} model={value.connection?.connectionId ?? ""} options={snapshot.connections.map(connection => ({ value: connection.connectionId, label: connection.name,
       detail: !supports(connection.adapterId) ? "此助手暂不支持从素材创建片场" : connection.reason ?? undefined,
       disabled: !supports(connection.adapterId) }))}
       open={open === "assistant"} onOpenChange={value => setOpen(value ? "assistant" : null)} disabled={disabled || Boolean(snapshot.loadingMessage)} onManage={onManage}
@@ -64,6 +65,6 @@ export function AssistantDeliverySelection({ service, candidates, sourceKind, va
       onChange={model => change({ ...value, modelKey: matching(model)?.modelKey, reasoningEffort: undefined })}
       variant={selection.supportedEfforts.length ? { value: value.reasoningEffort ?? "", options: [{ value: "", label: "默认 Variant" }, ...selection.supportedEfforts.map(value => ({ value, label: value }))],
         onChange: effort => change({ ...value, reasoningEffort: effort ? effort as AgentReasoningEffort : undefined }) } : undefined} /> : null}
-    {snapshot.loadingMessage || reason || snapshot.error ? <p className="authoring-generate__reason assistant-creation-controls__notice">{snapshot.loadingMessage || snapshot.error || reason}</p> : null}
+    {snapshot.loadingMessage || reason || snapshot.error ? <p className={`${emptyDirectory ? "" : "authoring-generate__reason "}assistant-creation-controls__notice`}>{snapshot.loadingMessage || snapshot.error || reason}</p> : null}
   </>;
 }

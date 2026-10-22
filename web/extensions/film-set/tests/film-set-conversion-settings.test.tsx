@@ -111,6 +111,23 @@ function entryWith(patch: Partial<FilmSetConversionEntry>): FilmSetConversionEnt
 
 const startButton = () => [...document.querySelectorAll("button")].find((entry) => entry.textContent?.includes("创建片场")) as HTMLButtonElement | undefined;
 
+it("未配置助手时显示公共配置入口，保留创作描述并禁止提交", async () => {
+  const { controller, calls } = fakeController(entryWith({}), true);
+  const dependencies = deps(controller);
+  dependencies.assistant!.listConnections = async () => ({ ok: true, value: [] });
+  const configure = vi.fn();
+  dependencies.openConfigureModel = configure;
+  const Settings = createFilmSetConversionSettings(dependencies);
+  const element = document.createElement("div"); document.body.append(element); root = createRoot(element);
+  await act(async () => root!.render(<Settings nodeId="img" nodeType="image" writable onClose={() => undefined} />));
+  expect(document.body.textContent).toContain("尚未配置助手。连接一个助手即可开始，创作描述会保留在这里。");
+  expect(startButton()!.disabled).toBe(true);
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "配置助手")!.click());
+  expect(configure).toHaveBeenCalledOnce();
+  expect(document.querySelector("textarea")!.value).toBe(defaultFilmSetConversionPrompt("image"));
+  expect(calls.start).toBe(0);
+});
+
 it("内置提示词直接填入编辑框，不作为占位文本", () => {
   render(entryWith({}), true);
   expect(document.querySelector("textarea")!.value).toBe(defaultFilmSetConversionPrompt("image"));

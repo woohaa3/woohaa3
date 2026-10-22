@@ -430,6 +430,8 @@ export type SlotContributionMap = {
     label: string;
     icon: ComponentType<{ className?: string }>;
     tone?: "primary";
+    /** Optional feature-owned contextual guidance around the action button. */
+    tooltip?: ComponentType<{ children: ReactNode }>;
     onActivate: () => void;
   };
   "canvas.context-menu": {
