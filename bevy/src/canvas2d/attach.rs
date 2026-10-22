@@ -18,6 +18,7 @@ use crate::theme::ThemeResource;
 use super::Visuals;
 use super::geometry::Geometry;
 use super::layout::{hex, port};
+use super::text_presentation::{LogicalText, TextScaleMode};
 
 /// 拖动粘连操作条高度，必须与 contracts 的 `DRAG_ATTACH_ACTION_BAR_HEIGHT` 一致
 /// （change: add-drag-touch-connections；由 `render-scene.test.ts` 断言两边相同）。
@@ -334,19 +335,22 @@ pub(crate) fn sync_attach_probe(
 pub(crate) fn sync_attach_labels(
     commands: &mut Commands,
     visuals: &mut Visuals,
-    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor), Without<Sprite>>,
+    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
     labels: Vec<AttachLabel>,
     z: f32,
 ) {
     let keys: Vec<String> = labels.iter().map(|label| label.key.clone()).collect();
     for label in labels {
         if let Some(entity) = visuals.attach_labels.get(&label.key).copied() {
-            if let Ok((mut text, mut transform, mut color)) = text_query.get_mut(entity) {
+            if let Ok((mut text, mut transform, mut color, mut meta)) = text_query.get_mut(entity) {
                 if text.0 != label.text {
                     text.0 = label.text.clone();
                 }
                 transform.translation = Vec3::new(label.position.x, -label.position.y, z);
                 color.0 = hex(label.color);
+                if !meta.matches(label.size, None, TextScaleMode::World) {
+                    meta.set(label.size, None, TextScaleMode::World);
+                }
                 continue;
             }
         }
@@ -362,6 +366,7 @@ pub(crate) fn sync_attach_labels(
                 TextLayout::new(Justify::Left, LineBreak::NoWrap),
                 Anchor::TOP_LEFT,
                 Transform::from_xyz(label.position.x, -label.position.y, z),
+                LogicalText::world(label.size, None),
             ))
             .id();
         visuals.attach_labels.insert(label.key, entity);

@@ -91,6 +91,9 @@ pub(crate) fn sync_surface(
     }
     let size = Vec2::new(window.width(), window.height());
     flags.surface_changed = surface.size != size;
+    // DPR-only 变化（同 CSS 尺寸）也必须进入文字呈现失效：`surface_changed` 只比较逻辑尺寸，
+    // 因此单独记录目标 DPR（change: 2026-10-22-improve-canvas-text-clarity，design D4）。
+    surface.pixel_ratio = window.scale_factor();
     surface.size = size;
     flags.changed = flags.scene_received
         || flags.positions_received

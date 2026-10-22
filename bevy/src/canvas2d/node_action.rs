@@ -31,6 +31,7 @@ use super::layout::{
     NODE_ACTION_TOOLBAR_FONT, NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_PAD,
     node_action_toolbar,
 };
+use super::text_presentation::{LogicalText, TextScaleMode};
 
 /// 横条容器圆角半径。
 const BAR_RADIUS: f32 = 8.0;
@@ -78,7 +79,13 @@ pub(crate) fn draw(
         let (bx, by, bw, bh) = layout.bar;
         geometry.rounded_rect(bx, by, bw, bh, BAR_RADIUS * scale, z, border);
         geometry.rounded_rect(bx + scale, by + scale, (bw - 2.0 * scale).max(scale), (bh - 2.0 * scale).max(scale), (BAR_RADIUS - 1.0) * scale, z + 0.001, surface);
-        let font = NODE_ACTION_TOOLBAR_FONT * scale;
+        // 横条文字是**固定屏幕字号**：`layout` 已是世界矩形（屏幕像素 ÷ zoom），因此文字在
+        // 世界空间里的高度是 `NODE_ACTION_TOOLBAR_FONT / zoom`（下面的 `world_font` 只用于
+        // 垂直居中），而 `Label.size` 传**屏幕逻辑字号**，由共享文字策略用实体尺度抵消相机
+        // 缩放（change: 2026-10-22-improve-canvas-text-clarity，design D3）。这样字形字号键
+        // 不再随 `1 / zoom` 连续变化。
+        let world_font = NODE_ACTION_TOOLBAR_FONT * scale;
+        let screen_font = NODE_ACTION_TOOLBAR_FONT;
         let mut labels: Vec<Label> = Vec::new();
         for slot in &layout.slots {
             let (ax, ay, aw, ah) = slot.rect;
@@ -96,8 +103,8 @@ pub(crate) fn draw(
                 }
             }
             if !slot.icon_only {
-                let text_y = ay + (ah - font) / 2.0 - scale;
-                labels.push((slot.label.clone(), Vec2::new(ax + 8.0 * scale, text_y), font, tint));
+                let text_y = ay + (ah - world_font) / 2.0 - scale;
+                labels.push((slot.label.clone(), Vec2::new(ax + 8.0 * scale, text_y), screen_font, tint));
             }
             if let Some((mx, my, mw, mh)) = slot.menu {
                 let center = Vec2::new(mx + mw / 2.0, my + mh / 2.0);
@@ -106,11 +113,11 @@ pub(crate) fn draw(
         }
         // 模型名摘要：最右侧弱化文本。
         if let Some((text, (sx, sy, _sw, sh))) = &layout.summary {
-            let text_y = sy + (sh - font) / 2.0 - scale;
+            let text_y = sy + (sh - world_font) / 2.0 - scale;
             labels.push((
                 text.clone(),
                 Vec2::new(*sx, text_y),
-                font,
+                screen_font,
                 body_text,
             ));
         }
@@ -131,7 +138,7 @@ pub(crate) fn sync_node_action_bars(
     theme: Res<ThemeResource>,
     mut visuals: ResMut<Visuals>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut TextFont), Without<Sprite>>,
+    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
 ) {
     // 图片/视频聚焦期间不绘制画布横条（横条只属于普通画布）。
     let focused = super::image_focus::has_presented_media_focus(&scene.0);
@@ -215,10 +222,14 @@ fn clear_mesh(commands: &mut Commands, visuals: &mut Visuals, meshes: &mut Asset
 }
 
 /// 同步横条标签：按 `(节点 id, 索引)` 角色 key 复用实体，独立于普通节点标签池。
+///
+/// 横条文字声明为**固定屏幕字号**（`LogicalText::screen`）：这里不写 `TextFont.font_size`，
+/// 免得每帧/每次缩放重建字形；栅格表示由共享文字策略按 DPR 固定生成，实体尺度抵消相机
+/// 缩放（change: 2026-10-22-improve-canvas-text-clarity，design D3）。
 fn sync_labels(
     commands: &mut Commands,
     visuals: &mut Visuals,
-    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut TextFont), Without<Sprite>>,
+    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
     groups: Vec<(String, Vec<Label>)>,
     z: f32,
 ) {
@@ -228,14 +239,18 @@ fn sync_labels(
             let slot = format!("{key}::{index}");
             live.push(slot.clone());
             if let Some(entity) = visuals.node_action_labels.get(&slot).copied() {
-                if let Ok((mut existing, mut transform, mut existing_color, mut existing_font)) = text_query.get_mut(entity)
+                if let Ok((mut existing, mut transform, mut existing_color, mut meta)) =
+                    text_query.get_mut(entity)
                 {
                     if existing.0 != text {
                         existing.0 = text.clone();
                     }
                     transform.translation = Vec3::new(position.x, -position.y, z);
                     existing_color.0 = super::layout::hex(color);
-                    existing_font.font_size = FontSize::Px(size);
+                    // 逐帧路径：先比较再写，避免无谓的组件变更标记让策略系统每帧重扫。
+                    if !meta.matches(size, None, TextScaleMode::Screen) {
+                        meta.set(size, None, TextScaleMode::Screen);
+                    }
                     continue;
                 }
             }
@@ -251,6 +266,7 @@ fn sync_labels(
                     TextLayout::new(Justify::Left, LineBreak::NoWrap),
                     Anchor::TOP_LEFT,
                     Transform::from_xyz(position.x, -position.y, z),
+                    LogicalText::screen(size),
                 ))
                 .id();
             visuals.node_action_labels.insert(slot, entity);
@@ -348,6 +364,51 @@ mod tests {
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].0, "a::node-action");
         assert_eq!(labels[0].1.len(), 3);
+    }
+
+    #[test]
+    fn labels_declare_screen_font_size_independent_of_zoom() {
+        let theme = ThemeResource::default();
+        let nodes = vec![node("a", 0.0, 200.0)];
+        let mut map = HashMap::new();
+        map.insert("a".to_owned(), actions(Some("gpt-5")));
+        let surface = (1200.0, 800.0);
+        for zoom in [0.1, 0.5, 1.0, 2.0, 4.0, 8.0, 12.0] {
+            let mut geometry = Geometry::default();
+            let labels = draw(
+                &mut geometry,
+                &theme,
+                &nodes,
+                &map,
+                Some((0.0, 0.0, zoom)),
+                Some(surface),
+                100.0,
+            );
+            for (_, _, size, _) in &labels[0].1 {
+                assert_eq!(
+                    *size, NODE_ACTION_TOOLBAR_FONT,
+                    "横条标签必须声明固定屏幕字号，不随 zoom={zoom} 变化"
+                );
+            }
+        }
+    }
+
+    /// 横条文字声明为屏幕模式：策略系统用 `1 / zoom` 的实体尺度抵消相机，字号键恒定。
+    #[test]
+    fn toolbar_labels_use_screen_scale_mode() {
+        use crate::canvas2d::text_presentation::{LogicalText, TextScaleMode, present};
+        let meta = LogicalText::screen(NODE_ACTION_TOOLBAR_FONT);
+        assert_eq!(meta.mode, TextScaleMode::Screen);
+        let mut keys = Vec::new();
+        for zoom in [0.1, 0.5, 1.0, 2.0, 4.0, 8.0, 12.0] {
+            let target = present(&meta, zoom, 2.0).expect("合法输入");
+            keys.push(target.raster_key(2.0));
+            // 世界尺寸 = 屏幕字号 / zoom，投影回屏幕后仍是固定字号。
+            assert!(
+                (target.font_size * target.scale - NODE_ACTION_TOOLBAR_FONT / zoom).abs() <= 1.0e-3
+            );
+        }
+        assert!(keys.iter().all(|key| *key == keys[0]), "连续缩放不得产生新字号键：{keys:?}");
     }
 
     #[test]

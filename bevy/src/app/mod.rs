@@ -120,6 +120,7 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<model3d::filmset_camera::FilmSetCameraVisual>()
         .init_resource::<ThemeResource>()
         .init_resource::<canvas2d::GenerationClock>()
+        .init_resource::<canvas2d::text_presentation::PresentationCache>()
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::model_preview::ModelPreviewPlugin)
@@ -184,6 +185,22 @@ fn configure_canvas(app: &mut App) {
                 canvas2d::sync_focus_backdrop,
                 canvas2d::sync_group_motion,
             )
+                .after(canvas2d::sync_scene),
+        )
+        // 画布文字栅格呈现（change: 2026-10-22-improve-canvas-text-clarity，design D4）：
+        // 必须排在**全部**标签生产者与 deferred 命令应用之后，Bevy 的文字布局在 PostUpdate
+        // 执行，因此这里处于同帧「标签已就绪、字体尚未栅格化」的唯一窗口。显式应用 deferred，
+        // 保证新建实体（`commands.spawn`）在本帧就带上正确档位，而不是下一个可呈现帧。
+        .add_systems(
+            Update,
+            (
+                bevy::ecs::schedule::ApplyDeferred,
+                canvas2d::text_presentation::sync,
+            )
+                .chain()
+                .after(canvas2d::sync_node_action_bars)
+                .after(canvas2d::sync_attach_probe)
+                .after(canvas2d::sync_generation)
                 .after(canvas2d::sync_scene),
         )
         // 动画求值在门禁结算之后（同帧 Playback.before(Evaluate)），且不在 scene chain 内：

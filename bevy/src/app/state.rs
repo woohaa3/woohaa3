@@ -22,9 +22,34 @@ pub(crate) struct FilmSetTextureBatch(pub(crate) HashMap<String, (u32, u32, Vec<
 pub(crate) struct ModelAssetTable(pub(crate) model3d::ModelAssets);
 
 /// 最近一次应用的画布 CSS 尺寸（逻辑像素，与 JS hit-test 空间一致）。
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub(crate) struct SurfaceState {
     pub(crate) size: Vec2,
+    /// renderer 实际接受的目标 DPR（窗口 scale factor，已受协议 `pixelRatio` 门禁约束）。
+    ///
+    /// 与 `size` 分开保存：同一 CSS 尺寸下 DPR 变化不改变物理分辨率取值却必须重取文字栅格
+    /// （change: 2026-10-22-improve-canvas-text-clarity，design D4）。
+    pub(crate) pixel_ratio: f32,
+}
+
+impl Default for SurfaceState {
+    fn default() -> Self {
+        Self {
+            size: Vec2::ZERO,
+            // 首帧尚无 window scale factor 时按 1.0 处理，等同于引擎默认栅格。
+            pixel_ratio: 1.0,
+        }
+    }
+}
+
+impl SurfaceState {
+    /// 测试/无窗口宿主用：按逻辑尺寸构造，DPR 取 1.0。
+    pub(crate) fn with_size(size: Vec2) -> Self {
+        Self {
+            size,
+            pixel_ratio: 1.0,
+        }
+    }
 }
 
 /// 活动动画节点当前求值出的镜头姿态

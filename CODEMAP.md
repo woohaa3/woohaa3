@@ -17,6 +17,8 @@
 
 Start at `web/backend/src/composition.ts` for local host composition, `web/frontend/src/main.tsx` for the interface, and `bevy/src/lib.rs` for rendering. Extension discovery follows `extensions.config.json`. Generated API bindings enter this repository only as `api/gen/es` output: a protocol change arrives as a regenerated binding, never as a local edit.
 
+Canvas text raster resolution is shared by the browser WASM and the native canvas: `bevy/src/canvas2d/text_presentation.rs` owns the logical-size metadata, the bounded zoom steps and the glyph cap, and every 2D text producer (labels, edge labels, generation status, drag-attach bar, node action toolbar) only declares logical text. See the rendering map for the scheduling and invalidation rules.
+
 Portable configuration handoff: `scripts/export-config.mjs` reads development configuration through `scripts/lib/development-config.mjs`; `scripts/lib/config-handoff.mjs` owns the separate configuration archive and merge/backup behavior. Tauri `desktop/src/local_host.rs` owns stop/import/restart and delegates `--import-config` to `scripts/desktop-host.mjs`. Application extension settings use the service's config-store API; imported model/deployment files belong to the user data directory.
 
 Runtime model handoff reads the host public snapshot through `scripts/lib/runtime-models-export.mjs`. Imported metadata is displayed through `web/backend/src/host/core/runtime-model-catalog.ts`; it does not register generation providers. Desktop data owns `config/runtime-models.json`.

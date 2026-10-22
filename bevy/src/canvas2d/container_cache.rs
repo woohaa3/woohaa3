@@ -1,5 +1,5 @@
 //! Local group/film-scope buffers; transparent fills retain document ordering below overlays.
-use super::{Visuals, geometry::Geometry, labels::sync_labels};
+use super::{Visuals, geometry::Geometry, labels::sync_labels, text_presentation::LogicalText};
 use crate::{
     protocol::{GraphNode, GroupPresentation, Scene},
     theme::ThemeResource,
@@ -80,7 +80,7 @@ pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
-    text: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor), Without<Sprite>>,
+    text: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
     scene: &Scene,
     theme: &ThemeResource,
 ) -> u64 {
