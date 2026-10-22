@@ -117,6 +117,14 @@ export const ORPHAN_GRACE_MS = 2 * 60 * 1000;
 /** 对账周期。 */
 export const ORPHAN_RECONCILE_INTERVAL_MS = 30 * 1000;
 
+/**
+ * Task → Media 的内部请求超时（仅分立部署走 HTTP client 时生效）。
+ *
+ * 不能沿用内部请求的 5s 默认值：转存是一次「受控下载最多 30s + 写入存储」的同步调用，
+ * 5s 会让慢下来的 provider 输出在客户端侧先失败（服务端其实还在跑）。
+ */
+const MEDIA_TRANSPORT_TIMEOUT_MS = 40_000;
+
 export function createTaskService(options: TaskServiceOptions): TaskService {
   const env = options.env ?? (process.env as Record<string, string | undefined>);
   const configResult = resolveTaskServiceConfig({ ...env, ...(options.storePath ? { WOOHAA3_TASK_STORE_PATH: options.storePath } : {}) });
@@ -144,6 +152,9 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       ? createMediaClient({
           baseUrl: (options.mediaServiceUrl ?? config.mediaServiceUrl) as string,
           serviceToken: config.serviceToken,
+          // Media 的受控下载预算是 30s（DEFAULT_IMPORT_TIMEOUT_MS）；用内部请求的 5s 默认值
+          // 会在分立部署下先打断转存（视频/大图必然踩），这里给下载留出同样预算 + 写入余量。
+          timeoutMs: MEDIA_TRANSPORT_TIMEOUT_MS,
           fetchImpl: options.fetchImpl,
           logger: options.logger
         })

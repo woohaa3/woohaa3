@@ -67,6 +67,13 @@ export type MediaApplicationServiceOptions = {
   fetchImpl?: typeof globalThis.fetch;
   resolveHost?: (hostname: string) => Promise<string[]>;
   now?: () => Date;
+  /**
+   * 转存失败诊断出口。
+   *
+   * 进程内 port 直接调本服务，不经 `api/internal-handler.ts`（那条路径自己会 log），所以
+   * 没有这个出口时线上只剩一句「受控下载失败」，分不清是超时、403 还是响应类型被拒。
+   */
+  logger?: (event: { event: string; status: number; code?: string }) => void;
 };
 
 export type MediaApplicationService = {
@@ -201,6 +208,12 @@ export function createMediaApplicationService(
         });
       } catch (error) {
         const code = error instanceof GuardedDownloadError ? error.code : "http-error";
+        // 守卫失败码只进日志（不含 URL / 凭据）：对外文案保持笼统，诊断靠这一行。
+        options.logger?.({
+          event: "media-import",
+          status: code === "blocked-host" || code === "unsupported-protocol" ? 400 : code === "too-large" ? 413 : 502,
+          code
+        });
         if (code === "blocked-host" || code === "unsupported-protocol") {
           throw new MediaApplicationError("unsupported", "受控下载失败");
         }

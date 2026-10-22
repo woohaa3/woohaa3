@@ -3,7 +3,9 @@
  * （自 `runtime.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R25）。
  *
  * 不变式：所有二进制生成结果先经 Media Service 转存为稳定对象，之后才写 succeeded；
- * 转存失败记录为 failed，绝不落 succeeded。
+ * 转存失败记录为 failed，绝不落 succeeded。**受控下载地址只是取字节的一种来源**：本地
+ * provider 的输出字节已经落在 durable 记录里，URL 转存失败时先用同一份字节再转存一次
+ * （见 materializeBinaryResult），provider 临时地址的抖动不得把已生成的结果判死。
  */
 import type { ExecutionRecord } from "@sdppp/pptask-worker-server/history";
 import type { PptaskTaskStore } from "@sdppp/pptask-worker-server";
@@ -210,6 +212,16 @@ export async function materializeBinaryResult(
       "succeeded"
     );
   } catch (error) {
+    // 受控下载失败不等于「结果拿不到」：本地 provider 的输出字节已由 pptask 归一化后落在
+    // durable 记录里（`result.images` / `result.audios`）。超时、403、地址过期或 CDN 抖动
+    // 都会把「产物已在手」的任务判死（2026-10-22 现场：6.9MB 图片的字节就在记录里、sha256
+    // 一致，同一地址二次下载超时 → 任务 failed）。与重启对账的「优先字节，其次地址」对齐：
+    // URL 失败后先用同一份字节再转存一次。视频不回退：大对象只接受地址（见
+    // materializeBinaryBytesFromStore）。
+    if (input.kind === "url" && modelType !== "video") {
+      const adopted = await importStoredBytesAfterUrlFailure(options, record, association, modelType, maxBytes, scope, error);
+      if (adopted) return;
+    }
     options.logger?.({ event: "media-output-import-failed", taskKey: record.id, code: safeProviderMessage(error) });
     // 转存失败：succeeded 不得落地，记录为失败（provider 已执行，但结果未持久化）。
     projectExecutionRecord(
@@ -220,6 +232,54 @@ export async function materializeBinaryResult(
       "failed",
       { name: "MediaImportError", message: `provider ${modelType} 结果转存失败` }
     );
+  }
+}
+
+/**
+ * URL 转存失败后用 durable 记录里的字节再转存一次（image / audio）。
+ *
+ * 单次读取、不轮询：走到这里时 worker 的 `saveTask` 早已落盘（URL 转存本身就要等下载超时），
+ * 而一次 93MB 级记录解析的代价不允许按 100ms 轮询重复。
+ *
+ * 返回 `false` 表示没有可用字节或按字节转存也失败，调用方保持既有 failed 终态。
+ */
+async function importStoredBytesAfterUrlFailure(
+  options: MaterializationContext,
+  record: ExecutionRecord,
+  association: Partial<TaskAssociation> | undefined,
+  modelType: "image" | "audio",
+  maxBytes: number,
+  scope: { canvasId?: string },
+  urlError: unknown
+): Promise<boolean> {
+  const stored = await readRawBinaryBytes(options.taskStore, record.id, modelType).catch(() => undefined);
+  if (!stored) {
+    options.logger?.({
+      event: "media-output-import-bytes-unavailable",
+      taskKey: record.id,
+      code: safeProviderMessage(urlError)
+    });
+    return false;
+  }
+  try {
+    const metadata = await options.mediaClient!.importBytes({
+      bytesBase64: stored.bytesBase64,
+      contentType: stored.contentType,
+      maxBytes,
+      ...scope
+    });
+    options.logger?.({ event: "media-output-imported-from-store", taskKey: record.id });
+    projectExecutionRecord(
+      options.history,
+      record,
+      association,
+      resultFromMedia(metadata, { durationSeconds: readDurationFromRecord(record) }),
+      "succeeded"
+    );
+    return true;
+  } catch (error) {
+    options.logger?.({ event: "media-output-import-bytes-failed", taskKey: record.id, code: safeProviderMessage(error) });
+    return false;
   }
 }
 

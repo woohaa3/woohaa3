@@ -84,7 +84,8 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
     storage,
     ...(options.maxBytes !== undefined ? { maxImportBytes: options.maxBytes } : {}),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    ...(options.resolveHost ? { resolveHost: options.resolveHost } : {})
+    ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}),
+    logger: log
   });
 
   const readiness = async (): Promise<{ ready: boolean; reason?: string }> => {

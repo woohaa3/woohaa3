@@ -126,6 +126,8 @@ export async function createTaskRuntime(options: TaskRuntimeOptions): Promise<Ta
             trackMaterialization(materializeVideoResult(options, record, association, url));
             return;
           }
+          // 图片/音频的字节同样在 durable 记录里：受控下载失败时 materializeBinaryResult 会用
+          // 同一份字节回退转存，provider 地址过期/超时不会把已生成的结果判死。
           trackMaterialization(materializeBinaryResult(options, record, association, { kind: "url", url, modelType }));
           return;
         }
