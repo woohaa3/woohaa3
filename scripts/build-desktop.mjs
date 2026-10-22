@@ -250,7 +250,7 @@ async function runBuild(options) {
   let hostPackage = null;
   if (!options.dryRun && !options.uiUrl) {
     buildNativeTools();
-    const prepared = await prepareDesktopHost({ frontend: frontendDist, build: resolvedReleaseId, ...(process.env.WOOHAA_DESKTOP_HOST_STAGING ? { output: path.resolve(process.env.WOOHAA_DESKTOP_HOST_STAGING) } : {}) });
+    const prepared = await prepareDesktopHost({ frontend: frontendDist, build: resolvedReleaseId, runtimeReleaseVersion: options.debug ? undefined : (options.version ?? config.version), ...(process.env.WOOHAA_DESKTOP_HOST_STAGING ? { output: path.resolve(process.env.WOOHAA_DESKTOP_HOST_STAGING) } : {}) });
     const endpoint = process.env.WOOHAA_DESKTOP_UPDATE_ENDPOINT ?? null;
     const publicKey = process.env.WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY ?? null;
     const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey });

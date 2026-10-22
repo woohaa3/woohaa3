@@ -154,3 +154,14 @@ test('atomic merged catalog selects the locked platform while preserving other p
   assert.equal(f.urls.at(-1), 'https://cdn.example.test/codex.tar.gz');
   assert.equal(f.calls(), 2);
 });
+
+test('app release CDN directory changes reuse unchanged installed components without network',async t=>{
+ const f=await fixture(t,{envelope:true});
+ assert.equal((await f.manager.install('codex')).status,'ready');
+ const defaults=JSON.parse(await fs.readFile(f.options.defaultsPath,'utf8'));
+ defaults.cdn.baseUrl='https://cdn.example.test/woohaa/runtimes/darwin-aarch64/9.9.9/';
+ await fs.writeFile(f.options.defaultsPath,JSON.stringify(defaults));
+ const next=createRuntimeComponentManager({...f.options,fetchImpl:()=>{throw new Error('unchanged runtime must not download after App upgrade');}});
+ assert.equal((await next.install('codex')).status,'ready');
+ const handle=await next.resolve('codex');assert.equal(handle.version,'1.2.3');handle.release();
+});

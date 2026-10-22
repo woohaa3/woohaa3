@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Build immutable, signed self-hosted component artifacts. Never installs dependencies. */
 import fs from 'node:fs';
+import { runtimeReleaseLayout } from './lib/runtime-release-layout.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -43,7 +44,9 @@ export function createComponentArchive(directory,output){
 }
 function dependency(source,name){const found=locateDependency(fs.realpathSync(source),name);if(!found)throw new Error(`缺少已安装依赖 ${name}`);return found;}
 function copyLicenses(source,target){for(const name of fs.readdirSync(source))if(/^(license|licence|notice|readme)/i.test(name)&&fs.statSync(path.join(source,name)).isFile())fs.copyFileSync(path.join(source,name),path.join(target,name));}
-export async function packageRuntimeComponents({output=path.join(root,'artifacts/runtimes/upload'),platform=process.platform,arch=process.arch,keyFile=process.env.WOOHAA_RUNTIME_SIGNING_KEY_FILE,key=process.env.WOOHAA_RUNTIME_SIGNING_KEY,ids=['codex','claude','dsh','shot-recorder','model-renderer','image-editor']}={}){
+export async function packageRuntimeComponents({output=path.join(root,'artifacts/runtimes/upload'),platform=process.platform,arch=process.arch,releaseVersion=readJson(path.join(root,'desktop/tauri.conf.json')).version,keyFile=process.env.WOOHAA_RUNTIME_SIGNING_KEY_FILE,key=process.env.WOOHAA_RUNTIME_SIGNING_KEY,ids=['codex','claude','dsh','shot-recorder','model-renderer','image-editor']}={}){
+ const layout=runtimeReleaseLayout({platform,arch,version:releaseVersion});
+ output=path.join(output,...layout.relativeDirectory.split('/'));
  const privateKey=createPrivateKey(keyFile?fs.readFileSync(keyFile):key??(()=>{throw new Error('需要 WOOHAA_RUNTIME_SIGNING_KEY_FILE（Ed25519 PEM 私钥路径）');})());
  if(privateKey.asymmetricKeyType!=='ed25519')throw new Error('组件签名必须使用 Ed25519');
  const lock=resolvedRuntimeLock({platform,arch});const sdkSource=path.join(root,'web/extensions/sdk-agent');
@@ -58,6 +61,7 @@ export async function packageRuntimeComponents({output=path.join(root,'artifacts
  try{for(const id of ids){
   if(!lock.components[id])throw new Error(`未知组件 ${id}`);
   const version=lock.components[id].version,staging=path.join(temporary,id);
+  if(previous.some(item=>item.id===id&&item.platform===platform&&item.arch===arch&&item.version!==version))throw new Error(`Runtime release conflict for ${id}; use a new --version`);
   const published=previous.find(item=>item.id===id&&item.version===version&&item.platform===platform&&item.arch===arch);
   if(published){
    const file=path.resolve(output,published.url);if(!file.startsWith(path.resolve(output)+path.sep)||!fs.existsSync(file)||sha256(file)!==published.sha256)throw new Error(`已发布组件缺失或被修改：${id}@${version}`);
@@ -107,13 +111,16 @@ export async function packageRuntimeComponents({output=path.join(root,'artifacts
  }
  const merged=[...previous.filter(old=>!components.some(item=>item.id===old.id&&item.version===old.version&&item.platform===old.platform&&item.arch===old.arch)),...components];
  const catalog=Buffer.from(JSON.stringify({schemaVersion:1,components:merged},null,2)+'\n');fs.mkdirSync(output,{recursive:true});
- fs.writeFileSync(path.join(output,'catalog.json'),catalog);fs.writeFileSync(path.join(output,'catalog.sig'),sign(null,catalog,privateKey).toString('base64')+'\n');
+ const signature=sign(null,catalog,privateKey).toString('base64');
+ fs.writeFileSync(path.join(output,'catalog.json'),catalog);fs.writeFileSync(path.join(output,'catalog.sig'),signature+'\n');
+ fs.writeFileSync(path.join(output,'catalog.signed.json'),JSON.stringify({schemaVersion:1,catalog:catalog.toString('base64'),signature},null,2)+'\n');
+ fs.writeFileSync(path.join(output,'runtime-release.json'),JSON.stringify({schemaVersion:1,platform:layout.platformKey,version:releaseVersion,relativeDirectory:layout.relativeDirectory},null,2)+'\n');
  fs.writeFileSync(path.join(output,'runtime-components.lock.json'),JSON.stringify(lock,null,2)+'\n');
  fs.writeFileSync(path.join(output,'trust-key.pem'),createPublicKey(privateKey).export({type:'spki',format:'pem'}));
- return {output,components};
+ return {output,relativeDirectory:layout.relativeDirectory,releaseVersion,components};
  }finally{fs.rmSync(temporary,{recursive:true,force:true});}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  const args=process.argv.slice(2);const value=name=>{const at=args.indexOf(name);return at<0?undefined:args[at+1];};
- packageRuntimeComponents({...(value('--output')?{output:path.resolve(value('--output'))}:{}),...(value('--components')?{ids:value('--components').split(',')}:{})}).then(result=>console.log(JSON.stringify(result,null,2))).catch(error=>{console.error(error.message);process.exitCode=1;});
+ packageRuntimeComponents({...(value('--version')?{releaseVersion:value('--version')}:{}),...(value('--output')?{output:path.resolve(value('--output'))}:{}),...(value('--components')?{ids:value('--components').split(',')}:{})}).then(result=>console.log(JSON.stringify(result,null,2))).catch(error=>{console.error(error.message);process.exitCode=1;});
 }

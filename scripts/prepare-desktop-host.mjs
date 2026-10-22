@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import { runtimeReleaseLayout } from './lib/runtime-release-layout.mjs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -29,7 +30,7 @@ export async function prepareDesktopNode(){
  const binaries=path.join(root,'desktop/build/binaries');fs.mkdirSync(binaries,{recursive:true});const binary=path.join(binaries,`woohaa-node-${artifact.triple}${process.platform==='win32'?'.exe':''}`);fs.copyFileSync(node,binary);fs.chmodSync(binary,0o755);
  return {node:binary,nodeSha256:actual};
 }
-export async function prepareDesktopHost({output=path.join(root,'.local/desktop-host'),frontend=path.join(root,'web/frontend/dist'),build='development'}={}){
+export async function prepareDesktopHost({output=path.join(root,'.local/desktop-host'),frontend=path.join(root,'web/frontend/dist'),build='development',runtimeReleaseVersion}={}){
  const artifact=nodeArtifact();const suffix=process.platform==='win32'?'.exe':'';
  const {node,nodeSha256:actual}=await prepareDesktopNode();
  // Rebuild the staging tree. Never copy user configuration from source packages.
@@ -68,7 +69,8 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
   extensions.push(extension.extensionId);
  }
  const runtimeDownloads=JSON.parse(fs.readFileSync(path.join(root,'desktop/runtime-downloads.json'),'utf8'));
- if(process.env.WOOHAA_RUNTIME_CDN_BASE_URL)runtimeDownloads.cdn.baseUrl=process.env.WOOHAA_RUNTIME_CDN_BASE_URL;
+ const runtimeCdnRoot=process.env.WOOHAA_RUNTIME_CDN_BASE_URL??runtimeDownloads.cdn?.baseUrl??'';
+ runtimeDownloads.cdn={baseUrl:runtimeReleaseVersion?runtimeReleaseLayout({version:runtimeReleaseVersion,cdnBaseUrl:runtimeCdnRoot}).baseUrl:runtimeCdnRoot};
  fs.writeFileSync(path.join(output,'runtime-downloads.json'),JSON.stringify(runtimeDownloads,null,2)+'\n');
  fs.writeFileSync(path.join(output,'runtime-components.lock.json'),JSON.stringify(resolvedRuntimeLock(),null,2)+'\n');
  fs.mkdirSync(path.join(output,'tools'),{recursive:true});

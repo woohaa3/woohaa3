@@ -50,15 +50,19 @@ chmod 600 ~/.config/woohaa-release/runtime-components.pem
 WOOHAA_RUNTIME_SIGNING_KEY_FILE="$HOME/.config/woohaa-release/runtime-components.pem" pnpm desktop:runtimes
 ```
 
-把输出公钥 `trust-key.pem` 的 PEM 内容写进发行默认配置的 trustKeys，并填写 CDN baseUrl，然后打 App：
+把输出公钥 `trust-key.pem` 的 PEM 内容写进发行默认配置的 trustKeys。设置构建环境 `WOOHAA_RUNTIME_CDN_BASE_URL` 为 runtime CDN 根地址，构建自动追加平台与实际 App 版本；发行默认配置也可提供此根地址。然后打 App：
 
 ```sh
-pnpm desktop:bundle -- --build-frontend --bundles app,dmg
+WOOHAA_RUNTIME_CDN_BASE_URL=https://downloads.example.com/woohaa/runtimes/ pnpm desktop:bundle -- --build-frontend --bundles app,dmg
 ```
 
-默认组件输出是 `artifacts/runtimes/upload/`。上传内容：
+默认组件输出是 `artifacts/runtimes/upload/<平台>/<App发行版本>/`。平台为 `darwin-aarch64` 或 `windows-x86_64`。版本默认读取 `desktop/tauri.conf.json`；若 App 构建指定 `--version`，组件打包必须传相同的 `--version`。`--output` 只改变上传根目录，仍自动追加平台和发行版本。
+
+上传叶目录内容：
 
 ```
+runtime-release.json
+catalog.signed.json
 catalog.json
 catalog.sig
 codex/<version>/darwin-arm64.tar.gz
@@ -71,7 +75,7 @@ image-editor/<content-version>/darwin-arm64.tar.gz
 
 在 Windows x64 上生成对应平台归档。目录还包含锁文件与公开 trust-key.pem，可一并托管；私钥不在输出目录，不能上传。
 
-先上传不可变归档，最后发布 catalog.json/catalog.sig。多平台或多版本必须合并 catalog 的 components 列表后用同一私钥重新签名，不能直接让后一平台覆盖前一平台的目录清单。不要覆盖同版本归档，旧 App 的锁定版本必须继续可下载。每个目录清单中组件 id/version/platform/arch 组合必须唯一。
+先上传不可变归档，再发布 catalog.json/catalog.sig，最后上传 catalog.signed.json。各平台和 App 发行版本使用独立目录，无须合并其他平台清单。不要覆盖已发布版本目录，旧 App 的锁定版本必须继续可下载。每个目录清单中组件 id/version/platform/arch 组合必须唯一。
 
 可用 `--components codex,claude` 限定生成项，`--output /absolute/output` 更换输出目录。限定生成项不代表更改客户端锁文件，也不应覆盖生产目录清单中仍需提供的其他项。
 
@@ -97,3 +101,12 @@ Codex/Claude/原生工具启动本地程序；DSH 用内置 Node 启动隔离闭
 ## 开发与打包的区别
 
 `pnpm dev` 和 `pnpm dev:desktop` 都直接使用工作区已安装的 SDK/CLI 与本地构建工具，不启用组件下载器、不读取下载缓存。开发宿主的 developmentRoot 标记决定这条分支，不能用 NODE_ENV 判断（开发桌面宿主也可能以 production 方式运行）。打包 App 没有 developmentRoot，才启用用户自有 CLI 或 CDN 托管组件的解析。开发环境缺少依赖时按原来的本地安装/构建流程修复，不静默下载。
+
+
+### 分目录发布
+
+例如 Windows App 0.1.4 的 runtime 应从 `artifacts/runtimes/upload/windows-x86_64/0.1.4/` 上传到 `<CDN runtime 根目录>/windows-x86_64/0.1.4/`；Mac 对应 `darwin-aarch64/0.1.4/`。不要把子目录内容覆盖到旧公共根目录。
+
+先上传组件归档，最后提交 `catalog.signed.json`（含同一对象中的清单与签名）。运行时会优先读取它，只有 404 才回退旧双文件清单。所有 runtime 产物成功上传后再发布 App/更新索引。已经发布的平台/发行版本目录不能替换为不同内容；改动后使用新 App 版本，旧目录保留。发布期间不要让外部上传插件并发写同一目录。
+
+发行版本仅隔离下载入口；组件版本、验证规则、用户数据目录缓存均不变。App 更新但组件版本未变时继续复用已安装组件。日常开发仍使用本地源码/依赖。

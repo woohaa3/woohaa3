@@ -16,4 +16,4 @@ Cross-process consumers acquire a lease by creating `.leases/<pid>-<uuid>.json` 
 
 Run `node --test index.test.mjs` to verify downloads, signatures, corrupt/traversing archives, offline caches, cancellation, resume, local CLI selection and leases.
 
-桌面发行构建可用 `WOOHAA_RUNTIME_CDN_BASE_URL` 覆盖随包 `runtime-downloads.json` 的 `cdn.baseUrl`，不修改源码中的默认下载配置或信任公钥。独立客户端的部署域名由构建环境提供。
+桌面发行构建可用 `WOOHAA_RUNTIME_CDN_BASE_URL` 指定 runtime CDN 根地址；打包将 `<平台>/<实际App版本>/` 追加后写入随包 `runtime-downloads.json` 的 `cdn.baseUrl`，不修改源码中的默认下载配置或信任公钥。独立客户端的部署域名由构建环境提供。
