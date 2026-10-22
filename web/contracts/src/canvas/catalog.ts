@@ -29,6 +29,21 @@ export type CanvasCatalogOrigin = "local" | "remote";
  */
 export type CanvasSyncState = "local-only" | "synced" | "syncing" | "offline" | "failed" | "remote-only";
 
+/**
+ * 调用者在这张画布上的**内容权限**（服务端判定，客户端只渲染）。
+ *
+ * 与 `sync`（链路状态）是两个维度：同步正常也可能只读（协作者 viewer、链接只读分享），
+ * 断线也可能本来可写。界面在进入画布时据此决定是否显示只读提示、是否允许生成/编辑。
+ *
+ * 省略表示**未知**（没接远端、远端这次没给答案），调用方不得把未知当成只读。
+ */
+export type CanvasAccess = {
+  /** 能否读取这张画布；`false` 表示远端明确拒绝（本机内容可能只是陈旧副本）。 */
+  canRead: boolean;
+  /** 能否写入这张画布；`false` 表示只读。 */
+  canWrite: boolean;
+};
+
 /** 画布列表条目的摘要；不含完整 document，避免分页响应过大。 */
 export type CanvasSummary = {
   id: string;
@@ -42,6 +57,8 @@ export type CanvasSummary = {
   sources?: readonly CanvasCatalogOrigin[];
   /** 本机看到的同步状态；省略表示目录没有接入远端（纯本地部署）。 */
   sync?: CanvasSyncState;
+  /** 调用者在这张画布上的内容权限；省略表示未知（按可写处理）。 */
+  access?: CanvasAccess;
 };
 
 /**
@@ -57,6 +74,8 @@ export type CanvasDetailSummary = {
   updatedAt: string;
   nodeCount: number;
   assetCount: number;
+  /** 调用者在这张画布上的内容权限；省略表示未知（按可写处理）。 */
+  access?: CanvasAccess;
 };
 
 /** 稳定分页结果：`offset`/`limit` 回显归一化后的请求参数。 */
@@ -104,6 +123,17 @@ function isOptionalSync(value: unknown): boolean {
   return value === undefined || (typeof value === "string" && SYNC_STATES.includes(value));
 }
 
+/** 权限字段一旦出现就必须两个布尔都合法：坏值不能悄悄退化成"可写"。 */
+function isOptionalAccess(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isJsonObject(value)) return false;
+  return typeof value.canRead === "boolean" && typeof value.canWrite === "boolean";
+}
+
+export function isCanvasAccess(value: unknown): value is CanvasAccess {
+  return isOptionalAccess(value) && value !== undefined;
+}
+
 export function isCanvasSummary(value: unknown): value is CanvasSummary {
   if (!isJsonObject(value)) return false;
   return (
@@ -115,7 +145,8 @@ export function isCanvasSummary(value: unknown): value is CanvasSummary {
     isNonNegativeInteger(value.nodeCount) &&
     isNonNegativeInteger(value.assetCount) &&
     isOptionalSources(value.sources) &&
-    isOptionalSync(value.sync)
+    isOptionalSync(value.sync) &&
+    isOptionalAccess(value.access)
   );
 }
 
@@ -168,6 +199,9 @@ export function decodeCanvasDetailSummary(
   const document = isJsonObject(canvas.document) ? canvas.document : null;
   if (!document || !Array.isArray(document.nodes)) return { ok: false, error: "画布 document 非法" };
   if (!Array.isArray(canvas.assets)) return { ok: false, error: "画布 assets 非法" };
+  // 权限可能挂在响应顶层（宿主另行判定）也可能在 canvas 内；坏值直接判非法，不静默当可写。
+  const access = value.access ?? canvas.access;
+  if (!isOptionalAccess(access)) return { ok: false, error: "画布 access 非法" };
   return {
     ok: true,
     summary: {
@@ -176,7 +210,8 @@ export function decodeCanvasDetailSummary(
       revision: canvas.revision,
       updatedAt: canvas.updatedAt,
       nodeCount: document.nodes.length,
-      assetCount: canvas.assets.length
+      assetCount: canvas.assets.length,
+      ...(access === undefined ? {} : { access: access as CanvasAccess })
     }
   };
 }

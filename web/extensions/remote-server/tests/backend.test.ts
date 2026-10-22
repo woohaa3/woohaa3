@@ -2101,4 +2101,30 @@ describe("remote-server 后端 · 协作邀请", () => {
   });
 });
 
+describe("access()：进入画布时回答的内容权限", () => {
+  it("作者可写、viewer 只读；远端看不见的画布返回 null（不猜）", async () => {
+    const fake = createFakeServer({
+      canvasIds: ["canvas-owned", "canvas-viewer"],
+      canvasAcl: {
+        "canvas-owned": { owner: "device-alice" },
+        "canvas-viewer": { owner: "someone-else", members: { "device-alice": "viewer" } }
+      }
+    });
+    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+    const provider = upstreamProviderOf(host);
+    // 服务端回填 allowed_actions；这里只做映射，不自己推判定。
+    expect(await provider.access!("canvas-owned")).toEqual({ canRead: true, canWrite: true });
+    expect(await provider.access!("canvas-viewer")).toEqual({ canRead: true, canWrite: false });
+    // 看不见与不存在在服务端是同一结论（not_found）：扩展返回 null，由宿主按归属决定是否判只读。
+    expect(await provider.access!("canvas-invisible")).toBeNull();
+  });
+
+  it("没有会话时返回 null：未知不等于只读", async () => {
+    const fake = createFakeServer();
+    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    expect(await upstreamProviderOf(host).access!("canvas-remote-1")).toBeNull();
+  });
+});
+
 

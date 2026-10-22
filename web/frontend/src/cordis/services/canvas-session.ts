@@ -16,7 +16,7 @@ import { beginLifecycleSpan } from "../performance/lifecycle-performance.js";
 import { CommandLifecycleRegistry, CanvasDatabase, IndexedDbYjsCacheRepository, WorkingProjectionStore, applyYjsCacheToDoc, validateYjsCache, woohaa3CanvasStore, type CanvasSyncStatus } from "./canvas-state/index.js";
 import { measureInteractionWork } from "./interaction-timing.js";
 import * as Y from "yjs";
-import type { CanvasCommand, TelemetryEventInput } from "@woohaa3/contracts";
+import type { CanvasAccess, CanvasCommand, TelemetryEventInput } from "@woohaa3/contracts";
 import { yDocToServerCanvas, YJS_SYNC_PROTOCOL_VERSION, YJS_CANVAS_FORMAT_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { ReadonlyCanvasProvider, type ReadonlyProviderState } from "./yjs/readonly-provider.js";
 import type { CanvasSession, CanvasSessionStatus } from "../contracts.js";
@@ -157,6 +157,14 @@ export type CreateCanvasSessionOptions = {
    * 超时只清「重建中」并保留只读，不谎称已连接；测试注入较短值。
    */
   reconnectTimeoutMs?: number;
+  /**
+   * 调用者在这张画布上的内容权限（服务端判定；省略/null = 未知，按可写处理）。
+   *
+   * 必须随**打开画布**一起解析：只读提示要出现在进入画布这一步，而不是等第一次服务端
+   * 写入（生成/存储）被拒绝才暴露。`canWrite=false` 时会话整体只读：`isWritable()`
+   * 为 false（生成/编辑/粘贴等入口按它置灰），`submitCommands` 直接结构化拒绝。
+   */
+  access?: CanvasAccess | null;
 };
 
 /**
@@ -169,11 +177,26 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   const remote = options.remote;
   const database = options.database ?? new CanvasDatabase();
 
+  /**
+   * 权限只读：服务端说这个账号写不了这张画布。
+   *
+   * 与断线只读区分开——断线是"暂时连不上"，这里是"本来就没有写权限"，重连也不会变。
+   * 没有权限答案（`null`/`undefined`）时**不**判只读：旧服务端、纯本地画布都走这条，
+   * 把未知当只读会让所有本地画布突然不可编辑。
+   */
+  const access = options.access ?? null;
+  const readOnly = access !== null && !access.canWrite;
+  const readOnlyReason = readOnly
+    ? access !== null && !access.canRead
+      ? "你在服务端没有这张画布的访问权限，本机内容是之前的副本、修改不会被保存。"
+      : "你对这张画布只有只读权限，修改不会被保存。"
+    : null;
+
   let status: CanvasSessionStatus = {
     phase: "loading",
     error: null,
     hydrated: false,
-    remote: IDLE_REMOTE
+    remote: { ...IDLE_REMOTE, readOnly, readOnlyReason }
   };
   const listeners = new Set<(status: CanvasSessionStatus) => void>();
   const publish = (patch: Partial<CanvasSessionStatus>) => {
@@ -366,6 +389,9 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         confirmedRevision: state.revision,
         pendingCount: projection.pendingBatches.length,
         error: offline ? offlineMessage : state.error,
+        // 权限只读与链路状态正交：链路正常也可能只读（viewer/只读链接/非参与者）。
+        readOnly,
+        readOnlyReason,
         // 断线来源：浏览器整机断网 vs 只是这条会话连接被关闭；文案与恢复入口据此区分。
         offlineReason: readyPhase ? null : offline ? "browser-offline" : "session-closed",
         reconnecting
@@ -605,7 +631,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       return () => listeners.delete(listener);
     },
     retry: async () => {
-      publish({ phase: "loading", error: null, remote: IDLE_REMOTE });
+      publish({ phase: "loading", error: null, remote: { ...IDLE_REMOTE, readOnly, readOnlyReason } });
       await attach();
     },
     reconnect: reconnectNow,
@@ -616,6 +642,11 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     commandLifecycle: () => yjsLifecycle ?? null,
     submitCommands: (commands: readonly CanvasCommand[], commandId: string) => {
       const submitStartedAt = telemetryNow();
+      // 权限只读是**权威**结论（服务端判定），不是等第一次写入被拒：在本地就拒绝，
+      // 不留 pending、不发 wire，界面拿到的 reason 能直接解释原因。
+      if (readOnly) {
+        return { ok: false, reason: readOnlyReason ?? "只读画布，修改不会被保存", code: "read-only" };
+      }
       if (!yjsProvider) {
         // 未连接属于门禁条件（离线只读时每次按键都会走到这里），不作为编辑失败观测，避免噪声。
         return { ok: false, reason: "画布尚未连接到 Canvas Service", code: "not-connected" };
@@ -678,7 +709,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       });
       return { ok: true, handle };
     },
-    isWritable: () => yjsProvider?.providerState.phase === "ready" && !isBrowserOffline(),
+    isWritable: () => yjsProvider?.providerState.phase === "ready" && !isBrowserOffline() && !readOnly,
     shutdown: () => {
       endFirstSync("cancelled");
       // 未完成的打开/首次同步按取消计（不伪装成失败或成功）。

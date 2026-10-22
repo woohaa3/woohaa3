@@ -96,7 +96,11 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
     // 断线来源与重建中标志决定气泡文案和按钮置灰
     // （change: 2026-10-21-recover-canvas-connection-explicitly）。
     offlineReason: sessionStatus.remote.offlineReason ?? null,
-    reconnecting: sessionStatus.remote.reconnecting ?? false
+    reconnecting: sessionStatus.remote.reconnecting ?? false,
+    // 权限只读（服务端判定）与断线无关：链路正常也要在进入画布时提示，
+    // 并让生成/编辑入口按 session.isWritable() 置灰。
+    readOnly: sessionStatus.remote.readOnly ?? false,
+    readOnlyReason: sessionStatus.remote.readOnlyReason ?? null
   });
   const snapshotFocus = presentation.mode.type === "node-focus"
     ? { nodeId: presentation.mode.nodeId, kind: presentation.mode.kind }

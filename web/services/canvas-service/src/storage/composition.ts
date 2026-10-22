@@ -261,6 +261,13 @@ export type ComposeCanvasStorageOptions = {
     | (() => readonly import("./core/index.js").CanvasCatalogRemoteSource[]);
   /** 本机视角的同步状态（由上游链路提供；省略表示没接远端）。 */
   catalogSyncState?: (canvasId: string) => import("@woohaa3/contracts").CanvasSyncState | undefined;
+  /**
+   * 这张画布是否**属于远端**（持久归属记录，与此刻连没连上无关）。
+   *
+   * 权限判定用它区分两种"远端查不到"：属于远端却被拒绝 = 当前账号没有访问权限（只读提示）；
+   * 纯本地画布 = 本来就不该问远端（按可写处理）。
+   */
+  catalogRemoteOwned?: (canvasId: string) => boolean;
   generateCanvasId?: () => string;
   handlers?: Partial<Omit<CanvasRequestHandlerOptions, "service" | "readiness">>;
 };
@@ -308,7 +315,8 @@ export async function composeCanvasStorage(
         repository,
         published: options.publishedReader,
         ...(options.catalogSources ? { remoteSources: options.catalogSources } : {}),
-        ...(options.catalogSyncState ? { syncStateOf: options.catalogSyncState } : {})
+        ...(options.catalogSyncState ? { syncStateOf: options.catalogSyncState } : {}),
+        ...(options.catalogRemoteOwned ? { isRemoteOwned: options.catalogRemoteOwned } : {})
       })
     : null;
 

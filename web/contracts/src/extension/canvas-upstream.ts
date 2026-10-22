@@ -24,6 +24,8 @@
  * 提供者不得用「已登录」代替「用户同意同步这张画布」。
  */
 
+import type { CanvasAccess } from "../canvas/catalog.js";
+
 /** capability id 前缀。 */
 export const CANVAS_UPSTREAM_CAPABILITY_PREFIX = "canvas-upstream:";
 
@@ -92,6 +94,18 @@ export type CanvasUpstreamProvider = {
    * （例如并入显式同步意图并持久化）；宿主只把摘要用于目录展示与打开，不代替实现做同步决定。
    */
   getCanvas?(canvasId: string): Promise<CanvasRemoteSummary | null>;
+  /**
+   * 按 id 回答调用者在这张画布上的内容权限（可选）。
+   *
+   * 与 `getCanvas` 的区别是**被拒绝也是答案**：远端明确拒绝时返回
+   * `{ canRead: false, canWrite: false }`，而 `getCanvas` 只能返回 null（"取不到"）。
+   * 返回 `null` 表示这次没有答案（未登录、来源不可用、远端故障），调用方按"未知"处理，
+   * 不得据此把画布判成只读。
+   *
+   * 宿主在打开画布时读它：没有权限的提示必须出现在**进入画布**这一步，而不是等第一次
+   * 服务端写入（生成/存储）被拒绝才暴露。
+   */
+  access?(canvasId: string): Promise<CanvasAccess | null>;
 };
 
 /** 远端来源能提供的画布摘要（字段最小化；缺的由宿主补默认值）。 */
@@ -103,6 +117,8 @@ export type CanvasRemoteSummary = {
   createdAt?: string;
   nodeCount?: number;
   assetCount?: number;
+  /** 调用者在这张画布上的内容权限；省略表示来源没有给答案。 */
+  access?: CanvasAccess;
 };
 
 export function isCanvasUpstreamProviderShape(value: unknown): value is CanvasUpstreamProvider {

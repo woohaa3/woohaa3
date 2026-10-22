@@ -370,3 +370,74 @@ describe("远端来源延迟解析（后登录也能看到远端画布）", () =
     expect((await catalog.listCanvases({ limit: 10 })).items.map((item) => item.id)).toContain("canvas-r");
   });
 });
+
+describe("内容权限（进画布即判定）", () => {
+  const REMOTE_ACCESS = { canRead: true, canWrite: false } as const;
+
+  it("来源给了权限：accessOf 原样返回；目录合并也带上 access", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({
+      repository,
+      published: createPublishedReader(yjs),
+      remoteSources: [
+        {
+          id: "remote:x",
+          label: "X",
+          list: async () => [{ id: "canvas-b", title: "B", revision: 0, updatedAt: NOW, access: REMOTE_ACCESS }],
+          access: async (canvasId) => (canvasId === "canvas-b" ? REMOTE_ACCESS : null)
+        }
+      ]
+    });
+    expect(await catalog.accessOf("canvas-b")).toEqual(REMOTE_ACCESS);
+    const item = (await catalog.listCanvases({ limit: 10 })).items.find((entry) => entry.id === "canvas-b");
+    // 两边都有时内容以本地为准，但**权限只能来自远端**。
+    expect(item?.access).toEqual(REMOTE_ACCESS);
+  });
+
+  it("来源没答案 + 画布属于远端：判为没有访问权限（远端刻意用 not_found 隐藏不可见画布）", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({
+      repository,
+      published: createPublishedReader(yjs),
+      remoteSources: [{ id: "remote:x", label: "X", list: async () => [], access: async () => null }],
+      isRemoteOwned: (canvasId) => canvasId === "canvas-a"
+    });
+    expect(await catalog.accessOf("canvas-a")).toEqual({ canRead: false, canWrite: false });
+  });
+
+  it("来源没答案 + 纯本地画布：返回 null（未知按可写，纯本地画布不能被判只读）", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({
+      repository,
+      published: createPublishedReader(yjs),
+      remoteSources: [{ id: "remote:x", label: "X", list: async () => [], access: async () => null }],
+      isRemoteOwned: () => false
+    });
+    expect(await catalog.accessOf("canvas-a")).toBeNull();
+  });
+
+  it("来源抛错时退化为未知，不让权限读取拖垮打开画布", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({
+      repository,
+      published: createPublishedReader(yjs),
+      remoteSources: [
+        {
+          id: "remote:x",
+          label: "X",
+          list: async () => {
+            throw new Error("boom");
+          },
+          access: async () => {
+            throw new Error("boom");
+          }
+        }
+      ]
+    });
+    expect(await catalog.accessOf("canvas-a")).toBeNull();
+  });
+});

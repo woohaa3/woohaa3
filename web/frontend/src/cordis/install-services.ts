@@ -438,7 +438,24 @@ export async function installCanvasPageServices(
   // modal 门禁：Dialog Service 是唯一来源（App scope 提供）。
   inputScopes.addScope("modal", () => ctx.dialogs.isModalActive());
 
-  const session = await createCanvasSession({ canvasId, remote: canvasRemote });
+  /**
+   * 打开画布时先取一次内容权限（服务端判定，宿主已折进 `GET /api/canvases/:id`）。
+   *
+   * 这一步是"进画布就提示"的前提：拿到 `canWrite=false` 时会话整体只读，只读气泡与
+   * 生成/编辑入口的置灰都由它驱动，而不是等第一次服务端写入被拒。
+   *
+   * 取不到（纯本地画布、没有接远端、远端暂时没答案）就是"未知"，按可写处理——不能把
+   * 一次没答案当成只读，否则本地画布会突然不可编辑。
+   */
+  // catalog 是 App scope 提供的服务（画布目录读模型的唯一来源），页面 scope 只经 ctx 取。
+  const canvasCatalog = ctx.get("canvasCatalog" as never) as CanvasCatalogService | undefined;
+  const access = canvasCatalog
+    ? await canvasCatalog
+        .get(canvasId)
+        .then((result) => (result.ok ? result.summary.access ?? null : null))
+        .catch(() => null)
+    : null;
+  const session = await createCanvasSession({ canvasId, remote: canvasRemote, ...(access ? { access } : {}) });
   ctx.provide("canvasSession" as never, session as never);
   ctx.effect(() => preloadAgentDirectory(agentConversations, ctx.currentUser, session), "agent-directory-preload");
   const groupRuns = createCanvasGroupRuns({ canvasId, transport: applicationRemote.transport, conversations: agentConversations, user: ctx.currentUser, writable: () => session.isWritable() });

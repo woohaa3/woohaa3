@@ -44,6 +44,10 @@ export type SyncStatusInput = {
   offlineReason?: "browser-offline" | "session-closed" | null;
   /** 重建连接是否仍在进行。 */
   reconnecting?: boolean;
+  /** 内容权限只读（服务端判定）：链路可能正常，但这个账号写不了这张画布。 */
+  readOnly?: boolean;
+  /** 只读原因文案。 */
+  readOnlyReason?: string | null;
 };
 
 const OFFLINE_LABEL = "画布连接已断开，只读";
@@ -85,6 +89,16 @@ export function syncStatusView(input: SyncStatusInput): SyncStatusView {
   }
   if (input.error) {
     return { tone: "danger", label: "同步异常", detail: input.error, pinned: true, action: RECONNECT_ACTION(false) };
+  }
+  // 权限只读是**稳态**，不是故障：不提供"重新连接"（重连也不会改变权限），
+  // 但必须常驻可见——否则用户会一路编辑到第一次服务端写入才被拒。
+  if (input.readOnly) {
+    return {
+      tone: "warning",
+      label: "只读画布",
+      detail: input.readOnlyReason ?? "你对这张画布只有只读权限，修改不会被保存。",
+      pinned: true
+    };
   }
   if (input.mode === "disabled") {
     return { tone: "danger", label: "同步异常", detail: "同步不可用", pinned: true };

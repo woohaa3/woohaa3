@@ -19,6 +19,7 @@ import type {
   ApplicationBackendDiagnosticEntry,
   ApplicationBackendExtensionDefinition,
   ApplicationExtensionRequestContext,
+  CanvasAccess,
   CanvasUpstreamLink,
   CanvasUpstreamProvider
 } from "@woohaa3/contracts";
@@ -470,7 +471,30 @@ type RemoteCanvasSummary = {
   revision: number;
   updatedAt: string;
   createdAt?: string;
+  /** 调用者在这张画布上的内容权限；省略表示这次没有答案（不当作只读）。 */
+  access?: CanvasAccess;
 };
+
+/**
+ * 从服务端 `Canvas` 的 `allowed_actions` 读出调用者的内容权限。
+ *
+ * 服务端已经在 `Canvas` 上回填 `role` / `is_owner` / `allowed_actions`，并注明"客户端据此
+ * 渲染"（proto 注释）；这里只做一一映射，不自己再推一遍判定。
+ *
+ * 同时接受 `canvas.read` / `canvas.write` 两种动作名；两个动作**都不在**列表里说明这次
+ * 响应没有带权限字段（旧服务端），返回 `undefined` 而不是"只读"——把"没答案"当只读会让
+ * 所有本地画布在旧服务端上突然不可写。
+ */
+function accessFromCanvas(canvas: Record<string, unknown>): CanvasAccess | undefined {
+  const raw = canvas.allowedActions;
+  if (!Array.isArray(raw)) return undefined;
+  const actions = raw.filter((item): item is string => typeof item === "string");
+  if (actions.length === 0) return undefined;
+  return {
+    canRead: actions.includes("canvas.read"),
+    canWrite: actions.includes("canvas.write")
+  };
+}
 
 
 export function createRemoteServerExtension(options: RemoteServerExtensionOptions = {}): ApplicationBackendExtensionDefinition {
@@ -663,20 +687,26 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
             createdAt?: string;
             updatedAt?: string;
             allowedActions?: string[];
+            role?: string;
+            isOwner?: boolean;
           }>;
         }>(fetchImpl, session.serverUrl, connectProcedurePath(CANVAS_SERVICE, "ListMyCanvases"), {}, { token: session.token });
         if (!result.ok) return null;
         return (result.value.canvases ?? [])
           .filter((canvas) => typeof canvas.canvasId === "string" && canvas.canvasId !== "")
-          .map((canvas) => ({
-            id: canvas.canvasId as string,
-            title: canvas.title ?? "",
-            // 远端不提供本地 revision 的确切含义；目录只用它做展示与乐观校验，
-            // 内容以同步链路为准。
-            revision: 0,
-            updatedAt: canvas.updatedAt ?? canvas.createdAt ?? new Date(0).toISOString(),
-            ...(canvas.createdAt === undefined ? {} : { createdAt: canvas.createdAt })
-          }));
+          .map((canvas) => {
+            const access = accessFromCanvas(canvas as Record<string, unknown>);
+            return {
+              id: canvas.canvasId as string,
+              title: canvas.title ?? "",
+              // 远端不提供本地 revision 的确切含义；目录只用它做展示与乐观校验，
+              // 内容以同步链路为准。
+              revision: 0,
+              updatedAt: canvas.updatedAt ?? canvas.createdAt ?? new Date(0).toISOString(),
+              ...(canvas.createdAt === undefined ? {} : { createdAt: canvas.createdAt }),
+              ...(access === undefined ? {} : { access })
+            };
+          });
       };
 
       /**
@@ -839,6 +869,43 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
          * 因此重启后 resolve 仍然放行——若只记内存，重启后这张画布会被当成本地画布，
          * 静默停在陈旧内容上。写入失败只记诊断、不影响打开：最坏是多打开一次。
          */
+        /**
+         * 回答「调用者能不能读/写这张画布」。
+         *
+         * 单独一条而不是让宿主从 `getCanvas` 里猜：没权限时 `GetCanvas` 直接返回
+         * permission_denied，而 `getCanvas` 的契约是"取不到就是 null"——宿主需要知道
+         * "被拒绝"和"这次没答案"的区别，否则进入画布时只能沉默。
+         *
+         * 只读链接 / viewer 协作者能读不能写（`allowedActions` 不含 canvas.write），
+         * 这也是一种"有答案的只读"，同样返回 canWrite=false。
+         */
+        async access(canvasId: string): Promise<CanvasAccess | null> {
+          const session = await sessionSource.current();
+          if (!session) return null;
+          if (!isBoundedId(canvasId)) return null;
+          const fetched = await callConnect<{ canvas?: Record<string, unknown> }>(
+            fetchImpl,
+            session.serverUrl,
+            connectProcedurePath(CANVAS_SERVICE, "GetCanvas"),
+            { canvasId },
+            { token: session.token }
+          );
+          if (!fetched.ok) {
+            // 明确被拒绝：这是"能回答"的答案（读不到，自然也写不了），不是"没答案"。
+            if (fetched.code === "permission_denied") return { canRead: false, canWrite: false };
+            if (fetched.code === "not_found") return null;
+            log({
+              event: "remote-canvas-access-unavailable",
+              level: "debug",
+              code: fetched.code,
+              reason: "读取画布权限失败",
+              serverUrl: session.serverUrl,
+              status: fetched.status
+            });
+            return null;
+          }
+          return accessFromCanvas(fetched.value?.canvas ?? {}) ?? null;
+        },
         async getCanvas(canvasId: string): Promise<RemoteCanvasSummary | null> {
           const session = await sessionSource.current();
           if (!session) return null;
@@ -875,6 +942,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
             });
           }
           log({ event: "remote-canvas-link-open", level: "debug", serverUrl: session.serverUrl });
+          const access = accessFromCanvas(canvas);
           return {
             id: canvasId,
             title: readString(canvas, "title") ?? "",
@@ -882,7 +950,8 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
             // 内容以同步链路为准。
             revision: 0,
             updatedAt: readString(canvas, "updatedAt") ?? createdAt ?? new Date(0).toISOString(),
-            ...(createdAt === null ? {} : { createdAt })
+            ...(createdAt === null ? {} : { createdAt }),
+            ...(access === undefined ? {} : { access })
           };
         }
       };

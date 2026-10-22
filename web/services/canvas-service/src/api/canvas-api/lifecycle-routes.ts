@@ -198,10 +198,18 @@ export async function handleGet(
   log: CanvasLogger
 ): Promise<boolean> {
   if (!(await requireCanvasAccess({ req, res, canvasId, permission: "read", options, log })).ok) return true;
+  /**
+   * 调用者在这张画布上的内容权限（远端判定；纯本地画布为 null = 未知）。
+   *
+   * 必须随**打开画布**的响应一起回去：只读提示要出现在进入画布这一步，而不是等第一次
+   * 服务端写入（生成/存储）被拒绝才暴露。读取失败只是"这次没答案"，不影响打开。
+   */
+  const access = await options.catalog?.accessOf(canvasId).catch(() => null);
+  const accessField = access === null || access === undefined ? {} : { access };
   try {
     const canvas = await options.service.getCanvas(canvasId);
     res.setHeader("ETag", etagFor(canvas.revision, canvas.updatedAt));
-    sendJson(res, 200, { canvas, revision: canvas.revision });
+    sendJson(res, 200, { canvas, revision: canvas.revision, ...accessField });
     log?.({ event: "canvas-get", status: 200 });
     return true;
   } catch (error) {
@@ -221,7 +229,7 @@ export async function handleGet(
       ...(remote.createdAt ? { createdAt: remote.createdAt } : {})
     };
     res.setHeader("ETag", etagFor(remote.revision, remote.updatedAt));
-    sendJson(res, 200, { canvas, revision: remote.revision, pendingFetch: true });
+    sendJson(res, 200, { canvas, revision: remote.revision, pendingFetch: true, ...accessField });
     log?.({ event: "canvas-get-remote-only", status: 200 });
     return true;
   }

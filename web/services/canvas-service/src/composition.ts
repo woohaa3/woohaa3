@@ -204,6 +204,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         // 闭包延迟取值：`upstream` 在本段之后才构造（先有存储目录，后有同步链路）。
         catalogSyncState: (canvasId: string) =>
           combineCanvasSyncState(syncStateOf(upstreamRef(), canvasId), options.mediaAssetSync?.stateOf(canvasId)),
+        // 归属同样延迟取值（upstream 在本段之后才构造）：它把"远端查不到"翻译成
+        // "这个账号没有访问权限"，是进画布即提示只读的关键判据。
+        catalogRemoteOwned: (canvasId: string) =>
+          upstreamRef()?.remoteCanvasIds().includes(canvasId) ?? false,
         logger: (event) =>
           log({ event: event.event, status: event.status, ...(event.code ? { code: event.code } : {}) })
       });

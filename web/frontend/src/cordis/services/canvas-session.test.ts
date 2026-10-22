@@ -374,6 +374,79 @@ describe("显式重连（change: 2026-10-21-recover-canvas-connection-explicitly
   });
 });
 
+describe("内容权限只读（进画布即判定，不等第一次写入被拒）", () => {
+  it("canWrite=false：isWritable=false、提交被本地拒绝、状态带只读原因", async () => {
+    const factory = new IDBFactory();
+    (globalThis as { indexedDB?: IDBFactory }).indexedDB = factory;
+    const sockets: Array<ReturnType<typeof fakeSocket>> = [];
+    const remote = {
+      openCanvasSession: () => {
+        const entry = fakeSocket([]);
+        sockets.push(entry);
+        return entry.socket;
+      },
+      closeCanvasSession: () => undefined,
+      reconnectCanvasSession: () => undefined
+    } as unknown as CanvasRemoteService;
+
+    const session = await createCanvasSession({
+      canvasId: CANVAS,
+      remote,
+      database: new CanvasDatabase({ indexedDb: factory }),
+      access: { canRead: true, canWrite: false }
+    });
+    try {
+      sockets[0]!.socket.receive(
+        encodeStatusMessage({ status: "synced", protocolVersion: YJS_SYNC_PROTOCOL_VERSION, roomEpoch: "epoch-1", revision: 1 })
+      );
+      expect(session.getStatus().phase).toBe("ready");
+      // 链路是正常的，但权限说不可写：写入门禁必须已经是关的。
+      expect(session.getStatus().remote.mode).toBe("remote");
+      expect(session.getStatus().remote.readOnly).toBe(true);
+      expect(session.getStatus().remote.readOnlyReason).toContain("只读权限");
+      expect(session.isWritable()).toBe(false);
+      const rejected = session.submitCommands([], "cmd-1");
+      expect(rejected.ok).toBe(false);
+      expect(rejected.ok === false && rejected.code).toBe("read-only");
+    } finally {
+      session.shutdown();
+      delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+    }
+  });
+
+  it("没有权限答案（null）：不判只读，行为与之前一致", async () => {
+    const factory = new IDBFactory();
+    (globalThis as { indexedDB?: IDBFactory }).indexedDB = factory;
+    const sockets: Array<ReturnType<typeof fakeSocket>> = [];
+    const remote = {
+      openCanvasSession: () => {
+        const entry = fakeSocket([]);
+        sockets.push(entry);
+        return entry.socket;
+      },
+      closeCanvasSession: () => undefined,
+      reconnectCanvasSession: () => undefined
+    } as unknown as CanvasRemoteService;
+
+    const session = await createCanvasSession({
+      canvasId: CANVAS,
+      remote,
+      database: new CanvasDatabase({ indexedDb: factory }),
+      access: null
+    });
+    try {
+      sockets[0]!.socket.receive(
+        encodeStatusMessage({ status: "synced", protocolVersion: YJS_SYNC_PROTOCOL_VERSION, roomEpoch: "epoch-1", revision: 1 })
+      );
+      expect(session.getStatus().remote.readOnly).toBe(false);
+      expect(session.isWritable()).toBe(true);
+    } finally {
+      session.shutdown();
+      delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+    }
+  });
+});
+
 describe("yDocToServerCanvas 参考（确保测试断言用的是权威派生）", () => {
   it("服务端 doc 派生 revision 与节点", () => {
     const canvas = createEmptyWoohaa3ServerCanvas(CANVAS, NOW);

@@ -65,6 +65,14 @@ export type CanvasCatalogRemoteSource = {
    * 抛错按「这次没答案」处理并回退到 `list()` 扫描（兼容只有列表能力的来源）。
    */
   get?(canvasId: string): Promise<RemoteCanvasSummary | null>;
+  /**
+   * 按 id 回答调用者在这张画布上的内容权限（可选）。
+   *
+   * 与 `get` 的区别是**被拒绝也是答案**：远端明确拒绝时返回
+   * `{ canRead: false, canWrite: false }`，而 `get` 只能返回 null（这次取不到）。
+   * 省略或返回 null 表示来源没有答案，调用方按"未知"处理（不得据此判只读）。
+   */
+  access?(canvasId: string): Promise<import("@woohaa3/contracts").CanvasAccess | null>;
 };
 
 /** 远端来源能提供的字段；缺的字段由调用方补默认值。 */
@@ -76,6 +84,8 @@ export type RemoteCanvasSummary = {
   createdAt?: string;
   nodeCount?: number;
   assetCount?: number;
+  /** 调用者在这张画布上的内容权限；省略表示来源没有答案。 */
+  access?: import("@woohaa3/contracts").CanvasAccess;
 };
 
 export type CanvasCatalogServiceOptions = {
@@ -93,6 +103,13 @@ export type CanvasCatalogServiceOptions = {
     | (() => readonly CanvasCatalogRemoteSource[]);
   /** 本机视角的同步状态；省略表示该部署没有接远端同步。 */
   syncStateOf?: (canvasId: string) => CanvasSyncState | undefined;
+  /**
+   * 这张画布是否属于远端（持久归属记录）。
+   *
+   * 只用于把"远端查不到"翻译成权限结论，见 `accessOf`：属于远端的画布被远端拒绝 =
+   * 当前账号没有访问权限；纯本地画布被拒绝是正常的（它本来就没上传）。
+   */
+  isRemoteOwned?: (canvasId: string) => boolean;
 };
 
 export class CanvasCatalogService {
@@ -110,6 +127,7 @@ export class CanvasCatalogService {
    */
   private readonly remoteSources: () => readonly CanvasCatalogRemoteSource[];
   private readonly syncStateOf: ((canvasId: string) => CanvasSyncState | undefined) | undefined;
+  private readonly isRemoteOwned: ((canvasId: string) => boolean) | undefined;
 
   constructor(options: CanvasCatalogServiceOptions) {
     this.repository = options.repository;
@@ -118,6 +136,7 @@ export class CanvasCatalogService {
     const source = options.remoteSources;
     this.remoteSources = typeof source === "function" ? source : () => source ?? [];
     this.syncStateOf = options.syncStateOf;
+    this.isRemoteOwned = options.isRemoteOwned;
   }
 
   /** 当前接入的远端来源名，供诊断与界面说明"这份目录来自哪"。 */
@@ -178,7 +197,9 @@ export class CanvasCatalogService {
         const existing = entries.get(item.id);
         if (existing) {
           existing.origins.add("remote");
-          // 两边都有：内容以本地 published projection 为准（本地是工作副本）。
+          // 两边都有：内容以本地 published projection 为准（本地是工作副本），
+          // 但**权限只能来自远端**——本地不知道谁是作者、谁共享了链接。
+          if (item.access !== undefined) existing.summary.access = item.access;
           continue;
         }
         entries.set(item.id, {
@@ -189,7 +210,8 @@ export class CanvasCatalogService {
             updatedAt: item.updatedAt,
             createdAt: item.createdAt ?? item.updatedAt,
             nodeCount: item.nodeCount ?? 0,
-            assetCount: item.assetCount ?? 0
+            assetCount: item.assetCount ?? 0,
+            ...(item.access === undefined ? {} : { access: item.access })
           },
           origins: new Set<CanvasCatalogOrigin>(["remote"])
         });
@@ -266,6 +288,39 @@ export class CanvasCatalogService {
         // 与合并路径同一口径：来源故障不变成"这张画布不存在"。
       }
     }
+    return null;
+  }
+
+  /**
+   * 按 id 问一次"调用者能不能读写这张画布"。
+   *
+   * 进画布时读它，决定是只读提示还是正常编辑。**优先用来源的 `access`**：只有它能把
+   * "远端明确拒绝"和"这次没答案"分开；来源没有这个能力时退回摘要里的 access（列表里
+   * 已知的权限），两者都没有就返回 null（未知，按可写处理，与旧行为一致）。
+   *
+   * 失败不抛错：权限读取是展示前置，不是打开画布的前提。
+   */
+  async accessOf(canvasId: string): Promise<import("@woohaa3/contracts").CanvasAccess | null> {
+    for (const source of this.remoteSources()) {
+      if (typeof source.access === "function") {
+        try {
+          const access = await source.access(canvasId);
+          if (access !== null) return access;
+        } catch {
+          // 来源故障 = 这次没答案，继续问下一个来源。
+        }
+      }
+      try {
+        const found = (await source.list()).find((item) => item.id === canvasId);
+        if (found?.access !== undefined) return found.access;
+      } catch {
+        // 与合并路径同一口径：来源故障不变成"这张画布不存在"。
+      }
+    }
+    // 来源没答案（含远端对不可见画布统一回 not_found——它刻意不区分"不存在"与"没权限"）。
+    // 只有**这张画布属于远端**时才能把"查不到"解释成"当前账号没有访问权限"：
+    // 纯本地画布本来就不该出现在远端，查不到是正常的，不能因此判只读。
+    if (this.isRemoteOwned?.(canvasId)) return { canRead: false, canWrite: false };
     return null;
   }
 

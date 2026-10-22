@@ -96,6 +96,21 @@ describe("syncStatusView", () => {
     expect(view.action?.busy).toBe(false);
   });
 
+  it("权限只读：warning、常驻、不给重连动作（重连也不会改变权限）", () => {
+    const view = syncStatusView(input({ readOnly: true, readOnlyReason: "你对这张画布只有只读权限，修改不会被保存。" }));
+    expect(view.tone).toBe("warning");
+    expect(view.pinned).toBe(true);
+    expect(view.label).toBe("只读画布");
+    expect(view.detail).toContain("只读权限");
+    // 权限不是链路故障：不提供「重新连接」，否则用户会反复点一个不会改变结论的按钮。
+    expect(view.action).toBeUndefined();
+  });
+
+  it("权限只读：缺省原因时给出稳定文案", () => {
+    const view = syncStatusView(input({ readOnly: true }));
+    expect(view.detail).toBe("你对这张画布只有只读权限，修改不会被保存。");
+  });
+
   it("气泡只承载同步信息，不含 MCP 指引（已移到页面级底部提示）", () => {
     for (const patch of [
       {},

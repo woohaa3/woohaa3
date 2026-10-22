@@ -120,11 +120,15 @@ function resolveCatalogSources(
       // 链接分享的入口：按 id 取一张不在目录里的画布摘要。provider 没有这个能力时
       // 只保留目录合并——来源仍然可用，只是打不开「链接里有、目录里没有」的画布。
       const get = typeof provider.getCanvas === "function" ? provider.getCanvas.bind(provider) : null;
+      // 内容权限的入口：provider 没有这个能力时，画布打开时只能看到"未知"权限
+      // （按可写处理），只读提示会退回链路状态那条路径。
+      const access = typeof provider.access === "function" ? provider.access.bind(provider) : null;
       sources.push({
         id: `remote:${provider.providerId}`,
         label: provider.describe?.() ?? provider.providerId,
         list: () => list(),
-        ...(get ? { get: (canvasId: string) => get(canvasId) } : {})
+        ...(get ? { get: (canvasId: string) => get(canvasId) } : {}),
+        ...(access ? { access: (canvasId: string) => access(canvasId) } : {})
       });
     }
   }

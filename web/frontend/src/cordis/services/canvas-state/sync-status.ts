@@ -27,4 +27,14 @@ export type CanvasSyncStatus = {
   offlineReason?: CanvasSyncOfflineReason | null;
   /** 重建连接（显式重连或浏览器恢复联网）是否仍在进行：进行中时按钮置灰。 */
   reconnecting?: boolean;
+  /**
+   * 内容权限只读（服务端判定，与断线无关）。
+   *
+   * 与 `mode === "offline"` 是两件事：链路可能完全正常，只是这个账号在这张画布上没有
+   * 写权限（viewer 协作者、只读链接、或者根本不是这张画布的参与者）。界面据此显示常驻
+   * 只读提示，并禁用生成/编辑入口——不能等到第一次服务端写入被拒绝才告诉用户。
+   */
+  readOnly?: boolean;
+  /** 只读原因（面向用户的一句话）；`readOnly` 为真时展示。 */
+  readOnlyReason?: string | null;
 };
