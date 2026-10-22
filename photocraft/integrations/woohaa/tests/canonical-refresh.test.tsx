@@ -51,6 +51,7 @@ function harness(begin: ReturnType<typeof vi.fn>, onSlot: (contribution: { rende
     canvasSession: { isWritable: () => true },
     canvasRuntime: runtime,
     canvasNavigation: {
+      registerNodeFocusGuard: () => () => {},
       subscribe: (fn: () => void) => { notifyNavigation = fn; return () => {}; },
       getSnapshot: () => ({ mode }),
       requestEnterNodeFocus: async () => ({ ok: true, snapshot: { mode, panel: null, menu: null } }),

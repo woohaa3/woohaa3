@@ -12,6 +12,10 @@
  * - 返回画布暂停呈现而保留文档；关闭 tab/离开页面才结算；
  * - 保存目的地按文档绑定：节点写原节点，独立文件走本地交付端口。
  */
+import { useSyncExternalStore } from "react";
+import { runtimeComponents, imageEditorReadiness } from "@woohaa3/frontend/plugin-api";
+import { createEditorPreparation } from "./editor-preparation.js";
+import { NodeEditorReadiness } from "./node-editor-readiness.js";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { appPublicUrl, woohaa3CanvasStore, workingCanvasOf } from "@woohaa3/frontend/plugin-api";
@@ -67,6 +71,27 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
 
       const getCanvas = () => workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
 
+      let preparationMode = ctx.canvasNavigation.getSnapshot().mode;
+      const preparation = createEditorPreparation({
+        prepare: () => { preparationMode = ctx.canvasNavigation.getSnapshot().mode; return runtimeComponents.prepareImageEditor(); },
+        enter: (input, signal) => ctx.canvasNavigation.requestEnterNodeFocus({ ...input, kind: "image", signal }),
+        stillCurrent: nodeId => !disposed && ctx.canvasNavigation.getSnapshot().mode === preparationMode && resolveImageFocusTarget(getCanvas(), nodeId) !== null
+      });
+      const unregisterEntryGuard = ctx.canvasNavigation.registerNodeFocusGuard(IMAGE_EDITOR_PLUGIN_ID, preparation.guard);
+      const manageRuntime = () => {
+        const settings = ctx.get("settingsOpen" as never) as { open(input: { canvasId: string; section: "runtimes" }): Promise<unknown> } | undefined;
+        if (settings) void settings.open({ canvasId, section: "runtimes" });
+      };
+      const removeReadinessOverlay = ctx.slots.register("canvas.overlay", {
+        id: "image-editor-readiness", owner: IMAGE_EDITOR_PLUGIN_ID,
+        render: function EditorReadinessOverlay() {
+          const pending = useSyncExternalStore(preparation.subscribe, preparation.getSnapshot, preparation.getSnapshot);
+          if (!pending.nodeId) return null;
+          return <PendingReadiness nodeId={pending.nodeId} phase={pending.phase} message={pending.message} />;
+        }
+
+      });
+
       /** 可用内容矩形：与 overlay DOM（铺满聚焦内容区）及 Bevy 取景共用同一表面。 */
       const workspaceRect = (): { x: number; y: number; width: number; height: number } => {
         const controller = ctx.canvasRuntime.controller();
@@ -82,6 +107,16 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         rect: workspaceRect,
         onChange: () => publish()
       });
+
+      function PendingReadiness({ nodeId, phase, message }: { nodeId: string; phase: "loading" | "failed"; message: string }) {
+        const runtimeState = useSyncExternalStore(runtimeComponents.subscribeImageEditor, runtimeComponents.getSnapshot, runtimeComponents.getSnapshot);
+        const hostReadiness = imageEditorReadiness(runtimeState);
+        const readiness = phase === "failed"
+          ? { phase: "failed" as const, label: "编辑器准备失败", tip: message }
+          : { phase: "loading" as const, label: hostReadiness.phase === "loading" ? hostReadiness.label : "正在准备图片编辑器…", tip: "准备好后自动进入编辑。你可以继续查看画布。" };
+        return <NodeEditorReadiness runtime={ctx.canvasRuntime} nodeIds={[nodeId]} readiness={readiness} activeNodeId={nodeId}
+          onSelect={() => preparation.cancel()} onManage={manageRuntime} onRetry={preparation.retry} />;
+      }
 
       // ------------------------------------------------------------ 呈现发布
 
@@ -727,6 +762,9 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
 
       const unsubscribeNav = ctx.canvasNavigation.subscribe(() => {
         const mode = ctx.canvasNavigation.getSnapshot().mode;
+        // A queued auto-entry must not resume after another navigation changes the scene.
+        // Our own successful entry also clears its now-completed node loading indicator.
+        if (preparation.getSnapshot().nodeId && mode !== preparationMode) preparation.cancel();
         if (mode.type === "overview") {
           // 返回画布：暂停呈现而不是关闭文档（不保存、不新增版本）。
           pausePresentation();
@@ -1008,6 +1046,9 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         () => () => {
           disposed = true;
           unsubscribeNav();
+          preparation.dispose();
+          unregisterEntryGuard();
+          removeReadinessOverlay();
           unsubscribeCanonical();
           unsubscribeSession();
           unregisterViewport();

@@ -94,3 +94,19 @@ it("工作区持有的控制器不随面板卸载释放", async () => {
   root = null;
   expect(dispose).not.toHaveBeenCalled();
 });
+
+it("缺失内核后，菜单和取景刷新不再次打开编辑器", async () => {
+  const openImage = vi.fn(async () => ({ ok: false, message: "需要图片编辑组件" }));
+  const createController = vi.fn(() => ({ dispose: vi.fn(), openImage }));
+  const view = fakeDocumentView({ baseAsset: () => ({ id: "base" }) });
+  const port = { createController, loadBaseImageBytes: async () => new Uint8Array([1]) } as unknown as ProjectEditorPort;
+  const entry = { mode: "image" } as const;
+  const container = document.createElement("div"); document.body.append(container);
+  root = createRoot(container);
+  const render = () => root!.render(<ProjectEditorPane view={view as unknown as EditorDocumentView} port={{ ...port, documents: { list: [], onActivateDocument: () => undefined } }} writable entry={entry} />);
+  await act(async () => render());
+  for (let i = 0; i < 5; i++) await act(async () => render());
+  expect(openImage).toHaveBeenCalledOnce();
+  expect(createController).toHaveBeenCalledOnce();
+  expect(container.textContent).toContain("需要图片编辑组件");
+});

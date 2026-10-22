@@ -18,7 +18,6 @@ export function externalizeEditorWasm(code: string): string {
   const endpoint = "new URL('/api/runtime-components/image-editor/asset', globalThis.location.origin)";
   const preflight = `const response = await fetch(${endpoint});
     if (!response.ok) {
-      globalThis.dispatchEvent(new CustomEvent('woohaa-runtime-component-required', { detail: { id: 'image-editor' } }));
       throw new Error('请在设置 → 运行时组件中下载图片编辑组件，然后重新打开图片编辑器。');
     }
     module_or_path = response;`;

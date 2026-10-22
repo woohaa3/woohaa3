@@ -85,9 +85,11 @@ function baseAssetIdOf(view: EditorDocumentView): string {
 
 /** 只读历史预览时不允许写操作。 */
 export function ProjectEditorPane({ view, writable, port, entry, display, controller: provided, renderCanvasBackground }: ProjectEditorPaneProps) {
+  // 菜单随工作区快照更新；它的端口包装变化不代表重新打开文档。
+  const { createController, loadProjectBytes, loadBaseImageBytes, fileDestination } = port;
   const controller = useMemo(
-    () => provided ?? port.createController(view, EditorWorkspaceController),
-    [port, view, provided]
+    () => provided ?? createController(view, EditorWorkspaceController),
+    [createController, view, provided]
   );
   // 工作区持有的控制器随文档存活：面板卸载不得释放它（change: 2026-10-21，design D3）。
   const ownsController = provided == null;
@@ -124,7 +126,7 @@ export function ProjectEditorPane({ view, writable, port, entry, display, contro
       }
       const baseAssetId = baseAssetIdOf(view);
       // 节点文档必须有稳定原图身份；独立文件文档没有资产 id，用自己的字节开工程。
-      if (!baseAssetId && port.fileDestination !== true) {
+      if (!baseAssetId && fileDestination !== true) {
         setStatus("原图不可用，无法进入编辑器");
         setFailed(true);
         return;
@@ -136,7 +138,7 @@ export function ProjectEditorPane({ view, writable, port, entry, display, contro
           setFailed(true);
           return;
         }
-        const bytes = await port.loadProjectBytes(document_.project.storageKey).catch(() => null);
+        const bytes = await loadProjectBytes(document_.project.storageKey).catch(() => null);
         if (cancelled) return;
         if (!bytes) {
           setStatus("工程对象不可读取，仅可查看合成图");
@@ -153,7 +155,7 @@ export function ProjectEditorPane({ view, writable, port, entry, display, contro
       }
 
       // 纯媒体、独立文件与 v1 标注：以原图为背景层开新工程。
-      const bytes = await port.loadBaseImageBytes(view).catch(() => null);
+      const bytes = await loadBaseImageBytes(view).catch(() => null);
       if (cancelled) return;
       if (!bytes) {
         setStatus("原图字节不可读取，无法进入编辑器");
@@ -192,7 +194,7 @@ export function ProjectEditorPane({ view, writable, port, entry, display, contro
       cancelled = true;
       cancelWait?.();
     };
-  }, [controller, entry, port, view]);
+  }, [controller, entry, loadProjectBytes, loadBaseImageBytes, fileDestination, view]);
 
   const apply = useCallback(async (): Promise<void> => {
     const outcome = await port.save(view, controller);

@@ -82,6 +82,24 @@ export class CanvasNavigationStore implements CanvasNavigationService {
   private pending: CanvasNavigationIntent[] = [];
   private requestQueue: Promise<unknown> = Promise.resolve();
   private focusEpoch = 0;
+  private readonly entryGuards = new Map<string, (input: { nodeId: string; kind: CanvasFocusKind; owner: "direct" | "history"; preserveOverviewReturn?: boolean }) => string | null>();
+
+  registerNodeFocusGuard(id: string, guard: (input: { nodeId: string; kind: CanvasFocusKind; owner: "direct" | "history"; preserveOverviewReturn?: boolean }) => string | null): () => void {
+    if (this.entryGuards.has(id)) throw new Error(`Duplicate node focus guard: ${id}`);
+    this.entryGuards.set(id, guard);
+    return () => { if (this.entryGuards.get(id) === guard) this.entryGuards.delete(id); };
+  }
+
+  private entryGuardFor(intent: CanvasNavigationIntent): string | null {
+    if (intent.type !== "enter-node-focus") return null;
+    const mode = this.snapshot.mode;
+    if (mode.type === "node-focus" && mode.nodeId === intent.nodeId && mode.kind === intent.kind && mode.owner === intent.owner) return null;
+    for (const guard of this.entryGuards.values()) {
+      const reason = guard(intent);
+      if (reason) return reason;
+    }
+    return null;
+  }
 
   constructor(private readonly options: CanvasNavigationOptions = {}) {}
 
@@ -184,7 +202,7 @@ export class CanvasNavigationStore implements CanvasNavigationService {
   private applyIntent(intent: CanvasNavigationIntent): CanvasNavigationResult {
     // 活动操作门禁（change: 2026-10-21-add-photocraft-document-workspace，D3）：切换或退出聚焦前
     // 拒绝仍在进行的笔迹与未确认草稿，现场与活动 tab 保留；同一呈现身份的幂等重入不受影响。
-    const gate = this.switchGateFor(intent);
+    const gate = this.entryGuardFor(intent) ?? this.switchGateFor(intent);
     if (gate) {
       this.diagnostic = gate;
       for (const listener of this.listeners) listener();
@@ -375,8 +393,11 @@ export class CanvasNavigationStore implements CanvasNavigationService {
    * 受控退出聚焦：异步结算净变化后再 dispatch（change: 图片聚焦编辑，design D7）。
    * `options.prepareExit` 由 Canvas navigation plugin 注入（持有退出协调器）。
    */
-  private request(intent: CanvasNavigationIntent, shouldPrepare: () => boolean): Promise<CanvasNavigationResult> {
+  private request(intent: CanvasNavigationIntent, shouldPrepare: () => boolean, signal?: AbortSignal): Promise<CanvasNavigationResult> {
     const result = this.requestQueue.then(async () => {
+      if (signal?.aborted) return { ok: false as const, error: "not-allowed" as const, reason: "已取消进入编辑器", snapshot: this.snapshot };
+      const blocked = this.entryGuardFor(intent);
+      if (blocked) return { ok: false as const, error: "not-allowed" as const, reason: blocked, snapshot: this.snapshot };
       const mode = this.snapshot.mode;
       const epoch = this.focusEpoch;
       if (shouldPrepare() && this.options.prepareExit) {
@@ -389,14 +410,16 @@ export class CanvasNavigationStore implements CanvasNavigationService {
           && (current.type !== "document-workspace" || (mode.type === "document-workspace" && current.documentId === mode.documentId));
         if (this.focusEpoch !== epoch || !sameMode) return { ok: false as const, error: "not-allowed" as const, reason: "聚焦目标已改变", snapshot: this.snapshot };
       }
+      if (signal?.aborted) return { ok: false as const, error: "not-allowed" as const, reason: "已取消进入编辑器", snapshot: this.snapshot };
       return this.dispatch(intent);
     });
     this.requestQueue = result.catch(() => undefined);
     return result;
   }
 
-  requestEnterNodeFocus(input: { nodeId: string; kind: CanvasFocusKind; owner?: "direct" | "history"; preserveOverviewReturn?: boolean }): Promise<CanvasNavigationResult> {
-    return this.request({ type: "enter-node-focus", ...input, owner: input.owner ?? "direct" }, () => this.isDifferentFocus(input));
+  requestEnterNodeFocus(input: { nodeId: string; kind: CanvasFocusKind; owner?: "direct" | "history"; preserveOverviewReturn?: boolean; signal?: AbortSignal }): Promise<CanvasNavigationResult> {
+    const { signal, ...target } = input;
+    return this.request({ type: "enter-node-focus", ...target, owner: target.owner ?? "direct" }, () => this.isDifferentFocus(target), signal);
   }
 
   /**

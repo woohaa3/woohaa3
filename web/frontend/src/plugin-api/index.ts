@@ -61,3 +61,6 @@ export { measurePhotocraft, photocraftPreview } from "../cordis/performance/phot
 export { appPublicUrl } from "../cordis/services/app-base-path.js";
 export { createRemoteClient } from "../cordis/plugins/node-history/history-adapters.js";
 export { ImageFocusStore } from "../cordis/plugins/canvas-runtime/image-focus-store.js";
+
+export { runtimeComponents, imageEditorReadiness } from "../cordis/services/runtime-components.js";
+export type { EditorReadiness } from "../cordis/services/runtime-components.js";

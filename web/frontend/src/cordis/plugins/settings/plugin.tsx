@@ -177,23 +177,6 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
         });
       };
 
-      const disposeRuntimeAction = ctx.dialogs.registerAlertAction("settings-runtime-component", async () => {
-        const result = await open({ section: "runtimes" });
-        return result.ok ? { ok: true } : { ok: false, error: result.reason };
-      });
-      const runtimeRequired = () => {
-        ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: {
-          title: "需要图片编辑组件",
-          description: "图片编辑组件尚未安装。可在运行时组件设置中查看下载源并安装；基础画布仍可离线使用。",
-          confirmLabel: "管理运行时组件", cancelLabel: "稍后", actionKey: "settings-runtime-component"
-        } });
-      };
-      window.addEventListener("woohaa-runtime-component-required", runtimeRequired);
-      ctx.effect(() => () => {
-        window.removeEventListener("woohaa-runtime-component-required", runtimeRequired);
-        disposeRuntimeAction();
-      }, "runtime-component-guidance");
-
       /**
        * dirty 时的共享确认（离开设置或内部导航）。返回用户是否确认放弃。
        *

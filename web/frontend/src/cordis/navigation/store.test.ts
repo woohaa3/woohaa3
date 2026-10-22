@@ -369,3 +369,36 @@ describe("CanvasNavigationStore 行为", () => {
   });
 
 });
+
+it("feature entry guards block direct editing before changing focus, but preserve history viewing", async () => {
+  const store = new CanvasNavigationStore(); registerBasics(store);
+  const log: string[] = []; store.setFocusAdapter(focusAdapter(log));
+  const unregister = store.registerNodeFocusGuard("image-editor", input => input.kind === "image" && input.owner === "direct" ? "图片编辑组件未安装" : null);
+  expect((await store.requestEnterNodeFocus({ nodeId: "n", kind: "image" })).ok).toBe(false);
+  expect(store.getSnapshot().mode.type).toBe("overview"); expect(log).toEqual([]);
+  expect(store.enterNodeFocus({ nodeId: "n", kind: "image", owner: "history" }).ok).toBe(true);
+  unregister();
+  expect((await store.requestEnterNodeFocus({ nodeId: "n", kind: "image" })).ok).toBe(true);
+});
+
+it("aborted focus requests cannot dispatch after exit settlement", async () => {
+  let finish!: () => void;
+  const store = new CanvasNavigationStore({ prepareExit: () => new Promise(resolve => { finish = () => resolve({ ok: true }); }) });
+  registerBasics(store); const log: string[] = []; store.setFocusAdapter(focusAdapter(log));
+  store.enterNodeFocus({ nodeId: "original", kind: "model", owner: "direct" }); log.length = 0;
+  const abort = new AbortController();
+  const pending = store.requestEnterNodeFocus({ nodeId: "n", kind: "image", signal: abort.signal });
+  await Promise.resolve();
+  abort.abort(); finish();
+  expect((await pending).ok).toBe(false);
+  expect(store.getSnapshot().mode).toMatchObject({ type: "node-focus", nodeId: "original" }); expect(log).toEqual([]);
+});
+
+it("idempotent entry to the already active view does not prepare it again", async () => {
+  const store = new CanvasNavigationStore(); registerBasics(store); store.setFocusAdapter(focusAdapter([]));
+  store.enterNodeFocus({ nodeId: "n", kind: "image", owner: "direct" });
+  let checks = 0;
+  store.registerNodeFocusGuard("image", () => { checks++; return "准备中"; });
+  expect((await store.requestEnterNodeFocus({ nodeId: "n", kind: "image", owner: "direct" })).ok).toBe(true);
+  expect(checks).toBe(0);
+});

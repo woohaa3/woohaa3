@@ -51,6 +51,7 @@ function harness(mode: { type: string; [key: string]: unknown }) {
       subscribeFocusContentRect: () => () => {}
     },
     canvasNavigation: {
+      registerNodeFocusGuard: () => () => {},
       subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn); },
       getSnapshot: () => ({ mode, panel: null, menu: null }),
       requestEnterNodeFocus: async () => ({ ok: true }),

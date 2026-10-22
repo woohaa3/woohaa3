@@ -1,18 +1,16 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore, useState } from "react";
 import { getAppPublicFetch } from "../../services/app-base-path.js";
 import { Button } from "../../../shared/ui/Button.js";
 
-type ComponentState = {
-  id: string; version: string; source: "managed" | "local"; status: string;
-  entry?: string; path?: string; error?: string; progress?: { received: number; total?: number };
-};
-type Snapshot = { available: boolean; components: ComponentState[]; configPath?: string };
+import { runtimeComponents } from "../../services/runtime-components.js";
+
 const LABELS: Record<string, string> = { "image-editor": "图片编辑", codex: "Codex", claude: "Claude", dsh: "DeepSeek DSH", "shot-recorder": "视频录制", "model-renderer": "模型渲染" };
 const STATUSES: Record<string, string> = { missing: "未安装", checking: "检查中", downloading: "下载中", verifying: "校验中", extracting: "解压中", ready: "可用", failed: "安装失败", incompatible: "版本不兼容" };
 const BUSY = new Set(["checking", "downloading", "verifying", "extracting"]);
 
 export function RuntimeComponentsSection() {
-  const [snapshot, setSnapshot] = useState<Snapshot>();
+  const runtimeState = useSyncExternalStore(runtimeComponents.subscribe, runtimeComponents.getSnapshot, runtimeComponents.getSnapshot);
+  const snapshot = runtimeState.snapshot;
   const [error, setError] = useState("");
   const [pending, setPending] = useState<string>();
   const [paths, setPaths] = useState<Record<string, string>>({});
@@ -24,16 +22,6 @@ export function RuntimeComponentsSection() {
     if (!response.ok) throw new Error(value.message ?? "组件服务请求失败");
     return value;
   };
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      try { const next = await request() as Snapshot; if (active) { setSnapshot(next); setError(""); } }
-      catch (cause) { if (active) setError(cause instanceof Error ? cause.message : "无法读取组件状态"); }
-    };
-    void load();
-    const timer = setInterval(() => void load(), 1500);
-    return () => { active = false; clearInterval(timer); };
-  }, []);
   const act = async (id: string, action: string, body: unknown = {}) => {
     setPending(id); setError("");
     try {
@@ -43,14 +31,14 @@ export function RuntimeComponentsSection() {
         if (first) setPaths((previous) => ({ ...previous, [id]: typeof first === "string" ? first : first.entry }));
         else setError("未找到本机程序，请填写绝对路径。");
       }
-      setSnapshot(await request() as Snapshot);
+      await runtimeComponents.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "组件操作失败"); }
     finally { setPending(undefined); }
   };
   return <div className="settings-page__list">
     <p className="settings-page__hint">基础画布可离线使用。可选组件只在点击下载后联网，安装后可离线使用；也可选择已有的 Codex 或 Claude 程序。</p>
     <p className="settings-page__hint">下载源配置：{snapshot?.configPath ?? "<App 用户数据目录>/config/runtime-downloads.json"}。发行默认配置位于 desktop/runtime-downloads.json。</p>
-    {error ? <p className="settings-page__error">{error}</p> : null}
+    {error || runtimeState.error ? <p className="settings-page__error">{error || runtimeState.error}</p> : null}
     {!snapshot ? <p>正在读取组件状态…</p> : !snapshot.available ? <p>运行时组件仅在桌面 App 中可用。</p> : snapshot.components.map((component) => {
       const busy = BUSY.has(component.status);
       const disabled = pending === component.id;

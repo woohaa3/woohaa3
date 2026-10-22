@@ -375,7 +375,7 @@ export interface CanvasNavigationService {
    * 无净变化时同步可逆退出。重复请求合并。
    */
   requestExitNodeFocus(): Promise<CanvasNavigationResult>;
-  requestEnterNodeFocus(input: { nodeId: string; kind: CanvasFocusKind; owner?: "direct" | "history"; preserveOverviewReturn?: boolean }): Promise<CanvasNavigationResult>;
+  requestEnterNodeFocus(input: { nodeId: string; kind: CanvasFocusKind; owner?: "direct" | "history"; preserveOverviewReturn?: boolean; signal?: AbortSignal }): Promise<CanvasNavigationResult>;
   /** 请求进入独立文档工作区呈现（先结算当前聚焦的净变化，再原子发布）。 */
   requestEnterDocumentWorkspace(documentId: string, options?: { preserveOverviewReturn?: boolean }): Promise<CanvasNavigationResult>;
   requestOpenNodeHistory(input: { nodeId: string; kind: CanvasFocusKind }): Promise<CanvasNavigationResult>;
@@ -396,6 +396,8 @@ export interface CanvasNavigationService {
   panelAvailable(route: CanvasPanelRoute): boolean;
   /** 注册 panel/menu owner 的 surface cleanup；返回 disposer。 */
   registerCleanup(key: string, cleanup: CanvasSurfaceCleanup): () => void;
+  /** Feature readiness gate before entering node focus. A rejection preserves the canvas. */
+  registerNodeFocusGuard(id: string, guard: (input: { nodeId: string; kind: CanvasFocusKind; owner: "direct" | "history"; preserveOverviewReturn?: boolean }) => string | null): () => void;
   /** 注册 mode effect adapter（canvas-runtime）。 */
   setFocusAdapter(adapter: CanvasLayoutAdapter): () => void;
 

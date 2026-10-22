@@ -14,7 +14,7 @@ it("desktop editor requests a managed local asset and offers guidance without do
   const output = externalizeEditorWasm("module_or_path = new URL('./photocraft_editor_bg.wasm', import.meta.url);");
   expect(output).not.toContain("new URL('./photocraft_editor_bg.wasm'");
   expect(output).toContain("/api/runtime-components/image-editor/asset");
-  expect(output).toContain("woohaa-runtime-component-required");
+  expect(output).not.toContain("dispatchEvent");
   expect(output).not.toContain("/install");
   expect(() => externalizeEditorWasm("changed upstream glue")).toThrow("入口已变化");
 });

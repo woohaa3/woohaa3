@@ -1,0 +1,11 @@
+.node-editor-readiness-layer { position: fixed; inset: 0; pointer-events: none; z-index: 24; }
+.node-editor-readiness { position: absolute; pointer-events: auto; font: 12px/1.5 var(--app-web-font-family, sans-serif); color: var(--app-web-text-primary); }
+.node-editor-readiness__badge { display: flex; align-items: center; gap: 6px; max-width: 240px; padding: 4px 9px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-panel); color: inherit; font: inherit; cursor: pointer; box-shadow: 0 2px 8px rgb(0 0 0 / 10%); }
+.node-editor-readiness__mark { display: grid; place-items: center; width: 14px; height: 14px; box-sizing: border-box; border: 1px solid currentColor; border-radius: 50%; color: var(--app-web-text-muted); font-size: 10px; }
+.node-editor-readiness__mark[data-loading] { border-color: var(--app-web-border); border-top-color: var(--app-web-accent); animation: node-editor-readiness-spin 900ms linear infinite; }
+.node-editor-readiness__tip { width: 280px; box-sizing: border-box; margin-top: 6px; padding: 12px; border: 1px solid var(--app-web-border); border-radius: 8px; background: var(--app-web-panel); box-shadow: 0 4px 16px rgb(0 0 0 / 12%); }
+.node-editor-readiness__tip p { margin: 0 0 10px; overflow-wrap: anywhere; color: var(--app-web-text-muted); }
+.node-editor-readiness__actions { display: flex; align-items: center; gap: 10px; }
+.node-editor-readiness__actions button { padding: 0; border: 0; background: transparent; color: var(--app-web-accent); font: inherit; cursor: pointer; }
+.node-editor-readiness__actions .node-editor-readiness__dismiss { margin-left: auto; color: var(--app-web-text-muted); }
+@keyframes node-editor-readiness-spin { to { transform: rotate(360deg); } }
