@@ -100,8 +100,16 @@ type GenerationTaskSummary struct {
 	// 成功终态的媒体类别与对象字节数；文本结果没有这两项。
 	ResultMediaKind string `protobuf:"bytes,15,opt,name=result_media_kind,json=resultMediaKind,proto3" json:"result_media_kind,omitempty"`
 	ResultSize      uint64 `protobuf:"varint,16,opt,name=result_size,json=resultSize,proto3" json:"result_size,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// 成功媒体结果的逻辑对象键与 Content-Type；文本结果为空。
+	//
+	// 键是命名空间内的逻辑键（如 `generation-outputs/<sha256>.png`），**不是**
+	// CreateCanvasObjectUrl 要的画布内相对对象键：它不含 `media/` 命名空间段，与
+	// GenerationTaskInput.storage_key 同口径。管理端预览时先拼成 `media/<key>` 再签地址；
+	// 列表只带这两项定位信息，仍然不返回结果正文。
+	ResultStorageKey  string `protobuf:"bytes,17,opt,name=result_storage_key,json=resultStorageKey,proto3" json:"result_storage_key,omitempty"`
+	ResultContentType string `protobuf:"bytes,18,opt,name=result_content_type,json=resultContentType,proto3" json:"result_content_type,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GenerationTaskSummary) Reset() {
@@ -244,6 +252,20 @@ func (x *GenerationTaskSummary) GetResultSize() uint64 {
 		return x.ResultSize
 	}
 	return 0
+}
+
+func (x *GenerationTaskSummary) GetResultStorageKey() string {
+	if x != nil {
+		return x.ResultStorageKey
+	}
+	return ""
+}
+
+func (x *GenerationTaskSummary) GetResultContentType() string {
+	if x != nil {
+		return x.ResultContentType
+	}
+	return ""
 }
 
 type ListGenerationTasksRequest struct {
@@ -515,12 +537,14 @@ func (x *GetGenerationTaskResponse) GetTraceState() GenerationTraceState {
 }
 
 type GenerationTaskInput struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AssetId       string                 `protobuf:"bytes,1,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
-	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
-	StorageKey    string                 `protobuf:"bytes,3,opt,name=storage_key,json=storageKey,proto3" json:"storage_key,omitempty"`
-	MediaType     string                 `protobuf:"bytes,4,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
-	MediaKind     string                 `protobuf:"bytes,5,opt,name=media_kind,json=mediaKind,proto3" json:"media_kind,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	AssetId string                 `protobuf:"bytes,1,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
+	Role    string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	// 命名空间内的逻辑键（不含 `media/` 段），与 GenerationTaskDetail.result_storage_key 同口径；
+	// 管理端预览时拼成画布内相对对象键 `media/<key>` 再签地址。
+	StorageKey    string `protobuf:"bytes,3,opt,name=storage_key,json=storageKey,proto3" json:"storage_key,omitempty"`
+	MediaType     string `protobuf:"bytes,4,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
+	MediaKind     string `protobuf:"bytes,5,opt,name=media_kind,json=mediaKind,proto3" json:"media_kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1618,7 +1642,7 @@ var File_woohaa_generation_v1alpha1_generation_admin_proto protoreflect.FileDesc
 
 const file_woohaa_generation_v1alpha1_generation_admin_proto_rawDesc = "" +
 	"\n" +
-	"1woohaa/generation/v1alpha1/generation_admin.proto\x12\x1awoohaa.generation.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+woohaa/generation/v1alpha1/generation.proto\"\x95\x05\n" +
+	"1woohaa/generation/v1alpha1/generation_admin.proto\x12\x1awoohaa.generation.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+woohaa/generation/v1alpha1/generation.proto\"\xf3\x05\n" +
 	"\x15GenerationTaskSummary\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1b\n" +
 	"\tcanvas_id\x18\x02 \x01(\tR\bcanvasId\x12\x19\n" +
@@ -1643,7 +1667,9 @@ const file_woohaa_generation_v1alpha1_generation_admin_proto_rawDesc = "" +
 	"durationMs\x12*\n" +
 	"\x11result_media_kind\x18\x0f \x01(\tR\x0fresultMediaKind\x12\x1f\n" +
 	"\vresult_size\x18\x10 \x01(\x04R\n" +
-	"resultSize\"\xa4\x03\n" +
+	"resultSize\x12,\n" +
+	"\x12result_storage_key\x18\x11 \x01(\tR\x10resultStorageKey\x12.\n" +
+	"\x13result_content_type\x18\x12 \x01(\tR\x11resultContentType\"\xa4\x03\n" +
 	"\x1aListGenerationTasksRequest\x12\x1b\n" +
 	"\tcanvas_id\x18\x01 \x01(\tR\bcanvasId\x12\x19\n" +
 	"\bactor_id\x18\x02 \x01(\tR\aactorId\x12=\n" +

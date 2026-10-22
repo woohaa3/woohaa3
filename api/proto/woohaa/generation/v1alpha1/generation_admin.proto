@@ -73,6 +73,14 @@ message GenerationTaskSummary {
   // 成功终态的媒体类别与对象字节数；文本结果没有这两项。
   string result_media_kind = 15;
   uint64 result_size = 16;
+  // 成功媒体结果的逻辑对象键与 Content-Type；文本结果为空。
+  //
+  // 键是命名空间内的逻辑键（如 `generation-outputs/<sha256>.png`），**不是**
+  // CreateCanvasObjectUrl 要的画布内相对对象键：它不含 `media/` 命名空间段，与
+  // GenerationTaskInput.storage_key 同口径。管理端预览时先拼成 `media/<key>` 再签地址；
+  // 列表只带这两项定位信息，仍然不返回结果正文。
+  string result_storage_key = 17;
+  string result_content_type = 18;
 }
 
 message ListGenerationTasksRequest {
@@ -109,6 +117,8 @@ message GetGenerationTaskResponse {
 message GenerationTaskInput {
   string asset_id = 1;
   string role = 2;
+  // 命名空间内的逻辑键（不含 `media/` 段），与 GenerationTaskDetail.result_storage_key 同口径；
+  // 管理端预览时拼成画布内相对对象键 `media/<key>` 再签地址。
   string storage_key = 3;
   string media_type = 4;
   string media_kind = 5;
