@@ -257,6 +257,25 @@ fn status(app: &tauri::AppHandle, message: &str, failed: bool) {
         let _ = window.show();
     }
 }
+/// 启动页地址。
+///
+/// `WebviewUrl::App(path)` 会用配置里的 `frontendDist` 作为 base 做 `Url::join`，且该调用在
+/// Tauri 内部是 `unwrap`。`FrontendDist` 的反序列化优先匹配 `Url`，因此 Windows 绝对路径
+/// （`E:\\dir` → scheme `e`、不透明 path）会让 base 变成 cannot-be-a-base，join 直接 panic。
+/// 这里自行拼出绝对 URL：外部 base 能 join 就用它，否则回退到内置协议 origin。
+fn startup_webview_url(app: &tauri::AppHandle) -> tauri::Url {
+    #[cfg(any(target_os = "windows", target_os = "android"))]
+    let protocol_origin = "http://tauri.localhost";
+    #[cfg(not(any(target_os = "windows", target_os = "android")))]
+    let protocol_origin = "tauri://localhost";
+    if let Some(tauri::utils::config::FrontendDist::Url(base)) = app.config().build.frontend_dist.as_ref() {
+        if let Ok(url) = base.join("desktop-startup.html") {
+            return url;
+        }
+    }
+    tauri::Url::parse(&format!("{protocol_origin}/desktop-startup.html")).expect("startup url")
+}
+
 pub fn install(
     app: &tauri::AppHandle,
     origin: Arc<RwLock<String>>,
@@ -327,7 +346,7 @@ pub fn install(
     let window = tauri::WebviewWindowBuilder::new(
         app,
         "startup",
-        tauri::WebviewUrl::App("desktop-startup.html".into()),
+        tauri::WebviewUrl::External(startup_webview_url(app)),
     )
     .title("WooHaa3 启动")
     .inner_size(560., 260.)

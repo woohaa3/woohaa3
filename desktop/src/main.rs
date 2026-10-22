@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Tauri 桌面宿主原型入口（change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，任务 1.4）。
 //!
 //! 目的（P0）：证明 Tauri 独占窗口与 OS 事件循环，且 native 画布生命周期与 `App::run()`/
@@ -7,8 +8,96 @@
 //! 用法：
 //!   cargo run -p woohaa_desktop_host --bin woohaa-desktop            # overlay 原型（需桌面会话）
 //!   cargo run -p woohaa_desktop_host --bin woohaa-desktop -- --probe # 只探测环境（无会话也安全）
+//!
+//! 发行构建声明 `windows_subsystem = "windows"`：双击不再附加控制台窗口。代价是失败信息不再
+//! 可见，因此所有致命路径都走 `fatal`：写 `logs/startup.log` 并在 Windows 上弹出原生错误框。
+
+/// 致命错误出口：记录诊断、提示用户，然后以给定退出码结束进程。
+fn fatal(message: &str, code: i32) -> ! {
+    report_fatal(message);
+    std::process::exit(code);
+}
+
+fn report_fatal(message: &str) {
+    eprintln!("{message}");
+    write_startup_log(message);
+    #[cfg(target_os = "windows")]
+    show_windows_error(message);
+}
+
+/// 与应用数据目录一致的日志位置；目录不可写时返回 None（诊断退化为 stderr）。
+fn startup_log_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("WOOHAA_DESKTOP_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("APPDATA")
+                .map(|root| std::path::PathBuf::from(root).join("com.woohaa.desktop"))
+        })
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|home| std::path::PathBuf::from(home).join(".com.woohaa.desktop"))
+        })?;
+    let logs = base.join("logs");
+    std::fs::create_dir_all(&logs).ok()?;
+    Some(logs.join("startup.log"))
+}
+
+fn write_startup_log(message: &str) {
+    use std::io::Write;
+    let Some(path) = startup_log_path() else {
+        return;
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "[{stamp}] {message}");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn show_windows_error(message: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+    fn wide(text: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(text)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+    let text = wide(message);
+    let title = wide("WooHaa3");
+    // SAFETY: 两个指针都指向调用期内保持存活的以 NUL 结尾的 UTF-16 缓冲。
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+/// 未捕获的 panic 同样要留下可读诊断：发行构建没有控制台，默认回溯等于消失。
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let log = startup_log_path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "（数据目录不可写）".to_owned());
+        let message = format!("WooHaa3 启动失败（未捕获的错误）：{info}\n日志：{log}");
+        report_fatal(&message);
+        default_hook(info);
+    }));
+}
 
 fn main() {
+    install_panic_hook();
     // `--probe` 只报告环境事实，不创建窗口/GPU 资源；用于无显示会话的 CI/容器。
     if std::env::args().any(|arg| arg == "--probe") {
         println!("{}", woohaa_desktop_host::view::desktop_support_report());
@@ -17,12 +106,12 @@ fn main() {
     // 预先检查显示会话：没有会话时 GTK 初始化会失败；这里给出明确诊断而不是静默继续。
     let session = woohaa_desktop_host::probe_desktop_session();
     if !session.has_session_env {
-        eprintln!(
+        fatal(
             "没有可用的桌面显示会话（Linux display / macOS WindowServer / Windows 可见窗口站）。\
              同窗口 overlay 原型需要真实桌面会话与 GPU；本机不执行渲染/合成验收。\
-             使用 --probe 只查看环境事实。"
+             使用 --probe 只查看环境事实。",
+            2,
         );
-        std::process::exit(2);
     }
     let external_host = std::env::args().any(|arg| arg == "--ui-url")
         || std::env::var_os("WOOHAA_DESKTOP_URL").is_some();
@@ -54,7 +143,6 @@ fn main() {
         None
     };
     if let Err(error) = woohaa_desktop_host::run_host() {
-        eprintln!("桌面宿主启动失败：{error}");
-        std::process::exit(1);
+        fatal(&format!("桌面宿主启动失败：{error}"), 1);
     }
 }

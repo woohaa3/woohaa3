@@ -46,6 +46,8 @@ gdkx11 = "0.18"
 tauri = { version = "=2.12.3", default-features = false, features = ["wry", "unstable", "macos-private-api", "devtools"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# 启动失败的原生提示框（发行构建没有控制台，错误否则不可见）。
+windows-sys = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging"] }
 # 直接依赖同样是 tauri-build 读取 DEP_TAURI_DEV 的前提；只靠通知插件的传递依赖
 # 会触发 “missing cargo:dev instruction” 构建脚本 panic。
 tauri = { version = "=2.12.3", default-features = false, features = ["wry", "common-controls-v6", "unstable", "macos-private-api", "devtools"] }
