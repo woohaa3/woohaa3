@@ -349,7 +349,11 @@ export function createSyncUpgradeHandler(options: SyncUpgradeOptions): SyncUpgra
       if (options.canvasExists) {
         void (async () => {
           try {
-            if (!await options.canvasExists!(canvasId)) { rejectUpgrade(socket, 404, "Canvas Not Found"); return; }
+            if (!await options.canvasExists!(canvasId)) {
+              log({ event: "sync-canvas-missing", status: 404, canvasId });
+              rejectUpgrade(socket, 404, "Canvas Not Found");
+              return;
+            }
             acceptConnection(req, socket, head, canvasId, sessionProtocolVersion);
           } catch { rejectUpgrade(socket, 503, "Storage Unavailable"); }
         })();

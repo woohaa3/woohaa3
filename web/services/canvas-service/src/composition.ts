@@ -372,8 +372,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     syncHandler ??= createSyncUpgradeHandler({
       ...(upstream ? { upstream } : {}),
       // 资源授权接管后，room 建立前的存在性判定改由下面的 principal read 判定负责；
-      // 未注入认证（独立单元）时保留内容存在性回退。
-      ...(options.accessRuntime ? { canvasExists: (id: string) => canvasContentExists(id) } : {}),
+      // 未注入认证（独立单元 / 本机单实例）时保留打开准入：本机有内容，或目录里是
+      // remote-only（与 GET 的 remoteSummary 兜底同一口径）。结算用的 canvasContentExists
+      // 仍只看本机持久化内容，不把「远端有、本机还没有」当成已建内容。
+      ...(options.accessRuntime ? { canvasExists: (id: string) => canvasSessionExists(id) } : {}),
       accessRuntime: options.accessRuntime,
       repository: {
         loadYjsState: async (canvasId) => (await resolveYjsRepository()).loadYjsState(canvasId),
@@ -609,6 +611,13 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       }
     }
     return (await (await resolveYjsRepository()).loadYjsState(canvasId)) !== null;
+  };
+
+  /** 打开 Canvas Session 的准入：本机有内容，或远端目录能给出摘要（内容由 room seed）。 */
+  const canvasSessionExists = async (canvasId: string): Promise<boolean> => {
+    if (await canvasContentExists(canvasId)) return true;
+    const remote = await composition?.catalog?.remoteSummary(canvasId).catch(() => null);
+    return remote !== null;
   };
 
   // 在线迁移（change: 2026-10-12-add-extension-online-canvas-migration）：
