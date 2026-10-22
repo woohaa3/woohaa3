@@ -392,20 +392,20 @@ describe("公开回调（remote-server/auth/callback）", () => {
     expect(fake.calls.filter((call) => call.path.endsWith("/ExchangeLocalLogin"))).toHaveLength(1);
   });
 
-  it("error=tof_* → 302 到完成页，失败短语进结果表", async () => {
+  it("error=<契约 reason> → 302 到完成页，失败短语进结果表", async () => {
     const fake = createFakeServer();
     const fixture = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     const started = await startAttempt(fixture);
     const callback = await fixture.callRaw(
       REMOTE_SERVER_OAUTH_CALLBACK_ROUTE,
-      CALLBACK_URL + "?error=tof_expired&state=" + started.attemptId
+      CALLBACK_URL + "?error=tof.rejected&state=" + started.attemptId
     );
     expect(callback.status).toBe(302);
     expect(fake.calls.filter((call) => call.path.endsWith("/ExchangeLocalLogin"))).toHaveLength(0);
 
     const poll = await fixture.call(REMOTE_SERVER_OAUTH_POLL_ROUTE, { attemptId: started.attemptId });
-    // 失败结果带**稳定码**（排障/上报用）与中文短语（界面用）。
-    expect(poll.body).toMatchObject({ state: "failed", code: "tof_expired" });
+    // 失败结果带**稳定码**（排障/上报用）与中文短语（界面用）。码就是 proto 里的 reason。
+    expect(poll.body).toMatchObject({ state: "failed", code: "tof.rejected" });
     expect(String((poll.body as { error: string }).error)).toContain("过期");
 
     const done = await fixture.callRaw(REMOTE_SERVER_OAUTH_DONE_ROUTE, DONE_URL + "?attempt=" + started.attemptId);
@@ -413,7 +413,34 @@ describe("公开回调（remote-server/auth/callback）", () => {
     expect(done.body).toContain("过期");
   });
 
-  it("未知的 error 码折算成 tof_unable，不反射远端文本", async () => {
+  it.each([
+    // 「认得这个人但不放行」必须原样到达界面：文案由契约生成，不是本文件手写的。
+    ["auth.subject_disabled", "停用", "auth.subject_disabled"],
+    ["tof.subject_unregistered", "尚未开通", "tof.subject_unregistered"]
+  ])("error=%s 保留稳定码并显示可执行文案", async (raw, needle, expectedCode) => {
+    const fake = createFakeServer();
+    const fixture = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const started = await startAttempt(fixture);
+    const callback = await fixture.callRaw(
+      REMOTE_SERVER_OAUTH_CALLBACK_ROUTE,
+      CALLBACK_URL + "?error=" + raw + "&state=" + started.attemptId
+    );
+    expect(callback.status).toBe(302);
+
+    // 先看完成页（peek），再轮询（消费）：反过来，页面只会显示"结果已不可用"。
+    const done = await fixture.callRaw(REMOTE_SERVER_OAUTH_DONE_ROUTE, DONE_URL + "?attempt=" + started.attemptId);
+    expect(done.body).toContain("登录未完成");
+    expect(done.body).toContain(needle);
+    expect(done.body).not.toContain("服务端暂时无法完成登录");
+
+    const poll = await fixture.call(REMOTE_SERVER_OAUTH_POLL_ROUTE, { attemptId: started.attemptId });
+    expect(poll.body).toMatchObject({ state: "failed", code: expectedCode });
+    const message = String((poll.body as { error: string }).error);
+    expect(message).toContain(needle);
+    expect(message).not.toContain("服务端暂时无法完成登录");
+  });
+
+  it("未知的 error 码回落通用文案，不反射远端文本", async () => {
     const fake = createFakeServer();
     const fixture = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     const started = await startAttempt(fixture);
@@ -424,7 +451,8 @@ describe("公开回调（remote-server/auth/callback）", () => {
     const poll = await fixture.call(REMOTE_SERVER_OAUTH_POLL_ROUTE, { attemptId: started.attemptId });
     expect(poll.body).toMatchObject({ state: "failed" });
     expect(String((poll.body as { error: string }).error)).not.toContain("some_internal_detail");
-    expect(String((poll.body as { error: string }).error)).toContain("服务端暂时无法完成登录");
+    // 认不出来的码不猜原因：只说清"没完成、要重来"。
+    expect(String((poll.body as { error: string }).error)).toContain("登录没有完成");
   });
 
   it("远端拒绝换码（PKCE 不匹配）→ 失败且不回显远端正文", async () => {
@@ -442,7 +470,8 @@ describe("公开回调（remote-server/auth/callback）", () => {
     const poll = await fixture.call(REMOTE_SERVER_OAUTH_POLL_ROUTE, { attemptId: started.attemptId });
     expect(poll.body).toMatchObject({ state: "failed" });
     const error = String((poll.body as { error: string }).error);
-    expect(error).toContain("企业统一登录没有完成");
+    // 文案来自 proto 的失败分类（tof.invalid_code），不是本扩展手写的。
+    expect(error).toContain("统一登录返回的凭证无效");
     expect(error).not.toContain("PKCE");
     expect(JSON.stringify(poll.body)).not.toContain("session-");
 
@@ -460,7 +489,7 @@ describe("公开回调（remote-server/auth/callback）", () => {
     const poll = await fixture.call(REMOTE_SERVER_OAUTH_POLL_ROUTE, { attemptId: started.attemptId });
     expect(poll.body).toMatchObject({ state: "failed" });
     const failures = fixture.logEvents.filter((event) => event.event === "remote-oauth-failed");
-    expect(failures.some((event) => event.code === "tof_invalid_code")).toBe(true);
+    expect(failures.some((event) => event.code === "tof.invalid_code")).toBe(true);
   });
 
   it("换码成功但响应形状不符 → 失败，不落半份会话", async () => {
@@ -571,10 +600,10 @@ describe("oauth-poll", () => {
     const fake = createFakeServer();
     const fixture = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     const started = await startAttempt(fixture);
-    await fixture.callRaw(REMOTE_SERVER_OAUTH_CALLBACK_ROUTE, CALLBACK_URL + "?error=tof_state_invalid&state=" + started.attemptId);
+    await fixture.callRaw(REMOTE_SERVER_OAUTH_CALLBACK_ROUTE, CALLBACK_URL + "?error=tof.state_invalid&state=" + started.attemptId);
     const first = await fixture.call(REMOTE_SERVER_OAUTH_POLL_ROUTE, { attemptId: started.attemptId });
     expect(first.body).toMatchObject({ state: "failed" });
-    expect(String((first.body as { error: string }).error)).toContain("会话已失效");
+    expect(String((first.body as { error: string }).error)).toContain("回跳已失效");
     const second = await fixture.call(REMOTE_SERVER_OAUTH_POLL_ROUTE, { attemptId: started.attemptId });
     expect(second.body).toMatchObject({ state: "failed" });
     expect(String((second.body as { error: string }).error)).toContain("已失效");

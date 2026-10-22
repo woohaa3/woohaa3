@@ -12,6 +12,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { DEFAULT_CANVAS_MAX_BODY_BYTES, type CanvasLogger, type CanvasReadiness, type CanvasRequestHandlerOptions } from "./types.js";
 import { etagFor, readInt, readJsonBody, sendError, sendJson } from "./http-codec.js";
 import { authorizeCanvasRequest, httpStatusForCanvasAccess } from "../../access/resolve-access.js";
+// 会话关闭原因的唯一来源：api/proto 的 SessionError 枚举（generrors 生成）。
+import { SESSION_ERROR } from "../../../../../../api/gen/es/woohaa/errors/v1alpha1/wirecodes_gen.js";
 
 /** 统一资源授权（仅在宿主注入 authenticate 时执行）；返回是否放行。 */
 async function requireCanvasAccess(input: {
@@ -284,7 +286,8 @@ export async function handleDelete(
   }
 
   // 删除成功后断开该画布的全部实时会话，使撤权在生效后同步可见（任务 5.2）。
-  await options.closeSessions?.(canvasId, "canvas-deleted");
+  // 关闭原因取自契约生成物：它会被浏览器端按同一套码判定（不可重试的终态）。
+  await options.closeSessions?.(canvasId, SESSION_ERROR.canvasDeleted);
   // 保存 tombstone（best-effort；缺失不使已删画布变成可认领孤儿）。
   if (options.lifecycle && principal) {
     await options.lifecycle.tombstone({ canvasId, principal, operationId: `delete:${canvasId}:${expectedRevision}` }).catch(() => undefined);

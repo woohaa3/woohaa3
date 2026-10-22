@@ -31,6 +31,8 @@ import type {
   PptaskVideoModelImplementation
 } from "@sdppp/pptask";
 import type { RemoteSession } from "../session.js";
+// 失败码来自契约生成物（api/proto 的 GenerationFailure 枚举），不在本文件写字面量。
+import { GENERATION_FAILURE } from "../../../../../../api/gen/es/woohaa/errors/v1alpha1/wirecodes_gen.js";
 import { generationFailureText, generationRpcErrorText, isRemoteGenerationModelType, asRecord, decodeCancelResponse, decodeSubmitResponse, decodeTask, REMOTE_GENERATION_PROVIDER_ID, type GenerationAdmission } from "./protocol.js";
 import { convergeGenerationParameters } from "./parameters.js";
 import { translateImageParameters } from "./image-models.js";
@@ -102,7 +104,7 @@ export function prepareRemoteGenerationInput(
 ): RemotePreparedInput {
   const canvasId = typeof input.canvasId === "string" ? input.canvasId.trim() : "";
   if (canvasId === "") {
-    throw new RemoteGenerationError("canvas-not-shared", "画布未同步到服务端（缺少画布身份）");
+    throw new RemoteGenerationError(GENERATION_FAILURE.canvasNotShared, "画布未同步到服务端（缺少画布身份）");
   }
   const idempotencyKey = typeof input.taskKey === "string" ? input.taskKey.trim() : "";
   if (idempotencyKey === "") {
@@ -110,7 +112,7 @@ export function prepareRemoteGenerationInput(
   }
   const model = deps.modelFor(input.providerModelId);
   if (model === undefined) {
-    throw new RemoteGenerationError("catalog-changed", generationFailureText("catalog-changed"));
+    throw new RemoteGenerationError(GENERATION_FAILURE.catalogChanged, generationFailureText(GENERATION_FAILURE.catalogChanged));
   }
   const inputs: RemotePreparedInput["inputs"] = [];
   for (const reference of input.references) {
@@ -124,7 +126,7 @@ export function prepareRemoteGenerationInput(
     if (storageKey === "") {
       // 键缺失/非法就不要把这次提交送出去：交一个服务端读不到的键，只会在执行期变成
       // 一个更难懂的失败；而按文生图静默出图更糟。
-      throw new RemoteGenerationError("media-not-found", generationFailureText("media-not-found"));
+      throw new RemoteGenerationError(GENERATION_FAILURE.mediaNotFound, generationFailureText(GENERATION_FAILURE.mediaNotFound));
     }
     inputs.push({
       ...(typeof reference.assetId === "string" && reference.assetId !== "" ? { assetId: reference.assetId } : {}),
@@ -178,7 +180,7 @@ export function prepareRemoteGenerationInput(
 function readPreparedInput(value: unknown): RemotePreparedInput {
   const record = asRecord(value);
   if (record === null || record.__remoteServerGeneration !== 1) {
-    throw new RemoteGenerationError("unsupported", "提交输入不可识别");
+    throw new RemoteGenerationError(GENERATION_FAILURE.unsupported, "提交输入不可识别");
   }
   return record as unknown as RemotePreparedInput;
 }
@@ -240,7 +242,7 @@ async function pollRemoteTask(
     if (result.code === "unauthenticated") {
       throw new RemoteGenerationError("unauthenticated", generationRpcErrorText(result.code));
     }
-    throw new RemoteGenerationError("unavailable", generationRpcErrorText(result.code));
+    throw new RemoteGenerationError(GENERATION_FAILURE.unavailable, generationRpcErrorText(result.code));
   }
   const task = decodeTask(result.value);
   const progress = task.progress ?? undefined;
@@ -253,17 +255,17 @@ async function pollRemoteTask(
     case "succeeded": {
       if (modelType === "language") {
         if (task.text === null) {
-          throw new RemoteGenerationError("unsupported", "服务端没有返回文本结果");
+          throw new RemoteGenerationError(GENERATION_FAILURE.unsupported, "服务端没有返回文本结果");
         }
         return { status: "completed", content: task.text.content };
       }
       if (task.media === null) {
-        throw new RemoteGenerationError("storage-failed", "服务端没有返回可用的媒体结果");
+        throw new RemoteGenerationError(GENERATION_FAILURE.storageFailed, "服务端没有返回可用的媒体结果");
       }
       return { status: "completed", media: task.media.media };
     }
     case "failed": {
-      const code = task.failure?.code ?? "unsupported";
+      const code = task.failure?.code ?? GENERATION_FAILURE.unsupported;
       throw new RemoteGenerationError(code, generationFailureText(code));
     }
     case "cancelled":
@@ -281,27 +283,27 @@ async function startRemoteTask(
   preparedValue: unknown
 ): Promise<PptaskOperationStartResult> {
   if (!isRemoteGenerationModelType(modelType)) {
-    throw new RemoteGenerationError("unsupported", generationFailureText("unsupported"));
+    throw new RemoteGenerationError(GENERATION_FAILURE.unsupported, generationFailureText(GENERATION_FAILURE.unsupported));
   }
   const prepared = readPreparedInput(preparedValue);
   const session = requireSession(await options.session());
   const submitted = await options.client.submitTask(session, toSubmitBody(prepared));
   if (!submitted.ok) {
     throw new RemoteGenerationError(
-      submitted.code === "unauthenticated" ? "unauthenticated" : "unavailable",
+      submitted.code === "unauthenticated" ? "unauthenticated" : GENERATION_FAILURE.unavailable,
       generationRpcErrorText(submitted.code)
     );
   }
   const response = decodeSubmitResponse(submitted.value);
   if (response.taskId === null) {
-    throw new RemoteGenerationError("unavailable", "服务端没有返回任务号");
+    throw new RemoteGenerationError(GENERATION_FAILURE.unavailable, "服务端没有返回任务号");
   }
   // 稳定拒绝（key-reused / canvas-not-shared / catalog-changed …）以 FAILED 状态返回：
   // 稳定码在 GetTask 的 error.code 里（proto 注释 D1/D8）。
   if (response.state === "failed") {
     const detail = await options.client.getTask(session, { taskId: response.taskId });
     const task = detail.ok ? decodeTask(detail.value) : null;
-    const code = task?.failure?.code ?? "unsupported";
+    const code = task?.failure?.code ?? GENERATION_FAILURE.unsupported;
     throw new RemoteGenerationError(code, generationFailureText(code));
   }
   const operation: RemoteOperation = {
@@ -322,11 +324,11 @@ async function cancelRemoteTask(options: RemoteGenerationProviderOptions, operat
   const session = requireSession(await options.session());
   const result = await options.client.cancelTask(session, operation.taskId);
   if (!result.ok) {
-    throw new RemoteGenerationError("unavailable", generationRpcErrorText(result.code));
+    throw new RemoteGenerationError(GENERATION_FAILURE.unavailable, generationRpcErrorText(result.code));
   }
   const state = decodeCancelResponse(result.value);
   if (state === null) {
-    throw new RemoteGenerationError("unsupported", "服务端没有返回取消结果");
+    throw new RemoteGenerationError(GENERATION_FAILURE.unsupported, "服务端没有返回取消结果");
   }
 }
 

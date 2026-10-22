@@ -86,7 +86,10 @@ bindings，且服务端当前 `max_inputs=0`——带 `inputs` 的提交会以�
 - **只交稳定引用**：提交带 `canvasId` 与参考输入的 `storageKey`/`assetId`，不把本机签名 URL
   交给服务端；结果只收稳定 `storageKey`，由 Media 的 `verify` 按画布作用域确认后直接采用，
   不二次搬运字节。因此要求画布已经同步到服务端；纯本地画布提交会以稳定码
-  `canvas-not-shared` 失败并提示先启用同步。
+  `canvas-not-shared` 失败并提示先启用同步。任务失败码（`catalog-changed` / `key-reused` /
+  `canvas-not-shared` / `limit-exceeded` / `resource-exhausted` / `media-not-found` /
+  `unsupported` / `unavailable` / `storage-failed`）和它们的文案都取自 `api/proto` 的
+  `GenerationFailure` 枚举（generrors 生成到 `api/gen/es`），本扩展不再维护自己的码表。
 - **刷新**：`generation-refresh` handler 重新探测并返回模型数量/目录修订，面板上的「刷新模型」就是它的
   入口（数量与目录修订立刻更新）；浏览器本来就在轮询 `GET /api/generation-models`，远端目录变化后
   下方「生成的模型」列表约 10 秒内自己跟上，不需要刷新整页，也不需要客户端发版。

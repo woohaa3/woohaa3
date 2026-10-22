@@ -24,6 +24,8 @@ import {
   type SessionChannelId
 } from "@woohaa3/contracts/canvas-yjs";
 import type { SyncSocket } from "@woohaa3/contracts/canvas-yjs";
+// 服务端下发的会话错误码来自契约生成物（api/proto 的 SessionError 枚举）。
+import { SESSION_ERROR } from "../../../../../api/gen/es/woohaa/errors/v1alpha1/wirecodes_gen.js";
 import { YJS_CANVAS_FORMAT_VERSION, YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import {
   activeTelemetryClient,
@@ -431,13 +433,19 @@ export function createCanvasSessionTransport(options: CanvasSessionTransportOpti
   };
 }
 
-/** 服务端明确宣告的不可重试关闭原因（重建连接也不会成功）。 */
+/**
+ * 服务端明确宣告的不可重试关闭原因（重建连接也不会成功）。
+ *
+ * 服务端下发的码来自 api/proto 的 `SessionError` 枚举（生成物），不在本文件写字面量；
+ * 另外两个是本机判定的原因（权限被撤销、协议版本不兼容），留在本地：
+ * 它们的生产者是 canvas-service，不是远端服务端。
+ */
 const NON_RETRYABLE_CLOSE_REASONS = [
   "read-revoked",
-  "canvas-deleted",
   "session-version-unsupported",
-  "unsupported-version",
-  "unauthenticated"
+  SESSION_ERROR.canvasDeleted,
+  SESSION_ERROR.unsupportedVersion,
+  SESSION_ERROR.unauthenticated
 ] as const;
 
 /**

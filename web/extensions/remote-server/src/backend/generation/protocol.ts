@@ -26,6 +26,8 @@ import {
   type ModelInteractionDescriptor,
   type PromptRequirement
 } from "@woohaa3/contracts";
+// 通道词表（生成任务失败码）：唯一来源是 api/proto，经 generrors 生成。
+import { GENERATION_FAILURE, GENERATION_FAILURE_TEXTS } from "../../../../../../api/gen/es/woohaa/errors/v1alpha1/wirecodes_gen.js";
 
 /** 服务名（与 proto 的 `package` + `service` 逐字一致）。 */
 export const GENERATION_SERVICE = "woohaa.generation.v1alpha1.GenerationService";
@@ -255,44 +257,18 @@ export function isGenerationTransientCode(code: string): boolean {
   return code === "unavailable" || code === "timeout" || code === "unreachable" || code === "internal" || code === "unknown" || code.startsWith("http-5");
 }
 
-/** 业务失败稳定码（与 proto 注释、客户端既有稳定码表同字面量）。未知码按不可重试失败处理。 */
-export const GENERATION_FAILURE_CODES = [
-  "catalog-changed",
-  "key-reused",
-  "canvas-not-shared",
-  "limit-exceeded",
-  "resource-exhausted",
-  "media-not-found",
-  "unsupported",
-  "unavailable",
-  "storage-failed"
-] as const;
+/**
+ * 业务失败稳定码。
+ *
+ * **码与文案都不在本文件**：它们来自 api/proto 的 `GenerationFailure` 枚举（generrors
+ * 生成到 `wirecodes_gen`）。这里再抄一份就是第二份契约——服务端新增一个码时，客户端
+ * 会静默把新码当作"服务端任务失败"，这正是 2026-10-22 那次事故的形状。
+ */
+export type GenerationFailureCode = (typeof GENERATION_FAILURE)[keyof typeof GENERATION_FAILURE];
 
-export type GenerationFailureCode = (typeof GENERATION_FAILURE_CODES)[number];
-
-/** 业务失败码 → 本地可读短语；未知码回落成一句稳定的「任务失败」。 */
+/** 业务失败码 → 可读短语；未知码回落成一句稳定的「任务失败」。 */
 export function generationFailureText(code: string): string {
-  switch (code) {
-    case "catalog-changed":
-      return "模型目录已变化，请重新选择模型";
-    case "key-reused":
-      return "同一提交键已用于不同的请求";
-    case "canvas-not-shared":
-      return "画布未同步到服务端";
-    case "limit-exceeded":
-    case "resource-exhausted":
-      return "超出服务端配额或上限";
-    case "media-not-found":
-      return "参考素材或结果在服务端不可读";
-    case "unsupported":
-      return "服务端不支持该模型或能力";
-    case "unavailable":
-      return "远端服务暂不可用";
-    case "storage-failed":
-      return "服务端结果存储失败";
-    default:
-      return "服务端任务失败";
-  }
+  return GENERATION_FAILURE_TEXTS[code] ?? "服务端任务失败";
 }
 
 // ---------------------------------------------------------------------------

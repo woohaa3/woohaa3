@@ -12,6 +12,8 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { ApplicationExtensionRawRequest, ApplicationExtensionRawResponse } from "@woohaa3/contracts";
+// 失败分类的唯一来源：reason 与界面文案都由 api/proto 生成，这里不再维护码表。
+import { FAILURE_REASON, failureText } from "../../../../../api/gen/es/woohaa/errors/v1alpha1/failures_gen.js";
 import {
   IDENTITY_SERVICE,
   OAUTH_LOGIN_UNSUPPORTED,
@@ -115,45 +117,44 @@ type AttemptOutcome =
 
 type StoredOutcome = AttemptOutcome & { expiresAt: number };
 
-/** 一眼可读的失败短语：只按稳定码映射，远端正文永远不进这里。 */
-const OAUTH_FAILURE_TEXT: Record<string, string> = {
-  tof_state_invalid: "企业统一登录的会话已失效，请重新发起",
-  tof_invalid_code: "企业统一登录没有完成（授权码无效）",
-  tof_expired: "授权码已过期，请重新发起",
-  tof_unable: "服务端暂时无法完成登录",
+/**
+ * 宿主**自己**判定的失败码与文案。
+ *
+ * 这些不是服务端的稳定码（服务端给的是 api/proto 里 FailureReason 的 reason），所以
+ * 文案留在这边：它们描述的是「这次浏览器登录在本机没走完」，服务端根本不知道发生过。
+ */
+const LOCAL_FAILURE_TEXT: Record<string, string> = {
   unreachable: "无法连接远端服务端",
-  timeout: "远端响应超时"
+  timeout: "远端响应超时",
+  "attempt-expired": "这次登录等待已超时，请重新发起或改用短码",
+  "invalid-response": "服务端返回的会话形状不符，请改用短码"
 };
 
-function failureText(code: string): string {
-  return OAUTH_FAILURE_TEXT[code] ?? "登录没有完成";
-}
-
-/** 服务端回调带回来的错误码只认自己那四种；其余一律折算成 tof_unable（不反射远端文本）。 */
-function normalizeTofError(raw: string): string {
-  switch (raw) {
-    case "tof_state_invalid":
-    case "tof_invalid_code":
-    case "tof_expired":
-    case "tof_unable":
-      return raw;
-    default:
-      return "tof_unable";
-  }
+/**
+ * 失败码 → 界面短语。
+ *
+ * 服务端稳定码的文案**不在本文件**：它来自 api/proto 的 FailureReason，由 generrors 生成
+ * 进 `api/gen/es`（见 FAILURE_TEXTS）。这里写死一张码表就等于造第二份契约——服务端新增
+ * 一个分类时，客户端会静默退化成语义错误的通用文案（2026-10-22 就是这么把「账号停用」
+ * 说成「服务端暂时无法完成登录」的）。
+ */
+function failureTextOf(code: string): string {
+  return LOCAL_FAILURE_TEXT[code] ?? failureText(code) ?? "登录没有完成";
 }
 
 /**
- * 换码失败的稳定码。
+ * 换码失败（ExchangeLocalLogin）的稳定码。
  *
- * ExchangeLocalLogin 的失败只有两类：**这张码/这次授权不被接受**（未认证、参数非法、已被用过）
- * 与**远端根本没答上来**（网络、超时、未实现）。两者的下一步不同，所以不能压成一个「登录失败」。
+ * 失败只有两类：**这张码/这次授权不被接受**（未认证、参数非法、已被用过）与**远端根本
+ * 没答上来**（网络、超时、未实现）。两者的下一步不同，所以不能压成一个「登录失败」。
+ * 前者的 reason 取自契约（FAILURE_REASON），不在此处写字面量。
  */
 function exchangeFailureCode(result: { status: number; code: string }): string {
   if (result.status === 0) return result.code === "timeout" ? "timeout" : "unreachable";
   if (result.code === "unauthenticated" || result.code === "permission_denied" || result.code === "invalid_argument") {
-    return "tof_invalid_code";
+    return FAILURE_REASON.tofInvalidCode;
   }
-  return "tof_unable";
+  return FAILURE_REASON.tofUnavailable;
 }
 
 function base64Url(buffer: Buffer): string {
@@ -413,23 +414,25 @@ export function createOAuthLogin(options: OAuthLoginOptions): OAuthLoginControll
       // 过期的尝试按「state 没命中」处理（design D5：命中不了 pending 就 400）：
       // 它没有任何可交换的东西，给一个完成页只会让人以为「还有救」。
       if (attempt.expiresAt <= options.now()) {
-        options.log({ event: "remote-oauth-failed", level: "warn", code: "tof_expired", reason: "state 已过期", serverUrl: attempt.serverUrl });
+        options.log({ event: "remote-oauth-failed", level: "warn", code: "attempt-expired", reason: "state 已过期", serverUrl: attempt.serverUrl });
         return sendText(res, 400, "这次登录请求已过期，请回到应用重新发起");
       }
 
-      // 服务端在失败时带 error=tof_* 回来；把它映射成稳定码与中文短语，绝不反射远端正文。
+      // 服务端失败时带 error=<契约 reason> 回来；文案按 reason 查生成表，绝不反射远端正文。
       const returnedError = url.searchParams.get("error");
       if (returnedError !== null && returnedError !== "") {
-        const code = normalizeTofError(returnedError);
+        // 原样保留服务端给的稳定码：它就是契约里的 reason。认不出来的码由 failureTextOf
+        // 回落成通用文案——不猜原因，也不反射远端正文。
+        const code = returnedError;
         options.log({ event: "remote-oauth-failed", level: "warn", code, reason: "授权入口返回失败", serverUrl: attempt.serverUrl });
-        recordOutcome(state, { kind: "failed", code, error: failureText(code) });
+        recordOutcome(state, { kind: "failed", code, error: failureTextOf(code) });
         return sendRedirect(res, doneUrl);
       }
 
       const code = url.searchParams.get("code") ?? "";
       if (code === "") {
-        options.log({ event: "remote-oauth-failed", level: "warn", code: "tof_invalid_code", reason: "回调没有带回授权码", serverUrl: attempt.serverUrl });
-        recordOutcome(state, { kind: "failed", code: "tof_invalid_code", error: failureText("tof_invalid_code") });
+        options.log({ event: "remote-oauth-failed", level: "warn", code: FAILURE_REASON.tofInvalidCode, reason: "回调没有带回授权码", serverUrl: attempt.serverUrl });
+        recordOutcome(state, { kind: "failed", code: FAILURE_REASON.tofInvalidCode, error: failureTextOf(FAILURE_REASON.tofInvalidCode) });
         return sendRedirect(res, doneUrl);
       }
 
@@ -449,7 +452,7 @@ export function createOAuthLogin(options: OAuthLoginOptions): OAuthLoginControll
           serverUrl: attempt.serverUrl,
           status: exchanged.status
         });
-        recordOutcome(state, { kind: "failed", code: stable, error: failureText(stable) });
+        recordOutcome(state, { kind: "failed", code: stable, error: failureTextOf(stable) });
         return sendRedirect(res, doneUrl);
       }
 
