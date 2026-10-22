@@ -1,0 +1,23 @@
+import { expect, it, vi } from "vitest";
+import { createManagedRendererClient } from "./managed-client.js";
+import type { RendererSceneRequest } from "./client.js";
+it("recovers after installation without restart and holds a lease through render", async () => {
+  let installed = false;
+  const release = vi.fn();
+  const resolve = vi.fn(async () => { if (!installed) throw new Error("missing"); return { entry: "/cache/renderer", release }; });
+  const close = vi.fn(async () => undefined);
+  const render = vi.fn(async () => { expect(release).not.toHaveBeenCalled(); return { ok: true as const, png: Buffer.from("png"), renderVersion: "v" }; });
+  const createClient = vi.fn(() => ({ available: () => true, close, render }));
+  const client = createManagedRendererClient({ getManager: () => ({ resolve }) as never, createClient });
+  expect(client.available()).toBe(true);
+  expect(resolve).not.toHaveBeenCalled();
+  const request = {} as RendererSceneRequest;
+  expect(await client.render(request)).toMatchObject({ ok: false, code: "renderer-unavailable" });
+  expect(createClient).not.toHaveBeenCalled();
+  installed = true;
+  expect(await client.render(request)).toMatchObject({ ok: true });
+  expect(close).toHaveBeenCalledOnce();
+  expect(release).toHaveBeenCalledOnce();
+  await client.close();
+  expect(client.available()).toBe(false);
+});

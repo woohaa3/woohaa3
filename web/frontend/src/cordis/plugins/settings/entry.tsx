@@ -24,7 +24,7 @@ export type SettingsOpenService = {
    */
   open: (input?: {
     canvasId?: string | null;
-    section?: "backend" | "plugins" | "appearance" | "notifications";
+    section?: "backend" | "plugins" | "appearance" | "notifications" | "runtimes";
     pluginId?: string;
   }) => Promise<{ ok: true } | { ok: false; code: string; reason: string }>;
 };

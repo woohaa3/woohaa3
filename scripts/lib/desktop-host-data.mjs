@@ -10,13 +10,14 @@ const DATA_ENTRIES = ['stores','media','config','secrets','extension-data','exte
 const inside = (root, file) => file === root || file.startsWith(root + path.sep);
 function atomicJson(file, value) { const tmp = `${file}.${randomUUID()}.tmp`; fs.writeFileSync(tmp, JSON.stringify(value), {mode:0o600}); fs.renameSync(tmp,file); }
 
-export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platform = process.platform }) {
+export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platform = process.platform, development = false }) {
  dataDir=path.resolve(dataDir);resourceRoot=path.resolve(resourceRoot);
  // Desktop mode deliberately does not inherit repository database/secret/provider settings.
  const env=Object.fromEntries(Object.entries(baseEnv).filter(([key])=>!key.startsWith('WOOHAA3_') && !key.startsWith('VITE_') && !['MONGODB_URI','MONGODB_DB','PORT','HOST','NODE_OPTIONS','NODE_PATH'].includes(key)));
  Object.assign(env,{
  PATH:path.join(resourceRoot,'tools')+path.delimiter+(env.PATH??'/usr/bin:/bin'),
- NODE_ENV:'production', WOOHAA3_BASE_PATH:'/', WOOHAA3_REPO_ROOT:resourceRoot,
+ NODE_ENV:'production', WOOHAA3_BASE_PATH:'/',
+ WOOHAA3_RUNTIME_DATA_DIR:dataDir, WOOHAA3_RUNTIME_DEFAULTS_FILE:path.join(resourceRoot,'runtime-downloads.json'), WOOHAA3_RUNTIME_LOCK_FILE:path.join(resourceRoot,'runtime-components.lock.json'), WOOHAA3_REPO_ROOT:resourceRoot,
  WOOHAA3_TASK_STORE_PATH:path.join(dataDir,'stores/task.sqlite'), WOOHAA3_APPLICATION_STORE_PATH:path.join(dataDir,'stores/application.sqlite'),
  WOOHAA3_CANVAS_STORAGE_BACKEND:'sqlite', WOOHAA3_CANVAS_STORAGE_SQLITE_PATH:path.join(dataDir,'stores/canvas.sqlite'),
  WOOHAA3_APPLICATION_DOCUMENT_STORE_BACKEND:'sqlite', WOOHAA3_CONFIG_FILE:path.join(dataDir,'config/woohaa.config.yml'), WOOHAA3_SECRETS_FILE:path.join(dataDir,'config/woohaa.secrets.yml'),
@@ -27,6 +28,9 @@ export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platfo
  WOOHAA3_EXTENSION_DIRS:[path.join(resourceRoot,'extensions'),path.join(dataDir,'extensions')].join(','), WOOHAA3_EXTENSION_WRITABLE_DIRS:path.join(dataDir,'extensions'),
  WOOHAA3_TRUSTED_INGRESS_SECRET:randomBytes(32).toString('hex'),
  });
+ // Development resolves installed SDKs and local tools; never let download configuration
+ // intercept dev:desktop, including inherited desktop runtime environment variables.
+ if(development)for(const key of ['WOOHAA3_RUNTIME_DATA_DIR','WOOHAA3_RUNTIME_DEFAULTS_FILE','WOOHAA3_RUNTIME_LOCK_FILE'])delete env[key];
  const master=path.join(dataDir,'secrets/master.key');
  if(fs.existsSync(master))env.WOOHAA3_PLUGIN_SECRET_MASTER_KEY=fs.readFileSync(master,'utf8').trim();
  for(const [file,key] of [['model-renderer','WOOHAA3_MODEL_RENDERER_CMD'],['shot-recorder','WOOHAA3_SHOT_RECORDER_CMD']]) {

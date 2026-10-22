@@ -1,6 +1,8 @@
 import type { BevyModule } from "./bevy-runtime-types.js";
 import { appPublicUrl } from "../../services/app-base-path.js";
 
+declare const __WOOHAA_NATIVE_ONLY__: boolean;
+
 export type RuntimeRealm = {
   module: BevyModule;
   dispose(): void;
@@ -27,6 +29,9 @@ export async function createRuntimeRealm(target: typeof globalThis, fault: (reas
     // 桌面壳：原生 Bevy App 由宿主主线程驱动，没有 WASM 实例，也就没有可重建的 iframe。
     const { createNativeRuntimeRealm } = await import("./native-runtime-realm.js");
     return createNativeRuntimeRealm(target, fault, signal);
+  }
+  if (typeof __WOOHAA_NATIVE_ONLY__ !== "undefined" && __WOOHAA_NATIVE_ONLY__) {
+    throw new Error("桌面原生渲染器未初始化，请重新打开 App。");
   }
   const canvas = target.document.getElementById("bevy-canvas") as HTMLCanvasElement | null;
   if (!canvas?.parentElement) throw new Error("画布输入表面尚未挂载");

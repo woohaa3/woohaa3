@@ -138,8 +138,11 @@ const allHostJsSize = sumFiles(allHostJs.map((file) => `assets/${file}`));
 const wasm = readdirSync(assetsDir).filter((file) => file.endsWith(".wasm"));
 const canvasWasm = wasm.filter((file) => /^woohaa_bevy_canvas_bg-[^.]+\.wasm$/.test(file));
 const editorWasm = wasm.filter((file) => /^photocraft_editor_bg-[^.]+\.wasm$/.test(file));
-if (canvasWasm.length !== 1 || editorWasm.length !== 1 || wasm.length !== 2) {
-  throw new Error(`Expected one canvas WASM and one image editor WASM artifact, found: ${wasm.join(", ")}`);
+const desktop = process.argv.includes("--desktop");
+const expectedCanvas = desktop ? 0 : 1;
+const expectedEditor = desktop ? 0 : 1;
+if (canvasWasm.length !== expectedCanvas || editorWasm.length !== expectedEditor || wasm.length !== expectedCanvas + expectedEditor) {
+  throw new Error(`Expected ${expectedCanvas} canvas WASM and ${expectedEditor} image editor WASM artifact, found: ${wasm.join(", ")}`);
 }
 const wasmSize = sumFiles(canvasWasm.map((file) => `assets/${file}`));
 const editorWasmSize = sumFiles(editorWasm.map((file) => `assets/${file}`));
@@ -168,8 +171,8 @@ const reports = [
     gzip: startup.gzip,
     budget: STARTUP_EXTENSION_BUDGET
   },
-  { scope: "canvas-wasm", file: `assets/${canvasWasm[0]}`, ...wasmSize, budget: WASM_BUDGET },
-  { scope: "image-editor-wasm", file: `assets/${editorWasm[0]}`, ...editorWasmSize, budget: IMAGE_EDITOR_WASM_BUDGET }
+  { scope: "canvas-wasm", file: canvasWasm[0] ? `assets/${canvasWasm[0]}` : null, ...wasmSize, budget: WASM_BUDGET },
+  { scope: "image-editor-wasm", file: editorWasm[0] ? `assets/${editorWasm[0]}` : null, ...editorWasmSize, budget: IMAGE_EDITOR_WASM_BUDGET }
 ];
 
 let failed = false;

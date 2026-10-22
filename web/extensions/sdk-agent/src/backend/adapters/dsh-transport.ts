@@ -235,7 +235,7 @@ export function projectDshEvents(
 
 type DshHarness = import("@deepseek-ai/dsh-sdk-client").DeepSeekHarness;
 
-export function createDshTransport(options: { configDir: string; workspaceDir: string }): AgentSdkTransport {
+export function createDshTransport(options: { configDir: string; workspaceDir: string; runtimeEntry?: string }): AgentSdkTransport {
   const active = new Set<string>();
   return {
     async run(input) {
@@ -263,7 +263,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           [input.restrictions.configDirEnvVar]: home,
           [credentialEnv]: input.apiKey
         };
-        await writeFile(launcher, launcherSource(dshRuntimeEntry()), { mode: 0o600 });
+        await writeFile(launcher, launcherSource(options.runtimeEntry ?? dshRuntimeEntry()), { mode: 0o600 });
         await writeFile(patchPath, buildDshPatch({
           modelBaseUrl: input.modelBaseUrl,
           model: input.model,

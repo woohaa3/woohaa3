@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "cdn": {
+    "baseUrl": ""
+  },
+  "trustKeys": [
+    "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA9TnHvg9Hbv0JSQz+Qjz1jVwnGIOs6oKmkjjAZI/mMxE=\n-----END PUBLIC KEY-----\n"
+  ],
+  "components": {}
+}

@@ -5,9 +5,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { nodeArtifact, DESKTOP_NODE_VERSION, copyRuntimeFiles, copyRuntimePackage, attachRuntimePackage, assertPortableTree, linkRuntimePackage } from './lib/desktop-host-package.mjs';
+import { nodeArtifact, DESKTOP_NODE_VERSION, copyRuntimeFiles, copyRuntimePackage, attachRuntimePackage, assertPortableTree, linkRuntimePackage, isExternalDesktopDependency } from './lib/desktop-host-package.mjs';
 import { systemTar } from './lib/desktop-platform-commands.mjs';
 import { writeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
+import { resolvedRuntimeLock } from './package-runtime-components.mjs';
 import { scanExtensions } from './lib/extension-scan.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=(command,args,options={})=>execFileSync(command,args,{cwd:root,stdio:'inherit',windowsHide:true,...options});
@@ -34,7 +35,7 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  // Rebuild the staging tree. Never copy user configuration from source packages.
  fs.rmSync(output,{recursive:true,force:true});fs.mkdirSync(output,{recursive:true});
  const yaml=createRequire(path.join(root,'web/backend/package.json'))('yaml');
- const state=new Map();state.platform=process.platform;state.arch=process.arch;state.packageExtensions=yaml.parse(fs.readFileSync(path.join(root,'web/pnpm-workspace.yaml'),'utf8')).packageExtensions??{};
+ const state=new Map();state.platform=process.platform;state.arch=process.arch;state.runtimeOnly=true;state.excludeDependency=isExternalDesktopDependency;state.packageExtensions=yaml.parse(fs.readFileSync(path.join(root,'web/pnpm-workspace.yaml'),'utf8')).packageExtensions??{};
  attachRuntimePackage(path.join(root,'web/backend'),path.join(output,'backend-runtime'),output,state);
  fs.mkdirSync(path.join(output,'scripts/lib'),{recursive:true});
  for(const entry of fs.readdirSync(path.join(root,'scripts/lib')))if(entry.endsWith('.mjs')&&!entry.includes('.test.'))fs.copyFileSync(path.join(root,'scripts/lib',entry),path.join(output,'scripts/lib',entry));
@@ -50,9 +51,12 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  for(const extension of scanned){
   if(!inventory.includes(extension.extensionId))continue;
   const target=copyRuntimePackage(extension.dir,output,state);const link=path.join(output,'extensions',extension.extensionId);
-  copyRuntimeFiles(extension.dir,link);
+  copyRuntimeFiles(target,link);
+  // Scanner deliberately accepts directories only. Keep a physical extension root,
+  // while its dependency edges share the central collected graph.
   if(process.platform==='win32'){
-   for(const edge of [...(state.links??[])]){const prefix=path.relative(output,path.join(target,'node_modules')).split(path.sep).join('/')+'/';if(edge.link.startsWith(prefix))state.links.push({...edge,link:path.relative(output,path.join(link,'node_modules')).split(path.sep).join('/')+'/'+edge.link.slice(prefix.length)});}
+   const prefix=path.relative(output,path.join(target,'node_modules')).split(path.sep).join('/')+'/';
+   for(const edge of [...(state.links??[])])if(edge.link.startsWith(prefix))state.links.push({...edge,link:path.relative(output,path.join(link,'node_modules')).split(path.sep).join('/')+'/'+edge.link.slice(prefix.length)});
   }else{
    const deps=path.join(target,'node_modules');
    if(fs.existsSync(deps))for(const name of fs.readdirSync(deps)){
@@ -60,16 +64,15 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
     for(const dep of names)linkRuntimePackage(fs.realpathSync(path.join(deps,dep)),path.join(link,'node_modules',dep),output,state);
    }
   }
+  fs.rmSync(path.join(target,'browser-dist'),{recursive:true,force:true});
   extensions.push(extension.extensionId);
  }
+ const runtimeDownloads=JSON.parse(fs.readFileSync(path.join(root,'desktop/runtime-downloads.json'),'utf8'));
+ if(process.env.WOOHAA_RUNTIME_CDN_BASE_URL)runtimeDownloads.cdn.baseUrl=process.env.WOOHAA_RUNTIME_CDN_BASE_URL;
+ fs.writeFileSync(path.join(output,'runtime-downloads.json'),JSON.stringify(runtimeDownloads,null,2)+'\n');
+ fs.writeFileSync(path.join(output,'runtime-components.lock.json'),JSON.stringify(resolvedRuntimeLock(),null,2)+'\n');
  fs.mkdirSync(path.join(output,'tools'),{recursive:true});
  fs.copyFileSync(path.join(root,'.local/desktop-node',artifact.archive.replace(/(?:\.tar\.gz|\.zip)$/,''),'LICENSE'),path.join(output,'tools/NODE_LICENSE'));
- fs.copyFileSync(node,path.join(output,`tools/node${suffix}`));fs.chmodSync(path.join(output,`tools/node${suffix}`),0o755);
- const tools={
-  'model-renderer':path.join(root,`bevy/target/${artifact.triple}/release/model-renderer${suffix}`),
-  'shot-recorder':path.join(root,`bevy/target/${artifact.triple}/release/shot-recorder${suffix}`)
- };
- for(const [name,preferred] of Object.entries(tools)){const native=path.join(root,name==='model-renderer'?'bevy':'desktop',`target/release/${name}${suffix}`);const source=fs.existsSync(preferred)?preferred:native;if(!fs.existsSync(source))throw new Error(`请先构建 release 工具：${name}`);fs.copyFileSync(source,path.join(output,'tools',name+suffix));fs.chmodSync(path.join(output,'tools',name+suffix),0o755);}
  if(process.platform==='win32')writeRuntimeLinks(output,state.links??[]);
  fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,build,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,inventory:[...state.keys()].map(dir=>{const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));return {name:pkg.name,version:pkg.version};})},null,2));
  assertPortableTree(output);

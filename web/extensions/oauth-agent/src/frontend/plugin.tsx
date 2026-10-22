@@ -82,7 +82,9 @@ export function oauthAgentExtension(options: OAuthAgentExtensionOptions = {}): P
         priority: 0,
         kind: "login",
         label: "登录 ChatGPT",
-        render: () => <ChatGptAuthorizationRow service={service} />
+        render: () => <ChatGptAuthorizationRow service={service} onOpenRuntimes={() => {
+          void (ctx.get("settingsOpen" as never) as { open(input: { section: "runtimes" }): Promise<unknown> } | undefined)?.open({ section: "runtimes" });
+        }} />
       });
       ctx.effect(() => () => removeRow(), "chatgpt-auth-row");
 

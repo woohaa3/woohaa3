@@ -30,6 +30,7 @@ import { createCanvasMediaClient } from "./clients/media-client.js";
 import { createMediaVerifierStorage } from "./clients/media-verifier.js";
 import { createDurableWriterLock } from "./sync/index.js";
 import { hostname } from "node:os";
+import { createManagedRendererClient } from "./model-renderer/managed-client.js";
 import { createRendererClient } from "./model-renderer/index.js";
 import { isAggregateRunNode } from "@woohaa3/contracts";
 import { composeSnippets, type SnippetComposition } from "./storage/snippet-composition.js";
@@ -522,7 +523,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
               : {}),
             logger: (event) => log(event)
           })
-        : null;
+        : createManagedRendererClient();
   const agentProfile = resolveAgentDeploymentProfile(env, env[CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV]);
   const mcpRuntime =
     modelMcpEnabled && sync && composition

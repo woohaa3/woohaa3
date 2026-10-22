@@ -38,7 +38,7 @@ async function main(){
  if(manifest.nodeVersion&&process.versions.node!==manifest.nodeVersion)throw new Error(`宿主要求 Node ${manifest.nodeVersion}`);
  const version={schema:manifest.schema??1,build:manifest.build};prepareData(dataDir,version);
  process.chdir(dataDir);
- const env=desktopEnvironment({dataDir,resourceRoot,baseEnv:process.env});
+ const env=desktopEnvironment({dataDir,resourceRoot,baseEnv:process.env,development:Boolean(manifest.developmentRoot)});
  if(arg('dev-origin'))env.WOOHAA3_ALLOWED_ORIGINS=new URL(arg('dev-origin')).origin;
  if(manifest.developmentRoot&&inheritedIngress)env.WOOHAA3_TRUSTED_INGRESS_SECRET=inheritedIngress;
  Object.assign(process.env,env);

@@ -15,7 +15,7 @@
  * - 不启用 `gpu-debug`（design D8 要求发行构建不携带 Bevy pass 名称）。
  */
 import { prepareDesktopHost } from "./prepare-desktop-host.mjs";
-import { standaloneBundleConfig, createHostArchive, nodeArtifact } from "./lib/desktop-host-package.mjs";
+import { standaloneBundleConfig, createHostArchive, nodeArtifact, prepareStartupFrontend } from "./lib/desktop-host-package.mjs";
 import { spawnSync } from "node:child_process";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
 import { createRequire } from "node:module";
@@ -85,6 +85,7 @@ function fail(message) {
 function childEnv() {
   return {
     ...process.env,
+    ...(process.platform === "darwin" ? { APPLE_SIGNING_IDENTITY: process.env.APPLE_SIGNING_IDENTITY ?? "-" } : {}),
     PATH: `${path.join(homedir(), ".cargo", "bin")}${path.delimiter}${process.env.PATH ?? ""}`
   };
 }
@@ -181,9 +182,13 @@ function buildNativeTools() {
   run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer,recording-worker", "--bin", "model-renderer", "--bin", "shot-recorder"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
 }
 
-function buildFrontend() {
+function frontendBuildSteps(standalone) {
+  return standalone?FRONTEND_BUILD_STEPS.filter(step=>!step.includes("scripts/build-bevy-wasm.mjs")).map(step=>step.includes("@woohaa3/frontend")?[...step.slice(0,-1),"build:desktop"]:step):FRONTEND_BUILD_STEPS;
+}
+
+function buildFrontend(standalone) {
   console.log("[desktop] 构建前端与扩展发布产物（含 Bevy 与图像编辑器 WASM 绑定）");
-  for (const step of FRONTEND_BUILD_STEPS) runManager(step);
+  for (const step of frontendBuildSteps(standalone)) runManager(step);
 }
 
 function writeDefaults(uiUrl) {
@@ -233,7 +238,7 @@ async function runBuild(options) {
   const targetError = nativeTargetError({ platform, arch, target: options.target });
   if (targetError) throw new Error(targetError);
   assertPlatformAndIcons({ platform });
-  if (options.buildFrontend && !options.dryRun) buildFrontend();
+  if (options.buildFrontend && !options.dryRun) buildFrontend(!options.uiUrl);
   if (!options.dryRun) assertFrontend(frontendDist);
 
   const override = tauriConfigOverride({
@@ -249,6 +254,7 @@ async function runBuild(options) {
     const endpoint = process.env.WOOHAA_DESKTOP_UPDATE_ENDPOINT ?? null;
     const publicKey = process.env.WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY ?? null;
     const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey });
+    override.build={...override.build,frontendDist:prepareStartupFrontend(frontendDist,path.join(path.dirname(defaultsPath),"startup-frontend"))};
     override.plugins = standalone.plugins;
     const hostArchive = createHostArchive(prepared.resourceRoot, path.join(path.dirname(defaultsPath), "desktop-host.tar.gz"));
     const runtimeFile = path.join(path.dirname(defaultsPath), "desktop-runtime.json");
@@ -262,7 +268,7 @@ async function runBuild(options) {
   if (options.dryRun) {
     console.log("[desktop] dry-run：以下步骤不会执行");
     console.log(`  平台/架构：${platform}/${arch}`);
-    if (options.buildFrontend) for (const step of FRONTEND_BUILD_STEPS) console.log(`  pnpm ${step.join(" ")}`);
+    if (options.buildFrontend) for (const step of frontendBuildSteps(!options.uiUrl)) console.log(`  pnpm ${step.join(" ")}`);
     if (!options.uiUrl) console.log("  cargo build 原生 model-renderer + shot-recorder (--release)，然后装配宿主运行时");
     console.log(`  前端 dist：${relative(frontendDist)}`);
     console.log(`  bundle 种类：${kindList.length > 0 ? kindList.join(", ") : "（--no-bundle）"}`);
@@ -291,6 +297,14 @@ async function runBuild(options) {
     throw new Error(
       `以下 bundle 未产出任何产物：${missing.map(entry => `${entry.kind}（期望 ${relative(entry.dir)}）`).join("，")}；请检查 tauri build 输出。`
     );
+  }
+  if (platform === "darwin") {
+    const app = collected.find(artifact => artifact.path.endsWith(".app"));
+    if (app) {
+      run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path]);
+      const bundledNode = path.join(app.path, "Contents/MacOS/woohaa-node");
+      if (fs.existsSync(bundledNode)) run(bundledNode, ["--input-type=module", "-e", "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync(':memory:'); db.close(); console.log('bundled Node',process.versions.node)"]);
+    }
   }
   const artifacts = [];
   for (const artifact of collected) {

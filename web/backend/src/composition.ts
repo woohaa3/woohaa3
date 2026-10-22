@@ -1,3 +1,4 @@
+import { createRuntimeComponentsHandler } from "./runtime-components/http.js";
 /**
  * 本机宿主的组合根：只启动 Context。
  *
@@ -236,6 +237,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
   // 任务 2.4）：在进入任何领域 handler 之前判定。允许列表由 `WOOHAA3_ALLOWED_ORIGINS` 给出；
   // 无 Origin 的非浏览器/服务端调用放行，同源（Host / x-forwarded-host）兜底，跨源写请求 403。
   const originGuard = createOriginGuard(parseAllowedOrigins(env));
+  const runtimeComponents = createRuntimeComponentsHandler({ allowedOrigins: parseAllowedOrigins(env) });
   return {
     handle: async (req, res) => {
       const origin = originGuard(req);
@@ -243,6 +245,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
         sendOriginForbidden(res, origin.code, origin.message);
         return true;
       }
+      if (await runtimeComponents(req, res)) return true;
       return gateway.handle(req, res);
     },
     upgrade: (req, socket, head) => gateway.handleUpgrade(req, socket, head),

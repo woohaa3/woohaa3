@@ -1,4 +1,5 @@
 //! Owned Node process and the versioned desktop host control channel.
+mod recording_runtime;
 use serde::Deserialize;
 use std::{
     io::{BufRead, BufReader, Write},
@@ -46,7 +47,7 @@ pub struct Launch {
 }
 pub struct LocalHost {
     child: Child,
-    recording: Option<woohaa_recording_supervisor::connection::ConnectionGuard>,
+    recording: Option<recording_runtime::RecordingRuntime>,
 }
 fn recording_config(
     launch: &Launch,
@@ -154,15 +155,7 @@ impl LocalHost {
                         let ready = validate_ready(&line, &instance, host.child.id())?;
                         // The backend recorder socket exists before ready. Match its
                         // canonical cwd (/tmp resolves to /private/tmp on macOS).
-                        let config = recording_config(launch)?;
-                        host.recording =
-                            match woohaa_recording_supervisor::connection::start(config) {
-                                Ok(guard) => Some(guard),
-                                Err(error) => {
-                                    eprintln!("原生录制不可用：{}", error.message);
-                                    None
-                                }
-                            };
+                        host.recording = Some(recording_runtime::start(launch));
                         return Ok((host, ready));
                     }
                     Some("error") => return Err(format!("宿主启动失败: {}", value["message"])),

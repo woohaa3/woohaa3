@@ -26,8 +26,10 @@ export type SettingsPanelHostProps = {
 export function ChatGptAuthorizationRow({
   service,
   reportEditState,
+  onOpenRuntimes,
 }: {
   service: ChatGptService;
+  onOpenRuntimes?: () => void;
 } & SettingsPanelHostProps) {
   const snapshot = useSyncExternalStore(
     service.subscribe,
@@ -126,6 +128,10 @@ export function ChatGptAuthorizationRow({
       <SettingsSection
         title="ChatGPT 账号"
       >
+        {onOpenRuntimes ? <SettingsFeedback tone="warning">
+          ChatGPT Agent 使用 Codex 运行时。首次使用前，可下载组件或选择本机 Codex 程序。
+          <Button size="sm" onClick={onOpenRuntimes}>管理运行时组件</Button>
+        </SettingsFeedback> : null}
         <div className="chatgpt-auth-row__account">
           <div>
             <strong className="chatgpt-auth-row__name"><span className="service-identity"><ServiceLogo service="chatgpt" />ChatGPT</span></strong>

@@ -1,3 +1,5 @@
+import { getRuntimeComponentManager } from "@woohaa3/runtime-components";
+import { createLeasedTransport } from "./managed-runtime.js";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createRequire } from "node:module";
@@ -10,6 +12,24 @@ export function createFixedEngineRuntime(dirs: { configDir: string; workspaceDir
   const transports = new Map<AgentEngineId, AgentSdkTransport>();
   async function resolve(engine: AgentEngineId): Promise<AgentSdkTransport> {
     if (Number(process.versions.node.split(".")[0]) < 22) throw new Error("SDK Agent requires Node >=22");
+    const manager = getRuntimeComponentManager();
+    const component = engine === "codex-agent-sdk" ? "codex" : engine === "claude-agent-sdk" ? "claude" : engine === "dsh-agent-sdk" ? "dsh" : null;
+    if (manager && component) {
+      // Health/readiness may check availability, but must never initiate downloads.
+      const state = await manager.inspect(component);
+      if (state.status !== "ready") throw new Error(`请在设置 → 运行时组件中安装或选择 ${component}。${state.error ?? ""}`);
+      const cached = transports.get(engine);
+      if (cached) return cached;
+      const managed = createLeasedTransport(manager, component, async (entry) => {
+        switch (component) {
+          case "codex": return (await import("./adapters/codex-transport.js")).createCodexTransport({ ...dirs, executablePath: entry });
+          case "claude": return (await import("./adapters/claude-transport.js")).createClaudeTransport({ ...dirs, executablePath: entry });
+          default: return (await import("./adapters/dsh-transport.js")).createDshTransport({ ...dirs, runtimeEntry: entry });
+        }
+      });
+      transports.set(engine, managed);
+      return managed;
+    }
     const existing = transports.get(engine);
     if (existing) return existing;
     let transport: AgentSdkTransport;

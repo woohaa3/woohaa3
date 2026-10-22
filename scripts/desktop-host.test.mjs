@@ -41,3 +41,17 @@ test('workspace imports standard tar dot-root archives and preserves Unicode fil
  const archive=path.join(output,'workspace.woohaa');execFileSync(systemTar(),['-czf',archive,'-C',source,'.'],{windowsHide:true});importWorkspace(target,archive);assert.equal(fs.readFileSync(path.join(target,'media/我的 图片.png'),'utf8'),'pixels');
  }finally{for(const dir of [source,target,output])fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('desktop development uses local dependencies; only packaged hosts enable component downloads',()=>{
+ const dir=temp();try{
+  fs.mkdirSync(path.join(dir,'tools'));fs.writeFileSync(path.join(dir,'tools/model-renderer'),'local renderer');
+  const development=desktopEnvironment({dataDir:dir,resourceRoot:dir,development:true,baseEnv:{WOOHAA3_RUNTIME_DATA_DIR:'/inherited/downloads'}});
+  assert.equal(development.WOOHAA3_RUNTIME_DATA_DIR,undefined);
+  assert.equal(development.WOOHAA3_RUNTIME_DEFAULTS_FILE,undefined);
+  assert.equal(development.WOOHAA3_RUNTIME_LOCK_FILE,undefined);
+  assert.equal(development.WOOHAA3_MODEL_RENDERER_CMD,path.join(dir,'tools/model-renderer'));
+  const packaged=desktopEnvironment({dataDir:dir,resourceRoot:dir});
+  assert.equal(packaged.WOOHAA3_RUNTIME_DATA_DIR,dir);
+  assert.equal(packaged.WOOHAA3_RUNTIME_LOCK_FILE,path.join(dir,'runtime-components.lock.json'));
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

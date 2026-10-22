@@ -95,13 +95,14 @@ export function createClaudeTransport(options: ClaudeTransportOptions): AgentSdk
           ...input.images!.map(image => ({ type: "image" as const, source: { type: "base64" as const, media_type: image.contentType as "image/png" | "image/jpeg" | "image/webp" | "image/gif", data: Buffer.from(image.bytes).toString("base64") } }))
         ] } };
       })() : input.prompt;
-      const stream = options.createQuery ? options.createQuery({ prompt, options: options_ }) : (query({ prompt, options: options_ }) as AsyncIterable<SDKMessage>);
+      let stream: AsyncIterable<SDKMessage> | undefined;
 
       const toolCalls: ModelToolCall[] = [];
       let assistantText = "";
       let nativeId = input.resumeNativeId ?? undefined;
       let finishReason: AgentSdkTransportResult extends { finishReason: infer R } ? R : never = "stop" as never;
       try {
+        stream = options.createQuery ? options.createQuery({ prompt, options: options_ }) : (query({ prompt, options: options_ }) as AsyncIterable<SDKMessage>);
         for await (const message of stream) {
           if (input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已取消", ...(nativeId ? { nativeId } : {}) };
           const events = mapClaudeMessage(message);
@@ -137,15 +138,35 @@ export function createClaudeTransport(options: ClaudeTransportOptions): AgentSdk
         return { ok: false, code: input.signal.aborted ? "cancelled" : "transport-unavailable", message: error instanceof Error ? error.message : "Claude 运行失败", ...(nativeId ? { nativeId } : {}) };
       } finally {
         input.signal.removeEventListener("abort", abort);
-        (stream as Partial<Query>).close?.();
-        await (stream as Partial<Query>).return?.(undefined);
+        // End the owned process before invoking SDK cleanup: close/return can
+        // throw or never settle, and the caller releases its runtime lease next.
         const process = child;
         if (process && process.exitCode === null && process.signalCode === null) {
           await new Promise<void>((resolve) => {
+            const finish = () => { clearTimeout(timer); process.removeListener("exit", finish); process.removeListener("close", finish); resolve(); };
             const timer = setTimeout(() => process.kill("SIGKILL"), 2000);
-            process.once("exit", () => { clearTimeout(timer); resolve(); });
-            process.kill("SIGTERM");
+            // A spawn failure emits close without exit. Waiting for exit alone
+            // would strand the turn and its lease after an ENOENT failure.
+            process.once("exit", finish);
+            process.once("close", finish);
+            if (process.exitCode !== null || process.signalCode !== null) finish();
+            else process.kill("SIGTERM");
           });
+        }
+        if (stream) {
+          const sdk = stream as Partial<Query>;
+          // Both cleanup hooks get a chance even when one throws. Bound SDK-only
+          // cleanup after process exit so a stuck iterator cannot strand a turn.
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const hooks = Promise.allSettled([
+              Promise.resolve().then(() => sdk.close?.()),
+              Promise.resolve().then(() => sdk.return?.(undefined))
+            ]).then(results => {
+              for (const result of results) if (result.status === "rejected") log({ event: "claude-agent-cleanup-failed", message: String(result.reason).slice(0, 200) });
+            });
+            await Promise.race([hooks, new Promise<void>(resolve => { timer = setTimeout(resolve, 1000); })]);
+          } finally { if (timer) clearTimeout(timer); }
         }
       }
       if (nativeId) input.onNativeId(nativeId);

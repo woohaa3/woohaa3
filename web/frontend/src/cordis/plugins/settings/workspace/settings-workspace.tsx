@@ -16,6 +16,7 @@ import { Button } from "../../../../shared/ui/Button.js";
 import { SegmentedControl } from "../../../../shared/ui/SegmentedControl.js";
 import type { ThemeService } from "../../../contract/platform.js";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
+import { RuntimeComponentsSection } from "../runtime-components-section.js";
 import { BackendSettingsSection } from "../backend-settings-section.js";
 import { PluginSettingsSection } from "../plugin-settings-section.js";
 import type { SettingsPanelSource } from "../plugin-panels.js";
@@ -27,12 +28,13 @@ import type { TaskNotificationService } from "../../../contract/notification.js"
 import { PluginConfigContent } from "./plugin-config-content.js";
 import { SettingsDialogChrome } from "./settings-dialog-chrome.js";
 
-export type SettingsSectionId = "backend" | "plugins" | "appearance" | "notifications";
+export type SettingsSectionId = "backend" | "plugins" | "appearance" | "notifications" | "runtimes";
 
 const SECTION_LABEL: Record<SettingsSectionId, string> = {
   backend: "核心服务",
   plugins: "插件配置",
   appearance: "外观",
+  runtimes: "运行时组件",
   notifications: "通知"
 };
 
@@ -40,6 +42,7 @@ const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: "backend", label: SECTION_LABEL.backend },
   { id: "plugins", label: SECTION_LABEL.plugins },
   { id: "appearance", label: SECTION_LABEL.appearance },
+  { id: "runtimes", label: SECTION_LABEL.runtimes },
   { id: "notifications", label: SECTION_LABEL.notifications }
 ];
 
@@ -253,6 +256,8 @@ export function SettingsWorkspace({
           />
           <ScrollRestore position={listScrollRef.current} />
         </Panel>
+      ) : view.section === "runtimes" ? (
+        <Panel title="运行时组件" hint="管理按需下载的可选功能。"><RuntimeComponentsSection /></Panel>
       ) : view.section === "appearance" ? (
         <Panel title="外观" hint="主题只保存在此浏览器。">
           <ThemeSection theme={theme} />

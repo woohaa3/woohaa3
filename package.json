@@ -52,7 +52,8 @@
     "photocraft:check": "node scripts/photocraft.mjs check",
     "photocraft:dev": "node scripts/photocraft.mjs dev",
     "photocraft:wasm": "node scripts/photocraft.mjs wasm",
-    "photocraft:verifier": "node scripts/photocraft.mjs verifier"
+    "photocraft:verifier": "node scripts/photocraft.mjs verifier",
+    "desktop:runtimes": "node scripts/package-runtime-components.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.3"

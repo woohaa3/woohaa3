@@ -30,3 +30,27 @@ test('Windows collector excludes dependencies explicitly forbidding its OS',()=>
   const state=new Map();state.platform='win32';state.arch='x64';copyRuntimePackage(source,path.join(root,'bundle'),state);assert.equal(state.size,1);assert.equal(state.links?.length??0,0);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+import { isExternalDesktopDependency } from './lib/desktop-host-package.mjs';
+test('core collection omits managed components and browser-only graph but keeps lightweight SDK',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'desktop-core-'));
+ try{
+  const source=path.join(root,'source');fs.mkdirSync(path.join(source,'node_modules'),{recursive:true});
+  const names=['@openai/codex','@anthropic-ai/claude-agent-sdk-darwin-arm64','@deepseek-ai/dsh','@woohaa3/frontend','light-sdk'];
+  fs.writeFileSync(path.join(source,'package.json'),JSON.stringify({name:'core',dependencies:Object.fromEntries(names.map(name=>[name,'1']))}));
+  for(const name of names){const dep=path.join(source,'node_modules',name);fs.mkdirSync(dep,{recursive:true});fs.writeFileSync(path.join(dep,'package.json'),JSON.stringify({name}));}
+  const state=new Map();state.excludeDependency=isExternalDesktopDependency;
+  const target=copyRuntimePackage(source,path.join(root,'out'),state);
+  assert.equal(state.size,2);assert.ok(fs.existsSync(path.join(target,'node_modules/light-sdk/package.json')));
+  for(const name of names.slice(0,-1))assert.equal(fs.existsSync(path.join(target,'node_modules',name)),false);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+import { prepareStartupFrontend } from './lib/desktop-host-package.mjs';
+test('standalone Tauri frontend embeds only self-contained startup HTML',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'desktop-startup-'));
+ try{const source=path.join(root,'frontend');fs.mkdirSync(source);fs.writeFileSync(path.join(source,'desktop-startup.html'),'<html><script>window.ready=true</script></html>');fs.writeFileSync(path.join(source,'large.wasm'),'large');
+ const target=prepareStartupFrontend(source,path.join(root,'embedded'));assert.deepEqual(fs.readdirSync(target).sort(),['desktop-startup.html','index.html']);
+ fs.writeFileSync(path.join(source,'desktop-startup.html'),'<script src="bundle.js"></script>');assert.throws(()=>prepareStartupFrontend(source,path.join(root,'other')),/自包含/);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

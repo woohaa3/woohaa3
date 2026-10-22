@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "components": {
+    "codex": {
+      "version": "0.161.0",
+      "localVersions": [
+        "0.161.0"
+      ]
+    },
+    "claude": {
+      "version": "0.3.301",
+      "localVersions": [
+        "2.1.301"
+      ]
+    },
+    "dsh": {
+      "version": "0.2.1-rc.2"
+    },
+    "shot-recorder": {
+      "version": "source-build"
+    },
+    "model-renderer": {
+      "version": "source-build"
+    },
+    "image-editor": {
+      "version": "source-build"
+    }
+  }
+}

@@ -4,6 +4,7 @@ packages:
   - frontend
   - services/*
   - backend
+  - runtime-components
   - extensions/*
   - ../extensions/*
   - ../photocraft/integrations/woohaa

@@ -14,7 +14,13 @@ const MAX_FRAME: usize = 8 * 1024 * 1024;
 /// Dropping this guard stops the connection thread and all its workers.
 pub struct ConnectionGuard {
     stop: Arc<AtomicBool>,
+    idle_stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
+}
+impl ConnectionGuard {
+    /// Stop registration only after all accepted jobs have completed.
+    pub fn request_idle_stop(&self) { self.idle_stop.store(true, Ordering::Release); }
+    pub fn is_stopped(&self) -> bool { self.thread.as_ref().is_none_or(|thread| thread.is_finished()) }
 }
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
@@ -30,6 +36,8 @@ pub fn start(config: SupervisorConfig) -> Result<ConnectionGuard, SupervisorErro
     }
     let stop = Arc::new(AtomicBool::new(false));
     let stopping = stop.clone();
+    let idle_stop = Arc::new(AtomicBool::new(false));
+    let idle_stopping = idle_stop.clone();
     let thread = std::thread::spawn(move || {
         // Probe once using the actual worker/GPU, then reuse the capability on reconnect.
         let output = probe_capability(&config.worker_path, &stopping);
@@ -43,8 +51,8 @@ pub fn start(config: SupervisorConfig) -> Result<ConnectionGuard, SupervisorErro
         capability["executorInstanceId"] = json!(config.executor_instance_id);
         capability["checkoutId"] = json!(config.checkout_id);
         RecordingSupervisor::new().sweep_work_root(&config.work_root, Duration::from_secs(24 * 60 * 60));
-        while !stopping.load(Ordering::Relaxed) {
-            if let Err(error) = serve(&config, &capability, &stopping) {
+        while !stopping.load(Ordering::Relaxed) && !idle_stopping.load(Ordering::Acquire) {
+            if let Err(error) = serve(&config, &capability, &stopping, &idle_stopping) {
                 eprintln!("录制执行器连接：{error}");
             }
             for _ in 0..10 {
@@ -53,7 +61,7 @@ pub fn start(config: SupervisorConfig) -> Result<ConnectionGuard, SupervisorErro
             }
         }
     });
-    Ok(ConnectionGuard { stop, thread: Some(thread) })
+    Ok(ConnectionGuard { stop, idle_stop, thread: Some(thread) })
 }
 
 fn probe_capability(worker: &Path, stop: &AtomicBool) -> std::io::Result<std::process::Output> {
@@ -94,7 +102,7 @@ fn failure(sequence: u64, job: &Value, code: &str, message: &str) -> Value {
     }})
 }
 
-fn serve(config: &SupervisorConfig, capability: &Value, stop: &AtomicBool) -> std::io::Result<()> {
+fn serve(config: &SupervisorConfig, capability: &Value, stop: &AtomicBool, idle_stop: &AtomicBool) -> std::io::Result<()> {
     let nonce = std::fs::read_to_string(&config.nonce_path)?;
     // Windows：宿主把本次实例的实际管道名写在同目录 pipe.name；每次重连都重新读取，
     // 避免两进程 TEMP 的 8.3 短路径/长路径字符串差异导致连错管道。
@@ -138,6 +146,7 @@ fn serve(config: &SupervisorConfig, capability: &Value, stop: &AtomicBool) -> st
         let mut last_host = Instant::now();
         let mut active: Option<Value> = None;
         while !stop.load(Ordering::Relaxed) {
+            if idle_stop.load(Ordering::Acquire) && active.is_none() && supervisor.active_count() == 0 { break; }
             if last_host.elapsed() > Duration::from_millis(config.lease_ms) {
                 return Err(std::io::Error::other("host lease expired"));
             }
@@ -254,6 +263,28 @@ mod tests {
     use std::os::unix::{fs::PermissionsExt, net::UnixListener};
 
     #[test]
+    fn idle_removal_releases_connection_without_application_shutdown() {
+        let root = std::env::temp_dir().join(format!("wo-idle-connection-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let worker = root.join("capability.sh");
+        std::fs::write(&worker, "#!/bin/sh\nprintf '{\"protocolVersion\":\"RECORDING_PROTOCOL_VERSION_1_ALPHA_1\"}'\n").unwrap();
+        std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut config = development_config(&root, worker);
+        config.nonce_path = root.join("nonce");
+        std::fs::write(&config.nonce_path, "fixture").unwrap();
+        let guard = start(config).unwrap();
+        guard.request_idle_stop();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !guard.is_stopped() {
+            assert!(Instant::now() < deadline, "idle recorder did not release");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(guard);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn socket_registration_worker_forwarding_and_disconnect_cleanup() {
         let root = std::env::temp_dir().join(format!("wo-connection-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -308,6 +339,10 @@ else:
             assert!(Instant::now() < deadline, "second worker did not start");
             std::thread::sleep(Duration::from_millis(10));
         }
+        // Component removal requests must wait for accepted recording work.
+        guard.request_idle_stop();
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(!guard.is_stopped(), "idle removal interrupted an active recording");
         // Host disappearance must terminate the worker independently of any window loop.
         socket.shutdown(std::net::Shutdown::Both).unwrap();
         drop(guard);

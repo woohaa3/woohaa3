@@ -160,3 +160,15 @@ it("复用窗口无法导航时仍提供授权链接", async () => {
   expect(el.textContent).toContain("授权窗口未能打开");
   expect(el.querySelector("a")).not.toBeNull();
 });
+
+it("运行时引导只导航设置，不触发授权或自动安装", async () => {
+  const api = service("disconnected");
+  const onOpenRuntimes = vi.fn();
+  await act(async () => root.render(<ChatGptAuthorizationRow service={api} onOpenRuntimes={onOpenRuntimes} />));
+  expect(el.textContent).toContain("本机 Codex 程序");
+  expect(onOpenRuntimes).not.toHaveBeenCalled();
+  expect(api.authorize).not.toHaveBeenCalled();
+  await click("管理运行时组件");
+  expect(onOpenRuntimes).toHaveBeenCalledOnce();
+  expect(api.authorize).not.toHaveBeenCalled();
+});

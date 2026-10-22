@@ -1,3 +1,4 @@
+import { getRuntimeComponentManager } from "@woohaa3/runtime-components";
 import { mcpToolOutcome } from "./mcp-tool-outcome.js";
 /**
  * 用户隔离的 Codex SDK 生成适配器
@@ -123,6 +124,7 @@ export type CodexThreadLike = {
 export type CodexUserInput = UserInput;
 
 export type CodexFactoryOptions = {
+  executablePath?: string;
   env: Record<string, string>;
   config: Record<string, unknown>;
 };
@@ -193,13 +195,13 @@ export function createCodexAdapter(deps: CodexAdapterDependencies): CodexAdapter
     ((options: CodexFactoryOptions) => {
       // 注意：这里只传实例 env/config；SDK 自身仍会注入 CODEX_API_KEY 等必需变量。
       return new Codex({
-        ...(deps.codexBin ? { codexPathOverride: deps.codexBin } : {}),
+        ...((options.executablePath ?? deps.codexBin) ? { codexPathOverride: options.executablePath ?? deps.codexBin! } : {}),
         env: options.env,
         config: options.config as never
       }) as unknown as CodexLike;
     });
 
-  const prepare = async (ownerId: string, grantToken?: string, noTools = false): Promise<CodexLike> => {
+  const prepare = async (ownerId: string, grantToken?: string, noTools = false, executablePath?: string): Promise<CodexLike> => {
     const token = await deps.accessTokenFor(ownerId);
     const home = path.join(deps.codexHomeDir, ownerKey(ownerId));
     const cwd = path.join(deps.workspaceDir, ownerKey(ownerId));
@@ -231,14 +233,14 @@ export function createCodexAdapter(deps: CodexAdapterDependencies): CodexAdapter
         config[`mcp_servers.${mcp.name}.bearer_token_env_var`] = CHATGPT_MCP_BEARER_ENV;
       }
     }
-    return factory({ env, config });
+    return factory({ env, config, ...(executablePath ? { executablePath } : {}) });
   };
 
-  const runInternal = async (input: CodexRunInput, onEvent?: (event: CodexRunEvent) => void): Promise<{ finalResponse: string }> => {
+  const executeInternal = async (input: CodexRunInput, onEvent?: (event: CodexRunEvent) => void, executablePath?: string): Promise<{ finalResponse: string }> => {
     const controller = input.signal ? null : new AbortController();
     const signal = input.signal ?? controller!.signal;
     if (controller) controllers.set(input.ownerId, controller);
-    const codex = await prepare(input.ownerId, input.mcpGrantToken, input.noTools === true);
+    const codex = await prepare(input.ownerId, input.mcpGrantToken, input.noTools === true, executablePath);
     const workspaceDir = path.join(deps.workspaceDir, ownerKey(input.ownerId));
     const thread = codex.startThread({
       model: input.model,
@@ -288,6 +290,18 @@ export function createCodexAdapter(deps: CodexAdapterDependencies): CodexAdapter
       if (controller) controllers.delete(input.ownerId);
     }
     return { finalResponse: input.outputSchema ? finalResponse : replies.join("\n\n") };
+  };
+
+  const runInternal = async (input: CodexRunInput, onEvent?: (event: CodexRunEvent) => void) => {
+    const manager = getRuntimeComponentManager();
+    // Explicit service/test overrides retain their existing resolution semantics.
+    const lease = manager && !deps.createCodex && !deps.codexBin ? await manager.resolve("codex") : undefined;
+    try {
+      return await executeInternal(input, onEvent, lease?.entry);
+    } finally {
+      await lease?.release();
+      controllers.delete(input.ownerId);
+    }
   };
 
   return {

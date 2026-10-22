@@ -1,0 +1,19 @@
+# Runtime components
+
+This dependency-free infrastructure package is used only by the desktop host. Inspecting or resolving never downloads; installation requires an explicit caller action. Configure `WOOHAA3_RUNTIME_DATA_DIR`, `WOOHAA3_RUNTIME_DEFAULTS_FILE`, and `WOOHAA3_RUNTIME_LOCK_FILE` before calling the singleton accessor.
+
+The immutable App lock pins archive versions and protocols. `localVersions` optionally declares exact compatible CLI versions independently of archive/package versions: Claude SDK `0.3.301` embeds Claude Code `2.1.301`, so these are intentionally different. A Claude local selection without `localVersions` is rejected. Probes require the expected CLI identity, bounded output, and a compatible version, in a separate home directory without inherited authentication environment variables. This is a compatibility probe, not a sandbox for arbitrary selected executables.
+
+Defaults contain `trustKeys` (Ed25519 public PEMs). User configuration can override CDN/selected executable paths and append explicit `additionalTrustKeys`, but cannot replace the defaults' trust roots. Catalog signatures cover the exact JSON bytes. Archives must be USTAR `.tar.gz` files with regular files and directories only; links/PAX records, Windows device/stream aliases and traversal are rejected. URLs stay within the configured CDN root; HTTP is supported only for local testing.
+
+Activation occurs only after archive SHA-256 verification and extraction limits. The cache retains signed catalog bytes and checks its receipt against that catalog offline. Every resolution also verifies the entry's persisted SHA-256 and containment; inspection does not reread large binary contents. This detects corrupted entry files; the cache is not a security boundary against a local user able to rewrite App data/trust configuration. Downloaded package dependencies are not individually rehashed on every task.
+
+Publishers must preserve native platform code signatures and perform their normal Apple notarization/Windows release checks before publishing artifacts. The manager never strips signatures or removes quarantine. It verifies distribution metadata and executable permissions; it does not claim to replace Gatekeeper, Authenticode or the consumer's runtime protocol handshake. Managed executable launchers must use the adapter's existing isolated environment and protocol checks.
+
+Cross-process consumers acquire a lease by creating `.leases/<pid>-<uuid>.json` with `{ "pid": 123 }` inside the installation, then **revalidate the entry/ready record after creating the lease**. Do not recursively recreate a missing installation directory to acquire a lease. Release the file after the child has exited. When live external leases exist, removal first writes `.release-requested` and waits up to 1.5 seconds for idle native consumers to stop and release their leases. Busy consumers keep running and removal returns `COMPONENT_BUSY`, clearing the marker. The native watcher must not restart while this marker exists. Removal then renames the installation out of its public location and checks leases again, restoring it if a newly acquired live consumer exists. This ordering prevents acquisition during deletion. A crashed consumer's dead PID lease can be removed automatically. PID reuse is conservative: removal may refuse until that process exits.
+
+`ready.json` contains `schemaVersion`, absolute `entry`, `version`, and `kind`. Non-Node consumers must validate its locked version and entry containment; it is a cache coordination record, not a signed public manifest.
+
+Run `node --test index.test.mjs` to verify downloads, signatures, corrupt/traversing archives, offline caches, cancellation, resume, local CLI selection and leases.
+
+桌面发行构建可用 `WOOHAA_RUNTIME_CDN_BASE_URL` 覆盖随包 `runtime-downloads.json` 的 `cdn.baseUrl`，不修改源码中的默认下载配置或信任公钥。独立客户端的部署域名由构建环境提供。

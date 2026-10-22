@@ -59,7 +59,9 @@ export function sdkAgentExtension(options: SdkAgentExtensionOptions = {}): Plugi
         priority: 10,
         kind: "api-key",
         label: "使用 API Key",
-        render: (props) => <SdkAgentSettingsPanel remote={remote} {...props} />
+        render: (props) => <SdkAgentSettingsPanel remote={remote} {...props} onOpenRuntimes={() => {
+          void (ctx.get("settingsOpen" as never) as { open(input: { section: "runtimes" }): Promise<unknown> } | undefined)?.open({ section: "runtimes" });
+        }} />
       });
       ctx.effect(() => () => removeSettings(), "sdk-agent-settings");
 

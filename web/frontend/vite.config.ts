@@ -1,4 +1,5 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
+import { externalizeEditorWasm, frontendTarget } from "./frontend-target.js";
 import react from "@vitejs/plugin-react";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -353,6 +354,7 @@ function gitOutput(cwd: string, args: readonly string[]): string {
 
 export default defineConfig(async ({ mode, command, isPreview }) => {
   const root = fileURLToPath(new URL(".", import.meta.url));
+  const target = frontendTarget(root, mode);
   const env = { ...loadEnv(mode, root, ""), ...process.env };
   const build = resolveFrontendBuild(env, root);
 
@@ -412,6 +414,12 @@ export default defineConfig(async ({ mode, command, isPreview }) => {
     // `missingStaticGuard` 必须排在 SPA 回退之前，使缺失的 `/assets/*` 显式 404。
     plugins: [
       react(),
+      ...(target.nativeOnly ? [{
+        name: "desktop-managed-image-editor",
+        transform(code: string, id: string) {
+          return id.endsWith("/src/photocraft-wasm/photocraft_editor.js") ? externalizeEditorWasm(code) : null;
+        }
+      }] : []),
       devWatchResilience({ outDir: join(root, "dist") }),
       missingStaticGuard(basePath, stripAppBasePath),
       extensionReleaseStatic(root, basePath, stripAppBasePath, dev ? backend : undefined),
@@ -441,10 +449,11 @@ export default defineConfig(async ({ mode, command, isPreview }) => {
     // define 是**文本替换**：写错不会有任何报错，只会在运行时报 ReferenceError；值必须经
     // JSON.stringify，否则字符串会被当成表达式粘进代码里。
     define: {
+      __WOOHAA_NATIVE_ONLY__: JSON.stringify(target.nativeOnly),
       __WOOHAA_FRONTEND_BUILD_VERSION__: JSON.stringify(build.version),
       __WOOHAA_FRONTEND_BUILD_COMMIT__: JSON.stringify(build.commit)
     },
     // extensionReleaseStatic 只清宿主产物，不能让 Vite 删掉独立装配的发布目录。
-    build: { outDir: "dist", assetsInlineLimit: 0, rollupOptions: { input: { main: join(root, "index.html"), renderer: join(root, "renderer.html") } } }
+    build: { outDir: "dist", assetsInlineLimit: 0, rollupOptions: { input: target.input } }
   };
 });

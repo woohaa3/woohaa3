@@ -39,7 +39,9 @@ export function SdkAgentSettingsPanel({
   connectionId,
   onSaved,
   reportEditState,
+  onOpenRuntimes,
 }: {
+  onOpenRuntimes?: () => void;
   remote: SdkAgentRemote;
   connectionId?: string;
   onSaved?: (connectionId: string) => void;
@@ -353,6 +355,10 @@ export function SdkAgentSettingsPanel({
             </Button>
           </div>
         </form>
+        {onOpenRuntimes ? <SettingsFeedback tone="warning">
+          Codex、Claude 等引擎需要运行时组件。首次使用前，可下载组件或选择本机程序。
+          <Button size="sm" onClick={onOpenRuntimes}>管理运行时组件</Button>
+        </SettingsFeedback> : null}
         {notice ? (
           <div data-testid="sdk-agent-notice">
             <SettingsFeedback tone={notice.tone}>
