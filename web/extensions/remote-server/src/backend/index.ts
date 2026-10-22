@@ -590,6 +590,16 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       });
 
       /**
+       * 当前**可用**的远端地址：部署配置优先，其次已登录会话（与存储后端同一个判据）。
+       *
+       * 直接复用 `resolveServerUrl`：地址回落只该有一处定义。凡是「要一个默认目标地址」的入口
+       * （登录 / 设备码 / 浏览器登录 / 探测）都走这里——只认部署配置的话，`config.local.json` 一丢
+       * 这些入口就以「还没有配置服务端地址」失败，而人明明已经登录过、同步也还在走远端。
+       */
+      const effectiveServerUrl = async (): Promise<string | null> =>
+        resolveServerUrl(readDeployment().serverUrl, await sessionSource.current());
+
+      /**
        * 服务端托管生成的注册与生命周期（change: 2026-10-20-reserve-remote-generation-provider）。
        *
        * 就绪顺序：占位注册（available=false、空目录）→ 有会话后 GetCapabilities/GetCatalog →
@@ -903,9 +913,10 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         auth: "authenticated",
         purpose: "read",
         handle: async (input) => {
-          // 探测可以带一个临时地址（「先试试再保存」），也可以只用已配置地址。
+          // 探测可以带一个临时地址（「先试试再保存」），也可以不给——那就用「当前在用的地址」，
+          // 已登录时它是会话里那个服务端，而不是要求人先把地址写进配置文件。
           const requested = readString(input.body, "serverUrl");
-          const parsed = parseServerUrl(requested ?? configuredServerUrl());
+          const parsed = parseServerUrl(requested ?? (await effectiveServerUrl()));
           if (!parsed.ok) {
             log({ event: "remote-probe-failed", level: "warn", code: "invalid_argument", reason: parsed.message });
             return { status: 400, body: { ok: false, error: parsed.message } };
@@ -1010,9 +1021,15 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         };
       };
 
-      /** 从请求体与配置解析目标地址（两者都没有时给稳定错误）。 */
-      const resolveTarget = (rawServerUrl: unknown): { ok: true; value: string } | { ok: false; status: number; error: string } => {
-        const parsed = parseServerUrl(typeof rawServerUrl === "string" ? rawServerUrl : configuredServerUrl());
+      /**
+       * 从请求体与「当前可用地址」解析目标地址（两者都没有时给稳定错误）。
+       *
+       * 缺省值取部署配置或已登录会话：会话里的地址是登录时由人认可、随后持久化的那个，
+       * 在配置文件丢失（换 checkout、被清理）时仍然是对的默认目标。
+       */
+      const resolveTarget = async (rawServerUrl: unknown): Promise<{ ok: true; value: string } | { ok: false; status: number; error: string }> => {
+        const explicit = typeof rawServerUrl === "string" && rawServerUrl.trim() !== "" ? rawServerUrl : undefined;
+        const parsed = parseServerUrl(explicit ?? (await effectiveServerUrl()));
         return parsed.ok ? parsed : { ok: false, status: 400, error: parsed.message };
       };
 
@@ -1034,7 +1051,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
             res.end(JSON.stringify(payload));
           };
           const body = await readBody(req).catch(() => ({}) as Record<string, unknown>);
-          const target = resolveTarget((body as { serverUrl?: unknown }).serverUrl);
+          const target = await resolveTarget((body as { serverUrl?: unknown }).serverUrl);
           if (!target.ok) return wrote(target.status, { ok: false, error: target.error });
 
           const result = await performLogin({
@@ -1055,7 +1072,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         purpose: "new-work",
         handle: async (input) => {
           const body = (input.body ?? {}) as RemoteServerLoginInput;
-          const target = resolveTarget(body.serverUrl);
+          const target = await resolveTarget(body.serverUrl);
           if (!target.ok) return { status: target.status, body: { ok: false, error: target.error } };
           // DTO 入口拿不到 headers，因此只可能是「配置凭证 / 请求体令牌」两条路。
           const result = await performLogin({
@@ -1080,7 +1097,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         auth: "authenticated",
         purpose: "new-work",
         handle: async (input) => {
-          const target = resolveTarget(readString(input.body, "serverUrl"));
+          const target = await resolveTarget(readString(input.body, "serverUrl"));
           if (!target.ok) {
             log({
               event: "remote-device-start-failed",
@@ -1273,7 +1290,8 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       const oauthLogin = createOAuthLogin({
         now,
         fetchImpl,
-        configuredServerUrl,
+        // 浏览器登录同样要能在「部署文件丢了、但已经登录过」时重新走一遍。
+        configuredServerUrl: effectiveServerUrl,
         sessionSource,
         snapshotOf: (session) => snapshotOf(session),
         basePath: () => host.deployment?.basePath ?? "",

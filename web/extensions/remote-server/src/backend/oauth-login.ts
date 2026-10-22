@@ -61,8 +61,13 @@ export type OAuthLoginLogInput = {
 export type OAuthLoginOptions = {
   now: () => number;
   fetchImpl: typeof globalThis.fetch;
-  /** 当前配置的远端基址；未配置为 null（= 纯本地，不是错误）。 */
-  configuredServerUrl: () => string | null;
+  /**
+   * 当前可用的远端基址；未配置为 null（= 纯本地，不是错误）。
+   *
+   * 允许返回 Promise：地址回落（部署配置 → 已登录会话）在宿主侧是异步的，这里只负责 await
+   * 一次，不自己判来源——判据只有 `resolveServerUrl` 一处。
+   */
+  configuredServerUrl: () => string | null | Promise<string | null>;
   /**
    * 唯一会话来源；这里只用 save。
    *
@@ -307,7 +312,7 @@ export function createOAuthLogin(options: OAuthLoginOptions): OAuthLoginControll
       if (!options.rawHttpAvailable) {
         return unsupported("unsupported", "宿主没有提供公开 HTTP 回调", "当前宿主不支持浏览器登录，请改用短码");
       }
-      const serverUrl = options.configuredServerUrl();
+      const serverUrl = await options.configuredServerUrl();
       if (serverUrl === null) {
         return failStart("not-configured", "not-configured", "没有配置服务端地址", "还没有配置服务端地址，无法发起浏览器登录");
       }
