@@ -1,5 +1,5 @@
 /** Build-time runtime collector. Links are relative and always remain inside the bundle. */
-import { systemTar } from './desktop-platform-commands.mjs';
+import {systemTarExec} from './desktop-platform-commands.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -65,7 +65,7 @@ export function standaloneBundleConfig({resourceRoot,node,endpoint=null,publicKe
 
 export function createHostArchive(resourceRoot,output) {
  assertPortableTree(resourceRoot);fs.mkdirSync(path.dirname(output),{recursive:true});
- execFileSync(systemTar(),['-czf',output,...(process.platform==='darwin'?['--options','gzip:compression-level=1']:[]),'-C',resourceRoot,'.'],{env:{...process.env,COPYFILE_DISABLE:'1'},stdio:'inherit',windowsHide:true});
+ systemTarExec(['-czf',output,...(process.platform==='darwin'?['--options','gzip:compression-level=1']:[]),'-C',resourceRoot,'.'],{env:{...process.env,COPYFILE_DISABLE:'1'},stdio:'inherit',windowsHide:true});
  return {path:output,sha256:createHash('sha256').update(fs.readFileSync(output)).digest('hex')};
 }
 

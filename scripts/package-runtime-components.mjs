@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { copyRuntimeFiles, copyRuntimePackage, locateDependency, nodeArtifact } from './lib/desktop-host-package.mjs';
 import { writeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
-import { systemTar } from './lib/desktop-platform-commands.mjs';
+import {systemTarExec} from './lib/desktop-platform-commands.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 const sha256=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -38,7 +38,7 @@ export function createComponentArchive(directory,output){
   const file=path.join(dir,item.name);if(item.isSymbolicLink())throw new Error(`组件归档不得包含链接：${file}`);
   if(item.isDirectory())walk(file);else if(item.isFile())unpackedBytes+=fs.statSync(file).size;else throw new Error(`组件包含非普通文件：${file}`);
  }};walk(directory);fs.mkdirSync(path.dirname(output),{recursive:true});
- execFileSync(systemTar(),['--format=ustar','-czf',output,'-C',directory,'.'],{env:{...process.env,COPYFILE_DISABLE:'1'},windowsHide:true});
+ systemTarExec(['--format=ustar','-czf',output,'-C',directory,'.'],{env:{...process.env,COPYFILE_DISABLE:'1'},windowsHide:true});
  return {sha256:sha256(output),bytes:fs.statSync(output).size,unpackedBytes};
 }
 function dependency(source,name){const found=locateDependency(fs.realpathSync(source),name);if(!found)throw new Error(`缺少已安装依赖 ${name}`);return found;}

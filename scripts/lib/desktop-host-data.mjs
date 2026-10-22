@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { systemTar } from './desktop-platform-commands.mjs';
+import {systemTarExec} from './desktop-platform-commands.mjs';
 
 const DATA_ENTRIES = ['stores','media','config','secrets','extension-data','extensions','data-version.json'];
 
@@ -78,7 +78,7 @@ function validateDataTree(directory) {
  const visit=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isSymbolicLink()||(!entry.isDirectory()&&!entry.isFile()))throw new Error('工作区不能包含软链或特殊文件');if(entry.isDirectory())visit(file);}};
  for(const entry of DATA_ENTRIES){const file=path.join(directory,entry);if(!fs.existsSync(file))continue;if(fs.lstatSync(file).isSymbolicLink())throw new Error('工作区不能包含软链');if(fs.statSync(file).isDirectory())visit(file);}
 }
-const tar=(args)=>execFileSync(systemTar(),args,{windowsHide:true,encoding:'utf8',maxBuffer:64*1024*1024,env:{...process.env,COPYFILE_DISABLE:'1'},stdio:['ignore','pipe','pipe']});
+const tar=(args)=>systemTarExec(args,{windowsHide:true,encoding:'utf8',maxBuffer:64*1024*1024,env:{...process.env,COPYFILE_DISABLE:'1'},stdio:['ignore','pipe','pipe']});
 export function exportWorkspace(dataDir,output) {
  const unlock=acquireDataLock(dataDir);const stage=fs.mkdtempSync(path.join(path.dirname(dataDir),'.woohaa-export-'));
  const temporary=path.join(stage,'workspace.woohaa');

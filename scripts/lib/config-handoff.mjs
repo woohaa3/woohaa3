@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {portableRuntimeModels} from './runtime-models-export.mjs';
-import {systemTar} from './desktop-platform-commands.mjs';
+import {systemTarExec} from './desktop-platform-commands.mjs';
 import {acquireDataLock,backupData} from './desktop-host-data.mjs';
 const ENTRY='config-package.json';
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
@@ -36,7 +36,7 @@ function validate(payload){
  if(payload.modelPolicies!==undefined&&JSON.stringify(portableValue(payload.modelPolicies))!==JSON.stringify(payload.modelPolicies))throw new Error('模型策略包含本机路径或会话');
  if(payload.models!==undefined&&JSON.stringify(portableValue(payload.models))!==JSON.stringify(payload.models))throw new Error('模型配置包含本机路径或会话');
 }
-const tar=args=>execFileSync(systemTar(),args,{encoding:'utf8',windowsHide:true,maxBuffer:16*1024*1024,env:{...process.env,COPYFILE_DISABLE:'1'}});
+const tar=args=>systemTarExec(args,{encoding:'utf8',windowsHide:true,maxBuffer:16*1024*1024,env:{...process.env,COPYFILE_DISABLE:'1'}});
 export function exportConfigPackage({output,payload}){
  validate(payload);const stage=fs.mkdtempSync(path.join(os.tmpdir(),'woohaa-config-export-'));
  try{

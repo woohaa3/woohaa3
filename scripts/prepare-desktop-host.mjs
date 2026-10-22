@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { nodeArtifact, DESKTOP_NODE_VERSION, copyRuntimeFiles, copyRuntimePackage, attachRuntimePackage, assertPortableTree, linkRuntimePackage, isExternalDesktopDependency } from './lib/desktop-host-package.mjs';
-import { systemTar } from './lib/desktop-platform-commands.mjs';
+import { systemTar, systemTarArgs } from './lib/desktop-platform-commands.mjs';
 import { writeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
 import { resolvedRuntimeLock } from './package-runtime-components.mjs';
 import { scanExtensions } from './lib/extension-scan.mjs';
@@ -23,7 +23,7 @@ export async function prepareDesktopNode(){
  const node=path.join(extracted,process.platform==='win32'?'node.exe':'bin/node');
  if(!fs.existsSync(node)){
   if(process.platform==='win32')run('powershell.exe',['-NoProfile','-NonInteractive','-Command',`Expand-Archive -LiteralPath $env:WOOHAA_NODE_ARCHIVE -DestinationPath $env:WOOHAA_NODE_CACHE -Force`],{env:{...process.env,WOOHAA_NODE_ARCHIVE:archive,WOOHAA_NODE_CACHE:cache},windowsHide:true});
-  else run(systemTar(),['-xzf',archive,'-C',cache]);
+  else run(systemTar(), systemTarArgs(systemTar(), ['-xzf',archive,'-C',cache]));
  }const probe=execFileSync(node,['--input-type=module','-e',`import {DatabaseSync} from 'node:sqlite';const db=new DatabaseSync(':memory:');db.exec('create table probe(id)');db.close();process.stdout.write(process.versions.node)`],{encoding:'utf8',windowsHide:true});
  if(probe!==DESKTOP_NODE_VERSION)throw new Error('Node SQLite/version 探针失败');
  const binaries=path.join(root,'desktop/build/binaries');fs.mkdirSync(binaries,{recursive:true});const binary=path.join(binaries,`woohaa-node-${artifact.triple}${process.platform==='win32'?'.exe':''}`);fs.copyFileSync(node,binary);fs.chmodSync(binary,0o755);

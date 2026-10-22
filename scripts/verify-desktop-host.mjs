@@ -5,7 +5,7 @@ import {systemTar,installedHostLayout,isolatedHostEnvironment} from './lib/deskt
 const app=path.resolve(process.argv.slice(2).filter(arg=>arg!=='--')[0]??(process.platform==='win32'?'desktop/target/release':'desktop/target/debug/bundle/macos/WooHaa3.app'));
 const work=fs.mkdtempSync(path.join(os.tmpdir(),'woohaa-bundle-smoke-'));const root=path.join(work,'runtime'),data=path.join(work,'data');fs.mkdirSync(root);fs.mkdirSync(data);
 const {node,archive}=installedHostLayout(app);
-execFileSync(systemTar(),['-xzf',archive,'-C',root],{windowsHide:true});
+systemTarExec(['-xzf',archive,'-C',root],{windowsHide:true});
 const log=fs.openSync(path.join(work,'host.log'),'a');const env=isolatedHostEnvironment(work);
 for(const name of ['TEMP','APPDATA','LOCALAPPDATA'])if(env[name])fs.mkdirSync(env[name],{recursive:true});
 const sqliteProbe=execFileSync(node,['--input-type=module','-e',"import {DatabaseSync} from 'node:sqlite';const db=new DatabaseSync(':memory:');db.exec('create table smoke (id integer)');db.close();console.log(process.versions.node)"],{env,cwd:work,encoding:'utf8',windowsHide:true});assert.equal(Number(sqliteProbe.trim().split('.')[0]),24,'bundled host requires Node 24');

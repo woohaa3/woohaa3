@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createRequire} from 'node:module';
-import {systemTar} from './desktop-platform-commands.mjs';
+import {systemTarExec} from './desktop-platform-commands.mjs';
 import {exportConfigPackage, importConfigPackage, portableValue} from './config-handoff.mjs';
 const require=createRequire(new URL('../../web/backend/package.json',import.meta.url));
 const yaml=require('yaml');
@@ -34,7 +34,7 @@ test('portable values omit machine paths and personal credentials, preserve shar
 });
 test('config importer rejects workspace archives without changing target',()=>{
  const root=fixture();try{fs.writeFileSync(path.join(root,'workspace-format.json'),'{}');
- execFileSync(systemTar(),['-czf',path.join(root,'bad.woohaa'),'-C',root,'workspace-format.json']);
+ systemTarExec(['-czf',path.join(root,'bad.woohaa'),'-C',root,'workspace-format.json']);
  assert.throws(()=>importConfigPackage({dataDir:path.join(root,'data'),archive:path.join(root,'bad.woohaa'),yaml}),/配置包/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
@@ -121,7 +121,7 @@ test('runtime model catalog is handed off with correct types and ownership, with
  const output=path.join(root,'runtime.woohaa'),dataDir=path.join(root,'data');
  const models=[{modelKey:'tokenhub:gateway-image',providerId:'tokenhub',extensionId:'tokenhub-provider',modelType:'image',title:'网关模型',enabled:true,isDefault:false,executable:false}];
  exportConfigPackage({output,payload:{settings:{},secrets:{},extensionConfigs:[],runtimeModels:models}});
- const descriptor=JSON.parse(execFileSync(systemTar(),['-xOzf',output,'config-package.json'],{encoding:'utf8'}));assert.equal(descriptor.version,2);
+ const descriptor=JSON.parse(systemTarExec(['-xOzf',output,'config-package.json'],{encoding:'utf8'}));assert.equal(descriptor.version,2);
  importConfigPackage({dataDir,archive:output,yaml});
  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir,'config/runtime-models.json'),'utf8')),models);
  }finally{fs.rmSync(root,{recursive:true,force:true});}

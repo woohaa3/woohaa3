@@ -15,7 +15,7 @@ test('explicit source must be local and supports base paths',async()=>{
 
 test('real export CLI reads a live loopback catalog and embeds it in the handoff archive',async()=>{
  const {createServer}=await import('node:http');const fs=await import('node:fs');const os=await import('node:os');const path=await import('node:path');
- const {fileURLToPath}=await import('node:url');const {execFile,execFileSync}=await import('node:child_process');const {promisify}=await import('node:util');const {systemTar}=await import('./desktop-platform-commands.mjs');
+ const {fileURLToPath}=await import('node:url');const {execFile,execFileSync}=await import('node:child_process');const {promisify}=await import('node:util');const {systemTarExec}=await import('./desktop-platform-commands.mjs');
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'woohaa-live-model-export-'));
  const server=createServer((req,res)=>{assert.equal(req.url,'/api/generation-models');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({revision:0,initialized:false,models:[{...model,apiKey:'not-exported'}]}));});
  try{
@@ -24,7 +24,7 @@ test('real export CLI reads a live loopback catalog and embeds it in the handoff
  const env=Object.fromEntries(['PATH','HOME','TMPDIR','SystemRoot','TEMP'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
  Object.assign(env,{WOOHAA3_SERVICE_ENV_FILE:path.join(directory,'env'),WOOHAA3_CONFIG_FILE:path.join(directory,'config.yml'),WOOHAA3_SECRETS_FILE:path.join(directory,'secrets.yml'),WOOHAA3_MODELS_CONFIG_PATH:path.join(directory,'models.json'),WOOHAA3_REMOTE_SERVER_CONFIG_FILE:path.join(directory,'remote.json'),WOOHAA3_APPLICATION_STORE_PATH:path.join(directory,'application.sqlite'),WOOHAA3_TASK_STORE_PATH:path.join(directory,'task.sqlite')});
  const output=path.join(directory,'team.woohaa');const {stdout}=await promisify(execFile)(process.execPath,[fileURLToPath(new URL('../export-config.mjs',import.meta.url)),'--out',output,'--from',`http://127.0.0.1:${server.address().port}`],{env});
- const descriptor=JSON.parse(execFileSync(systemTar(),['-xOzf',output,'config-package.json'],{encoding:'utf8'}));
+ const descriptor=JSON.parse(systemTarExec(['-xOzf',output,'config-package.json'],{encoding:'utf8'}));
  assert.equal(descriptor.payload.runtimeModels[0].modelKey,model.modelKey);assert.equal(descriptor.payload.runtimeModels[0].executable,false);
  assert.equal(descriptor.payload.secrets.providers.tokenhub.apiKey,'shared-test-key');assert.ok(!JSON.stringify(descriptor).includes('not-exported'));assert.match(stdout,/"tokenhub": 1/);
  }finally{await new Promise(resolve=>server.close(resolve));fs.rmSync(directory,{recursive:true,force:true});}

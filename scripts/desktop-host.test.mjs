@@ -36,9 +36,9 @@ test('Windows native commands and installed resource layout do not depend on PAT
 });
 test('desktop environment discovers Windows executable tools',()=>{const dir=temp();try{fs.mkdirSync(path.join(dir,'tools'));fs.writeFileSync(path.join(dir,'tools/shot-recorder.exe'),'exe');const env=desktopEnvironment({dataDir:dir,resourceRoot:dir,platform:'win32'});assert.equal(env.WOOHAA3_SHOT_RECORDER_CMD,path.join(dir,'tools/shot-recorder.exe'));}finally{fs.rmSync(dir,{recursive:true,force:true});}});
 test('workspace imports standard tar dot-root archives and preserves Unicode filenames',async()=>{
- const {execFileSync}=await import('node:child_process');const {systemTar}=await import('./lib/desktop-platform-commands.mjs');const source=temp(),target=temp(),output=temp();try{
+ const {execFileSync}=await import('node:child_process');const {systemTarExec}=await import('./lib/desktop-platform-commands.mjs');const source=temp(),target=temp(),output=temp();try{
  fs.mkdirSync(path.join(source,'media'));fs.writeFileSync(path.join(source,'media/我的 图片.png'),'pixels');fs.writeFileSync(path.join(source,'workspace-format.json'),JSON.stringify({format:'woohaa-workspace',version:1}));commitDataVersion(source,{schema:1,build:'test'});
- const archive=path.join(output,'workspace.woohaa');execFileSync(systemTar(),['-czf',archive,'-C',source,'.'],{windowsHide:true});importWorkspace(target,archive);assert.equal(fs.readFileSync(path.join(target,'media/我的 图片.png'),'utf8'),'pixels');
+ const archive=path.join(output,'workspace.woohaa');systemTarExec(['-czf',archive,'-C',source,'.'],{windowsHide:true});importWorkspace(target,archive);assert.equal(fs.readFileSync(path.join(target,'media/我的 图片.png'),'utf8'),'pixels');
  }finally{for(const dir of [source,target,output])fs.rmSync(dir,{recursive:true,force:true});}
 });
 

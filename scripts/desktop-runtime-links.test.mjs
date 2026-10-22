@@ -5,7 +5,7 @@ test('rejects absent targets, replaced destinations and edges beneath junctions 
 
 test('Windows graph survives archive extraction and resolves actual Node dependencies',async()=>{
  const {createHostArchive}=await import('./lib/desktop-host-package.mjs');
- const {systemTar}=await import('./lib/desktop-platform-commands.mjs');
+ const {systemTarExec}=await import('./lib/desktop-platform-commands.mjs');
  const {execFileSync}=await import('node:child_process');
  const {pathToFileURL}=await import('node:url');
  const work=fs.mkdtempSync(path.join(os.tmpdir(),'runtime-archive-'));
@@ -18,7 +18,7 @@ test('Windows graph survives archive extraction and resolves actual Node depende
   fs.writeFileSync(path.join(root,'packages/helper/index.js'),"export default 'restored-from-archive';");
   writeRuntimeLinks(root,[{link:'backend-runtime',target:'packages/backend'},{link:'packages/backend/node_modules/helper',target:'packages/helper'}]);
   const archive=createHostArchive(root,path.join(work,'host.tar.gz'));
-  execFileSync(systemTar(),['-xzf',archive.path,'-C',extracted],{windowsHide:true});
+  systemTarExec(['-xzf',archive.path,'-C',extracted],{windowsHide:true});
   materializeRuntimeLinks(extracted,{platform:'win32'});materializeRuntimeLinks(extracted,{platform:'win32'});
   const actual=await import(pathToFileURL(path.join(extracted,'backend-runtime/index.js')).href);assert.equal(actual.default,'restored-from-archive');
  }finally{fs.rmSync(work,{recursive:true,force:true});}
