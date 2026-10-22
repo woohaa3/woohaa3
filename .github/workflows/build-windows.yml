@@ -54,8 +54,9 @@ jobs:
     # the reported windows-2025 space pressure (actions/runner-images#12199).
     runs-on: windows-2022
     # Five Rust builds (Bevy WASM, native renderer/recorder, the recorder again from
-    # desktop/build.rs, and Tauri) plus a cold cache can take over two hours.
-    timeout-minutes: 300
+    # desktop/build.rs, and Tauri) on a 2-vCPU runner with a cold cache can take
+    # several hours.
+    timeout-minutes: 350
     defaults:
       run:
         shell: bash
@@ -183,11 +184,8 @@ jobs:
       - name: Preflight checks
         run: |
           set -euo pipefail
-          # Fail on extension inventory or public-boundary mistakes before the long build.
-          # extensions:check reads the built contracts output. The web install hook
-          # normally builds it already; rebuild explicitly so this stays self-contained.
-          pnpm -C web run build:contracts
-          pnpm extensions:check
+          # Extension validation needs the built extension modules, which --build-frontend
+          # produces later; keep this preflight to the cheap static public-boundary gate.
           pnpm boundary:check
 
       - name: Build Windows installer
