@@ -769,3 +769,23 @@
 .provider-connection__advanced[open] > .provider-connection__field { margin-top: 16px; }
 .provider-connection__actions, .provider-connection__confirmation { display: flex; align-items: center; gap: 8px; }
 .provider-connection__actions { grid-column: 2; grid-row: 1; align-self: start; margin-top: 34px; }
+
+/* 可选运行时：信息、托管操作与本机路径各自成组，避免共用服务说明的单行布局。 */
+.settings-runtime { min-width: 0; }
+.settings-runtime > .settings-page__hint { overflow-wrap: anywhere; }
+.settings-runtime__component {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 0;
+	padding: 20px 0;
+}
+.settings-runtime__component + .settings-runtime__component { border-top: 1px solid var(--mc-border); }
+.settings-runtime__summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.settings-runtime__summary strong { font-size: 14px; font-weight: 600; }
+.settings-runtime__summary p { color: var(--mc-text-muted); font-size: 12px; }
+.settings-runtime__component p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.settings-runtime__actions,
+.settings-runtime__local { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.settings-runtime__component .ui-button { flex: 0 0 auto; white-space: nowrap; }
+.settings-runtime__local .settings-page__input { flex: 1 1 280px; width: 0; }

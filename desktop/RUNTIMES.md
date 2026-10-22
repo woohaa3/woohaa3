@@ -10,7 +10,7 @@
 ~/Library/Application Support/com.woohaa.desktop/config/runtime-downloads.json
 ```
 
-开发数据目录独立，使用 `WOOHAA_DESKTOP_DATA_DIR` 时随该目录移动。设置面显示实际配置路径。
+开发数据目录独立，使用 `WOOHAA_DESKTOP_DATA_DIR` 时随该目录移动。设置面不显示内部配置文件路径。
 
 ```json
 {
