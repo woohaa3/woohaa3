@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { StorageObjectNotFoundError, type StorageBackend } from "@woohaa3/contracts";
-import { parseServerUrl } from "../src/shared.js";
+import { REMOTE_SERVER_LOGOUT_ROUTE, parseServerUrl } from "../src/shared.js";
 import { resolveServerStorageConfig, type ServerStorageConfig } from "../src/backend/storage/config.js";
 import {
   createServerStorageClient,
@@ -303,7 +303,8 @@ describe("serverUrl 有界校验（与 remote-server 共用同一套规则）", 
 describe("存储配置归一化（复用 remote-server 的部署配置）", () => {
   it("齐备时归一化 keyPrefix 的两端斜杠", () => {
     const resolved = resolveServerStorageConfig(
-      { serverUrl: "https://canvas.example.com", deviceToken: "token", keyPrefix: "" },
+      { keyPrefix: "" },
+      "https://canvas.example.com",
       { keyPrefix: "/tenant-a/" }
     );
     expect(resolved.ok).toBe(true);
@@ -317,23 +318,22 @@ describe("存储配置归一化（复用 remote-server 的部署配置）", () =
     expect(JSON.stringify(resolved.config)).not.toContain("token");
   });
 
-  it("缺 serverUrl 时返回 missing（不抛错，由调用方跳过注册）", () => {
-    const resolved = resolveServerStorageConfig({ serverUrl: null, deviceToken: null, keyPrefix: "" });
+  it("缺地址时返回 missing（不抛错，由调用方跳过注册）", () => {
+    expect(resolveServerStorageConfig({ keyPrefix: "" }, null).ok).toBe(false);
+    const resolved = resolveServerStorageConfig({ keyPrefix: "" }, "   ");
     expect(resolved.ok).toBe(false);
     if (resolved.ok) return;
     expect(resolved.missing).toEqual(["serverUrl"]);
   });
 
-  it("deviceToken 不是门槛：缺凭证仍然 ok，且返回值里不带任何凭证值", () => {
-    const resolved = resolveServerStorageConfig({
-      serverUrl: "https://canvas.example.com",
-      deviceToken: null,
-      keyPrefix: ""
-    });
-    expect(resolved.ok).toBe(true);
-    if (!resolved.ok) return;
-    expect(resolved.config).toEqual({ serverUrl: "https://canvas.example.com", keyPrefix: "" });
-    expect(JSON.stringify(resolved)).not.toContain("device-token-secret");
+  it("地址来自调用方（部署配置或会话）：本函数不自己读部署配置", () => {
+    // 第二个参数就是唯一的地址来源：它可以是 config.local.json 的值，也可以是
+    // 「已登录会话自带的地址」。存储后端因此不会拥有比登录更强的地址判据。
+    const fromSession = resolveServerStorageConfig({ keyPrefix: "" }, "https://canvas.example.com");
+    expect(fromSession.ok).toBe(true);
+    if (!fromSession.ok) return;
+    expect(fromSession.config).toEqual({ serverUrl: "https://canvas.example.com", keyPrefix: "" });
+    expect(JSON.stringify(fromSession)).not.toContain("device-token-secret");
   });
 });
 
@@ -341,6 +341,7 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
   /** 最小宿主替身：只实现本扩展用到的面。 */
   function fakeHost(options: { registerStorage?: boolean }) {
     const registered: StorageBackend[] = [];
+    const unregistered: string[] = [];
     const logs: Array<Record<string, unknown>> = [];
     const host = {
       extensionId: "remote-server",
@@ -355,14 +356,19 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
       registerResource: () => undefined,
       ...(options.registerStorage === false
         ? {}
-        : { registerStorage: (backend: StorageBackend) => registered.push(backend) })
+        : {
+            registerStorage: (backend: StorageBackend) => registered.push(backend),
+            unregisterStorage: (backendId: string) => {
+              unregistered.push(backendId);
+            }
+          })
     };
-    return { host: host as never, registered, logs };
+    return { host: host as never, registered, unregistered, logs };
   }
 
-  it("缺 serverUrl 时只记日志、不注册后端，且日志里没有凭证值", () => {
+  it("缺 serverUrl 时只记日志、不注册后端，且日志里没有凭证值", async () => {
     const fake = fakeHost({});
-    createRemoteServerExtension({
+    await createRemoteServerExtension({
       deployment: () => ({ serverUrl: null, deviceToken: null, keyPrefix: "" })
     }).activate(fake.host);
     expect(fake.registered).toEqual([]);
@@ -370,9 +376,9 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
     expect(JSON.stringify(fake.logs)).not.toContain("device-token-secret");
   });
 
-  it("配置齐备时注册 backendId=server（带 presign，能当主存储或 expose）", () => {
+  it("配置齐备时注册 backendId=server（带 presign，能当主存储或 expose）", async () => {
     const fake = fakeHost({});
-    createRemoteServerExtension({
+    await createRemoteServerExtension({
       deployment: () => ({ serverUrl: "https://canvas.example.com", deviceToken: "device-token-secret", keyPrefix: "tenant-a" })
     }).activate(fake.host);
 
@@ -382,14 +388,15 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
     expect(fake.logs).toContainEqual({
       event: "server-storage-activated",
       backendId: "server",
+      source: "deployment",
       credential: "device-token"
     });
     expect(JSON.stringify(fake.logs)).not.toContain("device-token-secret");
   });
 
-  it("只配了 serverUrl（没有 deviceToken）时仍注册；日志只记 credential=none，不记值", () => {
+  it("只配了 serverUrl（没有 deviceToken）时仍注册；日志只记 credential=none，不记值", async () => {
     const fake = fakeHost({});
-    createRemoteServerExtension({
+    await createRemoteServerExtension({
       deployment: () => ({ serverUrl: "https://canvas.example.com", deviceToken: null, keyPrefix: "" })
     }).activate(fake.host);
 
@@ -397,19 +404,113 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
     expect(fake.logs).toContainEqual({
       event: "server-storage-activated",
       backendId: "server",
+      source: "deployment",
       credential: "none"
     });
     expect(fake.logs.some((entry) => entry.event === "server-storage-unconfigured")).toBe(false);
     expect(JSON.stringify(fake.logs)).not.toContain("device-token-secret");
   });
 
-  it("宿主没有存储扩展点时记日志跳过，不抛错（纯本地宿主本来就没有这个后端）", () => {
+  it("部署配置为空但已有持久化会话时，用会话自带的地址注册（登录过就不必再配一次）", async () => {
+    const fake = fakeHost({});
+    // 等价于「上次登录过，config.local.json 没写」：地址只存在于会话记录里。
+    const store = createMemorySessionStore();
+    await store.save({
+      serverUrl: "https://canvas.example.com",
+      token: "session-1",
+      subject: "u1",
+      displayName: null,
+      expiresAt: Date.now() + 3_600_000
+    });
+    await createRemoteServerExtension({
+      deployment: () => ({ serverUrl: null, deviceToken: null, keyPrefix: "tenant-a" }),
+      store
+    }).activate(fake.host);
+
+    expect(fake.registered.map((backend) => backend.backendId)).toEqual(["server"]);
+    // 地址来自会话：排障时「配置没生效」与「靠会话顶上」必须能从日志分开。
+    expect(fake.logs).toContainEqual({
+      event: "server-storage-activated",
+      backendId: "server",
+      source: "session",
+      credential: "none"
+    });
+    expect(fake.logs.some((entry) => entry.event === "server-storage-unconfigured")).toBe(false);
+  });
+
+  it("部署配置与会话地址不一致时以部署配置为准（不拿另一台服务端的会话去注册）", async () => {
+    const fake = fakeHost({});
+    const store = createMemorySessionStore();
+    await store.save({
+      serverUrl: "https://old.example.com",
+      token: "session-1",
+      subject: "u1",
+      displayName: null,
+      expiresAt: Date.now() + 3_600_000
+    });
+    await createRemoteServerExtension({
+      deployment: () => ({ serverUrl: "https://canvas.example.com", deviceToken: null, keyPrefix: "" }),
+      store
+    }).activate(fake.host);
+
+    expect(fake.logs).toContainEqual({
+      event: "server-storage-activated",
+      backendId: "server",
+      source: "deployment",
+      credential: "none"
+    });
+  });
+
+  it("登出后既无部署地址也无会话时注销后端（不留一个打不通的实现）", async () => {
+    const fake = fakeHost({});
+    const store = createMemorySessionStore();
+    await store.save({
+      serverUrl: "https://canvas.example.com",
+      token: "session-1",
+      subject: "u1",
+      displayName: null,
+      expiresAt: Date.now() + 3_600_000
+    });
+    const logs: Array<Record<string, unknown>> = [];
+    const handler = { handle: null as null | ((input: unknown) => Promise<unknown>) };
+    const host = {
+      ...(fake.host as unknown as Record<string, unknown>),
+      // 会话变化会顺带通知宿主重解析同步上游；测试宿主给一个空实现。
+      services: { canvas: { refreshSyncUpstream: async () => undefined } },
+      logger: (event: Record<string, unknown>) => {
+        logs.push(event);
+        fake.logs.push(event);
+      },
+      registerHandler: (registration: { route: string; handle: (input: unknown) => Promise<unknown> }) => {
+        // 只记登出 handler：它走 sessionSource.save(null)，会触发 onSessionChanged。
+        if (registration.route === REMOTE_SERVER_LOGOUT_ROUTE) handler.handle = registration.handle;
+      }
+    };
+    const extension = createRemoteServerExtension({
+      deployment: () => ({ serverUrl: null, deviceToken: null, keyPrefix: "" }),
+      store,
+      // 登出不打远端：注入一个直接成功的 fake，只关心「会话清空 → 后端注销」。
+      fetchImpl: (async () => new Response("{}", { status: 200 })) as typeof fetch
+    });
+    await extension.activate(host as never);
+    expect(fake.registered).toHaveLength(1);
+    expect(handler.handle).not.toBeNull();
+
+    await handler.handle!({ body: {} });
+    // onSessionChanged 是异步跟进的（不阻塞登出本身），等它跑完。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fake.unregistered).toEqual(["server"]);
+    expect(logs.some((entry) => entry.event === "server-storage-released")).toBe(true);
+  });
+
+  it("宿主没有存储扩展点时记日志跳过，不抛错（纯本地宿主本来就没有这个后端）", async () => {
     const fake = fakeHost({ registerStorage: false });
-    expect(() =>
+    await expect(
       createRemoteServerExtension({
         deployment: () => ({ serverUrl: "https://canvas.example.com", deviceToken: "t", keyPrefix: "" })
       }).activate(fake.host)
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
     expect(fake.registered).toEqual([]);
     expect(fake.logs).toContainEqual({ event: "server-storage-unavailable", reason: "宿主没有提供存储扩展点" });
   });

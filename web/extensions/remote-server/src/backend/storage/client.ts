@@ -169,10 +169,14 @@ export function createServerStorageClient(options: ServerStorageClientOptions): 
   const timeoutMs = options.timeoutMs ?? SERVER_STORAGE_REQUEST_TIMEOUT_MS;
   const transferTimeoutMs = options.transferTimeoutMs ?? SERVER_STORAGE_TRANSFER_TIMEOUT_MS;
   const hostOrigin = options.hostOrigin ?? defaultHostOrigin();
-  const rpcBase = resolveRpcBase(config.serverUrl);
-  const outboundBase = config.serverUrl.startsWith("/")
-    ? `${hostOrigin.replace(/\/+$/, "")}${rpcBase}`
-    : rpcBase;
+  /**
+   * 出站基址**每次现算**：`config` 是活引用，换部署（首次登录补上地址、或改配置）时只改字段，
+   * 不重建后端——构造期就算成字符串，会让换地址变成一个静默无效的操作。
+   */
+  const outboundBaseOf = (): string => {
+    const rpcBase = resolveRpcBase(config.serverUrl);
+    return config.serverUrl.startsWith("/") ? `${hostOrigin.replace(/\/+$/, "")}${rpcBase}` : rpcBase;
+  };
 
   /** 一次 Connect 调用；`token` 为空时就是「不带会话」（本模块不再自己登录，因此只作兜底）。 */
   const callRaw = async (procedure: string, body: unknown, token?: string): Promise<CallResult<unknown>> => {
@@ -180,7 +184,7 @@ export function createServerStorageClient(options: ServerStorageClientOptions): 
     if (token) headers.Authorization = `Bearer ${token}`;
     let response: Response;
     try {
-      response = await fetchImpl(`${outboundBase}${procedure}`, {
+      response = await fetchImpl(`${outboundBaseOf()}${procedure}`, {
         method: "POST",
         headers,
         body: JSON.stringify(body ?? {}),

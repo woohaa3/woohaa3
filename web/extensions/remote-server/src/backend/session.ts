@@ -7,6 +7,9 @@
  *
  * - **只有这里**读写会话（持久化经注入的 `RemoteSessionStore`，缺省进程内存）；
  * - 到期（提前 30s）或换了远端地址，一律视为未登录——不拿死令牌去连远端；
+ * - 部署配置里的地址是**权威的**，会话自带的地址是**兜底**的：人已经在那台服务端上登录过，
+ *   它的地址就是这条会话的一部分。只看部署配置会让「登录过、但没写 config.local.json」
+ *   变成一种说不清的状态（存储后端注册不上，媒体静默回落主存储）；
  * - `ensure()` 是唯一允许「自己换会话」的入口：有部署凭证（deviceToken）时用它换一份，
  *   并发调用共享同一次登录（冷启动时三个 RPC 不该换三份会话）。
  *
@@ -142,6 +145,45 @@ export type RemoteSessionSource = {
   invalidate: (token: string) => Promise<void>;
 };
 
+/**
+ * 解析这条客户端实际在用的远端地址。
+ *
+ * **部署配置优先**：有地址就以它为准（人改配置就是要换部署），会话在那种情况下不得越权。
+ * 部署配置为空时回落到「已登录会话自带的地址」——那个地址是登录时由人认可、随后随会话一起
+ * 持久化的，不是凭空来的。两者都空才是「未配置」（纯本地）。
+ *
+ * 为什么需要这个回落：地址是**连接哪台服务端**的指针，登录（交互式）与存储后端（无人值守地
+ * 读写字节）是同一个指针的两种用法。只认配置文件会让「登录过、但没写 config.local.json」
+ * 的部署在下次启动时注册不上服务端存储，媒体静默回落到主存储——同一个客户端，
+ * 同步走远端、字节走本地。
+ */
+export function resolveServerUrl(
+  deploymentUrl: string | null,
+  session: RemoteSession | null
+): string | null {
+  return deploymentUrl !== null && deploymentUrl !== "" ? deploymentUrl : session?.serverUrl ?? null;
+}
+
+/**
+ * 两个地址是否指向同一台服务端（比 origin，不比原文）。
+ *
+ * 地址在持久化前后可能只差尾斜杠或默认端口（`https://x` 与 `https://x/`）；按原文比较会把
+ * 一份完全有效的会话判成「换了部署」而丢掉登录态。站内路径（`/remote`）没有 origin，按原文比。
+ */
+export function sameServerOrigin(a: string, b: string): boolean {
+  if (a === b) return true;
+  const originOf = (value: string): string | null => {
+    try {
+      return new URL(value).origin;
+    } catch {
+      return null;
+    }
+  };
+  const left = originOf(a);
+  const right = originOf(b);
+  return left !== null && left === right;
+}
+
 export function createRemoteSessionSource(options: RemoteSessionSourceOptions): RemoteSessionSource {
   const { store } = options;
   /** 并发请求共享同一次登录。 */
@@ -152,7 +194,8 @@ export function createRemoteSessionSource(options: RemoteSessionSourceOptions): 
     const serverUrl = options.configuredServerUrl();
     if (!isSessionUsable(stored, options.now())) return null;
     // 换了地址就当作未登录：旧令牌属于另一个部署的会话，拿它连新地址只会得到 401。
-    if (serverUrl !== null && stored.serverUrl !== serverUrl) return null;
+    // 部署配置优先（人改过配置就是要换部署）；没配地址时会话自带的地址就是它的地址。
+    if (serverUrl !== null && !sameServerOrigin(stored.serverUrl, serverUrl)) return null;
     return stored;
   };
 
