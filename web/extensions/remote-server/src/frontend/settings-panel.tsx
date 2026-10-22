@@ -94,6 +94,14 @@ export function RemoteServerSettingsPanel({
   /** 已被宿主接受过的草稿（发起登录成功那一刻），此后它才是 dirty 的基线。 */
   const [acceptedDraft, setAcceptedDraft] = useState<string | null>(null);
   const address = addressDraft ?? configuredServerUrl;
+  /**
+   * 地址被清空的状态。
+   *
+   * 空地址不能成为可提交的输入：它既没有可连的目标，也说不清「你想连哪台」。因此两个动作
+   * （测试连接 / 登录并连接）在空地址下禁用，并给出可读原因——而不是发一个注定失败的请求，
+   * 或者悄悄回落到预置值（用户刚把地址删掉，却连到了别处，那是最难解释的一种行为）。
+   */
+  const addressMissing = address.trim() === "";
   const setAddress = (value: string) => setAddressDraft(value);
   const [methods, setMethods] = useState<RemoteAuthMethod[]>([]);
   const [probeState, setProbeState] = useState<
@@ -168,8 +176,11 @@ export function RemoteServerSettingsPanel({
   useEffect(() => () => reportRef.current?.({ dirty: false, pending: false }), []);
 
   const probe = useCallback(async () => {
+    const target = address.trim();
+    // 空地址不发请求：按钮已是禁用态，这里再兜一层，避免将来有别的入口绕过禁用。
+    if (target === "") return;
     setProbeState({ kind: "busy" });
-    const result = await service.api.probe({ ...(address.trim() ? { serverUrl: address.trim() } : {}) });
+    const result = await service.api.probe({ serverUrl: target });
     if (!result.ok) {
       setProbeState({ kind: "error", message: result.error });
       setMethods([]);
@@ -189,19 +200,19 @@ export function RemoteServerSettingsPanel({
    * 地址摆到人面前，然后轮询。人在那个页面上已是登录态，批准后客户端自动接上。
    */
   const connectWithDeviceCode = useCallback(async () => {
+    const target = address.trim();
+    if (target === "") return;
     setPending(true);
     setActionError(null);
     setOauthFallback(false);
-    const result = await service.api.startDeviceLogin({
-      ...(address.trim() ? { serverUrl: address.trim() } : {})
-    });
+    const result = await service.api.startDeviceLogin({ serverUrl: target });
     setPending(false);
     if (!result.ok) {
       setActionError(result.error);
       return;
     }
     // 地址已被宿主接受：它是新的权威值，后续编辑从这个基线算 dirty。
-    setAcceptedDraft(address.trim());
+    setAcceptedDraft(target);
     setDeviceLogin({
       userCode: result.start.userCode,
       verificationUri: result.start.verificationUri,
@@ -226,6 +237,8 @@ export function RemoteServerSettingsPanel({
    * 设备码：设备码自己的错误信息也更贴近人下一步该做什么。
    */
   const connect = useCallback(async () => {
+    // 空地址没有可连的目标：两种登录路径都不该被发起（按钮已是禁用态，这里再兜一层）。
+    if (address.trim() === "") return;
     if (!loopback || oauthUnsupported) {
       await connectWithDeviceCode();
       return;
@@ -481,8 +494,20 @@ export function RemoteServerSettingsPanel({
                 地址由部署预置，直接点「登录并连接」即可；需要换一台就改上面这个输入框。
               </p>
             ) : null}
+            {addressMissing ? (
+              // 空地址是**本地的输入问题**，不是配置缺失：说清要先填什么，别发一个注定失败的请求。
+              <p className="settings-section__hint" data-testid="server-address-required">
+                先填服务端地址才能继续：它决定连哪台服务端。
+              </p>
+            ) : null}
             <div className="settings-section__actions">
-              <Button size="sm" tone="ghost" disabled={probeState.kind === "busy"} onClick={() => void probe()} data-testid="server-probe">
+              <Button
+                size="sm"
+                tone="ghost"
+                disabled={probeState.kind === "busy" || addressMissing}
+                onClick={() => void probe()}
+                data-testid="server-probe"
+              >
                 {probeState.kind === "busy" ? "探测中…" : "测试连接"}
               </Button>
               {probeState.kind === "ok" ? (
@@ -565,7 +590,7 @@ export function RemoteServerSettingsPanel({
                   </SettingsFeedback>
                 ) : null}
                 <div className="settings-section__actions">
-                  <Button size="sm" disabled={pending} onClick={() => void connect()} data-testid="server-connect">
+                  <Button size="sm" disabled={pending || addressMissing} onClick={() => void connect()} data-testid="server-connect">
                     {pending ? "正在发起…" : "登录并连接"}
                   </Button>
                   {oauthFallback ? (

@@ -106,7 +106,14 @@ export WOOHAA3_REMOTE_SERVER_URL=https://woohaa.example.com
 export WOOHAA3_REMOTE_SERVER_DEVICE_TOKEN=<部署发放的令牌>
 ```
 
-未配置 `serverUrl` 时是**本地模式**：不连任何远端，也不报错。
+未配置 `serverUrl` 时**没有预置地址**：设置面板的输入框为空，先填地址才能「测试连接 / 登录并连接」
+（空地址下两个按钮都是禁用态，不会发注定失败的请求）。连没连上远端是**会话状态**：未登录时是
+**本地模式**——不向任何远端发送内容，也不报错。
+
+公开 checkout **不内置内网地址**（`pnpm boundary:check` 拒绝 `.woa.com` 等域名）。内部开发想要的
+「装上就有默认地址」由私有入口注入：父仓 `scripts/client.mjs` 在 dev 子进程的环境里给
+`WOOHAA3_REMOTE_SERVER_URL` 一个缺省值，于是本地 dev 的面板依旧是被预填好的，公开构建保持空白。
+优先级不变：设置面非秘密项 > 环境变量 > `config.local.json`。
 
 `serverUrl` 也可以是站内路径（`/remote`），用于同源反代把服务端挂在客户端 origin 下的部署。
 

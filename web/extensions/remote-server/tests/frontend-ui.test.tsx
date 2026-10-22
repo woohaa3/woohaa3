@@ -230,7 +230,8 @@ describe("RemoteServerSettingsPanel（设置里的接入面板）", () => {
 
   it("点击登录后展示服务端短码与批准页地址，且不出现任何凭据输入", async () => {
     const { service } = createService({
-      "/session": { phase: "local", subject: null, serverUrl: null, methods: [], error: null },
+      // 有预置地址才能点「登录并连接」（空地址被禁用，见下方守卫用例）。
+      "/session": { phase: "local", subject: null, serverUrl: "https://preset.example.com", methods: [], error: null },
       "/device-start": {
         ok: true,
         userCode: "BCDF-GHJK",
@@ -259,7 +260,8 @@ describe("RemoteServerSettingsPanel（设置里的接入面板）", () => {
 
   it("发起失败时显示原因，且不要求输入凭据", async () => {
     const { service } = createService({
-      "/session": { phase: "local", subject: null, serverUrl: null, methods: [], error: null },
+      // 有预置地址才能点「登录并连接」（空地址被禁用，见下方守卫用例）。
+      "/session": { phase: "local", subject: null, serverUrl: "https://preset.example.com", methods: [], error: null },
       "/device-start": { ok: false, error: "这台服务端没有启用设备码登录（需要配置对外地址）" }
     });
     await act(async () => {
@@ -432,6 +434,43 @@ describe("预置服务端地址（部署配置里的 serverUrl）", () => {
     expect(container.querySelector('[data-testid="server-address-preset"]')).toBeNull();
     unmount();
   });
+
+  it("清空地址后不能继续：两个动作都禁用、给出原因，也不发出任何请求", async () => {
+    // 空地址没有可连的目标。既不能发一个注定失败的请求，也不能悄悄回落到预置值——
+    // 用户刚把地址删掉却连到了别处，是最难解释的一种行为。
+    const { service, calls } = createService({
+      "/session": {
+        phase: "local",
+        serverUrl: "https://preset.example.com",
+        subject: null,
+        displayName: null,
+        expiresAt: null,
+        methods: [],
+        error: null
+      }
+    });
+    await act(async () => {
+      await service.refresh();
+    });
+    const { container, unmount } = await mount(createElement(RemoteServerSettingsPanel, { service }));
+    const input = container.querySelector<HTMLInputElement>('[data-testid="server-address"]')!;
+    expect(input.value).toBe("https://preset.example.com");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="server-connect"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="server-probe"]')?.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="server-address-required"]')).not.toBeNull();
+    const before = calls.length;
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="server-connect"]')?.click();
+      container.querySelector<HTMLButtonElement>('[data-testid="server-probe"]')?.click();
+    });
+    expect(calls.length).toBe(before);
+    unmount();
+  });
 });
 
 describe("复制短码（省一次手抄，但不把短码放进地址）", () => {
@@ -442,7 +481,8 @@ describe("复制短码（省一次手抄，但不把短码放进地址）", () =
       value: { writeText: async (text: string) => void written.push(text) }
     });
     const { service } = createService({
-      "/session": { phase: "local", subject: null, serverUrl: null, methods: [], error: null },
+      // 有预置地址才能点「登录并连接」（空地址被禁用，见下方守卫用例）。
+      "/session": { phase: "local", subject: null, serverUrl: "https://preset.example.com", methods: [], error: null },
       "/device-start": {
         ok: true,
         userCode: "BCDF-GHJK",
@@ -468,7 +508,8 @@ describe("复制短码（省一次手抄，但不把短码放进地址）", () =
 
   it("批准页地址里没有短码（短码不进 URL 是安全要求，不是 UI 偏好）", async () => {
     const { service } = createService({
-      "/session": { phase: "local", subject: null, serverUrl: null, methods: [], error: null },
+      // 有预置地址才能点「登录并连接」（空地址被禁用，见下方守卫用例）。
+      "/session": { phase: "local", subject: null, serverUrl: "https://preset.example.com", methods: [], error: null },
       "/device-start": {
         ok: true,
         userCode: "BCDF-GHJK",
