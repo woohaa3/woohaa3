@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import zlib from 'node:zlib';
 export const DESKTOP_NODE_VERSION='24.22.0';
 export function nodeArtifact(platform=process.platform,arch=process.arch){
  if(platform==='darwin'&&arch==='arm64')return {version:DESKTOP_NODE_VERSION,archive:`node-v${DESKTOP_NODE_VERSION}-darwin-arm64.tar.gz`,triple:'aarch64-apple-darwin'};
@@ -63,9 +64,70 @@ export function standaloneBundleConfig({resourceRoot,node,endpoint=null,publicKe
  return {plugins:{updater:{pubkey:publicKey??''}},bundle:{externalBin:[node.replace(/-(?:aarch64-apple-darwin|x86_64-pc-windows-msvc)(?:\.exe)?$/,'')],resources:{},createUpdaterArtifacts:Boolean(endpoint),...(platform==='win32'?{icon:['icons/icon.ico'],windows:{nsis:{installMode:'currentUser'},webviewInstallMode:{type:'downloadBootstrapper',silent:true}}}:{})}};
 }
 
+const TAR_BLOCK=512;
+/** ustar 头；名字过长时按 prefix/name 拆分（Windows 宿主目录层级很深）。 */
+function tarHeader({name,prefix,mode,size,mtime,type}){
+ const header=Buffer.alloc(TAR_BLOCK,0);
+ header.write(name,0,100,'utf8');
+ header.write(mode.toString(8).padStart(7,'0')+'\0',100,'ascii');
+ header.write('0000000\0',108,'ascii');
+ header.write('0000000\0',116,'ascii');
+ header.write(size.toString(8).padStart(11,'0')+'\0',124,'ascii');
+ header.write(Math.floor(mtime).toString(8).padStart(11,'0')+'\0',136,'ascii');
+ header.write('        ',148,'ascii');
+ header.write(type,156,'ascii');
+ header.write('ustar\0',257,'ascii');
+ header.write('00',263,'ascii');
+ header.write(prefix,345,155,'utf8');
+ let sum=0;for(const byte of header)sum+=byte;
+ header.write(sum.toString(8).padStart(6,'0')+'\0 ',148,'ascii');
+ return header;
+}
+function splitTarName(name){
+ if(Buffer.byteLength(name,'utf8')<=100)return {name,prefix:''};
+ for(let index=name.length-1;index>0;index-=1){
+  if(name[index]!=='/')continue;
+  const prefix=name.slice(0,index),rest=name.slice(index+1);
+  if(Buffer.byteLength(prefix,'utf8')<=155&&Buffer.byteLength(rest,'utf8')<=100)return {name:rest,prefix};
+ }
+ return {name,prefix:''};
+}
+/**
+ * 在 Node 内直接生成 tar.gz。
+ *
+ * Windows 上没有可靠的 bsdtar（Server 2016/2012 完全没有），而混用 MSYS2 tar 与
+ * Git 的 gzip 会因 cygwin 运行时不同直接崩溃；自己写 ustar 再交给 zlib，不依赖
+ * 任何外部压缩进程。
+ */
+export function createHostArchiveInNode(resourceRoot,output){
+ const chunks=[];
+ const visit=(dir,relative)=>{
+  const entries=fs.readdirSync(dir,{withFileTypes:true}).sort((left,right)=>(left.name<right.name?-1:left.name>right.name?1:0));
+  for(const entry of entries){
+   const full=path.join(dir,entry.name);const name=relative?relative+'/'+entry.name:entry.name;
+   const stat=fs.statSync(full);
+   if(stat.isDirectory()){
+    const split=splitTarName(name+'/');
+    chunks.push(tarHeader({...split,mode:0o755,size:0,mtime:stat.mtimeMs/1000,type:'5'}));
+    visit(full,name);
+   }else{
+    const data=fs.readFileSync(full);const split=splitTarName(name);
+    chunks.push(tarHeader({...split,mode:0o644,size:data.length,mtime:stat.mtimeMs/1000,type:'0'}));
+    chunks.push(data);
+    const pad=(TAR_BLOCK-(data.length%TAR_BLOCK))%TAR_BLOCK;
+    if(pad>0)chunks.push(Buffer.alloc(pad,0));
+   }
+  }
+ };
+ visit(resourceRoot,'');
+ chunks.push(Buffer.alloc(TAR_BLOCK*2,0));
+ fs.writeFileSync(output,zlib.gzipSync(Buffer.concat(chunks)));
+}
+
 export function createHostArchive(resourceRoot,output) {
  assertPortableTree(resourceRoot);fs.mkdirSync(path.dirname(output),{recursive:true});
- systemTarExec(['-czf',output,...(process.platform==='darwin'?['--options','gzip:compression-level=1']:[]),'-C',resourceRoot,'.'],{env:{...process.env,COPYFILE_DISABLE:'1'},stdio:'inherit',windowsHide:true});
+ if(process.platform==='win32'){createHostArchiveInNode(resourceRoot,output);}
+ else systemTarExec(['-czf',output,...(process.platform==='darwin'?['--options','gzip:compression-level=1']:[]),'-C',resourceRoot,'.'],{env:{...process.env,COPYFILE_DISABLE:'1'},stdio:'inherit',windowsHide:true});
  return {path:output,sha256:createHash('sha256').update(fs.readFileSync(output)).digest('hex')};
 }
 
