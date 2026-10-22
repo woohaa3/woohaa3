@@ -17889,7 +17889,8 @@
           },
           "storageKey": {
             "type": "string",
-            "title": "storage_key"
+            "title": "storage_key",
+            "description": "命名空间内的逻辑键（不含 `media/` 段），与 GenerationTaskDetail.result_storage_key 同口径；\n 管理端预览时拼成画布内相对对象键 `media/<key>` 再签地址。"
           },
           "mediaType": {
             "type": "string",
@@ -18015,6 +18016,15 @@
               }
             ],
             "title": "result_size"
+          },
+          "resultStorageKey": {
+            "type": "string",
+            "title": "result_storage_key",
+            "description": "成功媒体结果的逻辑对象键与 Content-Type；文本结果为空。\n\n 键是命名空间内的逻辑键（如 `generation-outputs/<sha256>.png`），**不是**\n CreateCanvasObjectUrl 要的画布内相对对象键：它不含 `media/` 命名空间段，与\n GenerationTaskInput.storage_key 同口径。管理端预览时先拼成 `media/<key>` 再签地址；\n 列表只带这两项定位信息，仍然不返回结果正文。"
+          },
+          "resultContentType": {
+            "type": "string",
+            "title": "result_content_type"
           }
         },
         "title": "GenerationTaskSummary",
