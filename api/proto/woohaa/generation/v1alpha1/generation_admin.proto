@@ -1,0 +1,235 @@
+syntax = "proto3";
+
+package woohaa.generation.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "woohaa/generation/v1alpha1/generation.proto";
+
+option go_package = "woohaa3/api/gen/go/woohaa/generation/v1alpha1;generationv1alpha1";
+
+// 生成任务的管理只读面。
+//
+// 它回答排障需要的三件事：这次任务是谁、在什么上下文里触发的；发给上游什么、
+// 上游回了什么；任务现在与过去是什么状态。客户端不调用本服务：提交与轮询仍在
+// GenerationService，本服务只被管理端使用。
+//
+// 两条硬约束：
+//  1. 只读：没有任何方法会改变任务、取消任务或重试任务；
+//  2. 只对部署管理员开放：非管理员一律 permission_denied，不是空列表。
+//
+// 留痕是有界、脱敏、短保留的排障数据，不构成审计流水；不要在文档里把它描述成
+// 「可以证明谁做过什么」的证据。
+service GenerationAdminService {
+  // 任务列表，按创建时间倒序。返回摘要，不含 prompt/参数/结果正文。
+  rpc ListGenerationTasks(ListGenerationTasksRequest) returns (ListGenerationTasksResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 单个任务详情：触发参数、受理快照、结果、错误与时间线。
+  rpc GetGenerationTask(GetGenerationTaskRequest) returns (GetGenerationTaskResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 任务的上游调用留痕，分页读取。留痕过期或关闭时由 GetGenerationTask 的状态字段表达。
+  rpc ListGenerationTraces(ListGenerationTracesRequest) returns (ListGenerationTracesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 与列表相同过滤条件下的汇总。扫描有上限，超出时 truncated=true。
+  rpc GetGenerationSummary(GetGenerationSummaryRequest) returns (GetGenerationSummaryResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// 任务留痕的可用状态。关闭留痕与过期是两种不同的运维结论，不能用一个 bool 表达。
+enum GenerationTraceState {
+  GENERATION_TRACE_STATE_UNSPECIFIED = 0;
+  // 留痕开关打开，任务在保留期内；列表为空表示这次没有可留痕的调用。
+  GENERATION_TRACE_STATE_AVAILABLE = 1;
+  // 曾有留痕，但已超过保留期被清理。
+  GENERATION_TRACE_STATE_EXPIRED = 2;
+  // 本部署关闭了留痕开关。
+  GENERATION_TRACE_STATE_DISABLED = 3;
+}
+
+message GenerationTaskSummary {
+  string task_id = 1;
+  string canvas_id = 2;
+  string actor_id = 3;
+  // 服务端按主体登记表现算的展示名；取不到时为空。
+  string actor_display_name = 4;
+  string model_key = 5;
+  string model_type = 6;
+  TaskState state = 7;
+  double progress = 8;
+  string error_code = 9;
+  string upstream_task_id = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp started_at = 12;
+  google.protobuf.Timestamp finished_at = 13;
+  // 执行耗时（毫秒）。未开始的任务为 0。
+  uint64 duration_ms = 14;
+  // 成功终态的媒体类别与对象字节数；文本结果没有这两项。
+  string result_media_kind = 15;
+  uint64 result_size = 16;
+}
+
+message ListGenerationTasksRequest {
+  // 空表示跨画布查询。
+  string canvas_id = 1;
+  string actor_id = 2;
+  // 空表示全部状态。
+  repeated TaskState states = 3;
+  string model_key = 4;
+  string model_type = 5;
+  string error_code = 6;
+  google.protobuf.Timestamp created_from = 7;
+  google.protobuf.Timestamp created_to = 8;
+  // 缺省 50，上限 200。
+  int32 page_size = 9;
+  // 不透明游标；空表示从最新一条开始。
+  string page_token = 10;
+}
+
+message ListGenerationTasksResponse {
+  repeated GenerationTaskSummary tasks = 1;
+  string next_page_token = 2;
+}
+
+message GetGenerationTaskRequest {
+  string task_id = 1;
+}
+
+message GetGenerationTaskResponse {
+  GenerationTaskDetail task = 1;
+  GenerationTraceState trace_state = 2;
+}
+
+message GenerationTaskInput {
+  string asset_id = 1;
+  string role = 2;
+  string storage_key = 3;
+  string media_type = 4;
+  string media_kind = 5;
+}
+
+message GenerationTaskDetail {
+  string task_id = 1;
+  string idempotency_key = 2;
+  string canvas_id = 3;
+  string actor_id = 4;
+  string actor_display_name = 5;
+  string model_key = 6;
+  string provider_model_id = 7;
+  string model_type = 8;
+  string prompt = 9;
+  google.protobuf.Struct parameters = 10;
+  repeated GenerationTaskInput inputs = 11;
+  string node_id = 12;
+  string run_id = 13;
+  string interaction_id = 14;
+  uint32 interaction_version = 15;
+  uint64 admission_catalog_revision = 16;
+  uint64 admission_schema_revision = 17;
+  uint64 admission_config_version = 18;
+  TaskState state = 19;
+  double progress = 20;
+  string result_text = 21;
+  bool result_truncated = 22;
+  string result_media_kind = 23;
+  string result_storage_key = 24;
+  string result_content_type = 25;
+  uint64 result_size = 26;
+  string result_checksum = 27;
+  double result_duration_seconds = 28;
+  string error_code = 29;
+  string error_message = 30;
+  uint32 upstream_status = 31;
+  string upstream_task_id = 32;
+  uint64 record_revision = 33;
+  google.protobuf.Timestamp created_at = 34;
+  google.protobuf.Timestamp updated_at = 35;
+  google.protobuf.Timestamp started_at = 36;
+  google.protobuf.Timestamp finished_at = 37;
+  // 因单任务上限被丢弃的留痕行数。
+  uint32 trace_dropped = 38;
+}
+
+message GenerationTrace {
+  uint32 attempt = 1;
+  string kind = 2;
+  string method = 3;
+  // 只含上游路径，不含 host 与 base_url。
+  string path = 4;
+  uint32 http_status = 5;
+  uint64 duration_ms = 6;
+  string request_body = 7;
+  bool request_truncated = 8;
+  string response_body = 9;
+  bool response_truncated = 10;
+  // 人类可读的补充标记（例如 upstream-error）；不是机器契约。
+  string note = 11;
+  google.protobuf.Timestamp created_at = 12;
+}
+
+message ListGenerationTracesRequest {
+  string task_id = 1;
+  // 缺省 20，上限 100。
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListGenerationTracesResponse {
+  repeated GenerationTrace traces = 1;
+  string next_page_token = 2;
+}
+
+message GetGenerationSummaryRequest {
+  string canvas_id = 1;
+  string actor_id = 2;
+  repeated TaskState states = 3;
+  string model_key = 4;
+  string model_type = 5;
+  string error_code = 6;
+  google.protobuf.Timestamp created_from = 7;
+  google.protobuf.Timestamp created_to = 8;
+}
+
+message GenerationStateCount {
+  TaskState state = 1;
+  uint64 count = 2;
+}
+
+message GenerationModelCount {
+  string model_type = 1;
+  string model_key = 2;
+  uint64 count = 3;
+}
+
+message GenerationErrorCount {
+  string error_code = 1;
+  uint64 count = 2;
+}
+
+message GenerationDailyCount {
+  // YYYY-MM-DD（UTC）。
+  string day = 1;
+  uint64 total = 2;
+  uint64 failed = 3;
+}
+
+message GetGenerationSummaryResponse {
+  uint64 total = 1;
+  repeated GenerationStateCount by_state = 2;
+  repeated GenerationModelCount by_model = 3;
+  repeated GenerationErrorCount by_error = 4;
+  // 成功媒体结果的字节合计；不含文本长度。
+  uint64 result_bytes = 5;
+  // 只统计同时有 started_at 与 finished_at 的任务。
+  uint64 avg_duration_ms = 6;
+  uint64 max_duration_ms = 7;
+  repeated GenerationDailyCount daily = 8;
+  // 聚合只覆盖最近 50000 行；true 表示合计不完整。
+  bool truncated = 9;
+}

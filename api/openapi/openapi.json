@@ -5658,6 +5658,806 @@
         "x-connect-get-supported": false
       }
     },
+    "/woohaa.generation.v1alpha1.GenerationAdminService/ListGenerationTasks": {
+      "post": {
+        "tags": [
+          "woohaa.generation.v1alpha1.GenerationAdminService"
+        ],
+        "summary": "ListGenerationTasks",
+        "description": "任务列表，按创建时间倒序。返回摘要，不含 prompt/参数/结果正文。\n\n管理端生成任务列表（只读，仅部署管理员）。按创建时间倒序，keyset 游标分页；返回摘要，不含 prompt、参数、输入与结果正文。可按画布、主体、状态、模型、错误码与时间范围过滤。非管理员返回 permission_denied，不是空列表。\n\n此 RPC 同时支持 Connect GET：使用 encoding=json 和 JSON 编码的 message 查询参数。",
+        "operationId": "woohaa.generation.v1alpha1.GenerationAdminService.ListGenerationTasks",
+        "parameters": [
+          {
+            "name": "Connect-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/connect-protocol-version"
+            }
+          },
+          {
+            "name": "Connect-Timeout-Ms",
+            "in": "header",
+            "schema": {
+              "$ref": "#/components/schemas/connect-timeout-header"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.ListGenerationTasksRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/woohaa.generation.v1alpha1.ListGenerationTasksResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_argument：请求或字段不合法。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated：凭证缺失或无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "permission_denied：主体没有所需权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal：服务端或依赖不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-woohaa-auth": {
+          "mode": "permission",
+          "permission": "rbac.manage",
+          "scope": "*"
+        },
+        "x-connect-get-supported": true
+      }
+    },
+    "/woohaa.generation.v1alpha1.GenerationAdminService/GetGenerationTask": {
+      "post": {
+        "tags": [
+          "woohaa.generation.v1alpha1.GenerationAdminService"
+        ],
+        "summary": "GetGenerationTask",
+        "description": "单个任务详情：触发参数、受理快照、结果、错误与时间线。\n\n管理端生成任务详情（只读，仅部署管理员）。返回触发参数、受理快照（node/run/interaction/admission）、结果、错误与时间线；留痕单独分页读取。客户端不调用本接口。\n\n此 RPC 同时支持 Connect GET：使用 encoding=json 和 JSON 编码的 message 查询参数。",
+        "operationId": "woohaa.generation.v1alpha1.GenerationAdminService.GetGenerationTask",
+        "parameters": [
+          {
+            "name": "Connect-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/connect-protocol-version"
+            }
+          },
+          {
+            "name": "Connect-Timeout-Ms",
+            "in": "header",
+            "schema": {
+              "$ref": "#/components/schemas/connect-timeout-header"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GetGenerationTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GetGenerationTaskResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_argument：请求或字段不合法。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated：凭证缺失或无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "permission_denied：主体没有所需权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal：服务端或依赖不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-woohaa-auth": {
+          "mode": "permission",
+          "permission": "rbac.manage",
+          "scope": "*"
+        },
+        "x-connect-get-supported": true
+      }
+    },
+    "/woohaa.generation.v1alpha1.GenerationAdminService/ListGenerationTraces": {
+      "post": {
+        "tags": [
+          "woohaa.generation.v1alpha1.GenerationAdminService"
+        ],
+        "summary": "ListGenerationTraces",
+        "description": "任务的上游调用留痕，分页读取。留痕过期或关闭时由 GetGenerationTask 的状态字段表达。\n\n管理端读取任务的上游调用留痕（只读，仅部署管理员）。留痕有界、脱敏、短保留，不构成审计流水；过期或关闭由 GetGenerationTask 的 traceState 表达。\n\n此 RPC 同时支持 Connect GET：使用 encoding=json 和 JSON 编码的 message 查询参数。",
+        "operationId": "woohaa.generation.v1alpha1.GenerationAdminService.ListGenerationTraces",
+        "parameters": [
+          {
+            "name": "Connect-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/connect-protocol-version"
+            }
+          },
+          {
+            "name": "Connect-Timeout-Ms",
+            "in": "header",
+            "schema": {
+              "$ref": "#/components/schemas/connect-timeout-header"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.ListGenerationTracesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/woohaa.generation.v1alpha1.ListGenerationTracesResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_argument：请求或字段不合法。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated：凭证缺失或无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "permission_denied：主体没有所需权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal：服务端或依赖不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-woohaa-auth": {
+          "mode": "permission",
+          "permission": "rbac.manage",
+          "scope": "*"
+        },
+        "x-connect-get-supported": true
+      }
+    },
+    "/woohaa.generation.v1alpha1.GenerationAdminService/GetGenerationSummary": {
+      "post": {
+        "tags": [
+          "woohaa.generation.v1alpha1.GenerationAdminService"
+        ],
+        "summary": "GetGenerationSummary",
+        "description": "与列表相同过滤条件下的汇总。扫描有上限，超出时 truncated=true。\n\n管理端生成任务汇总（只读，仅部署管理员）。与列表相同过滤，返回状态/模型/错误分布、结果字节与耗时统计。扫描有上限，超出时 truncated 为 true。\n\n此 RPC 同时支持 Connect GET：使用 encoding=json 和 JSON 编码的 message 查询参数。",
+        "operationId": "woohaa.generation.v1alpha1.GenerationAdminService.GetGenerationSummary",
+        "parameters": [
+          {
+            "name": "Connect-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/connect-protocol-version"
+            }
+          },
+          {
+            "name": "Connect-Timeout-Ms",
+            "in": "header",
+            "schema": {
+              "$ref": "#/components/schemas/connect-timeout-header"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GetGenerationSummaryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GetGenerationSummaryResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_argument：请求或字段不合法。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated：凭证缺失或无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "permission_denied：主体没有所需权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal：服务端或依赖不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-woohaa-auth": {
+          "mode": "permission",
+          "permission": "rbac.manage",
+          "scope": "*"
+        },
+        "x-connect-get-supported": true
+      }
+    },
     "/woohaa.identity.v1alpha1.IdentityService/Login": {
       "post": {
         "tags": [
@@ -11399,6 +12199,806 @@
         "x-connect-get-supported": true
       }
     },
+    "/woohaa.storage.v1.StorageAdminService/ListCanvasObjects": {
+      "post": {
+        "tags": [
+          "woohaa.storage.v1.StorageAdminService"
+        ],
+        "summary": "ListCanvasObjects",
+        "description": "按前缀分页列举一张画布下的对象元数据（不返回字节）。\n\n管理端按前缀列举一张画布的对象元数据（只读，仅部署管理员）。不返回对象字节；后端列举没有 Content-Type 时该字段为空，不逐对象 HEAD。\n\n此 RPC 同时支持 Connect GET：使用 encoding=json 和 JSON 编码的 message 查询参数。",
+        "operationId": "woohaa.storage.v1.StorageAdminService.ListCanvasObjects",
+        "parameters": [
+          {
+            "name": "Connect-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/connect-protocol-version"
+            }
+          },
+          {
+            "name": "Connect-Timeout-Ms",
+            "in": "header",
+            "schema": {
+              "$ref": "#/components/schemas/connect-timeout-header"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/woohaa.storage.v1.ListCanvasObjectsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/woohaa.storage.v1.ListCanvasObjectsResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_argument：请求或字段不合法。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated：凭证缺失或无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "permission_denied：主体没有所需权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal：服务端或依赖不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-woohaa-auth": {
+          "mode": "permission",
+          "permission": "rbac.manage",
+          "scope": "*"
+        },
+        "x-connect-get-supported": true
+      }
+    },
+    "/woohaa.storage.v1.StorageAdminService/GetCanvasStorageUsage": {
+      "post": {
+        "tags": [
+          "woohaa.storage.v1.StorageAdminService"
+        ],
+        "summary": "GetCanvasStorageUsage",
+        "description": "按画布返回派生索引的用量；索引可能不完整，响应带最近重算时间。\n\n管理端读取画布存储用量（只读，仅部署管理员）。来自派生索引，可能不完整；reconciledAt 为空表示从未重算。不是对象存储的绝对事实。\n\n此 RPC 同时支持 Connect GET：使用 encoding=json 和 JSON 编码的 message 查询参数。",
+        "operationId": "woohaa.storage.v1.StorageAdminService.GetCanvasStorageUsage",
+        "parameters": [
+          {
+            "name": "Connect-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/connect-protocol-version"
+            }
+          },
+          {
+            "name": "Connect-Timeout-Ms",
+            "in": "header",
+            "schema": {
+              "$ref": "#/components/schemas/connect-timeout-header"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/woohaa.storage.v1.GetCanvasStorageUsageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/woohaa.storage.v1.GetCanvasStorageUsageResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_argument：请求或字段不合法。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated：凭证缺失或无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "permission_denied：主体没有所需权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal：服务端或依赖不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-woohaa-auth": {
+          "mode": "permission",
+          "permission": "rbac.manage",
+          "scope": "*"
+        },
+        "x-connect-get-supported": true
+      }
+    },
+    "/woohaa.storage.v1.StorageAdminService/ReconcileCanvasStorage": {
+      "post": {
+        "tags": [
+          "woohaa.storage.v1.StorageAdminService"
+        ],
+        "summary": "ReconcileCanvasStorage",
+        "description": "重算一张画布的派生索引。有界、可断点续扫；只写索引，不删除对象字节。\n\n管理端重算画布的派生对象索引（仅部署管理员）。有界、可断点续扫；只写/删索引行，不删除对象字节。restart=true 从头部重扫。\n\n仅使用 POST，不标记为无副作用方法。",
+        "operationId": "woohaa.storage.v1.StorageAdminService.ReconcileCanvasStorage",
+        "parameters": [
+          {
+            "name": "Connect-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/connect-protocol-version"
+            }
+          },
+          {
+            "name": "Connect-Timeout-Ms",
+            "in": "header",
+            "schema": {
+              "$ref": "#/components/schemas/connect-timeout-header"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/woohaa.storage.v1.ReconcileCanvasStorageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/woohaa.storage.v1.ReconcileCanvasStorageResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_argument：请求或字段不合法。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated：凭证缺失或无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "permission_denied：主体没有所需权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal：服务端或依赖不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-woohaa-auth": {
+          "mode": "permission",
+          "permission": "rbac.manage",
+          "scope": "*"
+        },
+        "x-connect-get-supported": false
+      }
+    },
+    "/woohaa.storage.v1.StorageAdminService/CreateCanvasObjectUrl": {
+      "post": {
+        "tags": [
+          "woohaa.storage.v1.StorageAdminService"
+        ],
+        "summary": "CreateCanvasObjectUrl",
+        "description": "为管理端预览/下载签一个短时 GET 地址。已删除画布拒绝。\n\n管理端为预览/下载签短时 GET 地址（仅部署管理员）。复用同一签名器与既有字节入口，不新增字节通道；已删除画布拒绝签名（proxy 与 backend 模式一致）；管理端不能签 PUT 或删除对象。\n\n此 RPC 同时支持 Connect GET：使用 encoding=json 和 JSON 编码的 message 查询参数。",
+        "operationId": "woohaa.storage.v1.StorageAdminService.CreateCanvasObjectUrl",
+        "parameters": [
+          {
+            "name": "Connect-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/connect-protocol-version"
+            }
+          },
+          {
+            "name": "Connect-Timeout-Ms",
+            "in": "header",
+            "schema": {
+              "$ref": "#/components/schemas/connect-timeout-header"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/woohaa.storage.v1.CreateCanvasObjectUrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/woohaa.storage.v1.CreateCanvasObjectUrlResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_argument：请求或字段不合法。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated：凭证缺失或无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "permission_denied：主体没有所需权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal：服务端或依赖不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/connect.error"
+                }
+              }
+            },
+            "headers": {
+              "X-Trace-ID": {
+                "description": "服务端请求链路 ID。",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "traceparent": {
+                "description": "W3C TraceContext 响应链路上下文。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-woohaa-auth": {
+          "mode": "permission",
+          "permission": "rbac.manage",
+          "scope": "*"
+        },
+        "x-connect-get-supported": true
+      }
+    },
     "/woohaa.telemetry.v1alpha1.TelemetryService/ReportEvents": {
       "post": {
         "tags": [
@@ -11980,6 +13580,11 @@
             "type": "boolean",
             "title": "include_stats",
             "description": "为 true 时一并返回存储统计（管理端运维页需要）。"
+          },
+          "includeOps": {
+            "type": "boolean",
+            "title": "include_ops",
+            "description": "为 true 时一并返回媒体与生成的运维摘要。与 include_stats 分开，\n 两个读模型的数据源不同。"
           }
         },
         "title": "AdminListCanvasesRequest",
@@ -12003,6 +13608,14 @@
             },
             "title": "stats",
             "description": "与 canvases 按 canvas_id 对齐的统计；include_stats=false 时为空。"
+          },
+          "ops": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.canvas.v1.CanvasOpsSummary"
+            },
+            "title": "ops",
+            "description": "与 canvases 按 canvas_id 对齐的运维摘要；include_ops=false 时为空。"
           }
         },
         "title": "AdminListCanvasesResponse",
@@ -12224,6 +13837,81 @@
         "title": "CanvasMember",
         "additionalProperties": false,
         "description": "协作者关系。作者本人不在成员表里：作者身份只有一个来源（Canvas.created_by）。"
+      },
+      "woohaa.canvas.v1.CanvasOpsSummary": {
+        "type": "object",
+        "properties": {
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id"
+          },
+          "generationTaskCount": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "generation_task_count"
+          },
+          "generationFailedCount": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "generation_failed_count",
+            "description": "只计 TASK_STATE_FAILED，不含 CANCELLED。"
+          },
+          "generationLastAt": {
+            "type": "string",
+            "title": "generation_last_at",
+            "description": "RFC 3339；空表示没有任务。"
+          },
+          "mediaObjectCount": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "media_object_count"
+          },
+          "mediaTotalBytes": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "media_total_bytes"
+          },
+          "mediaReconciledAt": {
+            "type": "string",
+            "title": "media_reconciled_at",
+            "description": "RFC 3339；空表示索引从未重算，媒体数字可能缺失。"
+          }
+        },
+        "title": "CanvasOpsSummary",
+        "additionalProperties": false,
+        "description": "管理端的运维摘要：文档存储之外，媒体与生成活动的只读口径。\n\n 它只跟着 AdminListCanvases 的 include_ops 返回，不扩大客户端已消费的\n CanvasStats。三个口径必须分开显示，不能合并成一个「占用」数字。"
       },
       "woohaa.canvas.v1.CanvasRecord": {
         "type": "object",
@@ -15804,6 +17492,916 @@
         "additionalProperties": false,
         "description": "文本结果。"
       },
+      "woohaa.generation.v1alpha1.GenerationTraceState": {
+        "type": [
+          "string",
+          "integer"
+        ],
+        "title": "GenerationTraceState",
+        "enum": [
+          "GENERATION_TRACE_STATE_UNSPECIFIED",
+          0,
+          "GENERATION_TRACE_STATE_AVAILABLE",
+          1,
+          "GENERATION_TRACE_STATE_EXPIRED",
+          2,
+          "GENERATION_TRACE_STATE_DISABLED",
+          3
+        ],
+        "description": "任务留痕的可用状态。关闭留痕与过期是两种不同的运维结论，不能用一个 bool 表达。"
+      },
+      "woohaa.generation.v1alpha1.GenerationDailyCount": {
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "string",
+            "title": "day",
+            "description": "YYYY-MM-DD（UTC）。"
+          },
+          "total": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "total"
+          },
+          "failed": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "failed"
+          }
+        },
+        "title": "GenerationDailyCount",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GenerationErrorCount": {
+        "type": "object",
+        "properties": {
+          "errorCode": {
+            "type": "string",
+            "title": "error_code"
+          },
+          "count": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "count"
+          }
+        },
+        "title": "GenerationErrorCount",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GenerationModelCount": {
+        "type": "object",
+        "properties": {
+          "modelType": {
+            "type": "string",
+            "title": "model_type"
+          },
+          "modelKey": {
+            "type": "string",
+            "title": "model_key"
+          },
+          "count": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "count"
+          }
+        },
+        "title": "GenerationModelCount",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GenerationStateCount": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "allOf": [
+              {
+                "title": "state"
+              },
+              {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.TaskState"
+              }
+            ]
+          },
+          "count": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "count"
+          }
+        },
+        "title": "GenerationStateCount",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GenerationTaskDetail": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "title": "task_id"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "title": "idempotency_key"
+          },
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id"
+          },
+          "actorId": {
+            "type": "string",
+            "title": "actor_id"
+          },
+          "actorDisplayName": {
+            "type": "string",
+            "title": "actor_display_name"
+          },
+          "modelKey": {
+            "type": "string",
+            "title": "model_key"
+          },
+          "providerModelId": {
+            "type": "string",
+            "title": "provider_model_id"
+          },
+          "modelType": {
+            "type": "string",
+            "title": "model_type"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "prompt"
+          },
+          "parameters": {
+            "allOf": [
+              {
+                "title": "parameters"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Struct"
+              }
+            ]
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationTaskInput"
+            },
+            "title": "inputs"
+          },
+          "nodeId": {
+            "type": "string",
+            "title": "node_id"
+          },
+          "runId": {
+            "type": "string",
+            "title": "run_id"
+          },
+          "interactionId": {
+            "type": "string",
+            "title": "interaction_id"
+          },
+          "interactionVersion": {
+            "type": "integer",
+            "title": "interaction_version"
+          },
+          "admissionCatalogRevision": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "admission_catalog_revision"
+          },
+          "admissionSchemaRevision": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "admission_schema_revision"
+          },
+          "admissionConfigVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "admission_config_version"
+          },
+          "state": {
+            "allOf": [
+              {
+                "title": "state"
+              },
+              {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.TaskState"
+              }
+            ]
+          },
+          "progress": {
+            "type": "number",
+            "title": "progress",
+            "format": "double"
+          },
+          "resultText": {
+            "type": "string",
+            "title": "result_text"
+          },
+          "resultTruncated": {
+            "type": "boolean",
+            "title": "result_truncated"
+          },
+          "resultMediaKind": {
+            "type": "string",
+            "title": "result_media_kind"
+          },
+          "resultStorageKey": {
+            "type": "string",
+            "title": "result_storage_key"
+          },
+          "resultContentType": {
+            "type": "string",
+            "title": "result_content_type"
+          },
+          "resultSize": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "result_size"
+          },
+          "resultChecksum": {
+            "type": "string",
+            "title": "result_checksum"
+          },
+          "resultDurationSeconds": {
+            "type": "number",
+            "title": "result_duration_seconds",
+            "format": "double"
+          },
+          "errorCode": {
+            "type": "string",
+            "title": "error_code"
+          },
+          "errorMessage": {
+            "type": "string",
+            "title": "error_message"
+          },
+          "upstreamStatus": {
+            "type": "integer",
+            "title": "upstream_status"
+          },
+          "upstreamTaskId": {
+            "type": "string",
+            "title": "upstream_task_id"
+          },
+          "recordRevision": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "record_revision"
+          },
+          "createdAt": {
+            "allOf": [
+              {
+                "title": "created_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "updatedAt": {
+            "allOf": [
+              {
+                "title": "updated_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "startedAt": {
+            "allOf": [
+              {
+                "title": "started_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "finishedAt": {
+            "allOf": [
+              {
+                "title": "finished_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "traceDropped": {
+            "type": "integer",
+            "title": "trace_dropped",
+            "description": "因单任务上限被丢弃的留痕行数。"
+          }
+        },
+        "title": "GenerationTaskDetail",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GenerationTaskInput": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "title": "asset_id"
+          },
+          "role": {
+            "type": "string",
+            "title": "role"
+          },
+          "storageKey": {
+            "type": "string",
+            "title": "storage_key"
+          },
+          "mediaType": {
+            "type": "string",
+            "title": "media_type"
+          },
+          "mediaKind": {
+            "type": "string",
+            "title": "media_kind"
+          }
+        },
+        "title": "GenerationTaskInput",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GenerationTaskSummary": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "title": "task_id"
+          },
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id"
+          },
+          "actorId": {
+            "type": "string",
+            "title": "actor_id"
+          },
+          "actorDisplayName": {
+            "type": "string",
+            "title": "actor_display_name",
+            "description": "服务端按主体登记表现算的展示名；取不到时为空。"
+          },
+          "modelKey": {
+            "type": "string",
+            "title": "model_key"
+          },
+          "modelType": {
+            "type": "string",
+            "title": "model_type"
+          },
+          "state": {
+            "allOf": [
+              {
+                "title": "state"
+              },
+              {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.TaskState"
+              }
+            ]
+          },
+          "progress": {
+            "type": "number",
+            "title": "progress",
+            "format": "double"
+          },
+          "errorCode": {
+            "type": "string",
+            "title": "error_code"
+          },
+          "upstreamTaskId": {
+            "type": "string",
+            "title": "upstream_task_id"
+          },
+          "createdAt": {
+            "allOf": [
+              {
+                "title": "created_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "startedAt": {
+            "allOf": [
+              {
+                "title": "started_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "finishedAt": {
+            "allOf": [
+              {
+                "title": "finished_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "durationMs": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "duration_ms",
+            "description": "执行耗时（毫秒）。未开始的任务为 0。"
+          },
+          "resultMediaKind": {
+            "type": "string",
+            "title": "result_media_kind",
+            "description": "成功终态的媒体类别与对象字节数；文本结果没有这两项。"
+          },
+          "resultSize": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "result_size"
+          }
+        },
+        "title": "GenerationTaskSummary",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GenerationTrace": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "title": "attempt"
+          },
+          "kind": {
+            "type": "string",
+            "title": "kind"
+          },
+          "method": {
+            "type": "string",
+            "title": "method"
+          },
+          "path": {
+            "type": "string",
+            "title": "path",
+            "description": "只含上游路径，不含 host 与 base_url。"
+          },
+          "httpStatus": {
+            "type": "integer",
+            "title": "http_status"
+          },
+          "durationMs": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "duration_ms"
+          },
+          "requestBody": {
+            "type": "string",
+            "title": "request_body"
+          },
+          "requestTruncated": {
+            "type": "boolean",
+            "title": "request_truncated"
+          },
+          "responseBody": {
+            "type": "string",
+            "title": "response_body"
+          },
+          "responseTruncated": {
+            "type": "boolean",
+            "title": "response_truncated"
+          },
+          "note": {
+            "type": "string",
+            "title": "note",
+            "description": "人类可读的补充标记（例如 upstream-error）；不是机器契约。"
+          },
+          "createdAt": {
+            "allOf": [
+              {
+                "title": "created_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          }
+        },
+        "title": "GenerationTrace",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GetGenerationSummaryRequest": {
+        "type": "object",
+        "properties": {
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id"
+          },
+          "actorId": {
+            "type": "string",
+            "title": "actor_id"
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.TaskState"
+            },
+            "title": "states"
+          },
+          "modelKey": {
+            "type": "string",
+            "title": "model_key"
+          },
+          "modelType": {
+            "type": "string",
+            "title": "model_type"
+          },
+          "errorCode": {
+            "type": "string",
+            "title": "error_code"
+          },
+          "createdFrom": {
+            "allOf": [
+              {
+                "title": "created_from"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "createdTo": {
+            "allOf": [
+              {
+                "title": "created_to"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          }
+        },
+        "title": "GetGenerationSummaryRequest",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GetGenerationSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "total"
+          },
+          "byState": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationStateCount"
+            },
+            "title": "by_state"
+          },
+          "byModel": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationModelCount"
+            },
+            "title": "by_model"
+          },
+          "byError": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationErrorCount"
+            },
+            "title": "by_error"
+          },
+          "resultBytes": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "result_bytes",
+            "description": "成功媒体结果的字节合计；不含文本长度。"
+          },
+          "avgDurationMs": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "avg_duration_ms",
+            "description": "只统计同时有 started_at 与 finished_at 的任务。"
+          },
+          "maxDurationMs": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "max_duration_ms"
+          },
+          "daily": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationDailyCount"
+            },
+            "title": "daily"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "truncated",
+            "description": "聚合只覆盖最近 50000 行；true 表示合计不完整。"
+          }
+        },
+        "title": "GetGenerationSummaryResponse",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GetGenerationTaskRequest": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "title": "task_id"
+          }
+        },
+        "title": "GetGenerationTaskRequest",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.GetGenerationTaskResponse": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "allOf": [
+              {
+                "title": "task"
+              },
+              {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationTaskDetail"
+              }
+            ]
+          },
+          "traceState": {
+            "allOf": [
+              {
+                "title": "trace_state"
+              },
+              {
+                "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationTraceState"
+              }
+            ]
+          }
+        },
+        "title": "GetGenerationTaskResponse",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.ListGenerationTasksRequest": {
+        "type": "object",
+        "properties": {
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id",
+            "description": "空表示跨画布查询。"
+          },
+          "actorId": {
+            "type": "string",
+            "title": "actor_id"
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.TaskState"
+            },
+            "title": "states",
+            "description": "空表示全部状态。"
+          },
+          "modelKey": {
+            "type": "string",
+            "title": "model_key"
+          },
+          "modelType": {
+            "type": "string",
+            "title": "model_type"
+          },
+          "errorCode": {
+            "type": "string",
+            "title": "error_code"
+          },
+          "createdFrom": {
+            "allOf": [
+              {
+                "title": "created_from"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "createdTo": {
+            "allOf": [
+              {
+                "title": "created_to"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "page_size",
+            "format": "int32",
+            "description": "缺省 50，上限 200。"
+          },
+          "pageToken": {
+            "type": "string",
+            "title": "page_token",
+            "description": "不透明游标；空表示从最新一条开始。"
+          }
+        },
+        "title": "ListGenerationTasksRequest",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.ListGenerationTasksResponse": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationTaskSummary"
+            },
+            "title": "tasks"
+          },
+          "nextPageToken": {
+            "type": "string",
+            "title": "next_page_token"
+          }
+        },
+        "title": "ListGenerationTasksResponse",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.ListGenerationTracesRequest": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "title": "task_id"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "page_size",
+            "format": "int32",
+            "description": "缺省 20，上限 100。"
+          },
+          "pageToken": {
+            "type": "string",
+            "title": "page_token"
+          }
+        },
+        "title": "ListGenerationTracesRequest",
+        "additionalProperties": false
+      },
+      "woohaa.generation.v1alpha1.ListGenerationTracesResponse": {
+        "type": "object",
+        "properties": {
+          "traces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.generation.v1alpha1.GenerationTrace"
+            },
+            "title": "traces"
+          },
+          "nextPageToken": {
+            "type": "string",
+            "title": "next_page_token"
+          }
+        },
+        "title": "ListGenerationTracesResponse",
+        "additionalProperties": false
+      },
       "woohaa.identity.v1alpha1.AuthMethodKind": {
         "type": [
           "string",
@@ -17163,6 +19761,325 @@
         "additionalProperties": false,
         "description": "一个对象的元数据。`exists` 为 false 时其余字段无意义。"
       },
+      "woohaa.storage.v1.CreateCanvasObjectUrlRequest": {
+        "type": "object",
+        "properties": {
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id"
+          },
+          "key": {
+            "type": "string",
+            "title": "key"
+          },
+          "expiresSeconds": {
+            "type": "integer",
+            "title": "expires_seconds",
+            "description": "0 取部署默认；超过上限时按上限收紧。"
+          }
+        },
+        "title": "CreateCanvasObjectUrlRequest",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.CreateCanvasObjectUrlResponse": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "url"
+          },
+          "expiresAt": {
+            "allOf": [
+              {
+                "title": "expires_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          }
+        },
+        "title": "CreateCanvasObjectUrlResponse",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.GetCanvasStorageUsageRequest": {
+        "type": "object",
+        "properties": {
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id"
+          }
+        },
+        "title": "GetCanvasStorageUsageRequest",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.GetCanvasStorageUsageResponse": {
+        "type": "object",
+        "properties": {
+          "objectCount": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "object_count"
+          },
+          "totalBytes": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "total_bytes"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.storage.v1.StorageUsageGroup"
+            },
+            "title": "groups"
+          },
+          "reconciledAt": {
+            "allOf": [
+              {
+                "title": "reconciled_at",
+                "description": "最近一次重算完成时刻；未设置表示从未重算。"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "complete",
+            "description": "最近一次重算是否完整走完。"
+          }
+        },
+        "title": "GetCanvasStorageUsageResponse",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.ListCanvasObjectsRequest": {
+        "type": "object",
+        "properties": {
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "prefix",
+            "description": "画布内相对前缀；空表示全部。不得含 ..、绝对路径或空段。"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "page_size",
+            "format": "int32",
+            "description": "缺省 100，上限 1000。"
+          },
+          "pageToken": {
+            "type": "string",
+            "title": "page_token",
+            "description": "不透明游标；空表示从头开始。"
+          }
+        },
+        "title": "ListCanvasObjectsRequest",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.ListCanvasObjectsResponse": {
+        "type": "object",
+        "properties": {
+          "objects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/woohaa.storage.v1.StorageObject"
+            },
+            "title": "objects"
+          },
+          "nextPageToken": {
+            "type": "string",
+            "title": "next_page_token"
+          }
+        },
+        "title": "ListCanvasObjectsResponse",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.ReconcileCanvasStorageRequest": {
+        "type": "object",
+        "properties": {
+          "canvasId": {
+            "type": "string",
+            "title": "canvas_id"
+          },
+          "restart": {
+            "type": "boolean",
+            "title": "restart",
+            "description": "true 表示丢弃断点从头部重新扫描；false 表示从上次断点继续。"
+          },
+          "maxObjects": {
+            "type": "integer",
+            "title": "max_objects",
+            "description": "单次最多处理的对象数；0 取服务端默认（20000），上限 100000。"
+          }
+        },
+        "title": "ReconcileCanvasStorageRequest",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.ReconcileCanvasStorageResponse": {
+        "type": "object",
+        "properties": {
+          "scanned": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "scanned"
+          },
+          "upserted": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "upserted"
+          },
+          "deleted": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "deleted"
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "complete",
+            "description": "本轮是否已经扫完；false 表示还有断点可继续。"
+          },
+          "reconciledAt": {
+            "allOf": [
+              {
+                "title": "reconciled_at",
+                "description": "完成后为最近一次完成时刻；未完成时为空。"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          }
+        },
+        "title": "ReconcileCanvasStorageResponse",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.StorageObject": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "key",
+            "description": "画布内的相对键，例如 media/generation-outputs/<sha256>.png。"
+          },
+          "size": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "size"
+          },
+          "contentType": {
+            "type": "string",
+            "title": "content_type",
+            "description": "后端列举没有提供时为空（COS 形态）；界面显示「未上报」。"
+          },
+          "modifiedAt": {
+            "allOf": [
+              {
+                "title": "modified_at"
+              },
+              {
+                "$ref": "#/components/schemas/google.protobuf.Timestamp"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "title": "source",
+            "description": "client / generation / unknown（来自索引；列举本身不带来源）。"
+          }
+        },
+        "title": "StorageObject",
+        "additionalProperties": false
+      },
+      "woohaa.storage.v1.StorageUsageGroup": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "label",
+            "description": "generation-outputs / media / other。"
+          },
+          "objectCount": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "object_count"
+          },
+          "totalBytes": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "title": "integer"
+              },
+              {
+                "type": "string",
+                "title": "string"
+              }
+            ],
+            "title": "total_bytes"
+          }
+        },
+        "title": "StorageUsageGroup",
+        "additionalProperties": false
+      },
       "woohaa.telemetry.v1alpha1.Action": {
         "type": [
           "string",
@@ -17439,6 +20356,10 @@
       "description": "服务端托管生成。执行模型是\"客户端轮询\"：提交立即返回，读取轮询到终态。\n\n 调用方是本机宿主而不是浏览器，Bearer 会话只在宿主内。授权分两层：所有 RPC 都要求\n 已认证，涉及具体画布的 RPC 再按画布 ACL 判定（提交/取消要 `canvas.write`，读取要\n `canvas.read`）。目录是部署级读，不按画布过滤——它回答的是\"这台部署能提供什么\"。"
     },
     {
+      "name": "woohaa.generation.v1alpha1.GenerationAdminService",
+      "description": "生成任务的管理只读面。\n\n 它回答排障需要的三件事：这次任务是谁、在什么上下文里触发的；发给上游什么、\n 上游回了什么；任务现在与过去是什么状态。客户端不调用本服务：提交与轮询仍在\n GenerationService，本服务只被管理端使用。\n\n 两条硬约束：\n  1. 只读：没有任何方法会改变任务、取消任务或重试任务；\n  2. 只对部署管理员开放：非管理员一律 permission_denied，不是空列表。\n\n 留痕是有界、脱敏、短保留的排障数据，不构成审计流水；不要在文档里把它描述成\n 「可以证明谁做过什么」的证据。"
+    },
+    {
       "name": "woohaa.identity.v1alpha1.IdentityService",
       "description": "IdentityService answers \"who are you\". It never answers \"what may you do\":\n permissions stay with RBACService. Every method is either public (the caller\n has no credential yet) or authenticated; none of them returns another\n subject's data."
     },
@@ -17457,6 +20378,10 @@
     {
       "name": "woohaa.storage.v1.StorageService",
       "description": "服务端托管存储的元数据与签名面。\n\n 字节**不**经此服务传输：`CreateSignedUrl` 签出的地址才是字节通道（服务端代理或 COS 直连）。\n 这样可以避免把大对象塞进一元 RPC，也让「私有读写」只有一条授权路径。"
+    },
+    {
+      "name": "woohaa.storage.v1.StorageAdminService",
+      "description": "托管存储的管理只读面。\n\n 它回答「这张画布有哪些对象、多大、最近有没有异常增长」，并为管理端提供只读的\n 浏览与预览。字节仍然只走既有签名地址与 /storage/objects/* 字节入口，本服务不\n 新增第二条字节通道。\n\n 授权：只对部署管理员开放；管理端只能签读，不能签写或删除。"
     },
     {
       "name": "woohaa.telemetry.v1alpha1.TelemetryService"

@@ -8,7 +8,9 @@ const diagnosticsAdmin = '/woohaa.diagnostics.v1alpha1.DiagnosticsAdminService/'
 const identity = '/woohaa.identity.v1alpha1.IdentityService/';
 const profile = '/woohaa.profile.v1alpha1.ProfileService/';
 const storage = '/woohaa.storage.v1.StorageService/';
+const storageAdmin = '/woohaa.storage.v1.StorageAdminService/';
 const generation = '/woohaa.generation.v1alpha1.GenerationService/';
+const generationAdmin = '/woohaa.generation.v1alpha1.GenerationAdminService/';
 const admin = { mode: 'permission', permission: 'rbac.manage', scope: '*' };
 
 // Documentation metadata, not an authorization engine. Every generated method
@@ -76,12 +78,19 @@ export const policies = {
   [storage + 'HeadObject']: { mode: 'authenticated', get: true, description: '读取对象元数据（存在性、字节数、Content-Type）。对象默认私有：需要 Bearer 会话，匿名主体被拒。键是相对键（`<namespace>/<rest>`），只允许 `[A-Za-z0-9._/-]`、不得以 `/` 开头、不得含 `.`/`..` 段，长度 1..1024。本期是部署级私有：认证通过即可访问同一命名空间，按画布或按主体的隔离尚未提供。' },
   [storage + 'DeleteObject']: { mode: 'authenticated', description: '删除对象，幂等：键本来就不存在同样返回成功。认证要求与 HeadObject 相同。' },
   [storage + 'CreateSignedUrl']: { mode: 'authenticated', get: true, description: '签一个短时地址：`GET` 用于读取（支持 Range），`PUT` 用于写入整对象。没有签名就访问不到字节——这是本服务唯一的字节授权路径。有效期由服务端决定：请求的 `expiresSeconds` 超过上限时按上限收紧，0 取部署默认值。`PUT` 的签名绑定 `contentType`，写入方必须原样发送该请求头，否则 403。签名地址不进日志，客户端不得自行延长有效期。' },
-  [storage + 'CreateSignedUrl']: { mode: 'authenticated', get: true, description: '签一个短时地址：`GET` 用于读取（支持 Range），`PUT` 用于写入整对象。没有签名就访问不到字节——这是本服务唯一的字节授权路径。有效期由服务端决定：请求的 `expiresSeconds` 超过上限时按上限收紧，0 取部署默认值。`PUT` 的签名绑定 `contentType`，写入方必须原样发送该请求头，否则 403。签名地址不进日志，客户端不得自行延长有效期。' },
   [generation + 'GetCapabilities']: { mode: 'authenticated', description: '托管生成协议协商。**这是预留契约：服务端实现之前对它的调用返回 unimplemented，客户端保持休眠（纯本地正常态），不得呈现为错误或引导用户配置。** 返回 `protocolVersion`（客户端内置 1，不相等即休眠）、`features`（v1 必须含 `catalog`；未知值忽略）、`pollAfterMs`（建议轮询间隔，0 取客户端默认）、`limits`（prompt 字符数、参考输入条数、参数字节数、文本字符数、各媒体输出字节数与幂等保留期）以及 `modelTypes`/`cancelScopes`（小写词汇）。该接口不返回模型、地址或凭据。' },
   [generation + 'GetCatalog']: { mode: 'authenticated', get: true, description: '服务端权威模型目录，部署级只读：只要求已认证，不按画布或主体过滤。`available=false` 时 `models` 为空、`reason` 给出稳定小写原因码，客户端保持休眠而不是当错误。`catalogRevision` 单调递增，仅用于目录失效判断，不是数据事实源。每个模型自足描述 `modelKey`/`providerId`/`providerModelId`/`modelType`/`title`/`inputSchema`/`defaultInput`/`bindings`/`promptRequirement`/`cancel`/`taskTimeoutMs`/`interaction`/`capabilityFacts`/`capabilities`/`executable`/`unavailableReason`/`schemaRevision`/`configVersion`；单个模型形状非法或 `modelType` 未知时客户端只跳过该模型，不得让整份目录不可用。模型描述、能力自述与原因不得含地址、密钥或内部代号。' },
   [generation + 'SubmitTask']: { mode: 'permission', permission: 'canvas.write', scope: 'canvasId', description: '幂等受理任务，立即返回、不等待终态（执行模型是客户端轮询）。请求携带 `canvasId`、`idempotencyKey`（客户端 workerTaskKey）、模型键/类型、prompt、已校验 `parameters`、稳定参考输入 `inputs`（`assetId`/`role`/`storageKey`/`mediaType`/`mediaKind`，不含 URL 与字节）、`interaction` 与 `admission`（`catalogRevision`/`schemaRevision`/`configVersion`，用提交时看到的目录版本固定受理基准）；`canvasId` 决定 `canvas.write` 判定与结果对象的作用域。同 key 同 payload 返回首次受理的任务（`reused=true`，不重复创建上游任务），同 key 不同 payload 不创建第二个任务并以稳定码 `key-reused` 收敛；画布未同步、目录已变化、超限等稳定拒绝同样不创建上游任务。业务失败以任务状态 `TASK_STATE_FAILED` + `TaskFailure.code` 表达（客户端经 GetTask 读取），只有"调用是否到达服务端"才用 Connect 错误。幂等保留期由 GetCapabilities 的 `limits.idempotencyRetentionSeconds` 公布，必须覆盖客户端重启补提窗口。' },
   [generation + 'GetTask']: { mode: 'permission', permission: 'canvas.read', scope: 'canvasId', get: true, description: '读取任务状态/进度/结果/稳定错误，只读。请求用 `taskId` 或 `idempotencyKey` 二选一引用任务（`idempotencyKey` 指向该 key 首次受理的任务）；授权按任务所属画布判定 `canvas.read`：不在可读范围与不存在返回同一结论，避免成为存在性探测。`state` 是 TaskState 六态枚举（`TASK_STATE_UNSPECIFIED` 按失败处理）；`progress` 是 0..1 小数，只用于展示；`recordRevision` 单调递增，客户端只在它前进时更新视图。成功终态给 `result`（`text` 或 `media`：媒体只有稳定 `storageKey` + `contentType`/`size`/`checksum`/`durationSeconds`/`poster`，**不含签名地址**）；失败终态给 `error`（`code` 与客户端稳定码表同字面量，`message` 是已脱敏固定短语）。任务超出幂等保留期或数据丢失时按不可恢复失败收敛，客户端不自动重提交。' },
   [generation + 'CancelTask']: { mode: 'permission', permission: 'canvas.write', scope: 'canvasId', description: '幂等取消，终态异步收敛：重复取消返回当前状态，已是终态时不做改变。请求只有 `taskId`；授权按任务所属画布判定 `canvas.write`。响应返回任务当前 `state` 与实际生效范围 `cancelScope`（`remote`=已向上游请求取消，`local`=只在服务端侧收敛，`unsupported`=模型不支持取消、状态不变）。模型声明 `cancel=unsupported` 时客户端只做本地取消，不调用本接口。' },
+  [generationAdmin + 'ListGenerationTasks']: { ...admin, get: true, description: '管理端生成任务列表（只读，仅部署管理员）。按创建时间倒序，keyset 游标分页；返回摘要，不含 prompt、参数、输入与结果正文。可按画布、主体、状态、模型、错误码与时间范围过滤。非管理员返回 permission_denied，不是空列表。' },
+  [generationAdmin + 'GetGenerationTask']: { ...admin, get: true, description: '管理端生成任务详情（只读，仅部署管理员）。返回触发参数、受理快照（node/run/interaction/admission）、结果、错误与时间线；留痕单独分页读取。客户端不调用本接口。' },
+  [generationAdmin + 'ListGenerationTraces']: { ...admin, get: true, description: '管理端读取任务的上游调用留痕（只读，仅部署管理员）。留痕有界、脱敏、短保留，不构成审计流水；过期或关闭由 GetGenerationTask 的 traceState 表达。' },
+  [generationAdmin + 'GetGenerationSummary']: { ...admin, get: true, description: '管理端生成任务汇总（只读，仅部署管理员）。与列表相同过滤，返回状态/模型/错误分布、结果字节与耗时统计。扫描有上限，超出时 truncated 为 true。' },
+  [storageAdmin + 'ListCanvasObjects']: { ...admin, get: true, description: '管理端按前缀列举一张画布的对象元数据（只读，仅部署管理员）。不返回对象字节；后端列举没有 Content-Type 时该字段为空，不逐对象 HEAD。' },
+  [storageAdmin + 'GetCanvasStorageUsage']: { ...admin, get: true, description: '管理端读取画布存储用量（只读，仅部署管理员）。来自派生索引，可能不完整；reconciledAt 为空表示从未重算。不是对象存储的绝对事实。' },
+  [storageAdmin + 'ReconcileCanvasStorage']: { ...admin, description: '管理端重算画布的派生对象索引（仅部署管理员）。有界、可断点续扫；只写/删索引行，不删除对象字节。restart=true 从头部重扫。' },
+  [storageAdmin + 'CreateCanvasObjectUrl']: { ...admin, get: true, description: '管理端为预览/下载签短时 GET 地址（仅部署管理员）。复用同一签名器与既有字节入口，不新增字节通道；已删除画布拒绝签名（proxy 与 backend 模式一致）；管理端不能签 PUT 或删除对象。' },
 };
 
 const error = (description) => ({ description, content: { 'application/json': { schema: { $ref: '#/components/schemas/connect.error' } } } });

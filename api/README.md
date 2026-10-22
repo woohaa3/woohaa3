@@ -38,3 +38,5 @@ Use the pinned `protoc-gen-go` version to avoid unrelated binding changes. The C
 The Swagger HTML embeds the contract and loads Swagger UI from a public CDN, so viewing it requires network access. Try it out and remote validation are disabled. RPC documentation describes Connect JSON requests; binary WebSocket synchronization is defined separately in [session.proto](proto/woohaa/canvas/v1/session.proto).
 
 When changing proto methods or runtime authorization/limits, update the supplemental OpenAPI descriptions and regenerate documentation. Keep private addresses, secrets and customer details out of public contracts and comments.
+
+Generation administration and storage administration RPCs provide deployment-administrator read access and controlled usage recomputation. Authorization, limits and response details are documented in the generated OpenAPI reference.

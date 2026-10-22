@@ -24,6 +24,23 @@ message CanvasStats {
   uint64 head_seq = 5;
 }
 
+// 管理端的运维摘要：文档存储之外，媒体与生成活动的只读口径。
+//
+// 它只跟着 AdminListCanvases 的 include_ops 返回，不扩大客户端已消费的
+// CanvasStats。三个口径必须分开显示，不能合并成一个「占用」数字。
+message CanvasOpsSummary {
+  string canvas_id = 1;
+  uint64 generation_task_count = 2;
+  // 只计 TASK_STATE_FAILED，不含 CANCELLED。
+  uint64 generation_failed_count = 3;
+  // RFC 3339；空表示没有任务。
+  string generation_last_at = 4;
+  uint64 media_object_count = 5;
+  uint64 media_total_bytes = 6;
+  // RFC 3339；空表示索引从未重算，媒体数字可能缺失。
+  string media_reconciled_at = 7;
+}
+
 // 一条已持久化记录的元数据。字节不在列表里：清单回答"这条画布由哪些记录组成、
 // 快照覆盖到哪里"，读字节是另一个动作（AdminReadCanvasRecords）。
 message CanvasRecord {
@@ -185,12 +202,17 @@ message AdminListCanvasesRequest {
   bool include_deleted = 1;
   // 为 true 时一并返回存储统计（管理端运维页需要）。
   bool include_stats = 2;
+  // 为 true 时一并返回媒体与生成的运维摘要。与 include_stats 分开，
+  // 两个读模型的数据源不同。
+  bool include_ops = 3;
 }
 
 message AdminListCanvasesResponse {
   repeated Canvas canvases = 1;
   // 与 canvases 按 canvas_id 对齐的统计；include_stats=false 时为空。
   repeated CanvasStats stats = 2;
+  // 与 canvases 按 canvas_id 对齐的运维摘要；include_ops=false 时为空。
+  repeated CanvasOpsSummary ops = 3;
 }
 
 // 协作者关系。作者本人不在成员表里：作者身份只有一个来源（Canvas.created_by）。

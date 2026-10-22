@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file woohaa/canvas/v1/canvas.proto.
  */
 export const file_woohaa_canvas_v1_canvas: GenFile = /*@__PURE__*/
-  fileDesc("Ch13b29oYWEvY2FudmFzL3YxL2NhbnZhcy5wcm90bxIQd29vaGFhLmNhbnZhcy52MSJ6CgtDYW52YXNTdGF0cxIRCgljYW52YXNfaWQYASABKAkSFAoMcmVjb3JkX2NvdW50GAIgASgNEhMKC3RvdGFsX2J5dGVzGAMgASgEEhsKE3NuYXBzaG90X2NvdmVyc19zZXEYBCABKAQSEAoIaGVhZF9zZXEYBSABKAQiYQoMQ2FudmFzUmVjb3JkEgsKA3NlcRgBIAEoBBIOCgZjdXJzb3IYAiABKAQSEgoKc2l6ZV9ieXRlcxgDIAEoBBIQCghzbmFwc2hvdBgEIAEoCBIOCgZjb3ZlcnMYBSABKAQiWAodQWRtaW5MaXN0Q2FudmFzUmVjb3Jkc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJEhEKCWFmdGVyX3NlcRgCIAEoBBIRCglwYWdlX3NpemUYAyABKAUiaQoeQWRtaW5MaXN0Q2FudmFzUmVjb3Jkc1Jlc3BvbnNlEi8KB3JlY29yZHMYASADKAsyHi53b29oYWEuY2FudmFzLnYxLkNhbnZhc1JlY29yZBIWCg5uZXh0X2FmdGVyX3NlcRgCIAEoBCJQChBDYW52YXNSZWNvcmREYXRhEi4KBnJlY29yZBgBIAEoCzIeLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUmVjb3JkEgwKBGRhdGEYAiABKAwiWAodQWRtaW5SZWFkQ2FudmFzUmVjb3Jkc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJEhEKCWFmdGVyX3NlcRgCIAEoBBIRCgltYXhfYnl0ZXMYAyABKA0iewoeQWRtaW5SZWFkQ2FudmFzUmVjb3Jkc1Jlc3BvbnNlEjMKB3JlY29yZHMYASADKAsyIi53b29oYWEuY2FudmFzLnYxLkNhbnZhc1JlY29yZERhdGESFgoObmV4dF9hZnRlcl9zZXEYAiABKAQSDAoEbW9yZRgDIAEoCCLrAQoGQ2FudmFzEhEKCWNhbnZhc19pZBgBIAEoCRISCgpjcmVhdGVkX2J5GAIgASgJEiwKBXN0YXRlGAMgASgOMh0ud29vaGFhLmNhbnZhcy52MS5DYW52YXNTdGF0ZRISCgpjcmVhdGVkX2F0GAQgASgJEhIKCnVwZGF0ZWRfYXQYBSABKAkSDQoFdGl0bGUYBiABKAkSKgoEcm9sZRgHIAEoDjIcLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUm9sZRIQCghpc19vd25lchgIIAEoCBIXCg9hbGxvd2VkX2FjdGlvbnMYCSADKAkiJAoTQ3JlYXRlQ2FudmFzUmVxdWVzdBINCgV0aXRsZRgBIAEoCSJAChRDcmVhdGVDYW52YXNSZXNwb25zZRIoCgZjYW52YXMYASABKAsyGC53b29oYWEuY2FudmFzLnYxLkNhbnZhcyIlChBHZXRDYW52YXNSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCSI9ChFHZXRDYW52YXNSZXNwb25zZRIoCgZjYW52YXMYASABKAsyGC53b29oYWEuY2FudmFzLnYxLkNhbnZhcyJUChNSZW5hbWVDYW52YXNSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCRINCgV0aXRsZRgCIAEoCRIbChNleHBlY3RlZF91cGRhdGVkX2F0GAMgASgJIkAKFFJlbmFtZUNhbnZhc1Jlc3BvbnNlEigKBmNhbnZhcxgBIAEoCzIYLndvb2hhYS5jYW52YXMudjEuQ2FudmFzIigKE0RlbGV0ZUNhbnZhc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJIhYKFERlbGV0ZUNhbnZhc1Jlc3BvbnNlIhcKFUxpc3RNeUNhbnZhc2VzUmVxdWVzdCJEChZMaXN0TXlDYW52YXNlc1Jlc3BvbnNlEioKCGNhbnZhc2VzGAEgAygLMhgud29vaGFhLmNhbnZhcy52MS5DYW52YXMiSgoYQWRtaW5MaXN0Q2FudmFzZXNSZXF1ZXN0EhcKD2luY2x1ZGVfZGVsZXRlZBgBIAEoCBIVCg1pbmNsdWRlX3N0YXRzGAIgASgIInUKGUFkbWluTGlzdENhbnZhc2VzUmVzcG9uc2USKgoIY2FudmFzZXMYASADKAsyGC53b29oYWEuY2FudmFzLnYxLkNhbnZhcxIsCgVzdGF0cxgCIAMoCzIdLndvb2hhYS5jYW52YXMudjEuQ2FudmFzU3RhdHMidAoMQ2FudmFzTWVtYmVyEhAKCGFjdG9yX2lkGAEgASgJEioKBHJvbGUYAiABKA4yHC53b29oYWEuY2FudmFzLnYxLkNhbnZhc1JvbGUSEgoKZ3JhbnRlZF9ieRgDIAEoCRISCgpncmFudGVkX2F0GAQgASgJIi0KGExpc3RDYW52YXNNZW1iZXJzUmVxdWVzdBIRCgljYW52YXNfaWQYASABKAkiWwoZTGlzdENhbnZhc01lbWJlcnNSZXNwb25zZRINCgVvd25lchgBIAEoCRIvCgdtZW1iZXJzGAIgAygLMh4ud29vaGFhLmNhbnZhcy52MS5DYW52YXNNZW1iZXIibAoZVXBzZXJ0Q2FudmFzTWVtYmVyUmVxdWVzdBIRCgljYW52YXNfaWQYASABKAkSEAoIYWN0b3JfaWQYAiABKAkSKgoEcm9sZRgDIAEoDjIcLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUm9sZSJMChpVcHNlcnRDYW52YXNNZW1iZXJSZXNwb25zZRIuCgZtZW1iZXIYASABKAsyHi53b29oYWEuY2FudmFzLnYxLkNhbnZhc01lbWJlciJAChlSZW1vdmVDYW52YXNNZW1iZXJSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCRIQCghhY3Rvcl9pZBgCIAEoCSIcChpSZW1vdmVDYW52YXNNZW1iZXJSZXNwb25zZSJ4ChVUcmFuc2ZlckNhbnZhc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJEhEKCW5ld19vd25lchgCIAEoCRI5ChNwcmV2aW91c19vd25lcl9yb2xlGAMgASgOMhwud29vaGFhLmNhbnZhcy52MS5DYW52YXNSb2xlIkIKFlRyYW5zZmVyQ2FudmFzUmVzcG9uc2USKAoGY2FudmFzGAEgASgLMhgud29vaGFhLmNhbnZhcy52MS5DYW52YXMizAEKDENhbnZhc0ludml0ZRIRCglpbnZpdGVfaWQYASABKAkSKgoEcm9sZRgCIAEoDjIcLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUm9sZRISCgpjcmVhdGVkX2J5GAMgASgJEhIKCmNyZWF0ZWRfYXQYBCABKAkSEgoKZXhwaXJlc19hdBgFIAEoCRIWCg5hY2NlcHRlZF9jb3VudBgGIAEoBRIYChBsYXN0X2FjY2VwdGVkX2F0GAcgASgJEg8KB3Jldm9rZWQYCCABKAgidgoZQ3JlYXRlQ2FudmFzSW52aXRlUmVxdWVzdBIRCgljYW52YXNfaWQYASABKAkSKgoEcm9sZRgCIAEoDjIcLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUm9sZRIaChJleHBpcmVzX2luX3NlY29uZHMYAyABKAMifAoaQ3JlYXRlQ2FudmFzSW52aXRlUmVzcG9uc2USEQoJaW52aXRlX2lkGAEgASgJEioKBHJvbGUYAiABKA4yHC53b29oYWEuY2FudmFzLnYxLkNhbnZhc1JvbGUSEgoKZXhwaXJlc19hdBgDIAEoCRILCgN1cmwYBCABKAkiLQoYTGlzdENhbnZhc0ludml0ZXNSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCSJMChlMaXN0Q2FudmFzSW52aXRlc1Jlc3BvbnNlEi8KB2ludml0ZXMYASADKAsyHi53b29oYWEuY2FudmFzLnYxLkNhbnZhc0ludml0ZSJBChlSZXZva2VDYW52YXNJbnZpdGVSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCRIRCglpbnZpdGVfaWQYAiABKAkiHAoaUmV2b2tlQ2FudmFzSW52aXRlUmVzcG9uc2UiKgoZQWNjZXB0Q2FudmFzSW52aXRlUmVxdWVzdBINCgV0b2tlbhgBIAEoCSJGChpBY2NlcHRDYW52YXNJbnZpdGVSZXNwb25zZRIoCgZjYW52YXMYASABKAsyGC53b29oYWEuY2FudmFzLnYxLkNhbnZhcyIqChVHZXRDYW52YXNTaGFyZVJlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJIlsKFkdldENhbnZhc1NoYXJlUmVzcG9uc2USLwoEbW9kZRgBIAEoDjIhLndvb2hhYS5jYW52YXMudjEuQ2FudmFzU2hhcmVNb2RlEhAKCHJldmlzaW9uGAIgASgDInkKGFVwZGF0ZUNhbnZhc1NoYXJlUmVxdWVzdBIRCgljYW52YXNfaWQYASABKAkSLwoEbW9kZRgCIAEoDjIhLndvb2hhYS5jYW52YXMudjEuQ2FudmFzU2hhcmVNb2RlEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgDIl4KGVVwZGF0ZUNhbnZhc1NoYXJlUmVzcG9uc2USLwoEbW9kZRgBIAEoDjIhLndvb2hhYS5jYW52YXMudjEuQ2FudmFzU2hhcmVNb2RlEhAKCHJldmlzaW9uGAIgASgDIhUKE0xpc3RDYW52YXNlc1JlcXVlc3QiRwoUTGlzdENhbnZhc2VzUmVzcG9uc2USLwoIY2FudmFzZXMYASADKAsyHS53b29oYWEuY2FudmFzLnYxLkNhbnZhc1N0YXRzIioKFUdldENhbnZhc1N0YXRzUmVxdWVzdBIRCgljYW52YXNfaWQYASABKAkiRgoWR2V0Q2FudmFzU3RhdHNSZXNwb25zZRIsCgVzdGF0cxgBIAEoCzIdLndvb2hhYS5jYW52YXMudjEuQ2FudmFzU3RhdHMiKQoUQ29tcGFjdENhbnZhc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJInQKFUNvbXBhY3RDYW52YXNSZXNwb25zZRItCgZiZWZvcmUYASABKAsyHS53b29oYWEuY2FudmFzLnYxLkNhbnZhc1N0YXRzEiwKBWFmdGVyGAIgASgLMh0ud29vaGFhLmNhbnZhcy52MS5DYW52YXNTdGF0cypZCgpDYW52YXNSb2xlEhsKF0NBTlZBU19ST0xFX1VOU1BFQ0lGSUVEEAASFgoSQ0FOVkFTX1JPTEVfVklFV0VSEAESFgoSQ0FOVkFTX1JPTEVfRURJVE9SEAIqeQoLQ2FudmFzU3RhdGUSHAoYQ0FOVkFTX1NUQVRFX1VOU1BFQ0lGSUVEEAASFwoTQ0FOVkFTX1NUQVRFX0FDVElWRRABEhkKFUNBTlZBU19TVEFURV9ERUxFVElORxACEhgKFENBTlZBU19TVEFURV9ERUxFVEVEEAMqoAEKD0NhbnZhc1NoYXJlTW9kZRIhCh1DQU5WQVNfU0hBUkVfTU9ERV9VTlNQRUNJRklFRBAAEiAKHENBTlZBU19TSEFSRV9NT0RFX1JFU1RSSUNURUQQARIjCh9DQU5WQVNfU0hBUkVfTU9ERV9FVkVSWU9ORV9WSUVXEAISIwofQ0FOVkFTX1NIQVJFX01PREVfRVZFUllPTkVfRURJVBADMu0RCg1DYW52YXNTZXJ2aWNlEl0KDENyZWF0ZUNhbnZhcxIlLndvb2hhYS5jYW52YXMudjEuQ3JlYXRlQ2FudmFzUmVxdWVzdBomLndvb2hhYS5jYW52YXMudjEuQ3JlYXRlQ2FudmFzUmVzcG9uc2USVAoJR2V0Q2FudmFzEiIud29vaGFhLmNhbnZhcy52MS5HZXRDYW52YXNSZXF1ZXN0GiMud29vaGFhLmNhbnZhcy52MS5HZXRDYW52YXNSZXNwb25zZRJdCgxSZW5hbWVDYW52YXMSJS53b29oYWEuY2FudmFzLnYxLlJlbmFtZUNhbnZhc1JlcXVlc3QaJi53b29oYWEuY2FudmFzLnYxLlJlbmFtZUNhbnZhc1Jlc3BvbnNlEl0KDERlbGV0ZUNhbnZhcxIlLndvb2hhYS5jYW52YXMudjEuRGVsZXRlQ2FudmFzUmVxdWVzdBomLndvb2hhYS5jYW52YXMudjEuRGVsZXRlQ2FudmFzUmVzcG9uc2USaAoOTGlzdE15Q2FudmFzZXMSJy53b29oYWEuY2FudmFzLnYxLkxpc3RNeUNhbnZhc2VzUmVxdWVzdBooLndvb2hhYS5jYW52YXMudjEuTGlzdE15Q2FudmFzZXNSZXNwb25zZSIDkAIBEnEKEUFkbWluTGlzdENhbnZhc2VzEioud29vaGFhLmNhbnZhcy52MS5BZG1pbkxpc3RDYW52YXNlc1JlcXVlc3QaKy53b29oYWEuY2FudmFzLnYxLkFkbWluTGlzdENhbnZhc2VzUmVzcG9uc2UiA5ACARKAAQoWQWRtaW5MaXN0Q2FudmFzUmVjb3JkcxIvLndvb2hhYS5jYW52YXMudjEuQWRtaW5MaXN0Q2FudmFzUmVjb3Jkc1JlcXVlc3QaMC53b29oYWEuY2FudmFzLnYxLkFkbWluTGlzdENhbnZhc1JlY29yZHNSZXNwb25zZSIDkAIBEoABChZBZG1pblJlYWRDYW52YXNSZWNvcmRzEi8ud29vaGFhLmNhbnZhcy52MS5BZG1pblJlYWRDYW52YXNSZWNvcmRzUmVxdWVzdBowLndvb2hhYS5jYW52YXMudjEuQWRtaW5SZWFkQ2FudmFzUmVjb3Jkc1Jlc3BvbnNlIgOQAgEScQoRTGlzdENhbnZhc01lbWJlcnMSKi53b29oYWEuY2FudmFzLnYxLkxpc3RDYW52YXNNZW1iZXJzUmVxdWVzdBorLndvb2hhYS5jYW52YXMudjEuTGlzdENhbnZhc01lbWJlcnNSZXNwb25zZSIDkAIBEm8KElVwc2VydENhbnZhc01lbWJlchIrLndvb2hhYS5jYW52YXMudjEuVXBzZXJ0Q2FudmFzTWVtYmVyUmVxdWVzdBosLndvb2hhYS5jYW52YXMudjEuVXBzZXJ0Q2FudmFzTWVtYmVyUmVzcG9uc2USbwoSUmVtb3ZlQ2FudmFzTWVtYmVyEisud29vaGFhLmNhbnZhcy52MS5SZW1vdmVDYW52YXNNZW1iZXJSZXF1ZXN0Giwud29vaGFhLmNhbnZhcy52MS5SZW1vdmVDYW52YXNNZW1iZXJSZXNwb25zZRJjCg5UcmFuc2ZlckNhbnZhcxInLndvb2hhYS5jYW52YXMudjEuVHJhbnNmZXJDYW52YXNSZXF1ZXN0Gigud29vaGFhLmNhbnZhcy52MS5UcmFuc2ZlckNhbnZhc1Jlc3BvbnNlEm8KEkNyZWF0ZUNhbnZhc0ludml0ZRIrLndvb2hhYS5jYW52YXMudjEuQ3JlYXRlQ2FudmFzSW52aXRlUmVxdWVzdBosLndvb2hhYS5jYW52YXMudjEuQ3JlYXRlQ2FudmFzSW52aXRlUmVzcG9uc2UScQoRTGlzdENhbnZhc0ludml0ZXMSKi53b29oYWEuY2FudmFzLnYxLkxpc3RDYW52YXNJbnZpdGVzUmVxdWVzdBorLndvb2hhYS5jYW52YXMudjEuTGlzdENhbnZhc0ludml0ZXNSZXNwb25zZSIDkAIBEm8KElJldm9rZUNhbnZhc0ludml0ZRIrLndvb2hhYS5jYW52YXMudjEuUmV2b2tlQ2FudmFzSW52aXRlUmVxdWVzdBosLndvb2hhYS5jYW52YXMudjEuUmV2b2tlQ2FudmFzSW52aXRlUmVzcG9uc2USbwoSQWNjZXB0Q2FudmFzSW52aXRlEisud29vaGFhLmNhbnZhcy52MS5BY2NlcHRDYW52YXNJbnZpdGVSZXF1ZXN0Giwud29vaGFhLmNhbnZhcy52MS5BY2NlcHRDYW52YXNJbnZpdGVSZXNwb25zZRJoCg5HZXRDYW52YXNTaGFyZRInLndvb2hhYS5jYW52YXMudjEuR2V0Q2FudmFzU2hhcmVSZXF1ZXN0Gigud29vaGFhLmNhbnZhcy52MS5HZXRDYW52YXNTaGFyZVJlc3BvbnNlIgOQAgESbAoRVXBkYXRlQ2FudmFzU2hhcmUSKi53b29oYWEuY2FudmFzLnYxLlVwZGF0ZUNhbnZhc1NoYXJlUmVxdWVzdBorLndvb2hhYS5jYW52YXMudjEuVXBkYXRlQ2FudmFzU2hhcmVSZXNwb25zZRJgCg1Db21wYWN0Q2FudmFzEiYud29vaGFhLmNhbnZhcy52MS5Db21wYWN0Q2FudmFzUmVxdWVzdBonLndvb2hhYS5jYW52YXMudjEuQ29tcGFjdENhbnZhc1Jlc3BvbnNlEmgKDkdldENhbnZhc1N0YXRzEicud29vaGFhLmNhbnZhcy52MS5HZXRDYW52YXNTdGF0c1JlcXVlc3QaKC53b29oYWEuY2FudmFzLnYxLkdldENhbnZhc1N0YXRzUmVzcG9uc2UiA5ACARJiCgxMaXN0Q2FudmFzZXMSJS53b29oYWEuY2FudmFzLnYxLkxpc3RDYW52YXNlc1JlcXVlc3QaJi53b29oYWEuY2FudmFzLnYxLkxpc3RDYW52YXNlc1Jlc3BvbnNlIgOQAgFCLlosd29vaGFhMy9hcGkvZ2VuL2dvL3dvb2hhYS9jYW52YXMvdjE7Y2FudmFzdjFiBnByb3RvMw");
+  fileDesc("Ch13b29oYWEvY2FudmFzL3YxL2NhbnZhcy5wcm90bxIQd29vaGFhLmNhbnZhcy52MSJ6CgtDYW52YXNTdGF0cxIRCgljYW52YXNfaWQYASABKAkSFAoMcmVjb3JkX2NvdW50GAIgASgNEhMKC3RvdGFsX2J5dGVzGAMgASgEEhsKE3NuYXBzaG90X2NvdmVyc19zZXEYBCABKAQSEAoIaGVhZF9zZXEYBSABKAQi1QEKEENhbnZhc09wc1N1bW1hcnkSEQoJY2FudmFzX2lkGAEgASgJEh0KFWdlbmVyYXRpb25fdGFza19jb3VudBgCIAEoBBIfChdnZW5lcmF0aW9uX2ZhaWxlZF9jb3VudBgDIAEoBBIaChJnZW5lcmF0aW9uX2xhc3RfYXQYBCABKAkSGgoSbWVkaWFfb2JqZWN0X2NvdW50GAUgASgEEhkKEW1lZGlhX3RvdGFsX2J5dGVzGAYgASgEEhsKE21lZGlhX3JlY29uY2lsZWRfYXQYByABKAkiYQoMQ2FudmFzUmVjb3JkEgsKA3NlcRgBIAEoBBIOCgZjdXJzb3IYAiABKAQSEgoKc2l6ZV9ieXRlcxgDIAEoBBIQCghzbmFwc2hvdBgEIAEoCBIOCgZjb3ZlcnMYBSABKAQiWAodQWRtaW5MaXN0Q2FudmFzUmVjb3Jkc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJEhEKCWFmdGVyX3NlcRgCIAEoBBIRCglwYWdlX3NpemUYAyABKAUiaQoeQWRtaW5MaXN0Q2FudmFzUmVjb3Jkc1Jlc3BvbnNlEi8KB3JlY29yZHMYASADKAsyHi53b29oYWEuY2FudmFzLnYxLkNhbnZhc1JlY29yZBIWCg5uZXh0X2FmdGVyX3NlcRgCIAEoBCJQChBDYW52YXNSZWNvcmREYXRhEi4KBnJlY29yZBgBIAEoCzIeLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUmVjb3JkEgwKBGRhdGEYAiABKAwiWAodQWRtaW5SZWFkQ2FudmFzUmVjb3Jkc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJEhEKCWFmdGVyX3NlcRgCIAEoBBIRCgltYXhfYnl0ZXMYAyABKA0iewoeQWRtaW5SZWFkQ2FudmFzUmVjb3Jkc1Jlc3BvbnNlEjMKB3JlY29yZHMYASADKAsyIi53b29oYWEuY2FudmFzLnYxLkNhbnZhc1JlY29yZERhdGESFgoObmV4dF9hZnRlcl9zZXEYAiABKAQSDAoEbW9yZRgDIAEoCCLrAQoGQ2FudmFzEhEKCWNhbnZhc19pZBgBIAEoCRISCgpjcmVhdGVkX2J5GAIgASgJEiwKBXN0YXRlGAMgASgOMh0ud29vaGFhLmNhbnZhcy52MS5DYW52YXNTdGF0ZRISCgpjcmVhdGVkX2F0GAQgASgJEhIKCnVwZGF0ZWRfYXQYBSABKAkSDQoFdGl0bGUYBiABKAkSKgoEcm9sZRgHIAEoDjIcLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUm9sZRIQCghpc19vd25lchgIIAEoCBIXCg9hbGxvd2VkX2FjdGlvbnMYCSADKAkiJAoTQ3JlYXRlQ2FudmFzUmVxdWVzdBINCgV0aXRsZRgBIAEoCSJAChRDcmVhdGVDYW52YXNSZXNwb25zZRIoCgZjYW52YXMYASABKAsyGC53b29oYWEuY2FudmFzLnYxLkNhbnZhcyIlChBHZXRDYW52YXNSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCSI9ChFHZXRDYW52YXNSZXNwb25zZRIoCgZjYW52YXMYASABKAsyGC53b29oYWEuY2FudmFzLnYxLkNhbnZhcyJUChNSZW5hbWVDYW52YXNSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCRINCgV0aXRsZRgCIAEoCRIbChNleHBlY3RlZF91cGRhdGVkX2F0GAMgASgJIkAKFFJlbmFtZUNhbnZhc1Jlc3BvbnNlEigKBmNhbnZhcxgBIAEoCzIYLndvb2hhYS5jYW52YXMudjEuQ2FudmFzIigKE0RlbGV0ZUNhbnZhc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJIhYKFERlbGV0ZUNhbnZhc1Jlc3BvbnNlIhcKFUxpc3RNeUNhbnZhc2VzUmVxdWVzdCJEChZMaXN0TXlDYW52YXNlc1Jlc3BvbnNlEioKCGNhbnZhc2VzGAEgAygLMhgud29vaGFhLmNhbnZhcy52MS5DYW52YXMiXwoYQWRtaW5MaXN0Q2FudmFzZXNSZXF1ZXN0EhcKD2luY2x1ZGVfZGVsZXRlZBgBIAEoCBIVCg1pbmNsdWRlX3N0YXRzGAIgASgIEhMKC2luY2x1ZGVfb3BzGAMgASgIIqYBChlBZG1pbkxpc3RDYW52YXNlc1Jlc3BvbnNlEioKCGNhbnZhc2VzGAEgAygLMhgud29vaGFhLmNhbnZhcy52MS5DYW52YXMSLAoFc3RhdHMYAiADKAsyHS53b29oYWEuY2FudmFzLnYxLkNhbnZhc1N0YXRzEi8KA29wcxgDIAMoCzIiLndvb2hhYS5jYW52YXMudjEuQ2FudmFzT3BzU3VtbWFyeSJ0CgxDYW52YXNNZW1iZXISEAoIYWN0b3JfaWQYASABKAkSKgoEcm9sZRgCIAEoDjIcLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUm9sZRISCgpncmFudGVkX2J5GAMgASgJEhIKCmdyYW50ZWRfYXQYBCABKAkiLQoYTGlzdENhbnZhc01lbWJlcnNSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCSJbChlMaXN0Q2FudmFzTWVtYmVyc1Jlc3BvbnNlEg0KBW93bmVyGAEgASgJEi8KB21lbWJlcnMYAiADKAsyHi53b29oYWEuY2FudmFzLnYxLkNhbnZhc01lbWJlciJsChlVcHNlcnRDYW52YXNNZW1iZXJSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCRIQCghhY3Rvcl9pZBgCIAEoCRIqCgRyb2xlGAMgASgOMhwud29vaGFhLmNhbnZhcy52MS5DYW52YXNSb2xlIkwKGlVwc2VydENhbnZhc01lbWJlclJlc3BvbnNlEi4KBm1lbWJlchgBIAEoCzIeLndvb2hhYS5jYW52YXMudjEuQ2FudmFzTWVtYmVyIkAKGVJlbW92ZUNhbnZhc01lbWJlclJlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJEhAKCGFjdG9yX2lkGAIgASgJIhwKGlJlbW92ZUNhbnZhc01lbWJlclJlc3BvbnNlIngKFVRyYW5zZmVyQ2FudmFzUmVxdWVzdBIRCgljYW52YXNfaWQYASABKAkSEQoJbmV3X293bmVyGAIgASgJEjkKE3ByZXZpb3VzX293bmVyX3JvbGUYAyABKA4yHC53b29oYWEuY2FudmFzLnYxLkNhbnZhc1JvbGUiQgoWVHJhbnNmZXJDYW52YXNSZXNwb25zZRIoCgZjYW52YXMYASABKAsyGC53b29oYWEuY2FudmFzLnYxLkNhbnZhcyLMAQoMQ2FudmFzSW52aXRlEhEKCWludml0ZV9pZBgBIAEoCRIqCgRyb2xlGAIgASgOMhwud29vaGFhLmNhbnZhcy52MS5DYW52YXNSb2xlEhIKCmNyZWF0ZWRfYnkYAyABKAkSEgoKY3JlYXRlZF9hdBgEIAEoCRISCgpleHBpcmVzX2F0GAUgASgJEhYKDmFjY2VwdGVkX2NvdW50GAYgASgFEhgKEGxhc3RfYWNjZXB0ZWRfYXQYByABKAkSDwoHcmV2b2tlZBgIIAEoCCJ2ChlDcmVhdGVDYW52YXNJbnZpdGVSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCRIqCgRyb2xlGAIgASgOMhwud29vaGFhLmNhbnZhcy52MS5DYW52YXNSb2xlEhoKEmV4cGlyZXNfaW5fc2Vjb25kcxgDIAEoAyJ8ChpDcmVhdGVDYW52YXNJbnZpdGVSZXNwb25zZRIRCglpbnZpdGVfaWQYASABKAkSKgoEcm9sZRgCIAEoDjIcLndvb2hhYS5jYW52YXMudjEuQ2FudmFzUm9sZRISCgpleHBpcmVzX2F0GAMgASgJEgsKA3VybBgEIAEoCSItChhMaXN0Q2FudmFzSW52aXRlc1JlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJIkwKGUxpc3RDYW52YXNJbnZpdGVzUmVzcG9uc2USLwoHaW52aXRlcxgBIAMoCzIeLndvb2hhYS5jYW52YXMudjEuQ2FudmFzSW52aXRlIkEKGVJldm9rZUNhbnZhc0ludml0ZVJlcXVlc3QSEQoJY2FudmFzX2lkGAEgASgJEhEKCWludml0ZV9pZBgCIAEoCSIcChpSZXZva2VDYW52YXNJbnZpdGVSZXNwb25zZSIqChlBY2NlcHRDYW52YXNJbnZpdGVSZXF1ZXN0Eg0KBXRva2VuGAEgASgJIkYKGkFjY2VwdENhbnZhc0ludml0ZVJlc3BvbnNlEigKBmNhbnZhcxgBIAEoCzIYLndvb2hhYS5jYW52YXMudjEuQ2FudmFzIioKFUdldENhbnZhc1NoYXJlUmVxdWVzdBIRCgljYW52YXNfaWQYASABKAkiWwoWR2V0Q2FudmFzU2hhcmVSZXNwb25zZRIvCgRtb2RlGAEgASgOMiEud29vaGFhLmNhbnZhcy52MS5DYW52YXNTaGFyZU1vZGUSEAoIcmV2aXNpb24YAiABKAMieQoYVXBkYXRlQ2FudmFzU2hhcmVSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCRIvCgRtb2RlGAIgASgOMiEud29vaGFhLmNhbnZhcy52MS5DYW52YXNTaGFyZU1vZGUSGQoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKAMiXgoZVXBkYXRlQ2FudmFzU2hhcmVSZXNwb25zZRIvCgRtb2RlGAEgASgOMiEud29vaGFhLmNhbnZhcy52MS5DYW52YXNTaGFyZU1vZGUSEAoIcmV2aXNpb24YAiABKAMiFQoTTGlzdENhbnZhc2VzUmVxdWVzdCJHChRMaXN0Q2FudmFzZXNSZXNwb25zZRIvCghjYW52YXNlcxgBIAMoCzIdLndvb2hhYS5jYW52YXMudjEuQ2FudmFzU3RhdHMiKgoVR2V0Q2FudmFzU3RhdHNSZXF1ZXN0EhEKCWNhbnZhc19pZBgBIAEoCSJGChZHZXRDYW52YXNTdGF0c1Jlc3BvbnNlEiwKBXN0YXRzGAEgASgLMh0ud29vaGFhLmNhbnZhcy52MS5DYW52YXNTdGF0cyIpChRDb21wYWN0Q2FudmFzUmVxdWVzdBIRCgljYW52YXNfaWQYASABKAkidAoVQ29tcGFjdENhbnZhc1Jlc3BvbnNlEi0KBmJlZm9yZRgBIAEoCzIdLndvb2hhYS5jYW52YXMudjEuQ2FudmFzU3RhdHMSLAoFYWZ0ZXIYAiABKAsyHS53b29oYWEuY2FudmFzLnYxLkNhbnZhc1N0YXRzKlkKCkNhbnZhc1JvbGUSGwoXQ0FOVkFTX1JPTEVfVU5TUEVDSUZJRUQQABIWChJDQU5WQVNfUk9MRV9WSUVXRVIQARIWChJDQU5WQVNfUk9MRV9FRElUT1IQAip5CgtDYW52YXNTdGF0ZRIcChhDQU5WQVNfU1RBVEVfVU5TUEVDSUZJRUQQABIXChNDQU5WQVNfU1RBVEVfQUNUSVZFEAESGQoVQ0FOVkFTX1NUQVRFX0RFTEVUSU5HEAISGAoUQ0FOVkFTX1NUQVRFX0RFTEVURUQQAyqgAQoPQ2FudmFzU2hhcmVNb2RlEiEKHUNBTlZBU19TSEFSRV9NT0RFX1VOU1BFQ0lGSUVEEAASIAocQ0FOVkFTX1NIQVJFX01PREVfUkVTVFJJQ1RFRBABEiMKH0NBTlZBU19TSEFSRV9NT0RFX0VWRVJZT05FX1ZJRVcQAhIjCh9DQU5WQVNfU0hBUkVfTU9ERV9FVkVSWU9ORV9FRElUEAMy7REKDUNhbnZhc1NlcnZpY2USXQoMQ3JlYXRlQ2FudmFzEiUud29vaGFhLmNhbnZhcy52MS5DcmVhdGVDYW52YXNSZXF1ZXN0GiYud29vaGFhLmNhbnZhcy52MS5DcmVhdGVDYW52YXNSZXNwb25zZRJUCglHZXRDYW52YXMSIi53b29oYWEuY2FudmFzLnYxLkdldENhbnZhc1JlcXVlc3QaIy53b29oYWEuY2FudmFzLnYxLkdldENhbnZhc1Jlc3BvbnNlEl0KDFJlbmFtZUNhbnZhcxIlLndvb2hhYS5jYW52YXMudjEuUmVuYW1lQ2FudmFzUmVxdWVzdBomLndvb2hhYS5jYW52YXMudjEuUmVuYW1lQ2FudmFzUmVzcG9uc2USXQoMRGVsZXRlQ2FudmFzEiUud29vaGFhLmNhbnZhcy52MS5EZWxldGVDYW52YXNSZXF1ZXN0GiYud29vaGFhLmNhbnZhcy52MS5EZWxldGVDYW52YXNSZXNwb25zZRJoCg5MaXN0TXlDYW52YXNlcxInLndvb2hhYS5jYW52YXMudjEuTGlzdE15Q2FudmFzZXNSZXF1ZXN0Gigud29vaGFhLmNhbnZhcy52MS5MaXN0TXlDYW52YXNlc1Jlc3BvbnNlIgOQAgEScQoRQWRtaW5MaXN0Q2FudmFzZXMSKi53b29oYWEuY2FudmFzLnYxLkFkbWluTGlzdENhbnZhc2VzUmVxdWVzdBorLndvb2hhYS5jYW52YXMudjEuQWRtaW5MaXN0Q2FudmFzZXNSZXNwb25zZSIDkAIBEoABChZBZG1pbkxpc3RDYW52YXNSZWNvcmRzEi8ud29vaGFhLmNhbnZhcy52MS5BZG1pbkxpc3RDYW52YXNSZWNvcmRzUmVxdWVzdBowLndvb2hhYS5jYW52YXMudjEuQWRtaW5MaXN0Q2FudmFzUmVjb3Jkc1Jlc3BvbnNlIgOQAgESgAEKFkFkbWluUmVhZENhbnZhc1JlY29yZHMSLy53b29oYWEuY2FudmFzLnYxLkFkbWluUmVhZENhbnZhc1JlY29yZHNSZXF1ZXN0GjAud29vaGFhLmNhbnZhcy52MS5BZG1pblJlYWRDYW52YXNSZWNvcmRzUmVzcG9uc2UiA5ACARJxChFMaXN0Q2FudmFzTWVtYmVycxIqLndvb2hhYS5jYW52YXMudjEuTGlzdENhbnZhc01lbWJlcnNSZXF1ZXN0Gisud29vaGFhLmNhbnZhcy52MS5MaXN0Q2FudmFzTWVtYmVyc1Jlc3BvbnNlIgOQAgESbwoSVXBzZXJ0Q2FudmFzTWVtYmVyEisud29vaGFhLmNhbnZhcy52MS5VcHNlcnRDYW52YXNNZW1iZXJSZXF1ZXN0Giwud29vaGFhLmNhbnZhcy52MS5VcHNlcnRDYW52YXNNZW1iZXJSZXNwb25zZRJvChJSZW1vdmVDYW52YXNNZW1iZXISKy53b29oYWEuY2FudmFzLnYxLlJlbW92ZUNhbnZhc01lbWJlclJlcXVlc3QaLC53b29oYWEuY2FudmFzLnYxLlJlbW92ZUNhbnZhc01lbWJlclJlc3BvbnNlEmMKDlRyYW5zZmVyQ2FudmFzEicud29vaGFhLmNhbnZhcy52MS5UcmFuc2ZlckNhbnZhc1JlcXVlc3QaKC53b29oYWEuY2FudmFzLnYxLlRyYW5zZmVyQ2FudmFzUmVzcG9uc2USbwoSQ3JlYXRlQ2FudmFzSW52aXRlEisud29vaGFhLmNhbnZhcy52MS5DcmVhdGVDYW52YXNJbnZpdGVSZXF1ZXN0Giwud29vaGFhLmNhbnZhcy52MS5DcmVhdGVDYW52YXNJbnZpdGVSZXNwb25zZRJxChFMaXN0Q2FudmFzSW52aXRlcxIqLndvb2hhYS5jYW52YXMudjEuTGlzdENhbnZhc0ludml0ZXNSZXF1ZXN0Gisud29vaGFhLmNhbnZhcy52MS5MaXN0Q2FudmFzSW52aXRlc1Jlc3BvbnNlIgOQAgESbwoSUmV2b2tlQ2FudmFzSW52aXRlEisud29vaGFhLmNhbnZhcy52MS5SZXZva2VDYW52YXNJbnZpdGVSZXF1ZXN0Giwud29vaGFhLmNhbnZhcy52MS5SZXZva2VDYW52YXNJbnZpdGVSZXNwb25zZRJvChJBY2NlcHRDYW52YXNJbnZpdGUSKy53b29oYWEuY2FudmFzLnYxLkFjY2VwdENhbnZhc0ludml0ZVJlcXVlc3QaLC53b29oYWEuY2FudmFzLnYxLkFjY2VwdENhbnZhc0ludml0ZVJlc3BvbnNlEmgKDkdldENhbnZhc1NoYXJlEicud29vaGFhLmNhbnZhcy52MS5HZXRDYW52YXNTaGFyZVJlcXVlc3QaKC53b29oYWEuY2FudmFzLnYxLkdldENhbnZhc1NoYXJlUmVzcG9uc2UiA5ACARJsChFVcGRhdGVDYW52YXNTaGFyZRIqLndvb2hhYS5jYW52YXMudjEuVXBkYXRlQ2FudmFzU2hhcmVSZXF1ZXN0Gisud29vaGFhLmNhbnZhcy52MS5VcGRhdGVDYW52YXNTaGFyZVJlc3BvbnNlEmAKDUNvbXBhY3RDYW52YXMSJi53b29oYWEuY2FudmFzLnYxLkNvbXBhY3RDYW52YXNSZXF1ZXN0Gicud29vaGFhLmNhbnZhcy52MS5Db21wYWN0Q2FudmFzUmVzcG9uc2USaAoOR2V0Q2FudmFzU3RhdHMSJy53b29oYWEuY2FudmFzLnYxLkdldENhbnZhc1N0YXRzUmVxdWVzdBooLndvb2hhYS5jYW52YXMudjEuR2V0Q2FudmFzU3RhdHNSZXNwb25zZSIDkAIBEmIKDExpc3RDYW52YXNlcxIlLndvb2hhYS5jYW52YXMudjEuTGlzdENhbnZhc2VzUmVxdWVzdBomLndvb2hhYS5jYW52YXMudjEuTGlzdENhbnZhc2VzUmVzcG9uc2UiA5ACAUIuWix3b29oYWEzL2FwaS9nZW4vZ28vd29vaGFhL2NhbnZhcy92MTtjYW52YXN2MWIGcHJvdG8z");
 
 /**
  * @generated from message woohaa.canvas.v1.CanvasStats
@@ -54,6 +54,64 @@ export type CanvasStats = Message<"woohaa.canvas.v1.CanvasStats"> & {
  */
 export const CanvasStatsSchema: GenMessage<CanvasStats> = /*@__PURE__*/
   messageDesc(file_woohaa_canvas_v1_canvas, 0);
+
+/**
+ * 管理端的运维摘要：文档存储之外，媒体与生成活动的只读口径。
+ *
+ * 它只跟着 AdminListCanvases 的 include_ops 返回，不扩大客户端已消费的
+ * CanvasStats。三个口径必须分开显示，不能合并成一个「占用」数字。
+ *
+ * @generated from message woohaa.canvas.v1.CanvasOpsSummary
+ */
+export type CanvasOpsSummary = Message<"woohaa.canvas.v1.CanvasOpsSummary"> & {
+  /**
+   * @generated from field: string canvas_id = 1;
+   */
+  canvasId: string;
+
+  /**
+   * @generated from field: uint64 generation_task_count = 2;
+   */
+  generationTaskCount: bigint;
+
+  /**
+   * 只计 TASK_STATE_FAILED，不含 CANCELLED。
+   *
+   * @generated from field: uint64 generation_failed_count = 3;
+   */
+  generationFailedCount: bigint;
+
+  /**
+   * RFC 3339；空表示没有任务。
+   *
+   * @generated from field: string generation_last_at = 4;
+   */
+  generationLastAt: string;
+
+  /**
+   * @generated from field: uint64 media_object_count = 5;
+   */
+  mediaObjectCount: bigint;
+
+  /**
+   * @generated from field: uint64 media_total_bytes = 6;
+   */
+  mediaTotalBytes: bigint;
+
+  /**
+   * RFC 3339；空表示索引从未重算，媒体数字可能缺失。
+   *
+   * @generated from field: string media_reconciled_at = 7;
+   */
+  mediaReconciledAt: string;
+};
+
+/**
+ * Describes the message woohaa.canvas.v1.CanvasOpsSummary.
+ * Use `create(CanvasOpsSummarySchema)` to create a new message.
+ */
+export const CanvasOpsSummarySchema: GenMessage<CanvasOpsSummary> = /*@__PURE__*/
+  messageDesc(file_woohaa_canvas_v1_canvas, 1);
 
 /**
  * 一条已持久化记录的元数据。字节不在列表里：清单回答"这条画布由哪些记录组成、
@@ -100,7 +158,7 @@ export type CanvasRecord = Message<"woohaa.canvas.v1.CanvasRecord"> & {
  * Use `create(CanvasRecordSchema)` to create a new message.
  */
 export const CanvasRecordSchema: GenMessage<CanvasRecord> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 1);
+  messageDesc(file_woohaa_canvas_v1_canvas, 2);
 
 /**
  * @generated from message woohaa.canvas.v1.AdminListCanvasRecordsRequest
@@ -131,7 +189,7 @@ export type AdminListCanvasRecordsRequest = Message<"woohaa.canvas.v1.AdminListC
  * Use `create(AdminListCanvasRecordsRequestSchema)` to create a new message.
  */
 export const AdminListCanvasRecordsRequestSchema: GenMessage<AdminListCanvasRecordsRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 2);
+  messageDesc(file_woohaa_canvas_v1_canvas, 3);
 
 /**
  * @generated from message woohaa.canvas.v1.AdminListCanvasRecordsResponse
@@ -156,7 +214,7 @@ export type AdminListCanvasRecordsResponse = Message<"woohaa.canvas.v1.AdminList
  * Use `create(AdminListCanvasRecordsResponseSchema)` to create a new message.
  */
 export const AdminListCanvasRecordsResponseSchema: GenMessage<AdminListCanvasRecordsResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 3);
+  messageDesc(file_woohaa_canvas_v1_canvas, 4);
 
 /**
  * 记录元数据 + 字节。字节原样返回，服务端不解析 Yjs。
@@ -180,7 +238,7 @@ export type CanvasRecordData = Message<"woohaa.canvas.v1.CanvasRecordData"> & {
  * Use `create(CanvasRecordDataSchema)` to create a new message.
  */
 export const CanvasRecordDataSchema: GenMessage<CanvasRecordData> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 4);
+  messageDesc(file_woohaa_canvas_v1_canvas, 5);
 
 /**
  * @generated from message woohaa.canvas.v1.AdminReadCanvasRecordsRequest
@@ -216,7 +274,7 @@ export type AdminReadCanvasRecordsRequest = Message<"woohaa.canvas.v1.AdminReadC
  * Use `create(AdminReadCanvasRecordsRequestSchema)` to create a new message.
  */
 export const AdminReadCanvasRecordsRequestSchema: GenMessage<AdminReadCanvasRecordsRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 5);
+  messageDesc(file_woohaa_canvas_v1_canvas, 6);
 
 /**
  * @generated from message woohaa.canvas.v1.AdminReadCanvasRecordsResponse
@@ -248,7 +306,7 @@ export type AdminReadCanvasRecordsResponse = Message<"woohaa.canvas.v1.AdminRead
  * Use `create(AdminReadCanvasRecordsResponseSchema)` to create a new message.
  */
 export const AdminReadCanvasRecordsResponseSchema: GenMessage<AdminReadCanvasRecordsResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 6);
+  messageDesc(file_woohaa_canvas_v1_canvas, 7);
 
 /**
  * 画布元数据。内容不在里面：文档只经 /ws 会话同步，服务端不解析 Yjs。
@@ -323,7 +381,7 @@ export type Canvas = Message<"woohaa.canvas.v1.Canvas"> & {
  * Use `create(CanvasSchema)` to create a new message.
  */
 export const CanvasSchema: GenMessage<Canvas> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 7);
+  messageDesc(file_woohaa_canvas_v1_canvas, 8);
 
 /**
  * @generated from message woohaa.canvas.v1.CreateCanvasRequest
@@ -342,7 +400,7 @@ export type CreateCanvasRequest = Message<"woohaa.canvas.v1.CreateCanvasRequest"
  * Use `create(CreateCanvasRequestSchema)` to create a new message.
  */
 export const CreateCanvasRequestSchema: GenMessage<CreateCanvasRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 8);
+  messageDesc(file_woohaa_canvas_v1_canvas, 9);
 
 /**
  * @generated from message woohaa.canvas.v1.CreateCanvasResponse
@@ -359,7 +417,7 @@ export type CreateCanvasResponse = Message<"woohaa.canvas.v1.CreateCanvasRespons
  * Use `create(CreateCanvasResponseSchema)` to create a new message.
  */
 export const CreateCanvasResponseSchema: GenMessage<CreateCanvasResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 9);
+  messageDesc(file_woohaa_canvas_v1_canvas, 10);
 
 /**
  * @generated from message woohaa.canvas.v1.GetCanvasRequest
@@ -376,7 +434,7 @@ export type GetCanvasRequest = Message<"woohaa.canvas.v1.GetCanvasRequest"> & {
  * Use `create(GetCanvasRequestSchema)` to create a new message.
  */
 export const GetCanvasRequestSchema: GenMessage<GetCanvasRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 10);
+  messageDesc(file_woohaa_canvas_v1_canvas, 11);
 
 /**
  * @generated from message woohaa.canvas.v1.GetCanvasResponse
@@ -393,7 +451,7 @@ export type GetCanvasResponse = Message<"woohaa.canvas.v1.GetCanvasResponse"> & 
  * Use `create(GetCanvasResponseSchema)` to create a new message.
  */
 export const GetCanvasResponseSchema: GenMessage<GetCanvasResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 11);
+  messageDesc(file_woohaa_canvas_v1_canvas, 12);
 
 /**
  * @generated from message woohaa.canvas.v1.RenameCanvasRequest
@@ -422,7 +480,7 @@ export type RenameCanvasRequest = Message<"woohaa.canvas.v1.RenameCanvasRequest"
  * Use `create(RenameCanvasRequestSchema)` to create a new message.
  */
 export const RenameCanvasRequestSchema: GenMessage<RenameCanvasRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 12);
+  messageDesc(file_woohaa_canvas_v1_canvas, 13);
 
 /**
  * @generated from message woohaa.canvas.v1.RenameCanvasResponse
@@ -439,7 +497,7 @@ export type RenameCanvasResponse = Message<"woohaa.canvas.v1.RenameCanvasRespons
  * Use `create(RenameCanvasResponseSchema)` to create a new message.
  */
 export const RenameCanvasResponseSchema: GenMessage<RenameCanvasResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 13);
+  messageDesc(file_woohaa_canvas_v1_canvas, 14);
 
 /**
  * @generated from message woohaa.canvas.v1.DeleteCanvasRequest
@@ -456,7 +514,7 @@ export type DeleteCanvasRequest = Message<"woohaa.canvas.v1.DeleteCanvasRequest"
  * Use `create(DeleteCanvasRequestSchema)` to create a new message.
  */
 export const DeleteCanvasRequestSchema: GenMessage<DeleteCanvasRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 14);
+  messageDesc(file_woohaa_canvas_v1_canvas, 15);
 
 /**
  * @generated from message woohaa.canvas.v1.DeleteCanvasResponse
@@ -469,7 +527,7 @@ export type DeleteCanvasResponse = Message<"woohaa.canvas.v1.DeleteCanvasRespons
  * Use `create(DeleteCanvasResponseSchema)` to create a new message.
  */
 export const DeleteCanvasResponseSchema: GenMessage<DeleteCanvasResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 15);
+  messageDesc(file_woohaa_canvas_v1_canvas, 16);
 
 /**
  * "我的画布"：作为作者或协作者的那些。
@@ -487,7 +545,7 @@ export type ListMyCanvasesRequest = Message<"woohaa.canvas.v1.ListMyCanvasesRequ
  * Use `create(ListMyCanvasesRequestSchema)` to create a new message.
  */
 export const ListMyCanvasesRequestSchema: GenMessage<ListMyCanvasesRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 16);
+  messageDesc(file_woohaa_canvas_v1_canvas, 17);
 
 /**
  * @generated from message woohaa.canvas.v1.ListMyCanvasesResponse
@@ -504,7 +562,7 @@ export type ListMyCanvasesResponse = Message<"woohaa.canvas.v1.ListMyCanvasesRes
  * Use `create(ListMyCanvasesResponseSchema)` to create a new message.
  */
 export const ListMyCanvasesResponseSchema: GenMessage<ListMyCanvasesResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 17);
+  messageDesc(file_woohaa_canvas_v1_canvas, 18);
 
 /**
  * 管理端全量列表。
@@ -525,6 +583,14 @@ export type AdminListCanvasesRequest = Message<"woohaa.canvas.v1.AdminListCanvas
    * @generated from field: bool include_stats = 2;
    */
   includeStats: boolean;
+
+  /**
+   * 为 true 时一并返回媒体与生成的运维摘要。与 include_stats 分开，
+   * 两个读模型的数据源不同。
+   *
+   * @generated from field: bool include_ops = 3;
+   */
+  includeOps: boolean;
 };
 
 /**
@@ -532,7 +598,7 @@ export type AdminListCanvasesRequest = Message<"woohaa.canvas.v1.AdminListCanvas
  * Use `create(AdminListCanvasesRequestSchema)` to create a new message.
  */
 export const AdminListCanvasesRequestSchema: GenMessage<AdminListCanvasesRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 18);
+  messageDesc(file_woohaa_canvas_v1_canvas, 19);
 
 /**
  * @generated from message woohaa.canvas.v1.AdminListCanvasesResponse
@@ -549,6 +615,13 @@ export type AdminListCanvasesResponse = Message<"woohaa.canvas.v1.AdminListCanva
    * @generated from field: repeated woohaa.canvas.v1.CanvasStats stats = 2;
    */
   stats: CanvasStats[];
+
+  /**
+   * 与 canvases 按 canvas_id 对齐的运维摘要；include_ops=false 时为空。
+   *
+   * @generated from field: repeated woohaa.canvas.v1.CanvasOpsSummary ops = 3;
+   */
+  ops: CanvasOpsSummary[];
 };
 
 /**
@@ -556,7 +629,7 @@ export type AdminListCanvasesResponse = Message<"woohaa.canvas.v1.AdminListCanva
  * Use `create(AdminListCanvasesResponseSchema)` to create a new message.
  */
 export const AdminListCanvasesResponseSchema: GenMessage<AdminListCanvasesResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 19);
+  messageDesc(file_woohaa_canvas_v1_canvas, 20);
 
 /**
  * 协作者关系。作者本人不在成员表里：作者身份只有一个来源（Canvas.created_by）。
@@ -594,7 +667,7 @@ export type CanvasMember = Message<"woohaa.canvas.v1.CanvasMember"> & {
  * Use `create(CanvasMemberSchema)` to create a new message.
  */
 export const CanvasMemberSchema: GenMessage<CanvasMember> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 20);
+  messageDesc(file_woohaa_canvas_v1_canvas, 21);
 
 /**
  * @generated from message woohaa.canvas.v1.ListCanvasMembersRequest
@@ -611,7 +684,7 @@ export type ListCanvasMembersRequest = Message<"woohaa.canvas.v1.ListCanvasMembe
  * Use `create(ListCanvasMembersRequestSchema)` to create a new message.
  */
 export const ListCanvasMembersRequestSchema: GenMessage<ListCanvasMembersRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 21);
+  messageDesc(file_woohaa_canvas_v1_canvas, 22);
 
 /**
  * @generated from message woohaa.canvas.v1.ListCanvasMembersResponse
@@ -635,7 +708,7 @@ export type ListCanvasMembersResponse = Message<"woohaa.canvas.v1.ListCanvasMemb
  * Use `create(ListCanvasMembersResponseSchema)` to create a new message.
  */
 export const ListCanvasMembersResponseSchema: GenMessage<ListCanvasMembersResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 22);
+  messageDesc(file_woohaa_canvas_v1_canvas, 23);
 
 /**
  * @generated from message woohaa.canvas.v1.UpsertCanvasMemberRequest
@@ -662,7 +735,7 @@ export type UpsertCanvasMemberRequest = Message<"woohaa.canvas.v1.UpsertCanvasMe
  * Use `create(UpsertCanvasMemberRequestSchema)` to create a new message.
  */
 export const UpsertCanvasMemberRequestSchema: GenMessage<UpsertCanvasMemberRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 23);
+  messageDesc(file_woohaa_canvas_v1_canvas, 24);
 
 /**
  * @generated from message woohaa.canvas.v1.UpsertCanvasMemberResponse
@@ -679,7 +752,7 @@ export type UpsertCanvasMemberResponse = Message<"woohaa.canvas.v1.UpsertCanvasM
  * Use `create(UpsertCanvasMemberResponseSchema)` to create a new message.
  */
 export const UpsertCanvasMemberResponseSchema: GenMessage<UpsertCanvasMemberResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 24);
+  messageDesc(file_woohaa_canvas_v1_canvas, 25);
 
 /**
  * @generated from message woohaa.canvas.v1.RemoveCanvasMemberRequest
@@ -701,7 +774,7 @@ export type RemoveCanvasMemberRequest = Message<"woohaa.canvas.v1.RemoveCanvasMe
  * Use `create(RemoveCanvasMemberRequestSchema)` to create a new message.
  */
 export const RemoveCanvasMemberRequestSchema: GenMessage<RemoveCanvasMemberRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 25);
+  messageDesc(file_woohaa_canvas_v1_canvas, 26);
 
 /**
  * @generated from message woohaa.canvas.v1.RemoveCanvasMemberResponse
@@ -714,7 +787,7 @@ export type RemoveCanvasMemberResponse = Message<"woohaa.canvas.v1.RemoveCanvasM
  * Use `create(RemoveCanvasMemberResponseSchema)` to create a new message.
  */
 export const RemoveCanvasMemberResponseSchema: GenMessage<RemoveCanvasMemberResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 26);
+  messageDesc(file_woohaa_canvas_v1_canvas, 27);
 
 /**
  * TransferCanvas 把作者身份转给另一个主体（离职代管、项目移交）。
@@ -749,7 +822,7 @@ export type TransferCanvasRequest = Message<"woohaa.canvas.v1.TransferCanvasRequ
  * Use `create(TransferCanvasRequestSchema)` to create a new message.
  */
 export const TransferCanvasRequestSchema: GenMessage<TransferCanvasRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 27);
+  messageDesc(file_woohaa_canvas_v1_canvas, 28);
 
 /**
  * @generated from message woohaa.canvas.v1.TransferCanvasResponse
@@ -766,7 +839,7 @@ export type TransferCanvasResponse = Message<"woohaa.canvas.v1.TransferCanvasRes
  * Use `create(TransferCanvasResponseSchema)` to create a new message.
  */
 export const TransferCanvasResponseSchema: GenMessage<TransferCanvasResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 28);
+  messageDesc(file_woohaa_canvas_v1_canvas, 29);
 
 /**
  * 一条画布协作邀请。
@@ -831,7 +904,7 @@ export type CanvasInvite = Message<"woohaa.canvas.v1.CanvasInvite"> & {
  * Use `create(CanvasInviteSchema)` to create a new message.
  */
 export const CanvasInviteSchema: GenMessage<CanvasInvite> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 29);
+  messageDesc(file_woohaa_canvas_v1_canvas, 30);
 
 /**
  * @generated from message woohaa.canvas.v1.CreateCanvasInviteRequest
@@ -860,7 +933,7 @@ export type CreateCanvasInviteRequest = Message<"woohaa.canvas.v1.CreateCanvasIn
  * Use `create(CreateCanvasInviteRequestSchema)` to create a new message.
  */
 export const CreateCanvasInviteRequestSchema: GenMessage<CreateCanvasInviteRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 30);
+  messageDesc(file_woohaa_canvas_v1_canvas, 31);
 
 /**
  * @generated from message woohaa.canvas.v1.CreateCanvasInviteResponse
@@ -894,7 +967,7 @@ export type CreateCanvasInviteResponse = Message<"woohaa.canvas.v1.CreateCanvasI
  * Use `create(CreateCanvasInviteResponseSchema)` to create a new message.
  */
 export const CreateCanvasInviteResponseSchema: GenMessage<CreateCanvasInviteResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 31);
+  messageDesc(file_woohaa_canvas_v1_canvas, 32);
 
 /**
  * @generated from message woohaa.canvas.v1.ListCanvasInvitesRequest
@@ -911,7 +984,7 @@ export type ListCanvasInvitesRequest = Message<"woohaa.canvas.v1.ListCanvasInvit
  * Use `create(ListCanvasInvitesRequestSchema)` to create a new message.
  */
 export const ListCanvasInvitesRequestSchema: GenMessage<ListCanvasInvitesRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 32);
+  messageDesc(file_woohaa_canvas_v1_canvas, 33);
 
 /**
  * @generated from message woohaa.canvas.v1.ListCanvasInvitesResponse
@@ -928,7 +1001,7 @@ export type ListCanvasInvitesResponse = Message<"woohaa.canvas.v1.ListCanvasInvi
  * Use `create(ListCanvasInvitesResponseSchema)` to create a new message.
  */
 export const ListCanvasInvitesResponseSchema: GenMessage<ListCanvasInvitesResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 33);
+  messageDesc(file_woohaa_canvas_v1_canvas, 34);
 
 /**
  * @generated from message woohaa.canvas.v1.RevokeCanvasInviteRequest
@@ -950,7 +1023,7 @@ export type RevokeCanvasInviteRequest = Message<"woohaa.canvas.v1.RevokeCanvasIn
  * Use `create(RevokeCanvasInviteRequestSchema)` to create a new message.
  */
 export const RevokeCanvasInviteRequestSchema: GenMessage<RevokeCanvasInviteRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 34);
+  messageDesc(file_woohaa_canvas_v1_canvas, 35);
 
 /**
  * @generated from message woohaa.canvas.v1.RevokeCanvasInviteResponse
@@ -963,7 +1036,7 @@ export type RevokeCanvasInviteResponse = Message<"woohaa.canvas.v1.RevokeCanvasI
  * Use `create(RevokeCanvasInviteResponseSchema)` to create a new message.
  */
 export const RevokeCanvasInviteResponseSchema: GenMessage<RevokeCanvasInviteResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 35);
+  messageDesc(file_woohaa_canvas_v1_canvas, 36);
 
 /**
  * @generated from message woohaa.canvas.v1.AcceptCanvasInviteRequest
@@ -982,7 +1055,7 @@ export type AcceptCanvasInviteRequest = Message<"woohaa.canvas.v1.AcceptCanvasIn
  * Use `create(AcceptCanvasInviteRequestSchema)` to create a new message.
  */
 export const AcceptCanvasInviteRequestSchema: GenMessage<AcceptCanvasInviteRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 36);
+  messageDesc(file_woohaa_canvas_v1_canvas, 37);
 
 /**
  * @generated from message woohaa.canvas.v1.AcceptCanvasInviteResponse
@@ -999,7 +1072,7 @@ export type AcceptCanvasInviteResponse = Message<"woohaa.canvas.v1.AcceptCanvasI
  * Use `create(AcceptCanvasInviteResponseSchema)` to create a new message.
  */
 export const AcceptCanvasInviteResponseSchema: GenMessage<AcceptCanvasInviteResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 37);
+  messageDesc(file_woohaa_canvas_v1_canvas, 38);
 
 /**
  * @generated from message woohaa.canvas.v1.GetCanvasShareRequest
@@ -1016,7 +1089,7 @@ export type GetCanvasShareRequest = Message<"woohaa.canvas.v1.GetCanvasShareRequ
  * Use `create(GetCanvasShareRequestSchema)` to create a new message.
  */
 export const GetCanvasShareRequestSchema: GenMessage<GetCanvasShareRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 38);
+  messageDesc(file_woohaa_canvas_v1_canvas, 39);
 
 /**
  * @generated from message woohaa.canvas.v1.GetCanvasShareResponse
@@ -1040,7 +1113,7 @@ export type GetCanvasShareResponse = Message<"woohaa.canvas.v1.GetCanvasShareRes
  * Use `create(GetCanvasShareResponseSchema)` to create a new message.
  */
 export const GetCanvasShareResponseSchema: GenMessage<GetCanvasShareResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 39);
+  messageDesc(file_woohaa_canvas_v1_canvas, 40);
 
 /**
  * @generated from message woohaa.canvas.v1.UpdateCanvasShareRequest
@@ -1069,7 +1142,7 @@ export type UpdateCanvasShareRequest = Message<"woohaa.canvas.v1.UpdateCanvasSha
  * Use `create(UpdateCanvasShareRequestSchema)` to create a new message.
  */
 export const UpdateCanvasShareRequestSchema: GenMessage<UpdateCanvasShareRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 40);
+  messageDesc(file_woohaa_canvas_v1_canvas, 41);
 
 /**
  * @generated from message woohaa.canvas.v1.UpdateCanvasShareResponse
@@ -1091,7 +1164,7 @@ export type UpdateCanvasShareResponse = Message<"woohaa.canvas.v1.UpdateCanvasSh
  * Use `create(UpdateCanvasShareResponseSchema)` to create a new message.
  */
 export const UpdateCanvasShareResponseSchema: GenMessage<UpdateCanvasShareResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 41);
+  messageDesc(file_woohaa_canvas_v1_canvas, 42);
 
 /**
  * @generated from message woohaa.canvas.v1.ListCanvasesRequest
@@ -1104,7 +1177,7 @@ export type ListCanvasesRequest = Message<"woohaa.canvas.v1.ListCanvasesRequest"
  * Use `create(ListCanvasesRequestSchema)` to create a new message.
  */
 export const ListCanvasesRequestSchema: GenMessage<ListCanvasesRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 42);
+  messageDesc(file_woohaa_canvas_v1_canvas, 43);
 
 /**
  * @generated from message woohaa.canvas.v1.ListCanvasesResponse
@@ -1121,7 +1194,7 @@ export type ListCanvasesResponse = Message<"woohaa.canvas.v1.ListCanvasesRespons
  * Use `create(ListCanvasesResponseSchema)` to create a new message.
  */
 export const ListCanvasesResponseSchema: GenMessage<ListCanvasesResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 43);
+  messageDesc(file_woohaa_canvas_v1_canvas, 44);
 
 /**
  * @generated from message woohaa.canvas.v1.GetCanvasStatsRequest
@@ -1138,7 +1211,7 @@ export type GetCanvasStatsRequest = Message<"woohaa.canvas.v1.GetCanvasStatsRequ
  * Use `create(GetCanvasStatsRequestSchema)` to create a new message.
  */
 export const GetCanvasStatsRequestSchema: GenMessage<GetCanvasStatsRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 44);
+  messageDesc(file_woohaa_canvas_v1_canvas, 45);
 
 /**
  * @generated from message woohaa.canvas.v1.GetCanvasStatsResponse
@@ -1155,7 +1228,7 @@ export type GetCanvasStatsResponse = Message<"woohaa.canvas.v1.GetCanvasStatsRes
  * Use `create(GetCanvasStatsResponseSchema)` to create a new message.
  */
 export const GetCanvasStatsResponseSchema: GenMessage<GetCanvasStatsResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 45);
+  messageDesc(file_woohaa_canvas_v1_canvas, 46);
 
 /**
  * @generated from message woohaa.canvas.v1.CompactCanvasRequest
@@ -1172,7 +1245,7 @@ export type CompactCanvasRequest = Message<"woohaa.canvas.v1.CompactCanvasReques
  * Use `create(CompactCanvasRequestSchema)` to create a new message.
  */
 export const CompactCanvasRequestSchema: GenMessage<CompactCanvasRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 46);
+  messageDesc(file_woohaa_canvas_v1_canvas, 47);
 
 /**
  * @generated from message woohaa.canvas.v1.CompactCanvasResponse
@@ -1194,7 +1267,7 @@ export type CompactCanvasResponse = Message<"woohaa.canvas.v1.CompactCanvasRespo
  * Use `create(CompactCanvasResponseSchema)` to create a new message.
  */
 export const CompactCanvasResponseSchema: GenMessage<CompactCanvasResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_canvas_v1_canvas, 47);
+  messageDesc(file_woohaa_canvas_v1_canvas, 48);
 
 /**
  * 协作者角色。只有两档：分享共创不需要更多。

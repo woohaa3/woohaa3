@@ -265,6 +265,105 @@ func (x *CanvasStats) GetHeadSeq() uint64 {
 	return 0
 }
 
+// 管理端的运维摘要：文档存储之外，媒体与生成活动的只读口径。
+//
+// 它只跟着 AdminListCanvases 的 include_ops 返回，不扩大客户端已消费的
+// CanvasStats。三个口径必须分开显示，不能合并成一个「占用」数字。
+type CanvasOpsSummary struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	CanvasId            string                 `protobuf:"bytes,1,opt,name=canvas_id,json=canvasId,proto3" json:"canvas_id,omitempty"`
+	GenerationTaskCount uint64                 `protobuf:"varint,2,opt,name=generation_task_count,json=generationTaskCount,proto3" json:"generation_task_count,omitempty"`
+	// 只计 TASK_STATE_FAILED，不含 CANCELLED。
+	GenerationFailedCount uint64 `protobuf:"varint,3,opt,name=generation_failed_count,json=generationFailedCount,proto3" json:"generation_failed_count,omitempty"`
+	// RFC 3339；空表示没有任务。
+	GenerationLastAt string `protobuf:"bytes,4,opt,name=generation_last_at,json=generationLastAt,proto3" json:"generation_last_at,omitempty"`
+	MediaObjectCount uint64 `protobuf:"varint,5,opt,name=media_object_count,json=mediaObjectCount,proto3" json:"media_object_count,omitempty"`
+	MediaTotalBytes  uint64 `protobuf:"varint,6,opt,name=media_total_bytes,json=mediaTotalBytes,proto3" json:"media_total_bytes,omitempty"`
+	// RFC 3339；空表示索引从未重算，媒体数字可能缺失。
+	MediaReconciledAt string `protobuf:"bytes,7,opt,name=media_reconciled_at,json=mediaReconciledAt,proto3" json:"media_reconciled_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *CanvasOpsSummary) Reset() {
+	*x = CanvasOpsSummary{}
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CanvasOpsSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CanvasOpsSummary) ProtoMessage() {}
+
+func (x *CanvasOpsSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CanvasOpsSummary.ProtoReflect.Descriptor instead.
+func (*CanvasOpsSummary) Descriptor() ([]byte, []int) {
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CanvasOpsSummary) GetCanvasId() string {
+	if x != nil {
+		return x.CanvasId
+	}
+	return ""
+}
+
+func (x *CanvasOpsSummary) GetGenerationTaskCount() uint64 {
+	if x != nil {
+		return x.GenerationTaskCount
+	}
+	return 0
+}
+
+func (x *CanvasOpsSummary) GetGenerationFailedCount() uint64 {
+	if x != nil {
+		return x.GenerationFailedCount
+	}
+	return 0
+}
+
+func (x *CanvasOpsSummary) GetGenerationLastAt() string {
+	if x != nil {
+		return x.GenerationLastAt
+	}
+	return ""
+}
+
+func (x *CanvasOpsSummary) GetMediaObjectCount() uint64 {
+	if x != nil {
+		return x.MediaObjectCount
+	}
+	return 0
+}
+
+func (x *CanvasOpsSummary) GetMediaTotalBytes() uint64 {
+	if x != nil {
+		return x.MediaTotalBytes
+	}
+	return 0
+}
+
+func (x *CanvasOpsSummary) GetMediaReconciledAt() string {
+	if x != nil {
+		return x.MediaReconciledAt
+	}
+	return ""
+}
+
 // 一条已持久化记录的元数据。字节不在列表里：清单回答"这条画布由哪些记录组成、
 // 快照覆盖到哪里"，读字节是另一个动作（AdminReadCanvasRecords）。
 type CanvasRecord struct {
@@ -284,7 +383,7 @@ type CanvasRecord struct {
 
 func (x *CanvasRecord) Reset() {
 	*x = CanvasRecord{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[1]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -296,7 +395,7 @@ func (x *CanvasRecord) String() string {
 func (*CanvasRecord) ProtoMessage() {}
 
 func (x *CanvasRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[1]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -309,7 +408,7 @@ func (x *CanvasRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasRecord.ProtoReflect.Descriptor instead.
 func (*CanvasRecord) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{1}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CanvasRecord) GetSeq() uint64 {
@@ -360,7 +459,7 @@ type AdminListCanvasRecordsRequest struct {
 
 func (x *AdminListCanvasRecordsRequest) Reset() {
 	*x = AdminListCanvasRecordsRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[2]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -372,7 +471,7 @@ func (x *AdminListCanvasRecordsRequest) String() string {
 func (*AdminListCanvasRecordsRequest) ProtoMessage() {}
 
 func (x *AdminListCanvasRecordsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[2]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -385,7 +484,7 @@ func (x *AdminListCanvasRecordsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminListCanvasRecordsRequest.ProtoReflect.Descriptor instead.
 func (*AdminListCanvasRecordsRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{2}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AdminListCanvasRecordsRequest) GetCanvasId() string {
@@ -421,7 +520,7 @@ type AdminListCanvasRecordsResponse struct {
 
 func (x *AdminListCanvasRecordsResponse) Reset() {
 	*x = AdminListCanvasRecordsResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[3]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -433,7 +532,7 @@ func (x *AdminListCanvasRecordsResponse) String() string {
 func (*AdminListCanvasRecordsResponse) ProtoMessage() {}
 
 func (x *AdminListCanvasRecordsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[3]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -446,7 +545,7 @@ func (x *AdminListCanvasRecordsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminListCanvasRecordsResponse.ProtoReflect.Descriptor instead.
 func (*AdminListCanvasRecordsResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{3}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AdminListCanvasRecordsResponse) GetRecords() []*CanvasRecord {
@@ -474,7 +573,7 @@ type CanvasRecordData struct {
 
 func (x *CanvasRecordData) Reset() {
 	*x = CanvasRecordData{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[4]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -486,7 +585,7 @@ func (x *CanvasRecordData) String() string {
 func (*CanvasRecordData) ProtoMessage() {}
 
 func (x *CanvasRecordData) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[4]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -499,7 +598,7 @@ func (x *CanvasRecordData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasRecordData.ProtoReflect.Descriptor instead.
 func (*CanvasRecordData) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{4}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CanvasRecordData) GetRecord() *CanvasRecord {
@@ -534,7 +633,7 @@ type AdminReadCanvasRecordsRequest struct {
 
 func (x *AdminReadCanvasRecordsRequest) Reset() {
 	*x = AdminReadCanvasRecordsRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[5]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -546,7 +645,7 @@ func (x *AdminReadCanvasRecordsRequest) String() string {
 func (*AdminReadCanvasRecordsRequest) ProtoMessage() {}
 
 func (x *AdminReadCanvasRecordsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[5]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -559,7 +658,7 @@ func (x *AdminReadCanvasRecordsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminReadCanvasRecordsRequest.ProtoReflect.Descriptor instead.
 func (*AdminReadCanvasRecordsRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{5}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AdminReadCanvasRecordsRequest) GetCanvasId() string {
@@ -597,7 +696,7 @@ type AdminReadCanvasRecordsResponse struct {
 
 func (x *AdminReadCanvasRecordsResponse) Reset() {
 	*x = AdminReadCanvasRecordsResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[6]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -609,7 +708,7 @@ func (x *AdminReadCanvasRecordsResponse) String() string {
 func (*AdminReadCanvasRecordsResponse) ProtoMessage() {}
 
 func (x *AdminReadCanvasRecordsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[6]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -622,7 +721,7 @@ func (x *AdminReadCanvasRecordsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminReadCanvasRecordsResponse.ProtoReflect.Descriptor instead.
 func (*AdminReadCanvasRecordsResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{6}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AdminReadCanvasRecordsResponse) GetRecords() []*CanvasRecordData {
@@ -673,7 +772,7 @@ type Canvas struct {
 
 func (x *Canvas) Reset() {
 	*x = Canvas{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[7]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -685,7 +784,7 @@ func (x *Canvas) String() string {
 func (*Canvas) ProtoMessage() {}
 
 func (x *Canvas) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[7]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -698,7 +797,7 @@ func (x *Canvas) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Canvas.ProtoReflect.Descriptor instead.
 func (*Canvas) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{7}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Canvas) GetCanvasId() string {
@@ -774,7 +873,7 @@ type CreateCanvasRequest struct {
 
 func (x *CreateCanvasRequest) Reset() {
 	*x = CreateCanvasRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[8]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -786,7 +885,7 @@ func (x *CreateCanvasRequest) String() string {
 func (*CreateCanvasRequest) ProtoMessage() {}
 
 func (x *CreateCanvasRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[8]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -799,7 +898,7 @@ func (x *CreateCanvasRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCanvasRequest.ProtoReflect.Descriptor instead.
 func (*CreateCanvasRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{8}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CreateCanvasRequest) GetTitle() string {
@@ -818,7 +917,7 @@ type CreateCanvasResponse struct {
 
 func (x *CreateCanvasResponse) Reset() {
 	*x = CreateCanvasResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[9]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -830,7 +929,7 @@ func (x *CreateCanvasResponse) String() string {
 func (*CreateCanvasResponse) ProtoMessage() {}
 
 func (x *CreateCanvasResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[9]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -843,7 +942,7 @@ func (x *CreateCanvasResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCanvasResponse.ProtoReflect.Descriptor instead.
 func (*CreateCanvasResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{9}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CreateCanvasResponse) GetCanvas() *Canvas {
@@ -862,7 +961,7 @@ type GetCanvasRequest struct {
 
 func (x *GetCanvasRequest) Reset() {
 	*x = GetCanvasRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[10]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -874,7 +973,7 @@ func (x *GetCanvasRequest) String() string {
 func (*GetCanvasRequest) ProtoMessage() {}
 
 func (x *GetCanvasRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[10]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -887,7 +986,7 @@ func (x *GetCanvasRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCanvasRequest.ProtoReflect.Descriptor instead.
 func (*GetCanvasRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{10}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetCanvasRequest) GetCanvasId() string {
@@ -906,7 +1005,7 @@ type GetCanvasResponse struct {
 
 func (x *GetCanvasResponse) Reset() {
 	*x = GetCanvasResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[11]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +1017,7 @@ func (x *GetCanvasResponse) String() string {
 func (*GetCanvasResponse) ProtoMessage() {}
 
 func (x *GetCanvasResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[11]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,7 +1030,7 @@ func (x *GetCanvasResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCanvasResponse.ProtoReflect.Descriptor instead.
 func (*GetCanvasResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{11}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetCanvasResponse) GetCanvas() *Canvas {
@@ -953,7 +1052,7 @@ type RenameCanvasRequest struct {
 
 func (x *RenameCanvasRequest) Reset() {
 	*x = RenameCanvasRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[12]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -965,7 +1064,7 @@ func (x *RenameCanvasRequest) String() string {
 func (*RenameCanvasRequest) ProtoMessage() {}
 
 func (x *RenameCanvasRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[12]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -978,7 +1077,7 @@ func (x *RenameCanvasRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenameCanvasRequest.ProtoReflect.Descriptor instead.
 func (*RenameCanvasRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{12}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RenameCanvasRequest) GetCanvasId() string {
@@ -1011,7 +1110,7 @@ type RenameCanvasResponse struct {
 
 func (x *RenameCanvasResponse) Reset() {
 	*x = RenameCanvasResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[13]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1023,7 +1122,7 @@ func (x *RenameCanvasResponse) String() string {
 func (*RenameCanvasResponse) ProtoMessage() {}
 
 func (x *RenameCanvasResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[13]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1036,7 +1135,7 @@ func (x *RenameCanvasResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenameCanvasResponse.ProtoReflect.Descriptor instead.
 func (*RenameCanvasResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{13}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RenameCanvasResponse) GetCanvas() *Canvas {
@@ -1055,7 +1154,7 @@ type DeleteCanvasRequest struct {
 
 func (x *DeleteCanvasRequest) Reset() {
 	*x = DeleteCanvasRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[14]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1067,7 +1166,7 @@ func (x *DeleteCanvasRequest) String() string {
 func (*DeleteCanvasRequest) ProtoMessage() {}
 
 func (x *DeleteCanvasRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[14]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1080,7 +1179,7 @@ func (x *DeleteCanvasRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCanvasRequest.ProtoReflect.Descriptor instead.
 func (*DeleteCanvasRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{14}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeleteCanvasRequest) GetCanvasId() string {
@@ -1098,7 +1197,7 @@ type DeleteCanvasResponse struct {
 
 func (x *DeleteCanvasResponse) Reset() {
 	*x = DeleteCanvasResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[15]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1110,7 +1209,7 @@ func (x *DeleteCanvasResponse) String() string {
 func (*DeleteCanvasResponse) ProtoMessage() {}
 
 func (x *DeleteCanvasResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[15]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1123,7 +1222,7 @@ func (x *DeleteCanvasResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCanvasResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCanvasResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{15}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{16}
 }
 
 // "我的画布"：作为作者或协作者的那些。
@@ -1138,7 +1237,7 @@ type ListMyCanvasesRequest struct {
 
 func (x *ListMyCanvasesRequest) Reset() {
 	*x = ListMyCanvasesRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[16]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1150,7 +1249,7 @@ func (x *ListMyCanvasesRequest) String() string {
 func (*ListMyCanvasesRequest) ProtoMessage() {}
 
 func (x *ListMyCanvasesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[16]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1163,7 +1262,7 @@ func (x *ListMyCanvasesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMyCanvasesRequest.ProtoReflect.Descriptor instead.
 func (*ListMyCanvasesRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{16}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{17}
 }
 
 type ListMyCanvasesResponse struct {
@@ -1175,7 +1274,7 @@ type ListMyCanvasesResponse struct {
 
 func (x *ListMyCanvasesResponse) Reset() {
 	*x = ListMyCanvasesResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[17]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1187,7 +1286,7 @@ func (x *ListMyCanvasesResponse) String() string {
 func (*ListMyCanvasesResponse) ProtoMessage() {}
 
 func (x *ListMyCanvasesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[17]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1200,7 +1299,7 @@ func (x *ListMyCanvasesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMyCanvasesResponse.ProtoReflect.Descriptor instead.
 func (*ListMyCanvasesResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{17}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListMyCanvasesResponse) GetCanvases() []*Canvas {
@@ -1216,14 +1315,17 @@ type AdminListCanvasesRequest struct {
 	// 包含已删除（墓碑）的画布。默认 false。
 	IncludeDeleted bool `protobuf:"varint,1,opt,name=include_deleted,json=includeDeleted,proto3" json:"include_deleted,omitempty"`
 	// 为 true 时一并返回存储统计（管理端运维页需要）。
-	IncludeStats  bool `protobuf:"varint,2,opt,name=include_stats,json=includeStats,proto3" json:"include_stats,omitempty"`
+	IncludeStats bool `protobuf:"varint,2,opt,name=include_stats,json=includeStats,proto3" json:"include_stats,omitempty"`
+	// 为 true 时一并返回媒体与生成的运维摘要。与 include_stats 分开，
+	// 两个读模型的数据源不同。
+	IncludeOps    bool `protobuf:"varint,3,opt,name=include_ops,json=includeOps,proto3" json:"include_ops,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AdminListCanvasesRequest) Reset() {
 	*x = AdminListCanvasesRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[18]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1235,7 +1337,7 @@ func (x *AdminListCanvasesRequest) String() string {
 func (*AdminListCanvasesRequest) ProtoMessage() {}
 
 func (x *AdminListCanvasesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[18]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1248,7 +1350,7 @@ func (x *AdminListCanvasesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminListCanvasesRequest.ProtoReflect.Descriptor instead.
 func (*AdminListCanvasesRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{18}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *AdminListCanvasesRequest) GetIncludeDeleted() bool {
@@ -1265,18 +1367,27 @@ func (x *AdminListCanvasesRequest) GetIncludeStats() bool {
 	return false
 }
 
+func (x *AdminListCanvasesRequest) GetIncludeOps() bool {
+	if x != nil {
+		return x.IncludeOps
+	}
+	return false
+}
+
 type AdminListCanvasesResponse struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Canvases []*Canvas              `protobuf:"bytes,1,rep,name=canvases,proto3" json:"canvases,omitempty"`
 	// 与 canvases 按 canvas_id 对齐的统计；include_stats=false 时为空。
-	Stats         []*CanvasStats `protobuf:"bytes,2,rep,name=stats,proto3" json:"stats,omitempty"`
+	Stats []*CanvasStats `protobuf:"bytes,2,rep,name=stats,proto3" json:"stats,omitempty"`
+	// 与 canvases 按 canvas_id 对齐的运维摘要；include_ops=false 时为空。
+	Ops           []*CanvasOpsSummary `protobuf:"bytes,3,rep,name=ops,proto3" json:"ops,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AdminListCanvasesResponse) Reset() {
 	*x = AdminListCanvasesResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[19]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1288,7 +1399,7 @@ func (x *AdminListCanvasesResponse) String() string {
 func (*AdminListCanvasesResponse) ProtoMessage() {}
 
 func (x *AdminListCanvasesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[19]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1301,7 +1412,7 @@ func (x *AdminListCanvasesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminListCanvasesResponse.ProtoReflect.Descriptor instead.
 func (*AdminListCanvasesResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{19}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *AdminListCanvasesResponse) GetCanvases() []*Canvas {
@@ -1314,6 +1425,13 @@ func (x *AdminListCanvasesResponse) GetCanvases() []*Canvas {
 func (x *AdminListCanvasesResponse) GetStats() []*CanvasStats {
 	if x != nil {
 		return x.Stats
+	}
+	return nil
+}
+
+func (x *AdminListCanvasesResponse) GetOps() []*CanvasOpsSummary {
+	if x != nil {
+		return x.Ops
 	}
 	return nil
 }
@@ -1333,7 +1451,7 @@ type CanvasMember struct {
 
 func (x *CanvasMember) Reset() {
 	*x = CanvasMember{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[20]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1345,7 +1463,7 @@ func (x *CanvasMember) String() string {
 func (*CanvasMember) ProtoMessage() {}
 
 func (x *CanvasMember) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[20]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1358,7 +1476,7 @@ func (x *CanvasMember) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasMember.ProtoReflect.Descriptor instead.
 func (*CanvasMember) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{20}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CanvasMember) GetActorId() string {
@@ -1398,7 +1516,7 @@ type ListCanvasMembersRequest struct {
 
 func (x *ListCanvasMembersRequest) Reset() {
 	*x = ListCanvasMembersRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[21]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1410,7 +1528,7 @@ func (x *ListCanvasMembersRequest) String() string {
 func (*ListCanvasMembersRequest) ProtoMessage() {}
 
 func (x *ListCanvasMembersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[21]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1423,7 +1541,7 @@ func (x *ListCanvasMembersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCanvasMembersRequest.ProtoReflect.Descriptor instead.
 func (*ListCanvasMembersRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{21}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ListCanvasMembersRequest) GetCanvasId() string {
@@ -1444,7 +1562,7 @@ type ListCanvasMembersResponse struct {
 
 func (x *ListCanvasMembersResponse) Reset() {
 	*x = ListCanvasMembersResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[22]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1456,7 +1574,7 @@ func (x *ListCanvasMembersResponse) String() string {
 func (*ListCanvasMembersResponse) ProtoMessage() {}
 
 func (x *ListCanvasMembersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[22]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1469,7 +1587,7 @@ func (x *ListCanvasMembersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCanvasMembersResponse.ProtoReflect.Descriptor instead.
 func (*ListCanvasMembersResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{22}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListCanvasMembersResponse) GetOwner() string {
@@ -1497,7 +1615,7 @@ type UpsertCanvasMemberRequest struct {
 
 func (x *UpsertCanvasMemberRequest) Reset() {
 	*x = UpsertCanvasMemberRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[23]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1509,7 +1627,7 @@ func (x *UpsertCanvasMemberRequest) String() string {
 func (*UpsertCanvasMemberRequest) ProtoMessage() {}
 
 func (x *UpsertCanvasMemberRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[23]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1522,7 +1640,7 @@ func (x *UpsertCanvasMemberRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertCanvasMemberRequest.ProtoReflect.Descriptor instead.
 func (*UpsertCanvasMemberRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{23}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *UpsertCanvasMemberRequest) GetCanvasId() string {
@@ -1555,7 +1673,7 @@ type UpsertCanvasMemberResponse struct {
 
 func (x *UpsertCanvasMemberResponse) Reset() {
 	*x = UpsertCanvasMemberResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[24]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1567,7 +1685,7 @@ func (x *UpsertCanvasMemberResponse) String() string {
 func (*UpsertCanvasMemberResponse) ProtoMessage() {}
 
 func (x *UpsertCanvasMemberResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[24]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1580,7 +1698,7 @@ func (x *UpsertCanvasMemberResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpsertCanvasMemberResponse.ProtoReflect.Descriptor instead.
 func (*UpsertCanvasMemberResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{24}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *UpsertCanvasMemberResponse) GetMember() *CanvasMember {
@@ -1600,7 +1718,7 @@ type RemoveCanvasMemberRequest struct {
 
 func (x *RemoveCanvasMemberRequest) Reset() {
 	*x = RemoveCanvasMemberRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[25]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1612,7 +1730,7 @@ func (x *RemoveCanvasMemberRequest) String() string {
 func (*RemoveCanvasMemberRequest) ProtoMessage() {}
 
 func (x *RemoveCanvasMemberRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[25]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1625,7 +1743,7 @@ func (x *RemoveCanvasMemberRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveCanvasMemberRequest.ProtoReflect.Descriptor instead.
 func (*RemoveCanvasMemberRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{25}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RemoveCanvasMemberRequest) GetCanvasId() string {
@@ -1650,7 +1768,7 @@ type RemoveCanvasMemberResponse struct {
 
 func (x *RemoveCanvasMemberResponse) Reset() {
 	*x = RemoveCanvasMemberResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[26]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1662,7 +1780,7 @@ func (x *RemoveCanvasMemberResponse) String() string {
 func (*RemoveCanvasMemberResponse) ProtoMessage() {}
 
 func (x *RemoveCanvasMemberResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[26]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1675,7 +1793,7 @@ func (x *RemoveCanvasMemberResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveCanvasMemberResponse.ProtoReflect.Descriptor instead.
 func (*RemoveCanvasMemberResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{26}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{27}
 }
 
 // TransferCanvas 把作者身份转给另一个主体（离职代管、项目移交）。
@@ -1695,7 +1813,7 @@ type TransferCanvasRequest struct {
 
 func (x *TransferCanvasRequest) Reset() {
 	*x = TransferCanvasRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[27]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1707,7 +1825,7 @@ func (x *TransferCanvasRequest) String() string {
 func (*TransferCanvasRequest) ProtoMessage() {}
 
 func (x *TransferCanvasRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[27]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1720,7 +1838,7 @@ func (x *TransferCanvasRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransferCanvasRequest.ProtoReflect.Descriptor instead.
 func (*TransferCanvasRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{27}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *TransferCanvasRequest) GetCanvasId() string {
@@ -1753,7 +1871,7 @@ type TransferCanvasResponse struct {
 
 func (x *TransferCanvasResponse) Reset() {
 	*x = TransferCanvasResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[28]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1765,7 +1883,7 @@ func (x *TransferCanvasResponse) String() string {
 func (*TransferCanvasResponse) ProtoMessage() {}
 
 func (x *TransferCanvasResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[28]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1778,7 +1896,7 @@ func (x *TransferCanvasResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransferCanvasResponse.ProtoReflect.Descriptor instead.
 func (*TransferCanvasResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{28}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *TransferCanvasResponse) GetCanvas() *Canvas {
@@ -1814,7 +1932,7 @@ type CanvasInvite struct {
 
 func (x *CanvasInvite) Reset() {
 	*x = CanvasInvite{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[29]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1826,7 +1944,7 @@ func (x *CanvasInvite) String() string {
 func (*CanvasInvite) ProtoMessage() {}
 
 func (x *CanvasInvite) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[29]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1839,7 +1957,7 @@ func (x *CanvasInvite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CanvasInvite.ProtoReflect.Descriptor instead.
 func (*CanvasInvite) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{29}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *CanvasInvite) GetInviteId() string {
@@ -1910,7 +2028,7 @@ type CreateCanvasInviteRequest struct {
 
 func (x *CreateCanvasInviteRequest) Reset() {
 	*x = CreateCanvasInviteRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[30]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1922,7 +2040,7 @@ func (x *CreateCanvasInviteRequest) String() string {
 func (*CreateCanvasInviteRequest) ProtoMessage() {}
 
 func (x *CreateCanvasInviteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[30]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1935,7 +2053,7 @@ func (x *CreateCanvasInviteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCanvasInviteRequest.ProtoReflect.Descriptor instead.
 func (*CreateCanvasInviteRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{30}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *CreateCanvasInviteRequest) GetCanvasId() string {
@@ -1972,7 +2090,7 @@ type CreateCanvasInviteResponse struct {
 
 func (x *CreateCanvasInviteResponse) Reset() {
 	*x = CreateCanvasInviteResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[31]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1984,7 +2102,7 @@ func (x *CreateCanvasInviteResponse) String() string {
 func (*CreateCanvasInviteResponse) ProtoMessage() {}
 
 func (x *CreateCanvasInviteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[31]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1997,7 +2115,7 @@ func (x *CreateCanvasInviteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCanvasInviteResponse.ProtoReflect.Descriptor instead.
 func (*CreateCanvasInviteResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{31}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *CreateCanvasInviteResponse) GetInviteId() string {
@@ -2037,7 +2155,7 @@ type ListCanvasInvitesRequest struct {
 
 func (x *ListCanvasInvitesRequest) Reset() {
 	*x = ListCanvasInvitesRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[32]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2049,7 +2167,7 @@ func (x *ListCanvasInvitesRequest) String() string {
 func (*ListCanvasInvitesRequest) ProtoMessage() {}
 
 func (x *ListCanvasInvitesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[32]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2062,7 +2180,7 @@ func (x *ListCanvasInvitesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCanvasInvitesRequest.ProtoReflect.Descriptor instead.
 func (*ListCanvasInvitesRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{32}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ListCanvasInvitesRequest) GetCanvasId() string {
@@ -2081,7 +2199,7 @@ type ListCanvasInvitesResponse struct {
 
 func (x *ListCanvasInvitesResponse) Reset() {
 	*x = ListCanvasInvitesResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[33]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2093,7 +2211,7 @@ func (x *ListCanvasInvitesResponse) String() string {
 func (*ListCanvasInvitesResponse) ProtoMessage() {}
 
 func (x *ListCanvasInvitesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[33]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2106,7 +2224,7 @@ func (x *ListCanvasInvitesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCanvasInvitesResponse.ProtoReflect.Descriptor instead.
 func (*ListCanvasInvitesResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{33}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListCanvasInvitesResponse) GetInvites() []*CanvasInvite {
@@ -2126,7 +2244,7 @@ type RevokeCanvasInviteRequest struct {
 
 func (x *RevokeCanvasInviteRequest) Reset() {
 	*x = RevokeCanvasInviteRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[34]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2138,7 +2256,7 @@ func (x *RevokeCanvasInviteRequest) String() string {
 func (*RevokeCanvasInviteRequest) ProtoMessage() {}
 
 func (x *RevokeCanvasInviteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[34]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2151,7 +2269,7 @@ func (x *RevokeCanvasInviteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeCanvasInviteRequest.ProtoReflect.Descriptor instead.
 func (*RevokeCanvasInviteRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{34}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RevokeCanvasInviteRequest) GetCanvasId() string {
@@ -2176,7 +2294,7 @@ type RevokeCanvasInviteResponse struct {
 
 func (x *RevokeCanvasInviteResponse) Reset() {
 	*x = RevokeCanvasInviteResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[35]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2188,7 +2306,7 @@ func (x *RevokeCanvasInviteResponse) String() string {
 func (*RevokeCanvasInviteResponse) ProtoMessage() {}
 
 func (x *RevokeCanvasInviteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[35]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2201,7 +2319,7 @@ func (x *RevokeCanvasInviteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeCanvasInviteResponse.ProtoReflect.Descriptor instead.
 func (*RevokeCanvasInviteResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{35}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{36}
 }
 
 type AcceptCanvasInviteRequest struct {
@@ -2214,7 +2332,7 @@ type AcceptCanvasInviteRequest struct {
 
 func (x *AcceptCanvasInviteRequest) Reset() {
 	*x = AcceptCanvasInviteRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[36]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2226,7 +2344,7 @@ func (x *AcceptCanvasInviteRequest) String() string {
 func (*AcceptCanvasInviteRequest) ProtoMessage() {}
 
 func (x *AcceptCanvasInviteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[36]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2239,7 +2357,7 @@ func (x *AcceptCanvasInviteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptCanvasInviteRequest.ProtoReflect.Descriptor instead.
 func (*AcceptCanvasInviteRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{36}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *AcceptCanvasInviteRequest) GetToken() string {
@@ -2258,7 +2376,7 @@ type AcceptCanvasInviteResponse struct {
 
 func (x *AcceptCanvasInviteResponse) Reset() {
 	*x = AcceptCanvasInviteResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[37]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2270,7 +2388,7 @@ func (x *AcceptCanvasInviteResponse) String() string {
 func (*AcceptCanvasInviteResponse) ProtoMessage() {}
 
 func (x *AcceptCanvasInviteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[37]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2283,7 +2401,7 @@ func (x *AcceptCanvasInviteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptCanvasInviteResponse.ProtoReflect.Descriptor instead.
 func (*AcceptCanvasInviteResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{37}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *AcceptCanvasInviteResponse) GetCanvas() *Canvas {
@@ -2302,7 +2420,7 @@ type GetCanvasShareRequest struct {
 
 func (x *GetCanvasShareRequest) Reset() {
 	*x = GetCanvasShareRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[38]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2314,7 +2432,7 @@ func (x *GetCanvasShareRequest) String() string {
 func (*GetCanvasShareRequest) ProtoMessage() {}
 
 func (x *GetCanvasShareRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[38]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2327,7 +2445,7 @@ func (x *GetCanvasShareRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCanvasShareRequest.ProtoReflect.Descriptor instead.
 func (*GetCanvasShareRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{38}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetCanvasShareRequest) GetCanvasId() string {
@@ -2348,7 +2466,7 @@ type GetCanvasShareResponse struct {
 
 func (x *GetCanvasShareResponse) Reset() {
 	*x = GetCanvasShareResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[39]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2360,7 +2478,7 @@ func (x *GetCanvasShareResponse) String() string {
 func (*GetCanvasShareResponse) ProtoMessage() {}
 
 func (x *GetCanvasShareResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[39]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2373,7 +2491,7 @@ func (x *GetCanvasShareResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCanvasShareResponse.ProtoReflect.Descriptor instead.
 func (*GetCanvasShareResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{39}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *GetCanvasShareResponse) GetMode() CanvasShareMode {
@@ -2402,7 +2520,7 @@ type UpdateCanvasShareRequest struct {
 
 func (x *UpdateCanvasShareRequest) Reset() {
 	*x = UpdateCanvasShareRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[40]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2414,7 +2532,7 @@ func (x *UpdateCanvasShareRequest) String() string {
 func (*UpdateCanvasShareRequest) ProtoMessage() {}
 
 func (x *UpdateCanvasShareRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[40]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2427,7 +2545,7 @@ func (x *UpdateCanvasShareRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCanvasShareRequest.ProtoReflect.Descriptor instead.
 func (*UpdateCanvasShareRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{40}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *UpdateCanvasShareRequest) GetCanvasId() string {
@@ -2461,7 +2579,7 @@ type UpdateCanvasShareResponse struct {
 
 func (x *UpdateCanvasShareResponse) Reset() {
 	*x = UpdateCanvasShareResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[41]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2473,7 +2591,7 @@ func (x *UpdateCanvasShareResponse) String() string {
 func (*UpdateCanvasShareResponse) ProtoMessage() {}
 
 func (x *UpdateCanvasShareResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[41]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2486,7 +2604,7 @@ func (x *UpdateCanvasShareResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCanvasShareResponse.ProtoReflect.Descriptor instead.
 func (*UpdateCanvasShareResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{41}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *UpdateCanvasShareResponse) GetMode() CanvasShareMode {
@@ -2511,7 +2629,7 @@ type ListCanvasesRequest struct {
 
 func (x *ListCanvasesRequest) Reset() {
 	*x = ListCanvasesRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[42]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2523,7 +2641,7 @@ func (x *ListCanvasesRequest) String() string {
 func (*ListCanvasesRequest) ProtoMessage() {}
 
 func (x *ListCanvasesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[42]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2536,7 +2654,7 @@ func (x *ListCanvasesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCanvasesRequest.ProtoReflect.Descriptor instead.
 func (*ListCanvasesRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{42}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{43}
 }
 
 type ListCanvasesResponse struct {
@@ -2548,7 +2666,7 @@ type ListCanvasesResponse struct {
 
 func (x *ListCanvasesResponse) Reset() {
 	*x = ListCanvasesResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[43]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2560,7 +2678,7 @@ func (x *ListCanvasesResponse) String() string {
 func (*ListCanvasesResponse) ProtoMessage() {}
 
 func (x *ListCanvasesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[43]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2573,7 +2691,7 @@ func (x *ListCanvasesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCanvasesResponse.ProtoReflect.Descriptor instead.
 func (*ListCanvasesResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{43}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ListCanvasesResponse) GetCanvases() []*CanvasStats {
@@ -2592,7 +2710,7 @@ type GetCanvasStatsRequest struct {
 
 func (x *GetCanvasStatsRequest) Reset() {
 	*x = GetCanvasStatsRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[44]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2604,7 +2722,7 @@ func (x *GetCanvasStatsRequest) String() string {
 func (*GetCanvasStatsRequest) ProtoMessage() {}
 
 func (x *GetCanvasStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[44]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2617,7 +2735,7 @@ func (x *GetCanvasStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCanvasStatsRequest.ProtoReflect.Descriptor instead.
 func (*GetCanvasStatsRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{44}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetCanvasStatsRequest) GetCanvasId() string {
@@ -2636,7 +2754,7 @@ type GetCanvasStatsResponse struct {
 
 func (x *GetCanvasStatsResponse) Reset() {
 	*x = GetCanvasStatsResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[45]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2648,7 +2766,7 @@ func (x *GetCanvasStatsResponse) String() string {
 func (*GetCanvasStatsResponse) ProtoMessage() {}
 
 func (x *GetCanvasStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[45]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2661,7 +2779,7 @@ func (x *GetCanvasStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCanvasStatsResponse.ProtoReflect.Descriptor instead.
 func (*GetCanvasStatsResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{45}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetCanvasStatsResponse) GetStats() *CanvasStats {
@@ -2680,7 +2798,7 @@ type CompactCanvasRequest struct {
 
 func (x *CompactCanvasRequest) Reset() {
 	*x = CompactCanvasRequest{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[46]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2692,7 +2810,7 @@ func (x *CompactCanvasRequest) String() string {
 func (*CompactCanvasRequest) ProtoMessage() {}
 
 func (x *CompactCanvasRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[46]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2705,7 +2823,7 @@ func (x *CompactCanvasRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactCanvasRequest.ProtoReflect.Descriptor instead.
 func (*CompactCanvasRequest) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{46}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *CompactCanvasRequest) GetCanvasId() string {
@@ -2725,7 +2843,7 @@ type CompactCanvasResponse struct {
 
 func (x *CompactCanvasResponse) Reset() {
 	*x = CompactCanvasResponse{}
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[47]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2737,7 +2855,7 @@ func (x *CompactCanvasResponse) String() string {
 func (*CompactCanvasResponse) ProtoMessage() {}
 
 func (x *CompactCanvasResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[47]
+	mi := &file_woohaa_canvas_v1_canvas_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2750,7 +2868,7 @@ func (x *CompactCanvasResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactCanvasResponse.ProtoReflect.Descriptor instead.
 func (*CompactCanvasResponse) Descriptor() ([]byte, []int) {
-	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{47}
+	return file_woohaa_canvas_v1_canvas_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *CompactCanvasResponse) GetBefore() *CanvasStats {
@@ -2778,7 +2896,15 @@ const file_woohaa_canvas_v1_canvas_proto_rawDesc = "" +
 	"\vtotal_bytes\x18\x03 \x01(\x04R\n" +
 	"totalBytes\x12.\n" +
 	"\x13snapshot_covers_seq\x18\x04 \x01(\x04R\x11snapshotCoversSeq\x12\x19\n" +
-	"\bhead_seq\x18\x05 \x01(\x04R\aheadSeq\"\x8b\x01\n" +
+	"\bhead_seq\x18\x05 \x01(\x04R\aheadSeq\"\xd3\x02\n" +
+	"\x10CanvasOpsSummary\x12\x1b\n" +
+	"\tcanvas_id\x18\x01 \x01(\tR\bcanvasId\x122\n" +
+	"\x15generation_task_count\x18\x02 \x01(\x04R\x13generationTaskCount\x126\n" +
+	"\x17generation_failed_count\x18\x03 \x01(\x04R\x15generationFailedCount\x12,\n" +
+	"\x12generation_last_at\x18\x04 \x01(\tR\x10generationLastAt\x12,\n" +
+	"\x12media_object_count\x18\x05 \x01(\x04R\x10mediaObjectCount\x12*\n" +
+	"\x11media_total_bytes\x18\x06 \x01(\x04R\x0fmediaTotalBytes\x12.\n" +
+	"\x13media_reconciled_at\x18\a \x01(\tR\x11mediaReconciledAt\"\x8b\x01\n" +
 	"\fCanvasRecord\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\x04R\x06cursor\x12\x1d\n" +
@@ -2836,13 +2962,16 @@ const file_woohaa_canvas_v1_canvas_proto_rawDesc = "" +
 	"\x14DeleteCanvasResponse\"\x17\n" +
 	"\x15ListMyCanvasesRequest\"N\n" +
 	"\x16ListMyCanvasesResponse\x124\n" +
-	"\bcanvases\x18\x01 \x03(\v2\x18.woohaa.canvas.v1.CanvasR\bcanvases\"h\n" +
+	"\bcanvases\x18\x01 \x03(\v2\x18.woohaa.canvas.v1.CanvasR\bcanvases\"\x89\x01\n" +
 	"\x18AdminListCanvasesRequest\x12'\n" +
 	"\x0finclude_deleted\x18\x01 \x01(\bR\x0eincludeDeleted\x12#\n" +
-	"\rinclude_stats\x18\x02 \x01(\bR\fincludeStats\"\x86\x01\n" +
+	"\rinclude_stats\x18\x02 \x01(\bR\fincludeStats\x12\x1f\n" +
+	"\vinclude_ops\x18\x03 \x01(\bR\n" +
+	"includeOps\"\xbc\x01\n" +
 	"\x19AdminListCanvasesResponse\x124\n" +
 	"\bcanvases\x18\x01 \x03(\v2\x18.woohaa.canvas.v1.CanvasR\bcanvases\x123\n" +
-	"\x05stats\x18\x02 \x03(\v2\x1d.woohaa.canvas.v1.CanvasStatsR\x05stats\"\x99\x01\n" +
+	"\x05stats\x18\x02 \x03(\v2\x1d.woohaa.canvas.v1.CanvasStatsR\x05stats\x124\n" +
+	"\x03ops\x18\x03 \x03(\v2\".woohaa.canvas.v1.CanvasOpsSummaryR\x03ops\"\x99\x01\n" +
 	"\fCanvasMember\x12\x19\n" +
 	"\bactor_id\x18\x01 \x01(\tR\aactorId\x120\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x1c.woohaa.canvas.v1.CanvasRoleR\x04role\x12\x1d\n" +
@@ -2980,137 +3109,139 @@ func file_woohaa_canvas_v1_canvas_proto_rawDescGZIP() []byte {
 }
 
 var file_woohaa_canvas_v1_canvas_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_woohaa_canvas_v1_canvas_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
+var file_woohaa_canvas_v1_canvas_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_woohaa_canvas_v1_canvas_proto_goTypes = []any{
 	(CanvasRole)(0),                        // 0: woohaa.canvas.v1.CanvasRole
 	(CanvasState)(0),                       // 1: woohaa.canvas.v1.CanvasState
 	(CanvasShareMode)(0),                   // 2: woohaa.canvas.v1.CanvasShareMode
 	(*CanvasStats)(nil),                    // 3: woohaa.canvas.v1.CanvasStats
-	(*CanvasRecord)(nil),                   // 4: woohaa.canvas.v1.CanvasRecord
-	(*AdminListCanvasRecordsRequest)(nil),  // 5: woohaa.canvas.v1.AdminListCanvasRecordsRequest
-	(*AdminListCanvasRecordsResponse)(nil), // 6: woohaa.canvas.v1.AdminListCanvasRecordsResponse
-	(*CanvasRecordData)(nil),               // 7: woohaa.canvas.v1.CanvasRecordData
-	(*AdminReadCanvasRecordsRequest)(nil),  // 8: woohaa.canvas.v1.AdminReadCanvasRecordsRequest
-	(*AdminReadCanvasRecordsResponse)(nil), // 9: woohaa.canvas.v1.AdminReadCanvasRecordsResponse
-	(*Canvas)(nil),                         // 10: woohaa.canvas.v1.Canvas
-	(*CreateCanvasRequest)(nil),            // 11: woohaa.canvas.v1.CreateCanvasRequest
-	(*CreateCanvasResponse)(nil),           // 12: woohaa.canvas.v1.CreateCanvasResponse
-	(*GetCanvasRequest)(nil),               // 13: woohaa.canvas.v1.GetCanvasRequest
-	(*GetCanvasResponse)(nil),              // 14: woohaa.canvas.v1.GetCanvasResponse
-	(*RenameCanvasRequest)(nil),            // 15: woohaa.canvas.v1.RenameCanvasRequest
-	(*RenameCanvasResponse)(nil),           // 16: woohaa.canvas.v1.RenameCanvasResponse
-	(*DeleteCanvasRequest)(nil),            // 17: woohaa.canvas.v1.DeleteCanvasRequest
-	(*DeleteCanvasResponse)(nil),           // 18: woohaa.canvas.v1.DeleteCanvasResponse
-	(*ListMyCanvasesRequest)(nil),          // 19: woohaa.canvas.v1.ListMyCanvasesRequest
-	(*ListMyCanvasesResponse)(nil),         // 20: woohaa.canvas.v1.ListMyCanvasesResponse
-	(*AdminListCanvasesRequest)(nil),       // 21: woohaa.canvas.v1.AdminListCanvasesRequest
-	(*AdminListCanvasesResponse)(nil),      // 22: woohaa.canvas.v1.AdminListCanvasesResponse
-	(*CanvasMember)(nil),                   // 23: woohaa.canvas.v1.CanvasMember
-	(*ListCanvasMembersRequest)(nil),       // 24: woohaa.canvas.v1.ListCanvasMembersRequest
-	(*ListCanvasMembersResponse)(nil),      // 25: woohaa.canvas.v1.ListCanvasMembersResponse
-	(*UpsertCanvasMemberRequest)(nil),      // 26: woohaa.canvas.v1.UpsertCanvasMemberRequest
-	(*UpsertCanvasMemberResponse)(nil),     // 27: woohaa.canvas.v1.UpsertCanvasMemberResponse
-	(*RemoveCanvasMemberRequest)(nil),      // 28: woohaa.canvas.v1.RemoveCanvasMemberRequest
-	(*RemoveCanvasMemberResponse)(nil),     // 29: woohaa.canvas.v1.RemoveCanvasMemberResponse
-	(*TransferCanvasRequest)(nil),          // 30: woohaa.canvas.v1.TransferCanvasRequest
-	(*TransferCanvasResponse)(nil),         // 31: woohaa.canvas.v1.TransferCanvasResponse
-	(*CanvasInvite)(nil),                   // 32: woohaa.canvas.v1.CanvasInvite
-	(*CreateCanvasInviteRequest)(nil),      // 33: woohaa.canvas.v1.CreateCanvasInviteRequest
-	(*CreateCanvasInviteResponse)(nil),     // 34: woohaa.canvas.v1.CreateCanvasInviteResponse
-	(*ListCanvasInvitesRequest)(nil),       // 35: woohaa.canvas.v1.ListCanvasInvitesRequest
-	(*ListCanvasInvitesResponse)(nil),      // 36: woohaa.canvas.v1.ListCanvasInvitesResponse
-	(*RevokeCanvasInviteRequest)(nil),      // 37: woohaa.canvas.v1.RevokeCanvasInviteRequest
-	(*RevokeCanvasInviteResponse)(nil),     // 38: woohaa.canvas.v1.RevokeCanvasInviteResponse
-	(*AcceptCanvasInviteRequest)(nil),      // 39: woohaa.canvas.v1.AcceptCanvasInviteRequest
-	(*AcceptCanvasInviteResponse)(nil),     // 40: woohaa.canvas.v1.AcceptCanvasInviteResponse
-	(*GetCanvasShareRequest)(nil),          // 41: woohaa.canvas.v1.GetCanvasShareRequest
-	(*GetCanvasShareResponse)(nil),         // 42: woohaa.canvas.v1.GetCanvasShareResponse
-	(*UpdateCanvasShareRequest)(nil),       // 43: woohaa.canvas.v1.UpdateCanvasShareRequest
-	(*UpdateCanvasShareResponse)(nil),      // 44: woohaa.canvas.v1.UpdateCanvasShareResponse
-	(*ListCanvasesRequest)(nil),            // 45: woohaa.canvas.v1.ListCanvasesRequest
-	(*ListCanvasesResponse)(nil),           // 46: woohaa.canvas.v1.ListCanvasesResponse
-	(*GetCanvasStatsRequest)(nil),          // 47: woohaa.canvas.v1.GetCanvasStatsRequest
-	(*GetCanvasStatsResponse)(nil),         // 48: woohaa.canvas.v1.GetCanvasStatsResponse
-	(*CompactCanvasRequest)(nil),           // 49: woohaa.canvas.v1.CompactCanvasRequest
-	(*CompactCanvasResponse)(nil),          // 50: woohaa.canvas.v1.CompactCanvasResponse
+	(*CanvasOpsSummary)(nil),               // 4: woohaa.canvas.v1.CanvasOpsSummary
+	(*CanvasRecord)(nil),                   // 5: woohaa.canvas.v1.CanvasRecord
+	(*AdminListCanvasRecordsRequest)(nil),  // 6: woohaa.canvas.v1.AdminListCanvasRecordsRequest
+	(*AdminListCanvasRecordsResponse)(nil), // 7: woohaa.canvas.v1.AdminListCanvasRecordsResponse
+	(*CanvasRecordData)(nil),               // 8: woohaa.canvas.v1.CanvasRecordData
+	(*AdminReadCanvasRecordsRequest)(nil),  // 9: woohaa.canvas.v1.AdminReadCanvasRecordsRequest
+	(*AdminReadCanvasRecordsResponse)(nil), // 10: woohaa.canvas.v1.AdminReadCanvasRecordsResponse
+	(*Canvas)(nil),                         // 11: woohaa.canvas.v1.Canvas
+	(*CreateCanvasRequest)(nil),            // 12: woohaa.canvas.v1.CreateCanvasRequest
+	(*CreateCanvasResponse)(nil),           // 13: woohaa.canvas.v1.CreateCanvasResponse
+	(*GetCanvasRequest)(nil),               // 14: woohaa.canvas.v1.GetCanvasRequest
+	(*GetCanvasResponse)(nil),              // 15: woohaa.canvas.v1.GetCanvasResponse
+	(*RenameCanvasRequest)(nil),            // 16: woohaa.canvas.v1.RenameCanvasRequest
+	(*RenameCanvasResponse)(nil),           // 17: woohaa.canvas.v1.RenameCanvasResponse
+	(*DeleteCanvasRequest)(nil),            // 18: woohaa.canvas.v1.DeleteCanvasRequest
+	(*DeleteCanvasResponse)(nil),           // 19: woohaa.canvas.v1.DeleteCanvasResponse
+	(*ListMyCanvasesRequest)(nil),          // 20: woohaa.canvas.v1.ListMyCanvasesRequest
+	(*ListMyCanvasesResponse)(nil),         // 21: woohaa.canvas.v1.ListMyCanvasesResponse
+	(*AdminListCanvasesRequest)(nil),       // 22: woohaa.canvas.v1.AdminListCanvasesRequest
+	(*AdminListCanvasesResponse)(nil),      // 23: woohaa.canvas.v1.AdminListCanvasesResponse
+	(*CanvasMember)(nil),                   // 24: woohaa.canvas.v1.CanvasMember
+	(*ListCanvasMembersRequest)(nil),       // 25: woohaa.canvas.v1.ListCanvasMembersRequest
+	(*ListCanvasMembersResponse)(nil),      // 26: woohaa.canvas.v1.ListCanvasMembersResponse
+	(*UpsertCanvasMemberRequest)(nil),      // 27: woohaa.canvas.v1.UpsertCanvasMemberRequest
+	(*UpsertCanvasMemberResponse)(nil),     // 28: woohaa.canvas.v1.UpsertCanvasMemberResponse
+	(*RemoveCanvasMemberRequest)(nil),      // 29: woohaa.canvas.v1.RemoveCanvasMemberRequest
+	(*RemoveCanvasMemberResponse)(nil),     // 30: woohaa.canvas.v1.RemoveCanvasMemberResponse
+	(*TransferCanvasRequest)(nil),          // 31: woohaa.canvas.v1.TransferCanvasRequest
+	(*TransferCanvasResponse)(nil),         // 32: woohaa.canvas.v1.TransferCanvasResponse
+	(*CanvasInvite)(nil),                   // 33: woohaa.canvas.v1.CanvasInvite
+	(*CreateCanvasInviteRequest)(nil),      // 34: woohaa.canvas.v1.CreateCanvasInviteRequest
+	(*CreateCanvasInviteResponse)(nil),     // 35: woohaa.canvas.v1.CreateCanvasInviteResponse
+	(*ListCanvasInvitesRequest)(nil),       // 36: woohaa.canvas.v1.ListCanvasInvitesRequest
+	(*ListCanvasInvitesResponse)(nil),      // 37: woohaa.canvas.v1.ListCanvasInvitesResponse
+	(*RevokeCanvasInviteRequest)(nil),      // 38: woohaa.canvas.v1.RevokeCanvasInviteRequest
+	(*RevokeCanvasInviteResponse)(nil),     // 39: woohaa.canvas.v1.RevokeCanvasInviteResponse
+	(*AcceptCanvasInviteRequest)(nil),      // 40: woohaa.canvas.v1.AcceptCanvasInviteRequest
+	(*AcceptCanvasInviteResponse)(nil),     // 41: woohaa.canvas.v1.AcceptCanvasInviteResponse
+	(*GetCanvasShareRequest)(nil),          // 42: woohaa.canvas.v1.GetCanvasShareRequest
+	(*GetCanvasShareResponse)(nil),         // 43: woohaa.canvas.v1.GetCanvasShareResponse
+	(*UpdateCanvasShareRequest)(nil),       // 44: woohaa.canvas.v1.UpdateCanvasShareRequest
+	(*UpdateCanvasShareResponse)(nil),      // 45: woohaa.canvas.v1.UpdateCanvasShareResponse
+	(*ListCanvasesRequest)(nil),            // 46: woohaa.canvas.v1.ListCanvasesRequest
+	(*ListCanvasesResponse)(nil),           // 47: woohaa.canvas.v1.ListCanvasesResponse
+	(*GetCanvasStatsRequest)(nil),          // 48: woohaa.canvas.v1.GetCanvasStatsRequest
+	(*GetCanvasStatsResponse)(nil),         // 49: woohaa.canvas.v1.GetCanvasStatsResponse
+	(*CompactCanvasRequest)(nil),           // 50: woohaa.canvas.v1.CompactCanvasRequest
+	(*CompactCanvasResponse)(nil),          // 51: woohaa.canvas.v1.CompactCanvasResponse
 }
 var file_woohaa_canvas_v1_canvas_proto_depIdxs = []int32{
-	4,  // 0: woohaa.canvas.v1.AdminListCanvasRecordsResponse.records:type_name -> woohaa.canvas.v1.CanvasRecord
-	4,  // 1: woohaa.canvas.v1.CanvasRecordData.record:type_name -> woohaa.canvas.v1.CanvasRecord
-	7,  // 2: woohaa.canvas.v1.AdminReadCanvasRecordsResponse.records:type_name -> woohaa.canvas.v1.CanvasRecordData
+	5,  // 0: woohaa.canvas.v1.AdminListCanvasRecordsResponse.records:type_name -> woohaa.canvas.v1.CanvasRecord
+	5,  // 1: woohaa.canvas.v1.CanvasRecordData.record:type_name -> woohaa.canvas.v1.CanvasRecord
+	8,  // 2: woohaa.canvas.v1.AdminReadCanvasRecordsResponse.records:type_name -> woohaa.canvas.v1.CanvasRecordData
 	1,  // 3: woohaa.canvas.v1.Canvas.state:type_name -> woohaa.canvas.v1.CanvasState
 	0,  // 4: woohaa.canvas.v1.Canvas.role:type_name -> woohaa.canvas.v1.CanvasRole
-	10, // 5: woohaa.canvas.v1.CreateCanvasResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
-	10, // 6: woohaa.canvas.v1.GetCanvasResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
-	10, // 7: woohaa.canvas.v1.RenameCanvasResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
-	10, // 8: woohaa.canvas.v1.ListMyCanvasesResponse.canvases:type_name -> woohaa.canvas.v1.Canvas
-	10, // 9: woohaa.canvas.v1.AdminListCanvasesResponse.canvases:type_name -> woohaa.canvas.v1.Canvas
+	11, // 5: woohaa.canvas.v1.CreateCanvasResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
+	11, // 6: woohaa.canvas.v1.GetCanvasResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
+	11, // 7: woohaa.canvas.v1.RenameCanvasResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
+	11, // 8: woohaa.canvas.v1.ListMyCanvasesResponse.canvases:type_name -> woohaa.canvas.v1.Canvas
+	11, // 9: woohaa.canvas.v1.AdminListCanvasesResponse.canvases:type_name -> woohaa.canvas.v1.Canvas
 	3,  // 10: woohaa.canvas.v1.AdminListCanvasesResponse.stats:type_name -> woohaa.canvas.v1.CanvasStats
-	0,  // 11: woohaa.canvas.v1.CanvasMember.role:type_name -> woohaa.canvas.v1.CanvasRole
-	23, // 12: woohaa.canvas.v1.ListCanvasMembersResponse.members:type_name -> woohaa.canvas.v1.CanvasMember
-	0,  // 13: woohaa.canvas.v1.UpsertCanvasMemberRequest.role:type_name -> woohaa.canvas.v1.CanvasRole
-	23, // 14: woohaa.canvas.v1.UpsertCanvasMemberResponse.member:type_name -> woohaa.canvas.v1.CanvasMember
-	0,  // 15: woohaa.canvas.v1.TransferCanvasRequest.previous_owner_role:type_name -> woohaa.canvas.v1.CanvasRole
-	10, // 16: woohaa.canvas.v1.TransferCanvasResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
-	0,  // 17: woohaa.canvas.v1.CanvasInvite.role:type_name -> woohaa.canvas.v1.CanvasRole
-	0,  // 18: woohaa.canvas.v1.CreateCanvasInviteRequest.role:type_name -> woohaa.canvas.v1.CanvasRole
-	0,  // 19: woohaa.canvas.v1.CreateCanvasInviteResponse.role:type_name -> woohaa.canvas.v1.CanvasRole
-	32, // 20: woohaa.canvas.v1.ListCanvasInvitesResponse.invites:type_name -> woohaa.canvas.v1.CanvasInvite
-	10, // 21: woohaa.canvas.v1.AcceptCanvasInviteResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
-	2,  // 22: woohaa.canvas.v1.GetCanvasShareResponse.mode:type_name -> woohaa.canvas.v1.CanvasShareMode
-	2,  // 23: woohaa.canvas.v1.UpdateCanvasShareRequest.mode:type_name -> woohaa.canvas.v1.CanvasShareMode
-	2,  // 24: woohaa.canvas.v1.UpdateCanvasShareResponse.mode:type_name -> woohaa.canvas.v1.CanvasShareMode
-	3,  // 25: woohaa.canvas.v1.ListCanvasesResponse.canvases:type_name -> woohaa.canvas.v1.CanvasStats
-	3,  // 26: woohaa.canvas.v1.GetCanvasStatsResponse.stats:type_name -> woohaa.canvas.v1.CanvasStats
-	3,  // 27: woohaa.canvas.v1.CompactCanvasResponse.before:type_name -> woohaa.canvas.v1.CanvasStats
-	3,  // 28: woohaa.canvas.v1.CompactCanvasResponse.after:type_name -> woohaa.canvas.v1.CanvasStats
-	11, // 29: woohaa.canvas.v1.CanvasService.CreateCanvas:input_type -> woohaa.canvas.v1.CreateCanvasRequest
-	13, // 30: woohaa.canvas.v1.CanvasService.GetCanvas:input_type -> woohaa.canvas.v1.GetCanvasRequest
-	15, // 31: woohaa.canvas.v1.CanvasService.RenameCanvas:input_type -> woohaa.canvas.v1.RenameCanvasRequest
-	17, // 32: woohaa.canvas.v1.CanvasService.DeleteCanvas:input_type -> woohaa.canvas.v1.DeleteCanvasRequest
-	19, // 33: woohaa.canvas.v1.CanvasService.ListMyCanvases:input_type -> woohaa.canvas.v1.ListMyCanvasesRequest
-	21, // 34: woohaa.canvas.v1.CanvasService.AdminListCanvases:input_type -> woohaa.canvas.v1.AdminListCanvasesRequest
-	5,  // 35: woohaa.canvas.v1.CanvasService.AdminListCanvasRecords:input_type -> woohaa.canvas.v1.AdminListCanvasRecordsRequest
-	8,  // 36: woohaa.canvas.v1.CanvasService.AdminReadCanvasRecords:input_type -> woohaa.canvas.v1.AdminReadCanvasRecordsRequest
-	24, // 37: woohaa.canvas.v1.CanvasService.ListCanvasMembers:input_type -> woohaa.canvas.v1.ListCanvasMembersRequest
-	26, // 38: woohaa.canvas.v1.CanvasService.UpsertCanvasMember:input_type -> woohaa.canvas.v1.UpsertCanvasMemberRequest
-	28, // 39: woohaa.canvas.v1.CanvasService.RemoveCanvasMember:input_type -> woohaa.canvas.v1.RemoveCanvasMemberRequest
-	30, // 40: woohaa.canvas.v1.CanvasService.TransferCanvas:input_type -> woohaa.canvas.v1.TransferCanvasRequest
-	33, // 41: woohaa.canvas.v1.CanvasService.CreateCanvasInvite:input_type -> woohaa.canvas.v1.CreateCanvasInviteRequest
-	35, // 42: woohaa.canvas.v1.CanvasService.ListCanvasInvites:input_type -> woohaa.canvas.v1.ListCanvasInvitesRequest
-	37, // 43: woohaa.canvas.v1.CanvasService.RevokeCanvasInvite:input_type -> woohaa.canvas.v1.RevokeCanvasInviteRequest
-	39, // 44: woohaa.canvas.v1.CanvasService.AcceptCanvasInvite:input_type -> woohaa.canvas.v1.AcceptCanvasInviteRequest
-	41, // 45: woohaa.canvas.v1.CanvasService.GetCanvasShare:input_type -> woohaa.canvas.v1.GetCanvasShareRequest
-	43, // 46: woohaa.canvas.v1.CanvasService.UpdateCanvasShare:input_type -> woohaa.canvas.v1.UpdateCanvasShareRequest
-	49, // 47: woohaa.canvas.v1.CanvasService.CompactCanvas:input_type -> woohaa.canvas.v1.CompactCanvasRequest
-	47, // 48: woohaa.canvas.v1.CanvasService.GetCanvasStats:input_type -> woohaa.canvas.v1.GetCanvasStatsRequest
-	45, // 49: woohaa.canvas.v1.CanvasService.ListCanvases:input_type -> woohaa.canvas.v1.ListCanvasesRequest
-	12, // 50: woohaa.canvas.v1.CanvasService.CreateCanvas:output_type -> woohaa.canvas.v1.CreateCanvasResponse
-	14, // 51: woohaa.canvas.v1.CanvasService.GetCanvas:output_type -> woohaa.canvas.v1.GetCanvasResponse
-	16, // 52: woohaa.canvas.v1.CanvasService.RenameCanvas:output_type -> woohaa.canvas.v1.RenameCanvasResponse
-	18, // 53: woohaa.canvas.v1.CanvasService.DeleteCanvas:output_type -> woohaa.canvas.v1.DeleteCanvasResponse
-	20, // 54: woohaa.canvas.v1.CanvasService.ListMyCanvases:output_type -> woohaa.canvas.v1.ListMyCanvasesResponse
-	22, // 55: woohaa.canvas.v1.CanvasService.AdminListCanvases:output_type -> woohaa.canvas.v1.AdminListCanvasesResponse
-	6,  // 56: woohaa.canvas.v1.CanvasService.AdminListCanvasRecords:output_type -> woohaa.canvas.v1.AdminListCanvasRecordsResponse
-	9,  // 57: woohaa.canvas.v1.CanvasService.AdminReadCanvasRecords:output_type -> woohaa.canvas.v1.AdminReadCanvasRecordsResponse
-	25, // 58: woohaa.canvas.v1.CanvasService.ListCanvasMembers:output_type -> woohaa.canvas.v1.ListCanvasMembersResponse
-	27, // 59: woohaa.canvas.v1.CanvasService.UpsertCanvasMember:output_type -> woohaa.canvas.v1.UpsertCanvasMemberResponse
-	29, // 60: woohaa.canvas.v1.CanvasService.RemoveCanvasMember:output_type -> woohaa.canvas.v1.RemoveCanvasMemberResponse
-	31, // 61: woohaa.canvas.v1.CanvasService.TransferCanvas:output_type -> woohaa.canvas.v1.TransferCanvasResponse
-	34, // 62: woohaa.canvas.v1.CanvasService.CreateCanvasInvite:output_type -> woohaa.canvas.v1.CreateCanvasInviteResponse
-	36, // 63: woohaa.canvas.v1.CanvasService.ListCanvasInvites:output_type -> woohaa.canvas.v1.ListCanvasInvitesResponse
-	38, // 64: woohaa.canvas.v1.CanvasService.RevokeCanvasInvite:output_type -> woohaa.canvas.v1.RevokeCanvasInviteResponse
-	40, // 65: woohaa.canvas.v1.CanvasService.AcceptCanvasInvite:output_type -> woohaa.canvas.v1.AcceptCanvasInviteResponse
-	42, // 66: woohaa.canvas.v1.CanvasService.GetCanvasShare:output_type -> woohaa.canvas.v1.GetCanvasShareResponse
-	44, // 67: woohaa.canvas.v1.CanvasService.UpdateCanvasShare:output_type -> woohaa.canvas.v1.UpdateCanvasShareResponse
-	50, // 68: woohaa.canvas.v1.CanvasService.CompactCanvas:output_type -> woohaa.canvas.v1.CompactCanvasResponse
-	48, // 69: woohaa.canvas.v1.CanvasService.GetCanvasStats:output_type -> woohaa.canvas.v1.GetCanvasStatsResponse
-	46, // 70: woohaa.canvas.v1.CanvasService.ListCanvases:output_type -> woohaa.canvas.v1.ListCanvasesResponse
-	50, // [50:71] is the sub-list for method output_type
-	29, // [29:50] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	4,  // 11: woohaa.canvas.v1.AdminListCanvasesResponse.ops:type_name -> woohaa.canvas.v1.CanvasOpsSummary
+	0,  // 12: woohaa.canvas.v1.CanvasMember.role:type_name -> woohaa.canvas.v1.CanvasRole
+	24, // 13: woohaa.canvas.v1.ListCanvasMembersResponse.members:type_name -> woohaa.canvas.v1.CanvasMember
+	0,  // 14: woohaa.canvas.v1.UpsertCanvasMemberRequest.role:type_name -> woohaa.canvas.v1.CanvasRole
+	24, // 15: woohaa.canvas.v1.UpsertCanvasMemberResponse.member:type_name -> woohaa.canvas.v1.CanvasMember
+	0,  // 16: woohaa.canvas.v1.TransferCanvasRequest.previous_owner_role:type_name -> woohaa.canvas.v1.CanvasRole
+	11, // 17: woohaa.canvas.v1.TransferCanvasResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
+	0,  // 18: woohaa.canvas.v1.CanvasInvite.role:type_name -> woohaa.canvas.v1.CanvasRole
+	0,  // 19: woohaa.canvas.v1.CreateCanvasInviteRequest.role:type_name -> woohaa.canvas.v1.CanvasRole
+	0,  // 20: woohaa.canvas.v1.CreateCanvasInviteResponse.role:type_name -> woohaa.canvas.v1.CanvasRole
+	33, // 21: woohaa.canvas.v1.ListCanvasInvitesResponse.invites:type_name -> woohaa.canvas.v1.CanvasInvite
+	11, // 22: woohaa.canvas.v1.AcceptCanvasInviteResponse.canvas:type_name -> woohaa.canvas.v1.Canvas
+	2,  // 23: woohaa.canvas.v1.GetCanvasShareResponse.mode:type_name -> woohaa.canvas.v1.CanvasShareMode
+	2,  // 24: woohaa.canvas.v1.UpdateCanvasShareRequest.mode:type_name -> woohaa.canvas.v1.CanvasShareMode
+	2,  // 25: woohaa.canvas.v1.UpdateCanvasShareResponse.mode:type_name -> woohaa.canvas.v1.CanvasShareMode
+	3,  // 26: woohaa.canvas.v1.ListCanvasesResponse.canvases:type_name -> woohaa.canvas.v1.CanvasStats
+	3,  // 27: woohaa.canvas.v1.GetCanvasStatsResponse.stats:type_name -> woohaa.canvas.v1.CanvasStats
+	3,  // 28: woohaa.canvas.v1.CompactCanvasResponse.before:type_name -> woohaa.canvas.v1.CanvasStats
+	3,  // 29: woohaa.canvas.v1.CompactCanvasResponse.after:type_name -> woohaa.canvas.v1.CanvasStats
+	12, // 30: woohaa.canvas.v1.CanvasService.CreateCanvas:input_type -> woohaa.canvas.v1.CreateCanvasRequest
+	14, // 31: woohaa.canvas.v1.CanvasService.GetCanvas:input_type -> woohaa.canvas.v1.GetCanvasRequest
+	16, // 32: woohaa.canvas.v1.CanvasService.RenameCanvas:input_type -> woohaa.canvas.v1.RenameCanvasRequest
+	18, // 33: woohaa.canvas.v1.CanvasService.DeleteCanvas:input_type -> woohaa.canvas.v1.DeleteCanvasRequest
+	20, // 34: woohaa.canvas.v1.CanvasService.ListMyCanvases:input_type -> woohaa.canvas.v1.ListMyCanvasesRequest
+	22, // 35: woohaa.canvas.v1.CanvasService.AdminListCanvases:input_type -> woohaa.canvas.v1.AdminListCanvasesRequest
+	6,  // 36: woohaa.canvas.v1.CanvasService.AdminListCanvasRecords:input_type -> woohaa.canvas.v1.AdminListCanvasRecordsRequest
+	9,  // 37: woohaa.canvas.v1.CanvasService.AdminReadCanvasRecords:input_type -> woohaa.canvas.v1.AdminReadCanvasRecordsRequest
+	25, // 38: woohaa.canvas.v1.CanvasService.ListCanvasMembers:input_type -> woohaa.canvas.v1.ListCanvasMembersRequest
+	27, // 39: woohaa.canvas.v1.CanvasService.UpsertCanvasMember:input_type -> woohaa.canvas.v1.UpsertCanvasMemberRequest
+	29, // 40: woohaa.canvas.v1.CanvasService.RemoveCanvasMember:input_type -> woohaa.canvas.v1.RemoveCanvasMemberRequest
+	31, // 41: woohaa.canvas.v1.CanvasService.TransferCanvas:input_type -> woohaa.canvas.v1.TransferCanvasRequest
+	34, // 42: woohaa.canvas.v1.CanvasService.CreateCanvasInvite:input_type -> woohaa.canvas.v1.CreateCanvasInviteRequest
+	36, // 43: woohaa.canvas.v1.CanvasService.ListCanvasInvites:input_type -> woohaa.canvas.v1.ListCanvasInvitesRequest
+	38, // 44: woohaa.canvas.v1.CanvasService.RevokeCanvasInvite:input_type -> woohaa.canvas.v1.RevokeCanvasInviteRequest
+	40, // 45: woohaa.canvas.v1.CanvasService.AcceptCanvasInvite:input_type -> woohaa.canvas.v1.AcceptCanvasInviteRequest
+	42, // 46: woohaa.canvas.v1.CanvasService.GetCanvasShare:input_type -> woohaa.canvas.v1.GetCanvasShareRequest
+	44, // 47: woohaa.canvas.v1.CanvasService.UpdateCanvasShare:input_type -> woohaa.canvas.v1.UpdateCanvasShareRequest
+	50, // 48: woohaa.canvas.v1.CanvasService.CompactCanvas:input_type -> woohaa.canvas.v1.CompactCanvasRequest
+	48, // 49: woohaa.canvas.v1.CanvasService.GetCanvasStats:input_type -> woohaa.canvas.v1.GetCanvasStatsRequest
+	46, // 50: woohaa.canvas.v1.CanvasService.ListCanvases:input_type -> woohaa.canvas.v1.ListCanvasesRequest
+	13, // 51: woohaa.canvas.v1.CanvasService.CreateCanvas:output_type -> woohaa.canvas.v1.CreateCanvasResponse
+	15, // 52: woohaa.canvas.v1.CanvasService.GetCanvas:output_type -> woohaa.canvas.v1.GetCanvasResponse
+	17, // 53: woohaa.canvas.v1.CanvasService.RenameCanvas:output_type -> woohaa.canvas.v1.RenameCanvasResponse
+	19, // 54: woohaa.canvas.v1.CanvasService.DeleteCanvas:output_type -> woohaa.canvas.v1.DeleteCanvasResponse
+	21, // 55: woohaa.canvas.v1.CanvasService.ListMyCanvases:output_type -> woohaa.canvas.v1.ListMyCanvasesResponse
+	23, // 56: woohaa.canvas.v1.CanvasService.AdminListCanvases:output_type -> woohaa.canvas.v1.AdminListCanvasesResponse
+	7,  // 57: woohaa.canvas.v1.CanvasService.AdminListCanvasRecords:output_type -> woohaa.canvas.v1.AdminListCanvasRecordsResponse
+	10, // 58: woohaa.canvas.v1.CanvasService.AdminReadCanvasRecords:output_type -> woohaa.canvas.v1.AdminReadCanvasRecordsResponse
+	26, // 59: woohaa.canvas.v1.CanvasService.ListCanvasMembers:output_type -> woohaa.canvas.v1.ListCanvasMembersResponse
+	28, // 60: woohaa.canvas.v1.CanvasService.UpsertCanvasMember:output_type -> woohaa.canvas.v1.UpsertCanvasMemberResponse
+	30, // 61: woohaa.canvas.v1.CanvasService.RemoveCanvasMember:output_type -> woohaa.canvas.v1.RemoveCanvasMemberResponse
+	32, // 62: woohaa.canvas.v1.CanvasService.TransferCanvas:output_type -> woohaa.canvas.v1.TransferCanvasResponse
+	35, // 63: woohaa.canvas.v1.CanvasService.CreateCanvasInvite:output_type -> woohaa.canvas.v1.CreateCanvasInviteResponse
+	37, // 64: woohaa.canvas.v1.CanvasService.ListCanvasInvites:output_type -> woohaa.canvas.v1.ListCanvasInvitesResponse
+	39, // 65: woohaa.canvas.v1.CanvasService.RevokeCanvasInvite:output_type -> woohaa.canvas.v1.RevokeCanvasInviteResponse
+	41, // 66: woohaa.canvas.v1.CanvasService.AcceptCanvasInvite:output_type -> woohaa.canvas.v1.AcceptCanvasInviteResponse
+	43, // 67: woohaa.canvas.v1.CanvasService.GetCanvasShare:output_type -> woohaa.canvas.v1.GetCanvasShareResponse
+	45, // 68: woohaa.canvas.v1.CanvasService.UpdateCanvasShare:output_type -> woohaa.canvas.v1.UpdateCanvasShareResponse
+	51, // 69: woohaa.canvas.v1.CanvasService.CompactCanvas:output_type -> woohaa.canvas.v1.CompactCanvasResponse
+	49, // 70: woohaa.canvas.v1.CanvasService.GetCanvasStats:output_type -> woohaa.canvas.v1.GetCanvasStatsResponse
+	47, // 71: woohaa.canvas.v1.CanvasService.ListCanvases:output_type -> woohaa.canvas.v1.ListCanvasesResponse
+	51, // [51:72] is the sub-list for method output_type
+	30, // [30:51] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_woohaa_canvas_v1_canvas_proto_init() }
@@ -3124,7 +3255,7 @@ func file_woohaa_canvas_v1_canvas_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_woohaa_canvas_v1_canvas_proto_rawDesc), len(file_woohaa_canvas_v1_canvas_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   48,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
