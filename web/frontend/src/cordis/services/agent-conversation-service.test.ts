@@ -183,6 +183,95 @@ describe("agent conversation service (frontend)", () => {
     expect(closed.at(-1)).toBe("agent-conversation");
   });
 
+  it("选中节点已不是来源目标时，收起只是关闭（不把画布拉回旧生成面板）", () => {
+    let selected: string | null = "n1";
+    const available = new Set(["model-node-editor", "agent-conversation"]);
+    const { navigation, opened, closed, current } = navStub({ type: "model-node-editor", nodeId: "n1" }, available);
+    const service = createAgentConversationService({
+      remote: fakeRemote(),
+      navigation,
+      currentTarget: () => selected ? { nodeId: selected, focus: false } : null
+    });
+    service.navigateToDetail({ conversationId: "conv-1", requestId: "req-1", nodeId: "n1" });
+    expect(service.canReturnToSource()).toBe(true);
+    const opensBefore = opened.length;
+
+    selected = "n2";
+    expect(service.canReturnToSource()).toBe(false);
+    service.collapseDetail();
+    expect(current()).toBeNull();
+    expect(closed.at(-1)).toBe("agent-conversation");
+    // 不额外打开旧来源 route。
+    expect(opened).toHaveLength(opensBefore);
+  });
+
+  it("取消选中（无当前目标）时也不返回来源面板", () => {
+    let selected: string | null = "n1";
+    const { navigation, current } = navStub({ type: "model-node-editor", nodeId: "n1" }, new Set(["model-node-editor", "agent-conversation"]));
+    const service = createAgentConversationService({
+      remote: fakeRemote(),
+      navigation,
+      currentTarget: () => selected ? { nodeId: selected, focus: false } : null
+    });
+    service.navigateToDetail({ conversationId: "conv-1", requestId: "req-1", nodeId: "n1" });
+    selected = null;
+    expect(service.canReturnToSource()).toBe(false);
+    service.collapseDetail();
+    expect(current()).toBeNull();
+  });
+
+  it("来源仍是当前目标时恢复生成面板", () => {
+    const { navigation, current } = navStub({ type: "model-node-editor", nodeId: "n1" }, new Set(["model-node-editor", "agent-conversation"]));
+    const service = createAgentConversationService({
+      remote: fakeRemote(),
+      navigation,
+      currentTarget: () => ({ nodeId: "n1", focus: false })
+    });
+    service.navigateToDetail({ conversationId: "conv-1", requestId: "req-1", nodeId: "n1" });
+    expect(service.canReturnToSource()).toBe(true);
+    service.collapseDetail();
+    expect(current()).toMatchObject({ type: "model-node-editor", nodeId: "n1" });
+  });
+
+  it("聚焦工作区打开的详情：仍是同节点聚焦时可关闭回工作区，换节点后不可返回", () => {
+    let target: { nodeId: string; focus: boolean } | null = { nodeId: "n1", focus: true };
+    const { navigation, current } = navStub(null, new Set(["agent-conversation"]));
+    const service = createAgentConversationService({ remote: fakeRemote(), navigation, currentTarget: () => target });
+    service.navigateToDetail({ conversationId: "conv-1", requestId: "req-1", nodeId: "n1" });
+    expect(service.canReturnToSource()).toBe(true);
+    target = { nodeId: "n2", focus: true };
+    expect(service.canReturnToSource()).toBe(false);
+    service.collapseDetail();
+    expect(current()).toBeNull();
+  });
+
+  it("历史/活动入口（无来源生成面板）没有返回语义", () => {
+    const { navigation, current } = navStub(null, new Set(["agent-conversation"]));
+    const service = createAgentConversationService({
+      remote: fakeRemote(),
+      navigation,
+      currentTarget: () => ({ nodeId: "n1", focus: false })
+    });
+    service.navigateToDetail({ conversationId: "conv-1", requestId: "req-1", nodeId: "n1" });
+    expect(service.canReturnToSource()).toBe(false);
+    service.collapseDetail();
+    expect(current()).toBeNull();
+  });
+
+  it("聚焦中从活动入口打开别的节点历史：不宣称可以返回该节点的生成面板", () => {
+    const { navigation, current } = navStub(null, new Set(["agent-conversation"]));
+    const service = createAgentConversationService({
+      remote: fakeRemote(),
+      navigation,
+      currentTarget: () => ({ nodeId: "n1", focus: true })
+    });
+    // 详情目标是 n2（聚焦的是 n1）：来源不是当前工作区的生成面板。
+    service.navigateToDetail({ conversationId: "conv-2", requestId: "req-2", nodeId: "n2" });
+    expect(service.canReturnToSource()).toBe(false);
+    service.collapseDetail();
+    expect(current()).toBeNull();
+  });
+
   it("queryTurn 只按确切 requestId 查询，不重新提交", async () => {
     const query = vi.fn(async () => ({ ok: true as const, value: { conversation: summary(), turn: turn(), snapshot: snapshot() } }));
     const accept = vi.fn();
