@@ -92,7 +92,9 @@ describe("浏览器授权登录（同机 loopback）", () => {
     const startCall = calls.find((call) => call.path.endsWith("/oauth-start"));
     expect(startCall).toBeDefined();
     // origin 由浏览器自报，宿主据此拼 loopback redirect_uri。
-    expect(startCall?.body).toEqual({ origin: "http://localhost:3000" });
+    // serverUrl 是面板里当前这个地址（预置值时也照传）：宿主只认部署配置与会话，不带上的话
+    // 手填地址的首次登录会被判成「还没有配置服务端地址」，静默退回短码。
+    expect(startCall?.body).toEqual({ origin: "http://localhost:3000", serverUrl: "https://canvas.example.com" });
     expect(openSpy).toHaveBeenCalledWith(AUTHORIZE_URL, "_blank", "noopener,noreferrer");
     expect(container.querySelector('[data-testid="server-oauth-pending"]')).not.toBeNull();
     // 没有退到设备码：这条路径不需要任何人抄短码。
@@ -183,7 +185,7 @@ describe("浏览器授权登录（同机 loopback）", () => {
     unmount();
   });
 
-  it("宿主说这条路径不存在（unsupported）→ 静默回退设备码，之后不再重复尝试", async () => {
+  it("宿主说这条路径不存在（unsupported）→ 回退设备码，并把原因写在面板上", async () => {
     vi.spyOn(window, "open").mockImplementation(() => null);
     const { service, calls } = createService({
       "/session": LOCAL_SNAPSHOT,
@@ -204,6 +206,10 @@ describe("浏览器授权登录（同机 loopback）", () => {
 
     expect(calls.filter((call) => call.path.endsWith("/oauth-start"))).toHaveLength(1);
     expect(container.querySelector('[data-testid="server-device-code"]')?.textContent).toContain("BCDF-GHJK");
+    // 自动改走短码不是「静默」的：面板要说明为什么，否则人只会看到短码框。
+    expect(container.querySelector('[data-testid="server-login-fallback"]')?.textContent).toContain(
+      "当前宿主不支持浏览器登录"
+    );
     unmount();
   });
 

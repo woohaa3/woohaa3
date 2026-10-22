@@ -20,6 +20,7 @@ import {
   oauthCallbackUrl,
   oauthDonePath,
   parseLoopbackOrigin,
+  parseServerUrl,
   resolveRemoteEndpoints,
   type RemoteOAuthLoginPoll,
   type RemoteOAuthLoginStartResult,
@@ -305,6 +306,14 @@ export function createOAuthLogin(options: OAuthLoginOptions): OAuthLoginControll
      *
      * origin 由浏览器自报（window.location.origin），宿主**必须**校验它是 loopback：
      * redirect_uri 直接由它拼出来，放行别的 host 就等于把授权码送给攻击者（design D2）。
+     *
+     * 地址：**优先用请求体里的那个**（面板里刚填、还没落进 config.local.json 的草稿），
+     * 缺省才回落到部署配置 / 已登录会话。此前这里只认回落链，于是「手填地址 + 首次登录」
+     * 恒报 not-configured、面板静默改走短码——人明明打了地址，却被要求抄码，且没有任何
+     * 说明。设备码那条路一直收面板地址，两条路必须同一个口径。
+     *
+     * 请求体里的地址仍然要过 parseServerUrl：它与探测（probe）用同一个解析器，因此
+     * 「探测得通」与「能拿去发起授权」不会分成两套判断。
      */
     async start(body) {
       const origin = parseLoopbackOrigin(readStringField(body, "origin"));
@@ -312,7 +321,15 @@ export function createOAuthLogin(options: OAuthLoginOptions): OAuthLoginControll
       if (!options.rawHttpAvailable) {
         return unsupported("unsupported", "宿主没有提供公开 HTTP 回调", "当前宿主不支持浏览器登录，请改用短码");
       }
-      const serverUrl = await options.configuredServerUrl();
+      const requested = readStringField(body, "serverUrl");
+      let serverUrl: string | null;
+      if (requested !== null && requested.trim() !== "") {
+        const parsed = parseServerUrl(requested);
+        if (!parsed.ok) return failStart("invalid-server-url", "invalid-server-url", parsed.message, parsed.message);
+        serverUrl = parsed.value;
+      } else {
+        serverUrl = await options.configuredServerUrl();
+      }
       if (serverUrl === null) {
         return failStart("not-configured", "not-configured", "没有配置服务端地址", "还没有配置服务端地址，无法发起浏览器登录");
       }

@@ -109,6 +109,14 @@ export function RemoteServerSettingsPanel({
   >({ kind: "idle" });
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  /**
+   * 「为什么这次改走了短码」。
+   *
+   * 宿主发起浏览器登录失败时，面板会**自动**改走设备码（否则人只能对着一个不动弹的按钮
+   * 干等）。但静默切换的代价是：界面上只剩一个短码框，人无从知道刚才发生了什么——这一次
+   * 到底是不支持、地址不对，还是宿主版本旧。所以把原因留在面板上，而不是只写进日志。
+   */
+  const [startNote, setStartNote] = useState<string | null>(null);
   /** 短码复制结果的短暂反馈；`idle` 时按钮显示「复制短码」。 */
   const [copyState, setCopyState] = useState<"idle" | "ok" | "error">("idle");
   /**
@@ -234,7 +242,12 @@ export function RemoteServerSettingsPanel({
    * 点批准。
    *
    * 宿主说这条路径不存在（旧版本没有公开回调 / 站内相对地址）或这一次没发起成功时**直接**改走
-   * 设备码：设备码自己的错误信息也更贴近人下一步该做什么。
+   * 设备码：设备码自己的错误信息也更贴近人下一步该做什么；失败原因同时留在面板上
+   * （startNote），不让「为什么突然要抄短码」变成猜谜。
+   *
+   * 地址要**显式**带上：宿主只认部署配置与已登录会话里的地址，而这里的地址可能还是刚手填的
+   * 草稿（没写进 config.local.json、也还没登录过）。不传的话首次登录恒被判成「还没有配置服务端
+   * 地址」，浏览器登录永远走不成、设备码却能走——这正是两条路端口径不一致造成的。
    */
   const connect = useCallback(async () => {
     // 空地址没有可连的目标：两种登录路径都不该被发起（按钮已是禁用态，这里再兜一层）。
@@ -246,10 +259,15 @@ export function RemoteServerSettingsPanel({
     setPending(true);
     setActionError(null);
     setOauthFallback(false);
-    const started = await service.api.startOauthLogin({ origin: window.location.origin });
+    setStartNote(null);
+    const started = await service.api.startOauthLogin({
+      origin: window.location.origin,
+      serverUrl: address.trim()
+    });
     setPending(false);
     if (!started.ok) {
       if (started.unsupported) setOauthUnsupported(true);
+      setStartNote(started.error);
       await connectWithDeviceCode();
       return;
     }
@@ -524,6 +542,14 @@ export function RemoteServerSettingsPanel({
                 {methods.some((method) => method.kind === "gateway" && method.ambient)
                   ? "。检测到当前请求已带网关身份，可直接连接。"
                   : ""}
+              </p>
+            ) : null}
+
+            {startNote !== null ? (
+              // 浏览器登录没能发起、已经自动改走短码：把原因留在面板上，而不是只写进日志。
+              // 放在登录状态之前渲染，所以无论是在等浏览器回调还是在抄短码，这句都看得见。
+              <p className="settings-section__hint" data-testid="server-login-fallback">
+                浏览器登录没有发起（{startNote}），已改用短码。
               </p>
             ) : null}
 

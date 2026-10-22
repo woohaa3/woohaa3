@@ -267,6 +267,29 @@ describe("oauth-start", () => {
     expect(result.body).toMatchObject({ ok: false, error: "not-configured" });
   });
 
+  it("面板手填地址（还没写进部署配置、也没登录过）时，按这个地址发起浏览器登录", async () => {
+    const fake = createFakeServer();
+    const fixture = activate({ deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
+    const result = await fixture.call(REMOTE_SERVER_OAUTH_START_ROUTE, {
+      origin: "http://127.0.0.1:5173",
+      serverUrl: "https://canvas.example.com"
+    });
+    const body = result.body as { ok: boolean; authorizeUrl: string };
+    expect(body.ok).toBe(true);
+    // 授权入口必须落在手填的那台服务端上，而不是「未配置」。
+    expect(authorizeParams(body.authorizeUrl).url.origin).toBe("https://canvas.example.com");
+  });
+
+  it("手填地址非法时给 invalid-server-url，不静默换成别的地址", async () => {
+    const fake = createFakeServer();
+    const fixture = activate({ deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
+    const result = await fixture.call(REMOTE_SERVER_OAUTH_START_ROUTE, {
+      origin: "http://127.0.0.1:5173",
+      serverUrl: "canvas.example.com"
+    });
+    expect(result.body).toMatchObject({ ok: false, error: "invalid-server-url" });
+  });
+
   it("各基址下 redirect_uri 始终指向宿主的公开回调（rpcBase 只影响授权入口）", async () => {
     const fake = createFakeServer();
     const fixture = activate({

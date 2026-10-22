@@ -312,13 +312,17 @@ export function createRemoteServerApi(transport: RemoteServerTransport) {
      *
      * 只有浏览器与本机宿主同机（loopback）时才该调用它：宿主会用这里传的 origin 拼
      * redirect_uri，非 loopback 会被宿主拒绝（返回 unsupported）。
+     *
+     * serverUrl 是面板里**当前这个**地址（可能还是没保存的草稿）。必须传：宿主自己只知道
+     * 部署配置或已登录会话里的地址，手填地址的人否则会被判成「还没有配置服务端地址」，
+     * 然后静默改走短码。
      */
-    async startOauthLogin(input: { origin: string }): Promise<RemoteOAuthStartOutcome> {
+    async startOauthLogin(input: { origin: string; serverUrl?: string }): Promise<RemoteOAuthStartOutcome> {
       try {
         const result = await transport.request({
           path: `${HANDLER_BASE}/${REMOTE_SERVER_OAUTH_START_ROUTE}`,
           method: "POST",
-          body: { origin: input.origin }
+          body: input.serverUrl === undefined ? { origin: input.origin } : { origin: input.origin, serverUrl: input.serverUrl }
         });
         if (!result.ok) return { ok: false, unsupported: false, error: result.error };
         const data = (result.data ?? {}) as Record<string, unknown>;

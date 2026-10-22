@@ -130,8 +130,10 @@ export WOOHAA3_REMOTE_SERVER_DEVICE_TOKEN=<部署发放的令牌>
 
 浏览器与本机宿主同机时，登录不再需要短码：
 
-1. 面板调 `oauth-start`（带 `window.location.origin`）；宿主校验 origin 是 loopback，生成 state 与
-   PKCE verifier，返回远端 `/tof/authorize?...` 地址；
+1. 面板调 `oauth-start`（带 `window.location.origin` 与**面板当前这个地址**）；宿主校验 origin 是
+   loopback，生成 state 与 PKCE verifier，返回远端 `/tof/authorize?...` 地址。地址必须由请求体
+   带上来：宿主自己只认部署配置与已登录会话里的地址，而首次登录时地址可能还是手填的草稿——不带
+   的话会被判成「还没有配置服务端地址」并静默改走短码；
 2. 浏览器完成企业统一登录，服务端 302 回宿主公开回调
    `/api/remote-server/auth/callback?code=&state=`；
 3. 宿主先消费 state，再用 `ExchangeLocalLogin`（code + verifier + redirect_uri）换会话、落库并
