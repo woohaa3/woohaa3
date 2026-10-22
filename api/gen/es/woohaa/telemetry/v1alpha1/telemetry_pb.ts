@@ -4,15 +4,13 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file woohaa/telemetry/v1alpha1/telemetry.proto.
  */
 export const file_woohaa_telemetry_v1alpha1_telemetry: GenFile = /*@__PURE__*/
-  fileDesc("Cil3b29oYWEvdGVsZW1ldHJ5L3YxYWxwaGExL3RlbGVtZXRyeS5wcm90bxIZd29vaGFhLnRlbGVtZXRyeS52MWFscGhhMSKHAgoLQ2xpZW50RXZlbnQSMQoGYWN0aW9uGAEgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5BY3Rpb24SMQoGcmVzdWx0GAIgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5SZXN1bHQSMQoGY2xpZW50GAMgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnQSMwoHc3VyZmFjZRgEIAEoDjIiLndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuU3VyZmFjZRIQCgh0cmFjZV9pZBgFIAEoCRIYChBmcm9udGVuZF92ZXJzaW9uGAYgASgJIk0KE1JlcG9ydEV2ZW50c1JlcXVlc3QSNgoGZXZlbnRzGAEgAygLMiYud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnRFdmVudCIuChRSZXBvcnRFdmVudHNSZXNwb25zZRIWCg5hY2NlcHRlZF9jb3VudBgBIAEoDSKTAQoLU3RvcmVkRXZlbnQSCgoCaWQYASABKAMSEAoIYWN0b3JfaWQYAiABKAkSLwoLcmVjZWl2ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjUKBWV2ZW50GAQgASgLMiYud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnRFdmVudCI6ChFMaXN0RXZlbnRzUmVxdWVzdBIRCglwYWdlX3NpemUYASABKAUSEgoKcGFnZV90b2tlbhgCIAEoCSJlChJMaXN0RXZlbnRzUmVzcG9uc2USNgoGZXZlbnRzGAEgAygLMiYud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5TdG9yZWRFdmVudBIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkquQEKBkFjdGlvbhIWChJBQ1RJT05fVU5TUEVDSUZJRUQQABIWChJBQ1RJT05fQ0FOVkFTX09QRU4QARIWChJBQ1RJT05fQ0FOVkFTX1NBVkUQAhIWChJBQ1RJT05fRURJVE9SX0VESVQQAxIXChNBQ1RJT05fU1lOQ19DT05ORUNUEAQSGQoVQUNUSU9OX1NZTkNfUkVDT05DSUxFEAUSGwoXQUNUSU9OX0xPQ0FMX1ZBTElEQVRJT04QBipzCgZSZXN1bHQSFgoSUkVTVUxUX1VOU1BFQ0lGSUVEEAASEgoOUkVTVUxUX1NVQ0NFU1MQARISCg5SRVNVTFRfRkFJTFVSRRACEhQKEFJFU1VMVF9DQU5DRUxMRUQQAxITCg9SRVNVTFRfUkVKRUNURUQQBCpfCgZDbGllbnQSFgoSQ0xJRU5UX1VOU1BFQ0lGSUVEEAASEgoOQ0xJRU5UX0JST1dTRVIQARISCg5DTElFTlRfREVTS1RPUBACEhUKEUNMSUVOVF9MT0NBTF9IT1NUEAMqegoHU3VyZmFjZRIXChNTVVJGQUNFX1VOU1BFQ0lGSUVEEAASEgoOU1VSRkFDRV9DQU5WQVMQARISCg5TVVJGQUNFX0VESVRPUhACEhAKDFNVUkZBQ0VfU1lOQxADEhwKGFNVUkZBQ0VfTE9DQUxfVkFMSURBVElPThAEMoMBChBUZWxlbWV0cnlTZXJ2aWNlEm8KDFJlcG9ydEV2ZW50cxIuLndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuUmVwb3J0RXZlbnRzUmVxdWVzdBovLndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuUmVwb3J0RXZlbnRzUmVzcG9uc2UyhwEKFVRlbGVtZXRyeUFkbWluU2VydmljZRJuCgpMaXN0RXZlbnRzEiwud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5MaXN0RXZlbnRzUmVxdWVzdBotLndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuTGlzdEV2ZW50c1Jlc3BvbnNlIgOQAgFCQFo+d29vaGFhMy9hcGkvZ2VuL2dvL3dvb2hhYS90ZWxlbWV0cnkvdjFhbHBoYTE7dGVsZW1ldHJ5djFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("Cil3b29oYWEvdGVsZW1ldHJ5L3YxYWxwaGExL3RlbGVtZXRyeS5wcm90bxIZd29vaGFhLnRlbGVtZXRyeS52MWFscGhhMSKHAgoLQ2xpZW50RXZlbnQSMQoGYWN0aW9uGAEgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5BY3Rpb24SMQoGcmVzdWx0GAIgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5SZXN1bHQSMQoGY2xpZW50GAMgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnQSMwoHc3VyZmFjZRgEIAEoDjIiLndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuU3VyZmFjZRIQCgh0cmFjZV9pZBgFIAEoCRIYChBmcm9udGVuZF92ZXJzaW9uGAYgASgJIk0KE1JlcG9ydEV2ZW50c1JlcXVlc3QSNgoGZXZlbnRzGAEgAygLMiYud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnRFdmVudCIuChRSZXBvcnRFdmVudHNSZXNwb25zZRIWCg5hY2NlcHRlZF9jb3VudBgBIAEoDSq5AQoGQWN0aW9uEhYKEkFDVElPTl9VTlNQRUNJRklFRBAAEhYKEkFDVElPTl9DQU5WQVNfT1BFThABEhYKEkFDVElPTl9DQU5WQVNfU0FWRRACEhYKEkFDVElPTl9FRElUT1JfRURJVBADEhcKE0FDVElPTl9TWU5DX0NPTk5FQ1QQBBIZChVBQ1RJT05fU1lOQ19SRUNPTkNJTEUQBRIbChdBQ1RJT05fTE9DQUxfVkFMSURBVElPThAGKnMKBlJlc3VsdBIWChJSRVNVTFRfVU5TUEVDSUZJRUQQABISCg5SRVNVTFRfU1VDQ0VTUxABEhIKDlJFU1VMVF9GQUlMVVJFEAISFAoQUkVTVUxUX0NBTkNFTExFRBADEhMKD1JFU1VMVF9SRUpFQ1RFRBAEKl8KBkNsaWVudBIWChJDTElFTlRfVU5TUEVDSUZJRUQQABISCg5DTElFTlRfQlJPV1NFUhABEhIKDkNMSUVOVF9ERVNLVE9QEAISFQoRQ0xJRU5UX0xPQ0FMX0hPU1QQAyp6CgdTdXJmYWNlEhcKE1NVUkZBQ0VfVU5TUEVDSUZJRUQQABISCg5TVVJGQUNFX0NBTlZBUxABEhIKDlNVUkZBQ0VfRURJVE9SEAISEAoMU1VSRkFDRV9TWU5DEAMSHAoYU1VSRkFDRV9MT0NBTF9WQUxJREFUSU9OEAQygwEKEFRlbGVtZXRyeVNlcnZpY2USbwoMUmVwb3J0RXZlbnRzEi4ud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5SZXBvcnRFdmVudHNSZXF1ZXN0Gi8ud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5SZXBvcnRFdmVudHNSZXNwb25zZUJAWj53b29oYWEzL2FwaS9nZW4vZ28vd29vaGFhL3RlbGVtZXRyeS92MWFscGhhMTt0ZWxlbWV0cnl2MWFscGhhMWIGcHJvdG8z");
 
 /**
  * @generated from message woohaa.telemetry.v1alpha1.ClientEvent
@@ -100,90 +98,6 @@ export type ReportEventsResponse = Message<"woohaa.telemetry.v1alpha1.ReportEven
  */
 export const ReportEventsResponseSchema: GenMessage<ReportEventsResponse> = /*@__PURE__*/
   messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 2);
-
-/**
- * @generated from message woohaa.telemetry.v1alpha1.StoredEvent
- */
-export type StoredEvent = Message<"woohaa.telemetry.v1alpha1.StoredEvent"> & {
-  /**
-   * @generated from field: int64 id = 1;
-   */
-  id: bigint;
-
-  /**
-   * Derived exclusively from the authenticated server context.
-   *
-   * @generated from field: string actor_id = 2;
-   */
-  actorId: string;
-
-  /**
-   * @generated from field: google.protobuf.Timestamp received_at = 3;
-   */
-  receivedAt?: Timestamp | undefined;
-
-  /**
-   * @generated from field: woohaa.telemetry.v1alpha1.ClientEvent event = 4;
-   */
-  event?: ClientEvent | undefined;
-};
-
-/**
- * Describes the message woohaa.telemetry.v1alpha1.StoredEvent.
- * Use `create(StoredEventSchema)` to create a new message.
- */
-export const StoredEventSchema: GenMessage<StoredEvent> = /*@__PURE__*/
-  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 3);
-
-/**
- * @generated from message woohaa.telemetry.v1alpha1.ListEventsRequest
- */
-export type ListEventsRequest = Message<"woohaa.telemetry.v1alpha1.ListEventsRequest"> & {
-  /**
-   * Defaults to 50, maximum 200.
-   *
-   * @generated from field: int32 page_size = 1;
-   */
-  pageSize: number;
-
-  /**
-   * Opaque cursor returned by the preceding page.
-   *
-   * @generated from field: string page_token = 2;
-   */
-  pageToken: string;
-};
-
-/**
- * Describes the message woohaa.telemetry.v1alpha1.ListEventsRequest.
- * Use `create(ListEventsRequestSchema)` to create a new message.
- */
-export const ListEventsRequestSchema: GenMessage<ListEventsRequest> = /*@__PURE__*/
-  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 4);
-
-/**
- * @generated from message woohaa.telemetry.v1alpha1.ListEventsResponse
- */
-export type ListEventsResponse = Message<"woohaa.telemetry.v1alpha1.ListEventsResponse"> & {
-  /**
-   * Newest first. Expired events are excluded.
-   *
-   * @generated from field: repeated woohaa.telemetry.v1alpha1.StoredEvent events = 1;
-   */
-  events: StoredEvent[];
-
-  /**
-   * @generated from field: string next_page_token = 2;
-   */
-  nextPageToken: string;
-};
-
-/**
- * Describes the message woohaa.telemetry.v1alpha1.ListEventsResponse.
- * Use `create(ListEventsResponseSchema)` to create a new message.
- */
-export const ListEventsResponseSchema: GenMessage<ListEventsResponse> = /*@__PURE__*/
-  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 5);
 
 /**
  * Local client diagnostics, not product analytics; do not duplicate completed RPCs.
@@ -353,21 +267,4 @@ export const TelemetryService: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_woohaa_telemetry_v1alpha1_telemetry, 0);
-
-/**
- * Requires server-side administrative authorization.
- *
- * @generated from service woohaa.telemetry.v1alpha1.TelemetryAdminService
- */
-export const TelemetryAdminService: GenService<{
-  /**
-   * @generated from rpc woohaa.telemetry.v1alpha1.TelemetryAdminService.ListEvents
-   */
-  listEvents: {
-    methodKind: "unary";
-    input: typeof ListEventsRequestSchema;
-    output: typeof ListEventsResponseSchema;
-  },
-}> = /*@__PURE__*/
-  serviceDesc(file_woohaa_telemetry_v1alpha1_telemetry, 1);
 

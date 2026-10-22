@@ -25,6 +25,21 @@ test('public checkout rejects committed local credentials and corporate endpoint
  try{fs.writeFileSync(path.join(root,'woohaa.secrets.yml'),'placeholder: value');fs.writeFileSync(path.join(root,'release.mjs'),"const endpoint = 'https://service.corp."+"internal/updates';");const errors=checkPublicBoundary(root);assert.equal(errors.length,2);}finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
+test('public checkout rejects administrative contracts in the published bindings',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'public-boundary-'));
+ try{
+  const dir=path.join(root,'api/gen/es/woohaa');fs.mkdirSync(dir,{recursive:true});
+  for(const name of ['ops_pb.ts','rbac_pb.ts','inspect_pb.ts','generation_admin_pb.ts']){
+   fs.writeFileSync(path.join(dir,name),'export {};');
+   const errors=checkPublicBoundary(root);
+   assert.ok(errors.some(error=>error.includes(name)),name);
+   fs.rmSync(path.join(dir,name));
+  }
+  fs.writeFileSync(path.join(dir,'canvas_pb.ts'),'export {};');
+  assert.deepEqual(checkPublicBoundary(root),[]);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('public checkout rejects corporate extensions even when uninstalled or renamed',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'public-boundary-'));
  try{

@@ -21,6 +21,9 @@ export function checkPublicBoundary(root,{files=sourceFiles(root)}={}){
   // Protocol sources and their generation pipeline are private; this checkout carries compiled bindings only.
   if (/\.proto$/i.test(file)) errors.push(`${file}: protobuf definition in public checkout`);
   if (/^api\//.test(file) && !/^api\/gen\/es\//.test(file) && !/^api\/(?:package\.json|tsconfig\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|README\.md)$/.test(file)) errors.push(`${file}: protocol source or tooling in public checkout`);
+  // Administrative contracts stay in the closed repository: the published bindings are the
+  // client-facing API surface only, so an admin service or admin channel in this checkout is a leak.
+  if (/^api\/gen\/es\/.*\/(?:[a-z0-9_]+_admin_pb\.ts|ops_pb\.ts|rbac_pb\.ts|inspect_pb\.ts)$/.test(file)) errors.push(`${file}: administrative contract in public bindings`);
   const basename=path.basename(file);
   const sample=/^(?:\.env\.(?:example|sample|template)|config\.(?:example|sample|template)\.json|woohaa\.(?:config|secrets)\.(?:example|sample|template)\.ya?ml)$/.test(basename);
   if(!sample&&/^(?:\.env(?:\..+)?|woohaa\.(?:secrets|config)\.ya?ml|config\.local\.json|updater\.key|auth\.json|credentials\.json|.*\.(?:sqlite3?|sqlite-wal|sqlite-shm|woohaa|p12|pfx))$/.test(basename))errors.push(`${file}: local credentials or data in public checkout`);
