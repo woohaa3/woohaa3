@@ -2,7 +2,7 @@
 
 | Directory | Responsibility |
 | --- | --- |
-| `api/proto` / `api/gen` | Shared protocol definitions and generated Go/TypeScript bindings |
+| `api/gen/es` | Generated protobuf-es bindings for the shared RPC and synchronization contracts; the protocol sources and their pipeline live outside this repository |
 | `web/contracts` | Cross-boundary DTOs, settings and pure domain helpers |
 | `web/frontend` | React/Cordis interface, browser adapters and canvas runtime integration |
 | `web/backend` | Local host composition, routes and domain adapters |
@@ -15,7 +15,7 @@
 | `scripts` | Client development, build, packaging and verification |
 | `locks` | Dependency lockfiles |
 
-Start at `web/backend/src/composition.ts` for local host composition, `web/frontend/src/main.tsx` for the interface, and `bevy/src/lib.rs` for rendering. Extension discovery follows `extensions.config.json`. Generated API bindings are maintained only in `api/gen`; regenerate from `api/proto` rather than editing bindings.
+Start at `web/backend/src/composition.ts` for local host composition, `web/frontend/src/main.tsx` for the interface, and `bevy/src/lib.rs` for rendering. Extension discovery follows `extensions.config.json`. Generated API bindings enter this repository only as `api/gen/es` output: a protocol change arrives as a regenerated binding, never as a local edit.
 
 Portable configuration handoff: `scripts/export-config.mjs` reads development configuration through `scripts/lib/development-config.mjs`; `scripts/lib/config-handoff.mjs` owns the separate configuration archive and merge/backup behavior. Tauri `desktop/src/local_host.rs` owns stop/import/restart and delegates `--import-config` to `scripts/desktop-host.mjs`. Application extension settings use the service's config-store API; imported model/deployment files belong to the user data directory.
 

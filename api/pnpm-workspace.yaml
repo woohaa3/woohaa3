@@ -1,4 +1,0 @@
-onlyBuiltDependencies:
-  - '@bufbuild/buf'
-allowBuilds:
-  '@bufbuild/buf': true

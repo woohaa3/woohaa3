@@ -80,3 +80,33 @@ test('private provider source is rejected even after directory renaming', () => 
   assert.ok(checkPublicBoundary(root).some(error=>error.includes('extension package')));
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('public checkout rejects a protobuf definition anywhere',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'public-boundary-proto-'));
+ try{
+  fs.mkdirSync(path.join(root,'bevy/src'),{recursive:true});
+  fs.writeFileSync(path.join(root,'bevy/src/wire.proto'),'syntax = "proto3";');
+  const errors=checkPublicBoundary(root);
+  assert.ok(errors.some(error=>error.includes('bevy/src/wire.proto: protobuf definition in public checkout')));
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('public checkout rejects protocol sources and generation tooling under api/',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'public-boundary-api-'));
+ try{
+  const rejected=['api/proto/woohaa/canvas/v1/canvas.proto','api/errs/errs.go','api/buf.yaml','api/buf.gen.yaml','api/go.mod','api/go.sum','api/gen/go/woohaa/canvas/v1/canvas.pb.go','api/scripts/openapi.mjs','api/openapi/openapi.json','api/tools/generrors/main.go'];
+  for(const file of rejected){const absolute=path.join(root,file);fs.mkdirSync(path.dirname(absolute),{recursive:true});fs.writeFileSync(absolute,'x');}
+  const errors=checkPublicBoundary(root);
+  assert.ok(errors.some(error=>error.includes('api/proto/woohaa/canvas/v1/canvas.proto: protobuf definition in public checkout')));
+  for(const file of rejected.filter(name=>!name.endsWith('.proto')))assert.ok(errors.some(error=>error.includes(`${file}: protocol source or tooling in public checkout`)),file);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('public checkout accepts only generated bindings and manifests under api/',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'public-boundary-api-'));
+ try{
+  const allowed=['api/gen/es/woohaa/canvas/v1/canvas_pb.ts','api/package.json','api/tsconfig.json','api/pnpm-lock.yaml','api/pnpm-workspace.yaml','api/.npmrc','api/README.md'];
+  for(const file of allowed){const absolute=path.join(root,file);fs.mkdirSync(path.dirname(absolute),{recursive:true});fs.writeFileSync(absolute,file.endsWith('package.json')?'{"name":"@woohaa3/api"}':'');}
+  assert.deepEqual(checkPublicBoundary(root),[]);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

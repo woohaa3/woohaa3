@@ -1,6 +1,6 @@
 # Client development
 
-Read [CODEMAP.md](CODEMAP.md) before exploring the implementation and [README.md](README.md) for setup. Keep this client independently installable and buildable: never import parent checkout files, private server/admin code or internal developer tools. Shared protocols belong in `api/proto`; generated bindings belong only in `api/gen` and must not be hand-edited.
+Read [CODEMAP.md](CODEMAP.md) before exploring the implementation and [README.md](README.md) for setup. Keep this client independently installable and buildable: never import parent checkout files, private server/admin code or internal developer tools. `api/gen/es` holds the generated protocol bindings the client consumes: the protocol sources and their generation pipeline live outside this repository, so never hand-edit a binding and never add `.proto` files or generation tooling here.
 
 The interface targets desktop computers and tablets, without phone-specific layouts. Accessibility changes are outside the default acceptance scope unless explicitly requested.
 

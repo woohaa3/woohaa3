@@ -2,7 +2,7 @@
  * remote-server 与远端的 Connect 传输层（登录、探测、一元调用、错误短语）。
  *
  * 为什么自己写 Connect 线格式而不是引 `@connectrpc/connect`：宿主只发 HTTP/JSON，不值得为
- * 几个 RPC 拖一整套生成绑定；两端共享的是 `api/proto` 与 Connect 的 JSON 形状，不是代码。
+ * 几个 RPC 拖一整套生成绑定；两端共享的是 `api/gen/es` 的字段语义与 Connect 的 JSON 形状，不是代码。
  *
  * 本模块只做**一次调用**（以及一次「拿凭证换会话」），不持有任何会话状态——会话的唯一归属是
  * `session.ts`，这样存储后端与画布同步上游不会各自缓存出两份登录。

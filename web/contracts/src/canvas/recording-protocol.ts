@@ -2,7 +2,7 @@
  * 本机录制执行器控制协议的 TS 投影
  * （change: 2026-10-17-add-native-offscreen-film-set-recording，任务 1.3 / design D2）。
  *
- * 唯一契约来源是 `api/proto/woohaa/recording/v1alpha1/recording.proto`；本文件只做
+ * 唯一契约来源是本仓库的 `api/gen/es/woohaa/recording/v1alpha1/recording_pb.ts`（协议源码不在本仓库）；本文件只做
  * **protobuf JSON 表示**的解析与校验，不另立 schema、不重新生成绑定：
  * - 字段名 lowerCamelCase，枚举用 ProtoJSON 的 UPPER_SNAKE 符号；
  * - 64 位整数按 ProtoJSON 以字符串承载（同时容忍普通数字，便于测试与旧版对端）；

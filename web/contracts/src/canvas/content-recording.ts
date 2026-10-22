@@ -36,7 +36,7 @@ export type ContentRecordingRequest = {
 /**
  * 冻结后的输入：**一次性**编译产物，worker 只消费它，不执行 JS、不读任意路径。
  *
- * 字段名与 `api/proto/woohaa/recording/v1alpha1/recording.proto` 的 `RecordingSnapshot`
+ * 字段名与 `api/gen/es/woohaa/recording/v1alpha1/recording_pb.ts` 的 `RecordingSnapshot`
  * 对齐；宿主负责把这里的 JSON 投影成 protobuf JSON 发送给执行器。
  */
 export type ContentRecordingSnapshot = {

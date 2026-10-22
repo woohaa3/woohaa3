@@ -12,7 +12,7 @@
  * 3. 画布同步上游与存储字节读写本来就是本机宿主发起的，凭据在同一个进程里才能交给它们。
  *
  * 本模块只依赖 `@woohaa3/contracts` 的宿主纯类型与扩展自有代码；不 import 宿主内部实现，
- * 也不 import 远端 Go 服务端的任何东西——两端只共享 `api/proto`，这里按 Connect 的
+ * 也不 import 远端 Go 服务端的任何东西——两端只共享生成绑定的字段语义，这里按 Connect 的
  * HTTP/JSON 线格式直接发请求，避免把整个 `@connectrpc/connect` 拖进宿主依赖。
  */
 import type {
@@ -299,7 +299,7 @@ async function readBody(req: { on(event: string, listener: (...args: never[]) =>
   });
 }
 
-/** 客户端诊断上报服务（`api/proto/woohaa/diagnostics/v1alpha1`）。 */
+/** 客户端诊断上报服务（生成绑定见 `api/gen/es/woohaa/diagnostics/v1alpha1`）。 */
 const DIAGNOSTICS_SERVICE = "woohaa.diagnostics.v1alpha1.ClientDiagnosticsService";
 
 /**

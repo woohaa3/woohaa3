@@ -56,7 +56,7 @@ mod shot_capture_wire;
 pub mod renderer_protocol;
 
 /// 本机录制执行器控制协议的 Rust 投影（change: 2026-10-17-add-native-offscreen-film-set-recording）。
-/// 唯一来源是 `api/proto/woohaa/recording/v1alpha1`；本模块不含 Bevy 依赖，任何 feature 下可编译。
+/// 契约的生成绑定是 `api/gen/es/woohaa/recording/v1alpha1/recording_pb.ts`；本模块不含 Bevy 依赖，任何 feature 下可编译。
 pub mod recording_protocol;
 /// 录制时间表：有理数采样时钟、末帧终点规则与帧数预算。
 /// 纯函数，不含 Bevy 依赖。

@@ -1,12 +1,12 @@
 /**
  * 服务端托管生成的线格式解释（change: 2026-10-20-reserve-remote-generation-provider，tasks 5.1/5.4）。
  *
- * 契约在 `api/proto/woohaa/generation/v1alpha1/generation.proto`（冻结）。本模块只做两件事：
+ * 契约冻结在本仓库的 `api/gen/es/woohaa/generation/v1alpha1/generation_pb.ts`。本模块只做两件事：
  * 1. **容忍 ProtoJSON**：uint64 可能是字符串、枚举可能是字符串或数字、未知字段一律忽略；
  * 2. **归一成客户端 catalog 契约**（`GenerationModelDefinition`）与 pptask 的任务结果形状。
  *
  * 为什么不用生成的 ES 绑定：宿主只发几个 HTTP/JSON 调用，不为它拖一整套生成代码；两端共享的
- * 是 `api/proto` 的字段语义，不是生成的类型（与 `connect.ts` 同一决定）。
+ * 是生成绑定的字段语义，不是生成的类型（与 `connect.ts` 同一决定）。
  *
  * 安全：远端正文（message / reason / unavailable_reason / upstream_code）不进浏览器、不进日志。
  * 本模块只输出稳定码与稳定短语；原始 text 只用于**模型目录的展示字段**与**任务结果正文**

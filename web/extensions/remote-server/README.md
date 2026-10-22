@@ -34,7 +34,7 @@
 
 「上报到服务端」由**本机宿主**带会话令牌调用
 `woohaa.diagnostics.v1alpha1.ClientDiagnosticsService.ReportDiagnostics`（契约见
-[diagnostics.proto](../../../api/proto/woohaa/diagnostics/v1alpha1/diagnostics.proto)），
+[diagnostics 生成绑定](../../../api/gen/es/woohaa/diagnostics/v1alpha1/diagnostics_pb.ts)），
 浏览器只触发、不接触令牌。上报是 best-effort：失败只影响这次排障，不影响编辑与同步。
 
 - **`frontendVersion` 由浏览器带、宿主校验后转发**：条目是宿主记的，但"这是哪一次构建的前端"
@@ -63,7 +63,7 @@
 ## 托管生成（已接通）
 
 服务端托管生成的客户端接入协议冻结在
-[generation.proto](../../../api/proto/woohaa/generation/v1alpha1/generation.proto)。服务端已实现 5 个 RPC，
+[generation 生成绑定](../../../api/gen/es/woohaa/generation/v1alpha1/generation_pb.ts)。服务端已实现 5 个 RPC，
 支持 LiteLLM 的 language / image / audio / video 四类模型；**当前客户端不需要更新**就能在模型面板里
 看到并使用服务端提供的模型。image/audio/video 需要服务端同时开启托管存储，否则目录里只有 language 模型。
 video 在服务端异步执行（创建上游 job 后轮询，`request_timeout` 是整段等待的预算），客户端仍只按

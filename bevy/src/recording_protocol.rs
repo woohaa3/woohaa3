@@ -1,7 +1,7 @@
 //! 本机录制执行器控制协议的 Rust 投影
 //! （change: 2026-10-17-add-native-offscreen-film-set-recording，任务 1.3 / design D2）。
 //!
-//! 唯一契约来源是 `api/proto/woohaa/recording/v1alpha1/recording.proto`；本模块只做
+//! 唯一契约来源是本仓库的 `api/gen/es/woohaa/recording/v1alpha1/recording_pb.ts`（协议源码不在本仓库）；本模块只做
 //! **protobuf JSON 表示的 serde 投影**，不引入第二套 schema：
 //! - 字段名用 ProtoJSON 的 lowerCamelCase；枚举用 ProtoJSON 的 UPPER_SNAKE 符号；
 //! - 64 位整数按 ProtoJSON 以字符串承载，本模块用 `u64_str` 兼容字符串与数字；
@@ -16,7 +16,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
-/// 控制协议版本；`api/proto` 的 `RECORDING_PROTOCOL_VERSION_1_ALPHA_1`。
+/// 控制协议版本；与 `recording_pb.ts` 的 `RECORDING_PROTOCOL_VERSION_1_ALPHA_1` 一致。
 pub const RECORDING_PROTOCOL_VERSION: &str = "RECORDING_PROTOCOL_VERSION_1_ALPHA_1";
 /// 控制消息体上限（与 proto 注释一致）：元数据帧不得超过 8 MiB。
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 8 * 1024 * 1024;

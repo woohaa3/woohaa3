@@ -1,6 +1,6 @@
 # Woohaa client
 
-Woohaa combines media generation, assets and 3D scene authoring in a canvas. This repository contains the browser frontend, local host, desktop shell, renderer, shared API contracts and public extensions. The client can run locally; remote services and provider accounts are optional integrations.
+Woohaa combines media generation, assets and 3D scene authoring in a canvas. This repository contains the browser frontend, local host, desktop shell, renderer, generated protocol bindings and public extensions. The client can run locally; remote services and provider accounts are optional integrations.
 
 ## Development
 
@@ -15,7 +15,7 @@ pnpm dev
 
 The development and production build commands generate the Bevy and image-editor WASM binaries and JavaScript bindings from source before starting Vite. The first build compiles Rust; later runs reuse build caches. These generated files are not committed. `pnpm build:wasm` builds both bindings explicitly.
 
-`pnpm dev:desktop` opens the desktop development app. `pnpm build` builds the browser client and extensions; `pnpm desktop:bundle --build-frontend` packages the desktop app for the current platform. `pnpm typecheck`, `pnpm test` and `pnpm boundary:check` check the public client. See [desktop](desktop/README.md), [API contracts](api/README.md) and [extensions](web/extensions/README.md).
+`pnpm dev:desktop` opens the desktop development app. `pnpm build` builds the browser client and extensions; `pnpm desktop:bundle --build-frontend` packages the desktop app for the current platform. `pnpm typecheck`, `pnpm test` and `pnpm boundary:check` check the public client; `pnpm -C api run typecheck` checks the generated bindings. See [desktop](desktop/README.md), [API bindings](api/README.md) and [extensions](web/extensions/README.md).
 
 The default storage backend is local. Copy [the configuration example](web/woohaa.config.example.yml) to `web/woohaa.config.yml` only when overriding settings. Provider URLs and keys must be supplied by the user or deployment. Keep credentials in the ignored `web/woohaa.secrets.yml` or environment variables; never commit local configuration or data.
 
