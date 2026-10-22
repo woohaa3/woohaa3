@@ -46,6 +46,7 @@
     "test:scripts": "node --test scripts/*.test.mjs scripts/lib/*.test.mjs",
     "build:image-editor": "node scripts/build-image-editor-wasm.mjs",
     "build:wasm": "node scripts/build-bevy-wasm.mjs && node scripts/build-image-editor-wasm.mjs",
+    "config:export": "node scripts/export-config.mjs",
     "photocraft:install": "node scripts/photocraft.mjs install",
     "photocraft:setup": "node scripts/photocraft.mjs setup",
     "photocraft:check": "node scripts/photocraft.mjs check",

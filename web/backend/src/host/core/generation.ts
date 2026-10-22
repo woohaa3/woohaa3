@@ -5,6 +5,7 @@
  * `/api/generation-models` 管理面。Provider 的密钥是它自己配置段里的 `secret` 字段，经设置服务写入。
  */
 import path from "node:path";
+import { readRuntimeModelViews, mergeRuntimeModelViews } from "./runtime-model-catalog.js";
 import type {
   FilmSetConversionProvider,
   GenerationModelPolicyView,
@@ -63,7 +64,7 @@ export const generationPlugin: HostPlugin<{ env: Record<string, string | undefin
     ctx.effect(() => () => policy.close());
     const service: GenerationService = { ...registry, policy };
     ctx.provide("generation", service);
-    ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.generationModels, createModelsApi(ctx, service, policy)));
+    ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.generationModels, createModelsApi(ctx, service, policy, readRuntimeModelViews(env.WOOHAA3_RUNTIME_MODELS_PATH))));
   }
 };
 
@@ -172,8 +173,14 @@ export function buildGenerationModelsSnapshot(
   };
 }
 
-function createModelsApi(ctx: HostContext, generation: HostGenerationService, policy: GenerationModelPolicyStore) {
-  const view = () => buildGenerationModelsSnapshot(ctx, generation.list(), policy.snapshot());
+function createModelsApi(ctx: HostContext, generation: HostGenerationService, policy: GenerationModelPolicyStore, cached: GenerationModelPolicyView[]) {
+  const view = () => {
+    const providers=generation.list();
+    const snapshot=policy.snapshot();
+    const value=buildGenerationModelsSnapshot(ctx,providers,snapshot);
+    value.models=mergeRuntimeModelViews(value.models,cached,providers,snapshot);
+    return value;
+  };
   return createGenerationModelsApiHandler({
     authenticator: ctx.access.authenticator,
     accessEnforcer: ctx.access.accessEnforcer,

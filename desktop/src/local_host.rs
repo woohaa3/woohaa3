@@ -65,7 +65,10 @@ fn recording_config(
 fn system_tar_path(windows: bool, system_root: Option<std::ffi::OsString>) -> PathBuf {
     if windows {
         let root = system_root.unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
-        let mut value = root.to_string_lossy().trim_end_matches(['\\', '/']).to_string();
+        let mut value = root
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .to_string();
         value.push_str(r"\System32\tar.exe");
         PathBuf::from(value)
     } else {
@@ -310,6 +313,8 @@ pub fn install(
             true,
             None::<&str>,
         )?;
+        let import_config =
+            tauri::menu::MenuItem::with_id(app, "config-import", "导入配置…", true, None::<&str>)?;
         let restore = tauri::menu::MenuItem::with_id(
             app,
             "workspace-restore",
@@ -317,8 +322,12 @@ pub fn install(
             true,
             None::<&str>,
         )?;
-        let submenu =
-            tauri::menu::Submenu::with_items(app, "工作区", true, &[&export, &import, &restore])?;
+        let submenu = tauri::menu::Submenu::with_items(
+            app,
+            "工作区",
+            true,
+            &[&export, &import, &import_config, &restore],
+        )?;
         menu.append(&submenu)?;
     }
     let retry = tx.clone();
@@ -439,6 +448,11 @@ pub fn install(
     });
     Ok(())
 }
+// Auxiliary authorization windows close independently of the local host.
+fn closes_application(label: &str) -> bool {
+    matches!(label, "main" | "startup")
+}
+
 pub fn handle_exit(app: &tauri::AppHandle, event: &tauri::RunEvent) -> bool {
     let Some(state) = app.try_state::<Arc<Managed>>() else {
         return false;
@@ -453,8 +467,9 @@ pub fn handle_exit(app: &tauri::AppHandle, event: &tauri::RunEvent) -> bool {
         }
         tauri::RunEvent::WindowEvent {
             event: tauri::WindowEvent::CloseRequested { api, .. },
+            label,
             ..
-        } => {
+        } if closes_application(label) => {
             api.prevent_close();
             true
         }
@@ -524,6 +539,7 @@ pub fn handle_exit(app: &tauri::AppHandle, event: &tauri::RunEvent) -> bool {
 enum ArchiveAction {
     Export,
     Import,
+    ImportConfig,
     Restore,
 }
 impl ArchiveAction {
@@ -531,6 +547,7 @@ impl ArchiveAction {
         match id {
             "workspace-export" => Some(Self::Export),
             "workspace-import" => Some(Self::Import),
+            "config-import" => Some(Self::ImportConfig),
             "workspace-restore" => Some(Self::Restore),
             _ => None,
         }
@@ -539,6 +556,7 @@ impl ArchiveAction {
         match self {
             Self::Export => "--export",
             Self::Import => "--import",
+            Self::ImportConfig => "--import-config",
             Self::Restore => "--restore-backup",
         }
     }
@@ -571,7 +589,7 @@ pub fn handle_menu(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
                 .add_filter("WooHaa 工作区", &["woohaa"])
                 .set_file_name("workspace.woohaa")
                 .blocking_save_file(),
-            ArchiveAction::Import => dialog
+            ArchiveAction::Import | ArchiveAction::ImportConfig => dialog
                 .add_filter("WooHaa 工作区", &["woohaa"])
                 .blocking_pick_file(),
             ArchiveAction::Restore => dialog.blocking_pick_folder(),
@@ -596,6 +614,9 @@ pub fn handle_menu(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
             match action {
                 ArchiveAction::Export => "正在停止宿主并导出工作区（包含配置和密钥）…",
                 ArchiveAction::Import => "正在备份并导入工作区…",
+                ArchiveAction::ImportConfig => {
+                    "正在备份并导入配置（保留画布、任务、媒体和个人会话）…"
+                }
                 ArchiveAction::Restore => "正在从所选备份恢复工作区…",
             },
             false,
@@ -716,6 +737,11 @@ mod recovery_tests {
         );
         assert_eq!(ArchiveAction::Restore.flag(), "--restore-backup");
         assert_eq!(ArchiveAction::Import.flag(), "--import");
+        assert_eq!(
+            ArchiveAction::from_menu("config-import"),
+            Some(ArchiveAction::ImportConfig)
+        );
+        assert_eq!(ArchiveAction::ImportConfig.flag(), "--import-config");
     }
 }
 
@@ -800,13 +826,16 @@ fn extract_resource_archive(
     let staging = cache.join(format!(".extract-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&staging).map_err(|e| e.to_string())?;
     let result = (|| {
-        let status = hidden_command(system_tar_path(cfg!(windows), std::env::var_os("SystemRoot")))
-            .arg("-xzf")
-            .arg(archive)
-            .arg("-C")
-            .arg(&staging)
-            .status()
-            .map_err(|e| e.to_string())?;
+        let status = hidden_command(system_tar_path(
+            cfg!(windows),
+            std::env::var_os("SystemRoot"),
+        ))
+        .arg("-xzf")
+        .arg(archive)
+        .arg("-C")
+        .arg(&staging)
+        .status()
+        .map_err(|e| e.to_string())?;
         if !status.success() || !staging.join("desktop-host.mjs").is_file() {
             return Err("宿主资源解包失败或缺少入口".into());
         }
@@ -931,5 +960,16 @@ mod platform_command_tests {
         let windows = system_tar_path(true, Some(std::ffi::OsString::from(r"D:\Windows")));
         assert_eq!(windows.to_string_lossy(), r"D:\Windows\System32\tar.exe");
         assert_eq!(system_tar_path(false, None), PathBuf::from("/usr/bin/tar"));
+    }
+}
+
+#[cfg(test)]
+mod close_window_tests {
+    #[test]
+    fn only_application_windows_request_host_shutdown() {
+        assert!(super::closes_application("main"));
+        assert!(super::closes_application("startup"));
+        assert!(!super::closes_application("web-popup-authorization"));
+        assert!(!super::closes_application("other"));
     }
 }

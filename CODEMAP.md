@@ -16,3 +16,9 @@
 | `locks` | Dependency lockfiles |
 
 Start at `web/backend/src/composition.ts` for local host composition, `web/frontend/src/main.tsx` for the interface, and `bevy/src/lib.rs` for rendering. Extension discovery follows `extensions.config.json`. Generated API bindings are maintained only in `api/gen`; regenerate from `api/proto` rather than editing bindings.
+
+Portable configuration handoff: `scripts/export-config.mjs` reads development configuration through `scripts/lib/development-config.mjs`; `scripts/lib/config-handoff.mjs` owns the separate configuration archive and merge/backup behavior. Tauri `desktop/src/local_host.rs` owns stop/import/restart and delegates `--import-config` to `scripts/desktop-host.mjs`. Application extension settings use the service's config-store API; imported model/deployment files belong to the user data directory.
+
+Runtime model handoff reads the host public snapshot through `scripts/lib/runtime-models-export.mjs`. Imported metadata is displayed through `web/backend/src/host/core/runtime-model-catalog.ts`; it does not register generation providers. Desktop data owns `config/runtime-models.json`.
+
+Windows dependency bootstrap: root `setup.ps1` checks the native toolchain before frozen client/web/api dependency installs; `-CheckOnly` performs only preflight checks. It does not build WASM or desktop installers.

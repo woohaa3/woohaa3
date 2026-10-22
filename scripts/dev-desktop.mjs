@@ -108,7 +108,10 @@ async function main() {
 <key>CFBundleIconFile</key><string>icon.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>0.1.0</string>
-<key>NSHighResolutionCapable</key><true/></dict></plist>`);
+<key>NSHighResolutionCapable</key><true/>
+<key>NSAppTransportSecurity</key><dict>
+<key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+</dict></dict></plist>`);
     const log = join(root, ".local/desktop-app.log");
     await finish(launch("open", ["-n", "-W", "--stdout", log, "--stderr", log, app, ...(remote ? ["--args", "--ui-url", url] : [])]));
   } else {

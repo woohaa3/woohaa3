@@ -35,3 +35,5 @@ export * from "./api/extension-api.js";
 export * from "./api/agent-conversation-api.js";
 export * from "./composition.js";
 export * from "./repository/instance-data-scope.js";
+
+export { createSqliteSiteExtensionConfigStore } from "./extensions/config-store.js";

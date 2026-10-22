@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import { createRequire } from 'node:module';
 import { acquireDataLock, desktopEnvironment, prepareData, commitDataVersion, exportWorkspace, importWorkspace, restoreBackup } from './lib/desktop-host-data.mjs';
+import { importConfigPackage } from './lib/config-handoff.mjs';
 import { materializeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
 const arg=(name,fallback)=>{const i=process.argv.indexOf(`--${name}`);return i<0?fallback:process.argv[i+1];};
 const emit=value=>process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -23,6 +24,12 @@ async function main(){
  if(!arg('data-dir')||!arg('resource-root'))throw new Error('缺少 data-dir 或 resource-root');
  if(arg('export')){emit({type:'exported',...exportWorkspace(dataDir,arg('export'))});return;}
  if(arg('restore-backup')){emit({type:'restored',...restoreBackup(dataDir,arg('restore-backup'))});return;}
+ if(arg('import-config')){
+  materializeRuntimeLinks(resourceRoot);
+  const require=createRequire(path.join(resourceRoot,'backend-runtime/package.json'));
+  const {createSqliteSiteExtensionConfigStore,createSqliteGenerationModelStore}=await import(pathToFileURL(path.join(resourceRoot,'backend-runtime/dist/index.js')).href);
+  emit({type:'config-imported',...importConfigPackage({dataDir,archive:arg('import-config'),yaml:require('yaml'),createStore:createSqliteSiteExtensionConfigStore,createModelStore:createSqliteGenerationModelStore})});return;
+ }
  if(arg('import')){emit({type:'imported',...importWorkspace(dataDir,arg('import'))});return;}
  const instance=arg('instance');if(!instance)throw new Error('缺少 instance');
  releaseLock=acquireDataLock(dataDir);

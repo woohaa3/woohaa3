@@ -14,3 +14,5 @@ export * from "./extensions/contract.js";
 export * from "./extensions/manifest.js";
 export * from "./ports/adapters.js";
 export * from "./ports/mcp-adapters.js";
+
+export { createSqliteSiteExtensionConfigStore, createSqliteGenerationModelStore } from "@woohaa3/application-service";

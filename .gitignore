@@ -111,5 +111,8 @@ config.local.json
 *.sqlite-wal
 *.sqlite-shm
 
+# Workspace/configuration handoff packages may contain credentials
+*.woohaa
+
 # Locally injected private provider branding
 /web/frontend/public/plugin-icons/litellm-provider.png

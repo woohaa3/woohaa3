@@ -45,7 +45,7 @@ export type ReadDeploymentInput = {
  */
 export function readRemoteServerDeployment(input: ReadDeploymentInput = {}): RemoteServerDeployment {
   const env = input.env ?? process.env;
-  const file = input.configFile ?? new URL(`../${REMOTE_SERVER_LOCAL_CONFIG}`, import.meta.url);
+  const file = input.configFile ?? env.WOOHAA3_REMOTE_SERVER_CONFIG_FILE ?? new URL(`../${REMOTE_SERVER_LOCAL_CONFIG}`, import.meta.url);
   let local: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));

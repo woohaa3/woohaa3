@@ -21,7 +21,9 @@ export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platfo
  WOOHAA3_CANVAS_STORAGE_BACKEND:'sqlite', WOOHAA3_CANVAS_STORAGE_SQLITE_PATH:path.join(dataDir,'stores/canvas.sqlite'),
  WOOHAA3_APPLICATION_DOCUMENT_STORE_BACKEND:'sqlite', WOOHAA3_CONFIG_FILE:path.join(dataDir,'config/woohaa.config.yml'), WOOHAA3_SECRETS_FILE:path.join(dataDir,'config/woohaa.secrets.yml'),
  WOOHAA3_PLUGIN_SECRET_DIR:path.join(dataDir,'secrets/plugins'), WOOHAA3_EXTENSION_DATA_DIR:path.join(dataDir,'extension-data'),
- WOOHAA3_LOG_DIR:path.join(dataDir,'logs'), WOOHAA3_MODELS_CONFIG_PATH:path.join(resourceRoot,'models.json'),
+ WOOHAA3_LOG_DIR:path.join(dataDir,'logs'), WOOHAA3_MODELS_CONFIG_PATH:fs.existsSync(path.join(dataDir,'config/models.json'))?path.join(dataDir,'config/models.json'):path.join(resourceRoot,'models.json'),
+ WOOHAA3_RUNTIME_MODELS_PATH:path.join(dataDir,'config/runtime-models.json'),
+ WOOHAA3_REMOTE_SERVER_CONFIG_FILE:path.join(dataDir,'config/remote-server.json'),
  WOOHAA3_EXTENSION_DIRS:[path.join(resourceRoot,'extensions'),path.join(dataDir,'extensions')].join(','), WOOHAA3_EXTENSION_WRITABLE_DIRS:path.join(dataDir,'extensions'),
  WOOHAA3_TRUSTED_INGRESS_SECRET:randomBytes(32).toString('hex'),
  });
