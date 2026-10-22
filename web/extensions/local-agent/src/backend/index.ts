@@ -47,6 +47,8 @@ import {
   type LocalAgentRuntimeOptions,
 } from "./local-agent-connections.js";
 import { createLocalAgentHandler } from "./handler.js";
+import { getRuntimeComponentManager } from "@woohaa3/runtime-components";
+import { createRuntimeExecutableResolver } from "./runtime-executable.js";
 import { resolveLocalExecutable } from "./discovery.js";
 import os from "node:os";
 import path from "node:path";
@@ -122,7 +124,7 @@ export function createLocalAgentExtension(
       // 停用后拒绝新回合（dispose 期间置 false）；已接受回合由宿主结算，专用进程随后回收。
       let admitted = true;
 
-      const executableFor = (adapterId: string): string | null => {
+      const localExecutableFor = (adapterId: string): string | null => {
         const command =
           adapterId === "codex-appserver"
             ? "codex"
@@ -141,7 +143,10 @@ export function createLocalAgentExtension(
         return resolveLocalExecutable(configured, command, env);
       };
 
+      const executables = createRuntimeExecutableResolver({ local: localExecutableFor, getManager: () => deployment.codexBin ? undefined : getRuntimeComponentManager() });
+      const executableFor = executables.executableFor;
       const processManager = createProcessManager({
+        acquireExecutable: executables.acquire,
         workDirRoot:
           deployment.workDir ?? path.join(os.tmpdir(), "woohaa3-local-agent"),
         portRange: deployment.portRange,

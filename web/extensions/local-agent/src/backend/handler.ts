@@ -30,7 +30,7 @@ import type { ProcessManager } from "./process-manager.js";
 
 export type LocalAgentHandlerOptions = {
   service: ConnectionService;
-  executableFor: (adapterId: string) => string | null;
+  executableFor: (adapterId: string) => string | null | Promise<string | null>;
   processManager: ProcessManager;
   transports?: Record<string, LocalAgentTransport>;
   argsFor?: (adapterId: string) => readonly string[];
@@ -167,7 +167,7 @@ export function createLocalAgentHandler(options: LocalAgentHandlerOptions) {
           message: "未知本机接入方式",
         });
       if (body?.useDetected === true) {
-        if (!options.executableFor(adapter.adapterId))
+        if (!(await options.executableFor(adapter.adapterId)))
           return sendJson(res, 400, {
             code: "runtime-missing",
             message: "未找到工具。请在后端机器安装后重新检测。",
@@ -252,7 +252,7 @@ export function createLocalAgentHandler(options: LocalAgentHandlerOptions) {
           code: "not-found",
           message: "连接不存在或无权访问",
         });
-      const probe = options.processManager.probe(record.adapterId);
+      const probe = await options.processManager.probe(record.adapterId);
       const transport = options.transports?.[record.adapterId];
       if (probe.ok && transport?.check && options.argsFor) {
         try {

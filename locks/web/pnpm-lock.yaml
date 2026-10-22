@@ -355,6 +355,9 @@ importers:
       '@woohaa3/frontend':
         specifier: workspace:*
         version: link:../../frontend
+      '@woohaa3/runtime-components':
+        specifier: workspace:*
+        version: link:../../runtime-components
       react:
         specifier: ^18.3.1
         version: 18.3.1

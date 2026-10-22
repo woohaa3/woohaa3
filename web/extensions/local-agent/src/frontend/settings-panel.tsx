@@ -21,11 +21,12 @@ export type SettingsPanelHostProps = {
 };
 
 export function LocalAgentSettingsPanel({
-  remote, connectionId, onSaved, reportEditState,
+  remote, connectionId, onSaved, reportEditState, onOpenRuntimes,
 }: {
   remote: LocalAgentRemote;
   connectionId?: string;
   onSaved?: (connectionId: string) => void;
+  onOpenRuntimes?: () => void;
 } & SettingsPanelHostProps) {
   const [adapters, setAdapters] = useState<LocalAgentAdapterView[]>([]);
   const [connections, setConnections] = useState<LocalAgentConnectionView[]>(
@@ -128,9 +129,9 @@ export function LocalAgentSettingsPanel({
               <li key={adapter.adapterId} data-adapter-id={adapter.adapterId}>
                 <div className="settings-section__item">
                   <div className="settings-section__item-main">
-                    <strong><span className="service-identity"><ServiceLogo service={adapter.adapterId} />{adapter.label.replace(/（本机）$/, "")}</span></strong>
-                    <p className="settings-section__hint">{installed ? "已安装" : "未安装"} · {running ? "运行中" : "未运行"}</p>
-                    {!installed ? <p className="settings-section__hint">{running ? "已发现服务；安装对应工具后可使用。" : adapter.note || "未找到工具，请先安装。"}</p> : null}
+                    <strong><span className="service-identity"><ServiceLogo service={adapter.adapterId} />{adapter.label.replace(/（本机）$/, "").replace(/(?: App Server| Server)$/, "")}</span></strong>
+                    <p className="settings-section__hint">{installed ? `已安装 · ${running ? "运行中" : "未运行"}` : running ? "未安装 · 发现其他服务进程" : "尚未安装"}</p>
+                    {!installed ? <p className="settings-section__hint">{adapter.adapterId === "codex-appserver" ? "安装 Codex 运行时组件，或选择本机已有的 Codex 程序。" : "请先在运行本应用的电脑上安装对应命令行工具。"}</p> : null}
                   </div>
                   {connection ? (
                     <>
@@ -143,6 +144,12 @@ export function LocalAgentSettingsPanel({
                         停用
                       </Button>
                     </>
+                  ) : !installed ? (
+                    adapter.adapterId === "codex-appserver" && onOpenRuntimes ? (
+                      <Button size="sm" disabled={Boolean(busy)} onClick={onOpenRuntimes}>安装或选择 Codex</Button>
+                    ) : (
+                      <a className="settings-section__hint" href={adapter.adapterId === "opencode-server" ? "https://opencode.ai/docs/" : adapter.adapterId === "codebuddy-server" ? "https://www.codebuddy.cn/docs/cli/installation" : "https://developers.openai.com/codex/cli/"} target="_blank" rel="noreferrer">查看安装说明 ↗</a>
+                    )
                   ) : (
                     <Button
                       size="sm"
@@ -208,6 +215,7 @@ export function LocalAgentSettingsPanel({
             );
           })}
         </ul>
+        {adapters.some(adapter => adapter.installed === false) ? <p className="settings-section__hint">安装并登录后，点击“重新检测”，再选择“使用此工具”。</p> : <p className="settings-section__hint">选择“使用此工具”后会添加到助手列表；执行任务时由应用自动启动。</p>}
         {notice ? (
           <div data-testid="local-agent-notice">
             <SettingsFeedback tone={notice.error ? "danger" : "success"}>

@@ -53,7 +53,8 @@ export type ProcessManagerOptions = {
   /** 部署允许的回环端口范围。 */
   portRange: { min: number; max: number };
   /** 可执行入口解析（按 adapter）。 */
-  executableFor: (adapterId: string) => string | null;
+  executableFor: (adapterId: string) => string | null | Promise<string | null>;
+  acquireExecutable?: (adapterId: string) => Promise<{ entry: string; release(): void } | null>;
   /**
    * 专用配置目录创建后、进程启动前的准备钩子（如为 Codex 链接现有 home）。
    * 不得写入 secret 副本；失败应抛出，避免带着错误配置启动。
@@ -97,7 +98,7 @@ export type ProcessProbe =
 
 export type ProcessManager = {
   /** 运行依赖探测（缺 CLI/版本不支持准确报错；不启动进程）。 */
-  probe: (adapterId: string, options?: { requiredVersion?: string }) => ProcessProbe;
+  probe: (adapterId: string, options?: { requiredVersion?: string }) => ProcessProbe | Promise<ProcessProbe>;
   /** 确保专用进程存在（幂等；已有句柄直接复用）。 */
   ensure: (input: { adapterId: string; owner: string; connectionId: string; args: readonly string[]; kind: "stdio" | "http"; env?: Record<string, string> }) => Promise<ProcessHandle>;
   /** 取得既有句柄（无则 null）。 */
@@ -249,8 +250,8 @@ export function createProcessManager(options: ProcessManagerOptions): ProcessMan
     };
   };
 
-  const probe = (adapterId: string, probeOptions?: { requiredVersion?: string }): ProcessProbe => {
-    const executable = options.executableFor(adapterId);
+  const probe = async (adapterId: string, probeOptions?: { requiredVersion?: string }): Promise<ProcessProbe> => {
+    const executable = await options.executableFor(adapterId);
     if (!executable) return { ok: false, code: "runtime-missing", message: `未安装 ${adapterId} 所需可执行文件（本机来源需要后端机器上有对应 CLI）` };
     // 版本探测由适配器在真实调用时用协议初始化结果校对；此处只报「入口存在」。
     const version = probeOptions?.requiredVersion ?? "unknown";
@@ -262,7 +263,7 @@ export function createProcessManager(options: ProcessManagerOptions): ProcessMan
     const existing = handles.get(key);
     if (existing) return existing.handle;
 
-    const executable = options.executableFor(input.adapterId);
+    let executable = await options.executableFor(input.adapterId);
     if (!executable) throw new Error(`未安装 ${input.adapterId} 所需可执行文件`);
     if (!options.workDirRoot) throw new Error("未配置专用工作目录");
 
@@ -308,7 +309,13 @@ export function createProcessManager(options: ProcessManagerOptions): ProcessMan
     }
 
     let process0: SpawnedProcess | undefined;
+    let lease: { entry: string; release(): void } | null = null;
     try {
+      if (options.acquireExecutable) {
+        lease = await options.acquireExecutable(input.adapterId);
+        if (!lease) throw new Error("工具尚未安装，请安装后重试");
+        executable = lease.entry;
+      }
       process0 = (options.spawnFn ?? defaultSpawn)({ command: executable, args, env, cwd: workDir });
       await process0.spawned;
     } catch (error) {
@@ -316,6 +323,7 @@ export function createProcessManager(options: ProcessManagerOptions): ProcessMan
         process0.kill("SIGTERM");
         await process0.exited;
       }
+      lease?.release();
       // 入口不可执行：不登记句柄、不占端口，把原因交给调用方按连接错误上报。
       if (loopbackUrl) {
         const port = Number(new URL(loopbackUrl).port);
@@ -342,6 +350,7 @@ export function createProcessManager(options: ProcessManagerOptions): ProcessMan
     };
     handles.set(key, { handle, process: process0 });
     void process0.exited.then(() => {
+      lease?.release();
       if (handles.get(key)?.handle !== handle) return;
       handles.delete(key);
       if (loopbackUrl) usedPorts.delete(Number(new URL(loopbackUrl).port));

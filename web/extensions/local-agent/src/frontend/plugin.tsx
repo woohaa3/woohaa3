@@ -55,7 +55,9 @@ export function localAgentExtension(options: LocalAgentExtensionOptions = {}): P
         priority: 20,
         kind: "installed",
         label: "使用已安装工具",
-        render: (props) => <LocalAgentSettingsPanel remote={remote} {...props} />
+        render: (props) => <LocalAgentSettingsPanel remote={remote} {...props} onOpenRuntimes={() => {
+          void (ctx.get("settingsOpen" as never) as { open(input: { section: "runtimes" }): Promise<unknown> } | undefined)?.open({ section: "runtimes" });
+        }} />
       });
       ctx.effect(() => () => removeSettings(), "local-agent-settings");
 

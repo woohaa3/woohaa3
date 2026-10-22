@@ -137,7 +137,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     // 启动的仍是专用进程，不读取或修改用户现有工具配置。
     const record = mine[0]!;
     try {
-      const probe = options.processManager.probe(adapter.adapterId);
+      const probe = await options.processManager.probe(adapter.adapterId);
       if (!probe.ok) return { models: [...catalog.values()], error: probe.message };
       const handle = await options.processManager.ensure({
         adapterId: adapter.adapterId,

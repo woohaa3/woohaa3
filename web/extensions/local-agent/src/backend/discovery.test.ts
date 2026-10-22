@@ -178,3 +178,13 @@ it("端口不可达仍返回安装状态和说明，不启动服务", async () =
     note: expect.stringContaining("生成时自动启动"),
   });
 });
+it("CodeBuddy 原生默认目录不在 PATH 时也可发现", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "agent-codebuddy-home-"));
+  try {
+    const dir = process.platform === "win32" ? path.join(home, "codebuddy", "bin") : path.join(home, ".local", "bin");
+    await mkdir(dir, { recursive: true });
+    const bin = path.join(dir, process.platform === "win32" ? "codebuddy.exe" : "codebuddy");
+    await writeFile(bin, "#!/bin/sh\nexit 0\n"); await chmod(bin, 0o755);
+    expect(resolveLocalExecutable(null, "codebuddy", { HOME: home, LOCALAPPDATA: home, PATH: "" })).toBe(bin);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

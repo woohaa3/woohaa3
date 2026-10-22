@@ -57,7 +57,7 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
 
   it("缺 CLI 时 probe 明确报 runtime-missing，ensure 抛错", async () => {
     const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42010 }, executableFor: () => null });
-    const probe = manager.probe("codex-appserver");
+    const probe = await manager.probe("codex-appserver");
     expect(probe.ok).toBe(false);
     if (!probe.ok) expect(probe.code).toBe("runtime-missing");
     await expect(manager.ensure({ adapterId: "codex-appserver", owner: "u1", connectionId: "c1", args: [], kind: "stdio" })).rejects.toThrow();
@@ -215,4 +215,20 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
     expect(true).toBe(true);
   });
+});
+
+it("托管工具持有进程租约至退出，实际启动使用租约内的入口", async () => {
+  const record: SpawnSpec[] = []; let released = 0;
+  const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42010 }, executableFor: async () => "/checked/codex", acquireExecutable: async () => ({ entry: "/leased/codex", release: () => { released++; } }), spawnFn: fakeSpawn(record) });
+  const input = { adapterId: "codex-appserver", owner: "u", connectionId: "c", args: [], kind: "stdio" as const };
+  expect((await manager.probe(input.adapterId)).ok).toBe(true);
+  expect(released).toBe(0);
+  await manager.ensure(input); expect(record[0]?.command).toBe("/leased/codex"); expect(released).toBe(0);
+  await manager.stop(input); expect(released).toBe(1);
+});
+it("托管工具启动失败会释放租约", async () => {
+  let released = 0;
+  const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42010 }, executableFor: async () => "/checked/codex", acquireExecutable: async () => ({ entry: "/leased/codex", release: () => { released++; } }), spawnFn: () => { throw new Error("不可执行"); } });
+  await expect(manager.ensure({ adapterId: "codex-appserver", owner: "u", connectionId: "c", args: [], kind: "stdio" })).rejects.toThrow("不可执行");
+  expect(released).toBe(1);
 });

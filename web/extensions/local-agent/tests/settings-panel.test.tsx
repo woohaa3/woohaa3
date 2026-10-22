@@ -117,12 +117,12 @@ it("仅检测到外部服务而没有 CLI 时显示安装指引，不冒称可�
     }),
   );
   await act(async () => root.render(<LocalAgentSettingsPanel remote={api} />));
-  expect(el.textContent).toContain("已发现服务；安装对应工具后可使用。");
+  expect(el.textContent).toContain("未安装 · 发现其他服务进程");
   expect(
     [...el.querySelectorAll("button")].find(
       (button) => button.textContent === "使用此工具",
-    )!.disabled,
-  ).toBe(true);
+    ),
+  ).toBeUndefined();
 });
 it("停用失败保留工具配置和确认状态", async () => {
   const api = remote();
@@ -191,4 +191,24 @@ it("管理入口只显示当前助手，停用成功返回列表", async () => {
   await click("确认停用");
   expect(api.remove).toHaveBeenCalledWith("c1");
   expect(onSaved).toHaveBeenCalledWith("");
+});
+
+it("Codex 缺失时给出可点击的安装/选择程序入口，而非禁用使用按钮", async () => {
+  const api = remote(); const result = await api.list(); if (!result.ok) throw new Error();
+  api.list = vi.fn(async () => ok({ ...result.value, adapters: result.value.adapters.map(a => ({ ...a, installed: false, running: true })) }));
+  const install = vi.fn();
+  await act(async () => root.render(<LocalAgentSettingsPanel remote={api} onOpenRuntimes={install} />));
+  expect(el.textContent).toContain("发现其他服务进程");
+  expect(el.textContent).not.toContain("未安装 · 运行中");
+  await click("安装或选择 Codex");
+  expect(install).toHaveBeenCalledOnce();
+  expect(api.create).not.toHaveBeenCalled();
+});
+it("OpenCode 和 CodeBuddy 缺失时各有官方安装入口和下一步说明", async () => {
+  const api = remote(); const result = await api.list(); if (!result.ok) throw new Error();
+  api.list = vi.fn(async () => ok({ ...result.value, adapters: ["opencode-server", "codebuddy-server"].map(adapterId => ({ ...result.value.adapters[0]!, adapterId, label: adapterId, installed: false, running: false })) }));
+  await act(async () => root.render(<LocalAgentSettingsPanel remote={api} />));
+  expect(el.querySelector('a[href="https://opencode.ai/docs/"]')).not.toBeNull();
+  expect(el.querySelector('a[href="https://www.codebuddy.cn/docs/cli/installation"]')).not.toBeNull();
+  expect(el.textContent).toContain("安装并登录后，点击“重新检测”，再选择“使用此工具”。");
 });

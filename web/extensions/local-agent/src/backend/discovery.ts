@@ -31,9 +31,12 @@ export function resolveLocalExecutable(
   // OpenCode 官方安装脚本把可执行文件放在 `~/.opencode/bin`，只把它追加到交互式 shell 的
   // PATH；后端进程可能在该目录进入 PATH 之前启动（先起服务、后装工具）。部署显式配置仍然
   // 优先且不做兜底，避免把写错的部署路径悄悄替换成另一份安装。
-  const fallbackDirs =
-    command === "opencode" && env.HOME?.trim()
-      ? [path.join(env.HOME.trim(), ".opencode", "bin")]
+  const fallbackDirs = command === "opencode" && env.HOME?.trim()
+    ? [path.join(env.HOME.trim(), ".opencode", "bin")]
+    : command === "codebuddy"
+      ? process.platform === "win32"
+        ? env.LOCALAPPDATA?.trim() ? [path.join(env.LOCALAPPDATA.trim(), "codebuddy", "bin")] : []
+        : env.HOME?.trim() ? [path.join(env.HOME.trim(), ".local", "bin")] : []
       : [];
   const candidates = configured
     ? [configured]
@@ -84,7 +87,7 @@ async function runningCommands(): Promise<string[][]> {
 }
 
 export function createLocalAgentDiscovery(options: {
-  executableFor: (id: string) => string | null;
+  executableFor: (id: string) => string | null | Promise<string | null>;
   fetchImpl?: typeof globalThis.fetch;
   listProcesses?: () => Promise<string[][]>;
 }) {
@@ -100,7 +103,7 @@ export function createLocalAgentDiscovery(options: {
     adapter: LocalAgentAdapterDescriptor,
     managed: boolean,
   ): Promise<LocalAgentDetection> => {
-    const installed = options.executableFor(adapter.adapterId) !== null;
+    const installed = (await options.executableFor(adapter.adapterId)) !== null;
     const command =
       adapter.adapterId === "codex-appserver"
         ? "codex"
