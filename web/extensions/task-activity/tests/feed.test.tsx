@@ -28,14 +28,13 @@ function record(patch: Partial<CanvasTaskActivity> & { taskKey: string; runId: s
   };
 }
 
-const noop = () => undefined;
 const media = (storageKey: string) => `https://cdn.test/${storageKey}`;
 
 describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
   it("无记录时显示可访问的折叠入口", () => {
     const store = storeWith([]);
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     expect(markup).toContain("task-activity-feed__entry");
     expect(markup).toContain('aria-label="任务活动"');
@@ -47,7 +46,7 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
       record({ taskKey: "t1", runId: "r1", nodeId: "n1", state: "running", modelKey: "gpt-image-2", progress: 0.42 })
     ]);
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     expect(markup).toContain("gpt-image-2");
     expect(markup).toContain("运行中");
@@ -61,7 +60,7 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
       record({ taskKey: "t1", runId: "r1", nodeId: "n1", state: "failed", error: { name: "ProviderError", message: "上游失败" } })
     ]);
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     expect(markup).toContain("失败");
     expect(markup).not.toContain('role="alert"');
@@ -75,7 +74,7 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
       record({ taskKey: "t1", runId: "r1", nodeId: "n1", state: "succeeded" })
     ]);
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     expect(markup).toContain('<button type="button" class="task-activity-feed__primary"');
     expect(markup).not.toContain('task-activity-feed__locate');
@@ -96,7 +95,7 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
       })
     ]);
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     expect(markup).not.toContain('aria-label="播放音频"');
     expect(markup).not.toContain("<audio");
@@ -114,7 +113,7 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
       })
     ]);
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     expect(markup).not.toContain("https://cdn.test/sha256-poster");
     store.dispose();
@@ -126,7 +125,7 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
       record({ taskKey: "t2", runId: "r2", nodeId: "n2", state: "succeeded", result: { mediaKind: "audio", storageKey: "sha256-a", durationSeconds: 9 } })
     ]);
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     // Button/IconButton 统一 class 前缀。
     expect(markup).toContain('aria-label="关闭该记录"');
@@ -147,7 +146,7 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
       createdAt: `2026-01-01T00:00:${String(index).padStart(2, "0")}Z`
     })));
     const renderFeed = () => renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     const markup = renderFeed();
     expect(markup).toContain("ui-scroll-area");
@@ -171,7 +170,7 @@ describe("TaskActivityFeed（任务 3.2 / 3.4 / 4.1）", () => {
     }));
     const store = storeWith(records);
     const before = store.getSnapshot().items.map((item) => item.taskKey);
-    const markup = renderToStaticMarkup(<TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />);
+    const markup = renderToStaticMarkup(<TaskActivityFeed store={store} resolveMediaUrl={media} />);
     const titles = [...markup.matchAll(/class="task-activity-feed__primary"[^>]*>([^<]*)<\/button>/g)].map((match) => match[1]);
     expect(titles).toHaveLength(12);
     expect(titles[0]).toBe("model-11");
@@ -204,7 +203,7 @@ describe("TaskActivityFeed 后台活动", () => {
       }));
     }
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     for (let i = 0; i < 9; i++) expect(markup).toContain(`录制尝试 ${i}`);
     expect(markup.indexOf("录制尝试 8")).toBeLessThan(markup.indexOf("录制尝试 7"));
@@ -216,10 +215,12 @@ describe("TaskActivityFeed 后台活动", () => {
       record({ taskKey: "t1", runId: "r1", nodeId: "n1", modelKey: "生成-旧", createdAt: "2026-01-01T00:00:01Z" }),
       record({ taskKey: "t2", runId: "r2", nodeId: "n2", modelKey: "生成-新", createdAt: "2026-01-01T00:00:03Z", state: "succeeded" })
     ]);
+    // 宿主装配会注入节点定位；有定位能力的后台活动行渲染为按钮（与生产一致）。
+    store.configure({ locateNode: () => undefined });
     store.applyJob(job({ title: "中间录制", updatedAt: "2026-01-01T00:00:02Z" }));
     store.applyJob(job({ title: "中间录制", progress: 0.9, updatedAt: "2026-01-01T00:00:09Z" }));
     const markup = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     const titles = [...markup.matchAll(/class="task-activity-feed__primary"[^>]*>([^<]*)<\/button>/g)].map(match => match[1]);
     expect(titles).toEqual(["生成-新", "录制镜头参考 · 中间录制", "生成-旧"]);
@@ -230,7 +231,7 @@ describe("TaskActivityFeed 后台活动", () => {
     const store = new TaskActivityStore();
     store.applyJob(job());
     const running = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     expect(running).toContain("录制镜头参考 · 片场 · 镜头 1");
     expect(running).toContain("录制中 · 40%");
@@ -238,7 +239,7 @@ describe("TaskActivityFeed 后台活动", () => {
 
     store.applyJob(job({ status: "succeeded", progress: 1, updatedAt: "2026-01-01T00:00:02Z" }));
     const done = renderToStaticMarkup(
-      <TaskActivityFeed store={store} resolveMediaUrl={media} onLocateNode={noop} />
+      <TaskActivityFeed store={store} resolveMediaUrl={media} />
     );
     expect(done).toContain("已录制");
     expect(done).toContain("关闭该记录");

@@ -140,7 +140,6 @@ export const CornerCoexistence: Story = () => {
 				<TaskActivityFeed
 					store={controls.store}
 					resolveMediaUrl={activityFixtureMediaUrl}
-					onLocateNode={() => undefined}
 				/>
 			</div>
 		</div>

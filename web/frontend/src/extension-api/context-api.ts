@@ -110,9 +110,47 @@ export type TaskActivityFeedItem = CanvasTaskActivity & {
   localFailure: boolean;
 };
 
+/** 活动记录来源种类；只决定数据来源与可用动作，不决定寿命或清理规则。 */
+export type TaskActivityRowKind = "task" | "job" | "group";
+
+/** 活动记录语义色（状态灯与状态文案）。 */
+export type TaskActivityRowTone = "active" | "success" | "danger" | "muted";
+
+/**
+ * 只读行视图：与面板实际渲染的记录一致，覆盖全部来源。
+ *
+ * 不含来源内部载荷（提示词、参数、凭据、签名 URL 或媒体字节），也不含动作函数——
+ * 该能力仍是只读的，没有写入口。
+ */
+export type TaskActivityRow = {
+  /** 稳定身份：`task:<runId>` | `job:<id>` | `group:<requestId>`。 */
+  key: string;
+  kind: TaskActivityRowKind;
+  title: string;
+  secondary?: string;
+  detail?: string;
+  status: string;
+  state: string;
+  tone: TaskActivityRowTone;
+  progress?: number;
+  nodeId?: string;
+  createdAt: string;
+  updatedAt: string;
+  active: boolean;
+};
+
 export type TaskActivityStoreSnapshot = {
+  /** 统一记录列表：全部来源按开始时间从新到旧交错（change: 2026-10-22，design D5）。 */
+  rows: readonly TaskActivityRow[];
+  /**
+   * @deprecated 过渡字段，由 `rows` 派生；改用 `rows`。
+   * 生成任务记录（含本地 optimistic/local-failure 标记）。
+   */
   items: TaskActivityFeedItem[];
-  /** 扩展后台活动（非 durable 任务），例如镜头参考录制。 */
+  /**
+   * @deprecated 过渡字段，由 `rows` 派生；改用 `rows`。
+   * 扩展后台活动（非 durable 任务），例如镜头参考录制。
+   */
   jobs: BackgroundActivityJob[];
   unread: number;
   cursor: number;
