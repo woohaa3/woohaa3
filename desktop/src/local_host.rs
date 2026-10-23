@@ -262,13 +262,36 @@ fn status(app: &tauri::AppHandle, message: &str, failed: bool) {
 /// `WebviewUrl::App(path)` 会用配置里的 `frontendDist` 作为 base 做 `Url::join`，且该调用在
 /// Tauri 内部是 `unwrap`。`FrontendDist` 的反序列化优先匹配 `Url`，因此 Windows 绝对路径
 /// （`E:\\dir` → scheme `e`、不透明 path）会让 base 变成 cannot-be-a-base，join 直接 panic。
-/// 这里自行拼出绝对 URL：外部 base 能 join 就用它，否则回退到内置协议 origin。
+/// 开发构建配置 devUrl 时不嵌入资源，启动页必须跟随实际开发前端（包括挂载路径）。
+/// 发行构建自行拼出绝对 URL，保留 Windows 路径的内置协议回退。
 fn startup_webview_url(app: &tauri::AppHandle) -> tauri::Url {
+    resolve_startup_webview_url(
+        &app.config().build,
+        tauri::is_dev(),
+        std::env::var("WOOHAA_DESKTOP_UI_URL").ok().as_deref(),
+    )
+}
+
+fn resolve_startup_webview_url(
+    build: &tauri::utils::config::BuildConfig,
+    dev: bool,
+    ui: Option<&str>,
+) -> tauri::Url {
+    if dev {
+        let override_url = ui.and_then(|ui| tauri::Url::parse(ui).ok()).filter(|url| {
+            url.scheme() == "http" && matches!(url.host_str(), Some("127.0.0.1" | "localhost"))
+        });
+        if let Some(base) = override_url.as_ref().or(build.dev_url.as_ref()) {
+            if let Ok(url) = base.join("desktop-startup.html") {
+                return url;
+            }
+        }
+    }
     #[cfg(any(target_os = "windows", target_os = "android"))]
     let protocol_origin = "http://tauri.localhost";
     #[cfg(not(any(target_os = "windows", target_os = "android")))]
     let protocol_origin = "tauri://localhost";
-    if let Some(tauri::utils::config::FrontendDist::Url(base)) = app.config().build.frontend_dist.as_ref() {
+    if let Some(tauri::utils::config::FrontendDist::Url(base)) = build.frontend_dist.as_ref() {
         if let Ok(url) = base.join("desktop-startup.html") {
             return url;
         }
@@ -983,5 +1006,67 @@ mod close_window_tests {
         assert!(super::closes_application("startup"));
         assert!(!super::closes_application("web-popup-authorization"));
         assert!(!super::closes_application("other"));
+    }
+}
+
+#[cfg(test)]
+mod startup_url_tests {
+    use super::*;
+
+    #[test]
+    fn development_startup_uses_actual_frontend_and_mount_path() {
+        let build = tauri::utils::config::BuildConfig {
+            dev_url: Some(tauri::Url::parse("http://127.0.0.1:5174/").unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_startup_webview_url(&build, true, None).as_str(),
+            "http://127.0.0.1:5174/desktop-startup.html"
+        );
+        assert_eq!(
+            resolve_startup_webview_url(&build, true, Some("http://127.0.0.1:6200/dev/check/"))
+                .as_str(),
+            "http://127.0.0.1:6200/dev/check/desktop-startup.html"
+        );
+    }
+
+    #[test]
+    fn development_without_dev_server_preserves_embedded_fallback() {
+        let build = tauri::utils::config::BuildConfig::default();
+        let url = resolve_startup_webview_url(&build, true, None);
+        assert_eq!(url.path(), "/desktop-startup.html");
+        assert_ne!(url.host_str(), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn release_windows_frontend_path_does_not_panic() {
+        let build = tauri::utils::config::BuildConfig {
+            frontend_dist: Some(tauri::utils::config::FrontendDist::Url(
+                tauri::Url::parse(r"E:\app\frontend").unwrap(),
+            )),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_startup_webview_url(&build, false, None).path(),
+            "/desktop-startup.html"
+        );
+    }
+
+    #[test]
+    fn release_ignores_development_urls() {
+        let build = tauri::utils::config::BuildConfig {
+            dev_url: Some(tauri::Url::parse("http://127.0.0.1:5174/").unwrap()),
+            ..Default::default()
+        };
+        let url = resolve_startup_webview_url(&build, false, Some("http://127.0.0.1:6200/"));
+        assert_eq!(url.path(), "/desktop-startup.html");
+        assert_eq!(
+            url.host_str(),
+            Some(if cfg!(any(target_os = "windows", target_os = "android")) {
+                "tauri.localhost"
+            } else {
+                "localhost"
+            })
+        );
     }
 }
