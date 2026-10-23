@@ -288,9 +288,9 @@ export async function buildExtensionBrowser(options = {}) {
 
   // 生成 staging 源码。browser-dist 是 builder 独占产物目录：每次构建先清空，避免
   // 旧 entry/chunk hash 残留（manifest 与 artifactId 只反映本次输入，复现性要求目录无陈旧文件）。
-  await fs.rm(targetStaging, { recursive: true, force: true });
+  await fs.rm(targetStaging, { recursive: true, force: true, maxRetries: 6, retryDelay: 200 });
   await fs.mkdir(targetStaging, { recursive: true });
-  await fs.rm(targetOut, { recursive: true, force: true });
+  await fs.rm(targetOut, { recursive: true, force: true, maxRetries: 6, retryDelay: 200 });
   await fs.mkdir(targetOut, { recursive: true });
   // 先求值纯 metadata（唯一身份来源），薄入口内联其值，避免入口静态依赖 metadata 模块。
   const metadataValue = await evaluateMetadata(metadataSource, targetStaging);
@@ -528,7 +528,7 @@ export async function buildExtensionBrowser(options = {}) {
 
   await fs.writeFile(path.join(targetOut, "metadata.json"), JSON.stringify(metadataValue, null, 2), "utf8");
   await fs.writeFile(path.join(targetOut, "artifact-manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
-  await fs.rm(targetStaging, { recursive: true, force: true });
+  await fs.rm(targetStaging, { recursive: true, force: true, maxRetries: 6, retryDelay: 200 });
 
   return { artifactId, entry: entryRelative, styles, manifest, outDir: targetOut };
 }
