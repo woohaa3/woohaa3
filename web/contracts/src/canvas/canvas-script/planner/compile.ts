@@ -121,11 +121,9 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
     return result.position;
   };
   try {
-    planAssert(
-      input.operations.length > 0 && input.operations.length <= AGENT_CANVAS_LIMITS.maxPlanOperations,
-      "malformed-request",
-      "计划需要 1..256 个操作",
-    );
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.1：删除计划操作数、派生命令数、
+    // 影响实体数、prompt/源码字节等应用侧总量门禁；完整计划经同一 planner 校验后一次原子提交。
+    planAssert(input.operations.length > 0, "malformed-request", "计划需要至少一个操作");
     for (const operation of input.operations) {
       const before = geometry.canonical();
       switch (operation.op) {
@@ -138,13 +136,6 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
               "limit-exceeded",
               "title 超过 200 字符",
               "title",
-            );
-          if (operation.prompt !== undefined)
-            planAssert(
-              operation.prompt.length <= AGENT_CANVAS_LIMITS.promptMaxChars,
-              "limit-exceeded",
-              "prompt 超限",
-              "prompt",
             );
           const id = deriveEntityId(descriptor.canonicalType, [...identity, operation.ref, "node"]);
           declare(operation.ref, id, descriptor.canonicalType);
@@ -248,12 +239,6 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
             "unsupported-node-kind",
             "该节点不支持 prompt",
           );
-          planAssert(
-            operation.prompt.length <= AGENT_CANVAS_LIMITS.promptMaxChars,
-            "limit-exceeded",
-            "prompt 超限",
-            "prompt",
-          );
           geometry.touch(id);
           commands.push({ type: "nodeData.patch", nodeId: id, value: { prompt: operation.prompt } });
           normalized.push(operation);
@@ -321,7 +306,6 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
       }
       if ("if" in operation && operation.if) preconditions.push(operation.if);
       commands.push(...geometry.diff(before));
-      planAssert(commands.length <= AGENT_CANVAS_LIMITS.maxDerivedCommands, "limit-exceeded", "派生命令超过 1024 上限");
       operationIndex++;
     }
     const finalNodes = geometry.canonical();

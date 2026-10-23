@@ -266,7 +266,7 @@ describe("ChatGPT 生成编排", () => {
     const granted: string[] = [];
     const okService = createChatGptGenerationService({ ports: ports(), codex: adapt(() => runWith([submitOk])), toolsEnabled: true,
       toolGrants: {
-        issue: async request => { granted.push(...request.tools ?? []); return { token: "grant", canvasIds: ["cv"], nodeIds: ["n"], tools: request.tools ?? [], maxCalls: 40, expiresAt: Date.now() + 60000 }; },
+        issue: async request => { granted.push(...request.tools ?? []); return { token: "grant", canvasIds: ["cv"], nodeIds: ["n"], tools: request.tools ?? [], workId: request.workId }; },
         revoke: () => undefined, authorize: () => ({ ok: true })
       }
     });
@@ -297,7 +297,7 @@ describe("ChatGPT 生成编排", () => {
       return { events: (async function* () { yield { type: "item.completed", item: { id: "submit", type: "mcp_tool_call", server: "s", tool: "submit_film_set", arguments: {}, status: "completed" } }; })() };
     } }) };
     const service = createChatGptGenerationService({ ports: p, codex: adapt(() => codex as never), toolsEnabled: true,
-      toolGrants: { issue: async input => { granted = input.tools ?? []; return { token: "g", canvasIds: ["cv"], nodeIds: ["n"], tools: [...granted], maxCalls: 40, expiresAt: Date.now() + 60_000 }; }, revoke: () => undefined, authorize: () => ({ ok: true }) }
+      toolGrants: { issue: async input => { granted = input.tools ?? []; return { token: "g", canvasIds: ["cv"], nodeIds: ["n"], tools: [...granted], workId: input.workId }; }, revoke: () => undefined, authorize: () => ({ ok: true }) }
     });
     const out = await service.generate({ ownerId: "o", requestId: "film-set-tool", canvasId: "cv", nodeId: "n", mode: "film-set", model: "m", prompt: "生成客厅" });
     expect(out.ok && out.receipt.status).toBe("succeeded");
@@ -525,47 +525,39 @@ describe("ChatGPT durable 工作生命周期（任务 4.1/4.4/4.6）", () => {
     expect(codexCalls).toEqual([]);
   });
 
-  it("有界排队：超出每 owner 深度即拒绝（429）", async () => {
-    // 用一个永不 resolve 的推理占住第一槽，使后续请求排队。
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
+  it("并发不受队列深度拒绝：超过原深度的请求都独立执行", async () => {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 3.3：每 owner 不再串行、也不按
+    // 排队深度拒绝。四个独立请求同时受理，各自完成并按原 requestId 返回回执。
     const service = createChatGptGenerationService({
       ports: ports(),
-      maxQueueDepth: 1,
-      codex: adapt(() => ({
-        startThread: () => ({
-          runStreamed: async () => {
-            await gate;
-            return { events: (async function* () { yield { type: "turn.completed", usage: { input_tokens: 0, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 } }; })() };
-          }
-        })
-      }))
+      codex: adapt(() => fakeCodex({ modelScript: VALID_SCRIPT, modelScriptVersion: PREFERRED_MODEL_SCRIPT_VERSION }))
     });
-    const first = service.generate({ ownerId: "o1", requestId: "q1", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-5", prompt: "x" });
-    // 第二个排在深度 1 内。
-    const second = service.generate({ ownerId: "o1", requestId: "q2", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-5", prompt: "x" });
-    // 第三个超出深度，立即拒绝。
-    const third = await service.generate({ ownerId: "o1", requestId: "q3", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-5", prompt: "x" });
-    expect(third.ok).toBe(false);
-    if (!third.ok) expect(third.status).toBe(429);
-    release();
-    await Promise.all([first, second]);
+    const requests = ["q1", "q2", "q3", "q4"].map((requestId) =>
+      service.generate({ ownerId: "o1", requestId, canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-5", prompt: `make ${requestId}` }));
+    const outcomes = await Promise.all(requests);
+    for (const outcome of outcomes) {
+      expect(outcome.ok).toBe(true);
+      if (outcome.ok) expect(outcome.receipt.status).toBe("succeeded");
+    }
     service.dispose();
   });
 
   it("执行前授权 epoch 变化：在途工作放弃且不推理", async () => {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 3.3：每 owner 串行队列已删除，
+    // 因此这里不再靠「排队延迟」制造竞态，而是让受理记录带上更早的 auth epoch（等价于
+    // 受理后、执行前授权被断开）。
     const journal = createChatGptWorkJournal({ directory: tempDir() });
+    const admitted = journal.authEpoch();
     let codexCalls = 0;
     const service = createChatGptGenerationService({
       ports: ports(),
       workJournal: journal,
       codex: adapt(() => ({ startThread: () => ({ runStreamed: async () => { codexCalls += 1; return { events: (async function* () { yield { type: "turn.completed", usage: { input_tokens: 0, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 } }; })() }; } }) }))
     });
-    // 占住队列，使提交的请求在“执行前”才检查 epoch。
-    const outcome = service.generate({ ownerId: "o1", requestId: "e1", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-5", prompt: "x" });
-    // 提交后立即断开（bump epoch）。
+    const originalAdmit = journal.admit.bind(journal);
+    journal.admit = (input => originalAdmit({ ...input, authEpoch: admitted - 1 })) as typeof journal.admit;
     journal.bumpAuthEpoch();
-    const result = await outcome;
+    const result = await service.generate({ ownerId: "o1", requestId: "e1", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-5", prompt: "x" });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("authorization-changed");
     expect(codexCalls).toBe(0);
@@ -596,7 +588,7 @@ describe("ChatGPT durable 工作生命周期（任务 4.1/4.4/4.6）", () => {
 });
 
 
-it("真实 SDK 事件边界保留消息与工具顺序，开始事件不重复消耗工具预算", async () => {
+it("真实 SDK 事件边界保留消息与工具顺序，工具事件不消耗任何执行额度", async () => {
   const progress: Array<{ stage: string; message?: string; tool?: { status: string; callId?: string } }> = [];
   const sdk: CodexLike = { startThread: () => ({ runStreamed: async () => ({ events: (async function* () {
     yield { type: "item.completed", item: { id: "m1", type: "agent_message", text: "开始修改" } };
@@ -604,7 +596,7 @@ it("真实 SDK 事件边界保留消息与工具顺序，开始事件不重复�
     yield { type: "item.completed", item: { id: "call-1", type: "mcp_tool_call", server: "s", tool: "submit_model_script", arguments: {}, status: "completed" } };
     yield { type: "item.completed", item: { id: "m2", type: "agent_message", text: "修改完成" } };
   })() }) }) };
-  const service = createChatGptGenerationService({ ports: ports(), codex: adapt(() => sdk), toolsEnabled: true, maxToolCalls: 1 });
+  const service = createChatGptGenerationService({ ports: ports(), codex: adapt(() => sdk), toolsEnabled: true });
   const outcome = await service.generate({ ownerId: "o", requestId: "mixed", canvasId: "cv", nodeId: "n", mode: "model3d", model: "m", prompt: "修改" }, (event) => {
     if (event.message !== undefined || event.tool) progress.push(event);
   });

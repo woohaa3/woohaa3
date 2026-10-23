@@ -11,28 +11,25 @@ import type { AgentSemanticKind } from "../agent-node-descriptors.js";
 export const AGENT_CANVAS_PROTOCOL_VERSION = 1 as const;
 export type AgentCanvasProtocolVersion = typeof AGENT_CANVAS_PROTOCOL_VERSION;
 
-/** 协议 limits：能力响应与校验共用同一事实源（design D4）。 */
+/**
+ * 协议 limits：能力响应与校验共用同一事实源（design D4；
+ * change: 2026-10-22-remove-agent-execution-limits，任务 4.2 / 5.1）。
+ *
+ * 这里**不再**包含可拒绝完整合法工作的应用侧总量额度：prompt 字符、计划操作数、图节点/边数、
+ * 邻域深度、响应字符、影响实体数与派生命令数都已删除。取代它们的是：
+ * - 分页/邻域**传输参数**（`defaultNeighborhoodDepth` 只是缺省值，不是最大深度）；
+ * - 真实表达边界（世界坐标绝对值、标题长度等结构性/合法性约束）。
+ */
 export const AGENT_CANVAS_LIMITS = {
-  /** prompt 字符上限（与任务协议一致）。 */
-  promptMaxChars: 8000,
-  /** 单个计划 operation 数上限。 */
-  maxPlanOperations: 256,
-  /** 单页 graph 节点上限。 */
-  maxGraphNodes: 200,
-  /** 单页 graph 边上限。 */
-  maxGraphEdges: 400,
-  /** 邻域读取默认与最大深度。 */
+  /** 邻域读取的缺省深度（传输参数；调用方可要求更深邻域，仍按快照完整读取）。 */
   defaultNeighborhoodDepth: 1,
-  maxNeighborhoodDepth: 4,
-  /** response 内嵌文本上限（超出需缩小查询）。 */
-  maxResponseTextChars: 200_000,
-  /** 单节点位置坐标绝对上限（画布世界坐标边界）。 */
+  /** 单页 graph 节点数的缺省值（传输参数；可用 cursor 继续读取）。 */
+  defaultGraphPageNodes: 200,
+  /** 单节点位置坐标绝对上限（画布世界坐标的真实表达边界，不是执行额度）。 */
   maxPositionAbs: 1_000_000,
-  /** 自动布局固定间距（与网格吸附同量级）。 */
+  /** 标题字符上限（展示/结构性约束，不是执行额度）。 */
   titleMaxChars: 200,
-  maxAffectedNodes: 256,
-  maxDerivedCommands: 1024,
-  maxGridColumns: 256,
+  /** 自动布局固定间距（与网格吸附同量级）。 */
   layoutGap: 40
 } as const;
 

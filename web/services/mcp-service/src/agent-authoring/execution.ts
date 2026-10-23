@@ -21,7 +21,6 @@ import {
   auditWrap,
   errorResult,
   now,
-  rateLimitGate,
   structured,
   type AgentAuthoringToolDeps
 } from "./tool-policy.js";
@@ -41,7 +40,7 @@ export async function readPlannerSnapshot(
     const outcome = await deps.client.getGraph({
       ...(canvasId !== undefined ? { canvasId } : {}),
       includePrompt: false,
-      limit: AGENT_CANVAS_LIMITS.maxGraphNodes,
+      limit: AGENT_CANVAS_LIMITS.defaultGraphPageNodes,
       ...(cursor !== undefined ? { cursor } : {})
     });
     if (!outcome.ok) {
@@ -113,8 +112,6 @@ export async function applyOperations(
     scope: PlanScope;
   }
 ): Promise<any> {
-  const limited = rateLimitGate(deps, "write", input.canvasId);
-  if (limited) return limited;
   const startedAt = now(deps);
   const emitted = await applyOperationsInner(deps, input);
   if (deps.audit) {
@@ -162,8 +159,9 @@ export async function applyOperationsInner(
     if (token.canvasId !== snapshot.snapshot.canvasId) {
       return { result: errorResult(agentCanvasError("plan-stale", "validationToken 属于其它画布", { retryable: false, suggestion: "请重新 validate_canvas_plan" })), raw: { ok: false, code: "plan-stale" } };
     }
-    if (token.expiresAtMs < now(deps)) {
-      return { result: errorResult(agentCanvasError("plan-stale", "validationToken 已过期", { retryable: false, suggestion: "请重新 validate_canvas_plan" })), raw: { ok: false, code: "plan-stale" } };
+    // 绑定主体（change: 2026-10-22-remove-agent-execution-limits，任务 4.3）：他人预检结果不可复用。
+    if (token.subject !== undefined && deps.principalId !== undefined && token.subject !== deps.principalId) {
+      return { result: errorResult(agentCanvasError("plan-stale", "validationToken 属于其它主体", { retryable: false, suggestion: "请重新 validate_canvas_plan" })), raw: { ok: false, code: "plan-stale" } };
     }
     if (token.capabilityVersion !== AGENT_CAPABILITY_VERSION || token.basisRevision !== snapshot.snapshot.revision) {
       return { result: errorResult(

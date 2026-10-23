@@ -262,7 +262,9 @@ describe("canvas classification groups", () => {
     ] as AgentPlanOperation[][])
       expect(compile(ops, snap).ok).toBe(false);
   });
-  it("rejects a small operation with too many affected descendants", () => {
+  it("moves a small operation affecting many descendants (no affected-node quota)", () => {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.1：原 256 影响节点额度已删除；
+    // 完整派生由同一 planner 处理，仍保持确定性与原子性。
     const nodes = [
       node("g", 0, 0, undefined, "group"),
       ...Array.from({ length: 256 }, (_, i) =>
@@ -281,7 +283,7 @@ describe("canvas classification groups", () => {
         ],
         snapshot(nodes),
       ),
-    ).toMatchObject({ ok: false, error: { code: "limit-exceeded" } });
+    ).toMatchObject({ ok: true });
   });
   it("group placement uses final bounds to the left of an existing anchor", () => {
     const snap = snapshot([node("anchor", 1000, 100)]);
@@ -321,7 +323,7 @@ describe("canvas classification groups", () => {
       {
         op: "layout",
         targets: [existing("a")],
-        layout: { mode: "grid", columns: 257 },
+        layout: { mode: "grid", columns: 0 },
       },
       { op: "reparent", targets: [existing("a")], parent: null, nodeData: {} },
       {

@@ -43,24 +43,32 @@ export async function hashPlanPayload(input: {
 }
 
 // ---------------------------------------------------------------------------
-// validation token（design D7：绑定 revision/capability version，无状态可校验）
+// validation token（design D2：绑定内容/能力/范围身份，不按固定时钟失效）
 // ---------------------------------------------------------------------------
 
 export const AGENT_CAPABILITY_VERSION = 1 as const;
 
+/**
+ * 计划验证 token 绑定的身份。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 4.3 / design D2：删除纯时间到期
+ * （原 120 秒）。token 是**预检证据**而不是权限，因此只绑定计划 hash、画布、basis revision、
+ * 能力版本与签发主体；实际提交仍重查当前权限与内容条件。
+ */
 export type ValidationTokenPayload = {
   canvasId: string;
   basisRevision: number;
   capabilityVersion: number;
   planHash: string;
+  /** 签发主体（同一 owner 之外的 token 不可复用）。 */
+  subject?: string;
 };
 
-export function createValidationToken(payload: ValidationTokenPayload, expiresAtMs: number): string {
-  const encoded = Buffer.from(JSON.stringify({ ...payload, expiresAtMs })).toString("base64url");
-  return encoded;
+export function createValidationToken(payload: ValidationTokenPayload): string {
+  return Buffer.from(JSON.stringify(payload)).toString("base64url");
 }
 
-export function readValidationToken(token: string): (ValidationTokenPayload & { expiresAtMs: number }) | null {
+export function readValidationToken(token: string): ValidationTokenPayload | null {
   try {
     const parsed = JSON.parse(Buffer.from(token, "base64url").toString("utf8")) as Record<string, unknown>;
     if (
@@ -68,7 +76,7 @@ export function readValidationToken(token: string): (ValidationTokenPayload & { 
       || typeof parsed.basisRevision !== "number"
       || typeof parsed.capabilityVersion !== "number"
       || typeof parsed.planHash !== "string"
-      || typeof parsed.expiresAtMs !== "number"
+      || (parsed.subject !== undefined && typeof parsed.subject !== "string")
     ) {
       return null;
     }
@@ -77,7 +85,7 @@ export function readValidationToken(token: string): (ValidationTokenPayload & { 
       basisRevision: parsed.basisRevision,
       capabilityVersion: parsed.capabilityVersion,
       planHash: parsed.planHash,
-      expiresAtMs: parsed.expiresAtMs
+      ...(typeof parsed.subject === "string" ? { subject: parsed.subject } : {})
     };
   } catch {
     return null;

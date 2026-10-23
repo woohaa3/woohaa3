@@ -30,7 +30,7 @@ const IDENTITY = {
   profileKey: "profile"
 };
 
-const LIMITS = { maxBytes: 256 * 1024 * 1024, expectedWidth: 1280, expectedHeight: 720, expectedDurationSeconds: 4, expectedFrameRate: 30 };
+const LIMITS = { expectedWidth: 1280, expectedHeight: 720, expectedDurationSeconds: 4, expectedFrameRate: 30 };
 
 function claim(overrides: Partial<RecordingArtifactClaim> = {}): RecordingArtifactClaim {
   // checksum 必须与实际字节一致：宿主复核会重算并比对。
@@ -176,11 +176,10 @@ describe("validateArtifactClaim", () => {
     expect(validateArtifactClaim(claim(), LIMITS)).toEqual({ ok: true });
   });
 
-  it("rejects empty, oversized and unverified artifacts", () => {
+  it("rejects empty and unverified artifacts (no size quota)", () => {
     expect(validateArtifactClaim(claim({ sizeBytes: 0 }), LIMITS)).toMatchObject({ code: "recording-artifact-empty" });
-    expect(validateArtifactClaim(claim({ sizeBytes: LIMITS.maxBytes + 1 }), LIMITS)).toMatchObject({
-      code: "recording-artifact-too-large"
-    });
+    // change: 2026-10-22-remove-agent-execution-limits，任务 7.5：成片总量门禁已删除。
+    expect(validateArtifactClaim(claim({ sizeBytes: 512 * 1024 * 1024 }), LIMITS)).toEqual({ ok: true });
     expect(validateArtifactClaim(claim({ contentSha256: "not-a-hash" }), LIMITS)).toMatchObject({
       code: "recording-artifact-unverified"
     });

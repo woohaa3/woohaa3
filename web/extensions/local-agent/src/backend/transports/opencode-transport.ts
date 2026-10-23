@@ -3,6 +3,41 @@ import { setTimeout as delay } from "node:timers/promises";
 import { canvasToolName, loopbackHttp, toolResultFailed } from "./loopback-http.js";
 import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportResult } from "./transport.js";
 
+/**
+ * 分页读取一个会话的全部 assistant 消息（change: 2026-10-22-remove-agent-execution-limits，
+ * 任务 4.1）。
+ *
+ * 原生快照不再取「最近 100 条」：分页只是单次传输量，完整历史可继续读取。页内按时间升序返回，
+ * 调用方据此保持真实顺序。
+ */
+type OpenCodeMessage = {
+  id: string;
+  error?: { type?: string; message?: string };
+  content?: Array<{
+    type?: string;
+    text?: string;
+    name?: string;
+    id?: string;
+    state?: { status?: string; content?: unknown; error?: { message?: string } };
+  }>;
+};
+
+async function readAllAssistantMessages(
+  http: { json: (path: string) => Promise<{ data?: OpenCodeMessage[] }> },
+  sessionPath: string
+): Promise<OpenCodeMessage[]> {
+  const pageSize = 200;
+  const collected: OpenCodeMessage[] = [];
+  const seen = new Set<string>();
+  for (let offset = 0; ; offset += pageSize) {
+    const response = await http.json(`${sessionPath}/message?limit=${pageSize}&offset=${offset}&order=asc&type=assistant`);
+    const page = response.data ?? [];
+    for (const message of page) if (message.id && !seen.has(message.id)) { seen.add(message.id); collected.push(message); }
+    if (page.length < pageSize) break;
+  }
+  return collected;
+}
+
 export type HttpTransportOptions = {
   fetchImpl?: typeof globalThis.fetch;
   locationMcpGrantToken?: string | null;
@@ -11,8 +46,7 @@ export type HttpTransportOptions = {
   catalogSettleMs?: number;
 };
 
-export function createOpenCodeTransport(options: HttpTransportOptions = {}): LocalAgentTransport {
-  // A location's runtime MCP config is shared. Never rotate its token during another turn.
+export function createOpenCodeTransport(options: HttpTransportOptions = {}): LocalAgentTransport {  // A location's runtime MCP config is shared. Never rotate its token during another turn.
   const locations = new Map<string, Promise<unknown>>();
   const run = async (input: LocalAgentTransportInput): Promise<LocalAgentTransportResult> => {
     if (!input.loopbackUrl) return { ok: false, code: "runtime-missing", message: "OpenCode 专用进程未启动" };
@@ -75,8 +109,10 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
       if (input.resumeNativeId && input.model) await http.json(`/api/session/${encodeURIComponent(sessionId)}/model`, "POST", { model: { providerID: input.model.slice(0, slash), id: input.model.slice(slash + 1) } });
       input.onEvidence?.({ transport: "ready" });
       const sessionPath = `/api/session/${encodeURIComponent(sessionId)}`;
+      // change: 2026-10-22-remove-agent-execution-limits，任务 4.1：原「最近 100 条 assistant
+      // 消息」的整体截断已删除。历史基线按分页完整读取，不把长会话的第 100 条以外记录当成不存在。
       const previousMessages = new Set<string>(input.resumeNativeId
-        ? (await http.json(`${sessionPath}/message?limit=100&order=desc&type=assistant`)).data?.map((message: { id: string }) => message.id) ?? []
+        ? (await readAllAssistantMessages(http, sessionPath)).map((message: { id: string }) => message.id)
         : []);
       await http.json(`${sessionPath}/prompt`, "POST", { text: input.prompt, ...(input.images?.length ? { files: input.images.map((image, index) => ({ uri: `data:${image.contentType};base64,${Buffer.from(image.bytes).toString("base64")}`, name: `frame-${index}` })) } : {}) });
       // Native idle wait + durable message snapshots avoid relying on a lossy global SSE window.
@@ -84,25 +120,27 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
         .then(async response => { await response.body?.cancel(); }, error => { waitError = error; })
         .finally(() => { settled = true; });
       const project = async () => {
-        const messages = await http.json(`${sessionPath}/message?limit=100&order=desc&type=assistant`);
+        const messages = { data: await readAllAssistantMessages(http, sessionPath) };
         const texts: string[] = [];
-        for (const message of [...(messages.data ?? [])].reverse()) {
+        for (const message of messages.data) {
           if (previousMessages.has(message.id)) continue;
           if (message.error) failure = { code: message.error.type ?? "agent-failed", message: message.error.message ?? "OpenCode 推理失败" };
           for (const [index, part] of (message.content ?? []).entries()) {
             if (part.type === "text") {
               const key = `${message.id}:${index}`;
-              texts.push(part.text);
-              if (textStates.get(key) !== part.text) {
-                textStates.set(key, part.text);
-                input.onEvent({ type: "message", role: "assistant", content: part.text, delivery: "replace", streamId: key });
+              const text = part.text ?? "";
+              texts.push(text);
+              if (textStates.get(key) !== text) {
+                textStates.set(key, text);
+                input.onEvent({ type: "message", role: "assistant", content: text, delivery: "replace", streamId: key });
               }
             } else if (part.type === "tool") {
-              const name = canvasToolName(part.name, input.allowedTools);
+              const name = canvasToolName(part.name ?? "unknown", input.allowedTools);
               const status = part.state?.status;
-              if (!toolStates.has(part.id)) input.onEvent({ type: "tool-started", tool: name, callId: part.id });
-              if (toolStates.get(part.id) !== status && (status === "completed" || status === "error")) input.onEvent({ type: "tool-completed", tool: name, callId: part.id, ok: status === "completed" && !toolResultFailed(part.state?.content), ...(part.state?.error?.message ? { summary: part.state.error.message } : {}) });
-              toolStates.set(part.id, status);
+              const partId = part.id ?? `${message.id}:tool:${index}`;
+              if (!toolStates.has(partId)) input.onEvent({ type: "tool-started", tool: name, callId: part.id });
+              if (toolStates.get(partId) !== status && (status === "completed" || status === "error")) input.onEvent({ type: "tool-completed", tool: name, callId: part.id, ok: status === "completed" && !toolResultFailed(part.state?.content), ...(part.state?.error?.message ? { summary: part.state.error.message } : {}) });
+              toolStates.set(partId, status ?? "unknown");
             }
           }
         }

@@ -3,7 +3,7 @@
  * （自 `agent-canvas-protocol.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R21）。
  */
 import { isBoundedId, isNonNegativeInteger, isJsonObject } from "../../validation.js";
-import { AGENT_CANVAS_LIMITS, type AgentDecodeResult } from "./types.js";
+import type { AgentDecodeResult } from "./types.js";
 import { assertKnownKeys, decodeFail } from "./common-codec.js";
 
 /** 解码 requestId（写工具必需，非空且有界）。 */
@@ -45,8 +45,10 @@ export function decodeAgentGraphQuery(raw: unknown): AgentDecodeResult<AgentGrap
     query.aroundNodeId = raw.aroundNodeId;
   }
   if (raw.depth !== undefined) {
-    if (!isNonNegativeInteger(raw.depth) || raw.depth > AGENT_CANVAS_LIMITS.maxNeighborhoodDepth) {
-      return decodeFail("malformed-request", `depth 必须是 0..${AGENT_CANVAS_LIMITS.maxNeighborhoodDepth} 整数`, { field: "depth" });
+    // change: 2026-10-22-remove-agent-execution-limits，任务 4.2：深度不再是应用额度上限；
+    // 只要求非负整数（真实图结构决定实际可达范围）。
+    if (!isNonNegativeInteger(raw.depth)) {
+      return decodeFail("malformed-request", "depth 必须是非负整数", { field: "depth" });
     }
     query.depth = raw.depth;
   }

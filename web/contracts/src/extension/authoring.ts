@@ -82,10 +82,12 @@ export type ApplicationMediaReferenceFacade = {
 };
 
 /**
- * MCP 工具委托（grant）：宿主签发、工具入口验证。
+ * MCP 工具委托（grant）：宿主签发、工具入口验证
+ * （change: 2026-10-22-remove-agent-execution-limits，任务 2.1 / design D2）。
  *
- * 绑定 plugin/version/work/owner/目标、允许工具、有效期与调用预算；只进入受限子进程环境，
- * 不进入浏览器、日志或公开 DTO。工具入口每次操作仍重新检查权限与失效状态。
+ * 绑定 plugin/version/work/owner/目标与允许工具；只进入受限子进程环境，不进入浏览器、日志或
+ * 公开 DTO。委托**不携带调用额度，也不按固定时钟失效**：寿命等于活动执行本身，由取消、终态、
+ * 撤权与连接代次决定。工具入口每次操作仍重新检查权限与失效状态。
  */
 export type ApplicationToolGrant = {
   groupScope?: import("../canvas/group-authoring-scope.js").CanvasGroupScope;
@@ -97,9 +99,12 @@ export type ApplicationToolGrant = {
   cameraId?: string; clipId?: string; itemId?: string;
   /** 允许调用的工具名集合。 */
   tools: readonly string[];
-  /** 调用预算。 */
-  maxCalls: number;
-  expiresAt: number;
+  /** 绑定的工作/回合身份（撤销按它定位；不进入模型提示词）。 */
+  workId: string;
+  /** 绑定的可信 owner；撤销与跨 owner 隔离据此判定。 */
+  subject?: string;
+  /** 绑定的连接代次；连接重建后旧委托不可继续使用。 */
+  credentialEpoch?: number;
 };
 
 export type ApplicationToolGrantRequest = {
@@ -111,18 +116,18 @@ export type ApplicationToolGrantRequest = {
   nodeId: string;
   cameraId?: string; clipId?: string; itemId?: string;
   tools?: readonly string[];
-  maxCalls?: number;
-  ttlMs?: number;
+  /** 绑定的连接代次（可选；变更后旧委托失效）。 */
+  credentialEpoch?: number;
 };
 
 export type ApplicationToolDelegationFacade = {
-  /** 签发一个受控工具 grant。 */
+  /** 签发一个受控工具 grant（寿命等于活动执行，不设调用额度或固定时钟到期）。 */
   issue(request: ApplicationToolGrantRequest): Promise<ApplicationToolGrant>;
   /** 撤销某工作的 grant（断开/取消/收尾）。 */
   revoke(workId: string, delegation?: ApplicationUserDelegation): void;
   /**
-   * 工具入口强制校验（design D8）：绑定 token/tool/目标范围与预算；成功消耗一次预算。
-   * 工具入口 MUST 在每次操作前调用它，而不是只在会话建立时校验。
+   * 工具入口强制校验（design D8）：绑定 token/tool/目标范围与当前撤销状态。
+   * 工具入口 MUST 在每次操作前调用它，而不是只在会话建立时校验。校验不消耗任何额度。
    */
   authorize(input: { token: string; tool: string; canvasId?: string; nodeId?: string; cameraId?: string; clipId?: string; itemId?: string }): { ok: true } | { ok: false; reason: string };
 };

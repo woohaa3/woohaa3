@@ -445,7 +445,8 @@ describe("HostRecordingService cancel", () => {
 });
 
 describe("artifact claim validation used by the host gate", () => {
-  it("rejects claims whose size exceeds the limit", () => {
+  it("accepts large artifacts (no size quota; task 7.5)", () => {
+    // change: 2026-10-22-remove-agent-execution-limits：原 256 MiB 成片门禁已删除。
     const result = validateArtifactClaim(
       {
         path: "/tmp/x.mp4",
@@ -457,10 +458,9 @@ describe("artifact claim validation used by the host gate", () => {
         frameCount: 120,
         mimeType: "video/mp4"
       },
-      { maxBytes: 256 * 1024 * 1024 }
+      {}
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe("recording-artifact-too-large");
+    expect(result).toEqual({ ok: true });
   });
 });
 

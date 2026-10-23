@@ -6,10 +6,16 @@ import { buildFilmSetConversionInstruction, filmSetConversionCandidateSchema, no
   readFilmSetConversionMediaInput, type AgentConversationAdapter, type AgentImageInput,
   type FilmSetConversionAdapterCapabilities, type FilmSetConversionProvider } from "@woohaa3/contracts";
 
+/**
+ * 候选生成与片场转换声明（change: 2026-10-22-remove-agent-execution-limits，任务 7.1）。
+ *
+ * `maxImages`/`maxFrames` 在这里表达助手引擎的**真实输入组织能力**（一次请求可承载的图/帧
+ * 数量），不是应用可拒绝合法工作的执行额度；400 万像素的应用自造门禁已删除。
+ */
 export const ASSISTANT_CANDIDATE_CAPABILITIES = { imageInput: true, maxImages: 12 } as const;
 export const ASSISTANT_CONVERSION_CAPABILITIES: FilmSetConversionAdapterCapabilities = {
   structuredCandidateOutput: true,
-  input: { imageInput: true, maxImages: 12, videoInput: false, maxFrames: 12, maxDurationSeconds: 0, maxPixels: 4_000_000 }
+  input: { imageInput: true, maxImages: 12, videoInput: false, maxFrames: 12, maxDurationSeconds: 0 }
 };
 
 /** The owner-scoped directory supplies model ids; this provider never publishes other owners' models. */

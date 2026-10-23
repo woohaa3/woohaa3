@@ -181,9 +181,6 @@ export function freezeFilmSetRecording(input: {
   hasPendingDraft?: boolean;
   /** 来源 incarnation：删除后重建同 id 必须得到不同值。 */
   sourceIncarnation: string;
-  /** 素材预算：单文件与合计上限（字节）。 */
-  maxResourceBytes?: number;
-  maxTotalResourceBytes?: number;
   /** 资产字节读端口（宿主 Media 能力）。 */
   read?: (storageKey: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
   /** 当前主题的镜头预览清屏色；背景为 `theme` 时解析成它（D6）。 */
@@ -262,9 +259,7 @@ export function freezeFilmSetRecording(input: {
   const resources = collectResources({
     animation,
     assets: input.assets,
-    clipId: clip.id,
-    ...(input.maxResourceBytes !== undefined ? { maxResourceBytes: input.maxResourceBytes } : {}),
-    ...(input.maxTotalResourceBytes !== undefined ? { maxTotalResourceBytes: input.maxTotalResourceBytes } : {})
+    clipId: clip.id
   });
   if ("ok" in resources) return resources;
 
@@ -390,15 +385,13 @@ function collectResources(input: {
   animation: FilmSetNodeData;
   assets: readonly StoredAsset[];
   clipId: string;
-  maxResourceBytes?: number;
-  maxTotalResourceBytes?: number;
 }): ContentRecordingResource[] | FreezeFailure {
   const view = resolveFilmSetClip(input.animation, input.clipId);
   if (!view) return fail("recording-source-invalid", "目标片段无法投影");
-  const maxResourceBytes = input.maxResourceBytes ?? 256 * 1024 * 1024;
-  const maxTotalBytes = input.maxTotalResourceBytes ?? 512 * 1024 * 1024;
+  // change: 2026-10-22-remove-agent-execution-limits，任务 7.5 / design D7：删除单文件 256 MiB
+  // 与素材合计 512 MiB 的应用侧总量拒绝。完整素材按真实资源调度读取；真实存储/读取失败按
+  // recording-source-invalid 等既有事实错误报告，不把合法大素材伪装成预算耗尽。
   const resources: ContentRecordingResource[] = [];
-  let total = 0;
   for (const item of view.content.items) {
     if (item.kind !== "image" && item.kind !== "video") continue;
     const asset = input.assets.find(entry => entry.id === item.assetId);
@@ -419,13 +412,6 @@ function collectResources(input: {
       return fail("recording-source-invalid", `素材 ${item.assetId} 内容类型与片场项不符`);
     }
     const sizeBytes = typeof size === "number" && size > 0 ? size : 0;
-    if (sizeBytes > maxResourceBytes) {
-      return fail("recording-budget-exceeded", `素材 ${item.assetId} 超过单文件上限`);
-    }
-    total += sizeBytes;
-    if (total > maxTotalBytes) {
-      return fail("recording-budget-exceeded", "素材合计超过录制预算");
-    }
     const playback = item.playback ?? { startTime: 0, duration: 0, timeScale: 1, loop: false };
     resources.push({
       resourceId: `${input.clipId}:${item.id}`,

@@ -2,25 +2,22 @@
  * 服务端视频元数据与有界抽帧
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 2.2 / design D2/D6）。
  *
- * 只使用稳定媒体字节（不接触 provider URL 或浏览器状态），在服务端做**有界 CPU 解码**：
- * - `probeFilmSetVideoDuration` 读取真实时长（供范围校验与预算判定）；
- * - `extractFilmSetVideoFrames` 在所选范围内抽取有时间戳、覆盖首尾与主要变化的帧组，
- *   帧数与单帧尺寸都受预算限制。临时文件与任务生命周期一致（用完即删）。
+ * 只使用稳定媒体字节（不接触 provider URL 或浏览器状态），在服务端做视频解码：
+ * - `probeFilmSetVideoDuration` 读取真实时长（供范围校验）；
+ * - `extractFilmSetVideoFrames` 在所选范围内抽取有时间戳、覆盖首尾的帧组。
  *
- * 抽帧方法（均匀采样覆盖首尾）与预算由调用方记录到任务详情；调用方 MUST NOT 用本模块
- * 静默截断所选范围（超预算时由调用方拒绝并要求用户重选范围）。
+ * change: 2026-10-22-remove-agent-execution-limits，任务 7.1 / design D7：原 24 MiB 抽帧
+ * 累计字节、30 秒命令超时与 768 缩放边**拒绝**已删除。帧数与单帧尺寸现在是明确的**媒体表示
+ * 策略**（采样密度、传输片段大小），不是执行额度；原始视频与完整时间范围始终保留，用户可
+ * 随时取消，真实解码/磁盘失败按事实报告，绝不静默截断所选范围。
  */
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-/** 单次抽帧的字节预算（所有帧合计）。 */
-const TOTAL_FRAME_BYTES_BUDGET = 24 * 1024 * 1024;
-/** 单帧最长边（服务端缩放后再编码）。 */
+/** 单帧最长边：明确的媒体表示策略（控制单帧传输片段大小），不是执行额度。 */
 const FRAME_MAX_EDGE = 768;
-/** 单条外部命令超时。 */
-const COMMAND_TIMEOUT_MS = 30_000;
 
 export type FilmSetVideoFrame = {
   timestampSeconds: number;
@@ -34,22 +31,19 @@ function run(command: string, args: string[], limit: number): Promise<Buffer> {
     const chunks: Buffer[] = [];
     let size = 0;
     let finished = false;
+    // 在途解码不设应用固定时长：只在调用方取消或进程真实失败时结束。
     const finish = (error?: Error, bytes?: Buffer) => {
       if (finished) return;
       finished = true;
-      clearTimeout(timeout);
       if (error) reject(error);
       else resolve(bytes!);
     };
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(new Error("视频解码超时"));
-    }, COMMAND_TIMEOUT_MS);
     child.stdout.on("data", (chunk: Buffer) => {
       size += chunk.length;
       if (size > limit) {
+        // `limit` 是单次命令的**输出分块**上界（pipe 缓冲），不是作品总量额度。
         child.kill("SIGKILL");
-        finish(new Error("视频解码超出预算"));
+        finish(new Error("单次解码输出超过传输分块上界"));
       } else {
         chunks.push(chunk);
       }
@@ -101,9 +95,9 @@ export async function extractFilmSetVideoFrames(input: {
     const end = input.range ? Math.min(duration, input.range.endSeconds) : duration;
     if (!(end > start)) throw new Error("视频范围非法");
     const span = end - start;
-    const count = Math.max(1, Math.min(input.maxFrames, 16));
+    // 采样帧数由模型真实多图能力决定；16 只是缺省采样密度（表示策略），不是应用额度。
+    const count = Math.max(1, input.maxFrames);
     const frames: FilmSetVideoFrame[] = [];
-    let totalBytes = 0;
     for (let index = 0; index < count; index += 1) {
       // 覆盖首尾：index 0 → start，最后一帧 → end（避免恰好落在末尾无帧，取略早位置）。
       const ratio = count === 1 ? 0 : index / (count - 1);
@@ -119,8 +113,6 @@ export async function extractFilmSetVideoFrames(input: {
         "pipe:1"
       ], 8 * 1024 * 1024);
       if (jpeg.length === 0) continue;
-      totalBytes += jpeg.length;
-      if (totalBytes > TOTAL_FRAME_BYTES_BUDGET) throw new Error("视频帧总字节超出预算");
       frames.push({ timestampSeconds: Number(time.toFixed(3)), bytes: new Uint8Array(jpeg), contentType: "image/jpeg" });
     }
     if (frames.length === 0) throw new Error("未能从视频中抽取可用帧");

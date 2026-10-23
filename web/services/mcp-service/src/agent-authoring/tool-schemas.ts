@@ -3,7 +3,7 @@
  * （自 `tools.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R05）。
  */
 import { z } from "zod";
-import { AGENT_CANVAS_LIMITS, AGENT_SEMANTIC_KINDS } from "@woohaa3/contracts";
+import { AGENT_SEMANTIC_KINDS } from "@woohaa3/contracts";
 
 export const POSITION_SCHEMA = z.strictObject({ x: z.number(), y: z.number() });
 
@@ -67,4 +67,4 @@ export const OPERATION_SCHEMA = z.union([
 
 export const CANVAS_ID_SCHEMA = { canvasId: z.string().min(1) } as const;
 
-export const MAX_PLAN_OPERATIONS = AGENT_CANVAS_LIMITS.maxPlanOperations;
+

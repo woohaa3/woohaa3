@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   MODEL_CAMERA_ASPECTS,
   MAX_MODEL_CAMERAS,
-  MODEL_SCRIPT_BATCH_LIMITS as LIMITS,
 } from "@woohaa3/contracts";
 import { createToolRegistrar } from "./guide.js";
 import { jsonResult, toolError } from "./tool-results.js";
@@ -28,19 +27,18 @@ const requestSchema = z.strictObject({
   canvasId: id,
   requestId: id,
   version: z.literal("woohaa-model-js-v2").optional(),
-  commonSource: z.string().max(LIMITS.maxSourceChars).optional(),
+  commonSource: z.string().optional(),
   items: z
     .array(
       z.strictObject({
         nodeId: id,
-        source: z.string().min(1).max(LIMITS.maxSourceChars),
+        source: z.string().min(1),
         expectedModelContentHash: id.optional(),
         cameras: z.array(camera).max(MAX_MODEL_CAMERAS).optional(),
         expectedCamerasHash: id.optional(),
       }),
     )
     .min(1)
-    .max(LIMITS.maxNodes),
 });
 const result = (outcome: { ok: boolean }) => ({
   ...jsonResult(outcome),
@@ -56,10 +54,10 @@ export function registerModelBatchTools(
     "get_model_nodes",
     {
       title: "批量读取模型节点",
-      description: `从同一权威快照读取最多 ${LIMITS.maxNodes} 个模型的版本、提示词、参考输入和镜头及 camerasHash。默认省略源码；需要编辑既有脚本时 includeSource=true。camerasHash 用于批量替换镜头的并发保护。无需逐节点重复读取镜头。`,
+      description: `从同一权威快照读取同一 revision 的模型版本、提示词、参考输入和镜头及 camerasHash。默认省略源码；需要编辑既有脚本时 includeSource=true。camerasHash 用于批量替换镜头的并发保护。大响应可按同一快照继续读取，不按模型数量或响应总量要求缩小请求。`,
       inputSchema: z.strictObject({
         canvasId: id,
-        nodeIds: z.array(id).min(1).max(LIMITS.maxNodes),
+        nodeIds: z.array(id).min(1),
         includeSource: z.boolean().optional(),
       }),
       annotations: {
@@ -79,7 +77,7 @@ export function registerModelBatchTools(
     "validate_model_scripts",
     {
       title: "预检模型批次",
-      description: `批量执行并校验模型脚本、镜头和内容哈希条件，不写画布、不占 requestId、不签发 token。commonSource 加换行后前置到每项 source，在独立 scene 中运行。返回逐节点模型版本、局部几何 AABB、操作数及镜头摘要；失败返回 index/nodeId/errors。最多 ${LIMITS.maxNodes} 项，展开源码总计 ${LIMITS.maxExpandedSourceBytes} 字节，执行总计 ${LIMITS.maxExecutionMs}ms。`,
+      description: `批量执行并校验模型脚本、镜头和内容哈希条件，不写画布、不占 requestId、不签发 token。commonSource 加换行后前置到每项 source，在独立 scene 中运行。返回逐节点模型版本、局部几何 AABB、操作数及镜头摘要；失败返回 index/nodeId/errors。批次按实际资源调度并整批一次原子保存，不按模型数量、源码字节、执行时长或并发批次数量拒绝合法工作。`,
       inputSchema: requestSchema,
       annotations: {
         readOnlyHint: true,

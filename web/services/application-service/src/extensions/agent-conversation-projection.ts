@@ -97,11 +97,9 @@ export function toMessage(record: ConversationMessageRecord): ConversationMessag
 }
 
 /** 由最近回合派生会话整体状态（宿主投影，不是第二事实源）。 */
-export function conversationStatusFor(turns: ConversationTurnRecord[]): ConversationSummary["status"] {
-  const active = turns.find((turn) => !isTerminalTurnStatus(turn.status));
-  if (active) return "active";
-  const latest = turns[turns.length - 1];
+export function conversationStatusFor(latest: ConversationTurnRecord | undefined): ConversationSummary["status"] {
   if (!latest) return "idle";
+  if (!isTerminalTurnStatus(latest.status)) return "active";
   switch (latest.status) {
     case "succeeded": return "succeeded";
     case "partial": return "partial";
@@ -117,15 +115,25 @@ export function buildSnapshot(
   store: AgentConversationStore,
   binding: ConversationAdapterBinding,
   cursor: number,
-  limits: { maxMessages: number; maxEvents: number }
+  limits: { maxMessages: number; maxEvents: number; beforeMessageSequence?: number | null; turnOffset?: number }
 ): ConversationSnapshot {
-  const messages = store.listMessages(binding.conversationId, limits.maxMessages).map(toMessage);
-  const turns = store.listTurns(binding.conversationId, 200).map((turn) => toTurn(store, turn));
+  const before = limits.beforeMessageSequence ?? null;
+  const messages = store.listMessagesBefore(binding.conversationId, before, limits.maxMessages).map(toMessage);
+  const turnOffset = limits.turnOffset ?? 0;
+  // 回合页多取一条以判断是否还有更早历史可继续读取。
+  const turnPage = store.listTurnsPage(binding.conversationId, turnOffset, 200 + 1);
+  const turns = turnPage.slice(0, 200).map((turn) => toTurn(store, turn));
   const events = store.listEvents(binding.conversationId, cursor, limits.maxEvents);
   const maxSequence = store.maxEventSequence(binding.conversationId);
   const earliest = events.length > 0 ? events[0]!.sequence : maxSequence + 1;
   // cursor 早于保留窗口起点：要求 resync（宿主当前保留全部事件，故仅在删除/压缩后发生）。
   const resyncRequired = cursor > 0 && cursor < earliest - 1;
+  // 分页游标（任务 4.1）：还有更早合法历史时给出继续读取位置，不退化成总量截断。
+  const nextMessageCursor =
+    messages.length > 0 && store.listMessagesBefore(binding.conversationId, messages[0]!.sequence, 1).length > 0
+      ? messages[0]!.sequence
+      : undefined;
+  const nextTurnCursor = turnPage.length > 200 ? turnOffset + 200 : undefined;
   return {
     conversation: toSummary(binding),
     turns,
@@ -140,7 +148,9 @@ export function buildSnapshot(
       createdAt: event.createdAt
     })),
     cursor: maxSequence,
-    resyncRequired
+    resyncRequired,
+    ...(nextMessageCursor !== undefined ? { nextMessageCursor } : {}),
+    ...(nextTurnCursor !== undefined ? { nextTurnCursor } : {})
   };
 }
 

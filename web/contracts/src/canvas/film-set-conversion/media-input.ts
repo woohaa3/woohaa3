@@ -48,7 +48,9 @@ export type FilmSetConversionMediaInputResult = {
 };
 
 /**
- * 装配真实视觉输入；预算不足或无法读取时抛出可读原因（调用方转为 `budget-exceeded` 等错误码）。
+ * 装配真实视觉输入；模型确实不能承载该输入（真实能力不足）或无法读取时抛出可读原因
+ * （调用方转为 `budget-exceeded` / `source-not-ready` 等错误码；这不是应用自设总量额度，
+ * 见 change: 2026-10-22-remove-agent-execution-limits）。
  */
 export async function readFilmSetConversionMediaInput(
   input: FilmSetConversionMediaInputRequest
@@ -85,7 +87,7 @@ export async function readFilmSetConversionMediaInput(
     maxFrames
   });
   if (frames.length === 0) throw new Error("服务端未产出可用视频帧，无法转换");
-  if (frames.length > maxFrames) throw new Error("视频帧预算超限，请重新选择范围");
+  if (frames.length > maxFrames) throw new Error("服务端返回的帧数超过所选模型的真实输入能力，请重新选择范围");
   return {
     attachments: frames.map((frame, index) => ({
       fileName: `frame-${index + 1}-${frame.timestampSeconds.toFixed(3)}s`,

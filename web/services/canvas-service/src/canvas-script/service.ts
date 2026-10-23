@@ -27,7 +27,6 @@ import {
   projectAgentNode,
   AGENT_NODE_DESCRIPTORS,
   CANVAS_SCRIPT_API_VERSION,
-  CANVAS_SCRIPT_LIMITS,
   CANVAS_SCRIPT_PROTOCOL_VERSION,
   canvasScriptError,
   canvasScriptSubmissionHash,
@@ -53,6 +52,8 @@ export type CanvasScriptRequestContext = {
   version: string;
   source: string;
   expectedRevision?: number;
+  /** 外部取消信号（change: 2026-10-22-remove-agent-execution-limits，任务 6.1）。 */
+  signal?: AbortSignal;
 };
 
 export type CanvasScriptValidateOutcome =
@@ -83,8 +84,6 @@ export type CanvasScriptServiceDependencies = {
   nodeKinds?: readonly CanvasScriptNodeKind[];
   recorder?: CanvasScriptRecorder;
   gate?: CanvasScriptConcurrencyGate;
-  /** 强制失败（测试）：让首次提交在 store 层失败以验证零部分写入。 */
-  now?: () => number;
   /**
    * 队列内全量影响范围复核（任务 3.6）。
    *
@@ -257,12 +256,13 @@ export class CanvasScriptService {
       return { ok: true, receipt: frozenReceipt(existing.script, decoded.value, existing.revision, true, !existing.changed) };
     }
 
-    // 并发门禁（任务 2.4）：执行前占用名额。
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.2 / 6.1：这里原本在并发/排队
+    // 超限时返回不可重试的 busy。并发数量不是权限，已删除；`acquire` 只做观察性计数，
+    // 执行仍承载于可终止的隔离故障域，用户停止可达。
     const slot = this.gate.acquire(input.principalId);
-    if (!slot.allowed) return { ok: false, error: canvasScriptError("busy", "record", slot.message, { retryable: true }) };
 
     try {
-      const recorded = await this.recordScript(decoded.value.source);
+      const recorded = await this.recordScript(decoded.value.source, input.signal);
       if (!recorded.ok) return recorded;
 
       const outcome = await room.submitDerived({
@@ -298,15 +298,14 @@ export class CanvasScriptService {
     }
   }
 
-  /** 受限执行 + host 侧严格解码（队列外）。 */
-  private async recordScript(source: string): Promise<{ ok: true; operations: AgentPlanOperation[] } | { ok: false; error: CanvasScriptError }> {
+  /** 受限执行 + host 侧严格解码（队列外；无应用侧时长上限，可外部取消）。 */
+  private async recordScript(source: string, signal?: AbortSignal): Promise<{ ok: true; operations: AgentPlanOperation[] } | { ok: false; error: CanvasScriptError }> {
     const kinds = this.availableNodeKinds();
     const recorded = await this.recorder.record({
       source,
       nodeKinds: kinds.map((entry) => entry.kind),
-      promptMaxChars: AGENT_CANVAS_LIMITS.promptMaxChars,
       positionAbsMax: AGENT_CANVAS_LIMITS.maxPositionAbs,
-      deadlineMs: this.now() + CANVAS_SCRIPT_LIMITS.executionTimeoutMs
+      ...(signal ? { signal } : {})
     });
     if (!recorded.ok) return { ok: false, error: recorded.error };
     return { ok: true, operations: recorded.operations };
@@ -412,7 +411,4 @@ export class CanvasScriptService {
     return { ok: false, error: canvasScriptError("script-unavailable", "decode", capability.reason) };
   }
 
-  private now(): number {
-    return this.deps.now?.() ?? Date.now();
-  }
 }

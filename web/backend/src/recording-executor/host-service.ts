@@ -152,7 +152,8 @@ export type HostRecordingServiceOptions = {
   publishActivity?: (job: import("@woohaa3/contracts").BackgroundActivityJob) => void;
   logger?: (event: Record<string, unknown>) => void;
   /** 单任务预算。 */
-  limits?: { maxBytes: number; leaseMs?: number };
+  /** 执行器租约（存活检测）时长；不是任务总时长额度。 */
+  limits?: { leaseMs?: number };
 };
 
 /** 任务 → 冻结/提交所需的上下文（内存，仅当前进程）。 */
@@ -368,7 +369,6 @@ export class HostRecordingService implements CanvasRecordingPort {
       sourceIncarnation: canvas.sourceIncarnation,
       readOnly: canvas.readOnly === true,
       hasPendingDraft: canvas.hasPendingDraft === true,
-      maxTotalResourceBytes: 512 * 1024 * 1024,
       canvas: {
         revision: canvas.revision,
         assets: canvas.assets,
@@ -512,7 +512,6 @@ export class HostRecordingService implements CanvasRecordingPort {
         commitRequest,
         sourcePosition: context.request.purpose === "export" ? layout : null,
         limits: {
-          maxBytes: this.options.limits?.maxBytes ?? 256 * 1024 * 1024,
           expectedWidth: dispatched.claim.width,
           expectedHeight: dispatched.claim.height,
           expectedDurationSeconds: dispatched.claim.durationSeconds,

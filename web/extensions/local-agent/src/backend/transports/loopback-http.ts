@@ -5,12 +5,19 @@ import { createSseParser } from "../protocol/sse.js";
 const policy = createEndpointPolicy({ allowedHosts: ["127.0.0.1", "localhost", "::1", "[::1]"], allowHttp: true });
 
 /** Separate HTTP errors from network/policy results. Never expose credentials in errors. */
+/**
+ * 本机 Agent 的受限 HTTP 客户端。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 2.5：原「每个请愿 30 秒」的固定
+ * 在途中止已删除。在途工作（尤其是一整个回合/等待流）只在用户取消（`signal`）、调用方显式
+ * 期限（`init.signal`）或传输真实失败时结束；就绪探测仍由 `ready()` 的短探测期限表达。
+ */
 export function loopbackHttp(base: string, headers: Record<string, string>, signal: AbortSignal, fetchImpl: typeof fetch) {
   const request = async (path: string, init: RequestInit = {}): Promise<Response> => {
     const result = await guardedFetch(`${base}${path}`, {
       ...init,
       headers: { ...headers, ...Object.fromEntries(new Headers(init.headers).entries()) },
-      signal: AbortSignal.any([signal, init.signal ?? AbortSignal.timeout(30_000)])
+      signal: init.signal ? AbortSignal.any([signal, init.signal]) : signal
     }, policy, fetchImpl);
     if (!result.ok) throw new Error(result.message);
     if (!result.response.ok) {

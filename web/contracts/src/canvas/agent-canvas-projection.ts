@@ -190,7 +190,9 @@ export function projectAgentGraph(canvas: CanvasLike, query: AgentGraphQuery = {
     return { ok: false, code: "snapshot-stale", message: "cursor 绑定的 revision 已变化", currentRevision: canvas.revision };
   }
 
-  const limit = Math.min(query.limit ?? AGENT_CANVAS_LIMITS.maxGraphNodes, AGENT_CANVAS_LIMITS.maxGraphNodes);
+  // 分页只是单次传输片段（任务 4.2）：页大小由调用方给出（缺省 200），不是总量上限。
+  const requested = query.limit ?? AGENT_CANVAS_LIMITS.defaultGraphPageNodes;
+  const limit = Number.isSafeInteger(requested) && requested > 0 ? requested : AGENT_CANVAS_LIMITS.defaultGraphPageNodes;
   const offset = cursor?.offset ?? 0;
   const pageNodes = selected.slice(offset, offset + limit);
   const pageNodeIds = new Set(pageNodes.map((node) => node.id));
@@ -199,12 +201,11 @@ export function projectAgentGraph(canvas: CanvasLike, query: AgentGraphQuery = {
   const edges = canvas.document.edges
     .filter((edge) => pageNodeIds.has(edge.source) && pageNodeIds.has(edge.target))
     .map(projectAgentEdge)
-    .sort((left, right) => (left.edgeId < right.edgeId ? -1 : left.edgeId > right.edgeId ? 1 : 0))
-    .slice(0, AGENT_CANVAS_LIMITS.maxGraphEdges);
+    .sort((left, right) => (left.edgeId < right.edgeId ? -1 : left.edgeId > right.edgeId ? 1 : 0));
 
   const end = offset + pageNodes.length;
   const hasMore = end < selected.length;
-  const truncated = hasMore || edges.length >= AGENT_CANVAS_LIMITS.maxGraphEdges;
+  const truncated = hasMore;
 
   return {
     ok: true,

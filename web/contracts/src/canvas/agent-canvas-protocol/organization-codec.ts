@@ -14,13 +14,10 @@ export function readGridLayout(raw: unknown, operationIndex: number): AgentDecod
   if (!isJsonObject(raw)) return decodeFail("malformed-request", "layout 必须是对象", loc);
   const known = assertKnownKeys(raw, ["mode", "columns", "gapX", "gapY", "origin"], loc);
   if (!known.ok) return known;
-  if (
-    raw.mode !== "grid" ||
-    !Number.isInteger(raw.columns) ||
-    Number(raw.columns) < 1 ||
-    Number(raw.columns) > AGENT_CANVAS_LIMITS.maxGridColumns
-  )
-    return decodeFail("malformed-request", "layout 需要 mode=grid 和 1..256 整数 columns", loc);
+  // change: 2026-10-22-remove-agent-execution-limits，任务 5.1：列数不再是应用额度上限，
+  // 只要求正整数（真实布局会按实际节点数展开）。
+  if (raw.mode !== "grid" || !Number.isInteger(raw.columns) || Number(raw.columns) < 1)
+    return decodeFail("malformed-request", "layout 需要 mode=grid 和正整数 columns", loc);
   for (const key of ["gapX", "gapY"] as const)
     if (
       raw[key] !== undefined &&
@@ -49,8 +46,9 @@ export function readEntityRefs(
   operationIndex: number,
   field: string,
 ): AgentDecodeResult<AgentEntityRef[]> {
-  if (!Array.isArray(raw) || !raw.length || raw.length > AGENT_CANVAS_LIMITS.maxAffectedNodes)
-    return decodeFail("malformed-request", `${field} 需要 1..256 个引用`, { operationIndex, field });
+  // 影响实体数不再是应用额度上限（任务 5.1）：完整引用集合由 planner 原子处理。
+  if (!Array.isArray(raw) || !raw.length)
+    return decodeFail("malformed-request", `${field} 需要至少一个引用`, { operationIndex, field });
   const values: AgentEntityRef[] = [];
   for (const entry of raw) {
     const ref = readEntityRef(entry, { operationIndex, field });

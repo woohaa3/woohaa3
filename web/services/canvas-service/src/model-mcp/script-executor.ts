@@ -5,9 +5,13 @@
  * 读取权威 `modelScript` 与版本 descriptor，调用与 Frontend 共用的版本 dispatch，
  * 执行 validator 与确定性重跑，**只返回规范化 Scene IR**（绝不把原始脚本交给 renderer）。
  *
- * JS 执行边界：默认用进程内 `worker_threads` 承载实际执行，设置 CPU 时间、源码长度与
- * 输出预算，并禁止网络/文件系统/环境变量/随机源。`worker_threads` 只作为可终止调度单元，
- * **不宣称为安全沙箱**；因此执行入口只注入版本化 `scene` API 与确定性 helper。
+ * JS 执行边界：默认用进程内 `worker_threads` 承载实际执行，并禁止网络/文件系统/环境变量/
+ * 随机源。`worker_threads` 只作为可终止调度单元，**不宣称为安全沙箱**；因此执行入口只注入
+ * 版本化 `scene` API 与确定性 helper。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 6.1 / design D6：原固定 2 秒 CPU
+ * 时间、20 万字符源码与 8 MiB 输出额度已删除。脚本承载于可从外部终止的独立故障域：用户可随时
+ * 停止，真实内存分配失败按实际资源故障报告，不影响宿主与其他任务。
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -22,12 +26,6 @@ import {
 } from "@woohaa3/contracts";
 import type { SceneV2Op } from "@woohaa3/contracts";
 
-/** 源码长度上限（与 MCP 提交一致）。 */
-export const EXECUTOR_MAX_SOURCE_CHARS = 200_000;
-/** 默认 CPU 时间上限（毫秒）。 */
-export const EXECUTOR_DEFAULT_TIMEOUT_MS = 2_000;
-/** 规范化后的 Scene IR JSON 字节上限。 */
-export const EXECUTOR_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
 export type ExecuteSceneResult =
   | {
@@ -41,13 +39,14 @@ export type ExecuteSceneResult =
   | ModelScriptFailure;
 
 export type ScriptExecutorOptions = {
-  /** CPU 时间上限（毫秒）；默认 2000。 */
+  /**
+   * 显式取消期限（毫秒，相对本次执行）。**不是应用执行额度**：缺省不设上限，合法长脚本继续
+   * 执行；用户停止仍可外部终止（`signal`）。
+   */
   timeoutMs?: number;
-  /** 源码长度上限；默认 200_000。 */
-  maxSourceChars?: number;
-  /** 输出 JSON 字节上限；默认 8 MiB。 */
-  maxOutputBytes?: number;
-  /** 测试可注入：同步执行（跳过 worker），仍做预算校验。 */
+  /** 外部取消信号：用户停止时终止隔离执行并丢弃结果。 */
+  signal?: AbortSignal;
+  /** 测试可注入：同步执行（跳过 worker）。 */
   executeSync?: (source: string, version: SupportedModelScriptVersion) => ExecuteSceneResult;
   now?: () => number;
 };
@@ -62,10 +61,6 @@ export async function executeSceneIr(
   version: unknown,
   options: ScriptExecutorOptions = {}
 ): Promise<ExecuteSceneResult> {
-  const maxSourceChars = options.maxSourceChars ?? EXECUTOR_MAX_SOURCE_CHARS;
-  if (source.length > maxSourceChars) {
-    return { ok: false, stage: "compile", code: "source-too-long", message: "脚本超过长度上限" };
-  }
   if (!isSupportedModelScriptVersion(version)) {
     return {
       ok: false,
@@ -75,24 +70,23 @@ export async function executeSceneIr(
     };
   }
 
-  const maxOutputBytes = options.maxOutputBytes ?? EXECUTOR_MAX_OUTPUT_BYTES;
-  const timeoutMs = options.timeoutMs ?? EXECUTOR_DEFAULT_TIMEOUT_MS;
   const result = options.executeSync
     ? options.executeSync(source, version)
-    : await runIsolated(source, version, timeoutMs);
-
-  if (!result.ok) return result;
-  if (Buffer.byteLength(result.json, "utf8") > maxOutputBytes) {
-    return { ok: false, stage: "validate", code: "output-too-large", message: "Scene IR 超过输出预算" };
-  }
+    : await runIsolated(source, version, options.timeoutMs, options.signal);
   return result;
 }
 
-/** 在可终止的 worker 中执行，CPU 超时则终止并返回 model-script-timeout。 */
+/**
+ * 在可终止的 worker 中执行。
+ *
+ * `timeoutMs` 只在调用方给了**显式**取消期限时启用；用户取消经 `signal` 从执行器外终止。
+ * 两者都不是应用执行额度（任务 6.1）。
+ */
 function runIsolated(
   source: string,
   version: SupportedModelScriptVersion,
-  timeoutMs: number
+  timeoutMs: number | undefined,
+  signal?: AbortSignal
 ): Promise<ExecuteSceneResult> {
   return new Promise((resolve) => {
     let settled = false;
@@ -105,19 +99,31 @@ function runIsolated(
         stackSizeMb: 4
       }
     });
-    const timer = setTimeout(() => {
+    const finish = () => { if (timer) clearTimeout(timer); signal?.removeEventListener("abort", onAbort); };
+    const timer = timeoutMs && timeoutMs > 0
+      ? setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          finish();
+          void worker.terminate();
+          resolve({ ok: false, stage: "execute", code: "model-script-timeout", message: "脚本执行超过了本次请求的显式截止时间" });
+        }, timeoutMs)
+      : undefined;
+    const onAbort = () => {
       if (settled) return;
       settled = true;
+      finish();
       void worker.terminate();
-      resolve({ ok: false, stage: "execute", code: "model-script-timeout", message: "脚本执行超过 CPU 时间上限" });
-    }, timeoutMs);
+      resolve({ ok: false, stage: "execute", code: "cancelled", message: "脚本执行已被用户停止" });
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     worker.on("message", (message: { kind?: string; result?: ExecuteSceneResult } | null) => {
       // Node --watch uses this channel for watch:import/watch:require notifications.
       if (!message || message.kind !== "model-script-result") return;
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      finish();
       void worker.terminate();
       const result = message.result;
       if (!result || typeof result.ok !== "boolean"
@@ -129,13 +135,13 @@ function runIsolated(
     worker.on("error", (error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      finish();
       resolve({ ok: false, stage: "execute", code: "runtime-error", message: error.message });
     });
     worker.on("exit", (code) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      finish();
       if (code !== 0) {
         resolve({ ok: false, stage: "execute", code: "runtime-error", message: `worker 异常退出 ${code}` });
       }

@@ -38,59 +38,40 @@ export type AuthoringAdapterDeps = {
   logger?: (event: Record<string, unknown>) => void;
 };
 
-/** 稳定工具 grant 的内存注册表（签发/校验/回收）；工具入口据此限制范围与预算。 */
+/** 稳定工具 grant 的内存注册表（签发/校验/回收）；工具入口据此限制范围与撤销状态。 */
 export type ToolGrantRegistry = {
   issue: (grant: ApplicationToolGrant, subject?: string) => void;
   subject: (token: string) => string | undefined;
   verify: (token: string) => ApplicationToolGrant | null;
   revoke: (workId: string, subject?: string) => void;
-  /** 记录一次调用；超出预算返回 false。 */
-  consume: (token: string) => boolean;
   /**
-   * 工具入口强制校验（change: 2026-10-08-unlock-...，任务 3.6 / design D8）。
+   * 工具入口强制校验（change: 2026-10-22-remove-agent-execution-limits，任务 2.1 / design D2）。
    *
-   * 校验 token 有效性、工具允许集合、目标画布/节点范围与调用预算；任一不满足返回
-   * `{ ok:false, reason }`，并**不**消耗预算（失败不记账）。成功时消耗一次调用预算。
+   * 校验 token 有效性、工具允许集合、目标画布/节点范围与撤销状态；任一不满足返回
+   * `{ ok:false, reason }`。委托没有可耗尽的调用额度，也不按固定时钟到期：合法性只由活动执行
+   * 生命周期、权限与范围代次决定。
    */
   authorize: (input: { token: string; tool: string; canvasId?: string; nodeId?: string; cameraId?: string; clipId?: string; itemId?: string }) => { ok: true } | { ok: false; reason: string };
 };
 
-export function createToolGrantRegistry(now: () => number = () => Date.now()): ToolGrantRegistry {
-  const grants = new Map<string, ApplicationToolGrant & { calls: number; workId: string; subject?: string }>();
+export function createToolGrantRegistry(): ToolGrantRegistry {
+  const grants = new Map<string, ApplicationToolGrant>();
   return {
     subject: token => grants.get(token)?.subject,
     issue(grant, subject) {
-      grants.set(grant.token, { ...grant, calls: 0, subject, workId: (grant as ApplicationToolGrant & { workId?: string }).workId ?? "" });
+      grants.set(grant.token, { ...grant, ...(subject ? { subject } : {}) });
     },
     verify(token) {
-      const grant = grants.get(token);
-      if (!grant) return null;
-      if (grant.expiresAt <= now()) {
-        grants.delete(token);
-        return null;
-      }
-      return grant;
+      return grants.get(token) ?? null;
     },
     revoke(workId, subject) {
       for (const [token, grant] of grants) {
-        if ((grant as { workId?: string }).workId === workId && (subject === undefined ? !grant.groupScope : subject === grant.subject)) grants.delete(token);
+        if (grant.workId === workId && (subject === undefined ? !grant.groupScope : subject === grant.subject)) grants.delete(token);
       }
-    },
-    consume(token) {
-      const grant = grants.get(token);
-      if (!grant) return false;
-      if (grant.expiresAt <= now() || grant.calls >= grant.maxCalls) return false;
-      grant.calls += 1;
-      return true;
     },
     authorize(input) {
       const grant = grants.get(input.token);
       if (!grant) return { ok: false, reason: "unknown-grant" };
-      if (grant.expiresAt <= now()) {
-        grants.delete(input.token);
-        return { ok: false, reason: "expired" };
-      }
-      if (grant.calls >= grant.maxCalls) return { ok: false, reason: "budget-exhausted" };
       if ((grant.groupScope || grant.tools.length > 0) && !grant.tools.includes(input.tool)) return { ok: false, reason: "tool-not-allowed" };
       if (grant.groupScope && canvasGroupEpoch(grant.groupScope.canvasId, grant.groupScope.rootGroupId) !== grant.groupScope.scopeEpoch) return { ok: false, reason: "group-scope-revoked" };
       if (input.canvasId !== undefined && grant.canvasIds.length > 0 && !grant.canvasIds.includes(input.canvasId)) {
@@ -103,7 +84,6 @@ export function createToolGrantRegistry(now: () => number = () => Date.now()): T
       if (input.tool === "submit_film_set" && (grant.itemId || grant.clipId || grant.cameraId)) return { ok: false, reason: "whole-film-set-not-allowed" };
       if (grant.itemId && input.tool === "mutate_film_set_clip" && input.itemId !== grant.itemId) return { ok: false, reason: "item-not-allowed" };
       if (grant.clipId && (input.tool === "mutate_film_set_clip" || input.tool === "export_film_set_clip") && input.clipId !== grant.clipId) return { ok: false, reason: "clip-not-allowed" };
-      grant.calls += 1;
       return { ok: true };
     }
   };
@@ -247,17 +227,16 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
         ...(request.clipId ? { clipId: request.clipId } : {}),
         ...(request.itemId ? { itemId: request.itemId } : {}),
         tools: request.tools ?? [],
-        maxCalls: request.maxCalls ?? 40,
-        expiresAt: Date.now() + (request.ttlMs ?? 30 * 60 * 1000)
+        workId: request.workId,
+        ...(request.credentialEpoch !== undefined ? { credentialEpoch: request.credentialEpoch } : {})
       };
-      (grant as ApplicationToolGrant & { workId?: string }).workId = request.workId;
       grants.issue(grant, request.delegation.subject);
       return grant;
     },
     revoke: (workId, delegation) => grants.revoke(workId, delegation?.subject),
     /**
-     * 工具入口强制校验（任务 3.6 / design D8）：宿主在 MCP 工具调用点用它与 bearer 令牌核对。
-     * 成功消耗预算，失败不记账。
+     * 工具入口强制校验（任务 2.1 / design D2）：宿主在 MCP 工具调用点用它与 bearer 令牌核对。
+     * 校验只判范围、权限与撤销状态，不消耗额度。
      */
     authorize: (input) => grants.authorize(input)
   };

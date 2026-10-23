@@ -363,9 +363,11 @@ describe("模型脚本指南的朝向约定（change: model-orientation-conventi
     // rotation 使用角度制与固定 Y-X-Z 顺序。
     expect(text).toContain("角度制");
     expect(text).toContain("Y-X-Z");
-    // 渲染预算：提示词必须声明估算顶点上限，避免产出超预算候选。
-    expect(text).toContain("Render budget");
-    expect(text).toContain(String(MODEL_RENDER_BUDGET.maxEstimatedVertices));
+    // change: 2026-10-22-remove-agent-execution-limits，任务 6.2：估算顶点**总量上限**已删除，
+    // 提示词改为可编辑性指引（明确「不是硬上限」）并保留每个图元的成本表。
+    expect(text).toContain("Editability guidance");
+    expect(text).toContain("not a hard limit");
+    expect(text).toContain(`box=${MODEL_RENDER_BUDGET.vertexCost.box}`);
     // 统计口径：禁止按成本表手算，并点明 segment 缺省是 capsule。
     expect(text).toContain("get_model_statistics");
     expect(text).toContain("MUST NOT 按上面的成本表自行推算");

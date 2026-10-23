@@ -91,9 +91,13 @@ export type ContentConversionServiceDeps = {
   models?: () => readonly FilmSetConversionModelCandidate[];
   now?: () => string;
   actorId?: string;
+  /**
+   * 提交/重试请求等待终态的时间（缺省 15s）。这是**请求等待参数**：超过即返回「进行中」并
+   * 让占位节点继续反映真实阶段，不掐断上游（change: 2026-10-22-remove-agent-execution-limits）。
+   */
   submitBudgetMs?: number;
+  /** 显式上游期限（缺省不设应用侧总时长上限；用户停止与真实失败照常收敛）。 */
   generationTimeoutMs?: number;
-  maxRepairAttempts?: number;
 };
 
 /**

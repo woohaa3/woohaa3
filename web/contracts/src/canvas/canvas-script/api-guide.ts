@@ -8,7 +8,7 @@
  * 语义边界：API 只记录语义操作，不立即写画布；`prompt` 是生成**输入**，不是已有作品输出。
  */
 import { CANVAS_SCRIPT_API_NAMES, type CanvasScriptApiName } from "./types.js";
-import { CANVAS_SCRIPT_LIMITS, DEFAULT_CANVAS_SCRIPT_VERSION } from "./limits.js";
+import { DEFAULT_CANVAS_SCRIPT_VERSION } from "./limits.js";
 
 export type CanvasScriptApiSignature = {
   name: CanvasScriptApiName;
@@ -162,12 +162,13 @@ ${CANVAS_SCRIPT_PLACEMENT_RULES.map((rule) => `- ${rule}`).join("\n")}
 
 ${CANVAS_SCRIPT_IF_RULES.map((rule) => `- ${rule}`).join("\n")}
 
-## 预算
+## 执行边界
 
-- 源码 UTF-8 上限：${CANVAS_SCRIPT_LIMITS.sourceMaxBytes} 字节
-- 单次执行时间上限：${CANVAS_SCRIPT_LIMITS.executionTimeoutMs} 毫秒
-- JS 堆上限：${CANVAS_SCRIPT_LIMITS.heapLimitBytes} 字节
-- 展开操作上限：${CANVAS_SCRIPT_LIMITS.maxOperations}
+脚本在隔离的执行域内运行，可被用户随时停止；没有应用侧的源码字节、执行时长、操作数或 API 调用次数上限。
+
+- 真实内存不足会作为执行域的资源故障返回，不影响其他请求
+- 相同脚本在独立执行域各运行一次以校验确定性
+- 大脚本/大计划完整记录后由同一 planner 校验并一次原子提交
 
 ## 示例
 
@@ -197,8 +198,16 @@ export function canvasScriptApiDescriptor() {
     handleRules: CANVAS_SCRIPT_HANDLE_RULES,
     placementRules: CANVAS_SCRIPT_PLACEMENT_RULES,
     ifRules: CANVAS_SCRIPT_IF_RULES,
-    limits: CANVAS_SCRIPT_LIMITS,
-    organizationExample: CANVAS_SCRIPT_ORGANIZATION_EXAMPLE,
-    example: CANVAS_SCRIPT_GUIDE_EXAMPLE
+    // 声明真实的执行边界（隔离 + 可取消），不声明任何应用侧总量额度。
+    execution: {
+      isolated: true,
+      cancellable: true,
+      deterministicDoubleRun: true,
+      applicationQuotas: []
+    },
+    examples: {
+      organization: CANVAS_SCRIPT_ORGANIZATION_EXAMPLE,
+      basic: CANVAS_SCRIPT_GUIDE_EXAMPLE
+    }
   };
 }

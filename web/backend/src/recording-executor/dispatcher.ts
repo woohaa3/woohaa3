@@ -7,6 +7,12 @@
  *
  * 不传像素（只有 IR/媒体声明），不驱动时钟（时间表在快照里），不信任 worker 的自报尺寸
  * ——宿主随后用 `probe.ts` 从实际字节复核。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 7.5 / design D7：这里原本有一个
+ * 「等待成片的总预算」（缺省 10 分钟），到点即判定执行器丢失。它是任务**总时长**额度，
+ * 会截断合法的大成片与慢解码。现在改为**执行器存活 watchdog**：只要仍在收到该 attempt 的
+ * 进度或消息就持续等待；只有在一段完全没有活动（或连接关闭）后才报告执行器失联。
+ * 活跃且有进度的执行不会因固定租约年龄被截断。
  */
 import type { ContentRecordingSnapshot } from "@woohaa3/contracts";
 import { RECORDING_PROTOCOL_VERSION } from "@woohaa3/contracts";
@@ -22,8 +28,11 @@ export type ExecutorDispatcherOptions = {
   /** 递增 sequence（同一连接单调）。 */
   nextSequence: () => number;
   logger?: (event: Record<string, unknown>) => void;
-  /** 等待成片的总预算。 */
-  timeoutMs?: number;
+  /**
+   * 执行器失联的**无活动**窗口（毫秒）。缺省 10 分钟；每收到该 attempt 的任何消息即重置。
+   * 这是存活检测，不是任务总时长额度：持续有进度/心跳时永不触发。
+   */
+  idleTimeoutMs?: number;
 };
 
 /** 冻结快照 → proto JSON 的 `submitJob`。 */
@@ -146,7 +155,7 @@ export function readArtifactClaim(payload: Record<string, unknown>): RecordingAr
  */
 export function createExecutorDispatcher(options: ExecutorDispatcherOptions): RecordingDispatcher {
   const log = options.logger ?? (() => undefined);
-  const timeoutMs = Math.max(10_000, options.timeoutMs ?? 10 * 60_000);
+  const idleTimeoutMs = Math.max(10_000, options.idleTimeoutMs ?? 10 * 60_000);
   return async input => {
     const requestId = `${input.identity.jobId}:${input.identity.attemptId}`;
       let settled = false;
@@ -156,6 +165,7 @@ export function createExecutorDispatcher(options: ExecutorDispatcherOptions): Re
       | { ok: true; claim: RecordingArtifactClaim }
       | { ok: false; stage: string; code: string; message: string; transient: boolean }
     >(resolve => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (
         outcome:
           | { ok: true; claim: RecordingArtifactClaim }
@@ -163,21 +173,29 @@ export function createExecutorDispatcher(options: ExecutorDispatcherOptions): Re
       ) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         unsubscribe();
         resolve(outcome);
       };
-      const timer = setTimeout(() => {
-        finish({
-          ok: false,
-          stage: "RECORDING_ERROR_STAGE_EXECUTOR_LOST",
-          code: "recording-dispatch-timeout",
-          message: "录音执行器在预算内没有返回成片",
-          transient: true
-        });
-      }, timeoutMs);
+      // 存活 watchdog：任何该 attempt 的消息都证明执行器仍在工作，重置无活动窗口。
+      const armWatchdog = () => {
+        if (settled) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          finish({
+            ok: false,
+            stage: "RECORDING_ERROR_STAGE_EXECUTOR_LOST",
+            code: "recording-executor-unresponsive",
+            message: "录制执行器长时间没有任何活动，判定失联",
+            transient: true
+          });
+        }, idleTimeoutMs);
+        if (typeof timer === "object" && timer !== null && "unref" in timer) (timer as { unref?: () => void }).unref?.();
+      };
+      armWatchdog();
 
       unsubscribe = options.subscribe(payload => {
+        armWatchdog();
         // progress：只认本 attempt。
         const progress = payload.progress as Record<string, unknown> | undefined;
         if (progress && sameAttempt(progress.job as Record<string, unknown> | undefined, input.identity)) {

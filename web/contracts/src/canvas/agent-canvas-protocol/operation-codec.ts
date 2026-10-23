@@ -8,7 +8,6 @@
 import { readOrganizationOperation } from "./organization-codec.js";
 import { isAgentSemanticKind } from "../agent-node-descriptors.js";
 import {
-  AGENT_CANVAS_LIMITS,
   type AgentCreatePlacement,
   type AgentDecodeResult,
   type AgentPlanOperation,
@@ -28,9 +27,8 @@ export function decodeAgentPlanOperations(raw: unknown): AgentDecodeResult<Agent
   if (!Array.isArray(raw) || raw.length === 0) {
     return decodeFail("malformed-request", "operations 必须是非空数组", { field: "operations" });
   }
-  if (raw.length > AGENT_CANVAS_LIMITS.maxPlanOperations) {
-    return decodeFail("limit-exceeded", `operations 超过 ${AGENT_CANVAS_LIMITS.maxPlanOperations} 上限`, { field: "operations" });
-  }
+  // change: 2026-10-22-remove-agent-execution-limits，任务 5.1：不再按计划操作数拒绝；
+  // 大计划完整解码后由同一 planner 校验并一次原子提交。
   const operations: AgentPlanOperation[] = [];
   for (const [operationIndex, entry] of raw.entries()) {
     const decoded = decodeAgentPlanOperation(entry, operationIndex);
@@ -73,9 +71,6 @@ function decodeAgentPlanOperation(raw: unknown, operationIndex: number): AgentDe
       }
       if (raw.prompt !== undefined && typeof raw.prompt !== "string") {
         return decodeFail("malformed-request", "prompt 必须是字符串", { operationIndex, field: "prompt" });
-      }
-      if (typeof raw.prompt === "string" && raw.prompt.length > AGENT_CANVAS_LIMITS.promptMaxChars) {
-        return decodeFail("limit-exceeded", `prompt 超过 ${AGENT_CANVAS_LIMITS.promptMaxChars} 字上限`, { operationIndex, field: "prompt" });
       }
       const placement = readPlacement(raw.placement, { operationIndex, field: "placement" });
       if (!placement.ok) return placement;
@@ -122,9 +117,6 @@ function decodeAgentPlanOperation(raw: unknown, operationIndex: number): AgentDe
       const target = readEntityRef(raw.target, { operationIndex, field: "target" });
       if (!target.ok) return target;
       if (typeof raw.prompt !== "string") return decodeFail("malformed-request", "prompt 必须是字符串", { operationIndex, field: "prompt" });
-      if (raw.prompt.length > AGENT_CANVAS_LIMITS.promptMaxChars) {
-        return decodeFail("limit-exceeded", `prompt 超过 ${AGENT_CANVAS_LIMITS.promptMaxChars} 字上限`, { operationIndex, field: "prompt" });
-      }
       const precondition = raw.if === undefined ? undefined : readPrecondition(raw.if, { operationIndex, field: "if" });
       if (precondition && !precondition.ok) return precondition;
       return {

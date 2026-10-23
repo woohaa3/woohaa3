@@ -255,7 +255,7 @@ describe("转换指令与结构化候选 schema（任务 2.3）", () => {
     if (!badClip.ok) expect(badClip.message).toMatch(/片段 clip-1/);
   });
 
-  it("地面尺寸过大被拒（过大的地面会把主体缩成一点）", () => {
+  it("地面尺寸过大改为取景诊断而不拒绝（任务 7.1）", () => {
     const run = (input: unknown) => validateFilmSetConversionCandidate({
       candidate: input,
       canvas: canvasWithAsset(groundAsset()),
@@ -266,16 +266,15 @@ describe("转换指令与结构化候选 schema（任务 2.3）", () => {
       items: [modelItem("solid"), { id: "floor", kind: "ground", name: "地面", localTransform: unitTransform, size, color: null }],
       clips: null, defaultClipId: null, sceneCamera: null, note: null
     });
-    // 200×200 地面（上游实测写法）被**具体**拒绝，进入有界修复轮。
-    const bad = run(withGround({ width: 200, depth: 200 }));
-    expect(bad.ok).toBe(false);
-    if (!bad.ok) {
-      expect(bad.code).toBe("candidate-invalid");
-      expect(bad.message).toMatch(/地面 floor/);
-      expect(bad.message).toMatch(/过大/);
-    }
-    // 接近主体占地的地面（默认 8）通过。
-    expect(run(withGround({ width: 8, depth: 8 })).ok).toBe(true);
+    // change: 2026-10-22-remove-agent-execution-limits，任务 7.1：原 32 世界单位的固定地面
+    // extent 拒绝已删除。200×200 地面结构合法，完整交付并给出取景诊断。
+    const large = run(withGround({ width: 200, depth: 200 }));
+    expect(large.ok).toBe(true);
+    if (large.ok) expect(large.value.note).toMatch(/地面 floor/);
+    // 接近主体占地的地面（默认 8）通过且没有额外诊断。
+    const small = run(withGround({ width: 8, depth: 8 }));
+    expect(small.ok).toBe(true);
+    if (small.ok) expect(small.value.note ?? "").toBe("");
   });
 });
 

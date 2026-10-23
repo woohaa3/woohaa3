@@ -72,13 +72,17 @@ export function createNativeReferenceRecorder(deps: NativeReferenceRecorderDeps)
 /**
  * 是否值得重试（参考录制按 2s→30s 退避，最多 5 次）。
  *
- * 只有执行器未就绪/丢帧/编码瞬态才算；输入非法、权限、预算类错误等源变化或用户显式重试。
+ * 只有执行器未就绪/失联/丢帧/编码瞬态才算；输入非法、权限、真实资源故障等由源变化或
+ * 用户显式重试处理。
  */
 export function isTransientCode(code: string): boolean {
   return (
     code === "recording-executor-unavailable" ||
     code === "recording-still-running" ||
+    // change: 2026-10-22-remove-agent-execution-limits，任务 7.5：总时长预算 → 执行器失联
+    // watchdog；保留旧码为瞬态以兼容既有回执。
     code === "recording-dispatch-timeout" ||
+    code === "recording-executor-unresponsive" ||
     code === "recording-device-lost" ||
     code === "capture-readiness-timeout" ||
     code === "recording-media-not-ready" ||

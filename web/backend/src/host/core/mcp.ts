@@ -59,12 +59,12 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       if (!owner) return mcp.handle(req, res);
       return withCanvasGroupScope({ ...scope, owner,
         ownsRun: (nodeId, runId) => {
-          const record = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId: (grant as typeof grant & { workId?: string }).workId ?? "" });
+          const record = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId: grant.workId ?? "" });
           const receipt = record?.ok ? record.turn.receipt as { kind?: string; actions?: { nodeId?: string; runId?: string }[] } | undefined : undefined;
           return receipt?.kind === "canvas-group" && receipt.actions?.some(action => action.nodeId === nodeId && action.runId === runId) === true;
         },
         authorize: async permission => (await services.agent?.authorizeCanvas({ principalId: owner, canvasId: scope.canvasId, permission }))?.ok === true,
-        onAction: action => ctx.get("application")?.service.agentConversations().recordGroupAction({ owner, requestId: (grant as typeof grant & { workId?: string }).workId ?? "", action }),
+        onAction: action => ctx.get("application")?.service.agentConversations().recordGroupAction({ owner, requestId: grant.workId ?? "", action }),
         valid: () => Boolean(toolGrants.verify(token)) && canvasGroupEpoch(scope.canvasId, scope.rootGroupId) === scope.scopeEpoch
       }, () => mcp.handle(req, res));
     }));

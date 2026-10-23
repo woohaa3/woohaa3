@@ -6,16 +6,15 @@
  * prelude.ts）；本模块是**宿主编译门**：把 realm 输出重新走一遍 contracts 严格 codec。
  *
  * 为什么在宿主重跑 codec：realm 内记录只是「尽量早发现」，realm 之外的宿主边界必须能独立
- * 判定输入合法，不依赖「prelude 一定正确」。因此即使 prelude 被绕过，未知字段、非法 ref
- * 形式、超限 prompt 仍会在 host 侧被拒绝。
+ * 判定输入合法，不依赖「prelude 一定正确」。因此即使 prelude 被绕过，未知字段与非法 ref
+ * 形式仍会在 host 侧被拒绝。
  *
- * 源码字节、时间、内存、操作数/API 调用预算都在 engine/prelude 落实；本模块不重复判定，
- * 只补齐 codec 与「记录阶段」诊断。
+ * change: 2026-10-22-remove-agent-execution-limits，任务 5.1 / 6.1：源码字节、操作数与 API
+ * 调用预算不再作为应用侧拒绝条件；本模块只补齐 codec 与「记录阶段」诊断，执行时长由可取消的
+ * 隔离执行与真实资源故障表达。
  */
 import {
-  CANVAS_SCRIPT_LIMITS,
   canvasScriptError,
-  canvasScriptSourceBytes,
   decodeAgentPlanOperations,
   type AgentPlanOperation,
   type CanvasScriptError
@@ -25,12 +24,12 @@ import { CanvasScriptEngine, type CanvasScriptExecutionInput } from "./engine.js
 export type RecordScriptInput = {
   source: string;
   nodeKinds: readonly string[];
-  promptMaxChars: number;
   positionAbsMax: number;
-  /** 共享请求 deadline（epoch 毫秒）；双跑共享。 */
-  deadlineMs: number;
-  maxOperations?: number;
+  /** 可选的显式取消/截止时间（epoch 毫秒）；缺省不设应用侧时长上限。 */
+  deadlineMs?: number;
   heapLimitBytes?: number;
+  /** 外部取消信号：用户停止时可从执行器外终止隔离执行。 */
+  signal?: AbortSignal;
 };
 
 export type RecordScriptOutcome =
@@ -46,22 +45,12 @@ export class CanvasScriptRecorder {
   }
 
   async record(input: RecordScriptInput): Promise<RecordScriptOutcome> {
-    // 源码字节在执行/分配前兜底（codec 已判，这里防止非 protocol 调用方绕过）。
-    const bytes = canvasScriptSourceBytes(input.source);
-    if (bytes > CANVAS_SCRIPT_LIMITS.sourceMaxBytes) {
-      return {
-        ok: false,
-        error: canvasScriptError("script-limit-exceeded", "decode", `源码 ${bytes} 字节超过上限`, { field: "source" })
-      };
-    }
-
     const execution: CanvasScriptExecutionInput = {
       source: input.source,
       nodeKinds: input.nodeKinds,
-      promptMaxChars: input.promptMaxChars,
       positionAbsMax: input.positionAbsMax,
-      deadlineMs: input.deadlineMs,
-      ...(input.maxOperations !== undefined ? { maxOperations: input.maxOperations } : {}),
+      ...(input.deadlineMs !== undefined ? { deadlineMs: input.deadlineMs } : {}),
+      ...(input.signal !== undefined ? { signal: input.signal } : {}),
       ...(input.heapLimitBytes !== undefined ? { heapLimitBytes: input.heapLimitBytes } : {})
     };
     const executed = await this.engine.execute(execution);

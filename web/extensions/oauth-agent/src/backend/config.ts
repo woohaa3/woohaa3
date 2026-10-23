@@ -16,8 +16,12 @@
  * - `WOOHAA3_CHATGPT_ALLOW_LOCAL_CALLBACK`：允许 loopback 开发回退（`1`/`true`）。
  * - `WOOHAA3_CHATGPT_CODEX_BIN`：覆盖 SDK 解析的 CLI 入口（测试用；生产留空由 SDK 解析）。
  * - `WOOHAA3_CHATGPT_ISSUER`：OAuth issuer（缺省 `https://auth.openai.com`，测试可覆盖）。
- * - `WOOHAA3_CHATGPT_MAX_CONCURRENCY`：单 owner 并发推理上限（缺省 1）。
- * - `WOOHAA3_CHATGPT_TURN_TIMEOUT_MS`：显式单回合超时（缺省 0，不限时）。
+ *
+ * 已删除的执行额度配置（change: 2026-10-22-remove-agent-execution-limits，任务 2.3 / 3.3）：
+ * `WOOHAA3_CHATGPT_MAX_CONCURRENCY`、`WOOHAA3_CHATGPT_MAX_QUEUE_DEPTH`、
+ * `WOOHAA3_CHATGPT_TURN_TIMEOUT_MS` 与 `WOOHAA3_CHATGPT_MAX_TOOL_CALLS`。它们过去限制并发、
+ * 排队深度、单回合总时长与工具次数；现在即使仍存在于部署环境也不再被读取，不会恢复任何拒绝路径。
+ * 每个回合拥有独立执行上下文与取消身份，停止只来自用户、引擎真实结束/失败与权限失效。
  */
 import path from "node:path";
 import fs from "node:fs";
@@ -36,11 +40,15 @@ export const CHATGPT_ENV = {
   allowLocalCallback: "WOOHAA3_CHATGPT_ALLOW_LOCAL_CALLBACK",
   codexBin: "WOOHAA3_CHATGPT_CODEX_BIN",
   issuer: "WOOHAA3_CHATGPT_ISSUER",
+  appClientId: "WOOHAA3_CHATGPT_APP_CLIENT_ID",
+  mcpUrl: "WOOHAA3_CHATGPT_MCP_URL"
+} as const;
+
+/** 旧执行额度环境变量名（保留常量仅用于迁移说明与测试断言「不再生效」）。 */
+export const CHATGPT_LEGACY_LIMIT_ENV = {
   maxConcurrency: "WOOHAA3_CHATGPT_MAX_CONCURRENCY",
   turnTimeoutMs: "WOOHAA3_CHATGPT_TURN_TIMEOUT_MS",
   maxQueueDepth: "WOOHAA3_CHATGPT_MAX_QUEUE_DEPTH",
-  appClientId: "WOOHAA3_CHATGPT_APP_CLIENT_ID",
-  mcpUrl: "WOOHAA3_CHATGPT_MCP_URL",
   maxToolCalls: "WOOHAA3_CHATGPT_MAX_TOOL_CALLS"
 } as const;
 
@@ -61,18 +69,10 @@ export type ChatGptServiceConfig = {
   codexBin: string | null;
   /** OAuth issuer。 */
   issuer: string;
-  /** 单 owner 并发上限。 */
-  maxConcurrency: number;
-  /** 单回合超时毫秒。 */
-  turnTimeoutMs: number;
-  /** 每 owner 最大排队深度（有界排队）。 */
-  maxQueueDepth: number;
   /** 已注册应用 client id（缺失时使用动态注册）。 */
   appClientId: string | null;
   /** 受控 MCP 工具面 URL（缺省同源 `/mcp/model-canvas`）。 */
   mcpUrl: string;
-  /** 单回合允许的最大 MCP 工具调用次数。 */
-  maxToolCalls: number;
 };
 
 export type ChatGptConfigResult =
@@ -148,20 +148,12 @@ export function resolveChatGptServiceConfig(
       return { ok: false, configured: false, reason: "WOOHAA3_CHATGPT_CALLBACK_ORIGIN 不是合法 URL" };
     }
   }
-  const maxConcurrencyRaw = Number(readEnv(env, CHATGPT_ENV.maxConcurrency) || "1");
-  const maxConcurrency = Number.isInteger(maxConcurrencyRaw) && maxConcurrencyRaw > 0 && maxConcurrencyRaw <= 8 ? maxConcurrencyRaw : 1;
-  const turnTimeoutRaw = Number(readEnv(env, CHATGPT_ENV.turnTimeoutMs) || "0");
-  const turnTimeoutMs = Number.isFinite(turnTimeoutRaw) && turnTimeoutRaw > 0 ? Math.floor(turnTimeoutRaw) : 0;
   const codexBin = readEnv(env, CHATGPT_ENV.codexBin) || null;
   const appClientId = readEnv(env, CHATGPT_ENV.appClientId) || null;
   const issuer = readEnv(env, CHATGPT_ENV.issuer) || "https://auth.openai.com";
   const mcpUrl =
     readEnv(env, CHATGPT_ENV.mcpUrl) ||
     `http://127.0.0.1:${readEnv(env, "BACKEND_PORT") || readEnv(env, "PORT") || "5180"}${addAppBasePath(deployment.basePath, "/mcp/model-canvas")}`;
-  const maxToolCallsRaw = Number(readEnv(env, CHATGPT_ENV.maxToolCalls) || "40");
-  const maxToolCalls = Number.isInteger(maxToolCallsRaw) && maxToolCallsRaw > 0 && maxToolCallsRaw <= 200 ? maxToolCallsRaw : 40;
-  const maxQueueDepthRaw = Number(readEnv(env, CHATGPT_ENV.maxQueueDepth) || "8");
-  const maxQueueDepth = Number.isInteger(maxQueueDepthRaw) && maxQueueDepthRaw > 0 && maxQueueDepthRaw <= 64 ? maxQueueDepthRaw : 8;
   return {
     ok: true,
     config: {
@@ -173,12 +165,8 @@ export function resolveChatGptServiceConfig(
       allowLocalCallback: isTruthy(env[CHATGPT_ENV.allowLocalCallback]),
       codexBin,
       issuer,
-      maxConcurrency,
-      turnTimeoutMs,
-      maxQueueDepth,
       appClientId,
-      mcpUrl,
-      maxToolCalls
+      mcpUrl
     }
   };
 }

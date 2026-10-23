@@ -10,7 +10,6 @@ import {
   CANVAS_SCRIPT_API_SIGNATURES,
   CANVAS_SCRIPT_GUIDE_EXAMPLE,
   CANVAS_SCRIPT_GUIDE_TEXT,
-  CANVAS_SCRIPT_LIMITS,
   canvasScriptApiDescriptor,
   canvasScriptSourceBytes,
   compileAgentPlanWithHash,
@@ -74,20 +73,23 @@ describe("严格 codec（任务 1.1）", () => {
     expect(decodeCanvasScriptRequest(base)).toMatchObject({ ok: false, error: { code: "malformed-request", field: "validationToken" } });
   });
 
-  it("源码 UTF-8 字节预算在执行前拒绝（含多字节字符）", () => {
-    const big = "好".repeat(CANVAS_SCRIPT_LIMITS.sourceMaxBytes); // 每字 3 字节，远超上限
-    expect(canvasScriptSourceBytes(big)).toBeGreaterThan(CANVAS_SCRIPT_LIMITS.sourceMaxBytes);
+  it("不再按源码 UTF-8 字节数拒绝大脚本（任务 5.1）", () => {
+    // change: 2026-10-22-remove-agent-execution-limits：原 128 KiB 源码门禁已删除。
+    const big = "好".repeat(200_000);
+    expect(canvasScriptSourceBytes(big)).toBeGreaterThan(128 * 1024);
     expect(decodeCanvasScriptRequest(
       { canvasId: "c1", requestId: "r1", version: "woohaa-canvas-js-v1", source: big }
-    )).toMatchObject({ ok: false, error: { code: "script-limit-exceeded", field: "source" } });
+    )).toMatchObject({ ok: true });
   });
 });
 
 describe("API 指南（任务 1.2）", () => {
-  it("公开节点和分类 API 签名与 limits，且不把 prompt 描述为作品输出", () => {
+  it("公开节点和分类 API 签名与执行边界，且不把 prompt 描述为作品输出", () => {
     const descriptor = canvasScriptApiDescriptor();
     expect(descriptor.apis.map((entry) => entry.name)).toEqual(["node", "group", "reparent", "ungroup", "setTitle", "layout", "existing", "connect", "move", "setPrompt", "remove"]);
-    expect(descriptor.limits).toBe(CANVAS_SCRIPT_LIMITS);
+    // change: 2026-10-22-remove-agent-execution-limits，任务 6.1：声明隔离/可取消，不声明应用额度。
+    expect(descriptor.execution).toMatchObject({ isolated: true, cancellable: true, applicationQuotas: [] });
+    expect(descriptor.execution).not.toHaveProperty("limits");
     expect(descriptor.version).toBe("woohaa-canvas-js-v1");
     expect(CANVAS_SCRIPT_API_SIGNATURES.every((entry) => entry.signature.length > 0)).toBe(true);
     // 指南明确 prompt 是生成输入，不是作品输出。

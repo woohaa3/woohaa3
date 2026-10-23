@@ -108,17 +108,16 @@ export class AgentCanvasInternalService {
     if (input.sinceRevision > canvas.revision) {
       return { ok: false, code: "malformed-request", message: "sinceRevision 大于当前 revision", currentRevision: canvas.revision };
     }
+    // change: 2026-10-22-remove-agent-execution-limits，任务 4.2：删除增量按节点/边/响应字符
+    // 总量拒绝。同一 published snapshot 的增量完整返回；确实不可恢复时才返回 resetRequired。
     if (currentCanvasGroupScope()) {
-      const delta = buildResetDelta(canvas, input.sinceRevision);
-      if (delta.nodes.length > Math.min(input.limit ?? AGENT_CANVAS_LIMITS.maxGraphNodes, AGENT_CANVAS_LIMITS.maxGraphNodes) || delta.edges.length > AGENT_CANVAS_LIMITS.maxGraphEdges || JSON.stringify(delta).length > AGENT_CANVAS_LIMITS.maxResponseTextChars) return { ok: false as const, code: "limit-exceeded", message: "组增量超过响应预算，请分页读取组图" };
-      return { ok: true as const, delta };
+      return { ok: true as const, delta: buildResetDelta(canvas, input.sinceRevision) };
     }
     this.deps.journal.seed(resolved.canvasId);
     const payload = this.deps.journal.deltaFor(resolved.canvasId, input.sinceRevision, canvas.revision);
-    let delta = payload
+    const delta = payload
       ? buildAgentDelta(canvas, input.sinceRevision, payload)
       : buildResetDelta(canvas, input.sinceRevision);
-    if (delta.nodes.length > Math.min(input.limit ?? AGENT_CANVAS_LIMITS.maxGraphNodes, AGENT_CANVAS_LIMITS.maxGraphNodes) || delta.edges.length > AGENT_CANVAS_LIMITS.maxGraphEdges || JSON.stringify(delta).length > AGENT_CANVAS_LIMITS.maxResponseTextChars) delta = buildResetDelta(canvas, input.sinceRevision);
     return { ok: true, delta };
   }
 
