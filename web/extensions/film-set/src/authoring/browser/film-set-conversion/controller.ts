@@ -266,7 +266,11 @@ export function createFilmSetConversionController(options: FilmSetConversionCont
       if (entry.busy || !input.writable || !options.isWritable()) return;
       // 进行中：不重复推理；结果未知：先查询核对，不自动重跑（design D5）。
       if (!filmSetConversionNeedsSettings(input.nodeType)) {
-        await submit(entryFor(input.nodeId, input.nodeType), {}, entry.identity ? "new" : "reuse");
+        const accepted = await submit(entryFor(input.nodeId, input.nodeType), {}, entry.identity ? "new" : "reuse");
+        const status = entries.get(input.nodeId)?.status;
+        // 3D 复制在本次点击内完成；立即定位结果，避免结果在视野外或重叠时看起来毫无响应。
+        // 图片/视频的后台生成仍不抢焦点；旧 owner 的迟到回执由 submit 拒绝。
+        if (accepted && status?.status === "completed") options.openFilmSet?.(status.targetNodeId);
         return;
       }
       openSettings(input);

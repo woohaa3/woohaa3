@@ -204,12 +204,14 @@ describe("控制器：共享动作与请求身份（任务 3.5/3.6/3.7/3.8）", 
       retry: async ({ requestId }) => { calls.retry += 1; return { ok: true, receipt: { ok: true, requestId, targetNodeId: "t", commandId: "cmd", duplicate: false }, status: { status: "completed", requestId, sourceNodeId: "s", targetNodeId: "t", commandId: "cmd" } }; }
     };
     const preferences = createFilmSetConversionPreferenceStore({ storage: null });
+    const openFilmSet = vi.fn();
     const controller = createFilmSetConversionController({
       canvasId: "c1", client, preferences, getDataScopeId: options.getDataScopeId,
+      openFilmSet,
       getCanvas: options.getCanvas ?? (() => null),
       isWritable: () => options.writable ?? true
     });
-    return { controller, submitted, calls, preferences, client };
+    return { controller, submitted, calls, preferences, client, openFilmSet };
   }
 
   const supported: FilmSetConversionModelCandidate = {
@@ -300,6 +302,17 @@ describe("控制器：共享动作与请求身份（任务 3.5/3.6/3.7/3.8）", 
     expect(h.calls.models).toBe(0);
     expect(requestSettings).not.toHaveBeenCalled();
     expect(h.controller.getEntry("m", "model3d").status?.status).toBe("completed");
+    const status = h.controller.getEntry("m", "model3d").status;
+    expect(status?.status === "completed" && status.targetNodeId).toBeTruthy();
+    expect(h.openFilmSet).toHaveBeenCalledTimes(1);
+    expect(h.openFilmSet).toHaveBeenCalledWith(status?.status === "completed" ? status.targetNodeId : "");
+  });
+
+  it("3D 创建失败时不定位一个不存在的片场", async () => {
+    const h = setup({ submitError: "模型内容不完整" });
+    await h.controller.activate({ nodeId: "m", nodeType: "model3d", writable: true });
+    expect(h.openFilmSet).not.toHaveBeenCalled();
+    expect(h.controller.getEntry("m", "model3d").error).toBe("模型内容不完整");
   });
 
   it("Escape 关闭草稿不改已保存设置", () => {
