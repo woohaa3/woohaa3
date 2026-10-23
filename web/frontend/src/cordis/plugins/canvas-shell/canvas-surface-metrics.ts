@@ -11,8 +11,11 @@ import type { Viewport } from "./interaction-core.js";
 export type CanvasBounds = { left: number; top: number; width: number; height: number };
 
 export type SurfaceMetrics = {
-  /** 可用画布尺寸（CSS 像素）+ DPR；见 `interaction-controller.ts` 的包含块说明。 */
-  surfaceSize: () => { width: number; height: number; pixelRatio: number };
+  /**
+   * 可用画布尺寸（CSS 像素）+ DPR，以及相对视口的原点。
+   * 见 `interaction-controller.ts` 的包含块说明。桌面顶栏把包含块下移时，原点不是 (0, 0)。
+   */
+  surfaceSize: () => { width: number; height: number; pixelRatio: number; originX: number; originY: number };
   /**
    * 读取 canvas 外框（一次同步布局读取）。同一事件可复用它传给 `pointerWorld` /
    * `clientToWorld` / `worldToClient`，避免重复 `getBoundingClientRect`
@@ -46,7 +49,14 @@ export function createSurfaceMetrics(input: {
     const width = rect.width || host.clientWidth || canvas.clientWidth || 1;
     const height = rect.height || host.clientHeight || canvas.clientHeight || 1;
     const pixelRatio = Math.min(3, target.devicePixelRatio || 1);
-    return { width, height, pixelRatio };
+    // 无布局时的回退尺寸没有可对齐的原点。
+    return {
+      width,
+      height,
+      pixelRatio,
+      originX: rect.width ? rect.left : 0,
+      originY: rect.height ? rect.top : 0,
+    };
   };
   const readBounds = (): CanvasBounds => {
     const rect = canvas.getBoundingClientRect();

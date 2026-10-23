@@ -34,6 +34,12 @@ pub(crate) struct SurfaceSize {
     pub(crate) content_right: f32,
     #[serde(default)]
     pub(crate) content_rect: Option<FocusContentRect>,
+    /// 表面相对窗口客户区左上角的偏移（CSS 像素）。桌面顶栏把画布往下推时非 0。
+    /// 缺省为 0：表面从窗口原点铺开，与浏览器画布一致。
+    #[serde(default)]
+    pub(crate) origin_x: f32,
+    #[serde(default)]
+    pub(crate) origin_y: f32,
 }
 
 #[derive(Clone, Deserialize)]
