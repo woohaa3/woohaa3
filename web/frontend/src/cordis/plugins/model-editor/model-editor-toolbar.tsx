@@ -44,6 +44,7 @@ export type ModelEditorToolbarProps = {
   /** 添加一个镜头（默认 auto-fit pose 由宿主按当前模型 AABB 计算）。 */
   onAddCamera: () => void;
   cameraCollectionMutable?: boolean;
+  captureEnabled?: boolean;
   /** 嵌入拍摄构图区域时，只展示视角参数和截图，省略镜头集合及生成入口。 */
   presentation?: "composition";
   /** 截图当前选中镜头。 */
@@ -216,7 +217,7 @@ export function ModelEditorToolbar(props: ModelEditorToolbarProps) {
           </div>
         ) : null}
 
-        {selected ? (
+        {selected && props.captureEnabled !== false ? (
           <div className="model-editor__capture">
             <Button
               className="model-editor__capture-button"

@@ -1,5 +1,19 @@
 use super::*;
 
+#[test]
+fn ordinary_preview_refresh_preserves_shot_camera_illumination() {
+    let mut world = World::new();
+    let light = world.spawn((DirectionalLight::default(), RenderLayers::from_layers(&[0, 7, 40, 41]))).id();
+    for layers in [RenderLayers::from_layers(&[0, 7, 8]), RenderLayers::from_layers(&[0, 7, 9])] {
+        merge_scene_light_layers(&mut world, &layers);
+        let actual = world.get::<RenderLayers>(light).unwrap();
+        for layer in [0, 7, 40, 41] {
+            assert!(actual.intersects(&RenderLayers::layer(layer)));
+        }
+        assert!(actual.intersects(&layers));
+    }
+}
+
 /// 单张模型卡片的 app；模型根由调用方显式推进（生产里由 `scene3d::sync_models` 完成）。
 fn model_card_app() -> App {
     let nodes = serde_json::from_str(

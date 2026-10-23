@@ -13,7 +13,7 @@ import {
   type Woohaa3CanvasJsonObject
 } from "../domain/index.js";
 import { readFilmSetContent, filmSetAssetReferences } from "../film-set-content.js";
-import { isSupportedShotReferenceEdgeData } from "../domain/core/shot-reference.js";
+import { isShotReferenceEdgeKind, isSupportedShotReferenceEdgeData } from "../domain/core/shot-reference.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
 import { validateNoGroupEndpoint } from "./node-commands.js";
 import { workingNodeDataReader } from "./working-state.js";
@@ -44,7 +44,7 @@ export function addEdge(
       `${edge.source} -> ${edge.target} 不是合法连线（端点相同、重复连线或不满足 handle 规则）`
     );
   }
-  const generated = createWoohaa3CanvasEdge(candidate, work.nodes);
+  const generated = createWoohaa3CanvasEdge(candidate, work.nodes, workingNodeDataReader(work));
   if (!generated) return reject("invalid-connection", `无法为 ${edge.source} -> ${edge.target} 创建边`);
   // 稳定 edgeId 必须由客户端提供（design D7 / spec「创建命令缺少稳定实体 ID」）。
   if (!edge.id) {
@@ -58,7 +58,7 @@ export function addEdge(
     ? { ...generated.data, ...edge.data }
     : generated.data;
   // 镜头参考边的结构版本门禁（任务 8.1）：拒绝本客户端不理解的更高版本，不猜测、不静默降级。
-  if (data.kind === "shot-reference" && !isSupportedShotReferenceEdgeData(data as Record<string, unknown>)) {
+  if (isShotReferenceEdgeKind(data.kind) && (!isSupportedShotReferenceEdgeData(data as Record<string, unknown>) || data.kind !== generated.data.kind)) {
     return reject(
       "unsupported-shot-reference",
       `镜头参考结构版本不受支持（${String((edge.data as { schemaVersion?: unknown } | undefined)?.schemaVersion)}）`

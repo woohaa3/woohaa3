@@ -87,7 +87,7 @@ export function resolveBlockingReasons(input: ResolveBlockingReasonsInput): stri
         nodeId,
         bindings: capability.bindings
       });
-      reasons.push(...resolution.blockingReasons);
+      reasons.push(...resolution.blockingReasons.filter(reason => reason !== "等待镜头参考图片准备完成"));
       // 视频生成模式约束（edit_video / first_last_frame）：与 Canvas Service 共用同一规则，
       // 面板在 provider 调用前就给出稳定原因，而不是静默提交注定失败的输入。
       const mode = readGenerationMode(input.panelParameters);

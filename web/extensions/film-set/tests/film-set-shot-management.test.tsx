@@ -84,7 +84,7 @@ function render(animations: FilmSetAnimations, options: { writable?: boolean } =
       projectCanvas: (value: ServerCanvas | null) => value
     },
     filmSetPlayback: playback,
-    modelWorkspace: { session: { cameras: () => [] } },
+    modelWorkspace: { session: { cameras: () => [], subscribe: () => () => {}, getState: () => null } },
     canvasSession: {
       submitCommands: (commands: typeof submitted) => { submitted.push(...commands); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }
     }
@@ -102,7 +102,7 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
   it("空集合显示创建入口、禁用预览，且不自动创建镜头", () => {
     const h = render({ schemaVersion: 3, defaultClipId: null, clips: [] });
     expect(document.querySelector(".film-set-animation-controls")?.textContent).toContain("还没有拍摄镜头");
-    expect(h.button("动画预览")?.disabled).toBe(true);
+    expect(h.button("动画预览")).toBeUndefined();
     act(() => h.button("新建拍摄镜头")!.click());
     expect(h.button("新建静态镜头")?.disabled).toBe(false);
     expect(h.button("新建动态镜头")?.disabled).toBe(false);
@@ -165,7 +165,7 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
     for (const name of ["复制", "删除", "设为默认", "转为动态镜头"]) {
       expect(h.button(name)?.disabled).toBe(true);
     }
-    expect(h.button("动画预览")?.disabled).toBe(false);
+    expect(h.button("动画预览")).toBeUndefined();
     expect(h.submitted).toHaveLength(0);
   });
 });
@@ -173,6 +173,8 @@ describe("拍摄镜头管理工作区（任务 6.5）", () => {
 
 it.each(["短名", "audit-fixes-20261019-这是一个合法的长镜头名称", "无空格镜头名称".repeat(8)])("long shot label %s preserves full submitted name and duration", async name => {
   const h=render({schemaVersion:3,defaultClipId:"long",clips:[dynamicClip("long",name,"")]});
+  act(() => h.button("拍摄镜头操作")!.click());
+  act(() => h.button("重命名")!.click());
   const label=[...document.querySelectorAll("label")].find(label=>label.textContent?.startsWith("名称"))!;
   const input=label.querySelector("input")!;
   expect(input.value).toBe(name);

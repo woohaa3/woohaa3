@@ -5,7 +5,7 @@
  * 组合资产注册表（片场/炉体消费）与模型编辑会话类：宿主实际实现引用，保证 class/对象同一实例。
  * 首期只保留扩展真实使用的能力，不做 barrel 展开。
  */
-import { AssistantComposer, AssistantToolbar, AssistantDeliverySelection, agentDirectory, AssistantModelSelector, agentModelSelection, agentDirectoryModels, assistantInputController, assistantInputKey } from "../../extension-api/assistant-execution.js";
+import { AssistantComposer, AssistantDeliverySelection, AssistantToolbar, agentDirectory, AssistantModelSelector, agentModelSelection, agentDirectoryModels, assistantInputController, assistantInputKey } from "../../extension-api/assistant-execution.js";
 import { CompositeAssetRegistry } from "../../extension-api/composite-assets.js";
 import { ModelEditorSession } from "../../extension-api/model-workspace-session.js";
 import type { ExtensionSdkGroupModule } from "./sdk-groups.js";
@@ -14,8 +14,8 @@ export const group = "authoring" as const;
 
 export const namedExports = {
   AssistantComposer,
-  AssistantToolbar,
   AssistantDeliverySelection,
+  AssistantToolbar,
   agentDirectory,
   AssistantModelSelector,
   agentModelSelection,

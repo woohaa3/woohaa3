@@ -2,7 +2,7 @@ import { createHighEntropyId } from "./node-factory";
 import type { Woohaa3CanvasConnection, Woohaa3CanvasEdge, Woohaa3CanvasNode } from "./canvas-runtime";
 import { isPureModelNodeType } from "./input-role";
 import { isShotPreviewNodeType } from "./shot-preview-node";
-import { decideShotReferenceConnection, SHOT_REFERENCE_SCHEMA_VERSION } from "./shot-reference";
+import { decideShotReferenceConnection, resolveShotReferenceSource, isShotReferenceEdgeKind, SHOT_REFERENCE_SCHEMA_VERSION } from "./shot-reference";
 
 export type Woohaa3CanvasConnectionNodeDataReader = { get: (nodeId: string) => Record<string, unknown> | undefined };
 
@@ -19,7 +19,7 @@ export type Woohaa3CanvasConnectionEdge = {
   targetHandle?: string | null;
 };
 
-export type Woohaa3CanvasEdgeKind = "input" | "output" | "dependency" | "reference" | "shot-reference";
+export type Woohaa3CanvasEdgeKind = "input" | "output" | "dependency" | "reference" | "shot-reference" | "shot-image-reference";
 
 export function isValidWoohaa3CanvasConnection(
   connection: Woohaa3CanvasConnectionLike,
@@ -100,14 +100,16 @@ export function shotReferenceDecision(
 export function createWoohaa3CanvasEdge(
   connection: Woohaa3CanvasConnectionLike,
   nodes: Woohaa3CanvasNode[],
-  _data?: Woohaa3CanvasConnectionNodeDataReader
+  data?: Woohaa3CanvasConnectionNodeDataReader
 ): Woohaa3CanvasEdge | null {
   if (!connection.source || !connection.target) return null;
   const sourceNode = nodes.find((node) => node.id === connection.source);
   const targetNode = nodes.find((node) => node.id === connection.target);
   if (!sourceNode || !targetNode) return null;
 
-  const kind = resolveEdgeKind(sourceNode, targetNode);
+  const source = isShotPreviewNodeType(sourceNode.type)
+    ? resolveShotReferenceSource(sourceNode.id, nodeDataOf(sourceNode.id, nodes, data), id => nodeDataOf(id, nodes, data)) : null;
+  const kind = source?.kind === "static" ? "shot-image-reference" : resolveEdgeKind(sourceNode, targetNode);
   return {
     id: createHighEntropyId(`edge-${connection.source}-${connection.target}`),
     source: connection.source,
@@ -115,7 +117,7 @@ export function createWoohaa3CanvasEdge(
     sourceHandle: connection.sourceHandle ?? null,
     targetHandle: connection.targetHandle ?? null,
     // 镜头参考边携带结构版本作为能力门禁（任务 8.1）；其他边保持原有 `{ kind }` 形状。
-    data: kind === "shot-reference"
+    data: isShotReferenceEdgeKind(kind)
       ? { kind, schemaVersion: SHOT_REFERENCE_SCHEMA_VERSION }
       : { kind }
   };

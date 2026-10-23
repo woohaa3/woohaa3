@@ -9,7 +9,7 @@
 import {
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
-  SHOT_REFERENCE_ROLE,
+  isShotReferenceRole, providerReferenceRole,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -18,7 +18,7 @@ import {
   type ServerCanvas,
   type StoredAsset } from "@woohaa3/contracts";
 import type { CanvasTaskInput } from "@woohaa3/contracts";
-import { SHOT_REFERENCE_REFERENCE_ROLE, resolveShotReferenceAsset } from "./shot-reference-resolution.js";
+import { resolveShotReferenceAsset } from "./shot-reference-resolution.js";
 
 export type ResolvedReference = {
   slotId: string;
@@ -35,6 +35,7 @@ export type InputResolution = {
 };
 
 export type ResolveNodeInputsOptions = {
+  frozenShotImages?: import("@woohaa3/contracts").FrozenShotImageReference[];
   canvas: ServerCanvas;
   nodeId: string;
   /** 模型参考输入 bindings（由 catalog 模型解析）。 */
@@ -73,8 +74,9 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
   for (const mapping of mappings) {
     // 文字角色是 prompt 来源，不是媒体参考资产。它的内容由 prompt-resolution 解析。
     if (mapping.role === "text_prompt") continue;
-    if (mapping.role === SHOT_REFERENCE_ROLE) {
-      resolveShotReferenceMapping({ canvas, nodeData, mapping, bindings, counts, references, blockingReasons });
+    if (isShotReferenceRole(mapping.role)) {
+      resolveShotReferenceMapping({ canvas, nodeData, mapping, bindings, counts, references, blockingReasons,
+        frozen: options.frozenShotImages?.find(ref => ref.slotId === mapping.slotId && ref.sourceNodeId === mapping.sourceNodeId) });
       continue;
     }
     const explicit = (mapping.sourceAssetIds ?? []).filter(
@@ -139,6 +141,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
 }
 
 function resolveShotReferenceMapping(input: {
+  frozen?: import("@woohaa3/contracts").FrozenShotImageReference;
   canvas: ServerCanvas;
   nodeData: Record<string, CanvasNodeData | undefined>;
   mapping: CanvasNodeInputMapping;
@@ -148,7 +151,8 @@ function resolveShotReferenceMapping(input: {
   blockingReasons: string[];
 }): void {
   const { canvas, nodeData, mapping, bindings, counts, references, blockingReasons } = input;
-  const resolution = resolveShotReferenceAsset({ canvas, nodeData, mapping });
+  const role = providerReferenceRole(mapping.role);
+  const resolution = resolveShotReferenceAsset({ canvas, nodeData, mapping, ...(input.frozen ? { frozen: input.frozen } : {}) });
   if (!resolution.ok) {
     blockingReasons.push(resolution.reason);
     return;
@@ -163,12 +167,12 @@ function resolveShotReferenceMapping(input: {
   const mediaKind = asset.mediaKind as CanvasReferenceMediaKind;
   const binding = bindings.find(
     (entry) =>
-      entry.roles.includes(SHOT_REFERENCE_REFERENCE_ROLE) &&
+      entry.roles.includes(role) &&
       entry.mediaKinds.includes(mediaKind) &&
       entry.mediaTypes.includes(mediaType)
   );
   if (!binding) {
-    blockingReasons.push(`所选模型不接受视频参考角色「${SHOT_REFERENCE_REFERENCE_ROLE}」或类型「${mediaType}」`);
+    blockingReasons.push(`所选模型不接受${role === "reference_image" ? "图片" : "视频"}参考角色「${role}」或类型「${mediaType}」`);
     return;
   }
   const used = (counts.get(binding.field) ?? 0) + 1;
@@ -179,12 +183,12 @@ function resolveShotReferenceMapping(input: {
   counts.set(binding.field, used);
   references.push({
     slotId: mapping.slotId ?? "",
-    role: SHOT_REFERENCE_REFERENCE_ROLE,
+    role,
     sortKey: mapping.sortKey,
     sourceNodeId: mapping.sourceNodeId,
     input: {
       assetId: asset.id,
-      role: SHOT_REFERENCE_REFERENCE_ROLE,
+      role,
       storageKey,
       mediaType,
       mediaKind
@@ -216,6 +220,7 @@ function collectInputMappings(
           sourceNode: nodeById.get(sourceNodeId) ?? { id: sourceNodeId, type: "custom" },
           targetNode: { id: nodeId, type: nodeById.get(nodeId)?.type ?? "custom" },
           sourceData: nodeData[sourceNodeId],
+          readNodeData: id => nodeData[id],
           targetData: nodeData[nodeId],
           existingRoles: declared.map((mapping) => mapping.role)
         }),

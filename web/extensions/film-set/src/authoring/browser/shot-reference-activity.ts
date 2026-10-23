@@ -105,7 +105,8 @@ export class ShotReferenceActivity {
       this.publish(job, "queued");
     }
     for (const record of [...this.jobs.values()]) {
-      if (record.status !== "queued" || dirtyIds.has(record.id) || this.running.has(record.id)) continue;
+      if ((record.status !== "queued" && record.status !== "running") || dirtyIds.has(record.id)) continue;
+      this.running.delete(record.id);
       const next: BackgroundActivityJob = { ...record, status: "cancelled", updatedAt: this.now() };
       this.jobs.set(next.id, next);
       this.deps.emit(next);

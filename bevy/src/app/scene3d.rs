@@ -81,7 +81,8 @@ pub(super) fn sync_models(
     let models = &mut *visuals;
     // 按需 spawn 集合（C2.1–C2.3）：descriptor 注册独立于 ECS/GPU 需求。
     // 截图（含等待 GPU ready/readback 期间）作为强制高质量消费者 pin 其节点（B1.6）。
-    let pins = capture.pins(&scene.0);
+    let mut pins = capture.pins(&scene.0);
+    crate::shot_node_preview::pin_visible_owners(&scene.0, &mut pins);
     let now = time.elapsed_secs_f64();
     let demand_changed = model3d::demand::update(models, &scene.0, rig.focus_node.as_deref(), &pins, now);
     if flags.changed || demand_changed {

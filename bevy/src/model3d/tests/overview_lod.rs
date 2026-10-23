@@ -97,6 +97,31 @@ fn settle(world: &mut World, scene: &Scene, now: &mut f64, expected: Quality) {
 }
 
 #[test]
+#[cfg(feature = "canvas-core")]
+fn visible_shot_card_promotes_overview_source_to_capture_quality() {
+    let (mut scene, resources) = fixture(mixed_snapshot("shot-source", 3, 3), 0.05, 1.0);
+    scene.nodes.push(serde_json::from_value(serde_json::json!({
+        "id":"shot","type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":167,
+        "shotPreview":{"filmSetNodeId":"film","clipId":"clip","kind":"static","name":"shot",
+            "aspect":1.7777778,"duration":0,"state":"ready",
+            "coverCamera":{"azimuth":0,"elevation":0.5,"distance":200,"focusOffset":[0,0,0]}}
+    })).unwrap());
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let mut now = 1.0;
+    settle(&mut world, &scene, &mut now, Quality::Low);
+    let mut pins = HashSet::new();
+    crate::shot_node_preview::pin_visible_owners(&scene, &mut pins);
+    assert!(pins.contains("film"));
+    for _ in 0..64 {
+        now += 0.1;
+        quality(&mut world, &scene, None, now, &pins);
+        if world.resource::<ModelVisuals>().quality("film") == Quality::High { break; }
+    }
+    assert_eq!(world.resource::<ModelVisuals>().quality("film"), Quality::High);
+}
+
+#[test]
 fn declared_overview_root_publishes_low_and_high_by_viewport_fraction() {
     // 小投影使用 Low，大投影先 Medium，停留后升 High。
     let (mut scene, resources) = fixture(mixed_snapshot("overview", 3, 3), 0.05, 1.0);

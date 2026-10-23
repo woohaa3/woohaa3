@@ -17,7 +17,7 @@ import { ShotReferenceRecordingQueue } from "../src/authoring/browser/shot-refer
 import { observeFilmSets, shotReferenceJobForClip } from "../src/authoring/browser/shot-reference-observation.js";
 import { ShotReferenceRecordingScheduler } from "../src/authoring/browser/shot-reference-recording-scheduler.js";
 
-function filmSetCanvas(options: { motionScript?: string; duration?: number; extraClips?: number; canvasId?: string } = {}): ServerCanvas {
+function filmSetCanvas(options: { motionScript?: string; duration?: number; extraClips?: number; canvasId?: string; mixed?: boolean } = {}): ServerCanvas {
   const snapshot = createFilmSetSnapshot({
     title: "片场",
     model: { modelScript: `scene.box({id:"body"});`, modelScriptVersion: "woohaa-model-js-v2" },
@@ -41,6 +41,11 @@ function filmSetCanvas(options: { motionScript?: string; duration?: number; extr
       ...structuredClone(first), id: `clip-${index + 2}`, name: `镜头 ${index + 2}`
     }))];
     (canvas.nodeData.film as { filmSetAnimations: { clips: unknown[] } }).filmSetAnimations.clips = clips;
+  }
+  if (options.mixed) {
+    const data = canvas.nodeData.film as unknown as { filmSetAnimations: { clips: Array<Record<string, unknown>> } };
+    const first = structuredClone(data.filmSetAnimations.clips[0]!);
+    data.filmSetAnimations.clips.push({ ...first, id: "static-1", kind: "static", name: "静态", timeline: { duration: 0, loop: false }, bindings: [], cameraMotion: { ...(first.cameraMotion as object), motionScript: "" } });
   }
   return canvas;
 }
@@ -150,11 +155,13 @@ describe("observeFilmSets（内容身份驱动，任务 8.3）", () => {
   });
 
   it("下游补排：动态镜头返回当前版本 job，静态/缺失返回 null", () => {
-    const canvas = filmSetCanvas();
+    const canvas = filmSetCanvas({ mixed: true });
     const job = shotReferenceJobForClip("c1", canvas, "film", "clip-1");
     expect(job).toMatchObject({ canvasId: "c1", filmSetNodeId: "film", clipId: "clip-1" });
     expect(job!.contentIdentity).toBeTruthy();
     expect(shotReferenceJobForClip("c1", canvas, "film", "missing")).toBeNull();
+    expect(shotReferenceJobForClip("c1", canvas, "film", "static-1")).toBeNull();
+    expect(observeFilmSets(canvas, null)[0]!.clips.find(clip => clip.clipId === "static-1")?.contentIdentity).toBeNull();
     expect(shotReferenceJobForClip("c1", null, "film", "clip-1")).toBeNull();
   });
 });
@@ -243,14 +250,37 @@ describe("ShotReferenceRecordingScheduler（串行执行与触发，任务 8.3�
 
   it("下游请求补排动态镜头可录、静态镜头不排", async () => {
     const recorded: string[] = [];
-    const { scheduler } = makeScheduler({ canvas: filmSetCanvas(), recorder: async (job) => { recorded.push(job.clipId); return { ok: true }; } });
+    const { scheduler } = makeScheduler({ canvas: filmSetCanvas({ mixed: true }), recorder: async (job) => { recorded.push(job.clipId); return { ok: true }; } });
     scheduler.requestRecord("film", "clip-1");
     await Promise.resolve();
     await Promise.resolve();
     expect(recorded).toEqual(["clip-1"]);
-    scheduler.requestRecord("film", "missing");
+    scheduler.requestRecord("film", "static-1");
     await Promise.resolve();
     expect(recorded).toEqual(["clip-1"]);
+  });
+
+  it("mixed fixture exits focus without static jobs; converting the active dynamic aborts and drops late success", async () => {
+    let canvas = filmSetCanvas({ mixed: true });
+    let focused: string | null = "film", signal: AbortSignal | undefined;
+    let finish!: (result: { ok: true }) => void;
+    const recorded: string[] = [];
+    const scheduler = new ShotReferenceRecordingScheduler({ canvasId: () => "c1", canvas: () => canvas,
+      focusedFilmSetId: () => focused, recorder: (job, abort) => { recorded.push(job.clipId); signal = abort; return new Promise(resolve => { finish = resolve; }); } });
+    scheduler.reconcile(); expect(recorded).toEqual([]);
+    expect(scheduler.snapshot().dirty.map(job => job.clipId)).toEqual(["clip-1"]);
+    focused = null; scheduler.reconcile(); expect(recorded).toEqual(["clip-1"]);
+    const original = scheduler.snapshot().dirty[0]!;
+    canvas = structuredClone(canvas);
+    const collection = (canvas.nodeData.film as unknown as { filmSetAnimations: { clips: Array<Record<string, unknown>> } }).filmSetAnimations;
+    const still = collection.clips.find(clip => clip.id === "static-1")!;
+    collection.clips[0] = { ...structuredClone(still), id: "clip-1" };
+    scheduler.reconcile(); expect(signal?.aborted).toBe(true);
+    finish({ ok: true }); await Promise.resolve(); await Promise.resolve();
+    expect(scheduler.isRecorded(original)).toBe(false);
+    expect(scheduler.snapshot().dirty).toEqual([]);
+    scheduler.requestRecord("film", "static-1"); expect(recorded).toEqual(["clip-1"]);
+    scheduler.dispose();
   });
 
   it("无画布时不排任何任务", async () => {

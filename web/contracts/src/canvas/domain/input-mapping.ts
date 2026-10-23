@@ -47,6 +47,7 @@ export function reconcileInputMappings(
           sourceNode: sourceNode ?? { id: sourceNodeId, type: "custom" },
           targetNode: nodesById.get(nodeId) ?? { id: nodeId, type: "custom" },
           sourceData,
+          readNodeData: id => nodeData[id],
           targetData: data,
           existingRoles: nextMappings.map((mapping) => mapping.role),
         }),

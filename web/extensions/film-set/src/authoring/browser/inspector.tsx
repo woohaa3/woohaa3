@@ -20,6 +20,7 @@ import { FilmSetObjectBinding } from "./film-set-object-binding.js";
 import { FilmSetAnimationPlayer } from "./film-set-animation-player.js";
 import { FilmSetAnimationControls } from "./film-set-animation-controls.js";
 import { FilmSetAdaptationConfirm } from "./film-set-adaptation.js";
+import type { ShotImageReferences } from "./shot-image-reference.js";
 
 /** 读取聚焦节点是否为片场业务（composite-asset + extensionId="film-set"）。 */
 function focusedIsFilmSet(ctx: Context, nodeId: string): boolean {
@@ -42,7 +43,8 @@ export function FilmSetInspector({
   objectAction,
   captureSession,
   writable,
-  canvasId
+  canvasId,
+  images
 }: {
   ctx: Context;
   session: ModelEditorSession;
@@ -51,6 +53,7 @@ export function FilmSetInspector({
   captureSession: ModelShotCaptureSession;
   writable: boolean;
   canvasId?: string;
+  images?: ShotImageReferences;
 }) {
   useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
   useSyncExternalStore(ctx.compositeAssets.subscribe, ctx.compositeAssets.getRevision, ctx.compositeAssets.getRevision);
@@ -130,6 +133,7 @@ export function FilmSetInspector({
 
   const cameraPanel = ctx.modelWorkspace.renderCameraPanel({
     presentation: "composition", cameraCollectionMutable: false,
+    captureEnabled: activeClip?.kind === "dynamic",
     writable: writable && !readOnly, readOnly,
     ...(canvasId ? { canvasId } : {}), onActivateCamera: () => objectSession.select(null)
   });
@@ -152,17 +156,18 @@ export function FilmSetInspector({
     <div className="model-editor-dock" data-inspector="true" data-history-open={historyOpen ? "true" : undefined} data-film-set="true">
       {header}
       <div className="model-inspector-scroll">
-      <FilmSetAnimationControls key={nodeId} ctx={ctx} nodeId={nodeId} writable={writable && !readOnly} cameraId={selectedCameraId} composition={cameraPanel}
-        compositionOpen={compositionOpen} onCompositionOpenChange={changeComposition} />
       <FilmSetObjectToolbar
         session={objectSession} writable={writable && rendererReady} readOnly={readOnly}
         nodeId={nodeId} onDelete={() => objectSession.deleteSelected()} action={objectAction}
         onExit={() => void ctx.canvasNavigation.requestExitNodeFocus()}
-      />
+      >
       {selectedItem && activeClip ? <>
         <FilmSetObjectBinding key={`${activeClip.id}:${selectedItem.id}`} ctx={ctx} nodeId={nodeId} item={selectedItem} clip={activeClip} collection={collection!} writable={writable && !readOnly} />
         <FilmSetAdaptationConfirm ctx={ctx} nodeId={nodeId} itemId={selectedItem.id} clipId={activeClip.id} writable={writable && !readOnly} />
       </> : null}
+      </FilmSetObjectToolbar>
+      <FilmSetAnimationControls key={nodeId} ctx={ctx} nodeId={nodeId} writable={writable && !readOnly} cameraId={selectedCameraId} composition={cameraPanel}
+        images={images} compositionOpen={compositionOpen} onCompositionOpenChange={changeComposition} />
       </div>
     </div>
     {hasGenerate ? <FilmSetGenerateDock key={nodeId}
@@ -174,7 +179,7 @@ export function FilmSetInspector({
       targetItemId={targetItemId}
       onTargetChange={itemId => setWholeShotForSelection(itemId ? null : selectionKey)}
     >{renderGenerate()}</FilmSetGenerateDock> : null}
-    {playback.preview ? <FilmSetAnimationPlayer ctx={ctx} captureSession={captureSession} writable={writable && !readOnly} /> : null}
+    {playback.preview && activeClip?.kind === "dynamic" ? <FilmSetAnimationPlayer ctx={ctx} captureSession={captureSession} writable={writable && !readOnly} /> : null}
     {!playback.preview && compositionOpen ? ctx.modelWorkspace.renderCameraPreview(readOnly) : null}
     </>
   );

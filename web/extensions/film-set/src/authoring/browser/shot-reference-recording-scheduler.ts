@@ -20,10 +20,10 @@ import { ShotReferenceRecordingQueue, type ShotReferenceRecordingJob } from "./s
 import { observeFilmSets, shotReferenceJobForClip, type ShotReferenceCanvasLike } from "./shot-reference-observation.js";
 
 /** 录制结果：成功表示该版本已编码、上传并校验；失败给出可读原因，可重试。 */
-export type ShotReferenceRecordResult = { ok: true } | { ok: false; error: string };
+export type ShotReferenceRecordResult = { ok: true } | { ok: false; error: string; transient?: boolean };
 
 /** 录制能力（任务 8.4 提供真实实现）。 */
-export type ShotReferenceRecorder = (job: ShotReferenceRecordingJob) => Promise<ShotReferenceRecordResult>;
+export type ShotReferenceRecorder = (job: ShotReferenceRecordingJob, signal?: AbortSignal) => Promise<ShotReferenceRecordResult>;
 
 export type ShotReferenceSchedulerDeps = {
   /** 当前画布 id；无画布返回空串（此时不排任何任务）。 */
@@ -76,6 +76,8 @@ const DEFAULT_RETRY_MAX_MS = 30_000;
 export class ShotReferenceRecordingScheduler {
   private readonly queue = new ShotReferenceRecordingQueue();
   private pumping = false;
+  private disposed = false;
+  private active: { job: ShotReferenceRecordingJob; controller: AbortController } | null = null;
   private lastError: string | null = null;
   private retryAttempt = 0;
   private retryHandle: ShotReferenceRetryHandle | null = null;
@@ -84,8 +86,13 @@ export class ShotReferenceRecordingScheduler {
 
   /** 用当前画布与聚焦重算 dirty 集，并在允许时启动串行录制。外部触发，重置重试预算。 */
   reconcile(): void {
+    if (this.disposed) return;
     this.resetRetry();
     const canvasId = this.deps.canvasId();
+    if (this.active) {
+      const current = shotReferenceJobForClip(canvasId, this.deps.canvas(), this.active.job.filmSetNodeId, this.active.job.clipId);
+      if (!current || current.contentIdentity !== this.active.job.contentIdentity || canvasId !== this.active.job.canvasId) this.active.controller.abort();
+    }
     if (!canvasId) {
       this.queue.observe("", []);
       this.notify();
@@ -144,6 +151,8 @@ export class ShotReferenceRecordingScheduler {
 
   /** 接线层释放：取消尚未触发的自动重试。 */
   dispose(): void {
+    this.disposed = true;
+    this.active?.controller.abort();
     this.resetRetry();
   }
 
@@ -174,20 +183,26 @@ export class ShotReferenceRecordingScheduler {
 
   /** 串行泵：一次取一个 job 交给 recorder。成功继续取下一个；失败停止本轮，保留 dirty 待下次重试。 */
   private async pump(): Promise<void> {
-    if (this.pumping) return;
+    if (this.pumping || this.disposed) return;
     const recorder = this.deps.recorder;
     if (!recorder) return;
     this.pumping = true;
     try {
       for (;;) {
+        if (this.disposed) break;
         const job = this.queue.nextJob();
         if (!job) break;
         let result: ShotReferenceRecordResult;
+        const controller = new AbortController();
+        this.active = { job, controller };
         try {
-          result = await recorder(job);
+          result = await recorder(job, controller.signal);
         } catch (cause) {
           result = { ok: false, error: cause instanceof Error ? cause.message : "镜头录制失败" };
         }
+        this.active = null;
+        if (this.disposed) break;
+        if (controller.signal.aborted) { this.queue.fail(job); continue; }
         if (result.ok) {
           this.queue.complete(job);
           this.lastError = null;
@@ -199,7 +214,7 @@ export class ShotReferenceRecordingScheduler {
         this.queue.fail(job);
         this.lastError = result.error;
         this.notify();
-        this.scheduleRetry();
+        if (result.transient !== false) this.scheduleRetry();
         break;
       }
     } finally {

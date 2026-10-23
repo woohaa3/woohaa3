@@ -59,8 +59,10 @@ export * from "./wire-shot-preview.js";
  * - v23：复合资产新增可信派生 ownershipLinks，使用模型局部锚点与目标节点底部绘制管理虚线。
  * - change: 2026-10-22-enhance-film-set-running-effects —— v22 增加片场执行身份与阶段，
  *   工作相机扫描消费同一摘要，装饰时间留在 renderer。
+ * - v24：shotPreview.backdrop 将每镜头背景传至 preview/capture；旧 renderer 会静默忽略，
+ *   因此同步提升能力版本，拒绝混合组合。
  */
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v23" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v24" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {

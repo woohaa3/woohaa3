@@ -74,17 +74,25 @@ pub(crate) fn route_capture_request(
     mut queue: ResMut<ShotCaptureQueue>,
     mut results: ResMut<ShotCaptureResults>,
     models: Res<super::ModelVisuals>,
+    scene: Res<crate::app::CurrentScene>,
 ) {
     // Native 后台准备：目标片场仍处于 Pending（未发布完整表示）时，截图必须等待合法
     // High Published 根与既有 GPU readiness，而不是把半场/灰底当成结果。请求留在 bridge
     // slot 中由后续帧继续等待（既有 capture 超时与公平调度负责收尾），**不在**同步请求内
     // 强制创建或阻塞等后台任务。
-    // 只对仍在创建中的片场等待；卡片预览 rig 的截图目标通常是预览节点本身，其归属片场
-    // 由 `pin_owner` 保活，不在这里阻塞。
-    if let Some(node) = bridge::queued_shot_capture_node()
-        && capture_must_wait(&models, &node)
-    {
-        return;
+    if let Some(node) = bridge::queued_shot_capture_node() {
+        let owner = scene.0.nodes.iter().find(|entry| entry.id == node)
+            .and_then(|entry| entry.shot_preview.as_ref())
+            .map(|preview| preview.film_set_node_id.as_str()).unwrap_or(&node);
+        if capture_must_wait(&models, owner) {
+            return;
+        }
+        // Preview requests pin the owner at High even outside the viewport. Wait for that
+        // representation and its GPU readiness, rather than capturing the last LOD cover.
+        if owner != node && (models.quality(owner) != super::quality::Quality::High
+            || preview_cards.cards.get(&node).is_none_or(|card| !card.confirmed)) {
+            return;
+        }
     }
     let Some(request) = bridge::take_shot_capture_request() else {
         return;

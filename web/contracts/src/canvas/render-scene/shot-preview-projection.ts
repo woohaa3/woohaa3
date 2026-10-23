@@ -90,6 +90,7 @@ export function shotPreviewCardPresentation(input: {
     aspect: target.aspect,
     duration: target.timeline.duration,
     coverCamera: target.coverCamera,
+    ...(target.backdrop ? { backdrop: target.backdrop } : {}),
     state: input.state ?? "ready",
     ...(target.kind === "dynamic" && progress !== undefined ? { progress } : {}),
     ...(target.kind === "dynamic" && input.playing !== undefined ? { playing: input.playing } : {}),

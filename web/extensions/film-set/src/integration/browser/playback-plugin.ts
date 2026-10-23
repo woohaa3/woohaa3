@@ -94,6 +94,7 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
         if (reconciling || disposed) return;
         reconciling = true;
         try {
+          if (ctx.filmSetPlayback.isStillCapture()) { controller.select(null); return; }
           // 镜头参考录制会话优先于 hover/聚焦：把投影锁到该镜头的预览卡片（输出目标卡片、
           // 暂停在录制方 seek 的 T），renderer 才能在片场非聚焦时按 T 离屏出该镜头画面。
           const captureSession = ctx.filmSetPlayback.captureSessionRequest();
@@ -126,9 +127,9 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
           if (focused && explicit.preview && explicit.nodeId === focusId) {
             const animation = readAnimation(canvas, focusId!);
             const resolved = animation ? resolveFilmSetClip(animation, explicit.clipId) : null;
-            if (!resolved) {
+            if (!resolved || resolved.clip.kind !== "dynamic") {
               controller.select(null);
-              ctx.filmSetPlayback.update({ playing: false, error: "动画片段不存在，请选择其他片段" });
+              ctx.filmSetPlayback.update({ preview: false, playing: false, error: resolved ? null : "动画片段不存在，请选择其他片段" });
               return;
             }
             controller.select(focusId!, undefined, { clipId: explicit.clipId ?? undefined, paused: true, viewMode: "focus-preview" });

@@ -4,10 +4,9 @@ import {
   TextInput,
 } from "../../../shared/ui/FormControls.js";
 import { AssistantComposer } from "./composer.js";
-import { AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "./model-selector.js";
+import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "./model-selector.js";
 import { useAssistantExecutionActions } from "./status.js";
 import { useAssistantDeliveryInput } from "./delivery-input.js";
-import { ModelSelector } from "../../plugins/task-execution/execution-panel/model-selector.js";
 import { agentModelSelection, agentDirectoryModels, readAgentCatalog } from "../../plugins/task-execution/agent-model-selection.js";
 import { readAssistantPreference, rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
 import { AuthoringGenerateLayout } from "../../plugins/task-execution/authoring-generate-layout.js";
@@ -289,7 +288,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
             onManage={props.onAuthorize} disabled={locked || selection?.loading}
             onChange={value => selection?.onSelectConnection(value)} />}
         model={delivery || !noConnection ? (
-            delivery || modelOptions.length > 0 ? <ModelSelector label="模型" model={model} placeholder={delivery ? "本次模型" : undefined} keepOpenOnModelSelect
+            delivery || modelOptions.length > 0 ? <AssistantModelSelector label="模型" model={model} placeholder={delivery ? "本次模型" : undefined} keepOpenOnModelSelect
               options={[{ value: "", label: toolDefault ? "跟随工具设置" : "选择模型" },
                 ...(invalidModel ? [{ value: model, label: delivery ? model : `${model}（已不可用）`, disabled: true }] : []),
                 ...modelOptions.map(entry => ({ value: entry.id, label: entry.label }))]}

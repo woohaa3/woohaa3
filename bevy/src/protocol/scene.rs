@@ -99,6 +99,8 @@ pub(crate) struct ShotPreviewPresentation {
     /// 时间线时长（秒）；静态为 0。
     #[serde(default)]
     pub(crate) duration: f32,
+    #[serde(default)]
+    pub(crate) backdrop: Option<String>,
     /// 零点封面相机（静态与非活动动态卡片使用；design D7）。
     #[serde(rename = "coverCamera")]
     pub(crate) cover_camera: ShotCoverCamera,

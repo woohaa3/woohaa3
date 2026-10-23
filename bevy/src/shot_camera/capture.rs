@@ -106,7 +106,7 @@ pub(crate) fn submit_pending_captures(
     mut queue: ResMut<ShotCaptureQueue>,
     mut state: ResMut<ShotCaptureState>,
     mut results: ResMut<ShotCaptureResults>,
-    rigs: Query<(&ShotCameraDerived, &ShotCameraLens, &ShotCameraViewMask, Option<&super::preview_readiness::ShotPreviewReadiness>)>,
+    rigs: Query<(&ShotCameraDerived, &ShotCameraLens, &ShotCameraViewMask, Option<&super::preview_readiness::ShotPreviewReadiness>, Option<&super::ShotCameraPreview>)>,
     ready: Res<super::preview_readiness::ShotPreviewReady>,
     waiting: Query<(Entity, &CaptureCamera, &AwaitCaptureReadback)>,
     clear: Res<super::ShotPreviewClearColor>,
@@ -131,7 +131,7 @@ pub(crate) fn submit_pending_captures(
         if state.in_flight.contains_key(&key) {
             continue;
         }
-        let Ok((derived, lens, mask, readiness)) = rigs.get(request.camera) else {
+        let Ok((derived, lens, mask, readiness, preview)) = rigs.get(request.camera) else {
             fail.push((request, ShotCaptureErrorCode::CameraGone));
             continue;
         };
@@ -151,7 +151,7 @@ pub(crate) fn submit_pending_captures(
             lens,
             mask,
             target.clone(),
-            clear.0,
+            preview.and_then(|preview| preview.clear_color).unwrap_or(clear.0),
             readiness,
         );
         submit.push((request, target));

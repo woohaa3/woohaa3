@@ -95,6 +95,7 @@ export * from "./canvas/film-set-clip-ops.js";
 export * from "./canvas/film-set-clip-compilation.js";
 export * from "./canvas/film-set-shot-preview.js";
 export * from "./canvas/film-set-shot-reference.js";
+export * from "./canvas/film-set-shot-image-reference.js";
 export * from "./canvas/film-set-clip-edit.js";
 export * from "./canvas/film-set-item-ops.js";
 export * from "./canvas/film-set-item-edit.js";

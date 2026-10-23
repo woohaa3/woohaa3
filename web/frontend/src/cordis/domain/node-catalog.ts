@@ -88,7 +88,8 @@ export function defaultNodeDataForType(nodeType: string): CanvasNodeData | undef
 export function connectNodeDataFor(
   from: { id: string; type: string },
   toNodeType: string,
-  existingRoles: readonly string[] = []
+  existingRoles: readonly string[] = [],
+  nodeData?: Record<string, CanvasNodeData>
 ): CanvasNodeData | undefined {
   const base = defaultNodeDataForType(toNodeType);
   if (!base) return undefined;
@@ -103,6 +104,7 @@ export function connectNodeDataFor(
         sourceNode: { id: from.id, type: from.type },
         targetNode: { id: "pending", type: toNodeType },
         existingRoles
+        , sourceData: nodeData?.[from.id], readNodeData: id => nodeData?.[id]
       }),
       sortKey: "0"
     }

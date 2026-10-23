@@ -111,7 +111,7 @@ export function planShotReferenceFreeze(input: {
         continue;
       }
       const clip = filmSetAnimationsOf(animation.value).clips.find((entry) => entry.id === ownership.clipId);
-      if (!clip) {
+      if (!clip || clip.kind !== "dynamic") {
         invalid.push(`镜头参考的镜头 ${ownership.clipId} 已不存在`);
         continue;
       }
@@ -139,13 +139,13 @@ export function planShotReferenceFreeze(input: {
         commands.push({ type: "asset.upsert", asset: buildShotReferenceAsset(request, ready, `${clip.name} · 镜头参考`, now()) });
         registered.add(assetId);
       }
-      patched ??= structuredClone(target) as CanvasNodeData;
+      patched ??= { inputMapping: structuredClone(mappings) } as CanvasNodeData;
       const patchedMappings = (patched.inputMapping ?? []) as CanvasNodeData["inputMapping"];
       const index = patchedMappings!.findIndex((entry) => entry.slotId === mapping.slotId);
       if (index >= 0) patchedMappings![index] = { ...patchedMappings![index]!, sourceAssetIds: [assetId] };
     }
 
-    if (patched) commands.push({ type: "nodeData.patch", nodeId: node.id, value: patched });
+    if (patched) commands.push({ type: "nodeData.patch", nodeId: node.id, value: patched, expectedInputMapping: mappings });
   }
 
   return { commands, waiting, invalid };

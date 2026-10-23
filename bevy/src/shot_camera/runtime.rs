@@ -310,7 +310,7 @@ pub(crate) fn sync_preview_targets(
                 .spawn((
                     Camera3d::default(),
                     Camera {
-                        clear_color: ClearColorConfig::Custom(clear.0),
+                        clear_color: ClearColorConfig::Custom(preview.clear_color.unwrap_or(clear.0)),
                         order: 5,
                         is_active: false,
                         ..default()
@@ -347,6 +347,7 @@ pub(crate) fn sync_preview_targets(
         // 否则会重置 clear_color、order 与 target，导致窗口 viewfinder 变透明或被主相机覆盖。
         if let Ok((mut camera_component, mut layers)) = camera_query.get_mut(camera) {
             camera_component.is_active = should_render && !suspended;
+            camera_component.clear_color = ClearColorConfig::Custom(preview.clear_color.unwrap_or(clear.0));
             // Existing offscreen rigs can move to another card layer without reallocating Image.
             *layers = mask.0.clone().without(super::SHOT_GIZMO_LAYER);
             if !offscreen {
@@ -367,7 +368,7 @@ pub(crate) fn sync_preview_targets(
                     camera_viewport.clamp_to_size(physical);
                     camera_component.viewport = Some(camera_viewport);
                     // 左下角是 rig 自己的视角：不透明清屏，避免观察相机从预览框透出来。
-                    let mut color = clear.0;
+                    let mut color = preview.clear_color.unwrap_or(clear.0);
                     color.set_alpha(1.0);
                     camera_component.clear_color = ClearColorConfig::Custom(color);
                 }

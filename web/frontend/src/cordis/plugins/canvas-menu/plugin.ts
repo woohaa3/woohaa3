@@ -18,7 +18,7 @@ import {
   findNodeTemplate
 } from "../../domain/node-catalog.js";
 import { planGroupNodes, planInsertNode, planUngroupNodes } from "../../../extension-api/command-planner.js";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, resolveShotReferenceSource } from "@woohaa3/contracts";
 import { shotReferenceTemplateItems } from "./shot-reference-menu.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
@@ -280,7 +280,9 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
         // 从拍摄镜头预览拉线：只提供视频生成节点（专用镜头参考，D9 / 任务 8.2）。其余项显式禁用并
         // 给出原因，避免「点击后静默失败」。
         if (connectFrom && connectFrom.nodeType === FILM_SET_SHOT_PREVIEW_NODE_TYPE) {
-          return shotReferenceTemplateItems(baseTemplates, writable, connectFrom);
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const source = resolveShotReferenceSource(connectFrom.nodeId, canvas?.nodeData[connectFrom.nodeId], id => canvas?.nodeData[id]);
+          return shotReferenceTemplateItems(baseTemplates, writable, connectFrom, source?.kind ?? null);
         }
         return [
           ...baseTemplates.map((template) => ({
@@ -481,7 +483,7 @@ function insertNode(ctx: Context, templateId: string, context: ContextMenuContex
       nodeData: context.connectFrom
         ? connectNodeDataFor(
             { id: context.connectFrom.nodeId, type: context.connectFrom.nodeType },
-            template.nodeType
+            template.nodeType, [], workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData
           ) ?? nodeData
         : nodeData,
       ...(context.connectFrom ? { connectFromNodeId: context.connectFrom.nodeId } : {}),

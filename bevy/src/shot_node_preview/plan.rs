@@ -51,6 +51,7 @@ pub(super) struct Target {
     /// 播放会话代数（活动卡片取自播放投影；封面恒为 0）。
     pub(super) generation: u32,
     pub(super) visible: bool,
+    pub(super) backdrop: Option<Color>,
     /// 归属片场仍在 native 后台准备中（未发布完整表示）。
     ///
     /// 这种卡片不能采样：此时层并集里没有模型实体，采样结果会是清屏色，发布出去就是
@@ -73,6 +74,22 @@ pub(crate) fn pin_capture_owners(scene: &Scene, pins: &mut std::collections::Has
         .map(|preview| preview.film_set_node_id.clone())
         .collect();
     pins.extend(owners);
+}
+
+/// A visible shot is a composition consumer, just like a focused view/capture.
+/// Its source must not silently switch to overview geometry or disappear offscreen.
+pub(crate) fn pin_visible_owners(scene: &Scene, pins: &mut std::collections::HashSet<String>) {
+    if card_geometry::focuses_isolate(scene) { return; }
+    let viewport = [scene.viewport.x, scene.viewport.y, scene.viewport.zoom];
+    let surface = scene.surface.as_ref()
+        .map(|surface| Vec2::new(surface.width, surface.height)).unwrap_or(Vec2::ZERO);
+    for node in &scene.nodes {
+        if let Some(preview) = node.shot_preview.as_ref() {
+            if card_geometry::visible_on_surface(node, viewport, surface) {
+                pins.insert(preview.film_set_node_id.clone());
+            }
+        }
+    }
 }
 
 /// 由场景派生全部卡片预览目标；只取同时具备合格源片场包围球的预览节点。
@@ -140,6 +157,7 @@ pub(super) fn targets_with_preparation(
                 focus_offset: Vec3::from_array(preview.cover_camera.focus_offset),
             }
         };
+        let backdrop = preview.backdrop.as_deref().unwrap_or(scene.theme.token("webSubtle"));
         result.push(Target {
             node_id: node.id.clone(),
             owner: owner.id.clone(),
@@ -148,13 +166,13 @@ pub(super) fn targets_with_preparation(
             pose,
             bounds,
             aspect: card_geometry::shot_preview_aspect(node),
-            content: content_identity(
+            content: format!("{}:background={backdrop}", content_identity(
                 owner,
                 owner.composite_asset.as_ref(),
                 owner.model.as_ref(),
                 preview,
                 &quality_of(&owner.id),
-            ),
+            )),
             time: if is_live {
                 live.map(|sampling| sampling.playback.time.to_bits()).unwrap_or(0)
             } else {
@@ -167,6 +185,7 @@ pub(super) fn targets_with_preparation(
             },
             visible: !hidden && card_geometry::visible_on_surface(node, viewport, surface),
             awaiting_root: preparing_of(&owner.id),
+            backdrop: Some(crate::model3d::scene::parse_hex(backdrop)),
         });
     }
     result
@@ -209,13 +228,14 @@ pub(super) fn content_identity(
         roots
     });
     format!(
-        "owner={}:clip={}:kind={}:aspect={:?}:duration={:?}:cover={:?}:items={:?}:media={:?}:roots={:?}:model={}:sig={}:quality={}:content={:?}",
+        "owner={}:clip={}:kind={}:aspect={:?}:duration={:?}:cover={:?}:backdrop={:?}:items={:?}:media={:?}:roots={:?}:model={}:sig={}:quality={}:content={:?}",
         owner.id,
         preview.clip_id,
         preview.kind,
         preview.aspect,
         preview.duration,
         preview.cover_camera,
+        preview.backdrop,
         placements,
         media,
         roots,
@@ -279,6 +299,36 @@ mod tests {
         let mut unrelated = std::collections::HashSet::from(["other".to_string()]);
         pin_capture_owners(&scene, &mut unrelated);
         assert!(!unrelated.contains("film"));
+    }
+
+    #[test]
+    fn only_visible_shots_pin_their_source_for_composition_quality() {
+        let mut scene = scene_of(owner_node(0.0, 1.6), preview_node("shot", 0.0));
+        scene.surface = Some(serde_json::from_value(serde_json::json!({"width":1024,"height":768,"pixelRatio":1})).unwrap());
+        let mut pins = std::collections::HashSet::new();
+        pin_visible_owners(&scene, &mut pins);
+        assert!(pins.contains("film"));
+        scene.nodes[1].x = 100000.0;
+        pins.clear();
+        pin_visible_owners(&scene, &mut pins);
+        assert!(pins.is_empty());
+    }
+
+    #[test]
+    fn theme_background_invalidates_card_without_affecting_custom_background() {
+        let mut scene = scene_of(owner_node(0.0, 1.6), preview_node("shot", 0.0));
+        let project = |scene: &Scene| targets(scene, &|_| None, &|_| "high".into(), None);
+        let first = project(&scene).remove(0);
+        scene.theme.tokens.insert("webSubtle".into(), "#123456".into());
+        let themed = project(&scene).remove(0);
+        assert_ne!(first.content, themed.content);
+        assert_ne!(first.backdrop, themed.backdrop);
+        scene.nodes[1].shot_preview.as_mut().unwrap().backdrop = Some("#abcdef".into());
+        let custom = project(&scene).remove(0);
+        scene.theme.tokens.insert("webSubtle".into(), "#654321".into());
+        let changed = project(&scene).remove(0);
+        assert_eq!(custom.content, changed.content);
+        assert_eq!(custom.backdrop, changed.backdrop);
     }
 
     #[test]

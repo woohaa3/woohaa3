@@ -142,6 +142,15 @@ function freeze(
 }
 
 describe("freezeFilmSetRecording", () => {
+  it("rejects a static zero-duration shot before frame preparation", () => {
+    const fixture = makeAnimation();
+    const clip = fixture.animation.filmSetAnimations!.clips[0]!;
+    clip.kind = "static"; clip.timeline = { duration: 0, loop: false }; clip.bindings = []; clip.cameraMotion = { ...clip.cameraMotion, motionScript: "" };
+    const result = freezeFilmSetRecording({ prepareFrame: () => { throw new Error("static must not prepare a video frame"); },
+      request: requestFor(fixture).request, nodeData: canonicalFilmSetFields(fixture.animation) as CanvasNodeData,
+      assets: [], canvasRevision: 7, sourceIncarnation: "incarnation-1" });
+    expect(result).toMatchObject({ ok: false, code: "shot-kind-unsupported" });
+  });
   it("freezes a self-contained snapshot with stable identity and profile", () => {
     const fixture = makeAnimation();
     const result = freeze(fixture);

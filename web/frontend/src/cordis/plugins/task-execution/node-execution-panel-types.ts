@@ -17,7 +17,7 @@ import type {
 } from "../../contracts.js";
 import type { ModelInteractionRegistry } from "../../contract/model-interaction.js";
 import type { ModelDraftStore } from "./model-draft.js";
-import type { TaskActivityEventSink } from "./submit-coordinator.js";
+import type { TaskActivityEventSink, SubmitCoordinator } from "./submit-coordinator.js";
 import type { ModelSubmitOutcome } from "../../contract/model-interaction.js";
 
 export type { ModelSubmitOutcome, ModelDraftStore };
@@ -30,6 +30,7 @@ export type ModelExecutionHostProps = {
   session: CanvasSession;
   /** Canvas 远端（run/cancel）。 */
   runClient: CanvasRemoteService;
+  submitCoordinator?: SubmitCoordinator;
   /** 画布是否可写（断线只读时禁用）。 */
   writable: boolean;
   /** Dialog 能力（Alert 等通用对话框）。 */

@@ -87,6 +87,17 @@ pub(crate) fn model_bounds_for_node(
     node_id: &str,
 ) -> Option<ModelBounds> {
     let node = scene.nodes.iter().find(|node| node.id == node_id)?;
+    // The editor resolves its saved camera against the canonical layout box, including
+    // media at their base size. Re-unioning rendered geometry (or spheres) here changes
+    // its center/radius and clamps the same saved distance differently in a card.
+    if let Some(bounds) = node.composite_asset.as_ref().and_then(|asset| asset.layout_aabb) {
+        let model = node.model.as_ref().and_then(|reference| resources.get(&reference.resource_key))
+            .map(|model| model.as_ref())
+            .or_else(|| models.roots.get(node_id).map(|root| root.resource.as_ref()));
+        let root = super::media_geometry::film_set_root(node, model);
+        let world = ModelAabb::new(bounds.min, bounds.max).transformed(&root);
+        return Some(ModelBounds { center: world.center(), radius: world.radius() });
+    }
     let model_bounds = (|| {
         let reference = node.model.as_ref()?;
         let root = models.roots.get(node_id)?;
@@ -354,6 +365,47 @@ fn is_hex_color(value: &str) -> bool {
 #[cfg(test)]
 mod focus_offset_tests {
     use super::*;
+
+    #[test]
+    fn saved_composition_uses_layout_bounds_instead_of_scaled_media_geometry() {
+        let mut scene = Scene::default();
+        scene.nodes.push(serde_json::from_value(serde_json::json!({
+            "id":"film", "type":"model", "x":200,"y":180,"width":400,"height":300,
+            "compositeAsset":{"x":200,"y":180,"width":400,"height":300,
+                "contentExtent":2,
+                "layoutAabb":{"min":[-3,-1,-2],"max":[7,4,3]},
+                "rootPlacement":{"offset":{"x":0,"y":0,"z":0},"scale":1,"yaw":37},
+                "media":[{"id":"photo","kind":"image","x":10,"y":8,"z":0,"width":20,"height":16,"yaw":0.3}]}
+        })).unwrap());
+        let models = ModelVisuals::default();
+        let resources = ModelAssets::new();
+        let first = model_bounds_for_node(&scene, &models, &resources, "film").unwrap();
+        // Same canonical layout as Web's editor. A rendered plane's current size is
+        // deliberately different from its base size and cannot redefine the shot.
+        let root = super::super::media_geometry::film_set_root(&scene.nodes[0], None);
+        let expected = ModelAabb::new([-3.0,-1.0,-2.0], [7.0,4.0,3.0]).transformed(&root);
+        assert!(first.center.abs_diff_eq(expected.center(), 1e-4));
+        assert!((first.radius - expected.radius()).abs() < 1e-4);
+        // Independent Web modelBounds/resolveShotCamera values for this rotated,
+        // media-containing layout; exercise the distance-clamp boundary as well.
+        assert!(first.center.abs_diff_eq(Vec3::new(429.70516, -261.13849, -135.98026), 1e-3));
+        assert!((first.radius - 272.36445).abs() < 1e-3);
+        let shot = crate::shot_camera::resolve_from_center_radius(
+            first.center, first.radius, 0.6, 0.4, 0.1, 16.0 / 9.0, Vec3::new(4.0, 3.0, -2.0),
+        );
+        assert!(shot.position.abs_diff_eq(Vec3::new(441.21295, -252.51680, -127.00615), 1e-3));
+        assert!((shot.distance - 14.43611).abs() < 1e-4);
+        scene.nodes[0].composite_asset.as_mut().unwrap().media[0].width *= 5.0;
+        let second = model_bounds_for_node(&scene, &models, &resources, "film").unwrap();
+        assert_eq!(first.center, second.center);
+        assert_eq!(first.radius, second.radius);
+        scene.model_focus = Some(serde_json::from_value(serde_json::json!({
+            "nodeId":"film","target":[0,0,0],"yaw":0,"pitch":0,"distance":100,"fov":0.87
+        })).unwrap());
+        let focused = focused_model_bounds(&scene, &models, &resources).unwrap();
+        assert_eq!(focused.center, first.center);
+        assert_eq!(focused.radius, first.radius);
+    }
 
     #[test]
     fn desired_shot_preserves_focus_offset() {

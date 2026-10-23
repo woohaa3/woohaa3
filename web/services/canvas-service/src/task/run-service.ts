@@ -16,6 +16,8 @@ import type { CanvasTaskCatalog, CanvasTaskModelType, CanvasRunRequest, CanvasTa
 import { catalogModelBindings, compileVideoEditProviderPrompt, isNodeModelTypeMatch, NODE_TYPE_TO_TASK_KIND, readGenerationMode, readVideoEditIntents, validateGenerationModeInputs } from "@woohaa3/contracts";
 import type { CanvasTaskClient } from "../clients/task-client.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
+import { withFrozenShotImages } from "./shot-reference-resolution.js";
+import { shotImageReferenceAssetId } from "@woohaa3/contracts";
 import { resolveMentionsAndCompile } from "./mention-resolution.js";
 import {
   EMPTY_UPSTREAM_TEXT_CODE,
@@ -68,11 +70,29 @@ export class CanvasRunService {
     const scope = currentCanvasGroupScope();
     if (scope && (!scope.valid() || scope.canvasId !== request.canvasId)) return { ok: false, code: "group-scope-revoked", message: "组创作授权已撤销" };
     if (scope && !canvasGroupMembers(exported.canvas, scope.rootGroupId).has(request.nodeId)) return { ok: false, code: "group-scope-forbidden", message: "运行目标已移出根组" };
-    const canvas = scope ? scopedCanvas(exported.canvas) : exported.canvas;
+    let canvas = scope ? scopedCanvas(exported.canvas) : exported.canvas;
+    if (!request.shotImageReferences && canvas.nodeData[request.nodeId]?.inputMapping?.some(mapping => mapping.role === "shot_image_reference")) {
+      return { ok: false, code: "shot-image-version-stale", message: "图片参考需要冻结镜头版本，请重新执行" };
+    }
+    if (request.shotImageReferences) {
+      const frozen = withFrozenShotImages(canvas, request.nodeId, request.shotImageReferences);
+      if (typeof frozen === "string") return { ok: false, code: "shot-image-version-stale", message: frozen };
+      canvas = frozen;
+    }
     if (scope && exported.canvas.document.edges.some(e => e.target === request.nodeId && !canvas.document.nodes.some(n => n.id === e.source))) return { ok: false, code: "group-external-input", message: "不能使用组外输入" };
     if (scope && hasExternalCanvasReference(canvas.nodeData[request.nodeId], canvasGroupMembers(canvas, scope.rootGroupId), canvasGroupAssetIds(canvas, canvasGroupMembers(canvas, scope.rootGroupId)))) return { ok: false, code: "group-external-input", message: "节点引用了组外输入" };
     const inputBasis = (snapshot: typeof canvas) => {
       const view = scope ? scopedCanvas(snapshot) : snapshot;
+      if (!scope && request.shotImageReferences) {
+        const mappings = view.nodeData[request.nodeId]?.inputMapping ?? [];
+        return stableStringify({
+          targetType: view.document.nodes.find(node => node.id === request.nodeId)?.type,
+          mappings: mappings.map(mapping => mapping.role === "shot_image_reference"
+            ? { slotId: mapping.slotId, sourceNodeId: mapping.sourceNodeId, role: mapping.role } : mapping),
+          otherInputs: mappings.filter(mapping => mapping.role !== "shot_image_reference").map(mapping => view.nodeData[mapping.sourceNodeId]),
+          images: request.shotImageReferences.map(ref => view.assets.find(asset => asset.id === shotImageReferenceAssetId(ref)))
+        });
+      }
       return stableStringify({ nodes: view.document.nodes, data: view.nodeData, edges: view.document.edges, assets: view.assets });
     };
     const basis = inputBasis(exported.canvas);
@@ -129,7 +149,7 @@ export class CanvasRunService {
       return { ok: false, code: "empty-prompt", message: "请先输入提示词" };
     }
 
-    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: request.nodeId, bindings });
+    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: request.nodeId, bindings, frozenShotImages: request.shotImageReferences });
     if (resolution.blockingReasons.length > 0) {
       return { ok: false, code: "invalid-input", message: resolution.blockingReasons[0] };
     }
@@ -234,9 +254,11 @@ export class CanvasRunService {
           }
         }
       ]
-    }, scope ? { authorize: async () => {
+    }, scope || request.shotImageReferences ? { authorize: async () => {
       const latest = room.exportCanvas();
-      return scope.valid() && (!scope.authorize || await scope.authorize("write")) && latest.ok && canvasGroupMembers(latest.canvas, scope.rootGroupId).has(request.nodeId) && inputBasis(latest.canvas) === basis;
+      return (!scope || (scope.valid() && (!scope.authorize || await scope.authorize("write")) && latest.ok && canvasGroupMembers(latest.canvas, scope.rootGroupId).has(request.nodeId)))
+        && latest.ok && (!request.shotImageReferences || typeof withFrozenShotImages(latest.canvas, request.nodeId, request.shotImageReferences) !== "string")
+        && inputBasis(latest.canvas) === basis;
     } } : undefined);
     if (!begin.ok) {
       return { ok: false, code: begin.code, message: begin.message };

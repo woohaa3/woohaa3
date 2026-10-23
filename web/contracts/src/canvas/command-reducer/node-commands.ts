@@ -196,7 +196,7 @@ export function addNode(
         `${source.type} -> ${nextNode.type} 不是合法连线（端点相同、重复连线或不满足 handle 规则）`
       );
     }
-    const generated = createWoohaa3CanvasEdge(candidate, [...work.nodes, nextNode]);
+    const generated = createWoohaa3CanvasEdge(candidate, [...work.nodes, nextNode], connectDataReader(work, nextNode.id, command.nodeData));
     if (!generated) return reject("invalid-connection", `无法为 ${source.id} -> ${nextNode.id} 创建边`);
     // 稳定 edgeId（change: add-frontend-speculative-canvas-state，design D7）：
     // 客户端必须预分配边 ID，服务端保留请求 ID，避免前后端生成不同实体。

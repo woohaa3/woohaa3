@@ -236,7 +236,7 @@ describe("粘贴规划", () => {
     expect(result.canvas.document.nodes.some((node) => node.id === ownership!.filmSetNodeId)).toBe(true);
   });
 
-  it("复制片场与视频节点时保留内部镜头参考边并重写两端（任务 8.2）", () => {
+  it.each(["dynamic", "static"] as const)("copy %s shot reference remaps both ends and preserves media role", kind => {
     const canvas = canvasFixture();
     const snapshot = createFilmSetSnapshot({
       title: "电影",
@@ -246,6 +246,11 @@ describe("粘贴规划", () => {
       timeline: { duration: 2, loop: false }
     });
     canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
+    if (kind === "static") {
+      const clip = snapshot.filmSetAnimations!.clips[0]!;
+      clip.kind = "static"; clip.timeline = { duration: 0, loop: false }; clip.bindings = [];
+      clip.cameraMotion = { ...clip.cameraMotion, motionScript: "" };
+    }
     canvas.nodeData.film = canonicalFilmSetFields(snapshot) as never;
     const materialized = applyCanvasCommands(canvas, [], { now: NOW });
     if (!materialized.ok) throw new Error(materialized.rejection.message);
@@ -267,13 +272,13 @@ describe("粘贴规划", () => {
     const plan = planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas: linked.canvas, payload, anchor: { kind: "point", position: { x: 0, y: 0 } } })!;
     const pasted = applyCanvasCommands(linked.canvas, plan.commands, { now: NOW });
     if (!pasted.ok) throw new Error(`${pasted.rejection.code}:${pasted.rejection.message}`);
-    const refEdges = pasted.canvas.document.edges.filter((edge) => edge.data?.kind === "shot-reference" && edge.id !== "edge-ref");
+    const refEdges = pasted.canvas.document.edges.filter((edge) => edge.data?.kind === (kind === "static" ? "shot-image-reference" : "shot-reference") && edge.id !== "edge-ref");
     expect(refEdges).toHaveLength(1);
     // 边两端都指向新实体，不再指向源预览/源视频节点。
     expect(refEdges[0].source).not.toBe(preview.id);
     expect(refEdges[0].target).not.toBe("video-1");
     const mapping = (pasted.canvas.nodeData[refEdges[0].target] as { inputMapping?: Array<{ role?: string }> }).inputMapping ?? [];
-    expect(mapping.some((entry) => entry.role === SHOT_REFERENCE_ROLE)).toBe(true);
+    expect(mapping.some((entry) => entry.role === (kind === "static" ? "shot_image_reference" : SHOT_REFERENCE_ROLE))).toBe(true);
   });
 
   it("单独复制预览节点无操作（受保护，不产生悬空载荷）", () => {

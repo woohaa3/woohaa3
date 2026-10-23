@@ -512,12 +512,20 @@ pub(crate) fn sync(
     }
     // Share the existing scene illumination instead of spawning a light per node.
     commands.queue(move |world: &mut World| {
-        let mut lights = world.query_filtered::<Entity, With<DirectionalLight>>();
-        let entities: Vec<_> = lights.iter(world).collect();
-        for entity in entities {
-            world.entity_mut(entity).insert(layers.clone());
-        }
+        merge_scene_light_layers(world, &layers);
     });
+}
+
+// Shot cards and ordinary model cards share these lights. Their independent
+// refresh schedules must merge layers, otherwise a focus/overview transition
+// removes shot illumination while its cached layer set still looks current.
+fn merge_scene_light_layers(world: &mut World, layers: &RenderLayers) {
+    let mut lights = world.query_filtered::<Entity, With<DirectionalLight>>();
+    let entities: Vec<_> = lights.iter(world).collect();
+    for entity in entities {
+        let existing = world.get::<RenderLayers>(entity).cloned().unwrap_or_default();
+        world.entity_mut(entity).insert(existing.union(layers));
+    }
 }
 fn make_image(size: UVec2) -> Image {
     let mut image = Image::new_uninit(

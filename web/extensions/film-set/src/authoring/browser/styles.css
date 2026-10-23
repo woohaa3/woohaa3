@@ -1,8 +1,8 @@
 .film-set-object-dock { padding: 16px; border-bottom: 1px solid var(--app-web-border); }
-.film-set-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; min-height: 24px; }
-.film-set-section-heading h3 { margin: 0; min-width: 0; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.film-set-count { margin-left: 5px; font-size: 10px; font-weight: 500; color: var(--app-web-text-muted); font-variant-numeric: tabular-nums; }
-.film-set-object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 224px; overflow-y: auto; }
+.film-set-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; min-height: 24px; }
+.film-set-section-heading h3 { margin: 0; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-set-count { margin-left: 5px; font-size: 12px; font-weight: 500; color: var(--app-web-text-muted); font-variant-numeric: tabular-nums; }
+.film-set-object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; }
 .film-set-object-list__empty { padding: 18px 12px; border: 1px dashed var(--app-web-border); border-radius: 8px; font-size: 12px; line-height: 1.6; color: var(--app-web-text-muted); }
 .film-set-object-row {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 8px 10px;
@@ -12,37 +12,37 @@
 .film-set-object-row[aria-selected="true"] { border-color: var(--app-interaction-accent); background: var(--app-interaction-accent-soft); }
 .film-set-object-row__icon { display: flex; flex-shrink: 0; color: var(--app-web-text-muted); }
 .film-set-object-row[aria-selected="true"] .film-set-object-row__icon { color: var(--app-interaction-accent); }
-.film-set-object-row__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.film-set-object-row__kind { font-size: 10px; color: var(--app-web-text-muted); flex-shrink: 0; }
+.film-set-object-row__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 20px; }
+.film-set-object-row__kind { font-size: 12px; color: var(--app-web-text-muted); flex-shrink: 0; }
 .film-set-object-fields { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--app-web-border); }
-.film-set-selection-heading > span { font-size: 10px; color: var(--app-web-text-muted); flex-shrink: 0; }
+.film-set-selection-heading > span { font-size: 12px; color: var(--app-web-text-muted); flex-shrink: 0; }
 .film-set-transform { display: grid; gap: 8px; }
-.film-set-transform__label { font-size: 11px; color: var(--app-web-text-muted); }
+.film-set-transform__label { font-size: 13px; color: var(--app-web-text-muted); }
 .film-set-transform__axes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .film-set-transform__pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
-.film-set-number { display: grid; gap: 6px; min-width: 0; font-size: 11px; color: var(--app-web-text-muted); }
+.film-set-number { display: grid; gap: 6px; min-width: 0; font-size: 13px; color: var(--app-web-text-muted); }
 .film-set-number[data-axis] { position: relative; }
-.film-set-number[data-axis] > span { position: absolute; left: 8px; top: 9px; z-index: 1; font-size: 10px; font-weight: 650; pointer-events: none; }
+.film-set-number[data-axis] > span { position: absolute; left: 8px; top: 9px; z-index: 1; font-size: 12px; font-weight: 650; pointer-events: none; }
 .film-set-number[data-axis="x"] > span { color: var(--app-gizmo-axis-x); }
 .film-set-number[data-axis="y"] > span { color: var(--app-gizmo-axis-y); }
 .film-set-number[data-axis="z"] > span { color: var(--app-gizmo-axis-z); }
 .film-set-number__input { display: flex; align-items: center; min-width: 0; border: 1px solid var(--app-web-border); background: var(--app-web-subtle); border-radius: 6px; }
 .film-set-number__input:focus-within { border-color: var(--app-interaction-accent); box-shadow: 0 0 0 2px var(--app-interaction-accent-soft); }
-.film-set-number__input input { width: 100%; min-width: 0; padding: 8px; border: 0; background: transparent; color: var(--app-web-text-primary); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; outline: none; appearance: textfield; }
+.film-set-number__input input { width: 100%; min-width: 0; padding: 8px; border: 0; background: transparent; color: var(--app-web-text-primary); font: inherit; font-size: 13px; line-height: 20px; height: 30px; box-sizing: border-box; font-variant-numeric: tabular-nums; outline: none; appearance: textfield; }
 .film-set-number[data-axis] input { padding-left: 23px; }
 .film-set-number input::-webkit-inner-spin-button { appearance: none; }
 .film-set-number input:disabled { opacity: 0.5; cursor: not-allowed; }
 .film-set-number input[aria-invalid="true"] { color: var(--app-status-danger); }
-.film-set-number__input > span { padding-right: 8px; font-size: 10px; }
+.film-set-number__input > span { padding-right: 8px; font-size: 12px; }
 .film-set-object-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
 .film-set-object-delete.ui-button { color: var(--app-web-text-muted); }
 .film-set-object-delete.ui-button:hover { color: var(--app-status-danger); }
-.film-set-object-hint { margin: 12px 0 0; color: var(--app-web-text-muted); font-size: 11px; line-height: 1.6; }
+.film-set-object-hint { margin: 12px 0 0; color: var(--app-web-text-muted); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 .film-set-object-error { margin-top: 10px; padding: 8px; border-radius: 6px; background: var(--app-web-subtle); color: var(--app-status-danger); font-size: 12px; line-height: 1.5; }
 
 .film-set-object-row:focus-visible { outline: 2px solid var(--app-interaction-accent); outline-offset: 2px; }
 
-.film-set-animation-controls { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; max-width: 100%; box-sizing: border-box; gap: 12px; padding: 16px; border-bottom: 1px solid var(--mc-border); }
+.film-set-animation-controls { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; max-width: 100%; box-sizing: border-box; gap: 12px; padding: 16px; border-bottom: 1px solid var(--app-web-border); }
 .film-set-animation-controls label { min-width: 0; max-width: 100%; display: flex; gap: 8px; align-items: center; }
 .film-set-animation-controls input:not([type="checkbox"]):not([type="color"]), .film-set-animation-controls select { width: 0; max-width: 100%; min-width: 0; flex: 1 1 0; text-overflow: ellipsis; }
 .film-set-animation-modes, .film-set-animation-actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -102,14 +102,16 @@
 /* 单栏按拍摄任务组织；低频操作与构图参数渐进展开。 */
 .film-set-shot-tools, .film-set-shot-picker, .film-set-shot-timing, .film-set-shot-backdrop { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .film-set-animation-controls .film-set-section-heading { margin-bottom: 0; }
-.film-set-shot-picker select { min-height: 34px; }
+.film-set-shot-picker select { min-height: 32px; }
 .film-set-shot-picker > .ui-button { flex-shrink: 0; }
 .film-set-shot-timing > label:first-child, .film-set-shot-backdrop > label { flex: 1; }
+.film-set-shot-backdrop > label { white-space: nowrap; }
+.film-set-shot-backdrop .ui-select-input { flex: 1; width: 0; }
 .film-set-shot-backdrop input[type="color"] { flex: none; width: 32px; height: 30px; padding: 2px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-panel); cursor: pointer; }
 .film-set-shot-menu { display: grid; gap: 4px; padding: 6px; min-width: 160px; }
 .film-set-shot-menu > .ui-button { justify-content: flex-start; }
 .film-set-composition { padding-top: 4px; }
-.film-set-composition summary, .film-set-transform__more summary { cursor: pointer; font-size: 12px; color: var(--app-web-text-primary); padding-block: 6px; }
+.film-set-composition summary, .film-set-transform__more summary { cursor: pointer; font-size: 13px; color: var(--app-web-text-primary); padding-block: 6px; }
 .film-set-composition summary > span { float: right; color: var(--app-web-text-muted); font-variant-numeric: tabular-nums; }
 .model-editor-dock[data-inspector] .film-set-composition .model-editor { height: auto; padding: 12px 0; }
 .film-set-composition .model-editor__body { padding: 0; }
@@ -138,3 +140,20 @@
 .film-set-object-tools { display: flex; gap: 4px; margin: 8px 0 12px; }
 .film-set-object-tools > button { flex: 1; min-width: 0; }
 .film-set-gizmo-readout { position: fixed; z-index: 30; pointer-events: none; padding: 6px 9px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-elevated); color: var(--app-web-text-primary); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.model-editor-dock[data-film-set] { font-size: 13px; line-height: 20px; }
+.model-editor-dock[data-film-set] .model-inspector-header h2 { font-size: 16px; line-height: 24px; }
+.model-editor-dock[data-film-set] .model-inspector-header p { font-size: 12px; line-height: 18px; }
+.model-editor-dock[data-film-set] input, .model-editor-dock[data-film-set] select, .model-editor-dock[data-film-set] button { font-family: inherit; }
+.film-set-animation-controls input:not([type="checkbox"]):not([type="color"]), .film-set-animation-controls select {
+  height: 32px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--app-web-border); border-radius: 6px;
+  background: var(--app-web-panel); color: var(--app-web-text-primary); font: inherit; font-variant-numeric: tabular-nums;
+}
+.film-set-shot-picker > .ui-select-input { flex: 1; min-width: 0; }
+.model-editor-dock[data-film-set] .ui-select-input.ui-button,
+.model-editor-dock[data-film-set] .ui-text-input { height: 32px; min-height: 32px; padding: 4px 8px; }
+.film-set-shot-kind, .film-set-image-reference p { margin: 0; font-size: 12px; line-height: 18px; color: var(--app-web-text-muted); overflow-wrap: anywhere; }
+.film-set-image-reference { display: grid; gap: 8px; }
+.model-editor-dock[data-film-set] .model-editor { font-size: 13px; line-height: 20px; }
+.model-editor-dock[data-film-set] .model-editor input, .model-editor-dock[data-film-set] .model-editor select { height: 32px; box-sizing: border-box; font: inherit; }
+.model-editor-dock[data-film-set] .model-editor label, .model-editor-dock[data-film-set] .model-editor__focus-title { font-size: 13px; }
+@media (max-height: 850px) { .film-set-object-list { max-height: 160px; } }

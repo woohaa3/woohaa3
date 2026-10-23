@@ -15,7 +15,7 @@ export type ModelWorkspaceService = {
   capture(): Promise<void>;
   acquireCapture(): Promise<() => void>;
   refreshGizmo(): void;
-  renderCameraPanel(input: { presentation?: "composition"; cameraCollectionMutable?: boolean; writable: boolean; readOnly: boolean; canvasId?: string; onActivateCamera?: () => void; renderGenerate?: () => ReactNode }): ReactNode;
+  renderCameraPanel(input: { presentation?: "composition"; cameraCollectionMutable?: boolean; captureEnabled?: boolean; writable: boolean; readOnly: boolean; canvasId?: string; onActivateCamera?: () => void; renderGenerate?: () => ReactNode }): ReactNode;
   /**
    * 渲染宿主 authoring 生成入口（`authoring.generate` 贡献）
    * （change: 2026-10-12-add-agent-conversation-panel，design D6/D8）。

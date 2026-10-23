@@ -71,6 +71,7 @@ export class ShotReferenceRecordingQueue {
         seen.add(key);
         if (clip.contentIdentity === null) {
           this.queued.delete(key);
+          this.inflight.delete(key);
           continue;
         }
         if (this.recorded.get(key) === clip.contentIdentity) {
@@ -134,6 +135,7 @@ export class ShotReferenceRecordingQueue {
   /** 录制成功：记录该版本已 ready，并清除同版本 dirty。 */
   complete(job: ShotReferenceRecordingJob): void {
     const key = shotReferenceJobKey(job);
+    if (this.queued.get(key)?.contentIdentity !== job.contentIdentity) return;
     this.recorded.set(key, job.contentIdentity);
     this.inflight.delete(key);
     if (this.queued.get(key)?.contentIdentity === job.contentIdentity) this.queued.delete(key);

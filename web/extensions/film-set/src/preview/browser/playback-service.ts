@@ -10,6 +10,14 @@ export class FilmSetPlaybackService {
   private reconcile: (() => void) | null = null;
   /** 镜头参考录制会话：把播放投影锁到该镜头的预览卡片（忽略 hover/聚焦），直到 `endCaptureSession`。 */
   private captureSession: { filmSetNodeId: string; clipId: string; previewNodeId: string } | null = null;
+  private stillCapture = false;
+  /** Suppress animation while the saved static rig captures T=0; no playback session is created. */
+  beginStillCapture(): () => void {
+    this.stillCapture = true;
+    this.reconcile?.();
+    return () => { this.stillCapture = false; this.reconcile?.(); };
+  }
+  isStillCapture(): boolean { return this.stillCapture; }
   getSnapshot = (): FilmSetPlaybackSnapshot => this.state;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   connect(controller: AnimationPlaybackController, reconcile: () => void): () => void {

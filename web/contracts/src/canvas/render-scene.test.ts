@@ -872,7 +872,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v22");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v24");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));
@@ -1597,6 +1597,13 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     expect(node.typeLabel).toBe("动态镜头");
     // 预览节点不合成为普通内容节点：无 outputAssetId/媒体引用等字段。
     expect(node).not.toHaveProperty("outputAssetId");
+  });
+
+  it("projects each shot's custom backdrop to the shared preview/capture rig", () => {
+    const source = filmSetCanvas();
+    (source.nodeData.film as unknown as { filmSetAnimations: { clips: { backdrop?: string }[] } }).filmSetAnimations.clips[0]!.backdrop = "#284e62";
+    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme() });
+    expect(scene.nodes.find(node => node.id === shotNodeId)!.shotPreview!.backdrop).toBe("#284e62");
   });
 
   it("本地播放状态与状态机进入卡片且只影响内容，不写 canonical", () => {

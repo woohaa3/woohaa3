@@ -218,7 +218,8 @@ describe("blank creation lifecycle", () => {
     expect(request).not.toHaveBeenCalled();
     const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="选择助手模型"]')!;
     await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
-    expect(document.querySelector('[role="menuitemradio"]')).toBeTruthy();
+    // 模型与 Variant 收在同一个横向选项面板里，仍挂在当前菜单的 Portal 内。
+    expect(document.querySelector('[role="dialog"][aria-label="选择助手模型"] .assistant-model-panel__option')).toBeTruthy();
     expect(close).not.toHaveBeenCalled();
   });
 });

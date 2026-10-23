@@ -82,13 +82,13 @@ export function installShotReferenceRecording(
     : null;
   const baseRecorder = options.recorder === undefined
     ? usesNative && nativeDriver
-      ? ((job: Parameters<ShotReferenceRecorder>[0]) => {
+      ? ((job: Parameters<ShotReferenceRecorder>[0], signal?: AbortSignal) => {
           // 宿主任务成功只表示「已保存」；版本缓存仍由权威资产回填后发布。
           return createNativeReferenceRecorder({
             driver: nativeDriver,
             canvasId: job.canvasId,
             contentIdentityOf: target => target.contentIdentity
-          })(targetForJob(job)).then(result =>
+          })(targetForJob(job), signal).then(result =>
             result.ok
               ? { ok: true as const }
               : { ok: false as const, error: result.error, transient: result.transient }
@@ -100,15 +100,16 @@ export function installShotReferenceRecording(
     : options.recorder;
   const recorder: ShotReferenceRecorder | null = baseRecorder === null
     ? null
-    : async (job) => {
+    : async (job, signal) => {
+        if (!shotReferenceTargetFor(ctx, job)) return { ok: false, error: "shot-kind-unsupported: 只有动态镜头可录制视频", transient: false };
         activity?.start(job);
         let result: ShotReferenceRecordResult;
         try {
-          result = await baseRecorder(job);
+          result = await baseRecorder(job, signal);
         } catch (cause) {
           result = { ok: false, error: cause instanceof Error ? cause.message : "镜头录制失败" };
         }
-        activity?.finish(job, result);
+        if (!signal?.aborted) activity?.finish(job, result);
         return result;
       };
 
@@ -144,7 +145,7 @@ export function installShotReferenceRecording(
 
   const scheduler = new ShotReferenceRecordingScheduler({
     canvasId: () => ctx.canvasState.getCanvas()?.id ?? "",
-    canvas: () => (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas()) as never,
+    canvas: () => ctx.canvasState.getCanvas() as never,
     focusedFilmSetId: () => focusedFilmSetId(ctx),
     recorder,
     isCachedReady: (ref) => cache.readyAsset(ref) !== null,

@@ -79,10 +79,12 @@ describe("ShotReferenceActivity（后台活动投影）", () => {
     expect(activity.records()[0]?.status).toBe("cancelled");
   });
 
-  it("在录的目标不被取消", () => {
+  it("类型变化清理在录活动，迟到成功不能复活", () => {
     const { activity } = fixture();
     activity.start(job());
     activity.syncQueued([]);
-    expect(activity.records()[0]?.status).toBe("running");
+    expect(activity.records()[0]?.status).toBe("cancelled");
+    activity.finish(job(), { ok: true });
+    expect(activity.records()[0]?.status).toBe("cancelled");
   });
 });

@@ -7,6 +7,7 @@
  */
 import { isBoundedId, isJsonObject } from "../validation.js";
 import { isModelKey } from "../task/model-identity.js";
+import type { FrozenShotImageReference } from "./film-set-shot-image-reference.js";
 
 export const CANVAS_API_BASE_PATH = "/api/canvases" as const;
 export const CANVAS_HEALTH_BASE_PATH = "/api/canvas-storage/health" as const;
@@ -22,6 +23,7 @@ export type CanvasRunRequest = {
   modelKey: string;
   prompt: string;
   parameters: Record<string, unknown>;
+  shotImageReferences?: FrozenShotImageReference[];
 };
 
 export type CanvasRunResponse =
@@ -61,6 +63,11 @@ export function decodeCanvasRunRequest(
   if (body.parameters !== undefined && !isJsonObject(body.parameters)) {
     return { ok: false, code: "malformed-request", message: "parameters 必须是对象" };
   }
+  if (body.shotImageReferences !== undefined && (!Array.isArray(body.shotImageReferences) || body.shotImageReferences.length > 128 || !body.shotImageReferences.every(ref => isJsonObject(ref)
+    && ["slotId", "sourceNodeId", "filmSetNodeId", "clipId", "contentIdentity", "profileKey"].every(key => isBoundedId(ref[key]))
+    && typeof ref.background === "string" && /^#[0-9a-f]{6}$/i.test(ref.background)))) {
+    return { ok: false, code: "malformed-request", message: "shotImageReferences 格式无效" };
+  }
   return {
     ok: true,
     value: {
@@ -70,6 +77,7 @@ export function decodeCanvasRunRequest(
       jobId: jobId as string,
       modelKey: modelKey as string,
       prompt: body.prompt,
+      ...(body.shotImageReferences === undefined ? {} : { shotImageReferences: body.shotImageReferences as FrozenShotImageReference[] }),
       parameters: (body.parameters as Record<string, unknown> | undefined) ?? {}
     }
   };
