@@ -47,7 +47,6 @@ import { RecentFilesIndex, planReleasedBytes, trackDocumentWhenReady } from "./r
 export const IMAGE_EDITOR_PLUGIN_ID = "image-editor";
 const IMAGE_EDITOR_WORKSPACE_ID = "image-editor-workspace";
 const DOCUMENT_WORKSPACE_ID = "image-document-workspace";
-const RECOVERY_ACTION_ID = "image-editor-reopen";
 
 export type ImageEditorPluginOptions = {
   canvasId?: string;
@@ -108,9 +107,7 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
        */
       const animationCodec = createAnimationCodecPort();
       setAnimationCodecPort(animationCodec);
-      let removingRecovery: (() => void) | null = null;
       /** 当前概览入口的文案（用于判断是否需要重新注册）。 */
-      let recoveryLabel: string | null = null;
 
       const getCanvas = () => workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
 
@@ -172,13 +169,11 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           documents: registry.snapshotState(),
           active: binding,
           busy,
-          // 恢复入口的数量随打开文档数变化（返回画布后仍可见）。
           writable: ctx.canvasSession.isWritable(),
           recentFiles: recentFiles.snapshot(),
           recentFilesError: recentFiles.lastError,
           notice
         });
-        syncRecoveryAction();
       }
 
       function activeBinding(resource: DocumentResource, entry: EditorDocumentEntry) {
@@ -221,45 +216,6 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       function setBusy(next: boolean): void {
         busy = next;
         publish();
-      }
-
-      /**
-       * 概览入口（“打开文件…”/“图像编辑（n）”）。
-       *
-       * 这是画布上**唯一**能从概览进入 PhotoCraft 的入口：没有它，独立文件文档在工作区之外
-       * 无处可开（“打开文件…”按钮只在工作区的 tab 条里，形成先有文档才能打开文件的死循环）。
-       * 有未关闭文档时显示文档数并恢复上次活动文档；没有文档时直接打开文件选择器。
-       * 聚焦中（工作区自身可见）不显示，避免与工作区 tab 条重复。
-       */
-      function syncRecoveryAction(): void {
-        const count = registry.snapshotState().entries.length;
-        const mode = ctx.canvasNavigation.getSnapshot().mode;
-        const focused = mode.type === "node-focus" || mode.type === "document-workspace";
-        const label = count > 0 ? `图像编辑（${count}）` : "打开文件…";
-        if (focused) {
-          if (removingRecovery) {
-            removingRecovery();
-            removingRecovery = null;
-            recoveryLabel = null;
-          }
-          return;
-        }
-        // label 是贡献的静态字段：数量变化时重新注册，保证按钮文案与文档数一致。
-        if (removingRecovery && recoveryLabel === label) return;
-        removingRecovery?.();
-        removingRecovery = ctx.slots.register("canvas.toolbar-action", {
-          id: RECOVERY_ACTION_ID,
-          owner: IMAGE_EDITOR_PLUGIN_ID,
-          priority: 40,
-          label,
-          icon: PhotoEditIcon,
-          onActivate: () => {
-            const id = registry.activeId() ?? registry.snapshotState().entries[0]?.id ?? null;
-            if (id) activateDocument(id);
-            else openFile();
-          }
-        });
-        recoveryLabel = label;
       }
 
       // ------------------------------------------------------------ 节点呈现
@@ -476,7 +432,7 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       /** 准备呈现（节点入场过渡/文件尺寸解码）；失败给出可重试原因。 */
       async function startResource(resource: DocumentResource): Promise<boolean> {
         // 已初始化过的文档只把既有呈现重新绑定到导航，不重放 overview 入场或重新解码
-        // （tab 往返与“图像编辑（n）”恢复入口共用；change: 2026-10-21，design D4）。
+        // （tab 往返与重新进入同一节点共用；change: 2026-10-21，design D4）。
         if (resource.started) return true;
         if (resource.kind === "file") {
           const started = await resource.view.start();
@@ -1540,9 +1496,6 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           unsubscribeRect();
           removeOverlay();
           removeDocumentWorkspace();
-          removingRecovery?.();
-          removingRecovery = null;
-          recoveryLabel = null;
           disposeParticipant();
           unregisterGate();
           unregisterLeave();
@@ -1578,16 +1531,4 @@ function readMeta(asset: { metadata?: Record<string, unknown> } | null, key: str
 function readMetaNumber(asset: { metadata?: Record<string, unknown> } | null, key: string): number | null {
   const value = asset?.metadata?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-/** 右下角「图像编辑」恢复入口图标（与工具栏其它动作同尺寸）。 */
-function PhotoEditIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="9" cy="9.5" r="1.6" fill="currentColor" />
-      <path d="M4.5 16.5l4.2-4.2 3.1 3.1 2.6-2.6 4.1 4.1" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M7 21h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
 }
