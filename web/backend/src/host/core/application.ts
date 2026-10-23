@@ -25,7 +25,7 @@ import { createInProcessAuthoringServices } from "../../ports/authoring-adapters
 import { createExtensionCanvasAccessFacade, createExtensionNodeFacade } from "../../ports/extension-nodes.js";
 import { createBackendRuntime } from "../../runtime/backend-runtime.js";
 import { createSiteGate } from "./site-gate.js";
-import { internalModelMcpUrl } from "./model-mcp-url.js";
+import { internalModelMcpEndpoint } from "./model-mcp-url.js";
 import type { ApplicationModule, HostContext, HostPlugin } from "../context.js";
 import { ROUTE_ORDER } from "../order.js";
 
@@ -137,17 +137,14 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     // Agent 来源扩展由启动期目录扫描提供；宿主只注入部署 env 与受控 MCP 工具 endpoint。
     // 回环直连本进程，但仍受应用挂载前缀约束：子路径部署必须带上 `config.basePath`，
     // 否则 MCP 404，本机 Agent 会表现为“没有画布工具”。
-    const mcpServerUrl = internalModelMcpUrl({
-      port: env.BACKEND_PORT ?? env.PORT ?? "5180",
-      basePath: config.basePath
-    });
+    const mcpEndpoint = internalModelMcpEndpoint(env, config.basePath);
     const manifest = createBackendExtensionManifest([], config.extensionHost);
     const definitions = config.applicationBackendExtensions ?? (config.extensionHost
       ? await config.extensionHost.createDefinitions({
           // 目录扫描按 extensionId 传 options；本地开发也始终给可信 owner 主体。
           'oauth-agent': { authConfigured: true, serviceOptions: { ...config.chatgptServiceOptions, deploymentBasePath: config.basePath } },
-          'sdk-agent': { env, mcpServerUrl },
-          'local-agent': { env, mcpEndpoint: { name: "woohaa", url: mcpServerUrl } }
+          'sdk-agent': { env, get mcpServerUrl() { return mcpEndpoint.url; } },
+          'local-agent': { env, mcpEndpoint }
         }, { excludeHostPlugins: true })
       : manifest.definitions);
     const metadata = config.applicationExtensionMetadata ?? manifest.metadata;

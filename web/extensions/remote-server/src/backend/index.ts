@@ -103,6 +103,7 @@ import {
   createMemorySyncPendingStore,
   type RemoteSyncScope
 } from "./sync-pending-store.js";
+import { createHash } from "node:crypto";
 import { createServerStorageBackend, type ServerStorageBackendOptions } from "./storage/backend.js";
 import { resolveServerStorageConfig, type ServerStorageConfig } from "./storage/config.js";
 
@@ -629,13 +630,23 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 就绪顺序：占位注册（available=false、空目录）→ 有会话后 GetCapabilities/GetCatalog →
        * 原地替换模型。宿主没有生成扩展点时安静跳过（纯本地宿主/旧版本），不影响接入本身。
        */
+      /**
+       * 参考字节上传出口：provider 调 uploadReference 时，把字节写进本部署的服务端存储，
+       * 换回一个 locator。实现依赖下面注册的存储后端，因此用可变引用而不是参数。
+       */
+      let referenceUploader:
+        | ((input: { bytes: Uint8Array; contentType: string; canvasId?: string; storageKey?: string }) => Promise<string | undefined>)
+        | null = null;
+
       const generationBridge = createRemoteGenerationBridge({
         ...(host.registerGeneration ? { registerGeneration: host.registerGeneration } : {}),
         session: () => sessionSource.current(),
         fetchImpl,
         log,
         ...(options.generation?.pollIntervalMs !== undefined ? { pollIntervalMs: options.generation.pollIntervalMs } : {}),
-        ...(options.generation?.clientTimeoutMs !== undefined ? { clientTimeoutMs: options.generation.clientTimeoutMs } : {})
+        ...(options.generation?.clientTimeoutMs !== undefined ? { clientTimeoutMs: options.generation.clientTimeoutMs } : {}),
+        // 参考输入走自己上传：本地画布的字节在客户端，服务端读不到裸键。
+        putReference: async (input) => (referenceUploader === null ? undefined : referenceUploader(input))
       });
       generationBridge.activate();
       // 已有会话（本进程登录过或从文档存储恢复）时立即拉一次目录；没有会话就是安静休眠。
@@ -2155,6 +2166,21 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         });
         host.registerStorage(backend);
         registeredStorageBackend = backend;
+        referenceUploader = async ({ bytes, contentType, storageKey }) => {
+          // 参考输入是**这次任务的输入**，归调用主体：写主体命名空间，与服务端的
+          // ActorNamespaceOfActor 用同一套派生（sha256(subject)）。画布命名空间要求服务端
+          // 已登记该画布，本地未同步的画布不满足，这也是上一版失败的根因。
+          const session = await sessionSource.current();
+          const subject = session?.subject ?? "";
+          if (subject === "") return undefined;
+          const actorSegment = createHash("sha256").update(subject).digest("hex");
+          const name = storageKey !== undefined && storageKey !== ""
+            ? storageKey.split("/").pop() as string
+            : createHash("sha256").update(bytes).digest("hex");
+          const key = `actor/${actorSegment}/media/reference-inputs/${name}`;
+          await backend.put(key, bytes, contentType, undefined);
+          return backend.locatorOf ? await backend.locatorOf(key, undefined) : undefined;
+        };
         host.logger({
           event: "server-storage-activated",
           backendId: backend.backendId,

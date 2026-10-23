@@ -264,6 +264,18 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
       // 唯一展开状态源是 CanvasNavigation 的类型化 route；只有用户点击详情动作才打开。打开只读
       // 快照、定位确切回合，**不**重新提交；关闭恢复合法来源（由 Nav 保存的轻量来源 route）。
       const agentConversations = ctx.get("agentConversationService" as never) as AgentConversationServiceHandle | undefined;
+      // 「返回生成面板」语义的实时来源：订阅选中节点与聚焦变化，供详情面板内部
+      // 用 useSyncExternalStore 派生按钮文案（render 本身保持无 hook，便于静态解析）。
+      const detailReturnSource = agentConversations
+        ? {
+            subscribe: (listener: () => void) => {
+              const offSelection = nodeSelectionStore.subscribe(listener);
+              const offNavigation = ctx.canvasNavigation.subscribe(listener);
+              return () => { offSelection(); offNavigation(); };
+            },
+            canReturn: () => agentConversations.canReturnToSource()
+          }
+        : undefined;
       const agentConversationPanel: CanvasPanelDefinition = {
         type: AGENT_CONVERSATION_PANEL_TYPE,
         owner: TASK_EXECUTION_PLUGIN_ID,
@@ -277,6 +289,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               conversationId={route.conversationId}
               requestId={route.requestId}
               {...(route.nodeId ? { nodeId: route.nodeId } : {})}
+              {...(detailReturnSource ? { returnToSource: detailReturnSource } : {})}
               service={agentConversations}
               onManageAssistant={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: { canvasId: ctx.canvasScope.canvasId() } })}
               targetExecution={() => {

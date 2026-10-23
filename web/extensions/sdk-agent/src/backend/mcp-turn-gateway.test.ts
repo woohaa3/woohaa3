@@ -100,14 +100,17 @@ describe("每轮 MCP 授权与权威回执", () => {
     } finally { release(); await f.close(); }
   });
 
-  it("工具预算在上游执行前拒绝第 25 个调用，重试不额外消耗", async () => {
+  it("超过原 24 次工具调用仍执行，callId 幂等且重复不重复触发上游 (task 2.2)", async () => {
+    // change: 2026-10-22-remove-agent-execution-limits：原 completed.size>=24 的
+    // tool-budget-exceeded 门禁已删除；稳定 callId 仍保证幂等与回执收敛。
     const f = await fixture();
     try {
-      for (let id = 1; id <= 24; id++) expect((await f.call("get_model_node", {}, id)).body).toHaveProperty("result");
+      for (let id = 1; id <= 40; id++) expect((await f.call("get_model_node", {}, id)).body).toHaveProperty("result");
+      // 相同 callId + 相同参数：复用原结果，不重复触达上游。
       expect((await f.call("get_model_node", {}, 1)).body).toHaveProperty("result");
-      expect((await f.call("submit_model_script", {}, 25)).body).toHaveProperty("error");
-      expect(f.received.filter((item) => item.method === "tools/call")).toHaveLength(24);
-      expect(f.gateway.receipts).toEqual([]);
+      expect(f.received.filter((item) => item.method === "tools/call")).toHaveLength(40);
+      // 相同 callId + 不同参数仍然冲突。
+      expect((await f.call("submit_model_script", {}, 1)).body).toHaveProperty("error");
     } finally { await f.close(); }
   });
 

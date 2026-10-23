@@ -43,6 +43,15 @@ function summary(nodeId: string, extra: Partial<CanvasNodeRunSummary> = {}): Can
 }
 
 describe("applyRunStateProjection", () => {
+  it("explicit film feedback controls decoration even when compatibility busy remains true", () => {
+    const nodes = [node("film", { type: "model", busy: true, compositeAsset: { x: 0, y: 0, width: 100, height: 100 } })];
+    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, aggregateRunning: true,
+      filmSetFeedback: { operationKey: "attempt", phase: "verifying", source: "conversion", labelCode: "verifying" } })], records: [] });
+    expect(nodes[0].aggregateRun).toMatchObject({ active: true, filmSet: { phase: "verifying" } });
+    applyRunStateProjection(nodes, { summaries: [summary("film", { isAggregate: true, aggregateRunning: true, filmSetFeedback: null })], records: [] });
+    expect(nodes[0].aggregateRun?.active).toBe(false);
+    expect(nodes[0].busy).toBe(true);
+  });
   it("规范节点 busy 的内容交付复用聚合执行遮罩，不依赖 Agent 操作记录", () => {
     const nodes = [node("film", { type: "model", busy: true, compositeAsset: { x: 0, y: 0, width: 100, height: 100 } })];
     applyRunStateProjection(nodes, { summaries: [], records: [] });

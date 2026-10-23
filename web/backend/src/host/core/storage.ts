@@ -301,6 +301,19 @@ export function createStorageRegistry(options: StorageRegistryOptions): HostStor
     },
     list: () => [...backends.values()],
     resolve: (backendId) => backends.get(backendId),
+    async readLocator(locator) {
+      // locator 的解析只在这里发生：拆出 backendId 交给对应后端，使用方看不到键布局。
+      const rest = locator.startsWith("media://") ? locator.slice("media://".length) : "";
+      const slash = rest.indexOf("/");
+      if (slash <= 0 || slash === rest.length - 1) throw new Error(`locator 形状不合法：${locator}`);
+      const backendId = rest.slice(0, slash);
+      const backend = backends.get(backendId);
+      if (!backend) throw new Error(`locator 指向未注册的存储后端：${backendId}`);
+      if (typeof backend.readLocator !== "function") {
+        throw new Error(`存储后端 ${backendId} 不支持按 locator 读取`);
+      }
+      return backend.readLocator(locator);
+    },
     bucket,
     async replicate(namespace, key, replicateOptions) {
       const targetId = replicateOptions.targetBackendId?.trim();

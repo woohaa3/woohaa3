@@ -13,12 +13,24 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApplicationService } from "../src/composition.js";
 import { createFakeRequestAuthenticator, testPrincipal } from "../src/auth/adapter.js";
-import { createGameFurnaceBackendDefinition } from "@woohaa3/extension-game-furnace/backend-extension";
+import type { ApplicationBackendExtensionDefinition } from "../src/extensions/contract.js";
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+/**
+ * 测试用后端扩展定义：验证装配机制（清单登记、启用状态、能力注入）本身，
+ * 不绑定任何具体业务扩展。私有扩展（如 game-furnace）迁出公开仓后仍能覆盖同一路径。
+ */
+function testBackendExtension(): ApplicationBackendExtensionDefinition {
+  return {
+    extensionId: "test-fixture-extension",
+    capabilities: [{ id: "test-fixture-extension.run", kind: "capability", description: "装配路径 fixture" }],
+    activate() {},
+  };
+}
 
 /** 测试用 site-access 策略：允许全部 action（生产由 site-access 扩展提供）。 */
 function allowAllSitePolicy(): import("@woohaa3/contracts").SiteAccessPolicy {
@@ -51,15 +63,15 @@ describe("Application Service 站点插件接线", () => {
       // 本测试显式注入等价 fixture（change: 2026-10-15-...，任务 4.3：Application 不再内建生产清单）。
       applicationExtensionMetadata: [
         {
-          extensionId: "game-furnace",
-          name: "游戏炼丹炉",
-          description: "收集画布素材并使用本站语言模型生成可试玩 HTML 游戏。",
+          extensionId: "test-fixture-extension",
+          name: "装配路径 fixture",
+          description: "验证站点清单登记、启用状态与后端定义装配；不绑定具体业务扩展。",
           version: "0.1.0",
           managementScope: "site",
           host: "backend",
-          configSchema: { schemaId: "game-furnace-config", schemaVersion: 1 },
+          configSchema: { schemaId: "test-fixture-extension-config", schemaVersion: 1 },
           dependencies: [],
-          capabilities: [{ id: "game-furnace.generate", kind: "capability", description: "生成可试玩 HTML 游戏" }],
+          capabilities: [{ id: "test-fixture-extension.run", kind: "capability", description: "装配路径 fixture" }],
           defaultEnabled: true
         },
         {
@@ -75,7 +87,7 @@ describe("Application Service 站点插件接线", () => {
           defaultEnabled: false
         }
       ],
-      applicationBackendExtensions: [createGameFurnaceBackendDefinition()]
+      applicationBackendExtensions: [testBackendExtension()]
     });
     const server = http.createServer((req, res) => {
       void service.handle(req, res).then((handled) => {
@@ -92,8 +104,8 @@ describe("Application Service 站点插件接线", () => {
     try {
       const snapshot = (await (await fetch(`${base}/api/extensions`)).json()) as { revision: number; plugins: Array<{ extensionId: string; actualState: string; desiredEnabled: boolean }> };
       expect(snapshot.revision).toBeGreaterThanOrEqual(0);
-      // 注入清单登记 game-furnace（有后端定义，默认启用）与只有元数据的 legacy-import（未配置）。
-      expect(snapshot.plugins).toContainEqual(expect.objectContaining({ extensionId: "game-furnace", actualState: "active", desiredEnabled: true }));
+      // 注入清单登记 test-fixture-extension（有后端定义，默认启用）与只有元数据的 legacy-import（未配置）。
+      expect(snapshot.plugins).toContainEqual(expect.objectContaining({ extensionId: "test-fixture-extension", actualState: "active", desiredEnabled: true }));
       expect(snapshot.plugins).toContainEqual(expect.objectContaining({ extensionId: "legacy-import", actualState: "unconfigured", desiredEnabled: false }));
 
       const live = await fetch(`${base}/api/application/health/live`);

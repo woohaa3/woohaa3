@@ -1,0 +1,30 @@
+{
+  "$comment": "工具矩阵与内核门禁的跨语言契约（change: 2026-10-22-add-photocraft-image-mode-workflows，任务 4.4）。Rust `features::modes::gate` 与本包 `modeToolAvailability` 必须逐项一致：界面提示与内核拒绝不能各说一套。`tools` 把工具映射到代表命令，`closedByMode` 列出该模式下会被内核拒绝的工具，未列出的模式全部放开（实测灰度/双色调会把彩色写入收敛为灰阶，不破坏不变量）。",
+  "tools": {
+    "move": [],
+    "marquee": [],
+    "lasso": [],
+    "wand": [],
+    "quick": [],
+    "pen": [],
+    "brush": ["paint.stroke"],
+    "eraser": ["paint.stroke"],
+    "text": ["type.create"],
+    "clone": ["paint.cloneStamp"],
+    "heal": ["paint.healingBrush"],
+    "retouch": ["paint.smudge"]
+  },
+  "neverGated": ["move", "marquee", "lasso", "wand", "quick", "pen"],
+  "closedByMode": {
+    "indexed": ["brush", "eraser", "text", "clone", "heal", "retouch"],
+    "bitmap": ["brush", "eraser", "text", "clone", "heal", "retouch"]
+  },
+  "colourWritingCommands": {
+    "indexed": ["paint.stroke", "paint.pencil", "paint.cloneStamp", "paint.healingBrush", "paint.smudge", "type.create", "edit.fillForeground", "edit.fillBackground", "path.fill", "path.stroke", "filter.blur.gaussianBlur", "image.adjustments.brightnessContrast", "layer.newAdjustmentLayer.curves"],
+    "bitmap": ["paint.stroke", "paint.pencil", "paint.cloneStamp", "paint.healingBrush", "paint.smudge", "type.create", "edit.fillForeground", "edit.fillBackground", "path.fill", "path.stroke", "filter.blur.gaussianBlur", "image.adjustments.brightnessContrast", "layer.newAdjustmentLayer.curves"]
+  },
+  "reason": {
+    "indexed": "内核不把写入量化到颜色表（抗锯齿边缘本身就会产生表外颜色），因此拒绝一切写像素颜色的命令；先用 image.mode.rgb 转换再编辑。",
+    "bitmap": "内核写入的是 8 位通道，只有黑白两点才算合法；因此拒绝一切写像素颜色的命令，先用 image.mode.grayscale 或 image.mode.rgb 转换再编辑。"
+  }
+}

@@ -17,10 +17,10 @@ async function fixture(t, changes = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'woohaa-runtime-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
   const { privateKey, publicKey } = generateKeyPairSync('ed25519'); const body = changes.body || archive(changes.name, changes.type);
   const component = { id: 'codex', version: '1.2.3', platform: process.platform, arch: process.arch, url: 'codex.tar.gz', bytes: body.length, unpackedBytes: 1024, sha256: createHash('sha256').update(body).digest('hex'), entry: 'bin/codex', kind: 'executable', ...changes.component };
-  const catalog = Buffer.from(JSON.stringify({ schemaVersion: 1, components: [component, ...(changes.otherComponents || [])] }));
+  const catalog = Buffer.from(JSON.stringify({ schemaVersion: changes.schemaVersion || 1, components: [component, ...(changes.otherComponents || [])] }));
   const signature = sign(null, catalog, privateKey).toString('base64');
   const defaultsPath = path.join(root, 'defaults.json'), lockPath = path.join(root, 'lock.json');
-  await fs.writeFile(defaultsPath, JSON.stringify({ schemaVersion: 1, cdn: { baseUrl: 'https://cdn.example.test/' }, trustKeys: [publicKey.export({ type: 'spki', format: 'pem' })] }));
+  await fs.writeFile(defaultsPath, JSON.stringify({ schemaVersion: 1, cdn: { baseUrl: changes.baseUrl || 'https://cdn.example.test/' }, trustKeys: [publicKey.export({ type: 'spki', format: 'pem' })] }));
   await fs.writeFile(lockPath, JSON.stringify({ schemaVersion: 1, components: { codex: { version: '1.2.3' } } }));
   let calls = 0;
   const urls = [];
@@ -46,9 +46,25 @@ test('shared install deduplicates network and cancellation affects only one wait
 test('last cancellation cleans staging and retry installs', async t => {
   const f = await fixture(t, { delay: true }); const controller = new AbortController(); const attempt = f.manager.install('codex', { signal: controller.signal }); controller.abort(new Error('cancel')); await assert.rejects(attempt, /cancel/); await new Promise(r => setTimeout(r, 20)); assert.equal((await f.manager.install('codex')).status, 'ready');
 });
-test('local configuration validates exact version and never downloads', { skip: process.platform === 'win32' }, async t => {
+test('Codex local programs accept any reported version except a blocklist', { skip: process.platform === 'win32' }, async t => {
   const f = await fixture(t); const cli = path.join(f.root, 'codex'); await fs.writeFile(cli, '#!/bin/sh\necho codex 1.2.3\n', { mode: 0o755 }); assert.equal((await f.manager.configure('codex', { source: 'local', path: cli })).status, 'ready'); const h = await f.manager.resolve('codex'); assert.equal(h.source, 'local'); h.release(); assert.equal(f.calls(), 0);
-  await fs.writeFile(cli, '#!/bin/sh\necho codex 1.2.30\n'); assert.equal((await f.manager.inspect('codex')).status, 'incompatible'); await assert.rejects(f.manager.configure('codex', { source: 'local', path: 'relative' }), { code: 'INVALID_CONFIG' });
+  await fs.writeFile(cli, '#!/bin/sh\necho codex 1.2.30\n'); assert.equal((await f.manager.inspect('codex')).status, 'ready'); assert.equal((await f.manager.inspect('codex')).version, '1.2.30');
+  await fs.writeFile(f.options.lockPath, JSON.stringify({ schemaVersion: 1, components: { codex: { version: '1.2.3', blockedVersions: ['1.2.30'] } } }));
+  assert.equal((await f.manager.inspect('codex')).status, 'incompatible');
+  await assert.rejects(f.manager.configure('codex', { source: 'local', path: 'relative' }), { code: 'INVALID_CONFIG' });
+});
+test('Codex accepts a ChatGPT app bundle without an exact version allowlist', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t);
+  const app = path.join(f.root, 'ChatGPT.app');
+  const cli = path.join(app, 'Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex');
+  await fs.mkdir(path.dirname(cli), { recursive: true });
+  await fs.writeFile(cli, '#!/bin/sh\necho "codex-cli 0.163.0-alpha.10.2"\n', { mode: 0o755 });
+  await fs.writeFile(f.options.lockPath, JSON.stringify({ schemaVersion: 1, components: { codex: { version: '0.161.0', localVersions: ['0.161.0'] } } }));
+  const state = await f.manager.configure('codex', { source: 'local', path: app });
+  assert.equal(state.status, 'ready');
+  assert.equal(state.entry, cli);
+  assert.equal(state.version, '0.163.0-alpha.10.2');
+  assert.equal(f.calls(), 0);
 });
 test('configuration rejects unknown fields and user trust root replacement', async t => {
   const f = await fixture(t); await fs.mkdir(path.join(f.root, 'config')); await fs.writeFile(f.manager.configPath, JSON.stringify({ trustKeys: [] })); await assert.rejects(f.manager.list(), { code: 'INVALID_CONFIG' });
@@ -107,7 +123,7 @@ test('real packaging USTAR output installs through signed catalog boundary', asy
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'woohaa-ustar-')); t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const source = path.join(temporary, 'source'); await fs.mkdir(path.join(source, 'bin'), { recursive: true }); await fs.writeFile(path.join(source, 'bin/codex'), '#!/bin/sh\necho codex 1.2.3\n', { mode: 0o755 });
   const { createComponentArchive } = await import('../../scripts/package-runtime-components.mjs');
-  const archivePath = path.join(temporary, 'artifact.tar.gz'); createComponentArchive(source, archivePath);
+  const archivePath = path.join(temporary, 'artifact.tar.gz'); await createComponentArchive(source, archivePath);
   const f = await fixture(t, { body: await fs.readFile(archivePath) }); assert.equal((await f.manager.install('codex')).status, 'ready');
 });
 test('idle native consumer cooperatively releases its lease on removal request', async t => {
@@ -164,4 +180,18 @@ test('app release CDN directory changes reuse unchanged installed components wit
  const next=createRuntimeComponentManager({...f.options,fetchImpl:()=>{throw new Error('unchanged runtime must not download after App upgrade');}});
  assert.equal((await next.install('codex')).status,'ready');
  const handle=await next.resolve('codex');assert.equal(handle.version,'1.2.3');handle.release();
+});
+
+test('schema 2 resolves shared blobs under runtime root and rejects other paths', async t => {
+ const body=archive(), sha256=createHash('sha256').update(body).digest('hex');
+ const baseUrl='https://cdn.example.test/woohaa/runtimes/darwin-aarch64/0.2.0/';
+ const url=`blobs/sha256/${sha256}.tar.gz`;
+ const f=await fixture(t,{body,schemaVersion:2,baseUrl,envelope:true,component:{url}});
+ assert.equal((await f.manager.install('codex')).status,'ready');
+ assert(f.urls.includes(`https://cdn.example.test/woohaa/runtimes/${url}`));
+ for(const bad of ['../escape.tar.gz',`blobs/sha256/${'0'.repeat(64)}.tar.gz`,'https://other.test/archive']){
+  const f=await fixture(t,{body,schemaVersion:2,baseUrl,envelope:true,component:{url:bad}});
+  await assert.rejects(f.manager.install('codex'),{code:'INVALID_CATALOG'});
+  assert(!f.urls.some(u=>u.endsWith('.tar.gz')));
+ }
 });

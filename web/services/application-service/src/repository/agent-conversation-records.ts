@@ -54,6 +54,14 @@ export type ConversationTurnRecord = {
   connectionAdapterId: string | null;
   connectionConfigRevision: number | null;
   connectionCredentialEpoch: number | null;
+  /**
+   * 受理时冻结的历史基准（消息 sequence 上界；change: 2026-10-22-remove-agent-execution-limits，
+   * 任务 3.1 / design D3）。
+   *
+   * 每个回合只读取受理前已完成的合法前缀，不纳入其他并发回合尚在生成中的半条输出。
+   * 旧数据为 null（按当前全部历史读取）。
+   */
+  historySequence: number | null;
   assistantText: string | null;
   runId: string | null;
   taskId: string | null;
@@ -130,6 +138,8 @@ export type TurnRow = {
   connection_adapter_id: string | null;
   connection_config_revision: number | null;
   connection_credential_epoch: number | null;
+  /** 受理时冻结的历史基准（change: 2026-10-22-remove-agent-execution-limits，任务 3.1）。 */
+  history_sequence: number | null;
   assistant_text: string | null;
   run_id: string | null;
   task_id: string | null;
@@ -213,6 +223,7 @@ export function turnFromRow(row: TurnRow): ConversationTurnRecord {
     connectionAdapterId: row.connection_adapter_id ?? null,
     connectionConfigRevision: row.connection_config_revision ?? null,
     connectionCredentialEpoch: row.connection_credential_epoch ?? null,
+    historySequence: row.history_sequence ?? null,
     assistantText: row.assistant_text,
     runId: row.run_id,
     taskId: row.task_id,

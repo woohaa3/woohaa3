@@ -5,7 +5,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
-  AGENT_CANVAS_LIMITS,
   agentProtocolVersion,
   type AgentPlanOperation,
   type AgentSemanticKind
@@ -16,7 +15,7 @@ import {
   compileForTool
 } from "./execution.js";
 import { createValidationToken, AGENT_CAPABILITY_VERSION } from "./planner.js";
-import { errorResult, now, structured } from "./tool-policy.js";
+import { errorResult, structured } from "./tool-policy.js";
 import {
   CANVAS_ID_SCHEMA,
   OPERATION_SCHEMA,
@@ -34,7 +33,7 @@ export function registerAgentPlanTools(server: McpServer, deps: AgentAuthoringTo
       inputSchema: z.strictObject({
         ...CANVAS_ID_SCHEMA,
         requestId: z.string().min(1).optional(),
-        operations: z.array(OPERATION_SCHEMA).min(1).max(AGENT_CANVAS_LIMITS.maxPlanOperations)
+        operations: z.array(OPERATION_SCHEMA).min(1)
       }),
       outputSchema: z.looseObject({
         ok: z.literal(true),
@@ -49,16 +48,13 @@ export function registerAgentPlanTools(server: McpServer, deps: AgentAuthoringTo
       const outcome = await compileForTool(deps, canvasId, "validate_canvas_plan", operations as AgentPlanOperation[], requestId);
       if (!outcome.ok) return errorResult(outcome.error);
       const compiled = outcome.compiled;
-      const expiresAtMs = now(deps) + (deps.validationTokenTtlMs ?? 120_000);
-      const validationToken = createValidationToken(
-        {
-          canvasId: compiled.canvasId,
-          basisRevision: compiled.basisRevision,
-          capabilityVersion: AGENT_CAPABILITY_VERSION,
-          planHash: compiled.payloadHash
-        },
-        expiresAtMs
-      );
+      const validationToken = createValidationToken({
+        canvasId: compiled.canvasId,
+        basisRevision: compiled.basisRevision,
+        capabilityVersion: AGENT_CAPABILITY_VERSION,
+        planHash: compiled.payloadHash,
+        ...(deps.principalId !== undefined ? { subject: deps.principalId } : {})
+      });
       const result = {
         ok: true as const,
         protocolVersion: agentProtocolVersion(),
@@ -82,7 +78,7 @@ export function registerAgentPlanTools(server: McpServer, deps: AgentAuthoringTo
       inputSchema: z.strictObject({
         ...CANVAS_ID_SCHEMA,
         requestId: z.string().min(1),
-        operations: z.array(OPERATION_SCHEMA).min(1).max(AGENT_CANVAS_LIMITS.maxPlanOperations),
+        operations: z.array(OPERATION_SCHEMA).min(1),
         validationToken: z.string().min(1).optional()
       }),
       outputSchema: z.looseObject({

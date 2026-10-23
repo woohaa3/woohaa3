@@ -23,7 +23,7 @@ import {
   threadIdFromResult
 } from "../protocol/codex-appserver.js";
 import type { StdioConnection } from "../process-manager.js";
-import { inheritedMcpServerNames } from "../codex-home.js";
+import { inheritedMcpServerNames, inheritedPluginNames } from "../codex-home.js";
 import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportResult } from "./transport.js";
 
 export type CodexAppServerTransportOptions = {
@@ -148,8 +148,11 @@ async function ensureInitialized(
 /** 受控工具面：当前 App Server 通过 `config.mcp_servers` 注入，而不是顶层 `mcpServers`。 */
 function threadConfig(input: LocalAgentTransportInput): Record<string, unknown> {
   const config: Record<string, unknown> = {
-    // 只走受控 MCP；不把内建 shell / 网页搜索当作工具面。
+    // 只走受控 MCP；不把内建 shell / 网页搜索 / 插件应用当作工具面。
     "features.shell_tool": false,
+    "features.js_repl": false,
+    "features.apps": false,
+    "features.skills": false,
     web_search: "disabled"
   };
   const mcpServers: Record<string, unknown> = {};
@@ -163,14 +166,64 @@ function threadConfig(input: LocalAgentTransportInput): Record<string, unknown> 
     mcpServers[input.mcpEndpoint.name] = {
       url: input.mcpEndpoint.url,
       http_headers: { Authorization: `Bearer ${input.toolToken}` },
-      default_tools_approval_mode: "approve"
+      default_tools_approval_mode: "approve",
+      ...(input.allowedTools.length > 0 ? { enabled_tools: [...input.allowedTools] } : {})
     };
   }
   if (Object.keys(mcpServers).length > 0) config.mcp_servers = mcpServers;
+  const plugins: Record<string, unknown> = {};
+  for (const name of inheritedPluginNames(input.configDir)) {
+    plugins[name] = { enabled: false };
+  }
+  if (Object.keys(plugins).length > 0) config.plugins = plugins;
   return config;
 }
 
 type McpReadyCheck = { ok: true; toolCount: number } | { ok: false; message: string };
+
+const MCP_FAILED_STATUSES = new Set(["failed", "disabled", "authenticationRequired", "cancelled"]);
+
+function mcpToolNames(tools: unknown): string[] {
+  if (Array.isArray(tools)) {
+    return tools.flatMap((tool) => {
+      if (typeof tool === "string") return [tool];
+      if (typeof tool === "object" && tool !== null && typeof (tool as { name?: unknown }).name === "string") {
+        return [(tool as { name: string }).name];
+      }
+      return [];
+    });
+  }
+  if (typeof tools === "object" && tools !== null) return Object.keys(tools);
+  return [];
+}
+
+function mcpServerName(entry: Record<string, unknown>): string | undefined {
+  if (typeof entry.name === "string") return entry.name;
+  const info = entry.serverInfo;
+  if (typeof info === "object" && info !== null && typeof (info as { name?: unknown }).name === "string") {
+    return (info as { name: string }).name;
+  }
+  return undefined;
+}
+
+function mcpRuntimeStatus(entry: Record<string, unknown>): string | undefined {
+  for (const key of ["runtimeStatus", "startupState", "status"] as const) {
+    const value = entry[key];
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return undefined;
+}
+
+function selectMcpStatus(
+  data: unknown[],
+  serverName: string,
+  requiredTools: readonly string[]
+): Record<string, unknown> | undefined {
+  const entries = data.filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null);
+  const named = entries.find((entry) => mcpServerName(entry) === serverName);
+  if (named) return named;
+  return entries.find((entry) => requiredTools.every((tool) => mcpToolNames(entry.tools).includes(tool)));
+}
 
 /**
  * 核对本轮线程真的拿到了受控 MCP 工具。
@@ -178,6 +231,10 @@ type McpReadyCheck = { ok: true; toolCount: number } | { ok: false; message: str
  * `thread/start` 的 config 可被接受但连接失败（例如子路径挂载下误用根路径返回 404）；
  * 只看 RPC 成功会让模型在没有工具的情况下回复“请上传模型”。这里用 `mcpServerStatus/list`
  * 读取该线程的连接状态与工具目录，缺失/失败时拒绝发送 turn。
+ *
+ * 就绪信号以工具目录为准：当前 Codex（0.145+）在工具已齐时仍可能报告
+ * `runtimeStatus: "unknown"`，或把配置名放在 `serverInfo.name` 而不是顶层 `name`。
+ * `connected`/`ready` 只是历史别名；硬失败状态仍立即拒绝。
  */
 async function waitForMcpTools(
   rpc: CodexRpc,
@@ -197,25 +254,21 @@ async function waitForMcpTools(
       return { ok: false, message: `无法核对 MCP 工具面：${error instanceof Error ? error.message : "协议调用失败"}` };
     }
     const data = Array.isArray(result.data) ? result.data : [];
-    const status = data.find((entry) => {
-      if (typeof entry !== "object" || entry === null) return false;
-      return (entry as Record<string, unknown>).name === input.serverName;
-    }) as Record<string, unknown> | undefined;
+    const status = selectMcpStatus(data, input.serverName, input.requiredTools);
     if (!status) {
       last = `MCP server "${input.serverName}" 未出现在线程工具状态中`;
     } else {
-      const tools = typeof status.tools === "object" && status.tools !== null ? Object.keys(status.tools) : [];
+      const tools = mcpToolNames(status.tools);
       const missing = input.requiredTools.filter((tool) => !tools.includes(tool));
-      if (status.runtimeStatus === "connected" && missing.length === 0) {
-        return { ok: true, toolCount: tools.length };
-      }
-      if (["failed", "disabled", "authenticationRequired", "cancelled"].includes(String(status.runtimeStatus))) {
-        const reason = typeof status.toolsError === "string" && status.toolsError !== "" ? status.toolsError : `MCP 状态 ${String(status.runtimeStatus)}`;
+      const runtime = mcpRuntimeStatus(status);
+      if (runtime && MCP_FAILED_STATUSES.has(runtime)) {
+        const reason = typeof status.toolsError === "string" && status.toolsError !== "" ? status.toolsError : `MCP 状态 ${runtime}`;
         return { ok: false, message: `受控 MCP 工具面不可用：${reason}` };
       }
-      last = missing.length > 0
-        ? `受控 MCP 缺少工具：${missing.join(", ")}`
-        : `MCP 状态 ${String(status.runtimeStatus ?? "unknown")}`;
+      if (missing.length === 0) {
+        return { ok: true, toolCount: tools.length };
+      }
+      last = `受控 MCP 缺少工具：${missing.join(", ")}`;
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }

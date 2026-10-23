@@ -14,9 +14,7 @@ import {
   FILM_SET_CONTENT_FIELD,
   FILM_SET_CONTENT_LEGACY_VERSION,
   FILM_SET_ITEM_KINDS,
-  MAX_FILM_SET_ITEMS,
   MAX_FILM_SET_NAME_LENGTH,
-  MAX_FILM_SET_TOTAL_SOURCE_BYTES,
   emptyFilmSetContent,
   isFilmSetMediaItem,
   type FilmSetContent,
@@ -27,7 +25,7 @@ import {
   type FilmSetOrigin,
   type FilmSetPlayback
 } from "../../../../contracts/src/canvas/film-set-content/types.js";
-import { itemSourceBytes, validateItemBudget } from "../../../../contracts/src/canvas/film-set-content/motion.js";
+import { validateItemBudget } from "../../../../contracts/src/canvas/film-set-content/motion.js";
 
 export type FilmSetContentDecodeResult =
   | { ok: true; value: FilmSetContent }
@@ -57,12 +55,8 @@ export function decodeFilmSetContent(input: unknown): FilmSetContentDecodeResult
   const schemaVersion = rawVersion as FilmSetContentVersion;
   const rawItems = input.items ?? [];
   if (!Array.isArray(rawItems)) return { ok: false, reason: "filmSetContent.items 必须是数组" };
-  if (rawItems.length > MAX_FILM_SET_ITEMS) {
-    return { ok: false, reason: `filmSetContent 超过上限 ${MAX_FILM_SET_ITEMS}` };
-  }
   const seen = new Set<string>();
   const items: FilmSetItem[] = [];
-  let totalSourceBytes = 0;
   for (const raw of rawItems) {
     if (!isJsonObject(raw)) return { ok: false, reason: "filmSetContent 元素必须是对象" };
     const id = raw.id;
@@ -87,10 +81,6 @@ export function decodeFilmSetContent(input: unknown): FilmSetContentDecodeResult
     if (!playback.ok) return { ok: false, reason: playback.reason };
     const budget = validateItemBudget(id, motion.value, playback.value);
     if (budget !== null) return { ok: false, reason: budget };
-    totalSourceBytes += itemSourceBytes(motion.value);
-    if (totalSourceBytes > MAX_FILM_SET_TOTAL_SOURCE_BYTES) {
-      return { ok: false, reason: `片场对象源码总量超过上限 ${MAX_FILM_SET_TOTAL_SOURCE_BYTES}` };
-    }
     const motionFields = motion.value ? { motion: motion.value } : {};
     const playbackFields = playback.value ? { playback: playback.value } : {};
     if (kind === "model") {

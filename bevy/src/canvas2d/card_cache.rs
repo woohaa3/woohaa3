@@ -1,7 +1,7 @@
 //! Fixed document-order blocks retain ordinary-card GPU buffers on local changes.
 //! All card primitives are opaque. Transparent groups and overlays remain in the
 //! original shared mesh, so this partition does not change blend submission order.
-use super::{Visuals, geometry::Geometry, labels::sync_labels};
+use super::{Visuals, geometry::Geometry, labels::sync_labels, text_presentation::LogicalText};
 use crate::{
     protocol::{GraphNode, Scene},
     theme::ThemeResource,
@@ -141,7 +141,7 @@ pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
-    text: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor), Without<Sprite>>,
+    text: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
     scene: &Scene,
     theme: &ThemeResource,
 ) -> u64 {

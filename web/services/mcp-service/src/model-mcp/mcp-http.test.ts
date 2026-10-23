@@ -363,9 +363,11 @@ describe("模型脚本指南的朝向约定（change: model-orientation-conventi
     // rotation 使用角度制与固定 Y-X-Z 顺序。
     expect(text).toContain("角度制");
     expect(text).toContain("Y-X-Z");
-    // 渲染预算：提示词必须声明估算顶点上限，避免产出超预算候选。
-    expect(text).toContain("Render budget");
-    expect(text).toContain(String(MODEL_RENDER_BUDGET.maxEstimatedVertices));
+    // change: 2026-10-22-remove-agent-execution-limits，任务 6.2：估算顶点**总量上限**已删除，
+    // 提示词改为可编辑性指引（明确「不是硬上限」）并保留每个图元的成本表。
+    expect(text).toContain("Editability guidance");
+    expect(text).toContain("not a hard limit");
+    expect(text).toContain(`box=${MODEL_RENDER_BUDGET.vertexCost.box}`);
     // 统计口径：禁止按成本表手算，并点明 segment 缺省是 capsule。
     expect(text).toContain("get_model_statistics");
     expect(text).toContain("MUST NOT 按上面的成本表自行推算");
@@ -525,6 +527,26 @@ describe("render_model_preview MCP（change: enhance-model-scene-authoring-api�
     expect(JSON.stringify(allowed.body)).toContain("cmd");
     expect(submitted).toEqual(["canvas-a"]);
   });
+
+  it("携带 bearer 时 tools/list 只暴露 grant 允许的工具", async () => {
+    const { base } = await start(undefined, {
+      authorize: () => ({ ok: true }),
+      allowedTools: token => token === "scoped" ? ["get_model_api", "submit_model_script"] : undefined
+    });
+    const headers = { authorization: "Bearer scoped" };
+    await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test-client", version: "1" } }
+    }, headers);
+    const listed = await mcpPost(base, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, headers);
+    const names = ((listed.body.result as { tools: Array<{ name: string }> }).tools).map((tool) => tool.name).sort();
+    expect(names).toEqual(["get_model_api", "submit_model_script"]);
+    expect(names).not.toContain("get_canvas_graph");
+    expect(names).not.toContain("get_node_output");
+  });
+
   it("real clip tool forwards captured actor scope through the registrar", async () => {
     const calls: unknown[] = [];
     const authorized: unknown[] = [];

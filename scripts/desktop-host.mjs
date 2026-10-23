@@ -10,10 +10,16 @@ import { importConfigPackage } from './lib/config-handoff.mjs';
 import { materializeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
 const arg=(name,fallback)=>{const i=process.argv.indexOf(`--${name}`);return i<0?fallback:process.argv[i+1];};
 const emit=value=>process.stdout.write(`${JSON.stringify(value)}\n`);
+// Heartbeat precedes awaited extension/backend startup. Archive helper commands stay single-response.
+if(arg('instance')){emit({type:'heartbeat'});setInterval(()=>emit({type:'heartbeat'}),2000).unref();}
 // Libraries must never corrupt the control stream.
 console.log=(...args)=>console.error(...args);
 const inheritedIngress=process.env.WOOHAA3_TRUSTED_INGRESS_SECRET;
 const dataDir=path.resolve(arg('data-dir',''));const resourceRoot=path.resolve(arg('resource-root',''));
+// Monitor preserves Node's default fatal-exception behavior (including exit status).
+process.on('uncaughtExceptionMonitor', (error, origin) => {
+ try { process.stderr.write(`[desktop-host] ${JSON.stringify({event:'fatal-exception',time:new Date().toISOString(),pid:process.pid,origin,stack:error?.stack??String(error)})}\n`); } catch {}
+});
 let releaseLock,runtime,closing=false;
 async function shutdown(){
  if(closing)return;closing=true;
@@ -39,6 +45,7 @@ async function main(){
  const version={schema:manifest.schema??1,build:manifest.build};prepareData(dataDir,version);
  process.chdir(dataDir);
  const env=desktopEnvironment({dataDir,resourceRoot,baseEnv:process.env,development:Boolean(manifest.developmentRoot)});
+ if(process.env.WOOHAA_DESKTOP_RUN_DIR)env.WOOHAA3_LOG_DIR=process.env.WOOHAA_DESKTOP_RUN_DIR;
  if(arg('dev-origin'))env.WOOHAA3_ALLOWED_ORIGINS=new URL(arg('dev-origin')).origin;
  if(manifest.developmentRoot&&inheritedIngress)env.WOOHAA3_TRUSTED_INGRESS_SECRET=inheritedIngress;
  Object.assign(process.env,env);
@@ -60,10 +67,12 @@ async function main(){
  }
  const {loadExtensionHost}=await import('./lib/extension-host.mjs');
  const {createBackendService}=await import(pathToFileURL(path.join(backendRoot,'dist/index.js')).href);
+ const {publishDesktopLoopbackPort,startDesktopServer}=await import('./lib/desktop-host-runtime.mjs');
+ const requestedPort=Number(arg('port','0'));
+ if(Number.isInteger(requestedPort)&&requestedPort>0)publishDesktopLoopbackPort(requestedPort,[env,process.env]);
  const extensionHost=await loadExtensionHost({repoRoot:manifest.developmentRoot??resourceRoot,env,logger:event=>console.error(`[extensions] ${JSON.stringify(event)}`)});
  const backend=await createBackendService({env,basePath:'/',extensionHost});
- const {startDesktopServer}=await import('./lib/desktop-host-runtime.mjs');
- runtime=await startDesktopServer({backend,frontendDir:path.join(resourceRoot,'frontend'),extensionHost,instance,port:Number(arg('port','0')),devOrigin:arg('dev-origin',null)});
+ runtime=await startDesktopServer({backend,frontendDir:path.join(resourceRoot,'frontend'),extensionHost,instance,port:requestedPort,devOrigin:arg('dev-origin',null),env});
  commitDataVersion(dataDir,version);
  emit(runtime.ready);
  process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);

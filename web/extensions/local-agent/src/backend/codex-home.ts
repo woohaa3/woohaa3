@@ -97,15 +97,26 @@ export function prepareCodexConfigDir(
   return { linked, sourceFound: true };
 }
 
+function readCodexToml(configDir: string): string | null {
+  const configFile = path.join(configDir, ".codex", "config.toml");
+  if (!existsSync(configFile)) return null;
+  try {
+    return readFileSync(configFile, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 /** 读取某条连接专用 Codex home 中继承的 MCP server 名称（不读取其值）。 */
 export function inheritedMcpServerNames(configDir: string): string[] {
-  const configFile = path.join(configDir, ".codex", "config.toml");
-  if (!existsSync(configFile)) return [];
-  try {
-    return parseMcpServerNames(readFileSync(configFile, "utf8"));
-  } catch {
-    return [];
-  }
+  const toml = readCodexToml(configDir);
+  return toml ? parseMcpServerNames(toml) : [];
+}
+
+/** 读取继承的 Codex 插件名，供本轮线程显式关闭。 */
+export function inheritedPluginNames(configDir: string): string[] {
+  const toml = readCodexToml(configDir);
+  return toml ? parsePluginNames(toml) : [];
 }
 
 /**
@@ -122,6 +133,25 @@ export function parseMcpServerNames(toml: string): string[] {
     // 未加引号的 TOML key 不把 `.` 当名字的一部分；带点的 server 名用引号形式。
     // section 头允许尾随注释。
     const match = /^\[mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\](?:\s*#.*)?$/.exec(line);
+    if (!match) continue;
+    const name = match[1] ?? match[2];
+    if (name) names.add(name);
+  }
+  return [...names];
+}
+
+/**
+ * 从 TOML 文本提取 `[plugins.<name>]` / `[plugins."<name>"]` 的插件名。
+ *
+ * 只读 section 头。全局 Codex 插件（browser / documents / search 等）会把
+ * `search_service.web_run` 这类工具带进线程，必须在本轮显式关掉。
+ */
+export function parsePluginNames(toml: string): string[] {
+  const names = new Set<string>();
+  for (const rawLine of toml.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const match = /^\[plugins\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\](?:\s*#.*)?$/.exec(line);
     if (!match) continue;
     const name = match[1] ?? match[2];
     if (name) names.add(name);

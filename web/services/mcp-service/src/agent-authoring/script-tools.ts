@@ -11,19 +11,21 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
-  CANVAS_SCRIPT_LIMITS,
   CANVAS_SCRIPT_VERSIONS,
   DEFAULT_CANVAS_SCRIPT_VERSION,
   agentProtocolVersion,
   canvasScriptError
 } from "@woohaa3/contracts";
-import { errorResult, rateLimitGate, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
+import { errorResult, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
 import { CANVAS_ID_SCHEMA } from "./tool-schemas.js";
 
 const SCRIPT_VERSION_TUPLE = CANVAS_SCRIPT_VERSIONS as unknown as ["woohaa-canvas-js-v1"];
 
-/** 保守的源码 schema：只限制上限，不注入语义（服务端 codec 才是权威）。 */
-const SCRIPT_SOURCE_SCHEMA = z.string().min(1).max(CANVAS_SCRIPT_LIMITS.sourceMaxBytes);
+/**
+ * 源码 schema（change: 2026-10-22-remove-agent-execution-limits，任务 5.1）：只要求非空，
+ * 不再按字节设置应用侧上限；服务端 codec 与隔离执行器才是权威。
+ */
+const SCRIPT_SOURCE_SCHEMA = z.string().min(1);
 
 const SCRIPT_REQUEST_SCHEMA = {
   ...CANVAS_ID_SCHEMA,
@@ -38,7 +40,7 @@ export function registerAgentScriptTools(server: McpServer, deps: AgentAuthoring
     {
       title: "读取 Canvas Script API",
       description:
-        "按当前授权范围返回受支持脚本版本、node/group/reparent/ungroup/layout/setTitle/existing/connect/move/setPrompt/remove 签名、handle/key 与 placement 规则、预算、可用节点种类和示例。只读；不执行脚本、不改变画布。不可用时明确标注原因。",
+        "按当前授权范围返回受支持脚本版本、node/group/reparent/ungroup/layout/setTitle/existing/connect/move/setPrompt/remove 签名、handle/key 与 placement 规则、执行边界（隔离与可取消）、可用节点种类和示例。只读；不执行脚本、不改变画布。不可用时明确标注原因。",
       inputSchema: z.strictObject({ ...CANVAS_ID_SCHEMA }),
       outputSchema: z.looseObject({
         available: z.boolean(),
@@ -48,8 +50,6 @@ export function registerAgentScriptTools(server: McpServer, deps: AgentAuthoring
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
     async ({ canvasId }) => {
-      const limited = rateLimitGate(deps, "read", canvasId);
-      if (limited) return limited;
       if (!deps.client.scriptCapability) {
         return errorResult(canvasScriptError("script-unavailable", "decode", "MCP 未接入 Canvas 脚本能力面"));
       }
@@ -69,7 +69,7 @@ export function registerAgentScriptTools(server: McpServer, deps: AgentAuthoring
     {
       title: "验证 Canvas Script（dry-run）",
       description:
-        "执行与提交一致的语法、引用、权限、预算和领域预检，返回规范化操作、refs、预计布局、basisRevision、organization（组标题/直属成员/世界边界）和 warnings。不写画布、不占用 requestId、不保存源码。",
+        "执行与提交一致的语法、引用、权限和领域预检，返回规范化操作、refs、预计布局、basisRevision、organization（组标题/直属成员/世界边界）和 warnings。不写画布、不占用 requestId、不保存源码。大脚本可完整传输与预检，不按固定源码/操作/时长额度拒绝。",
       inputSchema: z.strictObject({ ...SCRIPT_REQUEST_SCHEMA, expectedRevision: z.number().int().nonnegative().optional() }),
       outputSchema: z.looseObject({
         ok: z.literal(true),
@@ -79,8 +79,6 @@ export function registerAgentScriptTools(server: McpServer, deps: AgentAuthoring
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
     async ({ canvasId, requestId, version, source, expectedRevision }) => {
-      const limited = rateLimitGate(deps, "write", canvasId);
-      if (limited) return limited;
       if (!deps.client.validateScript) {
         return errorResult(canvasScriptError("script-unavailable", "decode", "MCP 未接入 Canvas 脚本能力面"));
       }
@@ -101,7 +99,7 @@ export function registerAgentScriptTools(server: McpServer, deps: AgentAuthoring
     {
       title: "提交 Canvas Script",
       description:
-        "画布创建与修改的首选入口。同一任务中已知的节点、连线和修改应在预算内合并为一个脚本，先 validate_canvas_script 再提交。全部命令在一次权威事务中保存，重试相同身份与内容返回冻结首次回执。支持删除，因此可能产生破坏性变更；源码不写入画布或持久层。",
+        "画布创建与修改的首选入口。同一任务中已知的节点、连线和修改应合并为一个脚本，先 validate_canvas_script 再提交。全部命令在一次权威事务中保存，重试相同身份与内容返回冻结首次回执。支持删除，因此可能产生破坏性变更；源码不写入画布或持久层。",
       inputSchema: z.strictObject({
         ...SCRIPT_REQUEST_SCHEMA,
         expectedRevision: z.number().int().nonnegative().optional()
@@ -117,8 +115,6 @@ export function registerAgentScriptTools(server: McpServer, deps: AgentAuthoring
       annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: true, openWorldHint: false }
     },
     async ({ canvasId, requestId, version, source, expectedRevision }) => {
-      const limited = rateLimitGate(deps, "write", canvasId);
-      if (limited) return limited;
       if (!deps.client.submitScript) {
         return errorResult(canvasScriptError("script-unavailable", "decode", "MCP 未接入 Canvas 脚本能力面"));
       }

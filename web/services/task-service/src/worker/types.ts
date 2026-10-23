@@ -32,7 +32,15 @@ export type TaskRuntimeOptions = {
   /** 优雅停机等待 active executor 的有界宽限。 */
   shutdownGraceMs?: number;
   now?: () => Date;
-  logger?: (event: { event: string; status?: number; code?: string; taskKey?: string; pending?: number }) => void;
+  logger?: (event: {
+    event: string;
+    status?: number;
+    code?: string;
+    taskKey?: string;
+    pending?: number;
+    /** 采纳/落库走的是哪条路（locator 还是稳定键）；排障时先看这个。 */
+    via?: string;
+  }) => void;
   /** 注入 worker server（测试用）。 */
   server?: PptaskWorkerServer;
   /** 按 taskKey 解析业务关联（canvasId/nodeId/runId/jobId）；由 submit 路径登记。 */

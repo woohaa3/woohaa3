@@ -13,7 +13,7 @@ function atomicJson(file, value) { const tmp = `${file}.${randomUUID()}.tmp`; fs
 export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platform = process.platform, development = false }) {
  dataDir=path.resolve(dataDir);resourceRoot=path.resolve(resourceRoot);
  // Desktop mode deliberately does not inherit repository database/secret/provider settings.
- const env=Object.fromEntries(Object.entries(baseEnv).filter(([key])=>!key.startsWith('WOOHAA3_') && !key.startsWith('VITE_') && !['MONGODB_URI','MONGODB_DB','PORT','HOST','NODE_OPTIONS','NODE_PATH'].includes(key)));
+ const env=Object.fromEntries(Object.entries(baseEnv).filter(([key])=>!key.startsWith('WOOHAA3_') && !key.startsWith('VITE_') && !['MONGODB_URI','MONGODB_DB','PORT','BACKEND_PORT','HOST','NODE_OPTIONS','NODE_PATH'].includes(key)));
  Object.assign(env,{
  PATH:path.join(resourceRoot,'tools')+path.delimiter+(env.PATH??'/usr/bin:/bin'),
  NODE_ENV:'production', WOOHAA3_BASE_PATH:'/',

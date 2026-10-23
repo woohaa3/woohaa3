@@ -12,7 +12,6 @@ import {
   filmSetAssetReferences,
   filmSetContentHash,
   layoutFilmSetImport,
-  MAX_FILM_SET_ITEMS,
   planFilmSetImportItems,
   readFilmSetContent,
   remapFilmSetItemIds,
@@ -43,13 +42,14 @@ describe("片场内容 codec（任务 1.2）", () => {
     expect(content.items[0]?.kind).toBe("ground");
   });
 
-  it("合法集合 round-trip；非法 kind / 重复 id / 超限整条拒绝", () => {
+  it("合法集合 round-trip；非法 kind / 重复 id 整条拒绝，对象数量不设额度", () => {
     const content = { schemaVersion: 3, items: [modelItem("a"), { id: "img", kind: "image", name: "图", localTransform: { offset: { x: 1, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-1", aspectRatio: 1.5 }] };
     const decoded = decodeFilmSetContent(content);
     expect(decoded.ok).toBe(true);
     expect(decodeFilmSetContent({ schemaVersion: 3, items: [{ id: "x", kind: "unknown", name: "x" }] }).ok).toBe(false);
     expect(decodeFilmSetContent({ schemaVersion: 3, items: [modelItem("dup"), modelItem("dup")] }).ok).toBe(false);
-    expect(decodeFilmSetContent({ schemaVersion: 3, items: Array.from({ length: MAX_FILM_SET_ITEMS + 1 }, (_, i) => modelItem(`m${i}`)) }).ok).toBe(false);
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.4：原 128 对象额度已删除。
+    expect(decodeFilmSetContent({ schemaVersion: 3, items: Array.from({ length: 300 }, (_, i) => modelItem(`m${i}`)) }).ok).toBe(true);
   });
 
   it("媒体引用参与资产枚举，ground/model 不产生媒体引用", () => {

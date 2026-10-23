@@ -25,6 +25,8 @@ mod decoration_cache;
 mod draw_order;
 mod edge_cache;
 mod film_set;
+#[cfg(test)]
+pub(crate) use film_set::draw_film_set_run_mask;
 mod focus_backdrop;
 mod generation;
 mod group;
@@ -42,6 +44,7 @@ mod render;
 mod render_edges;
 mod ownership_links;
 mod shared_key;
+pub(crate) mod text_presentation;
 mod textures;
 
 /// 共享纯布局函数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）：渲染与查询复用

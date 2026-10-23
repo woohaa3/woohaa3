@@ -31,7 +31,7 @@ pub fn initialize() {
     if SENDER.set(tx).is_err() {
         return;
     }
-    eprintln!("[native-performance] CPU wall timings → {path}");
+    crate::diagnostics::stderr(format_args!("[native-performance] CPU wall timings → {path}"));
     std::thread::spawn(move || {
         let mut groups: BTreeMap<&str, Samples> = BTreeMap::new();
         let (mut client, mut layout, mut work) = (Value::Null, Value::Null, Value::Null);

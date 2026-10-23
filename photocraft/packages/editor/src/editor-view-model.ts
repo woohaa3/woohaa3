@@ -19,6 +19,8 @@ export type EditorLayerRow = {
   blend: string;
   clipped: boolean;
   hasMask: boolean;
+  /** 是否有矢量蒙版（像素蒙版与矢量蒙版可共存，`hasMask` 只表示像素蒙版）。 */
+  hasVectorMask: boolean;
   hasEffects: boolean;
   maskEnabled: boolean;
   maskLinked: boolean;
@@ -37,6 +39,23 @@ export type EditorLayerRow = {
   adjustment: string | null;
   adjustmentParams: Record<string, unknown> | null;
   textStyle: EditorTextStyle | null;
+  /** 链接组 id（U58）：同组图层一起移动；`null` 表示未链接。 */
+  linkGroup: number | null;
+  /** 图层颜色标签 id（U58）：`none` 或 red/orange/…（与 `LabelColor` 同名）。 */
+  labelColor: string;
+  /** 高级混合开关与挖空（U60）：面板据此读回当前值，而不是用默认值覆盖。 */
+  advancedBlending: {
+    knockout: string;
+    blendInterior: boolean;
+    blendClipped: boolean;
+    transparencyShapes: boolean;
+    layerMaskHidesEffects: boolean;
+    vectorMaskHidesEffects: boolean;
+  };
+  /** 逐通道混合开关（U60）：`null` 表示文档没有报（旧宿主）。 */
+  channels: boolean[] | null;
+  /** Blend If 端点（U60）：每项一个通道。 */
+  blendIf: Array<{ channel: number; thisLayer: number[]; underlying: number[] }>;
 };
 
 export type EditorLayerLocks = Record<"transparency" | "pixels" | "position" | "artboard" | "all", boolean>;
@@ -51,6 +70,31 @@ export type EditorTextStyle = { text: string; font: "Noto Sans SC" | "Inter"; si
 /** 文档像素坐标中的选区边界线段。 */
 export type SelectionSegment = [number, number, number, number];
 
+/**
+ * 通道目标：复合、单个 RGB 分量、Alpha/专色通道、图层蒙版。
+ *
+ * 内核 `channels.target` 的 `index` 只在 color/alpha 两类里有值；复合与图层蒙版没有。
+ */
+export type EditorChannelTarget =
+  | { kind: "composite" }
+  | { kind: "color"; index: number }
+  | { kind: "alpha"; index: number }
+  | { kind: "layerMask" };
+
+/** 通道目标的目标编码（`color:0` / `alpha:1`）；复合与图层蒙版返回 null。 */
+export function channelTargetCode(target: EditorChannelTarget): string | null {
+  return target.kind === "color" || target.kind === "alpha" ? `${target.kind}:${target.index}` : null;
+}
+
+function decodeChannelTarget(value: unknown): EditorChannelTarget {
+  if (!isRecord(value)) return { kind: "composite" };
+  const index = typeof value.index === "number" && Number.isInteger(value.index) && value.index >= 0 ? value.index : null;
+  if (value.kind === "color" && index !== null) return { kind: "color", index };
+  if (value.kind === "alpha" && index !== null) return { kind: "alpha", index };
+  if (value.kind === "layerMask") return { kind: "layerMask" };
+  return { kind: "composite" };
+}
+
 /** 内核文档的界面视图。 */
 export type EditorDocumentView = {
   name: string;
@@ -62,6 +106,13 @@ export type EditorDocumentView = {
   selectedLayerIds: number[];
   hasSelection: boolean;
   editTarget: "pixels" | "mask";
+  /**
+   * 通道面板当前查看/编辑目标（`stateJson().document.channels.target`）。
+   *
+   * 与 `editTarget` 分开：`editTarget` 只区分像素/图层蒙版，通道目标还要区分 RGB 分量与
+   * Alpha/专色通道。像素命令据此选择落笔目标，主画布据此决定是否显示单通道灰度视图。
+   */
+  channelTarget: EditorChannelTarget;
   maskView: number | null;
   transformFrame: [number, number, number, number] | null;
   selectionOutline: SelectionSegment[];
@@ -131,6 +182,7 @@ function decodeDocument(document: Record<string, unknown>): EditorDocumentView |
     selectedLayerIds,
     hasSelection: document.hasSelection === true,
     editTarget: document.editTarget === "mask" && active?.hasMask ? "mask" : "pixels",
+    channelTarget: decodeChannelTarget(isRecord(document.channels) ? document.channels.target : null),
     maskView: isRecord(document.layerMaskView) && document.layerMaskView.mode === "gray" && document.layerMaskView.layer === activeLayerId && active?.hasMask ? activeLayerId : null,
     transformFrame: Array.isArray(document.transformFrame) && document.transformFrame.length === 4
       && document.transformFrame.every((v) => typeof v === "number" && Number.isFinite(v))
@@ -180,6 +232,7 @@ function flattenLayer(
     blend: typeof raw.blend === "string" ? raw.blend : "Normal",
     clipped: raw.clipped === true,
     hasMask: raw.hasMask === true,
+    hasVectorMask: raw.hasVectorMask === true,
     hasEffects: isRecord(raw.effects) && Array.isArray(raw.effects.items) && raw.effects.items.length>0,
     maskEnabled: raw.maskEnabled !== false,
     maskLinked: raw.maskLinked !== false,
@@ -193,7 +246,12 @@ function flattenLayer(
     text,
     adjustment,
     adjustmentParams: isRecord(raw.adjustment) && isRecord(raw.adjustment.params) ? raw.adjustment.params : null,
-    textStyle: null
+    textStyle: null,
+    linkGroup: typeof raw.linkGroup === "number" ? raw.linkGroup : null,
+    labelColor: typeof raw.labelColor === "string" ? raw.labelColor : "none",
+    advancedBlending: decodeAdvancedBlending(raw.advancedBlending),
+    channels: Array.isArray(raw.channels) && raw.channels.every((value) => typeof value === "boolean") ? raw.channels as boolean[] : null,
+    blendIf: decodeBlendIf(raw.blendIf)
   });
   if (Array.isArray(raw.children)) {
     for (const child of raw.children) flattenLayer(child, depth + 1, activeLayerId, selectedLayerIds, out, id);
@@ -208,6 +266,32 @@ function decodeLayerKind(value: unknown): string {
   if (kind === "type") return "text";
   if (kind === "smart object") return "smart";
   return kind;
+}
+
+/** 高级混合开关（U60）：缺字段时用上游默认值，避免面板把「没报」当成 false 去覆盖。 */
+function decodeAdvancedBlending(value: unknown): EditorLayerRow["advancedBlending"] {
+  const raw = isRecord(value) ? value : {};
+  return {
+    knockout: typeof raw.knockout === "string" ? raw.knockout : "none",
+    blendInterior: raw.blendInterior === true,
+    blendClipped: raw.blendClipped !== false,
+    transparencyShapes: raw.transparencyShapes !== false,
+    layerMaskHidesEffects: raw.layerMaskHidesEffects === true,
+    vectorMaskHidesEffects: raw.vectorMaskHidesEffects === true,
+  };
+}
+
+/** Blend If 端点（U60）：只接受完整的两项或四项数值端点。 */
+function decodeBlendIf(value: unknown): EditorLayerRow["blendIf"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isRecord(entry) || typeof entry.channel !== "number") return [];
+    const range = (input: unknown) => Array.isArray(input) && (input.length === 2 || input.length === 4)
+      && input.every((point) => typeof point === "number" && Number.isFinite(point)) ? input as number[] : null;
+    const thisLayer = range(entry.thisLayer);
+    const underlying = range(entry.underlying);
+    return thisLayer && underlying ? [{ channel: entry.channel, thisLayer, underlying }] : [];
+  });
 }
 
 /** Photoshop 普通图层混合模式，按菜单顺序排列。 */

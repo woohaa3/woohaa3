@@ -1,18 +1,28 @@
-import { PHOTOCRAFT_ENGINE_COMMIT, PHOTOCRAFT_ENGINE_VERSION, SUPPORTED_PHOTOCRAFT_ENGINE_VERSIONS } from "@woohaa3/photocraft-protocol";
+import {
+  PHOTOCRAFT_CAPABILITIES,
+  PHOTOCRAFT_DELIVERED_STAGES,
+  PHOTOCRAFT_ENGINE_COMMIT,
+  PHOTOCRAFT_ENGINE_VERSION,
+  SUPPORTED_PHOTOCRAFT_ENGINE_VERSIONS
+} from "@woohaa3/photocraft-protocol";
 // 只验证 JS/WASM 对象边界，不加载内核或执行绘制。
 import { expect, it, vi } from "vitest";
 import { EditorHandle, loadEditor, type EditorModuleFactory, type EditorExportBundle, type EditorInstance, type EditorPreview } from "./editor-wasm.js";
 
 const buildInfo = { upstreamCommit: "pinned", upstreamVersion: "0.9.0", engineVersion: PHOTOCRAFT_ENGINE_VERSION, formatVersion: 1 };
 
-function loaderFixture(read: (() => string) | undefined) {
-  const instance = { openProject: vi.fn(() => "opened") };
+/** 与当前界面契约一致的能力协商快照（阶段与能力清单逐项相同）。 */
+const handshake = { stages: [...PHOTOCRAFT_DELIVERED_STAGES], capabilities: [...PHOTOCRAFT_CAPABILITIES] };
+
+function loaderFixture(read: (() => string) | undefined, handshakeJson: (() => string | undefined) | undefined = () => JSON.stringify(handshake)) {
+  const free = vi.fn();
+  const instance = { openProject: vi.fn(() => "opened"), free, capabilityHandshakeJson: handshakeJson };
   const construct = vi.fn(function () { return instance; });
   const init = vi.fn(async () => undefined);
   const font = vi.fn();
   const module = { default: init, WasmEditor: Object.assign(construct, { buildInfoJson: read, registerFixedFont: font }) };
   const factory = vi.fn(async () => module) as unknown as EditorModuleFactory;
-  return { construct, instance, init, font, factory };
+  return { construct, instance, init, font, factory, free };
 }
 
 const currentBuild = { ...buildInfo, upstreamCommit: PHOTOCRAFT_ENGINE_COMMIT };
@@ -53,6 +63,31 @@ it("旧或未知能力、来源不符和畸形信息在创建实例前明确拒�
     expect(await loadEditor(f.factory)).toMatchObject({ ok: false, code: "unsupported-engine-version" });
     expect(f.construct).not.toHaveBeenCalled();
   }
+});
+
+it("运行时能力协商不符时拒绝可写实例并释放半初始化对象", async () => {
+  // 「新界面 + 旧 WASM」与「旧界面 + 新 WASM」都必须被拒：缺少阶段、缺少能力、
+  // 多出能力、顺序不同、结构畸形都不能被当成「可用」。
+  const drifted: (() => string | undefined)[] = [
+    () => undefined,
+    () => "{}",
+    () => "not json",
+    () => JSON.stringify({ stages: [...PHOTOCRAFT_DELIVERED_STAGES], capabilities: [...PHOTOCRAFT_CAPABILITIES].slice(0, 2) }),
+    () => JSON.stringify({ stages: [...PHOTOCRAFT_DELIVERED_STAGES].slice(0, 2), capabilities: [...PHOTOCRAFT_CAPABILITIES] }),
+    () => JSON.stringify({ stages: [...PHOTOCRAFT_DELIVERED_STAGES], capabilities: [...PHOTOCRAFT_CAPABILITIES, "vector.nonexistent"] }),
+    () => JSON.stringify({ stages: [], capabilities: [] })
+  ];
+  for (const read of drifted) {
+    const f = loaderFixture(() => JSON.stringify(currentBuild), read);
+    const loaded = await loadEditor(f.factory);
+    expect(loaded).toMatchObject({ ok: false, code: "capability-drift" });
+    expect(f.free).toHaveBeenCalledOnce();
+    if (!loaded.ok) expect(loaded.message.length).toBeGreaterThan(0);
+  }
+  // 协商一致才创建句柄。
+  const ok = loaderFixture(() => JSON.stringify(currentBuild));
+  expect(await loadEditor(ok.factory)).toMatchObject({ ok: true });
+  expect(ok.free).not.toHaveBeenCalled();
 });
 
 it("版本拒绝后可重试；模块初始化失败不创建实例", async () => {

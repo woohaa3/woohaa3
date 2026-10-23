@@ -48,15 +48,51 @@ pub struct ExportBundle {
 
 /// 编辑会话。持有 engine 的文档与历史；不持有任何 UI 状态。
 pub struct Editor {
-    session: Session,
+    pub(super) session: Session,
     pattern_library: crate::pattern_library::PatternLibrary,
-    registry: AssetRegistry,
+    brush_library: crate::brush_library::BrushLibrary,
+    pending_abr: Option<crate::brush_library::PendingAbr>,
+    pub(super) smart_child: crate::smart_document::SmartChildState,
+    /// P5/P6/P7 的隔离草稿与视图状态（预览不改正式文档）。
+    pub(super) selection_draft: Option<crate::adjustment_ext::SelectionDraft>,
+    pub(super) retouch_baseline: Option<crate::retouch::RetouchBaseline>,
+    pub(super) retouch_preview: Option<std::sync::Arc<photocraft_doc::Document>>,
+    pub(super) retouch_command: Option<String>,
+    pub(super) retouch_params: Option<Value>,
+    pub(super) filter_draft: Option<crate::retouch::FilterDraft>,
+    pub(super) compose_draft: Option<crate::composition::ComposeDraft>,
+    pub(super) view_aids: crate::composition::ViewAids,
+    pub(super) registry: AssetRegistry,
     live_stroke: Option<(photocraft_engine::brush_cmds::LiveStroke, Value)>,
     stroke_damage: photocraft_geom::Rect,
     transform_preview: Option<crate::transform_preview::TransformPreview>,
     text_preview: Option<crate::text_preview::TextPreview>,
     adjustment_preview: Option<crate::adjustment_preview::AdjustmentPreview>,
     layer_properties_preview: Option<crate::layer_properties_preview::LayerPropertiesPreview>,
+}
+
+fn command_error_for(id: &str, message: &str) -> EditorError {
+    EditorError::CommandFailed { id: id.into(), message: message.into() }
+}
+
+/// 打开工程时的核验通道。
+///
+/// 先走 `verify()`——它同时是普通上传与 CLI 的口径，对智能对象整体拒绝。只有它拒绝时才
+/// 尝试专用于「含嵌入源工程」的 `smart_source::verify_project()`：那条通道把根容器与整棵
+/// 嵌入源树纳入同一套预算（层数/层级/条目/解压字节），并继续拒绝外链、未开放效果、坏名称
+/// 与不可逆仿射。
+///
+/// 为什么需要这一步：U66「转回图层」只解包**当前实例**，同一工程里其他共享实例仍是智能
+/// 对象（这正是 spec 要求的成功证据「其他共享实例不变」）。如果打开入口不接受这类工程，
+/// 「保存 → 重开」对只转回部分实例的文档就不成立。两个通道除「是否允许智能对象」外判定
+/// 相同，因此这条回退不会放过任何其他拒绝原因；普通上传/CLI 的接收政策保持收紧。
+fn verify_for_open(bytes: &[u8]) -> Result<()> {
+    if photocraft_project_verify::verify(bytes).is_ok() {
+        return Ok(());
+    }
+    photocraft_project_verify::smart_source::verify_project(bytes)
+        .map(|_| ())
+        .map_err(|failure| EditorError::LoadFailed(failure.message))
 }
 
 impl Default for Editor {
@@ -68,7 +104,31 @@ impl Default for Editor {
 impl Editor {
     /// 新建一个空会话。
     pub fn new() -> Self {
-        Self { session: Session::new(), pattern_library:Default::default(), registry: AssetRegistry::default(), live_stroke: None, stroke_damage:photocraft_geom::Rect::EMPTY, transform_preview: None, text_preview: None, adjustment_preview: None, layer_properties_preview: None }
+        let mut editor = Self {
+            session: Session::new(),
+            pattern_library: Default::default(),
+            brush_library: crate::brush_library::BrushLibrary::default(),
+            pending_abr: None,
+            smart_child: Default::default(),
+            selection_draft: None,
+            retouch_baseline: None,
+            retouch_preview: None,
+            retouch_command: None,
+            retouch_params: None,
+            filter_draft: None,
+            compose_draft: None,
+            view_aids: Default::default(),
+            registry: AssetRegistry::default(),
+            live_stroke: None,
+            stroke_damage: photocraft_geom::Rect::EMPTY,
+            transform_preview: None,
+            text_preview: None,
+            adjustment_preview: None,
+            layer_properties_preview: None,
+        };
+        // 默认笔刷库在构造时同步到会话，工具栏在没有文档时也能选笔。
+        editor.sync_brush_library();
+        editor
     }
 
     /// 只注册随应用分发的固定中文字体；字节摘要不符即拒绝，不依赖系统字体。
@@ -88,6 +148,7 @@ impl Editor {
     /// 打开一张图片，建立背景层文档；`asset_id` 是宿主稳定资产 id（可为空）。
     pub fn open_image(&mut self, name: &str, asset_id: Option<&str>, bytes: &[u8]) -> Result<Value> {
         self.require_no_stroke()?;
+        self.require_no_tool_draft()?;
         let imported = photocraft_io::import(name, bytes).map_err(|e| EditorError::ImportFailed(e.to_string()))?;
         Self::validate_image_size(imported.document.size.width, imported.document.size.height)?;
         self.registry.clear();
@@ -108,15 +169,22 @@ impl Editor {
     /// 同一冻结文档会被算成不同内容。
     pub fn open_project(&mut self, bytes: &[u8], base_asset_id: Option<&str>) -> Result<Value> {
         self.require_no_stroke()?;
+        self.require_no_tool_draft()?;
         if !photocraft_format::is_pcraft(bytes) {
             return Err(EditorError::NotAProject);
         }
-        photocraft_project_verify::verify(bytes).map_err(|e| EditorError::LoadFailed(e.message))?;
+        verify_for_open(bytes)?;
         let doc = photocraft_format::load_from_bytes(bytes).map_err(|e| EditorError::LoadFailed(e.to_string()))?;
+        // 颜色采样点的持久投影在文档元数据里（本域命名空间键）；载入时灌回会话状态，
+        // 让 `view.colorSamplers.list`、单点读数与面板看到同一份点。
+        let samplers = crate::features::views::samplers::samplers_from_metadata(&doc.metadata.text);
         self.registry.clear();
         self.registry.base_asset_id = base_asset_id.map(str::to_string);
         let index = self.session.add_document(doc, None);
         self.session.set_active(index);
+        if let Some(state) = self.session.active_mut() {
+            state.color_samplers = samplers;
+        }
         self.active_json()
     }
 
@@ -147,10 +215,31 @@ impl Editor {
         self.active_json()
     }
 
+    /// 保存用的文档副本：把当前会话的颜色采样点写进元数据的命名空间键（U73）。
+    ///
+    /// 采样点是**会话视图状态**，上游明确不写进 `.pcraft`/PSD；本域把持久投影放在文档已有的
+    /// 自由文本元数据里（[`crate::features::views::samplers`]）。只改副本：不动会话文档，
+    /// 因此不推进 revision、不改内容指纹、不碰像素，也不会被撤销栈的快照回滚覆盖。
+    fn document_for_save(&self) -> Result<std::borrow::Cow<'_, photocraft_doc::Document>> {
+        let state = self.active_doc()?;
+        let document = &state.doc;
+        let key = crate::features::views::samplers::SAMPLERS_KEY;
+        let has_key = document.metadata.text.iter().any(|(name, _)| name == key);
+        // 没有采样点、元数据里也没有本域键：原样借用，保存字节连克隆都不经过（旧工程保存后
+        // 仍是同一个形状，也不会为了一次保存复制整棵图层树）。
+        if state.color_samplers.is_empty() && !has_key {
+            return Ok(std::borrow::Cow::Borrowed(document));
+        }
+        let mut owned = (**document).clone();
+        crate::features::views::samplers::apply_metadata(&mut owned, &state.color_samplers);
+        Ok(std::borrow::Cow::Owned(owned))
+    }
+
     /// 把当前文档序列化成 `.pcraft` 字节，并内嵌缩略图与合成预览。
     pub fn save_project(&self) -> Result<Vec<u8>> {
         self.require_no_stroke()?;
-        let doc = &self.active_doc()?.doc;
+        self.require_no_tool_draft()?;
+        let doc = &self.document_for_save()?;
         let opts = photocraft_format::SaveOptions {
             thumbnail: Some(photocraft_compose::thumbnail(doc, PROJECT_THUMBNAIL_SIDE)),
             composite: Some(photocraft_compose::thumbnail(doc, PROJECT_PREVIEW_SIDE)),
@@ -159,8 +248,35 @@ impl Editor {
     }
 
     fn preview_document(&self) -> Result<&photocraft_doc::Document> {
-        Ok(self.layer_properties_preview.as_ref().map(|draft| &draft.doc).or_else(||self.adjustment_preview.as_ref().map(|draft| &draft.doc)).or_else(|| self.text_preview.as_ref().map(|draft| &draft.doc)).or_else(|| self.transform_preview.as_ref().map(|draft| &draft.doc))
-            .or_else(|| self.live_stroke.as_ref().map(|(live, _)| &live.doc)).unwrap_or(&self.active_doc()?.doc))
+        // 草稿优先级：构图/滤镜/修饰/选区（P5–P7）→ 属性/调整/文字/变换（P0）→ 活动笔迹。
+        if let Some(doc) = self.compose_draft.as_ref().map(|draft| draft.document.as_ref()) {
+            return Ok(doc);
+        }
+        if let Some(doc) = self.filter_draft.as_ref().map(|draft| draft.document.as_ref()) {
+            return Ok(doc);
+        }
+        if let Some(doc) = self.retouch_preview.as_deref() {
+            return Ok(doc);
+        }
+        if let Some(doc) = self.selection_draft.as_ref().map(|draft| draft.document.as_ref()) {
+            return Ok(doc);
+        }
+        if let Some(doc) = self.layer_properties_preview.as_ref().map(|draft| draft.doc.as_ref()) {
+            return Ok(doc);
+        }
+        if let Some(doc) = self.adjustment_preview.as_ref().map(|draft| draft.doc.as_ref()) {
+            return Ok(doc);
+        }
+        if let Some(doc) = self.text_preview.as_ref().map(|draft| draft.doc.as_ref()) {
+            return Ok(doc);
+        }
+        if let Some(doc) = self.transform_preview.as_ref().map(|draft| draft.doc.as_ref()) {
+            return Ok(doc);
+        }
+        if let Some((live, _)) = &self.live_stroke {
+            return Ok(live.doc.as_ref());
+        }
+        Ok(&self.active_doc()?.doc)
     }
 
     fn preview_mask_layer(&self) -> Result<Option<photocraft_doc::LayerId>> {
@@ -182,6 +298,36 @@ impl Editor {
     /// 只合成指定文档区域，输出一源像素对应一个 RGBA8 像素，不缩放整图。
     pub fn render_region(&self, params: Value) -> Result<Preview> {
         crate::region_preview::render(self.preview_document()?,self.preview_mask_layer()?,params)
+    }
+
+    /// 画板/切片导出计划（U56）：只给「文件名 + 文档矩形」，不写盘。
+    ///
+    /// 分离计划与渲染，是因为写盘属于宿主端口（浏览器没有任意路径权限），而范围与命名属于
+    /// 内核语义。调用方拿到计划后按 `rect` 逐项取像素，再交给自己的文件通道。
+    pub fn composition_export_plan(&self, kind: &str) -> Result<Value> {
+        self.require_no_stroke()?;
+        self.require_no_tool_draft()?;
+        let doc = &self.active_doc()?.doc;
+        crate::composition_workflows::export_plan(doc, kind, &Value::Null)
+    }
+
+    /// 把计划里的一项导出成 PNG 字节（U56）。
+    ///
+    /// 编码留在内核：`render_region` 给的是 RGBA8 源像素，而 PNG 编码器只在这一侧有。让宿主
+    /// 自己编码会引出第二套编码器，字节与整图导出一致性也就无人保证。
+    pub fn composition_export_png(&self, rect: Value) -> Result<Vec<u8>> {
+        self.require_no_stroke()?;
+        self.require_no_tool_draft()?;
+        let preview = self.render_region(rect)?;
+        let image = photocraft_codecs::Image::from_u8(
+            preview.width,
+            preview.height,
+            photocraft_codecs::ChannelLayout::Rgba,
+            preview.pixels,
+        )
+        .map_err(|error| EditorError::RenderFailed(error.to_string()))?;
+        photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default())
+            .map_err(|error| EditorError::RenderFailed(error.to_string()))
     }
 
     /// 图层与蒙版缩略图按文档范围隔离，最多 64px；隐藏层仍可查看内容。
@@ -207,7 +353,7 @@ impl Editor {
         Ok((rgba[3] != 0).then(|| format!("#{:02x}{:02x}{:02x}", rgba[0], rgba[1], rgba[2])))
     }
 
-    fn require_no_stroke(&self) -> Result<()> {
+    pub(super) fn require_no_stroke(&self) -> Result<()> {
         if self.layer_properties_preview.is_some() {return Err(crate::layer_properties_preview::error("请先确认或取消图层属性编辑"));}
         if self.adjustment_preview.is_some() { return Err(crate::adjustment_preview::error("请先确认或取消调整参数编辑")); }
         if self.text_preview.is_some() { return Err(crate::text_preview::error("请先确认或取消文字编辑")); }
@@ -216,14 +362,46 @@ impl Editor {
         Ok(())
     }
 
+    /// 笔刷库写入口的附加门禁：有草稿时改库会让预览与库不一致。
+    fn require_no_brush_gesture(&self) -> Result<()> {
+        if self.layer_properties_preview.is_some()
+            || self.adjustment_preview.is_some()
+            || self.text_preview.is_some()
+            || self.transform_preview.is_some()
+        {
+            return Err(Self::brush_error("请先确认或取消当前草稿再修改笔刷库"));
+        }
+        Ok(())
+    }
+
+    /// P5/P6/P7 草稿门禁：任何内容写入前都要先结算这些草稿。
+    pub(super) fn require_no_tool_draft(&self) -> Result<()> {
+        if self.compose_draft.is_some() {
+            return Err(command_error_for("image.compose", "请先确认或取消构图修改"));
+        }
+        if self.filter_draft.is_some() {
+            return Err(command_error_for("filter.draft", "请先确认或取消滤镜草稿"));
+        }
+        if self.retouch_baseline.is_some() {
+            return Err(command_error_for("paint.retouch", "请先结束或取消当前修饰笔迹"));
+        }
+        if self.selection_draft.is_some() {
+            return Err(command_error_for("select.modify", "请先确认或取消选区修改"));
+        }
+        Ok(())
+    }
+
     /// 冻结导出：一次同步调用内取齐修订、指纹、尺寸与成对产物。
     pub fn export_bundle(&self) -> Result<ExportBundle> {
         self.require_no_stroke()?;
+        self.require_no_tool_draft()?;
         let state = self.active_doc()?;
         let doc = &state.doc;
         let content_hash = document_content::document_content_hash(doc, &self.registry).ok_or(EditorError::NoDocument)?;
+        // 视图数据与像素内容同批冻结：采样点写进工程字节，但内容指纹仍只算图层与画布。
+        let saved = self.document_for_save()?;
         let project = photocraft_format::save_to_bytes(
-            doc,
+            &saved,
             &photocraft_format::SaveOptions {
                 thumbnail: Some(photocraft_compose::thumbnail(doc, PROJECT_THUMBNAIL_SIDE)),
                 composite: Some(photocraft_compose::thumbnail(doc, PROJECT_PREVIEW_SIDE)),
@@ -299,13 +477,29 @@ impl Editor {
         json!(crate::capability::allowed_command_ids())
     }
 
+    /// 分阶段能力协商快照：阶段与能力清单（UI 核对后决定是否可写）。
+    pub fn capability_handshake(&self) -> Value {
+        json!({
+            "stages": crate::capability::DELIVERED_STAGES,
+            "capabilities": crate::capability::delivered_capabilities(),
+            "allStages": crate::capability::STAGES,
+            "nonGoals": crate::capability::NON_GOALS,
+        })
+    }
+
     /// 执行一条命令；这是 React 驱动引擎的唯一写入口。
     ///
     /// 未列入首期白名单的命令一律拒绝（阻止通过快捷键/命令面板绕过工具栏）。
     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value> {
         self.require_no_stroke()?;
+        self.require_no_tool_draft()?;
         if !crate::capability::command_allowed(id) {
             return Err(EditorError::CapabilityDisabled(id.into()));
+        }
+        // 按图像模式收紧其他域的写入命令（change: 2026-10-22-add-photocraft-image-mode-workflows）。
+        // 位置在唯一命令门之后、任何草稿/预览分支之前：快捷键、命令面板与宿主脚本都无法绕过。
+        if let Some(state) = self.session.active() {
+            crate::features::modes::gate::check(&state.doc, id, &params)?;
         }
         if crate::group_commands::IDS.contains(&id) { return crate::group_commands::execute(&mut self.session, id, params); }
         crate::group_commands::check(&self.session, id, &params)?;
@@ -378,13 +572,18 @@ impl Editor {
         self.cancel_text();
         self.cancel_stroke();
         self.cancel_transform();
+        self.cancel_selection_modify();
+        self.cancel_retouch();
+        self.cancel_filter();
+        self.cancel_compose();
+        self.smart_child.clear();
         if let Some(index) = self.session.active_index() {
             self.session.close(index);
         }
         self.state()
     }
 
-    fn active_doc(&self) -> Result<&photocraft_engine::DocState> {
+    pub(super) fn active_doc(&self) -> Result<&photocraft_engine::DocState> {
         self.session.active().ok_or(EditorError::NoDocument)
     }
 
@@ -406,7 +605,7 @@ impl Editor {
         Ok(())
     }
 
-    fn active_layer_id(&self) -> Option<photocraft_doc::LayerId> {
+    pub(super) fn active_layer_id(&self) -> Option<photocraft_doc::LayerId> {
         self.session.active().and_then(|d| d.active_layer)
     }
 
@@ -457,7 +656,7 @@ impl Editor {
 }
 
 #[cfg(test)]
-#[path = "editor/tests_pattern_library_interaction.rs"]
+#[path = "features/layers/tests_pattern_library_interaction.rs"]
 mod pattern_library_interaction_tests;
 
 #[cfg(test)]
@@ -465,18 +664,40 @@ mod pattern_library_interaction_tests;
 mod interaction_tests;
 
 #[cfg(test)]
-#[path = "editor/tests_stroke_selection.rs"]
+#[path = "features/selections/tests_stroke_selection.rs"]
 mod stroke_selection_tests;
 
 #[cfg(test)]
-#[path = "editor/tests_mask_creation.rs"]
+#[path = "features/selections/tests_mask_creation.rs"]
 mod mask_creation_tests;
 
 #[cfg(test)]
-#[path = "editor/tests_smart_entry.rs"]
+#[path = "features/smart/tests_smart_entry.rs"]
 mod smart_entry_tests;
 
+#[cfg(test)]
+#[path = "features/painting/tests_brush_library.rs"]
+mod brush_library_tests;
+
+#[cfg(test)]
+#[path = "features/layers/tests_transfer.rs"]
+mod transfer_tests;
+
+#[path = "features/painting/editor_stroke.rs"]
 mod stroke;
+#[path = "features/layers/editor_properties.rs"]
 mod properties;
+#[path = "features/type/editor_text.rs"]
 mod text;
+#[path = "features/composition/editor_transform.rs"]
 mod transform;
+#[path = "features/painting/editor_brush.rs"]
+mod brush;
+#[path = "features/layers/editor_transfer.rs"]
+mod transfer;
+#[path = "features/io/editor_psd.rs"]
+mod psd;
+mod tools;
+
+#[path = "features/adjustments/editor_adjustment.rs"]
+mod adjustment_feature;

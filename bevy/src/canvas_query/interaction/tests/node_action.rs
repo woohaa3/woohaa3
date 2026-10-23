@@ -164,6 +164,7 @@ fn node_action_hits_match_layout_after_viewport_and_edge_drag() {
     let mut scene = scene_with_actions(vec![node("n1", 500.0, 300.0, 200.0, 120.0)]);
     scene.surface = Some(crate::protocol::SurfaceSize {
         width: 1000.0, height: 800.0, pixel_ratio: 1.0, content_right: 0.0, content_rect: None,
+        origin_x: 0.0, origin_y: 0.0,
     });
     let base = accept_scene(&scene);
     let viewport = crate::protocol::Viewport { x: 75.0, y: 10.0, zoom: 0.5 };

@@ -17,6 +17,8 @@
 
 Start at `web/backend/src/composition.ts` for local host composition, `web/frontend/src/main.tsx` for the interface, and `bevy/src/lib.rs` for rendering. Extension discovery follows `extensions.config.json`. Generated API bindings enter this repository only as `api/gen/es` output: a protocol change arrives as a regenerated binding, never as a local edit.
 
+Canvas text raster resolution is shared by the browser WASM and the native canvas: `bevy/src/canvas2d/text_presentation.rs` owns the logical-size metadata, the bounded zoom steps and the glyph cap, and every 2D text producer (labels, edge labels, generation status, drag-attach bar, node action toolbar) only declares logical text. See the rendering map for the scheduling and invalidation rules.
+
 Portable configuration handoff: `scripts/export-config.mjs` reads development configuration through `scripts/lib/development-config.mjs`; `scripts/lib/config-handoff.mjs` owns the separate configuration archive and merge/backup behavior. Tauri `desktop/src/local_host.rs` owns stop/import/restart and delegates `--import-config` to `scripts/desktop-host.mjs`. Application extension settings use the service's config-store API; imported model/deployment files belong to the user data directory.
 
 Runtime model handoff reads the host public snapshot through `scripts/lib/runtime-models-export.mjs`. Imported metadata is displayed through `web/backend/src/host/core/runtime-model-catalog.ts`; it does not register generation providers. Desktop data owns `config/runtime-models.json`.
@@ -29,4 +31,12 @@ Canvas image editing prepares only after a direct edit request. `web/frontend/sr
 
 Local tool setup lives in `web/extensions/local-agent/src/frontend/settings-panel.tsx`: missing tools expose installation actions, including the shared runtime settings for Codex. `src/backend/runtime-executable.ts` bridges managed Codex and local executables; `process-manager.ts` holds the managed executable lease until process exit. Discovery stays read-only.
 
+Assistant entry points share `web/frontend/src/cordis/ui/assistant-execution/model-selector.tsx` for selection and the empty-directory configuration action. `web/frontend/src/cordis/plugins/agent-assistant/setup-tooltip.tsx` supplies the corner toolbar's first-connection guidance through the optional `canvas.toolbar-action.tooltip` wrapper; it subscribes to the existing data-space-scoped directory and suppresses guidance during loading, errors, and dialogs.
+
+`web/frontend/src/cordis/plugins/agent-assistant/first-use.ts` observes the same directory from the page plugin and opens the assistant dialog at `page: "add"` on the first successful empty result after canvas readiness. A data-space-scoped localStorage marker respects dismissal across reloads; failures, pending dialogs, scope changes and disposal do not create duplicate or stale prompts.
+
 Runtime release layout: `scripts/lib/runtime-release-layout.mjs` owns platform/App-version directory and CDN URL resolution. `build-desktop.mjs` passes the effective App version into host staging; `package-runtime-components.mjs` writes the same platform/version upload directory and atomic signed catalog. Component/cache identities stay unchanged.
+
+Shared runtime archives: `scripts/lib/runtime-archive.mjs` owns deterministic streaming USTAR/gzip generation. `web/runtime-components/index.mjs` accepts legacy schema 1 release-local archives and schema 2 SHA-256 blobs resolved under the runtime root; signed release catalogs remain platform/App-version scoped.
+
+PhotoCraft editing: `photocraft/packages/editor/src/features/` owns the 18 feature domains. `features/tool-groups.ts` shares toolbar grouping and Shift cycling; `features/menu-commands.ts` derives runtime menu entries. `editor-sidebar.tsx` hosts independently dockable feature panels. Painting controls share gesture settings through `features/painting/controls-context.tsx`; canvas lasso/crop hooks use the workspace draft gate. Feature boundary fixtures live in `photocraft/tests/fixtures/feature-boundary-*.json`.

@@ -1,5 +1,5 @@
 {
-  "$comment": "首期图片工程上限的**唯一权威来源**（notes/scope.md「首期资源上限」）。Rust 核验工具与 TypeScript 契约（IMAGE_PROJECT_LIMITS）都必须与本文件一致：Rust 侧 rust/crates/project-verify/tests/limits_agree.rs 与 protocol 侧 src/image-project.test.ts 各有一个交叉核对测试。change: 2026-10-16-integrate-photocraft-image-editing。",
+  "$comment": "图片工程与交换资源的**唯一权威来源**（notes/scope.md「首期资源上限」+ change 2026-10-22-complete-photocraft-webui-editing 任务 1.4）。Rust 核验工具与 TypeScript 契约（IMAGE_PROJECT_LIMITS）都必须与本文件一致：Rust 侧 rust/crates/project-verify/tests/limits_agree.rs 与 protocol 侧 src/image-project.test.ts 各有一个交叉核对测试。原有工程上限保持不变；新增的 PSD／跨文档载荷／ABR 预算只约束导入导出与笔刷库，不抬高工程预算。",
   "maxCanvasSide": 8192,
   "maxCanvasPixels": 67108864,
   "maxLayers": 64,
@@ -15,5 +15,23 @@
   "maxSerializedBytes": 262144,
   "maxPatterns": 64,
   "maxPatternSide": 1024,
-  "maxPatternPixels": 4194304
+  "maxPatternPixels": 4194304,
+  "maxPsdInputBytes": 67108864,
+  "maxPsdOutputBytes": 67108864,
+  "maxLayerTransferBytes": 67108864,
+  "maxLayerTransferLayers": 64,
+  "maxAbrFileBytes": 33554432,
+  "maxAbrPresetsPerImport": 256,
+  "maxBrushLibraryPresets": 256,
+  "maxBrushTipSide": 1024,
+  "maxBrushResourcePixels": 16777216,
+  "maxBrushDecodedBytes": 134217728,
+  "maxFilterRadius": 1000,
+  "maxSelectionRadius": 500,
+  "maxHistogramSamples": 67108864,
+  "maxOpenDocuments": 8,
+  "maxVectorSavedPaths": 256,
+  "maxVectorSubpaths": 4096,
+  "maxVectorKnotsPerSubpath": 4096,
+  "maxVectorPathPoints": 32768
 }

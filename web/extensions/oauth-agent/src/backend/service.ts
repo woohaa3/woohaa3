@@ -224,10 +224,6 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
     ports: options.canvasPorts,
     codex,
     toolsEnabled: true,
-    maxToolCalls: config.maxToolCalls,
-    maxConcurrency: config.maxConcurrency,
-    maxQueueDepth: config.maxQueueDepth,
-    turnTimeoutMs: config.turnTimeoutMs,
     workJournal,
     ...(options.toolGrants ? { toolGrants: options.toolGrants } : {}),
     logger: (event) => log({ module: "chatgpt-generation", ...event })

@@ -10,43 +10,6 @@ pnpmfileChecksum: sha256-PVihiLwKgkIWWo4DgSxVWqARFLsPTxpQlCdUxYGeOZ0=
 
 importers:
 
-  ../../extensions/game-furnace:
-    dependencies:
-      '@woohaa3/contracts':
-        specifier: workspace:*
-        version: link:../../web/contracts
-      '@woohaa3/frontend':
-        specifier: workspace:*
-        version: link:../../web/frontend
-      react:
-        specifier: ^18.3.1
-        version: 18.3.1
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: 4.0.5
-        version: 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
-      '@types/node':
-        specifier: ^22.15.3
-        version: 22.20.4
-      '@types/react':
-        specifier: ^18.3.12
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.1
-        version: 18.3.7(@types/react@18.3.31)
-      jsdom:
-        specifier: ^30.1.1
-        version: 30.1.1
-      react-dom:
-        specifier: ^18.3.1
-        version: 18.3.1(react@18.3.1)
-      typescript:
-        specifier: ^5.6.3
-        version: 5.9.3
-      vitest:
-        specifier: ^2.0.0
-        version: 2.1.9(@types/node@22.20.4)(jsdom@30.1.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@22.20.4)(typescript@5.9.3))
-
   ../../photocraft/integrations/woohaa:
     dependencies:
       '@deepseek-ai/cordis':
@@ -931,9 +894,6 @@ importers:
       '@woohaa3/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@woohaa3/extension-game-furnace':
-        specifier: workspace:*
-        version: link:../../../extensions/game-furnace
       mongodb:
         specifier: ^6.12.0
         version: 6.21.0
@@ -1115,9 +1075,6 @@ importers:
       '@woohaa3/extension-film-set':
         specifier: workspace:*
         version: link:../extensions/film-set
-      '@woohaa3/extension-game-furnace':
-        specifier: workspace:*
-        version: link:../../extensions/game-furnace
       '@woohaa3/extension-prompt-snippets':
         specifier: workspace:*
         version: link:../extensions/prompt-snippets

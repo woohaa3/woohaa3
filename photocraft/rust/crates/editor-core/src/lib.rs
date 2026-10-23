@@ -17,27 +17,65 @@ pub mod document_content;
 pub mod editor;
 pub mod error;
 pub mod identity;
+#[path = "features/selections/selection_outline.rs"]
 mod selection_outline;
+#[path = "features/composition/transform_preview.rs"]
 mod transform_preview;
+#[path = "features/layers/layer_preview.rs"]
 mod layer_preview;
+#[path = "features/selections/mask_commands.rs"]
 mod mask_commands;
+#[path = "features/type/text_preview.rs"]
 mod text_preview;
+#[path = "features/type/text_geometry.rs"]
 mod text_geometry;
+#[path = "features/adjustments/adjustment_preview.rs"]
 mod adjustment_preview;
+#[path = "features/layers/layer_properties_preview.rs"]
 mod layer_properties_preview;
+#[path = "features/history/preview_history.rs"]
 mod preview_history;
+#[path = "features/layers/layer_locks.rs"]
 mod layer_locks;
+#[path = "features/layers/layer_layout.rs"]
 mod layer_layout;
+#[path = "features/layers/clipping_commands.rs"]
 mod clipping_commands;
+#[path = "features/layers/fill_commands.rs"]
 mod fill_commands;
+#[path = "features/painting/brush_library.rs"]
+pub mod brush_library;
+#[path = "features/layers/transfer.rs"]
+pub mod transfer;
+#[path = "features/io/psd.rs"]
+pub mod psd;
+#[path = "features/smart/smart_document.rs"]
+mod smart_document;
+#[path = "features/adjustments/adjustment_ext.rs"]
+pub mod adjustment_ext;
+#[path = "features/retouch/retouch.rs"]
+pub mod retouch;
+#[path = "features/composition/composition.rs"]
+pub mod composition;
+#[path = "features/composition/workflows.rs"]
+pub mod composition_workflows;
+#[path = "features/layers/clipboard_commands.rs"]
 mod clipboard_commands;
+#[path = "features/painting/region_preview.rs"]
 mod region_preview;
+#[path = "features/layers/group_commands.rs"]
 mod group_commands;
+#[path = "features/smart/smart_identity.rs"]
 mod smart_identity;
+#[path = "features/smart/smart_source_edit.rs"]
 pub mod smart_source_edit;
+#[path = "features/smart/smart_source_render.rs"]
 mod smart_source_render;
+#[path = "features/smart/smart_copy.rs"]
 pub mod smart_copy;
+#[path = "features/smart/smart_transform.rs"]
 mod smart_transform;
+#[path = "features/smart/smart_convert.rs"]
 pub mod smart_convert;
 
 #[cfg(target_arch = "wasm32")]
@@ -133,6 +171,11 @@ mod tests {
     }
 }
 
+#[path = "features/layers/contour_presets.rs"]
 mod contour_presets;
+#[path = "features/layers/pattern_presets.rs"]
 pub mod pattern_presets;
+#[path = "features/layers/pattern_library.rs"]
 mod pattern_library;
+
+pub mod features;

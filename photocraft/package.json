@@ -16,7 +16,11 @@
     "verifier:debug": "node scripts/build-verifier.mjs --debug",
     "rust:test": "cargo test --manifest-path rust/Cargo.toml --workspace --offline",
     "rust:check": "cargo check --manifest-path rust/Cargo.toml --workspace --offline",
-    "clean": "node scripts/clean.mjs"
+    "clean": "node scripts/clean.mjs",
+    "features:check": "node scripts/check-feature-boundaries.mjs",
+    "evidence:filters": "node scripts/evidence/filter-suite.mjs",
+    "evidence:filters:check": "python3 scripts/evidence/filter-suite-check.py",
+    "evidence:drift": "node scripts/evidence/feature-boundary-drift.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.21.5",

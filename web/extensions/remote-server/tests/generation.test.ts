@@ -394,7 +394,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
           mediaType: "image/png",
           // `referenceHandling: "storage-key"`：Task 既不签地址也不上传字节，
           // 交过来的就是画布资产自己的稳定键。
-          storageKey: `generation-outputs/${hex("d")}.png`,
+          locator: `media://server/canvas-remote-1/media/generation-outputs/${hex("d")}.png`,
           assetId: "asset-1"
         }
       ],
@@ -411,13 +411,13 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
       parameters: { aspectRatio: "1:1" },
       runId: "run-2"
     });
-    // 提交的是**画布资产的稳定键**：服务端按 (canvas_id, storage_key) 读自己的对象，
+    // 提交的是**不透明 locator**：服务端据此读自己能读的对象，客户端不拼键。
     // 而这张画布的媒体已由归属路由放在服务端。
     expect(prepared!.inputs).toEqual([
       {
         assetId: "asset-1",
         role: "reference",
-        storageKey: `generation-outputs/${hex("d")}.png`,
+        mediaLocator: `media://server/canvas-remote-1/media/generation-outputs/${hex("d")}.png`,
         mediaType: "image/png",
         mediaKind: "image"
       }
@@ -458,7 +458,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     expect((caught as RemoteGenerationError).code).toBe("media-not-found");
   });
 
-  it("缺画布身份/幂等键/稳定素材键时抛稳定码", async () => {
+  it("缺幂等键或 locator 时抛稳定码（画布已可选）", async () => {
     const { harness } = activateWithCatalog({ models: [imageModel()] });
     await loginAndRefresh(harness);
     const prepareInput = harness.providers[0]?.prepareInput;
@@ -473,7 +473,6 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     };
 
     for (const [patch, code] of [
-      [{ canvasId: undefined }, "canvas-not-shared"],
       [{ taskKey: undefined }, "idempotency-key-missing"],
       [
         {

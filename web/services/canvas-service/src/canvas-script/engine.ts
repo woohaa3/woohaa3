@@ -23,19 +23,21 @@ import { CANVAS_SCRIPT_READ_EXPRESSION, canvasScriptPrelude } from "./prelude.js
 
 /** 一次受限执行的输入。 */
 export type CanvasScriptExecutionInput = {
-  /** 用户源码（已通过严格 codec；本层再按 UTF-8 字节数兜底）。 */
+  /** 用户源码（已通过严格 codec）。 */
   source: string;
   /** 支持的语义种类（进入 prelude，保证能力声明与执行一致）。 */
   nodeKinds: readonly string[];
-  /** prompt 字符上限（与任务协议一致）。 */
-  promptMaxChars: number;
   /** 节点位置坐标绝对值上限。 */
   positionAbsMax: number;
-  /** 本次执行（含双跑共享）的总 deadline（epoch 毫秒）。 */
-  deadlineMs: number;
+  /**
+   * 本次执行（含双跑共享）的截止时间（epoch 毫秒）；缺省不设应用侧时长上限
+   * （change: 2026-10-22-remove-agent-execution-limits，任务 6.1）。外部取消仍可随时终止。
+   */
+  deadlineMs?: number;
+  /** 外部取消信号：用户停止时从执行器外终止隔离执行并丢弃不完整计划。 */
+  signal?: AbortSignal;
+  /** 显式注入的真实内存上限（缺省只取宿主/执行器事实，不是应用固定额度）。 */
   heapLimitBytes?: number;
-  maxOperations?: number;
-  maxApiCalls?: number;
 };
 
 /** 单个 realm 内的记录结果（严格 JSON）。 */
@@ -117,10 +119,7 @@ export class CanvasScriptEngine {
   > {
     const preludeSource = canvasScriptPrelude({
       nodeKinds: input.nodeKinds,
-      maxOperations: input.maxOperations ?? CANVAS_SCRIPT_LIMITS.maxOperations,
-      maxApiCalls: input.maxApiCalls ?? CANVAS_SCRIPT_LIMITS.maxApiCalls,
-      promptMaxChars: input.promptMaxChars,
-      textMaxChars: input.promptMaxChars,
+      textMaxChars: CANVAS_SCRIPT_LIMITS.maxIdentifierChars,
       positionAbsMax: input.positionAbsMax
     });
 
@@ -137,11 +136,12 @@ export class CanvasScriptEngine {
         preludeSource,
         readExpression: CANVAS_SCRIPT_READ_EXPRESSION,
         source: input.source,
-        deadlineMs: input.deadlineMs,
+        deadlineMs: input.deadlineMs ?? null,
         heapLimitBytes: input.heapLimitBytes ?? CANVAS_SCRIPT_LIMITS.heapLimitBytes,
         stackLimitBytes: this.options.stackLimitBytes ?? CANVAS_SCRIPT_LIMITS.stackLimitBytes
       },
-      quickJsModuleUrl()
+      quickJsModuleUrl(),
+      input.signal
     );
   }
 }
@@ -177,7 +177,8 @@ type WorkerRequest = {
   preludeSource: string;
   readExpression: string;
   source: string;
-  deadlineMs: number;
+  /** 截止时间（epoch 毫秒）；`null` 表示不设应用侧时长上限。 */
+  deadlineMs: number | null;
   heapLimitBytes: number;
   stackLimitBytes: number;
 };
@@ -202,14 +203,17 @@ type WorkerResponse =
 
 function runRealmInWorker(
   request: WorkerRequest,
-  quickjsUrl: string
+  quickjsUrl: string,
+  signal?: AbortSignal
 ): Promise<{ ok: true; value: CanvasScriptRealmResult } | { ok: false; error: CanvasScriptError }> {
   return new Promise((resolve) => {
     let settled = false;
-    const remaining = Math.max(1, request.deadlineMs - Date.now());
-    // Worker 内的 CPU interrupt 是主终止路径；这个定时器是更外层的兜底
-    // （interrupt 无法打断 native 循环/分配）。
-    const hardTimeout = setTimeout(() => settle({ ok: false, error: timeoutError() }), remaining + 250);
+    // 截止时间是调用方给的显式取消期限（不是应用固定时长）；没有期限时只由用户取消或真实故障终止。
+    const hardTimeout = request.deadlineMs === null
+      ? undefined
+      : setTimeout(() => settle({ ok: false, error: timeoutError() }), Math.max(1, request.deadlineMs - Date.now()) + 250);
+    const onAbort = () => settle({ ok: false, error: cancelledError() });
+    signal?.addEventListener("abort", onAbort, { once: true });
     const worker = new Worker(WORKER_BOOTSTRAP, {
       eval: true,
       workerData: { qjsUrl: quickjsUrl },
@@ -219,7 +223,8 @@ function runRealmInWorker(
     function settle(outcome: { ok: true; value: CanvasScriptRealmResult } | { ok: false; error: CanvasScriptError }): void {
       if (settled) return;
       settled = true;
-      clearTimeout(hardTimeout);
+      if (hardTimeout) clearTimeout(hardTimeout);
+      signal?.removeEventListener("abort", onAbort);
       void worker.terminate();
       resolve(outcome);
     }
@@ -254,10 +259,15 @@ function timeoutError(): CanvasScriptError {
   return {
     code: "script-timeout",
     stage: "record",
-    message: `脚本执行超过 ${CANVAS_SCRIPT_LIMITS.executionTimeoutMs} 毫秒预算`,
+    message: "脚本执行超过了本次请求的显式截止时间",
     retryable: false,
-    suggestion: "减少循环规模或拆分批次"
+    suggestion: "检查脚本是否陷入死循环后重试"
   };
+}
+
+/** 用户取消：可重试（重新提交即可），且不发布任何不完整计划。 */
+function cancelledError(): CanvasScriptError {
+  return { code: "cancelled", stage: "record", message: "脚本执行已被用户停止", retryable: true };
 }
 
 function limitError(code: "script-memory-limit" | "script-timeout"): CanvasScriptError {
@@ -322,7 +332,7 @@ parentPort.once("message", async (request) => {
   runtime.setMaxStackSize(request.stackLimitBytes);
   let interrupted = false;
   runtime.setInterruptHandler(() => {
-    if (Date.now() > request.deadlineMs) { interrupted = true; return true; }
+    if (request.deadlineMs !== null && Date.now() > request.deadlineMs) { interrupted = true; return true; }
     return false;
   });
   const ctx = runtime.newContext({ intrinsics: { ...DefaultIntrinsics, Date: false, Promise: false } });

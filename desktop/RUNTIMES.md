@@ -35,7 +35,7 @@
 }
 ```
 
-本机程序必须是兼容的直接可执行文件，按锁文件 localVersions 校验；CLI 版本与 SDK/npm 版本分开。Windows 需要原生 `.exe`，不把 npm `.cmd` shim 当成原生程序。仅复用程序，不导入全局账号和技能。
+Claude 本机程序按锁文件 `localVersions` 精确校验，CLI 版本与 SDK/npm 版本分开。Codex 接受能自报版本的本机程序，只拒绝锁文件 `blockedVersions` 中的版本；macOS 上可以把 `ChatGPT.app` 作为路径，探测时会解析到包内的 Codex 可执行文件。Windows 需要原生 `.exe`，不把 npm `.cmd` shim 当成原生程序。仅复用程序，不导入全局账号和技能。
 
 ## 构建和上传 CDN
 
@@ -110,3 +110,16 @@ Codex/Claude/原生工具启动本地程序；DSH 用内置 Node 启动隔离闭
 先上传组件归档，最后提交 `catalog.signed.json`（含同一对象中的清单与签名）。运行时会优先读取它，只有 404 才回退旧双文件清单。所有 runtime 产物成功上传后再发布 App/更新索引。已经发布的平台/发行版本目录不能替换为不同内容；改动后使用新 App 版本，旧目录保留。发布期间不要让外部上传插件并发写同一目录。
 
 发行版本仅隔离下载入口；组件版本、验证规则、用户数据目录缓存均不变。App 更新但组件版本未变时继续复用已安装组件。日常开发仍使用本地源码/依赖。
+
+
+### Windows tar/gzip 安装一致性
+
+Windows 使用 GNU tar 回退时，压缩/解压必须使用同一安装目录的 `gzip.exe`。构建工具会把 tar 所在目录置于其子进程 PATH 首位，避免 MSYS2 tar 误用 Git for Windows gzip 导致 `cygheap base mismatch`。若缺少同目录 gzip，补齐对应工具安装；不要根据通用错误提示删除系统 DLL。Windows 自带 bsdtar 不需要外部 gzip。
+
+### 跨 App 版本共享归档（新版发布器）
+
+新版发布器可把本地 schema 1 构建清单转换并重新签名为 schema 2。清单仍在 `<runtime根>/<平台>/<App版本>/catalog.signed.json`，归档改为 `<runtime根>/blobs/sha256/<归档哈希>.tar.gz`。schema 2 中组件 url 必须为 `blobs/sha256/<sha256>.tar.gz`，下载器只在当前平台/发行目录上移两级后解析这个严格路径。旧 schema 1 继续按当前目录解析；大小、签名、哈希与安全解压校验均保留。
+
+必须为包含新版下载器的 App 使用未发布的新发行版本；旧 App 无法读取 schema 2，不要覆盖旧发行目录。旧对象不删除。上述“直接上传叶目录”仍是 schema 1 的发布方式；共享模式须由支持转换/重新签名的发布器先提交文件池再提交清单，不能混用普通目录上传步骤覆盖清单。
+
+组件归档由 `scripts/lib/runtime-archive.mjs` 以流式 USTAR/gzip 生成，固定时间、所有者、权限规则和顺序，消除未改内容的重复哈希。不再依赖系统 tar/gzip 生成组件包。

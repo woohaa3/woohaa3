@@ -8,12 +8,11 @@
  */
 import {
   FILM_SET_CONTENT_VERSION,
-  MAX_FILM_SET_ITEMS,
   MAX_FILM_SET_NAME_LENGTH,
   establishItemMotionAdapter,
   type FilmSetItem
 } from "../film-set-content.js";
-import { FILM_SET_ANIMATIONS_VERSION, MAX_FILM_SET_CLIPS } from "../film-set-animations.js";
+import { FILM_SET_ANIMATIONS_VERSION } from "../film-set-animations.js";
 import { PREFERRED_MODEL_SCRIPT_VERSION, MODEL_SCRIPT_LANGUAGE } from "../model-script.js";
 import { MODEL_API_AXIS_CONVENTIONS, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText } from "../model-api-descriptor.js";
 import { motionApiGuide } from "../model-api-descriptor-motion.js";
@@ -115,7 +114,7 @@ export function buildFilmSetConversionInstruction(input: FilmSetConversionInstru
     );
   }
   lines.push(
-    `Output an items-only film-set: filmSetContent.schemaVersion MUST be ${FILM_SET_CONTENT_VERSION}, items only (no top-level authored model), at most ${MAX_FILM_SET_ITEMS} items.`,
+    `Output an items-only film-set: filmSetContent.schemaVersion MUST be ${FILM_SET_CONTENT_VERSION}, items only (no top-level authored model).`,
     "The film-set MUST contain at least one item with kind \"model\" that reconstructs the visible content as an editable 3D model. A single flat copy of the source (image/video items only) is NOT an acceptable result.",
     "Each item needs a stable unique id, a name (<= " + MAX_FILM_SET_NAME_LENGTH + " chars), a legal localTransform {offset:{x,y,z},scale,yaw}, and a kind.",
     "Model items carry a complete, deterministic, self-contained modelScript; language \"" + "javascript" + "\".",
@@ -131,7 +130,7 @@ export function buildFilmSetConversionInstruction(input: FilmSetConversionInstru
     ...(input.assetIds && input.assetIds.length > 0
       ? [`Allowed media assetId values: ${input.assetIds.join(", ")}.`]
       : ["Do not reference any media asset unless it was explicitly provided."]),
-    `filmSetAnimations.schemaVersion MUST be ${FILM_SET_ANIMATIONS_VERSION} with at most ${MAX_FILM_SET_CLIPS} shots; each shot MUST set "kind" to "static" or "dynamic". A static shot MUST have duration 0, loop false, an empty cameraMotionScript, and no object motion or timed media playback. A dynamic shot MUST have a positive duration (seconds) and carries the camera/object motion; a fixed camera filming a moving subject is still "dynamic". Do NOT infer kind from whether cameraMotionScript is empty; many shots are dynamic with an empty camera script. cameraMotionScript is required (empty string = still camera); object motion lives in bindings[].motion referencing existing item ids.`,
+    `filmSetAnimations.schemaVersion MUST be ${FILM_SET_ANIMATIONS_VERSION}; each shot MUST set "kind" to "static" or "dynamic". A static shot MUST have duration 0, loop false, an empty cameraMotionScript, and no object motion or timed media playback. A dynamic shot MUST have a positive duration (seconds) and carries the camera/object motion; a fixed camera filming a moving subject is still "dynamic". Do NOT infer kind from whether cameraMotionScript is empty; many shots are dynamic with an empty camera script. cameraMotionScript is required (empty string = still camera); object motion lives in bindings[].motion referencing existing item ids.`,
     "Camera fields (`sceneCamera` and each clip's `camera`): `azimuth` and `elevation` are in RADIANS (NOT degrees); elevation 0 = level, +1.5708 ≈ straight up, and MUST stay within ±1.5708; `distance` is a positive world distance; `focusOffset` is a world-space offset from the scene bounding-box center (aim it at the subject, e.g. chest height).",
     "sceneCamera should reproduce the source framing/composition whenever usable viewpoint cues exist; omit it only when they do not.",
     "`filmSetContent` items are in world units with a life-like scale: build the subject at its real size (a standing person is about 1.7–2.7 units tall). Include a `ground` item ONLY when the source shows a visible floor; if you include one, keep its `size` close to the subject footprint (about 8×8). A giant plane such as 200×200 is WRONG — it shrinks the subject to almost nothing in the node preview and inflates the selection scope; omit the ground entirely when no floor is visible."

@@ -17,7 +17,7 @@ function DraftInput() {
   return <input aria-label="新增 API Key" value={value} onChange={event => setValue(event.target.value)} />;
 }
 afterEach(async () => { act(() => root?.unmount()); await runtime?.dispose(); document.body.innerHTML = ""; });
-async function render(connections: AgentConnectionView[] = [], configure = false, settingsStore?: ReturnType<typeof createBackendSettingsStore>, payload: {canvasId?: string; nodeId?: string; kind?: string} = {canvasId: "canvas", nodeId: "node"}) {
+async function render(connections: AgentConnectionView[] = [], configure = false, settingsStore?: ReturnType<typeof createBackendSettingsStore>, payload: {canvasId?: string; nodeId?: string; kind?: string; page?: "add"} = {canvasId: "canvas", nodeId: "node"}) {
   const slots = new SlotRegistry();
   if (configure) slots.register("agent-assistant.configuration", { id: "api", owner: "sdk-agent", kind: "api-key", label: "API Key", render: ({ onSaved }) => <><DraftInput /><button onClick={() => onSaved?.("c1")}>保存测试连接</button><SelectInput label="配置类型" value="one" onValueChange={() => {}} options={[{value:"one",label:"类型一"},{value:"two",label:"类型二"}]} /></> });
   if (configure) slots.register("agent-assistant.configuration", { id: "local", owner: "local-agent", kind: "installed", label: "我有本地 agent", render: () => <p>本机工具配置</p> });
@@ -43,6 +43,13 @@ it("全部扩展缺失仍能添加和读取外部指引，打开不推理", asyn
   for (const text of ["我有 ChatGPT 账号", "我有本地 agent", "我有 API Key"]) expect(f.el.textContent).toContain(text);
   expect(f.el.querySelectorAll("button:disabled")).toHaveLength(3);
   expect(f.listConnections).toHaveBeenCalledTimes(1);
+});
+it("首次引导可直接进入添加助手页，不必经过空列表", async () => {
+  const f = await render([], true, undefined, { page: "add" });
+  expect(f.el.querySelector(".agent-assistant--add")).not.toBeNull();
+  expect(f.el.querySelector(".dlg__title")?.textContent ?? f.el.textContent).toContain("添加助手");
+  expect(f.el.querySelector(".agent-assistant__empty")).toBeNull();
+  expect(f.el.querySelectorAll(".agent-assistant__method")).toHaveLength(3);
 });
 it("配置贡献的下拉浮层归属助手弹窗，不落到应用背景层", async () => {
   const f = await render([], true);

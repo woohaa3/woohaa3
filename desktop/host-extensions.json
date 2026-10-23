@@ -11,7 +11,6 @@
     "runninghub-provider",
     "tokenhub-provider",
     "film-set",
-    "game-furnace",
     "local-agent",
     "oauth-agent",
     "sdk-agent",

@@ -127,6 +127,8 @@ export type CanvasOperationRecord = {
  * 这是投影给渲染层的形状：有界、不含完整历史列表或媒体 bytes。
  */
 export type CanvasNodeRunSummary = {
+  /** Present only for trusted film sets; explicit null suppresses stale compatible busy. */
+  filmSetFeedback?: import("./film-set-feedback.js").FilmSetRunFeedback | null;
   canvasId: string;
   nodeId: string;
   /** 该节点当前非终态操作（若有）；同一普通节点可有多个，但仅首个用于门禁。 */

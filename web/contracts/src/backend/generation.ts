@@ -6,6 +6,7 @@
  * catalog、执行、投影。契约只含稳定 DTO 与不透明 provider 句柄，**不**引入 provider SDK、
  * 依赖或凭据。
  */
+import { isMediaLocator, type MediaLocator } from "../media/storage.js";
 import type { CanvasTaskModelType } from "../task/dto.js";
 import type { ModelInteractionDescriptor } from "../task/model-identity.js";
 import type { GenerationModelCapabilityFacts } from "../task/model-capabilities.js";
@@ -96,13 +97,6 @@ export type GenerationProvider = {
    */
   prepareInput?: (input: GenerationPrepareInput) => Record<string, unknown>;
   /**
-   * 参考输入的传递方式（缺省 `url`）。
-   *
-   * `storage-key` 表示 Provider 直接消费稳定 `storageKey`（不签 URL、不上传字节），
-   * 此时 Task 不会调用 `uploadReference`，也不会调用 Media 的 `sign`。
-   */
-  referenceHandling?: GenerationReferenceHandling;
-  /**
    * Provider 自带上传参考素材（设计稿 storage-extension-point 的生成链路 ①）。
    *
    * 提交时 Task 先问 Provider：有本钩子且能把参考字节读出来，就交给它自己上传（返回的地址
@@ -142,25 +136,17 @@ export type GenerationModelDescription = {
   cancel?: GenerationCancelCapability;
 };
 
-/**
- * 参考输入的传递方式（`GenerationProvider.referenceHandling`，缺省 `url`）。
- *
- * - `url`：Task 先问 Provider 的 `uploadReference`，否则由存储 `expose` 签出执行期地址，
- *   写进 `GenerationTaskReference.url`；Provider 只认地址。
- * - `storage-key`：Task **不签地址、也不上传**，直接把稳定 `storageKey` 交给 Provider。
- *   远端托管生成属于这一类：服务端按 `(canvasId, storageKey)` 读**自己的**对象，
- *   而这张画布的媒体已经由归属路由放在服务端（见 docs/design/canvas-media-and-reference-flow.md）。
- */
-export type GenerationReferenceHandling = "url" | "storage-key";
-
 /** 稳定参考输入（`url` 模式下的形状，顺序与提交一致）。 */
 export type GenerationReference = { role: string; mediaKind?: string; mediaType: string; url: string };
 
 /**
- * 交给 Provider 的稳定参考输入：执行期地址 + 原始稳定身份。
+ * 交给 Provider 的稳定参考输入：位置 + 原始稳定身份。
  *
- * `url` 只在 `referenceHandling: "url"` 时存在。`storage-key` 模式下 MUST NOT 读取 `url`：
- * 那类 Provider 拿 `storageKey` 就够，任何地址都会被服务端丢弃。
+ * 三种形态只表达同一件事——「字节在哪」：
+ * - `locator`：本部署存储里的不透明位置（Task 调 `uploadReference` 之后由存储给）；
+ * - `url`：Provider 自己的素材服务地址（它自己上传的，或存储 expose 签出的）；
+ * - `storageKey`：本机媒体命名空间内的逻辑键，只在没有上两者时可用（本机 Provider）。
+ * Provider 按自己的能力挑一个，**不得**把一种当成另一种来解析。
  */
 export type GenerationTaskReference = {
   role: string;
@@ -171,6 +157,12 @@ export type GenerationTaskReference = {
   assetId?: string;
   /** media namespace 内的稳定键；`storage-key` 模式下是唯一传递凭据。 */
   storageKey?: string;
+  /**
+   * 字节的不透明定位符。
+   *
+   * Provider 把它原样交给自己的上游（远端托管生成提交的就是它）；调用方不解析。
+   */
+  locator?: MediaLocator;
 };
 
 /**
@@ -187,8 +179,8 @@ export type GenerationReferenceUploadInput = {
   /**
    * 这次提交属于哪张画布。
    *
-   * 远端托管 Provider 要把素材写进服务端存储的**画布作用域**（服务端按
-   * `(canvas_id, storage_key)` 读自己的对象），没有画布身份就无法落对位置。
+   * 只用于选择落点（画布命名空间 vs 主体命名空间），**不是**读取凭据：
+   * 上传成功后由 Provider 返回 locator，提交体只带 locator。
    * 本机 Provider 忽略它。
    */
   canvasId?: string;
@@ -196,9 +188,20 @@ export type GenerationReferenceUploadInput = {
   storageKey?: string;
 };
 
+/**
+ * Provider 上传参考素材的结果：二选一，都表达「上游怎么拿到这堆字节」。
+ *
+ * - `locator`：写进了本部署存储，交给生成服务端按位置读；
+ * - `url`：写进了 Provider 自己的素材服务，上游直接拉。
+ */
+export type GenerationReferenceUploadResult = {
+  locator?: MediaLocator;
+  url?: string;
+};
+
 export type GenerationReferenceUpload = (
   input: GenerationReferenceUploadInput
-) => Promise<string | undefined> | string | undefined;
+) => Promise<GenerationReferenceUploadResult | undefined> | GenerationReferenceUploadResult | undefined;
 
 /** 生成模块交给插件 `prepareInput` 的规范输入。 */
 export type GenerationPrepareInput = {
@@ -239,11 +242,19 @@ export type GenerationResolveModelInput = {
 export type GenerationStableMediaResult = {
   media: {
     storageKey: string;
+    /**
+     * 结果字节的不透明定位符（media://<backend>/<opaque>）。
+     *
+     * 远端托管生成必填：结果在服务端命名空间里，没有它客户端只能靠猜键或带外字段。
+     * 本机 Provider 可以不给（字节本来就在本机存储里，键就够）。
+     */
+    locator?: MediaLocator;
     contentType: string;
     size: number;
     checksum?: string;
     durationSeconds?: number;
-    poster?: { storageKey: string; contentType: string; size: number; checksum?: string };
+    // 海报的主键同样可能是 locator（主体命名空间没有画布逻辑键）。
+    poster?: { storageKey?: string; locator?: MediaLocator; contentType: string; size: number; checksum?: string };
   };
 };
 
@@ -253,7 +264,10 @@ export function isGenerationStableMediaResult(value: unknown): value is Generati
   const media = (value as { media?: unknown }).media;
   if (typeof media !== "object" || media === null || Array.isArray(media)) return false;
   const entry = media as Record<string, unknown>;
-  if (typeof entry.storageKey !== "string" || !isValidStorageKey(entry.storageKey)) return false;
+  // 位置二选一：locator（任何后端）或稳定键（画布命名空间）。两者都没有才不是稳定结果。
+  const hasLocator = typeof entry.locator === "string" && isMediaLocator(entry.locator);
+  const hasStorageKey = typeof entry.storageKey === "string" && entry.storageKey !== "" && isValidStorageKey(entry.storageKey);
+  if (!hasLocator && !hasStorageKey) return false;
   if (typeof entry.contentType !== "string" || entry.contentType === "") return false;
   if (typeof entry.size !== "number" || !Number.isFinite(entry.size) || entry.size < 0) return false;
   if (entry.checksum !== undefined && typeof entry.checksum !== "string") return false;
@@ -261,7 +275,9 @@ export function isGenerationStableMediaResult(value: unknown): value is Generati
   if (entry.poster !== undefined) {
     if (typeof entry.poster !== "object" || entry.poster === null || Array.isArray(entry.poster)) return false;
     const poster = entry.poster as Record<string, unknown>;
-    if (typeof poster.storageKey !== "string" || !isValidStorageKey(poster.storageKey)) return false;
+    const posterHasLocator = typeof poster.locator === "string" && isMediaLocator(poster.locator);
+    const posterHasKey = typeof poster.storageKey === "string" && poster.storageKey !== "" && isValidStorageKey(poster.storageKey);
+    if (!posterHasLocator && !posterHasKey) return false;
     if (typeof poster.contentType !== "string" || poster.contentType === "") return false;
     if (typeof poster.size !== "number" || !Number.isFinite(poster.size) || poster.size < 0) return false;
     if (poster.checksum !== undefined && typeof poster.checksum !== "string") return false;

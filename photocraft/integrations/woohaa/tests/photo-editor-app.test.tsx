@@ -5,14 +5,14 @@ import { expect, it, vi } from "vitest";
 import { DialogService } from "@woohaa3/frontend/plugin-api";
 import { setup, press, canvasPort, root } from "../src/test-support/photo-editor-harness.js";
 
-it("工具选择仅展开当前参数，裁剪入口已移除", () => {
+it("工具选择仅展开当前参数，裁剪有专用工具入口", () => {
   const { container, dispatch } = setup();
   const sections = () => [...container.querySelectorAll<HTMLElement>(".photo-editor__options-group")].filter((node) => !node.hidden);
   expect(sections()).toHaveLength(1);
   act(() => container.querySelector<HTMLButtonElement>('.photo-editor__toolrail [aria-label="画笔"]')!.click());
   expect(sections().map((node) => node.getAttribute("aria-label"))).toEqual(["画笔"]);
   expect(container.querySelector(".photo-editor__crop")).toBeNull();
-  expect(container.querySelector('.photo-editor__toolrail [aria-label="裁剪"]')).toBeNull();
+  expect(container.querySelector('.photo-editor__toolrail [aria-label="裁剪"]')).not.toBeNull();
   expect(dispatch).not.toHaveBeenCalled();
 });
 
@@ -40,6 +40,112 @@ it("只读预览禁用历史跳转和工具，不提供平移工具", () => {
   expect(container.querySelector('[data-canvas]')?.getAttribute("data-tool")).toBe("none");
 });
 
+
+it("Q 键经本域快速蒙版草稿进入/退出，且不走共享 dispatch 直通", () => {
+  // 回归：把 q 解析成 `{kind:"command", id:"select.editInQuickMaskMode"}` 会让共享 run() 直接执行
+  // 上游命令——内核进入快速蒙版而本域没有草稿，随后画笔报"没有活动的快速蒙版会话"、保存却成功。
+  let active = false;
+  const selections = {
+    draftState: vi.fn(() => ({ ok: true, value: active
+      ? { active: true, kind: "quickMask", document: 1, revision: 1, stale: false, draft: { strokes: 0 } }
+      : { active: false } })),
+    beginQuickMask: vi.fn(() => { active = true; return { ok: true, value: { quickMask: true } }; }),
+    paintQuickMask: vi.fn(() => ({ ok: true, value: { strokes: 1 } })),
+    paintQuickMaskStroke: vi.fn(() => ({ ok: true, value: { strokes: 1 } })),
+    exitQuickMask: vi.fn(() => { active = false; return { ok: true, value: {} }; })
+  };
+  const { container, dispatch } = setup(false, { selections });
+  const editor = container.querySelector(".photo-editor")!;
+
+  press(editor, "q");
+  expect(selections.beginQuickMask).toHaveBeenCalledTimes(1);
+  expect(dispatch.mock.calls).not.toContainEqual(["select.editInQuickMaskMode", null]);
+
+  // 再按一次 Q：确认退出（转回选区），同样不经 dispatch。
+  press(editor, "q");
+  expect(selections.exitQuickMask).toHaveBeenLastCalledWith(false);
+  expect(dispatch.mock.calls).not.toContainEqual(["select.editInQuickMaskMode", null]);
+});
+
+it("反斜杠键真的切换蒙版叠加查看，与面板按钮同一条命令", () => {
+  // 面板按钮写着「切换叠加（\\）」。此前只有按钮、没有键，按键什么也不会发生——
+  // 文案与实现脱节。这里用真实 keydown 验证键确实落到 `layer.toggleMaskOverlay`。
+  const { container, dispatch } = setup(false, { maskCommands: true });
+  const editor = container.querySelector(".photo-editor")!;
+  press(editor, "\\", { code: "Backslash" });
+  expect(dispatch.mock.calls).toContainEqual(["layer.toggleMaskOverlay", null]);
+  // Shift+\\ 是 `|`，不抢。
+  dispatch.mockClear();
+  press(editor, "\\", { code: "Backslash", shiftKey: true });
+  expect(dispatch).not.toHaveBeenCalled();
+});
+
+it("只读预览下 Q 不进入快速蒙版", () => {
+  const selections = {
+    draftState: vi.fn(() => ({ ok: true, value: { active: false } })),
+    beginQuickMask: vi.fn(() => ({ ok: true, value: { quickMask: true } })),
+    paintQuickMask: vi.fn(), paintQuickMaskStroke: vi.fn(), exitQuickMask: vi.fn()
+  };
+  const { container } = setup(true, { selections });
+  press(container.querySelector(".photo-editor")!, "q");
+  expect(selections.beginQuickMask).not.toHaveBeenCalled();
+});
+
+it("U17 面板布防后画布单击直接落成一像素行/列，不走共享 dispatch", () => {
+  // spec 要求「缩放后单击形成准确的一源像素行/列」。冻结的工具清单不允许新增工具 id，
+  // 因此"单行/单列子工具"表达为一次待命：面板布防 → 画布下一次单击即落点。
+  const selections = {
+    selectLine: vi.fn(() => ({ ok: true, value: { bounds: [0, 7, 800, 1] } })),
+    draftState: vi.fn(() => ({ ok: true, value: { active: false } }))
+  };
+  const { container, dispatch } = setup(false, { selections });
+  act(() => Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "面板…")!.click());
+  act(() => Array.from(container.querySelectorAll<HTMLButtonElement>(".photo-editor__feature-picker button")).find((button) => button.textContent === "选区工具…")!.click());
+  const arm = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("单击画布放置单行"));
+  expect(arm).toBeTruthy();
+  act(() => arm!.click());
+  expect(container.querySelector('[data-line-pick-armed="row"]')).not.toBeNull();
+
+  // 画布真实单击：域会话收到该点的行，`dispatch` 从未被用来建行。
+  dispatch.mockClear();
+  const canvas = container.querySelector('[data-canvas]')!;
+  act(() => canvas.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 400, clientY: 7 })));
+  expect(selections.selectLine).toHaveBeenCalledTimes(1);
+  // 待命是一次性的：点完自动解除，不会被下一次单击重复消费。
+  expect(container.querySelector('[data-line-pick-armed="row"]')).toBeNull();
+  // 单击被 U17 认领后**不走**共享 dispatch：既不建行，也不会顺手执行"点空白取消选择"。
+  expect(dispatch).not.toHaveBeenCalled();
+});
+
+it("U22 面板布防后画布单击真的加入取样队列并触发预览", () => {
+  // spec 要求"色彩范围支持画布多点/增减取样"。此前只能手输 X/Y，画布单击完全没接到取样。
+  const selections = {
+    beginColorRange: vi.fn(() => ({ ok: true, value: { bounds: [0, 0, 800, 600] } })),
+    updateColorRange: vi.fn(() => ({ ok: true, value: { bounds: [0, 0, 800, 600] } })),
+    draftState: vi.fn(() => ({ ok: true, value: { active: false } })),
+    draftOutline: vi.fn(() => ({ ok: true, value: [] })),
+    commitSelectionDraft: vi.fn(() => ({ ok: true, value: {} })),
+    cancelSelectionDraft: vi.fn(() => ({ ok: true }))
+  };
+  const { container } = setup(false, { selections });
+  act(() => Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "面板…")!.click());
+  act(() => Array.from(container.querySelectorAll<HTMLButtonElement>(".photo-editor__feature-picker button")).find((button) => button.textContent === "色彩范围…")!.click());
+  const arm = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("单击画布加点 +"));
+  expect(arm).toBeTruthy();
+  act(() => arm!.click());
+  expect(container.querySelector('[data-color-range-pick-armed="+"]')).not.toBeNull();
+
+  // 画布真实单击：点位进队列，并用该点作为第一个取样点发起真实预览。
+  act(() => container.querySelector('[data-canvas]')!.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 123, clientY: 45 })));
+  expect(selections.beginColorRange).toHaveBeenCalledTimes(1);
+  // 内核参数是 `points` + 每点对应的 `order`（`+` = 加取样，`-` = 减取样）。
+  const params = (selections.beginColorRange.mock.calls as unknown[][])
+    .at(-1)![0] as { points?: number[][]; order?: string[] };
+  expect(params.points).toEqual([[123, 45]]);
+  expect(params.order).toEqual(["+"]);
+  // 一次性待命：点完即解除。
+  expect(container.querySelector('[data-color-range-pick-armed="+"]')).toBeNull();
+});
 
 it("编组快捷键经过真实编辑器路由，输入、IME、手势和只读不触发",()=>{
   const {container,dispatch,snapshot,render}=setup();
@@ -295,16 +401,18 @@ it("输入框的空格释放会留给宿主，避免宿主的空格状态卡住"
   } finally { window.removeEventListener("keyup", host); }
 });
 
-it("默认矩形选框；H 和已移除的 C 不切换工具，选区来自内核", () => {
+it("默认矩形选框；H/C/Z 切换抓手、裁剪、缩放，选区来自内核", () => {
   const { container } = setup(false, { hasSelection: true });
   const editor = container.querySelector<HTMLElement>(".photo-editor")!;
   const canvas = container.querySelector('[data-canvas]')!;
   expect(canvas.getAttribute("data-tool")).toBe("marquee");
   expect(canvas.getAttribute("data-selection")).toBe("[[10,20,50,20],[50,20,50,60],[50,60,10,60],[10,60,10,20]]");
   press(editor, "h");
-  expect(canvas.getAttribute("data-tool")).toBe("marquee");
+  expect(canvas.getAttribute("data-tool")).toBe("pan");
   press(editor, "c");
-  expect(canvas.getAttribute("data-tool")).toBe("marquee");
+  expect(canvas.getAttribute("data-tool")).toBe("crop");
+  press(editor, "z");
+  expect(canvas.getAttribute("data-tool")).toBe("zoom");
 });
 
 
@@ -315,9 +423,9 @@ it("选区内部单击保留，外部单击取消；增加模式保留原选区"
   expect(dispatch).not.toHaveBeenCalled();
   act(() => canvas.dispatchEvent(new MouseEvent("click", { clientX: 100, clientY: 100, bubbles: true })));
   expect(dispatch).toHaveBeenLastCalledWith("select.deselect", null); dispatch.mockClear();
-  const modes = container.querySelector<HTMLSelectElement>('[aria-label="选区"] select')!;
-  for (const mode of ["add", "subtract", "intersect"]) {
-    act(() => { modes.value = mode; modes.dispatchEvent(new Event("change", { bubbles: true })); });
+  for (const mode of ["增加", "减去", "相交"]) {
+    const button=container.querySelector<HTMLButtonElement>(`.photo-editor__selection-modes button[aria-label="${mode}"]`)!;
+    act(() => button.click());
     act(() => canvas.dispatchEvent(new MouseEvent("click", { clientX: 100, clientY: 100, bubbles: true })));
   }
   expect(dispatch).not.toHaveBeenCalled();
@@ -709,4 +817,28 @@ it("多选时菜单和 Ctrl+E 共用合并所选图层命令", () => {
   const merge=[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item=>item.textContent?.startsWith('合并图层'))!;
   act(()=>merge.click());
   expect(dispatch.mock.calls).toEqual([["layer.mergeLayers",null],["layer.mergeLayers",null]]);
+});
+
+it("文件菜单的新建…打开新建表单；同一份字节交给宿主另开文档", async () => {
+  // 回归：没有文档时 `locked` 为真，新建入口曾被外壳共用信号禁掉；
+  // 有文档时又要靠宿主另开槽位（一个会话只有一个文档槽位）。
+  const onRequestDocumentSlot = vi.fn(async (_input: { bytes: Uint8Array; name: string }) => ({ ok: true as const }));
+  const { container } = setup(false, {
+    documents: { onOpenFile: () => undefined },
+    onRequestDocumentSlot
+  });
+  const trigger = [...container.querySelectorAll<HTMLButtonElement>(".photo-editor__menubar button")]
+    .find((button) => button.textContent === "文件");
+  expect(trigger).toBeDefined();
+  // Radix 下拉菜单要由键盘/指针打开：focus + Enter 与用户实际操作一致。
+  press(trigger!, "Enter");
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    .find((node) => node.textContent?.startsWith("新建"));
+  expect(item).toBeDefined();
+  act(() => item!.click());
+  // 新建区展开后必须能看到表单与可用按钮（不因「没有文档」被禁用）。
+  const submit = [...container.querySelectorAll<HTMLButtonElement>("button")]
+    .find((node) => node.textContent?.includes("新建文档") || node.textContent?.trim() === "新建");
+  expect(submit).toBeDefined();
+  expect(submit!.disabled).toBe(false);
 });

@@ -9,7 +9,7 @@ import { createMcpService } from "@woohaa3/mcp-service";
 import { canvasGroupEpoch, withCanvasGroupScope } from "@woohaa3/canvas-service";
 import type { HostPlugin } from "../context.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
-import { createToolGrantRegistry } from "../../ports/authoring-adapters.js";
+import { catalogToolsForGrant, createToolGrantRegistry } from "../../ports/authoring-adapters.js";
 import { createExtensionMcpBridge } from "../../ports/extension-mcp.js";
 import { agentCanvasServiceToClient, modelMcpServiceToClient } from "../../ports/mcp-adapters.js";
 
@@ -44,7 +44,7 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       }), ctx.canvas),
       // 只共享显式配置的 Canvas 身份；缺省/空值不得凭空造身份。
       agentClient: groupScopedClient(agentCanvasServiceToClient(services.agent, { principalId: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "" }), ctx.canvas),
-      toolGrant: { allowedTools: token => toolGrants.verify(token)?.groupScope ? toolGrants.verify(token)!.tools : undefined, authorize: (input) => toolGrants.authorize(input) },
+      toolGrant: { allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)), authorize: (input) => toolGrants.authorize(input) },
       logger: ctx.log.scope("mcp")
     });
     ctx.effect(() => () => mcp.close());
@@ -59,12 +59,12 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       if (!owner) return mcp.handle(req, res);
       return withCanvasGroupScope({ ...scope, owner,
         ownsRun: (nodeId, runId) => {
-          const record = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId: (grant as typeof grant & { workId?: string }).workId ?? "" });
+          const record = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId: grant.workId ?? "" });
           const receipt = record?.ok ? record.turn.receipt as { kind?: string; actions?: { nodeId?: string; runId?: string }[] } | undefined : undefined;
           return receipt?.kind === "canvas-group" && receipt.actions?.some(action => action.nodeId === nodeId && action.runId === runId) === true;
         },
         authorize: async permission => (await services.agent?.authorizeCanvas({ principalId: owner, canvasId: scope.canvasId, permission }))?.ok === true,
-        onAction: action => ctx.get("application")?.service.agentConversations().recordGroupAction({ owner, requestId: (grant as typeof grant & { workId?: string }).workId ?? "", action }),
+        onAction: action => ctx.get("application")?.service.agentConversations().recordGroupAction({ owner, requestId: grant.workId ?? "", action }),
         valid: () => Boolean(toolGrants.verify(token)) && canvasGroupEpoch(scope.canvasId, scope.rootGroupId) === scope.scopeEpoch
       }, () => mcp.handle(req, res));
     }));

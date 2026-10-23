@@ -5,6 +5,7 @@ import { createNativeAsyncRpc } from "./native-async-rpc.js";
 import { recordNativeInputCall } from "./native-input-timing.js";
 import { createNativeViewportChannel } from "./native-viewport-channel.js";
 import { nativeProtocolUrl } from "../../../desktop/native-protocol.js";
+import { nativeDrawableLayout } from "./native-surface-layout.js";
 
 type NativeBootstrap = { protocol: string; token: string; viewportAsync?: boolean };
 export function nativeBootstrap(target: typeof globalThis): NativeBootstrap | undefined {
@@ -91,7 +92,7 @@ export async function createNativeRuntimeRealm(
   const layout = () => {
     if (!active || !canvas.isConnected) return;
     const rect = host.getBoundingClientRect();
-    const values = [rect.left, rect.top, rect.width, rect.height];
+    const values = nativeDrawableLayout(rect);
     const key = values.join(":");
     if (key !== previousLayout) { rpc("layout", ...values); previousLayout = key; }
   };

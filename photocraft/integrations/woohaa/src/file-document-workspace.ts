@@ -168,6 +168,18 @@ export class FileDocumentWorkspace implements EditorDocumentView {
     return null;
   }
 
+  /**
+   * 本文件应以哪种方式打开内核（change: 2026-10-22-add-photocraft-file-workflows，U01/U03）。
+   *
+   * `.pcraft` 必须走 `openProject`：它是分层工程包，不是位图。此前只有节点文档能表达
+   * 「携带工程定义」，独立文件只能被当成图片解码，于是打开 `.pcraft` 会在 `createImageBitmap`
+   * 处失败——「保存工程 → 重开」这条主链因此不可达。这里显式声明打开方式，不再由
+   * `projectDocument()`（节点语义）反推。
+   */
+  openMode(): "project" | "image" {
+    return this.kind === "project" ? "project" : "image";
+  }
+
   baseAsset(): unknown {
     return null;
   }
@@ -190,6 +202,11 @@ export class FileDocumentWorkspace implements EditorDocumentView {
   /**
    * 初始化呈现：图片文件解码得到源尺寸并建立适合窗口取景；工程文件等待内核打开后由
    * `setEditorPreview` 提供尺寸（在此之前显示打开中）。
+   *
+   * 浏览器解码不了**不等于**文件打不开：内核矩阵里可打开的一批格式（TIFF/QOI/TGA/PNM/
+   * PCX/XPM/DDS）`createImageBitmap` 都不认，但内核能解码。这类情况按工程文件同样处理 ——
+   * 先进入「打开中」，尺寸与像素由内核的首帧预览补上；真正无法打开时由内核给出原因
+   * （`previewStatus()`），而不是在这里用浏览器的解码能力冒充内核能力。
    */
   async start(): Promise<boolean> {
     const generation = ++this.generation;
@@ -201,10 +218,10 @@ export class FileDocumentWorkspace implements EditorDocumentView {
     const decoded = this.decodeImage ? await this.decodeImage(this.bytes).catch(() => null) : null;
     if (this.disposed || generation !== this.generation) return false;
     if (!decoded) {
-      this.error = "图片无法读取，请重新打开";
+      // 交给内核：不设尺寸，等 `setEditorPreview` 带来真实尺寸。
       this.ready = true;
       this.emit();
-      return false;
+      return true;
     }
     this.focus.adoptSourceSize(decoded.width, decoded.height);
     this.applyFit();

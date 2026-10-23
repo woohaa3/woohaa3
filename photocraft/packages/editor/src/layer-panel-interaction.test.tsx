@@ -15,7 +15,7 @@ function setup(selected=[3,2],readonly=false,locks:Record<number,Record<string,b
   const commands=new Map(["layer.moveTo","layer.lockLayers","layer.setProps","layer.createClippingMask","layer.releaseClippingMask"].map(id=>[id,{allowed:true,enabled:true} as PhotocraftCommand]));
   const onSelect=vi.fn(),onCommand=vi.fn();
   const container=document.createElement("div");document.body.append(container);root=createRoot(container);
-  const render=(locked=readonly)=>act(()=>root.render(<LayerPanel view={view} commands={commands} readonly={locked}
+  const render=(locked=readonly, filteredLayerIds: number[] | null = null)=>act(()=>root.render(<LayerPanel view={view} commands={commands} readonly={locked} filteredLayerIds={filteredLayerIds}
     onSelect={onSelect} onCommand={onCommand} onToggleVisible={vi.fn()} onBlend={vi.fn()} onRename={vi.fn()}
     onAddMask={vi.fn()} opacityEditing={{value:"100",active:false,disabled:locked,update:vi.fn(),finish:()=>true}}/>));
   render();
@@ -102,4 +102,43 @@ it("所选图层已剪贴时显示释放入口和关系标记",()=>{
   const button=container.querySelector<HTMLButtonElement>(".photo-editor__clipping-action")!;
   expect(button.textContent).toBe("释放剪贴");act(()=>button.click());
   expect(onCommand.mock.lastCall).toEqual(["layer.releaseClippingMask"]);
+});
+
+it("过滤只改变列表；清空条件恢复列表",()=>{
+  const {container,row,onSelect,onCommand,render}=setup();
+  render(false,[1]);
+  expect(row(1)).not.toBeNull();expect(row(2)).toBeNull();expect(row(3)).toBeNull();
+  expect(container.querySelectorAll("[data-layer-id]")).toHaveLength(1);
+  expect(onSelect).not.toHaveBeenCalled();expect(onCommand).not.toHaveBeenCalled();
+  render(false,[]);expect(container.textContent).toContain("没有匹配的图层");
+  render(false,null);expect(container.querySelectorAll("[data-layer-id]")).toHaveLength(3);
+});
+/**
+ * U58：颜色标签与链接必须在图层行里看得见。
+ *
+ * 这两个状态只存在于内核视图模型里；面板若不投影，用户无法知道「这层已链接」「这层是蓝色标签」，
+ * 也就无法在移动前判断会影响哪些层。
+ */
+it("图层行显示颜色标签与链接组标记，并可从动作区设置标签颜色",()=>{
+  const view=decodeEditorState({document:{width:16,height:16,activeLayer:3,selectedLayers:[3],
+    layers:[{id:3,name:"已链接",kind:"pixel",linkGroup:7,labelColor:"blue"},{id:2,name:"普通",kind:"pixel"}]}})!;
+  const commands=new Map(["layer.setLabelColor"].map(id=>[id,{allowed:true,enabled:true} as PhotocraftCommand]));
+  const onCommand=vi.fn();
+  const container=document.createElement("div");document.body.append(container);root=createRoot(container);
+  act(()=>root.render(<LayerPanel view={view} commands={commands} readonly={false} filteredLayerIds={null}
+    onSelect={vi.fn()} onCommand={onCommand} onToggleVisible={vi.fn()} onBlend={vi.fn()} onRename={vi.fn()}
+    onAddMask={vi.fn()} opacityEditing={{value:"100",active:false,disabled:false,update:vi.fn(),finish:()=>true}}/>));
+
+  const linked=container.querySelector<HTMLElement>('[data-layer-id="3"]')!;
+  const plain=container.querySelector<HTMLElement>('[data-layer-id="2"]')!;
+  expect(linked.dataset.linkGroup).toBe("7");
+  expect(plain.dataset.linkGroup).toBeUndefined();
+  expect(linked.querySelector(".photo-editor__label-swatch")!.getAttribute("data-label")).toBe("blue");
+  // 「无标签」不画色块，避免每行都有一个小方块。
+  expect(plain.querySelector(".photo-editor__label-swatch")).toBeNull();
+
+  // 动作区的图层颜色按钮开出的菜单项把所有标签色发成 `layer.setLabelColor`。
+  const trigger=container.querySelector<HTMLButtonElement>('button[aria-label="图层颜色"]');
+  expect(trigger).not.toBeNull();
+  expect(trigger!.disabled).toBe(false);
 });

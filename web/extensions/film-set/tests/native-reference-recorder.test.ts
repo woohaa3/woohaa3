@@ -179,6 +179,7 @@ describe("isTransientCode", () => {
   it("retries executor/frame/codec transients only", () => {
     expect(isTransientCode("recording-executor-unavailable")).toBe(true);
     expect(isTransientCode("recording-dispatch-timeout")).toBe(true);
+    expect(isTransientCode("recording-executor-unresponsive")).toBe(true);
     expect(isTransientCode("capture-readiness-timeout")).toBe(true);
     expect(isTransientCode("recording-device-lost")).toBe(true);
     expect(isTransientCode("recording-source-invalid")).toBe(false);

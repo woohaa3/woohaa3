@@ -154,7 +154,9 @@ it("选区变换框独立于内容框，拒绝退化或非有限边界，旧绑�
 });
 
 it("蒙版目标与单独查看需要当前活动层的实际蒙版；旧状态使用安全默认", () => {
-  const decode=(hasMask:boolean,extra:Record<string,unknown>={})=>decodeEditorState({document:{width:80,height:60,activeLayer:1,editTarget:"mask",layerMaskView:{layer:1,mode:"gray"},layers:[{id:1,hasMask,maskEnabled:false,maskLinked:false}],...extra}})!.document!;
+  const decode=(hasMask:boolean,extra:Record<string,unknown>={})=>decodeEditorState({document:{
+    channelTarget: { kind: "composite" },
+width:80,height:60,activeLayer:1,editTarget:"mask",layerMaskView:{layer:1,mode:"gray"},layers:[{id:1,hasMask,maskEnabled:false,maskLinked:false}],...extra}})!.document!;
   expect(decode(true).editTarget).toBe("mask"); expect(decode(true).maskView).toBe(1);
   expect(decode(true).layers[0]).toMatchObject({maskEnabled:false,maskLinked:false});
   expect(decode(false).editTarget).toBe("pixels"); expect(decode(false).maskView).toBeNull();
@@ -178,4 +180,27 @@ it("分组投影保留折叠后代和父 id，展开命令不因无菜单而丢�
   expect(doc.layers[2]).toMatchObject({selected:true,active:true,depth:2});
   expect(isRenderableCommand({id:"layer.setExpanded",allowed:true,menu:[]} as never)).toBe(true);
   expect(isRenderableCommand({id:"layer.setExpanded",allowed:false,menu:[]} as never)).toBe(false);
+});
+
+it("图层行的链接/标签/高级混合/Blend If 按内核字段解码，缺字段用安全默认",()=>{
+  const doc=decodeEditorState({document:{width:16,height:16,layers:[
+    {id:1,linkGroup:2,labelColor:"blue",advancedBlending:{knockout:"shallow",blendInterior:true,layerMaskHidesEffects:true,vectorMaskHidesEffects:true},channels:[true,true,false,true],blendIf:[{channel:1,thisLayer:[30,60,200,235],underlying:[0,255]}]},
+    {id:2}
+  ]}})!.document!;
+  expect(doc.layers[0]).toMatchObject({linkGroup:2,labelColor:"blue",channels:[true,true,false,true]});
+  expect(doc.layers[0].advancedBlending).toEqual({knockout:"shallow",blendInterior:true,blendClipped:true,transparencyShapes:true,layerMaskHidesEffects:true,vectorMaskHidesEffects:true});
+  expect(doc.layers[0].blendIf).toEqual([{channel:1,thisLayer:[30,60,200,235],underlying:[0,255]}]);
+  // 旧状态没有这些字段：不能凭空造出链接组或端点。
+  expect(doc.layers[1]).toMatchObject({linkGroup:null,labelColor:"none",channels:null,blendIf:[]});
+  expect(doc.layers[1].advancedBlending).toEqual({knockout:"none",blendInterior:false,blendClipped:true,transparencyShapes:true,layerMaskHidesEffects:false,vectorMaskHidesEffects:false});
+});
+
+it("非法 Blend If 端点被丢弃，不拿半截数组去提交",()=>{
+  const doc=decodeEditorState({document:{width:16,height:16,layers:[{id:1,blendIf:[
+    {channel:0,thisLayer:[30],underlying:[0,255]},
+    {channel:1,thisLayer:[0,255],underlying:[0]},
+    {channel:2,thisLayer:[1,2,3],underlying:[0,255]},
+    {channel:3,thisLayer:[0,255],underlying:[0,255]}
+  ]}]}})!.document!;
+  expect(doc.layers[0].blendIf).toEqual([{channel:3,thisLayer:[0,255],underlying:[0,255]}]);
 });

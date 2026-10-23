@@ -1,0 +1,237 @@
+{
+  "_comment": "图像模式与调色板的内容身份 fixture（change: 2026-10-22-add-photocraft-image-mode-workflows，任务 3.2）。Rust 的 features/modes/tests_content.rs 与 TypeScript 的 features/modes/content.test.ts 读同一份：每项给出 mode_json 输入与期望的规范文本，任一侧漂移都会失败。",
+  "cases": [
+    {
+      "name": "缺省 RGB/8 位不产生任何行（旧工程指纹不变）",
+      "mode": null,
+      "canonical": ""
+    },
+    {
+      "name": "RGB 显式写入与缺省等价",
+      "mode": {
+        "mode": "rgb"
+      },
+      "canonical": ""
+    },
+    {
+      "name": "显式 null 缺省值与省略等价",
+      "mode": {
+        "mode": "rgb",
+        "depthBits": 8,
+        "colorTable": null,
+        "duotone": null
+      },
+      "canonical": ""
+    },
+    {
+      "name": "灰度",
+      "mode": {
+        "mode": "grayscale"
+      },
+      "canonical": "mode:grayscale"
+    },
+    {
+      "name": "位图",
+      "mode": {
+        "mode": "bitmap"
+      },
+      "canonical": "mode:bitmap"
+    },
+    {
+      "name": "非 8 位带深度",
+      "mode": {
+        "mode": "rgb",
+        "depthBits": 16
+      },
+      "canonical": "mode:rgb:16"
+    },
+    {
+      "name": "索引色带颜色表与透明索引",
+      "mode": {
+        "mode": "indexed",
+        "colorTable": {
+          "colors": [
+            "#000000",
+            "#00ff00",
+            "#FFFFFF"
+          ],
+          "transparent": 2
+        }
+      },
+      "canonical": "mode:indexed|table:3:#000000,#00ff00,#ffffff|transparent:2"
+    },
+    {
+      "name": "索引色无透明索引",
+      "mode": {
+        "mode": "indexed",
+        "colorTable": {
+          "colors": [
+            "#000000"
+          ],
+          "transparent": null
+        }
+      },
+      "canonical": "mode:indexed|table:1:#000000"
+    },
+    {
+      "name": "双色调两种油墨含曲线",
+      "mode": {
+        "mode": "duotone",
+        "duotone": {
+          "inks": [
+            {
+              "name": "Black",
+              "color": "#101010",
+              "curve": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0.9
+                ]
+              ]
+            },
+            {
+              "name": "暖色",
+              "color": "#AA5522",
+              "curve": []
+            }
+          ]
+        }
+      },
+      "canonical": "mode:duotone|inks:2:5:Black#101010#2:0,0;10000,9000,2:暖色#aa5522#0:"
+    }
+  ],
+  "rejections": [
+    {
+      "name": "未知模式",
+      "mode": {
+        "mode": "cmyk"
+      }
+    },
+    {
+      "name": "未知键",
+      "mode": {
+        "mode": "rgb",
+        "icc": "x"
+      }
+    },
+    {
+      "name": "非法深度",
+      "mode": {
+        "mode": "rgb",
+        "depthBits": 12
+      }
+    },
+    {
+      "name": "索引色缺颜色表",
+      "mode": {
+        "mode": "indexed"
+      }
+    },
+    {
+      "name": "非索引色带颜色表",
+      "mode": {
+        "mode": "rgb",
+        "colorTable": {
+          "colors": [
+            "#000000"
+          ]
+        }
+      }
+    },
+    {
+      "name": "空颜色表",
+      "mode": {
+        "mode": "indexed",
+        "colorTable": {
+          "colors": []
+        }
+      }
+    },
+    {
+      "name": "非法颜色条目",
+      "mode": {
+        "mode": "indexed",
+        "colorTable": {
+          "colors": [
+            "#000"
+          ]
+        }
+      }
+    },
+    {
+      "name": "透明索引越界",
+      "mode": {
+        "mode": "indexed",
+        "colorTable": {
+          "colors": [
+            "#000000"
+          ],
+          "transparent": 1
+        }
+      }
+    },
+    {
+      "name": "双色调缺油墨",
+      "mode": {
+        "mode": "duotone"
+      }
+    },
+    {
+      "name": "非双色调带油墨",
+      "mode": {
+        "mode": "grayscale",
+        "duotone": {
+          "inks": []
+        }
+      }
+    },
+    {
+      "name": "空油墨",
+      "mode": {
+        "mode": "duotone",
+        "duotone": {
+          "inks": []
+        }
+      }
+    },
+    {
+      "name": "油墨名空",
+      "mode": {
+        "mode": "duotone",
+        "duotone": {
+          "inks": [
+            {
+              "name": "",
+              "color": "#000000",
+              "curve": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "油墨曲线越界",
+      "mode": {
+        "mode": "duotone",
+        "duotone": {
+          "inks": [
+            {
+              "name": "A",
+              "color": "#000000",
+              "curve": [
+                [
+                  0,
+                  1.5
+                ]
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -11,7 +11,7 @@ import type { AgentConversationService } from "../../contract/agent-conversation
 import "./style.css";
 
 type Page = "connections" | "add" | "configuration";
-type Payload = { canvasId?: string; nodeId?: string; kind?: string };
+type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add" };
 const kinds = [
   { id: "installed", label: "我有本地 agent", title: "连接本地 agent", services: [{ id: "chatgpt", name: "本地 ChatGPT" }, { id: "opencode", name: "本地 OpenCode" }, { id: "codebuddy", name: "本地 CodeBuddy" }], detail: "使用运行本应用的电脑上已安装的 agent。" },
   { id: "api-key", label: "我有 API Key", title: "连接模型 API", services: [{ id: "responses-protocol", name: "Responses" }, { id: "messages-protocol", name: "Messages" }, { id: "chat-protocol", name: "Chat Completions" }, { id: "gemini-protocol", name: "Gemini" }], detail: "填写已有的模型 API 地址与密钥。" },
@@ -30,7 +30,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   const contributions = useSlot("agent-assistant.configuration");
   const [tab, setTab] = useState(payload.kind === "generation" || payload.kind === "mcp" ? payload.kind : "intelligence");
   const [generationVisited, setGenerationVisited] = useState(payload.kind === "generation");
-  const [page, setPage] = useState<Page>(payload.kind && !["generation", "mcp"].includes(payload.kind) ? "configuration" : "connections");
+  const [page, setPage] = useState<Page>(payload.page === "add" ? "add" : payload.kind && !["generation", "mcp"].includes(payload.kind) ? "configuration" : "connections");
   const [kind, setKind] = useState(payload.kind ?? "");
   const [connections, setConnections] = useState<AgentConnectionView[]>([]);
   const [selected, setSelected] = useState<string | null>(null);

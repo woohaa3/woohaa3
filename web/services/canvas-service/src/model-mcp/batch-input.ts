@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   decodeModelCameras,
-  MODEL_SCRIPT_BATCH_LIMITS as LIMITS,
   type ModelBatchFailure,
   type ModelScriptBatchRequest,
 } from "@woohaa3/contracts";
@@ -43,18 +42,13 @@ export function decodeModelBatch(
   if (raw.commonSource !== undefined && typeof raw.commonSource !== "string")
     return failure("malformed-request", "commonSource 必须是字符串");
   const common = raw.commonSource as string | undefined;
-  if ((common?.length ?? 0) > LIMITS.maxSourceChars)
-    return failure("limit-exceeded", "commonSource 超过长度上限");
-  if (
-    !Array.isArray(raw.items) ||
-    raw.items.length < 1 ||
-    raw.items.length > LIMITS.maxNodes
-  )
-    return failure("limit-exceeded", `items 数量须在 1..${LIMITS.maxNodes}`);
+  // change: 2026-10-22-remove-agent-execution-limits，任务 5.3：不再按单项源码长度、
+  // 批次模型数量或展开字节总量拒绝；完整批次由实际资源调度并一次原子保存。
+  if (!Array.isArray(raw.items) || raw.items.length < 1)
+    return failure("malformed-request", "items 必须是非空数组");
   const items: ModelScriptBatchRequest["items"] = [],
     sources: string[] = [],
     seen = new Set<string>();
-  let expandedBytes = 0;
   for (const [index, item] of raw.items.entries()) {
     if (
       !object(item) ||
@@ -114,16 +108,7 @@ export function decodeModelBatch(
         return failure("malformed-request", "镜头包含未知字段");
       cameras = decoded.value;
     }
-    // Check lengths before concatenation so a tiny request cannot expand without a bound.
-    if (
-      item.source.length + (common ? common.length + 1 : 0) >
-      LIMITS.maxSourceChars
-    )
-      return failure("limit-exceeded", `items[${index}] 完整脚本过长`);
-    const source = common ? common + "\n" + item.source : item.source;
-    expandedBytes += Buffer.byteLength(source, "utf8");
-    if (expandedBytes > LIMITS.maxExpandedSourceBytes)
-      return failure("limit-exceeded", "展开脚本总字节超过上限");
+    const source = common ? `${common}\n${item.source}` : item.source;
     sources.push(source);
     items.push({
       nodeId: item.nodeId,

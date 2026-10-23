@@ -33,18 +33,24 @@ describe("executeSceneIr", () => {
     expect(result).toMatchObject({ ok: false, code: "version-mismatch" });
   });
 
-  it("rejects oversized source before executing", async () => {
-    const result = await executeSceneIr("x".repeat(10), "woohaa-model-js-v2", { maxSourceChars: 5 });
-    expect(result).toMatchObject({ ok: false, code: "source-too-long" });
+  it("no longer rejects source length or output size (task 6.1)", async () => {
+    // change: 2026-10-22-remove-agent-execution-limits：原 20 万字符源码与 8 MiB 输出额度已删除。
+    const longScript = `// ${"x".repeat(250_000)}
+${V2_SCRIPT}`;
+    const source = await executeSceneIr(longScript, "woohaa-model-js-v2");
+    expect(source).not.toMatchObject({ ok: false, code: "source-too-long" });
+    const output = await executeSceneIr(V2_SCRIPT, "woohaa-model-js-v2", { executeSync: syncExecutor as never });
+    expect(output.ok).toBe(true);
   });
 
-  it("rejects output over budget", async () => {
-    const result = await executeSceneIr(V2_SCRIPT, "woohaa-model-js-v2", {
-      maxOutputBytes: 10,
-      executeSync: syncExecutor as never
-    });
-    expect(result).toMatchObject({ ok: false, code: "output-too-large" });
-  });
+  it("cancels a blocked script from outside the executor (task 6.1)", async () => {
+    const controller = new AbortController();
+    const pending = executeSceneIr("while (true) {}", "woohaa-model-js-v2", { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    controller.abort();
+    const result = await pending;
+    expect(result).toMatchObject({ ok: false });
+  }, 20_000);
 
   it("executes a V2 script in the real worker", async () => {
     const result = await executeSceneIr(V2_SCRIPT, "woohaa-model-js-v2");

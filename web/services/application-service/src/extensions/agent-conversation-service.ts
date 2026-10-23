@@ -72,13 +72,9 @@ export type AgentConversationServiceOptions = {
    * 返回该 owner + adapter 的兼容默认连接（既有 ChatGPT）；未配置时返回 null（不伪造）。
    */
   defaultConnectionFor?: (input: { owner: string; adapterId: string }) => Promise<AgentConnectionView | null> | AgentConnectionView | null;
-  /** 单 owner 最大在途回合；缺省 8，与宿主总预算一致。 */
-  maxOwnerActiveTurns?: number;
-  /** 全局最大在途回合；缺省 8。 */
-  maxGlobalActiveTurns?: number;
   /** 每会话事件保留窗口（用于 resync 判定）；缺省 2000。 */
   maxEvents?: number;
-  /** 单会话最大消息数；缺省 200。 */
+  /** 单页消息数（分页读取的传输参数，不是总量截断）；缺省 200。 */
   maxMessages?: number;
   /** 显式部署的单条消息预算；缺省保留完整正文。 */
   maxMessageChars?: number;
@@ -158,7 +154,7 @@ export type AgentConversationService = {
    */
   switchConnection(input: { owner: string; canvasId: string; nodeId: string; connectionId: string }):
     Promise<{ ok: true; cleared: number } | { ok: false; error: AgentConversationServiceError }>;
-  readConversation(input: { owner: string; conversationId: string; cursor?: number }):
+  readConversation(input: { owner: string; conversationId: string; cursor?: number; beforeMessageSequence?: number; turnOffset?: number }):
     | { ok: true; snapshot: ConversationSnapshot }
     | { ok: false; error: AgentConversationServiceError };
   acceptTurn(input: { owner: string; conversationId: string; requestId: string; entry: AgentEntryIntent; connection?: AgentConnectionBinding | null }): AcceptTurnResult;
@@ -200,11 +196,8 @@ export function createAgentConversationService(options: AgentConversationService
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? defaultId;
   const log = options.logger ?? (() => undefined);
-  const maxOwnerActiveTurns = options.maxOwnerActiveTurns ?? 8;
-  const maxGlobalActiveTurns = options.maxGlobalActiveTurns ?? 8;
   const maxMessages = options.maxMessages ?? 200;
   const maxMessageChars = options.maxMessageChars ?? Infinity;
-
   const dispatches = new Map<string, Promise<void>>();
   const controllers = new Map<string, AbortController>();
   let acceptingTrustedDelivery = false;
@@ -263,8 +256,13 @@ export function createAgentConversationService(options: AgentConversationService
   // 投影绑定 store：把存储记录转成公开 DTO（纯函数在 projection 模块）。
   const toSummary = projectionToSummary;
   const toTurn = (record: ConversationTurnRecord): ConversationTurn => projectionToTurn(store, record);
-  const buildSnapshot = (binding: ConversationAdapterBinding, cursor: number): ConversationSnapshot =>
-    projectionBuildSnapshot(store, binding, cursor, { maxMessages, maxEvents: options.maxEvents ?? 2000 });
+  const buildSnapshot = (binding: ConversationAdapterBinding, cursor: number, page: { beforeMessageSequence?: number; turnOffset?: number } = {}): ConversationSnapshot =>
+    projectionBuildSnapshot(store, binding, cursor, {
+      maxMessages,
+      maxEvents: options.maxEvents ?? 2000,
+      ...(page.beforeMessageSequence !== undefined ? { beforeMessageSequence: page.beforeMessageSequence } : {}),
+      ...(page.turnOffset !== undefined ? { turnOffset: page.turnOffset } : {})
+    });
   const conversationStatusFor = projectionConversationStatusFor;
 
   const ownedConversation = (owner: string, conversationId: string): ConversationAdapterBinding | null => {
@@ -310,10 +308,22 @@ export function createAgentConversationService(options: AgentConversationService
     store.updateTurn(turn.turnId, { status: "running", stage: "running" }, now());
     appendEvent(turn.conversationId, turn.turnId, turn.requestId, "stage", { stage: "running" });
 
-    const history = store
-      .listMessages(turn.conversationId, maxMessages)
-      .filter((message) => message.turnId !== turn.turnId && (message.role === "user" || message.role === "assistant"))
-      .map((message) => projectionToMessage(message))
+    // 完整历史（任务 4.1）：按游标从冻结基准向前逐页读取，不按固定条数截断；真正的上下文窗口
+    // 由所选引擎的原生能力处理（此处只保证不静默丢弃合法历史）。
+    const historyRecords: Array<ReturnType<typeof projectionToMessage>> = [];
+    let beforeSequence: number | null = turn.historySequence;
+    for (;;) {
+      const page = store.listMessagesBefore(turn.conversationId, beforeSequence, maxMessages);
+      if (page.length === 0) break;
+      for (const message of page) {
+        if (message.turnId !== turn.turnId && (message.role === "user" || message.role === "assistant")) historyRecords.push(projectionToMessage(message));
+      }
+      const first = page[0]!.sequence;
+      if (beforeSequence !== null && first >= beforeSequence) break;
+      beforeSequence = first;
+    }
+    const history = historyRecords
+      .reverse()
       .map((message) => ({ ...message, content: clamp(message.content, maxMessageChars) }));
 
     const assistantDigest = createAssistantMessageDigest();
@@ -330,7 +340,7 @@ export function createAgentConversationService(options: AgentConversationService
           role: message.role,
           content: message.content,
           truncated: message.truncated ? 1 : 0,
-          sequence: store.listMessages(turn.conversationId, maxMessages).length + 1,
+          sequence: store.maxMessageSequence(turn.conversationId) + 1,
           createdAt: now()
         });
       },
@@ -411,7 +421,7 @@ export function createAgentConversationService(options: AgentConversationService
       role,
       content: bounded,
       truncated: truncated ? 1 : 0,
-      sequence: store.listMessages(turn.conversationId, maxMessages).length + 1,
+      sequence: store.maxMessageSequence(turn.conversationId) + 1,
       createdAt: now()
     });
     appendEvent(turn.conversationId, turn.turnId, turn.requestId, "message-completed", { messageId, role, content: bounded, truncated });
@@ -445,8 +455,7 @@ export function createAgentConversationService(options: AgentConversationService
     }
     const binding = store.getConversation(turn.conversationId);
     if (binding) {
-      const turns = store.listTurns(turn.conversationId, 200);
-      store.updateConversation(turn.conversationId, { status: conversationStatusFor(turns), latestRequestId: turn.requestId }, now());
+      store.updateConversation(turn.conversationId, { status: conversationStatusFor(store.latestTurn(turn.conversationId)), latestRequestId: turn.requestId }, now());
     }
     log({ event: "agent-conversation-turn-settled", conversationId: turn.conversationId, requestId: turn.requestId, status });
   };
@@ -487,12 +496,9 @@ export function createAgentConversationService(options: AgentConversationService
 
     clearContext(input) {
       if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
-      // 活动回合阻止清空（change: 2026-10-16-...，任务 2.3）：先取消并结算才允许变更。
-      const active = store.findConversationByTarget({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId });
-      if (active && store.activeTurnCount(active.conversationId) > 0) {
-        return fail("conversation-busy", "该节点仍有非终态回合，请先取消并等待结果核对");
-      }
-      // 只解除目标关联（归档旧会话），不删除历史；随后该节点提交将新建会话。
+      // change: 2026-10-22-remove-agent-execution-limits，任务 3.1/3.2 / design D3：
+      // 删除「活动回合阻止清空」。清空只解除目标关联（归档会话），不删除回合/消息/回执，
+      // 因此不会丢掉尚未核对的执行；后续只停止用户明确选择的 requestId。
       const cleared = store.clearTarget({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId });
       return { ok: true, cleared };
     },
@@ -504,12 +510,8 @@ export function createAgentConversationService(options: AgentConversationService
         const view = await connections.getConnection({ owner: input.owner, connectionId: input.connectionId });
         if (!view) return fail("connection-unavailable", "连接不存在或无权访问");
       }
-      const active = store.findConversationByTarget({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId });
-      // 活动回合阻止切换（design D7）：先取消并结算才允许变更。
-      if (active && store.activeTurnCount(active.conversationId) > 0) {
-        return fail("conversation-busy", "该节点仍有非终态回合，请先取消并等待结果核对");
-      }
-      // 解除目标关联（归档旧会话，保留历史）；下一次提交按新连接建立新会话。
+      // 解除目标关联（归档旧会话，保留全部历史与未核对回合）；下一次提交按新连接建立新会话。
+      // 活动回合不再阻止切换：执行拥有独立取消身份，旧回合继续按其原冻结连接结算。
       const cleared = store.archiveTargetForConnection({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId });
       return { ok: true, cleared };
     },
@@ -517,7 +519,13 @@ export function createAgentConversationService(options: AgentConversationService
     readConversation(input) {
       const binding = ownedConversation(input.owner, input.conversationId);
       if (!binding) return fail("not-found", "会话不存在或无权访问");
-      return { ok: true, snapshot: buildSnapshot(binding, input.cursor ?? 0) };
+      return {
+        ok: true,
+        snapshot: buildSnapshot(binding, input.cursor ?? 0, {
+          ...(input.beforeMessageSequence !== undefined ? { beforeMessageSequence: input.beforeMessageSequence } : {}),
+          ...(input.turnOffset !== undefined ? { turnOffset: input.turnOffset } : {})
+        })
+      };
     },
 
     resolveConnectionBinding(input) {
@@ -601,13 +609,9 @@ export function createAgentConversationService(options: AgentConversationService
         return { ok: true, conversation: toSummary(binding), turn: toTurn(existing), reused: true };
       }
 
-      if (store.activeTurnCount(binding.conversationId) > 0) {
-        return fail("conversation-busy", "该会话已有进行中的回合");
-      }
-      if (store.globalActiveTurnCount() >= maxGlobalActiveTurns || store.ownerActiveTurnCount(input.owner) >= maxOwnerActiveTurns) {
-        return fail("budget-exceeded", "并发回合已达上限，请稍后重试");
-      }
-
+      // change: 2026-10-22-remove-agent-execution-limits，任务 3.1 / design D3：
+      // 删除「单会话单活动回合」与 owner/global 活跃数量拒绝。每个 requestId 都有独立回合、
+      // 取消身份与冻结历史基准；并发写由 Canvas 内容版本与事务决定，不用活动数门禁代替。
       const resolved = registry.resolve(binding.adapterId);
       if (!resolved.ok) return fail("adapter-unavailable", resolved.message);
       const capabilities = resolved.handle.capabilities;
@@ -667,17 +671,18 @@ export function createAgentConversationService(options: AgentConversationService
         connectionAdapterId: connection?.adapterId ?? null,
         connectionConfigRevision: connection?.configRevision ?? null,
         connectionCredentialEpoch: connection?.credentialEpoch ?? null,
+        // 受理时冻结历史基准（任务 3.1）：只把此刻已完成的合法前缀纳入本回合，不读并发回合的半条输出。
+        historySequence: store.maxMessageSequence(binding.conversationId),
         createdAt: timestamp,
         updatedAt: timestamp
       });
       // 用户消息先于 dispatch 持久化（accept-before-dispatch）。
       appendMessage(store.getTurn(turnId)!, "user", input.entry.prompt);
       appendEvent(binding.conversationId, turnId, input.requestId, "accepted", { action: input.entry.action, target });
-      const turns = store.listTurns(binding.conversationId, 200);
       store.updateConversation(binding.conversationId, {
         status: "active",
         latestRequestId: input.requestId,
-        turnCount: turns.length,
+        turnCount: store.turnCount(binding.conversationId),
         // 首次提交时把会话绑定到目标节点（一个节点复用一条；design D8）。仅在无既往回合的
         // 新会话上补绑，避免把「已清空归档」的旧会话在讨论回复时重新绑回节点。
         ...(binding.nodeId === null && binding.turnCount === 0 && input.entry.nodeId !== undefined ? { nodeId: input.entry.nodeId } : {}),

@@ -77,7 +77,7 @@ export type RecordingCommitDeps = RecordingUploadDeps & {
  */
 export function verifyArtifactBytes(
   bytes: Uint8Array,
-  expected: { width?: number; height?: number; durationSeconds?: number; frameRate?: number; contentSha256?: string; maxBytes?: number }
+  expected: { width?: number; height?: number; durationSeconds?: number; frameRate?: number; contentSha256?: string }
 ): { ok: true; probe: ArtifactProbe } | ArtifactProbeFailure {
   const probe = probeArtifact(bytes);
   if (!probe.ok) return probe;
@@ -105,7 +105,6 @@ export type RecordingFinalizeResult =
  * 宿主的 probe 适配完成。任何不一致都拒绝，避免把半成品当成功上传。
  */
 export function validateArtifactClaim(claim: RecordingArtifactClaim, limits: {
-  maxBytes: number;
   expectedWidth?: number;
   expectedHeight?: number;
   expectedDurationSeconds?: number;
@@ -117,14 +116,6 @@ export function validateArtifactClaim(claim: RecordingArtifactClaim, limits: {
       stage: "RECORDING_ERROR_STAGE_MUX",
       code: "recording-artifact-empty",
       message: "成片大小非法"
-    };
-  }
-  if (claim.sizeBytes > limits.maxBytes) {
-    return {
-      ok: false,
-      stage: "RECORDING_ERROR_STAGE_MUX",
-      code: "recording-artifact-too-large",
-      message: `成片超过 ${limits.maxBytes} 字节上限`
     };
   }
   if (!/^[0-9a-f]{64}$/.test(claim.contentSha256)) {
@@ -203,7 +194,7 @@ export async function finalizeRecording(input: {
   claim: RecordingArtifactClaim;
   commitRequest: ContentRecordingCommitRequest;
   sourcePosition: { x: number; y: number; width: number } | null;
-  limits: { maxBytes: number; expectedWidth?: number; expectedHeight?: number; expectedDurationSeconds?: number; expectedFrameRate?: number };
+  limits: { expectedWidth?: number; expectedHeight?: number; expectedDurationSeconds?: number; expectedFrameRate?: number };
   deps: RecordingCommitDeps;
   signal: AbortSignal;
   /**
@@ -231,7 +222,6 @@ export async function finalizeRecording(input: {
     sizeBytes: input.claim.sizeBytes
   });
   const verification = verifyArtifactBytes(bytes, {
-    maxBytes: input.limits.maxBytes,
     ...(input.limits.expectedWidth !== undefined ? { width: input.limits.expectedWidth } : {}),
     ...(input.limits.expectedHeight !== undefined ? { height: input.limits.expectedHeight } : {}),
     ...(input.limits.expectedDurationSeconds !== undefined

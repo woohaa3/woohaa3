@@ -1,5 +1,22 @@
+import type { ComponentProps } from "react";
 import { ChevronDownIcon, DiamondIcon, DropdownMenu, DropdownMenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from "../../../shared/ui/index.js";
 import "./model-selector.css";
+
+export const ASSISTANT_SETUP_HINT = "尚未配置助手。连接一个助手即可开始，创作描述会保留在这里。";
+export const ASSISTANT_SETUP_TOOLTIP = "尚未配置助手，点击这里配置。";
+
+/** All assistant entry points share selection and the first-connection action. */
+export function AssistantConnectionSelector({ empty, loading, ...props }: Omit<ComponentProps<typeof AssistantModelSelector>, "label"> & { empty: boolean; loading?: boolean }) {
+	if (empty && props.onManage) return (
+		<div className="mc-panel__model assistant-model-selector">
+			<button type="button" className="mc-panel__model-trigger" disabled={props.disabled} onClick={props.onManage}>
+				<DiamondIcon className="mc-panel__model-icon" />
+				<span className="mc-panel__model-label">配置助手</span>
+			</button>
+		</div>
+	);
+	return <AssistantModelSelector {...props} label="选择助手" placeholder={loading ? "正在读取助手…" : props.placeholder ?? "选择助手"} />;
+}
 
 export function AssistantModelSelector({
 	model,

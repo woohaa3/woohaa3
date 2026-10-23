@@ -12,10 +12,9 @@
  * 2. **不发签名 URL**：提交只带 `storage_key` / `asset_id`，服务端按画布作用域读自己的对象。
  * 3. **不透传远端正文**：失败只出稳定码与稳定短语。
  */
-import {
+import { isMediaLocator,
   GENERIC_MODEL_INTERACTION_ID,
   GENERIC_MODEL_INTERACTION_VERSION,
-  isValidStorageKey,
   type GenerationModelDefinition,
   type GenerationPrepareInput,
   type GenerationStableMediaResult
@@ -54,12 +53,12 @@ export type RemotePreparedInput = {
   /** 本扩展的 prepared 形状标记：防止把别的 Provider 的输入误当成本 Provider 的。 */
   __remoteServerGeneration: 1;
   idempotencyKey: string;
-  canvasId: string;
+  canvasId?: string;
   modelKey: string;
   modelType: string;
   prompt: string;
   parameters: Record<string, unknown>;
-  inputs: Array<{ assetId?: string; role: string; storageKey: string; mediaType: string; mediaKind?: string }>;
+  inputs: Array<{ assetId?: string; role: string; mediaLocator: string; mediaType: string; mediaKind?: string }>;
   interaction: { id: string; version: number };
   admission?: GenerationAdmission;
   runId?: string;
@@ -84,6 +83,8 @@ export type RemoteGenerationProviderOptions = {
   /** 轮询间隔（毫秒）；缺省交给 pptask（1000）。 */
   pollIntervalMs?: number;
   providerId?: string;
+  /** 把参考字节推到本部署存储并返回 locator（由后端装配注入）。 */
+  putReference?: (input: { bytes: Uint8Array; contentType: string; canvasId?: string; storageKey?: string }) => Promise<string | undefined>;
 };
 
 function requireSession(session: Pick<RemoteSession, "serverUrl" | "token"> | null): GenerationSessionRef {
@@ -103,9 +104,6 @@ export function prepareRemoteGenerationInput(
   deps: Pick<RemoteGenerationProviderOptions, "modelFor" | "admissionFor">
 ): RemotePreparedInput {
   const canvasId = typeof input.canvasId === "string" ? input.canvasId.trim() : "";
-  if (canvasId === "") {
-    throw new RemoteGenerationError(GENERATION_FAILURE.canvasNotShared, "画布未同步到服务端（缺少画布身份）");
-  }
   const idempotencyKey = typeof input.taskKey === "string" ? input.taskKey.trim() : "";
   if (idempotencyKey === "") {
     throw new RemoteGenerationError("idempotency-key-missing", "缺少提交幂等键");
@@ -116,14 +114,12 @@ export function prepareRemoteGenerationInput(
   }
   const inputs: RemotePreparedInput["inputs"] = [];
   for (const reference of input.references) {
-    // 本 Provider 声明 `referenceHandling: "storage-key"`：Task 既不签地址也不上传字节，
-    // 直接把画布资产的稳定键交过来。服务端按 (canvas_id, storage_key) 读自己的对象，
-    // 而这张画布的媒体已由归属路由放在服务端（storage.route → server 后端）。
-    const storageKey =
-      typeof reference.storageKey === "string" && isValidStorageKey(reference.storageKey)
-        ? reference.storageKey
-        : "";
-    if (storageKey === "") {
+    // 服务端只认它自己能读的对象：locator 优先（远端 uploadReference 刚写好的位置），
+    // 其次透传契约里已有的 locator。裸 storageKey 不再作为跨进程凭据。
+    // 只读 locator：Task 已经把位置放在这个字段里，不再从 url 里猜。
+    const locator =
+      typeof reference.locator === "string" && isMediaLocator(reference.locator) ? reference.locator : "";
+    if (locator === "") {
       // 键缺失/非法就不要把这次提交送出去：交一个服务端读不到的键，只会在执行期变成
       // 一个更难懂的失败；而按文生图静默出图更糟。
       throw new RemoteGenerationError(GENERATION_FAILURE.mediaNotFound, generationFailureText(GENERATION_FAILURE.mediaNotFound));
@@ -131,7 +127,7 @@ export function prepareRemoteGenerationInput(
     inputs.push({
       ...(typeof reference.assetId === "string" && reference.assetId !== "" ? { assetId: reference.assetId } : {}),
       role: reference.role,
-      storageKey,
+      mediaLocator: locator,
       mediaType: reference.mediaType,
       ...(reference.mediaKind !== undefined ? { mediaKind: reference.mediaKind } : {})
     });
@@ -262,7 +258,10 @@ async function pollRemoteTask(
       if (task.media === null) {
         throw new RemoteGenerationError(GENERATION_FAILURE.storageFailed, "服务端没有返回可用的媒体结果");
       }
-      return { status: "completed", media: task.media.media };
+      return {
+        status: "completed",
+        media: { ...task.media.media, storageKey: task.media.media.storageKey ?? "" }
+      };
     }
     case "failed": {
       const code = task.failure?.code ?? GENERATION_FAILURE.unsupported;

@@ -2,12 +2,8 @@
  * Canvas Script 版本与预算事实源
  * （change: 2026-10-13-add-canvas-script-authoring，任务 1.1 / design D2、D4）。
  *
- * 这一份常量同时供三处消费，避免能力声明与实际执行预算漂移：
- * - MCP `get_canvas_script_api` 的能力响应；
- * - Canvas 受限执行器的接收/记录/并发门禁；
- * - contracts 严格 codec 的接收前校验。
- *
- * 源码预算在**分配大对象之前**按 UTF-8 字节判定（`sourceMaxBytes`），不是按字符数。
+ * 这一份常量同时供执行器与能力声明消费，避免声明与实现漂移。它只表达隔离执行屏障与
+ * 标识符长度约束，不包含任何可拒绝完整合法工作的总量额度。
  */
 
 /** 受支持的脚本 API 版本；未知版本在副作用前拒绝。 */
@@ -29,32 +25,26 @@ export function isCanvasScriptVersion(value: unknown): value is CanvasScriptVers
 }
 
 /**
- * 执行与提交预算。
+ * 执行与提交的事实参数
+ * （change: 2026-10-22-remove-agent-execution-limits，任务 5.1 / 6.1 / design D6）。
  *
- * `sourceMaxBytes` / `executionTimeoutMs` / `heapLimitBytes` 是**单次执行**预算；
- * `maxOperations` / `planMaxBytes` 是**记录输出**预算；并发与排队上限在服务端门禁生效。
+ * 这里**不再**包含可拒绝合法脚本的应用侧额度：源码字节（原 128 KiB）、执行时长（原 2 秒）、
+ * 展开操作数（原 256）、计划 JSON 字节（原 1 MiB）、单次 API 调用次数（原 4096）以及主体/全局
+ * 并发与排队上限（原 2/8/32）都已删除。取代它们的是：
+ * - **隔离执行 + 外部取消**：脚本承载于可 ``terminate()`` 的独立故障域，用户停止可达；
+ * - **真实资源边界**：`heapLimitBytes` / `stackLimitBytes` 只表达执行器选用的隔离屏障大小，
+ *   不是「超出即拒绝合法工作」的业务额度；真实分配失败按实际资源故障报告；
+ * - **确定性校验**：双跑一致性与严格 codec 继续生效。
+ *
+ * `maxIdentifierChars` 是标识符/展示标题的长度约束（真实表达边界），不限制作品内容总量。
  */
 export const CANVAS_SCRIPT_LIMITS = {
-  /** 源码 UTF-8 字节上限（接收前判定）。 */
-  sourceMaxBytes: 128 * 1024,
-  /** 单次执行（含双跑共享）总时间上限（毫秒）。 */
-  executionTimeoutMs: 2_000,
-  /** QuickJS 独立堆上限（字节）。 */
-  heapLimitBytes: 32 * 1024 * 1024,
-  /** QuickJS 调用栈上限（字节）。 */
-  stackLimitBytes: 512 * 1024,
-  /** 展开后语义操作数上限（记录时判定）。 */
-  maxOperations: 256,
-  /** 规范化计划 JSON 上限（字节）。 */
-  planMaxBytes: 1024 * 1024,
-  /** 单 principal 并发执行上限。 */
-  maxConcurrentPerPrincipal: 2,
-  /** 进程内全局并发执行上限。 */
-  maxConcurrentGlobal: 8,
-  /** 等待并发名额的排队上限（超出返回不可重试的繁忙错误）。 */
-  maxQueueDepth: 32,
-  /** 单次执行内 API 调用次数上限（含被拒绝调用）。 */
-  maxApiCalls: 4_096
+  /** 隔离执行 realm 的堆上限（执行器屏障；不是业务额度）。 */
+  heapLimitBytes: 256 * 1024 * 1024,
+  /** 隔离执行 realm 的调用栈上限（执行器屏障）。 */
+  stackLimitBytes: 4 * 1024 * 1024,
+  /** 标识符/展示标题的单字段长度约束。 */
+  maxIdentifierChars: 200
 } as const;
 
 export type CanvasScriptLimits = typeof CANVAS_SCRIPT_LIMITS;

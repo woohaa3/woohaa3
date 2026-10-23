@@ -11,6 +11,7 @@
 .image-edit-presentation { display: contents; }
 
 .image-edit-workspace {
+  --photo-document-tabs-height: 34px;
   position: absolute;
   inset: 0;
   display: flex;
@@ -47,6 +48,16 @@
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+}
+
+/* 菜单与工具选项之后、画布之前的文档标签栏。公共布局已经为它预留高度。 */
+.image-edit-workspace > .photo-document-tabs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(-1 * var(--photo-document-tabs-height));
+  max-width: none;
+  z-index: 3;
 }
 
 .image-edit-workspace .photo-editor-host__status {

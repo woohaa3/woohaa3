@@ -85,6 +85,9 @@ function isTurnSettled(status: string): boolean {
   );
 }
 
+/** 未注入实时来源时的空订阅（静态 `canReturnToSource` 路径不需要通知）。 */
+const NO_SUBSCRIBE = (): (() => void) => () => undefined;
+
 export type AgentConversationPanelProps = {
   conversationId: string;
   requestId: string;
@@ -92,6 +95,21 @@ export type AgentConversationPanelProps = {
   /** 受控收起：恢复合法来源（生成面板）或关闭详情。 */
   onClose: () => void;
   onManageAssistant?: () => void;
+  /**
+   * 收起动作语义的静态来源：来源生成面板是否仍是当前目标（缺省 true，兼容只读挂载）。
+   *
+   * `true` → 「返回生成面板」（恢复来源 route）；`false` → 「关闭」（用户已选中别的节点或
+   * 取消选中，不得把画布拉回旧节点的生成面板）。
+   */
+  canReturnToSource?: boolean;
+  /**
+   * 收起动作语义的实时来源：订阅目标节点/聚焦变化，换选节点后头部立刻从「返回生成面板」
+   * 变成「关闭」。提供时优先于静态 `canReturnToSource`。
+   */
+  returnToSource?: {
+    subscribe: (listener: () => void) => () => void;
+    canReturn: () => boolean;
+  };
   /** 宿主会话 service（读模型 + 讨论回合）。 */
   service: AgentConversationServiceHandle;
   /**
@@ -104,6 +122,13 @@ export type AgentConversationPanelProps = {
 
 export function AgentConversationPanel(props: AgentConversationPanelProps) {
   const service = props.service;
+  // 收起动作语义：来源节点仍是当前目标时是「返回生成面板」，否则只是「关闭」。
+  // 订阅而不是读取一次，才能在用户换选节点后立刻改写头部按钮。
+  const liveReturn = useSyncExternalStore(
+    props.returnToSource?.subscribe ?? NO_SUBSCRIBE,
+    props.returnToSource?.canReturn ?? (() => props.canReturnToSource !== false),
+    props.returnToSource?.canReturn ?? (() => props.canReturnToSource !== false),
+  );
   const snapshot = useSyncExternalStore(
     service.subscribe,
     service.getSnapshot,
@@ -351,7 +376,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
             className="agent-detail__back"
             onClick={props.onClose}
           >
-            返回生成面板
+            {liveReturn ? "返回生成面板" : "关闭"}
           </button>
         </div>
       </header>
@@ -424,7 +449,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ) : null}
         {turn?.status === "unknown" && turn.target.mode === "canvas-group" ? (
           <div className="agent-detail__result">
-            <p>可先停止此回合，再返回生成面板继续搭建。</p>
+            <p>{liveReturn ? "可先停止此回合，再返回生成面板继续搭建。" : "可先停止此回合，再关闭详情继续搭建。"}</p>
             <div className="agent-detail__actions">
               <button type="button" disabled={stopping} onClick={() => void stopUnknownTurn()}>{stopping ? "正在停止…" : "停止此回合"}</button>
             </div>

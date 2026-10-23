@@ -29,6 +29,23 @@ export type MediaObject = {
   contentType?: string;
 };
 
+/**
+ * 媒体定位符（locator）：字节物理位置的**不透明**表达，形如 media://<backendId>/<opaque-path>。
+ *
+ * 只有产出它的存储后端知道怎么解析；task / provider / media / 界面一律原样传递，
+ * 不解析、不拼接、不比较内部结构。需要判断「是否同一对象」时问存储层。
+ */
+export type MediaLocator = string;
+
+/** 粗判一个值是不是 locator（只用于防止把裸键当 locator；不做结构校验）。 */
+export function isMediaLocator(value: unknown): value is MediaLocator {
+  if (typeof value !== "string" || !value.startsWith("media://")) return false;
+  if (/\s/.test(value)) return false;
+  const rest = value.slice("media://".length);
+  const slash = rest.indexOf("/");
+  return slash > 0 && rest.slice(slash + 1).length > 0;
+}
+
 export type MediaObjectStat = {
   size: number;
   contentType?: string;
@@ -59,6 +76,13 @@ export type MediaStorage = {
   /** 区间为包含两端的字节偏移；省略时读取完整对象，仍按流返回。 */
   openRead?(key: string, range?: { start: number; end: number }, scope?: MediaStorageScope): Promise<MediaObjectStream>;
   getHttpsUrl?(key: string, options?: { expiresSeconds?: number }, scope?: MediaStorageScope): Promise<string>;
+  /**
+   * 按 locator 读字节（可跨后端）。
+   *
+   * locator 是不透明串：只有产出的后端知道怎么解析，媒体层只负责把结果交给它的使用方。
+   * 未实现表示该部署不支持按 locator 读取。
+   */
+  readLocator?(locator: MediaLocator): Promise<MediaObject>;
 };
 
 /** 按字符串判定 not-found：与 `MediaObjectNotFoundError` 的 `code`/`name` 保持一致。 */

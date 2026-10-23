@@ -346,7 +346,7 @@ describe("agent conversation service", () => {
     expect(conflict.error.code).toBe("request-id-reused");
   });
 
-  it("单会话最多一个 active turn", () => {
+  it("同会话可以受理多个独立回合（不再有单活动回合门禁）", () => {
     const { service } = setup();
     const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
     if (!created.ok) return;
@@ -354,21 +354,28 @@ describe("agent conversation service", () => {
     const first = service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-1", entry: entry() });
     expect(first.ok).toBe(true);
     const second = service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-2", entry: entry({ prompt: "第二个" }) });
-    expect(second.ok).toBe(false);
-    if (second.ok) return;
-    expect(second.error.code).toBe("conversation-busy");
+    // change: 2026-10-22-remove-agent-execution-limits，任务 3.1：新 requestId 独立受理，
+    // 每个回合有自己的取消身份与冻结历史基准。
+    expect(second.ok).toBe(true);
+    if (second.ok) {
+      expect(second.turn.status).toBe("queued");
+      expect(second.turn.turnId).not.toBe(first.ok && first.turn.turnId);
+    }
+    // 相同 requestId + 相同输入仍幂等复用，不同输入仍拒绝。
+    expect(service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-1", entry: entry() })).toMatchObject({ ok: true, reused: true });
+    expect(service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-1", entry: entry({ prompt: "changed" }) })).toMatchObject({ ok: false, error: { code: "request-id-reused" } });
   });
 
-  it("allows eight independent groups for one owner while retaining the host budget", () => {
+  it("同一 owner 可以受理超过原 8 个活动回合", () => {
     const { service } = setup();
-    for (let n = 0; n < 9; n++) {
+    for (let n = 0; n < 12; n++) {
       const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1", nodeId: `group-${n}` });
       expect(created.ok).toBe(true);
       if (!created.ok) throw new Error("conversation not created");
       const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId,
         requestId: `request-${n}`, entry: entry({ nodeId: `group-${n}`, mode: "canvas-group" }) });
-      if (n < 8) expect(accepted).toMatchObject({ ok: true, turn: { status: "queued" } });
-      else expect(accepted).toMatchObject({ ok: false, error: { code: "budget-exceeded" } });
+      // 原 owner/global 各 8 的门禁已删除：全部独立受理为 queued。
+      expect(accepted).toMatchObject({ ok: true, turn: { status: "queued" } });
     }
     service.cancelTurn({ owner: "user-a", requestId: "request-0" });
     expect(service.queryTurn({ owner: "user-a", requestId: "request-1" })).toMatchObject({ ok: true, turn: { status: "queued" } });
@@ -657,7 +664,7 @@ describe("agent conversation · 节点会话复用与清空（design D8）", () 
 });
 
 
-it("无权威回执的目标回复保持 unknown，阻止清空；查询不重发推理", async () => {
+it("无权威回执的目标回复保持 unknown，仍可清空关联且不删除未核对回合；查询不重发推理", async () => {
   const { service, controls } = setup({ outcomes: [{ status: "succeeded", assistantText: "我已修改" }] });
   const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" });
   if (!created.ok) throw new Error("create failed");
@@ -665,7 +672,10 @@ it("无权威回执的目标回复保持 unknown，阻止清空；查询不重�
   if (!accepted.ok) throw new Error("accept failed");
   await service.dispatchTurn(accepted.turn.turnId); await service.whenSettled(accepted.turn.turnId);
   expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "unknown", error: { code: "write-unconfirmed" } } });
-  expect(service.clearContext({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" })).toMatchObject({ ok: false, error: { code: "conversation-busy" } });
+  // change: 2026-10-22-remove-agent-execution-limits，任务 3.2：清空只解除目标关联，
+  // 不再被活动/unknown 回合阻止，也不删除未核对回合（历史与回执仍可查）。
+  expect(service.clearContext({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" })).toMatchObject({ ok: true, cleared: 1 });
+  expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "unknown" } });
   expect(controls.seen).toHaveLength(1);
 });
 

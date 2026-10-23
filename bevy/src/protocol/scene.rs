@@ -276,12 +276,35 @@ impl HistoryStripPresentation {
 
 /// 聚合节点运行遮罩呈现（change: 2026-10-12-unify-generation-history-strip）。
 #[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AggregateRunPresentation {
+    #[serde(default)]
+    pub(crate) film_set: Option<FilmSetRunFeedback>,
     #[serde(default)]
     pub(crate) active: bool,
     #[serde(default, rename = "reduceMotion")]
     pub(crate) reduce_motion: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FilmSetRunFeedback {
+    pub(crate) operation_key: String,
+    pub(crate) phase: String,
+    pub(crate) source: String,
+    pub(crate) label_code: String,
+}
+
+impl FilmSetRunFeedback {
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.operation_key.is_empty() || self.operation_key.len() > 2048
+            || !matches!(self.phase.as_str(), "submitting" | "queued" | "running" | "committing" | "verifying")
+            || !matches!(self.source.as_str(), "conversion" | "agent" | "operation" | "legacy" | "submission")
+            || !matches!(self.label_code.as_str(), "submitting" | "queued" | "generating" | "modifying" | "running" | "saving" | "verifying") {
+            return Err("Invalid film set run feedback");
+        }
+        Ok(())
+    }
 }
 
 /// 复合资产范围形状（change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D3 修订）。
@@ -625,6 +648,12 @@ impl Scene {
         self.validate_version()?;
         self.theme.validate()?;
         for node in &self.nodes {
+            if let Some(run) = &node.aggregate_run {
+                if let Some(film) = &run.film_set {
+                    if !run.active || node.composite_asset.is_none() { return Err("Invalid film set run owner"); }
+                    film.validate()?;
+                }
+            }
             if let Some(view) = &node.model_preview {
                 if ![view.azimuth, view.elevation, view.distance_scale].iter().chain(view.target_offset.iter()).all(|v| v.is_finite())
                     || view.elevation.abs() >= std::f32::consts::FRAC_PI_2

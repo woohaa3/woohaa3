@@ -26,11 +26,12 @@ import { DocumentTabs } from "./document-tabs.js";
 import { FileDocumentActionsBar, DocumentPreviewCanvas, type FileDocumentActions } from "./file-document-surface.js";
 import type { FileDocumentWorkspace } from "./file-document-workspace.js";
 import type { DocumentWorkspaceStore } from "./workspace-store.js";
+import type { RecentFileEntry, RecentFileStore } from "@woohaa3/photocraft-protocol";
 import "./image-editor.css";
 import "./document-workspace.css";
 import { editorDisplayLayout, useEditorDisplay } from "@woohaa3/photocraft-editor";
 
-const IMAGE_HELP = "V 移动 · Ctrl/Cmd+T 自由变换· M 选框（Shift+M 切换椭圆）· L 套索 · B 画笔 · E 橡皮 · T 文字；空格临时平移；[ / ] 调整笔刷大小，Shift+[ / ] 调整硬度；Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 重做，Ctrl/Cmd+S 应用到节点；Ctrl/Cmd+0 适合窗口，Ctrl/Cmd+1 实际大小；Ctrl/Cmd+H 显隐选区边界，Tab 显隐工具与面板，Shift+Tab 显隐侧栏。系统占用快捷键时可用菜单。";
+const IMAGE_HELP = "V 移动 · M 选框 · L 套索 · W 选择 · B 画笔 · E 橡皮 · J 修复 · S 仿制 · P 钢笔 · T 文字；Shift+工具键切换同组工具；空格临时平移；Ctrl/Cmd+Tab 切换文档；Ctrl/Cmd+S 保存当前文档；Ctrl/Cmd+0 适合窗口，Ctrl/Cmd+1 实际大小；Tab 显隐工具与面板。系统占用快捷键时可用菜单。";
 const IMAGE_HINT = "双指滑动平移 / 捏合缩放 / 空格拖动视图";
 /** 文档 tab 条高度（与 document-workspace.css 的 .photo-document-tabs 保持一致）。 */
 const DOCUMENT_TABS_HEIGHT = 34;
@@ -60,6 +61,7 @@ export type ActiveDocumentBinding = {
 };
 
 export type DocumentWorkspaceProps = {
+  onTransfer?: (id: string) => void;
   store: DocumentWorkspaceStore;
   projectPort?: ProjectEditorPort | null;
   rect?: () => SurfaceRect;
@@ -67,14 +69,45 @@ export type DocumentWorkspaceProps = {
   onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
   onActivateDocument: (documentId: string) => void;
   onCloseDocument: (documentId: string) => void;
+  onReorderDocument?: (documentId: string, targetDocumentId: string) => void;
   onOpenFile?: () => void;
+  /**
+   * 新建空白文档（change: 2026-10-22-add-photocraft-file-workflows，U01）。
+   *
+   * 编辑器产出自包含工程字节，由宿主用既有打开路径落成独立文档/标签。
+   */
+  onRequestDocumentSlot?: (input: { bytes: Uint8Array; name: string }) =>
+    | { ok: true }
+    | { ok: false; reason: string }
+    | Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * 最近文件端口（change: 2026-10-22-add-photocraft-file-workflows，U04）。
+   *
+   * 索引与字节都在宿主：工作区只转交快照与动作，编辑器面板不缓存内容字节。
+   */
+  recentFiles?: RecentFileStore | null;
+  /** 索引本机持久化诊断（写失败/快照损坏）；非空时面板如实提示「仅本次会话」。 */
+  recentFilesError?: string | null;
+  onReopenRecent?: (entry: RecentFileEntry) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  onRemoveRecent?: (id: string) => void;
+  hasRecentBytes?: (entry: RecentFileEntry) => boolean;
+  /** 关闭全部文档（U03）：逐文档串行结算，首个失败即停止。 */
+  onCloseAllDocuments?: () => void;
+  /** 关闭其他文档（U03）：保留活动项，其余串行结算。 */
+  onCloseOtherDocuments?: () => void;
+  /** 置入图片到当前文档（与打开文件分开，任务 4.4）。 */
+  onPlaceImage?: () => void;
+  /** 导入 PSD（任务 5.3）。 */
+  onOpenPsd?: () => void;
+  /** 导出 PSD 副本（任务 5.4）。 */
+  onExportPsd?: () => void;
 };
 
 /**
  * 工作区贡献：由 `canvas.focus-workspace`（节点文档）与 `canvas.document-workspace`
  * （独立文件）共同渲染。差异全部由活动绑定表达，不按 kind 分支界面。
  */
-export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, onCloseDocument, onOpenFile }: DocumentWorkspaceProps) {
+export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, onCloseDocument, onReorderDocument, onOpenFile, onPlaceImage, onOpenPsd, onExportPsd, onTransfer, onRequestDocumentSlot, onCloseAllDocuments, onCloseOtherDocuments, recentFiles, recentFilesError, onReopenRecent, onRemoveRecent, hasRecentBytes }: DocumentWorkspaceProps) {
   const ui = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const active = ui.active;
   const view = active?.view ?? null;
@@ -95,7 +128,8 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
   // 只有设为当前后的内容替换才重开内核；取景、预览和保存不重开。
   const entry = useMemo(() => view && projectPort
     ? decideEditorEntry({
-        hasProject: view.projectDocument() !== null,
+        // 独立文件按自己的类型声明打开方式；节点文档仍由工程定义推断。
+        hasProject: view.openMode ? view.openMode() === "project" : view.projectDocument() !== null,
         phase: view.project.currentPhase(),
         conversionFallback: view.project.conversionFallbackReason() !== null
       })
@@ -115,8 +149,20 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
   const fileView = active && !active.nodeDocument ? active.view as FileDocumentWorkspace : null;
   // 打开文件 / 关闭 / 文档清单是**菜单**能力（文件、窗口），不挂在文档标签条上。
   const documents = useMemo(() => ({
+    ...(onTransfer ? {transfer: {enabled: editable, onSelect: onTransfer}} : {}),
     ...(onOpenFile ? { onOpenFile } : {}),
+    ...(onPlaceImage ? { onPlaceImage } : {}),
+    ...(onOpenPsd ? { onOpenPsd } : {}),
+    ...(onExportPsd ? { onExportPsd } : {}),
+    ...(fileView && active?.fileActions ? {
+      onSave: active.fileActions.saveProject,
+      saveLabel: "保存工程",
+      onExportPng: active.fileActions.exportPng
+    } : active ? { saveLabel: "应用到节点" } : {}),
     ...(active ? { onCloseDocument: () => onCloseDocument(active.documentId) } : {}),
+    // 批量关闭是工作区操作：逐文档串行结算，内核侧只有单文档 `file.close`。
+    ...(onCloseOtherDocuments ? { onCloseOthers: onCloseOtherDocuments } : {}),
+    ...(onCloseAllDocuments ? { onCloseAll: onCloseAllDocuments } : {}),
     list: ui.documents.entries.map((entry) => ({
       id: entry.id,
       name: entry.name,
@@ -124,7 +170,24 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
       status: entry.status === "dirty" ? "未保存" : entry.status === "saving" ? "保存中" : entry.status === "error" ? "保存失败" : null
     })),
     onActivateDocument
-  }), [active, onActivateDocument, onCloseDocument, onOpenFile, ui.documents]);
+  }), [active, editable, fileView, onTransfer, onActivateDocument, onCloseDocument, onOpenFile, onPlaceImage, onOpenPsd, onExportPsd, onCloseAllDocuments, onCloseOtherDocuments, ui.documents]);
+  // `ProjectEditorPane` only reopens the WASM document when its actual inputs change. A fresh
+  // wrapper on every viewport/preview update would retrigger that open effect and erase tool state.
+  const editorPort = useMemo(
+    () => projectPort
+      ? {
+          ...projectPort,
+          documents,
+          ...(onRequestDocumentSlot ? { onRequestDocumentSlot } : {}),
+          ...(recentFiles === undefined ? {} : { recentFiles }),
+          ...(recentFilesError ? { recentFilesError } : {}),
+          ...(onReopenRecent ? { onReopenRecent } : {}),
+          ...(onRemoveRecent ? { onRemoveRecent } : {}),
+          ...(hasRecentBytes ? { hasRecentBytes } : {})
+        }
+      : null,
+    [projectPort, documents, onRequestDocumentSlot, recentFiles, recentFilesError, onReopenRecent, onRemoveRecent, hasRecentBytes]
+  );
   return (
     <div className="image-edit-presentation" style={{ visibility: ready ? undefined : "hidden" }}>
       <FocusHeader
@@ -136,14 +199,15 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
       <div className="image-edit-workspace" data-image-edit-workspace="true"
         data-document-kind={active?.nodeDocument ? "node" : active ? "file" : undefined}
         data-image-edit-history={view?.isReadOnlyPreview() ? "true" : undefined}>
-        {/* tab 条位于内容区顶部、编辑菜单与工具区之上（design D2）。 */}
+        {/* 文档标签紧贴画布顶部；菜单和工具选项位于其上方。 */}
         <DocumentTabs
           snapshot={ui.documents}
           onActivate={onActivateDocument}
           onClose={onCloseDocument}
+          onReorder={onReorderDocument}
         />
         <div className="image-edit-workspace__body">
-        {active && projectPort && entry && entry.mode !== "none" ? (
+        {active && editorPort && entry && entry.mode !== "none" ? (
           <div className={fileView ? "photo-document-surface__body" : "image-edit-workspace__editor"}
             hidden={!fileView && (historyOpen || (view?.isReadOnlyPreview() ?? false))}
             data-document-body={fileView ? "true" : undefined}>
@@ -151,7 +215,7 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
               key={`${active.documentId}:${contentRevision}`}
               view={active.view}
               writable={editable}
-              port={{ ...projectPort, documents }}
+              port={editorPort}
               entry={entry}
               display={display}
               controller={active.controller}

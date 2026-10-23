@@ -304,9 +304,7 @@ fn metal_multidraw_publishes_building_edit_and_history_restore() {
         .init_resource::<crate::app::FocusRig>()
         .init_resource::<crate::theme::ThemeResource>()
         .init_resource::<crate::app::FrameFlags>()
-        .insert_resource(SurfaceState {
-            size: Vec2::new(1200., 800.),
-        })
+        .insert_resource(SurfaceState::with_size(Vec2::new(1200., 800.)))
         .insert_resource(GlobalAmbientLight {
             brightness: 600.,
             ..default()

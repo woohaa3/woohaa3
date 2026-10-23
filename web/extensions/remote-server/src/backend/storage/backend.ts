@@ -27,6 +27,7 @@ import {
   type StorageObjectStream,
   type StorageScope
 } from "@woohaa3/contracts";
+import type { MediaLocator } from "@woohaa3/contracts";
 import type { EnsureSessionResult, RemoteSession } from "../session.js";
 import { REMOTE_SERVER_EXTENSION_ID } from "../../shared.js";
 import {
@@ -130,7 +131,32 @@ export function createServerStorageBackend(options: ServerStorageBackendOptions)
     return response;
   };
 
-  const backend: StorageBackend = {
+  /**
+ * 读一个已经拼好的物理键（get 与 readLocator 共用）。
+ *
+ * 两者的差别只有「键怎么来」：get 的键由画布作用域拼出来，readLocator 的键就是
+ * locator 里那一段。授权、签名、容错必须只有一份实现。
+ */
+const readStored = async (errorKey: string, storedKey: string): Promise<StorageObject> => {
+      const signed = await createSignedUrl(storedKey, SIGNED_URL_METHOD_GET);
+      const response = await fetchSigned(signed.url, { method: "GET" });
+      if (response.status === 404) throw new StorageObjectNotFoundError(errorKey);
+      if (!response.ok) {
+        throw new ServerStorageCallError(
+          response.status === 403 ? "permission_denied" : `http-${response.status}`,
+          response.status,
+          `签名地址读取失败（HTTP ${response.status}）`
+        );
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      // 签名地址按协议回 Content-Type（HEAD/GET 同一套头）；万一网关剥掉了它，
+      // 再问一次元数据——媒体 verify 会比对 contentType，缺了它等于读不出这个对象。
+      const headerType = response.headers.get("content-type");
+      const contentType = headerType ?? (await readRemoteContentType(client, storedKey));
+      return { bytes, ...(contentType ? { contentType } : {}) };
+};
+
+const backend: StorageBackend = {
     backendId: SERVER_STORAGE_BACKEND_ID,
     label: SERVER_STORAGE_LABEL,
     ownerExtensionId: REMOTE_SERVER_EXTENSION_ID,
@@ -159,23 +185,7 @@ export function createServerStorageBackend(options: ServerStorageBackendOptions)
       return { size, ...(contentType ? { contentType } : {}) };
     },
     async get(key, scope): Promise<StorageObject> {
-      const storedKey = keyFor(key, scope);
-      const signed = await createSignedUrl(storedKey, SIGNED_URL_METHOD_GET);
-      const response = await fetchSigned(signed.url, { method: "GET" });
-      if (response.status === 404) throw new StorageObjectNotFoundError(key);
-      if (!response.ok) {
-        throw new ServerStorageCallError(
-          response.status === 403 ? "permission_denied" : `http-${response.status}`,
-          response.status,
-          `签名地址读取失败（HTTP ${response.status}）`
-        );
-      }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      // 签名地址按协议回 Content-Type（HEAD/GET 同一套头）；万一网关剥掉了它，
-      // 再问一次元数据——媒体 verify 会比对 contentType，缺了它等于读不出这个对象。
-      const headerType = response.headers.get("content-type");
-      const contentType = headerType ?? (await readRemoteContentType(client, storedKey));
-      return { bytes, ...(contentType ? { contentType } : {}) };
+      return readStored(key, keyFor(key, scope));
     },
     async openRead(key, range, scope): Promise<StorageObjectStream> {
       const storedKey = keyFor(key, scope);
@@ -240,7 +250,25 @@ export function createServerStorageBackend(options: ServerStorageBackendOptions)
         ...(presignOptions?.expiresSeconds ? { expiresSeconds: presignOptions.expiresSeconds } : {})
       });
       return signed.url;
-    }
+    },
+    /**
+     * 给出某个稳定键对应的 locator。
+     *
+     * 前缀里的后端 id 是本部署的存储后端：别人据此把字节交回来解析，而不是自己拼路径。
+     */
+    async locatorOf(key, scope): Promise<MediaLocator | undefined> {
+      return `media://${SERVER_STORAGE_BACKEND_ID}/${keyFor(key, scope)}`;
+    },
+    /**
+     * 按 locator 读字节：locator 里已经是物理键，不再拼画布前缀。
+     */
+    async readLocator(locator): Promise<StorageObject> {
+      const prefix = `media://${SERVER_STORAGE_BACKEND_ID}/`;
+      if (!locator.startsWith(prefix)) {
+        throw new ServerStorageCallError("invalid-response", 0, "不是本部署存储的 locator");
+      }
+      return readStored(locator.slice(prefix.length), locator.slice(prefix.length));
+    },
   };
 
   return backend;

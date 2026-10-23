@@ -24,8 +24,8 @@ use serde::Deserialize;
 /// v20 起预览卡片新增节点内 `shotPreview` 呈现、场景新增派生 `shotPreviewLinks` 归属线集合、
 /// 动画播放新增 `shot-node-preview` 模式与目标卡片路由
 /// （change: 2026-10-15-add-film-set-shooting-shot-previews）。
-/// v22 起复合资产可携带派生 ownershipLinks；旧 renderer 不支持管理关系虚线。
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v22";
+/// v23 起复合资产可携带派生 ownershipLinks；旧 renderer 不支持管理关系虚线。
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v23";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 

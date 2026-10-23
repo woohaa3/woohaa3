@@ -1,0 +1,32 @@
+export const feature = {
+  id: "composition",
+  capabilities: [
+    { stage: "P0", order: 10, id: "compose.transform" },
+    // U50–U56 的构图能力。`order` 在 P7 内使用本域专属区间（40–64），与各域共同贡献时排序稳定。
+    { stage: "P7", order: 0, id: "image.crop" },
+    { stage: "P7", order: 1, id: "image.image-size" },
+    { stage: "P7", order: 2, id: "image.canvas-size" },
+    { stage: "P7", order: 11, id: "image.perspective-crop" },
+    { stage: "P7", order: 12, id: "image.trim" },
+    { stage: "P7", order: 13, id: "image.reveal-all" },
+    { stage: "P7", order: 14, id: "image.rotation.arbitrary" },
+    { stage: "P7", order: 15, id: "transform.again" },
+    { stage: "P7", order: 16, id: "transform.warp" },
+    { stage: "P7", order: 17, id: "transform.warp-grid" },
+    { stage: "P7", order: 18, id: "transform.perspective-warp" },
+    { stage: "P7", order: 19, id: "transform.puppet-warp" },
+    { stage: "P7", order: 20, id: "fill.arbitrary" },
+    { stage: "P7", order: 21, id: "fill.content-aware" },
+    { stage: "P7", order: 22, id: "fill.content-aware-scale" },
+    { stage: "P7", order: 23, id: "fill.stroke" },
+    { stage: "P7", order: 24, id: "edit.fade" },
+    { stage: "P7", order: 25, id: "photo.auto-align" },
+    { stage: "P7", order: 26, id: "photo.auto-blend" },
+    { stage: "P7", order: 27, id: "photo.photomerge" },
+    { stage: "P7", order: 28, id: "photo.merge-hdr" },
+    { stage: "P7", order: 29, id: "photo.crop-and-straighten" },
+    { stage: "P7", order: 30, id: "structure.artboard" },
+    { stage: "P7", order: 31, id: "structure.frame" },
+    { stage: "P7", order: 32, id: "structure.slice" },
+  ]
+} as const;

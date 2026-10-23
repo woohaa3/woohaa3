@@ -48,6 +48,11 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
       else delete node.group.runStatus;
       continue;
     }
+    if (summary && "filmSetFeedback" in summary) {
+      node.aggregateRun = { active: summary.filmSetFeedback != null, filmSet: summary.filmSetFeedback ?? undefined };
+      delete node.historyStrip;
+      continue;
+    }
     if (summary?.isAggregate || (node.compositeAsset && node.busy)) {
       // 部分内容交付任务以规范节点 busy 回流，和 Agent operation 共用聚合运行遮罩。
       node.aggregateRun = { active: Boolean(summary?.aggregateRunning || node.busy) };

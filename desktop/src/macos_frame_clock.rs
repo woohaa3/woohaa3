@@ -53,7 +53,7 @@ pub fn start(view: &NSView, callback: Box<dyn Fn()>) -> bool {
         link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes);
     }
     CLOCK.with(|slot| *slot.borrow_mut() = Some((target, link)));
-    eprintln!("[native-frame-clock] NSView display link enabled");
+    crate::diagnostics::stderr(format_args!("[native-frame-clock] NSView display link enabled"));
     true
 }
 pub fn stop() {

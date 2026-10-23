@@ -14,7 +14,15 @@ import type { MediaClient } from "../clients/media-client.js";
 /** 读取参考输入字节；由宿主用 `ctx.storage`（media namespace）接上，缺省时不走 ①。 */
 export type ReferenceObjectReader = (storageKey: string, scope?: { canvasId: string }) => Promise<{ bytes: Uint8Array; contentType?: string }>;
 
-export type ReferenceUrlResolution = { ok: true; urls: string[] } | { ok: false; reason: string };
+/**
+ * 解析结果：每个参考输入一个位置。
+ *
+ * `locators` 与 `urls` 同序；某一条可能只有其中一个。Provider 之后按能力挑，不再靠
+ * 「url 长得像 locator」这种猜法。
+ */
+export type ReferenceUrlResolution =
+  | { ok: true; urls: string[]; locators: Array<string | undefined> }
+  | { ok: false; reason: string };
 
 export type ReferenceUrlOptions = {
   inputs: readonly CanvasTaskInput[];
@@ -28,10 +36,13 @@ export type ReferenceUrlOptions = {
 
 export async function resolveReferenceUrls(options: ReferenceUrlOptions): Promise<ReferenceUrlResolution> {
   const urls: string[] = [];
+  const locators: Array<string | undefined> = [];
   for (const input of options.inputs) {
     const uploaded = await uploadWithProvider(input, options);
     if (uploaded !== undefined) {
-      urls.push(uploaded);
+      // Provider 自己上传：它给的是 locator 或 url，分别记到对应位置。
+      urls.push(uploaded.url ?? "");
+      locators.push(uploaded.locator);
       continue;
     }
     if (!options.mediaClient) {
@@ -39,20 +50,24 @@ export async function resolveReferenceUrls(options: ReferenceUrlOptions): Promis
     }
     try {
       urls.push(await options.mediaClient.sign(input.storageKey, options.expiresSeconds, options.scope));
+      locators.push(undefined);
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : "参考输入签名失败" };
     }
   }
-  return { ok: true, urls };
+  return { ok: true, urls, locators };
 }
 
-/** ① Provider 自带上传；未实现、返回空或抛错都回落到 expose，只记日志不阻断提交。 */
-async function uploadWithProvider(input: CanvasTaskInput, options: ReferenceUrlOptions): Promise<string | undefined> {
+/** ① Provider 自带上传；未实现或返回空时回落到 expose。 */
+async function uploadWithProvider(
+  input: CanvasTaskInput,
+  options: ReferenceUrlOptions
+): Promise<{ url?: string; locator?: string } | undefined> {
   const provider = options.provider;
   if (!provider?.uploadReference || !options.readReferenceObject) return undefined;
   try {
     const object = await options.readReferenceObject(input.storageKey, options.scope);
-    const url = await provider.uploadReference({
+    const uploaded = await provider.uploadReference({
       reference: {
         role: input.role,
         ...(input.mediaKind ? { mediaKind: input.mediaKind } : {}),
@@ -64,8 +79,10 @@ async function uploadWithProvider(input: CanvasTaskInput, options: ReferenceUrlO
       ...(options.scope?.canvasId ? { canvasId: options.scope.canvasId } : {}),
       storageKey: input.storageKey
     });
-    const trimmed = typeof url === "string" ? url.trim() : "";
-    return trimmed === "" ? undefined : trimmed;
+    if (uploaded === undefined) return undefined;
+    const locator = typeof uploaded.locator === "string" && uploaded.locator !== "" ? uploaded.locator : undefined;
+    const url = typeof uploaded.url === "string" && uploaded.url !== "" ? uploaded.url : undefined;
+    return locator === undefined && url === undefined ? undefined : { ...(locator ? { locator } : {}), ...(url ? { url } : {}) };
   } catch (error) {
     options.logger?.({
       event: "task-upload-reference-failed",

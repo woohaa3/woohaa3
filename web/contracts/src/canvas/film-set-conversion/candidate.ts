@@ -37,14 +37,14 @@ export type FilmSetConversionCandidateResult =
   | { ok: false; code: "candidate-invalid" | "budget-exceeded"; message: string };
 
 /**
- * 转换候选地面近似上限（世界单位）。
+ * 地面取景建议值（世界单位，**诊断阈值，不是拒绝额度**）。
  *
- * 地面几何参与 `filmSetLayoutBounds` 的节点等比适配基准：地面远大于主体时，`fit` 会把主体压成
- * 几个像素（实测上游写出 200×200 地面，主体仅 ≈3.4 世界单位）。这里给出宽松上限，越界以**具体**
- * 原因进入有界修复轮，而不是静默交付一个「地板巨大、人物微小」的片场。默认地面为
- * `FILM_SET_GROUND_DEFAULT_SIZE`（8）。
+ * change: 2026-10-22-remove-agent-execution-limits，任务 7.1 / design D7：这里原本以固定
+ * 32 世界单位为界**拒绝**结构合法但地面偏大的候选。现在改为世界尺度／取景**质量诊断**：
+ * 地面远大于主体时仍完整交付（内容合法即保留），只在结果的 note 中说明主体预览可能偏小。
+ * 默认地面为 `FILM_SET_GROUND_DEFAULT_SIZE`（8）。
  */
-export const MAX_FILM_SET_CONVERSION_GROUND_EXTENT = 32;
+export const FILM_SET_CONVERSION_GROUND_ADVISORY_EXTENT = 32;
 
 /**
  * 校验片场候选。
@@ -99,19 +99,12 @@ export function validateFilmSetConversionCandidate(input: {
     if (!validity.ok) return { ok: false, code: "candidate-invalid", message: validity.message };
   }
 
-  // 地面几何参与节点矩形的等比适配基准（`filmSetLayoutBounds`），因此过大的地面会把主体缩成一点
-  // 并放大选择范围（实测上游写出 200×200 地面、主体仅 3.4 世界单位 → 预览里人物几乎不可见）。
-  for (const item of content.items) {
-    if (item.kind !== "ground") continue;
-    const extent = Math.max(item.size.width, item.size.depth);
-    if (extent > MAX_FILM_SET_CONVERSION_GROUND_EXTENT) {
-      return {
-        ok: false,
-        code: "candidate-invalid",
-        message: `地面 ${item.id} 尺寸 ${extent} 过大：地面以世界单位计、应接近主体占地（约 ${FILM_SET_GROUND_DEFAULT_SIZE}），过大的地面会在节点预览中把主体缩成一点并放大选择范围；无可见地面时可直接省略该对象`
-      };
-    }
-  }
+  // 地面几何参与节点矩形的等比适配基准（`filmSetLayoutBounds`），过大的地面会让主体在预览里
+  // 偏小。change: 2026-10-22-remove-agent-execution-limits —— 这属于取景质量诊断，不拒绝结构
+  // 合法的地面；诊断以结果 note 呈现，完整内容照常交付。
+  const groundDiagnostics = content.items
+    .filter((item): item is Extract<typeof item, { kind: "ground" }> => item.kind === "ground" && Math.max(item.size.width, item.size.depth) > FILM_SET_CONVERSION_GROUND_ADVISORY_EXTENT)
+    .map((item) => `地面 ${item.id} 尺寸 ${Math.max(item.size.width, item.size.depth)} 偏大：地面以世界单位计、宜接近主体占地（约 ${FILM_SET_GROUND_DEFAULT_SIZE}），否则节点预览中主体会被缩得很小；无可见地面时可直接省略该对象`);
 
   const animationsInput = candidate.filmSetAnimations ?? emptyFilmSetAnimations();
   const animations = decodeFilmSetAnimations(animationsInput, content);
@@ -151,7 +144,8 @@ export function validateFilmSetConversionCandidate(input: {
     if (!complete.ok) return { ok: false, code: "candidate-invalid", message: complete.reason };
   }
 
-  const note = typeof candidate.note === "string" && candidate.note.trim() ? candidate.note.trim() : undefined;
+  const baseNote = typeof candidate.note === "string" && candidate.note.trim() ? candidate.note.trim() : undefined;
+  const note = [...(baseNote ? [baseNote] : []), ...groundDiagnostics].join(" ") || undefined;
   return {
     ok: true,
     value: {

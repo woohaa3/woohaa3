@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // One application: shared Vite/Node UI plus a Tauri-owned native Bevy surface.
 import { prepareDevelopmentHost } from "./prepare-desktop-host.mjs";
+import { stageDevelopmentExecutable } from "./lib/desktop-dev-app.mjs";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, copyFileSync, symlinkSync, existsSync, lstatSync, readlinkSync, unlinkSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync, readFileSync, openSync, closeSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join, delimiter } from "node:path";
@@ -37,9 +38,9 @@ function stop(code = 0) {
 }
 process.on("SIGINT", () => stop(130));
 process.on("SIGTERM", () => stop(143));
-function launch(command, argv, cwd = root) {
+function launch(command, argv, cwd = root, stdio = "inherit") {
   const invocation = command === "pnpm" ? packageManagerInvocation(argv) : { command, args: argv };
-  const child = spawn(invocation.command, invocation.args, { cwd, env, stdio: "inherit", windowsHide: true });
+  const child = spawn(invocation.command, invocation.args, { cwd, env, stdio, windowsHide: true });
   children.add(child);
   child.on("error", error => { console.error(error); stop(1); });
   child.once("close", () => children.delete(child));
@@ -89,7 +90,8 @@ async function main() {
   if (stopping) return;
   console.log(`[desktop] 共享界面 ${url}；画布后端 native Bevy`);
   if (process.platform === "darwin") {
-    // LaunchServices gives the development binary a stable app/window identity.
+    // Retain an app identity without making LaunchServices the responsible process.
+    // CLI launch inherits terminal access to the checkout and prepared host resources.
     const app = join(root, ".local/Woohaa Desktop.app");
     const contents = join(app, "Contents");
     mkdirSync(join(contents, "MacOS"), { recursive: true });
@@ -97,10 +99,14 @@ async function main() {
     copyFileSync(join(nativeRoot, "icons/icon.icns"), join(contents, "Resources/icon.icns"));
     const executable = join(contents, "MacOS/woohaa-desktop");
     const binary = join(nativeRoot, "target/debug/woohaa-desktop");
-    try {
-      if (lstatSync(executable).isSymbolicLink() && readlinkSync(executable) !== binary) unlinkSync(executable);
-    } catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (!existsSync(executable)) symlinkSync(binary, executable);
+    // A symlink here hangs in dyld before main when launched by LaunchServices.
+    // Stage atomically so a failed copy preserves the previous runnable app.
+    stageDevelopmentExecutable(binary, executable);
+    if (!remote && env.WOOHAA_DESKTOP_NODE) {
+      const nodeExecutable = join(contents, "MacOS/woohaa-node");
+      stageDevelopmentExecutable(env.WOOHAA_DESKTOP_NODE, nodeExecutable);
+      env.WOOHAA_DESKTOP_NODE = nodeExecutable;
+    }
     writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>woohaa-desktop</string>
 <key>CFBundleIdentifier</key><string>com.woohaa.desktop.prototype</string>
@@ -113,7 +119,10 @@ async function main() {
 <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
 </dict></dict></plist>`);
     const log = join(root, ".local/desktop-app.log");
-    await finish(launch("open", ["-n", "-W", "--stdout", log, "--stderr", log, app, ...(remote ? ["--args", "--ui-url", url] : [])]));
+    const logDescriptor = openSync(log, "a");
+    try {
+      await finish(launch(executable, remote ? ["--ui-url", url] : [], nativeRoot, ["ignore", logDescriptor, logDescriptor]));
+    } finally { closeSync(logDescriptor); }
   } else {
     await finish(launch(nativeBinary, remote ? ["--ui-url", url] : [], nativeRoot));
   }

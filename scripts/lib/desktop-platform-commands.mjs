@@ -37,19 +37,25 @@ function pathEntries(env) {
 }
 
 /**
- * 给 GNU tar 补 `--force-local`。
- *
- * GNU tar 把 `E:\dir` 里的盘符当成远程主机，只有 `--force-local` 才会按本地路径处理；
- * bsdtar（Windows 自带、MSYS2/Cygwin）没有这个开关也不需要它。
+ * Keep tar and its compression children in the same Windows installation.
+ * Mixing MSYS2 tar with Git/Cygwin gzip can crash before an archive is written.
  */
-/**
- * 运行 tar：解析可执行文件并补齐 GNU tar 需要的开关。
- * 调用方只关心 tar 参数，不必重复处理 Windows 盘符/远程主机歧义。
- */
-export function systemTarExec(args, options = {}, platform = process.platform) {
- if (platform !== 'win32') return execFileSync('/usr/bin/tar', args, options);
- const tarPath = systemTar(platform);
- return execFileSync(tarPath, systemTarArgs(tarPath, args, platform), options);
+export function systemTarExec(args, options = {}, platform = process.platform, run = execFileSync, fileExists = fs.existsSync) {
+ if (platform !== 'win32') return run('/usr/bin/tar', args, options);
+ const inherited = options.env ?? process.env;
+ const tarPath = systemTar(platform, inherited, fileExists);
+ const bin = path.win32.dirname(tarPath);
+ // Windows treats environment names case-insensitively; Node may otherwise select
+ // an inherited Path instead of our PATH when both are present.
+ const env = Object.fromEntries(Object.entries(inherited).filter(([key]) => key.toUpperCase() !== 'PATH'));
+ env.PATH = [bin, ...pathEntries(inherited).filter(entry => path.win32.normalize(entry).toLowerCase() !== path.win32.normalize(bin).toLowerCase())].join(';');
+ const probe = (command, parameters, probeOptions) => run(command, parameters, {...probeOptions, env});
+ const parameters = systemTarArgs(tarPath, args, platform, probe);
+ const usesGzip = args.some(arg => /^-[^-]*z/.test(arg) || ['--gzip','--gunzip','--ungzip'].includes(arg));
+ if (parameters[0] === '--force-local' && usesGzip && !fileExists(path.win32.join(bin, 'gzip.exe'))) {
+  throw new Error(`GNU tar requires gzip.exe from the same directory: ${bin}`);
+ }
+ return run(tarPath, parameters, {...options, env});
 }
 
 export function systemTarArgs(tarPath, args, platform=process.platform, run=execFileSync) {

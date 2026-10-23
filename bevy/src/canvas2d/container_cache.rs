@@ -1,5 +1,5 @@
 //! Local group/film-scope buffers; transparent fills retain document ordering below overlays.
-use super::{Visuals, geometry::Geometry, labels::sync_labels};
+use super::{Visuals, geometry::Geometry, labels::sync_labels, text_presentation::LogicalText};
 use crate::{
     protocol::{GraphNode, GroupPresentation, Scene},
     theme::ThemeResource,
@@ -12,6 +12,7 @@ struct Key {
     index: usize,
     rect: [f32; 4],
     scope: Option<(f32, f32, f32, f32)>,
+    scope_vertices: Option<[Vec2; 4]>,
     title: String,
     group: Option<GroupPresentation>,
     selected: bool,
@@ -19,6 +20,7 @@ struct Key {
     /// 聚合节点运行遮罩（change: 2026-10-12-unify-generation-history-strip，design D5）：
     /// 仅聚合节点（复合资产）出现，运行中时绘制半透明遮罩 + 「运行中」。
     aggregate_run: bool,
+    film_run: Option<crate::protocol::FilmSetRunFeedback>,
 }
 impl Key {
     fn new(n: &GraphNode, index: usize, scene: &Scene) -> Self {
@@ -31,11 +33,13 @@ impl Key {
                 .as_ref()
                 .map(|asset| (asset.x, asset.y, asset.width, asset.height)),
             title: n.title.clone(),
+            scope_vertices: n.composite_asset.as_ref().map(|_| super::scope::node_scope(n).vertices),
             group: n.group.clone(),
             selected: scene.selection.nodes.contains(&n.id),
             hovered: n.composite_asset.is_some()
                 && scene.hover.as_ref().and_then(|h| h.node_id.as_deref()) == Some(n.id.as_str()),
-            aggregate_run: n.aggregate_run.as_ref().is_some_and(|run| run.active),
+            aggregate_run: n.aggregate_run.as_ref().is_some_and(|run| run.active && run.film_set.is_none()),
+            film_run: n.aggregate_run.as_ref().and_then(|run| run.film_set.clone()),
         }
     }
 }
@@ -80,7 +84,7 @@ pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
-    text: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor), Without<Sprite>>,
+    text: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
     scene: &Scene,
     theme: &ThemeResource,
 ) -> u64 {
@@ -157,6 +161,21 @@ pub(super) fn sync(
             }
             // 聚合节点运行遮罩：覆盖整个范围（change: 2026-10-12-unify-generation-history-strip，
             // design D5）。半透明遮罩写入 blend 层，被上层不透明卡片正确遮挡。
+            if let Some(feedback) = &key.film_run {
+                super::film_set::draw_film_set_run_mask(&mut geometry, theme, node, z + 0.02);
+                let scope = super::scope::node_scope(node);
+                if scope.aabb.width.max(scope.aabb.height) * scene.viewport.zoom >= 48. {
+                    let label = match feedback.label_code.as_str() {
+                        "submitting" => "提交中", "queued" => "排队中", "generating" => "生成中", "modifying" => "修改中",
+                        "saving" => "保存中", "verifying" => "待确认", _ => "运行中",
+                    };
+                    let zoom = scene.viewport.zoom.max(0.1);
+                    let center = Vec2::new(scope.aabb.x + scope.aabb.width / 2., scope.aabb.y + scope.aabb.height + 14. / zoom);
+                    geometry.rounded_rect_alpha(center.x - 27. / zoom, center.y - 10. / zoom, 54. / zoom, 20. / zoom,
+                        5. / zoom, z + 0.02, theme.token_u32("canvasNodeContent"), 0.9);
+                    labels.push((label.to_owned(), center, 12. / zoom, theme.token_u32(if feedback.phase == "verifying" { "statusWarning" } else { "interactionAccent" })));
+                }
+            }
             if key.aggregate_run {
                 let scope = super::scope::node_scope(node);
                 let bounds = (scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height);

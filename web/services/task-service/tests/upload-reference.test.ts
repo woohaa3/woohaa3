@@ -186,7 +186,7 @@ describe("参考输入：Provider 自带上传优先", () => {
     const { harness, media, worker } = await startService({
       provider: providerWithUpload((input) => {
         seen.push({ storageKey: REQUEST.inputs[0]!.storageKey, bytes: [...input.bytes], contentType: input.contentType });
-        return "https://uploader.example/ref-1";
+        return { url: "https://uploader.example/ref-1" };
       }),
       readReferenceObject: async (storageKey, scope) => {
         expect(storageKey).toBe(REFERENCE_KEY);
@@ -250,7 +250,7 @@ describe("参考输入：Provider 自带上传优先", () => {
     const { harness, media, worker } = await startService({
       provider: providerWithUpload(() => {
         called += 1;
-        return "https://uploader.example/ref-1";
+        return { url: "https://uploader.example/ref-1" };
       })
     });
     try {

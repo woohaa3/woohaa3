@@ -19,6 +19,7 @@ import type { MediaStorage, MediaStorageScope } from "@woohaa3/contracts";
 import {
   ProjectVerificationError,
   createProcessOnlyVerifier,
+  inspectEmbeddedPhotocraftProject,
   type NativeProjectVerifier
 } from "@woohaa3/photocraft-project-verifier";
 
@@ -31,6 +32,37 @@ import {
  * `createNativeProjectVerifier()`；未注入时保持迁移前的默认行为。
  */
 const DEFAULT_VERIFIER: NativeProjectVerifier = createProcessOnlyVerifier();
+
+/**
+ * 工程保存的核验通道。
+ *
+ * 先按**普通上传口径**核验：不含智能对象的工程行为完全不变，任何既有拒绝原因原样返回。
+ *
+ * 只有「因为含嵌入智能对象而被拒」时，才改用专用于含源工程的通道：先用
+ * `inspectEmbeddedPhotocraftProject` 做外层有界结构检查（它只放开 `smart` 这一种对象类型，
+ * 填充/形状/画板/智能滤镜/外链/坏名称/不可逆仿射继续拒绝），再要求原生核验工具对整棵源树
+ * 复核同一预算并校对根摘要（`verifyEmbeddedForIngest` 在原生不可用时**失败**，不回退）。
+ *
+ * 为什么必须放行这一条：U66「转回图层」只解包当前实例，同工程里其他共享实例仍是智能对象
+ * （spec 的成功证据要求「其他共享实例不变」）。若保存入口整体拒绝这类工程，编辑结果在
+ * Woohaa 里根本存不下来。放行范围严格限于「嵌入智能对象」，且仍以原生全树核验为前置。
+ */
+async function verifyProjectForSave(
+  verifier: NativeProjectVerifier,
+  bytes: Uint8Array,
+  options: { maxBytes?: number }
+): Promise<void> {
+  try {
+    await verifier.verifyForIngest(bytes, IMAGE_PROJECT_CONTENT_TYPE, options);
+    return;
+  } catch (error) {
+    // 不是「含智能对象」的拒绝：保持原有失败语义，不做任何回退。
+    if (!(error instanceof ProjectVerificationError) || error.code !== "unsupported-object") throw error;
+    const summary = inspectEmbeddedPhotocraftProject(bytes, options);
+    if (!summary.objectKinds.includes("smart")) throw error;
+  }
+  await verifier.verifyEmbeddedForIngest(bytes, IMAGE_PROJECT_CONTENT_TYPE, options);
+}
 
 export { ALLOWED_MEDIA_TYPES, DEFAULT_MAX_UPLOAD_BYTES };
 
@@ -147,8 +179,7 @@ export async function ingestMediaObject(options: IngestMediaOptions): Promise<Me
       throw new MediaIngestError("unsupported-media-type", `专用工程入口只接受 ${IMAGE_PROJECT_CONTENT_TYPE}`);
     }
     try {
-      // 已配置原生核验工具时优先用它（与编辑器共用同一解析实现），否则回退进程内有界核验。
-      await (options.verifier ?? DEFAULT_VERIFIER).verifyForIngest(options.bytes, contentType, {
+      await verifyProjectForSave(options.verifier ?? DEFAULT_VERIFIER, options.bytes, {
         maxBytes: Math.min(maxBytes, IMAGE_PROJECT_LIMITS.maxProjectBytes)
       });
     } catch (error) {

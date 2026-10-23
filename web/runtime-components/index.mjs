@@ -97,16 +97,39 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
     return { lock, item, config: { ...defaults.components?.[id], ...user.components?.[id], source: user.components?.[id]?.source || defaults.components?.[id]?.source || 'managed' }, baseUrl: user.cdn?.baseUrl ?? defaults.cdn?.baseUrl, keys: [...defaults.trustKeys || [], ...user.additionalTrustKeys || []] };
   }
   const directory = (id, version) => path.join(dataDir, 'runtimes', id, version, `${platform}-${arch}`);
-  async function local(id, executable, version, localVersions) {
+  function reportedCodexVersion(output) {
+    return output.match(/codex(?:-cli)?\s+v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)?)/i)?.[1];
+  }
+  async function resolveCodexExecutable(executable) {
+    const info = await fs.stat(executable);
+    if (info.isFile()) return executable;
+    if (!(info.isDirectory() && executable.toLowerCase().endsWith('.app'))) fail('INCOMPATIBLE_COMPONENT', 'Selected runtime is not a file');
+    const names = platform === 'win32' ? ['codex.exe'] : ['codex'];
+    const relatives = [['Contents', 'Resources', 'codex-cli', 'CodexCLI.app', 'Contents', 'MacOS'], ['Contents', 'MacOS']];
+    for (const relative of relatives) for (const name of names) {
+      const candidate = path.join(executable, ...relative, name);
+      try { if ((await fs.stat(candidate)).isFile()) return candidate; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    fail('INCOMPATIBLE_COMPONENT', 'Selected app does not contain a Codex executable');
+  }
+  async function local(id, executable, version, localVersions, blockedVersions = []) {
     const compatible = localVersions ?? (id === 'claude' ? [] : [version]);
-    if (!Array.isArray(compatible) || compatible.some(value => !segment(value)) || !compatible.length) fail('INCOMPATIBLE_COMPONENT', `No compatible local CLI versions are declared for ${id}`);
+    if (id !== 'codex' && (!Array.isArray(compatible) || compatible.some(value => !segment(value)) || !compatible.length)) fail('INCOMPATIBLE_COMPONENT', `No compatible local CLI versions are declared for ${id}`);
     if (!path.isAbsolute(executable) || /\.(cmd|bat)$/i.test(executable)) fail('INCOMPATIBLE_COMPONENT', 'Choose an absolute native executable (Windows .cmd/.bat launchers are not supported)');
-    const info = await fs.stat(executable); if (!info.isFile()) fail('INCOMPATIBLE_COMPONENT', 'Selected runtime is not a file');
+    if (id === 'codex') executable = await resolveCodexExecutable(executable);
+    else { const info = await fs.stat(executable); if (!info.isFile()) fail('INCOMPATIBLE_COMPONENT', 'Selected runtime is not a file'); }
     const cwd = path.join(dataDir, 'runtime-probes', id); await fs.mkdir(cwd, { recursive: true });
     const env = { PATH: process.env.PATH, HOME: cwd, USERPROFILE: cwd, TMPDIR: cwd, TEMP: cwd, SystemRoot: process.env.SystemRoot };
     const { stdout, stderr } = await exec(executable, ['--version'], { cwd, env, timeout: 5000, maxBuffer: 16384, windowsHide: true });
-    if (['codex', 'claude'].includes(id) && !new RegExp(id, 'i').test(`${stdout}\n${stderr}`)) fail('INCOMPATIBLE_COMPONENT', `Selected program does not identify as ${id}`);
-    const actualVersion = compatible.find(candidate => new RegExp(`(?:^|[^\\d.])${candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^\\w.+-])`).test(`${stdout}\n${stderr}`));
+    const output = `${stdout}\n${stderr}`;
+    if (['codex', 'claude'].includes(id) && !new RegExp(id, 'i').test(output)) fail('INCOMPATIBLE_COMPONENT', `Selected program does not identify as ${id}`);
+    if (id === 'codex') {
+      const actualVersion = reportedCodexVersion(output);
+      if (!actualVersion) fail('INCOMPATIBLE_COMPONENT', 'Selected codex did not report a version');
+      if ((Array.isArray(blockedVersions) ? blockedVersions : []).includes(actualVersion)) fail('INCOMPATIBLE_COMPONENT', `Selected codex ${actualVersion} is blocked`);
+      return { entry: executable, version: actualVersion, source: 'local', kind: 'executable' };
+    }
+    const actualVersion = compatible.find(candidate => new RegExp(`(?:^|[^\\d.])${candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^\\w.+-])`).test(output));
     if (!actualVersion) fail('INCOMPATIBLE_COMPONENT', `Selected ${id} must report one of: ${compatible.join(', ')}`);
     return { entry: executable, version: actualVersion, source: 'local', kind: 'executable' };
   }
@@ -134,13 +157,13 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
     const s = await settings(id); const base = { id, version: s.item.version, source: s.config.source, status: 'missing', configured: Boolean(s.baseUrl), ...states.get(id) };
     if (jobs.has(id)) return base;
     try {
-      const found = s.config.source === 'local' ? await local(id, s.config.path, s.item.version, s.item.localVersions) : await installed(id, s);
+      const found = s.config.source === 'local' ? await local(id, s.config.path, s.item.version, s.item.localVersions, s.item.blockedVersions) : await installed(id, s);
       return { ...base, status: found ? 'ready' : base.status === 'failed' ? 'failed' : 'missing', ...found };
     } catch (error) { return { ...base, status: 'incompatible', error: error.message }; }
   }
   async function resolve(id) {
     const s = await settings(id);
-    const found = s.config.source === 'local' ? await local(id, s.config.path, s.item.version, s.item.localVersions) : await installed(id, s, true);
+    const found = s.config.source === 'local' ? await local(id, s.config.path, s.item.version, s.item.localVersions, s.item.blockedVersions) : await installed(id, s, true);
     if (!found) fail('RUNTIME_COMPONENT_MISSING', `Runtime ${id} is not installed; choose a local program or install it from Settings → Runtime components`);
     const key = `${id}/${found.version}`; leases.set(key, (leases.get(key) || 0) + 1); let released = false;
     let leaseFile;
@@ -186,7 +209,7 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
       }
       if (!s.keys.some(key => { try { return verify(null, bytes, key, Buffer.from(signature.toString().trim(), 'base64')); } catch { return false; } })) fail('INVALID_SIGNATURE', 'Runtime catalog signature is invalid or untrusted');
       const catalog = JSON.parse(bytes.toString());
-      if (catalog.schemaVersion !== 1 || !Array.isArray(catalog.components)) fail('INVALID_CATALOG', 'Invalid runtime catalog');
+      if (![1, 2].includes(catalog.schemaVersion) || !Array.isArray(catalog.components)) fail('INVALID_CATALOG', 'Invalid runtime catalog');
       const matches = catalog.components.filter(x => x.id === id && x.version === s.item.version && x.platform === platform && x.arch === arch);
       if (matches.length !== 1) fail('COMPONENT_NOT_PUBLISHED', `No unique locked ${id} ${s.item.version} for ${platform}-${arch}`);
       const component = matches[0];
@@ -211,9 +234,14 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
       if (space.bavail * space.bsize < component.bytes + component.unpackedBytes + 1024 * 1024) fail('INSUFFICIENT_SPACE', 'Insufficient space for runtime installation');
       staging = `${root}.staging-${randomUUID()}`; await fs.mkdir(staging);
       const archive = `${root}.partial`, partialInfo = `${root}.partial.json`;
+      let archiveBase = base;
+      if (catalog.schemaVersion === 2) {
+        if (!/^[a-f0-9]{64}$/.test(component.sha256) || component.url !== `blobs/sha256/${component.sha256}.tar.gz` || !/\/(darwin-aarch64|windows-x86_64)\/[^/]+\/$/.test(base.pathname) || base.search || base.hash) fail('INVALID_CATALOG', 'Invalid shared runtime blob or release directory');
+        archiveBase = new URL('../../', base);
+      }
       safeRelative(component.url);
-      const url = validateUrl(new URL(component.url, base).href);
-      if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname) || url.search || url.hash) fail('INVALID_CATALOG', 'Runtime archive URL must remain under the configured CDN directory');
+      const url = validateUrl(new URL(component.url, archiveBase).href);
+      if (url.origin !== base.origin || !url.pathname.startsWith(archiveBase.pathname) || url.search || url.hash) fail('INVALID_CATALOG', 'Runtime archive URL must remain under the configured CDN directory');
       let received = 0, handle, keepPartial = true;
       const prior = await json(partialInfo, true);
       if (prior.sha256 === component.sha256 && prior.url === url.href && prior.etag) {
@@ -304,7 +332,7 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
       } catch (e) { await fs.rename(tombstone, root); throw e; }
       states.delete(id); return inspect(id);
       } finally { await fs.rm(path.join(root, '.release-requested'), { force: true }); await fs.rm(mutationLock, { recursive: true, force: true }); } },
-    async discoverLocal(id) { const s = await settings(id); const found = []; for (const dir of (process.env.PATH || '').split(path.delimiter)) { if (!path.isAbsolute(dir)) continue; for (const name of platform === 'win32' ? [`${id}.exe`] : [id]) { try { const result = await local(id, path.join(dir, name), s.item.version, s.item.localVersions); if (!found.some(x => x.entry === result.entry)) found.push(result); } catch { /* discovery only returns compatible candidates */ } } } return found; },
+    async discoverLocal(id) { const s = await settings(id); const found = []; for (const dir of (process.env.PATH || '').split(path.delimiter)) { if (!path.isAbsolute(dir)) continue; for (const name of platform === 'win32' ? [`${id}.exe`] : [id]) { try { const result = await local(id, path.join(dir, name), s.item.version, s.item.localVersions, s.item.blockedVersions); if (!found.some(x => x.entry === result.entry)) found.push(result); } catch { /* discovery only returns compatible candidates */ } } } return found; },
   };
 }
 let singleton, singletonKey;

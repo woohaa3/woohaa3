@@ -110,3 +110,69 @@ it("缺失内核后，菜单和取景刷新不再次打开编辑器", async () =
   expect(createController).toHaveBeenCalledOnce();
   expect(container.textContent).toContain("需要图片编辑组件");
 });
+
+it("菜单端口包装变化不重新打开当前 WASM 文档", async () => {
+  const openImage = vi.fn(async () => ({ ok: true }));
+  const controller = {
+    dispose: vi.fn(),
+    openImage,
+    hasLayerProperties: () => false,
+    hasAdjustment: () => false,
+    hasText: () => false,
+    hasTransform: () => false,
+    isDirty: () => false,
+    currentState: () => ({ phase: "editing", message: null, dirty: false, retriable: false }),
+    snapshot: () => ({ view: { hasDocument: false, document: null, sessionActiveIndex: null }, commands: new Map(), state: { phase: "editing", message: null, dirty: false, retriable: false } }),
+    subscribe: () => () => undefined
+  };
+  const view = fakeDocumentView({ baseAsset: () => ({ id: "base" }) });
+  const loadBaseImageBytes = vi.fn(async () => new Uint8Array([1]));
+  const createController = vi.fn(() => controller);
+  const entry = { mode: "image" as const };
+  const port = (enabled: boolean) => ({
+    createController,
+    loadBaseImageBytes,
+    documents: { transfer: { enabled, onSelect: () => undefined } }
+  }) as unknown as ProjectEditorPort;
+  const container = document.createElement("div"); document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root!.render(<ProjectEditorPane view={view as unknown as EditorDocumentView} port={port(false)} writable entry={entry} />));
+  await act(async () => root!.render(<ProjectEditorPane view={view as unknown as EditorDocumentView} port={port(true)} writable entry={entry} />));
+  expect(createController).toHaveBeenCalledTimes(1);
+  expect(openImage).toHaveBeenCalledTimes(1);
+  expect(loadBaseImageBytes).toHaveBeenCalledTimes(1);
+});
+
+it("独立文件的 .pcraft 走 openProject，不经过位图归一化", async () => {
+  // 回归：文件文档的 `projectDocument()` 恒为 null，曾使 `.pcraft` 落到 openImage →
+  // `createImageBitmap` 解码 zip 失败，「保存工程 → 重开」整条主链不可达。
+  const openProject = vi.fn(async () => ({ ok: true }));
+  const openImage = vi.fn(async () => ({ ok: true }));
+  const loadProjectBytes = vi.fn(async () => new Uint8Array([9]));
+  const loadBaseImageBytes = vi.fn(async () => new Uint8Array([7]));
+  const view = fakeDocumentView({
+    baseAsset: () => null,
+    projectDocument: () => null,
+    openMode: () => "project" as const
+  });
+  const port = {
+    createController: () => ({ dispose: vi.fn(), openProject, openImage }),
+    // 文件文档的工程字节就是它自己打开的那份；节点工程对象读取器不应被调用。
+    loadBaseImageBytes,
+    loadProjectBytes,
+    fileDestination: true
+  } as unknown as ProjectEditorPort;
+  const container = document.createElement("div"); document.body.append(container);
+  root = createRoot(container);
+  // 同文件其它用例也会用到归一化替身：只比较本用例渲染前后的增量。
+  const normalizedBefore = normalize.mock.calls.length;
+  await act(async () => root!.render(
+    <ProjectEditorPane view={view as unknown as EditorDocumentView} port={port} writable entry={{ mode: "project" }} />
+  ));
+  expect(loadBaseImageBytes).toHaveBeenCalledTimes(1);
+  expect(loadProjectBytes).not.toHaveBeenCalled();
+  expect(openProject).toHaveBeenCalledWith({ bytes: new Uint8Array([7]), baseAssetId: "file-project" });
+  // 位图归一化不得介入工程包：`.pcraft` 不是图片。
+  expect(normalize.mock.calls.length).toBe(normalizedBefore);
+  expect(openImage).not.toHaveBeenCalled();
+});

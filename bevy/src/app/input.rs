@@ -1,4 +1,5 @@
 use bevy::{
+    camera::Viewport,
     prelude::*,
     window::{PrimaryWindow, WindowResized},
 };
@@ -6,7 +7,8 @@ use bevy::{
 use crate::{bridge, canvas2d, theme::ThemeResource};
 
 use super::{
-    CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable, SurfaceState, TextureBatch,
+    helpers::place_native_surface, CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable,
+    SurfaceState, TextureBatch,
 };
 
 /// 重置帧标记，取走最新 scene/texture batch；检测 theme-only 变化。
@@ -59,39 +61,86 @@ pub(crate) fn ingest_bridge(
     resources.0 = bridge::model_assets_snapshot();
 }
 
+fn same_viewport(current: &Option<Viewport>, next: &Option<Viewport>) -> bool {
+    match (current, next) {
+        (None, None) => true,
+        (Some(current), Some(next)) => {
+            current.physical_position == next.physical_position
+                && current.physical_size == next.physical_size
+                && current.depth == next.depth
+        }
+        _ => false,
+    }
+}
+
 /// 应用 surface/DPR；必要时补发 `WindowResized`；计算本帧是否变化。
+///
+/// 表面可以相对窗口原点内缩（桌面顶栏）。交换链覆盖整个客户区，主相机视口对齐
+/// DOM 画布；逻辑尺寸仍是画布本身，命中与投影不把顶栏算进画布。
 pub(crate) fn sync_surface(
     mut flags: ResMut<FrameFlags>,
     mut surface: ResMut<SurfaceState>,
     scene: Res<CurrentScene>,
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut window_resized: MessageWriter<WindowResized>,
+    mut canvas_cameras: Query<
+        &mut Camera,
+        Or<(
+            With<canvas2d::MainCanvasCamera>,
+            With<crate::model3d::grid::ModelCanvasCamera>,
+        )>,
+    >,
 ) {
     let Ok((window_entity, mut window)) = windows.single_mut() else {
         flags.surface_changed = false;
         return;
     };
-    if let Some(surface_size) = &scene.0.surface {
-        let width = (surface_size.width * surface_size.pixel_ratio).round() as u32;
-        let height = (surface_size.height * surface_size.pixel_ratio).round() as u32;
-        if window.physical_width() != width
-            || window.physical_height() != height
+    let logical = if let Some(surface_size) = &scene.0.surface {
+        let placed = place_native_surface(
+            surface_size.origin_x,
+            surface_size.origin_y,
+            surface_size.width,
+            surface_size.height,
+            surface_size.pixel_ratio,
+        );
+        if window.physical_width() != placed.window_width
+            || window.physical_height() != placed.window_height
             || window.scale_factor() != surface_size.pixel_ratio
         {
             window
                 .resolution
                 .set_scale_factor_override(Some(surface_size.pixel_ratio));
-            window.resolution.set_physical_resolution(width, height);
+            window
+                .resolution
+                .set_physical_resolution(placed.window_width, placed.window_height);
             window_resized.write(WindowResized {
                 window: window_entity,
                 width: window.width(),
                 height: window.height(),
             });
         }
-    }
-    let size = Vec2::new(window.width(), window.height());
-    flags.surface_changed = surface.size != size;
-    surface.size = size;
+        let viewport = placed.inset.then(|| Viewport {
+            physical_position: UVec2::new(placed.viewport_x, placed.viewport_y),
+            physical_size: UVec2::new(placed.viewport_width, placed.viewport_height),
+            depth: 0.0..1.0,
+        });
+        for mut camera in &mut canvas_cameras {
+            if !same_viewport(&camera.viewport, &viewport) {
+                camera.viewport = viewport.clone();
+            }
+        }
+        Vec2::new(placed.logical_width, placed.logical_height)
+    } else {
+        for mut camera in &mut canvas_cameras {
+            camera.viewport = None;
+        }
+        Vec2::new(window.width(), window.height())
+    };
+    flags.surface_changed = surface.size != logical;
+    // DPR-only 变化（同 CSS 尺寸）也必须进入文字呈现失效：`surface_changed` 只比较逻辑尺寸，
+    // 因此单独记录目标 DPR（change: 2026-10-22-improve-canvas-text-clarity，design D4）。
+    surface.pixel_ratio = window.scale_factor();
+    surface.size = logical;
     flags.changed = flags.scene_received
         || flags.positions_received
         || flags.surface_changed

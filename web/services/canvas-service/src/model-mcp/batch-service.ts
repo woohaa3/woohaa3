@@ -3,7 +3,6 @@ import {
   decodeModelContentVersion,
   isFilmSetNode,
   isModelAuthoringNodeType,
-  MODEL_SCRIPT_BATCH_LIMITS as LIMITS,
   MODEL_SCRIPT_LANGUAGE,
   readModelCameras,
   v2SceneAabb,
@@ -30,7 +29,6 @@ export type ModelBatchContext = {
   principalId: string;
   authorize?: () => Promise<boolean>;
 };
-let activeBatches = 0;
 const camerasHash = (data: CanvasNodeData | undefined) =>
   digest(readModelCameras(data));
 const authorized = async (context: ModelBatchContext) =>
@@ -45,7 +43,6 @@ export async function getModelNodes(
     !input.canvasId?.trim() ||
     !Array.isArray(input.nodeIds) ||
     input.nodeIds.length < 1 ||
-    input.nodeIds.length > LIMITS.maxNodes ||
     input.nodeIds.some((id) => typeof id !== "string" || !id.trim()) ||
     new Set(input.nodeIds).size !== input.nodeIds.length ||
     (input.includeSource !== undefined &&
@@ -77,10 +74,8 @@ export async function getModelNodes(
       revision: snapshot.canvas.revision,
       nodes,
     };
-    return Buffer.byteLength(JSON.stringify(result), "utf8") >
-      LIMITS.maxResponseBytes
-      ? failure("limit-exceeded", "读取结果过大，请缩小 nodeIds 或省略源码")
-      : result;
+    // 任务 5.3：不再按响应字节总量拒绝；大响应可继续分页读取同一快照。
+    return result;
   });
 }
 
@@ -172,21 +167,16 @@ export async function authorModelBatch(
       : failure("canvas-unavailable", snapshot.message),
   );
   if (initial) return initial;
-  if (activeBatches >= LIMITS.maxConcurrentBatches)
-    return failure("busy", "模型批量执行繁忙，请稍后重试");
-  activeBatches++;
+  // change: 2026-10-22-remove-agent-execution-limits，任务 5.3 / design D5：删除固定批次并发
+  // （原 2 批）与 15 秒总时长拒绝。合法批次按实际资源顺序执行（不一次启动全部 Worker），
+  // 可取消；时间只作为用户的显式取消信号，而不是应用额度。
   try {
-    const deadline = Date.now() + LIMITS.maxExecutionMs;
     const geometry: ModelBatchNodeSummary["geometry"][] = [],
       errors: ModelBatchIssue[] = [];
-    // Bounded sequential execution avoids starting one worker per asset at once.
+    // 顺序执行避免一次启动全部 Worker（调度，不是拒绝）。
     for (const [index, source] of sources.entries()) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0)
-        return failure("limit-exceeded", "模型批次执行超过总时间预算");
       const execution = await executeSceneIr(source, "woohaa-model-js-v2", {
         ...deps.scriptExecutor,
-        timeoutMs: Math.min(deps.scriptExecutor?.timeoutMs ?? 2000, remaining),
       });
       if (!execution.ok)
         errors.push({
@@ -204,8 +194,6 @@ export async function authorModelBatch(
         };
       }
     }
-    if (Date.now() > deadline)
-      return failure("limit-exceeded", "模型批次执行超过总时间预算");
     if (errors.length)
       return {
         ...failure("model-batch-invalid", "模型校验失败，整批未写入"),
@@ -303,6 +291,6 @@ export async function authorModelBatch(
       outcome.noop,
     );
   } finally {
-    activeBatches--;
+    // 无批次并发额度可释放；保留 try/finally 结构以便后续阶段化清理。
   }
 }

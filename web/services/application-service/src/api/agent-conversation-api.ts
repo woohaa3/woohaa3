@@ -61,12 +61,25 @@ export type AgentConversationApiDependencies = {
   mcpDiscovery?: () => Promise<import("@woohaa3/contracts").McpBuiltinDiscoveryView>;
   /** 当前公开挂载路径；外部 MCP 指引 URL 在其上派生（change: 2026-10-15-...）。 */
   basePath?: string;
+  /**
+   * 单次 HTTP 请求体的传输分块上界（change: 2026-10-22-remove-agent-execution-limits，任务 4.4）。
+   *
+   * 这是传输/解析参数：一次请求只携带一份 intent（prompt + 引用 identity），不是完整作品
+   * 总量额度。作品内容（脚本、计划、模型、片段）走各自的完整提交路径，不受此值限制。
+   */
   maxRequestBytes?: number;
   logger?: (event: Record<string, unknown>) => void;
 };
 
 export type AgentConversationApiHandler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 
+/**
+ * 错误码 → HTTP 状态。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 3.1：`conversation-busy` 与
+ * `budget-exceeded` 是**历史契约码**，受理与执行不再产生它们；保留映射只为旧客户端与旧
+ * 回执继续可读，不构成可用的拒绝路径。
+ */
 const STATUS_FOR: Record<AgentConversationServiceError["code"], number> = {
   "malformed-request": 400,
   unauthorized: 401,
@@ -255,7 +268,17 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
       if (conversationRead && method === "GET") {
         const conversationId = decodeURIComponent(conversationRead[1]!);
         const cursor = decodeCursorQuery(url.searchParams.get("cursor"));
-        const result = deps.service.readConversation({ owner, conversationId, cursor });
+        // 分页读取（change: 2026-10-22-remove-agent-execution-limits，任务 4.1）：游标只是单次
+        // 传输片段，完整历史可以继续向前读取，不做总量截断。
+        const beforeMessageSequence = readPositiveIntQuery(url.searchParams.get("beforeMessageSequence"));
+        const turnOffset = readNonNegativeIntQuery(url.searchParams.get("turnOffset"));
+        const result = deps.service.readConversation({
+          owner,
+          conversationId,
+          cursor,
+          ...(beforeMessageSequence !== undefined ? { beforeMessageSequence } : {}),
+          ...(turnOffset !== undefined ? { turnOffset } : {})
+        });
         if (!result.ok) return respondError(res, result.error);
         const canvasAllowed = await authorizeCanvas(deps, owner, result.snapshot.conversation.canvasId, "read");
         if (!canvasAllowed.ok) return respondError(res, canvasAllowed.error);
@@ -395,4 +418,18 @@ function firstHeader(value: string | string[] | undefined): string | undefined {
   const raw = Array.isArray(value) ? value[0] : value;
   const trimmed = raw?.trim();
   return trimmed === "" ? undefined : trimmed;
+}
+
+/** 读取正整数查询参数（分页游标）；非法或缺省返回 undefined（按默认页处理）。 */
+function readPositiveIntQuery(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+/** 读取非负整数查询参数（分页偏移）；非法或缺省返回 undefined。 */
+function readNonNegativeIntQuery(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }

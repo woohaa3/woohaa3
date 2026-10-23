@@ -100,7 +100,8 @@ describe("concurrent canvas creation threads", () => {
 function fakeStdio(options: {
   threadId?: string | null;
   account?: Record<string, unknown>;
-  mcpStatus?: "ready" | "failed";
+  mcpStatus?: "ready" | "failed" | "unknown";
+  mcpShape?: "legacy" | "v2";
   mcpTools?: readonly string[];
 } = {}): {
   connection: StdioConnection;
@@ -147,17 +148,26 @@ function fakeStdio(options: {
           return;
         case "mcpServerStatus/list": {
           const tools = options.mcpTools ?? ["get_model_node", "submit_model_script"];
-          respond(request.id, {
-            data: [{
+          const toolMap = options.mcpStatus === "failed" ? {} : Object.fromEntries(tools.map((name) => [name, { name, inputSchema: { type: "object" } }]));
+          const runtimeStatus = options.mcpStatus === "failed" ? "failed" : options.mcpStatus === "unknown" ? "unknown" : "connected";
+          const entry = options.mcpShape === "v2"
+            ? {
+              serverInfo: { name: "woohaa3-model-canvas" },
+              authStatus: "bearerToken",
+              tools: toolMap,
+              resources: [],
+              resourceTemplates: []
+            }
+            : {
               name: "woohaa",
               authStatus: "bearerToken",
-              runtimeStatus: options.mcpStatus === "failed" ? "failed" : "connected",
-              tools: options.mcpStatus === "failed" ? {} : Object.fromEntries(tools.map((name) => [name, { name, inputSchema: { type: "object" } }])),
+              runtimeStatus,
+              tools: toolMap,
               toolsError: options.mcpStatus === "failed" ? "HTTP 404" : null,
               resources: [],
               resourceTemplates: []
-            }]
-          });
+            };
+          respond(request.id, { data: [entry] });
           return;
         }
         case "turn/start":
@@ -293,12 +303,57 @@ describe("Codex App Server 传输（当前协议）", () => {
         woohaa: {
           url: "http://127.0.0.1:1234/mcp",
           http_headers: { Authorization: "Bearer grant-1" },
-          default_tools_approval_mode: "approve"
+          default_tools_approval_mode: "approve",
+          enabled_tools: ["get_model_node", "submit_model_script"]
         }
       },
       "features.shell_tool": false,
+      "features.js_repl": false,
+      "features.apps": false,
+      "features.skills": false,
       web_search: "disabled"
     });
+  });
+
+  it("受控 MCP 已暴露所需工具时即使 runtimeStatus 为 unknown 也发送 turn/start", async () => {
+    const fake = fakeStdio({ mcpStatus: "unknown" });
+    const result = await transport().run({
+      configDir: "/tmp/config",
+      workDir: "/tmp/work",
+      loopbackUrl: null,
+      stdio: fake.connection,
+      model: "gpt-6.1-sol",
+      prompt: "根据这个图生成一下3d模型给我",
+      allowedTools: ["get_model_node", "submit_model_script"],
+      toolToken: "grant-1",
+      mcpEndpoint: { name: "woohaa", url: "http://127.0.0.1:1234/mcp" },
+      resumeNativeId: null,
+      signal: new AbortController().signal,
+      onEvent: () => undefined
+    });
+    expect(result.ok).toBe(true);
+    expect(fake.requests.filter((request) => request.method === "mcpServerStatus/list")).toHaveLength(1);
+    expect(fake.requests.some((request) => request.method === "turn/start")).toBe(true);
+  });
+
+  it("Codex v2 用 serverInfo.name 且无 runtimeStatus 时仍按工具目录放行", async () => {
+    const fake = fakeStdio({ mcpShape: "v2" });
+    const result = await transport().run({
+      configDir: "/tmp/config",
+      workDir: "/tmp/work",
+      loopbackUrl: null,
+      stdio: fake.connection,
+      model: "gpt-6.1-sol",
+      prompt: "根据这个图生成一下3d模型给我",
+      allowedTools: ["get_model_node", "submit_model_script"],
+      toolToken: "grant-1",
+      mcpEndpoint: { name: "woohaa", url: "http://127.0.0.1:1234/mcp" },
+      resumeNativeId: null,
+      signal: new AbortController().signal,
+      onEvent: () => undefined
+    });
+    expect(result.ok).toBe(true);
+    expect(fake.requests.some((request) => request.method === "turn/start")).toBe(true);
   });
 
   it("受控 MCP 未就绪时拒绝发送 turn/start，不把“没有工具”当成成功回合", async () => {
@@ -385,6 +440,8 @@ describe("Codex App Server 传输（当前协议）", () => {
           'url = "http://localhost:5320"',
           "[mcp_servers.other]",
           'url = "http://localhost:1"',
+          '[plugins."browser@openai-bundled"]',
+          "enabled = true",
         ].join("\n"),
       );
       const fake = fakeStdio();
@@ -412,7 +469,11 @@ describe("Codex App Server 传输（当前协议）", () => {
             url: "http://127.0.0.1:1234/mcp",
             http_headers: { Authorization: "Bearer grant-1" },
             default_tools_approval_mode: "approve",
+            enabled_tools: ["get_model_node", "submit_model_script"],
           },
+        },
+        plugins: {
+          "browser@openai-bundled": { enabled: false },
         },
       });
     } finally {

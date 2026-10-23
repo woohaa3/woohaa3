@@ -1,9 +1,11 @@
 /**
  * 适配器共享运行支持
- * （change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 5.2/5.3/6.4/7.3 / design D6）。
+ * （change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 5.2/5.3/6.4/7.3 / design D6；
+ *  change: 2026-10-22-remove-agent-execution-limits，任务 2.2 / design D1）。
  *
  * 两个扩展的适配器共用同一套宿主边界，避免各写一套领域执行器：
- * - **回合预算**：限制循环次数、工具次数、时长与输出大小；超限返回 `budget-exceeded`；
+ * - **回合观察**：只记录工具次数与公开输出量用于诊断；**不**按次数、轮数、时长或输出量拒绝
+ *   或终止回合。停止只来自用户取消、原生引擎真实结束/失败、断连恢复失败与权限/目标失效；
  * - **工具范围校验**：每次工具调用都经宿主 `ApplicationToolDelegationFacade.authorize`
  *   重新校验**同一冻结范围**（并行调用也逐次校验），越权即 `capability-unsupported`；
  * - **取消登记**：按 requestId 登记 `AbortController`，取消先撤销 grant 再中断上游；
@@ -13,85 +15,45 @@
 import type { AgentConnectionCapabilities, AgentConnectionModel, AgentCredentialPurpose } from "@woohaa3/contracts";
 import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
 
-export type TurnBudgetLimits = {
-  /** 模型↔工具循环上限（默认 12）。 */
-  maxIterations: number;
-  /** 工具调用次数上限（默认 24）。 */
-  maxToolCalls: number;
-  /** 回合时长上限毫秒（默认 0，不限制；仅正数启用）。 */
-  maxDurationMs: number;
-  /** 累计助手输出字节上限（默认不限）。 */
-  maxOutputBytes: number;
+/** 回合观察量（仅供诊断与进度展示，不参与任何额度判定）。 */
+export type TurnObservation = {
+  /** 已观察到的工具事件数（含并行/重复事件；不是授权计数）。 */
+  readonly toolCalls: number;
+  /** 已观察到的公开输出字节数。 */
+  readonly outputBytes: number;
+  /** 回合已运行毫秒数（只读诊断；不用于终止）。 */
+  readonly elapsedMs: number;
 };
 
-export const DEFAULT_TURN_BUDGET: TurnBudgetLimits = {
-  maxIterations: 12,
-  maxToolCalls: 24,
-  maxDurationMs: 0,
-  maxOutputBytes: Number.POSITIVE_INFINITY
+export type TurnObserver = {
+  /** 记录一次工具事件（观察；永不影响执行）。 */
+  noteToolCall(): void;
+  /** 记录助手公开输出字节（观察；永不影响执行）。 */
+  addOutput(bytes: number): void;
+  /** 当前观察量快照。 */
+  observe(now?: number): TurnObservation;
 };
 
-export type TurnBudget = {
-  readonly limits: TurnBudgetLimits;
-  /** 进入下一轮循环；超出返回 false。 */
-  nextIteration(): boolean;
-  /** 记录一次工具调用；超出返回 false。 */
-  useToolCall(): boolean;
-  /** 记录助手输出字节；累计超限返回 false。 */
-  addOutput(bytes: number): boolean;
-  /** 是否已超时。 */
-  expired(now?: number): boolean;
-  /** 超限原因（未超限时 undefined）。 */
-  exceededReason(): string | undefined;
-};
-
-export function createTurnBudget(limits: Partial<TurnBudgetLimits> = {}, now: () => number = Date.now): TurnBudget {
-  const resolved: TurnBudgetLimits = { ...DEFAULT_TURN_BUDGET, ...limits };
+/**
+ * 创建回合观察器。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits —— 这里原本是 `createTurnBudget`，会在
+ * 循环次数、工具次数、时长与输出字节超限时返回 `budget-exceeded`。这些应用侧额度已删除：
+ * 合法工作持续到引擎正常结束、用户停止、权限/目标失效或真实故障。
+ */
+export function createTurnObserver(now: () => number = Date.now): TurnObserver {
   const started = now();
-  let iterations = 0;
   let toolCalls = 0;
   let outputBytes = 0;
-  let reason: string | undefined;
-
   return {
-    limits: resolved,
-    nextIteration() {
-      if (reason) return false;
-      if (iterations >= resolved.maxIterations) {
-        reason = "循环次数超出预算";
-        return false;
-      }
-      iterations += 1;
-      return true;
-    },
-    useToolCall() {
-      if (reason) return false;
-      if (toolCalls >= resolved.maxToolCalls) {
-        reason = "工具调用次数超出预算";
-        return false;
-      }
+    noteToolCall() {
       toolCalls += 1;
-      return true;
     },
     addOutput(bytes) {
-      if (reason) return false;
       outputBytes += bytes;
-      if (outputBytes > resolved.maxOutputBytes) {
-        reason = "输出大小超出预算";
-        return false;
-      }
-      return true;
     },
-    expired(nowMs = now()) {
-      if (reason) return true;
-      if (resolved.maxDurationMs > 0 && nowMs - started > resolved.maxDurationMs) {
-        reason = "回合时长超出预算";
-        return true;
-      }
-      return false;
-    },
-    exceededReason() {
-      return reason;
+    observe(nowMs = now()) {
+      return { toolCalls, outputBytes, elapsedMs: Math.max(0, nowMs - started) };
     }
   };
 }

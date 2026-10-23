@@ -70,13 +70,42 @@ pnpm photocraft:dev     # 独立编辑宿主（真实 WASM，不接 Canvas 服�
 
 本仓的 Rust 构建不做隐式联网：`pnpm install` / `prepare` 不会触发 cargo。
 
+## 编辑能力（change: 2026-10-22-complete-photocraft-webui-editing）
+
+共享编辑器按 P0 → P1a → P1b → P2 → P3 → P4 → P5 → P6 → P7 分阶段交付，每阶段都贯通协议、
+内核命令、WASM、React 入口、内容身份与工程核验；逐项链路见
+`packages/protocol/src/image-edit.ts` 中的能力声明与 `tests/fixtures/contract.json`。要点：
+
+| 阶段 | 已交付能力 |
+| --- | --- |
+| P1a | 笔刷预设库（程序性硬圆／软圆 + 采样笔尖）、间距／角度／圆度／翻转、大小／不透明度／流量压感与最小值、平滑（量／拉绳／追赶）、真实内核笔迹预览 |
+| P1b | ABR v1/v2/v6 预检与「仅导入可支持子集」、图片采样笔尖、形状／散布／纹理／颜色／传递动态、绘画混合模式、铅笔／颜色替换／渐变／油漆桶／魔术橡皮／背景橡皮、对称与从路径定义对称轴、独立吸管与平均采样、色板与渐变预设、工具预设与重置 |
+| P2 | 版本化 `LayerTransferBundle`（自包含、摘要校验）、工作区剪贴板、原位／居中粘贴、一步原子身份重映射、图片置入 |
+| P3 | 受限 PSD v1 RGB/U8 导入导出、逐特性兼容矩阵、逐层损失报告、显式扁平副本／栅格化副本 |
+| P4 | 嵌入智能对象转换／复制／替换／栅格化、子文档编辑、幂等原子回写、冲突恢复三条路径、按选中层的替换源/导出源、Convert to Layers 转回图层（含源工程可保存重开） |
+| P5 | 色阶／分通道曲线／自然饱和度／黑白、RGB／亮度直方图、魔棒／快速选择／色彩范围、选区修改、手工边缘细化 |
+| P6 | 仿制／修复／污点修复／模糊／锐化／涂抹／减淡／加深／海绵笔迹、高斯模糊与 USM 锐化草稿 |
+| P7 | 裁剪／图像尺寸／画布尺寸、标尺／参考线／网格／吸附、图层过滤、文字排版、钢笔路径／形状／矢量蒙版 |
+
+**明确不做**（`PHOTOCRAFT_NON_GOALS`）：PSB、CMYK／ICC／HDR、外链智能对象、双重／湿画／鬃毛笔刷、
+智能滤镜栈、液化、AI 主体／发丝抠图、路径文字、竖排文字、原生磁盘保存、独立应用外壳。
+这些从判定层拒绝，且与「尚未交付阶段」的拒绝理由可区分。
+
+资源上限的唯一权威来源仍是 [rust/project-limits.json](rust/project-limits.json)：原有工程上限
+（8192 单边、64 层、64 MiB 工程）不变，新增的 PSD（各 64 MiB）、跨文档载荷（64 MiB / 64 层）、
+ABR（32 MiB / 256 条 / 1024 单边 / 16,777,216 像素 / 128 MiB 解码）预算只约束交换与笔刷库。
+
+验证：`pnpm run check`（构建 + 类型 + 单元）、`pnpm run rust:test`、`pnpm run wasm`（真实产物）、
+`pnpm run verifier`（原生核验工具）。真实 GPU、数位笔手感与 Photoshop 交换必须在对应设备上人工
+验证，测试不能替代；当前记录的未采集项见本 change 的 `verification.md`。
+
 ## OpenSpec
 
 子项目有**自己**的 OpenSpec（`photocraft/openspec`）：编辑器内部语义（`editor-workspace`、
 `project-format`、`project-verification`）在此维护；Woohaa 主仓只保留集成行为（聚焦与输入归属、
 Bevy 呈现、上传/认证/存储、画布权威事务与历史）并引用这些契约。
 
-迁移台账见主仓 change 的 [notes/migration-ledger.md](../openspec/changes/2026-10-21-extract-photocraft-subproject/notes/migration-ledger.md)。
+内部规划、迁移台账与人工验收记录由开发者仓库维护；公开客户端仅保留可独立执行的代码、测试与契约。
 
 ## 上游快照
 

@@ -31,6 +31,8 @@ photocraft-codecs = { path = "../vendor/photocraft/crates/codecs" }
 photocraft-text = { path = "../vendor/photocraft/crates/text" }
 photocraft-engine = { path = "../vendor/photocraft/crates/engine" }
 photocraft-ops = { path = "../vendor/photocraft/crates/ops" }
+photocraft-color = { path = "../vendor/photocraft/crates/color" }
+photocraft-paint = { path = "../vendor/photocraft/crates/paint" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 sha2 = "0.10"

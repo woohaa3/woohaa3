@@ -267,6 +267,66 @@ fn media_focus_keeps_background_cards_and_restores_current_card() {
     assert!(world.get::<Text2d>(label).unwrap().0.starts_with("Remote"));
 }
 
+/// 纯视口跨档只更新文字呈现：不重建静态 2D mesh（change: 2026-10-22-improve-canvas-text-clarity，
+/// design D4「纯视口跨档仍复用主场景 mesh、空间索引与媒体纹理」）。
+#[test]
+fn viewport_only_step_change_updates_text_without_rebuilding_meshes() {
+    use crate::canvas2d::text_presentation;
+    let mut world = world();
+    world.insert_resource(text_presentation::PresentationCache::default());
+    world.insert_resource(crate::app::SurfaceState::with_size(Vec2::new(
+        1200.0, 800.0,
+    )));
+    render(&mut world);
+    let initial = handles(&world);
+    let decorations: Vec<_> = world
+        .resource::<Visuals>()
+        .card_decorations
+        .iter()
+        .filter_map(|block| block.handle())
+        .collect();
+    let label = world.resource::<Visuals>().labels["0"][0];
+    // 纯视口增量：`flags.changed` 保持 false，只有相机需要跟随。
+    {
+        let mut flags = world.resource_mut::<FrameFlags>();
+        flags.changed = false;
+        flags.viewport_only = true;
+        flags.camera_changed = true;
+        flags.mesh_rebuilt = false;
+        flags.card_blocks_rebuilt = 0;
+        flags.edge_blocks_rebuilt = 0;
+        flags.container_blocks_rebuilt = 0;
+        flags.card_decorations_rebuilt = 0;
+    }
+    world.resource_mut::<CurrentScene>().0.viewport.zoom = 8.0;
+    world
+        .run_system_once(super::super::render::sync_scene)
+        .unwrap();
+    world.run_system_once(text_presentation::sync).unwrap();
+    // 静态几何完全未重建。
+    let flags = world.resource::<FrameFlags>();
+    assert!(!flags.mesh_rebuilt, "纯视口不得重建主场景 mesh");
+    assert_eq!(flags.card_blocks_rebuilt, 0);
+    assert_eq!(flags.edge_blocks_rebuilt, 0);
+    assert_eq!(flags.container_blocks_rebuilt, 0);
+    assert_eq!(flags.card_decorations_rebuilt, 0);
+    assert_eq!(handles(&world), initial);
+    assert!(
+        world
+            .resource::<Visuals>()
+            .card_decorations
+            .iter()
+            .filter_map(|block| block.handle())
+            .eq(decorations.iter().copied()),
+        "装饰 mesh 也必须复用"
+    );
+    // 文字呈现已按新档位更新（zoom 8 → 档位 8）。
+    let font = world.get::<TextFont>(label).unwrap().font_size;
+    assert_eq!(font, FontSize::Px(96.0), "标题逻辑字号 12 × 档位 8");
+    let scale = world.get::<Transform>(label).unwrap().scale.x;
+    assert!((96.0 * scale - 12.0).abs() <= 1.0e-3);
+}
+
 #[test]
 fn edge_blocks_retain_unaffected_meshes_and_labels_on_local_changes() {
     let mut world = world();
@@ -449,4 +509,42 @@ fn container_blocks_update_locally_and_sort_transparency_before_high_overlays() 
         assert!(!world.resource::<Assets<Mesh>>().contains(handle));
     }
     assert!(world.resource::<Visuals>().labels.is_empty());
+}
+
+#[test]
+fn film_run_mask_covers_exact_scope_in_every_active_phase_and_clears_at_terminal() {
+    use bevy::mesh::VertexAttributeValues;
+    let mut world = world();
+    world.resource_mut::<CurrentScene>().0.nodes = serde_json::from_value(serde_json::json!([{
+        "id":"film", "type":"model", "x":100,"y":100,"width":200,"height":160,
+        "compositeAsset":{"x":100,"y":100,"width":200,"height":160,"scopeShape":"isometric-diamond"},
+        "aggregateRun":{"active":true,"filmSet":{"operationKey":"operation","phase":"running","source":"agent","labelCode":"generating"}}
+    }])).unwrap();
+    let expected = crate::canvas_query::scope::node_scope(&world.resource::<CurrentScene>().0.nodes[0]).vertices;
+    let mask_vertices = |world: &World| {
+        let id = world.resource::<Visuals>().container_blocks[0].state()[1].unwrap();
+        let mesh = world.resource::<Assets<Mesh>>().get(id).unwrap();
+        let VertexAttributeValues::Float32x3(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else { panic!() };
+        let VertexAttributeValues::Float32x4(colors) = mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() else { panic!() };
+        positions.iter().zip(colors).filter(|(_, color)| (color[3] - 0.45).abs() < 1e-6)
+            .map(|(p, _)| Vec2::new(p[0], -p[1])).collect::<Vec<_>>()
+    };
+    for phase in ["submitting", "queued", "running", "committing", "verifying"] {
+        world.resource_mut::<CurrentScene>().0.nodes[0].aggregate_run.as_mut().unwrap().film_set.as_mut().unwrap().phase = phase.into();
+        render(&mut world);
+        assert_eq!(mask_vertices(&world), expected, "backdrop must stay visible in {phase}");
+        let handles = world.resource::<Visuals>().container_blocks[0].state();
+        render(&mut world);
+        assert_eq!(world.resource::<Visuals>().container_blocks[0].state(), handles);
+    }
+    // Ground geometry can change while the node and base rectangle remain unchanged.
+    world.resource_mut::<CurrentScene>().0.nodes[0].composite_asset.as_mut().unwrap().scope_ground =
+        Some(serde_json::from_value(serde_json::json!({"cx":210,"cy":190,"hx":140,"hz":90})).unwrap());
+    render(&mut world);
+    let moved = crate::canvas_query::scope::node_scope(&world.resource::<CurrentScene>().0.nodes[0]).vertices;
+    assert_ne!(moved, expected);
+    assert_eq!(mask_vertices(&world), moved);
+    world.resource_mut::<CurrentScene>().0.nodes[0].aggregate_run = None;
+    render(&mut world);
+    assert!(mask_vertices(&world).is_empty());
 }

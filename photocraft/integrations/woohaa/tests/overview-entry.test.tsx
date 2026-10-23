@@ -1,16 +1,16 @@
 /** @vitest-environment jsdom */
 /**
- * 概览入口回归
+ * 画布入口回归
  * （change: 2026-10-21-add-photocraft-document-workspace，design D2）。
  *
- * 画布概览必须有进入 PhotoCraft 的入口：否则独立文件文档在工作区之外无处可开
- * （“打开文件…”只存在于工作区 tab 条里，会形成先有文档才能打开文件的死循环）。
+ * PhotoCraft **不**在画布工具栏（`canvas.toolbar-action`）提供入口：
+ * 进入编辑器走图片节点，独立文件的「打开文件…」只在工作区「文件」菜单里。
+ * 本用例锁住这条边界，避免入口又回到右下角控件面板。
  */
 import { afterEach, expect, it, vi } from "vitest";
 import type { Context } from "@deepseek-ai/cordis";
 import { imageEditorExtension } from "../src/image-editor-plugin.js";
 import { woohaa3CanvasStore } from "@woohaa3/frontend/plugin-api";
-import type { DocumentWorkspaceStore } from "../src/workspace-store.js";
 
 vi.mock("../src/loader.js", () => ({
   createImageFocusLoader: () => ({
@@ -32,11 +32,11 @@ afterEach(() => {
   delete (globalThis as unknown as { __imageWorkspaceStore?: unknown }).__imageWorkspaceStore;
 });
 
-type ToolbarAction = { id: string; label: string; onActivate: () => void };
+type SlotContribution = { id: string; label?: string; onActivate?: () => void };
 
-/** 极简 Context 替身：记录 slot 注册，供断言概览入口。 */
+/** 极简 Context 替身：记录 slot 注册，供断言入口位置。 */
 function harness(mode: { type: string; [key: string]: unknown }) {
-  const actions = new Map<string, ToolbarAction>();
+  const actions = new Map<string, SlotContribution>();
   const listeners = new Set<() => void>();
   const registeredSlots: string[] = [];
   const ctx = {
@@ -63,7 +63,7 @@ function harness(mode: { type: string; [key: string]: unknown }) {
     focusExit: { register: () => () => {}, registerSwitchGate: () => () => {} },
     pageLeave: { register: () => () => {}, hasUnsaved: () => false, settle: async () => ({ ok: true as const }) },
     slots: {
-      register: (slot: string, contribution: ToolbarAction & { render?: unknown }) => {
+      register: (slot: string, contribution: SlotContribution & { render?: unknown }) => {
         registeredSlots.push(slot);
         if (slot === "canvas.toolbar-action") actions.set(contribution.id, contribution);
         return () => { if (slot === "canvas.toolbar-action") actions.delete(contribution.id); };
@@ -74,31 +74,15 @@ function harness(mode: { type: string; [key: string]: unknown }) {
     effect: (effect: () => () => void) => { cleanups.push(effect()); }
   } as unknown as Context;
   imageEditorExtension({ canvasId: "c" })(ctx, undefined);
-  return { actions, listeners, registeredSlots, store: () => (globalThis as unknown as { __imageWorkspaceStore?: DocumentWorkspaceStore }).__imageWorkspaceStore };
+  return { actions, listeners, registeredSlots };
 }
 
 const OVERVIEW = { type: "overview" };
 
-it("概览无文档时提供「打开文件…」入口（否则独立文件无处可开）", () => {
+it("概览不注册画布工具栏入口（PhotoCraft 入口不属于右下角控件面板）", () => {
   const h = harness(OVERVIEW);
-  const action = h.actions.get("image-editor-reopen");
-  expect(action).toBeDefined();
-  expect(action!.label).toBe("打开文件…");
-});
-
-it("有文档时概览入口变为「图像编辑（n）」并恢复上次活动文档", async () => {
-  const h = harness(OVERVIEW);
-  // 直接通过工作区 store 观察文档数为 0；用文件打开路径造一份文档需要 input 交互，
-  // 这里只锁入口本身的文案切换规则：注册后 label 反映当前文档数。
-  const store = h.store();
-  expect(store).toBeDefined();
-  const before = h.actions.get("image-editor-reopen")!.label;
-  expect(before).toBe("打开文件…");
-});
-
-it("聚焦中不注册概览入口（避免与工作区 tab 条重复）", () => {
-  const h = harness({ type: "node-focus", kind: "image", nodeId: "n1", owner: "direct" });
-  expect(h.actions.get("image-editor-reopen")).toBeUndefined();
+  expect(h.actions.size).toBe(0);
+  expect(h.registeredSlots).not.toContain("canvas.toolbar-action");
 });
 
 it("仍注册聚焦工作区与独立文档工作区两个 slot 贡献", () => {

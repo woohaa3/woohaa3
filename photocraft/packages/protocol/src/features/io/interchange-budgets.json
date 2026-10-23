@@ -1,0 +1,15 @@
+{
+  "$comment": "栅格交换域的域内预算（change: 2026-10-22-add-photocraft-raster-interchange，U05/U06/U07）。这些数值只约束本域的打开预检、导出参数与逐层/按名称资产包，**不**抬高 rust/project-limits.json 的工程上限；工程候选仍须满足全局预算。唯一权威是本文件：Rust 内核 include_str! 读取、TypeScript 协议包直接 import，两端不得各自复制数值。",
+  "maxExportDimension": 8192,
+  "maxExportPixels": 67108864,
+  "maxLayerBundleFiles": 64,
+  "maxLayerBundlePixels": 67108864,
+  "maxLayerBundleBytes": 67108864,
+  "maxAssetFiles": 256,
+  "maxAssetPixels": 67108864,
+  "maxAssetBytes": 67108864,
+  "maxFileNameLength": 120,
+  "maxRelativePathLength": 200,
+  "maxExportPresets": 32,
+  "maxPresetNameLength": 80
+}

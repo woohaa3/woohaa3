@@ -29,8 +29,10 @@ export async function createMcpTurnGateway(options: {
   const completed = new Map<string, { identity: string; outcome: Promise<Json> }>();
   const receipts: Array<{ canvasId: string; nodeId?: string; commandId: string; revision?: number }> = [];
   const upstreamCall = async (method: string, params?: unknown) => {
+    // 在途工具工作不设应用固定时长；已受理的写入必须排空并登记权威回执，因此这里不把本回合
+    // 的取消信号直接绑到单次请求上（取消后由 drain/close 收敛回执，见下面 tools/call 分支）。
     const response = await fetch(options.upstream, {
-      method: "POST", redirect: "error", signal: AbortSignal.timeout(30_000),
+      method: "POST", redirect: "error",
       headers: { authorization: `Bearer ${options.grant}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: ++sequence, method, ...(params ? { params } : {}) })
     });
@@ -46,8 +48,8 @@ export async function createMcpTurnGateway(options: {
   const server = createServer(async (request, response) => {
     const send = (value: unknown, status = 200) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(value)); };
     try {
-      if (closed || options.input.signal.aborted || !(await options.valid())) return send({ error: "expired" }, 410);
-    } catch { return send({ error: "expired" }, 410); }
+      if (closed || options.input.signal.aborted || !(await options.valid())) return send({ error: "revoked" }, 410);
+    } catch { return send({ error: "revoked" }, 410); }
     const bearer = Buffer.from(request.headers.authorization?.replace(/^Bearer /i, "") ?? "");
     const expected = Buffer.from(token);
     if (request.socket.remoteAddress !== "127.0.0.1" || bearer.length !== expected.length || !timingSafeEqual(bearer, expected)) return send({ error: "unauthorized" }, 401);
@@ -99,10 +101,11 @@ export async function createMcpTurnGateway(options: {
         const call = { tool: name, callId };
         if (!calls.has(callId)) { calls.add(callId); options.input.emit({ type: "tool-started", ...call }); }
         const identity = JSON.stringify({ name, args });
-        if (closed || options.input.signal.aborted || !(await options.valid())) throw new Error("grant-expired");
+        if (closed || options.input.signal.aborted || !(await options.valid())) throw new Error("grant-revoked");
         const previous = completed.get(callId);
         if (previous && previous.identity !== identity) throw new Error("call-id-conflict");
-        if (!previous && completed.size >= 24) throw new Error("tool-budget-exceeded");
+        // change: 2026-10-22-remove-agent-execution-limits —— 这里原本按 completed.size 达 24
+        // 拒绝新 callId。调用次数不是权限：继续用稳定 callId 做幂等去重与回执收敛即可。
         const operation = previous?.outcome ?? upstreamCall("tools/call", { name, arguments: args }).then((outcome) => {
           if (outcome.error) throw new Error("tool-upstream-rejected");
           const evidence = outcome.result?.structuredContent;

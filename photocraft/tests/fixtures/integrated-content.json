@@ -1,0 +1,80 @@
+{
+  "input": {
+    "canvasWidth": 32,
+    "canvasHeight": 24,
+    "patternContentHash": "1111111111111111",
+    "channelsContentHash": "2222222222222222",
+    "mode": {
+      "mode": "grayscale"
+    },
+    "textStyles": "3333333333333333",
+    "paths": [
+      {
+        "name": "Path",
+        "contentHash": "4444444444444444"
+      }
+    ],
+    "workPath": {
+      "contentHash": "5555555555555555"
+    },
+    "clippingPath": {
+      "name": "Path",
+      "flatness": 2
+    },
+    "layers": [
+      {
+        "id": "background",
+        "name": "混合功能",
+        "kind": "pixel",
+        "visible": true,
+        "opacity": 1,
+        "blend": "normal",
+        "transform": {
+          "translateX": 0,
+          "translateY": 0,
+          "scale": 1,
+          "rotationDegrees": 0,
+          "flipHorizontal": false,
+          "flipVertical": false
+        },
+        "mask": null,
+        "pixel": {
+          "sourceAssetId": null,
+          "contentHash": "6666666666666666"
+        },
+        "text": null,
+        "adjustment": null
+      }
+    ],
+    "animation": {
+      "timeline": {
+        "fps": 12,
+        "duration": 3
+      },
+      "layers": []
+    },
+    "variables": {
+      "defs": [
+        {
+          "name": "show",
+          "layer": "background",
+          "type": "visibility"
+        }
+      ],
+      "dataSets": [
+        {
+          "name": "展示",
+          "values": [
+            {
+              "variable": "show",
+              "kind": "visibility",
+              "value": false
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "canonical": "canvas:32x24\npatterns:1111111111111111\nchannels:2222222222222222\nmode:grayscale\ntextStyles:3333333333333333\npaths:[4:Path:4444444444444444]\nwork:5555555555555555\nclip:4:Path:2\nlayer|background|混合功能|pixel|1|1|normal|0,0,1,0,0,0|none|pixel:-:6666666666666666\nanimation:12,3:2:[]\nvariables:[35:def|4:show|10:background|visibility][39:set|2:展示|[25:value|4:show|visibility|0]]",
+  "hash": "b06514e077dd0358"
+}

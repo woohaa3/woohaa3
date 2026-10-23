@@ -315,28 +315,18 @@ describe("freezeFilmSetRecording", () => {
     expect("ok" in wrongType && wrongType.ok).toBe(false);
   });
 
-  it("enforces per-file and total resource budgets", () => {
+  it("accepts large assets without application size quotas (task 7.5)", () => {
+    // change: 2026-10-22-remove-agent-execution-limits：原单文件 256 MiB 与合计 512 MiB
+    // 门禁已删除；大素材按真实资源调度，不再被应用预算拒绝。
     const fixture = withVideo(makeAnimation());
-    const perFile = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
+    const large = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
       request: requestFor(fixture).request,
       nodeData: fixture.nodeData,
-      assets: [mediaAsset({ size: 10_000 })],
+      assets: [mediaAsset({ size: 3 * 1024 * 1024 * 1024 })],
       canvasRevision: 1,
-      sourceIncarnation: "i",
-      maxResourceBytes: 1_000
+      sourceIncarnation: "i"
     });
-    expect("ok" in perFile && perFile.ok).toBe(false);
-    if ("ok" in perFile && !perFile.ok) expect(perFile.code).toBe("recording-budget-exceeded");
-
-    const total = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
-      request: requestFor(fixture).request,
-      nodeData: fixture.nodeData,
-      assets: [mediaAsset({ size: 900 })],
-      canvasRevision: 1,
-      sourceIncarnation: "i",
-      maxTotalResourceBytes: 500
-    });
-    expect("ok" in total && total.ok).toBe(false);
+    expect("ok" in large && large.ok).toBe(true);
   });
 
   it("validates resource readability asynchronously", async () => {

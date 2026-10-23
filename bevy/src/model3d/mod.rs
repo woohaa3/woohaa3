@@ -27,6 +27,8 @@ pub(crate) mod animation;
 pub(crate) mod media_geometry;
 pub(crate) mod pick;
 pub(crate) mod filmset_camera;
+#[cfg(feature = "canvas-core")]
+pub(crate) mod run_effect;
 pub(crate) mod film_set_pick;
 #[cfg(feature = "canvas-core")]
 pub(crate) mod capture;
@@ -117,6 +119,7 @@ pub(crate) use layout::{film_set_item_world_aabbs_counted, model_unit};
 pub(crate) use film_set_pick::FilmSetItemPreparation;
 
 use bevy::camera::visibility::RenderLayers;
+pub(crate) const RUN_EFFECT_LAYER: usize = 3;
 
 /// 模型实体渲染层：主画布层（0）+ 截图层，使截图像机只看到模型，不含网格/gizmo/2D chrome
 /// （change: add-model-editor-gizmo-shot-capture，任务 3.3）。

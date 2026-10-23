@@ -15,9 +15,13 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod limits;
+#[path = "features/layers/blend_modes.rs"]
 pub mod blend_modes;
+#[path = "features/layers/style_support.rs"]
 pub mod style_support;
+#[path = "features/layers/pattern_support.rs"]
 pub mod pattern_support;
+#[path = "features/smart/smart_source.rs"]
 pub mod smart_source;
 
 pub use limits::{
@@ -25,7 +29,6 @@ pub use limits::{
     MAX_DECOMPRESSED_RESOURCE_BYTES, MAX_DOCUMENT_DEPTH, MAX_ENTRIES, MAX_ENTRY_DECOMPRESSED_BYTES,
     MAX_LAYERS, MAX_PROJECT_BYTES, SUPPORTED_FORMAT_VERSIONS, UPSTREAM_COMMIT,
 };
-
 use photocraft_doc::{Adjustment, LayerContent};
 use photocraft_format::{LoadOptions, zip::ZipReader};
 use serde::Serialize;
@@ -143,6 +146,8 @@ fn verify_container_with(bytes:&[u8],pattern_library:bool,source_scope:Option<sm
     if !pattern_support::supported_manifest(&manifest.document.patterns) {
         return Err(err(VerifyErrorCode::UnsupportedObject,"工程图案资源超限或格式不受支持"));
     }
+    // 矢量载荷的**解码前**累计预算（工作/已存/裁切/形状/蒙版路径）：在分配像素与路径结构之前拒绝。
+    features::vectors::inspect_manifest_budget(&manifest)?;
     if pattern_library && (!manifest.document.layers.is_empty() || manifest.document.size!=photocraft_doc::Size::new(1,1)) {
         return Err(err(VerifyErrorCode::InvalidManifest,"本机图案库须为 1×1、无图层的资源容器"));
     }
@@ -181,7 +186,29 @@ fn verify_container_with(bytes:&[u8],pattern_library:bool,source_scope:Option<sm
     }
     let mut inspection = LayerInspection::default();
     inspect_layers(&document.layers, source_scope.map_or(1,|s|s.depth), &mut inspection,source_scope.is_some())?;
+    // 文档级动画规则（时间轴时长/帧率/播放头/工作区 + 整棵树的帧预算）：时间轴挂在
+    // `document.timeline` 上，逐层 `inspect` 看不到，因此由本域提供一个文档级入口
+    // （change: 2026-10-22-add-photocraft-animation-workflows）。没有时间轴与视频层的旧工程
+    // 不产生任何贡献；只收紧，不放宽。
+    features::animation::inspect_document(&document)?;
+    // 通道是文档级资源，不在图层树里；在图层遍历之后、预算汇总之前核验一次。
+    features::channels::inspect_document(&document)?;
+    // 文档级矢量检查（change: 2026-10-22-add-photocraft-vector-canvas-tools，U13）：
+    // 工作路径/已存路径/裁切路径引用必须存在且有界。图层级形状与蒙版由 INSPECTORS 覆盖。
+    features::vectors::inspect_document(&document)?;
     if let Some(scope)=source_scope {scope.inspect_document(&document)?;}
+    // 文档级持久内容（变量/数据集）不归属任何图层，单独一趟。
+    features::inspect_document(&document)?;
+    // U57：填充层的图案引用是文档级信息（逐层 `inspect` 只拿得到 `&Layer`），单独跑一遍。
+    if !features::layers::fill_support::supported_document(&document) {
+        return Err(err(
+            VerifyErrorCode::UnsupportedObject,
+            "工程包含无效或超限的填充层（图案引用必须随工程保存）",
+        ));
+    }
+    // 文档级视图/分析数据（参考线、原点、测量、计数、注释）：不挂在图层上，按域贡献逐个检查。
+    // 嵌套的智能对象来源文档同样要过这一关，避免只校验外层。
+    features::views::inspect_document(&document)?;
     if inspection.count > limits::MAX_LAYERS {
         return Err(err(
             VerifyErrorCode::TooManyLayers,
@@ -197,6 +224,14 @@ fn verify_container_with(bytes:&[u8],pattern_library:bool,source_scope:Option<sm
     if !style_support::supported_document(&document) {
         return Err(err(VerifyErrorCode::UnsupportedObject, "工程包含未开放或超限的图层样式"));
     }
+    // 文档级模式数据（change: 2026-10-22-add-photocraft-image-mode-workflows，任务 4.4）。
+    // 只校验颜色表/油墨/颜色模型；**不校验位深与像素格式**——编辑器能存的工程必须能通过核验
+    // （回归见 `features::modes::never_rejects_a_document_the_editor_can_create_and_save`）。
+    features::modes::validate_document(&document)?;
+    // 文字域文档级核验（change: 2026-10-22-add-photocraft-typography-workflows，任务 3.2）：
+    // 样式表 id 唯一性、名称/数量预算，以及每个 run 引用的样式是否真的存在。
+    // 逐层 `inspect` 拿不到文档级 `text_styles`，所以必须在这里做。
+    features::r#type::inspect_document(&document)?;
     let mut object_kinds: Vec<String> = inspection.kinds.iter().cloned().collect();
     object_kinds.sort();
     Ok((ProjectSummary {
@@ -220,6 +255,8 @@ struct LayerInspection {
     count: usize,
     depth: usize,
     kinds: std::collections::BTreeSet<String>,
+    /// 已计入的图层数（与 `count` 同步，用于智能对象源树的累计预算提示）。
+    manual_budget: usize,
 }
 
 fn inspect_layers(
@@ -241,63 +278,23 @@ fn inspect_layers(
             return Err(err(VerifyErrorCode::UnsupportedObject, "工程包含未开放的混合模式"));
         }
         out.count += 1;
+        out.manual_budget = out.count;
         if out.count > limits::MAX_LAYERS {
             return Err(err(
                 VerifyErrorCode::TooManyLayers,
                 format!("工程层数超过上限：{}", limits::MAX_LAYERS),
             ));
         }
-        if layer.mask.is_some() || layer.vector_mask.is_some() {
-            // 蒙版本身是首期能力；但矢量蒙版不在首期范围。
-            if layer.vector_mask.is_some() {
-                return Err(err(VerifyErrorCode::UnsupportedObject, "工程包含矢量路径"));
-            }
-        }
-        match &layer.content {
-            LayerContent::Raster(_) => {
-                out.kinds.insert("raster".into());
-            }
-            LayerContent::Text(_) => {
-                out.kinds.insert("text".into());
-            }
-            LayerContent::Adjustment(adjustment) => {
-                out.kinds.insert("adjustment".into());
-                inspect_adjustment(adjustment)?;
-            }
-            LayerContent::Group(group) => {
-                if group.artboard.is_some() {
-                    return Err(err(VerifyErrorCode::UnsupportedObject, "工程包含画板"));
-                }
-                out.kinds.insert("group".into());
-                if !group.children.is_empty() {
-                    inspect_layers(&group.children, depth + 1, out,embedded_smart)?;
-                }
-            }
-            LayerContent::Fill(_) => {
-                return Err(err(VerifyErrorCode::UnsupportedObject, "工程包含填充图层"));
-            }
-            LayerContent::Shape(_) => {
-                return Err(err(VerifyErrorCode::UnsupportedObject, "工程包含矢量形状层"));
-            }
-            LayerContent::Smart(smart) => {
-                let _ = smart;
-                if !embedded_smart {return Err(err(VerifyErrorCode::UnsupportedObject, "工程包含智能对象"));}
-                out.kinds.insert("smart".into());
-            }
-        }
+        features::selections::inspect_mask(layer)?;
+        features::inspect_content(layer, depth, out, embedded_smart)?;
     }
     Ok(())
 }
 
-fn inspect_adjustment(adjustment: &Adjustment) -> Result<(), VerifyError> {
-    match adjustment {
-        Adjustment::BrightnessContrast { .. } | Adjustment::HueSaturation { .. } | Adjustment::Curves { .. } => Ok(()),
-        _ => Err(err(
-            VerifyErrorCode::UnsupportedObject,
-            format!("工程包含首期未开放的调整类型：{}", adjustment.label()),
-        )),
-    }
-}
+
+
+/// 路径几何必须有界：节点与手柄都是有限数且在工程坐标范围内。
+
 
 fn assert_safe_entry_name(name: &str) -> Result<(), VerifyError> {
     if name.is_empty() || name.len() > 1024 {
@@ -344,3 +341,12 @@ fn map_load_error(error: photocraft_format::FormatError) -> VerifyError {
 fn err(code: VerifyErrorCode, message: impl Into<String>) -> VerifyError {
     VerifyError { code, message: message.into() }
 }
+
+use adjustments_inspect::inspect_adjustment;
+use vectors_inspect::path_bounded;
+#[path = "features/adjustments/inspect.rs"]
+mod adjustments_inspect;
+#[path = "features/vectors/inspect.rs"]
+mod vectors_inspect;
+
+mod features;

@@ -25,6 +25,9 @@ export type DocumentFocusView = {
   adoptSourceSize(width: number, height: number): void;
 };
 
+/** 文档以哪种方式打开内核；独立文件按自身类型声明，节点文档由工程定义推断。 */
+export type DocumentOpenMode = "project" | "image";
+
 export type DocumentRect = { x: number; y: number; width: number; height: number };
 
 /**
@@ -49,6 +52,13 @@ export interface EditorDocumentView {
   previewStatus(): string | null;
 
   projectDocument(): ImageProjectDocument | null;
+  /**
+   * 该文档应以哪种方式打开内核。
+   *
+   * 独立文件按自己的类型声明（`.pcraft` 是分层工程包，不是位图）；节点文档省略本方法，
+   * 由 [`projectDocument`] 是否携带工程定义推断（保持既有语义）。
+   */
+  openMode?(): DocumentOpenMode;
   baseAsset(): unknown;
 
   setViewport(viewport: ImageFocusViewport): void;

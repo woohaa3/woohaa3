@@ -4,7 +4,6 @@
  */
 import { isBoundedId, isJsonObject } from "../../validation.js";
 import type { CanvasCommand } from "../commands.js";
-import { MODEL_SCRIPT_BATCH_LIMITS } from "../model-script-batch.js";
 import type { GetModelNodesInput, ModelScriptBatchRequest } from "../model-script-batch.js";
 import {
   fail,
@@ -175,9 +174,6 @@ export function decodeMcpGetModelNodesRequest(body: unknown): McpDecodeResult<Ge
   if (!Array.isArray(body.nodeIds) || body.nodeIds.length === 0) {
     return fail("malformed-request", "nodeIds 必须是非空数组");
   }
-  if (body.nodeIds.length > MODEL_SCRIPT_BATCH_LIMITS.maxNodes) {
-    return fail("malformed-request", `nodeIds 数量超过上限 ${MODEL_SCRIPT_BATCH_LIMITS.maxNodes}`);
-  }
   if (body.nodeIds.some((nodeId) => !isBoundedId(nodeId))) {
     return fail("malformed-request", "nodeIds 必须是非空字符串");
   }
@@ -210,17 +206,11 @@ export function decodeMcpModelScriptBatchRequest(body: unknown): McpDecodeResult
   if (!Array.isArray(body.items) || body.items.length === 0) {
     return fail("malformed-request", "items 必须是非空数组");
   }
-  if (body.items.length > MODEL_SCRIPT_BATCH_LIMITS.maxNodes) {
-    return fail("malformed-request", `items 数量超过上限 ${MODEL_SCRIPT_BATCH_LIMITS.maxNodes}`);
-  }
   for (const item of body.items) {
     if (!isJsonObject(item)) return fail("malformed-request", "items 的每一项必须是对象");
     if (!isBoundedId(item.nodeId)) return fail("malformed-request", "items[].nodeId 必须是非空字符串");
     if (typeof item.source !== "string" || item.source.length === 0) {
       return fail("malformed-request", "items[].source 必须是非空字符串");
-    }
-    if (item.source.length > MODEL_SCRIPT_BATCH_LIMITS.maxSourceChars) {
-      return fail("malformed-request", `items[].source 超过上限 ${MODEL_SCRIPT_BATCH_LIMITS.maxSourceChars}`);
     }
     if (item.expectedModelContentHash !== undefined && !isBoundedId(item.expectedModelContentHash)) {
       return fail("malformed-request", "items[].expectedModelContentHash 必须是非空字符串");

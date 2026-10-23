@@ -4,6 +4,7 @@ import {
   TextInput,
 } from "../../../shared/ui/FormControls.js";
 import { AssistantComposer } from "./composer.js";
+import { AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "./model-selector.js";
 import { useAssistantExecutionActions } from "./status.js";
 import { useAssistantDeliveryInput } from "./delivery-input.js";
 import { ModelSelector } from "../../plugins/task-execution/execution-panel/model-selector.js";
@@ -124,6 +125,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
   const locked =
     busy || Boolean(delivery) || Boolean(selection?.blockedReason) || Boolean(inProgress);
   const noConnection = !service || !connectionId || !selectedConnection;
+  const emptyDirectory = !connections.length && !selection?.loading && !selection?.error;
   useEffect(() => { if (locked || noConnection) setOpenSelector(null); }, [locked, noConnection]);
   const ambiguousObjectAction = Boolean(props.itemId) && !props.clipId;
 
@@ -281,10 +283,10 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
             <AssistantComposer className="mc-panel__textarea" placeholder={delivery?.execution && !deliveryInput ? "正在读取本次创作描述…" : target.placeholder} value={delivery ? deliveryInput?.prompt ?? "" : prompt}
               onChange={setPrompt} disabled={locked || !props.writable} onSubmit={() => void submit()} />
           </div>}
-        assistant={<ModelSelector label="选择助手" placeholder={delivery ? "本次助手" : selection?.loading ? "正在读取助手…" : "选择助手"} model={!delivery && selection?.loading ? "" : connectionId ?? ""}
+        assistant={<AssistantConnectionSelector empty={!delivery && emptyDirectory} loading={!delivery && selection?.loading} placeholder={delivery ? "本次助手" : "选择助手"} model={!delivery && selection?.loading ? "" : connectionId ?? ""}
             options={connections.map(entry => ({ value: entry.connectionId, label: entry.label }))}
             open={openSelector === "assistant"} onOpenChange={open => setOpenSelector(open ? "assistant" : null)}
-            onManage={props.onAuthorize} disabled={locked || !connections.length || selection?.loading}
+            onManage={props.onAuthorize} disabled={locked || selection?.loading}
             onChange={value => selection?.onSelectConnection(value)} />}
         model={delivery || !noConnection ? (
             delivery || modelOptions.length > 0 ? <ModelSelector label="模型" model={model} placeholder={delivery ? "本次模型" : undefined} keepOpenOnModelSelect
@@ -330,7 +332,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
           delivery.cancel ? <Button tone="neutral" disabled={deliveryActions.busy || !props.writable} onClick={() => void deliveryActions.perform(delivery.cancel!)}>停止</Button>
           : delivery.retry ? <Button tone="primary" disabled={deliveryActions.busy || !props.writable} onClick={() => void deliveryActions.perform(delivery.retry!)}>重试</Button>
           : <Button tone="primary" disabled>{delivery.stage}</Button>
-        ) : noConnection && props.onAuthorize ? <Button tone="primary" disabled={busy || selection?.loading} onClick={props.onAuthorize}>连接助手</Button> : <Button
+        ) : <Button
           tone="primary"
           icon={<SendIcon size={14} />}
           loading={busy}
@@ -354,8 +356,8 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         {deliveryActions.error ? <p className="authoring-generate__reason">{deliveryActions.error}</p> : null}
       </> : null}
       {!delivery && modelError ? <p className="authoring-generate__reason">{modelError}</p> : null}
-      {!delivery && noConnection && !selection?.loading ? (
-        <p className="authoring-generate__hint" data-testid="authoring-generate-empty">连接一个助手即可开始，创作描述会保留在这里。</p>
+      {!delivery && emptyDirectory ? (
+        <p className="authoring-generate__hint" data-testid="authoring-generate-empty">{ASSISTANT_SETUP_HINT}</p>
       ) : null}
       {!delivery && reason ? (
         <p

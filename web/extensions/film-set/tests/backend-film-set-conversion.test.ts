@@ -122,7 +122,6 @@ function serviceFor(
     resolveModelCapabilities?: boolean;
     submitBudgetMs?: number;
     generationTimeoutMs?: number;
-    maxRepairAttempts?: number;
   } = {}
 ): FilmSetConversionService {
   return new FilmSetConversionService({
@@ -140,7 +139,6 @@ function serviceFor(
       : {}),
     ...(options.submitBudgetMs !== undefined ? { submitBudgetMs: options.submitBudgetMs } : {}),
     ...(options.generationTimeoutMs !== undefined ? { generationTimeoutMs: options.generationTimeoutMs } : {}),
-    ...(options.maxRepairAttempts !== undefined ? { maxRepairAttempts: options.maxRepairAttempts } : {}),
     now: () => NOW
   });
 }
@@ -522,11 +520,15 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
     expect(seen[1]?.candidate).toEqual(invalid);
   });
 
-  it("回喂修复耗尽后仍按具体原因有界失败（1 + 默认 2 次修复）", async () => {
+  it("持续相同诊断不被隐藏次数上限终止；真实上游失败才结束", async () => {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 7.2：原「1 + 默认 2 次修复」的
+    // 有界修复已删除。持续无效候选不会因修复次数被终止；这里用上游真实失败（非 retryable）
+    // 结束循环，验证终止原因是真实故障而不是计数。
     const room = await readyRoom("c-repair-x", [{ id: "img-src", type: "image", data: { outputAssetId: "asset-1" } as CanvasNodeData }], [readyImageAsset()]);
     let calls = 0;
     const generator: FilmSetConversionGenerator = async () => {
       calls += 1;
+      if (calls > 4) return { ok: false, code: "generation-failed", message: "上游真实失败", retryable: false };
       return {
         ok: true,
         candidate: {
@@ -544,8 +546,9 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
     }));
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
-    expect(outcome.code).toBe("candidate-invalid");
-    expect(calls).toBe(3);
+    // 超过原来的 3 次调用仍继续修复，直到上游真实失败。
+    expect(calls).toBeGreaterThan(3);
+    expect(outcome.code).toBe("generation-failed");
     const target = filmSetNode(room, "film-repair-x");
     const status = readFilmSetConversionNodeStatus(target!.data);
     expect(status?.status).toBe("failed");

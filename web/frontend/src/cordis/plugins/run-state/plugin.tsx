@@ -92,7 +92,9 @@ export function runStateExtension(options: RunStateExtensionOptions = {}): Plugi
       const syncAgentTurns = () => {
         const service = agentConversations();
         if (!service) return;
-        store.syncAgentOperations(projectAgentTurnOperations(service.getSnapshot(), canvasId));
+        const snapshot = service.getSnapshot();
+        store.syncFilmSetTurns((snapshot.turnsByRequest ? Object.values(snapshot.turnsByRequest) : snapshot.active ? [snapshot.active] : []).map(entry => entry.turn), snapshot.pendingSubmissions);
+        store.syncAgentOperations(projectAgentTurnOperations(snapshot, canvasId));
       };
       syncAgentTurns();
       scheduleAgentPoll();

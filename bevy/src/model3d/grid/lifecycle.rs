@@ -30,7 +30,7 @@ pub(crate) fn setup_camera(commands: &mut Commands) -> Entity {
         .spawn((
             Camera3d::default(),
             ModelCanvasCamera,
-            RenderLayers::layer(0),
+            RenderLayers::from_layers(&[0, super::super::RUN_EFFECT_LAYER]),
             Projection::Orthographic(canvas_camera_projection()),
             crate::isometric_grid::canvas_camera_transform(Vec2::ZERO),
             Tonemapping::None,

@@ -113,12 +113,30 @@ export async function materializeStableMediaResult(
   const canvasId = await readCanvasIdForMaterialization(options, record, association);
   const scope = canvasId ? { canvasId } : {};
   try {
-    const metadata = await adoptStableObject(options, media.storageKey, media, scope);
-    const poster = media.poster
-      ? await adoptStableObject(options, media.poster.storageKey, media.poster, scope)
-      : undefined;
+    // 两条采纳路径，按「Provider 给没给 locator」选：
+    // - 给了 locator：结果在别的后端（远端托管存储），必须由存储层按 locator 取字节，
+    //   媒体层再内容寻址导入；这是唯一能跨后端读的路径。
+    // - 没给：字节本来就在本机存储里，按稳定键核验即可（旧行为，保持不变）。
+    const adopt = async (
+      key: string,
+      locator: string | undefined,
+      expected: { contentType: string; size: number; checksum?: string }
+    ) =>
+      locator
+        ? options.mediaClient!.importFromLocator({
+            locator,
+            ...scope,
+            expected: {
+              contentType: expected.contentType,
+              size: expected.size,
+              ...(expected.checksum ? { checksum: expected.checksum } : {})
+            }
+          })
+        : adoptStableObject(options, key, expected, scope);
+    const metadata = await adopt(media.storageKey, media.locator, media);
+    const poster = media.poster ? await adopt(media.poster.storageKey ?? "", media.poster.locator, media.poster) : undefined;
     const durationSeconds = media.durationSeconds ?? readDurationFromRecord(record);
-    options.logger?.({ event: "media-output-adopted", taskKey: record.id });
+    options.logger?.({ event: "media-output-adopted", taskKey: record.id, via: media.locator ? "locator" : "storage-key" });
     projectExecutionRecord(
       options.history,
       record,

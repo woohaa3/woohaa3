@@ -101,20 +101,22 @@ fn rejects_an_empty_layer_list() {
 
 #[test]
 fn rejects_unsupported_object_kinds_not_just_hides_them() {
-    // 普通组已支持，画板仍不开放。
-    let mut group = Layer::group("画板", vec![raster("子层")]);
-    if let LayerContent::Group(group) = &mut group.content {
+    // 画板已开放（U56）：结构与子层内容都要核验，不能被整体拒绝。
+    let mut artboard = Layer::group("画板", vec![raster("子层")]);
+    if let LayerContent::Group(group) = &mut artboard.content {
         group.artboard = Some(photocraft_doc::Artboard::new(Default::default()));
     }
-    assert_eq!(
-        verify(&bytes(&doc(vec![raster("背景"), group]))).unwrap_err().code,
-        VerifyErrorCode::UnsupportedObject
-    );
+    let report = verify(&bytes(&doc(vec![raster("背景"), artboard]))).expect("画板工程应通过核验");
+    assert!(report.object_kinds.iter().any(|kind| kind == "artboard"), "{:?}", report.object_kinds);
+    // 子层被计入核验，而不是因为画板标记被跳过。
+    assert!(report.layer_count >= 2, "{}", report.layer_count);
 
-    // 填充层：首期能力清单外。
+    // 填充层：U57 起是可重编内容，合法填充必须通过；无效/超限填充仍拒绝。
     let fill = Layer::new("填充", LayerContent::Fill(Fill::Solid(Color::WHITE)));
+    assert!(verify(&bytes(&doc(vec![raster("背景"), fill]))).is_ok(), "合法纯色填充层应通过核验");
+    let bad = Layer::new("填充", LayerContent::Fill(Fill::Solid(Color::rgba(0.0, 0.0, 0.0, 2.0))));
     assert_eq!(
-        verify(&bytes(&doc(vec![raster("背景"), fill]))).unwrap_err().code,
+        verify(&bytes(&doc(vec![raster("背景"), bad]))).unwrap_err().code,
         VerifyErrorCode::UnsupportedObject
     );
 
@@ -155,8 +157,15 @@ fn accepts_nested_groups_and_counts_the_entire_tree() {
 
 #[test]
 fn groups_cannot_hide_unsupported_children_or_bypass_tree_limits() {
-    let fill = Layer::new("填充", LayerContent::Fill(Fill::Solid(Color::WHITE)));
-    assert_eq!(verify(&bytes(&doc(vec![Layer::group("组", vec![fill])]))).unwrap_err().code, VerifyErrorCode::UnsupportedObject);
+    // 组合交付后画板已开放；嵌套组必须保留画板身份，仍拒绝非法填充。
+    let mut artboard = Layer::group("画板", vec![raster("子层")]);
+    if let LayerContent::Group(group) = &mut artboard.content {
+        group.artboard = Some(photocraft_doc::Artboard::new(Default::default()));
+    }
+    let summary = verify(&bytes(&doc(vec![Layer::group("组", vec![artboard])]))).unwrap();
+    assert_eq!(summary.object_kinds, vec!["artboard", "group", "raster"]);
+    let bad_fill = Layer::new("填充", LayerContent::Fill(Fill::Solid(Color::rgba(0.0, 0.0, 0.0, 2.0))));
+    assert_eq!(verify(&bytes(&doc(vec![Layer::group("组", vec![bad_fill])]))).unwrap_err().code, VerifyErrorCode::UnsupportedObject);
     let children = (0..limits::MAX_LAYERS).map(|_| raster("层")).collect();
     assert_eq!(verify(&bytes(&doc(vec![Layer::group("组", children)]))).unwrap_err().code, VerifyErrorCode::TooManyLayers);
     let mut nested = Layer::group("空组", vec![]);
@@ -166,13 +175,55 @@ fn groups_cannot_hide_unsupported_children_or_bypass_tree_limits() {
 }
 
 #[test]
-fn rejects_unsupported_adjustments() {
-    // 色阶是真实的上游调整层，但不在首期三类（亮度/对比度、色相/饱和度、RGB 曲线）之内。
-    let levels = Layer::new("色阶", LayerContent::Adjustment(Adjustment::identity_levels()));
-    assert_eq!(
-        verify(&bytes(&doc(vec![raster("背景"), levels]))).unwrap_err().code,
-        VerifyErrorCode::UnsupportedObject
-    );
+fn accepts_delivered_adjustments_and_rejects_undelivered_ones() {
+    // P0 三类 + P5 四类（change: 2026-10-22）+ U43 九类（本 change）：合法且可编辑。
+    for (name, adjustment) in [
+        ("亮度/对比度", Adjustment::BrightnessContrast { brightness: 0.0, contrast: 0.0, legacy: false }),
+        ("色相/饱和度", Adjustment::default_hue_saturation()),
+        ("曲线", Adjustment::identity_curves()),
+        ("色阶", Adjustment::identity_levels()),
+        ("自然饱和度", Adjustment::Vibrance { vibrance: 10.0, saturation: 0.0 }),
+        ("黑白", Adjustment::BlackWhite { weights: [40.0, 60.0, 40.0, 60.0, 20.0, 80.0], tint: None }),
+        ("曝光", Adjustment::Exposure { exposure: 0.5, offset: 0.0, gamma: 1.0 }),
+        (
+            "色彩平衡",
+            Adjustment::ColorBalance { shadows: [0.0; 3], midtones: [0.0; 3], highlights: [0.0; 3], preserve_luminosity: true },
+        ),
+        ("照片滤镜", Adjustment::PhotoFilter { color: [1.0, 0.5, 0.0], density: 0.25, preserve_luminosity: true }),
+        (
+            "通道混合器",
+            Adjustment::ChannelMixer { matrix: [[0.4, 0.4, 0.2, 0.0], [0.3, 0.6, 0.1, 0.0], [0.2, 0.2, 0.6, 0.0]], monochrome: false },
+        ),
+        ("反相", Adjustment::Invert),
+        ("色调分离", Adjustment::Posterize { levels: 6 }),
+        ("阈值", Adjustment::Threshold { level: 0.5 }),
+        (
+            "渐变映射",
+            Adjustment::GradientMap { stops: vec![(0.0, [0.0, 0.0, 0.0]), (1.0, [1.0, 1.0, 1.0])], reverse: false, dither: true },
+        ),
+        ("可选颜色", Adjustment::SelectiveColor { relative: true, adjustments: [[0.0; 4]; 9] }),
+    ] {
+        let layer = Layer::new(name, LayerContent::Adjustment(adjustment));
+        let summary = verify(&bytes(&doc(vec![raster("背景"), layer])))
+            .unwrap_or_else(|failure| panic!("{name} 应通过核验：{}", failure.message));
+        assert!(summary.object_kinds.contains(&"adjustment".into()));
+    }
+    // 范围外/无法求值的调整（LUT、PSD 未知块）仍必须拒绝：`adjust.lut` 是永久非目标，
+    // 放行会让「核验通过、运行时拒绝」同时成立。
+    for (name, adjustment) in [
+        (
+            "LUT",
+            Adjustment::ColorLookup { name: "Look.cube".into(), lut: None, size: 2, tetrahedral: false, dither: false },
+        ),
+        ("未知 PSD 块", Adjustment::Unsupported { psd_key: "grdm".into(), raw: vec![1, 2, 3] }),
+    ] {
+        let layer = Layer::new(name, LayerContent::Adjustment(adjustment));
+        assert_eq!(
+            verify(&bytes(&doc(vec![raster("背景"), layer]))).unwrap_err().code,
+            VerifyErrorCode::UnsupportedObject,
+            "{name} 必须被拒绝"
+        );
+    }
 }
 
 #[test]
@@ -257,4 +308,175 @@ fn pattern_resources_are_checked_before_tile_decode() {
         // 无效资源即使声明了缺失的 tile，也须先以资源边界拒绝。
         assert_eq!(verify(&archive.finish().unwrap()).unwrap_err().code,VerifyErrorCode::UnsupportedObject,"case {case}");
     }
+}
+
+/// 通道是文档级资源：核验入口必须在真实工程字节上核验通道，而不是只在域内函数里通过。
+#[test]
+fn channels_are_verified_from_real_project_bytes() {
+    use photocraft_doc::{AlphaChannel, Color, ColorIndicates, Surface};
+
+    let mut document = doc(vec![raster("背景")]);
+    assert!(verify(&bytes(&document)).is_ok(), "无通道的旧工程必须继续通过");
+
+    let format = photocraft_doc::PixelFormat::new(ColorMode::Grayscale, SampleType::U8, false);
+    document.channels.push(AlphaChannel {
+        indicates: ColorIndicates::SelectedAreas,
+        opacity: 0.4,
+        ..AlphaChannel::new("Alpha 1", Surface::new(format))
+    });
+    document.channels.push(AlphaChannel {
+        spot: Some((Color::rgb(0.0, 1.0, 0.0), 0.6)),
+        ..AlphaChannel::new("专色绿", Surface::new(format))
+    });
+    let saved = bytes(&document);
+    assert!(verify(&saved).is_ok(), "合法 Alpha/专色通道必须通过核验");
+
+    // 通道名非法（空白）：整份工程必须在核验阶段被拒绝，而不是等到打开编辑器。
+    let mut broken = document.clone();
+    broken.channels[0].name = "  ".into();
+    assert_eq!(
+        verify(&bytes(&broken)).unwrap_err().code,
+        VerifyErrorCode::UnsupportedObject,
+        "空白通道名必须在核验阶段拒绝"
+    );
+
+    // 不透明度越界同样拒绝：这类字节在核验里必须报错，不能静默夹取。
+    let mut broken = document.clone();
+    broken.channels[1].opacity = 2.0;
+    assert_eq!(
+        verify(&bytes(&broken)).unwrap_err().code,
+        VerifyErrorCode::UnsupportedObject,
+    );
+
+    // 通道平面格式与文档深度不符：核验拒绝（否则重开后通道命令组无法工作）。
+    let mut broken = document;
+    broken.channels[0].surface = Surface::new(photocraft_doc::PixelFormat::new(ColorMode::Rgb, SampleType::U8, true));
+    assert_eq!(
+        verify(&bytes(&broken)).unwrap_err().code,
+        VerifyErrorCode::UnsupportedObject,
+    );
+}
+
+#[test]
+fn variables_are_checked_at_document_level_not_per_layer() {
+    use photocraft_doc::variables::{DataSet, DataValue, Value as VarValue, VarKind, VariableDef};
+    let text = Layer::new(
+        "标题",
+        LayerContent::Text(TextLayer { text: "旧标题".into(), font_family: "Inter".into(), size_pt: 12.0, color: Color::WHITE, ..TextLayer::default() }),
+    );
+    let background = raster("背景");
+    let text_id = text.id;
+    let raster_id = background.id;
+    let mut document = doc(vec![background, text]);
+    // 合法：可见性可绑任意层，文字替换绑文字层，像素替换绑像素层。
+    document.variables.defs = vec![
+        VariableDef { name: "show".into(), layer: raster_id, kind: VarKind::Visibility },
+        VariableDef { name: "title".into(), layer: text_id, kind: VarKind::TextReplacement },
+        VariableDef { name: "photo".into(), layer: raster_id, kind: VarKind::PixelReplacement { method: Default::default(), align: Default::default(), clip: false } },
+    ];
+    document.variables.data_sets = vec![DataSet {
+        name: "一".into(),
+        values: vec![
+            DataValue { variable: "show".into(), value: VarValue::Visibility(false) },
+            DataValue { variable: "title".into(), value: VarValue::Text("新标题".into()) },
+            DataValue { variable: "photo".into(), value: VarValue::Pixels("asset-key".into()) },
+        ],
+    }];
+    assert!(verify(&bytes(&document)).is_ok(), "合法变量/数据集应通过");
+
+    // 文字替换绑到像素层：上游只查图层存在，应用时静默跳过；核验器必须拦住。
+    let mut wrong = document.clone();
+    wrong.variables.defs[1].layer = raster_id;
+    assert_eq!(verify(&bytes(&wrong)).unwrap_err().code, VerifyErrorCode::UnsupportedObject);
+
+    // 指向不存在的图层。
+    let mut dangling = document.clone();
+    dangling.variables.defs[0].layer = photocraft_doc::LayerId(u64::MAX - 1);
+    assert_eq!(verify(&bytes(&dangling)).unwrap_err().code, VerifyErrorCode::InvalidManifest);
+
+    // 数据集引用未定义变量。
+    let mut orphan = document.clone();
+    orphan.variables.data_sets[0].values.push(DataValue { variable: "未定义".into(), value: VarValue::Visibility(true) });
+    assert_eq!(verify(&bytes(&orphan)).unwrap_err().code, VerifyErrorCode::InvalidManifest);
+
+    // 变量重名。
+    let mut duplicate = document.clone();
+    duplicate.variables.defs.push(duplicate.variables.defs[0].clone());
+    assert_eq!(verify(&bytes(&duplicate)).unwrap_err().code, VerifyErrorCode::InvalidManifest);
+    // 没有变量的工程照常通过（旧工程兼容）。
+    assert!(verify(&bytes(&doc(vec![raster("背景")]))).is_ok());
+}
+
+
+/// 矢量载荷的**解码前**预算必须在公开入口生效
+/// （change: 2026-10-22-add-photocraft-vector-canvas-tools，任务 3.2）。
+///
+/// 这里不走域内单测，而是造真实工程字节再交给 `verify`：已存路径超量、单路径锚点超量、
+/// 全文档锚点累计超量都必须被拒；同时验证「旧工程没有路径字段」照常通过。
+#[test]
+fn vector_payload_budgets_are_enforced_before_decoding() {
+    use photocraft_doc::vector::{NamedPath, Path, Subpath};
+
+    fn square(offset: f64) -> Path {
+        Path::new(vec![Subpath::polygon(&[
+            (offset, offset),
+            (offset + 4.0, offset),
+            (offset + 4.0, offset + 4.0),
+        ])])
+    }
+
+    // 没有矢量路径的工程照常通过（旧工程兼容）。
+    let plain = doc(vec![raster("背景")]);
+    assert!(verify(&bytes(&plain)).is_ok());
+
+    // 已存路径数量超限。
+    let mut many = doc(vec![raster("背景")]);
+    for index in 0..=limits::MAX_VECTOR_SAVED_PATHS {
+        many.paths.push(NamedPath { name: format!("P{index}"), path: square(index as f64), psd_raw: None });
+    }
+    assert_eq!(
+        verify(&bytes(&many)).unwrap_err().code,
+        VerifyErrorCode::UnsupportedObject,
+        "已存路径数量必须有界"
+    );
+
+    // 全文档锚点累计超限：每条路径都在子路径/锚点单项预算内，但总账必须拒绝。
+    let mut deep = doc(vec![raster("背景")]);
+    let mut subpaths: Vec<Subpath> = Vec::new();
+    let knots: Vec<(f64, f64)> = (0..32).map(|knot| (knot as f64, (knot % 7) as f64)).collect();
+    while (subpaths.len() as u64) * (knots.len() as u64) <= limits::MAX_VECTOR_PATH_POINTS {
+        subpaths.push(Subpath::polygon(&knots));
+    }
+    assert!(subpaths.len() <= limits::MAX_VECTOR_SUBPATHS + 1, "先保证单路径子路径数仍在预算内");
+    deep.paths.push(NamedPath { name: "深".into(), path: Path::new(subpaths), psd_raw: None });
+    assert_eq!(
+        verify(&bytes(&deep)).unwrap_err().code,
+        VerifyErrorCode::UnsupportedObject,
+        "锚点累计必须按全文档求和"
+    );
+}
+
+#[test]
+fn refuses_view_data_that_exceeds_the_domain_budget() {
+    // 端到端：域内评审过的视图数据上限经 `features::views::inspect_document` 在文档级生效，
+    // 恶意/超预算的 `.pcraft` 在加载阶段被拒，而不是进了编辑器才炸。
+    let mut document = doc(vec![raster("paint")]);
+    document.guides.vertical = (0..4097).map(|index| f64::from(index)).collect();
+    let error = verify(&bytes(&document)).expect_err("参考线超过每轴上限必须拒绝");
+    assert_eq!(error.code, VerifyErrorCode::UnsupportedObject, "超预算视图数据用稳定 code 拒绝");
+
+    // 非有限坐标在写入端就被拒（序列化不产生 NaN 参考线），核验端另有一道同样的判定，
+    // 因此恶意构造的字节流也进不来。
+    let mut document = doc(vec![raster("paint")]);
+    document.guides.horizontal = vec![f64::NAN];
+    assert!(
+        photocraft_format::save_to_bytes(&document, &SaveOptions::default()).is_err(),
+        "NaN 参考线不能写入工程"
+    );
+
+    // 边界内的正常数据照常通过，证明拦截不是一刀切。
+    let mut document = doc(vec![raster("paint")]);
+    document.guides.vertical = vec![10.0, 20.0];
+    document.ruler_origin = [5.0, 6.0];
+    verify(&bytes(&document)).expect("有界视图数据必须通过");
 }

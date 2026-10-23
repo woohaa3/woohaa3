@@ -15,7 +15,9 @@ mod setup;
 mod startup_timing;
 mod state;
 
-use bevy::{asset::AssetMetaCheck, prelude::*, window::Window};
+use bevy::{
+    asset::AssetMetaCheck, log::DEFAULT_FILTER, prelude::*, window::Window,
+};
 
 use crate::{canvas2d, model3d, theme::ThemeResource};
 
@@ -60,6 +62,17 @@ pub(crate) fn start() {
             .set(AssetPlugin {
                 file_path: "assets".into(),
                 meta_check: AssetMetaCheck::Never,
+                ..default()
+            })
+            .set(bevy::log::LogPlugin {
+                // 浏览器控制台只保留真正需要人看的信息（change: 2026-10-22-enhance-film-set-running-effects）：
+                // - bevy_ecs::world::command_queue 的 WARN 在 WASM 主循环里每帧重复刷屏，会淹没真实的
+                //   shader/渲染错误，对诊断无价值。压到 error。
+                // - mesh_view_bindings 等模块缺失、shader 编译失败这类问题只在 WARN/ERROR 出现，
+                //   因此不能整体降级 `level`；只按 target 静音已知噪音。
+                filter: format!(
+                    "{DEFAULT_FILTER}bevy_ecs::world::command_queue=error,"
+                ),
                 ..default()
             }),
     );
@@ -120,9 +133,11 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<model3d::filmset_camera::FilmSetCameraVisual>()
         .init_resource::<ThemeResource>()
         .init_resource::<canvas2d::GenerationClock>()
+        .init_resource::<canvas2d::text_presentation::PresentationCache>()
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::model_preview::ModelPreviewPlugin)
+        .add_plugins(model3d::run_effect::RunEffectPlugin)
         .add_plugins(crate::shot_node_preview::ShotNodePreviewPlugin)
         .add_plugins(crate::isometric_grid::IsometricGridPlugin)
         .add_plugins(crate::orbit_camera::OrbitCameraPlugin)
@@ -157,7 +172,7 @@ fn configure_canvas(app: &mut App) {
                     scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
                     // Native 片场后台准备：非阻塞 poll + 全局预算装配，排在消费者之前
                     // （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
-                    scene3d::advance_preparation,
+                    (scene3d::advance_preparation, model3d::run_effect::sync).chain(),
                     crate::model_preview::sync,
                     // 卡片预览：消费同一帧的采样镜头/播放投影，并在模型落位后并入卡片渲染层
                     // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
@@ -184,6 +199,22 @@ fn configure_canvas(app: &mut App) {
                 canvas2d::sync_focus_backdrop,
                 canvas2d::sync_group_motion,
             )
+                .after(canvas2d::sync_scene),
+        )
+        // 画布文字栅格呈现（change: 2026-10-22-improve-canvas-text-clarity，design D4）：
+        // 必须排在**全部**标签生产者与 deferred 命令应用之后，Bevy 的文字布局在 PostUpdate
+        // 执行，因此这里处于同帧「标签已就绪、字体尚未栅格化」的唯一窗口。显式应用 deferred，
+        // 保证新建实体（`commands.spawn`）在本帧就带上正确档位，而不是下一个可呈现帧。
+        .add_systems(
+            Update,
+            (
+                bevy::ecs::schedule::ApplyDeferred,
+                canvas2d::text_presentation::sync,
+            )
+                .chain()
+                .after(canvas2d::sync_node_action_bars)
+                .after(canvas2d::sync_attach_probe)
+                .after(canvas2d::sync_generation)
                 .after(canvas2d::sync_scene),
         )
         // 动画求值在门禁结算之后（同帧 Playback.before(Evaluate)），且不在 scene chain 内：

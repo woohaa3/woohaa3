@@ -51,20 +51,22 @@ describe("Agent Canvas 计划解码（任务 1.3）", () => {
     expect(decoded).toMatchObject({ ok: false, operationIndex: 0 });
   });
 
-  it("enforces prompt 与 operation 上限", () => {
-    const overPrompt = decodeAgentPlanOperations([
-      { op: "set_prompt", target: { nodeId: "n" }, prompt: "x".repeat(AGENT_CANVAS_LIMITS.promptMaxChars + 1) }
+  it("不再按 prompt 长度或计划操作数拒绝（任务 5.1）", () => {
+    // change: 2026-10-22-remove-agent-execution-limits：原 8000 字 prompt 与 256 操作总量门禁已删除。
+    const longPrompt = decodeAgentPlanOperations([
+      { op: "set_prompt", target: { nodeId: "n" }, prompt: "x".repeat(20_000) }
     ]);
-    expect(overPrompt).toMatchObject({ ok: false, code: "limit-exceeded" });
+    expect(longPrompt).toMatchObject({ ok: true });
 
-    const tooMany = decodeAgentPlanOperations(
-      Array.from({ length: AGENT_CANVAS_LIMITS.maxPlanOperations + 1 }, (_value, index) => ({
+    const many = decodeAgentPlanOperations(
+      Array.from({ length: 400 }, (_value, index) => ({
         op: "set_prompt",
         target: { nodeId: `n-${index}` },
         prompt: "x"
       }))
     );
-    expect(tooMany).toMatchObject({ ok: false, code: "limit-exceeded", field: "operations" });
+    expect(many).toMatchObject({ ok: true });
+    if (many.ok) expect(many.value).toHaveLength(400);
   });
 
   it("前置条件类型受校验", () => {
@@ -78,9 +80,11 @@ describe("Agent Canvas 计划解码（任务 1.3）", () => {
 });
 
 describe("Agent Canvas 查询解码（任务 1.3）", () => {
-  it("graph 查询校验深度上限与未知字段", () => {
-    expect(decodeAgentGraphQuery({ aroundNodeId: "n", depth: AGENT_CANVAS_LIMITS.maxNeighborhoodDepth }).ok).toBe(true);
-    expect(decodeAgentGraphQuery({ aroundNodeId: "n", depth: AGENT_CANVAS_LIMITS.maxNeighborhoodDepth + 1 }).ok).toBe(false);
+  it("graph 查询深度不再有应用上限，但仍拒绝非法值与未知字段", () => {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 4.2：深度是传输/邻域参数，不是额度。
+    expect(decodeAgentGraphQuery({ aroundNodeId: "n", depth: AGENT_CANVAS_LIMITS.defaultNeighborhoodDepth }).ok).toBe(true);
+    expect(decodeAgentGraphQuery({ aroundNodeId: "n", depth: 12 }).ok).toBe(true);
+    expect(decodeAgentGraphQuery({ aroundNodeId: "n", depth: -1 }).ok).toBe(false);
     expect(decodeAgentGraphQuery({ nodeIds: ["a"], extra: 1 }).ok).toBe(false);
   });
 

@@ -66,6 +66,12 @@ export type BevyRenderSurface = {
   contentRight?: number;
   /** Shared focus workspace rectangle in canvas CSS pixels. */
   contentRect?: { x: number; y: number; width: number; height: number };
+  /**
+   * 表面相对窗口客户区左上角的偏移（CSS 像素）。
+   * 桌面顶栏把画布往下推时，原生交换链仍覆盖整个窗口，相机视口用这个原点对齐 DOM。
+   */
+  originX?: number;
+  originY?: number;
 };
 
 /**

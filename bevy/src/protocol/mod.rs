@@ -52,7 +52,7 @@ pub(crate) use position::{
 #[allow(unused_imports)]
 pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
-pub(crate) use scene::{AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetPresentation, CompositeAssetScopeShape, Edge, GraphNode, GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane, Scene, ScopeGroundDto, Selection, ShotCoverCamera, ShotPreviewLink, ShotPreviewPresentation, Viewport};
+pub(crate) use scene::{FilmSetRunFeedback, AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetPresentation, CompositeAssetScopeShape, Edge, GraphNode, GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane, Scene, ScopeGroundDto, Selection, ShotCoverCamera, ShotPreviewLink, ShotPreviewPresentation, Viewport};
 #[allow(unused_imports)]
 pub(crate) use scene_instant::{
     AggregateConnect, AnimationPlayback, CursorPoint, Draft, DragAttach, DragAttachEdge,
@@ -97,3 +97,5 @@ mod tests_instant;
 mod tests_object_motion;
 #[cfg(test)]
 mod tests_shot_preview;
+#[cfg(test)]
+mod tests_run_effect;

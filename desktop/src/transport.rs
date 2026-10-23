@@ -138,6 +138,11 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
         return Err("Control payload exceeds budget".into());
     }
     let req: Request = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    static OPERATION: std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1);
+    let trace=matches!(req.method.as_str(),"set_scene"|"prepare_and_register_model_resource");
+    let operation=OPERATION.fetch_add(u64::from(trace),std::sync::atomic::Ordering::Relaxed);
+    let started=std::time::Instant::now();
+    if trace {crate::diagnostics::event("native-bridge","operation-start",json!({"method":req.method,"operation":operation}));}
     let result = match req.method.as_str() {
         "client_metrics" => {
             crate::metrics::client_with_work(
@@ -246,6 +251,7 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
         }
         _ => return Err(format!("Unsupported native method: {}", req.method)),
     };
+    if trace {crate::diagnostics::event("native-bridge","operation-end",json!({"method":req.method,"operation":operation,"durationMs":started.elapsed().as_millis() as u64}));}
     Ok(result)
 }
 
@@ -327,6 +333,23 @@ pub fn install(
                 );
                 return;
             }
+            // Diagnostics must remain usable when the renderer/main thread is blocked.
+            if request.uri().path() == "/diagnostics" {
+                let result = if request.method() == tauri::http::Method::POST {
+                    crate::diagnostics::ingest(request.body())
+                } else {
+                    Err("Diagnostics require POST".into())
+                };
+                respond(
+                    serde_json::to_vec(&match result {
+                        Ok(()) => json!({"ok":true}),
+                        Err(error) => json!({"ok":false,"error":error}),
+                    })
+                    .unwrap(),
+                    "application/json",
+                );
+                return;
+            }
             if request.body().len() > MAX_TEXTURE_BYTES {
                 respond(
                     br#"{"ok":false,"error":"Native request exceeds budget"}"#.to_vec(),
@@ -379,7 +402,10 @@ pub fn install(
                 };
                 let envelope = match result {
                     Ok(value) => json!({"ok":true,"value":value}),
-                    Err(error) => json!({"ok":false,"error":error}),
+                    Err(error) => {
+                        crate::diagnostics::event("native-bridge","request-failed",json!({"error":error}));
+                        json!({"ok":false,"error":error})
+                    },
                 };
                 crate::metrics::sample("rpc.service_ms", service.elapsed());
                 respond(

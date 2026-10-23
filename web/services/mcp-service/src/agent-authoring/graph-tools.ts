@@ -14,7 +14,7 @@ import {
   agentProtocolVersion,
   type AgentCanvasCapabilities
 } from "@woohaa3/contracts";
-import { budgetGate, errorResult, rateLimitGate, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
+import { errorResult, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
 import { CANVAS_ID_SCHEMA } from "./tool-schemas.js";
 
 export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringToolDeps): void {
@@ -33,8 +33,6 @@ export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringT
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
     async ({ canvasId }) => {
-      const limited = rateLimitGate(deps, "read", canvasId);
-      if (limited) return limited;
       // 与脚本 API 使用同一已授权领域能力；不能用部署层的静态 true 代替实际配置。
       let scriptAvailability: { available: boolean; reason?: string } = {
         available: false, reason: "MCP 未接入 Canvas 脚本能力面"
@@ -58,14 +56,12 @@ export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringT
       description: "按当前已认证 principal 稳定分页列出可访问画布（id/title/revision/updatedAt/nodeCount）。",
       inputSchema: z.strictObject({
         cursor: z.string().min(1).optional(),
-        limit: z.number().int().positive().max(AGENT_CANVAS_LIMITS.maxGraphNodes).optional()
+        limit: z.number().int().positive().optional()
       }),
       outputSchema: z.looseObject({ canvases: z.array(z.looseObject({ canvasId: z.string() })) }),
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
     async ({ cursor, limit }) => {
-      const limited = rateLimitGate(deps, "read");
-      if (limited) return limited;
       const outcome = await deps.client.listCanvases({
         ...(cursor !== undefined ? { cursor } : {}),
         ...(limit !== undefined ? { limit } : {})
@@ -85,9 +81,9 @@ export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringT
         ...CANVAS_ID_SCHEMA,
         nodeIds: z.array(z.string().min(1)).optional(),
         aroundNodeId: z.string().min(1).optional(),
-        depth: z.number().int().min(0).max(AGENT_CANVAS_LIMITS.maxNeighborhoodDepth).optional(),
+        depth: z.number().int().min(0).optional(),
         includePrompt: z.boolean().optional(),
-        limit: z.number().int().positive().max(AGENT_CANVAS_LIMITS.maxGraphNodes).optional(),
+        limit: z.number().int().positive().optional(),
         cursor: z.string().min(1).optional()
       }),
       outputSchema: z.looseObject({
@@ -100,8 +96,6 @@ export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringT
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
     async (input) => {
-      const limited = rateLimitGate(deps, "read", input.canvasId);
-      if (limited) return limited;
       const outcome = await deps.client.getGraph(input);
       if (!outcome.ok) {
         return errorResult(
@@ -111,8 +105,6 @@ export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringT
           })
         );
       }
-      const overBudget = budgetGate(outcome.graph);
-      if (overBudget) return overBudget;
       return structured(outcome.graph, `画布 ${outcome.graph.canvasId} revision ${outcome.graph.revision}，${outcome.graph.nodes.length} 节点`);
     }
   );
@@ -137,8 +129,6 @@ export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringT
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
     async (input) => {
-      const limited = rateLimitGate(deps, "read", input.canvasId);
-      if (limited) return limited;
       const outcome = await deps.client.getChanges(input);
       if (!outcome.ok) {
         return errorResult(
@@ -148,8 +138,6 @@ export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringT
           })
         );
       }
-      const overBudget = budgetGate(outcome.delta);
-      if (overBudget) return overBudget;
       return structured(outcome.delta, `画布 ${outcome.delta.canvasId} 增量到 revision ${outcome.delta.currentRevision}`);
     }
   );

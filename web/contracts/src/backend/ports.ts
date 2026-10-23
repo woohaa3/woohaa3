@@ -8,6 +8,7 @@
  * 这些类型刻意与既有 contracts（Task/Media 协议 DTO）对齐，使网络协议与进程内调用共享同一
  * 数据形状；网络协议本身在任务 2.3 被移除。
  */
+import type { MediaLocator } from "../media/storage.js";
 import type {
   TaskExecutionDetail
 } from "../task/history.js";
@@ -50,6 +51,19 @@ export type BackendMediaPort = {
   sign(storageKey: string, expiresSeconds?: number, scope?: MediaStorageScope): Promise<string>;
   importFromUrl(input: { url: string; contentType?: string; maxBytes?: number; canvasId?: string }): Promise<MediaMetadata>;
   importBytes(input: { bytesBase64: string; contentType: string; maxBytes?: number; canvasId?: string }): Promise<MediaMetadata>;
+  /**
+   * 按 locator 导入：字节可能在任何后端（含服务端），由存储层内部取数并落到目标位置。
+   *
+   * 幂等（内容寻址去重）；失败必须显式失败，**不得**回落成签名地址下载——那会把一个
+   * 根因报成两个不相干的错误。
+   */
+  importFromLocator(input: {
+    locator: MediaLocator;
+    canvasId?: string;
+    contentType?: string;
+    maxBytes?: number;
+    expected?: { contentType?: string; size?: number; checksum?: string };
+  }): Promise<MediaMetadata>;
 };
 
 /**

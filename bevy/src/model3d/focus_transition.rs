@@ -129,6 +129,8 @@ mod tests {
                 pixel_ratio: 2.0,
                 content_right: 0.0,
                 content_rect: None,
+                origin_x: 0.0,
+                origin_y: 0.0,
             }),
             ..default()
         }

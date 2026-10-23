@@ -51,7 +51,8 @@ fn commands_are_dispatched_through_the_single_engine_entry_point() {
         .iter()
         .find(|c| c.get("id").and_then(|v| v.as_str()) == Some("select.subject"))
         .expect("select.subject in registry");
-    assert_eq!(subject.get("allowed").and_then(|v| v.as_bool()), Some(false));
+    // U21 已交付传统主体分割：命令表里 allowed 为真（不是 AI 模型能力）。
+    assert_eq!(subject.get("allowed").and_then(|v| v.as_bool()), Some(true));
 
     editor.execute("select.all", serde_json::Value::Null).expect("select all");
     let selected = editor.state();
@@ -66,8 +67,6 @@ fn commands_outside_the_first_phase_list_are_refused_at_the_dispatch_layer() {
     let mut editor = Editor::new();
     editor.open_image("photo.png", None, &sample_png(16, 16)).expect("open image");
 
-    let error = editor.execute("select.subject", serde_json::json!({})).expect_err("AI selection is closed");
-    assert_eq!(error.code(), "capability-disabled");
     let error = editor.execute("edit.preferences.general", serde_json::Value::Null).expect_err("preferences are closed");
     assert_eq!(error.code(), "capability-disabled");
 
@@ -311,4 +310,104 @@ fn selection_outline_bounds_large_masks_without_losing_rectangle_edges() {
     assert_eq!(editor.state()["document"]["selectionOutline"], serde_json::json!([
         [3,5,2052,5], [3,518,2052,518], [3,5,3,518], [2052,5,2052,518]
     ]));
+}
+
+/// U43/U44 的发布证据：15 类调整层都必须能创建、保存重开（内容身份一致）、PSD 往返保类，
+/// 8 条自动/匹配命令都必须能在直接调整路径上真实改变像素。
+///
+/// 只走原生内核，不依赖 WASM/GPU；这是「已发布 = 真的能用」的最小闭环。
+#[test]
+fn every_published_adjustment_survives_save_reopen_and_psd_round_trip() {
+    let params = [
+        ("brightnessContrast", serde_json::json!({"brightness": 20, "contrast": 10})),
+        ("exposure", serde_json::json!({"exposure": 1.5, "offset": 0.05, "gamma": 1.2})),
+        ("hueSaturation", serde_json::json!({"hue": 30, "saturation": 20})),
+        ("curves", serde_json::json!({"points": [[0, 0], [128, 200], [255, 255]]})),
+        ("levels", serde_json::json!({"inBlack": 10, "gamma": 1.4, "inWhite": 240, "outBlack": 5, "outWhite": 250})),
+        ("colorBalance", serde_json::json!({"midtones": [0, 40, 0], "preserveLuminosity": false})),
+        ("blackWhite", serde_json::json!({"reds": 60, "yellows": 80})),
+        ("photoFilter", serde_json::json!({"filter": "cooling80", "density": 40})),
+        ("channelMixer", serde_json::json!({"red": [0, 100, 0, 0]})),
+        ("invert", serde_json::json!({})),
+        ("posterize", serde_json::json!({"levels": 3})),
+        ("threshold", serde_json::json!({"level": 180})),
+        ("gradientMap", serde_json::json!({"stops": [[0, "#ff0000"], [1, "#0000ff"]]})),
+        ("selectiveColor", serde_json::json!({"method": "absolute", "reds": [50, 0, 0, 0]})),
+        ("vibrance", serde_json::json!({"vibrance": 40})),
+    ];
+    for (kind, parameters) in params {
+        let mut editor = Editor::new();
+        editor.open_image("photo.png", Some("asset-1"), &sample_png(16, 16)).expect("open image");
+        let before = editor.content_hash().expect("hash");
+        editor
+            .execute(&format!("layer.newAdjustmentLayer.{kind}"), parameters)
+            .unwrap_or_else(|failure| panic!("{kind}: {failure:?}"));
+        let after = editor.content_hash().expect("hash");
+        assert_ne!(after, before, "{kind} 必须改变内容身份");
+
+        // 保存重开：参数与内容身份都必须一致（新增持久参数不能在半路丢）。
+        let project = editor.save_project().expect("save project");
+        let mut reopened = Editor::new();
+        reopened.open_project(&project, Some("asset-1")).expect("open project");
+        assert_eq!(reopened.content_hash().expect("hash"), after, "{kind} 重开后身份必须一致");
+        let state = reopened.state();
+        assert!(
+            state.pointer("/document/layers").and_then(|layers| layers.as_array()).is_some_and(|layers| {
+                layers.iter().any(|layer| layer.pointer("/adjustment/kind").and_then(|kind| kind.as_str()) == Some(kind))
+            }),
+            "{kind} 重开后必须还是同一类调整层"
+        );
+
+        // PSD 往返：调整层必须仍可编辑（不能降级成像素或另一种调整）。
+        let (psd, report) = editor.export_psd(serde_json::json!({})).expect("export psd");
+        assert!(
+            report["lossy"].as_array().is_none_or(|lossy| !lossy.iter().any(|entry| {
+                entry.as_str().is_some_and(|entry| entry.contains("的调整类型"))
+            })),
+            "{kind} 在 PSD 导出里被报成不可编辑：{report}"
+        );
+        let mut imported = Editor::new();
+        imported.import_psd_project(&psd, false).expect("import psd");
+        let imported_state = imported.state();
+        assert!(
+            imported_state
+                .pointer("/document/layers")
+                .and_then(|layers| layers.as_array())
+                .is_some_and(|layers| layers.iter().any(|layer| {
+                    layer.pointer("/adjustment/kind").and_then(|kind| kind.as_str()) == Some(kind)
+                })),
+            "{kind} PSD 往返后必须保类"
+        );
+    }
+}
+
+/// 8 条自动校正/匹配命令都能通过直接调整路径真实改变像素（不新增图层、只加一步历史）。
+#[test]
+fn every_published_auto_and_match_command_changes_pixels_in_one_step() {
+    let commands = [
+        ("image.autoTone", serde_json::json!({})),
+        ("image.autoContrast", serde_json::json!({})),
+        ("image.autoColor", serde_json::json!({})),
+        ("image.adjustments.desaturate", serde_json::json!({})),
+        ("image.adjustments.equalize", serde_json::json!({})),
+        ("image.adjustments.shadowsHighlights", serde_json::json!({"shadowAmount": 80})),
+        ("image.adjustments.replaceColor", serde_json::json!({"color": "#7a5230", "fuzziness": 200, "hue": 120})),
+        ("image.adjustments.matchColor", serde_json::json!({"neutralize": true})),
+    ];
+    for (command, parameters) in commands {
+        let mut editor = Editor::new();
+        editor.open_image("photo.png", Some("asset-1"), &sample_png(16, 16)).expect("open image");
+        let before = editor.content_hash().expect("hash");
+        let layer_count = editor.state().pointer("/document/layers").and_then(|l| l.as_array()).map(Vec::len);
+        editor
+            .begin_direct_adjustment(command, parameters, None)
+            .unwrap_or_else(|failure| panic!("{command}: {failure:?}"));
+        editor.commit_adjustment().unwrap_or_else(|failure| panic!("{command}: {failure:?}"));
+        assert_ne!(editor.content_hash().expect("hash"), before, "{command} 必须改变像素");
+        assert_eq!(
+            editor.state().pointer("/document/layers").and_then(|l| l.as_array()).map(Vec::len),
+            layer_count,
+            "{command} 不能新增图层"
+        );
+    }
 }

@@ -2,7 +2,7 @@
  * 多文档工作区样式
  * （change: 2026-10-21-add-photocraft-document-workspace，任务 2.2/2.4 / design D2/D4）。
  *
- * - tab 条：标题区下方、菜单与工具之上；横向滚动 + 文档列表；
+ * - tab 条：菜单与工具选项下方、画布上方；横向滚动 + 文档列表；
  * - 独立文件文档：不透明主题背景覆盖整个内容区，透明像素显示棋盘格；
  * - 全部复用现有主题变量与共享控件，电脑与 Pad 共用同一布局。
  */
@@ -50,6 +50,8 @@
   cursor: pointer;
   user-select: none;
 }
+.photo-document-tab[draggable="true"] { cursor: grab; }
+.photo-document-tab[draggable="true"]:active { cursor: grabbing; }
 
 .photo-document-tab:hover { background: var(--app-web-hover, rgba(127, 127, 127, 0.12)); }
 
@@ -147,6 +149,7 @@
 }
 
 .photo-document-surface__body {
+  --photo-document-actions-height: 35px;
   position: relative;
   display: flex;
   flex: 1 1 auto;
@@ -154,11 +157,6 @@
   min-height: 0;
   min-width: 0;
   background-color: var(--app-web-background, #1b1d21);
-  background-image:
-    linear-gradient(45deg, rgba(127, 127, 127, 0.16) 25%, transparent 25%, transparent 75%, rgba(127, 127, 127, 0.16) 75%),
-    linear-gradient(45deg, rgba(127, 127, 127, 0.16) 25%, transparent 25%, transparent 75%, rgba(127, 127, 127, 0.16) 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 8px 8px;
 }
 
 .photo-document-surface__preview {
@@ -167,6 +165,13 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+  background-color: #f0f0f0;
+  background-image:
+    linear-gradient(45deg, rgba(127, 127, 127, 0.22) 25%, transparent 25%, transparent 75%, rgba(127, 127, 127, 0.22) 75%),
+    linear-gradient(45deg, rgba(127, 127, 127, 0.22) 25%, transparent 25%, transparent 75%, rgba(127, 127, 127, 0.22) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.34), 0 3px 14px rgba(0, 0, 0, 0.22);
 }
 
 .photo-document-surface__notice {
@@ -184,11 +189,16 @@
 }
 
 .photo-document-surface__actions {
+  position: relative;
+  left: calc(-1 * var(--focus-tools));
+  width: calc(100% + var(--focus-tools) + var(--focus-panel-width));
+  height: var(--photo-document-actions-height);
+  box-sizing: border-box;
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 0 var(--photo-document-actions-height);
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 4px calc(var(--focus-panel-width) + 8px) 4px calc(var(--focus-tools) + 8px);
   border-top: 1px solid var(--app-web-border, rgba(127, 127, 127, 0.25));
   background: var(--app-web-panel);
 }

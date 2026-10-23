@@ -4,15 +4,15 @@
  *
  * worker 的成片是**不可信字节**：宿主不采信 worker 自报的尺寸/时长/codec，而是从实际
  * 字节重新解析 MP4 box，得出事实后再与声明比对。拒绝：截断、伪 MIME、错误尺寸/时长、
- * 非 H.264、含音轨、超过 256 MiB。
+ * 非 H.264、含音轨。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 7.5 / design D7：固定 256 MiB 成片
+ * 总量门禁已删除。完整成片按真实资源（磁盘/内存/编码器）处理，真实失败按既有阶段错误报告；
+ * 分块编码/保存仍不能发布不完整作品，尺寸/时长/帧数/codec 一致性校验继续生效。
  *
  * 纯字节解析（不依赖 ffprobe/ffmpeg），可直接在无 GPU 环境测试。
  */
-
-/** 成片上限（与 Media 端口一致）。 */
 import { createHash } from "node:crypto";
-
-export const MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
 
 export type ArtifactProbe = {
   ok: true;
@@ -119,9 +119,6 @@ export function sha256Hex(bytes: Uint8Array): string {
  */
 export function probeArtifact(bytes: Uint8Array): ArtifactProbe | ArtifactProbeFailure {
   if (bytes.length === 0) return fail("recording-artifact-incomplete", "成片为空");
-  if (bytes.length > MAX_ARTIFACT_BYTES) {
-    return fail("recording-artifact-too-large", `成片超过 ${MAX_ARTIFACT_BYTES} 字节上限`);
-  }
   const boxes = topLevelBoxes(bytes);
   const types = boxes.map(box => box.type);
   if (!types.includes("ftyp")) return fail("recording-artifact-not-mp4", "缺少 MP4 ftyp box");
@@ -229,12 +226,7 @@ export function compareArtifact(probe: Omit<ArtifactProbe, "ok">, expected: {
   durationSeconds?: number;
   frameRate?: number;
   contentSha256?: string;
-  maxBytes?: number;
 }): { ok: true } | ArtifactProbeFailure {
-  const maxBytes = expected.maxBytes ?? MAX_ARTIFACT_BYTES;
-  if (probe.sizeBytes > maxBytes) {
-    return fail("recording-artifact-too-large", `成片超过 ${maxBytes} 字节上限`);
-  }
   if (expected.width !== undefined && probe.width !== expected.width) {
     return fail("recording-artifact-wrong-size", `宽度 ${probe.width} 与 profile ${expected.width} 不一致`);
   }

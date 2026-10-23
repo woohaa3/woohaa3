@@ -84,11 +84,50 @@ const EOCD_MIN_BYTES = 22;
 const MAX_COMMENT_BYTES = 0xffff;
 
 /** 首期允许的 manifest 对象类型（上游 `ContentM` 的 serde tag）。 */
-const ALLOWED_OBJECT_KINDS = new Set(["raster", "adjustment", "text", "group"]);
-/** 首期允许的调整层类型。 */
-const ALLOWED_ADJUSTMENT_IDS = new Set(["brightnessContrast", "hueSaturation", "curves"]);
-/** 明确拒绝的对象类型。 */
-const REJECTED_OBJECT_KINDS = new Set(["smart", "shape", "fill"]);
+const ALLOWED_OBJECT_KINDS = new Set(["raster", "adjustment", "text", "group", "fill"]);
+/**
+ * 已发布并能在运行时重编的调整类型。
+ *
+ * 上游 `Adjustment` 是**外部标记**的枚举（`{"Exposure": {…}}`，无参数类型直接序列化成
+ * `"Invert"`），不是内部标记的 `{"kind": "exposure", …}`。接受集合必须与唯一命令门
+ * （`rust/crates/editor-core` 的 `features/adjustments` 命令表）一致：门禁放开的类型必须接受，
+ * 没放开的必须拒绝，否则会出现「核验通过、运行时拒绝」。范围外的 LUT（`ColorLookup`）与
+ * 无法求值的 PSD 块（`Unsupported`）因此继续拒绝。
+ */
+const ALLOWED_ADJUSTMENT_VARIANTS = new Set([
+  "BrightnessContrast",
+  "HueSaturation",
+  "Curves",
+  "Levels",
+  "Vibrance",
+  "BlackWhite",
+  "Exposure",
+  "ColorBalance",
+  "PhotoFilter",
+  "ChannelMixer",
+  "Invert",
+  "Posterize",
+  "Threshold",
+  "GradientMap",
+  "SelectiveColor"
+]);
+/** 明确拒绝的对象类型。`fill` 自 U57 起是可保存内容，不再在此列。 */
+const REJECTED_OBJECT_KINDS = new Set(["smart", "shape"]);
+
+/**
+ * 视频图层的本域预算（与 `rust/crates/editor-core/src/features/animation/limits.rs` 和原生
+ * 核验器的 `features/animation/mod.rs` 同值）。共享上限的唯一权威仍是 `project-limits.json`；
+ * 这里镜像同一收紧边界，因为原生与进程内核验必须对同一份工程给出相同的接收结论。
+ */
+const ANIMATION_MAX_FRAMES = 120;
+const ANIMATION_MAX_CUMULATIVE_FRAME_PIXELS = 16_777_216;
+const ANIMATION_MAX_FPS = 1000;
+/** 一帧最多覆盖整块画布预算所需的 tile 数（`maxCanvasPixels` / tile 面积，留足稀疏边角）。 */
+const ANIMATION_MAX_FRAME_TILES = 4096;
+/** tile 索引上限：与上游 `TileCoord::rect` 的 i32 安全范围一致。 */
+const ANIMATION_MAX_TILE_INDEX = 8_388_608;
+/** 上游 tile 边长（`photocraft_geom::TILE_SIZE`）。 */
+const TILE_SIZE = 256;
 
 type ZipEntry = {
   name: string;
@@ -321,6 +360,8 @@ function inspectManifest(manifest: Record<string, unknown>, embeddedSmart = fals
   const objectKinds = new Set<string>();
   const counters = { count: 0, depth: 0 };
   inspectLayers(layers, 1, counters, objectKinds,(doc.patterns as unknown[]|undefined)??[], embeddedSmart);
+  // 时间轴挂在 document 上，逐层检查看不到；与原生 `animation::inspect_document` 同口径。
+  inspectTimeline(doc.timeline);
   if (counters.count > IMAGE_PROJECT_LIMITS.maxLayers) {
     throw new ProjectVerificationError("too-many-layers", `工程层数超过上限：${counters.count} > ${IMAGE_PROJECT_LIMITS.maxLayers}`);
   }
@@ -377,6 +418,11 @@ function inspectLayers(
     }
     const kind = (content as Record<string, unknown>).kind;
     if (typeof kind !== "string") throw new ProjectVerificationError("invalid-manifest", "工程图层缺少内容类型");
+    // 视频层（change: 2026-10-22-add-photocraft-animation-workflows）：帧栈是**内嵌**内容，
+    // 与原生核验器一样接受并做同样的有界收紧；只有文件路径来源才是外部引用。视频层的内容
+    // 类型仍是栅格，但原生核验器的 `animation::inspect` 会在 `painting` 之前认领它并把种类
+    // 记为 `video-layer` 而不是 `raster`，这里必须同样处理，否则嵌入式核验的摘要比对会不等。
+    const video = layer.video;
     if (layer.blend !== undefined) {
       const blend = typeof layer.blend === "string" ? layer.blend.replace(/-/g, "").toLowerCase() : "";
       if (!IMAGE_PROJECT_BLEND_MODES.some(mode => mode.replace(/-/g, "") === blend)
@@ -384,12 +430,20 @@ function inspectLayers(
         throw new ProjectVerificationError("unsupported-object", "工程包含未开放的混合模式");
       }
     }
-    objectKinds.add(kind);
     if (!(embeddedSmart && kind === "smart") && (REJECTED_OBJECT_KINDS.has(kind) || !ALLOWED_OBJECT_KINDS.has(kind))) {
       throw new ProjectVerificationError("unsupported-object", `工程包含首期未开放的对象类型：${kind}`);
     }
+    if (video === undefined || video === null) {
+      objectKinds.add(kind);
+    } else if (typeof video !== "object" || Array.isArray(video)) {
+      throw new ProjectVerificationError("invalid-manifest", "工程视频图层结构非法");
+    } else {
+      inspectVideo(video as Record<string, unknown>);
+      objectKinds.add("video-layer");
+    }
     if (kind === "smart") inspectSmart(content as Record<string, unknown>);
     if (kind === "adjustment") inspectAdjustment(content as Record<string, unknown>);
+    if (kind === "fill") inspectFill(content as Record<string, unknown>, patterns);
     if (kind === "raster") inspectRasterSources(content as Record<string, unknown>);
     if (kind === "group") {
       const group = content as Record<string, unknown>;
@@ -405,13 +459,114 @@ function inspectLayers(
     if (layer.smart_filters !== undefined || (kind !== "smart" && (content as Record<string, unknown>).smart_filters !== undefined)) {
       throw new ProjectVerificationError("unsupported-object", "工程包含智能滤镜");
     }
-    // 视频/外部文件链接拒绝（工程必须自包含）。
-    if (layer.video !== undefined && layer.video !== null) {
-      throw new ProjectVerificationError("external-reference", "工程包含外部视频引用");
-    }
     if (Array.isArray(layer.vector_mask) && layer.vector_mask.length > 0) {
       throw new ProjectVerificationError("unsupported-object", "工程包含矢量路径");
     }
+  }
+}
+
+/**
+ * 视频图层的有界核验（与原生 `project-verify::features::animation` 同口径）。
+ *
+ * 只收紧：帧栈为空、帧数/累计像素/帧率超本域预算、原始素材与帧栈长度不一致都拒绝。
+ * `source` 只作溯源校验（形状合法即可）：帧像素本身已内嵌在 manifest 的 `frames` 里，本核验器
+ * 从不读取路径、不访问文件系统，因此与原生核验器一致，不因 `File { path }` 而拒绝。
+ */
+function inspectVideo(video: Record<string, unknown>): void {
+  const frames = video.frames;
+  const original = video.original_frames;
+  if (!Array.isArray(frames) || frames.length === 0) {
+    throw new ProjectVerificationError("unsupported-object", "视频图层的帧栈为空");
+  }
+  if (frames.length > ANIMATION_MAX_FRAMES) {
+    throw new ProjectVerificationError("unsupported-object", `视频图层帧数超过上限：${frames.length} > ${ANIMATION_MAX_FRAMES}`);
+  }
+  if (typeof video.fps !== "number" || !Number.isFinite(video.fps) || video.fps <= 0 || video.fps > ANIMATION_MAX_FPS) {
+    throw new ProjectVerificationError("unsupported-object", `视频图层帧率非法：${String(video.fps)}`);
+  }
+  if (video.show_altered !== undefined && typeof video.show_altered !== "boolean") {
+    throw new ProjectVerificationError("invalid-manifest", "视频图层显示开关非法");
+  }
+  const source = video.source;
+  // 来源只作溯源：帧像素本身已内嵌在 manifest 的 `frames` 里，因此与原生核验器一致，不因
+  // `File { path }` 而拒绝（本核验器从不读取该路径、不访问文件系统）。
+  if (source !== undefined && source !== null
+      && typeof source !== "string" && (typeof source !== "object" || Array.isArray(source))) {
+    throw new ProjectVerificationError("invalid-manifest", "视频图层来源结构非法");
+  }
+  if (original !== undefined && original !== null) {
+    if (!Array.isArray(original) || original.length !== frames.length) {
+      throw new ProjectVerificationError("unsupported-object", "视频图层原始帧数与帧栈不一致");
+    }
+  }
+  let pixels = 0;
+  for (const frame of [...frames, ...(Array.isArray(original) ? original : [])]) {
+    pixels += surfacePixels(frame);
+    if (pixels > ANIMATION_MAX_CUMULATIVE_FRAME_PIXELS) {
+      throw new ProjectVerificationError("unsupported-object", `视频帧累计像素超过上限：${pixels} > ${ANIMATION_MAX_CUMULATIVE_FRAME_PIXELS}`);
+    }
+  }
+}
+
+/**
+ * 一帧 `SurfaceM` 的像素面积：按已声明 tile 的包围盒计（与原生 `Surface::tile_bounds` 同口径）。
+ *
+ * Surface 是稀疏存储，tile 索引可能来自损坏文件，因此先保证索引在 i32 内并夹到画布预算，
+ * 再累加——畸形输入只会被拒，不会让这里的算术溢出或分配。
+ */
+function surfacePixels(raw: unknown): number {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ProjectVerificationError("invalid-manifest", "视频帧结构非法");
+  }
+  const surface = raw as Record<string, unknown>;
+  const tiles = surface.tiles;
+  if (!Array.isArray(tiles)) throw new ProjectVerificationError("invalid-manifest", "视频帧缺少 tile 列表");
+  if (tiles.length > ANIMATION_MAX_FRAME_TILES) {
+    throw new ProjectVerificationError("unsupported-object", `视频帧 tile 数超过上限：${tiles.length}`);
+  }
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const tile of tiles) {
+    if (typeof tile !== "object" || tile === null) throw new ProjectVerificationError("invalid-manifest", "视频帧 tile 结构非法");
+    const { tx, ty } = tile as Record<string, unknown>;
+    if (typeof tx !== "number" || typeof ty !== "number" || !Number.isInteger(tx) || !Number.isInteger(ty)
+        || Math.abs(tx) > ANIMATION_MAX_TILE_INDEX || Math.abs(ty) > ANIMATION_MAX_TILE_INDEX) {
+      throw new ProjectVerificationError("unsupported-object", "视频帧 tile 坐标非法");
+    }
+    x0 = Math.min(x0, tx * TILE_SIZE); y0 = Math.min(y0, ty * TILE_SIZE);
+    x1 = Math.max(x1, tx * TILE_SIZE + TILE_SIZE); y1 = Math.max(y1, ty * TILE_SIZE + TILE_SIZE);
+  }
+  if (!Number.isFinite(x0)) return 0;
+  return (x1 - x0) * (y1 - y0);
+}
+
+/**
+ * 文档级时间轴核验（与原生 `animation::inspect_document` 同口径）。
+ *
+ * 时长/帧率/播放头/工作区任一越界都拒绝。没有时间轴的旧工程不产生任何贡献。
+ */
+function inspectTimeline(raw: unknown): void {
+  if (raw === undefined || raw === null) return;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ProjectVerificationError("invalid-manifest", "工程时间轴结构非法");
+  }
+  const timeline = raw as Record<string, unknown>;
+  const duration = timeline.duration;
+  if (typeof duration !== "number" || !Number.isInteger(duration) || duration < 1 || duration > ANIMATION_MAX_FRAMES) {
+    throw new ProjectVerificationError("unsupported-object", `时间轴时长超过上限或非法：${String(duration)}（上限 ${ANIMATION_MAX_FRAMES}）`);
+  }
+  if (typeof timeline.fps !== "number" || !Number.isFinite(timeline.fps) || timeline.fps <= 0 || timeline.fps > ANIMATION_MAX_FPS) {
+    throw new ProjectVerificationError("unsupported-object", `时间轴帧率非法：${String(timeline.fps)}`);
+  }
+  const current = timeline.current;
+  if (typeof current !== "number" || !Number.isInteger(current) || current < 0 || current >= duration) {
+    throw new ProjectVerificationError("unsupported-object", `时间轴播放头越界：${String(current)} >= ${duration}`);
+  }
+  // `work_start` 缺省为 0（与上游 `#[serde(default)]` 一致）。
+  const workStart = timeline.work_start ?? 0;
+  const workEnd = timeline.work_end;
+  if (typeof workStart !== "number" || !Number.isInteger(workStart) || typeof workEnd !== "number" || !Number.isInteger(workEnd)
+      || workStart >= workEnd || workEnd > duration) {
+    throw new ProjectVerificationError("unsupported-object", `时间轴工作区范围非法：${String(workStart)}..${String(workEnd)}（时长 ${duration}）`);
   }
 }
 
@@ -439,18 +594,139 @@ function inspectSmart(content: Record<string, unknown>): void {
 
 function inspectAdjustment(content: Record<string, unknown>): void {
   const adjustment = content.adjustment;
-  if (typeof adjustment !== "object" || adjustment === null) {
+  if (adjustment === null || adjustment === undefined) {
     throw new ProjectVerificationError("invalid-manifest", "工程调整层缺少参数");
   }
-  const record = adjustment as Record<string, unknown>;
-  const id = record.kind ?? record.id ?? record.type;
-  if (typeof id !== "string" || !ALLOWED_ADJUSTMENT_IDS.has(id)) {
-    throw new ProjectVerificationError("unsupported-object", `工程包含首期未开放的调整类型：${String(id)}`);
+  // 无参数的调整（`Invert`）序列化成裸字符串；其余是单键对象 `{"<Variant>": {…}}`。
+  const variant = typeof adjustment === "string"
+    ? adjustment
+    : typeof adjustment === "object" && !Array.isArray(adjustment)
+      ? Object.keys(adjustment as Record<string, unknown>)[0]
+      : undefined;
+  if (typeof variant !== "string" || variant.length === 0 || !ALLOWED_ADJUSTMENT_VARIANTS.has(variant)) {
+    throw new ProjectVerificationError("unsupported-object", `工程包含未开放的调整类型：${String(variant ?? adjustment)}`);
   }
-  // `Unsupported { psd_key, raw }` 表示上游无法求值的调整：明确拒绝。
-  if (record.psd_key !== undefined || record.raw !== undefined) {
+  // 变体必须是**唯一**键：多键对象既不是本解析器认识的形状，也可能是伪造的白名单命中。
+  if (typeof adjustment === "object" && Object.keys(adjustment as Record<string, unknown>).length !== 1) {
+    throw new ProjectVerificationError("invalid-manifest", "工程调整层参数结构非法");
+  }
+  // `Unsupported { psd_key, raw }` 表示上游无法求值的调整：明确拒绝（variant 白名单已挡住，
+  // 这里保留判据说明「为什么」而不是让白名单成为唯一防线）。
+  const payload = typeof adjustment === "object" ? (adjustment as Record<string, unknown>)[variant] : null;
+  if (payload && typeof payload === "object" && !Array.isArray(payload)
+      && ((payload as Record<string, unknown>).psd_key !== undefined || (payload as Record<string, unknown>).raw !== undefined)) {
     throw new ProjectVerificationError("unsupported-object", "工程包含无法求值的调整层");
   }
+}
+
+/**
+ * 填充层（U57）：参数是可重编内容，必须逐字段有界并且图案引用随工程保存。
+ *
+ * 与原生 `project-verify` 的 `fill_support` 同一组界限；这里只做结构/范围判定，
+ * 不合成像素、不加载图案表面。
+ */
+function inspectFill(content: Record<string, unknown>, patterns: unknown[]): void {
+  const fill = content.fill;
+  if (typeof fill !== "object" || fill === null || Array.isArray(fill)) {
+    throw new ProjectVerificationError("invalid-manifest", "工程填充层缺少参数");
+  }
+  const record = fill as Record<string, unknown>;
+  if (record.kind === "Solid") {
+    inspectFillColor(record.alpha);
+    return;
+  }
+  if (record.kind === "Gradient") {
+    const stops = record.stops;
+    if (!Array.isArray(stops) || stops.length < 2 || stops.length > 1024) {
+      throw new ProjectVerificationError("unsupported-object", "工程渐变填充的端点数量非法");
+    }
+    let previous = Number.NEGATIVE_INFINITY;
+    for (const raw of stops) {
+      // 上游序列化是 `[位置, 颜色]` 元组。
+      if (!Array.isArray(raw) || raw.length !== 2) throw new ProjectVerificationError("invalid-manifest", "工程渐变端点结构非法");
+      const at = raw[0];
+      if (typeof at !== "number" || !Number.isFinite(at) || at < 0 || at > 1 || at < previous) {
+        throw new ProjectVerificationError("unsupported-object", "工程渐变端点位置非法或次序颠倒");
+      }
+      previous = at;
+      inspectFillColorValue(raw[1]);
+    }
+    const scale = record.scale;
+    if (typeof scale !== "number" || !Number.isFinite(scale) || scale < 0.1 || scale > 1.5) {
+      throw new ProjectVerificationError("unsupported-object", "工程渐变填充的缩放超出范围");
+    }
+    const midpoints = record.midpoints;
+    if (midpoints !== undefined) {
+      if (!Array.isArray(midpoints) || midpoints.length >= Math.max(stops.length, 1)) {
+        throw new ProjectVerificationError("unsupported-object", "工程渐变填充的中点数量非法");
+      }
+      if (!midpoints.every((mid) => typeof mid === "number" && Number.isFinite(mid) && mid >= 0 && mid <= 1)) {
+        throw new ProjectVerificationError("unsupported-object", "工程渐变填充的中点超出范围");
+      }
+    }
+    const opacityStops = record.opacity_stops;
+    if (opacityStops !== undefined) {
+      if (!Array.isArray(opacityStops) || opacityStops.length > 1024) {
+        throw new ProjectVerificationError("unsupported-object", "工程渐变填充的透明度端点数量非法");
+      }
+      for (const raw of opacityStops) {
+        if (!Array.isArray(raw) || raw.length !== 2) throw new ProjectVerificationError("invalid-manifest", "工程渐变透明度端点结构非法");
+        const [at, alpha] = raw;
+        if (typeof at !== "number" || !Number.isFinite(at) || at < 0 || at > 1) {
+          throw new ProjectVerificationError("unsupported-object", "工程渐变透明度端点位置非法");
+        }
+        if (typeof alpha !== "number" || !Number.isFinite(alpha) || alpha < 0 || alpha > 1) {
+          throw new ProjectVerificationError("unsupported-object", "工程渐变透明度端点取值非法");
+        }
+      }
+    }
+    return;
+  }
+  if (record.kind !== "Pattern") {
+    throw new ProjectVerificationError("unsupported-object", `工程包含未开放的对象类型：fill/${String(record.kind)}`);
+  }
+  // 图案必须随工程保存，否则重开后无法渲染。
+  const name = record.name;
+  const id = record.id;
+  if (typeof name !== "string" || !name.trim() || name.length > 200) {
+    throw new ProjectVerificationError("invalid-manifest", "工程图案填充的名称非法");
+  }
+  if (typeof id !== "string" || !id || id.length > 200) {
+    throw new ProjectVerificationError("invalid-manifest", "工程图案填充缺少图案引用");
+  }
+  if (!patterns.some((raw) => typeof raw === "object" && raw !== null && (raw as Record<string, unknown>).id === id)) {
+    throw new ProjectVerificationError("missing-resource", `工程图案填充引用了不存在的图案：${id}`);
+  }
+  const scale = record.scale;
+  if (typeof scale !== "number" || !Number.isFinite(scale) || scale <= 0 || scale > 10) {
+    throw new ProjectVerificationError("unsupported-object", "工程图案填充的缩放超出范围");
+  }
+  const angle = record.angle;
+  if (angle !== undefined && (typeof angle !== "number" || !Number.isFinite(angle) || angle < -360 || angle > 360)) {
+    throw new ProjectVerificationError("unsupported-object", "工程图案填充的角度超出范围");
+  }
+}
+
+/** 上游 `Color` 的 alpha 是独立字段，`c` 数组按模式定长。 */
+function inspectFillColor(alpha: unknown): void {
+  if (typeof alpha !== "number" || !Number.isFinite(alpha) || alpha < 0 || alpha > 1) {
+    throw new ProjectVerificationError("unsupported-object", "工程填充颜色透明度非法");
+  }
+}
+
+/** 渐变端点里的颜色同样是 `{mode, c, alpha}`。 */
+function inspectFillColorValue(raw: unknown): void {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ProjectVerificationError("invalid-manifest", "工程渐变端点缺少颜色");
+  }
+  const color = raw as Record<string, unknown>;
+  const channels = color.c;
+  if (channels !== undefined) {
+    if (!Array.isArray(channels) || !channels.every((value) => typeof value === "number" && Number.isFinite(value))) {
+      throw new ProjectVerificationError("unsupported-object", "工程渐变端点颜色通道非法");
+    }
+  }
+  inspectFillColor(color.alpha);
 }
 
 /** 像素层只允许内嵌来源；链接文件（智能对象）一律拒绝。 */

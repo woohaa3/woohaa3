@@ -76,6 +76,9 @@ fn system_tar_path(windows: bool, system_root: Option<std::ffi::OsString>) -> Pa
         PathBuf::from("/usr/bin/tar")
     }
 }
+pub(crate) fn diagnostic_tar() -> PathBuf {
+    system_tar_path(cfg!(windows),std::env::var_os("SystemRoot"))
+}
 fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = Command::new(program);
     #[cfg(windows)]
@@ -90,15 +93,19 @@ fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
 
 impl LocalHost {
     pub fn start(launch: &Launch) -> Result<(Self, Ready), String> {
-        std::fs::create_dir_all(launch.data.join("logs")).map_err(|e| e.to_string())?;
+        let log_dir = crate::diagnostics::run_dir()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| launch.data.join("logs"));
+        std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
         let logs = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(launch.data.join("logs/host.log"))
+            .open(log_dir.join("host-stderr.log"))
             .map_err(|e| e.to_string())?;
         let instance = uuid::Uuid::new_v4().to_string();
         let mut command = hidden_command(&launch.node);
         command.arg(launch.root.join("desktop-host.mjs"));
+        command.env("WOOHAA_DESKTOP_RUN_DIR", &log_dir);
         if cfg!(debug_assertions) {
             if let Ok(port) = std::env::var("WOOHAA_DESKTOP_HOST_PORT") {
                 command.arg("--port").arg(port);
@@ -120,17 +127,29 @@ impl LocalHost {
             .stderr(logs)
             .spawn()
             .map_err(|e| format!("启动本机宿主失败: {e}"))?;
+        crate::diagnostics::event(
+            "host",
+            "process-start",
+            serde_json::json!({"pid":child.id(), "instance":instance}),
+        );
         let stdout = child.stdout.take().ok_or("host stdout missing")?;
         let (tx, rx) = mpsc::channel();
+        let host_pid=child.id();
+        crate::diagnostics::node_heartbeat(host_pid,true);
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 match line {
                     Ok(line) => {
+                        if serde_json::from_str::<serde_json::Value>(&line).ok().map(|v|v["type"]=="heartbeat").unwrap_or(false) {
+                            crate::diagnostics::node_heartbeat(host_pid,true);
+                            continue;
+                        }
                         let _ = tx.send(line);
                     }
                     Err(_) => break,
                 }
             }
+            crate::diagnostics::node_heartbeat(host_pid,false);
         });
         let mut host = Self {
             child,
@@ -139,10 +158,15 @@ impl LocalHost {
         let deadline = Instant::now() + Duration::from_secs(90);
         loop {
             if let Some(status) = host.child.try_wait().map_err(|e| e.to_string())? {
-                return Err(format!("宿主启动时退出: {status}；请查看 logs/host.log"));
+                return Err(format!(
+                    "宿主启动时退出: {status}；请查看用户数据目录 logs/runs 下本次运行的 host-stderr.log"
+                ));
             }
             if Instant::now() >= deadline {
-                return Err("宿主启动超时；请查看 logs/host.log".into());
+                return Err(
+                    "宿主启动超时；请查看用户数据目录 logs/runs 下本次运行的 host-stderr.log"
+                        .into(),
+                );
             }
             if let Ok(line) = rx.recv_timeout(Duration::from_millis(100)) {
                 if line.len() > 64 * 1024 {
@@ -168,7 +192,12 @@ impl LocalHost {
         let exited = self
             .child
             .try_wait()
-            .map(|status| status.is_some())
+            .map(|status| {
+                if let Some(status) = status {
+                    crate::diagnostics::event("host", "process-exit", serde_json::json!({"pid":self.child.id(),"status":status.to_string(),"code":status.code(),"success":status.success()}));
+                }
+                status.is_some()
+            })
             .map_err(|e| e.to_string())?;
         if exited {
             self.recording.take();
@@ -262,13 +291,36 @@ fn status(app: &tauri::AppHandle, message: &str, failed: bool) {
 /// `WebviewUrl::App(path)` 会用配置里的 `frontendDist` 作为 base 做 `Url::join`，且该调用在
 /// Tauri 内部是 `unwrap`。`FrontendDist` 的反序列化优先匹配 `Url`，因此 Windows 绝对路径
 /// （`E:\\dir` → scheme `e`、不透明 path）会让 base 变成 cannot-be-a-base，join 直接 panic。
-/// 这里自行拼出绝对 URL：外部 base 能 join 就用它，否则回退到内置协议 origin。
+/// 开发构建配置 devUrl 时不嵌入资源，启动页必须跟随实际开发前端（包括挂载路径）。
+/// 发行构建自行拼出绝对 URL，保留 Windows 路径的内置协议回退。
 fn startup_webview_url(app: &tauri::AppHandle) -> tauri::Url {
+    resolve_startup_webview_url(
+        &app.config().build,
+        tauri::is_dev(),
+        std::env::var("WOOHAA_DESKTOP_UI_URL").ok().as_deref(),
+    )
+}
+
+fn resolve_startup_webview_url(
+    build: &tauri::utils::config::BuildConfig,
+    dev: bool,
+    ui: Option<&str>,
+) -> tauri::Url {
+    if dev {
+        let override_url = ui.and_then(|ui| tauri::Url::parse(ui).ok()).filter(|url| {
+            url.scheme() == "http" && matches!(url.host_str(), Some("127.0.0.1" | "localhost"))
+        });
+        if let Some(base) = override_url.as_ref().or(build.dev_url.as_ref()) {
+            if let Ok(url) = base.join("desktop-startup.html") {
+                return url;
+            }
+        }
+    }
     #[cfg(any(target_os = "windows", target_os = "android"))]
     let protocol_origin = "http://tauri.localhost";
     #[cfg(not(any(target_os = "windows", target_os = "android")))]
     let protocol_origin = "tauri://localhost";
-    if let Some(tauri::utils::config::FrontendDist::Url(base)) = app.config().build.frontend_dist.as_ref() {
+    if let Some(tauri::utils::config::FrontendDist::Url(base)) = build.frontend_dist.as_ref() {
         if let Ok(url) = base.join("desktop-startup.html") {
             return url;
         }
@@ -408,7 +460,7 @@ pub fn install(
                     main.navigate(tauri::Url::parse(&ui_url).map_err(|e| e.to_string())?)
                         .map_err(|e| e.to_string())?;
                     if main.show().is_ok() {
-                        eprintln!("desktop main shown: {}", ui_url);
+                        crate::diagnostics::stderr(format_args!("desktop main shown: {}", ui_url));
                     }
                     let _ = main.set_focus();
                 }
@@ -419,7 +471,7 @@ pub fn install(
             })();
             state.busy.store(false, Ordering::Release);
             if let Err(error) = result {
-                eprintln!("desktop startup: {error}");
+                crate::diagnostics::stderr(format_args!("desktop startup: {error}"));
                 status(
                     &handle,
                     &format!("{error}。可通过“工作区”菜单导入或从备份恢复。"),
@@ -449,7 +501,7 @@ pub fn install(
                     }
                     status(
                         &handle,
-                        "本机宿主已退出。请重试，或通过“工作区”菜单导入/从备份恢复；日志位于用户数据目录 logs/host.log。",
+                        "本机宿主已退出。请重试，或通过“工作区”菜单导入/从备份恢复；日志位于用户数据目录 logs/runs 下本次运行的 host-stderr.log。",
                         true,
                     );
                     break;
@@ -983,5 +1035,67 @@ mod close_window_tests {
         assert!(super::closes_application("startup"));
         assert!(!super::closes_application("web-popup-authorization"));
         assert!(!super::closes_application("other"));
+    }
+}
+
+#[cfg(test)]
+mod startup_url_tests {
+    use super::*;
+
+    #[test]
+    fn development_startup_uses_actual_frontend_and_mount_path() {
+        let build = tauri::utils::config::BuildConfig {
+            dev_url: Some(tauri::Url::parse("http://127.0.0.1:5174/").unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_startup_webview_url(&build, true, None).as_str(),
+            "http://127.0.0.1:5174/desktop-startup.html"
+        );
+        assert_eq!(
+            resolve_startup_webview_url(&build, true, Some("http://127.0.0.1:6200/dev/check/"))
+                .as_str(),
+            "http://127.0.0.1:6200/dev/check/desktop-startup.html"
+        );
+    }
+
+    #[test]
+    fn development_without_dev_server_preserves_embedded_fallback() {
+        let build = tauri::utils::config::BuildConfig::default();
+        let url = resolve_startup_webview_url(&build, true, None);
+        assert_eq!(url.path(), "/desktop-startup.html");
+        assert_ne!(url.host_str(), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn release_windows_frontend_path_does_not_panic() {
+        let build = tauri::utils::config::BuildConfig {
+            frontend_dist: Some(tauri::utils::config::FrontendDist::Url(
+                tauri::Url::parse(r"E:\app\frontend").unwrap(),
+            )),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_startup_webview_url(&build, false, None).path(),
+            "/desktop-startup.html"
+        );
+    }
+
+    #[test]
+    fn release_ignores_development_urls() {
+        let build = tauri::utils::config::BuildConfig {
+            dev_url: Some(tauri::Url::parse("http://127.0.0.1:5174/").unwrap()),
+            ..Default::default()
+        };
+        let url = resolve_startup_webview_url(&build, false, Some("http://127.0.0.1:6200/"));
+        assert_eq!(url.path(), "/desktop-startup.html");
+        assert_eq!(
+            url.host_str(),
+            Some(if cfg!(any(target_os = "windows", target_os = "android")) {
+                "tauri.localhost"
+            } else {
+                "localhost"
+            })
+        );
     }
 }

@@ -11,6 +11,7 @@ use crate::theme::ThemeResource;
 
 use super::Visuals;
 use super::geometry::Geometry;
+use super::text_presentation::LogicalText;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_scene(
@@ -22,7 +23,7 @@ pub(crate) fn sync_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut flags: ResMut<FrameFlags>,
-    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor), Without<Sprite>>,
+    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
     mut sprites: Query<(&mut Sprite, &mut Transform), Without<Text2d>>,
 ) {
     if !flags.changed {

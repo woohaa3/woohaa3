@@ -561,7 +561,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
     scene.marquee
       ? `marquee=${scene.marquee.x},${scene.marquee.y},${scene.marquee.width},${scene.marquee.height}`
       : "marquee=",
-    scene.surface ? `surf=${scene.surface.width},${scene.surface.height},${scene.surface.pixelRatio},${scene.surface.contentRight ?? 0},${JSON.stringify(scene.surface.contentRect ?? null)}` : "surf=",
+    scene.surface ? `surf=${scene.surface.width},${scene.surface.height},${scene.surface.pixelRatio},${scene.surface.contentRight ?? 0},${JSON.stringify(scene.surface.contentRect ?? null)},${scene.surface.originX ?? 0},${scene.surface.originY ?? 0}` : "surf=",
     scene.modelFocus
       ? `focus=${scene.modelFocus.nodeId},${scene.modelFocus.yaw},${scene.modelFocus.pitch},${scene.modelFocus.distance},${scene.modelFocus.radius},${scene.modelFocus.target.join(",")}`
       : "focus=",
@@ -605,7 +605,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
     // 历史条与聚合遮罩是瞬时运行反馈：参与指纹，使运行/终态变化能触发一次 set_scene
     // （change: 2026-10-12-unify-generation-history-strip）。
     if (node.historyStrip) parts.push(`history-strip=${node.id}:${JSON.stringify(node.historyStrip)}`);
-    if (node.aggregateRun) parts.push(`aggregate-run=${node.id}:${node.aggregateRun.active ? 1 : 0}`);
+    if (node.aggregateRun) parts.push(`aggregate-run=${node.id}:${JSON.stringify(node.aggregateRun)}`);
     // 拍摄镜头预览卡片呈现：标题/类型/状态/进度变化必须触发一次 set_scene
     // （change: 2026-10-15-add-film-set-shooting-shot-previews）。
     if (node.shotPreview) parts.push(`shot-preview=${node.id}:${JSON.stringify(node.shotPreview)}`);

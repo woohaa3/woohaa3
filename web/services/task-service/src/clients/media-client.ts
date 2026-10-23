@@ -52,6 +52,19 @@ export type MediaClient = {
   ): Promise<{ exists: boolean; matches: boolean; metadata?: MediaMetadata }>;
   sign(storageKey: string, expiresSeconds?: number, scope?: { canvasId: string }): Promise<string>;
   /**
+   * 按 locator 导入 provider 输出。
+   *
+   * 远端托管生成的结果在服务端命名空间里，客户端只有 locator：取数与授权由存储层完成，
+   * 媒体层只做校验与登记。`expected` 给了就强校验元数据。
+   */
+  importFromLocator(input: {
+    locator: string;
+    canvasId?: string;
+    contentType?: string;
+    maxBytes?: number;
+    expected?: { contentType?: string; size?: number; checksum?: string };
+  }): Promise<MediaMetadata>;
+  /**
    * 转存 provider 媒体输出。
    *
    * `canvasId` 声明「这次写入属于哪张画布」（缺省表示与画布无关，如扩展任务）：Media Service
@@ -147,6 +160,12 @@ export function createMediaClient(options: MediaClientOptions): MediaClient {
         size: result.size
       });
       return result;
+    },
+
+    async importFromLocator() {
+      // 内部 HTTP 协议面没有 locator 入口，也**不该**再补一个：locator 的解析属于存储层，
+      // 隔着 HTTP 传一遍只会把后端身份带到协议里。本机宿主的装配走进程内 media port。
+      throw new MediaClientError("unavailable", "当前装配不支持按 locator 导入：请使用进程内媒体端口");
     }
   };
 }

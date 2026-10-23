@@ -7,6 +7,7 @@
  */
 import { useMemo } from "react";
 import type { CanvasTaskActivity } from "@woohaa3/contracts";
+import type { CanvasGroupRun, ActivityRowCapabilities } from "@woohaa3/extension-task-activity/frontend";
 import { TaskActivityStore } from "@woohaa3/extension-task-activity/frontend";
 import { fixtureMediaUrl } from "../task-history-fixtures.js";
 
@@ -36,14 +37,21 @@ export type ActivityFixtureControls = {
 
 export type UseActivityFixtureOptions = {
   seed?: CanvasTaskActivity[];
+  /** 组创作记录：与任务/后台活动同列表交错（change: 2026-10-22-unify-task-activity-rows，任务 3.4）。 */
+  groups?: readonly CanvasGroupRun[];
+  /** 行适配能力（展示解析、节点定位、组动作）；缺省只提供可定位的空实现。 */
+  capabilities?: ActivityRowCapabilities;
 };
 
 /** 受控 store：先 hydration 种子记录，再暴露事件发射与补偿入口（非 hook 版本）。 */
 export function createActivityStoreFixture(options: UseActivityFixtureOptions = {}): ActivityFixtureControls {
   const store = new TaskActivityStore();
+  // story 只需能定位；真实定位/详情由宿主处理。
+  store.configure(options.capabilities ?? { locateNode: () => undefined });
 
   // 种子记录在首帧同步合并（不做异步快照，保证 SSR/首屏稳定）。
   for (const record of options.seed ?? []) store.applyServerRecord(record, 1);
+  if (options.groups?.length) store.replaceGroupRuns({ rows: options.groups, error: "" });
 
   return {
     store,
@@ -103,5 +111,36 @@ export function defaultActivitySeed(): CanvasTaskActivity[] {  return [
       error: { name: "ProviderError", message: "上游 provider 超时" },
       createdAt: "2026-09-29T07:58:00.000Z"
     })
+  ];
+}
+
+/** 组创作记录 fixture：一条进行中、一条已结算（change: 2026-10-22-unify-task-activity-rows）。 */
+export function groupActivitySeed(active = true): CanvasGroupRun[] {
+  return [
+    {
+      creation: {
+        requestId: "creation-showcase-running", canvasId: "showcase-canvas", rootGroupId: "group-running",
+        commandId: "command-running", turnRequestId: "request-running", scopeEpoch: 1, stage: "accepted",
+        conversationId: "conversation-running", turnId: "turn-running"
+      },
+      requestId: "request-running",
+      status: "running",
+      label: "创作中",
+      active,
+      createdAt: "2026-09-29T08:00:02.000Z"
+    },
+    {
+      creation: {
+        requestId: "creation-showcase-done", canvasId: "showcase-canvas", rootGroupId: "group-done",
+        commandId: "command-done", turnRequestId: "request-done", scopeEpoch: 1, stage: "accepted",
+        conversationId: "conversation-done", turnId: "turn-done"
+      },
+      requestId: "request-done",
+      status: "partial",
+      label: "部分完成",
+      error: "第 3 个节点未通过校验",
+      active: false,
+      createdAt: "2026-09-29T08:00:03.000Z"
+    }
   ];
 }

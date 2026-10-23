@@ -2,13 +2,18 @@
  * 转换 adapter 能力声明与服务端可用性判据
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 1.1/2.1 / design D6）。
  *
- * 转换模型必须显式声明：真实视觉输入（图片 / 多图 / 原生视频）、结构化片场候选输出与输入
- * 预算。能力未知或仅文字能力时服务端**在调用上游之前**拒绝，并提供可读原因；不把
+ * 转换模型必须显式声明：真实视觉输入（图片 / 多图 / 原生视频）、结构化片场候选输出与真实
+ * 输入能力。能力未知或仅文字能力时服务端**在调用上游之前**拒绝，并提供可读原因；不把
  * 「能输出 JSON」等同于「已支持片场校验与写入」。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 7.1 / design D7：`maxImages` /
+ * `maxFrames` / `maxDurationSeconds` 只表达**所选模型的真实输入能力**（一次请求能接收多少
+ * 图/帧、支持多长的视频），不是应用人为设置的执行额度；不声明即不宣称能力。原先声明的
+ * `maxPixels`（400 万像素）是应用自造的总量门禁，已删除。
  */
 import type { FilmSetConversionSourceKind } from "./types.js";
 
-/** 视觉/多模态输入能力与预算。 */
+/** 视觉/多模态输入能力（真实模型输入能力，非应用执行额度）。 */
 export type FilmSetConversionInputCapability = {
   /** 是否接受真实图片内容（非 URL 文本）。 */
   imageInput: boolean;
@@ -20,8 +25,6 @@ export type FilmSetConversionInputCapability = {
   maxFrames: number;
   /** 可处理的最长视频时长（秒）；`0` 表示未声明上限。 */
   maxDurationSeconds: number;
-  /** 单帧最大像素预算（宽 × 高）；缺省表示未声明。 */
-  maxPixels?: number;
 };
 
 /** 转换 adapter 声明能力。 */

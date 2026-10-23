@@ -373,7 +373,7 @@ export type InteractionController = {
    * Store/模型/主题/媒体/资源/输入只合并 dirty flags，不强制同步构建；由下一帧统一结算。
    */
   invalidate(reason?: string): void;
-  surface(): { width: number; height: number; pixelRatio: number };
+  surface(): { width: number; height: number; pixelRatio: number; originX?: number; originY?: number };
   /** 在当前基础上按因子缩放（以画布中心为锚点）并提交。 */
   zoomBy(factor: number): void;
   /** 缩放到指定 zoom（以画布中心为锚点）并提交。 */

@@ -61,7 +61,7 @@ export type SceneBuildInput = {
 
 export function buildSceneWithResources(
   options: InteractionControllerOptions,
-  surfaceSize: () => { width: number; height: number; pixelRatio: number },
+  surfaceSize: () => { width: number; height: number; pixelRatio: number; originX?: number; originY?: number },
   modelPlacements: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyModelPlacement>,
   input: SceneBuildInput
 ): { scene: CanvasRenderScene; resources: Map<string, PreparedModelResource> } | null {
@@ -167,6 +167,15 @@ export function buildSceneWithResources(
   // （change: 2026-10-12-unify-generation-history-strip，design D4/D5）。
   const runState = options.getRunState?.() ?? null;
   if (runState) applyRunStateProjection(scene.nodes, runState);
+  const reduceMotion = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  for (const node of scene.nodes) {
+    if (node.aggregateRun?.filmSet) {
+      node.aggregateRun.reduceMotion = reduceMotion;
+      // Historical model/media projections are read-only outputs of an older work, never live executions.
+      if ((node.id === focusNode && options.getModelSceneOverride?.(node.id))
+        || options.compositeAssets?.resolve(canvasState, node.id)?.historyProjection?.(node.id)) delete node.aggregateRun;
+    }
+  }
   for (const node of scene.nodes) for (const dot of node.historyStrip?.dots ?? []) {
     dot.hovered = input.hoveredHistory?.nodeId === node.id && input.hoveredHistory.presentationId === dot.presentationId;
     dot.pressed = input.pressedHistory?.nodeId === node.id && input.pressedHistory.presentationId === dot.presentationId;

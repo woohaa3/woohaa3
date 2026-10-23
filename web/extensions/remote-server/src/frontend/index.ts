@@ -185,6 +185,22 @@ export function remoteServerExtension(): ReturnType<typeof defineExtensionPlugin
       });
       ctx.effect(() => () => removeCollaboratorsAction(), "remote-server-collaborators-action");
 
+      // 新建画布时可勾选的「同时同步到远端」：建好后由宿主调用 apply 把它推到远端。
+      // 只在已连接时出现；不回填 defaultEnabled——新建默认本地，同步是显式选择。
+      const removeCreateOption = ctx.slots.register("canvas.create-option", {
+        id: `${REMOTE_SERVER_EXTENSION_ID}-create-sync`,
+        owner: REMOTE_SERVER_EXTENSION_ID,
+        priority: 10,
+        label: "同时同步到远端",
+        description: "建好后立刻把这张画布同步到远端，可邀请协作者。",
+        available: () => service.getSnapshot().phase === "connected",
+        apply: async ({ canvasId }) => {
+          const result = await service.api.enableCanvasSync(canvasId);
+          return result.ok ? { ok: true } : { ok: false, error: result.error };
+        }
+      });
+      ctx.effect(() => () => removeCreateOption(), "remote-server-create-option");
+
       ctx.effect(() => () => service.dispose(), "remote-server-service");
     },
     {

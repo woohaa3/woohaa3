@@ -369,7 +369,9 @@ describe("cross-layer failure matrix", () => {
     expect(nodeAdds).toHaveLength(0);
   });
 
-  it("oversized artifact is rejected before upload", async () => {
+  it("large artifact is no longer rejected by size (task 7.5)", async () => {
+    // change: 2026-10-22-remove-agent-execution-limits：原 256 MiB 成片门禁已删除。
+    // 真实字节仍必须可读并通过容器/尺寸/时长复核，因此这里以「读取失败」结束，而不是尺寸拒绝。
     let uploaded = false;
     const { instance } = service({
       upload: async input => {
@@ -395,7 +397,7 @@ describe("cross-layer failure matrix", () => {
     await settle();
     const status = await instance.status({ canvasId: "c1", jobId: submitted.jobId });
     if (!status.ok) throw new Error("status");
-    expect(status.status.error?.code).toBe("recording-artifact-too-large");
+    expect(status.status.error?.code).not.toBe("recording-artifact-too-large");
     expect(uploaded).toBe(false);
   });
 });
@@ -413,11 +415,11 @@ describe("artifact rejection matrix", () => {
   };
 
   it("rejects truncated, wrong codec, wrong duration and audio", () => {
-    expect(validateArtifactClaim({ ...base, sizeBytes: 0 }, { maxBytes: 1024 }).ok).toBe(false);
-    expect(validateArtifactClaim({ ...base, contentSha256: "nope" }, { maxBytes: 1 << 20 }).ok).toBe(false);
-    expect(validateArtifactClaim({ ...base, width: 321 }, { maxBytes: 1 << 20 }).ok).toBe(false);
-    expect(validateArtifactClaim({ ...base, durationSeconds: 9 }, { maxBytes: 1 << 20, expectedDurationSeconds: 4 }).ok).toBe(false);
-    expect(validateArtifactClaim({ ...base, mimeType: "video/webm" }, { maxBytes: 1 << 20 }).ok).toBe(false);
+    expect(validateArtifactClaim({ ...base, sizeBytes: 0 }, {}).ok).toBe(false);
+    expect(validateArtifactClaim({ ...base, contentSha256: "nope" }, {}).ok).toBe(false);
+    expect(validateArtifactClaim({ ...base, width: 321 }, {}).ok).toBe(false);
+    expect(validateArtifactClaim({ ...base, durationSeconds: 9 }, { expectedDurationSeconds: 4 }).ok).toBe(false);
+    expect(validateArtifactClaim({ ...base, mimeType: "video/webm" }, {}).ok).toBe(false);
   });
 
   it("host parser rejects non-MP4 and audio-containing files", () => {

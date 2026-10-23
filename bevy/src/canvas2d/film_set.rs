@@ -20,6 +20,17 @@ use crate::theme::ThemeResource;
 use super::geometry::Geometry;
 use super::labels::Label;
 
+/// Persistent running backdrop, clipped to the same scope polygon used by drawing and picking.
+pub(crate) fn draw_film_set_run_mask(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &GraphNode,
+    z: f32,
+) {
+    let scope = super::scope::node_scope(node);
+    geometry.polygon_alpha(&scope.vertices, z, theme.token_u32("canvasNodeContent"), 0.45);
+}
+
 /// 绘制片场范围虚线框与条件可见的顶部浮动名称面板，返回其标签（标题 + 可选业务类型名）。
 ///
 /// 范围绘制、hover、选择、框选、双击与 drop 命中复用同一几何，因此这里不重新计算 bounds，

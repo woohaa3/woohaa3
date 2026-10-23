@@ -15,6 +15,10 @@ use crate::generation_progress::{display_percent, estimate_percent};
 use super::Visuals;
 use super::geometry::Geometry;
 use super::layout::{generation_ring_rect, shows_generation_ring};
+use super::text_presentation::{LogicalText, TextScaleMode};
+
+/// 运行状态/加载提示的逻辑字号（世界单位）。
+const RUNNING_LABEL_FONT: f32 = 13.0;
 
 /// 每个运行节点的动画起点（秒，`Time::elapsed_secs`）。
 ///
@@ -38,7 +42,7 @@ pub(crate) fn sync_generation(
     mut visuals: ResMut<Visuals>,
     mut clock: ResMut<GenerationClock>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor), Without<Sprite>>,
+    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
 ) {
     // 图片/视频聚焦期间隐藏所有普通节点覆盖层
     // （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，任务 4.2；
@@ -162,7 +166,7 @@ pub(crate) fn sync_generation(
 fn update_label(
     commands: &mut Commands,
     visuals: &mut Visuals,
-    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor), Without<Sprite>>,
+    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
     id: &str,
     label: String,
     position: Vec2,
@@ -170,12 +174,15 @@ fn update_label(
     color: u32,
 ) {
     if let Some(entity) = visuals.running_labels.get(id).copied() {
-        if let Ok((mut text, mut transform, mut text_color)) = text_query.get_mut(entity) {
+        if let Ok((mut text, mut transform, mut text_color, mut meta)) = text_query.get_mut(entity) {
             if text.0 != label {
                 text.0 = label;
             }
             transform.translation = Vec3::new(position.x, -position.y, z);
             text_color.0 = super::layout::hex(color);
+            if !meta.matches(RUNNING_LABEL_FONT, None, TextScaleMode::World) {
+                meta.set(RUNNING_LABEL_FONT, None, TextScaleMode::World);
+            }
             return;
         }
     }
@@ -184,13 +191,14 @@ fn update_label(
             Text2d::new(label),
             TextFont {
                 font: visuals.font.clone().into(),
-                font_size: FontSize::Px(13.),
+                font_size: FontSize::Px(RUNNING_LABEL_FONT),
                 ..default()
             },
             TextColor(super::layout::hex(color)),
             TextLayout::new(Justify::Center, LineBreak::NoWrap),
             Anchor::CENTER,
             Transform::from_xyz(position.x, -position.y, z),
+            LogicalText::world(RUNNING_LABEL_FONT, None),
         ))
         .id();
     visuals.running_labels.insert(id.to_owned(), entity);

@@ -1442,6 +1442,20 @@ describe("renderSceneFingerprint（change: optimize-model-scene-snapshot-hot-pat
     expect(renderSceneFingerprint(baseScene())).toBe(renderSceneFingerprint(baseScene()));
   });
 
+  it("film feedback identity, phase and reduced motion participate in equality and fingerprint", () => {
+    const base = baseScene();
+    const withRun = { ...base, nodes: base.nodes.map(node => ({ ...node, aggregateRun: {
+      active: true, filmSet: { operationKey: "attempt-1", phase: "running" as const, source: "agent" as const, labelCode: "generating" as const }
+    } })) };
+    expect(renderSceneEquals(withRun, structuredClone(withRun))).toBe(true);
+    for (const change of [{ filmSet: { ...withRun.nodes[0]!.aggregateRun.filmSet, operationKey: "attempt-2" } },
+      { filmSet: { ...withRun.nodes[0]!.aggregateRun.filmSet, phase: "committing" as const } }, { reduceMotion: true }]) {
+      const next = { ...withRun, nodes: withRun.nodes.map(node => ({ ...node, aggregateRun: { ...node.aggregateRun, ...change } })) };
+      expect(renderSceneEquals(withRun, next)).toBe(false);
+      expect(renderSceneFingerprint(withRun)).not.toBe(renderSceneFingerprint(next));
+    }
+  });
+
   it("图片取景不变时，入场完成信号仍触发场景更新；省略信号兼容既有呈现", () => {
     const imageFocus = { version: "woohaa-image-focus-v1" as const, nodeId: "n1", viewport: { x: 0, y: 0, zoom: 1 }, sourceWidth: 640, sourceHeight: 480 };
     const scene = { ...baseScene(), imageFocus };

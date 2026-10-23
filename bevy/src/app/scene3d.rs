@@ -273,7 +273,7 @@ pub(super) fn drive_observer_from_shot(
         camera.is_active = !scene.0.animation_playback.as_ref().is_some_and(|p| p.view_mode == "focus-preview");
         camera.order = 0;
         camera.viewport = None;
-        *layers = bevy::camera::visibility::RenderLayers::layer(0);
+        *layers = bevy::camera::visibility::RenderLayers::from_layers(&[0, model3d::RUN_EFFECT_LAYER]);
     }
 }
 

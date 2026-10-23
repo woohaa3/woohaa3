@@ -15,6 +15,8 @@
  * 门禁查询用 `isBusy`（任一非终态即忙），聚合遮罩用 `aggregateRunning`。
  */
 import {
+  normalizeFilmSetRunFeedback, readFilmSetConversionNodeStatus, isFilmSetNode,
+  type ConversationTurn, type FilmSetConversionStatus,
   isActiveTaskState,
   type CanvasNodeRunSummary,
   type CanvasOperationKind,
@@ -68,6 +70,25 @@ export class RunStateStore {
   private readonly listeners = new Set<() => void>();
   private snapshot: RunStateSnapshot = { canvasId: "", records: [], summaries: new Map() };
   private disposed = false;
+  private filmCanvas: { document: { nodes: readonly { id: string }[] }; nodeData: Record<string, unknown> } | null = null;
+  private filmTurns = new Map<string, ConversationTurn>();
+  private filmPending: Readonly<Record<string, import("@woohaa3/contracts").AgentEntryIntent>> = {};
+  private filmConversions = new Map<string, FilmSetConversionStatus>();
+
+  syncFilmSetTurns(turns: readonly ConversationTurn[], pending: typeof this.filmPending = {}): void {
+    if (this.disposed) return;
+    this.filmPending = pending;
+    for (const turn of turns) {
+      if (turn.target.canvasId !== this.canvasId || turn.target.mode !== "film-set") continue;
+      const previous = this.filmTurns.get(turn.requestId);
+      const settled = (t: ConversationTurn) => ["succeeded", "failed", "cancelled", "partial"].includes(t.status);
+      if (previous && (settled(previous) || previous.updatedAt > turn.updatedAt)) continue;
+      this.filmTurns.set(turn.requestId, turn);
+    }
+    const settled = [...this.filmTurns.values()].filter(t => !["queued", "running", "committing", "unknown"].includes(t.status));
+    for (const turn of settled.slice(0, Math.max(0, settled.length - 256))) this.filmTurns.delete(turn.requestId);
+    this.publish();
+  }
 
   constructor(options: RunStateStoreOptions) {
     this.canvasId = options.canvasId;
@@ -262,8 +283,9 @@ export class RunStateStore {
    * 非终态 → running。已有终态记录不被回退；同一身份已结算则不重复加点。
    */
   reconcileCanonical(canvas: { document: { nodes: readonly { id: string }[] }; nodeData: Record<string, unknown> } | null): void {
-    if (this.disposed || !canvas) return;
-    let changed = false;
+    if (this.disposed) return;
+    this.filmCanvas = canvas;
+    if (!canvas) { this.filmTurns.clear(); this.filmConversions.clear(); this.publish(); return; }
     for (const node of canvas.document.nodes) {
       const data = canvas.nodeData[node.id] as { activeRunId?: unknown; taskStatus?: unknown } | undefined;
       const runId = typeof data?.activeRunId === "string" ? data.activeRunId : null;
@@ -287,9 +309,8 @@ export class RunStateStore {
         createdAt: existing?.createdAt ?? updatedAt,
         updatedAt
       });
-      changed = true;
     }
-    if (changed) this.publish();
+    this.publish();
   }
 
   /**
@@ -365,6 +386,39 @@ export class RunStateStore {
         })
       );
     }
+    for (const node of this.filmCanvas?.document.nodes ?? []) {
+      const data = this.filmCanvas!.nodeData[node.id];
+      if (!isFilmSetNode(this.nodeTypeOf(node.id), data)) continue;
+      let conversion = readFilmSetConversionNodeStatus(data);
+      const old = this.filmConversions.get(node.id);
+      const sameSettledConversion = old && conversion && conversion.requestId === old.requestId && old.execution?.attemptId === conversion.execution?.attemptId
+        && old.execution?.turnRequestId === conversion.execution?.turnRequestId
+        && ["completed", "failed", "cancelled"].includes(old.status);
+      if (sameSettledConversion && old && conversion) {
+        conversion = old.status === "failed" && conversion.status === "running"
+          ? { status: "unknown", requestId: old.requestId, sourceNodeId: old.sourceNodeId, execution: old.execution }
+          : old;
+      }
+      // Retain the terminal observation: repeated save-retry snapshots must stay verifying.
+      if (conversion && !sameSettledConversion) this.filmConversions.set(node.id, conversion);
+      const summary = summaries.get(node.id) ?? summarizeNodeRunState({ canvasId: this.canvasId, nodeId: node.id, isAggregate: true, records: [] });
+      summary.filmSetFeedback = normalizeFilmSetRunFeedback({ canvasId: this.canvasId, nodeId: node.id, conversion,
+        turns: [...this.filmTurns.values()], records: byNode.get(node.id),
+        pendingRequestId: Object.entries(this.filmPending).find(([, entry]) => entry.canvasId === this.canvasId && entry.nodeId === node.id && entry.mode === "film-set" && entry.action !== "discuss")?.[0],
+        legacyTaskStatus: (data as { taskStatus?: unknown } | undefined)?.taskStatus });
+      summaries.set(node.id, summary);
+    }
+    const liveNodes = new Set(this.filmCanvas?.document.nodes.map(n => n.id));
+    for (const [key, turn] of this.filmTurns) if (!liveNodes.has(turn.target.nodeId ?? "")) this.filmTurns.delete(key);
+    for (const key of this.filmConversions.keys()) if (!liveNodes.has(key)) this.filmConversions.delete(key);
+    if (records.length === this.snapshot.records.length && records.every((record, index) => record === this.snapshot.records[index])
+      && summaries.size === this.snapshot.summaries.size && [...summaries].every(([id, summary]) => {
+        const previous = this.snapshot.summaries.get(id);
+        return previous && previous.active === summary.active && previous.isAggregate === summary.isAggregate
+          && previous.aggregateRunning === summary.aggregateRunning
+          && ("filmSetFeedback" in previous) === ("filmSetFeedback" in summary)
+          && JSON.stringify(previous.filmSetFeedback) === JSON.stringify(summary.filmSetFeedback);
+      })) return;
     this.snapshot = { canvasId: this.canvasId, records, summaries };
     for (const listener of this.listeners) listener();
   }

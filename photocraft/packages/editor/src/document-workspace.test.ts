@@ -82,6 +82,10 @@ describe("激活、关闭与顺序", () => {
     expect(order()).toEqual([a.id, b.id, c.id]);
     documents.activate(a.id);
     expect(order()).toEqual([a.id, b.id, c.id]);
+    expect(documents.reorder(a.id,c.id)).toBe(true);
+    expect(order()).toEqual([b.id,c.id,a.id]);
+    expect(documents.snapshotState().activeId).toBe(a.id);
+    expect(documents.reorder("missing",a.id)).toBe(false);
 
     // 关闭中间项：活动项不变。
     expect(documents.close(b.id)).toMatchObject({ ok: true, nextActiveId: a.id });

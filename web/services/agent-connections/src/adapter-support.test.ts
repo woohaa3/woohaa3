@@ -1,8 +1,9 @@
 /**
  * 适配器共享运行支持测试
- * （change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 5.2/5.3/7.3 验收）。
+ * （change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 5.2/5.3/7.3 验收；
+ *  change: 2026-10-22-remove-agent-execution-limits，任务 2.2 改为观察量）。
  *
- * 覆盖：回合预算（循环/工具/输出/时长）、逐次工具授权、取消登记、发送前能力预检、原生会话索引。
+ * 覆盖：回合观察（不计额度）、逐次工具授权、取消登记、发送前能力预检、原生会话索引。
  */
 import { describe, expect, it } from "vitest";
 import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
@@ -10,7 +11,7 @@ import {
   authorizeToolCall,
   connectionCapabilities,
   createNativeSessionIndex,
-  createTurnBudget,
+  createTurnObserver,
   createTurnOutcomeJournal,
   createTurnRegistry,
   preflightInput
@@ -18,43 +19,29 @@ import {
 
 const fullCapabilities = connectionCapabilities({ discussion: true, tools: true, imageInput: true, structuredResult: true });
 
-describe("回合预算（任务 5.2）", () => {
-  it("默认长时间与大正文不会在完成后被判超预算", () => {
+describe("回合观察（任务 2.2）", () => {
+  it("长时间与大量输出不会被判超限（不存在额度判定）", () => {
     let now = 0;
-    const budget = createTurnBudget({}, () => now);
+    const observation = createTurnObserver(() => now);
     now = 30 * 24 * 60 * 60_000;
-    expect(budget.expired()).toBe(false);
-    expect(budget.addOutput(4 * 1024 * 1024)).toBe(true);
-    expect(budget.exceededReason()).toBeUndefined();
-    expect(createTurnBudget({ maxDurationMs: 0 }, () => now).expired(Number.MAX_SAFE_INTEGER)).toBe(false);
-  });
-  it("循环/工具/输出分别超限并给出原因", () => {
-    const budget = createTurnBudget({ maxIterations: 1, maxToolCalls: 1, maxOutputBytes: 8 });
-    expect(budget.nextIteration()).toBe(true);
-    expect(budget.nextIteration()).toBe(false);
-
-    const toolBudget = createTurnBudget({ maxToolCalls: 1 });
-    expect(toolBudget.useToolCall()).toBe(true);
-    expect(toolBudget.useToolCall()).toBe(false);
-
-    const outputBudget = createTurnBudget({ maxOutputBytes: 8 });
-    expect(outputBudget.addOutput(4)).toBe(true);
-    expect(outputBudget.addOutput(8)).toBe(false);
+    observation.addOutput(64 * 1024 * 1024);
+    const snapshot = observation.observe();
+    expect(snapshot.elapsedMs).toBe(30 * 24 * 60 * 60_000);
+    expect(snapshot.outputBytes).toBe(64 * 1024 * 1024);
+    expect("expired" in observation).toBe(false);
+    expect("exceededReason" in observation).toBe(false);
   });
 
-  it("时长超限由注入时钟判定", () => {
-    let now = 0;
-    const budget = createTurnBudget({ maxDurationMs: 1000 }, () => now);
-    expect(budget.expired()).toBe(false);
-    now = 2000;
-    expect(budget.expired()).toBe(true);
-    expect(budget.exceededReason()).toContain("时长");
+  it("超过原 24 次工具事件仍只累计观察量", () => {
+    const observation = createTurnObserver();
+    for (let index = 0; index < 200; index += 1) observation.noteToolCall();
+    expect(observation.observe().toolCalls).toBe(200);
   });
 });
 
 describe("逐次工具授权（任务 5.2/7.3）", () => {
   const facade = (allow: (tool: string) => boolean): ApplicationToolDelegationFacade => ({
-    issue: async () => ({ token: "t", canvasIds: [], nodeIds: [], tools: [], maxCalls: 1, expiresAt: Date.now() + 1000 }),
+    issue: async () => ({ token: "t", canvasIds: [], nodeIds: [], tools: [], workId: "w" }),
     revoke: () => undefined,
     authorize: ({ tool }) => (allow(tool) ? { ok: true } : { ok: false, reason: `工具 ${tool} 越权` })
   });

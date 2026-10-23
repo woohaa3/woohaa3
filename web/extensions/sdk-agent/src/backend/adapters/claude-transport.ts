@@ -65,7 +65,10 @@ export function createClaudeTransport(options: ClaudeTransportOptions): AgentSdk
         permissionMode: "dontAsk" as const,
         allowedTools: input.mcp ? input.restrictions.allowedTools.map((name) => `mcp__${input.mcp!.name}__${name}`) : [],
         disallowedTools: [...input.restrictions.disallowedTools],
-        maxTurns: 12,
+        // change: 2026-10-22-remove-agent-execution-limits，任务 2.4：不传 maxTurns。
+        // 安装版本 @anthropic-ai/claude-agent-sdk 0.3.301 只在 `if (maxTurns) push("--max-turns")`
+        // 时才向 CLI 传轮数上限，省略即不施加应用轮数上限（并不传 0/巨大值）。停止仍来自
+        // AbortController（用户取消）、CLI 真实结束/失败。
         env: {
           ANTHROPIC_API_KEY: input.apiKey,
           ANTHROPIC_BASE_URL: input.modelBaseUrl ?? "",
