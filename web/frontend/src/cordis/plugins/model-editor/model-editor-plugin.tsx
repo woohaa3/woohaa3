@@ -534,8 +534,9 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
 
       const modelExitParticipant = ctx.focusExit.register({
         id: `${MODEL_EDITOR_PLUGIN_ID}-session`,
-        hasUnsavedChanges: () => modelSessionId !== null && session.getState().nodeId !== null,
+        hasUnsavedChanges: () => session.getState().nodeId !== null && (modelSessionId !== null || session.getState().posePreview !== null || session.getState().focusPreview !== null),
         prepare: async () => {
+          session.commitForCapture();
           const nodeId = session.getState().nodeId;
           const sessionId = modelSessionId;
           if (!nodeId || !sessionId) return { ok: true };

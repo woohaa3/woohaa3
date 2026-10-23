@@ -66,7 +66,6 @@ export function FilmSetInspector({
   const playback = useSyncExternalStore(ctx.filmSetPlayback.subscribe, ctx.filmSetPlayback.getSnapshot, ctx.filmSetPlayback.getSnapshot);
   const state = useSyncExternalStore(session.subscribe, session.getState, session.getState);
   const objectState = useSyncExternalStore(objectSession.subscribe, objectSession.getState, objectSession.getState);
-  const selectedCameraId = state.selectedCameraId;
   const selectedItemId = objectState.selectedItemId;
   const nodeId = state.nodeId;
   const [wholeShotForSelection, setWholeShotForSelection] = useState<string | null>(null);
@@ -166,7 +165,7 @@ export function FilmSetInspector({
         <FilmSetAdaptationConfirm ctx={ctx} nodeId={nodeId} itemId={selectedItem.id} clipId={activeClip.id} writable={writable && !readOnly} />
       </> : null}
       </FilmSetObjectToolbar>
-      <FilmSetAnimationControls key={nodeId} ctx={ctx} nodeId={nodeId} writable={writable && !readOnly} cameraId={selectedCameraId} composition={cameraPanel}
+      <FilmSetAnimationControls key={nodeId} ctx={ctx} nodeId={nodeId} writable={writable && !readOnly} composition={cameraPanel}
         images={images} compositionOpen={compositionOpen} onCompositionOpenChange={changeComposition} />
       </div>
     </div>

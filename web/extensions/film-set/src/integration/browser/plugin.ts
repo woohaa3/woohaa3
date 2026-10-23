@@ -18,7 +18,7 @@ import { extendFilmSetDrop } from "./drop.js";
 import { installFilmSetConversionEntries } from "./film-set-conversion/registration.js";
 import type { FilmSetContext } from "./context.js";
 import { projectObjectPresentation } from "../../preview/browser/object-presentation.js";
-import { sceneCameraWriter } from "../../authoring/browser/scene-camera.js";
+import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser/scene-camera.js";
 import { contributionLifetime } from "./contributions.js";
 import { createFilmSetNodeData } from "../../state/shared/node.js";
 import { gizmoParentBasis } from "../../authoring/browser/gizmo-constraint.js";
@@ -36,7 +36,20 @@ export function filmSetExtension() {
       lifetime.own(() => feature.dispose());
       lifetime.own(() => preview.clear());
       lifetime.own(history.subscribe(() => { ctx.compositeAssets.invalidate(); feature.session.reconcile(); }));
-      lifetime.own(playback.subscribe(ctx.compositeAssets.invalidate));
+      lifetime.own(playback.subscribe(() => {
+        ctx.compositeAssets.invalidate();
+        const nodeId = ctx.modelWorkspace.session.getState().nodeId;
+        if (!nodeId) return;
+        const selected = playback.getSnapshot();
+        const data = ctx.compositeAssets.projectCanvas(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId];
+        const camera = filmSetEditorCameras(data, selected.nodeId === nodeId ? selected.clipId : null)[0];
+        if (camera && ctx.modelWorkspace.session.getState().selectedCameraId !== camera.id) {
+          const toolMode = ctx.modelWorkspace.session.getState().toolMode;
+          ctx.modelWorkspace.session.enter(nodeId);
+          ctx.modelWorkspace.session.setToolMode(toolMode);
+        }
+        ctx.modelWorkspace.refreshGizmo();
+      }));
       lifetime.own(feature.session.subscribe(() => ctx.modelWorkspace.refreshGizmo()));
       let previous = ctx.modelWorkspace.session.getState();
       lifetime.own(ctx.modelWorkspace.session.subscribe(() => {
@@ -68,12 +81,11 @@ export function filmSetExtension() {
           return entry ? { version: MODEL_EDITOR_VERSION, nodeId, toolMode: "object", objectTool: state.tool, itemId: state.selectedItemId,
             parentBasis: gizmoParentBasis(entry.worldToLocal, entry.yaw, entry.unit), feedback: state.feedback, focus: entry.center, radius: entry.radius } : null;
         },
-        readCameras(_nodeId, data) {
-          const decoded = decodeFilmSetNodeData(data);
-          if (!decoded.ok) return [];
-          return [{ ...decoded.value.sceneCamera, id: "scene-camera", name: "场景镜头", order: 0, elevation: decoded.value.sceneCamera.elevation ?? 0, aspect: decoded.value.sceneCamera.aspect ?? "16:9" }];
+        readCameras(nodeId, data) {
+          const selected = playback.getSnapshot();
+          return filmSetEditorCameras(data, selected.nodeId === nodeId ? selected.clipId : null);
         },
-        writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args)),
+        writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args), nodeId => (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId]),
         captureEnabled: (nodeId, cameraId) => {
           const data = decodeFilmSetNodeData(ctx.canvasState.getCanvas()?.nodeData[nodeId]);
           if (!data.ok) return false;

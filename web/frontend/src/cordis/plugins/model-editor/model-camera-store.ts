@@ -181,7 +181,7 @@ export function pushEditor(ctx: Context, session: ModelEditorSession): void {
         aspect: pose.aspect,
         focusOffset: session.effectiveFocus(selected)
       });
-      const mapped = shot && sceneBounds ? projectShotToDisplay(target, bounds, shot) : shot;
+      const mapped = shot && sceneBounds ? projectShotToDisplay(target, bounds, sceneBounds.center, shot) : shot;
       if (mapped) {
         base.cameraId = selected.id;
         base.shot = {
@@ -209,6 +209,7 @@ export function pushEditor(ctx: Context, session: ModelEditorSession): void {
 function projectShotToDisplay(
   target: FocusTargetInput,
   bounds: ModelBounds,
+  sceneCenter: Vec3,
   shot: { position: Vec3; focus: Vec3; fov: number; azimuth: number; elevation: number; distance: number }
 ): typeof shot | null {
   const transform = filmSetDisplayTransform({
@@ -220,7 +221,12 @@ function projectShotToDisplay(
     azimuth: shot.azimuth,
     elevation: shot.elevation,
     distance: shot.distance,
-    focusOffset: { x: shot.focus[0], y: shot.focus[1], z: shot.focus[2] }
+    // resolveShotCamera already added the scene center. Only transform its relative offset.
+    focusOffset: {
+      x: shot.focus[0] - sceneCenter[0],
+      y: shot.focus[1] - sceneCenter[1],
+      z: shot.focus[2] - sceneCenter[2]
+    }
   });
   if (!mapped) return null;
   const focus: Vec3 = [
@@ -228,7 +234,7 @@ function projectShotToDisplay(
     bounds.center[1] + mapped.focusOffset[1],
     bounds.center[2] + mapped.focusOffset[2]
   ];
-  const position = shotCameraPosition(focus, shot.azimuth, mapped.distance, shot.elevation);
+  const position = shotCameraPosition(focus, mapped.azimuth, mapped.distance, shot.elevation);
   if (![...focus, ...position].every((value) => Number.isFinite(value))) return null;
-  return { ...shot, position, focus, distance: mapped.distance };
+  return { ...shot, position, focus, azimuth: mapped.azimuth, distance: mapped.distance };
 }

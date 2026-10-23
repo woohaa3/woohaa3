@@ -66,5 +66,3 @@ export const OPERATION_SCHEMA = z.union([
 ]);
 
 export const CANVAS_ID_SCHEMA = { canvasId: z.string().min(1) } as const;
-
-

@@ -107,7 +107,6 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
        */
       const animationCodec = createAnimationCodecPort();
       setAnimationCodecPort(animationCodec);
-      /** 当前概览入口的文案（用于判断是否需要重新注册）。 */
 
       const getCanvas = () => workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
 
@@ -452,7 +451,6 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         return true;
       }
 
-      /** 激活已打开文档（tab 点击 / 恢复入口）。 */
       /**
        * 切换活动文档。
        *

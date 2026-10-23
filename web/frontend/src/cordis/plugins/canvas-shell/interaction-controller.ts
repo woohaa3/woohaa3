@@ -347,6 +347,9 @@ export function installInteractionController(options: InteractionControllerOptio
   let startupFrameKey = "";
   let startupFrameCount = 0;
   const runFrame = (force: boolean) => {
+    // A cold query or synchronous subscriber can request a flush while this scene
+    // is still being built. Finish its acceptance before retrying on the next frame.
+    if (frameExecuting) { markInvalidated("input"); return; }
     const measured = submissionDiagnosticsEnabled();
     const started = measured ? target.performance.now() : 0;
     const previous = frameExecuting; frameExecuting = true;

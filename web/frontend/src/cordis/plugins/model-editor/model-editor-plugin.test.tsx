@@ -179,13 +179,13 @@ afterEach(async () => {
   woohaa3CanvasStore.getState().applyRemoteCanvas(null as never);
 });
 
-function registerScene() {
+function registerScene(position: [number, number, number] = [0, 0, 0]) {
   modelSceneStore.put("m1", "woohaa-model-scene-ir-v2", [
     {
       t: "box",
       id: "b",
       parent: null,
-      position: [0, 0, 0],
+      position,
       rotation: [0, 0, 0],
       scale: [1, 1, 1],
       material: null,
@@ -243,6 +243,43 @@ describe("ModelEditorPlugin", () => {
     expect(gizmo?.toolMode).toBe("camera");
     expect(gizmo?.radius).toBeGreaterThan(0);
     expect(gizmo?.shot).toBeTruthy();
+  });
+
+  it.each([0, 65])("片场：偏心场景的聚焦取景与保存镜头一致（显示旋转 %s°）", async (yaw) => {
+    registerScene([4, 3, -2]);
+    const canvas = filmSetCanvas();
+    canvas.nodeData.m1!.modelPlacement = { scale: 0.7, yaw, offset: { x: 0, y: 0, z: 0 } };
+    const camera: ModelCamera = { id: "cam-a", name: "镜头", order: 0, azimuth: 0.4, elevation: 0.6,
+      distance: 3, aspect: "16:9", focusOffset: { x: 0.3, y: -0.2, z: 0.5 } };
+    const h = await harness(canvas, undefined, [camera]);
+    runtime = h.runtime;
+    h.focus.nodeId = "m1";
+    h.runtimeService.emitFocus();
+
+    const target = resolveTargets()[0]!;
+    const scene = filmSetSceneBounds(target)!;
+    expect(Math.hypot(...scene.center)).toBeGreaterThan(1);
+    const bounds = modelBounds(target)!;
+    const scale = filmSetDisplayScale(target);
+    const angle = yaw * Math.PI / 180;
+    const offset = camera.focusOffset!;
+    // Saved camera offsets are relative to the content center, as in the card rig.
+    const focus: [number, number, number] = [
+      bounds.center[0] + scale * (Math.cos(angle) * offset.x + Math.sin(angle) * offset.z),
+      bounds.center[1] + scale * offset.y,
+      bounds.center[2] + scale * (-Math.sin(angle) * offset.x + Math.cos(angle) * offset.z)
+    ];
+    const distance = clampShotDistance(camera.distance, shotFitDistance(shotBoundingRadius(scene.aabb), 16 / 9)) * scale;
+    const azimuth = camera.azimuth + angle;
+    const position = shotCameraPosition(focus, azimuth, distance, camera.elevation!);
+    const shot = h.getGizmo()!.shot!;
+    for (let axis = 0; axis < 3; axis++) {
+      expect(shot.focus[axis]).toBeCloseTo(focus[axis]!, 4);
+      expect(shot.position[axis]).toBeCloseTo(position[axis]!, 4);
+    }
+    expect(shot.azimuth).toBeCloseTo(azimuth);
+    expect(shot.distance).toBeCloseTo(distance);
+    expect(h.submitted).toHaveLength(0);
   });
 
   it("片场：拖相机沿径向改变距离，拖环改变方位，松开才提交", async () => {
@@ -411,6 +448,20 @@ describe("ModelEditorPlugin", () => {
     expect(h.getGizmo()).toBeNull();
     const service = h.runtime.ctx.get(MODEL_EDITOR_SERVICE as never) as unknown as { getState: () => { nodeId: string | null } };
     expect(service.getState().nodeId).toBeNull();
+  });
+
+  it("后退退出聚焦前提交尚未结束的镜头拖动", async () => {
+    registerScene();
+    const h = await harness(filmSetCanvas(), undefined, [{ id: "cam-a", name: "镜头 1", order: 0, azimuth: 0, elevation: Math.PI / 4, distance: 6, aspect: "16:9" }]);
+    runtime = h.runtime;
+    h.focus.nodeId = "m1";
+    h.runtimeService.emitFocus();
+    const service = h.runtime.ctx.get(MODEL_EDITOR_SERVICE as never) as unknown as { session: ModelEditorSession };
+    service.session.beginPose();
+    service.session.updatePose({ distance: 9 });
+    await expect(h.focusExit.prepare()).resolves.toMatchObject({ ok: true });
+    expect(h.submitted.at(-1)?.cameras[0]?.distance).toBe(9);
+    expect(service.session.getState().posePreview).toBeNull();
   });
 
   it("片场：添加镜头提交一次规范化 modelCameras patch 并进入镜头模式", async () => {

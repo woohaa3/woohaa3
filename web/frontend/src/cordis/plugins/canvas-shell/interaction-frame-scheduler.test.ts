@@ -54,6 +54,32 @@ function setup(textureSync?: Parameters<typeof installInteractionController>[0][
 }
 
 describe("纯视口增量路由（design D3）", () => {
+  it("首次构建中的范围查询不递归提交未完成的场景", () => {
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 0, y: 0 }]));
+    const { dom, advance } = frameClock();
+    const { runtime, scenes } = runtimeCapturing();
+    let builds = 0;
+    const controller = installInteractionController({
+      canvas: dom.canvas, getRuntime: () => runtime, getSession: () => getSession() as never,
+      target: dom.target as never,
+      getNodeActionToolbars: () => {
+        builds++;
+        if (builds > 3) throw new Error("recursive scene build");
+        controller.queryCompositeAssetScopes();
+        return new Map();
+      }
+    });
+    try {
+      controller.flush();
+      expect(builds).toBe(1);
+      expect(scenes).toHaveLength(1);
+      expect(controller.renderError()).toBeNull();
+      advance();
+      expect(builds).toBeLessThanOrEqual(2);
+      expect(scenes).toHaveLength(1);
+    } finally { controller.dispose(); }
+  });
+
   it("范围观察者只在成功提交后收到通知，静止、去重、失败和卸载不伪造变化", () => {
     const changed = vi.fn();
     const { controller, advance, dom, failNextSetScene } = setup(undefined, changed);

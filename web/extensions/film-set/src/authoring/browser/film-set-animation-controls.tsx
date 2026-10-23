@@ -39,8 +39,8 @@ function kindLabel(kind: FilmSetShotKind): string {
   return kind === "static" ? "静态镜头" : "动态镜头";
 }
 
-export function FilmSetAnimationControls({ ctx, nodeId, writable, cameraId, composition, compositionOpen, onCompositionOpenChange, images }: {
-  ctx: Context; nodeId: string; writable: boolean; cameraId: string | null; composition?: ReactNode;
+export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, compositionOpen, onCompositionOpenChange, images }: {
+  ctx: Context; nodeId: string; writable: boolean; composition?: ReactNode;
   compositionOpen?: boolean; onCompositionOpenChange?: (open: boolean) => void;
   images?: ShotImageReferences;
 }) {
@@ -50,7 +50,6 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, cameraId, comp
   const playback = useSyncExternalStore(ctx.filmSetPlayback.subscribe, ctx.filmSetPlayback.getSnapshot, ctx.filmSetPlayback.getSnapshot);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
-  const [saved, setSaved] = useState(false);
   useSyncExternalStore(images?.subscribe ?? (() => () => {}), images?.revision ?? (() => 0), () => 0);
   useSyncExternalStore(ctx.modelWorkspace.session.subscribe, ctx.modelWorkspace.session.getState, ctx.modelWorkspace.session.getState);
   const [pendingKind, setPendingKind] = useState<FilmSetShotKind | null>(null);
@@ -68,7 +67,7 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, cameraId, comp
     setPendingKind(null);
     setError(null);
     setMenu(null);
-    setRenaming(false); setSaved(false);
+    setRenaming(false);
   }, [nodeId, shot?.id]);
   useEffect(() => {
     if (playback.nodeId !== nodeId || playback.clipId !== (shot?.id ?? null)) ctx.filmSetPlayback.select(nodeId, shot?.id ?? null);
@@ -89,12 +88,14 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, cameraId, comp
   const create = async (kind: FilmSetShotKind): Promise<void> => {
     const id = `clip-${crypto.randomUUID()}`;
     const duration = kind === "dynamic" ? DEFAULT_DYNAMIC_DURATION : 0;
+    const camera = ctx.modelWorkspace.session.selectedCamera();
+    const initialCamera = camera ? { ...ctx.modelWorkspace.session.effectivePose(camera), focusOffset: ctx.modelWorkspace.session.effectiveFocus(camera) } : animation.sceneCamera;
     const clip: FilmSetAnimationClip = {
       id,
       name: kind === "dynamic" ? "新动态镜头" : "新静态镜头",
       kind,
       timeline: { duration, loop: false },
-      initialCamera: animation.sceneCamera,
+      initialCamera,
       cameraMotion: createMotionSnapshot({ motionScript: "", basedOnModelVersion: { revision: 1, sourceHash: "camera", contentHash: "camera" } }),
       bindings: [],
       ...(shot?.backdrop ? { backdrop: shot.backdrop } : {})
@@ -102,14 +103,6 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, cameraId, comp
     if (await mutate({ kind: "create", clip }, id)) ctx.filmSetPlayback.select(nodeId, id);
   };
 
-  const replaceComposition = async (): Promise<void> => {
-    const camera = ctx.modelWorkspace.session.cameras().find(entry => entry.id === cameraId);
-    if (camera) setSaved(await mutate({ kind: "camera", initialCamera: { azimuth: camera.azimuth, elevation: camera.elevation, distance: camera.distance, aspect: camera.aspect, focusOffset: camera.focusOffset ?? { x: 0, y: 0, z: 0 } } }));
-  };
-  const camera = ctx.modelWorkspace.session.cameras().find(entry => entry.id === cameraId);
-  const cameraValue = camera ? { azimuth: camera.azimuth, elevation: camera.elevation, distance: camera.distance, aspect: camera.aspect, focusOffset: camera.focusOffset ?? { x: 0, y: 0, z: 0 } } : null;
-  const canonicalCamera = (value: NonNullable<typeof cameraValue>) => [value.azimuth, value.elevation ?? 0, value.distance, value.aspect, value.focusOffset?.x ?? 0, value.focusOffset?.y ?? 0, value.focusOffset?.z ?? 0];
-  const unapplied = !!shot && !!cameraValue && JSON.stringify(canonicalCamera(cameraValue)) !== JSON.stringify(canonicalCamera(shot.initialCamera));
   const imageState = shot?.kind === "static" ? images?.state(nodeId, shot.id) : undefined;
 
   /**
@@ -159,7 +152,7 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, cameraId, comp
       </div>
     </div>
     {collection.clips.length === 0 ? <p className="film-set-object-list__empty">还没有拍摄镜头。新建静态镜头做固定构图，或新建动态镜头加入时长与动作。</p> : null}
-    <div className="film-set-shot-picker"><SelectInput label="拍摄镜头" value={shot?.id ?? ""} onValueChange={value => ctx.filmSetPlayback.select(nodeId, value)}
+    <div className="film-set-shot-picker"><SelectInput label="拍摄镜头" value={shot?.id ?? ""} onValueChange={value => { ctx.modelWorkspace.session.commitForCapture(); ctx.filmSetPlayback.select(nodeId, value); }}
       options={collection.clips.map((clip, index) => ({ value: clip.id, label: `${index + 1}. ${clip.name}${clip.id === collection.defaultClipId ? " · 默认" : ""}` }))} />
       {shot?.kind === "dynamic" ? <Button size="sm" aria-pressed={playback.preview} onClick={() => playback.preview ? ctx.filmSetPlayback.edit() : ctx.filmSetPlayback.preview()}>{playback.preview ? "返回编辑" : "动画预览"}</Button> : null}
     </div>
@@ -192,10 +185,8 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, cameraId, comp
           event.preventDefault();
           onCompositionOpenChange(!compositionOpen);
         } : undefined}>构图<span>{shot.initialCamera.aspect}</span></summary>
-        <p className="film-set-object-hint">当前观察视角独立于镜头已保存构图。</p>
+        <p className="film-set-object-hint">修改构图后自动保存，画布预览卡同步更新。</p>
         {composition}
-        {unapplied ? <p className="film-set-object-hint">构图尚未应用</p> : saved ? <p className="film-set-object-hint">构图已保存</p> : null}
-        <Button size="sm" disabled={!writable || !cameraId} onClick={() => void replaceComposition()}>用当前视角更新构图</Button>
       </details>
       {shot.kind === "static" ? <div className="film-set-image-reference">
         <p>{imageState?.status === "ready" ? "图片参考已更新" : imageState?.status === "failed" ? `图片参考更新失败：${imageState.error}` : "图片参考准备中 · 退出片场后自动更新"}</p>

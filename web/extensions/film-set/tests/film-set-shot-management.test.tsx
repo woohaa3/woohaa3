@@ -18,6 +18,7 @@ import {
   filmSetAnimationsOf,
   type FilmSetAnimationClip,
   type FilmSetAnimations,
+  type ModelCamera,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import type { FilmSetContext as Context } from "../src/integration/browser/context.js";
@@ -25,6 +26,7 @@ import { createTestCanvasState } from "./canvas-state.js";
 const store = createTestCanvasState();
 import { FilmSetAnimationControls } from "../src/authoring/browser/film-set-animation-controls.js";
 import { FilmSetPlaybackService } from "../src/preview/browser/playback-service.js";
+import { ModelEditorSession } from "@woohaa3/frontend/extension-api";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -71,11 +73,17 @@ function canvasWith(animations: FilmSetAnimations): ServerCanvas {
   } as unknown as ServerCanvas;
 }
 
-function render(animations: FilmSetAnimations, options: { writable?: boolean } = {}) {
+function render(animations: FilmSetAnimations, options: { writable?: boolean; camera?: ModelCamera } = {}) {
   const canvas = canvasWith(animations);
   store.getState().applyRemoteCanvas(canvas as never);
   const submitted: Array<{ type: string; clipId: string; op: { kind: string; clip?: unknown; confirmClearContent?: boolean; duration?: number } }> = [];
   const playback = new FilmSetPlaybackService();
+  const session = new ModelEditorSession({
+    readCameras: () => options.camera ? [options.camera] : [],
+    isWritable: () => options.writable ?? true,
+    submitCameras: (_nodeId, cameras) => { options.camera = cameras[0]; return true; }
+  });
+  session.enter("film");
   const ctx = {
     canvasState: store.facade,
     compositeAssets: {
@@ -84,7 +92,7 @@ function render(animations: FilmSetAnimations, options: { writable?: boolean } =
       projectCanvas: (value: ServerCanvas | null) => value
     },
     filmSetPlayback: playback,
-    modelWorkspace: { session: { cameras: () => [], subscribe: () => () => {}, getState: () => null } },
+    modelWorkspace: { session },
     canvasSession: {
       submitCommands: (commands: typeof submitted) => { submitted.push(...commands); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }
     }
@@ -93,12 +101,19 @@ function render(animations: FilmSetAnimations, options: { writable?: boolean } =
   document.body.appendChild(element);
   root = createRoot(element);
   const writable = options.writable ?? true;
-  act(() => root!.render(<FilmSetAnimationControls ctx={ctx} nodeId="film" writable={writable} cameraId={null} />));
+  act(() => root!.render(<FilmSetAnimationControls ctx={ctx} nodeId="film" writable={writable} />));
   const button = (name: string) => [...document.querySelectorAll("button")].find(entry => entry.textContent === name || entry.getAttribute("aria-label") === name);
-  return { submitted, playback, button, writable };
+  return { submitted, playback, button, writable, session };
 }
 
 describe("拍摄镜头管理工作区（任务 6.5）", () => {
+  it("构图自动保存，不再提供手动更新按钮", () => {
+    const h = render({ schemaVersion: 3, defaultClipId: "s1", clips: [staticClip("s1", "定妆照")] });
+    expect(document.body.textContent).toContain("修改构图后自动保存");
+    expect(h.button("用当前视角更新构图")).toBeUndefined();
+    expect(h.button("载入镜头已保存构图")).toBeUndefined();
+    expect(h.submitted).toHaveLength(0);
+  });
   it("空集合显示创建入口、禁用预览，且不自动创建镜头", () => {
     const h = render({ schemaVersion: 3, defaultClipId: null, clips: [] });
     expect(document.querySelector(".film-set-animation-controls")?.textContent).toContain("还没有拍摄镜头");
