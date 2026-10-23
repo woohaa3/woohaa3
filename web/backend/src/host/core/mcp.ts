@@ -9,7 +9,7 @@ import { createMcpService } from "@woohaa3/mcp-service";
 import { canvasGroupEpoch, withCanvasGroupScope } from "@woohaa3/canvas-service";
 import type { HostPlugin } from "../context.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
-import { createToolGrantRegistry } from "../../ports/authoring-adapters.js";
+import { catalogToolsForGrant, createToolGrantRegistry } from "../../ports/authoring-adapters.js";
 import { createExtensionMcpBridge } from "../../ports/extension-mcp.js";
 import { agentCanvasServiceToClient, modelMcpServiceToClient } from "../../ports/mcp-adapters.js";
 
@@ -44,7 +44,7 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       }), ctx.canvas),
       // 只共享显式配置的 Canvas 身份；缺省/空值不得凭空造身份。
       agentClient: groupScopedClient(agentCanvasServiceToClient(services.agent, { principalId: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "" }), ctx.canvas),
-      toolGrant: { allowedTools: token => toolGrants.verify(token)?.groupScope ? toolGrants.verify(token)!.tools : undefined, authorize: (input) => toolGrants.authorize(input) },
+      toolGrant: { allowedTools: token => catalogToolsForGrant(toolGrants.verify(token)), authorize: (input) => toolGrants.authorize(input) },
       logger: ctx.log.scope("mcp")
     });
     ctx.effect(() => () => mcp.close());

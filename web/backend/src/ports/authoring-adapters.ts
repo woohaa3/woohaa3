@@ -54,6 +54,11 @@ export type ToolGrantRegistry = {
   authorize: (input: { token: string; tool: string; canvasId?: string; nodeId?: string; cameraId?: string; clipId?: string; itemId?: string }) => { ok: true } | { ok: false; reason: string };
 };
 
+/** MCP `tools/list` 的本轮目录：有 grant 就只暴露其 tools，无 token 才给全量发现。 */
+export function catalogToolsForGrant(grant: { tools: readonly string[] } | null | undefined): readonly string[] | undefined {
+  return grant ? grant.tools : undefined;
+}
+
 export function createToolGrantRegistry(): ToolGrantRegistry {
   const grants = new Map<string, ApplicationToolGrant>();
   return {

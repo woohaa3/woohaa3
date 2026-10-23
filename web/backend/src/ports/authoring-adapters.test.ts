@@ -5,9 +5,16 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasService } from "@woohaa3/canvas-service";
 import type { ApplicationUserDelegation } from "@woohaa3/contracts";
-import { createInProcessAuthoringServices, createToolGrantRegistry } from "./authoring-adapters.js";
+import { catalogToolsForGrant, createInProcessAuthoringServices, createToolGrantRegistry } from "./authoring-adapters.js";
 
 const DELEGATION: ApplicationUserDelegation = { subject: "user-a", authLevel: "authenticated" };
+
+it("MCP 目录在有 grant 时按 tools 收窄，无 grant 才保持全量发现", () => {
+  expect(catalogToolsForGrant(null)).toBeUndefined();
+  expect(catalogToolsForGrant(undefined)).toBeUndefined();
+  expect(catalogToolsForGrant({ tools: ["get_model_node", "submit_model_script"] })).toEqual(["get_model_node", "submit_model_script"]);
+  expect(catalogToolsForGrant({ tools: [] })).toEqual([]);
+});
 
 it("does not revoke another owner's group grant with a colliding request identity", () => {
   const registry = createToolGrantRegistry();

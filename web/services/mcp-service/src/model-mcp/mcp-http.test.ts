@@ -527,6 +527,26 @@ describe("render_model_preview MCP（change: enhance-model-scene-authoring-api�
     expect(JSON.stringify(allowed.body)).toContain("cmd");
     expect(submitted).toEqual(["canvas-a"]);
   });
+
+  it("携带 bearer 时 tools/list 只暴露 grant 允许的工具", async () => {
+    const { base } = await start(undefined, {
+      authorize: () => ({ ok: true }),
+      allowedTools: token => token === "scoped" ? ["get_model_api", "submit_model_script"] : undefined
+    });
+    const headers = { authorization: "Bearer scoped" };
+    await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test-client", version: "1" } }
+    }, headers);
+    const listed = await mcpPost(base, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, headers);
+    const names = ((listed.body.result as { tools: Array<{ name: string }> }).tools).map((tool) => tool.name).sort();
+    expect(names).toEqual(["get_model_api", "submit_model_script"]);
+    expect(names).not.toContain("get_canvas_graph");
+    expect(names).not.toContain("get_node_output");
+  });
+
   it("real clip tool forwards captured actor scope through the registrar", async () => {
     const calls: unknown[] = [];
     const authorized: unknown[] = [];
