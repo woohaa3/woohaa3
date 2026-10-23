@@ -61,7 +61,7 @@ export type SceneBuildInput = {
 
 export function buildSceneWithResources(
   options: InteractionControllerOptions,
-  surfaceSize: () => { width: number; height: number; pixelRatio: number },
+  surfaceSize: () => { width: number; height: number; pixelRatio: number; originX?: number; originY?: number },
   modelPlacements: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyModelPlacement>,
   input: SceneBuildInput
 ): { scene: CanvasRenderScene; resources: Map<string, PreparedModelResource> } | null {

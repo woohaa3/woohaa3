@@ -561,7 +561,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
     scene.marquee
       ? `marquee=${scene.marquee.x},${scene.marquee.y},${scene.marquee.width},${scene.marquee.height}`
       : "marquee=",
-    scene.surface ? `surf=${scene.surface.width},${scene.surface.height},${scene.surface.pixelRatio},${scene.surface.contentRight ?? 0},${JSON.stringify(scene.surface.contentRect ?? null)}` : "surf=",
+    scene.surface ? `surf=${scene.surface.width},${scene.surface.height},${scene.surface.pixelRatio},${scene.surface.contentRight ?? 0},${JSON.stringify(scene.surface.contentRect ?? null)},${scene.surface.originX ?? 0},${scene.surface.originY ?? 0}` : "surf=",
     scene.modelFocus
       ? `focus=${scene.modelFocus.nodeId},${scene.modelFocus.yaw},${scene.modelFocus.pitch},${scene.modelFocus.distance},${scene.modelFocus.radius},${scene.modelFocus.target.join(",")}`
       : "focus=",

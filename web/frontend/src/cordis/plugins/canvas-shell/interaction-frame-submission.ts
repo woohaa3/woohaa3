@@ -23,7 +23,7 @@ export function createFrameSubmission(deps: {
   options: InteractionControllerOptions; state: InteractionState;
   now?: () => number;
   viewport: () => Viewport;
-  surface: () => {width:number;height:number;pixelRatio:number};
+  surface: () => {width:number;height:number;pixelRatio:number;originX?:number;originY?:number};
   transient: () => {dragAttach: CanvasRenderScene["dragAttach"] | null; aggregateConnect: CanvasRenderScene["aggregateConnect"] | null};
   build: () => {scene:CanvasRenderScene;resources:Map<string,PreparedModelResource>} | null;
 }) {
@@ -45,7 +45,7 @@ export function createFrameSubmission(deps: {
     if (baseline.base !== runtime.baseSceneGeneration?.()) return "base-changed";
     if (runtime.getRenderIssues?.().length) return "render-issues";
     const surface = deps.surface(), previous = baseline.scene.surface;
-    if (!previous || surface.width !== previous.width || surface.height !== previous.height || surface.pixelRatio !== previous.pixelRatio) return "surface-changed";
+    if (!previous || surface.width !== previous.width || surface.height !== previous.height || surface.pixelRatio !== previous.pixelRatio || (surface.originX ?? 0) !== (previous.originX ?? 0) || (surface.originY ?? 0) !== (previous.originY ?? 0)) return "surface-changed";
     if (baseline.scene.modelFocus || baseline.scene.modelEditor || baseline.scene.imageFocus || baseline.scene.videoFocus) return "baseline-focus";
     if (deps.options.getModelFocus?.() || deps.options.getModelEditor?.() || deps.options.getImageFocus?.() || deps.options.getVideoFocus?.()) return "focus-active";
     if (deps.state.localSizes.size) return "local-sizes";
