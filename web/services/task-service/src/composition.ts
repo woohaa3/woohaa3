@@ -33,7 +33,6 @@ import { createTaskExtensionTaskApiHandler, type TaskExtensionTaskApiDependencie
 import { createSqliteExtensionTaskAssociationRepository } from "./repository/extension-task-association-repository.js";
 import {
   CANVAS_TASK_LIMITS,
-  isValidStorageKey,
   type BackendTaskPort,
   type CanvasTaskActivityEventBatch,
   type CanvasTaskActivitySnapshot,
@@ -333,38 +332,27 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       });
     };
 
-    // 参考输入的传递方式由 Provider 声明（缺省 url）。两条路互斥，不互相兜底：
-    // - `url`：Provider 自带上传优先，不行才由存储 expose 签出执行期地址；
-    // - `storage-key`：不签地址也不上传字节，直接把稳定键交给 Provider
-    //   （远端托管生成的画布媒体本来就在服务端，见 docs/design/canvas-media-and-reference-flow.md）。
-    const referenceHandling = generationProvider?.referenceHandling ?? "url";
+    // 参考输入的位置解析：Provider 先自己上传（拿到 locator 或它自己素材服务的 url），
+    // 不行才由存储 expose 签出执行期地址。两种结果都记下来，Provider 按能力挑一个。
     let referenceUrls: string[] = [];
+    let referenceLocators: Array<string | undefined> = [];
     if (request.inputs.length > 0) {
-      if (referenceHandling === "storage-key") {
-        // 键是唯一凭据：非法键直接稳定失败，不要让服务端在执行期给一个更难懂的错误。
-        const invalid = request.inputs.find((input) => !isValidStorageKey(input.storageKey));
-        if (invalid) {
-          const reason = `参考素材键不合法：${invalid.mediaType}`;
-          markSubmitFailed(reason, "ReferenceInputUnavailable");
-          return { reused: false, state: "failed", mediaError: reason };
-        }
-      } else {
-        const resolved = await resolveReferenceUrls({
-          inputs: request.inputs,
-          ...(extensionAssociation ? {} : { scope: { canvasId: request.canvasId } }),
-          provider: generationProvider,
-          readReferenceObject: options.readReferenceObject,
-          mediaClient,
-          expiresSeconds: CANVAS_TASK_LIMITS.referenceUrlTtlSeconds,
-          logger: options.logger
-        });
-        if (!resolved.ok) {
-          // 调 provider 之前就已知失败：落失败终态（spec「签名 URL 生成失败」）。
-          markSubmitFailed(resolved.reason, "ReferenceInputUnavailable");
-          return { reused: false, state: "failed", mediaError: resolved.reason };
-        }
-        referenceUrls = resolved.urls;
+      const resolved = await resolveReferenceUrls({
+        inputs: request.inputs,
+        ...(extensionAssociation ? {} : { scope: { canvasId: request.canvasId } }),
+        provider: generationProvider,
+        readReferenceObject: options.readReferenceObject,
+        mediaClient,
+        expiresSeconds: CANVAS_TASK_LIMITS.referenceUrlTtlSeconds,
+        logger: options.logger
+      });
+      if (!resolved.ok) {
+        // 调 provider 之前就已知失败：落失败终态（spec「签名 URL 生成失败」）。
+        markSubmitFailed(resolved.reason, "ReferenceInputUnavailable");
+        return { reused: false, state: "failed", mediaError: resolved.reason };
       }
+      referenceUrls = resolved.urls;
+      referenceLocators = resolved.locators;
     }
     const admission = await resolveAdmissionVersions(request, extensionAssociation);
     const initial: HistoryRecordInput = {
@@ -417,8 +405,9 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
         role: input.role,
         ...(input.mediaKind ? { mediaKind: input.mediaKind } : {}),
         mediaType: input.mediaType,
-        // `storage-key` 模式下不存在执行期地址：Provider 只应读 storageKey。
-        ...(referenceHandling === "storage-key" ? {} : { url: referenceUrls[index] ?? "" }),
+        // 位置二选一：locator（本部署存储）优先，没有才给执行期地址。空串不入契约。
+        ...(referenceLocators[index] ? { locator: referenceLocators[index] as string } : {}),
+        ...(!referenceLocators[index] && referenceUrls[index] ? { url: referenceUrls[index] as string } : {}),
         assetId: input.assetId,
         storageKey: input.storageKey
       })),

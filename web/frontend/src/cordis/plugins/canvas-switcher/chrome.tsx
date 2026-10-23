@@ -22,7 +22,7 @@ import type { DialogRenderer, DialogRendererProps } from "../../services/dialogs
 import type { CanvasCatalogService, CanvasSelectionService, CanvasSummary } from "../../contract/canvas-catalog.js";
 import type { CanvasSession } from "../../contract/session.js";
 import type { CanvasNavigationService } from "../../navigation/index.js";
-import type { SlotsService } from "../../contracts.js";
+import type { CanvasCreateOptionContribution, SlotsService } from "../../contracts.js";
 
 export const CANVAS_SWITCHER_DIALOG_ID = "canvas-switcher";
 
@@ -188,7 +188,7 @@ export type CanvasSwitcherDeps = {
   session: CanvasSession;
   currentCanvasId: () => string;
   switchTo: (canvasId: string) => void;
-  create: () => Promise<{ ok: boolean; error?: string; canvasId?: string }>;
+  create: (options?: readonly CanvasCreateOptionContribution[]) => Promise<{ ok: boolean; error?: string; canvasId?: string }>;
   rename: (title: string) => Promise<{ ok: boolean; error?: string }>;
   /**
    * Slot registry：条目右侧的扩展动作（`canvas.catalog-item-action`）从这里读取
@@ -241,7 +241,17 @@ export function createCanvasSwitcherRenderer(deps: CanvasSwitcherDeps): DialogRe
       () => deps.slots.version(),
       () => deps.slots.version()
     );
-    const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
+const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
+    // 新建选项（`canvas.create-option`）：与条目动作同一套订阅方式，扩展晚注册也会出现。
+    useSyncExternalStore(
+      (listener) => deps.slots.subscribe("canvas.create-option", listener),
+      () => deps.slots.version(),
+      () => deps.slots.version()
+    );
+    const createOptions = deps.slots.list("canvas.create-option").filter((option) => option.available?.() !== false);
+    const [selectedCreateOptions, setSelectedCreateOptions] = useState<string[]>(() =>
+      createOptions.filter((option) => option.defaultEnabled === true).map((option) => option.id)
+    );
     const currentCanvasId = deps.currentCanvasId();
     const currentEntry = catalogState.entries.find((entry) => entry.id === currentCanvasId);
     const [query, setQuery] = useState("");
@@ -372,8 +382,10 @@ export function createCanvasSwitcherRenderer(deps: CanvasSwitcherDeps): DialogRe
     };
 
     const onCreate = () => {
+      // 勾选的选项按注册顺序交给宿主；建完画布后逐个 apply，失败不回滚画布。
+      const chosen = createOptions.filter((option) => selectedCreateOptions.includes(option.id));
       // DialogHost rejects closing a busy instance; clear busy before requesting close.
-      void run(deps.create).then((result) => {
+      void run(() => deps.create(chosen)).then((result) => {
         if (result?.ok && result.canvasId) requestClose();
       });
     };
@@ -433,6 +445,44 @@ export function createCanvasSwitcherRenderer(deps: CanvasSwitcherDeps): DialogRe
       } catch {
         setSourceState((prev) => ({ ...prev, loadingMore: false, error: "来源目录不可用" }));
       }
+    };
+
+    /**
+     * 新建选项行：单行紧凑形态（复选框 + 文案 + 灰色说明），可直接放进 footer 左侧。
+     *
+     * 之前做成「标题一行、说明一行」的独立块，视觉上像页脚外面漂着一段不属于任何人的
+     * 表单；收进 footer 并与按钮同基线，才读得出「这是新建的前置选择」。
+     */
+    const renderCreateOptions = (variant: "footer" | "empty" = "footer") => {
+      if (createOptions.length === 0) return null;
+      const toggle = (id: string, checked: boolean) =>
+        setSelectedCreateOptions((previous) =>
+          checked ? [...previous, id] : previous.filter((item) => item !== id)
+        );
+      return (
+        <div
+          className={
+            variant === "empty"
+              ? "canvas-switcher__create-options canvas-switcher__create-options--center"
+              : "canvas-switcher__create-options"
+          }
+        >
+          {createOptions.map((option) => (
+            <label key={option.id} className="canvas-switcher__create-option" title={option.description}>
+              <input
+                type="checkbox"
+                checked={selectedCreateOptions.includes(option.id)}
+                disabled={busy}
+                onChange={(event) => toggle(option.id, event.target.checked)}
+              />
+              <span className="canvas-switcher__create-option-label">{option.label}</span>
+              {option.description ? (
+                <span className="canvas-switcher__create-option-hint">{option.description}</span>
+              ) : null}
+            </label>
+          ))}
+        </div>
+      );
     };
 
     return (
@@ -539,6 +589,7 @@ export function createCanvasSwitcherRenderer(deps: CanvasSwitcherDeps): DialogRe
                 <CanvasSwitcherIcon className="canvas-switcher__empty-icon" />
                 <p className="canvas-switcher__empty-title">还没有画布</p>
                 <p className="canvas-switcher__empty-hint">新建一张画布开始创作。</p>
+            {renderCreateOptions("empty")}
                 <Button tone="primary" onClick={onCreate} disabled={busy}>
                   新建画布
                 </Button>
@@ -689,6 +740,7 @@ export function createCanvasSwitcherRenderer(deps: CanvasSwitcherDeps): DialogRe
           {error ? <p className="canvas-switcher__error" role="status">{error}</p> : null}
         </Dialog.Body>
         <Dialog.Footer>
+          {renderCreateOptions()}
           <Button tone="primary" onClick={onCreate} disabled={busy}>
             新建画布
           </Button>

@@ -7,7 +7,7 @@
  *
  * 本模块不接触请求/响应对象，只处理稳定 DTO；副作用与校验语义与原 handler 完全一致。
  */
-import type { MediaMetadata, MediaStorage, MediaStorageScope } from "@woohaa3/contracts";
+import type { MediaLocator, MediaMetadata, MediaStorage, MediaStorageScope } from "@woohaa3/contracts";
 import {
   defaultMaxOutputBytesFor,
   extensionForMediaType,
@@ -85,6 +85,14 @@ export type MediaApplicationService = {
   sign(storageKey: string, expiresSeconds?: number, scope?: MediaStorageScope): Promise<string>;
   importFromUrl(input: { url: string; contentType?: string; maxBytes?: number; canvasId?: string }): Promise<MediaMetadata>;
   importBytes(input: { bytesBase64: string; contentType: string; maxBytes?: number; canvasId?: string }): Promise<MediaMetadata>;
+  /** 按 locator 导入：字节可能在任何后端，存储层取数，媒体层只做校验与登记。 */
+  importFromLocator(input: {
+    locator: MediaLocator;
+    canvasId?: string;
+    contentType?: string;
+    maxBytes?: number;
+    expected?: { contentType?: string; size?: number; checksum?: string };
+  }): Promise<MediaMetadata>;
 };
 
 export function createMediaApplicationService(
@@ -237,6 +245,31 @@ export function createMediaApplicationService(
         throw new MediaApplicationError("malformed-request", "bytesBase64 不是合法 base64");
       }
       return persistBytes({ bytes, contentType: input.contentType, maxBytes: input.maxBytes, scope });
+    },
+
+    async importFromLocator(input) {
+      if (typeof options.storage.readLocator !== "function") {
+        throw new MediaApplicationError("unavailable", "当前存储不支持按 locator 读取");
+      }
+      const scope = scopeOf(input.canvasId);
+      let object;
+      try {
+        object = await options.storage.readLocator(input.locator);
+      } catch (error) {
+        if (isMediaObjectNotFoundError(error)) {
+          throw new MediaApplicationError("media-not-found", "locator 指向的对象不存在或不可读");
+        }
+        throw new MediaApplicationError("storage-failed", "按 locator 读取字节失败");
+      }
+      const contentType = input.contentType ?? object.contentType;
+      if (contentType === undefined || contentType === "") {
+        throw new MediaApplicationError("unsupported", "无法从 locator 判断媒体类型");
+      }
+      const metadata = await persistBytes({ bytes: object.bytes, contentType, maxBytes: input.maxBytes, scope });
+      if (input.expected !== undefined && compareMetadata(metadata, input.expected) !== null) {
+        throw new MediaApplicationError("storage-failed", "locator 对象的元数据与期望不一致");
+      }
+      return metadata;
     }
   };
 }

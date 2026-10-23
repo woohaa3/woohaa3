@@ -20,6 +20,7 @@ import {
   canvasSwitcherDefinition,
   createCanvasSwitcherRenderer
 } from "./chrome.js";
+import type { CanvasCreateOptionContribution } from "../../contracts.js";
 import type { CanvasLiveSync } from "./chrome.js";
 
 export const CANVAS_SWITCHER_PLUGIN_ID = "canvas-switcher";
@@ -131,11 +132,27 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
         });
       };
 
-      const create = async () => {
+      const create = async (options?: readonly CanvasCreateOptionContribution[]) => {
         const result = await catalog.create({});
         if (!result.ok) return { ok: false, error: result.error };
         selection.setRecentCanvasId(result.canvasId);
         ctx.appRouter.navigate({ page: "canvas", canvasId: result.canvasId });
+        // 选项在建好之后执行：失败只报告，**不回滚画布**——回滚会让用户丢掉刚建的东西。
+        const failures: string[] = [];
+        for (const option of options ?? []) {
+          try {
+            const applied = await option.apply({ canvasId: result.canvasId });
+            if (!applied.ok) failures.push(`${option.label}：${applied.error}`);
+          } catch (error) {
+            failures.push(`${option.label}：${error instanceof Error ? error.message : "失败"}`);
+          }
+        }
+        if (failures.length > 0) {
+          ctx.dialogs.open({
+            dialogId: ALERT_DIALOG_ID,
+            payload: { title: "画布已创建，但选项未生效", description: failures.join("\n") }
+          });
+        }
         return { ok: true, canvasId: result.canvasId };
       };
 

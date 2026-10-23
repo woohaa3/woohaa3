@@ -63,6 +63,15 @@ export function createMediaStorageFromStorage(
       if (!stat) throw new MediaObjectNotFoundError(key);
       return stat;
     },
-    getHttpsUrl: (key, options, scope) => bucket(scope).expose(key, options)
+    getHttpsUrl: (key, options, scope) => bucket(scope).expose(key, options),
+    // 按 locator 读字节：解析归 ctx.storage（它知道有哪些后端），本适配器只做翻译。
+    async readLocator(locator) {
+      try {
+        return await storage.readLocator(locator);
+      } catch (error) {
+        if (isStorageObjectNotFoundError(error)) throw new MediaObjectNotFoundError(locator);
+        throw error;
+      }
+    }
   };
 }

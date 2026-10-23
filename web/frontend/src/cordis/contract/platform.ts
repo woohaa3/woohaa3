@@ -357,6 +357,32 @@ export type CatalogItemActionContribution = {
 };
 
 
+/**
+ * 新建画布时可勾选的选项（`canvas.create-option` slot）。
+ *
+ * 宿主只负责：建完画布后按勾选顺序调用每个贡献的 `apply`，失败如实报出（不回滚画布——
+ * 画布已经建好了，回滚会让用户丢掉刚建的东西）。「要不要出现、什么时候可用」由贡献方
+ * 自己回答，宿主不认识任何扩展。
+ */
+export type CanvasCreateOptionContribution = {
+  /** 贡献稳定 ID；同一 slot 内重复会启动失败。 */
+  id: string;
+  /** 拥有者（诊断用）。 */
+  owner: string;
+  /** 越小越靠前。 */
+  priority?: number;
+  /** 复选框文案。 */
+  label: string;
+  /** 一句解释，放在文案下方。 */
+  description?: string;
+  /** 默认是否勾选；缺省不勾（新建默认本地，同步是显式选择）。 */
+  defaultEnabled?: boolean;
+  /** 此刻是否应该出现；缺省总是出现。 */
+  available?: () => boolean;
+  /** 画布建好后执行；失败返回原因，由宿主展示。 */
+  apply: (context: { canvasId: string }) => Promise<{ ok: true } | { ok: false; error: string }>;
+};
+
 export type SlotContributionMap = {
   "app.route": { path: string; render: ComponentType<RouteProps> };
   "canvas.overlay": { render: ComponentType<CanvasSlotProps> };
@@ -367,6 +393,8 @@ export type SlotContributionMap = {
    * 「把这张本地画布同步到远端」这类动作做成**显式操作**，而不是登录后的默认行为。
    */
   "canvas.catalog-item-action": CatalogItemActionContribution;
+  /** 新建画布时可勾选的选项（例如「同时同步到远端」）。 */
+  "canvas.create-option": CanvasCreateOptionContribution;
   /**
    * 通用「选中节点操作」横条的动作贡献
    * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1 / design D6）。

@@ -69,6 +69,7 @@ function fakeStorage(): {
         return current;
       },
       replicate: async () => false,
+      readLocator: async () => ({ bytes: new Uint8Array([1]) }),
       primaryId: () => "local",
       exposeId: () => undefined,
       readiness: () => ({ ready: true })

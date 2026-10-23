@@ -74,6 +74,9 @@ describe("进程内契约适配器", () => {
       async sign() {
         return "https://signed.example/x";
       },
+      async importFromLocator() {
+        return { storageKey: "media/locator.png", contentType: "image/png", size: 1, checksum: "x" };
+      },
       async importFromUrl() {
         return { storageKey: "sha256-".padEnd(71, "a"), contentType: "image/png", size: 1, checksum: "x" };
       },

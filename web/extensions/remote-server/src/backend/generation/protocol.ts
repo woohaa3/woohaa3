@@ -17,6 +17,7 @@ import {
   GENERIC_MODEL_INTERACTION_ID,
   GENERIC_MODEL_INTERACTION_VERSION,
   isGenerationModelCapabilityFacts,
+  isMediaLocator,
   isModelInteractionDescriptor,
   isPromptRequirement,
   isValidStorageKey,
@@ -517,12 +518,15 @@ export type DecodedTaskFailure = { code: string; retryable: boolean };
 export type DecodedTaskText = { content: Array<{ type: "text"; text: string }> };
 export type DecodedTaskMedia = {
   media: {
-    storageKey: string;
+    /** 画布命名空间内的逻辑键（旧契约）；主体命名空间没有它。 */
+    storageKey?: string;
+    /** 结果字节的不透明位置（新契约）；远端托管生成必有。 */
+    locator?: string;
     contentType: string;
     size: number;
     checksum?: string;
     durationSeconds?: number;
-    poster?: { storageKey: string; contentType: string; size: number; checksum?: string };
+    poster?: { storageKey?: string; locator?: string; contentType: string; size: number; checksum?: string };
   };
 };
 
@@ -553,20 +557,28 @@ function decodeMedia(value: unknown): DecodedTaskMedia | null {
   const record = asRecord(value);
   if (record === null) return null;
   const storageKey = readStringField(record, "storageKey", "storage_key");
+  const locator = readStringField(record, "mediaLocator", "media_locator");
   const contentType = readStringField(record, "contentType", "content_type");
   const size = readIntField(record, "size");
-  if (storageKey === null || contentType === null || size === null || size < 0) return null;
-  if (!isValidStorageKey(storageKey)) return null;
+  if (contentType === null || size === null || size < 0) return null;
+  const hasKey = storageKey !== null && isValidStorageKey(storageKey);
+  const hasLocator = locator !== null && isMediaLocator(locator);
+  // 位置二选一：新契约给 locator（主体命名空间没有画布逻辑键），旧契约给 storage_key。
+  if (!hasKey && !hasLocator) return null;
   const durationSeconds = readIntField(record, "durationSeconds", "duration_seconds");
   const posterRecord = readRecordField(record, "poster");
   let poster: NonNullable<DecodedTaskMedia["media"]["poster"]> | undefined;
   if (posterRecord !== null) {
     const posterKey = readStringField(posterRecord, "storageKey", "storage_key");
+    const posterLocator = readStringField(posterRecord, "mediaLocator", "media_locator");
     const posterType = readStringField(posterRecord, "contentType", "content_type");
     const posterSize = readIntField(posterRecord, "size");
-    if (posterKey !== null && posterType !== null && posterSize !== null && posterSize >= 0 && isValidStorageKey(posterKey)) {
+    const posterHasKey = posterKey !== null && isValidStorageKey(posterKey);
+    const posterHasLocator = posterLocator !== null && isMediaLocator(posterLocator);
+    if (posterType !== null && posterSize !== null && posterSize >= 0 && (posterHasKey || posterHasLocator)) {
       poster = {
-        storageKey: posterKey,
+        ...(posterHasKey ? { storageKey: posterKey as string } : {}),
+        ...(posterHasLocator ? { locator: posterLocator as string } : {}),
         contentType: posterType,
         size: posterSize,
         ...(readStringField(posterRecord, "checksum") !== null ? { checksum: readStringField(posterRecord, "checksum") as string } : {})
@@ -575,7 +587,8 @@ function decodeMedia(value: unknown): DecodedTaskMedia | null {
   }
   return {
     media: {
-      storageKey,
+      ...(hasKey ? { storageKey: storageKey as string } : {}),
+      ...(hasLocator ? { locator: locator as string } : {}),
       contentType,
       size,
       ...(readStringField(record, "checksum") !== null ? { checksum: readStringField(record, "checksum") as string } : {}),

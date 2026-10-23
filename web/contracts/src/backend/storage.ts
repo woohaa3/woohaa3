@@ -57,6 +57,8 @@ export type StorageObject = {
 };
 
 /** 区间读取的字节流；消费者结束时取消上游。 */
+import type { MediaLocator } from "../media/storage.js";
+
 export type StorageObjectStream = {
   bytes: AsyncIterable<Uint8Array>;
   cancel(): void;
@@ -113,6 +115,19 @@ export type StorageBackend = {
   delete?(key: string, scope?: StorageScope): Promise<void>;
   presign?(key: string, options?: { expiresSeconds?: number }, scope?: StorageScope): Promise<string>;
   putStream?(key:string,bytes:AsyncIterable<Uint8Array>,contentType:string,options:{size:number;signal?:AbortSignal},scope?:StorageScope):Promise<void>;
+  /**
+   * 按 locator 读字节（可跨后端）。
+   *
+   * locator 是不透明串：只有产出它的后端知道怎么解析，实现内部完成授权与取数。
+   * 未实现表示该部署不支持按 locator 读取。
+   */
+  readLocator?(locator: MediaLocator): Promise<StorageObject>;
+  /**
+   * 给出某个稳定键对应的 locator（写完之后把「新位置」交回调用方）。
+   *
+   * 实现不了时返回 undefined：调用方据此知道结果不带定位符，而不是自己拼一个前缀。
+   */
+  locatorOf?(key: string, scope?: StorageScope): Promise<MediaLocator | undefined>;
 };
 
 /** namespace 视图：使用方给 key，core 拼上 namespace，后端再加自己的前缀。 */
@@ -167,6 +182,13 @@ export type HostStorageService = {
     key: string,
     options: { targetBackendId: string; scope?: StorageScope; sourceBackendId?: string }
   ): Promise<boolean>;
+  /**
+   * 按 locator 读字节：解析出 backendId，交给对应后端的 `readLocator`。
+   *
+   * 这是 locator 的**唯一**解析入口：使用方永远不该自己拆 `media://...`。
+   * 后端没实现或 locator 不属于任何已注册后端时报错（显式失败，不回落主存储）。
+   */
+  readLocator(locator: MediaLocator): Promise<StorageObject>;
   /** 设置 `storage.primary` 的值（缺省 `local`）。 */
   primaryId(): string;
   /** 设置 `storage.expose` 的值；空表示只用主存储的签名能力。 */

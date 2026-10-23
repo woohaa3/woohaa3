@@ -45,6 +45,7 @@ export type {
   CanvasSlotProps,
   CanvasCatalogItemActionProps,
   CatalogItemActionContribution,
+  CanvasCreateOptionContribution,
   ContextMenuContext,
   PromptSnippetSearchResult,
   PromptSnippetSource,

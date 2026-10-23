@@ -126,7 +126,8 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
       verify: (storageKey, expected, scope) => internalApp.verify(storageKey, expected, scope),
       sign: (storageKey, expiresSeconds, scope) => internalApp.sign(storageKey, expiresSeconds, scope),
       importFromUrl: (input) => internalApp.importFromUrl(input),
-      importBytes: (input) => internalApp.importBytes(input)
+      importBytes: (input) => internalApp.importBytes(input),
+      importFromLocator: (input) => internalApp.importFromLocator(input)
     }),
     handle: async (req, res) => {
       // 内部协议优先（不同前缀，不会与 public 冲突）。

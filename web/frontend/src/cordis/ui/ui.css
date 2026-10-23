@@ -2602,6 +2602,67 @@
 	color: var(--app-web-text-muted);
 }
 
+/* 新建选项（canvas.create-option）：footer 左侧的单行控件，与按钮同基线。
+   说明做成灰色行内文字（·分隔），不再另起一行——那会让它读起来像页脚外的一段独立表单。 */
+.canvas-switcher__create-options {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-right: auto; /* footer 是 flex-end：把按钮推到右侧 */
+	min-width: 0;
+}
+
+.canvas-switcher__create-options--center {
+	align-items: center;
+	margin: 0 0 10px;
+}
+
+.canvas-switcher__create-option {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 34px; /* 与 footer 按钮等高，避免一高一低 */
+	padding: 0 10px 0 2px;
+	border-radius: 8px;
+	font-size: 12.5px;
+	color: var(--app-web-text-primary);
+	cursor: pointer;
+	user-select: none;
+	min-width: 0;
+}
+
+.canvas-switcher__create-option:hover {
+	background: color-mix(in srgb, var(--app-web-text-primary) 6%, transparent);
+}
+
+.canvas-switcher__create-option input {
+	flex: none;
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	accent-color: var(--app-interaction-accent);
+	cursor: pointer;
+}
+
+.canvas-switcher__create-option-label {
+	font-weight: 500;
+	white-space: nowrap;
+}
+
+.canvas-switcher__create-option-hint {
+	min-width: 0;
+	font-size: 11.5px;
+	color: var(--app-web-text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.canvas-switcher__create-option-hint::before {
+	content: "·";
+	margin-right: 6px;
+}
+
 .canvas-switcher__badge {
 	flex: none;
 	padding: 1px 7px;

@@ -27,7 +27,7 @@ import {
   REMOTE_GENERATION_PROVIDER_ID,
   type GenerationAdmission
 } from "./protocol.js";
-import { createRemoteGenerationProvider, prepareRemoteGenerationInput } from "./provider.js";
+import { RemoteGenerationError, createRemoteGenerationProvider, prepareRemoteGenerationInput } from "./provider.js";
 import { withImageParameterFamily } from "./image-models.js";
 
 /** 刷新结果（受控 handler 直接返回它；不含远端正文与任何凭据）。 */
@@ -60,6 +60,13 @@ export type RemoteGenerationBridgeOptions = {
   /** 测试可调小轮询间隔。 */
   pollIntervalMs?: number;
   clientTimeoutMs?: number;
+  /**
+   * 把参考字节推到本部署的存储，返回它的 locator。
+   *
+   * 由后端装配注入（用的是已注册的 server 存储后端）：Provider 不知道键布局，
+   * 只负责「把字节交出去，拿回一个不透明位置」。
+   */
+  putReference?: (input: { bytes: Uint8Array; contentType: string; canvasId?: string; storageKey?: string }) => Promise<string | undefined>;
 };
 
 export type RemoteGenerationBridge = {
@@ -94,6 +101,7 @@ export function createRemoteGenerationBridge(options: RemoteGenerationBridgeOpti
   const providerHandle = createRemoteGenerationProvider({
     client,
     session: options.session,
+    ...(options.putReference ? { putReference: options.putReference } : {}),
     modelFor,
     admissionFor: (providerModelId) => admission.get(providerModelId),
     ...(options.pollIntervalMs !== undefined ? { pollIntervalMs: options.pollIntervalMs } : {})
@@ -297,9 +305,18 @@ export function createRemoteGenerationBridge(options: RemoteGenerationBridgeOpti
         provider: providerHandle,
         models,
         describe: (providerModelId: string) => modelFor(providerModelId),
-        // 参考输入直接消费画布资产的稳定键：本 Provider 不收地址、也不上传字节。
-        // 服务端按 (canvas_id, storage_key) 读自己的对象，画布媒体已由归属路由放在服务端。
-        referenceHandling: "storage-key",
+        // 参考输入走自己上传：本地/未同步画布的字节在客户端，服务端读不到裸键。
+        // uploadReference 把字节推到本部署存储并返回 locator，提交体只带 locator；
+        // 已经是服务端对象（reference.locator 存在）时 Task 不会问这个钩子。
+        uploadReference: async (input) => {
+          const locator = await options.putReference?.(input);
+          if (locator === undefined) {
+            // 明确报「没连上」，不要回落到签名地址：那会让上游拿到一个它读不了的 URL，
+            // 最后以 media-not-found 收场，把「未连接」伪装成「素材不存在」。
+            throw new RemoteGenerationError("unavailable", "尚未连接远端服务，无法上传参考素材");
+          }
+          return { locator };
+        },
         prepareInput: (input) => prepareRemoteGenerationInput(input, { modelFor, admissionFor: (id) => admission.get(id) })
       };
       // 只注册一次：registration 非空即已注册，之后的刷新只原地改写。

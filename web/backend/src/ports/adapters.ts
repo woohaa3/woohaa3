@@ -51,7 +51,8 @@ export function mediaPortToTaskMediaClient(port: BackendMediaPort): MediaClient 
     sign: (storageKey, expiresSeconds, scope) => port.sign(storageKey, expiresSeconds, scope),
     // import 的 canvasId 在 input 里：原样转给媒体模块，由它交给存储层做画布路由。
     importFromUrl: (input) => port.importFromUrl(input),
-    importBytes: (input) => port.importBytes(input)
+    importBytes: (input) => port.importBytes(input),
+    importFromLocator: (input) => port.importFromLocator(input)
   };
 }
 

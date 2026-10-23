@@ -25,6 +25,10 @@ function recordingPort() {
       signCalls.push({ storageKey, expiresSeconds, scope });
       return "https://cos.example/signed";
     },
+    async importFromLocator(input) {
+      importCalls.push({ locator: input.locator });
+      return metadata("media/locator.png");
+    },
     async importFromUrl(input) {
       importCalls.push({ kind: "url", ...input });
       return metadata();
