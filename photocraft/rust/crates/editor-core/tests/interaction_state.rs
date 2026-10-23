@@ -125,12 +125,20 @@ fn invalid_adjustment_parameters_block_stale_commit_and_can_be_corrected() {
     let before=editor.state();let initial=editor.begin_adjustment(layer).unwrap();
     let good=json!({"points":[[0,0],[128,180],[255,255]]});
     editor.preview_adjustment(good.clone()).unwrap();
-    for bad in [json!({}),json!({"layer":layer}),json!({"eyedropper":{"point":"white","at":[1,1]}}),
-        json!({"red":[[0,0],[255,255]]}),json!({"points":[[0,0],[0,10]]}),
-        json!({"points":[[0,0],[256,255]]}),json!({"points":[[0,"x"],[255,255]]}),json!({"points":[[0,0]]})] {
+    // U41（change: 2026-10-22-add-photocraft-adjustment-workflows）放开分通道曲线与黑灰白场吸管，
+    // 因此这两项从「必须拒绝」改为下方单独校验；其余结构/类型/几何错误仍然拒绝。
+    for bad in [json!({}),json!({"layer":layer}),
+        json!({"points":[[0,0],[0,10]]}),
+        json!({"points":[[0,0],[256,255]]}),json!({"points":[[0,"x"],[255,255]]}),json!({"points":[[0,0]]}),
+        json!({"red":[[0,0],[0,10]]}),json!({"eyedropper":{"point":"guess","at":[1,1]}})] {
         assert!(editor.preview_adjustment(bad).is_err());
         assert!(editor.commit_adjustment().is_err());assert_eq!(editor.state(),before);
     }
+    // 分通道曲线与吸管现在是合法参数：接受且仍只改草稿。
+    editor.preview_adjustment(json!({"red":[[0,0],[255,255]]})).unwrap();
+    editor.preview_adjustment(json!({"eyedropper":{"point":"white","at":[1,1]}})).unwrap();
+    assert_eq!(editor.state(),before);
+    assert!(editor.preview_adjustment(json!({"points":[[0,0],[0,10]]})).is_err());
     editor.preview_adjustment(json!({"points":initial["params"]["points"]})).unwrap();
     editor.commit_adjustment().unwrap();assert_eq!(editor.state(),before);
     editor.begin_adjustment(layer).unwrap();editor.preview_adjustment(good).unwrap();

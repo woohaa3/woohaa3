@@ -29,16 +29,20 @@ import { IMAGE_EDIT_SERVICE, type ImageEditService } from "@woohaa3/frontend/plu
 import { EditorWorkspaceController } from "./editor-workspace.js";
 import type { ProjectEditorPort } from "./project-editor-pane.js";
 import { IMAGE_PROJECT_CONTENT_TYPE } from "@woohaa3/contracts";
-import { EditorDocumentRegistry, type EditorDocumentEntry, MAX_OPEN_DOCUMENTS } from "@woohaa3/photocraft-editor";
+import { EditorDocumentRegistry, type EditorDocumentEntry, MAX_OPEN_DOCUMENTS, RequestSequence, setAnimationCodecPort } from "@woohaa3/photocraft-editor";
+import { heldBytesAfterSave, planCloseAll, planCloseOthers, planReopenRecent, runClosePlan, type RecentFileEntry } from "@woohaa3/photocraft-protocol";
 import { DocumentWorkspaceSession, pendingDraftOf, type DocumentResource } from "./document-session.js";
 import type { FileDocumentWorkspace } from "./file-document-workspace.js";
 import { settleDocument } from "./document-settlement.js";
 import { createBrowserFilePort, decodeImageSize } from "./file-delivery-adapter.js";
 import { classifyOpenFile, OPEN_FILE_ACCEPT } from "./open-file.js";
+import { PLACE_IMAGE_ACCEPT, deliverPsd, pickFile, pickPsd, placeImageFile } from "./place-file.js";
 import { SerialGate, canOpenDocument, DEFAULT_WORKSPACE_POLICY, describePolicy } from "./workspace-policy.js";
 import { createPublishOperation, publishToCanvas, type PublishOperation } from "./publish-node.js";
 import { normalizeEditorImage } from "@woohaa3/photocraft-editor";
 import { DocumentWorkspaceStore } from "./workspace-store.js";
+import { createAnimationCodecPort } from "./animation-codec-port.js";
+import { RecentFilesIndex, planReleasedBytes, trackDocumentWhenReady } from "./recent-files-index.js";
 
 export const IMAGE_EDITOR_PLUGIN_ID = "image-editor";
 const IMAGE_EDITOR_WORKSPACE_ID = "image-editor-workspace";
@@ -58,6 +62,36 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       const gate = new SerialGate(DEFAULT_WORKSPACE_POLICY.maxOpenConcurrency);
       /** 独立文件字节（同一文档的打开/保存/发布复用）。 */
       const fileBytes = new Map<string, Uint8Array>();
+      /**
+       * 最近文件索引（U04）：只记身份与大小，字节仍在 `fileBytes`。
+       *
+       * 关标签/发布到画布时字节会被释放，那条记录同步移除——否则界面会显示一条点不开的
+       * 「最近文件」，用户点了才发现打不开。
+       */
+      const recentFiles = new RecentFilesIndex();
+      /**
+       * 等内核视图出现后再记录最近文件（打开路径的控制器是异步建好的）。
+       *
+       * 值是取消订阅：文档在视图出现前被关闭/发布时用它取消，避免记录一条已经不存在的文档。
+       */
+      const recentTracked = new Map<string, () => void>();
+      let layerClipboard: Uint8Array | null = null;
+      function transferLayers(id: string): void {
+        const resource = session.active();
+        const controller = resource?.controller;
+        if (!resource || !controller || resource.view.isReadOnlyPreview()) return;
+        if (controller.hasActiveDraft()) { setNotice({message: "请先确认或取消当前草稿", tone: "error"}); return; }
+        if (id === "edit.layerTransferCopy") {
+          const result = controller.copyLayers();
+          if (result.ok) layerClipboard = result.value;
+          setNotice({message: result.ok ? "已复制到工作区剪贴板" : result.message, tone: result.ok ? "info" : "error"});
+          return;
+        }
+        if (!layerClipboard) { setNotice({message: "工作区剪贴板为空，请先复制图层", tone: "error"}); return; }
+        const document = controller.currentView().document;
+        const result = controller.pasteLayers(layerClipboard, {inPlace: id === "edit.layerTransferPasteInPlace", ...(document ? {center: [document.width / 2, document.height / 2] as [number, number]} : {})});
+        setNotice(result.ok ? null : {message: result.message, tone: "error"});
+      }
       /** 添加到画布的稳定操作身份（按文档；重试复用同一 operationId/nodeId）。 */
       const publishOperations = new Map<string, PublishOperation>();
       /** 等待权威修订到达后重开内容的节点文档。 */
@@ -65,6 +99,15 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       let busy = false;
       let notice: { message: string; tone: "info" | "error" } | null = null;
       let disposed = false;
+      /**
+       * 宿主视频编解码端口（U77）。
+       *
+       * 编辑器只依赖公共 `AnimationCodecPort` 契约；真实 WebCodecs + 容器封装在这里注册。
+       * 注册后时间轴面板的「导入视频 / 导出视频」才可用；浏览器缺 WebCodecs 时端口自己回答
+       * `supported:false`（面板禁用并显示原因），不会静默只取首帧。
+       */
+      const animationCodec = createAnimationCodecPort();
+      setAnimationCodecPort(animationCodec);
       let removingRecovery: (() => void) | null = null;
       /** 当前概览入口的文案（用于判断是否需要重新注册）。 */
       let recoveryLabel: string | null = null;
@@ -131,6 +174,8 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           busy,
           // 恢复入口的数量随打开文档数变化（返回画布后仍可见）。
           writable: ctx.canvasSession.isWritable(),
+          recentFiles: recentFiles.snapshot(),
+          recentFilesError: recentFiles.lastError,
           notice
         });
         syncRecoveryAction();
@@ -285,6 +330,8 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       /** 编辑器控制器：保存目的地按文档绑定（节点写原节点 / 独立文件走本地交付）。 */
       function createController(resource: DocumentResource, _entry: EditorDocumentEntry): EditorWorkspaceController {
         const controller: EditorWorkspaceController = new EditorWorkspaceController({
+          // 状态变化即刷新该文档的门禁：草稿开始/结束、保存开始/结束都会改变能否切换或关闭。
+          onState: () => syncDocumentGate(resource.documentId),
           dialogOwner: () => {
             const active = session.active();
             if (active !== resource || resource.controller !== controller) return null;
@@ -298,6 +345,10 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           // 节点文档沿用原来的工程会话；独立文件的会话由文件呈现自持。
           session: resource.view.project,
           sessionId: resource.kind === "node" ? resource.sessionId : `image-edit:${canvasId}:${resource.documentId}`,
+          // 文档归属：条目 id 与注册表代际。关闭后重开同一节点会拿到新代际，
+          // 因此上一会话的模式计划不会被确认到新文档上（任务 3.3）。
+          documentId: resource.documentId,
+          documentGeneration: () => registry.entry(resource.documentId)?.generation ?? 0,
           baselineDocument: resource.kind === "node" ? resource.view.projectDocument() : null,
           assetUrl: appPublicUrl,
           ...(resource.kind === "file"
@@ -388,15 +439,28 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       }
 
       /**
-       * 让文档成为活动呈现：节点文档提交 node-focus，独立文件提交 document-workspace。
+       * 呈现请求序号（change: 2026-10-22-add-photocraft-file-workflows，任务 3.3）。
+       *
+       * 打开/重开都是异步的（解码 + WASM 打开 + 入场过渡）。先发起的请求可能后完成；
+       * 若它无条件提交导航，就会把用户在等待期间切到的文档挤掉。规则：只有最新一次请求
+       * 可以改变呈现——更早的请求仍完成打开（tab 保留），只是不抢呈现。
+       */
+      const presentationRequests = new RequestSequence();
+
+      /** 让文档成为活动呈现：节点文档提交 node-focus，独立文件提交 document-workspace。
        *
        * 两种情况都经唯一 Navigation/runtime coordinator 原子切换；失败保留原呈现与草稿。
+       * 被更新的呈现请求取代时提前返回 `false`（文档已打开，只是不抢呈现）。
        */
       async function enterDocumentPresentation(documentId: string, options: { preserveOverviewReturn: boolean }): Promise<boolean> {
+        const token = presentationRequests.next("presentation");
         const resource = session.resource(documentId);
         if (!resource) return false;
         const prepared = await startResource(resource);
         if (!prepared) return false;
+        // 准备期间用户已经切到别的文档：不提交导航，避免把新的呈现挤掉。这不是失败——
+        // 文档确实打开了（tab 已存在），呈现权交给更新的那次请求，所以仍返回成功。
+        if (!presentationRequests.isLatest("presentation", token)) return true;
         const result = resource.kind === "node"
           ? await ctx.canvasNavigation.requestEnterNodeFocus({
               nodeId: resource.nodeId, kind: "image", owner: "direct", preserveOverviewReturn: options.preserveOverviewReturn
@@ -433,11 +497,19 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       }
 
       /** 激活已打开文档（tab 点击 / 恢复入口）。 */
+      /**
+       * 切换活动文档。
+       *
+       * 门禁在会话里统一判定（`DocumentWorkspaceSession.activate` 先按活动控制器刷新未结算
+       * 草稿/保存阶段，再交给注册表），因此键盘、程序化导航与这里的点击共用同一条规则
+       * （change: 2026-10-22-add-photocraft-image-mode-workflows，任务 3.3）。
+       */
       function activateDocument(documentId: string): void {
         if (disposed) return;
         const previous = session.activeId();
         const result = session.activate(documentId);
         if (!result.ok) {
+          syncDocumentGate(previous);
           setNotice({ message: result.reason, tone: "error" });
           return;
         }
@@ -445,6 +517,23 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           // tab 切换：保留本轮首次进入捕获的 overview 返回位置。
           void enterDocumentPresentation(documentId, { preserveOverviewReturn: true });
         }
+        syncDocumentGate(documentId);
+      }
+
+      /**
+       * 把活动文档的门禁状态写进注册表，供标签栏显示与任何激活路径拒绝。
+       *
+       * 判定本身复用会话里的同一个 `pendingDraftOf`（其权威是控制器的 `blockingDraft()`），
+       * 不在这里另写一套条件。注册表的 gate 是「**当前活动**文档不能被离开」的共享位：
+       * 只允许活动文档写它——后台文档保存结束若来改这个位，会把之后的切换永久挡住，
+       * 而那时没有任何活动文档的手续会再去清它。
+       */
+      function syncDocumentGate(documentId: string | null): void {
+        if (!documentId) return;
+        if (session.activeId() !== documentId) return;
+        const resource = session.resource(documentId);
+        const reason = resource?.controller ? pendingDraftOf(resource.controller) : null;
+        registry.setGate(documentId, reason);
       }
 
       // ------------------------------------------------------------ 打开文件
@@ -467,6 +556,154 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         input.addEventListener("cancel", finish);
         document.body.appendChild(input);
         input.click();
+      }
+
+      /**
+       * 记录一条最近文件（U04）。
+       *
+       * 尺寸取自**已打开文档的视图**（内核真实画布），不是从文件名或字节头猜的；没有文档视图
+       * 时不记录——一条尺寸错误的记录会误导用户在重开前判断内容。
+       */
+      function recordRecent(documentId: string, name: string, bytes: Uint8Array): void {
+        const resource = session.resource(documentId);
+        const document = resource?.controller?.currentView().document;
+        if (!document) return;
+        recentFiles.record({
+          id: documentId,
+          name,
+          width: document.width,
+          height: document.height,
+          bytes
+        });
+        pruneRetainedBytes();
+        publish();
+      }
+
+      /**
+       * 等内核真正打开文档后再记录（尺寸来自内核，不从字节头猜）。
+       *
+       * 打开路径只拿到字节：控制器由呈现层异步 `openProject`/`openImage`，此刻
+       * `currentView().document` 还是 null。直接记录会静默漏掉每一条最近文件，因此这里等
+       * 第一份带尺寸的视图出现再记一次（规则见 `trackDocumentWhenReady`）。
+       */
+      function trackRecent(documentId: string, name: string, bytes: Uint8Array): void {
+        const controller = session.resource(documentId)?.controller;
+        if (!controller) return;
+        const cancel = trackDocumentWhenReady(controller, () => {
+          recentTracked.delete(documentId);
+          recordRecent(documentId, name, bytes);
+        });
+        recentTracked.set(documentId, cancel);
+      }
+
+      /** 取消尚未成立的记录（文档在视图出现前就被关闭/发布）。 */
+      function cancelTrackedRecent(documentId: string): void {
+        recentTracked.get(documentId)?.();
+        recentTracked.delete(documentId);
+      }
+
+      /**
+       * 字节预算收敛：最近记录之外的字节不再保留。
+       *
+       * 已关闭文档的字节**暂时**留在内存里，这样「最近文件 ▸ 重开」能真的用原字节重开；
+       * 一旦索引按条数/累计预算把它逐出，或用户移除记录，对应字节立刻释放。仍在打开的
+       * 文档无论有没有记录都保留字节（保存/导出要用）。规则见 `planReleasedBytes`。
+       */
+      function pruneRetainedBytes(): void {
+        const released = planReleasedBytes({
+          bytes: fileBytes.keys(),
+          recorded: recentFiles.snapshot().entries.map((entry) => entry.id),
+          open: registry.snapshotState().entries.map((entry) => entry.id)
+        });
+        for (const id of released) fileBytes.delete(id);
+      }
+
+      /**
+       * 保存成功后刷新宿主持有的字节（U04）。
+       *
+       * 打开时持有的是**打开那一刻**的字节；用户保存工程后磁盘上的内容已经前进。若不同步，
+       * 「最近文件 ▸ 重开」会静默打开保存前的旧内容——记录还在、名字一样，内容却是旧的。
+       * 判定规则见 `bytesAfterProjectSave`（修订必须与冻结产物一致）。
+       */
+      function refreshHeldBytes(documentId: string): void {
+        const controller = session.resource(documentId)?.controller;
+        const held = heldBytesAfterSave({
+          currentRevision: controller?.currentView().document?.revision ?? null,
+          frozen: controller?.frozenArtifacts() ?? null
+        });
+        if (!held) return;
+        fileBytes.set(documentId, held);
+        const existing = recentFiles.snapshot().entries.find((entry) => entry.id === documentId);
+        // 只刷新同一条记录的字节数与时间；身份/尺寸/名称不变。
+        if (existing) {
+          recentFiles.record({
+            id: documentId,
+            name: existing.name,
+            width: existing.width,
+            height: existing.height,
+            bytes: held
+          });
+        }
+        publish();
+      }
+
+      /**
+       * 用户显式移除一条最近记录。
+       *
+       * 只释放**已关闭**文档的字节：仍打开的文档还要用它保存/导出，记录消失不等于内容消失。
+       */
+      function forgetRecent(documentId: string): void {
+        cancelTrackedRecent(documentId);
+        recentFiles.remove(documentId);
+        if (!session.resource(documentId)) fileBytes.delete(documentId);
+        publish();
+      }
+
+      /**
+       * 重开一条最近文件（U04）。
+       *
+       * 前置判定与面板共用同一份纯规则；字节只从宿主内存取（浏览器不授予路径权限），
+       * 取不到就如实说「需重新选择」，不静默退回新建。
+       */
+      async function reopenRecent(entry: RecentFileEntry): Promise<{ ok: true } | { ok: false; reason: string }> {
+        if (disposed) return { ok: false, reason: "工作区已释放" };
+        const held = fileBytes.get(entry.id) ?? null;
+        const plan = planReopenRecent(recentFiles.snapshot(), entry.id, { hasBytes: held !== null, busy: activeDocumentBusy() });
+        if (!plan.ok) return { ok: false, reason: plan.reason };
+        // 记录对应的文档还开着（例如刚切走）：激活它，不为同一份内容再开一个 tab。
+        if (session.resource(entry.id)) {
+          activateDocument(entry.id);
+          return { ok: true };
+        }
+        const capacity = canOpenDocument(registry.snapshotState().entries.length);
+        if (!capacity.ok) return { ok: false, reason: capacity.reason };
+        const classified = classifyOpenFile({ name: entry.name });
+        if (!classified.ok) return { ok: false, reason: classified.reason };
+        setBusy(true);
+        setNotice(null);
+        try {
+          const opened = session.openFile({ fileName: entry.name, bytes: held!, kind: classified.kind });
+          if (!opened.ok) return { ok: false, reason: opened.reason };
+          fileBytes.set(opened.documentId, held!);
+          // 记录跟着新文档 id 走：旧 id 的条目与字节一并释放，列表只留一条。
+          cancelTrackedRecent(entry.id);
+          recentFiles.remove(entry.id);
+          trackRecent(opened.documentId, entry.name, held!);
+          pruneRetainedBytes();
+          const presented = await enterDocumentPresentation(opened.documentId, { preserveOverviewReturn: false });
+          return presented ? { ok: true } : { ok: false, reason: "文件已打开，但进入编辑视图失败" };
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      /** 活动文档是否有未结算草稿或正在保存（重开/新建前必须结算）。 */
+      function activeDocumentBusy(): boolean {
+        const resource = session.active();
+        if (!resource?.controller) return false;
+        const phase = resource.controller.currentState().phase;
+        if (phase === "saving" || phase === "freezing") return true;
+        return resource.controller.hasActiveDraft();
       }
 
       async function openFileDocument(file: File): Promise<void> {
@@ -494,12 +731,159 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
             return;
           }
           fileBytes.set(opened.documentId, bytes);
+          // U04：打开/新建的 `.pcraft` 与归一后的图片字节都记入最近文件（只记身份与大小）。
+          // 尺寸取自内核视图（异步出现），因此不在这里直接记录。
+          trackRecent(opened.documentId, file.name, bytes);
           await enterDocumentPresentation(opened.documentId, { preserveOverviewReturn: false });
         } catch (error) {
           setNotice({ message: error instanceof Error ? error.message : "无法打开文件，请重试", tone: "error" });
         } finally {
           setBusy(false);
         }
+      }
+
+      /**
+       * 新建空白文档（change: 2026-10-22-add-photocraft-file-workflows，U01）。
+       *
+       * 编辑器在**独立候选实例**上建好文档并序列化成自包含 `.pcraft` 字节后交到这里；
+       * 宿主只需用自己的既有打开路径把它落成一个独立文档/标签。这样：
+       * - 不把新建解释成新建画布，也不伪造节点文档；
+       * - 已有文档时可以再建一份（每份都有自己的条目、控制器与撤销栈）；
+       * - 容量上限、命名、tab 注册与呈现全部沿用既有实现，不复制第二套状态。
+       */
+      async function openBlankDocument(input: { bytes: Uint8Array; name: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
+        if (disposed) return { ok: false, reason: "工作区已释放" };
+        if (!(input.bytes instanceof Uint8Array) || input.bytes.length === 0) {
+          return { ok: false, reason: "新文档没有可打开的工程字节" };
+        }
+        const capacity = canOpenDocument(registry.snapshotState().entries.length);
+        if (!capacity.ok) return { ok: false, reason: capacity.reason };
+        setBusy(true);
+        setNotice(null);
+        try {
+          const fileName = `${input.name.trim() || "未命名"}.pcraft`;
+          const opened = session.openFile({ fileName, bytes: input.bytes, kind: "project" });
+          if (!opened.ok) return { ok: false, reason: opened.reason };
+          fileBytes.set(opened.documentId, input.bytes);
+          // U04：新建文档也进入最近文件（与「打开文件」同一条记录路径）。
+          trackRecent(opened.documentId, fileName, input.bytes);
+          const presented = await enterDocumentPresentation(opened.documentId, { preserveOverviewReturn: false });
+          return presented ? { ok: true } : { ok: false, reason: "新文档已创建，但进入编辑视图失败" };
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      /** 显式“置入图片”：只往当前活动文档加层，不建新文档。 */
+      function placeImage(): void {
+        if (disposed || typeof document === "undefined") return;
+        void (async () => {
+          const file = await pickFile(PLACE_IMAGE_ACCEPT);
+          if (!file) return;
+          const resource = session.active();
+          if (!resource?.controller) {
+            setNotice({ message: "没有可置入的活动文档", tone: "error" });
+            return;
+          }
+          const entry = registry.entry(resource.documentId);
+          if (entry && !entry.writable) {
+            setNotice({ message: "当前文档只读，无法置入", tone: "error" });
+            return;
+          }
+          setBusy(true);
+          try {
+            const outcome = await placeImageFile(resource.controller, file);
+            if (!outcome.ok) {
+              setNotice({ message: outcome.reason, tone: "error" });
+              return;
+            }
+            setNotice({ message: `已置入 ${outcome.name}`, tone: "info" });
+          } finally {
+            setBusy(false);
+          }
+        })();
+      }
+
+      /** 导入 PSD：内核预检 + 候选文档；默认拒绝不可编辑结构，可显式选择扁平副本。 */
+      function importPsd(): void {
+        if (disposed) return;
+        void (async () => {
+          const picked = await pickPsd();
+          if (!picked.ok) {
+            if (picked.reason !== "已取消") setNotice({ message: picked.reason, tone: "error" });
+            return;
+          }
+          const capacity = canOpenDocument(registry.snapshotState().entries.length);
+          if (!capacity.ok) {
+            setNotice({ message: capacity.reason, tone: "error" });
+            return;
+          }
+          // PSD 先经内核预检，再决定是否作为新文档打开。
+          const opened = session.openFile({ fileName: picked.file.name, bytes: picked.file.bytes, kind: "project" });
+          if (!opened.ok) {
+            setNotice({ message: opened.reason, tone: "error" });
+            return;
+          }
+          fileBytes.set(opened.documentId, picked.file.bytes);
+          trackRecent(opened.documentId, picked.file.name, picked.file.bytes);
+          await enterDocumentPresentation(opened.documentId, { preserveOverviewReturn: false });
+        })();
+      }
+
+      /** 导出 PSD：只交付文件副本，不影响工程保存基线。 */
+      function exportPsd(): void {
+        if (disposed) return;
+        void (async () => {
+          const resource = session.active();
+          if (!resource?.controller) {
+            setNotice({ message: "没有可导出的活动文档", tone: "error" });
+            return;
+          }
+          setBusy(true);
+          try {
+            const inspected = resource.controller.inspectPsdExport();
+            if (!inspected.ok) {
+              setNotice({ message: inspected.message, tone: "error" });
+              return;
+            }
+            const report = inspected.value as { editable?: boolean; blocking?: number; rasterizable?: number } | null;
+            const rasterize = report ? report.blocking === 0 && (report.rasterizable ?? 0) > 0 : false;
+            const exported = resource.controller.exportPsd({ rasterizeLossy: rasterize });
+            if (!exported.ok) {
+              setNotice({ message: exported.message, tone: "error" });
+              return;
+            }
+            const base = (resource.kind === "file" ? resource.view.fileName : "photocraft").replace(/\.[^.]+$/, "") || "photocraft";
+            const delivered = await deliverPsd(
+              createBrowserFilePort(() => base),
+              { bytes: exported.value.bytes, fileName: `${base}.psd` }
+            );
+            if (!delivered.ok) {
+              setNotice({ message: delivered.message ?? "PSD 导出失败，文档保留", tone: "error" });
+              return;
+            }
+            const exportReport = exported.value.report as {
+              rasterized?: boolean;
+              viewLosses?: Array<{ feature?: string; reason?: string }>;
+            } | null;
+            const rasterized = exportReport?.rasterized === true;
+            // PSD 没有参考线颜色/标尺原点/计数分组的通道：这些是文档级数据，不挂在图层上，
+            // 只报「已导出可编辑 PSD」会让用户以为全保住了。把视图损失一并说清楚。
+            const viewLosses = exportReport?.viewLosses ?? [];
+            const baseText = rasterized
+              ? "已导出栅格化 PSD 副本；原工程未保存状态不变"
+              : "已导出可编辑 PSD；原工程未保存状态不变";
+            setNotice({
+              message: viewLosses.length === 0
+                ? baseText
+                : `${baseText}。另：${viewLosses.map(item => item.reason ?? item.feature).join("；")}`,
+              // 宿主通知只有 info/error 两档；这不是失败，因此用 info，把损失详情写进文案。
+              tone: "info"
+            });
+          } finally {
+            setBusy(false);
+          }
+        })();
       }
 
       // ------------------------------------------------------------ 交付
@@ -524,10 +908,13 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           if (outcome.status === "download-started") {
             // 浏览器下载：只提示已发起，不宣称落盘、不清除未保存状态。
             session.setStatus(resource.documentId, resource.controller.isDirty() ? "dirty" : "clean");
+            // U04：保存过的内容成为新的「可直接重开」字节；不更新会让重开打开旧内容。
+            if (kind === "project") refreshHeldBytes(resource.documentId);
             setNotice({ message: "已发起下载；请确认文件已保存到目标位置（未自动标记为已保存）", tone: "info" });
             return;
           }
           session.setStatus(resource.documentId, resource.controller.isDirty() ? "dirty" : "clean");
+          if (kind === "project") refreshHeldBytes(resource.documentId);
           setNotice({ message: kind === "project" ? "工程已保存" : "PNG 已导出（不影响工程保存状态）", tone: "info" });
         } finally {
           setBusy(false);
@@ -596,6 +983,9 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           }
           session.rebindFileToNode(resource.documentId, { nodeId: published.nodeId, name: entry.name, view: nodeView });
           publishOperations.delete(resource.documentId);
+          // 内容已经变成画布节点文档：文件字节不再需要，记录同步移除（否则会出现一条
+          // 名为文件、实际指向节点文档的记录）。
+          forgetRecent(resource.documentId);
           fileBytes.delete(resource.documentId);
           // 新节点文档的编辑会话从这里开始（begin 捕获刚发布内容的权威基线）。
           const rebound = session.resource(resource.documentId);
@@ -671,34 +1061,108 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       // ------------------------------------------------------------ 关闭与离开
 
       /** 结算并关闭单个文档；脏文档先按用户选择保存或放弃。 */
-      async function closeDocument(documentId: string): Promise<void> {
-        if (disposed) return;
+      /**
+       * 关闭一个文档并返回结果（供单个关闭与批量串行结算共用）。
+       *
+       * 返回 `{ok:false}` 时**保留现场**：文档、草稿与保存状态都不变。批量关闭依赖这个
+       * 返回值在首个失败处停止，不能把「用户取消」或「保存失败」当成已关闭继续往下走。
+       */
+      async function closeDocumentStep(documentId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
         const resource = session.resource(documentId);
         const entry = registry.entry(documentId);
-        if (!resource || !entry) return;
+        if (!resource || !entry) return { ok: true };
+        const outcome = await settleDocument({
+          ...settlementItemOf(resource, entry),
+          scope: "close",
+          ui: {
+            confirm: async (reason) => confirmInWorkspace(entry.name, reason),
+            abandon: async (reason) => confirmInWorkspace(entry.name, reason)
+          }
+        });
+        if (!outcome.ok) return { ok: false, reason: outcome.reason };
+        const closed = session.close(documentId);
+        if (!closed.ok) return { ok: false, reason: closed.reason };
+        // 关闭**不**立刻丢字节：最近文件靠它重开（见 `pruneRetainedBytes`）。只取消
+        // 尚未成立的记录（文档在视图出现前就关了，从未真正打开过）。
+        cancelTrackedRecent(documentId);
+        pruneRetainedBytes();
+        const next = session.activeId();
+        // 关闭活动项：优先左邻；最后一项关闭后返回画布（不保存）。
+        if (next === null) ctx.canvasNavigation.exitNodeFocus();
+        else await enterDocumentPresentation(next, { preserveOverviewReturn: true });
+        return { ok: true };
+      }
+
+      async function closeDocument(documentId: string): Promise<void> {
+        if (disposed) return;
         setBusy(true);
         try {
-          const outcome = await settleDocument({
-            ...settlementItemOf(resource, entry),
-            scope: "close",
-            ui: {
-              confirm: async (reason) => confirmInWorkspace(entry.name, reason),
-              abandon: async (reason) => confirmInWorkspace(entry.name, reason)
-            }
-          });
-          if (!outcome.ok) {
-            if (outcome.reason !== "已取消") setNotice({ message: outcome.reason, tone: "error" });
-            return;
+          const outcome = await closeDocumentStep(documentId);
+          // 用户主动取消（取消保存/取消关闭）不是错误，不弹红色提示。
+          if (!outcome.ok && outcome.reason !== "已取消") setNotice({ message: outcome.reason, tone: "error" });
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      /**
+       * 关闭其他文档（U03）：保留活动项，其余逐文档串行结算。
+       *
+       * 关闭顺序先算成计划再执行：活动项**不动**，所以结算期间不会因为切换活动文档而改变
+       * 目标集合。首个失败（未确认草稿、保存失败、用户取消）立即停止，其余文档保持原状。
+       */
+      async function closeOtherDocuments(): Promise<void> {
+        if (disposed) return;
+        const state = registry.snapshotState();
+        const activeId = state.activeId ?? state.entries[0]?.id ?? null;
+        if (activeId === null) return;
+        const targets = state.entries
+          .filter((entry) => entry.id !== activeId)
+          .map((entry) => ({ id: entry.id, dirty: session.dirtyState(entry.id)?.dirty ?? false, gate: session.dirtyState(entry.id)?.pendingDraft ?? null }));
+        const plan = planCloseOthers(targets, activeId);
+        if (!plan.ok) {
+          if (plan.code !== "empty") setNotice({ message: plan.reason, tone: "error" });
+          return;
+        }
+        setBusy(true);
+        try {
+          const outcome = await runClosePlan(plan.order, closeDocumentStep);
+          const failed = outcome.failed;
+          if (failed && failed.reason !== "已取消") {
+            setNotice({ message: failed.reason, tone: "error" });
           }
-          const closed = session.close(documentId);
-          if (!closed.ok) {
-            setNotice({ message: closed.reason, tone: "error" });
-            return;
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      /**
+       * 关闭全部文档（U03）：活动项最后关闭，避免中途没有活动文档导致呈现切换抖动。
+       *
+       * 与「关闭其他」相同：串行 + 首个失败即停止，不隐式保存、不丢弃未确认草稿。
+       */
+      async function closeAllDocuments(): Promise<void> {
+        if (disposed) return;
+        const state = registry.snapshotState();
+        const activeId = state.activeId ?? state.entries[0]?.id ?? null;
+        if (activeId === null) return;
+        const targets = state.entries.map((entry) => ({
+          id: entry.id,
+          dirty: session.dirtyState(entry.id)?.dirty ?? false,
+          gate: session.dirtyState(entry.id)?.pendingDraft ?? null
+        }));
+        const plan = planCloseAll(targets, activeId);
+        if (!plan.ok) {
+          if (plan.code !== "empty") setNotice({ message: plan.reason, tone: "error" });
+          return;
+        }
+        setBusy(true);
+        try {
+          const outcome = await runClosePlan(plan.order, closeDocumentStep);
+          const failed = outcome.failed;
+          if (failed && failed.reason !== "已取消") {
+            setNotice({ message: failed.reason, tone: "error" });
           }
-          const next = session.activeId();
-          // 关闭活动项：优先左邻；最后一项关闭后返回画布（不保存）。
-          if (next === null) ctx.canvasNavigation.exitNodeFocus();
-          else await enterDocumentPresentation(next, { preserveOverviewReturn: true });
         } finally {
           setBusy(false);
         }
@@ -967,11 +1431,24 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         const background = activeBackground();
         return (
           <ImageEditorWorkspace
+            onTransfer={transferLayers}
             store={store}
             projectPort={background ? { ...projectPort, renderCanvasBackground: background } : projectPort}
             onActivateDocument={activateDocument}
             onCloseDocument={(documentId) => void closeDocument(documentId)}
+            onReorderDocument={(documentId, targetDocumentId) => {if(registry.reorder(documentId, targetDocumentId)) publish();}}
             onOpenFile={openFile}
+            onRequestDocumentSlot={openBlankDocument}
+            onCloseAllDocuments={() => void closeAllDocuments()}
+            onCloseOtherDocuments={() => void closeOtherDocuments()}
+            onPlaceImage={placeImage}
+            onOpenPsd={importPsd}
+            onExportPsd={exportPsd}
+            recentFiles={store.getSnapshot().recentFiles}
+            recentFilesError={store.getSnapshot().recentFilesError}
+            onReopenRecent={reopenRecent}
+            onRemoveRecent={forgetRecent}
+            hasRecentBytes={(entry) => fileBytes.has(entry.id)}
           />
         );
       };
@@ -1027,6 +1504,9 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         ? ctx.canvasSession.subscribe(() => publish())
         : () => undefined;
 
+      // 最近文件索引变化（记录/移除/逐出）也要推到界面：列表属工作区，不挂在某个文档上。
+      const unsubscribeRecent = recentFiles.subscribe(() => publish());
+
       // 仅开发构建暴露排障镜像。
       if (import.meta.env.DEV) {
         (globalThis as unknown as { __imageEditDebug?: unknown }).__imageEditDebug = () => ({
@@ -1045,12 +1525,17 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       ctx.effect(
         () => () => {
           disposed = true;
+          // 端口是模块级注册点：卸载时清掉，避免下一个宿主实例沿用旧端口（含旧取消标记）。
+          setAnimationCodecPort(null);
           unsubscribeNav();
           preparation.dispose();
           unregisterEntryGuard();
           removeReadinessOverlay();
           unsubscribeCanonical();
           unsubscribeSession();
+          unsubscribeRecent();
+          for (const cancel of recentTracked.values()) cancel();
+          recentTracked.clear();
           unregisterViewport();
           unsubscribeRect();
           removeOverlay();

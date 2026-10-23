@@ -66,6 +66,15 @@ export type { SettlementUi, SettleInput, SettleOutcome } from "./document-settle
 export { canStartDownload, startDownload, browserDownloadPort } from "./file-delivery.js";
 export { createBrowserFilePort, decodeImageSize } from "./file-delivery-adapter.js";
 export {
+  PSD_IMPORT_ACCEPT,
+  PLACE_IMAGE_ACCEPT,
+  deliverPsd,
+  pickFile,
+  pickPsd,
+  placeImageFile
+} from "./place-file.js";
+export type { PickedFile, PlaceOutcome, PsdImportRequest } from "./place-file.js";
+export {
   classifyOpenFile,
   validateOpenProjectDocument,
   projectVersionSupported,

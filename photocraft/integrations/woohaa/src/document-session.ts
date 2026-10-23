@@ -139,10 +139,14 @@ export class DocumentWorkspaceSession {
    */
   openNode(input: OpenNodeInput): DocumentOpenOutcome {
     if (this.disposed) return { ok: false, reason: "工作区已释放" };
+    const blocking = this.refreshActiveGate();
+    if (blocking) return { ok: false, reason: blocking };
     const canvasId = this.deps.canvasId();
     const existing = this.registry.findByNode(canvasId, input.nodeId);
     if (existing) {
-      this.activate(existing.id);
+      // 复用条目时也必须走同一个激活门禁，不能因为「文档已经开着」就绕过草稿检查。
+      const activated = this.activate(existing.id);
+      if (!activated.ok) return { ok: false, reason: activated.reason };
       return { ok: true, documentId: existing.id, created: false };
     }
     const opened = this.registry.open({ kind: "node", canvasId, nodeId: input.nodeId, name: input.name, writable: input.writable });
@@ -178,6 +182,9 @@ export class DocumentWorkspaceSession {
    */
   openFile(input: OpenFileInput): DocumentOpenOutcome {
     if (this.disposed) return { ok: false, reason: "工作区已释放" };
+    // 新文件打开后立即成为活动文档：因此也要先离开当前文档的门禁。
+    const blocking = this.refreshActiveGate();
+    if (blocking) return { ok: false, reason: blocking };
     const opened = this.registry.open({ kind: "file", fileName: input.fileName });
     if (!opened.ok) return { ok: false, reason: opened.reason };
     const view = new FileDocumentWorkspace({
@@ -203,6 +210,13 @@ export class DocumentWorkspaceSession {
 
   /** 激活已打开文档；门禁由 registry 拒绝，返回原因给 UI。 */
   activate(documentId: string): DocumentCloseOutcome {
+    if (documentId !== this.activeDocumentId) {
+      // 离开当前文档前先结算它的草稿/保存：控制器自己最清楚现在是不是半笔草稿。
+      // 同时把结果写回注册表，避免上一次的门禁原因留在这里挡住后续切换
+      // （change: 2026-10-22-add-photocraft-image-mode-workflows，任务 3.3）。
+      const blocking = this.refreshActiveGate();
+      if (blocking) return { ok: false, reason: blocking };
+    }
     const result = this.registry.activate(documentId);
     if (!result.ok) return { ok: false, reason: result.reason };
     if (result.changed) this.setActive(documentId);
@@ -210,12 +224,31 @@ export class DocumentWorkspaceSession {
   }
 
   /**
+   * 按当前活动控制器刷新注册表门禁，返回拒绝原因。
+   *
+   * 门禁的唯一判据是控制器的未结算草稿/保存阶段；每次切换前重新求值，所以草稿结算后不会
+   * 留下过期的拒绝。
+   */
+  private refreshActiveGate(): string | null {
+    const id = this.activeDocumentId;
+    if (!id) return null;
+    const active = this.active();
+    const reason = active?.controller ? pendingDraftOf(active.controller) : null;
+    this.registry.setGate(id, reason);
+    return reason;
+  }
+
+  /**
    * 关闭文档：释放控制器与呈现。
    *
    * 调用方负责先完成保存结算（dirty 时不得直接关闭）；这里只做资源释放与相邻项激活。
+   * 唯一例外是未结算草稿/保存阶段：那是「还没到能做保存决定」的状态，直接关闭会丢工作，
+   * 因此在这里也拒绝（change: 2026-10-22-add-photocraft-image-mode-workflows，任务 3.3）。
    */
   close(documentId: string): DocumentCloseOutcome {
     const resource = this.resources.get(documentId);
+    const blocking = resource?.controller ? pendingDraftOf(resource.controller) : null;
+    if (blocking) return { ok: false, reason: blocking };
     const result = this.registry.close(documentId);
     if (!result.ok) return { ok: false, reason: result.reason };
     if (resource) {
@@ -346,10 +379,24 @@ export class DocumentWorkspaceSession {
 
 /** 当前未确认的受控草稿原因（切换/关闭门禁）。 */
 export function pendingDraftOf(controller: EditorWorkspaceController): string | null {
+  // 单一权威：控制器内部的 `blockingDraft()` 覆盖全部草稿种类与保存阶段，且与保存/写入路径
+  // 完全一致，宿主不需要自己再列一遍。只有结构性测试替身缺这个方法时才退回旧的四项查询，
+  // 不在这里为新草稿种类补第二份清单（change: 2026-10-22-add-photocraft-image-mode-workflows，任务 3.3）。
+  const draft = controller.pendingDraftFailure?.();
+  if (draft) return draft.message;
+  if (controller.isSaving?.()) return "文档正在保存，请等待完成后再切换或关闭";
   if (controller.hasLayerProperties?.()) return "请先确认或取消图层属性编辑";
   if (controller.hasAdjustment?.()) return "请先确认或取消调整参数编辑";
   if (controller.hasText?.()) return "请先确认或取消文字编辑";
-  if (controller.hasTransform()) return "请先确认或取消自由变换";
+  if (controller.hasTransform?.()) return "请先确认或取消自由变换";
+  // 选区草稿（U17–U24）的判定与文案归本域自己：宿主只问"有没有必须先结算的"，
+  // 不在这里重复实现草稿状态机，也不猜内核里的归属。
+  const selectionDraft = controller.features?.selections?.unsettledDraftReason?.();
+  if (selectionDraft) return selectionDraft;
+  // 矢量草稿（形状拖绘中/钢笔未完成/锚点拖动）同样必须先结算：
+  // 否则关闭或离开会在半截手势里丢掉刚画的内容
+  // （change: 2026-10-22-add-photocraft-vector-canvas-tools，任务 3.3）。
+  if (controller.hasVectorDraft()) return "请先完成或取消当前矢量操作";
   return null;
 }
 

@@ -21,6 +21,11 @@ export {
 } from "@woohaa3/photocraft-protocol";
 
 export type {
+  AnimationContent as ImageProjectAnimationContent,
+  AnimationContentFrame as ImageProjectAnimationFrame,
+  AnimationContentLayer as ImageProjectAnimationLayer,
+  AnimationContentTimeline as ImageProjectAnimationTimeline,
+  AnimationContentVideo as ImageProjectAnimationVideo,
   ImageProjectAdjustmentContent,
   ImageProjectAdjustmentKind,
   ImageProjectAdjustmentParameters,

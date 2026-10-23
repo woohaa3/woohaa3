@@ -1,6 +1,10 @@
 import { AdjustmentRange } from "./adjustment-range.js";
 import { RgbCurveEditor, type CurvePoint } from "./rgb-curve-editor.js";
+import { BrushPresetPicker } from "./brush-panels.js";
+import type { BrushLibraryController } from "./brush-library-state.js";
 import { Button } from "./ui/Button.js";
+import { IconButton } from "./ui/Button.js";
+import { Combine, CopyMinus, CopyPlus, Square } from "lucide-react";
 import type { PhotoEditorTool } from "./photo-editor-shortcuts.js";
 import { buildFeather, clampBrushSize, isHexColor, type BrushSettings, type SelectionMode } from "./photo-editor-tools.js";
 
@@ -8,6 +12,22 @@ const SELECTION_MODES: readonly { id: SelectionMode; label: string }[] = [
   { id: "replace", label: "替换" }, { id: "add", label: "增加" },
   { id: "subtract", label: "减去" }, { id: "intersect", label: "相交" }
 ];
+const SELECTION_MODE_ICONS = { replace: Square, add: CopyPlus, subtract: CopyMinus, intersect: Combine } as const;
+
+export function SelectionModeButtons({ value, disabled, intersect = true, onChange }: {
+  value: SelectionMode;
+  disabled: boolean;
+  intersect?: boolean;
+  onChange: (mode: SelectionMode) => void;
+}) {
+  return <div className="photo-editor__selection-modes" aria-label="选区运算">
+    {SELECTION_MODES.filter(mode => intersect || mode.id !== "intersect").map(mode => {
+      const Icon = SELECTION_MODE_ICONS[mode.id];
+      return <IconButton key={mode.id} size="sm" label={mode.label} title={mode.label}
+        pressed={value === mode.id} disabled={disabled} onClick={() => onChange(mode.id)}><Icon size={15} /></IconButton>;
+    })}
+  </div>;
+}
 
 type AdjustmentState = { brightness: number; contrast: number; hue: number; saturation: number; lightness: number };
 export type PhotoEditorProperty = "text" | "mask" | "adjustment";
@@ -30,7 +50,8 @@ export function ToolOptionsPanel({
   hasMask, canApplyMask,
   adjustment,
   onAdjustment,
-  editingAdjustment, curvePoints, onCurvePoints, curveSamples, adjustmentActive, onEndAdjustment, adjustmentCancelRevision
+  editingAdjustment, curvePoints, onCurvePoints, curveSamples, adjustmentActive, onEndAdjustment, adjustmentCancelRevision,
+  brushLibrary, onBrushPreset
 }: {
   surface?:"tools"|"properties";
   readonly: boolean;
@@ -41,6 +62,10 @@ export function ToolOptionsPanel({
   onFeather: (value: number) => void;
   brush: BrushSettings;
   onBrush: (patch: Partial<BrushSettings>) => void;
+  /** 笔刷库控制器（提供时渲染预设选择器与笔刷设置面板）。 */
+  brushLibrary?: BrushLibraryController;
+  /** 选中预设后把它的设置应用到工具（界面状态，不写文档）。 */
+  onBrushPreset?: (name: string) => void;
   text: { text: string; size: number; color: string; font: "Noto Sans SC" | "Inter"; bold: boolean; align: "left" | "center" | "right" };
   onText: (patch: Partial<{ text: string; size: number; color: string; font: "Noto Sans SC" | "Inter"; bold: boolean; align: "left" | "center" | "right" }>) => void;
   textActive: boolean;
@@ -69,16 +94,7 @@ export function ToolOptionsPanel({
     <div className="photo-editor__options" aria-label="工具选项" data-tool={tool}>
       {surface!=="properties" ? <section className="photo-editor__options-group" aria-label="选区" hidden={tool !== "marquee" && tool !== "lasso"}>
         <span className="photo-editor__options-title">选区</span>
-        <label>
-          运算
-          <select value={selection.mode} disabled={readonly} onChange={(event) => onSelectionMode(event.currentTarget.value as SelectionMode)}>
-            {SELECTION_MODES.map((mode) => (
-              <option key={mode.id} value={mode.id}>
-                {mode.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectionModeButtons value={selection.mode} disabled={readonly} onChange={onSelectionMode} />
         <label>
           羽化
           <input
@@ -122,6 +138,15 @@ export function ToolOptionsPanel({
 
       {surface!=="properties" ? <section className="photo-editor__options-group" aria-label="画笔" hidden={!painting}>
         <span className="photo-editor__options-title" title="Shift 点击连接直线；Alt/Option 临时取色；数字调整不透明度，Shift+数字调整流量；X 交换颜色，D 复位">画笔{painting ? `（${tool === "eraser" ? "橡皮" : "画笔"}）` : ""}</span>
+        {brushLibrary ? (
+          <BrushPresetPicker
+            controller={brushLibrary}
+            brush={brush}
+            disabled={readonly}
+            onPick={(name) => onBrushPreset?.(name)}
+            onBrush={(patch) => onBrush(patch as Partial<BrushSettings>)}
+          />
+        ) : null}
         <label>
           尺寸
           <input

@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { planCloseDocument, planLeave, settleSerially, type DocumentSettlementItem } from "../src/document-close.js";
 import { settleDocument } from "../src/document-settlement.js";
 import { IMAGE_PROJECT_CONTENT_TYPE, PHOTOCRAFT_ENGINE_VERSION } from "@woohaa3/contracts";
-import { classifyOpenFile, projectVersionSupported, validateOpenProjectDocument } from "../src/open-file.js";
+import { OPEN_FILE_ACCEPT, classifyOpenFile, projectVersionSupported, validateOpenProjectDocument } from "../src/open-file.js";
+import { OPEN_RASTER_EXTENSIONS } from "@woohaa3/photocraft-protocol";
 import { canOpenDocument, DEFAULT_WORKSPACE_POLICY, SerialGate, shouldProducePreview } from "../src/workspace-policy.js";
 
 function item(overrides: Partial<DocumentSettlementItem> = {}): DocumentSettlementItem {
@@ -28,6 +29,14 @@ describe("打开文件校验", () => {
     { name: "a.png", type: "image/png", kind: "image" },
     { name: "a.JPG", type: "image/jpeg", kind: "image" },
     { name: "a.webp", type: "image/webp", kind: "image" },
+    // 本 change 扩充的格式：内核矩阵可打开，宿主选择器不得再挡在外面
+    // （change: 2026-10-22-add-photocraft-raster-interchange，任务 3.4）。
+    { name: "a.tiff", type: "image/tiff", kind: "image" },
+    { name: "a.gif", type: "image/gif", kind: "image" },
+    { name: "a.bmp", type: "image/bmp", kind: "image" },
+    { name: "a.qoi", type: "", kind: "image" },
+    { name: "a.pcx", type: "", kind: "image" },
+    { name: "a.dds", type: "", kind: "image" },
     { name: "a.pcraft", type: "", kind: "project" },
     { name: "无 MIME 的图片.png", type: "", kind: "image" }
   ])("$name → $kind", ({ name, type, kind }) => {
@@ -45,8 +54,22 @@ describe("打开文件校验", () => {
   });
 
   it("未知格式与空文件名拒绝", () => {
-    expect(classifyOpenFile({ name: "a.tiff", type: "image/tiff" })).toMatchObject({ ok: false });
+    // 暂缓格式仍拒绝：内核没有对应解码器，放进来只会让用户选中后被拒。
+    for (const name of ["a.exr", "a.hdr", "a.dpx", "a.fits", "a.avif", "a.heif"]) {
+      expect(classifyOpenFile({ name, type: "" }), name).toMatchObject({ ok: false });
+    }
+    expect(classifyOpenFile({ name: "a.xyz", type: "" })).toMatchObject({ ok: false });
     expect(classifyOpenFile({ name: "  ", type: "image/png" })).toMatchObject({ ok: false, reason: "未选择文件" });
+  });
+
+  it("选择器的 accept 值与内核可打开格式同源，且不混入工程扩展名之外的东西", () => {
+    // 宿主不再自己硬编码 image/png,image/jpeg,image/webp：清单来自协议域（= 内核矩阵）。
+    for (const extension of OPEN_RASTER_EXTENSIONS) expect(OPEN_FILE_ACCEPT).toContain(`.${extension}`);
+    for (const deferred of ["exr", "hdr", "dpx", "fits", "avif", "heif"]) {
+      expect(OPEN_FILE_ACCEPT).not.toContain(`.${deferred}`);
+    }
+    // 工程仍可选：它是同一个「打开文件」入口的另一种候选类型。
+    expect(OPEN_FILE_ACCEPT).toContain(".pcraft");
   });
 
   it("工程版本过新/引擎不匹配明确拒绝，不压平成图片", () => {

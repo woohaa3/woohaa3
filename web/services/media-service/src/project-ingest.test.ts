@@ -168,3 +168,104 @@ describe("工程上传入口 /api/media-projects", () => {
     expect(storage.keys()).toEqual([]);
   });
 });
+
+describe("含嵌入智能对象的工程保存（U66 转回图层后仍需可保存）", () => {
+  /** 假核验子进程夹具只在 PhotoCraft 子项目内（`test-support` 导出面不含它）。 */
+  const fakeVerifierSupport = () =>
+    import("../../../../photocraft/packages/project-verifier/src/test-support/fake-spawn.js");
+  const SMART = {
+    kind: "smart",
+    contents_id: 1,
+    source: { kind: "embedded", file_name: "contents.pcraft", blob: "a".repeat(64) },
+    transform: { m: [1, 0, 0, 1, 0, 0] },
+    smart_filters: [],
+    cache: null
+  };
+  const smartProject = () =>
+    projectBytes({ manifest: manifest({}, [{ id: "smart-1", name: "对象", blend: "normal", content: SMART }]) });
+
+  it("未配置原生核验工具时不接收含智能对象的工程，也不落对象", async () => {
+    // 前端结构检查会放过 smart，但整棵源树必须以原生核验为前置；没有工具就 fail closed。
+    const storage = memoryStorage();
+    await expect(
+      ingestMediaObject({
+        storage,
+        bytes: smartProject(),
+        contentType: IMAGE_PROJECT_CONTENT_TYPE,
+        projectIngest: true
+      })
+    ).rejects.toMatchObject({ code: "project-verification-failed" });
+    expect(storage.keys()).toEqual([]);
+  });
+
+  it("核验工具全树通过后接收，并按内容寻址写入", async () => {
+    const storage = memoryStorage();
+    const bytes = smartProject();
+    const { createFakeSpawn, fakeSummary } = await fakeVerifierSupport();
+    const { createNativeProjectVerifier } = await import("@woohaa3/photocraft-project-verifier");
+    // 原生摘要必须与前端外层结构一致，否则适配器会拒绝。
+    const structure = (await import("@woohaa3/photocraft-project-verifier")).inspectEmbeddedPhotocraftProject(bytes);
+    // 真实工具在普通口径下拒绝 smart，只在 `--embedded-smart` 下放行；替身按参数复现。
+    const fake = createFakeSpawn((call) => call.args.includes("--embedded-smart")
+      ? { output: JSON.stringify({ ok: true, summary: fakeSummary({ ...structure, objectKinds: ["smart"] }) }) }
+      : { output: JSON.stringify({ ok: false, code: "unsupported-object", message: "工程包含智能对象" }) });
+    const verifier = createNativeProjectVerifier({ binaryPath: "verifier", spawnImpl: fake.spawnImpl });
+    try {
+      const result = await ingestMediaObject({
+        storage,
+        bytes,
+        contentType: IMAGE_PROJECT_CONTENT_TYPE,
+        projectIngest: true,
+        verifier
+      });
+      expect(result.storageKey).toMatch(/^sha256-[0-9a-f]{64}$/);
+      expect(storage.keys()).toEqual([result.storageKey]);
+      // 两次调用：先普通口径（被 smart 拒绝），再走含源通道。
+      expect(fake.calls.map((call) => call.args)).toEqual([[], ["--embedded-smart"]]);
+    } finally {
+      verifier.dispose();
+    }
+  });
+
+  it("原生工具明确拒绝源树时不接收（不回退成外层结构通过）", async () => {
+    const storage = memoryStorage();
+    const bytes = smartProject();
+    const { createFakeSpawn } = await fakeVerifierSupport();
+    const { createNativeProjectVerifier } = await import("@woohaa3/photocraft-project-verifier");
+    const fake = createFakeSpawn({ output: JSON.stringify({ ok: false, code: "too-many-layers", message: "源树累计图层超限" }) });
+    const verifier = createNativeProjectVerifier({ binaryPath: "verifier", spawnImpl: fake.spawnImpl });
+    try {
+      await expect(
+        ingestMediaObject({
+          storage,
+          bytes,
+          contentType: IMAGE_PROJECT_CONTENT_TYPE,
+          projectIngest: true,
+          verifier
+        })
+      ).rejects.toMatchObject({ code: "project-verification-failed" });
+      expect(storage.keys()).toEqual([]);
+    } finally {
+      verifier.dispose();
+    }
+  });
+
+  it("外链智能对象仍被拒绝，不放行成可保存工程", async () => {
+    const storage = memoryStorage();
+    const bytes = projectBytes({
+      manifest: manifest({}, [{
+        id: "smart-1", name: "外链", blend: "normal",
+        content: { ...SMART, source: { kind: "linked", path: "https://invalid/source.pcraft" } }
+      }])
+    });
+    await expect(
+      ingestMediaObject({
+        storage,
+        bytes,
+        contentType: IMAGE_PROJECT_CONTENT_TYPE,
+        projectIngest: true
+      })
+    ).rejects.toMatchObject({ code: "project-verification-failed" });
+    expect(storage.keys()).toEqual([]);
+  });
+});

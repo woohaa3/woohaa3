@@ -1,0 +1,62 @@
+/*
+ * 智能对象子文档编辑器（U65）。
+ *
+ * 宿主把**最外层**编辑器的菜单/参数栏/工具栏/侧栏/状态条绝对定位到内容矩形之外
+ * （见 photo-editor.css 的 `.image-edit-workspace .photo-editor__*`）。这些后代选择器
+ * 也会命中嵌在子文档弹层里的第二个编辑器，把它的菜单推到弹层之外并被裁掉。
+ *
+ * 这里只在本域作用域内把这些规则还原成正常文档流：选择器带上方块+属性，特异性高于
+ * 宿主的后代规则，且不修改共享外壳样式，外层编辑器不受影响。
+ */
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__menubar,
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__contextbar,
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__toolrail,
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__sidebar,
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__status {
+  position: static;
+  inset: auto;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: auto;
+  height: auto;
+  max-height: none;
+}
+
+/* 工具列与侧栏在弹层里按内容高度收缩，滚动留在各自内部。 */
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__toolrail,
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__sidebar {
+  min-height: 0;
+}
+
+/* 菜单/参数栏按弹层宽度横向滚动，不撑破弹层。 */
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__menubar,
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__contextbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* 子文档自己的编辑器铺满弹层的剩余空间。 */
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * 宿主按当前聚焦面板隐藏最外层侧栏（`.app[data-focus-panel] .photo-editor__sidebar`）。
+ * 子文档是独立工作区，它的侧栏必须始终可用，因此这里用更高特异性重新显示。
+ */
+.photo-editor__smart-child[data-smart-child-editor] > .photo-editor .photo-editor__sidebar {
+  display: flex;
+}
+
+/* 子文档层级提示：这里改的是嵌入源，回写才是父对象提交。 */
+.photo-editor__smart-child[data-smart-child-editor] .photo-editor__smart-child-hint {
+  margin: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--app-web-border);
+  color: var(--app-web-text-muted);
+  font-size: 11px;
+}

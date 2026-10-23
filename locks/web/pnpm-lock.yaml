@@ -27,6 +27,9 @@ importers:
       '@woohaa3/photocraft-protocol':
         specifier: link:../../packages/protocol
         version: link:../../packages/protocol
+      mediabunny:
+        specifier: ^1.61.3
+        version: 1.61.3
       react:
         specifier: ^18.3.1
         version: 18.3.1

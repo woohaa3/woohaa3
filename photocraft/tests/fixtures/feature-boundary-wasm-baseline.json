@@ -1,0 +1,1943 @@
+{
+  "build": {
+    "upstreamCommit": "4e7a17cd5d5723313f459753663d0d155f047e19",
+    "upstreamVersion": "0.9.0",
+    "engineVersion": "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-patterns-v1",
+    "formatVersion": 1
+  },
+  "commands": [
+    "brush.defineFromSelection",
+    "brush.get",
+    "brush.presets.delete",
+    "brush.presets.deleteGroup",
+    "brush.presets.importAbr",
+    "brush.presets.importImage",
+    "brush.presets.list",
+    "brush.presets.move",
+    "brush.presets.moveGroup",
+    "brush.presets.rename",
+    "brush.presets.renameGroup",
+    "brush.presets.save",
+    "brush.presets.setCurrent",
+    "brush.presets.update",
+    "brush.texturePattern",
+    "channel.target.composite",
+    "channel.target.layerMask",
+    "edit.clear",
+    "edit.copy",
+    "edit.copyMerged",
+    "edit.cut",
+    "edit.fillBackground",
+    "edit.fillBackgroundPreserve",
+    "edit.fillForeground",
+    "edit.fillForegroundPreserve",
+    "edit.paste",
+    "edit.pasteSpecial.pasteInPlace",
+    "edit.redo",
+    "edit.transform",
+    "edit.transform.flipHorizontal",
+    "edit.transform.flipVertical",
+    "edit.transform.rotate180",
+    "edit.transform.rotate90Ccw",
+    "edit.transform.rotate90Cw",
+    "edit.undo",
+    "file.close",
+    "file.new",
+    "filter.blur.gaussianBlur",
+    "filter.lastFilter",
+    "filter.sharpen.unsharpMask",
+    "image.adjustments.blackWhite",
+    "image.adjustments.brightnessContrast",
+    "image.adjustments.curves",
+    "image.adjustments.hueSaturation",
+    "image.adjustments.levels",
+    "image.adjustments.vibrance",
+    "image.canvasSize",
+    "image.crop",
+    "image.imageRotation.180",
+    "image.imageRotation.90ccw",
+    "image.imageRotation.90cw",
+    "image.imageRotation.flipCanvasHorizontal",
+    "image.imageRotation.flipCanvasVertical",
+    "image.imageSize",
+    "image.trim",
+    "layer.align.bottomEdges",
+    "layer.align.horizontalCenters",
+    "layer.align.leftEdges",
+    "layer.align.rightEdges",
+    "layer.align.topEdges",
+    "layer.align.verticalCenters",
+    "layer.arrange.bringForward",
+    "layer.arrange.bringToFront",
+    "layer.arrange.sendBackward",
+    "layer.arrange.sendToBack",
+    "layer.createClippingMask",
+    "layer.delete",
+    "layer.distribute.bottomEdges",
+    "layer.distribute.horizontalCenters",
+    "layer.distribute.horizontally",
+    "layer.distribute.leftEdges",
+    "layer.distribute.rightEdges",
+    "layer.distribute.topEdges",
+    "layer.distribute.verticalCenters",
+    "layer.distribute.vertically",
+    "layer.duplicate",
+    "layer.flattenImage",
+    "layer.groupLayers",
+    "layer.layerMask.apply",
+    "layer.layerMask.delete",
+    "layer.layerMask.enabled",
+    "layer.layerMask.fromTransparency",
+    "layer.layerMask.hideAll",
+    "layer.layerMask.hideSelection",
+    "layer.layerMask.linked",
+    "layer.layerMask.revealAll",
+    "layer.layerMask.revealSelection",
+    "layer.lockLayers",
+    "layer.mergeDown",
+    "layer.mergeLayers",
+    "layer.mergeVisible",
+    "layer.moveTo",
+    "layer.new.group",
+    "layer.new.layer",
+    "layer.new.layerViaCopy",
+    "layer.newAdjustmentLayer.blackWhite",
+    "layer.newAdjustmentLayer.brightnessContrast",
+    "layer.newAdjustmentLayer.curves",
+    "layer.newAdjustmentLayer.hueSaturation",
+    "layer.newAdjustmentLayer.levels",
+    "layer.newAdjustmentLayer.vibrance",
+    "layer.rasterize.shape",
+    "layer.rasterize.vectorMask",
+    "layer.releaseClippingMask",
+    "layer.renameLayer",
+    "layer.select",
+    "layer.setAdjustment",
+    "layer.setExpanded",
+    "layer.setProps",
+    "layer.ungroupLayers",
+    "layer.vectorMask.add",
+    "layer.vectorMask.delete",
+    "layer.vectorMask.enabled",
+    "layer.vectorMask.fromPath",
+    "layer.vectorMask.hideAll",
+    "layer.vectorMask.info",
+    "layer.vectorMask.linked",
+    "layer.vectorMask.revealAll",
+    "paint.blur",
+    "paint.burn",
+    "paint.cloneStamp",
+    "paint.colorReplacement",
+    "paint.dodge",
+    "paint.healingBrush",
+    "paint.pencil",
+    "paint.sharpen",
+    "paint.smudge",
+    "paint.sponge",
+    "paint.spotHealing",
+    "paint.stroke",
+    "path.clippingPath.clear",
+    "path.clippingPath.set",
+    "path.delete",
+    "path.fill",
+    "path.info",
+    "path.list",
+    "path.rename",
+    "path.set",
+    "path.stroke",
+    "path.toSelection",
+    "path.transform",
+    "select.all",
+    "select.colorRange",
+    "select.convertToShape",
+    "select.deselect",
+    "select.grow",
+    "select.inverse",
+    "select.lasso",
+    "select.loadSelection",
+    "select.magicWand",
+    "select.modify.border",
+    "select.modify.contract",
+    "select.modify.expand",
+    "select.modify.feather",
+    "select.modify.smooth",
+    "select.quick",
+    "select.rect",
+    "select.refineEdge",
+    "select.reselect",
+    "select.saveSelection",
+    "select.similar",
+    "select.toWorkPath",
+    "select.transformSelection",
+    "shape.create",
+    "shape.edit",
+    "shape.info",
+    "shape.rasterize",
+    "tools.decreaseBrushHardness",
+    "tools.decreaseBrushSize",
+    "tools.increaseBrushHardness",
+    "tools.increaseBrushSize",
+    "tools.setBrush",
+    "tools.setColors",
+    "type.create",
+    "type.edit",
+    "type.rasterize",
+    "type.setStyle",
+    "view.clearGuides",
+    "view.deleteGuide",
+    "view.editGuide",
+    "view.layerMask",
+    "view.moveGuide",
+    "view.newGuide",
+    "view.resetRulerOrigin",
+    "view.setRulerOrigin"
+  ],
+  "capabilities": {
+    "allStages": [
+      "P0",
+      "P1a",
+      "P1b",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6",
+      "P7"
+    ],
+    "capabilities": [
+      "layers.composite",
+      "layers.fill-opacity",
+      "layers.styles.resource-free",
+      "layers.styles.patterns",
+      "layers.groups",
+      "layers.blend.pass-through",
+      "layers.blend.photoshop",
+      "layers.blend.normal",
+      "layers.blend.multiply",
+      "layers.blend.screen",
+      "compose.transform",
+      "selection.rect",
+      "selection.lasso",
+      "selection.feather",
+      "mask.pixel",
+      "paint.brush",
+      "paint.eraser",
+      "text.horizontal",
+      "adjust.brightness-contrast",
+      "adjust.hue-saturation",
+      "adjust.curves",
+      "brush.presets",
+      "brush.tip-shape",
+      "brush.dynamics.basic",
+      "brush.pressure",
+      "brush.smoothing",
+      "brush.external-abr",
+      "brush.tip-sampled",
+      "brush.dynamics.shape",
+      "brush.dynamics.scatter",
+      "brush.dynamics.texture",
+      "brush.dynamics.color",
+      "brush.dynamics.transfer",
+      "brush.paint-blend-modes",
+      "edit.layer-transfer",
+      "edit.workspace-clipboard",
+      "edit.paste-in-place",
+      "file.place-image",
+      "format.psd-import",
+      "format.psd-export",
+      "format.psd-loss-report",
+      "layer.smart-object",
+      "layer.smart-object.child-document",
+      "layer.smart-object.replace",
+      "layer.smart-object.copy-independent",
+      "adjust.levels",
+      "adjust.channel-curves",
+      "adjust.vibrance",
+      "adjust.black-white",
+      "analysis.histogram",
+      "selection.magic-wand",
+      "selection.quick-select",
+      "selection.color-range",
+      "selection.modify",
+      "selection.refine-edge",
+      "tool.clone",
+      "tool.healing",
+      "tool.retouch-brush",
+      "filter.blur-gaussian",
+      "filter.sharpen-usm",
+      "image.crop",
+      "image.image-size",
+      "image.canvas-size",
+      "view.guides",
+      "view.grid-snap",
+      "layer.filter-list",
+      "type.typography",
+      "vector.path",
+      "vector.shape",
+      "vector.mask",
+      "selection.from-path"
+    ],
+    "nonGoals": [
+      "format.psb",
+      "filter.liquify",
+      "selection.ai-subject",
+      "selection.hair-refine",
+      "adjust.lut",
+      "color.icc",
+      "color.cmyk",
+      "color.hdr",
+      "type.path",
+      "type.vertical",
+      "brush.dual",
+      "brush.wet-edges",
+      "brush.mixer",
+      "layer.smart-filter",
+      "file.smart-object.linked",
+      "print",
+      "plugin",
+      "automation.mcp",
+      "batch.background",
+      "file.open-external",
+      "file.export-local"
+    ],
+    "stages": [
+      "P0",
+      "P1a",
+      "P1b",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6",
+      "P7"
+    ]
+  },
+  "steps": [
+    {
+      "name": "new",
+      "hash": "d2b2e6421b2f9b8a",
+      "state": {
+        "document": {
+          "activeLayer": 2,
+          "activeTextStyle": null,
+          "canRedo": false,
+          "canUndo": false,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "layerMaskView": null,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 8,
+          "editTarget": "pixels",
+          "hasSelection": false,
+          "height": 24,
+          "history": [
+            "Open"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layerMaskView": null,
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                32,
+                24
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "name": "Background",
+              "opacity": 1,
+              "selected": true,
+              "vectorMaskEnabled": null,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Boundary baseline",
+          "notes": [],
+          "path": null,
+          "quickMask": false,
+          "redoHistory": [],
+          "resolution": 72,
+          "revision": 1,
+          "selectedLayers": [
+            2
+          ],
+          "selectionBounds": null,
+          "selectionFrame": null,
+          "selectionOutline": [],
+          "snapshots": [],
+          "symmetry": null,
+          "timeline": null,
+          "transformFrame": [
+            0,
+            0,
+            32,
+            24
+          ],
+          "variables": null,
+          "width": 32
+        },
+        "session": {
+          "active": 0,
+          "background": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "documents": [
+            {
+              "dirty": false,
+              "height": 24,
+              "index": 0,
+              "name": "Boundary baseline",
+              "path": null,
+              "revision": 1,
+              "width": 32
+            }
+          ],
+          "foreground": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "selection",
+      "hash": "d2b2e6421b2f9b8a",
+      "state": {
+        "document": {
+          "activeLayer": 2,
+          "activeTextStyle": null,
+          "canRedo": false,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "layerMaskView": null,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 8,
+          "editTarget": "pixels",
+          "hasSelection": true,
+          "height": 24,
+          "history": [
+            "Open",
+            "Rectangular Marquee"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layerMaskView": null,
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                32,
+                24
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "name": "Background",
+              "opacity": 1,
+              "selected": true,
+              "vectorMaskEnabled": null,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Boundary baseline",
+          "notes": [],
+          "path": null,
+          "quickMask": false,
+          "redoHistory": [],
+          "resolution": 72,
+          "revision": 2,
+          "selectedLayers": [
+            2
+          ],
+          "selectionBounds": [
+            2,
+            3,
+            10,
+            8
+          ],
+          "selectionFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "selectionOutline": [
+            [
+              2,
+              3,
+              12,
+              3
+            ],
+            [
+              2,
+              11,
+              12,
+              11
+            ],
+            [
+              2,
+              3,
+              2,
+              11
+            ],
+            [
+              12,
+              3,
+              12,
+              11
+            ]
+          ],
+          "snapshots": [],
+          "symmetry": null,
+          "timeline": null,
+          "transformFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "variables": null,
+          "width": 32
+        },
+        "session": {
+          "active": 0,
+          "background": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "documents": [
+            {
+              "dirty": true,
+              "height": 24,
+              "index": 0,
+              "name": "Boundary baseline",
+              "path": null,
+              "revision": 2,
+              "width": 32
+            }
+          ],
+          "foreground": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "layer",
+      "hash": "6d82510636c059f6",
+      "state": {
+        "document": {
+          "activeLayer": 3,
+          "activeTextStyle": null,
+          "canRedo": false,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "layerMaskView": null,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 8,
+          "editTarget": "pixels",
+          "hasSelection": true,
+          "height": 24,
+          "history": [
+            "Open",
+            "Rectangular Marquee",
+            "New Layer"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layerMaskView": null,
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 3,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "name": "paint",
+              "opacity": 1,
+              "selected": true,
+              "vectorMaskEnabled": null,
+              "visible": true
+            },
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                32,
+                24
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "name": "Background",
+              "opacity": 1,
+              "selected": false,
+              "vectorMaskEnabled": null,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Boundary baseline",
+          "notes": [],
+          "path": null,
+          "quickMask": false,
+          "redoHistory": [],
+          "resolution": 72,
+          "revision": 3,
+          "selectedLayers": [
+            3
+          ],
+          "selectionBounds": [
+            2,
+            3,
+            10,
+            8
+          ],
+          "selectionFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "selectionOutline": [
+            [
+              2,
+              3,
+              12,
+              3
+            ],
+            [
+              2,
+              11,
+              12,
+              11
+            ],
+            [
+              2,
+              3,
+              2,
+              11
+            ],
+            [
+              12,
+              3,
+              12,
+              11
+            ]
+          ],
+          "snapshots": [],
+          "symmetry": null,
+          "timeline": null,
+          "transformFrame": null,
+          "variables": null,
+          "width": 32
+        },
+        "session": {
+          "active": 0,
+          "background": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "documents": [
+            {
+              "dirty": true,
+              "height": 24,
+              "index": 0,
+              "name": "Boundary baseline",
+              "path": null,
+              "revision": 3,
+              "width": 32
+            }
+          ],
+          "foreground": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stroke",
+      "hash": "236a58b682c4c4df",
+      "state": {
+        "document": {
+          "activeLayer": 3,
+          "activeTextStyle": null,
+          "canRedo": false,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "layerMaskView": null,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 8,
+          "editTarget": "pixels",
+          "hasSelection": true,
+          "height": 24,
+          "history": [
+            "Open",
+            "Rectangular Marquee",
+            "New Layer",
+            "Brush Tool"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layerMaskView": null,
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                2,
+                3,
+                8,
+                8
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 3,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "name": "paint",
+              "opacity": 1,
+              "selected": true,
+              "vectorMaskEnabled": null,
+              "visible": true
+            },
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                32,
+                24
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "name": "Background",
+              "opacity": 1,
+              "selected": false,
+              "vectorMaskEnabled": null,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Boundary baseline",
+          "notes": [],
+          "path": null,
+          "quickMask": false,
+          "redoHistory": [],
+          "resolution": 72,
+          "revision": 4,
+          "selectedLayers": [
+            3
+          ],
+          "selectionBounds": [
+            2,
+            3,
+            10,
+            8
+          ],
+          "selectionFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "selectionOutline": [
+            [
+              2,
+              3,
+              12,
+              3
+            ],
+            [
+              2,
+              11,
+              12,
+              11
+            ],
+            [
+              2,
+              3,
+              2,
+              11
+            ],
+            [
+              12,
+              3,
+              12,
+              11
+            ]
+          ],
+          "snapshots": [],
+          "symmetry": null,
+          "timeline": null,
+          "transformFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "variables": null,
+          "width": 32
+        },
+        "session": {
+          "active": 0,
+          "background": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "documents": [
+            {
+              "dirty": true,
+              "height": 24,
+              "index": 0,
+              "name": "Boundary baseline",
+              "path": null,
+              "revision": 4,
+              "width": 32
+            }
+          ],
+          "foreground": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "undo",
+      "hash": "6d82510636c059f6",
+      "state": {
+        "document": {
+          "activeLayer": 3,
+          "activeTextStyle": null,
+          "canRedo": true,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "layerMaskView": null,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 8,
+          "editTarget": "pixels",
+          "hasSelection": true,
+          "height": 24,
+          "history": [
+            "Open",
+            "Rectangular Marquee",
+            "New Layer"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layerMaskView": null,
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 3,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "name": "paint",
+              "opacity": 1,
+              "selected": true,
+              "vectorMaskEnabled": null,
+              "visible": true
+            },
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                32,
+                24
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "name": "Background",
+              "opacity": 1,
+              "selected": false,
+              "vectorMaskEnabled": null,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Boundary baseline",
+          "notes": [],
+          "path": null,
+          "quickMask": false,
+          "redoHistory": [
+            "Brush Tool"
+          ],
+          "resolution": 72,
+          "revision": 5,
+          "selectedLayers": [
+            3
+          ],
+          "selectionBounds": [
+            2,
+            3,
+            10,
+            8
+          ],
+          "selectionFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "selectionOutline": [
+            [
+              2,
+              3,
+              12,
+              3
+            ],
+            [
+              2,
+              11,
+              12,
+              11
+            ],
+            [
+              2,
+              3,
+              2,
+              11
+            ],
+            [
+              12,
+              3,
+              12,
+              11
+            ]
+          ],
+          "snapshots": [],
+          "symmetry": null,
+          "timeline": null,
+          "transformFrame": null,
+          "variables": null,
+          "width": 32
+        },
+        "session": {
+          "active": 0,
+          "background": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "documents": [
+            {
+              "dirty": true,
+              "height": 24,
+              "index": 0,
+              "name": "Boundary baseline",
+              "path": null,
+              "revision": 5,
+              "width": 32
+            }
+          ],
+          "foreground": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "redo",
+      "hash": "236a58b682c4c4df",
+      "state": {
+        "document": {
+          "activeLayer": 3,
+          "activeTextStyle": null,
+          "canRedo": false,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "layerMaskView": null,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 8,
+          "editTarget": "pixels",
+          "hasSelection": true,
+          "height": 24,
+          "history": [
+            "Open",
+            "Rectangular Marquee",
+            "New Layer",
+            "Brush Tool"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layerMaskView": null,
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                2,
+                3,
+                8,
+                8
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 3,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "name": "paint",
+              "opacity": 1,
+              "selected": true,
+              "vectorMaskEnabled": null,
+              "visible": true
+            },
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                32,
+                24
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "name": "Background",
+              "opacity": 1,
+              "selected": false,
+              "vectorMaskEnabled": null,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Boundary baseline",
+          "notes": [],
+          "path": null,
+          "quickMask": false,
+          "redoHistory": [],
+          "resolution": 72,
+          "revision": 6,
+          "selectedLayers": [
+            3
+          ],
+          "selectionBounds": [
+            2,
+            3,
+            10,
+            8
+          ],
+          "selectionFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "selectionOutline": [
+            [
+              2,
+              3,
+              12,
+              3
+            ],
+            [
+              2,
+              11,
+              12,
+              11
+            ],
+            [
+              2,
+              3,
+              2,
+              11
+            ],
+            [
+              12,
+              3,
+              12,
+              11
+            ]
+          ],
+          "snapshots": [],
+          "symmetry": null,
+          "timeline": null,
+          "transformFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "variables": null,
+          "width": 32
+        },
+        "session": {
+          "active": 0,
+          "background": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "documents": [
+            {
+              "dirty": true,
+              "height": 24,
+              "index": 0,
+              "name": "Boundary baseline",
+              "path": null,
+              "revision": 6,
+              "width": 32
+            }
+          ],
+          "foreground": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "cancel-selection",
+      "hash": "236a58b682c4c4df",
+      "state": {
+        "document": {
+          "activeLayer": 3,
+          "activeTextStyle": null,
+          "canRedo": false,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "layerMaskView": null,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 8,
+          "editTarget": "pixels",
+          "hasSelection": true,
+          "height": 24,
+          "history": [
+            "Open",
+            "Rectangular Marquee",
+            "New Layer",
+            "Brush Tool"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layerMaskView": null,
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                2,
+                3,
+                8,
+                8
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 3,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "name": "paint",
+              "opacity": 1,
+              "selected": true,
+              "vectorMaskEnabled": null,
+              "visible": true
+            },
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                32,
+                24
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "name": "Background",
+              "opacity": 1,
+              "selected": false,
+              "vectorMaskEnabled": null,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Boundary baseline",
+          "notes": [],
+          "path": null,
+          "quickMask": false,
+          "redoHistory": [],
+          "resolution": 72,
+          "revision": 6,
+          "selectedLayers": [
+            3
+          ],
+          "selectionBounds": [
+            2,
+            3,
+            10,
+            8
+          ],
+          "selectionFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "selectionOutline": [
+            [
+              2,
+              3,
+              12,
+              3
+            ],
+            [
+              2,
+              11,
+              12,
+              11
+            ],
+            [
+              2,
+              3,
+              2,
+              11
+            ],
+            [
+              12,
+              3,
+              12,
+              11
+            ]
+          ],
+          "snapshots": [],
+          "symmetry": null,
+          "timeline": null,
+          "transformFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "variables": null,
+          "width": 32
+        },
+        "session": {
+          "active": 0,
+          "background": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "documents": [
+            {
+              "dirty": true,
+              "height": 24,
+              "index": 0,
+              "name": "Boundary baseline",
+              "path": null,
+              "revision": 6,
+              "width": 32
+            }
+          ],
+          "foreground": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "cancel-filter",
+      "hash": "236a58b682c4c4df",
+      "state": {
+        "document": {
+          "activeLayer": 3,
+          "activeTextStyle": null,
+          "canRedo": false,
+          "canUndo": true,
+          "channels": {
+            "alpha": [],
+            "colors": [
+              {
+                "name": "Red",
+                "visible": true
+              },
+              {
+                "name": "Green",
+                "visible": true
+              },
+              {
+                "name": "Blue",
+                "visible": true
+              }
+            ],
+            "composite": "RGB",
+            "compositeVisible": true,
+            "layerMaskView": null,
+            "quickMask": null,
+            "target": {
+              "kind": "composite"
+            }
+          },
+          "depth": 8,
+          "editTarget": "pixels",
+          "hasSelection": true,
+          "height": 24,
+          "history": [
+            "Open",
+            "Rectangular Marquee",
+            "New Layer",
+            "Brush Tool"
+          ],
+          "isolatedLayers": [],
+          "lastAppliedComp": null,
+          "layerComps": [],
+          "layerMaskView": null,
+          "layers": [
+            {
+              "blend": "Normal",
+              "bounds": [
+                2,
+                3,
+                8,
+                8
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 3,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": false,
+                "transparency": false
+              },
+              "name": "paint",
+              "opacity": 1,
+              "selected": true,
+              "vectorMaskEnabled": null,
+              "visible": true
+            },
+            {
+              "blend": "Normal",
+              "bounds": [
+                0,
+                0,
+                32,
+                24
+              ],
+              "clipped": false,
+              "effectiveLocks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "fill": 1,
+              "hasMask": false,
+              "hasVectorMask": false,
+              "id": 2,
+              "kind": "Pixel",
+              "labelColor": "none",
+              "linkGroup": null,
+              "locks": {
+                "all": false,
+                "artboard": false,
+                "pixels": false,
+                "position": true,
+                "transparency": true
+              },
+              "name": "Background",
+              "opacity": 1,
+              "selected": false,
+              "vectorMaskEnabled": null,
+              "visible": true
+            }
+          ],
+          "measurement": {
+            "count": 0,
+            "countGroups": 0,
+            "ruler": null,
+            "scale": "1 pixels = 1.0000 pixels"
+          },
+          "mode": "Rgb",
+          "name": "Boundary baseline",
+          "notes": [],
+          "path": null,
+          "quickMask": false,
+          "redoHistory": [],
+          "resolution": 72,
+          "revision": 6,
+          "selectedLayers": [
+            3
+          ],
+          "selectionBounds": [
+            2,
+            3,
+            10,
+            8
+          ],
+          "selectionFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "selectionOutline": [
+            [
+              2,
+              3,
+              12,
+              3
+            ],
+            [
+              2,
+              11,
+              12,
+              11
+            ],
+            [
+              2,
+              3,
+              2,
+              11
+            ],
+            [
+              12,
+              3,
+              12,
+              11
+            ]
+          ],
+          "snapshots": [],
+          "symmetry": null,
+          "timeline": null,
+          "transformFrame": [
+            2,
+            3,
+            12,
+            11
+          ],
+          "variables": null,
+          "width": 32
+        },
+        "session": {
+          "active": 0,
+          "background": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "documents": [
+            {
+              "dirty": true,
+              "height": 24,
+              "index": 0,
+              "name": "Boundary baseline",
+              "path": null,
+              "revision": 6,
+              "width": 32
+            }
+          ],
+          "foreground": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    }
+  ],
+  "errors": [
+    {
+      "id": "unknown.command",
+      "error": "{\"code\":\"capability-disabled\",\"message\":\"首期未开放的功能：unknown.command\"}"
+    },
+    {
+      "id": "filter.liquify",
+      "error": "{\"code\":\"capability-disabled\",\"message\":\"首期未开放的功能：filter.liquify\"}"
+    },
+    {
+      "id": "file.automate.batch",
+      "error": "{\"code\":\"capability-disabled\",\"message\":\"首期未开放的功能：file.automate.batch\"}"
+    }
+  ],
+  "output": {
+    "hash": "236a58b682c4c4df",
+    "revision": 6,
+    "projectLength": 7013,
+    "png": "c51f9049f12c3b59c295b311a07e583a59af0e1f98f6d18810d63e0ef8936a48"
+  }
+}

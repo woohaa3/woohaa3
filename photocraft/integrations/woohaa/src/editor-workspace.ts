@@ -40,6 +40,13 @@ export type EditorWorkspaceOptions = {
   saveDeps: ProjectSaveDeps;
   /** 进入本次编辑时携带的工程定义。 */
   baselineDocument: ImageEditDocument | null;
+  /** 宿主文档 id（多文档工作区里的条目身份）。 */
+  documentId?: string | null;
+  /**
+   * 宿主文档代际：关闭后重开同一节点、或权威内容替换时递增。
+   * 域内计划以「文档 id + 代际」判定归属，避免把旧会话的计划确认到新文档上。
+   */
+  documentGeneration?: () => number;
   load?: () => Promise<EditorResult<EditorHandle>>;
   /** 宿主部署基路径下的静态资源地址（字体）。 */
   assetUrl?: EditorAssetPort;
@@ -70,6 +77,8 @@ export class EditorWorkspaceController extends CoreEditorWorkspaceController {
     super({
       ...(options.dialogOwner ? { dialogOwner: options.dialogOwner } : {}),
       session: options.session,
+      documentId: options.documentId ?? null,
+      ...(options.documentGeneration ? { documentGeneration: options.documentGeneration } : {}),
       ...(options.load ? { load: options.load } : {}),
       ...(options.assetUrl ? { assetUrl: options.assetUrl } : {}),
       ...(options.yieldTask ? { yieldTask: options.yieldTask } : {}),

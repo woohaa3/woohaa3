@@ -53,18 +53,26 @@ function nodeView(nodeId: string) {
 /** 控制器替身：只实现会话关心的部分。 */
 function controller() {
   const dispose = vi.fn();
+  let vectorDraft = false;
   const value = {
     dispose,
     isDirty: () => false,
     currentState: () => ({ phase: "editing", message: null, dirty: false, retriable: false }),
+    // 真实控制器把 `blockingDraft()` 以这个名字暴露给宿主；替身默认「没有草稿」。
+    pendingDraftFailure: () => null,
+    isSaving: () => false,
     hasLayerProperties: () => false,
     hasAdjustment: () => false,
     hasText: () => false,
-    hasTransform: () => false
+    hasTransform: () => false,
+    // 本域只暴露"有没有必须先结算的草稿"，宿主不复制它的状态机。
+    features: { selections: { unsettledDraftReason: () => null as string | null } },
+    hasVectorDraft: () => vectorDraft,
+    hasActiveDraft: () => vectorDraft,
+    setVectorDraft: (active: boolean) => { vectorDraft = active; }
   } as unknown as EditorWorkspaceController;
   return { controller: value, dispose };
 }
-
 function harness() {
   const views = new Map<string, ReturnType<typeof nodeView>>();
   const controllers = new Map<string, ReturnType<typeof controller>>();
@@ -184,10 +192,147 @@ describe("门禁与草稿", () => {
     const opened = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
     if (!opened.ok) return;
     const controllerValue = h.controllers.get(opened.documentId)!.controller;
-    (controllerValue as unknown as { hasText: () => boolean }).hasText = () => true;
+    // 走控制器的权威入口：宿主不再自己列草稿种类。
+    (controllerValue as unknown as { pendingDraftFailure: () => unknown }).pendingDraftFailure =
+      () => ({ ok: false, code: "text-active", message: "请先确认或取消文字编辑" });
     expect(pendingDraftOf(controllerValue)).toBe("请先确认或取消文字编辑");
-    (controllerValue as unknown as { hasText: () => boolean }).hasText = () => false;
+    (controllerValue as unknown as { pendingDraftFailure: () => unknown }).pendingDraftFailure = () => null;
     expect(pendingDraftOf(controllerValue)).toBeNull();
+  });
+
+  it("滤镜草稿期间切换标签被会话本身拒绝（不依赖 UI 先拦一次）", () => {
+    const h = harness();
+    const a = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    const b = h.session.openNode({ nodeId: "n2", name: "B", writable: true });
+    if (!a.ok || !b.ok) throw new Error("open failed");
+    h.session.activate(a.documentId);
+    const controllerValue = h.controllers.get(a.documentId)!.controller;
+    // 滤镜草稿：旧写法在宿主侧漏掉了这一种，现在统一由 `blockingDraft()` 给出。
+    const gate = controllerValue as unknown as { pendingDraftFailure: () => unknown };
+    gate.pendingDraftFailure = () => ({ ok: false, code: "filter-active", message: "请先确认或取消滤镜草稿" });
+    expect(h.session.activate(b.documentId)).toEqual({ ok: false, reason: "请先确认或取消滤镜草稿" });
+    // 门禁拒绝时活动项不变：不能留下「tab 已经切走、文档还开着草稿」的状态。
+    expect(h.session.activeId()).toBe(a.documentId);
+    gate.pendingDraftFailure = () => null;
+    expect(h.session.activate(b.documentId)).toMatchObject({ ok: true, nextActiveId: b.documentId });
+  });
+
+  it("保存中拒绝切换与关闭（等待权威回执）", () => {
+    const h = harness();
+    const a = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    const b = h.session.openNode({ nodeId: "n2", name: "B", writable: true });
+    if (!a.ok || !b.ok) throw new Error("open failed");
+    h.session.activate(a.documentId);
+    const controllerValue = h.controllers.get(a.documentId)!.controller;
+    (controllerValue as unknown as { isSaving: () => boolean }).isSaving = () => true;
+    expect(h.session.activate(b.documentId)).toEqual({ ok: false, reason: "文档正在保存，请等待完成后再切换或关闭" });
+    expect(h.session.close(a.documentId)).toEqual({ ok: false, reason: "文档正在保存，请等待完成后再切换或关闭" });
+    expect(h.controllers.get(a.documentId)?.dispose).not.toHaveBeenCalled();
+  });
+
+  it("草稿期间关闭被拒绝，结算后可以关闭", () => {
+    const h = harness();
+    const opened = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    if (!opened.ok) return;
+    const controllerValue = h.controllers.get(opened.documentId)!.controller;
+    const gate = controllerValue as unknown as { pendingDraftFailure: () => unknown };
+    gate.pendingDraftFailure = () => ({ ok: false, code: "text-active", message: "请先确认或取消文字编辑" });
+    expect(h.session.close(opened.documentId)).toEqual({ ok: false, reason: "请先确认或取消文字编辑" });
+    expect(h.controllers.get(opened.documentId)?.dispose).not.toHaveBeenCalled();
+    gate.pendingDraftFailure = () => null;
+    expect(h.session.close(opened.documentId)).toMatchObject({ ok: true });
+    expect(h.controllers.get(opened.documentId)?.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("草稿期间打开新文档也被拒绝（打开会切走活动文档）", () => {
+    const h = harness();
+    const a = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    if (!a.ok) throw new Error("open failed");
+    const gate = h.controllers.get(a.documentId)!.controller as unknown as { pendingDraftFailure: () => unknown };
+    gate.pendingDraftFailure = () => ({ ok: false, code: "stroke-active", message: "请先结束当前笔迹" });
+    expect(h.session.openFile({ fileName: "b.png", bytes: new Uint8Array([1]), kind: "image" })).toEqual({
+      ok: false, reason: "请先结束当前笔迹"
+    });
+    expect(h.session.openNode({ nodeId: "n2", name: "B", writable: true })).toEqual({
+      ok: false, reason: "请先结束当前笔迹"
+    });
+    // 拒绝时不留下空条目：既没有新 tab，活动项也没变。
+    expect(h.session.size()).toBe(1);
+    expect(h.session.activeId()).toBe(a.documentId);
+    gate.pendingDraftFailure = () => null;
+    expect(h.session.openNode({ nodeId: "n2", name: "B", writable: true })).toMatchObject({ ok: true, created: true });
+  });
+
+  it("重开已打开的节点同样走门禁，不从「已开着」的路径绕过", () => {
+    const h = harness();
+    const a = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    const b = h.session.openNode({ nodeId: "n2", name: "B", writable: true });
+    if (!a.ok || !b.ok) throw new Error("open failed");
+    h.session.activate(b.documentId);
+    const gate = h.controllers.get(b.documentId)!.controller as unknown as { pendingDraftFailure: () => unknown };
+    gate.pendingDraftFailure = () => ({ ok: false, code: "filter-active", message: "请先确认或取消滤镜草稿" });
+    expect(h.session.openNode({ nodeId: "n1", name: "A", writable: true })).toEqual({
+      ok: false, reason: "请先确认或取消滤镜草稿"
+    });
+    expect(h.session.activeId()).toBe(b.documentId);
+  });
+
+  it("关闭后重开同一节点得到新代际，旧文档的计划不可能对上新文档", () => {
+    const h = harness();
+    const first = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    if (!first.ok) return;
+    const before = h.registry.entry(first.documentId)!.generation;
+    const firstController = h.controllers.get(first.documentId)!.controller;
+    h.session.close(first.documentId);
+    const again = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    if (!again.ok) return;
+    expect(again.created).toBe(true);
+    expect(h.registry.entry(again.documentId)!.generation).toBeGreaterThan(before);
+    expect(h.registry.isCurrent(first.documentId, before)).toBe(false);
+    // 重建后是新控制器实例：上一会话的计划不会落到新文档上。
+    expect(h.controllers.get(again.documentId)!.controller).not.toBe(firstController);
+  });
+
+  it("活动选区草稿阻止切换，文案由本域给出（不在这里重写一遍）", () => {
+    const h = harness();
+    const opened = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    if (!opened.ok) return;
+    const controllerValue = h.controllers.get(opened.documentId)!.controller;
+    const target = controllerValue as unknown as {
+      features: { selections: { unsettledDraftReason: () => string | null } };
+    };
+    // 宿主只搬运本域判定结果：改这里的文案就等于改本域文案，说明没有第二份实现。
+    target.features.selections.unsettledDraftReason = () => "请先确认或取消选区草稿";
+    expect(pendingDraftOf(controllerValue)).toBe("请先确认或取消选区草稿");
+    // 内核草稿结算后立刻放行（过期草稿被丢弃时也是这样）。
+    target.features.selections.unsettledDraftReason = () => null;
+    expect(pendingDraftOf(controllerValue)).toBeNull();
+  });
+
+  it("选区草稿也进关闭/离开的结算计划（脏状态回执带上原因）", () => {
+    const h = harness();
+    const opened = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    if (!opened.ok) return;
+    const controllerValue = h.controllers.get(opened.documentId)!.controller;
+    (controllerValue as unknown as {
+      features: { selections: { unsettledDraftReason: () => string | null } };
+    }).features.selections.unsettledDraftReason = () => "请先确认或取消选区草稿";
+    expect(h.session.dirtyState(opened.documentId)?.pendingDraft).toBe("请先确认或取消选区草稿");
+  });
+
+  it("未结算的矢量草稿阻止切换、关闭与离开", () => {
+    const h = harness();
+    const opened = h.session.openNode({ nodeId: "n1", name: "A", writable: true });
+    if (!opened.ok) return;
+    const controllerValue = h.controllers.get(opened.documentId)!.controller;
+    controllerValue.setVectorDraft(true);
+    expect(controllerValue.hasVectorDraft()).toBe(true);
+    expect(pendingDraftOf(controllerValue)).toBe("请先完成或取消当前矢量操作");
+    // 同一草稿也进入统一门禁：保存/换文档的判定与宿主呈现使用同一原因。
+    expect(controllerValue.hasActiveDraft()).toBe(true);
+    controllerValue.setVectorDraft(false);
+    expect(pendingDraftOf(controllerValue)).toBeNull();
+    expect(controllerValue.hasActiveDraft()).toBe(false);
   });
 });
 
@@ -211,6 +356,8 @@ describe("独立文件文档", () => {
     // 文件文档没有可信磁盘写入：版本历史与工程定义都不存在。
     expect(view.historyOverrideState()).toBeNull();
     expect(view.projectDocument()).toBeNull();
+    // 位图文件仍以图片方式打开内核（只有 `.pcraft` 走工程路径）。
+    expect(view.openMode()).toBe("image");
     view.dispose();
     expect(view.isPresentationReady()).toBe(true);
   });
@@ -223,11 +370,37 @@ describe("独立文件文档", () => {
       bytes: new Uint8Array([9]),
       rect: { x: 0, y: 0, width: 400, height: 400 }
     });
+    // 回归：`.pcraft` 是分层工程包，必须声明走工程打开，不能被当成位图解码。
+    expect(view.openMode()).toBe("project");
+    expect(view.projectDocument()).toBeNull();
     await view.start();
     expect(view.previewState()).toBeNull();
     view.setEditorPreview({ width: 2, height: 2, pixels: new Uint8Array(16) }, { width: 800, height: 400 });
     expect(view.displaySize()).toEqual({ width: 800, height: 400 });
     expect(view.focus.viewportState().zoom).toBeCloseTo(0.5);
+    view.dispose();
+  });
+
+  it("浏览器解码不了的格式交给内核，不用浏览器能力冒充打开结果", async () => {
+    // TIFF/QOI/TGA/PNM/PCX/XPM/DDS：`createImageBitmap` 一律失败，但内核能解码。
+    // 这里必须先进「打开中」（start 成功、无尺寸），尺寸与像素由内核首帧预览补上；
+    // 若在这里就返回 false，U05 新增格式会在宿主里完全打不开。
+    const view = new FileDocumentWorkspace({
+      documentId: "file-tif",
+      fileName: "scan.tif",
+      kind: "image",
+      bytes: new Uint8Array([0x49, 0x49, 0x2a, 0x00]),
+      rect: { x: 0, y: 0, width: 640, height: 480 },
+      decodeImage: async () => null
+    });
+    await expect(view.start()).resolves.toBe(true);
+    expect(view.isPresentationReady()).toBe(true);
+    // 还没有尺寸：等内核发布预览，而不是自己编一个。
+    expect(view.focus.sourceWidth).toBe(0);
+    expect(view.previewStatus()).toBeNull();
+    view.setEditorPreview({ width: 120, height: 80, pixels: new Uint8Array(120 * 80 * 4) }, { width: 120, height: 80 });
+    expect(view.focus.sourceWidth).toBe(120);
+    expect(view.focus.sourceHeight).toBe(80);
     view.dispose();
   });
 

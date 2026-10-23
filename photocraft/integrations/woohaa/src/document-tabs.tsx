@@ -15,6 +15,7 @@ export type DocumentTabsProps = {
   snapshot: EditorDocumentWorkspaceSnapshot;
   onActivate: (documentId: string) => void;
   onClose: (documentId: string) => void;
+  onReorder?: (documentId: string, targetDocumentId: string) => void;
 };
 
 /** 状态标签与呈现语气；干净文档不显示任何徽标。 */
@@ -37,7 +38,7 @@ function duplicateNames(entries: readonly EditorDocumentEntry[]): Set<string> {
   return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name));
 }
 
-export function DocumentTabs({ snapshot, onActivate, onClose }: DocumentTabsProps) {
+export function DocumentTabs({ snapshot, onActivate, onClose, onReorder }: DocumentTabsProps) {
   const stripRef = useRef<HTMLDivElement>(null);
   const duplicates = duplicateNames(snapshot.entries);
   const activeId = snapshot.activeId;
@@ -50,6 +51,20 @@ export function DocumentTabs({ snapshot, onActivate, onClose }: DocumentTabsProp
     active?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeId, snapshot.entries.length]);
 
+  useEffect(() => {
+    const cycle = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key !== "Tab" || snapshot.entries.length < 2) return;
+      const index = Math.max(0, snapshot.entries.findIndex((entry) => entry.id === activeId));
+      const step = event.shiftKey ? -1 : 1;
+      const next = snapshot.entries[(index + step + snapshot.entries.length) % snapshot.entries.length];
+      if (!next) return;
+      event.preventDefault();
+      onActivate(next.id);
+    };
+    window.addEventListener("keydown", cycle);
+    return () => window.removeEventListener("keydown", cycle);
+  }, [activeId, onActivate, snapshot.entries]);
+
   if (snapshot.entries.length === 0) return null;
   return (
     <div className="photo-document-tabs" data-document-tabs="true" data-document-count={snapshot.entries.length}>
@@ -60,11 +75,24 @@ export function DocumentTabs({ snapshot, onActivate, onClose }: DocumentTabsProp
           const detail = duplicates.has(entry.name) ? entry.detail : null;
           return (
             <div key={entry.id} role="tab" aria-selected={active} tabIndex={active ? 0 : -1}
+              draggable={!!onReorder}
               data-document-id={entry.id} data-active={active ? "true" : undefined} data-status={status?.tone}
               className={`photo-document-tab${active ? " photo-document-tab--active" : ""}`}
               title={`${entry.name}${entry.detail ? ` · ${entry.detail}` : ""}${entry.message ? ` · ${entry.message}` : ""}`}
               onClick={() => onActivate(entry.id)}
-              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onActivate(entry.id); } }}>
+              onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/x-photocraft-document", entry.id); }}
+              onDragOver={(event) => { if (onReorder && event.dataTransfer.types.includes("text/x-photocraft-document")) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move"; } }}
+              onDrop={(event) => { const moving = event.dataTransfer.getData("text/x-photocraft-document"); if (moving) {event.preventDefault();event.stopPropagation();if(moving !== entry.id) onReorder?.(moving, entry.id);} }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onActivate(entry.id); return; }
+                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                  event.preventDefault();
+                  const index = snapshot.entries.findIndex((candidate) => candidate.id === entry.id);
+                  const step = event.key === "ArrowLeft" ? -1 : 1;
+                  const next = snapshot.entries[(index + step + snapshot.entries.length) % snapshot.entries.length];
+                  if (next) onActivate(next.id);
+                }
+              }}>
               <span className="photo-document-tab__icon" data-source={entry.source.kind} aria-hidden="true" />
               <span className="photo-document-tab__name">{entry.name}</span>
               {detail ? <span className="photo-document-tab__detail">{detail}</span> : null}

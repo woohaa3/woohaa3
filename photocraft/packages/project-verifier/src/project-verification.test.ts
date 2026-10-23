@@ -9,7 +9,7 @@
  * `test-support/project-fixtures.ts` 提供，Media 的接收边界测试复用同一份。
  */
 import { describe, expect, it } from "vitest";
-import { IMAGE_PROJECT_CONTENT_TYPE, IMAGE_PROJECT_LIMITS } from "@woohaa3/photocraft-protocol";
+import { IMAGE_PROJECT_ADJUSTMENT_KINDS, IMAGE_PROJECT_CONTENT_TYPE, IMAGE_PROJECT_LIMITS } from "@woohaa3/photocraft-protocol";
 import {
   ProjectVerificationError,
   createNativeProjectVerifier,
@@ -94,20 +94,82 @@ describe("工程核验（design D5）", () => {
     expect(summary.objectKinds).toEqual(["raster"]);
   });
 
-  it("接受受支持的文字层与三类调整层", () => {
+  it("接受受支持的文字层与已发布的调整层", () => {
     const summary = verifyPhotocraftProject(
       projectBytes({
         manifest: manifest({}, [
           { id: "bg", name: "BG", blend: "normal", opacity: 1, visible: true, content: { kind: "raster", sources: [{ kind: "embedded", blob: HASH_A }] } },
           { id: "t", name: "Title", blend: "normal", opacity: 1, visible: true, content: { kind: "text", text: "标题" } },
-          { id: "a1", name: "B/C", blend: "multiply", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { kind: "brightnessContrast", brightness: 0.1 } } },
-          { id: "a2", name: "H/S", blend: "screen", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { kind: "hueSaturation", hue: 10 } } },
-          { id: "a3", name: "Curves", blend: "normal", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { kind: "curves" } } }
+          // 真实性判据：形状必须是上游 serde 的输出（外部标记的变体，无参数类型是裸字符串），
+          // 不是 `{kind: "…"}`——后者是 `image-project` 的内容投影，不是工程 manifest。
+          { id: "a1", name: "B/C", blend: "multiply", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { BrightnessContrast: { brightness: 0.1, contrast: 0.0, legacy: false } } } },
+          { id: "a2", name: "H/S", blend: "screen", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { HueSaturation: { hue: 10.0, saturation: 0.0, lightness: 0.0, colorize: false, ranges: [] } } } },
+          { id: "a3", name: "Curves", blend: "normal", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { Curves: { master: [], per_channel: [[], [], []] } } } }
         ])
       })
     );
     expect(summary.layerCount).toBe(5);
     expect(summary.objectKinds).toEqual(["adjustment", "raster", "text"]);
+  });
+
+  it("接受全部 15 类已发布调整，拒绝范围外变体与非法结构", () => {
+    const published: Array<[string, unknown]> = [
+      ["BrightnessContrast", { brightness: 0.1, contrast: 0.0, legacy: false }],
+      ["HueSaturation", { hue: 0.0, saturation: 0.0, lightness: 0.0, colorize: false, ranges: [] }],
+      ["Curves", { master: [], per_channel: [[], [], []] }],
+      ["Levels", { master: {} }],
+      ["Vibrance", { vibrance: 0.1, saturation: 0.0 }],
+      ["BlackWhite", { weights: [40, 60, 40, 60, 20, 80], tint: null }],
+      ["Exposure", { exposure: 0.5, offset: 0.0, gamma: 1.0 }],
+      ["ColorBalance", { shadows: [0, 0, 0], midtones: [0, 10, 0], highlights: [0, 0, 0], preserve_luminosity: true }],
+      ["PhotoFilter", { color: [1, 0.5, 0], density: 0.25, preserve_luminosity: true }],
+      ["ChannelMixer", { matrix: [[0.4, 0.4, 0.2, 0], [0, 1, 0, 0], [0, 0, 1, 0]], monochrome: false }],
+      ["Posterize", { levels: 4 }],
+      ["Threshold", { level: 0.5 }],
+      ["GradientMap", { stops: [[0, [0, 0, 0]], [1, [1, 1, 1]]], reverse: false, dither: false }],
+      ["SelectiveColor", { relative: true, adjustments: [] }]
+    ];
+    for (const [variant, payload] of published) {
+      const summary = verifyLayers([
+        { id: "a", name: variant, blend: "normal", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { [variant]: payload } } }
+      ]);
+      expect(summary.objectKinds).toEqual(["adjustment"]);
+    }
+    // 无参数类型序列化成裸字符串。
+    expect(verifyLayers([
+      { id: "a", name: "反相", blend: "normal", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: "Invert" } }
+    ]).layerCount).toBe(1);
+    // 范围外：LUT 变体必须拒绝（`adjust.lut` 是永久非目标）。
+    expectLayerError([
+      { id: "a", name: "LUT", blend: "normal", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { ColorLookup: { name: "x", lut: null, size: 2 } } } }
+    ], "unsupported-object");
+    // 上游无法求值的 PSD 块同样拒绝。
+    expectLayerError([
+      { id: "a", name: "块", blend: "normal", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { Unsupported: { psd_key: "grdm", raw: [1, 2, 3] } } } }
+    ], "unsupported-object");
+    // 结构非法：空对象、多键对象、非对象。
+    expectLayerError([{ id: "a", content: { kind: "adjustment", adjustment: {} } }], "unsupported-object");
+    expectLayerError([
+      { id: "a", content: { kind: "adjustment", adjustment: { Exposure: {}, ColorLookup: {} } } }
+    ], "invalid-manifest");
+    expectLayerError([{ id: "a", content: { kind: "adjustment", adjustment: [1] } }], "unsupported-object");
+  });
+
+  it("核验器的接受集合与协议内容投影的 15 类逐项一致", () => {
+    // 协议侧 `IMAGE_PROJECT_ADJUSTMENT_KINDS` 是内容投影的类型名（kebab-case）；工程 manifest
+    // 用的是上游 serde 的变体名（PascalCase）。两边必须一一对应：协议新增类型而核验器漏放，
+    // 会让「编辑器能存、Media 拒收」同时成立。
+    expect(IMAGE_PROJECT_ADJUSTMENT_KINDS).toHaveLength(15);
+    for (const kind of IMAGE_PROJECT_ADJUSTMENT_KINDS) {
+      const variant = kind.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+      const summary = verifyLayers([
+        { id: "a", name: kind, blend: "normal", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { [variant]: {} } } }
+      ]);
+      expect(summary.objectKinds, kind).toEqual(["adjustment"]);
+    }
+    // 范围外的 LUT 不在协议类型表里，也必须不在核验器白名单里。
+    expect(() => verifyLayers([{ id: "a", content: { kind: "adjustment", adjustment: { ColorLookup: {} } } }]))
+      .toThrow(expect.objectContaining({ code: "unsupported-object" }));
   });
 
   it("拒绝普通 ZIP 伪装工程", () => {
@@ -183,8 +245,10 @@ describe("工程核验（design D5）", () => {
       expect((error as ProjectVerificationError).code).toBe("unsupported-object");
     }
     try {
+      // `levels` 在本 change 已发布并接受；范围外的 LUT 变体必须仍被拒绝。
       verifyPhotocraftProject(
-        projectBytes({ manifest: manifest({}, [{ id: "l", name: "A", blend: "normal", opacity: 1, visible: true, content: { kind: "adjustment", adjustment: { kind: "levels" } } }]) })
+        projectBytes({ manifest: manifest({}, [{ id: "l", name: "A", blend: "normal", opacity: 1, visible: true,
+          content: { kind: "adjustment", adjustment: { ColorLookup: { name: "Look.cube", lut: null, size: 2 } } } }]) })
       );
       throw new Error("应当拒绝");
     } catch (error) {
@@ -349,4 +413,92 @@ describe("嵌入 Smart 外层结构前置检查",()=>{
       {transform:{m:[1,0,0,0,0,0]}},{transform:{m:[1e308,0,0,1e308,0,0]}},
     ]) expect(()=>inspectEmbeddedPhotocraftProject(bytes(change))).toThrow(ProjectVerificationError);
   });
+});
+
+/**
+ * 视频图层与时间轴（change: 2026-10-22-add-photocraft-animation-workflows）。
+ *
+ * 进程内核验是**未配置原生工具时的默认接收边界**。这里必须与原生
+ * `project-verify::features::animation` 同口径：接受内嵌帧栈、拒绝超预算内容、把种类记为
+ * `video-layer`。否则默认部署会拒绝自己保存的动画工程，而配置了原生工具的部署却能接收。
+ */
+describe("视频图层与时间轴的进程内核验",()=>{
+  const surface=(tiles:[number,number][]=[[0,0]])=>({
+    format:"RGBA8",
+    default:"00000000",
+    tiles:tiles.map(([tx,ty])=>({tx,ty,hash:HASH_A}))
+  });
+  const video=(change:Record<string,unknown>={})=>({
+    frames:[surface(),surface([[1,0]])],
+    original_frames:null,
+    source:"Blank",
+    fps:24,
+    show_altered:true,
+    ...change
+  });
+  const layer=(change:Record<string,unknown>={})=>({
+    id:"v",name:"视频",blend:"normal",opacity:1,visible:true,
+    content:{kind:"raster",sources:[{kind:"embedded",blob:HASH_A}]},
+    video:video(),
+    ...change
+  });
+  const bytes=(layers:Record<string,unknown>[],document:Record<string,unknown>={})=>{
+    // `manifest()` 的 `overrides.document` 是**整体替换**，因此这里在生成后合并，保留 size 等字段。
+    const built=manifest({},layers);
+    built.document={...(built.document as Record<string,unknown>),...document};
+    return projectBytes({manifest:built});
+  };
+
+  it("接受内嵌帧栈并把种类记为 video-layer，不再是外部引用",()=>{
+    const summary=verifyPhotocraftProject(bytes([layer()]));
+    expect(summary.objectKinds).toEqual(["video-layer"]);
+    expect(summary.layerCount).toBe(1);
+    // 混合工程：普通栅格层仍是 raster，视频层单独一类。
+    const mixed=verifyPhotocraftProject(bytes([layer(),{id:"r",name:"底",blend:"normal",opacity:1,visible:true,
+      content:{kind:"raster",sources:[{kind:"embedded",blob:HASH_A}]}}]));
+    expect(mixed.objectKinds).toEqual(["raster","video-layer"]);
+  });
+
+  it("文件来源只是溯源信息，不因路径拒绝（像素已内嵌）",()=>{
+    const summary=verifyPhotocraftProject(bytes([layer({video:video({source:{File:{path:"/tmp/clip.mp4"}}})})]));
+    expect(summary.objectKinds).toEqual(["video-layer"]);
+  });
+
+  it("超帧数、超累计像素、非法帧率、原始帧数不一致都被拒绝",()=>{
+    expectLayerError([layer({video:video({frames:[]})})],"unsupported-object");
+    expectLayerError([layer({video:video({frames:Array.from({length:121},()=>surface())})})],"unsupported-object");
+    expectLayerError([layer({video:video({fps:0})})],"unsupported-object");
+    expectLayerError([layer({video:video({fps:Number.NaN})})],"unsupported-object");
+    expectLayerError([layer({video:video({fps:1001})})],"unsupported-object");
+    expectLayerError([layer({video:video({original_frames:[surface()]})})],"unsupported-object");
+    // 4096×4096 一帧 = 16,777,216 像素：两帧即超累计预算。
+    const big=surface([[0,0],[15,15]]);
+    expectLayerError([layer({video:video({frames:[big,big]})})],"unsupported-object");
+  });
+
+  it("tile 坐标与结构非法立即拒绝，不做无界算术",()=>{
+    expectLayerError([layer({video:video({frames:[{format:"RGBA8",default:"00000000"}]})})],"invalid-manifest");
+    expectLayerError([layer({video:video({frames:[surface([[1e9,0]])]})})],"unsupported-object");
+    expectLayerError([layer({video:{frames:"nope"}})],"unsupported-object");
+    expect(()=>verifyPhotocraftProject(bytes([layer({video:[]})]))).toThrow(expect.objectContaining({code:"invalid-manifest"}));
+    // 真实保存的工程给**每个**图层写 `video: null`（上游 `LayerM.video` 无 skip_serializing_if），
+    // 因此 null 必须等价于「没有视频层」，否则默认部署会拒绝所有普通工程。
+    expect(verifyPhotocraftProject(bytes([layer({video:null})])).objectKinds).toEqual(["raster"]);
+  });
+
+  it("文档级时间轴时长/帧率/播放头/工作区越界被拒绝，旧工程无贡献",()=>{
+    const timeline=(change:Record<string,unknown>={})=>({fps:24,duration:3,current:0,work_start:0,work_end:3,...change});
+    expect(verifyPhotocraftProject(bytes([layer()],{timeline:timeline()})).layerCount).toBe(1);
+    for(const change of [
+      {duration:0},{duration:121},{fps:0},{fps:Number.NaN},{current:3},{current:-1},
+      {work_start:2,work_end:1},{work_end:4}
+    ]) expectLayerError([layer()],"unsupported-object",{timeline:timeline(change)});
+    // 没有时间轴的旧工程同样通过（本域零贡献）。
+    expect(verifyPhotocraftProject(bytes([layer()])).objectKinds).toEqual(["video-layer"]);
+  });
+
+  function expectLayerError(layers:Record<string,unknown>[],code:string,document:Record<string,unknown>={}):void{
+    try{verifyPhotocraftProject(bytes(layers,document));throw new Error(`应当拒绝：${code}`);}
+    catch(error){expect((error as ProjectVerificationError).code).toBe(code);}
+  }
 });

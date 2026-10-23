@@ -23,6 +23,7 @@ import {
   toHexColor,
   type CanvasViewport
 } from "./photo-editor-tools.js";
+import { mergeBrushPatch } from "./paint-tool-state.js";
 
 describe("范围钳制", () => {
   it("笔头尺寸钳到首期公开范围", () => {
@@ -159,4 +160,23 @@ it("绘画坐标保留图外点；非法数值不进入内核", () => {
   expect(screenToDocument(550, 550, viewport, false)).toEqual({ x: 900, y: 700 });
   expect(screenToDocument(NaN, 0, viewport, false)).toBeNull();
   expect(screenToDocument(0, 0, { ...viewport, width: Infinity })).toBeNull();
+});
+
+describe("笔刷动态补丁（P1a/P1b）", () => {
+  it("dynamics 作为 paint.stroke 的 brush 参数透传；空 dynamics 不发送", () => {
+    const plain = buildStroke([{ x: 1, y: 1 }], { ...DEFAULT_BRUSH })!;
+    expect("brush" in plain).toBe(false);
+    const withDynamics = buildStroke([{ x: 1, y: 1 }], {
+      ...DEFAULT_BRUSH,
+      dynamics: { spacing: 0.3, roundness: 0.7, scattering: { enabled: true, count: 3 } }
+    })!;
+    expect(withDynamics.brush).toEqual({ spacing: 0.3, roundness: 0.7, scattering: { enabled: true, count: 3 } });
+  });
+
+  it("标量与动态分别合并，互不覆盖", () => {
+    const current = { ...DEFAULT_BRUSH, dynamics: { angle: 30 } };
+    const next = mergeBrushPatch(current, { size: 88, angle: 45 });
+    expect(next.size).toBe(88);
+    expect(next.dynamics).toEqual({ angle: 45 });
+  });
 });

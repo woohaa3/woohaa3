@@ -187,6 +187,19 @@ export class EditorDocumentRegistry {
     return { ok: true, changed: true, id };
   }
 
+  /** 按拖放目标重排文档；活动项和资源身份保持不变。 */
+  reorder(id: string, targetId: string): boolean {
+    const from = this.entries.findIndex((entry) => entry.id === id);
+    const target = this.entries.findIndex((entry) => entry.id === targetId);
+    if (from < 0 || target < 0 || from === target) return false;
+    const moving = this.entries[from]!;
+    const next = this.entries.filter((entry) => entry.id !== id);
+    next.splice(target, 0, moving);
+    this.entries = next;
+    this.publish();
+    return true;
+  }
+
   /** 关闭条目；活动项关闭后优先左邻、其次右邻，最后一项关闭后无活动项。 */
   close(id: string): CloseDocumentResult {
     const index = this.entries.findIndex((entry) => entry.id === id);
@@ -268,6 +281,8 @@ export class EditorDocumentRegistry {
       this.publish();
       return;
     }
+    // 同一条原因不重复发布：状态回调可能在同一轮里多次报告相同门禁。
+    if (this.gate?.id === id && this.gate.reason === reason) return;
     this.gate = { id, reason };
     this.publish();
   }

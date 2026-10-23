@@ -1,3 +1,5 @@
+import { createFeatureSessions } from "./features/sessions.js";
+import type { WorkspaceFeatureContext, VectorDocumentToken } from "./features/workspace-context.js";
 import { yieldEditorTask } from "./yield-editor-task.js";
 /**
  * React 图像编辑器工作区控制器
@@ -16,6 +18,7 @@ import { yieldEditorTask } from "./yield-editor-task.js";
 import type { PhotocraftCommand, PhotocraftContentState } from "@woohaa3/photocraft-protocol";
 import type { TextGeometry, TextGeometryRequest } from "./text-geometry.js";
 import { freezeProjectArtifacts, type ArtifactDigest, type ProjectExportArtifacts } from "./editor-artifacts.js";
+import { exportCompositionArtifacts, type CompositionExportResult } from "./features/composition/export.js";
 import type { EditorAssetPort, EditorEditingOwner, EditorFileDeliveryResult, EditorFilePort } from "./ports.js";
 import type { EditorDocumentSession, EditorSaveOutcome, EditorSavePort } from "./session.js";
 import {
@@ -27,6 +30,7 @@ import {
   type EditorResult
 } from "./editor-wasm.js";
 import { decodeEditorState, indexRenderableCommands, type EditorViewModel } from "./editor-view-model.js";
+import { BrushLibraryController, type BrushLibraryStorage } from "./brush-library-state.js";
 
 /** React 消费的只读快照。 */
 export type EditorSnapshot = {
@@ -78,14 +82,93 @@ export type EditorWorkspaceOptions = {
   yieldTask?: () => Promise<void>;
   /** 摘要实现（测试注入；缺省 `crypto.subtle`）。 */
   digest?: ArtifactDigest;
+  /**
+   * 笔刷库持久化端口（change: 2026-10-22-complete-photocraft-webui-editing，任务 2.5 / design D4）。
+   *
+   * 提供时预设保存／导入后写入本机存储；缺省只在会话内保留（提示未持久化）。
+   */
+  brushStorage?: BrushLibraryStorage;
   onState?: (state: EditorWorkspaceState) => void;
   onViewModel?: (view: EditorViewModel, commands: Map<string, unknown>) => void;
+  /**
+   * 宿主文档身份（change: 2026-10-22-add-photocraft-image-mode-workflows，任务 3.3）。
+   *
+   * 控制器不能从视图里推出「这份文档是哪一份」：关闭后重开同一节点可以又是修订 1、
+   * 内容 hash 也相同。宿主因此提供 `documentId`，并在重建/权威内容替换时递增 `generation`；
+   * 域内计划用这个组合判定归属，避免把旧计划的报告当成新文档的结果。
+   */
+  documentId?: string | null;
+  /** 宿主文档代际（缺省 0；重新打开或权威替换内容时由宿主递增）。 */
+  documentGeneration?: () => number;
 };
+
+/** 子文档只在父文档工作区内编辑，不产生宿主保存回执。 */
+class SmartChildSession implements EditorDocumentSession {
+  private baseline: string | null = null;
+  private current: string | null = null;
+
+  isDirty(): boolean { return this.baseline !== null && this.current !== this.baseline; }
+  beginFreeze(): void {}
+  resumeEditing(): void {}
+  beginSave(): void {}
+  commitBaseline(contentHash: string): void { this.baseline = contentHash; this.current = contentHash; }
+  failSave(): void {}
+  establishBaseline(): void { if (this.current !== null) this.baseline = this.current; }
+  applyContentState(state: PhotocraftContentState): void {
+    this.current = state.documentContentHash;
+    if (this.baseline === null) this.baseline = this.current;
+  }
+}
 
 export class EditorWorkspaceController {
   private readonly options: EditorWorkspaceOptions;
   private state: EditorWorkspaceState = { phase: "idle", message: null, dirty: false, retriable: false };
+  readonly features = createFeatureSessions(() => this.workspaceFeatureContext());
+
+  private workspaceFeatureContext(): WorkspaceFeatureContext {
+    const controller = this;
+    return {
+      get handle() { return controller.handle; },
+      get view() { return controller.view; },
+      get phase() { return controller.currentState().phase; },
+      get pendingArtifacts() { return controller.pendingArtifacts !== null; },
+      get owner() { return { documentId: controller.documentId, generation: controller.observedGeneration() }; },
+      get saving() {
+        return controller.isSaving();
+      },
+      get selectionModifyActive() { return controller.selectionModifyActive; },
+      set selectionModifyActive(value) { controller.selectionModifyActive = value; },
+      get retouchActive() { return controller.retouchActive; },
+      set retouchActive(value) { controller.retouchActive = value; },
+      get filterActive() { return controller.filterActive; },
+      set filterActive(value) { controller.filterActive = value; },
+      get composeActive() { return controller.composeActive; },
+      set composeActive(value) { controller.composeActive = value; },
+      afterWrite: (...args) => controller.afterWrite(...args),
+      fail: (...args) => controller.fail(...args),
+      unavailable: (...args) => controller.unavailable(...args),
+      hasActiveDraft: (...args) => controller.hasActiveDraft(...args),
+      blockingDraft: (...args) => controller.blockingDraft(...args),
+      frozen: () => controller.frozenGate(),
+      documentGeneration: () => controller.generation,
+      blockingDraftExceptVector: (...args) => controller.blockingDraftExceptVector(...args),
+      vectorToken: (...args) => controller.vectorToken(...args),
+      writesFrozen: () => controller.writesFrozen(),
+    };
+  }
+
   private handle: EditorHandle | null = null;
+  /** 宿主文档 id（未接宿主时为 null）。 */
+  private readonly documentId: string | null;
+  /**
+   * 文档归属代际：每次在本控制器里重新载入文档、或宿主报告代际变化时递增。
+   *
+   * 它比「修订 + 内容指纹」更强：关闭后重新打开同一节点可能又是修订 1、内容指纹也相同，
+   * 那时只有代际能说明「这份计划来自已经销毁的文档」。
+   */
+  private contentGeneration = 0;
+  /** 最近一次读到的宿主代际，用于发现宿主的重建/内容替换。 */
+  private lastHostGeneration = 0;
   private view: EditorViewModel = { hasDocument: false, document: null, sessionActiveIndex: null };
   private frozen: ProjectExportArtifacts | null = null;
   /** 最近一次冻结但尚未权威确认的产物（重试复用，不重新冻结）。 */
@@ -97,14 +180,50 @@ export class EditorWorkspaceController {
   private textActive = false;
   private adjustmentActive = false;
   private propertiesActive = false;
+  private selectionModifyActive = false;
+  private retouchActive = false;
+  private filterActive = false;
+  private composeActive = false;
+  private smartChildActive = false;
+  /** 矢量域登记的未结算草稿（形状拖绘/钢笔未完成/锚点拖动）。 */
+  private vectorDraftActive = false;
+  private canvasToolDraftActive = false;
+  private smartChild: EditorWorkspaceController | null = null;
+  private smartChildProject: Uint8Array | null = null;
   private readonly placedAssetIds = new Set<string>();
   private commandIndex: Map<string, PhotocraftCommand> = new Map();
   /** 快照缓存：`useSyncExternalStore` 要求未变化时返回同一引用，否则会无限重渲染。 */
   private snapshotCache: EditorSnapshot | null = null;
   private readonly listeners = new Set<(snapshot: EditorSnapshot) => void>();
+  /** 笔刷库控制器：与文档同一生命周期，但库内容与文档内容互不影响。 */
+  private readonly brushes: BrushLibraryController;
 
   constructor(options: EditorWorkspaceOptions) {
     this.options = options;
+    this.documentId = options.documentId ?? null;
+    this.lastHostGeneration = options.documentGeneration?.() ?? 0;
+    this.contentGeneration = this.lastHostGeneration;
+    this.brushes = new BrushLibraryController(() => this.handle, options.brushStorage ?? null);
+  }
+
+  /**
+   * 宿主报告的文档代际是否已变化（重开同一节点、权威内容替换）。
+   *
+   * 每次取上下文都会读一次：宿主递增后，当前控制器持有的计划立即失效，不需要宿主再调一个
+   * 通知接口。返回 true 时同时把本地代际推上去，之后的计划以新代际为基线。
+   */
+  private observedGeneration(): number {
+    const host = this.options.documentGeneration?.() ?? 0;
+    if (host !== this.lastHostGeneration) {
+      this.lastHostGeneration = host;
+      this.contentGeneration += 1;
+    }
+    return this.contentGeneration;
+  }
+
+  /** 笔刷库控制器（预设选择、保存、ABR 导入与真实笔迹预览）。 */
+  brushLibrary(): BrushLibraryController {
+    return this.brushes;
   }
 
   /** 订阅状态/视图变化（React 用 `useSyncExternalStore` 消费）。 */
@@ -125,8 +244,7 @@ export class EditorWorkspaceController {
   }
 
   dialogOwner() {
-    if (!this.handle || this.strokeActive || this.transformActive || this.textActive || this.propertiesActive
-      || this.adjustmentActive || this.saving || this.pendingArtifacts
+    if (!this.handle || this.hasActiveDraft() || this.saving || this.pendingArtifacts
       || this.state.phase === "saving" || this.state.phase === "freezing") return null;
     return this.options.dialogOwner?.() ?? null;
   }
@@ -140,9 +258,30 @@ export class EditorWorkspaceController {
     return this.handle;
   }
 
+  /**
+   * 文档代际（change: 2026-10-22-add-photocraft-painting-color-workflows，任务 3.3）。
+   *
+   * 打开/关闭/`dispose()` 时递增；域会话拿异步结果落地前比较它，避免把上一份文档的采样色、
+   * 预设列表写到后来打开的另一份文档上。
+   */
+  documentGeneration(): number {
+    return this.generation;
+  }
+
   /** 最近一次视图模型。 */
   currentView(): EditorViewModel {
     return this.view;
+  }
+
+  /**
+   * 当前文档归属（宿主文档 id + 代际）
+   * （change: 2026-10-22-add-photocraft-image-mode-workflows，任务 3.3）。
+   *
+   * 域内计划、面板预览都用它当归属键：只看名称/尺寸/修订会漏掉「同尺寸同修订的另一份文档」，
+   * 也认不出关闭后重开的同一节点。
+   */
+  documentOwner(): { documentId: string | null; generation: number } {
+    return { documentId: this.documentId, generation: this.observedGeneration() };
   }
 
   /** 最近一次冻结的成对产物（保存失败后仍可重试）。 */
@@ -162,11 +301,8 @@ export class EditorWorkspaceController {
    * 摘要校验，且重试复用同一冻结结果（change: 2026-10-21-add-photocraft-document-workspace，D5）。
    */
   async freezeForPublish(): Promise<EditorResult<ProjectExportArtifacts>> {
-    if (this.propertiesActive) return { ok: false, code: "properties-active", message: "请先确认或取消图层属性编辑" };
-    if (this.adjustmentActive) return { ok: false, code: "adjustment-active", message: "请先确认或取消调整参数编辑" };
-    if (this.textActive) return { ok: false, code: "text-active", message: "请先确认或取消文字编辑" };
-    if (this.transformActive) return { ok: false, code: "transform-active", message: "请先确认或取消自由变换" };
-    if (this.strokeActive) return { ok: false, code: "stroke-active", message: "请先结束当前笔迹" };
+    const draft = this.blockingDraft();
+    if (draft && draft.code.endsWith("-active")) return draft;
     const handle = this.handle;
     if (!handle) return { ok: false, code: "no-document", message: "编辑器尚未就绪" };
     const generation = this.generation;
@@ -236,6 +372,8 @@ export class EditorWorkspaceController {
       return loaded;
     }
     this.handle = loaded.value;
+    // 库与文档分离：进入可写编辑后先恢复本机库（坏快照保留默认库）。
+    void this.brushes.restore();
     return loaded;
   }
 
@@ -305,17 +443,23 @@ export class EditorWorkspaceController {
   dispatch(id: string, params: unknown = null): EditorResult<EditorViewModel> {
     const handle = this.handle;
     if (!handle) return this.unavailable();
-    if (this.propertiesActive) return this.propertiesPending();
-    if (this.adjustmentActive) return this.adjustmentPending();
-    if (this.textActive) return this.textPending();
-    if (this.transformActive) return this.transformPending();
-    if (this.pendingArtifacts || this.state.phase === "freezing" || this.state.phase === "saving") {
-      return { ok: false, code: "frozen", message: "导出期间不接受内容修改" };
-    }
-    if (this.strokeActive) return { ok: false, code: "stroke-active", message: "请先结束当前笔迹" };
+    const blocked = this.blockingDraft();
+    if (blocked) return blocked;
+    const frozen = this.frozenGate();
+    if (frozen) return frozen;
     const result = handle.execute(id, params);
     if (!result.ok) return this.fail(result);
     return this.afterWrite();
+  }
+
+  /**
+   * 是否处在冻结窗口（保存/导出已取走成对产物，尚未结算）。
+   *
+   * 所有内容写入口都必须先看这个判定，否则冻结期间仍能改文档，交出与当前修订不符的产物
+   * （change: 2026-10-22-add-photocraft-vector-canvas-tools，任务 3.3：矢量命令走同一门禁）。
+   */
+  writesFrozen(): boolean {
+    return this.pendingArtifacts !== null || this.state.phase === "freezing" || this.state.phase === "saving";
   }
 
   /** 临时笔迹不发布内容状态，只有提交才同步修订与净变化。 */
@@ -339,7 +483,12 @@ export class EditorWorkspaceController {
   }
 
   takeStrokeDamage():EditorResult<EditorPreviewRegion[]> {
-    return this.handle&&this.strokeActive ? this.handle.takeStrokeDamage() : this.unavailable();
+    // 修饰笔迹也走同一条局部预览通道：`strokeActive` 只由 `beginStroke` 置位，修饰笔迹
+    // （`beginRetouch`）不会置位。若不认 `retouchActive`，局部预览会一直拿到
+    // `unavailable`，真实 UI 里表现为「提交成功、也是一步历史，但画面不重绘」。
+    return this.handle && (this.strokeActive || this.retouchActive)
+      ? this.handle.takeStrokeDamage()
+      : this.unavailable();
   }
 
   commitStroke(): EditorResult<EditorViewModel> {
@@ -507,6 +656,472 @@ export class EditorWorkspaceController {
   /** 撤销。 */
   undo(): EditorResult<EditorViewModel> { return this.dispatch("edit.undo"); }
 
+  /**
+   * P2：导出所选图层为跨文档载荷（源文档关闭后仍有效）。
+   *
+   * 载荷是自包含字节；控制器不缓存它——工作区剪贴板由**宿主/工作区**持有，
+   * 因此不同工作区不会串剪贴板。
+   */
+  copyLayers(layers?: readonly number[]): EditorResult<Uint8Array> {
+    if (!this.handle) return this.unavailable();
+    if (this.strokeActive || this.retouchActive || this.smartChildActive) {
+      return { ok: false, code: "gesture-active", message: "请先结束当前操作" };
+    }
+    return this.handle.exportLayerTransfer(layers && layers.length ? { layers } : {});
+  }
+
+  /** P2：载荷摘要与结构（不解码像素）。 */
+  inspectLayerTransfer(bytes: Uint8Array): EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.inspectLayerTransfer(bytes);
+  }
+
+  /** P2：目标候选文档预检（不改任何状态）。 */
+  canPasteLayers(bytes: Uint8Array): EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.canPasteLayerTransfer(bytes);
+  }
+
+  /** P2：原子粘贴（`inPlace` 保持源坐标，否则居中到可见中心）。 */
+  pasteLayers(bytes: Uint8Array, options: { inPlace?: boolean; center?: [number, number] } = {}): EditorResult<EditorViewModel> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    if (this.blockingDraft()) return this.blockingDraft() as EditorFailure;
+    if (this.pendingArtifacts || this.saving || this.state.phase === "freezing" || this.state.phase === "saving") {
+      return { ok: false, code: "frozen", message: "导出期间不接受内容修改" };
+    }
+    const result = handle.pasteLayerTransfer(bytes, {
+      placement: options.inPlace ? "inPlace" : "center",
+      ...(options.center ? { center: options.center } : {})
+    });
+    if (!result.ok) return this.fail(result);
+    return this.afterWrite();
+  }
+
+  /** P2：置入前预检（真实解码类型与尺寸）。 */
+  inspectPlace(bytes: Uint8Array): EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.inspectPlaceAsset(bytes);
+  }
+
+  /** P2：置入当前文档（像素层或嵌入智能对象）。 */
+  placeAsset(input: { name: string; bytes: Uint8Array; assetId?: string; mode?: "pixel" | "smartObject" }): EditorResult<EditorViewModel> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    const blocked = this.blockingDraft();
+    if (blocked) return blocked;
+    if (this.pendingArtifacts || this.saving) return { ok: false, code: "frozen", message: "请先重试确认上次保存结果" };
+    const result = handle.placeAsset(input.bytes, {
+      name: input.name,
+      ...(input.assetId ? { assetId: input.assetId } : {}),
+      ...(input.mode ? { mode: input.mode } : {})
+    });
+    if (!result.ok) return this.fail(result);
+    if (input.assetId) this.placedAssetIds.add(input.assetId);
+    return this.afterWrite();
+  }
+
+  // ------------------------------------------------------------------ P3 PSD
+
+  /** PSD 兼容矩阵（与内核同一份声明）。 */
+  psdMatrix(): EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.psdMatrix();
+  }
+
+  /** PSD 头部预检（不替换文档）。 */
+  inspectPsd(bytes: Uint8Array): EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.inspectPsd(bytes);
+  }
+
+  /** 导入 PSD：默认拒绝不可编辑结构；`flat` 显式选择扁平副本。 */
+  async openPsd(input: { bytes: Uint8Array; flat?: boolean }): Promise<EditorResult<EditorViewModel>> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    const blocked = this.blockingDraft();
+    if (blocked) return blocked;
+    const result = handle.importPsd(input.bytes, input.flat ?? false);
+    if (!result.ok) return this.fail(result);
+    return this.afterOpen(handle, this.generation, false);
+  }
+
+  /** PSD 导出预检：逐层损失报告。 */
+  inspectPsdExport(): EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.inspectPsdExport();
+  }
+
+  /** PSD 导出：只产生文件字节与报告，不推进工程保存基线。 */
+  exportPsd(options: { rasterizeLossy?: boolean } = {}): EditorResult<{ bytes: Uint8Array; report: unknown }> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    if (this.hasActiveDraft()) return { ok: false, code: "gesture-active", message: "请先结算当前草稿再导出" };
+    const bytes = handle.exportPsd(options.rasterizeLossy ?? false);
+    if (!bytes.ok) return this.fail(bytes);
+    const report = handle.lastPsdExportReport();
+    return { ok: true, value: { bytes: bytes.value, report: report.ok ? report.value : null } };
+  }
+
+  // ------------------------------------------------------------ P4 智能对象
+
+  beginSmartChild(layer: number): EditorResult<unknown> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    if (this.hasActiveDraft()) return { ok: false, code: "gesture-active", message: "请先结算当前草稿" };
+    const result = handle.beginSmartChild(layer);
+    if (result.ok) {
+      this.smartChildActive = true;
+      const value = result.value as { project?: unknown };
+      if (typeof value?.project === "string") {
+        try {
+          const binary = globalThis.atob(value.project);
+          this.smartChildProject = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+          this.smartChild?.dispose();
+          this.smartChild = this.createSmartChildController();
+          void this.smartChild.openProject({ bytes: this.smartChildProject, baseAssetId: "photocraft-smart-child" });
+        } catch {
+          this.smartChildProject = null;
+        }
+      }
+      this.setState(this.state.phase, this.state.message, this.state.dirty, this.state.retriable);
+    }
+    return result;
+  }
+
+  updateSmartParent(attemptId: string, child: Uint8Array): EditorResult<EditorViewModel> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    // 父子回写是内容替换：父文档有自己的未结算草稿/保存阶段时不能写入。
+    const blocked = this.blockingDraft();
+    if (blocked) return blocked;
+    if (this.isSaving()) return { ok: false, code: "frozen", message: "正在保存，请等待保存完成后再写回" };
+    // 父子回写同样是文档写入：未结算草稿（含矢量手势）必须先结算，
+    // 否则会用半截状态覆盖父文档（change: 2026-10-22-add-photocraft-vector-canvas-tools，任务 3.3）。
+
+    const result = handle.updateSmartParent(attemptId, child);
+    if (!result.ok) return this.fail(result);
+    const written = this.afterWrite();
+    if (!written.ok) return written;
+    this.smartChildActive = false;
+    return written;
+  }
+
+  /**
+   * 用真正子文档编辑器当前的工程字节回写父文档。
+   *
+   * 子文档有未结算草稿时导出的工程**不含**这部分几何，因此先拒绝而不是「成功」地丢掉
+   * 半截操作（change: 2026-10-22-add-photocraft-vector-canvas-tools，任务 3.3）。
+   */
+  updateSmartParentFromChild(attemptId: string): EditorResult<EditorViewModel> {
+    const child = this.smartChild;
+    if (!child) return { ok: false, code: "smart-child-unavailable", message: "子文档编辑器尚未就绪" };
+    // 子文档自己的草稿也必须先结算：半笔草稿不能变成父文档里的智能对象内容。
+    if (child.hasActiveDraft()) return { ok: false, code: "draft-active", message: "请先完成或取消子文档中的草稿" };
+    if (child.isSaving()) return { ok: false, code: "frozen", message: "子文档正在保存，请等待完成后再写回" };
+    const project = child.exportProjectBytes();
+    if (!project.ok) return project as EditorResult<EditorViewModel>;
+    return this.updateSmartParent(attemptId, project.value);
+  }
+
+  /** 当前打开的智能对象子文档编辑器。 */
+  smartChildController(): EditorWorkspaceController | null { return this.smartChild; }
+
+  /** 导出当前文档工程，供父子文档边界使用。 */
+  exportProjectBytes(): EditorResult<Uint8Array> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.saveProject();
+  }
+
+  private createSmartChildController(): EditorWorkspaceController {
+    return new EditorWorkspaceController({
+      ...this.options,
+      session: new SmartChildSession(),
+      save: async () => ({ ok: true, status: "completed" }),
+      fileDelivery: undefined,
+      onState: undefined,
+      onViewModel: undefined,
+      // 子文档是另一份内容：不能沿用父文档的归属 id，否则子文档里的模式计划会被
+      // 当成父文档的计划，父子回写时更难判断来源（任务 3.3）。
+      documentId: this.documentId ? `${this.documentId}#smart-child` : null,
+      // 子文档没有宿主条目代际，归属只靠控制器自己的载入代际。
+      documentGeneration: () => 0
+    });
+  }
+
+  reloadSmartChild(): EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.reloadSmartChild();
+  }
+
+  exportSmartChild(): EditorResult<Uint8Array> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.exportSmartChild();
+  }
+
+  detachSmartChild(): EditorResult<EditorViewModel> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    const result = handle.detachSmartChild();
+    if (!result.ok) return this.fail(result);
+    this.smartChildActive = false;
+    return this.afterWrite();
+  }
+
+  closeSmartChild(): void {
+    if (!this.handle) return;
+    this.handle.closeSmartChild();
+    this.smartChildActive = false;
+    this.smartChild?.dispose();
+    this.smartChild = null;
+    this.smartChildProject = null;
+    this.setState(this.state.phase, this.state.message, this.state.dirty, this.state.retriable);
+  }
+
+  smartChildState(): EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    return this.handle.smartChildState();
+  }
+
+  hasSmartChild(): boolean {
+    return this.smartChildActive;
+  }
+
+  convertToSmartObject(layers?: readonly number[]): EditorResult<EditorViewModel> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    const blocked = this.blockingDraft();
+    if (blocked) return blocked;
+    const targets = layers ?? (this.view.document ? this.view.document.layers.filter((layer) => layer.selected || layer.active).map((layer) => layer.id) : []);
+    const result = handle.convertToSmartObject(targets);
+    if (!result.ok) return this.fail(result);
+    return this.afterWrite();
+  }
+
+  duplicateSmartObject(layers: readonly number[], independent: boolean): EditorResult<EditorViewModel> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    const blocked = this.blockingDraft();
+    if (blocked) return blocked;
+    const result = handle.duplicateSmartObject(layers, independent);
+    if (!result.ok) return this.fail(result);
+    return this.afterWrite();
+  }
+
+  replaceSmartContents(layer: number, bytes: Uint8Array): EditorResult<EditorViewModel> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    const blocked = this.blockingDraft();
+    if (blocked) return blocked;
+    const result = handle.replaceSmartContents(layer, bytes);
+    if (!result.ok) return this.fail(result);
+    return this.afterWrite();
+  }
+
+  rasterizeSmartObject(layer: number): EditorResult<EditorViewModel> {
+    const handle = this.handle;
+    if (!handle) return this.unavailable();
+    const blocked = this.blockingDraft();
+    if (blocked) return blocked;
+    const result = handle.rasterizeSmartObject(layer);
+    if (!result.ok) return this.fail(result);
+    return this.afterWrite();
+  }
+
+  // -------------------------------------------------------- P5 调色与选区
+
+  /** 直方图（只读；结果带 `generation`，调用方丢弃过期响应）。 */
+  histogram(params: { source?: "layer" | "composite"; channel?: "rgb" | "luminance" } = {}): EditorResult<unknown> { return this.features.adjustments.histogram(params); }
+
+  beginSelectionModify(params: { operation: "expand" | "contract" | "smooth" | "border" | "feather"; radius: number }): EditorResult<unknown> { return this.features.selections.beginSelectionModify(params); }
+
+  updateSelectionModify(params: { radius: number }): EditorResult<unknown> { return this.features.selections.updateSelectionModify(params); }
+
+  commitSelectionModify(): EditorResult<EditorViewModel> { return this.features.selections.commitSelectionModify(); }
+
+  cancelSelectionModify(): void { return this.features.selections.cancelSelectionModify(); }
+
+  prepareRefineEdge(params: Record<string, unknown>): EditorResult<unknown> { return this.features.selections.prepareRefineEdge(params); }
+
+  // -------------------------------------------------------- P6 修饰与滤镜
+
+  beginRetouch(id: string, params: unknown): EditorResult<unknown> { return this.features.retouch.beginRetouch(id, params); }
+
+  appendRetouch(points: unknown): EditorResult<unknown> { return this.features.retouch.appendRetouch(points); }
+
+  commitRetouch(): EditorResult<EditorViewModel> { return this.features.retouch.commitRetouch(); }
+
+  cancelRetouch(): void { return this.features.retouch.cancelRetouch(); }
+
+  hasRetouch(): boolean { return this.features.retouch.hasRetouch(); }
+
+  beginFilter(id: string, params: unknown): EditorResult<unknown> { return this.features.filters.beginFilter(id, params); }
+
+  updateFilter(params: unknown): EditorResult<unknown> { return this.features.filters.updateFilter(params); }
+
+  commitFilter(): EditorResult<EditorViewModel> { return this.features.filters.commitFilter(); }
+
+  cancelFilter(): void { return this.features.filters.cancelFilter(); }
+
+  hasFilter(): boolean { return this.features.filters.hasFilter(); }
+
+  // -------------------------------------------------------- P7 构图与矢量
+
+  beginCompose(id: string, params: unknown): EditorResult<unknown> { return this.features.composition.beginCompose(id, params); }
+
+  updateCompose(params: unknown): EditorResult<unknown> { return this.features.composition.updateCompose(params); }
+
+  commitCompose(): EditorResult<EditorViewModel> { return this.features.composition.commitCompose(); }
+
+  cancelCompose(): void { return this.features.composition.cancelCompose(); }
+
+  hasCompose(): boolean { return this.features.composition.hasCompose(); }
+
+  /**
+   * 画板 / 切片导出（U56）。
+   *
+   * 范围与命名来自内核计划，字节由内核编码，落盘走宿主的文件交付端口；任一产物失败即整体
+   * 失败并返回原因。没有宿主端口时明确拒绝，不假装导出成功。
+   */
+  exportCompositionArtifacts(kind: "slices" | "artboards"): Promise<EditorResult<CompositionExportResult>> {
+    const draft = this.blockingDraft();
+    if (draft && draft.code.endsWith("-active")) return Promise.resolve(draft as never);
+    return exportCompositionArtifacts(this.features.composition, kind, this.options.fileDelivery);
+  }
+
+  viewAids(): EditorResult<unknown> { return this.features.views.viewAids(); }
+
+  /** 视图辅助（标尺/网格/参考线/吸附）：不进文档内容或历史。 */
+  setViewAids(params: Record<string, unknown>): EditorResult<unknown> { return this.features.views.setViewAids(params); }
+
+  /** 源坐标吸附（`tolerance` 是屏幕像素，按 `zoom` 换算）。 */
+  snapPoint(point: [number, number], zoom: number, tolerance = 6): EditorResult<unknown> { return this.features.views.snapPoint(point, zoom, tolerance); }
+
+  /** 图层列表过滤（只影响列表；`by` 是 U63 的主条件，`mode` 配合 `by: "mode"`）。 */
+  filterLayers(params: { name?: string; kinds?: string[]; by?: "kind" | "name" | "mode"; mode?: string; onlySelected?: boolean }): EditorResult<unknown> { return this.features.layers.filterLayers(params); }
+
+  /** 文字排版参数（行距/字距/字偶距/基线偏移）。 */
+  applyTypography(params: Record<string, unknown>): EditorResult<EditorViewModel> { return this.features.type.applyTypography(params); }
+
+  /** 矢量命令（形状/路径/矢量蒙版/路径转选区）。 */
+  /** 矢量命令（形状/路径/矢量蒙版/路径转选区）。`token` 由手势开始时捕获，用于丢弃晚到写入。 */
+  vectorCommand(id: string, params: unknown, token?: VectorDocumentToken): EditorResult<EditorViewModel> { return this.features.vectors.vectorCommand(id, params, token); }
+
+  /** 当前文档代际令牌：矢量手势开始与提交共用，换文档后旧手势不再写入。 */
+  token(): VectorDocumentToken { return this.vectorToken(); }
+
+  /** 参考线/标尺（视图数据）。 */
+  guideCommand(id: string, params: unknown): EditorResult<EditorViewModel> { return this.features.views.guideCommand(id, params); }
+
+  vectorSnapshot(): EditorResult<unknown> { return this.features.vectors.vectorSnapshot(); }
+
+  /** 字体是否真实可用（缺字体明确报告，不伪造）。 */
+  checkFont(font: string): EditorResult<unknown> { return this.features.type.checkFont(font); }
+
+  /** 是否有任何活动草稿（新入口的统一门禁）。 */
+  hasActiveDraft(): boolean {
+    return this.propertiesActive || this.adjustmentActive || this.textActive || this.transformActive
+      || this.strokeActive || this.selectionModifyActive || this.retouchActive || this.filterActive
+      || this.composeActive || this.vectorDraftActive || this.canvasToolDraftActive;
+  }
+
+  /**
+   * 是否正在冻结/保存（含尚未得到权威回执的产物）。
+   *
+   * 与 `hasActiveDraft()` 分开：草稿需要用户先结算，保存需要等待回执。两者对「切标签/关闭/
+   * 重复保存」都是必须拒绝的理由，但拒绝文案不同，因此不合并成一个布尔。
+   */
+  isSaving(): boolean {
+    return Boolean(this.saving || this.pendingArtifacts
+      || this.state.phase === "freezing" || this.state.phase === "saving");
+  }
+
+  /**
+   * 未结算草稿的拒绝原因（保存、切标签、关闭共用同一权威）。
+   *
+   * 与 `save()`/`dispatch()` 内部用的是同一个 `blockingDraft()`：宿主不需要自己再列一遍草稿
+   * 种类，也不会因为漏了某个域而出现「保存会拒绝、切标签却放行」的不一致
+   * （change: 2026-10-22-add-photocraft-image-mode-workflows，任务 3.3）。
+   */
+  pendingDraftFailure(): EditorFailure | null {
+    return this.blockingDraft();
+  }
+
+  /**
+   * 登记/清除矢量草稿（形状拖绘、钢笔未完成路径、锚点拖动）。
+   *
+   * 矢量草稿由 `features/vectors` 的归约器持有，但保存、切标签、关闭与父子回写必须能看见它；
+   * 因此这里只登记一个原因字符串，不复制手势状态
+   * （change: 2026-10-22-add-photocraft-vector-canvas-tools，任务 3.3）。
+   */
+  setVectorDraft(active: boolean): void {
+    if (this.vectorDraftActive === active) return;
+    this.vectorDraftActive = active;
+    // 门禁变化要反映到快照（切标签按钮与保存按钮据此禁用）。
+    this.setState(this.state.phase, this.state.message, this.isDirty(), this.state.retriable);
+  }
+
+  /** 尚未交给内核的画布工具草稿也阻止保存、切文档和关闭。 */
+  setCanvasToolDraft(active: boolean): void {
+    if (this.canvasToolDraftActive === active) return;
+    this.canvasToolDraftActive = active;
+    this.setState(this.state.phase, this.state.message, this.isDirty(), this.state.retriable);
+  }
+
+  /** 当前矢量草稿是否未结算。 */
+  hasVectorDraft(): boolean {
+    return this.vectorDraftActive;
+  }
+
+  /**
+   * 当前文档代际令牌（change: 2026-10-22-add-photocraft-vector-canvas-tools，任务 3.3）。
+   *
+   * 手势开始时捕获、提交时回传：会话已 dispose 或换文档后，晚到的矢量命令被丢弃，
+   * 不会写入后来活动文档（与 `generation` + 活动文档索引共同判定）。
+   */
+  vectorToken(): VectorDocumentToken {
+    return { generation: this.generation, session: this.view.sessionActiveIndex };
+  }
+
+  /**
+   * 排除「当前正在提交的矢量草稿」后的门禁。
+   *
+   * 矢量手势的草稿由域内归约器持有（React 状态），而它提交时又必须经过
+   * `blockingDraft()`。若不加区分，草稿会拦住自己的提交。这里只放行矢量自身，
+   * 其它草稿（属性/调整/文字/变换/笔迹/修饰/滤镜/构图）照常拦截。
+   */
+  blockingDraftExceptVector(): EditorFailure | null {
+    return this.blockingDraft(true);
+  }
+
+  /** 门禁失败原因（供新入口直接复用统一文案）。`skipVectorDraft` 只在矢量自身提交时使用。 */
+  private blockingDraft(skipVectorDraft = false): EditorFailure | null {
+    if (this.propertiesActive) return this.propertiesPending();
+    if (this.adjustmentActive) return this.adjustmentPending();
+    if (this.textActive) return this.textPending();
+    if (this.transformActive) return this.transformPending();
+    if (this.strokeActive) return { ok: false, code: "stroke-active", message: "请先结束当前笔迹" };
+    if (this.selectionModifyActive) return { ok: false, code: "selection-modify-active", message: "请先确认或取消选区修改" };
+    if (this.retouchActive) return { ok: false, code: "retouch-active", message: "请先结束或取消当前修饰笔迹" };
+    if (this.filterActive) return { ok: false, code: "filter-active", message: "请先确认或取消滤镜草稿" };
+    if (this.composeActive) return { ok: false, code: "compose-active", message: "请先确认或取消构图修改" };
+    if (this.canvasToolDraftActive) return { ok: false, code: "gesture-active", message: "请先完成或取消当前画布工具操作" };
+    if (this.vectorDraftActive && !skipVectorDraft) return { ok: false, code: "vector-active", message: "请先完成或取消当前矢量操作" };
+    return null;
+  }
+
+  /**
+   * 导出/保存期的写入门（change: 2026-10-22-add-photocraft-painting-color-workflows，任务 3.3）。
+   *
+   * 与 `dispatch()` 曾经的内联判断逐字一致，现在抽成方法并对外暴露给域会话，避免「域里直连
+   * 内核的写入口只查草稿门」这条旁路。冻结在同步导出内完成，这里只挡界面竞态。
+   */
+  private frozenGate(): EditorFailure | null {
+    if (this.pendingArtifacts || this.state.phase === "freezing" || this.state.phase === "saving") {
+      return { ok: false, code: "frozen", message: "导出期间不接受内容修改" };
+    }
+    return null;
+  }
   /** 重做。 */
   redo(): EditorResult<EditorViewModel> { return this.dispatch("edit.redo"); }
 
@@ -562,11 +1177,8 @@ export class EditorWorkspaceController {
     const handle = this.handle;
     const session = this.options.session;
     if (!handle) return { ok: false, code: "invalid-artifacts", message: "编辑器尚未就绪", retriable: false };
-    if (this.propertiesActive) return {...this.propertiesPending(),code:"freeze-failed",retriable:true};
-    if (this.adjustmentActive) return { ...this.adjustmentPending(), code: "freeze-failed", retriable: true };
-    if (this.textActive) return { ...this.textPending(), code: "freeze-failed", retriable: true };
-    if (this.transformActive) return { ...this.transformPending(), code: "freeze-failed", retriable: true };
-    if (this.strokeActive) return { ok: false, code: "freeze-failed", message: "请先结束当前笔迹再保存", retriable: true };
+    const draft = this.blockingDraft();
+    if (draft) return { ok: false, code: "freeze-failed", message: draft.message, retriable: true };
     const revision = this.view.document?.revision;
     this.setState("freezing", null, this.isDirty());
     session.beginFreeze();
@@ -610,14 +1222,26 @@ export class EditorWorkspaceController {
     this.cancelText();
     this.cancelStroke();
     this.cancelTransform();
+    this.cancelSelectionModify();
+    this.cancelRetouch();
+    this.cancelFilter();
+    this.cancelCompose();
+    // 矢量草稿是纯界面状态（尚未落任何命令），释放时直接清除登记，不额外写文档。
+    this.vectorDraftActive = false;
+    this.canvasToolDraftActive = false;
+    this.closeSmartChild();
     this.generation++;
     this.saving = null;
     this.handle?.closeDocument();
     this.handle = null;
+    this.smartChild?.dispose();
+    this.smartChild = null;
+    this.smartChildProject = null;
     this.frozen = null;
     this.pendingArtifacts = null;
     this.placedAssetIds.clear();
     this.commandIndex.clear();
+    this.brushes.refresh(null);
     this.view = { hasDocument: false, document: null, sessionActiveIndex: null };
     this.setState("idle", null, false);
   }
@@ -640,6 +1264,8 @@ export class EditorWorkspaceController {
     if (!current()) return this.unavailable();
     this.view = view;
     this.commandIndex = allowed;
+    // 文档被换进来了：即使修订号与内容指纹碰巧和上一份相同，上一份文档的计划也已失效。
+    this.contentGeneration += 1;
     this.syncSession(view);
     if (baseline) this.options.session.establishBaseline();
     this.options.onViewModel?.(view, allowed);

@@ -74,8 +74,6 @@ export function FileDocumentActionsBar({ view, actions, status, statusTone = "in
       <span className="photo-document-surface__status" data-tone={statusTone} role="status">
         {status ?? "独立文件文档 · 不写入画布"}
       </span>
-      <Button size="sm" tone="ghost" disabled={busy || readonly} onClick={actions.saveProject} title="保存工程到本地文件">保存工程…</Button>
-      <Button size="sm" tone="ghost" disabled={busy} onClick={actions.exportPng} title="导出当前合成 PNG（不改变工程保存状态）">导出 PNG</Button>
       {actions.addToCanvas ? (
         <Button
           size="sm"

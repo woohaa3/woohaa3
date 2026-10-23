@@ -53,3 +53,12 @@ code { font-family: ui-monospace, monospace; }
 .dlg__body { display: grid; gap: 8px; font-size: 13px; }
 .dlg__footer { display: flex; justify-content: flex-end; gap: 8px; }
 .dlg--sm { width: 340px; }
+
+/* A/B 双文档条：只用于验证共享核心的跨文档行为，不是产品外壳。 */
+.dev-documents { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.dev-documents button {
+  height: 26px; padding: 0 8px; border: 1px solid var(--app-web-border, #8884);
+  border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer;
+}
+.dev-documents button[aria-pressed="true"] { border-color: var(--app-interaction-accent, #4a8cff); font-weight: 600; }
+.dev-documents button:disabled { opacity: .5; cursor: default; }

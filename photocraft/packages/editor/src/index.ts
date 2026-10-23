@@ -35,6 +35,9 @@ export * from "./new-layer-dialog.js";
 export * from "./normalize-image.js";
 export * from "./paint-tool-state.js";
 export * from "./pattern-preset-store.js";
+export * from "./brush-library-state.js";
+export * from "./brush-panels.js";
+export * from "./editor-tool-panels.js";
 export * from "./photo-editor-app.js";
 export * from "./photo-editor-canvas.js";
 export * from "./photo-editor-chrome.js";
@@ -44,6 +47,9 @@ export * from "./photo-editor-panels.js";
 export * from "./photo-editor-shortcuts.js";
 export * from "./photo-editor-tool-options.js";
 export * from "./photo-editor-tools.js";
+export * from "./smart-object-panel.js";
+export * from "./vector-tools-panel.js";
+export * from "./view-aids-overlay.js";
 export * from "./rgb-curve-editor.js";
 export * from "./selection-autopan.js";
 export * from "./selection-gesture.js";
@@ -55,3 +61,14 @@ export * from "./text-session.js";
 export * from "./transform.js";
 export * from "./transform-layer.js";
 export * from "./transform-session.js";
+
+// 宿主 codec 端口注册点（change: 2026-10-22-add-photocraft-animation-workflows）。
+// 宿主在装配时把 WebCodecs/容器实现交给编辑器；编辑器自身不实现编解码（见 features/animation/codec.ts）。
+export { animationCodecPort, setAnimationCodecPort, ANIMATION_CONTAINERS, negotiateAnimationContainer } from "./features/animation/codec.js";
+export type { AnimationContainer, AnimationNegotiation } from "./features/animation/codec.js";
+
+// 文件域的写入前置规则与请求序号（change: 2026-10-22-add-photocraft-file-workflows）。
+// 宿主工作区装配必须与域会话共用**同一份**判断（导出/保存中拒绝写入、只有最新呈现请求
+// 可以改变呈现），因此公开这一个子模块；不把域装配表（`feature`）导出去。
+export { RequestSequence, planFileWrite } from "./features/files/write-gate.js";
+export type { FileWriteBlockCode, FileWriteFacts, FileWritePlan } from "./features/files/write-gate.js";

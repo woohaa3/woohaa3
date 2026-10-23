@@ -189,7 +189,41 @@ export const IMAGE_PROJECT_LIMITS = {
   minBrushSizeSourcePixels: 1,
   maxBrushSizeSourcePixels: 512,
   /** 工程定义序列化字节上限。 */
-  maxSerializedBytes: 256 * 1024
+  maxSerializedBytes: 256 * 1024,
+  /**
+   * PSD 交换预算（change: 2026-10-22-complete-photocraft-webui-editing，任务 1.4 / design D6）。
+   *
+   * 原始输入与单次导出各限 64 MiB；候选工程仍须满足既有保存预算。
+   */
+  maxPsdInputBytes: 64 * 1024 * 1024,
+  maxPsdOutputBytes: 64 * 1024 * 1024,
+  /** 跨文档图层载荷（`LayerTransferBundle`）原始字节与层数预算（design D5）。 */
+  maxLayerTransferBytes: 64 * 1024 * 1024,
+  maxLayerTransferLayers: 64,
+  /** ABR／笔刷库预算（design D4）：单文件、单次导入、库总数、笔尖单边、累计像素与解码字节。 */
+  maxAbrFileBytes: 32 * 1024 * 1024,
+  maxAbrPresetsPerImport: 256,
+  maxBrushLibraryPresets: 256,
+  maxBrushTipSide: 1024,
+  maxBrushResourcePixels: 16 * 1024 * 1024,
+  maxBrushDecodedBytes: 128 * 1024 * 1024,
+  /** 参数滤镜与选区修改的半径上限（源像素）。 */
+  maxFilterRadius: 1000,
+  maxSelectionRadius: 500,
+  /** 直方图采样像素上限（与画布像素上限同量级，避免额外大分配）。 */
+  maxHistogramSamples: 8192 * 8192,
+  /** 工作区同时打开的文档数（含子文档）；运行政策，不写入工程格式。 */
+  maxOpenDocuments: 8,
+  /**
+   * 矢量载荷预算（change: 2026-10-22-add-photocraft-vector-canvas-tools，任务 3.2）。
+   *
+   * 与 `rust/project-limits.json` 同名同值，由 `contract-fixture.test.ts` 与
+   * `limits_agree.rs` 双向核对；**解码前**按 manifest 计数累计，超限整份拒绝。
+   */
+  maxVectorSavedPaths: 256,
+  maxVectorSubpaths: 4096,
+  maxVectorKnotsPerSubpath: 4096,
+  maxVectorPathPoints: 32768
 } as const;
 
 /** 受控色板（design D4：颜色从允许色板选择）。 */

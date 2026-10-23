@@ -14,10 +14,14 @@ import type { FrontendRuntime } from "@woohaa3/frontend/plugin-api";
 import { bindingOf, entryOf, fakeDocumentView, storeWith } from "../src/test-support/document-workspace-harness.js";
 
 const opened = vi.hoisted(() => vi.fn());
+const portSeen = vi.hoisted(() => vi.fn());
 vi.mock("@woohaa3/frontend/plugin-api", async (importOriginal) => ({ ...(await importOriginal<object>()), FocusHeader: () => <div data-header="true" /> }));
 vi.mock("../src/project-editor-pane.js", () => ({
-  ProjectEditorPane: ({ entry, writable, display }: { entry: unknown; writable: boolean; display: EditorDisplayControls }) => {
-    useEffect(() => { opened(entry); }, [entry]);
+  ProjectEditorPane: ({ entry, writable, display, port }: { entry: unknown; writable: boolean; display: EditorDisplayControls; port: ProjectEditorPort }) => {
+    // Menu/status wrappers may change; only content-loading inputs are allowed to reopen the document.
+    useEffect(() => { opened(entry); }, [entry, port.fileDestination, port.loadBaseImageBytes, port.loadProjectBytes]);
+    // 最近文件端口属于工作区（不随文档变化），这里只记录它是否贯通到面板。
+    portSeen({ recentFiles: port.recentFiles, reopen: port.onReopenRecent, remove: port.onRemoveRecent, hasBytes: port.hasRecentBytes });
     const [draft, setDraft] = useState("草稿");
     return <><input data-draft="true" value={draft} disabled={!writable} onChange={(event) => setDraft(event.currentTarget.value)} />
       <button data-toggle="panels" onClick={() => display.toggle("panels")}>面板</button>
@@ -177,4 +181,33 @@ it("tab 条显示顺序与状态，激活点击只切换文档、不重排", asy
   const close = tabs[0]!.querySelector<HTMLButtonElement>(".photo-document-tab__close")!;
   await act(async () => close.click());
   expect(onClose).toHaveBeenCalledWith("doc-1");
+});
+
+it("最近文件端口从工作区贯通到编辑器面板（索引属于工作区，不是某个文档）", async () => {
+  // 回归：索引与字节都在宿主；工作区只转交快照与动作。若链路断在这里，
+  // 面板会显示「宿主未提供端口」，而宿主明明持有记录——用户看不到最近文件。
+  const view = fakeDocumentView({ nodeId: "image" });
+  const store = storeWith({ active: bindingOf({ view }) });
+  const recentFiles = { version: 1 as const, entries: [{ id: "doc-1", name: "海报.pcraft", width: 100, height: 80, byteLength: 2048, savedAt: 1 }] };
+  const onReopenRecent = vi.fn(async () => ({ ok: true as const }));
+  const onRemoveRecent = vi.fn();
+  const hasRecentBytes = vi.fn(() => true);
+  const container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+  await act(async () => root.render(<ImageEditorWorkspace store={store} projectPort={{} as ProjectEditorPort}
+    onActivateDocument={() => undefined} onCloseDocument={() => undefined}
+    recentFiles={recentFiles} onReopenRecent={onReopenRecent} onRemoveRecent={onRemoveRecent} hasRecentBytes={hasRecentBytes} />));
+  const seen = portSeen.mock.lastCall?.[0];
+  expect(seen.recentFiles).toBe(recentFiles);
+  expect(seen.reopen).toBe(onReopenRecent);
+  expect(seen.remove).toBe(onRemoveRecent);
+  expect(seen.hasBytes).toBe(hasRecentBytes);
+});
+
+it("宿主不提供最近文件端口时不伪造空索引（面板据此显示不可用）", async () => {
+  const view = fakeDocumentView({ nodeId: "image" });
+  const store = storeWith({ active: bindingOf({ view }) });
+  const container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+  await act(async () => root.render(<ImageEditorWorkspace store={store} projectPort={{} as ProjectEditorPort}
+    onActivateDocument={() => undefined} onCloseDocument={() => undefined} />));
+  expect(portSeen.mock.lastCall?.[0].recentFiles).toBeUndefined();
 });

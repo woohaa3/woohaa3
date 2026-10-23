@@ -50,22 +50,21 @@ it("图片交互层不拦截触摸板事件，只向画布入口提供操作区�
   expect(stage.dataset.canvasViewportBlocked).toBeUndefined();
 });
 it("视图指令区分适合窗口与实际像素大小", () => {
-  const { ref, container } = setup();
-  const percentage = () => container.querySelector(".photo-editor-canvas__zoom > span")!.textContent;
-  expect(percentage()).toBe("50%");
+  const { ref, changed, container } = setup();
+  expect(container.querySelector(".photo-editor-canvas__zoom")).toBeNull();
   act(() => ref.current!.view("actualSize"));
-  expect(percentage()).toBe("100%");
+  expect(changed).toHaveBeenLastCalledWith({x:0,y:0,zoom:1});
   act(() => ref.current!.view("zoomOut"));
-  expect(percentage()).toBe("83%");
+  expect(changed).toHaveBeenLastCalledWith({x:0,y:0,zoom:1/1.2});
   act(() => ref.current!.view("fit"));
-  expect(percentage()).toBe("50%");
+  expect(changed).toHaveBeenLastCalledWith({x:0,y:0,zoom:.5});
 });
 it("取消手势释放指针，迟到 pointerup 不补交操作；活动指针不接受缩放", () => {
-  const { ref, stage, container } = setup();
+  const { ref, stage, changed } = setup();
   pointer(stage, "pointerdown");
   expect(ref.current!.hasGesture()).toBe(true);
   act(() => ref.current!.view("actualSize"));
-  expect(container.querySelector(".photo-editor-canvas__zoom > span")!.textContent).toBe("50%");
+  expect(changed).not.toHaveBeenCalled();
   let cancelled = false;
   act(() => { cancelled = ref.current!.cancelGesture(); });
   expect(cancelled).toBe(true);
@@ -108,13 +107,11 @@ it("首帧沿用聚焦取景，透明交互层没有第二张图片；过渡中�
   const onChange = vi.fn();
   const { ref, stage, container, render } = setup({ view: { viewport: { x: 38, y: -25, zoom: 0.14 }, fitZoom: 0.54, transitioning: true, onChange } });
   expect(container.querySelector("canvas, img")).toBeNull();
-  expect(container.querySelector(".photo-editor-canvas__zoom > span")?.textContent).toBe("14%");
   pointer(stage, "pointerdown");
   act(() => ref.current!.view("fit"));
   expect(ref.current!.hasGesture()).toBe(false);
   expect(onChange).not.toHaveBeenCalled();
   render({ view: { viewport: { x: 0, y: 0, zoom: 0.54 }, fitZoom: 0.54, transitioning: false, onChange } });
-  expect(container.querySelector(".photo-editor-canvas__zoom > span")?.textContent).toBe("54%");
   act(() => ref.current!.view("actualSize"));
   expect(onChange).toHaveBeenLastCalledWith({ x: 0, y: 0, zoom: 1 });
 });
@@ -436,4 +433,267 @@ it("样式目标切换和输入禁用取消定位，旧指针释放不补交；�
   pointer(stage,"pointerdown");render({tool:"none",positioning,interactive:false});expect(positioning.cancel).toHaveBeenCalledTimes(2);
   render({tool:"pan",positioning});pointer(stage,"pointerdown");pointer(stage,"pointerup");
   expect(positioning.start).toHaveBeenCalledTimes(2);expect(positioning.end).not.toHaveBeenCalled();
+});
+it("单击类工具（油漆桶/魔术橡皮）按下即提交一个事务，不进入拖动轨迹", () => {
+  for (const tool of ["bucket", "magicEraser"] as const) {
+    const start = vi.fn(), move = vi.fn(), finish = vi.fn();
+    const { stage } = setup({ tool, onStrokeStart: start, onStrokeMove: move, onStroke: finish });
+    const send = (type: string, x: number, y: number) => {
+      const event = new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      act(() => stage.dispatchEvent(event));
+    };
+    send("pointerdown", 100, 100);
+    expect(finish).toHaveBeenCalledOnce();
+    expect(finish.mock.calls[0]![0]).toEqual([{ x: 136, y: 136 }]);
+    send("pointermove", 200, 200); send("pointerup", 200, 200);
+    expect(start).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+    expect(finish).toHaveBeenCalledOnce();
+  }
+});
+
+it("吸管不需要 Alt：按下与拖动持续取色，抬笔只多报一次且从不落笔", () => {
+  const sample = vi.fn(), start = vi.fn(), finish = vi.fn();
+  const { stage } = setup({ tool: "eyedropper", onSampleColor: sample, onStrokeStart: start, onStroke: finish });
+  const send = (type: string, x: number, y: number) => {
+    const event = new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true });
+    Object.defineProperty(event, "pointerId", { value: 1 });
+    act(() => stage.dispatchEvent(event));
+  };
+  send("pointerdown", 100, 100);
+  expect(sample).toHaveBeenLastCalledWith({ x: 136, y: 136 });
+  send("pointermove", 140, 120);
+  expect(sample).toHaveBeenLastCalledWith({ x: 216, y: 176 });
+  const before = sample.mock.calls.length;
+  send("pointerup", 140, 120);
+  expect(sample).toHaveBeenCalledTimes(before + 1);
+  expect(start).not.toHaveBeenCalled();
+  expect(finish).not.toHaveBeenCalled();
+});
+
+it("真笔的倾斜/旋转随 coalesced 采样进入点位，鼠标保持短编码不补零姿态", () => {
+  const start = vi.fn(), finish = vi.fn();
+  const { stage, render } = setup({ tool: "brush", onStrokeStart: start, onStroke: finish });
+  const pen = (type: string, x: number, pressure: number, tiltX: number, twist: number, samples?: PointerEvent[]) => {
+    const event = new MouseEvent(type, { button: 0, clientX: x, clientY: 100, bubbles: true });
+    Object.defineProperties(event, {
+      pointerId: { value: 1 }, pointerType: { value: "pen" }, pressure: { value: pressure },
+      tiltX: { value: tiltX }, tiltY: { value: tiltX / 2 }, twist: { value: twist },
+      ...(samples ? { getCoalescedEvents: { value: () => samples } } : {})
+    });
+    return event;
+  };
+  act(() => {
+    stage.dispatchEvent(pen("pointerdown", 100, .5, 30, 45, [
+      { clientX: 110, clientY: 100, pressure: .6, tiltX: 40, tiltY: 20, twist: 60 }
+    ] as PointerEvent[]));
+    stage.dispatchEvent(pen("pointerup", 100, 0, 0, 0));
+  });
+  expect(start).toHaveBeenCalledWith({ x: 136, y: 136, pressure: .5, tiltX: 30, tiltY: 15, rotation: 45 }, { shift: false });
+  // 抬笔坐标与起点重合 → 不追加补点；已有点位保留真实姿态而不是抬笔的 0 值。
+  expect(finish.mock.calls[0][0]).toEqual([{ x: 136, y: 136, pressure: .5, tiltX: 30, tiltY: 15, rotation: 45 }]);
+  render({ tool: "brush", onStrokeStart: start, onStroke: finish });
+  const mouse = (type: string, x: number, y: number) => {
+    const event = new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true });
+    Object.defineProperty(event, "pointerId", { value: 2 });
+    return event;
+  };
+  act(() => { stage.dispatchEvent(mouse("pointerdown", 100, 100)); stage.dispatchEvent(mouse("pointerup", 120, 100)); });
+  expect(finish.mock.calls.at(-1)![0]).toEqual([{ x: 136, y: 136 }, { x: 176, y: 136 }]);
+});
+
+it("矢量工具把文档坐标交给域内归约器，不再落到平移或笔迹分支", () => {
+  const onVectorPointer = vi.fn();
+  const onStroke = vi.fn();
+  const onPenPoint = vi.fn();
+  const { stage, ref, changed } = setup({ tool: "shape-rect", onVectorPointer, onStroke, onPenPoint });
+  const send = (type: string, x: number, y: number, extra: MouseEventInit = {}) => {
+    const event = new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true, ...extra });
+    Object.defineProperty(event, "pointerId", { value: 1 });
+    act(() => stage.dispatchEvent(event));
+  };
+
+  const last = () => onVectorPointer.mock.calls.at(-1)!;
+  send("pointerdown", 100, 100);
+  expect(last()[0]).toMatchObject({ type: "down", point: [136, 136] });
+  expect(ref.current!.hasGesture()).toBe(true);
+
+  send("pointermove", 200, 150, { shiftKey: true });
+  const move = onVectorPointer.mock.calls.at(-1)!;
+  expect(move[0]).toMatchObject({ type: "move", shift: true });
+  expect(move[0].point[0]).toBeCloseTo(336);
+  expect(move[0].point[1]).toBeCloseTo(236);
+  // 拖动期间**不**产生笔迹：矢量几何由归约器在松手时提交。
+  expect(onStroke).not.toHaveBeenCalled();
+  expect(onPenPoint).not.toHaveBeenCalled();
+
+  send("pointerup", 200, 150);
+  expect(last()[0].type).toBe("up");
+  expect(last()[0].point[0]).toBeCloseTo(336);
+  expect(last()[0].point[1]).toBeCloseTo(236);
+  expect(ref.current!.hasGesture()).toBe(false);
+  // 画布不自己平移：矢量工具拖动不是视图操作。
+  expect(changed).not.toHaveBeenCalled();
+  expect(onStroke).not.toHaveBeenCalled();
+});
+
+it("矢量工具取消手势通知归约器丢弃草稿，且不提交抬笔事件", () => {
+  const onVectorPointer = vi.fn();
+  const { stage, ref } = setup({ tool: "pen-freeform", onVectorPointer });
+  const send = (type: string, x: number, y: number) => {
+    const event = new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true });
+    Object.defineProperty(event, "pointerId", { value: 1 });
+    act(() => stage.dispatchEvent(event));
+  };
+  send("pointerdown", 100, 100);
+  act(() => { ref.current!.cancelGesture(); });
+  expect(onVectorPointer.mock.calls.at(-1)![0]).toMatchObject({ type: "cancel" });
+  const calls = onVectorPointer.mock.calls.length;
+  send("pointerup", 120, 120);
+  expect(onVectorPointer).toHaveBeenCalledTimes(calls);
+});
+
+it("矢量路径编辑的抬笔带双击标记，供归约器区分选择与平滑/尖角转换", () => {
+  const onVectorPointer = vi.fn();
+  const { stage } = setup({ tool: "direct-select", onVectorPointer });
+  for (const type of ["pointerdown", "pointerup"]) {
+    const event = new MouseEvent(type, { button: 0, clientX: 100, clientY: 100, bubbles: true, detail: 2 });
+    Object.defineProperty(event, "pointerId", { value: 1 });
+    act(() => stage.dispatchEvent(event));
+  }
+  expect(onVectorPointer.mock.calls.at(-1)![0]).toMatchObject({ type: "up", doubleClick: true });
+});
+
+it("视图域的参考线拖动优先接管按下，取消不提交", () => {
+  const down = vi.fn(() => true);
+  const move = vi.fn();
+  const up = vi.fn();
+  const { stage } = setup({ tool: "brush", onGuideDown: down, onGuideMove: move, onGuideUp: up });
+
+  // 按下：视图域先决定是否接管；接管后画布不当成笔迹。
+  pointer(stage, "pointerdown");
+  expect(down).toHaveBeenCalledWith([100, 100]);
+  expect(stage.hasAttribute("data-view-guide-drag")).toBe(true);
+
+  pointer(stage, "pointermove");
+  expect(move).toHaveBeenCalledWith([100, 100]);
+
+  pointer(stage, "pointerup");
+  expect(up).toHaveBeenCalledWith([100, 100], false);
+  expect(stage.hasAttribute("data-view-guide-drag")).toBe(false);
+});
+
+it("视图域不接管时画布行为与之前完全一致", () => {
+  const down = vi.fn(() => false);
+  const move = vi.fn();
+  const up = vi.fn();
+  const { stage, changed } = setup({ tool: "marquee", onGuideDown: down, onGuideMove: move, onGuideUp: up });
+
+  pointer(stage, "pointerdown");
+  expect(down).toHaveBeenCalledOnce();
+  expect(stage.hasAttribute("data-view-guide-drag")).toBe(false);
+  // 选框仍然正常开始拖动，端口没有被误触。
+  pointer(stage, "pointermove");
+  expect(move).not.toHaveBeenCalled();
+  expect(up).not.toHaveBeenCalled();
+  pointer(stage, "pointerup");
+  expect(up).not.toHaveBeenCalled();
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it("拖动中指针被取消时通知视图域丢弃草稿，不提交", () => {
+  const down = vi.fn(() => true);
+  const up = vi.fn();
+  const { stage } = setup({ tool: "brush", onGuideDown: down, onGuideUp: up });
+  pointer(stage, "pointerdown");
+  pointer(stage, "pointercancel");
+  expect(up).toHaveBeenCalledWith([0, 0], true);
+  expect(stage.hasAttribute("data-view-guide-drag")).toBe(false);
+});
+
+it("拖动预览只画一条临时线，不改画布数据", () => {
+  const { stage, container } = setup({ tool: "brush", guidePreview: { vertical: true, position: 200 } });
+  const preview = container.querySelector('[data-guide-preview="vertical"]');
+  expect(preview).not.toBeNull();
+  expect(stage.getAttribute("data-canvas-viewport")).toBe("true");
+});
+
+it("落点请求优先于当前工具：一次点击即被消费，不落笔也不起选框", () => {
+  const point = vi.fn((_point: { x: number; y: number }) => true);
+  const stroke = vi.fn();
+  const { stage, changed } = setup({ tool: "brush", onStroke: stroke, onViewPoint: point });
+
+  pointer(stage, "pointerdown");
+  pointer(stage, "pointerup");
+  // 「点画布放一个标记」是明确的一次性意图，不应先落一笔。
+  expect(point).toHaveBeenCalledOnce();
+  expect(point.mock.calls[0][0]).toMatchObject({ x: expect.any(Number), y: expect.any(Number) });
+  expect(stroke).not.toHaveBeenCalled();
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it("没有落点请求时画布行为完全不变", () => {
+  const point = vi.fn((_point: { x: number; y: number }) => false);
+  const stroke = vi.fn();
+  const { stage } = setup({ tool: "brush", onStroke: stroke, onViewPoint: point });
+  pointer(stage, "pointerdown");
+  pointer(stage, "pointerup");
+  expect(point).toHaveBeenCalledOnce();
+  expect(stroke).toHaveBeenCalled();
+});
+
+it("Info 读数端口只转发客户坐标，离开画布时清空", () => {
+  const onProbe = vi.fn();
+  const { stage } = setup({ tool: "marquee", onProbe });
+  const move = new MouseEvent("pointermove", { clientX: 321, clientY: 123, bubbles: true });
+  Object.defineProperty(move, "pointerId", { value: 1 });
+  act(() => stage.dispatchEvent(move));
+  expect(onProbe).toHaveBeenLastCalledWith([321, 123]);
+  // React 用 `pointerout` 合成 `pointerleave`（后者本身不冒泡），所以这里派发 out。
+  act(() => stage.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: document.body })));
+  // 离开必须是 null：面板据此显示「—」，不能继续显示上一个像素。
+  expect(onProbe).toHaveBeenLastCalledWith(null);
+});
+
+it("画布上报真实取景（客户坐标原点 + 缩放），值不变不重复上报", () => {
+  const onFrame = vi.fn();
+  const { render } = setup({ tool: "marquee", onFrame });
+  expect(onFrame).toHaveBeenCalled();
+  const [origin, zoom] = onFrame.mock.calls.at(-1)!;
+  // 864×514 的容器、1600×900 的文档、0.5 缩放 → 居中后的原点，加容器在页面里的位置。
+  expect(zoom).toBe(0.5);
+  expect(origin).toEqual({ x: (864 - 1600 * 0.5) / 2, y: (514 - 900 * 0.5) / 2 });
+  onFrame.mockClear();
+  // 重渲染但取景没变：不重复回调（避免每帧写内核）。
+  render({ tool: "marquee", onFrame });
+  expect(onFrame).not.toHaveBeenCalled();
+});
+
+it("缩放工具以点击点为锚，Alt 点击还原缩放且不产生选区", () => {
+  const onSelectionClick = vi.fn();
+  const { stage, changed } = setup({ tool: "zoom", onSelectionClick });
+  pointer(stage, "pointerdown");
+  expect(changed).toHaveBeenLastCalledWith({ zoom: .75, x: 166, y: 78.5 });
+  const event = new MouseEvent("pointerdown", { button: 0, clientX: 100, clientY: 100, altKey: true, bubbles: true });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  act(() => stage.dispatchEvent(event));
+  expect(changed).toHaveBeenLastCalledWith({ zoom: .5, x: 0, y: 0 });
+  expect(onSelectionClick).not.toHaveBeenCalled();
+});
+
+it("裁剪工具拖框返回文档像素矩形，单击不清空已有选区", () => {
+  const onMarquee = vi.fn(), onSelectionClick = vi.fn();
+  const { stage, container } = setup({ tool: "crop", ellipse: true, onMarquee, onSelectionClick });
+  pointer(stage, "pointerdown");
+  pointer(stage, "pointerup");
+  expect(onSelectionClick).not.toHaveBeenCalled();
+  pointer(stage, "pointerdown");
+  for (const type of ["pointermove", "pointerup"]) {
+    const event = new MouseEvent(type, { button: 0, clientX: 200, clientY: 180, bubbles: true });
+    Object.defineProperty(event, "pointerId", { value: 1 });
+    act(() => stage.dispatchEvent(event));
+    if (type === "pointermove") expect(container.querySelector<HTMLElement>(".photo-editor-canvas__marquee")?.style.borderRadius).not.toBe("50%");
+  }
+  expect(onMarquee).toHaveBeenCalledWith({ x: 136, y: 136, width: 200, height: 160 }, "replace");
 });

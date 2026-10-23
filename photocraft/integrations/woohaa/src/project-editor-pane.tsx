@@ -55,6 +55,28 @@ export type ProjectEditorPort = {
   documents?: import("@woohaa3/photocraft-editor").EditorDocumentsMenu;
   /** 像素呈现端口（文件文档用 Canvas 画自己的预览；节点文档省略，由 Bevy 呈现）。 */
   renderCanvasBackground?: (origin: { x: number; y: number }, zoom: number) => import("react").ReactNode;
+  /**
+   * 申请独立文档槽位（change: 2026-10-22-add-photocraft-file-workflows，U01）。
+   *
+   * 一个编辑会话只有一个文档槽位，所以「已有文档时再新建」必须由宿主另开一个文档/标签。
+   * 编辑器把新文档序列化成自包含工程字节后交到这里；宿主用既有打开路径落地。
+   */
+  onRequestDocumentSlot?: (input: { bytes: Uint8Array; name: string }) =>
+    | { ok: true }
+    | { ok: false; reason: string }
+    | Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * 最近文件端口（change: 2026-10-22-add-photocraft-file-workflows，U04）。
+   *
+   * 索引字节都由宿主提供；面板只渲染身份与大小并把动作转回去，不缓存文件内容。
+   */
+  recentFiles?: import("@woohaa3/photocraft-protocol").RecentFileStore | null;
+  /** 索引本机持久化诊断（写失败/快照损坏）；非空时面板如实提示「仅本次会话」。 */
+  recentFilesError?: string | null;
+  onReopenRecent?: (entry: import("@woohaa3/photocraft-protocol").RecentFileEntry) =>
+    Promise<{ ok: true } | { ok: false; reason: string }>;
+  onRemoveRecent?: (id: string) => void;
+  hasRecentBytes?: (entry: import("@woohaa3/photocraft-protocol").RecentFileEntry) => boolean;
 };
 
 /** React 编辑器的进入方式（判定见 `editor-entry.ts`）。 */
@@ -132,22 +154,25 @@ export function ProjectEditorPane({ view, writable, port, entry, display, contro
         return;
       }
       if (entry.mode === "project") {
-        const document_ = view.projectDocument();
-        if (!document_) {
-          setStatus("该图片没有可编辑的工程");
-          setFailed(true);
-          return;
-        }
-        const bytes = await loadProjectBytes(document_.project.storageKey).catch(() => null);
+        // 节点文档的工程对象在别处（storageKey）；独立文件的工程就是它自己打开的字节。
+        // 两条来源必须分开取，不能把文件的 `.pcraft` 当成节点工程对象。
+        const projectDocument = view.projectDocument();
+        const bytes = projectDocument
+          ? await loadProjectBytes(projectDocument.project.storageKey).catch(() => null)
+          : await loadBaseImageBytes(view).catch(() => null);
         if (cancelled) return;
         if (!bytes) {
-          setStatus("工程对象不可读取，仅可查看合成图");
+          setStatus(projectDocument ? "工程对象不可读取，仅可查看合成图" : "工程字节不可读取，请重新打开");
           setFailed(true);
           return;
         }
         await waitForTransition();
         if (cancelled) return;
-        const opened = await controller.openProject({ bytes, baseAssetId: document_.baseAssetId });
+        const opened = await controller.openProject({
+          bytes,
+          // 独立文件没有节点资产 id：用文档自己的稳定身份，避免空 id 混进工程基线。
+          baseAssetId: projectDocument?.baseAssetId || baseAssetId || "file-project"
+        });
         if (cancelled) return;
         setStatus(opened.ok ? null : opened.message);
         setFailed(!opened.ok);
@@ -162,11 +187,42 @@ export function ProjectEditorPane({ view, writable, port, entry, display, contro
         setFailed(true);
         return;
       }
-      const normalized = await normalizeEditorImage(bytes);
-      if (cancelled) return;
+      /**
+       * 独立文件文档优先走内核的真实格式准入（change: 2026-10-22-add-photocraft-raster-interchange）。
+       *
+       * 浏览器归一（`normalizeEditorImage`）只能认 PNG/JPEG/WebP 一类；TIFF/QOI/TGA/PNM/PCX/
+       * XPM/DDS 它一律拒绝，而这些格式内核本来就能打开。这里先问本域预检：内核说能开就直接
+       * 把原始字节交给内核，保留真实位深/布局与失真报告；预检说不行则显示内核给的原因，
+       * 不再退化成浏览器的一句「无法读取」。
+       */
+      let payload = bytes;
+      if (fileDestination === true) {
+        await waitForTransition();
+        if (cancelled) return;
+        const ready = await controller.ensureEditor();
+        if (cancelled) return;
+        const io = (controller as unknown as {
+          features?: { io?: { inspectOpenRaster?: (bytes: Uint8Array) => { ok: boolean; value?: unknown; message?: string } } };
+        }).features?.io;
+        if (ready.ok && typeof io?.inspectOpenRaster === "function") {
+          const inspected = io.inspectOpenRaster(bytes);
+          if (!inspected.ok) {
+            setStatus(inspected.message ?? "该文件无法作为图片打开");
+            setFailed(true);
+            return;
+          }
+        } else {
+          // 旧内核没有本域端口：退回原来的浏览器归一，行为与本 change 之前一致。
+          payload = await normalizeEditorImage(bytes);
+          if (cancelled) return;
+        }
+      } else {
+        payload = await normalizeEditorImage(bytes);
+        if (cancelled) return;
+      }
       await waitForTransition();
       if (cancelled) return;
-      const opened = await controller.openImage({ name: "image", assetId: baseAssetId || "file-image", bytes: normalized });
+      const opened = await controller.openImage({ name: "image", assetId: baseAssetId || "file-image", bytes: payload });
       if (cancelled) return;
       if (!opened.ok) {
         setStatus(opened.message);
@@ -239,6 +295,12 @@ export function ProjectEditorPane({ view, writable, port, entry, display, contro
         onApply={apply}
         readonly={!writable}
         {...(port.documents ? { documents: port.documents } : {})}
+        {...(port.onRequestDocumentSlot ? { onRequestDocumentSlot: port.onRequestDocumentSlot } : {})}
+        {...(port.recentFiles === undefined ? {} : { recentFiles: port.recentFiles })}
+        {...(port.recentFilesError ? { recentFilesError: port.recentFilesError } : {})}
+        {...(port.onReopenRecent ? { onReopenRecent: port.onReopenRecent } : {})}
+        {...(port.onRemoveRecent ? { onRemoveRecent: port.onRemoveRecent } : {})}
+        {...(port.hasRecentBytes ? { hasRecentBytes: port.hasRecentBytes } : {})}
       />
     </div>
   );

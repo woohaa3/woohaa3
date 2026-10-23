@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PhotocraftCommand } from "@woohaa3/photocraft-protocol";
+import { LAYER_FILL_LIMITS } from "@woohaa3/photocraft-protocol";
 import { Button, IconButton } from "./ui/Button.js";
 import { Tooltip } from "./ui/Tooltip.js";
 import { DropdownMenu } from "./ui/Menu.js";
@@ -12,10 +13,12 @@ import { PHOTOSHOP_BLENDS, type EditorLayerRow, type EditorLayerLocks, type Edit
 import { AdjustmentIcon, LockIcon, FolderPlusIcon, ChevronDownIcon, ChevronRightIcon } from "./ui/icons.js";
 
 export const BLEND_LABELS: Record<string, string> = {"Normal": "正常", "Dissolve": "溶解", "Darken": "变暗", "Multiply": "正片叠底", "Color Burn": "颜色加深", "Linear Burn": "线性加深", "Darker Color": "深色", "Lighten": "变亮", "Screen": "滤色", "Color Dodge": "颜色减淡", "Linear Dodge (Add)": "线性减淡（添加）", "Lighter Color": "浅色", "Overlay": "叠加", "Soft Light": "柔光", "Hard Light": "强光", "Vivid Light": "亮光", "Linear Light": "线性光", "Pin Light": "点光", "Hard Mix": "实色混合", "Difference": "差值", "Exclusion": "排除", "Subtract": "减去", "Divide": "划分", "Hue": "色相", "Saturation": "饱和度", "Color": "颜色", "Luminosity": "明度", "Pass Through": "穿透" };
-const KIND_LABELS: Record<string, string> = { raster: "像素", group: "组", text: "文字", adjustment: "调整", pixel: "像素" };
+const KIND_LABELS: Record<string, string> = { raster: "像素", group: "组", text: "文字", adjustment: "调整", pixel: "像素", fill: "填充" };
 
 /** 属性属于活动图层；选择集合与重排结果始终读取内核。 */
-export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible, onBlend, onRename, onCommand, thumbnail, onMask, onAddMask, opacityEditing, collapseControl, styleEditor }: {
+export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible, onBlend, onRename, onCommand, thumbnail, onMask, onAddMask, opacityEditing, collapseControl, styleEditor, filterControl, filteredLayerIds }: {
+  filterControl?: ReactNode;
+  filteredLayerIds?: readonly number[] | null;
   styleEditor?:ReactNode;
   collapseControl?:ReactNode;
   view: EditorViewModel;
@@ -45,7 +48,10 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
     }
     return parents;
   };
-  const displayed = layers.filter(layer => ancestors(layer).every(parent => parent.expanded));
+  // Search reveals matching descendants even when their group is collapsed.
+  const displayed = filteredLayerIds != null
+    ? layers.filter(layer => filteredLayerIds.includes(layer.id))
+    : layers.filter(layer => ancestors(layer).every(parent => parent.expanded));
   const active = layers.find((layer) => layer.active);
   const blends: readonly string[] = active?.kind === "group" ? ["Pass Through", ...PHOTOSHOP_BLENDS] : PHOTOSHOP_BLENDS;
   const clippingCommand=active?.clipped ? "layer.releaseClippingMask" : "layer.createClippingMask";
@@ -69,6 +75,8 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
   return (
     <section className="photo-editor__panel photo-editor__panel--layers">
       <header className="photo-editor__panel-title"><span>{collapseControl}图层</span><span>{layers.filter(layer=>layer.selected).length > 1 ? `已选 ${layers.filter(layer=>layer.selected).length} / ${layers.length}` : layers.length}</span></header>
+      {filterControl}
+      {filteredLayerIds != null && displayed.length === 0 ? <p className="photo-editor__option-hint">没有匹配的图层，请调整筛选条件</p> : null}
       <div className="photo-editor__layer-properties">
         <select value={active?.blend ?? "Normal"} disabled={readonly || !active || active.effectiveLocks.all} title="混合模式"
           onChange={(event) => active && onBlend(active, event.currentTarget.value)}>
@@ -123,6 +131,7 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
           return (
             <li key={layer.id} className={`photo-editor__layer${layer.selected || layer.active ? " photo-editor__layer--selected" : ""}${layer.active ? " photo-editor__layer--active" : ""}`}
               data-layer-id={layer.id} data-drop-position={canReorder && drop?.layer===layer.id ? drop.position : undefined}
+              data-link-group={layer.linkGroup === null ? undefined : layer.linkGroup}
               onDragOver={(event)=>{
                 if (!acceptsDrop(layer)) { setDrop(null); return; }
                 const position = positionAt(layer,event.currentTarget,event.clientY);
@@ -148,6 +157,8 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
                 onClick={(event)=>onCommand("layer.setExpanded",{layer:layer.id,expanded:!layer.expanded,...(event.altKey ? {all:true} : {})})}>
                 {layer.expanded ? <ChevronDownIcon size={12}/> : <ChevronRightIcon size={12}/>}
               </IconButton> : <span className="photo-editor__group-disclosure-space"/>}
+              {layer.labelColor && layer.labelColor !== "none" ? <span className="photo-editor__label-swatch" data-label={layer.labelColor} title={`图层颜色：${layer.labelColor}`} /> : null}
+              {layer.linkGroup !== null ? <span className="photo-editor__clipping-indicator" title="已链接：与同组图层一起移动"><LinkIcon size={13} /></span> : null}
               {layer.clipped ? <span className="photo-editor__clipping-indicator" title="剪贴到下方基底"><ClippingMaskIcon size={13} /></span> : null}
               <button type="button" className="photo-editor__layer-thumbnail" data-edit-target="pixels" data-target-active={layer.active && !maskActive ? "true" : undefined} disabled={readonly} onClick={(event) => select(layer,event)} title={`${layer.name}：编辑内容；Shift 范围选择，Ctrl/Cmd 增减选择`}>
                 <LayerThumbnail layer={layer.id} revision={view.document?.revision ?? 0} read={thumbnail} />
@@ -186,6 +197,18 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
         })}
       </ul>
       <div className="photo-editor__layer-actions">
+        {commands.get("layer.setLabelColor")?.allowed ? <DropdownMenu label="图层颜色" side="top" align="end"
+          trigger={<IconButton size="sm" label="图层颜色" title="图层颜色标签"
+            disabled={readonly || selected.length === 0 || !commands.get("layer.setLabelColor")?.enabled}>
+            <span className="photo-editor__label-swatch" data-label={active?.labelColor && active.labelColor !== "none" ? active.labelColor : "gray"} /></IconButton>}
+          items={LAYER_FILL_LIMITS.labelColors.map((color) => ({
+            id: color,
+            label: color === "none" ? "无" : color,
+            selected: (active?.labelColor ?? "none") === color,
+            disabled: readonly || selected.length === 0,
+            onSelect: () => onCommand("layer.setLabelColor", { color })
+          }))}
+        /> : null}
         {commands.get(clippingCommand)?.allowed ? <Button size="sm" tone="ghost" className="photo-editor__clipping-action"
           title={commands.get(clippingCommand)?.disabledReason || `创建或释放剪贴蒙版（${commandShortcutLabel(clippingCommand)}）`}
           disabled={readonly || !active || !commands.get(clippingCommand)?.enabled}
