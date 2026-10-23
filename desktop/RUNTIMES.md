@@ -35,7 +35,7 @@
 }
 ```
 
-本机程序必须是兼容的直接可执行文件，按锁文件 localVersions 校验；CLI 版本与 SDK/npm 版本分开。Windows 需要原生 `.exe`，不把 npm `.cmd` shim 当成原生程序。仅复用程序，不导入全局账号和技能。
+Claude 本机程序按锁文件 `localVersions` 精确校验，CLI 版本与 SDK/npm 版本分开。Codex 接受能自报版本的本机程序，只拒绝锁文件 `blockedVersions` 中的版本；macOS 上可以把 `ChatGPT.app` 作为路径，探测时会解析到包内的 Codex 可执行文件。Windows 需要原生 `.exe`，不把 npm `.cmd` shim 当成原生程序。仅复用程序，不导入全局账号和技能。
 
 ## 构建和上传 CDN
 
