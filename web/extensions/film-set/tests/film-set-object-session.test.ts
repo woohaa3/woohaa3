@@ -25,7 +25,7 @@ function item(id: string): FilmSetItem {
 }
 
 function harness(options: { writable?: boolean } = {}) {
-  let content: FilmSetContent = { schemaVersion: 3, items: [item("a"), item("b")] };
+  let content: FilmSetContent = { schemaVersion: 4, items: [item("a"), item("b")] };
   const submitted: Array<{ nodeId: string; itemId: string; op: FilmSetItemPatchOp }> = [];
   let paused = 0;
   const session = new FilmSetObjectSession({
@@ -100,7 +100,7 @@ describe("FilmSetObjectSession（任务 4.2–4.4）", () => {
     expect(h.session.deleteSelected()).toBe(true);
     expect(h.submitted.at(-1)?.op).toEqual({ kind: "delete" });
     expect(h.session.getState().selectedItemId).toBeNull();
-    h.setContent({ schemaVersion: 3, items: [] });
+    h.setContent({ schemaVersion: 4, items: [] });
     expect(h.session.objects()).toEqual([]);
   });
 
@@ -117,7 +117,7 @@ describe("FilmSetObjectSession（任务 4.2–4.4）", () => {
     const h = harness();
     h.session.enter("film");
     h.session.select("a");
-    h.setContent({ schemaVersion: 3, items: [item("b")] });
+    h.setContent({ schemaVersion: 4, items: [item("b")] });
     h.session.reconcile();
     expect(h.session.getState().selectedItemId).toBeNull();
   });
@@ -132,7 +132,7 @@ describe("FilmSetObjectSession（任务 4.2–4.4）", () => {
 });
 
 it("surfaces asynchronous rejection without writing the preview to canonical content", async () => {
-  const content: FilmSetContent = { schemaVersion: 3, items: [item("a")] };
+  const content: FilmSetContent = { schemaVersion: 4, items: [item("a")] };
   let reject!: (value: { state: string; error: string | null }) => void;
   const settled = new Promise<{ state: string; error: string | null }>(resolve => { reject = resolve; });
   const session = new FilmSetObjectSession({ readContent: () => content, isWritable: () => true,
@@ -145,7 +145,7 @@ it("surfaces asynchronous rejection without writing the preview to canonical con
 });
 
 it("ignores a late rejection after leaving and re-entering the same node", async () => {
-  const content: FilmSetContent = { schemaVersion: 3, items: [item("a")] };
+  const content: FilmSetContent = { schemaVersion: 4, items: [item("a")] };
   let settle!: (value: { state: string; error: string | null }) => void;
   const settled = new Promise<{ state: string; error: string | null }>(resolve => { settle = resolve; });
   const session = new FilmSetObjectSession({ readContent: () => content, isWritable: () => true,
@@ -161,7 +161,7 @@ it("ignores a late rejection after leaving and re-entering the same node", async
 it("cancels a drag when a remote transform replaces its frozen base", () => {
   const h = harness(); h.session.enter("film"); h.session.select("a"); h.session.beginEdit();
   const updated = item("a"); updated.localTransform.offset.x = 8;
-  h.setContent({ schemaVersion: 3, items: [updated, item("b")] }); h.session.reconcile();
+  h.setContent({ schemaVersion: 4, items: [updated, item("b")] }); h.session.reconcile();
   h.session.endEdit();
   expect(h.session.getState().preview).toBeNull();
   expect(h.session.getState().error).toContain("已更新");
@@ -170,7 +170,7 @@ it("cancels a drag when a remote transform replaces its frozen base", () => {
 
 describe("FilmSetObjectSession 异步结算生命周期（任务 4.2/4.4）", () => {
   function asyncHarness() {
-    const content: FilmSetContent = { schemaVersion: 3, items: [item("a"), item("b")] };
+    const content: FilmSetContent = { schemaVersion: 4, items: [item("a"), item("b")] };
     const submitted: Array<{ itemId: string; op: FilmSetItemPatchOp; label: string }> = [];
     const resolvers: Array<(value: { state: string; error: string | null }) => void> = [];
     const session = new FilmSetObjectSession({
@@ -250,7 +250,7 @@ describe("FilmSetObjectSession 异步结算生命周期（任务 4.2/4.4）", ()
   });
 
   it("支持 Promise 形式回执并在 committed/rejected 时结算", async () => {
-    const content: FilmSetContent = { schemaVersion: 3, items: [item("a")] };
+    const content: FilmSetContent = { schemaVersion: 4, items: [item("a")] };
     const outcomes: string[] = [];
     let resolve!: (value: { ok: boolean; reason?: string }) => void;
     const session = new FilmSetObjectSession({
@@ -269,7 +269,7 @@ describe("FilmSetObjectSession 异步结算生命周期（任务 4.2/4.4）", ()
   });
 
   it("非布尔提交失败直接报错且不进入 pending", () => {
-    const content: FilmSetContent = { schemaVersion: 3, items: [item("a")] };
+    const content: FilmSetContent = { schemaVersion: 4, items: [item("a")] };
     const session = new FilmSetObjectSession({
       readContent: () => content,
       isWritable: () => true,

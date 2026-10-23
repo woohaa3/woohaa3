@@ -35,7 +35,8 @@ export type FilmSetContentDecodeResult =
  * 校验并规范化不受信任的 `filmSetContent`。
  *
  * - 缺失 / `null` → 空集合（兼容旧片场）。
- * - schemaVersion 缺失按 1；接受 1（无 motion/playback）与 2；未知版本稳定拒绝。
+ * - schemaVersion 缺失按 1；接受 1（无 motion/playback）、2、3、4；未知版本稳定拒绝。
+ *   schema 4 只用于识别「已迁移到场景单位」的目标内容（离线工具重跑幂等），不做语义改写。
  * - 每个对象必须字段完整、kind 合法、id 集合内唯一、变换有限、名称受限；
  *   模型对象须含完整 `ModelDefinition`；媒体对象须引用稳定 `assetId` 与正有限宽高比；
  *   地面对象须有正有限尺寸。
@@ -49,7 +50,7 @@ export function decodeFilmSetContent(input: unknown): FilmSetContentDecodeResult
   if (input === undefined || input === null) return { ok: true, value: emptyFilmSetContent() };
   if (!isJsonObject(input)) return { ok: false, reason: "filmSetContent 必须是对象" };
   const rawVersion = input.schemaVersion ?? FILM_SET_CONTENT_LEGACY_VERSION;
-  if (!isNonNegativeInteger(rawVersion) || rawVersion < 1 || rawVersion > 3) {
+  if (!isNonNegativeInteger(rawVersion) || rawVersion < 1 || rawVersion > 4) {
     return { ok: false, reason: `不支持的 filmSetContent schemaVersion ${String(input.schemaVersion)}` };
   }
   const schemaVersion = rawVersion as FilmSetContentVersion;

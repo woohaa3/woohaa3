@@ -17,7 +17,8 @@ export const FILM_SET_CONVERSION_PROTOCOL_VERSION = 1 as const;
 // v6：加入动作脚本 API 与相机弧度单位，修正「镜头朝向错、人物完全不动」。
 // v7：声明世界单位/主体真实尺寸与地面尺寸指引，修正「地板巨大、人物微小」。
 // v8：拍摄镜头 kind 联合（static/dynamic）与严格静态/动态不变式，区分「固定机位拍运动对象」。
-export const FILM_SET_CONVERSION_INSTRUCTION_VERSION = 9 as const;
+// v9：片场场景单位语义隔离（内容/媒体/镜头同一尺度，画布矩形与 zoom 只影响呈现）与摆放只执行一次。
+export const FILM_SET_CONVERSION_INSTRUCTION_VERSION = 10 as const;
 
 /** 支持的转换来源节点种类：图片、视频、普通 3D 模型。 */
 export const FILM_SET_CONVERSION_SOURCE_KINDS = ["image", "video", "model3d"] as const;

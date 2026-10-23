@@ -214,7 +214,7 @@ describe("两类 3D 节点数据（任务 1.1/1.3）", () => {
       motionScript: "",
       timeline: { duration: 0, loop: false }
     });
-    const empty = canonicalFilmSetFields({ ...animation, filmSetContent: { schemaVersion: 3, items: [] } });
+    const empty = canonicalFilmSetFields({ ...animation, filmSetContent: { schemaVersion: 4, items: [] } });
     expect(decodeFilmSetNodeData(empty).ok).toBe(true);
   });
 

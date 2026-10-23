@@ -30,6 +30,7 @@ import {
   type ShotPreviewBounds
 } from "@woohaa3/contracts";
 import { planFilmSetNodeV3 } from "../../animation/film-set-shooting-shot-migration.js";
+import { auditFilmSetSceneSpace, planFilmSetSceneSpaceNode } from "../../animation/film-set-scene-space-migration.js";
 import { animationDefinitionIdentityFromPayload } from "../core/node-history-service/current-state.js";
 import { loadOfflineYjsCanvasSources } from "./offline-yjs-source.mjs";
 import { createHash, randomUUID } from "node:crypto";
@@ -256,16 +257,48 @@ function convertCompletionRow(row: Record<string, unknown>, identityRemap: Reado
 }
 
 
-/** 迁移画布：镜头集合升级 + 预览闭包；返回新 checkpoint 与净变化标记。 */
+/**
+ * 迁移画布：拍摄镜头集合升级 → 坐标契约升级（场景单位）→ 预览闭包；返回新 checkpoint 与净变化标记。
+ *
+ * 坐标迁移必须在镜头集合已是 schema 3 之后执行：它要读全部片段的 `initialCamera` 与镜头运动，
+ * 并按该节点当时的显示映射把世界单位反解成场景单位。缺少节点尺寸的片场明确阻断该画布，
+ * 保留原件（change: 2026-10-23-isolate-film-set-camera-space，design D5）。
+ */
 function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, unknown>; raw: { meta: { createdAt: string } } }) {
   const canvas: ServerCanvas = structuredClone(source.canvas);
   let changed = false;
+  const conflicts: Array<{ nodeId: string; conflict: string; reason: string }> = [];
   for (const filmSetId of filmSetNodeIds(canvas)) {
     const data = canvas.nodeData[filmSetId] as Record<string, unknown>;
     const migrated = planFilmSetNodeV3(data);
     if (!migrated.ok) fail(`画布 ${canvas.id}/${filmSetId} 迁移失败：${migrated.reason}`);
-    canvas.nodeData[filmSetId] = { ...data, ...canonicalFilmSetFields(migrated.value) } as never;
-    changed = changed || migrated.changed;
+    const node = canvas.document.nodes.find((entry) => entry.id === filmSetId);
+    const projected = planFilmSetSceneSpaceNode(
+      { ...data, ...canonicalFilmSetFields(migrated.value) },
+      { nodeSize: node ? { width: readNodeWidth({ ...node, data: {} }), height: readNodeHeight({ ...node, data: {} }) } : null }
+    );
+    if (!projected.ok) {
+      // 无法精确反解单位：报告具名冲突并**保留原件**，不按数值大小猜测
+      // （change: 2026-10-23-isolate-film-set-camera-space，design D5）。
+      conflicts.push({ nodeId: filmSetId, conflict: projected.conflict, reason: projected.reason });
+      continue;
+    }
+    canvas.nodeData[filmSetId] = { ...data, ...canonicalFilmSetFields(projected.value) } as never;
+    changed = changed || projected.changed;
+  }
+  // 冲突画布不做预览闭包重排：保留原样便于人工处理。
+  if (conflicts.length > 0) {
+    return {
+      canvas: source.canvas,
+      sourceReport: source.report,
+      changed: false,
+      conflicts,
+      snapshot: new Uint8Array(),
+      roomEpoch: String(source.report.roomEpoch),
+      snapshotSeq: source.report.storageSeq,
+      beforeHash: digest(source.canvas),
+      afterHash: digest(source.canvas)
+    };
   }
   changed = reconcilePreviews(canvas).changed || changed;
 
@@ -282,6 +315,7 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
       canvas: decoded.canvas,
       sourceReport: source.report,
       changed,
+      conflicts,
       snapshot: Y.encodeStateAsUpdate(doc),
       roomEpoch: changed ? `film-set-shooting-shots-${randomUUID()}` : String(source.report.roomEpoch),
       snapshotSeq: source.report.storageSeq,
@@ -330,16 +364,35 @@ export function planMigration(db: unknown, _options: MigrationOptions = {}) {
     documents.some((document) => document.changed) ||
     historyWrites.some((write) => write.changed) ||
     completionWrites.some((write) => write.changed);
+  const conflicts = documents.flatMap((document) =>
+    (document.conflicts ?? []).map((entry) => ({ canvasId: document.canvas.id, ...entry }))
+  );
+  // dry-run 概览：逐片场列出坐标来源分类（current / migratable + 旧显示倍率 / conflict）。
+  const sceneSpaceSources = sources.flatMap((source) =>
+    filmSetNodeIds(source.canvas).map((nodeId) => {
+      const node = source.canvas.document.nodes.find((entry) => entry.id === nodeId);
+      const audit = auditFilmSetSceneSpace(
+        source.canvas.nodeData[nodeId],
+        node ? { width: readNodeWidth({ ...node, data: {} }), height: readNodeHeight({ ...node, data: {} }) } : null
+      );
+      return { canvasId: source.canvas.id, nodeId, ...audit };
+    })
+  );
   return {
     documents,
     historyWrites,
     completionWrites,
     changed,
+    conflicts,
     report: {
       version: "film-set-shooting-shots-migration-v1",
       canvasCount: documents.length,
       historyCount: historyWrites.length,
       completionCount: completionWrites.length,
+      /** 无法精确反解坐标单位、已保留原件的片场（具名诊断，不猜测）。 */
+      sceneSpaceConflicts: conflicts,
+      /** 每个片场的坐标来源分类（dry-run 概览；不含用户内容）。 */
+      sceneSpaceSources,
       canvases: documents.map(({ canvas, sourceReport, beforeHash, afterHash, changed: documentChanged }) => ({
         canvasId: canvas.id,
         revision: canvas.revision,

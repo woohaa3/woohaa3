@@ -39,7 +39,7 @@ describe("公共来源素材描述", () => {
   it("导演场提取内部图片视频，重复引用只保留一份", () => {
     const canvas = source("composite-asset");
     const item = { id: "plane", kind: "image", name: "image", assetId: "image", aspectRatio: 1, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
-    canvas.nodeData.n = { extensionId: "film-set", filmSetContent: { schemaVersion: 3, items: [item, { ...item, id: "second" }] } } as never;
+    canvas.nodeData.n = { extensionId: "film-set", filmSetContent: { schemaVersion: 4, items: [item, { ...item, id: "second" }] } } as never;
     expect(describeCanvasSource(canvas, "n")!.assets.map(asset => asset.id)).toEqual(["image"]);
   });
 });

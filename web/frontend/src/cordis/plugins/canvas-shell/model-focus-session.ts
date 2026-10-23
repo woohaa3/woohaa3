@@ -14,6 +14,9 @@ import {
   normalizeYaw,
   beginGesture,
   beginModelGesture,
+  filmSetFitFactor,
+  filmSetNaturalScale,
+  filmSetSceneAabb,
   isFilmSetNode,
   getWoohaa3CanvasNodeAbsolutePosition,
   enterFocus,
@@ -138,6 +141,42 @@ export function renderedModelNodeSize(node: {
   height?: number;
 }, _data?: unknown): { width: number; height: number } {
   return effectiveCanvasNodeSize(node);
+}
+
+/**
+ * 片场**场景空间**包围盒（场景单位，不含节点矩形适配）
+ * （change: 2026-10-23-isolate-film-set-camera-space，design D1/D3）。
+ *
+ * 场景单位同时约束几何、媒体与镜头；节点矩形只决定呈现倍率。镜头默认取景、数值字段与手势都
+ * 从这里的半径/中心派生，不再从节点像素尺寸反推保存值。`placement.scale` 是内容根倍率，属于
+ * 场景单位的一部分（与 Rust `model_unit` 一致）。
+ */
+export function filmSetSceneBounds(input: FocusTargetInput): { aabb: Aabb; center: Vec3; radius: number } | null {
+  const scene = filmSetSceneAabb(input.aabb ?? null);
+  if (!scene) return null;
+  const { center, radius } = aabbCenterRadius(scene);
+  return { aabb: scene, center, radius };
+}
+
+/**
+ * 片场场景 → 画布世界的显示倍率（= `model_unit`：自然单位 × 节点矩形容器适配）。
+ *
+ * 节点矩形适配只在这里出现一次；镜头与内容共用它，构图因此与呈现尺寸无关。
+ */
+export function filmSetDisplayScale(input: FocusTargetInput): number {
+  const natural = filmSetNaturalScale(input.placement, input.extent);
+  const size = renderedModelNodeSize(
+    input.canvas.document.nodes.find((entry) => entry.id === input.nodeId) ?? { type: "composite-asset" },
+    input.canvas.nodeData?.[input.nodeId]
+  );
+  const fit = filmSetFitFactor({ ...sceneInput(input), filmSetFit: { width: size.width, height: size.height } }, { width: size.width, height: size.height });
+  return natural * fit;
+}
+
+/** 片场场景 → 画布世界的显示旋转（仅 placement yaw）。 */
+export function filmSetDisplayRotation(input: FocusTargetInput): number {
+  const yaw = input.placement?.yaw ?? 0;
+  return Number.isFinite(yaw) ? (yaw * Math.PI) / 180 : 0;
 }
 
 export type FocusHitResult =

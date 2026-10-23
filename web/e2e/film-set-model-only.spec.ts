@@ -71,7 +71,7 @@ test("纯模型片场：无卡片/端口、范围框 hover/选中、空片场可
   expect((await sendCommands(page, [{
     type: "nodeData.patch",
     nodeId: "filmset",
-    value: { filmSetContent: { schemaVersion: 3, items: [...initialContent.items, modelItem] } },
+    value: { filmSetContent: { schemaVersion: 4, items: [...initialContent.items, modelItem] } },
   }])).ok).toBe(true);
   await waitForCommandsSettled(page);
   await expect.poll(async () => ((await readStoredCanvas(page))!.nodeData.filmset.filmSetContent as { items: FilmSetItem[] }).items.map(item => item.id))

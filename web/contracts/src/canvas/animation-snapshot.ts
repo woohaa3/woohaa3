@@ -48,6 +48,7 @@ import {
   defaultFilmSetContent,
   emptyFilmSetContent,
   filmSetContentHash,
+  FILM_SET_CONTENT_VERSION,
   type FilmSetContent,
   type FilmSetLocalTransform
 } from "./film-set-content.js";
@@ -247,7 +248,7 @@ export function createFilmSetSnapshot(input: CreateAnimationSnapshotInput): Film
     sceneCamera: cloneInitialCamera(camera),
     camera,
     timeline: { duration: input.timeline.duration, loop: input.timeline.loop },
-    filmSetContent: { schemaVersion: 3, items },
+    filmSetContent: { schemaVersion: FILM_SET_CONTENT_VERSION, items },
     filmSetAnimations,
     ...(input.origin ? { origin: input.origin } : {})
   };

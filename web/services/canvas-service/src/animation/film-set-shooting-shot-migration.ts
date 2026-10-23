@@ -14,6 +14,8 @@
  * 纯函数、JSON-only：不写 Store / Y.Doc / 数据库。
  */
 import {
+  FILM_SET_CONTENT_PREVIOUS_VERSION,
+  FILM_SET_CONTENT_VERSION,
   decodeFilmSetAnimations,
   decodeFilmSetNodeData,
   type FilmSetAnimationClip,
@@ -119,22 +121,31 @@ export type FilmSetNodeV3Outcome =
  *
  * 非片场节点或非法结构明确拒绝（调用方应只对已识别的片场节点调用）。
  */
-export function planFilmSetNodeV3(nodeData: unknown): FilmSetNodeV3Outcome {
+export function planFilmSetNodeV3(
+  nodeData: unknown,
+  options: { acceptedContentVersions?: readonly number[] } = {}
+): FilmSetNodeV3Outcome {
   if (!nodeData || typeof nodeData !== "object" || Array.isArray(nodeData)) return { ok: false, reason: "片场 nodeData 必须是对象" };
   const raw = nodeData as Record<string, unknown>;
+  // 本迁移是**离线**入口：允许读取上一代内容版本（场景坐标迁移紧随其后执行，见
+  // `film-set-scene-space-migration.ts`）；生产读取绝不放宽。
+  const acceptedContentVersions = options.acceptedContentVersions ?? [FILM_SET_CONTENT_PREVIOUS_VERSION, FILM_SET_CONTENT_VERSION];
   const animations = raw.filmSetAnimations;
   if (animations === undefined) {
     // 无镜头集合：按新空片场解释，交由生产解码器补齐。
-    const decoded = decodeFilmSetNodeData(raw);
+    const decoded = decodeFilmSetNodeData(raw, { acceptedContentVersions });
     return decoded.ok ? { ok: true, value: decoded.value, changed: false } : { ok: false, reason: decoded.reason };
   }
-  // 先取内容以判定集合版本（内容必须已是 schema 3 items-only）。
-  const contentProbe = decodeFilmSetNodeData({ ...raw, filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] } });
+  // 先取内容以判定集合版本（内容必须是 items-only）。
+  const contentProbe = decodeFilmSetNodeData(
+    { ...raw, filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] } },
+    { acceptedContentVersions }
+  );
   if (!contentProbe.ok) return { ok: false, reason: contentProbe.reason };
   const planned = planFilmSetAnimationsV3(animations, contentProbe.value.filmSetContent);
   if (!planned.ok) return { ok: false, reason: planned.reason };
   const candidate = { ...raw, filmSetAnimations: planned.value };
-  const decoded = decodeFilmSetNodeData(candidate);
+  const decoded = decodeFilmSetNodeData(candidate, { acceptedContentVersions });
   if (!decoded.ok) return { ok: false, reason: decoded.reason };
   return { ok: true, value: decoded.value, changed: planned.changed };
 }

@@ -53,7 +53,7 @@ function fixture(): { canvas: ServerCanvas; animation: FilmSetNodeData } {
       { ...template, id: "third", name: "third", bindings: [{ itemId: "D", playback }] }
     ]
   };
-  const animation: FilmSetNodeData = { ...base, filmSetContent: { schemaVersion: 3, items }, filmSetAnimations: animations };
+  const animation: FilmSetNodeData = { ...base, filmSetContent: { schemaVersion: 4, items }, filmSetAnimations: animations };
   const canvas = createEmptyWoohaa3ServerCanvas("c1", NOW);
   canvas.document.nodes.push({ id: "film", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 } });
   canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
@@ -341,7 +341,7 @@ describe("对象 transform 规划不受片段键顺序影响（回归）", () =>
         motionScript: "",
         timeline: { duration: 0, loop: false },
         filmSetContent: {
-          schemaVersion: 3,
+          schemaVersion: 4,
           items: [
             {
               id: "photo",

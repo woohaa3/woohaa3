@@ -8,7 +8,7 @@
 import type { CanvasCommand } from "../commands.js";
 import { decodeFilmSetNodeData } from "../canvas-node-model.js";
 import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
-import { readFilmSetContent } from "../film-set-content.js";
+import { FILM_SET_CONTENT_VERSION, readFilmSetContent } from "../film-set-content.js";
 import { canonicalFilmSetFields, LEGACY_FILM_SET_ANIMATION_FIELDS, LEGACY_FILM_SET_TOP_MODEL_FIELDS } from "../film-set-clip-view.js";
 import { animationSnapshotHash } from "../animation-snapshot.js";
 import {
@@ -80,7 +80,7 @@ export function patchFilmSetItem(
   if (previous.filmSetAnimations !== undefined) {
     const current = decodeFilmSetNodeData(previous);
     if (!current.ok || !current.value.filmSetAnimations) return reject("invalid-self-contained-node", "片段集合非法");
-    merged.filmSetContent = { ...result.value, schemaVersion: 3 };
+    merged.filmSetContent = { ...result.value, schemaVersion: FILM_SET_CONTENT_VERSION };
     merged.filmSetAnimations = {
       ...current.value.filmSetAnimations,
       clips: current.value.filmSetAnimations.clips.map(clip => ({ ...clip, bindings: clip.bindings.filter(binding => result.value.items.some(item => item.id === binding.itemId)) }))

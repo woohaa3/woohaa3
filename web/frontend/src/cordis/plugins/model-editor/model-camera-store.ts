@@ -6,16 +6,27 @@ import type { Context } from "@deepseek-ai/cordis";
 import {
   MODEL_EDITOR_VERSION,
   clampShotDistance,
+  filmSetDisplayTransform,
   isFilmSetNode,
+  mapFilmSetSceneCamera,
+  shotCameraPosition,
   modelCameraAspectRatio,
   resolveShotCamera,
   shotBoundingRadius,
   shotFitDistance,
   type Aabb,
   type BevyModelEditor,
-  type ModelCamera
+  type ModelCamera,
+  type Vec3
 } from "@woohaa3/contracts";
-import { modelBounds, type FocusTargetInput } from "../canvas-shell/model-focus-session.js";
+import {
+  filmSetDisplayRotation,
+  filmSetDisplayScale,
+  filmSetSceneBounds,
+  modelBounds,
+  type FocusTargetInput,
+  type ModelBounds
+} from "../canvas-shell/model-focus-session.js";
 import { resolveModelFocusTargets } from "../canvas-shell/model-focus-targets.js";
 import { MODEL_SCENES_SERVICE, type ModelScenesProvider } from "../service-keys.js";
 import { modelSceneStore } from "../model-scene/model-scene-store.js";
@@ -61,7 +72,12 @@ export function resolveTargets(ctx?: Context): FocusTargetInput[] {
 
 export function defaultDistanceForNode(nodeId: string, ctx?: Context): number {
   const target = resolveTargets(ctx).find((entry) => entry.nodeId === nodeId);
-  const bounds = target ? modelBounds(target) : null;
+  if (!target) return shotFitDistance(1);
+  // 片场：默认取景按**场景单位**包围球派生，不读节点矩形
+  // （change: 2026-10-23-isolate-film-set-camera-space，design D3）。
+  const scene = filmSetSceneBounds(target);
+  if (scene) return shotFitDistance(shotBoundingRadius(scene.aabb));
+  const bounds = modelBounds(target);
   const radius = bounds ? shotBoundingRadius(bounds.aabb) : 1;
   return shotFitDistance(radius);
 }
@@ -82,6 +98,9 @@ export function isFilmSetNodeId(ctx: Context, nodeId: string): boolean {
 export function shotModelForNode(nodeId: string | null, ctx?: Context): { aabb: Aabb } | null {
   if (!nodeId) return null;
   const target = resolveTargets(ctx).find((entry) => entry.nodeId === nodeId);
+  // 片场镜头按场景单位取景（节点矩形只影响呈现）：与 `defaultDistanceForNode` 同源。
+  const scene = target ? filmSetSceneBounds(target) : null;
+  if (scene) return { aabb: scene.aabb };
   const bounds = target ? modelBounds(target) : null;
   return bounds ? { aabb: bounds.aabb } : null;
 }
@@ -147,29 +166,69 @@ export function pushEditor(ctx: Context, session: ModelEditorSession): void {
     const selected = session.selectedCamera();
     if (selected) {
       const pose = session.effectivePose(selected);
-      const fit = shotFitDistance(radius, modelCameraAspectRatio(pose.aspect));
+      // 片场镜头是**场景单位**：自动 fit 与 clamp 用场景包围球，派生后再经同一显示变换映射到
+      // 画布世界供 gizmo/预览渲染（change: 2026-10-23-isolate-film-set-camera-space，D2/D3）。
+      // 这样节点矩形只改变显示倍率，不改变保存值，也不改变构图比例。
+      const sceneBounds = filmSetSceneBounds(target);
+      const fitAabb = sceneBounds?.aabb ?? aabb;
+      const fit = shotFitDistance(shotBoundingRadius(fitAabb), modelCameraAspectRatio(pose.aspect));
       const distance = clampShotDistance(pose.distance, fit);
       // Inspector 与 gizmo 共用当前有效偏移（包含未提交的拖动预览）。
-      const shot = resolveShotCamera(aabb, {
+      const shot = resolveShotCamera(fitAabb, {
         azimuth: pose.azimuth,
         elevation: pose.elevation,
         distance,
         aspect: pose.aspect,
         focusOffset: session.effectiveFocus(selected)
       });
-      if (shot) {
+      const mapped = shot && sceneBounds ? projectShotToDisplay(target, bounds, shot) : shot;
+      if (mapped) {
         base.cameraId = selected.id;
         base.shot = {
-          position: shot.position,
-          focus: shot.focus,
-          fov: shot.fov,
-          azimuth: shot.azimuth,
-          elevation: shot.elevation,
-          distance: shot.distance,
+          position: mapped.position,
+          focus: mapped.focus,
+          fov: mapped.fov,
+          azimuth: mapped.azimuth,
+          elevation: mapped.elevation,
+          distance: mapped.distance,
           aspect: pose.aspect
         };
       }
     }
   }
   ctx.canvasRuntime.setModelEditor(base);
+}
+
+/**
+ * 场景空间镜头 → 画布显示姿态（同一相似变换）
+ * （change: 2026-10-23-isolate-film-set-camera-space，design D2）。
+ *
+ * 与 Rust `sampled_camera_pose` 同式：世界焦点 = 世界包围球中心 + `D(focusOffset)`，世界距离 =
+ * `s × 场景距离`，再复用 shot 轨道公式。非法映射返回 `null`，调用方不写入猜测姿态。
+ */
+function projectShotToDisplay(
+  target: FocusTargetInput,
+  bounds: ModelBounds,
+  shot: { position: Vec3; focus: Vec3; fov: number; azimuth: number; elevation: number; distance: number }
+): typeof shot | null {
+  const transform = filmSetDisplayTransform({
+    scale: filmSetDisplayScale(target),
+    yaw: filmSetDisplayRotation(target)
+  });
+  if (!transform.ok) return null;
+  const mapped = mapFilmSetSceneCamera(transform.value, bounds.center, {
+    azimuth: shot.azimuth,
+    elevation: shot.elevation,
+    distance: shot.distance,
+    focusOffset: { x: shot.focus[0], y: shot.focus[1], z: shot.focus[2] }
+  });
+  if (!mapped) return null;
+  const focus: Vec3 = [
+    bounds.center[0] + mapped.focusOffset[0],
+    bounds.center[1] + mapped.focusOffset[1],
+    bounds.center[2] + mapped.focusOffset[2]
+  ];
+  const position = shotCameraPosition(focus, shot.azimuth, mapped.distance, shot.elevation);
+  if (![...focus, ...position].every((value) => Number.isFinite(value))) return null;
+  return { ...shot, position, focus, distance: mapped.distance };
 }

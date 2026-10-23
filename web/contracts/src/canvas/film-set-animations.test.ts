@@ -45,7 +45,7 @@ describe("independent film set clips", () => {
     expect(decodeFilmSetNodeData(fields).ok).toBe(true);
     expect(decodeFilmSetNodeData({ ...fields, timeline: animation.timeline }).ok).toBe(false);
     const item = animation.filmSetContent.items[0]!;
-    expect(decodeFilmSetNodeData({ ...fields, filmSetContent: { schemaVersion: 3, items: [{ ...item, playback: { duration: 0 } }] } }).ok).toBe(false);
+    expect(decodeFilmSetNodeData({ ...fields, filmSetContent: { schemaVersion: 4, items: [{ ...item, playback: { duration: 0 } }] } }).ok).toBe(false);
   });
 
   it("duplicates only clip data and preserves shared item IDs", () => {

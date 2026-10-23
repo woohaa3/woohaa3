@@ -1544,7 +1544,7 @@ it("media placements emit content-local geometry that the shared root scales", (
     nodeId: "film",
     readyPlaneIds: new Set(),
     contentExtent: 2,
-    data: { filmSetContent: { schemaVersion: 3, items: [{ id: "photo", kind: "image", name: "photo", assetId: "asset", aspectRatio: 1.5, localTransform: { offset: { x: 3, y: 4, z: 5 }, scale: 2, yaw: 0.2 } }] } } as never
+    data: { filmSetContent: { schemaVersion: 4, items: [{ id: "photo", kind: "image", name: "photo", assetId: "asset", aspectRatio: 1.5, localTransform: { offset: { x: 3, y: 4, z: 5 }, scale: 2, yaw: 0.2 } }] } } as never
   });
   // 内容单位高度 = 48 × itemScale(2) × extent(2) / 192 = 1；宽 1.5；中心 = offset + 半高。
   expect(plane).toMatchObject({ id: "film::photo", itemId: "photo", unit: 1, x: 3, y: 4.5, z: 5, width: 1.5, height: 1, yaw: 0.2 });

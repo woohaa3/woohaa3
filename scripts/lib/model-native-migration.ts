@@ -2,6 +2,7 @@ import { compareByZIndexThenId, YJS_CANVAS_FORMAT_VERSION, serverCanvasToYDoc, y
 /** Offline-only conversion. This entry is bundled by the CLI and never imported by a service. */
 import * as Y from "yjs";
 import { canonicalFilmSetFields, type ServerCanvas } from "@woohaa3/contracts";
+import { planFilmSetSceneSpaceNode } from "../../web/services/canvas-service/src/animation/film-set-scene-space-migration.js";
 import { readLegacyFilmSetNodeData } from "../../web/services/canvas-service/src/animation/legacy-film-set-reader.js";
 import { legacyFilmSetHistoryInput, convertLegacyFilmSetHistoryEntry } from "../../web/services/canvas-service/src/animation/legacy-film-set-history.js";
 import { legacyFilmSetIdentityKey, planLegacyFilmSetItemIdentities } from "../../web/services/canvas-service/src/animation/legacy-film-set-identities.js";
@@ -106,10 +107,17 @@ export function planMigration(db: any, options: MigrationOptions = {}) {
       if (isFilm(node.type, data)) {
         const result = readLegacyFilmSetNodeData(data, { topModelItemId: mapping.get(keyOf(canvas.id, node.id)) });
         if (!result.ok) fail(`Canonical conversion ${canvas.id}/${node.id}: ${result.reason}`);
+        // 坐标契约升级（场景单位）紧随 items-only 转换：用该节点当时的显示映射反解镜头，
+        // 缺少可证实尺寸时明确阻断，不猜测单位
+        // （change: 2026-10-23-isolate-film-set-camera-space，任务 4.1–4.3 / design D5）。
+        const sceneSpace = planFilmSetSceneSpaceNode(canonicalFilmSetFields(result.value), {
+          nodeSize: { width: node.width, height: node.height }
+        });
+        if (!sceneSpace.ok) fail(`Scene-space conversion ${canvas.id}/${node.id} (${sceneSpace.conflict}): ${sceneSpace.reason}`);
         const preserved = { ...data };
         if (preserved.kind === "animation3d" || preserved.kind === "composite-asset") delete preserved.kind;
         for (const field of ["modelScript", "modelScriptLanguage", "modelScriptVersion", "modelContentVersion", "modelPlacement", "motionScript", "motionScriptLanguage", "motionScriptVersion", "motionRevision", "motionSourceHash", "motionBasedOnModelVersion", "initialCamera", "timeline", "animationSnapshotHash"]) delete preserved[field];
-        canvas.nodeData[node.id] = { ...preserved, ...canonicalFilmSetFields(result.value) } as any;
+        canvas.nodeData[node.id] = { ...preserved, ...canonicalFilmSetFields(sceneSpace.value) } as any;
         node.type = "composite-asset";
       } else if (isFurnace(node.type, data, canvas.id, node.id)) {
         node.type = "composite-asset";

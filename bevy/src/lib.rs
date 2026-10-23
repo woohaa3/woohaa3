@@ -100,6 +100,8 @@ pub mod recording_openh264;
 pub mod model3d;
 /// 可复用 shot camera ECS 模块（change: add-reusable-bevy-shot-camera）。
 pub mod shot_camera;
+/// 片场场景空间 ↔ 画布呈现空间的纯数学（change: 2026-10-23-isolate-film-set-camera-space）。
+pub mod film_set_space;
 
 /// 跨语言 golden 测试用的纯函数门面（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 7.2）。
 ///

@@ -670,7 +670,7 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
       motionScript: "motion.model.move('body', { speed: 1, range: [0,2] });",
       timeline: { duration: 4, loop: false },
       filmSetContent: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         items: [
           { id: "g", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }
         ]
@@ -702,7 +702,7 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
       title: "媒体片场",
       timeline: { duration: 0, loop: false },
       filmSetContent: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         items: [{ id: "img", kind: "image", name: "图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "a1", aspectRatio: 1 }]
       }
     }));

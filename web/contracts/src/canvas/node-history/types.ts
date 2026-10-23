@@ -123,6 +123,7 @@ export type NodeHistoryAnimationPayload = LegacyNodeHistoryAnimationPayload | Fi
  * **不另存顶层模型**。schema 2 的旧片场 payload 只允许由隔离离线 reader 转换，在线读取直接拒绝。
  */
 export type FilmSetHistoryAnimationPayload = {
+  /** payload 布局版本（items-only）：与内部 `filmSetContent.schemaVersion` 无关。 */
   schemaVersion: 3;
   /** D7 独立片场根（整体摆放）。 */
   scenePlacement: import("../film-set-content.js").FilmSetLocalTransform;

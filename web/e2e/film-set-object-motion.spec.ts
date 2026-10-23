@@ -84,7 +84,7 @@ async function foregroundCount(page: Page): Promise<number> {
 const FILM_SET_NODE_DATA = filmSetNodeDataFields(createFilmSetSnapshot({
   title: "片场", model: { modelScript: "", modelScriptVersion: "woohaa-model-js-v2" },
   motionScript: "", timeline: { duration: 0, loop: false },
-  filmSetContent: { schemaVersion: 3, items: [] }
+  filmSetContent: { schemaVersion: 4, items: [] }
 }));
 
 test.describe("片场对象动作与对象编辑（change: 2026-10-09）", () => {
@@ -105,7 +105,7 @@ test.describe("片场对象动作与对象编辑（change: 2026-10-09）", () =>
           nodeData: {
             ...FILM_SET_NODE_DATA,
             filmSetContent: {
-              schemaVersion: 3,
+              schemaVersion: 4,
               items: [
                 {
                   id: "obj-a",

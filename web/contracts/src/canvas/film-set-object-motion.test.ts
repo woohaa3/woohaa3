@@ -38,18 +38,19 @@ function modelItem(id: string, script = `scene.box({ id: "body" });`): FilmSetIt
   };
 }
 
-describe("片场 schema 3 静态对象", () => {
-  it("在线解码拒绝旧版本，并保留 schema 3 的静态对象", () => {
-    for (const schemaVersion of [1, 2, 4]) expect(decodeFilmSetContent({ schemaVersion, items: [modelItem("a")] }).ok).toBe(false);
-    const decoded = decodeFilmSetContent({ schemaVersion: 3, items: [modelItem("a")] });
+describe("片场 schema 4 静态对象", () => {
+  it("在线解码拒绝旧版本，并保留 schema 4 的静态对象", () => {
+    // 旧客户端严格拒绝非 schema 3；新客户端同样严格拒绝非 schema 4（场景单位语义）。
+    for (const schemaVersion of [1, 2, 3]) expect(decodeFilmSetContent({ schemaVersion, items: [modelItem("a")] }).ok).toBe(false);
+    const decoded = decodeFilmSetContent({ schemaVersion: 4, items: [modelItem("a")] });
     expect(decoded.ok).toBe(true);
     if (decoded.ok) expect(decoded.value.items[0]).toEqual(modelItem("a"));
   });
   it("对象动作和时间映射只能放在片段 binding，不能夹带在 items", () => {
     const item = modelItem("a");
     const motion = createFilmSetItemMotion({ item, motionScript: `motion.model.rotate("body", { speed: 1 });` });
-    expect(decodeFilmSetContent({ schemaVersion: 3, items: [{ ...item, motion }] }).ok).toBe(false);
-    expect(decodeFilmSetContent({ schemaVersion: 3, items: [{ ...item, playback: { startTime: 0, duration: 2, timeScale: 1, loop: false } }] }).ok).toBe(false);
+    expect(decodeFilmSetContent({ schemaVersion: 4, items: [{ ...item, motion }] }).ok).toBe(false);
+    expect(decodeFilmSetContent({ schemaVersion: 4, items: [{ ...item, playback: { startTime: 0, duration: 2, timeScale: 1, loop: false } }] }).ok).toBe(false);
     expect(motion.basedOnModelVersion.contentHash).toBe(filmSetItemAdapterHash(item));
   });
 });
@@ -72,7 +73,7 @@ describe("统一播放头局部时间映射（任务 5.1）", () => {
 });
 
 describe("对象级权威操作（任务 2.3）", () => {
-  const content: FilmSetContent = { schemaVersion: 3, items: [modelItem("a"), modelItem("b")] };
+  const content: FilmSetContent = { schemaVersion: 4, items: [modelItem("a"), modelItem("b")] };
 
   it("transform 只改目标对象，precondition 冲突拒绝", () => {
     const result = applyFilmSetItemTransform({ content, itemId: "a", localTransform: { offset: { x: 1, y: 0, z: 0 }, scale: 2, yaw: 0.5 } });
@@ -153,7 +154,7 @@ describe("对象级命令经 reducer 原子生效（任务 2.3）", () => {
       model: { modelScript: "", modelScriptVersion: "woohaa-model-js-v2" },
       motionScript: "",
       timeline: { duration: 0, loop: false },
-      filmSetContent: { schemaVersion: 3, items: [modelItem("a")] }
+      filmSetContent: { schemaVersion: 4, items: [modelItem("a")] }
     });
     return filmSetNodeDataFields(snapshot) as Record<string, unknown>;
   }

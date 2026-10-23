@@ -86,16 +86,19 @@ pub(super) fn targets(
     quality_of: &dyn Fn(&str) -> String,
     live: Option<LiveSampling<'_>>,
 ) -> Vec<Target> {
-    targets_with_preparation(scene, bounds_of, quality_of, live, &|_| false)
+    // 测试与无 renderer 环境没有资源表：显示变换缺省为恒等（等同场景 == 世界）。
+    targets_with_preparation(scene, bounds_of, quality_of, live, &|_| false, &|_| None)
 }
 
-/// 同 [`targets`]，额外注入「归属片场是否仍在准备中」。
+/// 同 [`targets`]，额外注入「归属片场是否仍在准备中」，以及片场的显示变换
+/// （场景单位镜头 → 画布世界姿态；change: 2026-10-23-isolate-film-set-camera-space，D2）。
 pub(super) fn targets_with_preparation(
     scene: &Scene,
     bounds_of: &dyn Fn(&str) -> Option<ModelBounds>,
     quality_of: &dyn Fn(&str) -> String,
     live: Option<LiveSampling<'_>>,
     preparing_of: &dyn Fn(&str) -> bool,
+    display_of: &dyn Fn(&str) -> Option<crate::model3d::shot_adapter::DisplayUnit>,
 ) -> Vec<Target> {
     let hidden = card_geometry::focuses_isolate(scene);
     let viewport = [scene.viewport.x, scene.viewport.y, scene.viewport.zoom];
@@ -124,21 +127,28 @@ pub(super) fn targets_with_preparation(
             center: Vec3::ZERO,
             radius: 0.0,
         });
-        let pose = if let (true, Some(sampling)) = (is_live, live) {
-            let camera = sampling.camera;
-            ShotCameraPose {
-                azimuth: camera.azimuth,
-                elevation: camera.elevation,
-                distance: camera.distance,
-                focus_offset: camera.focus_offset,
-            }
+        // 镜头（封面机与活动采样）都是**场景单位**：必须与内容共用同一显示变换映射到画布
+        // 世界，否则卡片构图随节点矩形/画布缩放漂移（change: 2026-10-23-isolate-film-set-camera-space，D2）。
+        let scene_camera = if let (true, Some(sampling)) = (is_live, live) {
+            *sampling.camera
         } else {
-            ShotCameraPose {
+            crate::motion::CameraState {
                 azimuth: preview.cover_camera.azimuth,
                 elevation: preview.cover_camera.elevation,
                 distance: preview.cover_camera.distance,
                 focus_offset: Vec3::from_array(preview.cover_camera.focus_offset),
             }
+        };
+        let display = display_of(&owner.id);
+        let Some(mapped) = crate::model3d::shot_adapter::display_camera_state(display, &scene_camera) else {
+            // 非法显示变换/相机：不发布猜测取景（卡片等待下一帧合法输入）。
+            continue;
+        };
+        let pose = ShotCameraPose {
+            azimuth: mapped.azimuth,
+            elevation: mapped.elevation,
+            distance: mapped.distance,
+            focus_offset: mapped.focus_offset,
         };
         result.push(Target {
             node_id: node.id.clone(),
@@ -450,13 +460,13 @@ mod tests {
         let scene = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
         let idle = targets(&scene, &bounds, &quality, None);
         assert!(!idle[0].awaiting_root);
-        let preparing = targets_with_preparation(&scene, &bounds, &quality, None, &|_| true);
+        let preparing = targets_with_preparation(&scene, &bounds, &quality, None, &|_| true, &|_| None);
         assert!(
             preparing[0].awaiting_root,
             "归属片场准备中时卡片必须等待，而不是采样空场"
         );
         // 准备完成后恢复可采样。
-        let ready = targets_with_preparation(&scene, &bounds, &quality, None, &|_| false);
+        let ready = targets_with_preparation(&scene, &bounds, &quality, None, &|_| false, &|_| None);
         assert!(!ready[0].awaiting_root);
     }
 

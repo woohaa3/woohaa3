@@ -5,9 +5,16 @@ import { createFilmSetVideoEncoder } from "./film-set-video-encoder.js";
 import { recordingThemeBackdrop } from "./recording-theme-backdrop.js";
 
 function canvasNow(ctx: Context) { return ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(); }
+/**
+ * 导出输入身份：只含**作品**内容，不含画布呈现
+ * （change: 2026-10-23-isolate-film-set-camera-space，任务 3.2 / design D4）。
+ *
+ * 节点宽高与画布位置/zoom 只决定呈现倍率，已不参与场景空间取景；把它们放进身份会让拖动节点
+ * 或缩放画布无谓中断导出。作品内容、镜头与时间仍由 `sourceIdentity`/`generation` 覆盖。
+ */
 function layoutIdentity(ctx: Context, nodeId: string): string {
   const canvas = canvasNow(ctx), node = canvas?.document.nodes.find(node => node.id === nodeId);
-  return JSON.stringify([node?.width, node?.height, canvas?.nodeData[nodeId]?.scenePlacement]);
+  return JSON.stringify([node?.id ?? nodeId, canvas?.nodeData[nodeId]?.scenePlacement]);
 }
 export function videoExportTarget(ctx: Context, profile: FilmSetExportProfile = readFilmSetExportProfile(undefined)): FilmSetVideoTarget | null {
   const canvas = canvasNow(ctx), playback = ctx.canvasRuntime.animationPlaybackState();

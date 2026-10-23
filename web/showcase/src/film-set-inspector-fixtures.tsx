@@ -72,7 +72,7 @@ export function filmSetInspectorCanvas(id: FilmSetInspectorFixtureId): {
     timeline: { duration: 5, loop: false }
   });
 
-  let animation: FilmSetNodeData = { ...base, filmSetContent: { schemaVersion: 3, items } };
+  let animation: FilmSetNodeData = { ...base, filmSetContent: { schemaVersion: 4, items } };
   // 适配 fixture：首对象 binding 的动作基于过期内容版本 → 失配。
   if (id === "adaptation" && animation.filmSetContent.items[0]?.kind === "model") {
     const item = animation.filmSetContent.items[0] as FilmSetModelItem;

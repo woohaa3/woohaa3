@@ -4,7 +4,7 @@ import { FilmSetObjectSession } from "../src/authoring/browser/object-session.js
 import { createFilmSetObjectGesture } from "../src/authoring/browser/film-set-object-gesture.js";
 
 function fixture(handle: "x" | "y" | "z" | "center", yaw = 0, worldToLocal?: number[]) {
-  const content: FilmSetContent = { schemaVersion: 3, items: ["a", "b"].map(id => ({
+  const content: FilmSetContent = { schemaVersion: 4, items: ["a", "b"].map(id => ({
     id, kind: "model", name: id,
     localTransform: { offset: { x: -1.25, y: 0, z: 0 }, scale: 1, yaw: 0 },
     model: createModelSnapshot({ modelScript: "scene.box({id:'body'});", modelScriptVersion: "woohaa-model-js-v2" })

@@ -170,7 +170,7 @@ describe("粘贴规划", () => {
       // 对象动作只经片段 binding（items-only，D10）。
       motionScript: "motion.model.rotate('body', { speed: 1 });",
       timeline: { duration: 2, loop: false },
-      filmSetContent: { schemaVersion: 3, items: [{ id: "video", kind: "video", name: "视频", assetId: "asset-video", aspectRatio: 16 / 9, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } }] }
+      filmSetContent: { schemaVersion: 4, items: [{ id: "video", kind: "video", name: "视频", assetId: "asset-video", aspectRatio: 16 / 9, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } }] }
     });
     const collection = filmSetAnimationsOf(snapshot);
     collection.clips.push({ ...structuredClone(collection.clips[0]), id: "second", name: "第二段" });

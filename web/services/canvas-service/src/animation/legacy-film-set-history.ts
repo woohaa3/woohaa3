@@ -66,7 +66,8 @@ export function legacyFilmSetHistoryInput(payload: unknown, title: string): Hist
     return { ok: false, reason: "片场历史模型 descriptor 不受支持" };
   }
   if (schema === 3) {
-    const decoded = decodeAnimationPayload(animation);
+    // 离线迁移许可读取上一代坐标语义（schema 3 内容），生产在线读取仍严格拒绝。
+    const decoded = decodeAnimationPayload(animation, { acceptedContentVersions: [3, 4] });
     if (!decoded || decoded.schemaVersion !== 3 || payload.modelScript !== "" || payload.placement !== undefined) {
       return { ok: false, reason: "目标片场历史仍有顶层 authored 模型或非法内容" };
     }
@@ -133,7 +134,7 @@ export function convertLegacyFilmSetHistoryEntry(
     filmSetContent: converted.value.filmSetContent, filmSetAnimations: filmSetAnimationsOf(converted.value),
     ...(rawAnimation.origin !== undefined ? { origin: rawAnimation.origin as FilmSetHistoryAnimationPayload["origin"] } : {}),
   };
-  const validatedAnimation = decodeAnimationPayload(animation);
+  const validatedAnimation = decodeAnimationPayload(animation, { acceptedContentVersions: [3, 4] });
   if (!validatedAnimation || validatedAnimation.schemaVersion !== 3 || stable(validatedAnimation) !== stable(animation)) {
     return { ok: false, reason: "转换后的片场历史无法完整保全内容/来源" };
   }
@@ -146,11 +147,12 @@ export function convertLegacyFilmSetHistoryEntry(
     ...(stored.modelCameras !== undefined ? { modelCameras: stored.modelCameras as NodeHistoryModelPayload["modelCameras"] } : {}),
   };
   const candidate = { ...original, payload, currentIdentity: animationDefinitionIdentityFromPayload(validatedAnimation) };
-  const decoded = decodeNodeGenerationHistoryEntry(candidate);
+  const decoded = decodeNodeGenerationHistoryEntry(candidate, { acceptedContentVersions: [3, 4] });
   if (!decoded.ok) return { ok: false, reason: decoded.message };
   if (stable(decoded.value) !== stable(candidate)) return { ok: false, reason: "新历史 codec 会丢弃或默认化 metadata/payload" };
   const fields = canonicalFilmSetFields({ ...converted.value, ...(animation.origin ? { origin: animation.origin } : {}) });
-  const verified = decodeFilmSetNodeData(fields);
+  // 离线迁移产物仍是 schema 3 内容（坐标迁移按节点尺寸在其后执行），因此这里用离线许可复核。
+  const verified = decodeFilmSetNodeData(fields, { acceptedContentVersions: [3, 4] });
   if (!verified.ok) return { ok: false, reason: verified.reason };
   return { ok: true, entry: decoded.value, nodeData: fields, bytes: Buffer.byteLength(JSON.stringify(decoded.value), "utf8"),
     changed: stable(decoded.value) !== stable(input) };

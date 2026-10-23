@@ -4,6 +4,7 @@ import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { CanvasRoom } from "../sync/room.js";
 import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
 import { readLegacyFilmSetNodeData } from "./legacy-film-set-reader.js";
+import { planFilmSetSceneSpaceNode } from "./film-set-scene-space-migration.js";
 const now = "2026-10-10T00:00:00.000Z";
 
 /**
@@ -42,7 +43,13 @@ async function migratedRoom() {
   canvas.document.nodes.push({ id: "fs", type: "composite-asset", position: { x: 0, y: 0 } });
   const read = readLegacyFilmSetNodeData(legacyCanvas().nodeData.fs);
   if (!read.ok) throw Error(read.reason);
-  canvas.nodeData.fs = canonicalFilmSetFields(read.value) as never;
+  // 旧片场的镜头是世界单位：正式开放前必须再经坐标迁移（change:
+  // 2026-10-23-isolate-film-set-camera-space）。这里用与启动迁移相同的计划与显式节点尺寸。
+  const sceneSpace = planFilmSetSceneSpaceNode(canonicalFilmSetFields(read.value), {
+    nodeSize: { width: 260, height: 195 }
+  });
+  if (!sceneSpace.ok) throw Error(sceneSpace.reason);
+  canvas.nodeData.fs = canonicalFilmSetFields(sceneSpace.value) as never;
   await room.initialize({ canvas, roomEpoch: "e", createdAt: now });
   return { room, repository };
 }
@@ -69,7 +76,10 @@ describe("durable clip commands and explicit migration", () => {
     expect(fields.extensionId).toBe("film-set");
     expect(fields.timeline).toBeUndefined();
     expect(fields.modelScript).toBeUndefined();
-    expect(decodeFilmSetNodeData(fields).ok).toBe(true);
+    // 离线 reader 只负责旧格式 → items-only；坐标单位由启动迁移按节点尺寸反解，因此这里用
+    // 离线许可读取，随后在 migratedRoom 中完成场景单位升级。
+    expect(decodeFilmSetNodeData(fields, { acceptedContentVersions: [3] }).ok).toBe(true);
+    expect(decodeFilmSetNodeData(fields).ok).toBe(false);
   });
 
   it("canonical 内容再读不改变身份、items 或 clips，也不写 room", async () => {

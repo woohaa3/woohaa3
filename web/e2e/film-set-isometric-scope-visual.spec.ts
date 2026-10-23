@@ -54,7 +54,7 @@ async function seed(page: Page, id: string, title: string, items: FilmSetItem[],
   const fields = canonicalFilmSetFields(createFilmSetSnapshot({
     title,
     timeline: { duration: 0, loop: false },
-    filmSetContent: { schemaVersion: 3, items }
+    filmSetContent: { schemaVersion: 4, items }
   }));
   expect((await sendCommands(page, [
     { type: "node.add", node: { id, type: "composite-asset", position, ...size }, nodeData: fields as never }

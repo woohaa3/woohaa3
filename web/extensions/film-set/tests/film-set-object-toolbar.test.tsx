@@ -10,7 +10,7 @@ import { FilmSetObjectToolbar } from "../src/authoring/browser/film-set-object-t
 let root: Root | null = null;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });
 function setup(writable = true, action?: FilmSetObjectAction, onExit?: () => void) {
-  const content: FilmSetContent = { schemaVersion: 3, items: [{ id: "photo", name: "照片", kind: "image", assetId: "asset", aspectRatio: 1.5, localTransform: { offset: { x: 1, y: 2, z: 3 }, scale: 1, yaw: 0 } }] };
+  const content: FilmSetContent = { schemaVersion: 4, items: [{ id: "photo", name: "照片", kind: "image", assetId: "asset", aspectRatio: 1.5, localTransform: { offset: { x: 1, y: 2, z: 3 }, scale: 1, yaw: 0 } }] };
   const submitted: FilmSetItemPatchOp[] = [];
   const session = new FilmSetObjectSession({ readContent: () => content, isWritable: () => writable, submitItemOp: ({ op }) => {
     submitted.push(op); if (op.kind === "transform") content.items[0].localTransform = op.localTransform;

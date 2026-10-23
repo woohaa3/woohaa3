@@ -20,7 +20,7 @@ import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { resolveFilmSetClipHash, resolveFilmSetTargetClip } from "./film-set-target.js";
 
 const CONTENT: FilmSetContent = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   items: [
     {
       id: "body",

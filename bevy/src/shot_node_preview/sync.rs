@@ -72,12 +72,16 @@ pub(crate) fn sync(
     let preparing_of = |node_id: &str| {
         models.preparation_state(node_id) == model3d::RootState::Pending
     };
+    let display_of = |node_id: &str| {
+        model3d::shot_adapter::display_unit_for_node(&scene.0, &resources.0, node_id)
+    };
     let targets = plan::targets_with_preparation(
         &scene.0,
         &bounds_of,
         &quality_of,
         live,
         &preparing_of,
+        &display_of,
     );
     let capture_pins = capture.pins(&scene.0);
     let pixel_ratio = scene

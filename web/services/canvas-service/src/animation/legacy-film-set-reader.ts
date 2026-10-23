@@ -265,9 +265,9 @@ export function readLegacyFilmSetNodeData(
   }
   if (!isJsonObject(nodeData)) return { ok: false, reason: "nodeData 必须是对象" };
 
-  // 已是 items-only 目标格式：仅业务身份迁移（type → composite-asset + extensionId）。
+  // 已是 items-only 目标格式（schema 3 或已升到场景单位的 schema 4）：只做业务身份投影。
   const contentProbe = decodeFilmSetContent(nodeData.filmSetContent);
-  if (contentProbe.ok && contentProbe.value.schemaVersion === 3) {
+  if (contentProbe.ok && (contentProbe.value.schemaVersion === 3 || contentProbe.value.schemaVersion === 4)) {
     // 目标内容下可能存在旧顶层/节点级字段（schema 3 内容但尚未清理顶层）：仍走转换以清理。
     const hasLegacyTop = ["modelScript", "modelScriptLanguage", "modelScriptVersion", "modelContentVersion", "modelPlacement", "motionScript", "motionScriptLanguage", "motionScriptVersion", "motionRevision", "motionSourceHash", "motionBasedOnModelVersion", "initialCamera", "timeline"].some(
       field => nodeData[field] !== undefined
@@ -395,9 +395,15 @@ export function readLegacyFilmSetNodeData(
   return { ok: true, value, changed: true };
 }
 
-/** 目标格式（items-only）投影读取；复用生产严格解码但不做旧字段兼容。 */
+/**
+ * 目标格式（items-only）投影读取；复用生产严格解码但不做旧字段兼容。
+ *
+ * 同时接受 schema 3（旧世界单位坐标，等待坐标迁移）与 schema 4（场景单位）：离线 reader 本身
+ * 不拥有节点尺寸，无法反解镜头单位，因此不在这里擅自升级内容版本
+ * （change: 2026-10-23-isolate-film-set-camera-space，design D1/D5）。
+ */
 function readTargetFilmSet(nodeData: Record<string, unknown>): LegacyFilmSetRead {
-  const decoded = decodeFilmSetNodeData(nodeData);
+  const decoded = decodeFilmSetNodeData(nodeData, { acceptedContentVersions: [3, 4] });
   if (!decoded.ok) return { ok: false, reason: decoded.reason };
   return { ok: true, value: decoded.value, changed: canonicalFieldsDiffer(nodeData, decoded.value) };
 }

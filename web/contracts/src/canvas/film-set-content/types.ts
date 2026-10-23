@@ -9,11 +9,28 @@ import { DEFAULT_MEDIA_TIME_MAP, type ModelMediaTimeMap } from "../media-time.js
 import type { ModelDefinition } from "../model-definition.js";
 import type { MotionDefinition } from "../motion-script.js";
 
-/** 片场内容契约版本；结构变化必须升版本。schema 3 = items-only（几何只在 items，动作只在片段 binding）。 */
-export const FILM_SET_CONTENT_VERSION = 3 as const;
+/**
+ * 片场内容契约版本；结构变化必须升版本。
+ *
+ * - schema 3 = items-only（几何只在 items，动作只在片段 binding）；
+ * - schema 4 = 在 schema 3 之上显式声明**场景单位**语义：items 的 localTransform/尺寸、媒体
+ *   尺寸与镜头（`sceneCamera` / 片段 `initialCamera` distance、`focusOffset`、镜头运动）全部
+ *   使用同一场景空间单位，画布节点矩形与 viewport 只控制呈现
+ *   （change: 2026-10-23-isolate-film-set-camera-space，design D1/D5）。
+ *
+ * 旧客户端严格拒绝非 schema 3，因此版本升级本身就是拒绝门禁：不能只加一个旧客户端会忽略的
+ * optional 坐标字段。
+ */
+export const FILM_SET_CONTENT_VERSION = 4 as const;
+/** 上一代在线版本（items-only，坐标语义未显式版本化）；只由离线迁移转换。 */
+export const FILM_SET_CONTENT_PREVIOUS_VERSION = 3 as const;
 /** 仅用于隔离离线 reader 类型的旧版本（在线 decoder 拒绝）。 */
 export const FILM_SET_CONTENT_LEGACY_VERSION = 1 as const;
-export type FilmSetContentVersion = typeof FILM_SET_CONTENT_LEGACY_VERSION | 2 | typeof FILM_SET_CONTENT_VERSION;
+export type FilmSetContentVersion =
+  | typeof FILM_SET_CONTENT_LEGACY_VERSION
+  | 2
+  | typeof FILM_SET_CONTENT_PREVIOUS_VERSION
+  | typeof FILM_SET_CONTENT_VERSION;
 export const FILM_SET_CONTENT_FIELD = "filmSetContent" as const;
 
 /** 单个片场允许的内部对象数量上限。 */
@@ -42,7 +59,10 @@ export type FilmSetItemKind = (typeof FILM_SET_ITEM_KINDS)[number];
 export const FILM_SET_IMPORTABLE_KINDS = ["model", "image", "video"] as const;
 export type FilmSetImportableKind = (typeof FILM_SET_IMPORTABLE_KINDS)[number];
 
-/** 片场局部变换：offset 使用固定世界单位，scale 等比，yaw 绕局部 Y 轴。 */
+/**
+ * 片场局部变换：offset 使用片场**场景单位**（与几何、媒体尺寸、镜头 distance 同一尺度），
+ * scale 等比，yaw 绕局部 Y 轴。画布节点矩形与 viewport 不改变这些值。
+ */
 export type FilmSetLocalTransform = {
   offset: { x: number; y: number; z: number };
   scale: number;

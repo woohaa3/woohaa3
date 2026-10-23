@@ -56,7 +56,9 @@ describe("offline full film-set history conversion", () => {
     expect(result.entry.currentIdentity).not.toBe(original.currentIdentity);
     expect(result.bytes).toBe(Buffer.byteLength(JSON.stringify(result.entry), "utf8"));
     expect(original).toEqual(before);
-    expect(decodeFilmSetNodeData(result.nodeData).ok).toBe(true);
+    // 离线转换仍产出 schema 3 内容；坐标单位由启动迁移按节点尺寸升级为 schema 4
+    // （change: 2026-10-23-isolate-film-set-camera-space）。
+    expect(decodeFilmSetNodeData(result.nodeData, { acceptedContentVersions: [3] }).ok).toBe(true);
   });
 
   it("precollection is pure and supplies only the format-defined old motion language", () => {
@@ -83,7 +85,7 @@ describe("offline full film-set history conversion", () => {
     const motion = createMotionSnapshot({ motionScript: cameraScript, basedOnModelVersion: model.contentVersion });
     payload.animation = {
       schemaVersion: 2, modelContentVersion: model.contentVersion,
-      filmSetContent: { schemaVersion: 3, items: [{ id: "ground", kind: "ground", name: "地面", size: { width: 8, depth: 8 }, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } }] },
+      filmSetContent: { schemaVersion: 4, items: [{ id: "ground", kind: "ground", name: "地面", size: { width: 8, depth: 8 }, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } }] },
       filmSetAnimations: { schemaVersion: 1, defaultClipId: "b", clips: ["a", "b"].map(id => ({ id, name: id,
         motion, timeline: { duration: 5, loop: false }, initialCamera: defaultInitialShotCamera(), bindings: [] })) },
     };

@@ -47,7 +47,7 @@ function filmSetFields(title: string, items: FilmSetItem[] = []) {
       title,
       motionScript: "",
       timeline: { duration: 0, loop: false },
-      filmSetContent: { schemaVersion: 3, items }
+      filmSetContent: { schemaVersion: 4, items }
     })
   );
 }

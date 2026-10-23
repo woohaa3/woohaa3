@@ -26,7 +26,7 @@ function filmSetCanvas(id: string): ServerCanvas {
   const animation = createFilmSetSnapshot({
     title: `片场 ${id}`,
     filmSetContent: {
-      schemaVersion: 3,
+      schemaVersion: 4,
       items: [{ id: "body", kind: "model", name: "角色", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, model: createModelSnapshot({ modelScript: `scene.box({id:"body"});`, modelScriptVersion: "woohaa-model-js-v2" }) }]
     },
     timeline: { duration: 0, loop: false }

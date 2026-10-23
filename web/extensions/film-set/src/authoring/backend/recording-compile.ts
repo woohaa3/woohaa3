@@ -43,6 +43,7 @@ import {
   filmSetContentHash,
   resolveFilmSetClip,
   shotAspectValue,
+  SHOT_REFERENCE_CONTENT_VERSION,
   shotReferenceContentIdentity,
   shotReferenceProfileKey,
   validateSelfContainedModel,
@@ -269,7 +270,7 @@ export function freezeFilmSetRecording(input: {
     animation,
     clipId: clip.id,
     profile: {
-      schemaVersion: 1,
+      schemaVersion: SHOT_REFERENCE_CONTENT_VERSION,
       width: profile.width,
       height: profile.height,
       frameRate

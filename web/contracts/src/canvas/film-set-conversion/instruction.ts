@@ -133,7 +133,9 @@ export function buildFilmSetConversionInstruction(input: FilmSetConversionInstru
     `filmSetAnimations.schemaVersion MUST be ${FILM_SET_ANIMATIONS_VERSION}; each shot MUST set "kind" to "static" or "dynamic". A static shot MUST have duration 0, loop false, an empty cameraMotionScript, and no object motion or timed media playback. A dynamic shot MUST have a positive duration (seconds) and carries the camera/object motion; a fixed camera filming a moving subject is still "dynamic". Do NOT infer kind from whether cameraMotionScript is empty; many shots are dynamic with an empty camera script. cameraMotionScript is required (empty string = still camera); object motion lives in bindings[].motion referencing existing item ids.`,
     "Camera fields (`sceneCamera` and each clip's `camera`): `azimuth` and `elevation` are in RADIANS (NOT degrees); elevation 0 = level, +1.5708 ≈ straight up, and MUST stay within ±1.5708; `distance` is a positive world distance; `focusOffset` is a world-space offset from the scene bounding-box center (aim it at the subject, e.g. chest height).",
     "sceneCamera should reproduce the source framing/composition whenever usable viewpoint cues exist; omit it only when they do not.",
-    "`filmSetContent` items are in world units with a life-like scale: build the subject at its real size (a standing person is about 1.7–2.7 units tall). Include a `ground` item ONLY when the source shows a visible floor; if you include one, keep its `size` close to the subject footprint (about 8×8). A giant plane such as 200×200 is WRONG — it shrinks the subject to almost nothing in the node preview and inflates the selection scope; omit the ground entirely when no floor is visible."
+    "`filmSetContent` items are in scene units with a life-like scale: build the subject at its real size (a standing person is about 1.7–2.7 units tall). Include a `ground` item ONLY when the source shows a visible floor; if you include one, keep its `size` close to the subject footprint (about 8×8). A giant plane such as 200×200 is WRONG — it shrinks the subject to almost nothing in the node preview and inflates the selection scope; omit the ground entirely when no floor is visible.",
+    "All item `localTransform.offset`, item sizes, `sceneCamera`/clip `distance` and `focusOffset` use the SAME scene units as the geometry you model. The canvas node rectangle and canvas zoom only change presentation; never scale them into your numbers and never estimate the node's pixel size.",
+    "Item placement belongs ONLY to the item `localTransform`: keep every item's geometry centered around its own origin (the model script must not bake the item's world offset/scale/yaw into it). Applying the same offset inside the script doubles it and lifts detached props (e.g. a sword held by a character) out of the scene."
   );
   const prompt = input.instruction?.trim() || defaultFilmSetConversionPrompt(input.sourceKind);
   if (prompt) lines.push(`Scene instruction: ${prompt}`);
@@ -336,12 +338,17 @@ function normalizeItem(input: unknown): unknown {
     const modelScriptVersion = typeof raw.modelScriptVersion === "string" && raw.modelScriptVersion
       ? raw.modelScriptVersion
       : PREFERRED_MODEL_SCRIPT_VERSION;
+    // 外层摆放只归 `localTransform`：新生成候选的脚本按场景局部坐标建模，内部 model.placement
+    // 必须是单位变换，否则组合器会把同一 offset 执行两次（change:
+    // 2026-10-23-isolate-film-set-camera-space，任务 2.4 / design D6）。合法源模型的原始
+    // placement 由导入路径（`buildModelCopyCandidate`）显式保留，不经过本归一。
+    const placement = DEFAULT_MODEL_PLACEMENT_FOR_CANDIDATE;
     // 内容标识必须由实际源码/摆放派生（客户端声明的 hash 不被信任），否则完整校验会拒绝。
     const contentVersion = deriveModelContentVersion({
       modelScript,
       modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
       modelScriptVersion,
-      placement: readModelPlacement(localTransform),
+      placement,
       revision: 1
     });
     return {
@@ -354,7 +361,7 @@ function normalizeItem(input: unknown): unknown {
         modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
         modelScriptVersion,
         contentVersion,
-        placement: readModelPlacement(localTransform)
+        placement
       }
     };
   }
@@ -371,22 +378,15 @@ function normalizeItem(input: unknown): unknown {
   return { id: raw.id, kind: "ground", name: raw.name, localTransform, size: raw.size, ...(typeof raw.color === "string" ? { color: raw.color } : {}) };
 }
 
-/** 读取摆放（非法形状退回单位变换，交给完整校验拒绝）。 */
-function readModelPlacement(input: unknown): ModelPlacement {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) return { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
-  const raw = input as Record<string, unknown>;
-  const offset = typeof raw.offset === "object" && raw.offset !== null
-    ? (raw.offset as Record<string, unknown>)
-    : {};
-  const x = typeof offset.x === "number" ? offset.x : 0;
-  const y = typeof offset.y === "number" ? offset.y : 0;
-  const z = typeof offset.z === "number" ? offset.z : 0;
-  return {
-    offset: { x, y, z },
-    scale: typeof raw.scale === "number" && raw.scale > 0 ? raw.scale : 1,
-    yaw: typeof raw.yaw === "number" ? raw.yaw : 0
-  };
-}
+/**
+ * 新生成候选的模型内部 placement：**恒为单位变换**
+ * （change: 2026-10-23-isolate-film-set-camera-space，任务 2.4 / design D6）。
+ *
+ * 候选的外层摆放已经写入 `localTransform`；组合器会把 item 根与源模型 placement 各执行一次，
+ * 若把同一 offset 也写进 placement，武器/道具会抬升到双倍高度。合法源模型导入保留其真实
+ * placement（见 `buildModelCopyCandidate`），不经过这里。
+ */
+const DEFAULT_MODEL_PLACEMENT_FOR_CANDIDATE: ModelPlacement = { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
 
 function normalizeClip(input: unknown, index: number, itemsById: ReadonlyMap<string, FilmSetItem>): unknown {
   const raw = typeof input === "object" && input !== null && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
