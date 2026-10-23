@@ -54,6 +54,9 @@ export interface CanvasRuntimeService {
   /** 本地视口版本号；随 pan/zoom 递增（供 overlay 用 useSyncExternalStore 重排）。 */
   viewportVersion(): number;
   subscribeViewport(listener: () => void): () => void;
+  /** Read-only geometry invalidation after scene/position/view submission; no frame heartbeat. */
+  sceneVersion?(): number;
+  subscribeScene?(listener: () => void): () => void;
   /**
    * 单节点当前**屏幕矩形**（CSS px，含 canvas 外框偏移）
    * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1）。

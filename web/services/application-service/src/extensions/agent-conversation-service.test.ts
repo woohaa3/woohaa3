@@ -21,6 +21,7 @@ import type {
 import { createSqliteAgentConversationStore as openConversationStore } from "../repository/agent-conversation-repository.js";
 import { loadNodeSqlite } from "../repository/sqlite-loader.js";
 import { createAgentAdapterRegistry } from "./agent-adapter-registry.js";
+import { createExtensionAssistants } from "./extension-assistants.js";
 import { createAgentConversationService, hashIntent } from "./agent-conversation-service.js";
 
 const dirs: string[] = [];
@@ -49,7 +50,7 @@ type FakeAdapterControls = {
 function fakeAdapter(controls: FakeAdapterControls): AgentConversationAdapter {
   return {
     id: "fake",
-    capabilities: () => ({ discussion: true, targets: ["model3d", "film-set", "camera", "canvas-group"], tools: true, models: "remote" }),
+    capabilities: () => ({ candidateGeneration:{imageInput:true,maxImages:8}, discussion: true, targets: ["model3d", "film-set", "camera", "canvas-group"], tools: true, models: "remote" }),
     authorization: async () => "ready",
     models: async () => ({ models: [{ id: "gpt-6.1-sol", label: "GPT 6.1 Sol" }] }),
     async run(input) {
@@ -666,4 +667,66 @@ it("无权威回执的目标回复保持 unknown，阻止清空；查询不重�
   expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "unknown", error: { code: "write-unconfirmed" } } });
   expect(service.clearContext({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" })).toMatchObject({ ok: false, error: { code: "conversation-busy" } });
   expect(controls.seen).toHaveLength(1);
+});
+
+
+describe("trusted structured assistant execution", () => {
+  const candidate = {images:[{bytes:new Uint8Array([1,2,3]),contentType:"image/png"}],outputSchema:{type:"object"}};
+  it("durably distinguishes structured dispatch and rejects schema/image changes under the same request",async()=>{
+    const {service,controls}=setup({outcomes:[{status:"succeeded",assistantText:'{"ok":true}'}]});
+    const created=service.createConversation({owner:"owner",canvasId:"canvas",adapterId:"fake"});
+    if (!created.ok) throw new Error("create failed");
+    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"structured",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design"},candidate};
+    const accepted=service.acceptStructuredTurn(input);if(!accepted.ok)throw new Error("accept failed");
+    expect(accepted.turn.target.structuredInputHash).toBeTruthy();
+    await service.dispatchTurn(accepted.turn.turnId);expect(controls.seen).toHaveLength(0);
+    await service.dispatchStructuredTurn(accepted.turn.turnId,{...candidate,outputSchema:{type:"array"}});expect(controls.seen).toHaveLength(0);
+    expect(service.acceptStructuredTurn({...input,candidate:{...candidate,images:[]}})).toMatchObject({ok:false,error:{code:"request-id-reused"}});
+    expect(service.acceptStructuredTurn({...input,candidate:{...candidate,outputSchema:{type:"array"}}})).toMatchObject({ok:false,error:{code:"request-id-reused"}});
+    expect(service.acceptTurn(input)).toMatchObject({ok:false,error:{code:"request-id-reused"}});
+    await Promise.all([service.dispatchStructuredTurn(accepted.turn.turnId,candidate),service.dispatchStructuredTurn(accepted.turn.turnId,candidate)]);
+    expect(controls.seen).toHaveLength(1);expect(controls.seen[0].candidate).toEqual(candidate);expect(controls.seen[0].intent.action).toBe("discuss");
+    expect(service.acceptStructuredTurn(input)).toMatchObject({ok:true,reused:true});
+    expect(service.queryTurn({owner:"other",requestId:"structured"}).ok).toBe(false);
+    expect(service.acceptStructuredTurn({...input,entry:{...input.entry,canvasId:"other"}}).ok).toBe(false);
+  });
+  it("restart and cancellation never restart structured inference",async()=>{
+    const {service,controls}=setup();
+    const created=service.createConversation({owner:"owner",canvasId:"canvas",adapterId:"fake"});if(!created.ok)throw Error();
+    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"lost",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design"},candidate};
+    const accepted=service.acceptStructuredTurn(input);if(!accepted.ok)throw Error();
+    await service.reconcileUnknown();
+    await service.dispatchStructuredTurn(accepted.turn.turnId,candidate);
+    expect(controls.seen).toHaveLength(0);
+    expect(service.acceptStructuredTurn(input)).toMatchObject({ok:true,reused:true,turn:{status:"unknown"}});
+    service.cancelTurn({owner:"owner",requestId:"lost"});
+    await service.dispatchStructuredTurn(accepted.turn.turnId,candidate);expect(controls.seen).toHaveLength(0);
+  });
+  it("extension facade freezes connections, scopes identities and reads canvas image bytes before execution",async()=>{
+    const {service,controls}=setup({outcomes:[{status:"succeeded",assistantText:'{"design":true}'}]});
+    const binding={connectionId:"selected",adapterId:"fake",configRevision:2,credentialEpoch:3};
+    vi.spyOn(service,"resolveConnectionBinding").mockResolvedValue({ok:true,binding});
+    const read=vi.fn(async()=>candidate.images[0]);
+    const services={canvasAccess:{authorize:vi.fn(async({subject,canvasId})=>({ok:subject==="owner" && canvasId==="canvas"}))},media:{verify:vi.fn(async()=>({exists:true,metadata:{checksum:"hash",contentType:"image/png"}})),resources:{read}}} as unknown as import("@woohaa3/contracts").ApplicationExtensionServices;
+    const facade=createExtensionAssistants("extension",services,()=>service);
+    const input={subject:"owner",canvasId:"canvas",nodeId:"node",requestId:"request",connection:binding,model:"chosen",reasoningEffort:"high" as const,prompt:"design",outputSchema:candidate.outputSchema,references:[{storageKey:"key",checksum:"hash"}]};
+    expect(await facade.submit({...input,connection:{...binding,credentialEpoch:1}})).toMatchObject({ok:false,code:"connection-unavailable"});
+    const accepted = await facade.submit(input);
+    expect(accepted).toMatchObject({ok:true,conversation:{conversationId:expect.any(String),requestId:expect.stringMatching(/^extension-/)}});
+    if (!accepted.ok || !accepted.conversation) throw Error("missing ledger reference");
+    expect(accepted.conversation.requestId).not.toBe(input.requestId);
+    await vi.waitFor(()=>expect(controls.seen).toHaveLength(1));
+    await service.whenSettled(controls.seen[0].turnId);
+    expect(controls.seen[0]).toMatchObject({connection:binding,candidate,intent:{model:"chosen",reasoningEffort:"high"}});
+    expect(read).toHaveBeenCalledWith("key","canvas");
+    expect(await facade.query(input)).toMatchObject({state:"succeeded",text:'{"design":true}',conversation:accepted.conversation});
+    expect(service.queryTurn({owner:input.subject,requestId:accepted.conversation.requestId})).toMatchObject({ok:true,turn:{conversationId:accepted.conversation.conversationId}});
+    expect(await facade.submit(input)).toEqual(accepted);expect(controls.seen).toHaveLength(1);
+    expect(await facade.submit({...input,prompt:"changed"})).toMatchObject({ok:false,code:"request-id-reused"});
+    expect(await facade.query({...input,nodeId:"other"})).toBeNull();
+    expect(await createExtensionAssistants("other-extension",services,()=>service).query(input)).toBeNull();
+    await expect(facade.query({...input,subject:"other"})).rejects.toThrow();
+    expect(await facade.submit({...input,canvasId:"other"})).toMatchObject({ok:false,code:"authorization-unavailable"});
+    await facade.cancel(input);expect(controls.seen).toHaveLength(1);
+  });
 });

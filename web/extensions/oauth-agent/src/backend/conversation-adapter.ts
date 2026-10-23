@@ -72,6 +72,7 @@ export function createChatGptConversationAdapter(
   const ownerIdFor = options.ownerIdFor ?? ((owner) => `principal:${owner}`);
 
   const capabilities = (): AgentAdapterCapabilities => ({
+    candidateGeneration: { imageInput: true, maxImages: 12 },
     discussion: true,
     targets: ["model3d", "film-set", "camera"],
     tools: true,
@@ -126,7 +127,8 @@ export function createChatGptConversationAdapter(
         ownerId,
         model: input.intent.model ?? "",
         prompt: input.intent.prompt,
-        ...(input.images?.length ? { images: input.images.map((image, index) => ({ ...image, fileName: `image-${index}`, mimeType: image.contentType })) } : {}),
+        ...((input.candidate?.images ?? input.images)?.length ? { images: (input.candidate?.images ?? input.images)!.map((image, index) => ({ ...image, fileName: `image-${index}`, mimeType: image.contentType })) } : {}),
+        ...(input.candidate ? { outputSchema: input.candidate.outputSchema } : {}),
         ...(isChatGptReasoningEffort(input.intent.reasoningEffort) ? { reasoningEffort: input.intent.reasoningEffort } : {}),
         history: input.history.map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content })),
         signal: input.signal,

@@ -298,7 +298,23 @@ export type ApplicationExtensionCanvasAccessFacade = {
 };
 
 /** 公共 Context 暴露给插件的受限服务集合；核心 Context 不属于可关闭插件集合。 */
+/** Structured assistant work uses the host conversation ledger and configured assistant connections. */
+export type ApplicationExtensionAssistantFacade = {
+  submit(input: { subject: string; canvasId: string; nodeId: string; requestId: string;
+    connection: import("./conversation.js").AgentConnectionBinding; model?: string;
+    reasoningEffort?: import("./conversation.js").AgentReasoningEffort; prompt: string;
+    outputSchema: Record<string, unknown>; references: readonly { storageKey: string; checksum: string }[];
+  }): Promise<{ ok: true; conversation?: { conversationId: string; requestId: string } } | { ok: false; code: string; message: string }>;
+  query(input: { subject: string; canvasId: string; nodeId: string; requestId: string }): Promise<{
+    state: string; text?: string; error?: { code: string; message: string };
+    /** Exact host ledger identity for read-only conversation navigation. */
+    conversation?: { conversationId: string; requestId: string };
+  } | null>;
+  cancel(input: { subject: string; canvasId: string; nodeId: string; requestId: string }): Promise<void>;
+};
+
 export type ApplicationExtensionServices = {
+  assistants?: ApplicationExtensionAssistantFacade;
   extensionNodes?: ApplicationExtensionNodeFacade;
   tasks: ApplicationExtensionTaskFacade;
   media: ApplicationExtensionMediaFacade;

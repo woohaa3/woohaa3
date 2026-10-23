@@ -29,6 +29,9 @@ it("连续滚动只提交视口；重复停止播放不触发 full，停止滚�
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 800 }) as DOMRect;
   document.body.append(canvas);
   host.attach(canvas); advance();
+  const sceneChanged = vi.fn();
+  const unsubscribeScene = host.subscribeScene(sceneChanged);
+  const sceneVersion = host.sceneVersion();
   // 播放插件在资格撤销时会再次发布 null。这里走真实宿主与交互控制器。
   const unsubscribe = hoverNodeStore.subscribe(() => host.setAnimationPlayback(null));
   try {
@@ -41,6 +44,12 @@ it("连续滚动只提交视口；重复停止播放不触发 full，停止滚�
       canvas.dispatchEvent(new WheelEvent("wheel", { clientX: 900, clientY: 700, deltaX: 4, deltaY: 2 }));
       advance();
     }
+    // Scope queries may flush in a React render. Notifications are deferred and
+    // coalesced so subscribers never synchronously update another component.
+    expect(host.sceneVersion()).toBeGreaterThan(sceneVersion);
+    expect(sceneChanged).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(sceneChanged).toHaveBeenCalledOnce();
     expect(viewports).toHaveLength(30);
     expect(scenes).toHaveLength(fullBefore);
     expect(sceneDiagnostics.sceneBuilds).toBe(0);
@@ -50,7 +59,7 @@ it("连续滚动只提交视口；重复停止播放不触发 full，停止滚�
     expect(query).toHaveBeenCalledOnce();
     expect(hoverNodeStore.getPlaybackSnapshot().blocked).toBe(false);
     expect(host.controller()?.viewport()).toMatchObject({ x: -120, y: -60 });
-  } finally { unsubscribe(); host.dispose(); canvas.remove(); }
+  } finally { unsubscribeScene(); unsubscribe(); host.dispose(); canvas.remove(); }
 });
 
 it("聚焦有效性使用轻量查询，显式宿主目标覆盖优先", async () => {

@@ -1,5 +1,4 @@
 import { ChevronDownIcon, DiamondIcon, DropdownMenu, DropdownMenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from "../../../shared/ui/index.js";
-import "./creation-controls.css";
 import "./model-selector.css";
 
 export function AssistantModelSelector({

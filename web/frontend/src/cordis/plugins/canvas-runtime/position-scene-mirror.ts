@@ -30,7 +30,12 @@ export class PositionSceneMirror {
       scene.nodes[slot.index] = {
         ...node, x: position.x, y: position.y,
         ...(node.compositeAsset && slot.scopeOffset ? { compositeAsset: {
-          ...node.compositeAsset, x: position.x + slot.scopeOffset.x, y: position.y + slot.scopeOffset.y
+          ...node.compositeAsset, x: position.x + slot.scopeOffset.x, y: position.y + slot.scopeOffset.y,
+          ...(node.compositeAsset.scopeGround ? { scopeGround: {
+            ...node.compositeAsset.scopeGround,
+            cx: node.compositeAsset.scopeGround.cx + position.x - node.x,
+            cy: node.compositeAsset.scopeGround.cy + position.y - node.y
+          } } : {})
         } } : {})
       };
     }

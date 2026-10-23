@@ -16,6 +16,7 @@ use super::geometry::Geometry;
 pub(crate) fn sync_scene(
     mut commands: Commands,
     scene: Res<CurrentScene>,
+    model_assets: Res<crate::app::ModelAssetTable>,
     theme: Res<ThemeResource>,
     mut visuals: ResMut<Visuals>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -90,12 +91,15 @@ pub(crate) fn sync_scene(
         &theme,
     );
 
-    let shared_key = super::shared_key::SharedKey::new(scene, &theme);
+    let ownership_links = super::ownership_links::segments(scene, &model_assets.0);
+    let mut shared_key = super::shared_key::SharedKey::new(scene, &theme);
+    shared_key.ownership_links = ownership_links.clone();
     if visuals.shared_key.as_ref() == Some(&shared_key) {
         flags.canvas_committed = true;
         return;
     }
     visuals.shared_key = Some(shared_key);
+    super::ownership_links::draw(&mut geometry, &ownership_links, &theme);
     super::render_edges::draw_draft(&mut geometry, scene, &theme, &node_map);
     // 拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）：
     // 派生呈现，不在 `document.edges` 里；起点由映射层按当前观察相机投影给出，终点复用卡片

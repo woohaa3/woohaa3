@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AssistantToolbar } from "../../ui/assistant-execution/toolbar.js";
 import "./execution-panel/execution-panel.css";
 import "./authoring-generate-panel.css";
 
@@ -11,6 +12,10 @@ type AuthoringLayoutProps = {
   model?: ReactNode;
   detail?: ReactNode;
   submit: ReactNode;
+  onRefresh?: () => void;
+  onManage?: () => void;
+  disabled?: boolean;
+  refreshing?: boolean;
 };
 
 /** 普通创作与外部任务共用完整面板布局，状态与输入由任务所有者提供。 */
@@ -24,10 +29,12 @@ export function AuthoringGenerateSurface({ children, mode, sourceId, ...layout }
   </div>;
 }
 
-/** 只组织呈现：聚焦检查器不沿用外侧 dock 的横向工具栏。 */
+/** Dock and inspector use the same five-control assistant toolbar. */
 export function AuthoringGenerateLayout({
-  inspector, references, mcp, prompt, assistant, model, detail, submit,
+  inspector, references, mcp, prompt, assistant, model, detail, submit, onRefresh, onManage, disabled, refreshing,
 }: AuthoringLayoutProps) {
+  const toolbar = <AssistantToolbar assistant={assistant} parameters={model} submit={submit}
+    onRefresh={onRefresh} onManage={onManage} disabled={disabled} refreshing={refreshing} />;
   if (inspector) return <>
     <div className="authoring-generate__inspector-heading">
       <h3>AI 修改</h3>
@@ -35,11 +42,8 @@ export function AuthoringGenerateLayout({
     </div>
     {references ? <div className="authoring-generate__references">{references}</div> : null}
     {prompt}
-    <div className="authoring-generate__inspector-settings">
-      <div className="authoring-generate__inspector-field"><span>助手</span>{assistant}</div>
-      {model ? <div className="authoring-generate__inspector-field"><span>模型</span>{model}</div> : null}
-    </div>
-    <div className="authoring-generate__inspector-actions">{submit}{detail}</div>
+    {toolbar}
+    {detail ? <div className="authoring-generate__actions">{detail}</div> : null}
   </>;
 
   return <>
@@ -48,9 +52,7 @@ export function AuthoringGenerateLayout({
       {mcp}
     </div>
     {prompt}
-    <div className="mc-panel__sectioned-footer authoring-generate__toolbar">
-      <div className="mc-panel__parameters mc-panel__grid-parameter">{assistant}{model}</div>
-      <div className="authoring-generate__actions">{detail}{submit}</div>
-    </div>
+    {toolbar}
+    {detail ? <div className="authoring-generate__actions">{detail}</div> : null}
   </>;
 }

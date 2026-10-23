@@ -11,6 +11,30 @@ use super::geometry::Geometry;
 const DASH_LENGTH: f32 = 10.0;
 const DASH_GAP: f32 = 6.0;
 
+/// Preserve world-length dash spacing across sampled curve segments.
+pub(super) fn dashed_polyline(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32) {
+    let period = DASH_LENGTH + DASH_GAP;
+    let mut phase = 0.0_f32;
+    for pair in points.windows(2) {
+        let length = pair[0].distance(pair[1]);
+        if !length.is_finite() || length <= 0.0001 { continue; }
+        let direction = (pair[1] - pair[0]) / length;
+        let mut offset = 0.0;
+        while length - offset > 0.0001 {
+            let drawing = phase < DASH_LENGTH;
+            let boundary = if drawing { DASH_LENGTH } else { period };
+            let step = (boundary - phase).min(length - offset);
+            if drawing && step > 0.0001 {
+                geometry.line(pair[0] + direction * offset, pair[0] + direction * (offset + step), border, z, color);
+            }
+            offset += step;
+            phase += step;
+            if phase >= period - 0.0001 { phase = 0.0; }
+            else if (phase - DASH_LENGTH).abs() < 0.0001 { phase = DASH_LENGTH; }
+        }
+    }
+}
+
 /// 画一个圆角虚线矩形（四边由等长短线拼成，圆角处用短弧近似）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn dashed_rounded_rect(
@@ -124,6 +148,17 @@ fn dashed_line(geometry: &mut Geometry, a: Vec2, b: Vec2, border: f32, z: f32, c
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curve_dashes_keep_length_across_sample_boundaries() {
+        let mut geometry = Geometry::default();
+        dashed_polyline(&mut geometry, &[Vec2::ZERO, Vec2::new(5.,0.), Vec2::new(14.,0.), Vec2::new(30.,0.)], 1., 0., 0xffffff);
+        let mesh = geometry.build();
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!("positions"); };
+        assert!(points.iter().any(|p| p[0] == 0.));
+        assert!(points.iter().any(|p| p[0] == 26.));
+        assert!(points.iter().all(|p| p[0] <= 10. || (p[0] >= 16. && p[0] <= 26.)));
+    }
 
     fn positions(geometry: Geometry) -> usize {
         let mesh = geometry.build();

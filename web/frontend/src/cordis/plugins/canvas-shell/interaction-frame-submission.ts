@@ -86,6 +86,7 @@ export function createFrameSubmission(deps: {
           baseline.scene = applyObserverToScene(baseline.scene, input);
           fingerprint = null;
           deps.options.onScene?.(baseline.scene);
+          deps.options.onSceneSubmitted?.();
           return {error:null,retry:false};
         } catch (error) { return fail(error); }
       }
@@ -107,6 +108,7 @@ export function createFrameSubmission(deps: {
               baseline.previews=next;
               fingerprint=null;
               deps.options.onScene?.(baseline.scene);
+              deps.options.onSceneSubmitted?.();
               return {error:null,retry:false};
             }
             if (!viewChanged) { if (trace) trace.route = "noop"; return {error:null,retry:false}; }
@@ -117,6 +119,7 @@ export function createFrameSubmission(deps: {
             if (error) return fail(error);
             if (trace && runtime.queueViewport) trace.outcome = "queued";
             baseline.scene={...baseline.scene,viewport:{...viewport}};
+            deps.options.onSceneSubmitted?.();
             return {error:null,retry:false};
           } catch (error) { return fail(error); }
         }
@@ -130,6 +133,7 @@ export function createFrameSubmission(deps: {
         if (error) return fail(error);
         if (trace && runtime.queueViewport) trace.outcome = "queued";
         baseline.scene={...baseline.scene,viewport:{...viewport}};
+        deps.options.onSceneSubmitted?.();
         return {error:null,retry:false};
       }
     }
@@ -160,6 +164,7 @@ export function createFrameSubmission(deps: {
       const previews=index && expandPositionPreviews(index,deps.state.localPositions);
       baseline=index && previews ? {runtime,index,previews,scene:mirror.reset(built.scene),
         generation:runtime.generation?.() ?? 0,base:runtime.baseSceneGeneration?.() ?? 0,transient:transientNow()} : null;
+      deps.options.onSceneSubmitted?.();
       return {error:null,retry:false};
     } catch(error) { return fail(error); }
   };

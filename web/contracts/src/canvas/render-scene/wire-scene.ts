@@ -56,8 +56,9 @@ export * from "./wire-shot-preview.js";
  *   不画归属线、hover 目标错位），因此必须版本同步升级拒绝混合组合。提升为 v20。
  * - change: 2026-10-20-unify-node-execution-feedback —— 圆点身份、预览选择和指针反馈提升为
  *   v21；拒绝忽略 selected/hovered/pressed 的旧 renderer，避免预览与加载反馈不一致。
+ * - v22：复合资产新增可信派生 ownershipLinks，使用模型局部锚点与目标节点底部绘制管理虚线。
  */
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v21" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v22" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
@@ -199,6 +200,8 @@ export type CompositeAssetGeometryQuality = "overview-primitives-v1";
  * 此时基准矩形即范围框。这是纯派生呈现几何，不写规范文档、不进镜头成片。
  */
 export type BevyCompositeAssetPresentation = {
+  /** Derived ownership only; local model anchor → target card bottoms. Not editable document edges. */
+  ownershipLinks?: { anchor: [number, number, number]; targetNodeIds: string[] };
   rootPlacement?: BevyModelPlacement;
   contentExtent?: number;
   /** 范围形状声明；缺失即复合资产类别默认 `isometric-diamond`。 */

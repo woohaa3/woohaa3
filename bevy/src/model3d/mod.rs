@@ -76,6 +76,7 @@ mod batch_strategy;
 pub(crate) mod instancing;
 
 pub(crate) use animation::TransformAnimationSet;
+pub(crate) use layout::film_set_root_transform;
 
 #[cfg(feature = "canvas-core")]
 pub(crate) use grid::{setup as setup_grid, setup_camera};

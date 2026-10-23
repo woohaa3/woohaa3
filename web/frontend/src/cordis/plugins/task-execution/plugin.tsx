@@ -278,6 +278,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               requestId={route.requestId}
               {...(route.nodeId ? { nodeId: route.nodeId } : {})}
               service={agentConversations}
+              onManageAssistant={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: { canvasId: ctx.canvasScope.canvasId() } })}
               targetExecution={() => {
                 const detail = agentConversations.getDetail();
                 const target = detail?.turns.slice().reverse().find((turn) => turn.action !== "discuss")?.target;

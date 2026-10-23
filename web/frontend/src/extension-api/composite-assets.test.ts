@@ -1,8 +1,78 @@
-import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, prepareModelResource } from "@woohaa3/contracts";
+import { describe, expect, it, vi } from "vitest";
+import { buildCanvasRenderScene, createEmptyWoohaa3ServerCanvas, prepareModelResource } from "@woohaa3/contracts";
 import { CompositeAssetRegistry } from "./composite-assets.js";
 const adapter = (identity: string) => ({ extensionId: identity, owner: identity, executionKey: () => "static", prepare: () => ({ resource: prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: [] }) }) });
 describe("复合资产严格 owner 与 scope", () => {
+  it("节点级形状通过共享 mapper 派生 ground，矩形角色保留原范围且不回写尺寸", () => {
+    const registry = new CompositeAssetRegistry();
+    registry.register({ ...adapter("test-asset"), scopeShape: "rect", scopeShapeForNode: id => id === "main" ? "isometric-diamond" : "rect" });
+    const canvas = createEmptyWoohaa3ServerCanvas("c");
+    for (const id of ["main", "input"]) {
+      canvas.document.nodes.push({ id, type: "composite-asset", position: { x: 10, y: 20 }, width: 260, height: 195 });
+      canvas.nodeData[id] = { extensionId: "test-asset" } as never;
+    }
+    const before = JSON.stringify(canvas);
+    const scene = buildCanvasRenderScene({ canvas, compositeAssetScopeShapes: registry.scopeShapes(canvas) });
+    expect(scene.nodes.find(node => node.id === "main")?.compositeAsset).toMatchObject({ scopeShape: "isometric-diamond", scopeGround: expect.any(Object) });
+    expect(scene.nodes.find(node => node.id === "input")?.compositeAsset).not.toHaveProperty("scopeGround");
+    expect(JSON.stringify(canvas)).toBe(before);
+  });
+  it("逐节点覆盖静态形状，undefined 恢复静态声明，坏节点不阻断其它节点", () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const registry = new CompositeAssetRegistry();
+      let broken = false;
+      let useDefault = false;
+      registry.register({ ...adapter("test-asset"), scopeShape: "rect", scopeShapeForNode: id => {
+        if (id === "main") { if (broken) throw new Error("unavailable"); return useDefault ? undefined : "isometric-diamond"; }
+        if (id === "bad") return "hexagon" as never;
+        return undefined;
+      } });
+      const canvas = createEmptyWoohaa3ServerCanvas("c");
+      for (const id of ["main", "bad", "input"]) {
+        canvas.document.nodes.push({ id, type: "composite-asset", position: { x: 0, y: 0 } });
+        canvas.nodeData[id] = { extensionId: "test-asset", extensionContentRef: { schemaVersion: 1, instanceId: "one" } } as never;
+      }
+      expect([...registry.scopeShapes(canvas)]).toEqual([["main", "isometric-diamond"], ["bad", "rect"], ["input", "rect"]]);
+      expect(registry.scopeDiagnostic("bad")).toContain("hexagon");
+      broken = true;
+      expect(registry.scopeShapes(canvas).get("main")).toBe("isometric-diamond");
+      expect(registry.scopeDiagnostic("main")).toBe("unavailable");
+      registry.scopeShapes(canvas);
+      expect(warning).toHaveBeenCalledTimes(2);
+      broken = false; useDefault = true;
+      expect(registry.scopeShapes(canvas).get("main")).toBe("rect");
+      expect(registry.scopeDiagnostic("main")).toBeNull();
+    } finally { warning.mockRestore(); }
+  });
+  it("范围回退按画布/内容引用隔离，删除、卸载和 clear 清理诊断及历史", () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const registry = new CompositeAssetRegistry();
+      let broken = false;
+      const definition = { ...adapter("test-asset"), scopeShapeForNode: () => { if (broken) throw new Error("unavailable"); return "rect" as const; } };
+      let stop = registry.register(definition);
+      const canvas = createEmptyWoohaa3ServerCanvas("c");
+      canvas.document.nodes.push({ id: "node", type: "composite-asset", position: { x: 0, y: 0 } });
+      canvas.nodeData.node = { extensionId: "test-asset", extensionContentRef: { schemaVersion: 1, instanceId: "one" } } as never;
+      const seed = () => { broken = false; expect(registry.scopeShapes(canvas).get("node")).toBe("rect"); broken = true; };
+      seed();
+      canvas.nodeData.node.extensionContentRef = { schemaVersion: 1, instanceId: "two" };
+      expect(registry.scopeShapes(canvas).has("node")).toBe(false);
+      seed(); canvas.id = "other";
+      expect(registry.scopeShapes(canvas).has("node")).toBe(false);
+      seed(); registry.retain(new Set());
+      expect(registry.scopeDiagnostic("node")).toBeNull();
+      expect(registry.scopeShapes(canvas).has("node")).toBe(false);
+      seed(); stop(); stop = registry.register(definition);
+      expect(registry.scopeShapes(canvas).has("node")).toBe(false);
+      seed(); registry.clear(); registry.register(definition);
+      expect(registry.scopeShapes(canvas).has("node")).toBe(false);
+      registry.scopeShapes(null);
+      expect(registry.scopeDiagnostic("node")).toBeNull();
+      stop();
+    } finally { warning.mockRestore(); }
+  });
   it("只能由 type + extensionId 解析，不能由 payload 或标题猜业务", () => {
     const registry = new CompositeAssetRegistry();
     registry.register(adapter("film-set"));

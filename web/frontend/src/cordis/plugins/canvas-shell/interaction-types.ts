@@ -41,6 +41,7 @@ export type InteractionControllerOptions = {
    */
   getTheme?: () => AppThemeSnapshot;
   onScene?: (scene: CanvasRenderScene) => void;
+  onSceneSubmitted?: () => void;
   target?: Window & typeof globalThis;
   isWritable?: () => boolean;
   /**

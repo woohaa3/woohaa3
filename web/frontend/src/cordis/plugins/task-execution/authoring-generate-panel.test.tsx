@@ -477,12 +477,12 @@ describe("统一 Agent 创作入口", () => {
     await render({ ...props, agentConversation: { ...props.agentConversation!, service } });
     await input("textarea", "生成台灯");
     await act(async () => generate().click());
-    const primary = () => el.querySelector<HTMLButtonElement>(".authoring-generate__actions .ui-button--primary")!;
+    const primary = () => el.querySelector<HTMLButtonElement>(".assistant-toolbar__submit .ui-button--primary")!;
     // 侧栏（详情 route）不由提交触发；主操作自己表达执行中。
     expect(props.agentConversation!.onOpenDetail).not.toHaveBeenCalled();
     expect(primary().textContent).toBe("执行中");
     expect(primary().disabled).toBe(true);
-    // 详情入口仍可就近手动展开，并与主操作同一行。
+    // 详情仍可就近展开，主工具栏固定保留五个调用控件。
     const detailEntry = el.querySelector<HTMLButtonElement>('[data-testid="authoring-generate-detail"]')!;
     expect(detailEntry.textContent).toBe("查看执行与对话");
     expect(detailEntry.getAttribute("title")).toBe("执行中");
@@ -517,12 +517,24 @@ describe("统一 Agent 创作入口", () => {
 
 it("参考图在提示词上方，助手、模型和 Variant 收在提示词下方工具栏；切换并提交实际参数", async () => {
   const { props, service } = fixture();
+  props.onAuthorize = vi.fn();
+  props.sourceSelection!.onRefresh = vi.fn();
   props.renderers = { references: () => <div data-testid="references">参考图</div> };
   props.sourceSelection!.connections = [{ connectionId: "c1", label: "Codex", ready: true, models: [
     { id: "model-a", label: "模型 A", reasoningEfforts: ["low", "high"] },
     { id: "model-b", label: "模型 B", reasoningEfforts: ["medium"] }
   ] }];
   await render(props);
+  const toolbar = el.querySelector('.assistant-toolbar')!;
+  const refresh = toolbar.querySelector<HTMLButtonElement>('button[aria-label="刷新助手"]')!;
+  const manage = toolbar.querySelector<HTMLButtonElement>('button[aria-label="管理助手"]')!;
+  expect(toolbar.querySelectorAll('button')).toHaveLength(5);
+  expect(refresh.textContent).toBe("");
+  expect(manage.textContent).toBe("");
+  await act(async () => { refresh.click(); manage.click(); });
+  expect(props.sourceSelection!.onRefresh).toHaveBeenCalledOnce();
+  expect(props.onAuthorize).toHaveBeenCalledOnce();
+  expect(service.submitTurn).not.toHaveBeenCalled();
   expect(el.querySelector('.authoring-generate__header button[aria-label="复制 MCP 指引"]')).not.toBeNull();
   expect(el.querySelector('.authoring-generate__header [data-testid="references"]')).not.toBeNull();
   expect(el.querySelector('.authoring-generate__actions button[aria-label="复制 MCP 指引"]')).toBeNull();
@@ -531,7 +543,7 @@ it("参考图在提示词上方，助手、模型和 Variant 收在提示词下�
   await input("textarea", "改成四层建筑");
   await select("模型", "模型 A");
   expect(el.querySelector('button[aria-label="Variant"]')).toBeNull();
-  expect(el.querySelectorAll(".mc-panel__parameters .mc-panel__model-trigger")).toHaveLength(2);
+  expect(el.querySelectorAll(".assistant-toolbar .mc-panel__model-trigger")).toHaveLength(2);
   await select("模型", "high");
   await select("模型", "模型 B");
   await select("模型", "medium");

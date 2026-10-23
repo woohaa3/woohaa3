@@ -335,6 +335,8 @@ pub(crate) struct ScopeGroundDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CompositeAssetPresentation {
     #[serde(default)]
+    pub(crate) ownership_links: Option<CompositeOwnershipLinks>,
+    #[serde(default)]
     pub(crate) root_placement: Option<super::ModelPlacement>,
     #[serde(default)]
     pub(crate) content_extent: Option<f32>,
@@ -365,6 +367,14 @@ pub(crate) struct CompositeAssetPresentation {
     pub(crate) item_roots: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub(crate) item_placements: std::collections::HashMap<String, super::ModelPlacement>,
+}
+
+/// Trusted, derived ownership presentation, independent of editable edges.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CompositeOwnershipLinks {
+    pub(crate) anchor: [f32; 3],
+    pub(crate) target_node_ids: Vec<String>,
 }
 
 /// 片场媒体平面（change: 2026-10-08-make-film-set-model-only，design D5）。
@@ -685,6 +695,14 @@ impl Scene {
         }
         for actions in self.node_actions.values() {
             actions.validate()?;
+        }
+        for node in &self.nodes {
+            if let Some(links) = node.composite_asset.as_ref().and_then(|asset| asset.ownership_links.as_ref()) {
+                if !links.anchor.iter().all(|v| v.is_finite()) || links.target_node_ids.len() > 4096
+                    || links.target_node_ids.iter().any(|id| id.is_empty() || id.len() > 1024 || id == &node.id) {
+                    return Err("Invalid composite ownership links");
+                }
+            }
         }
         Ok(())
     }

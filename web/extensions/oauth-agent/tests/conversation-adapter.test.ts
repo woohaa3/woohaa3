@@ -124,11 +124,19 @@ describe("ChatGPT 会话 adapter · 能力与授权", () => {
     expect(calls.converse[0]?.images).toEqual([expect.objectContaining({ bytes, mimeType: "image/png" })]);
     expect(calls.generate).toEqual([]);
   });
+  it("passes trusted structured images and schema through the same no-tools assistant", async () => {
+    const { service, calls } = fakeService();
+    const candidate = { images: [{ bytes: new Uint8Array([1, 2, 3]), contentType: "image/png" }], outputSchema: { type: "object" } };
+    expect(await build({ service }).run(runInput({ candidate }))).toMatchObject({ status: "succeeded" });
+    expect(calls.converse[0]).toMatchObject({ outputSchema: candidate.outputSchema, images: [{ bytes: candidate.images[0].bytes, mimeType: "image/png" }] });
+    expect(calls.generate).toEqual([]);
+  });
   it("声明讨论/工具与模型/片场/镜头目标，目录来源为真实账户", () => {
     const { service } = fakeService();
     const adapter = build({ service });
     expect(adapter.id).toBe(CHATGPT_CONVERSATION_ADAPTER_ID);
     expect(adapter.capabilities()).toEqual({
+      candidateGeneration: { imageInput: true, maxImages: 12 },
       discussion: true,
       targets: ["model3d", "film-set", "camera"],
       tools: true,

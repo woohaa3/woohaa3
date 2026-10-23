@@ -251,13 +251,23 @@ impl Geometry {
         // 控制点、采样点数与点到线段距离由 `super::curve` 提供唯一事实源，绘制与命中查询
         // 共用（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，design D4）。
         let (c1, c2) = super::curve::edge_control_points(a, b);
+        self.curve_with_controls(a, c1, c2, b, width, z, color, dashed);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn curve_with_controls(&mut self, a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, width: f32, z: f32, color: u32, dashed: bool) {
+        if dashed {
+            let points: Vec<_> = (0..=super::curve::EDGE_CURVE_SEGMENTS).map(|i| {
+                super::curve::cubic_point(a, c1, c2, b, i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32)
+            }).collect();
+            super::dash::dashed_polyline(self, &points, width, z, color);
+            return;
+        }
         let mut previous = a;
         for i in 1..=super::curve::EDGE_CURVE_SEGMENTS {
             let t = i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32;
             let point = super::curve::cubic_point(a, c1, c2, b, t);
-            if !dashed || i % 6 < 4 {
-                self.line(previous, point, width, z, color);
-            }
+            self.line(previous, point, width, z, color);
             previous = point;
         }
     }

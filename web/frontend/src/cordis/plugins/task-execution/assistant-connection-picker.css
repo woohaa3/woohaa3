@@ -1,4 +1,0 @@
-.assistant-connection-picker { display: flex; flex-direction: column; gap: 8px; }
-.assistant-connection-picker__controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.assistant-connection-picker--compact { min-width: 0; }
-.assistant-connection-picker--compact .assistant-connection-picker__controls { flex-wrap: nowrap; gap: 6px; min-width: 0; }

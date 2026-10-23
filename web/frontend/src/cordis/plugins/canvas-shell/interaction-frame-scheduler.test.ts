@@ -38,7 +38,7 @@ function frameClock() {
   return { dom, advance };
 }
 
-function setup(textureSync?: Parameters<typeof installInteractionController>[0]["textureSync"]) {
+function setup(textureSync?: Parameters<typeof installInteractionController>[0]["textureSync"], onSceneSubmitted?: () => void) {
   woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 0, y: 0 }]));
   const { dom, advance } = frameClock();
   const { runtime, scenes, viewports, failNextSetScene, failNextSetViewport } = runtimeCapturing();
@@ -47,12 +47,31 @@ function setup(textureSync?: Parameters<typeof installInteractionController>[0][
     getRuntime: () => runtime,
     getSession: () => getSession() as never,
     target: dom.target as never,
-    textureSync
+    textureSync,
+    onSceneSubmitted
   });
   return { dom, advance, scenes, viewports, runtime, controller, failNextSetScene, failNextSetViewport };
 }
 
 describe("纯视口增量路由（design D3）", () => {
+  it("范围观察者只在成功提交后收到通知，静止、去重、失败和卸载不伪造变化", () => {
+    const changed = vi.fn();
+    const { controller, advance, dom, failNextSetScene } = setup(undefined, changed);
+    controller.flush();
+    expect(changed).toHaveBeenCalledOnce();
+    controller.flush(); advance();
+    expect(changed).toHaveBeenCalledOnce();
+    dom.fire("wheel", { deltaX: 6, deltaY: 2, deltaMode: 0, clientX: 900, clientY: 700, timeStamp: 1 });
+    advance();
+    expect(changed).toHaveBeenCalledTimes(2);
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 50, y: 0 }]));
+    failNextSetScene("boom"); controller.invalidate("input"); advance();
+    expect(changed).toHaveBeenCalledTimes(2);
+    advance();
+    expect(changed).toHaveBeenCalledTimes(3);
+    controller.dispose(); controller.invalidate("late"); advance();
+    expect(changed).toHaveBeenCalledTimes(3);
+  });
   it("异步视口只记录 queued，诊断代数仍是最近真实接受值", () => {
     const { dom, runtime, controller, advance } = setup(); controller.flush();
     const start = submissionSequence(); runtime.queueViewport = vi.fn();

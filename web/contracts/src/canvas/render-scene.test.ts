@@ -872,7 +872,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v21");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v22");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));

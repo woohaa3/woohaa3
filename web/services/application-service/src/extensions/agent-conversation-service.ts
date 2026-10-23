@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * 宿主 Agent 会话服务
  * （change: 2026-10-12-add-agent-conversation-panel，任务 1.5/1.6/1.7 / design D1/D2/D7）。
@@ -106,7 +107,18 @@ export type AcceptTurnResult =
   | { ok: true; conversation: ConversationSummary; turn: ConversationTurn; reused: boolean }
   | { ok: false; error: AgentConversationServiceError };
 
+type StructuredCandidate = NonNullable<import("@woohaa3/contracts").AgentAdapterRunInput["candidate"]> & {
+  referenceIdentity?: readonly { storageKey: string; checksum: string }[];
+};
+const candidateHash = (candidate: StructuredCandidate): string => createHash("sha256").update(JSON.stringify({
+  schema: candidate.outputSchema, references: candidate.referenceIdentity, images: candidate.images.map(image => ({contentType: image.contentType,
+    hash: createHash("sha256").update(image.bytes).digest("hex")}))
+})).digest("hex");
+
 export type AgentConversationService = {
+  /** Host-only structured discussion, including exact schema and resolved image bytes. */
+  acceptStructuredTurn(input: Parameters<AgentConversationService["acceptTurn"]>[0] & { candidate: StructuredCandidate }): AcceptTurnResult;
+  dispatchStructuredTurn(turnId: string, candidate: StructuredCandidate): Promise<void>;
   /** Trusted host entry, deliberately absent from the HTTP decoder and browser API. */
   acceptDeliveryTurn(input: { owner: string; conversationId: string; requestId: string; entry: AgentEntryIntent; connection?: AgentConnectionBinding | null;
     delivery: NonNullable<AgentTargetSnapshot["delivery"]> }): AcceptTurnResult;
@@ -196,6 +208,7 @@ export function createAgentConversationService(options: AgentConversationService
   const dispatches = new Map<string, Promise<void>>();
   const controllers = new Map<string, AbortController>();
   let acceptingTrustedDelivery = false;
+  let acceptingStructuredHash: string | undefined;
   const connections = options.connections;
 
   const fail = (code: AgentConversationServiceError["code"], message: string): { ok: false; error: AgentConversationServiceError } => ({ ok: false, error: { code, message } });
@@ -283,7 +296,7 @@ export function createAgentConversationService(options: AgentConversationService
   };
 
   const runTurn = async (turn: ConversationTurnRecord, entry: AgentEntryIntent,
-    delivery?: Parameters<AgentConversationService["dispatchDeliveryTurn"]>[1]): Promise<void> => {
+    delivery?: Parameters<AgentConversationService["dispatchDeliveryTurn"]>[1], candidate?: StructuredCandidate): Promise<void> => {
     const resolved = resolveAdapter(undefined);
     // adapter 可能与创建时不同（扩展升级）；用会话绑定的 adapterId 再解析一次。
     const binding = store.getConversation(turn.conversationId);
@@ -363,6 +376,7 @@ export function createAgentConversationService(options: AgentConversationService
         turnId: turn.turnId,
         requestId: turn.requestId,
         intent: entry,
+        ...(candidate ? { candidate } : {}),
         ...(turnConnection(turn) ? { connection: turnConnection(turn)! } : {}),
         history,
         signal: controller.signal,
@@ -510,6 +524,31 @@ export function createAgentConversationService(options: AgentConversationService
       return resolveTurnConnection(input.owner, input.adapterId, input.connectionId);
     },
 
+    acceptStructuredTurn(input) {
+      if (input.entry.action !== "discuss") return fail("malformed-request", "Structured assistant requires discuss");
+      const conversation = ownedConversation(input.owner, input.conversationId);
+      if (!conversation) return fail("not-found", "会话不存在或无权访问");
+      const adapter = resolveAdapter(conversation.adapterId);
+      const capability = adapter.ok ? adapter.handle.capabilities.candidateGeneration : undefined;
+      if (!capability || input.candidate.images.length > capability.maxImages || (input.candidate.images.length > 0 && !capability.imageInput)) {
+        return fail("capability-unsupported", "所选助手不支持本次结构化设计或参考图数量，请更换助手。");
+      }
+      acceptingStructuredHash = candidateHash(input.candidate);
+      try { return service.acceptTurn(input); }
+      finally { acceptingStructuredHash = undefined; }
+    },
+    async dispatchStructuredTurn(turnId, candidate) {
+      const existing = dispatches.get(turnId);
+      if (existing) return existing;
+      const record = store.getTurn(turnId);
+      if (!record || record.status !== "queued") return;
+      if (JSON.parse(record.targetJson).structuredInputHash !== candidateHash(candidate)) return;
+      const promise = Promise.resolve().then(() => runTurn(record, entryFromTurn(record), undefined, candidate))
+        .catch(error => { log({ event: "agent-structured-dispatch-error", turnId, message: error instanceof Error ? error.message : String(error) }); })
+        .finally(() => dispatches.delete(turnId));
+      dispatches.set(turnId, promise);
+      return promise;
+    },
     acceptDeliveryTurn(input) {
       const existing = store.findTurnByRequest(input.owner, input.requestId);
       if (existing && JSON.stringify(JSON.parse(existing.targetJson).delivery) !== JSON.stringify(input.delivery)) {
@@ -553,7 +592,7 @@ export function createAgentConversationService(options: AgentConversationService
       if (input.entry.canvasId !== binding.canvasId) return fail("unauthorized", "目标画布与会话不一致");
       if (input.entry.action !== "discuss" && binding.nodeId && input.entry.nodeId !== binding.nodeId) return fail("unauthorized", "目标节点与会话不一致");
 
-      const inputHash = hashIntent(input.entry, input.connection ?? null);
+      const inputHash = hashIntent(input.entry, input.connection ?? null) + (acceptingStructuredHash ? `:${acceptingStructuredHash}` : "");
       const existing = store.findTurnByRequest(input.owner, input.requestId);
       if (existing) {
         if (existing.conversationId !== binding.conversationId || existing.canvasId !== binding.canvasId) return fail("request-id-reused", "requestId 已绑定其它会话或画布");
@@ -596,6 +635,7 @@ export function createAgentConversationService(options: AgentConversationService
       const turnId = createId("turn");
       const timestamp = now();
       const target: AgentTargetSnapshot = {
+        ...(acceptingStructuredHash ? { structuredInputHash: acceptingStructuredHash } : {}),
         canvasId: binding.canvasId,
         ...(input.entry.nodeId !== undefined ? { nodeId: input.entry.nodeId } : {}),
         ...(input.entry.mode !== undefined ? { mode: input.entry.mode } : {}),
@@ -653,7 +693,7 @@ export function createAgentConversationService(options: AgentConversationService
       const record = store.getTurn(turnId);
       if (!record || isTerminalTurnStatus(record.status) || record.status !== "queued") return;
       // A persisted candidate delivery can only be dispatched by the trusted domain coordinator.
-      if (JSON.parse(record.targetJson).delivery) return;
+      if (JSON.parse(record.targetJson).delivery || JSON.parse(record.targetJson).structuredInputHash) return;
       const entry = entryFromTurn(record);
       const promise = runTurn(record, entry).catch((error) => {
         log({ event: "agent-conversation-dispatch-error", turnId, message: error instanceof Error ? error.message : String(error) });
@@ -776,6 +816,11 @@ export function createAgentConversationService(options: AgentConversationService
         try {
           const outcome = await bound.handle.adapter.query({ owner: turn.owner, requestId: turn.requestId });
           if (outcome) {
+            if (JSON.parse(turn.targetJson).structuredInputHash) {
+              // A completion without its structured text cannot be adopted as a design result.
+              if (outcome.status !== "succeeded" || outcome.assistantText?.trim()) finishTurn(turn, outcome);
+              continue;
+            }
             store.updateTurn(turn.turnId, {
               status: outcome.status,
               stage: outcome.status,

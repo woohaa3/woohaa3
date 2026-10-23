@@ -109,6 +109,7 @@ export type ChatGptService = {
     prompt: string;
     history: ReadonlyArray<{ role: "user" | "assistant"; content: string }>;
     images?: readonly import("./codex-adapter.js").CodexImageAttachment[];
+    outputSchema?: Record<string, unknown>;
     signal?: AbortSignal;
     onStage?: (stage: string) => void;
   }) => Promise<{ ok: true; text: string } | { ok: false; code: string; message: string }>;
@@ -304,7 +305,7 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
       const prompt = buildConversationPrompt(input.history, input.prompt);
       try {
         const { finalResponse } = await codex.runStreamed(
-          { ownerId: input.ownerId, model: input.model, ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}), prompt, noTools: true, ...(input.images ? { images: input.images } : {}), ...(input.signal ? { signal: input.signal } : {}) },
+          { ownerId: input.ownerId, model: input.model, ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}), prompt, noTools: true, ...(input.images ? { images: input.images } : {}), ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}), ...(input.signal ? { signal: input.signal } : {}) },
           (event) => {
             if (event.type === "progress") input.onStage?.(event.stage);
           }

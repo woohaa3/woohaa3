@@ -30,11 +30,16 @@ impl PositionIndex {
                 continue;
             };
             let node = &mut scene.nodes[index];
+            let delta = Vec2::new(p.x - node.x, p.y - node.y);
             node.x = p.x;
             node.y = p.y;
             if let (Some(scope), Some(offset)) = (&mut node.composite_asset, offset) {
                 scope.x = p.x + offset.x;
                 scope.y = p.y + offset.y;
+                if let Some(ground) = &mut scope.scope_ground {
+                    ground.cx += delta.x;
+                    ground.cy += delta.y;
+                }
             }
         }
     }
@@ -55,7 +60,8 @@ mod tests {
             nodes: serde_json::from_value(serde_json::json!([
                 {"id":"a","type":"text","x":0,"y":0},
                 {"id":"film","type":"model","x":100,"y":200,
-                    "compositeAsset":{"x":120,"y":240,"width":300,"height":200}}
+                    "compositeAsset":{"x":120,"y":240,"width":300,"height":200,
+                        "scopeGround":{"cx":250,"cy":340,"hx":100,"hz":100}}}
             ]))
             .unwrap(),
             ..default()
@@ -128,6 +134,9 @@ mod tests {
             );
             let scope = scene.nodes[1].composite_asset.as_ref().unwrap();
             assert_eq!((scope.x, scope.y), (x + 20., y + 40.));
+            let ground = scope.scope_ground.as_ref().unwrap();
+            assert!((ground.cx - (x + 150.)).abs() < 0.001);
+            assert!((ground.cy - (y + 140.)).abs() < 0.001);
         }
     }
 }

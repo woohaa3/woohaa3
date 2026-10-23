@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FilmSetConversionModelCandidate, FilmSetConversionSettings, FilmSetConversionSourceKind, AgentReasoningEffort } from "@woohaa3/contracts";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { agentDirectory } from "../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, readAssistantPreference, rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
 import { AssistantModelSelector } from "./model-selector.js";
+import { AssistantToolbar } from "./toolbar.js";
 
 /** Same owner directory as ordinary authoring; unsupported delivery capabilities remain visible. */
-export function AssistantDeliverySelection({ service, candidates, sourceKind, value, disabled, onChange, onValidityChange, onManage }: {
+export function AssistantDeliverySelection({ service, candidates, sourceKind, value, disabled, onChange, onValidityChange, onManage, onRefresh, submit }: {
   service: AgentConversationService; candidates: readonly FilmSetConversionModelCandidate[]; sourceKind: FilmSetConversionSourceKind;
   value: FilmSetConversionSettings; disabled: boolean; onChange(value: FilmSetConversionSettings): void;
   onValidityChange(valid: boolean): void; onManage?: () => void;
+  onRefresh?: () => void; submit?: ReactNode;
 }) {
   const directory = agentDirectory(service, service.getDataScopeId?.() ?? "page");
   const snapshot = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot);
@@ -52,18 +54,18 @@ export function AssistantDeliverySelection({ service, candidates, sourceKind, va
     : selection.invalidEffort ? "原 Variant 已失效，请重新选择" : "";
   const valid = snapshot.ready && !reason;
   useEffect(() => { onValidityChange(valid); }, [valid, onValidityChange]);
-  return <>
-    <AssistantModelSelector label="选择助手" placeholder={snapshot.loadingMessage ? "正在读取助手…" : "选择助手"} model={value.connection?.connectionId ?? ""} options={snapshot.connections.map(connection => ({ value: connection.connectionId, label: connection.name,
+  return <AssistantToolbar disabled={disabled} refreshing={Boolean(snapshot.loadingMessage)} onManage={onManage}
+    onRefresh={() => { void directory.load(true); onRefresh?.(); }} submit={submit}
+    assistant={<AssistantModelSelector label="选择助手" placeholder={snapshot.loadingMessage ? "正在读取助手…" : "选择助手"} model={value.connection?.connectionId ?? ""} options={snapshot.connections.map(connection => ({ value: connection.connectionId, label: connection.name,
       detail: !supports(connection.adapterId) ? "此助手暂不支持从素材创建片场" : connection.reason ?? undefined,
       disabled: !supports(connection.adapterId) }))}
       open={open === "assistant"} onOpenChange={value => setOpen(value ? "assistant" : null)} disabled={disabled || Boolean(snapshot.loadingMessage)} onManage={onManage}
       onChange={id => { const connection = snapshot.connections.find(candidate => candidate.connectionId === id); if (connection) change({ ...value,
-        connection: { connectionId: id, adapterId: connection.adapterId, configRevision: connection.configRevision, credentialEpoch: connection.credentialEpoch }, modelKey: undefined, reasoningEffort: undefined }); }} />
-    {connection ? <AssistantModelSelector label="选择助手模型" model={model} options={models.map(model => ({ value: model.id, label: model.label, disabled: !matching(model.id) }))}
+        connection: { connectionId: id, adapterId: connection.adapterId, configRevision: connection.configRevision, credentialEpoch: connection.credentialEpoch }, modelKey: undefined, reasoningEffort: undefined }); }} />}
+    parameters={connection ? <AssistantModelSelector label="选择助手模型" model={model} options={models.map(model => ({ value: model.id, label: model.label, disabled: !matching(model.id) }))}
       open={open === "model"} onOpenChange={value => setOpen(value ? "model" : null)} disabled={disabled || !connection} keepOpenOnModelSelect
       onChange={model => change({ ...value, modelKey: matching(model)?.modelKey, reasoningEffort: undefined })}
       variant={selection.supportedEfforts.length ? { value: value.reasoningEffort ?? "", options: [{ value: "", label: "默认 Variant" }, ...selection.supportedEfforts.map(value => ({ value, label: value }))],
-        onChange: effort => change({ ...value, reasoningEffort: effort ? effort as AgentReasoningEffort : undefined }) } : undefined} /> : null}
-    {snapshot.loadingMessage || reason || snapshot.error ? <p className="authoring-generate__reason assistant-creation-controls__notice">{snapshot.loadingMessage || snapshot.error || reason}</p> : null}
-  </>;
+        onChange: effort => change({ ...value, reasoningEffort: effort ? effort as AgentReasoningEffort : undefined }) } : undefined} /> : undefined}
+    notice={snapshot.loadingMessage || reason || snapshot.error ? <p className="authoring-generate__reason">{snapshot.loadingMessage || snapshot.error || reason}</p> : null} />;
 }

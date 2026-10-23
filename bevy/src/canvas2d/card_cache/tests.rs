@@ -8,6 +8,7 @@ fn world() -> World {
     world.insert_resource(Assets::<Image>::default());
     world.insert_resource(ThemeResource::default());
     world.insert_resource(FrameFlags::default());
+    world.insert_resource(crate::app::ModelAssetTable::default());
     world.insert_resource(Visuals {
         card_blocks: Vec::new(),
         card_decorations: Vec::new(),

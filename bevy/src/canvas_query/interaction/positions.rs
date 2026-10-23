@@ -70,7 +70,7 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
     // 全量 `build_snapshot` 一致（无需重跑 `node_scope`）。
     next.scope = node
         .scope
-        .map(|scope| scope::translate(&scope, Vec2::new(p.x - node.initial_position.x, p.y - node.initial_position.y)));
+        .map(|scope| scope::translate(&scope, Vec2::new(p.x - node.layout_bounds.0, p.y - node.layout_bounds.1)));
     next.bounds = match &next.scope {
         Some(scope) => (scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height),
         None => next.layout_bounds,

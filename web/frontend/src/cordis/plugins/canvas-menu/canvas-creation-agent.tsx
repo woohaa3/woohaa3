@@ -7,6 +7,8 @@ import { ModelSelector } from "../task-execution/execution-panel/model-selector.
 import { agentModelSelection, agentDirectoryModels } from "../task-execution/agent-model-selection.js";
 import { agentDirectory } from "../../services/agent-directory.js";
 import { rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
+import { AssistantToolbar } from "../../ui/assistant-execution/toolbar.js";
+import "../../ui/assistant-execution/creation-controls.css";
 import { creationInput, creationDraft, creationResponse, readCreation, CANVAS_CREATIONS_PATH, subscribeCreationDraft, creationDraftRevision, notifyCreationDraft } from "./canvas-creation-drafts.js";
 import "../task-execution/execution-panel/execution-panel.css";
 
@@ -103,14 +105,13 @@ export default function CanvasCreationAgent(props: {
   });
   return <div className="canvas-create__composer">
         <div className="canvas-create__ai-heading"><SparklesIcon /><span>节点搭建</span></div>
-        <div className="assistant-creation-controls">
-          <ModelSelector label="选择助手" placeholder={loading ? "正在读取助手…" : "选择助手"} model={draft.connectionId} open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} onManage={manage} disabled={loading || draft.busy || Boolean(draft.pending)} options={connections.map(c => ({ value: c.connectionId, label: c.name, disabled: !supportsGroup(c), detail: c.reason }))} onChange={connectionId => edit({ connectionId, model: "", effort: "" })} />
-          {connection && (!toolDefault || models.length > 0) ? <ModelSelector keepOpenOnModelSelect label="选择助手模型" model={draft.model} open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={draft.busy || Boolean(draft.pending)} options={[...(toolDefault ? [{ value: "", label: "使用助手默认模型" }] : []), ...models.map(m => ({ value: m.id, label: m.label, disabled: connection.models.find(c => c.id === m.id)?.capabilities?.tools === false }))]} onChange={model => edit({ model, effort: "" })} variant={selection.supportedEfforts.length ? { value: draft.effort, options: [{ value: "", label: "默认 Variant" }, ...selection.supportedEfforts.map(value => ({ value, label: value }))], onChange: value => edit({ effort: value as AgentReasoningEffort | "" }) } : undefined} /> : null}
-          <Button tone="primary" disabled={loading || draft.busy || Boolean(blocked) || !draft.prompt.trim()} onClick={() => void submit()}>{draft.busy ? "正在创建…" : draft.pending ? "重试原请求" : "创建"}</Button>
-        </div>
+        <AssistantToolbar disabled={draft.busy} refreshing={Boolean(directoryState.loadingMessage)}
+          onRefresh={() => { setNotice(""); void directory.load(true); }} onManage={manage}
+          assistant={<ModelSelector label="选择助手" placeholder={loading ? "正在读取助手…" : "选择助手"} model={draft.connectionId} open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} onManage={manage} disabled={loading || draft.busy || Boolean(draft.pending)} options={connections.map(c => ({ value: c.connectionId, label: c.name, disabled: !supportsGroup(c), detail: c.reason }))} onChange={connectionId => edit({ connectionId, model: "", effort: "" })} />}
+          parameters={connection && (!toolDefault || models.length > 0) ? <ModelSelector keepOpenOnModelSelect label="选择助手模型" model={draft.model} open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={draft.busy || Boolean(draft.pending)} options={[...(toolDefault ? [{ value: "", label: "使用助手默认模型" }] : []), ...models.map(m => ({ value: m.id, label: m.label, disabled: connection.models.find(c => c.id === m.id)?.capabilities?.tools === false }))]} onChange={model => edit({ model, effort: "" })} variant={selection.supportedEfforts.length ? { value: draft.effort, options: [{ value: "", label: "默认 Variant" }, ...selection.supportedEfforts.map(value => ({ value, label: value }))], onChange: value => edit({ effort: value as AgentReasoningEffort | "" }) } : undefined} /> : undefined}
+          submit={<Button tone="primary" disabled={loading || draft.busy || Boolean(blocked) || !draft.prompt.trim()} onClick={() => void submit()}>{draft.busy ? "正在创建…" : draft.pending ? "重试原请求" : "创建"}</Button>} />
         {loadingMessage || notice || directoryState.error || draft.notice || blocked || connection?.modelsError ? <p className="canvas-create__notice">{loadingMessage || notice || directoryState.error || draft.notice || blocked || connection?.modelsError}</p> : null}
         <div className="assistant-creation-recovery">
-          <button type="button" onClick={() => { setNotice(""); void directory.load(true); }} disabled={Boolean(directoryState.loadingMessage)}>刷新助手</button><button type="button" onClick={manage}>管理助手</button>
           {draft.pending ? <button type="button" disabled={draft.busy} onClick={() => void submit(true)}>查询原请求</button> : null}
           {draft.result ? <button type="button" onClick={() => locate.locateNodes([draft.result!.rootGroupId])}>定位创作组</button> : null}
           <span>Ctrl / ⌘ + Enter 创建</span>

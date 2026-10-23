@@ -87,6 +87,32 @@ afterEach(async () => {
 });
 
 describe("model-scene plugin version dispatch", () => {
+  it("本地节点呈现键独立更新，重复失效复用资源，替换画布/实例重新准备", async () => {
+    const harness = await makeHarness();
+    runtime = harness.runtime;
+    const keys = new Map([["a", "1"], ["b", "1"]]);
+    const prepare = vi.fn((_nodeId: string) => ({ resource: prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: [] }) }));
+    harness.registry.register({ extensionId: "test-asset", owner: "test-asset", executionKey: (_data, id) => keys.get(id ?? "")!, prepare });
+    const canvas = createEmptyWoohaa3ServerCanvas("c1");
+    for (const id of keys.keys()) {
+      canvas.document.nodes.push({ id, type: "composite-asset", position: { x: 0, y: 0 } });
+      canvas.nodeData[id] = { extensionId: "test-asset", extensionContentRef: { schemaVersion: 1, instanceId: id } } as never;
+    }
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+    await expect.poll(() => prepare.mock.calls.length).toBe(2);
+    keys.set("a", "2"); harness.registry.invalidate();
+    await expect.poll(() => prepare.mock.calls.length).toBe(3);
+    harness.registry.invalidate();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(prepare).toHaveBeenCalledTimes(3);
+    expect(prepare.mock.calls.at(-1)?.[0]).toBe("a");
+    const replacement = structuredClone(canvas);
+    replacement.nodeData.a.extensionContentRef = { schemaVersion: 1, instanceId: "new" };
+    woohaa3CanvasStore.getState().applyRemoteCanvas(replacement);
+    await expect.poll(() => prepare.mock.calls.length).toBe(4);
+    woohaa3CanvasStore.getState().applyRemoteCanvas({ ...replacement, id: "c2" });
+    await expect.poll(() => prepare.mock.calls.length).toBe(6);
+  });
   it("重新加载已确认状态的模型仍准备资源，但不重复上报", async () => {
     const harness = await makeHarness();
     runtime = harness.runtime;

@@ -45,12 +45,14 @@ export type AttachAssemblyDeps = {
   gestures: ModelEditorGestureRefs;
   onModelFocusChange: NonNullable<InteractionControllerOptions["onModelFocusChange"]>;
   onViewportChange: () => void;
+  onSceneSubmitted?: () => void;
 };
 
 export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): InteractionControllerOptions {
   const { options } = deps;
   return {
     canvas: deps.canvas,
+    onSceneSubmitted: deps.onSceneSubmitted,
     ...(options.compositeAssets ? { compositeAssets: options.compositeAssets } : {}),
     ...(options.canvasId ? { canvasId: options.canvasId } : {}),
     getRuntime: deps.getRuntime,

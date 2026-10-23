@@ -13,7 +13,6 @@ import { AuthoringGenerateLayout } from "../../plugins/task-execution/authoring-
 import { AuthoringMcpButton } from "../../plugins/task-execution/model-parameter-panel.js";
 import { Button } from "../../../shared/ui/Button.js";
 import {
-  RefreshIcon,
   SendIcon,
 } from "../../../shared/ui/icons.js";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
@@ -271,6 +270,10 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     >
       <AuthoringGenerateLayout
         inspector={inspector}
+        onRefresh={selection?.onRefresh}
+        onManage={props.onAuthorize}
+        disabled={locked}
+        refreshing={selection?.loading}
         references={props.renderers?.references?.()}
         mcp={<AuthoringMcpButton canvasId={props.canvasId} nodeId={props.nodeId} isFilmSet={props.mode === "film-set"}
           mcpServerUrl={props.mcpHint?.serverUrl} />}
@@ -351,7 +354,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         {deliveryActions.error ? <p className="authoring-generate__reason">{deliveryActions.error}</p> : null}
       </> : null}
       {!delivery && modelError ? <p className="authoring-generate__reason">{modelError}</p> : null}
-      {!delivery && !noConnection && selection?.onRefresh && (modelError || invalidModel) ? <Button size="sm" tone="ghost" icon={<RefreshIcon size={13} />} disabled={locked || selection.loading} onClick={selection.onRefresh}>刷新模型</Button> : null}
       {!delivery && noConnection && !selection?.loading ? (
         <p className="authoring-generate__hint" data-testid="authoring-generate-empty">连接一个助手即可开始，创作描述会保留在这里。</p>
       ) : null}

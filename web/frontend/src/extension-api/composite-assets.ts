@@ -22,6 +22,8 @@ export type CompositeAssetAdapter = {
    * 仅在需要按严格身份显示为轴对齐矩形时才声明 `rect`。未知值在 register 边界拒绝，不写规范 nodeData。
    */
   scopeShape?: CompositeAssetScopeShape;
+  /** Per-node override. undefined uses the static declaration/category default. */
+  scopeShapeForNode?(nodeId: string, data: CanvasNodeData): CompositeAssetScopeShape | undefined;
   /**
    * 总览 primitive LOD 策略声明
    * （change: 2026-10-15-add-film-set-overview-lod，design D1）。
@@ -31,7 +33,8 @@ export type CompositeAssetAdapter = {
    * World 用途保持 High；未知值在 register 边界拒绝，不从 nodeData 标题/items/动画或历史类型推断。
    */
   geometryQuality?: CompositeAssetGeometryQuality;
-  executionKey(data: CanvasNodeData): string;
+  /** Hosts pass nodeId; optional for existing callers that only have node data. */
+  executionKey(data: CanvasNodeData, nodeId?: string): string;
   prepare(nodeId: string, data: CanvasNodeData): CompositeAssetProjection | null;
   mediaSources?(nodeId: string, data: CanvasNodeData, playback: BevyAnimationPlayback | null): CompositeAssetMediaSource[];
   projectCanvas?(canvas: ServerCanvas): ServerCanvas;
@@ -56,6 +59,7 @@ export class CompositeAssetRegistry {
   private listeners = new Set<() => void>();
   private projectionOwners = new Map<string, string>();
   private projections = new Map<string, CompositeAssetProjection>();
+  private scopeResults = new Map<string, { identity: string; owner: string; shape?: CompositeAssetScopeShape; diagnostic?: string }>();
   register(adapter: CompositeAssetAdapter): () => void {
     if (!adapter.extensionId || adapter.owner !== adapter.extensionId) throw new Error("复合资产 adapter owner 与业务身份不一致");
     if (this.adapters.has(adapter.extensionId)) throw new Error(`复合资产业务注册冲突：${adapter.extensionId}`);
@@ -71,7 +75,7 @@ export class CompositeAssetRegistry {
     }
     this.adapters.set(adapter.extensionId, adapter); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate();
     let alive = true;
-    return () => { if (!alive) return; alive = false; if (this.adapters.get(adapter.extensionId) === adapter) { this.adapters.delete(adapter.extensionId); for (const [id, owner] of this.projectionOwners) if (owner === adapter.extensionId) { this.projections.delete(id); this.projectionOwners.delete(id); } this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate(); } };
+    return () => { if (!alive) return; alive = false; if (this.adapters.get(adapter.extensionId) === adapter) { this.adapters.delete(adapter.extensionId); for (const [id, owner] of this.projectionOwners) if (owner === adapter.extensionId) { this.projections.delete(id); this.projectionOwners.delete(id); } for (const [id, result] of this.scopeResults) if (result.owner === adapter.extensionId) this.scopeResults.delete(id); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate(); } };
   }
   resolve(canvas: ServerCanvas | null, nodeId: string): CompositeAssetAdapter | null {
     const node = canvas?.document.nodes.find(node => node.id === nodeId);
@@ -93,13 +97,33 @@ export class CompositeAssetRegistry {
    */
   scopeShapes(canvas: ServerCanvas | null): ReadonlyMap<string, CompositeAssetScopeShape> {
     const shapes = new Map<string, CompositeAssetScopeShape>();
-    if (!canvas) return shapes;
+    if (!canvas) { this.scopeResults.clear(); return shapes; }
+    const retained = new Set<string>();
     for (const node of canvas.document.nodes) {
       const adapter = this.resolve(canvas, node.id);
-      if (adapter?.scopeShape) shapes.set(node.id, adapter.scopeShape);
+      if (!adapter) continue;
+      retained.add(node.id);
+      const data = canvas.nodeData[node.id];
+      // Content references are opaque to the host, but replacement must discard old fallback.
+      const identity = JSON.stringify([canvas.id, adapter.extensionId, this.generation(adapter.extensionId), data?.extensionContentRef]);
+      const previous = this.scopeResults.get(node.id);
+      let shape = previous?.identity === identity ? previous.shape : adapter.scopeShape;
+      let diagnostic: string | undefined;
+      try {
+        const resolved = adapter.scopeShapeForNode?.(node.id, data);
+        if (resolved !== undefined && resolved !== "rect" && resolved !== "isometric-diamond") throw new Error(`未知范围形状：${String(resolved)}`);
+        shape = resolved ?? adapter.scopeShape;
+      } catch (error) {
+        diagnostic = error instanceof Error ? error.message : String(error);
+        if (previous?.identity !== identity || previous.diagnostic !== diagnostic) console.warn(`Composite asset scope ${node.id}: ${diagnostic}`);
+      }
+      this.scopeResults.set(node.id, { identity, owner: adapter.extensionId, shape, diagnostic });
+      if (shape) shapes.set(node.id, shape);
     }
+    for (const id of this.scopeResults.keys()) if (!retained.has(id)) this.scopeResults.delete(id);
     return shapes;
   }
+  scopeDiagnostic(nodeId: string): string | null { return this.scopeResults.get(nodeId)?.diagnostic ?? null; }
   /**
    * 按严格身份解析每个复合资产节点的**总览 primitive LOD 策略声明**
    * （change: 2026-10-15-add-film-set-overview-lod，design D1）。
@@ -147,6 +171,7 @@ export class CompositeAssetRegistry {
   }
   retain(nodeIds: ReadonlySet<string>): void {
     for (const id of this.projections.keys()) if (!nodeIds.has(id)) { this.projections.delete(id); this.projectionOwners.delete(id); }
+    for (const id of this.scopeResults.keys()) if (!nodeIds.has(id)) this.scopeResults.delete(id);
   }
   projectCanvas(canvas: ServerCanvas | null): ServerCanvas | null {
     if (!canvas) return null;
@@ -157,5 +182,5 @@ export class CompositeAssetRegistry {
   keydown(event: KeyboardEvent, canvas: ServerCanvas | null, nodeId: string | null): boolean { return nodeId ? this.resolve(canvas, nodeId)?.keydown?.(event, nodeId) ?? false : false; }
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   invalidate = (): void => { this.revision += 1; for (const listener of this.listeners) listener(); };
-  clear(): void { this.adapters.clear(); this.projections.clear(); this.projectionOwners.clear(); this.invalidate(); }
+  clear(): void { this.adapters.clear(); this.projections.clear(); this.projectionOwners.clear(); this.scopeResults.clear(); this.invalidate(); }
 }

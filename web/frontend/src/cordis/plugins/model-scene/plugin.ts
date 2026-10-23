@@ -282,7 +282,7 @@ function modelExecutionKey(registry: CompositeAssetRegistry, canvas: ServerCanva
   if (node.type !== "composite-asset") return `${String(data?.modelScriptVersion)}:${source}`;
   const adapter = registry.resolve(canvas, nodeId);
   return adapter && data
-    ? `${registry.generation(adapter.extensionId)}:${adapter.executionKey(data)}`
+    ? JSON.stringify([canvas!.id, adapter.extensionId, registry.generation(adapter.extensionId), data.extensionContentRef, adapter.executionKey(data, nodeId)])
     : `unavailable:${String(data?.extensionId)}:${JSON.stringify(data?.scenePlacement)}:${String(data?.modelScriptVersion)}:${source}`;
 }
 

@@ -304,7 +304,7 @@ fn film_set_anchor_centers_model_within_node() {
         card_label: None,
         group: None,
         model: None,
-        composite_asset: Some(crate::protocol::CompositeAssetPresentation {
+        composite_asset: Some(crate::protocol::CompositeAssetPresentation { ownership_links: None,
             root_placement: None,
             content_extent: None,
             layout_aabb: None,

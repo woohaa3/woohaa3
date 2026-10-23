@@ -17,6 +17,7 @@
 import type {} from "../cordis/context.js";
 export { defineExtensionFrontend, defineExtensionPlugin } from "./entry.js";
 export { AssistantConnectionPicker, type AssistantConnectionSelection } from "../cordis/plugins/task-execution/assistant-connection-picker.js";
+export { resolveAgentDetailAction } from "../cordis/plugins/task-execution/execution-panel/agent-detail-action.js";
 export { AuthoringGenerateSurface } from "../cordis/plugins/task-execution/authoring-generate-layout.js";
 export type { CanvasGroupRun, CanvasGroupRunsService, CanvasGroupRunsSnapshot } from "./context-api.js";
 /**

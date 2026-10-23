@@ -1,7 +1,7 @@
 /** 聚焦标题栏的创建入口与创建弹窗内容，三个入口共用控制器。 */
 import { useState, useSyncExternalStore } from "react";
 import type { FilmSetConversionModelCandidate, FilmSetConversionSettings, FilmSetConversionSourceKind, ServerCanvas } from "@woohaa3/contracts";
-import { AssistantComposer, AssistantDeliverySelection, Button, FilmIcon, type AgentConversationService } from "@woohaa3/frontend/extension-api";
+import { AssistantComposer, AssistantDeliverySelection, AssistantToolbar, Button, FilmIcon, type AgentConversationService } from "@woohaa3/frontend/extension-api";
 import { type FilmSetConversionController } from "./controller.js";
 import { resolveFilmSetConversionAvailability } from "./view.js";
 import type { FilmSetConversionPreferenceStore } from "./preference.js";
@@ -48,25 +48,19 @@ export function FilmSetConversionSettingsPanel(props: {
 }) {
   const [validAssistant, setValidAssistant] = useState(false);
   const validModel = Boolean(props.draft.modelKey) && validAssistant;
+  const submit = <Button tone="primary" loading={props.busy} disabled={props.disabled || !validModel} onClick={props.onStart}>创建片场</Button>;
   return <div className="film-set-conversion-settings" data-source-kind={props.kind}>
     <AssistantComposer className="film-set-conversion-settings__prompt" rows={6}
       placeholder="描述希望生成的场景，或修改默认提示词。留空使用内置提示词。"
       value={props.draft.instruction ?? ""} disabled={props.busy}
       onChange={instruction => props.onDraftChange({ ...props.draft, instruction })}
       onSubmit={() => { if (!props.disabled && !props.busy && validModel) props.onStart(); }} />
-    <div className="film-set-conversion-settings__footer assistant-creation-controls">
-      <div className="film-set-conversion-settings__model">
+    <div className="film-set-conversion-settings__footer">
         {props.assistant ? <AssistantDeliverySelection service={props.assistant} candidates={props.models} sourceKind={props.kind} value={props.draft}
-          disabled={props.busy} onChange={props.onDraftChange} onValidityChange={setValidAssistant} onManage={props.openConfigureModel} /> : <span>助手会话服务尚未就绪</span>}
-      </div>
-      <Button tone="primary" loading={props.busy} disabled={props.disabled || !validModel}
-        onClick={props.onStart}>创建片场</Button>
+          disabled={props.busy} onChange={props.onDraftChange} onValidityChange={setValidAssistant} onManage={props.openConfigureModel}
+          onRefresh={props.onRefreshModels} submit={submit} /> : <AssistantToolbar disabled={props.busy} onManage={props.openConfigureModel} onRefresh={props.onRefreshModels} submit={submit} notice={<p>助手会话服务尚未就绪</p>} />}
     </div>
-    <div className="assistant-creation-recovery">
-      {props.onRefreshModels ? <button type="button" disabled={props.busy || !props.modelsLoaded} onClick={props.onRefreshModels}>刷新助手</button> : null}
-      {props.openConfigureModel ? <button type="button" disabled={props.busy} onClick={props.openConfigureModel}>管理助手</button> : null}
-      <span>Ctrl / ⌘ + Enter 创建</span>
-    </div>
+    <p className="film-set-conversion-settings__hint">Ctrl / ⌘ + Enter 创建</p>
     {props.error ? <div className="film-set-conversion-settings__error" data-testid="film-set-conversion-settings-error">
       <span>{props.error}</span>{props.onRefreshModels ? <Button size="sm" tone="neutral" disabled={props.busy} onClick={props.onRefreshModels}>重新加载模型</Button> : null}
     </div> : null}

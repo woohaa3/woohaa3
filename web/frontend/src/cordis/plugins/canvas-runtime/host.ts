@@ -51,6 +51,22 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private readonly viewportListeners = new Set<() => void>();
   private readonly modelFocusListeners = new Set<() => void>();
   private viewportRevision = 0;
+  private sceneRevision = 0;
+  private sceneNotificationQueued = false;
+  private readonly sceneListeners = new Set<() => void>();
+  sceneVersion = (): number => this.sceneRevision;
+  subscribeScene = (listener: () => void): (()=>void) => { this.sceneListeners.add(listener);return ()=>{this.sceneListeners.delete(listener);}; };
+  private sceneSubmitted = (): void => {
+    this.sceneRevision++;
+    // Queries may flush pending interaction work during a consumer's render.
+    // Publish after that stack and coalesce multiple submissions in the same turn.
+    if (this.sceneNotificationQueued || this.disposed) return;
+    this.sceneNotificationQueued = true;
+    queueMicrotask(() => {
+      this.sceneNotificationQueued = false;
+      if (!this.disposed) for (const listener of this.sceneListeners) listener();
+    });
+  };
   private ghosts: GhostRenderNode[] = [];
   private previews = new Map<string, string>();
   /** 当前模型聚焦瞬时投影（浏览器本地；不进 ServerCanvas/命令）。 */
@@ -554,6 +570,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       buildAttachInteractionOptions({
         canvas,
         options: this.options,
+        onSceneSubmitted: this.sceneSubmitted,
         textureSync,
         videoSessions,
         compositeAssetMediaSessions,
@@ -619,6 +636,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       compositeAssetMediaSessions.dispose();
       this.compositeAssetMediaSessionsInstance = null;
       if (this.controllerInstance === controller) this.controllerInstance = null;
+      this.sceneSubmitted();
       this.modelFocus = null;
       this.modelFocusTargetsOverride = null;
       this.modelEditor = null;
@@ -649,6 +667,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.publish({ phase: "booting", error: null });
     this.listeners.clear();
     this.viewportListeners.clear();
+    this.sceneListeners.clear();
   }
 
   private publish(status: CanvasRuntimeStatus): void {

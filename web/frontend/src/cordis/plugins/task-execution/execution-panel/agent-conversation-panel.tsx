@@ -27,6 +27,8 @@ import { assistantInputController } from "../../../services/assistant-execution/
 import { assistantConversationPort } from "../../../services/assistant-execution/conversation-port.js";
 import type { AgentConversationSubmitInput, AgentConversationSubmitResult } from "../../../contract/agent-conversation.js";
 import { AssistantComposer } from "../../../ui/assistant-execution/composer.js";
+import { AssistantToolbar } from "../../../ui/assistant-execution/toolbar.js";
+import { Button } from "../../../../shared/ui/Button.js";
 import { AssistantModelSelector } from "../../../ui/assistant-execution/model-selector.js";
 import { agentDirectory } from "../../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, assistantSelectionMemory, rememberAssistantPreference } from "../../../services/assistant-execution/selection.js";
@@ -89,6 +91,7 @@ export type AgentConversationPanelProps = {
   nodeId?: string;
   /** 受控收起：恢复合法来源（生成面板）或关闭详情。 */
   onClose: () => void;
+  onManageAssistant?: () => void;
   /** 宿主会话 service（读模型 + 讨论回合）。 */
   service: AgentConversationServiceHandle;
   /**
@@ -431,26 +434,21 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
       </div>
 
       <form className="agent-detail__reply" onSubmit={submitReply}>
-        {replyConnectionId ? <div className="agent-detail__actions">
-          <AssistantModelSelector label="选择助手" model={replyConnectionId} options={directoryView.connections.map(connection => ({ value: connection.connectionId, label: connection.name, detail: connection.reason ?? undefined }))}
-            open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)} onChange={id => void chooseConnection(id)} />
-          <AssistantModelSelector label="选择助手模型" model={replyModel} options={replyModels.map(model => ({ value: model.id, label: model.label }))}
-            open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={input.busy || turnActive || Boolean(input.pending) || toolDefault} keepOpenOnModelSelect
-            onChange={model => { controller.edit({ models: { ...input.draft.models, [modelKey]: model }, efforts: { ...input.draft.efforts, [modelKey]: "" } }); rememberReply(model, ""); }}
-            variant={modelSelection.supportedEfforts.length ? { value: replyEffort, options: [{ value: "", label: "默认 Variant" }, ...modelSelection.supportedEfforts.map(value => ({ value, label: value }))],
-              onChange: effort => { controller.edit({ efforts: { ...input.draft.efforts, [modelKey]: effort as typeof replyEffort } }); rememberReply(replyModel, effort as typeof replyEffort); } } : undefined} />
-        </div> : null}
-        {selectionReason ? <p className="agent-detail__reply-error">{selectionReason}</p> : null}
         <AssistantComposer className="agent-detail__reply-input" rows={2}
           placeholder="继续讨论"
           value={draft} onChange={setDraft} disabled={!detail || input.busy || turnActive || switchingConnection} onSubmit={() => submitReply()} />
-        <button
-          type="submit"
-          className="agent-detail__reply-send"
-          disabled={input.busy || draft.trim() === "" || turnActive || Boolean(selectionReason && !input.pending)}
-        >
-          发送
-        </button>
+        <AssistantToolbar disabled={input.busy || switchingConnection || turnActive} refreshing={Boolean(directoryView.loadingMessage)}
+          onRefresh={() => void directory.load(true)} onManage={props.onManageAssistant}
+          assistant={replyConnectionId ? <AssistantModelSelector label="选择助手" model={replyConnectionId} options={directoryView.connections.map(connection => ({ value: connection.connectionId, label: connection.name, detail: connection.reason ?? undefined }))}
+            open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)} onChange={id => void chooseConnection(id)} />
+            : undefined}
+          parameters={replyConnectionId ? <AssistantModelSelector label="选择助手模型" model={replyModel} options={replyModels.map(model => ({ value: model.id, label: model.label }))}
+            open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={input.busy || turnActive || Boolean(input.pending) || toolDefault} keepOpenOnModelSelect
+            onChange={model => { controller.edit({ models: { ...input.draft.models, [modelKey]: model }, efforts: { ...input.draft.efforts, [modelKey]: "" } }); rememberReply(model, ""); }}
+            variant={modelSelection.supportedEfforts.length ? { value: replyEffort, options: [{ value: "", label: "默认 Variant" }, ...modelSelection.supportedEfforts.map(value => ({ value, label: value }))],
+              onChange: effort => { controller.edit({ efforts: { ...input.draft.efforts, [modelKey]: effort as typeof replyEffort } }); rememberReply(replyModel, effort as typeof replyEffort); } } : undefined} /> : undefined}
+          submit={<Button type="submit" tone="primary" disabled={input.busy || draft.trim() === "" || turnActive || Boolean(selectionReason && !input.pending)}>发送</Button>} />
+        {selectionReason ? <p className="agent-detail__reply-error">{selectionReason}</p> : null}
         {input.pending ? <button type="button" disabled={input.busy} onClick={() => void controller.query(port)}>核对原请求</button> : null}
         {input.notice ? <p className="agent-detail__reply-error">{input.notice}</p> : null}
         {replyError ? (

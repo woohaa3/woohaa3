@@ -1,3 +1,4 @@
+import { createExtensionAssistants } from "./extensions/extension-assistants.js";
 import { CanvasCreationStore } from "./repository/canvas-creation-store.js";
 import { CanvasCreationService } from "./extensions/canvas-creation-service.js";
 /**
@@ -275,7 +276,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
 
   // 公共 Context 的受限服务 facade：按插件 principal 裁剪；插件拿不到服务令牌。
   // 统一后端可注入进程内 facade（servicesFor）；缺省用网络客户端 facade（保持既有行为）。
-  const servicesFor = options.servicesFor ?? ((extensionId: string, configVersion?: number): ApplicationExtensionServices => {
+  const baseServicesFor = options.servicesFor ?? ((extensionId: string, configVersion?: number): ApplicationExtensionServices => {
     const committedVersion = configVersion ?? extensionConfigStore.get(extensionId)?.configVersion ?? 0;
     const principal: ApplicationExtensionPrincipal = {
       extensionId,
@@ -312,6 +313,11 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
           }
     };
   });
+
+  const servicesFor = (extensionId: string, configVersion?: number): ApplicationExtensionServices => {
+    const services = baseServicesFor(extensionId, configVersion);
+    return { ...services, assistants: createExtensionAssistants(extensionId, services, () => agentConversations) };
+  };
 
   const extensionHost = options.host ?? createApplicationExtensionHost({
     logger: options.logger,

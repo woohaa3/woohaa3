@@ -114,6 +114,8 @@ export function isAgentReasoningEffort(value: unknown): value is AgentReasoningE
 
 /** 一次回合的显式目标快照（camera/clip/item 使用稳定 id，不用索引）。 */
 export type AgentTargetSnapshot = {
+  /** Trusted structured runner identity; ordinary dispatch must never execute this turn. */
+  structuredInputHash?: string;
   /** Trusted host delivery association; never accepted from a browser entry intent. */
   delivery?: { purpose: "film-set-conversion"; domainRequestId: string; attemptId: string };
   canvasId: string;
