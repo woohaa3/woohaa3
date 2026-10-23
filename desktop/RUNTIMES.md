@@ -110,3 +110,8 @@ Codex/Claude/原生工具启动本地程序；DSH 用内置 Node 启动隔离闭
 先上传组件归档，最后提交 `catalog.signed.json`（含同一对象中的清单与签名）。运行时会优先读取它，只有 404 才回退旧双文件清单。所有 runtime 产物成功上传后再发布 App/更新索引。已经发布的平台/发行版本目录不能替换为不同内容；改动后使用新 App 版本，旧目录保留。发布期间不要让外部上传插件并发写同一目录。
 
 发行版本仅隔离下载入口；组件版本、验证规则、用户数据目录缓存均不变。App 更新但组件版本未变时继续复用已安装组件。日常开发仍使用本地源码/依赖。
+
+
+### Windows tar/gzip 安装一致性
+
+Windows 使用 GNU tar 回退时，压缩/解压必须使用同一安装目录的 `gzip.exe`。构建工具会把 tar 所在目录置于其子进程 PATH 首位，避免 MSYS2 tar 误用 Git for Windows gzip 导致 `cygheap base mismatch`。若缺少同目录 gzip，补齐对应工具安装；不要根据通用错误提示删除系统 DLL。Windows 自带 bsdtar 不需要外部 gzip。
