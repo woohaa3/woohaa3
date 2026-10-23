@@ -466,7 +466,10 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     queryGizmoHit: (input) => {
       if (!module.query_gizmo_hit) return null;
       try {
-        return parseGizmoResult(module.query_gizmo_hit(encodeGizmoRequest(input)));
+        const before = generation;
+        let result = parseGizmoResult(module.query_gizmo_hit(encodeGizmoRequest(input, interactionGeneration)));
+        if (result?.reason === "stale") result = parseGizmoResult(module.query_gizmo_hit(encodeGizmoRequest(input, interactionGeneration)));
+        return before === generation && (!result?.available || result.generation === interactionGeneration) ? result : null;
       } catch {
         return null;
       }

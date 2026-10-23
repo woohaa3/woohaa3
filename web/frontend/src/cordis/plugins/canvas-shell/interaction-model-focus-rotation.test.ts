@@ -7,7 +7,7 @@ import { focusHarness, modelCenter } from "./test-support/model-focus-harness.js
 installSharedSession();
 
 const shotEditor: BevyModelEditor = {
-  version: "woohaa-model-editor-v1",
+  version: "woohaa-model-editor-v2",
   nodeId: "m1",
   toolMode: "camera",
   cameraId: "cam",

@@ -252,6 +252,7 @@ export type InteractionControllerOptions = {
    * 缺省/返回 null 时不绘制编辑 gizmo。由宿主从编辑会话与聚焦目标派生。
    */
   getModelEditor?: () => BevyModelEditor | null;
+  onGizmoFeedback?: (feedback: import("@woohaa3/contracts").GizmoFeedback) => void;
   /**
    * 活动动画节点播放瞬时投影
    * （change: 2026-10-05-bind-model-animation-to-shots，任务 4.1）。
@@ -288,6 +289,7 @@ export type InteractionControllerOptions = {
     /** 命中选中对象时开始拖动；返回是否已开始。 */
     begin(point: { x: number; y: number }, shift: boolean): boolean;
     move(point: { x: number; y: number }): void;
+    hover?(point: { x: number; y: number } | null): void;
     /** 结束并提交一次对象摆放操作。 */
     end(): void;
     /** 取消（丢弃 preview，不提交）。 */

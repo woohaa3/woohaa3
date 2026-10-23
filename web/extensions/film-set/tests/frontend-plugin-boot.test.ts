@@ -80,10 +80,12 @@ function bootFilmSet(canvas: ServerCanvas | null = null, failAt?: string): { ctx
   } as never);
   ctx.provide("canvasSession" as never, {
     isWritable: () => true,
+    subscribe: () => () => undefined,
     submitCommands: () => ({ ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } })
   } as never);
   ctx.provide("canvasRuntime" as never, {
     modelFocusMode: () => "edit",
+    runtime: () => ({generation: () => 1}), subscribe: () => () => undefined,
     pauseAnimation: () => undefined,
     controller: () => ({ invalidate: () => undefined, cancelTransientGesture: () => undefined }),
     modelFocusProjection: () => null,

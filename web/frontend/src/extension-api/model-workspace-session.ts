@@ -93,6 +93,7 @@ export type ModelEditorSessionDeps = {
 };
 
 export class ModelEditorSession {
+  private gestureCamera: string | null = null;
   private state: ModelEditorSessionState = { ...INITIAL };
   private readonly listeners = new Set<() => void>();
   /**
@@ -254,7 +255,8 @@ export class ModelEditorSession {
   /** 开始一次镜头 pose 手势：冻结时只记录 preview（含画幅与仰角），不写规范状态。 */
   beginPose(): void {
     const selected = this.selectedCamera();
-    if (!selected) return;
+    if (!selected || !this.deps.isWritable()) return;
+    this.gestureCamera = JSON.stringify(selected);
     this.state = {
       ...this.state,
       posePreview: {
@@ -284,7 +286,9 @@ export class ModelEditorSession {
     const selected = this.selectedCamera();
     const nodeId = this.state.nodeId;
     this.state = { ...this.state, posePreview: null };
-    if (!preview || !selected || !nodeId) {
+    const valid = this.deps.isWritable() && this.gestureCamera === JSON.stringify(selected);
+    this.gestureCamera = null;
+    if (!preview || !selected || !nodeId || !valid) {
       this.emit();
       return;
     }
@@ -390,7 +394,8 @@ export class ModelEditorSession {
    */
   beginFocus(): boolean {
     const selected = this.selectedCamera();
-    if (!selected) return false;
+    if (!selected || !this.deps.isWritable()) return false;
+    this.gestureCamera = JSON.stringify(selected);
     const offset = modelCameraFocusOffset(selected);
     this.state = { ...this.state, focusPreview: { ...offset }, posePreview: null };
     this.emit();
@@ -413,7 +418,9 @@ export class ModelEditorSession {
     const selected = this.selectedCamera();
     const nodeId = this.state.nodeId;
     this.state = { ...this.state, focusPreview: null };
-    if (!preview || !selected || !nodeId) {
+    const valid = this.deps.isWritable() && this.gestureCamera === JSON.stringify(selected);
+    this.gestureCamera = null;
+    if (!preview || !selected || !nodeId || !valid) {
       this.emit();
       return;
     }
@@ -441,6 +448,15 @@ export class ModelEditorSession {
   commitForCapture(): void {
     if (this.state.posePreview) this.endPose();
     if (this.state.focusPreview) this.endFocus();
+  }
+
+  /** Canonical changes invalidate a frozen gesture; unrelated cameras remain editable. */
+  reconcileGesture(): void {
+    if (!this.state.posePreview && !this.state.focusPreview) return;
+    if (this.deps.isWritable() && this.gestureCamera === JSON.stringify(this.selectedCamera())) return;
+    this.gestureCamera = null;
+    this.state = { ...this.state, posePreview: null, focusPreview: null };
+    this.emit();
   }
 
   /** 当前生效的镜头 focusOffset（preview 优先）。 */

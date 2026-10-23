@@ -26,10 +26,7 @@ fn test_app() -> App {
 #[test]
 fn multiple_rigs_coexist_with_stable_identity() {
     let mut app = test_app();
-    let config_a = ShotCameraConfig::from_bounds(Aabb::new(
-        Vec3::splat(-1.0),
-        Vec3::splat(1.0),
-    ));
+    let config_a = ShotCameraConfig::from_bounds(Aabb::new(Vec3::splat(-1.0), Vec3::splat(1.0)));
     let config_b = ShotCameraConfig::from_bounds(Aabb::new(
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(4.0, 4.0, 4.0),
@@ -51,10 +48,8 @@ fn multiple_rigs_coexist_with_stable_identity() {
 #[test]
 fn invalid_config_is_rejected_without_partial_resources() {
     let mut app = test_app();
-    let mut config = ShotCameraConfig::from_bounds(Aabb::new(
-        Vec3::new(f32::NAN, 0.0, 0.0),
-        Vec3::splat(1.0),
-    ));
+    let mut config =
+        ShotCameraConfig::from_bounds(Aabb::new(Vec3::new(f32::NAN, 0.0, 0.0), Vec3::splat(1.0)));
     config.preview = Some(ShotCameraPreview::new(640, 360));
     let entity = app.world_mut().commands().spawn_shot_camera(config);
     app.update();
@@ -133,16 +128,37 @@ fn removing_preview_component_releases_output() {
 
 #[test]
 fn despawn_rig_removes_orbit_gizmos() {
-    use woohaa_bevy_canvas::shot_camera::{PreviewTarget, ShotGizmo, ShotGizmoSelection, ShotPreviewCamera};
+    use woohaa_bevy_canvas::shot_camera::{
+        PreviewTarget, ShotGizmo, ShotGizmoSelection, ShotPreviewCamera,
+    };
     let mut app = test_app();
     let mut config = ShotCameraConfig::from_bounds(Aabb::new(Vec3::splat(-1.0), Vec3::splat(1.0)));
-    config.preview = Some(ShotCameraPreview::new(320, 180).with_policy(woohaa_bevy_canvas::shot_camera::PreviewUpdatePolicy::Continuous).with_target(PreviewTarget::Window));
+    config.preview = Some(
+        ShotCameraPreview::new(320, 180)
+            .with_policy(woohaa_bevy_canvas::shot_camera::PreviewUpdatePolicy::Continuous)
+            .with_target(PreviewTarget::Window),
+    );
     let entity = app.world_mut().commands().spawn_shot_camera(config);
-    app.world_mut().resource_mut::<ShotGizmoSelection>().entities.push(entity);
+    app.world_mut()
+        .resource_mut::<ShotGizmoSelection>()
+        .entities
+        .push(entity);
+    app.world_mut().resource_mut::<ShotGizmoSelection>().view =
+        woohaa_bevy_canvas::gizmo_layout::GizmoView::orbit(
+            Vec3::ZERO,
+            0.7,
+            -0.5,
+            20.0,
+            Vec2::new(1000.0, 800.0),
+            1.0,
+        );
     app.update();
     app.update();
     let mut gizmos = app.world_mut().query::<&ShotGizmo>();
-    assert!(gizmos.iter(app.world()).count() > 0, "选中 rig 应生成轨道环");
+    assert!(
+        gizmos.iter(app.world()).count() > 0,
+        "选中 rig 应生成轨道环"
+    );
     let mut cameras = app.world_mut().query::<&ShotPreviewCamera>();
     assert_eq!(cameras.iter(app.world()).count(), 1);
     app.world_mut().entity_mut(entity).despawn();
@@ -178,21 +194,42 @@ fn despawn_rig_releases_registry_entry() {
 #[test]
 fn edit_state_machine_orbit_commit_and_cancel() {
     let mut pose = ShotCameraPose::new(0.3, 10.0);
-    let mut session = begin_edit(Entity::from_raw_u32(1).unwrap(), ShotCameraAxis::Orbit, None, pose, 5.0);
+    let mut session = begin_edit(
+        Entity::from_raw_u32(1).unwrap(),
+        ShotCameraAxis::Orbit,
+        None,
+        pose,
+        5.0,
+    );
     let event = update_orbit(&mut session, 120.0, 800.0);
-    assert!(matches!(event, woohaa_bevy_canvas::shot_camera::ShotEditEvent::Updated { moved, .. } if moved));
+    assert!(
+        matches!(event, woohaa_bevy_canvas::shot_camera::ShotEditEvent::Updated { moved, .. } if moved)
+    );
     let committed = commit_edit(&session).expect("有净变化应发布 commit");
-    if let woohaa_bevy_canvas::shot_camera::ShotEditEvent::Committed { pose: next, .. } = committed {
+    if let woohaa_bevy_canvas::shot_camera::ShotEditEvent::Committed { pose: next, .. } = committed
+    {
         pose = next;
     }
     assert!(pose.azimuth > 0.9, "orbit 应推进 azimuth");
 
     // 无净变化的 commit 不发布。
-    let same = begin_edit(Entity::from_raw_u32(1).unwrap(), ShotCameraAxis::Orbit, None, pose, 5.0);
+    let same = begin_edit(
+        Entity::from_raw_u32(1).unwrap(),
+        ShotCameraAxis::Orbit,
+        None,
+        pose,
+        5.0,
+    );
     assert!(commit_edit(&same).is_none());
 
     // cancel 恢复起始 pose。
-    let mut cancelled = begin_edit(Entity::from_raw_u32(1).unwrap(), ShotCameraAxis::Orbit, None, pose, 5.0);
+    let mut cancelled = begin_edit(
+        Entity::from_raw_u32(1).unwrap(),
+        ShotCameraAxis::Orbit,
+        None,
+        pose,
+        5.0,
+    );
     let _ = update_distance(&mut cancelled, 50.0, 600.0);
     if let woohaa_bevy_canvas::shot_camera::ShotEditEvent::Cancelled { pose: restored, .. } =
         cancel_edit(&cancelled)
@@ -226,20 +263,20 @@ fn disabled_editable_rejects_commands() {
     app.world_mut()
         .resource_mut::<ShotEditCommands>()
         .push(entity, ShotEditCommand::BeginOrbit);
-    app.world_mut()
-        .resource_mut::<ShotEditCommands>()
-        .push(entity, ShotEditCommand::UpdateOrbit {
+    app.world_mut().resource_mut::<ShotEditCommands>().push(
+        entity,
+        ShotEditCommand::UpdateOrbit {
             delta_x: 200.0,
             surface_width: 800.0,
-        });
+        },
+    );
     app.update();
     let after = *app.world().get::<ShotCameraPose>(entity).unwrap();
-    assert!((before.azimuth - after.azimuth).abs() < 1e-9, "只读 rig 不应被编辑");
-    assert!(app
-        .world()
-        .resource::<ShotEditSessions>()
-        .active
-        .is_empty());
+    assert!(
+        (before.azimuth - after.azimuth).abs() < 1e-9,
+        "只读 rig 不应被编辑"
+    );
+    assert!(app.world().resource::<ShotEditSessions>().active.is_empty());
 }
 
 #[test]
@@ -299,10 +336,21 @@ fn capture_result_generation_matches_request() {
 #[test]
 fn resolve_matches_hand_computed_default() {
     let aabb = Aabb::new(Vec3::splat(-1.0), Vec3::splat(1.0));
-    let pose = resolve_shot_camera(&aabb, 0.0, std::f32::consts::FRAC_PI_4, 100.0, 16.0 / 9.0, Vec3::ZERO).unwrap();
+    let pose = resolve_shot_camera(
+        &aabb,
+        0.0,
+        std::f32::consts::FRAC_PI_4,
+        100.0,
+        16.0 / 9.0,
+        Vec3::ZERO,
+    )
+    .unwrap();
     let fit = shot_fit_distance(3f32.sqrt(), 16.0 / 9.0);
     let (min, max) = shot_distance_bounds(fit);
-    assert!(pose.distance >= min - 1e-9 && pose.distance <= max + 1e-9, "distance 落在合法范围");
+    assert!(
+        pose.distance >= min - 1e-9 && pose.distance <= max + 1e-9,
+        "distance 落在合法范围"
+    );
     assert!(pose.position.y > 0.0, "默认 45° 仰角应位于 focus 上方");
     assert!((pose.elevation - std::f32::consts::FRAC_PI_4).abs() < 1e-9);
     assert!(pose.fov > 0.0 && pose.fov < std::f32::consts::PI);
@@ -371,8 +419,14 @@ fn capture_request_for_window_target_rig_creates_offscreen_target() {
     let world = app.world_mut();
     let mut queue = world.remove_resource::<ShotCaptureQueue>().unwrap();
     let mut results = world.remove_resource::<ShotCaptureResults>().unwrap();
-    let (_request_id, outcome) =
-        woohaa_bevy_canvas::shot_camera::request_capture(&mut queue, &mut results, entity, 1280, 720, generation);
+    let (_request_id, outcome) = woohaa_bevy_canvas::shot_camera::request_capture(
+        &mut queue,
+        &mut results,
+        entity,
+        1280,
+        720,
+        generation,
+    );
     world.insert_resource(queue);
     world.insert_resource(results);
     assert_eq!(outcome, ShotCaptureEnqueue::Accepted);
@@ -405,7 +459,9 @@ fn preview_budget_limits_updates_per_frame() {
 
 #[test]
 fn caller_viewport_rejects_non_positive_size() {
-    use woohaa_bevy_canvas::shot_camera::{CallerViewport, resolve_caller_viewport, viewport_from_css};
+    use woohaa_bevy_canvas::shot_camera::{
+        CallerViewport, resolve_caller_viewport, viewport_from_css,
+    };
     assert_eq!(resolve_caller_viewport(None), CallerViewport::Unspecified);
     assert!(matches!(
         resolve_caller_viewport(Some(Vec4::new(0.0, 0.0, 800.0, 600.0))),
@@ -482,9 +538,7 @@ fn window_target_preview_creates_camera_without_offscreen_image() {
     use woohaa_bevy_canvas::shot_camera::{PreviewTarget, ShotCameraViewMask};
     let mut app = test_app();
     let mut config = ShotCameraConfig::from_bounds(Aabb::new(Vec3::splat(-1.0), Vec3::splat(1.0)));
-    config.preview = Some(
-        ShotCameraPreview::new(640, 360).with_target(PreviewTarget::Window),
-    );
+    config.preview = Some(ShotCameraPreview::new(640, 360).with_target(PreviewTarget::Window));
     config.view_mask = ShotCameraViewMask::default();
     let entity = app.world_mut().commands().spawn_shot_camera(config);
     app.update();

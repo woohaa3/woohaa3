@@ -20,6 +20,7 @@ import { projectObjectPresentation } from "../../preview/browser/object-presenta
 import { sceneCameraWriter } from "../../authoring/browser/scene-camera.js";
 import { contributionLifetime } from "./contributions.js";
 import { createFilmSetNodeData } from "../../state/shared/node.js";
+import { gizmoParentBasis } from "../../authoring/browser/gizmo-constraint.js";
 
 export function filmSetExtension() {
   return defineExtensionPlugin<FilmSetContext>(ctx => {
@@ -61,9 +62,10 @@ export function filmSetExtension() {
         },
         gizmo(nodeId) {
           const state = feature.session.getState();
-          if (state.nodeId !== nodeId || !state.selectedItemId) return null;
+          if (state.nodeId !== nodeId || !state.selectedItemId || playback.getSnapshot().preview || ctx.canvasRuntime.modelFocusMode() === "history" || !ctx.canvasSession.isWritable()) return null;
           const entry = ctx.canvasRuntime.queryCompositeAssetItemBounds(nodeId).find(item => item.itemId === state.selectedItemId);
-          return entry ? { version: MODEL_EDITOR_VERSION, nodeId, toolMode: "object", focus: entry.center, radius: Math.max(0.5, entry.radius) } : null;
+          return entry ? { version: MODEL_EDITOR_VERSION, nodeId, toolMode: "object", objectTool: state.tool, itemId: state.selectedItemId,
+            parentBasis: gizmoParentBasis(entry.worldToLocal, entry.yaw, entry.unit), feedback: state.feedback, focus: entry.center, radius: entry.radius } : null;
         },
         readCameras(_nodeId, data) {
           const decoded = decodeFilmSetNodeData(data);

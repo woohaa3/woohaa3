@@ -79,37 +79,22 @@ export function createQueryBridge(currentGeneration: () => number): QueryBridge 
 }
 
 /** gizmo 命中请求编码（与 Rust `gizmo_query_json` 契约同构）。 */
-export function encodeGizmoRequest(input: GizmoQueryInput): string {
+export function encodeGizmoRequest(input: GizmoQueryInput, generation = 0): string {
   const editor: BevyModelEditor | null = input.editor;
   return JSON.stringify({
     kind: input.kind,
-    toolMode: editor?.toolMode ?? "model",
-    ...(editor?.cameraTool ? { cameraTool: editor.cameraTool } : {}),
+    generation,
+    editor,
     x: input.point.x,
     y: input.point.y,
     width: input.surface.width,
     height: input.surface.height,
-    ...(editor?.radius !== undefined ? { radius: editor.radius } : {}),
-    ...(editor?.focus ? { focus: editor.focus } : {}),
-    ...(editor?.shot
-      ? {
-          shot: {
-            position: editor.shot.position,
-            focus: editor.shot.focus,
-            fov: editor.shot.fov
-          }
-        }
-      : {}),
-    ...(input.projection
-      ? {
-          projection: {
-            target: input.projection.target,
-            yaw: input.projection.yaw,
-            pitch: input.projection.pitch,
-            distance: input.projection.distance
-          }
-        }
-      : {})
+    projection: input.projection ? {
+      target: input.projection.target,
+      yaw: input.projection.yaw,
+      pitch: input.projection.pitch,
+      distance: input.projection.distance
+    } : null
   });
 }
 

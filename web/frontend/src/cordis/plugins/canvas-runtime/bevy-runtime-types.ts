@@ -150,6 +150,10 @@ export type GizmoHitResult = {
   reason?: string | null;
   handle: string | null;
   constraint?: AxisDragConstraint | null;
+  yawConstraint?: { origin: [number, number, number]; u: [number, number, number]; v: [number, number, number]; normal: [number, number, number]; startAngle: number; mode: "plane" | "tangent"; direction: [number, number]; radiansPerPixel: number } | null;
+  layoutId?: string | null;
+  generation?: number;
+  epoch?: number;
 };
 
 /** 稳定查询失败原因：未就绪 / generation 过期 / 运行时缺新导出。 */

@@ -1,113 +1,87 @@
-//! gizmo 投影与命中的几何单元测试（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
-
 use super::*;
-use super::*;
+use crate::protocol::Scene;
+use serde_json::{Value, json};
 
-    const SURFACE: (f32, f32) = (1000.0, 800.0);
+fn fixture() -> Value {
+    json!({"version":"woohaa-model-editor-v2", "nodeId":"film", "toolMode":"object",
+        "objectTool":"move", "itemId":"item", "focus":[0,0,0], "radius":2,
+        "feedback":{"epoch":4}})
+}
+fn accept(editor: Value) -> Value {
+    let projection = json!({"version":"woohaa-model-focus-v1", "nodeId":"film", "target":[0,0,0],
+        "yaw":0, "pitch":0, "distance":6, "fov":MODEL_FOCUS_FOV});
+    let mut scene = Scene::default();
+    scene.nodes.push(
+        serde_json::from_value(json!({"id":"film","type":"composite-asset","x":0,"y":0,
+        "compositeAsset":{"x":0,"y":0,"width":100,"height":100,"itemRoots":{"item":"item-root"}}}))
+        .unwrap(),
+    );
+    scene.model_editor = Some(serde_json::from_value(editor.clone()).unwrap());
+    scene.model_focus = Some(serde_json::from_value(projection.clone()).unwrap());
+    scene.surface =
+        Some(serde_json::from_value(json!({"width":1000,"height":800,"pixelRatio":2})).unwrap());
+    let generation = crate::canvas_query::interaction::accept_scene(&scene);
+    accepted::accept_gizmo_scene(&scene);
+    json!({"kind":"object", "x":500,"y":350,"width":1000,"height":800,
+        "editor":editor,"projection":projection,"generation":generation})
+}
+fn query(request: &Value) -> Value {
+    serde_json::from_str(&gizmo_query_json(&request.to_string())).unwrap()
+}
 
-    #[test]
-    fn distance_to_segment_clamps() {
-        assert!((distance_to_segment((5.0, 3.0), (0.0, 0.0), (10.0, 0.0)) - 3.0).abs() < 1e-3);
-        assert!((distance_to_segment((-4.0, 0.0), (0.0, 0.0), (10.0, 0.0)) - 4.0).abs() < 1e-3);
+#[test]
+fn accepted_query_returns_css_constraint_and_rejects_stale_identity() {
+    let request = accept(fixture());
+    let hit = query(&request);
+    assert_eq!(hit["available"], true);
+    assert_eq!(hit["handle"], "y");
+    assert!(hit["constraint"]["worldPerPixel"].as_f64().unwrap() > 0.0);
+    assert!(hit["layoutId"].as_str().unwrap().len() == 16);
+    for (path, value) in [
+        ("itemId", json!("other")),
+        ("nodeId", json!("other")),
+        ("objectTool", json!("scale")),
+    ] {
+        let mut stale = request.clone();
+        stale["editor"][path] = value;
+        assert_eq!(query(&stale)["available"], false);
     }
-
-    #[test]
-    fn focus_projector_centers_target() {
-        let camera = FocusCamera {
-            target: [0.0, 0.0, 0.0],
-            yaw: 0.4,
-            pitch: 0.3,
-            distance: 6.0,
-        };
-        let project = focus_projector(camera, SURFACE, 0.6);
-        let screen = project(camera.target).expect("center visible");
-        assert!((screen.0 - 500.0).abs() < 1e-2);
-        assert!((screen.1 - 400.0).abs() < 1e-2);
-        // 相机前方沿视线的一点（target 与 camera 之间）也投影到画面中心。
-        let cam = camera.position();
-        let forward_point = [
-            cam[0] + (camera.target[0] - cam[0]) * 0.5,
-            cam[1] + (camera.target[1] - cam[1]) * 0.5,
-            cam[2] + (camera.target[2] - cam[2]) * 0.5,
-        ];
-        let mid = project(forward_point).expect("front point visible");
-        assert!((mid.0 - 500.0).abs() < 1e-2);
-        assert!((mid.1 - 400.0).abs() < 1e-2);
+    for field in ["generation", "width"] {
+        let mut stale = request.clone();
+        stale[field] = json!(0);
+        assert_eq!(query(&stale)["available"], false);
     }
-
-    #[test]
-    fn hit_focus_gizmo_picks_nearest_axis() {
-        let camera = FocusCamera {
-            target: [0.0, 0.0, 0.0],
-            yaw: 0.0,
-            pitch: 0.0,
-            distance: 6.0,
-        };
-        let geometry = focus_gizmo([0.0, 0.0, 0.0], 2.0);
-        let project = focus_projector(camera, SURFACE, 0.6);
-        // 指向 Y 轴端点屏幕位置的指针应命中 y。
-        let tip = project(geometry.y).unwrap();
-        let hit = hit_focus_gizmo(tip, &geometry, &project);
-        assert_eq!(hit.map(|(axis, _)| axis), Some("y"));
-    }
-
-    #[test]
-    fn focus_axis_constraint_matches_drag_delta() {
-        let camera = FocusCamera {
-            target: [0.0, 0.0, 0.0],
-            yaw: 0.5,
-            pitch: 0.3,
-            distance: 6.0,
-        };
-        let geometry = focus_gizmo([0.0, 0.0, 0.0], 2.0);
-        let project = focus_projector(camera, SURFACE, 0.6);
-        let constraint = focus_axis_constraint(&geometry, "x", &project).unwrap();
-        // 沿轴方向拖动 30px 的世界位移。
-        let delta = (constraint.direction.0 * 30.0, constraint.direction.1 * 30.0);
-        let origin = project(geometry.origin).unwrap();
-        let tip = project(geometry.x).unwrap();
-        let world = focus_axis_drag_world_delta(delta, origin, tip, geometry.axis_length).unwrap();
-        assert!((world - 30.0 * constraint.world_per_pixel).abs() < 1e-2);
-    }
-
-    #[test]
-    fn hit_shot_gizmo_origin_and_ring() {
-        let focus = [0.0, 0.0, 0.0];
-        let camera_position = [0.0, 3.0, 6.0];
-        let geometry = shot_gizmo(focus, camera_position, 2.0);
-        let project = shot_projector(focus, camera_position, 2.0, SURFACE);
-        let origin = project(camera_position).unwrap();
-        assert_eq!(hit_shot_gizmo(origin, &geometry, &project).map(|(h, _)| h), Some("shot-origin"));
-        // 距离段沿视线，正交投影下与相机原点重合；远离时未命中。
-        assert!(hit_shot_gizmo((50.0, 50.0), &geometry, &project).is_none());
-    }
-
-    #[test]
-    fn hit_shot_gizmo_elevation_ring() {
-        let focus = [0.0, 0.0, 0.0];
-        // 相机在水平方向上，使竖直半圆的方位径向为 +Z。
-        let camera_position = [0.0, 0.0, 6.0];
-        let geometry = shot_gizmo(focus, camera_position, 2.0);
-        let project = shot_projector(focus, camera_position, 2.0, SURFACE);
-        // 半圆上 45° 处的采样点（径向 +Z，抬高）。
-        let radius = 6.0_f32;
-        let point = [0.0, radius * (std::f32::consts::FRAC_PI_4).sin(), radius * (std::f32::consts::FRAC_PI_4).cos()];
-        let screen = project(point).unwrap();
-        assert_eq!(hit_shot_gizmo(screen, &geometry, &project).map(|(h, _)| h), Some("elevation-ring"));
-    }
-
-    /// 对象模式三轴 gizmo：命中 Y 轴并返回轴拖动约束（change: 2026-10-09）。
-    #[test]
-    fn object_gizmo_hit_returns_axis_and_constraint() {
-        let json = r#"{"kind":"object","x":500.0,"y":300.0,"width":1000.0,"height":800.0,"radius":2.0,"focus":[0.0,0.0,0.0],"projection":{"target":[0.0,0.0,0.0],"yaw":0.0,"pitch":0.0,"distance":6.0}}"#;
-        // 直接验证几何命中（Y 轴端点）。
-        let camera = FocusCamera { target: [0.0, 0.0, 0.0], yaw: 0.0, pitch: 0.0, distance: 6.0 };
-        let geometry = focus_gizmo([0.0, 0.0, 0.0], 2.0);
-        let project = focus_projector(camera, SURFACE, MODEL_FOCUS_FOV);
-        let tip = project(geometry.y).unwrap();
-        let hit = hit_focus_gizmo(tip, &geometry, &project);
-        assert_eq!(hit.map(|(axis, _)| axis), Some("y"));
-        // JSON 入口可用（中心命中至少返回 available）。
-        let out = query::gizmo_query_json(json);
-        assert!(out.contains("\"available\":true"));
-    }
+    let mut stale = request.clone();
+    stale["editor"]["feedback"]["epoch"] = json!(3);
+    assert_eq!(query(&stale)["reason"], "stale");
+    // Hover changes styling without changing accepted geometry identity.
+    let mut hover = request.clone();
+    hover["editor"]["feedback"]["hover"] = json!("y");
+    assert_eq!(query(&hover)["layoutId"], hit["layoutId"]);
+    accepted::accept_gizmo_scene(&Scene::default());
+    assert_eq!(query(&request)["available"], false);
+}
+#[test]
+fn tool_gates_and_both_transport_facades_share_query() {
+    let mut editor = fixture();
+    editor["toolMode"] = json!("model");
+    assert_eq!(query(&accept(editor))["available"], false);
+    let mut editor = fixture();
+    editor["objectTool"] = json!("yaw");
+    let mut request = accept(editor);
+    request["x"] = json!(550);
+    request["y"] = json!(400);
+    let hit = query(&request);
+    assert_eq!(hit["handle"], "yaw-ring");
+    assert_eq!(hit["yawConstraint"]["mode"], "tangent");
+    // Native opaque dispatcher and WASM export call the same facade.
+    let facade: Value =
+        serde_json::from_str(&crate::query_gizmo_hit(&request.to_string())).unwrap();
+    assert_eq!(facade, hit);
+    let mut editor = fixture();
+    editor["toolMode"] = json!("camera");
+    editor["cameraTool"] = json!("orbit");
+    let mut request = accept(editor);
+    request["kind"] = json!("focus");
+    assert_eq!(query(&request)["available"], false);
+}

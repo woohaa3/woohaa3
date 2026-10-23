@@ -502,7 +502,7 @@ fn parses_marquee() {
 
 #[test]
 fn parses_and_validates_model_editor() {
-    let json = r#"{"version":"woohaa-canvas-render-scene-v22","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v1","nodeId":"m1","toolMode":"camera","cameraTool":"orbit","cameraId":"cam-a","focus":[0,1,0],"radius":2.0,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0.4,"elevation":0.785,"distance":5.0,"aspect":"1:1"}}}"#;
+    let json = r#"{"version":"woohaa-canvas-render-scene-v23","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","cameraTool":"orbit","cameraId":"cam-a","focus":[0,1,0],"radius":2.0,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0.4,"elevation":0.785,"distance":5.0,"aspect":"1:1"}}}"#;
     let scene: Scene = parse(&with_theme(json));
     assert!(scene.validate().is_ok());
     let editor = scene.model_editor.as_ref().expect("editor");
@@ -510,10 +510,20 @@ fn parses_and_validates_model_editor() {
     assert_eq!(editor.camera_tool.as_deref(), Some("orbit"));
     assert_eq!(editor.shot.as_ref().unwrap().aspect, "1:1");
     // 缺省 aspect 兼容读取为 16:9。
-    let legacy = r#"{"version":"woohaa-canvas-render-scene-v22","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v1","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2.0,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0.4,"elevation":0.785,"distance":5.0}}}"#;
+    let legacy = r#"{"version":"woohaa-canvas-render-scene-v23","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2.0,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0.4,"elevation":0.785,"distance":5.0}}}"#;
     let scene: Scene = parse(&with_theme(legacy));
     assert!(scene.validate().is_ok());
-    assert_eq!(scene.model_editor.as_ref().unwrap().shot.as_ref().unwrap().aspect, "16:9");
+    assert_eq!(
+        scene
+            .model_editor
+            .as_ref()
+            .unwrap()
+            .shot
+            .as_ref()
+            .unwrap()
+            .aspect,
+        "16:9"
+    );
 }
 
 #[test]
@@ -521,7 +531,7 @@ fn accepts_expanded_shot_aspects() {
     // 与 Web `MODEL_CAMERA_ASPECTS` 并集一致：每个画幅都能通过边界校验并解析出正比例。
     for &aspect in crate::protocol::SUPPORTED_SHOT_ASPECTS {
         let json = format!(
-            r#"{{"version":"woohaa-canvas-render-scene-v22","nodes":[],"edges":[],"modelEditor":{{"version":"woohaa-model-editor-v1","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0,"elevation":0.785,"distance":5,"aspect":"{aspect}"}}}}}}"#
+            r#"{{"version":"woohaa-canvas-render-scene-v23","nodes":[],"edges":[],"modelEditor":{{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0,"elevation":0.785,"distance":5,"aspect":"{aspect}"}}}}}}"#
         );
         let scene: Scene = parse(&with_theme(&json));
         assert!(scene.validate().is_ok(), "aspect {aspect} 应通过校验");
@@ -538,23 +548,23 @@ fn rejects_invalid_model_editor() {
     let parsed: Scene = parse(&with_theme(bad));
     assert!(parsed.validate().is_err());
     // 未知工具模式。
-    let bad_mode = r#"{"version":"woohaa-canvas-render-scene-v22","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v1","nodeId":"m1","toolMode":"scale","focus":[0,1,0],"radius":2}}"#;
+    let bad_mode = r#"{"version":"woohaa-canvas-render-scene-v23","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"scale","focus":[0,1,0],"radius":2}}"#;
     let parsed: Scene = parse(&with_theme(bad_mode));
     assert!(parsed.validate().is_err());
     // 未知镜头工具 / 未知画幅。
-    let bad_tool = r#"{"version":"woohaa-canvas-render-scene-v22","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v1","nodeId":"m1","toolMode":"camera","cameraTool":"roll","focus":[0,1,0],"radius":2}}"#;
+    let bad_tool = r#"{"version":"woohaa-canvas-render-scene-v23","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","cameraTool":"roll","focus":[0,1,0],"radius":2}}"#;
     let parsed: Scene = parse(&with_theme(bad_tool));
     assert!(parsed.validate().is_err());
-    let bad_aspect = r#"{"version":"woohaa-canvas-render-scene-v22","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v1","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0,"elevation":0.785,"distance":5,"aspect":"7:3"}}}"#;
+    let bad_aspect = r#"{"version":"woohaa-canvas-render-scene-v23","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0,"elevation":0.785,"distance":5,"aspect":"7:3"}}}"#;
     let parsed: Scene = parse(&with_theme(bad_aspect));
     assert!(parsed.validate().is_err());
     // 非有限几何。
-    let ok = r#"{"version":"woohaa-canvas-render-scene-v22","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v1","nodeId":"m1","toolMode":"model","focus":[0,1,0],"radius":2}}"#;
+    let ok = r#"{"version":"woohaa-canvas-render-scene-v23","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"model","focus":[0,1,0],"radius":2}}"#;
     let mut parsed: Scene = parse(&with_theme(ok));
     parsed.model_editor.as_mut().unwrap().focus[1] = f32::NAN;
     assert!(parsed.validate().is_err());
     // 非法 shot 尺寸。
-    let bad_shot = r#"{"version":"woohaa-canvas-render-scene-v22","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v1","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0,"azimuth":0,"elevation":0.785,"distance":5}}}"#;
+    let bad_shot = r#"{"version":"woohaa-canvas-render-scene-v23","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0,"azimuth":0,"elevation":0.785,"distance":5}}}"#;
     let parsed: Scene = parse(&with_theme(bad_shot));
     assert!(parsed.validate().is_err());
 }

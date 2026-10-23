@@ -15,9 +15,7 @@ mod setup;
 mod startup_timing;
 mod state;
 
-use bevy::{
-    asset::AssetMetaCheck, log::DEFAULT_FILTER, prelude::*, window::Window,
-};
+use bevy::{asset::AssetMetaCheck, log::DEFAULT_FILTER, prelude::*, window::Window};
 
 use crate::{canvas2d, model3d, theme::ThemeResource};
 
@@ -242,7 +240,7 @@ fn configure_canvas(app: &mut App) {
                 model3d::capture::publish_capture_results
                     .after(crate::shot_camera::ShotCameraSet::Capture),
                 scene3d::hide_shot_gizmos_during_transition
-                    .after(crate::shot_camera::ShotCameraSet::Capture),
+                    .after(crate::shot_camera::ShotCameraSet::Gizmo),
                 scene3d::drive_observer_from_shot
                     .after(crate::shot_camera::ShotCameraSet::Preview)
                     .after(crate::orbit_camera::sync_orbit_rigs)

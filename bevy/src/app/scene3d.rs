@@ -2,7 +2,9 @@ use bevy::prelude::*;
 
 use crate::{isometric_grid, model3d, theme::ThemeResource};
 
-use super::{AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, SurfaceState};
+use super::{
+    AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, SurfaceState,
+};
 
 /// Native 片场后台准备推进（独占系统）：非阻塞 poll + 分帧装配
 /// （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
@@ -120,7 +122,10 @@ pub(super) fn sync_models(
         visuals.set_visible_focus(&mut commands, rig.focus_node.as_deref());
         *visible_focus = rig.focus_node.clone();
     }
-    render_work.startup_models(scene.0.animation_playback.as_ref(), started.elapsed().as_secs_f64() * 1000.0);
+    render_work.startup_models(
+        scene.0.animation_playback.as_ref(),
+        started.elapsed().as_secs_f64() * 1000.0,
+    );
 }
 
 pub(super) fn sync_editor_gizmo(
@@ -130,6 +135,7 @@ pub(super) fn sync_editor_gizmo(
     theme: Res<ThemeResource>,
     flags: Res<FrameFlags>,
 ) {
+    selection.view = crate::canvas_query::gizmo::gizmo_view(&scene.0);
     if !flags.changed {
         return;
     }
@@ -153,9 +159,21 @@ pub(super) fn sync_shot_adapter(
     theme: Res<ThemeResource>,
     flags: Res<FrameFlags>,
 ) {
+    selection.view = crate::canvas_query::gizmo::gizmo_view(&scene.0);
     if !flags.changed {
         return;
     }
+    selection.palette = model3d::editor::gizmo_palette(&theme);
+    let editor = scene.0.model_editor.as_ref();
+    selection.tool = editor
+        .and_then(|e| e.camera_tool.clone())
+        .unwrap_or_else(|| "orbit".into());
+    selection.hover = editor
+        .and_then(|e| e.feedback.as_ref())
+        .and_then(|f| f.hover.clone());
+    selection.active = editor
+        .and_then(|e| e.feedback.as_ref())
+        .and_then(|f| f.active.clone());
     model3d::shot_adapter::sync_shot_adapter(
         &mut commands,
         &mut adapter,
@@ -211,11 +229,20 @@ pub(super) fn sync_shot_main_view(
         .and_then(|editor| editor.shot.as_ref())
         .map(|shot| shot_aspect_ratio(&shot.aspect))
         .unwrap_or(16.0 / 9.0);
-    let animation_preview = scene.0.animation_playback.as_ref().filter(|p| p.view_mode == "focus-preview");
-    let aspect = animation_preview.map(|p| shot_aspect_ratio(&p.initial_camera.aspect)).unwrap_or(aspect);
-    let has_shot = animation_preview.is_some() || scene.0.model_editor.as_ref().is_some_and(|editor| {
-        editor.tool_mode == "camera" && editor.shot.is_some()
-    });
+    let animation_preview = scene
+        .0
+        .animation_playback
+        .as_ref()
+        .filter(|p| p.view_mode == "focus-preview");
+    let aspect = animation_preview
+        .map(|p| shot_aspect_ratio(&p.initial_camera.aspect))
+        .unwrap_or(aspect);
+    let has_shot = animation_preview.is_some()
+        || scene
+            .0
+            .model_editor
+            .as_ref()
+            .is_some_and(|editor| editor.tool_mode == "camera" && editor.shot.is_some());
     viewport.hold = rig.animating();
     viewport.rect = if has_shot && width > 0.0 && height > 0.0 {
         Some(if animation_preview.is_some() {
@@ -225,13 +252,25 @@ pub(super) fn sync_shot_main_view(
             let w = rect.map(|r| r.width).unwrap_or((width - right).max(1.0));
             let h = rect.map(|r| r.height).unwrap_or(height);
             let frame_h = h.min(w / aspect);
-            Vec4::new(x + (w - frame_h * aspect) / 2.0, y + (h - frame_h) / 2.0, frame_h * aspect, frame_h)
+            Vec4::new(
+                x + (w - frame_h * aspect) / 2.0,
+                y + (h - frame_h) / 2.0,
+                frame_h * aspect,
+                frame_h,
+            )
         } else if let Some(rect) = surface.and_then(|surface| surface.content_rect.as_ref()) {
             let max_w = ((rect.width - 32.0) * 0.32).clamp(1.0, 340.0);
             let max_h = ((rect.height - 56.0) * 0.30).clamp(1.0, 220.0);
             let h = (max_w / aspect).min(max_h);
-            Vec4::new(rect.x + 16.0, rect.y + (rect.height - h - 16.0).max(0.0), h * aspect, h)
-        } else { rig_preview_rect((width - right).max(1.0), height, aspect) })
+            Vec4::new(
+                rect.x + 16.0,
+                rect.y + (rect.height - h - 16.0).max(0.0),
+                h * aspect,
+                h,
+            )
+        } else {
+            rig_preview_rect((width - right).max(1.0), height, aspect)
+        })
     } else {
         None
     };
@@ -258,7 +297,12 @@ fn rig_preview_rect(content_width: f32, height: f32, aspect: f32) -> Vec4 {
         preview_height = max_h;
         preview_width = preview_height * aspect;
     }
-    Vec4::new(margin, (height - preview_height - margin).max(0.0), preview_width, preview_height)
+    Vec4::new(
+        margin,
+        (height - preview_height - margin).max(0.0),
+        preview_width,
+        preview_height,
+    )
 }
 
 /// 观察相机始终铺满主画面，用来看 rig 和模型。它没有可画的本体。
@@ -283,13 +327,19 @@ pub(super) fn hide_shot_gizmos_during_transition(
     viewport: Res<crate::shot_camera::ShotPreviewViewport>,
     mut gizmos: Query<&mut Visibility, With<crate::shot_camera::ShotGizmo>>,
 ) {
-    let hidden = scene.0.animation_playback.as_ref().is_some_and(|p| p.view_mode == "focus-preview") || viewport.rect.is_none() || viewport.hold;
-    for mut visibility in &mut gizmos {
-        *visibility = if hidden {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        };
+    let hidden = scene
+        .0
+        .animation_playback
+        .as_ref()
+        .is_some_and(|p| p.view_mode == "focus-preview")
+        || viewport.rect.is_none()
+        || viewport.hold;
+    // The layout refresh restores each part every frame. Only suppress it here:
+    // restoring Inherited would also reveal dashed/near-clipped layout segments.
+    if hidden {
+        for mut visibility in &mut gizmos {
+            *visibility = Visibility::Hidden;
+        }
     }
 }
 
@@ -297,6 +347,47 @@ pub(super) fn hide_shot_gizmos_during_transition(
 mod grid_tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
+
+    #[test]
+    fn shot_transition_preserves_layout_hidden_segments() {
+        let mut app = App::new();
+        app.init_resource::<CurrentScene>()
+            .insert_resource(crate::shot_camera::ShotPreviewViewport {
+                rect: Some(Vec4::new(0.0, 0.0, 320.0, 180.0)),
+                ..default()
+            })
+            .add_systems(Update, hide_shot_gizmos_during_transition);
+        let rig = app.world_mut().spawn_empty().id();
+        let visible = app
+            .world_mut()
+            .spawn((crate::shot_camera::ShotGizmo { rig }, Visibility::Inherited))
+            .id();
+        let dashed = app
+            .world_mut()
+            .spawn((crate::shot_camera::ShotGizmo { rig }, Visibility::Hidden))
+            .id();
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(visible).unwrap(),
+            Visibility::Inherited
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(dashed).unwrap(),
+            Visibility::Hidden
+        );
+        app.world_mut()
+            .resource_mut::<crate::shot_camera::ShotPreviewViewport>()
+            .hold = true;
+        app.update();
+        assert_eq!(
+            *app.world().get::<Visibility>(visible).unwrap(),
+            Visibility::Hidden
+        );
+        assert_eq!(
+            *app.world().get::<Visibility>(dashed).unwrap(),
+            Visibility::Hidden
+        );
+    }
 
     // 只运行 ECS 与 CPU 网格生成，不创建窗口或 GPU。
     #[test]

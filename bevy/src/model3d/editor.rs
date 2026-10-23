@@ -9,8 +9,8 @@
 //! 严格受限：模型 placement gizmo 只有位移中心 + 世界 Y 轴 yaw 环；镜头 focus 允许三轴编辑；
 //! shot frustum/orbit/distance gizmo 仍由 `ShotCameraPlugin` 拥有，本模块不重复绘制。
 
-use bevy::prelude::*;
 use bevy::camera::visibility::RenderLayers;
+use bevy::prelude::*;
 
 use crate::protocol::ModelEditor;
 use crate::transform_gizmo::{
@@ -76,46 +76,52 @@ pub(crate) fn sync_editor_gizmo(
     editor: Option<&ModelEditor>,
     theme: &crate::theme::ThemeResource,
 ) {
-    style.accent = theme.token_color("gridSelection");
+    style.palette = gizmo_palette(theme);
     style.layers = editor_render_layers();
-
+    selection.hover = editor
+        .and_then(|e| e.feedback.as_ref())
+        .and_then(|f| f.hover.clone());
+    selection.active = editor
+        .and_then(|e| e.feedback.as_ref())
+        .and_then(|f| f.active.clone());
+    selection.basis = editor
+        .and_then(|e| e.parent_basis)
+        .map(|b| Mat3::from_cols_array(&b))
+        .unwrap_or(Mat3::IDENTITY);
     let Some(editor) = editor else {
         selection.set(None, None);
         return;
     };
-    let radius = if editor.radius.is_finite() && editor.radius > 1e-3 {
-        editor.radius
+    let mode = if editor.tool_mode == "object" {
+        Some(match editor.object_tool {
+            crate::gizmo_layout::ObjectTool::Move => TransformGizmoMode::FocusAxes,
+            crate::gizmo_layout::ObjectTool::Yaw => TransformGizmoMode::Yaw,
+            crate::gizmo_layout::ObjectTool::Scale => TransformGizmoMode::Scale,
+        })
+    } else if editor.tool_mode == "camera"
+        && editor.camera_tool.as_deref() == Some("focus")
+        && editor.shot.is_some()
+    {
+        Some(TransformGizmoMode::FocusAxes)
     } else {
-        1.0
+        None
     };
-
-    if editor.tool_mode == "model" {
-        selection.set(
-            Some(TransformGizmoMode::Placement),
-            Some(TransformGizmoTarget {
-                focus: Vec3::from_array(editor.focus),
-                radius,
-            }),
-        );
-    } else if editor.tool_mode == "object" {
-        // 片场对象编辑：选中对象处的三轴位移 + 中心 handle
-        // （change: 2026-10-09-add-film-set-object-motion-and-editing）。
-        selection.set(
-            Some(TransformGizmoMode::FocusAxes),
-            Some(TransformGizmoTarget {
-                focus: Vec3::from_array(editor.focus),
-                radius,
-            }),
-        );
-    } else if editor.tool_mode == "camera" && editor.shot.is_some() {
-        let focus = Vec3::from_array(editor.shot.as_ref().unwrap().focus);
-        selection.set(
-            Some(TransformGizmoMode::FocusAxes),
-            Some(TransformGizmoTarget { focus, radius }),
-        );
+    let focus = if editor.tool_mode == "camera" {
+        editor
+            .shot
+            .as_ref()
+            .map(|s| s.focus)
+            .unwrap_or(editor.focus)
     } else {
-        selection.set(None, None);
-    }
+        editor.focus
+    };
+    selection.set(
+        mode,
+        mode.map(|_| TransformGizmoTarget {
+            focus: Vec3::from_array(focus),
+            radius: editor.radius,
+        }),
+    );
 }
 
 #[cfg(test)]
@@ -127,6 +133,10 @@ mod tests {
             version: crate::protocol::MODEL_EDITOR_VERSION.to_owned(),
             node_id: "m1".to_owned(),
             tool_mode: tool.to_owned(),
+            object_tool: Default::default(),
+            item_id: None,
+            parent_basis: None,
+            feedback: None,
             camera_tool: Some("orbit".to_owned()),
             camera_id: Some("cam-a".to_owned()),
             focus: [0.0, 1.0, 0.0],
@@ -177,12 +187,32 @@ mod tests {
         let mut selection = TransformGizmoSelection::default();
 
         sync_editor_gizmo(&mut selection, &mut style, Some(&editor("model")), &theme);
-        assert_eq!(selection.mode, Some(TransformGizmoMode::Placement));
+        assert_eq!(selection.mode, None);
 
         sync_editor_gizmo(&mut selection, &mut style, Some(&editor("camera")), &theme);
+        assert_eq!(selection.mode, None);
+        let mut focus_editor = editor("camera");
+        focus_editor.camera_tool = Some("focus".into());
+        sync_editor_gizmo(&mut selection, &mut style, Some(&focus_editor), &theme);
         assert_eq!(selection.mode, Some(TransformGizmoMode::FocusAxes));
 
         sync_editor_gizmo(&mut selection, &mut style, None, &theme);
         assert_eq!(selection.mode, None);
+    }
+}
+
+/// Palette adapters are the only theme-aware part; reusable gizmos receive colors from their host.
+pub(crate) fn gizmo_palette(
+    theme: &crate::theme::ThemeResource,
+) -> crate::gizmo_layout::render::GizmoPalette {
+    crate::gizmo_layout::render::GizmoPalette {
+        colors: [
+            theme.token_color("gizmoAxisX"),
+            theme.token_color("gizmoAxisY"),
+            theme.token_color("gizmoAxisZ"),
+            theme.token_color("webTextPrimary"),
+            theme.token_color("webTextMuted"),
+        ],
+        accent: theme.token_color("interactionAccent"),
     }
 }

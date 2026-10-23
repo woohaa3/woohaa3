@@ -60,6 +60,19 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
   let objectGesture = options.filmSetObjectGesture ?? null;
   /** 是否正在拖动片场对象。 */
   let activeObjectDrag = false;
+  let feedbackEpoch = 0;
+  let cameraDragKey: string | null = null;
+  const feedback = (handle: import("@woohaa3/contracts").GizmoHandleName | null, active = false) => {
+    const previous = options.getModelEditor?.()?.feedback;
+    if (!active && previous?.hover === (handle ?? undefined) && !previous?.active) return;
+    options.onGizmoFeedback?.({ epoch: ++feedbackEpoch, ...(handle ? active ? { active: handle } : { hover: handle } : {}) });
+  };
+  const dragKey = () => {
+    const editor = options.getModelEditor?.();
+    const canonical = woohaa3CanvasStore.getState().canvas;
+    return JSON.stringify([focus.projection(), surfaceSize(), options.getRuntime()?.generation(), options.getModelFocusMode?.(),
+      editor?.nodeId, editor?.toolMode, editor?.cameraId, editor?.cameraTool, canonical?.nodeData?.[focus.nodeId ?? ""]]);
+  };
   /** 片场对象局部键盘 action（change: 2026-10-10-improve-film-set-editing-and-inspector）。 */
   let objectAction = options.filmSetObjectAction ?? null;
   /** 上报聚焦投影变化；宿主据此把投影合并进下一份渲染快照并 flush。 */
@@ -202,11 +215,17 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
       objectGesture.cancel();
     }
     activeObjectDrag = false;
+    objectGesture?.hover?.(null);
+    cameraDragKey = null;
+    feedback(null);
     focus.clearHeld();
   };
 
   /** 聚焦目标失效（删除 / Scene IR 移除 / selection 清除）→ 退出并恢复（任务 3.4）。 */
-  const syncModelFocusValid = () => lifecycle.syncValid();
+  const syncModelFocusValid = () => {
+    if (cameraDragKey && (!placementEditable() || cameraDragKey !== dragKey())) clearHeldKeys();
+    lifecycle.syncValid();
+  };
 
   /** 单次键盘飞行推进（每帧调用；聚焦且无 DOM editable/modal 时生效）。 */
   const advanceModelFly = () => {
@@ -231,6 +250,8 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
       if (shotHandle && shotGesture && placementEditable()) {
         if (shotGesture.begin(shotHandle, point)) {
           activeShotHandle = shotHandle;
+          cameraDragKey = dragKey();
+          feedback(shotHandle, true);
           canvas.setPointerCapture?.(event.pointerId);
           event.preventDefault();
           return;
@@ -241,6 +262,8 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
       if (focusAxis && focusGesture && placementEditable()) {
         if (focusGesture.begin(focusAxis, point)) {
           activeFocusAxis = focusAxis;
+          cameraDragKey = dragKey();
+          feedback(focusAxis, true);
           canvas.setPointerCapture?.(event.pointerId);
           event.preventDefault();
           return;
@@ -306,6 +329,7 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     const surface = surfaceSize();
     const rect = canvas.getBoundingClientRect();
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    if (cameraDragKey && (!placementEditable() || cameraDragKey !== dragKey())) { clearHeldKeys(); return true; }
     // 片场对象拖动优先（change: 2026-10-09 片场对象编辑）。
     if (activeObjectDrag && objectGesture) {
       measureInteractionPhase("object-gesture", () => objectGesture!.move(point));
@@ -321,6 +345,11 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
       focusGesture.move(activeFocusAxis, point);
       return true;
     }
+    objectGesture?.hover?.(placementEditable() ? point : null);
+    if (options.getModelEditor?.()?.toolMode === "camera") {
+      const handle = placementEditable() ? resolveFocusGizmoAxis(point) ?? resolveShotGizmoHandle(point) : null;
+      feedback(handle);
+    }
     const changed = focus.movePointer(event.pointerId, event.clientX, event.clientY, surface.height);
     if (changed) emitModelFocus();
     return changed;
@@ -328,18 +357,26 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
 
   /** 聚焦状态下 pointerup：结束镜头/焦点/相机手势。 */
   const endFocusPointer = (event: PointerEvent) => {
+    if (cameraDragKey && (!placementEditable() || cameraDragKey !== dragKey())) { clearHeldKeys(); return; }
+    const rect = canvas.getBoundingClientRect();
+    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     if (activeObjectDrag && objectGesture) {
+      objectGesture.move(point);
       objectGesture.end();
       activeObjectDrag = false;
     } else if (activeShotHandle && shotGesture) {
+      shotGesture.move(activeShotHandle, point);
       shotGesture.end();
       activeShotHandle = null;
     } else if (activeFocusAxis && focusGesture) {
+      focusGesture.move(activeFocusAxis, point);
       focusGesture.end();
       activeFocusAxis = null;
     } else {
       focus.endPointer(event.pointerId);
     }
+    cameraDragKey = null;
+    feedback(null);
   };
 
   return {

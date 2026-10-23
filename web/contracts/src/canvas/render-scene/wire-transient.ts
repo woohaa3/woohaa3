@@ -223,8 +223,14 @@ export type BevyVideoFocus = {
  * placement 后 AABB 的正交镜头）。它不进入 ServerCanvas / CanvasCommand / Y.Doc；
  * Bevy 只据此绘制可丢弃的 gizmo 与镜头 frustum，不持有 canonical 所有权。
  */
-export const MODEL_EDITOR_VERSION = "woohaa-model-editor-v1" as const;
+export const MODEL_EDITOR_VERSION = "woohaa-model-editor-v2" as const;
 export type ModelEditorVersion = typeof MODEL_EDITOR_VERSION;
+
+/** Disposable tools and feedback, transported with the instance's accepted render scene. */
+export type ObjectGizmoTool = "move" | "yaw" | "scale";
+export type GizmoHandleName = "x" | "y" | "z" | "center" | "yaw-ring" | "scale" | "orbit-ring" | "elevation-ring" | "distance" | "shot-origin";
+export type GizmoFeedback = { hover?: GizmoHandleName; active?: GizmoHandleName; epoch: number };
+export type GizmoYawConstraint = { origin: [number, number, number]; u: [number, number, number]; v: [number, number, number]; normal: [number, number, number]; startAngle: number; mode: "plane" | "tangent"; direction: [number, number]; radiansPerPixel: number };
 
 export type BevyModelEditor = {
   /** schema 版本；Bevy 据此校验。 */
@@ -236,6 +242,11 @@ export type BevyModelEditor = {
    * `object` 为片场对象模式（重心/三轴位移，change: 2026-10-09）。
    */
   toolMode: "model" | "object" | "camera";
+  objectTool?: ObjectGizmoTool;
+  itemId?: string;
+  /** Parent basis before the item's base yaw and animation (column-major). */
+  parentBasis?: number[];
+  feedback?: GizmoFeedback;
   /**
    * 显式镜头工具（change: fix-model-focus-navigation-and-camera-parity，task 4.4/design D6；
    * change: add-shot-camera-elevation-control）。

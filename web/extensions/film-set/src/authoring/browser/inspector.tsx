@@ -12,6 +12,7 @@ import { decodeFilmSetNodeData, filmSetAnimationsOf, filmSetClipHash, resolveNod
 import type { ModelEditorSession, ModelCaptureSession as ModelShotCaptureSession, AuthoringGenerationProps } from "@woohaa3/frontend/extension-api";
 import type { FilmSetObjectSession } from "./object-session.js";
 import type { FilmSetObjectAction } from "./object-action.js";
+import { GizmoReadout } from "./gizmo-readout.js";
 import { FilmSetObjectToolbar } from "./film-set-object-toolbar.js";
 import { IconButton, CloseIcon } from "@woohaa3/frontend/extension-api";
 import { FilmSetGenerateDock } from "./film-set-generate-dock.js";
@@ -145,6 +146,9 @@ export function FilmSetInspector({
 
   return (
     <>
+    {!readOnly && !playback.preview && objectState.pointer && objectSession.dragReadout() ? (
+      <GizmoReadout point={objectState.pointer}>{objectSession.dragReadout()!}</GizmoReadout>
+    ) : null}
     <div className="model-editor-dock" data-inspector="true" data-history-open={historyOpen ? "true" : undefined} data-film-set="true">
       {header}
       <div className="model-inspector-scroll">

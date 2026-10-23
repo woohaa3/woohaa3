@@ -1,5 +1,5 @@
 {
-  "version": "woohaa-app-theme-v1",
+  "version": "woohaa-app-theme-v2",
   "id": "dark",
   "tokens": {
     "webBackdrop": "#101614",
@@ -77,6 +77,9 @@
     "mediaDialogText": "#eef5f0",
     "mediaDialogTextMuted": "#b5c7bc",
     "mediaDialogControl": "#18201c",
-    "mediaDialogControlBorder": "#52685c"
+    "mediaDialogControlBorder": "#52685c",
+    "gizmoAxisX": "#f3777e",
+    "gizmoAxisY": "#64cd8d",
+    "gizmoAxisZ": "#79a9ff"
   }
 }

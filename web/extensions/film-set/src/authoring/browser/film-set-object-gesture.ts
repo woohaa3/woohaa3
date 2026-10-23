@@ -12,7 +12,8 @@
  *
  * 只持浏览器本地 preview；canonical 写入由注入的 `submitItemOp` 完成。
  */
-import { focusPointerRay, rayPlanePoint, worldDeltaToFilmSetItemOffset, type ModelFocusCamera, type Vec3 } from "@woohaa3/contracts";
+import { focusPointerRay, rayPlanePoint, worldDeltaToFilmSetItemOffset, type ModelFocusCamera, type Vec3, type GizmoYawConstraint } from "@woohaa3/contracts";
+import { constrainedYawAngle, unwrapAngle } from "./gizmo-constraint.js";
 import type { InteractionController, InteractionControllerOptions } from "@woohaa3/frontend/extension-api";
 import { FilmSetObjectSession } from "./object-session.js";
 
@@ -28,7 +29,8 @@ export type FilmSetObjectGestureDeps = {
   /** gizmo 三轴/中心命中（与主画面同一投影）；无则 null。 */
   hitObjectGizmo: (
     point: { x: number; y: number }
-  ) => { handle: "x" | "y" | "z" | "center"; direction?: [number, number]; worldPerPixel?: number } | null;
+  ) => { handle: "x" | "y" | "z" | "center" | "yaw-ring" | "scale"; direction?: [number, number]; worldPerPixel?: number; yawConstraint?: GizmoYawConstraint; layoutId?: string } | null;
+  invalidationKey?: () => string;
   /** 聚焦的片场 nodeId。 */
   nodeId: () => string | null;
   /** 是否有活动 modal/只读，阻断编辑。 */
@@ -43,7 +45,12 @@ export type FilmSetObjectGesture = NonNullable<InteractionControllerOptions["fil
 
 /** 一次对象拖动的起始冻结态。 */
 type ObjectDrag = {
-  kind: "axis" | "plane" | "yaw";
+  kind: "axis" | "plane" | "yaw" | "ring" | "scale";
+  tool: import("@woohaa3/contracts").ObjectGizmoTool;
+  yawConstraint?: GizmoYawConstraint;
+  lastAngle?: number;
+  accumulatedAngle?: number;
+  invalidationKey?: string;
   axis: "x" | "y" | "z" | null;
   itemId: string;
   startX: number;
@@ -83,33 +90,68 @@ export function createFilmSetObjectGesture(deps: FilmSetObjectGestureDeps): {
     const camera = { ...projection, target: [...projection.target] as Vec3 };
     const surface = { ...deps.surface() };
     const initialHit = rayPlanePoint(focusPointerRay({ point, size: surface, camera }), planeOrigin, planeNormal);
+    const hit = deps.hitObjectGizmo(point);
 
     // Shift 拖动选中对象本体：绕局部 Y 旋转。
-    if (isShift && deps.pick(point) === item.id) {
+    if (!hit && isShift && deps.session.getState().tool === "move" && deps.pick(point) === item.id) {
       if (!deps.session.beginEdit()) return false;
-      drag = { ...baseDrag("yaw", null, item.id, item, point, planeOrigin, planeNormal), nodeId: deps.nodeId() };
+      drag = { ...baseDrag("yaw", null, item.id, item, point, planeOrigin, planeNormal), camera, surface, basis, nodeId: deps.nodeId(), tool: deps.session.getState().tool, invalidationKey: deps.invalidationKey?.() };
+      deps.session.setActive("yaw-ring", point);
       return true;
     }
 
     // 命中 gizmo：轴约束或中心自由平移。
-    const hit = deps.hitObjectGizmo(point);
     if (!hit) return false;
+    if (hit.handle === "yaw-ring" && !hit.yawConstraint) return false;
+    if (hit.handle !== "center" && hit.handle !== "yaw-ring" && (!hit.direction || !Number.isFinite(hit.worldPerPixel))) return false;
+    if (hit.handle === "center" && !initialHit) return false;
     if (!deps.session.beginEdit()) return false;
     drag = {
-      ...baseDrag(hit.handle === "center" ? "plane" : "axis", hit.handle === "center" ? null : hit.handle, item.id, item, point, planeOrigin, planeNormal),
+      ...baseDrag(hit.handle === "center" ? "plane" : hit.handle === "yaw-ring" ? "ring" : hit.handle === "scale" ? "scale" : "axis", hit.handle === "x" || hit.handle === "y" || hit.handle === "z" ? hit.handle : null, item.id, item, point, planeOrigin, planeNormal),
+      tool: deps.session.getState().tool,
+      yawConstraint: hit.yawConstraint,
+      lastAngle: hit.yawConstraint?.startAngle,
+      accumulatedAngle: 0,
+      invalidationKey: deps.invalidationKey?.(),
       camera, surface, basis: { unit: basis.unit, yaw: basis.yaw, worldToLocal: basis.worldToLocal }, nodeId: deps.nodeId(),
       ...(initialHit ? { initialHit } : {}),
       ...(hit.direction ? { direction: hit.direction } : {}),
       ...(hit.worldPerPixel !== undefined ? { worldPerPixel: hit.worldPerPixel } : {})
     };
+    deps.session.setActive(hit.handle, point);
     return true;
   };
 
   const move = (point: { x: number; y: number }): void => {
     if (!drag) return;
     const state = deps.session.getState();
-    if (deps.blocked() || state.selectedItemId !== drag.itemId || !state.preview || (drag.nodeId !== undefined && state.nodeId !== drag.nodeId)) { cancel(); return; }
+    if (deps.blocked() || state.selectedItemId !== drag.itemId || !state.preview || state.tool !== drag.tool || (drag.nodeId !== undefined && state.nodeId !== drag.nodeId)
+      || JSON.stringify(deps.projection()) !== JSON.stringify(drag.camera) || JSON.stringify(deps.surface()) !== JSON.stringify(drag.surface)
+      || drag.invalidationKey !== deps.invalidationKey?.()) { cancel(); return; }
+    deps.session.setPointer(point);
     const scale = drag.originScale;
+
+    if (drag.kind === "scale") {
+      const projected = (point.x - drag.startX) * drag.direction![0] + (point.y - drag.startY) * drag.direction![1];
+      const next = scale * Math.exp(projected * drag.worldPerPixel!);
+      if (Number.isFinite(next) && next > 0) deps.session.updatePreview({ offset: { ...drag.originOffset }, yaw: drag.originYaw, scale: next });
+      return;
+    }
+    if (drag.kind === "ring" && drag.yawConstraint) {
+      const constraint = drag.yawConstraint;
+      let angle: number;
+      if (constraint.mode === "tangent") {
+        angle = ((point.x - drag.startX) * constraint.direction[0] + (point.y - drag.startY) * constraint.direction[1]) * constraint.radiansPerPixel;
+      } else {
+        const current = constrainedYawAngle(constraint, focusPointerRay({ point, size: drag.surface!, camera: drag.camera! }));
+        if (current === null) return;
+        drag.accumulatedAngle = (drag.accumulatedAngle ?? 0) + unwrapAngle(current - drag.lastAngle!);
+        drag.lastAngle = current;
+        angle = drag.accumulatedAngle;
+      }
+      if (Number.isFinite(angle)) deps.session.updatePreview({ offset: { ...drag.originOffset }, scale, yaw: drag.originYaw + angle });
+      return;
+    }
 
     if (drag.kind === "yaw") {
       const yaw = drag.originYaw + ((point.x - drag.startX) * Math.PI) / 180 * 1.15;
@@ -155,7 +197,7 @@ export function createFilmSetObjectGesture(deps: FilmSetObjectGestureDeps): {
 
   const end = (): void => {
     if (!drag) return;
-    const valid = deps.session.getState().selectedItemId === drag.itemId && deps.session.getState().nodeId === drag.nodeId;
+    const valid = !deps.blocked() && deps.session.getState().tool === drag.tool && deps.session.getState().selectedItemId === drag.itemId && deps.session.getState().nodeId === drag.nodeId;
     drag = null;
     if (valid) deps.session.endEdit(); else deps.session.cancelEdit();
   };
@@ -183,11 +225,15 @@ export function createFilmSetObjectGesture(deps: FilmSetObjectGestureDeps): {
     select,
     begin,
     move,
+    hover: point => {
+      if (drag) return;
+      deps.session.setHover(point && !deps.blocked() ? deps.hitObjectGizmo(point)?.handle ?? null : null);
+    },
     end,
     cancel,
     cancelIfDragging,
     dispose: () => {
-      drag = null;
+      cancel();
     }
   };
 
@@ -208,6 +254,7 @@ function baseDrag(
 ): ObjectDrag {
   return {
     kind,
+    tool: "move",
     axis,
     itemId,
     startX: point.x,

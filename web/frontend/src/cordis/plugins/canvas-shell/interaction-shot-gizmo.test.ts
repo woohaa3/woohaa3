@@ -15,8 +15,8 @@ describe("拍摄模式 gizmo 输入", () => {
         const target = targetFor(canvas);
         const { center, radius } = modelBounds(target)!;
         const editor: BevyModelEditor = {
-          version: "woohaa-model-editor-v1", nodeId: "m1", toolMode: "camera", cameraId: "cam",
-          focus: center, radius,
+          version: "woohaa-model-editor-v2", nodeId: "m1", toolMode: "camera", cameraId: "cam",
+          focus: center, radius, cameraTool: part === "center" ? "focus" : "orbit",
           shot: {
             position: [center[0] + radius * 0.8, center[1] + radius * 0.8, center[2]],
             focus: center, fov: MODEL_FOCUS_FOV, azimuth: Math.PI / 2,
@@ -58,7 +58,7 @@ describe("拍摄模式 gizmo 输入", () => {
         domFire(h.dom, "pointermove", { clientX: point.x + 30, clientY: point.y + 20 });
         domFire(h.dom, "pointerup", { button: 0, clientX: point.x + 30, clientY: point.y + 20 });
         const handle = part === "center" ? "center" : part === "ring" ? "orbit-ring" : "distance";
-        expect(calls).toEqual([handle, `move:${handle}`, "end"]);
+        expect(calls).toEqual([handle, `move:${handle}`, `move:${handle}`, "end"]);
         expect(h.controller.focusProjection()).toEqual(before);
         h.controller.dispose();
       });
@@ -70,7 +70,7 @@ describe("拍摄模式 gizmo 输入", () => {
     const target = targetFor(canvas);
     const { center, radius } = modelBounds(target)!;
     const editor: BevyModelEditor = {
-      version: "woohaa-model-editor-v1", nodeId: "m1", toolMode: "camera", cameraId: "cam",
+      version: "woohaa-model-editor-v2", nodeId: "m1", toolMode: "camera", cameraId: "cam",
       focus: center, radius,
       shot: {
         position: [center[0] + radius * 0.8, center[1] + radius * 0.8, center[2]],
@@ -103,7 +103,7 @@ describe("拍摄模式 gizmo 输入", () => {
     domFire(h.dom, "pointerdown", { button: 0, clientX: point.x, clientY: point.y });
     domFire(h.dom, "pointermove", { clientX: point.x, clientY: point.y - 20 });
     domFire(h.dom, "pointerup", { button: 0, clientX: point.x, clientY: point.y - 20 });
-    expect(calls).toEqual(["elevation-ring", "move:elevation-ring", "end"]);
+    expect(calls).toEqual(["elevation-ring", "move:elevation-ring", "move:elevation-ring", "end"]);
     expect(h.controller.focusProjection()).toEqual(before);
     h.controller.dispose();
   });

@@ -75,6 +75,10 @@ export const APP_THEME_DEFAULT_TOKENS = {
   nodeVideoTint: "#faf0e9",
   nodeDefaultForeground: "#526b5e",
   nodeDefaultTint: "#f1f5f3",
+  // gizmo
+  gizmoAxisX: "#c83b42",
+  gizmoAxisY: "#27824b",
+  gizmoAxisZ: "#326dd1",
   // grid
   gridMinor: "#e2ead7",
   gridMajor: "#cee0cc",
@@ -90,12 +94,12 @@ export const APP_THEME_DEFAULT_TOKENS = {
 } as const satisfies AppThemeTokens;
 
 export const APP_THEME_DEFAULT_ID = "default";
-export const APP_THEME_DEFAULT_FINGERPRINT = "58a7f3cd0c86c453";
+export const APP_THEME_DEFAULT_FINGERPRINT = "067deae4f2041f31";
 
 /** 默认 preset（生成物）；结构与 `app-theme.default.json` 一致。 */
 export const APP_THEME_DEFAULT_PRESET = {
   id: APP_THEME_DEFAULT_ID,
-  version: "woohaa-app-theme-v1" as const,
+  version: "woohaa-app-theme-v2" as const,
   tokens: APP_THEME_DEFAULT_TOKENS
 } as const;
 
@@ -167,6 +171,9 @@ export const APP_THEME_CSS_VARIABLES: Record<AppThemeTokenName, string> = {
   nodeVideoTint: "--app-node-video-tint",
   nodeDefaultForeground: "--app-node-default-foreground",
   nodeDefaultTint: "--app-node-default-tint",
+  gizmoAxisX: "--app-gizmo-axis-x",
+  gizmoAxisY: "--app-gizmo-axis-y",
+  gizmoAxisZ: "--app-gizmo-axis-z",
   gridMinor: "--app-grid-minor",
   gridMajor: "--app-grid-major",
   gridSelection: "--app-grid-selection",

@@ -81,6 +81,9 @@ const SENTINEL_OVERRIDES: Partial<AppThemeTokens> = {
   nodeDefaultForeground: "#4c3a73",
   nodeDefaultTint: "#f3ecff",
 
+  gizmoAxisX: "#f43f5e",
+  gizmoAxisY: "#84cc16",
+  gizmoAxisZ: "#8b5cf6",
   gridMinor: "#e7def7",
   gridMajor: "#d3c1ee",
   gridSelection: "#6d28d9",

@@ -35,6 +35,7 @@ pub mod orbit_camera;
 pub mod transform_animation;
 /// 可复用 transform gizmo（change: refactor-bevy-reusable-components）。
 pub mod transform_gizmo;
+pub mod gizmo_layout;
 
 #[cfg(feature = "canvas-core")]
 mod app;
@@ -317,6 +318,7 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
     // （change: 2026-10-14-scope-film-set-object-picking-to-focus，design D1/D2/D5）。
     let items = pick_index::film_set_items(&scene);
     canvas_query::film_set_pick::accept_items(items.owner, items.candidates, items.part_bounds_evaluations);
+    canvas_query::gizmo::accept_gizmo_scene(&scene);
     bridge::queue_scene(scene);
     Ok(generation)
 }
@@ -365,6 +367,7 @@ pub fn set_observer(json: &str) -> Result<u32, BoundaryError> {
         &request.node_id,
     )
     .map_err(BoundaryError::from_str)?;
+    canvas_query::gizmo::accept_gizmo_observer(&request);
     bridge::queue_observer(request);
     Ok(generation)
 }

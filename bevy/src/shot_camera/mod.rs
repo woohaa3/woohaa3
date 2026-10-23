@@ -30,7 +30,10 @@ pub use capture_types::{
     ShotCaptureRequest, ShotCaptureResult, ShotCaptureResults, resolve_capture_route,
 };
 pub use components::*;
-pub use constants::*;pub use edit::{ShotEditCommand, ShotEditCommands};
+pub use constants::*;
+#[cfg(feature = "canvas-core")]
+pub use edit::{ShotCameraInteractionPlugin, ShotPointerAdapter};
+pub use edit::{ShotEditCommand, ShotEditCommands};
 pub use edit_types::{
     ShotEditEvent, ShotEditSession, ShotEditSessions, begin_edit, cancel_edit, commit_edit,
     has_moved, reset_pose, update_distance, update_elevation, update_focus, update_orbit,
@@ -39,20 +42,20 @@ pub use framing::{
     Aabb, FramedShotCamera, SHOT_CAMERA_ABSOLUTE_MAX_DISTANCE, SHOT_CAMERA_ABSOLUTE_MIN_DISTANCE,
     SHOT_CAMERA_ELEVATION, SHOT_CAMERA_ELEVATION_LIMIT, SHOT_CAMERA_FIT_MAX_FACTOR,
     SHOT_CAMERA_FIT_MIN_FACTOR, SHOT_CAMERA_FIT_MIN_FLOOR_FACTOR, SHOT_CAMERA_FOV,
-    SHOT_CAMERA_MAX_ELEVATION, SHOT_CAMERA_MIN_ELEVATION,
-    azimuth_from_horizontal_drag, clamp_shot_distance, clamp_shot_elevation, distance_from_drag,
-    elevation_from_vertical_drag, resolve_from_center_radius, resolve_shot_camera,
-    shot_bounding_radius, shot_camera_forward, shot_camera_position, shot_camera_right,
-    shot_distance_bounds, shot_fit_distance, shot_focus_plane_height, shot_view_half_height,
+    SHOT_CAMERA_MAX_ELEVATION, SHOT_CAMERA_MIN_ELEVATION, azimuth_from_horizontal_drag,
+    clamp_shot_distance, clamp_shot_elevation, distance_from_drag, elevation_from_vertical_drag,
+    resolve_from_center_radius, resolve_shot_camera, shot_bounding_radius, shot_camera_forward,
+    shot_camera_position, shot_camera_right, shot_distance_bounds, shot_fit_distance,
+    shot_focus_plane_height, shot_view_half_height,
 };
-pub use gizmo::{SHOT_ELEVATION_ARC_SEGMENTS, SHOT_GIZMO_LAYER, ShotGizmoAssets, ShotGizmoSelection};
+pub use gizmo::{
+    SHOT_ELEVATION_ARC_SEGMENTS, SHOT_GIZMO_LAYER, ShotGizmoAssets, ShotGizmoSelection,
+};
 pub use preview_types::{
     CallerViewport, PreviewTarget, ShotCameraPreview, ShotPreviewBudget, ShotPreviewClearColor,
-    ShotPreviewOutput,     ShotPreviewViewport, plan_preview_updates, preview_viewport_rect,
+    ShotPreviewOutput, ShotPreviewViewport, plan_preview_updates, preview_viewport_rect,
     resolve_caller_viewport, viewport_from_css,
 };
-#[cfg(feature = "canvas-core")]
-pub use edit::{ShotCameraInteractionPlugin, ShotPointerAdapter};
 pub use runtime::{ShotCameraPlugin, ShotCameraRegistry, ShotCameraSet};
 
 /// rig 的内部子资源句柄（不保证布局稳定；仅供模块内部系统使用）。
@@ -78,21 +81,6 @@ pub struct GizmoPart {
 /// gizmo 部件类型（用于差量刷新）。
 #[derive(Clone, Copy, Debug)]
 pub enum GizmoPartKind {
-    /// 方位环（以 focus 为中心，半径按水平距离缩放）。
-    Ring {
-        focus: bevy::math::Vec3,
-        radius: f32,
-    },
-    /// 竖直仰角半圆的一段（change: add-shot-camera-elevation-control）。
-    ElevationArc {
-        /// 弧半径的基准桶（用于差量缩放）。
-        radius: f32,
-        /// 段序号（0..segments）。
-        index: u32,
-        segments: u32,
-    },
-    /// 镜头原点球。
-    Origin { position: bevy::math::Vec3 },
     /// 线段（视线/frustum 边）。
     Line {
         start: bevy::math::Vec3,
@@ -105,8 +93,6 @@ pub enum GizmoPartKind {
 #[derive(Clone, Default, Debug)]
 pub struct GizmoLayout {
     pub entities: Vec<GizmoPart>,
-    /// 创建时相机本体的半径，距离改变时复用 sphere mesh 并按比例缩放。
-    pub base_radius: f32,
 }
 
 /// 标记：某实体是 rig 的 preview 相机。

@@ -1,5 +1,5 @@
 {
-  "version": "woohaa-app-theme-v1",
+  "version": "woohaa-app-theme-v2",
   "id": "default",
   "tokens": {
     "webBackdrop": "#f8faf9",
@@ -14,7 +14,6 @@
     "webBorderStrong": "#7f9389",
     "webOverlay": "#141e1a80",
     "webShadow": "#2d423933",
-
     "interactionAccent": "#16846c",
     "interactionAccentHover": "#12755f",
     "interactionAccentPressed": "#0f6553",
@@ -22,7 +21,6 @@
     "interactionFocus": "#16846c",
     "interactionOnAccent": "#ffffff",
     "interactionDisabled": "#b6c2bb",
-
     "statusSuccess": "#238569",
     "statusSuccessSoft": "#8fd3bf",
     "statusSuccessBackground": "#e9f5ef",
@@ -39,7 +37,6 @@
     "statusInfoSoft": "#a9c9dd",
     "statusInfoBackground": "#eaf3fa",
     "statusOnInfo": "#ffffff",
-
     "canvasNodeSurface": "#ffffff",
     "canvasNodeContent": "#f1f5f6",
     "canvasNodeBorder": "#d9e1dd",
@@ -59,7 +56,6 @@
     "canvasProgressFill": "#16846c",
     "canvasCloseIcon": "#8a9a91",
     "canvasBodyText": "#526b65",
-
     "nodeTextForeground": "#3b7299",
     "nodeTextTint": "#eaf3fa",
     "nodeImageForeground": "#a45378",
@@ -72,17 +68,18 @@
     "nodeVideoTint": "#faf0e9",
     "nodeDefaultForeground": "#526b5e",
     "nodeDefaultTint": "#f1f5f3",
-
     "gridMinor": "#e2ead7",
     "gridMajor": "#cee0cc",
     "gridSelection": "#16846c",
     "gridGizmo": "#3b7299",
-
     "mediaDialogBackdrop": "#101814f0",
     "mediaDialogSurface": "#101814f0",
     "mediaDialogText": "#f1f5f2",
     "mediaDialogTextMuted": "#cfdad4",
     "mediaDialogControl": "#ffffff",
-    "mediaDialogControlBorder": "#cbd7cf"
+    "mediaDialogControlBorder": "#cbd7cf",
+    "gizmoAxisX": "#c83b42",
+    "gizmoAxisY": "#27824b",
+    "gizmoAxisZ": "#326dd1"
   }
 }

@@ -60,7 +60,7 @@ export function hitFocusGizmoAxis(input: {
   query: GizmoQuery;
 }): "x" | "y" | "z" | "center" | null {
   const editor = input.editor;
-  if (!editor || editor.toolMode !== "camera" || !editor.shot) return null;
+  if (!editor || editor.toolMode !== "camera" || editor.cameraTool !== "focus" || !editor.shot) return null;
   if (!input.projection) return null;
   const result = input.query({
     kind: "focus",

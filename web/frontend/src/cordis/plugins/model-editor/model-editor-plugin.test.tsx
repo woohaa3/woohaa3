@@ -123,6 +123,7 @@ async function harness(canvas: ServerCanvas, mode: { value: "edit" | "history" }
       ctx.provide("inputScopes" as never, new InputScopeService() as never);
       ctx.provide("canvasSession" as never, {
         isWritable: () => true,
+        subscribe: () => () => undefined,
         submitCommands: (commands: Array<{ nodeId?: string; value?: { modelCameras?: ModelCamera[] } }>) => {
           const patch = commands.find((command) => command.value?.modelCameras);
           if (patch?.nodeId && patch.value?.modelCameras) {

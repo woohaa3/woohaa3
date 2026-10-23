@@ -75,7 +75,7 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
     (ctx: Context) => {
       const session = new ModelEditorSession({
         readCameras: (nodeId) => readCameras(nodeId, ctx),
-        isWritable: () => ctx.canvasSession.isWritable(),
+        isWritable: () => ctx.canvasSession.isWritable() && ctx.canvasRuntime.modelFocusMode() !== "history",
         submitCameras: (nodeId, cameras) => submitCameras(ctx, nodeId, cameras),
         revokeObjectUrl: (url) => URL.revokeObjectURL?.(url)
       });
@@ -137,7 +137,7 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
             : null;
           shotStart = { ...session.effectivePose(selected), distance: editor?.shot?.distance ?? selected.distance, x: point.x, y: point.y, orbitDirection, radial };
           session.beginPose();
-          return true;
+          return session.getState().posePreview !== null;
         },
         move: (handle, point) => {
           if (!shotStart) return;
@@ -282,8 +282,10 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
       ctx.effect(() => () => ctx.canvasRuntime.setModelEditorFocusGesture(null), "model-editor-focus-gesture");
 
       // 权威画布/模型内容变化 → 镜头列表与 gizmo 取景同步。
-      const unsubscribeCanvas = woohaa3CanvasStore.subscribe(() => pushEditor(ctx, session));
+      const unsubscribeCanvas = woohaa3CanvasStore.subscribe(() => { session.reconcileGesture(); pushEditor(ctx, session); });
       ctx.effect(() => () => unsubscribeCanvas(), "model-editor-canvas");
+      const unsubscribePermission = ctx.canvasSession.subscribe(() => { session.reconcileGesture(); pushEditor(ctx, session); });
+      ctx.effect(() => () => unsubscribePermission(), "model-editor-permission");
 
       // 截图会话：capture → Media 上传 → 原子 asset.upsert + node.add + edge.add（任务 4.1–4.3）。
       const captureSession = new ModelShotCaptureSession({

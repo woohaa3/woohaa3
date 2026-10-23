@@ -75,6 +75,10 @@
   --app-node-video-tint: #faf0e9;
   --app-node-default-foreground: #526b5e;
   --app-node-default-tint: #f1f5f3;
+  /* gizmo */
+  --app-gizmo-axis-x: #c83b42;
+  --app-gizmo-axis-y: #27824b;
+  --app-gizmo-axis-z: #326dd1;
   /* grid */
   --app-grid-minor: #e2ead7;
   --app-grid-major: #cee0cc;
@@ -162,6 +166,10 @@
   --app-node-video-tint: #3a2619;
   --app-node-default-foreground: #a9bdb1;
   --app-node-default-tint: #232f29;
+  /* gizmo */
+  --app-gizmo-axis-x: #f3777e;
+  --app-gizmo-axis-y: #64cd8d;
+  --app-gizmo-axis-z: #79a9ff;
   /* grid */
   --app-grid-minor: #1f2a25;
   --app-grid-major: #2b3a32;

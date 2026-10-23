@@ -59,10 +59,12 @@ function fixture() {
   const invalidated: string[] = [];
   const ctx = {
     canvasState,
+    filmSetPlayback: { subscribe: () => () => undefined, getSnapshot: () => ({preview:false}) },
     compositeAssets: { projectCanvas },
-    canvasSession: { isWritable: () => true },
+    canvasSession: { subscribe: () => () => undefined, isWritable: () => true },
     canvasEdit: { record: async () => ({ ok: true }) },
     canvasRuntime: {
+      runtime: () => ({generation: () => 1}), subscribe: () => () => undefined, animationPlaybackState: () => null,
       pauseAnimation: () => undefined,
       queryCompositeAssetItemBounds: (nodeId: string) => boundsFor(nodeId),
       queryCompositeAssetItemPick: () => null,

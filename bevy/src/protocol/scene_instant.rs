@@ -327,6 +327,14 @@ pub(crate) struct ModelEditor {
     pub(crate) node_id: String,
     /// 工具模式："model" | "camera"。
     pub(crate) tool_mode: String,
+    #[serde(default)]
+    pub(crate) object_tool: crate::gizmo_layout::ObjectTool,
+    #[serde(default)]
+    pub(crate) item_id: Option<String>,
+    #[serde(default)]
+    pub(crate) parent_basis: Option<[f32; 9]>,
+    #[serde(default)]
+    pub(crate) feedback: Option<GizmoFeedback>,
     /// 显式镜头工具："orbit" | "distance" | "focus"
     /// （change: fix-model-focus-navigation-and-camera-parity，task 4.4）。
     #[serde(default)]
@@ -396,7 +404,15 @@ pub(crate) fn parse_shot_aspect_ratio(aspect: &str) -> Option<f32> {
     }
 }
 
-pub(crate) const MODEL_EDITOR_VERSION: &str = "woohaa-model-editor-v1";
+pub(crate) const MODEL_EDITOR_VERSION: &str = "woohaa-model-editor-v2";
+
+#[derive(Clone, Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct GizmoFeedback {
+    pub(crate) hover: Option<String>,
+    pub(crate) active: Option<String>,
+    pub(crate) epoch: u32,
+}
 
 impl ModelEditor {
     /// 边界级防御校验：版本、id、工具模式、有限几何。
@@ -409,6 +425,37 @@ impl ModelEditor {
         }
         if self.tool_mode != "model" && self.tool_mode != "object" && self.tool_mode != "camera" {
             return Err("Invalid model editor tool mode");
+        }
+        if let Some(id) = &self.item_id
+            && (id.is_empty() || id.len() > 128)
+        {
+            return Err("Invalid gizmo item id");
+        }
+        if let Some(basis) = self.parent_basis {
+            let matrix = bevy::math::Mat3::from_cols_array(&basis);
+            if !matrix.is_finite() || matrix.determinant().abs() < 1e-12 {
+                return Err("Invalid gizmo parent basis");
+            }
+        }
+        if let Some(feedback) = &self.feedback {
+            for handle in [&feedback.hover, &feedback.active].into_iter().flatten() {
+                if ![
+                    "x",
+                    "y",
+                    "z",
+                    "center",
+                    "yaw-ring",
+                    "scale",
+                    "orbit-ring",
+                    "elevation-ring",
+                    "distance",
+                    "shot-origin",
+                ]
+                .contains(&handle.as_str())
+                {
+                    return Err("Invalid gizmo feedback handle");
+                }
+            }
         }
         if let Some(tool) = &self.camera_tool {
             if tool != "orbit" && tool != "elevation" && tool != "distance" && tool != "focus" {

@@ -15,6 +15,9 @@ export type FilmSetOperationOutcome =
   | { state: "pending" };
 
 export type FilmSetObjectSessionState = {
+  tool: import("@woohaa3/contracts").ObjectGizmoTool;
+  feedback: import("@woohaa3/contracts").GizmoFeedback;
+  pointer: { x: number; y: number } | null;
   nodeId: string | null;
   selectedItemId: string | null;
   /** 拖动中的临时摆放 preview；无 preview 为 null。 */
@@ -29,6 +32,9 @@ export type FilmSetObjectSessionState = {
 };
 
 const INITIAL: FilmSetObjectSessionState = {
+  tool: "move",
+  feedback: { epoch: 0 },
+  pointer: null,
   nodeId: null,
   selectedItemId: null,
   preview: null,

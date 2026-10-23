@@ -266,3 +266,11 @@ describe("焦点手势 / 重命名 / 重置（change: 模型编辑 gizmo 焦点�
     expect(h.session.effectiveFocus(h.session.selectedCamera()!)).toEqual({ x: -1, y: -2, z: -3 });
   });
 });
+
+it("remote camera edits and deletion cancel frozen pose/focus without overwriting confirmed values", () => {
+  const h=harness([camera()]);h.session.enter("m1");h.session.beginPose();h.session.updatePose({distance:8});
+  h.setCameras([camera({distance:12})]);h.session.reconcileGesture();h.session.endPose();
+  expect(h.session.getState().posePreview).toBeNull();expect(h.submitted).toHaveLength(0);
+  h.session.beginFocus();h.session.updateFocus({x:1,y:2,z:3});h.setCameras([]);h.session.reconcileGesture();h.session.endFocus();
+  expect(h.session.getState().focusPreview).toBeNull();expect(h.submitted).toHaveLength(0);
+});

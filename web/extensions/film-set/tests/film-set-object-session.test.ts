@@ -50,6 +50,30 @@ function harness(options: { writable?: boolean } = {}) {
 }
 
 describe("FilmSetObjectSession（任务 4.2–4.4）", () => {
+  it("round-trip floating point drift does not create an undo entry", () => {
+    const h = harness();
+    h.session.enter("film"); h.session.select("a"); h.session.beginEdit();
+    h.session.updatePreview({ offset: { x: 1e-12, y: 0, z: 0 }, scale: 1 + 1e-12, yaw: 1e-12 });
+    h.session.endEdit();
+    h.session.setSelectedScale(1);
+    expect(h.submitted).toHaveLength(0);
+  });
+
+  it("changing tools cancels the preview while selection changes retain the local tool", () => {
+    const h = harness();
+    h.session.enter("film"); h.session.select("a"); h.session.beginEdit();
+    h.session.setActive("x");
+    h.session.updatePreview({ offset: { x: 3, y: 0, z: 0 }, scale: 1, yaw: 0 });
+    h.session.setTool("yaw");
+    expect(h.session.getState().preview).toBeNull();
+    expect(h.session.getState().feedback.active).toBeUndefined();
+    h.session.select("b");
+    expect(h.session.getState().tool).toBe("yaw");
+    h.session.exit(); h.session.enter("film");
+    expect(h.session.getState().tool).toBe("move");
+    expect(h.submitted).toHaveLength(0);
+  });
+
   it("进入片场即可选择稳定 itemId，无需切换模式", () => {
     const h = harness();
     h.session.enter("film");
@@ -266,6 +290,15 @@ describe("FilmSetObjectSession 异步结算生命周期（任务 4.2/4.4）", ()
     await Promise.resolve(); await Promise.resolve();
     expect(session.getState().pendingItemId).toBeNull();
     expect(session.getState().error).toBe("concurrent-edit-conflict");
+  });
+
+  it("unknown settlement keeps the invocation blocked across selection changes", async () => {
+    const h=asyncHarness();h.session.enter("film");h.session.select("a");
+    h.session.setSelectedScale(2);h.session.select("b");
+    h.settleLast({state:"unknown",error:null});await Promise.resolve();
+    expect(h.session.getState().pendingItemId).toBe("a");
+    expect(h.session.beginEdit()).toBe(false);expect(h.session.setSelectedScale(3)).toBe(false);
+    expect(h.submitted).toHaveLength(1);
   });
 
   it("非布尔提交失败直接报错且不进入 pending", () => {

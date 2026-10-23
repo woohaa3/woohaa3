@@ -113,3 +113,24 @@ it("已有 tabindex 的宿主元素不被 dispose 改写", async () => {
   realm.dispose();
   expect(canvas.getAttribute("tabindex")).toBe("-1");
 });
+
+it("native gizmo RPC preserves transient tools, feedback, constraints and identity", async () => {
+  const host=document.createElement("div");document.body.append(host);mountBevyCanvas(host);
+  const target=nativeTarget();
+  const editor={version:"woohaa-model-editor-v2",nodeId:"film",itemId:"item",toolMode:"object",objectTool:"yaw",feedback:{epoch:9,active:"yaw-ring"}};
+  const response={available:true,generation:4,epoch:9,layoutId:"accepted",handle:"yaw-ring",yawConstraint:{mode:"tangent",direction:[1,0],radiansPerPixel:0.02}};
+  let received:unknown;
+  (target as unknown as {XMLHttpRequest:unknown}).XMLHttpRequest=class {
+    status=200;responseText=JSON.stringify({ok:true,value:null});
+    open(){} setRequestHeader(){}
+    send(body:string|null){
+      if(!body)return;
+      const request=JSON.parse(body);
+      if(request.method==="query_gizmo_hit") {received=JSON.parse(request.args[0]);this.responseText=JSON.stringify({ok:true,value:JSON.stringify(response)});}
+    }
+  };
+  const realm=await createNativeRuntimeRealm(target,vi.fn());
+  const input={kind:"object",generation:4,editor,x:100,y:200};
+  expect(JSON.parse(realm.module.query_gizmo_hit!(JSON.stringify(input)))).toEqual(response);
+  expect(received).toEqual(input);realm.dispose();
+});

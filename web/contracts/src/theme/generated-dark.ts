@@ -75,6 +75,10 @@ export const APP_THEME_DARK_TOKENS = {
   nodeVideoTint: "#3a2619",
   nodeDefaultForeground: "#a9bdb1",
   nodeDefaultTint: "#232f29",
+  // gizmo
+  gizmoAxisX: "#f3777e",
+  gizmoAxisY: "#64cd8d",
+  gizmoAxisZ: "#79a9ff",
   // grid
   gridMinor: "#1f2a25",
   gridMajor: "#2b3a32",
@@ -90,11 +94,11 @@ export const APP_THEME_DARK_TOKENS = {
 } as const satisfies AppThemeTokens;
 
 export const APP_THEME_DARK_ID = "dark";
-export const APP_THEME_DARK_FINGERPRINT = "b291ab5ad0cdb3e3";
+export const APP_THEME_DARK_FINGERPRINT = "be88bc7e5733b27c";
 
 /** 暗色 preset（生成物）；结构与 `app-theme.dark.json` 一致。 */
 export const APP_THEME_DARK_PRESET = {
   id: APP_THEME_DARK_ID,
-  version: "woohaa-app-theme-v1" as const,
+  version: "woohaa-app-theme-v2" as const,
   tokens: APP_THEME_DARK_TOKENS
 } as const;

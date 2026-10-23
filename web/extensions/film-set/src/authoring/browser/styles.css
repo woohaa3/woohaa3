@@ -23,9 +23,9 @@
 .film-set-number { display: grid; gap: 6px; min-width: 0; font-size: 11px; color: var(--app-web-text-muted); }
 .film-set-number[data-axis] { position: relative; }
 .film-set-number[data-axis] > span { position: absolute; left: 8px; top: 9px; z-index: 1; font-size: 10px; font-weight: 650; pointer-events: none; }
-.film-set-number[data-axis="x"] > span { color: var(--app-status-danger); }
-.film-set-number[data-axis="y"] > span { color: var(--app-status-success); }
-.film-set-number[data-axis="z"] > span { color: var(--app-interaction-accent); }
+.film-set-number[data-axis="x"] > span { color: var(--app-gizmo-axis-x); }
+.film-set-number[data-axis="y"] > span { color: var(--app-gizmo-axis-y); }
+.film-set-number[data-axis="z"] > span { color: var(--app-gizmo-axis-z); }
 .film-set-number__input { display: flex; align-items: center; min-width: 0; border: 1px solid var(--app-web-border); background: var(--app-web-subtle); border-radius: 6px; }
 .film-set-number__input:focus-within { border-color: var(--app-interaction-accent); box-shadow: 0 0 0 2px var(--app-interaction-accent-soft); }
 .film-set-number__input input { width: 100%; min-width: 0; padding: 8px; border: 0; background: transparent; color: var(--app-web-text-primary); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; outline: none; appearance: textfield; }
@@ -134,3 +134,7 @@
 .film-set-generate-dock__target { max-width: 38%; min-width: 0; margin-left: auto; padding: 4px 8px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-panel); color: inherit; font: inherit; text-overflow: ellipsis; }
 .film-set-generate-dock__scope { margin-left: auto; color: var(--app-web-text-muted); white-space: nowrap; }
 .film-set-generate-restore { box-shadow: 0 4px 16px var(--app-web-shadow); }
+
+.film-set-object-tools { display: flex; gap: 4px; margin: 8px 0 12px; }
+.film-set-object-tools > button { flex: 1; min-width: 0; }
+.film-set-gizmo-readout { position: fixed; z-index: 30; pointer-events: none; padding: 6px 9px; border: 1px solid var(--app-web-border); border-radius: 6px; background: var(--app-web-elevated); color: var(--app-web-text-primary); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }

@@ -33,6 +33,32 @@ export class FilmSetObjectSession extends FilmSetObjectState {
   private submission = 0;
   constructor(private readonly deps: FilmSetObjectSessionDeps) { super(); }
 
+  setTool(tool: import("@woohaa3/contracts").ObjectGizmoTool): void {
+    if (tool === this.state.tool) return;
+    this.editBase = null;
+    this.state = { ...this.state, tool, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 } };
+    this.emit();
+  }
+  setHover(handle: import("@woohaa3/contracts").GizmoHandleName | null): void {
+    if (this.state.feedback.active || this.state.feedback.hover === (handle ?? undefined)) return;
+    this.state = { ...this.state, feedback: { epoch: this.state.feedback.epoch, ...(handle ? { hover: handle } : {}) } };
+    this.emit();
+  }
+  setActive(handle: import("@woohaa3/contracts").GizmoHandleName | null, pointer: { x: number; y: number } | null = null): void {
+    this.state = { ...this.state, pointer, feedback: { epoch: this.state.feedback.epoch + 1, ...(handle ? { active: handle } : {}) } };
+    this.emit();
+  }
+  setPointer(pointer: { x: number; y: number }): void { this.state = { ...this.state, pointer }; }
+  dragReadout(): string | null {
+    const { preview, feedback } = this.state;
+    const base = this.editBase;
+    if (!preview || !base || !feedback.active) return null;
+    if (feedback.active === "yaw-ring") return `Y 旋转 ${signed((preview.yaw - base.yaw) * 180 / Math.PI, 1)}°`;
+    if (feedback.active === "scale") return `等比缩放 ${(preview.scale / base.scale).toFixed(2)}×`;
+    const delta = (["x", "y", "z"] as const).map(axis => `${axis.toUpperCase()} ${signed(preview.offset[axis] - base.offset[axis], 2)}`);
+    return feedback.active === "center" ? delta.join("  ") : delta[["x", "y", "z"].indexOf(feedback.active)] ?? null;
+  }
+
   /** 进入片场聚焦（整体与对象工具同时可用）。 */
   enter(nodeId: string): void {
     ++this.submission;
@@ -73,24 +99,19 @@ export class FilmSetObjectSession extends FilmSetObjectState {
   /** 选择对象（session-only）；item 不存在时清空选择。 */
   select(itemId: string | null): void {
     if (!this.state.nodeId) return;
-    ++this.submission;
+    this.editBase = null;
     if (itemId === null) {
-      this.state = { ...this.state, selectedItemId: null, preview: null };
+      this.state = { ...this.state, selectedItemId: null, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 } };
       this.emit();
       return;
     }
     const selected = filmSetItemById(this.deps.readContent(this.state.nodeId), itemId);
-    if (this.state.preview && this.editBase && selected && !sameTransform(selected.localTransform, this.editBase)) {
-      this.state = { ...this.state, preview: null, error: "对象摆放已更新，请重新拖动" };
-      this.editBase = null;
-      this.emit();
-    }
     if (!selected) {
-      this.state = { ...this.state, selectedItemId: null, preview: null };
+      this.state = { ...this.state, selectedItemId: null, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 } };
       this.emit();
       return;
     }
-    this.state = { ...this.state, selectedItemId: itemId, preview: null };
+    this.state = { ...this.state, selectedItemId: itemId, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 } };
     this.emit();
   }
 
@@ -123,12 +144,14 @@ export class FilmSetObjectSession extends FilmSetObjectState {
   endEdit(): void {
     const preview = this.state.preview;
     const item = this.selectedItem();
-    this.state = { ...this.state, preview: null };
+    const base = this.editBase;
+    this.editBase = null;
+    this.state = { ...this.state, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 } };
     if (!preview || !item) {
       this.emit();
       return;
     }
-    if (sameTransform(preview, item.localTransform)) {
+    if (!this.deps.isWritable() || base && !sameTransform(item.localTransform, base) || equivalentTransform(preview, item.localTransform)) {
       this.emit();
       return;
     }
@@ -136,16 +159,16 @@ export class FilmSetObjectSession extends FilmSetObjectState {
       this.emit();
       return;
     }
-    const result = this.submit({ kind: "transform", localTransform: preview, ...(this.editBase ? { expectedLocalTransform: this.editBase } : {}) });
-    this.editBase = null;
+    const result = this.submit({ kind: "transform", localTransform: preview, ...(base ? { expectedLocalTransform: base } : {}) });
     if (!result && !this.state.error) this.state = { ...this.state, error: "摆放提交失败" };
     this.emit();
   }
 
   /** 取消编辑：丢弃 preview，不提交。 */
   cancelEdit(): void {
-    if (!this.state.preview) return;
-    this.state = { ...this.state, preview: null };
+    this.editBase = null;
+    if (!this.state.preview && !this.state.feedback.active && !this.state.feedback.hover) return;
+    this.state = { ...this.state, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 } };
     this.emit();
   }
 
@@ -165,7 +188,7 @@ export class FilmSetObjectSession extends FilmSetObjectState {
     });
     if (result) {
       // 乐观移除对象（working projection 可提前消失），committed 前不宣称成功。
-      this.state = { ...this.state, selectedItemId: null, preview: null };
+      this.state = { ...this.state, selectedItemId: null, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 } };
     } else if (!this.state.error) {
       this.state = { ...this.state, error: "删除失败" };
     }
@@ -177,6 +200,7 @@ export class FilmSetObjectSession extends FilmSetObjectState {
   setSelectedScale(scale: number): boolean {
     const item = this.selectedItem();
     if (!item || !Number.isFinite(scale) || scale <= 0) return false;
+    if (scale === item.localTransform.scale) return true;
     if (this.state.pendingItemId === item.id) return false;
     const result = this.submit({
       kind: "transform",
@@ -213,6 +237,7 @@ export class FilmSetObjectSession extends FilmSetObjectState {
   /** 权威内容变化后清理失效选择（远端删除/切换）。 */
   reconcile(): void {
     if (!this.state.nodeId) return;
+    if (!this.deps.isWritable()) { this.cancelEdit(); this.setTool("move"); return; }
     const itemId = this.state.selectedItemId;
     if (!itemId) return;
     const selected = filmSetItemById(this.deps.readContent(this.state.nodeId), itemId);
@@ -221,12 +246,12 @@ export class FilmSetObjectSession extends FilmSetObjectState {
       return;
     }
     if (this.state.preview && this.editBase && selected && !sameTransform(selected.localTransform, this.editBase)) {
-      this.state = { ...this.state, preview: null, error: "对象摆放已更新，请重新拖动" };
+      this.state = { ...this.state, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 }, error: "对象摆放已更新，请重新拖动" };
       this.editBase = null;
       this.emit();
     }
     if (!selected) {
-      this.state = { ...this.state, selectedItemId: null, preview: null };
+      this.state = { ...this.state, selectedItemId: null, preview: null, pointer: null, feedback: { epoch: this.state.feedback.epoch + 1 } };
       this.emit();
     }
   }
@@ -234,7 +259,7 @@ export class FilmSetObjectSession extends FilmSetObjectState {
   private submit(op: FilmSetItemPatchOp, label?: string, onOutcome?: (outcome: FilmSetOperationOutcome) => void): boolean {
     const nodeId = this.state.nodeId;
     const item = this.selectedItem();
-    if (!nodeId || !item || !this.deps.isWritable()) return false;
+    if (!nodeId || !item || !this.deps.isWritable() || this.state.pendingItemId !== null) return false;
     const token = ++this.submission;
     const actionLabel = label ?? itemActionLabel(op, item.name);
     const targetId = item.id;
@@ -253,19 +278,27 @@ export class FilmSetObjectSession extends FilmSetObjectState {
     if (typeof result === "boolean") return result;
     this.state = { ...this.state, pendingItemId: targetId };
     if (result instanceof Promise) {
-      void result.then(outcome => settle(outcome.ok ? { state: "committed" } : { state: "rejected", error: outcome.reason ?? "对象操作提交失败" }));
+      void result.then(outcome => settle(outcome.ok ? { state: "committed" } : { state: "rejected", error: outcome.reason ?? "对象操作提交失败" })).catch(() => this.markUnknown(token));
       return true;
     }
     if (!result.ok) {
       this.state = { ...this.state, pendingItemId: null, error: result.reason ?? "对象操作提交失败" };
       return false;
     }
+    if (!result.handle) { settle({ state: "committed" }); return true; }
     void result.handle?.settled.then(handle => {
       if (handle.state === "rejected") settle({ state: "rejected", error: handle.error });
       else if (handle.state === "committed") settle({ state: "committed" });
-      else settle({ state: "pending" });
-    });
+      // Unknown results retain the original invocation identity and keep conflicting edits blocked.
+      else this.markUnknown(token);
+    }).catch(() => this.markUnknown(token));
     return true;
+  }
+
+  private markUnknown(token: number): void {
+    if (token !== this.submission) return;
+    this.state = { ...this.state, error: "操作结果尚未确认，请等待同步" };
+    this.emit();
   }
 
   private deletionLabel(item: FilmSetItem): string {
@@ -297,4 +330,10 @@ function itemActionLabel(op: FilmSetItemPatchOp, name: string): string {
 export { isFilmSetMediaItem };
 
 export { readFilmSetContentForSession } from "../../state/browser/object-state.js";
+function signed(value: number, digits: number): string { return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`; }
 export type { FilmSetObjectEntry, FilmSetObjectSessionState, FilmSetOperationOutcome } from "../../state/browser/object-state.js";
+
+function equivalentTransform(left: FilmSetLocalTransform, right: FilmSetLocalTransform): boolean {
+  return [left.offset.x-right.offset.x,left.offset.y-right.offset.y,left.offset.z-right.offset.z,left.yaw-right.yaw,left.scale-right.scale]
+    .every(delta => Math.abs(delta) <= 1e-9);
+}

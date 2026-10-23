@@ -239,3 +239,9 @@ describe("canonical 生成物一致性（任务 1.4）", () => {
     }
   });
 });
+
+it.each(["gizmoAxisX", "gizmoAxisY", "gizmoAxisZ"])("rejects a theme missing %s atomically", key => {
+  const tokens={...defaultAppTheme().tokens} as Record<string,string>;
+  delete tokens[key];
+  expect(validateAppThemePreset({id:"incomplete",version:APP_THEME_SCHEMA_VERSION,tokens})).toMatchObject({ok:false,code:"missing-token"});
+});

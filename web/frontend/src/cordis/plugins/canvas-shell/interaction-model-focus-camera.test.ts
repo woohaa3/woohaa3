@@ -68,7 +68,7 @@ describe("聚焦滚轮事件目标分类（change: fix-model-focus-navigation-an
 });
 
 const shotEditor: BevyModelEditor = {
-  version: "woohaa-model-editor-v1",
+  version: "woohaa-model-editor-v2",
   nodeId: "m1",
   toolMode: "camera",
   cameraId: "cam",

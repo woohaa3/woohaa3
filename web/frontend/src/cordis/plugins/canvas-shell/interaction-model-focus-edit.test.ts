@@ -124,7 +124,7 @@ describe("模型聚焦编辑（change: add-model-focus-viewing / editing）", ()
       canvas,
       targets: () => [target],
       getModelEditor: () => ({
-        version: "woohaa-model-editor-v1",
+        version: "woohaa-model-editor-v2",
         nodeId: "m1",
         toolMode: "camera",
         cameraId: "cam-a",
@@ -181,7 +181,7 @@ describe("模型聚焦编辑（change: add-model-focus-viewing / editing）", ()
       canvas,
       targets: () => [target],
       getModelEditor: () => ({
-        version: "woohaa-model-editor-v1",
+        version: "woohaa-model-editor-v2",
         nodeId: "m1",
         toolMode: "camera",
         cameraTool: "orbit",
@@ -227,9 +227,10 @@ describe("模型聚焦编辑（change: add-model-focus-viewing / editing）", ()
     const target = targetFor(canvas);
     const worldCenter = modelBounds(target)!.center;
     const editor = {
-      version: "woohaa-model-editor-v1" as const,
+      version: "woohaa-model-editor-v2" as const,
       nodeId: "m1",
       toolMode: "camera" as const,
+      cameraTool: "focus" as const,
       cameraId: "cam-a",
       focus: worldCenter,
       radius: 2,
@@ -280,7 +281,7 @@ describe("模型聚焦编辑（change: add-model-focus-viewing / editing）", ()
     domFire(h.dom, "pointermove", { clientX: xMid!.x + 30, clientY: xMid!.y });
     domFire(h.dom, "pointerup", { clientX: xMid!.x + 30, clientY: xMid!.y });
     h.controller.flush();
-    expect(events).toEqual(["begin", "move", "end"]);
+    expect(events).toEqual(["begin", "move", "move", "end"]);
     expect(h.controller.focusProjection()!.yaw).toBe(before.yaw);
     expect(submitted.filter((command) => command.type === "nodeData.patch")).toHaveLength(0);
     h.controller.dispose();

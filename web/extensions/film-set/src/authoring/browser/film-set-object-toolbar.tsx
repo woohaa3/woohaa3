@@ -91,13 +91,19 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
       {item ? (
         <div className="film-set-object-fields" key={item.id}>
           <div className="film-set-section-heading film-set-selection-heading"><h3 title={item.name}>{item.name}</h3><span>变换</span></div>
+          <div className="film-set-object-tools">
+            {([ ["move", "移动"], ["yaw", "Y 旋转"], ["scale", "等比缩放"] ] as const).map(([tool, label]) => (
+              <Button key={tool} size="sm" tone={state.tool === tool ? "primary" : "ghost"} data-active={state.tool === tool}
+                disabled={!editable || pending} onClick={() => session.setTool(tool)}>{label}</Button>
+            ))}
+          </div>
           <FilmSetObjectTransformFields session={session} transform={state.preview ?? item.localTransform} disabled={!editable || pending} />
           <div className="film-set-object-actions">
             <Button size="sm" tone="ghost" className="film-set-object-delete" icon={<TrashIcon />} disabled={!editable || pending} onClick={deleteItem}>删除对象</Button>
           </div>
         </div>
       ) : objects.length > 0 ? <p className="film-set-object-hint">在场景中点选对象，或从列表中选择。</p> : null}
-      {item ? <p className="film-set-object-hint">拖动三轴移动 · Shift 拖动旋转</p> : null}
+      {item ? <p className="film-set-object-hint">{state.tool === "move" ? "拖动箭头或中心框移动 · Shift 拖动对象旋转" : state.tool === "yaw" ? "拖动圆环绕对象局部 Y 轴旋转" : "拖动方块等比缩放"}</p> : null}
       {state.error ? <div className="film-set-object-error" role="status">{state.error}</div> : null}
     </section>
   );

@@ -633,3 +633,23 @@ it("细节端口使用增量编码，清理及新 runtime 首批完整重传",as
   const next=await loadBevyRuntime({importModule:async()=>module});
   next.setImageFocusDetails!(frame);expect(upload.mock.lastCall?.[1]).toHaveLength(4);next.dispose();
 });
+
+it("gizmo queries carry full transient identity, retry stale once and reject old generations", async () => {
+  const module=mockModule([]);
+  const requests: Array<Record<string,unknown>>=[];
+  let stale=true;
+  module.query_gizmo_hit=(json:string)=>{
+    const request=JSON.parse(json);requests.push(request);
+    return JSON.stringify(stale ? {available:false,reason:"stale"} : {available:true,generation:request.generation,handle:"scale",layoutId:"layout",epoch:7});
+  };
+  const runtime=await loadBevyRuntime({importModule:async()=>module});
+  const input={kind:"object" as const,editor:{version:"woohaa-model-editor-v2" as const,nodeId:"film",itemId:"a",toolMode:"object" as const,objectTool:"scale" as const,
+    focus:[0,0,0] as [number,number,number],radius:1,feedback:{epoch:7,hover:"scale" as const}},
+    projection:{target:[0,0,0] as [number,number,number],yaw:0,pitch:0,distance:10},surface:{width:1024,height:768},point:{x:1,y:2}};
+  expect(runtime.queryGizmoHit!(input)?.available).toBe(false);
+  expect(requests).toHaveLength(2);
+  expect(requests[0].editor).toEqual(input.editor);
+  stale=false;expect(runtime.queryGizmoHit!(input)?.handle).toBe("scale");
+  module.query_gizmo_hit=()=>JSON.stringify({available:true,generation:999,handle:"scale"});
+  expect(runtime.queryGizmoHit!(input)).toBeNull();runtime.dispose();
+});

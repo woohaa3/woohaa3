@@ -39,6 +39,7 @@ export type AttachAssemblyDeps = {
   contentRectRight: () => number;
   focusRect: () => import("../../focus/types.js").FocusContentRect | null;
   modelEditor: () => import("@woohaa3/contracts").BevyModelEditor | null;
+  onGizmoFeedback?: InteractionControllerOptions["onGizmoFeedback"];
   animationPlayback: () => import("@woohaa3/contracts").BevyAnimationPlayback | null;
   focusTransition: () => import("@woohaa3/contracts").BevyFocusTransition | null;
   runState: () => import("../canvas-shell/interaction-types.js").RunStateProjectionInput | null;
@@ -88,6 +89,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     getContentRect: () => ({ right: deps.contentRectRight() }),
     getFocusContentRect: deps.focusRect,
     getModelEditor: deps.modelEditor,
+    onGizmoFeedback: deps.onGizmoFeedback,
     getAnimationPlayback: deps.animationPlayback,
     getFocusTransition: deps.focusTransition,
     getRunState: deps.runState,

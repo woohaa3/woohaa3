@@ -33,7 +33,7 @@ const OUT_TS_DARK = join(root, "web", "contracts", "src", "theme", "generated-da
 const OUT_CSS = join(root, "web", "frontend", "src", "cordis", "ui", "generated-theme.css");
 const OUT_RS = join(root, "bevy", "src", "theme_generated.rs");
 
-const SCHEMA_VERSION = "woohaa-app-theme-v1";
+const SCHEMA_VERSION = "woohaa-app-theme-v2";
 const MAX_ID_LENGTH = 80;
 const MAX_JSON_BYTES = 16 * 1024;
 const HEX_PATTERN = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
@@ -66,6 +66,7 @@ const TOKEN_GROUPS = {
     "nodeModelForeground", "nodeModelTint", "nodeAudioForeground", "nodeAudioTint",
     "nodeVideoForeground", "nodeVideoTint", "nodeDefaultForeground", "nodeDefaultTint"
   ],
+  gizmo: ["gizmoAxisX", "gizmoAxisY", "gizmoAxisZ"],
   grid: ["gridMinor", "gridMajor", "gridSelection", "gridGizmo"],
   mediaDialog: [
     "mediaDialogBackdrop", "mediaDialogSurface", "mediaDialogText", "mediaDialogTextMuted",

@@ -395,6 +395,10 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
    * 传 null 清除；payload 未变不失效，避免普通模型聚焦轨道每帧挡住 `set_observer`。
    */
   setModelEditor = (editor: BevyModelEditor | null): void => {
+    const previous = this.modelEditor;
+    if (editor?.toolMode === "camera" && previous?.nodeId === editor.nodeId && previous.cameraId === editor.cameraId && previous.cameraTool === editor.cameraTool && previous.toolMode === editor.toolMode && !editor.feedback) {
+      editor = { ...editor, ...(previous.feedback ? { feedback: previous.feedback } : {}) };
+    }
     if (JSON.stringify(this.modelEditor) === JSON.stringify(editor)) return;
     this.modelEditor = editor;
     this.controllerInstance?.invalidate("model-editor");
@@ -598,6 +602,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         contentRectRight: () => this.focusRectStore.contentRectRight(),
         focusRect: () => this.focusRectStore.get(),
         modelEditor: () => this.modelEditor,
+        onGizmoFeedback: feedback => {
+          if (this.modelEditor?.toolMode === "camera") this.setModelEditor({ ...this.modelEditor, feedback });
+        },
         animationPlayback: () => this.animationPlaybackStore.current(),
         focusTransition: () => this.focusTransition.modelProgress(),
         runState: () => this.options.getRunState?.() ?? null,

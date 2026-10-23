@@ -1,171 +1,145 @@
-//! gizmo 命中与轴拖动约束的 JSON 边界入口
-//! （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 5.3）。
-//!
-//! 从 `gizmo/mod.rs` 拆出以遵守文件体积守卫；只做 JSON 解码与调度，几何在父模块。
-
-use super::{
-    AxisDragConstraint, FocusCamera, FocusGizmo, GizmoHitResult, MODEL_FOCUS_FOV,
-    FOCUS_GIZMO_CENTER_HIT_CSS, focus_axis_constraint, focus_gizmo, focus_projector, hit_focus_gizmo,
-    hit_model_gizmo, hit_shot_gizmo, model_gizmo, shot_gizmo, shot_projector, Projector,
-};
-
+//! The WASM and native dispatcher share this exact accepted-layout query.
+use super::{AxisDragConstraint, GizmoHitResult};
+use crate::gizmo_layout::{ObjectGizmoLayout, ObjectTool, hit_shot_layout, shot_gizmo_layout};
+use crate::protocol::ModelEditor;
+use bevy::math::{Mat3, Vec2, Vec3};
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Request {
-    /// 查询种类：`model` / `shot` / `focus`（与前端三个入口一一对应）。
     kind: String,
     x: f32,
     y: f32,
     width: f32,
     height: f32,
-    #[serde(default)]
-    radius: Option<f32>,
-    #[serde(default)]
-    focus: Option<[f32; 3]>,
-    #[serde(default)]
-    shot: Option<ShotJson>,
-    #[serde(default)]
-    projection: Option<ProjectionJson>,
+    generation: u32,
+    editor: ModelEditor,
+    projection: Projection,
 }
-
 #[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ShotJson {
-    position: [f32; 3],
-    focus: [f32; 3],
-    /// 透视垂直 FOV（弧度；change: switch-shot-camera-to-perspective）。
-    fov: f32,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectionJson {
+struct Projection {
     target: [f32; 3],
     yaw: f32,
     pitch: f32,
     distance: f32,
 }
-
-/// JSON 入口：模型编辑 gizmo 命中。
-///
-/// 请求携带 editor 瞬时态（kind/toolMode/shot/focus/radius）、可选聚焦投影与 surface 尺寸，
-/// 由 Rust 用同一相机/几何投影并返回稳定 handle 与轴拖动约束。
 pub(crate) fn gizmo_query_json(json: &str) -> String {
-    let Ok(request) = serde_json::from_str::<Request>(json) else {
-        return gizmo_unavailable("unavailable");
-    };
-    let surface = (request.width, request.height);
-    let radius = request.radius.unwrap_or(1.0);
-    let pointer = (request.x, request.y);
-    if request.kind == "model" {
-        let Some(focus) = request.focus else {
-            return gizmo_unavailable("unavailable");
-        };
-        let Some(camera) = focus_camera(request.projection.as_ref()) else {
-            return gizmo_unavailable("unavailable");
-        };
-        let project = focus_projector(camera, surface, MODEL_FOCUS_FOV);
-        let geometry = model_gizmo(focus, radius);
-        return match hit_model_gizmo(pointer, &geometry, &project) {
-            Some((handle, _)) => gizmo_hit(Some(handle), None),
-            None => gizmo_hit(None, None),
-        };
-    }
-    // 片场对象编辑：选中对象处三轴位移 + 中心（change: 2026-10-09）。
-    if request.kind == "object" {
-        let Some(focus) = request.focus else {
-            return gizmo_unavailable("unavailable");
-        };
-        let Some(camera) = focus_camera(request.projection.as_ref()) else {
-            return gizmo_unavailable("unavailable");
-        };
-        let project = focus_projector(camera, surface, MODEL_FOCUS_FOV);
-        let geometry = focus_gizmo(focus, radius);
-        if let Some(center) = project(geometry.origin) {
-            let distance = ((pointer.0 - center.0).powi(2) + (pointer.1 - center.1).powi(2)).sqrt();
-            if distance <= FOCUS_GIZMO_CENTER_HIT_CSS {
-                return gizmo_hit(Some("center"), None);
-            }
-        }
-        return match hit_focus_gizmo(pointer, &geometry, &project) {
-            Some((axis, _)) => {
-                let constraint = focus_axis_constraint(&geometry, axis, &project);
-                gizmo_hit(Some(axis), constraint)
-            }
-            None => gizmo_hit(None, None),
-        };
-    }
-    if request.kind == "focus" {
-        let Some(shot) = request.shot else {
-            return gizmo_unavailable("unavailable");
-        };
-        let Some(camera) = focus_camera(request.projection.as_ref()) else {
-            return gizmo_unavailable("unavailable");
-        };
-        let project = focus_projector(camera, surface, MODEL_FOCUS_FOV);
-        let geometry = focus_gizmo(shot.focus, radius);
-        // 注视点中心优先：与主画面一致，中心拖动改变注视点本身（无轴约束）。
-        if let Some(center) = project(geometry.origin) {
-            let distance = ((pointer.0 - center.0).powi(2) + (pointer.1 - center.1).powi(2)).sqrt();
-            if distance <= FOCUS_GIZMO_CENTER_HIT_CSS {
-                return gizmo_hit(Some("center"), None);
-            }
-        }
-        return match hit_focus_gizmo(pointer, &geometry, &project) {
-            Some((axis, _)) => {
-                let constraint = focus_axis_constraint(&geometry, axis, &project);
-                gizmo_hit(Some(axis), constraint)
-            }
-            None => gizmo_hit(None, None),
-        };
-    }
-    let Some(shot) = request.shot else {
-        return gizmo_hit(None, None);
-    };
-    // 主观察相机的透视投影（与主画面 gizmo 一致）；无投影时回退镜头正交投影。
-    let project = match focus_camera(request.projection.as_ref()) {
-        Some(camera) => focus_projector(camera, surface, MODEL_FOCUS_FOV),
-        None => shot_projector(shot.focus, shot.position, shot.fov, surface),
-    };
-    let geometry = shot_gizmo(shot.focus, shot.position, radius);
-    match hit_shot_gizmo(pointer, &geometry, &project) {
-        Some((handle, _)) => gizmo_hit(Some(handle), None),
-        None => gizmo_hit(None, None),
-    }
-}
-
-fn focus_camera(projection: Option<&ProjectionJson>) -> Option<FocusCamera> {
-    let projection = projection?;
-    Some(FocusCamera {
-        target: projection.target,
-        yaw: projection.yaw,
-        pitch: projection.pitch,
-        distance: projection.distance,
-    })
-}
-
-fn gizmo_hit(handle: Option<&str>, constraint: Option<AxisDragConstraint>) -> String {
-    serde_json::to_string(&GizmoHitResult {
-        available: true,
-        reason: None,
-        handle: handle.map(str::to_owned),
-        constraint,
-    })
-    .unwrap_or_else(|_| gizmo_unavailable("unavailable"))
-}
-
-fn gizmo_unavailable(reason: &str) -> String {
-    serde_json::to_string(&GizmoHitResult {
+    let mut result = GizmoHitResult {
         available: false,
-        reason: Some(reason.to_owned()),
+        reason: Some("unavailable".into()),
         handle: None,
         constraint: None,
-    })
-    .unwrap_or_else(|_| "{}".to_owned())
+        yaw_constraint: None,
+        layout_id: None,
+        generation: 0,
+        epoch: 0,
+    };
+    let apply = |result: &mut GizmoHitResult| -> Option<()> {
+        let request = serde_json::from_str::<Request>(json).ok()?;
+        if request.editor.validate().is_err() {
+            return None;
+        }
+        let accepted = super::accepted::current()?;
+        let generation = crate::canvas_query::interaction::current_generation();
+        let expected = super::accepted::layout_id(&accepted.editor, &accepted.view);
+        let view = crate::gizmo_layout::GizmoView::orbit(
+            Vec3::from_array(request.projection.target),
+            request.projection.yaw,
+            request.projection.pitch,
+            request.projection.distance,
+            Vec2::new(request.width, request.height),
+            accepted.view.fov,
+        )?;
+        if request.generation != generation
+            || super::accepted::layout_id(&request.editor, &view) != expected
+            || request.editor.feedback.as_ref().map(|f| f.epoch)
+                != accepted.editor.feedback.as_ref().map(|f| f.epoch)
+        {
+            result.reason = Some("stale".into());
+            return None;
+        }
+        result.generation = generation;
+        result.layout_id = Some(expected);
+        result.epoch = accepted.editor.feedback.as_ref().map_or(0, |f| f.epoch);
+        let pointer = Vec2::new(request.x, request.y);
+        if !pointer.is_finite() {
+            return None;
+        }
+        let editor = &accepted.editor;
+        if request.kind == "object" && editor.tool_mode != "object"
+            || request.kind != "object" && editor.tool_mode != "camera"
+        {
+            return None;
+        }
+        let tool = if request.kind == "object" {
+            editor.object_tool
+        } else {
+            ObjectTool::Move
+        };
+        if request.kind == "focus" && editor.camera_tool.as_deref() != Some("focus") {
+            return None;
+        }
+        result.available = true;
+        result.reason = None;
+        if request.kind == "shot" {
+            let shot = editor.shot.as_ref()?;
+            let position = Vec3::from_array(shot.position);
+            let lines = shot_gizmo_layout(
+                &view,
+                Vec3::from_array(shot.focus),
+                position,
+                shot.fov,
+                crate::protocol::parse_shot_aspect_ratio(&shot.aspect)?,
+                editor.camera_tool.as_deref().unwrap_or("orbit"),
+            );
+            result.handle = hit_shot_layout(&lines, &view, position, pointer).map(str::to_owned);
+            return Some(());
+        }
+        if request.kind != "object" && request.kind != "focus" {
+            return None;
+        }
+        let origin = if request.kind == "focus" {
+            editor.shot.as_ref()?.focus
+        } else {
+            editor.focus
+        };
+        let parent = editor
+            .parent_basis
+            .map(|b| Mat3::from_cols_array(&b))
+            .unwrap_or(Mat3::IDENTITY);
+        let layout = ObjectGizmoLayout::new(&view, Vec3::from_array(origin), tool, parent)?;
+        let Some(handle) = layout.hit(&view, pointer) else {
+            return Some(());
+        };
+        match handle {
+            "x" | "y" | "z" => {
+                let index = match handle {
+                    "x" => 0,
+                    "y" => 1,
+                    _ => 2,
+                };
+                let (direction, scale) = layout.axes[index]?;
+                result.constraint = Some(AxisDragConstraint {
+                    axis: handle.into(),
+                    direction: (direction.x, direction.y),
+                    world_per_pixel: scale,
+                });
+            }
+            "yaw-ring" => result.yaw_constraint = Some(layout.yaw_constraint(&view, pointer)?),
+            "scale" => {
+                result.constraint = Some(AxisDragConstraint {
+                    axis: handle.into(),
+                    direction: (
+                        std::f32::consts::FRAC_1_SQRT_2,
+                        -std::f32::consts::FRAC_1_SQRT_2,
+                    ),
+                    world_per_pixel: 1.0 / 128.0,
+                })
+            }
+            _ => {}
+        }
+        result.handle = Some(handle.into());
+        Some(())
+    };
+    apply(&mut result);
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".into())
 }
-
-// 显式标记这些类型在子模块中作为签名一部分被引用（避免未使用告警）。
-#[allow(dead_code)]
-type _ProjectorAlias = Projector<'static>;
-#[allow(dead_code)]
-type _FocusGizmoAlias = FocusGizmo;

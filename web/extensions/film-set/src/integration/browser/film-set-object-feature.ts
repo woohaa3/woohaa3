@@ -99,14 +99,18 @@ export function installFilmSetObjectFeature(
       });
       if (!result?.available || !result.handle) return null;
       const handle = result.handle;
-      if (handle !== "x" && handle !== "y" && handle !== "z" && handle !== "center") return null;
+      if (handle !== "x" && handle !== "y" && handle !== "z" && handle !== "center" && handle !== "yaw-ring" && handle !== "scale") return null;
       return {
         handle,
+        ...(result.yawConstraint ? { yawConstraint: result.yawConstraint } : {}),
+        ...(result.layoutId ? { layoutId: result.layoutId } : {}),
         ...(result.constraint ? { direction: result.constraint.direction, worldPerPixel: result.constraint.worldPerPixel } : {})
       };
     },
     nodeId: () => objectSession.getState().nodeId,
-    blocked: () => isHistoryMode() || !ctx.canvasSession.isWritable()
+    invalidationKey: () => JSON.stringify([ctx.canvasRuntime.runtime()?.generation(), ctx.canvasRuntime.modelFocusMode(), objectSession.selectedItem(),
+      (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[objectSession.getState().nodeId ?? ""]]),
+    blocked: () => isHistoryMode() || !ctx.canvasSession.isWritable() || ctx.canvasRuntime.animationPlaybackState()?.viewMode === "focus-preview"
   });
   ctx.canvasRuntime.setFilmSetObjectGesture?.(objectGesture.handler);
   // 片场对象局部 keyboard action（change: 2026-10-10-improve-film-set-editing-and-inspector，
@@ -137,6 +141,8 @@ export function installFilmSetObjectFeature(
   ctx.canvasRuntime.setFilmSetObjectAction?.(objectAction);
 
   const unsubscribeFocus = ctx.canvasRuntime.subscribeModelFocus(() => {
+    objectGesture.handler.cancelIfDragging();
+    objectSession.setHover(null);
     const candidate = ctx.canvasRuntime.modelFocusProjection()?.nodeId ?? null;
     const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
     const node = candidate ? canvas?.document.nodes.find((entry) => entry.id === candidate) : undefined;
@@ -158,6 +164,22 @@ export function installFilmSetObjectFeature(
     ctx.canvasRuntime.controller()?.invalidate("film-set-object-preview");
   });
   const unsubscribeCanvas = ctx.canvasState.subscribe(() => objectSession.reconcile());
+  const unsubscribePermission = ctx.canvasSession.subscribe(() => objectSession.reconcile());
+  const unsubscribePlayback = ctx.filmSetPlayback.subscribe(() => {
+    if (!ctx.filmSetPlayback.getSnapshot().preview) return;
+    objectGesture.handler.cancelIfDragging();
+    objectSession.cancelEdit();
+    objectSession.setTool("move");
+  });
+  let runtimeGeneration = ctx.canvasRuntime.runtime()?.generation();
+  const unsubscribeRuntime = ctx.canvasRuntime.subscribe(() => {
+    const generation = ctx.canvasRuntime.runtime()?.generation();
+    if (generation === runtimeGeneration) return;
+    runtimeGeneration = generation;
+    objectGesture.handler.cancelIfDragging();
+    objectSession.cancelEdit();
+    objectSession.setTool("move");
+  });
 
   return {
     session: objectSession,
@@ -168,6 +190,9 @@ export function installFilmSetObjectFeature(
       if (previewNode) filmSetPreview.delete(previewNode);
       ctx.canvasRuntime.controller()?.invalidate("film-set-object-dispose");
       unsubscribeCanvas();
+      unsubscribePermission();
+      unsubscribeRuntime();
+      unsubscribePlayback();
       objectGesture.handler.dispose();
       ctx.canvasRuntime.setFilmSetObjectGesture?.(null);
     }
