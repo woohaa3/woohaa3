@@ -12,7 +12,7 @@ import { hiddenBy, summarize } from "./panel-shared.js";
 import { ParameterField } from "./parameter-field.js";
 import type { ExecutionPanelParameterField } from "./types.js";
 
-export { AssistantModelSelector as ModelSelector } from "../../../ui/assistant-execution/model-selector.js";
+export { AssistantListSelector as ModelSelector } from "../../../ui/assistant-execution/model-selector.js";
 
 export function SettingsMenu({
 	fields,

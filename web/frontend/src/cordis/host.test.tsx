@@ -478,7 +478,7 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
     expect(panel?.getAttribute("data-presentation")).toBe("dock");
     expect(panel?.textContent).toContain("转换状态");
     expect(el.querySelector("textarea")?.disabled).toBe(true);
-    expect(panel?.querySelector(".authoring-generate__toolbar")).not.toBeNull();
+    expect(panel?.querySelector(".assistant-toolbar")).not.toBeNull();
   });
 
   it("无任何来源扩展时仍渲染内置面板并提示配置来源（MUST NOT 隐藏生成入口）", async () => {

@@ -29,7 +29,7 @@ import type { AgentConversationSubmitInput, AgentConversationSubmitResult } from
 import { AssistantComposer } from "../../../ui/assistant-execution/composer.js";
 import { AssistantToolbar } from "../../../ui/assistant-execution/toolbar.js";
 import { Button } from "../../../../shared/ui/Button.js";
-import { AssistantModelSelector } from "../../../ui/assistant-execution/model-selector.js";
+import { AssistantModelSelector, AssistantListSelector } from "../../../ui/assistant-execution/model-selector.js";
 import { agentDirectory } from "../../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, assistantSelectionMemory, rememberAssistantPreference } from "../../../services/assistant-execution/selection.js";
 import {
@@ -464,7 +464,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
           value={draft} onChange={setDraft} disabled={!detail || input.busy || turnActive || switchingConnection} onSubmit={() => submitReply()} />
         <AssistantToolbar disabled={input.busy || switchingConnection || turnActive} refreshing={Boolean(directoryView.loadingMessage)}
           onRefresh={() => void directory.load(true)} onManage={props.onManageAssistant}
-          assistant={replyConnectionId ? <AssistantModelSelector label="选择助手" model={replyConnectionId} options={directoryView.connections.map(connection => ({ value: connection.connectionId, label: connection.name, detail: connection.reason ?? undefined }))}
+          assistant={replyConnectionId ? <AssistantListSelector label="选择助手" model={replyConnectionId} options={directoryView.connections.map(connection => ({ value: connection.connectionId, label: connection.name, detail: connection.reason ?? undefined }))}
             open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)} onChange={id => void chooseConnection(id)} />
             : undefined}
           parameters={replyConnectionId ? <AssistantModelSelector label="选择助手模型" model={replyModel} options={replyModels.map(model => ({ value: model.id, label: model.label }))}

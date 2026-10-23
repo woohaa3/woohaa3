@@ -4,8 +4,7 @@ import type { AgentConversationService } from "../../contract/agent-conversation
 import type { CurrentUserService } from "../../services/current-user.js";
 import { agentDirectory } from "../../services/agent-directory.js";
 import { agentDirectoryModels, agentModelSelection } from "./agent-model-selection.js";
-import { ModelSelector } from "./execution-panel/model-selector.js";
-import { AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "../../ui/assistant-execution/model-selector.js";
+import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "../../ui/assistant-execution/model-selector.js";
 import { AssistantToolbar } from "../../ui/assistant-execution/toolbar.js";
 
 export type AssistantConnectionSelection = { connection: AgentConnectionBinding; model?: string; reasoningEffort?: AgentReasoningEffort };
@@ -49,7 +48,7 @@ export function AssistantConnectionPicker(props: {
       <AssistantConnectionSelector empty={!props.compact && emptyDirectory} loading={Boolean(state.loadingMessage)} model={value?.connection.connectionId ?? ""}
         open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} onManage={props.onManage}
         disabled={props.disabled || !namespace || !state.ready} options={state.connections.map(c => ({ value: c.connectionId, label: c.name, detail: c.reason }))} onChange={choose} />}
-    parameters={(props.compact && value || connection && (!toolDefault || models.length > 0)) ? <ModelSelector label="选择助手模型" model={value?.model ?? ""}
+    parameters={(props.compact && value || connection && (!toolDefault || models.length > 0)) ? <AssistantModelSelector label="选择助手模型" model={value?.model ?? ""}
         keepOpenOnModelSelect
         open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={props.disabled || changed}
         options={[...(toolDefault || props.compact ? [{ value: "", label: "使用助手默认模型" }] : []), ...models.map(m => ({ value: m.id, label: m.label }))]}

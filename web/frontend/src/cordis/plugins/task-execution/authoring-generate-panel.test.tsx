@@ -98,7 +98,9 @@ async function select(label: string, text: string) {
       trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     }
   });
-  const option = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(option => option.textContent === text);
+  // 模型与 Variant 在同一个参数面板里横向排开（不再逐项单行下拉）。
+  const option = [...document.querySelectorAll<HTMLButtonElement>(".assistant-model-panel__option")]
+    .find(option => option.getAttribute("aria-label") === text);
   expect(option, document.body.textContent ?? "").toBeDefined();
   await act(async () => { option!.click(); });
   // Radix restores trigger focus on the next task after closing a popup.
@@ -251,7 +253,7 @@ describe("统一 Agent 创作入口", () => {
       el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
     );
     const options = document.querySelector(
-      '[role="menu"][aria-label="模型"]',
+      '[role="dialog"][aria-label="模型"]',
     )!.textContent;
     expect(options).toContain("模型 B");
     expect(options).not.toContain("模型 A");
@@ -306,7 +308,7 @@ describe("统一 Agent 创作入口", () => {
       el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
     );
     expect(
-      document.querySelector('[role="menu"][aria-label="模型"]')!.textContent,
+      document.querySelector('[role="dialog"][aria-label="模型"]')!.textContent,
     ).toContain("GPT-6.1-Sol");
   });
 
@@ -561,12 +563,12 @@ it("活动门禁关闭已打开的选择菜单，解除门禁后不自行重开�
   const { props, service } = fixture();
   await render(props);
   await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-  expect(document.querySelector('[role="menu"][aria-label="模型"]')).not.toBeNull();
+  expect(document.querySelector('[role="dialog"][aria-label="模型"]')).not.toBeNull();
   await render({ ...props, sourceSelection: { ...props.sourceSelection!, blockedReason: "正在执行" } });
-  expect(document.querySelector('[role="menu"][aria-label="模型"]')).toBeNull();
+  expect(document.querySelector('[role="dialog"][aria-label="模型"]')).toBeNull();
   expect(el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.disabled).toBe(true);
   await render(props);
-  expect(document.querySelector('[role="menu"][aria-label="模型"]')).toBeNull();
+  expect(document.querySelector('[role="dialog"][aria-label="模型"]')).toBeNull();
   expect(service.submitTurn).not.toHaveBeenCalled();
 });
 

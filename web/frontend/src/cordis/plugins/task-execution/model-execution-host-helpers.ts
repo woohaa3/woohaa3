@@ -77,7 +77,7 @@ export function readPanelLocalSurface(): { picker: boolean; overlay: boolean } {
   return {
     picker: document.querySelector('[data-testid="reference-picker"]') !== null,
     overlay: document.querySelector(
-      ".mc-panel__model-menu, .mc-panel__settings-menu, .mc-panel__polish-menu, .mc-panel__error-panel"
+      ".mc-panel__model-menu, .mc-panel__settings-menu, .mc-panel__polish-menu, .mc-panel__error-panel, .assistant-model-panel"
     ) !== null
   };
 }
