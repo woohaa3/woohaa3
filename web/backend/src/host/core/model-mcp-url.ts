@@ -19,3 +19,22 @@ export function internalModelMcpUrl(input: { port: string | number; basePath: st
   const port = String(input.port).trim() || "5180";
   return `http://127.0.0.1:${port}${basePathPrefix(input.basePath)}/mcp/model-canvas`;
 }
+
+/**
+ * 给本机 Agent 的受控 MCP 入口。url 在每次读取时从 env 派生，
+ * 避免桌面宿主先装配插件、后绑定随机/开发端口时把 5180 拍死。
+ */
+export function internalModelMcpEndpoint(
+  env: { BACKEND_PORT?: string; PORT?: string },
+  basePath: string
+): { name: "woohaa"; readonly url: string } {
+  return {
+    name: "woohaa",
+    get url() {
+      return internalModelMcpUrl({
+        port: env.BACKEND_PORT ?? env.PORT ?? "5180",
+        basePath
+      });
+    }
+  };
+}

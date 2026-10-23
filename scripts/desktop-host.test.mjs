@@ -7,8 +7,9 @@ import { gzipSync } from 'node:zlib';
 import { desktopEnvironment, prepareData, commitDataVersion, acquireDataLock, exportWorkspace, importWorkspace } from './lib/desktop-host-data.mjs';
 const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'woohaa-host-test-'));
 test('desktop paths ignore inherited repository and database settings', () => {
- const dir=temp(); try { const env=desktopEnvironment({ dataDir:dir, resourceRoot:'/bundle', baseEnv:{WOOHAA3_TASK_STORE_PATH:'/repo/task.sqlite', WOOHAA3_EXTENSION_DIRS:'/repo/extensions', MONGODB_URI:'secret'} });
- assert.equal(env.WOOHAA3_TASK_STORE_PATH,path.join(dir,'stores/task.sqlite')); assert.equal(env.MONGODB_URI,undefined); assert.equal(env.WOOHAA3_CANVAS_STORAGE_SQLITE_PATH,path.join(dir,'stores/canvas.sqlite')); assert.ok(!env.WOOHAA3_EXTENSION_DIRS.includes('/repo')); } finally {fs.rmSync(dir,{recursive:true,force:true});}
+ const dir=temp(); try { const env=desktopEnvironment({ dataDir:dir, resourceRoot:'/bundle', baseEnv:{WOOHAA3_TASK_STORE_PATH:'/repo/task.sqlite', WOOHAA3_EXTENSION_DIRS:'/repo/extensions', MONGODB_URI:'secret', PORT:'5180', BACKEND_PORT:'5180', HOST:'0.0.0.0'} });
+ assert.equal(env.WOOHAA3_TASK_STORE_PATH,path.join(dir,'stores/task.sqlite')); assert.equal(env.MONGODB_URI,undefined); assert.equal(env.WOOHAA3_CANVAS_STORAGE_SQLITE_PATH,path.join(dir,'stores/canvas.sqlite')); assert.ok(!env.WOOHAA3_EXTENSION_DIRS.includes('/repo'));
+ assert.equal(env.PORT,undefined); assert.equal(env.BACKEND_PORT,undefined); assert.equal(env.HOST,undefined); } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
 test('migration backs up old data, commits only after successful readiness, refuses future schema', () => {
  const dir=temp(); try { fs.mkdirSync(path.join(dir,'stores'));fs.writeFileSync(path.join(dir,'stores/canvas.sqlite'),'old');

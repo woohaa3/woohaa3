@@ -82,8 +82,6 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
       const allowedHosts = options.allowedHosts !== undefined ? options.allowedHosts : deployment.allowedHosts;
       const allowHttp = options.allowHttp ?? deployment.allowHttp;
       const agentSdkDirs = options.agentSdkDirs ?? deployment.agentSdkDirs;
-      const mcpServerUrl = options.mcpServerUrl ?? deployment.mcpServerUrl;
-
       const documents = host.services.documents;
       if (!documents) {
         host.logger({ event: "sdk-agent-disabled", reason: "宿主未配置 documents 存储" });
@@ -99,6 +97,7 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
       let admitted = true;
       const shutdown = new AbortController();
 
+      const mcpServerUrlOf = () => options.mcpServerUrl ?? resolveSdkAgentDeployment(options.env ?? (process.env as Record<string, string | undefined>)).mcpServerUrl;
       const runtime = agentSdkDirs ? createFixedEngineRuntime(agentSdkDirs) : undefined;
       const inFlight = new Set<Promise<unknown>>();
       const runtimeOptions = {
@@ -111,7 +110,9 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
         inFlight,
         allowedHosts,
         allowHttp,
-        ...(mcpServerUrl ? { mcpServerUrl } : {}),
+        get mcpServerUrl() {
+          return mcpServerUrlOf();
+        },
         ...(agentSdkDirs ? { agentSdkDirs } : {}),
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         ...(host.services.authoring?.tools ? { tools: host.services.authoring.tools } : {}),
@@ -147,7 +148,7 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
       const handler = createSdkAgentHandler({
         service,
         runtimeOptions,
-        deployment: { allowedHosts, allowHttp, ...(agentSdkDirs ? { agentSdkDirs } : {}), ...(mcpServerUrl ? { mcpServerUrl } : {}), ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) },
+        deployment: { allowedHosts, allowHttp, ...(agentSdkDirs ? { agentSdkDirs } : {}), get mcpServerUrl() { return mcpServerUrlOf(); }, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) },
         ...(host.services.authoring?.tools ? { tools: host.services.authoring.tools } : {})
       });
 

@@ -60,10 +60,12 @@ async function main(){
  }
  const {loadExtensionHost}=await import('./lib/extension-host.mjs');
  const {createBackendService}=await import(pathToFileURL(path.join(backendRoot,'dist/index.js')).href);
+ const {publishDesktopLoopbackPort,startDesktopServer}=await import('./lib/desktop-host-runtime.mjs');
+ const requestedPort=Number(arg('port','0'));
+ if(Number.isInteger(requestedPort)&&requestedPort>0)publishDesktopLoopbackPort(requestedPort,[env,process.env]);
  const extensionHost=await loadExtensionHost({repoRoot:manifest.developmentRoot??resourceRoot,env,logger:event=>console.error(`[extensions] ${JSON.stringify(event)}`)});
  const backend=await createBackendService({env,basePath:'/',extensionHost});
- const {startDesktopServer}=await import('./lib/desktop-host-runtime.mjs');
- runtime=await startDesktopServer({backend,frontendDir:path.join(resourceRoot,'frontend'),extensionHost,instance,port:Number(arg('port','0')),devOrigin:arg('dev-origin',null)});
+ runtime=await startDesktopServer({backend,frontendDir:path.join(resourceRoot,'frontend'),extensionHost,instance,port:requestedPort,devOrigin:arg('dev-origin',null),env});
  commitDataVersion(dataDir,version);
  emit(runtime.ready);
  process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);

@@ -2,7 +2,21 @@ import http from 'node:http';
 import { createStaticHandler, send } from './static-server.mjs';
 import { injectReleaseLinkHtml } from './extension-release-catalog.mjs';
 
-export async function startDesktopServer({ backend, frontendDir, instance, extensionHost=null, port=0, devOrigin=null }) {
+/** 把宿主实际监听端口写回 env，供本机 Agent MCP 回环地址使用。 */
+export function publishDesktopLoopbackPort(port, targets = [process.env]) {
+  const value = String(port);
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric <= 0 || numeric > 65535) {
+    throw new Error(`非法回环端口：${port}`);
+  }
+  for (const target of targets) {
+    if (!target) continue;
+    target.PORT = value;
+    target.BACKEND_PORT = value;
+  }
+}
+
+export async function startDesktopServer({ backend, frontendDir, instance, extensionHost=null, port=0, devOrigin=null, env=null }) {
  const readiness=await (backend.modules ? backend.modules().canvas.readiness() : backend.readiness());
  if(!readiness.ready){await backend.close();throw new Error(`宿主未就绪：${readiness.reason??'unknown'}`);}
  devOrigin=devOrigin?new URL(devOrigin).origin:null;
@@ -24,6 +38,7 @@ export async function startDesktopServer({ backend, frontendDir, instance, exten
  try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});}
  catch(error){await backend.close();throw error;}
  origin=`http://127.0.0.1:${server.address().port}`;
+ publishDesktopLoopbackPort(server.address().port, [process.env, env]);
  let closing;
  return {ready:{type:'ready',protocol:1,instance,origin,pid:process.pid},close(){
   if(closing)return closing;stopping=true;
