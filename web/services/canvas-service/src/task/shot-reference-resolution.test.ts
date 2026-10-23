@@ -12,6 +12,7 @@ import {
   createEmptyWoohaa3ServerCanvas,
   decodeFilmSetNodeData,
   filmSetAnimationsOf,
+  freezeShotImageReferences, shotImageReferenceAssetId, createMotionSnapshot, type FrozenShotImageReference,
   SHOT_PREVIEW_SCHEMA_VERSION,
   shotPreviewNodeId,
   shotReferenceAssetMetadata,
@@ -23,8 +24,50 @@ import { resolveNodeReferenceInputs } from "../task/input-resolution.js";
 import {
   readShotReferenceLink,
   resolveShotReferenceAsset,
-  verifyShotReferenceOwnership
+  verifyShotReferenceOwnership,
+  withFrozenShotImages
 } from "../task/shot-reference-resolution.js";
+
+describe("authoritative static image input resolution", () => {
+  function still() {
+    const h = fixture(), decoded = decodeFilmSetNodeData(h.nodeData.film);
+    if (!decoded.ok) throw new Error(decoded.reason);
+    const animation = decoded.value, clip = animation.filmSetAnimations!.clips[0]!;
+    animation.filmSetAnimations!.clips[0] = { ...clip, kind: "static", timeline: { duration: 0, loop: false }, bindings: [], cameraMotion: createMotionSnapshot({ motionScript: "", basedOnModelVersion: { revision: 1, sourceHash: "camera", contentHash: "camera" } }) };
+    h.nodeData.film = canonicalFilmSetFields(animation) as never; h.mapping.role = "shot_image_reference";
+    const refs = freezeShotImageReferences(h.canvas, "video", "#ffffff") as FrozenShotImageReference[], ref = refs[0]!;
+    const asset: StoredAsset = { id: shotImageReferenceAssetId(ref), title: "PNG", source: "generated", mediaKind: "image", status: "ready", createdAt: "2026-10-23T00:00:00Z", metadata: { storageKey: "images/a.png", checksum: "a".repeat(64), contentType: "image/png", width: 1280, height: 720, background: "#ffffff", shotImageReference: ref } };
+    h.canvas.assets.push(asset); h.mapping.sourceAssetIds = [asset.id];
+    return { ...h, ref, refs, asset, animation };
+  }
+  const bindings = [{ field: "images", semantic: "reference-image" as const, roles: ["reference_image"], mediaKinds: ["image" as const], mediaTypes: ["image/png"], maxItems: 2, valueFormat: "reference" as const }];
+  it("passes the registered PNG through the existing reference_image attachment channel", () => {
+    const h = still();
+    const result = resolveNodeReferenceInputs({ canvas: h.canvas, nodeId: "video", bindings });
+    expect(result.blockingReasons).toEqual([]);
+    expect(result.inputs).toEqual([{ assetId: h.asset.id, role: "reference_image", storageKey: "images/a.png", mediaType: "image/png", mediaKind: "image" }]);
+  });
+  it.each(["checksum", "storageKey", "width", "contentType", "mediaKind", "ownership"])("rejects invalid %s without passing a texture or preview identity", field => {
+    const h = still();
+    if (field === "mediaKind") h.asset.mediaKind = "video";
+    else if (field === "ownership") (h.asset.metadata!.shotImageReference as Record<string, unknown>).filmSetNodeId = "wrong";
+    else h.asset.metadata![field] = field === "width" ? 1 : field === "storageKey" ? "blob:temporary" : "invalid";
+    const result = resolveNodeReferenceInputs({ canvas: h.canvas, nodeId: "video", bindings });
+    expect(result.inputs).toEqual([]); expect(result.blockingReasons.length).toBeGreaterThan(0);
+  });
+  it("frozen A remains exact after B, never writes mappings and rejects reconnection or source deletion", () => {
+    const h = still(), before = structuredClone(h.canvas.nodeData.video);
+    h.animation.filmSetAnimations!.clips[0]!.initialCamera.azimuth += 1;
+    h.canvas.nodeData.film = canonicalFilmSetFields(h.animation) as never;
+    expect(resolveNodeReferenceInputs({ canvas: h.canvas, nodeId: "video", bindings }).inputs).toEqual([]);
+    const execution = withFrozenShotImages(h.canvas, "video", h.refs); expect(typeof execution).toBe("object");
+    if (typeof execution !== "string") expect(resolveNodeReferenceInputs({ canvas: execution, nodeId: "video", bindings, frozenShotImages: h.refs }).inputs[0]?.assetId).toBe(h.asset.id);
+    expect(h.canvas.nodeData.video).toEqual(before);
+    h.mapping.sourceNodeId = "another"; expect(typeof withFrozenShotImages(h.canvas, "video", h.refs)).toBe("string");
+    h.mapping.sourceNodeId = h.previewId; h.canvas.document.nodes = h.canvas.document.nodes.filter(node => node.id !== "film");
+    expect(typeof withFrozenShotImages(h.canvas, "video", h.refs)).toBe("string");
+  });
+});
 
 function fixture() {
   const canvas = createEmptyWoohaa3ServerCanvas("c1") as ServerCanvas;
@@ -128,7 +171,7 @@ describe("resolveNodeReferenceInputs（端到端）", () => {
     const { canvas } = fixture();
     const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "video", bindings });
     expect(resolution.inputs).toHaveLength(0);
-    expect(resolution.blockingReasons.join()).toContain("等待中");
+    expect(resolution.blockingReasons.join()).toContain("录制完成");
   });
 
   it("就绪时转成 reference_video 输入", () => {

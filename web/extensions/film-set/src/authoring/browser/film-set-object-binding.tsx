@@ -9,7 +9,7 @@ export function FilmSetObjectBinding({ ctx, nodeId, item, clip, collection, writ
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (clip.bindings.some(binding => binding.itemId === item.id)) return null;
+  if (clip.bindings.some(binding => binding.itemId === item.id)) return <p className="film-set-object-binding film-set-object-hint">当前镜头：{clip.name} · 已加入</p>;
   const bind = async () => {
     if (!writable || busy) return;
     setBusy(true); setError(null);
@@ -25,7 +25,8 @@ export function FilmSetObjectBinding({ ctx, nodeId, item, clip, collection, writ
     finally { setBusy(false); }
   };
   return <div className="film-set-object-binding" key={`${clip.id}:${item.id}`}>
-    <Button size="sm" disabled={!writable} loading={busy} onClick={() => void bind()}>加入当前拍摄镜头</Button>
+    <p className="film-set-object-hint">当前镜头：{clip.name}</p>
+    <Button size="sm" disabled={!writable} loading={busy} onClick={() => void bind()}>加入该镜头</Button>
     {error ? <p className="film-set-object-error">{error}</p> : null}
   </div>;
 }

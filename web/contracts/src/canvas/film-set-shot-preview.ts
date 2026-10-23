@@ -248,6 +248,7 @@ export type ShotPreviewTarget = {
   kind: FilmSetShotKind;
   name: string;
   timeline: AnimationTimeline;
+  backdrop?: string;
   aspect: number;
   /** 零点封面相机（静态与非活动动态卡片使用；design D7）。 */
   coverCamera: ShotCoverCamera;
@@ -261,6 +262,7 @@ export function shotPreviewTargetsOf(filmSetNodeId: string, animation: { filmSet
     kind: clip.kind,
     name: clip.name,
     timeline: { duration: clip.timeline.duration, loop: clip.timeline.loop },
+    ...(clip.backdrop && clip.backdrop !== "theme" ? { backdrop: clip.backdrop } : {}),
     aspect: shotAspectValue(clip),
     coverCamera: shotCoverCamera(clip)
   }));

@@ -1,5 +1,5 @@
 /** Object list and selected properties in the shared film-set inspector. */
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import type { FilmSetObjectSession } from "./object-session.js";
 import type { FilmSetObjectAction } from "./object-action.js";
 import { Button } from "@woohaa3/frontend/extension-api";
@@ -16,12 +16,15 @@ export type FilmSetObjectToolbarProps = {
   action?: FilmSetObjectAction;
   /** 无手势且无选中时经受控导航退出聚焦（列表聚焦时窗口处理器被 editable 保护挡下）。 */
   onExit?: () => void;
+  children?: ReactNode;
 };
 const KIND_LABEL: Record<string, string> = { model: "模型", image: "图片", video: "视频", ground: "地面" };
 const KIND_ICON = { model: DiamondIcon, image: ImageIcon, video: VideoIcon, ground: LayoutGridIcon };
 
-export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDelete, action, onExit }: FilmSetObjectToolbarProps) {
+export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDelete, action, onExit, children }: FilmSetObjectToolbarProps) {
   const state = useSyncExternalStore(session.subscribe, session.getState, session.getState);
+  const list = useRef<HTMLUListElement>(null);
+  useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" }); }, [state.selectedItemId]);
   if (state.nodeId !== nodeId) return null;
   const objects = session.objects();
   const item = session.selectedItem();
@@ -41,7 +44,7 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
         <h3>场景对象 <span className="film-set-count">{objects.length}</span></h3>
         {state.selectedItemId ? <Button size="sm" tone="ghost" onClick={() => session.select(null)}>取消选择</Button> : null}
       </div>
-      <ul className="film-set-object-list" role="listbox" aria-label="片场对象列表">
+      <ul ref={list} className="film-set-object-list" role="listbox" aria-label="片场对象列表" onWheel={event => event.stopPropagation()}>
         {objects.length === 0 ? <li className="film-set-object-list__empty">片场为空，拖入模型开始布置。</li> : null}
         {objects.map(entry => {
           const Icon = KIND_ICON[entry.kind];
@@ -92,6 +95,7 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
         <div className="film-set-object-fields" key={item.id}>
           <div className="film-set-section-heading film-set-selection-heading"><h3 title={item.name}>{item.name}</h3><span>变换</span></div>
           <FilmSetObjectTransformFields session={session} transform={state.preview ?? item.localTransform} disabled={!editable || pending} />
+          {children}
           <div className="film-set-object-actions">
             <Button size="sm" tone="ghost" className="film-set-object-delete" icon={<TrashIcon />} disabled={!editable || pending} onClick={deleteItem}>删除对象</Button>
           </div>

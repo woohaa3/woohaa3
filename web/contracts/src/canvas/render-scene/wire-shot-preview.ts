@@ -37,6 +37,8 @@ export type BevyShotPreviewPresentation = {
   aspect: number;
   /** 时间线时长（秒）；静态镜头为 0。 */
   duration: number;
+  /** Explicit custom shot background; absent uses the current theme. */
+  backdrop?: string;
   /**
    * 零点封面相机（静态与非活动动态镜头使用）
    * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。

@@ -29,7 +29,7 @@ import type { ShotReferenceRecordingJob } from "./shot-reference-recording-queue
 import type { ShotReferenceVersionCache } from "./shot-reference-version-cache.js";
 
 function canvasNow(ctx: Context) {
-  return ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
+  return ctx.canvasState.getCanvas();
 }
 
 /**
@@ -62,9 +62,10 @@ export function shotReferenceTargetFor(ctx: Context, job: ShotReferenceRecording
   const decoded = decodeFilmSetNodeData(canvas.nodeData[job.filmSetNodeId]);
   if (!decoded.ok) return null;
   const clip = filmSetAnimationsOf(decoded.value).clips.find((entry) => entry.id === job.clipId);
-  if (!clip) return null;
+  if (!clip || clip.kind !== "dynamic") return null;
   const size = videoSize(clip.initialCamera.aspect);
   return {
+    kind: "dynamic",
     canvasId: canvas.id,
     filmSetNodeId: job.filmSetNodeId,
     clipId: job.clipId,
@@ -96,7 +97,7 @@ export function createShotReferenceRecorder(
   } = {}
 ): ShotReferenceRecorder {
   let captureGeneration = 2_000_000;
-  return async (job) => {
+  return async (job, signal) => {
     const target = shotReferenceTargetFor(ctx, job);
     if (!target) {
       cache.markFailed(job, "片场或镜头已不存在");
@@ -107,7 +108,6 @@ export function createShotReferenceRecorder(
     cache.markRecording(target);
     // 记住用户原播放状态，录完恢复（现有 renderer 只能捕捉当前时钟）。
     const before = ctx.canvasRuntime.animationPlaybackState();
-    const controller = new AbortController();
     const timing = createShotReferenceRecordTiming();
     const startedAt = clock();
     const deps = createShotReferenceRecordDeps({
@@ -119,9 +119,9 @@ export function createShotReferenceRecorder(
       nextCaptureGeneration: () => captureGeneration++,
       original: { time: before?.time ?? 0, playing: before?.playing ?? false }
     });
-    const outcome = await recordShotReference(deps, target, controller.signal);
+    const outcome = await recordShotReference(deps, target, signal ?? new AbortController().signal);
     reportShotReferenceTiming(target, timing, outcome, clock() - startedAt);
-    if (outcome.ok) {
+    if (outcome.ok && !signal?.aborted && shotReferenceTargetFor(ctx, job) && contentIdentityNow(ctx, job.filmSetNodeId, job.clipId) === job.contentIdentity) {
       // 上传只保存了字节；必须独立登记版本映射，未被下游引用的镜头也能在刷新后恢复。
       const persisted = await persistShotReferenceRecording(ctx, target, outcome.asset, `${target.title} · 镜头参考`);
       if (!persisted.ok) {
@@ -131,8 +131,9 @@ export function createShotReferenceRecorder(
       cache.publish(target, outcome.asset);
       return { ok: true };
     }
-    cache.markFailed(target, outcome.message);
-    return { ok: false, error: outcome.message };
+    const message = outcome.ok ? "镜头版本已失效" : outcome.message;
+    cache.markFailed(target, message);
+    return { ok: false, error: message };
   };
 }
 
@@ -158,6 +159,7 @@ export function createShotReferenceRecordDeps(input: {
   now?: () => string;
 }): ShotReferenceRecordDeps {
   const { ctx, playback, target, nextCaptureGeneration, original, timing, onProgress } = input;
+  if (target.kind === "static") throw new Error("shot-kind-unsupported: 静态镜头不支持视频录制");
   // 录制会话：把播放投影锁到该镜头的预览卡片，renderer 才能按 T 离屏出该镜头的画面。
   // `restore` 一定在录制结束时交还投影（`recordShotReference` 的 finally）。
   playback.beginCaptureSession({

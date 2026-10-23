@@ -220,14 +220,17 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const submitCoordinator = useMemo(
     () =>
       canvasId
-        ? createSubmitCoordinator({
+        ? props.submitCoordinator ?? createSubmitCoordinator({
             store: woohaa3CanvasStore,
             client: runClient,
             ...(activity ? { activity } : {})
           })
         : null,
-    [canvasId, runClient, activity]
+    [canvasId, runClient, activity, props.submitCoordinator]
   );
+  const waitingMessage = useSyncExternalStore(submitCoordinator?.subscribeWaiting ?? (() => () => {}),
+    () => submitCoordinator?.waitingMessage?.(selectedNodeId ?? ""), () => undefined);
+  const executionMessage = submitError ?? waitingMessage;
 
   const references = useMemo<ModelReferenceItem[]>(() => {
     if (!canvas || !context || !panelKind || !catalog || !targetModelKey) return [];
@@ -312,7 +315,10 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         canvas,
         panelParameters: input.parameters
       });
-      if (reasons.length > 0) return { ok: false, error: reasons[0]! };
+      if (reasons.length > 0) {
+        setSubmitError(reasons[0]!);
+        return { ok: false, error: reasons[0]! };
+      }
 
       const modelDescriptor = catalog.models.find((entry) => entry.modelKey === targetModelKey);
       const promptRequirement = modelDescriptor?.promptRequirement ?? "required";
@@ -344,7 +350,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       if (!outcome.ok) {
         draftStore.patch(nodeId, targetModelKey, { prompt: input.prompt });
         if (outcome.error === EMPTY_UPSTREAM_TEXT_MESSAGE) showEmptyUpstreamAlert();
-        else setSubmitError(outcome.error);
+        else if (!submitCoordinator.waitingMessage) setSubmitError(outcome.error);
         return { ok: false, error: outcome.error };
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
@@ -506,9 +512,9 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
           </div>
         </ExecutionPanelShell>
       )}
-      {submitError ? (
+      {executionMessage ? (
         <p className="node-execution-dock__error" role="alert">
-          {submitError}
+          {executionMessage}
         </p>
       ) : null}
     </div>

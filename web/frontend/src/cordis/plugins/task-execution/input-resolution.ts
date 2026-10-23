@@ -20,6 +20,7 @@ import { ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   providerReferenceRole,
   SHOT_REFERENCE_ROLE,
+  SHOT_IMAGE_REFERENCE_ROLE,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -94,7 +95,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
         // 镜头参考的资产由录制冻结写入（预览节点不承载 outputAssetId）：还在录制时是**等待**，
         // 不是「上游没有输出」。与服务端/参考 chips 用同一说法（change: 2026-10-15，任务 8.6）。
         blockingReasons.push(
-          mapping.role === SHOT_REFERENCE_ROLE
+          mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "等待镜头参考图片准备完成" : mapping.role === SHOT_REFERENCE_ROLE
             ? "等待镜头参考录制完成"
             : `上游节点 ${mapping.sourceNodeId} 还没有可用输出，无法作为参考输入`
         );
@@ -176,6 +177,7 @@ function collectInputMappings(
           sourceNode: nodeById.get(sourceNodeId) ?? { id: sourceNodeId, type: "custom" },
           targetNode: { id: nodeId, type: nodeById.get(nodeId)?.type ?? "custom" },
           sourceData: nodeData[sourceNodeId],
+          readNodeData: id => nodeData[id],
           targetData: nodeData[nodeId],
           existingRoles: declared.map((mapping) => mapping.role)
         }),

@@ -33,7 +33,8 @@ export type NativeReferenceRecorderResult =
  * 返回的 `ok` 只代表**宿主任务已完成并保存**；版本缓存仍由调用方在权威资产回填后发布。
  */
 export function createNativeReferenceRecorder(deps: NativeReferenceRecorderDeps) {
-  return async (target: ShotReferenceRecordTarget): Promise<NativeReferenceRecorderResult> => {
+  return async (target: ShotReferenceRecordTarget, signal?: AbortSignal): Promise<NativeReferenceRecorderResult> => {
+    if (target.kind === "static" || signal?.aborted) return { ok: false, code: "shot-kind-unsupported", error: "静态镜头不支持视频录制", transient: false };
     const contentIdentity = deps.contentIdentityOf(target);
     const requestId = `reference-v2:${target.filmSetNodeId}:${target.clipId}:${contentIdentity}:${target.profileKey}`;
     const submitted = await deps.driver.submit({
@@ -52,7 +53,10 @@ export function createNativeReferenceRecorder(deps: NativeReferenceRecorderDeps)
         error: submitted.message
       };
     }
-    const waited = await deps.driver.wait(submitted.submission.jobId);
+    const cancel = () => { void deps.driver.cancel(submitted.submission.jobId); };
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) cancel();
+    const waited = await deps.driver.wait(submitted.submission.jobId).finally(() => signal?.removeEventListener("abort", cancel));
     if (waited.ok) {
       return { ok: true, jobId: submitted.submission.jobId, status: waited.status };
     }

@@ -7,6 +7,8 @@ import { compileFilmSetClip, filmSetCompiledBudget } from "../film-set-clip-comp
 import { animationSnapshotHash } from "../animation-snapshot.js";
 import type { CanvasNodeData } from "../domain/index.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
+import { shotPreviewNodeId } from "../film-set-shot-preview.js";
+import { isShotImageReferenceTargetNode, isShotReferenceTargetNode, shotReferenceRoleForKind } from "../domain/core/shot-reference.js";
 
 export function patchFilmSetClip(work: WorkingState, command: Extract<CanvasCommand, { type: "filmSet.clipPatch" }>): CommandApplyResult {
   const node = work.nodes.find(entry => entry.id === command.nodeId);
@@ -28,9 +30,33 @@ export function patchFilmSetClip(work: WorkingState, command: Extract<CanvasComm
     if (!compiled.ok || compiled.diagnostics.length) return reject("invalid-self-contained-node", !compiled.ok ? compiled.reason : compiled.diagnostics.join("；"));
   }
   const next = { ...previous, ...canonicalFilmSetFields(animation) } as CanvasNodeData;
+  const previousKind = resolveFilmSetClip(decoded.value, targetId)?.clip.kind;
+  if (target && previousKind && previousKind !== target.clip.kind) {
+    const converted = convertShotReferenceConsumers(work, command.nodeId, targetId, target.clip.kind);
+    if (!converted.ok) return converted;
+  }
   for (const field of LEGACY_FILM_SET_ANIMATION_FIELDS) delete next[field];
   for (const field of LEGACY_FILM_SET_TOP_MODEL_FIELDS) delete next[field];
   next.animationSnapshotHash = animationSnapshotHash(animation);
   work.nodeData[command.nodeId] = next;
+  return OK;
+}
+
+/** Shared by commands and protected undo/replay; reject all incompatible consumers before writes. */
+export function convertShotReferenceConsumers(work: WorkingState, nodeId: string, clipId: string, kind: "static" | "dynamic"): CommandApplyResult {
+  const previewId = shotPreviewNodeId(nodeId, clipId);
+  const edges = work.edges.filter(edge => edge.source === previewId);
+  const accepts = kind === "static" ? isShotImageReferenceTargetNode : isShotReferenceTargetNode;
+  const blocked = edges.filter(edge => !accepts(work.nodes.find(node => node.id === edge.target)?.type, work.nodeData[edge.target]));
+  if (blocked.length) return reject("invalid-connection", `镜头类型转换失败：下游 ${blocked.map(edge => edge.target).join("、")} 不支持${kind === "static" ? "图片" : "视频"}参考，请先断开连接`);
+  for (const edge of edges) {
+    edge.data = { ...edge.data, kind: kind === "static" ? "shot-image-reference" : "shot-reference", schemaVersion: 1 };
+    const data = work.nodeData[edge.target];
+    if (data?.inputMapping) work.nodeData[edge.target] = { ...data, inputMapping: data.inputMapping.map(mapping => {
+      if (mapping.sourceNodeId !== previewId) return mapping;
+      const { sourceAssetIds: _assets, ...rest } = mapping;
+      return { ...rest, role: shotReferenceRoleForKind(kind) };
+    }) } as CanvasNodeData;
+  }
   return OK;
 }

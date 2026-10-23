@@ -1,7 +1,8 @@
 import "../../authoring/browser/styles.css";
 import { createElement } from "react";
 import { defineExtensionFrontend, defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, MODEL_EDITOR_VERSION, decodeFilmSetNodeData } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, MODEL_EDITOR_VERSION, decodeFilmSetNodeData, filmSetAnimationsOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { installShotImageReferences } from "../../authoring/browser/shot-image-reference.js";
 import { FILM_SET_EXTENSION_ID, FILM_SET_LABEL } from "../../state/shared/identity.js";
 import { FILM_SET_FRONTEND_METADATA } from "./metadata.js";
 import { HistoryFilmSetSnapshots } from "../../preview/browser/history-preview.js";
@@ -71,6 +72,15 @@ export function filmSetExtension() {
           return [{ ...decoded.value.sceneCamera, id: "scene-camera", name: "场景镜头", order: 0, elevation: decoded.value.sceneCamera.elevation ?? 0, aspect: decoded.value.sceneCamera.aspect ?? "16:9" }];
         },
         writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args)),
+        captureEnabled: (nodeId, cameraId) => {
+          const data = decodeFilmSetNodeData(ctx.canvasState.getCanvas()?.nodeData[nodeId]);
+          if (!data.ok) return false;
+          const collection = filmSetAnimationsOf(data.value);
+          const selected = playback.getSnapshot();
+          const clipId = cameraId?.startsWith("clip:") ? cameraId.slice(5) : selected.nodeId === nodeId ? selected.clipId : collection.defaultClipId;
+          const clip = collection.clips.find(clip => clip.id === clipId);
+          return clip?.kind === "dynamic";
+        },
         captureOrigin: (nodeId, cameraId) => ({ nodeData: { filmSetShotOrigin: { filmSetNodeId: nodeId, cameraId, capturedAt: new Date().toISOString() } } as never }),
         awaitCaptureReady: nodeId => ctx.canvasRuntime.compositeAssetMediaSessions?.()?.waitForTime(nodeId, ctx.canvasRuntime.animationPlaybackState()?.time ?? 0, 2500) ?? Promise.resolve(true)
       }));
@@ -84,10 +94,36 @@ export function filmSetExtension() {
       // MUST NOT 展开（`{ ...ctx }`）——展开只复制自有可枚举属性，会丢掉 ctx 的 service 访问器，
       // 使注册模块读到 undefined 的 canvasScope（此前导致 required film-set 启动失败 → 白屏）。
       lifetime.own(installFilmSetConversionEntries(ctx));
+      const images = installShotImageReferences(ctx, playback);
+      lifetime.own(() => images.dispose());
+      const imageOwner = (nodeId: string) => shotPreviewOwnershipOf(ctx.canvasState.getCanvas()?.nodeData[nodeId]);
+      lifetime.own(ctx.slots.register("canvas.node-action", {
+        id: "film-set-image-download", owner: FILM_SET_EXTENSION_ID, order: 0,
+        available: ({ nodeId, nodeType }) => {
+          const owner = imageOwner(nodeId);
+          return nodeType === FILM_SET_SHOT_PREVIEW_NODE_TYPE && !!owner && images.isStatic(owner.filmSetNodeId, owner.clipId);
+        },
+        describe: ({ nodeId }) => {
+          const owner = imageOwner(nodeId);
+          const state = owner ? images.state(owner.filmSetNodeId, owner.clipId) : null;
+          return { label: "下载图片参考", enabled: state?.status === "ready", reason: state?.status === "ready" ? undefined : "静态图片参考尚未就绪" };
+        },
+        activate: ({ nodeId }) => { const owner = imageOwner(nodeId); if (owner) void images.download(owner.filmSetNodeId, owner.clipId); }
+      }));
+      lifetime.own(ctx.slots.register("canvas.context-menu", {
+        id: "film-set-image-download-menu", owner: FILM_SET_EXTENSION_ID, priority: 15,
+        items: ({ nodeId, connectFrom }) => {
+          if (!nodeId || connectFrom) return [];
+          const owner = imageOwner(nodeId);
+          if (!owner || !images.isStatic(owner.filmSetNodeId, owner.clipId)) return [];
+          return [{ id: "film-set-image-download", label: "下载图片参考", disabled: images.state(owner.filmSetNodeId, owner.clipId).status !== "ready" }];
+        },
+        onSelect: (id, { nodeId }) => { const owner = nodeId && imageOwner(nodeId); if (id === "film-set-image-download" && owner) void images.download(owner.filmSetNodeId, owner.clipId); }
+      }));
       lifetime.own(ctx.slots.register("canvas.overlay", {
         id: "film-set-inspector", owner: FILM_SET_EXTENSION_ID, priority: 20,
         render: ({ writable }) => createElement(FilmSetInspector, { ctx, session: ctx.modelWorkspace.session, captureSession: ctx.modelWorkspace.captureSession,
-          objectSession: feature.session, objectAction: feature.action, writable, canvasId: ctx.canvasState.getCanvas()?.id ?? "" })
+          objectSession: feature.session, objectAction: feature.action, images, writable, canvasId: ctx.canvasState.getCanvas()?.id ?? "" })
       }));
       ctx.plugin(animationPlaybackExtension());
       // 镜头参考录制调度（任务 8.3）：只维护 dirty 集与触发边界；真实录制由 8.4 注入。
@@ -111,7 +147,7 @@ export function filmSetExtension() {
       lifetime.dispose();
       throw error;
     }
-  }, { name: FILM_SET_EXTENSION_ID, inject: ["dialogs", "slots", "compositeAssets", "canvasState", "canvasSession", "canvasRuntime", "canvasEdit", "canvasNavigation", "mediaRemote", "modelWorkspace", "hoverState", "canvasScope", "canvasRemote", "canvasLocate"] });
+  }, { name: FILM_SET_EXTENSION_ID, inject: ["theme", "dialogs", "slots", "compositeAssets", "canvasState", "canvasSession", "canvasRuntime", "canvasEdit", "canvasNavigation", "mediaRemote", "modelWorkspace", "hoverState", "canvasScope", "canvasRemote", "canvasLocate"] });
 }
 export const descriptor = defineExtensionFrontend({ ...FILM_SET_FRONTEND_METADATA, plugin: filmSetExtension });
 

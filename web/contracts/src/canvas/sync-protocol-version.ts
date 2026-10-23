@@ -9,5 +9,6 @@
  *     `shot_reference` 映射）。旧客户端会把这些边当作非法预览端点清理，因此必须在交换文档前
  *     由握手/命令解码明确拒绝并提示刷新，不映射、不静默丢弃。
  */
-export const YJS_SYNC_PROTOCOL_VERSION = 4 as const;
+// v5: static shot image references; v4 normalizers cannot safely write these documents.
+export const YJS_SYNC_PROTOCOL_VERSION = 5 as const;
 export type YjsSyncProtocolVersion = typeof YJS_SYNC_PROTOCOL_VERSION;

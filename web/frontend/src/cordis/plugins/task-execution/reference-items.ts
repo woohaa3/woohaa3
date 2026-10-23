@@ -11,6 +11,7 @@ import {
   inferWoohaa3CanvasInputRole,
   providerReferenceRole,
   SHOT_REFERENCE_ROLE,
+  SHOT_IMAGE_REFERENCE_ROLE,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -91,11 +92,11 @@ export function resolveReferenceItems(options: {
         role: mapping.role,
         mentionType,
         label,
-        mediaKind: mapping.role === SHOT_REFERENCE_ROLE ? "video" : null,
+        mediaKind: mapping.role === SHOT_REFERENCE_ROLE ? "video" : mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "image" : null,
         previewUrl: null,
         assetId: null,
         status: "waiting",
-        blockingReason: mapping.role === SHOT_REFERENCE_ROLE
+        blockingReason: mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "等待镜头参考图片准备完成" : mapping.role === SHOT_REFERENCE_ROLE
           ? "等待镜头参考录制完成"
           : `上游节点 ${mapping.sourceNodeId} 还没有可用输出`
       });
@@ -224,6 +225,7 @@ export function collectDirectMappings(canvas: ServerCanvas, nodeId: string): Can
           sourceNode: nodeById.get(sourceNodeId) ?? { id: sourceNodeId, type: "custom" },
           targetNode: { id: nodeId, type: nodeById.get(nodeId)?.type ?? "custom" },
           sourceData: nodeData[sourceNodeId],
+          readNodeData: id => nodeData[id],
           targetData: nodeData[nodeId],
           existingRoles: declared.map((mapping) => mapping.role)
         }),
@@ -236,6 +238,7 @@ export function collectDirectMappings(canvas: ServerCanvas, nodeId: string): Can
 function mentionTypeForMapping(mapping: CanvasNodeInputMapping): Woohaa3CanvasMentionType {
   if (mapping.role === "text_prompt") return "input_text";
   if (mapping.role === SHOT_REFERENCE_ROLE) return "input_video";
+  if (mapping.role === SHOT_IMAGE_REFERENCE_ROLE) return "input_image";
   if (mapping.role.includes("video")) return "input_video";
   if (mapping.role.includes("audio") || mapping.role.includes("voice") || mapping.role.includes("music")) {
     return "input_audio";

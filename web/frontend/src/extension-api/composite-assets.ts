@@ -47,6 +47,8 @@ export type CompositeAssetAdapter = {
   writeCameras?(nodeId: string, cameras: readonly ModelCamera[]): boolean;
   captureOrigin?(nodeId: string, cameraId: string): import("./model-workspace.js").ModelCaptureOrigin | null;
   awaitCaptureReady?(nodeId: string): Promise<boolean>;
+  /** Business owner decides whether explicit frame capture is available for this target. */
+  captureEnabled?(nodeId: string, cameraId: string): boolean;
   blocksFocusInput?(): boolean;
   keydown?(event: KeyboardEvent, focusedNodeId: string | null): boolean;
 };

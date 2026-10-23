@@ -43,6 +43,7 @@ import type { TaskHistoryReader } from "../../shared/task-history/client.js";
 export type CanvasActivityChangesQuery = { canvasId: string; after: number; limit?: number };
 
 export type CanvasRunRequest = {
+  shotImageReferences?: import("@woohaa3/contracts").FrozenShotImageReference[];
   nodeId: string;
   runId: string;
   jobId: string;

@@ -12,7 +12,7 @@
  * 因此「请求返回后页面即可关闭」「终态只由服务端写入」是结构性保证。
  */
 import type { CanvasTaskCatalog, CanvasTaskModelType } from "@woohaa3/contracts";
-import { CANVAS_TASK_LIMITS } from "@woohaa3/contracts";
+import { CANVAS_TASK_LIMITS, APP_THEME_DEFAULT_TOKENS, freezeShotImageReferences, readyShotImageAsset, shotImageMappingsMatch, catalogModelBindings, type FrozenShotImageReference } from "@woohaa3/contracts";
 import type { ExecutionLaunchEvent, ExecutionOrigin } from "./execution-launch.js";
 import type { Woohaa3CanvasStoreState } from "../../services/canvas-state/index.js";
 import type { CanvasRunRequest, CanvasRunResult } from "../../contracts.js";
@@ -51,6 +51,8 @@ export type SubmitCoordinatorOptions = {
   activity?: TaskActivityEventSink;
   /** 判断一次网关拒绝是否属于「等待镜头参考」等可自动续交状态。 */
   isWaiting?: (error: string) => boolean;
+  imageReferenceBackground?: () => string;
+  isWritable?: () => boolean;
   now?: () => string;
   createRunId?: () => string;
 };
@@ -80,16 +82,26 @@ export type SubmitCoordinator = {
   retryWaiting(): Promise<readonly SubmitOutcome[]>;
   /** 当前等待续交的节点 id。 */
   pendingWaiting(): readonly string[];
+  subscribeWaiting?: (listener: () => void) => () => void;
+  waitingMessage?: (nodeId: string) => string | null | undefined;
 };
 
 export function createSubmitCoordinator(options: SubmitCoordinatorOptions): SubmitCoordinator {
   const createRunId = options.createRunId ?? defaultRunId;
-  const waiting = new Map<string, SubmitInput>();
+  type PendingInput = SubmitInput & { imageReferences?: FrozenShotImageReference[]; canvasId?: string };
+  const waiting = new Map<string, PendingInput>();
   const submitting = new Set<string>();
+  const waitingMessages = new Map<string, string | null>();
+  const waitingListeners = new Set<() => void>();
+  const message = (nodeId: string, value: string | null) => {
+    if (waitingMessages.get(nodeId) === value) return;
+    waitingMessages.set(nodeId, value); waitingListeners.forEach(listener => listener());
+  };
 
-  const attempt = async (input: SubmitInput): Promise<SubmitOutcome> => {
+  const attempt = async (input: PendingInput): Promise<SubmitOutcome> => {
     const canvas = options.store.getState().canvas;
     if (!canvas) return { ok: false, error: "画布尚未加载，无法提交任务" };
+    if (options.isWritable?.() === false) return { ok: false, error: "shot-image-permission-denied: 画布当前不可写，请恢复连接后重新执行" };
 
     if (!input.catalog.available) {
       return { ok: false, error: input.catalog.reason ?? "任务目录不可用" };
@@ -105,8 +117,33 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
     if (input.prompt.length > CANVAS_TASK_LIMITS.promptMaxChars) {
       return { ok: false, error: `提示词超过 ${CANVAS_TASK_LIMITS.promptMaxChars} 字上限` };
     }
+    if (input.canvasId && input.canvasId !== canvas.id) return { ok: false, error: "画布已切换，图片参考等待已取消" };
+    if (!input.imageReferences) {
+      const frozen = freezeShotImageReferences(canvas, input.nodeId, options.imageReferenceBackground?.() ?? APP_THEME_DEFAULT_TOKENS.webSubtle);
+      if (typeof frozen === "string") return { ok: false, error: frozen };
+      input = { ...input, parameters: structuredClone(input.parameters), canvasId: canvas.id, imageReferences: frozen };
+    }
+    const images = input.imageReferences ?? [];
+    if (!shotImageMappingsMatch(canvas, input.nodeId, images)) return { ok: false, error: "输入连接已变化，请重新执行" };
+    if (images.length) {
+      const current = freezeShotImageReferences(canvas, input.nodeId, options.imageReferenceBackground?.() ?? APP_THEME_DEFAULT_TOKENS.webSubtle);
+      if (typeof current === "string") return { ok: false, error: current };
+      if (!catalogModelBindings(model).some(binding => binding.roles.includes("reference_image") && binding.mediaKinds.includes("image") && binding.mediaTypes.includes("image/png"))) {
+        return { ok: false, error: "所选模型不接受图片参考（image/png）" };
+      }
+      for (const ref of images) {
+        if (readyShotImageAsset(canvas.assets, ref)) continue;
+        if (!current.some(candidate => candidate.slotId === ref.slotId && candidate.contentIdentity === ref.contentIdentity && candidate.profileKey === ref.profileKey)) {
+          return { ok: false, error: "shot-image-version-stale: 图片参考版本已失效，请重新执行" };
+        }
+        waiting.set(input.nodeId, input);
+        message(input.nodeId, "等待镜头参考图片准备完成");
+        return { ok: false, error: "等待镜头参考图片准备完成", waiting: true };
+      }
+    }
 
     const runId = createRunId();
+    message(input.nodeId, null);
     const jobId = `job-${runId}`;
     const now = options.now ?? (() => new Date().toISOString());
     const launch = (phase: ExecutionLaunchEvent["phase"]) => {
@@ -130,7 +167,8 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
       jobId,
       modelKey: input.modelKey,
       prompt: input.prompt,
-      parameters: input.parameters
+      parameters: input.parameters,
+      ...(images.length ? { shotImageReferences: images } : {})
     }).catch(() => ({ ok: false as const, error: "提交失败，请检查连接后重试" }));
     if (!result.ok) {
       launch("rejected");
@@ -156,8 +194,16 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
   };
 
   return {
-    submit(input) {
-      return attempt(input);
+    async submit(input) {
+      const imageInput = options.store.getState().canvas?.nodeData[input.nodeId]?.inputMapping?.some(mapping => mapping.role === "shot_image_reference");
+      if (imageInput && submitting.has(input.nodeId)) return { ok: false, error: "任务正在提交" };
+      if (imageInput) submitting.add(input.nodeId);
+      waiting.delete(input.nodeId);
+      try {
+        const outcome = await attempt(input);
+        message(input.nodeId, outcome.ok ? null : outcome.error);
+        return outcome;
+      } finally { if (imageInput) submitting.delete(input.nodeId); }
     },
     async retryWaiting() {
       const outcomes: SubmitOutcome[] = [];
@@ -168,6 +214,7 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
           const outcome = await attempt(input);
           outcomes.push(outcome);
           if (!(outcome.ok === false && outcome.waiting)) waiting.delete(nodeId);
+          message(nodeId, outcome.ok ? null : outcome.error);
         } finally {
           submitting.delete(nodeId);
         }
@@ -177,8 +224,11 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
     pendingWaiting() {
       return [...waiting.keys()];
     },
+    subscribeWaiting(listener) { waitingListeners.add(listener); return () => { waitingListeners.delete(listener); }; },
+    waitingMessage(nodeId) { return waitingMessages.get(nodeId); },
     cancel(input) {
       waiting.delete(input.nodeId);
+      message(input.nodeId, null);
       return options.client.cancel(input);
     }
   };

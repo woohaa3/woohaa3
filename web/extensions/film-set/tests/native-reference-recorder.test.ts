@@ -68,6 +68,13 @@ function driver(states: RecordingStatusView[], submitResult?: { ok: true; jobId:
 import { createRecordingDriver } from "../src/authoring/browser/native-recording-client.js";
 
 describe("createNativeReferenceRecorder", () => {
+  it("rejects static before submitting a native recording job", async () => {
+    const fake = driver([]);
+    const recorder = createNativeReferenceRecorder({ driver: createRecordingDriver({ remote: fake.remote as never, canvasId: "c1" }), canvasId: "c1", contentIdentityOf: value => value.contentIdentity });
+    const result = await recorder({ ...target(), kind: "static", duration: 0 });
+    expect(result).toMatchObject({ ok: false, code: "shot-kind-unsupported", transient: false });
+    expect(fake.submitted).toEqual([]);
+  });
   it("submits a reference job and reports success", async () => {
     const fake = driver([]);
     const recorder = createNativeReferenceRecorder({

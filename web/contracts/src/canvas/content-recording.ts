@@ -194,6 +194,7 @@ export type ContentRecordingErrorCode =
   | "recording-capability-missing"
   | "recording-profile-unsupported"
   | "recording-source-invalid"
+  | "shot-kind-unsupported"
   | "recording-source-changed"
   | "recording-source-removed"
   | "recording-budget-exceeded"

@@ -162,7 +162,8 @@ pub(crate) fn sync(
                 preview: Some(
                     ShotCameraPreview::new(size.x, size.y)
                         .with_target(PreviewTarget::Offscreen)
-                        .with_policy(PreviewUpdatePolicy::Manual),
+                        .with_policy(PreviewUpdatePolicy::Manual)
+                        .with_clear_color(target.backdrop),
                 ),
                 editable: false,
             });
@@ -233,7 +234,8 @@ pub(crate) fn sync(
                 card_camera_layers(layer),
                 ShotCameraPreview::new(size.x, size.y)
                     .with_target(PreviewTarget::Offscreen)
-                    .with_policy(PreviewUpdatePolicy::Manual),
+                    .with_policy(PreviewUpdatePolicy::Manual)
+                        .with_clear_color(target.backdrop),
                 ShotCameraEditable { enabled: false },
             ));
             card.applied_rig = Some(rig_state);

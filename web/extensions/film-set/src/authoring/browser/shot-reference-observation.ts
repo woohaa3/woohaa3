@@ -38,7 +38,7 @@ export function observeFilmSetClips(
   const profileKey = shotReferenceProfileKey(DEFAULT_SHOT_REFERENCE_RECORD_PROFILE);
   return filmSetAnimationsOf(animation).clips.map((clip) => ({
     clipId: clip.id,
-    contentIdentity: shotReferenceContentIdentity({ animation, clipId: clip.id }),
+    contentIdentity: clip.kind === "dynamic" ? shotReferenceContentIdentity({ animation, clipId: clip.id }) : null,
     profileKey
   }));
 }

@@ -121,6 +121,8 @@ pub struct ShotCameraPreview {
     pub policy: PreviewUpdatePolicy,
     pub active: bool,
     pub target: PreviewTarget,
+    /// Per-rig clear color, shared by preview and capture; None follows the host theme.
+    pub clear_color: Option<Color>,
 }
 
 impl Default for ShotCameraPreview {
@@ -130,6 +132,7 @@ impl Default for ShotCameraPreview {
             policy: PreviewUpdatePolicy::OnDirty,
             active: true,
             target: PreviewTarget::Offscreen,
+            clear_color: None,
         }
     }
 }
@@ -153,6 +156,11 @@ impl ShotCameraPreview {
 
     pub fn with_target(mut self, target: PreviewTarget) -> Self {
         self.target = target;
+        self
+    }
+
+    pub fn with_clear_color(mut self, color: Option<Color>) -> Self {
+        self.clear_color = color;
         self
     }
 }

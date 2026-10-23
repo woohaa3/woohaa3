@@ -89,7 +89,7 @@ function renderOverlay(canvas: ServerCanvas, initialCamera = false, options: { g
   const ctx = {
     canvasState: woohaa3CanvasStore.facade,
     compositeAssets: new CompositeAssetRegistry(), filmSetPlayback: new FilmSetPlaybackService(),
-    modelWorkspace: { renderCameraPreview: () => <div data-camera-preview />, renderCameraPanel: () => <div data-camera-panel>镜头工具</div>, renderGenerate },
+    modelWorkspace: { session, renderCameraPreview: () => <div data-camera-preview />, renderCameraPanel: () => <div data-camera-panel>镜头工具</div>, renderGenerate },
     canvasNavigation: {
       subscribe: () => () => undefined,
       getSnapshot: () => NAV_SNAPSHOT,
@@ -198,7 +198,7 @@ describe("FilmSetInspector single column and generation dock", () => {
   it("joining a shot submits one checked binding command and disables the history path", async () => {
     const h = renderOverlay(filmSetCanvas(true), false, { generate: true });
     act(() => h.objectSession.select("ground"));
-    await act(async () => { button("加入当前拍摄镜头").click(); });
+    await act(async () => { button("加入该镜头").click(); });
     expect(h.submitted).toEqual([expect.objectContaining({ type: "filmSet.clipPatch", clipId: "clip-1", expectedHash: expect.any(String),
       op: expect.objectContaining({ kind: "binding", itemId: "ground", expectedAdapterHash: expect.any(String) }) })]);
   });
@@ -217,7 +217,7 @@ describe("FilmSetInspector single column and generation dock", () => {
     const h = renderOverlay(filmSetCanvas(true), false, { generate: true, readOnly: true });
     act(() => h.objectSession.select("ground"));
     expect(document.querySelector<HTMLDivElement>(".film-set-generate-dock")!.hidden).toBe(true);
-    expect(button("加入当前拍摄镜头").disabled).toBe(true);
+    expect(button("加入该镜头").disabled).toBe(true);
     expect(h.renderGenerate).toHaveBeenLastCalledWith(expect.objectContaining({ writable: false }));
     expect(h.submitted).toHaveLength(0);
   });

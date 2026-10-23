@@ -16,6 +16,8 @@ import {
   decodeFilmSetNodeData,
   filmSetAnimationsOf,
   readShotReferenceAssetLink,
+  readShotImageReferenceAssetLink, SHOT_IMAGE_REFERENCE_ROLE, shotImageReferenceIdentity, readyShotImageAsset,
+  shotImageMappingsMatch, shotImageReferenceAssetId, type FrozenShotImageReference,
   shotPreviewOwnershipOf,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -45,7 +47,7 @@ export function verifyShotReferenceOwnership(input: {
   sourceNodeId: string;
 }): { ok: true; filmSetNodeId: string; clipId: string } | { ok: false; reason: string } {
   const ownership = shotPreviewOwnershipOf(input.nodeData[input.sourceNodeId]);
-  if (!ownership) {
+  if (!ownership || !input.canvas.document.nodes.some(node => node.id === input.sourceNodeId && node.type === "film-set-shot-preview")) {
     return { ok: false, reason: `镜头参考来源 ${input.sourceNodeId} 不是拍摄镜头预览节点` };
   }
   const filmSetNode = input.canvas.document.nodes.find((node) => node.id === ownership.filmSetNodeId);
@@ -74,15 +76,48 @@ export function resolveShotReferenceAsset(input: {
   canvas: ServerCanvas;
   nodeData: Record<string, CanvasNodeData | undefined>;
   mapping: CanvasNodeInputMapping;
+  frozen?: FrozenShotImageReference;
 }): ShotReferenceResolution {
   const ownership = verifyShotReferenceOwnership({ canvas: input.canvas, nodeData: input.nodeData, sourceNodeId: input.mapping.sourceNodeId });
   if (!ownership.ok) return { ok: false, waiting: false, reason: ownership.reason };
 
   const assetIds = (input.mapping.sourceAssetIds ?? []).filter((id): id is string => typeof id === "string" && id !== "");
   if (!assetIds.length) {
-    return { ok: false, waiting: true, reason: `镜头参考「${ownership.filmSetNodeId}/${ownership.clipId}」尚未录制完成，等待中` };
+    return { ok: false, waiting: true, reason: input.mapping.role === SHOT_IMAGE_REFERENCE_ROLE ? "等待镜头参考图片准备完成" : `等待镜头参考「${ownership.filmSetNodeId}/${ownership.clipId}」录制完成` };
+  }
+  if (input.mapping.role === SHOT_IMAGE_REFERENCE_ROLE) {
+    const asset = input.canvas.assets.find(asset => asset.id === assetIds[0]);
+    const link = readShotImageReferenceAssetLink(asset?.metadata);
+    const decoded = decodeFilmSetNodeData(input.nodeData[ownership.filmSetNodeId]);
+    if (!link || !asset || !decoded.ok || link.filmSetNodeId !== ownership.filmSetNodeId || link.clipId !== ownership.clipId
+      || filmSetAnimationsOf(decoded.value).clips.find(clip => clip.id === ownership.clipId)?.kind !== "static"
+      || readyShotImageAsset(input.canvas.assets, link)?.id !== asset.id) return { ok: false, waiting: false, reason: "shot-image-unavailable: 图片参考资产或归属无效" };
+    const identity = shotImageReferenceIdentity({ animation: decoded.value, clipId: link.clipId, background: String(asset.metadata?.background), assets: input.canvas.assets });
+    const frozen = input.frozen;
+    if (frozen ? frozen.contentIdentity !== link.contentIdentity || frozen.profileKey !== link.profileKey
+      : !identity || identity.contentIdentity !== link.contentIdentity || identity.profileKey !== link.profileKey) return { ok: false, waiting: false, reason: "shot-image-version-stale: 图片参考版本已失效，请重新执行" };
+    return { ok: true, asset, link };
   }
   return resolveAsset(input.canvas, assetIds, ownership.filmSetNodeId, ownership.clipId);
+}
+
+/** Apply only validated frozen slots to an execution snapshot; never write stale mappings to the document. */
+export function withFrozenShotImages(canvas: ServerCanvas, nodeId: string, frozen: FrozenShotImageReference[]): ServerCanvas | string {
+  if (!shotImageMappingsMatch(canvas, nodeId, frozen)) return "图片参考输入连接已变化，请重新执行";
+  const data = canvas.nodeData[nodeId];
+  for (const ref of frozen) {
+    const ownership = verifyShotReferenceOwnership({ canvas, nodeData: canvas.nodeData, sourceNodeId: ref.sourceNodeId });
+    const asset = readyShotImageAsset(canvas.assets, ref);
+    const link = readShotImageReferenceAssetLink(asset?.metadata);
+    const decoded = ownership.ok ? decodeFilmSetNodeData(canvas.nodeData[ownership.filmSetNodeId]) : null;
+    if (!ownership.ok || ownership.filmSetNodeId !== ref.filmSetNodeId || ownership.clipId !== ref.clipId || !asset || !link
+      || !decoded?.ok || filmSetAnimationsOf(decoded.value).clips.find(clip => clip.id === ref.clipId)?.kind !== "static"
+      || link.contentIdentity !== ref.contentIdentity || link.profileKey !== ref.profileKey) return "shot-image-unavailable: 冻结的图片参考不可用";
+  }
+  return { ...canvas, nodeData: { ...canvas.nodeData, [nodeId]: { ...data, inputMapping: (data?.inputMapping ?? []).map(mapping => {
+    const ref = frozen.find(ref => ref.slotId === mapping.slotId && ref.sourceNodeId === mapping.sourceNodeId);
+    return ref ? { ...mapping, sourceAssetIds: [shotImageReferenceAssetId(ref)] } : mapping;
+  }) } } } as ServerCanvas;
 }
 
 function resolveAsset(

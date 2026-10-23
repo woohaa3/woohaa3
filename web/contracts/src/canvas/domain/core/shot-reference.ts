@@ -16,6 +16,8 @@
 
 /** 镜头参考映射角色（目标节点的 `inputMapping[].role`）。 */
 export const SHOT_REFERENCE_ROLE = "shot_reference" as const;
+export const SHOT_IMAGE_REFERENCE_ROLE = "shot_image_reference" as const;
+export const SHOT_IMAGE_REFERENCE_EDGE_KIND = "shot-image-reference" as const;
 
 /**
  * Provider 侧角色：镜头参考以**视频参考**身份参与模型绑定校验、生成模式校验与任务输入。
@@ -28,7 +30,7 @@ export const SHOT_REFERENCE_PROVIDER_ROLE = "reference_video" as const;
 
 /** 把画布输入角色映射为 provider 绑定角色（镜头参考 → `reference_video`）。 */
 export function providerReferenceRole(role: string): string {
-  return role === SHOT_REFERENCE_ROLE ? SHOT_REFERENCE_PROVIDER_ROLE : role;
+  return role === SHOT_REFERENCE_ROLE ? SHOT_REFERENCE_PROVIDER_ROLE : role === SHOT_IMAGE_REFERENCE_ROLE ? "reference_image" : role;
 }
 
 /** 镜头参考边的 `data.kind`，与普通 `dependency` 边区分。 */
@@ -53,15 +55,15 @@ export function isSupportedShotReferenceEdgeData(
   return version === SHOT_REFERENCE_SCHEMA_VERSION;
 }
 
-export type ShotReferenceRole = typeof SHOT_REFERENCE_ROLE;
-export type ShotReferenceEdgeKind = typeof SHOT_REFERENCE_EDGE_KIND;
+export type ShotReferenceRole = typeof SHOT_REFERENCE_ROLE | typeof SHOT_IMAGE_REFERENCE_ROLE;
+export type ShotReferenceEdgeKind = typeof SHOT_REFERENCE_EDGE_KIND | typeof SHOT_IMAGE_REFERENCE_EDGE_KIND;
 
 export function isShotReferenceRole(value: unknown): value is ShotReferenceRole {
-  return value === SHOT_REFERENCE_ROLE;
+  return value === SHOT_REFERENCE_ROLE || value === SHOT_IMAGE_REFERENCE_ROLE;
 }
 
 export function isShotReferenceEdgeKind(value: unknown): value is ShotReferenceEdgeKind {
-  return value === SHOT_REFERENCE_EDGE_KIND;
+  return value === SHOT_REFERENCE_EDGE_KIND || value === SHOT_IMAGE_REFERENCE_EDGE_KIND;
 }
 
 /**
@@ -137,6 +139,15 @@ export function isShotReferenceTargetNode(type: string | undefined, nodeData: Re
   return false;
 }
 
+/** Static shots use the same image-reference targets as ordinary image inputs. */
+export function isShotImageReferenceTargetNode(type: string | undefined, data: Record<string, unknown> | undefined): boolean {
+  return type === "image" || isShotReferenceTargetNode(type, data);
+}
+
+export function shotReferenceRoleForKind(kind: "static" | "dynamic"): ShotReferenceRole {
+  return kind === "static" ? SHOT_IMAGE_REFERENCE_ROLE : SHOT_REFERENCE_ROLE;
+}
+
 export type ShotReferenceDecision = { ok: true; source: ShotReferenceSourceShape } | { ok: false; reason: string };
 
 /**
@@ -173,11 +184,8 @@ export function decideShotReferenceConnection(input: {
   if (!source) {
     return { ok: false, reason: "镜头参考来源的片场或拍摄镜头不存在" };
   }
-  if (source.kind !== "dynamic") {
-    return { ok: false, reason: "静态拍摄镜头不能作为视频参考" };
-  }
-  if (!isShotReferenceTargetNode(input.targetType, input.targetData)) {
-    return { ok: false, reason: "镜头参考只能连到视频生成节点" };
+  if (source.kind === "static" ? !isShotImageReferenceTargetNode(input.targetType, input.targetData) : !isShotReferenceTargetNode(input.targetType, input.targetData)) {
+    return { ok: false, reason: source.kind === "static" ? "静态镜头图片参考只能连到图片或视频生成节点" : "动态镜头视频参考只能连到视频生成节点" };
   }
   if (input.hasExistingEdge) {
     return { ok: false, reason: "该镜头参考已存在" };

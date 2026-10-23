@@ -288,6 +288,9 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
       // 截图会话：capture → Media 上传 → 原子 asset.upsert + node.add + edge.add（任务 4.1–4.3）。
       const captureSession = new ModelShotCaptureSession({
         render: async ({ nodeId, cameraId, captureId }) => {
+          if (ctx.compositeAssets.resolve(ctx.canvasState.getCanvas(), nodeId)?.captureEnabled?.(nodeId, cameraId) === false) {
+            return { ok: false as const, code: "capture-unsupported", message: "当前目标不支持保存帧，请使用已准备的图片参考" };
+          }
           const playback = ctx.canvasRuntime.animationPlaybackState();
           if (cameraId.startsWith("clip:") && playback?.nodeId === nodeId && playback.viewMode === "focus-preview") {
             return renderWithBevy(ctx, { captureId, nodeId, shot: { ...playback.initialCamera, focus: playback.initialCamera.focusOffset, aspect: playback.initialCamera.aspect ?? "16:9" } as never });

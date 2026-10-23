@@ -20,7 +20,7 @@
 mod plan;
 mod policy;
 #[cfg(feature = "canvas-core")]
-pub(crate) use plan::pin_capture_owners;
+pub(crate) use plan::{pin_capture_owners, pin_visible_owners};
 #[cfg(feature = "canvas-core")]
 mod state;
 #[cfg(feature = "canvas-core")]

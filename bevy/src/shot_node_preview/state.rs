@@ -95,6 +95,7 @@ pub(crate) struct RigState {
     pub(crate) center: Vec3,
     pub(crate) radius: f32,
     pub(crate) size: UVec2,
+    pub(crate) backdrop: Option<Color>,
 }
 
 /// 实际工作计数（累积；只服务诊断，不代表 GPU 时间或帧率）。
@@ -219,6 +220,7 @@ pub(crate) fn rig_state_of(target: &Target, size: UVec2) -> RigState {
         center: target.bounds.center,
         radius: target.bounds.radius.max(1e-4),
         size,
+        backdrop: target.backdrop,
     }
 }
 

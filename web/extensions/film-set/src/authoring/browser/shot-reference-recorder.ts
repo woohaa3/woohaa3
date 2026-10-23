@@ -25,6 +25,7 @@ export const SHOT_REFERENCE_FPS = 30;
 
 /** 一次录制任务的固定身份（不含播放状态，因此不依赖打开工作区或当前选中镜头）。 */
 export type ShotReferenceRecordTarget = {
+  kind?: "static" | "dynamic";
   canvasId: string;
   filmSetNodeId: string;
   clipId: string;
@@ -102,6 +103,7 @@ export async function recordShotReference(
   target: ShotReferenceRecordTarget,
   signal: AbortSignal
 ): Promise<ShotReferenceRecordOutcome> {
+  if (target.kind === "static") return { ok: false, code: "failed", message: "shot-kind-unsupported: 静态镜头不支持视频录制" };
   if (!(Number.isFinite(target.duration) && target.duration > 0)) {
     return { ok: false, code: "failed", message: "该镜头没有可录制的动画时长" };
   }

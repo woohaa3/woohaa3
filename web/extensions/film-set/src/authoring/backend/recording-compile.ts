@@ -197,6 +197,7 @@ export function freezeFilmSetRecording(input: {
   const collection = filmSetAnimationsOf(animation);
   const clip = collection.clips.find(entry => entry.id === request.clipId);
   if (!clip) return fail("recording-source-invalid", "目标片段不存在");
+  if (clip.kind !== "dynamic") return fail("shot-kind-unsupported", "静态镜头不支持视频录制");
   const view = resolveFilmSetClip(animation, clip.id);
   if (!view) return fail("recording-source-invalid", "目标片段无法投影");
 

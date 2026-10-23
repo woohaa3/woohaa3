@@ -113,6 +113,9 @@ function applyCommand(work: WorkingState, command: CanvasCommand): CommandApplyR
     case "node.remove":
       return removeNodes(work, command.nodeIds);
     case "nodeData.patch":
+      if (command.expectedInputMapping !== undefined && JSON.stringify(work.nodeData[command.nodeId]?.inputMapping ?? []) !== JSON.stringify(command.expectedInputMapping)) {
+        return reject("invalid-connection", "输入连接已变化，请重新执行");
+      }
       return patchNodeData(work, command.nodeId, command.value);
     case "filmSet.clipPatch":
       return patchFilmSetClip(work, command);

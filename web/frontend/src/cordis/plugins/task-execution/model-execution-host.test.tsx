@@ -104,6 +104,28 @@ afterEach(async () => {
 });
 
 describe("ModelExecutionHost 提示词归属", () => {
+  it("uses the page coordinator and updates its waiting result without remounting or losing drafts", async () => {
+    let panel: ModelPanelProps | undefined;
+    let message: string | null = "等待镜头参考图片准备完成";
+    const listeners = new Set<() => void>();
+    const submit = vi.fn(async () => ({ ok: false as const, error: message!, waiting: true }));
+    const run = vi.fn();
+    const registry = new ModelInteractionService();
+    registry.register({ id: "test-panel", version: 1, owner: "test", Panel: props => { panel = props; return <output>{props.draft.prompt}</output>; } });
+    const container = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
+      runClient={{ run, cancel: vi.fn() } as never} writable dialogs={new DialogService()} catalog={new StubCatalogService(CATALOG)}
+      registry={registry} draftStore={createModelDraftStore()} submitCoordinator={{ submit, cancel: vi.fn(), retryWaiting: vi.fn(), pendingWaiting: () => [NODE_ID],
+        waitingMessage: () => message, subscribeWaiting: listener => { listeners.add(listener); return () => listeners.delete(listener); } }} />);
+    await act(async () => { panel!.patchDraft({ prompt: "preserved draft" }); });
+    await act(async () => { await panel!.submit({ prompt: "preserved draft", parameters: {} }); });
+    expect(submit).toHaveBeenCalledOnce(); expect(run).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(message);
+    await act(async () => { message = "shot-image-version-stale"; listeners.forEach(listener => listener()); });
+    expect(container.textContent).toContain("shot-image-version-stale");
+    await act(async () => { message = null; listeners.forEach(listener => listener()); });
+    expect(container.textContent).not.toContain("shot-image-version-stale");
+    expect(container.querySelector("output")!.textContent).toBe("preserved draft");
+  });
   it("keeps custom panels ready during active tasks and accepts three clicks before any request resolves", async () => {
     const saved=canvasWithVideoNode(); saved.nodeData[NODE_ID]!.taskStatus="processing";
     woohaa3CanvasStore.getState().hydrate(saved);

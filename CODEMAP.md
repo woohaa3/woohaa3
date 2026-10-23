@@ -1,5 +1,9 @@
 # Client code map
 
+Film-set static image references: `web/contracts/src/canvas/film-set-shot-image-reference.ts` owns image profiles, stable version identities and ready asset validation. Sync protocol 5 protects the independent image role; atomic clip conversion and protected undo/replay update consumer roles together. `web/extensions/film-set/src/authoring/browser/shot-image-reference.ts` owns bounded T=0/High capture, PNG registration, reuse/retry and download. Dynamic recording excludes static clips. The inspector owns object-first authoring and saved composition feedback; the shared camera panel takes an explicit capture policy.
+
+`web/frontend/src/cordis/plugins/task-execution/submit-coordinator.ts` freezes image inputs and parameters at click time and resumes each waiting consumer once. The page shares this coordinator with ModelExecutionHost. `web/services/canvas-service/src/task/shot-reference-resolution.ts` validates frozen image metadata and builds an execution-only mapping; run-service revalidates before durable acceptance. `bevy/src/shot_node_preview` and shared `shot_camera` carry each rig's optional backdrop through preview and capture, waiting for real High/GPU readiness before readback.
+
 | Directory | Responsibility |
 | --- | --- |
 | `api/gen/es` | Generated protobuf-es bindings for the shared RPC and synchronization contracts; the protocol sources and their pipeline live outside this repository |

@@ -47,6 +47,12 @@ function render(element: React.ReactElement) {
 }
 
 describe("ModelEditorToolbar", () => {
+  it("explicit captureEnabled=false omits capture while retaining composition fields", () => {
+    const { session } = makeSession([camera()]); session.enter("m1"); session.setToolMode("camera");
+    render(<ModelEditorToolbar session={session} writable captureEnabled={false} onAddCamera={() => undefined} onCapture={() => { throw new Error("unexpected capture"); }} />);
+    expect(document.body.textContent).not.toContain("截图");
+    expect(document.body.textContent).toContain("仰角");
+  });
   it("未进入编辑（nodeId 为 null）时不渲染", () => {
     const { session } = makeSession();
     render(<ModelEditorToolbar session={session} writable onAddCamera={() => undefined} onCapture={() => undefined} />);

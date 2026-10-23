@@ -59,7 +59,7 @@ export type CanvasCommand =
     }
   | { type: "node.remove"; nodeIds: readonly string[] }
   /** `value: null` 等价于删除该 nodeData 键。 */
-  | { type: "nodeData.patch"; nodeId: string; value: CanvasNodeData | null }
+  | { type: "nodeData.patch"; nodeId: string; value: CanvasNodeData | null; expectedInputMapping?: CanvasNodeData["inputMapping"] }
   /** 片场对象级权威更新；`nodeId` 必须是 `animation3d`。 */
   | { type: "filmSet.itemPatch"; nodeId: string; itemId: string; op: FilmSetItemPatchOp }
   | { type: "filmSet.clipPatch"; nodeId: string; clipId: string; expectedHash: string; op: FilmSetClipPatchOp }
@@ -142,7 +142,9 @@ export function isCanvasCommand(value: unknown): value is CanvasCommand {
       return Array.isArray(value.nodeIds) && value.nodeIds.every(isNonEmptyString);
     case "nodeData.patch":
       return isNonEmptyString(value.nodeId)
-        && (value.value === null || isRecord(value.value));
+        && (value.value === null || isRecord(value.value))
+        && (value.expectedInputMapping === undefined || (Array.isArray(value.expectedInputMapping)
+          && value.expectedInputMapping.every(entry => isRecord(entry) && isNonEmptyString(entry.sourceNodeId) && isNonEmptyString(entry.role))));
     case "filmSet.itemPatch":
       return isNonEmptyString(value.nodeId)
         && isNonEmptyString(value.itemId)

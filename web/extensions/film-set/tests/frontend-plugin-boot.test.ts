@@ -68,6 +68,7 @@ function fakeSlots(failAt?: string): SlotsService {
 /** 装配一个具有 film-set 所需全部注入 service 的真实 Cordis Context。 */
 function bootFilmSet(canvas: ServerCanvas | null = null, failAt?: string): { ctx: Context; fiber: Fiber; slots: SlotsService; dialogs: DialogService } {
   const ctx = new Context();
+  ctx.provide("theme" as never, { getSnapshot: () => ({ tokens: { webSubtle: "#f6f8f6" } }), subscribe: () => () => undefined } as never);
   const slots = fakeSlots(failAt);
   const dialogs = new DialogService();
   ctx.provide("dialogs" as never, dialogs as never);

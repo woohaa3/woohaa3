@@ -3,7 +3,7 @@
  * （change: 2026-09-29-add-pluggable-model-interactions，任务 4.1）。
  */
 import type { CanvasSession } from "../../contracts.js";
-import { SHOT_REFERENCE_ROLE, type CanvasTaskCatalogModel, type CanvasTaskModelType, type ServerCanvas } from "@woohaa3/contracts";
+import { isShotReferenceRole, type CanvasTaskCatalogModel, type CanvasTaskModelType, type ServerCanvas } from "@woohaa3/contracts";
 import { planConnectEdge, planDeleteEdge } from "../../../extension-api/command-planner.js";
 import type { ModelReferenceItem } from "../../contract/model-interaction.js";
 
@@ -19,7 +19,7 @@ export function canMentionReference(
 ): boolean {
   if (item.slotId === "") return false;
   if (item.status === "ready") return true;
-  return item.role === SHOT_REFERENCE_ROLE && item.status === "pending";
+  return isShotReferenceRole(item.role) && item.status === "pending";
 }
 
 /** 连接一个来源节点作为目标节点的参考输入（受控 Canvas 命令）。 */

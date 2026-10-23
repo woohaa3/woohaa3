@@ -12,7 +12,7 @@ import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeFilmSetContent, FILM_SET_CONTENT_FIELD } from "../film-set-content.js";
 import { isPureModelNodeType } from "./core/input-role.js";
 import { FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "./core/shot-preview-node.js";
-import { isShotReferenceRole, isSupportedShotReferenceEdgeData } from "./core/shot-reference.js";
+import { isSupportedShotReferenceEdgeData, resolveShotReferenceSource, shotReferenceRoleForKind, SHOT_IMAGE_REFERENCE_EDGE_KIND, SHOT_REFERENCE_EDGE_KIND } from "./core/shot-reference.js";
 import { shotReferenceDecision } from "./core/connection-rules.js";
 import { isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
 import { DIRECTOR_STUDIO_DEFAULT_TITLE, LEGACY_ANIMATION_DEFAULT_TITLE } from "../director-studio-title.js";
@@ -75,14 +75,16 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
     sanitizedNodeData[nodeId] as Record<string, unknown> | undefined;
   const connectionNodes = sanitizedNodes as unknown as Parameters<typeof shotReferenceDecision>[1];
   /** 镜头参考边合法性：结构版本受支持、来源动态预览、目标视频生成节点、且当前画布不存在重复边。 */
-  const isLegalShotReferenceEdge = (edge: Woohaa3CanvasEdge): boolean =>
-    isSupportedShotReferenceEdgeData(edge.data as Record<string, unknown> | undefined)
-    && shotReferenceDecision(
+  const isLegalShotReferenceEdge = (edge: Woohaa3CanvasEdge): boolean => {
+    const decision = shotReferenceDecision(
       { source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle ?? null, targetHandle: edge.targetHandle ?? null },
       connectionNodes,
       [],
       { get: readSanitizedNodeData }
-    ).ok;
+    );
+    return decision.ok && isSupportedShotReferenceEdgeData(edge.data as Record<string, unknown> | undefined)
+      && edge.data?.kind === (decision.source.kind === "static" ? SHOT_IMAGE_REFERENCE_EDGE_KIND : SHOT_REFERENCE_EDGE_KIND);
+  };
   document.nodes = sanitizedNodes;
   document.edges = document.edges.filter(
     (edge) => nodeIdsAfterSanitize.has(edge.source) && nodeIdsAfterSanitize.has(edge.target)
@@ -104,7 +106,7 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   cleanFilmSetInputMappings(nodeData, filmSetIds);
   // 拍摄镜头预览（D2）：归一化不得剥掉 preview 节点身份；同时清除其上的输入 mapping，
   // 预览不能作为普通生成/参考输入。
-  cleanShotPreviewInputMappings(nodeData, nodeTypes);
+  cleanShotPreviewInputMappings(nodeData, nodeTypes, document.edges);
 
   // slot 身份在创建/planner 阶段生成并持久化（change: 2026-10-07-remove-residual-compatibility）：
   // 读取/normalize 不再按 sourceNodeId/sortKey 重建或补齐 slot 身份。
@@ -248,7 +250,8 @@ function cleanFilmSetInputMappings(
  */
 function cleanShotPreviewInputMappings(
   nodeData: Record<string, CanvasNodeData>,
-  nodeTypes: ReadonlyMap<string, string>
+  nodeTypes: ReadonlyMap<string, string>,
+  edges: readonly Woohaa3CanvasEdge[]
 ): void {
   const previewIds = new Set(
     [...nodeTypes.entries()].filter(([, type]) => type === FILM_SET_SHOT_PREVIEW_NODE_TYPE).map(([id]) => id)
@@ -261,9 +264,12 @@ function cleanShotPreviewInputMappings(
       delete data.inputMapping;
       continue;
     }
-    const filtered = mappings.filter((mapping) =>
-      !previewIds.has(mapping.sourceNodeId) || isShotReferenceRole(mapping.role)
-    );
+    const filtered = mappings.filter((mapping) => {
+      if (!previewIds.has(mapping.sourceNodeId)) return true;
+      const source = resolveShotReferenceSource(mapping.sourceNodeId, nodeData[mapping.sourceNodeId], id => nodeData[id]);
+      return source && mapping.role === shotReferenceRoleForKind(source.kind)
+        && edges.some(edge => edge.source === mapping.sourceNodeId && edge.target === nodeId);
+    });
     if (filtered.length === mappings.length) continue;
     if (filtered.length > 0) data.inputMapping = filtered;
     else delete data.inputMapping;

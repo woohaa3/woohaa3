@@ -22,17 +22,18 @@ export const SHOT_REFERENCE_TARGET_REASON = "镜头参考只能连到视频生�
 export function shotReferenceTemplateItems(
   templates: readonly CanvasNodeTemplate[],
   writable: boolean,
-  connectFrom: { nodeId: string; nodeType: string }
+  connectFrom: { nodeId: string; nodeType: string },
+  kind: "static" | "dynamic" | null = "dynamic"
 ): CanvasContextMenuItem[] {
   void connectFrom;
   return templates.map((template) => {
-    const isVideo = template.nodeType === SHOT_REFERENCE_TARGET_NODE_TYPE;
+    const isVideo = kind !== null && (template.nodeType === SHOT_REFERENCE_TARGET_NODE_TYPE || (kind === "static" && template.nodeType === "image"));
     return {
       id: `insert:${template.id}`,
       label: template.label,
       section: CANVAS_MENU_SECTION.basicMaterial,
       disabled: !writable || !isVideo,
-      ...(isVideo || !writable ? {} : { reason: SHOT_REFERENCE_TARGET_REASON })
+      ...(isVideo || !writable ? {} : { reason: kind === "static" ? "静态镜头图片参考只能连到图片或视频生成节点" : SHOT_REFERENCE_TARGET_REASON })
     };
   });
 }

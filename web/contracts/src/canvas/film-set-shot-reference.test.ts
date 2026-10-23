@@ -6,10 +6,12 @@
  * 组合明确拒绝、以及规范化不剥掉合法镜头参考 / 清理非法预览边。
  */
 import { describe, expect, it } from "vitest";
+import { shotImageReferenceIdentity, freezeShotImageReferences, shotImageReferenceAssetId } from "./film-set-shot-image-reference.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
 import { normalizeCanvas } from "./domain/normalization.js";
 import { applyCanvasCommands } from "./command-reducer.js";
+import { planCanvasEdit } from "./edit-plan.js";
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { filmSetClipPrecondition, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";
@@ -109,6 +111,77 @@ function withExtraStaticClip(canvas: ServerCanvas): ServerCanvas {
 const PREVIEW_ID = shotPreviewNodeId("film", "clip-1");
 const STATIC_PREVIEW_ID = shotPreviewNodeId("film", "clip-s");
 
+describe("static image reference contracts", () => {
+  const connect = (canvas: ServerCanvas, source = STATIC_PREVIEW_ID, target = "video-1") => expectOk(apply(canvas, [{ type: "edge.add", edge: { id: "image-edge", source, target } }]));
+  it("protected undo/redo restores the source kind and consumer edge/mapping role together", () => {
+    const base = connect(withExtraStaticClip(materialize(withDynamicFilmSet())));
+    const plan = planCanvasEdit(base, [clipPatch(base, { kind: "set-kind", toKind: "dynamic", duration: 3 }, "clip-s")] as never);
+    if (!plan.ok) throw new Error(plan.reason);
+    const replay = (canvas: ServerCanvas, direction: typeof plan.forward) => expectOk(apply(canvas, [{ type: "edit.apply", ...direction }]));
+    const forward = replay(base, plan.forward);
+    expect(forward.document.edges[0]?.data?.kind).toBe("shot-reference");
+    expect(forward.nodeData["video-1"]!.inputMapping![0]!.role).toBe("shot_reference");
+    const undo = replay(forward, plan.inverse);
+    expect(undo.document.edges[0]?.data?.kind).toBe("shot-image-reference");
+    expect(undo.nodeData["video-1"]!.inputMapping![0]!.role).toBe("shot_image_reference");
+    const redo = replay(undo, plan.forward);
+    expect(redo.document.edges[0]?.data?.kind).toBe("shot-reference");
+  });
+  it("static edge, mapping, normalization and atomic creation share the image role", () => {
+    const canvas = connect(withExtraStaticClip(materialize(withDynamicFilmSet())));
+    expect(canvas.document.edges[0]?.data?.kind).toBe("shot-image-reference");
+    expect(canvas.nodeData["video-1"]?.inputMapping?.[0]?.role).toBe("shot_image_reference");
+    expect(normalizeCanvas(canvas).document.edges).toEqual(canvas.document.edges);
+    expect(normalizeCanvas(canvas).nodeData["video-1"]?.inputMapping).toEqual(canvas.nodeData["video-1"]?.inputMapping);
+    const next = expectOk(apply(canvas, [{ type: "node.add", node: { id: "image-1", type: "image", position: { x: 500, y: 500 } }, nodeData: { taskKind: "image-generation" }, connect: { fromNodeId: STATIC_PREVIEW_ID, edgeId: "image-created" } }]));
+    expect(next.nodeData["image-1"]?.inputMapping?.[0]?.role).toBe("shot_image_reference");
+    expect(next.document.edges.find(edge => edge.id === "image-created")?.data?.kind).toBe("shot-image-reference");
+    const removed = expectOk(apply(next, [{ type: "node.remove", nodeIds: ["film"] }]));
+    expect(removed.document.edges).toEqual([]);
+    expect(removed.nodeData["image-1"]?.inputMapping ?? []).toEqual([]);
+  });
+  it("conversion commits kind/edge/role together, preserves slot/layout and rejects incompatible consumers atomically", () => {
+    const base = connect(withExtraStaticClip(materialize(withDynamicFilmSet())));
+    const before = base.nodeData["video-1"]!.inputMapping![0]!;
+    const dynamic = expectOk(apply(base, [clipPatch(base, { kind: "set-kind", toKind: "dynamic", duration: 3 }, "clip-s")]));
+    expect(dynamic.document.edges[0]?.data?.kind).toBe("shot-reference");
+    expect(dynamic.nodeData["video-1"]!.inputMapping![0]).toMatchObject({ slotId: before.slotId, role: "shot_reference" });
+    expect(dynamic.document.nodes.find(node => node.id === STATIC_PREVIEW_ID)?.position).toEqual(base.document.nodes.find(node => node.id === STATIC_PREVIEW_ID)?.position);
+    const still = expectOk(apply(dynamic, [clipPatch(dynamic, { kind: "set-kind", toKind: "static", confirmClearContent: true }, "clip-s")]));
+    expect(still.nodeData["video-1"]!.inputMapping![0]).toMatchObject({ slotId: before.slotId, role: "shot_image_reference" });
+    const imageConsumer = expectOk(apply(still, [{ type: "node.add", node: { id: "image-1", type: "image", position: { x: 0, y: 0 } }, connect: { fromNodeId: STATIC_PREVIEW_ID, edgeId: "blocked" } }]));
+    const snapshot = structuredClone(imageConsumer);
+    const result = apply(imageConsumer, [clipPatch(imageConsumer, { kind: "set-kind", toKind: "dynamic", duration: 3 }, "clip-s")]);
+    expect(result.ok).toBe(false); expect(imageConsumer).toEqual(snapshot);
+    if (!result.ok) expect(result.rejection.message).toContain("image-1");
+  });
+  it("stale mapping patches cannot overwrite a reconnect or unrelated target fields", () => {
+    const canvas = connect(withExtraStaticClip(materialize(withDynamicFilmSet())));
+    const original = structuredClone(canvas.nodeData["video-1"]!.inputMapping!);
+    const disconnected = expectOk(apply(canvas, [{ type: "edge.remove", edgeId: "image-edge" }]));
+    const result = apply(disconnected, [{ type: "nodeData.patch", nodeId: "video-1", value: { inputMapping: original }, expectedInputMapping: original }]);
+    expect(result.ok).toBe(false);
+    expect(disconnected.nodeData["video-1"]!.inputMapping ?? []).toEqual([]);
+  });
+  it("image identity excludes name/provenance/scene observation and includes saved camera, background, geometry and profile", () => {
+    const canvas = connect(withExtraStaticClip(materialize(withDynamicFilmSet())));
+    const decoded = decodeFilmSetNodeData(canvas.nodeData.film); if (!decoded.ok) throw new Error(decoded.reason);
+    const animation = decoded.value;
+    const identity = (background = "#ffffff") => shotImageReferenceIdentity({ animation, clipId: "clip-s", background, assets: [] })!;
+    const before = identity();
+    animation.title = "Renamed"; animation.sceneCamera.azimuth += 1;
+    animation.filmSetContent.items[0]!.name = "Renamed object";
+    expect(identity()).toEqual(before);
+    expect(identity("#000000").contentIdentity).not.toBe(before.contentIdentity);
+    animation.filmSetAnimations!.clips.find(clip => clip.id === "clip-s")!.initialCamera.aspect = "9:16";
+    expect(identity()).toMatchObject({ width: 720, height: 1280 });
+    expect(identity().profileKey).not.toBe(before.profileKey);
+    const frozen = freezeShotImageReferences(canvas, "video-1", "#ffffff");
+    expect(Array.isArray(frozen)).toBe(true);
+    if (Array.isArray(frozen)) expect(shotImageReferenceAssetId(frozen[0]!)).toContain("shot-reference-image:film:clip-s:");
+  });
+});
+
 describe("镜头参考协议（任务 8.1）", () => {
   it("动态预览到视频节点的连接合法，边标记为 shot-reference，映射角色为 shot_reference", () => {
     const canvas = materialize(withDynamicFilmSet());
@@ -137,14 +210,12 @@ describe("镜头参考协议（任务 8.1）", () => {
     expect(canvas.document.edges.filter((edge) => edge.source === PREVIEW_ID || edge.target === PREVIEW_ID)).toHaveLength(0);
   });
 
-  it("静态镜头、预览作目标、非视频目标都明确拒绝并给出原因", () => {
+  it("静态镜头接受图片参考，预览作目标和动态非视频目标明确拒绝", () => {
     const canvas = materialize(withDynamicFilmSet());
     const staticCanvas = withExtraStaticClip(canvas);
     const reader = { get: (id: string) => staticCanvas.nodeData[id] as Record<string, unknown> | undefined };
     const fromStatic = { source: STATIC_PREVIEW_ID, target: "video-1", sourceHandle: null, targetHandle: null };
-    expect(isValidWoohaa3CanvasConnection(fromStatic, staticCanvas.document.nodes, staticCanvas.document.edges, reader)).toBe(false);
-    expect(explainWoohaa3CanvasConnectionBlock(fromStatic, staticCanvas.document.nodes, staticCanvas.document.edges, reader))
-      .toBe("静态拍摄镜头不能作为视频参考");
+    expect(isValidWoohaa3CanvasConnection(fromStatic, staticCanvas.document.nodes, staticCanvas.document.edges, reader)).toBe(true);
 
     const dynamicReader = { get: (id: string) => canvas.nodeData[id] as Record<string, unknown> | undefined };
     expect(isValidWoohaa3CanvasConnection({ source: "video-1", target: PREVIEW_ID, sourceHandle: null, targetHandle: null }, canvas.document.nodes, canvas.document.edges, dynamicReader)).toBe(false);
@@ -157,7 +228,7 @@ describe("镜头参考协议（任务 8.1）", () => {
     const imageReader = { get: (id: string) => imageCanvas.nodeData[id] as Record<string, unknown> | undefined };
     expect(isValidWoohaa3CanvasConnection({ source: PREVIEW_ID, target: "image-1", sourceHandle: null, targetHandle: null }, imageCanvas.document.nodes, imageCanvas.document.edges, imageReader)).toBe(false);
     expect(explainWoohaa3CanvasConnectionBlock({ source: PREVIEW_ID, target: "image-1", sourceHandle: null, targetHandle: null }, imageCanvas.document.nodes, imageCanvas.document.edges, imageReader))
-      .toBe("镜头参考只能连到视频生成节点");
+      .toBe("动态镜头视频参考只能连到视频生成节点");
   });
 
   it("规范化保留合法镜头参考边与映射，剥掉非法预览边", () => {

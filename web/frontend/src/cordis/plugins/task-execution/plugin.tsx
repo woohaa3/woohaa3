@@ -198,6 +198,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           const surface = resolveExecutionPanelSurface(presentation, resolvePanelNodeType(route.nodeId));
           return (
             <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} />}><ModelExecutionHost
+              submitCoordinator={coordinator}
               canvasId={canvasId}
               selectedNodeId={route.nodeId}
               session={ctx.canvasSession}
@@ -324,7 +325,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         client: ctx.canvasRemote,
         activity: activitySink,
         // 镜头参考：录制完成并冻结后（画布更新）自动续交一次（任务 8.6）。
-        isWaiting: (error) => error.includes("等待镜头参考")
+        isWaiting: (error) => error.includes("等待镜头参考"),
+        isWritable: () => ctx.canvasSession.isWritable(),
+        imageReferenceBackground: () => (ctx.get("theme") as { getSnapshot?: () => { tokens?: { webSubtle?: string } } } | undefined)?.getSnapshot?.().tokens?.webSubtle ?? "#f6f8f6"
       });
       // 统一运行状态：活动状态优先于滞后的 canonical taskStatus（不依赖鼠标移动刷新）。
       const runStateService = (): RunStateService | undefined => ctx.get(RUN_STATE_SERVICE) as RunStateService | undefined;
@@ -470,7 +473,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
     },
     {
       name: TASK_EXECUTION_PLUGIN_ID,
-      inject: ["slots", "canvasRemote", "canvasSession", "canvasState", "taskCatalog", "dialogs", "modelInteractions", "canvasRuntime", "canvasNavigation", "canvasEdit", "appRouter", "applicationRemote", "mediaRemote"]
+      inject: ["theme", "slots", "canvasRemote", "canvasSession", "canvasState", "taskCatalog", "dialogs", "modelInteractions", "canvasRuntime", "canvasNavigation", "canvasEdit", "appRouter", "applicationRemote", "mediaRemote"]
     }
   );
 }

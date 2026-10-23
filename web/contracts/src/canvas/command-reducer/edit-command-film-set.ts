@@ -1,3 +1,4 @@
+import { convertShotReferenceConsumers } from "./film-set-clip-commands.js";
 /**
  * 命令 reducer 的**片场对象类型化受保护编辑**（`edit.apply` 扩展）
  * （change: 2026-10-10-improve-film-set-editing-and-inspector，任务 3.1–3.2 / design D6）。
@@ -22,7 +23,7 @@ import {
 } from "../film-set-item-edit.js";
 import { applyFilmSetClipEditRemove, applyFilmSetClipEditSet, filmSetClipStateHash } from "../film-set-clip-edit.js";
 import { patchNodeData } from "./node-commands.js";
-import { canonicalFilmSetFields, LEGACY_FILM_SET_ANIMATION_FIELDS, LEGACY_FILM_SET_TOP_MODEL_FIELDS } from "../film-set-clip-view.js";
+import { canonicalFilmSetFields, filmSetAnimationsOf, LEGACY_FILM_SET_ANIMATION_FIELDS, LEGACY_FILM_SET_TOP_MODEL_FIELDS } from "../film-set-clip-view.js";
 import { animationSnapshotHash } from "../animation-snapshot.js";
 import { decodeShotPreviewData, shotPreviewNodeId } from "../film-set-shot-preview.js";
 import { FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "../domain/core/shot-preview-node.js";
@@ -172,6 +173,11 @@ export function applyFilmSetOperation(work: WorkingState, operation: EditOperati
     const result = applyFilmSetClipEditSet({ animation, clip: operation.clip, defaultClipId: operation.defaultClipId });
     if (!result.ok) return reject("edit-operation-invalid", result.reason);
     if (!result.changed) return OK;
+    const previous = filmSetAnimationsOf(animation).clips.find(clip => clip.id === operation.clip.id);
+    if (previous && previous.kind !== operation.clip.kind) {
+      const converted = convertShotReferenceConsumers(work, operation.nodeId, operation.clip.id, operation.clip.kind);
+      if (!converted.ok) return converted;
+    }
     return writeFilmSetAnimation(work, operation.nodeId, result.value);
   }
   if (operation.kind === "film-set-clip-remove") {
