@@ -437,7 +437,7 @@ describe("节点历史 repository / 应用服务", () => {
       timeline: { duration: 0, loop: false },
       scenePlacement: { offset: { x: 2, y: 0, z: 0 }, scale: 1.5, yaw: 0.3 },
       filmSetContent: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }]
       }
     });
@@ -475,7 +475,7 @@ describe("节点历史 repository / 应用服务", () => {
     const { service, room } = setup(canvasWithNode("composite-asset", filmSetNodeDataFields(createFilmSetSnapshot({
       title: "片场",
       timeline: { duration: 0, loop: false },
-      filmSetContent: { schemaVersion: 3, items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }] }
+      filmSetContent: { schemaVersion: 4, items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }] }
     }))));
     const before = JSON.stringify(room.canvas.nodeData["node-1"]);
     // 手工注册一条旧格式条目（顶层模型 + 节点级运动；无既有集合）。

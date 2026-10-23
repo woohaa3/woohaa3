@@ -76,7 +76,7 @@ describe("CanvasRenderWarnings", () => {
           { itemId: "other", motion: createFilmSetItemMotion({ item: other, motionScript: good }), playback }
         ]
       };
-      return { kind: "composite-asset" as const, title: "屋顶跑酷", scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, sceneCamera: defaultInitialShotCamera(), camera: defaultInitialShotCamera(), timeline: { duration: 4, loop: false }, filmSetContent: { schemaVersion: 3 as const, items: [hero, other] }, filmSetAnimations: { schemaVersion: 3 as const, defaultClipId: "clip-1", clips: [clip] } };
+      return { kind: "composite-asset" as const, title: "屋顶跑酷", scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, sceneCamera: defaultInitialShotCamera(), camera: defaultInitialShotCamera(), timeline: { duration: 4, loop: false }, filmSetContent: { schemaVersion: 4 as const, items: [hero, other] }, filmSetAnimations: { schemaVersion: 3 as const, defaultClipId: "clip-1", clips: [clip] } };
     };
     const setCanvas = (heroScript: string) => woohaa3CanvasStore.setState({ canvas: { document: { nodes: [{ id: "scene", type: "composite-asset" }] }, nodeData: { scene: filmSetNodeDataFields(snapshot(heroScript)) } } as never });
     const badSnapshot = snapshot(bad);

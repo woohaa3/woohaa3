@@ -11,6 +11,7 @@ import { isBoundedId, isFiniteNumber, isJsonObject } from "../../validation.js";
 import {
   DEFAULT_FILM_SET_LOCAL_TRANSFORM,
   FILM_SET_CONTENT_FIELD,
+  FILM_SET_CONTENT_VERSION,
   FILM_SET_ITEM_KINDS,
   MAX_FILM_SET_NAME_LENGTH,
   emptyFilmSetContent,
@@ -29,13 +30,28 @@ export type FilmSetContentDecodeResult =
   | { ok: true; value: FilmSetContent }
   | { ok: false; reason: string };
 
-/** Strict schema 3 reader; legacy disk records are handled only by the offline migration. */
-export function decodeFilmSetContent(input: unknown): FilmSetContentDecodeResult {
+/** 解码选项：默认只接受当前版本；离线迁移可显式接受上一代版本。 */
+export type FilmSetContentDecodeOptions = {
+  /** 允许读取的 schemaVersion 集合；缺省只接受 [`FILM_SET_CONTENT_VERSION`]。 */
+  acceptedVersions?: readonly number[];
+};
+
+/**
+ * 严格 schema 4 reader（scene-unit 语义）；schema 3 及更早只由离线迁移读取。
+ *
+ * schema 4 与 schema 3 的 items 结构相同，差异在**语义**：所有 offset/尺寸/镜头 unit 都是同一
+ * 场景空间单位（design D1/D5）。旧客户端严格拒绝非 schema 3，因此升级版本即视为拒绝新语义。
+ */
+export function decodeFilmSetContent(
+  input: unknown,
+  options: FilmSetContentDecodeOptions = {}
+): FilmSetContentDecodeResult {
   if (input === undefined || input === null) return { ok: true, value: emptyFilmSetContent() };
   if (!isJsonObject(input)) return { ok: false, reason: "filmSetContent 必须是对象" };
+  const accepted = options.acceptedVersions ?? [FILM_SET_CONTENT_VERSION];
   const rawVersion = input.schemaVersion;
-  if (rawVersion !== 3) {
-    return { ok: false, reason: `不支持的 filmSetContent schemaVersion ${String(input.schemaVersion)}` };
+  if (!accepted.includes(rawVersion as number)) {
+    return { ok: false, reason: `不支持的 filmSetContent schemaVersion ${String(input.schemaVersion)}（要求 ${FILM_SET_CONTENT_VERSION}）` };
   }
   const schemaVersion = rawVersion as FilmSetContentVersion;
   const rawItems = input.items ?? [];
@@ -53,9 +69,9 @@ export function decodeFilmSetContent(input: unknown): FilmSetContentDecodeResult
     if (typeof kind !== "string" || !(FILM_SET_ITEM_KINDS as readonly string[]).includes(kind)) {
       return { ok: false, reason: `片场对象 ${id} kind 非法` };
     }
-    // schema 3 对象只存静态内容；动作与播放配置属于片段 binding。
+    // schema 4 对象只存静态内容；动作与播放配置属于片段 binding。
     if ( (raw.motion !== undefined || raw.playback !== undefined)) {
-      return { ok: false, reason: `schema ${schemaVersion} 片场对象 ${id} 不得包含对象动作；schema 3 请使用片段 binding` };
+      return { ok: false, reason: `schema ${schemaVersion} 片场对象 ${id} 不得包含对象动作；动作请使用片段 binding` };
     }
     const name = readFilmSetName(raw.name);
     if (name === null) return { ok: false, reason: `片场对象 ${id} 名称非法` };
@@ -136,9 +152,12 @@ export function readFilmSetContent(nodeData: unknown): FilmSetContent {
 }
 
 /** 从 flat nodeData 读取片场内容（严格；非法时返回失败原因）。 */
-export function decodeFilmSetContentFromNodeData(nodeData: unknown): FilmSetContentDecodeResult {
+export function decodeFilmSetContentFromNodeData(
+  nodeData: unknown,
+  acceptedVersions?: readonly number[]
+): FilmSetContentDecodeResult {
   if (!isJsonObject(nodeData)) return { ok: false, reason: "nodeData 必须是对象" };
-  return decodeFilmSetContent(nodeData[FILM_SET_CONTENT_FIELD]);
+  return decodeFilmSetContent(nodeData[FILM_SET_CONTENT_FIELD], acceptedVersions ? { acceptedVersions } : {});
 }
 
 /** 按稳定 id 查找对象（缺失返回 undefined）。 */

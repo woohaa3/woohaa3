@@ -218,6 +218,7 @@ fn setup_animation_camera(
     camera: &crate::renderer_protocol::InitialCameraRequest,
     focus: Vec3,
     radius: f32,
+    scene_scale: f32,
     background: Color,
 ) {
     let radius = if radius.is_finite() && radius > 1e-4 {
@@ -225,12 +226,15 @@ fn setup_animation_camera(
     } else {
         1.0
     };
-    // 用解析出的镜头状态求相机位置；elevation/azimuth/distance 来自求值后的 initial camera。
+    // 用解析出的场景镜头状态求相机位置：distance 是场景单位，必须乘同一自然倍率后才与
+    // 内容的世界位置同尺度（change: 2026-10-23-isolate-film-set-camera-space，design D4）。
     let state = camera.state();
+    let scale = if scene_scale.is_finite() && scene_scale > 0.0 { scene_scale } else { 1.0 };
+    let distance = state.distance * scale;
     let position = crate::shot_camera::shot_camera_position(
         focus,
         state.azimuth,
-        state.distance,
+        distance,
         state.elevation,
     );
     let rotation = Transform::from_translation(position)
@@ -238,6 +242,8 @@ fn setup_animation_camera(
         .rotation;
     let fov = crate::shot_camera::SHOT_CAMERA_FOV;
     let distance = (focus - position).length();
+    // 近/远裁剪按同一场景尺度派生，避免极端倍率下近裁剪随呈现变化（design D2）。
+    let near = (distance * 1e-3).max(1e-4);
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -247,8 +253,8 @@ fn setup_animation_camera(
         RenderTarget::Image(image.into()),
         Projection::Perspective(PerspectiveProjection {
             fov,
-            near: 0.01,
-            far: distance * 4.0 + radius * 4.0 + 100.0,
+            near,
+            far: distance * 4.0 + radius * 4.0 + 100.0 * scale,
             ..default()
         }),
         Transform {
@@ -467,12 +473,18 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
             match &animation_camera {
                 Some(camera) => {
                     let (center, radius) = (reference_center, reference_radius);
+                    // 场景单位镜头 → 生产输出世界：距离与焦点偏移按同一自然倍率缩放、按内容根旋转，
+                    // 保证成片构图与节点矩形/画布 zoom 无关（change:
+                    // 2026-10-23-isolate-film-set-camera-space，任务 3.1 / design D4）。
+                    let scale = if root_transform.scale.x.is_finite() && root_transform.scale.x > 0.0 { root_transform.scale.x } else { 1.0 };
+                    let focus_offset = root_transform.rotation * (Vec3::from_array(camera.focus_offset) * scale);
                     setup_animation_camera(
                         &mut commands,
                         image.clone(),
                         camera,
-                        center + Vec3::from_array(camera.focus_offset),
+                        center + focus_offset,
                         radius,
+                        scale,
                         background,
                     );
                 }

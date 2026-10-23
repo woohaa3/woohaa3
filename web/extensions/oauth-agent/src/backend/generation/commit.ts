@@ -152,7 +152,7 @@ export async function commitAnimation(
     }
     const next: FilmSetNodeData = {
       ...current,
-      filmSetContent: { schemaVersion: 3, items },
+      filmSetContent: { schemaVersion: 4, items },
       filmSetAnimations: { ...collection, clips: nextClips }
     };
     const decoded = decodeFilmSetNodeData(toFlatAnimation(next));

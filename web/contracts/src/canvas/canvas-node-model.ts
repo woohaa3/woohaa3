@@ -28,6 +28,7 @@ import {
 import { DEFAULT_MODEL_CAMERA_ASPECT, MODEL_CAMERA_ASPECTS, type ModelCameraAspect } from "./model-cameras.js";
 import type { MotionIr } from "./motion-ir.js";
 import {
+  FILM_SET_CONTENT_VERSION,
   decodeFilmSetContentFromNodeData,
   decodeFilmSetLocalTransform,
   type FilmSetContent,
@@ -257,10 +258,21 @@ export const FILM_SET_LEGACY_NODE_ANIMATION_FIELDS = [
  * - `filmSetAnimations` 必须是 schema 3；缺失按空集合（新空片场）。
  *
  * 旧格式（顶层 model/clip.motion）只由隔离离线 reader 转换，本函数不提供任何兼容读取。
+ *
+ * `options.acceptedContentVersions` 只供离线迁移显式放宽到上一代内容版本；生产调用不得传入。
  */
 export function decodeFilmSetNodeData(
   nodeData: unknown,
-  options: { cameraFallback?: InitialShotCamera } = {}
+  options: {
+    cameraFallback?: InitialShotCamera;
+    /**
+     * 允许读取的内容契约版本；缺省只接受当前 schema（场景单位）。
+     *
+     * 只由**离线迁移**显式传入上一代版本，生产读取与写入路径绝不放宽（change:
+     * 2026-10-23-isolate-film-set-camera-space，design D5）。
+     */
+    acceptedContentVersions?: readonly number[];
+  } = {}
 ): FilmSetNodeDataDecodeResult {
   if (!isJsonObject(nodeData)) return { ok: false, reason: "nodeData 必须是对象" };
   for (const field of FILM_SET_TOP_LEVEL_MODEL_FIELDS) {
@@ -271,9 +283,12 @@ export function decodeFilmSetNodeData(
   }
   const scenePlacement = decodeFilmSetLocalTransform(nodeData.scenePlacement);
   if (!scenePlacement.ok) return { ok: false, reason: `scenePlacement 非法：${scenePlacement.reason}` };
-  const content = decodeFilmSetContentFromNodeData(nodeData);
+  const content = decodeFilmSetContentFromNodeData(nodeData, options.acceptedContentVersions);
   if (!content.ok) return content;
-  if (content.value.schemaVersion !== 3) return { ok: false, reason: "片场 filmSetContent 要求 schema 3（items-only）" };
+  const allowedContentVersions = options.acceptedContentVersions ?? [FILM_SET_CONTENT_VERSION];
+  if (!allowedContentVersions.includes(content.value.schemaVersion)) {
+    return { ok: false, reason: `片场 filmSetContent 要求 schema ${FILM_SET_CONTENT_VERSION}（场景单位）` };
+  }
   const animations = nodeData.filmSetAnimations === undefined
     ? { ok: true as const, value: emptyFilmSetAnimations() }
     : decodeFilmSetAnimations(nodeData.filmSetAnimations, content.value);

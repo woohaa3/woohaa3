@@ -26,10 +26,10 @@ import {
   focusRay,
   rayPlanePoint,
   makeFocusProjector,
-  modelCameraAspectRatio,
   modelCameraFocusOffset,
   shotBoundingRadius,
   shotFitDistance,
+  unmapFilmSetSceneVector,
 } from "@woohaa3/contracts";
 import { shotDragDirection } from "./shot-drag-direction.js";
 import { ModelEditorSession } from "../../../extension-api/model-workspace-session.js";
@@ -41,11 +41,13 @@ import {
   defaultDistanceForNode,
   pushEditor,
   readCameras,
+  resolveTargets,
   shotModelForNode,
   submitCameras
 } from "./model-camera-store.js";
 import { captureSelected, renderWithBevy, acquireCaptureLock } from "./model-shot-capture-run.js";
 import type { InteractionControllerOptions } from "../canvas-shell/interaction-controller.js";
+import { filmSetDisplayRotation, filmSetDisplayScale } from "../canvas-shell/model-focus-session.js";
 import { isModelEditorNodeType } from "../canvas-shell/model-focus-targets.js";
 
 type ShotGestureHandler = NonNullable<InteractionControllerOptions["shotGesture"]>;
@@ -114,13 +116,56 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
       ctx.effect(() => () => unsubscribeFocus(), "model-editor-focus");
 
       // 镜头 pose 手势：命中 shot gizmo 时由控制器回调；实际 preview/commit 走会话。
+      //
+      // 片场镜头是**场景单位**：手势按下时冻结当前容器显示变换（倍率 + 旋转），所有世界位移
+      // 都逆映射回场景后提交；容器 resize / owner 切换立即取消手势，绝不把混合坐标写入作品
+      // （change: 2026-10-23-isolate-film-set-camera-space，design D3）。
       let activeShotHandle: "orbit-ring" | "elevation-ring" | "distance" | null = null;
-      let shotStart: { azimuth: number; elevation: number; distance: number; aspect: import("@woohaa3/contracts").ModelCameraAspect; x: number; y: number; orbitDirection: number; radial: { x: number; y: number; length: number } | null } | null = null;
+      type ShotGestureStart = {
+        azimuth: number;
+        elevation: number;
+        /** 场景单位距离（提交值）。 */
+        distance: number;
+        aspect: import("@woohaa3/contracts").ModelCameraAspect;
+        x: number;
+        y: number;
+        orbitDirection: number;
+        radial: { x: number; y: number; length: number } | null;
+        /** 场景 → 画布世界的显示变换（按下时冻结；非法即不开始手势）。 */
+        display: { scale: number; yaw: number };
+        /** 场景单位 fit 距离（合法范围基准）。 */
+        sceneFit: number;
+        nodeId: string;
+      };
+      let shotStart: ShotGestureStart | null = null;
+
+      /** 当前节点的显示变换与场景 fit；非法/非片场返回 null。 */
+      const shotDisplayFor = (nodeId: string | null): { display: { scale: number; yaw: number }; sceneFit: number } | null => {
+        const target = nodeId ? resolveTargets(ctx).find((entry) => entry.nodeId === nodeId) : null;
+        if (!target) return null;
+        const scale = filmSetDisplayScale(target);
+        const yaw = filmSetDisplayRotation(target);
+        if (!Number.isFinite(scale) || scale <= 0 || !Number.isFinite(yaw)) return null;
+        const model = shotModelForNode(nodeId, ctx);
+        const sceneFit = model ? shotFitDistance(shotBoundingRadius(model.aabb)) : 1;
+        return { display: { scale, yaw }, sceneFit };
+      };
+
+      const cancelShotGesture = () => {
+        activeShotHandle = null;
+        shotStart = null;
+        session.cancelPose();
+      };
       const shotGesture: ShotGestureHandler = {
         begin: (handle, point) => {
           if (isHistoryMode()) return false;
           const selected = session.selectedCamera();
           if (!selected) return false;
+          const nodeId = session.getState().nodeId;
+          if (!nodeId) return false;
+          // 显示变换缺失/非法时拒绝开始：不构造混合坐标的预览。
+          const mapping = shotDisplayFor(nodeId);
+          if (!mapping) return false;
           activeShotHandle = handle;
           const projection = ctx.canvasRuntime.controller()?.focusProjection();
           const editor = ctx.canvasRuntime.modelEditorState();
@@ -135,50 +180,74 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
           const radial = center && length > 1
             ? { x: (point.x - center.x) / length, y: (point.y - center.y) / length, length }
             : null;
-          shotStart = { ...session.effectivePose(selected), distance: editor?.shot?.distance ?? selected.distance, x: point.x, y: point.y, orbitDirection, radial };
+          // 手势起点始终使用**场景单位**规范值（不是映射后的世界距离），保证“按下一屏推拉”换算与
+          // 保存值一致。
+          const pose = session.effectivePose(selected);
+          shotStart = {
+            ...pose,
+            distance: pose.distance,
+            x: point.x,
+            y: point.y,
+            orbitDirection,
+            radial,
+            display: mapping.display,
+            sceneFit: mapping.sceneFit,
+            nodeId
+          };
           session.beginPose();
           return session.getState().posePreview !== null;
         },
         move: (handle, point) => {
           if (!shotStart) return;
+          // 手势期间容器/内容映射必须仍然成立：任何变化都取消手势，不提交混合坐标。
+          const current = shotDisplayFor(shotStart.nodeId);
+          if (!current
+            || Math.abs(current.display.scale - shotStart.display.scale) > 1e-9
+            || Math.abs(current.display.yaw - shotStart.display.yaw) > 1e-9) {
+            cancelShotGesture();
+            return;
+          }
           const surface = ctx.canvasRuntime.controller()?.surface() ?? { width: 1, height: 1, pixelRatio: 1 };
-          const model = shotModelForNode(session.getState().nodeId, ctx);
-          const aspect = session.selectedCamera()?.aspect;
-          const fit = model ? shotFitDistance(shotBoundingRadius(model.aabb), modelCameraAspectRatio(aspect)) : 1;
+          const fit = shotStart.sceneFit;
           if (handle === "orbit-ring") {
             const azimuth = azimuthFromHorizontalDrag(shotStart.azimuth, (point.x - shotStart.x) * shotStart.orbitDirection, surface.width);
             session.updatePose({ azimuth, distance: shotStart.distance });
-          } else if (handle === "elevation-ring") {
+            return;
+          }
+          if (handle === "elevation-ring") {
             // 竖直半圆：纵向拖动改变仰角，一屏 180°，并钳入奇点容差。
             const elevation = elevationFromVerticalDrag(shotStart.elevation, point.y - shotStart.y, surface.height);
             session.updatePose({ azimuth: shotStart.azimuth, elevation, distance: shotStart.distance });
-          } else {
-            // 沿按下点到焦点的屏幕径向缩放；向外拖放大轨道，向内拖缩小。
-            const radial = shotStart.radial;
-            const outward = radial
-              ? (point.x - shotStart.x) * radial.x + (point.y - shotStart.y) * radial.y
-              : 0;
-            const distance = radial
-              ? clampShotDistance(shotStart.distance * (1 + outward / radial.length), fit)
-              : distanceFromDrag({
-                  startDistance: shotStart.distance,
-                  deltaPixels: point.y - shotStart.y,
-                  surfaceHeight: surface.height,
-                  fitDistance: fit
-                });
-            session.updatePose({ azimuth: shotStart.azimuth, distance });
+            return;
           }
+          // 推拉：屏幕位移先按显示倍率还原成**场景单位**距离变化，再做场景单位 clamp。
+          // 沿按下点到焦点的屏幕径向缩放；向外拖放大轨道，向内拖缩小。
+          const radial = shotStart.radial;
+          const outward = radial
+            ? (point.x - shotStart.x) * radial.x + (point.y - shotStart.y) * radial.y
+            : 0;
+          const sceneStart = shotStart.distance;
+          let distance: number;
+          if (radial) {
+            const worldDelta = sceneStart * (1 + outward / radial.length);
+            distance = clampShotDistance(worldDelta, fit);
+          } else {
+            const worldDistance = distanceFromDrag({
+              startDistance: sceneStart,
+              deltaPixels: point.y - shotStart.y,
+              surfaceHeight: surface.height,
+              fitDistance: fit
+            });
+            distance = clampShotDistance(worldDistance, fit);
+          }
+          session.updatePose({ azimuth: shotStart.azimuth, distance });
         },
         end: () => {
           activeShotHandle = null;
           shotStart = null;
           session.endPose();
         },
-        cancel: () => {
-          activeShotHandle = null;
-          shotStart = null;
-          session.cancelPose();
-        }
+        cancel: cancelShotGesture
       };
       void activeShotHandle;
       ctx.canvasRuntime.setModelEditorShotGesture(shotGesture);
@@ -187,9 +256,28 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
       // 焦点三轴/中心位移手势（change: 模型编辑 gizmo 焦点）：命中轴后在起始焦点处冻结；
       // 屏幕轴约束由 Rust 用同一相机/bounds/gizmo 投影派生（design D5：约束来自同一 query
       // generation，不重建相机矩阵）；中心拖动在按下时固定经过注视点的屏幕平面。
+      //
+      // 片场焦点偏移是**场景单位**：世界位移必须经按下时冻结的显示变换逆映射后提交
+      // （change: 2026-10-23-isolate-film-set-camera-space，design D3）。
       let focusStart:
-        | { axis: "x" | "y" | "z" | "center"; planePoint?: (point: { x: number; y: number }) => import("@woohaa3/contracts").Vec3 | null; startWorld?: import("@woohaa3/contracts").Vec3; point: { x: number; y: number }; offset: { x: number; y: number; z: number }; direction?: [number, number]; worldPerPixel?: number }
+        | { axis: "x" | "y" | "z" | "center"; planePoint?: (point: { x: number; y: number }) => import("@woohaa3/contracts").Vec3 | null; startWorld?: import("@woohaa3/contracts").Vec3; point: { x: number; y: number }; offset: { x: number; y: number; z: number }; direction?: [number, number]; worldPerPixel?: number; display: { scale: number; yaw: number }; nodeId: string }
         | null = null;
+      /** 焦点手势逆映射：世界位移 → 场景位移（identity 表示非片场节点，保持原语义）。 */
+      const focusDisplayFor = (nodeId: string | null): { scale: number; yaw: number } | null => {
+        const target = nodeId ? resolveTargets(ctx).find((entry) => entry.nodeId === nodeId) : null;
+        if (!target) return { scale: 1, yaw: 0 };
+        const scale = filmSetDisplayScale(target);
+        const yaw = filmSetDisplayRotation(target);
+        if (!Number.isFinite(scale) || scale <= 0 || !Number.isFinite(yaw)) return null;
+        return { scale, yaw };
+      };
+      const unmapFocusDelta = (display: { scale: number; yaw: number }, delta: import("@woohaa3/contracts").Vec3): import("@woohaa3/contracts").Vec3 | null =>
+        unmapFilmSetSceneVector({ scale: display.scale, yaw: display.yaw }, delta);
+      const cancelFocusGesture = () => {
+        focusStart = null;
+        session.cancelFocus();
+        pushEditor(ctx, session);
+      };
       const focusGesture: ShotFocusGestureHandler = {
         begin: (axis, point) => {
           if (isHistoryMode()) return false;
@@ -197,6 +285,10 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
           if (!selected) return false;
           const editor = ctx.canvasRuntime.modelEditorState();
           if (!editor?.shot) return false;
+          const nodeId = session.getState().nodeId;
+          if (!nodeId) return false;
+          const display = focusDisplayFor(nodeId);
+          if (!display) return false;
           const projection = ctx.canvasRuntime.controller()?.focusProjection() ?? null;
           const surface = ctx.canvasRuntime.controller()?.surface() ?? { width: 1, height: 1, pixelRatio: 1 };
           if (!projection) return false;
@@ -220,7 +312,7 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
               rayPlanePoint(focusRay({ point: at, size: surface, camera, fov: projection.fov }), planeOrigin, normal);
             const startWorld = planePoint(point);
             if (!startWorld || !session.beginFocus()) return false;
-            focusStart = { axis, planePoint, startWorld, point, offset: modelCameraFocusOffset(selected) };
+            focusStart = { axis, planePoint, startWorld, point, offset: modelCameraFocusOffset(selected), display, nodeId };
             return true;
           }
           // 轴拖动约束由 Rust 用同一相机/bounds/gizmo 投影派生。
@@ -239,44 +331,68 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
             point,
             offset: modelCameraFocusOffset(selected),
             direction: constraint.direction,
-            worldPerPixel: constraint.worldPerPixel
+            worldPerPixel: constraint.worldPerPixel,
+            display,
+            nodeId
           };
           return true;
         },
         move: (axis, point) => {
           if (!focusStart || focusStart.axis !== axis) return;
+          // 手势期间显示映射必须仍然成立：容器 resize / owner 切换立即取消，不提交混合坐标。
+          const current = focusDisplayFor(focusStart.nodeId);
+          if (!current
+            || Math.abs(current.scale - focusStart.display.scale) > 1e-9
+            || Math.abs(current.yaw - focusStart.display.yaw) > 1e-9) {
+            cancelFocusGesture();
+            return;
+          }
           if (axis === "center") {
             const world = focusStart.planePoint?.(point);
             if (!world || !focusStart.startWorld) return;
+            const delta = unmapFocusDelta(focusStart.display, [
+              world[0] - focusStart.startWorld[0],
+              world[1] - focusStart.startWorld[1],
+              world[2] - focusStart.startWorld[2]
+            ]);
+            if (!delta) return;
             session.updateFocus({
-              x: focusStart.offset.x + world[0] - focusStart.startWorld[0],
-              y: focusStart.offset.y + world[1] - focusStart.startWorld[1],
-              z: focusStart.offset.z + world[2] - focusStart.startWorld[2]
+              x: focusStart.offset.x + delta[0],
+              y: focusStart.offset.y + delta[1],
+              z: focusStart.offset.z + delta[2]
             });
             return;
           }
-          // 轴坐标沿该轴方向投影：世界位移 = 投影像素 × worldPerPixel。
+          // 轴坐标沿该轴方向投影：世界位移 = 投影像素 × worldPerPixel；
+          // 再按同一显示变换逆映射回场景单位（含容器旋转）。
           const direction = focusStart.direction;
           const worldPerPixel = focusStart.worldPerPixel;
           if (!direction || worldPerPixel === undefined) return;
           const projected =
             (point.x - focusStart.point.x) * direction[0]
             + (point.y - focusStart.point.y) * direction[1];
-          const delta = projected * worldPerPixel;
-          if (!Number.isFinite(delta)) return;
-          const next = { ...focusStart.offset, [axis]: focusStart.offset[axis] + delta };
-          session.updateFocus(next);
+          const deltaWorld = projected * worldPerPixel;
+          if (!Number.isFinite(deltaWorld)) return;
+          const axisUnit: import("@woohaa3/contracts").Vec3 =
+            axis === "x" ? [1, 0, 0] : axis === "y" ? [0, 1, 0] : [0, 0, 1];
+          const delta = unmapFocusDelta(focusStart.display, [
+            axisUnit[0] * deltaWorld,
+            axisUnit[1] * deltaWorld,
+            axisUnit[2] * deltaWorld
+          ]);
+          if (!delta) return;
+          session.updateFocus({
+            x: focusStart.offset.x + delta[0],
+            y: focusStart.offset.y + delta[1],
+            z: focusStart.offset.z + delta[2]
+          });
         },
         end: () => {
           focusStart = null;
           session.endFocus();
           pushEditor(ctx, session);
         },
-        cancel: () => {
-          focusStart = null;
-          session.cancelFocus();
-          pushEditor(ctx, session);
-        }
+        cancel: cancelFocusGesture
       };
       ctx.canvasRuntime.setModelEditorFocusGesture(focusGesture);
       ctx.effect(() => () => ctx.canvasRuntime.setModelEditorFocusGesture(null), "model-editor-focus-gesture");

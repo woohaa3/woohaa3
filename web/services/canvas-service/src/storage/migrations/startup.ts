@@ -5,7 +5,6 @@ import type { DatabaseSync } from "node:sqlite";
 import { writerLockHolderIsStale } from "../../sync/writer-lock.js";
 import { loadNodeSqlite } from "../sqlite/sqlite-loader.js";
 import { applyMigration, planMigration } from "./film-set-shooting-shots.js";
-
 function hasTable(db: DatabaseSync, name: string): boolean {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 }
@@ -33,6 +32,14 @@ export function migrateSqliteCanvasBeforeStartup(databasePath: string): { change
     const version = () => JSON.stringify(db.prepare("PRAGMA data_version").get());
     const before = version();
     const plan = planMigration(db);
+    // 存在无法精确反解坐标单位的片场：明确阻断并保留原件（不猜测单位、不写任何记录）。
+    if (plan.conflicts.length > 0) {
+      throw new Error(
+        `片场坐标迁移存在无法精确反解的记录，已保留原件：${plan.conflicts
+          .map((conflict) => `${conflict.canvasId}/${conflict.nodeId}（${conflict.conflict}）`)
+          .join("、")}`
+      );
+    }
     if (!plan.changed) return { changed: false };
     assertNoWriter(db);
 

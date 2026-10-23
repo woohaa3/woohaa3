@@ -206,7 +206,10 @@ pub(crate) fn sync(
             }
             continue;
         };
-        let Some((focus, position)) = sampled_camera_pose(bounds, &target.camera) else {
+        // 采样/封面相机是**场景单位**：与内容共用同一显示变换映射到画布世界
+        // （change: 2026-10-23-isolate-film-set-camera-space，任务 2.2 / design D2）。
+        let display = super::shot_adapter::display_unit_for_node(scene, resources, &target.owner_node_id);
+        let Some((focus, position)) = sampled_camera_pose(bounds, display, &target.camera) else {
             if let Some(root) = visual.markers.remove(&target.preview_node_id) {
                 commands.entity(root).try_despawn();
             }

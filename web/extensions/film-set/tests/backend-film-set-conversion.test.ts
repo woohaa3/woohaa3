@@ -427,7 +427,7 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
     const generator: FilmSetConversionGenerator = async () => ({
       ok: true,
       candidate: {
-        filmSetContent: { schemaVersion: 3, items: [{ id: "x", kind: "video", name: "v", assetId: "missing-asset", aspectRatio: 1 }] },
+        filmSetContent: { schemaVersion: 4, items: [{ id: "x", kind: "video", name: "v", assetId: "missing-asset", aspectRatio: 1 }] },
         sceneCamera: undefined
       }
     });
@@ -463,7 +463,7 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
       ok: true,
       candidate: {
         filmSetContent: {
-          schemaVersion: 3,
+          schemaVersion: 4,
           // 引用合法且 ready 的源资产，但整份片场只有平面媒体项、没有 model 对象。
           items: [{ id: "img", kind: "image", name: "源图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-1", aspectRatio: 1.5 }]
         },
@@ -494,7 +494,7 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
     // 结构归一成功但完整校验失败的候选（只有平面媒体、无重建画面的 model 对象）。
     const invalid = {
       filmSetContent: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         items: [{ id: "img", kind: "image", name: "源图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-1", aspectRatio: 1.5 }]
       },
       sceneCamera: undefined
@@ -533,7 +533,7 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
         ok: true,
         candidate: {
           filmSetContent: {
-            schemaVersion: 3,
+            schemaVersion: 4,
             items: [{ id: "img", kind: "image", name: "图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-1", aspectRatio: 1 }]
           },
           sceneCamera: undefined

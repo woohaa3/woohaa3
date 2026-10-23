@@ -138,7 +138,7 @@ async function seedFilmSet(
   const fields = canonicalFilmSetFields(createFilmSetSnapshot({
     title: "对地面片场",
     timeline: { duration: 0, loop: false },
-    filmSetContent: { schemaVersion: 3, items }
+    filmSetContent: { schemaVersion: 4, items }
   }));
   const result = await sendCommands(page, [
     { type: "node.add", node: { id, type: "composite-asset", position, width, height }, nodeData: fields as never }

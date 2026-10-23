@@ -10,8 +10,13 @@ import type { Context } from "@deepseek-ai/cordis";
 import {
   createEmptyWoohaa3ServerCanvas,
   decodeModelCameras,
+  clampShotDistance,
   makeFocusProjector,
+  mapFilmSetSceneCamera,
   resolveShotCamera,
+  shotBoundingRadius,
+  shotCameraPosition,
+  shotFitDistance,
   type BevyModelEditor,
   type ModelCamera,
   type ServerCanvas
@@ -26,7 +31,12 @@ import { FocusExitCoordinator } from "../../navigation/exit-coordinator.js";
 import { modelEditorExtension, MODEL_EDITOR_PLUGIN_ID } from "./model-editor-plugin.js";
 import type { InteractionController, InteractionControllerOptions } from "../canvas-shell/interaction-controller.js";
 import { resolveTargets } from "./model-camera-store.js";
-import { modelBounds } from "../canvas-shell/model-focus-session.js";
+import {
+  filmSetDisplayRotation,
+  filmSetDisplayScale,
+  filmSetSceneBounds,
+  modelBounds
+} from "../canvas-shell/model-focus-session.js";
 import { hitShotGizmoHandle } from "../canvas-shell/model-gizmo-hit.js";
 import { gizmoHitOracle } from "../canvas-shell/test-support/model-focus-harness.js";
 import type { ModelEditorSession } from "../../../extension-api/model-workspace-session.js";
@@ -238,7 +248,9 @@ describe("ModelEditorPlugin", () => {
   it("片场：拖相机沿径向改变距离，拖环改变方位，松开才提交", async () => {
     registerScene();
     // 距离取合法区间的中段，两个方向都有余量（上限为 fit × 2.2）。
-    const h = await harness(filmSetCanvas(), undefined, [{ id: "cam-a", name: "镜头 1", order: 0, azimuth: 0, elevation: Math.PI / 4, distance: 30, aspect: "16:9" }]);
+    // 镜头距离是**场景单位**（片场内容脚本尺度），不是画布世界单位
+    // （change: 2026-10-23-isolate-film-set-camera-space）。
+    const h = await harness(filmSetCanvas(), undefined, [{ id: "cam-a", name: "镜头 1", order: 0, azimuth: 0, elevation: Math.PI / 4, distance: 3, aspect: "16:9" }]);
     runtime = h.runtime;
     h.focus.nodeId = "m1";
     h.runtimeService.emitFocus();
@@ -290,9 +302,31 @@ describe("ModelEditorPlugin", () => {
     h.focus.nodeId = "m1";
     h.runtimeService.emitFocus();
     const editor = h.getGizmo()!;
-    const renderedShot = resolveShotCamera(bounds.aabb, { azimuth: 1, distance: 240, aspect: "16:9" })!;
-    expect(editor.shot!.focus).toEqual(renderedShot.focus);
-    expect(editor.shot!.position).toEqual(renderedShot.position);
+    // 镜头以**场景单位**求值，再经与内容同一显示变换映射到画布世界
+    // （change: 2026-10-23-isolate-film-set-camera-space，D2）。
+    const scene = filmSetSceneBounds(target)!;
+    const displayScale = filmSetDisplayScale(target);
+    const displayYaw = filmSetDisplayRotation(target);
+    expect(displayYaw).toBe(0);
+    const sceneFit = shotFitDistance(shotBoundingRadius(scene.aabb), 16 / 9);
+    // 与生产同一 clamp：镜头保存 240 场景单位，超出 fit 上限即钳到 fit×2.2。
+    const sceneDistance = clampShotDistance(240, sceneFit);
+    const sceneShot = resolveShotCamera(scene.aabb, { azimuth: 1, distance: sceneDistance, aspect: "16:9" })!;
+    const mapped = mapFilmSetSceneCamera(
+      { scale: displayScale, yaw: displayYaw },
+      bounds.center,
+      { azimuth: sceneShot.azimuth, elevation: sceneShot.elevation, distance: sceneShot.distance, focusOffset: { x: 0, y: 0, z: 0 } }
+    )!;
+    const worldFocus: [number, number, number] = [
+      bounds.center[0] + mapped.focusOffset[0],
+      bounds.center[1] + mapped.focusOffset[1],
+      bounds.center[2] + mapped.focusOffset[2]
+    ];
+    const renderedShot = { ...sceneShot, focus: worldFocus, position: shotCameraPosition(worldFocus, sceneShot.azimuth, mapped.distance, sceneShot.elevation) };
+    for (let axis = 0; axis < 3; axis += 1) {
+      expect(editor.shot!.focus[axis]).toBeCloseTo(renderedShot.focus[axis]!, 4);
+      expect(editor.shot!.position[axis]).toBeCloseTo(renderedShot.position[axis]!, 4);
+    }
     expect(editor.radius).toBeCloseTo(bounds.radius);
     const project = makeFocusProjector({ camera: { ...projection, flySpeed: 6 }, surface, fov: projection.fov });
     expect(hitShotGizmoHandle({ editor, projection, surface, point: project(renderedShot.position)!, query: gizmoHitOracle })).toBe("distance");
@@ -309,19 +343,28 @@ describe("ModelEditorPlugin", () => {
   it("片场：注视点偏移传到镜头与 gizmo，拖动预览可取消", async () => {
     registerScene();
     const offset = { x: 10, y: -5, z: 3 };
-    const h = await harness(filmSetCanvas(), undefined, [{ id: "cam-a", name: "镜头 1", order: 0, azimuth: 0, elevation: Math.PI / 4, distance: 240, aspect: "16:9", focusOffset: offset }]);
+    const h = await harness(filmSetCanvas(), undefined, [{ id: "cam-a", name: "镜头 1", order: 0, azimuth: 0, elevation: Math.PI / 4, distance: 3, aspect: "16:9", focusOffset: offset }]);
     runtime = h.runtime;
     h.focus.nodeId = "m1";
     h.runtimeService.emitFocus();
     const { session } = h.runtime.ctx.get(MODEL_EDITOR_SERVICE as never) as unknown as { session: ModelEditorSession };
+    // focusOffset 是**场景单位**：显示时按同一倍率缩放（D2）。
+    const target = resolveTargets()[0]!;
+    const scale = filmSetDisplayScale(target);
     const base = h.getGizmo()!.focus;
-    expect(h.getGizmo()!.shot!.focus).toEqual([base[0] + 10, base[1] - 5, base[2] + 3]);
+    const expectFocus = (value: { x: number; y: number; z: number }) => {
+      const focus = h.getGizmo()!.shot!.focus;
+      expect(focus[0]).toBeCloseTo(base[0] + value.x * scale, 4);
+      expect(focus[1]).toBeCloseTo(base[1] + value.y * scale, 4);
+      expect(focus[2]).toBeCloseTo(base[2] + value.z * scale, 4);
+    };
+    expectFocus(offset);
     session.beginFocus();
     session.updateFocus({ x: 20, y: 0, z: -4 });
-    expect(h.getGizmo()!.shot!.focus).toEqual([base[0] + 20, base[1], base[2] - 4]);
+    expectFocus({ x: 20, y: 0, z: -4 });
     expect(h.submitted).toHaveLength(0);
     session.cancelFocus();
-    expect(h.getGizmo()!.shot!.focus).toEqual([base[0] + 10, base[1] - 5, base[2] + 3]);
+    expectFocus(offset);
   });
 
   it("片场：中心拖动跟随屏幕平面，支持取消且松开只提交一次", async () => {

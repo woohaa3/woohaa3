@@ -22,6 +22,13 @@ use super::layout::{model_anchor, model_unit, model_view_rotation};
 use super::runtime::{ModelAssets, ModelVisuals};
 use super::scene::{self, ModelAabb};
 
+/// 片场场景单位 → 画布世界单位的显示变换
+/// （change: 2026-10-23-isolate-film-set-camera-space，design D2）。
+///
+/// 内容几何与完整相机姿态必须共用它：`scale` 是 `model_unit`（自然单位 × 节点矩形容器适配），
+/// `yaw` 是 placement 的绕 Y 轴旋转。只用它做**呈现**映射，绝不写回作品参数。
+pub(crate) type DisplayUnit = crate::film_set_space::DisplayUnit;
+
 /// adapter 当前持有的 rig 与来源 identity。
 #[derive(Resource, Default)]
 pub(crate) struct ShotAdapterState {
@@ -155,31 +162,103 @@ pub(crate) fn model_bounds_for_node(
     })
 }
 
-/// 由共享目标包围球与采样镜头状态派生世界姿态（focus + position）
-/// （change: 2026-10-13-add-film-set-hover-camera-entity，任务 2.1 / design D2）。
+/// 由显式 nodeId 派生片场的显示变换（场景 → 画布世界）。
 ///
-/// `focus = bounds.center + camera.focus_offset`；`position` 复用 shot 轨道公式（环绕/仰角/
-/// 推拉/奇点钳制）。focus-preview 与 overview 辅助实体共用同一派生，避免第二套取景公式。
-/// 非有限输入返回 `None`（不伪造位置）。
-pub(crate) fn sampled_camera_pose(
-    bounds: ModelBounds,
-    camera: &crate::motion::CameraState,
-) -> Option<(Vec3, Vec3)> {
-    if !bounds.center.is_finite()
-        || !bounds.radius.is_finite()
-        || !camera.focus_offset.is_finite()
-        || !camera.azimuth.is_finite()
-        || !camera.distance.is_finite()
-        || !camera.elevation.is_finite()
-    {
+/// 与内容根 transform 同源：倍率就是 `model_unit`（自然单位 × 节点矩形容器适配），旋转是
+/// placement 的 yaw。非法/缺失节点返回 `None`，调用方不得猜测镜头。
+pub(crate) fn display_unit_for_node(
+    scene: &Scene,
+    resources: &ModelAssets,
+    node_id: &str,
+) -> Option<DisplayUnit> {
+    let node = scene.nodes.iter().find(|node| node.id == node_id)?;
+    if node.composite_asset.is_none() {
         return None;
     }
-    let focus = bounds.center + camera.focus_offset;
+    let placement = node
+        .model
+        .as_ref()
+        .map(|reference| reference.placement.clone())
+        .or_else(|| {
+            node.composite_asset
+                .as_ref()
+                .and_then(|asset| asset.root_placement.clone())
+        })
+        .unwrap_or_default();
+    let fallback;
+    let snapshot: &crate::protocol::ModelSnapshot = match node
+        .model
+        .as_ref()
+        .and_then(|reference| resources.get(&reference.resource_key))
+    {
+        Some(model) => model.as_ref(),
+        None => {
+            fallback = crate::protocol::ModelSnapshot {
+                extent: node
+                    .composite_asset
+                    .as_ref()
+                    .and_then(|asset| asset.content_extent)
+                    .unwrap_or(2.0)
+                    .max(0.001),
+                ..Default::default()
+            };
+            &fallback
+        }
+    };
+    DisplayUnit::validated(
+        model_unit(node, snapshot, &placement),
+        placement.yaw.to_radians(),
+    )
+}
+
+/// 场景镜头状态 → 画布显示镜头状态（距离、focusOffset 与方位角按同一相似变换）
+/// （change: 2026-10-23-isolate-film-set-camera-space，design D2）。
+///
+/// 公式唯一来源在 [`crate::film_set_space::display_camera`]；这里只做 `CameraState` 适配。
+pub(crate) fn display_camera_state(
+    display: Option<DisplayUnit>,
+    camera: &crate::motion::CameraState,
+) -> Option<crate::motion::CameraState> {
+    let mapped = crate::film_set_space::display_camera(
+        display,
+        &crate::film_set_space::SceneCamera {
+            azimuth: camera.azimuth,
+            elevation: camera.elevation,
+            distance: camera.distance,
+            focus_offset: camera.focus_offset,
+        },
+    )?;
+    Some(crate::motion::CameraState {
+        azimuth: mapped.azimuth,
+        elevation: mapped.elevation,
+        distance: mapped.distance,
+        focus_offset: mapped.focus_offset,
+    })
+}
+
+/// 由共享目标包围球与采样镜头状态派生世界姿态（focus + position）
+/// （change: 2026-10-13-add-film-set-hover-camera-entity，任务 2.1 / design D2；
+///  change: 2026-10-23-isolate-film-set-camera-space，任务 2.2 / design D2：完整相机经同一显示
+///  变换映射，构图与节点矩形无关）。
+///
+/// `bounds.center` 已是画布世界的包围球中心（`D(sceneCenter)`）；`camera` 的 distance 与
+/// focus_offset 仍是**场景单位**，必须按 `display` 映射到世界。非有限输入返回 `None`
+/// （不伪造位置）。
+pub(crate) fn sampled_camera_pose(
+    bounds: ModelBounds,
+    display: Option<DisplayUnit>,
+    camera: &crate::motion::CameraState,
+) -> Option<(Vec3, Vec3)> {
+    if !bounds.center.is_finite() || !bounds.radius.is_finite() {
+        return None;
+    }
+    let mapped = display_camera_state(display, camera)?;
+    let focus = bounds.center + mapped.focus_offset;
     let position = crate::shot_camera::shot_camera_position(
         focus,
-        camera.azimuth,
-        camera.distance,
-        camera.elevation,
+        mapped.azimuth,
+        mapped.distance,
+        mapped.elevation,
     );
     Some((focus, position))
 }
@@ -203,8 +282,13 @@ fn surface_vec(scene: &Scene) -> Vec2 {
         .unwrap_or(Vec2::new(1.0, 1.0))
 }
 
-/// 当前 scene 是否应显示 shot rig（camera 模式且带 shot）。
-fn desired_shot(scene: &Scene) -> Option<(String, Option<String>, f32, ShotCameraPose)> {
+/** 当前 scene 是否应显示 shot rig（camera 模式且带 shot）。 */
+///
+/// 返回的 pose 语义按来源区分（change: 2026-10-23-isolate-film-set-camera-space）：
+/// - 活动播放（`focus-preview`）的 `initialCamera` / 采样相机是**场景单位**，由 adapter 用显示
+///   变换映射；
+/// - `modelEditor.shot` 是前端已映射好的**画布世界**姿态（gizmo、命中与截图共用同一坐标）。
+fn desired_shot(scene: &Scene) -> Option<(String, Option<String>, f32, ShotCameraPose, bool)> {
     if let Some(playback) = scene
         .animation_playback
         .as_ref()
@@ -220,6 +304,7 @@ fn desired_shot(scene: &Scene) -> Option<(String, Option<String>, f32, ShotCamer
                 distance: playback.initial_camera.distance,
                 focus_offset: Vec3::from_array(playback.initial_camera.focus_offset),
             },
+            true,
         ));
     }
     let editor = scene.model_editor.as_ref()?;
@@ -239,6 +324,7 @@ fn desired_shot(scene: &Scene) -> Option<(String, Option<String>, f32, ShotCamer
         editor.camera_id.clone(),
         aspect_ratio(&shot.aspect),
         pose,
+        false,
     ))
 }
 
@@ -272,7 +358,7 @@ pub(crate) fn sync_shot_adapter(
         .map(crate::model3d::scene::parse_hex)
         .unwrap_or(clear_color);
 
-    let Some((node_id, camera_id, aspect, pose)) = desired_shot(scene) else {
+    let Some((node_id, camera_id, aspect, scene_pose, scene_units)) = desired_shot(scene) else {
         if let Some(rig) = state.rig.take() {
             commands.entity(rig).try_despawn();
         }
@@ -283,6 +369,42 @@ pub(crate) fn sync_shot_adapter(
     };
 
     let bounds = focused_model_bounds(scene, models, resources);
+    // 场景单位姿态（活动播放）必须经同一显示变换映射到画布世界；前端已映射过的
+    // `modelEditor.shot` 直接使用，绝不二次缩放（change: 2026-10-23-isolate-film-set-camera-space，D2）。
+    let display = scene_units
+        .then(|| display_unit_for_node(scene, resources, &node_id))
+        .flatten();
+    if scene_units && display.is_none() {
+        // 场景单位姿态缺少合法显示变换：不构造猜测镜头（也不保留旧 rig）。
+        if let Some(rig) = state.rig.take() {
+            commands.entity(rig).try_despawn();
+        }
+        selection.entities.clear();
+        return;
+    }
+    let pose = if scene_units {
+        let state_for_mapping = crate::motion::CameraState {
+            azimuth: scene_pose.azimuth,
+            elevation: scene_pose.elevation,
+            distance: scene_pose.distance,
+            focus_offset: scene_pose.focus_offset,
+        };
+        let Some(mapped) = display_camera_state(display, &state_for_mapping) else {
+            if let Some(rig) = state.rig.take() {
+                commands.entity(rig).try_despawn();
+            }
+            selection.entities.clear();
+            return;
+        };
+        ShotCameraPose {
+            azimuth: mapped.azimuth,
+            elevation: mapped.elevation,
+            distance: mapped.distance,
+            focus_offset: mapped.focus_offset,
+        }
+    } else {
+        scene_pose
+    };
 
     let identity_changed = state.node_id.as_deref() != Some(node_id.as_str())
         || state.camera_id != camera_id
@@ -422,7 +544,7 @@ mod focus_offset_tests {
             }))
             .unwrap(),
         );
-        let (_, _, _, pose) = desired_shot(&scene).unwrap();
+        let (_, _, _, pose, _) = desired_shot(&scene).unwrap();
         assert_eq!(pose.focus_offset, Vec3::new(10.0, -5.0, 3.0));
     }
 
@@ -482,7 +604,7 @@ mod focus_offset_tests {
             (std::f32::consts::PI, 0.0, 100.0, Vec3::splat(0.5)),
         ] {
             let state = camera(azimuth, elevation, distance, offset);
-            let (focus, position) = sampled_camera_pose(b, &state).unwrap();
+            let (focus, position) = sampled_camera_pose(b, None, &state).unwrap();
             assert_eq!(focus, b.center + offset, "focus = bounds.center + focusOffset");
             let expected = crate::shot_camera::shot_camera_position(focus, azimuth, distance, elevation);
             assert_eq!(position, expected, "position 必须与 shot 轨道公式逐位一致");
@@ -500,15 +622,23 @@ mod focus_offset_tests {
             1.2,
             std::f32::consts::FRAC_PI_2,
         ] {
-            let (focus, position) =
-                sampled_camera_pose(b, &camera(0.6, elevation, 18.0, Vec3::ZERO)).unwrap();
+            let (focus, position) = sampled_camera_pose(
+                b,
+                None,
+                &camera(0.6, elevation, 18.0, Vec3::ZERO),
+            )
+            .unwrap();
             assert!(focus.is_finite() && position.is_finite(), "极值仰角仍有限");
         }
         // 近距推拉保持有限；相对向量等于无偏移情形。
-        let near = sampled_camera_pose(b, &camera(0.6, 0.4, 0.75, Vec3::ZERO)).unwrap();
+        let near = sampled_camera_pose(b, None, &camera(0.6, 0.4, 0.75, Vec3::ZERO)).unwrap();
         assert!(near.1.is_finite());
-        let shifted =
-            sampled_camera_pose(b, &camera(0.6, 0.4, 0.75, Vec3::new(2.0, 1.0, -3.0))).unwrap();
+        let shifted = sampled_camera_pose(
+            b,
+            None,
+            &camera(0.6, 0.4, 0.75, Vec3::new(2.0, 1.0, -3.0)),
+        )
+        .unwrap();
         assert!(
             (shifted.1 - near.1 - Vec3::new(2.0, 1.0, -3.0)).length() < 1e-4,
             "focusOffset 只整体平移"
@@ -520,12 +650,13 @@ mod focus_offset_tests {
     #[test]
     fn sampled_camera_pose_rejects_non_finite_inputs() {
         assert!(
-            sampled_camera_pose(bounds(Vec3::NAN, 5.0), &camera(0.0, 0.4, 10.0, Vec3::ZERO))
+            sampled_camera_pose(bounds(Vec3::NAN, 5.0), None, &camera(0.0, 0.4, 10.0, Vec3::ZERO))
                 .is_none()
         );
         assert!(
             sampled_camera_pose(
                 bounds(Vec3::ZERO, 5.0),
+                None,
                 &camera(f32::NAN, 0.4, 10.0, Vec3::ZERO)
             )
             .is_none()
@@ -533,6 +664,7 @@ mod focus_offset_tests {
         assert!(
             sampled_camera_pose(
                 bounds(Vec3::ZERO, 5.0),
+                None,
                 &camera(0.0, f32::INFINITY, 10.0, Vec3::ZERO)
             )
             .is_none()
@@ -540,6 +672,7 @@ mod focus_offset_tests {
         assert!(
             sampled_camera_pose(
                 bounds(Vec3::ZERO, 5.0),
+                None,
                 &camera(0.0, 0.4, 10.0, Vec3::splat(f32::NAN))
             )
             .is_none()

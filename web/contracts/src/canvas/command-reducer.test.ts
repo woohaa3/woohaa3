@@ -400,7 +400,7 @@ describe("片场无连线与内容引用（change: 2026-10-08-make-film-set-mode
 
   it("媒体导入必须引用已保存 ready 且类型匹配的资产", () => {
     const canvas = withFilmSet();
-    const content = { schemaVersion: 3, items: [
+    const content = { schemaVersion: 4, items: [
       { id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } },
       { id: "img", kind: "image", name: "图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-image", aspectRatio: 1 }
     ] } as never;
@@ -422,7 +422,7 @@ describe("片场无连线与内容引用（change: 2026-10-08-make-film-set-mode
   it("删除被片场引用的资产被拒绝", () => {
     const canvas = withFilmSet();
     canvas.assets.push(imageAsset());
-    canvas.nodeData.anim.filmSetContent = { schemaVersion: 3, items: [
+    canvas.nodeData.anim.filmSetContent = { schemaVersion: 4, items: [
       { id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } },
       { id: "img", kind: "image", name: "图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-image", aspectRatio: 1 }
     ] };

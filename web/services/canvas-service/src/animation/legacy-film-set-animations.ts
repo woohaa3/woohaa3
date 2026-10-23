@@ -18,7 +18,7 @@ export function legacyFilmSetAnimations(input: {
     ? { ...draft, kind }
     : { ...draft, kind: "static", timeline: { duration: 0, loop: false }, cameraMotion: { ...input.motion, motionScript: "" } };
   return {
-    content: { schemaVersion: 3, items },
+    content: { schemaVersion: 4, items },
     animations: cloneFilmSetAnimations({ schemaVersion: 3, defaultClipId: "legacy-default", clips: [clip] })
   };
 }

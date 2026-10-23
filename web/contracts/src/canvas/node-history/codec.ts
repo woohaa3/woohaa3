@@ -45,8 +45,17 @@ function invalid(message: string): { ok: false; code: "NODE_HISTORY_INVALID"; me
   return { ok: false, code: "NODE_HISTORY_INVALID", message };
 }
 
-/** 校验一条完整历史条目（repository 写入前的最后一道边界）。 */
-export function decodeNodeGenerationHistoryEntry(input: unknown): NodeHistoryDecodeResult<NodeGenerationHistoryEntry> {
+/**
+ * 校验一条完整历史条目（repository 写入前的最后一道边界）。
+ *
+ * `options.acceptedContentVersions` 只供**离线迁移**复核其即将写回的上一代坐标内容；生产写入
+ * 与读取不传，因此在线路径仍严格拒绝旧坐标版本
+ * （change: 2026-10-23-isolate-film-set-camera-space，design D5）。
+ */
+export function decodeNodeGenerationHistoryEntry(
+  input: unknown,
+  options: { acceptedContentVersions?: readonly number[] } = {}
+): NodeHistoryDecodeResult<NodeGenerationHistoryEntry> {
   if (!isJsonObject(input)) return invalid("历史条目必须是对象");
   if (input.version !== NODE_GENERATION_HISTORY_VERSION) return invalid("历史条目版本不受支持");
   const entryId = input.entryId;
@@ -63,7 +72,7 @@ export function decodeNodeGenerationHistoryEntry(input: unknown): NodeHistoryDec
   }
   const source = decodeSourceSummary(input.source);
   if (!source.ok) return source;
-  const payload = decodePayload(input.kind, input.payload);
+  const payload = decodePayload(input.kind, input.payload, options);
   if (!payload.ok) return payload;
   // outcome：缺省（旧条目）视为 succeeded；失败 payload 必须与 outcome 一致。
   const outcome = decodeOutcome(input.outcome);
@@ -121,7 +130,11 @@ function decodeSourceSummary(input: unknown): NodeHistoryDecodeResult<NodeHistor
   return { ok: true, value: summary };
 }
 
-function decodePayload(kind: NodeGenerationKind, input: unknown): NodeHistoryDecodeResult<NodeHistoryPayload> {
+function decodePayload(
+  kind: NodeGenerationKind,
+  input: unknown,
+  options: { acceptedContentVersions?: readonly number[] } = {}
+): NodeHistoryDecodeResult<NodeHistoryPayload> {
   if (!isJsonObject(input)) return invalid("payload 必须是对象");
   if (input.kind === "failure") return decodeFailurePayload(kind, input);
   if (kind === "text") {
@@ -134,7 +147,7 @@ function decodePayload(kind: NodeGenerationKind, input: unknown): NodeHistoryDec
     const language = input.language;
     const version = input.version;
     const sourceHash = input.sourceHash;
-    const animation = decodeAnimationPayload(input.animation);
+    const animation = decodeAnimationPayload(input.animation, options);
     if (input.animation !== undefined && animation === null) return invalid("模型 payload animation 非法");
     // items-only 片场历史（schema 3）没有顶层 authored 模型：`modelScript` 允许为空，身份由完整
     // 片场定义承担（D8/D10）。这只放宽 schema-3 片场分支，普通 model3d 仍必须带真实脚本，
@@ -224,18 +237,31 @@ function decodeFailureBaseline(input: unknown): NodeHistoryFailurePayload["basel
   return baseline;
 }
 
-/** 校验并归一化动画版本 payload（不受信任输入）；非法返回 null。 */
-export function decodeAnimationPayload(input: unknown): NodeHistoryAnimationPayload | null {
+/**
+ * 校验并归一化动画版本 payload（不受信任输入）；非法返回 null。
+ *
+ * `options.acceptedContentVersions` 只供**离线迁移**读取上一代坐标语义的片场内容；生产入口
+ * 不传，因此在线读取仍严格拒绝旧坐标版本（change: 2026-10-23-isolate-film-set-camera-space，D5）。
+ */
+export function decodeAnimationPayload(
+  input: unknown,
+  options: { acceptedContentVersions?: readonly number[] } = {}
+): NodeHistoryAnimationPayload | null {
   if (!isJsonObject(input)) return null;
-  // 片场 items-only 版本（schema 3）：独立根 + 共享 items + 全部 clips；不另存顶层模型。
+  // 片场 items-only payload（布局版本 3）：独立根 + 共享 items + 全部 clips；不另存顶层模型。
+  // 内部 `filmSetContent` 必须是当前 schema（场景单位）；旧坐标语义只由离线迁移转换
+  // （change: 2026-10-23-isolate-film-set-camera-space，design D5）。
   if (input.schemaVersion === 3) {
     if (["motionScript", "motionScriptVersion", "motionRevision", "motionSourceHash", "motionBasedOnModelVersion", "initialCamera", "timeline", "modelContentVersion", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelContentVersion", "modelPlacement"].some(key => input[key] !== undefined)) return null;
     const scenePlacement = decodeFilmSetLocalTransform(input.scenePlacement);
     if (!scenePlacement.ok) return null;
     const sceneCamera = decodeInitialShotCamera(input.sceneCamera);
     if (!sceneCamera.ok) return null;
-    const content = decodeFilmSetContent(input.filmSetContent);
-    if (!content.ok || content.value.schemaVersion !== 3) return null;
+    const content = decodeFilmSetContent(
+      input.filmSetContent,
+      options.acceptedContentVersions ? { acceptedVersions: options.acceptedContentVersions } : {}
+    );
+    if (!content.ok) return null;
     const animations = decodeFilmSetAnimations(input.filmSetAnimations, content.value);
     if (!animations.ok) return null;
     const origin = decodeOrigin(input.origin);

@@ -32,7 +32,7 @@ async function readyRoom(withItem = true): Promise<CanvasRoom> {
     ...(withItem
       ? {
           filmSetContent: {
-            schemaVersion: 3 as const,
+            schemaVersion: 4 as const,
             items: [
               {
                 id: "obj-a",

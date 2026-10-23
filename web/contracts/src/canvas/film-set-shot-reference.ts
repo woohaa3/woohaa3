@@ -30,11 +30,18 @@ export function shotReferenceOwnershipOf(previewNodeData: unknown): ShotReferenc
 }
 
 /** 内容身份算法版本；改变身份组成时必须升版本，避免旧缓存被误当同版本复用。 */
-export const SHOT_REFERENCE_CONTENT_VERSION = 1 as const;
+// v2：坐标语义隔离——画布节点矩形/zoom 不再影响取景身份，取景完全由场景相机与内容决定
+// （change: 2026-10-23-isolate-film-set-camera-space，任务 3.2）。
+export const SHOT_REFERENCE_CONTENT_VERSION = 2 as const;
 
-/** 录制 profile：编码参数是身份的一部分，改变即产生新版本、不复用旧缓存。 */
+/**
+ * 录制 profile：编码参数是身份的一部分，改变即产生新版本、不复用旧缓存。
+ *
+ * `schemaVersion` 是**身份算法**版本（不是内容契约版本）：1 = 旧浏览器 profile（历史缓存仍可
+ * 识别），2 = 场景坐标隔离后的取景语义。已有缓存按各自的版本 key 命中，绝不跨版本复用。
+ */
 export type ShotReferenceRecordProfile = {
-  schemaVersion: typeof SHOT_REFERENCE_CONTENT_VERSION;
+  schemaVersion: ShotReferenceProfileSchemaVersion;
   /** 输出像素宽（正偶数）。 */
   width: number;
   /** 输出像素高（正偶数）。 */
@@ -42,6 +49,8 @@ export type ShotReferenceRecordProfile = {
   /** 采样帧率（正有限）。 */
   frameRate: number;
 };
+
+export type ShotReferenceProfileSchemaVersion = 1 | typeof SHOT_REFERENCE_CONTENT_VERSION;
 
 /** 默认录制 profile（16:9、30fps；与现有导出能力一致）。 */
 export const DEFAULT_SHOT_REFERENCE_RECORD_PROFILE: ShotReferenceRecordProfile = {
@@ -54,7 +63,8 @@ export const DEFAULT_SHOT_REFERENCE_RECORD_PROFILE: ShotReferenceRecordProfile =
 /** profile 的稳定字符串标识（进入身份元组与缓存键）。 */
 export function shotReferenceProfileKey(profile: ShotReferenceRecordProfile): string {
   // r2：捕捉相机确认渲染后再回读，不复用旧时序产生的黑屏缓存。
-  return `v${profile.schemaVersion}-${profile.width}x${profile.height}@${profile.frameRate}-r2`;
+  // r4：场景坐标隔离后取景不再依赖画布节点矩形（change: 2026-10-23-isolate-film-set-camera-space）。
+  return `v${profile.schemaVersion}-${profile.width}x${profile.height}@${profile.frameRate}-r4`;
 }
 
 /**

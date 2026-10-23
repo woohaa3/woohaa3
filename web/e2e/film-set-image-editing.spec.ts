@@ -14,7 +14,7 @@ test("图片直接点选、三轴实时移动、缩放和持久化，整体与�
   });
   const upload = await uploadMedia(page, bytes); expect(upload.status).toBe(201);
   const storageKey = String((upload.body as any).storageKey);
-  const data = filmSetNodeDataFields(createFilmSetSnapshot({ title: "图片片场", motionScript: "", timeline: { duration: 0, loop: false }, filmSetContent: { schemaVersion: 3, items: [{ id: "photo", name: "照片", kind: "image", assetId: "photo-asset", aspectRatio: 4/3, localTransform: { offset: { x: 0, y: 2, z: 0 }, scale: 1, yaw: 0.2 } }] } }));
+  const data = filmSetNodeDataFields(createFilmSetSnapshot({ title: "图片片场", motionScript: "", timeline: { duration: 0, loop: false }, filmSetContent: { schemaVersion: 4, items: [{ id: "photo", name: "照片", kind: "image", assetId: "photo-asset", aspectRatio: 4/3, localTransform: { offset: { x: 0, y: 2, z: 0 }, scale: 1, yaw: 0.2 } }] } }));
   await sendCommands(page, [
     { type: "asset.upsert", asset: { id: "photo-asset", title: "照片", mediaKind: "image", source: "uploaded", status: "ready", createdAt: new Date().toISOString(), url: `/api/media/${storageKey}`, metadata: { storageKey, checksum: storageKey.replace("sha256-", ""), contentType: "image/png", size: bytes.length } } },
     { type: "node.add", node: { id: "film", type: "composite-asset", position: { x: 200, y: 120 }, width: 260, height: 195 }, nodeData: data }

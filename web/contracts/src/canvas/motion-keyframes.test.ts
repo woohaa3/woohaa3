@@ -78,7 +78,7 @@ describe("连续单人物运动", () => {
     const base: FilmSetItem = { id: "hero", kind: "model", name: "人物", model, localTransform: { offset: { x: 10, y: 2, z: 3 }, scale: 0.5, yaw: 0.3 } };
     const motion = createFilmSetItemMotion({ item: base, motionScript: PARKOUR_MOTION_SCRIPT });
     const playback = { startTime: 2, duration: 8, timeScale: 1, loop: false };
-    const filmSetContent: FilmSetContent = { schemaVersion: 3, items: [base] };
+    const filmSetContent: FilmSetContent = { schemaVersion: 4, items: [base] };
     const bindings = [{ itemId: "hero", motion, playback }];
     const projection = buildFilmSetObjectMotions({ filmSetContent, bindings });
     expect(projection.diagnostics).toEqual([]);

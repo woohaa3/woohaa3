@@ -78,7 +78,7 @@ describe("复合资产严格 owner 与 scope", () => {
     registry.register(adapter("film-set"));
     const canvas = createEmptyWoohaa3ServerCanvas("c");
     canvas.document.nodes.push({ id: "asset", type: "composite-asset", position: { x: 0, y: 0 } });
-    canvas.nodeData.asset = { title: "片场", filmSetContent: { schemaVersion: 3, items: [] } } as never;
+    canvas.nodeData.asset = { title: "片场", filmSetContent: { schemaVersion: 4, items: [] } } as never;
     expect(registry.resolve(canvas, "asset")).toBeNull();
     canvas.nodeData.asset.extensionId = "film-set";
     expect(registry.resolve(canvas, "asset")?.extensionId).toBe("film-set");

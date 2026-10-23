@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 const CONTENT: FilmSetContent = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   items: [
     { id: "body", kind: "model", name: "角色", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, model: createModelSnapshot({ modelScript: `scene.box({id:"body"});`, modelScriptVersion: "woohaa-model-js-v2" }) },
     { id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 32, depth: 32 } }

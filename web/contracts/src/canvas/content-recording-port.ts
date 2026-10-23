@@ -161,9 +161,13 @@ export function recordingSubmitProfileSpec(request: Pick<RecordingSubmitRequest,
  *
  * 渲染语义在 2026-10-19 因透明度动作、三维缓动、unlit/opacity 材质与镜头背景改变，渲染与
  * 编译版本各前进一位：旧参考视频按既有版本政策重录，不混用。
+ *
+ * 2026-10-23 场景坐标隔离改变了取景语义（原生输出不再使用节点矩形适配），渲染与编译再次各
+ * 前进一位，保证新旧缓存与冻结任务互不混用
+ * （change: 2026-10-23-isolate-film-set-camera-space，任务 3.2）。
  */
-export const NATIVE_RECORDING_RENDERER_VERSION = "bevy-shot-recorder-2";
-export const NATIVE_RECORDING_COMPILER_VERSION = "film-set-compiler-2";
+export const NATIVE_RECORDING_RENDERER_VERSION = "bevy-shot-recorder-3";
+export const NATIVE_RECORDING_COMPILER_VERSION = "film-set-compiler-3";
 export const NATIVE_RECORDING_CODEC_VERSION = "openh264-0.9.9";
 export const NATIVE_RECORDING_COLOR_REVISION = "srgb-bt709-limited-1";
 /** 参考视频固定使用的帧率（等于 `standard` profile）。 */

@@ -25,7 +25,7 @@ import {
   type FilmSetItem,
   type FilmSetLocalTransform
 } from "./film-set-content.js";
-import { filmSetContentHash } from "./film-set-content.js";
+import { FILM_SET_CONTENT_VERSION, filmSetContentHash } from "./film-set-content.js";
 
 /** 片场对象编辑的失败原因（稳定、可读）。 */
 export type FilmSetItemEditFailure = { ok: false; reason: string };
@@ -43,7 +43,7 @@ export type FilmSetItemBindingRestore = { clipId: string; binding: FilmSetAnimat
 
 /** 对象完整内容哈希：结构化、与顺序无关的单对象身份。 */
 export function filmSetItemEditHash(item: FilmSetItem): string {
-  return filmSetContentHash({ schemaVersion: 3, items: [item] });
+  return filmSetContentHash({ schemaVersion: FILM_SET_CONTENT_VERSION, items: [item] });
 }
 
 /** 相关绑定的身份哈希（缺失即 `null` 的哈希）。 */
@@ -195,7 +195,7 @@ export function captureItemBindingClosure(
 }
 
 function withContent(animation: FilmSetNodeData, items: FilmSetItem[]): FilmSetNodeData {
-  return { ...animation, filmSetContent: { schemaVersion: 3, items } as FilmSetContent };
+  return { ...animation, filmSetContent: { schemaVersion: FILM_SET_CONTENT_VERSION, items } as FilmSetContent };
 }
 
 function withAnimations(animation: FilmSetNodeData, animations: FilmSetAnimations): FilmSetNodeData {

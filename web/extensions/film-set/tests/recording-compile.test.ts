@@ -179,11 +179,13 @@ describe("freezeFilmSetRecording", () => {
     expect(snapshot.motionJson).not.toContain("motionScript");
   });
 
-  it("freezes authoritative dimensions and object motion in preview-compatible fields", () => {
+  it("freezes scene-space framing and object motion in preview-compatible fields", () => {
+    // 生产取景不依赖画布节点矩形：冻结帧只携带内容 extent 与场景布局 AABB
+    // （change: 2026-10-23-isolate-film-set-camera-space，任务 3.1/3.2）。
     const result = freeze(makeAnimation(), { node: { width: 1566, height: 1158 } });
     if (!result.ok) throw new Error("freeze failed");
     const scene = JSON.parse(result.snapshot.sceneIrJson);
-    expect(scene.compositeAssetFrame).toMatchObject({ width: 1566, height: 1158 });
+    expect(scene.compositeAssetFrame).toMatchObject({ width: 1, height: 1 });
     expect(scene.compositeAssetFrame.resourceExtent).toBeGreaterThan(0);
     const motion = JSON.parse(result.snapshot.motionJson);
     expect(motion.modelMotion).toEqual([]);
@@ -366,8 +368,9 @@ describe("native profile identity", () => {
     const native = nativeRecordingProfileKey("16:9");
     expect(native).not.toBe(browserReferenceProfileKey());
     expect(native).toContain(FILM_SET_RECORDING_CODEC_REVISION);
-    expect(browserReferenceProfileKey()).toContain("r2");
-    expect(native).not.toContain("-r2");
+    // 浏览器侧身份算法版本已升到场景坐标隔离后的 r4；native 与它仍不共享缓存。
+    expect(browserReferenceProfileKey()).toContain("r4");
+    expect(native).not.toContain("-r4");
   });
 
   it("encodes size, renderer, compiler, codec and colour in the key", () => {

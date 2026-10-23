@@ -74,7 +74,7 @@ describe("引用与参数检查（任务 3.2）", () => {
     const state = checkAnimationMotion({
       animation: base,
       clip: { id: "clip", name: "clip", kind: "static", timeline: { duration: 0, loop: false }, initialCamera: base.camera, cameraMotion, bindings: [] },
-      content: { schemaVersion: 3, items: base.filmSetContent.items },
+      content: { schemaVersion: 4, items: base.filmSetContent.items },
       initialCamera: base.camera,
       timeline: { duration: 0, loop: false },
       cameraMotion

@@ -29,7 +29,7 @@ function filmSetData(title = "片场"): ServerCanvas["nodeData"][string] {
     title,
     timeline: { duration: 0, loop: false },
     filmSetContent: {
-      schemaVersion: 3,
+      schemaVersion: 4,
       items: [
         { id: "img", kind: "image", name: "图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-image", aspectRatio: 2 },
         { id: "vid", kind: "video", name: "视", localTransform: { offset: { x: 3, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-video", aspectRatio: 1.5 }

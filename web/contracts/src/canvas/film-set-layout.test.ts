@@ -16,7 +16,7 @@ const box: SceneV2Op = { t: "box", id: "body", parent: null, position: [0, 1, 0]
 const identity = { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
 const transforms = [{ offset: { x: -10, y: 0, z: 0 }, scale: 4, yaw: 0.6 }, { offset: { x: 14, y: 5, z: 8 }, scale: 2, yaw: -1 }];
 const ops = composeFilmSetScene({ models: transforms.map((_, index) => ({ itemId: String(index), localTransform: identity, ops: [box] })) }).ops;
-const content = { schemaVersion: 3, items: transforms.map((localTransform, index) => ({ id: String(index), kind: "model", localTransform })) } as FilmSetContent;
+const content = { schemaVersion: 4, items: transforms.map((localTransform, index) => ({ id: String(index), kind: "model", localTransform })) } as FilmSetContent;
 
 it("layout includes all saved object transforms, and updates without changing resource ops", () => {
   const bounds = filmSetLayoutBounds(ops, content);
@@ -51,7 +51,7 @@ it("media items frame the scene but never scale the fit with the object scale", 
   // 片场仍有可用适配基准；但若按对象当前 scale 参与，放大 item 会同时放大 bounds 与缩小
   // fit，两者相消，对象缩放对世界几何不再生效。
   const mediaOnly: FilmSetContent = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     items: [{ id: "photo", kind: "image", name: "照片", assetId: "a", aspectRatio: 4 / 3, localTransform: { offset: { x: 0, y: 2, z: 0 }, scale: 1, yaw: 0.2 } }] as never
   };
   const base = filmSetLayoutBounds([], mediaOnly, 2);
