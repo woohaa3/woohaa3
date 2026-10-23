@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   inheritedMcpServerNames,
+  inheritedPluginNames,
   parseMcpServerNames,
+  parsePluginNames,
   prepareCodexConfigDir,
   resolveCodexHome,
 } from "./codex-home.js";
@@ -88,5 +90,35 @@ describe("Codex 本机配置复用", () => {
     );
     expect(inheritedMcpServerNames(configDir)).toEqual(["model-canvas"]);
     expect(inheritedMcpServerNames(path.join(root, "missing"))).toEqual([]);
+  });
+
+  it("只从 config.toml 提取插件名，不读取配置值", () => {
+    expect(
+      parsePluginNames(
+        [
+          '[plugins."codex-app-tools@openai-bundled"]',
+          "enabled = true",
+          '[plugins."browser@openai-bundled"]',
+          "enabled = true",
+          "[plugins.local_search]",
+          "enabled = true",
+          "# [plugins.commented]",
+          "[mcp_servers.node_repl]",
+          'command = "/bin/false"',
+        ].join("\n"),
+      ),
+    ).toEqual(["codex-app-tools@openai-bundled", "browser@openai-bundled", "local_search"]);
+  });
+
+  it("读取连接目录中链接后的继承插件名", () => {
+    const root = tempRoot();
+    const configDir = path.join(root, "config");
+    mkdirSync(path.join(configDir, ".codex"), { recursive: true });
+    writeFileSync(
+      path.join(configDir, ".codex", "config.toml"),
+      '[plugins."documents@openai-primary-runtime"]\nenabled = true\n',
+    );
+    expect(inheritedPluginNames(configDir)).toEqual(["documents@openai-primary-runtime"]);
+    expect(inheritedPluginNames(path.join(root, "missing"))).toEqual([]);
   });
 });
