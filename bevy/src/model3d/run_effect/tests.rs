@@ -16,6 +16,7 @@ fn app() -> App {
         .init_resource::<RunEffectSettings>()
         .insert_resource(SurfaceState {
             size: Vec2::new(1024., 768.),
+            pixel_ratio: 1.,
         })
         .add_systems(Update, sync);
     app.world_mut().resource_mut::<CurrentScene>().0.nodes = serde_json::from_value(serde_json::json!([{

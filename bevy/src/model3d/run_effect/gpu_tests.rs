@@ -106,6 +106,7 @@ fn hardware_run_effect_shader_and_output_isolation() {
         .init_resource::<ThemeResource>()
         .insert_resource(SurfaceState {
             size: Vec2::new(640., 480.),
+            pixel_ratio: 1.,
         })
         .insert_resource(GlobalAmbientLight {
             brightness: 700.,
