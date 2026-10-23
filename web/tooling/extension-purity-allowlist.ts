@@ -40,8 +40,8 @@ export const EXTENSION_IMPORT_DEBT: readonly ExtensionImportDebt[] = [
   },
   {
     file: "web/services/application-service/package.json",
-    packages: ["@woohaa3/extension-game-furnace", "@woohaa3/extension-sample-site"],
-    reason: "同上：application-service 的默认站点插件清单（炉体）与样例 fixture。"
+    packages: ["@woohaa3/extension-sample-site"],
+    reason: "同上：application-service 的样例 fixture。私有业务扩展（如炉体）不在此列。"
   },
   {
     file: "web/services/canvas-service/package.json",

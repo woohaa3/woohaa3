@@ -26,7 +26,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@woohaa3/extension-game-furnace": "workspace:*",
     "@woohaa3/contracts": "workspace:*",
     "mongodb": "^6.12.0"
   },
