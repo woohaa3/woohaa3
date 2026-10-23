@@ -186,7 +186,7 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
       }
       if (!s.keys.some(key => { try { return verify(null, bytes, key, Buffer.from(signature.toString().trim(), 'base64')); } catch { return false; } })) fail('INVALID_SIGNATURE', 'Runtime catalog signature is invalid or untrusted');
       const catalog = JSON.parse(bytes.toString());
-      if (catalog.schemaVersion !== 1 || !Array.isArray(catalog.components)) fail('INVALID_CATALOG', 'Invalid runtime catalog');
+      if (![1, 2].includes(catalog.schemaVersion) || !Array.isArray(catalog.components)) fail('INVALID_CATALOG', 'Invalid runtime catalog');
       const matches = catalog.components.filter(x => x.id === id && x.version === s.item.version && x.platform === platform && x.arch === arch);
       if (matches.length !== 1) fail('COMPONENT_NOT_PUBLISHED', `No unique locked ${id} ${s.item.version} for ${platform}-${arch}`);
       const component = matches[0];
@@ -211,9 +211,14 @@ export function createRuntimeComponentManager({ dataDir, defaultsPath, lockPath,
       if (space.bavail * space.bsize < component.bytes + component.unpackedBytes + 1024 * 1024) fail('INSUFFICIENT_SPACE', 'Insufficient space for runtime installation');
       staging = `${root}.staging-${randomUUID()}`; await fs.mkdir(staging);
       const archive = `${root}.partial`, partialInfo = `${root}.partial.json`;
+      let archiveBase = base;
+      if (catalog.schemaVersion === 2) {
+        if (!/^[a-f0-9]{64}$/.test(component.sha256) || component.url !== `blobs/sha256/${component.sha256}.tar.gz` || !/\/(darwin-aarch64|windows-x86_64)\/[^/]+\/$/.test(base.pathname) || base.search || base.hash) fail('INVALID_CATALOG', 'Invalid shared runtime blob or release directory');
+        archiveBase = new URL('../../', base);
+      }
       safeRelative(component.url);
-      const url = validateUrl(new URL(component.url, base).href);
-      if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname) || url.search || url.hash) fail('INVALID_CATALOG', 'Runtime archive URL must remain under the configured CDN directory');
+      const url = validateUrl(new URL(component.url, archiveBase).href);
+      if (url.origin !== base.origin || !url.pathname.startsWith(archiveBase.pathname) || url.search || url.hash) fail('INVALID_CATALOG', 'Runtime archive URL must remain under the configured CDN directory');
       let received = 0, handle, keepPartial = true;
       const prior = await json(partialInfo, true);
       if (prior.sha256 === component.sha256 && prior.url === url.href && prior.etag) {

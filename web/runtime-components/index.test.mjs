@@ -17,10 +17,10 @@ async function fixture(t, changes = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'woohaa-runtime-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
   const { privateKey, publicKey } = generateKeyPairSync('ed25519'); const body = changes.body || archive(changes.name, changes.type);
   const component = { id: 'codex', version: '1.2.3', platform: process.platform, arch: process.arch, url: 'codex.tar.gz', bytes: body.length, unpackedBytes: 1024, sha256: createHash('sha256').update(body).digest('hex'), entry: 'bin/codex', kind: 'executable', ...changes.component };
-  const catalog = Buffer.from(JSON.stringify({ schemaVersion: 1, components: [component, ...(changes.otherComponents || [])] }));
+  const catalog = Buffer.from(JSON.stringify({ schemaVersion: changes.schemaVersion || 1, components: [component, ...(changes.otherComponents || [])] }));
   const signature = sign(null, catalog, privateKey).toString('base64');
   const defaultsPath = path.join(root, 'defaults.json'), lockPath = path.join(root, 'lock.json');
-  await fs.writeFile(defaultsPath, JSON.stringify({ schemaVersion: 1, cdn: { baseUrl: 'https://cdn.example.test/' }, trustKeys: [publicKey.export({ type: 'spki', format: 'pem' })] }));
+  await fs.writeFile(defaultsPath, JSON.stringify({ schemaVersion: 1, cdn: { baseUrl: changes.baseUrl || 'https://cdn.example.test/' }, trustKeys: [publicKey.export({ type: 'spki', format: 'pem' })] }));
   await fs.writeFile(lockPath, JSON.stringify({ schemaVersion: 1, components: { codex: { version: '1.2.3' } } }));
   let calls = 0;
   const urls = [];
@@ -107,7 +107,7 @@ test('real packaging USTAR output installs through signed catalog boundary', asy
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'woohaa-ustar-')); t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const source = path.join(temporary, 'source'); await fs.mkdir(path.join(source, 'bin'), { recursive: true }); await fs.writeFile(path.join(source, 'bin/codex'), '#!/bin/sh\necho codex 1.2.3\n', { mode: 0o755 });
   const { createComponentArchive } = await import('../../scripts/package-runtime-components.mjs');
-  const archivePath = path.join(temporary, 'artifact.tar.gz'); createComponentArchive(source, archivePath);
+  const archivePath = path.join(temporary, 'artifact.tar.gz'); await createComponentArchive(source, archivePath);
   const f = await fixture(t, { body: await fs.readFile(archivePath) }); assert.equal((await f.manager.install('codex')).status, 'ready');
 });
 test('idle native consumer cooperatively releases its lease on removal request', async t => {
@@ -164,4 +164,18 @@ test('app release CDN directory changes reuse unchanged installed components wit
  const next=createRuntimeComponentManager({...f.options,fetchImpl:()=>{throw new Error('unchanged runtime must not download after App upgrade');}});
  assert.equal((await next.install('codex')).status,'ready');
  const handle=await next.resolve('codex');assert.equal(handle.version,'1.2.3');handle.release();
+});
+
+test('schema 2 resolves shared blobs under runtime root and rejects other paths', async t => {
+ const body=archive(), sha256=createHash('sha256').update(body).digest('hex');
+ const baseUrl='https://cdn.example.test/woohaa/runtimes/darwin-aarch64/0.2.0/';
+ const url=`blobs/sha256/${sha256}.tar.gz`;
+ const f=await fixture(t,{body,schemaVersion:2,baseUrl,envelope:true,component:{url}});
+ assert.equal((await f.manager.install('codex')).status,'ready');
+ assert(f.urls.includes(`https://cdn.example.test/woohaa/runtimes/${url}`));
+ for(const bad of ['../escape.tar.gz',`blobs/sha256/${'0'.repeat(64)}.tar.gz`,'https://other.test/archive']){
+  const f=await fixture(t,{body,schemaVersion:2,baseUrl,envelope:true,component:{url:bad}});
+  await assert.rejects(f.manager.install('codex'),{code:'INVALID_CATALOG'});
+  assert(!f.urls.some(u=>u.endsWith('.tar.gz')));
+ }
 });
