@@ -164,5 +164,11 @@ mod tests {
         assert_eq!((placed.viewport_x, placed.viewport_y), (0, 26));
         assert_eq!((placed.viewport_width, placed.viewport_height), (1280, 694));
         assert_eq!((placed.logical_width, placed.logical_height), (1280.0, 694.0));
+        // Native view layout must cover this swapchain (0,0,1280,720), not the
+        // canvas hole (0,26,1280,694). The hole is only the camera viewport.
+        assert_eq!(
+            (0.0 + 1280.0, 26.0 + 694.0),
+            (placed.window_width as f32, placed.window_height as f32)
+        );
     }
 }

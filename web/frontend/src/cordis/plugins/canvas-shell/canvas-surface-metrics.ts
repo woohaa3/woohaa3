@@ -54,8 +54,8 @@ export function createSurfaceMetrics(input: {
       width,
       height,
       pixelRatio,
-      originX: rect.width ? rect.left : 0,
-      originY: rect.height ? rect.top : 0,
+      originX: rect.width ? Math.round(rect.left) : 0,
+      originY: rect.height ? Math.round(rect.top) : 0,
     };
   };
   const readBounds = (): CanvasBounds => {
