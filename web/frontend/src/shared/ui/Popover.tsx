@@ -23,6 +23,8 @@ type PopoverCommonProps = {
   sideOffset?: number;
   /** popup 追加 class。 */
   className?: string;
+  /** popup 可访问名（`role="dialog"` 的 aria-label）。 */
+  label?: string;
   /** 是否在 outside pointerdown 时请求关闭（默认 true）。 */
   dismissOnOutside?: boolean;
   /** Escape 请求关闭（默认 true）。 */
@@ -53,6 +55,7 @@ export const Popover = forwardRef<HTMLButtonElement, PopoverProps>(function Popo
     align = "center",
     sideOffset = 6,
     className,
+    label,
     dismissOnOutside = true,
     dismissOnEscape = true,
     restoreFocus = true,
@@ -91,6 +94,7 @@ export const Popover = forwardRef<HTMLButtonElement, PopoverProps>(function Popo
           align={align}
           sideOffset={sideOffset}
           collisionPadding={8}
+          {...(label !== undefined ? { "aria-label": label } : {})}
           data-testid={testId}
           onPointerDownOutside={handlePointerDownOutside}
           onEscapeKeyDown={handleEscapeKeyDown}
