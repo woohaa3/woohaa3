@@ -15,11 +15,12 @@
 /// 致命错误出口：记录诊断、提示用户，然后以给定退出码结束进程。
 fn fatal(message: &str, code: i32) -> ! {
     report_fatal(message);
+    woohaa_desktop_host::diagnostics::finish(false);
     std::process::exit(code);
 }
 
 fn report_fatal(message: &str) {
-    eprintln!("{message}");
+    woohaa_desktop_host::diagnostics::stderr(format_args!("{message}"));
     write_startup_log(message);
     #[cfg(target_os = "windows")]
     show_windows_error(message);
@@ -27,16 +28,10 @@ fn report_fatal(message: &str) {
 
 /// 与应用数据目录一致的日志位置；目录不可写时返回 None（诊断退化为 stderr）。
 fn startup_log_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("WOOHAA_DESKTOP_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("APPDATA")
-                .map(|root| std::path::PathBuf::from(root).join("com.woohaa.desktop"))
-        })
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .map(|home| std::path::PathBuf::from(home).join(".com.woohaa.desktop"))
-        })?;
+    if let Some(run) = woohaa_desktop_host::diagnostics::run_dir() {
+        return Some(run.join("startup.log"));
+    }
+    let base = woohaa_desktop_host::diagnostics::data_directory()?;
     let logs = base.join("logs");
     std::fs::create_dir_all(&logs).ok()?;
     Some(logs.join("startup.log"))
@@ -97,12 +92,20 @@ fn install_panic_hook() {
 }
 
 fn main() {
+    let args: Vec<_> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--diagnostic-watchdog") {
+        if let (Some(dir), Some(pid)) = (args.get(2), args.get(3).and_then(|s| s.parse().ok())) {
+            woohaa_desktop_host::diagnostic_watchdog::run(std::path::Path::new(dir), pid);
+        }
+        return;
+    }
     install_panic_hook();
     // `--probe` 只报告环境事实，不创建窗口/GPU 资源；用于无显示会话的 CI/容器。
     if std::env::args().any(|arg| arg == "--probe") {
         println!("{}", woohaa_desktop_host::view::desktop_support_report());
         return;
     }
+    woohaa_desktop_host::diagnostics::initialize();
     // 预先检查显示会话：没有会话时 GTK 初始化会失败；这里给出明确诊断而不是静默继续。
     let session = woohaa_desktop_host::probe_desktop_session();
     if !session.has_session_env {
@@ -145,4 +148,5 @@ fn main() {
     if let Err(error) = woohaa_desktop_host::run_host() {
         fatal(&format!("桌面宿主启动失败：{error}"), 1);
     }
+    woohaa_desktop_host::diagnostics::finish(true);
 }

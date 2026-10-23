@@ -76,6 +76,9 @@ fn system_tar_path(windows: bool, system_root: Option<std::ffi::OsString>) -> Pa
         PathBuf::from("/usr/bin/tar")
     }
 }
+pub(crate) fn diagnostic_tar() -> PathBuf {
+    system_tar_path(cfg!(windows),std::env::var_os("SystemRoot"))
+}
 fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = Command::new(program);
     #[cfg(windows)]
@@ -90,15 +93,19 @@ fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
 
 impl LocalHost {
     pub fn start(launch: &Launch) -> Result<(Self, Ready), String> {
-        std::fs::create_dir_all(launch.data.join("logs")).map_err(|e| e.to_string())?;
+        let log_dir = crate::diagnostics::run_dir()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| launch.data.join("logs"));
+        std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
         let logs = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(launch.data.join("logs/host.log"))
+            .open(log_dir.join("host-stderr.log"))
             .map_err(|e| e.to_string())?;
         let instance = uuid::Uuid::new_v4().to_string();
         let mut command = hidden_command(&launch.node);
         command.arg(launch.root.join("desktop-host.mjs"));
+        command.env("WOOHAA_DESKTOP_RUN_DIR", &log_dir);
         if cfg!(debug_assertions) {
             if let Ok(port) = std::env::var("WOOHAA_DESKTOP_HOST_PORT") {
                 command.arg("--port").arg(port);
@@ -120,17 +127,29 @@ impl LocalHost {
             .stderr(logs)
             .spawn()
             .map_err(|e| format!("启动本机宿主失败: {e}"))?;
+        crate::diagnostics::event(
+            "host",
+            "process-start",
+            serde_json::json!({"pid":child.id(), "instance":instance}),
+        );
         let stdout = child.stdout.take().ok_or("host stdout missing")?;
         let (tx, rx) = mpsc::channel();
+        let host_pid=child.id();
+        crate::diagnostics::node_heartbeat(host_pid,true);
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 match line {
                     Ok(line) => {
+                        if serde_json::from_str::<serde_json::Value>(&line).ok().map(|v|v["type"]=="heartbeat").unwrap_or(false) {
+                            crate::diagnostics::node_heartbeat(host_pid,true);
+                            continue;
+                        }
                         let _ = tx.send(line);
                     }
                     Err(_) => break,
                 }
             }
+            crate::diagnostics::node_heartbeat(host_pid,false);
         });
         let mut host = Self {
             child,
@@ -139,10 +158,15 @@ impl LocalHost {
         let deadline = Instant::now() + Duration::from_secs(90);
         loop {
             if let Some(status) = host.child.try_wait().map_err(|e| e.to_string())? {
-                return Err(format!("宿主启动时退出: {status}；请查看 logs/host.log"));
+                return Err(format!(
+                    "宿主启动时退出: {status}；请查看用户数据目录 logs/runs 下本次运行的 host-stderr.log"
+                ));
             }
             if Instant::now() >= deadline {
-                return Err("宿主启动超时；请查看 logs/host.log".into());
+                return Err(
+                    "宿主启动超时；请查看用户数据目录 logs/runs 下本次运行的 host-stderr.log"
+                        .into(),
+                );
             }
             if let Ok(line) = rx.recv_timeout(Duration::from_millis(100)) {
                 if line.len() > 64 * 1024 {
@@ -168,7 +192,12 @@ impl LocalHost {
         let exited = self
             .child
             .try_wait()
-            .map(|status| status.is_some())
+            .map(|status| {
+                if let Some(status) = status {
+                    crate::diagnostics::event("host", "process-exit", serde_json::json!({"pid":self.child.id(),"status":status.to_string(),"code":status.code(),"success":status.success()}));
+                }
+                status.is_some()
+            })
             .map_err(|e| e.to_string())?;
         if exited {
             self.recording.take();
@@ -431,7 +460,7 @@ pub fn install(
                     main.navigate(tauri::Url::parse(&ui_url).map_err(|e| e.to_string())?)
                         .map_err(|e| e.to_string())?;
                     if main.show().is_ok() {
-                        eprintln!("desktop main shown: {}", ui_url);
+                        crate::diagnostics::stderr(format_args!("desktop main shown: {}", ui_url));
                     }
                     let _ = main.set_focus();
                 }
@@ -442,7 +471,7 @@ pub fn install(
             })();
             state.busy.store(false, Ordering::Release);
             if let Err(error) = result {
-                eprintln!("desktop startup: {error}");
+                crate::diagnostics::stderr(format_args!("desktop startup: {error}"));
                 status(
                     &handle,
                     &format!("{error}。可通过“工作区”菜单导入或从备份恢复。"),
@@ -472,7 +501,7 @@ pub fn install(
                     }
                     status(
                         &handle,
-                        "本机宿主已退出。请重试，或通过“工作区”菜单导入/从备份恢复；日志位于用户数据目录 logs/host.log。",
+                        "本机宿主已退出。请重试，或通过“工作区”菜单导入/从备份恢复；日志位于用户数据目录 logs/runs 下本次运行的 host-stderr.log。",
                         true,
                     );
                     break;

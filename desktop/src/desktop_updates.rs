@@ -31,7 +31,7 @@ pub fn startup(
     let config = read_config(resources)?;
     let Some(channel) = config.updater else {
         status("更新通道未配置，正在启动当前版本…");
-        eprintln!("desktop updater: unconfigured");
+        crate::diagnostics::stderr(format_args!("desktop updater: unconfigured"));
         if required.load(std::sync::atomic::Ordering::Acquire) {
             return Err("必须完成已发现的更新".into());
         }
@@ -54,7 +54,7 @@ pub fn startup(
         let update = match updater.check().await {
             Ok(update) => update,
             Err(error) => {
-                eprintln!("desktop updater check failed: {error}");
+                crate::diagnostics::stderr(format_args!("desktop updater check failed: {error}"));
                 if required.load(std::sync::atomic::Ordering::Acquire) {
                     return Err(format!("必须更新，但检查失败: {error}"));
                 }

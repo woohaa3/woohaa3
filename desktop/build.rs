@@ -17,6 +17,9 @@ fn main() {
     println!("cargo:rerun-if-changed=../bevy/Cargo.toml");
     println!("cargo:rerun-if-changed=../scripts/build-shot-recorder.mjs");
     let root = client_root();
+    let revision=std::process::Command::new("git").args(["rev-parse","HEAD"]).current_dir(&root).output().ok()
+        .filter(|o|o.status.success()).map(|o|String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_else(||"unknown".into());
+    println!("cargo:rustc-env=WOOHAA_DIAGNOSTIC_REVISION={revision}");
     let release = std::env::var("PROFILE").as_deref() == Ok("release");
     let mut command = std::process::Command::new("node");
     command

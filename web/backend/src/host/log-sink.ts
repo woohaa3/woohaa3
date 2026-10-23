@@ -253,7 +253,11 @@ export function createHostLogSink(options: HostLogSinkOptions = {}): HostLogSink
   const now = options.now ?? (() => new Date());
   const threshold = LEVEL_RANK[resolveHostLogLevel(env)];
   const dir = resolveHostLogDir(env, cwd);
-  const writer = dir === null ? null : createFileWriter(dir, { ...DEFAULT_LOG_LIMITS, ...options.limits }, stderr, now);
+  // A desktop run shares its budget with native/WebView logs and incident samples.
+  const defaults = (options.env ?? process.env).WOOHAA_DESKTOP_RUN_DIR
+    ? { ...DEFAULT_LOG_LIMITS, segments: 2, dirBytes: 40 * 1024 * 1024 }
+    : DEFAULT_LOG_LIMITS;
+  const writer = dir === null ? null : createFileWriter(dir, { ...defaults, ...options.limits }, stderr, now);
 
   const log: HostLog = (event) => {
     const level = eventLevel(event);

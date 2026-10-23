@@ -57,7 +57,7 @@ pub fn create(
         Ok(window) => NewWindowResponse::Create { window },
         Err(_) => {
             // 不记录包含 OAuth state / code 等参数的 URL。
-            eprintln!("Unable to create authorization WebView window");
+            crate::diagnostics::stderr(format_args!("Unable to create authorization WebView window"));
             NewWindowResponse::Deny
         }
     }
