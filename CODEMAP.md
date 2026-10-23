@@ -36,3 +36,5 @@ Assistant entry points share `web/frontend/src/cordis/ui/assistant-execution/mod
 `web/frontend/src/cordis/plugins/agent-assistant/first-use.ts` observes the same directory from the page plugin and opens the assistant dialog at `page: "add"` on the first successful empty result after canvas readiness. A data-space-scoped localStorage marker respects dismissal across reloads; failures, pending dialogs, scope changes and disposal do not create duplicate or stale prompts.
 
 Runtime release layout: `scripts/lib/runtime-release-layout.mjs` owns platform/App-version directory and CDN URL resolution. `build-desktop.mjs` passes the effective App version into host staging; `package-runtime-components.mjs` writes the same platform/version upload directory and atomic signed catalog. Component/cache identities stay unchanged.
+
+Shared runtime archives: `scripts/lib/runtime-archive.mjs` owns deterministic streaming USTAR/gzip generation. `web/runtime-components/index.mjs` accepts legacy schema 1 release-local archives and schema 2 SHA-256 blobs resolved under the runtime root; signed release catalogs remain platform/App-version scoped.

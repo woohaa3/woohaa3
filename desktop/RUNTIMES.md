@@ -115,3 +115,11 @@ Codex/Claude/原生工具启动本地程序；DSH 用内置 Node 启动隔离闭
 ### Windows tar/gzip 安装一致性
 
 Windows 使用 GNU tar 回退时，压缩/解压必须使用同一安装目录的 `gzip.exe`。构建工具会把 tar 所在目录置于其子进程 PATH 首位，避免 MSYS2 tar 误用 Git for Windows gzip 导致 `cygheap base mismatch`。若缺少同目录 gzip，补齐对应工具安装；不要根据通用错误提示删除系统 DLL。Windows 自带 bsdtar 不需要外部 gzip。
+
+### 跨 App 版本共享归档（新版发布器）
+
+新版发布器可把本地 schema 1 构建清单转换并重新签名为 schema 2。清单仍在 `<runtime根>/<平台>/<App版本>/catalog.signed.json`，归档改为 `<runtime根>/blobs/sha256/<归档哈希>.tar.gz`。schema 2 中组件 url 必须为 `blobs/sha256/<sha256>.tar.gz`，下载器只在当前平台/发行目录上移两级后解析这个严格路径。旧 schema 1 继续按当前目录解析；大小、签名、哈希与安全解压校验均保留。
+
+必须为包含新版下载器的 App 使用未发布的新发行版本；旧 App 无法读取 schema 2，不要覆盖旧发行目录。旧对象不删除。上述“直接上传叶目录”仍是 schema 1 的发布方式；共享模式须由支持转换/重新签名的发布器先提交文件池再提交清单，不能混用普通目录上传步骤覆盖清单。
+
+组件归档由 `scripts/lib/runtime-archive.mjs` 以流式 USTAR/gzip 生成，固定时间、所有者、权限规则和顺序，消除未改内容的重复哈希。不再依赖系统 tar/gzip 生成组件包。

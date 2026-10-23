@@ -10,7 +10,8 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { copyRuntimeFiles, copyRuntimePackage, locateDependency, nodeArtifact } from './lib/desktop-host-package.mjs';
 import { writeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
-import {systemTarExec} from './lib/desktop-platform-commands.mjs';
+import { createComponentArchive } from './lib/runtime-archive.mjs';
+export { createComponentArchive } from './lib/runtime-archive.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 const sha256=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -32,15 +33,6 @@ export function resolvedRuntimeLock(options={}){
  if(!fs.existsSync(editor))throw new Error(`图像编辑器 WASM 缺失：${editor}`);
  lock.components['image-editor']={version:`0.1.0-${sha256(editor).slice(0,16)}`};
  return lock;
-}
-export function createComponentArchive(directory,output){
- let unpackedBytes=0;
- const walk=dir=>{for(const item of fs.readdirSync(dir,{withFileTypes:true})){
-  const file=path.join(dir,item.name);if(item.isSymbolicLink())throw new Error(`组件归档不得包含链接：${file}`);
-  if(item.isDirectory())walk(file);else if(item.isFile())unpackedBytes+=fs.statSync(file).size;else throw new Error(`组件包含非普通文件：${file}`);
- }};walk(directory);fs.mkdirSync(path.dirname(output),{recursive:true});
- systemTarExec(['--format=ustar','-czf',output,'-C',directory,'.'],{env:{...process.env,COPYFILE_DISABLE:'1'},windowsHide:true});
- return {sha256:sha256(output),bytes:fs.statSync(output).size,unpackedBytes};
 }
 function dependency(source,name){const found=locateDependency(fs.realpathSync(source),name);if(!found)throw new Error(`缺少已安装依赖 ${name}`);return found;}
 function copyLicenses(source,target){for(const name of fs.readdirSync(source))if(/^(license|licence|notice|readme)/i.test(name)&&fs.statSync(path.join(source,name)).isFile())fs.copyFileSync(path.join(source,name),path.join(target,name));}
@@ -107,7 +99,7 @@ export async function packageRuntimeComponents({output=path.join(root,'artifacts
   if(!fs.existsSync(path.join(staging,entry)))throw new Error(`组件入口不存在 ${id}: ${entry}`);
   if(kind==='executable')fs.chmodSync(path.join(staging,entry),0o755);
   const url=`${id}/${version}/${platform}-${arch}.tar.gz`;
-  components.push({id,version,platform,arch,url,...createComponentArchive(staging,path.join(output,url)),entry,kind});
+  components.push({id,version,platform,arch,url,...await createComponentArchive(staging,path.join(output,url)),entry,kind});
  }
  const merged=[...previous.filter(old=>!components.some(item=>item.id===old.id&&item.version===old.version&&item.platform===old.platform&&item.arch===old.arch)),...components];
  const catalog=Buffer.from(JSON.stringify({schemaVersion:1,components:merged},null,2)+'\n');fs.mkdirSync(output,{recursive:true});
