@@ -449,3 +449,41 @@ fn container_blocks_update_locally_and_sort_transparency_before_high_overlays() 
     }
     assert!(world.resource::<Visuals>().labels.is_empty());
 }
+
+#[test]
+fn film_run_mask_covers_exact_scope_in_every_active_phase_and_clears_at_terminal() {
+    use bevy::mesh::VertexAttributeValues;
+    let mut world = world();
+    world.resource_mut::<CurrentScene>().0.nodes = serde_json::from_value(serde_json::json!([{
+        "id":"film", "type":"model", "x":100,"y":100,"width":200,"height":160,
+        "compositeAsset":{"x":100,"y":100,"width":200,"height":160,"scopeShape":"isometric-diamond"},
+        "aggregateRun":{"active":true,"filmSet":{"operationKey":"operation","phase":"running","source":"agent","labelCode":"generating"}}
+    }])).unwrap();
+    let expected = crate::canvas_query::scope::node_scope(&world.resource::<CurrentScene>().0.nodes[0]).vertices;
+    let mask_vertices = |world: &World| {
+        let id = world.resource::<Visuals>().container_blocks[0].state()[1].unwrap();
+        let mesh = world.resource::<Assets<Mesh>>().get(id).unwrap();
+        let VertexAttributeValues::Float32x3(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else { panic!() };
+        let VertexAttributeValues::Float32x4(colors) = mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() else { panic!() };
+        positions.iter().zip(colors).filter(|(_, color)| (color[3] - 0.45).abs() < 1e-6)
+            .map(|(p, _)| Vec2::new(p[0], -p[1])).collect::<Vec<_>>()
+    };
+    for phase in ["submitting", "queued", "running", "committing", "verifying"] {
+        world.resource_mut::<CurrentScene>().0.nodes[0].aggregate_run.as_mut().unwrap().film_set.as_mut().unwrap().phase = phase.into();
+        render(&mut world);
+        assert_eq!(mask_vertices(&world), expected, "backdrop must stay visible in {phase}");
+        let handles = world.resource::<Visuals>().container_blocks[0].state();
+        render(&mut world);
+        assert_eq!(world.resource::<Visuals>().container_blocks[0].state(), handles);
+    }
+    // Ground geometry can change while the node and base rectangle remain unchanged.
+    world.resource_mut::<CurrentScene>().0.nodes[0].composite_asset.as_mut().unwrap().scope_ground =
+        Some(serde_json::from_value(serde_json::json!({"cx":210,"cy":190,"hx":140,"hz":90})).unwrap());
+    render(&mut world);
+    let moved = crate::canvas_query::scope::node_scope(&world.resource::<CurrentScene>().0.nodes[0]).vertices;
+    assert_ne!(moved, expected);
+    assert_eq!(mask_vertices(&world), moved);
+    world.resource_mut::<CurrentScene>().0.nodes[0].aggregate_run = None;
+    render(&mut world);
+    assert!(mask_vertices(&world).is_empty());
+}

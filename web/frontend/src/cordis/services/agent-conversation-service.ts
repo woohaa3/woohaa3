@@ -232,33 +232,41 @@ export function createAgentConversationService(
     input: AgentConversationSubmitInput & { requestId: string }
   ): Promise<AgentConversationResult<AgentConversationSubmitResult>> => {
     const submittedScope = dataScopeId();
-    publish({ loading: true, error: null });
-    const conversation = await ensureConversation(input);
-    if (!conversation.ok) {
-      if (submittedScope === dataScopeId()) publish({ loading: false, error: conversation.error });
-      return conversation;
-    }
-    if (submittedScope !== dataScopeId()) return { ok: false, code: "identity-changed", error: "Assistant identity changed" };
-    const accepted = await remote.accept(conversation.value, { requestId: input.requestId, entry: input.entry });
-    if (!accepted.ok) {
-      if (submittedScope === dataScopeId()) publish({ loading: false, error: accepted.error });
-      return accepted;
-    }
-    const value: AgentConversationSubmitResult = {
-      conversationId: accepted.value.conversation.conversationId,
-      requestId: input.requestId,
-      turn: accepted.value.turn,
-      reused: accepted.value.reused
+    publish({ loading: true, error: null, pendingSubmissions: { ...snapshot.pendingSubmissions, [input.requestId]: input.entry } });
+    const clearPending = () => {
+      if (submittedScope !== dataScopeId()) return;
+      const pendingSubmissions = { ...snapshot.pendingSubmissions };
+      delete pendingSubmissions[input.requestId];
+      publish({ pendingSubmissions });
     };
-    if (submittedScope === dataScopeId()) publish({
-      loading: false,
-      active: { conversationId: accepted.value.conversation.conversationId, requestId: input.requestId, turn: accepted.value.turn },
-      error: null,
-      conversations: snapshot.conversations.map((entry) =>
-        entry.conversationId === conversation.value ? accepted.value.conversation : entry
-      )
-    });
-    return { ok: true, value };
+    try {
+      const conversation = await ensureConversation(input);
+      if (!conversation.ok) {
+        if (submittedScope === dataScopeId()) publish({ loading: false, error: conversation.error });
+        return conversation;
+      }
+      if (submittedScope !== dataScopeId()) return { ok: false, code: "identity-changed", error: "Assistant identity changed" };
+      const accepted = await remote.accept(conversation.value, { requestId: input.requestId, entry: input.entry });
+      if (!accepted.ok) {
+        if (submittedScope === dataScopeId()) publish({ loading: false, error: accepted.error });
+        return accepted;
+      }
+      const value: AgentConversationSubmitResult = {
+        conversationId: accepted.value.conversation.conversationId,
+        requestId: input.requestId,
+        turn: accepted.value.turn,
+        reused: accepted.value.reused
+      };
+      if (submittedScope === dataScopeId()) publish({
+        loading: false,
+        active: { conversationId: accepted.value.conversation.conversationId, requestId: input.requestId, turn: accepted.value.turn },
+        error: null,
+        conversations: snapshot.conversations.map((entry) =>
+          entry.conversationId === conversation.value ? accepted.value.conversation : entry
+        )
+      });
+      return { ok: true, value };
+    } finally { clearPending(); }
   };
 
   const queries = new Map<string, ReturnType<AgentConversationService["queryTurn"]>>();

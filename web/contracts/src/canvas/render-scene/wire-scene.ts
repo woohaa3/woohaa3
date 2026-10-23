@@ -56,8 +56,10 @@ export * from "./wire-shot-preview.js";
  *   不画归属线、hover 目标错位），因此必须版本同步升级拒绝混合组合。提升为 v20。
  * - change: 2026-10-20-unify-node-execution-feedback —— 圆点身份、预览选择和指针反馈提升为
  *   v21；拒绝忽略 selected/hovered/pressed 的旧 renderer，避免预览与加载反馈不一致。
+ * - change: 2026-10-22-enhance-film-set-running-effects —— v22 增加片场执行身份与阶段，
+ *   工作相机扫描消费同一摘要，装饰时间留在 renderer。
  */
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v21" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v22" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
@@ -312,7 +314,8 @@ export type BevyHistoryStripPresentation = {
 
 /** 聚合节点运行遮罩呈现（change: 2026-10-12-unify-generation-history-strip，design D5）。 */
 export type BevyAggregateRunPresentation = {
-  /** 是否存在运行中操作；驱动覆盖整个节点范围的半透明遮罩与“运行中”。 */
+  filmSet?: import("../run-state/film-set-feedback.js").FilmSetRunFeedback;
+  /** 是否存在运行反馈；片场使用 filmSet 扫描，其它聚合保留范围遮罩。 */
   active: boolean;
   /** 减少动态效果偏好下使用静态可区分形态。 */
   reduceMotion?: boolean;

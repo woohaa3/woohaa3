@@ -56,6 +56,8 @@ export type AgentConversationActiveTurn = {
 };
 
 export type AgentConversationSnapshotView = {
+  /** Local requests awaiting acceptance; never operation records or persisted history. */
+  pendingSubmissions?: Readonly<Record<string, AgentEntryIntent>>;
   /** Exact request index; active is retained only for legacy consumers. */
   turnsByRequest?: Readonly<Record<string, AgentConversationActiveTurn>>;
   conversations: ConversationSummary[];

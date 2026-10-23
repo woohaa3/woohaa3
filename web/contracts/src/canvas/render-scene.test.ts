@@ -872,7 +872,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v21");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v22");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));
@@ -1440,6 +1440,20 @@ describe("renderSceneFingerprint（change: optimize-model-scene-snapshot-hot-pat
 
   it("相同输入得到相同 fingerprint，只由可见字段驱动", () => {
     expect(renderSceneFingerprint(baseScene())).toBe(renderSceneFingerprint(baseScene()));
+  });
+
+  it("film feedback identity, phase and reduced motion participate in equality and fingerprint", () => {
+    const base = baseScene();
+    const withRun = { ...base, nodes: base.nodes.map(node => ({ ...node, aggregateRun: {
+      active: true, filmSet: { operationKey: "attempt-1", phase: "running" as const, source: "agent" as const, labelCode: "generating" as const }
+    } })) };
+    expect(renderSceneEquals(withRun, structuredClone(withRun))).toBe(true);
+    for (const change of [{ filmSet: { ...withRun.nodes[0]!.aggregateRun.filmSet, operationKey: "attempt-2" } },
+      { filmSet: { ...withRun.nodes[0]!.aggregateRun.filmSet, phase: "committing" as const } }, { reduceMotion: true }]) {
+      const next = { ...withRun, nodes: withRun.nodes.map(node => ({ ...node, aggregateRun: { ...node.aggregateRun, ...change } })) };
+      expect(renderSceneEquals(withRun, next)).toBe(false);
+      expect(renderSceneFingerprint(withRun)).not.toBe(renderSceneFingerprint(next));
+    }
   });
 
   it("图片取景不变时，入场完成信号仍触发场景更新；省略信号兼容既有呈现", () => {

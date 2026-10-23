@@ -78,6 +78,20 @@ describe("exact assistant request reads", () => {
   });
 });
 
+it("publishes a local submitting target and clears it after rejection without a fake turn", async () => {
+  let reject!: (value: Awaited<ReturnType<AgentConversationRemote["accept"]>>) => void;
+  const service = createAgentConversationService({ remote: fakeRemote({ accept: () => new Promise(resolve => { reject = resolve; }) }) });
+  const request = service.submitTurn({ canvasId: "cv", conversationId: "conv-1", requestId: "pending",
+    entry: { canvasId: "cv", nodeId: "film", mode: "film-set", action: "modify", prompt: "change" } });
+  expect(service.getSnapshot().pendingSubmissions?.pending.nodeId).toBe("film");
+  await vi.waitFor(() => expect(reject).toBeTypeOf("function"));
+  reject({ ok: false, code: "rejected", error: "Rejected" });
+  await request;
+  expect(service.getSnapshot().pendingSubmissions).toEqual({});
+  expect(Object.keys(service.getSnapshot().turnsByRequest ?? {})).toEqual([]);
+  expect(service.getSnapshot().active).toBeNull();
+});
+
 function fakeRemote(overrides: Partial<AgentConversationRemote> = {}): AgentConversationRemote {
   return {
     catalog: async () => ({ ok: true, value: { models: [], authState: "ready", capabilities: { discussion: true, targets: ["model3d"], tools: false, models: "remote" } } }),

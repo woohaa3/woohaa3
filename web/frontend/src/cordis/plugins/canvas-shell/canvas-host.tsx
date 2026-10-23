@@ -138,7 +138,7 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
   const overlays = (
     <>
       <CanvasOverlayHost {...slotProps} />
-      {snapshotFocus ? <FocusRunStrip canvasId={canvasId} nodeId={snapshotFocus.nodeId} /> : null}
+      {snapshotFocus && presentation.mode.type === "node-focus" && presentation.mode.owner !== "history" ? <FocusRunStrip canvasId={canvasId} nodeId={snapshotFocus.nodeId} /> : null}
       {contextMenu}
     </>
   );

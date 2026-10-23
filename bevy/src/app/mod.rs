@@ -15,7 +15,9 @@ mod setup;
 mod startup_timing;
 mod state;
 
-use bevy::{asset::AssetMetaCheck, prelude::*, window::Window};
+use bevy::{
+    asset::AssetMetaCheck, log::DEFAULT_FILTER, prelude::*, window::Window,
+};
 
 use crate::{canvas2d, model3d, theme::ThemeResource};
 
@@ -60,6 +62,17 @@ pub(crate) fn start() {
             .set(AssetPlugin {
                 file_path: "assets".into(),
                 meta_check: AssetMetaCheck::Never,
+                ..default()
+            })
+            .set(bevy::log::LogPlugin {
+                // 浏览器控制台只保留真正需要人看的信息（change: 2026-10-22-enhance-film-set-running-effects）：
+                // - bevy_ecs::world::command_queue 的 WARN 在 WASM 主循环里每帧重复刷屏，会淹没真实的
+                //   shader/渲染错误，对诊断无价值。压到 error。
+                // - mesh_view_bindings 等模块缺失、shader 编译失败这类问题只在 WARN/ERROR 出现，
+                //   因此不能整体降级 `level`；只按 target 静音已知噪音。
+                filter: format!(
+                    "{DEFAULT_FILTER}bevy_ecs::world::command_queue=error,"
+                ),
                 ..default()
             }),
     );
@@ -123,6 +136,7 @@ fn configure_canvas(app: &mut App) {
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::model_preview::ModelPreviewPlugin)
+        .add_plugins(model3d::run_effect::RunEffectPlugin)
         .add_plugins(crate::shot_node_preview::ShotNodePreviewPlugin)
         .add_plugins(crate::isometric_grid::IsometricGridPlugin)
         .add_plugins(crate::orbit_camera::OrbitCameraPlugin)
@@ -157,7 +171,7 @@ fn configure_canvas(app: &mut App) {
                     scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
                     // Native 片场后台准备：非阻塞 poll + 全局预算装配，排在消费者之前
                     // （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
-                    scene3d::advance_preparation,
+                    (scene3d::advance_preparation, model3d::run_effect::sync).chain(),
                     crate::model_preview::sync,
                     // 卡片预览：消费同一帧的采样镜头/播放投影，并在模型落位后并入卡片渲染层
                     // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。

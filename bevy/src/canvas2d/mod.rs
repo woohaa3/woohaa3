@@ -25,6 +25,8 @@ mod decoration_cache;
 mod draw_order;
 mod edge_cache;
 mod film_set;
+#[cfg(test)]
+pub(crate) use film_set::draw_film_set_run_mask;
 mod focus_backdrop;
 mod generation;
 mod group;
