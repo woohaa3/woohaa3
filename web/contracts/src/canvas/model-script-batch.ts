@@ -1,14 +1,19 @@
-/** Bounded model authoring batches; Canvas Script remains responsible for canvas structure. */
+/**
+ * Model authoring batches; Canvas Script remains responsible for canvas structure.
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 5.3：原 `MODEL_SCRIPT_BATCH_LIMITS`
+ * （批次 64 模型、单项 20 万字符、展开/响应 1 MiB、15 秒、并发 2 批）已删除。完整批次由实际
+ * 资源调度并一次原子保存，不再按固定数量/字节/时长/并发拒绝合法工作。
+ *
+ * 保留的 `MODEL_BATCH_PAGING` 只是读取分页参数（可继续读取，不是总量截断）。
+ */
 import type { ModelCamera } from "./model-cameras.js";
 import type { ModelContentVersion } from "./model-definition.js";
 
-export const MODEL_SCRIPT_BATCH_LIMITS = {
-  maxNodes: 64,
-  maxSourceChars: 200_000,
-  maxExpandedSourceBytes: 1024 * 1024,
-  maxExecutionMs: 15_000,
-  maxResponseBytes: 1024 * 1024,
-  maxConcurrentBatches: 2,
+/** 批次读取的分页参数（传输语义；大响应可继续读取）。 */
+export const MODEL_BATCH_PAGING = {
+  /** get_model_nodes 单页 nodeIds 数缺省值。 */
+  defaultPageNodes: 64,
 } as const;
 
 export type ModelScriptBatchItem = {

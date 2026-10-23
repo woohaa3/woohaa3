@@ -141,7 +141,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
           workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
           ...(input.intent.mode === "canvas-group" ? { expectedScopeEpoch: Number(frozenHash.slice("group-epoch:".length)) } : {}),
           ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-      ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}), ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}), tools: localAgentToolsForMode(input.intent.mode), maxCalls: 24 });
+      ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}), ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}), tools: localAgentToolsForMode(input.intent.mode) });
         gateway = await createMcpTurnGateway({ input: { ...frozenInput, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
           validateTarget: async () => {
             const target = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });

@@ -10,7 +10,6 @@ import { nativeContextFor, nativeContextKey } from "@woohaa3/agent-connections";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentConversationAdapter, AgentAdapterRunInput, AgentConnectionStatus, ApplicationToolDelegationFacade } from "@woohaa3/contracts";
 import type { ConnectionMetadataRecord } from "@woohaa3/agent-connections";
-import { createTurnBudget } from "@woohaa3/agent-connections";
 import { createLocalAgentConversationAdapter, createLocalAgentDescriptors, type LocalAgentRuntimeOptions } from "./local-agent-connections.js";
 import { LOCAL_AGENT_ADAPTERS } from "../shared.js";
 import type { ProcessManager, ProcessHandle } from "./process-manager.js";
@@ -124,7 +123,7 @@ function fakeToolFacade(authorize: ApplicationToolDelegationFacade["authorize"] 
         ...(request.clipId ? { clipId: request.clipId } : {}),
         ...(request.itemId ? { itemId: request.itemId } : {})
       });
-      return { token: "grant-1", canvasIds: [], nodeIds: [], tools: request.tools ?? [], maxCalls: 24, expiresAt: Date.now() + 60_000 };
+      return { token: "grant-1", canvasIds: [], nodeIds: [], tools: request.tools ?? [], workId: request.workId };
     },
     revoke: () => undefined,
     authorize
@@ -406,7 +405,7 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
   });
 });
 
-describe("回合预算（任务 5.2 复用）", () => {
+describe("无执行额度（任务 2.2 / 2.5）", () => {
   it.each(LOCAL_AGENT_ADAPTERS)("$adapterId accepts the completed candidate after 30 minutes", async descriptor => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
     try {
@@ -425,12 +424,27 @@ describe("回合预算（任务 5.2 复用）", () => {
     } finally { clock.mockRestore(); }
   });
 
-  it("工具调用次数超限即拒绝", () => {
-    const budget = createTurnBudget({ maxToolCalls: 1 });
-    expect(budget.useToolCall()).toBe(true);
-    expect(budget.useToolCall()).toBe(false);
-    expect(budget.exceededReason()).toContain("工具调用次数");
-    expect(budget.expired()).toBe(true);
+  it("工具事件不再有次数上限（原 24 次额度已删除）", async () => {
+    const { service } = fakeService([record()]);
+    const { manager } = fakeProcessManager({ executable: "/native" });
+    const emitted: unknown[] = [];
+    const { transport } = fakeTransport(input => {
+      for (let index = 0; index < 60; index += 1) {
+        input.onEvent({ type: "tool-started", tool: "get_model_api", callId: `call-${index}` });
+        input.onEvent({ type: "tool-completed", tool: "get_model_api", callId: `call-${index}`, ok: true });
+      }
+      input.onEvent({ type: "tool-completed", tool: "submit_model_script", callId: "submit-1", ok: true });
+      return { ok: true, outcome: { status: "succeeded", assistantText: "done" } };
+    });
+    const { facade } = fakeToolFacade();
+    const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: facade, mcpEndpoint: { name: "woohaa", url: "http://127.0.0.1:1/mcp" } });
+    const outcome = await adapter.run(runInput({
+      intent: { action: "generate", canvasId: "c1", nodeId: "n1", mode: "model3d", model: "gpt", prompt: "make" },
+      connection: { connectionId: "c1", adapterId: "codex-appserver", configRevision: 1, credentialEpoch: 1 }
+    }, emitted));
+    // 超过原 24 次工具事件仍按真实写入回执结算成功，不返回任何额度错误。
+    expect(outcome.status).toBe("succeeded");
+    expect(emitted.filter((event) => (event as { type?: string }).type === "tool-started")).toHaveLength(60);
   });
 });
 

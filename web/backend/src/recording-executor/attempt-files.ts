@@ -26,14 +26,13 @@ export async function stageRecordingResources(input: {
   read?: (storageKey: string, canvasId?: string) => Promise<{ bytes: Uint8Array; contentType: string }>;
 }): Promise<void> {
   await mkdir(input.directory, { recursive: true, mode: 0o700 });
-  let total = 0;
+  // change: 2026-10-22-remove-agent-execution-limits，任务 7.5：原单文件 256 MiB 与合计
+  // 512 MiB 素材门禁已删除。冻结身份（大小/类型/checksum）仍逐项核对，真实存储失败照常报错。
   for (const [index, resource] of input.snapshot.resources.entries()) {
     input.signal.throwIfAborted();
     if (!input.read) throw new Error("录制素材读取端口未装配");
     const media = await input.read(resource.storageKey, input.snapshot.origin.canvasId);
     input.signal.throwIfAborted();
-    total += media.bytes.byteLength;
-    if (total > 512 * 1024 * 1024 || media.bytes.byteLength > 256 * 1024 * 1024) throw new Error("录制素材超过预算");
     if (media.bytes.byteLength !== resource.sizeBytes || media.contentType !== resource.contentType ||
         createHash("sha256").update(media.bytes).digest("hex") !== resource.checksum) {
       throw new Error(`录制素材与冻结身份不符：${resource.resourceId}`);

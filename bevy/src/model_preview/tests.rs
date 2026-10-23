@@ -32,9 +32,7 @@ fn model_card_app() -> App {
         .init_resource::<model3d::FocusVisuals>()
         .init_resource::<crate::theme::ThemeResource>()
         .insert_resource(CurrentScene(scene))
-        .insert_resource(SurfaceState {
-            size: Vec2::new(1200.0, 800.0),
-        })
+        .insert_resource(SurfaceState::with_size(Vec2::new(1200.0, 800.0)))
         .insert_resource(crate::app::FrameFlags {
             changed: true,
             ..default()
@@ -194,9 +192,7 @@ fn translation_reuses_cached_preview_and_zoom_refreshes_without_changing_framing
         .init_resource::<model3d::ModelVisuals>()
         .init_resource::<crate::theme::ThemeResource>()
         .insert_resource(CurrentScene(scene))
-        .insert_resource(SurfaceState {
-            size: Vec2::new(1200.0, 800.0),
-        })
+        .insert_resource(SurfaceState::with_size(Vec2::new(1200.0, 800.0)))
         .insert_resource(crate::app::FrameFlags {
             changed: true,
             ..default()
@@ -528,9 +524,7 @@ fn repeated_sync_skips_unchanged_preview_sprite_and_pose_commands() {
         .init_resource::<model3d::ModelVisuals>()
         .init_resource::<crate::theme::ThemeResource>()
         .insert_resource(CurrentScene(scene))
-        .insert_resource(SurfaceState {
-            size: Vec2::new(1200.0, 800.0),
-        })
+        .insert_resource(SurfaceState::with_size(Vec2::new(1200.0, 800.0)))
         .insert_resource(crate::app::FrameFlags {
             changed: true,
             ..default()

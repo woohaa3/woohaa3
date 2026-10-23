@@ -2,20 +2,16 @@
  * Scene IR V2：全局 validator
  * （自 `scene-ir-v2.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R14）。
  *
- * 聚合局部 reader，并保留全局 ID 唯一性、先后引用、层级深度/环及累计资源预算检查；返回统一
- * 规范化结果。不写规范 Y.Doc，仅运行时 DTO。
+ * 聚合局部 reader，并保留全局 ID 唯一性、先后引用与无环层级检查；返回统一规范化结果。
+ * 不写规范 Y.Doc，仅运行时 DTO。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 6.2 / design D6：删除 op 数、材质数、
+ * 层级深度、累计/估算几何数量等应用侧总量拒绝；完整权威几何交给渲染端分块/渐进准备。
  */
 import {
-  SCENE_IR_V2_MAX_ESTIMATED_VERTICES,
-  SCENE_IR_V2_MAX_HIERARCHY_DEPTH,
-  SCENE_IR_V2_MAX_MATERIALS,
-  SCENE_IR_V2_MAX_OPS,
-  SCENE_IR_V2_MAX_TOTAL_MESH_FACES,
-  SCENE_IR_V2_MAX_TOTAL_MESH_VERTICES,
   SCENE_IR_V2_VERSION,
   V2_ANIMATION_OPS,
   V2_SHAPE_OPS,
-  estimatePrimitiveVertices,
   fail,
   isRecord,
   type SceneV2Op,
@@ -29,18 +25,11 @@ export function validateModelSceneIrV2(input: unknown): SceneIrV2Validation {
     return fail("version-mismatch", `未知 Scene IR 版本 ${String(input.version)}`);
   }
   if (!Array.isArray(input.ops)) return fail("ops-not-array", "ops 必须是数组");
-  if (input.ops.length > SCENE_IR_V2_MAX_OPS) {
-    return fail("too-many-ops", `op 数量 ${input.ops.length} 超过上限 ${SCENE_IR_V2_MAX_OPS}`);
-  }
 
   const ops: SceneV2Op[] = [];
   const shapeIds = new Set<string>();
   const materialIds = new Set<string>();
   const parentOf = new Map<string, string | null>();
-  const depthOf = new Map<string, number>();
-  let totalMeshVertices = 0;
-  let totalMeshFaces = 0;
-  let estimatedVertices = 0;
 
   for (let index = 0; index < input.ops.length; index += 1) {
     const raw = input.ops[index];
@@ -52,9 +41,6 @@ export function validateModelSceneIrV2(input: unknown): SceneIrV2Validation {
       const material = readMaterial(raw, index, materialIds);
       if (!material.ok) return material;
       materialIds.add(material.value.id);
-      if (materialIds.size > SCENE_IR_V2_MAX_MATERIALS) {
-        return fail("render-budget-exceeded", `material 数量超过上限 ${SCENE_IR_V2_MAX_MATERIALS}`);
-      }
       ops.push(material.value);
       continue;
     }
@@ -73,34 +59,8 @@ export function validateModelSceneIrV2(input: unknown): SceneIrV2Validation {
 
     shapeIds.add(op.id);
     parentOf.set(op.id, op.parent);
-    const depth = op.parent === null ? 1 : (depthOf.get(op.parent) ?? 1) + 1;
-    if (depth > SCENE_IR_V2_MAX_HIERARCHY_DEPTH) {
-      return fail(
-        "hierarchy-too-deep",
-        `对象 ${op.id} 的层级深度 ${depth} 超过上限 ${SCENE_IR_V2_MAX_HIERARCHY_DEPTH}`
-      );
-    }
-    depthOf.set(op.id, depth);
+    // 层级深度不再是应用额度；无环与 parent 先出现由下面的环检测与 readShape 保证。
 
-    if (op.t === "mesh") {
-      totalMeshVertices += op.vertices.length;
-      totalMeshFaces += op.faces.length;
-      if (totalMeshVertices > SCENE_IR_V2_MAX_TOTAL_MESH_VERTICES) {
-        return fail("scene-too-large", `累计 mesh 顶点数超过上限 ${SCENE_IR_V2_MAX_TOTAL_MESH_VERTICES}`);
-      }
-      if (totalMeshFaces > SCENE_IR_V2_MAX_TOTAL_MESH_FACES) {
-        return fail("scene-too-large", `累计 mesh 面数超过上限 ${SCENE_IR_V2_MAX_TOTAL_MESH_FACES}`);
-      }
-    }
-    if (op.t !== "group") {
-      estimatedVertices += estimatePrimitiveVertices(op);
-      if (estimatedVertices > SCENE_IR_V2_MAX_ESTIMATED_VERTICES) {
-        return fail(
-          "render-budget-exceeded",
-          `估算渲染顶点 ${estimatedVertices} 超过上限 ${SCENE_IR_V2_MAX_ESTIMATED_VERTICES}`
-        );
-      }
-    }
     ops.push(op);
   }
 

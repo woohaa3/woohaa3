@@ -8,7 +8,7 @@
  * 这些是**非渲染**检查：不采集帧率/GPU/截图，只验证隔离执行与语义记录行为。
  */
 import { describe, expect, it } from "vitest";
-import { CANVAS_SCRIPT_GUIDE_EXAMPLE, CANVAS_SCRIPT_LIMITS, canvasScriptSubmissionHash } from "@woohaa3/contracts";
+import { CANVAS_SCRIPT_GUIDE_EXAMPLE, canvasScriptSubmissionHash } from "@woohaa3/contracts";
 import { CanvasScriptRecorder } from "./recorder.js";
 import { CanvasScriptConcurrencyGate } from "./availability.js";
 import { canvasScriptPrelude } from "./prelude.js";
@@ -23,9 +23,7 @@ async function record(source: string, overrides: Partial<Parameters<CanvasScript
   return recorder().record({
     source,
     nodeKinds: KINDS,
-    promptMaxChars: 8000,
     positionAbsMax: 1_000_000,
-    deadlineMs: Date.now() + CANVAS_SCRIPT_LIMITS.executionTimeoutMs,
     ...overrides
   });
 }
@@ -231,19 +229,19 @@ describe("宿主隔离与动态执行阻断（任务 2.2）", () => {
   });
 });
 
-describe("预算与并发门禁（任务 2.4）", () => {
+describe("执行边界与观察（任务 2.4 / 6.1）", () => {
   it("无限循环在时间预算内终止", async () => {
     const outcome = await record(`while (true) {}`, { deadlineMs: Date.now() + 300 });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(["script-timeout", "script-runtime-error"]).toContain(outcome.error.code);
   }, 15_000);
 
-  it("短脚本展开超过操作数上限被拒绝", async () => {
+  it("短脚本展开大量操作仍完整记录（任务 5.1）", async () => {
+    // 原 256 操作 / 4096 API 调用额度已删除：短脚本通过循环生成的合法计划完整记录。
     const outcome = await record(`for (let i = 0; i < 1000; i++) { canvas.node("text", { key: "n" + i }); }`);
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.error.code).toBe("script-limit-exceeded");
-  }, 15_000);
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) expect(outcome.operations).toHaveLength(1000);
+  }, 30_000);
 
   it("内存耗尽返回内存预算错误", async () => {
     const outcome = await record(
@@ -254,32 +252,33 @@ describe("预算与并发门禁（任务 2.4）", () => {
     if (!outcome.ok) expect(["script-memory-limit", "script-timeout", "script-runtime-error"]).toContain(outcome.error.code);
   }, 15_000);
 
-  it("源码字节超限在记录阶段拒绝", async () => {
-    const outcome = await record("x".repeat(CANVAS_SCRIPT_LIMITS.sourceMaxBytes + 1));
+  it("大源码不再按字节上限拒绝（任务 5.1）", async () => {
+    // 原 128 KiB 源码门禁已删除：超长但仍合法的脚本体正常进入记录阶段。
+    const padding = "// " + "x".repeat(200_000) + "\n";
+    const outcome = await record(`${padding}canvas.node("text", { key: "t" });`);
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("并发执行不再按数量拒绝（任务 6.1）", () => {
+    const gate = new CanvasScriptConcurrencyGate();
+    const slots = Array.from({ length: 40 }, (_value, index) => gate.acquire(`p-${index}`));
+    // 任何数量都允许执行，只做观察性计数。
+    expect(slots.every((slot) => slot.allowed)).toBe(true);
+    expect(gate.activeCount).toBe(40);
+    for (const slot of slots) slot.release();
+    expect(gate.activeCount).toBe(0);
+  });
+
+  it("外部取消可从执行器外终止长时间脚本（任务 6.1）", async () => {
+    const controller = new AbortController();
+    const pending = record("for (;;) { /* spin */ }", { signal: controller.signal });
+    // 让 realm 真正起来后取消（否则可能在 worker 启动前就结束）。
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    controller.abort();
+    const outcome = await pending;
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error.code).toBe("script-limit-exceeded");
-  });
-
-  it("并发门禁：超过 per-principal 上限返回 busy", () => {
-    const gate = new CanvasScriptConcurrencyGate({ maxConcurrentPerPrincipal: 1, maxConcurrentGlobal: 8, maxQueueDepth: 4 });
-    const first = gate.acquire("p1");
-    expect(first.allowed).toBe(true);
-    const second = gate.acquire("p1");
-    expect(second.allowed).toBe(false);
-    if (!second.allowed) expect(second.code).toBe("busy");
-    if (first.allowed) first.release();
-    // 释放后普通请求仍可取得名额（不影响其他读写）。
-    expect(gate.acquire("p1").allowed).toBe(true);
-  });
-
-  it("并发门禁：全局上限与排队上限", () => {
-    const gate = new CanvasScriptConcurrencyGate({ maxConcurrentPerPrincipal: 10, maxConcurrentGlobal: 1, maxQueueDepth: 1 });
-    expect(gate.acquire("a").allowed).toBe(true);
-    expect(gate.acquire("b").allowed).toBe(false);
-    const queued = new CanvasScriptConcurrencyGate({ maxConcurrentPerPrincipal: 10, maxConcurrentGlobal: 1, maxQueueDepth: 0 });
-    expect(queued.acquire("a").allowed).toBe(true);
-    expect(queued.acquire("b").allowed).toBe(false);
-  });
+    if (!outcome.ok) expect(["cancelled", "script-timeout", "script-runtime-error"]).toContain(outcome.error.code);
+  }, 20_000);
 });
 
 describe("双 realm 确定性与诊断（任务 2.5）", () => {
@@ -318,14 +317,14 @@ describe("prelude 事实源（任务 2.4）", () => {
   it("prelude 记录状态读取器返回严格 JSON", () => {
     const source = canvasScriptPrelude({
       nodeKinds: KINDS,
-      maxOperations: 256,
-      maxApiCalls: 4096,
-      promptMaxChars: 8000,
       textMaxChars: 8000,
       positionAbsMax: 1_000_000
     });
     expect(source).toContain("__woohaaCanvasScriptState");
-    expect(source).toContain("MAX_OPS = 256");
+    // 任务 5.1：prelude 不再包含操作数/API 调用额度常量。
+    expect(source).not.toContain("MAX_OPS");
+    expect(source).not.toContain("MAX_API_CALLS");
+    expect(source).not.toContain("PROMPT_MAX");
     // 动态执行加固顺序：先断 constructor 再删 Function。
     expect(source.indexOf("Function.prototype")).toBeLessThan(source.indexOf('"Function"'));
   });

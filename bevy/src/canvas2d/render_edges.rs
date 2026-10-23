@@ -19,6 +19,10 @@ use super::layout::{
     EDGE_DELETE_BUTTON_GAP, EDGE_DELETE_BUTTON_SIZE, EDGE_LABEL_HEIGHT, EDGE_LABEL_WIDTH, hex,
     port, shortened,
 };
+use super::text_presentation::LogicalText;
+
+/// 连线标签的逻辑字号（世界单位）。
+const EDGE_LABEL_FONT: f32 = 11.0;
 
 /// 绘制全部边、边标签、悬停删除按钮与草稿线。
 ///
@@ -86,14 +90,16 @@ pub(super) fn draw_block(
                 );
                 let entity = commands
                     .spawn((
-                        Text2d::new(shortened(&edge.label, 96., 11.)),
+                        Text2d::new(shortened(&edge.label, 96., EDGE_LABEL_FONT)),
                         TextFont {
                             font: font.clone().into(),
-                            font_size: FontSize::Px(11.),
+                            font_size: FontSize::Px(EDGE_LABEL_FONT),
                             ..default()
                         },
                         TextColor(hex(theme.token_u32("canvasEdgeLabelText"))),
                         Transform::from_xyz(center.x, -center.y, 2.1 + depth_offset),
+                        // 连线标签随世界缩放：栅格表示由共享文字策略按相机/DPR 派生。
+                        LogicalText::world(EDGE_LABEL_FONT, None),
                     ))
                     .id();
                 labels.push(entity);

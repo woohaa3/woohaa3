@@ -19,8 +19,8 @@ it("真实 MCP 在只有地面的片场生成独立模型；原子拒绝非法�
   const model = new ModelMcpService({ resolveRoom: async () => room });
   const filmSet = filmSetMcpRuntime.createNodeService({ resolveRoom: async () => room });
   const grants = createToolGrantRegistry();
-  const baseGrant = { canvasIds: [canvasId], nodeIds: ["scene"], tools: ["get_model_node", "submit_film_set"], maxCalls: 100, expiresAt: Date.now() + 60_000 };
-  for (const [token, scope] of [["whole", {}], ["item", { itemId: "table" }], ["clip", { clipId: "shot" }], ["camera", { cameraId: "camera" }]] as const) grants.issue({ ...baseGrant, token, ...scope });
+  const baseGrant = { canvasIds: [canvasId], nodeIds: ["scene"], tools: ["get_model_node", "submit_film_set"] };
+  for (const [token, scope] of [["whole", {}], ["item", { itemId: "table" }], ["clip", { clipId: "shot" }], ["camera", { cameraId: "camera" }]] as const) grants.issue({ ...baseGrant, token, workId: `w-${token}`, ...scope });
   const handler = createModelMcpHttpHandler({ service: modelMcpServiceToClient(model, { commitAnimation: input => filmSet.commitAnimation(input) }), toolGrant: { authorize: input => grants.authorize(input) } });
   const server = http.createServer((req, res) => { void handler.handle(req, res); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));

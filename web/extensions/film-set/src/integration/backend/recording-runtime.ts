@@ -38,10 +38,6 @@ export function createFilmSetRecordingRuntime(options: FilmSetRecordingRuntimeOp
         sourceIncarnation: input.sourceIncarnation,
         ...(input.readOnly !== undefined ? { readOnly: input.readOnly } : {}),
         ...(input.hasPendingDraft !== undefined ? { hasPendingDraft: input.hasPendingDraft } : {}),
-        ...(input.maxResourceBytes !== undefined ? { maxResourceBytes: input.maxResourceBytes } : {}),
-        ...(input.maxTotalResourceBytes !== undefined
-          ? { maxTotalResourceBytes: input.maxTotalResourceBytes }
-          : {})
       });
       if (!("ok" in result) || !result.ok) return result as ContentRecordingFreezeResult;
       // 素材必须真实可读：缺源在冻结之后立刻失败，不把问题推给 worker。

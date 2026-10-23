@@ -79,9 +79,11 @@ describe("model batch MCP", () => {
     expect(
       byName.get("submit_model_scripts").inputSchema.additionalProperties,
     ).toBe(false);
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.3：批次 64 项上限已删除，
+    // schema 不再声明 maxItems（完整批次由实际资源调度并一次原子保存）。
     expect(
       byName.get("submit_model_scripts").inputSchema.properties.items.maxItems,
-    ).toBe(64);
+    ).toBeUndefined();
   });
   it("forwards shared code, item preconditions and camera sets without per-node calls", async () => {
     const getModelNodes = vi

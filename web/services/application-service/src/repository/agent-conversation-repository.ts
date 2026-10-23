@@ -66,12 +66,12 @@ export type AgentConversationStore = {
   findTurnByRun(owner: string, runId: string): ConversationTurnRecord | undefined;
   getTurn(turnId: string): ConversationTurnRecord | undefined;
   listTurns(conversationId: string, limit: number): ConversationTurnRecord[];
-  /** 会话当前活动回合数（单会话最多一个 active turn 的门禁依据）。 */
+  /** 最新回合（按 created_at 倒序第一条）；用于派生会话整体状态，不受分页影响。 */
+  latestTurn(conversationId: string): ConversationTurnRecord | undefined;
+  /** 会话回合总数（不截断）。 */
+  turnCount(conversationId: string): number;
+  /** 会话当前活动回合数（只用于诊断/展示，不再是受理门禁）。 */
   activeTurnCount(conversationId: string): number;
-  /** owner 在途回合数（有界并发预算）。 */
-  ownerActiveTurnCount(owner: string): number;
-  /** owner/global 在途回合数（有界并发预算）。 */
-  globalActiveTurnCount(): number;
   createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage">): void;
   updateTurn(turnId: string, patch: Partial<Omit<ConversationTurnRecord, "turnId" | "conversationId" | "owner" | "canvasId" | "requestId" | "createdAt">>, now: string): void;
   appendMessage(message: ConversationMessageRecord): void;
@@ -82,6 +82,17 @@ export type AgentConversationStore = {
    */
   updateMessage(messageId: string, patch: { content: string; truncated: number }): void;
   listMessages(conversationId: string, limit: number): ConversationMessageRecord[];
+  /**
+   * 读取消息页（change: 2026-10-22-remove-agent-execution-limits，任务 4.1）。
+   *
+   * `beforeSequence` 为继续读取更早历史的游标（不含）；缺省读取最新一页。返回按 sequence 升序，
+   * 长度不超过 `limit`。分页只限制单次传输量，不丢弃更早的合法历史。
+   */
+  listMessagesBefore(conversationId: string, beforeSequence: number | null, limit: number): ConversationMessageRecord[];
+  /** 会话当前最大消息 sequence（缺省 0）；用于分配下一条消息的真实顺序。 */
+  maxMessageSequence(conversationId: string): number;
+  /** 读取回合页（`offset` 为从最早起跳过的回合数）。 */
+  listTurnsPage(conversationId: string, offset: number, limit: number): ConversationTurnRecord[];
   appendEvent(event: Omit<ConversationEventRecord, "sequence">): number;
   listEvents(conversationId: string, after: number, limit: number): ConversationEventRecord[];
   maxEventSequence(conversationId: string): number;
@@ -140,6 +151,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
         connection_adapter_id TEXT,
         connection_config_revision INTEGER,
         connection_credential_epoch INTEGER,
+        history_sequence INTEGER,
         assistant_text TEXT,
         run_id TEXT,
         task_id TEXT,
@@ -199,6 +211,8 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     this.ensureColumn("agent_conversation_turns", "connection_adapter_id", "TEXT");
     this.ensureColumn("agent_conversation_turns", "connection_config_revision", "INTEGER");
     this.ensureColumn("agent_conversation_turns", "connection_credential_epoch", "INTEGER");
+    // 受理时冻结的历史基准（change: 2026-10-22-remove-agent-execution-limits，任务 3.1）。
+    this.ensureColumn("agent_conversation_turns", "history_sequence", "INTEGER");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target ON agent_conversations(owner, canvas_id, node_id, updated_at DESC);");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target_connection ON agent_conversations(owner, canvas_id, node_id, connection_id, updated_at DESC);");
   }
@@ -298,6 +312,20 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     return rows.map(turnFromRow);
   }
 
+  latestTurn(conversationId: string): ConversationTurnRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM agent_conversation_turns WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(conversationId) as TurnRow | undefined;
+    return row ? turnFromRow(row) : undefined;
+  }
+
+  turnCount(conversationId: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE conversation_id = ?")
+      .get(conversationId) as { count: number };
+    return row.count;
+  }
+
   prepareConnectionMigration(owner: string, connectionId: string): boolean {
     return this.dbMigration(owner, connectionId);
   }
@@ -319,27 +347,13 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     return row.count;
   }
 
-  ownerActiveTurnCount(owner: string): number {
-    const row = this.db
-      .prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE owner = ? AND status IN ('queued','running','committing')")
-      .get(owner) as { count: number };
-    return row.count;
-  }
-
-  globalActiveTurnCount(): number {
-    const row = this.db
-      .prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE status IN ('queued','running','committing')")
-      .get() as { count: number };
-    return row.count;
-  }
-
   createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage">): void {
     this.db
       .prepare(
         `INSERT INTO agent_conversation_turns
            (turn_id, conversation_id, owner, canvas_id, request_id, action, status, stage, input_hash, target_json, intent_json,
-            connection_id, connection_adapter_id, connection_config_revision, connection_credential_epoch, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            connection_id, connection_adapter_id, connection_config_revision, connection_credential_epoch, history_sequence, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         turn.turnId,
@@ -357,6 +371,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
         turn.connectionAdapterId,
         turn.connectionConfigRevision,
         turn.connectionCredentialEpoch,
+        turn.historySequence,
         turn.createdAt,
         turn.updatedAt
       );
@@ -378,7 +393,8 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       connectionId: "connection_id",
       connectionAdapterId: "connection_adapter_id",
       connectionConfigRevision: "connection_config_revision",
-      connectionCredentialEpoch: "connection_credential_epoch"
+      connectionCredentialEpoch: "connection_credential_epoch",
+      historySequence: "history_sequence"
     };
     const sets: string[] = ["updated_at = ?"];
     const values: Array<string | number | null> = [now];
@@ -423,6 +439,31 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       .prepare("SELECT * FROM agent_conversation_messages WHERE conversation_id = ? ORDER BY sequence ASC LIMIT ?")
       .all(conversationId, limit) as MessageRow[];
     return rows.map(messageFromRow);
+  }
+
+  listMessagesBefore(conversationId: string, beforeSequence: number | null, limit: number): ConversationMessageRecord[] {
+    const rows = beforeSequence === null
+      ? this.db
+          .prepare("SELECT * FROM (SELECT * FROM agent_conversation_messages WHERE conversation_id = ? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence ASC")
+          .all(conversationId, limit) as MessageRow[]
+      : this.db
+          .prepare("SELECT * FROM (SELECT * FROM agent_conversation_messages WHERE conversation_id = ? AND sequence < ? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence ASC")
+          .all(conversationId, beforeSequence, limit) as MessageRow[];
+    return rows.map(messageFromRow);
+  }
+
+  maxMessageSequence(conversationId: string): number {
+    const row = this.db
+      .prepare("SELECT COALESCE(MAX(sequence), 0) AS max FROM agent_conversation_messages WHERE conversation_id = ?")
+      .get(conversationId) as { max: number };
+    return row.max;
+  }
+
+  listTurnsPage(conversationId: string, offset: number, limit: number): ConversationTurnRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM agent_conversation_turns WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?")
+      .all(conversationId, limit, Math.max(0, offset)) as TurnRow[];
+    return rows.map(turnFromRow);
   }
 
   appendEvent(event: Omit<ConversationEventRecord, "sequence">): number {

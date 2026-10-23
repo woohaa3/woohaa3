@@ -9,7 +9,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  MAX_ARTIFACT_BYTES,
   compareArtifact,
   probeArtifact,
   sha256Hex,
@@ -163,9 +162,12 @@ describe("probeArtifact", () => {
     expect(probeArtifact(bytes)).toMatchObject({ code: "recording-artifact-has-audio" });
   });
 
-  it("rejects oversized artifacts before parsing", () => {
-    const huge = new Uint8Array(MAX_ARTIFACT_BYTES + 1);
-    expect(probeArtifact(huge)).toMatchObject({ code: "recording-artifact-too-large" });
+  it("has no artifact size quota (task 7.5)", () => {
+    // change: 2026-10-22-remove-agent-execution-limits：原 256 MiB 成片门禁已删除。
+    // 大字节不再是拒绝理由，结构校验仍按真实内容报告。
+    const large = new Uint8Array(300 * 1024 * 1024);
+    expect(probeArtifact(large)).not.toMatchObject({ code: "recording-artifact-too-large" });
+    expect(probeArtifact(large)).toMatchObject({ code: "recording-artifact-not-mp4" });
   });
 
   it("rejects a non-H.264 sample description", () => {
@@ -218,8 +220,10 @@ describe("compareArtifact", () => {
     expect(compareArtifact(probe, { durationSeconds: 4 - 1 / 60, frameRate: 30 })).toEqual({ ok: true });
   });
 
-  it("enforces the 256 MiB cap", () => {
-    expect(compareArtifact(probe, { maxBytes: 100 })).toMatchObject({ code: "recording-artifact-too-large" });
+  it("has no artifact size cap (task 7.5)", () => {
+    // change: 2026-10-22-remove-agent-execution-limits：`maxBytes` 参数与 256 MiB 门禁已删除。
+    expect(compareArtifact(probe, {})).toEqual({ ok: true });
+    expect("maxBytes" in probe).toBe(false);
   });
 });
 

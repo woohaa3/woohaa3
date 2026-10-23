@@ -11,7 +11,7 @@ const DELEGATION: ApplicationUserDelegation = { subject: "user-a", authLevel: "a
 
 it("does not revoke another owner's group grant with a colliding request identity", () => {
   const registry = createToolGrantRegistry();
-  const grant = { token: "a", workId: "same-request", canvasIds: ["canvas"], nodeIds: [], tools: ["get_canvas_graph"], maxCalls: 24, expiresAt: Date.now() + 60_000, groupScope: { canvasId: "canvas", rootGroupId: "root", scopeEpoch: 0 } };
+  const grant = { token: "a", workId: "same-request", canvasIds: ["canvas"], nodeIds: [], tools: ["get_canvas_graph"], groupScope: { canvasId: "canvas", rootGroupId: "root", scopeEpoch: 0 } };
   registry.issue(grant, "user-a"); registry.issue({ ...grant, token: "b" }, "user-b");
   registry.revoke("same-request");
   expect(registry.verify("a")).not.toBeNull();
@@ -95,31 +95,33 @@ describe("进程内 authoring 适配器", () => {
     if (resolved.ok) expect(resolved.url).toBe("/media/k1");
   });
 
-  it("工具 grant 绑定目标、过期与预算", async () => {
+  it("工具 grant 绑定目标与撤销状态，不设调用额度或固定时钟到期（任务 2.1）", async () => {
     let now = 1_000;
-    const registry = createToolGrantRegistry(() => now);
-    registry.issue({ token: "t1", canvasIds: ["c1"], nodeIds: ["n1"], tools: ["get_model_node"], maxCalls: 2, expiresAt: 2_000, ...( { workId: "w1" } as object) } as never);
+    const registry = createToolGrantRegistry();
+    registry.issue({ token: "t1", canvasIds: ["c1"], nodeIds: ["n1"], tools: ["get_model_node"], workId: "w1" });
     expect(registry.verify("t1")).not.toBeNull();
-    expect(registry.consume("t1")).toBe(true);
-    expect(registry.consume("t1")).toBe(true);
-    expect(registry.consume("t1")).toBe(false); // 预算耗尽
-    now = 3_000;
-    expect(registry.verify("t1")).toBeNull(); // 过期
+    // 推进时钟超过原 30 分钟有效期：委托仍然有效（寿命由活动执行决定）。
+    now += 31 * 60 * 1000;
+    expect(registry.verify("t1")).not.toBeNull();
+    // 超过原 24/40 次调用后仍然授权。
+    for (let index = 0; index < 200; index += 1) {
+      expect(registry.authorize({ token: "t1", tool: "get_model_node", canvasId: "c1", nodeId: "n1" })).toEqual({ ok: true });
+    }
+    // 撤销后立即失效。
     registry.revoke("w1");
+    expect(registry.verify("t1")).toBeNull();
+    expect(registry.authorize({ token: "t1", tool: "get_model_node", canvasId: "c1", nodeId: "n1" })).toEqual({ ok: false, reason: "unknown-grant" });
   });
 
-  it("工具入口 authorize 强制工具/画布/节点范围与预算（任务 3.6）", () => {
-    let now = 1_000;
-    const registry = createToolGrantRegistry(() => now);
+  it("工具入口 authorize 强制工具/画布/节点范围，失败不产生任何副作用（任务 3.6）", () => {
+    const registry = createToolGrantRegistry();
     registry.issue({
       token: "g1",
       canvasIds: ["c1"],
       nodeIds: ["n1"],
       tools: ["submit_model_script", "set_model_camera"],
-      maxCalls: 2,
-      expiresAt: 2_000,
       workId: "w1"
-    } as never);
+    });
 
     // 允许的工具与目标。
     expect(registry.authorize({ token: "g1", tool: "submit_model_script", canvasId: "c1", nodeId: "n1" })).toEqual({ ok: true });
@@ -128,38 +130,37 @@ describe("进程内 authoring 适配器", () => {
     // 越界画布 / 节点。
     expect(registry.authorize({ token: "g1", tool: "submit_model_script", canvasId: "c2", nodeId: "n1" })).toEqual({ ok: false, reason: "canvas-not-allowed" });
     expect(registry.authorize({ token: "g1", tool: "submit_model_script", canvasId: "c1", nodeId: "n2" })).toEqual({ ok: false, reason: "node-not-allowed" });
-    // 预算只被成功调用消耗：前两次成功用尽。
-    expect(registry.authorize({ token: "g1", tool: "set_model_camera", canvasId: "c1", nodeId: "n1" })).toEqual({ ok: true });
-    expect(registry.authorize({ token: "g1", tool: "set_model_camera", canvasId: "c1", nodeId: "n1" })).toEqual({ ok: false, reason: "budget-exhausted" });
+    // 合法调用没有可耗尽额度（超过原 40 次仍成功）。
+    for (let index = 0; index < 120; index += 1) {
+      expect(registry.authorize({ token: "g1", tool: "set_model_camera", canvasId: "c1", nodeId: "n1" })).toEqual({ ok: true });
+    }
 
-    // 未知 token / 过期。
+    // 未知 token。
     expect(registry.authorize({ token: "nope", tool: "x" })).toEqual({ ok: false, reason: "unknown-grant" });
-    registry.issue({ token: "g2", canvasIds: ["c1"], nodeIds: [], tools: [], maxCalls: 5, expiresAt: 1_500, workId: "w2" } as never);
-    now = 2_000;
-    expect(registry.authorize({ token: "g2", tool: "whatever", canvasId: "c1" })).toEqual({ ok: false, reason: "expired" });
 
     // 空 tools 表示允许任意工具；空 nodeIds 表示任意节点。
-    registry.issue({ token: "g3", canvasIds: [], nodeIds: [], tools: [], maxCalls: 1, expiresAt: 9_000, workId: "w3" } as never);
+    registry.issue({ token: "g3", canvasIds: [], nodeIds: [], tools: [], workId: "w3" });
     expect(registry.authorize({ token: "g3", tool: "any_tool", canvasId: "cX", nodeId: "nY" })).toEqual({ ok: true });
   });
   it("captured camera grants reject other cameras and unrelated writes", () => {
-    const registry = createToolGrantRegistry(() => 1000);
-    registry.issue({ token: "camera", canvasIds: ["c"], nodeIds: ["n"], tools: ["update_model_camera"], cameraId: "scene-camera", maxCalls: 1, expiresAt: 2000 });
+    const registry = createToolGrantRegistry();
+    registry.issue({ token: "camera", canvasIds: ["c"], nodeIds: ["n"], tools: ["update_model_camera"], cameraId: "scene-camera", workId: "w-camera" });
     const call = { token: "camera", tool: "update_model_camera", canvasId: "c", nodeId: "n", cameraId: "scene-camera" };
     expect(registry.authorize({ ...call, cameraId: "other" })).toEqual({ ok: false, reason: "camera-not-allowed" });
     expect(registry.authorize({ ...call, cameraId: undefined })).toEqual({ ok: false, reason: "camera-not-allowed" });
     expect(registry.authorize({ ...call, tool: "submit_model_script" }).ok).toBe(false);
     expect(registry.authorize(call)).toEqual({ ok: true });
   });
-  it("captured clip and actor grants reject switched targets without consuming valid-call budget", () => {
-    const registry = createToolGrantRegistry(() => 1000);
-    registry.issue({ token: "actor", canvasIds: ["c"], nodeIds: ["n"], tools: ["mutate_film_set_clip"], clipId: "jump", itemId: "hero", maxCalls: 1, expiresAt: 2000 });
+  it("captured clip and actor grants reject switched targets and stay usable afterwards", () => {
+    const registry = createToolGrantRegistry();
+    registry.issue({ token: "actor", canvasIds: ["c"], nodeIds: ["n"], tools: ["mutate_film_set_clip"], clipId: "jump", itemId: "hero", workId: "w-actor" });
     const call = { token: "actor", tool: "mutate_film_set_clip", canvasId: "c", nodeId: "n", clipId: "jump", itemId: "hero" };
     expect(registry.authorize({ ...call, clipId: "walk" })).toEqual({ ok: false, reason: "clip-not-allowed" });
     expect(registry.authorize({ ...call, itemId: "other" })).toEqual({ ok: false, reason: "item-not-allowed" });
     expect(registry.authorize({ ...call, itemId: undefined })).toEqual({ ok: false, reason: "item-not-allowed" });
+    // 范围错误不消耗任何额度：正确目标继续可用，且没有次数上限。
     expect(registry.authorize(call)).toEqual({ ok: true });
-    expect(registry.authorize(call)).toEqual({ ok: false, reason: "budget-exhausted" });
+    for (let index = 0; index < 60; index += 1) expect(registry.authorize(call)).toEqual({ ok: true });
   });
 
 });

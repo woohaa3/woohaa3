@@ -11,7 +11,6 @@
  */
 import {
   compileAgentPlan as compileScopedPlan,
-  AGENT_CANVAS_LIMITS,
   defaultAgentNodeData,
   findAgentNodeDescriptor,
   type AgentCanvasError,
@@ -159,9 +158,6 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
       case "set_prompt": {
         const target = resolveEntityRef(operation.target, declaredRefs, snapshot, operationIndex, "target");
         if (!target.ok) return target;
-        if (operation.prompt.length > AGENT_CANVAS_LIMITS.promptMaxChars) {
-          return fail(operationIndex, "prompt", "limit-exceeded", `prompt 超过 ${AGENT_CANVAS_LIMITS.promptMaxChars} 字上限`);
-        }
         commands.push({ type: "nodeData.patch", nodeId: target.nodeId, value: { prompt: operation.prompt } });
         collectPrecondition(operation.if, operationIndex, preconditions);
         normalized.push(operation);

@@ -14,7 +14,7 @@ import { createInMemoryDocumentStore, createInMemorySecretStore } from "./test-d
 
 const EXT_ID = "test-agent";
 
-function setup(runtime?: import("@woohaa3/contracts").AgentConnectionRuntime) {
+function setup(runtime?: import("@woohaa3/contracts").AgentConnectionRuntime, displayName?: string) {
   const documents = createInMemoryDocumentStore([EXT_ID]);
   const service = createConnectionService({ documents: documents.forExtension(EXT_ID)!, secrets: createInMemorySecretStore(), createId: () => "conn-1" });
   const provider = createConnectionProvider({
@@ -24,6 +24,7 @@ function setup(runtime?: import("@woohaa3/contracts").AgentConnectionRuntime) {
     descriptors: {
       "openai-responses": {
         describe: ({ credentialConfigured }) => ({
+          ...(displayName === undefined ? {} : { name: displayName }),
           ...(runtime ? { runtime } : {}),
           capabilities: connectionCapabilities({ discussion: true, tools: true, imageInput: true, cancel: true }),
           models: [modelView({ id: "gpt-4o", source: "remote-catalog", accountAuthorized: true })],
@@ -42,6 +43,16 @@ function setup(runtime?: import("@woohaa3/contracts").AgentConnectionRuntime) {
 }
 
 describe("连接发现端口（任务 2.1）", () => {
+  it("列表与详情使用公开名称，不改写持久名称或连接身份", async () => {
+    const { service, provider } = setup(undefined, "本地 ChatGPT");
+    const created = await service.create("user-a", { adapterId: "openai-responses", name: "旧默认名称", runCategory: "http-sdk", authMode: "api-key" });
+    if (!created.ok) throw new Error("create failed");
+    const connectionId = created.value.connectionId;
+    expect(await provider.listConnections({ owner: "user-a" })).toEqual([expect.objectContaining({ connectionId, name: "本地 ChatGPT" })]);
+    expect(await provider.getConnection!({ owner: "user-a", connectionId })).toMatchObject({ connectionId, name: "本地 ChatGPT" });
+    expect(await service.get("user-a", connectionId)).toMatchObject({ name: "旧默认名称", configRevision: 1 });
+  });
+
   it("只返回本 owner 的连接；未安装/无 capability 时不注册（此处以空列表体现）", async () => {
     const { service, provider } = setup();
     const created = await service.create("user-a", { adapterId: "openai-responses", name: "OpenAI", runCategory: "http-sdk", authMode: "api-key" });

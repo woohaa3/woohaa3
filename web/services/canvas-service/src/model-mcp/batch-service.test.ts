@@ -6,7 +6,6 @@ import {
   createEmptyWoohaa3ServerCanvas,
   createModel3DNodeData,
   model3DNodeDataFields,
-  MODEL_SCRIPT_BATCH_LIMITS,
   type ModelScriptBatchRequest,
   type CanvasNodeData,
 } from "@woohaa3/contracts";
@@ -290,7 +289,7 @@ describe("batch model authoring", () => {
     }).submitScripts(request, context);
     expect(retry).toEqual({ ...first, duplicate: true });
   });
-  it("rejects duplicate targets, unknown fields, expanded source overflow and invalid node kinds", async () => {
+  it("rejects duplicate targets, unknown fields and invalid node kinds; no size or count quotas", async () => {
     const { room, service, request } = await fixture();
     const before = exported(room);
     expect(
@@ -305,28 +304,26 @@ describe("batch model authoring", () => {
         context,
       ),
     ).toMatchObject({ ok: false, code: "malformed-request" });
-    expect(
-      await service.submitScripts(
-        {
-          ...request,
-          commonSource: "x".repeat(190_000),
-          items: Array.from({ length: 6 }, (_, i) => ({
-            nodeId: "n" + i,
-            source: "x",
-          })),
-        },
-        context,
-      ),
-    ).toMatchObject({ ok: false, code: "limit-exceeded" });
-    expect(
-      await service.getModelNodes({
-        canvasId: "batch",
-        nodeIds: Array.from(
-          { length: MODEL_SCRIPT_BATCH_LIMITS.maxNodes + 1 },
-          (_, i) => "n" + i,
-        ),
-      }),
-    ).toMatchObject({ ok: false });
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.3：原展开源码 1 MiB 与
+    // 批次 64 项额度已删除；数量/字节不再产生 limit-exceeded（这里因目标节点不存在而失败）。
+    const bigBatch = await service.submitScripts(
+      {
+        ...request,
+        commonSource: "x".repeat(190_000),
+        items: Array.from({ length: 6 }, (_, i) => ({
+          nodeId: "n" + i,
+          source: "x",
+        })),
+      },
+      context,
+    );
+    expect(bigBatch).not.toMatchObject({ ok: false, code: "limit-exceeded" });
+    // 读取不再按模型数量拒绝（未知节点仍明确报错，但不返回数量额度错误）。
+    const wide = await service.getModelNodes({
+      canvasId: "batch",
+      nodeIds: Array.from({ length: 70 }, (_, i) => "n" + i),
+    });
+    expect(wide).not.toMatchObject({ ok: false, code: "limit-exceeded" });
     request.items[1].nodeId = "missing";
     expect(await service.submitScripts(request, context)).toMatchObject({
       ok: false,

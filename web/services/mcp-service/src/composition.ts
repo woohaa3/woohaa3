@@ -9,7 +9,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH, type ModelMcpHttpHandler, type ModelMcpHttpOptions, type ModelMcpDiscoveryResult } from "./model-mcp/mcp-http.js";
 import { createCanvasMcpClient, type CanvasMcpClient } from "./downstream/canvas-client.js";
 import { createAgentCanvasClient, type AgentCanvasClient } from "./downstream/agent-canvas-client.js";
-import { AgentRateLimiter } from "./agent-authoring/limits.js";
 
 export { MODEL_MCP_HTTP_PATH };
 
@@ -117,8 +116,8 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
       : null);
   // 生产启动配置校验（任务 2.4）：非显式 loopback 时不得用 development principal 兜底。
   const agentProfile = resolveMcpAgentProfile(env, developmentPrincipalId);
-  // 速率与容量限制（任务 2.5）：进程内固定窗口，按 principal/canvas/tool 维度。
-  const agentRateLimiter = new AgentRateLimiter();
+  // change: 2026-10-22-remove-agent-execution-limits，任务 3.4：这里的进程内固定窗口限流
+  // （read 120 / write 30 / run 60 每分钟）已删除；合法 Agent 工作不再因调用频率被应用拒绝。
   const modelMcpHandler: ModelMcpHttpHandler | null =
     modelMcpEnabled && canvasClient
       ? createModelMcpHttpHandler({
@@ -132,7 +131,6 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
                 agentAuthoring: {
                   client: agentClient,
                   runAvailability: { available: true },
-                  rateLimiter: agentRateLimiter,
                   ...(developmentPrincipalId ? { principalId: developmentPrincipalId } : {}),
                   audit: (event) =>
                     log({

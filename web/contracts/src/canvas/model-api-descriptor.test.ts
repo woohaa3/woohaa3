@@ -15,7 +15,7 @@ import {
   modelPrimitiveConstraintsText,
   modelRenderBudgetText
 } from "./model-api-descriptor.js";
-import { QUALITY_VERTEX_COUNTS, SCENE_IR_V2_MAX_ESTIMATED_VERTICES } from "./scene-ir-v2/types.js";
+import { QUALITY_VERTEX_COUNTS } from "./scene-ir-v2/types.js";
 import { MODEL_SCRIPT_V2_VERSION, PREFERRED_MODEL_SCRIPT_VERSION } from "./model-script.js";
 import { SceneBuilderV2, executeModelScriptV2 } from "./model-executor-v2.js";
 
@@ -51,10 +51,12 @@ describe("model API guide", () => {
 });
 
 describe("render budget text", () => {
-  it("由 Scene IR V2 常量派生：上限与每个图元的顶点成本都在提示词里", () => {
+  it("由 Scene IR V2 常量派生：每个图元的顶点成本都在提示词里，且不声明硬上限", () => {
     const text = modelRenderBudgetText();
-    expect(MODEL_RENDER_BUDGET.maxEstimatedVertices).toBe(SCENE_IR_V2_MAX_ESTIMATED_VERTICES);
-    expect(text).toContain(String(SCENE_IR_V2_MAX_ESTIMATED_VERTICES));
+    // change: 2026-10-22-remove-agent-execution-limits，任务 6.2：总量上限已删除，
+    // 文本改为可编辑性指引而不是拒绝阈值。
+    expect(MODEL_RENDER_BUDGET).not.toHaveProperty("maxEstimatedVertices");
+    expect(text).toMatch(/not a hard limit/);
     expect(text).toContain(`box=${QUALITY_VERTEX_COUNTS.box}`);
     expect(text).toContain(`cylinder=${QUALITY_VERTEX_COUNTS.cylinder}`);
     expect(text).toContain(`sphere=${QUALITY_VERTEX_COUNTS.sphere}`);

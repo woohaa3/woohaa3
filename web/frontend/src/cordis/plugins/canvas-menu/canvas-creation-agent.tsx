@@ -4,6 +4,7 @@ import { useService } from "../../react.js";
 import { Button } from "../../../shared/ui/Button.js";
 import { SparklesIcon } from "../../../shared/ui/icons.js";
 import { ModelSelector } from "../task-execution/execution-panel/model-selector.js";
+import { AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "../../ui/assistant-execution/model-selector.js";
 import { agentModelSelection, agentDirectoryModels } from "../task-execution/agent-model-selection.js";
 import { agentDirectory } from "../../services/agent-directory.js";
 import { rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
@@ -35,6 +36,7 @@ export default function CanvasCreationAgent(props: {
   const { connections, catalogs } = directoryState;
   const loadingMessage = namespace && !directoryState.ready ? directoryState.loadingMessage : "";
   const loading = Boolean(loadingMessage);
+  const emptyDirectory = directoryState.ready && !directoryState.loadingMessage && !directoryState.error && !connections.length;
   const [notice, setNotice] = useState("");
   const [selector, setSelector] = useState<"assistant" | "model" | null>(null);
   const alive = useRef(false);
@@ -53,7 +55,7 @@ export default function CanvasCreationAgent(props: {
   const selection = agentModelSelection(models, draft.model, draft.effort, !toolDefault);
   // 本机来源（auth-mode local-login）的账号证据只在真实执行时才可获得：创建前的 ready 只代表
   // 运行依赖已探测，不能作为拦死第一次创作的门禁；账号不可用时由本轮执行返回真实失败。
-  const blocked = !namespace ? "正在确认当前数据空间" : !props.writable ? "画布当前不可写" : !connection ? "请选择助手连接" : !supportsGroup(connection) ? "此助手尚未支持节点搭建" : !connection.ready && connection.authMode !== "local-login" ? connection.reason ?? "助手尚未就绪" : selection.missingRequiredModel ? "请选择助手模型" : selection.invalidModel ? "原模型已失效，请重新选择" : selection.invalidEffort ? "原 Variant 已失效，请重新选择" : connection.models.find(m => m.id === draft.model)?.capabilities?.tools === false ? "此模型不支持工具执行" : "";
+  const blocked = !namespace ? "正在确认当前数据空间" : !props.writable ? "画布当前不可写" : emptyDirectory ? ASSISTANT_SETUP_HINT : !connection ? "请选择助手连接" : !supportsGroup(connection) ? "此助手尚未支持节点搭建" : !connection.ready && connection.authMode !== "local-login" ? connection.reason ?? "助手尚未就绪" : selection.missingRequiredModel ? "请选择助手模型" : selection.invalidModel ? "原模型已失效，请重新选择" : selection.invalidEffort ? "原 Variant 已失效，请重新选择" : connection.models.find(m => m.id === draft.model)?.capabilities?.tools === false ? "此模型不支持工具执行" : "";
   const edit = (patch: Partial<typeof draft>) => {
     Object.assign(draft, patch); draft.version++; notifyCreationDraft(draft);
     if (patch.connectionId !== undefined || patch.model !== undefined || patch.effort !== undefined) {
@@ -104,7 +106,7 @@ export default function CanvasCreationAgent(props: {
   return <div className="canvas-create__composer">
         <div className="canvas-create__ai-heading"><SparklesIcon /><span>节点搭建</span></div>
         <div className="assistant-creation-controls">
-          <ModelSelector label="选择助手" placeholder={loading ? "正在读取助手…" : "选择助手"} model={draft.connectionId} open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} onManage={manage} disabled={loading || draft.busy || Boolean(draft.pending)} options={connections.map(c => ({ value: c.connectionId, label: c.name, disabled: !supportsGroup(c), detail: c.reason }))} onChange={connectionId => edit({ connectionId, model: "", effort: "" })} />
+          <AssistantConnectionSelector empty={emptyDirectory} loading={loading} model={draft.connectionId} open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} onManage={manage} disabled={loading || draft.busy || Boolean(draft.pending)} options={connections.map(c => ({ value: c.connectionId, label: c.name, disabled: !supportsGroup(c), detail: c.reason }))} onChange={connectionId => edit({ connectionId, model: "", effort: "" })} />
           {connection && (!toolDefault || models.length > 0) ? <ModelSelector keepOpenOnModelSelect label="选择助手模型" model={draft.model} open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={draft.busy || Boolean(draft.pending)} options={[...(toolDefault ? [{ value: "", label: "使用助手默认模型" }] : []), ...models.map(m => ({ value: m.id, label: m.label, disabled: connection.models.find(c => c.id === m.id)?.capabilities?.tools === false }))]} onChange={model => edit({ model, effort: "" })} variant={selection.supportedEfforts.length ? { value: draft.effort, options: [{ value: "", label: "默认 Variant" }, ...selection.supportedEfforts.map(value => ({ value, label: value }))], onChange: value => edit({ effort: value as AgentReasoningEffort | "" }) } : undefined} /> : null}
           <Button tone="primary" disabled={loading || draft.busy || Boolean(blocked) || !draft.prompt.trim()} onClick={() => void submit()}>{draft.busy ? "正在创建…" : draft.pending ? "重试原请求" : "创建"}</Button>
         </div>

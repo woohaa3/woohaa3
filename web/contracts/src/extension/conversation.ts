@@ -309,6 +309,10 @@ export type ConversationEvent = {
  *
  * `cursor` 是当前最大事件 sequence；`resyncRequired` 表示客户端 cursor 早于保留窗口，
  * 调用方必须丢弃本地事件缓存并以本快照为准。
+ *
+ * `nextMessageCursor`／`nextTurnCursor` 表示还有更早的合法历史可继续读取（change:
+ * 2026-10-22-remove-agent-execution-limits，任务 4.1）：分页只是单次传输片段，不是总量截断，
+ * 完整历史始终可以通过游标继续读取。
  */
 export type ConversationSnapshot = {
   conversation: ConversationSummary;
@@ -317,6 +321,10 @@ export type ConversationSnapshot = {
   events: readonly ConversationEvent[];
   cursor: number;
   resyncRequired: boolean;
+  /** 继续读取更早消息的游标（消息 sequence）；缺省表示已到起点。 */
+  nextMessageCursor?: number;
+  /** 继续读取更早回合的游标（偏移）；缺省表示已到起点。 */
+  nextTurnCursor?: number;
 };
 
 /**
@@ -478,7 +486,13 @@ export function isAgentAdapterCapabilities(value: unknown): value is AgentAdapte
 /** 解码结果：成功携带值；失败携带稳定错误码与可读原因。 */
 export type AgentConversationDecodeResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
 
-/** 稳定会话错误码（跨进程按字符串判定）。 */
+/**
+ * 稳定会话错误码（跨进程按字符串判定）。
+ *
+ * `conversation-busy` 与 `budget-exceeded` 是**历史契约码**（change:
+ * 2026-10-22-remove-agent-execution-limits，任务 3.1）：受理与执行已不再产生它们，保留只为
+ * 旧历史记录与跨版本解码继续可读，不得作为新增拒绝路径。
+ */
 export const AGENT_CONVERSATION_ERROR_CODES = [
   "malformed-request",
   "unauthorized",

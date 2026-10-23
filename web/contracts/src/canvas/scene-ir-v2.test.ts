@@ -17,8 +17,6 @@ import {
   estimatePrimitiveVertices,
   modelSceneStatistics,
   modelSceneStatisticsDetail,
-  SCENE_IR_V2_MAX_HIERARCHY_DEPTH,
-  SCENE_IR_V2_MAX_MATERIALS,
   v2SceneAabb,
   v2SceneExtent,
   v2SceneSignature,
@@ -160,25 +158,26 @@ describe("validateModelSceneIrV2 segments", () => {
   });
 });
 
-describe("validateModelSceneIrV2 budgets and hierarchy", () => {
-  it("rejects hierarchy deeper than the limit", () => {
+describe("validateModelSceneIrV2 structure (no application quotas)", () => {
+  it("accepts deep hierarchies (no depth quota) but still rejects cycles", () => {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 6.2：层级深度不再是额度。
     const ops: unknown[] = [{ t: "group", id: "g0" }];
-    for (let i = 1; i <= SCENE_IR_V2_MAX_HIERARCHY_DEPTH; i += 1) {
-      ops.push({ t: "group", id: `g${i}`, parent: `g${i - 1}` });
-    }
-    expect(validateModelSceneIrV2(wrap(ops))).toMatchObject({ ok: false, code: "hierarchy-too-deep" });
+    for (let i = 1; i <= 40; i += 1) ops.push({ t: "group", id: `g${i}`, parent: `g${i - 1}` });
+    expect(validateModelSceneIrV2(wrap(ops))).toMatchObject({ ok: true });
+    expect(validateModelSceneIrV2(wrap([{ t: "group", id: "a", parent: "b" }, { t: "group", id: "b", parent: "a" }])))
+      .toMatchObject({ ok: false });
   });
 
-  it("rejects too many materials", () => {
+  it("accepts many materials (no material quota)", () => {
     const ops: unknown[] = [];
-    for (let i = 0; i <= SCENE_IR_V2_MAX_MATERIALS; i += 1) ops.push(material({ id: `m${i}` }));
-    expect(validateModelSceneIrV2(wrap(ops))).toMatchObject({ ok: false, code: "render-budget-exceeded" });
+    for (let i = 0; i < 600; i += 1) ops.push(material({ id: `m${i}` }));
+    expect(validateModelSceneIrV2(wrap(ops))).toMatchObject({ ok: true });
   });
 
-  it("rejects primitive counts that exceed the estimated render budget", () => {
+  it("accepts large primitive counts (no estimated-vertex quota)", () => {
     const ops: unknown[] = [];
-    for (let i = 0; i < 4096; i += 1) ops.push({ t: "sphere", id: `s${i}`, radius: 0.1 });
-    expect(validateModelSceneIrV2(wrap(ops))).toMatchObject({ ok: false, code: "render-budget-exceeded" });
+    for (let i = 0; i < 6000; i += 1) ops.push({ t: "sphere", id: `s${i}`, radius: 0.1 });
+    expect(validateModelSceneIrV2(wrap(ops))).toMatchObject({ ok: true });
   });
 
   it("estimates primitive vertices deterministically by quality tier", () => {

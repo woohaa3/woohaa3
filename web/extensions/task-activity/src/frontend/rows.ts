@@ -1,0 +1,173 @@
+/**
+ * 统一活动记录模型（change: 2026-10-22-unify-task-activity-rows，任务 1.1 / design D1 / D3）。
+ *
+ * 面板只消费 `ActivityRow`：`kind` 只决定**数据来源**与可用动作，不决定寿命、排序、关闭方式
+ * 或清理规则。三个接入适配器（`adapt-task-row` / `adapt-job-row` / `adapt-group-row`）把各自
+ * 来源的载荷转成这一种记录，「是否进行中」的判定留在适配器里，因为那是来源语义而不是面板语义。
+ *
+ * 移除后的「不复活」同样按来源分工（design D2）：
+ *
+ * - 任务 / 后台活动：store 写 `expired` 键集合，事件或轮询重放时丢弃；
+ * - 组创作：来源是宿主的整表轮询，没有增量事件可丢；移除写 `dismissedGroups`，由
+ *   `replaceGroupRuns` 在记录重新 active 时清除，并由组节点入口显式重开。
+ *
+ * 面板自身只认 `active` 与 `key`：`key` 是稳定身份（`task:<runId>` / `job:<id>` /
+ * `group:<requestId>`），`exitingKeys` 也以它为键（design D3）。
+ */
+import type { BackgroundActivityJob, CanvasTaskActivity } from "@woohaa3/contracts";
+import type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
+import type { ActivityFeedItem, BackgroundFeedJob } from "./store.js";
+
+export type ActivityRowKind = "task" | "job" | "group";
+
+/** 状态语义色，仅用于行内状态灯与状态文案，不承载来源判别。 */
+export type ActivityRowTone = "active" | "success" | "danger" | "muted";
+
+/** 记录携带的来源载荷：只保留该来源详情预览需要的字段。 */
+export type ActivityRowSource =
+  | { kind: "task"; item: ActivityFeedItem }
+  | { kind: "job"; job: BackgroundFeedJob }
+  | { kind: "group"; run: CanvasGroupRun };
+
+/**
+ * 记录声明的可用动作。字段存在即表示该动作可用，因此 renderer 不需要按来源分支。
+ *
+ * 组创作额外声明两个交互能力（design D4 的「保留风险」）：点击锁定预览（`pinOnOpen`）与
+ * 被组节点选中时自动展开并滚动到可视区（`autoOpenOnSelect`）。
+ */
+export type ActivityRowActions = {
+  /** 终态记录可关闭；进行中记录不可关闭。 */
+  close: boolean;
+  /** 定位画布节点（任务 / 后台活动）或创作组（组记录）。 */
+  locate?: () => void;
+  /** 主行标题可打开详情（作品生成历史或确切 Agent 详情）。 */
+  openDetail?: () => void;
+  /** 组创作的停止 / 重试原请求 / 核对状态；只有写权限与来源可用时才存在。 */
+  stop?: () => Promise<void>;
+  retry?: () => Promise<void>;
+  verify?: () => Promise<void>;
+  openConversation?: () => Promise<void>;
+  /** 组记录详情中的写操作需要画布可写。 */
+  writable?: boolean;
+  /** 点击主行锁定详情（组记录）；缺省时悬停即预览。 */
+  pinOnOpen?: boolean;
+  /** 被组节点选中时自动展开详情并滚动到可视区。 */
+  autoOpenOnSelect?: boolean;
+};
+
+export type ActivityRow = {
+  /** 稳定身份：`task:<runId>` | `job:<id>` | `group:<requestId>`。 */
+  key: string;
+  kind: ActivityRowKind;
+  /** 主行文案（已解析）。 */
+  title: string;
+  /** 次行：模型可读名或来源细节。 */
+  secondary?: string;
+  /** 详情补充说明（失败原因、组错误）；缺省时不渲染该段。 */
+  detail?: string;
+  /** 状态文案（不含进度百分比，进度由面板按 `progress` 追加）。 */
+  status: string;
+  /** 来源原始状态码，只用于 `data-state` 诊断与既有样式钩子。 */
+  state: string;
+  tone: ActivityRowTone;
+  /** 0..1，仅进行中有意义。 */
+  progress?: number;
+  nodeId?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** 是否进行中：面板唯一的寿命判定。 */
+  active: boolean;
+  /** 被组节点入口选中（只对组记录有意义）。 */
+  selected?: boolean;
+  actions: ActivityRowActions;
+  source: ActivityRowSource;
+};
+
+/** 宿主在装配时构造一次的来源能力（design D6）。 */
+export type ActivityRowCapabilities = {
+  /** 定位画布节点；组记录传入创作组根节点。 */
+  locateNode?: (nodeId: string) => void;
+  /** 打开该任务的详情；返回 `false` 表示该 run 没有 Agent 回合关联。 */
+  openTaskDetail?: (item: ActivityFeedItem) => Promise<boolean> | boolean;
+  /** 打开作品生成历史弹窗。 */
+  openHistory?: (item: ActivityFeedItem) => void;
+  /** 主/次行文案解析；缺省按 modelKey 兜底。 */
+  resolveTaskDisplay?: (item: ActivityFeedItem) => { primary: string; secondary: string };
+  group?: ActivityRowGroupCapabilities;
+};
+
+export type ActivityRowGroupCapabilities = {
+  action?: (run: CanvasGroupRun, action: "stop" | "retry" | "refresh") => Promise<void>;
+  openConversation?: (run: CanvasGroupRun) => void | Promise<void>;
+  writable?: () => boolean;
+  resolveTitle?: (nodeId: string) => string;
+};
+
+/** 任务状态文案。 */
+export const TASK_STATE_LABELS: Record<CanvasTaskActivity["state"], string> = {
+  queued: "排队中",
+  pending: "准备中",
+  running: "运行中",
+  succeeded: "已完成",
+  failed: "失败",
+  cancelled: "已取消"
+};
+
+/** 后台活动状态文案。 */
+export const BACKGROUND_STATUS_LABELS: Record<BackgroundActivityJob["status"], string> = {
+  queued: "排队中",
+  running: "录制中",
+  succeeded: "已录制",
+  failed: "失败",
+  cancelled: "已取消"
+};
+
+/** 后台活动种类文案。 */
+export const BACKGROUND_KIND_LABELS: Record<BackgroundActivityJob["kind"], string> = {
+  "shot-reference-recording": "录制镜头参考"
+};
+
+/** 任务状态 → 语义色。 */
+export const TASK_STATE_TONES: Record<CanvasTaskActivity["state"], ActivityRowTone> = {
+  queued: "active",
+  pending: "active",
+  running: "active",
+  succeeded: "success",
+  failed: "danger",
+  cancelled: "muted"
+};
+
+/** 后台活动状态 → 语义色。 */
+export const BACKGROUND_STATUS_TONES: Record<BackgroundActivityJob["status"], ActivityRowTone> = {
+  queued: "active",
+  running: "active",
+  succeeded: "success",
+  failed: "danger",
+  cancelled: "muted"
+};
+
+/**
+ * 组创作状态 → 语义色。状态比任务多 `preparing` / `committing` / `partial` / `unknown`
+ * 等阶段；未知状态按「需要注意」处理，避免被读成已结束。
+ */
+export function groupRunTone(status: string): ActivityRowTone {
+  if (status === "succeeded") return "success";
+  if (status === "failed" || status === "partial" || status === "unknown") return "danger";
+  if (status === "cancelled") return "muted";
+  return "active";
+}
+
+/** 组记录仍可停止的运行状态（宿主侧语义）。 */
+export const GROUP_STOPPABLE_STATUSES = ["queued", "running", "committing", "unknown"] as const;
+
+/** 进度只在进行中显示，并按 0..1 夹紧；缺失时保留 undefined（不伪造百分比）。 */
+export function clampProgress(progress: number | undefined): number | undefined {
+  if (progress === undefined) return undefined;
+  return Math.max(0, Math.min(1, progress));
+}
+
+/** 面板排序：开始时间从新到旧，同时刻用稳定 key 兜底（design D7）。 */
+export function compareRows(a: ActivityRow, b: ActivityRow): number {
+  if (a.createdAt === b.createdAt) return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+  return a.createdAt > b.createdAt ? -1 : 1;
+}

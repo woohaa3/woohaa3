@@ -22,9 +22,9 @@ import type {
   AgentConnectionCapabilities,
   AgentConversationAdapter
 } from "@woohaa3/contracts";
-import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnBudget, createTurnOutcomeJournal, preflightInput, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
+import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnObserver, createTurnOutcomeJournal, preflightInput, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
 import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
-import { LOCAL_AGENT_ADAPTERS, LOCAL_AGENT_PLUGIN_ID, type LocalAgentAdapterDescriptor } from "../shared.js";
+import { LOCAL_AGENT_ADAPTERS, LOCAL_AGENT_PLUGIN_ID, localAgentConnectionName, type LocalAgentAdapterDescriptor } from "../shared.js";
 import type { ProcessManager } from "./process-manager.js";
 import type { LocalAgentTransport } from "./transports/transport.js";
 import { buildTargetPrompt } from "./target-prompt.js";
@@ -72,8 +72,7 @@ async function issueToolGrant(
       ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
       ...(input.intent.clipId ? { clipId: input.intent.clipId } : {}),
       ...(input.intent.itemId ? { itemId: input.intent.itemId } : {}),
-      tools,
-      maxCalls: 24
+      tools
     });
     return grant.token;
   } catch {
@@ -88,6 +87,7 @@ export function createLocalAgentDescriptors(): Record<string, ConnectionDescript
   for (const adapter of LOCAL_AGENT_ADAPTERS) {
     descriptors[adapter.adapterId] = {
       describe: ({ record }) => ({
+        name: localAgentConnectionName(adapter.adapterId, record.name),
         capabilities: capabilitiesFor(),
         // 不在连接描述里伪造 `app-server-default`：它不是 App Server 的真实模型 id，提交后会被
         // 上游拒绝。用户手填过的模型作为 user-provided 保留；没有时交给 adapter 读取真实目录。
@@ -221,7 +221,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     if (!discussion && !toolToken) {
       return { status: "failed", error: { code: "capability-unsupported", message: "本轮未取得画布工具授权，不能执行目标动作" } };
     }
-    const budget = createTurnBudget({});
+    const observation = createTurnObserver();
     const toolCalls: string[] = [];
     let successfulWrite = false;
     let toolFailure: string | undefined;
@@ -255,8 +255,8 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         signal: input.signal,
         onEvent: async (event) => {
           if (event.type === "tool-started") {
-            if (!budget.useToolCall()) return;
-            // Notifications are observations; only the MCP entry consumes the grant.
+            // 工具事件是观察，不是授权计数：MCP 入口仍然逐次校验范围与撤销状态。
+            observation.noteToolCall();
             if (!toolNames.includes(event.tool)) {
               toolFailure = "tool-not-allowed";
               input.emit({ type: "tool-completed", tool: event.tool, ok: false, summary: toolFailure, ...(event.callId ? { callId: event.callId } : {}) });
@@ -301,7 +301,6 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
       if (result.nativeId && !input.candidate) {
         await options.service.setNativeBinding({ owner: input.owner, connectionId, context, native: { nativeId: result.nativeId, credentialEpoch: record.credentialEpoch, updatedAt: new Date().toISOString() } });
       }
-      if (budget.expired()) return { status: "failed", error: { code: "budget-exceeded", message: budget.exceededReason() ?? "超出预算" } };
       if (!discussion && !successfulWrite) return { status: "failed", error: { code: "canvas-not-modified", message: toolFailure ?? "推理结束，但没有成功的画布写入回执" } };
       return result.outcome;
     } catch (error) {

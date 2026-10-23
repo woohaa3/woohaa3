@@ -10,7 +10,7 @@ import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
 import { buildAgentSdkRestrictions, CLAUDE_BUILTIN_TOOLS, CODEX_BUILTIN_TOOLS, createAgentSdkAdapter, type AgentSdkTransport } from "./agent-sdk-adapter.js";
 
 const tools: ApplicationToolDelegationFacade = {
-  issue: async () => ({ token: "t", canvasIds: [], nodeIds: [], tools: [], maxCalls: 1, expiresAt: Date.now() + 1000 }),
+  issue: async () => ({ token: "t", canvasIds: [], nodeIds: [], tools: [], workId: "w" }),
   revoke: () => undefined,
   authorize: ({ tool }) => (tool === "write_node" ? { ok: true } : { ok: false, reason: "越权" })
 };
@@ -55,16 +55,16 @@ describe("Agent SDK 执行前限制（任务 7.3）", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("honors an explicitly injected duration budget", async () => {
+  it("不再有可注入的时长预算：长回合只在取消或引擎结束时停止", async () => {
     vi.useFakeTimers();
     try {
       const { transport: t } = transport({ run: async input => {
-        await vi.advanceTimersByTimeAsync(60);
-        expect(input.signal.aborted).toBe(true);
-        return { ok: true, assistantText: "late", toolCalls: [], finishReason: "stop" };
+        await vi.advanceTimersByTimeAsync(3_600_000);
+        expect(input.signal.aborted).toBe(false);
+        return { ok: true, assistantText: "long", toolCalls: [], finishReason: "stop" };
       } });
       const adapter = createAgentSdkAdapter({ kind: "codex-agent-sdk", apiKey: "test", configDir: "/tmp/c", workspaceDir: "/tmp/ws", transport: t, probeRuntime: okRuntime });
-      expect(await adapter.run({ model: "m", prompt: "p", tools: [], budget: { maxDurationMs: 50 }, signal: new AbortController().signal })).toMatchObject({ ok: false, code: "budget-exceeded" });
+      expect(await adapter.run({ model: "m", prompt: "p", tools: [], signal: new AbortController().signal })).toMatchObject({ ok: true, outcome: { assistantText: "long" } });
     } finally { vi.useRealTimers(); }
   });
 

@@ -19,8 +19,7 @@ import { CanvasScriptEngine } from "./engine.js";
 
 function execute() {
   return new CanvasScriptEngine().execute({
-    source: "", nodeKinds: ["text"], promptMaxChars: 8000,
-    positionAbsMax: 1_000_000, deadlineMs: Date.now() + 2000
+    source: "", nodeKinds: ["text"],     positionAbsMax: 1_000_000, deadlineMs: Date.now() + 2000
   });
 }
 

@@ -12,7 +12,7 @@ import {
   SUPPORTED_MODEL_SCRIPT_VERSIONS,
   type SupportedModelScriptVersion
 } from "./model-script.js";
-import { QUALITY_VERTEX_COUNTS, SCENE_IR_V2_MAX_ESTIMATED_VERTICES } from "./scene-ir-v2/types.js";
+import { QUALITY_VERTEX_COUNTS } from "./scene-ir-v2/types.js";
 
 /** 坐标 / 旋转单位与朝向约定。 */
 export const MODEL_API_AXIS_CONVENTIONS = {
@@ -56,14 +56,14 @@ export function modelApiMethodNames(version: SupportedModelScriptVersion): strin
 }
 
 /**
- * 渲染预算：单场景**所有 primitive 的估算 tessellation 顶点之和**上限
- * （change: 2026-10-13-add-node-to-film-set-shortcut —— 模型作者/转换提示词必须在生成前声明该上限，
- * 否则会产出结构合法但超预算的候选，被 `SCENE_IR_V2_MAX_ESTIMATED_VERTICES` 整份拒绝）。
+ * 单个 primitive 的估算 tessellation 顶点成本。
  *
- * 由 Scene IR V2 的估算常量派生，是提示词的单一事实来源，避免文档与校验漂移。
+ * change: 2026-10-22-remove-agent-execution-limits，任务 6.2 / design D6：这里原本用于表达
+ * 「单场景估算顶点上限」并在校验侧整份拒绝超预算候选。该应用侧总量门禁已删除；保留的成本表
+ * 只作为**创作质量指引**（用少量、尺寸合理的可编辑图元，而不是海量小图元堆砌），
+ * 由渲染端按真实后端能力渐进准备，不作为拒绝合法作品的依据。
  */
 export const MODEL_RENDER_BUDGET = {
-  maxEstimatedVertices: SCENE_IR_V2_MAX_ESTIMATED_VERTICES,
   /** 单个 primitive 的估算顶点成本（segment 按自身 shape 取 box/capsule）。 */
   vertexCost: {
     box: QUALITY_VERTEX_COUNTS.box,
@@ -74,18 +74,17 @@ export const MODEL_RENDER_BUDGET = {
 } as const;
 
 /**
- * 供生成提示词使用的英文渲染预算说明。
+ * 供生成提示词使用的英文创作质量说明（不是拒绝阈值）。
  *
  * 数字全部由常量派生、输出稳定（无随机/时间），可直接放进提示词并被断言。
  */
 export function modelRenderBudgetText(): string {
-  const { maxEstimatedVertices, vertexCost } = MODEL_RENDER_BUDGET;
-  const maxBoxes = Math.floor(maxEstimatedVertices / vertexCost.box);
+  const { vertexCost } = MODEL_RENDER_BUDGET;
   return [
-    `Render budget: the summed estimated tessellation vertices over ALL primitives MUST stay <= ${maxEstimatedVertices}.`,
-    `Per-primitive cost: box=${vertexCost.box}, segment(box)=${vertexCost.box}, cylinder=${vertexCost.cylinder}, sphere=${vertexCost.sphere}, capsule=${vertexCost.capsule}, segment(capsule)=${vertexCost.capsule}, mesh=its declared vertex count.`,
+    "Editability guidance: prefer a small number of well-proportioned, editable primitives over piling up thousands of tiny primitives.",
+    `Per-primitive tessellation cost: box=${vertexCost.box}, segment(box)=${vertexCost.box}, cylinder=${vertexCost.cylinder}, sphere=${vertexCost.sphere}, capsule=${vertexCost.capsule}, segment(capsule)=${vertexCost.capsule}, mesh=its declared vertex count.`,
     "A segment WITHOUT shape is a capsule, not a box: it costs the capsule count above. Pass shape:'box' explicitly for boxy limbs.",
-    `Do NOT reconstruct a scene by instancing thousands of tiny primitives — ${maxBoxes} plain boxes ALONE reach the budget. Use few, larger, well-proportioned parts, share materials, and stay comfortably under ${maxEstimatedVertices}.`
+    "This is a quality guideline, not a hard limit: large scenes are prepared progressively by the renderer. Thousands of tiny primitives still make the result hard to edit, so use few, larger, well-proportioned parts and share materials."
   ].join(" ");
 }
 

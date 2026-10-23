@@ -23,9 +23,6 @@ export const FILM_SET_ANIMATIONS_VERSION = 3 as const;
 export const FILM_SET_ANIMATIONS_LEGACY_VERSION = 2 as const;
 /** 最早一代旧片段动画版本（schema 1，含 clip.motion）；只由隔离离线 reader 转换。 */
 export const FILM_SET_ANIMATIONS_LEGACY_V1_VERSION = 1 as const;
-export const MAX_FILM_SET_CLIPS = 32;
-export const MAX_FILM_SET_ANIMATION_SOURCE_BYTES = 1 << 20;
-export const MAX_FILM_SET_ANIMATION_BYTES = 2 << 20;
 
 /** 拍摄镜头类型；是否动态由 kind 明确表达，禁止仅凭 cameraMotion 是否非空推断。 */
 export const FILM_SET_SHOT_KINDS = ["static", "dynamic"] as const;
@@ -166,13 +163,13 @@ export function decodeFilmSetAnimations(input: unknown, content: FilmSetContent)
   if (!isJsonObject(input) || input.schemaVersion !== FILM_SET_ANIMATIONS_VERSION) {
     return fail("不支持的 filmSetAnimations 版本（要求 3，旧 schema 1/2 只由隔离离线 reader 转换）");
   }
-  if (!Array.isArray(input.clips) || input.clips.length > MAX_FILM_SET_CLIPS) return fail("clips 必须为数组且不超过 32 个");
+  // change: 2026-10-22-remove-agent-execution-limits，任务 5.4：片段数量、源码字节与内容
+  // 总量额度已删除；完整合法内容一次原子提交。
+  if (!Array.isArray(input.clips)) return fail("clips 必须为数组");
   if (input.defaultClipId !== null && !isBoundedId(input.defaultClipId)) return fail("defaultClipId 非法");
   const itemIds = new Set(content.items.map(item => item.id));
   const ids = new Set<string>();
   const clips: FilmSetAnimationClip[] = [];
-  let sourceBytes = 0;
-  for (const item of content.items) if (item.kind === "model") sourceBytes += utf8Bytes(item.model.modelScript);
   for (const raw of input.clips) {
     if (!isJsonObject(raw) || !isBoundedId(raw.id) || ids.has(raw.id)) return fail("拍摄镜头 id 非法或重复");
     if (typeof raw.name !== "string" || !raw.name.trim() || raw.name.trim().length > 80) return fail(`拍摄镜头 ${raw.id} 名称非法`);
@@ -195,7 +192,6 @@ export function decodeFilmSetAnimations(input: unknown, content: FilmSetContent)
       return fail(`动态拍摄镜头 ${raw.id} 必须正时长（至多 3600 秒）`);
     }
     if (!Array.isArray(raw.bindings) || raw.bindings.length > 128) return fail(`拍摄镜头 ${raw.id} bindings 非法`);
-    sourceBytes += utf8Bytes(cameraMotion.value.motionScript);
     const seen = new Set<string>();
     const bindings: FilmSetAnimationBinding[] = [];
     for (const binding of raw.bindings) {
@@ -211,7 +207,6 @@ export function decodeFilmSetAnimations(input: unknown, content: FilmSetContent)
       } else if (childMotion.value?.motionScript.trim() && playback.value.duration === 0) {
         return fail(`对象 ${binding.itemId} 动作需要正时长`);
       }
-      sourceBytes += utf8Bytes(childMotion.value?.motionScript ?? "");
       seen.add(binding.itemId);
       bindings.push({ itemId: binding.itemId, playback: playback.value, ...(childMotion.value ? { motion: childMotion.value } : {}) });
     }
@@ -220,7 +215,5 @@ export function decodeFilmSetAnimations(input: unknown, content: FilmSetContent)
   }
   if ((clips.length === 0) !== (input.defaultClipId === null) || (input.defaultClipId !== null && !ids.has(input.defaultClipId as string))) return fail("defaultClipId 必须引用存在的拍摄镜头");
   const value: FilmSetAnimations = { schemaVersion: FILM_SET_ANIMATIONS_VERSION, defaultClipId: input.defaultClipId as string | null, clips };
-  if (sourceBytes > MAX_FILM_SET_ANIMATION_SOURCE_BYTES) return fail("共享模型与全部镜头源码超过 1 MiB UTF-8 预算");
-  if (utf8Bytes(JSON.stringify({ filmSetContent: content, filmSetAnimations: value })) > MAX_FILM_SET_ANIMATION_BYTES) return fail("共享内容与镜头超过 2 MiB 预算");
   return { ok: true, value };
 }

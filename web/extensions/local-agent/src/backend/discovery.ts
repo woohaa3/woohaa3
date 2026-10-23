@@ -126,11 +126,11 @@ export function createLocalAgentDiscovery(options: {
         managed,
         running: managed || processFound,
         note: managed
-          ? "应用使用的 App Server 正在运行。"
+          ? "本地 ChatGPT 正在运行。"
           : processFound
-            ? "检测到已有 App Server 进程，生成时使用独立会话。"
+            ? "检测到本地 ChatGPT 正在运行，生成时使用独立会话。"
             : installed
-              ? "已找到工具，生成时自动启动 App Server。"
+              ? "已找到工具，生成时自动启动本地 ChatGPT。"
               : "未找到工具，请先在后端机器安装 Codex。",
       };
     const endpoint = `http://127.0.0.1:${adapter.defaultPort}`;

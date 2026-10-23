@@ -8,8 +8,9 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { BackgroundActivityJob, CanvasTaskActivity } from "@woohaa3/contracts";
-import { ACTIVITY_EXIT_DURATION_MS, TaskActivityStore } from "../src/frontend/store.js";
+import { ACTIVITY_EXIT_DURATION_MS, ACTIVITY_TERMINAL_LINGER_MS, TaskActivityStore } from "../src/frontend/store.js";
 import type { TaskActivityFinished, TaskActivityUpdated } from "@woohaa3/contracts";
+import type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
 
 function record(patch: Partial<CanvasTaskActivity> & { taskKey: string; runId: string; nodeId: string }): CanvasTaskActivity {
   return {
@@ -334,5 +335,142 @@ describe("统一活动显示期限", () => {
       store.dispose();
       expect(vi.getTimerCount()).toBe(0);
     } finally { store.dispose(); vi.useRealTimers(); }
+  });
+});
+
+describe("统一记录模型（change: 2026-10-22-unify-task-activity-rows）", () => {
+  const groupRow = (id: string, active: boolean): CanvasGroupRun => ({
+    creation: {
+      requestId: `creation-${id}`, canvasId: "c", rootGroupId: id, commandId: `cmd-${id}`,
+      turnRequestId: `request-${id}`, scopeEpoch: 1, stage: "accepted",
+      conversationId: `conversation-${id}`, turnId: `turn-${id}`
+    },
+    requestId: `request-${id}`,
+    status: active ? "running" : "succeeded",
+    label: active ? "创作中" : "已完成",
+    active,
+    createdAt: `2026-01-01T00:00:0${id === "g1" ? 1 : 2}Z`
+  });
+
+  /** 同时放入三种来源：g1 终态、g2 运行中、一条终态任务、一条运行任务、一条终态后台活动。 */
+  function mixedStore(): TaskActivityStore {
+    const store = new TaskActivityStore();
+    store.applyServerRecord(record({ taskKey: "done", runId: "rd", nodeId: "n", state: "succeeded", createdAt: "2026-01-01T00:00:03Z" }), 1);
+    store.applyServerRecord(record({ taskKey: "busy", runId: "rb", nodeId: "n", state: "running", createdAt: "2026-01-01T00:00:04Z" }), 2);
+    store.applyJob({
+      id: "job-done", canvasId: "c", kind: "shot-reference-recording",
+      title: "镜头", status: "succeeded", updatedAt: "2026-01-01T00:00:05Z"
+    });
+    store.replaceGroupRuns({ rows: [groupRow("g1", false), groupRow("g2", true)], error: "" });
+    return store;
+  }
+
+  it("快照 rows 与旧集合互相自洽，三种来源同列表按开始时间交错", () => {
+    const store = mixedStore();
+    const snapshot = store.getSnapshot();
+    expect(new Set(snapshot.rows.map(row => row.kind))).toEqual(new Set(["task", "job", "group"]));
+    expect(snapshot.rows.map(row => row.key)).toEqual([
+      "job:job-done", "task:rb", "task:rd", "group:creation-g2", "group:creation-g1"
+    ]);
+    // 过渡字段由 rows 派生，不出现旁路差异。
+    expect(snapshot.items.map(item => item.taskKey)).toEqual(["busy", "done"]);
+    expect(snapshot.jobs.map(job => job.id)).toEqual(["job-done"]);
+    expect(snapshot.groups.map(run => run.creation.requestId)).toEqual(["creation-g2", "creation-g1"]);
+    expect(snapshot.hasActive).toBe(true);
+    store.dispose();
+  });
+
+  it("三种来源在同一条期限内一起退出，exitingKeys 同时出现三种前缀", () => {
+    vi.useFakeTimers();
+    const store = mixedStore();
+    try {
+      // 只有终态记录计时；运行中的任务与组不因时长被移除。
+      vi.advanceTimersByTime(ACTIVITY_TERMINAL_LINGER_MS - 1);
+      expect(store.getSnapshot().exitingKeys).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(store.getSnapshot().exitingKeys.slice().sort()).toEqual(["group:creation-g1", "job:job-done", "task:rd"]);
+      vi.advanceTimersByTime(ACTIVITY_EXIT_DURATION_MS);
+      expect(store.getSnapshot().rows.map(row => row.key)).toEqual(["task:rb", "group:creation-g2"]);
+    } finally { store.dispose(); vi.useRealTimers(); }
+  });
+
+  it("dismissRow 只移除终态：进行中记录不可移除，三种来源均可移除", () => {
+    const store = mixedStore();
+    for (const key of ["task:rb", "group:creation-g2"]) {
+      store.dismissRow(key);
+      expect(store.getSnapshot().rows.some(row => row.key === key)).toBe(true);
+    }
+    for (const key of ["task:rd", "job:job-done", "group:creation-g1"]) {
+      store.dismissRow(key);
+      expect(store.getSnapshot().rows.some(row => row.key === key)).toBe(false);
+    }
+    expect(store.getSnapshot().rows.map(row => row.key)).toEqual(["task:rb", "group:creation-g2"]);
+    store.dispose();
+  });
+
+  it("清除已结束同时清掉三种来源并保留进行中；未读在到期移除后回退", () => {
+    const store = mixedStore();
+    // 三处终态（任务、后台活动、组）各记一条未读。
+    expect(store.getSnapshot().unread).toBe(3);
+    store.clearTerminal();
+    expect(store.getSnapshot().rows.map(row => row.key)).toEqual(["task:rb", "group:creation-g2"]);
+    expect(store.getSnapshot().unread).toBe(0);
+    expect(store.getSnapshot().hasActive).toBe(true);
+    store.dispose();
+  });
+
+  it("终态记录到期移除后未读回退，不会因移除而悬空", () => {
+    vi.useFakeTimers();
+    const store = new TaskActivityStore();
+    try {
+      store.applyServerRecord(record({ taskKey: "t", runId: "r", nodeId: "n", state: "succeeded" }), 1);
+      expect(store.getSnapshot().unread).toBe(1);
+      vi.advanceTimersByTime(ACTIVITY_TERMINAL_LINGER_MS + ACTIVITY_EXIT_DURATION_MS);
+      expect(store.getSnapshot().rows).toHaveLength(0);
+      expect(store.getSnapshot().unread).toBe(0);
+    } finally { store.dispose(); vi.useRealTimers(); }
+  });
+
+  it("已移除的记录不因重放复活：任务/后台活动写 expired，组写 dismissedGroups", () => {
+    vi.useFakeTimers();
+    const store = new TaskActivityStore();
+    try {
+      const done = record({ taskKey: "t", runId: "r", nodeId: "n", state: "succeeded" });
+      const job: BackgroundActivityJob = {
+        id: "job", canvasId: "c", kind: "shot-reference-recording",
+        title: "镜头", status: "succeeded", updatedAt: "2026-01-01T00:00:00Z"
+      };
+      store.applyServerRecord(done, 1);
+      store.applyJob(job);
+      store.replaceGroupRuns({ rows: [groupRow("g1", false)], error: "" });
+      vi.advanceTimersByTime(ACTIVITY_TERMINAL_LINGER_MS + ACTIVITY_EXIT_DURATION_MS);
+      expect(store.getSnapshot().rows).toHaveLength(0);
+
+      // 过期重放：三条来源都不得复活。
+      store.applyServerRecord(done, 2);
+      store.applyJob({ ...job, updatedAt: "2026-01-01T00:00:09Z" });
+      store.replaceGroupRuns({ rows: [groupRow("g1", false)], error: "" });
+      expect(store.getSnapshot().rows).toHaveLength(0);
+
+      // 组再次执行（重新 active）是新的活动记录，不被上一次移除永久屏蔽。
+      store.replaceGroupRuns({ rows: [groupRow("g1", true)], error: "" });
+      expect(store.getSnapshot().rows.map(row => [row.key, row.active])).toEqual([["group:creation-g1", true]]);
+    } finally { store.dispose(); vi.useRealTimers(); }
+  });
+
+  it("公开只读投影与渲染一致且不含来源载荷或动作函数", () => {
+    const store = mixedStore();
+    const publicSnapshot = store.getPublicSnapshot();
+    expect(publicSnapshot.rows.map(row => row.key)).toEqual(store.getSnapshot().rows.map(row => row.key));
+    for (const row of publicSnapshot.rows) {
+      expect(row).not.toHaveProperty("source");
+      expect(row).not.toHaveProperty("actions");
+    }
+    // 过渡字段与统一行视图自洽。
+    expect(publicSnapshot.items.map(item => `task:${item.runId}`)).toEqual(["task:rb", "task:rd"]);
+    expect(publicSnapshot.jobs.map(job => `job:${job.id}`)).toEqual(["job:job-done"]);
+    expect(publicSnapshot.hasActive).toBe(true);
+    expect(publicSnapshot.unread).toBe(3);
+    store.dispose();
   });
 });

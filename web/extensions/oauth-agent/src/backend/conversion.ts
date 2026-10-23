@@ -31,8 +31,7 @@ export const CHATGPT_CONVERSION_CAPABILITIES: FilmSetConversionAdapterCapabiliti
     maxImages: 12,
     videoInput: false,
     maxFrames: 12,
-    maxDurationSeconds: 0,
-    maxPixels: 4_000_000
+    maxDurationSeconds: 0
   }
 };
 

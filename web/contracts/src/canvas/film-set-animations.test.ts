@@ -137,13 +137,14 @@ describe("independent film set clips", () => {
     }
   });
 
-  it("accepts 32 clips and rejects the next without truncation", () => {
+  it("accepts any number of clips without truncation (no clip quota)", () => {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.4：原 32 片段额度已删除。
     const animation = fixture();
-    const clips = Array.from({ length: 32 }, (_, i) => ({ ...animation.filmSetAnimations!.clips[0], id: `c${i}` }));
+    const clips = Array.from({ length: 40 }, (_, i) => ({ ...animation.filmSetAnimations!.clips[0], id: `c${i}` }));
     const value = { schemaVersion: FILM_SET_ANIMATIONS_VERSION, defaultClipId: "c0", clips };
     expect(decodeFilmSetAnimations(value, animation.filmSetContent).ok).toBe(true);
-    expect(decodeFilmSetAnimations({ ...value, clips: [...clips, { ...clips[0], id: "c32" }] }, animation.filmSetContent).ok).toBe(false);
-    expect(value.clips).toHaveLength(32);
+    expect(decodeFilmSetAnimations({ ...value, clips: [...clips, { ...clips[0], id: "c40" }] }, animation.filmSetContent).ok).toBe(true);
+    expect(value.clips).toHaveLength(40);
   });
 
   it("enforces cumulative tracks across clips and the exact keyframe boundary", () => {
@@ -164,17 +165,18 @@ describe("independent film set clips", () => {
     expect(filmSetCompiledBudget(animation)).toContain("16384");
   });
 
-  it("oversized source is still rejected by the strict decoder, never silently truncated", () => {
-    // 迁移的输入内容超预算：严格解码器必须拒绝整份 nodeData（不静默截断）。
-    const oversize = createFilmSetSnapshot({
+  it("large but valid source is not rejected or truncated (no byte quota)", () => {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.4：原 1/2 MiB 源码与内容
+    // 额度已删除；大内容完整往返，不静默截断也不整份拒绝。
+    const large = createFilmSetSnapshot({
       title: "large",
       model: { modelScript: "scene.box({id:'body'});", modelScriptVersion: "woohaa-model-js-v2" },
       motionScript: "//" + "汉".repeat(400000),
       timeline: { duration: 5, loop: false }
     });
-    const fields = filmSetNodeDataFields(oversize);
+    const fields = filmSetNodeDataFields(large);
     const before = JSON.stringify(fields);
-    expect(decodeFilmSetNodeData(fields).ok).toBe(false);
+    expect(decodeFilmSetNodeData(fields).ok).toBe(true);
     expect(JSON.stringify(fields)).toBe(before);
   });
 

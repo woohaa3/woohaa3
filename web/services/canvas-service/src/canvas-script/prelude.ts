@@ -10,24 +10,23 @@
  * 2. **recorder**：注入冻结的 `canvas` API。所有调用只把语义操作压入有序数组，绝不触碰
  *    宿主、画布或 IO；handle 由闭包内 `WeakSet` 验证，脚本无法伪造。
  *
- * 预算（操作数 / API 调用数 / 字段长度）在**记录时**判定并写入 `__S.fatal`，脚本即使
- * catch 掉异常也无法绕过；这样避免「执行结束后才发现超大结果」。宿主只读取
+ * 结构校验（未知字段、非法 kind、非有限坐标、重复 key）在**记录时**判定并写入
+ * `__S.fatal`，脚本即使 catch 掉异常也无法绕过。宿主只读取
  * `JSON.stringify({ops, fatal, apiCalls})`，因此跨边界只有严格 JSON，无宿主函数或原型。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 5.1 / 6.1：这里原本按展开操作数
+ * （256）、API 调用次数（4096）与 prompt 字符数（8000）拒绝。这些应用侧总量额度已删除：
+ * 完整合法计划正常记录并由同一 planner 校验后一次原子提交；`apiCalls` 只作为观察量保留。
+ * 保留的字段长度上限只覆盖标识符与展示标题（真实表达/可读性约束），不限制作品内容总量。
  */
 
 /** prelude 需要的运行时事实（全部来自 contracts 的单一事实源）。 */
 export type CanvasScriptPreludeOptions = {
   /** 支持的语义节点种类（拒绝未知 kind 且给出定位）。 */
   nodeKinds: readonly string[];
-  /** 展开操作数上限。 */
-  maxOperations: number;
-  /** 单次执行 API 调用次数上限（含被拒绝调用）。 */
-  maxApiCalls: number;
-  /** prompt 字符上限（与任务协议一致）。 */
-  promptMaxChars: number;
-  /** 节点位置坐标绝对值上限。 */
+  /** 节点位置坐标绝对值上限（画布世界坐标的真实表达边界）。 */
   positionAbsMax: number;
-  /** 单字段字符串上限（title/label/key 等）。 */
+  /** 标识符/展示标题的单字段长度上限（真实表达约束，不是执行额度）。 */
   textMaxChars: number;
 };
 
@@ -43,9 +42,6 @@ export function canvasScriptPrelude(options: CanvasScriptPreludeOptions): string
 "use strict";
 (function () {
   var ALLOWED_KINDS = ${strings(options.nodeKinds)};
-  var MAX_OPS = ${options.maxOperations};
-  var MAX_API_CALLS = ${options.maxApiCalls};
-  var PROMPT_MAX = ${options.promptMaxChars};
   var TEXT_MAX = ${options.textMaxChars};
   var POS_ABS_MAX = ${options.positionAbsMax};
 
@@ -181,7 +177,7 @@ export function canvasScriptPrelude(options: CanvasScriptPreludeOptions): string
 
   function nodeList(value, api, field) {
     var list = Array.isArray(value) ? value : [value];
-    if (!list.length || list.length > 256) reject("script-limit-exceeded", field + " 需要 1..256 个节点", api, field);
+    if (!list.length) reject("malformed-request", field + " 需要至少一个节点", api, field);
     return list.map(function (n) { return entity(asNode(n, api, field)); });
   }
   function requiredTitle(value, api) {
@@ -191,7 +187,7 @@ export function canvasScriptPrelude(options: CanvasScriptPreludeOptions): string
   }
   function grid(value, api) {
     checkKeys(value, "layout", api, ["mode", "columns", "gapX", "gapY", "origin"]);
-    if (value.mode !== "grid" || typeof value.columns !== "number" || value.columns !== Math.floor(value.columns) || value.columns < 1 || value.columns > 256) reject("malformed-request", "layout 需要 mode=grid 和 1..256 整数 columns", api, "layout");
+    if (value.mode !== "grid" || typeof value.columns !== "number" || value.columns !== Math.floor(value.columns) || value.columns < 1) reject("malformed-request", "layout 需要 mode=grid 和正整数 columns", api, "layout");
     var result = { mode: "grid", columns: value.columns };
     for (var key of ["gapX", "gapY"]) if (value[key] !== undefined) {
       if (typeof value[key] !== "number" || !isFinite(value[key]) || value[key] < 0 || value[key] > POS_ABS_MAX) reject("malformed-request", "gap 必须是有界非负有限数", api, key);
@@ -214,26 +210,19 @@ export function canvasScriptPrelude(options: CanvasScriptPreludeOptions): string
       checkKeys(value, "if", api, ["type", "nodeId", "equals"]);
       if (typeof value.nodeId !== "string" || value.nodeId.length === 0) reject("malformed-request", "if.nodeId 必须是非空字符串", api, "if.nodeId");
       if (typeof value.equals !== "string") reject("malformed-request", "if.equals 必须是字符串", api, "if.equals");
-      if (value.equals.length > PROMPT_MAX) reject("script-limit-exceeded", "if.equals 超过 prompt 上限", api, "if.equals");
       return { type: type, nodeId: value.nodeId, equals: value.equals };
     }
     return reject("malformed-request", "未知 if.type " + String(type), api, "if.type");
   }
 
   function beginCall(api) {
+    // apiCalls 只是观察量（诊断/证据），不是可耗尽额度。
     S.apiCalls += 1;
-    if (S.apiCalls > MAX_API_CALLS) {
-      fatal("script-limit-exceeded", "API 调用次数超过 " + MAX_API_CALLS + " 上限", api, undefined, S.ops.length);
-      throw new RangeError("API 调用次数超限");
-    }
     if (S.fatal) throw new TypeError("脚本已因 " + S.fatal.code + " 失败");
   }
 
   function record(op, api) {
-    if (S.ops.length >= MAX_OPS) {
-      fatal("script-limit-exceeded", "展开操作超过 " + MAX_OPS + " 上限", api, undefined, S.ops.length);
-      throw new RangeError("操作数超限");
-    }
+    if (S.fatal) throw new TypeError("脚本已因 " + S.fatal.code + " 失败");
     S.ops.push(op);
   }
 
@@ -247,8 +236,11 @@ export function canvasScriptPrelude(options: CanvasScriptPreludeOptions): string
       var op = { op: "create_node", ref: ref, kind: kind };
       var title = text(options.title, "title", "node", "title", 200);
       if (title !== undefined) op.title = title;
-      var prompt = text(options.prompt, "prompt", "node", "prompt", PROMPT_MAX);
-      if (prompt !== undefined) op.prompt = prompt;
+      var prompt = options.prompt;
+      if (prompt !== undefined) {
+        if (typeof prompt !== "string") reject("malformed-request", "prompt 必须是字符串", "node", "prompt");
+        op.prompt = prompt;
+      }
       var place = placement(options.placement, "node");
       if (place !== undefined) op.placement = place;
       S.refs.set(ref, "node");
@@ -296,8 +288,9 @@ export function canvasScriptPrelude(options: CanvasScriptPreludeOptions): string
       options = options === undefined ? {} : options;
       checkKeys(options, "setPrompt options", "setPrompt", ["if"]);
       var handle = asNode(node, "setPrompt", "node");
-      var value = text(prompt, "prompt", "setPrompt", "prompt", PROMPT_MAX);
+      var value = prompt;
       if (value === undefined) reject("malformed-request", "setPrompt 需要 prompt 字符串", "setPrompt", "prompt");
+      if (typeof value !== "string") reject("malformed-request", "setPrompt 需要 prompt 字符串", "setPrompt", "prompt");
       var op = { op: "set_prompt", target: entity(handle), prompt: value };
       var condition = precondition(options.if, "setPrompt");
       if (condition !== undefined) op.if = condition;

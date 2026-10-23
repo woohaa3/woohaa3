@@ -180,7 +180,9 @@ export type ContentRecordingCommitPlan =
  * - `recording-source-invalid`：源节点/片段/脚本/时长/权限不合法；
  * - `recording-source-changed`：冻结后源变了（参考录制 → stale）；
  * - `recording-source-removed`：源节点/片段已删除（阻止提交）；
- * - `recording-budget-exceeded`：素材/帧数/字节超预算；
+ * - `recording-budget-exceeded`：**历史错误码**（change: 2026-10-22-remove-agent-execution-limits，
+ *   任务 7.5）：素材/帧数/字节的固定总量门禁已删除，新实现不再产生它；保留只为旧任务与
+ *   跨版本回执继续可读。
  * - `recording-cancelled` / `recording-too-late`：取消裁定结果；
  * - `recording-commit-rejected`：权威保存被拒绝。
  */
@@ -232,9 +234,6 @@ export type ContentRecordingRuntime = {
     readOnly?: boolean;
     /** 存在未提交 working draft：必须等待提交或明确拒绝，不能与已提交内容混合。 */
     hasPendingDraft?: boolean;
-    /** 素材预算（字节）。 */
-    maxResourceBytes?: number;
-    maxTotalResourceBytes?: number;
     /** 稳定的权威画布快照（扩展不自己读 Y.Doc）。 */
     canvas: {
       revision: number;

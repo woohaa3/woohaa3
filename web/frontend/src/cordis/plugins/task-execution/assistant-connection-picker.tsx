@@ -5,6 +5,7 @@ import type { CurrentUserService } from "../../services/current-user.js";
 import { agentDirectory } from "../../services/agent-directory.js";
 import { agentDirectoryModels, agentModelSelection } from "./agent-model-selection.js";
 import { ModelSelector } from "./execution-panel/model-selector.js";
+import { AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "../../ui/assistant-execution/model-selector.js";
 import { Button } from "../../../shared/ui/Button.js";
 import "./assistant-connection-picker.css";
 
@@ -29,12 +30,13 @@ export function AssistantConnectionPicker(props: {
   const [selector, setSelector] = useState<"assistant" | "model" | null>(null);
   useEffect(() => { if (namespace && !state.ready) void directory.load(); }, [directory, namespace, state.ready]);
   const value = props.value;
+  const emptyDirectory = state.ready && !state.loadingMessage && !state.error && !state.connections.length;
   const connection = state.connections.find(c => c.connectionId === value?.connection.connectionId);
   const models = agentDirectoryModels(connection?.models, connection ? state.catalogs[connection.adapterId]?.models : undefined);
   const toolDefault = connection?.authMode === "local-login";
   const selection = agentModelSelection(models, value?.model ?? "", value?.reasoningEffort ?? "", !toolDefault);
   const changed = Boolean(connection && value && (connection.adapterId !== value.connection.adapterId || connection.configRevision !== value.connection.configRevision || connection.credentialEpoch !== value.connection.credentialEpoch));
-  const reason = !namespace ? "正在确认当前数据空间" : !state.ready ? state.loadingMessage || state.error || "正在读取助手…" : !connection ? "请选择助手连接" : changed ? "助手连接已更新，请重新选择" : !connection.ready ? connection.reason ?? "助手尚未就绪" : selection.missingRequiredModel ? "请选择助手模型" : selection.invalidModel ? "原模型已失效，请重新选择" : selection.invalidEffort ? "原 Variant 已失效，请重新选择" : "";
+  const reason = !namespace ? "正在确认当前数据空间" : !state.ready ? state.loadingMessage || state.error || "正在读取助手…" : emptyDirectory ? ASSISTANT_SETUP_HINT : !connection ? "请选择助手连接" : changed ? "助手连接已更新，请重新选择" : !connection.ready ? connection.reason ?? "助手尚未就绪" : selection.missingRequiredModel ? "请选择助手模型" : selection.invalidModel ? "原模型已失效，请重新选择" : selection.invalidEffort ? "原 Variant 已失效，请重新选择" : "";
   const valid = Boolean(namespace && state.ready && !reason);
   useEffect(() => { props.onValidityChange(valid); }, [valid, props.onValidityChange]);
   const choose = (connectionId: string) => {
@@ -43,7 +45,7 @@ export function AssistantConnectionPicker(props: {
   };
   return <div className={`assistant-connection-picker${props.compact ? " assistant-connection-picker--compact" : ""}`}>
     <div className="assistant-connection-picker__controls">
-      <ModelSelector label="选择助手" model={value?.connection.connectionId ?? ""} placeholder={state.loadingMessage ? "正在读取助手…" : "选择助手"}
+      <AssistantConnectionSelector empty={!props.compact && emptyDirectory} loading={Boolean(state.loadingMessage)} model={value?.connection.connectionId ?? ""}
         open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} onManage={props.onManage}
         disabled={props.disabled || !namespace || !state.ready} options={state.connections.map(c => ({ value: c.connectionId, label: c.name, detail: c.reason }))} onChange={choose} />
       {(props.compact && value || connection && (!toolDefault || models.length > 0)) ? <ModelSelector label="选择助手模型" model={value?.model ?? ""}

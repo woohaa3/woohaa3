@@ -270,19 +270,21 @@ describe("来源复用、切换与清空（任务 2.3 / design D8）", () => {
     expect(unknown.ok).toBe(false);
   });
 
-  it("活动回合阻止清空与切换（先取消并结算）", async () => {
+  it("活动回合不阻止清空与切换，且不删除未核对回合", async () => {
     const { service } = setup({ byOwner: { "user-a": [conn({ connectionId: "c2", adapterId: "fake", extensionId: "sdk-agent" })] } });
     const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" });
     if (!created.ok) throw new Error("create failed");
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "req-1", entry: entry({ action: "generate", nodeId: "node-1", mode: "model3d", model: "m" }) });
     if (!accepted.ok) throw new Error("accept failed");
 
+    // change: 2026-10-22-remove-agent-execution-limits，任务 3.2 / design D3：清空/切换只解除
+    // 目标关联（归档会话），不因活动回合被拒绝，也不删除回合、消息与回执。
     const cleared = service.clearContext({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" });
-    expect(cleared.ok).toBe(false);
-    if (!cleared.ok) expect(cleared.error.code).toBe("conversation-busy");
+    expect(cleared).toMatchObject({ ok: true });
+    expect(service.queryTurn({ owner: "user-a", requestId: "req-1" })).toMatchObject({ ok: true, turn: { status: "queued" } });
     const switched = await service.switchConnection({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1", connectionId: "c2" });
-    expect(switched.ok).toBe(false);
-    if (!switched.ok) expect(switched.error.code).toBe("conversation-busy");
+    expect(switched.ok).toBe(true);
+    expect(service.queryTurn({ owner: "user-a", requestId: "req-1" })).toMatchObject({ ok: true, turn: { status: "queued" } });
   });
 });
 

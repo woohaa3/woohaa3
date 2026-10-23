@@ -19,6 +19,7 @@ import {
   LOCAL_AGENT_ADAPTERS,
   LOCAL_AGENT_LOCATION_NOTE,
   findLocalAgentAdapter,
+  localAgentConnectionName,
 } from "../shared.js";
 import {
   createLocalAgentDiscovery,
@@ -125,7 +126,7 @@ export function createLocalAgentHandler(options: LocalAgentHandlerOptions) {
           return {
             connectionId: record.connectionId,
             adapterId: record.adapterId,
-            name: record.name,
+            name: localAgentConnectionName(record.adapterId, record.name),
             label: adapter.label,
             runCategory: record.runCategory,
             authMode: record.authMode,

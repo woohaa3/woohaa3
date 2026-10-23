@@ -15,7 +15,7 @@
  */
 import type { ModelStreamEvent, ModelToolCall, ModelToolDefinition, ModelTurnOutcome } from "../protocol/model-turn.js";
 import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
-import { createTurnBudget, type TurnBudgetLimits } from "@woohaa3/agent-connections";
+import { createTurnObserver } from "@woohaa3/agent-connections";
 
 export type AgentSdkKind = "codex-agent-sdk" | "claude-agent-sdk" | "dsh-agent-sdk" | "gemini-agent-adk";
 
@@ -42,7 +42,6 @@ export type AgentSdkRunInput = {
   onStage?: (stage: string, detail?: string) => void;
   /** 原生会话续轮（同连接 + epoch）。 */
   resumeNativeId?: string | null;
-  budget?: Partial<TurnBudgetLimits>;
 };
 
 export type AgentSdkRunResult =
@@ -193,7 +192,7 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
     const runtime = await probeRuntime();
     if (!runtime.ok) return { ok: false, code: runtime.code, message: runtime.message };
 
-    const budget = createTurnBudget(input.budget ?? {});
+    const observation = createTurnObserver();
     const discussion = (input.toolToken ?? "") === "";
     const allowedToolNames = discussion ? [] : input.tools.map((tool) => tool.name);
     const restrictions = buildAgentSdkRestrictions({ kind: options.kind, workspaceDir: options.workspaceDir, allowedTools: allowedToolNames });
@@ -211,11 +210,7 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
     const abort = () => controller.abort();
     input.signal.addEventListener("abort", abort, { once: true });
     if (input.signal.aborted) abort();
-    let budgetExceeded = false;
     let toolViolation = false;
-    const timer = budget.limits.maxDurationMs > 0 && Number.isFinite(budget.limits.maxDurationMs)
-      ? setTimeout(() => { budgetExceeded = true; controller.abort(); }, budget.limits.maxDurationMs)
-      : undefined;
     try {
     const result = await transport.run({
       kind: options.kind,
@@ -235,10 +230,8 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
       onNativeId: () => undefined,
       onEvent: (event) => {
         if (event.type === "text-delta") {
-          if (!budget.addOutput(Buffer.byteLength(event.text, "utf8"))) {
-            budgetExceeded = true; controller.abort();
-            return;
-          }
+          // 公开输出只用于诊断；长正文本身不被应用额度截断。
+          observation.addOutput(Buffer.byteLength(event.text, "utf8"));
           // `replace` 是完整正文，不重复累计；增量才追加。
           assistantText = event.delivery === "replace" ? event.text : assistantText + event.text;
           input.onText?.(event.text, { delivery: event.delivery ?? "append", ...(event.streamId ? { streamId: event.streamId } : {}) });
@@ -246,7 +239,7 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
         }
         if (event.type === "tool-call") {
           // Authorization happens at the MCP gateway before execution, never at this event.
-          if (!budget.useToolCall()) { budgetExceeded = true; controller.abort(); return; }
+          observation.noteToolCall();
           if (!allowedToolNames.includes(event.call.name)) {
             toolViolation = true;
             controller.abort();
@@ -264,19 +257,16 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
       }
     });
 
-    if (budgetExceeded) return { ok: false, code: "budget-exceeded", message: budget.exceededReason() ?? "回合时长超出预算" };
     if (toolViolation || (result.ok && result.toolCalls.some(call => !allowedToolNames.includes(call.name)))) return { ok: false, code: "capability-unsupported", message: "助手调用了本轮未授权的工具" };
     if (input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
     if (!result.ok) return { ok: false, code: result.code, message: result.message, ...(result.nativeId ? { nativeId: result.nativeId } : {}) };
     toolCalls = [...result.toolCalls];
-    if (budget.expired()) return { ok: false, code: "budget-exceeded", message: budget.exceededReason() ?? "超出预算" };
     return {
       ok: true,
       outcome: { assistantText: result.assistantText || assistantText, toolCalls, finishReason: result.finishReason },
       ...(result.nativeId ? { nativeId: result.nativeId } : {})
     };
     } finally {
-      clearTimeout(timer);
       input.signal.removeEventListener("abort", abort);
     }
   };

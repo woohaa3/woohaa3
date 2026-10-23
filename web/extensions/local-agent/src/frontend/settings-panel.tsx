@@ -96,7 +96,7 @@ export function LocalAgentSettingsPanel({
   return (
     <div data-testid="local-agent-settings">
       <SettingsSection
-        title="调用本机 Agent"
+        title="连接本地 agent"
         action={
           <Button
             size="sm"
@@ -129,9 +129,9 @@ export function LocalAgentSettingsPanel({
               <li key={adapter.adapterId} data-adapter-id={adapter.adapterId}>
                 <div className="settings-section__item">
                   <div className="settings-section__item-main">
-                    <strong><span className="service-identity"><ServiceLogo service={adapter.adapterId} />{adapter.label.replace(/（本机）$/, "").replace(/(?: App Server| Server)$/, "")}</span></strong>
+                    <strong><span className="service-identity"><ServiceLogo service={adapter.adapterId === "codex-appserver" ? "chatgpt" : adapter.adapterId} />{adapter.label}</span></strong>
                     <p className="settings-section__hint">{installed ? `已安装 · ${running ? "运行中" : "未运行"}` : running ? "未安装 · 发现其他服务进程" : "尚未安装"}</p>
-                    {!installed ? <p className="settings-section__hint">{adapter.adapterId === "codex-appserver" ? "安装 Codex 运行时组件，或选择本机已有的 Codex 程序。" : "请先在运行本应用的电脑上安装对应命令行工具。"}</p> : null}
+                    {!installed ? <p className="settings-section__hint">{adapter.adapterId === "codex-appserver" ? "本地 ChatGPT 通过 Codex 连接。请安装或选择 Codex 程序。" : "请先在运行本应用的电脑上安装对应命令行工具。"}</p> : null}
                   </div>
                   {connection ? (
                     <>

@@ -266,6 +266,66 @@ fn media_focus_keeps_background_cards_and_restores_current_card() {
     assert!(world.get::<Text2d>(label).unwrap().0.starts_with("Remote"));
 }
 
+/// 纯视口跨档只更新文字呈现：不重建静态 2D mesh（change: 2026-10-22-improve-canvas-text-clarity，
+/// design D4「纯视口跨档仍复用主场景 mesh、空间索引与媒体纹理」）。
+#[test]
+fn viewport_only_step_change_updates_text_without_rebuilding_meshes() {
+    use crate::canvas2d::text_presentation;
+    let mut world = world();
+    world.insert_resource(text_presentation::PresentationCache::default());
+    world.insert_resource(crate::app::SurfaceState::with_size(Vec2::new(
+        1200.0, 800.0,
+    )));
+    render(&mut world);
+    let initial = handles(&world);
+    let decorations: Vec<_> = world
+        .resource::<Visuals>()
+        .card_decorations
+        .iter()
+        .filter_map(|block| block.handle())
+        .collect();
+    let label = world.resource::<Visuals>().labels["0"][0];
+    // 纯视口增量：`flags.changed` 保持 false，只有相机需要跟随。
+    {
+        let mut flags = world.resource_mut::<FrameFlags>();
+        flags.changed = false;
+        flags.viewport_only = true;
+        flags.camera_changed = true;
+        flags.mesh_rebuilt = false;
+        flags.card_blocks_rebuilt = 0;
+        flags.edge_blocks_rebuilt = 0;
+        flags.container_blocks_rebuilt = 0;
+        flags.card_decorations_rebuilt = 0;
+    }
+    world.resource_mut::<CurrentScene>().0.viewport.zoom = 8.0;
+    world
+        .run_system_once(super::super::render::sync_scene)
+        .unwrap();
+    world.run_system_once(text_presentation::sync).unwrap();
+    // 静态几何完全未重建。
+    let flags = world.resource::<FrameFlags>();
+    assert!(!flags.mesh_rebuilt, "纯视口不得重建主场景 mesh");
+    assert_eq!(flags.card_blocks_rebuilt, 0);
+    assert_eq!(flags.edge_blocks_rebuilt, 0);
+    assert_eq!(flags.container_blocks_rebuilt, 0);
+    assert_eq!(flags.card_decorations_rebuilt, 0);
+    assert_eq!(handles(&world), initial);
+    assert!(
+        world
+            .resource::<Visuals>()
+            .card_decorations
+            .iter()
+            .filter_map(|block| block.handle())
+            .eq(decorations.iter().copied()),
+        "装饰 mesh 也必须复用"
+    );
+    // 文字呈现已按新档位更新（zoom 8 → 档位 8）。
+    let font = world.get::<TextFont>(label).unwrap().font_size;
+    assert_eq!(font, FontSize::Px(96.0), "标题逻辑字号 12 × 档位 8");
+    let scale = world.get::<Transform>(label).unwrap().scale.x;
+    assert!((96.0 * scale - 12.0).abs() <= 1.0e-3);
+}
+
 #[test]
 fn edge_blocks_retain_unaffected_meshes_and_labels_on_local_changes() {
     let mut world = world();

@@ -34,6 +34,14 @@ export type AgentDetailNavigation = {
   panelAvailable(route: CanvasPanelRoute): boolean;
 };
 
+/**
+ * 当前生成目标身份（宿主注入）。
+ *
+ * `focus=true` 表示生成面板正随聚焦工作区呈现（此时没有 panel route），`focus=false` 表示
+ * 生成面板来自概览里选中节点打开的 panel。`null` 表示当前没有生成目标（未选中任何节点）。
+ */
+export type AgentDetailCurrentTarget = { nodeId: string; focus: boolean };
+
 export const AGENT_CONVERSATION_PANEL_ROUTE_TYPE = "agent-conversation" as const;
 
 export type { AgentConversationSnapshotView } from "../contract/agent-conversation.js";
@@ -56,6 +64,14 @@ export type CreateAgentConversationServiceOptions = {
   now?: () => string;
   /** 详情打开/关闭的受控导航（缺省只用本地读模型，不改变 route）。 */
   navigation?: AgentDetailNavigation;
+  /**
+   * 当前生成目标（聚焦节点或画布主选中节点 + 是否处于聚焦工作区）。
+   *
+   * 详情头部的「返回生成面板」只在当前目标仍是打开详情时的来源目标时成立；用户已切到别的
+   * 节点（或取消选中）后该动作退化为纯关闭，不把用户拉回旧节点的生成面板。
+   * 未注入时保留旧行为（只要来源 route 可用就恢复）。
+   */
+  currentTarget?: () => AgentDetailCurrentTarget | null;
 };
 
 export function createAgentConversationService(
@@ -74,6 +90,13 @@ export function createAgentConversationService(
   clearDetail: () => void;
   /** 收起详情并恢复合法来源 route（导航语义）；用于显式「返回生成面板」。 */
   closeDetail: () => void;
+  /**
+   * 当前详情是否仍能「返回生成面板」：来源 route 可用**且**其节点仍是当前生成目标。
+   *
+   * 用户已选中别的节点、取消选中或来源节点被删除时返回 false：此时收起详情只是关闭，
+   * 不把用户拉回旧节点的生成面板。
+   */
+  canReturnToSource: () => boolean;
   /** 当前详情快照（生成面板与详情共用同一读模型）。 */
   getDetail: () => ConversationSnapshot | null;
   /** 只读打开详情 route（保存合法来源，不 submit/dispatch）。 */
@@ -94,6 +117,9 @@ export function createAgentConversationService(
   let disposed = false;
   // 详情来源返回上下文：只保存稳定 panel route identity，不复制消息/事件（design D6a）。
   let detailReturn: CanvasPanelRoute | null = null;
+  // 详情来源生成目标（打开时的来源节点与呈现形态）：用于判断「返回生成面板」是否仍成立。
+  // 概览来源同时有 `detailReturn`；聚焦工作区的生成面板没有 panel route，只有这里的目标身份。
+  let detailSource: AgentDetailCurrentTarget | null = null;
 
   const dataScopeId = options.dataScopeId ?? (() => "page");
   let namespace = dataScopeId();
@@ -332,7 +358,19 @@ export function createAgentConversationService(
     const nav = options.navigation;
     if (!nav) return;
     const current = nav.getPanel();
-    if (current && current.type !== AGENT_CONVERSATION_PANEL_ROUTE_TYPE) detailReturn = current;
+    if (current?.type === AGENT_CONVERSATION_PANEL_ROUTE_TYPE) {
+      // 详情 → 详情（活动/历史里再点一条）：保留既有来源，不因为当前 panel 是详情就丢掉它。
+    } else if (current) {
+      detailReturn = current;
+      detailSource = current.nodeId ? { nodeId: current.nodeId, focus: false } : null;
+    } else {
+      // 没有概览来源 panel：可能是聚焦工作区检查器里的生成面板（只有目标身份），
+      // 也可能是历史/活动入口（根本没有生成面板，收起就只有关闭）。仅当聚焦节点正是本次
+      // 详情的目标节点时才算「从这个生成面板打开」，否则不宣称可以返回。
+      const target = options.currentTarget?.() ?? null;
+      detailReturn = null;
+      detailSource = target?.focus && input.nodeId !== undefined && target.nodeId === input.nodeId ? target : null;
+    }
     nav.openPanel({
       type: AGENT_CONVERSATION_PANEL_ROUTE_TYPE,
       conversationId: input.conversationId,
@@ -344,16 +382,47 @@ export function createAgentConversationService(
     void openDetail(input.conversationId);
   };
 
-  /** 收起详情：恢复合法来源生成面板；来源失效则仅关闭（不留下失效 route）。 */
+  /**
+   * 来源是否仍是当前生成目标。
+   *
+   * 两种来源形态：
+   * - 概览生成面板：记录了一个 panel route，只有该 route 仍可用**且**节点仍是当前目标时才能返回，
+   *   否则返回会把画布拉到用户已经离开的节点。
+   * - 聚焦工作区检查器：没有 panel route，关闭详情就回到工作区里的生成面板，因此要求当前仍是
+   *   同一节点的聚焦态。
+   *
+   * 历史/活动入口打开的详情没有来源目标，只能关闭。
+   * 宿主未注入目标查询时保留旧行为（只有概览来源 route 可用才算可返回）。
+   */
+  const canReturnToSource = (): boolean => {
+    const nav = options.navigation;
+    if (!nav) return false;
+    const readTarget = options.currentTarget;
+    if (!readTarget) return detailReturn !== null && nav.panelAvailable(detailReturn);
+    const target = readTarget();
+    if (detailReturn) {
+      if (!nav.panelAvailable(detailReturn)) return false;
+      return target !== null && target.nodeId === detailReturn.nodeId;
+    }
+    return target !== null && target.focus && detailSource !== null && target.nodeId === detailSource.nodeId;
+  };
+
+  /**
+   * 收起详情。
+   *
+   * 仅当来源生成面板**仍可返回**时恢复它；否则这只是一个关闭动作——用户已选中别的节点
+   * （或取消选中、来源节点被删除）时不得把画布拉回旧节点的生成面板。
+   */
   const collapseDetail = (): void => {
     const nav = options.navigation;
     if (!nav) {
       publish({ detail: null });
       return;
     }
-    const restore = detailReturn;
+    const restore = canReturnToSource() ? detailReturn : null;
     detailReturn = null;
-    if (restore && nav.panelAvailable(restore)) nav.openPanel(restore);
+    detailSource = null;
+    if (restore) nav.openPanel(restore);
     else nav.closePanel(AGENT_CONVERSATION_PANEL_ROUTE_TYPE);
     publish({ detail: null });
   };
@@ -426,6 +495,7 @@ export function createAgentConversationService(
     openDetail,
     clearDetail,
     closeDetail: collapseDetail,
+    canReturnToSource,
     navigateToDetail,
     locateAndOpenDetail,
     collapseDetail,

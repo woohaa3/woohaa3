@@ -9,16 +9,18 @@ import type { Vec3 } from "../model-transform.js";
 
 export const SCENE_IR_V2_VERSION = MODEL_SCRIPT_SCENE_IR_V2_VERSION;
 
-/** 资源上限（至少与 V1 同量级，并新增 V2 专属预算）。 */
-export const SCENE_IR_V2_MAX_OPS = 4096;
-export const SCENE_IR_V2_MAX_MATERIALS = 256;
-export const SCENE_IR_V2_MAX_HIERARCHY_DEPTH = 16;
+/**
+ * 真实表达/正确性边界（**不是**应用执行额度）。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 6.2 / design D6：原 op 数（4096）、
+ * material 数（256）、层级深度（16）、累计/估算顶点与面数（20 万/40 万）等应用侧总量门禁已删除。
+ * 保留的是不能由应用任意记账绕过的真实边界：
+ * - 单个 mesh 的顶点/面数由 16 位索引宽度决定（`SCENE_IR_V2_MAX_MESH_VERTICES`/`FACES`），
+ *   超出时必须改用分段的合法表示，而不是把整份场景判为失败；
+ * - 坐标绝对值、有限数值、引用存在性与无环层级是正确性约束。
+ */
 export const SCENE_IR_V2_MAX_MESH_VERTICES = 65_000;
 export const SCENE_IR_V2_MAX_MESH_FACES = 130_000;
-export const SCENE_IR_V2_MAX_TOTAL_MESH_VERTICES = 200_000;
-export const SCENE_IR_V2_MAX_TOTAL_MESH_FACES = 400_000;
-/** 估算 tessellation 顶点预算：由 primitive 数量 × 固定质量档推导，不能靠海量 op 绕过。 */
-export const SCENE_IR_V2_MAX_ESTIMATED_VERTICES = 200_000;
 export const SCENE_IR_V2_COORD_LIMIT = 1_000_000;
 /** segment 最小长度（低于此值视为退化）。 */
 export const SCENE_IR_V2_MIN_SEGMENT_LENGTH = 1e-4;

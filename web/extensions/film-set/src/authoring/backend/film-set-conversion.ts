@@ -124,7 +124,6 @@ export type FilmSetConversionServiceDependencies = {
    * 上游调用）。每次上游调用都是无状态回合，模型不会记得上一次输出，因此服务端把上一份候选与
    * 校验错误一并回喂，避免逐条在提示词里穷举场景隐式约束（胶囊高度、图元尺寸等）。
    */
-  maxRepairAttempts?: number;
 };
 
 /** 提交结果：3D 直接完成，图片/视频完成后返回终态；running/unknown 由状态查询继续跟踪。 */
@@ -150,7 +149,6 @@ export class FilmSetConversionService {
   /** 显式部署的总时长预算；0 表示不限时。 */
   private readonly generationTimeoutMs: number;
   /** 完整校验失败时允许的回喂修复轮数（0 表示不修复，一次失败即终态）。 */
-  private readonly maxRepairAttempts: number;
 
   constructor(deps: FilmSetConversionServiceDependencies) {
     this.deps = deps;
@@ -159,8 +157,6 @@ export class FilmSetConversionService {
     this.submitBudgetMs = typeof budget === "number" && Number.isFinite(budget) && budget >= 0 ? budget : 0;
     const timeout = deps.generationTimeoutMs;
     this.generationTimeoutMs = typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0 ? timeout : 0;
-    const repairs = deps.maxRepairAttempts;
-    this.maxRepairAttempts = typeof repairs === "number" && Number.isInteger(repairs) && repairs >= 0 ? repairs : 2;
   }
 
   /**
@@ -641,9 +637,11 @@ export class FilmSetConversionService {
         void this.updateRunning(record, { step });
       }
     };
-    // 结构归一成功但**完整校验失败**时，把校验错误与上一份候选回喂给模型做**有界修复**（design D4/D5）：
-    // 上游每次调用都是无状态回合、不会记得上一份输出，逐条在提示词里穷举场景隐式约束（胶囊高度、
-    // 图元尺寸等）会一直漏；回喂能让模型针对真实报错收敛，同时保持上游不被掐断。
+    // 结构归一成功但**完整校验失败**时，把校验错误与上一份候选回喂给模型继续修复
+    // （change: 2026-10-22-remove-agent-execution-limits，任务 7.2 / design D7）：上游每次调用都是
+    // 无状态回合、不会记得上一份输出，逐条在提示词里穷举场景隐式约束会一直漏。修复**不再有固定
+    // 次数上限**：每次调用拥有稳定子尝试身份并关联同一父回合，直到候选通过完整校验、用户停止、
+    // 权限/目标失效或上游真实失败。
     let repair: FilmSetConversionRepair | undefined;
     for (let round = 0; ; round += 1) {
       if (abort.signal.aborted) return;
@@ -677,10 +675,7 @@ export class FilmSetConversionService {
         await this.commit(record, room, validated.value, mediaProvenance(record), note, abort.signal);
         return;
       }
-      if (round >= this.maxRepairAttempts) {
-        await this.fail(record, validated.code, validated.message, false);
-        return;
-      }
+      // 不按修复次数终止：携带上一候选与具体诊断继续同一父回合的下一子尝试。
       repair = { candidate: result.candidate, message: validated.message, attempt: round + 1 };
     }
   }

@@ -37,11 +37,6 @@ export function validateItemBudget(
   return null;
 }
 
-/** 单个对象源码字节估算（动作脚本；模型脚本另计）。 */
-export function itemSourceBytes(motion: FilmSetMotion | undefined): number {
-  return motion ? motion.motionScript.length : 0;
-}
-
 /**
  * 对象动作的适配关联内容 hash（design D6）。
  *

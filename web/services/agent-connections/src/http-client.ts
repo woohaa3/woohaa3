@@ -11,7 +11,10 @@ import { guardedFetch, type EndpointPolicy } from "./endpoint-policy.js";
 export type BoundedHttpClientOptions = {
   policy: EndpointPolicy;
   fetchImpl?: typeof globalThis.fetch;
-  /** 单请求超时（毫秒；默认 60s）。 */
+  /**
+   * 单请求的**显式**期限（毫秒）。缺省不设置：在途工作不因固定时长中止
+   * （change: 2026-10-22-remove-agent-execution-limits，任务 2.5）；停止仍由调用方 signal 表达。
+   */
   timeoutMs?: number;
 };
 
@@ -32,10 +35,10 @@ export type HttpJsonRequest = {
 
 export function createBoundedHttpClient(options: BoundedHttpClientOptions) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  const defaultTimeout = options.timeoutMs ?? 60_000;
+  const defaultTimeout = options.timeoutMs !== undefined && options.timeoutMs > 0 ? options.timeoutMs : undefined;
 
-  /** 收集 `AbortSignal` 与超时，返回可清理的组合信号。 */
-  const composeSignal = (signal: AbortSignal | undefined, timeoutMs: number) => {
+  /** 收集 `AbortSignal` 与（可选的）显式期限，返回可清理的组合信号。 */
+  const composeSignal = (signal: AbortSignal | undefined, timeoutMs: number | undefined) => {
     const controller = new AbortController();
     const cleanups: Array<() => void> = [];
     if (signal) {
@@ -46,8 +49,8 @@ export function createBoundedHttpClient(options: BoundedHttpClientOptions) {
         cleanups.push(() => signal.removeEventListener("abort", onAbort));
       }
     }
-    const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
-    cleanups.push(() => clearTimeout(timer));
+    const timer = timeoutMs === undefined ? undefined : setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+    if (timer !== undefined) cleanups.push(() => clearTimeout(timer));
     return { signal: controller.signal, cleanup: () => { for (const fn of cleanups) fn(); } };
   };
 

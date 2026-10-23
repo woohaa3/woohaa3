@@ -76,7 +76,7 @@ export type AuthoringGenerationProps = {
    * 失效选择保留并显示原因，**不**自动切换到别家来源。
    */
   sourceSelection?: {
-    /** 可选来源（>=1；贡献方据 `selectedSourceId` 判定自己是否被渲染）。 */
+    /** 可选来源（未配置时可为空；贡献方据 `selectedSourceId` 判定自己是否被渲染）。 */
     sources: ReadonlyArray<{ sourceId: string; label: string }>;
     selectedSourceId: string;
     /** 该来源当前可选连接（不含秘密）。 */

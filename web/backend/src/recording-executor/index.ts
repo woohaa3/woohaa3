@@ -61,7 +61,6 @@ export {
 } from "./finalize.js";
 export { sweepRecordingWorkRoot, type RecordingSweepOptions } from "./sweep.js";
 export {
-  MAX_ARTIFACT_BYTES,
   compareArtifact,
   probeArtifact,
   sha256Hex,

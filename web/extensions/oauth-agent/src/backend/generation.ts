@@ -21,7 +21,6 @@ import { parseCandidateText } from "./generation/candidate-codec.js";
 import { buildPrompt, buildToolsPrompt } from "./generation/prompts.js";
 import { commitAnimation, commitCameras, commitModel, type CommitContext } from "./generation/commit.js";
 import { priorToReceipt } from "./generation/receipts.js";
-import { isAggregateRunNode } from "@woohaa3/contracts";
 import { identityOf, type GenerateRequest, type GenerationOutcome, type GenerationProgress, type RequestRecord } from "./generation/types.js";
 
 export type { GenerateRequest, GenerationProgress, GenerationOutcome } from "./generation/types.js";
@@ -32,15 +31,8 @@ export { buildPrompt, buildToolsPrompt } from "./generation/prompts.js";
 export type ChatGptGenerationOptions = {
   ports: ChatGptCanvasPorts;
   codex: CodexAdapter;
-  /** 每 owner 串行：同一 owner 的推理排队执行。 */
-  maxConcurrency?: number;
-  turnTimeoutMs?: number;
-  /** 每 owner 最大排队深度（超出即拒绝；design D6 有界排队）。 */
-  maxQueueDepth?: number;
   /** 受控 MCP 工具面（design D4b）。 */
   toolsEnabled?: boolean;
-  /** 单回合允许的最大 MCP 工具调用次数（超出即终止回合）。 */
-  maxToolCalls?: number;
   toolGrants?: import("@woohaa3/contracts").ApplicationToolDelegationFacade;
   workJournal?: ChatGptWorkJournal;
   logger?: (event: Record<string, unknown>) => void;
@@ -60,10 +52,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
   const codex = options.codex;
   const records = new Map<string, RequestRecord>();
   const active = new Map<string, { controller: AbortController; ownerId: string }>();
-  const ownerQueues = new Map<string, Promise<unknown>>();
-  const turnTimeoutMs = options.turnTimeoutMs ?? 0;
   const toolsEnabled = options.toolsEnabled === true;
-  const maxToolCalls = options.maxToolCalls ?? 40;
   const journal = options.workJournal;
   const log = options.logger ?? (() => undefined);
   const workIds = new Map<string, string>();
@@ -75,30 +64,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     journal.update(workId, patch);
   };
 
-  const enqueue = <T>(ownerId: string, task: () => Promise<T>): Promise<T> => {
-    const previous = ownerQueues.get(ownerId) ?? Promise.resolve();
-    const next = previous.then(task, task);
-    ownerQueues.set(ownerId, next.catch(() => undefined));
-    return next;
-  };
-
-  const maxQueueDepth = options.maxQueueDepth ?? 8;
-  const queuedCounts = new Map<string, number>();
-
   const epochValid = (admittedEpoch: number): boolean => !journal || journal.authEpoch() === admittedEpoch;
-
-  // 聚合节点（片场）单任务门禁：同一 owner 同一节点在途生成只允许一个。
-  const aggregateNodeIds = new Map<string, { nodeId: string; requestId: string }>();
-  const activeKey = (ownerId: string, nodeId: string): string => `${ownerId}\u0000${nodeId}`;
-  const isAggregateNodeType = (nodeType: string): boolean => isAggregateRunNode({ type: nodeType });
-  const hasOtherActiveForNode = (ownerId: string, nodeId: string, requestId: string): boolean => {
-    const current = aggregateNodeIds.get(activeKey(ownerId, nodeId));
-    return current !== undefined && current.requestId !== requestId;
-  };
-  const clearAggregate = (ownerId: string, nodeId: string, requestId: string): void => {
-    const key = activeKey(ownerId, nodeId);
-    if (aggregateNodeIds.get(key)?.requestId === requestId) aggregateNodeIds.delete(key);
-  };
 
   const fail = (record: RequestRecord, onProgress: GenerationProgress | undefined, code: string, message: string, status: number): GenerationOutcome => {
     record.receipt = { status: "failed", requestId: record.requestId, mode: record.mode, code, message, ...(record.llmOutput ? { llmOutput: record.llmOutput } : {}), ...(record.clipId ? { clipId: record.clipId } : {}) };
@@ -170,7 +136,6 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     ]);
     const applied: string[] = [];
     const failed: Array<{ part: string; code: string; message: string }> = [];
-    let toolCalls = 0;
     record.receipt = { status: "running", requestId: input.requestId, stage: "reasoning" };
     onProgress?.({ requestId: input.requestId, stage: "reasoning" });
     const prompt = buildToolsPrompt(input, read);
@@ -185,8 +150,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
           tools: [...WRITE_TOOLS, "get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_film_set_clips"],
           ...(input.selectedCameraId ? { cameraId: input.selectedCameraId } : {}),
           ...(input.clipId ? { clipId: input.clipId } : {}),
-          ...(input.itemId ? { itemId: input.itemId } : {}),
-          maxCalls: maxToolCalls
+          ...(input.itemId ? { itemId: input.itemId } : {})
         });
         grantToken = grant.token;
       } catch (error) {
@@ -206,11 +170,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
           } else if (event.type === "tool-started") {
             onProgress?.({ requestId: input.requestId, stage: `tool:${event.tool}`, tool: { name: event.tool, callId: event.callId, status: "started" } });
           } else if (event.type === "tool") {
-            toolCalls += 1;
-            if (toolCalls > maxToolCalls) {
-              controller.abort();
-              return;
-            }
+            // 工具事件是观察：真正的授权与撤销校验在 MCP 工具入口逐次执行，不按累计次数终止回合。
             onProgress?.({ requestId: input.requestId, stage: `tool:${event.tool}`, ...(event.status ? { detail: event.status } : {}), tool: { name: event.tool, callId: event.callId, status: event.ok ? "completed" : "failed", ok: event.ok, summary: event.message } });
             if (!WRITE_TOOLS.has(event.tool)) return;
             if (event.ok) applied.push(event.tool);
@@ -224,7 +184,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
         options.toolGrants.revoke(workIds.get(input.requestId) ?? input.requestId);
       }
     }
-    if (controller.signal.aborted) return fail(record, onProgress, "cancelled", "生成已取消（或超出工具预算）。", 499);
+    if (controller.signal.aborted) return fail(record, onProgress, "cancelled", "生成已取消。", 499);
     if (applied.length === 0 && failed.length === 0) {
       return fail(record, onProgress, "no-change", "推理完成但未对画布做出任何改动。", 422);
     }
@@ -266,11 +226,6 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     const record: RequestRecord = existing ?? { requestId: input.requestId, identity, mode: input.mode, receipt: { status: "running", requestId: input.requestId, stage: "queued" } };
     records.set(input.requestId, record);
     record.receipt = { status: "running", requestId: input.requestId, stage: "queued" };
-    const queued = queuedCounts.get(input.ownerId) ?? 0;
-    if (queued >= maxQueueDepth) {
-      return { ok: false, status: 429, code: "queue-full", message: "该账户的生成队列已满，请稍后重试。" };
-    }
-    queuedCounts.set(input.ownerId, queued + 1);
     let admittedEpoch = journal ? journal.authEpoch() : 0;
     if (journal) {
       const admitted = journal.admit({
@@ -289,22 +244,13 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     }
     onProgress?.({ requestId: input.requestId, stage: "queued" });
 
-    // 聚合节点（片场）单任务门禁在**权威受理点**保证：3D 生成按 (ownerId,nodeId) 预留，
-    // 已有在途任务时直接拒绝（change: 2026-10-12-unify-generation-history-strip，design D5）。
-    // 非 3D 模式不参与预留；预留后若读到的节点不是聚合节点则立即释放（见下）。
-    const is3dMode = input.mode === "model3d" || input.mode === "film-set" || input.mode === "camera";
-    if (is3dMode) {
-      if (hasOtherActiveForNode(input.ownerId, input.nodeId, input.requestId)) {
-        return { ok: false, status: 409, code: "operation-in-progress", message: "该聚合节点已有运行中的生成任务" };
-      }
-      aggregateNodeIds.set(activeKey(input.ownerId, input.nodeId), { nodeId: input.nodeId, requestId: input.requestId });
-    }
+    // change: 2026-10-22-remove-agent-execution-limits，任务 3.3 / design D3：删除聚合节点
+    // 「已有在途任务」的拒绝与每 owner 串行队列。同一目标上的并发写由 Canvas 权威内容条件与
+    // 事务决定：真实冲突返回 version-conflict，不以「节点忙」或排队长度拒绝合法工作。
 
-    return enqueue(input.ownerId, async (): Promise<GenerationOutcome> => {
-      queuedCounts.set(input.ownerId, Math.max(0, (queuedCounts.get(input.ownerId) ?? 1) - 1));
+    return (async (): Promise<GenerationOutcome> => {
       const controller = new AbortController();
       active.set(input.requestId, { controller, ownerId: input.ownerId });
-      const timeout = turnTimeoutMs > 0 ? setTimeout(() => controller.abort(), turnTimeoutMs) : undefined;
       if (!epochValid(admittedEpoch)) {
         return fail(record, onProgress, "authorization-changed", "授权已变更，已放弃该在途生成。", 409);
       }
@@ -315,8 +261,6 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
         record.clipId = input.clipId;
         if (input.mode === "camera" && input.selectedCameraId && !read.cameras.some(camera => camera.id === input.selectedCameraId)) return fail(record, onProgress, "unknown-camera", "Selected camera no longer exists", 409);
         if (input.mode === "camera" && input.clipId && read.animation && !resolveFilmSetClip(read.animation, input.clipId)) return fail(record, onProgress, "unknown-clip", "Selected clip no longer exists", 409);
-        // 预留针对的是「3D 目标」；读到的节点不是聚合节点时释放预留，不误伤普通模型节点。
-        if (is3dMode && !isAggregateNodeType(read.nodeType)) clearAggregate(input.ownerId, input.nodeId, input.requestId);
         if (input.itemId && (!read.animation?.filmSetContent.items.some(item => item.id === input.itemId) || !input.clipId)) return fail(record, onProgress, "unknown-item", "生成目标对象或片段不存在", 409);
         if (input.itemId && !toolsEnabled) return fail(record, onProgress, "tools-required", "对象动作生成需要启用片段工具能力", 409);
         if (input.mode === "film-set" && read.animation) {
@@ -353,11 +297,9 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
         if (controller.signal.aborted) return fail(record, onProgress, "cancelled", "生成已取消。", 499);
         return fail(record, onProgress, "generation-failed", error instanceof Error ? error.message : String(error), 502);
       } finally {
-        clearTimeout(timeout);
         active.delete(input.requestId);
-        clearAggregate(input.ownerId, input.nodeId, input.requestId);
       }
-    });
+    })();
   };
 
   return {

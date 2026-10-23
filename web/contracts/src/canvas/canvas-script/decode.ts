@@ -2,13 +2,16 @@
  * Canvas Script 严格 codec
  * （change: 2026-10-13-add-canvas-script-authoring，任务 1.1 / design D3、D4）。
  *
- * 在执行/授权/持久化**之前**拒绝：未知版本、未知字段、空身份、非法 expectedRevision、
- * 超源码字节预算。与 `agent-canvas-protocol` 共享同一套原语，不引入 schema 库。
+ * 在执行/授权/持久化**之前**拒绝：未知版本、未知字段、空身份、非法 expectedRevision。
+ * 与 `agent-canvas-protocol` 共享同一套原语，不引入 schema 库。
+ *
+ * change: 2026-10-22-remove-agent-execution-limits，任务 5.1：源码字节总量门禁已删除；
+ * 大脚本完整接收、完整预检并可继续传输，不再要求用户拆分。
  *
  * 浏览器安全：只用 `TextEncoder` 计算 UTF-8 字节数，不依赖 Node Buffer。
  */
 import { isBoundedId, isJsonObject, isNonNegativeInteger } from "../../validation.js";
-import { CANVAS_SCRIPT_LIMITS, isCanvasScriptVersion, type CanvasScriptVersion } from "./limits.js";
+import { isCanvasScriptVersion, type CanvasScriptVersion } from "./limits.js";
 import { canvasScriptError, type CanvasScriptError } from "./types.js";
 
 export type CanvasScriptDecodeResult<T> =
@@ -61,14 +64,6 @@ export function decodeCanvasScriptRequest(raw: unknown): CanvasScriptDecodeResul
   }
   if (typeof raw.source !== "string") return fail("malformed-request", "source 必须是字符串", "source");
   if (raw.source.trim() === "") return fail("malformed-request", "source 不能为空", "source");
-  const bytes = canvasScriptSourceBytes(raw.source);
-  if (bytes > CANVAS_SCRIPT_LIMITS.sourceMaxBytes) {
-    return fail(
-      "script-limit-exceeded",
-      `源码 ${bytes} 字节超过 ${CANVAS_SCRIPT_LIMITS.sourceMaxBytes} 字节上限`,
-      "source"
-    );
-  }
   const decoded: DecodedCanvasScriptRequest = {
     canvasId: raw.canvasId,
     requestId: raw.requestId,

@@ -44,7 +44,10 @@ export function createGeminiTransport(): AgentSdkTransport {
         const runner = new Runner({ agent, appName, sessionService });
         for await (const event of runner.runAsync({
           userId, sessionId, newMessage: { role: "user", parts: [{ text: input.prompt }, ...(input.images ?? []).map(image => ({ inlineData: { mimeType: image.contentType, data: Buffer.from(image.bytes).toString("base64") } }))] },
-          runConfig: { streamingMode: StreamingMode.SSE, maxLlmCalls: 12 }, abortSignal: input.signal
+          // change: 2026-10-22-remove-agent-execution-limits，任务 2.4：ADK 2.3.0 的官方语义是
+          // `maxLlmCalls <= 0` 时**不施加**LLM 调用数上限；省略会落到内建默认 500，属于隐藏上限。
+          // 因此显式传 0（不是猜测的负数，也不是巨大值）。停止仍来自 abortSignal 与 ADK 真实结束/失败。
+          runConfig: { streamingMode: StreamingMode.SSE, maxLlmCalls: 0 }, abortSignal: input.signal
         })) {
           if (event.errorCode) return { ok: false, code: "model-access-denied", message: event.errorMessage ?? event.errorCode };
           for (const part of event.content?.parts ?? []) {

@@ -68,12 +68,9 @@ export class PlanGeometry {
     return selected;
   }
   touch(id: string) {
+    // change: 2026-10-22-remove-agent-execution-limits，任务 5.1：影响节点数不再是额度；
+    // 完整派生集合由同一 planner 原子处理。
     this.affected.add(id);
-    planAssert(
-      this.affected.size <= AGENT_CANVAS_LIMITS.maxAffectedNodes,
-      "limit-exceeded",
-      "实际影响节点超过 256 上限",
-    );
   }
   move(id: string, target: { x: number; y: number }) {
     const n = this.require(id),
@@ -131,12 +128,9 @@ export class PlanGeometry {
   grid(ids: string[], grid: AgentGridLayout) {
     const selected = this.roots(ids, true);
     planAssert(
-      grid.mode === "grid" &&
-        Number.isInteger(grid.columns) &&
-        grid.columns >= 1 &&
-        grid.columns <= AGENT_CANVAS_LIMITS.maxGridColumns,
+      grid.mode === "grid" && Number.isInteger(grid.columns) && grid.columns >= 1,
       "malformed-request",
-      "grid.columns 必须是 1..256 整数",
+      "grid.columns 必须是正整数",
     );
     const columns = Math.min(grid.columns, selected.length),
       gapX = grid.gapX ?? AGENT_CANVAS_LIMITS.layoutGap,
