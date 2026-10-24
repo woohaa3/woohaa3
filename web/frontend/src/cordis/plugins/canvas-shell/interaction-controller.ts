@@ -310,6 +310,12 @@ export function installInteractionController(options: InteractionControllerOptio
       focusInputBlocked,
       clearHeldKeys,
       syncModelFocusValid: () => frameLoop.step("focus-valid", () => model.syncModelFocusValid(), undefined),
+      projectResidency: () => frameLoop.step("residency-project", () => {
+        // 先下发本帧视口/surface（缩略图档位与可见范围依赖它们），再投影准入集合。
+        options.onViewportForResidency?.(activeViewport());
+        options.onSurface?.(surfaceSize());
+        options.projectResidency?.();
+      }, undefined),
       syncTexture: () => frameLoop.step("image-sync", () => textureSync?.sync(), undefined),
       syncVideoSessions: () => frameLoop.step("video-sync", () => options.videoSessions?.sync(), undefined),
       syncCompositeAssetMedia: () => frameLoop.step("composite-media-sync", () => options.compositeAssetMediaSessions?.sync() ?? null, compositeAssetMediaReady),

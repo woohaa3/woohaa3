@@ -13,6 +13,7 @@ mod observer;
 mod positions;
 mod results;
 mod snapshot;
+mod spatial;
 pub(crate) use positions::PositionDelta;
 
 use std::cell::{Cell, RefCell};

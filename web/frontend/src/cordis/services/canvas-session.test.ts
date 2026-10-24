@@ -447,6 +447,78 @@ describe("内容权限只读（进画布即判定，不等第一次写入被拒�
   });
 });
 
+describe("规范投影复用（change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 8.1）", () => {
+  const REUSE_CANVAS = "canvas-projection-reuse";
+  const syncing = () => encodeStatusMessage({
+    status: "syncing",
+    protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+    roomEpoch: "epoch-1",
+    revision: 4
+  });
+  const synced = () => encodeStatusMessage({
+    status: "synced",
+    protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+    roomEpoch: "epoch-1",
+    revision: 4
+  });
+
+  it("同一 doc/epoch/revision 的重复状态通知复用同一规范投影对象", async () => {
+    const factory = new IDBFactory();
+    (globalThis as { indexedDB?: IDBFactory }).indexedDB = factory;
+    const sockets: Array<ReturnType<typeof fakeSocket>> = [];
+    const remote = {
+      openCanvasSession: () => {
+        const entry = fakeSocket([]);
+        sockets.push(entry);
+        return entry.socket;
+      },
+      closeCanvasSession: () => undefined,
+      reconnectCanvasSession: () => undefined
+    } as unknown as CanvasRemoteService;
+
+    const session = await createCanvasSession({
+      canvasId: REUSE_CANVAS,
+      remote,
+      database: new CanvasDatabase({ indexedDb: factory })
+    });
+    try {
+      const canvas = createEmptyWoohaa3ServerCanvas(REUSE_CANVAS, NOW);
+      canvas.document.nodes.push({ id: "n1", type: "text", position: { x: 1, y: 2 }, width: 10, height: 10, zIndex: 1 });
+      canvas.revision = 4;
+      const serverDoc = serverCanvasToYDoc(canvas);
+      sockets[0]!.socket.receive(syncing());
+      sockets[0]!.socket.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, Y.encodeStateAsUpdate(serverDoc)));
+      sockets[0]!.socket.receive(synced());
+      const first = (globalThis as { __canvasCanonical?: unknown }).__canvasCanonical;
+      expect(first).toBeTruthy();
+
+      // 与内容无关的状态通知（revision 未变、无新 update）：复用同一已验证投影。
+      for (let i = 0; i < 20; i += 1) sockets[0]!.socket.receive(synced());
+      expect((globalThis as { __canvasCanonical?: unknown }).__canvasCanonical).toBe(first);
+      expect(session.getStatus().remote.confirmedRevision).toBe(4);
+      expect(session.getStatus().phase).toBe("ready");
+
+      // revision 前进：同一 doc 谱系上继续写入（新客户端 id 的并发写会按 Yjs 冲突规则落败）。
+      serverDoc.getMap("meta").set("revision", 5);
+      sockets[0]!.socket.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, Y.encodeStateAsUpdate(serverDoc)));
+      sockets[0]!.socket.receive(
+        encodeStatusMessage({
+          status: "synced",
+          protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+          roomEpoch: "epoch-1",
+          revision: 5
+        })
+      );
+      const after = (globalThis as { __canvasCanonical?: { revision: number } }).__canvasCanonical;
+      expect(after?.revision).toBe(5);
+      expect(after).not.toBe(first);
+    } finally {
+      session.shutdown();
+      delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+    }
+  });
+});
+
 describe("yDocToServerCanvas 参考（确保测试断言用的是权威派生）", () => {
   it("服务端 doc 派生 revision 与节点", () => {
     const canvas = createEmptyWoohaa3ServerCanvas(CANVAS, NOW);

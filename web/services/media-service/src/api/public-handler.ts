@@ -6,13 +6,23 @@
  * - `POST  /api/media`         上传
  * - `GET   /api/media/<key>`   读取（支持 `Range`）
  * - `HEAD  /api/media/<key>`   元数据
+ * - `GET   /api/media/<key>?variant=thumbnail&edge=256[&format=webp][&kind=poster]`
+ *   受控预览派生物（change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.1）：
+ *   命中缓存仍需按当前作用域验证原资产授权；未命中时有界排队生成，本次以 `202 pending`
+ *   结束，调用方保持占位/上次合法图并重试。派生物不是 canonical 资产，不产生 asset/job。
  *
  * 安全性：key 必须是内容寻址键；错误响应只给稳定 `code`，不回显 COS 原始错误。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { ALLOWED_MEDIA_TYPES, isValidStorageKey } from "@woohaa3/contracts";
+import {
+  ALLOWED_MEDIA_TYPES,
+  isDerivableSourceKey,
+  isValidStorageKey,
+  thumbnailDerivativeQuery,
+  type MediaDerivativeIdentity
+} from "@woohaa3/contracts";
 import { isMediaObjectNotFoundError, type MediaStorage, type MediaStorageScope } from "@woohaa3/contracts";
 import { canvasScopeOf } from "../application/media-scope.js";
 import { DEFAULT_MAX_UPLOAD_BYTES,
@@ -20,6 +30,10 @@ import { DEFAULT_MAX_UPLOAD_BYTES,
   ingestMediaObject,
   mediaErrorStatus,
   mediaObjectUrl } from "../application/ingest.js";
+import {
+  MediaDerivativeError,
+  type MediaDerivativeReadFacade
+} from "../application/media-derivatives.js";
 import type { NativeProjectVerifier } from "@woohaa3/photocraft-project-verifier";
 
 export const DEFAULT_MEDIA_BASE_PATH = "/api/media";
@@ -50,6 +64,13 @@ export type MediaRequestHandlerOptions = {
    * 进程内有界核验的默认实例。
    */
   verifier?: NativeProjectVerifier;
+  /**
+   * 预览派生物读取面（change: 2026-10-23-scale-canvas-media-residency，任务 4.1）。
+   *
+   * 缺省表示本部署不启用派生：带 `variant` 的读取以 `derivative-unsupported` 拒绝，调用方
+   * 回退到原图路径。派生物字节仍只经注入的 `storage` 读写。
+   */
+  derivatives?: MediaDerivativeReadFacade;
 };
 
 export function createMediaRequestHandler(options: MediaRequestHandlerOptions): MediaRequestHandler {
@@ -63,6 +84,7 @@ export function createMediaRequestHandler(options: MediaRequestHandlerOptions): 
     let key: string;
     let projectUpload = false;
     let scope: MediaStorageScope | undefined;
+    let variant: MediaDerivativeIdentity | undefined;
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       pathname = url.pathname;
@@ -76,6 +98,21 @@ export function createMediaRequestHandler(options: MediaRequestHandlerOptions): 
       } else {
         return false;
       }
+      // 只有显式声明 `variant` 才走派生物；参数非法时在访问存储之前稳定拒绝。
+      const variantKind = url.searchParams.get("variant");
+      if (variantKind !== null && key !== "") {
+        const decoded = thumbnailDerivativeQuery({
+          sourceKey: key,
+          edge: url.searchParams.get("edge"),
+          format: url.searchParams.get("format") ?? undefined,
+          kind: variantKind
+        });
+        if (!decoded || !isDerivableSourceKey(key)) {
+          sendJson(res, 400, { error: "invalid-derivative" });
+          return true;
+        }
+        variant = decoded;
+      }
     } catch {
       sendJson(res, 400, { error: "invalid-request" });
       return true;
@@ -83,6 +120,10 @@ export function createMediaRequestHandler(options: MediaRequestHandlerOptions): 
 
     if (req.method === "POST" && (pathname === basePath || projectUpload)) {
       await handleUpload(req, res, options.storage, maxBytes, options.allowedTypes, basePath, log, projectUpload, scope, options.verifier);
+      return true;
+    }
+    if ((req.method === "GET" || req.method === "HEAD") && key !== "" && variant) {
+      await handleDerivativeRead(req, res, options.derivatives, variant, scope, log);
       return true;
     }
     if ((req.method === "GET" || req.method === "HEAD") && key !== "") {
@@ -143,6 +184,55 @@ async function handleUpload(
   } catch (error) {
     respondError(res, error, "media-upload", log);
   }
+}
+
+async function handleDerivativeRead(
+  req: IncomingMessage,
+  res: ServerResponse,
+  derivatives: MediaDerivativeReadFacade | undefined,
+  identity: MediaDerivativeIdentity,
+  scope: MediaStorageScope | undefined,
+  log: Logger
+): Promise<void> {
+  // HEAD 只用于探测；必须与 GET 一样经过授权和预算，不能成为绕过读取权限的旁路。
+  if (!derivatives) {
+    res.setHeader("Cache-Control", "no-store");
+    sendJson(res, 415, { error: "derivative-unsupported" });
+    log?.({ event: "media-derivative", status: 415, code: "unsupported" });
+    return;
+  }
+  try {
+    const result = await derivatives.read({ identity, scope });
+    if (result.status === "pending") {
+      // 已排队/正在生成：显式 202，调用方保持占位或上次合法图并稍后重试。
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Retry-After", "1");
+      sendJson(res, 202, { error: "derivative-pending" });
+      log?.({ event: "media-derivative", status: 202, code: "pending" });
+      return;
+    }
+    res.statusCode = 200;
+    applyObjectHeaders(res, mediaDerivativeCacheKeyOf(identity), result.contentType, result.bytes.byteLength);
+    if (req.method === "HEAD") {
+      res.end();
+    } else {
+      res.end(Buffer.from(result.bytes));
+    }
+    log?.({ event: "media-derivative", status: 200 });
+  } catch (error) {
+    res.setHeader("Cache-Control", "no-store");
+    if (error instanceof MediaDerivativeError) {
+      sendJson(res, error.status, { error: error.code });
+      log?.({ event: "media-derivative", status: error.status, code: error.code });
+      return;
+    }
+    sendJson(res, 500, { error: "derivative-failed" });
+    log?.({ event: "media-derivative", status: 500, code: "failed" });
+  }
+}
+
+function mediaDerivativeCacheKeyOf(identity: MediaDerivativeIdentity): string {
+  return `${identity.sourceKey}-${identity.kind}-${identity.edge}.${identity.format}`;
 }
 
 async function handleRead(

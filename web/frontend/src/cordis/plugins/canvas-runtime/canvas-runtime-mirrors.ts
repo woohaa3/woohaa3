@@ -14,6 +14,13 @@ export function installCanvasRuntimeMirrors(input: {
   imageFocus: () => { nodeId: string } | null;
   videoFocus: () => { nodeId: string } | null;
   videoFocusTargetId: () => string | null;
+  /**
+   * 页面级资源协调器诊断（change: 2026-10-23-scale-canvas-media-residency，任务 1.3）。
+   *
+   * 只暴露计数与估算（队列等待/执行、reservation、CPU/GPU 估算），不暴露内容；GPU 字节是
+   * 保守估算，不是驱动实测显存。
+   */
+  residency?: { diagnostics?: () => unknown } | null;
 }): void {
   const target = globalThis as unknown as {
     __canvasVideoSessions?: unknown;
@@ -22,7 +29,9 @@ export function installCanvasRuntimeMirrors(input: {
     __canvasModelPlacement?: unknown;
     __canvasImageFocus?: unknown;
     __canvasVideoFocus?: unknown;
+    __canvasResidency?: unknown;
   };
+  target.__canvasResidency = { snapshot: () => input.residency?.diagnostics?.() ?? null };
   target.__compositeAssetMedia = { snapshot: () => input.compositeAssetMediaSessions?.diagnostics?.() ?? [] };
   target.__canvasVideoSessions = {
     active: () => input.videoSessions.activeNodeIds(),

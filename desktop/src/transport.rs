@@ -216,6 +216,12 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
         "prepare_and_register_model_resource" => json!(
             canvas::prepare_and_register_model_resource(arg(&req, 0)?).map_err(|e| e.to_string())?
         ),
+        "declare_model_resource" => json!(
+            canvas::declare_model_resource(arg(&req, 0)?).map_err(|e| e.to_string())?
+        ),
+        "set_model_payload_leases" => json!(
+            canvas::set_model_payload_leases(arg(&req, 0)?).map_err(|e| e.to_string())?
+        ),
         "query_point_hit" => json!(canvas::query_point_hit(arg(&req, 0)?)),
         "query_marquee" => json!(canvas::query_marquee(arg(&req, 0)?)),
         "query_probe" => json!(canvas::query_probe(arg(&req, 0)?)),
@@ -262,6 +268,10 @@ pub fn texture(header: &str, bytes: &[u8]) -> Result<(), String> {
         width: u32,
         height: u32,
         plane: bool,
+        /// 稳定内容身份：Rust 侧按内容+尺寸共享同一 GPU 纹理
+        /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
+        #[serde(default)]
+        content: String,
     }
     if bytes.len() > MAX_TEXTURE_BYTES {
         return Err("Texture payload exceeds budget".into());
@@ -270,10 +280,13 @@ pub fn texture(header: &str, bytes: &[u8]) -> Result<(), String> {
     if meta.id.is_empty() || meta.id.len() > 1024 {
         return Err("Invalid texture id".into());
     }
+    if meta.content.len() > 4096 {
+        return Err("Texture content identity too large".into());
+    }
     let result = if meta.plane {
         canvas::set_model_media_texture(&meta.id, meta.width, meta.height, bytes)
     } else {
-        canvas::set_texture(&meta.id, meta.width, meta.height, bytes)
+        canvas::set_texture(&meta.id, meta.width, meta.height, bytes, &meta.content)
     };
     result.map_err(|e| e.to_string())
 }

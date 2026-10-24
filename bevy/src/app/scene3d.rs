@@ -64,7 +64,7 @@ pub(super) fn sync_models(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut visuals: ResMut<model3d::ModelVisuals>,
     mut focus: ResMut<model3d::FocusVisuals>,
-    resources: Res<ModelAssetTable>,
+    mut resources: ResMut<ModelAssetTable>,
     scene: Res<CurrentScene>,
     flags: Res<FrameFlags>,
     rig: Res<FocusRig>,
@@ -85,6 +85,14 @@ pub(super) fn sync_models(
     crate::shot_node_preview::pin_visible_owners(&scene.0, &mut pins);
     let now = time.elapsed_secs_f64();
     let demand_changed = model3d::demand::update(models, &scene.0, rig.focus_node.as_deref(), &pins, now);
+    // 模型 payload lease：只有当前需求引用重型 IR（design D5）。先按最新需求收敛预算，
+    // 再同步根：本次淘汰掉的 cold payload 会在同步里以缺资源跳过，等待重新取得需求。
+    let leases = model3d::demand::payload_lease_keys(&scene.0, models);
+    let (_retained, evicted) = crate::bridge::set_model_payload_leases(leases);
+    if !evicted.is_empty() {
+        // 淘汰后刷新只读快照资源，使本帧所有消费者看到同一份 payload 表。
+        resources.0 = crate::bridge::model_assets_snapshot();
+    }
     if flags.changed || demand_changed {
         model3d::sync_models(
             &mut commands,

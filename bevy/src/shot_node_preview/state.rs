@@ -24,10 +24,12 @@ use crate::{
 use super::plan::{SampleIdentity, Target};
 use super::policy;
 
-/// 卡片各自占用的渲染层基数（与模型层 0、辅助层 1/2/7 分离，避免串画面）。
-pub(crate) const PREVIEW_LAYER_BASE: usize = 40;
-/// 卡片渲染层上限（与 Image/候选上限同量级，避免层号无界增长）。
-pub(crate) const MAX_PREVIEW_LAYERS: usize = policy::MAX_IMAGES;
+/// 卡片各自占用的渲染层（模型卡片与镜头卡片共用同一层池；见
+/// `crate::preview_layers`，change: 2026-10-23-scale-canvas-media-residency，design D6）。
+///
+/// 旧的固定基数 `40 + index % 16` 与模型卡片的 `(32..)` 分配互不知情，普通模型分到 40 以后
+/// 就会与镜头卡片共用层而串画面；现在层只从层池租出，超出容量时卡片排队。
+pub(crate) const MAX_PREVIEW_LAYERS: usize = crate::preview_layers::CAPACITY;
 
 /// 卡片预览 rig 的稳定身份（不参与布局，仅供诊断/去重）。
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +136,8 @@ pub(crate) struct ShotPreviewCards {
     pub(crate) next_generation: u64,
     pub(crate) tick: u64,
     pub(crate) work: PreviewWork,
+    /// 因层池已满而排队等层的卡片（诊断；不持有层，也不创建 rig）。
+    pub(crate) pending_layers: std::collections::HashSet<String>,
 }
 
 impl ShotPreviewCards {
@@ -143,6 +147,7 @@ impl ShotPreviewCards {
     /// 渲染侧未确认）也需要连续帧直到确认。两者都归零后静止画布才停帧。
     pub(crate) fn has_pending(&self) -> bool {
         self.active.is_some()
+            || !self.pending_layers.is_empty()
             || self
                 .cards
                 .values()
@@ -183,9 +188,18 @@ impl Plugin for ShotNodePreviewPlugin {
     }
 }
 
-/// 卡片渲染层：固定基数 + 卡片序号；超出上限回绕（复用层，不无界增长）。
-pub(crate) fn layer_for(index: usize) -> usize {
-    PREVIEW_LAYER_BASE + index % MAX_PREVIEW_LAYERS
+/// 卡片渲染层：由共享层池租出（模型卡片与镜头卡片不会拿到同一层）。
+///
+/// 返回 `None` 表示层池已满：调用方必须让该卡片排队，不能无界增长层号或与其它 owner 共用。
+pub(crate) fn acquire_layer(
+    pool: &mut crate::app::PreviewLayerPool,
+    owner: &str,
+) -> Option<usize> {
+    let slot = pool.0.acquire(owner);
+    if slot.is_none() {
+        pool.0.note_exhausted();
+    }
+    slot.map(|slot| slot.layer)
 }
 
 /// 卡片相机可见层：**只**看该卡片独占层。
@@ -289,6 +303,7 @@ pub(crate) fn apply_light_layers(commands: &mut Commands, cards: &mut ShotPrevie
 pub(crate) fn remove_card(
     commands: &mut Commands,
     cards: &mut ShotPreviewCards,
+    pool: &mut crate::app::PreviewLayerPool,
     ready: &ShotPreviewReady,
     id: &str,
 ) {
@@ -301,6 +316,8 @@ pub(crate) fn remove_card(
     if cards.active.as_deref() == Some(id) {
         cards.active = None;
     }
+    // 层在旧视图停止后归还；下一次出租推进代数，迟到完成按代数丢弃。
+    pool.0.release(id);
     cards.work.cancels += 1;
 }
 
@@ -312,20 +329,23 @@ mod tests {
 
     #[test]
     fn preview_layers_stay_finite_and_inside_engine_capacity() {
+        let mut pool = crate::app::PreviewLayerPool::default();
         let mut seen = HashSet::new();
-        for index in 0..policy::MAX_IMAGES * 2 {
-            let layer = layer_for(index);
-            assert!(layer >= PREVIEW_LAYER_BASE);
+        for index in 0..MAX_PREVIEW_LAYERS {
+            let layer = acquire_layer(&mut pool, &format!("card-{index}")).expect("容量内必须能租到层");
+            assert!(!crate::preview_layers::PreviewLayers::is_reserved(layer));
             seen.insert(layer);
         }
-        assert!(seen.len() <= MAX_PREVIEW_LAYERS);
+        assert_eq!(seen.len(), MAX_PREVIEW_LAYERS);
+        // 超出容量：不无界增长层号，也不与已有 owner 共用。
+        assert_eq!(acquire_layer(&mut pool, "overflow"), None);
     }
 
     #[test]
     fn card_camera_sees_only_its_own_layer() {
-        let mask = card_camera_layers(PREVIEW_LAYER_BASE);
+        let mask = card_camera_layers(crate::preview_layers::SLOT_BASE);
         let layers: Vec<usize> = mask.0.iter().collect();
-        assert_eq!(layers, vec![PREVIEW_LAYER_BASE]);
+        assert_eq!(layers, vec![crate::preview_layers::SLOT_BASE]);
         // 网格/辅助层（0、1、2、7）都不在卡片相机可见集合内，避免卡片里出现网格或 gizmo。
         for excluded in [0usize, 1, 2, 7] {
             assert!(!layers.contains(&excluded));

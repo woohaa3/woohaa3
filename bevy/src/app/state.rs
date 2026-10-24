@@ -8,9 +8,46 @@ use crate::{model3d, protocol::Scene};
 #[derive(Resource, Default)]
 pub(crate) struct CurrentScene(pub(crate) Scene);
 
+/// 同代节点索引：`nodeId → scene.nodes` 下标
+/// （change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 7.2）。
+///
+/// 纹理上传、场景保留、预览摆放都要「按 id 找节点」。逐纹理 `nodes.iter().find()` 在千节点
+/// 文档上是 O(纹理数 × 文档节点数)，且每帧重复。这里只在**接受新场景**时重建一次（纯视口/
+/// 位置增量不重建），消费者按 id 取下标后 O(1) 定位。
+///
+/// 索引与 `CurrentScene` 同代：`scene_received` 时重建，因此过期索引不会被使用。
+#[derive(Resource, Default)]
+pub(crate) struct NodeIndex {
+    /// 节点 id → 下标。
+    pub(crate) by_id: HashMap<String, usize>,
+}
+
+impl NodeIndex {
+    /// 按场景重建（只在接受完整场景时调用）。
+    pub(crate) fn rebuild(&mut self, scene: &Scene) {
+        self.by_id.clear();
+        self.by_id.reserve(scene.nodes.len());
+        for (index, node) in scene.nodes.iter().enumerate() {
+            // 同 id 重复出现时保留首个（与既有 `iter().find()` 语义一致）。
+            self.by_id.entry(node.id.clone()).or_insert(index);
+        }
+    }
+
+    /// 节点下标；不存在返回 `None`。
+    pub(crate) fn position(&self, id: &str) -> Option<usize> {
+        self.by_id.get(id).copied()
+    }
+
+    /// 节点引用；索引缺失或场景已换时返回 `None`（调用方回退到保守路径）。
+    pub(crate) fn node<'a>(&self, scene: &'a Scene, id: &str) -> Option<(usize, &'a crate::protocol::GraphNode)> {
+        let index = self.position(id)?;
+        scene.nodes.get(index).filter(|node| node.id == id).map(|node| (index, node))
+    }
+}
+
 /// 本帧 texture inbox 的一次性批次。
 #[derive(Resource, Default)]
-pub(crate) struct TextureBatch(pub(crate) HashMap<String, (u32, u32, Vec<u8>)>);
+pub(crate) struct TextureBatch(pub(crate) HashMap<String, (u32, u32, Vec<u8>, Option<String>)>);
 
 /// 片场媒体平面纹理 inbox 的一次性批次（键为全局唯一 `planeId`；
 /// change: 2026-10-08-make-film-set-model-only）。
@@ -20,6 +57,13 @@ pub(crate) struct FilmSetTextureBatch(pub(crate) HashMap<String, (u32, u32, Vec<
 /// 已注册不可变模型资源表的只读快照。
 #[derive(Resource, Default)]
 pub(crate) struct ModelAssetTable(pub(crate) model3d::ModelAssets);
+
+/// 普通模型卡片与镜头卡片共用的预览渲染层池
+/// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.3）。
+///
+/// 两个预览模块通过**同一个** resource 取层，因此不会各自假设不相交区间而串画面。
+#[derive(Resource, Default)]
+pub(crate) struct PreviewLayerPool(pub(crate) crate::preview_layers::PreviewLayers);
 
 /// 最近一次应用的画布 CSS 尺寸（逻辑像素，与 JS hit-test 空间一致）。
 #[derive(Resource)]

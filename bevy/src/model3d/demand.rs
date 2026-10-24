@@ -58,6 +58,36 @@ pub(crate) fn update(models: &mut ModelVisuals, scene: &Scene, focus: Option<&st
     true
 }
 
+/// 当前需求持有的模型 payload lease key 集合
+/// （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+///
+/// 只有当前渲染需求（可见/预热/聚焦/编辑/捕获 pin/播放）以及仍在宽限内的已发布根引用的
+/// 模型重型 payload 被保护；其余 descriptor 保持 cold，可在预算内淘汰并按需重新准备。
+/// 把已发布根计入 lease 是必要的：根持有 payload `Arc`，提前从表里淘汰会让消费者看到
+/// 「需求仍在但资源消失」，进而误删根并重准备（宽限内的旧表示应当保留到根真正退役）。
+/// `demand == None` 表示尚未计算需求，沿用既有保守语义（全部保留），不制造意外淘汰。
+pub(crate) fn payload_lease_keys(
+    scene: &Scene,
+    models: &ModelVisuals,
+) -> HashSet<String> {
+    let demand = models.demand.as_ref();
+    let mut keys: HashSet<String> = scene
+        .nodes
+        .iter()
+        .filter(|node| demand.is_none_or(|required| required.contains(&node.id)))
+        .filter_map(|node| node.model.as_ref().map(|reference| reference.resource_key.clone()))
+        .collect();
+    // 已发布/分帧装配中的根仍持有 payload：宽限内不得因预算淘汰其内容。
+    for node in &scene.nodes {
+        if models.roots.contains_key(&node.id)
+            && let Some(reference) = &node.model
+        {
+            keys.insert(reference.resource_key.clone());
+        }
+    }
+    keys
+}
+
 /// 复用一屏预热边距；无有效 surface 时保守保留。
 fn near_viewport(node: &crate::protocol::GraphNode, scene: &Scene, focus: Option<&str>) -> bool {
     scene.surface.as_ref().is_none_or(|s| {

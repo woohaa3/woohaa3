@@ -178,6 +178,7 @@ mod tests {
             font: default(),
             labels: default(),
             textures: default(),
+            texture_store: default(),
             edge_blocks: default(),
             shared_key: None,
             attach_labels: default(),

@@ -31,9 +31,9 @@ use crate::{
 
 use super::plan::LiveSampling;
 use super::state::{
-    apply_light_layers, apply_owner_layers, card_camera_layers, identity_of, layer_for, remove_card,
-    rig_state_of, take_generation, target_component_of, Card, ShotPreviewCards, ShotPreviewRig,
-    SpriteState,
+    acquire_layer, apply_light_layers, apply_owner_layers, card_camera_layers, identity_of,
+    remove_card, rig_state_of, take_generation, target_component_of, Card, ShotPreviewCards,
+    ShotPreviewRig, SpriteState,
 };
 use super::{plan, policy};
 
@@ -44,7 +44,9 @@ use super::{plan, policy};
 pub(crate) fn sync(
     mut commands: Commands,
     mut cards: ResMut<ShotPreviewCards>,
+    mut layers: ResMut<crate::app::PreviewLayerPool>,
     scene: Res<CurrentScene>,
+    index: Res<crate::app::NodeIndex>,
     models: Res<model3d::ModelVisuals>,
     mut media: ResMut<model3d::film_set_media::FilmSetMediaVisuals>,
     resources: Res<ModelAssetTable>,
@@ -99,18 +101,16 @@ pub(crate) fn sync(
         .cloned()
         .collect();
     for id in stale {
-        remove_card(&mut commands, &mut cards, &ready, &id);
+        remove_card(&mut commands, &mut cards, &mut layers, &ready, &id);
     }
 
     // 2. 目标尺寸档：按卡片实际显示像素分档（最长边 1024），并收敛到剩余像素预算内。
     let mut sizes: Vec<UVec2> = Vec::with_capacity(targets.len());
     for target in &targets {
-        let (width, height) = scene
-            .0
-            .nodes
-            .iter()
-            .find(|node| node.id == target.node_id)
-            .map(|node| {
+        // 同代节点索引：按 id 定位，替代逐目标全文档扫描（design D7 / 任务 7.2）。
+        let (width, height) = index
+            .node(&scene.0, &target.node_id)
+            .map(|(_, node)| {
                 let (_, _, width, height) = crate::canvas_query::shot_preview::content_rect_of(node);
                 (width, height)
             })
@@ -144,9 +144,16 @@ pub(crate) fn sync(
     }
 
     // 3. 创建/更新卡片（rig + sprite），并汇总 owner → 层并集。
+    //
+    // 层从共享层池租出（与模型卡片同一池）：池满时本卡片排队等待，不与其他视图共用层。
     let mut owner_layers: HashMap<String, Vec<usize>> = HashMap::new();
     for (index, target) in targets.iter().enumerate() {
-        let layer = layer_for(index);
+        let Some(layer) = acquire_layer(&mut layers, &target.node_id) else {
+            // 池满：保留已有卡片的合法画面，新卡片排队（不无界增长层号）。
+            cards.pending_layers.insert(target.node_id.clone());
+            continue;
+        };
+        cards.pending_layers.remove(&target.node_id);
         owner_layers.entry(target.owner.clone()).or_default().push(layer);
         let size = sizes[index];
         let rig_state = rig_state_of(target, size);
@@ -368,7 +375,7 @@ pub(crate) fn sync(
                 .map_or((None, card.size), |(image, size)| (Some(image.clone()), *size));
             (card.sprite, card.visible, size, image)
         };
-        let Some(node) = scene.0.nodes.iter().find(|node| node.id == target.node_id) else {
+        let Some((node_index, node)) = index.node(&scene.0, &target.node_id) else {
             continue;
         };
         let (x, y, width, height) = crate::canvas_query::shot_preview::content_rect_of(node);
@@ -376,13 +383,7 @@ pub(crate) fn sync(
             node,
             Vec2::new(size.x as f32, size.y as f32),
         );
-        let index = scene
-            .0
-            .nodes
-            .iter()
-            .position(|node| node.id == target.node_id)
-            .unwrap_or(0);
-        let z = 10.01 + index as f32 * 0.1;
+        let z = 10.01 + node_index as f32 * 0.1;
         let state = SpriteState {
             transform: Transform::from_xyz(x + width / 2.0, -(y + height / 2.0), z),
             size: content,
@@ -437,7 +438,7 @@ pub(crate) fn sync(
     let retained_images = cards.cards.values()
         .filter(|card| card.published.is_some() && !card.published_current).count();
     for id in policy::evictions(&entries, policy::MAX_IMAGES.saturating_sub(retained_images), policy::MAX_PIXELS) {
-        remove_card(&mut commands, &mut cards, &ready, &id);
+        remove_card(&mut commands, &mut cards, &mut layers, &ready, &id);
         cards.work.evictions += 1;
     }
 

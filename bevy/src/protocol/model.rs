@@ -4,6 +4,10 @@
 use serde::Deserialize;
 
 /// 当前画布快照协议版本；与 contracts `CANVAS_RENDER_SCENE_VERSION` 一致。
+/// v25 起模型改为「descriptor 声明」与「重型 payload 驻留」两阶段确认：场景只保护轻量
+/// descriptor 身份，payload 按实际需求 lease 并在预算内淘汰
+/// （change: 2026-10-23-scale-canvas-media-residency，design D5）。旧 renderer 会把
+/// descriptor-only 引用当成未知资源拒绝，因此必须同步提升能力版本。
 /// v5 起模型从节点内联 payload 拆出为按内容签名注册的不可变资源
 /// （change: optimize-model-scene-snapshot-hot-path）。
 /// v7 起新增单节点拖动粘连瞬时投影 `dragAttach`
@@ -26,9 +30,100 @@ use serde::Deserialize;
 /// （change: 2026-10-15-add-film-set-shooting-shot-previews）。
 /// v23 起复合资产可携带派生 ownershipLinks；旧 renderer 不支持管理关系虚线。
 /// v24 起镜头预览携带独立 backdrop，preview/capture 共用背景，拒绝忽略该字段的旧 renderer。
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v24";
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v25";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
+/// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。
+pub(crate) const MODEL_DESCRIPTOR_VERSION: &str = "woohaa-model-descriptor-v1";
+
+/// 轻量模型 descriptor：身份 + 必要几何声明，**不含** ops/mesh。
+///
+/// 场景引用只保护本结构（design D5）。确认它表示「身份合法、布局/查询可用」，
+/// 不表示重型 payload 已驻留或模型可渲染。
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ModelDescriptor {
+    pub(crate) resource_version: String,
+    pub(crate) resource_key: String,
+    pub(crate) scene_version: Option<String>,
+    pub(crate) signature: String,
+    pub(crate) extent: f32,
+    pub(crate) aabb: Option<ModelAabbDto>,
+}
+
+impl ModelDescriptor {
+    /// 是否与另一份声明描述同一内容身份（key/signature/sceneVersion 一致）。
+    ///
+    /// **extent/AABB 不参与身份判定**：它们是同一内容的派生结果，而派生有两条独立路径
+    /// ——前端 `v2SceneAabb`（f64）与 Rust `prepare_snapshot`（f32）。同一份 IR 在两条路径上
+    /// 的末位必然不同，若把派生值当身份，合法模型会被误判成「同 key 不同内容」而整片拒绝
+    /// （2026-10-24 实际故障：22 个模型有 15 个报 `Model resource key conflict`）。
+    ///
+    /// 真冲突仍由两处稳定拒绝：`ModelDescriptorDto::validate` 的 key/signature 一致性，
+    /// 以及 `queue_model_snapshot` 的 signature/sceneVersion 比较。
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
+        self.resource_key == other.resource_key
+            && self.signature == other.signature
+            && self.scene_version == other.scene_version
+    }
+}
+
+/// 声明 wire DTO：`declare_model_descriptor` 的输入。
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelDescriptorDto {
+    #[serde(default)]
+    pub(crate) resource_version: String,
+    #[serde(default)]
+    pub(crate) resource_key: String,
+    #[serde(default)]
+    pub(crate) scene_version: Option<String>,
+    #[serde(default)]
+    pub(crate) signature: String,
+    #[serde(default = "default_extent")]
+    pub(crate) extent: f32,
+    #[serde(default)]
+    pub(crate) aabb: Option<ModelAabbDto>,
+}
+
+impl ModelDescriptorDto {
+    /// 边界级防御校验：版本、场景版本（V2-only）、key/签名一致、有限 extent。
+    ///
+    /// 与 payload 注册同一套身份校验，避免「声明轻松通过、注册才冲突」的漂移。
+    pub(crate) fn validate(&self) -> Result<ModelDescriptor, &'static str> {
+        if self.resource_version != MODEL_DESCRIPTOR_VERSION {
+            return Err("Unknown model descriptor version");
+        }
+        match self.scene_version.as_deref() {
+            Some(version) if is_supported_scene_ir_version(version) => {}
+            _ => return Err("Unsupported model scene version"),
+        }
+        if self.resource_key.is_empty() || self.resource_key.len() > 256 {
+            return Err("Invalid model resource key");
+        }
+        if self.signature.is_empty() || self.signature.len() > 256 {
+            return Err("Invalid model resource signature");
+        }
+        if !self.resource_key.ends_with(&self.signature) {
+            return Err("Model resource key/signature mismatch");
+        }
+        if !self.extent.is_finite() || self.extent <= 0.0 {
+            return Err("Invalid model resource extent");
+        }
+        if let Some(aabb) = &self.aabb
+            && !aabb.min.iter().chain(aabb.max.iter()).all(|v| v.is_finite())
+        {
+            return Err("Invalid model resource bounds");
+        }
+        Ok(ModelDescriptor {
+            resource_version: self.resource_version.clone(),
+            resource_key: self.resource_key.clone(),
+            scene_version: self.scene_version.clone(),
+            signature: self.signature.clone(),
+            extent: self.extent,
+            aabb: self.aabb,
+        })
+    }
+}
 
 /// 节点上的轻量模型引用：只含稳定 resource key 与动态 placement。
 #[derive(Clone, Deserialize)]

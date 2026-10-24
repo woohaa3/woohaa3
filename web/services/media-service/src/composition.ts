@@ -24,6 +24,11 @@ import { DEFAULT_MEDIA_BASE_PATH } from "./api/public-handler.js";
 import { MEDIA_INTERNAL_BASE_PATH } from "./api/internal-handler.js";
 import { createMediaApplicationService } from "./application/internal-service.js";
 import { createExtensionMediaResources } from "./application/extension-resources.js";
+import {
+  createMediaDerivatives,
+  type MediaDerivativeGenerator,
+  type MediaDerivativeReadFacade
+} from "./application/media-derivatives.js";
 import { parseServiceIdentityConfig, type ServiceIdentityConfig } from "./security/identity.js";
 
 export type MediaServiceOptions = {
@@ -37,6 +42,15 @@ export type MediaServiceOptions = {
   fetchImpl?: typeof globalThis.fetch;
   resolveHost?: (hostname: string) => Promise<string[]>;
   logger?: (event: { event: string; status: number; code?: string }) => void;
+  /**
+   * 预览派生物转换执行器（change: 2026-10-23-scale-canvas-media-residency，任务 4.1）。
+   *
+   * 由宿主注入（Worker/受控工具）；本服务自带并发/排队/预算/缓存，但**不含 codec**。
+   * 未注入时带 `variant` 的读取以 `derivative-unsupported` 拒绝，调用方回退原图。
+   */
+  derivativeGenerator?: MediaDerivativeGenerator;
+  /** 派生物预算覆盖（测试注入更小预算）。 */
+  derivativeLimits?: Partial<MediaDerivativeReadFacade["limits"]>;
 };
 
 export type MediaService = {
@@ -44,6 +58,8 @@ export type MediaService = {
   readiness: () => Promise<{ ready: boolean; reason?: string }>;
   close: () => Promise<void>;
   storage: MediaStorage;
+  /** 预览派生物读取面与统计（change: 2026-10-23-scale-canvas-media-residency）。 */
+  derivatives: MediaDerivativeReadFacade;
   /**
    * 进程内 Media 契约（change: 2026-10-06-unify-backend-runtime-with-cordis，任务 2.1）。
    * 供统一后端进程内的 Canvas/Task 模块直接调用，取代服务间 HTTP client。
@@ -71,15 +87,27 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
       })()
     : createProcessOnlyVerifier();
 
+  /**
+   * 预览派生物：后台转换 + 有界缓存（design D4）。
+   *
+   * 没有注入生成器时仍然建实例（读取以 `unsupported` 结束，调用方回退原图），避免 public
+   * handler 出现两条分支；执行器由宿主注入，服务本身不含 codec。
+   */
+  const derivatives = createMediaDerivatives({
+    storage,
+    ...(options.derivativeGenerator ? { generator: options.derivativeGenerator } : {}),
+    ...(options.derivativeLimits ? { limits: options.derivativeLimits } : {})
+  });
+
   const publicHandler: MediaRequestHandler = createMediaRequestHandler({
     storage,
     basePath: options.publicBasePath ?? DEFAULT_MEDIA_BASE_PATH,
     maxBytes: options.maxBytes,
     logger: log,
-    verifier
+    verifier,
+    derivatives
   });
 
-  /** 进程内 Media 能力（供统一后端进程的 BackendMediaPort 复用）。 */
   const internalApp = createMediaApplicationService({
     storage,
     ...(options.maxBytes !== undefined ? { maxImportBytes: options.maxBytes } : {}),
@@ -120,6 +148,7 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
   return {
     storage,
     readiness,
+    derivatives,
     port: () => ({
       resources: createExtensionMediaResources(storage),
       // canvas scope / canvasId 只做透传：进程内调用方声明这次读写属于哪张画布。
@@ -135,6 +164,8 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
       return publicHandler(req, res);
     },
     close: async () => {
+      // 先等在途派生物结算，再释放存储：中断中的转换不能留在已关闭的存储上写缓存。
+      await derivatives.drain();
       verifier.dispose();
       const closeable = storage as { close?: () => void | Promise<void> };
       await closeable.close?.();

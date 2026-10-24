@@ -53,6 +53,26 @@ export type SceneDiagnostics = {
   positionSubmits: number;
   /** `prepare_and_register_model_resource` 实际调用次数（幂等复用不计）。 */
   modelRegistrations: number;
+  /**
+   * `declare_model_resource` 实际声明次数
+   * （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+   *
+   * descriptor 声明与 payload 注册分成两次边界调用：同一 key 只声明一次，payload 可在预算
+   * 淘汰后重新准备，因此两者计数不同步是正常状态。
+   */
+  modelDescriptors: number;
+  /** `set_model_payload_leases` 提交次数（只有需求投影变化时才提交）。 */
+  modelLeaseSubmits: number;
+  /** 最近一次 lease 提交后 Rust 报告的淘汰 payload 数（累计）。 */
+  modelPayloadEvictions: number;
+  /** 重型模型 payload 准备的累计同步耗时（ms；真实主线程时间）。 */
+  modelPrepareMs: number;
+  /** 单项模型准备的最大同步耗时（ms）。 */
+  modelPrepareMaxMs: number;
+  /** 已完成的模型 payload 准备次数。 */
+  modelPrepareCount: number;
+  /** 单项准备超过帧预算的次数（真实超预算项，不是平均）。 */
+  modelPrepareOverBudget: number;
   /** 一次场景提交中跨 WASM 边界的字节总量（scene JSON + 资源 payload + viewport JSON）。 */
   boundaryBytes: number;
   /** 模型派生元数据（prepare）次数。 */
@@ -112,6 +132,13 @@ const state: SceneDiagnostics = {
   observerSubmits: 0,
   positionSubmits: 0,
   modelRegistrations: 0,
+  modelDescriptors: 0,
+  modelLeaseSubmits: 0,
+  modelPayloadEvictions: 0,
+  modelPrepareMs: 0,
+  modelPrepareMaxMs: 0,
+  modelPrepareCount: 0,
+  modelPrepareOverBudget: 0,
   boundaryBytes: 0,
   derivedMetadata: 0,
   interactionQueries: 0,

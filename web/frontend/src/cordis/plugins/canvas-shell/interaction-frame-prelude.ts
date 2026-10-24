@@ -17,6 +17,13 @@ export type TransientFrameDeps = {
   clearHeldKeys: () => void;
   /** 聚焦目标失效检查（删除 / Scene IR 移除 / selection 清除）。 */
   syncModelFocusValid: () => void;
+  /**
+   * 本帧资源需求投影（先准入再创建）。
+   *
+   * 必须在 `syncTexture` / `syncVideoSessions` / `syncCompositeAssetMedia` 之前调用：
+   * 未准入的节点不得创建解码器、纹理或片场会话（design D1/D2）。缺省跳过（旧测试路径）。
+   */
+  projectResidency?: () => void;
   syncTexture: () => void;
   syncVideoSessions: () => void;
   /** 同步片场媒体会话并返回就绪平面集合。 */
@@ -39,6 +46,8 @@ export function advanceTransientState(deps: TransientFrameDeps): ReadonlySet<str
   // modal 打开时清理 focus held input；非模态 panel 不打断 focus 飞行（D6）。
   if (deps.focusInputBlocked()) deps.clearHeldKeys();
   deps.syncModelFocusValid();
+  // 先算本帧准入集合（含档位/用途），再让各媒体 owner 只为准入项创建资源（design D1/D2）。
+  deps.projectResidency?.();
   // 先确保就绪纹理已上传（上传完成的节点 texture 标记才会生效）。
   deps.syncTexture();
   // 视频会话按当前 canonical/working 画布同步（新增/换源/删除），并推进 hover 播放。

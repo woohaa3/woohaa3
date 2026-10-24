@@ -73,6 +73,16 @@ export type InteractionControllerOptions = {
   onRedoRequest?: () => void;
   /** 可注入的纹理上传器（测试用）；缺省从 runtime 创建。 */
   textureSync?: TextureUploader;
+  /**
+   * 每帧资源需求投影（change: 2026-10-23-scale-canvas-media-residency，design D1/D2）。
+   *
+   * 必须在纹理/视频/片场媒体 `sync()` **之前**执行：先准入再创建。
+   */
+  projectResidency?: () => void;
+  /** 本帧 surface 尺寸变化（供资源协调器按物理尺寸选缩略图档）；缺省不通知。 */
+  onSurface?: (surface: { width: number; height: number; pixelRatio: number }) => void;
+  /** 本帧已接受视口（资源需求投影与缩略图档位用）；缺省不通知。 */
+  onViewportForResidency?: (viewport: { x: number; y: number; zoom: number }) => void;
   /** 画布 ID；本地视口按它记忆（各浏览器独立）。 */
   canvasId?: string;
   /**

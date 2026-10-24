@@ -13,10 +13,10 @@ import { beginLifecycleSpan } from "../performance/lifecycle-performance.js";
  * 已删除 Godot bridge：不再有 frame buffer、`canvasPushFrame`、`canvasBridgeCommand`、
  * `canvas-runtime-ready` 或投影 coordinator。
  */
-import { CommandLifecycleRegistry, CanvasDatabase, IndexedDbYjsCacheRepository, WorkingProjectionStore, applyYjsCacheToDoc, validateYjsCache, woohaa3CanvasStore, type CanvasSyncStatus } from "./canvas-state/index.js";
+import { CommandLifecycleRegistry, CanvasDatabase, IndexedDbYjsCacheRepository, WorkingProjectionStore, applyYjsCacheToDoc, createCanonicalProjectionCache, validateYjsCache, woohaa3CanvasStore, type CanvasSyncStatus } from "./canvas-state/index.js";
 import { measureInteractionWork } from "./interaction-timing.js";
 import * as Y from "yjs";
-import type { CanvasAccess, CanvasCommand, TelemetryEventInput } from "@woohaa3/contracts";
+import type { CanvasAccess, CanvasCommand, ServerCanvas, TelemetryEventInput } from "@woohaa3/contracts";
 import { yDocToServerCanvas, YJS_SYNC_PROTOCOL_VERSION, YJS_CANVAS_FORMAT_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { ReadonlyCanvasProvider, type ReadonlyProviderState } from "./yjs/readonly-provider.js";
 import type { CanvasSession, CanvasSessionStatus } from "../contracts.js";
@@ -276,6 +276,17 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   let yjsLifecycle: CommandLifecycleRegistry | undefined;
   /** 会话内 working projection：canonical + 有序 pending batches，仅内存。 */
   const projection = new WorkingProjectionStore();
+  /**
+   * 规范投影复用缓存（change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 8.1）。
+   *
+   * provider 的状态通知远多于内容变化；同一 doc/epoch/revision/doc版本 连续到达时直接复用
+   * 已验证投影，不重复全量排序与完整性校验。换画布、换 epoch、换本地 doc 或派生失败都使
+   * 缓存失效（失败不进缓存，损坏状态必须每次重新报告）。
+   */
+  const canonicalProjection = createCanonicalProjectionCache<ServerCanvas>();
+  /** 每个应用的服务端 update 递增；覆盖「revision 未变但内容已变」的合并写入。 */
+  let canonicalDocVersion = 0;
+
   let offlineListener: (() => void) | undefined;
   let onlineListener: (() => void) | undefined;
   let disposed = false;
@@ -331,10 +342,26 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   };
 
   /** 从当前 Y.Doc 派生规范聚合（Store 的唯一来源）。 */
-  const deriveCanvas = () => {
-    if (!yjsProvider) return null;
-    const exported = yDocToServerCanvas(yjsProvider.doc);
-    return exported.ok ? exported.canvas : null;
+  const deriveCanvas = (): ServerCanvas | null => {
+    const provider = yjsProvider;
+    if (!provider) return null;
+    const key = {
+      canvasId,
+      roomEpoch: provider.providerState.roomEpoch,
+      revision: provider.providerState.revision ?? -1,
+      docVersion: canonicalDocVersion
+    };
+    try {
+      // 派生失败时抛错：缓存只保存**已验证成功**的投影，损坏状态必须每次重新报告。
+      const { value } = canonicalProjection.resolve(key, () => {
+        const exported = yDocToServerCanvas(provider.doc);
+        if (!exported.ok) throw new Error(`${exported.failure.code}: ${exported.failure.message}`);
+        return exported.canvas;
+      });
+      return value;
+    } catch {
+      return null;
+    }
   };
 
   /**
@@ -424,6 +451,9 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     // 每次（重）连接都是一次独立的 sync.connect 观测；上一次已结算的不受影响。
     syncStartedAt = telemetryNow();
     syncSettled = false;
+    // 新连接会新建本地 doc：旧投影（含旧 epoch 的复用结果）不能再被当作当前文档。
+    canonicalDocVersion += 1;
+    canonicalProjection.invalidate();
     const factory = globalThis.indexedDB;
     const cache = factory ? new IndexedDbYjsCacheRepository({ indexedDb: factory, open: () => database.open() }) : null;
     // 每次同步在启动时求值一次命名空间，保证本轮 load 与后续 append/saveMetadata 用同一 key
@@ -475,6 +505,9 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       cacheRoomEpoch: usableCache?.metadata.roomEpoch ?? null,
       onCachedDocumentDiscarded: () => {
         cacheSeq = 0;
+        // 本地 doc 被替换：任何复用过的投影都不再对应当前文档。
+        canonicalDocVersion += 1;
+        canonicalProjection.invalidate();
         if (!cache) return;
         // 必须让 clear 先于本轮收到的任何 update 写入，避免再次读到本地多余结构。
         cacheWriteQueue = cacheWriteQueue
@@ -506,6 +539,8 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         });
       },
       onServerUpdate: (update) => {
+        // 服务端 update 已应用进本地 doc：即使 revision 未变，内容也可能变化，必须让投影失效。
+        canonicalDocVersion += 1;
         // 只缓存服务端 published update；working/pending 永不落盘（design D10）。
         cacheSeq += 1;
         const seq = cacheSeq;

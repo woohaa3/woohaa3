@@ -101,8 +101,8 @@ export async function createNativeRuntimeRealm(
   target.addEventListener("resize", layout);
   layout();
 
-  const upload = (plane: boolean, id: string, width: number, height: number, rgba: Uint8Array) => {
-    const meta = encodeURIComponent(JSON.stringify({ plane, id, width, height }));
+  const upload = (plane: boolean, id: string, width: number, height: number, rgba: Uint8Array, content = "") => {
+    const meta = encodeURIComponent(JSON.stringify({ plane, id, width, height, content }));
     const result = JSON.parse(request(`texture?meta=${meta}`, rgba).responseText) as { ok: boolean; error?: string };
     if (!result.ok) throw new Error(result.error ?? "Native texture upload failed");
   };
@@ -117,7 +117,7 @@ export async function createNativeRuntimeRealm(
       timings.recordWork(JSON.parse(value), started, target.performance.now());
       return value;
     },
-    set_texture: (id, w, h, bytes) => upload(false, id, w, h, bytes),
+    set_texture: (id, w, h, bytes, content) => upload(false, id, w, h, bytes, content ?? ""),
     set_model_media_texture: (id, w, h, bytes) => upload(true, id, w, h, bytes),
     poll_shot_capture: (id, generation) => {
       const text = request(`capture?requestId=${id}&generation=${generation}`).responseText;
@@ -128,6 +128,7 @@ export async function createNativeRuntimeRealm(
     "is_ready", "rendered_revision", "base_scene_generation", "viewport_capability", "observer_capability", "position_capability", "scene_capability",
     "runtime_health", "canvas_work_diagnostics", "model_asset_diagnostics", "shot_diagnostics",
     "set_scene", "set_viewport", "set_observer", "set_positions", "prepare_and_register_model_resource",
+    "declare_model_resource", "set_model_payload_leases",
     "query_point_hit", "query_marquee", "query_probe", "query_drop_target", "query_composite_asset_scopes",
     "query_model_pick", "query_composite_asset_item_pick", "query_composite_asset_item_bounds", "query_gizmo_hit",
     "request_shot_capture", "seed_runtime_generation"

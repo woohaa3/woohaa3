@@ -1,7 +1,8 @@
 import { measureVideoPhase, recordVideoTransition } from "../../performance/interaction-phase-profiler.js";
 /**
  * 画布视频帧会话
- * （change: enable-video-node-live-preview，design D1–D4/D8）。
+ * （change: enable-video-node-live-preview，design D1–D4/D8；
+ *   change: 2026-10-23-scale-canvas-media-residency，design D1/D2/D3/D8）。
  *
  * 浏览器负责解码、Bevy 只负责呈现：为每个有 canonical ready 输出视频的节点维护一个**不可见**
  * `HTMLVideoElement` 会话，把首个可呈现帧与 hover 播放期间的新帧上传为 Bevy 纹理。
@@ -12,9 +13,11 @@ import { measureVideoPhase, recordVideoTransition } from "../../performance/inte
  * - `posterUrl` 只作为首帧尚未就绪或解码失败时的回退，真实帧可用后必须替换；
  * - 播放状态/currentTime/像素只存在于本会话，不写 Y.Doc/nodeData/history。
  *
- * 有界与迟到防护（design D4/D8）：
- * - 每个会话带 source generation，异步回调提交前核对，避免旧资产覆盖新纹理；
- * - 静态首帧解码走有界队列，活动会话数量有上限；
+ * 有界与迟到防护（design D2/D3/D4/D8；本 change 的任务 3.1–3.3）：
+ * - **先选 admitted 集合再创建**：只为准入项建 decoder，不再「先建全部再 prune」；
+ * - decoder 名额（默认 12）在创建前分配：先按 hover/聚焦目标，再按准入 purpose 与排队年龄，
+ *   片场/普通卡片/聚焦共用同一上限；
+ * - 静态首帧名额在**真实帧完成/失败/超时/取消清理**后归还，配置 2 时始终至多 2 个未完成；
  * - 帧上传只在 `minUploadIntervalMs`（默认最高 60fps）节流后发生；
  * - 删除/替换/dispose 时暂停、撤销回调、移除媒体源并阻止迟到结果。
  */
@@ -23,7 +26,9 @@ import type { ServerCanvas } from "@woohaa3/contracts";
 import type { BevyRuntime } from "./bevy-runtime.js";
 import {
   rasterizeDrawable,
+  scaleToMaxDimension,
   defaultRasterCanvasFactory,
+  BEVY_TEXTURE_MAX_DIMENSION,
   type RasterCanvas,
   type RasterCanvasFactory
 } from "./media-raster.js";
@@ -31,14 +36,18 @@ import { resolveNodeVideoSource, defaultCreateVideo, defaultLoadPosterImage } fr
 export { resolveNodeVideoSource } from "./video-source.js";
 import { TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
 import { NodeResourceLoading, type NodeResourceLoad } from "../../services/node-resource-loading.js";
+import { DEFAULT_RESIDENCY_POLICY, canvasStructureKey, type ResidencyPurpose } from "./residency/index.js";
+import type { CanvasResourceCoordinator } from "./residency/index.js";
 /** 默认最高 60fps；实际更新由视频解码帧回调驱动。 */
 export const VIDEO_FRAME_MIN_UPLOAD_INTERVAL_MS = 1000 / 60;
-/** 同时存在的视频会话上限（design D4）。 */
-export const VIDEO_SESSION_LIMIT = 12;
+/** 同时存在的视频会话上限（design D4；与集中策略默认一致）。 */
+export const VIDEO_SESSION_LIMIT = DEFAULT_RESIDENCY_POLICY.videoSessionLimit;
 /** 静态首帧并发解码上限。 */
-export const VIDEO_STATIC_DECODE_LIMIT = 2;
+export const VIDEO_STATIC_DECODE_LIMIT = DEFAULT_RESIDENCY_POLICY.videoFirstFrameConcurrency;
 /** 首帧 seek 目标（design D2）：`min(0.1s, duration / 2)`。 */
 export const VIDEO_FIRST_FRAME_SEEK_SECONDS = 0.1;
+/** 首帧等待上限：超过即按超时结算名额并保留 poster（design D2/D8）。 */
+export const VIDEO_FIRST_FRAME_TIMEOUT_MS = 4000;
 /** 隐藏解码元素的稳定接口（生产由 `document.createElement("video")` 提供，测试注入 fake）。 */
 export type VideoElementLike = {
   src: string;
@@ -89,6 +98,17 @@ export type VideoFrameSessionOptions = {
   now?: () => number;
   /** 纹理/播放状态变化后回调（触发一次 scene flush / E2E 镜像）。 */
   onChange?: () => void;
+  /**
+   * 页面级资源协调器（change: 2026-10-23，design D1）。
+   *
+   * 提供时：decoder 与首帧工作经 `video-session` / `video-frame` 通道准入，
+   * 需求用途来自协调器投影；缺省时按 `maxSessions`/`maxStaticDecodes` 本地有界（旧行为）。
+   */
+  residency?: CanvasResourceCoordinator;
+  /** 该节点当前的准入用途；缺省按 visible。 */
+  purposeOf?: (nodeId: string) => ResidencyPurpose | null;
+  /** 首帧等待上限（ms）。 */
+  firstFrameTimeoutMs?: number;
 };
 export type VideoFrameSessions = {
   /** 按当前 canonical 画布同步会话（幂等）。 */
@@ -105,6 +125,8 @@ export type VideoFrameSessions = {
   isLoading?(nodeId: string): boolean;
   /** 当前活动会话的节点 id（供 E2E / 排障观察）。 */
   activeNodeIds(): string[];
+  /** 诊断：首帧名额的真实占用（含 draining）。 */
+  diagnostics?(): { sessions: number; staticActive: number; staticPending: number; created: number; disposed: number };
   dispose(): void;
 };
 type Session = {
@@ -127,39 +149,71 @@ type Session = {
   posterSettled: boolean;
   detached: boolean;
 };
+type StaticTask = { run: () => void; nodeId: string };
 export function createVideoFrameSessions(options: VideoFrameSessionOptions): VideoFrameSessions {
   const createVideo = options.createVideo ?? defaultCreateVideo;
   const createCanvas = options.createCanvas ?? defaultRasterCanvasFactory;
   const loadPosterImage = options.loadPosterImage ?? defaultLoadPosterImage;
   const now = options.now ?? (() => performance.now());
   const minUploadInterval = options.minUploadIntervalMs ?? VIDEO_FRAME_MIN_UPLOAD_INTERVAL_MS;
-  const maxSessions = options.maxSessions ?? VIDEO_SESSION_LIMIT;
-  const maxStaticDecodes = options.maxStaticDecodes ?? VIDEO_STATIC_DECODE_LIMIT;
+  // 集中策略是唯一预算来源（design D3 / 任务 2.2）：显式注入优先，其次读页面协调器的策略，
+  // 最后才回落到默认常量。否则注入更小的 `videoSessionLimit` 只影响投影而不限制 decoder，
+  // 「所有媒体 owner 接同一页总预算」就不成立。
+  const maxSessions = Math.max(1, options.maxSessions
+    ?? options.residency?.getPolicy().videoSessionLimit ?? VIDEO_SESSION_LIMIT);
+  const maxStaticDecodes = Math.max(1, options.maxStaticDecodes
+    ?? options.residency?.getPolicy().videoFirstFrameConcurrency ?? VIDEO_STATIC_DECODE_LIMIT);
+  const firstFrameTimeout = options.firstFrameTimeoutMs ?? VIDEO_FIRST_FRAME_TIMEOUT_MS;
+  const residency = options.residency;
   const sessions = new Map<string, Session>();
   const uploads = new MediaOperationBoundary(options.runtime);
   let retryVersion = options.runtime.retryVersion?.() ?? 0;
-  const staticQueue: Array<() => void> = [];
-  let staticActive = 0;
+  /** 首帧等待队列：只有真正完成/失败/超时/取消清理后才腾出名额。 */
+  const staticQueue: StaticTask[] = [];
+  /** 已占用首帧名额的节点 → 超时句柄；数量即真实在途数。 */
+  const staticActive = new Map<string, ReturnType<typeof globalThis.setTimeout> | null>();
   let hovered: string | null = null;
   let generationCounter = 0;
   let disposed = false;
   let wasSuspended = false;
+  let createdCount = 0;
+  let disposedCount = 0;
   const overriddenTextures = new Set<string>();
   const pendingRestores = new Map<string, Session>();
+  /** 视频绑定 memo（design D7 / 任务 7.1）：静止帧不重新解析全量节点视频来源。 */
+  let boundCanvas: ServerCanvas | null = null;
+  let boundStructure = "";
+  let boundSources: Map<string, { url: string; posterUrl: string | null }> | null = null;
   const notify = () => options.onChange?.();
   const loading = new NodeResourceLoading(notify, "video-first-frame");
-  const runStatic = (task: () => void) => {
-    staticQueue.push(task);
+  const purposeOf = (nodeId: string): ResidencyPurpose => options.purposeOf?.(nodeId) ?? "visible";
+
+  /** 首帧名额：只有显式 release 才归还（完成/失败/超时/清理）。 */
+  const releaseStatic = (nodeId: string) => {
+    const handle = staticActive.get(nodeId);
+    if (handle === undefined) return;
+    if (handle !== null) globalThis.clearTimeout?.(handle);
+    staticActive.delete(nodeId);
+    pumpStatic();
+  };
+  const runStatic = (nodeId: string, task: () => void) => {
+    staticQueue.push({ nodeId, run: task });
     pumpStatic();
   };
   function pumpStatic(): void {
-    while (staticActive < maxStaticDecodes && staticQueue.length > 0) {
-      const task = staticQueue.shift()!;
-      staticActive += 1;
+    while (staticActive.size < maxStaticDecodes && staticQueue.length > 0) {
+      const next = staticQueue.shift()!;
+      // 名额先登记，再置超时：超时同样结算（不允许「函数已返回但帧永远没来」长期占用）。
+      staticActive.set(next.nodeId, null);
+      const timer = globalThis.setTimeout?.(() => {
+        if (!staticActive.has(next.nodeId)) return;
+        releaseStatic(next.nodeId);
+      }, firstFrameTimeout) ?? null;
+      staticActive.set(next.nodeId, timer);
       try {
-        task();
-      } finally {
-        staticActive -= 1;
+        next.run();
+      } catch {
+        releaseStatic(next.nodeId);
       }
     }
   }
@@ -176,6 +230,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   const detachSession = (session: Session) => measureVideoPhase("session-detach", session.nodeId, () => {
     if (session.detached) return;
     session.detached = true;
+    disposedCount += 1;
     pendingRestores.delete(session.nodeId);
     uploads.clear(`video:${session.nodeId}`);
     uploads.clear(`poster:${session.nodeId}`);
@@ -183,6 +238,9 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     loading.remove(session.load);
     session.state = "idle";
     cancelFrameHandle(session);
+    releaseStatic(session.nodeId);
+    residency?.cancel(`video-session:${session.nodeId}`);
+    residency?.cancel(`video-frame:${session.nodeId}`);
     try {
       measureVideoPhase("pause-call", session.nodeId, () => session.video.pause());
     } catch {
@@ -203,6 +261,11 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     if (!isCurrent(session, sourceGeneration) || options.isSuspended?.()) return false;
     const { videoWidth, videoHeight, seeking, readyState } = session.video;
     if (!videoWidth || !videoHeight || seeking || (readyState !== undefined && readyState < 2)) return false;
+    // 每帧上传 staging 预算（design D3）：额度用尽时本帧不上传，也不标记为资源失败；
+    // 调用方保留 poster/在途状态，下一帧帧前导重置额度后继续（首帧名额因此照常按
+    // 成功/失败/超时/清理归还，不会因预算延后而泄漏或提前释放）。
+    // 播放/悬停（`playing`）是当前交互需求，按 D3「交互优先」不受逐帧额度限制。
+    if (!(residency?.spendUploadBytes(videoWidth * videoHeight * 4, session.state === "playing") ?? true)) return false;
     const uploadedAt = now();
     const accepted = uploads.run(`video:${session.nodeId}`, session.sourceUrl, session.nodeId, () => {
       const raster = measureVideoPhase("frame-raster", session.nodeId, () => rasterizeDrawable(
@@ -235,6 +298,17 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
           session.posterSettled = false;
           return;
         }
+        // 每帧上传 staging 预算（design D3）：额度用尽就留到下一帧再试。必须在进入上传边界
+        // **之前**判定，否则 `false` 会被当成资源失败而永久跳过该封面。
+        const { width, height } = scaleToMaxDimension(
+          image.naturalWidth || image.width,
+          image.naturalHeight || image.height,
+          Math.min(TEXTURE_MAX_DIMENSION, BEVY_TEXTURE_MAX_DIMENSION)
+        );
+        if (!(residency?.spendUploadBytes(width * height * 4) ?? true)) {
+          session.posterSettled = false;
+          return;
+        }
         uploads.run(`poster:${session.nodeId}`, posterUrl, session.nodeId, () => {
           const raster = rasterizeDrawable(
           image,
@@ -254,12 +328,18 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       });
   };
 
-  /** seek 到首帧可呈现位置并解码上传（design D2）。 */
+  /**
+   * seek 到首帧可呈现位置并解码上传（design D2）。
+   *
+   * 名额在 `runStatic` 取得，并且只有在**帧回调真正执行完**（成功上传 / 帧不可用 / 元素失败 /
+   * 超时）后才 `releaseStatic`；不再于启动函数返回时释放（原缺陷：配置 2 仍可发出 12 次
+   * 未完成 seek，任务 3.2）。
+   */
   const ensureFirstFrame = (session: Session, sourceGeneration: number) => {
     if (session.staticRequested) return;
     session.staticRequested = true;
-    runStatic(() => {
-      if (!isCurrent(session, sourceGeneration)) return;
+    runStatic(session.nodeId, () => {
+      if (!isCurrent(session, sourceGeneration)) { releaseStatic(session.nodeId); return; }
       const video = session.video;
       const duration = Number(video.duration);
       const target = Number.isFinite(duration) && duration > 0 ? Math.min(VIDEO_FIRST_FRAME_SEEK_SECONDS, duration / 2) : 0;
@@ -268,21 +348,29 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       } catch {
         /* seek 可能不可用 */
       }
+      const settle = (uploaded: boolean) => {
+        releaseStatic(session.nodeId);
+        if (uploaded) { notify(); return; }
+        if (!isCurrent(session, sourceGeneration)) return;
+        // 帧尚不可呈现：保留 poster，并让下一次合法需求（hover/重试）重新排队。
+        session.staticRequested = false;
+        session.posterSettled = false;
+        uploadPosterFallback(session, sourceGeneration);
+      };
       if (typeof video.requestVideoFrameCallback === "function") {
         const handle = video.requestVideoFrameCallback(() => {
           if (session.frameCallbackHandle === handle) session.frameCallbackHandle = null;
-          if (uploadRealFrame(session, sourceGeneration)) notify();
+          settle(uploadRealFrame(session, sourceGeneration));
         });
         session.frameCallbackHandle = handle;
       } else {
         session.fallbackTimer = globalThis.setTimeout?.(() => {
           session.fallbackTimer = null;
-          if (uploadRealFrame(session, sourceGeneration)) notify();
+          settle(uploadRealFrame(session, sourceGeneration));
         }, 0) ?? null;
       }
     });
   };
-
   const stopPlayback = (session: Session) => measureVideoPhase("stop-playback", session.nodeId, () => {
     if (session.state === "idle") return;
     session.state = "idle";
@@ -354,6 +442,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     // 预取策略：建会话只取元数据，避免一进画布就为每个视频节点拉取正文；hover/播放时才升级为 auto。
     video.preload = "metadata";
     video.crossOrigin = "anonymous";
+    createdCount += 1;
     const session: Session = {
       nodeId,
       sourceUrl: url,
@@ -373,8 +462,11 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       detached: false
     };
     // 元数据到达就显式 seek 一次：只取首帧所需数据即可上传，无需等整段缓冲。
+    // 只有真正需要真帧的目标（无 poster 的卡片、hover/聚焦）才占首帧名额（任务 3.3）。
+    const wantsRealFrame = () => nodeId === hovered || !posterUrl || overriddenTextures.has(nodeId);
     const requestFirstFrame = () => {
       if (!isCurrent(session, session.generation) || session.hasRealFrame || session.state === "playing") return;
+      if (!wantsRealFrame()) { uploadPosterFallback(session, session.generation); return; }
       uploads.clear(`decode-video:${session.nodeId}`);
       ensureFirstFrame(session, session.generation);
     };
@@ -387,19 +479,38 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     video.addEventListener("error", () => {
       if (!isCurrent(session, session.generation)) return;
       loading.setLoading(session.load, false, "error");
+      // 解码失败同样终结真实在途名额（不靠超时兜底）。
+      releaseStatic(session.nodeId);
+      session.staticRequested = false;
       uploads.run(`decode-video:${session.nodeId}`, session.sourceUrl, session.nodeId, () => { throw new Error("视频解码失败"); });
     });
     return session;
   };
 
-  const pruneExcess = () => {
-    if (sessions.size <= maxSessions) return;
-    for (const [nodeId, session] of sessions) {
-      if (sessions.size <= maxSessions) break;
-      if (nodeId === hovered) continue;
-      detachSession(session);
-      sessions.delete(nodeId);
-    }
+  /**
+   * 选出本帧实际创建的 decoder 集合。
+   *
+   * 顺序：hover（当前播放目标）→ interactive 用途 → 其余按 purpose/文档顺序。
+   * 名额由 `maxSessions` 约束；未选中的节点只用 poster/占位（design D1/D3）。
+   *
+   * 协调器提供的准入集合是**需求上界**，这里的 `maxSessions` 是 decoder 硬上限：两者取小，
+   * 因此 1000 个可见视频也不会创建 1000 个播放器（任务 3.1）。
+   */
+  const admitted = (next: Map<string, { url: string; posterUrl: string | null }>): string[] => {
+    const order = new Map<string, number>();
+    let index = 0;
+    for (const nodeId of next.keys()) order.set(nodeId, index++);
+    return [...next.keys()]
+      .filter((nodeId) => !residency || residency.isAdmitted(nodeId))
+      .sort((a, b) => {
+        const hoverDelta = (a === hovered ? 0 : 1) - (b === hovered ? 0 : 1);
+        if (hoverDelta !== 0) return hoverDelta;
+        const purposeDelta = purposeRank(purposeOf(a)) - purposeRank(purposeOf(b));
+        if (purposeDelta !== 0) return purposeDelta;
+        // 同优先级保留文档顺序（稳定、可复现）。
+        return (order.get(a) ?? 0) - (order.get(b) ?? 0);
+      })
+      .slice(0, maxSessions);
   };
 
   return {
@@ -423,31 +534,46 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
         hovered = null;
         return;
       }
-      const next = new Map<string, { url: string; posterUrl: string | null }>();
-      for (const node of canvas.document.nodes) {
-        if (node.type !== "video") continue;
-        const resolved = resolveNodeVideoSource(canvas, node.id);
-        if (resolved) next.set(node.id, resolved);
+    const next = new Map<string, { url: string; posterUrl: string | null }>();
+      // 需求集合 memo（design D7 / 任务 7.1）：画布身份与结构指纹都没变时复用上一帧解析结果，
+      // 静止帧不重新解析全量节点视频来源。
+      const structure = `${canvasStructureKey(canvas)}|${canvas.id}`;
+      if (canvas !== boundCanvas || structure !== boundStructure || !boundSources) {
+        for (const node of canvas.document.nodes) {
+          if (node.type !== "video") continue;
+          const resolved = resolveNodeVideoSource(canvas, node.id);
+          if (resolved) next.set(node.id, resolved);
+        }
+        boundCanvas = canvas;
+        boundStructure = structure;
+        boundSources = next;
+      } else {
+        for (const [nodeId, source] of boundSources) next.set(nodeId, source);
       }
 
+      // 先算准入集合，再创建：未准入节点不创建 decoder（不再 create-all/prune-later）。
+      const admittedIds = new Set(admitted(next));
       uploads.retainNodes(new Set(next.keys()));
       for (const [nodeId, session] of sessions) {
         const want = next.get(nodeId);
-        if (!want || want.url !== session.sourceUrl) {
+        if (!want || want.url !== session.sourceUrl || !admittedIds.has(nodeId)) {
           detachSession(session);
           sessions.delete(nodeId);
           if (hovered === nodeId) hovered = null;
         }
       }
 
-      for (const [nodeId, { url, posterUrl }] of next) {
+      for (const nodeId of admittedIds) {
         if (sessions.has(nodeId)) continue;
+        const { url, posterUrl } = next.get(nodeId)!;
         const session = uploads.run(`video-session:${nodeId}`, url, nodeId, () => measureVideoPhase("session-create", nodeId, () => createSession(nodeId, url, posterUrl)));
         if (!session) continue;
         sessions.set(nodeId, session);
+        // 普通静态卡片优先 poster：有 poster 时不抢首帧名额（design D3 / 任务 3.3）。
         if (posterUrl) uploadPosterFallback(session, session.generation);
+        // 只有真正需要真帧的目标（hover/聚焦/无 poster）才取首帧。
+        if (!posterUrl && nodeId === hovered) ensureFirstFrame(session, session.generation);
       }
-      pruneExcess();
       const overridden = options.getFocusTextureNodeId?.();
       if (overridden && sessions.has(overridden)) overriddenTextures.add(overridden);
       for (const nodeId of overriddenTextures) if (!sessions.has(nodeId)) overriddenTextures.delete(nodeId);
@@ -489,6 +615,8 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
         notify();
         return;
       }
+      // hover 是交互需求：没有会话时（例如刚被预算裁掉）按当前画布重新选准入集合。
+      if (!sessions.has(nodeId)) this.sync();
       // 减少动态效果：不自动播放，保留真实静态帧（design D3）。
       if (options.isReducedMotion?.()) return;
       const session = sessions.get(nodeId);
@@ -516,13 +644,33 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       return [...sessions.keys()];
     },
 
+    diagnostics() {
+      return {
+        sessions: sessions.size,
+        staticActive: staticActive.size,
+        staticPending: staticQueue.length,
+        created: createdCount,
+        disposed: disposedCount
+      };
+    },
+
     dispose() {
       disposed = true;
       for (const session of sessions.values()) detachSession(session);
       sessions.clear();
       loading.clear();
       staticQueue.length = 0;
+      for (const nodeId of [...staticActive.keys()]) releaseStatic(nodeId);
       hovered = null;
     }
   };
+}
+
+function purposeRank(purpose: ResidencyPurpose): number {
+  switch (purpose) {
+    case "interactive": return 0;
+    case "visible": return 1;
+    case "prefetch": return 2;
+    case "warm": return 3;
+  }
 }

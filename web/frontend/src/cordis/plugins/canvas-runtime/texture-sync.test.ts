@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import { createTextureSync, TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
 import type { BevyRuntime } from "./bevy-runtime.js";
+import { IMAGE_RETRY_DELAYS_MS, ImageLoadError } from "./image-load.js";
 
 function canvas(withAsset: boolean, nodeType: "image" | "video" = "image"): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas("c1");
@@ -282,4 +283,113 @@ it("细节整批上传/去重，失败清理旧区域，重建与重试重传，
   retry++;sync.sync();expect(upload).toHaveBeenCalledTimes(count+1);
   details=null;sync.sync();expect(upload).toHaveBeenLastCalledWith(null);
   sync.dispose();expect(upload).toHaveBeenLastCalledWith(null);
+});
+
+it("传输失败按有界退避自动重试，健康素材不会被一次重启永久钉成错误", async () => {
+  vi.useFakeTimers();
+  try {
+    const { context } = fakeCanvasContext();
+    (globalThis as unknown as { document: unknown }).document = {
+      createElement: () => ({ width: 0, height: 0, getContext: () => context })
+    };
+    const reported: Array<{ key: string }> = [];
+    const cleared: string[] = [];
+    const { runtime, uploaded } = runtimeRecorder();
+    const runtimeWithIssues = Object.assign(runtime, {
+      reportRuntimeIssue: (issue: { key: string }) => reported.push(issue),
+      clearRuntimeIssue: (key: string) => cleared.push(key)
+    }) as unknown as BevyRuntime;
+    let attempts = 0;
+    const sync = createTextureSync({
+      runtime: runtimeWithIssues,
+      getCanvas: () => canvas(true),
+      loadImage: async () => {
+        attempts += 1;
+        // 前两次是媒体服务重启期的 502，之后恢复。
+        if (attempts <= 2) throw new ImageLoadError("图片加载失败（HTTP 502）。", true);
+        return fakeImage(100, 60);
+      }
+    });
+    sync.sync();
+    await vi.advanceTimersByTimeAsync(0);
+    // 第一次失败不报错、不放弃：转入退避重试，卡片保持加载中。
+    expect(reported).toHaveLength(0);
+    expect(sync.isLoading?.("n1")).toBe(true);
+    await vi.advanceTimersByTimeAsync(IMAGE_RETRY_DELAYS_MS[0]);
+    expect(attempts).toBe(2);
+    expect(reported).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(IMAGE_RETRY_DELAYS_MS[1]);
+    expect(attempts).toBe(3);
+    // 解码成功后由下一次 sync 完成上传（与既有路径一致）。
+    sync.sync();
+    // 恢复后照常上传，并且错误摘要被清掉（不会残留一条过期错误）。
+    expect(uploaded).toEqual([{ id: "n1", width: 100, height: 60 }]);
+    expect(reported).toHaveLength(0);
+    expect(cleared).toContain("decode:image:n1");
+    sync.dispose();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("内容失败不自动重试，只在明确重试时重新解码", async () => {
+  vi.useFakeTimers();
+  try {
+    const { context } = fakeCanvasContext();
+    (globalThis as unknown as { document: unknown }).document = {
+      createElement: () => ({ width: 0, height: 0, getContext: () => context })
+    };
+    const reported: Array<{ key: string }> = [];
+    let retry = 0;
+    const runtime = Object.assign(runtimeRecorder().runtime, {
+      reportRuntimeIssue: (issue: { key: string }) => reported.push(issue),
+      retryVersion: () => retry
+    }) as unknown as BevyRuntime;
+    let attempts = 0;
+    const sync = createTextureSync({
+      runtime,
+      getCanvas: () => canvas(true),
+      loadImage: async () => { attempts += 1; throw new ImageLoadError("图片加载失败（HTTP 404）。", false); }
+    });
+    sync.sync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reported.map(issue => issue.key)).toEqual(["decode:image:n1"]);
+    // 退避窗口全部走完也不再尝试：内容失败不会被当成抖动。
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(attempts).toBe(1);
+    retry += 1;
+    sync.sync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attempts).toBe(2);
+    sync.dispose();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("退避期间删除节点不会再对该内容重试", async () => {
+  vi.useFakeTimers();
+  try {
+    const { context } = fakeCanvasContext();
+    (globalThis as unknown as { document: unknown }).document = {
+      createElement: () => ({ width: 0, height: 0, getContext: () => context })
+    };
+    let attempts = 0;
+    let current = canvas(true);
+    const sync = createTextureSync({
+      runtime: runtimeRecorder().runtime,
+      getCanvas: () => current,
+      loadImage: async () => { attempts += 1; throw new ImageLoadError("图片加载失败（HTTP 503）。", true); }
+    });
+    sync.sync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attempts).toBe(1);
+    current = canvas(false);
+    sync.sync();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(attempts).toBe(1);
+    sync.dispose();
+  } finally {
+    vi.useRealTimers();
+  }
 });

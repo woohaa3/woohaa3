@@ -326,7 +326,7 @@ describe("createVideoFrameSessions", () => {
     sessions.dispose();
   });
 
-  it("首帧解码后上传真实画面并替换 poster 回退", async () => {
+  it("普通静态卡片优先保留 poster；hover 取真实帧后替换 poster 回退", async () => {
     const { runtime } = runtimeRecorder();
     const poster = { width: 80, height: 45 };
     const video = fakeVideo();
@@ -340,8 +340,13 @@ describe("createVideoFrameSessions", () => {
     sessions.sync();
     // 异步 poster 回退：尚未有真实帧。
     expect(sessions.hasRealFrame("n1")).toBe(false);
-    // 触发 loadeddata → 静态首帧解码并上传真实帧。
+    // poster 已有：静态卡片不抢首帧名额，metadata/loadeddata 不触发取帧（change: 2026-10-23，任务 3.3）。
     video.emitLoaded();
+    video.emitFrame();
+    expect(sessions.hasRealFrame("n1")).toBe(false);
+    expect(sessions.diagnostics?.().staticActive).toBe(0);
+    // hover 是交互需求：此时才按需取真实帧并替换 poster。
+    sessions.setHovered("n1");
     video.emitFrame();
     expect(sessions.hasRealFrame("n1")).toBe(true);
     sessions.dispose();
@@ -644,7 +649,7 @@ describe("createVideoFrameSessions", () => {
     sessions.dispose();
   });
 
-  it("会话数量超过上限时释放非 hover 会话（有界资源）", () => {
+  it("会话数量超过上限时只创建准入名额内的 decoder（不先建全部再 prune）", () => {
     const { runtime } = runtimeRecorder();
     const videos: FakeVideo[] = [];
     const sessions = createVideoFrameSessions({
@@ -664,9 +669,13 @@ describe("createVideoFrameSessions", () => {
       maxSessions: 2
     });
     sessions.sync();
-    expect(sessions.activeNodeIds().length).toBeLessThanOrEqual(2);
-    // 被释放的会话移除 src。
-    expect(videos.some((video) => video.src === "")).toBe(true);
+    expect(sessions.activeNodeIds()).toEqual(["n1", "n2"]);
+    // 关键：超出名额的节点从不创建 decoder（change: 2026-10-23，design D1；旧实现创建 3 个再释放 1 个）。
+    expect(videos).toHaveLength(2);
+    expect(videos.every((video) => video.src !== "")).toBe(true);
+    // 重复同步保持稳定，不会重复创建。
+    sessions.sync();
+    expect(videos).toHaveLength(2);
     sessions.dispose();
   });
 

@@ -123,3 +123,59 @@ export function prepareModelOps(
 ): PreparedModelResource {
   return prepareModelResource({ sceneVersion, ops });
 }
+
+/**
+ * 轻量模型 descriptor envelope 版本
+ * （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+ *
+ * descriptor 只包含内容身份与必要 bounds，**不含** ops；声明它与注册重型 payload 是两次
+ * 独立确认。场景引用只需 descriptor 已声明，因此 1000 个离屏模型不强制常驻整场 IR。
+ */
+export const MODEL_DESCRIPTOR_VERSION = "woohaa-model-descriptor-v1" as const;
+export type ModelDescriptorVersion = typeof MODEL_DESCRIPTOR_VERSION;
+
+/** 轻量模型 descriptor（与 Rust `ModelDescriptorDto` 同形）。 */
+export type ModelDescriptor = {
+  resourceVersion: ModelDescriptorVersion;
+  resourceKey: string;
+  sceneVersion: string;
+  signature: string;
+  extent: number;
+  aabb: Aabb | null;
+};
+
+/** 从 prepared resource 派生轻量 descriptor（不含 ops；可安全常驻）。 */
+export function modelDescriptorOf(resource: PreparedModelResource): ModelDescriptor {
+  return {
+    resourceVersion: MODEL_DESCRIPTOR_VERSION,
+    resourceKey: resource.resourceKey,
+    sceneVersion: resource.sceneVersion,
+    signature: resource.signature,
+    extent: resource.extent,
+    aabb: resource.aabb
+  };
+}
+
+/** descriptor 声明边界的线格式 JSON。 */
+export function modelDescriptorPayload(descriptor: ModelDescriptor): string {
+  return JSON.stringify({
+    resourceVersion: descriptor.resourceVersion,
+    resourceKey: descriptor.resourceKey,
+    sceneVersion: descriptor.sceneVersion,
+    signature: descriptor.signature,
+    extent: descriptor.extent,
+    aabb: descriptor.aabb
+  });
+}
+
+/** Rust `declare_model_resource` 的回执（与 descriptor 同形）。 */
+export type DeclaredModelDescriptor = ModelDescriptor;
+
+/**
+ * 当前需求持有的 payload lease 请求线格式
+ * （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+ */
+export function modelPayloadLeaseRequest(keys: Iterable<string>): string {
+  return JSON.stringify({ keys: [...keys] });
+}
+

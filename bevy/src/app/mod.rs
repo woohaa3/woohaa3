@@ -24,7 +24,7 @@ pub(crate) use input::{
 };
 pub(crate) use state::{
     AnimationCameraState, CurrentScene, FilmSetTextureBatch, FocusRig, FrameFlags, ModelAssetTable,
-    SurfaceState, TextureBatch,
+    NodeIndex, PreviewLayerPool, SurfaceState, TextureBatch,
 };
 
 #[cfg(feature = "wasm")]
@@ -123,6 +123,8 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<FilmSetTextureBatch>()
         .init_resource::<model3d::film_set_media::FilmSetMediaVisuals>()
         .init_resource::<ModelAssetTable>()
+        .init_resource::<NodeIndex>()
+        .init_resource::<crate::app::PreviewLayerPool>()
         .init_resource::<SurfaceState>()
         .init_resource::<FrameFlags>()
         .init_resource::<FocusRig>()

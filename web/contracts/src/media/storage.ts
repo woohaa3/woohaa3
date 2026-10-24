@@ -75,6 +75,13 @@ export type MediaStorage = {
   putStream?(key:string,bytes:AsyncIterable<Uint8Array>,contentType:string,options:{size:number;signal?:AbortSignal},scope?:MediaStorageScope):Promise<void>;
   /** 区间为包含两端的字节偏移；省略时读取完整对象，仍按流返回。 */
   openRead?(key: string, range?: { start: number; end: number }, scope?: MediaStorageScope): Promise<MediaObjectStream>;
+  /**
+   * 删除对象（可选）。
+   *
+   * 只用于**可清理派生物缓存**（缩略图/海报）的预算淘汰；canonical 资产从不经此删除。
+   * 未实现表示该部署不支持删除派生缓存——调用方必须按「缓存已满」失败，不能假装淘汰成功。
+   */
+  delete?(key: string, scope?: MediaStorageScope): Promise<void>;
   getHttpsUrl?(key: string, options?: { expiresSeconds?: number }, scope?: MediaStorageScope): Promise<string>;
   /**
    * 按 locator 读字节（可跨后端）。

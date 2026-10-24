@@ -8,6 +8,8 @@ fn world() -> World {
     world.insert_resource(Assets::<Image>::default());
     world.insert_resource(ThemeResource::default());
     world.insert_resource(FrameFlags::default());
+    // 纹理/预览定位走同代节点索引（design D7 / 任务 7.2）。
+    world.insert_resource(crate::app::NodeIndex::default());
     world.insert_resource(crate::app::ModelAssetTable::default());
     world.insert_resource(Visuals {
         card_blocks: Vec::new(),
@@ -22,6 +24,7 @@ fn world() -> World {
         font: default(),
         labels: default(),
         textures: default(),
+        texture_store: default(),
         edge_blocks: default(),
         shared_key: None,
         attach_labels: default(),

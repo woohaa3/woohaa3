@@ -21,7 +21,7 @@ export type BevyModule = {
   runtime_health?: () => string;
   seed_runtime_generation?: (previous: number) => void;
   set_scene: (json: string) => number;
-  set_texture: (id: string, width: number, height: number, rgba: Uint8Array) => void;
+  set_texture: (id: string, width: number, height: number, rgba: Uint8Array, content?: string) => void;
   set_image_focus_details?: (manifest:string,pixels:Uint8Array)=>void;
   /** 上传片场媒体平面纹理（键为全局唯一 planeId；change: 2026-10-08-make-film-set-model-only）。 */
   set_model_media_texture?: (id: string, width: number, height: number, rgba: Uint8Array) => void;
@@ -50,6 +50,16 @@ export type BevyModule = {
   query_gizmo_hit?: (json: string) => string;
   /** 合并准备与注册（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。 */
   prepare_and_register_model_resource?: (json: string) => string;
+  /**
+   * 声明轻量模型 descriptor（change: 2026-10-23-scale-canvas-media-residency，design D5）。
+   * 只登记内容身份与必要 bounds，不注册重型 payload；返回规范化 descriptor JSON。
+   */
+  declare_model_resource?: (json: string) => string;
+  /**
+   * 提交当前需求持有的模型 payload lease 并按预算淘汰 cold payload
+   * （change: 同上）。返回 `{retained, evicted, evictedKeys, descriptors, cold}`。
+   */
+  set_model_payload_leases?: (json: string) => string;
   /** model asset 派生诊断（JSON）。 */
   model_asset_diagnostics?: () => string;
   /**
@@ -230,6 +240,29 @@ export type BevyRuntime = {
    * （change: optimize-model-scene-snapshot-hot-path）。
    */
   registerModelResource(resource: PreparedModelResource): void;
+  /**
+   * 提交当前需求持有的模型 payload lease（resource key 集合），由 Rust 按预算淘汰无 lease 的
+   * 重型 payload 并为需求内 cold 项重新准备
+   * （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+   *
+   * 只接受已声明过的模型 key（资产/片场内容身份会被忽略）。需求集合未变化时幂等短路，
+   * 因此可在帧前导每帧调用；当前需求内的 cold payload 会在同一调用内补准备。
+   */
+  setModelPayloadLeases?(keys: Iterable<string>): void;
+  /**
+   * 覆盖模型准备的单帧并发/时间预算
+   * （change: 2026-10-23-scale-canvas-media-residency，design D3 / 任务 2.2、6.1）。
+   *
+   * 由页面级协调器的集中策略注入：不同媒体 owner 不得各自放宽预算。未调用时用默认策略。
+   */
+  setModelPrepareBudget?(input: { concurrency: number; budgetMs: number }): void;
+  /**
+   * 每帧推进有界数量的重型模型准备（change: 2026-10-23-scale-canvas-media-residency，任务 6.1）。
+   *
+   * 静止帧也必须调用：待准备队列由需求驱动，不能等到下一次场景提交才继续，否则大片模型
+   * 永远停在 preparing。无待办时是常量开销。
+   */
+  advanceModelPreparation?(): void;
   /**
    * 合并准备与注册：把已规范化 Scene IR 一次性交给 Rust，由其派生兼容 signature/AABB/extent、
    * 注册资源并返回轻量 metadata（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 6.6）。

@@ -61,8 +61,11 @@ export * from "./wire-shot-preview.js";
  *   工作相机扫描消费同一摘要，装饰时间留在 renderer。
  * - v24：shotPreview.backdrop 将每镜头背景传至 preview/capture；旧 renderer 会静默忽略，
  *   因此同步提升能力版本，拒绝混合组合。
+ * - change: 2026-10-23-scale-canvas-media-residency —— v25 起模型引用只需 **轻量 descriptor
+ *   已声明**：payload 未驻留是合法 cold/preparing 状态，重型 IR 由需求 lease 与预算淘汰。
+ *   旧 renderer 会把 cold 引用当作未知资源并拒绝整帧，因此必须同步提升能力版本。
  */
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v24" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v25" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {

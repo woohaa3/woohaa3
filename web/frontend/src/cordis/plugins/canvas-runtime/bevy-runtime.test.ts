@@ -3,138 +3,13 @@
  * （change: optimize-model-scene-snapshot-hot-path，任务 2.5 / 4.1）。
  *
  * 用 mock WASM 模块验证：幂等上传、注册失败隔离、重启清表与恢复时的调用顺序。
+ * descriptor 与 payload 分离的用例见 `bevy-runtime-payload.test.ts`（同一份 harness）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION, MODEL_FOCUS_VERSION, DEFAULT_MODEL_PREVIEW, defaultAppTheme, prepareModelResource, type CanvasRenderScene, type SceneV2Op } from "@woohaa3/contracts";
-import { loadBevyRuntime, type BevyModule } from "./bevy-runtime.js";
+import { CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION, MODEL_FOCUS_VERSION, DEFAULT_MODEL_PREVIEW, prepareModelResource, type CanvasRenderScene } from "@woohaa3/contracts";
+import { loadBevyRuntime } from "./bevy-runtime.js";
 import { resetSceneDiagnostics, sceneDiagnostics } from "./scene-diagnostics.js";
-
-function v2Ops(radius: number): SceneV2Op[] {
-  return [
-    {
-      t: "sphere",
-      id: "s",
-      parent: null,
-      position: [0, 0, 0],
-      rotation: [0, 0, 0],
-      scale: [1, 1, 1],
-      material: null,
-      color: "#ffffff",
-      radius
-    } as SceneV2Op
-  ];
-}
-
-function sceneWith(resourceKey: string, signature: string): CanvasRenderScene {
-  return {
-    version: CANVAS_RENDER_SCENE_VERSION,
-    revision: 1,
-    nodes: [
-      {
-        id: "m1",
-        type: "model",
-        x: 0,
-        y: 0,
-        width: 196,
-        height: 64,
-        body: "",
-        title: "模型",
-        typeLabel: "3D 模型",
-        progress: 0,
-        busy: false,
-        texture: false,
-        resizable: false,
-        model: { sceneVersion: "woohaa-model-scene-ir-v2", resourceKey, signature }
-      }
-    ],
-    edges: [],
-    selection: { nodes: [], edge: null },
-    viewport: { x: 0, y: 0, zoom: 1 },
-    draft: null,
-    surface: null,
-    theme: defaultAppTheme()
-  };
-}
-
-type Calls = Array<{ kind: string; value: string }>;
-
-function mockModule(calls: Calls, opts: { failRegister?: boolean; prepare?: boolean } = {}): BevyModule {
-  // interaction generation 计数（set_scene 与 set_viewport 都推进，模拟 Rust 接受点）。
-  let sceneGeneration = 0;
-  let baseGeneration = 0;
-  const module: BevyModule = {
-    default: async () => undefined,
-    start: () => calls.push({ kind: "start", value: "" }),
-    // 返回 interaction generation（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
-    set_scene: (json: string) => {
-      calls.push({ kind: "set_scene", value: json });
-      sceneGeneration += 1;
-      baseGeneration = sceneGeneration;
-      return sceneGeneration;
-    },    set_texture: () => undefined,
-    rendered_revision: () => 1,
-    is_ready: () => true,
-    query_point_hit: () => JSON.stringify({ available: false, reason: "unavailable", generation: 0, hit: null }),
-    query_marquee: () => JSON.stringify({ available: false, reason: "unavailable", generation: 0, nodeIds: [] }),
-    query_probe: () => JSON.stringify({ available: false, reason: "unavailable", generation: 0, candidates: [] }),
-    // 片场菱形范围的 drop/scope 查询（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
-    query_drop_target: () => JSON.stringify({ available: false, reason: "unavailable", generation: 0, targetNodeId: null }),
-    query_composite_asset_scopes: () => JSON.stringify({ available: false, reason: "unavailable", generation: 0, scopes: [] })
-  };
-  if (opts.prepare !== false) {
-    module.prepare_and_register_model_resource = (json: string) => {
-      calls.push({ kind: "prepare", value: json });
-      if (opts.failRegister) throw new Error("register failed");
-      const parsed = JSON.parse(json) as { sceneVersion: string; ops: unknown[]; expectedSignature?: string };
-      const signature = parsed.expectedSignature ?? "sig";
-      return JSON.stringify({
-        resourceVersion: "woohaa-prepared-model-resource-v1",
-        resourceKey: `${parsed.sceneVersion}:${signature}`,
-        sceneVersion: parsed.sceneVersion,
-        signature,
-        extent: 2,
-        aabb: { min: [-1, -1, -1], max: [1, 1, 1] }
-      });
-    };
-  }
-  // 直接 Shot Camera capture 边界（change: 2026-10-07-remove-residual-compatibility）。
-  // 初始化能力校验要求存在；默认不产出帧（返回空数组）。
-  module.request_shot_capture = (json: string) => {
-    calls.push({ kind: "request_shot_capture", value: json });
-  };
-  module.poll_shot_capture = () => new Uint8Array();
-  // 纯视口增量能力（change: 2026-10-10-optimize-canvas-interaction-hot-path）。
-  // 默认能力版本正确；base 身份随 set_scene 更新、set_viewport 只推进 generation。
-  module.viewport_capability = () => CANVAS_VIEWPORT_UPDATE_VERSION;
-  module.position_capability = () => CANVAS_POSITION_UPDATE_VERSION;
-  // 场景 wire 能力（change: 2026-10-15-add-film-set-overview-lod）。
-  module.scene_capability = () => CANVAS_RENDER_SCENE_VERSION;
-  module.base_scene_generation = () => baseGeneration;
-  module.set_viewport = (json: string) => {
-    const parsed = JSON.parse(json) as { baseSceneGeneration: number };
-    if (baseGeneration === 0) throw new Error("unavailable");
-    if (parsed.baseSceneGeneration !== baseGeneration) throw new Error("stale-base");
-    calls.push({ kind: "set_viewport", value: json });
-    return ++sceneGeneration;
-  };
-  module.set_positions = (json: string) => {
-    const parsed = JSON.parse(json) as { baseSceneGeneration: number };
-    if (!baseGeneration) throw new Error("unavailable");
-    if (parsed.baseSceneGeneration !== baseGeneration) throw new Error("stale-base");
-    calls.push({ kind: "set_positions", value: json });
-    return ++sceneGeneration;
-  };
-  module.observer_capability = () => CANVAS_OBSERVER_UPDATE_VERSION;
-  module.set_observer = (json: string) => {
-    const parsed = JSON.parse(json) as { baseSceneGeneration: number };
-    if (baseGeneration === 0) throw new Error("unavailable");
-    if (parsed.baseSceneGeneration !== baseGeneration) throw new Error("stale-base");
-    calls.push({ kind: "set_observer", value: json });
-    return ++sceneGeneration;
-  };
-  (module as { __setBaseGeneration?: (value: number) => void }).__setBaseGeneration = (value: number) => { baseGeneration = value; };
-  return module;
-}
+import { mockModule, sceneWith, v2Ops, type Calls } from "./test-support/runtime-harness.js";
 
 beforeEach(() => {
   resetSceneDiagnostics();
@@ -610,7 +485,10 @@ describe("Bevy 初始化与纹理故障恢复", () => {
     expect(runtime.setTexture("bad", 1, 1, pixels)).toBe(false);
     expect(runtime.setTexture("bad", 1, 1, pixels)).toBe(false);
     expect(upload).toHaveBeenCalledTimes(1);
-    expect(runtime.setTexture("good", 1, 1, pixels)).toBe(true);
+    expect(runtime.setTexture("good", 1, 1, pixels, { sourceKey: "sha256-content" })).toBe(true);
+    expect(upload).toHaveBeenCalledTimes(2);
+    // 稳定内容身份随上传一起过界：Rust 侧据此共享同一 GPU 纹理（设计 D4 / 任务 4.4）。
+    expect(upload.mock.calls[1]).toEqual(["good", 1, 1, pixels, "sha256-content"]);
     expect(runtime.getRuntimeIssues!()).toHaveLength(1);
     rejected = false; runtime.retryRuntimeIssues!();
     expect(runtime.setTexture("bad", 1, 1, pixels)).toBe(true);

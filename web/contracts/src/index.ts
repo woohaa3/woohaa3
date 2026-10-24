@@ -25,6 +25,7 @@ export * from "./task/seedream-presets.js";
 export * from "./media/keys.js";
 export * from "./media/protocol.js";
 export * from "./media/storage.js";
+export * from "./media/variants.js";
 export * from "./canvas/protocol.js";
 export * from "./canvas/catalog.js";
 export * from "./canvas/source.js";

@@ -13,6 +13,13 @@ use crate::canvas_query::{curve, layout};
 use crate::protocol::{GraphNode, Scene};
 
 use super::results::{PointHit, ProbeCandidate, ScopeGeometryEntry};
+use super::spatial::SpatialGrid;
+
+/// 空间网格 cell 边长（世界单位）。
+///
+/// 取固定卡片量级：太小会让大卡片/片场跨很多 cell，太大则退化为全量候选。位置增量只搬动
+/// 真正移动的对象，因此该值不需要随 zoom 变化（design D7 / 任务 7.3）。
+const SPATIAL_CELL_SIZE: f32 = 256.0;
 
 /// 快照中的单个节点几何。
 #[derive(Clone)]
@@ -74,8 +81,84 @@ pub(crate) struct InteractionSnapshot {
     pub(super) adjacency: Vec<Vec<usize>>,
     /// 仅保留有横条的节点，视口增量不重建节点/边的世界几何。
     pub(super) action_descriptors: Vec<(usize, crate::protocol::NodeActions)>,
+    /// 节点 AABB 空间网格：点/框选/drop/probe 先取候选再细判（design D7 / 任务 7.3）。
+    pub(super) node_grid: SpatialGrid,
+    /// 边折线 AABB 空间网格（边命中先粗筛，再逐段距离）。
+    pub(super) edge_grid: SpatialGrid,
+    /// `nodes` 下标 → 点命中优先级（`order` 中的位置；不在 `order` 里为 `u32::MAX`）。
+    pub(super) order_rank: Vec<u32>,
     pub(super) viewport: (f32, f32, f32),
     pub(super) surface: Option<(f32, f32)>,
+}
+
+/// 节点参与空间候选的外接矩形：片场用真实范围 AABB，其余用节点矩形。
+pub(super) fn node_bounds(node: &SnapshotNode) -> (f32, f32, f32, f32) {
+    node.bounds
+}
+
+/// 合并两个矩形。
+fn union(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> (f32, f32, f32, f32) {
+    let left = a.0.min(b.0);
+    let top = a.1.min(b.1);
+    let right = (a.0 + a.2).max(b.0 + b.2);
+    let bottom = (a.1 + a.3).max(b.1 + b.3);
+    (left, top, right - left, bottom - top)
+}
+
+/// 点命中可触及的节点范围：节点几何 + 屏幕固定的操作横条/组运行状态芯片。
+///
+/// 横条按屏幕像素排版后换算回世界坐标，可能明显超出节点矩形（甚至在视口边缘被夹住），
+/// 因此它必须计入空间候选，否则「画在哪、点在哪」会出现命不中的回归（design D7 / 任务 7.3）。
+pub(super) fn node_hit_bounds(node: &SnapshotNode) -> (f32, f32, f32, f32) {
+    let mut rect = node_bounds(node);
+    if let Some(status) = node.group_status {
+        rect = union(rect, status);
+    }
+    if let Some(actions) = &node.node_actions {
+        rect = union(rect, actions.bar);
+    }
+    rect
+}
+
+/// 重建节点网格（只在完整场景接受点调用；位置增量用 `relocate`）。
+fn build_node_grid(nodes: &[SnapshotNode]) -> SpatialGrid {
+    let mut grid = SpatialGrid::new(SPATIAL_CELL_SIZE);
+    for (index, node) in nodes.iter().enumerate() {
+        grid.insert(index, node_hit_bounds(node));
+    }
+    grid
+}
+
+/// 重建边网格；`aabb` 为 `([min_x, min_y], [max_x, max_y])`。
+fn build_edge_grid(edges: &[SnapshotEdge]) -> SpatialGrid {
+    let mut grid = SpatialGrid::new(SPATIAL_CELL_SIZE);
+    for (index, edge) in edges.iter().enumerate() {
+        grid.insert(index, edge_bounds(edge));
+    }
+    grid
+}
+
+pub(super) fn edge_bounds(edge: &SnapshotEdge) -> (f32, f32, f32, f32) {
+    (
+        edge.aabb.0[0],
+        edge.aabb.0[1],
+        edge.aabb.1[0] - edge.aabb.0[0],
+        edge.aabb.1[1] - edge.aabb.0[1],
+    )
+}
+
+/// 点命中优先级索引：`order` 中的位置，未列出为 `u32::MAX`。
+fn build_order_rank(order: &[usize], nodes: usize) -> Vec<u32> {
+    let mut rank = vec![u32::MAX; nodes];
+    for (position, index) in order.iter().enumerate() {
+        rank[*index] = position as u32;
+    }
+    rank
+}
+
+/// 按点命中优先级排序候选（同 `order` 语义：靠前者优先）。
+fn sort_by_order_rank(candidates: &mut [usize], rank: &[u32]) {
+    candidates.sort_by_key(|index| rank.get(*index).copied().unwrap_or(u32::MAX));
 }
 
 /// 构建快照：所有几何由共享纯函数派生，与绘制一致。
@@ -141,6 +224,10 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
     } else {
         Vec::new()
     };
+    // 空间候选索引与几何同代：只在完整场景接受点构建（design D7 / 任务 7.3）。
+    let node_grid = build_node_grid(&nodes);
+    let edge_grid = build_edge_grid(&edges);
+    let nodes_len = nodes.len();
     InteractionSnapshot {
         generation,
         overview: scene.model_focus.is_none()
@@ -157,7 +244,10 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
         aggregate_selection,
         nodes,
         edges,
+        order_rank: build_order_rank(&order, nodes_len),
         order,
+        node_grid,
+        edge_grid,
         aggregate_handles: scene.aggregate_connect.as_ref().and_then(|_| {
             let bounds = selection_bounds(&scene.nodes, &scene.selection.nodes)?;
             let (ix, iy) = aggregate_handle(bounds, false);
@@ -279,6 +369,56 @@ fn handle_name(index: usize) -> Option<String> {
 }
 
 impl InteractionSnapshot {
+    /// 把该节点当前的可命中范围写回空间网格（位置/横条变化后调用）。
+    ///
+    /// 只移动单个条目：位置增量不重建整张索引（design D7 / 任务 7.3）。
+    pub(crate) fn refresh_node_grid(&mut self, index: usize) {
+        let Some(node) = self.nodes.get(index) else {
+            self.node_grid.remove(index);
+            return;
+        };
+        let bounds = node_hit_bounds(node);
+        self.node_grid.relocate(index, bounds);
+    }
+
+    /// 点查询的候选半径（世界单位）。    ///
+    /// 端口/抓手的命中半径随 zoom 放大（`10/zoom`），节点顶部操作横条按屏幕像素排版后换算回
+    /// 世界坐标（约 `48/zoom` 的偏移），因此候选窗口必须同时覆盖两者；这样既不会漏掉横条，
+    /// 也不会因为固定 64 世界单位在低 zoom 下漏判。
+    fn point_candidate_margin(zoom: f32) -> f32 {
+        let safe_zoom = if zoom.is_finite() && zoom > 0.0 { zoom } else { 1.0 };
+        layout::hit_radius(safe_zoom).max(96.0 / safe_zoom)
+    }
+
+    /// 点周围的候选矩形（`(x, y, width, height)`）。
+    fn point_candidate_rect(world: Vec2, zoom: f32) -> (f32, f32, f32, f32) {
+        let margin = Self::point_candidate_margin(zoom);
+        (world.x - margin, world.y - margin, margin * 2.0, margin * 2.0)
+    }
+
+    /// 点查询的节点候选：空间网格取邻域，再按 `order`（z/who-owns-the-pixel）排序。
+    ///
+    /// 候选只是**缩小遍历范围**：命中判定仍用原几何与顺序，因此结果与全量扫描一致。
+    pub(super) fn point_node_candidates(&self, world: Vec2, zoom: f32) -> Vec<usize> {
+        let mut candidates = self.node_grid.candidates(Self::point_candidate_rect(world, zoom));
+        sort_by_order_rank(&mut candidates, &self.order_rank);
+        candidates.retain(|index| self.order_rank.get(*index).is_some_and(|rank| *rank != u32::MAX));
+        candidates
+    }
+
+    /// 点命中的边候选：按绘制倒序（后绘制优先），与既有边命中顺序一致。
+    fn point_edge_candidates(&self, world: Vec2, zoom: f32) -> Vec<usize> {
+        let margin = layout::edge_hit_distance(zoom);
+        let mut candidates = self.edge_grid.candidates((
+            world.x - margin,
+            world.y - margin,
+            margin * 2.0,
+            margin * 2.0,
+        ));
+        candidates.reverse();
+        candidates
+    }
+
     /// 点命中：悬停边删除按钮 → 节点端口/关闭/历史/抓手 → 节点本体 → 边。
     pub(crate) fn point_hit(
         &self,
@@ -309,7 +449,8 @@ impl InteractionSnapshot {
                 });
             }
         }
-        for &index in &self.order {
+        // 空间候选（design D7 / 任务 7.3）：只遍历与点邻域可能相交的节点，再按原命中顺序判定。
+        for index in self.point_node_candidates(world, zoom) {
             let node = &self.nodes[index];
             if node.ghost {
                 continue;
@@ -429,9 +570,10 @@ impl InteractionSnapshot {
                 });
             }
         }
-        // 边：倒序（后绘制优先），先 broad phase 再逐段距离。
+        // 边：倒序（后绘制优先），先用边网格缩小范围，再做 broad phase 与逐段距离。
         let distance = layout::edge_hit_distance(zoom);
-        for edge in self.edges.iter().rev() {
+        for index in self.point_edge_candidates(world, zoom) {
+            let edge = &self.edges[index];
             if world.x < edge.aabb.0[0] - distance
                 || world.x > edge.aabb.1[0] + distance
                 || world.y < edge.aabb.0[1] - distance
@@ -453,6 +595,8 @@ impl InteractionSnapshot {
     /// 框选：与归一化矩形**正面积**相交且可交互（非 ghost）的节点，保持文档顺序。
     ///
     /// 复合资产使用真实范围多边形 SAT；仅触边不选中（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
+    /// 候选来自空间网格（design D7 / 任务 7.3），因此只遍历可能相交的节点；结果仍按文档顺序返回，
+    /// 未驻留/离屏节点照常参与框选。
     pub(crate) fn marquee(&self, x: f32, y: f32, width: f32, height: f32) -> Vec<String> {
         let left = x.min(x + width);
         let right = x.max(x + width);
@@ -464,8 +608,11 @@ impl InteractionSnapshot {
             width: right - left,
             height: bottom - top,
         };
-        self.nodes
-            .iter()
+        let mut candidates = self.node_grid.candidates((left, top, right - left, bottom - top));
+        candidates.sort_unstable();
+        candidates
+            .into_iter()
+            .filter_map(|index| self.nodes.get(index))
             .filter(|node| !node.ghost)
             .filter(|node| match &node.scope {
                 Some(scope) => scope::intersects_rect(scope, rect),
@@ -479,13 +626,29 @@ impl InteractionSnapshot {
     }
 
     /// drag-touch probe：返回拖动节点在给定方向上的候选目标（非 ghost）。
+    ///
+    /// 方向判定只依赖节点中心与来源中心的相对位置，与 z 顺序无关；空间候选用「来源节点
+    /// 一侧的延伸矩形」，避免全量遍历，结果仍按文档顺序返回。
     pub(crate) fn probe(&self, source_id: &str, direction: &str) -> Vec<ProbeCandidate> {
-        let Some(source) = self.nodes.iter().find(|node| node.id == source_id) else {
+        let Some(source_index) = self.node_index.get(source_id).copied() else {
             return Vec::new();
         };
+        let source = &self.nodes[source_index];
         let sign = if direction == "prev" { -1.0 } else { 1.0 };
-        self.nodes
-            .iter()
+        // 候选矩形：来源节点中心沿方向的半平面，纵向取网格整体范围（probe 不限制纵向距离）。
+        let extent = self.node_grid.extent().unwrap_or((source.center.x, source.center.y, 0.0, 0.0));
+        let top = extent.1;
+        let bottom = extent.1 + extent.3;
+        let query = if sign > 0.0 {
+            (source.center.x, top, extent.0 + extent.2 - source.center.x, bottom - top)
+        } else {
+            (extent.0, top, source.center.x - extent.0, bottom - top)
+        };
+        let mut candidates = self.node_grid.candidates(query);
+        candidates.sort_unstable();
+        candidates
+            .into_iter()
+            .filter_map(|index| self.nodes.get(index))
             .filter(|node| node.id != source_id && !node.ghost)
             .filter(|node| (node.center.x - source.center.x) * sign > 0.0)
             .map(|node| ProbeCandidate {
@@ -506,7 +669,7 @@ impl InteractionSnapshot {
         if !world.x.is_finite() || !world.y.is_finite() {
             return None;
         }
-        for &index in &self.order {
+        for index in self.point_node_candidates(world, 1.0) {
             let node = &self.nodes[index];
             if node.ghost || excluded.iter().any(|id| id == &node.id) {
                 continue;
@@ -572,5 +735,15 @@ pub(super) fn refresh_node_actions(snapshot: &mut InteractionSnapshot, viewport:
     for (index, actions) in &snapshot.action_descriptors {
         let node = &mut snapshot.nodes[*index];
         node.node_actions = layout::node_action_toolbar_for_bounds(node.layout_bounds, actions, Some(snapshot.viewport), snapshot.surface);
+    }
+    // 横条几何随 zoom/pan 变化，命中候选范围也必须同步（design D7 / 任务 7.3）：
+    // 只搬动带横条的节点，不重建整张索引。
+    let reindexed: Vec<usize> = snapshot
+        .action_descriptors
+        .iter()
+        .map(|(index, _)| *index)
+        .collect();
+    for index in reindexed {
+        snapshot.refresh_node_grid(index);
     }
 }

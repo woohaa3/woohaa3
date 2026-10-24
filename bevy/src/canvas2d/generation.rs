@@ -38,6 +38,7 @@ pub(crate) fn sync_generation(
     mut commands: Commands,
     time: Res<Time>,
     scene: Res<CurrentScene>,
+    index: Res<crate::app::NodeIndex>,
     theme: Res<crate::theme::ThemeResource>,
     mut visuals: ResMut<Visuals>,
     mut clock: ResMut<GenerationClock>,
@@ -88,12 +89,8 @@ pub(crate) fn sync_generation(
         active.push(node.id.clone());
         // 该节点在文档中的 z 带（与卡片外壳同一公式）。进度覆盖层必须落在自身 z 带内，
         // 才能被上层卡片正确遮挡（change: 2026-10-09-fix-model-preview-layering-and-projection）。
-        let index = scene
-            .0
-            .nodes
-            .iter()
-            .position(|candidate| candidate.id == node.id)
-            .unwrap_or(0);
+        // 同代节点索引按 id O(1) 定位（change: 2026-10-23-scale-canvas-media-residency，任务 7.2）。
+        let index = index.position(&node.id).unwrap_or(0);
         let top_z = 10.0 + index as f32 * 0.1 + 0.01;
         let (accent, _, _) = theme.node_palette(&node.kind);
         let (cx, cy, cw, ch) = generation_ring_rect(node);

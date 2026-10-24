@@ -210,11 +210,18 @@ pub(super) struct PositionPlan {
 }
 
 pub(super) fn commit(snapshot: &mut InteractionSnapshot, plan: PositionPlan) -> Vec<PositionDelta> {
+    let moved_nodes: Vec<usize> = plan.nodes.keys().copied().collect();
     for (index, node) in plan.nodes {
         snapshot.nodes[index] = node;
     }
+    // 横条按当前视口重新派生，因此先刷新派生几何，再把移动过的节点重新写进空间网格。
     super::snapshot::refresh_node_actions(snapshot, None);
+    // 位置增量只搬动真正移动的节点/边（design D7 / 任务 7.3），不重建整张空间索引。
+    for index in moved_nodes {
+        snapshot.refresh_node_grid(index);
+    }
     for (index, edge) in plan.edges {
+        snapshot.edge_grid.relocate(index, super::snapshot::edge_bounds(&edge));
         snapshot.edges[index] = edge;
     }
     snapshot.aggregate_handles = plan.handles;

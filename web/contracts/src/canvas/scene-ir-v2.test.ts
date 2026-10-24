@@ -241,15 +241,51 @@ describe("v2SceneExtent", () => {
       { t: "group", id: "arm", position: [0, 2, 0], rotation: [0, 0, 90], scale: [1, 1, 1] },
       { t: "segment", id: "forearm", parent: "arm", from: [0, 0, 0], to: [2, 0, 0], width: 0.2 }
     ]);
-    // group 旋转 90° 绕 Z，把 +X 的 segment 转向 +Y，世界 y 达 2 + 2 = 4（+ 端帽半宽 0.1）。
+    // group 旋转 90° 绕 Z，把 +X 的 segment 转向 +Y，世界 y 达 2 + 2 = 4。
+    // capsule 的 `width` 是直径且已包含两端半球，不再额外沿轴加半径
+    // （与 Rust `prepare_snapshot` 的 Capsule 语义一致）。
     const box = v2SceneAabb(ops);
     expect(box).not.toBeNull();
-    expect(box!.max[1]).toBeCloseTo(4.1, 3);
+    expect(box!.max[1]).toBeCloseTo(4, 3);
   });
 
   it("is deterministic for the same op sequence", () => {
     const ops = validateScene([{ t: "capsule", id: "c", radius: 0.3, height: 1.2 }]);
     expect(v2SceneSignature(ops)).toBe(v2SceneSignature(validateScene([{ t: "capsule", id: "c", radius: 0.3, height: 1.2 }])));
+  });
+});
+
+/**
+ * segment 的派生包围盒必须与 Rust `build_entity_specs` 同解
+ * （change: 2026-10-23-scale-canvas-media-residency，2026-10-24 模型预览 key 冲突回归）。
+ *
+ * 前端 `v2SceneAabb`（f64）与 Rust `prepare_snapshot`（f32）是两条独立派生路径；只要两边的
+ * **几何语义**一致，剩下的就只有浮点末位噪声。语义一旦分歧，误差会放大到百分之几。
+ */
+describe("segment bounds match the Rust renderer derivation", () => {
+  it("does not add the capsule radius to the axial half-length", () => {
+    // capsule 的 `width` 是直径、总高含两端半球；沿轴再加半径会把包围盒放大半个直径。
+    const capsule = validateScene([
+      { t: "segment", id: "s", from: [-1, 0, 0], to: [1, 0, 0], width: 0.1, shape: "capsule" }
+    ]);
+    const box = v2SceneAabb(capsule)!;
+    expect(box.min[0]).toBeCloseTo(-1, 6);
+    expect(box.max[0]).toBeCloseTo(1, 6);
+    // 横向仍按半径外扩。
+    expect(box.max[1]).toBeCloseTo(0.05, 6);
+  });
+
+  it("applies the parent non-uniform scale to the segment's own axis", () => {
+    // 父级非均匀缩放时，长度必须乘在 segment **对齐后**的 y 轴（scale.y），
+    // 与 `build_entity_specs` 把 center/rotation 写进子变换的做法一致。
+    const ops = validateScene([
+      { t: "group", id: "g", scale: [1.03, 1.3, 1.1] },
+      { t: "segment", id: "s", parent: "g", from: [-3.15, 3.47, -2.45], to: [3.15, 3.47, -2.45], width: 0.11 }
+    ]);
+    const box = v2SceneAabb(ops)!;
+    // 半长 3.15 × 1.3（父级 y scale）= 4.095。
+    expect(box.min[0]).toBeCloseTo(-4.095, 4);
+    expect(box.max[0]).toBeCloseTo(4.095, 4);
   });
 });
 

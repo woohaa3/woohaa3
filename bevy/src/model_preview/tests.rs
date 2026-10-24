@@ -35,6 +35,7 @@ fn model_card_app() -> App {
     .unwrap();
     let mut app = App::new();
     app.init_resource::<Previews>()
+        .init_resource::<crate::app::PreviewLayerPool>()
         .init_resource::<Time>()
         .init_resource::<crate::app::FocusRig>()
         .init_resource::<Ready>()
@@ -198,6 +199,7 @@ fn translation_reuses_cached_preview_and_zoom_refreshes_without_changing_framing
     .unwrap();
     let mut app = App::new();
     app.init_resource::<Previews>()
+        .init_resource::<crate::app::PreviewLayerPool>()
         .init_resource::<Time>()
         .init_resource::<crate::app::FocusRig>()
         .init_resource::<Ready>()
@@ -530,6 +532,7 @@ fn repeated_sync_skips_unchanged_preview_sprite_and_pose_commands() {
     .unwrap();
     let mut app = App::new();
     app.init_resource::<Previews>()
+        .init_resource::<crate::app::PreviewLayerPool>()
         .init_resource::<Time>()
         .init_resource::<crate::app::FocusRig>()
         .init_resource::<Ready>()
@@ -612,4 +615,61 @@ fn busy_card_sprite_yields_to_generation_ring() {
         *app.world().get::<Visibility>(sprite).expect("恢复时写可见性"),
         Visibility::Inherited
     );
+}
+
+/// 卡片层只从共享层池租出，且租约在移除后归还
+/// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.3）。
+#[test]
+fn card_layers_come_from_shared_pool_and_return_on_removal() {
+    let mut app = model_card_app();
+    app.update();
+    let layer = app.world().resource::<Previews>().cards["m"].layer;
+    assert!(
+        !crate::preview_layers::PreviewLayers::is_reserved(layer),
+        "卡片层不得落在保留层"
+    );
+    assert_eq!(
+        app.world().resource::<crate::app::PreviewLayerPool>().0.slot_of("m").map(|slot| slot.layer),
+        Some(layer),
+        "层池必须记录该卡片租约"
+    );
+
+    // 离屏超过宽限后卡片被回收，层归还（供下一张卡片复用）。
+    app.world_mut().resource_mut::<CurrentScene>().0.viewport.x = -10_000.;
+    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = true;
+    app.update();
+    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = false;
+    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(2));
+    app.update();
+    assert!(app.world().resource::<Previews>().cards.is_empty());
+    assert_eq!(
+        app.world().resource::<crate::app::PreviewLayerPool>().0.active(),
+        0,
+        "移除卡片必须归还层"
+    );
+}
+
+/// 固定可见需求时，文档新增大量离屏模型不得降低当前预览分辨率
+/// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.6）。
+#[test]
+fn offscreen_model_count_does_not_shrink_visible_preview() {
+    let mut app = model_card_app();
+    app.update();
+    let before = app.world().resource::<Previews>().cards["m"].size;
+
+    // 再插入 999 个完全离屏的模型节点（同一资源）。
+    {
+        let mut scene = app.world_mut().resource_mut::<CurrentScene>();
+        for index in 0..999 {
+            let mut node = scene.0.nodes[0].clone();
+            node.id = format!("off-{index}");
+            node.x = 100_000.0 + index as f32 * 400.0;
+            scene.0.nodes.push(node);
+        }
+    }
+    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = true;
+    app.update();
+    let after = app.world().resource::<Previews>().cards["m"].size;
+    assert_eq!(after, before, "离屏模型不参与预览像素预算分摊");
+    assert_eq!(app.world().resource::<Previews>().cards.len(), 1, "只驻留可见卡片");
 }

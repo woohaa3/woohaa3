@@ -21,6 +21,9 @@ mod theme_generated;
 /// 2D 共享纯几何与 interaction 查询（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
 /// 不依赖 Bevy/ECS/wasm，可在 native 下单独测试；`canvas2d` 渲染复用其布局与曲线函数。
 mod canvas_query;
+/// 预览渲染层/槽的统一分配与回收
+/// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.3）。
+pub mod preview_layers;
 /// 动画节点独立播放会话/时钟（change: 2026-10-05-bind-model-animation-to-shots）。
 pub mod animation_session;
 /// 通用相机过渡状态机（change: refactor-bevy-reusable-components）。
@@ -244,11 +247,30 @@ impl std::fmt::Display for BoundaryError {
 }
 
 /// 上传/更新一张 RGBA 纹理；按 node ID 合并，latest-wins。
+///
+/// `content` 是稳定内容身份（`sourceKey`），Rust 侧按「内容 + 尺寸」共享同一 `Image`，
+/// 避免 1000 个节点重复上传同一资产（change: 2026-10-23-scale-canvas-media-residency，
+/// design D4 / 任务 4.4）。传空串表示没有稳定内容身份（独占纹理）。
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn set_texture(id: &str, width: u32, height: u32, rgba: &[u8]) -> Result<(), BoundaryError> {
+pub fn set_texture(
+    id: &str,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    content: &str,
+) -> Result<(), BoundaryError> {
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
-    bridge::queue_texture(id, width, height, rgba);
+    if content.len() > 4096 {
+        return Err(BoundaryError::from_str("Texture content identity too large"));
+    }
+    bridge::queue_texture(
+        id,
+        width,
+        height,
+        rgba,
+        (!content.is_empty()).then_some(content),
+    );
     Ok(())
 }
 
@@ -282,8 +304,9 @@ pub fn set_model_media_texture(
 
 /// 提交一份完整渲染快照；通过校验后覆盖未消费的旧快照（latest-wins）。
 ///
-/// v5 起节点只携带模型资源引用；引用未知 key 时在队列前拒绝整帧
-/// （change: optimize-model-scene-snapshot-hot-path，任务 2.3）。
+/// v5 起节点只携带模型资源引用；v25 起引用只要求 **descriptor 已声明**：已声明但 payload
+/// 未驻留是合法 cold/preparing 状态，未声明的 key 才在队列前拒绝整帧
+/// （change: 2026-10-23-scale-canvas-media-residency，design D5）。
 ///
 /// 返回接受该帧后新的 interaction generation；同一接受点同步发布 render scene 与
 /// interaction snapshot（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，design D2/D3）。
@@ -296,7 +319,7 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
     let scene: protocol::Scene =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
     scene.validate().map_err(BoundaryError::from_str)?;
-    if let Some(missing) = bridge::missing_model_asset(&scene) {
+    if let Some(missing) = bridge::missing_model_descriptor(&scene) {
         return Err(BoundaryError::from_str(&format!(
             "Unknown model resource {missing}"
         )));
@@ -507,10 +530,12 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
         return Err(BoundaryError::from_str("Model resource signature mismatch"));
     }
     let resource_key = format!("{}:{}", request.scene_version, signature);
-    // 同一内容 identity 只派生一次：同 key 已有资源时直接复用其 metadata。
-    if let Some((_signature, _scene_version, extent, aabb)) =
-        bridge::existing_model_metadata(&resource_key)
-    {
+    // 同一内容 identity 只派生一次：已声明的 descriptor 直接复用其 metadata。
+    // 但 **payload** 可能已被预算淘汰（cold），此时仍需重新准备并注册重型内容
+    // （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+    let existing = bridge::existing_model_metadata(&resource_key);
+    if existing.is_some() && bridge::lookup_model_asset(&resource_key).is_some() {
+        let (_signature, _scene_version, extent, aabb) = existing.expect("checked above");
         bridge::note_model_derivation_hit();
         let metadata = protocol::PreparedModelMetadata {
             resource_version: request.resource_version,
@@ -535,7 +560,19 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
     let aabb = snapshot.aabb;
     let extent = snapshot.extent;
     bridge::note_model_derivation();
-    // 4. 注册不可变资源（含 local_aabb 与派生 extent），保留供布局/聚焦/picking 复用。
+    // 4. 声明轻量 descriptor（幂等）；payload 注册前必须已有合法身份。
+    let declared = bridge::declare_model_descriptor_dto(protocol::ModelDescriptorDto {
+        resource_version: protocol::MODEL_DESCRIPTOR_VERSION.to_owned(),
+        resource_key: resource_key.clone(),
+        scene_version: Some(request.scene_version.clone()),
+        signature: signature.clone(),
+        extent,
+        aabb,
+    });
+    if let Err(error) = declared {
+        return Err(BoundaryError::from_str(error));
+    }
+    // 5. 注册重型 payload（含 local_aabb 与派生 extent），只在实际需求下驻留。
     match bridge::queue_model_snapshot(
         resource_key.clone(),
         signature.clone(),
@@ -547,7 +584,7 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
             return Err(BoundaryError::from_str("Model resource key conflict"));
         }
     }
-    // 5. 返回轻量 metadata。
+    // 6. 返回轻量 metadata。
     let metadata = protocol::PreparedModelMetadata {
         resource_version: request.resource_version,
         resource_key,
@@ -557,6 +594,85 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
         aabb,
     };
     serde_json::to_string(&metadata).map_err(|err| BoundaryError::from_str(&err.to_string()))
+}
+
+/// 声明一份轻量模型 descriptor：只登记内容身份与必要 bounds，**不**注册重型 payload
+/// （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+///
+/// 返回规范化后的 descriptor JSON。同 key 同内容幂等；同 key 不同内容返回稳定冲突错误，
+/// 且不影响已声明身份与当前画面。
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn declare_model_resource(json: &str) -> Result<String, BoundaryError> {
+    if json.len() > 64 * 1024 {
+        return Err(BoundaryError::from_str("Model descriptor payload too large"));
+    }
+    let dto: protocol::ModelDescriptorDto =
+        serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
+    let declared = bridge::declare_model_descriptor_dto(dto).map_err(BoundaryError::from_str)?;
+    serde_json::to_string(&DeclaredModelDescriptor {
+        resource_version: declared.resource_version,
+        resource_key: declared.resource_key,
+        scene_version: declared.scene_version,
+        signature: declared.signature,
+        extent: declared.extent,
+        aabb: declared.aabb,
+    })
+    .map_err(|err| BoundaryError::from_str(&err.to_string()))
+}
+
+/// 声明结果回执（与 `ModelDescriptor` 同形，供调用方确认身份）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeclaredModelDescriptor {
+    resource_version: String,
+    resource_key: String,
+    scene_version: Option<String>,
+    signature: String,
+    extent: f32,
+    aabb: Option<protocol::ModelAabbDto>,
+}
+
+/// 设置当前需求持有的模型 payload lease，并按预算淘汰无 lease 的重型 payload
+/// （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+///
+/// 入参是 `{"keys":["v2:..."]}`；返回
+/// `{"retained":N,"evicted":M,"evictedKeys":[...],"residentKeys":[...],"descriptors":N,"cold":N}`。
+/// lease 是 payload 存活的唯一依据：场景引用只保护轻量 descriptor。
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn set_model_payload_leases(json: &str) -> Result<String, BoundaryError> {
+    if json.len() > 4 * 1024 * 1024 {
+        return Err(BoundaryError::from_str("Model lease payload too large"));
+    }
+    let request: ModelPayloadLeaseRequest =
+        serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
+    let keys: std::collections::HashSet<String> = request
+        .keys
+        .into_iter()
+        .filter(|key| !key.is_empty() && key.len() <= 256)
+        .collect();
+    let (retained, evicted) = bridge::set_model_payload_leases(keys);
+    let diagnostics: serde_json::Value = serde_json::from_str(&bridge::model_asset_diagnostics())
+        .map_err(|err| BoundaryError::from_str(&err.to_string()))?;
+    serde_json::to_string(&serde_json::json!({
+        "retained": retained,
+        "evicted": evicted.len(),
+        // 被淘汰的 key 让前端同步清空自己的「已驻留」账本，避免把 cold 当成 ready。
+        "evictedKeys": evicted,
+        // 实际驻留集合：payload 也可能被其它注册调用顺带淘汰，前端据此对齐账本。
+        "residentKeys": bridge::resident_payload_keys(),
+        "descriptors": diagnostics.get("descriptors").cloned().unwrap_or(serde_json::Value::from(0)),
+        "cold": diagnostics.get("cold").cloned().unwrap_or(serde_json::Value::from(0)),
+    }))
+    .map_err(|err| BoundaryError::from_str(&err.to_string()))
+}
+
+/// `set_model_payload_leases` 的 wire 请求。
+#[derive(serde::Deserialize)]
+struct ModelPayloadLeaseRequest {
+    #[serde(default)]
+    keys: Vec<String>,
 }
 
 /// 滚动 model asset 诊断计数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm；E2E/单测观察）。

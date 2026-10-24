@@ -17,6 +17,7 @@ use super::text_presentation::LogicalText;
 pub(crate) fn sync_scene(
     mut commands: Commands,
     scene: Res<CurrentScene>,
+    index: Res<crate::app::NodeIndex>,
     model_assets: Res<crate::app::ModelAssetTable>,
     theme: Res<ThemeResource>,
     mut visuals: ResMut<Visuals>,
@@ -30,13 +31,13 @@ pub(crate) fn sync_scene(
         return;
     }
     let scene = &scene.0;
-    visuals.textures.retain(|id, (entity, handle, texture_px)| {
-        if let Some((index, node)) = scene
-            .nodes
-            .iter()
-            .enumerate()
-            .find(|(_, n)| &n.id == id && n.texture)
-        {
+    // 先算要移除的节点，再统一解绑：`retain` 闭包里同时借用 `visuals` 与 `texture_store`
+    // 会让借用检查器拒绝（两者都是 `visuals` 的字段）。
+    let mut removed: Vec<(String, Entity)> = Vec::new();
+    visuals.textures.retain(|id, (entity, _handle, texture_px)| {
+        // 同代节点索引：保留判定按 id O(1) 定位，不再逐纹理扫描整份文档
+        // （change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 7.2）。
+        if let Some((index, node)) = index.node(scene, id).filter(|(_, node)| node.texture) {
             if let Ok((mut sprite, mut transform)) = sprites.get_mut(*entity) {
                 let (content, center, color, z) = super::image_focus::sprite_layout(scene, node, *texture_px, index);
                 sprite.custom_size = Some(content);
@@ -45,11 +46,18 @@ pub(crate) fn sync_scene(
             }
             true
         } else {
-            commands.entity(*entity).despawn();
-            images.remove(handle.id());
+            removed.push((id.clone(), *entity));
             false
         }
     });
+    // 只解绑被移除的节点：同内容仍被其他节点使用时纹理保留
+    // （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
+    for (id, entity) in removed {
+        commands.entity(entity).despawn();
+        for stale in visuals.texture_store.release(&id) {
+            images.remove(stale.id());
+        }
+    }
 
     let mut geometry = Geometry::default();
     let node_map: HashMap<&str, &GraphNode> =

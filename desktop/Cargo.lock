@@ -7835,7 +7835,6 @@ dependencies = [
 name = "woohaa_desktop_host"
 version = "0.1.0"
 dependencies = [
- "windows-sys 0.60.2",
  "bevy",
  "gdkx11",
  "gtk",
@@ -7855,6 +7854,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "uuid",
+ "windows-sys 0.60.2",
  "woohaa_bevy_canvas",
  "woohaa_recording_supervisor",
 ]

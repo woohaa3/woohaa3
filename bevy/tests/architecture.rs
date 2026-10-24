@@ -122,6 +122,8 @@ fn lib_is_facade_without_ecs_definitions() {
         "query_drop_target",
         "query_composite_asset_scopes",
         "prepare_and_register_model_resource",
+        "declare_model_resource",
+        "set_model_payload_leases",
         "model_asset_diagnostics",
         "query_model_pick",
         "query_gizmo_hit",
@@ -144,7 +146,7 @@ fn lib_is_facade_without_ecs_definitions() {
 }
 
 #[test]
-fn wasm_exports_are_exactly_thirty() {
+fn wasm_exports_are_exactly_thirty_two() {
     let source = read("lib.rs");
     // 只统计真正标记函数的属性行（doc 里的行内引用带反引号，不计入）。
     // 5 个基础导出 + request_shot_capture/poll_shot_capture（change:
@@ -164,6 +166,8 @@ fn wasm_exports_are_exactly_thirty() {
     //   （change: 2026-10-12-optimize-canvas-model-lod-and-interactions 原子位置预览）。
     // + scene_capability（change: 2026-10-15-add-film-set-overview-lod 片场总览 LOD 协议升级）。
     // + set_observer / observer_capability（聚焦朝向增量，旧 WASM 可缺省回退 full）。
+    // + declare_model_resource / set_model_payload_leases
+    //   （change: 2026-10-23-scale-canvas-media-residency —— descriptor 声明与 payload lease 分离）。
     // 导出属性有两种写法，都是 wasm-bindgen 导出，必须一起计数：
     // - `#[wasm_bindgen]`：仅 wasm 编译的条目；
     // - `#[cfg_attr(feature = "wasm", wasm_bindgen)]`：wasm 与 native 共享实现、只在 wasm
@@ -176,7 +180,7 @@ fn wasm_exports_are_exactly_thirty() {
                 || trimmed == r#"#[cfg_attr(feature = "wasm", wasm_bindgen)]"#
         })
         .count();
-    assert_eq!(count, 30, "WASM 导出数量必须固定为 30，实际 {count}");
+    assert_eq!(count, 32, "WASM 导出数量必须固定为 32，实际 {count}");
 }
 
 #[test]

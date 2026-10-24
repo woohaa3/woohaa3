@@ -56,6 +56,7 @@ pub(crate) fn setup(
         font: assets.load("fonts/NotoSansSC-Regular.otf"),
         labels: HashMap::new(),
         textures: HashMap::new(),
+        texture_store: Default::default(),
         edge_blocks: Vec::new(),
         shared_key: None,
         attach_labels: HashMap::new(),

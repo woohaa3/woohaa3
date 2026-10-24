@@ -46,6 +46,7 @@ mod ownership_links;
 mod shared_key;
 pub(crate) mod text_presentation;
 mod textures;
+mod texture_store;
 
 /// 共享纯布局函数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）：渲染与查询复用
 /// `canvas_query::layout` 的同一实现，保持既有 `super::layout` 路径与常量。
@@ -110,6 +111,12 @@ pub(crate) struct Visuals {
     font: Handle<Font>,
     labels: HashMap<String, Vec<Entity>>,
     textures: HashMap<String, (Entity, Handle<Image>, Vec2)>,
+    /// 纹理按内容身份 + 尺寸共享的引用表
+    /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
+    ///
+    /// `textures` 是「节点 → 展示实例」，本表是「内容 → GPU 图像」；删除节点只减引用，
+    /// 最后一个引用结束才移除 `Assets<Image>`。
+    texture_store: texture_store::TextureStore,
     edge_blocks: Vec<edge_cache::Block>,
     shared_key: Option<shared_key::SharedKey>,
     /// 拖动粘连操作条的复用文字实体（按角色 key；change: add-drag-touch-connections）。

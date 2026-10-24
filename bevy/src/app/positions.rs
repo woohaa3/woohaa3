@@ -78,6 +78,8 @@ mod tests {
     fn merged_positions_and_viewport_apply_after_pending_full_scene() {
         let mut world = World::new();
         world.insert_resource(CurrentScene::default());
+        // `ingest_bridge` 在读入完整场景后重建同代节点索引（design D7 / 任务 7.2）。
+        world.insert_resource(crate::app::NodeIndex::default());
         world.insert_resource(PositionIndex::default());
         world.insert_resource(FrameFlags::default());
         world.insert_resource(ModelAssetTable::default());
@@ -85,6 +87,9 @@ mod tests {
         world.insert_resource(FilmSetTextureBatch::default());
         world.insert_resource(ThemeResource::default());
         world.insert_resource(ClearColor::default());
+        // `ingest_bridge` 每帧消费图片聚焦细节批次；缺该资源会让系统参数校验失败
+        // （既有测试缺口，change: 2026-10-23-scale-canvas-media-residency 任务 10.2 修正）。
+        world.insert_resource(crate::canvas2d::focus_details::FocusDetailBatch::default());
         bridge::queue_scene(scene());
         bridge::queue_positions(vec![row("a", 40., 50.), row("film", 200., 300.)], None);
         bridge::queue_viewport(crate::protocol::Viewport {

@@ -27,14 +27,15 @@ fn clear(state:&mut FocusDetailVisuals,commands:&mut Commands,images:&mut Assets
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync(
-    mut commands:Commands,scene:Res<CurrentScene>,visuals:Res<Visuals>,
+    mut commands:Commands,scene:Res<CurrentScene>,index:Res<crate::app::NodeIndex>,visuals:Res<Visuals>,
     mut batch:ResMut<FocusDetailBatch>,mut state:ResMut<FocusDetailVisuals>,
     mut images:ResMut<Assets<Image>>,mut sprites:Query<(&mut Sprite,&mut Transform)>,
 ) {
     // 每帧先恢复上次替换的基础 Sprite；仅有效细节会在下面重新隐藏它。
+    // 同代节点索引按 id O(1) 定位（change: 2026-10-23-scale-canvas-media-residency，任务 7.2）。
     if let Some(frame)=&state.frame {
         if let Some((entity,_,px))=visuals.textures.get(&frame.node_id) {
-            if let Some((index,node))=scene.0.nodes.iter().enumerate().find(|(_,n)|n.id==frame.node_id) {
+            if let Some((index,node))=index.node(&scene.0,&frame.node_id) {
                 if let Ok((mut sprite,_))=sprites.get_mut(*entity) {sprite.color=super::image_focus::sprite_layout(&scene.0,node,*px,index).2;}
             }
         }
@@ -68,7 +69,7 @@ pub(crate) fn sync(
     let valid=scene.0.image_focus.as_ref().is_some_and(|f|f.presentation_ready && f.node_id==frame.node_id && f.source_width==frame.width as f32 && f.source_height==frame.height as f32);
     if !valid {clear(&mut state,&mut commands,&mut images);return;}
     let Some((base_entity,base_handle,px))=visuals.textures.get(&frame.node_id) else{clear(&mut state,&mut commands,&mut images);return;};
-    let Some((index,node))=scene.0.nodes.iter().enumerate().find(|(_,n)|n.id==frame.node_id&&n.texture) else{clear(&mut state,&mut commands,&mut images);return;};
+    let Some((index,node))=index.node(&scene.0,&frame.node_id).filter(|(_,n)|n.texture) else{clear(&mut state,&mut commands,&mut images);return;};
     let (size,center,color,z)=super::image_focus::sprite_layout(&scene.0,node,*px,index);
     let source=Vec2::new(frame.width as f32,frame.height as f32);
     if let Ok((mut sprite,_))=sprites.get_mut(*base_entity) {sprite.color=Color::NONE;}

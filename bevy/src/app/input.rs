@@ -8,13 +8,14 @@ use crate::{bridge, canvas2d, theme::ThemeResource};
 
 use super::{
     helpers::place_native_surface, CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable,
-    SurfaceState, TextureBatch,
+    NodeIndex, SurfaceState, TextureBatch,
 };
 
 /// 重置帧标记，取走最新 scene/texture batch；检测 theme-only 变化。
 pub(crate) fn ingest_bridge(
     mut flags: ResMut<FrameFlags>,
     mut scene: ResMut<CurrentScene>,
+    mut index: ResMut<NodeIndex>,
     mut positions: ResMut<super::positions::PositionIndex>,
     mut theme: ResMut<ThemeResource>,
     mut batch: ResMut<TextureBatch>,
@@ -42,6 +43,8 @@ pub(crate) fn ingest_bridge(
         theme.0 = next.theme.clone();
         clear_color.0 = theme.backdrop_color();
         scene.0 = next;
+        // 完整场景接受点重建同代节点索引；纯视口/位置增量不重建（design D7 / 任务 7.2）。
+        index.rebuild(&scene.0);
         positions.reset(&scene.0);
     }
     if let Some(viewport) = input.viewport {

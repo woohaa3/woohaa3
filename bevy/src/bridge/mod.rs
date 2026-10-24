@@ -18,15 +18,17 @@ use std::collections::HashMap;
 use crate::protocol::{NodePosition, ObserverUpdateRequest, Scene, Viewport};
 
 pub(crate) use assets::{
-    AssetRegistration, existing_model_metadata, lookup_model_asset, missing_model_asset,
-    model_assets_snapshot, queue_model_snapshot, set_scene_asset_keys,
+    AssetRegistration, AssetRegistryStats, asset_registry_stats, declare_model_descriptor,
+    declare_model_descriptor_dto, existing_model_metadata, lookup_model_asset,
+    missing_model_descriptor, model_assets_snapshot, model_descriptor_declared,
+    queue_model_snapshot, resident_payload_keys, set_model_payload_leases, set_scene_descriptor_keys,
 };
 
 // 测试面：`bridge::tests` 通过 `super::*` 复用这些资源表 helper 与常量。
 #[cfg(test)]
 pub(crate) use assets::{
-    MODEL_ASSET_MAX_BYTES, MODEL_ASSET_MAX_ENTRIES, clear_model_assets, model_asset_registered,
-    queue_model_asset,
+    MODEL_ASSET_MAX_BYTES, MODEL_ASSET_MAX_ENTRIES, MODEL_DESCRIPTOR_MAX_ENTRIES,
+    clear_model_assets, model_asset_registered, queue_model_asset,
 };
 thread_local! {
     static FOCUS_DETAILS: RefCell<crate::protocol::focus_details::FocusDetailInbox> = const {RefCell::new(crate::protocol::focus_details::FocusDetailInbox::new())};
@@ -37,7 +39,7 @@ thread_local! {
     /// 最近 full scene 的 viewport，不重建场景几何。latest-wins。
     static VIEWPORT: RefCell<Option<Viewport>> = const { RefCell::new(None) };
     static OBSERVER: RefCell<Option<ObserverUpdateRequest>> = const { RefCell::new(None) };
-    static TEXTURES: RefCell<HashMap<String, (u32, u32, Vec<u8>)>> = RefCell::new(HashMap::new());
+    static TEXTURES: RefCell<HashMap<String, (u32, u32, Vec<u8>, Option<String>)>> = RefCell::new(HashMap::new());
     /// 片场媒体平面纹理（键为全局唯一 `planeId`；change: 2026-10-08-make-film-set-model-only）。
     static FILM_SET_TEXTURES: RefCell<HashMap<String, (u32, u32, Vec<u8>)>> = RefCell::new(HashMap::new());
     static STARTED: Cell<bool> = const { Cell::new(false) };
@@ -92,6 +94,12 @@ pub(crate) fn note_model_derivation() {
 /// 记录一次派生去重命中。
 pub(crate) fn note_model_derivation_hit() {
     MODEL_DERIVATION_HITS.with(|cell| cell.set(cell.get() + 1));
+}
+
+/// 记录本次被预算淘汰的 cold payload 数（诊断；淘汰本身已由资源表累计）。
+#[allow(dead_code)]
+pub(crate) fn note_model_payload_evictions(_count: u64) {
+    // 计数在 `assets::evict_payloads` 内累加，避免两条路径各记一次。
 }
 
 // ── 实际工作计数（change: 2026-10-10-optimize-canvas-interaction-hot-path）─────────
@@ -180,12 +188,19 @@ pub(crate) fn work_diagnostics() -> String {
     )
 }
 
-/// model asset 诊断快照（JSON）。
+/// model asset 诊断快照（JSON）：descriptor/payload 分离后的计数。
 pub(crate) fn model_asset_diagnostics() -> String {
+    let stats = asset_registry_stats();
     format!(
-        "{{\"derivations\":{},\"derivationHits\":{}}}",
+        "{{\"derivations\":{},\"derivationHits\":{},\"descriptors\":{},\"payloads\":{},\"payloadBytes\":{},\"leased\":{},\"cold\":{},\"payloadEvictions\":{}}}",
         MODEL_DERIVATIONS.with(Cell::get),
-        MODEL_DERIVATION_HITS.with(Cell::get)
+        MODEL_DERIVATION_HITS.with(Cell::get),
+        stats.descriptors,
+        stats.payloads,
+        stats.payload_bytes,
+        stats.leased,
+        stats.cold,
+        stats.payload_evictions
     )
 }
 
@@ -300,19 +315,21 @@ pub(crate) struct FrameInput {
     /// full scene 的 viewport；与 scene 同在 latest-wins inbox，取最新值。
     pub(crate) viewport: Option<Viewport>,
     pub(crate) observer: Option<ObserverUpdateRequest>,
-    pub(crate) textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    /// nodeId → (宽, 高, RGBA, 内容身份)。内容身份用于 Rust 侧按内容共享 GPU 纹理
+    /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
+    pub(crate) textures: HashMap<String, (u32, u32, Vec<u8>, Option<String>)>,
     pub(crate) film_set_textures: HashMap<String, (u32, u32, Vec<u8>)>,
 }
 
 /// 覆盖排队中的 scene（latest-wins）。调用方必须已通过 `Scene::validate`。
 pub(crate) fn queue_scene(scene: Scene) {
-    // 记录本帧引用的资源 key：资源淘汰不得逐出当前待渲染场景仍引用的资源。
+    // 记录本帧引用的 descriptor key：轻量声明不得被逐出（payload 另由 lease 保护）。
     let keys: std::collections::HashSet<String> = scene
         .nodes
         .iter()
         .filter_map(|node| node.model.as_ref().map(|r| r.resource_key.clone()))
         .collect();
-    set_scene_asset_keys(keys);
+    set_scene_descriptor_keys(keys);
     // 记录 surface 供视口增量沿用（视口增量不改 surface）。
     if let Some(surface) = &scene.surface {
         LAST_SURFACE.with(|slot| *slot.borrow_mut() = Some([surface.width, surface.height]));
@@ -354,11 +371,21 @@ pub(crate) fn queue_positions(positions: Vec<NodePosition>, viewport: Option<Vie
 }
 
 /// 记录一次合法纹理上传；同一 ID 覆盖，不同 ID 合并。
-pub(crate) fn queue_texture(id: &str, width: u32, height: u32, rgba: &[u8]) {
+///
+/// `content` 是稳定内容身份（同资产同档位共享同一 GPU 纹理）；`None` 表示独占纹理
+/// （例如上传中的本地幽灵预览）。内容身份**不含** nodeId。
+pub(crate) fn queue_texture(
+    id: &str,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    content: Option<&str>,
+) {
     TEXTURES.with(|textures| {
-        textures
-            .borrow_mut()
-            .insert(id.to_owned(), (width, height, rgba.to_vec()));
+        textures.borrow_mut().insert(
+            id.to_owned(),
+            (width, height, rgba.to_vec(), content.map(str::to_owned)),
+        );
     });
 }
 

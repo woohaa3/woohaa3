@@ -164,6 +164,7 @@ impl Plugin for ModelPreviewPlugin {
         app.insert_resource(work.clone());
         app.insert_resource(ready.clone())
             .init_resource::<Previews>()
+            .init_resource::<crate::app::PreviewLayerPool>()
             .add_plugins(ExtractComponentPlugin::<PreviewView>::default());
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render_work::install(render, work);
@@ -179,6 +180,7 @@ impl Plugin for ModelPreviewPlugin {
 pub(crate) fn sync(
     mut commands: Commands,
     mut state: ResMut<Previews>,
+    mut pool: ResMut<crate::app::PreviewLayerPool>,
     mut images: ResMut<Assets<Image>>,
     scene: Res<CurrentScene>,
     surface: Res<SurfaceState>,
@@ -207,7 +209,7 @@ pub(crate) fn sync(
     .map(|(id, _)| id.clone())
     .collect();
     for id in expired {
-        remove_card(&mut commands, &mut state, &mut images, &ready, &id);
+        remove_card(&mut commands, &mut state, &mut pool, &mut images, &ready, &id);
     }
     let quality_changed = state.cards.iter().any(|(id, card)|
         !card.signature.ends_with(&format!(":{}", models.quality_identity(id))));
@@ -232,7 +234,7 @@ pub(crate) fn sync(
         .cloned()
         .collect();
     for id in stale {
-        remove_card(&mut commands, &mut state, &mut images, &ready, &id);
+        remove_card(&mut commands, &mut state, &mut pool, &mut images, &ready, &id);
     }
     let clear = theme.token_color("canvasNodeContent");
     let tick = state.tick;
@@ -285,9 +287,14 @@ pub(crate) fn sync(
         );
         // Across all retained cards, displayed + pending textures stay within
         // 128 MiB of RGBA8 pixels (excluding driver/MSAA attachments).
-        let size = budget_target_size(size, alive.len());
+        //
+        // The divisor is the **admitted/retained** card count, never the document
+        // model count: adding 999 off-screen models (design D6, task 6.6) must not
+        // shrink the visible preview of a fixed demand.
+        let budget_cards = state.cards.len() + usize::from(!state.cards.contains_key(&node.id));
+        let size = budget_target_size(size, budget_cards);
         let size = state.cards.get(&node.id).map_or(size, |card|
-            policy::retained_size(card.size, size, budget_target_size(card.size, alive.len()) == card.size));
+            policy::retained_size(card.size, size, budget_target_size(card.size, budget_cards) == card.size));
         // Account for real retained generations, rather than assuming every
         // displayed image already follows today's per-card budget.
         let replaceable = state.cards.get(&node.id).filter(|card| card.image != card.displayed)
@@ -332,10 +339,16 @@ pub(crate) fn sync(
                 state.retry_allocation = true;
                 continue;
             }
-            // Layers are reusable after deletion; never allocate one engine per card.
-            let used: std::collections::HashSet<usize> =
-                state.cards.values().map(|c| c.layer).collect();
-            let layer = (32..).find(|l| !used.contains(l)).unwrap();
+            // Layers come from the shared pool: an unused layer is rented only
+            // after older views stop, so model and shot cards can never share a
+            // layer. Exhaustion defers the card instead of growing layer numbers.
+            let Some(slot) = pool.0.acquire(&node.id) else {
+                pool.0.note_exhausted();
+                state.deferred.entry(node.id.clone()).or_insert(tick);
+                state.retry_allocation = true;
+                continue;
+            };
+            let layer = slot.layer;
             let Some(allocated_size) = policy::fit_bytes(size, available) else {
                 state.deferred.entry(node.id.clone()).or_insert(tick);
                 state.retry_allocation = true;
@@ -547,18 +560,26 @@ fn preview_image(images: &mut Assets<Image>, size: UVec2) -> Handle<Image> {
     images.add(make_image(size))
 }
 
-fn remove_card(commands: &mut Commands, state: &mut Previews, images: &mut Assets<Image>, ready: &Ready, id: &str) {
+fn remove_card(
+    commands: &mut Commands,
+    state: &mut Previews,
+    pool: &mut crate::app::PreviewLayerPool,
+    images: &mut Assets<Image>,
+    ready: &Ready,
+    id: &str,
+) {
     state.deferred.remove(id);
     state.latency.cancel(id);
     state.applied_layers.remove(id);
     let Some(card) = state.cards.remove(id) else { return; };
+    // 层只在旧视图停止（实体销毁 + 就绪记录移除）后归还，下一次出租推进代数。
+    pool.0.release(id);
     commands.entity(card.camera).try_despawn();
     commands.entity(card.sprite).try_despawn();
     images.remove(card.image.id());
     if card.displayed != card.image { images.remove(card.displayed.id()); }
     ready.0.lock().unwrap().remove(&card.camera);
 }
-
 fn image_bytes(images: &Assets<Image>, handle: &Handle<Image>) -> u64 {
     images.get(handle).map_or(0, |image|
         image.texture_descriptor.size.width as u64 * image.texture_descriptor.size.height as u64 * 4)

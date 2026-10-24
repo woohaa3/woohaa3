@@ -10,6 +10,7 @@ export * from "./store/canvas-commit.js";
 export * from "./store/yjs-facade.js";
 export * from "./store/canvas-store.js";
 export * from "./store/working-projection.js";
+export * from "./store/canonical-projection-cache.js";
 export * from "./store/edit-journal.js";
 export * from "./store/canvas-edit-service.js";
 export * from "./sync-status.js";

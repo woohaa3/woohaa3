@@ -9,7 +9,6 @@ import {
   expandAabb,
   lengthVec3,
   addVec3,
-  orientedBoxAabb,
   quatAlignYTo,
   scaleVec3,
   subVec3,
@@ -18,8 +17,7 @@ import {
   transformAabb,
   type Aabb,
   type LocalTransform,
-  type Transform,
-  type Vec3
+  type Transform
 } from "../model-transform.js";
 import { SCENE_IR_V2_VERSION, V2_SHAPE_OPS, type SceneV2Op, type SceneV2ShapeOp } from "./types.js";
 
@@ -30,7 +28,7 @@ export function v2SceneAabb(ops: readonly SceneV2Op[]): Aabb | null {
 
   for (const op of ops) {
     if (!isV2ShapeOp(op)) continue;
-    const local = transformOf(localOfShape(op));
+    const local = localTransformOf(op);
     const parent = op.parent === null ? null : worldOf.get(op.parent) ?? null;
     const world = parent ? composeTransform(parent, local) : local;
     worldOf.set(op.id, world);
@@ -69,6 +67,36 @@ export function v2ExtentFromAabb(box: Aabb | null): number {
   return Math.max(1, extent * 2);
 }
 
+/**
+ * 节点在**父空间**的局部变换。
+ *
+ * `segment` 以端点为中心线权威表达：中心取 `from/to` 中点、朝向取 `from→to` 对齐 +Y 的
+ * 四元数（见 `segmentLocalTransform`）。这与 Rust `build_entity_specs` 一致，也是 Bevy 实际
+ * 渲染的几何——父级存在非均匀缩放时，若改用 `op.position/rotation` 并把已定向的包围盒整体
+ * 套上去，长度会被乘到 parent 的不同轴上而与渲染画面不符。
+ */
+function localTransformOf(op: SceneV2ShapeOp): Transform {
+  if (op.t === "segment") {
+    const segment = segmentLocalTransform(op);
+    if (segment) return segment;
+  }
+  return transformOf(localOfShape(op));
+}
+
+/**
+ * `segment` 的父空间变换（中心 + 对齐姿态 + 自身 scale）；退化端点返回 `null`
+ * （validator 已拒绝退化 segment，这里只是防御）。
+ */
+function segmentLocalTransform(op: SceneV2ShapeOp & { t: "segment" }): Transform | null {
+  const direction = subVec3(op.to, op.from);
+  if (lengthVec3(direction) <= 1e-4) return null;
+  return {
+    translation: scaleVec3(addVec3(op.from, op.to), 0.5),
+    rotation: quatAlignYTo(direction),
+    scale: [...op.scale]
+  };
+}
+
 function localOfShape(op: SceneV2ShapeOp): LocalTransform {
   return { position: op.position, rotation: op.rotation, scale: op.scale };
 }
@@ -89,16 +117,14 @@ function shapeLocalAabb(op: SceneV2ShapeOp): Aabb | null {
     case "mesh":
       return aabbOfPoints(op.vertices);
     case "segment": {
-      const center = scaleVec3(addVec3(op.from, op.to), 0.5);
-      const direction = subVec3(op.to, op.from);
-      const length = lengthVec3(direction);
-      const rotation = quatAlignYTo(direction);
-      const halfLength = length / 2 + op.overlap;
-      const halfExtents: Vec3 =
-        op.shape === "capsule"
-          ? [op.width / 2, halfLength + op.width / 2, op.width / 2]
-          : [op.width / 2, halfLength, op.depth / 2];
-      return orientedBoxAabb({ translation: center, rotation, scale: [1, 1, 1] }, halfExtents);
+      // 几何在 segment **自身局部空间**：中心在原点，长度沿 +Y（由 `localTransformOf` 的对齐
+      // 四元数摆正）。`overlap` 沿中心线在两端各延伸；capsule 的 `width` 是直径且总高已包含
+      // 两端半球，因此轴向半长与 box 一致，只有横向取半径（与 Rust `build_entity_specs` 的
+      // `Box{width, length+2*overlap, depth}` / `Capsule{radius: width/2, height}` 同解）。
+      const halfLength = lengthVec3(subVec3(op.to, op.from)) / 2 + op.overlap;
+      const halfWidth = op.width / 2;
+      const halfDepth = op.shape === "capsule" ? halfWidth : op.depth / 2;
+      return { min: [-halfWidth, -halfLength, -halfDepth], max: [halfWidth, halfLength, halfDepth] };
     }
     default:
       return null;

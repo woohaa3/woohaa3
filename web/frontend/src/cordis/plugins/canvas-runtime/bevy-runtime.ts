@@ -4,6 +4,8 @@ import { RuntimeIssues } from "./runtime-issues.js";
 import { protectWasmModule } from "./wasm-call-boundary.js";
 import { TextureUploadBoundary } from "./texture-upload-boundary.js";
 import { ModelResourceFailures } from "./model-resource-failures.js";
+import { ModelPayloadScheduler } from "./model-payload-scheduler.js";
+import { createModelResourceRegistrar } from "./model-resource-registrar.js";
 import { PositionSceneMirror } from "./position-scene-mirror.js";
 import { createRuntimeRealm, type RuntimeRealm } from "./runtime-realm.js";
 import { RuntimeSupervisor, readRuntimeHealth } from "./runtime-supervisor.js";
@@ -20,10 +22,9 @@ import { RuntimeSupervisor, readRuntimeHealth } from "./runtime-supervisor.js";
  */
 import type {
   CanvasRenderScene,
-  PreparedModelMetadata,
   PreparedModelResource
 } from "@woohaa3/contracts";
-import { canvasPositionUpdateRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
+import { canvasPositionUpdateRequest, modelDescriptorOf, modelDescriptorPayload, modelPayloadLeaseRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
 
 import { sceneDiagnostics, measureSceneWork } from "./scene-diagnostics.js";
 import { createWorkDiagnosticsCollector } from "./work-diagnostics-collector.js";
@@ -82,6 +83,13 @@ function nextCaptureRequestId(): number {
 /** 稳定模块诊断标识；实际 glue 在 runtime-realm-entry 通过字面量 import 打包。 */
 export const BEVY_WASM_MODULE = "../bevy-wasm/woohaa_bevy_canvas.js";
 
+/** 两个 key 集合是否完全相同（幂等短路用）。 */
+function sameKeySet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const key of a) if (!b.has(key)) return false;
+  return true;
+}
+
 /**
  * 初始化时校验当前必需 WASM 能力（change: 2026-10-07-remove-residual-compatibility）。
  *
@@ -91,6 +99,10 @@ export const BEVY_WASM_MODULE = "../bevy-wasm/woohaa_bevy_canvas.js";
 export function assertRequiredCapabilities(module: BevyModule): void {
   const missing: string[] = [];
   if (!module.prepare_and_register_model_resource) missing.push("prepare_and_register_model_resource");
+  // change: 2026-10-23-scale-canvas-media-residency —— descriptor 声明与 payload lease 是模型
+  // 驻留的必需通道；缺失时明确能力不匹配，不静默回退「引用即常驻整场 IR」。
+  if (!module.declare_model_resource) missing.push("declare_model_resource");
+  if (!module.set_model_payload_leases) missing.push("set_model_payload_leases");
   if (!module.request_shot_capture) missing.push("request_shot_capture");
   if (!module.poll_shot_capture) missing.push("poll_shot_capture");
   // change: 2026-10-10-optimize-canvas-interaction-hot-path —— 新 Frontend 必须有视口增量
@@ -216,33 +228,162 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
   let baseSceneGeneration = 0;
   /** 本 generation 内已成功注册的 resource key；重启后清空重放。 */
   const registeredKeys = new Set<string>();
-  const replayModels = new Map<string, string>();
+  /** 已声明 descriptor 的 key（可与 payload 驻留分离）。 */
+  const declaredKeys = new Set<string>();
+  /** 曾声明过 descriptor 的模型内容身份；用于把资产/片场 key 与模型 key 区分开。 */
+  const knownModelKeys = new Set<string>();
+  /**
+   * 最近一次提交场景携带的模型资源（payload 补准备的数据来源）。
+   *
+   * 只引用 model-scene provider 持有的不可变资源，**不复制** ops：本运行时不再保留整场 IR
+   * 副本，否则 payload 淘汰省下的内存会被 replay 缓存抵消（design D5）。
+   */
+  let lastModelResources: ReadonlyMap<string, PreparedModelResource> = new Map();
+  /**
+   * 当前需求请求的 payload lease key 集合（内容身份）；`null` 表示尚未收到需求投影。
+   *
+   * `null` 时沿用保守语义（引用即准备），避免初始化阶段把全部模型降为 cold；
+   * 收到第一次投影后才按需求准备/淘汰（design D5）。
+   */
+  let requestedLeases: Set<string> | null = null;
+  /** 已真正提交给 Rust 的 lease 子集（只含已声明过的模型 key）。 */
+  let submittedLeases = new Set<string>();
+  let leasesSubmitted = false;
   const resourceFailures = new ModelResourceFailures();
   const textures = new TextureUploadBoundary(issues);
   const focusDetails=new FocusDetailEncoder();
   let retryVersion = 0;
   const retryListeners = new Set<() => void>();
+  /**
+   * 有界模型 payload 准备调度（design D3 / 任务 6.1）。
+   *
+   * 并发与每帧片段预算只由页面集中策略注入（`setModelPrepareBudget`），默认沿用 policy 的
+   * 2 项 / 6ms；`drain` 每帧最多推进这么多项，剩下的留到后续帧。
+   */
+  const payloadScheduler = new ModelPayloadScheduler({
+    now: () => now(),
+    concurrency: 2,
+    budgetMs: 6,
+    isResident: (key) => registeredKeys.has(key),
+    hasContent: (key) => lastModelResources.has(key),
+    wanted: () => requestedLeases,
+    prepare: (key) => {
+      const resource = lastModelResources.get(key);
+      if (!resource) return;
+      registrar.register(resource);
+    },
+    onPrepared: (key, cost) => {
+      resourceFailures.clear(key);
+      sceneDiagnostics.modelPrepareMs += cost;
+      sceneDiagnostics.modelPrepareMaxMs = Math.max(sceneDiagnostics.modelPrepareMaxMs, cost);
+      sceneDiagnostics.modelPrepareCount += 1;
+      // 单项超预算计入诊断：真实设备上必须能看到「这一项本身就慢」。
+      if (cost > payloadScheduler.budget().budgetMs) sceneDiagnostics.modelPrepareOverBudget += 1;
+    },
+    onFailed: (key, error) => {
+      resourceFailures.fail(key, lastModelResources.get(key), error instanceof Error ? error.message : String(error));
+    }
+  });
+  /**
+   * 声明轻量 descriptor 与注册重型 payload 的边界调用
+   * （design D5；跨边界细节见 `ModelResourceRegistrar`）。
+   */
+  const registrar = createModelResourceRegistrar({
+    module: () => module,
+    declaredKeys,
+    registeredKeys,
+    knownModelKeys
+  });
+  /**
+   * 声明 descriptor；payload 只在该 key 属于当前需求（或尚未投影）时进入有界准备队列。
+   *
+   * 两步分成两次边界调用：descriptor 极轻且只需声明一次，payload 可被预算淘汰后按需重建。
+   * 缺少 descriptor 通道的旧 runtime 由能力校验在初始化时拒绝（不静默降级）。
+   */
   const registerModelResource = (resource: PreparedModelResource): void => {
+    registrar.declare(resource);
     if (registeredKeys.has(resource.resourceKey)) return;
-    // 唯一资源注册边界：prepared-and-register（Rust 派生 signature/AABB/extent 并注册）。
-    // change: 2026-10-07-remove-residual-compatibility —— 缺少该必需导出时初始化明确失败，
-    // 不回退 register_model_resource 或空 metadata。
-    if (!module.prepare_and_register_model_resource) {
-      throw new Error("Bevy 运行时缺少 prepare_and_register_model_resource 边界");
+    // 尚未投影（`requestedLeases === null`）时保持保守「引用即准备」；投影后由 lease 决定。
+    if (requestedLeases && !requestedLeases.has(resource.resourceKey)) return;
+    // 走同一个有界准备队列（design D3 / 任务 6.1）：场景一次引用几十个模型时不能在这一次
+    // `set_scene` 里同步全部装配完，否则主线程片段预算形同不存在。队列在同一调用内推进到
+    // 本帧预算上限，因此单模型场景仍在提交场景前就绪。
+    payloadScheduler.enqueue(resource.resourceKey);
+  };
+  /**
+   * 为当前需求（lease 内）的模型准备重型 payload。
+   *
+   * 单个失败只隔离该内容：descriptor 已声明，场景引用仍合法（显示 preparing 卡片）；
+   * 内容变化或显式重试后再准备。
+   *
+   * 预算（design D3 / 任务 6.1）：同一帧最多推进 `modelPrepareConcurrency` 项、累计
+   * `modelPrepareBudgetMs` 毫秒，其余留在队列由后续帧继续（见 `ModelPayloadScheduler`）。
+   */
+  const preparePayloadsForLeases = (keys: ReadonlySet<string>): void => {
+    payloadScheduler.enqueueAll(keys);
+    payloadScheduler.drain();
+  };
+  /** 每帧推进有界数量的待准备 payload。 */
+  const drainPendingPayloads = (): void => {
+    payloadScheduler.drain();
+  };
+  /**
+   * 把当前需求投影成模型 payload lease 提交给 Rust，并为需求内 cold 项补准备
+   * （change: 2026-10-23-scale-canvas-media-residency，design D5）。
+   *
+   * 顺序固定：先提交 lease（此后淘汰只发生在需求之外），再准备 payload。反过来会把刚重建
+   * 的 payload 暴露给本轮淘汰。
+   *
+   * 需求集合未变化时幂等短路：静止帧不跨边界提交 lease。尚未收到需求投影时不做任何事，
+   * 由 `setScene` 走保守的「引用即准备」。
+   */
+  const submitModelLeases = (): boolean => {
+    if (disposed || !requestedLeases) return false;
+    const next = new Set<string>();
+    for (const key of requestedLeases) {
+      // 只有已声明为模型资源的 key 才可能持有 payload；资产/片场内容身份不是模型。
+      if (knownModelKeys.has(key)) next.add(key);
     }
-    const metadata = prepareAndRegisterModelResource({
-      sceneVersion: resource.sceneVersion,
-      ops: resource.ops as readonly unknown[],
-      // 复用同一份规范化 ops JSON，保持 signature 逐字节兼容。
-      opsJson: JSON.stringify(resource.ops),
-      expectedSignature: resource.signature
-    });
-    if (!metadata) {
-      throw new Error("Bevy 运行时未返回模型资源 metadata");
+    if (leasesSubmitted && sameKeySet(submittedLeases, next)) return false;
+    submittedLeases = next;
+    leasesSubmitted = true;
+    if (!module.set_model_payload_leases) {
+      throw new Error("Bevy 运行时缺少 set_model_payload_leases 边界");
     }
-    if (metadata.resourceKey !== resource.resourceKey) {
-      throw new Error(`模型资源 key 不一致：${metadata.resourceKey} != ${resource.resourceKey}`);
-    }
+    const report = JSON.parse(
+      module.set_model_payload_leases(modelPayloadLeaseRequest(next))
+    ) as { retained?: unknown; evicted?: unknown; evictedKeys?: unknown; residentKeys?: unknown };
+    sceneDiagnostics.modelLeaseSubmits += 1;
+    // Rust 侧已淘汰的 payload 不再驻留；重新取得需求时必须重准备。`residentKeys` 是权威账本：
+    // payload 也可能被其它注册调用顺带淘汰，只信「本轮注册成功」会把 cold 当成 ready。
+    const resident = new Set(
+      Array.isArray(report.residentKeys)
+        ? report.residentKeys.filter((key): key is string => typeof key === "string" && !!key)
+        : []
+    );
+    const evicted = Array.isArray(report.evictedKeys)
+      ? report.evictedKeys.filter((key): key is string => typeof key === "string" && !!key)
+      : [];
+    for (const key of evicted) resident.delete(key);
+    for (const key of next) registeredKeys.delete(key);
+    for (const key of resident) registeredKeys.add(key);
+    sceneDiagnostics.modelPayloadEvictions += typeof report.evicted === "number" ? report.evicted : evicted.length;
+    preparePayloadsForLeases(next);
+    return true;
+  };
+  /**
+   * 记录当前需求的内容身份，并立即尝试提交（投影早于首次场景时只记录，等 descriptor 声明）。
+   */
+  const setModelPayloadLeases = (keys: Iterable<string>): void => {
+    if (disposed) return;
+    const next = new Set<string>();
+    for (const key of keys) if (typeof key === "string" && key) next.add(key);
+    if (requestedLeases && sameKeySet(requestedLeases, next)) return;
+    requestedLeases = next;
+    // 需求投影是独立的帧前导入口（先于 `setScene`）：它也算一个准备帧，否则上一帧残留的
+    // 预算计数会让本帧一项都推进不了。
+    payloadScheduler.beginFrame();
+    submitModelLeases();
   };
 
   /**
@@ -250,29 +391,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
    * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 6.6）。
    * 缺新导出时返回 `null`；调用方保留最近合法资源并隔离诊断，不回落 TS 派生。
    */
-  const prepareAndRegisterModelResource = (input: {
-    sceneVersion: string;
-    ops: readonly unknown[];
-    opsJson?: string;
-    expectedSignature?: string;
-    expectedExtent?: number;
-  }): PreparedModelMetadata | null => {
-    if (!module.prepare_and_register_model_resource) return null;
-    const json = modelPrepareRequest({
-      sceneVersion: input.sceneVersion,
-      ops: input.ops as never,
-      ...(input.opsJson ? { opsJson: input.opsJson } : {}),
-      ...(input.expectedSignature ? { expectedSignature: input.expectedSignature } : {}),
-      ...(input.expectedExtent !== undefined ? { expectedExtent: input.expectedExtent } : {})
-    });
-    const metadata = JSON.parse(module.prepare_and_register_model_resource(json)) as PreparedModelMetadata;
-    // 注册在 Rust 侧完成；记录 key 以保持 setScene 的幂等重放语义。
-    registeredKeys.add(metadata.resourceKey);
-    replayModels.set(metadata.resourceKey, json);
-    sceneDiagnostics.modelRegistrations += 1;
-    sceneDiagnostics.boundaryBytes += json.length;
-    return metadata;
-  };
+  const prepareAndRegisterModelResource = registrar.prepareAndRegister;
 
   const queryBridge = createQueryBridge(() => interactionGeneration);
   const { runQuery, guardGeneration } = queryBridge;
@@ -350,7 +469,9 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       if (scene) { lastScene = scene; supervisor?.accepted(scene.revision, accepted); }
     } }),
     setTexture: (id, width, height, rgba, source) => textures.upload("node", id, width, height, rgba,
-      () => module.set_texture(id, width, height, rgba), source),
+      // 稳定内容身份让 Rust 侧按内容+尺寸共享同一 GPU 纹理，nodeId 只是绑定实例
+      // （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
+      () => module.set_texture(id, width, height, rgba, source?.sourceKey ?? ""), source),
     setImageFocusDetails:frame=>{
       if(!module.set_image_focus_details) {if(frame)throw new Error("画布内核缺少图片细节纹理接口");return;}
       focusDetails.upload(frame,(manifest,pixels)=>module.set_image_focus_details!(manifest,pixels));
@@ -359,8 +480,37 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       () => { if (!module.set_model_media_texture) throw new Error("缺少媒体平面纹理能力"); module.set_model_media_texture(id, width, height, rgba); }, source),
     registerModelResource,
     prepareAndRegisterModelResource,
+    setModelPayloadLeases,
+    /** 页面集中策略注入（design D3）：模型准备并发/片段预算只有一个来源。 */
+    setModelPrepareBudget: (input) => {
+      payloadScheduler.configure({
+        ...(Number.isFinite(input.concurrency) ? { concurrency: input.concurrency } : {}),
+        ...(Number.isFinite(input.budgetMs) ? { budgetMs: input.budgetMs } : {})
+      });
+    },
+    /** 每帧推进有界数量的待准备模型 payload（静止帧也调用；无待办时零开销）。 */
+    advanceModelPreparation: () => {
+      if (disposed) return;
+      payloadScheduler.beginFrame();
+      payloadScheduler.drain();
+    },
     setScene: (scene, resources) => {
-      const accepted = resources ? resourceFailures.project(scene, resources, lastScene, registerModelResource) : scene;
+      // 先声明本帧引用的 descriptor（payload 由 lease 决定是否驻留；design D5）。
+      payloadScheduler.beginFrame();
+      if (resources) lastModelResources = resources;
+      const failureVersion = resourceFailures.version();
+      let accepted = resources ? resourceFailures.project(scene, resources, lastScene, registerModelResource) : scene;
+      // 本帧新声明的模型若属于当前需求，把需求 lease 与派生准备推进一次（幂等短路）。
+      // 必须在提交场景之前：场景引用应当先看到 lease 已提交、payload 已就绪或明确 cold。
+      submitModelLeases();
+      // 尚未收到需求投影时 `submitModelLeases` 直接返回，这里按保守的「引用即准备」推进一次
+      // 有界队列；已投影时上一行已排空，本行为空转。
+      drainPendingPayloads();
+      // payload 准备是有界的（可能延后到后续帧），但**本帧实际尝试**的失败必须立刻反映到
+      // 场景：失败节点回退上一帧合法引用并提示，而不是先提交一个注定显示不出的引用。
+      if (resources && resourceFailures.version() !== failureVersion) {
+        accepted = resourceFailures.project(scene, resources, lastScene, registerModelResource);
+      }
       sceneDiagnostics.sceneStringify += 1;
       const json = measureSceneWork("stringifyMs", now, () => JSON.stringify(accepted));
       sceneDiagnostics.sceneSubmits += 1;
@@ -410,8 +560,6 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         };
         afterPaint(revealWhenRendered);
       }
-      const required = new Set(scene.nodes.map(node => node.model?.resourceKey).filter(Boolean));
-      for (const key of replayModels.keys()) if (!required.has(key)) { replayModels.delete(key); registeredKeys.delete(key); }
       textures.retain(new Set(scene.nodes.map(node => node.id)),
         new Set(scene.nodes.flatMap(node => node.compositeAsset?.media?.map(plane => plane.id) ?? [])));
     },
@@ -527,7 +675,35 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         if (!replacement.runtime_health || !replacement.seed_runtime_generation) throw new Error("Bevy WASM 缺少恢复健康协议");
         replacement.seed_runtime_generation(previousInteraction);
         replacement.start();
-        for (const json of replayModels.values()) replacement.prepare_and_register_model_resource!(json);
+        // 代际重建只恢复**当前需求**（design D5 / 任务 5.5）：先重放轻量 descriptor，再只为
+        // 需求内的模型重准备重型 payload。不能重放整场 IR：1000 个离屏模型的准备成本与场景
+        // 规模成正比，正是本 change 要消除的。
+        declaredKeys.clear(); registeredKeys.clear(); submittedLeases = new Set(); leasesSubmitted = false;
+        for (const key of knownModelKeys) {
+          const resource = lastModelResources.get(key);
+          if (!resource || !replacement.declare_model_resource) continue;
+          replacement.declare_model_resource(modelDescriptorPayload(modelDescriptorOf(resource)));
+          declaredKeys.add(key);
+        }
+        const restore = new Set<string>();
+        for (const key of requestedLeases ?? lastModelResources.keys()) {
+          if (lastModelResources.has(key)) restore.add(key);
+        }
+        if (replacement.set_model_payload_leases) {
+          replacement.set_model_payload_leases(modelPayloadLeaseRequest(restore));
+          submittedLeases = restore; leasesSubmitted = true;
+        }
+        for (const key of restore) {
+          const resource = lastModelResources.get(key);
+          if (!resource) continue;
+          replacement.prepare_and_register_model_resource!(modelPrepareRequest({
+            sceneVersion: resource.sceneVersion,
+            ops: resource.ops as never,
+            opsJson: JSON.stringify(resource.ops),
+            expectedSignature: resource.signature
+          }));
+          registeredKeys.add(key);
+        }
         const recoveredInteraction = lastScene ? replacement.set_scene(JSON.stringify(lastScene)) : 0;
         let remaining = 30000; let sampledAt = performance.now();
         while (!disposed && remaining > 0) {

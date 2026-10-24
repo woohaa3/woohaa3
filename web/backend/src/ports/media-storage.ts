@@ -29,6 +29,11 @@ export function createMediaStorageFromStorage(
     storage.bucket(namespace, scope ? { canvasId: scope.canvasId } : undefined);
   return {
     put: (key, bytes, contentType, scope) => bucket(scope).put(key, bytes, contentType),
+    async delete(key, scope) {
+      const current = bucket(scope);
+      if (!current.delete) throw new Error("当前存储后端不支持删除");
+      await current.delete(key);
+    },
     async putStream(key, bytes, contentType, options, scope) {
       const current = bucket(scope);
       if (!current.putStream) throw new Error("当前存储后端不支持流式写入");

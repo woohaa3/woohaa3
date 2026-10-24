@@ -22,6 +22,7 @@ import { installCanvasRuntimeMirrors } from "./canvas-runtime-mirrors.js";
 import { FocusContentRectStore } from "./focus-content-rect-store.js";
 import { FocusTransitionCoordinator } from "./focus-transition-coordinator.js";
 import { MediaResourceStore } from "./media-resource-store.js";
+import { hoverNodeStore } from "../../services/hover-store.js";
 import { createDefaultMediaDecoder } from "./media-decoder.js";
 import { VideoLeaseRegistry } from "./video-lease-registry.js";
 
@@ -52,6 +53,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private readonly modelFocusListeners = new Set<() => void>();
   private viewportRevision = 0;
   private sceneRevision = 0;
+  /** 模型/片场内容身份版本：model-scene 通知时推进（候选表与准入投影据此失效）。 */
+  private modelContentVersion = 0;
   private sceneNotificationQueued = false;
   private readonly sceneListeners = new Set<() => void>();
   sceneVersion = (): number => this.sceneRevision;
@@ -411,6 +414,43 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private readonly animationPlaybackStore = new AnimationPlaybackStore();
   /** 当前挂载的片场媒体会话（change: 2026-10-08-make-film-set-model-only）。 */
   private compositeAssetMediaSessionsInstance: import("./composite-asset-media-session.js").CompositeAssetMediaSessions | null = null;
+  /** 当前 attach 的页面级资源需求 owner（change: 2026-10-23-scale-canvas-media-residency）。 */
+  private residencyInstance: import("./residency/index.js").CanvasResourceCoordinator | null = null;
+  /** 当前资源协调器（诊断/测试；未挂载返回 null）。 */
+  residency = (): import("./residency/index.js").CanvasResourceCoordinator | null => this.residencyInstance;
+
+  /**
+   * 当前必须优先驻留的节点（interactive 用途）。
+   *
+   * 只含聚焦/播放/捕获目标：选中上千节点只提升优先级，不把全部选中项变成不可淘汰 pin
+   * （change: 2026-10-23 design D1/D3）。
+   */
+  private residencyInteractiveNodeIds(): readonly string[] {
+    const ids = new Set<string>();
+    const add = (nodeId: string | null | undefined) => { if (nodeId) ids.add(nodeId); };
+    add(this.modelFocus?.nodeId);
+    add(this.imageFocusStore.getTargetId());
+    add(this.videoFocusStore.getTargetId());
+    add(this.animationPlaybackStore.current()?.nodeId);
+    add(hoverNodeStore.getNodeId());
+    add(this.videoFocusStore.getTexture()?.nodeId);
+    add(this.imageFocusStore.getTexture()?.nodeId);
+    return [...ids];
+  }
+
+  /**
+   * 显式 pin（聚焦/捕获过渡期间保留目标卡片与过渡表示）。
+   *
+   * 有界：只包含当前聚焦目标，不随选择集增长；退出聚焦即自动释放。
+   */
+  private residencyPinnedNodeIds(): readonly string[] {
+    const ids = new Set<string>();
+    const add = (nodeId: string | null | undefined) => { if (nodeId) ids.add(nodeId); };
+    add(this.modelFocus?.nodeId);
+    add(this.imageFocusStore.getTargetId());
+    add(this.videoFocusStore.getTargetId());
+    return [...ids];
+  }
   /** 宿主推入活动动画节点播放投影；传 null 清除。变化立即 flush 一次 scene。 */
   setAnimationPlayback = (playback: import("@woohaa3/contracts").BevyAnimationPlayback | null): void => {
     if (this.animationPlaybackStore.set(playback)) this.controllerInstance?.invalidate("animation-playback");
@@ -550,7 +590,15 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     // 先清理旧挂载，保证重复 attach 不累积 listener（StrictMode 安全）。
     this.detach?.();
     const runtime = this.runtimeInstance;
-    const { textureSync, videoSessions, compositeAssetMediaSessions } = createAttachedMedia({
+    // 视口/surface/surface 尺寸由 controller 提供；attach 期间用转发器保存引用
+    // （controller 需要 media 句柄，media 也需要 controller 的视口：单向解引用避免构造环）。
+    const viewportRef: { current: (() => { x: number; y: number; zoom: number }) | null } = { current: null };
+    const surfaceRef: {
+      current: (() => { width: number; height: number; pixelRatio: number }) | null;
+    } = { current: null };
+    const {
+      textureSync, videoSessions, compositeAssetMediaSessions, residency, projectResidency
+    } = createAttachedMedia({
       runtime,
       options: this.options,
       getPreviewUrls: () => this.previews,
@@ -558,8 +606,15 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       getFocusDetails: this.imageFocusStore.getDetails,
       isFocused: this.isFocused,
       playback: this.animationPlaybackStore,
-      invalidate: (reason) => this.controllerInstance?.invalidate(reason)
+      invalidate: (reason) => this.controllerInstance?.invalidate(reason),
+      getViewport: () => viewportRef.current?.() ?? { x: 0, y: 0, zoom: 1 },
+      getSurface: () => surfaceRef.current?.() ?? { width: 0, height: 0, pixelRatio: 1 },
+      getInteractiveNodeIds: () => this.residencyInteractiveNodeIds(),
+      getPinnedNodeIds: () => this.residencyPinnedNodeIds(),
+      isPageVisible: () => (globalThis.document?.visibilityState ?? "visible") !== "hidden",
+      getModelContentVersion: () => this.modelContentVersion
     });
+    this.residencyInstance = residency;
     this.compositeAssetMediaSessionsInstance = compositeAssetMediaSessions;
     // E2E/排障镜像：观察视频会话/模型聚焦/图片聚焦/放置预览（生产无副作用）。
     installCanvasRuntimeMirrors({
@@ -568,7 +623,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       modelFocus: () => this.modelFocus,
       imageFocus: () => this.imageFocusStore.get(),
       videoFocus: () => this.videoFocusStore.get(),
-      videoFocusTargetId: () => this.videoFocusStore.getTargetId()
+      videoFocusTargetId: () => this.videoFocusStore.getTargetId(),
+      residency
     });
     const controller = installInteractionController(
       buildAttachInteractionOptions({
@@ -605,6 +661,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         onGizmoFeedback: feedback => {
           if (this.modelEditor?.toolMode === "camera") this.setModelEditor({ ...this.modelEditor, feedback });
         },
+        projectResidency: () => { projectResidency(); },
+        onSurface: (surface) => { surfaceRef.current = () => surface; },
+        onViewportForResidency: (viewport) => { viewportRef.current = () => viewport; },
         animationPlayback: () => this.animationPlaybackStore.current(),
         focusTransition: () => this.focusTransition.modelProgress(),
         runState: () => this.options.getRunState?.() ?? null,
@@ -624,7 +683,11 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     );
     controller.start();
     this.controllerInstance = controller;
-    const unsubscribe = this.options.subscribeModelScenes(() => controller.invalidate("model-scenes"));
+    const unsubscribe = this.options.subscribeModelScenes(() => {
+      // prepared resource 就绪/替换不改变画布对象，但会改变内容身份与可准入性。
+      this.modelContentVersion += 1;
+      controller.invalidate("model-scenes");
+    });
     const unsubscribeTheme = this.options.subscribeTheme?.(() => controller.invalidate("theme"));
     const unsubscribeRunState = this.options.subscribeRunState?.(() => controller.flush());
     // 规范画布变化（目标删除/失效）也触发一次重算（任务 3.4）。
@@ -641,7 +704,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       textureSync.dispose();
       videoSessions.dispose();
       compositeAssetMediaSessions.dispose();
+      residency.dispose();
       this.compositeAssetMediaSessionsInstance = null;
+      this.residencyInstance = null;
       if (this.controllerInstance === controller) this.controllerInstance = null;
       this.sceneSubmitted();
       this.modelFocus = null;
