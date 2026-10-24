@@ -10,10 +10,17 @@ export function validCurve(points: readonly CurvePoint[]): boolean {
 const copy=(points:CurvePoint[])=>points.map(([x,y])=>[x,y] as CurvePoint);
 
 /** RGB 总曲线；图形读取内核样条采样，控制点只管理输入。 */
-export function RgbCurveEditor({points,onChange,readonly,onApply,editing,samples=[],onEnd=()=>true,disabledBySession=false,cancelRevision=0}: {
+export function RgbCurveEditor({points,onChange,readonly,onApply,editing,samples=[],onEnd=()=>true,disabledBySession=false,cancelRevision=0,inline=false}: {
   points:CurvePoint[];onChange:(points:CurvePoint[])=>void;readonly:boolean;onApply:()=>void;editing:boolean;
   samples?:number[];onEnd?:(commit:boolean)=>boolean;disabledBySession?:boolean;
   cancelRevision?:number;
+  /**
+   * 直接铺在面板里，而不是收在「RGB 曲线」按钮的 Popover 后面。
+   *
+   * 调整图层的属性面板必须用 inline：曲线调整层选中后只有一行按钮、看不到曲线也拖不动，
+   * 用户会以为这个调整类型没有编辑器（2026-10-24 审片 A4）。点曲线与铅笔曲线都支持 inline。
+   */
+  inline?:boolean;
 }) {
   const [open,setOpen]=useState(false);
   const [selected,setSelected]=useState(0);
@@ -59,9 +66,7 @@ export function RgbCurveEditor({points,onChange,readonly,onApply,editing,samples
     change([...all.slice(0,gap+1),[Math.round((left[0]+right[0])/2),Math.round((left[1]+right[1])/2)],...all.slice(gap+1)]);
     setSelected(gap+1);finish(true);
   };
-  return <Popover open={open} dismissOnEscape={false} onOpenChange={(next)=>{if (next || finish(true)) setOpen(next);}}
-    trigger={<Button size="sm" tone="ghost" disabled={blocked}>RGB 曲线</Button>}>
-    <div className="photo-editor-curve" onKeyDown={(event)=>{
+  const body = <div className="photo-editor-curve" onKeyDown={(event)=>{
       if (event.nativeEvent.isComposing || event.keyCode===229) return;
       if (event.key==="Escape") {event.preventDefault();event.stopPropagation();finish(false);return;}
       if (event.key==="Enter") {event.preventDefault();event.stopPropagation();finish(true);return;}
@@ -69,7 +74,7 @@ export function RgbCurveEditor({points,onChange,readonly,onApply,editing,samples
         event.preventDefault();event.stopPropagation();remove();
       }
     }}>
-      <span className="photo-editor__options-title">RGB 总曲线</span>
+      {!inline ? <span className="photo-editor__options-title">RGB 总曲线</span> : null}
       <svg viewBox="0 0 255 255" width="192" height="192" tabIndex={0} data-curve-graph
         onPointerDown={(event)=>{
           if (blocked || !valid || event.button!==0) return;
@@ -122,6 +127,11 @@ export function RgbCurveEditor({points,onChange,readonly,onApply,editing,samples
         {editing ? <Button size="sm" disabled={blocked || !valid} onClick={()=>{if (finish(true)) setOpen(false);}}>完成</Button>
           : <Button size="sm" disabled={blocked || !valid} onClick={()=>{if (finish(true)) {onApply();setOpen(false);}}}>新建曲线层</Button>}
       </div>
-    </div>
+    </div>;
+  // inline 直接铺在面板里：曲线调整层的属性面板不能把图形藏在按钮后面（A4）。
+  if (inline) return body;
+  return <Popover open={open} dismissOnEscape={false} onOpenChange={(next)=>{if (next || finish(true)) setOpen(next);}}
+    trigger={<Button size="sm" tone="ghost" disabled={blocked}>RGB 曲线</Button>}>
+    {body}
   </Popover>;
 }

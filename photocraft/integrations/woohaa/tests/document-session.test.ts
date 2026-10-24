@@ -139,6 +139,39 @@ describe("文档身份与打开", () => {
     expect(rejected.reason).toContain("最多同时打开 8 个文档");
     expect(h.session.metrics().documents).toBe(8);
   });
+
+  it("按呈现/控制器反查资源，保存能落到发起保存的文档（A2）", () => {
+    // 回归：`projectPort.save` 曾忽略入参、改取 `session.active()`，多标签下切过 tab 之后
+    // 「应用到节点」会写到另一篇文档或错误节点。反查是修复的前提。
+    const h = harness();
+    const first = h.session.openNode({ nodeId: "n1", name: "海报", writable: true });
+    const second = h.session.openNode({ nodeId: "n2", name: "橘猫", writable: true });
+    if (!first.ok || !second.ok) throw new Error("打开失败");
+    // n2 是活动文档；用 n1 的呈现与控制器保存必须解析到 n1。
+    expect(h.session.activeId()).toBe(second.documentId);
+    const resource = h.session.resource(first.documentId)!;
+    expect(h.session.findByView(resource.view)?.documentId).toBe(first.documentId);
+    expect(h.session.findByController(resource.controller)?.documentId).toBe(first.documentId);
+    expect(h.session.findByNode("n1")?.documentId).toBe(first.documentId);
+    expect(h.session.findByNode("n2")?.documentId).toBe(second.documentId);
+    // 未知身份不伪造结果（调用方退回 active）。
+    expect(h.session.findByNode("n3")).toBeNull();
+    expect(h.session.findByView({})).toBeNull();
+    expect(h.session.findByController(null)).toBeNull();
+  });
+
+  it("节点标签的 detail 只在显式给出时写入，不回落到内部节点 id（A12）", () => {
+    const h = harness();
+    const opened = h.session.openNode({ nodeId: "asset-image-c5d9f2e9", name: "开业海报", writable: true, detail: "图片" });
+    if (!opened.ok) throw new Error("打开失败");
+    const entry = h.registry.entry(opened.documentId)!;
+    expect(entry.name).toBe("开业海报");
+    expect(entry.detail).toBe("图片");
+    // 未给 detail 时保持注册表默认（节点身份仍可见于 source），不额外暴露更长 id 到画面。
+    const plain = h.session.openNode({ nodeId: "n2", name: "橘猫", writable: true });
+    if (!plain.ok) throw new Error("打开失败");
+    expect(h.registry.entry(plain.documentId)!.name).toBe("橘猫");
+  });
 });
 
 describe("活动绑定与关闭", () => {

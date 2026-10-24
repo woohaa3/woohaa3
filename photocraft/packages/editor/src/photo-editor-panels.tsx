@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PhotocraftCommand } from "@woohaa3/photocraft-protocol";
 import { LAYER_FILL_LIMITS } from "@woohaa3/photocraft-protocol";
+import { displayLayerName } from "./layer-display-name.js";
 import { Button, IconButton } from "./ui/Button.js";
 import { Tooltip } from "./ui/Tooltip.js";
 import { DropdownMenu } from "./ui/Menu.js";
@@ -160,7 +161,7 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
               {layer.labelColor && layer.labelColor !== "none" ? <span className="photo-editor__label-swatch" data-label={layer.labelColor} title={`图层颜色：${layer.labelColor}`} /> : null}
               {layer.linkGroup !== null ? <span className="photo-editor__clipping-indicator" title="已链接：与同组图层一起移动"><LinkIcon size={13} /></span> : null}
               {layer.clipped ? <span className="photo-editor__clipping-indicator" title="剪贴到下方基底"><ClippingMaskIcon size={13} /></span> : null}
-              <button type="button" className="photo-editor__layer-thumbnail" data-edit-target="pixels" data-target-active={layer.active && !maskActive ? "true" : undefined} disabled={readonly} onClick={(event) => select(layer,event)} title={`${layer.name}：编辑内容；Shift 范围选择，Ctrl/Cmd 增减选择`}>
+              <button type="button" className="photo-editor__layer-thumbnail" data-edit-target="pixels" data-target-active={layer.active && !maskActive ? "true" : undefined} disabled={readonly} onClick={(event) => select(layer,event)} title={`${displayLayerName(layer.name)}：编辑内容；Shift 范围选择，Ctrl/Cmd 增减选择`}>
                 <LayerThumbnail layer={layer.id} revision={view.document?.revision ?? 0} read={thumbnail} />
               </button>
               {layer.hasMask ? <>
@@ -168,13 +169,14 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
                   onClick={() => onCommand("layer.layerMask.linked",{layer:layer.id,linked:!layer.maskLinked})}>{layer.maskLinked ? <LinkIcon size={12} /> : <UnlinkIcon size={12} />}</IconButton>
                 <button type="button" className="photo-editor__layer-thumbnail photo-editor__mask-thumbnail" data-edit-target="mask" data-target-active={maskActive ? "true" : undefined}
                   data-mask-enabled={String(layer.maskEnabled)} data-mask-view={view.document?.maskView === layer.id ? "true" : undefined} disabled={readonly}
-                  title={`${layer.name}：编辑蒙版；Shift 启停，Alt/Option 单独查看`} onClick={(event) => onMask?.(layer,{shift:event.shiftKey,alt:event.altKey})}>
+                  title={`${displayLayerName(layer.name)}：编辑蒙版；Shift 启停，Alt/Option 单独查看`} onClick={(event) => onMask?.(layer,{shift:event.shiftKey,alt:event.altKey})}>
                   <LayerThumbnail layer={layer.id} mask revision={view.document?.revision ?? 0} read={thumbnail} />
                   {!layer.maskEnabled ? <span className="photo-editor__mask-disabled"><CloseIcon size={24} /></span> : null}
                 </button>
               </> : null}
               {renaming === layer.id ? (
-                <input autoFocus defaultValue={layer.name} onBlur={(event) => { const name=event.currentTarget.value || layer.name; if (name!==layer.name) onRename(layer,name); setRenaming(null); }}
+                // 重命名写回**原始**名字：显示层翻译不改变工程的持久数据（A11）。
+                <input autoFocus defaultValue={displayLayerName(layer.name)} onBlur={(event) => { const name=event.currentTarget.value || layer.name; if (name!==layer.name && name!==displayLayerName(layer.name)) onRename(layer,name); setRenaming(null); }}
                   onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setRenaming(null); }} />
               ) : (
                 <button type="button" className="photo-editor__layer-name" disabled={readonly} onClick={(event) => select(layer,event)} onDoubleClick={() => setRenaming(layer.id)}
@@ -186,10 +188,10 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
                     dragging.current=ids;event.dataTransfer.effectAllowed="move";
                     event.dataTransfer.setData("application/x-woohaa-image-layers",ids.join(","));
                   }} onDragEnd={clearDrag}>
-                  <span>{layer.name}</span><small>{KIND_LABELS[layer.kind] ?? layer.kind}{layer.hasEffects ? " · 样式" : ""}</small>
+                  <span>{displayLayerName(layer.name)}</span><small>{KIND_LABELS[layer.kind] ?? layer.kind}{layer.hasEffects ? " · 样式" : ""}</small>
                 </button>
               )}
-              {Object.values(layer.effectiveLocks).some(Boolean) ? <IconButton size="sm" label="解锁图层" title={`${layer.name}：${lockControls.filter(([key])=>layer.effectiveLocks[key]).map(([,label])=>label).join("、")}已锁定`}
+              {Object.values(layer.effectiveLocks).some(Boolean) ? <IconButton size="sm" label="解锁图层" title={`${displayLayerName(layer.name)}：${lockControls.filter(([key])=>layer.effectiveLocks[key]).map(([,label])=>label).join("、")}已锁定`}
                 disabled={readonly || !commands.get("layer.setProps")?.allowed || !Object.values(layer.locks).some(Boolean)}
                 onClick={()=>onCommand("layer.setProps",{layer:layer.id,locks:{transparency:false,pixels:false,position:false,artboard:false,all:false} satisfies EditorLayerLocks})}><LockIcon size={13}/></IconButton> : null}
             </li>

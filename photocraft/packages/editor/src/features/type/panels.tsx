@@ -90,17 +90,46 @@ export function TypographyPanel({ controller, readonly, layer, locked = false }:
   const apply = (patch: Record<string, unknown>) => {
     const result = controller.features.type.applyTypography({ ...patch, ...target(layer) });
     setMessage(result.ok ? null : result.message);
+    return result.ok;
+  };
+  // 回读真实值：面板不能只显示自己刚敲的数字。选中的文字层可能已有字距（从 PSD 打开、
+  // 或上一轮改过），面板显示 0 会让用户「再拉到 300」也看不出差别（A6）。
+  const revision = controller.snapshot().view.document?.revision ?? 0;
+  useEffect(() => {
+    if (layer === null) return;
+    const info = controller.features.type.typeQuery("type.info", { layer });
+    if (!info.ok) return;
+    const runs = asRecord(info.value).runs;
+    const first = Array.isArray(runs) ? asRecord(runs[0]) : {};
+    const style = asRecord(first.style);
+    setValues((current) => ({
+      ...current,
+      ...(typeof style.tracking === "number" ? { tracking: style.tracking } : {}),
+      ...(typeof style.baselineShift === "number" ? { baselineShift: style.baselineShift } : {}),
+      ...(typeof style.kerning === "string" ? { kerning: style.kerning } : {})
+    }));
+  }, [controller, layer, revision]);
+  /**
+   * 字距/基线/字偶距立即生效（A6）。
+   *
+   * 之前它们只改本地 state，必须再点一次「应用排版」才提交：照台本「把字距拉大」调完数字后
+   * 画面没变化，看起来像字距不生效。现在数字一变就提交，同时保留「应用排版」作为整组提交。
+   * 行距仍不随手填：`leading` 有「自动」语义，显式 0 会压扁行高。
+   */
+  const commitTypographic = (patch: Record<string, unknown>) => {
+    const next = { tracking: values.tracking, baselineShift: values.baselineShift, kerning: values.kerning, ...patch };
+    apply(next);
   };
   const disabled = readonly || locked || layer === null;
   return (
     <section className="photo-editor__advanced-group" aria-label="排版" data-typography="true">
       <span className="photo-editor__options-title">排版</span>
       <label>行距<input type="number" step={0.5} placeholder="自动" value={values.leading ?? ""} disabled={disabled} onChange={(event) => setValues((current) => ({ ...current, leading: event.currentTarget.value === "" ? null : Number(event.currentTarget.value) }))} /></label>
-      <label>字距<input type="number" step={10} value={values.tracking} disabled={disabled} onChange={(event) => setValues((current) => ({ ...current, tracking: Number(event.currentTarget.value) }))} /></label>
-      <label>基线<input type="number" step={0.5} value={values.baselineShift} disabled={disabled} onChange={(event) => setValues((current) => ({ ...current, baselineShift: Number(event.currentTarget.value) }))} /></label>
+      <label>字距<input type="number" step={10} value={values.tracking} disabled={disabled} onChange={(event) => { const tracking = Number(event.currentTarget.value); setValues((current) => ({ ...current, tracking })); commitTypographic({ tracking }); }} /></label>
+      <label>基线<input type="number" step={0.5} value={values.baselineShift} disabled={disabled} onChange={(event) => { const baselineShift = Number(event.currentTarget.value); setValues((current) => ({ ...current, baselineShift })); commitTypographic({ baselineShift }); }} /></label>
       <label>
         字偶距
-        <select value={values.kerning} disabled={disabled} onChange={(event) => setValues((current) => ({ ...current, kerning: event.currentTarget.value }))}>
+        <select value={values.kerning} disabled={disabled} onChange={(event) => { const kerning = event.currentTarget.value; setValues((current) => ({ ...current, kerning })); commitTypographic({ kerning }); }}>
           <option value="metrics">度量</option>
           <option value="optical">视觉</option>
           <option value="off">关</option>
@@ -117,6 +146,7 @@ export function TypographyPanel({ controller, readonly, layer, locked = false }:
         if (values.leading !== null) patch.leading = values.leading;
         apply(patch);
       }}>应用排版</Button>
+      {layer !== null && message === null ? <p className="photo-editor__option-hint" data-typography-hint="true">字距、基线与字偶距改完立即生效，画布会跟着变。</p> : null}
       <span className="photo-editor__options-title">指定字符对</span>
       <label>第几个字符<input type="number" min={1} step={1} value={values.kernAt} disabled={disabled} onChange={(event) => setValues((current) => ({ ...current, kernAt: Math.max(1, Math.round(Number(event.currentTarget.value))) }))} /></label>
       <label>字偶距增量<input type="number" step={5} value={values.kernBy} disabled={disabled} onChange={(event) => setValues((current) => ({ ...current, kernBy: Number(event.currentTarget.value) }))} /></label>

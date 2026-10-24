@@ -57,6 +57,18 @@ it("已有曲线完成不创建图层，新建偏好只有明确点击才创建"
   act(()=>[...container.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="新建曲线层")!.click());
   expect(apply).toHaveBeenCalledOnce();expect(container.querySelector("svg")).toBeNull();
 });
+it("inline 直接把曲线铺在面板里，不需要先点按钮（A4）",()=>{
+  // 回归：曲线调整层的属性面板只有一行「RGB 曲线」按钮，曲线收在 Popover 后面；选中曲线层
+  // 看不到图形也拖不动（2026-10-24 审片 A4）。inline 必须立刻渲染 svg。
+  const change=vi.fn(),end=vi.fn(()=>true);
+  const container=document.createElement("div");document.body.append(container);root=createRoot(container);
+  act(()=>root.render(<RgbCurveEditor points={[[0,0],[255,255]]} onChange={change} readonly={false} editing inline
+    onEnd={end} samples={Array.from({length:256},(_,i)=>i)} onApply={()=>true}/>));
+  expect(container.querySelector("svg[data-curve-graph]")).not.toBeNull();
+  expect(container.querySelector("polyline")).not.toBeNull();
+  // 没有触发按钮：图形不是 popover 内容。
+  expect([...container.querySelectorAll("button")].some(button=>button.textContent==="RGB 曲线")).toBe(false);
+});
 it("点选邻近控制点不挪点，拖动保留松手时的最后坐标",()=>{
   const {change,send}=setup();
   send("pointerdown",130,130);send("pointerup",130,130);expect(change).not.toHaveBeenCalled();

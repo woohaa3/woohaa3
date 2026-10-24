@@ -62,6 +62,8 @@ async function makeHarness(input: {
   client?: NodeHistoryClient;
   writable?: boolean;
   includeRuntime?: boolean;
+  imageEdit?: unknown;
+  canvasRemote?: Record<string, unknown>;
 }): Promise<{
   runtime: FrontendRuntime;
   slots: SlotRegistry;
@@ -90,7 +92,8 @@ async function makeHarness(input: {
       ctx.provide("dialogs" as never, dialogs as never);
       ctx.provide("canvasNavigation" as never, navigation as never);
       ctx.provide("canvasSession" as never, { isWritable: () => input.writable ?? true } as never);
-      ctx.provide("canvasRemote" as never, {} as never);
+      ctx.provide("canvasRemote" as never, (input.canvasRemote ?? {}) as never);
+      if (input.imageEdit !== undefined) ctx.provide("imageEdit" as never, input.imageEdit as never);
       if (fakeRuntime) {
         ctx.provide("canvasRuntime" as never, fakeRuntime as never);
       }
@@ -115,6 +118,18 @@ function textCanvas() {
     document: { ...base.document, nodes: [{ id: "n1", type: "text", position: { x: 0, y: 0 } }] },
     nodeData: { n1: { title: "T" } }
   };
+}
+
+/** 图片节点画布：历史预览要落到这个节点（A3 回归）。 */
+function imageCanvas() {
+  const base = createEmptyWoohaa3ServerCanvas("woohaa3-default-canvas", "2026-09-27T00:00:00.000Z");
+  return {
+    ...base,
+    revision: 1,
+    document: { ...base.document, nodes: [{ id: "n1", type: "image", position: { x: 0, y: 0 } }] },
+    nodeData: { n1: { title: "海报", outputAssetId: "asset-output", taskStatus: "successed" } },
+    assets: [{ id: "asset-output", title: "图片", mediaKind: "image", source: "uploaded", status: "ready", createdAt: "2026-09-27T00:00:00.000Z", metadata: { storageKey: "generation-outputs/current.png", checksum: "a".repeat(64), contentType: "image/png", size: 10 } }]
+  } as never;
 }
 
 /** 模型节点（`generate`）画布，用于验证聚焦关联行为。 */
@@ -382,6 +397,86 @@ describe("Node History Plugin", () => {
     expect(harness.navigation.getSnapshot().mode).toEqual({ type: "node-focus", nodeId: "m1", kind: "model", owner: "direct" });
     expect(harness.navigation.getSnapshot().panel).toBeNull();
   });
+  it("图片历史预览把 override 装到面板所属节点，而不是当前活动节点（A3）", async () => {
+    // 回归：`setHistoryOverride` 曾只作用于 `session.active()`。多标签下活动文档可能是另一篇，
+    // 结果是「点了旧版本，画布仍是当前版本，标题栏也没出现『历史预览 · 只读』」。
+    const overrides: Array<{ url: string | null; nodeId: string | null }> = [];
+    const client: NodeHistoryClient = {
+      list: async () => ({
+        ok: true,
+        items: [
+          {
+            entryId: "e1",
+            kind: "image",
+            createdAt: "2026-09-27T00:00:00.000Z",
+            current: false,
+            recoverable: true,
+            previewable: true,
+            source: { label: "图片生成" },
+            preview: { kind: "image", href: "/api/canvas-node-history/c/n1/e1/preview" }
+          }
+        ] as never,
+        nextCursor: null
+      }),
+      detail: async () => ({
+        ok: true,
+        detail: {
+          entryId: "e1",
+          kind: "image",
+          storageKey: "generation-outputs/old.png",
+          checksum: "a".repeat(64),
+          contentType: "image/png",
+          size: 10,
+          base: null
+        } as never
+      }),
+      apply: async () => ({ ok: true }),
+      previewUrl: () => "/api/canvas-node-history/c/n1/e1/preview"
+    };
+    const imageEditStub = {
+      isActive: () => true,
+      nodeId: () => "n1",
+      draftState: () => "saved" as const,
+      setHistoryOverride: (override: { url: string } | null, nodeId?: string) => {
+        overrides.push({ url: override?.url ?? null, nodeId: nodeId ?? null });
+      },
+      refreshFromCanonical: () => undefined
+    };
+    const harness = await makeHarness({
+      canvas: imageCanvas(),
+      client,
+      imageEdit: imageEditStub,
+      canvasRemote: {
+        nodeHistoryPreviewUrl: (input: { nodeId: string; entryId: string }) =>
+          `/api/canvas-node-history/c/${input.nodeId}/${input.entryId}/preview`
+      }
+    });
+    runtime = harness.runtime;
+    const navigation = harness.navigation;
+    navigation.setFocusAdapter({
+      apply: (target) => {
+        harness.focusCalls.push({ kind: target ? "enter" : "exit", payload: target ?? {} });
+        return { ok: true };
+      },
+      isFocused: () => true,
+      isTargetValid: () => true
+    });
+    navigation.enterNodeFocus({ nodeId: "n1", kind: "image", owner: "direct" });
+    navigation.openNodeHistory({ nodeId: "n1", kind: "image" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const service = harness.runtime.ctx.get(NODE_HISTORY_SERVICE as never) as unknown as {
+      getState: () => unknown;
+      select: (entryId: string) => Promise<void>;
+    };
+    expect(service.getState()).not.toBeNull();
+    await service.select("e1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // 预览必须落在面板节点 n1 上（不是碰巧活动的另一篇文档）。
+    expect(overrides).toEqual([{ url: "/api/canvas-node-history/c/n1/e1/preview", nodeId: "n1" }]);
+    // 并且聚焦 owner 切到 history（标题栏据此显示「历史预览 · 只读」）。
+    expect(harness.navigation.getSnapshot().mode).toEqual({ type: "node-focus", nodeId: "n1", kind: "image", owner: "history" });
+  });
+
   it("缺失 canvasRuntime 时保持 pending 且零副作用", async () => {
     const slots = new SlotRegistry();
     const instance = await startFrontendRuntime({

@@ -308,7 +308,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         const mode = ctx.canvasNavigation.getSnapshot().mode;
         if (state.selectedEntryId === CURRENT_PRESENTATION_ID || state.selectedEntryId === null) {
           if (appliedImageOverrideEntryId !== null) {
-            imageEdit?.setHistoryOverride?.(null);
+            imageEdit?.setHistoryOverride?.(null, state.nodeId);
             appliedImageOverrideEntryId = null;
             if (mode.type === "node-focus" && mode.kind === "image") {
               ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "direct" });
@@ -327,12 +327,16 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
           entryId: detail.entryId,
           variant: "preview"
         });
-        imageEdit?.setHistoryOverride?.({ url: href });
+        imageEdit?.setHistoryOverride?.({ url: href }, state.nodeId);
         appliedImageOverrideEntryId = state.selectedEntryId;
         // 中央内容切到 history owner（原子；禁用写工具）。
         if (mode.type === "node-focus" && mode.kind === "image" && mode.owner === "direct") {
           ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "history" });
         } else if (mode.type !== "node-focus") {
+          ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "history" });
+        } else if (mode.type === "node-focus" && mode.kind === "image" && mode.owner === "history" && mode.nodeId !== state.nodeId) {
+          // 历史面板所属节点与当前聚焦节点不一致（多标签/刚切过文档）：把聚焦切回面板节点，
+          // 否则标题栏与画布都还停在另一篇文档（A3）。
           ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "history" });
         }
       };

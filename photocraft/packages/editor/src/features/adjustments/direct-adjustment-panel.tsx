@@ -401,7 +401,8 @@ function CurvesParameters({ values, disabled, foreground, endpoint, onChange }: 
       ? <CurveMapEditor map={map} readonly={disabled}
           // 新笔画就是新的整条映射：写进去后平滑归零，避免在已平滑的图上再叠一层。
           onChange={(next) => onChange(buildCurveMap(channel, next, { smooth: 0 }))} />
-      : <RgbCurveEditor points={points} samples={samples} readonly={disabled} editing
+      // 调整层：曲线必须直接可拖。inline（不套 Popover）让属性面板里就有曲线图形（A4）。
+      : <RgbCurveEditor points={points} samples={samples} readonly={disabled} editing inline
           onChange={(next: CurvePoint[]) => onChange(buildCurves(channel, next, { pencil: false, smooth: smooth > 0 ? smooth : undefined }))}
           onApply={() => true} onEnd={() => true} />}
     <label>

@@ -90,3 +90,49 @@ it("仍注册聚焦工作区与独立文档工作区两个 slot 贡献", () => {
   expect(h.registeredSlots).toContain("canvas.focus-workspace");
   expect(h.registeredSlots).toContain("canvas.document-workspace");
 });
+
+it("图片聚焦工作区在任何文档打开前就可用（A8：不再先闪「工作区不可用」）", () => {
+  // 回归：贡献曾以「至少一个文档已打开」为 available，双击后的第一帧文档还没打开，
+  // 解析就当它不存在，先渲染「此节点的工作区不可用 / 请检查对应扩展是否已启用」，等异步
+  // 打开完成才换回编辑器（2026-10-24 审片 A8，几乎每条镜头开头都有）。
+  const contributions = new Map<string, { available?: () => boolean; kind?: string }>();
+  const listeners = new Set<() => void>();
+  const ctx = {
+    canvasSession: { isWritable: () => true },
+    canvasRuntime: {
+      registerImageViewportTarget: () => () => {},
+      controller: () => ({ surface: () => ({ width: 1200, height: 900, pixelRatio: 1 }), viewport: () => ({ x: 0, y: 0, zoom: 1 }), restoreViewport: vi.fn() }),
+      runtime: () => null,
+      focusContentRect: () => ({ x: 0, y: 0, width: 1200, height: 900 }),
+      focusTransitionPort: () => ({ run: async () => true, cancel: vi.fn() }),
+      setImageFocus: vi.fn(), setImageFocusTexture: vi.fn(), setImageFocusDetails: vi.fn(), setImageFocusTargets: vi.fn(),
+      subscribeFocusContentRect: () => () => {}
+    },
+    canvasNavigation: {
+      registerNodeFocusGuard: () => () => {},
+      subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn); },
+      getSnapshot: () => ({ mode: OVERVIEW, panel: null, menu: null }),
+      requestEnterNodeFocus: async () => ({ ok: true }),
+      requestEnterDocumentWorkspace: async () => ({ ok: true }),
+      exitNodeFocus: vi.fn(),
+      invalidateNodeFocus: vi.fn()
+    },
+    canvasRemote: { editBegin: vi.fn(async () => ({ ok: true, value: { baselineContentIdentity: "media:x" } })) },
+    focusExit: { register: () => () => {}, registerSwitchGate: () => () => {} },
+    pageLeave: { register: () => () => {}, hasUnsaved: () => false, settle: async () => ({ ok: true as const }) },
+    slots: {
+      register: (slot: string, contribution: { id: string; kind?: string; available?: () => boolean }) => {
+        if (slot === "canvas.focus-workspace") contributions.set(contribution.id, contribution);
+        return () => { contributions.delete(contribution.id); };
+      }
+    },
+    provide: () => undefined,
+    get: () => undefined,
+    effect: (effect: () => () => void) => { cleanups.push(effect()); }
+  } as unknown as Context;
+  imageEditorExtension({ canvasId: "c" })(ctx, undefined);
+  const workspace = [...contributions.values()].find((entry) => entry.kind === "image");
+  expect(workspace).toBeDefined();
+  // 没有任何文档时也必须解析成「可用」：工作区自己呈现准备中/加载中/失败。
+  expect(workspace?.available?.()).toBe(true);
+});

@@ -282,7 +282,7 @@ export function ToolOptionsPanel({
             disabled={readonly || Boolean(adjustmentActive && editingAdjustment!==entry.kind)}
             onChange={(value)=>onAdjustment({[entry.key]:value})} onEnd={onEndAdjustment ?? (()=>true)} />)}
         {editingAdjustment === "curves" ? <RgbCurveEditor points={curvePoints} onChange={onCurvePoints} readonly={readonly}
-          onApply={() => onEndAdjustment?.(true)} editing
+          onApply={() => onEndAdjustment?.(true)} editing inline
           samples={curveSamples} onEnd={onEndAdjustment} cancelRevision={adjustmentCancelRevision} /> : null}
         {adjustmentActive ? <>
           <Button size="sm" disabled={readonly} onClick={()=>onEndAdjustment?.(true)}>确认调整</Button>

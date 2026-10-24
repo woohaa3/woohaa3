@@ -63,10 +63,13 @@ it("滑杆在松手前发出临时预览，取消恢复正式预览，下一次�
   expect(commit).toHaveBeenCalledOnce();expect(controller.snapshot().view.document?.revision).toBe(2);
   expect(controller.isDirty()).toBe(true);expect(controller.hasAdjustment()).toBe(false);
 });
-it("曲线门户内拖点和数字焦点切换不被误判为离开编辑器，失焦与只读取消活动草稿",async()=>{
+it("曲线直接在属性面板里拖点和数字焦点切换不被误判为离开编辑器，失焦与只读取消活动草稿",async()=>{
+  // 回归（A4）：曲线编辑器曾经收在「RGB 曲线」按钮的 Popover 后面，属性面板只显示一行按钮，
+  // 选中曲线调整层看不到曲线也拖不动。现在曲线**直接铺在面板里**（inline）。
   const {container,preview,commit,cancel,key,input,pointer,tick,render}=await setup("curves");
-  act(()=>[...container.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="RGB 曲线")!.click());
-  const graph=document.querySelector<SVGSVGElement>("[data-curve-graph]")!;
+  const properties=container.querySelector('.photo-editor__object-properties [aria-label="调整层"]')!;
+  const graph=properties.querySelector<SVGSVGElement>("[data-curve-graph]")!;
+  expect(graph).not.toBeNull();
   expect(graph).not.toBeNull();graph.getBoundingClientRect=()=>({left:0,top:0,width:255,height:255} as DOMRect);
   pointer(graph,"pointerdown",128,127);pointer(graph,"pointermove",100,75);tick();
   expect(controller.hasAdjustment()).toBe(true);expect(JSON.parse(preview.mock.calls.at(-1)![0]).points[1]).toEqual([100,180]);
@@ -114,7 +117,8 @@ it.each([
   const properties=container.querySelector('.photo-editor__object-properties [aria-label="调整层"]')!;
   expect(properties.hasAttribute("hidden")).toBe(false);
   expect([...properties.querySelectorAll("[data-adjustment-control]")].map(node=>node.firstChild?.textContent)).toEqual(fields);
-  expect(properties.textContent?.includes("RGB 曲线")).toBe(kind==="curves");
+  // 曲线调整层必须**直接**带可拖的曲线图，而不是只有一行按钮（A4）。
+  expect(properties.querySelector("[data-curve-graph]") !== null).toBe(kind==="curves");
   expect(container.querySelector('.photo-editor__toolrail [aria-label="调整层"]')).toBeNull();
   render(true);expect(trigger.disabled).toBe(true);
 });

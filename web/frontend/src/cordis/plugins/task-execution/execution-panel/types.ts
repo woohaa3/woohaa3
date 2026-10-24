@@ -34,6 +34,13 @@ export interface ExecutionPanelParameterField {
 	control?: "slider";
 	options?: ReadonlyArray<{ value: string; label: string }>;
 	defaultValue?: string | number | boolean;
+	/**
+	 * Provider schema 标记为必填（`inputSchema.required`）。
+	 *
+	 * 缺省 false。必填字段在提交前必须已经解析出值（默认值也算），否则面板就地报可读错误，
+	 * 不把请求发给 Provider 再等它回一句英文错误（A9）。
+	 */
+	required?: boolean;
 	minimum?: number;
 	maximum?: number;
 	step?: number;

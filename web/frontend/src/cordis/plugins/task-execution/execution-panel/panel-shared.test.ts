@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parametersAfterModelSwitch } from "./panel-shared.js";
+import { missingRequiredParameters, parametersAfterModelSwitch, parametersOnOpen } from "./panel-shared.js";
 import type { ExecutionPanelModelConfig } from "./types.js";
 
 const CONFIG: ExecutionPanelModelConfig = {
@@ -103,5 +103,81 @@ describe("parametersAfterModelSwitch", () => {
 		);
 
 		expect(next).toEqual({ model: "gemini-3-pro-image", resolution: "4K", aspectRatio: "16:9" });
+	});
+});
+
+/**
+ * A9 回归：面板打开时也要并入 schema 默认值，并在提交前按 required 校验。
+ *
+ * 之前 `parametersAfterModelSwitch` 只在**切换模型**时跑；首次打开面板 `parameters` 是
+ * 空对象，720p/5 这些默认值只用于渲染控件，没有进提交草稿。Provider 收到
+ * `field 'resolution' is required, can not be empty`（2026-10-24 preflight #1）。
+ */
+describe("parametersOnOpen", () => {
+	it("首次打开（草稿为空）就带出该模型的全部默认值", () => {
+		expect(parametersOnOpen(CONFIG, {}, "gemini-3-pro-image")).toEqual({
+			model: "gemini-3-pro-image", resolution: "1K", aspectRatio: "auto",
+		});
+	});
+
+	it("已有草稿值优先，只补缺", () => {
+		expect(parametersOnOpen(CONFIG, { aspectRatio: "16:9" }, "gpt-image-2")).toEqual({
+			model: "gpt-image-2", resolution: "1K", aspectRatio: "16:9", quality: "high", n: 1,
+		});
+	});
+
+	it("null 与空串不压掉默认值（恢复损坏草稿时也要能提交）", () => {
+		expect(parametersOnOpen(CONFIG, { resolution: null, quality: "" }, "gpt-image-2")).toMatchObject({
+			resolution: "1K", quality: "high",
+		});
+	});
+});
+
+describe("missingRequiredParameters", () => {
+	const REQUIRED: ExecutionPanelModelConfig = {
+		...CONFIG,
+		parameterSchemaByModel: {
+			...CONFIG.parameterSchemaByModel,
+			"seedance-video": [
+				{
+					key: "resolution", label: "分辨率", type: "select", required: true,
+					options: ["480p", "720p", "1080p"].map((value) => ({ value, label: value })),
+					defaultValue: "720p",
+				},
+				{ key: "duration", label: "时长", type: "number", required: true, minimum: 1, maximum: 30, defaultValue: 5 },
+				{
+					key: "ratio", label: "比例", type: "select",
+					options: ["auto", "16:9"].map((value) => ({ value, label: value })),
+				},
+			],
+		},
+		defaultsByModel: { ...CONFIG.defaultsByModel, "seedance-video": { resolution: "720p", duration: 5 } },
+	};
+
+	it("默认值补齐后没有缺项", () => {
+		const params = parametersOnOpen(REQUIRED, {}, "seedance-video");
+		expect(missingRequiredParameters(REQUIRED, params, "seedance-video")).toEqual([]);
+	});
+
+	it("真的缺了必填项时报出来，且不把非必填项算进去", () => {
+		const missing = missingRequiredParameters(REQUIRED, { ratio: "auto" }, "seedance-video");
+		expect(missing.map((field) => field.key)).toEqual(["resolution", "duration"]);
+	});
+
+	it("隐藏字段不参与必填判定", () => {
+		const config: ExecutionPanelModelConfig = {
+			...REQUIRED,
+			parameterSchemaByModel: {
+				...REQUIRED.parameterSchemaByModel,
+				hidden: [
+					{
+						key: "resolution", label: "分辨率", type: "select", required: true,
+						options: [{ value: "720p", label: "720p" }],
+						hiddenWhen: [{ field: "mode", equals: "fixed" }],
+					},
+				],
+			},
+		};
+		expect(missingRequiredParameters(config, { mode: "fixed" }, "hidden")).toEqual([]);
 	});
 });

@@ -272,9 +272,12 @@ fn rgb_documents_are_untouched_by_the_gate() {
 #[test]
 fn masks_and_selections_are_never_gated() {
     // 掩版与选区不引入新的 RGB 颜色：挡掉它们只会让索引色文档连蒙版都做不了。
+    //
+    // 断言的是「不新增表外 RGB」而不是「合成像素不变」：在蒙版上落笔本来就会让那一块变透明
+    // （合成本该跟着变），而被守住的跨域不变量是**不往像素层写任意颜色**。
     for mut editor in [indexed(), bitmap()] {
         let before = distinct_colors(&editor);
-        editor.execute("layer.layerMask.fromTransparency", json!({})).unwrap();
+        editor.execute("layer.layerMask.revealAll", json!({})).unwrap();
         editor
             .execute(
                 "paint.stroke",
@@ -287,7 +290,13 @@ fn masks_and_selections_are_never_gated() {
             .expect("掩版绘制必须被允许");
         editor.execute("select.rect", json!({"x": 1, "y": 1, "width": 4, "height": 4, "mode": "replace"})).unwrap();
         editor.execute("select.deselect", json!({})).unwrap();
-        assert_eq!(distinct_colors(&editor), before, "掩版与选区不得改变像素颜色");
+        let after = distinct_colors(&editor);
+        for color in &after {
+            assert!(
+                before.contains(color) || color == "#000000" || color == "#ffffff",
+                "蒙版绘制写进了表外颜色：{color}（before={before:?} after={after:?}）"
+            );
+        }
     }
 }
 

@@ -180,7 +180,10 @@ describe.skipIf(!available)("跨域联合回归（真实 WASM + 真实提供方�
 
     // 真实核验：调用 `photocraft-project-verify` 原生二进制（与服务器/CI 同一实现），
     // 不在这里重写一份 ZIP/manifest 校验来「自证」。
-    const binary = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../project-verifier/dist/bin/photocraft-project-verify");
+    // Windows 上构建产物带 `.exe`：不带扩展名的路径在 Windows 上永远不存在，会让这条用例
+    // 在录制机上有「产物缺失」的假失败。
+    const binaryBase = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../project-verifier/dist/bin/photocraft-project-verify");
+    const binary = process.platform === "win32" && fs.existsSync(`${binaryBase}.exe`) ? `${binaryBase}.exe` : binaryBase;
     if (!fs.existsSync(binary)) {
       throw new Error(`缺少原生核验器产物（先运行 pnpm -C photocraft run verifier）：${binary}`);
     }

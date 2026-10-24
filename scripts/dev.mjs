@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import fs, { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveModelRendererCommand } from "./lib/model-renderer-command.mjs";
@@ -251,9 +253,33 @@ async function main() {
   // change: 2026-10-23-optimize-bevy-development-build —— 模式由 WOOHAA_BEVY_DEV_MODE 选择。
   await run(process.execPath, ["scripts/build-bevy-wasm.mjs", ...bevyModeArgs]);
   if (stopping) return;
-  await run(process.execPath, ["scripts/ensure-photocraft-wasm.mjs"]);
+  /**
+   * PhotoCraft 产物新鲜度（2026-10-24 录制阻塞项）：
+   *
+   * 这一步会**校验**wasm / protocol / project-verifier 三条产物（缺必需导出或比源码旧就重建），
+   * 而不是只判断文件存在。任一产物被重建时把结果写进临时文件：JS 包与宿主副本都变了，
+   * `--skip-build` 下继续跑会端出旧模块，因此下面的 build:units 也不能再跳过。
+   */
+  const artifactReport = join(tmpdir(), `photocraft-artifacts-${process.pid}.json`);
+  await run(process.execPath, ["scripts/ensure-photocraft-wasm.mjs", "--report", artifactReport]);
   if (stopping) return;
-  if (!options.skipBuild) {
+  let rebuiltArtifacts = [];
+  try {
+    rebuiltArtifacts = JSON.parse(fs.readFileSync(artifactReport, "utf8")).rebuilt ?? [];
+  } catch {
+    // 报告缺失不阻断：校验脚本自己已经在失败时非零退出。
+  } finally {
+    try { fs.rmSync(artifactReport, { force: true }); } catch {}
+  }
+  const artifactsRebuilt = rebuiltArtifacts.length > 0;
+  if (artifactsRebuilt) {
+    console.log(`[dev] PhotoCraft 产物已重建（${rebuiltArtifacts.join(" / ")}），本次强制重建宿主模块`);
+  }
+  // 缓存了旧 transform 的 Vite 会继续端出旧 glue：产物重建后清一次，避免「重建了还是旧代码」。
+  if (artifactsRebuilt) {
+    try { fs.rmSync(path.join(root, "web/frontend/node_modules/.vite"), { recursive: true, force: true }); } catch {}
+  }
+  if (!options.skipBuild || artifactsRebuilt) {
     console.log("[dev] 构建模块（已有产物时可用 --skip-build 快速重启）");
     await runManager(["-C", "web", "run", "build:units"]);
   }

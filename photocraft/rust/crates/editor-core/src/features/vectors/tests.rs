@@ -339,6 +339,44 @@ fn vector_mask_editing_keeps_the_image_and_rejects_out_of_range_parameters() {
 }
 
 #[test]
+fn degenerate_work_paths_are_rejected_instead_of_hiding_the_whole_layer() {
+    // 回归（2026-10-24 审片 A5）：三点共线 / 少于三点的「闭合」路径会栅格化成零覆盖率，
+    // 表现为「路径设为矢量蒙版后整层消失」。这类路径必须报错，而不是静默把整层藏掉。
+    for path in [
+        // 共线三点（零面积）。
+        json!({"subpaths": [{"closed": true, "knots": [[20, 20], [60, 20], [100, 20]]}]}),
+        // 只有两个锚点。
+        json!({"subpaths": [{"closed": true, "knots": [[20, 20], [120, 120]]}]}),
+        // 完全重复的锚点。
+        json!({"subpaths": [{"closed": true, "knots": [[40, 40], [40, 40], [40, 40]]}]}),
+    ] {
+        let mut editor = editor();
+        let created = editor.execute("layer.new.layer", json!({"name": "paint"})).expect("新层");
+        let layer = created["layer"].as_u64().expect("新层 id");
+        editor.execute("path.set", json!({"name": "work", "path": path})).expect("设置工作路径");
+        let error = editor
+            .vector_command("layer.vectorMask.fromPath", json!({"layer": layer, "name": "work"}))
+            .expect_err("退化路径必须被拒绝");
+        assert!(error.to_string().contains("没有圈出可蒙版的区域"), "{}", error);
+        // 失败不写文档：图层仍在、没有蒙版。
+        let snapshot = editor.vector_snapshot().expect("快照");
+        assert!(
+            snapshot["vectorMasks"].as_array().map(|masks| masks.iter().all(|mask| mask["layer"] != layer)).unwrap_or(true),
+            "失败的矢量蒙版不得留下半成品"
+        );
+    }
+
+    // 正常闭合四边形仍然成立，并且蒙版真的沿路径裁切（覆盖区有像素、外部透明）。
+    let mut editor = editor();
+    let created = editor.execute("layer.new.layer", json!({"name": "paint"})).expect("新层");
+    let layer = created["layer"].as_u64().expect("新层 id");
+    editor.execute("path.set", json!({"name": "work", "path": square()})).expect("设置工作路径");
+    editor
+        .vector_command("layer.vectorMask.fromPath", json!({"layer": layer, "name": "work"}))
+        .expect("闭合路径可以设为矢量蒙版");
+}
+
+#[test]
 fn direct_selection_edits_one_anchor_per_drag_and_keeps_open_paths_open() {
     let mut editor = editor();
     editor

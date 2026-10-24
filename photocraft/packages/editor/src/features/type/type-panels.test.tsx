@@ -21,7 +21,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function setup(options: { locked?: boolean; kind?: "text" | "pixel"; queryFails?: boolean; layerLocked?: boolean; noLayerId?: boolean } = {}) {
+function setup(options: { locked?: boolean; kind?: "text" | "pixel"; queryFails?: boolean; layerLocked?: boolean; noLayerId?: boolean; tracking?: number; baselineShift?: number; kerning?: string } = {}) {
   const calls: { command: string; params: Record<string, unknown> }[] = [];
   const queries: { query: string; params: Record<string, unknown> }[] = [];
   const type = {
@@ -37,7 +37,7 @@ function setup(options: { locked?: boolean; kind?: "text" | "pixel"; queryFails?
       if (id.endsWith(".list")) {
         return { ok: true, value: { styles: [{ id: 1, name: "标题" }], current: { character: 2, paragraph: null } } };
       }
-      if (id === "type.info") return { ok: true, value: { runs: [{ style: { ligatures: false, features: [{ tag: "frac", value: 1 }] } }] } };
+      if (id === "type.info") return { ok: true, value: { runs: [{ style: { ligatures: false, features: [{ tag: "frac", value: 1 }], ...(options.tracking === undefined ? {} : { tracking: options.tracking }), ...(options.baselineShift === undefined ? {} : { baselineShift: options.baselineShift }), ...(options.kerning === undefined ? {} : { kerning: options.kerning }) } }] } };
       if (id === "edit.checkSpelling") return { ok: true, value: { misspellings: [{ layer: 1, start: 0, end: 3, word: "teh", suggestions: ["the"] }] } };
       if (id === "type.resolveMissingFonts") return { ok: true, value: { missing: ["Gone"] } };
       return { ok: true, value: {} };
@@ -134,6 +134,22 @@ it("排版按钮把参数发给域会话，Warp/蒙版/替换走白名单命令"
   expect(calls[3]!.params).toEqual({ layer: 5 });
 });
 
+it("字距改动立即提交给内核，并回读图层真实字距（A6）", () => {
+  // 回归：字距输入框曾只改本地 state，必须再点「应用排版」才提交，且初值固定 0、不读图层。
+  // 照台本「把字距拉大」调完数字后画面没变化 = 看起来字距完全不生效（2026-10-24 审片 A6）。
+  const { container, type, queries } = setup({ tracking: 120, baselineShift: 4, kerning: "optical" });
+  const trackingInput = [...container.querySelectorAll<HTMLLabelElement>("label")]
+    .find((label) => label.textContent?.startsWith("字距"))!.querySelector("input")!;
+  expect(trackingInput.value).toBe("120");
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    setter.call(trackingInput, "300");
+    trackingInput.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  // 不点「应用排版」就必须已经发出写命令（并带上当前基线/字偶距，避免互相覆盖）。
+  expect(type.applyTypography).toHaveBeenLastCalledWith({ tracking: 300, baselineShift: 4, kerning: "optical", layer: 5 });
+  expect(queries.some((entry) => entry.query === "type.info")).toBe(true);
+});
 it("行距留空表示自动行距，不把 0pt 当成用户输入", () => {
   // 上游 `type.setStyle` 的 `leading:0` 是「行高 0pt」，不是「回到自动」；自动行距是
   // `leading:null`/`"auto"`。初值若写成 0，用户只点一下「应用排版」就会把内容判脏。

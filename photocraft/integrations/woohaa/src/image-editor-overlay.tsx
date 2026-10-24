@@ -239,7 +239,7 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
           </div>
         ) : null}
         {ui.notice ? (
-          <div className="image-edit-workspace__notice" data-tone={ui.notice.tone} role="status">
+          <div className="image-edit-workspace__toast" data-tone={ui.notice.tone} role="status">
             <p>{ui.notice.message}</p>
           </div>
         ) : null}

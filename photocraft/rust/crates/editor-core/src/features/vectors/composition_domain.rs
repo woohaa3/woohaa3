@@ -145,7 +145,51 @@ pub fn vector_mask(session: &mut Session, id: &str, params: Value) -> Result<Val
     if id == "layer.vectorMask.edit" {
         validate_mask_edit(&params)?;
     }
+    // 「从工作路径设为矢量蒙版」拿的是文档里的路径：同样不能是全零覆盖的退化几何，
+    // 否则整层会直接消失，看起来像「蒙版把图层隐藏了」（2026-10-24 审片 A5）。
+    if id == "layer.vectorMask.fromPath" {
+        require_maskable_work_path(session, &params)?;
+    }
     session.execute(id, params).map_err(|failure| error("layer.vectorMask", failure))
+}
+
+/// 从工作路径建立蒙版前，要求路径真的圈得住面积。
+///
+/// 空路径的语义是「全显」，但**零面积**（共线锚点、少于 3 个锚点、或在画布外）会栅格化成
+/// 全零覆盖率，整层消失。这类路径多半是录制/操作时点得太随意，静默藏掉整层比直接报错更难排查。
+fn require_maskable_work_path(session: &Session, params: &Value) -> Result<()> {
+    let Some(state) = session.active() else { return Ok(()) };
+    let name = params.get("name").and_then(Value::as_str);
+    let path = match name {
+        // 工作路径是文档里的 `work_path`；显式名字走文档路径表。
+        None => state.doc.work_path.clone(),
+        Some(name) if name == "work" => state.doc.work_path.clone(),
+        Some(name) => state.doc.paths.iter().find(|entry| entry.name == name).map(|entry| entry.path.clone()),
+    };
+    let Some(path) = path else { return Ok(()) };
+    // 已经显式反转的蒙版（"全隐"）是有意为之，不按退化几何拦。
+    if path.inverted {
+        return Ok(());
+    }
+    let knots: usize = path.subpaths.iter().map(|subpath| subpath.knots.len()).sum();
+    let mut min = (f64::INFINITY, f64::INFINITY);
+    let mut max = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for subpath in &path.subpaths {
+        for knot in &subpath.knots {
+            min.0 = min.0.min(knot.anchor.x);
+            min.1 = min.1.min(knot.anchor.y);
+            max.0 = max.0.max(knot.anchor.x);
+            max.1 = max.1.max(knot.anchor.y);
+        }
+    }
+    let area = (max.0 - min.0) * (max.1 - min.1);
+    if path.subpaths.is_empty() || knots < 3 || !area.is_finite() || area <= 0.5 {
+        return Err(error(
+            "layer.vectorMask",
+            "工作路径没有圈出可蒙版的区域；请用钢笔画出闭合轮廓（至少三个不共线的锚点）后再设为矢量蒙版"
+        ));
+    }
+    Ok(())
 }
 
 /// 直接编辑矢量蒙版前的参数校验：密度/羽化范围在分配资源前裁定。

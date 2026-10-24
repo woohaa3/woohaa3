@@ -1,41 +1,81 @@
 #!/usr/bin/env node
 /**
- * 确保 PhotoCraft 内核 WASM 产物存在
- * （change: 2026-10-21-extract-photocraft-subproject，任务 2.4/5.4）。
+ * 确保 PhotoCraft 构建产物存在且**是本版本的**（2026-10-24 录制阻塞项）。
  *
- * 独立 dev 宿主通过 `@woohaa3/photocraft-editor/wasm` 从子项目产物加载；宿主前端使用复制到
- * `web/frontend/src/photocraft-wasm/` 的源码根副本，避免跨 workspace 的 `@fs` 请求。两边产物
- * 都是生成物，不入 Git。
+ * 曾经这里只判断文件是否存在（`existsSync`），于是 10-22 的旧 WASM 一直留在
+ * `web/frontend/src/photocraft-wasm/`：双击图片节点报「图像编辑内核缺少能力协商」，
+ * `protocol/dist` 缺 `verifyPhotocraftHandshake`、`project-verifier/dist` 白名单缺
+ * `PhotoFilter` 让带调整层的工程保存被拒（报「首期未开放的调整类型：undefined」）。
+ * 这些错误都在运行时才出现，且指向的不是真正的原因。
  *
- * - 子项目与宿主副本都已就绪 → 直接返回，不重复编译。
- * - 缺任一 → 调用子项目构建，并同步 `web/frontend/src/photocraft-wasm/`。
+ * 现在的规则：
+ * - 产物缺失 / 缺必需导出 / 比源码旧 → **明确报错并重建**，不再静默继续；
+ * - 重建后仍不合格 → 非零退出，把原因写清楚；
+ * - 三条产物（wasm、protocol、project-verifier）一起检查，因为它们跨仓共享校验逻辑。
  *
  * 只在显式 dev/build 流程调用；**不放进** install/prepare，避免安装时隐式联网构建 Rust。
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncPhotocraftWasm } from "./lib/photocraft-wasm-copy.mjs";
+import { checkPhotocraftArtifacts, describeArtifactFailures } from "./lib/photocraft-artifacts.mjs";
+import { writeFileSync } from "node:fs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const wasmDir = join(root, "photocraft", "packages", "editor", "dist", "wasm");
-const glue = join(wasmDir, "photocraft_editor.js");
-const binary = join(wasmDir, "photocraft_editor_bg.wasm");
+/** `--report <path>`：写一份机器可读结果，让 dev 启动链路知道这次到底重建了什么。 */
+const reportIndex = process.argv.indexOf("--report");
+const reportPath = reportIndex >= 0 ? process.argv[reportIndex + 1] : null;
+const rebuilt = [];
 
-if (existsSync(glue) && existsSync(binary)) {
-  const copied = syncPhotocraftWasm(root);
-  if (copied.copied) console.log(`✓ 宿主 WASM 副本 → ${copied.destination}`);
-  process.exit(0);
+function run(step, args, cwd = root) {
+  console.log(`▶ ${step}`);
+  const result = spawnSync(process.execPath, args, { cwd, stdio: "inherit" });
+  if (result.error) {
+    console.error(`✗ 无法启动${step}：${result.error.message}`);
+    process.exit(1);
+  }
+  return result.status ?? 1;
 }
 
-console.log("▶ PhotoCraft 内核 WASM 尚未构建，先构建一次（photocraft/scripts/build-wasm.mjs）");
-const result = spawnSync(process.execPath, [join(root, "scripts", "build-image-editor-wasm.mjs")], {
-  cwd: root,
-  stdio: "inherit"
-});
-if (result.error) {
-  console.error(`✗ 无法启动 PhotoCraft WASM 构建：${result.error.message}`);
+let results = checkPhotocraftArtifacts(root);
+let failures = results.filter((entry) => !entry.ok);
+if (failures.length > 0) {
+  console.warn(`! ${describeArtifactFailures(failures)}`);
+}
+
+// 内核 WASM 的构建入口是子项目的 build-wasm.mjs（需要 Rust 工具链）。
+if (failures.some((entry) => entry.id === "wasm")) {
+  rebuilt.push("wasm");
+  if (run("PhotoCraft 内核 WASM 构建（photocraft/scripts/build-wasm.mjs）", [join(root, "scripts", "build-image-editor-wasm.mjs")]) !== 0) process.exit(1);
+}
+// JS 包重建：只重跑声明了该构建脚本的包，构建口径仍只有一份。
+if (failures.some((entry) => entry.id === "protocol")) {
+  rebuilt.push("protocol");
+  if (run("PhotoCraft 协议包构建", [join(root, "photocraft", "scripts", "build-package.mjs")], join(root, "photocraft", "packages", "protocol")) !== 0) process.exit(1);
+}
+if (failures.some((entry) => entry.id === "verifier")) {
+  rebuilt.push("verifier");
+  if (run("PhotoCraft 工程核验器构建", [join(root, "photocraft", "scripts", "build-package.mjs"), "--platform", "node"], join(root, "photocraft", "packages", "project-verifier")) !== 0) process.exit(1);
+}
+
+// 宿主副本必须来自刚校验过的内核产物。
+const copied = syncPhotocraftWasm(root);
+if (copied.missingSource) {
+  console.error("✗ PhotoCraft 内核产物缺失，无法同步宿主副本");
   process.exit(1);
 }
-process.exit(result.status ?? 1);
+if (copied.copied) console.log(`✓ 宿主 WASM 副本 → ${copied.destination}`);
+
+// 重建后复检：仍不合格就明确失败，不把问题留给运行时。
+results = checkPhotocraftArtifacts(root);
+failures = results.filter((entry) => !entry.ok);
+if (failures.length > 0) {
+  console.error(`✗ 重建后仍有产物不合格：
+${describeArtifactFailures(failures)}`);
+  process.exit(1);
+}
+console.log("✓ PhotoCraft 产物均为当前源码构建（wasm / protocol / project-verifier）");
+if (reportPath) {
+  writeFileSync(reportPath, JSON.stringify({ rebuilt, missingSource: false }));
+}

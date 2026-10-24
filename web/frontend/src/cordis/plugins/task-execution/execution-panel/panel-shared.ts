@@ -85,6 +85,51 @@ export function parametersAfterModelSwitch(
 }
 
 /**
+ * 面板打开/恢复草稿时的起始参数：**同样**并入该模型的默认值（A9）。
+ *
+ * `parametersAfterModelSwitch` 只在切换模型时跑，首次打开面板时 `parameters` 是空对象，
+ * schema 默认值过去只用于渲染控件、没有被写进提交草稿。于是界面上显示
+ * 「720p · 5」，请求体里却没有 `resolution`，Provider 直接拒绝
+ * `field 'resolution' is required`（2026-10-24 preflight #1 / 审片 A9）。
+ *
+ * 已有值优先（恢复的草稿、节点上保存的参数不被覆盖），只补缺。
+ */
+export function parametersOnOpen(
+	config: ExecutionPanelModelConfig,
+	parameters: Record<string, unknown>,
+	model: string,
+): Record<string, unknown> {
+	const defaults = config.defaultsByModel?.[model] ?? {};
+	const merged: Record<string, unknown> = { ...defaults };
+	for (const [key, value] of Object.entries(parameters)) {
+		// 只有真正的值才算「已有」：null/空串不压掉默认值。
+		if (value === undefined || value === null || value === "") continue;
+		merged[key] = value;
+	}
+	return { ...merged, model };
+}
+
+/**
+ * 提交前按参数表核对必填字段（A9）。
+ *
+ * schema 的 `required` 在投影时已由 Provider 目录带过来；缺字段时不要让请求发出去再等
+ * Provider 报错——那时用户只看到一句英文错误，不知道少了哪一项。
+ */
+export function missingRequiredParameters(
+	config: ExecutionPanelModelConfig,
+	parameters: Record<string, unknown>,
+	model: string,
+): ExecutionPanelParameterField[] {
+	const fields = config.parameterSchemaByModel?.[model] ?? [];
+	return fields.filter((field) => {
+		if (!field.required) return false;
+		if (hiddenBy(field, parameters)) return false;
+		const value = parameters[field.key];
+		return value === undefined || value === null || value === "";
+	});
+}
+
+/**
  * 面板局部 Escape 路由（change: 2026-09-28-align-execution-reference-and-expansion，
  * design D7）。
  *

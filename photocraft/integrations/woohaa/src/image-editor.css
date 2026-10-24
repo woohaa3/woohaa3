@@ -72,6 +72,7 @@
   font-size: 12px;
 }
 
+/* 空态占位：没有可呈现的文档时占满内容矩形。 */
 .image-edit-workspace__notice {
   display: flex;
   flex: 1 1 auto;
@@ -84,6 +85,36 @@
   color: var(--app-web-text-muted);
   pointer-events: none;
 }
+
+/*
+ * 工作区内联提示是**浮层**，不参与 body 的纵向 flex 分配。
+ *
+ * 之前它和编辑器是同级的 `flex: 1 1 auto` 兄弟节点：只要有提示（导出 PSD 回执、
+ * 「正在加载编辑内核…」），编辑器就被压掉一半高度，状态栏跑到屏幕中部、画布下半截
+ * 画到界面下方（2026-10-24 审片 A1）。提示只在画布下方叠一条，不改变布局。
+ */
+.image-edit-workspace__toast {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  max-width: min(560px, calc(100% - 48px));
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-elevated);
+  box-shadow: 0 8px 24px var(--app-web-shadow);
+  color: var(--app-web-text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  pointer-events: none;
+}
+.image-edit-workspace__toast[data-tone="error"] { color: var(--app-status-danger); border-color: var(--app-status-danger-soft); }
+.image-edit-workspace__toast > p { margin: 0; }
 
 .image-edit-workspace__notice-hint {
   font-size: 12px;

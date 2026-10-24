@@ -31,7 +31,7 @@ import {
 	executionRunSnapshot,
 	isExecutionBusy,
 } from "./run-snapshot.js";
-import { isBusy, parametersAfterModelSwitch, readParameters } from "./panel-shared.js";
+import { isBusy, missingRequiredParameters, parametersAfterModelSwitch, parametersOnOpen, readParameters } from "./panel-shared.js";
 import { resolvePromptSubmitKey } from "../prompt-keyboard.js";
 import { isMacPlatform } from "../../canvas-shell/input/shortcuts.js";
 import { FormatToolbar } from "./format-toolbar.js";
@@ -169,9 +169,20 @@ export function ExecutionPanel({
 	);
 
 	const hasBlockingReasons = (blockingReasons?.length ?? 0) > 0;
+	// 打开面板时把该模型的参数默认值并入草稿（A9）：界面上显示「720p · 5」，
+	// 请求体里却可能一个字段都没有。只补缺，不覆盖已有值。
+	const effectiveParameters = useMemo(
+		() => parametersOnOpen(config, parameters, model),
+		[config, parameters, model],
+	);
+	const missingRequired = missingRequiredParameters(config, effectiveParameters, model);
+	const missingRequiredHint = missingRequired.length
+		? `缺少必填参数：${missingRequired.map((field) => field.label).join("、")}`
+		: undefined;
 	const promptOptional = allowEmptySubmit;
 	const canRun =
 		!readOnly &&
+		missingRequired.length === 0 &&
 		(canRunExecution({ prompt, status, blockingReasons }) ||
 			(promptOptional &&
 				prompt.trim().length === 0 &&
@@ -181,11 +192,13 @@ export function ExecutionPanel({
 		? "当前只读，无法生成"
 		: busy
 			? pendingLabel
-			: hasBlockingReasons
-				? blockingReasons?.[0]
-				: !promptOptional && prompt.trim().length === 0
-					? "请先输入提示词"
-					: undefined;
+			: missingRequiredHint
+				? missingRequiredHint
+				: hasBlockingReasons
+					? blockingReasons?.[0]
+					: !promptOptional && prompt.trim().length === 0
+						? "请先输入提示词"
+						: undefined;
 
 	const patch = (next: Partial<ExecutionPanelData>) => onChange?.(next);
 
@@ -194,8 +207,9 @@ export function ExecutionPanel({
 
 	function submit() {
 		if (!canRun) return;
-		// 快照取本地 prompt + 渲染期解析出的 model/parameters：父组件状态尚未回流也不影响本次提交。
-		onRun?.(executionRunSnapshot({ prompt, model, parameters }));
+		// 快照取本地 prompt + 渲染期解析出的 model/参数：父组件状态尚未回流也不影响本次提交。
+		// 参数必须带上模型默认值，否则 Provider 会拒一个界面上明明有值的必填字段（A9）。
+		onRun?.(executionRunSnapshot({ prompt, model, parameters: effectiveParameters }));
 	}
 
 	function runSkill(skill: ExecutionPanelSkill) {
@@ -314,7 +328,7 @@ export function ExecutionPanel({
 			{fields.length > 0 ? (
 				<SettingsMenu
 					fields={fields}
-					parameters={parameters}
+					parameters={effectiveParameters}
 					open={settingsOpen}
 					onOpenChange={setSettingsOpen}
 					onChange={patchParameters}

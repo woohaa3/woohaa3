@@ -20,7 +20,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { appPublicUrl, woohaa3CanvasStore, workingCanvasOf } from "@woohaa3/frontend/plugin-api";
 import { resolveImageFocusTarget, ImageFocusWorkspace } from "./workspace.js";
-import { imageEditRequestId } from "./save.js";
+import { imageEditRequestId, imageEditSessionId } from "./save.js";
 import { MediaOperationBoundary } from "@woohaa3/frontend/plugin-api";
 import { rasterizeDrawable, defaultRasterCanvasFactory, BEVY_TEXTURE_MAX_DIMENSION } from "@woohaa3/frontend/plugin-api";
 import { ImageEditorWorkspace, fileBackgroundPort } from "./image-editor-overlay.js";
@@ -28,7 +28,7 @@ import { definePlugin } from "@woohaa3/frontend/plugin-api";
 import { IMAGE_EDIT_SERVICE, type ImageEditService } from "@woohaa3/frontend/plugin-api";
 import { EditorWorkspaceController } from "./editor-workspace.js";
 import type { ProjectEditorPort } from "./project-editor-pane.js";
-import { IMAGE_PROJECT_CONTENT_TYPE } from "@woohaa3/contracts";
+import { IMAGE_PROJECT_CONTENT_TYPE, resolveNodeDisplayName } from "@woohaa3/contracts";
 import { EditorDocumentRegistry, type EditorDocumentEntry, MAX_OPEN_DOCUMENTS, RequestSequence, setAnimationCodecPort } from "@woohaa3/photocraft-editor";
 import { heldBytesAfterSave, planCloseAll, planCloseOthers, planReopenRecent, runClosePlan, type RecentFileEntry } from "@woohaa3/photocraft-protocol";
 import { DocumentWorkspaceSession, pendingDraftOf, type DocumentResource } from "./document-session.js";
@@ -354,8 +354,22 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         }
         const canvas = getCanvas();
         const node = canvas?.document.nodes.find((candidate) => candidate.id === nodeId);
-        const name = (canvas?.nodeData[nodeId] as { title?: string } | undefined)?.title ?? node?.type ?? "图片";
-        const opened = await gate.run(async () => session.openNode({ nodeId, name, writable: ctx.canvasSession.isWritable() }));
+        // 标签用**用户可读的节点名**：`nodeData.title` → 已提交提示词摘要 → 中文默认名。
+        // 直接退回 `node.type` 会让所有图片节点都叫 `image`，同名时标签条再露出内部节点 id
+        // （`asset-image-c5d…`，2026-10-24 审片 A12）。
+        const name = resolveNodeDisplayName({
+          type: node?.type,
+          explicitName: (canvas?.nodeData[nodeId] as { title?: unknown } | undefined)?.title,
+          prompt: (canvas?.nodeData[nodeId] as { prompt?: unknown } | undefined)?.prompt
+        }).displayName;
+        const opened = await gate.run(async () => session.openNode({
+          nodeId,
+          name,
+          writable: ctx.canvasSession.isWritable(),
+          // 同名时才露出的来源补充：用用户能认出的东西（类型中文名 + 已提交提示词摘要），
+          // 不能是内部节点 id（A12）。
+          detail: detailForNode(node?.type, (canvas?.nodeData[nodeId] as { prompt?: unknown } | undefined)?.prompt, name)
+        }));
         if (!opened.ok) {
           setNotice({ message: opened.reason, tone: "error" });
           return false;
@@ -365,6 +379,21 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         if (resource?.kind === "node") resource.begin = beginNodeSession(resource);
         setNotice(null);
         return enterDocumentPresentation(opened.documentId, { preserveOverviewReturn: false });
+      }
+
+      /**
+       * 同名文档的来源补充（A12）。
+       *
+       * 标签条只在重名时显示 detail；这里给出**用户能认出的**信息（内容类型中文名，必要时
+       * 再加已提交提示词摘要）。绝不能回落到节点 id —— 那是内部标识，`asset-image-c5d…`
+       * 会直接出现在画面上。
+       */
+      function detailForNode(type: string | undefined, prompt: unknown, name: string): string | null {
+        const resolved = resolveNodeDisplayName({ type, prompt });
+        const label = resolved.contentTypeLabel;
+        // 名字本身已经来自提示词摘要时，再重复一遍摘要没有信息量。
+        if (resolved.nameSource === "prompt-summary" && resolved.displayName === name) return label;
+        return label;
       }
 
       /**
@@ -391,6 +420,32 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           },
           (error: unknown) => ({ ok: false as const, message: error instanceof Error ? error.message : "编辑会话连接失败" })
         );
+      }
+
+      /**
+       * 保存成功后轮换编辑会话身份（A2 回归）。
+       *
+       * 服务端按 `begin:<sessionId>` 幂等返回**第一次** begin 的基线，`complete` 又优先用持久化的
+       * 基线而不是请求里的值。于是同一个 sessionId 在第一次成功保存之后，节点身份就与那份
+       * 陈旧基线不同，之后每一次「应用到节点」都以 `EDIT_SESSION_BASELINE_STALE` 被拒 ——
+       * 表现就是「点了应用到节点，刷新后没有新版本」。
+       *
+       * 因此每次成功写入都必须换新 sessionId（并清掉 requestId 与缓存的 begin），让下一次
+       * 保存重新捕获基线；`editAbandon` 顺手让服务端丢掉上一条 prepared 记录。
+       */
+      function rotateEditSession(resource: DocumentResource): void {
+        if (resource.kind !== "node") return;
+        const previous = resource.sessionId;
+        resource.sessionId = imageEditSessionId(resource.nodeId);
+        resource.requestId = null;
+        resource.begin = null;
+        resource.begun = false;
+        // `edit-abandon` 按 begin 记录键（`begin:<sessionId>`）定位，不是按 sessionId。
+        void ctx.canvasRemote.editAbandon?.({
+          canvasId,
+          nodeId: resource.nodeId,
+          requestId: `begin:${previous}`
+        }).catch(() => undefined);
       }
 
       /**
@@ -971,7 +1026,10 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       async function persistNode(resource: DocumentResource): Promise<{ ok: boolean; message?: string }> {
         if (resource.kind !== "node") return { ok: true };
         const controller = resource.controller;
-        if (!controller || !controller.isDirty()) return { ok: true };
+        // 没有未保存改动时「应用到节点」不产生新版本是正确的，但必须说清楚，不能看起来
+        // 像保存成功（A2：点了按钮、刷新后什么都没变）。
+        if (!controller) return { ok: false, message: "文档尚未就绪，无法保存" };
+        if (!controller.isDirty()) return { ok: false, message: "没有未保存的改动" };
         const target = resolveImageFocusTarget(getCanvas(), resource.nodeId);
         const base = resource.view.baseAsset();
         if (!target || !base) return { ok: false, message: "原图不可用，无法保存" };
@@ -993,9 +1051,16 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         if (!outcome.ok && (!outcome.retriable || outcome.code === "conflict")) resource.requestId = null;
         if (outcome.ok) {
           session.setStatus(resource.documentId, outcome.status === "history-pending" ? "history-pending" : "clean");
-          resource.requestId = null;
+          // 成功写入后基线已经过期：换新会话，否则下一次保存必定被判基线冲突（A2）。
+          rotateEditSession(resource);
         } else {
           session.setStatus(resource.documentId, outcome.code === "conflict" ? "conflict" : "error", outcome.message);
+          // 冲突是「节点已被别的写入更新」：丢弃旧基线，下次保存重新 begin 才能写进去。
+          if (outcome.code === "conflict") {
+            resource.begin = null;
+            resource.requestId = null;
+            rotateEditSession(resource);
+          }
         }
         return outcome.ok ? { ok: true } : { ok: false, message: outcome.message };
       }
@@ -1345,8 +1410,10 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           if (resource.kind === "file") return fileBytes.get(resource.documentId) ?? null;
           return loadMediaBytes(readKey(resource.view.baseAsset() as never));
         },
-        save: async () => {
-          const resource = session.active();
+        save: async (view, controller) => {
+          // 保存必须落到**发起这次保存的文档**，不能改取当前活动文档：多标签下切过 tab 之后，
+          // 「应用到节点」会把另一篇文档写回目标节点，或者静默写到错误节点（A2）。
+          const resource = session.findByController(controller) ?? session.findByView(view) ?? session.active();
           if (!resource?.controller) return { ok: false, message: "没有活动文档" };
           if (resource.kind === "file") {
             // 独立文件的“保存/应用”= 保存工程到本地；不写节点、不产生版本。
@@ -1355,6 +1422,8 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
             return outcome.ok ? { ok: true } : { ok: false, message: outcome.message ?? "保存失败" };
           }
           const saved = await persistNode(resource);
+          if (!saved.ok) setNotice({ message: saved.message ?? "保存失败", tone: "error" });
+          else setNotice(null);
           return saved.ok ? { ok: true } : { ok: false, message: saved.message ?? "保存失败" };
         },
         // 独立文件文档没有画布节点资产：允许它在无 baseAsset 的情况下用自己的字节开工程
@@ -1411,7 +1480,17 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         id: IMAGE_EDITOR_WORKSPACE_ID,
         owner: IMAGE_EDITOR_PLUGIN_ID,
         kind: "image",
-        available: () => registry.snapshotState().entries.length > 0,
+        /**
+         * 编辑工作区对**所有**图片节点聚焦都可用（A8）。
+         *
+         * 这里曾经是「至少一个文档已打开」：双击后的第一帧文档还没打开，唯一的工作区贡献就被
+         * 过滤掉，聚焦宿主先渲染「此节点的工作区不可用 / 请检查对应扩展是否已启用」，等异步打开
+         * 完成才换成编辑器（2026-10-24 审片 A8，几乎每条镜头开头都有，约 10 秒）。
+         *
+         * 可用性只表达「这个 kind 有工作区」，内容就绪与否由工作区自己呈现（准备中/加载中/
+         * 打开失败都各有可读状态）；视频与模型编辑器也按同一契约注册。
+         */
+        available: () => true,
         render: renderWorkspace
       });
       const removeDocumentWorkspace = ctx.slots.register("canvas.document-workspace", {
@@ -1429,9 +1508,13 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           const resource = session.active();
           return resource?.kind === "node" ? resource.nodeId : null;
         },
-        setHistoryOverride: (override) => {
+        setHistoryOverride: (override, nodeId) => {
           // 历史只属于节点文档；文件文档没有节点版本。
-          const resource = session.active();
+          //
+          // 目标节点优先用调用方给的身份：多标签时 `active()` 可能是另一篇文档，只改活动
+          // 文档会让预览「点了没反应」，标题栏也停在「当前版本」（A3）。显式 nodeId 找不到时
+          // 退回到活动节点（单文档路径行为不变）。
+          const resource = nodeId ? session.findByNode(nodeId) ?? session.active() : session.active();
           if (resource?.kind !== "node") return;
           resource.view.setHistoryOverride(override);
         },

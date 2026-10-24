@@ -533,12 +533,7 @@ impl Editor {
         if let Some(message) = crate::mask_commands::creation_reason(&self.session, id, &params) {
             return Err(EditorError::CommandFailed { id: id.into(), message });
         }
-        let target_active_mask = crate::mask_commands::creates_on_active(&self.session,id,&params);
         let result = self.session.execute(id, params).map_err(|e| EditorError::CommandFailed { id: id.into(), message: e.to_string() })?;
-        if target_active_mask {
-            self.session.execute("channel.target.layerMask", Value::Null)
-                .map_err(|e| EditorError::CommandFailed { id: id.into(), message: e.to_string() })?;
-        }
         Ok(result)
     }
 

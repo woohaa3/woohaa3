@@ -25,11 +25,6 @@ fn targets(session: &Session, id: &str, params: &Value) -> Option<Vec<photocraft
     })
 }
 
-pub(crate) fn creates_on_active(session: &Session, id: &str, params: &Value) -> bool {
-    creates_mask(id) && session.active().and_then(|state|state.active_layer)
-        .is_some_and(|active|targets(session,id,params).is_some_and(|ids|ids.contains(&active)))
-}
-
 pub(crate) fn creation_reason(session: &Session, id: &str, params: &Value) -> Option<String> {
     if !creates_mask(id) { return None; }
     let state = session.active()?;

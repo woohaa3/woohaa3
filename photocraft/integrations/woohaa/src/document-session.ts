@@ -82,7 +82,7 @@ export type DocumentWorkspaceDeps = {
   onChange?: () => void;
 };
 
-export type OpenNodeInput = { nodeId: string; name: string; writable: boolean };
+export type OpenNodeInput = { nodeId: string; name: string; writable: boolean; detail?: string | null };
 export type OpenFileInput = { fileName: string; bytes: Uint8Array; kind: FileDocumentKind };
 
 export type DocumentOpenOutcome =
@@ -126,6 +126,35 @@ export class DocumentWorkspaceSession {
     return this.resources.get(documentId) ?? null;
   }
 
+  /**
+   * 按呈现或控制器反查资源（A2：保存必须落到发起保存的文档）。
+   *
+   * 「应用到节点」由面板带着自己的 `view`/`controller` 发起；多标签下如果保存改取
+   * `active()`，切过 tab 之后就会写错节点或静默写空。
+   */
+  findByView(view: unknown): DocumentResource | null {
+    for (const resource of this.resources.values()) {
+      if (resource.view === view) return resource;
+    }
+    return null;
+  }
+
+  findByController(controller: unknown): DocumentResource | null {
+    if (!controller) return null;
+    for (const resource of this.resources.values()) {
+      if (resource.controller === controller) return resource;
+    }
+    return null;
+  }
+
+  /** 按节点身份反查资源（历史预览要作用于面板所属节点，而不是碰巧活动的文档）。 */
+  findByNode(nodeId: string): DocumentResource | null {
+    for (const resource of this.resources.values()) {
+      if (resource.kind === "node" && resource.nodeId === nodeId) return resource;
+    }
+    return null;
+  }
+
   /** 已打开文档数（上限判定用）。 */
   size(): number {
     return this.resources.size;
@@ -149,7 +178,7 @@ export class DocumentWorkspaceSession {
       if (!activated.ok) return { ok: false, reason: activated.reason };
       return { ok: true, documentId: existing.id, created: false };
     }
-    const opened = this.registry.open({ kind: "node", canvasId, nodeId: input.nodeId, name: input.name, writable: input.writable });
+    const opened = this.registry.open({ kind: "node", canvasId, nodeId: input.nodeId, name: input.name, writable: input.writable, ...(input.detail === undefined ? {} : { detail: input.detail }) });
     if (!opened.ok) return { ok: false, reason: opened.reason };
     const entry = this.registry.entry(opened.id);
     const view = this.deps.createNodeView(input.nodeId, entry ?? { id: opened.id } as EditorDocumentEntry);

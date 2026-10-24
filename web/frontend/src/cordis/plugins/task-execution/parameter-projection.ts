@@ -33,6 +33,7 @@ export function projectParameterFields(
   model: CanvasTaskCatalogModel
 ): ExecutionPanelParameterField[] {
   const properties = readObject(model.inputSchema.properties) ?? {};
+  const required = readStringArray(model.inputSchema.required);
   const fields: ExecutionPanelParameterField[] = [];
 
   for (const [key, rawSchema] of Object.entries(properties)) {
@@ -41,6 +42,7 @@ export function projectParameterFields(
     if (!schema) continue;
     const label = readString(schema.title) ?? key;
     const defaultValue = schema.default ?? model.defaultInput[key];
+    const isRequired = required.includes(key) ? { required: true } : {};
 
     const enumOptions = readEnumOptions(schema.enum);
     if (enumOptions.length > 0) {
@@ -57,6 +59,7 @@ export function projectParameterFields(
         defaultValue: defaultValue as string | number | boolean | undefined,
         ...(semantic !== undefined ? { semantic } : {}),
         ...(adaptiveValue !== undefined ? { adaptiveValue } : {}),
+        ...isRequired,
         hiddenWhen: readHiddenWhen(schema["x-hidden-when"])
       });
       continue;
@@ -69,6 +72,7 @@ export function projectParameterFields(
         label,
         type: "boolean",
         defaultValue: defaultValue === true,
+        ...isRequired,
         hiddenWhen: readHiddenWhen(schema["x-hidden-when"])
       });
       continue;
@@ -87,6 +91,7 @@ export function projectParameterFields(
         maximum,
         step,
         defaultValue: defaultValue as number | undefined,
+        ...isRequired,
         hiddenWhen: readHiddenWhen(schema["x-hidden-when"])
       });
       continue;
@@ -99,6 +104,7 @@ export function projectParameterFields(
       label,
       type: multiline ? "textarea" : "text",
       defaultValue: defaultValue as string | undefined,
+      ...isRequired,
       hiddenWhen: readHiddenWhen(schema["x-hidden-when"])
     });
   }
@@ -122,6 +128,10 @@ export function projectParameterDefaults(
     if (schema?.default !== undefined) defaults[key] = schema.default;
   }
   return defaults;
+}
+
+function readStringArray(input: unknown): string[] {
+  return Array.isArray(input) ? input.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
 function readEnumOptions(input: unknown): Array<{ value: string; label: string }> {

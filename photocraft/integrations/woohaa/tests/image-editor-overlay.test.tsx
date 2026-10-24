@@ -183,6 +183,29 @@ it("tab 条显示顺序与状态，激活点击只切换文档、不重排", asy
   expect(onClose).toHaveBeenCalledWith("doc-1");
 });
 
+it("工作区内联提示是浮层，不参与内容矩形的纵向分配（A1 回归）", async () => {
+  // 回归：提示曾经和编辑器是同级的 `flex: 1 1 auto` 兄弟节点，于是「导出 PSD」回执或
+  // 「正在加载编辑内核…」一出现就把编辑器压掉一半高度，状态栏跑到屏幕中部、画布下半截
+  // 画到界面下方（2026-10-24 审片 A1）。提示只能是叠在内容上的 toast。
+  const view = fakeDocumentView();
+  const store = storeWith({ active: bindingOf({ view }) });
+  const container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+  await act(async () => root.render(<ImageEditorWorkspace store={store} projectPort={{} as ProjectEditorPort}
+    onActivateDocument={() => undefined} onCloseDocument={() => undefined} />));
+  expect(container.querySelector(".image-edit-workspace__toast")).toBeNull();
+  await act(async () => store.setNotice({ message: "已导出可编辑 PSD；原工程未保存状态不变", tone: "info" }));
+  const toast = container.querySelector<HTMLElement>(".image-edit-workspace__toast")!;
+  expect(toast).not.toBeNull();
+  expect(toast.textContent).toContain("已导出可编辑 PSD");
+  // 提示不得使用会挤占空间的空态类名，也不得成为 body 的直接 flex 子项。
+  expect(container.querySelector(".image-edit-workspace__notice")).toBeNull();
+  expect(toast.closest(".image-edit-workspace__body")?.querySelector(":scope > .image-edit-workspace__toast")).toBe(toast);
+  // 编辑器仍在（提示不替换内容，也不隐藏它）。
+  expect(container.querySelector<HTMLElement>(".image-edit-workspace__editor")?.hidden).toBe(false);
+  await act(async () => store.setNotice(null));
+  expect(container.querySelector(".image-edit-workspace__toast")).toBeNull();
+});
+
 it("最近文件端口从工作区贯通到编辑器面板（索引属于工作区，不是某个文档）", async () => {
   // 回归：索引与字节都在宿主；工作区只转交快照与动作。若链路断在这里，
   // 面板会显示「宿主未提供端口」，而宿主明明持有记录——用户看不到最近文件。

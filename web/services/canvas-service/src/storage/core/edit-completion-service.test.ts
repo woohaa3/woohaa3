@@ -677,6 +677,65 @@ describe("工程编辑完成（任务 4.2/4.4）", () => {
     const entries = await historyService.listEntriesForNode(CANVAS, "node-1");
     expect(entries.filter((entry) => entry.sourceIdentity.startsWith("image-project:")).length).toBeGreaterThanOrEqual(1);
   });
+
+  it("复用同一 begin 会沿用陈旧基线：宿主必须换 sessionId 才能写第二版（A2 根因）", async () => {
+    // 回归：`begin` 按 `begin:<sessionId>` 幂等返回**第一次**的基线，`complete` 又优先用这份
+    // 持久化基线。所以同一个 sessionId 在首次成功保存之后，节点身份已经变了，第二次提交
+    // 一律被判基线过期 —— 表现就是「点了应用到节点，刷新后没有新版本」（2026-10-24 审片 A2）。
+    const { editService, historyService } = setup(imageCanvas(), { mediaExists: () => true });
+    const begun = await editService.begin({
+      canvasId: CANVAS,
+      nodeId: "node-1",
+      sessionId: "reused",
+      requestId: "begin:reused",
+      kind: "image",
+      baselineContentIdentity: "media:" + BASE_KEY
+    });
+    expect(begun.ok).toBe(true);
+    const first = await editService.complete(
+      projectComplete({ requestId: "req-a", outputStorageKey: "generation-outputs/" + "b".repeat(64) + ".png", project: projectDoc({ documentContentHash: "1111111111111111" }) })
+    );
+    expect(first.ok).toBe(true);
+
+    // 同一个 sessionId 再 begin：拿到的是旧基线（不重新采集）。
+    const reused = await editService.begin({
+      canvasId: CANVAS,
+      nodeId: "node-1",
+      sessionId: "reused",
+      requestId: "begin:reused",
+      kind: "image",
+      baselineContentIdentity: "media:" + BASE_KEY
+    });
+    expect(reused.ok).toBe(true);
+    if (!reused.ok || !begun.ok) return;
+    expect(reused.baselineContentIdentity).toBe(begun.baselineContentIdentity);
+
+    const second = await editService.complete(
+      projectComplete({ requestId: "req-b", outputStorageKey: "generation-outputs/" + "c".repeat(64) + ".png", project: projectDoc({ documentContentHash: "2222222222222222" }) })
+    );
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.code).toBe("EDIT_SESSION_BASELINE_STALE");
+
+    // 换新 sessionId 重新 begin（宿主的修复动作）→ 第二版正常写入。
+    const rotated = await editService.begin({
+      canvasId: CANVAS,
+      nodeId: "node-1",
+      sessionId: "rotated",
+      requestId: "begin:rotated",
+      kind: "image",
+      baselineContentIdentity: "media:" + BASE_KEY
+    });
+    expect(rotated.ok).toBe(true);
+    const third = await editService.complete({
+      ...projectComplete({ requestId: "req-c", outputStorageKey: "generation-outputs/" + "c".repeat(64) + ".png", project: projectDoc({ documentContentHash: "2222222222222222" }) }),
+      sessionId: "rotated"
+    } as never);
+    expect(third.ok).toBe(true);
+    const entries = await historyService.listEntriesForNode(CANVAS, "node-1");
+    const projects = entries.filter((entry) => entry.sourceIdentity.startsWith("image-project:"));
+    expect(projects.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 

@@ -31,6 +31,7 @@ fn world() -> World {
         attach_probe_mesh: default(),
         attach_probe_entity: None,
         attach_probe_active: false,
+        media_alpha_checker: None,
         node_action_mesh: default(),
         node_action_entity: None,
         node_action_labels: default(),

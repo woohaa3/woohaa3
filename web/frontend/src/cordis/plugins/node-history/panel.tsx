@@ -56,12 +56,42 @@ export function NodeHistoryPanel({ controller, writable, variant, onWidthChange,
   const title = kindLabel(state.kind);
   const applying = state.applyingEntryId !== null;
 
+  // Escape 收起抽屉（A10）。
+  //
+  // 抽屉盖住右侧与顶栏的一部分；用户最自然的动作是按 Esc 收起。此前 Esc 只会被画布键盘层
+  // 消费（退出整个聚焦），抽屉本身不响应，看起来像「收不掉」。
+  //
+  // 实现按对话框语义走：打开时把焦点交给抽屉本身，Escape 由**抽屉元素**消费并停止冒泡。
+  // 不挂 document 级监听：焦点/Tab/Escape 契约归 Radix 适配层（dialogs 架构审计），
+  // 抽屉不抢焦点也就没有键盘归属 —— 两者一起解决。
+  useEffect(() => {
+    const element = rootRef.current;
+    if (!element) return undefined;
+    element.focus({ preventScroll: true });
+    return undefined;
+  }, [state?.nodeId]);
+  useEffect(() => {
+    if (!onClose) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    const element = rootRef.current;
+    element?.addEventListener("keydown", onKeyDown);
+    return () => element?.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
     <div
       ref={rootRef}
       className={`node-history ${isDrawer ? "node-history--drawer" : "node-history--panel"}`}
       role="dialog"
       aria-label={`${title}节点版本`}
+      // 抽屉自己接键盘（Esc 收起）：需要焦点才能收到按键，因此可聚焦。
+      tabIndex={-1}
       data-node-history-panel="true"
       // 面板自身消费 pointer/wheel：阻止驱动画布相机/视口。
       onPointerDown={(event) => { event.stopPropagation(); }}
@@ -97,6 +127,9 @@ export function NodeHistoryPanel({ controller, writable, variant, onWidthChange,
         <ul className="node-history__list node-history__list--current">
           <NodeHistoryCurrentCard
             current={state.current}
+            // 当前版本的缩略图取「被标记为 current 的已归档条目」的受控预览：当前内容就是
+            // 那条归档写出来的。没有匹配条目（从未归档）时才回退到空占位（A3：之前固定是空白格）。
+            preview={state.items.find((item) => item.current)?.preview ?? null}
             selected={state.selectedEntryId === CURRENT_PRESENTATION_ID}
             onSelect={() => void controller.select(CURRENT_PRESENTATION_ID)}
           />
@@ -193,10 +226,13 @@ function ClearHistoryAction({ controller, clearing }: { controller: NodeHistoryC
 }
 
 function NodeHistoryCurrentCard({ current,
+  preview,
   selected,
   onSelect
 }: {
   current: import("./controller.js").NodeHistoryCurrentPresentation;
+  /** 当前内容对应的受控预览（取「被标记为 current 的已归档条目」）；无则只显示空占位。 */
+  preview?: import("@woohaa3/contracts").NodeHistoryPreview | null;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -213,7 +249,11 @@ function NodeHistoryCurrentCard({ current,
       data-current-entry="true"
     >
       <button type="button" className="node-history__select" aria-label="选择当前版本" onClick={onSelect}>
-        <div className="node-history__thumb node-history__thumb--current" data-preview-kind="current" />
+        {preview && !unavailable
+          ? <HistoryPreview preview={preview} />
+          : <div className="node-history__thumb node-history__thumb--current" data-preview-kind="empty">
+              <span className="node-history__thumb-fallback">当前</span>
+            </div>}
         <div className="node-history__meta">
           <span className="node-history__time">{draftLabel}</span>
           <span className="node-history__source">{unavailable ? "当前暂无输出" : "节点当前内容"}</span>

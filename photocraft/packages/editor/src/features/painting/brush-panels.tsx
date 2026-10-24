@@ -21,6 +21,7 @@ import {
 } from "../../brush-library-state.js";
 import type { EditorPreview } from "../../editor-wasm.js";
 import { clampBrushSize, type BrushSettings } from "../../photo-editor-tools.js";
+import { displayBrushGroupName, displayBrushPresetName } from "../../layer-display-name.js";
 import { MASK_MODES, PAINT_BLEND_MODES, TEXTURE_STYLES, type MaskMode, type PaintBlendMode, type TextureStyle } from "./blend-modes.js";import { formatCurvePoints, isLinearCurve, parseCurvePoints } from "./curve-points.js";
 
 export type BrushPresetPickerProps = {
@@ -151,7 +152,7 @@ export function BrushPresetPicker({ controller, brush, disabled = false, onPick,
           <label>导入分组<input value={abrGroup} onChange={event => setAbrGroup(event.currentTarget.value)} placeholder="可选" maxLength={255} /></label>
           {groups.map(([group, list]) => (
             <section key={group} className="photo-editor__brush-group">
-              <h4>{group || "未分组"}</h4>
+              <h4>{group ? displayBrushGroupName(group) : "未分组"}</h4>
               <ul>
                 {list.map((preset) => (
                   <li key={preset.name} data-brush-preset={preset.name}>
@@ -166,8 +167,8 @@ export function BrushPresetPicker({ controller, brush, disabled = false, onPick,
                         }
                       }}
                     >
-                      <BrushPreviewCanvas preview={preview(preset.name)} width={28} height={28} title={`笔迹预览：${preset.name}`} />
-                      <span>{preset.name}</span>
+                      <BrushPreviewCanvas preview={preview(preset.name)} width={28} height={28} title={`笔迹预览：${displayBrushPresetName(preset.name)}`} />
+                      <span>{displayBrushPresetName(preset.name)}</span>
                       <small>{preset.origin === "builtin" ? "内置" : preset.origin === "abr" ? "ABR" : preset.origin === "image" ? "图片" : "自定义"}{preset.sampled ? " · 采样" : ""}</small>
                     </button>
                     <span className="photo-editor__brush-actions">

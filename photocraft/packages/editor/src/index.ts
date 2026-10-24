@@ -23,6 +23,7 @@ export * from "./adjustment-range.js";
 export * from "./adjustment-session.js";
 export * from "./contour-preset-store.js";
 export * from "./frame-edit-session.js";
+export * from "./layer-display-name.js";
 export * from "./layer-layout-controls.js";
 export * from "./layer-style-contour-editor.js";
 export * from "./layer-style-editor.js";

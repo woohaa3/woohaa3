@@ -185,6 +185,7 @@ mod tests {
             attach_probe_mesh: default(),
             attach_probe_entity: None,
             attach_probe_active: false,
+        media_alpha_checker: None,
             running_mesh: default(),
             running_mesh_entity: None,
             running_labels: default(),
