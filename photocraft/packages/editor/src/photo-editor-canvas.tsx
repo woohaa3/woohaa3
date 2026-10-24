@@ -27,6 +27,8 @@ export type PhotoCanvasHandle = {
   cancelGesture: () => boolean;
   hasGesture: () => boolean;
   selectionKey: (key: string, pressed: boolean) => boolean;
+  /** 画布容器元素：标尺角落的原点拖动命中要用它的屏幕包围盒。 */
+  element: () => HTMLDivElement | null;
 };
 
 export type PhotoCanvasView = {
@@ -383,7 +385,9 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
     hasGesture: () => pointerRef.current !== null || (transformRef.current?.hasGesture() ?? false),
     cancelGesture,
     selectionKey,
-    view: changeView
+    view: changeView,
+    // 标尺角落的命中判定要用画布容器的包围盒：调用方（应用层）据此只在该角落接管原点拖动。
+    element: () => containerRef.current
   }));
   // 将文档边界投影到当前视图；缩放与平移不改变选区状态。
   const originX = (stageSize.width - documentWidth * actualScale) / 2 + offset.x;

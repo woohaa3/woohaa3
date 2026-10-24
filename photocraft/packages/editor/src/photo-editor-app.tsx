@@ -1175,7 +1175,9 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
             onGuideDown={(client) => {
               if (!display.state.extrasVisible || !guideGesture) return false;
               // 标尺角落优先：那里没有参考线，但拖动的是原点。
-              const drag = guideGesture.beginGuide(client).drag ?? guideGesture.beginOrigin(client);
+              // 原点拖动只在角落成立（`beginOrigin` 自己核对命中），其余位置必须返回 false，
+              // 否则画布的每一次按下都会被当成「拖标尺原点」而吞掉工具手势。
+              const drag = guideGesture.beginGuide(client).drag ?? guideGesture.beginOrigin(client, canvasRef.current?.element() ?? null);
               if (!drag) return false;
               setGuideDrag({ ...drag });
               return true;
