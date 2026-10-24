@@ -12,7 +12,7 @@ export const LOCAL_AGENT_FRONTEND_METADATA: ExtensionFrontendMetadata = {
   extensionId: LOCAL_AGENT_PLUGIN_ID,
   version: "0.1.0",
   label: "本地 agent",
-  description: "连接运行本应用的电脑上的本地 ChatGPT / 本地 OpenCode / 本地 CodeBuddy（默认关闭）。",
+  description: "连接运行本应用的电脑上的本地 ChatGPT / 本地 OpenCode / 本地 CodeBuddy。",
   icon: "agent",
   activation: "server-active",
   configScope: "site",

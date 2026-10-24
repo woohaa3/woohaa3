@@ -3,13 +3,13 @@
   "extensionId": "sdk-agent",
   "site": {
     "name": "SDK Agent 来源",
-    "description": "配置 OpenAI / Anthropic / OpenAI 兼容 / Gemini API Key，并使用对应固定 Agent 引擎，作为 Agent 生成来源（默认关闭）。",
+    "description": "配置 OpenAI / Anthropic / OpenAI 兼容 / Gemini API Key，并使用对应固定 Agent 引擎，作为 Agent 生成来源。",
     "version": "0.1.0",
     "configSchema": { "schemaId": "sdk-agent-config", "schemaVersion": 1 },
     "capabilities": [
       { "id": "agent-connection-provider:sdk-agent", "kind": "capability", "description": "SDK Agent 来源连接发现" }
     ],
-    "defaultEnabled": false,
+    "defaultEnabled": true,
     "order": 60
   },
   "backend": { "module": "./backend", "factory": "createSdkAgentExtension", "optionsType": "SdkAgentExtensionOptions", "order": 60 },

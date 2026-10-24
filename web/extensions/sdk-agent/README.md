@@ -1,6 +1,6 @@
 # sdk-agent 扩展
 
-四类个人 API 连接固定使用 Agent 框架。扩展默认关闭，与已安装工具扩展、ChatGPT OAuth 和普通文本/图片/音视频 Provider 独立。打开助手、读取状态、保存 Key 和普通检查不推理；只有生成和维护区「测试生成」会发送模型请求，可能产生上游费用。
+四类个人 API 连接固定使用 Agent 框架。扩展安装后默认启用，与已安装工具扩展、ChatGPT OAuth 和普通文本/图片/音视频 Provider 独立。打开助手、读取状态、保存 Key 和普通检查不推理；只有生成和维护区「测试生成」会发送模型请求，可能产生上游费用。
 
 | API 类型 | 保留的 adapter ID | 固定引擎及版本 | 地址 |
 | --- | --- | --- | --- |
@@ -13,7 +13,7 @@
 
 ## 安装与运行位置
 
-执行发生在本机宿主，浏览器只加载扩展前端产物。运行时按需动态导入；配套 CLI 通过包内平台资源定位，不查找全局 CLI，不在线安装。dsh runtime 由扩展内已安装模块解析绝对入口，禁止 Server 在运行时安装 npm 包。构建：`pnpm --filter @woohaa3/extension-sdk-agent run build`；扩展在站点控制面显式启用（`defaultEnabled:false`）。
+执行发生在本机宿主，浏览器只加载扩展前端产物。运行时按需动态导入；配套 CLI 通过包内平台资源定位，不查找全局 CLI，不在线安装。dsh runtime 由扩展内已安装模块解析绝对入口，禁止 Server 在运行时安装 npm 包。构建：`pnpm --filter @woohaa3/extension-sdk-agent run build`；首次启动由站点控制面自动启用（`defaultEnabled:true`），已有的手动停用设置继续保留。
 
 dsh 的 bin 依赖 `import.meta.main` 自启，而该属性只在 Node >= 24 存在；因此在 Node 22/23 上由本扩展生成一个显式调用 `runCli()` 的启动器，避免 bin 静默退出（表现为 `JSON-RPC input closed`）。
 

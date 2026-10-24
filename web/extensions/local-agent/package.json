@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "本机 Agent 生成来源扩展（change: 2026-10-16-add-agent-appserver-and-sdk-connections）：Codex App Server（stdio JSON-RPC）、OpenCode Server（HTTP+SSE）、CodeBuddy Server（HTTP+ACP）；默认关闭，且线上默认 release 不安装。",
+  "description": "本机 Agent 生成来源扩展：Codex App Server（stdio JSON-RPC）、OpenCode Server（HTTP+SSE）、CodeBuddy Server（HTTP+ACP）；安装后默认启用。",
   "exports": {
     "./frontend": {
       "types": "./src/frontend/index.ts",

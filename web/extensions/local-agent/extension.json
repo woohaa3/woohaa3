@@ -3,13 +3,13 @@
   "extensionId": "local-agent",
   "site": {
     "name": "本地 agent",
-    "description": "连接运行本应用的电脑上的本地 ChatGPT / 本地 OpenCode / 本地 CodeBuddy（默认关闭，线上默认不安装）。",
+    "description": "连接运行本应用的电脑上的本地 ChatGPT / 本地 OpenCode / 本地 CodeBuddy。",
     "version": "0.1.0",
     "configSchema": { "schemaId": "local-agent-config", "schemaVersion": 1 },
     "capabilities": [
       { "id": "agent-connection-provider:local-agent", "kind": "capability", "description": "本地 agent 连接发现" }
     ],
-    "defaultEnabled": false,
+    "defaultEnabled": true,
     "order": 70
   },
   "backend": { "module": "./backend", "factory": "createLocalAgentExtension", "optionsType": "LocalAgentExtensionOptions", "order": 70 },

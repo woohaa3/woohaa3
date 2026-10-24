@@ -1,6 +1,6 @@
 # local-agent 扩展
 
-本机 Agent 来源扩展（change: 2026-10-16-add-agent-appserver-and-sdk-connections）。默认关闭；线上默认 release **不安装**。
+本机 Agent 来源扩展（change: 2026-10-16-add-agent-appserver-and-sdk-connections）。安装后默认启用；线上默认 release **不安装**。
 
 ## 提供的来源
 
@@ -15,7 +15,7 @@
 ## 安装与启用
 
 1. 扩展目录 `web/extensions/local-agent` 需已构建（`pnpm --filter @woohaa3/extension-local-agent run build`）。
-2. 站点控制面显式启用该扩展（站点 `defaultEnabled:false`）。
+2. 首次启动由站点控制面自动启用（`defaultEnabled:true`）；已有的手动停用设置继续保留，可在插件配置中重新启用。
 3. 可选部署变量：
    - `WOOHAA3_LOCAL_AGENT_CODEX_BIN` / `WOOHAA3_LOCAL_AGENT_OPENCODE_BIN` / `WOOHAA3_LOCAL_AGENT_CODEBUDDY_BIN`：已安装可执行文件路径；可选，未配置时从后端 PATH 自动发现（不自动下载）。OpenCode 官方安装脚本把它放在 `~/.opencode/bin`，只追加到交互式 shell 的 PATH；后端进程未继承该目录时按此固定位置兜底（显式配置仍然优先且不做兜底）。
    - `WOOHAA3_LOCAL_AGENT_WORK_DIR`（可选）：专用工作/配置目录根；缺省用系统临时目录，仍按 owner/连接隔离。

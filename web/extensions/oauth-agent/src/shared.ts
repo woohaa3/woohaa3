@@ -15,6 +15,7 @@ export const OAUTH_AGENT_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   description: "个人 OAuth 授权与连接；3D 生成面板由宿主内置（design D10）。",
   version: "1.0.0",
   managementScope: "site",
+  defaultEnabled: true,
   host: "backend",
   configSchema: { schemaId: "chatgpt-plugin-config", schemaVersion: 1 },
   dependencies: [],
