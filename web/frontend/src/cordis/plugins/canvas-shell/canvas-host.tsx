@@ -10,7 +10,7 @@ import { FocusRunStrip } from "./focus-run-strip.js";
 import { Button } from "../../../shared/ui/Button.js";
 import { mountBevyCanvas, unmountBevyCanvas } from "./bevy-canvas-element.js";
 import { useService } from "../../react.js";
-import { syncStatusView } from "../../sync-status.js";
+import { useSyncStatusView } from "../../use-sync-status.js";
 import {
   CanvasFocusNodeHistoryHost,
   CanvasFocusSidePanelHost,
@@ -87,7 +87,7 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
   const writable = canvasSession.isWritable();
   // 顶部不再常驻同步/revision 胶囊：状态改由右下角控件面板承载
   // （change: move-sync-status-to-corner-panel）。
-  const sync = syncStatusView({
+  const sync = useSyncStatusView({
     mode: sessionStatus.remote.mode,
     phase: sessionStatus.remote.phase,
     pendingCount: sessionStatus.remote.pendingCount,

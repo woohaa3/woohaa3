@@ -16,7 +16,7 @@ import { beginLifecycleSpan } from "../performance/lifecycle-performance.js";
 import { CommandLifecycleRegistry, CanvasDatabase, IndexedDbYjsCacheRepository, WorkingProjectionStore, applyYjsCacheToDoc, validateYjsCache, woohaa3CanvasStore, type CanvasSyncStatus } from "./canvas-state/index.js";
 import { measureInteractionWork } from "./interaction-timing.js";
 import * as Y from "yjs";
-import type { CanvasAccess, CanvasCommand, TelemetryEventInput } from "@woohaa3/contracts";
+import type { CanvasAccess, CanvasCommand, ServerCanvas, TelemetryEventInput } from "@woohaa3/contracts";
 import { yDocToServerCanvas, YJS_SYNC_PROTOCOL_VERSION, YJS_CANVAS_FORMAT_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { ReadonlyCanvasProvider, type ReadonlyProviderState } from "./yjs/readonly-provider.js";
 import type { CanvasSession, CanvasSessionStatus } from "../contracts.js";
@@ -274,6 +274,14 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   /** 只读同步 provider（唯一持久化路径）。 */
   let yjsProvider: ReadonlyCanvasProvider | undefined;
   let yjsLifecycle: CommandLifecycleRegistry | undefined;
+  const saveStarts = new Map<string, number>();
+  const settleSave = (commandId: string, result: "success" | "failure" | "cancelled", errorCode?: string) => {
+    const started = saveStarts.get(commandId);
+    if (started === undefined) return;
+    saveStarts.delete(commandId);
+    recordTelemetry({ name: "canvas.save", result, origin: "browser", surface: "sync",
+      durationMs: elapsedMs(started), ...(errorCode ? { errorCode } : {}) });
+  };
   /** 会话内 working projection：canonical + 有序 pending batches，仅内存。 */
   const projection = new WorkingProjectionStore();
   let offlineListener: (() => void) | undefined;
@@ -314,6 +322,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     });
 
   const detach = () => {
+    for (const commandId of saveStarts.keys()) settleSave(commandId, "cancelled");
     yjsProvider?.dispose();
     yjsProvider = undefined;
     yjsLifecycle = undefined;
@@ -330,11 +339,18 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     onlineListener = undefined;
   };
 
-  /** 从当前 Y.Doc 派生规范聚合（Store 的唯一来源）。 */
+  let derivedDoc: Y.Doc | undefined;
+  let derivedVersion = -1;
+  let derivedCanvas: ServerCanvas | null = null;
+  /** Export once per document transaction; statuses/results/cache writes reuse it. */
   const deriveCanvas = () => {
     if (!yjsProvider) return null;
+    if (derivedDoc === yjsProvider.doc && derivedVersion === yjsProvider.documentVersion) return derivedCanvas;
     const exported = yDocToServerCanvas(yjsProvider.doc);
-    return exported.ok ? exported.canvas : null;
+    derivedDoc = yjsProvider.doc;
+    derivedVersion = yjsProvider.documentVersion;
+    derivedCanvas = exported.ok ? exported.canvas : null;
+    return derivedCanvas;
   };
 
   /**
@@ -349,12 +365,11 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     // 授权门禁（change: 2026-10-13-...，任务 5.8 / design D10）：只在服务端权威握手（ready）后把
     // 派生状态发布到 UI。syncing/error/offline 期间即使本地缓存可派生也不展示旧缓存内容，直到
     // 服务器确认当前身份的读权限；断线只读沿用已发布的 canonical（不在此覆盖）。
-    if (state.phase === "ready" && derived) {
-      woohaa3CanvasStore.getState().applyRemoteCanvas(derived);
+    if (state.phase === "ready" && derived && derived !== projection.canonicalCanvas) {
       (globalThis as unknown as { __canvasCanonical?: unknown }).__canvasCanonical = derived;
       // canonical 变化后重基 working projection（effect satisfaction + 顺序重放）。
       projection.applyCanonical(derived);
-      woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
+      woohaa3CanvasStore.getState().applyRemoteCanvas(derived, projection.workingCanvas);
       // 已被 canonical 观察的批次 → lifecycle observed（update-first 场景）。
       for (const batch of projection.pendingBatches) {
         if (batch.state === "observed") lifecycle.observe(batch.commandId);
@@ -432,7 +447,11 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     const cached = cache ? await cache.load(cacheId).catch(() => null) : null;
 
     const lifecycle = new CommandLifecycleRegistry({
-      derivedRevision: () => deriveCanvas()?.revision ?? 0
+      derivedRevision: () => projection.canonicalCanvas?.revision ?? 0,
+      onChange: event => {
+        if (event.state === "committed") settleSave(event.commandId, "success");
+        else if (event.state === "rejected") settleSave(event.commandId, "failure", "command-rejected");
+      }
     });
 
     // 只读本地 Y.Doc：先应用 published cache，再以该 state vector 连接服务端（design D10）。
@@ -672,6 +691,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       }
       // 2) 登记 lifecycle（复用调用方 commandId，保证与 wire 一致）。
       const handle = yjsLifecycle!.begin(revision, commandId);
+      saveStarts.set(commandId, submitStartedAt);
       // 3) 发送 wire。
       const sent = yjsProvider.submitCommand({
         protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
@@ -682,6 +702,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         commands: [...commands]
       });
       if (!sent.ok) {
+        settleSave(commandId, "failure", "send-failed");
         // 发送失败：立即移除 pending、重放剩余批次，返回结构化失败。
         measureInteractionWork("pendingProjectionMs", () => projection.rejectBatch(commandId, sent.reason));
         measureInteractionWork("statePublishMs", () => woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas));

@@ -140,7 +140,7 @@ describe("握手闸门（任务 5.2）", () => {
     await seedRoom(room, 1);
     const { fake } = await connect(room, { clientProtocolVersion: version });
     expect(fake.closed).not.toBeNull();
-    expect(YJS_SYNC_PROTOCOL_VERSION).toBe(5);
+    expect(YJS_SYNC_PROTOCOL_VERSION).toBe(6);
     expect(fake.sent.some((entry) => entry.kind === "sync" && entry.syncType === SYNC_MESSAGE_TYPE.UPDATE)).toBe(false);
     const status = fake.sent.find((entry) => entry.kind === "status");
     expect(status?.kind === "status" && status.status.code).toBe("protocol-version-unsupported");
@@ -411,4 +411,18 @@ describe("广播与顺序无关性（任务 5.7）", () => {
     await room.settle();
     expect(fake.sent.filter((entry) => entry.kind === "result").length).toBe(before);
   });
+});
+
+it("command timing observer failures cannot suppress a durable confirmation", async () => {
+  const { room } = await readyRoom();
+  let seen: { status: string; latencyMs: number } | undefined;
+  const { fake } = await connect(room, { onCommandComplete: input => {
+    seen = input;
+    expect(room.currentRevision).toBe(1);
+    throw new Error("diagnostic sink failed");
+  } });
+  fake.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.STEP1, Y.encodeStateVector(new Y.Doc())));
+  fake.receive(encodeCommandMessage(commandBatch()));
+  await expect.poll(() => fake.sent.find(entry => entry.kind === "result")).toMatchObject({ kind: "result", result: { status: "accepted", revision: 1 } });
+  expect(seen).toMatchObject({ status: "accepted", latencyMs: expect.any(Number) });
 });

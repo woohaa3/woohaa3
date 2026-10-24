@@ -418,7 +418,8 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         }
       },
       logger: (event) =>
-        log({ event: event.event, status: event.status, ...(event.code ? { code: event.code } : {}) }),
+        log({ event: event.event, status: event.status, ...(event.code ? { code: event.code } : {}),
+          ...(event.latencyMs !== undefined ? { latencyMs: event.latencyMs } : {}) }),
       onCommitted: (input) => {
         void recordModelPlacementHistory(
           nodeHistoryRef && nodeHistoryRef.editCompletion

@@ -57,6 +57,7 @@ export type SyncUpgradeOptions = {
     canvasId?: string;
     channel?: string;
     cursor?: number;
+    latencyMs?: number;
   }) => void;
   /** 新画布 bootstrap：Yjs 文档不存在时返回其规范聚合（见 `CanvasRoomOptions.bootstrap`）。 */
   bootstrap?: (canvasId: string) => Promise<ServerCanvas | null>;
@@ -208,6 +209,11 @@ export function createSyncUpgradeHandler(options: SyncUpgradeOptions): SyncUpgra
             clientRoomEpoch: readStringQuery(req, "roomEpoch"),
             clientStateVector: new Uint8Array(0),
             actorId: principal?.subject ?? resolveActorId(req),
+            onCommandComplete: ({ status, latencyMs }) => log({
+              event: status === "accepted" ? "command-accepted" : status === "duplicate" ? "command-duplicate" : "command-rejected",
+              status: status === "accepted" || status === "duplicate" ? 200 : 400,
+              canvasId, latencyMs
+            }),
             limits: { ...DEFAULT_CANVAS_SESSION_LIMITS },
             // 每条命令在 room 队列/持久 commit 前 write 复核（任务 4.5/6.2/6.3）；未注入时不传。
             ...(principal && options.authorizeCommand ? { authorizeCommand: () => options.authorizeCommand!({ canvasId, principal }) } : {}),
