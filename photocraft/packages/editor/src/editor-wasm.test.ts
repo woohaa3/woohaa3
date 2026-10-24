@@ -210,3 +210,56 @@ it("样式定位帧索引和响应严格核验，坏数据不交给拖动层",()
   }
   read.mockClear();for(const index of [-1,.5,64,NaN,Infinity,2**32]) expect(handle.stylePositionFrame(index)).toMatchObject({ok:false});expect(read).not.toHaveBeenCalled();
 });
+
+it("非默认取色尺寸和来源只交给新接口，旧内核不能静默取错来源",()=>{
+ const sample=vi.fn(()=>"#123456"),options=vi.fn((_params:string)=>"#abcdef");
+ const handle=new EditorHandle({sampleColor:sample,sampleColorOptions:options} as unknown as EditorInstance,buildInfo);
+ expect(handle.sampleColor(2,3,{size:11,sampleLayer:"current"})).toEqual({ok:true,value:"#abcdef"});expect(JSON.parse(options.mock.calls[0]![0]!)).toEqual({x:2,y:3,size:11,sampleLayer:"current"});expect(sample).not.toHaveBeenCalled();
+ const legacy=new EditorHandle({sampleColor:sample} as unknown as EditorInstance,buildInfo);expect(legacy.sampleColor(2,3,{size:11,sampleLayer:"current"}).ok).toBe(false);expect(sample).not.toHaveBeenCalled();expect(legacy.sampleColor(2,3,{size:1,sampleLayer:"all"})).toEqual({ok:true,value:"#123456"});
+});
+it("字体样例读取在成功和畸形数据时均释放WASM资源，旧内核缺失方法不冒用浏览器字体",()=>{
+ const free=vi.fn(),pixels=new Uint8Array(8),fontPreview=vi.fn(()=>({width:2,height:1,pixels,free}));
+ const handle=new EditorHandle({fontPreview} as unknown as EditorInstance,buildInfo);
+ expect(handle.fontPreview("Inter",18,1)).toEqual({ok:true,value:{width:2,height:1,pixels}});expect(free).toHaveBeenCalledOnce();
+ fontPreview.mockReturnValue({width:1000,height:1,pixels,free});expect(handle.fontPreview("Inter",18,1).ok).toBe(false);expect(free).toHaveBeenCalledTimes(2);
+ const old=new EditorHandle({} as EditorInstance,buildInfo);expect(old.fontPreview("Inter",18,1).ok).toBe(false);
+});
+
+it("性能偏好整数边界原子传递，旧WASM仅能保留默认内存；不先应用历史再失败",()=>{
+  const set=vi.fn((historyStates:number,memoryUsageMb:number)=>JSON.stringify({historyStates,memoryUsageMb}));
+  const handle=new EditorHandle({setPerformancePreferences:set} as unknown as EditorInstance,buildInfo);
+  for(const [history,memory] of [[0,256],[1001,256],[1.5,256],[5,255],[5,256.5],[5,1048577],[5,NaN],[5,Infinity]])expect(handle.setPerformancePreferences(history,memory)).toMatchObject({ok:false});
+  expect(set).not.toHaveBeenCalled();expect(handle.setPerformancePreferences(25,512)).toEqual({ok:true,value:{historyStates:25,memoryUsageMb:512}});expect(set).toHaveBeenCalledOnce();
+  const history=vi.fn(()=>'{"historyStates":25}'),legacy=new EditorHandle({setHistoryLimit:history} as unknown as EditorInstance,buildInfo);
+  expect(legacy.setPerformancePreferences(25,512)).toMatchObject({ok:false});expect(history).not.toHaveBeenCalled();
+  expect(legacy.setPerformancePreferences(25,8192)).toEqual({ok:true,value:{historyStates:25}});expect(history).toHaveBeenCalledWith(25);
+});
+
+it("Info只读数据严格解码，NaN不被JSON转为无指针，畸形/缺失端口明确失败",()=>{
+  const sample={rgb:[255,0,0],cmyk:[0,100,100,0],position:[4,5],selectionSize:null,documentSize:[16,12]},read=vi.fn((_params:string)=>JSON.stringify(sample));
+  const handle=new EditorHandle({infoReadout:read} as unknown as EditorInstance,buildInfo);
+  for(const params of [{x:NaN,y:NaN,size:1},{x:null,y:3,size:1},{x:1,y:2,size:2}])expect(handle.infoReadout(params)).toMatchObject({ok:false});expect(read).not.toHaveBeenCalled();
+  expect(handle.infoReadout({x:4,y:5,size:1})).toEqual({ok:true,value:sample});expect(read).toHaveBeenLastCalledWith('{"x":4,"y":5,"size":1}');
+  read.mockReturnValueOnce('{"rgb":[256,0,0]}');expect(handle.infoReadout({x:null,y:null,size:3})).toMatchObject({ok:false});
+  expect(new EditorHandle({} as EditorInstance,buildInfo).infoReadout({x:null,y:null,size:1})).toMatchObject({ok:false});
+});
+
+it("pixel grid validates budget before raw WASM and strictly checks returned native geometry",()=>{
+  const raw=vi.fn(()=>JSON.stringify([[0,0,0,1,255,255,255,64]]));
+  const handle=new EditorHandle({pixelGrid:raw} as unknown as EditorInstance,buildInfo);
+  expect(handle.pixelGrid({x:NaN,y:0,width:1,height:1})).toMatchObject({ok:false});expect(raw).not.toHaveBeenCalled();
+  expect(handle.pixelGrid({x:0,y:0,width:1,height:1})).toEqual({ok:true,value:[[0,0,0,1,255,255,255,64]]});
+  raw.mockReturnValueOnce(JSON.stringify([[0,0,2,0,0,0,0,64]]));expect(handle.pixelGrid({x:0,y:0,width:1,height:1})).toMatchObject({ok:false});
+  expect(new EditorHandle({} as EditorInstance,buildInfo).pixelGrid({x:0,y:0,width:1,height:1})).toMatchObject({ok:false});
+});
+
+it("histogram requires the read-only native port and rejects malformed native responses",()=>{
+  const raw=vi.fn(()=>'{"channels":[]}');
+  expect(new EditorHandle({histogram:raw} as unknown as EditorInstance,buildInfo).histogram()).toMatchObject({ok:false});expect(raw).toHaveBeenCalledTimes(1);
+  expect(new EditorHandle({} as EditorInstance,buildInfo).histogram()).toMatchObject({ok:false});
+});
+
+it("internal clipboard bounds are strict read-only geometry and support empty data",()=>{
+ const raw=vi.fn(()=>"null"),handle=new EditorHandle({clipboardBounds:raw} as unknown as EditorInstance,buildInfo);
+ expect(handle.clipboardBounds()).toEqual({ok:true,value:null});raw.mockReturnValueOnce("[1,2,4,6]");expect(handle.clipboardBounds()).toEqual({ok:true,value:[1,2,4,6]});for(const bad of ["[1,2,1,4]","[1.5,2,4,6]","{}"]) {raw.mockReturnValueOnce(bad);expect(handle.clipboardBounds()).toMatchObject({ok:false});}
+});

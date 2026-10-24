@@ -76,7 +76,7 @@ export class EditorWorkspaceController extends CoreEditorWorkspaceController {
       ...(options.digest ? { digest: options.digest } : {}),
       ...(options.onState ? { onState: options.onState } : {}),
       ...(options.onViewModel ? { onViewModel: options.onViewModel } : {}),
-      save: async ({ artifacts, sourceAssetIds, isCurrent }): Promise<EditorSaveOutcome> => {
+      save: async ({ artifacts, sourceAssetIds, isCurrent, onProgress }): Promise<EditorSaveOutcome> => {
         const input = host.input;
         if (!input) return { ok: false, code: "invalid-artifacts", message: "缺少保存输入", retriable: false };
         const closed = { ok: false as const, code: "complete-failed" as const, error: "编辑会话已结束" };
@@ -86,7 +86,9 @@ export class EditorWorkspaceController extends CoreEditorWorkspaceController {
             ...host.deps,
             // 上传完成后再次检查代际；退出后的迟到结果不得提交回执。
             complete: (request) => isCurrent() ? host.deps.complete(request) : Promise.resolve(closed),
-            ...(host.deps.status ? { status: (request: Parameters<NonNullable<ProjectSaveDeps["status"]>>[0]) => isCurrent() ? host.deps.status!(request) : Promise.resolve(closed) } : {})
+            ...(host.deps.status ? { status: (request: Parameters<NonNullable<ProjectSaveDeps["status"]>>[0]) => isCurrent() ? host.deps.status!(request) : Promise.resolve(closed) } : {}),
+            // 进度只在会话仍是当前代际时上报，避免过期任务刷新别的文档。
+            ...(onProgress ? { onProgress: (percent: number) => { if (isCurrent()) onProgress(percent); } } : {})
           },
           host.attempt
         );

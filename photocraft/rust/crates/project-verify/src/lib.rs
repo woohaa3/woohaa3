@@ -140,6 +140,7 @@ fn verify_container_with(bytes:&[u8],pattern_library:bool,source_scope:Option<sm
     if source_scope.is_some() && (manifest.document.mode!=photocraft_doc::ColorMode::Rgb || manifest.document.depth!=photocraft_doc::SampleType::U8) {
         return Err(err(VerifyErrorCode::UnsupportedObject,"智能对象源仅支持 RGB/U8 原生工程"));
     }
+    if !manifest.document.resolution_dpi.is_finite() || !(1.0..=10000.0).contains(&manifest.document.resolution_dpi) {return Err(err(VerifyErrorCode::UnsupportedObject,"工程分辨率须为 1–10000 DPI"));}
     if !pattern_support::supported_manifest(&manifest.document.patterns) {
         return Err(err(VerifyErrorCode::UnsupportedObject,"工程图案资源超限或格式不受支持"));
     }
@@ -246,6 +247,10 @@ fn inspect_layers(
                 VerifyErrorCode::TooManyLayers,
                 format!("工程层数超过上限：{}", limits::MAX_LAYERS),
             ));
+        }
+        if layer.link_group.is_some_and(|group|group==0 || group>9_007_199_254_740_991) {return Err(err(VerifyErrorCode::UnsupportedObject,"链接组编号必须为安全正整数"));}
+        if let Some(mask)=&layer.mask {
+            if !mask.density.is_finite() || !(0.0..=1.0).contains(&mask.density) || !mask.feather.is_finite() || !(0.0..=1000.0).contains(&mask.feather) {return Err(err(VerifyErrorCode::UnsupportedObject,"蒙版密度或羽化超出范围"));}
         }
         if layer.mask.is_some() || layer.vector_mask.is_some() {
             // 蒙版本身是首期能力；但矢量蒙版不在首期范围。

@@ -4,6 +4,12 @@ use photocraft_engine::{DocState, channel_cmds::ChannelTarget, transform_cmds};
 use serde_json::{Value, json};
 use crate::{Preview, error::{EditorError, Result}};
 
+pub(crate) fn require_visible(state:&DocState,ids:&[LayerId],command:&str)->Result<()> {
+    if ids.iter().any(|id|state.doc.path_of(*id).is_some_and(|path|!state.doc.shown_at(&path))) {
+        return Err(EditorError::CommandFailed{id:command.into(),message:"目标图层或父组已隐藏，请先显示后编辑".into()});
+    }
+    Ok(())
+}
 pub(crate) fn mask_target(state: &DocState) -> bool {
     (state.channel_view.target == ChannelTarget::LayerMask || photocraft_engine::mask_view_cmds::current(state).is_some())
         && state.active_layer.and_then(|id|state.doc.layer(id)).is_some_and(|layer|layer.mask.is_some())
@@ -30,7 +36,7 @@ pub(crate) fn transform_targets(state:&DocState)->Vec<LayerId> {
     if transform_cmds::lone_target(&state.doc,state.active_layer,&target_params(state)).ok().flatten().is_some() {
         return state.active_layer.into_iter().collect();
     }
-    selected_roots(state)
+    photocraft_engine::layer_multi_cmds::move_targets(&state.doc,&selected_roots(state))
 }
 
 pub(crate) fn selected_roots(state:&DocState)->Vec<LayerId> {
@@ -145,4 +151,16 @@ mod tests {
         assert_eq!(selected_roots(state).len(),2);
         assert!(!selected_roots(state).contains(&first));
     }
+    #[test]
+    fn linked_transform_targets_expand_once_but_independent_masks_stay_local() {
+        let mut session=Session::new();session.execute("file.new",json!({"width":16,"height":16})).unwrap();
+        session.execute("layer.new.layer",json!({})).unwrap();let a=session.active().unwrap().active_layer.unwrap();
+        session.execute("layer.new.layer",json!({})).unwrap();let b=session.active().unwrap().active_layer.unwrap();
+        let state=session.active_mut().unwrap();state.selected_layers=vec![a];state.active_layer=Some(a);
+        let doc=std::sync::Arc::make_mut(&mut state.doc);doc.layer_mut(a).unwrap().link_group=Some(17);doc.layer_mut(b).unwrap().link_group=Some(17);
+        let targets=transform_targets(state);assert_eq!(targets.len(),2);assert!(targets.contains(&a));assert!(targets.contains(&b));
+        let mask=LayerMask{linked:false,..LayerMask::reveal_all()};std::sync::Arc::make_mut(&mut state.doc).layer_mut(a).unwrap().mask=Some(mask);
+        state.channel_view.target=ChannelTarget::LayerMask;assert_eq!(transform_targets(state),vec![a]);
+    }
+
 }

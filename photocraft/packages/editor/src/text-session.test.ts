@@ -13,7 +13,7 @@ function setup() {
   const controller = {
     beginText: vi.fn((_params: unknown) => ({ ok: true, value: { text: "", new: true } })),
     previewText: vi.fn((_params: unknown) => ({ ok: true, value: { text: "中文" } } as { ok: true; value: unknown } | { ok: false; message: string; code: string })),
-    commitText: vi.fn(() => ({ ok: true, value: {} })), cancelText: vi.fn()
+    commitText: vi.fn(() => ({ ok: true, value: {} })), checkpointText:vi.fn(()=>({ok:true,value:{layer:1,text:"saved"}})),cancelText: vi.fn()
   };
   const refresh = vi.fn(), error = vi.fn(), info = vi.fn();
   const session = new TextSession(controller as unknown as EditorWorkspaceController, refresh, error, info);
@@ -95,4 +95,14 @@ it("确认失败保留会话，可取消；失败的开始不占用会话", () =
   expect(session.composing).toBe(false);
   expect(session.active).toBe(false);
   expect(controller.cancelText).toHaveBeenCalledOnce();
+});
+
+
+it("保存检查点补齐帧并保留会话；失败、IME和迟到帧不结束或误写",()=>{
+ const {session,controller,frames}=setup();session.begin({layer:1});session.preview(draft);
+ expect(session.checkpoint()).toBe(true);expect(session.active).toBe(true);expect(controller.previewText).toHaveBeenCalledOnce();expect(controller.checkpointText).toHaveBeenCalledOnce();expect(controller.commitText).not.toHaveBeenCalled();
+ frames[0](0);expect(controller.previewText).toHaveBeenCalledOnce();
+ session.compositionStart();expect(session.checkpoint()).toBe(false);expect(controller.checkpointText).toHaveBeenCalledOnce();session.compositionEnd({...draft,text:"后续"});
+ controller.checkpointText.mockReturnValueOnce({ok:false,code:"failed",message:"保存失败"} as never);expect(session.checkpoint()).toBe(false);expect(session.active).toBe(true);
+ session.cancel();expect(controller.cancelText).toHaveBeenCalledOnce();
 });

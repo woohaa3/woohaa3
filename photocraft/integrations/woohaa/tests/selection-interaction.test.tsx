@@ -57,9 +57,9 @@ it("已有选区拖动沿真实 App → 控制器选择边界或像素草稿，�
   const outline=[[100,100,300,100],[300,100,300,300],[300,300,100,300],[100,300,100,100]];
   const stateJson=() => JSON.stringify({document:{width:1600,height:900,activeLayer:1,revision:1,hasSelection:true,
     selectionFrame:[100,100,300,300],selectionOutline:outline,transformFrame:[120,120,200,200],layers:[{id:1,name:"来源",kind:"raster"}]}});
-  const beginBoundary=vi.fn(),beginPixels=vi.fn(),commit=vi.fn(() => "null"),cancel=vi.fn(),preview=vi.fn();
+  const beginBoundary=vi.fn(),beginPixels=vi.fn(()=>true),commit=vi.fn(() => "null"),cancel=vi.fn(),preview=vi.fn();
   const handle=new EditorHandle({openImage:stateJson,stateJson,commandsJson:() => "[]",contentHash:() => "0123456789abcdef",
-    beginSelectionTransform:beginBoundary,beginTransform:beginPixels,previewTransform:preview,commitTransform:commit,cancelTransform:cancel,
+    selectionContains:(x:number,y:number)=>x>=100 && x<300 && y>=100 && y<300,beginMove:beginPixels,beginSelectionTransform:beginBoundary,beginTransform:beginPixels,previewTransform:preview,commitTransform:commit,cancelTransform:cancel,
     renderPreview:() => ({width:1,height:1,pixels:new Uint8Array(4)})} as unknown as EditorInstance,
     {upstreamCommit: "pinned", upstreamVersion: "0.9.0", engineVersion: PHOTOCRAFT_ENGINE_VERSION, formatVersion: 1});
   const project=new ProjectSession({nodeId:"image-1",baseAssetId:"asset-1",baseStorageKey:"image.png",sourceWidth:1600,sourceHeight:900,edit:null});

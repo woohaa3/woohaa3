@@ -119,7 +119,7 @@ export function createSurfaceInteractions(deps: SurfaceInteractionDeps): Surface
       // canvas 本体仍由原生 wheel 监听处理；覆盖层也进入同一个画布输入入口。
       const target = event.target as HTMLElement | null;
       const region = target?.closest?.("[data-canvas-viewport]");
-      if (!region || target?.closest?.("[data-canvas-viewport-control]")) return;
+      if (!region || region.getAttribute("data-canvas-wheel-owner")==="local" || target?.closest?.("[data-canvas-viewport-control]")) return;
       event.preventDefault();
       if (region.getAttribute("data-canvas-viewport-blocked") !== "true") deps.onWheel?.(event);
       return;

@@ -265,7 +265,7 @@ function makeController(options: {
     yieldTask: options.yieldTask ?? (() => Promise.resolve()),
     digest: digestOf
   });
-  return { controller, project, handle };
+  return { controller, project, handle,instance };
 }
 
 describe("编辑器工作区加载与打开", () => {
@@ -671,4 +671,89 @@ it("初始化分任务调度，退出后不再执行后续内核工作", async (
   expect((await pending).ok).toBe(false);
   expect(commands).not.toHaveBeenCalled();
   expect(controller.currentState().phase).toBe("idle");
+});
+
+
+it("拾取返回原生命中id而非视图，空白不复用旧活动层，草稿期间零执行",async()=>{
+ const fake=fakeInstance(),execute=vi.spyOn(fake.instance,"execute");
+ const handle=new EditorHandle(fake.instance,{upstreamCommit:"pinned",upstreamVersion:"0.9.0",engineVersion:PHOTOCRAFT_ENGINE_VERSION,formatVersion:1});
+ const {controller}=makeController({load:async()=>({ok:true,value:handle})});
+ try {
+  await controller.openProject({bytes:new Uint8Array([1]),baseAssetId:"asset-base"});
+  execute.mockReturnValueOnce(JSON.stringify({layer:7}));expect(controller.pickLayerAt({x:1,y:2,target:"group",mode:"add"})).toEqual({ok:true,value:7});
+  execute.mockReturnValueOnce(JSON.stringify({layer:null}));expect(controller.pickLayerAt({x:1,y:2,target:"layer",select:false})).toEqual({ok:true,value:null});
+  expect(controller.beginText({layer:1}).ok).toBe(true);execute.mockClear();
+  expect(controller.pickLayerAt({x:1,y:2,target:"layer"}).ok).toBe(false);expect(execute).not.toHaveBeenCalled();
+ }finally{controller.dispose();}
+});
+
+
+it("文字检查点允许成对保存并保留草稿；冻结期间拒绝修改，后续预览须重新检查点",async()=>{
+ const fake=fakeInstance();fake.instance.checkpointText=vi.fn(()=>JSON.stringify({layer:2,new:false,text:"已保存"}));
+ const handle=new EditorHandle(fake.instance,{upstreamCommit:"pinned",upstreamVersion:"0.9.0",engineVersion:PHOTOCRAFT_ENGINE_VERSION,formatVersion:1});
+ let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});const defaults=saveDeps();
+ const deps={...defaults,uploadProject:async(...args:Parameters<ProjectSaveDeps["uploadProject"]>)=>{await gate;return defaults.uploadProject(...args);}};
+ const {controller}=makeController({load:async()=>({ok:true,value:handle}),deps});
+ try {
+  await controller.openProject({bytes:new Uint8Array([1]),baseAssetId:"asset-base"});controller.beginText({layer:2});controller.previewText({text:"已保存"});
+  expect(controller.checkpointText()).toMatchObject({ok:true});expect(controller.hasText()).toBe(true);
+  const saving=controller.save(saveInput());expect(controller.previewText({text:"迟到输入"}).ok).toBe(false);expect(controller.commitText().ok).toBe(false);expect(controller.checkpointText().ok).toBe(false);
+  release();expect(await saving).toMatchObject({ok:true});expect(controller.hasText()).toBe(true);expect(fake.calls).toContain("exportBundle");expect(fake.calls).not.toContain("commitText");
+  expect(controller.previewText({text:"继续输入"}).ok).toBe(true);const exports=fake.calls.filter(call=>call==="exportBundle").length;
+  expect(await controller.save(saveInput())).toMatchObject({ok:false,code:"freeze-failed"});expect(fake.calls.filter(call=>call==="exportBundle")).toHaveLength(exports);
+ }finally{release();controller.dispose();}
+});
+
+it("旋转预览隔离写入和保存，取消解除门禁，失败确认保留候选，dispose清理",async()=>{
+ const fake=fakeInstance();let valid=true;
+ fake.instance.beginImageRotation=vi.fn(()=>JSON.stringify({width:800,height:600}));
+ fake.instance.previewImageRotation=vi.fn(()=>JSON.stringify({width:600,height:800}));
+ fake.instance.commitImageRotation=vi.fn(()=>{if(!valid)throw new Error("旋转参数无效");return "{}";});
+ fake.instance.cancelImageRotation=vi.fn();
+ const handle=new EditorHandle(fake.instance,{upstreamCommit:"pinned",upstreamVersion:"0.9.0",engineVersion:PHOTOCRAFT_ENGINE_VERSION,formatVersion:1});
+ const {controller}=makeController({load:async()=>({ok:true,value:handle})});
+ try {await controller.openProject({bytes:new Uint8Array([1]),baseAssetId:"asset-base"});
+ expect(controller.beginImageRotation().ok).toBe(true);expect(controller.canDispatchCommands()).toBe(false);
+ expect(controller.dispatch("layer.new.layer").ok).toBe(false);expect(controller.beginText({layer:2}).ok).toBe(false);expect(controller.setHistoryLimit(100).ok).toBe(false);
+ expect(await controller.save(saveInput())).toMatchObject({ok:false,code:"freeze-failed"});expect(fake.calls).not.toContain("exportBundle");
+ expect(controller.previewImageRotation({angle:90}).ok).toBe(true);valid=false;expect(controller.commitImageRotation().ok).toBe(false);expect(controller.canDispatchCommands()).toBe(false);
+ controller.cancelImageRotation();expect(controller.canDispatchCommands()).toBe(true);valid=true;expect(controller.beginImageRotation().ok).toBe(true);expect(controller.commitImageRotation().ok).toBe(true);expect(controller.canDispatchCommands()).toBe(true);
+ controller.beginImageRotation();controller.dispose();expect(fake.instance.cancelImageRotation).toHaveBeenCalledTimes(2);
+ }finally{controller.dispose();}
+});
+
+it("复制文档检测旧运行组件，导出不冻结源；所有活动草稿在调用字节端口前拒绝",async()=>{
+ const {controller,instance,project}=makeController();await controller.openProject({bytes:new Uint8Array([1]),baseAssetId:"asset-base"});
+ expect(controller.canDuplicateDocument()).toBe(false);expect(controller.duplicateDocument("Copy")).toMatchObject({ok:false,code:"capability-disabled"});
+ const duplicate=vi.fn((_name:string)=>new Uint8Array([4,5,6]));instance.duplicateProject=duplicate;
+ expect(controller.canDuplicateDocument()).toBe(true);const state=controller.snapshot(),dirty=project.isDirty();expect(controller.duplicateDocument("Copy")).toEqual({ok:true,value:new Uint8Array([4,5,6])});expect(duplicate).toHaveBeenCalledOnce();expect(controller.snapshot()).toBe(state);expect(project.isDirty()).toBe(dirty);
+ controller.beginText({x:1,y:1});expect(controller.canDuplicateDocument()).toBe(false);expect(controller.duplicateDocument("Blocked").ok).toBe(false);expect(duplicate).toHaveBeenCalledOnce();controller.cancelText();
+ controller.beginStroke({points:[[1,1]],size:2});expect(controller.duplicateDocument("Blocked").ok).toBe(false);expect(duplicate).toHaveBeenCalledOnce();controller.cancelStroke();expect(controller.canDuplicateDocument()).toBe(true);expect(controller.dispatch("layer.delete").ok).toBe(true);controller.dispose();
+});
+
+
+it("文字查找返回原生结果并刷新活动层，草稿/释放期间无命令，失败不伪造成功",async()=>{
+ const fake=fakeInstance(),execute=vi.fn((_id:string,_params:string)=>JSON.stringify({found:{layer:7,start:3,end:10,text:"猫😀"}}));fake.instance.execute=execute;
+ const handle=new EditorHandle(fake.instance,{upstreamCommit:"pinned",upstreamVersion:"0.9.0",engineVersion:PHOTOCRAFT_ENGINE_VERSION,formatVersion:1});
+ const {controller}=makeController({load:async()=>({ok:true,value:handle})});
+ try{await controller.openProject({bytes:new Uint8Array([1]),baseAssetId:"asset-base"});
+  expect(controller.findReplaceText({find:"猫😀",action:"find"})).toEqual({ok:true,value:{found:{layer:7,start:3,end:10,text:"猫😀"}}});
+  expect(execute).toHaveBeenLastCalledWith("edit.findAndReplaceText",JSON.stringify({find:"猫😀",action:"find"}));
+  controller.beginText({layer:1});const count=execute.mock.calls.length;expect(controller.findReplaceText({find:"x"}).ok).toBe(false);expect(execute).toHaveBeenCalledTimes(count);controller.cancelText();
+  execute.mockImplementationOnce(()=>{throw JSON.stringify({code:"locked",message:"文字图层已锁定"});});expect(controller.findReplaceText({find:"x",action:"changeAll"})).toMatchObject({ok:false,message:"文字图层已锁定"});
+ }finally{controller.dispose();}
+ expect(controller.findReplaceText({find:"x"}).ok).toBe(false);
+});
+
+it("拼写检查返回原生结果并刷新活动层，草稿/释放期间无命令，失败不伪造成功",async()=>{
+ const fake=fakeInstance(),execute=vi.fn((_id:string,_params:string)=>JSON.stringify({found:{layer:7,start:3,end:10,text:"猫😀"}}));fake.instance.execute=execute;
+ const handle=new EditorHandle(fake.instance,{upstreamCommit:"pinned",upstreamVersion:"0.9.0",engineVersion:PHOTOCRAFT_ENGINE_VERSION,formatVersion:1});
+ const {controller}=makeController({load:async()=>({ok:true,value:handle})});
+ try{await controller.openProject({bytes:new Uint8Array([1]),baseAssetId:"asset-base"});
+  expect(controller.checkSpelling({action:"list"})).toEqual({ok:true,value:{found:{layer:7,start:3,end:10,text:"猫😀"}}});
+  expect(execute).toHaveBeenLastCalledWith("edit.checkSpelling",JSON.stringify({action:"list"}));
+  controller.beginText({layer:1});const count=execute.mock.calls.length;expect(controller.checkSpelling({action:"list"}).ok).toBe(false);expect(execute).toHaveBeenCalledTimes(count);controller.cancelText();
+  execute.mockImplementationOnce(()=>{throw JSON.stringify({code:"locked",message:"文字图层已锁定"});});expect(controller.checkSpelling({word:"helo",replace:"hello",action:"changeAll"})).toMatchObject({ok:false,message:"文字图层已锁定"});
+ }finally{controller.dispose();}
+ expect(controller.checkSpelling({action:"list"}).ok).toBe(false);
 });

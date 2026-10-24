@@ -35,7 +35,7 @@ export const IMAGE_PROJECT_ENGINE = "photocraft" as const;
  * 宿主编辑能力版本。上游提交仍由 PHOTOCRAFT_ENGINE_COMMIT 单独核对；
  * 分组产物使用新标识，旧应用不能将其按扁平文档继续改写。
  */
-export const PHOTOCRAFT_ENGINE_VERSION = "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-patterns-v1" as const;
+export const PHOTOCRAFT_ENGINE_VERSION = "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-resolution-v1" as const;
 
 /** 受支持的引擎版本集合：未知/过新引擎只读，不静默降级。 */
 export const SUPPORTED_PHOTOCRAFT_ENGINE_VERSIONS: readonly string[] = [
@@ -44,6 +44,9 @@ export const SUPPORTED_PHOTOCRAFT_ENGINE_VERSIONS: readonly string[] = [
   "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-blends-v1",
   "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-fill-v1",
   "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-styles-v1",
+  "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-patterns-v1",
+  "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-layer-metadata-v1",
+  "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-mask-properties-v1",
   PHOTOCRAFT_ENGINE_VERSION
 ];
 

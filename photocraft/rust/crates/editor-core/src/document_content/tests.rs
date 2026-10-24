@@ -264,3 +264,21 @@ fn mask_links_survive_project_roundtrip_without_rendering() {
     doc.layers[0].mask.as_mut().expect("蒙版").linked=true;
     assert_ne!(document_content_hash(&doc,&registry),before);
 }
+
+#[test]
+fn layer_labels_and_normalized_links_survive_roundtrip_and_affect_identity_without_rendering() {
+    let registry=AssetRegistry::default();let mut doc=document();doc.layers.push(Layer::raster("A",doc.pixel_format()));
+    let baseline=document_content_hash(&doc,&registry).unwrap();
+    doc.layers[0].label=photocraft_doc::LabelColor::Red;
+    let labeled=document_content_hash(&doc,&registry).unwrap();assert_ne!(baseline,labeled);
+    for layer in &mut doc.layers {layer.link_group=Some(17);}
+    let linked=document_content_hash(&doc,&registry).unwrap();assert_ne!(linked,labeled);
+    let content=project_content(&doc,&registry);assert_eq!(content["layers"][0]["labelColor"],"red");assert_eq!(content["layers"][0]["linkGroup"],1);assert_eq!(content["layers"][1]["linkGroup"],1);
+    let bytes=photocraft_format::save_to_bytes(&doc,&Default::default()).unwrap();photocraft_project_verify::verify(&bytes).unwrap();
+    let loaded=photocraft_format::load_from_bytes(&bytes).unwrap();assert_eq!(document_content_hash(&loaded,&registry).unwrap(),linked);
+    for layer in &mut doc.layers {layer.link_group=Some(203);}
+    assert_eq!(document_content_hash(&doc,&registry).unwrap(),linked);
+    for layer in &mut doc.layers {layer.link_group=None;}
+    assert_eq!(document_content_hash(&doc,&registry).unwrap(),labeled);doc.layers[0].label=photocraft_doc::LabelColor::None;
+    assert_eq!(document_content_hash(&doc,&registry).unwrap(),baseline);
+}

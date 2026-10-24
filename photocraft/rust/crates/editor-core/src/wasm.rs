@@ -137,6 +137,10 @@ impl WasmEditor {
     pub fn begin_layer_properties(&mut self,layer:u32)->Result<String,JsValue> {
         self.inner.begin_layer_properties(u64::from(layer)).map(|v|v.to_string()).map_err(|e|js_error(&e))
     }
+    #[wasm_bindgen(js_name = beginLayerVisibility)]
+    pub fn begin_layer_visibility(&mut self,layer:u32)->Result<String,JsValue> {
+        self.inner.begin_layer_visibility(u64::from(layer)).map(|v|v.to_string()).map_err(|e|js_error(&e))
+    }
     #[wasm_bindgen(js_name = previewLayerProperties)]
     pub fn preview_layer_properties(&mut self,params_json:&str)->Result<String,JsValue> {
         self.inner.preview_layer_properties(parse_params(params_json)?).map(|v|v.to_string()).map_err(|e|js_error(&e))
@@ -151,6 +155,17 @@ impl WasmEditor {
     }
     #[wasm_bindgen(js_name = cancelLayerProperties)]
     pub fn cancel_layer_properties(&mut self) {self.inner.cancel_layer_properties();}
+    /// Layers 面板拖动重排的画布预览（I218）：候选只读，不写正式文档。
+    #[wasm_bindgen(js_name = beginReorderPreview)]
+    pub fn begin_reorder_preview(&mut self)->Result<String,JsValue> {
+        self.inner.begin_reorder_preview().map(|v|v.to_string()).map_err(|e|js_error(&e))
+    }
+    #[wasm_bindgen(js_name = previewReorder)]
+    pub fn preview_reorder(&mut self,params_json:&str)->Result<String,JsValue> {
+        self.inner.preview_reorder(parse_params(params_json)?).map(|v|v.to_string()).map_err(|e|js_error(&e))
+    }
+    #[wasm_bindgen(js_name = endReorderPreview)]
+    pub fn end_reorder_preview(&mut self)->String {self.inner.end_reorder_preview().to_string()}
     #[wasm_bindgen(js_name = beginAdjustment)]
     pub fn begin_adjustment(&mut self, layer: u32) -> Result<String,JsValue> {
         self.inner.begin_adjustment(u64::from(layer)).map(|v|v.to_string()).map_err(|e|js_error(&e))
@@ -169,6 +184,12 @@ impl WasmEditor {
     pub fn curve_geometry(&self, points_json: &str) -> Result<String,JsValue> {
         self.inner.curve_geometry(parse_params(points_json)?).map(|v|v.to_string()).map_err(|e|js_error(&e))
     }
+    #[wasm_bindgen(js_name = moveHoverAt)]
+    pub fn move_hover_at(&self,params_json:&str)->Result<String,JsValue>{self.inner.move_hover_at(parse_params(params_json)?).map(|value|value.to_string()).map_err(|e|js_error(&e))}
+
+    #[wasm_bindgen(js_name = missingFonts)]
+    pub fn missing_fonts(&self)->Result<String,JsValue>{self.inner.missing_fonts().map(|fonts|serde_json::to_string(&fonts).unwrap()).map_err(|e|js_error(&e))}
+
     #[wasm_bindgen(js_name = beginText)]
     pub fn begin_text(&mut self, params_json: &str) -> Result<String,JsValue> {
         self.inner.begin_text(parse_params(params_json)?).map(|v|v.to_string()).map_err(|e|js_error(&e))
@@ -177,6 +198,11 @@ impl WasmEditor {
     pub fn preview_text(&mut self, params_json: &str) -> Result<String,JsValue> {
         self.inner.preview_text(parse_params(params_json)?).map(|v|v.to_string()).map_err(|e|js_error(&e))
     }
+    #[wasm_bindgen(js_name = checkpointText)]
+    pub fn checkpoint_text(&mut self) -> Result<String,JsValue> {
+        self.inner.checkpoint_text().map(|value|value.to_string()).map_err(|e|js_error(&e))
+    }
+
     #[wasm_bindgen(js_name = commitText)]
     pub fn commit_text(&mut self) -> Result<String,JsValue> {
         self.inner.commit_text().map(|v|v.to_string()).map_err(|e|js_error(&e))
@@ -192,6 +218,36 @@ impl WasmEditor {
     pub fn register_fixed_font(bytes: &[u8]) -> std::result::Result<(), JsValue> {
         Editor::register_fixed_font(bytes).map_err(|e| js_error(&e))
     }
+
+    #[wasm_bindgen(js_name = beginImageRotation)]
+    pub fn begin_image_rotation(&mut self)->Result<String,JsValue> {self.inner.begin_image_rotation().map(|v|v.to_string()).map_err(|e|js_error(&e))}
+    #[wasm_bindgen(js_name = previewImageRotation)]
+    pub fn preview_image_rotation(&mut self,params:&str)->Result<String,JsValue> {self.inner.preview_image_rotation(parse_params(params)?).map(|v|v.to_string()).map_err(|e|js_error(&e))}
+    #[wasm_bindgen(js_name = commitImageRotation)]
+    pub fn commit_image_rotation(&mut self)->Result<String,JsValue> {self.inner.commit_image_rotation().map(|v|v.to_string()).map_err(|e|js_error(&e))}
+    #[wasm_bindgen(js_name = cancelImageRotation)]
+    pub fn cancel_image_rotation(&mut self) {self.inner.cancel_image_rotation();}
+
+    #[wasm_bindgen(js_name = clipboardBounds)]
+    pub fn clipboard_bounds(&self)->String {serde_json::json!(self.inner.clipboard_bounds()).to_string()}
+
+    #[wasm_bindgen(js_name = histogram)]
+    pub fn histogram(&self)->Result<String,JsValue> {self.inner.histogram().map(|value|value.to_string()).map_err(|error|js_error(&error))}
+
+    #[wasm_bindgen(js_name = pixelGrid)]
+    pub fn pixel_grid(&self,params:&str)->Result<String,JsValue> {let params=serde_json::from_str(params).map_err(|_|js_error(&EditorError::CommandFailed{id:"view.pixelGridReadout".into(),message:"像素网格区域无效".into()}))?;self.inner.pixel_grid(params).map(|value|value.to_string()).map_err(|error|js_error(&error))}
+
+    #[wasm_bindgen(js_name = infoReadout)]
+    pub fn info_readout(&self,params:&str)->Result<String,JsValue> {let params=serde_json::from_str(params).map_err(|_|js_error(&EditorError::CommandFailed{id:"document.infoReadout".into(),message:"信息取样参数无效".into()}))?;self.inner.info_readout(params).map(|value|value.to_string()).map_err(|error|js_error(&error))}
+    #[wasm_bindgen(js_name = setPerformancePreferences)]
+    pub fn set_performance_preferences(&mut self,history_states:f64,memory_usage_mb:f64)->Result<String,JsValue> {
+        if !history_states.is_finite() || history_states.fract()!=0. || !(1.0..=1000.0).contains(&history_states) || !memory_usage_mb.is_finite() || memory_usage_mb.fract()!=0. || !(256.0..=1_048_576.0).contains(&memory_usage_mb) {
+            return Err(js_error(&EditorError::CommandFailed{id:"preferences.performance".into(),message:"无效的历史状态数量或内存预算".into()}));
+        }
+        self.inner.set_performance_preferences(history_states as u32,memory_usage_mb as u32).map(|value|value.to_string()).map_err(|e|js_error(&e))
+    }
+    #[wasm_bindgen(js_name = setHistoryLimit)]
+    pub fn set_history_limit(&mut self,limit:u32)->Result<String,JsValue> {self.inner.set_history_limit(limit).map(|value|value.to_string()).map_err(|e|js_error(&e))}
 
     /// 新建空会话。
     #[wasm_bindgen(constructor)]
@@ -233,6 +289,12 @@ impl WasmEditor {
         self.inner.save_project().map_err(|e| js_error(&e))
     }
 
+    /// Copy current formal content into a fresh project, without modifying this session.
+    #[wasm_bindgen(js_name = duplicateProject)]
+    pub fn duplicate_project(&self, name: &str) -> Result<Vec<u8>, JsValue> {
+        self.inner.duplicate_project(name).map_err(|error|js_error(&error))
+    }
+
     /// 合成预览：`maxSide` 为最长边上限。
     #[wasm_bindgen(js_name = renderPreview)]
     pub fn render_preview(&self, max_side: u32) -> Result<WasmPreview, JsValue> {
@@ -252,9 +314,23 @@ impl WasmEditor {
         self.inner.begin_stroke(parse_params(params_json)?).map_err(|e| js_error(&e))
     }
 
+    #[wasm_bindgen(js_name = selectionContains)]
+    pub fn selection_contains(&self,x:f64,y:f64)->Result<bool,JsValue> {self.inner.selection_contains(x,y).map_err(|e|js_error(&e))}
+
+    #[wasm_bindgen(js_name = sampleColorOptions)]
+    pub fn sample_color_options(&self, params: &str) -> Result<Option<String>, JsValue> {
+        self.inner.sample_color_options(parse_params(params)?).map_err(|e|js_error(&e))
+    }
+
     #[wasm_bindgen(js_name = sampleColor)]
     pub fn sample_color(&self, x: f64, y: f64) -> Result<Option<String>, JsValue> {
         self.inner.sample_color(x, y).map_err(|e| js_error(&e))
+    }
+
+    #[wasm_bindgen(js_name = fontPreview)]
+    pub fn font_preview(&self,family:&str,size:u32,scale:u32)->Result<WasmPreview,JsValue>{
+        let preview=self.inner.font_preview(family,size,scale).map_err(|e|js_error(&e))?;
+        Ok(WasmPreview{width:preview.width,height:preview.height,pixels:preview.pixels})
     }
 
     #[wasm_bindgen(js_name = layerThumbnail)]
@@ -326,6 +402,25 @@ impl WasmEditor {
             canvas_height: bundle.canvas_height,
             project: bundle.project,
             output: bundle.output,
+        })
+    }
+
+    /// 只读当前画笔设置（I132）；不走命令分派，也不产生历史。
+    #[wasm_bindgen(js_name = brushGet)]
+    pub fn brush_get(&mut self)->Result<String,JsValue> {
+        let value=self.inner.execute("brush.get",serde_json::Value::Null).map_err(|e|js_error(&e))?;
+        Ok(value.to_string())
+    }
+
+    /// 按导出格式与控制编码当前修订（I045）；字节交给宿主单文件端口。
+    #[wasm_bindgen(js_name = exportImage)]
+    pub fn export_image(&self, params_json:&str)->Result<WasmExportBundle,JsValue> {
+        let request=crate::export_request::ExportRequest::parse(&parse_params(params_json)?).map_err(|e|js_error(&e))?;
+        let bundle=self.inner.export_image(request).map_err(|e|js_error(&e))?;
+        Ok(WasmExportBundle {
+            revision:bundle.revision, document_content_hash:bundle.document_content_hash,
+            canvas_width:bundle.canvas_width, canvas_height:bundle.canvas_height,
+            project:bundle.project, output:bundle.output,
         })
     }
 

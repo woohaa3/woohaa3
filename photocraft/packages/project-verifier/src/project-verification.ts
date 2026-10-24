@@ -303,6 +303,7 @@ function inspectManifest(manifest: Record<string, unknown>, embeddedSmart = fals
   }
   const doc = document as Record<string, unknown>;
   if (!isSupportedImageProjectPatterns(doc.patterns)) throw new ProjectVerificationError("unsupported-object", "工程图案资源超限或格式不受支持");
+  if(doc.resolution_dpi!==undefined && (typeof doc.resolution_dpi!=="number" || !Number.isFinite(doc.resolution_dpi) || doc.resolution_dpi<1 || doc.resolution_dpi>10000)) throw new ProjectVerificationError("unsupported-object","工程分辨率须为 1–10000 DPI");
   const size = doc.size;
   if (typeof size !== "object" || size === null) throw new ProjectVerificationError("invalid-manifest", "工程缺少画布尺寸");
   const width = readDimension((size as Record<string, unknown>).width);
@@ -367,6 +368,16 @@ function inspectLayers(
     }
     if (layer.fill_opacity !== undefined && (typeof layer.fill_opacity !== "number" || !Number.isFinite(layer.fill_opacity) || layer.fill_opacity < 0 || layer.fill_opacity > 1)) {
       throw new ProjectVerificationError("unsupported-object", "工程填充不透明度无效");
+    }
+    if(layer.label!==undefined && !["None","Red","Orange","Yellow","Green","Seafoam","Blue","Indigo","Magenta","Fuchsia","Violet","Gray"].includes(layer.label as string)) throw new ProjectVerificationError("unsupported-object","图层颜色标签不受支持");
+    if(layer.link_group!==undefined && layer.link_group!==null && (typeof layer.link_group!=="number" || !Number.isSafeInteger(layer.link_group) || layer.link_group<1)) throw new ProjectVerificationError("unsupported-object","链接组编号必须为安全正整数");
+    if(layer.mask!=null) {
+      if(typeof layer.mask!=="object" || Array.isArray(layer.mask)) throw new ProjectVerificationError("unsupported-object","蒙版属性格式无效");
+      const mask=layer.mask as Record<string,unknown>;
+      for(const [key,max] of [["density",1],["feather",1000]] as const) {
+        const value=mask[key];
+        if(value!==undefined && (typeof value!=="number" || !Number.isFinite(value) || value<0 || value>max)) throw new ProjectVerificationError("unsupported-object","蒙版密度或羽化超出范围");
+      }
     }
     if (layer.effects !== undefined && !isSupportedImageProjectEffects(layer.effects,patterns)) {
       throw new ProjectVerificationError("unsupported-object", "工程包含未开放或超限的图层样式");

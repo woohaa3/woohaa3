@@ -22,14 +22,35 @@ mod transform_preview;
 mod layer_preview;
 mod mask_commands;
 mod text_preview;
+mod text_commands;
+mod text_find_replace;
+mod text_spelling;
+mod text_antialias;
+mod text_orientation;
+mod edge_stroke;
+mod rasterize_commands;
+mod flatten_masks_commands;
 mod text_geometry;
+mod font_preview;
 mod adjustment_preview;
 mod layer_properties_preview;
 mod preview_history;
+mod reorder_preview;
+pub mod export_request;
+mod brush_prefs_check;
 mod layer_locks;
+mod new_layer_options;
 mod layer_layout;
+mod layer_selection_commands;
+mod layer_cleanup_commands;
+mod layer_composite_commands;
+mod image_geometry_commands;
+mod image_extent_commands;
 mod clipping_commands;
+mod retouch_params;
+mod adjust_params_check;
 mod fill_commands;
+mod general_fill;
 mod clipboard_commands;
 mod region_preview;
 mod group_commands;
@@ -53,7 +74,7 @@ pub const UPSTREAM_COMMIT: &str = "4e7a17cd5d5723313f459753663d0d155f047e19";
 pub const UPSTREAM_VERSION: &str = "0.9.0";
 
 /// 宿主能力版本；与 contracts 的当前写入版本一致，不等同于上游来源提交。
-pub const HOST_ENGINE_VERSION: &str = "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-patterns-v1";
+pub const HOST_ENGINE_VERSION: &str = "4e7a17cd5d5723313f459753663d0d155f047e19+woohaa-resolution-v1";
 
 /// 上游 `.pcraft` 格式版本（`photocraft_format::FORMAT_VERSION`）。
 pub const FORMAT_VERSION: u32 = 1;
@@ -136,3 +157,12 @@ mod tests {
 mod contour_presets;
 pub mod pattern_presets;
 mod pattern_library;
+
+mod bucket_command;
+
+mod painting_symmetry;
+
+mod document_status;
+
+mod history_commands;
+mod history_follow;

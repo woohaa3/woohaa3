@@ -63,3 +63,25 @@ it("点选邻近控制点不挪点，拖动保留松手时的最后坐标",()=>{
   send("pointerdown",128,128);send("pointermove",100,160);send("pointerup",90,170);
   expect(change).toHaveBeenLastCalledWith([[0,0],[90,170],[255,255]]);
 });
+
+it("曲线点方向键按1/Shift10级调整并夹紧，输入字段与组合输入不被图形快捷键截走",()=>{
+ const {graph,container,change,end,send}=setup();send("pointerdown",128,128);send("pointerup",128,128);change.mockClear();end.mockClear();
+ const key=(target:Element,key:string,options:KeyboardEventInit={})=>act(()=>target.dispatchEvent(new KeyboardEvent("keydown",{key,bubbles:true,cancelable:true,...options})));
+ key(graph,"ArrowRight");expect(change).toHaveBeenLastCalledWith([[0,0],[129,128],[255,255]]);key(graph,"ArrowUp",{shiftKey:true});expect(change).toHaveBeenLastCalledWith([[0,0],[129,138],[255,255]]);expect(end.mock.calls).toEqual([[true],[true]]);
+ for(let i=0;i<30;i++)key(graph,"ArrowUp",{shiftKey:true});expect(change.mock.lastCall?.[0][1][1]).toBe(255);const calls=change.mock.calls.length;
+ key(graph,"ArrowDown",{isComposing:true});key(graph,"ArrowDown",{altKey:true});expect(change).toHaveBeenCalledTimes(calls);const commits=end.mock.calls.length;key(container.querySelector("input")!,"ArrowDown");expect(change.mock.lastCall?.[0][1]).toEqual([129,255]);expect(end).toHaveBeenCalledTimes(commits);
+});
+it("曲线右键和Ctrl/Cmd点击删除命中中间点，端点与空白不能误删或增点",()=>{
+ const {graph,change,end,send}=setup();
+ const event=(type:string,x:number,y:number,options:MouseEventInit={})=>{const next=new MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:255-y,button:0,...options});Object.defineProperty(next,"pointerId",{value:1});act(()=>graph.dispatchEvent(next));return next;};
+ expect(event("contextmenu",0,0,{button:2}).defaultPrevented).toBe(true);expect(change).not.toHaveBeenCalled();
+ event("pointerdown",60,60,{ctrlKey:true});send("pointerup",60,60);expect(change).not.toHaveBeenCalled();
+ event("contextmenu",128,128,{button:2});expect(change).toHaveBeenLastCalledWith([[0,0],[255,255]]);expect(end).toHaveBeenCalledOnce();
+ send("pointerdown",100,150);send("pointerup",100,150);event("pointerdown",100,150,{metaKey:true});send("pointerup",100,150);expect(change).toHaveBeenLastCalledWith([[0,0],[255,255]]);expect(end).toHaveBeenCalledTimes(3);
+});
+it("曲线点越过12px删除、拖回恢复，同次候选仅松手结算；取消恢复且迟到释放不写",()=>{
+ const {graph,change,end,send,key}=setup();send("pointerdown",128,128);send("pointermove",-11,100);expect(change.mock.lastCall?.[0]).toHaveLength(3);
+ send("pointermove",-13,100);expect(change).toHaveBeenLastCalledWith([[0,0],[255,255]]);expect(end).not.toHaveBeenCalled();send("pointermove",80,150);expect(change).toHaveBeenLastCalledWith([[0,0],[80,150],[255,255]]);send("pointerup",80,150);expect(end.mock.calls).toEqual([[true]]);
+ send("pointerdown",80,150);send("pointermove",-20,100);key(graph,"Escape");expect(change).toHaveBeenLastCalledWith([[0,0],[80,150],[255,255]]);send("pointerup",-20,100);expect(end.mock.calls).toEqual([[true],[false]]);
+ send("pointerdown",0,0);send("pointermove",-20,100);send("pointerup",-20,100);expect(change.mock.lastCall?.[0]).toHaveLength(3);
+});

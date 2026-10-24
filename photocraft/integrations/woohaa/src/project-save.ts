@@ -37,10 +37,10 @@ export type UploadedObject = {
 };
 
 export type ProjectSaveDeps = {
-  /** 上传工程对象（受控工程入口）。失败返回 null。 */
-  uploadProject: (bytes: Uint8Array) => Promise<UploadedObject | null>;
+  /** 上传工程对象（受控工程入口）。失败返回 null。`onProgress` 为真实字节上传进度 0–100。 */
+  uploadProject: (bytes: Uint8Array, onProgress?: (percent: number) => void) => Promise<UploadedObject | null>;
   /** 上传合成 PNG。失败返回 null。 */
-  uploadOutput: (bytes: Uint8Array) => Promise<UploadedObject | null>;
+  uploadOutput: (bytes: Uint8Array, onProgress?: (percent: number) => void) => Promise<UploadedObject | null>;
   /** 调用 edit-complete。 */
   complete: (request: ImageEditCompleteRequest) => Promise<EditCompleteResult>;
   status?: (request: Pick<ImageEditCompleteRequest, "canvasId" | "nodeId" | "requestId">) => Promise<EditCompleteResult>;
@@ -48,6 +48,12 @@ export type ProjectSaveDeps = {
   assetIdFor: (checksum: string) => string;
   /** 摘要实现（测试注入；缺省 `crypto.subtle`）。 */
   digest?: (bytes: Uint8Array) => Promise<string>;
+  /**
+   * 真实保存进度（0–100）。
+   *
+   * 只由本模块按宿主上报的字节上传进度转发；宿主没有进度时根本不调用，界面也就不会出现百分比。
+   */
+  onProgress?: (percent: number) => void;
 };
 
 export type ProjectSaveInput = {
@@ -137,15 +143,27 @@ export async function saveImageProject(input: ProjectSaveInput, deps: ProjectSav
   }
 
   // 3. 上传两个对象。
+  //
+  // 进度只在宿主上报**真实字节进度**时转发：工程对象占 0–50、输出对象占 50–100；摘要校验与
+  // 回执等待不折算成假百分比。`attempt` 已复用的上传直接跳到对应阶段之后。
   let uploadReason = "";
   const failedUpload = (error: unknown) => { uploadReason = error instanceof Error ? error.message : ""; return null; };
-  const uploadedProject = attempt.project ?? await deps.uploadProject(artifacts.project).catch(failedUpload);
-  if (!uploadedProject) return failure("project-upload-failed", uploadReason ? `工程对象上传失败：${uploadReason}` : "工程对象上传失败，未提交内容", true);
-  attempt.project = uploadedProject;
-  const uploadedOutput = attempt.output ?? await deps.uploadOutput(artifacts.output).catch(failedUpload);
-  if (!uploadedOutput) return failure("output-upload-failed", uploadReason ? `合成输出上传失败：${uploadReason}` : "合成输出上传失败，未提交内容", true);
-
-  attempt.output = uploadedOutput;
+  const report = (base: number, span: number) => (percent: number) => {
+    if (!Number.isFinite(percent)) return;
+    deps.onProgress?.(base + Math.min(1, Math.max(0, percent / 100)) * span);
+  };
+  let uploadedProject: UploadedObject | null = attempt.project ?? null;
+  if (!uploadedProject) {
+    uploadedProject = await deps.uploadProject(artifacts.project, report(0, 50)).catch(failedUpload);
+    if (!uploadedProject) return failure("project-upload-failed", uploadReason ? `工程对象上传失败：${uploadReason}` : "工程对象上传失败，未提交内容", true);
+    attempt.project = uploadedProject;
+  }
+  let uploadedOutput: UploadedObject | null = attempt.output ?? null;
+  if (!uploadedOutput) {
+    uploadedOutput = await deps.uploadOutput(artifacts.output, report(50, 50)).catch(failedUpload);
+    if (!uploadedOutput) return failure("output-upload-failed", uploadReason ? `合成输出上传失败：${uploadReason}` : "合成输出上传失败，未提交内容", true);
+    attempt.output = uploadedOutput;
+  }
 
   // 4. 组装工程定义：直接采用本次冻结修订的内容，不沿用旧定义。
   const projectDocument = buildProjectDocument({

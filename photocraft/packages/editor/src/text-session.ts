@@ -1,7 +1,10 @@
+import type {TextAntialias} from "./text-antialias.js";
 /** 文字草稿的帧调度和输入法门禁；不持有文档或自行排版。 */
 import type { EditorWorkspaceController } from "./editor-workspace.js";
 
 export type TextDraft = {
+  orientation?:"horizontal"|"vertical";
+  antialias?:TextAntialias;
   text: string;
   font: "Inter" | "Noto Sans SC";
   size: number;
@@ -9,8 +12,8 @@ export type TextDraft = {
   fauxBold: boolean;
   align: "left" | "center" | "right";
 };
-export type TextPlacement = { layer: number } | { x: number; y: number; box?: [number, number, number, number] };
-type TextPort = Pick<EditorWorkspaceController, "beginText" | "previewText" | "commitText" | "cancelText">;
+export type TextPlacement = { layer: number; x?:number; y?:number } | { x: number; y: number; box?: [number, number, number, number]; forceNew?:boolean };
+type TextPort = Pick<EditorWorkspaceController, "beginText" | "previewText" | "commitText" | "cancelText" | "checkpointText">;
 
 export class TextSession {
   private frame: number | null = null;
@@ -85,6 +88,13 @@ export class TextSession {
     this.generation++;
     this.refresh();
     return true;
+  }
+
+  checkpoint(): boolean {
+    if(!this.active || this.composing) {this.error("请先完成输入法选词，再保存文字");return false;}
+    if(!this.flush()) return false;
+    const result=this.controller.checkpointText();if(!result.ok) {this.error(result.message);return false;}
+    this.onInfo(result.value);this.refresh();return true;
   }
 
   /** 点击/导航前补齐未到下一帧的输入，避免使用上一版布局。 */

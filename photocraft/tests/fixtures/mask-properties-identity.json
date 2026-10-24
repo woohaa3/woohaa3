@@ -1,0 +1,444 @@
+[
+  {
+    "name": "legacy",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": "canvas:16x16\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef|pixel:-:0123456789abcdef",
+    "hash": "73820997bc1028df"
+  },
+  {
+    "name": "explicit-defaults",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "density": 1,
+            "feather": 0
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": "canvas:16x16\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef|pixel:-:0123456789abcdef",
+    "hash": "73820997bc1028df"
+  },
+  {
+    "name": "density",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "density": 0.37
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": "canvas:16x16\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef:properties:1052602532,0|pixel:-:0123456789abcdef",
+    "hash": "1c5f2072365d5f02"
+  },
+  {
+    "name": "feather",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "feather": 4.25
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": "canvas:16x16\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef:properties:1065353216,1082654720|pixel:-:0123456789abcdef",
+    "hash": "51dfa332a83275f1"
+  },
+  {
+    "name": "both",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "density": 0.25,
+            "feather": 1000
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": "canvas:16x16\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef:properties:1048576000,1148846080|pixel:-:0123456789abcdef",
+    "hash": "3e45fdd730e1babf"
+  },
+  {
+    "name": "zero",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "density": 0,
+            "feather": 0
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": "canvas:16x16\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef:properties:0,0|pixel:-:0123456789abcdef",
+    "hash": "74f263c9a1c18fb0"
+  },
+  {
+    "name": "density-too-high",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "density": 1.1
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": null,
+    "hash": null
+  },
+  {
+    "name": "negative-feather",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "feather": -1
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": null,
+    "hash": null
+  },
+  {
+    "name": "feather-too-high",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "feather": 1001
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": null,
+    "hash": null
+  },
+  {
+    "name": "null-density",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "density": null
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": null,
+    "hash": null
+  },
+  {
+    "name": "string-feather",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef",
+            "feather": "2"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": null,
+    "hash": null
+  }
+]

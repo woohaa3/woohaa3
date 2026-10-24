@@ -5,7 +5,7 @@ import type {EditorDisplayControls} from "./editor-display.js";
 
 type Drag={kind:"width"|"position"|"split"|"size";x:number;y:number;base:EditorPanelLayout;pointer:number;target:HTMLElement;span:number};
 /** 面板只改变显示偏好；公共 FocusWorkspace 继续持有内容矩形。 */
-export function EditorSidebar({display,disabled,canChange,layers,history,properties}:{display:EditorDisplayControls;disabled:boolean;canChange?:()=>boolean;layers:ReactNode;history:ReactNode;properties:ReactNode}) {
+export function EditorSidebar({display,disabled,canChange,layers,history,properties,info}:{display:EditorDisplayControls;disabled:boolean;canChange?:()=>boolean;layers:ReactNode;history:ReactNode;properties:ReactNode;info?:ReactNode}) {
   const layout=display.state.panelLayout??DEFAULT_PANEL_LAYOUT;
   const drag=useRef<Drag|null>(null);
   const stack=useRef<HTMLDivElement>(null);
@@ -44,6 +44,7 @@ export function EditorSidebar({display,disabled,canChange,layers,history,propert
       <span>{layout.floating?"浮动面板":"面板"}</span>
       <Button size="sm" tone="ghost" disabled={disabled || !update} onClick={()=>{if(canChange?.()!==false) update?.({floating:!layout.floating});}}>{layout.floating?"停靠右侧":"浮动"}</Button>
     </header>
+    {info}
     <div className="photo-editor__panel-slot photo-editor__panel-slot--properties" data-collapsed={layout.propertiesCollapsed}>{properties}</div>
     <div className="photo-editor__panel-stack" ref={stack}>
       <div className="photo-editor__panel-slot" data-collapsed={layout.layersCollapsed} style={{flex:layout.layersCollapsed?"0 0 38px":`${layout.split} 1 0`}}>{layers}</div>

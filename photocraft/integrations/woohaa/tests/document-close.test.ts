@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { planCloseDocument, planLeave, settleSerially, type DocumentSettlementItem } from "../src/document-close.js";
 import { settleDocument } from "../src/document-settlement.js";
 import { IMAGE_PROJECT_CONTENT_TYPE, PHOTOCRAFT_ENGINE_VERSION } from "@woohaa3/contracts";
-import { classifyOpenFile, projectVersionSupported, validateOpenProjectDocument } from "../src/open-file.js";
+import { OPEN_FILE_ACCEPT,classifyOpenFile, projectVersionSupported, validateOpenProjectDocument } from "../src/open-file.js";
 import { canOpenDocument, DEFAULT_WORKSPACE_POLICY, SerialGate, shouldProducePreview } from "../src/workspace-policy.js";
 
 function item(overrides: Partial<DocumentSettlementItem> = {}): DocumentSettlementItem {
@@ -221,4 +221,18 @@ describe("工作区资源政策", () => {
     await expect(failing.run(async () => { throw new Error("boom"); })).rejects.toThrow("boom");
     await expect(failing.run(async () => "ok")).resolves.toBe("ok");
   });
+});
+
+
+it("Open筛选仅列明确支持格式，未知二进制不以octet-stream泛选；无MIME工程仍按扩展名打开",()=>{
+  const accept=OPEN_FILE_ACCEPT.split(",");
+  expect(new Set(accept)).toEqual(new Set(["image/png","image/jpeg","image/webp",".png",".jpg",".jpeg",".webp",".pcraft"]));
+  for(const name of ["source.xcf","palette.act","binary.bin","source.psd","source.psb","frames.mp4"]){
+    expect(accept).not.toContain(name.slice(name.lastIndexOf(".")));
+    expect(classifyOpenFile({name,type:"application/octet-stream"})).toMatchObject({ok:false});
+  }
+  for(const type of ["","application/octet-stream"]){
+    expect(classifyOpenFile({name:"Project.PCRAFT",type})).toEqual({ok:true,kind:"project"});
+    for(const name of ["a.PNG","a.JPG","a.JPEG","a.WEBP"])expect(classifyOpenFile({name,type})).toEqual({ok:true,kind:"image"});
+  }
 });

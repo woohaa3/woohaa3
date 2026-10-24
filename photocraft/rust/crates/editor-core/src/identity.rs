@@ -78,6 +78,11 @@ pub fn canonicalize(content: &Value) -> Option<String> {
         return None;
     }
     let mut lines = vec![format!("canvas:{canvas_width}x{canvas_height}")];
+    if let Some(value)=content.get("resolutionDpi") {
+        let dpi=value.as_f64()?;
+        if !dpi.is_finite() || !(1.0..=10000.0).contains(&dpi) {return None;}
+        if dpi as f32!=72.0 {lines.push(format!("resolution:{}",(dpi as f32).to_bits()));}
+    }
     if let Some(value)=content.get("patternContentHash") {
         let hash=value.as_str()?;
         if hash.len()!=16 || !hash.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {return None;}
@@ -118,6 +123,10 @@ fn canonicalize_layer(layer: &Value, depth: usize, count: &mut usize,groups:&mut
             format!("|effects:{}:{hash}", if enabled {1} else {0})
         }
     };
+    let label=match layer.get("labelColor") {None=>"none",Some(value)=>value.as_str()?};
+    if photocraft_doc::LabelColor::from_id(label).is_none() {return None;}
+    let mut metadata=if label=="none" {String::new()} else {format!("|label:{label}")};
+    if let Some(value)=layer.get("linkGroup") {let link=positive_integer(value)?;if link>photocraft_project_verify::MAX_LAYERS as u64 {return None;}metadata+=&format!("|link:{link}");}
     let blend = layer.get("blend")?.as_str()?;
     if !(photocraft_project_verify::blend_modes::PHOTOSHOP_BLEND_NAMES.contains(&blend) || blend == "pass-through") || (blend == "pass-through" && kind != "group") {
         return None;
@@ -177,7 +186,7 @@ fn canonicalize_layer(layer: &Value, depth: usize, count: &mut usize,groups:&mut
             mask,
             body,
         ]
-        .join("|") + &locks + clipped + &fill + &effects,
+        .join("|") + &locks + clipped + &fill + &effects + &metadata,
     )
 }
 
@@ -228,8 +237,12 @@ fn canonicalize_mask(mask: &Value) -> Option<String> {
     if !is_hash16(hash) {
         return None;
     }
+    let density=match mask.get("density") {None=>1.0,Some(v)=>v.as_f64()?};
+    let feather=match mask.get("feather") {None=>0.0,Some(v)=>v.as_f64()?};
+    if !density.is_finite() || !(0.0..=1.0).contains(&density) || !feather.is_finite() || !(0.0..=1000.0).contains(&feather) {return None;}
+    let properties=if density==1.0 && feather==0.0 {String::new()} else {format!(":properties:{},{}",(if density==0.0 {0.0_f32} else {density as f32}).to_bits(),(if feather==0.0 {0.0_f32} else {feather as f32}).to_bits())};
     Some(format!(
-        "mask:{}:{origin}:{hash}{}",
+        "mask:{}:{origin}:{hash}{}{properties}",
         if enabled { "1" } else { "0" },
         if linked {""} else {":unlinked"}
     ))

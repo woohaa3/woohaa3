@@ -11,7 +11,7 @@
  * 锁定；不得用于复制已有 Lucide 通用操作图标。
  */
 import {
-  Activity,
+  Activity,PaintBucket,Pencil,Pipette,
   AppWindow,
 
   AlignHorizontalJustifyStart,
@@ -51,6 +51,8 @@ import {
   ClockArrowLeft,
   Cloud,
   Copy,
+  Scissors,
+  MousePointer2,
   CornerDownRight,
   Crosshair,
   Database,
@@ -148,6 +150,8 @@ export const FitScreenIcon = withDefaults(Maximize);
 // 关闭 / 复制 / 确认
 export const CloseIcon = withDefaults(X);
 export const CopyIcon = withDefaults(Copy);
+export const CutIcon = withDefaults(Scissors);
+export const PointerIcon = withDefaults(MousePointer2);
 export const RestoreWindowIcon = withDefaults(Copy);
 export const CheckIcon = withDefaults(Check);
 
@@ -302,3 +306,10 @@ export const AlignBottomIcon = withDefaults(AlignVerticalJustifyEnd);
 
 /** 图层剪贴到下方基底。 */
 export const ClippingMaskIcon = withDefaults(CornerDownRight);
+
+export const PaintBucketIcon=withDefaults(PaintBucket);
+
+export const PencilIcon=withDefaults(Pencil);
+
+
+export const PipetteIcon=withDefaults(Pipette);

@@ -1,3 +1,6 @@
+import {decodeHistogram,type HistogramReadout} from "./histogram-data.js";
+import {validatePixelGridRegion,decodePixelGrid,type PixelGridRegion,type PixelGridSegment} from "./pixel-grid-data.js";
+import {decodeInfoReadout,type InfoReadout,type InfoRequest} from "./info-readout.js";
 /**
  * 编辑内核的 wasm 绑定与加载器
  * （change: 2026-10-16-integrate-photocraft-image-editing，任务 3.1/3.2 / design D1/D3）。
@@ -20,6 +23,7 @@ import { editorMetric, editorPhase, editorPreview, type EditorAssetPort } from "
 
 /** 合成预览。 */
 export type EditorPreview = { width: number; height: number; pixels: Uint8Array };
+export type MoveHover={layer:number;frame:[number,number,number,number]};
 /** 源像素区域，不接受目标层或缩放参数。 */
 export type EditorPreviewRegion = { x: number; y: number; width: number; height: number };
 
@@ -35,6 +39,14 @@ export type EditorExportBundle = {
   project: Uint8Array;
   output: Uint8Array;
 };
+
+function readExportBundle(bundle:{revision:number;documentContentHash:string;canvasWidth:number;canvasHeight:number;project:Uint8Array;output:Uint8Array}):EditorExportBundle {
+  if(!Number.isSafeInteger(bundle.revision)||bundle.revision<0)throw new Error("导出修订无效");
+  if(!Number.isSafeInteger(bundle.canvasWidth)||!Number.isSafeInteger(bundle.canvasHeight)||bundle.canvasWidth<1||bundle.canvasHeight<1)throw new Error("导出尺寸无效");
+  if(!(bundle.output instanceof Uint8Array)||!bundle.output.byteLength)throw new Error("导出字节为空");
+  return {revision:bundle.revision,documentContentHash:bundle.documentContentHash,canvasWidth:bundle.canvasWidth,canvasHeight:bundle.canvasHeight,
+    project:bundle.project instanceof Uint8Array?bundle.project:new Uint8Array(),output:bundle.output};
+}
 
 /** 内核错误。 */
 export type EditorFailure = { ok: false; code: string; message: string };
@@ -64,6 +76,54 @@ function decodePatternLibrary(raw:string):PatternLibraryState {
   return value;
 }
 
+export type CloneSourceSlot = {
+  index:number; source:[number,number]|null; anchor:[number,number]|null; offset:[number,number]|null;
+  layer:number|null; width:number; height:number; linked:boolean; rotation:number; flipH:boolean; flipV:boolean;
+};
+export type CloneSourceOverlay = {show:boolean; opacity:number; clipped:boolean; autoHide:boolean; invert:boolean; blend:"normal"|"darken"|"lighten"|"difference"};
+export type CloneSourceList = {active:number; sources:CloneSourceSlot[]; overlay:CloneSourceOverlay};
+
+const finitePoint=(value:unknown):[number,number]|null=>Array.isArray(value)&&value.length===2&&value.every(item=>typeof item==="number"&&Number.isFinite(item))?[value[0],value[1]]:null;
+function decodeCloneSourceSlot(value:unknown):CloneSourceSlot {
+  const invalid=()=>{throw new Error("克隆源响应无效");};
+  if(!value||typeof value!=="object")return invalid();
+  const slot=value as Record<string,unknown>;
+  const number=(key:string,min:number,max:number,fallback:number)=>{const raw=slot[key];if(raw===undefined)return fallback;if(typeof raw!=="number"||!Number.isFinite(raw)||raw<min||raw>max)return invalid();return raw;};
+  return {index:number("index",0,4,0),
+    source:slot.source===null||slot.source===undefined?null:finitePoint(slot.source)??invalid(),
+    anchor:slot.anchor===null||slot.anchor===undefined?null:finitePoint(slot.anchor)??invalid(),
+    offset:slot.offset===null||slot.offset===undefined?null:finitePoint(slot.offset)??invalid(),
+    layer:slot.layer===null||slot.layer===undefined?null:typeof slot.layer==="number"?slot.layer:invalid(),
+    width:number("width",1,1000,100), height:number("height",1,1000,100),
+    linked:typeof slot.linked==="boolean"?slot.linked:false,
+    rotation:number("rotation",-180,180,0),
+    flipH:typeof slot.flipH==="boolean"?slot.flipH:false,
+    flipV:typeof slot.flipV==="boolean"?slot.flipV:false};
+}
+function decodeCloneSourceOverlay(value:unknown):CloneSourceOverlay {
+  const invalid=()=>{throw new Error("克隆源叠层响应无效");};
+  if(!value||typeof value!=="object")return invalid();
+  const overlay=value as Record<string,unknown>;
+  if(!["normal","darken","lighten","difference"].includes(overlay.blend as string))return invalid();
+  if(typeof overlay.opacity!=="number"||!Number.isFinite(overlay.opacity)||overlay.opacity<0||overlay.opacity>100)return invalid();
+  return {show:typeof overlay.show==="boolean"?overlay.show:false, opacity:overlay.opacity,
+    clipped:typeof overlay.clipped==="boolean"?overlay.clipped:false,
+    autoHide:typeof overlay.autoHide==="boolean"?overlay.autoHide:false,
+    invert:typeof overlay.invert==="boolean"?overlay.invert:false,
+    blend:overlay.blend as CloneSourceOverlay["blend"]};
+}
+/** 严格解码原生 `cloneSource.list`：字段缺失或越界视为无效，不猜测默认值。 */
+export function decodeCloneSourceList(value:unknown):CloneSourceList {
+  const invalid=()=>{throw new Error("克隆源响应无效");};
+  if(!value||typeof value!=="object")return invalid();
+  const data=value as Record<string,unknown>;
+  if(!Array.isArray(data.sources)||data.sources.length!==5)return invalid();
+  if(typeof data.active!=="number"||!Number.isInteger(data.active)||data.active<0||data.active>4)return invalid();
+  const sources=data.sources.map(entry=>decodeCloneSourceSlot(entry));
+  if(sources.some((slot,index)=>slot.index!==index))return invalid();
+  return {active:data.active, sources, overlay:decodeCloneSourceOverlay(data.overlay)};
+}
+
 export type EditorInstance = {
   patternLibrary():string;
   importPatternPresets(bytes:Uint8Array):string;
@@ -75,29 +135,55 @@ export type EditorInstance = {
   importContourPresets(bytes:Uint8Array):string;
   exportContourPreset(contourJson:string):Uint8Array;
   beginLayerProperties(layer:number):string;
+  beginLayerVisibility?(layer:number):string;
+  /** 图层重排的画布预览（I218）：候选只读，可选能力。 */
+  beginReorderPreview?():string;
+  previewReorder?(paramsJson:string):string;
+  endReorderPreview?():string;
   stylePositionFrame(index:number):string;
   previewLayerProperties(paramsJson:string):string;
   commitLayerProperties():string;
   cancelLayerProperties():void;
+  beginImageRotation?():string;
+  previewImageRotation?(params:string):string;
+  commitImageRotation?():string;
+  cancelImageRotation?():void;
+  clipboardBounds?():string;
+  histogram?():string;
+  pixelGrid?(params:string):string;
+  infoReadout?(params:string):string;
+  setPerformancePreferences?(historyStates:number,memoryUsageMb:number):string;
+  setHistoryLimit?(limit:number):string;
   beginAdjustment(layer: number): string;
   previewAdjustment(paramsJson: string): string;
   commitAdjustment(): string;
   cancelAdjustment(): void;
   curveGeometry(pointsJson: string): string;
+  moveHoverAt?(params:string):string;
+  missingFonts?():string;
   beginText(paramsJson: string): string;
   previewText(paramsJson: string): string;
   textGeometry(paramsJson: string): string;
+  checkpointText?(): string;
   commitText(): string;
   cancelText(): void;
   openImage(name: string, assetId: string, bytes: Uint8Array): string;
   openProject(bytes: Uint8Array, baseAssetId: string): string;
   placeImage(name: string, assetId: string, bytes: Uint8Array, paramsJson: string): string;
   saveProject(): Uint8Array;
+  duplicateProject?(name:string):Uint8Array;
   renderPreview(maxSide: number): WasmResource<EditorPreview>;
   renderRegion(paramsJson: string): WasmResource<EditorPreview>;
+  selectionContains?(x:number,y:number):boolean;
   sampleColor(x: number, y: number): string | undefined;
+  sampleColorOptions?(params:string):string|undefined;
+  fontPreview?(family:string,size:number,scale:number):WasmResource<EditorPreview>;
   layerThumbnail(layer: number, mask: boolean, maxSide: number): WasmResource<EditorPreview>;
   exportBundle(): WasmResource<EditorExportBundle>;
+  /** 按导出格式与控制编码当前修订（I045）。 */
+  exportImage?(paramsJson:string): WasmResource<EditorExportBundle>;
+  /** 只读当前画笔（I132），不走命令分派。 */
+  brushGet?():string;
   contentHash(): string;
   assetIdsJson(): string;
   commandsJson(): string;
@@ -198,6 +284,12 @@ export class EditorHandle {
     return this.call((i) => i.saveProject());
   }
 
+  canDuplicateProject():boolean {return typeof this.instance.duplicateProject==="function";}
+  duplicateProject(name:string):EditorResult<Uint8Array> {
+    if(!this.instance.duplicateProject)return {ok:false,code:"capability-disabled",message:"当前编辑器版本不支持复制文档，请更新运行组件"};
+    return this.call(instance=>instance.duplicateProject!(name));
+  }
+
   renderPreview(maxSide: number): EditorResult<EditorPreview> {
     return this.call((i) => {
       return editorPreview("full", () => {
@@ -212,7 +304,42 @@ export class EditorHandle {
     });
   }
 
-  sampleColor(x: number, y: number): EditorResult<string | null> {
+  selectionContains(x:number,y:number):EditorResult<boolean> {
+    return this.call(i=>{if(!i.selectionContains) throw new Error("请更新编辑内核以使用精确选区命中");return i.selectionContains(x,y);});
+  }
+
+  moveHoverAt(params:{x:number;y:number;target:"layer"|"group"}):EditorResult<MoveHover|null> {
+    return this.call(i=>{if(!i.moveHoverAt)throw new Error("当前编辑内核未提供悬停目标，请重新加载编辑器");const value:unknown=JSON.parse(i.moveHoverAt(JSON.stringify(params)));if(value===null)return null;
+      const candidate=value as MoveHover;if(!candidate||!Number.isSafeInteger(candidate.layer)||candidate.layer<=0||!Array.isArray(candidate.frame)||candidate.frame.length!==4||!candidate.frame.every(Number.isFinite)||candidate.frame[2]<=candidate.frame[0]||candidate.frame[3]<=candidate.frame[1])throw new Error("悬停目标信息无效");return candidate;});
+  }
+  /** 只读克隆源快照；面板据此显示五槽与叠层设置，不写文档。 */
+  cloneSourceList():EditorResult<CloneSourceList> {
+    return this.call(i=>decodeCloneSourceList(JSON.parse(i.execute("cloneSource.list",JSON.stringify(null)))));
+  }
+  cloneSourceSelect(index:number):EditorResult<CloneSourceSlot> {
+    return this.call(i=>{const value:unknown=JSON.parse(i.execute("cloneSource.select",JSON.stringify({index})));return decodeCloneSourceSlot(value);});
+  }
+  cloneSourceSet(params:unknown):EditorResult<CloneSourceSlot> {
+    return this.call(i=>{const value:unknown=JSON.parse(i.execute("cloneSource.set",JSON.stringify(params??null)));return decodeCloneSourceSlot(value);});
+  }
+  cloneSourceResetTransform(index:number):EditorResult<CloneSourceSlot> {
+    return this.call(i=>{const value:unknown=JSON.parse(i.execute("cloneSource.resetTransform",JSON.stringify({index})));return decodeCloneSourceSlot(value);});
+  }
+  cloneSourceOverlay(params:unknown):EditorResult<CloneSourceOverlay> {
+    return this.call(i=>{const value:unknown=JSON.parse(i.execute("cloneSource.overlay",JSON.stringify(params??null)));return decodeCloneSourceOverlay(value);});
+  }
+  fontPreview(family:string,size:number,scale:number):EditorResult<EditorPreview> {
+    return this.call(i=>{
+      if(!i.fontPreview)throw new Error("当前编辑内核未提供字体样例");
+      const preview=i.fontPreview(family,size,scale);
+      try{const {width,height,pixels}=preview;if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<1||height<1||width>888||height>212||!(pixels instanceof Uint8Array)||pixels.length!==width*height*4)throw new Error("字体样例数据无效");return {width,height,pixels};}finally{preview.free?.();}
+    });
+  }
+  missingFonts():EditorResult<string[]> {
+    return this.call(i=>{if(!i.missingFonts)throw new Error("当前编辑内核未提供缺失字体查询，请重新加载编辑器");const value:unknown=JSON.parse(i.missingFonts());if(!Array.isArray(value)||value.some(item=>typeof item!=="string"))throw new Error("缺失字体信息无效");return value as string[];});
+  }
+  sampleColor(x: number, y: number,options?:{size:number;sampleLayer:string}): EditorResult<string | null> {
+    if(options && (options.size!==1 || options.sampleLayer!=="all"))return this.call(i=>{if(!i.sampleColorOptions)throw new Error("当前编辑内核未提供取样选项，请重新加载编辑器");return i.sampleColorOptions(JSON.stringify({x,y,...options}))??null;});
     return this.call((i) => i.sampleColor(x, y) ?? null);
   }
 
@@ -243,6 +370,18 @@ export class EditorHandle {
   }
 
   /** 冻结导出：同一修订的工程与 PNG。 */
+  brushGet():EditorResult<unknown> {
+    return this.call(i=>{if(!i.brushGet)throw new Error("当前编辑内核未提供只读画笔查询");return JSON.parse(i.brushGet());});
+  }
+
+  exportImage(params:unknown):EditorResult<EditorExportBundle> {
+    return this.call(i=>{
+      if(!i.exportImage)throw new Error("当前编辑内核未提供导出格式，请更新编辑内核");
+      const bundle=i.exportImage(JSON.stringify(params));
+      try{return readExportBundle(bundle);}finally{bundle.free?.();}
+    });
+  }
+
   exportBundle(): EditorResult<EditorExportBundle> {
     return this.call((i) => {
       const bundle = i.exportBundle();
@@ -286,6 +425,27 @@ export class EditorHandle {
     return this.call((i) => i.beginStroke(JSON.stringify(params)));
   }
 
+  beginImageRotation():EditorResult<unknown> {return this.call(i=>{if(!i.beginImageRotation)throw new Error("请更新编辑内核以预览画布旋转");return JSON.parse(i.beginImageRotation());});}
+  previewImageRotation(params:unknown):EditorResult<unknown> {return this.call(i=>{if(!i.previewImageRotation)throw new Error("请更新编辑内核以预览画布旋转");return JSON.parse(i.previewImageRotation(JSON.stringify(params)));});}
+  commitImageRotation():EditorResult<unknown> {return this.call(i=>{if(!i.commitImageRotation)throw new Error("请更新编辑内核以预览画布旋转");return JSON.parse(i.commitImageRotation());});}
+  cancelImageRotation():EditorResult<void> {return this.call(i=>i.cancelImageRotation?.());}
+  clipboardBounds():EditorResult<[number,number,number,number]|null> {return this.call(i=>{if(!i.clipboardBounds)throw new Error("请更新编辑内核以读取内部剪贴板位置");const bounds:unknown=JSON.parse(i.clipboardBounds());if(bounds===null)return null;if(!Array.isArray(bounds)||bounds.length!==4||bounds.some(n=>!Number.isSafeInteger(n))||bounds[2]<=bounds[0]||bounds[3]<=bounds[1])throw new Error("内部剪贴板边界无效");return bounds as [number,number,number,number];});}
+  histogram():EditorResult<HistogramReadout> {return this.call(i=>{if(!i.histogram)throw new Error("请更新编辑内核以读取直方图");return decodeHistogram(JSON.parse(i.histogram()));});}
+  pixelGrid(params:PixelGridRegion):EditorResult<PixelGridSegment[]> {return this.call(i=>{validatePixelGridRegion(params);if(!i.pixelGrid)throw new Error("请更新编辑内核以显示像素网格");return decodePixelGrid(JSON.parse(i.pixelGrid(JSON.stringify(params))),params);});}
+  infoReadout(params:InfoRequest):EditorResult<InfoReadout> {return this.call(i=>{if(!(params.x===null&&params.y===null)&&!(typeof params.x==="number"&&Number.isFinite(params.x)&&typeof params.y==="number"&&Number.isFinite(params.y)))throw new Error("信息取样坐标无效");if(!Number.isSafeInteger(params.size)||![1,3,5,11,31,51,101].includes(params.size))throw new Error("信息取样尺寸无效");if(!i.infoReadout)throw new Error("请更新编辑内核以读取信息面板");return decodeInfoReadout(JSON.parse(i.infoReadout(JSON.stringify(params))));});}
+  setPerformancePreferences(historyStates:number,memoryUsageMb:number):EditorResult<unknown> {return this.call(i=>{
+    if(!Number.isInteger(historyStates)||historyStates<1||historyStates>1000||!Number.isInteger(memoryUsageMb)||memoryUsageMb<256||memoryUsageMb>1048576)throw new Error("无效的历史状态数量或内存预算");
+    if(i.setPerformancePreferences)return JSON.parse(i.setPerformancePreferences(historyStates,memoryUsageMb));
+    if(memoryUsageMb!==8192)throw new Error("请更新编辑内核以设置内存预算");
+    if(i.setHistoryLimit)return JSON.parse(i.setHistoryLimit(historyStates));
+    if(historyStates===50)return {historyStates,memoryUsageMb};
+    throw new Error("请更新编辑内核以设置性能偏好");
+  });}
+  setHistoryLimit(limit:number):EditorResult<unknown> {return this.call(i=>{
+    if(!Number.isInteger(limit) || limit<1 || limit>1000)throw new Error("历史状态数量须为 1–1000 的整数");
+    if(!i.setHistoryLimit){if(limit===50)return {historyStates:50};throw new Error("请更新编辑内核以设置历史状态数量");}
+    return JSON.parse(i.setHistoryLimit(limit));
+  });}
   beginAdjustment(layer: number): EditorResult<unknown> { return this.call((i)=>JSON.parse(i.beginAdjustment(layer))); }
   patternLibrary():EditorResult<PatternLibraryState> {return this.call(i=>decodePatternLibrary(i.patternLibrary()));}
   importPatternPresets(bytes:Uint8Array):EditorResult<PatternLibraryState> {return this.call(i=>{
@@ -309,7 +469,19 @@ export class EditorHandle {
   }
   exportContourPreset(contour:unknown):EditorResult<Uint8Array> {return this.call(i=>i.exportContourPreset(JSON.stringify(contour)));}
   beginLayerProperties(layer:number):EditorResult<unknown> {return this.call(i=>JSON.parse(i.beginLayerProperties(layer)));}
+  beginLayerVisibility(layer:number):EditorResult<unknown> {
+    return this.call(i=>{if(!i.beginLayerVisibility) throw new Error("当前内核未提供可取消显隐扫动，请更新编辑内核");return JSON.parse(i.beginLayerVisibility(layer));});
+  }
   previewLayerProperties(params:unknown):EditorResult<unknown> {return this.call(i=>JSON.parse(i.previewLayerProperties(JSON.stringify(params))));}
+  beginReorderPreview():EditorResult<unknown> {
+    return this.call(i=>{if(!i.beginReorderPreview) throw new Error("当前内核未提供图层重排预览，请更新编辑内核");return JSON.parse(i.beginReorderPreview());});
+  }
+  previewReorder(params:unknown):EditorResult<unknown> {
+    return this.call(i=>{if(!i.previewReorder) throw new Error("当前内核未提供图层重排预览，请更新编辑内核");return JSON.parse(i.previewReorder(JSON.stringify(params)));});
+  }
+  endReorderPreview():EditorResult<boolean> {
+    return this.call(i=>{if(!i.endReorderPreview) return false;const value:unknown=JSON.parse(i.endReorderPreview());return !!(value&&typeof value==="object"&&(value as {active?:unknown}).active===true);});
+  }
   stylePositionFrame(index:number):EditorResult<StyleGradientFrame> {
     return this.call(i=>{
       if(!Number.isInteger(index) || index<0 || index>=64) throw new Error("定位效果索引无效");
@@ -335,10 +507,14 @@ export class EditorHandle {
   textGeometry(params: TextGeometryRequest): EditorResult<TextGeometry> {
     return this.call((i) => decodeTextGeometry(JSON.parse(i.textGeometry(JSON.stringify(params)))));
   }
+  checkpointText(): EditorResult<unknown> {
+    return this.call(i=>{if(!i.checkpointText) throw new Error("请更新编辑内核以在文字编辑期间保存");return JSON.parse(i.checkpointText());});
+  }
+
   commitText(): EditorResult<unknown> { return this.call((i)=>JSON.parse(i.commitText())); }
   cancelText(): EditorResult<void> { return this.call((i)=>i.cancelText()); }
 
-  beginMove(params: { x: number; y: number; autoSelect: boolean; duplicate: boolean }): EditorResult<boolean> { return this.call((i) => i.beginMove(JSON.stringify(params))); }
+  beginMove(params: { x: number; y: number; autoSelect: boolean; duplicate: boolean; wholeLayer?: boolean; selectedPixels?: boolean }): EditorResult<boolean> { return this.call((i) => i.beginMove(JSON.stringify(params))); }
 
   beginTransform(selectionOnly = false): EditorResult<void> { return this.call((i) => selectionOnly ? i.beginSelectionTransform() : i.beginTransform()); }
   previewTransform(matrix: readonly number[]): EditorResult<void> { return this.call((i) => i.previewTransform(JSON.stringify(matrix))); }

@@ -26,3 +26,15 @@ it("工具和侧栏占位只通过公共布局变化，菜单保留，边界开�
   expect(hidden.tools).toBe(0);expect(hidden.panelWidth).toBe(0);expect(hidden.toolbar).toBe(44);
   expect(hidden.contentRect.height-full.contentRect.height).toBe(52);
 });
+
+ it("工具栏/选项栏/侧栏八种组合按Tab原样恢复，布局各自占位",()=>{
+ for(let bits=0;bits<8;bits++){
+  const state={...INITIAL_EDITOR_DISPLAY,toolsVisible:!!(bits&1),optionsVisible:!!(bits&2),sidebarVisible:!!(bits&4)};
+  const hidden=toggleEditorDisplay(state,"panels"),restored=toggleEditorDisplay(hidden,"panels");
+  if(bits){expect(hidden.toolsVisible||hidden.optionsVisible||hidden.sidebarVisible).toBe(false);expect(restored).toEqual(state);}
+  else expect(hidden.toolsVisible&&hidden.optionsVisible&&hidden.sidebarVisible).toBe(true);
+ }
+ const tools=toggleEditorDisplay(INITIAL_EDITOR_DISPLAY,"tools"),options=toggleEditorDisplay(INITIAL_EDITOR_DISPLAY,"options");
+ expect(tools.optionsVisible).toBe(true);expect(editorDisplayLayout(tools)).toMatchObject({toolColumn:0,toolbar:96});
+ expect(options.toolsVisible).toBe(true);expect(editorDisplayLayout(options)).toMatchObject({toolColumn:52,toolbar:44});
+ });

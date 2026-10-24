@@ -15,7 +15,7 @@
  * 本模块不 import 宿主私有实现；节点解析、字节加载与交付端口由插件注入。
  */
 import type { ImageProjectDocument } from "@woohaa3/contracts";
-import type { EditorDocumentRegistry, EditorDocumentEntry, EditorDocumentStatus } from "@woohaa3/photocraft-editor";
+import type { EditorDocumentRegistry, EditorDocumentEntry, EditorDocumentStatus, WorkspacePurgeId, WorkspacePurgePort } from "@woohaa3/photocraft-editor";
 import type { EditorWorkspaceController } from "./editor-workspace.js";
 import type { DocumentDirtyState, EditorDocumentView } from "./document-view.js";
 import { FileDocumentWorkspace, type FileDocumentKind } from "./file-document-workspace.js";
@@ -67,6 +67,23 @@ export type EditSessionBaseline =
   | { ok: true; baselineContentIdentity: string }
   | { ok: false; message: string };
 
+/**
+ * 一次受控的文件打开（I069）。
+ *
+ * 宿主在读取/解码**之前**调用 `begin` 拿到占位 id，把真实进度写进标签；用户可以随时取消，
+ * 取消后不得注册文档或改动活动项。三步都是幂等的：迟到进度被忽略，完成后不能再取消。
+ */
+export type ControlledFileOpen = {
+  id: string;
+  cancelled: () => boolean;
+  /** 上报读取/解码进度（0–100，单调）。 */
+  progress: (percent: number) => void;
+  /** 用最终字节完成打开并激活；已取消时返回 `null` 表示不写入。 */
+  complete: (input: Omit<OpenFileInput, "fileName"> & { fileName?: string }) => DocumentOpenOutcome | null;
+  /** 显式失败：移除占位条目并返回原因。 */
+  fail: (reason: string) => void;
+};
+
 export type DocumentWorkspaceDeps = {
   /** 当前工作画布 id（节点身份与上传都带它）。 */
   canvasId: () => string;
@@ -83,7 +100,8 @@ export type DocumentWorkspaceDeps = {
 };
 
 export type OpenNodeInput = { nodeId: string; name: string; writable: boolean };
-export type OpenFileInput = { fileName: string; bytes: Uint8Array; kind: FileDocumentKind };
+export type OpenFileInput = {
+  initiallyUnsaved?:boolean; fileName: string; bytes: Uint8Array; kind: FileDocumentKind };
 
 export type DocumentOpenOutcome =
   | { ok: true; documentId: string; created: boolean }
@@ -124,6 +142,38 @@ export class DocumentWorkspaceSession {
 
   resource(documentId: string): DocumentResource | null {
     return this.resources.get(documentId) ?? null;
+  }
+
+  /** 清理应用内存覆盖所有独立控制器；同步整批预检后才开始清理。 */
+  purgePort():WorkspacePurgePort {
+    const ids:WorkspacePurgeId[]=["edit.purge.clipboard","edit.purge.histories","edit.purge.all"];
+    return {commands:Object.fromEntries(ids.map(id=>[id,this.purgeAvailability(id)])) as WorkspacePurgePort["commands"],execute:id=>this.purge(id)};
+  }
+  private purgeTargets(id:WorkspacePurgeId):EditorWorkspaceController[] {
+    return [...this.resources.values()].flatMap(resource=>resource.controller && resource.controller.snapshot().commands.get(id)?.allowed && resource.controller.snapshot().commands.get(id)?.enabled?[resource.controller]:[]);
+  }
+  private purgeAvailability(id:WorkspacePurgeId):{enabled:boolean;reason?:string} {
+    if(this.disposed) return {enabled:false,reason:"工作区已释放"};
+    const targets=this.purgeTargets(id);
+    if(!targets.length) return {enabled:false,reason:"没有可清理的内容"};
+    if(targets.some(controller=>!controller.canDispatchCommands())) return {enabled:false,reason:"请先结束所有文档中的编辑或保存"};
+    return {enabled:true};
+  }
+  private purge(id:WorkspacePurgeId):{ok:boolean;message?:string} {
+    if(!["edit.purge.clipboard","edit.purge.histories","edit.purge.all"].includes(id)) return {ok:false,message:"未知清理命令"};
+    const availability=this.purgeAvailability(id);
+    if(!availability.enabled) return {ok:false,message:availability.reason};
+    const targets=this.purgeTargets(id);
+    for(const [index,controller] of targets.entries()) {
+      // 缓存由整个WASM实例共享；All仅清一次，其他控制器分别释放自身历史与剪贴板。
+      const commands=id==="edit.purge.all" && index>0?["edit.purge.histories","edit.purge.clipboard"]:[id];
+      for(const command of commands) {
+        if(!controller.snapshot().commands.get(command)?.enabled) continue;
+        const result=controller.dispatch(command);
+        if(!result.ok) return {ok:false,message:result.message};
+      }
+    }
+    this.deps.onChange?.();return {ok:true};
   }
 
   /** 已打开文档数（上限判定用）。 */
@@ -180,25 +230,96 @@ export class DocumentWorkspaceSession {
     if (this.disposed) return { ok: false, reason: "工作区已释放" };
     const opened = this.registry.open({ kind: "file", fileName: input.fileName });
     if (!opened.ok) return { ok: false, reason: opened.reason };
+    return this.materializeFile({ id: opened.id, ...input });
+  }
+
+  /** 用已注册的文件条目 id 建立文档资源（受控打开复用占位条目的 id 与顺序）。 */
+  private materializeFile(input: OpenFileInput & { id: string }): DocumentOpenOutcome {
     const view = new FileDocumentWorkspace({
-      documentId: opened.id,
+      documentId: input.id,
       fileName: input.fileName,
       kind: input.kind,
+      initiallyUnsaved:input.initiallyUnsaved,
       bytes: input.bytes,
       rect: this.deps.rect(),
       ...(this.deps.decodeImage ? { decodeImage: this.deps.decodeImage } : {})
     });
     const resource: DocumentResource = {
       kind: "file",
-      documentId: opened.id,
+      documentId: input.id,
       view,
       controller: null,
-      operationId: `publish:${opened.id}`
+      operationId: `publish:${input.id}`
     };
-    this.resources.set(opened.id, resource);
+    this.resources.set(input.id, resource);
     this.attachController(resource);
-    this.setActive(opened.id);
-    return { ok: true, documentId: opened.id, created: true };
+    this.setActive(input.id);
+    return { ok: true, documentId: input.id, created: true };
+  }
+
+  /**
+   * 受控打开：先注册占位标签，宿主上报真实进度，用户可取消（I069）。
+   *
+   * 取消只移除占位条目，不改变活动文档、不创建资源；解码失败同样移除，不会留下半成品。
+   */
+  beginControlledOpen(fileName: string): { ok: true; handle: ControlledFileOpen } | { ok: false; reason: string } {
+    if (this.disposed) return { ok: false, reason: "工作区已释放" };
+    const begun = this.registry.beginOpening(fileName);
+    if (!begun.ok) return { ok: false, reason: begun.reason };
+    const id = begun.id;
+    let cancelled = false;
+    const exists = () => !this.disposed && this.registry.entry(id)?.status === "opening";
+    return {
+      ok: true,
+      handle: {
+        id,
+        cancelled: () => cancelled,
+        progress: (percent) => {
+          if (cancelled || !exists()) return;
+          if (this.registry.setOpeningProgress(id, percent)) this.deps.onChange?.();
+        },
+        complete: (input) => {
+          if (cancelled || !exists()) return null;
+          if (!this.registry.completeOpening(id)) return null;
+          // 复用占位条目的 id：标签顺序与代际不因完成而改变。
+          return this.materializeFile({ id, fileName: input.fileName ?? fileName, bytes: input.bytes, kind: input.kind, ...(input.initiallyUnsaved === undefined ? {} : { initiallyUnsaved: input.initiallyUnsaved }) });
+        },
+        fail: (reason) => {
+          if (cancelled || !exists()) return;
+          cancelled = true;
+          this.registry.close(id);
+          this.deps.onChange?.();
+          void reason;
+        }
+      }
+    };
+  }
+
+  /**
+   * 取消一次受控打开。
+   *
+   * 只对仍在 `opening` 的条目生效；已经完成的文档不会被这一步移除（那是关闭流程的职责）。
+   */
+  cancelOpen(documentId: string): boolean {
+    const entry = this.registry.entry(documentId);
+    if (!entry || entry.status !== "opening") return false;
+    this.registry.close(documentId);
+    this.deps.onChange?.();
+    return true;
+  }
+
+
+  /** A duplicate is a new unsaved file, independent of the source node/save session. */
+  duplicateActive():DocumentOpenOutcome {    if(this.disposed)return {ok:false,reason:"工作区已释放"};
+    const snapshot=this.registry.snapshotState(),source=this.active(),entry=source?this.registry.entry(source.documentId):null;
+    if(snapshot.activeGate)return {ok:false,reason:snapshot.activeGate};
+    if(!source?.controller || !entry)return {ok:false,reason:"文档尚未就绪"};
+    if(!this.registry.hasCapacity())return {ok:false,reason:"文档数量已达上限，请先关闭一个后再试"};
+    if(!source.controller.canDuplicateDocument())return {ok:false,reason:"请先结束当前编辑或保存；运行组件须支持复制文档"};
+    const stem=entry.name.replace(/\.(?:png|jpe?g|webp|pcraft)$/i,"").replace(/[\u0000-\u001f\u007f-\u009f]/g,"").trim() || "文档";
+    const chars=Array.from(stem);while(chars.join("").length>195)chars.pop();const name=`${chars.join("").trimEnd()} copy`;
+    const bytes=source.controller.duplicateDocument(name);if(!bytes.ok)return {ok:false,reason:bytes.message};
+    return this.openFile({fileName:`${name}.pcraft`,bytes:bytes.value,kind:"project",initiallyUnsaved:true});
   }
 
   /** 激活已打开文档；门禁由 registry 拒绝，返回原因给 UI。 */
@@ -346,6 +467,8 @@ export class DocumentWorkspaceSession {
 
 /** 当前未确认的受控草稿原因（切换/关闭门禁）。 */
 export function pendingDraftOf(controller: EditorWorkspaceController): string | null {
+  if(controller.hasStroke?.())return "请先结束当前笔迹";
+  if(controller.hasImageRotation?.())return "请先确认或取消图像旋转";
   if (controller.hasLayerProperties?.()) return "请先确认或取消图层属性编辑";
   if (controller.hasAdjustment?.()) return "请先确认或取消调整参数编辑";
   if (controller.hasText?.()) return "请先确认或取消文字编辑";

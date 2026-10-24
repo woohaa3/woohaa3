@@ -4,12 +4,14 @@ use photocraft_doc::LayerContent;
 use photocraft_engine::Session;
 use serde_json::{Value, json};
 
-pub(crate) const IDS: [&str; 5] = [
+pub(crate) const IDS: [&str; 7] = [
     "edit.copy",
     "edit.copyMerged",
     "edit.cut",
     "edit.paste",
     "edit.pasteSpecial.pasteInPlace",
+    "edit.pasteSpecial.pasteInto",
+    "edit.pasteSpecial.pasteOutside",
 ];
 fn error(id: &str, message: impl ToString) -> EditorError {
     EditorError::CommandFailed {
@@ -26,7 +28,7 @@ fn check(session: &Session, id: &str, params: &Value) -> Result<()> {
         && !params.as_object().is_some_and(|p| {
             p.is_empty()
                 || (id == "edit.cut" && p.len() == 1 && p.contains_key("color"))
-                || (id == "edit.paste" && p.len() == 1 && p.contains_key("center"))
+                || (matches!(id,"edit.paste"|"edit.pasteSpecial.pasteInto"|"edit.pasteSpecial.pasteOutside") && p.len() == 1 && p.contains_key("center"))
         })
     {
         return Err(error(id, "剪贴板操作不接受外部载荷或指定目标"));
@@ -47,6 +49,9 @@ fn check(session: &Session, id: &str, params: &Value) -> Result<()> {
     }
     let state = session.active().ok_or(EditorError::NoDocument)?;
     if paste(id) {
+        if matches!(id,"edit.pasteSpecial.pasteInto"|"edit.pasteSpecial.pasteOutside") && state.doc.selection.as_ref().is_none_or(|selection|selection.content_bounds().intersect(&state.doc.bounds()).is_empty()) {
+            return Err(error(id,"粘贴入或外部需要非空像素选区"));
+        }
         let clip = session
             .clipboard
             .as_ref()
@@ -103,14 +108,11 @@ fn check(session: &Session, id: &str, params: &Value) -> Result<()> {
             .active_layer
             .and_then(|id| state.doc.layer(id))
             .ok_or_else(|| error(id, "没有活动图层"))?;
-        let mask = crate::layer_preview::mask_target(state);
+        let mask = id!="edit.cut" && crate::layer_preview::mask_target(state);
         if mask && layer.mask.is_none() {
             return Err(error(id, "目标图层没有蒙版"));
         }
         if id == "edit.cut" {
-            if !mask && crate::layer_preview::selected_roots(state).len() > 1 {
-                return Err(error(id, "请只选择一个图层再剪切像素"));
-            }
             let locks = state.doc.effective_locks(layer.id);
             if locks.all || (!mask && locks.pixels) {
                 return Err(error(id, "目标图层已锁定"));
@@ -120,10 +122,8 @@ fn check(session: &Session, id: &str, params: &Value) -> Result<()> {
             }
         }
     }
-    if id != "edit.cut" || !crate::layer_preview::mask_target(state) {
-        if let Some(reason) = session.disabled_reason(id) {
-            return Err(error(id, reason));
-        }
+    if let Some(reason) = session.disabled_reason(id) {
+        return Err(error(id, reason));
     }
     Ok(())
 }
@@ -145,13 +145,13 @@ pub(crate) fn disabled_reason(session: &Session, id: &str) -> Option<String> {
 pub(crate) fn execute(session: &mut Session, id: &str, params: &Value) -> Result<Value> {
     check(session, id, params)?;
     let base = session.active().ok_or(EditorError::NoDocument)?.clone();
-    let mask = crate::layer_preview::mask_target(&base);
+    let mask = id!="edit.cut" && crate::layer_preview::mask_target(&base);
     let mut scratch = Session::new();
     scratch.add_document((*base.doc).clone(), None);
     *scratch.active_mut().unwrap() = base;
     scratch.tools = session.tools.clone();
     scratch.clipboard = session.clipboard.clone();
-    let mut routed = if params.is_object() && id == "edit.paste" {
+    let mut routed = if params.is_object() && matches!(id,"edit.paste"|"edit.pasteSpecial.pasteInto"|"edit.pasteSpecial.pasteOutside") {
         params.clone()
     } else {
         json!({})
@@ -161,21 +161,8 @@ pub(crate) fn execute(session: &mut Session, id: &str, params: &Value) -> Result
     }
     let result = if id == "edit.cut" {
         let color = crate::fill_commands::color(id, params)?;
-        if mask {
-            // 上游 Cut 不路由蒙版；Copy + 定向背景填充仍只产生一次文档历史。
-            let copied = scratch
-                .execute("edit.copy", routed.clone())
-                .map_err(|e| error(id, e))?;
-            scratch.tools.background = color;
-            scratch.tools.other_colors = [color; 2];
-            scratch
-                .execute("edit.fillBackground", routed)
-                .map_err(|e| error(id, e))?;
-            copied
-        } else {
-            scratch.tools.background = color;
-            scratch.execute(id, json!({})).map_err(|e| error(id, e))?
-        }
+        scratch.tools.background = color;
+        scratch.execute(id, json!({})).map_err(|e| error(id, e))?
     } else {
         scratch.execute(id, routed).map_err(|e| error(id, e))?
     };
@@ -189,7 +176,7 @@ pub(crate) fn execute(session: &mut Session, id: &str, params: &Value) -> Result
             .collect::<Vec<_>>();
         if !inserted.is_empty() {
             let state = scratch.active_mut().unwrap();
-            state.selected_layers = inserted;
+            state.selected_layers = inserted.last().copied().into_iter().collect();
             state.layer_anchor = state.active_layer;
             state
                 .history
@@ -235,6 +222,58 @@ mod tests {
     }
 
     #[test]
+    fn cut_multi_roots_copies_all_but_clears_only_active_pixels_and_keeps_mask() {
+        let mut s=session();let a=s.active().unwrap().active_layer.unwrap();
+        s.tools.foreground=[1.,0.,0.,1.];
+        s.execute("edit.fillForeground",json!({"color":"#ff0000"})).unwrap();
+        let b=photocraft_doc::LayerId(s.execute("layer.new.layer",json!({"name":"Blue"})).unwrap()["layer"].as_u64().unwrap());
+        s.tools.foreground=[0.,0.,1.,1.];
+        s.execute("edit.fillForeground",json!({"color":"#0000ff"})).unwrap();
+        s.execute("layer.layerMask.revealAll",Value::Null).unwrap();
+        s.execute("layer.select",json!({"layer":a.0})).unwrap();s.execute("layer.select",json!({"layer":b.0,"mode":"add"})).unwrap();
+        s.execute("channel.target.layerMask",Value::Null).unwrap();
+        let before=s.active().unwrap().clone();let mask=before.doc.layer(b).unwrap().mask.clone();
+        execute(&mut s,"edit.cut",&json!({"color":"#ffffff"})).unwrap();
+        let after=s.active().unwrap();let mut red=[0.;4];after.doc.layer(a).unwrap().surface().unwrap().read_pixel(2,2,&mut red);assert_eq!(red,[1.,0.,0.,1.]);
+        let mut clear=[0.;4];after.doc.layer(b).unwrap().surface().unwrap().read_pixel(2,2,&mut clear);assert_eq!(clear[3],0.);
+        assert_eq!(after.doc.layer(b).unwrap().mask,mask);assert!(crate::layer_preview::mask_target(after));assert_eq!(after.history.past_len(),before.history.past_len()+1);
+        let copied=s.clipboard.as_ref().unwrap().layers.as_ref().unwrap();assert_eq!(copied.layers.len(),2);let mut blue=[0.;4];copied.layers[1].surface().unwrap().read_pixel(2,2,&mut blue);assert_eq!(blue,[0.,0.,1.,1.]);
+        s.execute("edit.undo",Value::Null).unwrap();assert_eq!(s.active().unwrap().doc,before.doc);s.execute("edit.redo",Value::Null).unwrap();
+        s.execute("channel.target.composite",Value::Null).unwrap();execute(&mut s,"edit.pasteSpecial.pasteInPlace",&Value::Null).unwrap();let pasted=s.active().unwrap();assert_eq!(pasted.selected_layers(),pasted.active_layer.into_iter().collect::<Vec<_>>());assert_eq!(pasted.doc.layers.len(),before.doc.layers.len()+2);
+    }
+
+    #[test]
+    fn cut_pixel_selection_ignores_mask_target_and_preserves_pixels_outside_selection() {
+        let mut s=session();let layer=s.active().unwrap().active_layer.unwrap();s.tools.foreground=[1.,0.,0.,1.];s.execute("edit.fillForeground",Value::Null).unwrap();
+        s.execute("layer.layerMask.revealAll",Value::Null).unwrap();s.execute("channel.target.layerMask",Value::Null).unwrap();s.execute("select.rect",json!({"x":1,"y":2,"width":3,"height":4})).unwrap();let before=s.active().unwrap().clone();
+        execute(&mut s,"edit.cut",&json!({"color":"#ffffff"})).unwrap();let after=s.active().unwrap();let mut inside=[0.;4];let mut outside=[0.;4];after.doc.layer(layer).unwrap().surface().unwrap().read_pixel(2,3,&mut inside);after.doc.layer(layer).unwrap().surface().unwrap().read_pixel(8,8,&mut outside);assert_eq!(inside[3],0.);assert_eq!(outside,[1.,0.,0.,1.]);assert_eq!(after.doc.layer(layer).unwrap().mask,before.doc.layer(layer).unwrap().mask);
+        let clip=s.clipboard.as_ref().unwrap();assert!(clip.layers.is_none());assert_eq!(clip.bounds,photocraft_geom::Rect::new(1,2,4,6));let mut copied=[0.;4];clip.surface.read_pixel(2,3,&mut copied);assert_eq!(copied,[1.,0.,0.,1.]);assert_eq!(s.active().unwrap().history.past_len(),before.history.past_len()+1);
+        s.execute("edit.undo",Value::Null).unwrap();assert_eq!(s.active().unwrap().doc,before.doc);
+    }
+
+    #[test]
+    fn paste_into_and_outside_create_selection_masks_atomically_in_one_history_step() {
+        for (id,outside) in [("edit.pasteSpecial.pasteInto",false),("edit.pasteSpecial.pasteOutside",true)] {
+            let mut s=session();s.tools.foreground=[1.,0.,0.,1.];s.execute("edit.fillForeground",Value::Null).unwrap();execute(&mut s,"edit.copy",&Value::Null).unwrap();
+            assert!(disabled_reason(&s,id).is_some());s.execute("select.rect",json!({"x":4,"y":4,"width":4,"height":4})).unwrap();let before=s.active().unwrap().clone();
+            execute(&mut s,id,&Value::Null).unwrap();let after=s.active().unwrap();let pasted=after.doc.layer(after.active_layer.unwrap()).unwrap();let mask=pasted.mask.as_ref().unwrap();let mut inside=[0.];let mut edge=[0.];mask.surface.read_pixel(5,5,&mut inside);mask.surface.read_pixel(1,1,&mut edge);
+            assert_eq!(inside[0],if outside{0.}else{1.});assert_eq!(edge[0],if outside{1.}else{0.});assert!(!mask.linked);assert!(after.doc.selection.is_none());assert_eq!(after.doc.layers.len(),before.doc.layers.len()+1);assert_eq!(after.history.past_len(),before.history.past_len()+1);assert_eq!(after.selected_layers(),after.active_layer.into_iter().collect::<Vec<_>>());
+            let bytes=photocraft_format::save_to_bytes(&after.doc,&Default::default()).unwrap();photocraft_project_verify::verify(&bytes).unwrap();
+            s.execute("edit.undo",Value::Null).unwrap();assert_eq!(s.active().unwrap().doc,before.doc);s.execute("edit.redo",Value::Null).unwrap();assert_eq!(s.active().unwrap().history.past_len(),before.history.past_len()+1);
+        }
+    }
+    #[test]
+    fn paste_into_outside_mask_target_and_invalid_parameters_keep_the_correct_owners() {
+        for (id,outside) in [("edit.pasteSpecial.pasteInto",false),("edit.pasteSpecial.pasteOutside",true)] {
+            let mut s=session();s.tools.foreground=[1.,0.,0.,1.];s.execute("edit.fillForeground",Value::Null).unwrap();execute(&mut s,"edit.copy",&Value::Null).unwrap();s.execute("layer.layerMask.revealAll",Value::Null).unwrap();s.execute("select.rect",json!({"x":4,"y":4,"width":4,"height":4})).unwrap();s.execute("channel.target.layerMask",Value::Null).unwrap();let before=s.active().unwrap().clone();
+            execute(&mut s,id,&json!({"center":[6,6]})).unwrap();let after=s.active().unwrap();let layer=after.doc.layer(after.active_layer.unwrap()).unwrap();assert_eq!(layer.content,before.doc.layer(after.active_layer.unwrap()).unwrap().content);assert_eq!(after.doc.layers.len(),before.doc.layers.len());let mask=layer.mask.as_ref().unwrap();let mut inside=[0.];let mut edge=[0.];mask.surface.read_pixel(5,5,&mut inside);mask.surface.read_pixel(1,1,&mut edge);if outside{assert_eq!(inside[0],1.);assert!(edge[0]<0.9);}else{assert!(inside[0]<0.9);assert_eq!(edge[0],1.);}assert_eq!(after.history.past_len(),before.history.past_len()+1);
+            s.execute("edit.undo",Value::Null).unwrap();assert_eq!(s.active().unwrap().doc,before.doc);
+            for bad in [json!({"target":"pixels"}),json!({"center":[1,2,3]}),json!({"center":["bad",2]}),json!({"payload":"external"})] {let state=s.active().unwrap().clone();assert!(execute(&mut s,id,&bad).is_err());assert!(Arc::ptr_eq(&state.doc,&s.active().unwrap().doc));}
+            s.execute("layer.lockLayers",json!({"all":true})).unwrap();assert!(disabled_reason(&s,id).is_some());let locked=s.active().unwrap().clone();assert!(execute(&mut s,id,&Value::Null).is_err());assert!(Arc::ptr_eq(&locked.doc,&s.active().unwrap().doc));
+        }
+    }
+
+    #[test]
     fn pattern_paste_is_self_contained_bounded_and_conflicts_are_atomic() {
         use photocraft_doc::{Pattern,Surface,Effect,FxCommon,BlendMode};
         let mut s=session();empty_clip(&mut s,1);
@@ -263,11 +302,14 @@ mod tests {
         let template = doc.layers.last().unwrap().clone();
         let children = (0..62).map(|_| template.duplicate()).collect();
         doc.layers = vec![photocraft_doc::Layer::group("组", children), template];
-        let before = state.clone();
-        let error = execute(&mut s, "edit.paste", &Value::Null).unwrap_err();
-        assert!(error.to_string().contains("64"));
-        assert!(Arc::ptr_eq(&before.doc, &s.active().unwrap().doc));
-        assert_eq!(before.history.past_len(), s.active().unwrap().history.past_len());
+        s.execute("select.rect",json!({"x":1,"y":1,"width":4,"height":4})).unwrap();
+        let before = s.active().unwrap().clone();
+        for id in ["edit.paste","edit.pasteSpecial.pasteInto","edit.pasteSpecial.pasteOutside"] {
+            let error = execute(&mut s, id, &Value::Null).unwrap_err();
+            assert!(error.to_string().contains("64"));
+            assert!(Arc::ptr_eq(&before.doc, &s.active().unwrap().doc));
+            assert_eq!(before.history.past_len(), s.active().unwrap().history.past_len());
+        }
     }
 
     #[test]
@@ -287,7 +329,8 @@ mod tests {
         execute(&mut s,"edit.pasteSpecial.pasteInPlace",&Value::Null).unwrap();
         let pasted=s.active().unwrap().clone();
         let selected=pasted.selected_layers();
-        assert_eq!(selected.len(),2);
+        assert_eq!(selected.len(),1);
+        assert_eq!(selected,pasted.active_layer.into_iter().collect::<Vec<_>>());
         assert!(selected.iter().all(|id|before.doc.layer(*id).is_none()));
         assert_eq!(pasted.doc.layer(parent_id).unwrap().children().unwrap().len(),3);
         assert_eq!(pasted.history.past_len(),before.history.past_len()+1);
@@ -351,7 +394,7 @@ mod tests {
         s.execute("edit.redo", Value::Null).unwrap();
         assert_eq!(s.active().unwrap().doc.layers.len(), 4);
         assert!(s.clipboard.is_some());
-        assert_eq!(s.active().unwrap().selected_layers.len(), 2);
+        assert_eq!(s.active().unwrap().selected_layers.len(), 1);
     }
     #[test]
     fn rejected_parameters_capacity_locks_and_empty_copy_preserve_document_clipboard_and_redo() {
@@ -419,7 +462,7 @@ mod tests {
         assert!(disabled_reason(&s, "edit.paste").is_none());
         s.execute("layer.lockLayers", json!({"pixels":true}))
             .unwrap();
-        assert!(disabled_reason(&s, "edit.cut").is_none());
+        assert!(disabled_reason(&s, "edit.cut").is_some());
         s.execute("layer.lockLayers", json!({"all":true})).unwrap();
         for id in ["edit.cut", "edit.paste"] {
             assert!(disabled_reason(&s, id).is_some());

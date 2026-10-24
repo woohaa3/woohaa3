@@ -258,3 +258,15 @@ fn pattern_resources_are_checked_before_tile_decode() {
         assert_eq!(verify(&archive.finish().unwrap()).unwrap_err().code,VerifyErrorCode::UnsupportedObject,"case {case}");
     }
 }
+
+#[test]
+fn layer_metadata_accepts_labels_but_refuses_zero_and_unsafe_link_groups_without_rendering() {
+    let mut document=doc(vec![raster("元数据")]);document.layers[0].label=photocraft_doc::LabelColor::Red;document.layers[0].link_group=Some(1);verify(&bytes(&document)).unwrap();
+    for group in [0,9_007_199_254_740_992,u64::MAX] {document.layers[0].link_group=Some(group);assert_eq!(verify(&bytes(&document)).unwrap_err().code,VerifyErrorCode::UnsupportedObject);}
+}
+
+#[test]
+fn resolution_limits_are_checked_before_document_loading() {
+    for dpi in [1.,72.,300.1,10000.] {let mut d=doc(vec![raster("像素")]);d.resolution_dpi=dpi;verify(&bytes(&d)).unwrap();}
+    for dpi in [0.,-1.,10001.] {let mut d=doc(vec![raster("像素")]);d.resolution_dpi=dpi;assert_eq!(verify(&bytes(&d)).unwrap_err().code,VerifyErrorCode::UnsupportedObject);}
+}

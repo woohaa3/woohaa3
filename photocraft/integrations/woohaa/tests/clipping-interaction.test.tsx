@@ -36,7 +36,7 @@ it("剪贴快捷键按当前状态创建或释放，面板、净变化和纹理�
     act(()=>container.querySelector<HTMLButtonElement>(".photo-editor__clipping-action")!.click());expect(controller.isDirty()).toBe(true);
     act(()=>container.querySelector<HTMLButtonElement>('.photo-editor__history-actions [aria-label="撤销"]')!.click());expect(controller.isDirty()).toBe(false);
     act(()=>container.querySelector<HTMLButtonElement>('.photo-editor__history-actions [aria-label="重做"]')!.click());expect(controller.isDirty()).toBe(true);
-    const calls=execute.mock.calls.length;chord(container.querySelector("input")!);expect(execute).toHaveBeenCalledTimes(calls);
+    chord(container.querySelector("input")!);expect(execute.mock.lastCall).toEqual(["layer.releaseClippingMask","null"]);const calls=execute.mock.calls.length;
     render(true);chord(editor);act(()=>container.querySelector<HTMLButtonElement>(".photo-editor__clipping-action")!.click());expect(execute).toHaveBeenCalledTimes(calls);
   } finally {act(()=>root.unmount());controller.dispose();container.remove();vi.restoreAllMocks();}
 });

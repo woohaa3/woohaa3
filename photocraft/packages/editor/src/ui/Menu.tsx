@@ -10,10 +10,107 @@
  * 方向键、Home/End、Enter/Space、Escape、disabled item、单次 select 都由 Radix 菜单语义
  * 提供；本层只统一 class 与 portal container。
  */
-import { type ReactNode } from "react";
+import {createContext,useContext,useEffect,useId,useMemo,useRef,useState,type ReactNode} from "react";
+import {MenuScroll} from "./menu-scroll.js";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { usePortalContainer } from "./UiProvider.js";
 import { ChevronRightIcon } from "./icons.js";
+import {AltTap,menuMnemonic,moveMenuFocus,resolveMenuBarKey} from "./menu-keyboard.js";
+
+type MenuBarState={owner:string;active:string|null;setOpen:(id:string,open:boolean)=>void;enter:(id:string)=>void;hasOpenMenu:()=>boolean};
+const MenuBarContext=createContext<MenuBarState|null>(null);
+
+/**
+ * Menu titles share one open menu and one mouse press across portal levels.
+ *
+ * 键盘（I037）：Alt 点按或 F10 把焦点放到菜单栏，左右键切换顶级项，向下/Enter/Space 打开，
+ * Esc/点击离开，Alt+字母直达对应菜单。展开后的项内导航仍由 Radix 提供。
+ */
+export function MenuBar({children,className}:{children:ReactNode;className?:string}){
+  const owner=useId();
+  const [active,setActive]=useState<string|null>(null),press=useRef<number|null>(null),element=useRef<HTMLDivElement>(null),current=useRef(active);current.current=active;
+  /** 键盘停在菜单栏时的顶级项下标；null 表示键盘不在菜单栏。 */
+  const [focusIndex,setFocusIndex]=useState<number|null>(null);
+  const focusRef=useRef(focusIndex);focusRef.current=focusIndex;
+  const altTap=useRef(new AltTap());
+  const titles=()=>[...(element.current?.querySelectorAll<HTMLButtonElement>("[data-menu-title]") ?? [])].filter(button=>!button.disabled);
+  const focusTitle=(index:number)=>{
+    const buttons=titles();if(!buttons.length){setFocusIndex(null);return;}
+    // 夹紧到有效范围：聚焦入口不推进下标，只有左右键才移动（移动前已做循环计算）。
+    const next=Math.min(Math.max(index,0),buttons.length-1);
+    setFocusIndex(next);buttons[next]?.focus({preventScroll:true});
+  };
+  /**
+   * 由键盘打开某个顶级菜单。
+   *
+   * Radix 的 trigger 在真实指针按下时展开；这里补一对按下/松开，等价于用户点开该标题，
+   * 而不是依赖 `click()`（Radix 不监听 click 展开）。
+   */
+  const openTitle=(index:number)=>{
+    const buttons=titles(),button=buttons[index];
+    if(!button)return;
+    focusTitle(index);
+    for(const type of ["pointerdown","pointerup"]){
+      button.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,button:0,buttons:type==="pointerdown"?1:0}));
+    }
+  };
+  useEffect(()=>{
+    const clear=()=>{press.current=null;};
+    const release=(event:PointerEvent)=>{
+      if(press.current!==event.pointerId)return;clear();
+      const target=event.target instanceof Element?event.target:null;
+      if(target?.closest("[data-menu-title]")?.closest("[data-menu-bar]")===element.current)return;
+      if(target?.closest('[role="menuitem"]:not([data-disabled]),[role="menuitemradio"]:not([data-disabled])'))return;
+      setActive(null);
+    };
+    const cancel=()=>{clear();setActive(null);setFocusIndex(null);};altTap.current.reset();
+    const hide=()=>{if(document.hidden)cancel();};
+    document.addEventListener("pointerup",release,true);document.addEventListener("pointercancel",cancel,true);window.addEventListener("blur",cancel);document.addEventListener("visibilitychange",hide);
+    return()=>{clear();document.removeEventListener("pointerup",release,true);document.removeEventListener("pointercancel",cancel,true);window.removeEventListener("blur",cancel);document.removeEventListener("visibilitychange",hide);};
+  },[]);
+  useEffect(()=>{
+    const keydown=(event:KeyboardEvent)=>{
+      const target=event.target instanceof Element?event.target:null;
+      // 输入控件里的 Alt/方向键属于该字段，不抢菜单栏。
+      if(target?.closest("input,textarea,select,[contenteditable=true]"))return;
+      altTap.current.keydown(event);
+      // 只有本层把键盘放到菜单栏（Alt 点按/F10）后才接管方向键与 Enter；Tab 到标题时
+      // Radix trigger 自己的键盘语义保持不变。
+      const action=resolveMenuBarKey(event,focusRef.current!==null,current.current!==null);
+      if(action.kind==="ignore")return;
+      if(action.kind==="focus"){event.preventDefault();focusTitle(action.index);return;}
+      if(action.kind==="leave"){event.preventDefault();setFocusIndex(null);setActive(null);return;}
+      if(action.kind==="move"){
+        event.preventDefault();
+        const index=focusRef.current??-1,buttons=titles();
+        focusTitle(index<0?(action.delta>0?0:buttons.length-1):moveMenuFocus(index,buttons.length,action.delta));
+        return;
+      }
+      if(action.kind==="open"){
+        event.preventDefault();
+        const index=focusRef.current;if(index===null)return;
+        openTitle(index);return;
+      }
+      if(action.kind==="mnemonic"){
+        const buttons=titles(),index=buttons.findIndex(button=>button.dataset.menuMnemonic===action.letter);
+        if(index<0)return;
+        event.preventDefault();openTitle(index);return;
+      }
+    };
+    const keyup=(event:KeyboardEvent)=>{
+      const tapped=altTap.current.keyup(event);
+      if(event.key==="Alt" && tapped && !current.current && !(event.target instanceof Element && event.target.closest("input,textarea,select,[contenteditable=true]"))){event.preventDefault();focusTitle(0);}
+    };
+    document.addEventListener("keydown",keydown,true);document.addEventListener("keyup",keyup,true);
+    return()=>{document.removeEventListener("keydown",keydown,true);document.removeEventListener("keyup",keyup,true);};
+  },[]);
+  const group=useMemo<MenuBarState>(()=>({owner,active,hasOpenMenu:()=>current.current!==null,setOpen:(id,open)=>{if(!open && current.current===id)press.current=null;setActive(current=>open?id:current===id?null:current);},enter:id=>{if(press.current!==null)setActive(id);}}),[active,owner]);
+  return <MenuBarContext.Provider value={group}><div ref={element} className={className} data-menu-bar={owner} onPointerDownCapture={event=>{
+    if(event.button!==0 || !(event.target instanceof Element))return;
+    const title=event.target.closest<HTMLButtonElement>("[data-menu-title]");if(title && !title.disabled)press.current=event.pointerId;
+    setFocusIndex(null);
+  }}>{children}</div></MenuBarContext.Provider>;
+}
 
 export type MenuItem = {
   id: string;
@@ -26,12 +123,15 @@ export type MenuItem = {
   /** 选中态（radio/checked 语义）。 */
   selected?: boolean;
   children?: readonly MenuItem[];
-  onSelect: (id: string) => void;
+  onHover?: (hovered:boolean) => void;
+  onSelect: (id: string,modifiers?:{altKey:boolean}) => void;
 };
 
 /** 单个菜单项（普通 Dropdown 模式）。 */
 export function MenuEntry(props: { item: MenuItem; itemClassName?: string; separatorClassName?: string }) {
   const { item } = props;
+  const group=useContext(MenuBarContext);
+  const alt=useRef(false);
   const container = usePortalContainer();
   return (
     <>
@@ -45,8 +145,8 @@ export function MenuEntry(props: { item: MenuItem; itemClassName?: string; separ
           {item.label}<ChevronRightIcon size={12} />
         </DropdownMenuPrimitive.SubTrigger>
         <DropdownMenuPrimitive.Portal container={container ?? undefined}>
-          <DropdownMenuPrimitive.SubContent className="ui-menu" sideOffset={4} collisionPadding={8}>
-            {item.children.map(child => <MenuEntry key={child.id} item={child} itemClassName={props.itemClassName} separatorClassName={props.separatorClassName} />)}
+          <DropdownMenuPrimitive.SubContent data-menu-bar-owner={group?.owner} className="ui-menu" sideOffset={4} collisionPadding={8}>
+            <MenuScroll>{item.children.map(child => <MenuEntry key={child.id} item={child} itemClassName={props.itemClassName} separatorClassName={props.separatorClassName} />)}</MenuScroll>
           </DropdownMenuPrimitive.SubContent>
         </DropdownMenuPrimitive.Portal>
       </DropdownMenuPrimitive.Sub> : <DropdownMenuPrimitive.Item
@@ -57,7 +157,12 @@ export function MenuEntry(props: { item: MenuItem; itemClassName?: string; separ
         data-selected={item.selected ? "true" : undefined}
         // 禁用原因只做桌面悬停提示/诊断，不新增 role/label 契约。
         {...(item.reason !== undefined ? { title: item.reason } : {})}
-        onSelect={() => item.onSelect(item.id)}
+        onPointerDown={event=>{alt.current=event.altKey;}}
+        onPointerMove={event=>{alt.current=event.altKey;if(!item.disabled)item.onHover?.(true);}}
+        onPointerLeave={()=>item.onHover?.(false)}
+        onPointerUp={event=>{alt.current=event.altKey;}}
+        onKeyDown={event=>{alt.current=event.altKey;}}
+        onSelect={() => item.onSelect(item.id,{altKey:alt.current})}
       >
         {item.label}
       </DropdownMenuPrimitive.Item>}
@@ -131,20 +236,23 @@ export type DropdownMenuProps = {
 /** 普通 trigger 下拉菜单（受控可选）。 */
 export function DropdownMenu(props: DropdownMenuProps) {
   const container = usePortalContainer();
+  const group=useContext(MenuBarContext),id=useId();
   const content = props.children ?? props.items?.map((item) => <MenuEntry key={item.id} item={item} />);
   return (
-    <DropdownMenuPrimitive.Root open={props.open} onOpenChange={props.onOpenChange}>
-      <DropdownMenuPrimitive.Trigger asChild>{props.trigger}</DropdownMenuPrimitive.Trigger>
+    <DropdownMenuPrimitive.Root open={group?group.active===id:props.open} onOpenChange={open=>{group?.setOpen(id,open);props.onOpenChange?.(open);}} modal={!group}>
+      <DropdownMenuPrimitive.Trigger asChild data-menu-title={group?id:undefined} data-menu-mnemonic={group?menuMnemonic(props.label??""):undefined} onPointerEnter={()=>group?.enter(id)}>{props.trigger}</DropdownMenuPrimitive.Trigger>
       <DropdownMenuPrimitive.Portal container={container ?? undefined}>
         <DropdownMenuPrimitive.Content
+          data-menu-bar-owner={group?.owner}
           className={["ui-menu", props.className].filter(Boolean).join(" ")}
           side={props.side ?? "bottom"}
           align={props.align ?? "center"}
           sideOffset={props.sideOffset ?? 6}
           collisionPadding={8}
           aria-label={props.label}
+          onCloseAutoFocus={event=>{if(group?.hasOpenMenu())event.preventDefault();}}
         >
-          {props.radioValue !== undefined ? (
+          <MenuScroll>{props.radioValue !== undefined ? (
             <DropdownMenuPrimitive.RadioGroup
               value={props.radioValue}
               onValueChange={props.onRadioValueChange}
@@ -153,7 +261,7 @@ export function DropdownMenu(props: DropdownMenuProps) {
             </DropdownMenuPrimitive.RadioGroup>
           ) : (
             content
-          )}
+          )}</MenuScroll>
         </DropdownMenuPrimitive.Content>
       </DropdownMenuPrimitive.Portal>
     </DropdownMenuPrimitive.Root>
@@ -206,14 +314,14 @@ export function CursorMenu(props: CursorMenuProps) {
           aria-label={props.label ?? "上下文菜单"}
           data-cursor-menu=""
         >
-          {props.items.map((item) => (
+          <MenuScroll>{props.items.map((item) => (
             <MenuEntry
               key={item.id}
               item={item}
               itemClassName={props.itemClassName}
               separatorClassName={props.separatorClassName}
             />
-          ))}
+          ))}</MenuScroll>
         </DropdownMenuPrimitive.Content>
       </DropdownMenuPrimitive.Portal>
     </DropdownMenuPrimitive.Root>

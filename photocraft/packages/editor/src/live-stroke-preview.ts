@@ -5,8 +5,11 @@ import { strokePoints, type DocumentPoint } from "./photo-editor-tools.js";
 
 export class LiveStrokePreview {
   private active = false;
+  private pencil = false;
+  private initial:Record<string,unknown>|null=null;
   private pending: DocumentPoint[] = [];
   private frame: number | null = null;
+  private generation=0;
 
   constructor(
     private readonly controller: EditorWorkspaceController,
@@ -18,6 +21,8 @@ export class LiveStrokePreview {
   begin(params: Record<string, unknown>): boolean {
     this.cancel();
     if (!this.check(this.controller.beginStroke(params))) return false;
+    this.initial=structuredClone(params);
+    this.pencil = params.strokeCommand === "paint.pencil";
     this.active = true;
     this.schedule();
     return true;
@@ -29,6 +34,13 @@ export class LiveStrokePreview {
     this.schedule();
   }
 
+  replaceTap(point:DocumentPoint):boolean {
+    if(!this.active || !this.initial || !Array.isArray(this.initial.points) || this.initial.points.length!==1)return false;
+    this.stopFrame();this.pending=[];this.controller.cancelStroke();
+    const result=this.controller.beginStroke({...this.initial,points:strokePoints([point],this.pencil)});
+    if(!this.check(result))return false;
+    this.schedule();return true;
+  }
   finish(): boolean {
     if (!this.active) return false;
     this.stopFrame();
@@ -51,7 +63,9 @@ export class LiveStrokePreview {
 
   private schedule(): void {
     if (this.frame !== null) return;
+    const generation=this.generation;
     this.frame = requestAnimationFrame(() => {
+      if(generation!==this.generation)return;
       this.frame = null;
       if (this.active && this.flush()) this.refreshStroke();
     });
@@ -60,7 +74,7 @@ export class LiveStrokePreview {
   private flush(): boolean {
     const points = this.pending;
     this.pending = [];
-    return points.length === 0 || this.check(this.controller.appendStroke(strokePoints(points)));
+    return points.length === 0 || this.check(this.controller.appendStroke(strokePoints(points,this.pencil)));
   }
 
   private check(result: EditorResult<unknown>): boolean {
@@ -73,6 +87,7 @@ export class LiveStrokePreview {
   }
 
   private stopFrame(): void {
+    this.generation++;
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
   }

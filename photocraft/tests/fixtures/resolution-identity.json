@@ -1,0 +1,401 @@
+[
+  {
+    "name": "absent",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ]
+    },
+    "canonical": "canvas:16x16\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef|pixel:-:0123456789abcdef",
+    "hash": "73820997bc1028df"
+  },
+  {
+    "name": "default",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": 72
+    },
+    "canonical": "canvas:16x16\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef|pixel:-:0123456789abcdef",
+    "hash": "73820997bc1028df"
+  },
+  {
+    "name": "fractional",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": 300.10000001
+    },
+    "canonical": "canvas:16x16\nresolution:1133907149\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef|pixel:-:0123456789abcdef",
+    "hash": "d0e593203e509d87"
+  },
+  {
+    "name": "one",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": 1
+    },
+    "canonical": "canvas:16x16\nresolution:1065353216\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef|pixel:-:0123456789abcdef",
+    "hash": "bea5e9e3c67e554b"
+  },
+  {
+    "name": "max",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": 10000
+    },
+    "canonical": "canvas:16x16\nresolution:1176256512\nlayer|a|甲|pixel|1|1|normal|0,0,1,0,0,0|mask:1:paint:0123456789abcdef|pixel:-:0123456789abcdef",
+    "hash": "83b946e7b62448d1"
+  },
+  {
+    "name": "zero",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": 0
+    },
+    "canonical": null,
+    "hash": null
+  },
+  {
+    "name": "negative",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": -1
+    },
+    "canonical": null,
+    "hash": null
+  },
+  {
+    "name": "over",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": 10001
+    },
+    "canonical": null,
+    "hash": null
+  },
+  {
+    "name": "string",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": "72"
+    },
+    "canonical": null,
+    "hash": null
+  },
+  {
+    "name": "null",
+    "content": {
+      "canvasWidth": 16,
+      "canvasHeight": 16,
+      "layers": [
+        {
+          "id": "a",
+          "name": "甲",
+          "kind": "pixel",
+          "visible": true,
+          "opacity": 1,
+          "blend": "normal",
+          "transform": {
+            "translateX": 0,
+            "translateY": 0,
+            "scale": 1,
+            "rotationDegrees": 0,
+            "flipHorizontal": false,
+            "flipVertical": false
+          },
+          "mask": {
+            "enabled": true,
+            "origin": "paint",
+            "contentHash": "0123456789abcdef"
+          },
+          "pixel": {
+            "sourceAssetId": null,
+            "contentHash": "0123456789abcdef"
+          },
+          "text": null,
+          "adjustment": null,
+          "labelColor": "none"
+        }
+      ],
+      "resolutionDpi": null
+    },
+    "canonical": null,
+    "hash": null
+  }
+]

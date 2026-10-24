@@ -44,7 +44,7 @@ async function setup(kind="brightnessContrast") {
   const render=(readonly=false)=>act(()=>root.render(<PhotoEditorApp controller={controller} readonly={readonly} canvasView={{viewport:{x:0,y:0,zoom:0.5},fitZoom:0.5,transitioning:false,onChange:vi.fn()}} onPreview={onPreview}/>));
   render();
   const tick=()=>act(()=>{const callbacks=[...frames.values()];frames.clear();callbacks.forEach(callback=>callback(0));});
-  const key=(node:Element,key:string,ctrlKey=false)=>act(()=>node.dispatchEvent(new KeyboardEvent("keydown",{key,ctrlKey,bubbles:true,cancelable:true})));
+  const key=(node:Element,key:string,ctrlKey=false)=>act(()=>{node.dispatchEvent(new KeyboardEvent("keydown",{key,ctrlKey,bubbles:true,cancelable:true}));node.dispatchEvent(new KeyboardEvent("keyup",{key,ctrlKey,bubbles:true,cancelable:true}));});
   const input=(node:HTMLInputElement,value:string)=>act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(node,value);node.dispatchEvent(new Event("input",{bubbles:true}));});
   const pointer=(node:Element,type:string,x=0,y=0)=>{const event=new MouseEvent(type,{bubbles:true,button:0,clientX:x,clientY:y});Object.defineProperty(event,"pointerId",{value:1});act(()=>node.dispatchEvent(event));};
   return {container,begin,preview,commit,cancel,onPreview,tick,key,input,pointer,render,execute};
@@ -56,7 +56,7 @@ it("滑杆在松手前发出临时预览，取消恢复正式预览，下一次�
   expect(JSON.parse(preview.mock.calls.at(-1)![0])).toEqual({brightness:50});
   expect(onPreview.mock.calls.at(-1)![0].pixels[0]).toBe(99);
   expect(controller.snapshot()).toBe(before);expect(controller.isDirty()).toBe(false);
-  key(slider,"s",true);expect(container.textContent).toContain("请先确认或取消调整参数编辑");
+  key(container.querySelector(".photo-editor")!,"s",true);expect(container.textContent).toContain("请先确认或取消调整参数编辑");
   key(slider,"Escape");expect(cancel).toHaveBeenCalledOnce();expect(slider.value).toBe("30");
   pointer(slider,"pointerup");expect(commit).not.toHaveBeenCalled();expect(onPreview.mock.calls.at(-1)![0].pixels[0]).toBe(1);
   pointer(slider,"pointerdown");input(slider,"60");pointer(slider,"pointerup");
@@ -134,4 +134,45 @@ it("从图层菜单创建调整层，离开文字属性后仍保留文字工具"
   expect(container.querySelector<HTMLElement>(".photo-editor-canvas")!.dataset.tool).toBe("text");
   expect(container.querySelector<HTMLElement>(".photo-editor__sidebar")!.hidden).toBe(false);
   expect(container.querySelector('.photo-editor__object-properties [aria-label="调整层"]')!.hasAttribute("hidden")).toBe(false);
+});
+
+
+it("数值表达式确认同步flush，非法输入不能提交上次有效候选，Escape恢复原参数",async()=>{
+  const {container,preview,commit,cancel,input,key,tick}=await setup();
+  const field=container.querySelector<HTMLInputElement>('[data-adjustment-control] input[data-numeric-input]')!;
+  input(field,"40");tick();expect(JSON.parse(preview.mock.calls.at(-1)![0])).toEqual({brightness:40});
+  preview.mockImplementationOnce(()=>{throw JSON.stringify({code:"invalid-params",message:"亮度参数无效"});});
+  input(field,"1+");tick();key(field,"Enter");
+  expect(JSON.parse(preview.mock.calls.at(-1)![0])).toEqual({brightness:null});
+  expect(commit).not.toHaveBeenCalled();expect(controller.isDirty()).toBe(false);
+  key(field,"Escape");expect(cancel).toHaveBeenCalledOnce();expect(field.value).toBe("30");
+  input(field,"20+5");key(field,"Enter");
+  expect(JSON.parse(preview.mock.calls.at(-1)![0])).toEqual({brightness:25});
+  expect(commit).toHaveBeenCalledOnce();expect(controller.currentView().document?.revision).toBe(2);
+  input(field,"2000");key(field,"Enter");expect(commit).toHaveBeenCalledOnce();key(field,"Escape");
+});
+
+it("标签拖动阈值、最终坐标和取消均沿同一调整草稿，只读不写",async()=>{
+  const {container,preview,commit,cancel,pointer,tick,render}=await setup();
+  const label=container.querySelector('[data-adjustment-control] span')!;
+  pointer(label,"pointerdown",10);pointer(label,"pointermove",12);pointer(label,"pointerup",12);
+  expect(preview).not.toHaveBeenCalled();expect(commit).not.toHaveBeenCalled();
+  pointer(label,"pointerdown",10);pointer(label,"pointermove",15);tick();
+  expect(JSON.parse(preview.mock.calls.at(-1)![0])).toEqual({brightness:35});
+  expect(controller.isDirty()).toBe(false);
+  pointer(label,"pointerup",20);expect(JSON.parse(preview.mock.calls.at(-1)![0])).toEqual({brightness:40});
+  expect(commit).toHaveBeenCalledOnce();expect(controller.currentView().document?.revision).toBe(2);
+  pointer(label,"pointerdown",20);pointer(label,"pointermove",30);tick();pointer(label,"pointercancel",30);pointer(label,"pointerup",40);
+  expect(cancel).toHaveBeenCalledOnce();expect(commit).toHaveBeenCalledOnce();
+  render(true);pointer(label,"pointerdown",10);pointer(label,"pointerup",50);expect(commit).toHaveBeenCalledOnce();
+});
+
+it("调整页脚按下拖入项目松手创建一次；按钮原地松手不创建",async()=>{
+ const {container,pointer,execute}=await setup();
+ const trigger=container.querySelector<HTMLButtonElement>('.photo-editor__layer-actions [aria-label="新建调整层"]')!;
+ pointer(trigger,"pointerdown");pointer(trigger,"pointerup");expect(execute).not.toHaveBeenCalled();
+ const item=[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item=>item.textContent==="色相/饱和度")!;
+ expect(item).toBeDefined();pointer(item,"pointerup");
+ expect(execute).toHaveBeenCalledOnce();expect(execute).toHaveBeenCalledWith("layer.newAdjustmentLayer.hueSaturation",JSON.stringify({hue:0,saturation:0,lightness:0}));
+ expect(controller.currentView().document?.activeLayerId).toBe(2);
 });

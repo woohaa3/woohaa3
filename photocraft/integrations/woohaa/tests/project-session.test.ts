@@ -236,3 +236,13 @@ describe("进入编辑器的基线（打开 ≠ 修改）", () => {
     expect(session.isDirty()).toBe(false);
   });
 });
+
+it("复制等新建文件首次打开/重建基线仍未保存，失败保留，可信交付后才推进",()=>{
+ const state=(documentContentHash:string,revision:number)=>({documentContentHash,revision,canvasWidth:20,canvasHeight:10,layerCount:1,activeLayerIndex:0,dirty:false,frozen:false});
+ const session=new ProjectSession({...base,edit:null,initiallyUnsaved:true});expect(session.isDirty()).toBe(true);
+ session.applyContentState(state("original",0));session.establishBaseline();expect(session.isDirty()).toBe(true);
+ session.beginFreeze();session.failSave("Not delivered");expect(session.isDirty()).toBe(true);
+ session.commitBaseline("original");expect(session.isDirty()).toBe(false);
+ session.applyContentState(state("changed",1));expect(session.isDirty()).toBe(true);
+ session.applyContentState(state("original",2));expect(session.isDirty()).toBe(false);
+});

@@ -25,7 +25,7 @@ it("T 定位、按帧文字和样式、取消与确认均沿原节点预览，�
   const commit=vi.fn(()=>{revision++;draft=null;return "null";});
   const cancel=vi.fn(()=>{draft=null;});
   const stateJson=()=>JSON.stringify({document:{width:1600,height:900,revision,activeLayer:1,canUndo:revision>1,history:revision>1?["编辑文字"]:[],layers:[{id:1,name:"原图",kind:"raster",visible:true,opacity:1,blend:"Normal"}]}});
-  const geometry=vi.fn((_params:string)=>JSON.stringify({caret:[[136,100],[136,136]],selection:[],hit:null}));
+  const geometry=vi.fn((params:string)=>{const range=JSON.parse(params);return JSON.stringify({caret:[[136,100],[136,136]],selection:range.start!==range.end?[[[136,100],[156,100],[156,136],[136,136]]]:[],hit:null});});
   const instance={openImage:stateJson,stateJson,commandsJson:()=>"[]",contentHash:()=>revision.toString(16).padStart(16,"0"),
     beginText:begin,previewText:preview,commitText:commit,cancelText:cancel,textGeometry:geometry,
     renderPreview:()=>({width:1,height:1,pixels:new Uint8Array([draft?99:revision,0,0,255])}),closeDocument:()=>"null"} as unknown as EditorInstance;
@@ -56,8 +56,17 @@ it("T 定位、按帧文字和样式、取消与确认均沿原节点预览，�
   expect(controller.snapshot()).toBe(before);expect(controller.isDirty()).toBe(false);
   expect(onPreview.mock.calls.at(-1)![0].pixels[0]).toBe(99);
   expect(geometry).toHaveBeenCalledWith(JSON.stringify({start:4,end:4}));
-  const input=type("取消内容");
-  act(()=>input.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true})));
+  const composingInput=container.querySelector<HTMLTextAreaElement>("[data-text-input]")!;
+  act(()=>composingInput.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true})));
+  type("最后输入候");tick();
+  expect(geometry).toHaveBeenCalledWith(JSON.stringify({start:4,end:5}));
+  const preedit=container.querySelector('[data-text-preedit="true"]');expect(preedit).not.toBeNull();
+  expect(preedit?.getAttribute("x1")).toBe("100");expect(preedit?.getAttribute("x2")).toBe("110");expect(preedit?.getAttribute("y1")).toBe("100");
+  type("最后输入候选");tick();expect(geometry).toHaveBeenCalledWith(JSON.stringify({start:4,end:6}));
+  act(()=>composingInput.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true,data:"候选"})));tick();
+  expect(container.querySelector('[data-text-preedit="true"]')).toBeNull();expect(controller.snapshot()).toBe(before);
+  type("取消内容");
+  act(()=>[...container.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="取消文字")!.click());
   expect(cancel).toHaveBeenCalledOnce();expect(commit).not.toHaveBeenCalled();
   expect(controller.snapshot()).toBe(before);expect(onPreview.mock.calls.at(-1)![0].pixels[0]).toBe(1);
   send("pointerdown");send("pointerup");const finalInput=type("确认文字");

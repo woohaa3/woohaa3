@@ -138,6 +138,10 @@ it.each([["画笔", false,false,false], ["橡皮", true,false,false],["画笔",f
   expect(JSON.parse(execute.mock.calls[1][1])).toMatchObject({points:[[336,236],[436,336]],smoothing:0,erase});
   const editor=container.querySelector(".photo-editor")!;
   act(() => editor.dispatchEvent(new KeyboardEvent("keydown",{key:"Alt",altKey:true,bubbles:true})));
+  if(erase) {
+    pointer("pointerdown",100,100,{altKey:true});pointer("pointerup",100,100,{altKey:true});
+    expect(sampleColor).not.toHaveBeenCalled();expect(JSON.parse(execute.mock.calls[2][1])).toMatchObject({erase:true});return;
+  }
   expect(stage.style.cursor).toBe("crosshair");
   pointer("pointerdown",100,100,{altKey:true}); pointer("pointermove",120,110,{altKey:true}); pointer("pointerup",120,110);
   expect(sampleColor).toHaveBeenLastCalledWith(176,156);

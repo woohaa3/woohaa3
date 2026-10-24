@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EditorHandle, type EditorExportBundle, type EditorInstance } from "@woohaa3/photocraft-editor";
 import { EditorWorkspaceController } from "../src/editor-workspace.js";
 import { DevDocumentSession } from "../../../dev/src/dev-session.js";
+import { DEFAULT_EXPORT_OPTIONS } from "../src/ports.js";
 
 const PROJECT = new Uint8Array([1, 2, 3]);
 const OUTPUT = new Uint8Array([4, 5, 6, 7]);
@@ -61,6 +62,7 @@ function fakeHandle() {
     beginText: () => JSON.stringify({ ok: true, value: { layer: 1, new: true, text: "" } }),
     previewText: () => JSON.stringify({ ok: true, value: { layer: 1, new: true, text: "a" } }),
     textGeometry: () => JSON.stringify({ ok: true, value: { caret: [[0, 0], [0, 10]], selection: [], hit: 1, next: 0 } }),
+    checkpointText:()=>{edit();return JSON.stringify({layer:1,new:false,text:"a"});},
     commitText: () => { edit(); return "null"; },
     cancelText: () => undefined,
     renderPreview: () => { throw new Error("render not stubbed"); },
@@ -190,5 +192,64 @@ describe("文档级 owner", () => {
     await openDirty(controller, editor);
     controller.dispose();
     expect(controller.dialogOwner()).toBeNull();
+  });
+});
+
+
+it("文字检查点经文件保存写入，冻结期间拒绝改动且保留继续输入会话",async()=>{
+ let finish!:()=>void;const gate=new Promise<void>(resolve=>{finish=resolve;});
+ const {controller,editor}=build({delivery:async()=>{await gate;return {ok:true,status:"written"};}});
+ try {await openDirty(controller,editor);controller.beginText({layer:1});controller.previewText({text:"a"});expect(controller.checkpointText().ok).toBe(true);
+ const delivery=controller.deliverFile("project");expect(controller.previewText({text:"late"}).ok).toBe(false);expect(controller.commitText().ok).toBe(false);
+ finish();expect(await delivery).toMatchObject({ok:true,status:"written"});expect(controller.hasText()).toBe(true);expect(controller.isDirty()).toBe(false);expect(controller.previewText({text:"next"}).ok).toBe(true);
+ }finally{finish();controller.dispose();}
+});
+
+describe("按格式导出（I045）", () => {
+  it("字节走同一交付端口，文件名与 MIME 跟随所选格式，且不推进工程基线", async () => {
+    const delivered: Array<{ fileName: string; contentType: string; bytes: Uint8Array }> = [];
+    const { controller, session, editor } = build({
+      delivery: async (file) => { delivered.push(file); return { ok: true, status: "download-started" }; }
+    });
+    await openDirty(controller, editor);
+    expect(session.status().dirty).toBe(true);
+
+    // 替身内核按请求返回不同字节，便于核对格式映射。
+    (editor.handle as unknown as { exportImage: (options: { format: string }) => unknown }).exportImage = (options: { format: string }) => ({
+      ok: true as const,
+      value: { revision: 2, documentContentHash: EDITED_HASH, canvasWidth: 4, canvasHeight: 3, project: new Uint8Array(), output: new TextEncoder().encode(options.format) }
+    });
+
+    await expect(controller.exportImage({ ...DEFAULT_EXPORT_OPTIONS, format: "jpeg" })).resolves.toEqual({ ok: true, status: "download-started" });
+    expect(delivered[0]).toMatchObject({ fileName: "art.jpg", contentType: "image/jpeg" });
+    expect(new TextDecoder().decode(delivered[0]!.bytes)).toBe("jpeg");
+    // 下载只代表交给浏览器，工程仍未保存。
+    expect(session.status().dirty).toBe(true);
+
+    await controller.exportImage({ ...DEFAULT_EXPORT_OPTIONS, format: "webp" });
+    expect(delivered[1]).toMatchObject({ fileName: "art.webp", contentType: "image/webp" });
+    expect(controller.snapshot().state.phase).toBe("editing");
+    controller.dispose();
+  });
+
+  it("没有文件端口、内核失败或存在未结算草稿时拒绝导出", async () => {
+    const missing = build({ delivery: null });
+    (missing.editor.handle as unknown as { exportImage?: unknown }).exportImage = () => ({ ok: true, value: {} });
+    await expect(missing.controller.exportImage(DEFAULT_EXPORT_OPTIONS)).resolves.toMatchObject({ ok: false, status: "failed" });
+    missing.controller.dispose();
+
+    const failing = build();
+    await openDirty(failing.controller, failing.editor);
+    (failing.editor.handle as unknown as { exportImage: () => unknown }).exportImage = () => ({ ok: false, code: "save-failed", message: "编码失败" });
+    await expect(failing.controller.exportImage(DEFAULT_EXPORT_OPTIONS)).resolves.toMatchObject({ ok: false, status: "failed", message: "编码失败" });
+    failing.controller.dispose();
+
+    // 文字草稿未检查点时不允许导出，避免导出旧内容。
+    const drafts = build();
+    await openDirty(drafts.controller, drafts.editor);
+    (drafts.editor.handle as unknown as { exportImage: () => unknown }).exportImage = () => ({ ok: true, value: { revision: 2, documentContentHash: EDITED_HASH, canvasWidth: 4, canvasHeight: 3, project: new Uint8Array(), output: OUTPUT } });
+    drafts.controller.beginText({ layer: 1 });
+    await expect(drafts.controller.exportImage(DEFAULT_EXPORT_OPTIONS)).resolves.toMatchObject({ ok: false, message: expect.stringContaining("文字") });
+    drafts.controller.dispose();
   });
 });

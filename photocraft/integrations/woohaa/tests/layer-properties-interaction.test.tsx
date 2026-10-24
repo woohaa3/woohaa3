@@ -109,7 +109,7 @@ it("失败保留可重试输入，保存键受门禁，失焦与只读切换取�
   const {container,input,type,key,tick,commit,cancel,render}=await setup();
   commit.mockImplementationOnce(()=>{throw JSON.stringify({code:"command-failed",message:"暂时无法提交"});});
   type("40");key("Enter");expect(controller.hasLayerProperties()).toBe(true);expect(input.value).toBe("40");
-  key("s",true);expect(container.textContent).toContain("请先确认或取消图层属性编辑");
+  act(()=>container.querySelector(".photo-editor")!.dispatchEvent(new KeyboardEvent("keydown",{key:"s",ctrlKey:true,bubbles:true,cancelable:true})));expect(container.textContent).toContain("请先确认或取消图层属性编辑");
   key("Enter");expect(controller.hasLayerProperties()).toBe(false);expect(controller.snapshot().view.document?.revision).toBe(2);
   type("20");tick();act(()=>window.dispatchEvent(new Event("blur")));expect(controller.hasLayerProperties()).toBe(false);expect(input.value).toBe("40");
   type("10");tick();render(true);expect(controller.hasLayerProperties()).toBe(false);expect(cancel).toHaveBeenCalledTimes(2);
@@ -145,7 +145,7 @@ it("样式空值阻止确认，修正后可提交，Esc 和只读切换取消会
   const {container,tick,commit,cancel,render}=await setup("style");
   const button=(text:string)=>[...container.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent===text)!;
   act(()=>button("图层样式…").click());act(()=>button("添加效果").click());tick();
-  const input=container.querySelector<HTMLInputElement>("[data-layer-style] fieldset input[type=number]")!;
+  const input=container.querySelector<HTMLInputElement>("[data-layer-style] fieldset input[data-numeric-input]")!;
   const type=(value:string)=>act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("input",{bubbles:true}));});
   type("");tick();act(()=>button("确认样式").click());expect(commit).not.toHaveBeenCalled();expect(controller.hasLayerProperties()).toBe(true);
   type("50");tick();act(()=>button("确认样式").click());expect(commit).toHaveBeenCalledOnce();

@@ -27,7 +27,7 @@ function setup() {
     const event=new MouseEvent(type,{bubbles:true,cancelable:true,clientY:y});
     Object.defineProperty(event,"dataTransfer",{value:transfer});act(()=>target.dispatchEvent(event));return event;
   };
-  return {container,raw,group,nested,render,row,drag,onCommand,onSelect,onBlend};
+  return {container,raw,group,nested,render,row,drag,onCommand,onSelect,onBlend,commands};
 }
 
 it("折叠只隐藏子行，保留完整层数和内核选择；展开与 Alt 全部切换不选层",()=>{
@@ -80,6 +80,7 @@ it("拒绝祖先投向后代及移入锁定组，取消和只读清理拖动",()
 
 it("新建组使用能力门，穿透选项只提供给组",()=>{
   const {container,raw,render,onCommand,onBlend}=setup();
+  raw.selectedLayers=[2];render();
   act(()=>container.querySelector<HTMLButtonElement>('[aria-label="新建组"]')!.click());
   expect(onCommand.mock.lastCall).toEqual(["layer.new.group"]);
   const select=container.querySelector<HTMLSelectElement>('[title="混合模式"]')!;
@@ -94,4 +95,34 @@ it("新建组使用能力门，穿透选项只提供给组",()=>{
   expect([...select.options].some(option=>option.value==="Pass Through")).toBe(false);
   render(true);
   expect(container.querySelector<HTMLButtonElement>('[aria-label="新建组"]')!.disabled).toBe(true);
+});
+
+it("组按钮将多选和 Shift 单选分派为编组；单选创建空组，能力未开放时不执行",()=>{
+  const {container,raw,render,onCommand,commands}=setup();
+  const click=(shiftKey=false)=>act(()=>container.querySelector<HTMLButtonElement>('[aria-label="新建组"]')!.dispatchEvent(new MouseEvent("click",{bubbles:true,shiftKey})));
+  click();expect(onCommand.mock.lastCall).toEqual(["layer.groupLayers"]);
+  raw.selectedLayers=[2];render();click();expect(onCommand.mock.lastCall).toEqual(["layer.new.group"]);
+  click(true);expect(onCommand.mock.lastCall).toEqual(["layer.groupLayers"]);
+  commands.set("layer.groupLayers",{allowed:false,enabled:true} as PhotocraftCommand);render();
+  const count=onCommand.mock.calls.length;click(true);expect(onCommand).toHaveBeenCalledTimes(count);
+  raw.selectedLayers=[2,3];render();expect(container.querySelector<HTMLButtonElement>('[aria-label="新建组"]')!.disabled).toBe(true);
+});
+
+
+it("活动目标变化才展开祖先并滚入列表；同一目标的手动折叠/滚动不被覆盖",()=>{
+  const {container,raw,group,nested,row,render,onCommand}=setup();
+  const list=container.querySelector<HTMLUListElement>(".photo-editor__layers")!;
+  vi.spyOn(list,"getBoundingClientRect").mockReturnValue({top:100,bottom:200} as DOMRect);
+  raw.activeLayer=5;raw.selectedLayers=[5];render();
+  expect(onCommand.mock.calls).toEqual([["layer.setExpanded",{layer:2,expanded:true}],["layer.setExpanded",{layer:4,expanded:true}]]);
+  group.expanded=true;nested.expanded=true;render();
+  vi.spyOn(row(5),"getBoundingClientRect").mockReturnValue({top:250,bottom:280} as DOMRect);
+  // 再次切换目标，模拟布局已完成后的活动行跟随。
+  vi.spyOn(row(1),"getBoundingClientRect").mockReturnValue({top:110,bottom:140} as DOMRect);
+  raw.activeLayer=1;raw.selectedLayers=[1];render();list.scrollTop=0;
+  raw.activeLayer=5;raw.selectedLayers=[5];render();expect(list.scrollTop).toBe(80);
+  list.scrollTop=20;render();expect(list.scrollTop).toBe(20);
+  onCommand.mockClear();group.expanded=false;render();expect(row(5)).toBeNull();expect(onCommand).not.toHaveBeenCalled();
+  raw.activeLayer=1;raw.selectedLayers=[1];render();raw.activeLayer=5;raw.selectedLayers=[5];render(true);
+  expect(onCommand).not.toHaveBeenCalled();render(false);expect(onCommand.mock.calls).toEqual([["layer.setExpanded",{layer:2,expanded:true}]]);
 });

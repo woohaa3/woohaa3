@@ -45,6 +45,8 @@ export function DocumentPreviewCanvas({ preview, width, height, zoom, origin }: 
 export type FileDocumentActions = {
   /** 保存工程到本地文件（`.pcraft`）。 */
   saveProject: () => void;
+  /** 另存为：先让用户给出目标文件名，再走同一交付端口（I042）。 */
+  saveProjectAs?: (fileName: string) => void;
   /** 导出合成 PNG（不代表工程已保存）。 */
   exportPng: () => void;
   /** 显式添加到当前画布（发布工程 + PNG 与图片节点）。 */
@@ -75,6 +77,15 @@ export function FileDocumentActionsBar({ view, actions, status, statusTone = "in
         {status ?? "独立文件文档 · 不写入画布"}
       </span>
       <Button size="sm" tone="ghost" disabled={busy || readonly} onClick={actions.saveProject} title="保存工程到本地文件">保存工程…</Button>
+      {actions.saveProjectAs?<Button size="sm" tone="ghost" disabled={busy || readonly}
+        title="以新文件名保存工程副本（不改变当前文档名）"
+        onClick={()=>{
+          const suggested=`${view.fileName.replace(/\.[^.]+$/,"")||"photocraft"}-副本.pcraft`;
+          const name=globalThis.prompt?.("另存为（文件名）",suggested);
+          const normalized=(name??"").trim();
+          if(!normalized)return;
+          actions.saveProjectAs?.(normalized.toLowerCase().endsWith(".pcraft")?normalized:`${normalized}.pcraft`);
+        }}>另存为…</Button>:null}
       <Button size="sm" tone="ghost" disabled={busy} onClick={actions.exportPng} title="导出当前合成 PNG（不改变工程保存状态）">导出 PNG</Button>
       {actions.addToCanvas ? (
         <Button

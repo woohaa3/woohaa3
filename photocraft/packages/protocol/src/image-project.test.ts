@@ -169,7 +169,7 @@ describe("图片工程严格联合（任务 2.1）", () => {
 
   it("读取旧引擎版本，分组能力版本与上游来源分开核对", () => {
     expect(decodeImageEditDocument(project({ engineVersion: PHOTOCRAFT_ENGINE_COMMIT })).ok).toBe(true);
-    expect(PHOTOCRAFT_ENGINE_VERSION).toBe(`${PHOTOCRAFT_ENGINE_COMMIT}+woohaa-patterns-v1`);
+    expect(PHOTOCRAFT_ENGINE_VERSION).toBe(`${PHOTOCRAFT_ENGINE_COMMIT}+woohaa-resolution-v1`);
     expect(decodeImageEditDocument(project({ engineVersion: `${PHOTOCRAFT_ENGINE_COMMIT}+woohaa-styles-v1` })).ok).toBe(true);
   });
 

@@ -21,6 +21,7 @@ export type OpenFileClassification =
 
 /** 受支持的位图 MIME（与内核归一入口一致）。 */
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
 
 /** 明确不开放的分层格式（给出具体原因，而不是泛泛的“不支持”）。 */
 const LAYERED_FORMATS = [
@@ -32,7 +33,7 @@ const LAYERED_FORMATS = [
 export const PROJECT_EXTENSION = ".pcraft";
 
 /** 打开文件选择器的 `accept` 值（只列受支持格式）。 */
-export const OPEN_FILE_ACCEPT = `image/png,image/jpeg,image/webp,${PROJECT_EXTENSION},application/octet-stream`;
+export const OPEN_FILE_ACCEPT = [...IMAGE_TYPES,...IMAGE_EXTENSIONS,PROJECT_EXTENSION].join(",");
 
 function extensionOf(name: string): string {
   const index = name.lastIndexOf(".");
@@ -52,7 +53,7 @@ export function classifyOpenFile(input: { name: string; type?: string | null }):
   const type = (input.type ?? "").toLowerCase();
   if (IMAGE_TYPES.has(type)) return { ok: true, kind: "image" };
   // 部分环境不提供 MIME：按扩展名兜底，但只认受支持位图。
-  if ([".png", ".jpg", ".jpeg", ".webp"].includes(extension)) return { ok: true, kind: "image" };
+  if (IMAGE_EXTENSIONS.includes(extension)) return { ok: true, kind: "image" };
   return { ok: false, reason: "只支持 PNG、JPEG、WebP 图片与受支持的 .pcraft 工程" };
 }
 

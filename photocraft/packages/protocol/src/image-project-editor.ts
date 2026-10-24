@@ -21,6 +21,10 @@ export const PHOTOCRAFT_ENGINE_COMMIT = "4e7a17cd5d5723313f459753663d0d155f047e1
 /** 首期开放的能力 id（与 notes/scope.md 六组一一对应）。 */
 export const PHOTOCRAFT_CAPABILITIES = [
   "layers.composite",
+  "layers.metadata",
+  "layers.hover-preview",
+  "mask.properties",
+  "image.resolution",
   "layers.fill-opacity",
   "layers.styles.resource-free",
   "layers.styles.patterns",
@@ -34,13 +38,30 @@ export const PHOTOCRAFT_CAPABILITIES = [
   "selection.rect",
   "selection.lasso",
   "selection.feather",
+  "selection.wand",
+  "selection.color-range",
+  "selection.modify",
   "mask.pixel",
   "paint.brush",
   "paint.eraser",
+  "paint.bucket",
+  "paint.pencil",
+  "paint.symmetry",
+  "paint.retouch",
+  "history.snapshots",
   "text.horizontal",
+  "text.vertical",
+  "text.refresh",
+  "layers.rasterize",
+  "text.defaults",
+  "text.font-replacement",
   "adjust.brightness-contrast",
   "adjust.hue-saturation",
-  "adjust.curves"
+  "adjust.curves",
+  "adjust.destructive",
+  "layers.effects",
+  "type.mask-selection",
+  "image.color-mode"
 ] as const;
 export type PhotocraftCapability = (typeof PHOTOCRAFT_CAPABILITIES)[number];
 
@@ -69,7 +90,6 @@ export const PHOTOCRAFT_DISABLED_FEATURES = [
   "color.hdr",
   "brush.external-abr",
   "type.path",
-  "type.vertical",
   "print",
   "plugin",
   "automation.mcp",

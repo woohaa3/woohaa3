@@ -41,6 +41,8 @@ export type ImageProjectAdjustmentKind = (typeof IMAGE_PROJECT_ADJUSTMENT_KINDS)
 export type ImageProjectContent = {
   /** 内核工程图案资源摘要；空资源省略以兼容旧身份。 */
   patternContentHash?: string;
+  /** 印刷分辨率；缺省72，非默认值纳入内容身份。 */
+  resolutionDpi?:number;
   /** 当前画布尺寸（裁剪后）。 */
   canvasWidth: number;
   canvasHeight: number;
@@ -48,7 +50,11 @@ export type ImageProjectContent = {
   layers: ImageProjectLayer[];
 };
 
+export const IMAGE_PROJECT_LAYER_LABELS=["none","red","orange","yellow","green","seafoam","blue","indigo","magenta","fuchsia","violet","gray"] as const;
 export type ImageProjectLayer = {
+  labelColor?:typeof IMAGE_PROJECT_LAYER_LABELS[number];
+  /** 按图层树首次出现顺序归一化的链接组号；不使用运行时随机 id。 */
+  linkGroup?:number;
   id: string;
   name: string;
   kind: ImageProjectLayerKind;
@@ -100,6 +106,8 @@ export type ImageProjectTransform = {
 /** 蒙版摘要：只描述状态与来源像素摘要，不含蒙版像素。 */
 export type ImageProjectMaskSummary = {
   linked?: boolean;
+  density?: number;
+  feather?: number;
   enabled: boolean;
   /** 蒙版来源：选区转换/手工绘制。 */
   origin: "selection" | "paint";
@@ -173,6 +181,9 @@ export function canonicalizeImageProjectContent(content: ImageProjectContent): s
   if (!isFinitePositiveInteger(content.canvasWidth) || !isFinitePositiveInteger(content.canvasHeight)) return null;
   if (!Array.isArray(content.layers) || content.layers.length === 0) return null;
   const lines: string[] = [`canvas:${content.canvasWidth}x${content.canvasHeight}`];
+  const dpi=content.resolutionDpi===undefined?72:content.resolutionDpi;
+  if(typeof dpi!=="number" || !Number.isFinite(dpi) || dpi<1 || dpi>10000) return null;
+  if(Math.fround(dpi)!==72) {const bytes=new DataView(new ArrayBuffer(4));bytes.setFloat32(0,dpi);lines.push(`resolution:${bytes.getUint32(0)}`);}
   if (content.patternContentHash !== undefined) {
     if(typeof content.patternContentHash!=="string" || !/^[a-f0-9]{16}$/.test(content.patternContentHash)) return null;
     lines.push(`patterns:${content.patternContentHash}`);
@@ -195,6 +206,9 @@ function canonicalizeLayer(layer: ImageProjectLayer, depth: number, budget: { co
   if (typeof layer.visible !== "boolean") return null;
   if (!isFiniteUnit(layer.opacity)) return null;
   if (layer.fill !== undefined && !isFiniteUnit(layer.fill)) return null;
+  if(layer.labelColor!==undefined && !IMAGE_PROJECT_LAYER_LABELS.includes(layer.labelColor)) return null;
+  if(layer.linkGroup!==undefined && (!Number.isSafeInteger(layer.linkGroup) || layer.linkGroup<1 || layer.linkGroup>IMAGE_PROJECT_LIMITS.maxLayers)) return null;
+  const metadata=(layer.labelColor===undefined || layer.labelColor==="none" ? "" : `|label:${layer.labelColor}`)+(layer.linkGroup===undefined ? "" : `|link:${layer.linkGroup}`);
   const fill = layer.fill === undefined || layer.fill === 1 ? "" : `|fill:${round(layer.fill)}`;
   if (!isImageProjectBlendMode(layer.blend)) return null;
   if (layer.blend === "pass-through" && layer.kind !== "group") return null;
@@ -257,7 +271,7 @@ function canonicalizeLayer(layer: ImageProjectLayer, depth: number, budget: { co
     transform,
     mask,
     body
-  ].join("|") + locks + clipping + fill + style;
+  ].join("|") + locks + clipping + fill + style + metadata;
 }
 
 function canonicalizeLocks(locks: ImageProjectLayer["locks"]): string | null {
@@ -294,7 +308,11 @@ function canonicalizeMask(mask: ImageProjectMaskSummary | null): string | null {
   if (mask.linked !== undefined && typeof mask.linked !== "boolean") return null;
   if (mask.origin !== "selection" && mask.origin !== "paint") return null;
   if (typeof mask.contentHash !== "string" || !HASH16.test(mask.contentHash)) return null;
-  return `mask:${mask.enabled ? "1" : "0"}:${mask.origin}:${mask.contentHash}${mask.linked === false ? ":unlinked" : ""}`;
+  const density=mask.density===undefined?1:mask.density,feather=mask.feather===undefined?0:mask.feather;
+  if (![density,feather].every(value=>typeof value==="number" && Number.isFinite(value)) || density<0 || density>1 || feather<0 || feather>1000) return null;
+  const bits=(value:number)=>new Uint32Array(new Float32Array([value===0?0:value]).buffer)[0];
+  const properties=density===1 && feather===0?"":`:properties:${bits(density)},${bits(feather)}`;
+  return `mask:${mask.enabled ? "1" : "0"}:${mask.origin}:${mask.contentHash}${mask.linked === false ? ":unlinked" : ""}${properties}`;
 }
 
 function canonicalizePixel(pixel: ImageProjectPixelSummary | null): string | null {

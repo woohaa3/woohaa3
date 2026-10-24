@@ -85,3 +85,13 @@
 .image-edit-workspace__history-preview > span, .image-edit-workspace__history-preview > p { position: absolute; bottom: 12px; padding: 4px 8px; border-radius: 6px; background: var(--app-web-panel); color: var(--app-web-text-primary); font-size: 12px; }
 .image-edit-workspace__history-preview > p { top: 12px; bottom: auto; }
 .photo-editor--unavailable { align-items: center; justify-content: center; gap: 12px; }
+
+.image-edit-workspace__notification {
+  position: absolute; right: 12px; bottom: 12px; z-index: 2;
+  display: flex; align-items: flex-start; gap: 12px; max-width: min(440px, calc(100% - 24px));
+  padding: 10px 12px; border: 1px solid var(--app-web-border); border-radius: 6px;
+  background: var(--app-web-panel); color: var(--app-web-text-primary); pointer-events: auto;
+}
+.image-edit-workspace__notification p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.image-edit-workspace__notification button { flex-shrink: 0; }
+.image-edit-workspace__notification[data-tone="error"] { color: var(--app-web-danger); }

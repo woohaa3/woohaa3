@@ -1,3 +1,6 @@
+import type {HistogramReadout} from "./histogram-data.js";
+import type {PixelGridRegion,PixelGridSegment} from "./pixel-grid-data.js";
+import type {InfoRequest,InfoReadout} from "./info-readout.js";
 import { yieldEditorTask } from "./yield-editor-task.js";
 /**
  * React 图像编辑器工作区控制器
@@ -16,16 +19,20 @@ import { yieldEditorTask } from "./yield-editor-task.js";
 import type { PhotocraftCommand, PhotocraftContentState } from "@woohaa3/photocraft-protocol";
 import type { TextGeometry, TextGeometryRequest } from "./text-geometry.js";
 import { freezeProjectArtifacts, type ArtifactDigest, type ProjectExportArtifacts } from "./editor-artifacts.js";
-import type { EditorAssetPort, EditorEditingOwner, EditorFileDeliveryResult, EditorFilePort } from "./ports.js";
+import {EXPORT_FORMATS, type EditorAssetPort, type EditorEditingOwner, type EditorExportOptions, type EditorFileDeliveryResult, type EditorFilePort } from "./ports.js";
 import type { EditorDocumentSession, EditorSaveOutcome, EditorSavePort } from "./session.js";
 import {
   loadEditor,
+  type CloneSourceList,
+  type CloneSourceOverlay,
+  type CloneSourceSlot,
   type EditorFailure,
   type EditorHandle,
   type EditorPreview,
   type EditorPreviewRegion,
   type EditorResult
 } from "./editor-wasm.js";
+export type { CloneSourceList, CloneSourceOverlay, CloneSourceSlot };
 import { decodeEditorState, indexRenderableCommands, type EditorViewModel } from "./editor-view-model.js";
 
 /** React 消费的只读快照。 */
@@ -52,6 +59,13 @@ export type EditorWorkspaceState = {
   message: string | null;
   dirty: boolean;
   retriable: boolean;
+  /**
+   * 宿主上报的真实保存进度（0–100）；没有可测量的宿主时缺省。
+   *
+   * 只在 `phase === "saving"` 有意义。编辑器从不估算：宿主不调用 `onProgress` 时这里保持缺省，
+   * 界面继续只显示「保存中」。
+   */
+  savePercent?: number;
 };
 
 export type EditorWorkspaceOptions = {
@@ -85,6 +99,8 @@ export type EditorWorkspaceOptions = {
 export class EditorWorkspaceController {
   private readonly options: EditorWorkspaceOptions;
   private state: EditorWorkspaceState = { phase: "idle", message: null, dirty: false, retriable: false };
+  /** 当前保存上报的真实进度；`undefined` 表示宿主没有提供可测进度。 */
+  private savePercent: number | undefined;
   private handle: EditorHandle | null = null;
   private view: EditorViewModel = { hasDocument: false, document: null, sessionActiveIndex: null };
   private frozen: ProjectExportArtifacts | null = null;
@@ -95,7 +111,9 @@ export class EditorWorkspaceController {
   private strokeActive = false;
   private transformActive = false;
   private textActive = false;
+  private textCheckpointed = false;
   private adjustmentActive = false;
+  private rotationActive=false;
   private propertiesActive = false;
   private readonly placedAssetIds = new Set<string>();
   private commandIndex: Map<string, PhotocraftCommand> = new Map();
@@ -145,6 +163,13 @@ export class EditorWorkspaceController {
     return this.view;
   }
 
+  canDuplicateDocument():boolean {return this.view.hasDocument && this.state.phase==="editing" && this.canDispatchCommands() && this.handle?.canDuplicateProject()===true;}
+  duplicateDocument(name:string):EditorResult<Uint8Array> {
+    if(!this.handle)return this.unavailable();
+    if(!this.view.hasDocument || this.state.phase!=="editing" || !this.canDispatchCommands())return {ok:false,code:"gesture-active",message:"请先结束当前编辑或保存，再复制文档"};
+    return this.handle.duplicateProject(name);
+  }
+
   /** 最近一次冻结的成对产物（保存失败后仍可重试）。 */
   frozenArtifacts(): ProjectExportArtifacts | null {
     return this.frozen;
@@ -162,7 +187,7 @@ export class EditorWorkspaceController {
    * 摘要校验，且重试复用同一冻结结果（change: 2026-10-21-add-photocraft-document-workspace，D5）。
    */
   async freezeForPublish(): Promise<EditorResult<ProjectExportArtifacts>> {
-    if (this.propertiesActive) return { ok: false, code: "properties-active", message: "请先确认或取消图层属性编辑" };
+    if (this.rotationActive || this.propertiesActive) return { ok: false, code: "properties-active", message: this.rotationActive?"请先确认或取消画布旋转":"请先确认或取消图层属性编辑" };
     if (this.adjustmentActive) return { ok: false, code: "adjustment-active", message: "请先确认或取消调整参数编辑" };
     if (this.textActive) return { ok: false, code: "text-active", message: "请先确认或取消文字编辑" };
     if (this.transformActive) return { ok: false, code: "transform-active", message: "请先确认或取消自由变换" };
@@ -188,17 +213,54 @@ export class EditorWorkspaceController {
    * 节点历史、不要求 nodeId。只有宿主确认已写入磁盘（`written`）才推进本地基线；
    * 仅发起下载（`download-started`）保留未保存状态，取消/失败保留现场（design D5）。
    */
-  async deliverFile(kind: "project" | "png", options: { fileName?: string } = {}): Promise<EditorFileDeliveryResult> {
-    const deliver = this.options.fileDelivery;
+  /**
+   * 按所选格式与控制导出当前修订（I045）。
+   *
+   * 与 `deliverFile` 的区别：这里只导出**扁平图像**，不推进工程保存基线（导出的 JPEG 不代表
+   * 工程已保存）。编码由内核完成，字节走同一单文件交付端口。
+   */
+  async exportImage(options:EditorExportOptions):Promise<EditorFileDeliveryResult> {
+    const deliver=this.options.fileDelivery;
+    if(!deliver)return {ok:false,status:"failed",message:"当前宿主不支持本地文件导出"};
+    if(this.rotationActive||this.propertiesActive)return {ok:false,status:"failed",message:"请先确认或取消图层属性编辑"};
+    if(this.adjustmentActive)return {ok:false,status:"failed",message:"请先确认或取消调整参数编辑"};
+    if(this.textActive&&!this.textCheckpointed)return {ok:false,status:"failed",message:"请先确认或取消文字编辑"};
+    if(this.transformActive)return {ok:false,status:"failed",message:"请先确认或取消自由变换"};
+    if(this.strokeActive)return {ok:false,status:"failed",message:"请先结束当前笔迹再导出"};
+    const handle=this.handle;
+    if(!handle)return {ok:false,status:"failed",message:"编辑器尚未就绪"};
+    if(this.saving||this.state.phase==="freezing"||this.state.phase==="saving")return {ok:false,status:"failed",message:"保存正在进行，请稍候"};
+    const generation=this.generation;
+    const format=EXPORT_FORMATS[options.format];
+    if(!format)return {ok:false,status:"failed",message:"不支持的导出格式"};
+    this.setState("freezing",null,this.isDirty());
+    try {
+      const result=handle.exportImage(options);
+      if(generation!==this.generation)return {ok:false,status:"failed",message:"编辑会话已结束"};
+      if(!result.ok)return {ok:false,status:"failed",message:result.message};
+      this.setState("saving",null,this.isDirty());
+      const base=(this.view.document?.name??"photocraft").replace(/\.[^.]+$/,"")||"photocraft";
+      return await deliver({fileName:`${base}.${format.extension}`,contentType:format.contentType,bytes:result.value.output});
+    } catch(error) {
+      return {ok:false,status:"failed",message:error instanceof Error?error.message:"导出失败，请重试"};
+    } finally {
+      if(generation===this.generation)this.setState("editing",null,this.isDirty());
+    }
+  }
+
+  async deliverFile(kind: "project" | "png", options: { fileName?: string } = {}): Promise<EditorFileDeliveryResult> {    const deliver = this.options.fileDelivery;
     if (!deliver) return { ok: false, status: "failed", message: "当前宿主不支持本地文件保存" };
-    if (this.propertiesActive) return { ok: false, status: "failed", message: "请先确认或取消图层属性编辑" };
+    if (this.rotationActive || this.propertiesActive) return { ok: false, status: "failed", message: this.rotationActive?"请先确认或取消画布旋转":"请先确认或取消图层属性编辑" };
     if (this.adjustmentActive) return { ok: false, status: "failed", message: "请先确认或取消调整参数编辑" };
-    if (this.textActive) return { ok: false, status: "failed", message: "请先确认或取消文字编辑" };
+    if (this.textActive && !this.textCheckpointed) return { ok: false, status: "failed", message: "请先确认或取消文字编辑" };
     if (this.transformActive) return { ok: false, status: "failed", message: "请先确认或取消自由变换" };
     if (this.strokeActive) return { ok: false, status: "failed", message: "请先结束当前笔迹再导出" };
     const handle = this.handle;
     if (!handle) return { ok: false, status: "failed", message: "编辑器尚未就绪" };
+    if(this.saving || this.state.phase==="freezing" || this.state.phase==="saving") return {ok:false,status:"failed",message:"保存正在进行，请稍候"};
     const generation = this.generation;
+    this.setState("freezing",null,this.isDirty());
+    try {
     const revision = this.view.document?.revision;
     if (!this.pendingArtifacts || this.pendingArtifacts.revision !== revision) {
       const frozen = await freezeProjectArtifacts(handle, this.options.digest);
@@ -209,6 +271,7 @@ export class EditorWorkspaceController {
     }
     const artifacts = this.pendingArtifacts;
     const isProject = kind === "project";
+    this.setState("saving",null,this.isDirty());
     const result = await deliver({
       fileName: options.fileName ?? (isProject ? "photocraft.pcraft" : "photocraft.png"),
       contentType: isProject ? artifacts.projectSummary.contentType : "image/png",
@@ -221,6 +284,8 @@ export class EditorWorkspaceController {
       this.pendingArtifacts = null;
     }
     return result;
+    } catch(error) {return {ok:false,status:"failed",message:error instanceof Error?error.message:"保存失败，请重试"};}
+    finally {if(generation===this.generation) this.setState("editing",null,this.isDirty());}
   }
 
   /** 加载内核（幂等）。 */
@@ -241,7 +306,7 @@ export class EditorWorkspaceController {
 
   /** 打开图片（纯媒体或 v1 标注 → 工程）。 */
   async openImage(input: { name: string; assetId: string; bytes: Uint8Array }): Promise<EditorResult<EditorViewModel>> {
-    if (this.propertiesActive) return this.propertiesPending();
+    if (this.rotationActive || this.propertiesActive) return this.propertiesPending();
     if (this.adjustmentActive) return this.adjustmentPending();
     if (this.textActive) return this.textPending();
     const generation = this.generation;
@@ -258,7 +323,7 @@ export class EditorWorkspaceController {
 
   /** 打开 `.pcraft` 工程字节。 */
   async openProject(input: { bytes: Uint8Array; baseAssetId: string }): Promise<EditorResult<EditorViewModel>> {
-    if (this.propertiesActive) return this.propertiesPending();
+    if (this.rotationActive || this.propertiesActive) return this.propertiesPending();
     if (this.adjustmentActive) return this.adjustmentPending();
     if (this.textActive) return this.textPending();
     const generation = this.generation;
@@ -285,7 +350,7 @@ export class EditorWorkspaceController {
   }): Promise<EditorResult<EditorViewModel>> {
     const handle = this.handle;
     if (!handle) return this.unavailable();
-    if (this.propertiesActive) return this.propertiesPending();
+    if (this.rotationActive || this.propertiesActive) return this.propertiesPending();
     if (this.adjustmentActive) return this.adjustmentPending();
     if (this.textActive) return this.textPending();
     if (this.transformActive) return this.transformPending();
@@ -305,7 +370,7 @@ export class EditorWorkspaceController {
   dispatch(id: string, params: unknown = null): EditorResult<EditorViewModel> {
     const handle = this.handle;
     if (!handle) return this.unavailable();
-    if (this.propertiesActive) return this.propertiesPending();
+    if (this.rotationActive || this.propertiesActive) return this.propertiesPending();
     if (this.adjustmentActive) return this.adjustmentPending();
     if (this.textActive) return this.textPending();
     if (this.transformActive) return this.transformPending();
@@ -318,10 +383,63 @@ export class EditorWorkspaceController {
     return this.afterWrite();
   }
 
+  /** Search results retain native UTF-8 ranges; the dialog never maps them to DOM text offsets. */
+  findReplaceText(params:unknown):EditorResult<Record<string,unknown>> {
+    if(!this.handle || !this.canDispatchCommands())return {ok:false,code:"gesture-active",message:"请先结束当前编辑或保存"};
+    const result=this.handle.execute("edit.findAndReplaceText",params);
+    if(!result.ok)return this.fail(result);
+    const refreshed=this.afterWrite();if(!refreshed.ok)return refreshed;
+    try {const value=typeof result.value==="string"?JSON.parse(result.value):result.value;
+      if(!value || typeof value!=="object" || Array.isArray(value))throw new Error();
+      return {ok:true,value:value as Record<string,unknown>};
+    }catch{return {ok:false,code:"invalid-state",message:"无法读取查找替换结果"};}
+  }
+
+  /** Read-only document metadata (XMP + camera EXIF); never a document write. */
+  fileInfo(): EditorResult<Record<string, unknown>> {
+    if(!this.handle || !this.canDispatchCommands()) return {ok:false,code:"gesture-active",message:"请先结束当前编辑或保存"};
+    const result=this.handle.execute("file.fileInfo",null);
+    if(!result.ok)return this.fail(result);
+    try{const value=typeof result.value==="string"?JSON.parse(result.value):result.value;
+      if(!value || typeof value!=="object" || Array.isArray(value))throw new Error();
+      return {ok:true,value:value as Record<string,unknown>};
+    }catch{return {ok:false,code:"invalid-state",message:"无法读取文件信息"};}
+  }
+
+  /** Spelling ranges stay native character indices; no DOM offset conversion. */
+  checkSpelling(params:unknown):EditorResult<Record<string,unknown>> {
+    if(!this.handle || !this.canDispatchCommands())return {ok:false,code:"gesture-active",message:"请先结束当前编辑或保存"};
+    const result=this.handle.execute("edit.checkSpelling",params);
+    if(!result.ok)return this.fail(result);
+    const refreshed=this.afterWrite();if(!refreshed.ok)return refreshed;
+    try {const value=typeof result.value==="string"?JSON.parse(result.value):result.value;
+      if(!value || typeof value!=="object" || Array.isArray(value))throw new Error();
+      return {ok:true,value:value as Record<string,unknown>};
+    }catch{return {ok:false,code:"invalid-state",message:"无法读取拼写检查结果"};}
+  }
+
+  /** 拾取的命中值与刷新后的视图分开返回，空白不能复用上次活动层。 */
+  pickLayerAt(params:{x:number;y:number;target:"layer"|"group";mode?:"add"|"replace";select?:boolean}):EditorResult<number|null> {
+    if(!this.handle || !this.canDispatchCommands()) return {ok:false,code:"gesture-active",message:"请先结束当前操作"};
+    const picked=this.handle.execute("layer.pickAt",params);
+    if(!picked.ok) return this.fail(picked);
+    const refreshed=this.afterWrite();if(!refreshed.ok) return refreshed;
+    try {
+      const value=typeof picked.value==="string"?JSON.parse(picked.value):picked.value;
+      return {ok:true,value:typeof value?.layer==="number"?value.layer:null};
+    } catch {return {ok:false,code:"invalid-state",message:"无法读取图层命中结果"};}
+  }
+
+  /** 跨文档内存操作预检；不修改状态，也不结束任何草稿或冻结结果。 */
+  canDispatchCommands():boolean {
+    return !!this.handle && !this.rotationActive && !this.propertiesActive && !this.adjustmentActive && !this.textActive && !this.transformActive && !this.strokeActive
+      && !this.saving && !this.pendingArtifacts && this.state.phase!=="freezing" && this.state.phase!=="saving";
+  }
+
   /** 临时笔迹不发布内容状态，只有提交才同步修订与净变化。 */
   beginStroke(params: unknown): EditorResult<void> {
     if (!this.handle) return this.unavailable();
-    if (this.propertiesActive) return this.propertiesPending();
+    if (this.rotationActive || this.propertiesActive) return this.propertiesPending();
     if (this.adjustmentActive) return this.adjustmentPending();
     if (this.textActive) return this.textPending();
     if (this.transformActive) return this.transformPending();
@@ -355,6 +473,8 @@ export class EditorWorkspaceController {
     this.strokeActive = false;
   }
 
+  hasImageRotation():boolean {return this.rotationActive;}
+  hasStroke():boolean {return this.strokeActive;}
   hasTransform(): boolean { return this.transformActive; }
   hasText(): boolean { return this.textActive; }
   hasAdjustment(): boolean { return this.adjustmentActive; }
@@ -367,12 +487,126 @@ export class EditorWorkspaceController {
   patternLibrarySnapshot() {return this.handle?.patternLibrarySnapshot()??this.unavailable();}
   restorePatternLibrary(bytes:Uint8Array) {return this.handle?.restorePatternLibrary(bytes)??this.unavailable();}
   exportContourPreset(contour:unknown) {return this.handle?.exportContourPreset(contour)??this.unavailable();}
-  hasLayerProperties():boolean {return this.propertiesActive;}
+  /**
+   * 图层重排的画布预览（I218）。
+   *
+   * 候选只影响预览合成：不写正式文档、历史或指纹；释放时的 `layer.moveTo` 才是唯一提交。
+   */
+  beginReorderPreview():EditorResult<unknown> {
+    if(!this.handle) return this.unavailable();
+    if(!this.handle.beginReorderPreview) return {ok:false,code:"unsupported",message:"当前编辑内核未提供图层重排预览"};
+    return this.handle.beginReorderPreview();
+  }
+  previewReorder(params:unknown):EditorResult<unknown> {
+    if(!this.handle||!this.handle.previewReorder) return {ok:false,code:"unsupported",message:"当前编辑内核未提供图层重排预览"};
+    return this.handle.previewReorder(params);
+  }
+  endReorderPreview():EditorResult<boolean> {
+    if(!this.handle||!this.handle.endReorderPreview) return {ok:true,value:false};
+    return this.handle.endReorderPreview();
+  }
+  /** 克隆源面板：读取为只读；写命令只改会话预设，不推进文档内容身份。 */
+  cloneSources() {return this.handle?.cloneSourceList()??this.unavailable();}
+  /**
+   * 画笔预设（I058/I132/I136）。
+   *
+   * 预设属于会话状态：不推进文档内容身份或历史。读取走只读命令，写入走 `brush.presets.*`
+   * 与 `brush.defineFromSelection`，由内核复核选区与像素目标。
+   */
+  brushPresets():EditorResult<unknown> {
+    return this.handle ? this.handle.execute("brush.presets.list", {full:false}) : this.unavailable();
+  }
+  /**
+   * 新建文档的命名预设与最近设置（I064）。
+   *
+   * 两者都由固定引擎的 `document.*` 命令持有；编辑器只读列表，写入走同一命令。
+   * `file.new` 本身是唯一的建文档入口，且只在宿主允许工作时可用。
+   */
+  documentPresets():EditorResult<unknown> {
+    return this.handle ? this.handle.execute("document.presets.list", null) : this.unavailable();
+  }
+  documentPresetSave(name:string,settings:Record<string,unknown>):EditorResult<unknown> {
+    return this.documentPresetWrite("document.presets.save",{name,settings});
+  }
+  documentPresetDelete(name:string):EditorResult<unknown> {
+    return this.documentPresetWrite("document.presets.delete",{name});
+  }
+  recentDocuments():EditorResult<unknown> {
+    return this.handle ? this.handle.execute("document.recent.list", null) : this.unavailable();
+  }
+  addRecentDocument(settings:Record<string,unknown>):EditorResult<unknown> {
+    return this.documentPresetWrite("document.recent.add",{settings});
+  }
+  /** 新建文档：真正的写入口，仍由内核校验尺寸/模式/位深与资源预算。 */
+  newDocument(settings:Record<string,unknown>):EditorResult<EditorViewModel> {
+    return this.dispatch("file.new",settings);
+  }
+  private documentPresetWrite(id:string,params:unknown):EditorResult<unknown> {
+    const handle=this.handle;
+    if(!handle)return this.unavailable();
+    if(!this.canDispatchCommands())return {ok:false,code:"gesture-active",message:"请先结束当前编辑或保存"};
+    const result=handle.execute(id,params);
+    if(!result.ok)return this.fail(result);
+    return result;
+  }  saveBrushPreset(name:string):EditorResult<unknown> {return this.brushPresetWrite("brush.presets.save",{name});}
+  updateBrushPreset(name?:string):EditorResult<unknown> {return this.brushPresetWrite("brush.presets.update",name===undefined?{}:{name});}
+  deleteBrushPreset(name:string):EditorResult<unknown> {return this.brushPresetWrite("brush.presets.delete",{name});}
+  setBrushPreset(name:string):EditorResult<unknown> {return this.brushPresetWrite("brush.presets.setCurrent",{name});}
+  defineBrushFromSelection(name:string):EditorResult<unknown> {return this.brushPresetWrite("brush.defineFromSelection",{name});}
+  private brushPresetWrite(id:string,params:unknown):EditorResult<unknown> {
+    const handle=this.handle;
+    if(!handle)return this.unavailable();
+    if(!this.canDispatchCommands())return {ok:false,code:"gesture-active",message:"请先结束当前编辑或保存"};
+    const result=handle.execute(id,params);
+    if(!result.ok)return this.fail(result);
+    this.refreshPresetViews();
+    return result;
+  }
+  cloneSourceSelect(index:number) {
+    if(!this.handle) return this.unavailable();
+    if(this.strokeActive || this.transformActive || this.textActive || this.propertiesActive || this.adjustmentActive) return this.clonePending();
+    const result=this.handle.cloneSourceSelect(index);
+    if(result.ok)this.refreshPresetViews();
+    return result;
+  }
+  cloneSourceSet(params:unknown) {
+    if(!this.handle) return this.unavailable();
+    if(this.strokeActive || this.transformActive || this.textActive || this.propertiesActive || this.adjustmentActive) return this.clonePending();
+    const result=this.handle.cloneSourceSet(params);
+    if(result.ok)this.refreshPresetViews();
+    return result;
+  }
+  cloneSourceResetTransform(index:number) {
+    if(!this.handle) return this.unavailable();
+    if(this.strokeActive || this.transformActive || this.textActive || this.propertiesActive || this.adjustmentActive) return this.clonePending();
+    const result=this.handle.cloneSourceResetTransform(index);
+    if(result.ok)this.refreshPresetViews();
+    return result;
+  }
+  cloneSourceOverlay(params:unknown) {
+    if(!this.handle) return this.unavailable();
+    const result=this.handle.cloneSourceOverlay(params);
+    if(result.ok)this.refreshPresetViews();
+    return result;
+  }
+  /** 克隆源变更只影响会话预设：重新发布视图，但不推进保存基线或内容修订。 */
+  private refreshPresetViews():void {
+    const refreshed=this.afterWrite();if(!refreshed.ok)return;
+  }
+  private clonePending():EditorFailure {
+    return {ok:false,code:"gesture-active",message:"请先结束当前操作再修改克隆源"};
+  }  hasLayerProperties():boolean {return this.propertiesActive;}
   beginLayerProperties(layer:number):EditorResult<unknown> {
     if (!this.handle) return this.unavailable();
-    if (this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving
+    if (this.rotationActive || this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving
       || this.pendingArtifacts || this.state.phase==="freezing" || this.state.phase==="saving") return this.propertiesPending();
     const result=this.handle.beginLayerProperties(layer);this.propertiesActive=result.ok;return result;
+  }
+  beginLayerVisibility(layer:number):EditorResult<unknown> {
+    if (!this.handle) return this.unavailable();
+    if (this.rotationActive || this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving
+      || this.pendingArtifacts || this.state.phase==="freezing" || this.state.phase==="saving") return this.propertiesPending();
+    const result=this.handle.beginLayerVisibility(layer);this.propertiesActive=result.ok;return result;
   }
   previewLayerProperties(params:unknown):EditorResult<unknown> {
     return this.handle && this.propertiesActive ? this.handle.previewLayerProperties(params) : this.unavailable();
@@ -391,15 +625,38 @@ export class EditorWorkspaceController {
     this.propertiesActive=false;
   }
   private propertiesPending():EditorFailure {
-    return {ok:false,code:"properties-active",message:"请先确认或取消图层属性编辑"};
+    return {ok:false,code:this.rotationActive?"rotation-active":"properties-active",message:this.rotationActive?"请先确认或取消画布旋转":"请先确认或取消图层属性编辑"};
   }
   curveGeometry(points: readonly [number,number][]): EditorResult<number[]> {
     return this.handle ? this.handle.curveGeometry(points) : this.unavailable();
   }
 
+  beginImageRotation():EditorResult<unknown> {
+    if(!this.handle || !this.canDispatchCommands())return this.propertiesPending();
+    const result=this.handle.beginImageRotation();this.rotationActive=result.ok;return result;
+  }
+  previewImageRotation(params:unknown):EditorResult<unknown> {return this.handle && this.rotationActive?this.handle.previewImageRotation(params):this.unavailable();}
+  commitImageRotation():EditorResult<EditorViewModel> {
+    if(!this.handle || !this.rotationActive)return this.unavailable();const result=this.handle.commitImageRotation();if(!result.ok)return result;this.rotationActive=false;return this.afterWrite();
+  }
+  cancelImageRotation():void {if(this.rotationActive)this.handle?.cancelImageRotation();this.rotationActive=false;}
+
+  clipboardBounds():EditorResult<[number,number,number,number]|null> {return this.handle?this.handle.clipboardBounds():this.unavailable();}
+  histogram():EditorResult<HistogramReadout> {return this.handle?this.handle.histogram():this.unavailable();}
+  pixelGrid(params:PixelGridRegion):EditorResult<PixelGridSegment[]> {return this.handle?this.handle.pixelGrid(params):this.unavailable();}
+  infoReadout(params:InfoRequest):EditorResult<InfoReadout> {return this.handle?this.handle.infoReadout(params):this.unavailable();}
+  setPerformancePreferences(historyStates:number,memoryUsageMb:number):EditorResult<EditorViewModel> {
+    if(!this.handle || !this.canDispatchCommands())return {ok:false,code:"gesture-active",message:"请先结束当前操作，再调整性能偏好"};
+    const result=this.handle.setPerformancePreferences(historyStates,memoryUsageMb);if(!result.ok)return result;return this.afterWrite();
+  }
+  setHistoryLimit(limit:number):EditorResult<EditorViewModel> {
+    if(!this.handle || !this.canDispatchCommands())return {ok:false,code:"gesture-active",message:"请先结束当前操作，再调整历史状态数量"};
+    const result=this.handle.setHistoryLimit(limit);if(!result.ok)return result;return this.afterWrite();
+  }
+
   beginAdjustment(layer: number): EditorResult<unknown> {
     if (!this.handle) return this.unavailable();
-    if (this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving
+    if (this.rotationActive || this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving
       || this.pendingArtifacts || this.state.phase === "freezing" || this.state.phase === "saving") return this.adjustmentPending();
     const result=this.handle.beginAdjustment(layer);
     this.adjustmentActive=result.ok;
@@ -429,23 +686,32 @@ export class EditorWorkspaceController {
 
   beginText(params: unknown): EditorResult<unknown> {
     if (!this.handle) return this.unavailable();
-    if (this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving || this.pendingArtifacts
+    if (this.rotationActive || this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving || this.pendingArtifacts
       || this.state.phase === "freezing" || this.state.phase === "saving") return this.textPending();
     const result=this.handle.beginText(params);
-    this.textActive=result.ok;
+    this.textActive=result.ok;this.textCheckpointed=false;
     return result;
   }
 
   previewText(params: unknown): EditorResult<unknown> {
-    return this.handle && this.textActive ? this.handle.previewText(params) : this.unavailable();
+    if(!this.handle || !this.textActive || this.saving || this.state.phase==="saving" || this.state.phase==="freezing") return this.unavailable();
+    this.textCheckpointed=false;
+    return this.handle.previewText(params);
   }
 
   textGeometry(params: TextGeometryRequest): EditorResult<TextGeometry> {
     return this.handle && this.textActive ? this.handle.textGeometry(params) : this.unavailable();
   }
 
+  checkpointText():EditorResult<unknown> {
+    if(!this.handle || !this.textActive || this.saving || this.state.phase==="saving" || this.state.phase==="freezing") return this.unavailable();
+    const result=this.handle.checkpointText();if(!result.ok) return result;
+    const refreshed=this.afterWrite();if(!refreshed.ok) return refreshed;
+    this.textCheckpointed=true;return result;
+  }
+
   commitText(): EditorResult<EditorViewModel> {
-    if (!this.handle || !this.textActive) return this.unavailable();
+    if (!this.handle || !this.textActive || this.saving || this.state.phase==="saving" || this.state.phase==="freezing") return this.unavailable();
     const result=this.handle.commitText();
     if (!result.ok) return result;
     this.textActive=false;
@@ -463,16 +729,16 @@ export class EditorWorkspaceController {
 
   beginTransform(selectionOnly = false): EditorResult<void> {
     if (!this.handle) return this.unavailable();
-    if (this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving || this.pendingArtifacts
+    if (this.rotationActive || this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving || this.pendingArtifacts
       || this.state.phase === "freezing" || this.state.phase === "saving") return this.transformPending();
     const result = selectionOnly ? this.handle.beginTransform(true) : this.handle.beginTransform();
     this.transformActive = result.ok;
     return result;
   }
 
-  beginMove(params: { x: number; y: number; autoSelect: boolean; duplicate: boolean }): EditorResult<boolean> {
+  beginMove(params: { x: number; y: number; autoSelect: boolean; duplicate: boolean; wholeLayer?: boolean; selectedPixels?: boolean }): EditorResult<boolean> {
     if (!this.handle) return this.unavailable();
-    if (this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving || this.pendingArtifacts
+    if (this.rotationActive || this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive || this.saving || this.pendingArtifacts
       || this.state.phase === "freezing" || this.state.phase === "saving") return this.transformPending();
     const result = this.handle.beginMove(params);
     if (!result.ok) { this.afterWrite(); return result; }
@@ -511,15 +777,27 @@ export class EditorWorkspaceController {
   redo(): EditorResult<EditorViewModel> { return this.dispatch("edit.redo"); }
 
   /** 合成预览像素（画布元素直接绘制）。 */
-  sampleColor(x: number, y: number): EditorResult<string | null> {
+  selectionContains(x:number,y:number):EditorResult<boolean> {
+    if(!this.handle) return this.unavailable();return this.handle.selectionContains(x,y);
+  }
+
+  moveHoverAt(params:{x:number;y:number;target:"layer"|"group"}) {return this.handle&&this.canDispatchCommands()?this.handle.moveHoverAt(params):{ok:false as const,code:"gesture-active",message:"请先结束当前操作"};}
+
+  fontPreview(family:string,size:number,scale:number):EditorResult<EditorPreview> {return this.handle?this.handle.fontPreview(family,size,scale):this.unavailable();}
+
+  missingFonts():EditorResult<string[]> {return this.handle?this.handle.missingFonts():this.unavailable();}
+
+  sampleColor(x: number, y: number,options?:{size:number;sampleLayer:string}): EditorResult<string | null> {
     if (!this.handle) return this.unavailable();
-    if (this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive) return {ok:false,code:"gesture-active",message:"请先结束当前操作"};
-    return this.handle.sampleColor(x,y);
+    if (this.rotationActive || this.propertiesActive || this.adjustmentActive || this.textActive || this.strokeActive || this.transformActive) return {ok:false,code:"gesture-active",message:"请先结束当前操作"};
+    return this.handle.sampleColor(x,y,options);
   }
 
   layerThumbnail(layer: number, mask: boolean): EditorResult<EditorPreview> {
     return this.handle ? this.handle.layerThumbnail(layer,mask) : this.unavailable();
   }
+
+  navigatorPreview():EditorResult<EditorPreview> {return this.handle?this.handle.renderPreview(256):this.unavailable();}
 
   render(maxSide: number): EditorResult<EditorPreview> {
     const handle = this.handle;
@@ -539,6 +817,27 @@ export class EditorWorkspaceController {
 
   isDirty(): boolean {
     return this.options.session.isDirty();
+  }
+
+  /**
+   * 只读当前画笔设置，供画笔设置面板回填。
+   *
+   * 走只读端口而不是命令分派：它不是编辑动作，也不应出现在「绘画期间没有额外命令」的断言里。
+   * 老内核没有该端口时回退到 `brush.get` 命令。
+   */
+  currentBrush():EditorResult<unknown> {
+    if(!this.handle) return this.unavailable();
+    if(this.handle.brushGet) return this.handle.brushGet();
+    return this.handle.execute("brush.get", null);
+  }
+  /** 深合并画笔设置（`tools.setBrush`）；只改会话工具状态，不写文档或历史。 */
+  setBrushDynamics(patch:Record<string,unknown>):EditorResult<unknown> {
+    return this.brushPresetWrite("tools.setBrush",patch);
+  }
+
+  /** 宿主是否提供了本地文件交付端口（导出与另存的前提）。 */
+  hasFileDelivery(): boolean {
+    return !!this.options.fileDelivery;
   }
 
   /**
@@ -562,9 +861,9 @@ export class EditorWorkspaceController {
     const handle = this.handle;
     const session = this.options.session;
     if (!handle) return { ok: false, code: "invalid-artifacts", message: "编辑器尚未就绪", retriable: false };
-    if (this.propertiesActive) return {...this.propertiesPending(),code:"freeze-failed",retriable:true};
+    if (this.rotationActive || this.propertiesActive) return {...this.propertiesPending(),code:"freeze-failed",retriable:true};
     if (this.adjustmentActive) return { ...this.adjustmentPending(), code: "freeze-failed", retriable: true };
-    if (this.textActive) return { ...this.textPending(), code: "freeze-failed", retriable: true };
+    if (this.textActive && !this.textCheckpointed) return { ...this.textPending(), code: "freeze-failed", retriable: true };
     if (this.transformActive) return { ...this.transformPending(), code: "freeze-failed", retriable: true };
     if (this.strokeActive) return { ok: false, code: "freeze-failed", message: "请先结束当前笔迹再保存", retriable: true };
     const revision = this.view.document?.revision;
@@ -581,14 +880,27 @@ export class EditorWorkspaceController {
       this.pendingArtifacts = frozen.value;
     }
     session.beginSave();
+    this.savePercent = undefined;
     this.setState("saving", null, true);
     const saveGeneration = this.generation;
+    const reportProgress = (percent: number) => {
+      // 只接受真实上报：有限、整数化、单调、0–100，过期代际或已离开 saving 时丢弃。
+      if (saveGeneration !== this.generation || this.state.phase !== "saving") return;
+      if (!Number.isFinite(percent)) return;
+      const next = Math.min(100, Math.max(0, Math.round(percent)));
+      if (this.savePercent !== undefined && next <= this.savePercent) return;
+      this.savePercent = next;
+      this.setState("saving", null, true);
+    };
     const outcome = await this.options.save({
       artifacts: this.pendingArtifacts,
       sourceAssetIds: [...this.placedAssetIds],
-      isCurrent: () => saveGeneration === generation && this.generation === generation
+      isCurrent: () => saveGeneration === generation && this.generation === generation,
+      onProgress: reportProgress
     });
     if (generation !== this.generation) return this.closedSave();
+    // 保存阶段结束后不再保留进度：成功/失败都回到不带百分比的稳定状态。
+    this.savePercent = undefined;
     if (outcome.ok) {
       const contentHash = this.pendingArtifacts.documentContentHash;
       this.pendingArtifacts = null;
@@ -605,6 +917,7 @@ export class EditorWorkspaceController {
 
   /** 释放：丢弃内核句柄与冻结产物（退出后不再写回）。 */
   dispose(): void {
+    this.cancelImageRotation();
     this.cancelLayerProperties();
     this.cancelAdjustment();
     this.cancelText();
@@ -712,7 +1025,7 @@ export class EditorWorkspaceController {
     dirty = this.state.dirty,
     retriable = phase === "failed"
   ): EditorWorkspaceState {
-    this.state = { phase, message, dirty, retriable };
+    this.state = { phase, message, dirty, retriable, ...(phase === "saving" && this.savePercent !== undefined ? { savePercent: this.savePercent } : {}) };
     // 状态/视图已变：作废快照缓存，让订阅者拿到新的引用（未变化时复用同一引用）。
     this.snapshotCache = null;
     this.options.onState?.(this.currentState());

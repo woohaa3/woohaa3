@@ -19,7 +19,7 @@ export class TransformSession {
     return true;
   }
 
-  beginMove(params: { x: number; y: number; autoSelect: boolean; duplicate: boolean }): boolean {
+  beginMove(params: { x: number; y: number; autoSelect: boolean; duplicate: boolean; wholeLayer?: boolean; selectedPixels?: boolean }): boolean {
     if (this.active) return false;
     const result = this.controller.beginMove(params);
     if (!result.ok) { this.error(result.message); return false; }

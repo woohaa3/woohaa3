@@ -43,6 +43,17 @@ describe("工程核验（design D5）", () => {
     expectLayerError([layer({...style([]),psd_raw:"raw"})],"unsupported-object");
   });
 
+  it("分辨率上传校验接受默认和范围端点，拒绝非法持久化值",()=>{
+    const fixture=(resolution_dpi:unknown)=>{const value=manifest();(value.document as Record<string,unknown>).resolution_dpi=resolution_dpi;return projectBytes({manifest:value});};
+    for(const resolution_dpi of [1,72,300.1,10000]) expect(verifyPhotocraftProject(fixture(resolution_dpi)).layerCount).toBe(1);
+    for(const resolution_dpi of [0,-1,10001,"72",null]) expect(()=>verifyPhotocraftProject(fixture(resolution_dpi))).toThrow(expect.objectContaining({code:"unsupported-object"}));
+  });
+
+  it("蒙版属性接受默认值和范围端点，拒绝非法上传参数",()=>{
+    for(const mask of [{},{density:0,feather:1000},{density:0.37,feather:4.25}]) expect(verifyLayers([{mask,content:{kind:"raster",sources:[]}}]).layerCount).toBe(1);
+    for(const mask of [{density:1.1},{density:null},{feather:-1},{feather:1001},{feather:"2"},[]]) expectLayerError([{mask,content:{kind:"raster",sources:[]}}],"unsupported-object");
+  });
+
   it("填充不透明度接受零和分数，拒绝非法上传参数", () => {
     for (const fill_opacity of [0, 0.4, 1]) expect(verifyLayers([{fill_opacity,content:{kind:"raster",sources:[]}}]).layerCount).toBe(1);
     for (const fill_opacity of [-1, 2, "0.4", null]) expectLayerError([{fill_opacity,content:{kind:"raster",sources:[]}}],"unsupported-object");
@@ -349,4 +360,10 @@ describe("嵌入 Smart 外层结构前置检查",()=>{
       {transform:{m:[1,0,0,0,0,0]}},{transform:{m:[1e308,0,0,1e308,0,0]}},
     ]) expect(()=>inspectEmbeddedPhotocraftProject(bytes(change))).toThrow(ProjectVerificationError);
   });
+});
+
+it("颜色标签和链接元数据允许保存，非法标签、零/不安全链接编号拒绝",()=>{
+  const make=(metadata:Record<string,unknown>)=>{const m=manifest();(m.document as Record<string,unknown>).layers=[{...metadata,content:{kind:"raster",sources:[]}}];return projectBytes({manifest:m});};
+  expect(verifyPhotocraftProject(make({label:"Seafoam",link_group:17})).layerCount).toBe(1);
+  for(const metadata of [{label:"unknown"},{label:null},{link_group:0},{link_group:-1},{link_group:1.5},{link_group:"1"},{link_group:Number.MAX_SAFE_INTEGER+1}]) expect(()=>verifyPhotocraftProject(make(metadata))).toThrow(expect.objectContaining({code:"unsupported-object"}));
 });

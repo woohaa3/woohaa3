@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { SelectionAutoPan, selectionPanStep, type SelectionPanContext } from "./selection-autopan.js";
 const context = (patch: Partial<SelectionPanContext> = {}): SelectionPanContext => ({
-  pointer:{x:799,y:300},width:800,height:600,documentWidth:1600,documentHeight:1200,zoom:1,x:0,y:0,...patch
+  pointer:{x:831,y:300},width:800,height:600,documentWidth:1600,documentHeight:1200,zoom:1,x:0,y:0,...patch
 });
 afterEach(() => vi.unstubAllGlobals());
 it("边缘按屏幕速度平移，只移动可滚动轴并限制到文档范围", () => {
@@ -9,7 +9,7 @@ it("边缘按屏幕速度平移，只移动可滚动轴并限制到文档范围"
   expect(selectionPanStep(context({x:-399}),1/60)).toEqual({x:-1,y:0});
   expect(selectionPanStep(context({x:-400}),1/60)).toEqual({x:0,y:0});
   expect(selectionPanStep(context({zoom:.4}),1/60)).toEqual({x:0,y:0});
-  expect(selectionPanStep(context({pointer:{x:400,y:300}}),1/60)).toEqual({x:0,y:0});
+  for(const x of [0,1,32,400,799,800]) expect(selectionPanStep(context({pointer:{x,y:300}}),1/60)).toEqual({x:0,y:0});
   expect(selectionPanStep(context({pointer:{x:-100,y:-100}}),1)).toEqual({x:15.36,y:15.36});
   expect(selectionPanStep(context({width:0,height:0}),1/60)).toEqual({x:0,y:0});
 });

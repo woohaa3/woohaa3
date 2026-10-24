@@ -37,7 +37,7 @@ it.each([1,2].flatMap(count => entries.map(entry => [count,entry] as const)))("%
   }
   const beginMove = vi.fn((_json: string) => { active = true; draft = null; return true; });
   const instance = {
-    beginMove,
+    beginMove, execute:()=>JSON.stringify({layer:1}),
     openImage: stateJson, stateJson,
     commandsJson: () => JSON.stringify([{id:"edit.transform",label:"自由变换",menu:["Edit"],shortcut:"Mod+T",
       params:"",allowed:true,enabled:true,disabledReason:null,needsDocument:true}]),
@@ -140,7 +140,9 @@ it.each([1,2].flatMap(count => entries.map(entry => [count,entry] as const)))("%
     Object.defineProperty(event,"pointerId",{value:1}); act(() => stage.dispatchEvent(event));
   };
   movePointer("pointerdown",100,100,true);
-  expect(JSON.parse(beginMove.mock.calls.at(-1)![0])).toEqual({x:136,y:136,autoSelect:true,duplicate:true});
+  expect(beginMove).not.toHaveBeenCalled();
+  movePointer("pointermove",120,110,true);
+  expect(JSON.parse(beginMove.mock.calls.at(-1)![0])).toEqual({x:136,y:136,autoSelect:false,duplicate:true,selectedPixels:false});
   movePointer("pointermove",120,110,true); frame();
   expect(marker()).toBe(99); expect(controller.isDirty()).toBe(true); expect(committed).toHaveLength(1);
   movePointer("pointerup",130,120,true);

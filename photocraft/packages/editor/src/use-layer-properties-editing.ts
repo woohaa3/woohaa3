@@ -18,7 +18,9 @@ export type LayerStyleEditing={active:boolean;data:LayerStyleData|null;start:()=
 export function useLayerPropertiesEditing(controller:EditorWorkspaceController,layer:EditorLayerRow|undefined,
   refresh:()=>void,error:(message:string|null)=>void,disabled:boolean) {
   const [values,setValues]=useState({opacity:"100",fill:"100"});
-  const current=useRef(values),original=useRef(values),field=useRef<Property|"style">("opacity");
+  const current=useRef(values),original=useRef(values),field=useRef<Property|"style"|"blend"|"mask">("opacity");
+  const [maskValues,setMaskValues]=useState({density:"100",feather:"0"});
+  const maskCurrent=useRef(maskValues),maskOriginal=useRef(maskValues);
   const [active,setActive]=useState(false);
   const [styleActive,setStyleActive]=useState(false),[styleData,setStyleData]=useState<LayerStyleData|null>(null);
   const styleRef=useRef<LayerStyleData|null>(null),presetPicker=useRef(false);
@@ -71,23 +73,36 @@ export function useLayerPropertiesEditing(controller:EditorWorkspaceController,l
     if (session.active) return;
     const next={opacity:String(Math.round((layer?.opacity??1)*100)),fill:String(Math.round((layer?.fill??1)*100))};
     current.current=next;setValues(next);
+    const mask={density:String(Math.round((layer?.maskDensity??1)*10000)/100),feather:String(layer?.maskFeather??0)};
+    maskCurrent.current=mask;setMaskValues(mask);
   },[layer,session]);
   const finish=useCallback((commit:boolean)=>{
     if (!session.active) return true;
     if (commit) {
       if (positionDrag.current) {callbacks.current.error("请先结束样式拖动，再确认样式");return false;}
-      if (field.current!=="style") {
+      if (field.current==="opacity" || field.current==="fill") {
       const value=current.current[field.current];
       const number=value.trim()===""?NaN:Number(value);
       if (!Number.isFinite(number) || number<0 || number>100) {callbacks.current.error("不透明度和填充须为 0–100，请修改或取消");return false;}
       }
+      if(field.current==="mask" && !validMask(maskCurrent.current)) {callbacks.current.error("密度须为 0–100%，羽化须为 0–1000 px，请修改或取消");return false;}
       if (!session.commit()) return false;
     } else {
-      positionDrag.current=null;session.cancel();current.current=original.current;setValues(original.current);
+      positionDrag.current=null;session.cancel();current.current=original.current;setValues(original.current);maskCurrent.current=maskOriginal.current;setMaskValues(maskOriginal.current);
     }
     positionDrag.current=null;targetRef.current=null;setPositionTarget(null);
     presetPicker.current=false;setActive(false);setStyleActive(false);callbacks.current.error(null);return true;
   },[session]);
+  const updateMask=(property:"density"|"feather",next:string)=>{
+    if(disabled || !layer?.hasMask) return;
+    if(session.active && field.current!=="mask" && !finish(true)) return;
+    if(!session.active) {
+      if(!session.begin(layer.id)) return;
+      original.current=current.current;maskOriginal.current=maskCurrent.current;field.current="mask";setActive(true);error(null);
+    }
+    maskCurrent.current={...maskCurrent.current,[property]:next};setMaskValues(maskCurrent.current);
+    session.preview({mask:{density:maskCurrent.current.density.trim()===""?NaN:Number(maskCurrent.current.density)/100,feather:maskCurrent.current.feather.trim()===""?NaN:Number(maskCurrent.current.feather)}});
+  };
   const updateProperty=(property:Property,next:string)=>{
     if (disabled || !layer) return;
     if (session.active && field.current!==property && !finish(true)) return;
@@ -99,6 +114,12 @@ export function useLayerPropertiesEditing(controller:EditorWorkspaceController,l
     session.preview({[property]:next.trim()===""?NaN:Number(next)/100});
   };
   useEffect(()=>{if (disabled) finish(false);},[disabled,finish]);
+  const previewBlend=(blend:string)=>{
+    if(disabled || !layer) return false;
+    if(session.active && field.current!=="blend" && !finish(true)) return false;
+    if(!session.active) {if(!session.begin(layer.id)) return false;original.current=current.current;field.current="blend";setActive(true);error(null);}
+    session.preview({blend});return true;
+  };
   const startStyle=()=>{
     if(disabled || !layer || session.active) return;
     styleRef.current=null;
@@ -186,12 +207,21 @@ export function useLayerPropertiesEditing(controller:EditorWorkspaceController,l
     if(!session.flushPreview()) return false;
     const result=action();if(!result.ok) {error(result.message);return false;}
     applyPatterns(result.value);error(null);
+    persistPatterns();
+    return true;
+  };
+  const persistPatterns=()=>{
     const snapshot=controller.patternLibrarySnapshot();
     const token=++patternGeneration.current;
     const warn=()=>{if(mounted.current && token===patternGeneration.current) callbacks.current.error("浏览器未能保存图案库，当前编辑器仍可使用；请保存 PAT 文件以保留图案");};
     if(!snapshot.ok) warn();
     else void savePatternLibrarySnapshot(snapshot.value).catch(warn);
-    return true;
+  };
+  const definePattern=(name:string):string|null=>{
+    if(disabled || session.active || !patternsReady)return "请先结束当前操作并等候图案库载入";
+    const result=controller.dispatch("edit.definePattern",{name});if(!result.ok)return result.message;
+    const libraryState=controller.patternLibrary();if(!libraryState.ok)return libraryState.message;
+    applyPatterns(libraryState.value);persistPatterns();return null;
   };
   const patternLibrary:PatternLibraryActions={owner:controller,ready:patternsReady,presets:userPatterns,
     import:bytes=>managePatterns(()=>controller.importPatternPresets(bytes)),
@@ -201,8 +231,12 @@ export function useLayerPropertiesEditing(controller:EditorWorkspaceController,l
       if(!session.active || field.current!=="style" || disabled || !patternsReady) return null;
       const result=controller.exportPatternPresets(key);if(!result.ok) {error(result.message);return null;}error(null);return result.value;
     }};
-  return {value:values.opacity,fillValue:values.fill,active,styleActive,positioning,
+  return {definePattern,patternsReady,maskEditing:{active:active && field.current==="mask",values:maskValues,update:updateMask,finish:(commit:boolean)=>field.current==="mask"?finish(commit):true},blendEditing:{active:active && field.current==="blend",preview:previewBlend,finish:(commit:boolean)=>field.current==="blend"?finish(commit):true},value:values.opacity,fillValue:values.fill,active,styleActive,positioning,
     styleEditing:{active:styleActive,data:styleData,start:startStyle,change:changeStyle,finish,importContours,exportContour,contourLibrary:{create:createContour,rename:renameContour,remove:removeContour},patternLibrary,setPositionTarget:selectPositionTarget,setPresetPickerActive:(active:boolean)=>{presetPicker.current=active;}},
     presetPickerActive:()=>presetPicker.current,
     update:(next:string)=>updateProperty("opacity",next),updateFill:(next:string)=>updateProperty("fill",next),finish};
+}
+
+function validMask(values:{density:string;feather:string}) {
+  return values.density.trim()!=="" && values.feather.trim()!=="" && Number.isFinite(Number(values.density)) && Number(values.density)>=0 && Number(values.density)<=100 && Number.isFinite(Number(values.feather)) && Number(values.feather)>=0 && Number(values.feather)<=1000;
 }

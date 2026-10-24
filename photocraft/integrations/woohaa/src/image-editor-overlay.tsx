@@ -1,3 +1,4 @@
+import {WorkspaceNotification,type WorkspaceNotice} from "./workspace-notification.js";
 /**
  * 文档工作区 renderer（image-editor 完整界面）
  * （change: 2026-10-08-add-image-focus-editing-and-unified-node-history；
@@ -28,7 +29,7 @@ import type { FileDocumentWorkspace } from "./file-document-workspace.js";
 import type { DocumentWorkspaceStore } from "./workspace-store.js";
 import "./image-editor.css";
 import "./document-workspace.css";
-import { editorDisplayLayout, useEditorDisplay } from "@woohaa3/photocraft-editor";
+import { editorDisplayLayout, useEditorDisplay,usePasteboardAppearance } from "@woohaa3/photocraft-editor";
 
 const IMAGE_HELP = "V 移动 · Ctrl/Cmd+T 自由变换· M 选框（Shift+M 切换椭圆）· L 套索 · B 画笔 · E 橡皮 · T 文字；空格临时平移；[ / ] 调整笔刷大小，Shift+[ / ] 调整硬度；Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 重做，Ctrl/Cmd+S 应用到节点；Ctrl/Cmd+0 适合窗口，Ctrl/Cmd+1 实际大小；Ctrl/Cmd+H 显隐选区边界，Tab 显隐工具与面板，Shift+Tab 显隐侧栏。系统占用快捷键时可用菜单。";
 const IMAGE_HINT = "双指滑动平移 / 捏合缩放 / 空格拖动视图";
@@ -67,25 +68,51 @@ export type DocumentWorkspaceProps = {
   onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
   onActivateDocument: (documentId: string) => void;
   onCloseDocument: (documentId: string) => void;
+  /** 取消一次仍在读取/解码中的打开（占位标签）。 */
+  onCancelOpenDocument?:(documentId:string)=>void;
+  onCloseAllDocuments?:()=>void;
+  onCloseOtherDocuments?:(documentId?:string)=>void;
+  onReorderDocument?:(documentId:string,beforeId:string|null,generation:number,beforeGeneration?:number)=>void;
   onOpenFile?: () => void;
+  onDuplicateDocument?:()=>void;
+  onDismissNotice?:(notice:WorkspaceNotice)=>void;
+  getPurge?:()=>import("@woohaa3/photocraft-editor").WorkspacePurgePort;
 };
 
 /**
  * 工作区贡献：由 `canvas.focus-workspace`（节点文档）与 `canvas.document-workspace`
  * （独立文件）共同渲染。差异全部由活动绑定表达，不按 kind 分支界面。
  */
-export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, onCloseDocument, onOpenFile }: DocumentWorkspaceProps) {
+export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, onCloseDocument, onCancelOpenDocument, onCloseAllDocuments,onCloseOtherDocuments,onReorderDocument,onOpenFile,onDuplicateDocument,onDismissNotice, getPurge }: DocumentWorkspaceProps) {
+  const emptyAppearance=usePasteboardAppearance();
   const ui = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const active = ui.active;
+  const purge=getPurge?.();
+  const controller=active?.controller??null;
+  const editorSnapshot=useSyncExternalStore(useCallback(listener=>controller?.subscribe(listener)??(()=>undefined),[controller]),useCallback(()=>controller?.snapshot()??null,[controller]));
+  const document=editorSnapshot?.view.document;
+  const activeLayer=document?.layers.find(layer=>layer.id===document.activeLayerId);
+  const activeEntry=ui.documents.entries.find(entry=>entry.id===active?.documentId);
+  const tabContext=active && activeEntry && document?{documentId:active.documentId,generation:activeEntry.generation,zoom:active.view.focus.viewportState().zoom,layer:activeLayer?.name??null,target:document.editTarget,mode:document.mode,depthBits:document.depthBits,dirty:controller?.isDirty()??false,...(editorSnapshot?.state?.savePercent===undefined?{}:{savePercent:editorSnapshot.state.savePercent})}:null;
+  /**
+   * 标签关闭按钮：打开中的占位标签走取消打开，其余走正常关闭结算。
+   *
+   * 两者必须分开：取消打开只是丢弃还在读取的文件，已完成的文档必须经过未保存保护。
+   */
+  const onCancelOrCloseDocument = useCallback((documentId: string) => {
+    const entry = ui.documents.entries.find(item => item.id === documentId);
+    if (entry?.status === "opening") { onCancelOpenDocument?.(documentId); return; }
+    onCloseDocument(documentId);
+  }, [onCancelOpenDocument, onCloseDocument, ui.documents.entries]);
   const view = active?.view ?? null;
   const beforeLayoutChange = useCallback(() => view?.preserveNextLayoutViewport(), [view]);
   const display = useEditorDisplay(beforeLayoutChange);
   // 公共标题栏下的工具选项区高度 = 编辑器自身的菜单+工具栏（96/44）+ 文档 tab 条。
   // 编辑器把菜单/工具栏绝对定位到内容矩形之外，tab 条也是同样的外扩控制区；不计入预留
-  // 高度就会与菜单栏重叠（tab 被菜单盖住或反之）。tab 高度固定 34px（见 document-workspace.css）。
+  // 高度就会与菜单栏重叠（tab 被菜单盖住或反之）。tab 高度为34px，大标签42px（见 document-workspace.css）。
   useFocusLayout(useMemo(() => {
     const layout = editorDisplayLayout(display.state);
-    return { ...layout, toolbar: (layout.toolbar ?? 0) + DOCUMENT_TABS_HEIGHT };
+    return { ...layout, toolbar: (layout.toolbar ?? 0) + (!display.state.screenMode || display.state.screenMode==="standard" ? DOCUMENT_TABS_HEIGHT+(display.state.largeDocumentTabs?8:0) : 0) };
   }, [display.state]));
   useSyncExternalStore(
     useCallback((listener) => view?.subscribe(listener) ?? (() => undefined), [view]),
@@ -116,6 +143,9 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
   // 打开文件 / 关闭 / 文档清单是**菜单**能力（文件、窗口），不挂在文档标签条上。
   const documents = useMemo(() => ({
     ...(onOpenFile ? { onOpenFile } : {}),
+    ...(active && onDuplicateDocument?{onDuplicateDocument,duplicateDisabled:ui.busy || !!ui.documents.activeGate || !controller?.canDuplicateDocument?.()}:{}),
+    ...(onCloseAllDocuments?{onCloseAllDocuments}:{}),
+    ...(onCloseOtherDocuments?{onCloseOtherDocuments}:{}),
     ...(active ? { onCloseDocument: () => onCloseDocument(active.documentId) } : {}),
     list: ui.documents.entries.map((entry) => ({
       id: entry.id,
@@ -123,10 +153,11 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
       active: entry.id === ui.documents.activeId,
       status: entry.status === "dirty" ? "未保存" : entry.status === "saving" ? "保存中" : entry.status === "error" ? "保存失败" : null
     })),
-    onActivateDocument
-  }), [active, onActivateDocument, onCloseDocument, onOpenFile, ui.documents]);
+    onActivateDocument,
+    ...(purge?{purge}:{})
+  }), [active, onActivateDocument, onCloseDocument,onCloseAllDocuments,onCloseOtherDocuments,onOpenFile,onDuplicateDocument,controller,editorSnapshot,ui.busy, ui.documents,purge]);
   return (
-    <div className="image-edit-presentation" style={{ visibility: ready ? undefined : "hidden" }}>
+    <div className="image-edit-presentation" data-screen-mode={display.state.screenMode??"standard"} style={{ visibility: ready ? undefined : "hidden" }}>
       <FocusHeader
         fallbackTitle="图片"
         help={IMAGE_HELP}
@@ -137,12 +168,16 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
         data-document-kind={active?.nodeDocument ? "node" : active ? "file" : undefined}
         data-image-edit-history={view?.isReadOnlyPreview() ? "true" : undefined}>
         {/* tab 条位于内容区顶部、编辑菜单与工具区之上（design D2）。 */}
+        <div data-document-tabs-wrap="true" hidden={!!display.state.screenMode && display.state.screenMode!=="standard"}>
         <DocumentTabs
-          snapshot={ui.documents}
+          snapshot={ui.documents} activeContext={tabContext} large={display.state.largeDocumentTabs}
           onActivate={onActivateDocument}
-          onClose={onCloseDocument}
-        />
-        <div className="image-edit-workspace__body">
+          onClose={onCancelOrCloseDocument} onCloseAll={onCloseAllDocuments} onCloseOthers={onCloseOtherDocuments} onReorder={onReorderDocument}
+        /></div>
+        <div className="image-edit-workspace__body" style={!active?emptyAppearance:undefined} onDoubleClick={event=>{
+          if(active || ui.busy || ui.documents.entries.length || !onOpenFile || (event.target as Element).closest("button,input,textarea,select,a"))return;
+          event.preventDefault();event.stopPropagation();onOpenFile();
+        }}>
         {active && projectPort && entry && entry.mode !== "none" ? (
           <div className={fileView ? "photo-document-surface__body" : "image-edit-workspace__editor"}
             hidden={!fileView && (historyOpen || (view?.isReadOnlyPreview() ?? false))}
@@ -161,7 +196,7 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
         ) : (
           <div className="image-edit-workspace__notice" role="status">
             <p>{entry && entry.mode === "none" ? entry.reason : active ? "图片尚不可编辑" : "没有打开的文档"}</p>
-            <p className="image-edit-workspace__notice-hint">当前版本仍可查看；返回后可用历史版本恢复。</p>
+            {!active && onOpenFile ? <><p className="image-edit-workspace__notice-hint">双击空白处或打开文件开始编辑。</p><Button size="sm" tone="ghost" disabled={ui.busy} onClick={onOpenFile}>打开文件…</Button></> : <p className="image-edit-workspace__notice-hint">当前版本仍可查看；返回后可用历史版本恢复。</p>}
           </div>
         )}
         {view?.historyOverrideState() ? (
@@ -174,11 +209,7 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
             <span>在右侧选择版本预览；关闭后返回编辑</span>
           </div>
         ) : null}
-        {ui.notice ? (
-          <div className="image-edit-workspace__notice" data-tone={ui.notice.tone} role="status">
-            <p>{ui.notice.message}</p>
-          </div>
-        ) : null}
+        {ui.notice?<WorkspaceNotification notice={ui.notice} onDismiss={onDismissNotice}/>:null}
         {fileView && active?.fileActions ? (
           <FileDocumentActionsBar
             view={fileView}

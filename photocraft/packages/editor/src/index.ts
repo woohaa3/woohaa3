@@ -55,3 +55,21 @@ export * from "./text-session.js";
 export * from "./transform.js";
 export * from "./transform-layer.js";
 export * from "./transform-session.js";
+
+export * from "./zoom-levels.js";
+
+export * from "./document-settlement-prompt.js";
+
+export {usePasteboardAppearance} from "./pasteboard-appearance.js";
+
+export {browserScreenModeWindow,type EditorScreenModeWindowPort} from "./screen-mode-window.js";
+
+export type {InfoReadout,InfoRequest} from "./info-readout.js";
+
+export type {PixelGridRegion,PixelGridSegment} from "./pixel-grid-data.js";
+
+export type {HistogramReadout,HistogramChannel} from "./histogram-data.js";
+
+export type {NavigatorFrame,NavigatorAction} from "./navigator-geometry.js";
+
+export {useNotificationPreferences,readNotifications,publishNotifications,normalizeNotifications,type NotificationPreferences} from "./notification-preferences.js";

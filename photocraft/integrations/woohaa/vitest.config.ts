@@ -1,9 +1,12 @@
+import {createRequire} from "node:module";
+import {dirname} from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // 适配包与被 link 的核心包必须共用同一份 React；否则 hooks 读到 null dispatcher。
-const react = fileURLToPath(new URL("../../node_modules/.pnpm/react@18.3.1/node_modules/react", import.meta.url));
-const reactDom = fileURLToPath(new URL("../../node_modules/.pnpm/react-dom@18.3.1_react@18.3.1/node_modules/react-dom", import.meta.url));
+const coreRequire=createRequire(new URL("../../packages/editor/package.json",import.meta.url));
+const react=dirname(coreRequire.resolve("react"));
+const reactDom=dirname(coreRequire.resolve("react-dom"));
 // 干净副本没有构建 Rust 产物时也须能解析字面量子路径；这些用例自带内核替身。
 const wasmStub = fileURLToPath(new URL("../../packages/editor/src/test-support/wasm-stub.ts", import.meta.url));
 

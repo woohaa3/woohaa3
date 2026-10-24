@@ -24,6 +24,7 @@ export type EditorDocumentSource =
 /**
  * 文档状态（展示用）。
  *
+ * `opening`：文件仍在读取/解码，条目只是占位标签，可取消；
  * `unavailable`：节点被删除/权限丢失或工程不可编辑，内容仍可本地导出；
  * `conflict`：权威内容已改变而本地有净变化，禁止覆盖。
  */
@@ -31,6 +32,7 @@ export type EditorDocumentStatus =
   | "clean"
   | "dirty"
   | "saving"
+  | "opening"
   | "history-pending"
   | "conflict"
   | "unavailable"
@@ -51,6 +53,12 @@ export type EditorDocumentEntry = {
   writable: boolean;
   /** 文档代际：重新打开同一节点会递增，旧异步结果不得发布。 */
   generation: number;
+  /**
+   * 打开进度（0–100），只在 `status === "opening"` 时有意义。
+   *
+   * 由宿主读取/解码阶段真实上报；未知阶段不填数字，标签只显示「打开中」。
+   */
+  openPercent?: number;
 };
 
 export type EditorDocumentWorkspaceSnapshot = {
@@ -187,6 +195,17 @@ export class EditorDocumentRegistry {
     return { ok: true, changed: true, id };
   }
 
+  /** Reorder presentation only; resource ownership, active document and generations stay intact. */
+  moveBefore(id:string,beforeId:string|null,generation?:number,beforeGeneration?:number):boolean {
+    const source=this.entry(id),target=beforeId===null?null:this.entry(beforeId);
+    if(this.gate || !source || generation!==undefined && source.generation!==generation || beforeId!==null && (!target || beforeGeneration!==undefined && target.generation!==beforeGeneration))return false;
+    if(id===beforeId)return true;
+    const next=this.entries.filter(entry=>entry.id!==id),position=beforeId===null?next.length:next.findIndex(entry=>entry.id===beforeId);
+    next.splice(position,0,source);
+    if(next.every((entry,index)=>entry===this.entries[index]))return true;
+    this.entries=next;this.publish();return true;
+  }
+
   /** 关闭条目；活动项关闭后优先左邻、其次右邻，最后一项关闭后无活动项。 */
   close(id: string): CloseDocumentResult {
     const index = this.entries.findIndex((entry) => entry.id === id);
@@ -283,6 +302,57 @@ export class EditorDocumentRegistry {
       || entry.status === "conflict" || entry.status === "error" || entry.status === "history-pending");
   }
 
+  /**
+   * 打开中的条目（占位标签）。
+   *
+   * 打开流程在**读取/解码期间**先注册条目，用户可以看见文件名与真实进度并取消；取消或失败
+   * 时移除条目，不留下半成品文档，也不占用文档数量上限之外的资源。
+   */
+  opening(): EditorDocumentEntry[] {
+    return this.entries.filter((entry) => entry.status === "opening");
+  }
+
+  /**
+   * 注册一个打开中的文件占位条目。
+   *
+   * 与 `open` 的区别：不激活、不创建资源，调用方在解码成功后再用 `completeOpening`
+   * 把同一 id 换成真实文档；失败/取消用 `close` 移除。
+   */
+  beginOpening(fileName: string): OpenDocumentResult {
+    const name = fileName.trim();
+    if (!name) return { ok: false, code: "invalid", reason: "缺少文件名" };
+    if (!this.hasCapacity()) return this.limitFailure();
+    const sequence = ++this.fileSequence;
+    const id = `file:${sequence}:${Date.now().toString(36)}`;
+    const entry = defaultEntry(id, { kind: "file", fileName: name }, name, `文件 ${sequence}`, 1, true);
+    // 不激活：打开中仍有用户原来的活动文档。
+    this.entries = [...this.entries, { ...entry, status: "opening" }];
+    this.publish();
+    return { ok: true, id, created: true, generation: entry.generation };
+  }
+
+  /** 上报打开进度（0–100，单调）；条目已消失或已不在打开中时忽略。 */
+  setOpeningProgress(id: string, percent: number): boolean {
+    const entry = this.entry(id);
+    if (!entry || entry.status !== "opening" || !Number.isFinite(percent)) return false;
+    const next = Math.min(100, Math.max(0, Math.round(percent)));
+    if (entry.openPercent !== undefined && next <= entry.openPercent) return false;
+    this.replace({ ...entry, openPercent: next });
+    this.publish();
+    return true;
+  }
+
+  /** 打开完成：把占位条目变成普通文档条目并激活（保留 id 与顺序）。 */
+  completeOpening(id: string): boolean {
+    const entry = this.entry(id);
+    if (!entry || entry.status !== "opening") return false;
+    const { openPercent: _percent, ...rest } = entry;
+    this.replace({ ...rest, status: "clean", message: null });
+    this.active = id;
+    this.publish();
+    return true;
+  }
+
   /** 页面释放：清空全部条目与门禁（不发布活动项）。 */
   clear(): void {
     this.entries = [];
@@ -291,7 +361,7 @@ export class EditorDocumentRegistry {
     this.publish();
   }
 
-  private hasCapacity(): boolean {
+  hasCapacity(): boolean {
     return this.entries.length < this.limit;
   }
 

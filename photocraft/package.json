@@ -12,6 +12,7 @@
     "dev": "pnpm -C dev dev",
     "wasm": "node scripts/build-wasm.mjs",
     "wasm:debug": "node scripts/build-wasm.mjs --debug",
+    "wasm:smoke": "node tests/wasm-interactions.mjs",
     "verifier": "node scripts/build-verifier.mjs",
     "verifier:debug": "node scripts/build-verifier.mjs --debug",
     "rust:test": "cargo test --manifest-path rust/Cargo.toml --workspace --offline",

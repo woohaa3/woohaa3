@@ -5,7 +5,7 @@
  * 覆盖身份分源、同节点去重、复制节点与同名文件隔离、关闭邻项、代际隔离与数量上限；
  * 纯状态机，不加载内核、不采集渲染。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   EditorDocumentRegistry,
   MAX_OPEN_DOCUMENTS,
@@ -168,4 +168,18 @@ describe("代际与门禁", () => {
     expect(documents.snapshotState().entries.map((entry) => entry.id)).toEqual([file.id, tail.id]);
     expect(documents.findByNode("c1", "n1")?.id).toBe(file.id);
   });
+});
+
+it("文档拖排只改变顺序，保留活动项/状态/代际，按新顺序选择关闭邻项",()=>{
+ const documents=registry(),ids=["a","b","c"].map(name=>{const result=documents.open({kind:"node",canvasId:"c",nodeId:name,name});if(!result.ok)throw new Error(result.reason);return result.id;});
+ documents.activate(ids[1]!);documents.update(ids[0]!,{status:"dirty"});const before=documents.snapshotState(),changed=vi.fn();documents.subscribe(changed);
+ expect(documents.moveBefore(ids[2]!,ids[0]!,1,1)).toBe(true);expect(documents.snapshotState().entries.map(entry=>entry.id)).toEqual([ids[2],ids[0],ids[1]]);expect(documents.activeId()).toBe(ids[1]);expect(documents.entry(ids[0]!)).toEqual(before.entries[0]);expect(changed).toHaveBeenCalledOnce();
+ const current=documents.snapshotState();expect(documents.moveBefore(ids[1]!,null,1)).toBe(true);expect(documents.snapshotState()).toBe(current);expect(changed).toHaveBeenCalledOnce();
+ documents.activate(ids[0]!);documents.close(ids[0]!);expect(documents.activeId()).toBe(ids[2]);
+});
+it("文档拖排拒绝草稿门禁、缺失及重开旧代际，不发布部分顺序",()=>{
+ const documents=registry();const a=documents.open({kind:"node",canvasId:"c",nodeId:"a",name:"A"}),b=documents.open({kind:"node",canvasId:"c",nodeId:"b",name:"B"});if(!a.ok||!b.ok)throw new Error("fixture");
+ const before=documents.snapshotState();for(const [id,beforeId,generation,beforeGeneration] of [[a.id,"missing",1,1],["missing",b.id,1,1],[a.id,b.id,2,1],[a.id,b.id,1,2]] as const){expect(documents.moveBefore(id,beforeId,generation,beforeGeneration)).toBe(false);expect(documents.snapshotState()).toBe(before);}
+ documents.setGate(b.id,"文字草稿");const gated=documents.snapshotState();expect(documents.moveBefore(a.id,null,1)).toBe(false);expect(documents.snapshotState()).toBe(gated);documents.setGate(b.id,null);
+ documents.close(a.id);const reopened=documents.open({kind:"node",canvasId:"c",nodeId:"a",name:"Again"});expect(reopened).toMatchObject({ok:true,id:a.id,generation:2});const current=documents.snapshotState();expect(documents.moveBefore(a.id,b.id,1,1)).toBe(false);expect(documents.snapshotState()).toBe(current);
 });

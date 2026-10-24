@@ -127,3 +127,9 @@ it("更换取景目标后，旧 owner 的释放不清除新 owner", () => {
   release();
   expect(s.store.getViewportTarget()).toBeNull();
 });
+
+it("本地拥有滚轮的图片编辑器不经过捕获阶段相机路由，旧入口仍保持宿主导航",()=>{
+ const s=setup();s.stage.dataset.canvasWheelOwner="local";
+ expect(wheel(s.stage,{ctrlKey:true,deltaY:-10}).defaultPrevented).toBe(false);expect(s.writes).not.toHaveBeenCalled();
+ delete s.stage.dataset.canvasWheelOwner;wheel(s.stage,{deltaX:8,deltaY:0});expect(s.writes).toHaveBeenCalled();
+});

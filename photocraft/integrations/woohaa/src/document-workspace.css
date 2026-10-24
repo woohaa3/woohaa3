@@ -37,11 +37,13 @@
 }
 
 .photo-document-tab {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
   max-width: 240px;
+  overflow: hidden;
   padding: 4px 4px 4px 8px;
   border: 1px solid transparent;
   border-radius: 5px;
@@ -101,6 +103,9 @@
 .photo-document-tab__status[data-tone="saving"] { background: rgba(76, 141, 255, 0.2); }
 .photo-document-tab__status[data-tone="error"] { background: rgba(230, 70, 70, 0.24); color: var(--app-web-text-primary); }
 .photo-document-tab__status[data-tone="warn"] { background: rgba(230, 160, 30, 0.18); }
+/* 打开中的真实进度条（I069）：只在宿主上报进度时出现，未上报时高度为 0。 */
+.photo-document-tab__progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(76, 141, 255, 0.22); pointer-events: none; }
+.photo-document-tab__progress > i { display: block; height: 100%; background: var(--app-interaction-accent); }
 
 .photo-document-tab__close {
   flex: 0 0 auto;
@@ -154,11 +159,7 @@
   min-height: 0;
   min-width: 0;
   background-color: var(--app-web-background, #1b1d21);
-  background-image:
-    linear-gradient(45deg, rgba(127, 127, 127, 0.16) 25%, transparent 25%, transparent 75%, rgba(127, 127, 127, 0.16) 75%),
-    linear-gradient(45deg, rgba(127, 127, 127, 0.16) 25%, transparent 25%, transparent 75%, rgba(127, 127, 127, 0.16) 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 8px 8px;
+
 }
 
 .photo-document-surface__preview {
@@ -204,3 +205,15 @@
 }
 
 .photo-document-surface__status[data-tone="error"] { color: var(--app-web-danger, #e64646); }
+
+.image-edit-presentation > [hidden], .image-edit-workspace > [hidden] { display: none; }
+
+.image-edit-workspace > [data-document-tabs-wrap]:not([hidden]) { display: contents; }
+
+.photo-document-tab[data-drop-before] {box-shadow:inset 3px 0 var(--app-interaction-accent);}
+
+.photo-document-tab[data-drop-after] {box-shadow:inset -3px 0 var(--app-interaction-accent);}
+
+.photo-document-tabs[data-large-tabs] {height:42px;}
+.photo-document-tabs[data-large-tabs] .photo-document-tab {font-size:14px;}
+.photo-document-tabs[data-large-tabs] .photo-document-tab__detail {font-size:12px;}

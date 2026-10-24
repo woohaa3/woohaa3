@@ -19,6 +19,7 @@ import type { DocumentRect, EditorDocumentView } from "./document-view.js";
 export type FileDocumentKind = "image" | "project";
 
 export type FileDocumentInput = {
+  initiallyUnsaved?:boolean;
   /** 工作区分配的不透明文档 id。 */
   documentId: string;
   fileName: string;
@@ -108,6 +109,7 @@ export class FileDocumentWorkspace implements EditorDocumentView {
     // 文件文档没有节点身份与旧标注转换：`nodeId` 只是 ProjectSession 的内部标签
     // （它不参与上传、回执或节点写入，见 project-session）。
     this.project = new ProjectSession({
+      initiallyUnsaved:input.initiallyUnsaved,
       nodeId: `file-document:${input.documentId}`,
       baseAssetId: `file-asset:${input.documentId}`,
       baseStorageKey: "",

@@ -67,6 +67,5 @@ function sameState(a: WorkspaceUiState, b: WorkspaceUiState): boolean {
   if (a === b) return true;
   if (a.documents !== b.documents || a.active !== b.active) return false;
   if (a.busy !== b.busy || a.writable !== b.writable) return false;
-  if (a.notice === b.notice) return true;
-  return a.notice?.message === b.notice?.message && a.notice?.tone === b.notice?.tone;
+  return a.notice === b.notice;
 }

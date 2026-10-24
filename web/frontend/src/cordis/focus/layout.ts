@@ -15,6 +15,8 @@ import type { FocusContentRect, FocusInsets } from "./types.js";
  * 第二 runtime 或类型分支。公共几何据此 + 画布尺寸计算唯一 contentRect。
  */
 export type FocusLayoutConfig = {
+  /** 全屏编辑器可临时隐藏公共标题和底部占位；默认显示。 */
+  chrome?: boolean;
   /** 固定桌面工具布局，不随窗口宽度将工具列与检查器移到上下。 */
   desktop?: boolean;
   /** 是否呈现右侧（桌面）/底部（窄屏）检查面板（工具或历史）。 */
@@ -113,10 +115,10 @@ export const FOCUS_NARROW_BREAKPOINT = 900;
 export function focusLayout(input: FocusLayoutInput): FocusLayout {
   const { width, height } = input;
   const narrow = !input.desktop && width < FOCUS_NARROW_BREAKPOINT;
-  const rail = width < 480 ? FOCUS_RAIL_NARROW : FOCUS_RAIL_WIDE;
-  const header = narrow ? 100 : FOCUS_HEADER;
+  const rail = input.chrome===false ? 0 : width < 480 ? FOCUS_RAIL_NARROW : FOCUS_RAIL_WIDE;
+  const header = input.chrome===false ? 0 : narrow ? 100 : FOCUS_HEADER;
   const player = resolvePlayer(input.player, width);
-  const footer = FOCUS_FOOTER_BASE + player + (input.animationPreview ? (narrow ? 160 : 100) : 0);
+  const footer = (input.chrome===false ? 0 : FOCUS_FOOTER_BASE) + player + (input.animationPreview ? (narrow ? 160 : 100) : 0);
   const tools = Math.max(0, input.toolColumn ?? 0);
   const toolbar = Math.max(0, input.toolbar ?? 0);
   const panelMaxWidth = Math.max(0, input.panelMaxWidth ?? 320);

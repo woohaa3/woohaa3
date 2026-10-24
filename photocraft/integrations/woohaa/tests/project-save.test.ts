@@ -297,3 +297,41 @@ it("上传失败保留具体原因，拒绝提交并允许重试", async () => {
   expect(result).toEqual({ ok: false, code: "project-upload-failed", message: "工程对象上传失败：工程核验服务暂不可用", retriable: true });
   expect(committed).toBe(false);
 });
+
+it("保存进度只转发宿主上报的字节上传百分比：工程 0–50、输出 50–100", async () => {
+  const seen: number[] = [];
+  const dependencies = deps({
+    uploadProject: async (_bytes, onProgress) => { onProgress?.(0); onProgress?.(50); onProgress?.(100); return uploaded("project-key", IMAGE_PROJECT_CONTENT_TYPE); },
+    uploadOutput: async (_bytes, onProgress) => { onProgress?.(0); onProgress?.(100); return uploaded("output-key", "image/png"); },
+    onProgress: (percent) => seen.push(percent)
+  });
+  const result = await saveImageProject(input(), dependencies);
+  expect(result.ok).toBe(true);
+  expect(seen).toEqual([0, 25, 50, 50, 100]);
+});
+
+it("宿主不提供上传进度时不产生任何百分比；重试复用的上传不重复报告", async () => {
+  const seen: number[] = [];
+  const silent = deps({
+    uploadProject: async () => uploaded("project-key", IMAGE_PROJECT_CONTENT_TYPE),
+    uploadOutput: async () => uploaded("output-key", "image/png"),
+    onProgress: (percent) => seen.push(percent)
+  });
+  expect((await saveImageProject(input(), silent)).ok).toBe(true);
+  expect(seen).toEqual([]);
+
+  // 第一次提交失败但上传已成功：重试直接复用，不再报告进度。
+  const attempt = {};
+  const retried: number[] = [];
+  let completed = 0;
+  const flaky = deps({
+    uploadProject: async (_bytes, onProgress) => { onProgress?.(100); return uploaded("project-key", IMAGE_PROJECT_CONTENT_TYPE); },
+    uploadOutput: async () => uploaded("output-key", "image/png"),
+    complete: async (request) => { completed++; if (completed === 1) throw new Error("回执丢失"); return deps().complete(request); },
+    onProgress: (percent) => retried.push(percent)
+  });
+  expect((await saveImageProject(input(), flaky, attempt)).ok).toBe(false);
+  retried.length = 0;
+  expect((await saveImageProject(input(), flaky, attempt)).ok).toBe(true);
+  expect(retried).toEqual([]);
+});

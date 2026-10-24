@@ -1,3 +1,4 @@
+import {beforeEach} from "vitest";
 /**
  * Vitest DOM 环境补齐
  * （change: 2026-10-21-extract-photocraft-subproject，design D6）。
@@ -36,3 +37,6 @@ if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
 }
 
 export {};
+
+// Separate test sessions; individual remounts still exercise actual persistence.
+beforeEach(()=>{if(typeof localStorage!=="undefined")for(const key of Object.keys(localStorage))if(key.startsWith("photocraft.tools.v1."))localStorage.removeItem(key);});

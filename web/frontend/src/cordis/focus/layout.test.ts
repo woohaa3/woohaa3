@@ -21,3 +21,8 @@ it("聚焦布局不为窗口横栏二次扣减高度（横栏在页面布局里�
   expect(layout.contentRect).toEqual({ x: 0, y: 56, width: 1440, height: 774 });
   expect("chrome" in layout).toBe(false);
 });
+
+it("全屏临时隐藏公共chrome可占满窗口，恢复配置不改默认几何",()=>{
+  expect(focusLayout({desktop:true,chrome:false,width:1440,height:900}).contentRect).toEqual({x:0,y:0,width:1440,height:900});
+  expect(focusLayout({desktop:true,width:1440,height:900}).contentRect).toEqual({x:0,y:56,width:1440,height:800});
+});

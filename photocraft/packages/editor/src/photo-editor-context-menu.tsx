@@ -31,7 +31,7 @@ export function EditorCanvasMenu({ children, commands, disabled, transforming, c
     ...(canTransformSelection ? [
       { id: "select.transformSelection", label: "变换选区", disabled: !available("select.transformSelection"),
         onSelect: () => onTransform(true) },
-      { id: "select.deselect", label: "取消选择", separatorBefore: true, disabled: !available("select.deselect"), onSelect: onCommand }
+      { id: "select.deselect", label: "取消选择", separatorBefore: true, disabled: !available("select.deselect"), onSelect: ()=>onCommand("select.deselect") }
     ] : [])
   ];
   return <div className="photo-editor__stage"

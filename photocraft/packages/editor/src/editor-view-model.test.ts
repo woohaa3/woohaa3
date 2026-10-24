@@ -179,3 +179,10 @@ it("分组投影保留折叠后代和父 id，展开命令不因无菜单而丢�
   expect(isRenderableCommand({id:"layer.setExpanded",allowed:true,menu:[]} as never)).toBe(true);
   expect(isRenderableCommand({id:"layer.setExpanded",allowed:false,menu:[]} as never)).toBe(false);
 });
+
+it("preserves native document identity independently of the reused active index",()=>{
+  const document={width:8,height:6,layers:[],revision:0};
+  const first=decodeEditorState({session:{active:0},document:{...document,documentKey:"18446744073709551614"}})!;
+  const next=decodeEditorState({session:{active:0},document:{...document,documentKey:"18446744073709551615"}})!;
+  expect(first.sessionActiveIndex).toBe(next.sessionActiveIndex);expect(first.document?.documentKey).not.toBe(next.document?.documentKey);
+});

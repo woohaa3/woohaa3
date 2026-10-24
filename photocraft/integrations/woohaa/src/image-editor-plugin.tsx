@@ -1,3 +1,7 @@
+import {installDocumentUnloadGuard} from "./document-unload.js";
+import {createDocumentSettlementPrompt} from "@woohaa3/photocraft-editor";
+import {documentCloseTargets,closeDocumentBatch} from "./close-document-batch.js";
+import {OpenFileBatchQueue} from "./open-file-batch.js";
 /**
  * 图片聚焦编辑 Plugin（多文档工作区）
  * （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，任务 4.3–4.6/5.2–5.7；
@@ -63,8 +67,10 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       /** 等待权威修订到达后重开内容的节点文档。 */
       const pendingCanonical = new Map<string, number>();
       let busy = false;
+      let closingDocuments=false;
       let notice: { message: string; tone: "info" | "error" } | null = null;
       let disposed = false;
+      const settlementPrompt=createDocumentSettlementPrompt(ctx.dialogs,message=>{if(!disposed)setNotice({message,tone:"error"});});
       let removingRecovery: (() => void) | null = null;
       /** 当前概览入口的文案（用于判断是否需要重新注册）。 */
       let recoveryLabel: string | null = null;
@@ -149,6 +155,7 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           contentRevision: resource.view.contentRevisionState(),
           fileActions: fileView ? {
             saveProject: () => void deliverActive("project"),
+            saveProjectAs: (fileName:string) => void deliverActive("project",fileName),
             exportPng: () => void deliverActive("png"),
             addToCanvas: () => void addActiveToCanvas(),
             addToCanvasBlocked: ctx.canvasSession.isWritable() ? null : "当前画布只读或未连接"
@@ -174,7 +181,7 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       }
 
       function setBusy(next: boolean): void {
-        busy = next;
+        busy = next || closingDocuments;
         publish();
       }
 
@@ -304,15 +311,15 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
             ? { fileDelivery: createBrowserFilePort(() => (resource.view as FileDocumentWorkspace).fileName) }
             : {}),
           saveDeps: {
-            uploadProject: async (bytes) => {
+            uploadProject: async (bytes, onProgress) => {
               const file = new File([bytes.slice().buffer as ArrayBuffer], "project.pcraft", { type: IMAGE_PROJECT_CONTENT_TYPE });
-              const result = await ctx.mediaRemote.upload({ file, canvasId });
+              const result = await ctx.mediaRemote.upload({ file, canvasId, ...(onProgress ? { onProgress } : {}) });
               if (!result.ok) throw new Error(result.error);
               return result.media;
             },
-            uploadOutput: async (bytes) => {
+            uploadOutput: async (bytes, onProgress) => {
               const file = new File([bytes.slice().buffer as ArrayBuffer], "output.png", { type: "image/png" });
-              const result = await ctx.mediaRemote.upload({ file, canvasId });
+              const result = await ctx.mediaRemote.upload({ file, canvasId, ...(onProgress ? { onProgress } : {}) });
               if (!result.ok) throw new Error(result.error);
               return result.media;
             },
@@ -434,7 +441,7 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
 
       /** 激活已打开文档（tab 点击 / 恢复入口）。 */
       function activateDocument(documentId: string): void {
-        if (disposed) return;
+        if (disposed || closingDocuments) return;
         const previous = session.activeId();
         const result = session.activate(documentId);
         if (!result.ok) {
@@ -449,63 +456,92 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
 
       // ------------------------------------------------------------ 打开文件
 
+      const openFileQueue=new OpenFileBatchQueue<File>();
       /** 显式“打开文件”：受支持位图与 `.pcraft`；取消/失败保留原文档与取景。 */
       function openFile(): void {
-        if (disposed || typeof document === "undefined") return;
+        if (disposed || closingDocuments || typeof document === "undefined") return;
         const input = document.createElement("input");
         input.type = "file";
         input.accept = OPEN_FILE_ACCEPT;
+        input.multiple=true;
         input.style.display = "none";
         const finish = () => input.remove();
         input.addEventListener("change", () => {
-          const file = input.files?.[0] ?? null;
+          const files = Array.from(input.files??[]);
           finish();
           // 取消不创建条目、不替换已有内容。
-          if (!file) return;
-          void openFileDocument(file);
+          if (!files.length) return;
+          void openFileQueue.enqueue(files,async file=>{
+            if(disposed)return "工作区已关闭";
+            setBusy(true);return openFileDocument(file);
+          },()=>!disposed).then(result=>{
+            if(disposed)return;
+            setBusy(false);
+            if(result.errors.length)setNotice({message:result.errors.map(error=>`${error.name}：${error.message}`).join("\n"),tone:"error"});
+          });
         });
         input.addEventListener("cancel", finish);
         document.body.appendChild(input);
         input.click();
       }
 
-      async function openFileDocument(file: File): Promise<void> {
+      async function openFileDocument(file: File): Promise<string|null> {
         const classified = classifyOpenFile({ name: file.name, type: file.type });
         if (!classified.ok) {
-          setNotice({ message: classified.reason, tone: "error" });
-          return;
+          return classified.reason;
         }
         const capacity = canOpenDocument(registry.snapshotState().entries.length);
         if (!capacity.ok) {
-          setNotice({ message: capacity.reason, tone: "error" });
-          return;
+          return capacity.reason;
         }
-        setBusy(true);
         notice = null;
+        // 受控打开：先出现带真实进度的临时标签，读取/解码期间可取消（I069）。
+        const controlled = session.beginControlledOpen(file.name);
+        if (!controlled.ok) return controlled.reason;
+        const opening = controlled.handle;
+        publish();
         try {
+          opening.progress(5);
           const raw = new Uint8Array(await file.arrayBuffer());
+          if(disposed || opening.cancelled()){session.cancelOpen(opening.id);publish();return null;}
+          opening.progress(classified.kind === "image" ? 40 : 80);
           // 复用现有方向/sRGB/RGBA8 归一与有界解码；超限明确拒绝，不缩小原图。
           const bytes = classified.kind === "image"
             ? await gate.run(() => normalizeEditorImage(raw))
             : raw;
-          const opened = session.openFile({ fileName: file.name, bytes, kind: classified.kind });
-          if (!opened.ok) {
-            setNotice({ message: opened.reason, tone: "error" });
-            return;
-          }
+          if(disposed || opening.cancelled()){session.cancelOpen(opening.id);publish();return null;}
+          opening.progress(90);
+          const opened = opening.complete({ bytes, kind: classified.kind });
+          if (!opened) { session.cancelOpen(opening.id); publish(); return null; }
+          if (!opened.ok) { session.cancelOpen(opening.id); publish(); return opened.reason; }
+          publish();
           fileBytes.set(opened.documentId, bytes);
-          await enterDocumentPresentation(opened.documentId, { preserveOverviewReturn: false });
+          if(!await enterDocumentPresentation(opened.documentId, { preserveOverviewReturn: false }))return (notice as {message:string}|null)?.message??"无法打开文件，请重试";
+          return null;
         } catch (error) {
-          setNotice({ message: error instanceof Error ? error.message : "无法打开文件，请重试", tone: "error" });
-        } finally {
-          setBusy(false);
+          // 失败移除占位标签，保留既有文档与取景。
+          session.cancelOpen(opening.id);publish();
+          return error instanceof Error ? error.message : "无法打开文件，请重试";
         }
+      }
+
+      async function duplicateDocument():Promise<void> {
+        if(disposed || busy || closingDocuments)return;
+        setBusy(true);
+        try {
+          const opened=session.duplicateActive();
+          if(!opened.ok){setNotice({message:opened.reason,tone:"error"});return;}
+          const resource=session.resource(opened.documentId);
+          if(resource?.kind==="file")fileBytes.set(opened.documentId,resource.view.sourceBytes());
+          await enterDocumentPresentation(opened.documentId,{preserveOverviewReturn:false});
+        }catch(error){if(!disposed)setNotice({message:error instanceof Error?error.message:"无法复制文档",tone:"error"});}
+        finally{if(!disposed)setBusy(false);}
       }
 
       // ------------------------------------------------------------ 交付
 
       /** 独立文件保存工程 / 导出 PNG（本地文件端口；只有可信写入推进基线）。 */
-      async function deliverActive(kind: "project" | "png"): Promise<void> {
+      async function deliverActive(kind: "project" | "png", fileName?: string): Promise<void> {
         const resource = session.active();
         if (!resource || resource.kind !== "file" || !resource.controller) return;
         const baseName = resource.view.fileName.replace(/\.[^.]+$/, "") || "photocraft";
@@ -513,7 +549,7 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
         notice = null;
         try {
           const outcome = await resource.controller.deliverFile(kind, {
-            fileName: kind === "project" ? `${baseName}.pcraft` : `${baseName}.png`
+            fileName: fileName ?? (kind === "project" ? `${baseName}.pcraft` : `${baseName}.png`)
           });
           if (!outcome.ok) {
             const message = outcome.status === "cancelled" ? "已取消保存，文档保留" : (outcome.message ?? "保存失败，文档仍保留");
@@ -671,43 +707,55 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       // ------------------------------------------------------------ 关闭与离开
 
       /** 结算并关闭单个文档；脏文档先按用户选择保存或放弃。 */
-      async function closeDocument(documentId: string): Promise<void> {
-        if (disposed) return;
+      async function closeDocumentOne(documentId: string): Promise<boolean> {
+        if (disposed) return false;
         const resource = session.resource(documentId);
         const entry = registry.entry(documentId);
-        if (!resource || !entry) return;
-        setBusy(true);
-        try {
+        if (!resource || !entry) return true;
+        const wasActive=session.activeId()===documentId;
+        {
           const outcome = await settleDocument({
             ...settlementItemOf(resource, entry),
             scope: "close",
+            isCurrent:()=>!disposed && session.resource(documentId)===resource && registry.entry(documentId)?.generation===entry.generation && (!resource.controller || !pendingDraftOf(resource.controller)),
             ui: {
-              confirm: async (reason) => confirmInWorkspace(entry.name, reason),
-              abandon: async (reason) => confirmInWorkspace(entry.name, reason)
+              choose: reason=>chooseSettlement(entry.name,reason),
+              abandon: async reason=>(await chooseSettlement(entry.name,reason,true))==="save"
             }
           });
           if (!outcome.ok) {
             if (outcome.reason !== "已取消") setNotice({ message: outcome.reason, tone: "error" });
-            return;
+            return false;
           }
-          const closed = session.close(documentId);
-          if (!closed.ok) {
-            setNotice({ message: closed.reason, tone: "error" });
-            return;
-          }
-          const next = session.activeId();
-          // 关闭活动项：优先左邻；最后一项关闭后返回画布（不保存）。
-          if (next === null) ctx.canvasNavigation.exitNodeFocus();
-          else await enterDocumentPresentation(next, { preserveOverviewReturn: true });
-        } finally {
-          setBusy(false);
+          if(disposed || session.resource(documentId)!==resource || registry.entry(documentId)?.generation!==entry.generation)return false;
+          return removeSettledDocument(documentId,wasActive);
         }
       }
 
-      /** 关闭/离开确认在工作区内呈现（不依赖先触发全局 Dialog cleanup）。 */
-      function confirmInWorkspace(name: string, reason: string): boolean {
-        if (typeof window === "undefined" || typeof window.confirm !== "function") return false;
-        return window.confirm(`${name}\n\n${reason}\n\n继续会先保存并关闭；取消则保留文档与草稿。`);
+      async function removeSettledDocument(documentId:string,wasActive:boolean):Promise<boolean> {
+        const closed=session.close(documentId);
+        if(!closed.ok){setNotice({message:closed.reason,tone:"error"});return false;}
+        const next=session.activeId();
+        if(next===null)ctx.canvasNavigation.exitNodeFocus();
+        else if(wasActive)await enterDocumentPresentation(next,{preserveOverviewReturn:true});
+        return true;
+      }
+
+      async function closeDocuments(mode:"all"|"others"|"single",documentId?:string):Promise<void> {
+        if(disposed || busy || closingDocuments)return;
+        if(mode==="others" && documentId && !registry.entry(documentId))return;
+        const ids=mode==="single" && documentId?[documentId]:documentCloseTargets(registry.snapshotState().entries,mode==="others" && documentId?documentId:session.activeId(),mode==="others"?"others":"all");
+        closingDocuments=true;setBusy(true);
+        try {await closeDocumentBatch(ids,closeDocumentOne,()=>!disposed);}
+        catch(error){if(!disposed)setNotice({message:error instanceof Error?error.message:"关闭失败，剩余文档已保留",tone:"error"});}
+        finally {closingDocuments=false;if(!disposed)setBusy(false);}
+      }
+      const closeDocument=(documentId:string)=>closeDocuments("single",documentId);
+
+      function chooseSettlement(name:string,reason:string,acknowledge=false) {
+        const mode=ctx.canvasNavigation.getSnapshot().mode;
+        const owner=mode.type==="overview"?null:session.active()?.controller?.dialogOwner()??null;
+        return settlementPrompt.ask({name,reason,acknowledge,owner});
       }
 
       function settlementItemOf(resource: DocumentResource, entry: EditorDocumentEntry) {
@@ -738,15 +786,19 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
 
       /** 离开页面/切换画布：串行结算全部文档，失败即停止并定位失败项。 */
       async function prepareLeave(): Promise<{ ok: true } | { ok: false; reason: string }> {
+        if(closingDocuments)return {ok:false,reason:"请等待文档关闭完成"};
+        closingDocuments=true;setBusy(true);
+        try {
         for (const entry of registry.snapshotState().entries) {
           const resource = session.resource(entry.id);
           if (!resource) continue;
           const outcome = await settleDocument({
             ...settlementItemOf(resource, entry),
             scope: "leave",
+            isCurrent:()=>!disposed && session.resource(entry.id)===resource && registry.entry(entry.id)?.generation===entry.generation && (!resource.controller || !pendingDraftOf(resource.controller)),
             ui: {
-              confirm: async (reason) => confirmInWorkspace(entry.name, reason),
-              abandon: async (reason) => confirmInWorkspace(entry.name, reason)
+              choose: reason=>chooseSettlement(entry.name,reason),
+              abandon: async reason=>(await chooseSettlement(entry.name,reason,true))==="save"
             }
           });
           if (!outcome.ok) {
@@ -754,8 +806,11 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
             if (outcome.reason !== "已取消") setNotice({ message: `${entry.name}：${outcome.reason}`, tone: "error" });
             return { ok: false, reason: outcome.reason === "已取消" ? `已取消离开（${entry.name}）` : `${entry.name}：${outcome.reason}` };
           }
+          // A later cancellation keeps prior discard choices applied, just as prior saves stay applied.
+          if(outcome.action==="abandoned" && !await removeSettledDocument(entry.id,session.activeId()===entry.id))return {ok:false,reason:"无法关闭已放弃的文档"};
         }
         return { ok: true };
+        } finally {closingDocuments=false;if(!disposed)setBusy(false);}
       }
 
       // ------------------------------------------------------------ 导航
@@ -893,22 +948,15 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       });
 
       // 页面离开守卫：切换画布 / 离开页面 / 窗口关闭时才结算全部文档（design D6）。
+      const needsUnloadProtection=()=>registry.unsettled().length>0 || registry.snapshotState().entries.some(entry=>{const controller=session.resource(entry.id)?.controller;return !!controller && !!pendingDraftOf(controller);});
       const unregisterLeave = ctx.pageLeave.register({
         id: IMAGE_EDITOR_PLUGIN_ID,
-        hasUnsaved: () => registry.unsettled().length > 0,
+        hasUnsaved: needsUnloadProtection,
         settle: prepareLeave
       });
 
       // 硬刷新 / 浏览器关闭不能依赖异步保存完成：存在未保存文档时尽力提示（不承诺恢复）。
-      const onBeforeUnload = (event: BeforeUnloadEvent) => {
-        if (!registry.unsettled().length) return;
-        event.preventDefault();
-        // 现代浏览器忽略自定义文案，但必须赋值才显示通用提示。
-        event.returnValue = "";
-      };
-      if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
-        window.addEventListener("beforeunload", onBeforeUnload);
-      }
+      const unregisterUnload=typeof window!=="undefined"?installDocumentUnloadGuard(window,needsUnloadProtection):()=>{};
 
       // ------------------------------------------------------------ 呈现贡献
 
@@ -971,7 +1019,14 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
             projectPort={background ? { ...projectPort, renderCanvasBackground: background } : projectPort}
             onActivateDocument={activateDocument}
             onCloseDocument={(documentId) => void closeDocument(documentId)}
+            onCancelOpenDocument={(documentId) => { if(session.cancelOpen(documentId))publish(); }}
+            onCloseAllDocuments={()=>void closeDocuments("all")}
+            onCloseOtherDocuments={documentId=>void closeDocuments("others",documentId)}
+            onReorderDocument={(id,beforeId,generation,beforeGeneration)=>{if(!disposed && !busy && !closingDocuments && registry.moveBefore(id,beforeId,generation,beforeGeneration))publish();}}
             onOpenFile={openFile}
+            onDuplicateDocument={()=>void duplicateDocument()}
+            onDismissNotice={expected=>{if(!disposed && notice===expected)setNotice(null);}}
+            getPurge={()=>session.purgePort()}
           />
         );
       };
@@ -1045,6 +1100,7 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
       ctx.effect(
         () => () => {
           disposed = true;
+          settlementPrompt.dispose();
           unsubscribeNav();
           preparation.dispose();
           unregisterEntryGuard();
@@ -1061,9 +1117,7 @@ export function imageEditorExtension(options: ImageEditorPluginOptions = {}): Pl
           disposeParticipant();
           unregisterGate();
           unregisterLeave();
-          if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
-            window.removeEventListener("beforeunload", onBeforeUnload);
-          }
+          unregisterUnload();
           session.dispose();
           fileBytes.clear();
           publishOperations.clear();

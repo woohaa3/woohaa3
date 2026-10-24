@@ -87,7 +87,7 @@ function PatternFields({value,patterns,onChange,overlay=false,texture=false}:{va
       const preset=patterns.find(p=>p.id===event.currentTarget.value);if(preset) onChange({...value,id:preset.id,name:preset.name});
     }}>{!patterns.some(p=>p.id===value.id)?<option value={String(value.id??"")}>图案资源缺失</option>:null}{patterns.map(p=><option key={p.id} value={p.id}>{p.name}（{p.width} × {p.height}）</option>)}</select></label>
     <NumberField label="缩放" value={Number(value.scale)} min={.01} max={10} factor={100} onChange={n=>update("scale",n)}/>
-    {overlay?<NumberField label="角度" value={Number(value.angle)} min={-360} max={360} onChange={n=>update("angle",n)}/>:null}
+    {overlay?<NumberField units={{unit:"°"}} label="角度" value={Number(value.angle)} min={-360} max={360} onChange={n=>update("angle",n)}/>:null}
     {texture?<><NumberField label="纹理深度" value={Number(value.depth)} min={-10} max={10} factor={100} onChange={n=>update("depth",n)}/>
       <label><input type="checkbox" checked={value.invert===true} onChange={event=>update("invert",event.currentTarget.checked)}/>反相纹理</label></>:null}
     {overlay || texture?<><label><input type="checkbox" checked={value.link===true} onChange={event=>update("link",event.currentTarget.checked)}/>与图层链接</label>
@@ -174,7 +174,7 @@ export function LayerStyleEditor({editing,disabled}:{editing:LayerStyleEditing;d
       return <LayerStyleContourEditor key={id} value={v} label={key==="gloss_contour"?"光泽等高线":"等高线"} samples={data.contourSamples?.[index]?.[sampleKey]} presets={data.contourPresets} library={editing.contourLibrary} onSave={editing.exportContour?saveContour:undefined} onChange={value=>modify(p,value)}/>;
     }
     if(typeof v==="number" && NUMBERS[key]) {
-      const [label,min,max,factor]=NUMBERS[key]!;return <NumberField key={id} value={v} label={label} min={min} max={max} factor={factor} onChange={next=>modify(p,next)}/>;
+      const [label,min,max,factor]=NUMBERS[key]!;return <NumberField units={key==="angle"||key==="altitude"?{unit:"°"}:key==="size"||key==="distance"||key==="soften"?{unit:"px"}:undefined} key={id} value={v} label={label} min={min} max={max} factor={factor} onChange={next=>modify(p,next)}/>;
     }
     if(typeof v==="boolean" && BOOLEANS[key]) return <label key={id}><input type="checkbox" checked={v} onChange={event=>modify(p,event.currentTarget.checked)}/>{BOOLEANS[key]}</label>;
     if(key==="blend" && typeof v==="string") return <label key={id}>混合模式<select value={v} onChange={event=>modify(p,event.currentTarget.value)}>{PHOTOSHOP_BLENDS.map(label=>{
@@ -248,7 +248,7 @@ export function LayerStyleEditor({editing,disabled}:{editing:LayerStyleEditing;d
       {common(body.shadow,["style","items",index,kind,"shadow"],"阴影")}
       {gradient?renderGradient(gradient,value=>modify(["style","items",index,kind,"gradient"],value),["style","items",index,kind,"gradient"]):null}
     </div>:null}</>:<p>尚未添加效果</p>}
-    <fieldset><legend>全局光源</legend><NumberField value={data.globalLight.angle} label="角度" min={-360} max={360} onChange={value=>modify(["globalLight","angle"],value)}/><NumberField value={data.globalLight.altitude} label="高度" min={0} max={90} onChange={value=>modify(["globalLight","altitude"],value)}/></fieldset>
+    <fieldset><legend>全局光源</legend><NumberField value={data.globalLight.angle} units={{unit:"°"}} label="角度" min={-360} max={360} onChange={value=>modify(["globalLight","angle"],value)}/><NumberField value={data.globalLight.altitude} units={{unit:"°"}} label="高度" min={0} max={90} onChange={value=>modify(["globalLight","altitude"],value)}/></fieldset>
     <div className="photo-editor__style-actions"><Button size="sm" onClick={()=>editing.finish(true)}>确认样式</Button><Button size="sm" tone="ghost" onClick={()=>editing.finish(false)}>取消样式</Button></div>
   </section>;
 }

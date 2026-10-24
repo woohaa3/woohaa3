@@ -1,4 +1,4 @@
-/** 选区拖动只回写已有取景端口，不注册滚轮或触摸板输入。 */
+/** 工具拖出可视区域才回写已有取景端口，不注册滚轮或触摸板输入。 */
 export type SelectionPanContext = {
   pointer: {x:number;y:number}; width:number; height:number;
   documentWidth:number; documentHeight:number; zoom:number; x:number; y:number;
@@ -9,8 +9,8 @@ export function selectionPanStep(context: SelectionPanContext, seconds: number):
     const limit = Math.max(0,(documentSize*context.zoom-size)/2);
     if (!limit) return 0;
     const edge = Math.min(32,size/4);
-    const speed = pointer < edge ? Math.min(1,(edge-pointer)/edge)*480
-      : pointer > size-edge ? -Math.min(1,(pointer-size+edge)/edge)*480 : 0;
+    const speed = pointer < 0 ? Math.min(1,-pointer/edge)*480
+      : pointer > size ? -Math.min(1,(pointer-size)/edge)*480 : 0;
     const delta = speed*Math.min(.032,Math.max(0,seconds));
     return delta > 0 ? Math.min(delta,Math.max(0,limit-offset)) : Math.max(delta,Math.min(0,-limit-offset));
   };

@@ -10,6 +10,8 @@ pub(crate) struct TransformPreview {
     pub params: Option<Value>,
     pub duplicate: bool,
     pub selection_only: bool,
+    pub whole_layer: bool,
+    pub selected_pixels: Option<photocraft_engine::float_cmds::CutParts>,
     active: Option<photocraft_doc::LayerId>,
     selected: Vec<photocraft_doc::LayerId>,
     valid: bool,
@@ -17,7 +19,7 @@ pub(crate) struct TransformPreview {
 
 impl TransformPreview {
     pub fn new(base: &DocState) -> Self {
-        Self { base: base.clone(), doc: base.doc.clone(), params: None, duplicate: false, selection_only: false, active: base.active_layer, selected: base.selected_layers(), valid: true }
+        Self { base: base.clone(), doc: base.doc.clone(), params: None, duplicate: false, selection_only: false, whole_layer: false, selected_pixels: None, active: base.active_layer, selected: base.selected_layers(), valid: true }
     }
 
     /// 每次从进入时的原文档计算累计矩阵，避免连续重采样损失。
@@ -41,7 +43,7 @@ impl TransformPreview {
             return Err(error("变换矩阵不可逆"));
         }
         let identity=numbers.iter().zip([1.,0.,0.,1.,0.,0.]).all(|(a,b)| *a==b);
-        if identity && !self.duplicate {
+        if identity && (!self.duplicate || self.selected_pixels.is_some()) {
             self.doc = self.base.doc.clone();
             self.params = None;
             self.active = self.base.active_layer;
@@ -49,7 +51,18 @@ impl TransformPreview {
             self.valid = true;
             return Ok(());
         }
+        if let Some(parts)=&self.selected_pixels {
+            if numbers[..4] != [1.,0.,0.,1.] || numbers[4..].iter().any(|v| v.abs()>i32::MAX as f64) {
+                return Err(error("选区像素移动只接受有效的平移"));
+            }
+            let (dx,dy)=(numbers[4].round() as i32,numbers[5].round() as i32);
+            let mut doc=parts.moved(&self.base.doc,dx,dy).map_err(error)?;
+            doc.selection=self.base.doc.selection.as_ref().map(|sel|photocraft_algo::resample::translate_surface(sel,dx,dy));
+            self.doc=Arc::new(doc);self.params=Some(json!({"matrix":matrix}));self.valid=true;
+            return Ok(());
+        }
         let mut source=self.base.clone();
+        if self.whole_layer {Arc::make_mut(&mut source.doc).selection=None;}
         if self.duplicate {
             source.selected_layers=crate::layer_preview::transform_targets(&source);
             if !source.active_layer.is_some_and(|id|source.selected_layers.contains(&id)) {source.active_layer=source.selected_layers.last().copied();}
@@ -79,6 +92,7 @@ impl TransformPreview {
             let mut result=source.clone();result.doc=Arc::new(merged);result
         };
         if !self.selection_only && crate::smart_identity::contains_smart(&preview.doc.layers) {refresh(&before_transform,Arc::make_mut(&mut preview.doc))?;}
+        if self.whole_layer {Arc::make_mut(&mut preview.doc).selection=self.base.doc.selection.clone();}
         self.active=preview.active_layer;
         self.selected=preview.selected_layers();
         self.doc=preview.doc;
@@ -344,4 +358,44 @@ mod tests {
         assert!(Arc::ptr_eq(&draft.doc,&locked.doc));
     }
 
+}
+
+#[cfg(test)]
+mod selected_move_tests {
+    use super::*;
+    fn fixture()->Session {
+        use photocraft_doc::*;
+        let mut doc=Document::new("选区移动",Size::new(16,16),ColorMode::Rgb,SampleType::U8);
+        let mut layer=Layer::raster("像素",doc.pixel_format());
+        layer.surface_mut().unwrap().write_pixel(2,3,&[1.,0.,0.,1.]);
+        layer.surface_mut().unwrap().write_pixel(6,3,&[0.,1.,0.,1.]);
+        let mut selection=LayerMask::hide_all().surface;selection.write_pixel(2,3,&[1.]);doc.selection=Some(selection);
+        doc.layers=vec![layer];let mut session=Session::new();session.add_document(doc,None);session
+    }
+    #[test]
+    fn selected_pixel_move_and_copy_are_cancelable_single_step_and_do_not_duplicate_layers() {
+        for copy in [false,true] {
+            let mut session=fixture();let base=session.active().unwrap().clone();let id=base.active_layer.unwrap();
+            let mut draft=TransformPreview::new(&base);
+            draft.selected_pixels=Some(photocraft_engine::float_cmds::CutParts::new(&base.doc,id,copy,[1.,1.,1.,1.],false).unwrap());draft.duplicate=copy;
+            for dx in [2,3] {draft.update(json!([1,0,0,1,dx,0])).unwrap();}
+            let surface=draft.doc.layer(id).unwrap().surface().unwrap();
+            assert_eq!(surface.sample_channel(5,3,3),1.);assert_eq!(surface.sample_channel(2,3,3),if copy {1.} else {0.});assert_eq!(surface.sample_channel(6,3,3),1.);
+            assert_eq!(draft.doc.layers.len(),1);assert_eq!(draft.doc.selection.as_ref().unwrap().sample_channel(5,3,0),1.);
+            assert!(Arc::ptr_eq(&session.active().unwrap().doc,&base.doc));
+            assert!(draft.update(json!([2,0,0,1,3,0])).is_err());assert!(draft.commit(&mut session).is_err());
+            draft.update(json!([1,0,0,1,3,0])).unwrap();draft.commit(&mut session).unwrap();assert_eq!(session.active().unwrap().history.past_len(),base.history.past_len()+1);
+            session.execute("edit.undo",Value::Null).unwrap();assert_eq!(session.active().unwrap().doc,base.doc);
+            session.execute("edit.redo",Value::Null).unwrap();assert_eq!(session.active().unwrap().doc,draft.doc);
+        }
+    }
+    #[test]
+    fn whole_layer_move_preserves_selection_and_moves_unselected_pixels() {
+        let mut session=fixture();let base=session.active().unwrap().clone();let id=base.active_layer.unwrap();
+        let mut draft=TransformPreview::new(&base);draft.whole_layer=true;
+        draft.update(json!([1,0,0,1,3,0])).unwrap();
+        assert_eq!(draft.doc.selection,base.doc.selection);let surface=draft.doc.layer(id).unwrap().surface().unwrap();
+        assert_eq!(surface.sample_channel(5,3,3),1.);assert_eq!(surface.sample_channel(9,3,3),1.);assert_eq!(surface.sample_channel(6,3,3),0.);
+        draft.commit(&mut session).unwrap();session.execute("edit.undo",Value::Null).unwrap();assert_eq!(session.active().unwrap().doc,base.doc);
+    }
 }

@@ -312,3 +312,34 @@ fn selection_outline_bounds_large_masks_without_losing_rectangle_edges() {
         [3,5,2052,5], [3,518,2052,518], [3,5,3,518], [2052,5,2052,518]
     ]));
 }
+
+#[test]
+fn unsupported_placeholder_workflows_cannot_bypass_the_ui_or_modify_the_document() {
+    let mut editor = Editor::new();
+    editor.open_image("placeholder.png", None, &sample_png(8, 8)).unwrap();
+    let before = editor.state();
+    let hash = editor.content_hash().unwrap();
+    for id in [
+        "view.pixelArtPreview",
+        "type.fontPreviewSize.small", "type.fontPreviewSize.medium", "type.fontPreviewSize.large",
+        "type.fontPreviewSize.extraLarge", "type.fontPreviewSize.huge",
+        "type.languageOptions.defaultFeatures", "type.languageOptions.eastAsianFeatures",
+        "type.languageOptions.middleEasternFeatures", "type.languageOptions.middleEasternAndSouthAsianComposer",
+        "file.import.videoFramesToLayers", "edit.presets.migratePresets",
+        "file.print", "file.printOneCopy", "file.generate.imageAssets", "file.import.wiaSupport", "file.placeEmbedded", "file.placeLinked",
+        "file.scripts.loadFilesIntoStack", "file.automate.contactSheetII", "file.automate.lensCorrection", "file.scripts.imageProcessor", "file.automate.createDroplet",
+    ] {
+        // Even valid-looking parameters must fail before path I/O or any engine edit.
+        let error = editor.execute(id, serde_json::json!({"path":"placeholder-never-read","enabled":true})).unwrap_err();
+        assert_eq!(error.code(), "capability-disabled", "{id}");
+        assert_eq!(editor.state(), before, "{id}");
+        assert_eq!(editor.content_hash().unwrap(), hash, "{id}");
+    }
+}
+
+#[test]
+fn internal_clipboard_geometry_is_read_only_and_does_not_require_a_document() {
+    let mut editor=Editor::new();assert_eq!(editor.clipboard_bounds(),None);
+    editor.open_image("clipboard.png",None,&sample_png(8,8)).unwrap();editor.execute("edit.copy",serde_json::json!({})).unwrap();
+    let state=editor.state();let hash=editor.content_hash().unwrap();let bounds=editor.clipboard_bounds().unwrap();assert!(bounds[2]>bounds[0]&&bounds[3]>bounds[1]);assert_eq!(editor.state(),state);assert_eq!(editor.content_hash().unwrap(),hash);
+}

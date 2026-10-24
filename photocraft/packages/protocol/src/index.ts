@@ -15,6 +15,7 @@
  * external 包降级成运行时属性拷贝，宿主的 `dist/index.js` 就不会再导出这些符号（消费者拿到
  * `undefined`）。逐条列举让 esbuild 生成真实的静态 re-export。类型用 `export type *`。
  */
+export {IMAGE_PROJECT_LAYER_LABELS} from "./image-project-content.js";
 export { fnv1a64Hex } from "./content-hash.js";
 
 export {

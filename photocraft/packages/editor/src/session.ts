@@ -50,6 +50,13 @@ export type EditorSaveRequest = {
   sourceAssetIds: string[];
   /** 会话是否仍是当前代际；退出/释放后迟到步骤必须停止，不得提交回执。 */
   isCurrent: () => boolean;
+  /**
+   * 宿主上报的真实保存进度（0–100）。
+   *
+   * 只在宿主确实能测量时调用（例如上传字节进度）；编辑器不估算百分比，也不把冻结/摘要
+   * 校验折算成假进度。未调用即表示该阶段没有可报告的进度。
+   */
+  onProgress?: (percent: number) => void;
 };
 
 /** 保存结果。`status` 只用于呈现（历史待登记），不改变基线推进时机。 */

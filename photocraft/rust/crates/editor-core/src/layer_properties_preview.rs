@@ -12,6 +12,8 @@ pub(crate) struct LayerPropertiesPreview {
     base:DocState,
     layer:LayerId,
     valid:bool,
+    visibility_only:bool,
+    targets:Vec<LayerId>,
     patterns:Vec<photocraft_doc::Pattern>,
     pub doc:Arc<Document>,
 }
@@ -20,7 +22,13 @@ impl LayerPropertiesPreview {
         let layer=LayerId(layer);
         if base.doc.layer(layer).is_none() {return Err(error("图层不存在"));}
         if base.doc.effective_locks(layer).all {return Err(error("图层已锁定，无法修改属性"));}
-        Ok(Self{base:base.clone(),layer,valid:true,patterns:base.doc.patterns.clone(),doc:base.doc.clone()})
+        let targets=if base.selected_layers().contains(&layer) {base.selected_layers()} else {vec![layer]};
+        Ok(Self{base:base.clone(),layer,valid:true,visibility_only:false,targets,patterns:base.doc.patterns.clone(),doc:base.doc.clone()})
+    }
+    pub fn visibility(base:&DocState,layer:u64)->Result<Self> {
+        let layer=LayerId(layer);
+        if base.doc.layer(layer).is_none() {return Err(error("图层不存在"));}
+        Ok(Self{base:base.clone(),layer,valid:true,visibility_only:true,targets:vec![layer],patterns:Vec::new(),doc:base.doc.clone()})
     }
     pub fn with_patterns(mut self,patterns:&[photocraft_doc::Pattern])->Self {
         self.add_patterns(patterns);
@@ -41,6 +49,7 @@ impl LayerPropertiesPreview {
         self.add_patterns(patterns);
     }
     pub fn info(&self)->Value {
+        if self.visibility_only {return json!({"layer":self.layer.0,"visibility":self.targets.iter().map(|id|json!({"layer":id.0,"visible":self.doc.layer(*id).unwrap().visible})).collect::<Vec<_>>()});}
         let layer=self.doc.layer(self.layer).unwrap();
         // 与 composite_layer_effects/composite_atop_any 的 paint_fx 帧一致。
         // 使用原生边界缓存；启停效果也可能切换 shapeless 的整画布语义。
@@ -48,6 +57,7 @@ impl LayerPropertiesPreview {
             .unwrap_or_else(||photocraft_compose::layer_bounds(layer,self.doc.bounds()));
         let gradient_frame=[i64::from(frame.x0),i64::from(frame.y0),i64::from(frame.width().max(1)),i64::from(frame.height().max(1))];
         json!({"layer":self.layer.0,"opacity":layer.opacity,"fill":layer.fill_opacity,
+            "mask":layer.mask.as_ref().map(|mask|json!({"density":mask.density,"feather":mask.feather})),
             "style":{"enabled":layer.effects.enabled,"items":layer.effects.items},"globalLight":self.doc.global_light,"styleContourSamples":contour_samples(&layer.effects),"styleGradientFrame":gradient_frame})
     }
     /// 描边帧会读取实际效果映射，仅在开始定位时请求，不加入每帧属性响应。
@@ -82,20 +92,56 @@ impl LayerPropertiesPreview {
     }
     pub fn update(&mut self,params:Value)->Result<()> {
         self.valid=false;
-        let fields=params.as_object().filter(|p| !p.is_empty() && p.keys().all(|key| matches!(key.as_str(),"opacity" | "fill" | "style" | "globalLight")))
+        if self.visibility_only {
+            let fields=params.as_object().filter(|fields|fields.len()==2 && fields.contains_key("layers") && fields.contains_key("visible"))
+                .ok_or_else(||error("显隐草稿只接受 layers 和 visible"))?;
+            let visible=fields["visible"].as_bool().ok_or_else(||error("可见状态必须是布尔值"))?;
+            let raw=fields["layers"].as_array().filter(|ids|!ids.is_empty() && ids.len()<=photocraft_project_verify::MAX_LAYERS)
+                .ok_or_else(||error("显隐目标必须是资源上限内的非空数组"))?;
+            let mut targets=Vec::new();
+            for id in raw {
+                let id=LayerId(id.as_u64().ok_or_else(||error("图层 id 必须是非负整数"))?);
+                if self.base.doc.layer(id).is_none() || targets.contains(&id) {return Err(error("显隐目标不存在或重复"));}
+                targets.push(id);
+            }
+            if !targets.contains(&self.layer) {return Err(error("显隐草稿必须包含起始图层"));}
+            let mut doc=(*self.base.doc).clone();
+            for id in &targets {doc.layer_mut(*id).unwrap().visible=visible;}
+            self.targets=targets;self.doc=Arc::new(doc);self.valid=true;return Ok(());
+        }
+        let fields=params.as_object().filter(|p| !p.is_empty() && p.keys().all(|key| matches!(key.as_str(),"opacity" | "fill" | "blend" | "style" | "globalLight" | "mask")))
             .ok_or_else(||error("属性草稿包含不支持的字段"))?;
         for value in [fields.get("opacity"),fields.get("fill")].into_iter().flatten() {
             if !value.as_f64().is_some_and(|v|v.is_finite() && (0.0..=1.0).contains(&v)) {
                 return Err(error("不透明度和填充必须是 0–1 之间的数值"));
             }
         }
+        if let Some(blend)=fields.get("blend") {
+            let mode=blend.as_str().and_then(photocraft_engine::commands::blend_from_str).ok_or_else(||error("混合模式无效"))?;
+            if self.targets.iter().any(|target|!photocraft_doc::BlendMode::LAYER_MODES.contains(&mode) && !(self.base.doc.layer(*target).is_some_and(|layer|layer.is_group()) && mode==photocraft_doc::BlendMode::PassThrough)) {return Err(error("所选集合包含不支持该混合模式的图层"));}
+        }
         let mut scratch=Session::new();scratch.add_document((*self.base.doc).clone(),None);
         *scratch.active_mut().unwrap()=self.base.clone();
-        let props=fields.iter().filter(|(key,_)| matches!(key.as_str(),"opacity"|"fill"))
+        let props=fields.iter().filter(|(key,_)| matches!(key.as_str(),"opacity"|"fill"|"blend"))
             .map(|(key,value)|(key.clone(),value.clone())).collect::<serde_json::Map<_,_>>();
         if !props.is_empty() {
-            let mut props=Value::Object(props);props["layer"]=json!(self.layer.0);
-            scratch.execute("layer.setProps",props).map_err(error)?;
+            if self.targets.iter().any(|id|self.base.doc.effective_locks(*id).all) {return Err(error("所选图层包含全部锁定的图层"));}
+            for target in &self.targets {
+                let mut props=Value::Object(props.clone());props["layer"]=json!(target.0);
+                scratch.execute("layer.setProps",props).map_err(error)?;
+            }
+        }
+        if let Some(mask)=fields.get("mask") {
+            if fields.len()!=1 {return Err(error("蒙版属性须独立编辑"));}
+            let values=mask.as_object().filter(|v|!v.is_empty() && v.keys().all(|key|matches!(key.as_str(),"density"|"feather"))).ok_or_else(||error("蒙版属性格式无效"))?;
+            for (key,value) in values {
+                let max=if key=="density" {1.0} else {1000.0};
+                if !value.as_f64().is_some_and(|value|value.is_finite() && (0.0..=max).contains(&value)) {return Err(error("蒙版密度须为 0–100%，羽化须为 0–1000 px"));}
+            }
+            let doc=Arc::make_mut(&mut scratch.active_mut().unwrap().doc);
+            let mask=doc.layer_mut(self.layer).unwrap().mask.as_mut().ok_or_else(||error("图层没有像素蒙版"))?;
+            if let Some(value)=values.get("density") {mask.density=value.as_f64().unwrap() as f32;}
+            if let Some(value)=values.get("feather") {mask.feather=value.as_f64().unwrap() as f32;}
         }
         if let Some(style)=fields.get("style") {
             let object=style.as_object().filter(|object|object.len()==2 && object.contains_key("enabled") && object.contains_key("items"))
@@ -133,7 +179,8 @@ impl LayerPropertiesPreview {
     }
     pub fn commit(&self,session:&mut Session)->Result<()> {
         self.require_valid()?;
-        crate::preview_history::commit(session,self.doc.clone(),None,"修改图层属性").map_err(error)
+        if self.doc==self.base.doc {return Ok(());}
+        crate::preview_history::commit(session,self.doc.clone(),None,if self.visibility_only {"修改图层可见性"} else {"修改图层属性"}).map_err(error)
     }
 }
 
@@ -434,4 +481,37 @@ mod tests {
         Arc::make_mut(&mut session.active_mut().unwrap().doc).layer_mut(id).unwrap().locks.all=true;
         assert!(LayerPropertiesPreview::new(session.active().unwrap(),id.0).is_err());
     }
+    #[test]
+    fn mask_properties_are_transactional_persisted_and_do_not_mutate_pixels() {
+        let mut s=Session::new();s.execute("file.new",json!({"width":16,"height":16})).unwrap();
+        let id=s.active().unwrap().active_layer.unwrap();
+        Arc::make_mut(&mut s.active_mut().unwrap().doc).layer_mut(id).unwrap().mask=Some(photocraft_doc::LayerMask::hide_all());
+        let base=s.active().unwrap().clone();
+        let hash=crate::document_content::document_content_hash(&base.doc,&Default::default()).unwrap();
+        let mut draft=LayerPropertiesPreview::new(&base,id.0).unwrap();
+        draft.update(json!({"mask":{"density":0.37,"feather":4.25}})).unwrap();
+        assert_eq!(s.active().unwrap().doc,base.doc);
+        assert_eq!(draft.doc.layer(id).unwrap().mask.as_ref().unwrap().surface,base.doc.layer(id).unwrap().mask.as_ref().unwrap().surface);
+        assert_ne!(crate::document_content::document_content_hash(&draft.doc,&Default::default()).unwrap(),hash);
+        for params in [json!({"mask":{}}),json!({"mask":{"density":1.1}}),json!({"mask":{"feather":1001}}),json!({"mask":{"density":null}}),json!({"mask":{"other":1}}),json!({"mask":{"density":0.5},"opacity":0.5})] {
+            assert!(draft.update(params).is_err());assert!(draft.commit(&mut s).is_err());
+        }
+        draft.update(json!({"mask":{"density":0.37,"feather":4.25}})).unwrap();draft.commit(&mut s).unwrap();
+        assert_eq!(s.active().unwrap().history.past_len(),base.history.past_len()+1);
+        let bytes=photocraft_format::save_to_bytes(&s.active().unwrap().doc,&Default::default()).unwrap();
+        photocraft_project_verify::verify(&bytes).unwrap();
+        let loaded=photocraft_format::load_from_bytes(&bytes).unwrap();
+        assert_eq!(loaded.layer(id).unwrap().mask.as_ref().unwrap().density,0.37);
+        assert_eq!(loaded.layer(id).unwrap().mask.as_ref().unwrap().feather,4.25);
+        assert_eq!(crate::document_content::document_content_hash(&loaded,&Default::default()),crate::document_content::document_content_hash(&s.active().unwrap().doc,&Default::default()));
+        s.execute("edit.undo",Value::Null).unwrap();assert_eq!(s.active().unwrap().doc,base.doc);
+        s.execute("edit.redo",Value::Null).unwrap();
+        let redo=s.active().unwrap().history.past_len();
+        let mut noop=LayerPropertiesPreview::new(s.active().unwrap(),id.0).unwrap();noop.update(json!({"mask":{"density":0.37,"feather":4.25}})).unwrap();noop.commit(&mut s).unwrap();
+        assert_eq!(s.active().unwrap().history.past_len(),redo);
+        let mut invalid=loaded.clone();
+        invalid.layer_mut(id).unwrap().mask.as_mut().unwrap().density=2.0;
+        assert!(photocraft_project_verify::verify(&photocraft_format::save_to_bytes(&invalid,&Default::default()).unwrap()).is_err());
+    }
+
 }

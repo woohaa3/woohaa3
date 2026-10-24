@@ -170,6 +170,7 @@ export function FocusWorkspace({ presentation, runtime, surfaceRef, sidePanel = 
           data-focus-kind={mode.type === "node-focus" ? mode.kind : mode.type === "document-workspace" ? "document" : undefined}
           data-focus-owner={mode.type === "node-focus" ? mode.owner : mode.type === "document-workspace" ? "document" : undefined}
           data-focus-narrow={focused && layout.narrow ? "true" : undefined}
+          data-focus-chrome={focused && config.chrome===false ? "hidden" : undefined}
           data-focus-panel={focused ? panelState : undefined}>
           {children}
         </div>

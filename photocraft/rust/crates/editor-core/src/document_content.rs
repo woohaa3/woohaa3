@@ -69,6 +69,7 @@ pub fn project_content(doc: &Document, registry: &AssetRegistry) -> Value {
         "canvasHeight": doc.size.height.max(1),
         "layers": layers
     });
+    if doc.resolution_dpi!=72.0 {content["resolutionDpi"]=json!(doc.resolution_dpi);}
     if !doc.patterns.is_empty() {
         if !photocraft_project_verify::pattern_support::supported(&doc.patterns) {
             content["patternContentHash"]=json!("unsupported");
@@ -80,6 +81,16 @@ pub fn project_content(doc: &Document, registry: &AssetRegistry) -> Value {
             content["patternContentHash"]=json!(hash);
         }
     }
+    fn metadata(rows:&mut Value,doc:&Document,links:&mut HashMap<u64,usize>) {
+        if let Some(rows)=rows.as_array_mut() {for row in rows {
+            if let Some(layer)=row["id"].as_str().and_then(|id|id.strip_prefix("layer-")).and_then(|id|id.parse::<u64>().ok()).and_then(|id|doc.layer(LayerId(id))) {
+                if layer.label!=photocraft_doc::LabelColor::None {row["labelColor"]=json!(layer.label.id());}
+                if let Some(group)=layer.link_group {let next=links.len()+1;let group=*links.entry(group).or_insert(next);row["linkGroup"]=json!(group);}
+            }
+            if let Some(children)=row.get_mut("children") {metadata(children,doc,links);}
+        }}
+    }
+    metadata(&mut content["layers"],doc,&mut HashMap::new());
     if crate::smart_identity::contains_smart(&doc.layers) {crate::smart_identity::attach(doc,&mut content);}
     content
 }
@@ -112,6 +123,7 @@ fn layer_content(layer: &Layer, first_root: bool, registry: &AssetRegistry, fing
             json!({
                 "enabled": mask.enabled,
                 "linked": mask.linked,
+                "density":mask.density,"feather":mask.feather,
                 "origin": "paint",
                 "contentHash": surface_hash_cached(&mask.surface, fingerprints)
             })

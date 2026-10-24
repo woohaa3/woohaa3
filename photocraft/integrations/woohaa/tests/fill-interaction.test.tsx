@@ -15,8 +15,8 @@ vi.mock("../../../packages/editor/src/ui/Menu.js", async (importOriginal) => {
   const entries = (items: readonly import("@woohaa3/photocraft-editor/ui").MenuItem[]): ReactNode => items.map(item =>
     item.children ? <div key={item.id} data-submenu={item.id}>{entries(item.children)}</div> :
       <button key={item.id} data-command={item.id} disabled={item.disabled} onClick={() => item.onSelect(item.id)}>{item.label}</button>);
-  return {...actual, DropdownMenu: ({label, items}: {label: string; items: readonly import("@woohaa3/photocraft-editor/ui").MenuItem[]}) =>
-    <div data-menu={label}>{entries(items)}</div>};
+  return {...actual, DropdownMenu: (props: import("../../../packages/editor/src/ui/Menu.js").DropdownMenuProps) =>
+    props.children ? <actual.DropdownMenu {...props}/> : <div data-menu={props.label}>{entries(props.items ?? [])}</div>};
 });
 (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 
@@ -62,7 +62,7 @@ it("菜单和快捷键将当前色盘送入内核，正式快照刷新历史与�
     expect(controller.isDirty()).toBe(false);
     expect(container.textContent).toContain("目标已锁定");
     fail=false;chord(editor);
-    expect(execute.mock.lastCall).toEqual(["edit.fillForeground",JSON.stringify({color:"#000000"})]);
+    expect(execute.mock.lastCall).toEqual(["edit.fillForeground",JSON.stringify({color:"#ffffff"})]);
     expect(controller.isDirty()).toBe(true);
     const calls=execute.mock.calls.length;
     chord(background);render(true);chord(editor);

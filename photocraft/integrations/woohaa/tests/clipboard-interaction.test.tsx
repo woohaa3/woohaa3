@@ -15,8 +15,8 @@ vi.mock("../../../packages/editor/src/ui/Menu.js", async (importOriginal) => {
   const entries = (items: readonly import("@woohaa3/photocraft-editor/ui").MenuItem[]): ReactNode => items.map(item =>
     item.children ? <div key={item.id} data-submenu={item.id}>{entries(item.children)}</div> :
       <button key={item.id} data-command={item.id} disabled={item.disabled} onClick={() => item.onSelect(item.id)}>{item.label}</button>);
-  return {...actual, DropdownMenu: ({label, items}: {label: string; items: readonly import("@woohaa3/photocraft-editor/ui").MenuItem[]}) =>
-    <div data-menu={label}>{entries(items)}</div>};
+  return {...actual, DropdownMenu: (props: import("../../../packages/editor/src/ui/Menu.js").DropdownMenuProps) =>
+    props.children ? <actual.DropdownMenu {...props}/> : <div data-menu={props.label}>{entries(props.items ?? [])}</div>};
 });
 (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 
@@ -55,7 +55,7 @@ it("内部剪贴板菜单、键盘与原生事件走同一内核入口，输入�
     expect(container.textContent).toContain("内部剪贴板为空");expect(controller.isDirty()).toBe(false);
     expect(execute.mock.lastCall).toEqual(["edit.paste",JSON.stringify({center:[320,360]})]);
     fail=false;selectionFrame=[10,20,50,80];chord(editor,"c");
-    native(editor,"paste");expect(execute.mock.lastCall).toEqual(["edit.paste",JSON.stringify({center:[30,50]})]);
+    native(editor,"paste");expect(execute.mock.lastCall).toEqual(["edit.paste",JSON.stringify({center:[320,360]})]);
     chord(editor,"v",true);expect(execute.mock.lastCall).toEqual(["edit.pasteSpecial.pasteInPlace","null"]);
     expect(controller.isDirty()).toBe(true);expect(onPreview.mock.lastCall?.[0].pixels[0]).toBe(2);
     const menu=container.querySelector('[data-menu="编辑"]')!;

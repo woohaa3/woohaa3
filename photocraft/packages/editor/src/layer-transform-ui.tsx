@@ -1,10 +1,14 @@
+import {useStickyModifiers,withStickyModifiers} from "./modifier-keys.js";
+import {isEditorMac} from "./photo-editor-shortcuts.js";
+import {ArithmeticInput} from "./arithmetic-input.js";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "./ui/Button.js";
 import { IDENTITY_MATRIX, IDENTITY_TRANSFORM, dragTransformMatrix, frameCenter, inverseTransformPoint, transformMatrix, transformValues, updateTransformValue, type LayerTransform, type TransformFrame, type TransformDragHandle, type TransformPoint } from "./transform-layer.js";
 
 export type TransformGesturePort = { cancelGesture: () => boolean; hasGesture: () => boolean; previewAt: (point: TransformPoint, shift: boolean, alt: boolean) => void };
 
-export function TransformOptions({ frame, matrix, readonly, onPreview, onConfirm, onCancel, onValidChange, linked = true, onLinkedChange, reference, onReferenceChange }: {
+export function TransformOptions({ resolutionDpi=72, frame, matrix, readonly, onPreview, onConfirm, onCancel, onValidChange, linked = true, onLinkedChange, reference, onReferenceChange }: {
+  resolutionDpi?:number;
   linked?: boolean; onLinkedChange?: (linked: boolean) => void; reference?: TransformPoint; onReferenceChange?: (point: TransformPoint) => void;
   frame: TransformFrame | null; matrix: readonly number[]; readonly: boolean; onPreview: (matrix: number[]) => void;
   onConfirm: () => void; onCancel: () => void; onValidChange: (valid: boolean) => void;
@@ -15,10 +19,10 @@ export function TransformOptions({ frame, matrix, readonly, onPreview, onConfirm
   const valid = draftValid && !!frame && !!transformMatrix(frame, value);
   return <div className="photo-editor__options-group">
     {([ ["dx", "水平位移", "px"], ["dy", "垂直位移", "px"], ["scaleX", "宽度", "%"], ["scaleY", "高度", "%"], ["rotate", "旋转", "°"] ] as const).map(([key, label, unit]) =>
-      <label key={key}>{label}<input type="number" value={Number.isFinite(value[key]) ? value[key] : ""} disabled={readonly || !frame}
+      <label key={key}>{label}<ArithmeticInput invalidate units={key.startsWith("scale")?{unit:"%"}:key==="rotate"?{unit:"°"}:{unit:"px",dpi:resolutionDpi}}  value={Number.isFinite(value[key]) ? value[key] : ""} disabled={readonly || !frame}
         min={key.startsWith("scale") ? 1 : undefined} max={key.startsWith("scale") ? 1600 : undefined}
         onChange={(event) => {
-          const next = { ...value, [key]: event.currentTarget.valueAsNumber };
+          const next = { ...value, [key]: (event.currentTarget.value.trim()===""?NaN:Number(event.currentTarget.value)) };
           setValue(next);
           const updated = frame && Object.values(next).every(Number.isFinite) && updateTransformValue(frame, matrix, key, next[key], reference ?? frameCenter(frame), linked);
           setDraftValid(!!updated);
@@ -82,6 +86,7 @@ export const LayerTransformOverlay = forwardRef<TransformGesturePort, {
     const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
     return { x: (event.clientX - bounds.left - origin.x) / zoom, y: (event.clientY - bounds.top - origin.y) / zoom };
   };
+  const sticky=useStickyModifiers();
   const calculate = (event: { clientX: number; clientY: number; currentTarget: HTMLElement; shiftKey: boolean; altKey: boolean }) => {
     const active = gesture.current!;
     return dragTransformMatrix(frame, active.matrix, active.handle as TransformDragHandle, active.start, point(event),
@@ -97,7 +102,8 @@ export const LayerTransformOverlay = forwardRef<TransformGesturePort, {
   return <div className="photo-editor-transform" data-canvas-viewport-blocked={gesture.current ? "true" : undefined}
     style={{ pointerEvents: passive ? "none" : undefined, left: origin.x + x0 * zoom, top: origin.y + y0 * zoom, width: (x1 - x0) * zoom, height: (y1 - y0) * zoom,
       transformOrigin: "0 0", transform: `matrix(${a},${b},${c},${d},${(a*x0+c*y0+e-x0)*zoom},${(b*x0+d*y0+f-y0)*zoom})` }}
-    onPointerDown={(event) => {
+    onPointerDown={(rawEvent) => {
+      const event=withStickyModifiers(rawEvent,sticky,isEditorMac());
       if (event.button !== 0 || gesture.current) return;
       event.stopPropagation();
       const handle = (event.target as HTMLElement).dataset.transformHandle as TransformDragHandle | "reference" | undefined;
@@ -107,7 +113,8 @@ export const LayerTransformOverlay = forwardRef<TransformGesturePort, {
       onGestureChange(true);
       onPointerPosition?.(event);
     }}
-    onPointerMove={(event) => {
+    onPointerMove={(rawEvent) => {
+      const event=withStickyModifiers(rawEvent,sticky,isEditorMac());
       if (!gesture.current || gesture.current.pointer !== event.pointerId) return;
       event.stopPropagation();
       onPointerPosition?.(event);
@@ -116,7 +123,8 @@ export const LayerTransformOverlay = forwardRef<TransformGesturePort, {
       setPreview(next);
       onPreview?.(next);
     }}
-    onPointerUp={(event) => {
+    onPointerUp={(rawEvent) => {
+      const event=withStickyModifiers(rawEvent,sticky,isEditorMac());
       const active = gesture.current;
       if (!active || active.pointer !== event.pointerId) return;
       event.stopPropagation();

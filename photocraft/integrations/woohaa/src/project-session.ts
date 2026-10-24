@@ -43,6 +43,7 @@ export type ProjectSessionPhase =
 
 /** 进入工程会话前解析到的当前权威内容。 */
 export type ProjectSessionInput = {
+  initiallyUnsaved?:boolean;
   nodeId: string;
   baseAssetId: string;
   baseStorageKey: string;
@@ -64,6 +65,7 @@ export type V1ConversionPlan =
 export class ProjectSession {
   readonly nodeId: string;
   private input: ProjectSessionInput;
+  private initiallyUnsaved:boolean;
   private phase: ProjectSessionPhase;
   private readonly baseline: ImageEditDocument | null;
   private baselineContentHash: string | null;
@@ -74,6 +76,7 @@ export class ProjectSession {
 
   constructor(input: ProjectSessionInput) {
     this.nodeId = input.nodeId;
+    this.initiallyUnsaved=input.initiallyUnsaved===true;
     this.input = input;
     this.baseline = input.edit;
     this.annotations = input.edit && !isImageProjectDocument(input.edit) ? [...input.edit.shapes] : [];
@@ -115,6 +118,7 @@ export class ProjectSession {
 
   /** 是否可以保存（存在净变化且未在导出中）。 */
   isDirty(): boolean {
+    if(this.initiallyUnsaved)return true;
     if (this.phase === "editing" || this.phase === "readonly-project") {
       return this.currentHash !== null && this.currentHash !== this.baselineContentHash;
     }
@@ -171,6 +175,7 @@ export class ProjectSession {
    * 内容已权威提交但历史待登记时同样推进：重试不会重复归档。
    */
   commitBaseline(contentHash: string): void {
+    this.initiallyUnsaved=false;
     this.baselineContentHash = contentHash;
     this.currentHash = contentHash;
     this.phase = "editing";
@@ -185,6 +190,7 @@ export class ProjectSession {
    * 仍使用进入时捕获的权威描述符身份，不随本地指纹迁移。
    */
   establishBaseline(): void {
+    if(this.initiallyUnsaved)return;
     if (this.currentHash !== null) {
       this.baselineContentHash = this.currentHash;
       this.errorMessage = null;

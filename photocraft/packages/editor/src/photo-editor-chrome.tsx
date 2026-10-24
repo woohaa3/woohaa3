@@ -1,15 +1,22 @@
+import {decodeTextAntialias,type TextAntialias} from "./text-antialias.js";
+import type {TextClipboardControls,TextClipboardAction} from "./text-clipboard.js";
+import {EDITOR_THEMES,type useEditorTheme} from "./editor-theme.js";
+import {TextToolGroup} from "./text-tool-group.js";
 import {MarqueeToolGroup} from "./marquee-tool-group.js";
+import {RetouchToolGroup} from "./retouch-tool-group.js";
+import type {RetouchToolId} from "./retouch-tools.js";
 import { editorMenusFor, type EditorDocumentsMenu, type EditorMenuItem } from "./photo-editor-menu.js";
 import type { PhotocraftCommand } from "@woohaa3/photocraft-protocol";
 import { Button, IconButton } from "./ui/Button.js";
-import { DropdownMenu, type MenuItem } from "./ui/Menu.js";
+import {DropdownMenu,MenuBar,type MenuItem} from "./ui/Menu.js";
 import { Tooltip } from "./ui/Tooltip.js";
 import {
-  MoveIcon, EraserIcon, LassoIcon, MarqueeIcon,
-  PenIcon, RedoIcon, TypeIcon, UndoIcon, ChevronDownIcon, SwapColorsIcon
+  PipetteIcon,PencilIcon, PaintBucketIcon, HandIcon, ZoomInIcon, MoveIcon, EraserIcon, LassoIcon, MarqueeIcon,
+  PenIcon, RedoIcon, TypeIcon, UndoIcon, ChevronDownIcon, ChevronRightIcon, SwapColorsIcon, WandSparklesIcon
 } from "./ui/icons.js";
 import { DISPLAY_SHORTCUTS, TOOL_KEYS, commandShortcutLabel, shortcutLabel, type PhotoEditorTool, type EditorViewAction } from "./photo-editor-shortcuts.js";
-import type {EditorDisplayControls} from "./editor-display.js";
+import {EDITOR_SCREEN_MODES,type EditorDisplayControls,type EditorScreenMode} from "./editor-display.js";
+import {ScreenModeButton} from "./screen-mode-button.js";
 export type { PhotoEditorTool } from "./photo-editor-shortcuts.js";
 
 
@@ -17,12 +24,30 @@ export const PHOTO_TOOLS = [
   { id: "move", label: "移动", Icon: MoveIcon },
   { id: "marquee", label: "矩形 / 椭圆选框", Icon: MarqueeIcon },
   { id: "lasso", label: "套索", Icon: LassoIcon },
+  {id:"magicWand",label:"魔棒",Icon:WandSparklesIcon},
   { id: "brush", label: "画笔", Icon: PenIcon },
+  {id:"pencil",label:"铅笔",Icon:PencilIcon},
+  {id:"eyedropper",label:"吸管",Icon:PipetteIcon},
+  { id:"bucket",label:"油漆桶",Icon:PaintBucketIcon },
   { id: "eraser", label: "橡皮", Icon: EraserIcon },
-  { id: "text", label: "文字", Icon: TypeIcon }
+  { id: "retouch", label: "润饰", Icon: WandSparklesIcon },
+  { id: "text", label: "文字", Icon: TypeIcon },
+  { id:"pan",label:"手形",Icon:HandIcon },
+  { id:"zoom",label:"缩放",Icon:ZoomInIcon }
 ] as const;
 
-export function EditorMenuBar({ commands, readonly, canUndo, canRedo, onCommand, onApply, canSave, saving, display, displayDisabled, onTransform, canTransform, canTransformSelection, onView, viewDisabled, mergeLabel, documents }: {
+export function EditorMenuBar({ theme, commands, readonly, canUndo, canRedo, onCommand, onApply, canSave, saving, display, displayDisabled, cloneSourceAvailable, brushPresetsAvailable, guides, onTransform, canTransform, canTransformSelection, onView, viewDisabled, mergeLabel, documents, onPreferences,onSearch,textActions,textClipboard }: {
+  /** 「克隆源」面板入口只在对应命令开放时出现。 */
+  cloneSourceAvailable?:boolean;
+  /** 「画笔预设」面板入口只在预设命令开放时出现。 */
+  brushPresetsAvailable?:boolean;
+  /** 标尺/参考线/网格显示与吸附（I096）。 */
+  guides?:{showRulers:boolean;showGuides:boolean;showGrid:boolean;snapToGuides:boolean;snapToGrid:boolean;toggle:(key:"showRulers"|"showGuides"|"showGrid"|"snapToGuides"|"snapToGrid")=>void};
+  textClipboard?:TextClipboardControls;
+  textActions?:{canInsertLorem:boolean;insertLorem:()=>void;canAntialias?:boolean;antialias?:TextAntialias;setOrientation?:(mode:"horizontal"|"vertical")=>void;canOrientation?:boolean;setAntialias?:(mode:TextAntialias)=>void};
+  theme?:ReturnType<typeof useEditorTheme>;
+  onPreferences?:()=>void;
+  onSearch?:()=>void;
   display?:EditorDisplayControls;
   displayDisabled?:boolean;
   commands: ReadonlyMap<string, PhotocraftCommand>;
@@ -42,37 +67,66 @@ export function EditorMenuBar({ commands, readonly, canUndo, canRedo, onCommand,
   /**
    * 文档菜单能力（change: 2026-10-21-add-photocraft-document-workspace，D2）。
    *
-   * 打开文件 / 关闭 / 文档清单属于菜单，不放在文档标签条上。缺省（PhotoCraft dev 宿主）
-   * 不显示「文件」与文档清单项。
+   * 打开文件 / 关闭 / 文档清单由宿主注入；内核允许的文件脚本独立显示。
    */
   documents?: EditorDocumentsMenu;
 }) {
   const menuItems = (entries: readonly EditorMenuItem[]): MenuItem[] => entries.flatMap<MenuItem>(entry => {
+    if(entry.id==="image.duplicateDocument")return [{...entry,children:undefined,disabled:readonly || documents?.duplicateDisabled===true,onSelect:()=>documents?.onDuplicateDocument?.()}];
+    // 图像模式对话框由编辑器自身持有；它没有内核命令条目，但仍受只读与门禁约束。
+    if(entry.id==="image.colorMode")return commands.get("image.mode.rgb")?.allowed?[{...entry,children:undefined,disabled:readonly || !commands.get("image.mode.rgb")?.enabled,onSelect:()=>onCommand("image.colorMode")}]:[];
     if (entry.children) {
       const children = menuItems(entry.children);
       return children.length ? [{...entry, children, disabled: children.every(child => child.disabled), onSelect: () => {}}] : [];
     }
+    if(textClipboard && ["edit.cut","edit.copy","edit.paste","select.all"].includes(entry.id)) {
+      const action=entry.id as TextClipboardAction;
+      return [{...entry,children:undefined,disabled:!textClipboard.enabled(action),onSelect:()=>textClipboard.run(action)}];
+    }
+    if(entry.id.startsWith("type.orientation.") && textActions?.setOrientation){
+      const mode=entry.id.slice("type.orientation.".length);if((mode!=="horizontal" && mode!=="vertical") || !commands.get(entry.id)?.allowed)return [];
+      return [{...entry,children:undefined,disabled:!textActions.canOrientation,onSelect:()=>textActions.setOrientation?.(mode)}];
+    }
+    if(entry.id.startsWith("type.antiAlias.") && textActions?.setAntialias){
+      const mode=decodeTextAntialias(entry.id.slice("type.antiAlias.".length));if(!mode || !commands.get(entry.id)?.allowed)return [];
+      return [{...entry,children:undefined,disabled:!textActions.canAntialias,onSelect:()=>textActions.setAntialias?.(mode)}];
+    }
     const command = commands.get(entry.id);
     if (!command?.allowed) return [];
     const transform = entry.id === "edit.transform" || entry.id === "select.transformSelection";
-    const enabled = entry.id === "edit.undo" ? canUndo : entry.id === "edit.redo" ? canRedo
+    const workspacePurge=documents?.purge?.commands[entry.id as keyof typeof documents.purge.commands];
+    const enabled = workspacePurge?workspacePurge.enabled:entry.id === "edit.undo" ? canUndo : entry.id === "edit.redo" ? canRedo : entry.id === "edit.toggleLastState" ? canUndo || canRedo
       : transform ? command.enabled && !!onTransform && (entry.id === "edit.transform" ? canTransform : canTransformSelection) : command.enabled;
     const shortcut = entry.id === "edit.transform" ? shortcutLabel("Mod+T") : commandShortcutLabel(entry.id);
-    return [{...entry, children: undefined, label: <><span title={command.disabledReason ?? undefined}>{entry.id === "layer.mergeLayers" ? mergeLabel ?? entry.label : entry.label}</span>{shortcut ? <kbd className="photo-editor__shortcut" title={entry.id === "edit.transform" ? "浏览器可能占用此快捷键，可直接点击菜单或使用图片右键菜单" : undefined}>{shortcut}</kbd> : null}</>,
+    return [{...entry, children: undefined, label: <><span title={(workspacePurge?workspacePurge.reason:command.disabledReason) ?? undefined}>{entry.id === "layer.mergeLayers" ? mergeLabel ?? entry.label : entry.label}</span>{shortcut ? <kbd className="photo-editor__shortcut" title={entry.id === "edit.transform" ? "浏览器可能占用此快捷键，可直接点击菜单或使用图片右键菜单" : undefined}>{shortcut}</kbd> : null}</>,
       disabled: readonly || !enabled, danger: entry.id === "layer.delete",
-      onSelect: transform ? () => onTransform?.(entry.id === "select.transformSelection") : onCommand}];
+      onSelect: transform ? () => onTransform?.(entry.id === "select.transformSelection") : (id,modifiers)=>{
+        const alternate=modifiers?.altKey ? id==="layer.mergeVisible"?"layer.stampVisible":id==="layer.mergeLayers" || id==="layer.mergeDown"?"layer.stampDown":null:null;
+        if(alternate) {const command=commands.get(alternate);if(!readonly && command?.allowed && command.enabled) onCommand(alternate);}
+        else onCommand(id);
+      }}];
   }).map((item, index) => ({...item, separatorBefore: index > 0 && item.separatorBefore}));
   const displayItems = DISPLAY_SHORTCUTS.map(entry => {
-    const visible = entry.action === "extras" ? display?.state.extrasVisible : entry.action === "sidebar" ? display?.state.sidebarVisible : display?.state.toolsVisible || display?.state.sidebarVisible;
+    const visible = entry.action === "extras" ? display?.state.extrasVisible : entry.action === "sidebar" ? display?.state.sidebarVisible : display?.state.toolsVisible || display?.state.optionsVisible || display?.state.sidebarVisible;
     const name = entry.action === "extras" ? "额外内容（选区与变换边界）" : entry.action === "sidebar" ? "侧栏面板" : "工具与面板";
     return {id: entry.action, label: <><span>{name}</span><kbd className="photo-editor__shortcut">{shortcutLabel(entry.label)}</kbd></>,
       selected: !!visible, disabled: displayDisabled ?? readonly, onSelect: () => display?.toggle(entry.action)};
   });
   const viewItems: MenuItem[] = onView ? ([
-    ["zoomIn", "放大", "Mod++"], ["zoomOut", "缩小", "Mod+-"], ["fit", "适合屏幕", "Mod+0"], ["actualSize", "100%", "Mod+1"]
-  ] as const).map(([id, label, shortcut], index) => ({id, label: <><span>{label}</span><kbd className="photo-editor__shortcut">{shortcutLabel(shortcut)}</kbd></>,
+    ["zoomIn", "放大", "Mod++"], ["zoomOut", "缩小", "Mod+-"], ["fit", "适合屏幕", "Mod+0"], ["actualSize", "100%", "Mod+1"], ["twoHundredPercent","200%",""], ["printSize","打印尺寸",""], ["fitLayers","适合所选图层",""]
+  ] as const).map(([id, label, shortcut], index) => ({id, label: <><span>{label}</span>{shortcut?<kbd className="photo-editor__shortcut">{shortcutLabel(shortcut)}</kbd>:null}</>,
     separatorBefore: index === 2, disabled: viewDisabled ?? readonly, onSelect: () => onView(id)})) : [];
   if (display) viewItems.push({...displayItems[0]!, separatorBefore: viewItems.length > 0});
+  if(display)viewItems.push({id:"pixelGrid",label:"像素网格",selected:!!display.state.pixelGridVisible,disabled:displayDisabled??readonly,onSelect:()=>display.toggle("pixelGrid")});
+  // 标尺/参考线/网格（I096）：显示偏好属于本机；参考线与原点由画布上的原生命令写入文档。
+  if(guides)viewItems.push({id:"view.extras.guides",label:"参考线",selected:guides.showGuides,disabled:displayDisabled??readonly,onSelect:()=>guides.toggle("showGuides")});
+  if(guides)viewItems.push({id:"view.extras.grid",label:"网格",selected:guides.showGrid,disabled:displayDisabled??readonly,onSelect:()=>guides.toggle("showGrid")});
+  if(guides)viewItems.push({id:"view.extras.rulers",label:"标尺",selected:guides.showRulers,disabled:displayDisabled??readonly,onSelect:()=>guides.toggle("showRulers")});
+  if(guides)viewItems.push({id:"view.snapGuides",label:"对齐到参考线",selected:guides.snapToGuides,disabled:displayDisabled??readonly,onSelect:()=>guides.toggle("snapToGuides")});
+  if(guides)viewItems.push({id:"view.snapGrid",label:"对齐到网格",selected:guides.snapToGrid,disabled:displayDisabled??readonly,onSelect:()=>guides.toggle("snapToGrid")});
+  if(guides)viewItems.push({id:"view.clearGuides",label:"清除参考线",disabled:(displayDisabled??readonly)||!commands.get("view.clearGuides")?.allowed,onSelect:()=>onCommand("view.clearGuides")});
+  if(guides)viewItems.push({id:"view.resetRulerOrigin",label:"重置标尺原点",disabled:(displayDisabled??readonly)||!commands.get("view.resetRulerOrigin")?.allowed,onSelect:()=>onCommand("view.resetRulerOrigin")});
+  if(display?.setScreenMode)viewItems.push({id:"screenMode",label:"屏幕模式",disabled:displayDisabled??readonly,onSelect:()=>{},children:EDITOR_SCREEN_MODES.map(mode=>({id:`view.screenMode.${mode.id}`,label:mode.label,selected:(display.state.screenMode??"standard")===mode.id,onSelect:()=>display.setScreenMode?.(mode.id)}))});
   // 文档清单属于「窗口」菜单（与编辑器自身的窗口显示项同处一组）。
   const documentItems: MenuItem[] = (documents?.list ?? []).map((entry) => ({
     id: `document:${entry.id}`,
@@ -80,50 +134,67 @@ export function EditorMenuBar({ commands, readonly, canUndo, canRedo, onCommand,
     selected: entry.active,
     onSelect: () => documents?.onActivateDocument?.(entry.id)
   }));
-  const windowItems = [...displayItems.slice(1), ...documentItems];
+  const helpItems:MenuItem[]=onSearch?[{id:"help-search",label:"搜索命令与菜单路径…",disabled:readonly,onSelect:onSearch}]:[];
+  const themeItems:MenuItem[]=theme?[{id:"theme",label:"主题",onSelect:()=>{},children:[...EDITOR_THEMES.map(item=>({id:`window.theme.${item.id}`,label:item.label,selected:theme.preference.theme===item.id,onSelect:()=>theme.select(item.id)})),{id:"window.theme.system",label:"跟随系统外观",separatorBefore:true,selected:theme.preference.theme==="system",onSelect:()=>theme.select("system")}]},
+    {id:"view.darkenInterface",label:<>调暗界面<kbd>{shortcutLabel("Mod+Shift+F1")}</kbd></>,onSelect:()=>theme.step(false)},
+    {id:"view.lightenInterface",label:<>调亮界面<kbd>{shortcutLabel("Mod+Shift+F2")}</kbd></>,onSelect:()=>theme.step(true)}]:[];
+  const independentDisplayItems:MenuItem[]=display?([
+    ["tools","工具栏",display.state.toolsVisible],["options","选项栏",display.state.optionsVisible]
+  ] as const).map(([id,label,selected])=>({id,label,selected,disabled:displayDisabled??readonly,onSelect:()=>display.toggle(id)})):[];
+  if(display)independentDisplayItems.push({id:"modifiers",label:"修饰键",selected:!!display.state.modifiersVisible,disabled:displayDisabled??readonly,onSelect:()=>display.toggle("modifiers")});
+  if(display)independentDisplayItems.push({id:"navigator",label:"导航器",selected:!!display.state.navigatorVisible,disabled:displayDisabled??readonly,onSelect:()=>display.toggle("navigator")});
+  if(display)independentDisplayItems.push({id:"histogram",label:"直方图",selected:!!display.state.histogramVisible,disabled:displayDisabled??readonly,onSelect:()=>display.toggle("histogram")});
+  if(display)independentDisplayItems.push({id:"info",label:<>信息<kbd>F8</kbd></>,selected:!!display.state.infoVisible,disabled:displayDisabled??readonly,onSelect:()=>display.toggle("info")});
+  if(display && cloneSourceAvailable)independentDisplayItems.push({id:"cloneSource",label:"克隆源",selected:!!display.state.cloneSourceVisible,disabled:displayDisabled??readonly,onSelect:()=>display.toggle("cloneSource")});
+  if(display && brushPresetsAvailable)independentDisplayItems.push({id:"brushPresets",label:"画笔预设",selected:!!display.state.brushPresetsVisible,disabled:displayDisabled??readonly,onSelect:()=>display.toggle("brushPresets")});
+  const windowItems = [...themeItems,...displayItems.slice(1),...independentDisplayItems, ...documentItems];
   // 文档动作（打开/关闭）走「文件」菜单；与图层命令不同，它们不来自内核命令表。
-  const fileMenus = documents
-    ? editorMenusFor(documents).filter((menu) => menu.label === "文件").map((menu) => ({
+  const fileMenus = editorMenusFor(documents).filter((menu) => menu.label === "文件").map((menu) => ({
         ...menu,
-        items: menu.items.map((entry): MenuItem => ({
-          id: entry.id,
-          label: entry.label,
-          ...(entry.separatorBefore ? { separatorBefore: true } : {}),
-          // 默认禁用：working 会话未就绪时不允许打开新文档。
-          disabled: entry.id === "file.open" ? readonly : false,
-          onSelect: entry.id === "file.open" ? () => documents.onOpenFile?.() : () => documents.onCloseDocument?.()
-        }))
-      }))
-    : [];
+        items: menu.items.flatMap((entry):MenuItem[] => {
+          if(!["file.new","file.open","file.exportAs","file.close","file.closeAll","file.closeOthers"].includes(entry.id)) return menuItems([entry]);
+          return [{id:entry.id,label:<><span>{entry.label}</span>{entry.id==="file.closeAll"||entry.id==="file.closeOthers"?<kbd>{shortcutLabel(entry.id==="file.closeAll"?"Mod+Alt+W":"Mod+Alt+P")}</kbd>:null}</>,separatorBefore:entry.separatorBefore,disabled:readonly || entry.id==="file.closeOthers" && (documents?.list?.length??0)<2,
+            onSelect:()=>{if(entry.id==="file.new")documents?.onNewDocument?.();else if(entry.id==="file.exportAs")documents?.onExport?.();else if(entry.id==="file.open")documents?.onOpenFile?.();else if(entry.id==="file.closeAll")documents?.onCloseAllDocuments?.();else if(entry.id==="file.closeOthers")documents?.onCloseOtherDocuments?.();else documents?.onCloseDocument?.();}}];
+        })
+      })).filter(menu=>menu.items.length>0);
+  const typeItems=menuItems(editorMenusFor(documents).find(menu=>menu.label==="文字")?.items??[]);
   return (
-    <div className="photo-editor__menubar">
+    <MenuBar className="photo-editor__menubar">
       {fileMenus.map((menu) => (
         <DropdownMenu key={menu.label} align="start" label={menu.label}
           trigger={<Button size="sm" tone="ghost">{menu.label}<ChevronDownIcon size={12} /></Button>}
           items={menu.items} />
       ))}
-      {editorMenusFor(documents).filter((menu) => menu.label !== "文件").map(menu => ({...menu, items: menuItems(menu.items)})).filter(menu => menu.items.length).map(menu => (
+      {editorMenusFor(documents).filter((menu) => menu.label !== "文件" && menu.label!=="文字").map(menu => ({...menu, items: [...(menu.label==="编辑" && onSearch?[{id:"search",label:<>搜索命令…<kbd className="photo-editor__shortcut">{shortcutLabel("Mod+F")}</kbd></>,disabled:readonly,onSelect:onSearch}]:[]),...menuItems(menu.items),...(menu.label==="编辑" && onPreferences ? [{id:"preferences",label:"偏好设置…",separatorBefore:true,disabled:readonly,onSelect:onPreferences}]:[])]})).filter(menu => menu.items.length).map(menu => (
         <DropdownMenu key={menu.label} align="start" label={menu.label}
           trigger={<Button size="sm" tone="ghost">{menu.label}<ChevronDownIcon size={12} /></Button>}
           items={menu.items} />
       ))}
+      {textActions || typeItems.length?<DropdownMenu align="start" label="文字" trigger={<Button size="sm" tone="ghost">文字<ChevronDownIcon size={12}/></Button>} items={[...(textActions?[{id:"type.pasteLoremIpsum",label:"插入 Lorem Ipsum",disabled:!textActions.canInsertLorem,onSelect:textActions.insertLorem}]:[]),...typeItems]}/>:null}
       {viewItems.length ? <DropdownMenu align="start" label="视图" trigger={<Button size="sm" tone="ghost">视图<ChevronDownIcon size={12}/></Button>}
         items={viewItems} /> : null}
-      {display ? <DropdownMenu align="start" label="窗口" trigger={<Button size="sm" tone="ghost">窗口<ChevronDownIcon size={12}/></Button>}
+      {display || theme ? <DropdownMenu align="start" label="窗口" trigger={<Button size="sm" tone="ghost">窗口<ChevronDownIcon size={12}/></Button>}
         items={windowItems} /> : null}
+      {helpItems.length?<DropdownMenu align="start" label="帮助" trigger={<Button size="sm" tone="ghost">帮助<ChevronDownIcon size={12}/></Button>} items={helpItems}/>:null}
       <span className="photo-editor__divider" />
       <IconButton label="撤销" title={`撤销（${commandShortcutLabel("edit.undo")}）`} size="sm" disabled={readonly || !canUndo} onClick={() => onCommand("edit.undo")}><UndoIcon /></IconButton>
       <IconButton label="重做" title={`重做（${commandShortcutLabel("edit.redo")}）`} size="sm" disabled={readonly || !canRedo} onClick={() => onCommand("edit.redo")}><RedoIcon /></IconButton>
       <span className="photo-editor__status-gap" />
       <Button size="sm" tone="primary" disabled={!canSave} loading={saving} title={`应用到节点（${shortcutLabel("Mod+S")}）`} onClick={onApply}>应用到节点</Button>
-    </div>
+    </MenuBar>
   );
 }
 
-export function EditorToolRail({ tool, onTool, readonly, color, onColor, background = "#ffffff", onBackground, onColorAction, hidden = false, ellipse = false, onMarqueeKind }: {
+export function EditorToolRail({ tool, onTool, readonly, color, onColor, background = "#ffffff", onBackground, onColorAction,onEditColor, hidden = false, ellipse = false, line, onMarqueeKind, doubleColumn=false,onToggleColumns,onView,screenMode,onScreenMode,textOrientation,onTextOrientation,verticalTextDisabled,retouchTool="colorReplacement",onRetouchTool }: {
+  verticalTextDisabled?:boolean;
+  textOrientation?:"horizontal"|"vertical";onTextOrientation?:(mode:"horizontal"|"vertical")=>void;
+  retouchTool?:RetouchToolId;onRetouchTool?:(tool:RetouchToolId)=>void;
+  screenMode?:EditorScreenMode;onScreenMode?:(mode:EditorScreenMode)=>void;
+  doubleColumn?:boolean;onToggleColumns?:()=>void;onView?:(action:EditorViewAction)=>void;
   hidden?:boolean;
   ellipse?:boolean;
-  onMarqueeKind?:(ellipse:boolean)=>void;
+  line?:"row"|"column";
+  onMarqueeKind?:(ellipse:boolean,line?:"row"|"column")=>void;
   tool: PhotoEditorTool;
   onTool: (tool: PhotoEditorTool) => void;
   readonly: boolean;
@@ -131,29 +202,36 @@ export function EditorToolRail({ tool, onTool, readonly, color, onColor, backgro
   onColor: (color: string) => void;
   background?: string;
   onBackground?: (color:string) => void;
+  onEditColor?:(target:"foreground"|"background")=>void;
   onColorAction?: (action:"swap"|"reset") => void;
 }) {
   return (
-    <div className="photo-editor__toolrail" hidden={hidden}>
+    <div className="photo-editor__toolrail" data-columns={doubleColumn?2:1} hidden={hidden}>
+      {onToggleColumns?<Button size="sm" tone="ghost" title={doubleColumn?"切换为单列工具栏":"切换为双列工具栏"} disabled={readonly} onClick={onToggleColumns}><ChevronRightIcon size={14} style={{transform:doubleColumn?"rotate(180deg)":undefined}}/></Button>:null}
+      <div className="photo-editor__tool-list">
       {PHOTO_TOOLS.map(({ id, label, Icon }) => id==="marquee" ? (
-        <MarqueeToolGroup key={id} active={tool===id} ellipse={ellipse} disabled={readonly} hidden={hidden}
-          onChoose={value=>{onMarqueeKind?.(value);onTool("marquee");}}/>
-      ) : (
+        <MarqueeToolGroup key={id} active={tool===id} ellipse={ellipse} line={line} disabled={readonly} hidden={hidden}
+          onChoose={(value,line)=>{onMarqueeKind?.(value,line);onTool("marquee");}}/>
+      ) : id==="retouch" && onRetouchTool ? <RetouchToolGroup key={id} active={tool==="retouch"} tool={retouchTool} disabled={readonly} hidden={hidden}
+        onChoose={onRetouchTool}/> : id==="text" && onTextOrientation ? <TextToolGroup key={id} active={tool==="text"} orientation={textOrientation}
+        disabled={readonly} verticalDisabled={verticalTextDisabled} hidden={hidden} onChoose={onTextOrientation}/> : (
         <Tooltip key={id} content={TOOL_KEYS[id] ? `${label}（${TOOL_KEYS[id]}）` : label} side="right">
           <IconButton label={label} pressed={tool === id} disabled={readonly}
-            className="photo-editor__tool" onClick={() => onTool(id)}><Icon /></IconButton>
+            className="photo-editor__tool" onClick={() => onTool(id)} onDoubleClick={()=>{if(id==="pan")onView?.("fit");else if(id==="zoom")onView?.("actualSize");}}><Icon /></IconButton>
         </Tooltip>
       ))}
+      </div>
       <div className="photo-editor__colors">
       <label className="photo-editor__swatch" title="前景色">
-        <input type="color" value={color} disabled={readonly} onChange={(event) => onColor(event.currentTarget.value)} />
+        <input type="color" value={color} disabled={readonly} onClick={onEditColor?event=>{event.preventDefault();if(!readonly)onEditColor("foreground");}:undefined} onChange={(event) => onColor(event.currentTarget.value)} />
       </label>
       <label className="photo-editor__background-swatch" title="背景色">
-        <input type="color" value={background} disabled={readonly} onChange={(event) => onBackground?.(event.currentTarget.value)} />
+        <input type="color" value={background} disabled={readonly} onClick={onEditColor?event=>{event.preventDefault();if(!readonly)onEditColor("background");}:undefined} onChange={(event) => onBackground?.(event.currentTarget.value)} />
       </label>
       </div>
       <IconButton size="sm" label="交换前背景色（X）" disabled={readonly} onClick={() => onColorAction?.("swap")}><SwapColorsIcon size={14} /></IconButton>
       <Button size="sm" tone="ghost" title="恢复默认前背景色（D）" disabled={readonly} onClick={() => onColorAction?.("reset")}>默认</Button>
+      {onScreenMode?<ScreenModeButton mode={screenMode??"standard"} onChange={onScreenMode} disabled={readonly} hidden={hidden}/>:null}
     </div>
   );
 }

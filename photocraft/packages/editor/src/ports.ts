@@ -114,6 +114,37 @@ export type EditorFileDelivery = {
   bytes: Uint8Array;
 };
 
+/** 导出格式选项（I045）：与内核 `export_request.rs` 同名的字段。 */
+export type EditorExportOptions = {
+  format: "png"|"jpeg"|"webp"|"tiff"|"tga"|"bmp"|"gif"|"ico";
+  jpegQuality: number;
+  jpegChromaSubsampling: boolean;
+  pngCompression: "default"|"fast"|"best"|"none";
+  pngInterlaced: boolean;
+  webpLossless: boolean;
+  webpQuality: number;
+  tiffCompression: "none"|"lzw"|"deflate"|"packbits";
+  embedMetadata: boolean;
+  scale: number;
+};
+
+export const DEFAULT_EXPORT_OPTIONS: EditorExportOptions = {
+  format:"png", jpegQuality:90, jpegChromaSubsampling:true, pngCompression:"default", pngInterlaced:false,
+  webpLossless:false, webpQuality:85, tiffCompression:"lzw", embedMetadata:true, scale:1
+};
+
+/** 各格式的 MIME 与扩展名；只列固定编码器真实支持的类型。 */
+export const EXPORT_FORMATS: Readonly<Record<EditorExportOptions["format"], {label:string;extension:string;contentType:string}>> = {
+  png:{label:"PNG",extension:"png",contentType:"image/png"},
+  jpeg:{label:"JPEG",extension:"jpg",contentType:"image/jpeg"},
+  webp:{label:"WebP",extension:"webp",contentType:"image/webp"},
+  tiff:{label:"TIFF",extension:"tiff",contentType:"image/tiff"},
+  tga:{label:"Targa",extension:"tga",contentType:"image/x-tga"},
+  bmp:{label:"BMP",extension:"bmp",contentType:"image/bmp"},
+  gif:{label:"GIF",extension:"gif",contentType:"image/gif"},
+  ico:{label:"ICO",extension:"ico",contentType:"image/x-icon"}
+};
+
 export type EditorFileDeliveryResult =
   | { ok: true; status: "written" | "download-started" }
   | { ok: false; status: "cancelled" | "failed"; message?: string };

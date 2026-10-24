@@ -17,7 +17,7 @@
 import { IMAGE_PROJECT_LIMITS } from "@woohaa3/photocraft-protocol";
 
 /** 首期画布工具。 */
-export type EditorToolId = "none" | "pan" | "move" | "marquee" | "lasso" | "brush" | "eraser" | "text";
+export type EditorToolId = "none" | "pan" | "zoom" | "bucket" | "pencil" | "eyedropper" | "move" | "marquee" | "lasso" | "magicWand" | "brush" | "eraser" | "retouch" | "text";
 
 /** 选区运算方式（与内核 `mode` 取值一致）。 */
 export type SelectionMode = "replace" | "add" | "subtract" | "intersect";
@@ -27,6 +27,21 @@ export type PixelRect = { x: number; y: number; width: number; height: number };
 
 /** 文档坐标点。 */
 export type DocumentPoint = { x: number; y: number; pressure?: number };
+
+/** Shift 移动吸附到四/八方向，越过分界线 8° 后才切换，避免对角附近抖动。 */
+export function constrainMoveOffset(offset:DocumentPoint,previous:DocumentPoint|null,directions:4|8):DocumentPoint {
+  if(!Number.isFinite(offset.x) || !Number.isFinite(offset.y) || Math.hypot(offset.x,offset.y)===0) return offset;
+  const step=Math.PI*2/directions,angle=Math.atan2(offset.y,offset.x);
+  let direction=Math.round(angle/step);
+  if(previous && Math.hypot(previous.x,previous.y)>0) {
+    const last=Math.round(Math.atan2(previous.y,previous.x)/step);
+    const difference=Math.abs(Math.atan2(Math.sin(angle-last*step),Math.cos(angle-last*step)));
+    if(difference<step/2+8*Math.PI/180) direction=last;
+  }
+  const x=Math.cos(direction*step),y=Math.sin(direction*step),distance=Math.max(0,offset.x*x+offset.y*y);
+  const clean=(value:number)=>Math.abs(value)<1e-9 ? 0 : value;
+  return {x:clean(distance*x),y:clean(distance*y)};
+}
 
 /** 对掩码边界做奇偶射线判定，支持不相连选区和减选形成的孔洞。 */
 export function pointInSelection(point: DocumentPoint, segments: readonly (readonly number[])[]): boolean {
@@ -42,6 +57,11 @@ export function pointInSelection(point: DocumentPoint, segments: readonly (reado
 
 /** 笔刷设置（首期范围见 notes/scope.md）。 */
 export type BrushSettings = {
+  angle?:number;
+  autoErase?:boolean;
+  eraserMode?:"brush"|"pencil"|"block";
+  /** 会话级画笔混合模式，不是图层混合模式。 */
+  mode?:string;
   /** 笔头尺寸（源像素），1–512。 */
   size: number;
   /** 硬度 0–1。 */
@@ -135,7 +155,7 @@ export function screenToDocument(clientX: number, clientY: number, viewport: Can
 /** `select.rect` 参数。 */
 export function buildRectSelection(
   rect: PixelRect,
-  options: { mode?: SelectionMode; ellipse?: boolean; feather?: number } = {}
+  options: { mode?: SelectionMode; ellipse?: boolean; line?: "row"|"column"; feather?: number } = {}
 ): Record<string, unknown> {
   return {
     x: roundPixel(rect.x),
@@ -143,7 +163,8 @@ export function buildRectSelection(
     width: Math.max(0, roundPixel(rect.width)),
     height: Math.max(0, roundPixel(rect.height)),
     mode: options.mode ?? "replace",
-    ellipse: options.ellipse ?? false,
+    ellipse: options.line ? false : options.ellipse ?? false,
+    ...(options.line ? {line:options.line} : {}),
     antiAlias: true,
     feather: clampFeather(options.feather ?? 0)
   };
@@ -152,6 +173,72 @@ export function buildRectSelection(
 /** `select.modify.feather` 参数。 */
 export function buildFeather(radius: number): Record<string, unknown> {
   return { radius: clampFeather(radius) };
+}
+
+/** 选框维护命令的公开半径范围；与固定引擎注册表一致。 */
+export const SELECTION_MODIFY_RANGES = {
+  "select.modify.border": { min: 1, max: 200, label: "边框宽度" },
+  "select.modify.smooth": { min: 1, max: 500, label: "平滑半径" },
+  "select.modify.expand": { min: 1, max: 500, label: "扩展量" },
+  "select.modify.contract": { min: 1, max: 500, label: "收缩量" }
+} as const;
+export type SelectionModifyId = keyof typeof SELECTION_MODIFY_RANGES;
+
+export function clampSelectionRadius(id: SelectionModifyId, radius: number): number {
+  const range = SELECTION_MODIFY_RANGES[id];
+  if (!Number.isFinite(radius)) return range.min;
+  return Math.round(Math.min(range.max, Math.max(range.min, radius)));
+}
+
+/** `select.modify.border|smooth|expand|contract` 参数。 */
+export function buildSelectionModify(id: SelectionModifyId, radius: number): Record<string, unknown> {
+  return { radius: clampSelectionRadius(id, radius) };
+}
+
+/** 魔棒设置属于本机工具记忆；参数边界与原生注册表一致。 */
+export type MagicWandSettings = { tolerance: number; antialias: boolean; contiguous: boolean; sampleAllLayers: boolean };
+export const DEFAULT_MAGIC_WAND: MagicWandSettings = { tolerance: 32, antialias: true, contiguous: true, sampleAllLayers: false };
+export function buildMagicWand(point: DocumentPoint, settings: MagicWandSettings, mode: SelectionMode): Record<string, unknown> {
+  return {
+    x: roundPixel(point.x), y: roundPixel(point.y),
+    tolerance: Math.round(clamp(settings.tolerance, 0, 255)),
+    antiAlias: settings.antialias, contiguous: settings.contiguous,
+    sampleAllLayers: settings.sampleAllLayers, mode
+  };
+}
+
+/** 颜色范围预置；`sampledColors` 使用取样颜色，色调预设使用固定明度范围。 */
+export const COLOR_RANGE_SELECTIONS = [
+  ["sampledColors", "取样颜色"], ["reds", "红色"], ["yellows", "黄色"], ["greens", "绿色"],
+  ["cyans", "青色"], ["blues", "蓝色"], ["magentas", "洋红"], ["highlights", "高光"],
+  ["midtones", "中间调"], ["shadows", "阴影"], ["skinTones", "肤色"], ["outOfGamut", "溢色"]
+] as const;
+export type ColorRangeSelection = (typeof COLOR_RANGE_SELECTIONS)[number][0];
+export type ColorRangeSettings = {
+  select: ColorRangeSelection; color: string; fuzziness: number;
+  localized: boolean; range: number; invert: boolean; sampleAllLayers: boolean; mode: SelectionMode;
+  /**
+   * 画布取色取样点（I269）：`points` 加到取样集合、`subtractPoints` 从集合里减去。
+   * 位置是文档像素；由画布点击收集，命令只读取样并生成选区。
+   */
+  points?: readonly [number, number][];
+  subtractPoints?: readonly [number, number][];
+};
+export const DEFAULT_COLOR_RANGE: ColorRangeSettings = { select: "sampledColors", color: "#ff0000", fuzziness: 40, localized: false, range: 100, invert: false, sampleAllLayers: true, mode: "replace" };
+
+/** `select.colorRange` 参数：取样颜色来自显式颜色字段，不读取 DOM 或隐藏状态。 */
+export function buildColorRange(settings: ColorRangeSettings): Record<string, unknown> {
+  const tonal = !["sampledColors", "outOfGamut"].includes(settings.select);
+  return {
+    select: settings.select,
+    ...(settings.select === "sampledColors" ? { color: settings.color, fuzziness: Math.round(clamp(settings.fuzziness, 0, 200)) } : {}),
+    ...(tonal ? { fuzziness: Math.round(clamp(settings.fuzziness, 0, 100)) } : {}),
+    ...(settings.select === "sampledColors" && settings.localized ? { localized: true, range: Math.round(clamp(settings.range, 0, 100)) } : {}),
+    // 画布取样点只对「取样颜色」有意义；空数组不下发，避免把「没点过」当成显式空集合。
+    ...(settings.select === "sampledColors" && settings.points?.length ? { points: settings.points.map(point => [roundPixel(point[0]), roundPixel(point[1])]) } : {}),
+    ...(settings.select === "sampledColors" && settings.subtractPoints?.length ? { subtractPoints: settings.subtractPoints.map(point => [roundPixel(point[0]), roundPixel(point[1])]) } : {}),
+    invert: settings.invert, sampleAllLayers: settings.sampleAllLayers, mode: settings.mode
+  };
 }
 
 /** 套索至少需要 3 个点；不足时返回 `null`（调用方不提交半截手势）。 */
@@ -168,27 +255,32 @@ export function buildLasso(
 }
 
 /** 开始与增量采样共用编码，保留笔压。 */
-export function strokePoints(points: readonly DocumentPoint[]): number[][] {
-  return points.map((point) => point.pressure === undefined ? [roundPixel(point.x), roundPixel(point.y)] : [roundPixel(point.x), roundPixel(point.y), clamp(point.pressure, 0, 1)]);
+export function strokePoints(points: readonly DocumentPoint[], preserveCoordinates=false): number[][] {
+  const xy=(v:number)=>preserveCoordinates?v:roundPixel(v);
+  return points.map((point) => point.pressure === undefined ? [xy(point.x), xy(point.y)] : [xy(point.x), xy(point.y), clamp(point.pressure, 0, 1)]);
 }
 
 /** `paint.stroke` 参数：整笔保持同一组设置。 */
 export function buildStroke(
   points: readonly DocumentPoint[],
   brush: BrushSettings,
-  options: { erase?: boolean; zoom?: number } = {}
+  options: { erase?: boolean; zoom?: number;pencil?:boolean;backgroundColor?:string } = {}
 ): Record<string, unknown> | null {
   if (points.length === 0) return null;
+  const pencil=options.pencil || options.erase && brush.eraserMode!==undefined && brush.eraserMode!=="brush";
   return {
-    points: strokePoints(points),
+    ...(pencil?{strokeCommand:"paint.pencil",autoErase:!options.erase && !!brush.autoErase,...(brush.eraserMode==="block" && options.erase?{block:true}:{})}:{}),
+    ...(options.backgroundColor?{backgroundColor:options.backgroundColor}:{}),
+    ...(brush.angle===undefined?{}:{brush:{angle:brush.angle}}),
+    points: strokePoints(points,!!pencil),
     size: clampBrushSize(brush.size),
-    hardness: clamp(brush.hardness, 0, 1),
+    ...(pencil?{}:{hardness:clamp(brush.hardness,0,1)}),
     opacity: clamp(brush.opacity, 0, 1),
-    flow: clamp(brush.flow, 0, 1),
+    ...(pencil?{}:{flow:clamp(brush.flow,0,1)}),
     spacing: 0.25,
     smoothing: clamp(brush.smoothing, 0, 1),
     color: brush.color,
-    mode: "normal",
+    mode: brush.mode ?? "normal",
     erase: options.erase ?? false,
     zoom: options.zoom && options.zoom > 0 ? options.zoom : 1,
     target: brush.target
@@ -205,8 +297,10 @@ export function buildTextCreate(input: {
   align: "left" | "center" | "right";
   bold?: boolean;
   font?: "Noto Sans SC" | "Inter";
+  orientation?:"horizontal"|"vertical";
 }): Record<string, unknown> {
   return {
+    ...(input.orientation?{orientation:input.orientation}:{}),
     x: roundPixel(input.x),
     y: roundPixel(input.y),
     text: input.text,

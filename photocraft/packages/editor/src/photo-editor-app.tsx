@@ -1,3 +1,47 @@
+import {LayerGeometryControls} from "./layer-geometry-controls.js";
+import {NavigatorPanel} from "./navigator-panel.js";
+import {clipboardVisible,type NavigatorFrame,type NavigatorAction} from "./navigator-geometry.js";
+import {HistogramPanel} from "./histogram-panel.js";
+import type {PixelGridRegion} from "./pixel-grid-data.js";
+import {InfoPanel} from "./info-panel.js";
+import type {InfoRequest} from "./info-readout.js";
+import {StickyModifierContext,NO_STICKY_MODIFIERS,ModifierKeysPanel} from "./modifier-keys.js";
+import {useRasterizePrompt} from "./rasterize-prompt.js";
+import {TextContextMenu} from "./text-context-menu.js";
+import {useTextClipboard} from "./text-clipboard.js";
+import {useColorPicker} from "./color-picker.js";
+import {useMissingFonts} from "./missing-fonts.js";
+import {LOREM_IPSUM} from "./text-placeholder.js";
+import {useToolMemory} from "./tool-memory.js";
+import {decodeRememberedTool,decodeMoveTarget,decodeSelectionMode,decodeFeather,decodeFalse,decodeTrue,decodeMarqueeLine,decodeMarqueeConstraint,DEFAULT_CONSTRAINT,decodeBucketMemory,decodeSampleMemory,decodeMagicWandMemory,decodeColorRangeMemory,decodeRetouchTool,decodeRetouchMemory} from "./tool-option-memory.js";
+import {useToolReset,ToolResetMenu} from "./tool-reset.js";
+import {EDITOR_THEMES,EditorThemeRoot,useEditorTheme,themedEditorDialogs} from "./editor-theme.js";
+import {DocumentStatus,ZoomField} from "./editor-status-bar.js";
+import {EyedropperOptions,DEFAULT_SAMPLE} from "./eyedropper-tool.js";
+import {usePaintingSymmetry} from "./painting-symmetry.js";
+import {BucketOptions,DEFAULT_BUCKET,bucketParams,type BucketSettings} from "./bucket-tool.js";
+import {useCommandSearch} from "./command-search.js";
+import {useFieldMenuShortcuts} from "./use-field-menu-shortcuts.js";
+import {stepBrushSize,stepBrushHardness,normalizeBrushAngle} from "./brush-resize.js";
+import {SpringTools} from "./spring-tools.js";
+import {useEditorPreferences} from "./editor-preferences.js";
+import {useColorRangeDialog} from "./color-range-dialog.js";
+import {useFadeDialog} from "./fade-dialog.js";
+import {useAdjustmentDialog,type AdjustmentKind} from "./adjustment-dialog.js";
+import {useFileInfoDialog} from "./file-info-dialog.js";
+import {useColorModeDialog} from "./color-mode-dialog.js";
+import {useNewDocumentDialog} from "./new-document-dialog.js";
+import {useExportDialog} from "./export-dialog.js";
+import {useConditionalModeDialog} from "./conditional-mode-dialog.js";
+import {useFilterDialog} from "./filter-dialog.js";
+import type {GuidePreferences} from "./guides.js";
+import {MagicWandOptions} from "./magic-wand-options.js";
+import {RetouchOptions} from "./retouch-options.js";
+import {TextStyleControls} from "./text-style-controls.js";
+import {BrushSettingsPanel,DEFAULT_BRUSH_DYNAMICS,brushDynamicsPatch,decodeBrushDynamics,type BrushDynamics} from "./brush-settings-panel.js";
+import {CloneSourcePanel} from "./clone-source-panel.js";
+import {BrushPresetPanel} from "./brush-preset-panel.js";
+import {buildRetouch,DEFAULT_RETOUCH,retouchSpec as RETOUCH_SPEC,type RetouchSettings,type RetouchToolId} from "./retouch-tools.js";
 /**
  * PhotoCraft 图像编辑器界面（React）
  * （change: 2026-10-16-integrate-photocraft-image-editing，任务 3.2–3.6 / design D1/D2/D3）。
@@ -16,10 +60,22 @@
  * - 整图旋转/翻转 → `image.imageRotation.*`；图层旋转/翻转 → `edit.transform.*`。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import {cycleBlend} from "./layer-blends.js";
+import {cyclePaintMode} from "./paint-modes.js";
 import {LayerStyleEditor} from "./layer-style-editor.js";
+import {useLayerVisibilityEditing} from "./use-layer-visibility-editing.js";
 import { useLayerPropertiesEditing } from "./use-layer-properties-editing.js";
+import {LayerLayoutControls} from "./layer-layout-controls.js";
+import {useFillDialog} from "./fill-dialog.js";
+import {useStrokeDialog} from "./stroke-dialog.js";
+import {useSpellingDialog} from "./spelling-dialog.js";
+import {useFindReplaceDialog} from "./find-replace-dialog.js";
+import {useDefinePatternDialog} from "./define-pattern-dialog.js";
+import {useScriptImport} from "./script-import.js";
+import {useImageGeometryDialogs} from "./image-geometry-dialogs.js";
+import {useLayerActionDialogs} from "./layer-action-dialogs.js";
 import { useNewLayerDialog } from "./new-layer-dialog.js";
-import {useEditorDisplay,type EditorDisplayControls,type EditorDisplayAction} from "./editor-display.js";
+import {editorChromeVisible,EDITOR_SCREEN_MODES,useEditorDisplay,type EditorScreenMode,type EditorDisplayControls,type EditorDisplayAction} from "./editor-display.js";
 import { useAdjustmentEditing } from "./use-adjustment-editing.js";
 import {EditorSidebar} from "./editor-sidebar.js";
 import {DEFAULT_PANEL_LAYOUT,type EditorPanelLayout} from "./editor-panel-layout.js";
@@ -31,7 +87,7 @@ import { useTextEditing } from "./use-text-editing.js";
 import { TextInputOverlay } from "./text-input-overlay.js";
 import { LiveStrokePreview } from "./live-stroke-preview.js";
 import {SourceDetailPreview,type DetailFrame} from "./source-detail-preview.js";
-import { usePaintTools } from "./paint-tool-state.js";
+import { PaintPercentInput, usePaintTools } from "./paint-tool-state.js";
 import { TransformSession } from "./transform-session.js";
 import { IDENTITY_MATRIX, frameCenter, type TransformPoint } from "./transform-layer.js";
 import { Button } from "./ui/Button.js";
@@ -47,15 +103,16 @@ import {
   buildLasso,
   buildRectSelection,
   buildStroke,
-  clampBrushSize,
+  buildMagicWand,
+  DEFAULT_MAGIC_WAND,
+  DEFAULT_COLOR_RANGE,
   clampFeather,
-  pointInSelection,
   type DocumentPoint,
   type EditorToolId,
   type SelectionMode
 } from "./photo-editor-tools.js";
 import type { EditorPreview,EditorPreviewRegion } from "./editor-wasm.js";
-import { editorInputConsumesKeys, FILL_SHORTCUTS, isEditorMac, resolveEditorShortcut, type EditorShortcut } from "./photo-editor-shortcuts.js";
+import { editorInputConsumesKeys, FILL_SHORTCUTS, isEditorMac, nudgeTarget, resolveEditorShortcut, type EditorShortcut } from "./photo-editor-shortcuts.js";
 import "./photo-editor.css";
 
 export type PhotoEditorAppProps = {
@@ -86,8 +143,13 @@ export type PhotoEditorAppProps = {
  *
  * 预览在每次修订变化后重新取一次；`previewSide` 固定，避免每帧调用内核。
  */
-export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPreview, renderCanvasBackground, readonly = false, onApply, closing = false, dialogs, display: controlledDisplay, documents }: PhotoEditorAppProps) {
-  const localDisplay=useEditorDisplay();
+export function PhotoEditorApp(props:PhotoEditorAppProps) {
+  const dialogs=useMemo(()=>props.dialogs?themedEditorDialogs(props.dialogs):undefined,[props.dialogs]);
+  return <EditorThemeRoot><PhotoEditorContents {...props} dialogs={dialogs}/></EditorThemeRoot>;
+}
+function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPreview, renderCanvasBackground, readonly = false, onApply, closing = false, dialogs, display: controlledDisplay, documents }: PhotoEditorAppProps) {
+  const theme=useEditorTheme();
+  const localDisplay=useEditorDisplay(undefined,undefined,!controlledDisplay);
   const display=controlledDisplay??localDisplay;
   const snapshot = useSyncExternalStore(
     useCallback((listener) => controller.subscribe(listener), [controller]),
@@ -95,9 +157,19 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
   );
   const editorRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<PhotoCanvasHandle>(null);
+  const [infoPoint,setInfoPoint]=useState<DocumentPoint|null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
+  const temporaryErase=useRef(false);
+
+  const [sampledColor,setSampledColor]=useState<string|null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [sampleSettings,setSampleSettings]=useToolMemory("sample",DEFAULT_SAMPLE,decodeSampleMemory,setMessage);
+  const [magicWand,setMagicWand]=useToolMemory("selection.magicWand",DEFAULT_MAGIC_WAND,decodeMagicWandMemory,setMessage);
+  const [retouchTool,setRetouchTool]=useToolMemory<RetouchToolId>("retouch.tool","colorReplacement",decodeRetouchTool,setMessage);
+  const [retouch,setRetouch]=useToolMemory<RetouchSettings>("retouch",DEFAULT_RETOUCH,decodeRetouchMemory,setMessage);
+  const retouchPath=useRef<DocumentPoint[]|null>(null);
+  const [retouchPatterns,setRetouchPatterns]=useState<{id:string;name:string;width:number;height:number}[]>([]);
+  const [colorRange,setColorRange]=useToolMemory("selection.colorRange",DEFAULT_COLOR_RANGE,decodeColorRangeMemory,setMessage);  const [busy, setBusy] = useState(false);
   const [detailVersion,setDetailVersion]=useState(0);
   const detailRegions=useRef<EditorPreviewRegion[]|undefined>();
   const localDetailUpdate=useRef(false);
@@ -107,29 +179,73 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
   useEffect(()=>()=>details.dispose(),[details]);
 
   // 画布工具与其参数（纯界面状态，不复制文档模型）。
-  const [tool, setTool] = useState<PhotoEditorTool>("marquee");
-  const [textToolProperties, setTextToolProperties] = useState(false);
-  const [autoSelect, setAutoSelect] = useState(true);
+  const [rememberedTool,setRememberedTool]=useToolMemory("current",decodeRememberedTool(null),decodeRememberedTool,setMessage);
+  const [tool, setTool] = useState<PhotoEditorTool>(rememberedTool);
+  const [,refreshToolMemory]=useState(0);
+  const [textToolProperties, setTextToolProperties] = useState(rememberedTool==="text");
+  const [layerEditRequest,setLayerEditRequest]=useState<{id:number;kind:"content"|"style"|"mask"}|null>(null);
+  const [zoomScrubby,setZoomScrubby]=useToolMemory("zoom.scrubby",true,decodeTrue,setMessage);
+  const [autoSelect, setAutoSelect] = useToolMemory("move.autoSelect",true,decodeTrue,setMessage);
+  const [autoSelectTarget,setAutoSelectTarget]=useToolMemory("move.target",decodeMoveTarget(null),decodeMoveTarget,setMessage);
+  const layerDigits=useRef(new PaintPercentInput());
   const nudge = useRef<{dx: number; dy: number} | null>(null);
   const previousTool = useRef<PhotoEditorTool>("marquee");
+  const springTools=useRef(new SpringTools<PhotoEditorTool>());
+  useEffect(()=>{setRememberedTool(springTools.current.persistentTool(tool==="transform"?previousTool.current:tool));});
+  const [boundaryMoveActive,setBoundaryMoveActive]=useState(false);
   const [selectionTransform, setSelectionTransform] = useState(false);
   const [transformMatrix, setTransformMatrix] = useState<readonly number[]>(IDENTITY_MATRIX);
   const [transformLinked, setTransformLinked] = useState(true);
   const [transformReference, setTransformReference] = useState<TransformPoint>();
   const [transformValid, setTransformValid] = useState(true);
-  const [selectionMode, setSelectionMode] = useState<SelectionMode>("replace");
-  const [ellipse, setEllipse] = useState(false);
-  const [feather, setFeather] = useState(0);
-  const {brush:paintBrush,setBrush,colors,setColor,setBackground,colorAction,percent,resetDigits} = usePaintTools(tool,snapshot.view.document?.editTarget);
+  const [selectionMode, setSelectionMode] = useToolMemory<SelectionMode>("selection.mode","replace",decodeSelectionMode,setMessage);
+  const [ellipse, setEllipse] = useToolMemory("selection.ellipse",false,decodeFalse,setMessage);
+  const [marqueeLine,setMarqueeLine]=useToolMemory("selection.line",undefined as "row"|"column"|undefined,decodeMarqueeLine,setMessage);
+  const [marqueeConstraint,setMarqueeConstraint]=useToolMemory("selection.constraint",DEFAULT_CONSTRAINT,decodeMarqueeConstraint,setMessage);
+  const marqueeConstraintValid=marqueeConstraint.mode==="normal" || [marqueeConstraint.width,marqueeConstraint.height].every(value=>value.trim()!=="" && Number.isFinite(Number(value)) && Number(value)>=1 && Number(value)<=16384 && (marqueeConstraint.mode!=="size" || Number.isInteger(Number(value))));
+  const [bucket,setBucket]=useToolMemory<BucketSettings>("bucket",DEFAULT_BUCKET,decodeBucketMemory,setMessage);
+  const [feather, setFeather] = useToolMemory("selection.feather",0,decodeFeather,setMessage);
+  const {brush:paintBrush,setBrush,resetPaint,colors,pixelBackground,setColor,setBackground,colorAction,percent,resetDigits} = usePaintTools(tool,snapshot.view.document?.editTarget,setMessage);
+  // 画笔动态（I132）：面板读取 `brush.get`，写入 `tools.setBrush`；都是会话工具状态。
+  const [brushDynamics,setBrushDynamics]=useState<BrushDynamics>(DEFAULT_BRUSH_DYNAMICS);
+  useEffect(()=>{
+    if(tool!=="brush"&&tool!=="pencil"&&tool!=="eraser")return;
+    // 宿主/测试替身可能只实现部分接口：缺少只读画笔查询时保留默认面板值。
+    if(typeof controller.currentBrush!=="function")return;
+    const result=controller.currentBrush();
+    if(result.ok)setBrushDynamics(decodeBrushDynamics(result.value));
+  },[controller,tool]);
+
+  const changeBrushDynamics=(patch:Partial<BrushDynamics>)=>{
+    const next={...brushDynamics,...patch};setBrushDynamics(next);
+    if(typeof controller.setBrushDynamics!=="function")return;
+    const result=controller.setBrushDynamics(brushDynamicsPatch(next));
+    if(!result.ok)setMessage(result.message);
+  };
+
   const [altHeld,setAltHeld] = useState(false);
   const strokeAnchor = useRef<{point:DocumentPoint;key:string} | null>(null);
+  const [strokePreviewAnchor,setStrokePreviewAnchor]=useState<{point:DocumentPoint;key:string}|null>(null);
   const strokeEnd = useRef<{point:DocumentPoint;key:string} | null>(null);
 
   const view = snapshot.view;
   const documentView = view.document;
+  useEffect(()=>{const result=controller.patternLibrary();if(result.ok)setRetouchPatterns([...result.value.presets,...(result.value.patternPresets??[])]);},[controller,documentView?.revision]);
   const brush={...paintBrush,target:documentView?.editTarget ?? "pixels"};
   const activeLayerId = documentView?.activeLayerId ?? null;
-  useEffect(() => { strokeAnchor.current = null; strokeEnd.current = null; resetDigits(); }, [activeLayerId,tool,brush.target,resetDigits]);
+  const readPixelGrid=useCallback((region:PixelGridRegion)=>controller.pixelGrid?.(region)??{ok:false as const,code:"unavailable",message:"像素网格暂不可用"},[controller]);
+  const [navigatorFrame,setNavigatorFrame]=useState<{key:string;frame:NavigatorFrame}|null>(null);
+  const moveBoxOwner=useRef<{key:string|undefined;revision:number;target:"layer"|"group"}|null>(null);
+  const navigatorDocumentKey=documentView?.documentKey??String(snapshot.view.sessionActiveIndex);
+  const onNavigatorFrame=useCallback((frame:NavigatorFrame)=>setNavigatorFrame({key:navigatorDocumentKey,frame}),[navigatorDocumentKey]);
+  const readNavigator=useCallback(()=>controller.navigatorPreview?.()??{ok:false as const,code:"unavailable",message:"导航预览暂不可用"},[controller]);
+  const navigatorNavigate=useCallback((action:NavigatorAction)=>canvasRef.current?.navigator?.(action),[]);
+  const navigatorZoom=useCallback((zoom:number)=>canvasRef.current?.zoomTo(zoom),[]);
+  const readHistogram=useCallback(()=>controller.histogram?.()??{ok:false as const,code:"unavailable",message:"直方图暂不可用"},[controller]);
+  const readInfo=useCallback((params:InfoRequest)=>controller.infoReadout?.(params)??{ok:false as const,code:"unavailable",message:"信息暂不可用"},[controller]);
+  const readFontSample=useCallback((family:string,size:number,scale:number)=>controller.fontPreview?.(family,size,scale)??{ok:false as const,code:"unavailable",message:"字体样例尚不可用"},[controller]);
+  useEffect(() => {resetDigits();layerDigits.current.reset();},[activeLayerId,tool,brush.target,snapshot.view.sessionActiveIndex,resetDigits]);
+  useEffect(()=>{strokeAnchor.current=null;strokeEnd.current=null;setStrokePreviewAnchor(null);},[controller]);
   const activeLayer = documentView?.layers.find((layer) => layer.id === activeLayerId);
   useEffect(() => {
     if (activeLayer?.textStyle) textEditing.setPreference(activeLayer.textStyle);
@@ -159,8 +275,9 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     setDetailVersion(value=>value+1);
   },[controller,details,onDetailPreview,refreshPreview]);
 
-  const textEditing=useTextEditing(controller,refreshPreview,setMessage);
+  const textEditing=useTextEditing(controller,refreshPreview,setMessage,()=>preferences.value.fillNewTextWithPlaceholder,()=>colors.foreground);
   const adjustmentEditing=useAdjustmentEditing(controller,activeLayer,refreshPreview,setMessage,readonly || closing || busy || canvasView.transitioning || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing");
+  const visibilityEditing=useLayerVisibilityEditing(controller,refreshPreview,setMessage,readonly || closing || busy || canvasView.transitioning || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing");
   const propertiesEditing=useLayerPropertiesEditing(controller,activeLayer,refreshPreview,setMessage,readonly || closing || busy || canvasView.transitioning || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing");
   const {brightness,contrast,hue,saturation,lightness,points:curvePoints}=adjustmentEditing.values;
   const text=textEditing.style;
@@ -177,6 +294,16 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     readonly || closing || busy || canvasView.transitioning || !documentView ||
     snapshot.state.phase === "saving" || snapshot.state.phase === "freezing" ||
     textEditing.active || adjustmentEditing.active || propertiesEditing.active || tool === "transform");
+
+  const layerDialogs=useLayerActionDialogs(dialogs,controller,
+    readonly || closing || busy || canvasView.transitioning || !documentView ||
+    snapshot.state.phase === "saving" || snapshot.state.phase === "freezing" ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage);
+
+  const geometryDialogs=useImageGeometryDialogs(dialogs,controller,
+    readonly || closing || busy || canvasView.transitioning || !documentView ||
+    snapshot.state.phase === "saving" || snapshot.state.phase === "freezing" ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage,colors);
 
   // 修订变化 → 重新取预览（只读也一样，历史预览需要看到对应画面）。
   useEffect(() => {
@@ -195,6 +322,47 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
   },[details,onDetailPreview,refreshPreview,detailVersion,documentView?.width,documentView?.height,canvasView.contentSize?.width,canvasView.contentSize?.height,
     canvasView.viewport.x,canvasView.viewport.y,canvasView.viewport.zoom,canvasView.transitioning,readonly,closing]);
 
+  const definePattern=useDefinePatternDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform" || !propertiesEditing.patternsReady,
+    propertiesEditing.definePattern,setMessage);
+  const fillDialog=useFillDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform" || !propertiesEditing.patternsReady,colors,refreshPreview,setMessage);
+  const findReplace=useFindReplaceDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage);
+  const spelling=useSpellingDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage);
+  const edgeStroke=useStrokeDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",colors.foreground,refreshPreview,setMessage);
+  const scriptImport=useScriptImport(controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform" || newLayer.modalActive,
+    ()=>!!canvasRef.current?.hasGesture(),refreshPreview,setMessage);
+  const colorRangeDialog=useColorRangeDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage,setColorRange);
+  const fadeDialog=useFadeDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage);
+  const adjustmentDialog=useAdjustmentDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage);
+  const fileInfoDialog=useFileInfoDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage);
+  const colorModeDialog=useColorModeDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage);
+  // 滤镜（I035）：无参滤镜直接分派，有参滤镜打开表单。
+  const filterDialog=useFilterDialog(dialogs,controller,()=>readonly || closing || busy || canvasView.transitioning || !documentView
+    || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform"
+    || !!canvasRef.current?.hasGesture() || !!nudge.current,refreshPreview);
+  // 条件模式转换（I291）：只把表单编译成固定引擎的条件命令。
+  const conditionalModeDialog=useConditionalModeDialog(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView
+    || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform",refreshPreview,setMessage);
+  // 导出（I045）：只有宿主提供文件交付端口时才出现。
+  const exportDialog=useExportDialog(dialogs,controller,()=>readonly || closing || busy || canvasView.transitioning || !documentView
+    || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform"
+    || !!canvasRef.current?.hasGesture() || !!nudge.current);
+  useEffect(()=>{const unregister=exportDialog.register();return()=>unregister();},[exportDialog.register]);
+  // 新建文档（I064）：命令可用且没有活动手势/草稿时才打开。
+  const newDocumentDialog=useNewDocumentDialog(dialogs,controller,()=>readonly || closing || busy || canvasView.transitioning
+    || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool === "transform"
+    || !!canvasRef.current?.hasGesture() || !!nudge.current);
+
   const run = useCallback(
     (id: string, params: unknown = null) => {
       if (propertiesEditing.active) {setMessage("请先确认或取消图层属性编辑");return false;}
@@ -204,7 +372,30 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
         setMessage("只读预览不允许修改");
         return false;
       }
+      if(id==="edit.definePattern" && params===null){if(canvasRef.current?.hasGesture())return false;return definePattern.open();}
+      if(id==="edit.fillHistory" && (canvasRef.current?.hasGesture() || nudge.current))return false;
+      if(id==="edit.fill" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return fillDialog.open();}
+      if(id==="edit.stroke" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return edgeStroke.open();}
+      if(id==="image.colorMode" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return colorModeDialog.open();}
+      if(id==="file.automate.conditionalModeChange" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return conditionalModeDialog.open();}
+      if(id.startsWith("filter.") && id!=="filter.lastFilter" && params===null){
+        if(canvasRef.current?.hasGesture() || nudge.current)return false;
+        const mode=filterDialog.open(id);
+        if(mode==="direct")return run(id,{});
+        return mode==="dialog";
+      }
+      if(id==="file.fileInfo") {if(canvasRef.current?.hasGesture() || nudge.current)return false;return fileInfoDialog.open();}
+      if(id==="file.new" && params===null){if(!newDocumentDialog.available)return false;return newDocumentDialog.open();}
+      if(id==="edit.fade" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return fadeDialog.open(documentView?.history.at(-1)??"最近一步");}
+      const destructive=id.startsWith("image.adjustments.") && !["image.adjustments.brightnessContrast","image.adjustments.hueSaturation","image.adjustments.curves"].includes(id) ? id.slice("image.adjustments.".length) : null;
+      if(destructive && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return adjustmentDialog.open(destructive as AdjustmentKind);}
+      if(id==="edit.checkSpelling" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return spelling.open();}
+      if(id==="edit.findAndReplaceText" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return findReplace.open();}
+      if(id==="select.colorRange" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return colorRangeDialog.open(colorRange);}
+      if(id==="file.scripts.browse" && params===null)return scriptImport.open();
+      if((id==="edit.pasteSpecial.pasteInto" || id==="edit.pasteSpecial.pasteOutside") && (canvasRef.current?.hasGesture() || nudge.current))return false;
       canvasRef.current?.cancelGesture();
+      if(id==="layer.lockLayers" && params===null) return layerDialogs.locks();
       if (id === "layer.new.layer" && params === null) {
         const command = controller.snapshot().commands.get(id);
         if (!command?.allowed || !command.enabled) return false;
@@ -212,25 +403,37 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
         setMessage(error);
         return error === null;
       }
+      if(documents?.purge && (id==="edit.purge.clipboard" || id==="edit.purge.histories" || id==="edit.purge.all")) {
+        const result=documents.purge.execute(id);setMessage(result.ok?null:result.message??"清理失败");return result.ok;
+      }
+      if(params===null && id==="image.trim") return geometryDialogs.open("trim");
+      if(params===null && id==="file.automate.fitImage") return geometryDialogs.open("fit");
+      if(params===null && id==="image.imageSize") return geometryDialogs.open("size");
+      if(params===null && id==="image.canvasSize") return geometryDialogs.open("canvas");
+      if(params===null && id==="image.rotation.arbitrary") return geometryDialogs.open("rotate");
       const fill = FILL_SHORTCUTS.find((entry) => entry.id === id);
       if (id === "edit.paste" && params === null && documentView) {
-        const frame=documentView.selectionFrame;
-        const {x,y,zoom}=canvasView.viewport;
-        params={center:frame ? [(frame[0]+frame[2])/2,(frame[1]+frame[3])/2] : [documentView.width/2-x/zoom,documentView.height/2-y/zoom]};
+        const clip=controller.clipboardBounds?.();
+        const frame=canvasRef.current?.navigationFrame?.()??(canvasView.contentSize?{viewport:canvasView.viewport,size:canvasView.contentSize,document:{width:documentView.width,height:documentView.height}}:null);
+        const {x,y,zoom}=frame?.viewport??canvasView.viewport;
+        params=clip?.ok&&clip.value&&frame&&clipboardVisible(clip.value,frame)?{}:{center:[documentView.width/2-x/zoom,documentView.height/2-y/zoom]};
       }
-      const result = controller.dispatch(id, params === null && (fill || id === "edit.cut" || id === "edit.clear") ? {color:colors[fill?.source ?? "background"]} : params);
-      setMessage(result.ok ? null : result.message);
+      if(id==="layer.matting.colorDecontaminate" && params===null) return layerDialogs.decontaminate();
+      if(id==="layer.matting.defringe" && params===null) return layerDialogs.defringe();
+      if(id==="select.findLayers" && params===null) return layerDialogs.find();
+      const result = controller.dispatch(id, params === null && (fill || id === "edit.cut" || id === "edit.clear") ? {color:id==="edit.cut"?pixelBackground:colors[fill?.source ?? "background"]} : params);
+      setMessage(result.ok ? id==="edit.purge.videoCache"?"没有视频图层可清理":null : result.message);
       return result.ok;
     },
-    [controller, readonly, busy, closing, textEditing.active, adjustmentEditing.active, propertiesEditing.active, newLayer.modalActive, newLayer.open, colors.foreground, colors.background, documentView, canvasView.viewport]
+    [controller, documents, geometryDialogs.open, scriptImport.open, definePattern.open,findReplace.open,spelling.open,edgeStroke.open,fillDialog.open,colorRangeDialog.open,colorRange,fadeDialog.open,adjustmentDialog.open,fileInfoDialog.open,colorModeDialog.open,retouchPatterns, readonly, busy, closing, textEditing.active, adjustmentEditing.active, propertiesEditing.active, newLayer.modalActive, newLayer.open, layerDialogs.locks, layerDialogs.find, layerDialogs.defringe, layerDialogs.decontaminate, colors.foreground, colors.background,pixelBackground, documentView, canvasView.viewport]
   );
 
   // 画布手势 → 命令参数（编译在 photo-editor-tools.ts，这里只做提交）。
   const applyMarquee = useCallback(
     (rect: { x: number; y: number; width: number; height: number }, mode = selectionMode) => {
-      run("select.rect", buildRectSelection(rect, { mode, ellipse, feather }));
+      run("select.rect", buildRectSelection(rect, { mode, ellipse, line:marqueeLine, feather }));
     },
-    [ellipse, feather, run, selectionMode]
+    [ellipse, marqueeLine, feather, run, selectionMode]
   );
   const applyLasso = useCallback(
     (points: { x: number; y: number }[], mode = selectionMode) => {
@@ -243,13 +446,38 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     },
     [feather, run, selectionMode]
   );
-  const beginStroke = (point: DocumentPoint, modifiers?: {shift:boolean}) => {
-    if (readonly || busy || closing) return;
-    const key = `${activeLayerId}:${tool}:${brush.target}`;
+  const rasterizeBeforePaint=useRasterizePrompt(dialogs,controller,
+    readonly || closing || busy || canvasView.transitioning || !documentView || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing" ||
+    textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || tool==="transform",
+    JSON.stringify([tool,brush,colors,bucket]),refreshPreview,setMessage);
+  const beginStroke = (point: DocumentPoint, modifiers?: {shift:boolean;alt?:boolean;mod?:boolean}) => {
+    if (readonly || busy || closing) return false;
+    if (tool === "retouch") {
+      const spec=RETOUCH_SPEC(retouchTool);
+      if(!spec) return false;
+      const command=commands.get(spec.command);
+      if(!command?.allowed || !command.enabled) {setMessage(command?.disabledReason??"当前图层不能使用该润饰工具");return false;}
+      // 克隆类工具：Alt/Option 单击取样来源点（对应上游来源点手势），不绘制笔迹。
+      if((retouchTool==="cloneStamp" || retouchTool==="healingBrush") && modifiers?.alt){
+        setRetouch(current=>({...current,source:[point.x,point.y],offset:null}));
+        setMessage(`已取样来源 (${Math.round(point.x)}, ${Math.round(point.y)})`);
+        return false;
+      }
+      if(spec.point){run(spec.command,buildRetouch(retouchTool,point,[point],retouch,colors.foreground,documentView?.editTarget??"pixels",canvasView.viewport.zoom));return false;}
+      if(spec.needsPattern && !retouch.pattern){setMessage("请先选择图案");return false;}
+      // 润饰笔画在释放时以整条路径提交一次；不伪造内核未提供的实时预览。
+      retouchPath.current=[point];
+      strokeEnd.current={point,key:String(snapshot.view.sessionActiveIndex)};
+      return true;
+    }
+    const tap=buildStroke([point],brush,{erase:tool==="eraser" || temporaryErase.current && (tool==="brush" || tool==="pencil"),pencil:tool==="pencil",backgroundColor:colors.background,zoom:canvasView.viewport.zoom});
+    if(tap && rasterizeBeforePaint(()=>{if(liveStroke.begin(tap))liveStroke.finish();}))return false;
+    const key = String(snapshot.view.sessionActiveIndex);
     const anchor = strokeAnchor.current;
     const line = modifiers?.shift && anchor?.key === key;
-    const params = buildStroke(line ? [anchor.point,point] : [point], line ? {...brush,smoothing:0} : brush, { erase: tool === "eraser", zoom: canvasView.viewport.zoom });
+    const params = buildStroke(line ? [anchor.point,point] : [point], line ? {...brush,smoothing:0} : brush, { erase: tool === "eraser" || temporaryErase.current && (tool==="brush" || tool==="pencil"),pencil:tool==="pencil",backgroundColor:colors.background, zoom: canvasView.viewport.zoom });
     strokeEnd.current = params && liveStroke.begin(params) ? {point,key} : null;
+    return !!strokeEnd.current;
   };
 
   const applySave = useCallback(async () => {
@@ -257,7 +485,7 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     if (newLayer.modalActive) return;
     if (propertiesEditing.active) {setMessage("请先确认或取消图层属性编辑");return;}
     if (adjustmentEditing.active) {setMessage("请先确认或取消调整参数编辑");return;}
-    if (textEditing.active) {setMessage("请先确认或取消文字编辑");return;}
+    if (textEditing.active && !textEditing.checkpoint()) return;
     if (transformSession.active) { setMessage("请先确认或取消自由变换"); return; }
     canvasRef.current?.cancelGesture();
     setBusy(true);
@@ -271,18 +499,46 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
   }, [onApply, transformSession, textEditing.active, adjustmentEditing.active, propertiesEditing.active, newLayer.modalActive]);
 
   const commands = snapshot.commands;
-  const locked = newLayer.modalActive || readonly || closing || busy || canvasView.transitioning || snapshot.state.phase === "saving" || snapshot.state.phase === "freezing" || !documentView;
+  const baseLocked = newLayer.modalActive || readonly || closing || busy || canvasView.transitioning || snapshot.state.phase === "saving" || snapshot.state.phase === "freezing" || !documentView;
+  const painting=tool==="brush"||tool==="pencil"||tool==="eraser";
+  const symmetry=usePaintingSymmetry(controller,documentView?.paintingSymmetry??null,documentView?.symmetryPaths??[],String(snapshot.view.sessionActiveIndex),baseLocked || visibilityEditing.active || !painting || textEditing.active || adjustmentEditing.active || propertiesEditing.active,()=>!!canvasRef.current?.hasGesture(),setMessage);
+  const locked=baseLocked || visibilityEditing.active || symmetry.active;
   const transforming = tool === "transform";
+  const textClipboard=useTextClipboard(textEditing,`${snapshot.view.sessionActiveIndex}`,locked || transforming || adjustmentEditing.active || propertiesEditing.active,setMessage);
+  const preferences=useEditorPreferences(dialogs,controller,readonly || closing || busy || canvasView.transitioning || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing" || !documentView || transforming || visibilityEditing.active || textEditing.active || adjustmentEditing.active || propertiesEditing.active,setMessage);
+  // 标尺/参考线/网格（I096）：显示与吸附偏好来自本机编辑器偏好；参考线本身是文档视图状态。
+  const guidePreferences=useMemo<GuidePreferences>(()=>({
+    showRulers:preferences.value.showRulers,showGuides:true,showGrid:preferences.value.showGrid,
+    snapToGuides:preferences.value.snapToGuides,snapToGrid:preferences.value.snapToGrid,snapToCanvas:true,gridSize:preferences.value.gridSize
+  }),[preferences.value.showRulers,preferences.value.showGrid,preferences.value.snapToGuides,preferences.value.snapToGrid,preferences.value.gridSize]);
+  const guideControls=useMemo(()=>({
+    showRulers:guidePreferences.showRulers,showGuides:guidePreferences.showGuides,showGrid:guidePreferences.showGrid,
+    snapToGuides:guidePreferences.snapToGuides,snapToGrid:guidePreferences.snapToGrid,
+    toggle:(key:"showRulers"|"showGuides"|"showGrid"|"snapToGuides"|"snapToGrid")=>{
+      if(key==="showGuides")return; // 参考线显示由「视图 ▸ 参考线」与 Extras 共同决定，不单独持久化。
+      preferences.togglePreference(key,!(guidePreferences as unknown as Record<string,boolean>)[key]);
+    }
+  }),[guidePreferences,preferences]);
+  const colorPicker=useColorPicker(dialogs,controller,`${snapshot.view.sessionActiveIndex}:${documentView?.editTarget}`,
+    readonly || closing || busy || canvasView.transitioning || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing" || !documentView || transforming || visibilityEditing.active || textEditing.active || adjustmentEditing.active || propertiesEditing.active || symmetry.active,setMessage);
+  const missingFonts=useMissingFonts(dialogs,controller,String(snapshot.view.sessionActiveIndex),documentView?.revision,!!commands.get("type.resolveMissingFonts")?.allowed,
+    readonly || closing || busy || canvasView.transitioning || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing" || !documentView || transforming || visibilityEditing.active || textEditing.active || adjustmentEditing.active || propertiesEditing.active || symmetry.active,setMessage,refreshPreview);
   const viewDisabled=locked;
   const displayDisabled=locked||textEditing.active||adjustmentEditing.active||propertiesEditing.active;
+  const chromeVisible=editorChromeVisible(display.state);
+  const setScreenMode=(mode:EditorScreenMode)=>{if(displayDisabled||transforming||canvasRef.current?.hasGesture()||nudge.current)return;display.setScreenMode?.(mode);};
   const toggleDisplay=(action:EditorDisplayAction)=>{
     if(displayDisabled||canvasRef.current?.hasGesture()||nudge.current) return;
     display.toggle(action);
   };
-  const canSave = !locked && !transforming && !textEditing.active && !adjustmentEditing.active && !propertiesEditing.active && snapshot.state.dirty;
+  const canSave = !locked && !transforming && !textEditing.composing && !adjustmentEditing.active && !propertiesEditing.active && (snapshot.state.dirty || textEditing.active);
   const transformFrame = selectionTransform ? documentView?.selectionFrame : documentView?.transformFrame;
-  const toolLabel = tool === "marquee" ? ellipse ? "椭圆选框" : "矩形选框" : transforming ? selectionTransform ? "变换选区" : "自由变换" : PHOTO_TOOLS.find((entry) => entry.id === tool)?.label;
+  const toolLabel = tool === "marquee" ? marqueeLine==="row" ? "单行选框" : marqueeLine==="column" ? "单列选框" : ellipse ? "椭圆选框" : "矩形选框" : tool==="retouch" ? RETOUCH_SPEC(retouchTool)?.label : transforming ? selectionTransform ? "变换选区" : "自由变换" : PHOTO_TOOLS.find((entry) => entry.id === tool)?.label;
   const readThumbnail=useCallback((layer:number,mask:boolean)=>controller.layerThumbnail(layer,mask),[controller]);
+  const selectedContentBounds=(rows:readonly {selected:boolean;bounds?:[number,number,number,number]|null}[])=>{
+    const bounds=rows.filter(row=>row.selected && row.bounds).map(row=>row.bounds!);if(!bounds.length)return null;
+    const x=Math.min(...bounds.map(b=>b[0])),y=Math.min(...bounds.map(b=>b[1]));return [x,y,Math.max(...bounds.map(b=>b[0]+b[2]))-x,Math.max(...bounds.map(b=>b[1]+b[3]))-y] as [number,number,number,number];
+  };
   const selectTarget=(layer: {id:number},mask:boolean,solo=false,mode:"replace"|"toggle"|"range"="replace") => {
     if (!run("layer.select",{layer:layer.id,mode})) return;
     if (mode!=="replace") return;
@@ -292,9 +548,23 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     if (solo) run("view.layerMask",{layer:layer.id,mode:"toggleGray"});
     if (mask || documentView?.layers.find(row=>row.id===layer.id)?.kind==="adjustment") revealProperties();
   };
-  const canvasTool: EditorToolId = !spaceHeld && !locked && !textEditing.active && !adjustmentEditing.active && !propertiesEditing.active && (tool === "move" || tool === "marquee" || tool === "lasso" || tool === "brush" || tool === "eraser" || tool === "text") ? tool : spaceHeld ? "pan" : "none";
-  const chooseTool = (next: PhotoEditorTool, selectionOnly = false) => {
+  useEffect(()=>{
+    const request=layerEditRequest;if(!request) return;
+    setLayerEditRequest(null);
+    if(locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || activeLayer?.id!==request.id) return;
+    revealProperties();
+    if(request.kind==="mask") return;
+    if(request.kind==="style") propertiesEditing.styleEditing.start();
+    else if(activeLayer.kind==="text") {setTool("text");textEditing.begin({layer:activeLayer.id});}
+    else if(activeLayer.kind==="adjustment") setTextToolProperties(false);
+  },[layerEditRequest,activeLayer,locked,transforming,textEditing.active,adjustmentEditing.active,propertiesEditing.active]);
+  const requestLayerEditor=(layer:{id:number},kind:"content"|"style"|"mask")=>{
+    selectTarget(layer,kind==="mask");setLayerEditRequest({id:layer.id,kind});
+  };
+  const canvasTool: EditorToolId = !spaceHeld && !locked && !textEditing.active && !adjustmentEditing.active && !propertiesEditing.active && !(tool==="marquee" && !marqueeLine && !marqueeConstraintValid) && (tool === "move" || tool === "marquee" || tool === "lasso" || tool === "magicWand" || tool === "retouch" || tool === "brush" || tool === "pencil" || tool === "eraser" || tool === "text" || tool === "pan" || tool === "zoom" || tool === "bucket" || tool==="eyedropper") ? tool : spaceHeld ? "pan" : "none";
+  const chooseTool = (next: PhotoEditorTool, selectionOnly = false, keyboard=false) => {
     if (locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active) return;
+    if(!keyboard)springTools.current.reset();
     if (nudge.current) { nudge.current = null; endTransform(true); }
     if (next === "transform") {
       const frame = selectionOnly ? documentView?.selectionFrame : documentView?.transformFrame;
@@ -309,18 +579,26 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     setTextToolProperties(next==="text");
     setTool(next);
   };
+  useEffect(()=>{const previous=springTools.current.reset();if(previous!==null)setTool(previous);},[controller]);
+  const springBusy=()=>!!canvasRef.current?.hasGesture() || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active;
+  const restoreSpringTool=()=>{const previous=springTools.current.finish(springBusy());if(previous!==null){setTextToolProperties(previous==="text");setTool(previous);}};
+  useEffect(()=>{restoreSpringTool();});
   const previewTransform = (matrix: number[]) => {
     setTransformMatrix(matrix);
     transformSession.preview(matrix);
+  };
+  const previewMoveTransform=(matrix:number[])=>{
+    if(tool==="move" && preferences.value.showBoundingBoxWhenDraggingLayer) setTransformMatrix(matrix);else previewTransform(matrix);
   };
   const endTransform = (commit: boolean) => {
     if (commit && locked) return;
     if (commit && !transformValid) { setMessage("变换参数无效，请修改后重试或取消"); return; }
     if (commit && !transformSession.commit()) {
-      if (!transforming) { transformSession.cancel(); setTransformMatrix(IDENTITY_MATRIX); setSelectionTransform(false); }
+      if (!transforming) { setBoundaryMoveActive(false);transformSession.cancel(); setTransformMatrix(IDENTITY_MATRIX); setSelectionTransform(false); }
       return;
     }
     if (!commit) transformSession.cancel();
+    setBoundaryMoveActive(false);
     setTransformMatrix(IDENTITY_MATRIX);
     setTransformValid(true);
     setSelectionTransform(false);
@@ -331,11 +609,15 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     if (nudge.current) { nudge.current = null; transformSession.cancel(); setTransformMatrix(IDENTITY_MATRIX); }
     if(!propertiesEditing.presetPickerActive()) propertiesEditing.finish(false);
     adjustmentEditing.finish(false);
+    visibilityEditing.finish(false);
     setSpaceHeld(false);
+    temporaryErase.current=false;
+    symmetry.cancel();
     setAltHeld(false);
     resetDigits();
     canvasRef.current?.cancelGesture();
-  }, [transformSession,resetDigits,adjustmentEditing.finish,propertiesEditing.finish]);
+    const previous=springTools.current.reset();if(previous!==null)setTool(previous);
+  }, [transformSession,resetDigits,adjustmentEditing.finish,propertiesEditing.finish,visibilityEditing.finish,symmetry.cancel]);
   useEffect(() => {
     const element = editorRef.current;
     if (element && !element.closest("[hidden]")) element.focus({ preventScroll: true });
@@ -349,11 +631,12 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
       document_?.removeEventListener("visibilitychange", onVisibility);
     };
   }, [releaseInput]);
-  useEffect(() => { if (locked) releaseInput(); }, [locked, releaseInput]);
+  useEffect(() => { if (baseLocked) releaseInput(); }, [baseLocked, releaseInput]);
 
   const applyShortcut = (action: EditorShortcut): void => {
     if(action.kind==="display") {toggleDisplay(action.action);return;}
-    if (action.kind !== "paintPercent") resetDigits();
+    if (action.kind !== "paintPercent") {resetDigits();layerDigits.current.reset();}
+    if(action.kind==="navigate"){if(!viewDisabled)canvasRef.current?.navigate?.(action.navigation);return;}
     if (action.kind === "view") { if (!viewDisabled) canvasRef.current?.view(action.action); return; }
     if (action.kind === "pan") {
       if (!canvasRef.current?.hasGesture()) setSpaceHeld(true);
@@ -364,10 +647,23 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     if (locked || canvasRef.current?.hasGesture()) return;
     if (action.kind === "confirm") { if (transforming) endTransform(true); return; }
     if (transforming) return;
+    if(action.kind==="documentsClose") {if(action.mode==="all")documents?.onCloseAllDocuments?.();else if((documents?.list?.length??0)>1)documents?.onCloseOtherDocuments?.();return;}
+    if(action.kind==="blendCycle") {
+      if(tool==="brush" || tool==="pencil") setBrush(current=>({...current,mode:cyclePaintMode(current.mode??"Normal",action.direction)}));
+      else if(activeLayer && propertiesEditing.blendEditing.preview(cycleBlend(activeLayer.blend,action.direction,activeLayer.kind==="group"))) propertiesEditing.blendEditing.finish(true);
+      return;
+    }
     if (action.kind === "nudge") {
-      if (tool !== "move" || !documentView?.transformFrame) return;
+      if((tool==="brush" || tool==="pencil" || tool==="eraser") && action.dx!==0 && !action.pixels && !action.duplicate){
+        setBrush(current=>({...current,angle:normalizeBrushAngle((current.angle??0)+Math.sign(action.dx)*(Math.abs(action.dx)>1?15:1))}));return;
+      }
+      const target=nudgeTarget(tool,!!documentView?.hasSelection,action.pixels);
+      if(!target) return;
       if (!nudge.current) {
-        if (!transformSession.begin()) return;
+        const boundary=target==="boundary";
+        const started=boundary ? transformSession.begin(true) : transformSession.beginMove({x:0,y:0,autoSelect:false,duplicate:!!action.duplicate,selectedPixels:target==="selectedPixels",wholeLayer:target==="layer"});
+        if (!started) return;
+        setSelectionTransform(boundary);
         nudge.current = {dx:0,dy:0};
       }
       nudge.current.dx += action.dx; nudge.current.dy += action.dy;
@@ -376,16 +672,37 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
     }
     if (nudge.current) { nudge.current = null; endTransform(true); }
     if (action.kind === "tool") {
-      chooseTool(action.tool);
-      if (action.cycle && action.tool === "marquee") setEllipse((current) => !current);
+      chooseTool(action.tool==="brush" && action.cycle && (tool==="brush" || tool==="pencil") ? tool==="brush"?"pencil":"brush":action.tool,false,true);
+      if (action.cycle && action.tool === "marquee" && (preferences.value.useShiftForToolSwitch || tool==="marquee")) {
+        if(marqueeLine==="row") setMarqueeLine("column");
+        else if(marqueeLine==="column") {setMarqueeLine(undefined);setEllipse(false);}
+        else if(ellipse) {setEllipse(false);setMarqueeLine("row");}
+        else setEllipse(true);
+      }
     } else if (action.kind === "color") {
       colorAction(action.action);
-    } else if (action.kind === "paintPercent" && (tool === "brush" || tool === "eraser")) {
-      percent(action.digit,action.property);
-    } else if (action.kind === "brush" && (tool === "brush" || tool === "eraser")) {
+    } else if (action.kind === "paintPercent") {
+      if(tool==="brush" || tool==="pencil" || tool==="eraser") {layerDigits.current.reset();percent(action.digit,action.property);}
+      else if(tool==="bucket") {
+        resetDigits();
+        if(action.property==="flow"){layerDigits.current.reset();return;}
+        const scope=`bucket:${snapshot.view.sessionActiveIndex}:${documentView?.editTarget}`;
+        const opacity=String(Math.max(1,Math.round(layerDigits.current.input(action.digit,"bucketOpacity",scope,performance.now())*100)));
+        setBucket(current=>({...current,opacity}));
+      }
+      else if(activeLayer) {
+        resetDigits();
+        const property=action.property==="flow"?"fill":"opacity";
+        const scope=`${tool}:${snapshot.view.sessionActiveIndex}:${documentView?.layers.filter(row=>row.selected || row.active).map(row=>row.id).join(",")}`;
+        const value=String(layerDigits.current.input(action.digit,property,scope,performance.now())*100);
+        if(property==="fill") propertiesEditing.updateFill(value);else propertiesEditing.update(value);
+        propertiesEditing.finish(true);
+      }
+    } else if (action.kind === "brush" && (tool === "brush" || tool === "pencil" || tool === "eraser")) {
       setBrush((current) => action.property === "size"
-        ? { ...current, size: clampBrushSize(current.size + action.direction * (current.size < 10 ? 1 : current.size < 100 ? 5 : 10)) }
-        : { ...current, hardness: Math.max(0, Math.min(1, current.hardness + action.direction * .25)) });
+        ? { ...current, size: stepBrushSize(current.size,action.direction) }
+        : { ...current, hardness: stepBrushHardness(current.hardness,action.direction) });
+    } else if(action.kind==="open"){documents?.onOpenFile?.();
     } else if (action.kind === "save") {
       if (canSave) void applySave();
     } else if (action.kind === "clipping") {
@@ -398,36 +715,81 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
         ? documentView.hasSelection ? "edit.fillBackground" : "layer.layerMask.delete"
         : documentView?.hasSelection ? "edit.clear" : "layer.delete";
       if (commands.get(id)?.allowed && commands.get(id)?.enabled) run(id);
+    } else if(action.kind==="layerState") {
+      if(activeLayer && !activeLayer.effectiveLocks.all && commands.get("layer.setProps")?.allowed && commands.get("layer.setProps")?.enabled) run("layer.setProps",{layer:activeLayer.id,locks:{transparency:!activeLayer.locks.transparency}});
     } else if (action.kind === "command") {
       const enabled = action.id === "edit.undo" ? documentView?.canUndo
-        : action.id === "edit.redo" ? documentView?.canRedo : commands.get(action.id)?.enabled;
-      if (enabled) run(action.id);
+        : action.id === "edit.redo" ? documentView?.canRedo : action.id === "edit.toggleLastState" ? documentView?.canUndo || documentView?.canRedo : commands.get(action.id)?.enabled;
+      if (enabled) run(action.id,action.id==="layer.hideLayers" && activeLayer?{layer:activeLayer.id}:undefined);
     }
   };
+
+  const fieldMenuShortcut=useFieldMenuShortcuts({owner:controller,targetKey:`${snapshot.view.sessionActiveIndex}:${documentView?.selectedLayerIds.join(",")}:${activeLayerId}`,isMac:isEditorMac(),
+    blocked:locked || transforming || textEditing.active || !!canvasRef.current?.hasGesture() || newLayer.modalActive,
+    before:()=>!propertiesEditing.styleActive && propertiesEditing.finish(true) && adjustmentEditing.finish(true),apply:applyShortcut});
 
   const revealProperties=()=>{
     if(!display.state.sidebarVisible) display.toggle("sidebar");
     display.updatePanels?.({propertiesCollapsed:false});
   };
   const panelLayout=display.state.panelLayout??DEFAULT_PANEL_LAYOUT;
+  const propertyFrame=documentView?.layerTransformFrame??(!documentView?.hasSelection?documentView?.transformFrame:null);
   const propertyTool:PhotoEditorProperty|null=textEditing.active || textToolProperties?"text":adjustmentEditing.active?"adjustment":documentView?.editTarget==="mask"?"mask":activeLayer?.kind==="text"?"text":activeLayer?.kind==="adjustment"?"adjustment":null;
+  const canInsertLorem=!!commands.get("type.create")?.allowed && !locked && !transforming && !propertiesEditing.active && !adjustmentEditing.active && !textEditing.composing;
+  const insertLorem=()=>{
+    if(!canInsertLorem || canvasRef.current?.hasGesture() || !documentView)return;
+    if(textEditing.active){textEditing.insertLorem();return;}
+    const {width,height,resolutionDpi}=documentView;
+    if(!textEditing.begin({x:width*.1,y:height*.1,box:[width*.1,height*.1,width*.8,height*.8],forceNew:true}))return;
+    textEditing.update({text:LOREM_IPSUM,size:Math.min(72,Math.max(6,height/20*72/(resolutionDpi??72)))});
+    springTools.current.reset();setTool("text");setTextToolProperties(true);revealProperties();
+    textEditing.finish(true);
+  };
   const runLayerAction = (id: string) => {
+    if(id==="type.resolveMissingFonts")return missingFonts.open();
     const adjustment = ADJUSTMENT_LAYER_ACTIONS.find(action => action.id === id);
-    if (run(id, adjustment?.params ?? null) && (adjustment || id.startsWith("layer.layerMask."))) {
+    const result=run(id, adjustment?.params ?? null);
+    if (result && (adjustment || id.startsWith("layer.layerMask."))) {
       setTextToolProperties(false);
       revealProperties();
     }
+    return result;
   };
+  const resetOptions=(all:boolean)=>{
+    if(canvasRef.current?.hasGesture() || nudge.current)return;
+    if(all || tool==="brush" || tool==="pencil" || tool==="eraser")resetPaint(all?"all":tool as "brush"|"pencil"|"eraser");
+    if(all || tool==="marquee" || tool==="lasso") {setSelectionMode("replace");setFeather(0);if(all || tool==="marquee" && !marqueeLine)setMarqueeConstraint({mode:"normal",width:"1",height:"1"});}
+    if(all || tool==="move"){setAutoSelect(true);setAutoSelectTarget("group");display.updatePanels?.({showMoveTransform:DEFAULT_PANEL_LAYOUT.showMoveTransform});}
+    if(all || tool==="bucket")setBucket({...DEFAULT_BUCKET});
+    if(all || tool==="eyedropper")setSampleSettings({...DEFAULT_SAMPLE});
+    if(all || tool==="zoom")setZoomScrubby(true);
+    if(all || tool==="text")textEditing.update({...textEditing.style,size:48,font:"Noto Sans SC",bold:false,align:"left",antialias:"smooth",orientation:"horizontal"});
+    strokeAnchor.current=null;setStrokePreviewAnchor(null);resetDigits();layerDigits.current.reset();
+  };
+  const toolReset=useToolReset(dialogs,controller,readonly || closing || busy || canvasView.transitioning || !documentView || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing" || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || symmetry.active,resetOptions,setMessage);
+  const search=useCommandSearch({dialogs,controller,purge:documents?.purge,blocked:readonly || closing || busy || canvasView.transitioning || snapshot.state.phase==="saving" || snapshot.state.phase==="freezing" || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active,execute:entry=>{
+    if(canvasRef.current?.hasGesture()) return false;
+    if(entry.id==="tool.reset"){toolReset.resetCurrent();return true;}
+    if(entry.id==="tool.resetAll"){toolReset.confirmAll();return true;}
+    if(entry.id==="window.theme.system"){theme.select("system");return true;}
+    const selectedTheme=EDITOR_THEMES.find(item=>entry.id===`window.theme.${item.id}`);
+    if(selectedTheme){theme.select(selectedTheme.id);return true;}
+    if(entry.id==="view.darkenInterface"||entry.id==="view.lightenInterface"){theme.step(entry.id==="view.lightenInterface");return true;}
+    if(entry.tool) {chooseTool(entry.tool);return true;}
+    if(entry.id==="edit.transform" || entry.id==="select.transformSelection") {chooseTool("transform",entry.id==="select.transformSelection");return true;}
+    return runLayerAction(entry.id);
+  },error:setMessage});
   const updatePanels=useCallback((patch:Partial<EditorPanelLayout>)=>{if(!displayDisabled && !transforming && !canvasRef.current?.hasGesture()) display.updatePanels?.(patch);},[displayDisabled,transforming,display.updatePanels]);
   const collapseControl=(key:"layersCollapsed"|"historyCollapsed"|"propertiesCollapsed",name:string)=>{
     const Icon=panelLayout[key]?ChevronRightIcon:ChevronDownIcon;
     return <Button size="sm" tone="ghost" title={`${panelLayout[key]?"展开":"折叠"}${name}`} disabled={displayDisabled} onClick={()=>updatePanels({[key]:!panelLayout[key]})}><Icon size={13}/></Button>;
   };
   const renderOptions=(surface:"tools"|"properties")=>(
-    <ToolOptionsPanel
+    <ToolOptionsPanel zoomScrubby={zoomScrubby} onZoomScrubby={setZoomScrubby} resolutionDpi={documentView?.resolutionDpi??72}
             readonly={locked || transforming || propertiesEditing.active}
             surface={surface} tool={tool} property={propertyTool}
             selection={{ mode: selectionMode, ellipse, feather }}
+            marqueeConstraint={marqueeLine?undefined:marqueeConstraint} onMarqueeConstraint={patch=>setMarqueeConstraint(current=>({...current,...patch}))}
             onSelectionMode={setSelectionMode}
             onFeather={(value) => setFeather(clampFeather(value))}
             brush={brush}
@@ -435,12 +797,15 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
               if (patch.target && activeLayerId !== null) selectTarget({id:activeLayerId},patch.target === "mask");
               setBrush((current) => ({ ...current, ...patch }));
             }}
+            fontPreview={preferences.value.fontPreview} readFontSample={readFontSample}
+            fontNamesInEnglish={preferences.value.showFontNamesInEnglish} recentFontLimit={preferences.value.recentFonts}
             text={text}
+            onPreviewFont={font=>{if(!locked && !transforming && !propertiesEditing.active && !adjustmentEditing.active)textEditing.previewFont(font,activeLayer?.kind==="text"?activeLayer.id:undefined);}}
             onText={(patch)=>{
               if(activeLayer?.kind==="text" && !textEditing.active && !textEditing.begin({layer:activeLayer.id})) return;
               textEditing.update(patch);
             }}
-            textActive={textEditing.active} textComposing={textEditing.composing}
+            textActive={textEditing.active} textComposing={textEditing.composing} textEscapeCommits={preferences.value.useEscapeToCommit}
             editingText={activeLayer?.text !== null && activeLayer?.text !== undefined}
             onEditText={()=>{if (activeLayerId!==null) textEditing.begin({layer:activeLayerId});}}
             onConfirmText={()=>endText(true)} onCancelText={()=>endText(false)}
@@ -449,6 +814,7 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
             hasSelection={documentView?.hasSelection ?? false}
             hasMask={activeLayer?.hasMask ?? false}
             canApplyMask={activeLayer?.kind === "raster" || activeLayer?.kind === "pixel"}
+            maskProperties={{...propertiesEditing.maskEditing,disabled:locked || transforming || textEditing.active || adjustmentEditing.active || !!activeLayer?.effectiveLocks.all || (propertiesEditing.active && !propertiesEditing.maskEditing.active)}}
             adjustment={{ brightness, contrast, hue, saturation, lightness }}
             onAdjustment={(patch) => adjustmentEditing.update("brightness" in patch || "contrast" in patch ? "brightnessContrast" : "hueSaturation",patch)}
             adjustmentActive={adjustmentEditing.active} adjustmentCancelRevision={adjustmentEditing.cancelRevision}
@@ -469,11 +835,38 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
   };
 
   return (
-    <div ref={editorRef} className="photo-editor" role="application" aria-label="PhotoCraft 图像编辑器" tabIndex={-1}
+    <div ref={editorRef} className="photo-editor" data-editor-chrome={chromeVisible?undefined:"hidden"} data-screen-mode={display.state.screenMode??"standard"} role="application" aria-label="PhotoCraft 图像编辑器" tabIndex={-1}
       onCopy={(event)=>clipboardEvent(event,"edit.copy")}
       onCut={(event)=>clipboardEvent(event,"edit.cut")}
       onPaste={(event)=>clipboardEvent(event,"edit.paste")}
       onKeyDownCapture={(event)=>{
+        if((isEditorMac()?event.metaKey:event.ctrlKey) && event.shiftKey && !event.altKey && (event.key==="F1"||event.key==="F2") && !event.nativeEvent.isComposing && event.keyCode!==229 && !editorInputConsumesKeys(event.target)) {
+          if(newLayer.modalActive || (event.target as Element).closest('[role="menu"]'))return;
+          event.preventDefault();event.stopPropagation();if(!event.repeat)theme.step(event.key==="F2");return;
+        }
+        if(symmetry.active) {
+          if(!event.nativeEvent.isComposing && event.keyCode!==229 && (event.key==="Enter" || event.key==="Escape")){event.preventDefault();event.stopPropagation();symmetry.finish(event.key==="Enter");return;}
+          if(!editorInputConsumesKeys(event.target)){event.preventDefault();event.stopPropagation();}return;
+        }
+        if((isEditorMac()?event.metaKey:event.ctrlKey) && event.key.toLowerCase()==="f" && !event.altKey && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode!==229 && search.available) {
+          if((event.target as Element).closest('[role="dialog"],[role="menu"]')) return;
+          event.preventDefault();event.stopPropagation();if(!event.repeat && !canvasRef.current?.hasGesture()) search.open();return;
+        }
+        const cycle=resolveEditorShortcut(event.nativeEvent,isEditorMac());
+        if(cycle?.kind==="documentCycle" && documents?.onActivateDocument && (documents.list?.length??0)>1) {
+          event.preventDefault();event.stopPropagation();
+          if(event.repeat || busy || closing || newLayer.modalActive || visibilityEditing.active || transforming || textEditing.composing || canvasRef.current?.hasGesture()) return;
+          const entries=documents.list!;
+          const current=entries.findIndex(entry=>entry.active);if(current<0) return;
+          if(textEditing.active && !textEditing.finish(true)) return;
+          if(!propertiesEditing.finish(true) || !adjustmentEditing.finish(true)) return;
+          documents.onActivateDocument(entries[(current+cycle.direction+entries.length)%entries.length].id);return;
+        }
+        if(fieldMenuShortcut(event)) return;
+        if(visibilityEditing.active) {
+          if(event.key==="Escape") {event.preventDefault();event.stopPropagation();visibilityEditing.finish(false);}
+          return;
+        }
         if (propertiesEditing.active && !event.nativeEvent.isComposing && event.keyCode!==229) {
           if (event.key==="Escape") {event.preventDefault();event.stopPropagation();if(!canvasRef.current?.cancelGesture()) propertiesEditing.finish(false);return;}
           if (propertiesEditing.styleActive && event.key==="Enter" && !(event.target as Element).closest("button,select")) {
@@ -493,21 +886,38 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
         }
         if (!textEditing.active || textEditing.composing || event.nativeEvent.isComposing || event.keyCode===229) return;
         if (event.key==="Escape" || ((event.ctrlKey || event.metaKey) && event.key==="Enter")) {
-          event.preventDefault();event.stopPropagation();endText(event.key!=="Escape");
+          event.preventDefault();event.stopPropagation();endText(event.key!=="Escape" || preferences.value.useEscapeToCommit);
         } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase()==="s") {
-          event.preventDefault();event.stopPropagation();setMessage("请先确认或取消文字编辑");
+          event.preventDefault();event.stopPropagation();if(!event.repeat && !locked) void applySave();
         }
       }}
+      onPointerUp={()=>restoreSpringTool()}
+      onPointerCancel={()=>restoreSpringTool()}
       onPointerDownCapture={(event) => {
+        if((event.target as Element).closest(".photo-editor-canvas"))springTools.current.useCanvas();
         if (!editorInputConsumesKeys(event.target) && !(event.target as Element).closest("button, .photo-editor-curve")) event.currentTarget.focus({ preventScroll: true });
       }}
       onBlur={(event) => {
         // 参数控件与曲线门户自行结算，提交失败时保留待修正输入。
         if ((event.target as Element).closest(".photo-editor-curve, [data-adjustment-control], [data-layer-opacity], [data-layer-fill], [data-layer-style]")) return;
         const next=event.relatedTarget;
+        // A menu portal belongs to this editor even though its DOM is outside the stage.
+        const menuOwner=next instanceof Element?next.closest("[data-menu-bar-owner]")?.getAttribute("data-menu-bar-owner"):null;
+        if(menuOwner && [...event.currentTarget.querySelectorAll("[data-menu-bar]")].some(menu=>menu.getAttribute("data-menu-bar")===menuOwner))return;
         if (!event.currentTarget.contains(next as Node | null) && !(next instanceof Element && next.closest(".photo-editor-curve"))) releaseInput();
       }}
+      onKeyUpCapture={(event)=>{
+        if(event.code==="Backquote" || event.key==="`" || event.key==="~") {
+          if(temporaryErase.current){event.preventDefault();event.stopPropagation();}
+          temporaryErase.current=false;
+        }
+      }}
       onKeyUp={(event) => {
+        const held=springTools.current.pending;
+        const previous=springTools.current.release(event.key.toLowerCase(),performance.now(),springBusy());
+        if(held && !springTools.current.pending)refreshToolMemory(value=>value+1);
+        if(previous!==null){event.preventDefault();event.stopPropagation();setTextToolProperties(previous==="text");setTool(previous);}
+
         if (event.key === "Alt") {
           if (altHeld) { event.preventDefault(); event.stopPropagation(); }
           setAltHeld(false);
@@ -523,23 +933,32 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
       }}
       onKeyDown={(event) => {
         if (event.defaultPrevented || editorInputConsumesKeys(event.target) || event.currentTarget.closest("[hidden]")) return;
+        if(spaceHeld && event.key.toLowerCase()==="f" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.nativeEvent.isComposing && event.keyCode!==229) {
+          event.preventDefault();event.stopPropagation();if(!event.repeat && !locked && !transforming && !textEditing.active && !adjustmentEditing.active && !propertiesEditing.active && !canvasRef.current?.hasGesture())preferences.cycleCanvasColor(event.shiftKey);return;
+        }
+        if(event.key.toLowerCase()==="f" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode!==229) {
+          event.preventDefault();event.stopPropagation();if(!event.repeat && !textEditing.active)setScreenMode(EDITOR_SCREEN_MODES[(EDITOR_SCREEN_MODES.findIndex(mode=>mode.id===(display.state.screenMode??"standard"))+1)%3]!.id);return;
+        }
         if (textEditing.active) {
           if (event.nativeEvent.isComposing || event.keyCode===229) return;
           if (event.key==="Escape" || ((event.ctrlKey || event.metaKey) && event.key==="Enter")) {
-            event.preventDefault();event.stopPropagation();endText(event.key!=="Escape");
+            event.preventDefault();event.stopPropagation();endText(event.key!=="Escape" || preferences.value.useEscapeToCommit);
           }
           return;
         }
-        if (event.key === "Alt" && (tool === "brush" || tool === "eraser") && !event.nativeEvent.isComposing && event.keyCode !== 229 && !locked && !canvasRef.current?.hasGesture()) {
+        if((event.code==="Backquote" || event.key==="`" || event.key==="~") && !event.ctrlKey && !event.metaKey && !event.altKey && !event.nativeEvent.isComposing && event.keyCode!==229 && !locked && !transforming && !adjustmentEditing.active && !propertiesEditing.active && (tool==="brush" || tool==="pencil")) {
+          event.preventDefault();event.stopPropagation();temporaryErase.current=true;return;
+        }
+        if (event.key === "Alt" && (tool === "brush" || tool === "pencil" || tool === "bucket") && !event.nativeEvent.isComposing && event.keyCode !== 229 && !locked && !canvasRef.current?.hasGesture()) {
           event.preventDefault(); event.stopPropagation(); setAltHeld(true); return;
         }
         if (!event.nativeEvent.isComposing && event.keyCode !== 229 && canvasRef.current?.selectionKey?.(event.key,true)) {
           event.preventDefault(); event.stopPropagation(); return;
         }
-        const action = resolveEditorShortcut(event.nativeEvent, isEditorMac());
+        const action = resolveEditorShortcut(event.nativeEvent, isEditorMac(),preferences.value.useShiftForToolSwitch);
         if (!action) return;
         if (action.kind === "confirm" && !transforming) return;
-        if (action.kind === "nudge" && tool !== "move") return;
+        if (action.kind === "nudge" && tool !== "move" && tool!=="marquee" && tool!=="lasso" && !action.pixels && !((tool==="brush" || tool==="pencil" || tool==="eraser") && action.dx!==0 && !action.duplicate)) return;
         if (action.kind === "escape" && nudge.current) {
           event.preventDefault(); event.stopPropagation(); nudge.current = null; endTransform(false); return;
         }
@@ -559,37 +978,67 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
           }
         }
         event.preventDefault(); event.stopPropagation();
-        if (event.repeat && action.kind !== "brush" && action.kind !== "view" && action.kind !== "nudge") return;
+        if (event.repeat && action.kind !== "brush" && action.kind !== "view" && action.kind !== "navigate" && action.kind !== "nudge") return;
+        if(action.kind==="tool" && action.tool!=="transform" && !event.shiftKey && !locked && !springBusy())springTools.current.press(event.key.toLowerCase(),tool,action.tool==="brush" && action.cycle && (tool==="brush" || tool==="pencil") ? tool==="brush"?"pencil":"brush":action.tool,performance.now());
         applyShortcut(action);
       }}>
 
-      <EditorMenuBar commands={commands} readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
-        display={{state:display.state,toggle:toggleDisplay}} displayDisabled={displayDisabled} viewDisabled={viewDisabled}
+      {scriptImport.input}
+      <EditorMenuBar textClipboard={textClipboard} textActions={commands.get("type.create")?.allowed?{canInsertLorem,insertLorem,
+        canAntialias:!locked && !transforming && !textEditing.composing && !adjustmentEditing.active && !propertiesEditing.active && (textEditing.active || !!commands.get("type.antiAlias.smooth")?.enabled),antialias:text.antialias,
+        canOrientation:!locked && !transforming && !textEditing.composing && !adjustmentEditing.active && !propertiesEditing.active && (textEditing.active || !!commands.get("type.orientation.vertical")?.enabled),
+        setOrientation:mode=>{if(locked || transforming || textEditing.composing || adjustmentEditing.active || propertiesEditing.active || canvasRef.current?.hasGesture() || nudge.current || !commands.get(`type.orientation.${mode}`)?.allowed)return;if(textEditing.active)textEditing.update({orientation:mode});else run(`type.orientation.${mode}`);},
+        setAntialias:mode=>{if(locked || transforming || textEditing.composing || adjustmentEditing.active || propertiesEditing.active || canvasRef.current?.hasGesture() || nudge.current || !commands.get(`type.antiAlias.${mode}`)?.allowed)return;if(textEditing.active)textEditing.update({antialias:mode});else run(`type.antiAlias.${mode}`);}}:undefined} theme={theme} commands={commands} readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
+        display={{...display,state:display.state,toggle:toggleDisplay,setScreenMode:display.setScreenMode?setScreenMode:undefined}} displayDisabled={displayDisabled} viewDisabled={viewDisabled}
+        cloneSourceAvailable={!!commands.get("cloneSource.list")?.allowed}
+        brushPresetsAvailable={!!commands.get("brush.presets.list")?.allowed}
+        guides={guideControls}
         mergeLabel={(documentView?.layers.filter(layer => layer.selected || layer.active).length ?? 0) > 1 ? "合并图层" : activeLayer?.kind === "group" ? "合并组" : "向下合并"}
         canUndo={documentView?.canUndo ?? false} canRedo={documentView?.canRedo ?? false}
         canTransform={!!documentView?.transformFrame} canTransformSelection={!!documentView?.selectionFrame}
         onTransform={selectionOnly => chooseTool("transform", selectionOnly)}
         onView={action => applyShortcut({kind: "view", action})}
+        onSearch={search.available?()=>{if(!canvasRef.current?.hasGesture()) search.open();}:undefined}
+        onPreferences={preferences.available?()=>{if(!canvasRef.current?.hasGesture() && !nudge.current) preferences.open();}:undefined}
         onCommand={runLayerAction} onApply={() => void applySave()} canSave={canSave} saving={busy}
-        {...(documents ? { documents } : {})} />
-      <div className="photo-editor__contextbar" hidden={!display.state.toolsVisible}>
-        <span className="photo-editor__tool-label">{toolLabel}</span>
-          {transforming ? <TransformOptions linked={transformLinked} onLinkedChange={setTransformLinked} reference={transformReference} onReferenceChange={setTransformReference} frame={transformFrame ?? null} matrix={transformMatrix} readonly={locked} onValidChange={setTransformValid} onPreview={previewTransform} onConfirm={() => endTransform(true)} onCancel={() => endTransform(false)} /> : null}
-          {tool === "move" ? <label><input type="checkbox" checked={autoSelect} disabled={locked} onChange={(event) => setAutoSelect(event.currentTarget.checked)} />自动选择图层</label> : null}
+        {...(documents ? { documents:{...documents,onDuplicateDocument:documents.onDuplicateDocument?()=>{if(!canvasRef.current?.hasGesture() && !nudge.current && !displayDisabled)documents.onDuplicateDocument?.();}:undefined,...(newDocumentDialog.available?{onNewDocument:()=>{if(!canvasRef.current?.hasGesture() && !nudge.current && !displayDisabled)newDocumentDialog.open();}}:{}),...(exportDialog.available?{onExport:()=>{if(!canvasRef.current?.hasGesture() && !nudge.current && !displayDisabled)exportDialog.open();}}:{})} } : {})} />
+      <div className="photo-editor__contextbar" data-narrow-options={display.state.narrowOptionsBar || undefined} hidden={!chromeVisible || !display.state.optionsVisible}>
+        <ToolResetMenu key={`${snapshot.view.sessionActiveIndex}:${tool}`} tool={tool} label={toolLabel??tool} disabled={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active} onReset={()=>{if(!canvasRef.current?.hasGesture())toolReset.resetCurrent();}} onAll={toolReset.available?()=>{if(!canvasRef.current?.hasGesture())toolReset.confirmAll();}:undefined}/>
+          {transforming ? <TransformOptions resolutionDpi={documentView?.resolutionDpi??72} linked={transformLinked} onLinkedChange={setTransformLinked} reference={transformReference} onReferenceChange={setTransformReference} frame={transformFrame ?? null} matrix={transformMatrix} readonly={locked} onValidChange={setTransformValid} onPreview={previewTransform} onConfirm={() => endTransform(true)} onCancel={() => endTransform(false)} /> : null}
+          {tool==="bucket"?<BucketOptions controller={controller} value={bucket} onChange={patch=>setBucket(current=>({...current,...patch}))} disabled={locked}/>:null}
+          {tool === "move" ? <label><input type="checkbox" checked={autoSelect} disabled={locked} onChange={(event) => setAutoSelect(event.currentTarget.checked)} />自动选择</label> : null}
+          {tool==="move" ? <label><input type="checkbox" checked={panelLayout.showMoveTransform} disabled={locked} onChange={event=>updatePanels({showMoveTransform:event.currentTarget.checked})}/>显示变换控件</label>:null}
+          {tool==="move" ? <select title="自动选择目标" value={autoSelectTarget} disabled={locked} onChange={event=>setAutoSelectTarget(event.currentTarget.value as "layer"|"group")}><option value="group">组</option><option value="layer">图层</option></select>:null}
           {tool === "move" ? <Button size="sm" disabled={locked || !documentView?.transformFrame} onClick={() => chooseTool("transform")}>自由变换</Button> : null}
+          {tool==="move"?<LayerLayoutControls quick commands={commands} readonly={locked || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active} hasSelection={documentView?.hasSelection??false} onCommand={(id,params)=>{if(!canvasRef.current?.hasGesture() && !nudge.current)run(id,params??null);}}/>:null}
           {(tool === "marquee" || tool === "lasso") ? <Button size="sm" disabled={locked || !documentView?.selectionFrame} onClick={() => chooseTool("transform",true)}>变换选区</Button> : null}
+          {tool==="eyedropper"?<EyedropperOptions value={sampleSettings} onChange={setSampleSettings} disabled={locked}/>:null}
+          {tool==="magicWand"?<MagicWandOptions value={magicWand} onChange={patch=>setMagicWand(current=>({...current,...patch}))} disabled={locked}/>:null}
+          {tool==="retouch"?<RetouchOptions tool={retouchTool} value={retouch} onChange={patch=>setRetouch(current=>({...current,...patch}))} disabled={locked || transforming} patterns={retouchPatterns} resolutionDpi={documentView?.resolutionDpi??72}/>:null}
+          {tool==="text"?<TextStyleControls style={textEditing.textStyle} size={textEditing.style.size} disabled={locked || transforming || textEditing.composing} onChange={patch=>textEditing.updateStyle(patch)}/>:null}
+          {painting?<div className="photo-editor__brush-settings" data-brush-settings-wrap="true"><BrushSettingsPanel value={brushDynamics} disabled={locked||transforming} onChange={changeBrushDynamics}/></div>:null}
+          {painting?symmetry.controls:null}
           {renderOptions("tools")}
 
       </div>
+      {display.state.screenModeError && !chromeVisible?<div className="photo-editor__screen-error">{display.state.screenModeError}</div>:null}
       <div className="photo-editor__body">
-        <EditorToolRail ellipse={ellipse} onMarqueeKind={setEllipse} tool={tool} onTool={chooseTool} readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
-          hidden={!display.state.toolsVisible}
+        <EditorToolRail retouchTool={retouchTool} onRetouchTool={chosen=>{setRetouchTool(chosen);chooseTool("retouch");}} verticalTextDisabled={!commands.get("type.orientation.vertical")?.allowed} textOrientation={textEditing.style.orientation} onTextOrientation={mode=>{
+          if(locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || canvasRef.current?.hasGesture() || nudge.current || mode==="vertical" && !commands.get("type.orientation.vertical")?.allowed)return;
+          chooseTool("text");if(commands.get(`type.orientation.${mode}`)?.allowed)textEditing.update({orientation:mode});
+        }} screenMode={display.state.screenMode} onScreenMode={display.setScreenMode?setScreenMode:undefined} onView={action=>canvasRef.current?.view(action)} doubleColumn={panelLayout.toolbarDouble} onToggleColumns={()=>updatePanels({toolbarDouble:!panelLayout.toolbarDouble})} ellipse={ellipse} line={marqueeLine} onMarqueeKind={(ellipse,line)=>{setEllipse(ellipse);setMarqueeLine(line);}} tool={tool} onTool={chooseTool} readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
+          hidden={!chromeVisible || !display.state.toolsVisible}
+          onEditColor={colorPicker.available?target=>{if(!canvasRef.current?.hasGesture())colorPicker.open(colors[target],target==="foreground"?setColor:setBackground);}:undefined}
           color={colors.foreground} onColor={setColor} background={colors.background} onBackground={setBackground} onColorAction={colorAction} />
         <EditorCanvasMenu commands={commands} disabled={displayDisabled} transforming={transforming}
           canTransform={!!documentView?.transformFrame} canTransformSelection={!!documentView?.selectionFrame}
           canConfirm={transformValid} hasGesture={() => !!canvasRef.current?.hasGesture() || !!nudge.current}
           onTransform={selectionOnly => chooseTool("transform", selectionOnly)} onEndTransform={endTransform} onCommand={run}>
-          <PhotoCanvas ref={canvasRef}
+          <StickyModifierContext.Provider value={display.state.stickyModifiers??NO_STICKY_MODIFIERS}><PhotoCanvas ref={canvasRef}
+            onNavigatorFrame={display.state.navigatorVisible?onNavigatorFrame:undefined}
+            pixelGrid={display.state.pixelGridVisible&&display.state.extrasVisible?{contextKey:`${documentView?.documentKey??snapshot.view.sessionActiveIndex}:${documentView?.revision}:${detailVersion}`,read:readPixelGrid}:undefined}
+            onPointerPosition={display.state.infoVisible?setInfoPoint:undefined}
+            showScrollbars={!display.state.screenMode || display.state.screenMode==="standard"}
             view={canvasView}
             {...(renderCanvasBackground ? { renderBackground: renderCanvasBackground } : {})}
             documentWidth={documentView?.width ?? 0}
@@ -597,6 +1046,22 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
             interactive={!locked}
             tool={canvasTool}
             positioning={propertiesEditing.positioning}
+            resolutionDpi={documentView?.resolutionDpi??72}
+            screenResolution={preferences.value.screenResolution}
+            measurementUnit={preferences.value.measurementUnit} pointPicaSize={preferences.value.pointPicaSize}
+            pasteboard={preferences.value.pasteboard}
+            transparency={preferences.value.transparency}
+            selectedBounds={selectedContentBounds(documentView?.layers??[])}
+            enableGestures={preferences.value.enableGestures}
+            overscroll={preferences.value.overscroll}
+            zoomWithScrollWheel={preferences.value.zoomWithScrollWheel} zoomWithTrackpadPinch={preferences.value.zoomWithTrackpadPinch}
+            zoomScrubby={zoomScrubby}
+            animatedZoom={preferences.value.animatedZoom}
+            zoomClickedPointToCenter={preferences.value.zoomClickedPointToCenter}
+            enableFlickPanning={preferences.value.enableFlickPanning}
+            showTransformationValues={preferences.value.showTransformationValues}
+            hasSelection={!!documentView?.hasSelection}
+            selectionContains={point=>{const result=controller.selectionContains(point.x,point.y);return result.ok && result.value;}}
             selectionOutline={selectionTransform ? documentView?.selectionOutline : transformSession.active ? [] : documentView?.selectionOutline}
             showSelectionEdges={display.state.extrasVisible}
             selectionMatrix={selectionTransform ? transformMatrix : undefined}
@@ -604,54 +1069,178 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
               if (!transformSession.begin(!pixels)) return false;
               setSelectionTransform(!pixels); setTransformMatrix(IDENTITY_MATRIX); return true;
             }}
-            transformFrame={(transforming || (tool === "move" && display.state.extrasVisible)) && !spaceHeld ? transformFrame : null}
+            transformFrame={(transforming || (tool === "move" && display.state.extrasVisible && (panelLayout.showMoveTransform || boundaryMoveActive))) && !spaceHeld ? transformFrame : null}
             transformMatrix={transformMatrix}
             transformLinked={transformLinked} transformReference={transformReference} onTransformReferenceChange={setTransformReference}
             transformMoveOnly={tool === "move"}
-            onMoveStart={(point, modifiers) => transformSession.beginMove({ ...point, autoSelect: documentView?.editTarget !== "mask" && !documentView?.hasSelection && autoSelect !== modifiers.toggleAuto, duplicate: modifiers.duplicate })}
-            onMovePreview={previewTransform}
+            moveHoverKey={`${autoSelect}:${autoSelectTarget}:${documentView?.revision}:${documentView?.editTarget}:${documentView?.hasSelection}:${display.state.extrasVisible}:${locked}`}
+            onMoveHover={(point,modifiers)=>{
+              if(locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || !display.state.extrasVisible || documentView?.editTarget==="mask" || documentView?.hasSelection || autoSelect===modifiers.toggleAuto || !controller.moveHoverAt)return null;
+              const result=controller.moveHoverAt({...point,target:autoSelectTarget});if(result.ok)return result.value;setMessage(result.message);return null;
+            }}
+            guides={documentView?.guides}
+            guidePreferences={guidePreferences}
+            onGuidesChange={action=>{
+              if(locked || !display.state.extrasVisible)return;
+              if(action.kind==="create")run("view.newGuide",{orientation:action.orientation,position:action.position});
+              else if(action.kind==="move")run("view.moveGuide",{orientation:action.orientation,index:action.index,position:action.position});
+              else run("view.deleteGuide",{orientation:action.orientation,index:action.index});
+            }}
+            onRulerOrigin={origin=>{if(!locked)run("view.setRulerOrigin",{x:origin[0],y:origin[1]});}}
+            measureMoveDistance={display.state.extrasVisible && tool==="move" && !locked}
+            onMoveMeasure={(point)=>{
+              const selectedIds=new Set((documentView?.layers??[]).filter(row=>row.selected).map(row=>row.id));
+              if(locked || !controller.moveHoverAt || !selectedIds.size)return undefined;
+              const result=controller.moveHoverAt({...point,target:autoSelectTarget});
+              if(!result.ok){setMessage(result.message);return undefined;}
+              // null 或命中自身选择：上游此时量到画布边缘。
+              if(!result.value || selectedIds.has(result.value.layer))return null;
+              const frame=result.value.frame;
+              return [frame[0],frame[1],frame[2],frame[3]] as const;
+            }}
+            onMovePick={(point,modifiers)=>{
+              if(documentView?.editTarget==="mask" || documentView?.hasSelection || autoSelect===modifiers.toggleAuto) return true;
+              const result=controller.pickLayerAt({...point,target:autoSelectTarget,mode:modifiers.add?"add":"replace"});
+              if(!result.ok) {setMessage(result.message);return false;}
+              refreshPreview();
+              if(result.value!==null)return true;
+              const fresh=controller.snapshot().view.document;
+              if(!fresh || !controller.snapshot().commands.get("layer.selectInRect")?.allowed)return false;
+              moveBoxOwner.current={key:fresh.documentKey,revision:fresh.revision,target:autoSelectTarget};return "box";
+            }}
+            onMoveBoxEnd={(start,end,add,dragged)=>{
+              const owner=moveBoxOwner.current;moveBoxOwner.current=null;
+              const fresh=controller.snapshot().view.document;
+              if(locked || !owner || !fresh || fresh.documentKey!==owner.key || fresh.revision!==owner.revision || !controller.canDispatchCommands())return;
+              if(dragged){const width=end.x-start.x,height=end.y-start.y;if(!width || !height)return;
+                run("layer.selectInRect",{...start,width,height,target:owner.target,mode:add?"add":"replace"});
+              }else if(start.x<0 || start.y<0 || start.x>=fresh.width || start.y>=fresh.height)run("select.deselectLayers",{});
+              refreshPreview();
+            }}
+            moveBoundingBox={tool==="move" && preferences.value.showBoundingBoxWhenDraggingLayer}
+            onMoveStart={(point, modifiers) => {const started=transformSession.beginMove({ ...point, autoSelect:false, duplicate: modifiers.duplicate, wholeLayer:modifiers.wholeLayer, selectedPixels:modifiers.selectedPixels ?? (documentView?.hasSelection && tool==="move") });if(started && tool==="move" && preferences.value.showBoundingBoxWhenDraggingLayer) setBoundaryMoveActive(true);return started;}}
+            onMovePreview={previewMoveTransform}
             onMoveEnd={(matrix) => { previewTransform(matrix); endTransform(true); }}
             onMoveCancel={() => endTransform(false)}
             onTransformBegin={() => transformSession.begin()}
-            onTransformPreview={previewTransform}
+            onTransformPreview={previewMoveTransform}
             onTransform={(matrix) => { previewTransform(matrix); if (!transforming) endTransform(true); }}
             onTransformCancel={() => { if (!transforming) endTransform(false); }}
             ellipse={ellipse}
+            marqueeLine={marqueeLine}
+            marqueeConstraint={marqueeConstraintValid?{mode:marqueeConstraint.mode,width:Number(marqueeConstraint.width),height:Number(marqueeConstraint.height)}:undefined}
             selectionMode={selectionMode}
             onText={(placement)=>{revealProperties();return textEditing.begin(placement);}}
-            renderOverlay={(origin,zoom)=>textEditing.active ? <TextInputOverlay editing={textEditing} origin={origin} zoom={zoom} disabled={locked} onEnd={endText} /> : null}
+            onBucket={point=>{
+              const params=bucketParams(bucket,point,colors.foreground,documentView?.editTarget??"pixels");
+              if(!params){setMessage("请输入 1–100% 不透明度、0–255 容差，并选择填充图案。");return;}
+              if(rasterizeBeforePaint(()=>{const result=controller.dispatch("paint.bucket",params);setMessage(result.ok?null:result.message);refreshPreview();}))return;
+              run("paint.bucket",params);
+            }}
+            onTextEdit={point=>{
+              if(locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active) return;
+              const hit=controller.pickLayerAt({...point,target:"layer",select:false});
+              if(!hit.ok) {setMessage(hit.message);return;}
+              const id=hit.value;
+              if(typeof id!=="number" || controller.snapshot().view.document?.layers.find(layer=>layer.id===id)?.kind!=="text") return;
+              const selected=controller.dispatch("layer.select",{layer:id});if(!selected.ok) {setMessage(selected.message);return;}
+              if(textEditing.begin({layer:id,...point})) {setTool("text");revealProperties();}
+            }}
+            renderOverlay={(origin,zoom)=><><ModifierKeysPanel display={{...display,state:{...display.state,modifiersVisible:chromeVisible && display.state.modifiersVisible}}} disabled={locked}/>{painting?symmetry.overlay(origin,zoom,documentView?.width??0,documentView?.height??0):null}{textEditing.active ? <TextContextMenu editing={textEditing} clipboard={textClipboard} disabled={locked} onEnd={endText} onLorem={canInsertLorem?insertLorem:undefined}><TextInputOverlay editing={textEditing} origin={origin} zoom={zoom} disabled={locked} preciseCursor={preferences.value.cursors.other==="precise"} smartQuotes={preferences.value.useSmartQuotes} escapeCommits={preferences.value.useEscapeToCommit} onEnd={endText}
+              onFormat={command=>{
+                if(locked || textEditing.composing)return;
+                // 格式快捷键（I127）只写已开放的字符/段落字段，正式提交仍由原生 `type.setStyle` 完成。
+                if(command.kind==="style"){
+                  const style=command.style;
+                  const patch:Record<string,unknown>={};
+                  if(style.caps==="all")patch.caps="all";
+                  if(style.underline===true)patch.underline=true;
+                  if(style.strikethrough===true)patch.strikethrough=true;
+                  if(style.fauxBold===true){patch.fauxBold=true;textEditing.update({bold:true});}
+                  if(style.fauxItalic===true)patch.fauxItalic=true;
+                  textEditing.updateStyle(patch);
+                  return;
+                }
+                if(command.kind==="hyphenate"){textEditing.updateStyle({hyphenate:!textEditing.textStyle?.hyphenate});return;}
+                // 相对步进：以当前草稿值为基准，缺少基准时用原生默认值起步。
+                const current=textEditing.textStyle;
+                const step=command.amount;
+                switch(command.field){
+                  case "leadingBy": textEditing.updateStyle({leading:Math.max(.01,Math.min(5000,(current?.leading??textEditing.style.size*1.2)+step))});return;
+                  case "baselineShiftBy": textEditing.updateStyle({baselineShift:Math.max(-5000,Math.min(5000,(current?.baselineShift??0)+step))});return;
+                  case "trackingBy": textEditing.updateStyle({tracking:Math.max(-1000,Math.min(10000,(current?.tracking??0)+step))});return;
+                  case "leading": textEditing.updateStyle({leading:Math.max(.01,Math.min(5000,step))});return;
+                }
+              }}/></TextContextMenu> : null}</>}
+            cursors={preferences.value.cursors} brushHardness={brush.hardness}
             brushSize={brush.size}
+            eraserMode={brush.eraserMode}
+            brushResize={{values:brush,hardness:preferences.value.varyBrushHardnessOnHud,commit:values=>setBrush(current=>({...current,...values}))}}
+            strokeAnchor={strokePreviewAnchor?.key===String(snapshot.view.sessionActiveIndex)?strokePreviewAnchor.point:null}
             sampling={altHeld}
-            onSampleColor={(point) => { const result = controller.sampleColor(point.x,point.y); if (result.ok) { if (result.value) setColor(result.value); } else setMessage(result.message); }}
+            samplingColors={{foreground:colors.foreground,background:colors.background,current:sampledColor}}
+            onSampleColor={(point,modifiers) => { const result = controller.sampleColor(point.x,point.y,sampleSettings); if (result.ok) {setSampledColor(result.value); if (result.value) {if(modifiers?.background)setBackground(result.value);else setColor(result.value);} } else setMessage(result.message); }}
             onMarquee={applyMarquee}
             onLasso={applyLasso}
-            onSelectionClick={(point, mode = selectionMode) => {
-              if (mode === "replace" && documentView?.hasSelection && !pointInSelection(point, documentView.selectionOutline)) run("select.deselect");
+            onSelectionClick={(_point, mode = selectionMode) => {
+              if (mode === "replace" && documentView?.hasSelection) run("select.deselect");
+            }}
+            onMagicWand={(point,mode)=>{
+              if(commands.get("select.magicWand")?.allowed) run("select.magicWand",buildMagicWand(point,magicWand,mode));
             }}
             onStrokeStart={beginStroke}
-            onStrokeMove={(points) => { if (strokeEnd.current && points.length) strokeEnd.current.point = points[points.length-1]; liveStroke.append(points); }}
-            onStroke={() => { if (liveStroke.finish() && strokeEnd.current) strokeAnchor.current = strokeEnd.current; strokeEnd.current = null; }}
-            onStrokeCancel={() => { liveStroke.cancel(); strokeEnd.current = null; }}
-          />
+            onStrokeTap={point=>{if(liveStroke.replaceTap(point) && strokeEnd.current)strokeEnd.current={...strokeEnd.current,point};}}
+            onStrokeMove={(points) => { if (strokeEnd.current && points.length) strokeEnd.current.point = points[points.length-1]; if(tool==="retouch"){if(retouchPath.current)retouchPath.current.push(...points);return;} liveStroke.append(points); }}
+            onStroke={(points) => {
+              if(tool==="retouch"){
+                const path=retouchPath.current??points;retouchPath.current=null;strokeEnd.current=null;
+                const spec=RETOUCH_SPEC(retouchTool);if(!spec || !path.length)return;
+                const params=buildRetouch(retouchTool,path[0]!,path,retouch,colors.foreground,documentView?.editTarget??"pixels",canvasView.viewport.zoom,selectionMode);
+                if(params)run(spec.command,params);
+                return;
+              }
+              if (liveStroke.finish() && strokeEnd.current) {strokeAnchor.current = strokeEnd.current;setStrokePreviewAnchor({...strokeEnd.current});} strokeEnd.current = null;
+            }}
+            onStrokeCancel={() => { if(tool==="retouch"){retouchPath.current=null;strokeEnd.current=null;return;} liveStroke.cancel(); strokeEnd.current = null; }}
+          /></StickyModifierContext.Provider>
         </EditorCanvasMenu>
 
-        <EditorSidebar display={display} canChange={()=>!canvasRef.current?.hasGesture()} disabled={displayDisabled || transforming}
+        <EditorSidebar info={<>{display.state.navigatorVisible?<NavigatorPanel key={navigatorDocumentKey} contextKey={`${navigatorDocumentKey}:${documentView?.revision}:${detailVersion}`} frame={navigatorFrame?.key===navigatorDocumentKey?navigatorFrame.frame:null} read={readNavigator} transparency={preferences.value.transparency} navigate={navigatorNavigate} zoomTo={navigatorZoom} blocked={displayDisabled} pinch={preferences.value.zoomWithTrackpadPinch}/>:null}{display.state.histogramVisible?<HistogramPanel documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} contextKey={`${documentView?.revision}:${detailVersion}`} read={readHistogram}/>:null}{display.state.infoVisible?<InfoPanel key={snapshot.view.sessionActiveIndex} contextKey={`${documentView?.documentKey??snapshot.view.sessionActiveIndex}:${documentView?.revision}:${detailVersion}`} point={infoPoint} size={sampleSettings.size} unit={preferences.value.measurementUnit} pointPicaSize={preferences.value.pointPicaSize} resolutionDpi={documentView?.resolutionDpi??72} read={readInfo}/>:null}<CloneSourcePanel controller={controller} visible={!!display.state.cloneSourceVisible} disabled={displayDisabled||transforming} documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} allowed={!!commands.get("cloneSource.list")?.allowed} message={setMessage}/><BrushPresetPanel controller={controller} visible={!!display.state.brushPresetsVisible} disabled={displayDisabled||transforming} documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} canDefineFromSelection={!!commands.get("brush.defineFromSelection")?.allowed && !!commands.get("brush.defineFromSelection")?.enabled} defineBlockedReason={commands.get("brush.defineFromSelection")?.disabledReason ?? "请先建立非空像素选区"}/></>} display={{...display,state:{...display.state,sidebarVisible:chromeVisible && display.state.sidebarVisible}}} canChange={()=>!canvasRef.current?.hasGesture()} disabled={displayDisabled || transforming}
           properties={<section className="photo-editor__panel photo-editor__panel--properties">
             <header className="photo-editor__panel-title"><span>{collapseControl("propertiesCollapsed","属性")}属性</span><span>{propertyTool==="mask"?"蒙版":propertyTool==="text"?"文字":propertyTool==="adjustment"?"调整":"图层"}</span></header>
             <div className="photo-editor__object-properties">
               <p className="photo-editor__property-name">{activeLayer?.name??"未选择图层"}</p>
               {propertyTool ? renderOptions("properties") : <>
                 <p>{documentView?.width} × {documentView?.height} px · {documentView?.mode}</p>
-                {documentView?.transformFrame ? <dl className="photo-editor__geometry-properties"><dt>X / Y</dt><dd>{documentView.transformFrame[0]} / {documentView.transformFrame[1]} px</dd><dt>宽 / 高</dt><dd>{documentView.transformFrame[2]-documentView.transformFrame[0]} / {documentView.transformFrame[3]-documentView.transformFrame[1]} px</dd></dl>:null}
                 {documentView?.transformFrame ? <Button size="sm" disabled={locked || transforming} onClick={()=>chooseTool("transform")}>变换所选图层</Button>:null}
               </>}
+                {documentView && propertyFrame && propertyTool!=="mask" ? <LayerGeometryControls key={`${documentView.documentKey}:${documentView.revision}:${documentView.activeLayerId}:${preferences.value.measurementUnit}`} frame={propertyFrame} linked={transformLinked} onLinkedChange={setTransformLinked}
+                  unit={preferences.value.measurementUnit} dpi={documentView.resolutionDpi??72} pointPicaSize={preferences.value.pointPicaSize} documentSize={documentView}
+                  disabled={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || !commands.get("edit.transform")?.allowed || !commands.get("edit.transform")?.enabled}
+                  onApply={matrix=>{
+                    const current=controller.snapshot().view.document;
+                    if(locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || visibilityEditing.active || nudge.current || canvasRef.current?.hasGesture() || !commands.get("edit.transform")?.allowed || !commands.get("edit.transform")?.enabled || !current || current.documentKey!==documentView.documentKey || current.revision!==documentView.revision)return false;
+                    if(!transformSession.beginMove({x:propertyFrame[0],y:propertyFrame[1],autoSelect:false,duplicate:false,wholeLayer:true}))return false;transformSession.preview(matrix);
+                    if(!transformSession.commit()){transformSession.cancel();return false;}setMessage(null);return true;
+                  }}/>:null}
             </div>
           </section>}
           layers={
-          <LayerPanel collapseControl={collapseControl("layersCollapsed","图层")}
+          <LayerPanel workspaceOwner={controller} collapseControl={collapseControl("layersCollapsed","图层")}
             view={view}
             commands={commands}
-            readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
+            readonly={baseLocked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
+            visibilityEditing={visibilityEditing}
+            onDelete={bypass=>documentView?.editTarget==="mask" && activeLayer?.hasMask ? run("layer.layerMask.delete",{layer:activeLayer.id}):layerDialogs.delete(bypass)}
+            onTrashMask={layer=>layerDialogs.mask(layer)}
+            onFitLayer={layer=>{
+              if(locked || !run("layer.select",{layer:layer.id,mode:"replace"}))return;
+              const doc=controller.snapshot().view.document;canvasRef.current?.view("fitLayers",selectedContentBounds(doc?.layers??[]));
+            }}
+            onEditContent={layer=>requestLayerEditor(layer,"content")}
+            onEditStyle={layer=>requestLayerEditor(layer,"style")}
+            onEditMask={layer=>requestLayerEditor(layer,"mask")}
+            blendEditing={propertiesEditing.blendEditing}
             opacityEditing={{...propertiesEditing,disabled:locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.styleActive}}
             styleEditor={<LayerStyleEditor editing={propertiesEditing.styleEditing} disabled={!activeLayer || !!activeLayer.effectiveLocks.all || locked || transforming || textEditing.active || adjustmentEditing.active || (propertiesEditing.active && !propertiesEditing.styleActive)}/> }
             thumbnail={typeof controller.layerThumbnail === "function" ? readThumbnail : undefined}
@@ -662,35 +1251,34 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
               if (run(`layer.layerMask.${operation}`,layerParam)) {setTextToolProperties(false);revealProperties();}
             }}
             onMask={(layer,modifiers) => modifiers.shift ? run("layer.layerMask.enabled",{layer:layer.id,enabled:!layer.maskEnabled}) : selectTarget(layer,true,modifiers.alt)}
-            onToggleVisible={(layer) => run("layer.setProps", { layer: layer.id, visible: !layer.visible })}
+            onToggleVisible={(layer,{alt}) => alt ? run("layer.showOnly",{layer:layer.id}) : run("layer.setProps", { layer: layer.id, visible: !layer.visible })}
             onBlend={(layer, blend) => run("layer.setProps", { layer: layer.id, blend })}
             onRename={(layer, name) => run("layer.setProps", { layer: layer.id, name })}
             onCommand={(id,params)=>params===undefined ? runLayerAction(id) : run(id,params)}
+            reorderPreview={{
+              // 面板开关（I218/I177）：默认开启，可在偏好或此菜单里关闭。
+              enabled: !locked && preferences.value.previewLayerReorder,
+              begin: () => { controller.beginReorderPreview(); },
+              preview: params => { if(!controller.previewReorder(params).ok) return; refreshPreview(); },
+              end: () => { if(controller.endReorderPreview().ok) refreshPreview(); }
+            }}
           />
           } history={<HistoryPanel collapseControl={collapseControl("historyCollapsed","操作历史")} view={view} readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active} onUndo={() => run("edit.undo")} onRedo={() => run("edit.redo")}
-            onGoTo={(index) => {
-              canvasRef.current?.cancelGesture();
-              const count = (documentView?.history.length ?? 1) - 1 - index;
-              for (let step = 0; step < Math.abs(count); step++) {
-                const result = controller.dispatch(count > 0 ? "edit.undo" : "edit.redo");
-                if (!result.ok) { setMessage(result.message); break; }
-              }
-            }} />
+            commands={snapshot.commands} onHistoryCommand={run}
+            onGoTo={index=>{if(canvasRef.current?.hasGesture())return;run("history.selectState",{state:index});}} />
         } />
       </div>
 
-      <div className="photo-editor__status">
-        <span>{readonly ? "只读" : ({ idle: "准备中", "loading-module": "加载中", opening: "打开中", editing: "编辑中", freezing: "正在导出", saving: "正在保存", saved: "已保存", unavailable: "不可用", failed: "操作失败" })[snapshot.state.phase]}</span>
+      <div className="photo-editor__status" hidden={!chromeVisible}>
+        <span>{readonly ? "只读" : ({ idle: "准备中", "loading-module": "加载中", opening: "打开中", editing: "编辑中", freezing: "正在导出", saving: snapshot.state.savePercent===undefined ? "正在保存" : `正在保存 ${snapshot.state.savePercent}%`, saved: "已保存", unavailable: "不可用", failed: "操作失败" })[snapshot.state.phase]}</span>
         {documentView ? (
-          <span>
-            {documentView.width}×{documentView.height} · {documentView.mode} · {documentView.layers.length} 层
-            {documentView.hasSelection ? display.state.extrasVisible?" · 有选区":" · 有选区（边界已隐藏）" : ""}
-          </span>
+          <><ZoomField key={snapshot.view.sessionActiveIndex??"none"} zoom={canvasView.viewport.zoom} width={documentView.width} height={documentView.height} disabled={locked} onChange={zoom=>canvasRef.current?.zoomTo(zoom)}/><DocumentStatus document={documentView} tool={toolLabel??tool}/>{documentView.hasSelection?<span>{display.state.extrasVisible?"有选区":"有选区（边界已隐藏）"}</span>:null}</>
         ) : (
           <span>未打开文档</span>
         )}
         {snapshot.state.dirty ? <span>有未保存修改</span> : null}
-        {message || snapshot.state.message ? <span className="photo-editor__message">{message ?? snapshot.state.message}</span> : null}
+        {missingFonts.fonts.length?<span className="photo-editor__message" title={missingFonts.fonts.join("、")}>缺少字体：{missingFonts.fonts.slice(0,3).join("、")}{missingFonts.fonts.length>3?` 等 ${missingFonts.fonts.length} 种`:""}，正在使用替代字体。{dialogs && !readonly?<Button size="sm" disabled={displayDisabled || transforming} onClick={()=>missingFonts.open()}>替换…</Button>:null}</span>:null}
+        {message || snapshot.state.message || theme.error || display.state.screenModeError ? <span className="photo-editor__message">{message ?? snapshot.state.message ?? theme.error ?? display.state.screenModeError}</span> : null}
         <span className="photo-editor__status-gap" />
       </div>
     </div>

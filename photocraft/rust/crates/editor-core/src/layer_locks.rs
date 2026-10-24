@@ -27,8 +27,15 @@ pub(crate) fn check(session:&Session,id:&str,params:&Value)->Result<()> {
     if id=="layer.moveTo" || id.starts_with("layer.arrange.") {
         if let Some(state)=session.active() {
             let ids=if let Some(ids)=params["layers"].as_array() {ids.iter().filter_map(Value::as_u64).map(LayerId).collect::<Vec<_>>()}
-                else {params["layer"].as_u64().map(LayerId).or(state.active_layer).into_iter().collect()};
+                else if let Some(layer)=params["layer"].as_u64() {vec![LayerId(layer)]}
+                else {crate::layer_preview::selected_roots(state)};
             if ids.iter().any(|id|state.doc.effective_locks(*id).all) {return Err(error(id,"所选图层包含全部锁定的图层，请先解锁再调整顺序"));}
+            if id=="layer.arrange.reverse" {
+                let paths=ids.iter().filter_map(|id|state.doc.path_of(*id)).collect::<Vec<_>>();
+                if paths.iter().any(|path| paths.first().is_some_and(|first|path[..path.len()-1]!=first[..first.len()-1])) {
+                    return Err(error(id,"反转顺序只支持同一父组中的图层"));
+                }
+            }
             if id=="layer.moveTo" {
                 if let Some(target)=params["target"].as_u64().map(LayerId) {
                     let parent=if params["position"].as_str()==Some("into") {Some(target)} else {
@@ -42,7 +49,20 @@ pub(crate) fn check(session:&Session,id:&str,params:&Value)->Result<()> {
     Ok(())
 }
 
+pub(crate) fn check_via_cut(session:&Session,params:&Value)->Result<()> {
+    let id="layer.new.layerViaCut";
+    if !params.is_null() && !params.as_object().is_some_and(|fields|fields.is_empty()) {return Err(error(id,"通过剪切新建图层不接受额外参数"));}
+    let state=session.active().ok_or(EditorError::NoDocument)?;
+    if crate::layer_preview::mask_target(state) {return Err(error(id,"请先选择图层内容，不能把蒙版剪切为图层"));}
+    let target=state.active_layer.ok_or_else(||error(id,"请先选择像素图层"))?;
+    crate::layer_preview::require_visible(state,&[target],id)?;
+    if !matches!(state.doc.layer(target).map(|layer|&layer.content),Some(photocraft_doc::LayerContent::Raster(_))) {return Err(error(id,"通过剪切新建图层只支持像素图层"));}
+    let locks=state.doc.effective_locks(target);
+    if locks.pixels || locks.all {return Err(error(id,"目标图层已锁定像素，请先解锁"));}
+    Ok(())
+}
 pub(crate) fn disabled_reason(session:&Session,id:&str)->Option<String> {
+    if id=="layer.new.layerViaCut" {return check_via_cut(session,&Value::Null).err().map(|error|error.to_string());}
     if id.starts_with("layer.arrange.") {
         return check(session,id,&Value::Null).err().map(|error| match error {EditorError::CommandFailed{message,..}=>message,_=>unreachable!()});
     }

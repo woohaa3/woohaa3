@@ -1,3 +1,4 @@
+import {cycleBlend} from "./layer-blends.js";
 /**
  * 编辑器工具参数与坐标映射回归
  * （change: 2026-10-16-integrate-photocraft-image-editing，任务 3.4/3.5/3.6）。
@@ -8,8 +9,15 @@ import { describe, expect, it } from "vitest";
 import { IMAGE_PROJECT_LIMITS } from "@woohaa3/photocraft-protocol";
 import {
   DEFAULT_BRUSH,
+  constrainMoveOffset,
   buildBrightnessContrast,
   buildFeather,
+  buildMagicWand,
+  buildSelectionModify,
+  clampSelectionRadius,
+  DEFAULT_MAGIC_WAND,
+  DEFAULT_COLOR_RANGE,
+  buildColorRange,
   buildHueSaturation,
   buildLasso,
   buildRectSelection,
@@ -159,4 +167,54 @@ it("绘画坐标保留图外点；非法数值不进入内核", () => {
   expect(screenToDocument(550, 550, viewport, false)).toEqual({ x: 900, y: 700 });
   expect(screenToDocument(NaN, 0, viewport, false)).toBeNull();
   expect(screenToDocument(0, 0, { ...viewport, width: Infinity })).toBeNull();
+});
+
+
+it("移动轴约束保留迟滞、支持反向及八方向，释放 Shift 的原始偏移由调用方保留",()=>{
+  expect(constrainMoveOffset({x:10,y:9},null,4)).toEqual({x:10,y:0});
+  expect(constrainMoveOffset({x:10,y:11},{x:10,y:0},4)).toEqual({x:10,y:0});
+  expect(constrainMoveOffset({x:10,y:15},{x:10,y:0},4)).toEqual({x:0,y:15});
+  expect(constrainMoveOffset({x:-20,y:-2},{x:10,y:0},4)).toEqual({x:-20,y:0});
+  const diagonal=constrainMoveOffset({x:10,y:12},null,8);
+  expect(diagonal.x).toBeCloseTo(11);expect(diagonal.y).toBeCloseTo(11);
+  expect(constrainMoveOffset({x:0,y:0},null,4)).toEqual({x:0,y:0});
+});
+
+it("混合循环两端回绕，组才包含穿透；画笔参数保留独立模式",()=>{
+  expect(cycleBlend("Normal",-1)).toBe("Luminosity");expect(cycleBlend("Luminosity",1)).toBe("Normal");expect(cycleBlend("Normal",-1,true)).toBe("Pass Through");
+  expect(buildStroke([{x:1,y:2}],{...DEFAULT_BRUSH,mode:"Multiply"})).toMatchObject({mode:"Multiply"});
+});
+
+it("brush orientation is compiled into the native brush patch without changing default params",()=>{
+ expect(buildStroke([{x:1,y:2}],{...DEFAULT_BRUSH,angle:-14})).toMatchObject({brush:{angle:-14}});
+ expect(buildStroke([{x:1,y:2}],DEFAULT_BRUSH)).not.toHaveProperty("brush");
+});
+
+it("铅笔保留子像素输入交由内核吸附，硬边满流量与背景色按整笔传递",()=>{
+ const points=[{x:4.8,y:5.9,pressure:.5}];
+ const pencil=buildStroke(points,{...DEFAULT_BRUSH,autoErase:true},{pencil:true,backgroundColor:"#123456"});
+ expect(pencil).toMatchObject({strokeCommand:"paint.pencil",points:[[4.8,5.9,.5]],autoErase:true,backgroundColor:"#123456"});
+ expect(pencil).not.toHaveProperty("hardness");expect(pencil).not.toHaveProperty("flow");
+ const block=buildStroke(points,{...DEFAULT_BRUSH,autoErase:true,eraserMode:"block"},{erase:true,zoom:2});
+ expect(block).toMatchObject({strokeCommand:"paint.pencil",block:true,autoErase:false,erase:true,zoom:2});
+ expect(buildStroke(points,DEFAULT_BRUSH)).not.toHaveProperty("strokeCommand");
+});
+
+it("魔棒与颜色范围参数保持原生范围并省略不适用字段",()=>{
+  expect(buildMagicWand({x:10.4,y:20.6},{tolerance:300,antialias:false,contiguous:false,sampleAllLayers:true},"add"))
+    .toEqual({x:10,y:21,tolerance:255,antiAlias:false,contiguous:false,sampleAllLayers:true,mode:"add"});
+  expect(buildMagicWand({x:0,y:0},DEFAULT_MAGIC_WAND,"replace")).toMatchObject({tolerance:32,antiAlias:true,contiguous:true,sampleAllLayers:false});
+  const sampled=buildColorRange({...DEFAULT_COLOR_RANGE,select:"sampledColors",color:"#00ff00",fuzziness:999,localized:true,range:150});
+  expect(sampled).toEqual({select:"sampledColors",color:"#00ff00",fuzziness:200,localized:true,range:100,invert:false,sampleAllLayers:true,mode:"replace"});
+  const tones=buildColorRange({...DEFAULT_COLOR_RANGE,select:"highlights",fuzziness:130});
+  expect(tones).toEqual({select:"highlights",fuzziness:100,invert:false,sampleAllLayers:true,mode:"replace"});
+  expect(buildColorRange({...DEFAULT_COLOR_RANGE,select:"outOfGamut"})).not.toHaveProperty("fuzziness");
+});
+
+it("选区修改命令使用固定引擎半径范围并在越界时夹紧",()=>{
+  expect(buildSelectionModify("select.modify.border",0)).toEqual({radius:1});
+  expect(buildSelectionModify("select.modify.border",500)).toEqual({radius:200});
+  expect(buildSelectionModify("select.modify.expand",12.6)).toEqual({radius:13});
+  expect(buildSelectionModify("select.modify.contract",Number.NaN)).toEqual({radius:1});
+  expect(clampSelectionRadius("select.modify.smooth",501)).toBe(500);
 });
