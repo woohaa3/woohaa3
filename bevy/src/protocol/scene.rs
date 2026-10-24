@@ -360,6 +360,8 @@ pub(crate) struct ScopeGroundDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CompositeAssetPresentation {
     #[serde(default)]
+    pub(crate) panel: Option<super::CompositeContainerPanel>,
+    #[serde(default)]
     pub(crate) ownership_links: Option<CompositeOwnershipLinks>,
     #[serde(default)]
     pub(crate) root_placement: Option<super::ModelPlacement>,
@@ -442,6 +444,7 @@ fn default_true() -> bool {
 impl CompositeAssetPresentation {
     /// 范围几何必须有限且非负尺寸；媒体平面几何必须有限、正尺寸。
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if let Some(panel) = &self.panel { panel.validate()?; }
         if ![self.x, self.y, self.width, self.height]
             .iter()
             .all(|v| v.is_finite())

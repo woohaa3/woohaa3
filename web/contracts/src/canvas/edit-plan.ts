@@ -13,6 +13,7 @@
  *
  * 纯函数：只读取传入画布并用共享 reducer 模拟；不访问 DOM/网络/Yjs。
  */
+import { filmSetObjectOwnershipOf } from "./film-set-object-container.js";
 import { planPositionEdit } from "./edit-plan-position.js";
 import type { CanvasCommand } from "./commands.js";
 import { applyCanvasCommands } from "./command-reducer.js";
@@ -82,7 +83,10 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   // 在同一批次内维护，因此新增/删除不进入结构 diff（否则通用路径会把派生副作用记成独立增删，
   // 撤销时会尝试删除受保护预览并被正确拒绝）。但**既有**预览的布局变化（位置/尺寸/zIndex/父级）
   // 是用户显式动作，必须进入受保护编辑日志，故保留在 commonNodes 中参与字段差异规划。
-  const addedNodes = [...afterNodes.values()].filter((node) => !beforeNodes.has(node.id) && !isShotPreviewNodeType(node.type));
+  // Default object containers are also derived; recording their automatic creation would
+  // make redo fail after reconciliation restores them during undo of a legacy scene edit.
+  // Explicit removals remain in history so hide/delete undo restores the original layout.
+  const addedNodes = [...afterNodes.values()].filter((node) => !beforeNodes.has(node.id) && !isShotPreviewNodeType(node.type) && !filmSetObjectOwnershipOf(after.nodeData[node.id]));
   const removedNodes = [...beforeNodes.values()].filter((node) => !afterNodes.has(node.id) && !isShotPreviewNodeType(node.type));
   const commonNodes = [...afterNodes.values()].filter((node) => beforeNodes.has(node.id));
   const addedEdges = [...afterEdges.values()].filter((edge) => !beforeEdges.has(edge.id));

@@ -135,6 +135,12 @@ export function evaluateFilmSetPrecondition(
  * 归一化与资产/来源校验，保持整批原子。
  */
 export function applyFilmSetOperation(work: WorkingState, operation: EditOperation): CommandApplyResult {
+  if (operation.kind === "film-set-item-set") {
+    const animation = animationOf(work, operation.nodeId);
+    if (!animation || !animation.filmSetContent.items.some(item => item.id === operation.item.id)) return reject("edit-operation-invalid", "被替换的片场对象不存在");
+    return patchNodeData(work, operation.nodeId, fromAnimation({ ...animation,
+      filmSetContent: { ...animation.filmSetContent, items: animation.filmSetContent.items.map(item => item.id === operation.item.id ? operation.item : item) } }));
+  }
   if (operation.kind === "film-set-item-transform") {
     const animation = animationOf(work, operation.nodeId);
     if (!animation) return reject("edit-operation-invalid", `片场 ${operation.nodeId} 不存在或内容非法`);

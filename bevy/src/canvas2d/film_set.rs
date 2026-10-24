@@ -110,7 +110,7 @@ fn draw_scope_title(
 }
 
 /// 范围抓手：地面矩形 8 个方形（四顶点 + 四边中点）；普通矩形右下角方形（与普通节点一致）。
-fn draw_scope_grip(geometry: &mut Geometry, theme: &ThemeResource, grip: &super::scope::ScopeGrip, base_z: f32) {
+pub(super) fn draw_scope_grip(geometry: &mut Geometry, theme: &ThemeResource, grip: &super::scope::ScopeGrip, base_z: f32) {
     match grip {
         super::scope::ScopeGrip::Handles(handles) => {
             let half = super::scope::DIAMOND_GRIP_LEG / 2.0;

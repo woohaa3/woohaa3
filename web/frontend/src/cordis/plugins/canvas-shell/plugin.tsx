@@ -47,7 +47,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
         describe: ({ nodeId, nodeType }) => {
           // group 横条只显示分组动作（批量执行/整理/解组，change: 2026-10-16-add-group-selection-toolbar
           // design D1）；下载是媒体内容动作，不属于分组。
-          if (nodeType === "group" || nodeType === "audio") return null;
+          if (nodeType === "group" || nodeType === "audio" || nodeType === "composite-asset") return null;
           const readiness = resolveNodeDownloadAvailability({
             canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
             nodeId,

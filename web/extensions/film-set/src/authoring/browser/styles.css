@@ -157,3 +157,8 @@
 .model-editor-dock[data-film-set] .model-editor input, .model-editor-dock[data-film-set] .model-editor select { height: 32px; box-sizing: border-box; font: inherit; }
 .model-editor-dock[data-film-set] .model-editor label, .model-editor-dock[data-film-set] .model-editor__focus-title { font-size: 13px; }
 @media (max-height: 850px) { .film-set-object-list { max-height: 160px; } }
+
+
+.film-set-object-list__item { display: flex; align-items: center; gap: 4px; }
+.film-set-object-list__item > .film-set-object-row { flex: 1; min-width: 0; }
+.film-set-object-list__item > .ui-button { flex-shrink: 0; }

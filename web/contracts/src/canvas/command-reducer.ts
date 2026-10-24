@@ -15,6 +15,7 @@
  * 唯一状态/原子边界不随拆分改变：所有命令作用于同一 `WorkingState`，`finalize` 一次性
  * 规范化写回；输入 mapping reconciliation 与 revision/no-op 判定保持同一原子批次。
  */
+import { reconcileFilmSetObjectContainers } from "./command-reducer/film-set-object-containers.js";
 import type { CanvasCommand } from "./commands.js";
 import type { ServerCanvas } from "./domain/index.js";
 import { applyEditCommand } from "./command-reducer/edit-command.js";
@@ -73,6 +74,13 @@ export function applyCanvasCommands(
   const previewResult = reconcileShotPreviews(work, shotPreviewContext);
   if (!previewResult.ok) return previewResult;
 
+  const positioned = new Set<string>();
+  for (const command of commands) {
+    if (command.type === "node.update" && command.position) positioned.add(command.nodeId);
+    if (command.type === "edit.apply") for (const op of command.operations) if (op.kind === "node-update" && op.position) positioned.add(op.nodeId);
+  }
+  const objects = reconcileFilmSetObjectContainers(work, canvas, positioned);
+  if (!objects.ok) return objects;
   return finalize(canvas, work, now);
 }
 

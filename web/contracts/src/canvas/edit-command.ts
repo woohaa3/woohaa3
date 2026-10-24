@@ -271,6 +271,9 @@ function decodeOperation(value: unknown): EditOperation | null {
       }
       return { kind: "film-set-item-transform", nodeId: value.nodeId, itemId: value.itemId, localTransform: transform.value };
     }
+    case "film-set-item-set":
+      return isNonEmptyString(value.nodeId) && isRecord(value.item) && isNonEmptyString(value.item.id)
+        ? { kind: "film-set-item-set", nodeId: value.nodeId, item: value.item as FilmSetItem } : null;
     case "film-set-item-remove":
       return isNonEmptyString(value.nodeId) && isNonEmptyString(value.itemId)
         ? { kind: "film-set-item-remove", nodeId: value.nodeId, itemId: value.itemId }

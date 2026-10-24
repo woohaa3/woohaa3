@@ -10,6 +10,7 @@ import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeModelCameras } from "../model-cameras.js";
 import { decodeImageEditDocument } from "../image-edit.js";
 import { decodeFilmSetNodeData, decodeModel3DNodeData, type FilmSetNodeData } from "../canvas-node-model.js";
+import { filmSetObjectOwnershipOf } from "../film-set-object-container.js";
 import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, GAME_FURNACE_EXTENSION_ID, isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
 import { decodeModelContentVersion, modelSourceHash, normalizeModelDefinition } from "../model-definition.js";
 import { animationSnapshotHash } from "../animation-snapshot.js";
@@ -96,6 +97,7 @@ export function validateSelfContained3DNodePatch(
   const node = work.nodes.find((entry) => entry.id === nodeId);
   if (!node) return null;
   const mergedData = { ...(work.nodeData[nodeId] ?? {}), ...value } as CanvasNodeData;
+  if (filmSetObjectOwnershipOf(mergedData)) return null; // full ownership/field validation runs once per batch
   if (isFilmSetNode(node.type, mergedData)) {
     const previous = work.nodeData[nodeId] ?? {};
     const decoded = decodeFilmSetNodeData(mergedData);
@@ -152,6 +154,7 @@ export function normalizeSelfContained3D(
   merged: CanvasNodeData
 ): CommandApplyResult | null {
   const targetNode = work.nodes.find((entry) => entry.id === nodeId);
+  if (filmSetObjectOwnershipOf(merged)) return null;
   if (isCompositeAssetNodeType(targetNode?.type) && readCompositeAssetExtensionId(merged) === CREATURE_VIDEO_ASSETS_EXTENSION_ID) return null;
   if (isFilmSetNode(targetNode?.type, merged)) {
     // items-only 片场：不得归一化/写入任何顶层 authored 模型字段（D8）。

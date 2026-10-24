@@ -13,7 +13,8 @@ const NODES = [
   { id: "img", type: "image" },
   { id: "vid", type: "video" },
   { id: "model", type: "model3d" },
-  { id: "text", type: "text" }
+  { id: "text", type: "text" },
+  { id: "film", type: "composite-asset" }
 ];
 
 function canvasWith(overrides: Partial<ServerCanvas> = {}): ServerCanvas {
@@ -22,7 +23,7 @@ function canvasWith(overrides: Partial<ServerCanvas> = {}): ServerCanvas {
 
 describe("节点顶部横条显隐（任务 3.1/3.9）", () => {
   it("单选适用类型节点时显示并固定来源", () => {
-    for (const [id, type] of [["img", "image"], ["vid", "video"], ["model", "model3d"]] as const) {
+    for (const [id, type] of [["img", "image"], ["vid", "video"], ["model", "model3d"], ["film", "composite-asset"]] as const) {
       expect(resolveNodeActionToolbarView({ selectedNodeIds: [id], nodes: NODES, focused: false, writable: true }))
         .toEqual({ nodeId: id, nodeType: type, writable: true });
     }

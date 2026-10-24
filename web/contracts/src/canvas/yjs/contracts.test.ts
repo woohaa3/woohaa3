@@ -38,7 +38,7 @@ const VALID_BATCH = {
 describe("格式与版本契约（任务 1.4）", () => {
   it("固定格式/协议版本与顶层 shared type 名", () => {
     expect(YJS_CANVAS_FORMAT_VERSION).toBe("woohaa3-ycanvas-v2");
-    expect(YJS_SYNC_PROTOCOL_VERSION).toBe(5);
+    expect(YJS_SYNC_PROTOCOL_VERSION).toBe(6);
     expect(Object.values(YJS_SHARED_TYPES).sort()).toEqual(
       ["assets", "edges", "jobs", "meta", "nodeData", "nodes"].sort()
     );

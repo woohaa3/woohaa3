@@ -163,6 +163,7 @@ export function buildSceneWithResources(
       else delete node.compositeAsset.geometryQuality;
     }
   }
+  options.compositeAssets?.projectChildren(scene, canvasState);
   // 统一生成运行状态 → 节点底部历史条与聚合运行遮罩投影
   // （change: 2026-10-12-unify-generation-history-strip，design D4/D5）。
   const runState = options.getRunState?.() ?? null;

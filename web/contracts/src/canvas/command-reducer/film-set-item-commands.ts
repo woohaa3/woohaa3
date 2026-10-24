@@ -5,6 +5,8 @@
  * R12）。从**最新权威集合**读取对应 item 后按 `op` 原子更新；缺失对象、kind 不匹配、
  * precondition 不成立时整批拒绝，不按数组序号或客户端旧数组覆盖其他项。
  */
+import { replaceFilmSetObjectModel } from "../film-set-object-replacement.js";
+import { patchNodeData } from "./node-commands.js";
 import type { CanvasCommand } from "../commands.js";
 import { decodeFilmSetNodeData } from "../canvas-node-model.js";
 import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
@@ -36,6 +38,8 @@ function applyFilmSetItemOp(
       });
     case "delete":
       return deleteFilmSetItem({ content, itemId });
+    case "replace-model":
+      return { ok: false, code: "invalid-payload", reason: "模型替换必须从权威来源解析" };
   }
 }
 
@@ -57,7 +61,7 @@ function filmSetItemOpRejectionCode(code: FilmSetItemOpCode): CanvasCommandRejec
  *
  * 从**最新权威集合**读取对应 item 后按 `op` 原子更新；缺失对象、kind 不匹配、precondition
  * 不成立时整批拒绝，不按数组序号或客户端旧数组覆盖其他项。对象动作/播放一律走 clip binding，
- * 因此这里只允许 transform / delete。更新后重新派生 `filmSetContent` 与 `animationSnapshotHash`，
+ * 因此动作仍由片段维护；这里允许 transform / delete / replace-model。更新后重新派生 `filmSetContent` 与 `animationSnapshotHash`，
  * 并复用媒体资产/来源 precondition 校验。
  */
 export function patchFilmSetItem(
@@ -72,6 +76,18 @@ export function patchFilmSetItem(
     return reject("invalid-self-contained-node", "片场对象操作只支持片场复合资产节点（composite-asset + film-set）");
   }
   const previous = work.nodeData[command.nodeId] ?? {};
+  if (command.op.kind === "replace-model") {
+    const op = command.op;
+    const source = work.nodes.find(node => node.id === op.sourceNodeId);
+    if (source?.type !== "model3d") return reject("invalid-self-contained-node", "仅普通 3D 模型可以替换对象");
+    const animation = decodeFilmSetNodeData(previous);
+    if (!animation.ok) return reject("invalid-self-contained-node", animation.reason);
+    const result = replaceFilmSetObjectModel({ animation: animation.value, itemId: command.itemId,
+      sourceNodeId: op.sourceNodeId, sourceData: work.nodeData[op.sourceNodeId],
+      expectedSourceHash: op.expectedSourceHash, expectedModelHash: op.expectedModelHash, expectedItemHash: op.expectedItemHash, importedAt: op.importedAt });
+    if (!result.ok) return reject("invalid-self-contained-node", result.reason);
+    return patchNodeData(work, command.nodeId, canonicalFilmSetFields(result.value) as CanvasNodeData);
+  }
   const content = readFilmSetContent(previous);
   const result = applyFilmSetItemOp(content, command.itemId, command.op);
   if (!result.ok) return reject(filmSetItemOpRejectionCode(result.code), result.reason);

@@ -121,6 +121,7 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<canvas2d::focus_details::FocusDetailBatch>()
         .init_resource::<canvas2d::focus_details::FocusDetailVisuals>()
         .init_resource::<FilmSetTextureBatch>()
+        .init_resource::<canvas2d::scope_panel::PanelImages>()
         .init_resource::<model3d::film_set_media::FilmSetMediaVisuals>()
         .init_resource::<ModelAssetTable>()
         .init_resource::<SurfaceState>()
@@ -161,7 +162,7 @@ fn configure_canvas(app: &mut App) {
                     sync_ready,
                     canvas2d::sync_textures,
                     model3d::film_set_media::sync_film_set_planes,
-                    model3d::film_set_media::sync_film_set_textures,
+                    (canvas2d::scope_panel::sync_images, model3d::film_set_media::sync_film_set_textures).chain(),
                     canvas2d::sync_camera,
                     focus::sync_focus,
                     scene3d::sync_grid.before(crate::isometric_grid::IsometricGridSet::Style),

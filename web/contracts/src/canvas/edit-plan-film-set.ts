@@ -63,7 +63,15 @@ export function planFilmSetItemDiffs(
       const beforeItem = beforeItems.find((entry) => entry.id === afterItem.id)!;
       if (filmSetItemEditHash(beforeItem) === filmSetItemEditHash(afterItem)) continue;
       if (!sameItemExceptTransform(beforeItem, afterItem)) {
-        return { ok: false, reason: `片场对象 ${afterItem.id} 的内容变化无法记录为可撤销的基础摆放` };
+        piece.forwardPre.push({ kind: "film-set-item-state", nodeId: node.id, itemId: afterItem.id, contentHash: filmSetItemEditHash(beforeItem) });
+        piece.forwardPre.push({ kind: "film-set-item-binding-closure", nodeId: node.id, itemId: afterItem.id,
+          bindings: captureItemBindingClosure(beforeAnimation, afterItem.id).map(entry => ({ clipId: entry.clipId, bindingHash: filmSetItemBindingEditHash(entry.binding) })) });
+        piece.inversePre.push({ kind: "film-set-item-binding-closure", nodeId: node.id, itemId: afterItem.id,
+          bindings: captureItemBindingClosure(afterAnimation, afterItem.id).map(entry => ({ clipId: entry.clipId, bindingHash: filmSetItemBindingEditHash(entry.binding) })) });
+        piece.forwardOps.push({ kind: "film-set-item-set", nodeId: node.id, item: afterItem });
+        piece.inversePre.push({ kind: "film-set-item-state", nodeId: node.id, itemId: afterItem.id, contentHash: filmSetItemEditHash(afterItem) });
+        piece.inverseOps.push({ kind: "film-set-item-set", nodeId: node.id, item: beforeItem });
+        continue;
       }
       piece.forwardPre.push({ kind: "film-set-item-state", nodeId: node.id, itemId: afterItem.id, contentHash: filmSetItemEditHash(beforeItem) });
       piece.forwardOps.push({ kind: "film-set-item-transform", nodeId: node.id, itemId: afterItem.id, localTransform: afterItem.localTransform, expectedLocalTransform: beforeItem.localTransform });

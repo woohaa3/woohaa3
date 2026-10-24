@@ -1,5 +1,7 @@
 # 应用插件目录
 
+3D composite 的素材容器与实体产物使用[公共子节点 API](COMPOSITE-CHILDREN.md)。
+
 每个应用插件的前端、后端和共享定义放在 `web/extensions/<extensionId>/` 同一个目录下。
 
 > 扩展根里还可以放**非插件**的共享框架包：包名不以 `@woohaa3/extension-` 开头（扫描按此规则跳过，

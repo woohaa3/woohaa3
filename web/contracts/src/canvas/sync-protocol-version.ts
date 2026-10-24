@@ -10,5 +10,6 @@
  *     由握手/命令解码明确拒绝并提示刷新，不映射、不静默丢弃。
  */
 // v5: static shot image references; v4 normalizers cannot safely write these documents.
-export const YJS_SYNC_PROTOCOL_VERSION = 5 as const;
+// v6: film-set object containers and protected model snapshot replacement.
+export const YJS_SYNC_PROTOCOL_VERSION = 6 as const;
 export type YjsSyncProtocolVersion = typeof YJS_SYNC_PROTOCOL_VERSION;

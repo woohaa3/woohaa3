@@ -124,6 +124,42 @@ mod tests {
     }
 
     #[test]
+    fn first_scene_can_register_more_models_than_the_idle_cache_budget() {
+        clear_model_assets();
+        let count = MODEL_ASSET_MAX_ENTRIES + 4;
+        let mut nodes = Vec::new();
+        for index in 0..count {
+            let signature = format!("first-{index}");
+            let key = format!("v2:{signature}");
+            queue_model_asset(descriptor(&key, &signature, 1.0));
+            let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({
+                "id": format!("object-{index}"), "type": "model",
+                "x": index as f32 * 260.0, "y": 0.0, "width": 248.0, "height": 232.0,
+                "model": { "resourceKey": key, "signature": signature }
+            })).unwrap();
+            // Object containers and ordinary model cards share the same immutable resource table.
+            if index >= 22 {
+                node.composite_asset = Some(serde_json::from_value(serde_json::json!({
+                    "x": 0.0, "y": 0.0, "width": 248.0, "height": 232.0
+                })).unwrap());
+            }
+            nodes.push(node);
+        }
+        let scene = Scene { nodes, ..Scene::default() };
+        assert!(missing_model_asset(&scene).is_none(), "first-frame registration must not evict models before scene acceptance");
+        queue_scene(scene.clone());
+        assert_eq!(model_assets_snapshot().len(), count, "the cache budget applies to idle resources, not live scene models");
+        assert!(missing_model_asset(&scene).is_none());
+
+        let mut next = scene.clone();
+        next.nodes.truncate(1);
+        queue_scene(next.clone());
+        assert!(missing_model_asset(&next).is_none());
+        assert_eq!(model_assets_snapshot().len(), MODEL_ASSET_MAX_ENTRIES, "unused resources are reclaimed after accepting the next scene");
+        clear_model_assets();
+    }
+
+    #[test]
     fn asset_eviction_keeps_scene_referenced_entries() {
         clear_model_assets();
         let protected = "v2:keep";

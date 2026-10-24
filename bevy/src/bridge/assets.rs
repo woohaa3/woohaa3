@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::protocol::{ModelAabbDto, ModelSnapshot, Scene};
 
-/// 不可变模型资源表容量上限（条目数）。超出时按未引用 LRU 淘汰。
+/// 场景接受后的缓存预算（条目数）；正在使用的场景资源不受该上限限制。
 pub(crate) const MODEL_ASSET_MAX_ENTRIES: usize = 32;
 /// 资源字节预算（估算）；与条目上限共同约束大型 mesh 驻留。
 pub(crate) const MODEL_ASSET_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -75,7 +75,9 @@ fn insert(
         }
         table.insert(key.clone(), snapshot);
         touch_asset(&key);
-        evict_assets(&mut table);
+        // Registrations precede set_scene. Evicting here can discard the first
+        // resource of a >32-model batch before the scene can protect its keys.
+        // Keep the incoming batch intact; reclaim idle entries at scene acceptance.
         AssetRegistration::Ok
     })
 }
@@ -196,4 +198,7 @@ pub(crate) fn missing_model_asset(scene: &Scene) -> Option<String> {
 /// 记录当前待渲染场景引用的 resource key（淘汰保护）。
 pub(crate) fn set_scene_asset_keys(keys: HashSet<String>) {
     SCENE_ASSET_KEYS.with(|slot| *slot.borrow_mut() = keys);
+    // This commit point knows the complete incoming reference set. Live models
+    // may exceed the idle-cache budget; only unreferenced entries are evicted.
+    MODEL_ASSETS.with(|resources| evict_assets(&mut resources.borrow_mut()));
 }

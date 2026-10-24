@@ -51,6 +51,15 @@ export function createDoubleClickHandler(core: InteractionCore) {
       }
     }
 
+    const child = cardEntry ? options.compositeAssets?.children(canvasState).get(cardEntry.id) : null;
+    if (child?.kind === "container" && child.focusOwner) {
+      event.preventDefault();
+      setSelection([child.ownerNodeId]);
+      options.onModelFocusIntent?.({ type: "enter", nodeId: child.ownerNodeId,
+        kind: focusKindForModelNodeType("composite-asset", canvasState.nodeData[child.ownerNodeId]) });
+      return;
+    }
+
     // 片场支持模型 picking；普通模型按内嵌预览卡片命中进入聚焦。
     // 命中由 Rust 相机/bounds/placement 派生（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
     // 没有命中任何卡片，或命中的就是模型卡片时才尝试模型 picking。

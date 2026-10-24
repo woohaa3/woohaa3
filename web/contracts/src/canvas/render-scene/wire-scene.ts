@@ -62,7 +62,8 @@ export * from "./wire-shot-preview.js";
  * - v24：shotPreview.backdrop 将每镜头背景传至 preview/capture；旧 renderer 会静默忽略，
  *   因此同步提升能力版本，拒绝混合组合。
  */
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v24" as const;
+/** v25 adds the shared composite container panel (text and reference thumbnails). */
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v25" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
@@ -204,6 +205,8 @@ export type CompositeAssetGeometryQuality = "overview-primitives-v1";
  * 此时基准矩形即范围框。这是纯派生呈现几何，不写规范文档、不进镜头成片。
  */
 export type BevyCompositeAssetPresentation = {
+  /** Shared canvas container surface, rendered inside Bevy. */
+  panel?: import("../composite-children.js").CompositeContainerPanel;
   /** Derived ownership only; local model anchor → target card bottoms. Not editable document edges. */
   ownershipLinks?: { anchor: [number, number, number]; targetNodeIds: string[] };
   rootPlacement?: BevyModelPlacement;

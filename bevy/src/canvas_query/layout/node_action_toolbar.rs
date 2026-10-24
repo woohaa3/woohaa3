@@ -65,7 +65,13 @@ pub(crate) fn node_action_toolbar(
     viewport: Option<(f32, f32, f32)>,
     surface: Option<(f32, f32)>,
 ) -> Option<NodeActionLayout> {
-    node_action_toolbar_for_bounds((node.x, node.y, node.width, node.height), actions, viewport, surface)
+    let bounds = if node.composite_asset.is_some() {
+        let scope = crate::canvas_query::scope::node_scope(node);
+        (scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height)
+    } else {
+        (node.x, node.y, node.width, node.height)
+    };
+    node_action_toolbar_for_bounds(bounds, actions, viewport, surface)
 }
 
 pub(crate) fn node_action_toolbar_for_bounds(
