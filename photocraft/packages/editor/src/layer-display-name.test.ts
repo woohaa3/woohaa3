@@ -27,6 +27,12 @@ describe("displayLayerName", () => {
     expect(displayLayerName("Black & White")).toBe("黑白");
   });
 
+  it("用户命名层的拷贝也换成本地「拷贝」", () => {
+    expect(displayLayerName("开业啦 copy")).toBe("开业啦 拷贝");
+    expect(displayLayerName("开业啦 copy 3")).toBe("开业啦 拷贝 3");
+    expect(displayLayerName("海报 copy")).toBe("海报 拷贝");
+  });
+
   it("用户起的名字原样显示（不猜、不改）", () => {
     for (const name of ["开业海报", "Curves layer", "我的 Layer 0", "Layer 0a", "background"]) {
       expect(displayLayerName(name)).toBe(name);

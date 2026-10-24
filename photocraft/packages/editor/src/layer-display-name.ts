@@ -13,6 +13,8 @@
 
 /** 默认图层名：`Layer` / `Layer 3` / `Layer 3 copy` / `Layer 3 copy 2`。 */
 const LAYER_PATTERN = /^Layer(?: (\d+))?(?: copy(?: (\d+))?)?$/;
+/** 任意名字的拷贝后缀：`<名字> copy` / `<名字> copy 2`（内核 `copy_name` 的产物）。 */
+const COPY_SUFFIX = /^(.+?) copy(?: (\d+))?$/;
 /** 默认调整层名：`Curves` / `Curves 1`。 */
 const ADJUSTMENT_PATTERN = /^(Brightness\/Contrast|Levels|Curves|Exposure|Vibrance|Hue\/Saturation|Color Balance|Black & White|Photo Filter|Channel Mixer|Color Lookup|Invert|Posterize|Threshold|Gradient Map|Selective Color)(?: (\d+))?$/;
 
@@ -66,6 +68,13 @@ export function displayLayerName(name: string): string {
     const copied = name.includes(" copy") ? " 拷贝" : "";
     const ordinal = layer[2] ? ` ${layer[2]}` : "";
     return `图层${index}${copied}${ordinal}`;
+  }
+  // 用户命名的层被拷贝时，内核也只会加 ` copy` 后缀：中文名同样要换成本地的「拷贝」，
+  // 否则图层面板会出现 `开业啦 copy 3` 这种半中文半英文的名字（A11）。
+  const copied = COPY_SUFFIX.exec(name);
+  if (copied) {
+    const base = displayLayerName(copied[1]!);
+    return copied[2] ? `${base} 拷贝 ${copied[2]}` : `${base} 拷贝`;
   }
   const adjustment = ADJUSTMENT_PATTERN.exec(name);
   if (adjustment) {
