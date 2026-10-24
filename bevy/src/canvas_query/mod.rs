@@ -11,6 +11,7 @@
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code))]
 
 pub(crate) mod aggregate;
+pub(crate) mod composite_panel;
 pub(crate) mod curve;
 pub(crate) mod film_set_pick;
 pub(crate) mod gizmo;

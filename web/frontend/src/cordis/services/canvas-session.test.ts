@@ -11,7 +11,7 @@
  * 再应用服务端全量内容（等价于手动删 IndexedDB 的自动版，不需要二次连接）。
  */
 import { IDBFactory } from "fake-indexeddb";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { MESSAGE_TYPE,
@@ -525,5 +525,95 @@ describe("yDocToServerCanvas 参考（确保测试断言用的是权威派生）
     canvas.revision = 7;
     const exported = yDocToServerCanvas(serverCanvasToYDoc(canvas));
     expect(exported.ok && exported.canvas.revision).toBe(7);
+  });
+});
+
+describe("确认回流只发布一次规范/working 快照", () => {
+  async function fixture() {
+    const entry = fakeSocket([]);
+    const events: import("@woohaa3/contracts").TelemetryEventInput[] = [];
+    const remote = {
+      openCanvasSession: () => entry.socket,
+      closeCanvasSession: () => undefined,
+      reconnectCanvasSession: () => undefined
+    } as unknown as CanvasRemoteService;
+    const session = await createCanvasSession({ canvasId: CANVAS, remote,
+      database: new CanvasDatabase({ indexedDb: new IDBFactory() }),
+      telemetry: { record: (event: import("@woohaa3/contracts").TelemetryEventInput) => events.push(event) } as unknown as import("./telemetry-primitives.js").TelemetryClient });
+    const canvas = createEmptyWoohaa3ServerCanvas(CANVAS, NOW);
+    canvas.document.nodes.push({ id: "n1", type: "image", position: { x: 0, y: 0 } });
+    const doc = serverCanvasToYDoc(canvas);
+    const synced = (revision: number) => entry.socket.receive(encodeStatusMessage({ status: "synced", revision }));
+    entry.socket.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, Y.encodeStateAsUpdate(doc)));
+    synced(0);
+    return { session, socket: entry.socket, doc, synced, events };
+  }
+
+  it("重复 synced 和提交不重新导出规范画布；新文档事务才替换快照", async () => {
+    const { session, doc, synced, socket } = await fixture();
+    const store = (await import("./canvas-state/index.js")).woohaa3CanvasStore;
+    try {
+      const original = store.getState().canvas;
+      let publications = 0;
+      const unsubscribe = store.subscribe(() => publications++);
+      try {
+        synced(0); synced(0);
+        expect(store.getState().canvas).toBe(original);
+        expect(publications).toBe(0);
+        const first = session.submitCommands([{ type: "node.update", nodeId: "n1", position: { x: 10, y: 0 } }], "move-first");
+        const second = session.submitCommands([{ type: "node.update", nodeId: "n1", position: { x: 20, y: 0 } }], "move-second");
+        expect(first.ok && second.ok).toBe(true);
+        expect(store.getState().canvas).toBe(original);
+        const before = Y.encodeStateVector(doc);
+        doc.transact(() => {
+          doc.getMap("nodes").set("n1", { id: "n1", type: "image", position: { x: 10, y: 0 } });
+          doc.getMap("meta").set("revision", 1);
+        });
+        socket.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, Y.encodeStateAsUpdate(doc, before)));
+        publications = 0;
+        const seen: number[] = [];
+        const stop = store.subscribe(state => seen.push(state.working!.document.nodes[0]!.position.x));
+        synced(1);
+        stop();
+        // The second local edit must not briefly roll back to the first edit.
+        expect(seen).toEqual([20]);
+        expect(publications).toBe(1);
+        expect(store.getState().canvas).not.toBe(original);
+        synced(1);
+        expect(publications).toBe(1);
+      } finally { unsubscribe(); }
+    } finally { session.shutdown(); }
+  });
+
+  it.each(["result-first", "update-first"])("canvas.save waits for durable result and canonical coverage: %s", async order => {
+    const { session, doc, synced, socket, events } = await fixture();
+    const { encodeJsonMessage } = await import("@woohaa3/contracts/canvas-yjs");
+    let clock = 10;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    try {
+      const submitted = session.submitCommands([{ type: "node.update", nodeId: "n1", position: { x: 10, y: 0 } }], "move-save");
+      expect(submitted.ok).toBe(true);
+      const before = Y.encodeStateVector(doc);
+      doc.transact(() => {
+        doc.getMap("nodes").set("n1", { id: "n1", type: "image", position: { x: 10, y: 0 } });
+        doc.getMap("meta").set("revision", 1);
+      });
+      const result = () => socket.receive(encodeJsonMessage(MESSAGE_TYPE.COMMAND_RESULT, { commandId: "move-save", status: "accepted", revision: 1 }));
+      const update = () => {
+        socket.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, Y.encodeStateAsUpdate(doc, before)));
+        synced(1);
+      };
+      const saves = () => events.filter(event => event.name === "canvas.save");
+      clock = 410;
+      (order === "result-first" ? result : update)();
+      expect(saves()).toHaveLength(0);
+      clock = 610;
+      (order === "result-first" ? update : result)();
+      expect(saves()).toEqual([expect.objectContaining({ result: "success", surface: "sync", durationMs: 600 })]);
+      expect(session.getStatus().remote.pendingCount).toBe(0);
+      if (submitted.ok) expect((await submitted.handle.settled).state).toBe("committed");
+      synced(1); result();
+      expect(saves()).toHaveLength(1);
+    } finally { now.mockRestore(); session.shutdown(); }
   });
 });

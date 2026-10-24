@@ -50,7 +50,7 @@ export const MIN_ICON_SOURCE_SIZE = 1024;
 
 /** Source frontend builds need both WASM bindings, including native desktop UI imports. */
 export const FRONTEND_BUILD_STEPS = [
-  ["exec", "node", "scripts/build-bevy-wasm.mjs"],
+  ["exec", "node", "scripts/build-bevy-wasm.mjs", "--mode", "release"],
   ["exec", "node", "scripts/build-image-editor-wasm.mjs"],
   ["run", "assets:sync"],
   ["-C", "web", "run", "build:units"],

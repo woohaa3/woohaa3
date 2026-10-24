@@ -13,7 +13,7 @@
 import type { ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition, Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
 import {
   decodeImageEditDocument,
-  shotPreviewOwnershipOf, FILM_SET_SHOT_PREVIEW_NODE_TYPE,
+  filmSetObjectOwnershipOf, shotPreviewOwnershipOf, FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   filmSetAssetReferences,
   isImageProjectDocument,
   readFilmSetContent,
@@ -107,6 +107,8 @@ export function buildCanvasCopyPayload(
   // （不产生指向原片场的副本引用）。预览不能单独复制：选择集里没有非预览节点时返回 null（无操作）。
   const previewOwnerByNode = new Map<string, string>();
   for (const node of nodes) {
+    const object = filmSetObjectOwnershipOf(canvas.nodeData[node.id]);
+    if (object) { previewOwnerByNode.set(node.id, object.filmSetNodeId); continue; }
     if (node.type !== FILM_SET_SHOT_PREVIEW_NODE_TYPE) continue;
     const ownership = shotPreviewOwnershipOf(canvas.nodeData[node.id]);
     if (ownership) previewOwnerByNode.set(node.id, ownership.filmSetNodeId);
@@ -125,6 +127,7 @@ export function buildCanvasCopyPayload(
     if (owner && !included.has(owner)) included.delete(id);
   }
 
+  if (included.size === 0) return null;
   const copyNodes: CopyNode[] = nodes
     .filter((node) => included.has(node.id))
     .map(toCopyNode);

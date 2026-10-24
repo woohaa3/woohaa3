@@ -187,3 +187,32 @@ fn node_action_hits_match_layout_after_viewport_and_edge_drag() {
         assert_hit(generation, &node("n1", x, y, 200.0, 120.0), &viewport);
     }
 }
+
+#[test]
+fn composite_node_action_bar_uses_scope_and_tracks_viewport_and_moves() {
+    let original = film_set("n1", 500., 300., 200., 120., Some((450., 200., 400., 240.)));
+    let scene = scene_with_actions(vec![original.clone()]);
+    let base = accept_scene(&scene);
+    let assert_hit = |generation, node: &GraphNode, viewport: &crate::protocol::Viewport| {
+        let bar = crate::canvas_query::layout::node_action_toolbar(node, &scene.node_actions["n1"], Some((viewport.x, viewport.y, viewport.zoom)), None).unwrap();
+        let rect = bar.slots[1].menu.unwrap();
+        assert_eq!(point_query(generation, rect.0 + rect.2 / 2., rect.1 + rect.3 / 2., viewport.zoom, None).hit,
+            Some(results::PointHit::NodeAction { node_id: "n1".into(), action_id: "convert".into(), menu: true }));
+    };
+    let viewport = crate::protocol::Viewport { x: 0., y: 0., zoom: 1. };
+    assert_hit(base, &original, &viewport);
+    let zoom = crate::protocol::Viewport { x: 50., y: 70., zoom: 0.6 };
+    let zoomed = accept_viewport(base, zoom.clone()).unwrap();
+    assert_hit(zoomed, &original, &zoom);
+    let request = crate::protocol::PositionUpdateRequest {
+        version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(), base_scene_generation: base,
+        positions: vec![crate::protocol::NodePosition { id: "n1".into(), x: 600., y: 400. }], viewport: Some(zoom.clone()),
+    };
+    let (moved, _) = accept_positions(&request).unwrap();
+    let mut shifted = original;
+    shifted.x += 100.; shifted.y += 100.;
+    let asset = shifted.composite_asset.as_mut().unwrap();
+    asset.x += 100.; asset.y += 100.;
+    if let Some(ground) = asset.scope_ground.as_mut() { ground.cx += 100.; ground.cy += 100.; }
+    assert_hit(moved, &shifted, &zoom);
+}

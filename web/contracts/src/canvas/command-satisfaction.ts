@@ -165,6 +165,10 @@ function isEditOperationSatisfied(canvas: ServerCanvas, operation: EditOperation
     }
     case "canvas-title-set":
       return (canvas.title ?? "") === operation.title;
+    case "film-set-item-set": {
+      const animation = decodeFilmSetNodeData(canvas.nodeData[operation.nodeId]);
+      return animation.ok && shallowEqual(animation.value.filmSetContent.items.find(item => item.id === operation.item.id), operation.item);
+    }
     case "film-set-item-transform": {
       const animation = decodeFilmSetNodeData(canvas.nodeData[operation.nodeId]);
       if (!animation.ok) return false;
@@ -229,6 +233,9 @@ function filmSetItemSatisfied(
   switch (command.op.kind) {
     case "transform":
       return shallowEqual(item.localTransform, command.op.localTransform);
+    case "replace-model":
+      return item.kind === "model" && item.model.contentVersion.sourceHash === command.op.expectedSourceHash && item.model.contentVersion.contentHash === command.op.expectedModelHash
+        && item.origin?.sourceNodeId === command.op.sourceNodeId && item.origin.importedAt === command.op.importedAt;
   }
 }
 

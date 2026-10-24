@@ -219,6 +219,104 @@ mod tests {
     #[test]
     fn scene_reference_protects_only_descriptors_not_payloads() {
         clear_model_assets();
+        // 场景引用一个已注册的 payload：它只保护 descriptor，不保护 payload。
+        let protected = "v2:scene-only";
+        queue_model_asset(descriptor(protected, "scene-only", 1.0));
+        assert!(model_asset_registered(protected));
+        queue_scene(Scene {
+            nodes: vec![crate::protocol::GraphNode {
+                model_preview: None,
+                composite_asset: None,
+                history_strip: None,
+                aggregate_run: None,
+                shot_preview: None,
+                id: "n".into(),
+                kind: "model".into(),
+                x: 0.0,
+                y: 0.0,
+                width: 224.0,
+                height: 116.0,
+                body: String::new(),
+                title: String::new(),
+                type_label: String::new(),
+                progress: 0.0,
+                busy: false,
+                texture: false,
+                media_loading: false,
+                resizable: false,
+                ghost: false,
+                card_label: None,
+                group: None,
+                model: Some(crate::protocol::ModelReference {
+                    scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
+                    resource_key: protected.to_owned(),
+                    signature: "scene-only".to_owned(),
+                    placement: Default::default(),
+                }),
+            }],
+            ..Scene::default()
+        });
+        // 场景引用只保护 descriptor：撤销 lease 后再注册一批 cold payload 超出预算，
+        // 被场景引用的 payload 也必须能被淘汰（否则 1000 个离屏模型会锁死重型 IR）。
+        for index in 0..(MODEL_ASSET_MAX_ENTRIES + 8) {
+            set_model_payload_leases(std::collections::HashSet::new());
+            let key = format!("v2:pressure-{index}");
+            queue_model_asset(descriptor(&key, &format!("pressure-{index}"), 1.0));
+        }
+        set_model_payload_leases(std::collections::HashSet::new());
+        assert!(!model_asset_registered(protected), "场景引用不得阻止 payload 淘汰");
+        // 但 descriptor 仍在，引用依然是合法 cold：场景不会因 payload 不在而拒绝整帧。
+        assert!(model_descriptor_declared(protected));
+        clear_model_assets();
+    }
+
+    #[test]
+    fn first_scene_can_register_more_models_than_the_idle_cache_budget() {
+        // change: 2026-10-23-scale-canvas-media-residency —— 注册不淘汰、场景接受点回收
+        // 未 lease 的 payload；场景引用只保护 descriptor。
+        clear_model_assets();
+        let count = MODEL_ASSET_MAX_ENTRIES + 4;
+        let mut nodes = Vec::new();
+        for index in 0..count {
+            let signature = format!("first-{index}");
+            let key = format!("v2:{signature}");
+            queue_model_asset(descriptor(&key, &signature, 1.0));
+            let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({
+                "id": format!("object-{index}"), "type": "model",
+                "x": index as f32 * 260.0, "y": 0.0, "width": 248.0, "height": 232.0,
+                "model": { "resourceKey": key, "signature": signature }
+            })).unwrap();
+            // Object containers and ordinary model cards share the same immutable resource table.
+            if index >= 22 {
+                node.composite_asset = Some(serde_json::from_value(serde_json::json!({
+                    "x": 0.0, "y": 0.0, "width": 248.0, "height": 232.0
+                })).unwrap());
+            }
+            nodes.push(node);
+        }
+        let scene = Scene { nodes, ..Scene::default() };
+        assert!(missing_model_descriptor(&scene).is_none(), "first-frame registration must not evict models before scene acceptance");
+        queue_scene(scene.clone());
+        assert_eq!(model_assets_snapshot().len(), count, "first-frame registration with live leases keeps every payload");
+        assert!(missing_model_descriptor(&scene).is_none());
+
+        // 需求集合收敛后（lease 只留显式需求），未使用的 payload 才按预算回收；
+        // descriptor 全部保留，因此仍是合法 cold 引用而不是 unknown resource。
+        let mut next = scene.clone();
+        next.nodes.truncate(1);
+        set_model_payload_leases(["v2:first-0".to_owned()].into_iter().collect());
+        queue_scene(next.clone());
+        assert!(missing_model_descriptor(&next).is_none());
+        assert!(
+            model_assets_snapshot().len() <= MODEL_ASSET_MAX_ENTRIES,
+            "unused payloads are reclaimed within the idle cache budget"
+        );
+        clear_model_assets();
+    }
+
+    #[test]
+    fn asset_eviction_keeps_scene_referenced_entries() {
+        clear_model_assets();
         let protected = "v2:keep";
         queue_model_asset(descriptor(protected, "keep", 1.0));
         // 排队一个引用 protected 的场景。

@@ -1,8 +1,13 @@
 /** Trusted, scope-owned composite asset adapters. Business identity is never inferred from content. */
-import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape } from "@woohaa3/contracts";
+import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene } from "@woohaa3/contracts";
 export type CompositeAssetMediaSource = { planeId: string; nodeId: string; assetId: string; kind: "image" | "video"; playback?: ModelMediaTimeMap; sourceIdentity: string };
 /** A valid content projection may have no 3D resource; null prepare means unavailable. */
 export type CompositeAssetProjection = { resource?: PreparedModelResource; composition?: BevyCompositeAssetCompositionInfo; diagnostic?: string };
+export type CompositeChildPresentation = CompositeChildRelation & {
+  panel?: CompositeContainerPanel;
+  /** Containers can route double-click back to their owning workspace. */
+  focusOwner?: boolean;
+};
 export type CompositeAssetAdapter = {
   extensionId: string;
   owner: string;
@@ -14,6 +19,9 @@ export type CompositeAssetAdapter = {
    * 2026-10-12-align-film-set-scope-with-isometric-grid）。缺省时回落到通用内容类型标签。
    */
   label?: string;
+  /** Declare managed canvas containers and entity cards. The host owns common presentation/dragging. */
+  children?(canvas: ServerCanvas, ownerNodeId: string): readonly CompositeChildPresentation[];
+  childLinkAnchor?: [number, number, number];
   /**
    * 通用范围形状**覆盖**声明（change: 2026-10-12-align-film-set-scope-with-isometric-grid，
    * design D3 修订）。
@@ -123,6 +131,7 @@ export class CompositeAssetRegistry {
       if (shape) shapes.set(node.id, shape);
     }
     for (const id of this.scopeResults.keys()) if (!retained.has(id)) this.scopeResults.delete(id);
+    for (const child of this.children(canvas).values()) if (child.kind === "container") shapes.set(child.nodeId, "rect");
     return shapes;
   }
   scopeDiagnostic(nodeId: string): string | null { return this.scopeResults.get(nodeId)?.diagnostic ?? null; }
@@ -179,6 +188,46 @@ export class CompositeAssetRegistry {
     if (!canvas) return null;
     for (const adapter of this.adapters.values()) if (adapter.projectCanvas) canvas = adapter.projectCanvas(canvas);
     return canvas;
+  }
+  children(canvas: ServerCanvas | null): ReadonlyMap<string, CompositeChildPresentation> {
+    const children = new Map<string, CompositeChildPresentation>();
+    if (!canvas) return children;
+    const nodes = new Map(canvas.document.nodes.map(node => [node.id, node]));
+    for (const owner of canvas.document.nodes) {
+      const adapter = this.resolve(canvas, owner.id);
+      if (!adapter?.children) continue;
+      for (const child of adapter.children(canvas, owner.id)) {
+        if (child.ownerNodeId !== owner.id || child.nodeId === owner.id || !nodes.has(child.nodeId)) continue;
+        if (child.kind !== "container" && child.kind !== "entity") continue;
+        if (children.has(child.nodeId)) throw new Error(`复合资产子节点归属冲突：${child.nodeId}`);
+        if (child.kind === "container" && nodes.get(child.nodeId)?.type !== "composite-asset") throw new Error("容器必须使用 composite-asset 节点");
+        children.set(child.nodeId, child);
+      }
+    }
+    return children;
+  }
+  dragAlongNodeIds(canvas: ServerCanvas | null, ownerNodeId: string): string[] {
+    return [...this.children(canvas).values()].filter(child => child.ownerNodeId === ownerNodeId && child.followOwner !== false).map(child => child.nodeId);
+  }
+  projectChildren(scene: CanvasRenderScene, canvas: ServerCanvas): void {
+    const children = this.children(canvas), nodes = new Map(scene.nodes.map(node => [node.id, node]));
+    const targets = new Map<string, string[]>();
+    for (const child of children.values()) {
+      const node = nodes.get(child.nodeId), owner = nodes.get(child.ownerNodeId);
+      if (!node || !owner?.compositeAsset) continue;
+      const ids = targets.get(child.ownerNodeId) ?? []; ids.push(child.nodeId); targets.set(child.ownerNodeId, ids);
+      if (child.kind === "container" && node.compositeAsset) {
+        node.compositeAsset.scopeShape = "rect";
+        delete node.compositeAsset.scopeGround;
+        node.compositeAsset.panel = child.panel ?? { title: node.title };
+      }
+    }
+    for (const [ownerId, targetNodeIds] of targets) {
+      const owner = nodes.get(ownerId)!;
+      owner.compositeAsset!.ownershipLinks = { anchor: this.resolve(canvas, ownerId)?.childLinkAnchor ?? [0, 0, 0], targetNodeIds };
+    }
+    // Managed entities share the same ownership links as containers. Their media/shot renderer stays intact.
+    scene.shotPreviewLinks = scene.shotPreviewLinks?.filter(link => !children.has(link.previewNodeId)) ?? [];
   }
   blocksFocusInput(): boolean { return [...this.adapters.values()].some(adapter => adapter.blocksFocusInput?.()); }
   keydown(event: KeyboardEvent, canvas: ServerCanvas | null, nodeId: string | null): boolean { return nodeId ? this.resolve(canvas, nodeId)?.keydown?.(event, nodeId) ?? false : false; }

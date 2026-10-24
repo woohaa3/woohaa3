@@ -37,10 +37,10 @@ export type EditNodeField = (typeof EDIT_NODE_FIELDS)[number];
 /**
  * 节点业务字段（nodeData）白名单。
  *
- * 仅允许名称和稳定项目关联，精确恢复字段缺失；不拥有任务进度或其它业务数据。
+ * 仅允许名称、稳定项目关联和片场对象容器显示设置，精确恢复字段缺失；不拥有任务进度或其它业务数据。
  * 结构化字段（prompt/parameters/taskStatus 等）由各自权威路径管理，撤销不得回退。
  */
-export const EDIT_NODE_DATA_FIELDS = ["title", "projectStorageKey", "inputHash", "activeBuildId"] as const;
+export const EDIT_NODE_DATA_FIELDS = ["title", "projectStorageKey", "inputHash", "activeBuildId", "filmSetObjectContainersHidden"] as const;
 export type EditNodeDataField = (typeof EDIT_NODE_DATA_FIELDS)[number];
 
 /** 字段快照：明确区分「不存在」与「null」。 */
@@ -166,6 +166,7 @@ export type EditOperation =
       localTransform: FilmSetLocalTransform;
       expectedLocalTransform?: FilmSetLocalTransform;
     }
+  | { kind: "film-set-item-set"; nodeId: string; item: FilmSetItem }
   /** 片场对象删除：复用 item 删除与全部片段绑定清理语义。 */
   | { kind: "film-set-item-remove"; nodeId: string; itemId: string }
   /**

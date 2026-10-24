@@ -12,6 +12,7 @@ import { canBindPort, findPortOwners, freePort } from "./lib/dev-port-guard.mjs"
 import { startHostWatch } from "./lib/dev-host-watch.mjs";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
 import { syncBevyAssets } from "./sync-bevy-assets.mjs";
+import { resolveDevEntryArgs, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2).filter((value) => value !== "--");
@@ -23,11 +24,16 @@ const usage = `启动 Vite 和统一后端：
   --frontend-port <port>  前端端口（FRONTEND_PORT，默认 5173）
   --backend-port <port>   后端端口（BACKEND_PORT / PORT，默认 5180）
   --native                桌面宿主模式：画布走 native Bevy；仍生成前端导入所需的 WASM 绑定
-  --skip-build            使用已有模块/扩展产物；仍检查带 Rust 函数名的 WASM
+  --skip-build            使用已有模块/扩展产物；仍按所选 Bevy 模式检查 Rust 源码新鲜度
   --free-port             启动前结束占用前后端端口的残留进程（SIGTERM，超时后 SIGKILL）
   --watch                 显式开启宿主源码 watch（默认开启）
   --no-watch              关闭宿主源码 watch
   --help                 显示帮助
+
+Bevy WASM 模式（change: 2026-10-23-optimize-bevy-development-build）：
+  默认 development：Cargo dev profile 增量编译、跳过 wasm-opt，保留 Rust 函数名。
+  ${DEV_MODE_ENV}=performance 启动即改用 release 编译 + wasm-opt -Oz -g，用于本地性能采集。
+  --skip-build 不跳过 Rust 新鲜度检查：改了 bevy/ 源码仍会先重建所选模式的 WASM。
 
 宿主 watch（默认开启）：监听配置根下的包源码，按包重跑它自己的构建脚本（build /
 server:build / 扩展 build:browser + assemble:extensions），宿主进程以 node --watch 运行，
@@ -184,6 +190,8 @@ async function main() {
     return;
   }
   const options = parseOptions();
+  // 非法的 WOOHAA_BEVY_DEV_MODE 在端口探测和任何构建之前失败（change: 2026-10-23）。
+  const bevyModeArgs = resolveDevEntryArgs(process.env);
   // 宿主 watch 默认开启；--no-watch 回到「构建一次 + 普通 node 进程」的旧行为。
   const watch = options.watch ?? true;
   const serviceEnv = loadServiceEnv(root, process.env.WOOHAA3_SERVICE_ENV_FILE);
@@ -238,8 +246,10 @@ async function main() {
 
   syncBevyAssets();
   // Vite resolves both generated binding modules even when the native canvas is active.
-  // Build helpers reuse their caches; --skip-build still ensures a clean checkout can load UI.
-  await run(process.execPath, ["scripts/build-bevy-wasm.mjs", "--keep-names"]);
+  // Build helpers reuse their caches; --skip-build still ensures Rust freshness: the script
+  // always runs Cargo for the selected mode, so a changed bevy/ source cannot be served stale.
+  // change: 2026-10-23-optimize-bevy-development-build —— 模式由 WOOHAA_BEVY_DEV_MODE 选择。
+  await run(process.execPath, ["scripts/build-bevy-wasm.mjs", ...bevyModeArgs]);
   if (stopping) return;
   await run(process.execPath, ["scripts/ensure-photocraft-wasm.mjs"]);
   if (stopping) return;

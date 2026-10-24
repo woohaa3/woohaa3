@@ -71,6 +71,8 @@ export type SyncSessionContext = {
    * 撤权生效后的 commit 被拒绝且不形成新 revision/不广播；撤权前已入队的命令按既有顺序。
    */
   authorizeCommand?: () => Promise<boolean>;
+  /** Queue + authorization + durable commit wall time; excludes transport. */
+  onCommandComplete?: (input: { status: string; latencyMs: number }) => void;
 };
 
 export type SyncSessionStatus =
@@ -99,12 +101,14 @@ export class CanvasSyncSession {
   private synced = false;
   /** write 复核钩子（任务 4.5/6.2/6.3）；未注入时不传（历史行为不变）。 */
   private readonly authorizeCommand: (() => Promise<boolean>) | undefined;
+  private readonly onCommandComplete: SyncSessionContext["onCommandComplete"];
 
   constructor(context: SyncSessionContext) {
     this.room = context.room;
     this.socket = context.socket;
     this.actorId = context.actorId;
     this.authorizeCommand = context.authorizeCommand;
+    this.onCommandComplete = context.onCommandComplete;
     this.limits = { ...DEFAULT_SYNC_LIMITS, ...context.limits };
     this.now = context.now ?? (() => Date.now());
 
@@ -270,6 +274,7 @@ export class CanvasSyncSession {
     // actorId 以**服务端上下文**为准，忽略客户端自报值。
     // write 复核（任务 4.5/6.2/6.3）作为命令选项进入 room 串行队列：撤权后 barrier 拒绝，
     // 不形成新 revision、不广播；检查与持久 commit 之间无无保护授权窗口。
+    const started = performance.now();
     const outcome = await this.room.submit(
       {
         ...batch,
@@ -278,6 +283,9 @@ export class CanvasSyncSession {
       },
       this.authorizeCommand ? { authorize: this.authorizeCommand } : undefined
     );
+    try {
+      this.onCommandComplete?.({ status: outcome.status, latencyMs: Math.max(0, performance.now() - started) });
+    } catch { /* Diagnostics must not affect command confirmation. */ }
 
     if (outcome.ok) {
       this.socket.send(encodeJsonMessage(MESSAGE_TYPE.COMMAND_RESULT, {

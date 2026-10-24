@@ -40,7 +40,7 @@ export type Woohaa3CanvasStoreState = {
 
   hydrate: (canvas: ServerCanvas, issues?: readonly CanvasAggregateIssue[]) => void;
   /** 应用服务端派生的规范画布（Yjs 唯一回流路径）。 */
-  applyRemoteCanvas: (canvas: ServerCanvas) => void;
+  applyRemoteCanvas: (canvas: ServerCanvas, working?: ServerCanvas | null) => void;
   /** 覆盖 working projection（由 working projection store 推入）。 */
   applyWorkingCanvas: (working: ServerCanvas | null) => void;
   commit: (patch: CanvasCommitPatch, now?: string) => CanvasCommitResult;
@@ -117,17 +117,17 @@ export function createWoohaa3CanvasStore() {
       hydrate: (canvas, issues = []) =>
         set({ canvas, working: canvas, issues, lastRejection: null }),
 
-      applyRemoteCanvas: (canvas) =>
+      applyRemoteCanvas: (canvas, working = canvas) =>
         set((state) => ({
           canvas,
-          // canonical 是 working 的新基线；pending 重基由 working projection store 随后
-          // 调用 `applyWorkingCanvas` 推入。这里先回落到 canonical，避免残留上次的 working。
-          working: canvas,
+          // Publish canonical and its rebased working projection together. Subscribers
+          // must never see an intermediate rollback of still-pending edits.
+          working,
           lastRejection: null,
           issues: state.issues
         })),
 
-      applyWorkingCanvas: (working) => set({ working }),
+      applyWorkingCanvas: (working) => { if (get().working !== working) set({ working }); },
 
       commit: (patch, now) => applyCommit((canvas) => commitCanvas(canvas, patch, { now }), now),
       addNode: (node, nodeData, now) =>

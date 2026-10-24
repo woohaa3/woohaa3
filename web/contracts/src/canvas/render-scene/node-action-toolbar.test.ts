@@ -173,19 +173,19 @@ describe("resolveNodeActionToolbarTarget（任务 3.1/3.9）", () => {
     expect(resolveNodeActionToolbarTarget({ selectedNodeIds: [], nodes })).toBeNull();
     expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["img", "vid"], nodes })).toBeNull();
     expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["text"], nodes })).toBeNull();
-    expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["composite"], nodes })).toBeNull();
+    expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["composite"], nodes })).toEqual({ nodeId: "composite", nodeType: "composite-asset" });
     expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["missing"], nodes })).toBeNull();
     // 部分成员（未规范化为 group）的多选不显示分组横条。
     expect(resolveNodeActionToolbarTarget({ selectedNodeIds: ["img", "group"], nodes })).toBeNull();
   });
 
-  it("仅图片/视频/3D/分组是通用横条类型，composite-asset 仍被排除", () => {
+  it("复合资产也能通过通用横条呈现扩展动作", () => {
     expect(isNodeActionToolbarNodeType("image")).toBe(true);
     expect(isNodeActionToolbarNodeType("video")).toBe(true);
     expect(isNodeActionToolbarNodeType("model3d")).toBe(true);
     expect(isNodeActionToolbarNodeType("group")).toBe(true);
     expect(isNodeActionToolbarNodeType("text")).toBe(false);
-    expect(isNodeActionToolbarNodeType("composite-asset")).toBe(false);
+    expect(isNodeActionToolbarNodeType("composite-asset")).toBe(true);
   });
 });
 

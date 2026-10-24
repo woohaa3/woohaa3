@@ -235,7 +235,7 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
             && scene.video_focus.is_none(),
         action_descriptors: scene.node_actions.iter().filter_map(|(id, actions)| {
             let index = *node_index.get(id)?;
-            (!nodes[index].group && !nodes[index].composite_asset).then(|| (index, actions.clone()))
+            (!nodes[index].group).then(|| (index, actions.clone()))
         }).collect(),
         viewport,
         surface: scene.surface.as_ref().map(|s| (s.width, s.height)),
@@ -299,8 +299,8 @@ fn snapshot_node(
         Some(scope) => (scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height),
         None => (node.x, node.y, node.width, node.height),
     };
-    // 顶部操作横条：非 group、非片场纯模型节点可带横条；世界几何随节点移动重算。
-    let node_actions = if group || film_set {
+    // 顶部操作横条：复合资产也可贡献操作，锚定其真实范围；group 使用独立横条。
+    let node_actions = if group {
         None
     } else {
         node_actions.get(&node.id).and_then(|actions| {
@@ -734,7 +734,7 @@ pub(super) fn refresh_node_actions(snapshot: &mut InteractionSnapshot, viewport:
     }
     for (index, actions) in &snapshot.action_descriptors {
         let node = &mut snapshot.nodes[*index];
-        node.node_actions = layout::node_action_toolbar_for_bounds(node.layout_bounds, actions, Some(snapshot.viewport), snapshot.surface);
+        node.node_actions = layout::node_action_toolbar_for_bounds(node.bounds, actions, Some(snapshot.viewport), snapshot.surface);
     }
     // 横条几何随 zoom/pan 变化，命中候选范围也必须同步（design D7 / 任务 7.3）：
     // 只搬动带横条的节点，不重建整张索引。

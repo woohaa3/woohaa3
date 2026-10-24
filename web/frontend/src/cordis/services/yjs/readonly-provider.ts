@@ -109,7 +109,7 @@ export class ReadonlyCanvasProvider {
   private detachOpen: (() => void) | undefined;
   private state: ReadonlyProviderState;
 
-  /** 记录本地是否发生过 transaction（用于断言「本地 transaction 不产生出站」）。 */
+  /** Monotonic document transaction version, including received updates. */
   private localTransactionCount = 0;
   /** 出站消息计数（测试断言只读性）。 */
   private outboundSyncUpdates = 0;
@@ -151,6 +151,11 @@ export class ReadonlyCanvasProvider {
 
   /** 本地 cache transaction 次数（测试断言 cache 不产生出站）。 */
   get localTransactions(): number {
+    return this.localTransactionCount;
+  }
+
+  /** Invalidates derived projections without encoding or traversing the document. */
+  get documentVersion(): number {
     return this.localTransactionCount;
   }
 

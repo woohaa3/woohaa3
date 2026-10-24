@@ -11,7 +11,7 @@
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { createHighEntropyId, remapFilmSetItemIds, decodeFilmSetNodeData, canonicalFilmSetFields, canonicalShotPreviewFields, filmSetAnimationsOf, cloneFilmSetAnimations, LEGACY_FILM_SET_ANIMATION_FIELDS, isFilmSetNode, shotPreviewNodeId, shotPreviewOwnershipOf, SHOT_PREVIEW_SCHEMA_VERSION, FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "@woohaa3/contracts";
+import { filmSetObjectOwnershipOf, filmSetObjectContainerId, filmSetObjectContainerData, createHighEntropyId, remapFilmSetItemIds, decodeFilmSetNodeData, canonicalFilmSetFields, canonicalShotPreviewFields, filmSetAnimationsOf, cloneFilmSetAnimations, LEGACY_FILM_SET_ANIMATION_FIELDS, isFilmSetNode, shotPreviewNodeId, shotPreviewOwnershipOf, SHOT_PREVIEW_SCHEMA_VERSION, FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -135,11 +135,13 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   //     clipId 映射先算一次并复用：nodeData 重写与预览归属必须落到同一份新 clipId，且不得重复
   //     调用 makeId（默认实现会推进模块级序列，重复调用会产生不同 ID）。
   const filmSetClipIds = new Map<string, Map<string, string>>();
+  const filmSetItemIds = new Map<string, Map<string, string>>();
   for (const node of payload.nodes) {
     const data = payload.nodeData[node.id];
     if (!data || !isFilmSetNode(node.type, data)) continue;
     const decoded = decodeFilmSetNodeData(data);
     if (!decoded.ok) continue;
+    filmSetItemIds.set(node.id, new Map(decoded.value.filmSetContent.items.map((item, index) => [item.id, makeId("film-object", index)])));
     const clips = filmSetAnimationsOf(decoded.value).clips;
     filmSetClipIds.set(node.id, new Map(clips.map((clip, index) => [clip.id, makeId("clip", index)])));
   }
@@ -147,6 +149,14 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   // 必须重算节点 ID 与归属。源片场不在载荷内（不应发生）时丢弃该预览，不产生悬空归属。
   const precomputedPreviewData = new Map<string, import("@woohaa3/contracts").CanvasNodeData>();
   for (const node of payload.nodes) {
+    const object = filmSetObjectOwnershipOf(payload.nodeData[node.id]);
+    if (object) {
+      const newOwner = idMap.get(object.filmSetNodeId), newItem = filmSetItemIds.get(object.filmSetNodeId)?.get(object.itemId);
+      if (!newOwner || !newItem) { idMap.delete(node.id); continue; }
+      idMap.set(node.id, filmSetObjectContainerId(newOwner, newItem));
+      precomputedPreviewData.set(node.id, filmSetObjectContainerData(newOwner, newItem));
+      continue;
+    }
     const ownership = shotPreviewOwnershipOf(payload.nodeData[node.id]);
     if (!ownership) continue;
     const newOwner = idMap.get(ownership.filmSetNodeId);
@@ -217,12 +227,12 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   //    （change: 2026-10-08-make-film-set-model-only，design D3）。
   //    预览节点的归属已随 `node.add` 写入，这里跳过。
   for (const node of payload.nodes) {
-    if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE) continue;
+    if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || precomputedPreviewData.has(node.id)) continue;
     const data = payload.nodeData[node.id];
     if (!data || Object.keys(data).length === 0) continue;
     const newId = idMap.get(node.id);
     if (newId === undefined) continue;
-    const remapped = isFilmSetNode(node.type, data) ? remapFilmSetNodeData(data, makeId, filmSetClipIds.get(node.id)) : data;
+    const remapped = isFilmSetNode(node.type, data) ? remapFilmSetNodeData(data, filmSetItemIds.get(node.id), filmSetClipIds.get(node.id)) : data;
     if (!remapped) continue;
     commands.push({
       type: "nodeData.patch",
@@ -359,13 +369,12 @@ function cloneJson(value: Woohaa3CanvasJsonObject): Woohaa3CanvasJsonObject {
  */
 function remapFilmSetNodeData(
   data: Woohaa3CanvasJsonObject,
-  makeId: (prefix: string, index: number) => string,
+  itemIds: Map<string, string> | undefined,
   clipIds: Map<string, string> | undefined
 ): Woohaa3CanvasJsonObject | null {
   const decoded = decodeFilmSetNodeData(data);
   if (!decoded.ok) return null;
-  if (!clipIds) return null;
-  const itemIds = new Map(decoded.value.filmSetContent.items.map((item, index) => [item.id, makeId("film-object", index)]));
+  if (!clipIds || !itemIds) return null;
   const content = remapFilmSetItemIds(decoded.value.filmSetContent, item => itemIds.get(item.id)!);
   const collection = cloneFilmSetAnimations(filmSetAnimationsOf(decoded.value));
   collection.defaultClipId = collection.defaultClipId ? clipIds.get(collection.defaultClipId)! : null;
@@ -374,6 +383,7 @@ function remapFilmSetNodeData(
     for (const binding of clip.bindings) binding.itemId = itemIds.get(binding.itemId)!;
   }
   const shared = { ...data };
+  if (Array.isArray(shared.filmSetObjectContainersHidden)) shared.filmSetObjectContainersHidden = shared.filmSetObjectContainersHidden.flatMap(id => typeof id === "string" && itemIds.has(id) ? [itemIds.get(id)!] : []);
   for (const field of LEGACY_FILM_SET_ANIMATION_FIELDS) delete shared[field];
   return { ...shared, ...canonicalFilmSetFields({ ...decoded.value, filmSetContent: content, filmSetAnimations: collection }) } as Woohaa3CanvasJsonObject;
 }

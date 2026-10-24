@@ -19,6 +19,9 @@ use std::sync::Arc;
 use crate::protocol::{ModelAabbDto, ModelDescriptor, ModelDescriptorDto, ModelSnapshot, Scene};
 
 /// 重型 payload 条目上限（超出时按未被 lease 的 LRU 淘汰）。
+///
+/// 该预算是**冷缓存**上限：被当前需求 lease 的 payload 不受它限制，因此场景接受点
+/// 只需要完整引用集合来保护 descriptor，不会因条目数把正在显示的模型淘汰。
 pub(crate) const MODEL_ASSET_MAX_ENTRIES: usize = 32;
 /// 重型 payload 字节预算（估算）；与条目上限共同约束大型 mesh 驻留。
 pub(crate) const MODEL_ASSET_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -338,8 +341,15 @@ pub(crate) fn missing_model_descriptor(scene: &Scene) -> Option<String> {
 }
 
 /// 记录当前待渲染场景引用的 descriptor key（descriptor 淘汰保护）。
+///
+/// 注册发生在 `set_scene` 之前，因此注册路径不主动淘汰（否则 >32 个模型的批次会在场景
+/// 保护它的 key 之前把自己丢掉）。场景接受点持有**完整**引用集合，是回收空闲 payload 的
+/// 唯一安全时机：这里只淘汰未被需求 lease 的条目（design D5）。
 pub(crate) fn set_scene_descriptor_keys(keys: HashSet<String>) {
     SCENE_DESCRIPTOR_KEYS.with(|slot| *slot.borrow_mut() = keys);
+    MODEL_PAYLOADS.with(|cache| {
+        evict_payloads(&mut cache.borrow_mut(), None);
+    });
 }
 
 /// descriptor / payload 计数快照（诊断；不含内容）。

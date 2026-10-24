@@ -10,6 +10,7 @@ import {
   IMAGE_PROJECT_CONTENT_TYPE,
   PHOTOCRAFT_ENGINE_VERSION,
   applyCanvasCommands,
+  filmSetObjectContainerId, filmSetObjectContainerData, resolveFilmSetObject,
   FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewOwnershipOf, SHOT_REFERENCE_ROLE,
   type FilmSetModelItem, type FilmSetMediaItem,
   type ServerCanvas,
@@ -555,5 +556,42 @@ describe("图片工程复制与跨画布引用（任务 2.4）", () => {
     delete json.projectObjects;
     expect(parseCanvasCopyPayload(JSON.stringify(json))).not.toBeNull();
     expect(checkPasteReferences({ canvas: createEmptyWoohaa3ServerCanvas("canvas-2", NOW), payload })).toBeNull();
+  });
+});
+
+
+describe("片场对象容器复制", () => {
+  it("随片场复制并重映射对象身份；单独复制容器不生成悬空节点", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("object-copy", NOW);
+    canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
+    canvas.nodeData.film = canonicalFilmSetFields(createFilmSetSnapshot({ title: "片场", modelItemId: "actor",
+      model: { modelScript: "scene.box({id:'body',size:[1,1,1]});", modelScriptVersion: "woohaa-model-js-v2" },
+      timeline: { duration: 0, loop: false } })) as never;
+    const film = canvas.nodeData.film;
+    const content = film.filmSetContent as any;
+    content.items.push({ ...structuredClone(content.items[0]), id: "hidden-actor", name: "隐藏对象" });
+    film.filmSetObjectContainersHidden = ["hidden-actor"];
+    const id = filmSetObjectContainerId("film", "actor");
+    canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 400, y: 0 }, id));
+    canvas.nodeData[id] = filmSetObjectContainerData("film", "actor");
+    expect(buildCanvasCopyPayload(canvas, [id])).toBeNull();
+    const payload = buildCanvasCopyPayload(canvas, ["film"])!;
+    expect(payload.nodes.map(node => node.id)).toContain(id);
+    const target = createEmptyWoohaa3ServerCanvas("destination", NOW);
+    const plan = planCanvasPaste({ canvas: target, payload, anchor: null, viewport: { x: 0, y: 0, zoom: 1 } })!;
+    const result = applyCanvasCommands(target, plan.commands, { now: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const newId = plan.newNodeIds.find(candidate => candidate.startsWith("film-object:"))!;
+    const object = resolveFilmSetObject(result.canvas, newId)!;
+    expect(object).not.toBeNull();
+    expect(object.owner.filmSetNodeId).not.toBe("film");
+    expect(object.item.id).not.toBe("actor");
+    expect(newId).toBe(filmSetObjectContainerId(object.owner.filmSetNodeId, object.item.id));
+    const ownerData = result.canvas.nodeData[object.owner.filmSetNodeId];
+    const hiddenId = (ownerData.filmSetObjectContainersHidden as string[])[0];
+    expect(hiddenId).not.toBe("hidden-actor");
+    expect((ownerData.filmSetContent as any).items.some((item: any) => item.id === hiddenId)).toBe(true);
+    expect(result.canvas.document.nodes.some(node => node.id === filmSetObjectContainerId(object.owner.filmSetNodeId, hiddenId))).toBe(false);
   });
 });

@@ -12,6 +12,9 @@ export type FilmSetObjectToolbarProps = {
   readOnly: boolean;
   nodeId: string;
   onDelete: () => void;
+  onContainerVisibilityChange?: (itemId: string, visible: boolean) => void;
+  hiddenContainerIds?: readonly string[];
+  containerVisibilityWritable?: boolean;
   /** 与画布键盘共用的局部 action；用于列表内分层 Escape（取消手势优先于清选择）。 */
   action?: FilmSetObjectAction;
   /** 无手势且无选中时经受控导航退出聚焦（列表聚焦时窗口处理器被 editable 保护挡下）。 */
@@ -21,7 +24,7 @@ export type FilmSetObjectToolbarProps = {
 const KIND_LABEL: Record<string, string> = { model: "模型", image: "图片", video: "视频", ground: "地面" };
 const KIND_ICON = { model: DiamondIcon, image: ImageIcon, video: VideoIcon, ground: LayoutGridIcon };
 
-export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDelete, action, onExit, children }: FilmSetObjectToolbarProps) {
+export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDelete, onContainerVisibilityChange, hiddenContainerIds = [], containerVisibilityWritable = writable, action, onExit, children }: FilmSetObjectToolbarProps) {
   const state = useSyncExternalStore(session.subscribe, session.getState, session.getState);
   const list = useRef<HTMLUListElement>(null);
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" }); }, [state.selectedItemId]);
@@ -49,7 +52,7 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
         {objects.map(entry => {
           const Icon = KIND_ICON[entry.kind];
           return (
-            <li key={entry.itemId}>
+            <li key={entry.itemId} className="film-set-object-list__item">
               <button type="button" className="film-set-object-row" role="option" aria-selected={entry.itemId === state.selectedItemId}
                 aria-label={`${KIND_LABEL[entry.kind]} · ${entry.name}`} title={entry.name}
                 onClick={() => session.select(entry.itemId)}
@@ -87,6 +90,7 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
                 <span className="film-set-object-row__name">{entry.name}</span>
                 <span className="film-set-object-row__kind">{KIND_LABEL[entry.kind]}</span>
               </button>
+              {onContainerVisibilityChange ? <Button size="sm" tone="ghost" disabled={!containerVisibilityWritable || readOnly || pending} onClick={() => onContainerVisibilityChange(entry.itemId, hiddenContainerIds.includes(entry.itemId))}>{hiddenContainerIds.includes(entry.itemId) ? "显示容器" : "关闭容器"}</Button> : null}
             </li>
           );
         })}

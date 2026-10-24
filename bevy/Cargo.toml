@@ -106,5 +106,15 @@ opt-level = "z"
 codegen-units = 1
 
 [profile.dev]
+# change: 2026-10-23-optimize-bevy-development-build（design D2）——开发模式优先增量与并行，
+# 本项目代码保持较低优化，依赖仍按 opt-level=3 复用缓存。原生桌面用 desktop/Cargo.toml
+# 的 profile，这里的设置只作用于 WASM 构建，不会被当成原生配置生效。
+incremental = true
+lto = false
 opt-level = 1
 debug = 0
+codegen-units = 16
+
+# 依赖只在首次或依赖变化时付出优化成本；普通源码小改优先复用。
+[profile.dev.package."*"]
+opt-level = 3

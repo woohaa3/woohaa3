@@ -100,6 +100,8 @@ export * from "./canvas/film-set-shot-image-reference.js";
 export * from "./canvas/film-set-clip-edit.js";
 export * from "./canvas/film-set-item-ops.js";
 export * from "./canvas/film-set-item-edit.js";
+export * from "./canvas/film-set-object-container.js";
+export * from "./canvas/film-set-object-replacement.js";
 export * from "./canvas/film-set-conversion.js";
 export * from "./canvas/film-set-composition.js";
 export * from "./canvas/film-set-layout.js";
@@ -130,3 +132,5 @@ export * from "./canvas/image-project-references.js";
 export * from "./mcp-installation.js";
 export * from "./canvas/group-authoring-scope.js";
 export * from "./canvas/node-history/execution-presentation.js";
+
+export * from "./canvas/composite-children.js";

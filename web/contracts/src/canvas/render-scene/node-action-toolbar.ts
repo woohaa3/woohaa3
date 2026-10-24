@@ -225,10 +225,10 @@ export function nodeActionToolbarLayout(
  * change: 2026-10-16-add-group-selection-toolbar 增加 `group`）。
  *
  * 与 `FilmSetConversionSourceKind` 对齐，但属于**渲染宿主**的通用呈现规则：宿主只按通用
- * node type 判定是否呈现单节点横条，MUST NOT 按 film-set 业务 ID 分支。`composite-asset`
- * 仍被排除。
+ * node type 判定是否呈现单节点横条，MUST NOT 按 film-set 业务 ID 分支。复合资产
+ * 可以提供自己的动作；没有贡献时不绘制横条。
  */
-export const NODE_ACTION_TOOLBAR_NODE_TYPES = ["image", "video", "audio", "model3d", "group"] as const;
+export const NODE_ACTION_TOOLBAR_NODE_TYPES = ["image", "video", "audio", "model3d", "group", "composite-asset"] as const;
 export type NodeActionToolbarNodeType = (typeof NODE_ACTION_TOOLBAR_NODE_TYPES)[number];
 
 export function isNodeActionToolbarNodeType(nodeType: string): nodeType is NodeActionToolbarNodeType {

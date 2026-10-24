@@ -80,8 +80,8 @@ fn film_set(
     GraphNode {
         kind: "model".into(),
         composite_asset: Some(match scope {
-            Some((sx, sy, sw, sh)) => crate::protocol::CompositeAssetPresentation { ownership_links: None, root_placement: None, content_extent: None, layout_aabb: None, geometry_quality: None, scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond, scope_ground: Some(crate::protocol::ScopeGroundDto { cx: sx + sw / 2.0, cy: sy + sh / 2.0, hx: 80.0, hz: 80.0 }), x: sx, y: sy, width: sw, height: sh, media: Vec::new(), item_roots: std::collections::HashMap::new(), item_placements: std::collections::HashMap::new() },
-            None => crate::protocol::CompositeAssetPresentation { ownership_links: None, root_placement: None, content_extent: None, layout_aabb: None, geometry_quality: None, scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond, scope_ground: Some(crate::protocol::ScopeGroundDto { cx: x + w / 2.0, cy: y + h / 2.0, hx: 80.0, hz: 80.0 }), x: 0.0, y: 0.0, width: w, height: h, media: Vec::new(), item_roots: std::collections::HashMap::new(), item_placements: std::collections::HashMap::new() },
+            Some((sx, sy, sw, sh)) => crate::protocol::CompositeAssetPresentation { panel: None, ownership_links: None, root_placement: None, content_extent: None, layout_aabb: None, geometry_quality: None, scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond, scope_ground: Some(crate::protocol::ScopeGroundDto { cx: sx + sw / 2.0, cy: sy + sh / 2.0, hx: 80.0, hz: 80.0 }), x: sx, y: sy, width: sw, height: sh, media: Vec::new(), item_roots: std::collections::HashMap::new(), item_placements: std::collections::HashMap::new() },
+            None => crate::protocol::CompositeAssetPresentation { panel: None, ownership_links: None, root_placement: None, content_extent: None, layout_aabb: None, geometry_quality: None, scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond, scope_ground: Some(crate::protocol::ScopeGroundDto { cx: x + w / 2.0, cy: y + h / 2.0, hx: 80.0, hz: 80.0 }), x: 0.0, y: 0.0, width: w, height: h, media: Vec::new(), item_roots: std::collections::HashMap::new(), item_placements: std::collections::HashMap::new() },
         }),
         ..node(id, x, y, w, h)
     }
@@ -91,7 +91,7 @@ fn film_set(
 fn rect_film_set(id: &str, x: f32, y: f32, w: f32, h: f32) -> GraphNode {
     GraphNode {
         kind: "model".into(),
-        composite_asset: Some(crate::protocol::CompositeAssetPresentation { ownership_links: None,
+        composite_asset: Some(crate::protocol::CompositeAssetPresentation { panel: None, ownership_links: None,
             root_placement: None,
             content_extent: None,
             layout_aabb: None,

@@ -1,3 +1,4 @@
+import { compositeChildMovementContext, followCompositeChildOwner, createCompositeChildNode, removeCompositeChildNodes } from "../composite-children.js";
 /**
  * 共享 reducer 内的拍摄镜头预览 reconciliation 与最终不变式
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，D2/D3/D4）。
@@ -28,7 +29,6 @@ import {
 import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import {
   getWoohaa3CanvasNodeAbsolutePosition,
-  nextWoohaa3CanvasNodeZIndex,
   readNodeHeight,
   readNodeWidth
 } from "../domain/index.js";
@@ -89,17 +89,13 @@ export function reconcileShotPreviews(
   // 清理：源镜头已消失或源片场已删除的预览连同 nodeData 一并移除；同时移除从这些预览拉出的
   // 镜头参考边（否则留下指向不存在来源的悬空边）。
   const removalIds = new Set(existing.filter((entry) => !desiredByNodeId.has(entry.nodeId)).map((entry) => entry.nodeId));
-  if (removalIds.size > 0) {
-    work.nodes = work.nodes.filter((node) => !removalIds.has(node.id));
-    work.edges = work.edges.filter((edge) => !removalIds.has(edge.source) && !removalIds.has(edge.target));
-    for (const id of removalIds) delete work.nodeData[id];
-  }
+  removeCompositeChildNodes(work, removalIds);
 
   // 创建：按源镜头顺序补齐缺失预览（同一批次内原子创建，重试不增加副本）。
-  const occupied: ShotPreviewBounds[] = work.nodes.map((node) => nodeBounds(work, node));
   const present = new Set(work.nodes.filter((node) => node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE).map((node) => node.id));
-  for (const target of desired) {
-    if (present.has(target.nodeId)) continue;
+  const missing = desired.filter(target => !present.has(target.nodeId));
+  const occupied: ShotPreviewBounds[] = missing.length ? work.nodes.map((node) => nodeBounds(work, node)) : [];
+  for (const target of missing) {
     const source = work.nodes.find((node) => node.id === target.filmSetNodeId);
     if (!source) return reject("invalid-shot-preview", `拍摄镜头预览缺少源片场 ${target.filmSetNodeId}`);
     const placement = planShotPreviewLayout({
@@ -107,18 +103,7 @@ export function reconcileShotPreviews(
       sizes: [shotPreviewCardSize(target.aspect)],
       occupied
     })[0]!;
-    const parentId = source.parentId;
-    const parentAbs = parentId ? absolutePosition(work, parentId) : { x: 0, y: 0 };
-    work.nodes.push({
-      id: target.nodeId,
-      type: FILM_SET_SHOT_PREVIEW_NODE_TYPE,
-      position: { x: placement.x - parentAbs.x, y: placement.y - parentAbs.y },
-      width: placement.width,
-      height: placement.height,
-      ...(parentId ? { parentId } : {}),
-      zIndex: nextWoohaa3CanvasNodeZIndex(work.nodes),
-      data: {}
-    });
+    work.nodes.push(createCompositeChildNode({ nodes: work.nodes, owner: source, id: target.nodeId, type: FILM_SET_SHOT_PREVIEW_NODE_TYPE, bounds: placement }));
     work.nodeData[target.nodeId] = canonicalShotPreviewFields({
       shotPreview: {
         schemaVersion: SHOT_PREVIEW_SCHEMA_VERSION,
@@ -222,55 +207,21 @@ function applyShotPreviewMoveClosure(
   work: WorkingState,
   context: ShotPreviewBatchContext
 ): CommandApplyResult | null {
-  const beforeAbsolute = absoluteMap(context.beforeNodes);
-  const afterAbsolute = absoluteMap(work.nodes);
-
+  const movement = compositeChildMovementContext(context.beforeNodes, work.nodes);
   for (const node of work.nodes) {
     if (!isFilmSetNode(node.type, work.nodeData[node.id])) continue;
-    const before = beforeAbsolute.get(node.id);
-    const after = afterAbsolute.get(node.id);
-    if (!before || !after) continue;
-    const dx = after.x - before.x;
-    const dy = after.y - before.y;
     const decoded = decodeFilmSetNodeData(work.nodeData[node.id]);
     if (!decoded.ok) continue;
-    const sourceBeforeParent = context.beforeNodes.find((entry) => entry.id === node.id)?.parentId ?? null;
+    const oldOwner = movement.before.get(node.id);
     for (const target of shotPreviewTargetsOf(node.id, decoded.value)) {
-      const preview = work.nodes.find((entry) => entry.id === target.nodeId);
-      if (!preview) continue;
-      const beforePreview = beforeAbsolute.get(preview.id);
-      const previewExistedBefore = context.beforeNodes.some((entry) => entry.id === preview.id);
-      // 本批新增/恢复的预览不属于「独立改变所属分组」：以源片场当前 parent 为基线对齐。
-      const previewBeforeParent = previewExistedBefore
-        ? context.beforeNodes.find((entry) => entry.id === preview.id)?.parentId ?? null
-        : sourceBeforeParent;
-      if (previewBeforeParent === sourceBeforeParent && (preview.parentId ?? null) !== (node.parentId ?? null)) {
-        // 来源重父化（或普通移动）但预览未跟随：由闭包补齐，保持世界相对位置。
-        preview.parentId = node.parentId;
-        if (beforePreview) reanchorAbsolute(work, preview, beforePreview);
-      }
-      if (previewExistedBefore && !context.explicitPreviewIds.has(preview.id) && previewBeforeParent !== sourceBeforeParent) {
-        return reject("invalid-shot-preview", `预览节点 ${preview.id} 不能独立改变所属分组`);
-      }
-      if (beforePreview && (dx !== 0 || dy !== 0) && !context.explicitPreviewIds.has(preview.id)) {
-        reanchorAbsolute(work, preview, { x: beforePreview.x + dx, y: beforePreview.y + dy });
-      }
+      const child = movement.current.get(target.nodeId);
+      if (!child) continue;
+      const oldChild = movement.before.get(child.id);
+      if (oldChild && !context.explicitPreviewIds.has(child.id) && (oldChild.parentId ?? null) !== (oldOwner?.parentId ?? null)) return reject("invalid-shot-preview", `预览节点 ${child.id} 不能独立改变所属分组`);
+      followCompositeChildOwner(child, node, context.beforeNodes, work.nodes, context.explicitPreviewIds.has(child.id), movement);
     }
   }
   return null;
-}
-
-/** 按绝对坐标重写节点的持久化相对坐标（含完整祖先链）。 */
-function reanchorAbsolute(work: WorkingState, node: Woohaa3CanvasNode, absolute: { x: number; y: number }): void {
-  const parentAbs = node.parentId ? absolutePosition(work, node.parentId) : { x: 0, y: 0 };
-  node.position = { x: absolute.x - parentAbs.x, y: absolute.y - parentAbs.y };
-}
-
-function absoluteMap(nodes: readonly Woohaa3CanvasNode[]): Map<string, { x: number; y: number }> {
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const result = new Map<string, { x: number; y: number }>();
-  for (const node of nodes) result.set(node.id, getWoohaa3CanvasNodeAbsolutePosition(node, byId));
-  return result;
 }
 
 function absolutePosition(work: WorkingState, nodeId: string): { x: number; y: number } {

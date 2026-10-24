@@ -275,6 +275,7 @@ export function decodeFilmSetNodeData(
   } = {}
 ): FilmSetNodeDataDecodeResult {
   if (!isJsonObject(nodeData)) return { ok: false, reason: "nodeData 必须是对象" };
+  if (nodeData.compositeAssetRole !== undefined) return { ok: false, reason: "对象容器不是独立片场" };
   for (const field of FILM_SET_TOP_LEVEL_MODEL_FIELDS) {
     if (nodeData[field] !== undefined) return { ok: false, reason: `片场不得保存顶层模型字段 ${field}` };
   }

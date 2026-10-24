@@ -37,7 +37,8 @@ import type {
  */
 export type FilmSetItemPatchOp =
   | { kind: "transform"; localTransform: FilmSetLocalTransform; expectedLocalTransform?: FilmSetLocalTransform }
-  | { kind: "delete" };
+  | { kind: "delete" }
+  | { kind: "replace-model"; sourceNodeId: string; expectedSourceHash: string; expectedModelHash: string; expectedItemHash: string; importedAt: string };
 
 export type CanvasCommand =
   | EditApplyCommand

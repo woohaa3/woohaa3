@@ -13,6 +13,7 @@ import type { ModelEditorSession, ModelCaptureSession as ModelShotCaptureSession
 import type { FilmSetObjectSession } from "./object-session.js";
 import type { FilmSetObjectAction } from "./object-action.js";
 import { GizmoReadout } from "./gizmo-readout.js";
+import { setFilmSetObjectContainerVisible } from "./object-container-commands.js";
 import { FilmSetObjectToolbar } from "./film-set-object-toolbar.js";
 import { IconButton, CloseIcon } from "@woohaa3/frontend/extension-api";
 import { FilmSetGenerateDock } from "./film-set-generate-dock.js";
@@ -71,6 +72,8 @@ export function FilmSetInspector({
   const [wholeShotForSelection, setWholeShotForSelection] = useState<string | null>(null);
   const [aiCollapsed, setAiCollapsed] = useState(false);
   const [compositionOpen, setCompositionOpen] = useState(false);
+  const [containerPending, setContainerPending] = useState(false);
+  const [containerError, setContainerError] = useState<string | null>(null);
   const selectionKey = `${nodeId}:${selectedItemId}`;
   useEffect(() => setWholeShotForSelection(null), [nodeId, selectedItemId]);
   useEffect(() => {
@@ -158,6 +161,15 @@ export function FilmSetInspector({
       <FilmSetObjectToolbar
         session={objectSession} writable={writable && rendererReady} readOnly={readOnly}
         nodeId={nodeId} onDelete={() => objectSession.deleteSelected()} action={objectAction}
+        hiddenContainerIds={(currentCanvas?.nodeData[nodeId]?.filmSetObjectContainersHidden as string[] | undefined) ?? []}
+        containerVisibilityWritable={writable && !containerPending}
+        onContainerVisibilityChange={(itemId, visible) => {
+          setContainerPending(true); setContainerError(null);
+          void setFilmSetObjectContainerVisible(ctx, nodeId, itemId, visible)
+            .then(result => { if (!result.ok) setContainerError(result.reason); })
+            .catch(() => setContainerError("容器显示修改失败，请重试"))
+            .finally(() => setContainerPending(false));
+        }}
         onExit={() => void ctx.canvasNavigation.requestExitNodeFocus()}
       >
       {selectedItem && activeClip ? <>
@@ -165,6 +177,7 @@ export function FilmSetInspector({
         <FilmSetAdaptationConfirm ctx={ctx} nodeId={nodeId} itemId={selectedItem.id} clipId={activeClip.id} writable={writable && !readOnly} />
       </> : null}
       </FilmSetObjectToolbar>
+      {containerError ? <p className="film-set-object-error">{containerError}</p> : null}
       <FilmSetAnimationControls key={nodeId} ctx={ctx} nodeId={nodeId} writable={writable && !readOnly} composition={cameraPanel}
         images={images} compositionOpen={compositionOpen} onCompositionOpenChange={changeComposition} />
       </div>

@@ -44,6 +44,7 @@ mod render;
 mod render_edges;
 mod ownership_links;
 mod shared_key;
+pub(crate) mod scope_panel;
 pub(crate) mod text_presentation;
 mod textures;
 mod texture_store;

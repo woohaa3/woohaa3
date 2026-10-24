@@ -44,7 +44,8 @@ export function readCompositeAssetExtensionId(nodeData: unknown): CompositeAsset
 
 /** 是否为片场业务节点（`composite-asset` + `extensionId="film-set"`）。 */
 export function isFilmSetNode(type: string | undefined, nodeData: unknown): boolean {
-  return isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(nodeData) === FILM_SET_EXTENSION_ID;
+  return isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(nodeData) === FILM_SET_EXTENSION_ID
+    && (nodeData as { compositeAssetRole?: unknown }).compositeAssetRole === undefined;
 }
 
 /** 是否为游戏炼丹炉业务节点（`composite-asset` + `extensionId="game-furnace"`）。 */

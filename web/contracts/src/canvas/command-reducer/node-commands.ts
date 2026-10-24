@@ -4,6 +4,7 @@
  * 自 `command-reducer.ts` 拆出（change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，
  * R12）。复用 domain 结构校验，语义与 edit.apply 的对应操作完全一致。
  */
+import { filmSetObjectOwnershipOf } from "../film-set-object-container.js";
 import type { CanvasCommand } from "../commands.js";
 import {
   DEFAULT_NODE_DIMS,
@@ -230,7 +231,12 @@ export function updateNode(
   if (!node) return reject("unknown-node", `节点 ${command.nodeId} 不存在`);
   // 预览节点不得独立改归属（D4）：重父化只随所属片场移动由 reconciliation 补齐。
   if (command.parentId !== undefined && isProtectedShotPreview(work, command.nodeId)) {
-    return reject("invalid-shot-preview", "拍摄镜头预览不能独立改变所属分组");
+    const owner = shotPreviewOwnershipOf(work.nodeData[command.nodeId]);
+    const parent = owner ? work.nodes.find(entry => entry.id === owner.filmSetNodeId) : null;
+    // 受保护编辑重放会显式携带由 owner 派生的 parent 更新，允许与当前 owner 一致的值。
+    if (!parent || (command.parentId ?? null) !== (parent.parentId ?? null)) {
+      return reject("invalid-shot-preview", "拍摄镜头预览不能独立改变所属分组");
+    }
   }
 
   const parentRejection = validateGroupParent(work, command.nodeId, command.parentId);
@@ -291,6 +297,7 @@ export function patchNodeData(
   nodeId: string,
   value: CanvasNodeData | null
 ): CommandApplyResult {
+  if (filmSetObjectOwnershipOf(work.nodeData[nodeId])) return reject("invalid-self-contained-node", "对象容器只保存归属；请拖入模型替换对象，或移除容器");
   // 受保护预览的 nodeData 不能被普通 patch 改写或清除（D2）：归属只能随源镜头生命周期变化。
   if (hasShotPreviewOwnership(value) || isProtectedShotPreview(work, nodeId)) {
     return reject("invalid-shot-preview", "拍摄镜头预览归属不能通过普通数据写入修改");

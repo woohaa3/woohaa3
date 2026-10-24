@@ -9,7 +9,7 @@ import { FilmSetObjectToolbar } from "../src/authoring/browser/film-set-object-t
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | null = null;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });
-function setup(writable = true, action?: FilmSetObjectAction, onExit?: () => void) {
+function setup(writable = true, action?: FilmSetObjectAction, onExit?: () => void, onContainerVisibilityChange?: (itemId: string, visible: boolean) => void) {
   const content: FilmSetContent = { schemaVersion: 4, items: [{ id: "photo", name: "照片", kind: "image", assetId: "asset", aspectRatio: 1.5, localTransform: { offset: { x: 1, y: 2, z: 3 }, scale: 1, yaw: 0 } }] };
   const submitted: FilmSetItemPatchOp[] = [];
   const session = new FilmSetObjectSession({ readContent: () => content, isWritable: () => writable, submitItemOp: ({ op }) => {
@@ -18,7 +18,7 @@ function setup(writable = true, action?: FilmSetObjectAction, onExit?: () => voi
   } });
   session.enter("film"); session.select("photo");
   const element = document.createElement("div"); document.body.appendChild(element); root = createRoot(element);
-  act(() => root!.render(<FilmSetObjectToolbar session={session} nodeId="film" writable={writable} readOnly={false} onDelete={() => session.deleteSelected()} {...(action ? { action } : {})} {...(onExit ? { onExit } : {})} />));
+  act(() => root!.render(<FilmSetObjectToolbar session={session} nodeId="film" writable={writable} readOnly={false} onDelete={() => session.deleteSelected()} {...(action ? { action } : {})} {...(onExit ? { onExit } : {})} {...(onContainerVisibilityChange ? { onContainerVisibilityChange } : {})} />));
   return { session, submitted, content };
 }
 const input = (label: string) => document.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
@@ -181,4 +181,16 @@ it("列表内 Escape repeat 不推进层级（任务 5.3）", () => {
   expect(calls.cancel).toBe(0);
   expect(calls.exit).toBe(0);
   expect(h.session.getState().selectedItemId).toBe("photo");
+});
+
+
+it("对象容器默认显示，列表可关闭且不要求先选择对象", () => {
+  const exposed: [string, boolean][] = [];
+  const h = setup(true, undefined, undefined, (id, visible) => exposed.push([id, visible]));
+  act(() => h.session.select(null));
+  const button = [...document.querySelectorAll("button")].find(element => element.textContent === "关闭容器")!;
+  expect(button).toBeDefined();
+  expect(button.disabled).toBe(false);
+  act(() => button.click());
+  expect(exposed).toEqual([["photo", false]]);
 });

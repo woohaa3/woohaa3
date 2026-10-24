@@ -64,8 +64,8 @@ pub(crate) fn draw(
 
     let mut out = Vec::new();
     for node in nodes {
-        // group 与片场纯模型节点不绘制横条（与命中快照同一判定）。
-        if node.group.is_some() || node.composite_asset.is_some() {
+        // group 使用独立选区横条；复合资产可声明自己的操作（与命中快照同源）。
+        if node.group.is_some() {
             continue;
         }
         let Some(actions) = node_actions.get(&node.id) else {

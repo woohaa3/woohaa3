@@ -1,3 +1,4 @@
+import { planCompositeChildLayout } from "./composite-children.js";
 /**
  * 拍摄镜头预览节点契约
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，D2/D4）。
@@ -208,32 +209,8 @@ export function planShotPreviewLayout(input: {
   /** 已占用矩形（绝对坐标；用于避免重叠）。 */
   occupied: readonly ShotPreviewBounds[];
 }): ShotPreviewPlacement[] {
-  const originX = input.filmSetBounds.x + input.filmSetBounds.width + SHOT_PREVIEW_LAYOUT_GAP;
-  const originY = input.filmSetBounds.y;
-  const taken: ShotPreviewBounds[] = input.occupied.map(cloneBounds);
-  const result: ShotPreviewPlacement[] = [];
-  let cursorY = originY;
-  for (const size of input.sizes) {
-    let candidateY = cursorY;
-    for (let attempt = 0; attempt < SHOT_PREVIEW_LAYOUT_MAX_ATTEMPTS; attempt += 1) {
-      const candidate: ShotPreviewPlacement = { x: originX, y: candidateY, width: size.width, height: size.height };
-      if (!taken.some((box) => overlaps(box, candidate))) break;
-      candidateY += SHOT_PREVIEW_LAYOUT_STEP;
-    }
-    const placement: ShotPreviewPlacement = { x: originX, y: candidateY, width: size.width, height: size.height };
-    taken.push(cloneBounds(placement));
-    result.push(placement);
-    cursorY = candidateY + size.height + SHOT_PREVIEW_LAYOUT_SPACING;
-  }
-  return result;
-}
-
-function cloneBounds(bounds: ShotPreviewBounds): ShotPreviewBounds {
-  return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
-}
-
-function overlaps(a: ShotPreviewBounds, b: ShotPreviewBounds): boolean {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  return planCompositeChildLayout({ ownerBounds: input.filmSetBounds, sizes: input.sizes, occupied: input.occupied,
+    gap: SHOT_PREVIEW_LAYOUT_GAP, spacing: SHOT_PREVIEW_LAYOUT_SPACING, step: SHOT_PREVIEW_LAYOUT_STEP, maxAttempts: SHOT_PREVIEW_LAYOUT_MAX_ATTEMPTS });
 }
 
 /**

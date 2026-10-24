@@ -35,7 +35,7 @@ import {
 } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasTaskActivity } from "@woohaa3/contracts/canvas-yjs";
 import type { SyncSocket } from "@woohaa3/contracts/canvas-yjs";
-import { CanvasSyncSession, DEFAULT_SYNC_LIMITS, type SyncSessionLimits } from "./sync-session.js";
+import { CanvasSyncSession, DEFAULT_SYNC_LIMITS, type SyncSessionLimits, type SyncSessionContext } from "./sync-session.js";
 import type { CanvasSessionBroadcastTarget } from "./sync-hub.js";
 import type { CanvasRoom } from "./room.js";
 
@@ -88,6 +88,7 @@ export type CanvasSessionContext = {
   onSessionDispose?: () => void;
   /** 每条命令提交前的 write 复核（任务 4.5/6.2/6.3）；撤权后立即拒绝。 */
   authorizeCommand?: () => Promise<boolean>;
+  onCommandComplete?: SyncSessionContext["onCommandComplete"];
   /** 广播前可读性复核（任务 6.3）；撤 read 后停止发送。缺省恒 true。 */
   authorizeRead?: () => Promise<boolean>;
 };
@@ -200,7 +201,8 @@ export class CanvasSession implements CanvasSessionBroadcastTarget {
       actorId: context.actorId,
       ...(context.yjsLimits ? { limits: context.yjsLimits } : {}),
       ...(context.now ? { now: context.now } : {}),
-      ...(context.authorizeCommand ? { authorizeCommand: context.authorizeCommand } : {})
+      ...(context.authorizeCommand ? { authorizeCommand: context.authorizeCommand } : {}),
+      ...(context.onCommandComplete ? { onCommandComplete: context.onCommandComplete } : {})
     });
 
     this.detachMessage = this.socket.onMessage((data) => this.handleFrame(data));

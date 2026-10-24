@@ -21,6 +21,8 @@ import { projectObjectPresentation } from "../../preview/browser/object-presenta
 import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser/scene-camera.js";
 import { contributionLifetime } from "./contributions.js";
 import { createFilmSetNodeData } from "../../state/shared/node.js";
+import { installFilmSetObjectContainers } from "../../authoring/browser/object-containers.js";
+import { filmSetObjectOwnershipOf } from "@woohaa3/contracts";
 import { gizmoParentBasis } from "../../authoring/browser/gizmo-constraint.js";
 
 export function filmSetExtension() {
@@ -57,14 +59,21 @@ export function filmSetExtension() {
         if (next.selectedCameraId !== previous.selectedCameraId || next.toolMode !== previous.toolMode || next.cameraTool !== previous.cameraTool) feature.session.select(null);
         previous = next;
       }));
-      const adapter = createFilmSetModelAdapter(history);
+      const objectFeedback = new Map<string, string>();
+      const adapter = createFilmSetModelAdapter(history, () => ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), id => objectFeedback.get(id));
       lifetime.own(ctx.compositeAssets.register({
         ...adapter,
         // 业务类型显示名：浮动名称面板据此标注聚合节点业务类型（change:
         // 2026-10-12-align-film-set-scope-with-isometric-grid）。范围形状仍是复合资产类别默认
         // （等距地面范围），无需按业务显式声明；通用宿主与 Rust 只消费声明，不按 film-set 业务 ID 分支。
         label: FILM_SET_LABEL,
-        projectPresentation: projectObjectPresentation(preview),
+        projectPresentation(node, data, resource) {
+          projectObjectPresentation(preview)(node, data, resource);
+          if (!node.compositeAsset) return;
+          const owner = filmSetObjectOwnershipOf(data);
+          if (owner) { node.compositeAsset.itemPlacements = {}; return; }
+
+        },
         objectPreview: nodeId => preview.get(nodeId) ?? null,
         blocksFocusInput: () => playback.getSnapshot().preview,
         keydown(event) {
@@ -104,6 +113,7 @@ export function filmSetExtension() {
         createNodeData: () => createFilmSetNodeData() as never
       }));
       lifetime.own(extendFilmSetDrop(ctx));
+      lifetime.own(installFilmSetObjectContainers(ctx, objectFeedback));
       // 直接传递 Cordis `ctx`：它已注入 canvasScope/canvasRemote/canvasLocate/canvasRuntime。
       // MUST NOT 展开（`{ ...ctx }`）——展开只复制自有可枚举属性，会丢掉 ctx 的 service 访问器，
       // 使注册模块读到 undefined 的 canvasScope（此前导致 required film-set 启动失败 → 白屏）。

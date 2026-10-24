@@ -234,7 +234,9 @@ export function create2dInputFamily(core: InteractionCore) {
       // selection/gesture 初始化与绝对 origin 解析（design D1 分段）。
       const origins = measure("selectionMs", () => {
         const starts = new Map<string, { x: number; y: number }>();
-        for (const id of active) {
+        const moving = new Set(active);
+        for (const id of active) for (const childId of options.compositeAssets?.dragAlongNodeIds(canvasState, id) ?? []) moving.add(childId);
+        for (const id of moving) {
           // 拖动预览 `localPositions` 在渲染投影里是**绝对**画布坐标，因此 origin 也必须取
           // 绝对坐标。组内节点 position 是相对父级的局部坐标，直接用它会让节点在按下瞬间
           // 跳到「局部坐标 + 指针位移」的位置（change: fix-group-and-marquee-preview）。
