@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file woohaa/telemetry/v1alpha1/telemetry.proto.
  */
 export const file_woohaa_telemetry_v1alpha1_telemetry: GenFile = /*@__PURE__*/
-  fileDesc("Cil3b29oYWEvdGVsZW1ldHJ5L3YxYWxwaGExL3RlbGVtZXRyeS5wcm90bxIZd29vaGFhLnRlbGVtZXRyeS52MWFscGhhMSKHAgoLQ2xpZW50RXZlbnQSMQoGYWN0aW9uGAEgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5BY3Rpb24SMQoGcmVzdWx0GAIgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5SZXN1bHQSMQoGY2xpZW50GAMgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnQSMwoHc3VyZmFjZRgEIAEoDjIiLndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuU3VyZmFjZRIQCgh0cmFjZV9pZBgFIAEoCRIYChBmcm9udGVuZF92ZXJzaW9uGAYgASgJIk0KE1JlcG9ydEV2ZW50c1JlcXVlc3QSNgoGZXZlbnRzGAEgAygLMiYud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnRFdmVudCIuChRSZXBvcnRFdmVudHNSZXNwb25zZRIWCg5hY2NlcHRlZF9jb3VudBgBIAEoDSKTAQoLU3RvcmVkRXZlbnQSCgoCaWQYASABKAMSEAoIYWN0b3JfaWQYAiABKAkSLwoLcmVjZWl2ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjUKBWV2ZW50GAQgASgLMiYud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnRFdmVudCq5AQoGQWN0aW9uEhYKEkFDVElPTl9VTlNQRUNJRklFRBAAEhYKEkFDVElPTl9DQU5WQVNfT1BFThABEhYKEkFDVElPTl9DQU5WQVNfU0FWRRACEhYKEkFDVElPTl9FRElUT1JfRURJVBADEhcKE0FDVElPTl9TWU5DX0NPTk5FQ1QQBBIZChVBQ1RJT05fU1lOQ19SRUNPTkNJTEUQBRIbChdBQ1RJT05fTE9DQUxfVkFMSURBVElPThAGKnMKBlJlc3VsdBIWChJSRVNVTFRfVU5TUEVDSUZJRUQQABISCg5SRVNVTFRfU1VDQ0VTUxABEhIKDlJFU1VMVF9GQUlMVVJFEAISFAoQUkVTVUxUX0NBTkNFTExFRBADEhMKD1JFU1VMVF9SRUpFQ1RFRBAEKl8KBkNsaWVudBIWChJDTElFTlRfVU5TUEVDSUZJRUQQABISCg5DTElFTlRfQlJPV1NFUhABEhIKDkNMSUVOVF9ERVNLVE9QEAISFQoRQ0xJRU5UX0xPQ0FMX0hPU1QQAyp6CgdTdXJmYWNlEhcKE1NVUkZBQ0VfVU5TUEVDSUZJRUQQABISCg5TVVJGQUNFX0NBTlZBUxABEhIKDlNVUkZBQ0VfRURJVE9SEAISEAoMU1VSRkFDRV9TWU5DEAMSHAoYU1VSRkFDRV9MT0NBTF9WQUxJREFUSU9OEAQygwEKEFRlbGVtZXRyeVNlcnZpY2USbwoMUmVwb3J0RXZlbnRzEi4ud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5SZXBvcnRFdmVudHNSZXF1ZXN0Gi8ud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5SZXBvcnRFdmVudHNSZXNwb25zZUJAWj53b29oYWEzL2FwaS9nZW4vZ28vd29vaGFhL3RlbGVtZXRyeS92MWFscGhhMTt0ZWxlbWV0cnl2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("Cil3b29oYWEvdGVsZW1ldHJ5L3YxYWxwaGExL3RlbGVtZXRyeS5wcm90bxIZd29vaGFhLnRlbGVtZXRyeS52MWFscGhhMSKHAgoLQ2xpZW50RXZlbnQSMQoGYWN0aW9uGAEgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5BY3Rpb24SMQoGcmVzdWx0GAIgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5SZXN1bHQSMQoGY2xpZW50GAMgASgOMiEud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnQSMwoHc3VyZmFjZRgEIAEoDjIiLndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuU3VyZmFjZRIQCgh0cmFjZV9pZBgFIAEoCRIYChBmcm9udGVuZF92ZXJzaW9uGAYgASgJIk0KE1JlcG9ydEV2ZW50c1JlcXVlc3QSNgoGZXZlbnRzGAEgAygLMiYud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DbGllbnRFdmVudCIuChRSZXBvcnRFdmVudHNSZXNwb25zZRIWCg5hY2NlcHRlZF9jb3VudBgBIAEoDSIgCh5DcmVhdGVQZXJmb3JtYW5jZVVwbG9hZFJlcXVlc3QieAofQ3JlYXRlUGVyZm9ybWFuY2VVcGxvYWRSZXNwb25zZRILCgNrZXkYASABKAkSCwoDdXJsGAIgASgJEhIKCmV4cGlyZXNfYXQYAyABKAMSEQoJbWF4X2J5dGVzGAQgASgDEhQKDGNvbnRlbnRfdHlwZRgFIAEoCSJHCh5Db21taXRQZXJmb3JtYW5jZVVwbG9hZFJlcXVlc3QSCwoDa2V5GAEgASgJEhgKEGZyb250ZW5kX3ZlcnNpb24YAiABKAkiOwofQ29tbWl0UGVyZm9ybWFuY2VVcGxvYWRSZXNwb25zZRIKCgJpZBgBIAEoAxIMCgRzaXplGAIgASgDIpMBCgtTdG9yZWRFdmVudBIKCgJpZBgBIAEoAxIQCghhY3Rvcl9pZBgCIAEoCRIvCgtyZWNlaXZlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNQoFZXZlbnQYBCABKAsyJi53b29oYWEudGVsZW1ldHJ5LnYxYWxwaGExLkNsaWVudEV2ZW50KrkBCgZBY3Rpb24SFgoSQUNUSU9OX1VOU1BFQ0lGSUVEEAASFgoSQUNUSU9OX0NBTlZBU19PUEVOEAESFgoSQUNUSU9OX0NBTlZBU19TQVZFEAISFgoSQUNUSU9OX0VESVRPUl9FRElUEAMSFwoTQUNUSU9OX1NZTkNfQ09OTkVDVBAEEhkKFUFDVElPTl9TWU5DX1JFQ09OQ0lMRRAFEhsKF0FDVElPTl9MT0NBTF9WQUxJREFUSU9OEAYqcwoGUmVzdWx0EhYKElJFU1VMVF9VTlNQRUNJRklFRBAAEhIKDlJFU1VMVF9TVUNDRVNTEAESEgoOUkVTVUxUX0ZBSUxVUkUQAhIUChBSRVNVTFRfQ0FOQ0VMTEVEEAMSEwoPUkVTVUxUX1JFSkVDVEVEEAQqXwoGQ2xpZW50EhYKEkNMSUVOVF9VTlNQRUNJRklFRBAAEhIKDkNMSUVOVF9CUk9XU0VSEAESEgoOQ0xJRU5UX0RFU0tUT1AQAhIVChFDTElFTlRfTE9DQUxfSE9TVBADKnoKB1N1cmZhY2USFwoTU1VSRkFDRV9VTlNQRUNJRklFRBAAEhIKDlNVUkZBQ0VfQ0FOVkFTEAESEgoOU1VSRkFDRV9FRElUT1IQAhIQCgxTVVJGQUNFX1NZTkMQAxIcChhTVVJGQUNFX0xPQ0FMX1ZBTElEQVRJT04QBDKpAwoQVGVsZW1ldHJ5U2VydmljZRJvCgxSZXBvcnRFdmVudHMSLi53b29oYWEudGVsZW1ldHJ5LnYxYWxwaGExLlJlcG9ydEV2ZW50c1JlcXVlc3QaLy53b29oYWEudGVsZW1ldHJ5LnYxYWxwaGExLlJlcG9ydEV2ZW50c1Jlc3BvbnNlEpABChdDcmVhdGVQZXJmb3JtYW5jZVVwbG9hZBI5Lndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuQ3JlYXRlUGVyZm9ybWFuY2VVcGxvYWRSZXF1ZXN0Gjoud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5DcmVhdGVQZXJmb3JtYW5jZVVwbG9hZFJlc3BvbnNlEpABChdDb21taXRQZXJmb3JtYW5jZVVwbG9hZBI5Lndvb2hhYS50ZWxlbWV0cnkudjFhbHBoYTEuQ29tbWl0UGVyZm9ybWFuY2VVcGxvYWRSZXF1ZXN0Gjoud29vaGFhLnRlbGVtZXRyeS52MWFscGhhMS5Db21taXRQZXJmb3JtYW5jZVVwbG9hZFJlc3BvbnNlQkBaPndvb2hhYTMvYXBpL2dlbi9nby93b29oYWEvdGVsZW1ldHJ5L3YxYWxwaGExO3RlbGVtZXRyeXYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message woohaa.telemetry.v1alpha1.ClientEvent
@@ -102,6 +102,108 @@ export const ReportEventsResponseSchema: GenMessage<ReportEventsResponse> = /*@_
   messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 2);
 
 /**
+ * 一次私有上传。url 只能 PUT 这一个对象，过期即失效。
+ * max_bytes 是档案上限；超过它的对象不会被登记。
+ *
+ * @generated from message woohaa.telemetry.v1alpha1.CreatePerformanceUploadRequest
+ */
+export type CreatePerformanceUploadRequest = Message<"woohaa.telemetry.v1alpha1.CreatePerformanceUploadRequest"> & {
+};
+
+/**
+ * Describes the message woohaa.telemetry.v1alpha1.CreatePerformanceUploadRequest.
+ * Use `create(CreatePerformanceUploadRequestSchema)` to create a new message.
+ */
+export const CreatePerformanceUploadRequestSchema: GenMessage<CreatePerformanceUploadRequest> = /*@__PURE__*/
+  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 3);
+
+/**
+ * @generated from message woohaa.telemetry.v1alpha1.CreatePerformanceUploadResponse
+ */
+export type CreatePerformanceUploadResponse = Message<"woohaa.telemetry.v1alpha1.CreatePerformanceUploadResponse"> & {
+  /**
+   * @generated from field: string key = 1;
+   */
+  key: string;
+
+  /**
+   * @generated from field: string url = 2;
+   */
+  url: string;
+
+  /**
+   * @generated from field: int64 expires_at = 3;
+   */
+  expiresAt: bigint;
+
+  /**
+   * @generated from field: int64 max_bytes = 4;
+   */
+  maxBytes: bigint;
+
+  /**
+   * @generated from field: string content_type = 5;
+   */
+  contentType: string;
+};
+
+/**
+ * Describes the message woohaa.telemetry.v1alpha1.CreatePerformanceUploadResponse.
+ * Use `create(CreatePerformanceUploadResponseSchema)` to create a new message.
+ */
+export const CreatePerformanceUploadResponseSchema: GenMessage<CreatePerformanceUploadResponse> = /*@__PURE__*/
+  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 4);
+
+/**
+ * 对象已经按上传凭证写完之后，登记一条档案记录。
+ * key 必须是 CreatePerformanceUpload 发给当前主体的那个键。
+ *
+ * @generated from message woohaa.telemetry.v1alpha1.CommitPerformanceUploadRequest
+ */
+export type CommitPerformanceUploadRequest = Message<"woohaa.telemetry.v1alpha1.CommitPerformanceUploadRequest"> & {
+  /**
+   * @generated from field: string key = 1;
+   */
+  key: string;
+
+  /**
+   * 形状与 ClientEvent.frontend_version 相同。非法值被丢弃，不拒绝登记。
+   *
+   * @generated from field: string frontend_version = 2;
+   */
+  frontendVersion: string;
+};
+
+/**
+ * Describes the message woohaa.telemetry.v1alpha1.CommitPerformanceUploadRequest.
+ * Use `create(CommitPerformanceUploadRequestSchema)` to create a new message.
+ */
+export const CommitPerformanceUploadRequestSchema: GenMessage<CommitPerformanceUploadRequest> = /*@__PURE__*/
+  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 5);
+
+/**
+ * @generated from message woohaa.telemetry.v1alpha1.CommitPerformanceUploadResponse
+ */
+export type CommitPerformanceUploadResponse = Message<"woohaa.telemetry.v1alpha1.CommitPerformanceUploadResponse"> & {
+  /**
+   * @generated from field: int64 id = 1;
+   */
+  id: bigint;
+
+  /**
+   * @generated from field: int64 size = 2;
+   */
+  size: bigint;
+};
+
+/**
+ * Describes the message woohaa.telemetry.v1alpha1.CommitPerformanceUploadResponse.
+ * Use `create(CommitPerformanceUploadResponseSchema)` to create a new message.
+ */
+export const CommitPerformanceUploadResponseSchema: GenMessage<CommitPerformanceUploadResponse> = /*@__PURE__*/
+  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 6);
+
+/**
  * @generated from message woohaa.telemetry.v1alpha1.StoredEvent
  */
 export type StoredEvent = Message<"woohaa.telemetry.v1alpha1.StoredEvent"> & {
@@ -133,7 +235,7 @@ export type StoredEvent = Message<"woohaa.telemetry.v1alpha1.StoredEvent"> & {
  * Use `create(StoredEventSchema)` to create a new message.
  */
 export const StoredEventSchema: GenMessage<StoredEvent> = /*@__PURE__*/
-  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 3);
+  messageDesc(file_woohaa_telemetry_v1alpha1_telemetry, 7);
 
 /**
  * Local client diagnostics, not product analytics; do not duplicate completed RPCs.
@@ -300,6 +402,26 @@ export const TelemetryService: GenService<{
     methodKind: "unary";
     input: typeof ReportEventsRequestSchema;
     output: typeof ReportEventsResponseSchema;
+  },
+  /**
+   * 给已登录客户端签发一次私有上传地址。档案字节不经过这个 RPC。
+   *
+   * @generated from rpc woohaa.telemetry.v1alpha1.TelemetryService.CreatePerformanceUpload
+   */
+  createPerformanceUpload: {
+    methodKind: "unary";
+    input: typeof CreatePerformanceUploadRequestSchema;
+    output: typeof CreatePerformanceUploadResponseSchema;
+  },
+  /**
+   * 上传完成后登记一条记录。对象不存在、为空或超过上限时拒绝，超限对象会被删除。
+   *
+   * @generated from rpc woohaa.telemetry.v1alpha1.TelemetryService.CommitPerformanceUpload
+   */
+  commitPerformanceUpload: {
+    methodKind: "unary";
+    input: typeof CommitPerformanceUploadRequestSchema;
+    output: typeof CommitPerformanceUploadResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_woohaa_telemetry_v1alpha1_telemetry, 0);
