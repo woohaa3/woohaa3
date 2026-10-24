@@ -108,6 +108,36 @@ fn model_mesh_layers(app: &mut App) -> Vec<Vec<usize>> {
 }
 
 #[test]
+fn many_model_cards_cross_inline_layer_boundary_without_panicking() {
+    let mut app = model_card_app();
+    let template = app.world().resource::<CurrentScene>().0.nodes[0].clone();
+    app.world_mut().resource_mut::<CurrentScene>().0.nodes = (0..41)
+        .map(|index| {
+            let mut node = template.clone();
+            node.id = format!("model-{index}");
+            node
+        })
+        .collect();
+    spawn_model_roots(&mut app);
+    for _ in 0..64 {
+        app.update();
+    }
+    let previews = app.world().resource::<Previews>();
+    assert_eq!(previews.cards.len(), 41);
+    assert!(previews.cards.values().any(|card| card.layer >= 64));
+    let mut layers = std::collections::HashSet::new();
+    for (id, card) in &previews.cards {
+        assert!(layers.insert(card.layer), "preview layers must remain unique");
+        let expected = RenderLayers::from_layers(&[card.layer]);
+        assert_eq!(app.world().get::<RenderLayers>(card.camera), Some(&expected));
+        assert_eq!(
+            app.world().resource::<model3d::ModelVisuals>().preview_layers(id, card.layer, false),
+            Some(expected),
+        );
+    }
+}
+
+#[test]
 fn preview_covers_physical_pixels_at_high_dpi_and_zoom() {
     for (zoom, dpr) in [(1.0, 1.0), (1.0, 2.0), (2.0, 1.0), (2.0, 3.0)] {
         let size = preview_target_size(240.0, 180.0, zoom, dpr);

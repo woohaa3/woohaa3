@@ -91,6 +91,7 @@ export const BEVY_WASM_MODULE = "../bevy-wasm/woohaa_bevy_canvas.js";
 export function assertRequiredCapabilities(module: BevyModule): void {
   const missing: string[] = [];
   if (!module.prepare_and_register_model_resource) missing.push("prepare_and_register_model_resource");
+  if (!module.prepare_scene_resources) missing.push("prepare_scene_resources");
   if (!module.request_shot_capture) missing.push("request_shot_capture");
   if (!module.poll_shot_capture) missing.push("poll_shot_capture");
   // change: 2026-10-10-optimize-canvas-interaction-hot-path —— 新 Frontend 必须有视口增量
@@ -360,6 +361,9 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     registerModelResource,
     prepareAndRegisterModelResource,
     setScene: (scene, resources) => {
+      const keys = [...new Set(scene.nodes.flatMap(node => node.model ? [node.model.resourceKey] : []))];
+      const missing = JSON.parse(module.prepare_scene_resources!(JSON.stringify(keys))) as string[];
+      for (const key of missing) registeredKeys.delete(key);
       const accepted = resources ? resourceFailures.project(scene, resources, lastScene, registerModelResource) : scene;
       sceneDiagnostics.sceneStringify += 1;
       const json = measureSceneWork("stringifyMs", now, () => JSON.stringify(accepted));
@@ -527,6 +531,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         if (!replacement.runtime_health || !replacement.seed_runtime_generation) throw new Error("Bevy WASM 缺少恢复健康协议");
         replacement.seed_runtime_generation(previousInteraction);
         replacement.start();
+        replacement.prepare_scene_resources!(JSON.stringify([...replayModels.keys()]));
         for (const json of replayModels.values()) replacement.prepare_and_register_model_resource!(json);
         const recoveredInteraction = lastScene ? replacement.set_scene(JSON.stringify(lastScene)) : 0;
         let remaining = 30000; let sampledAt = performance.now();

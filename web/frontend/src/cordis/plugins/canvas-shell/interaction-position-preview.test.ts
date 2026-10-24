@@ -3,13 +3,14 @@ import type { ServerCanvas } from "@woohaa3/contracts";
 import { installInteractionController } from "./interaction-controller.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
+import { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
 import { resetSceneDiagnostics, sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
 import { canvasWith, getSession, harness, installSharedSession, runtimeCapturing, submitted } from "./test-support/controller-harness.js";
 
 installSharedSession();
 afterEach(() => { nodeSelectionStore.reset(); resetSceneDiagnostics(); });
 
-function setup(canvas: ServerCanvas = canvasWith([{id:"n1",x:20,y:20},{id:"n2",x:600,y:500}])) {
+function setup(canvas: ServerCanvas = canvasWith([{id:"n1",x:20,y:20},{id:"n2",x:600,y:500}]), compositeAssets?: CompositeAssetRegistry) {
   woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
   const dom=harness();
   const callbacks:Array<(t:number)=>void>=[];
@@ -18,7 +19,7 @@ function setup(canvas: ServerCanvas = canvasWith([{id:"n1",x:20,y:20},{id:"n2",x
   const advance=()=>{for(const cb of callbacks.splice(0)) cb(0);};
   const captured=runtimeCapturing();
   let active=captured.runtime;
-  const controller=installInteractionController({canvas:dom.canvas,getRuntime:()=>active,getSession:()=>getSession() as never,target:dom.target as never});
+  const controller=installInteractionController({canvas:dom.canvas,compositeAssets,getRuntime:()=>active,getSession:()=>getSession() as never,target:dom.target as never});
   controller.flush();
   return {...captured,dom,advance,controller,swapRuntime:(next:typeof active)=>{active=next;}};
 }
@@ -29,6 +30,30 @@ function start(s:ReturnType<typeof setup>) {
   s.advance(); // selection and initial attach operation bar require one full scene.
   resetSceneDiagnostics();
 }
+
+it.each(["pointerup", "pointercancel"])("keeps expanded presentation offsets throughout drag and %s", end => {
+  const canvas=canvasWith([{id:"n1",x:20,y:20}]);
+  canvas.document.nodes[0]!.type="composite-asset";
+  canvas.nodeData.n1={extensionId:"expanded-base"};
+  const registry=new CompositeAssetRegistry();
+  registry.register({extensionId:"expanded-base",owner:"expanded-base",scopeShape:"rect",executionKey:()=>"",prepare:()=>({}),
+    projectPresentation:node=>{
+      node.x-=40;node.y-=25;node.width+=80;node.height+=50;
+      if(node.compositeAsset) Object.assign(node.compositeAsset,{x:node.x,y:node.y,width:node.width,height:node.height});
+    }});
+  const s=setup(canvas,registry);
+  try {
+    start(s);
+    for (const [x,y] of [[90,110],[110,130]]) {
+      s.dom.fire("pointermove",{clientX:x,clientY:y});s.advance();
+      expect(s.positions.at(-1)!.positions).toEqual([{id:"n1",x:x-70,y:y-75}]);
+    }
+    expect(sceneDiagnostics.sceneBuilds).toBe(0);
+    s.dom.fire(end,{clientX:110,clientY:130});s.advance();
+    if(end==="pointerup") expect(s.scenes.at(-1)!.nodes).toEqual(expect.arrayContaining([expect.objectContaining({id:"n1",x:40,y:55})]));
+    else expect(s.positions.at(-1)!.positions).toEqual([{id:"n1",x:-20,y:-5}]);
+  } finally {s.controller.dispose();}
+});
 
 it("200 ordinary drag frames submit only positions without contact/full scene construction", () => {
   const s=setup();start(s);

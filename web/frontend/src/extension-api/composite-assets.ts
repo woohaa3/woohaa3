@@ -38,6 +38,8 @@ export type CompositeAssetAdapter = {
   prepare(nodeId: string, data: CanvasNodeData): CompositeAssetProjection | null;
   mediaSources?(nodeId: string, data: CanvasNodeData, playback: BevyAnimationPlayback | null): CompositeAssetMediaSource[];
   projectCanvas?(canvas: ServerCanvas): ServerCanvas;
+  /** Additional owned nodes that move with this node, without changing selection. */
+  dragAlongNodeIds?(canvas: ServerCanvas, nodeId: string): readonly string[];
   history?(nodeId: string, detail: NodeGenerationHistoryDetail | null): boolean;
   historyProjection?(nodeId: string): CompositeAssetProjection | null;
   projectPresentation?(node: BevyRenderNode, data: CanvasNodeData, resource?: PreparedModelResource): void;

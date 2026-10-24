@@ -174,4 +174,27 @@ mod tests {
         queue_scene(Scene::default());
         clear_model_assets();
     }
+
+    #[test]
+    fn incoming_scene_resources_survive_registration_beyond_lru_capacity() {
+        clear_model_assets();
+        let keys: std::collections::HashSet<String> = (0..MODEL_ASSET_MAX_ENTRIES + 9)
+            .map(|index| format!("v2:incoming-{index}"))
+            .collect();
+        // Models can already have been prepared (and evicted) before scene assembly.
+        for key in &keys {
+            queue_model_asset(descriptor(key, key, 1.0));
+        }
+        let missing = prepare_scene_resources(keys.clone());
+        assert!(!missing.is_empty());
+        for key in missing {
+            queue_model_asset(descriptor(&key, &key, 1.0));
+        }
+        assert!(keys.iter().all(|key| model_asset_registered(key)));
+        set_scene_asset_keys(keys.clone());
+        assert!(keys.iter().all(|key| model_asset_registered(key)));
+        set_scene_asset_keys(std::collections::HashSet::new());
+        assert!(model_assets_snapshot().len() <= MODEL_ASSET_MAX_ENTRIES);
+        clear_model_assets();
+    }
 }

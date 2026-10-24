@@ -52,7 +52,7 @@ pub(crate) use position::{
 #[allow(unused_imports)]
 pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
-pub(crate) use scene::{FilmSetRunFeedback, AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetPresentation, CompositeAssetScopeShape, Edge, GraphNode, GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane, Scene, ScopeGroundDto, Selection, ShotCoverCamera, ShotPreviewLink, ShotPreviewPresentation, Viewport};
+pub(crate) use scene::{CompositePanel, FilmSetRunFeedback, AggregateRunPresentation, CompositeAssetGeometryQuality, CompositeAssetPresentation, CompositeAssetScopeShape, Edge, GraphNode, GroupPresentation, GroupRunStatus, HistoryStripDot, HistoryStripPresentation, ModelMediaPlane, Scene, ScopeGroundDto, Selection, ShotCoverCamera, ShotPreviewLink, ShotPreviewPresentation, Viewport};
 #[allow(unused_imports)]
 pub(crate) use scene_instant::{
     AggregateConnect, AnimationPlayback, CursorPoint, Draft, DragAttach, DragAttachEdge,

@@ -19,7 +19,7 @@ use crate::protocol::{NodePosition, ObserverUpdateRequest, Scene, Viewport};
 
 pub(crate) use assets::{
     AssetRegistration, existing_model_metadata, lookup_model_asset, missing_model_asset,
-    model_assets_snapshot, queue_model_snapshot, set_scene_asset_keys,
+    model_assets_snapshot, prepare_scene_resources, queue_model_snapshot, set_scene_asset_keys,
 };
 
 // 测试面：`bridge::tests` 通过 `super::*` 复用这些资源表 helper 与常量。

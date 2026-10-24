@@ -193,7 +193,7 @@ pub(crate) fn layer_for(index: usize) -> usize {
 /// 模型根与媒体平面会被追加该层，因此卡片能看见所属片场的内容；网格（层 0）、gizmo 与片场
 /// 小相机（层 1/2/7）都不进入卡片画面。
 pub(crate) fn card_camera_layers(layer: usize) -> ShotCameraViewMask {
-    ShotCameraViewMask(bevy::camera::visibility::RenderLayers::layer(layer))
+    ShotCameraViewMask(bevy::camera::visibility::RenderLayers::from_layers(&[layer]))
 }
 
 /// 卡片预览采样身份：源内容 + 尺寸档 + 播放会话。

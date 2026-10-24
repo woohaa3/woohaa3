@@ -73,7 +73,8 @@ pub(crate) fn draw_film_set_scope(
 ///
 /// 使用节点已有的解析名称与业务类型名（`GraphNode.title` / `GraphNode.type_label`，由映射层按
 /// 共享规则与可信 adapter 身份派生），不读草稿、不写默认名称。位置由 `layout::film_title_layout`
-/// 派生：水平居中于范围中心、浮在范围顶部上方固定间隙处，不侵占范围内部、不与抓手重叠。
+/// 派生：水平居中于模型内容包围盒、浮在范围顶部与内容包围盒顶部较高者之上固定间隙处，
+/// 不侵占范围内部、不遮住模型身体、不与抓手重叠。
 /// 显隐仍由 hover/选中决定（`draw_film_set_scope` 的提前返回）。
 fn draw_scope_title(
     geometry: &mut Geometry,
@@ -110,7 +111,7 @@ fn draw_scope_title(
 }
 
 /// 范围抓手：地面矩形 8 个方形（四顶点 + 四边中点）；普通矩形右下角方形（与普通节点一致）。
-fn draw_scope_grip(geometry: &mut Geometry, theme: &ThemeResource, grip: &super::scope::ScopeGrip, base_z: f32) {
+pub(super) fn draw_scope_grip(geometry: &mut Geometry, theme: &ThemeResource, grip: &super::scope::ScopeGrip, base_z: f32) {
     match grip {
         super::scope::ScopeGrip::Handles(handles) => {
             let half = super::scope::DIAMOND_GRIP_LEG / 2.0;

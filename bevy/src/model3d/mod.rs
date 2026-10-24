@@ -52,6 +52,7 @@ pub mod preview;
 pub mod lod_benchmark;
 
 mod layout;
+pub(crate) use layout::film_set_content_bounds;
 mod item_placement;
 mod mesh;
 pub(crate) mod quality;

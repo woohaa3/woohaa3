@@ -61,7 +61,7 @@ const GLUE_POSTPROCESS_VERSION = "1";
 // query_composite_asset_scopes 导出，模板版本提升使缓存失效。
 // change: 2026-10-12-optimize-canvas-model-lod-and-interactions —— 新增 set_positions /
 // position_capability 导出，模板版本提升使缓存失效。
-const DTS_TEMPLATE_VERSION = "9";
+const DTS_TEMPLATE_VERSION = "10";
 
 const OUT_NAME = "woohaa_bevy_canvas";
 const glueName = `${OUT_NAME}.js`;
@@ -100,6 +100,7 @@ export function query_composite_asset_item_pick(json: string): string;
 export function query_composite_asset_item_bounds(json: string): string;
 export function query_gizmo_hit(json: string): string;
 export function prepare_and_register_model_resource(json: string): string;
+export function prepare_scene_resources(json: string): string;
 export function model_asset_diagnostics(): string;
 export function set_viewport(json: string): number;
 export function set_observer(json: string): number;

@@ -45,10 +45,16 @@ function parse(file: string): ts.SourceFile {
 /**
  * 复刻 `build-extension-browser.mjs#collectSdkRequirements` 的具名运行时需求规则：
  * 命中公共入口的 `ImportDeclaration`/`ExportDeclaration` 的具名子句（排除 type-only）。
+ *
+ * 扫描范围必须是整个 `src/`，不能只看 `src/frontend/`：构建脚本跟随入口的传递依赖闭包
+ * （`collectFrontendSources`），`src/frontend/index.ts` 往往只 re-export 责任目录，真正的
+ * SDK 具名导入在 `src/authoring/...` 之类的实现文件里。只看入口目录会漏掉这些需求，把
+ * 「构建产物声明了宿主没有的导出 → required extension 装载失败」放过去
+ * （2026-10-22-redesign-creature-workflow-node 的 `AssistantToolbar` 就是这样漏检的）。
  */
 function requiredSdkExportsForExtension(extensionId: string): string[] {
   const names = new Set<string>();
-  for (const file of walk(path.join(EXTENSIONS_ROOT, extensionId, "src", "frontend"))) {
+  for (const file of walk(path.join(EXTENSIONS_ROOT, extensionId, "src"))) {
     for (const statement of parse(file).statements) {
       if (ts.isImportDeclaration(statement)) {
         const specifier = statement.moduleSpecifier;

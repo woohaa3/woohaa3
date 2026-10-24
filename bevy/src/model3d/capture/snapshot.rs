@@ -141,7 +141,7 @@ impl FrozenModelSnapshot {
                 .spawn((
                     part.transform,
                     Visibility::Inherited,
-                    bevy::camera::visibility::RenderLayers::layer(layer),
+                    bevy::camera::visibility::RenderLayers::from_layers(&[layer]),
                 ))
                 .id();
             if let (Some(mesh), Some(material)) = (&part.mesh, &part.material) {

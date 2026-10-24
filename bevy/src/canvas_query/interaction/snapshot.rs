@@ -341,8 +341,8 @@ impl InteractionSnapshot {
                     }
                 }
             }
-            // 片场纯模型：只按真实范围几何命中（无端口/控件/preview）；选中时抓手优先命中
-            // resize（拖动即等比缩放整个片场内容）。
+            // 片场纯模型：按范围多边形或范围顶部之上的模型身体命中（无端口/控件/preview）；
+            // 选中时抓手优先命中 resize（拖动即等比缩放整个片场内容）。
             if node.composite_asset {
                 if let Some(scope) = &node.scope {
                     if let Some(handle) = node
@@ -355,7 +355,7 @@ impl InteractionSnapshot {
                             handle: handle_name(handle),
                         });
                     }
-                    if scope::contains(scope, world) {
+                    if scope::pick_contains(scope, world) {
                         return Some(PointHit::FilmScope {
                             node_id: node.id.clone(),
                         });

@@ -14,6 +14,7 @@ struct Key {
     scope: Option<(f32, f32, f32, f32)>,
     scope_vertices: Option<[Vec2; 4]>,
     title: String,
+    panel: Option<crate::protocol::CompositePanel>,
     group: Option<GroupPresentation>,
     selected: bool,
     hovered: bool,
@@ -33,6 +34,7 @@ impl Key {
                 .as_ref()
                 .map(|asset| (asset.x, asset.y, asset.width, asset.height)),
             title: n.title.clone(),
+            panel: n.composite_asset.as_ref().and_then(|asset| asset.panel.clone()),
             scope_vertices: n.composite_asset.as_ref().map(|_| super::scope::node_scope(n).vertices),
             group: n.group.clone(),
             selected: scene.selection.nodes.contains(&n.id),
@@ -145,6 +147,8 @@ pub(super) fn sync(
                     group,
                     key.selected,
                 )]
+            } else if key.panel.is_some() {
+                super::scope_panel::draw(&mut geometry, theme, node, key.selected, z)
             } else {
                 super::film_set::draw_film_set_scope(
                     &mut geometry,

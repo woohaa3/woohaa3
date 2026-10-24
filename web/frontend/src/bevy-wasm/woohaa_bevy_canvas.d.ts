@@ -26,6 +26,7 @@ export function query_composite_asset_item_pick(json: string): string;
 export function query_composite_asset_item_bounds(json: string): string;
 export function query_gizmo_hit(json: string): string;
 export function prepare_and_register_model_resource(json: string): string;
+export function prepare_scene_resources(json: string): string;
 export function model_asset_diagnostics(): string;
 export function set_viewport(json: string): number;
 export function set_observer(json: string): number;

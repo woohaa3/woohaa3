@@ -360,6 +360,8 @@ pub(crate) struct ScopeGroundDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CompositeAssetPresentation {
     #[serde(default)]
+    pub(crate) panel: Option<CompositePanel>,
+    #[serde(default)]
     pub(crate) ownership_links: Option<CompositeOwnershipLinks>,
     #[serde(default)]
     pub(crate) root_placement: Option<super::ModelPlacement>,
@@ -392,6 +394,16 @@ pub(crate) struct CompositeAssetPresentation {
     pub(crate) item_roots: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub(crate) item_placements: std::collections::HashMap<String, super::ModelPlacement>,
+}
+
+/// Trusted, derived ownership presentation, independent of editable edges.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CompositePanel {
+    pub(crate) title: String,
+    pub(crate) message: String,
+    pub(crate) hint: String,
+    pub(crate) image_ids: Vec<String>,
 }
 
 /// Trusted, derived ownership presentation, independent of editable edges.
@@ -728,6 +740,12 @@ impl Scene {
             actions.validate()?;
         }
         for node in &self.nodes {
+            if let Some(panel) = node.composite_asset.as_ref().and_then(|asset| asset.panel.as_ref()) {
+                if panel.image_ids.len() > 8 || panel.image_ids.iter().any(|id| id.is_empty() || id.len() > 1024)
+                    || [&panel.title, &panel.message, &panel.hint].iter().any(|text| text.len() > 4096) {
+                    return Err("Invalid composite panel");
+                }
+            }
             if let Some(links) = node.composite_asset.as_ref().and_then(|asset| asset.ownership_links.as_ref()) {
                 if !links.anchor.iter().all(|v| v.is_finite()) || links.target_node_ids.len() > 4096
                     || links.target_node_ids.iter().any(|id| id.is_empty() || id.len() > 1024 || id == &node.id) {

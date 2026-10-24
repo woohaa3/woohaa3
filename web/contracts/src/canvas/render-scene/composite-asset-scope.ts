@@ -13,6 +13,12 @@
  * 跨语言 golden 锁定并与 Rust `isometric_grid::plan::AXIS_X/AXIS_Y` 一致；更换投影必须同时更新
  * 本常量与两侧测试。Rust `canvas_query::scope` 是运行时事实源，本模块供映射、测试 oracle 与
  * 非运行时计算。
+ *
+ * 点命中在 Rust 侧另有一层扩展（`scope::pick_contains`）：地面范围只覆盖地面占地，小地面、
+ * 较高的模型会把可见身体投影到范围 AABB 顶部之上，因此点选/hover/双击额外接受**模型内容投影
+ * 包围盒**（Rust 由呈现字段按与渲染相同的 fit/anchor 公式派生）从范围顶部向上延伸到内容顶部
+ * 的条带；条带只覆盖内容包围盒宽度，AABB 内部仍只按平行四边形判定，空白角不命中。drop 与框选
+ * 仍只认地面范围。
  */
 import type { CompositeAssetScopeShape } from "./wire-scene.js";
 

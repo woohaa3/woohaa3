@@ -57,6 +57,7 @@ export * from "./wire-shot-preview.js";
  * - change: 2026-10-20-unify-node-execution-feedback —— 圆点身份、预览选择和指针反馈提升为
  *   v21；拒绝忽略 selected/hovered/pressed 的旧 renderer，避免预览与加载反馈不一致。
  * - v23：复合资产新增可信派生 ownershipLinks，使用模型局部锚点与目标节点底部绘制管理虚线。
+ * - v24：复合资产增加只读 panel，背景、文字和媒体缩略图由 Bevy 统一呈现。
  * - change: 2026-10-22-enhance-film-set-running-effects —— v22 增加片场执行身份与阶段，
  *   工作相机扫描消费同一摘要，装饰时间留在 renderer。
  * - v24：shotPreview.backdrop 将每镜头背景传至 preview/capture；旧 renderer 会静默忽略，
@@ -204,6 +205,8 @@ export type CompositeAssetGeometryQuality = "overview-primitives-v1";
  * 此时基准矩形即范围框。这是纯派生呈现几何，不写规范文档、不进镜头成片。
  */
 export type BevyCompositeAssetPresentation = {
+  /** Read-only 2D scope content. Images use the shared composite media texture channel. */
+  panel?: { title: string; message: string; hint: string; imageIds: string[] };
   /** Derived ownership only; local model anchor → target card bottoms. Not editable document edges. */
   ownershipLinks?: { anchor: [number, number, number]; targetNodeIds: string[] };
   rootPlacement?: BevyModelPlacement;

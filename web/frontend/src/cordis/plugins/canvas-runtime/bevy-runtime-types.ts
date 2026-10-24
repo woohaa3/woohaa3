@@ -50,6 +50,7 @@ export type BevyModule = {
   query_gizmo_hit?: (json: string) => string;
   /** 合并准备与注册（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。 */
   prepare_and_register_model_resource?: (json: string) => string;
+  prepare_scene_resources?: (json: string) => string;
   /** model asset 派生诊断（JSON）。 */
   model_asset_diagnostics?: () => string;
   /**

@@ -532,7 +532,7 @@ impl ModelVisuals {
         focused: bool,
     ) -> Option<bevy::camera::visibility::RenderLayers> {
         self.roots.get(id)?;
-        let mut layers = bevy::camera::visibility::RenderLayers::layer(layer);
+        let mut layers = bevy::camera::visibility::RenderLayers::from_layers(&[layer]);
         if focused {
             layers = layers.with(0);
         }

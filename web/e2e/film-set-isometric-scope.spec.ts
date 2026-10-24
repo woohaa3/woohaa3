@@ -5,7 +5,8 @@
  * 在真实 Bevy WASM 运行时上用确定性 fixture 验证：
  * - 范围几何：包裹**模型地面占地**（不是内容适配矩形）的地面矩形投影，四边与地面网格
  *   平行（±0.5 斜率）、外包矩形宽高比恒为 2、8 个抓手（四顶点 + 四边中点）；
- * - hover/select/double-click：范围内命中、AABB 空白角不命中、双击整体聚焦；
+ * - hover/select/double-click：范围内命中、范围顶部之上的模型身体命中、AABB 空白角不命中、
+ *   双击整体聚焦；
  * - 框选：与平行四边形正面积相交才选中，只碰 AABB 空白角不选中；
  * - drop：真实鼠标把合法 model3d 拖入范围可导入、源节点回位；图片拖入不显示提示且被拒绝；
  *   空白角不命中；上层普通卡片先于业务过滤；所有 composite-asset（含炉体）默认等距范围；
@@ -126,6 +127,17 @@ function modelItem(id: string, name: string): FilmSetItem {
   };
 }
 
+/** 小地面、较高的模型：可见身体投影远高于地面范围。 */
+function tallModelItem(id: string, name: string): FilmSetItem {
+  return {
+    id,
+    kind: "model",
+    name,
+    localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
+    model: createModelSnapshot({ modelScript: `scene.box({id:'tower',size:[0.5,4,0.5],color:'#40ee50'});`, modelScriptVersion: "woohaa-model-js-v2" })
+  };
+}
+
 /** 建一个带默认尺寸的片场节点，等待其呈现就绪。 */
 async function seedFilmSet(
   page: Page,
@@ -220,6 +232,38 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
     expect(errors).toEqual([]);
     await page.screenshot({ path: info.outputPath("film-ground-geometry.png") });
     void rightClient;
+  });
+
+  test("高模型身体在范围顶部之上仍可点选，但空白角与 drop 不扩散", async ({ page }) => {
+    test.setTimeout(150_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installPageHelpers(page);
+    await resetCanvasStorage(page);
+    await waitForCanvasSession(page);
+
+    // 无地面、单根高模型：地面范围被最小尺寸兜底，可见身体投影远高于范围顶部。
+    await seedFilmSet(page, "tall", { x: 240, y: 160 }, DEFAULT_W, DEFAULT_H, [tallModelItem("tower", "高塔")]);
+    const accepted = (await acceptedScope(page, "tall"))!;
+    const [bx, by, bw] = accepted.base;
+    const body = { x: accepted.aabb[0] + accepted.aabb[2] / 2, y: accepted.aabb[1] - 10 };
+    expect(body.y, "选取点应位于范围顶部之上且在内容适配矩形内").toBeGreaterThan(by + 4);
+    expect(body.y).toBeLessThan(accepted.aabb[1]);
+    expect(body.x).toBeGreaterThan(bx);
+    expect(body.x).toBeLessThan(bx + bw);
+
+    // 范围顶部之上的模型身体可点选（旧实现只认地面多边形，这里点不中）。
+    await expect.poll(async () => (await queryPoint(page, body))?.kind).toBe("film-scope");
+
+    // AABB 空白角仍在平行四边形外：不因身体可点选而扩散命中。
+    const corner = { x: accepted.aabb[0] + 4, y: accepted.aabb[1] + 4 };
+    expect((await queryPoint(page, corner))?.kind).not.toBe("film-scope");
+
+    // drop 仍只认地面范围：身体上方释放不把片场当作素材接收目标。
+    const dropTarget = await page.evaluate((point) => {
+      const r = (window as any).__bevyRuntime?.queryDropTarget?.(point, []);
+      return r?.ok ? r.value : { unavailable: r?.reason };
+    }, body);
+    expect(dropTarget).toBeNull();
   });
 
   test("框选按平行四边形正面积相交，空白角不选中", async ({ page }) => {

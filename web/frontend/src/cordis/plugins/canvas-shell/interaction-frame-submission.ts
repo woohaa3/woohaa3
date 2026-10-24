@@ -60,6 +60,19 @@ export function createFrameSubmission(deps: {
     return {error:error instanceof Error ? error.message : String(error),retry:true};
   };
 
+  const presentationRows = (index: CanvasNodeIndex, next: Map2D) => {
+    const accepted = baseline;
+    if (!accepted) return [];
+    return changedPreviewPositions(index, accepted.previews, next).map(position => {
+      const node = mirror.node(accepted.scene, position.id);
+      const previous = accepted.previews.get(position.id) ?? index.absolutePosition(position.id);
+      if (!node || !previous) throw new Error("Unknown presentation position node");
+      // Adapters may expand a node around its canonical center. Move its accepted
+      // presentation by the gesture delta instead of replacing that offset.
+      return { id: position.id, x: node.x + position.x - previous.x, y: node.y + position.y - previous.y };
+    });
+  };
+
   const submit = (reasons: ReadonlySet<string>, force: boolean): Outcome => {
     const runtime=deps.options.getRuntime();
     const index=indexNow();
@@ -96,7 +109,7 @@ export function createFrameSubmission(deps: {
         const next=expandPositionPreviews(index,deps.state.localPositions);
         if (next) {
           try {
-            const positions=changedPreviewPositions(index,baseline.previews,next);
+            const positions=presentationRows(index,next);
             const viewport=deps.viewport(),old=baseline.scene.viewport;
             const viewChanged=viewport.x!==old.x || viewport.y!==old.y || viewport.zoom!==old.zoom;
             if (positions.length) {
@@ -213,7 +226,7 @@ export function createFrameSubmission(deps: {
     if (!baseline || !index || baseline.index!==index) return deps.build()?.scene ?? null;
     const positions=expandPositionPreviews(index,deps.state.localPositions);
     if (!positions) return null;
-    const rows=changedPreviewPositions(index,baseline.previews,positions);
+    const rows=presentationRows(index,positions);
     const projected=new PositionSceneMirror();
     return projected.apply(projected.reset(baseline.scene),{baseSceneGeneration:baseline.base,positions:rows});
   };

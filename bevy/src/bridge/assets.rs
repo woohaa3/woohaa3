@@ -196,4 +196,15 @@ pub(crate) fn missing_model_asset(scene: &Scene) -> Option<String> {
 /// 记录当前待渲染场景引用的 resource key（淘汰保护）。
 pub(crate) fn set_scene_asset_keys(keys: HashSet<String>) {
     SCENE_ASSET_KEYS.with(|slot| *slot.borrow_mut() = keys);
+    MODEL_ASSETS.with(|resources| evict_assets(&mut resources.borrow_mut()));
+}
+
+/// Protect the incoming scene before its resources are registered. Keep the accepted
+/// scene protected until replacement succeeds, and report cache entries lost to LRU.
+pub(crate) fn prepare_scene_resources(keys: HashSet<String>) -> Vec<String> {
+    SCENE_ASSET_KEYS.with(|slot| slot.borrow_mut().extend(keys.iter().cloned()));
+    MODEL_ASSETS.with(|resources| {
+        let table = resources.borrow();
+        keys.into_iter().filter(|key| !table.contains_key(key)).collect()
+    })
 }

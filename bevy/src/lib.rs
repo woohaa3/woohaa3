@@ -559,6 +559,19 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
     serde_json::to_string(&metadata).map_err(|err| BoundaryError::from_str(&err.to_string()))
 }
 
+/// Reserve the next scene's model references before registration can evict them.
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn prepare_scene_resources(json: &str) -> Result<String, BoundaryError> {
+    if json.len() > protocol::MAX_SCENE_BYTES {
+        return Err(BoundaryError::from_str("Model resource keys payload too large"));
+    }
+    let keys: std::collections::HashSet<String> = serde_json::from_str(json)
+        .map_err(|err| BoundaryError::from_str(&err.to_string()))?;
+    serde_json::to_string(&bridge::prepare_scene_resources(keys))
+        .map_err(|err| BoundaryError::from_str(&err.to_string()))
+}
+
 /// 滚动 model asset 诊断计数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm；E2E/单测观察）。
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]

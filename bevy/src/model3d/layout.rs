@@ -88,9 +88,19 @@ fn film_set_anchor(
     placement: &ModelPlacement,
     unit: f32,
 ) -> Vec3 {
-    let size = 64.0;
     let layout_rotation = grid::view_rotation() * Quat::from_rotation_y(placement.yaw.to_radians());
     let bounds = layout_aabb(node, model, layout_rotation, unit);
+    let (cx, cy) = film_set_anchor_canvas(node, bounds, placement);
+    canvas_world_position(cx, cy, placement.offset.z * 64.0)
+}
+
+/// 片场根锚点的画布坐标 `(cx, cy)`（y 向下）；索引/标题与渲染共用同一居中与偏移夹取公式。
+fn film_set_anchor_canvas(
+    node: &GraphNode,
+    bounds: Option<ModelAabb>,
+    placement: &ModelPlacement,
+) -> (f32, f32) {
+    let size = 64.0;
     let center = bounds
         .map(|aabb| aabb.center())
         .filter(|value| value.is_finite())
@@ -104,7 +114,7 @@ fn film_set_anchor(
         node.x + node.width / 2.0 - center.x + (placement.offset.x * size).clamp(-slack_x, slack_x);
     let cy = node.y + node.height / 2.0 + center.y
         - (placement.offset.y * size).clamp(-slack_y, slack_y);
-    canvas_world_position(cx, cy, placement.offset.z * size)
+    (cx, cy)
 }
 
 /// 模型根单位缩放。
@@ -139,6 +149,11 @@ fn film_set_fit(
     let Some(aabb) = layout_aabb(node, model, layout_rotation, natural_unit) else {
         return 1.0;
     };
+    film_set_fit_for_bounds(node, &aabb)
+}
+
+/// 让给定投影 AABB 等比落入节点矩形（减去固定边距）；与 `film_set_fit` 共用。
+fn film_set_fit_for_bounds(node: &GraphNode, aabb: &ModelAabb) -> f32 {
     let width = (aabb.max[0] - aabb.min[0]).max(1e-3);
     let height = (aabb.max[1] - aabb.min[1]).max(1e-3);
     let avail_w = (node.width - FILM_SET_FIT_MARGIN * 2.0).max(1.0);
@@ -149,6 +164,57 @@ fn film_set_fit(
     } else {
         1.0
     }
+}
+
+/// 片场全部内容在画布上的投影包围盒 `(x, y, width, height)`（y 向下）。
+///
+/// 直接消费呈现字段 `layout_aabb`/`content_extent`/根 placement（渲染节点优先使用模型引用的
+/// placement），并复用与 [`film_set_fit`] 和 [`film_set_anchor_canvas`] 完全相同的适配与锚点
+/// 公式。范围标题据此浮在模型顶部之上，点命中只把条带延伸到模型包围盒顶部，避免高模型顶部被
+/// 标题遮挡、身体又难以点选。缺失内容几何或数值非法时返回 `None`。
+pub(crate) fn film_set_content_bounds(node: &GraphNode) -> Option<(f32, f32, f32, f32)> {
+    let film = node.composite_asset.as_ref()?;
+    let bounds = film.layout_aabb?;
+    let local = ModelAabb::new(bounds.min, bounds.max);
+    if !local.is_finite() {
+        return None;
+    }
+    let placement = node
+        .model
+        .as_ref()
+        .map(|model| &model.placement)
+        .or(film.root_placement.as_ref())
+        .cloned()
+        .unwrap_or_default();
+    let extent = film
+        .content_extent
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(2.0);
+    let natural = 64.0 * 3.0 / extent.max(0.001);
+    let rotation = grid::view_rotation() * Quat::from_rotation_y(placement.yaw.to_radians());
+    let projected = local.transformed(&Transform {
+        rotation,
+        scale: Vec3::splat(natural),
+        ..default()
+    });
+    let unit = placement.scale.min(1.0) * natural * film_set_fit_for_bounds(node, &projected);
+    let isometric = local.transformed(&Transform {
+        rotation,
+        scale: Vec3::splat(unit),
+        ..default()
+    });
+    let (cx, cy) = film_set_anchor_canvas(node, Some(isometric), &placement);
+    let x = cx + isometric.min[0];
+    let y = cy - isometric.max[1];
+    let width = isometric.max[0] - isometric.min[0];
+    let height = isometric.max[1] - isometric.min[1];
+    (x.is_finite()
+        && y.is_finite()
+        && width.is_finite()
+        && height.is_finite()
+        && width >= 0.0
+        && height >= 0.0)
+        .then_some((x, y, width, height))
 }
 
 /// Saved placement bounds drive layout; drag previews only replace item transforms.

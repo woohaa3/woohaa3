@@ -19,6 +19,7 @@ mod camera;
 mod card_cache;
 mod cards;
 mod container_cache;
+pub(crate) mod scope_panel;
 mod dash;
 mod decoration_cache;
 #[cfg(test)]

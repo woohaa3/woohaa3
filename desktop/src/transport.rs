@@ -216,6 +216,9 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
         "prepare_and_register_model_resource" => json!(
             canvas::prepare_and_register_model_resource(arg(&req, 0)?).map_err(|e| e.to_string())?
         ),
+        "prepare_scene_resources" => json!(
+            canvas::prepare_scene_resources(arg(&req, 0)?).map_err(|e| e.to_string())?
+        ),
         "query_point_hit" => json!(canvas::query_point_hit(arg(&req, 0)?)),
         "query_marquee" => json!(canvas::query_marquee(arg(&req, 0)?)),
         "query_probe" => json!(canvas::query_probe(arg(&req, 0)?)),

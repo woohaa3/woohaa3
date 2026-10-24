@@ -127,7 +127,7 @@ export async function createNativeRuntimeRealm(
   for (const name of [
     "is_ready", "rendered_revision", "base_scene_generation", "viewport_capability", "observer_capability", "position_capability", "scene_capability",
     "runtime_health", "canvas_work_diagnostics", "model_asset_diagnostics", "shot_diagnostics",
-    "set_scene", "set_viewport", "set_observer", "set_positions", "prepare_and_register_model_resource",
+    "set_scene", "set_viewport", "set_observer", "set_positions", "prepare_and_register_model_resource", "prepare_scene_resources",
     "query_point_hit", "query_marquee", "query_probe", "query_drop_target", "query_composite_asset_scopes",
     "query_model_pick", "query_composite_asset_item_pick", "query_composite_asset_item_bounds", "query_gizmo_hit",
     "request_shot_capture", "seed_runtime_generation"
