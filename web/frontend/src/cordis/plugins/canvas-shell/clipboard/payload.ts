@@ -15,7 +15,7 @@ import {
   decodeImageEditDocument,
   filmSetObjectOwnershipOf, shotPreviewOwnershipOf, FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   filmSetAssetReferences,
-  isImageProjectDocument,
+  isImageProjectDocument, decodeFilmSetNodeData, model3DNodeDataFields,
   readFilmSetContent,
   sanitizeNodeDataForClipboard,
   type ImageEditProjectObjectRef,
@@ -124,13 +124,40 @@ export function buildCanvasCopyPayload(
   }
   for (const id of [...included]) {
     const owner = previewOwnerByNode.get(id);
-    if (owner && !included.has(owner)) included.delete(id);
+    // 对象容器可以在所属片场未被选中时物化为独立 model3d；拍摄镜头预览仍必须丢弃。
+    const isObjectContainer = !!filmSetObjectOwnershipOf(canvas.nodeData[id]);
+    if (owner && !included.has(owner) && !isObjectContainer) included.delete(id);
   }
 
   if (included.size === 0) return null;
+
+  // 单独复制片场对象容器时，将当前对象模型物化为普通 model3d 快照。
+  // 容器仍然是片场生命周期里的 composite-asset；只有在复制闭包不包含所属片场时，
+  // 才切断归属并把当下的模型内容写进载荷，保证粘贴结果不再依赖源片场。
+  const materializedModelData = new Map<string, Woohaa3CanvasJsonObject>();
+  const materializedNodeIds = new Set<string>();
+  for (const node of nodes) {
+    if (!included.has(node.id)) continue;
+    const ownership = filmSetObjectOwnershipOf(canvas.nodeData[node.id]);
+    if (!ownership || included.has(ownership.filmSetNodeId)) continue;
+    const ownerData = canvas.nodeData[ownership.filmSetNodeId];
+    const decoded = decodeFilmSetNodeData(ownerData);
+    if (!decoded.ok) continue;
+    const item = decoded.value.filmSetContent.items.find(candidate => candidate.id === ownership.itemId);
+    if (!item || item.kind !== "model") {
+      // 空容器没有可独立复制的内容；从选区中移除，避免产生悬空容器。
+      included.delete(node.id);
+      continue;
+    }
+    materializedNodeIds.add(node.id);
+    materializedModelData.set(node.id, JSON.parse(JSON.stringify(model3DNodeDataFields({
+      kind: "model3d", title: item.name, model: item.model
+    }))) as Woohaa3CanvasJsonObject);
+  }
+  if (included.size === 0) return null;
   const copyNodes: CopyNode[] = nodes
     .filter((node) => included.has(node.id))
-    .map(toCopyNode);
+    .map(node => ({ ...toCopyNode(node), ...(materializedNodeIds.has(node.id) ? { type: "model3d" } : {}) }));
 
   const copyEdges: CopyEdge[] = [];
   const incomingEdges: CopyIncomingEdge[] = [];
@@ -156,7 +183,7 @@ export function buildCanvasCopyPayload(
   const nodeTypeById = new Map(nodes.map((node) => [node.id, node.type]));
   for (const id of [...included].sort()) {
     const raw = rawNodeData[id];
-    const cleaned = sanitizeNodeDataForClipboard(raw ?? {});
+    const cleaned = materializedModelData.get(id) ?? sanitizeNodeDataForClipboard(raw ?? {});
     restoreContentReferences(raw, cleaned, nodeTypeById.get(id), assetsById);
     if (Object.keys(cleaned).length > 0) nodeData[id] = cleaned;
   }

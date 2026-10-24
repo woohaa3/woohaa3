@@ -561,7 +561,7 @@ describe("图片工程复制与跨画布引用（任务 2.4）", () => {
 
 
 describe("片场对象容器复制", () => {
-  it("随片场复制并重映射对象身份；单独复制容器不生成悬空节点", () => {
+  it("随片场复制并重映射对象身份；单独复制容器物化为独立 model3d", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("object-copy", NOW);
     canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
     canvas.nodeData.film = canonicalFilmSetFields(createFilmSetSnapshot({ title: "片场", modelItemId: "actor",
@@ -574,7 +574,15 @@ describe("片场对象容器复制", () => {
     const id = filmSetObjectContainerId("film", "actor");
     canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 400, y: 0 }, id));
     canvas.nodeData[id] = filmSetObjectContainerData("film", "actor");
-    expect(buildCanvasCopyPayload(canvas, [id])).toBeNull();
+    const standalone = buildCanvasCopyPayload(canvas, [id]);
+    expect(standalone).not.toBeNull();
+    expect(standalone!.nodes).toEqual([expect.objectContaining({ id, type: "model3d" })]);
+    expect(standalone!.nodeData[id]).toEqual(expect.objectContaining({
+      modelScript: "scene.box({id:'body',size:[1,1,1]});"
+    }));
+    const standalonePlan = planCanvasPaste({ canvas: createEmptyWoohaa3ServerCanvas("standalone-destination", NOW), payload: standalone!, anchor: null, viewport: { x: 0, y: 0, zoom: 1 } })!;
+    expect(standalonePlan.commands.some(command => command.type === "node.add" && command.node.type === "model3d")).toBe(true);
+    expect(standalonePlan.commands.some(command => command.type === "nodeData.patch" && command.value?.modelScript === "scene.box({id:'body',size:[1,1,1]});")).toBe(true);
     const payload = buildCanvasCopyPayload(canvas, ["film"])!;
     expect(payload.nodes.map(node => node.id)).toContain(id);
     const target = createEmptyWoohaa3ServerCanvas("destination", NOW);
