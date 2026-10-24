@@ -19,6 +19,10 @@ import {
 
 type TypePanelProps = { controller: EditorWorkspaceController; readonly: boolean; layer: number | null; locked?: boolean };
 
+/** 逐字手动字偶距：`type.info` 用数值表示，下拉框只显示不复用（不参与回写）。 */
+const MANUAL_KERNING = "manual";
+const AUTO_KERNING_MODES: readonly string[] = ["metrics", "optical", "off"];
+
 /** OpenType 特性 id → 上游 `style.features` 的 tag（与内核 `params.rs` 的开关表一致）。 */
 const OPEN_TYPE_TAGS: Record<Exclude<TypeCraftOpenTypeId, "standardLigatures" | "discretionaryLigatures">, string> = {
   contextualAlternates: "calt",
@@ -106,7 +110,12 @@ export function TypographyPanel({ controller, readonly, layer, locked = false }:
       ...current,
       ...(typeof style.tracking === "number" ? { tracking: style.tracking } : {}),
       ...(typeof style.baselineShift === "number" ? { baselineShift: style.baselineShift } : {}),
-      ...(typeof style.kerning === "string" ? { kerning: style.kerning } : {})
+      // 字偶距是三选一**或**逐字手动值（数值）。手动值要单独标出来：把它当成 "off" 回传
+      // 会静默清掉用户已有的手动字偶距，原样回传数值又会被内核拒绝
+      // （「kerning 必须是 metrics/optical/off 或 ±1000 内的数值」）。
+      ...(typeof style.kerning === "string" && ["metrics", "optical", "off"].includes(style.kerning)
+        ? { kerning: style.kerning }
+        : typeof style.kerning === "number" ? { kerning: MANUAL_KERNING } : {})
     }));
   }, [controller, layer, revision]);
   /**
@@ -117,7 +126,10 @@ export function TypographyPanel({ controller, readonly, layer, locked = false }:
    * 行距仍不随手填：`leading` 有「自动」语义，显式 0 会压扁行高。
    */
   const commitTypographic = (patch: Record<string, unknown>) => {
-    const next = { tracking: values.tracking, baselineShift: values.baselineShift, kerning: values.kerning, ...patch };
+    const next: Record<string, unknown> = { tracking: values.tracking, baselineShift: values.baselineShift, ...patch };
+    // 手动字偶距不在这个下拉框的语义里：既不能原样回传数值（内核拒绝整次提交），
+    // 也不能悄悄写成 "off"（会清掉用户已有的手动值）。只有明确的自动模式才写。
+    if (AUTO_KERNING_MODES.includes(values.kerning)) next.kerning = values.kerning;
     apply(next);
   };
   const disabled = readonly || locked || layer === null;
@@ -133,6 +145,7 @@ export function TypographyPanel({ controller, readonly, layer, locked = false }:
           <option value="metrics">度量</option>
           <option value="optical">视觉</option>
           <option value="off">关</option>
+          {values.kerning === MANUAL_KERNING ? <option value={MANUAL_KERNING}>手动（逐字）</option> : null}
         </select>
       </label>
       <Button size="sm" disabled={disabled} onClick={() => {
@@ -140,9 +153,9 @@ export function TypographyPanel({ controller, readonly, layer, locked = false }:
         // 也会把「只是点了应用排版」判成内容变化。
         const patch: Record<string, unknown> = {
           tracking: values.tracking,
-          baselineShift: values.baselineShift,
-          kerning: values.kerning
+          baselineShift: values.baselineShift
         };
+        if (AUTO_KERNING_MODES.includes(values.kerning)) patch.kerning = values.kerning;
         if (values.leading !== null) patch.leading = values.leading;
         apply(patch);
       }}>应用排版</Button>

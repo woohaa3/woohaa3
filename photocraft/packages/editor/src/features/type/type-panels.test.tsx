@@ -150,6 +150,26 @@ it("字距改动立即提交给内核，并回读图层真实字距（A6）", ()
   expect(type.applyTypography).toHaveBeenLastCalledWith({ tracking: 300, baselineShift: 4, kerning: "optical", layer: 5 });
   expect(queries.some((entry) => entry.query === "type.info")).toBe(true);
 });
+it("手动字偶距（数值）不回传 kerning，避免整次排版被内核拒绝（A6）", () => {
+  // 真实窗口里 `type.info` 的手动字偶距是**数值**；把它原样回传给 `type.setStyle` 会被拒
+  // （「kerning 必须是 metrics/optical/off 或 ±1000 内的数值」），连累字距一起提交失败。
+  // 也不能悄悄写成 "off"：那会清掉用户已有的手动字偶距。
+  const { container, type } = setup({ tracking: 0, kerning: 120 as never });
+  const kerningSelect = [...container.querySelectorAll<HTMLSelectElement>("select")]
+    .find((select) => [...select.options].some((option) => option.value === "metrics"))!;
+  expect(kerningSelect.value).toBe("manual");
+  expect([...kerningSelect.options].map((option) => option.textContent)).toContain("手动（逐字）");
+  const trackingInput = [...container.querySelectorAll<HTMLLabelElement>("label")]
+    .find((label) => label.textContent?.startsWith("字距"))!.querySelector("input")!;
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    setter.call(trackingInput, "300");
+    trackingInput.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const payload = type.applyTypography.mock.calls.at(-1)![0] as Record<string, unknown>;
+  expect(payload.tracking).toBe(300);
+  expect("kerning" in payload).toBe(false);
+});
 it("行距留空表示自动行距，不把 0pt 当成用户输入", () => {
   // 上游 `type.setStyle` 的 `leading:0` 是「行高 0pt」，不是「回到自动」；自动行距是
   // `leading:null`/`"auto"`。初值若写成 0，用户只点一下「应用排版」就会把内容判脏。
