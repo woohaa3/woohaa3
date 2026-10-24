@@ -291,6 +291,12 @@ pub(crate) const FILM_TITLE_LINE_GAP: f32 = 6.0;
 pub(crate) const FILM_TITLE_GAP: f32 = 20.0;
 /// 片场标题面板最小宽度。
 pub(crate) const FILM_TITLE_MIN_WIDTH: f32 = 64.0;
+/// 片场标题/类型名可读的最小文案宽度（约 6 个中文字符，含 `shortened` 预留的省略号宽度）。
+///
+/// 地面范围可能远窄于模型（小地面、较高的模型），若文案可用宽度严格跟随范围/内容宽度，标题会
+/// 退化为单个字加省略号。面板浮在**范围与模型内容包围盒之上**、不侵占两者内部，因此允许它宽于
+/// 内容以保住可读性。
+pub(crate) const FILM_TITLE_MIN_TEXT_WIDTH: f32 = 224.0;
 
 /// 片场标题面板高度：上下内边距 + 标题行（+ 可选类型标记行）。
 pub(crate) fn film_title_chip_height(has_type: bool) -> f32 {
@@ -305,10 +311,11 @@ pub(crate) fn film_title_chip_height(has_type: bool) -> f32 {
 
 /// 片场标题面板的纯布局：面板矩形、标题行与类型标记行的文案与落点。
 ///
-/// 面板浮在范围**顶部之上**、水平居中（不落在平行四边形内部，也不占用范围本身），只按范围宽度
-/// 有界省略文案。第二行是节点业务类型名（`GraphNode.type_label`，如「片场」「游戏炼丹炉」，
-/// 由映射层按可信 adapter 身份派生），缺失时只画标题行。绘制（`canvas2d::film_set`）与测试共用
-/// 本函数；显隐仍由 hover/选中决定
+/// 面板浮在范围顶部与**模型内容包围盒**顶部较高者之上、水平居中于内容包围盒（不落在平行
+/// 四边形内部，也不遮住模型身体）；文案优先按内容宽度有界省略，但保留可读下限（面板可宽于很
+/// 小的地面范围）。第二行是节点业务类型名
+/// （`GraphNode.type_label`，如「片场」「游戏炼丹炉」，由映射层按可信 adapter 身份派生），
+/// 缺失时只画标题行。绘制（`canvas2d::film_set`）与测试共用本函数；显隐仍由 hover/选中决定
 /// （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D7 修订）。
 pub(crate) struct FilmTitleLayout {
     /// 截断后的标题文案。
@@ -326,9 +333,11 @@ pub(crate) struct FilmTitleLayout {
 pub(crate) fn film_title_layout(node: &GraphNode) -> FilmTitleLayout {
     let scope = super::scope::node_scope(node);
     let aabb = scope.aabb;
-    // 文案可用宽度：面板至多与范围等宽，减去左右内边距；极小范围仍保留可读下限。
-    let max_text = (aabb.width - FILM_TITLE_CHIP_PAD * 2.0)
-        .max(FILM_TITLE_MIN_WIDTH - FILM_TITLE_CHIP_PAD * 2.0);
+    // 文案可用宽度：优先与模型内容包围盒等宽（减去左右内边距），无内容时回落到范围宽度；
+    // 不低于可读下限，避免小地面把标题压成「…」。
+    let content = scope.content;
+    let available_width = content.map(|bounds| bounds.width).unwrap_or(aabb.width);
+    let max_text = (available_width - FILM_TITLE_CHIP_PAD * 2.0).max(FILM_TITLE_MIN_TEXT_WIDTH);
     let title = shortened(&node.title, max_text, FILM_TITLE_FONT);
     let raw_type = node.type_label.trim();
     let type_label = shortened(raw_type, max_text, FILM_TITLE_TYPE_FONT);
@@ -338,10 +347,15 @@ pub(crate) fn film_title_layout(node: &GraphNode) -> FilmTitleLayout {
         + FILM_TITLE_CHIP_PAD * 2.0)
         .max(FILM_TITLE_MIN_WIDTH);
     let chip_height = film_title_chip_height(has_type);
-    // 浮在范围顶部之上，水平居中于范围中心（顶部顶点即 AABB 顶边中点）。
-    let chip_bottom = aabb.y - FILM_TITLE_GAP;
+    // 浮在范围顶部与模型内容包围盒顶部**较高者**之上：小地面 + 高模型时标题不再压住模型
+    // 身体；平铺内容时仍保持在范围顶部之上。水平居中于内容包围盒（无内容时居中于范围）。
+    let anchor_top = content.map(|bounds| bounds.y).unwrap_or(aabb.y).min(aabb.y);
+    let chip_bottom = anchor_top - FILM_TITLE_GAP;
     let chip_top = chip_bottom - chip_height;
-    let chip_left = aabb.x + aabb.width / 2.0 - chip_width / 2.0;
+    let center_x = content
+        .map(|bounds| bounds.x + bounds.width / 2.0)
+        .unwrap_or(aabb.x + aabb.width / 2.0);
+    let chip_left = center_x - chip_width / 2.0;
     let title_pos = Vec2::new(chip_left + FILM_TITLE_CHIP_PAD, chip_top + FILM_TITLE_VPAD);
     let type_pos = Vec2::new(
         title_pos.x,
@@ -400,6 +414,8 @@ pub(crate) fn shortened(text: &str, max_width: f32, size: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod film_title;
 
     fn node(width: f32, height: f32) -> GraphNode {
         GraphNode {
@@ -534,89 +550,6 @@ mod tests {
         assert_eq!(shortened("abc", 100.0, 12.0), "abc");
         assert_eq!(shortened("中\u{0007}文", 100.0, 12.0), "中 文");
         assert!(shortened(&"宽".repeat(50), 40.0, 12.0).ends_with('…'));
-    }
-
-    fn film_node(title: &str, scope: (f32, f32, f32, f32)) -> GraphNode {
-        film_node_with_ground(title, scope, 40.0)
-    }
-
-    fn film_node_with_ground(title: &str, scope: (f32, f32, f32, f32), half: f32) -> GraphNode {
-        let mut node = film_node_typed(title, scope, half);
-        node.type_label = String::new();
-        node
-    }
-
-    fn film_node_typed(title: &str, scope: (f32, f32, f32, f32), half: f32) -> GraphNode {
-        let mut node = node(320.0, 200.0);
-        node.title = title.into();
-        node.composite_asset = Some(crate::protocol::CompositeAssetPresentation { panel: None, ownership_links: None, root_placement: None, content_extent: None,
-            layout_aabb: None,
-            geometry_quality: None,
-            scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond,
-            scope_ground: Some(crate::protocol::ScopeGroundDto { cx: scope.0 + scope.2 / 2.0, cy: scope.1 + scope.3 / 2.0, hx: half, hz: half }),
-            x: scope.0,
-            y: scope.1,
-            width: scope.2,
-            height: scope.3,
-            media: Vec::new(),
-            item_roots: std::collections::HashMap::new(),
-            item_placements: std::collections::HashMap::new(),
-        });
-        node
-    }
-
-    #[test]
-    fn film_title_floats_above_scope_top_centered() {
-        // 真实地面范围（hx=hz=120 → 菱形 AABB 340×170）；带业务类型名。
-        let mut node = film_node_with_ground("片场 A", (100.0, 50.0, 400.0, 300.0), 120.0);
-        node.type_label = "片场".into();
-        let scope = crate::canvas_query::scope::node_scope(&node);
-        let layout = film_title_layout(&node);
-        let (chip_x, chip_y, chip_w, chip_h) = layout.chip;
-        assert_eq!(layout.title, "片场 A");
-        assert_eq!(layout.type_label, "片场");
-        // 面板整体浮在范围顶部之上（含间隙），不侵占范围内部。
-        assert!(chip_y + chip_h <= scope.aabb.y, "面板底边应在范围顶部之上");
-        assert!((scope.aabb.y - (chip_y + chip_h) - FILM_TITLE_GAP).abs() < 1e-3);
-        // 水平居中于范围中心。
-        let chip_center_x = chip_x + chip_w / 2.0;
-        assert!((chip_center_x - (scope.aabb.x + scope.aabb.width / 2.0)).abs() < 1e-3);
-        // 两行都在面板内，且类型名在标题下方。
-        assert_eq!(layout.title_pos.x, chip_x + FILM_TITLE_CHIP_PAD);
-        assert!(layout.title_pos.y >= chip_y);
-        assert!(layout.title_pos.y + FILM_TITLE_FONT <= chip_y + chip_h);
-        assert!(layout.type_pos.y > layout.title_pos.y + FILM_TITLE_FONT);
-        assert!(layout.type_pos.y + FILM_TITLE_TYPE_FONT <= chip_y + chip_h + 1e-3);
-    }
-
-    #[test]
-    fn film_title_without_business_type_is_single_line() {
-        let node = film_node_with_ground("片场 A", (100.0, 50.0, 400.0, 300.0), 120.0);
-        let layout = film_title_layout(&node);
-        assert!(layout.type_label.is_empty());
-        assert_eq!(layout.chip.3, film_title_chip_height(false));
-    }
-
-    #[test]
-    fn film_title_floats_above_scope_top_and_truncates() {
-        let long = "非常长的中文片场名称".repeat(8);
-        let node = film_node_with_ground(&long, (0.0, 0.0, 200.0, 150.0), 90.0);
-        let scope = crate::canvas_query::scope::node_scope(&node);
-        let layout = film_title_layout(&node);
-        assert!(layout.title.ends_with('…'));
-        assert!(layout.title.chars().count() >= 2);
-        // 面板浮在范围顶部之上，且不宽于范围加内边距。
-        assert!(layout.chip.1 + layout.chip.3 <= scope.aabb.y);
-        assert!(layout.chip.2 <= scope.aabb.width.max(FILM_TITLE_MIN_WIDTH) + 1e-3);
-    }
-
-    #[test]
-    fn film_title_accepts_empty_name_without_panic() {
-        let node = film_node("", (0.0, 0.0, 64.0, 64.0));
-        let layout = film_title_layout(&node);
-        assert_eq!(layout.title, "");
-        assert!(layout.chip.2 >= FILM_TITLE_MIN_WIDTH);
-        assert!(layout.chip.0.is_finite());
     }
 
     #[test]

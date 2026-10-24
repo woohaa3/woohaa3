@@ -165,6 +165,25 @@ describe("标尺原点拖动会话", () => {
     expect(gesture.current()).toMatchObject({ origin: [4, 5] });
     expect(gesture.commit()).toEqual({ ok: true, value: { changed: false } });
   });
+
+  // 回归：内核的 `drag-origin` 只要坐标有限就回 `current`（当前原点值），并不判断这一下
+  // 是否按在标尺角落。曾因此把画布上每一次按下都当成「拖原点」，画笔/选区/修饰等工具手势
+  // 全部被吞掉（表现为「画笔能选中、落笔没反应、历史里没有那一步」）。
+  it("按在标尺角落之外不接管：交给画布继续按当前工具处理", () => {
+    const { gesture, pointer } = session({ current: [0, 0], origin: [10, 10] });
+    const canvas = { getBoundingClientRect: () => ({ left: 100, top: 50 }) } as unknown as HTMLElement;
+    expect(gesture.beginOrigin([300, 400], canvas)).toBeNull();
+    expect(pointer).not.toHaveBeenCalledWith("drag-origin", expect.anything(), expect.anything());
+    expect(gesture.dragging).toBe(false);
+  });
+
+  it("按在标尺角落之内才接管原点拖动", () => {
+    const { gesture } = session({ current: [4, 5], origin: [8, 9] });
+    const canvas = { getBoundingClientRect: () => ({ left: 100, top: 50 }) } as unknown as HTMLElement;
+    // 角落 24×20：落在 (100..124, 50..70) 之内即命中。
+    const started = gesture.beginOrigin([110, 60], canvas);
+    expect(started).toMatchObject({ kind: "origin", from: [4, 5] });
+  });
 });
 
 describe("来源视图核对", () => {

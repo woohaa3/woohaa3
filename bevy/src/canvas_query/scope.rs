@@ -63,6 +63,9 @@ pub(crate) struct ScopeGeometry {
     pub(crate) handles: [Vec2; 8],
     /// 地面矩形（仅地面平行四边形时存在）。
     pub(crate) ground: Option<ScopeGround>,
+    /// 全部模型内容的投影包围盒（画布世界）；由呈现字段 + 渲染同一 fit/anchor 公式派生，
+    /// 供标题浮在模型顶部之上、点选条带止于模型顶部。缺失即无内容几何。
+    pub(crate) content: Option<ScopeRect>,
 }
 
 /// 范围抓手集合：复合资产为 8 个抓手；普通矩形节点沿用右下角方形。
@@ -171,6 +174,7 @@ pub(crate) fn geometry(
             radius_y,
             handles,
             ground: Some(ground),
+            content: None,
         };
     }
     let half_w = normalized.width / 2.0;
@@ -199,6 +203,7 @@ pub(crate) fn geometry(
         radius_y: half_h,
         handles,
         ground: None,
+        content: None,
     }
 }
 
@@ -224,6 +229,32 @@ pub(crate) fn contains(geometry: &ScopeGeometry, point: Vec2) -> bool {
         && point.x <= a.x + a.width + SCOPE_EPSILON
         && point.y >= a.y - SCOPE_EPSILON
         && point.y <= a.y + a.height + SCOPE_EPSILON
+}
+
+/// 点命中区域：真实范围多边形 ∪ 范围顶部之上的模型身体投影。
+///
+/// 地面范围只覆盖模型的地面占地；小地面、较高的模型（例如窄底座上的高塔）会把可见身体投影
+/// 到范围 AABB 顶部之上，只按多边形命中会让用户几乎点不中模型。等距投影中屏幕横坐标只由世界
+/// x/z 决定，因此把**模型内容投影包围盒**（[`ScopeGeometry::content`]，与渲染同一 fit/anchor
+/// 公式派生）的水平区间从范围顶部向上延伸到包围盒顶部，即可精确覆盖模型身体，又不会横向
+/// 扩散到无关区域；无内容几何时回落到内容适配基准矩形顶部。
+///
+/// 只扩展 AABB 顶部以上：AABB 内部仍由凸多边形判定，保持既有「外包矩形空白角不命中」语义。
+/// drop 与框选仍只认地面范围（drop 表达落在片场地面上，不应由上方空气区域接收）。
+pub(crate) fn pick_contains(geometry: &ScopeGeometry, point: Vec2) -> bool {
+    if contains(geometry, point) {
+        return true;
+    }
+    if !finite(point.x) || !finite(point.y) || point.y >= geometry.aabb.y {
+        return false;
+    }
+    let (strip_x, strip_y, strip_width) = match geometry.content {
+        Some(content) => (content.x, content.y, content.width),
+        None => (geometry.aabb.x, geometry.base.y, geometry.aabb.width),
+    };
+    point.x >= strip_x - SCOPE_EPSILON
+        && point.x <= strip_x + strip_width + SCOPE_EPSILON
+        && point.y >= strip_y - SCOPE_EPSILON
 }
 
 /// 范围是否与框选矩形有**正面积**相交（仅触边不算）。SAT：x/y 轴与范围边法线。
@@ -294,6 +325,7 @@ pub(crate) fn translate(geometry: &ScopeGeometry, offset: Vec2) -> ScopeGeometry
             cy: ground.cy + offset.y,
             ..ground
         }),
+        content: geometry.content.map(translate_rect),
         ..*geometry
     }
 }
@@ -375,22 +407,32 @@ pub(crate) fn polygon_contains(vertices: &[Vec2], point: Vec2, epsilon: f32) -> 
 /// `scope_ground` 时回退矩形几何（映射层为菱形始终下发地面矩形）。
 pub(crate) fn node_scope(node: &GraphNode) -> ScopeGeometry {
     match &node.composite_asset {
-        Some(asset) => geometry(
-            ScopeRect {
-                x: asset.x,
-                y: asset.y,
-                width: asset.width,
-                height: asset.height,
-            },
-            asset.scope_shape,
-            asset.scope_ground.map(|g| ScopeGround {
-                cx: g.cx,
-                cy: g.cy,
-                hx: g.hx,
-                hz: g.hz,
-            }),
-            SCOPE_MIN_HALF,
-        ),
+        Some(asset) => {
+            let mut scope = geometry(
+                ScopeRect {
+                    x: asset.x,
+                    y: asset.y,
+                    width: asset.width,
+                    height: asset.height,
+                },
+                asset.scope_shape,
+                asset.scope_ground.map(|g| ScopeGround {
+                    cx: g.cx,
+                    cy: g.cy,
+                    hx: g.hx,
+                    hz: g.hz,
+                }),
+                SCOPE_MIN_HALF,
+            );
+            scope.content = crate::model3d::film_set_content_bounds(node)
+                .map(|(x, y, width, height)| ScopeRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                });
+            scope
+        }
         None => geometry(
             ScopeRect {
                 x: node.x + node.width / 2.0 - SCOPE_MIN_HALF,
@@ -479,6 +521,62 @@ mod tests {
         assert!(contains(&g, g.vertices[0]));
         let blank = Vec2::new(g.aabb.x, g.aabb.y);
         assert!(!contains(&g, blank));
+    }
+
+    #[test]
+    fn pick_expands_above_scope_but_keeps_blank_corner_excluded() {
+        // 小地面范围 + 高内容：内容适配基准矩形（200×240）远高于菱形 AABB。
+        let g = geometry(
+            base(0.0, 0.0, 200.0, 240.0),
+            CompositeAssetScopeShape::IsometricDiamond,
+            Some(ground(100.0, 150.0, 20.0, 20.0)),
+            SCOPE_MIN_HALF,
+        );
+        assert!(g.aabb.y > g.base.y);
+        // 范围顶部之上的模型身体（范围水平区间内）命中。
+        assert!(pick_contains(&g, Vec2::new(100.0, g.aabb.y - 40.0)));
+        // 基准矩形更宽，但范围水平区间之外（模型不可能投影到那里）不扩散命中。
+        let wide = Vec2::new(g.aabb.x - 8.0, g.aabb.y - 40.0);
+        assert!(wide.x > g.base.x);
+        assert!(!pick_contains(&g, wide));
+        // AABB 内、平行四边形外的空白角保持不命中。
+        let blank = Vec2::new(g.aabb.x, g.aabb.y + 1.0);
+        assert!(!contains(&g, blank));
+        assert!(!pick_contains(&g, blank));
+        // 范围内部正常命中。
+        assert!(pick_contains(&g, g.center));
+    }
+
+    #[test]
+    fn pick_strip_uses_model_content_bounds_when_present() {
+        let mut g = geometry(
+            base(0.0, 0.0, 200.0, 240.0),
+            CompositeAssetScopeShape::IsometricDiamond,
+            Some(ground(100.0, 150.0, 20.0, 20.0)),
+            SCOPE_MIN_HALF,
+        );
+        // 内容包围盒高而窄：顶部远高于地面范围，水平范围只覆盖模型身体。
+        g.content = Some(base(70.0, 20.0, 60.0, 290.0));
+        assert!(g.content.unwrap().y < g.aabb.y);
+        assert!(pick_contains(&g, Vec2::new(100.0, 40.0)));
+        // 内容包围盒之外不扩散命中（即使仍落在范围 AABB 水平区间内）。
+        assert!(!pick_contains(&g, Vec2::new(70.0 - 2.0, 40.0)));
+        // 内容包围盒顶部之上（模型上方留白）不命中。
+        assert!(!pick_contains(&g, Vec2::new(100.0, 10.0)));
+    }
+
+    #[test]
+    fn pick_union_is_limited_to_scope_column_and_content_top() {
+        let g = geometry(
+            base(0.0, 0.0, 200.0, 240.0),
+            CompositeAssetScopeShape::IsometricDiamond,
+            Some(ground(100.0, 150.0, 20.0, 20.0)),
+            SCOPE_MIN_HALF,
+        );
+        // 高于基准矩形顶部（模型上方留白）不命中。
+        assert!(!pick_contains(&g, Vec2::new(100.0, g.base.y - 10.0)));
+        // 低于范围 AABB 底部、基准矩形内也不命中（下方不属于内容身体）。
+        assert!(!pick_contains(&g, Vec2::new(100.0, g.aabb.y + g.aabb.height + 10.0)));
     }
 
     #[test]

@@ -209,3 +209,31 @@ fn film_set_not_connectable_by_probe() {
         .find(|candidate| candidate.node_id == "fs");
     assert!(target.is_some_and(|candidate| !candidate.connectable));
 }
+
+#[test]
+fn film_set_tall_model_body_above_scope_is_pickable_but_not_a_drop_target() {
+    clear_snapshot();
+    // 小地面、较高的片场：地面菱形只到基准矩形底部附近，模型身体投影在其上方。
+    let mut node = film_set("fs", 0.0, 0.0, 80.0, 400.0, Some((0.0, 0.0, 80.0, 400.0)));
+    node.composite_asset.as_mut().unwrap().scope_ground = Some(crate::protocol::ScopeGroundDto {
+        cx: 40.0,
+        cy: 360.0,
+        hx: 8.0,
+        hz: 8.0,
+    });
+    let scope = crate::canvas_query::scope::node_scope(&node);
+    assert!(scope.aabb.y > 300.0);
+    let g = accept_scene(&scene(vec![node], vec![]));
+    // 范围顶部之上的模型身体可点选。
+    assert_eq!(
+        point_query(g, 40.0, 300.0, 1.0, None).hit,
+        Some(PointHit::FilmScope { node_id: "fs".into() })
+    );
+    // AABB 内、平行四边形外的空白角仍不命中。
+    assert_eq!(
+        point_query(g, scope.aabb.x + 2.0, scope.aabb.y + 2.0, 1.0, None).hit,
+        None
+    );
+    // drop 仍只认地面范围，不因上方身体可点选而接收素材。
+    assert_eq!(drop_target_query(g, 40.0, 300.0, &[]).target_node_id, None);
+}

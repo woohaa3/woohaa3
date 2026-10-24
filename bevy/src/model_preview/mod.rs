@@ -368,7 +368,7 @@ pub(crate) fn sync(
                     RenderTarget::Image(image.clone().into()),
                     pose,
                     projection.clone(),
-                    RenderLayers::layer(layer),
+                    RenderLayers::from_layers(&[layer]),
                     Msaa::Sample4,
                     bevy::render::view::Tonemapping::None,
                     // 就绪门禁只统计可逐项计数的直接绘制队列；Bevy 的 multidraw 实例数是

@@ -78,6 +78,10 @@ export type ViewGesturePorts = {
 /** 拖动容差（屏幕像素）；内核按 `tolerance / zoom` 换算成源像素。 */
 const TOLERANCE = 6;
 
+/** 标尺角落尺寸，与 `view-aids-overlay` 的 `RULER_CORNER` 保持一致（上边 20、左边 24）。 */
+const RULER_CORNER_WIDTH = 24;
+const RULER_CORNER_HEIGHT = 20;
+
 export class ViewGestureSession {
   private active: ViewDrag | null = null;
   /** 从标尺条按下时需要接管后续 move/up 的指针 id（覆盖层拿不到画布的捕获）。 */
@@ -159,7 +163,18 @@ export class ViewGestureSession {
   }
 
   /** 在客户坐标处开始拖动标尺原点（标尺角落按下时由画布调用）。 */
-  beginOrigin(client: readonly [number, number]): OriginDrag | null {
+  beginOrigin(client: readonly [number, number], corner?: HTMLElement | null): OriginDrag | null {
+    // 语义核对：内核的 `drag-origin` 只要坐标有限就回 `current`（当前原点值），并不判断
+    // 「这一下是否真的按在标尺角落」。只看 `current` 会把画布上每一次按下都当成拖原点，
+    // 画笔/选区/修饰等全部手势都会被吞掉。因此命中判定留在界面这一层：只有按在标尺角落
+    // （24×20，与 `view-aids-overlay` 的角落矩形同一尺寸）才接管，其余一律交回画布。
+    if (corner) {
+      const box = corner.getBoundingClientRect();
+      const inside =
+        client[0] >= box.left && client[0] <= box.left + RULER_CORNER_WIDTH &&
+        client[1] >= box.top && client[1] <= box.top + RULER_CORNER_HEIGHT;
+      if (!inside) return null;
+    }
     const result = this.ports.pointer("drag-origin", client, { viewId: this.ports.viewId });
     if (!result.ok || result.value.kind !== "origin" || !result.value.current) return null;
     this.active = {

@@ -6,6 +6,21 @@
 use super::*;
 
 #[test]
+fn composite_panel_is_optional_and_bounded() {
+    let mut scene = parse(&scene_json(""));
+    scene.nodes = serde_json::from_value(serde_json::json!([
+        {"id":"reference","type":"model","x":0,"y":0,
+            "compositeAsset":{"x":0,"y":0,"width":280,"height":210,"scopeShape":"rect",
+                "panel":{"title":"参考图","message":"拖入图片","hint":"最多 8 张","imageIds":["reference::image"]}}}
+    ])).unwrap();
+    assert!(scene.validate().is_ok());
+    scene.nodes[0].composite_asset.as_mut().unwrap().panel.as_mut().unwrap().image_ids = vec!["image".into(); 9];
+    assert_eq!(scene.validate(), Err("Invalid composite container panel"));
+    scene.nodes[0].composite_asset.as_mut().unwrap().panel = None;
+    assert!(scene.validate().is_ok());
+}
+
+#[test]
 fn composite_ownership_links_validate_geometry_and_identity() {
     let mut scene = parse(&scene_json(""));
     scene.nodes = serde_json::from_value(serde_json::json!([

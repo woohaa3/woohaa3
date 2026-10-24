@@ -101,6 +101,24 @@ describe("Bevy runtime interaction queries（change: 2026-09-29-move-canvas-hot-
 });
 
 describe("Bevy runtime model resource registration", () => {
+  it("模型被 Rust LRU 淘汰后在提交场景前补注册", async () => {
+    const calls: Calls = [];
+    const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: v2Ops(1) });
+    const module = mockModule(calls);
+    const runtime = await loadBevyRuntime({ importModule: async () => module });
+    const scene = sceneWith(resource.resourceKey, resource.signature);
+    const resources = new Map([[resource.resourceKey, resource]]);
+    runtime.setScene(scene, resources);
+    runtime.setModelPayloadLeases!([]);
+    module.set_model_payload_leases = request => {
+      expect(JSON.parse(request).keys).toEqual([resource.resourceKey]);
+      return JSON.stringify({ retained: 0, evicted: 1, evictedKeys: [resource.resourceKey], residentKeys: [] });
+    };
+    runtime.setModelPayloadLeases!([resource.resourceKey]);
+    runtime.setScene(scene, resources);
+    expect(calls.filter(call => call.kind === "prepare")).toHaveLength(2);
+    expect(calls.slice(-2).map(call => call.kind)).toEqual(["prepare", "set_scene"]);
+  });
   it("先注册资源、后提交引用场景，且同一 key 幂等只上传一次", async () => {
     const calls: Calls = [];
     const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: v2Ops(1) });

@@ -209,7 +209,7 @@ describe("ChatGPT 转换 adapter：真实视觉输入（任务 2.1/2.2）", () =
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const candidate = result.candidate as { filmSetContent: { schemaVersion: number; items: unknown[] }; filmSetAnimations: unknown };
-    expect(candidate.filmSetContent.schemaVersion).toBe(3);
+    expect(candidate.filmSetContent.schemaVersion).toBe(4);
     expect(candidate.filmSetContent.items).toHaveLength(1);
     expect(candidate.filmSetAnimations).toBeTruthy();
   });

@@ -243,6 +243,13 @@ export function create2dInputFamily(core: InteractionCore) {
           const start = index?.absolutePosition(id);
           if (start) starts.set(id, start);
         }
+        if (canvasState) for (const id of active) {
+          const adapter = options.compositeAssets?.resolve(canvasState, id);
+          for (const related of adapter?.dragAlongNodeIds?.(canvasState, id) ?? []) {
+            const start = index?.absolutePosition(related);
+            if (start) starts.set(related, start);
+          }
+        }
         return starts;
       });
       // 拖动 group 时其后代随容器移动，因此只拖动**根**：后代保持相对坐标，

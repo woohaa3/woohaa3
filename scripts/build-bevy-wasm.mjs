@@ -64,7 +64,7 @@ const GLUE_POSTPROCESS_VERSION = "2";
 // query_composite_asset_scopes 导出，模板版本提升使缓存失效。
 // change: 2026-10-12-optimize-canvas-model-lod-and-interactions —— 新增 set_positions /
 // position_capability 导出，模板版本提升使缓存失效。
-const DTS_TEMPLATE_VERSION = "9";
+const DTS_TEMPLATE_VERSION = "10";
 
 const OUT_NAME = "woohaa_bevy_canvas";
 const glueName = `${OUT_NAME}.js`;
