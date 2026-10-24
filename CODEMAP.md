@@ -17,6 +17,8 @@ Film-set static image references: `web/contracts/src/canvas/film-set-shot-image-
 | `bevy` | WASM/native renderer and recording tools |
 | `desktop` | Tauri desktop shell and native host integration |
 | `scripts` | Client development, build, packaging and verification |
+
+Bevy WASM builds resolve one shared mode policy in `scripts/lib/bevy-build-mode.mjs`: development (incremental dev profile, no `wasm-opt`) is the default for `dev`, `dev:frontend`, `dev:desktop` and `build:bevy:dev`; `WOOHAA_BEVY_DEV_MODE=performance` or `build:bevy:perf` selects release compilation with `wasm-opt -Oz -g`; production `build`, `build:bevy` and desktop frontend assembly request release explicitly. `build-bevy-wasm.mjs` derives the target directory from `cargo metadata`, follows Cargo's own job defaults, serializes writers of the shared frontend output through a recoverable lock under `.local/locks/`, and only reuses post-processing when mode, inputs and the recorded JS/WASM/d.ts digests all match.
 | `locks` | Dependency lockfiles |
 
 Start at `web/backend/src/composition.ts` for local host composition, `web/frontend/src/main.tsx` for the interface, and `bevy/src/lib.rs` for rendering. Extension discovery follows `extensions.config.json`. Generated API bindings enter this repository only as `api/gen/es` output: a protocol change arrives as a regenerated binding, never as a local edit.

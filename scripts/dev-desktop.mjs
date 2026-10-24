@@ -9,6 +9,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveDevEntryArgs, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const nativeRoot = join(root, "desktop");
@@ -16,9 +17,23 @@ const nativeBinary = join(nativeRoot, `target/debug/woohaa-desktop${process.plat
 const args = process.argv.slice(2).filter(arg => arg !== "--");
 const option = (name, fallback) => { const i = args.indexOf(name); return i < 0 ? fallback : args[i + 1]; };
 if (args.includes("--help")) {
-  console.log("pnpm dev:desktop [--frontend-port 5174] [--backend-port 5181] [--skip-build] [--no-watch]");
+  console.log(`pnpm dev:desktop [--frontend-port 5174] [--backend-port 5181] [--skip-build] [--no-watch]
+
+Bevy WASM 模式（change: 2026-10-23-optimize-bevy-development-build）：
+  默认 development：Cargo dev profile 增量编译、跳过 wasm-opt。
+  ${DEV_MODE_ENV}=performance 改用 release + wasm-opt -Oz -g 做本地性能采集。
+  --skip-build 只跳过模块/扩展构建；Vite 需要的 WASM 绑定与 Rust 新鲜度仍会检查。`);
   process.exit(0);
 }
+// 非法开发模式变量在任何构建前失败。
+let bevyModeArgs;
+try {
+  bevyModeArgs = resolveDevEntryArgs(process.env);
+} catch (error) {
+  console.error(`[desktop] ${error.message}`);
+  process.exit(1);
+}
+
 const front = option("--frontend-port", process.env.FRONTEND_PORT ?? "5174");
 const remote = option("--backend-url", process.env.WOOHAA3_BACKEND_URL);
 const back = option("--backend-port", process.env.BACKEND_PORT ?? "5181");
@@ -56,7 +71,8 @@ async function main() {
     server = launch(process.execPath, ["scripts/dev.mjs", "--native", "--frontend-port", front, "--backend-port", back, "--backend-url", remote, ...(args.includes("--skip-build") ? ["--skip-build"] : []), ...(args.includes("--no-watch") ? ["--no-watch"] : [])]);
   } else {
     // Native UI still imports both generated browser bindings during Vite resolution.
-    await finish(launch(process.execPath, ["scripts/build-bevy-wasm.mjs", "--keep-names"]));
+    // change: 2026-10-23-optimize-bevy-development-build —— 与其它开发入口共用模式选择。
+    await finish(launch(process.execPath, ["scripts/build-bevy-wasm.mjs", ...bevyModeArgs]));
     await finish(launch(process.execPath, ["scripts/build-image-editor-wasm.mjs", "--keep-names"]));
     if (!args.includes("--skip-build")) {
       await finish(launch("pnpm", ["--config.verify-deps-before-run=false", "-C", "web", "run", "build:units"]));
