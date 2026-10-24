@@ -271,15 +271,21 @@ async function main() {
   } finally {
     try { fs.rmSync(artifactReport, { force: true }); } catch {}
   }
-  const artifactsRebuilt = rebuiltArtifacts.length > 0;
-  if (artifactsRebuilt) {
-    console.log(`[dev] PhotoCraft 产物已重建（${rebuiltArtifacts.join(" / ")}），本次强制重建宿主模块`);
+  /**
+   * 只有**会内联进宿主模块**的产物（protocol / project-verifier）重建时才必须重跑 build:units：
+   * 后端与 media-service 会把它们打进自己的产物。wasm 只经 `syncPhotocraftWasm` 复制到
+   * 前端源码树，由 Vite 直接加载，不参与 build:units —— 为它强制全量重建只会把无关扩展的
+   * 既有构建失败拖进 dev 启动。
+   */
+  const hostModulesStale = rebuiltArtifacts.includes("protocol") || rebuiltArtifacts.includes("verifier");
+  if (rebuiltArtifacts.length > 0) {
+    console.log(`[dev] PhotoCraft 产物已重建（${rebuiltArtifacts.join(" / ")}）${hostModulesStale ? "，本次强制重建宿主模块" : ""}`);
   }
   // 缓存了旧 transform 的 Vite 会继续端出旧 glue：产物重建后清一次，避免「重建了还是旧代码」。
-  if (artifactsRebuilt) {
+  if (rebuiltArtifacts.length > 0) {
     try { fs.rmSync(path.join(root, "web/frontend/node_modules/.vite"), { recursive: true, force: true }); } catch {}
   }
-  if (!options.skipBuild || artifactsRebuilt) {
+  if (!options.skipBuild || hostModulesStale) {
     console.log("[dev] 构建模块（已有产物时可用 --skip-build 快速重启）");
     await runManager(["-C", "web", "run", "build:units"]);
   }

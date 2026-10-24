@@ -21,6 +21,7 @@ import type { DocumentDirtyState, EditorDocumentView } from "./document-view.js"
 import { FileDocumentWorkspace, type FileDocumentKind } from "./file-document-workspace.js";
 import { ImageFocusWorkspace } from "./workspace.js";
 import { resolveImageFocusTarget } from "./workspace-target.js";
+import { imageEditSessionId } from "./save.js";
 
 /** 一个打开文档的宿主资源。 */
 export type DocumentResource =
@@ -193,7 +194,15 @@ export class DocumentWorkspaceSession {
       nodeId: input.nodeId,
       view,
       controller: null,
-      sessionId: `image-edit:${canvasId}:${input.nodeId}`,
+      // 每次**打开**文档都是一次新的编辑会话（A2）。
+      //
+      // 曾经这里是 `image-edit:<canvas>:<node>`，让同一节点永远复用同一个 sessionId；而服务端
+      // 按 `begin:<sessionId>` 幂等返回**第一次**的基线，complete 又优先用这份持久化基线。
+      // 于是该节点只要保存成功过一次，之后每次提交都以 EDIT_SESSION_BASELINE_STALE 被拒
+      // （库里的 canvas_edit_completions 能直接看到成串的这条错误）。
+      //
+      // 会话身份必须与「一次打开」对齐：重开文档、保存成功后轮换，都会重新捕获基线。
+      sessionId: imageEditSessionId(input.nodeId),
       requestId: null,
       begin: null,
       begun: false
@@ -320,7 +329,7 @@ export class DocumentWorkspaceSession {
       nodeId: input.nodeId,
       view: input.view,
       controller,
-      sessionId: `image-edit:${this.deps.canvasId()}:${input.nodeId}`,
+      sessionId: imageEditSessionId(input.nodeId),
       requestId: null,
       begin: null,
       begun: false

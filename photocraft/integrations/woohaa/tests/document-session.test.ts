@@ -160,6 +160,24 @@ describe("文档身份与打开", () => {
     expect(h.session.findByController(null)).toBeNull();
   });
 
+  it("每次打开都是一次新的编辑会话身份（A2）", () => {
+    // 回归：sessionId 曾经按 `image-edit:<canvas>:<node>` 恒定复用。服务端 `begin:<sessionId>`
+    // 幂等返回第一次的基线、complete 又优先用持久化基线，于是该节点保存成功过一次之后，
+    // 之后每次提交都被判基线过期（库里能看到成串的 EDIT_SESSION_BASELINE_STALE）。
+    const h = harness();
+    const first = h.session.openNode({ nodeId: "n1", name: "海报", writable: true });
+    if (!first.ok) throw new Error("打开失败");
+    const a = h.session.resource(first.documentId)!;
+    expect(a.kind).toBe("node");
+    const firstSession = a.sessionId;
+    expect(firstSession).toMatch(/^img-session-/);
+    // 关闭后重开同一节点 → 新会话（重新捕获基线）。
+    h.session.close(first.documentId);
+    const again = h.session.openNode({ nodeId: "n1", name: "海报", writable: true });
+    if (!again.ok) throw new Error("重开失败");
+    expect(h.session.resource(again.documentId)!.sessionId).not.toBe(firstSession);
+  });
+
   it("节点标签的 detail 只在显式给出时写入，不回落到内部节点 id（A12）", () => {
     const h = harness();
     const opened = h.session.openNode({ nodeId: "asset-image-c5d9f2e9", name: "开业海报", writable: true, detail: "图片" });

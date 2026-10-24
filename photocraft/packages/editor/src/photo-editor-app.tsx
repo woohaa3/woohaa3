@@ -102,6 +102,7 @@ import { useCustomizationPreferences } from "./features/customization/use-custom
 import { brushOptionValues, resolveWithPreferences, restoreBrushOptions, workspacePanelLayout } from "./features/customization/shell-adapter.js";
 import { defaultCustomizationStore } from "./features/customization/preferences.js";
 import "./photo-editor.css";
+import { displayLayerName } from "./layer-display-name.js";
 
 export type PhotoEditorAppProps = {
   display?:EditorDisplayControls;
@@ -1629,7 +1630,7 @@ export function PhotoEditorApp({ controller, canvasView, onPreview, onDetailPrev
                 onClick={() => {setAdvancedOpen((value) => !value);}}>{advancedOpen ? "关闭列表" : "面板…"}</Button>
             </header>
             <div className="photo-editor__object-properties">
-              <p className="photo-editor__property-name">{activeLayer?.name??"未选择图层"}</p>
+              <p className="photo-editor__property-name">{activeLayer ? displayLayerName(activeLayer.name) : "未选择图层"}</p>
 
               {propertyTool ? renderOptions("properties") : <>
                 <p>{documentView?.width} × {documentView?.height} px · {documentView?.mode}</p>
