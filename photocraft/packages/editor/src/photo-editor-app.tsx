@@ -13,7 +13,7 @@ import {useColorPicker} from "./color-picker.js";
 import {useMissingFonts} from "./missing-fonts.js";
 import {LOREM_IPSUM} from "./text-placeholder.js";
 import {useToolMemory} from "./tool-memory.js";
-import {decodeRememberedTool,decodeMoveTarget,decodeSelectionMode,decodeFeather,decodeFalse,decodeTrue,decodeMarqueeLine,decodeMarqueeConstraint,DEFAULT_CONSTRAINT,decodeBucketMemory,decodeSampleMemory,decodeMagicWandMemory,decodeColorRangeMemory,decodeRetouchTool,decodeRetouchMemory} from "./tool-option-memory.js";
+import {decodeRememberedTool,decodeMoveTarget,decodeSelectionMode,decodeFeather,decodeFalse,decodeTrue,decodeMarqueeLine,decodeMarqueeConstraint,DEFAULT_CONSTRAINT,decodeBucketMemory,decodeSampleMemory,decodeMagicWandMemory,decodeColorRangeMemory,decodeRetouchMemory,decodeSlotMemory,decodeGroupMemory} from "./tool-option-memory.js";
 import {useToolReset,ToolResetMenu} from "./tool-reset.js";
 import {EDITOR_THEMES,EditorThemeRoot,useEditorTheme,themedEditorDialogs} from "./editor-theme.js";
 import {DocumentStatus,ZoomField} from "./editor-status-bar.js";
@@ -41,7 +41,7 @@ import {TextStyleControls} from "./text-style-controls.js";
 import {BrushSettingsPanel,DEFAULT_BRUSH_DYNAMICS,brushDynamicsPatch,decodeBrushDynamics,type BrushDynamics} from "./brush-settings-panel.js";
 import {CloneSourcePanel} from "./clone-source-panel.js";
 import {BrushPresetPanel} from "./brush-preset-panel.js";
-import {buildRetouch,DEFAULT_RETOUCH,retouchSpec as RETOUCH_SPEC,type RetouchSettings,type RetouchToolId} from "./retouch-tools.js";
+import {buildRetouch,DEFAULT_RETOUCH,isRetouchTool,type RetouchSettings} from "./retouch-tools.js";
 /**
  * PhotoCraft 图像编辑器界面（React）
  * （change: 2026-10-16-integrate-photocraft-image-editing，任务 3.2–3.6 / design D1/D2/D3）。
@@ -95,7 +95,9 @@ import { EditorCanvasMenu } from "./photo-editor-context-menu.js";
 import { EditorWorkspaceController } from "./editor-workspace.js";
 import type { EditorDialogPort } from "./ports.js";
 import type { EditorDocumentsMenu } from "./photo-editor-menu.js";
-import { EditorMenuBar, EditorToolRail, PHOTO_TOOLS, type PhotoEditorTool } from "./photo-editor-chrome.js";
+import { EditorMenuBar, EditorToolRail, type PhotoEditorTool } from "./photo-editor-chrome.js";
+import {groupOf, isCanvasTool, memberIdFor, slotOf, toolGroups, toolLabelFor, toolbarMembers, type ToolMember} from "./toolbar-slots.js";
+import {paintDispatch} from "./paint-dispatch.js";
 import { TransformOptions } from "./layer-transform-ui.js";
 import { PhotoCanvas, type PhotoCanvasHandle, type PhotoCanvasView } from "./photo-editor-canvas.js";
 import { HistoryPanel, LayerPanel } from "./photo-editor-panels.js";
@@ -165,8 +167,14 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
   const [message, setMessage] = useState<string | null>(null);
   const [sampleSettings,setSampleSettings]=useToolMemory("sample",DEFAULT_SAMPLE,decodeSampleMemory,setMessage);
   const [magicWand,setMagicWand]=useToolMemory("selection.magicWand",DEFAULT_MAGIC_WAND,decodeMagicWandMemory,setMessage);
-  const [retouchTool,setRetouchTool]=useToolMemory<RetouchToolId>("retouch.tool","colorReplacement",decodeRetouchTool,setMessage);
   const [retouch,setRetouch]=useToolMemory<RetouchSettings>("retouch",DEFAULT_RETOUCH,decodeRetouchMemory,setMessage);
+  /**
+   * 每槽记住的工具（design D4）。键是槽索引；只存非默认项，与本机工具记忆同一命名空间。
+   * 槽位记忆决定槽位按钮显示哪个成员，字母键的组记忆另存 `groupMemory`。
+   */
+  const [slotMemory,setSlotMemory]=useToolMemory<Record<string,string>>("slots",{},decodeSlotMemory,setMessage);
+  /** 每组上次所用工具（design D4）；字母键 `group_tool(key)` 语义。 */
+  const [groupMemory,setGroupMemory]=useToolMemory<Record<string,string>>("groups",{},decodeGroupMemory,setMessage);
   const retouchPath=useRef<DocumentPoint[]|null>(null);
   const [retouchPatterns,setRetouchPatterns]=useState<{id:string;name:string;width:number;height:number}[]>([]);
   const [colorRange,setColorRange]=useToolMemory("selection.colorRange",DEFAULT_COLOR_RANGE,decodeColorRangeMemory,setMessage);  const [busy, setBusy] = useState(false);
@@ -189,8 +197,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
   const [autoSelectTarget,setAutoSelectTarget]=useToolMemory("move.target",decodeMoveTarget(null),decodeMoveTarget,setMessage);
   const layerDigits=useRef(new PaintPercentInput());
   const nudge = useRef<{dx: number; dy: number} | null>(null);
-  const previousTool = useRef<PhotoEditorTool>("marquee");
-  const springTools=useRef(new SpringTools<PhotoEditorTool>());
+  const previousTool = useRef<PhotoEditorTool>("marquee");  const springTools=useRef(new SpringTools<PhotoEditorTool>());
   useEffect(()=>{setRememberedTool(springTools.current.persistentTool(tool==="transform"?previousTool.current:tool));});
   const [boundaryMoveActive,setBoundaryMoveActive]=useState(false);
   const [selectionTransform, setSelectionTransform] = useState(false);
@@ -452,20 +459,21 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
     JSON.stringify([tool,brush,colors,bucket]),refreshPreview,setMessage);
   const beginStroke = (point: DocumentPoint, modifiers?: {shift:boolean;alt?:boolean;mod?:boolean}) => {
     if (readonly || busy || closing) return false;
-    if (tool === "retouch") {
-      const spec=RETOUCH_SPEC(retouchTool);
-      if(!spec) return false;
-      const command=commands.get(spec.command);
-      if(!command?.allowed || !command.enabled) {setMessage(command?.disabledReason??"当前图层不能使用该润饰工具");return false;}
-      // 克隆类工具：Alt/Option 单击取样来源点（对应上游来源点手势），不绘制笔迹。
-      if((retouchTool==="cloneStamp" || retouchTool==="healingBrush") && modifiers?.alt){
+    if (isRetouchTool(tool)) {
+      // 分派决策是纯函数（`paint-dispatch.ts`）：每个绘画工具 id 的行为可在无浏览器环境下断言。
+      const dispatch=paintDispatch(tool,{alt:modifiers?.alt,hasPattern:!!retouch.pattern});
+      if(dispatch.kind==="other") return false;
+      const command=commands.get(dispatch.command);
+      if(!command?.allowed || !command.enabled) {setMessage(command?.disabledReason??"当前图层不能使用该绘制工具");return false;}
+      if(dispatch.kind==="sample"){
+        // 克隆类工具：Alt/Option 单击取样来源点（对应上游来源点手势），不绘制笔迹。
         setRetouch(current=>({...current,source:[point.x,point.y],offset:null}));
         setMessage(`已取样来源 (${Math.round(point.x)}, ${Math.round(point.y)})`);
         return false;
       }
-      if(spec.point){run(spec.command,buildRetouch(retouchTool,point,[point],retouch,colors.foreground,documentView?.editTarget??"pixels",canvasView.viewport.zoom));return false;}
-      if(spec.needsPattern && !retouch.pattern){setMessage("请先选择图案");return false;}
-      // 润饰笔画在释放时以整条路径提交一次；不伪造内核未提供的实时预览。
+      if(dispatch.kind==="point"){run(dispatch.command,buildRetouch(tool,point,[point],retouch,colors.foreground,documentView?.editTarget??"pixels",canvasView.viewport.zoom));return false;}
+      if(dispatch.kind==="blocked"){setMessage(dispatch.reason);return false;}
+      // 整笔在释放时一次提交；不伪造内核未提供的实时预览。
       retouchPath.current=[point];
       strokeEnd.current={point,key:String(snapshot.view.sessionActiveIndex)};
       return true;
@@ -533,7 +541,20 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
   };
   const canSave = !locked && !transforming && !textEditing.composing && !adjustmentEditing.active && !propertiesEditing.active && (snapshot.state.dirty || textEditing.active);
   const transformFrame = selectionTransform ? documentView?.selectionFrame : documentView?.transformFrame;
-  const toolLabel = tool === "marquee" ? marqueeLine==="row" ? "单行选框" : marqueeLine==="column" ? "单列选框" : ellipse ? "椭圆选框" : "矩形选框" : tool==="retouch" ? RETOUCH_SPEC(retouchTool)?.label : transforming ? selectionTransform ? "变换选区" : "自由变换" : PHOTO_TOOLS.find((entry) => entry.id === tool)?.label;
+  /**
+   * 槽位按钮显示哪个成员（design D4）：当前工具属于该槽时显示当前工具对应的成员；
+   * 否则显示该槽上次所用的成员；再否则显示槽内首成员。
+   */
+  const shownMemberFor = (slot: {index:number; members:readonly ToolMember[]}):ToolMember => {
+    const current = slot.members.filter(member => member.tool === tool);
+    if (current.length) {
+      const variant = tool === "marquee" ? marqueeVariantValue() : tool === "text" ? textEditing.style.orientation : undefined;
+      return current.find(member => member.variant === variant) ?? current[0]!;
+    }
+    const remembered = slotMemory[String(slot.index)];
+    return slot.members.find(member => member.id === remembered) ?? slot.members[0]!;
+  };
+  const toolLabel = tool === "marquee" ? marqueeLine==="row" ? "单行选框" : marqueeLine==="column" ? "单列选框" : ellipse ? "椭圆选框" : "矩形选框" : transforming ? selectionTransform ? "变换选区" : "自由变换" : toolLabelFor(tool, textEditing.style.orientation);
   const readThumbnail=useCallback((layer:number,mask:boolean)=>controller.layerThumbnail(layer,mask),[controller]);
   const selectedContentBounds=(rows:readonly {selected:boolean;bounds?:[number,number,number,number]|null}[])=>{
     const bounds=rows.filter(row=>row.selected && row.bounds).map(row=>row.bounds!);if(!bounds.length)return null;
@@ -561,9 +582,25 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
   const requestLayerEditor=(layer:{id:number},kind:"content"|"style"|"mask")=>{
     selectTarget(layer,kind==="mask");setLayerEditRequest({id:layer.id,kind});
   };
-  const canvasTool: EditorToolId = !spaceHeld && !locked && !textEditing.active && !adjustmentEditing.active && !propertiesEditing.active && !(tool==="marquee" && !marqueeLine && !marqueeConstraintValid) && (tool === "move" || tool === "marquee" || tool === "lasso" || tool === "magicWand" || tool === "retouch" || tool === "brush" || tool === "pencil" || tool === "eraser" || tool === "text" || tool === "pan" || tool === "zoom" || tool === "bucket" || tool==="eyedropper") ? tool : spaceHeld ? "pan" : "none";
-  const chooseTool = (next: PhotoEditorTool, selectionOnly = false, keyboard=false) => {
-    if (locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active) return;
+  // 画布工具：全部已开放工具都把手势交给画布；未列出的（transform 之外的伪工具）为 none。
+  const canvasTool: EditorToolId = !spaceHeld && !locked && !textEditing.active && !adjustmentEditing.active && !propertiesEditing.active && !(tool==="marquee" && !marqueeLine && !marqueeConstraintValid) && isCanvasTool(tool) ? tool : spaceHeld ? "pan" : "none";
+  const marqueeVariantValue = ():string => marqueeLine ?? (ellipse ? "ellipse" : "rectangle");
+  /**
+   * 记录槽位与组记忆（design D4）：只由「选中工具」这一个动作写入，两张表不会各自漂移。
+   * 槽位记忆按 `<槽索引>` 存成员 id；组记忆按组字母存工具 id。
+   */
+  const rememberToolForSlots = (next: PhotoEditorTool, variant?: string) => {
+    const slot = slotOf(next);
+    const sameTool = slot ? slot.members.filter(candidate => candidate.tool === next) : [];
+    const member = sameTool.find(candidate => candidate.variant === variant) ?? sameTool[0];
+    if (slot && member) setSlotMemory(current => current[String(slot.index)] === member.id ? current : {...current, [String(slot.index)]: member.id});
+    const group = groupOf(next);
+    if (group) {
+      const key = toolbarMembers().find(entry => entry.tool === next)?.key;
+      if (key) setGroupMemory(current => current[key] === next ? current : {...current, [key]: next});
+    }
+  };
+  const chooseTool = (next: PhotoEditorTool, selectionOnly = false, keyboard=false) => {    if (locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active) return;
     if(!keyboard)springTools.current.reset();
     if (nudge.current) { nudge.current = null; endTransform(true); }
     if (next === "transform") {
@@ -578,6 +615,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
     if(next==="text") revealProperties();
     setTextToolProperties(next==="text");
     setTool(next);
+    rememberToolForSlots(next,next==="marquee"?marqueeVariantValue():next==="text"?textEditing.style.orientation:undefined);
   };
   useEffect(()=>{const previous=springTools.current.reset();if(previous!==null)setTool(previous);},[controller]);
   const springBusy=()=>!!canvasRef.current?.hasGesture() || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active;
@@ -671,14 +709,29 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
       return;
     }
     if (nudge.current) { nudge.current = null; endTransform(true); }
-    if (action.kind === "tool") {
-      chooseTool(action.tool==="brush" && action.cycle && (tool==="brush" || tool==="pencil") ? tool==="brush"?"pencil":"brush":action.tool,false,true);
-      if (action.cycle && action.tool === "marquee" && (preferences.value.useShiftForToolSwitch || tool==="marquee")) {
-        if(marqueeLine==="row") setMarqueeLine("column");
-        else if(marqueeLine==="column") {setMarqueeLine(undefined);setEllipse(false);}
-        else if(ellipse) {setEllipse(false);setMarqueeLine("row");}
-        else setEllipse(true);
+    if (action.kind === "toolGroup") {
+      // 组切换（design D5）：现工具在组内时按 `cycle` 决定「原地不动」或「下一个」；
+      // 不在组内时回到该组上次所用工具，没有记录则取组首。
+      const group = toolGroups().get(action.key) ?? [];
+      if (!group.length) return;
+      const currentId = memberIdFor(tool, tool === "marquee" ? marqueeVariantValue() : tool === "text" ? textEditing.style.orientation : undefined);
+      const current = group.findIndex(member => member.id === currentId);
+      const remembered = group.find(member => member.id === (groupMemory[action.key] ?? ""))
+        ?? group.find(member => member.tool === groupMemory[action.key]);
+      const next = current >= 0
+        ? (action.cycle ? group[(current + 1) % group.length]! : group[current]!)
+        : (remembered ?? group[0]!);
+      // 变体成员：先切变体，再选工具，避免工具已切换但变体仍停在旧值。
+      if (next.tool === "marquee" && next.variant) {
+        if (next.variant === "row" || next.variant === "column") {setEllipse(false);setMarqueeLine(next.variant);}
+        else {setMarqueeLine(undefined);setEllipse(next.variant === "ellipse");}
+      } else if (next.tool === "text" && next.variant) {
+        const mode=next.variant==="vertical"?"vertical" as const:"horizontal" as const;
+        if(commands.get(`type.orientation.${mode}`)?.allowed)textEditing.update({orientation:mode});
       }
+      chooseTool(next.tool, false, true);
+    } else if (action.kind === "tool") {
+      chooseTool(action.tool,false,true);
     } else if (action.kind === "color") {
       colorAction(action.action);
     } else if (action.kind === "paintPercent") {
@@ -1014,7 +1067,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
           {(tool === "marquee" || tool === "lasso") ? <Button size="sm" disabled={locked || !documentView?.selectionFrame} onClick={() => chooseTool("transform",true)}>变换选区</Button> : null}
           {tool==="eyedropper"?<EyedropperOptions value={sampleSettings} onChange={setSampleSettings} disabled={locked}/>:null}
           {tool==="magicWand"?<MagicWandOptions value={magicWand} onChange={patch=>setMagicWand(current=>({...current,...patch}))} disabled={locked}/>:null}
-          {tool==="retouch"?<RetouchOptions tool={retouchTool} value={retouch} onChange={patch=>setRetouch(current=>({...current,...patch}))} disabled={locked || transforming} patterns={retouchPatterns} resolutionDpi={documentView?.resolutionDpi??72}/>:null}
+          {isRetouchTool(tool)?<RetouchOptions tool={tool} value={retouch} onChange={patch=>setRetouch(current=>({...current,...patch}))} disabled={locked || transforming} patterns={retouchPatterns} resolutionDpi={documentView?.resolutionDpi??72}/>:null}
           {tool==="text"?<TextStyleControls style={textEditing.textStyle} size={textEditing.style.size} disabled={locked || transforming || textEditing.composing} onChange={patch=>textEditing.updateStyle(patch)}/>:null}
           {painting?<div className="photo-editor__brush-settings" data-brush-settings-wrap="true"><BrushSettingsPanel value={brushDynamics} disabled={locked||transforming} onChange={changeBrushDynamics}/></div>:null}
           {painting?symmetry.controls:null}
@@ -1023,10 +1076,10 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
       </div>
       {display.state.screenModeError && !chromeVisible?<div className="photo-editor__screen-error">{display.state.screenModeError}</div>:null}
       <div className="photo-editor__body">
-        <EditorToolRail retouchTool={retouchTool} onRetouchTool={chosen=>{setRetouchTool(chosen);chooseTool("retouch");}} verticalTextDisabled={!commands.get("type.orientation.vertical")?.allowed} textOrientation={textEditing.style.orientation} onTextOrientation={mode=>{
+        <EditorToolRail tool={tool} onTool={chooseTool} shownMemberFor={shownMemberFor} onTextOrientation={mode=>{
           if(locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || canvasRef.current?.hasGesture() || nudge.current || mode==="vertical" && !commands.get("type.orientation.vertical")?.allowed)return;
           chooseTool("text");if(commands.get(`type.orientation.${mode}`)?.allowed)textEditing.update({orientation:mode});
-        }} screenMode={display.state.screenMode} onScreenMode={display.setScreenMode?setScreenMode:undefined} onView={action=>canvasRef.current?.view(action)} doubleColumn={panelLayout.toolbarDouble} onToggleColumns={()=>updatePanels({toolbarDouble:!panelLayout.toolbarDouble})} ellipse={ellipse} line={marqueeLine} onMarqueeKind={(ellipse,line)=>{setEllipse(ellipse);setMarqueeLine(line);}} tool={tool} onTool={chooseTool} readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
+        }} quickMask={!!documentView?.quickMask} onQuickMask={()=>run("select.editInQuickMaskMode")} screenMode={display.state.screenMode} onScreenMode={display.setScreenMode?setScreenMode:undefined} onView={action=>canvasRef.current?.view(action)} doubleColumn={panelLayout.toolbarDouble} onToggleColumns={()=>updatePanels({toolbarDouble:!panelLayout.toolbarDouble})} onMarqueeKind={(ellipse,line)=>{setEllipse(ellipse);setMarqueeLine(line);}} readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
           hidden={!chromeVisible || !display.state.toolsVisible}
           onEditColor={colorPicker.available?target=>{if(!canvasRef.current?.hasGesture())colorPicker.open(colors[target],target==="foreground"?setColor:setBackground);}:undefined}
           color={colors.foreground} onColor={setColor} background={colors.background} onBackground={setBackground} onColorAction={colorAction} />
@@ -1190,18 +1243,20 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
             }}
             onStrokeStart={beginStroke}
             onStrokeTap={point=>{if(liveStroke.replaceTap(point) && strokeEnd.current)strokeEnd.current={...strokeEnd.current,point};}}
-            onStrokeMove={(points) => { if (strokeEnd.current && points.length) strokeEnd.current.point = points[points.length-1]; if(tool==="retouch"){if(retouchPath.current)retouchPath.current.push(...points);return;} liveStroke.append(points); }}
+            onStrokeMove={(points) => { if (strokeEnd.current && points.length) strokeEnd.current.point = points[points.length-1]; if(isRetouchTool(tool)){if(retouchPath.current)retouchPath.current.push(...points);return;} liveStroke.append(points); }}
             onStroke={(points) => {
-              if(tool==="retouch"){
+              if(isRetouchTool(tool)){
                 const path=retouchPath.current??points;retouchPath.current=null;strokeEnd.current=null;
-                const spec=RETOUCH_SPEC(retouchTool);if(!spec || !path.length)return;
-                const params=buildRetouch(retouchTool,path[0]!,path,retouch,colors.foreground,documentView?.editTarget??"pixels",canvasView.viewport.zoom,selectionMode);
-                if(params)run(spec.command,params);
+                if(!path.length)return;
+                const dispatch=paintDispatch(tool,{hasPattern:!!retouch.pattern});
+                if(dispatch.kind!=="stroke")return;
+                const params=buildRetouch(tool,path[0]!,path,retouch,colors.foreground,documentView?.editTarget??"pixels",canvasView.viewport.zoom,selectionMode);
+                if(params)run(dispatch.command,params);
                 return;
               }
               if (liveStroke.finish() && strokeEnd.current) {strokeAnchor.current = strokeEnd.current;setStrokePreviewAnchor({...strokeEnd.current});} strokeEnd.current = null;
             }}
-            onStrokeCancel={() => { if(tool==="retouch"){retouchPath.current=null;strokeEnd.current=null;return;} liveStroke.cancel(); strokeEnd.current = null; }}
+            onStrokeCancel={() => { if(isRetouchTool(tool)){retouchPath.current=null;strokeEnd.current=null;return;} liveStroke.cancel(); strokeEnd.current = null; }}
           /></StickyModifierContext.Provider>
         </EditorCanvasMenu>
 

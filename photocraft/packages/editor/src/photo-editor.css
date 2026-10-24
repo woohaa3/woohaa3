@@ -76,8 +76,13 @@
 }
 .photo-editor__toolrail[data-columns="2"] { flex-basis: 92px; }
 .photo-editor__toolrail > * { flex-shrink: 0; }
-.photo-editor__tool-list { display: grid; grid-template-columns: 36px; gap: 6px; min-height: 0; overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; }
-.photo-editor__toolrail[data-columns="2"] .photo-editor__tool-list { grid-template-columns: repeat(2,36px); }
+/* 工具列按段渲染：段之间一条细线；段内仍是 36px 方形按钮网格（change: refactor-photocraft-toolbar）。 */
+.photo-editor__tool-list { display: flex; flex-direction: column; gap: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; }
+.photo-editor__tool-section { display: grid; grid-template-columns: 36px; gap: 6px; padding: 6px 0; }
+.photo-editor__tool-section + .photo-editor__tool-section { border-top: 1px solid var(--app-web-border); }
+.photo-editor__tool-section:first-child { padding-top: 0; }
+.photo-editor__tool-section:last-child { padding-bottom: 0; }
+.photo-editor__toolrail[data-columns="2"] .photo-editor__tool-section { grid-template-columns: repeat(2,36px); }
 .photo-editor__tool.ui-icon-button { width: 36px; height: 36px; border-radius: 6px; }
 .photo-editor__tool[aria-pressed="true"] { background: var(--app-interaction-accent-soft); color: var(--app-interaction-accent); }
 .photo-editor__colors { position: relative; flex-shrink: 0; width: 40px; height: 54px; margin-top: 10px; border-top: 1px solid var(--app-web-border); }

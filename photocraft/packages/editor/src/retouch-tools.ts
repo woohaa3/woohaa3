@@ -13,6 +13,17 @@ export type RetouchToolId =
   | "dodge" | "burn" | "sponge" | "blur" | "sharpen" | "smudge"
   | "spotHealing" | "redEye" | "magicEraser" | "backgroundEraser";
 
+/**
+ * 该工具是否由本模块编译参数。
+ *
+ * 16 个绘画/润饰工具在工具栏里是各自独立的一级工具 id（change: refactor-photocraft-toolbar），
+ * 但它们共用这里的参数编译器与命令映射。`brush`/`pencil`/`eraser`/`bucket` 不在此列：
+ * 它们走 `buildStroke` 与各自的参数面板。
+ */
+export function isRetouchTool(tool: string): tool is RetouchToolId {
+  return Object.prototype.hasOwnProperty.call(RETOUCH_SPECS, tool);
+}
+
 export type RetouchSettings = {
   size: number; hardness: number; opacity: number; flow: number;
   mode: string;
@@ -205,6 +216,9 @@ export const RETOUCH_SPECS: Record<RetouchToolId, Spec> = {
 };
 
 export function retouchToolIds(): RetouchToolId[] { return Object.keys(RETOUCH_SPECS) as RetouchToolId[]; }
+
+/** `paint.*` 命令按工具 id 的映射；工具栏槽位注册表与能力门禁都用它。 */
+export function retouchCommand(tool: RetouchToolId): string { return RETOUCH_SPECS[tool].command; }
 
 /** 编译笔画命令；返回 `null` 表示参数不完整（调用方不得提交半截操作）。 */
 export function buildRetouch(tool: RetouchToolId, point: DocumentPoint, points: readonly DocumentPoint[], settings: RetouchSettings, color: string, _target: "pixels"|"mask", _zoom: number, _mode?: SelectionMode): Record<string, unknown> | null {

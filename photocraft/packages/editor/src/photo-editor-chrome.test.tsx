@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import type { PhotocraftCommand } from "@woohaa3/photocraft-protocol";
 import { EditorMenuBar,EditorToolRail } from "./photo-editor-chrome.js";
+import {TOOL_SLOTS} from "./toolbar-slots.js";
 import {INITIAL_EDITOR_DISPLAY} from "./editor-display.js";
 vi.mock("./ui/Menu.js", async importOriginal => {
   const actual=await importOriginal<typeof import("./ui/Menu.js")>();
@@ -175,6 +176,71 @@ it("手形和缩放工具单击选择，双击分别适合屏幕和实际像素�
  try {render();for(const [name,tool,view] of [["手形","pan","fit"],["缩放","zoom","actualSize"]] as const){const button=node.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!;act(()=>button.click());expect(onTool).toHaveBeenLastCalledWith(tool);act(()=>button.dispatchEvent(new MouseEvent("dblclick",{bubbles:true})));expect(onView).toHaveBeenLastCalledWith(view);}
  render(true);act(()=>node.querySelector<HTMLButtonElement>('button[aria-label="手形"]')!.click());expect(onTool).toHaveBeenCalledTimes(2);
  }finally{act(()=>root.unmount());node.remove();}
+});
+
+it("工具栏按槽位渲染：5 段 16 槽，画笔与铅笔同在一个槽内",()=>{
+ const node=document.createElement("div");document.body.append(node);const root=createRoot(node),onTool=vi.fn();
+ try {
+  act(()=>root.render(<EditorToolRail tool="brush" onTool={onTool} readonly={false} color="#000000" onColor={()=>{}}/>));
+  const rail=node.querySelector<HTMLElement>(".photo-editor__toolrail")!;
+  expect(rail.dataset.sections).toBe("5");
+  const sections=Array.from(node.querySelectorAll<HTMLElement>(".photo-editor__tool-section"));
+  expect(sections.map(section=>section.dataset.section)).toEqual(["1","2","3","4","5"]);
+  expect(sections.map(section=>section.querySelectorAll("button").length)).toEqual([1,4,8,1,2]);
+  // 画笔槽位（索引 8）同时承载画笔、铅笔、混合画笔与颜色替换；flyout 成员顺序由注册表断言，
+  // 展开行为由 `tool-slot-button.test.tsx` 覆盖。
+  const brushSlot=node.querySelector<HTMLElement>('[data-tool-slot="8"]')!;
+  expect(brushSlot.dataset.toolMember).toBe("brush");
+  const brushMembers=TOOL_SLOTS.find(slot=>slot.index===8)!.members.map(member=>member.id);
+  expect(brushMembers).toEqual(["brush","pencil","mixer","colorReplacement"]);
+  // 已保存的槽位记忆让按钮显示铅笔而不是画笔。
+  act(()=>root.render(<EditorToolRail tool="move" onTool={onTool} readonly={false} color="#000000" onColor={()=>{}}
+    shownMemberFor={slot=>slot.index===8?slot.members[1]!:slot.members.find(member=>member.tool==="move")??slot.members[0]!}/>));
+  expect(node.querySelector<HTMLElement>('[data-tool-slot="8"]')!.dataset.toolMember).toBe("pencil");
+ } finally {act(()=>root.unmount());node.remove();}
+});
+
+it("单成员槽位不画 flyout 三角；多成员槽位画三角",()=>{
+ const node=document.createElement("div");document.body.append(node);const root=createRoot(node);
+ try {
+  act(()=>root.render(<EditorToolRail tool="move" onTool={()=>{}} readonly={false} color="#000000" onColor={()=>{}}/>));
+  for(const index of [0,2,3,6,10,12,19,20]) {
+   expect(node.querySelector<HTMLElement>(`[data-tool-slot="${index}"]`)!.querySelector(".photo-editor__tool-group-mark")).toBeNull();
+  }
+  for(const index of [1,7,8,9,11,13,14,16]) {
+   expect(node.querySelector<HTMLElement>(`[data-tool-slot="${index}"]`)!.querySelector(".photo-editor__tool-group-mark")).not.toBeNull();
+  }
+ } finally {act(()=>root.unmount());node.remove();}
+});
+
+it("快速蒙版按钮随文档状态切换提示并派发同一命令",()=>{
+ const node=document.createElement("div");document.body.append(node);const root=createRoot(node),onQuickMask=vi.fn();
+ const render=(quickMask:boolean,readonly=false)=>act(()=>root.render(<EditorToolRail tool="marquee" onTool={()=>{}}
+   readonly={readonly} color="#000000" onColor={()=>{}} quickMask={quickMask} onQuickMask={onQuickMask}/>));
+ try {
+  render(false);
+  const button=node.querySelector<HTMLButtonElement>(".photo-editor__quick-mask")!;
+  expect(button.getAttribute("aria-label")).toBe("以快速蒙版模式编辑（Q）");
+  expect(button.getAttribute("aria-pressed")).toBe("false");
+  act(()=>button.click());
+  expect(onQuickMask).toHaveBeenCalledOnce();
+  render(true);
+  const active=node.querySelector<HTMLButtonElement>(".photo-editor__quick-mask")!;
+  expect(active.getAttribute("aria-label")).toBe("以标准模式编辑（Q）");
+  expect(active.getAttribute("aria-pressed")).toBe("true");
+  render(true,true);
+  act(()=>node.querySelector<HTMLButtonElement>(".photo-editor__quick-mask")!.click());
+  expect(onQuickMask).toHaveBeenCalledOnce();
+ } finally {act(()=>root.unmount());node.remove();}
+});
+
+it("槽位按钮高亮：槽内任一成员为当前工具即高亮",()=>{
+ const node=document.createElement("div");document.body.append(node);const root=createRoot(node);
+ try {
+  act(()=>root.render(<EditorToolRail tool="pencil" onTool={()=>{}} readonly={false} color="#000000" onColor={()=>{}}/>));
+  expect(node.querySelector<HTMLElement>('[data-tool-slot="8"]')!.getAttribute("aria-pressed")).toBe("true");
+  expect(node.querySelector<HTMLElement>('[data-tool-slot="0"]')!.getAttribute("aria-pressed")).toBe("false");
+ } finally {act(()=>root.unmount());node.remove();}
 });
 
 it("批量关闭菜单使用宿主回调，关闭其他仅在多文档可用",()=>{

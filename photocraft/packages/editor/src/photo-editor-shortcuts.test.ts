@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FILL_SHORTCUTS, nudgeTarget, resolveEditorShortcut, shortcutLabel, commandShortcutLabel } from "./photo-editor-shortcuts.js";
+import { FILL_SHORTCUTS, TOOL_GROUP_KEYS, nudgeTarget, resolveEditorShortcut, shortcutLabel, commandShortcutLabel } from "./photo-editor-shortcuts.js";
 function key(key: string, overrides: Partial<KeyboardEvent> = {}, isMac = false) {
   return resolveEditorShortcut({ key, code: "", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false, keyCode: 0, ...overrides }, isMac);
 }
@@ -24,15 +24,15 @@ describe("图片编辑快捷键", () => {
     expect(key("h",{metaKey:true},true)).toEqual({kind:"display",action:"extras"});
     expect(key("Tab")).toEqual({kind:"display",action:"panels"});
     expect(key("Tab",{shiftKey:true})).toEqual({kind:"display",action:"sidebar"});
-    expect(key("h")).toEqual({kind:"tool",tool:"pan",cycle:false});expect(key("h",{ctrlKey:true,shiftKey:true})).toBeNull();
+    expect(key("h")).toEqual({kind:"toolGroup",key:"H",cycle:false});expect(key("h",{ctrlKey:true,shiftKey:true})).toBeNull();
     expect(key("Tab",{ctrlKey:true})).toEqual({kind:"documentCycle",direction:1});expect(key("Tab",{altKey:true})).toBeNull();
     expect(key("Tab",{isComposing:true})).toBeNull();
   });
-  it.each([["m", "marquee"], ["l", "lasso"], ["v", "move"], ["b", "brush"], ["e", "eraser"], ["t", "text"]])("%s 切换到 %s", (letter, tool) => {
-    expect(key(letter)).toEqual({ kind: "tool", tool, cycle: false });
+  it.each([["m", "M"], ["l", "L"], ["v", "V"], ["b", "B"], ["e", "E"], ["t", "T"], ["w","W"], ["i","I"], ["j","J"], ["s","S"], ["y","Y"], ["o","O"], ["g","G"], ["z","Z"]])("%s 解析为 %s 组", (letter, group) => {
+    expect(key(letter)).toEqual({ kind: "toolGroup", key: group, cycle: false });
   });
-  it("Shift+M 轮换选框；方括号与 Shift 方括号分别调整大小和硬度", () => {
-    expect(key("M", { shiftKey: true })).toMatchObject({ tool: "marquee", cycle: true });
+  it("Shift+M 请求在选框组内轮换；方括号与 Shift 方括号分别调整大小和硬度", () => {
+    expect(key("M", { shiftKey: true })).toEqual({ kind: "toolGroup", key: "M", cycle: true });
     expect(key("[", { code: "BracketLeft" })).toMatchObject({ kind: "brush", property: "size", direction: -1 });
     expect(key("}", { code: "BracketRight", shiftKey: true })).toMatchObject({ kind: "brush", property: "hardness", direction: 1 });
     expect(key("]", { code: "BracketRight", ctrlKey: true })).toEqual({ kind: "command", id: "layer.arrange.bringForward" });
@@ -64,7 +64,7 @@ describe("图片编辑快捷键", () => {
     expect(key("0", { ctrlKey: true })).toEqual({ kind: "view", action: "fit" });
     expect(key("1", { ctrlKey: true })).toEqual({ kind: "view", action: "actualSize" });
     expect(key("f", { ctrlKey: true })).toBeNull();
-    expect(key("h")).toEqual({kind:"tool",tool:"pan",cycle:false});
+    expect(key("h")).toEqual({kind:"toolGroup",key:"H",cycle:false});
     expect(key("b", { isComposing: true })).toBeNull();
     expect(key("b", { keyCode: 229 })).toBeNull();
   });
@@ -135,7 +135,7 @@ it("编组和取消编组采用平台 G 组合，与剪贴蒙版及 IME 分离",
     expect(key("g",modifiers,mac)).toEqual({kind:"command",id});
     expect(key("g",{...modifiers,isComposing:true},mac)).toBeNull();
   }
-  expect(key("g")).toMatchObject({kind:"tool",tool:"bucket"});
+  expect(key("g")).toEqual({kind:"toolGroup",key:"G",cycle:false});
   expect(commandShortcutLabel("layer.groupLayers")).toBe(shortcutLabel("Mod+G"));
   expect(commandShortcutLabel("layer.ungroupLayers")).toBe(shortcutLabel("Mod+Shift+G"));
 });
@@ -169,7 +169,8 @@ it("微移目标由工具和选区决定，普通绘画方向键不移动图层"
 
 it("关闭Shift切换偏好后同组工具单键可请求循环，默认仍需Shift",()=>{
   const input={key:"m",code:"KeyM",ctrlKey:false,metaKey:false,altKey:false,shiftKey:false,isComposing:false,keyCode:0};
-  expect(resolveEditorShortcut(input,false,false)).toEqual({kind:"tool",tool:"marquee",cycle:true});expect(resolveEditorShortcut(input,false)).toEqual({kind:"tool",tool:"marquee",cycle:false});
+  expect(resolveEditorShortcut(input,false,false)).toEqual({kind:"toolGroup",key:"M",cycle:true});
+  expect(resolveEditorShortcut(input,false)).toEqual({kind:"toolGroup",key:"M",cycle:false});
 });
 
 it("盖印快捷键按平台保留源图层，不误用普通合并",()=>{
@@ -246,4 +247,58 @@ it("再次变换与再次变换并复制使用独立组合，不抢文字工具�
  expect(key("v",{ctrlKey:true,shiftKey:true,altKey:true})).toEqual({kind:"command",id:"edit.pasteSpecial.pasteInto"});
  expect(key("t",{ctrlKey:true})).toEqual({kind:"tool",tool:"transform",cycle:false});
  expect(key("T",{ctrlKey:true,shiftKey:true,isComposing:true})).toBeNull();
+});
+
+describe("工具字母按组解析（design D5）", () => {
+  it("给出 15 个字母组，其中 7 个是多成员组", () => {
+    expect(TOOL_GROUP_KEYS.map(entry => entry.key).sort()).toEqual(
+      ["B", "E", "G", "H", "I", "J", "L", "M", "O", "S", "T", "V", "W", "Y", "Z"]
+    );
+    expect(TOOL_GROUP_KEYS.filter(entry => entry.members.length > 1).map(entry => entry.key).sort())
+      .toEqual(["B", "E", "J", "M", "O", "S", "T"]);
+  });
+
+  it("多成员组按循环序排列成员（变体作为独立成员保留）", () => {
+    const ids = (key: string) => TOOL_GROUP_KEYS.find(entry => entry.key === key)!.memberIds;
+    // B 组：画笔 → 铅笔 → 混合画笔 → 颜色替换（Tool::ALL 序）。
+    expect(ids("B")).toEqual(["brush", "pencil", "mixer", "colorReplacement"]);
+    // M 组只含矩形与椭圆两项；单行/单列无组键，不在表内。
+    expect(ids("M")).toEqual(["rectMarquee", "ellipseMarquee"]);
+    expect(ids("J")).toEqual(["spotHealing", "healingBrush", "redEye"]);
+    expect(ids("E")).toEqual(["eraser", "backgroundEraser", "magicEraser"]);
+    expect(ids("O")).toEqual(["dodge", "burn", "sponge"]);
+    expect(ids("S")).toEqual(["cloneStamp", "patternStamp"]);
+    // T 组按 Tool::ALL 序：横排 → 竖排（蒙版未开放）。
+    expect(ids("T")).toEqual(["horizontalType", "verticalType"]);
+  });
+
+  it("单成员字母只回到该工具", () => {
+    for (const key of ["V", "L", "W", "I", "Y", "G", "H", "Z"]) {
+      expect(TOOL_GROUP_KEYS.find(entry => entry.key === key)!.members).toHaveLength(1);
+    }
+  });
+
+  it("模糊/锐化/涂抹与单行/单列不被任何字母选中", () => {
+    const keyed = new Set(TOOL_GROUP_KEYS.flatMap(entry => entry.memberIds));
+    for (const tool of ["blur", "sharpen", "smudge"]) expect(keyed.has(tool)).toBe(false);
+    for (const id of ["singleRowMarquee", "singleColumnMarquee"]) expect(keyed.has(id)).toBe(false);
+    // 单行/单列是选区变体，解析器只产出组，不产出这些变体。
+    for (const letter of ["m", "M"]) {
+      expect(key(letter, {shiftKey: letter === "M"})).toEqual({kind: "toolGroup", key: "M", cycle: letter === "M"});
+    }
+  });
+
+  it("Shift 偏好开启时普通字母不循环、Shift 字母循环；关闭时普通字母也循环", () => {
+    const input = (shiftKey: boolean) => ({key: "b", code: "KeyB", ctrlKey: false, metaKey: false, altKey: false, shiftKey, isComposing: false, keyCode: 0});
+    expect(resolveEditorShortcut(input(false), false, true)).toEqual({kind: "toolGroup", key: "B", cycle: false});
+    expect(resolveEditorShortcut(input(true), false, true)).toEqual({kind: "toolGroup", key: "B", cycle: true});
+    expect(resolveEditorShortcut(input(false), false, false)).toEqual({kind: "toolGroup", key: "B", cycle: true});
+  });
+
+  it("输入法组合与 229 不触发组切换", () => {
+    for (const letter of ["b", "j", "s", "y", "o", "t", "e"]) {
+      expect(key(letter, {isComposing: true})).toBeNull();
+      expect(key(letter, {keyCode: 229})).toBeNull();
+    }
+  });
 });

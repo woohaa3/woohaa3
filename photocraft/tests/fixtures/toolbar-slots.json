@@ -1,0 +1,474 @@
+{
+  "source": {
+    "slots": "crates/ui-egui/src/panels.rs::TOOL_SECTIONS",
+    "order": "crates/ui-egui/src/state.rs::Tool::ALL",
+    "keys": "crates/ui-egui/src/state.rs::Tool::key()（'\\\\0' 记 null）"
+  },
+  "sections": [
+    {
+      "section": 1,
+      "slots": [
+        {
+          "index": 0,
+          "members": [
+            {
+              "name": "Move",
+              "key": "V",
+              "cycleOrder": 0
+            },
+            {
+              "name": "Artboard",
+              "key": "V",
+              "cycleOrder": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "section": 2,
+      "slots": [
+        {
+          "index": 1,
+          "members": [
+            {
+              "name": "RectMarquee",
+              "key": "M",
+              "cycleOrder": 2
+            },
+            {
+              "name": "EllipseMarquee",
+              "key": "M",
+              "cycleOrder": 3
+            },
+            {
+              "name": "SingleRowMarquee",
+              "key": null,
+              "cycleOrder": 4
+            },
+            {
+              "name": "SingleColumnMarquee",
+              "key": null,
+              "cycleOrder": 5
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "members": [
+            {
+              "name": "Lasso",
+              "key": "L",
+              "cycleOrder": 6
+            },
+            {
+              "name": "PolygonLasso",
+              "key": "L",
+              "cycleOrder": 7
+            },
+            {
+              "name": "MagneticLasso",
+              "key": "L",
+              "cycleOrder": 8
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "members": [
+            {
+              "name": "ObjectSelection",
+              "key": "W",
+              "cycleOrder": 49
+            },
+            {
+              "name": "QuickSelection",
+              "key": "W",
+              "cycleOrder": 48
+            },
+            {
+              "name": "MagicWand",
+              "key": "W",
+              "cycleOrder": 9
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "members": [
+            {
+              "name": "Crop",
+              "key": "C",
+              "cycleOrder": 10
+            },
+            {
+              "name": "PerspectiveCrop",
+              "key": "C",
+              "cycleOrder": 11
+            },
+            {
+              "name": "Slice",
+              "key": "C",
+              "cycleOrder": 64
+            },
+            {
+              "name": "SliceSelect",
+              "key": "C",
+              "cycleOrder": 65
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "members": [
+            {
+              "name": "Frame",
+              "key": "K",
+              "cycleOrder": 66
+            }
+          ]
+        },
+        {
+          "index": 6,
+          "members": [
+            {
+              "name": "Eyedropper",
+              "key": "I",
+              "cycleOrder": 12
+            },
+            {
+              "name": "ColorSampler",
+              "key": "I",
+              "cycleOrder": 13
+            },
+            {
+              "name": "Ruler",
+              "key": "I",
+              "cycleOrder": 14
+            },
+            {
+              "name": "Note",
+              "key": "I",
+              "cycleOrder": 15
+            },
+            {
+              "name": "Count",
+              "key": "I",
+              "cycleOrder": 16
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "section": 3,
+      "slots": [
+        {
+          "index": 7,
+          "members": [
+            {
+              "name": "Remove",
+              "key": "J",
+              "cycleOrder": 33
+            },
+            {
+              "name": "SpotHealing",
+              "key": "J",
+              "cycleOrder": 34
+            },
+            {
+              "name": "Healing",
+              "key": "J",
+              "cycleOrder": 35
+            },
+            {
+              "name": "Patch",
+              "key": "J",
+              "cycleOrder": 36
+            },
+            {
+              "name": "ContentAwareMove",
+              "key": "J",
+              "cycleOrder": 37
+            },
+            {
+              "name": "RedEye",
+              "key": "J",
+              "cycleOrder": 38
+            }
+          ]
+        },
+        {
+          "index": 8,
+          "members": [
+            {
+              "name": "Brush",
+              "key": "B",
+              "cycleOrder": 17
+            },
+            {
+              "name": "Pencil",
+              "key": "B",
+              "cycleOrder": 18
+            },
+            {
+              "name": "MixerBrush",
+              "key": "B",
+              "cycleOrder": 19
+            },
+            {
+              "name": "ColorReplacement",
+              "key": "B",
+              "cycleOrder": 20
+            }
+          ]
+        },
+        {
+          "index": 9,
+          "members": [
+            {
+              "name": "CloneStamp",
+              "key": "S",
+              "cycleOrder": 39
+            },
+            {
+              "name": "PatternStamp",
+              "key": "S",
+              "cycleOrder": 40
+            }
+          ]
+        },
+        {
+          "index": 10,
+          "members": [
+            {
+              "name": "HistoryBrush",
+              "key": "Y",
+              "cycleOrder": 41
+            }
+          ]
+        },
+        {
+          "index": 11,
+          "members": [
+            {
+              "name": "Eraser",
+              "key": "E",
+              "cycleOrder": 21
+            },
+            {
+              "name": "BackgroundEraser",
+              "key": "E",
+              "cycleOrder": 22
+            },
+            {
+              "name": "MagicEraser",
+              "key": "E",
+              "cycleOrder": 23
+            }
+          ]
+        },
+        {
+          "index": 12,
+          "members": [
+            {
+              "name": "Gradient",
+              "key": "G",
+              "cycleOrder": 24
+            },
+            {
+              "name": "PaintBucket",
+              "key": "G",
+              "cycleOrder": 25
+            }
+          ]
+        },
+        {
+          "index": 13,
+          "members": [
+            {
+              "name": "Blur",
+              "key": null,
+              "cycleOrder": 42
+            },
+            {
+              "name": "Sharpen",
+              "key": null,
+              "cycleOrder": 43
+            },
+            {
+              "name": "Smudge",
+              "key": null,
+              "cycleOrder": 44
+            }
+          ]
+        },
+        {
+          "index": 14,
+          "members": [
+            {
+              "name": "Dodge",
+              "key": "O",
+              "cycleOrder": 45
+            },
+            {
+              "name": "Burn",
+              "key": "O",
+              "cycleOrder": 46
+            },
+            {
+              "name": "Sponge",
+              "key": "O",
+              "cycleOrder": 47
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "section": 4,
+      "slots": [
+        {
+          "index": 15,
+          "members": [
+            {
+              "name": "Pen",
+              "key": "P",
+              "cycleOrder": 50
+            },
+            {
+              "name": "FreeformPen",
+              "key": "P",
+              "cycleOrder": 51
+            },
+            {
+              "name": "CurvaturePen",
+              "key": "P",
+              "cycleOrder": 52
+            },
+            {
+              "name": "AddAnchorPoint",
+              "key": "P",
+              "cycleOrder": 53
+            },
+            {
+              "name": "DeleteAnchorPoint",
+              "key": "P",
+              "cycleOrder": 54
+            },
+            {
+              "name": "ConvertPoint",
+              "key": "P",
+              "cycleOrder": 55
+            }
+          ]
+        },
+        {
+          "index": 16,
+          "members": [
+            {
+              "name": "Type",
+              "key": "T",
+              "cycleOrder": 26
+            },
+            {
+              "name": "VerticalType",
+              "key": "T",
+              "cycleOrder": 27
+            },
+            {
+              "name": "VerticalTypeMask",
+              "key": "T",
+              "cycleOrder": 29
+            },
+            {
+              "name": "HorizontalTypeMask",
+              "key": "T",
+              "cycleOrder": 28
+            }
+          ]
+        },
+        {
+          "index": 17,
+          "members": [
+            {
+              "name": "PathSelection",
+              "key": "A",
+              "cycleOrder": 56
+            },
+            {
+              "name": "DirectSelection",
+              "key": "A",
+              "cycleOrder": 57
+            }
+          ]
+        },
+        {
+          "index": 18,
+          "members": [
+            {
+              "name": "Rectangle",
+              "key": "U",
+              "cycleOrder": 58
+            },
+            {
+              "name": "EllipseShape",
+              "key": "U",
+              "cycleOrder": 59
+            },
+            {
+              "name": "Triangle",
+              "key": "U",
+              "cycleOrder": 60
+            },
+            {
+              "name": "Polygon",
+              "key": "U",
+              "cycleOrder": 61
+            },
+            {
+              "name": "Line",
+              "key": "U",
+              "cycleOrder": 62
+            },
+            {
+              "name": "CustomShape",
+              "key": "U",
+              "cycleOrder": 63
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "section": 5,
+      "slots": [
+        {
+          "index": 19,
+          "members": [
+            {
+              "name": "Hand",
+              "key": "H",
+              "cycleOrder": 30
+            },
+            {
+              "name": "RotateView",
+              "key": "R",
+              "cycleOrder": 31
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "members": [
+            {
+              "name": "Zoom",
+              "key": "Z",
+              "cycleOrder": 32
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

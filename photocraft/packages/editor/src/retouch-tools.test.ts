@@ -1,13 +1,41 @@
 import {describe,expect,it} from "vitest";
-import {DEFAULT_RETOUCH,RETOUCH_SPECS,buildRetouch,retouchToolIds} from "./retouch-tools.js";
+import {DEFAULT_RETOUCH,RETOUCH_SPECS,buildRetouch,isRetouchTool,retouchCommand,retouchToolIds} from "./retouch-tools.js";
+import {TOOL_SLOTS,groupOf,slotOf,toolbarMembers} from "./toolbar-slots.js";
 
 const points=[{x:10.4,y:20.6},{x:11,y:21}];
 
 describe("润饰画笔命令参数",()=>{
  it("每个工具都映射到固定引擎的独立命令，不共享普通画笔入口",()=>{
   expect(retouchToolIds()).toHaveLength(16);
-  expect([...new Set(retouchToolIds().map(id=>RETOUCH_SPECS[id].command))]).toHaveLength(16);
+  expect([...new Set(retouchToolIds().map(id=>retouchCommand(id)))]).toHaveLength(16);
   expect(Object.values(RETOUCH_SPECS).every(spec=>spec.command.startsWith("paint."))).toBe(true);
+ });
+
+ it("每个工具在一级工具栏里有唯一归属槽位，并按上游分属 6 个不同组",()=>{
+  // 16 个绘画/润饰工具各自是一级工具 id：不再共用「润饰」伪工具。
+  for(const tool of retouchToolIds()) {
+   expect(isRetouchTool(tool)).toBe(true);
+   const slots=TOOL_SLOTS.filter(slot=>slot.members.some(member=>member.tool===tool));
+   expect(slots).toHaveLength(1);
+  }
+  const indexes=new Set(retouchToolIds().map(tool=>slotOf(tool)!.index));
+  // 修复 7、画笔 8、仿制 9、历史 10、橡皮 11、模糊 13、减淡 14 —— 颜色替换与混合画笔在画笔槽。
+  expect([...indexes].sort((a,b)=>a-b)).toEqual([7,8,9,10,11,13,14]);
+  // 颜色替换与混合画笔属于画笔组（B），不应留在修复组。
+  expect(groupOf("colorReplacement")?.map(member=>member.id)).toEqual(["brush","pencil","mixer","colorReplacement"]);
+  expect(groupOf("mixer")?.map(member=>member.id)).toEqual(["brush","pencil","mixer","colorReplacement"]);
+  expect(groupOf("cloneStamp")?.map(member=>member.id)).toEqual(["cloneStamp","patternStamp"]);
+  // 模糊族没有组键：不在任何字母组里。
+  expect(groupOf("blur")).toBeUndefined();
+  expect(groupOf("sharpen")).toBeUndefined();
+  expect(groupOf("smudge")).toBeUndefined();
+  // 历史记录画笔独占一槽。
+  expect(slotOf("historyBrush")?.members).toHaveLength(1);
+ });
+
+ it("16 个工具都出现在工具栏可见成员里（没有只存在于注册表、点不到的工具）",()=>{
+  const visible=new Set(toolbarMembers().map(member=>member.tool));
+  for(const tool of retouchToolIds()) expect(visible.has(tool)).toBe(true);
  });
 
  it("克隆类工具携带对齐、取样图层与显式来源点，缺省时交给克隆源面板",()=>{

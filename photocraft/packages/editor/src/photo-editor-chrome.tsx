@@ -1,40 +1,25 @@
 import {decodeTextAntialias,type TextAntialias} from "./text-antialias.js";
 import type {TextClipboardControls,TextClipboardAction} from "./text-clipboard.js";
 import {EDITOR_THEMES,type useEditorTheme} from "./editor-theme.js";
-import {TextToolGroup} from "./text-tool-group.js";
-import {MarqueeToolGroup} from "./marquee-tool-group.js";
-import {RetouchToolGroup} from "./retouch-tool-group.js";
-import type {RetouchToolId} from "./retouch-tools.js";
 import { editorMenusFor, type EditorDocumentsMenu, type EditorMenuItem } from "./photo-editor-menu.js";
 import type { PhotocraftCommand } from "@woohaa3/photocraft-protocol";
 import { Button, IconButton } from "./ui/Button.js";
 import {DropdownMenu,MenuBar,type MenuItem} from "./ui/Menu.js";
-import { Tooltip } from "./ui/Tooltip.js";
-import {
-  PipetteIcon,PencilIcon, PaintBucketIcon, HandIcon, ZoomInIcon, MoveIcon, EraserIcon, LassoIcon, MarqueeIcon,
-  PenIcon, RedoIcon, TypeIcon, UndoIcon, ChevronDownIcon, ChevronRightIcon, SwapColorsIcon, WandSparklesIcon
-} from "./ui/icons.js";
-import { DISPLAY_SHORTCUTS, TOOL_KEYS, commandShortcutLabel, shortcutLabel, type PhotoEditorTool, type EditorViewAction } from "./photo-editor-shortcuts.js";
+import { ChevronDownIcon, ChevronRightIcon, RedoIcon, SquareDashedIcon, SwapColorsIcon, UndoIcon } from "./ui/icons.js";
+import { DISPLAY_SHORTCUTS, commandShortcutLabel, shortcutLabel, type PhotoEditorTool, type EditorViewAction } from "./photo-editor-shortcuts.js";
 import {EDITOR_SCREEN_MODES,type EditorDisplayControls,type EditorScreenMode} from "./editor-display.js";
 import {ScreenModeButton} from "./screen-mode-button.js";
+import {ToolSlotButton} from "./tool-slot-button.js";
+import {visibleToolSections, type ToolMember} from "./toolbar-slots.js";
 export type { PhotoEditorTool } from "./photo-editor-shortcuts.js";
 
+/**
+ * 工具栏结构来自槽位注册表（`toolbar-slots.ts`），本文件只做投影渲染：
+ * 段、槽、flyout 成员顺序、高亮与底部常驻入口。行为契约见
+ * `openspec/specs/editor-workspace/spec.md` 的工具栏要求。
+ */
 
-export const PHOTO_TOOLS = [
-  { id: "move", label: "移动", Icon: MoveIcon },
-  { id: "marquee", label: "矩形 / 椭圆选框", Icon: MarqueeIcon },
-  { id: "lasso", label: "套索", Icon: LassoIcon },
-  {id:"magicWand",label:"魔棒",Icon:WandSparklesIcon},
-  { id: "brush", label: "画笔", Icon: PenIcon },
-  {id:"pencil",label:"铅笔",Icon:PencilIcon},
-  {id:"eyedropper",label:"吸管",Icon:PipetteIcon},
-  { id:"bucket",label:"油漆桶",Icon:PaintBucketIcon },
-  { id: "eraser", label: "橡皮", Icon: EraserIcon },
-  { id: "retouch", label: "润饰", Icon: WandSparklesIcon },
-  { id: "text", label: "文字", Icon: TypeIcon },
-  { id:"pan",label:"手形",Icon:HandIcon },
-  { id:"zoom",label:"缩放",Icon:ZoomInIcon }
-] as const;
+
 
 export function EditorMenuBar({ theme, commands, readonly, canUndo, canRedo, onCommand, onApply, canSave, saving, display, displayDisabled, cloneSourceAvailable, brushPresetsAvailable, guides, onTransform, canTransform, canTransformSelection, onView, viewDisabled, mergeLabel, documents, onPreferences,onSearch,textActions,textClipboard }: {
   /** 「克隆源」面板入口只在对应命令开放时出现。 */
@@ -185,15 +170,22 @@ export function EditorMenuBar({ theme, commands, readonly, canUndo, canRedo, onC
   );
 }
 
-export function EditorToolRail({ tool, onTool, readonly, color, onColor, background = "#ffffff", onBackground, onColorAction,onEditColor, hidden = false, ellipse = false, line, onMarqueeKind, doubleColumn=false,onToggleColumns,onView,screenMode,onScreenMode,textOrientation,onTextOrientation,verticalTextDisabled,retouchTool="colorReplacement",onRetouchTool }: {
+export function EditorToolRail({ tool, onTool, readonly, color, onColor, background = "#ffffff", onBackground, onColorAction,onEditColor, hidden = false, onMarqueeKind, doubleColumn=false,onToggleColumns,onView,screenMode,onScreenMode,onTextOrientation,quickMask=false,onQuickMask,shownMemberFor }: {
+  /** @deprecated 竖排文字现在由槽位注册表的未支持标注决定，参数保留以兼容既有调用。 */
   verticalTextDisabled?:boolean;
-  textOrientation?:"horizontal"|"vertical";onTextOrientation?:(mode:"horizontal"|"vertical")=>void;
-  retouchTool?:RetouchToolId;onRetouchTool?:(tool:RetouchToolId)=>void;
+  /** 文字方向切换：槽位里的竖排成员由它落地。 */
+  onTextOrientation?:(mode:"horizontal"|"vertical")=>void;
+  /** 文档是否处于快速蒙版编辑模式；底部常驻按钮的按下态与提示由它决定。 */
+  quickMask?:boolean;onQuickMask?:()=>void;
+  /**
+   * 槽位按钮显示哪个成员：由调用方按当前工具与槽位记忆决定。
+   * 缺省时退化为「当前工具命中则用它，否则槽内首成员」。
+   */
+  shownMemberFor?:(slot:{index:number;members:readonly ToolMember[]})=>ToolMember;
   screenMode?:EditorScreenMode;onScreenMode?:(mode:EditorScreenMode)=>void;
   doubleColumn?:boolean;onToggleColumns?:()=>void;onView?:(action:EditorViewAction)=>void;
   hidden?:boolean;
-  ellipse?:boolean;
-  line?:"row"|"column";
+  /** 选框子工具选择：`line` 优先于 `ellipse`，与槽位成员一一对应。 */
   onMarqueeKind?:(ellipse:boolean,line?:"row"|"column")=>void;
   tool: PhotoEditorTool;
   onTool: (tool: PhotoEditorTool) => void;
@@ -201,25 +193,37 @@ export function EditorToolRail({ tool, onTool, readonly, color, onColor, backgro
   color: string;
   onColor: (color: string) => void;
   background?: string;
-  onBackground?: (color:string) => void;
+  onBackground?: (color:string)=>void;
   onEditColor?:(target:"foreground"|"background")=>void;
   onColorAction?: (action:"swap"|"reset") => void;
 }) {
+  const choose=(member:ToolMember)=>{
+    // 变体成员只切变体，不另开工具 id；选框与文字复用既有回调。
+    if(member.variant && member.tool==="marquee") {
+      const next=member.variant;
+      if(next==="row" || next==="column") onMarqueeKind?.(false,next); else onMarqueeKind?.(next==="ellipse",undefined);
+    } else if(member.variant && member.tool==="text") onTextOrientation?.(member.variant==="vertical"?"vertical":"horizontal");
+    onTool(member.tool);
+  };
+  const shown=(slot:{index:number;members:readonly ToolMember[]})=>shownMemberFor?.(slot)
+    ?? slot.members.find(member=>member.tool===tool) ?? slot.members[0]!;
+  const sections=visibleToolSections();
   return (
-    <div className="photo-editor__toolrail" data-columns={doubleColumn?2:1} hidden={hidden}>
+    <div className="photo-editor__toolrail" data-columns={doubleColumn?2:1} data-sections={sections.length} hidden={hidden}>
       {onToggleColumns?<Button size="sm" tone="ghost" title={doubleColumn?"切换为单列工具栏":"切换为双列工具栏"} disabled={readonly} onClick={onToggleColumns}><ChevronRightIcon size={14} style={{transform:doubleColumn?"rotate(180deg)":undefined}}/></Button>:null}
       <div className="photo-editor__tool-list">
-      {PHOTO_TOOLS.map(({ id, label, Icon }) => id==="marquee" ? (
-        <MarqueeToolGroup key={id} active={tool===id} ellipse={ellipse} line={line} disabled={readonly} hidden={hidden}
-          onChoose={(value,line)=>{onMarqueeKind?.(value,line);onTool("marquee");}}/>
-      ) : id==="retouch" && onRetouchTool ? <RetouchToolGroup key={id} active={tool==="retouch"} tool={retouchTool} disabled={readonly} hidden={hidden}
-        onChoose={onRetouchTool}/> : id==="text" && onTextOrientation ? <TextToolGroup key={id} active={tool==="text"} orientation={textOrientation}
-        disabled={readonly} verticalDisabled={verticalTextDisabled} hidden={hidden} onChoose={onTextOrientation}/> : (
-        <Tooltip key={id} content={TOOL_KEYS[id] ? `${label}（${TOOL_KEYS[id]}）` : label} side="right">
-          <IconButton label={label} pressed={tool === id} disabled={readonly}
-            className="photo-editor__tool" onClick={() => onTool(id)} onDoubleClick={()=>{if(id==="pan")onView?.("fit");else if(id==="zoom")onView?.("actualSize");}}><Icon /></IconButton>
-        </Tooltip>
-      ))}
+        {sections.map(({section,slots})=>(
+          <div key={section} className="photo-editor__tool-section" data-section={section}>
+            {slots.map(slot=>{
+              const member=shown(slot);
+              return <ToolSlotButton key={slot.index} slot={slot} shown={member}
+                active={slot.members.some(member=>member.tool===tool)}
+                onChoose={choose}
+                onDoubleClick={member=>{if(member.tool==="pan")onView?.("fit");else if(member.tool==="zoom")onView?.("actualSize");}}
+                disabled={readonly} hidden={hidden}/>;
+            })}
+          </div>
+        ))}
       </div>
       <div className="photo-editor__colors">
       <label className="photo-editor__swatch" title="前景色">
@@ -231,6 +235,9 @@ export function EditorToolRail({ tool, onTool, readonly, color, onColor, backgro
       </div>
       <IconButton size="sm" label="交换前背景色（X）" disabled={readonly} onClick={() => onColorAction?.("swap")}><SwapColorsIcon size={14} /></IconButton>
       <Button size="sm" tone="ghost" title="恢复默认前背景色（D）" disabled={readonly} onClick={() => onColorAction?.("reset")}>默认</Button>
+      {onQuickMask?<IconButton size="sm" label={quickMask?"以标准模式编辑（Q）":"以快速蒙版模式编辑（Q）"}
+        title={quickMask?"以标准模式编辑（Q）":"以快速蒙版模式编辑（Q）"} pressed={quickMask} disabled={readonly}
+        className="photo-editor__quick-mask" onClick={onQuickMask}><SquareDashedIcon size={16}/></IconButton>:null}
       {onScreenMode?<ScreenModeButton mode={screenMode??"standard"} onChange={onScreenMode} disabled={readonly} hidden={hidden}/>:null}
     </div>
   );

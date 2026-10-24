@@ -1,6 +1,6 @@
 # 差异处置矩阵
 
-本表与 `interaction-differences-baseline.md` 的 301 行一一对应，B1–B117 后已无「待处置」行，也**不再有「待核验」行**：每行都是补齐、部分补齐、等价或明确不支持之一。B117 复核了 B116 留下的 8 条待核验，能静态证实的差异已补齐实现，须真实设备的结论改写为「补齐/部分补齐 + 待人工验证」，不再用待核验代替交付判断。当前统计：补齐 164、部分补齐 58、等价 7、明确不支持 72。实现与验证细节见 [verification](../verification.md)。
+本表与 `interaction-differences-baseline.md` 的 301 行一一对应，B1–B117 后已无「待处置」行，也**不再有「待核验」行**：每行都是补齐、部分补齐、等价或明确不支持之一。B117 复核了 B116 留下的 8 条待核验，能静态证实的差异已补齐实现，须真实设备的结论改写为「补齐/部分补齐 + 待人工验证」，不再用待核验代替交付判断。当前统计：补齐 171、部分补齐 50、等价 8、明确不支持 72（B128 重构工具栏后，I004/I106/I210 与 11 条绘画工具证据按槽位重写，6 条原「部分补齐」因补齐分组结论升为「补齐」）。实现与验证细节见 [verification](../verification.md)。
 
 矩阵由 `scripts/check-disposition-matrix.mjs` 机械校验（301 行唯一、任务列、证据路径、命令白名单），并由 `packages/editor/src/unsupported-closure.test.ts` 断言 72 条不支持项的命令与菜单入口同时关闭。
 
@@ -17,20 +17,20 @@
 | I001 | 产品入口 | 等价：独立文件工作区与节点聚焦入口 | P1 · B116 | I001 | 独立 PhotoCraft 应用入口不在本产品形态内；从图片节点聚焦进入、在编辑工作区内打开独立文件是既有等价入口，工具栏不另设独立产品壳 |
 | I002 | 切片工作流 | 明确不支持：共享字节编辑器无切片文档状态与 HTML/图像切片交付 | P1 · B116 | I002 | 切片需要文档级 slice 状态、画布覆盖层与 HTML+图像批量交付；本产品以单文件字节导入/导出为边界，未开放 `slice.*` 白名单，菜单无入口 |
 | I003 | 透视裁切工具 | 明确不支持：无透视四边形画布手势 | P1 · B116 | I003 | `image.perspectiveCrop` 与 `image.crop` 保持关闭；本产品不提供透视四边形拖框/四点/角点手势、网格与红色无效提示或尺寸栏，也不以无入口的内核命令充当功能 |
-| I004 | 画布工具 | 部分补齐：移动/选框/套索/魔棒/画笔/铅笔/吸管/油漆桶/橡皮/润饰组/文字/手形/缩放；其余上游工具未开放 | P1 · B116 | I004 | 工具栏渲染已接线工具；修复类克隆/修补/移除、路径/形状/切片/画板/渐变/裁剪等仍按各自条目未实现，不显示空占位 |
-| I005 | 颜色替换画笔 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I005 | 润饰工具组`retouch-tool-group.tsx`、参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；14条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
-| I006 | Mixer Brush 混合画笔 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I006 | 润饰工具组`retouch-tool-group.tsx`、参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；14条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
-| I007 | Pattern Stamp 图案图章 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I007 | 润饰工具组`retouch-tool-group.tsx`、参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；14条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
-| I008 | History Brush 历史记录画笔 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I008 | 润饰工具组`retouch-tool-group.tsx`、参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；14条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
-| I009 | Dodge / Burn / Sponge 色调笔刷 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I009 | 润饰工具组`retouch-tool-group.tsx`、参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；14条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
-| I010 | Blur / Sharpen / Smudge 局部笔刷 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I010 | 润饰工具组`retouch-tool-group.tsx`、参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；14条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
+| I004 | 画布工具 | 部分补齐：按上游槽位渲染 5 段 16 槽（移动/选框/套索/魔棒/吸管/修复/画笔/仿制/历史记录画笔/橡皮/油漆桶/模糊/减淡/文字/手形/缩放）；其余上游槽位未开放 | P1/P3/P5/P7 · B128 | I004 | `toolbar-slots.ts` 逐项对应上游 `panels.rs::TOOL_SECTIONS`（5 段 21 槽 67 成员），投影为 5 段 16 槽；`tool-slot-button.tsx` 为唯一 flyout 实现；`toolbar-slots.test.ts` 与 `tests/fixtures/toolbar-slots.json` 机械比对段/槽/成员顺序/组键/循环序；未开放槽位整槽省略不留占位；裁剪/画板/Frame/路径/形状/切片/渐变仍按各自条目关闭 |
+| I005 | 颜色替换画笔 | 补齐命令接线与槽位/选项；原生执行由固定引擎提供，画面待人工 | P1/P3/P5/P7 · B128 | I005 | 画笔槽（槽 8）成员之一：`colorReplacement` 是一级工具 id，与画笔/铅笔/混合画笔同槽同 B 组；参数编译`retouch-tools.ts`、选项`retouch-options.tsx`；`paint.colorReplacement` 在白名单；释放整笔一次分派、取消不写；真实笔迹与GPU画面待人工 |
+| I006 | Mixer Brush 混合画笔 | 补齐命令接线与槽位/选项；原生执行由固定引擎提供，画面待人工 | P1/P3/P5/P7 · B128 | I006 | 画笔槽（槽 8）成员之一：`mixer` 是一级工具 id，按 B 组循环；参数编译`retouch-tools.ts`、选项`retouch-options.tsx`；`paint.mixerBrush` 在白名单；真实笔迹与GPU画面待人工 |
+| I007 | Pattern Stamp 图案图章 | 补齐命令接线与槽位/选项；原生执行由固定引擎提供，画面待人工 | P1/P3/P5/P7 · B128 | I007 | 仿制槽（槽 9）成员之一：`patternStamp` 与仿制图章同槽，按 S 组循环；参数编译`retouch-tools.ts`、选项`retouch-options.tsx`；缺图案时不派发；`paint.patternStamp` 在白名单；真实笔迹与GPU画面待人工 |
+| I008 | History Brush 历史记录画笔 | 补齐命令接线与槽位/选项；原生执行由固定引擎提供，画面待人工 | P1/P3/P5/P7 · B128 | I008 | 独占槽 10：`historyBrush` 是独立一键（不与仿制或修复合并），按 Y 组循环；参数编译`retouch-tools.ts`、选项`retouch-options.tsx`；`paint.historyBrush` 在白名单；真实笔迹与GPU画面待人工 |
+| I009 | Dodge / Burn / Sponge 色调笔刷 | 补齐命令接线与槽位/选项；原生执行由固定引擎提供，画面待人工 | P1/P3/P5/P7 · B128 | I009 | 减淡槽（槽 14）：`dodge`/`burn`/`sponge` 三者同槽，按 O 组循环；参数编译`retouch-tools.ts`、选项`retouch-options.tsx`；三条命令在白名单；真实笔迹与GPU画面待人工 |
+| I010 | Blur / Sharpen / Smudge 局部笔刷 | 补齐命令接线与槽位/选项；原生执行由固定引擎提供，画面待人工 | P1/P3/P5/P7 · B128 | I010 | 模糊槽（槽 13）：`blur`/`sharpen`/`smudge` 三者同槽；上游此槽无组键（`Tool::key()` 为 `'\0'`），本实现同样只从槽位展开列表进入，不占用任何字母；参数编译`retouch-tools.ts`、选项`retouch-options.tsx`；真实笔迹与GPU画面待人工 |
 | I011 | Clone Stamp / Healing Brush 与 Clone Source | 补齐命令与工具/面板接线；Clone Source 五槽面板与 Alt 取样已实现，真实笔迹与画面待人工 | P1/P5 · B117 | I011 | `paint.cloneStamp`/`paint.healingBrush` 与 `cloneSource.list|select|set|resetTransform|overlay` 进入能力白名单；`retouch-tools.ts` 新增仿制图章/修复画笔参数（对齐、取样图层、显式来源点或偏移），`retouch-options.tsx` 提供选项，App 在 Alt/Option 按下时取样来源点而不绘制整笔；`clone-source-panel.tsx` 提供五槽选择、宽高/链接/旋转/翻转、重置与清除，以及叠层显示/不透明度/混合/剪贴/自动隐藏/反相，只改会话预设；`retouch_params.rs` 在写路由前拒绝半截来源点、越界笔尖与未知取样范围；`tests/clone_source.rs` 断言预设不推进内容指纹、历史或修订，重开工程后槽位清空，绘制无来源时明确拒绝。真实指针取样、源叠层画面与 GPU 合成待人工 |
-| I012 | Spot Healing Brush 污点修复画笔 | 部分补齐：命令与工具组接线；画面待人工 | P1 · B114 | I012 | `paint.spotHealing` 通过白名单，工具选项提供内容感知/创建纹理/近似匹配与跨层取样；实际修复结果与背景任务取消待人工 |
+| I012 | Spot Healing Brush 污点修复画笔 | 补齐命令接线与槽位/选项；画面待人工 | P1/P3/P5/P7 · B128 | I012 | 修复槽（槽 7）：`spotHealing` 与修复画笔、红眼同槽，按 J 组循环（上游 Remove/Patch/ContentAwareMove 未开放，槽内省略）；选项提供内容感知/创建纹理/近似匹配与跨层取样；`paint.spotHealing` 在白名单；实际修复结果与背景任务取消待人工 |
 | I013 | Patch 选区修补工具 | 明确不支持：需要选区拖动取样的专用画布手势与后台任务 | P1 · B116 | I013 | 现有选区拖动只搬移像素；不开放 `paint.patch` 的 Source/Destination 或内容感知参数，避免以普通移动冒充修补 |
 | I014 | Content-Aware Move 内容感知移动 | 明确不支持：需放置后变换与内容填补后台任务 | P1 · B116 | I014 | `paint.contentAwareMove` 未进入白名单：Move/Extend、Transform On Drop 与可取消内容填补均未接线；不复制无预览的占位工具 |
-| I015 | Red Eye 红眼修复工具 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I015 | 润饰工具组`retouch-tool-group.tsx`、参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；14条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
+| I015 | Red Eye 红眼修复工具 | 补齐命令接线与槽位/选项；原生执行由固定引擎提供，画面待人工 | P1/P3/P5/P7 · B128 | I015 | 修复槽（槽 7）成员之一：`redEye` 是一级工具 id，按 J 组循环；点按类工具只提交一个坐标；参数编译`retouch-tools.ts`、选项`retouch-options.tsx`；`paint.redEye` 在白名单；真实画面待人工 |
 | I016 | Remove Tool 移除工具 | 明确不支持：需暂存笔划与内容填补任务 | P1 · B116 | I016 | 现无暂存笔划状态或 `paint.remove` 分派，该命令未进入白名单；橡皮擦只擦除不作周边补全 |
-| I017 | 单行/单列选框 | 补齐；DOM/内核通过，实机待核验 | P1 · B3 | I017 | `selection-gesture.ts`、`marquee-tool-group.tsx`、Canvas 点按/取消测试；`interaction_state.rs` 整行/列权威范围及越界拒绝；真实 WASM 冒烟；[B2/B3 验证](../verification.md) |
+| I017 | 单行/单列选框 | 补齐；DOM/内核通过，实机待核验 | P1 · B3 | I017 | `selection-gesture.ts`、`toolbar-slots.ts`（槽 1 的矩形/椭圆/单行/单列四个成员）、`tool-slot-button.test.tsx`、Canvas 点按/取消测试；`interaction_state.rs` 整行/列权威范围及越界拒绝；真实 WASM 冒烟；[B2/B3 验证](../verification.md) |
 | I018 | 移动工具自动选层目标与追加选择 | 补齐；状态/DOM通过，拾取视觉待人工 | P1 · B3 | I018 | Group 默认目标、Layer/Group 切换与 Shift 追加；`editor/transform.rs`、`photo-editor-canvas.test.tsx`、group picker 状态回归；[B2/B3 验证](../verification.md) |
 | I019 | Move 拖动预览模式 | 补齐；边界/箭头DOM通过，画面待人工 | P1 · B10 | I019 | 拖动只更新边框，释放最终矩阵一次提交；取消零preview，显式变换仍实时；普通Move和变换框拖动共享位移箭头；[B10](../verification.md) |
 | I020 | Move 自动选层的悬停目标预览 | 补齐；CPU/DOM/WASM通过，画面待人工 | P1 · B45 | I020 | 共用原生自动选层/组命中与变换边界，只读不改选择/历史；修饰键静止刷新，离开/失焦/按下/视图变化清理；[B45](../verification.md) |
@@ -119,7 +119,7 @@
 | I103 | 历史操作 | 补齐；CPU/DOM通过，合并快照画面待人工 | P3 · B29 | I103 | history.selectState一次修订且保留redo；完整/合并/当前图层快照、恢复/改名/删除，严格参数与scratch原子发布；快照元数据不改内容；[B29](../verification.md) |
 | I104 | 图层复合（Layer Comps） | 明确不支持：图层复合是新的持久化状态 | P3 · B116 | I104 | 图层复合会保存可见性/位置/样式快照并需版本协商，`layer.comps.*` 未进入白名单且无面板入口；本产品用历史快照提供一步状态，不伪造复合面板 |
 | I105 | 动作录制与自动化 | 明确不支持：动作录制会执行任意命令序列 | P3 · B116 | I105 | `actions.*` 未进入命令白名单，菜单也无动作面板入口；本产品只提供有界的文档字节脚本导入，不提供录制/回放或 .atn |
-| I106 | 工具快捷键与 Shift 循环设置 | 部分补齐：现有选框组Shift循环偏好；其余工具组未开放 | P3/P4/P6/P7 · B5 | I106 | useShiftForToolSwitch默认true，关闭后同组工具单键循环；新切入工具先恢复已记忆子工具；[B5 验证](../verification.md) |
+| I106 | 工具快捷键与 Shift 循环设置 | 部分补齐：8 组字母循环（V/M/L/W/I/J/B/S/E/G/O/T/H/Z 共 15 个字母）+ 无键槽；快捷键自定义仍未开放 | P1/P3/P5/P7 · B128 | I106 | `toolbar-slots.ts` 的组键派生 `TOOL_GROUP_KEYS`（按循环序）；`photo-editor-shortcuts.ts` 返回 `toolGroup`；`photo-editor-shortcuts.test.ts` 覆盖 15 个字母、7 个多成员组（M/J/B/S/E/O/T）逐成员循环与单成员组；`Blur/Sharpen/Smudge` 与单行/单列无组键；`useShiftForToolSwitch` 默认 true 时普通键回组内上次工具、Shift 循环；`toolbar-memory.test.ts` 断言组切换语义；自定义快捷键集仍属 I039 |
 | I107 | 按住工具键临时切换 | 补齐现有工具；状态/宿主回归通过，设备待核验 | P3 · B13 | I107 | 短按保持，300ms或使用画布后恢复，半笔等待结束；显式工具点击/失焦/owner变化清理；[B13](../verification.md) |
 | I108 | 工具栏项目自定义 | 明确不支持：未协商工具栏隐藏偏好 | P3 · B116 | I108 | 工具栏按已开放工具固定渲染；单双列与紧凑选项栏已支持，逐项隐藏未开放 |
 | I109 | 菜单项目自定义 | 明确不支持：未协商菜单隐藏/色标偏好 | P3 · B116 | I109 | 菜单按固定目录与命令能力渲染，偏好设置中不提供隐藏/色标页；色标与隐藏需要新的本机偏好契约，未开放 |
@@ -157,7 +157,7 @@
 | I141 | 橡皮擦模式 | 补齐；CPU像素/DOM通过，设备画面待人工 | P3 · B21 | I141 | Brush/Pencil/Block切换；Block按缩放换算16屏幕像素方块、忽略不适用参数，方形光标并关闭笔头HUD；[B21](../verification.md) |
 | I142 | 绘画时临时擦除 | 补齐；宿主事件/参数通过，设备按键待人工 | P3 · B22 | I142 | Brush/Pencil反引号临时擦除，整笔冻结参数且工具不切换；keyup捕获跨字段恢复、失焦/隐藏清理、IME及字段门禁；[B22](../verification.md) |
 | I143 | 绘画对称辅助 | 补齐；CPU镜像/DOM/WASM通过，设备轴线和笔迹待人工 | P5 · B23 | I143 | 四种轴与已有路径来源、画布轴线、中心/旋转拖动和15°吸附；候选仅轴线、Enter确认/Escape或失焦取消；模式不改内容/修订/历史；[B23](../verification.md) |
-| I144 | 背景/魔术橡皮擦 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I144 | 润饰工具组`retouch-tool-group.tsx`、参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；14条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
+| I144 | 背景/魔术橡皮擦 | 补齐命令接线与工具组/选项；原生执行由固定引擎提供，画面待人工 | P1/P5 · B114 | I144 | 橡皮槽（槽 11）：`eraser`/`backgroundEraser`/`magicEraser` 三者同槽，按 E 组循环（原「背景/魔术橡皮擦被塞进润饰组、而橡皮自己在一级」的问题已修正）；参数编译`retouch-tools.ts`与选项`retouch-options.tsx`；16条`paint.*`命令进入白名单；释放整笔一次分派、点按类只提交一个坐标、取消不写、命令关闭时不派发；参数边界按原生注册表夹紧；真实笔迹与GPU画面待人工 |
 | I145 | 数位笔姿态输入 | 部分补齐：同点落笔峰值；倾斜/旋转/笔端切换/压力曲线待做 | P5 · B44 | I145 | 同点pen合并事件/抬笔非零压力取接触峰值，移动笔迹沿用实际尾压；冻结参数重建单点候选、仅最终一步历史，迟到RAF代际隔离；[B44](../verification.md) |
 | I146 | 颜色编辑 | 部分补齐：独立选择器/数值/目标颜色组；Color面板与文字范围/动态轨道待做 | P5 · B41/B42 | I146 | 像素与蒙版分别记忆前后景，默认黑白/白黑；宿主选择器含SV/色相/HSB/RGB/Lab/通用CMYK/HEX；取消不写，确认仅改工具色；[B41/B42](../verification.md) |
 | I147 | 颜色选择器的 Web 色域与色板动作 | 部分补齐：216色/最近色/原色/色板；印刷ICC色域未支持 | P5 · B42 | I147 | 仅Web颜色限制与最近216色、原色恢复、显式加入本机色板；Lab超sRGB提示夹紧，CMYK通用换算明确无ICC，不伪造印刷色域结论；[B42](../verification.md) |
@@ -223,7 +223,7 @@
 | I207 | 混合模式预览与下拉手势 | 补齐；候选/DOM/WASM通过，菜单布局待人工 | P3/P6/P7 · B4 | I207 | `layer-blend-field.tsx` 按下展开/悬停候选/离开取消/拖放确认/滚轮不越界；多层内核草稿、PassThrough严格门禁、noop保留redo；[B4 验证](../verification.md) |
 | I208 | 混合模式快捷键循环 | 部分补齐：图层/Brush/Pencil循环；Gradient未开放 | P3/P6/P7 · B4/B21/B72 | I208 | Shift加减按图层或独立Brush/Pencil参数循环；Pencil真实paint.pencil/Dissolve参数回归通过，Gradient仍待实现；[B72](../verification.md) |
 | I209 | 图层不透明度/填充的调整控件 | 补齐；批量草稿/DOM通过，弹层定位待人工 | P3/P6/P7 · B4 | I209 | 数值与标签scrub、Shift加速/Alt细调、anchored弹出range、滚轮180ms合帧及聚焦画布路由；取消和全选锁预检；[B4 验证](../verification.md) |
-| I210 | 工具组 flyout 的拖动选取 | 补齐；DOM 回归通过，真实指针待核验 | P7 · B1 | I210 | `marquee-tool-group.test.tsx` 拖出即开/释放选取/外部释放取消/重复右键切换，保留短按/长按/取消；[B1 验证](../verification.md) |
+| I210 | 工具组 flyout 的拖动选取 | 补齐；DOM 回归通过（槽位成员与手势同测），真实指针待核验 | P1/P3/P5/P7 · B128 | I210 | `tool-slot-button.test.tsx` 覆盖长按 350ms/拖出即开/释放选取/外部释放取消/Escape/再点关闭/禁用与卸载清理；`photo-editor-chrome.test.tsx` 断言 5 段 16 槽、单成员无三角、多成员有三角、槽内任一成员高亮；`toolbar-slots.test.ts` 断言每槽成员与上游一致（原「只测选框组机制却推断全部分组」的问题已由结构门禁补上）；真实指针待人工 |
 | I211 | 面板 | 部分补齐：属性/图层/历史及导航/直方图/信息；Channels/Paths/Actions/Comps 等未实现 | P7 · B116 | I211 | 现有面板可控显隐与折叠；不渲染无数据源的面板壳 |
 | I212 | 面板自由停靠与分组 | 明确不支持：侧栏为固定分组 | P7 · B116 | I212 | 只支持整体侧栏浮动/停靠与单一分栏，面板不提供拆分/合并控点；不提供任意组拆分/合并布局引擎 |
 | I213 | 时间轴面板与帧播放 | 明确不支持：无视频时间轴文档模型 | P7 · B116 | I213 | `timeline.*` 未开放；不复制无内容的时间轴面板 |

@@ -2,11 +2,23 @@ import type {ViewportNavigation} from "./viewport-navigation.js";
 /** 图片编辑器的快捷键与显示提示共用清单；不扩展内核能力白名单。 */
 import type { EditorToolId } from "./photo-editor-tools.js";
 import type {EditorDisplayAction} from "./editor-display.js";
+import {toolGroups} from "./toolbar-slots.js";
 
 export type PhotoEditorTool = Exclude<EditorToolId, "none"> | "move" | "transform" | "text";
 export type EditorViewAction = "zoomIn" | "zoomOut" | "fit" | "actualSize" | "twoHundredPercent" | "printSize" | "fitLayers";
+
+/**
+ * 工具字母提示。取值来自槽位注册表的组键（`toolbar-slots.ts`），此处只是给界面读取的投影；
+ * 组键为 `null` 的工具（模糊/锐化/涂抹）不出现，因为它们只能从槽位展开列表进入。
+ */
 export const TOOL_KEYS: Partial<Record<PhotoEditorTool, string>> = {
-  move: "V", marquee: "M", lasso: "L", magicWand: "W", brush: "B",pencil:"B",eyedropper:"I", eraser: "E", text: "T",pan:"H",zoom:"Z",bucket:"G"
+  move: "V", marquee: "M", lasso: "L", magicWand: "W",
+  brush: "B", pencil: "B", mixer: "B", colorReplacement: "B",
+  spotHealing: "J", healingBrush: "J", redEye: "J",
+  cloneStamp: "S", patternStamp: "S", historyBrush: "Y",
+  eraser: "E", backgroundEraser: "E", magicEraser: "E",
+  bucket: "G", dodge: "O", burn: "O", sponge: "O",
+  eyedropper: "I", text: "T", pan: "H", zoom: "Z"
 };
 
 export const COMMAND_SHORTCUTS = [
@@ -35,8 +47,22 @@ export const COMMAND_SHORTCUTS = [
   { id: "layer.arrange.sendToBack", key: "[", shift: true, label: "Mod+Shift+[" }
 ] as const;
 
-export const FILL_SHORTCUTS = [
-  {id:"edit.fillForeground",source:"foreground",alt:true,mod:false,shift:false,label:"Alt+Backspace"},
+/**
+ * 工具字母组（按组键）。成员顺序是**循环序**（上游 `shortcuts.rs` 的 `group`），
+ * 与槽位 flyout 顺序不同（槽 3、槽 16）。
+ *
+ * 同一工具的多个变体（矩形/椭圆选框）在循环里是**不同步**：上游 `Tool::ALL` 把它们当两个成员，
+ * 因此这里保留两者；解析器再按成员 id 决定选中哪个变体。
+ */
+export const TOOL_GROUP_KEYS: readonly {key: string; members: readonly PhotoEditorTool[]; memberIds: readonly string[]}[] =
+  [...toolGroups()].map(([key, members]) => ({
+    key,
+    // 变体在组里保留为独立成员（上游 `Tool::ALL` 就是这样），因此 M 组是「矩形、椭圆」两项。
+    members: members.map(member => member.tool),
+    memberIds: members.map(member => member.id)
+  }));
+
+export const FILL_SHORTCUTS = [  {id:"edit.fillForeground",source:"foreground",alt:true,mod:false,shift:false,label:"Alt+Backspace"},
   {id:"edit.fillBackground",source:"background",alt:false,mod:true,shift:false,label:"Mod+Backspace"},
   {id:"edit.fillForegroundPreserve",source:"foreground",alt:true,mod:false,shift:true,label:"Alt+Shift+Backspace"},
   {id:"edit.fillBackgroundPreserve",source:"background",alt:false,mod:true,shift:true,label:"Mod+Shift+Backspace"}
@@ -76,6 +102,11 @@ export type EditorShortcut =
   | {kind:"layerState";action:"transparencyLock"}
   | { kind: "command"; id: string }
   | { kind: "tool"; tool: PhotoEditorTool; cycle: boolean }
+  /**
+   * 工具字母键（按组）：`key` 是组字母，`cycle` 表示应当在组内循环而不是回到组内上次工具。
+   * 解析成具体工具由 App 按当前工具与偏好决定（design D5）。
+   */
+  | { kind: "toolGroup"; key: string; cycle: boolean }
   | { kind:"blendCycle";direction:-1|1 }
   | { kind: "nudge"; dx: number; dy: number; pixels?:boolean; duplicate?:boolean }
   | { kind: "view"; action: EditorViewAction }
@@ -154,8 +185,10 @@ export function resolveEditorShortcut(event: KeyInput, isMac: boolean,useShiftFo
   if (key === "enter" && !event.shiftKey) return { kind: "confirm" };
   if ((key === "delete" || key === "backspace") && !event.shiftKey) return { kind: "delete" };
   if (["[","]","ö","#","'"].includes(key)) return { kind: "brush", property: event.shiftKey ? "hardness" : "size", direction: key === "[" || key === "ö" ? -1 : 1 };
-  const tool = Object.entries(TOOL_KEYS).find(([, letter]) => letter?.toLowerCase() === key)?.[0] as PhotoEditorTool | undefined;
-  if (tool && (!event.shiftKey || tool === "marquee" || tool==="brush")) return { kind: "tool", tool, cycle: event.shiftKey || !useShiftForToolSwitch };
+  // 工具字母按组解析（design D5）：同一字母的成员构成一组，组内顺序由槽位注册表的循环序决定。
+  // 无组键的工具（模糊/锐化/涂抹、单行/单列选框）不在表内，按它们不会切换工具。
+  const group = TOOL_GROUP_KEYS.find(entry => entry.key.toLowerCase() === key);
+  if (group) return { kind: "toolGroup", key: group.key, cycle: event.shiftKey || !useShiftForToolSwitch };
   return null;
 }
 

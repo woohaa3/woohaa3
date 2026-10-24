@@ -4,7 +4,7 @@ import type {EditorWorkspaceController} from "./editor-workspace.js";
 import {DialogBody,DialogContent,DialogFooter,DialogHeader,DialogTitle} from "./ui/Dialog.js";
 import {Button} from "./ui/Button.js";
 import {CursorMenu} from "./ui/Menu.js";
-import {PHOTO_TOOLS} from "./photo-editor-chrome.js";
+import {toolbarMembers} from "./toolbar-slots.js";
 import type {PhotoEditorTool} from "./photo-editor-shortcuts.js";
 const ID="image-editor.reset-all-tools";
 export function useToolReset(dialogs:EditorDialogPort|undefined,controller:EditorWorkspaceController,blocked:boolean,reset:(all:boolean)=>void,error:(message:string)=>void) {
@@ -27,7 +27,7 @@ export function useToolReset(dialogs:EditorDialogPort|undefined,controller:Edito
  }};
 }
 export function ToolResetMenu({tool,label,disabled,onReset,onAll}:{tool:PhotoEditorTool;label:string;disabled:boolean;onReset:()=>void;onAll?:()=>void}) {
- const [position,setPosition]=useState<{x:number;y:number}|null>(null);const Icon=PHOTO_TOOLS.find(item=>item.id===tool)?.Icon;
+ const [position,setPosition]=useState<{x:number;y:number}|null>(null);const Icon=toolbarMembers().find(item=>item.tool===tool)?.Icon;
  useEffect(()=>{if(disabled)setPosition(null);},[disabled]);
  return <><Button className="photo-editor__tool-label" size="sm" tone="ghost" disabled={disabled} title="右键重置工具选项" onContextMenu={event=>{event.preventDefault();event.stopPropagation();if(!disabled)setPosition({x:event.clientX,y:event.clientY});}}>{Icon?<Icon size={16}/>:null}{label}</Button>
  <CursorMenu open={!!position} x={position?.x??0} y={position?.y??0} onOpenChange={open=>{if(!open)setPosition(null);}} label="重置工具选项" items={[{id:"tool.reset",label:"重置当前工具",disabled,onSelect:()=>{setPosition(null);if(!disabled)onReset();}},{id:"tool.resetAll",label:"重置全部工具…",disabled:disabled||!onAll,onSelect:()=>{setPosition(null);if(!disabled)onAll?.();}}]}/></>;

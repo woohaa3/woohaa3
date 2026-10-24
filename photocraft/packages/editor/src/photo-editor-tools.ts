@@ -16,8 +16,21 @@
  */
 import { IMAGE_PROJECT_LIMITS } from "@woohaa3/photocraft-protocol";
 
-/** 首期画布工具。 */
-export type EditorToolId = "none" | "pan" | "zoom" | "bucket" | "pencil" | "eyedropper" | "move" | "marquee" | "lasso" | "magicWand" | "brush" | "eraser" | "retouch" | "text";
+/**
+ * 画布工具。绘画与润饰工具各自是一级工具 id（与上游槽位一一对应）；
+ * 子工具变体（选框的矩形/椭圆/行列、文字的横排/竖排）由工具自己的参数承载，不单独占 id。
+ */
+export type EditorToolId =
+  | "none" | "pan" | "zoom" | "bucket" | "pencil" | "eyedropper" | "move" | "marquee" | "lasso"
+  | "magicWand" | "brush" | "eraser" | "text"
+  /** 绘画与润饰（槽 7/8/9/11/13/14）：参数编译共用 `retouch-tools.ts`，工具身份各自独立。 */
+  | "spotHealing" | "healingBrush" | "redEye"
+  | "mixer" | "colorReplacement"
+  | "cloneStamp" | "patternStamp"
+  | "historyBrush"
+  | "backgroundEraser" | "magicEraser"
+  | "blur" | "sharpen" | "smudge"
+  | "dodge" | "burn" | "sponge";
 
 /** 选区运算方式（与内核 `mode` 取值一致）。 */
 export type SelectionMode = "replace" | "add" | "subtract" | "intersect";

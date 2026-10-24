@@ -4,11 +4,13 @@ import type {EditorWorkspaceController} from "./editor-workspace.js";
 import type {EditorDialogPort,EditorDialogRendererProps} from "./ports.js";
 import {EDITOR_MENUS,type EditorMenuItem,type WorkspacePurgePort} from "./photo-editor-menu.js";
 import {commandShortcutLabel,TOOL_KEYS,type PhotoEditorTool} from "./photo-editor-shortcuts.js";
+import {toolbarMembers} from "./toolbar-slots.js";
 import {DialogBody,DialogContent,DialogHeader,DialogTitle} from "./ui/Dialog.js";
 import {Button} from "./ui/Button.js";
 const DIALOG="image-editor.command-search",RECENTS="photocraft.command-search.recent.v1";
 export type SearchEntry={id:string;label:string;path:string;shortcut?:string;enabled:boolean;reason?:string|null;tool?:PhotoEditorTool};
-const tools:readonly [PhotoEditorTool,string][]=[["move","移动"],["marquee","选框"],["lasso","套索"],["bucket","油漆桶"],["pencil","铅笔"],["eyedropper","吸管"],["brush","画笔"],["eraser","橡皮"],["text","文字"],["pan","手形"],["zoom","缩放"]];
+/** 工具条目直接来自槽位注册表：工具栏里有的工具，命令面板都能切到，反之亦然。 */
+const tools:readonly [PhotoEditorTool,string][]=toolbarMembers().map(member=>[member.tool,member.label]);
 export function commandSearchEntries(controller:EditorWorkspaceController,purge?:WorkspacePurgePort):SearchEntry[] {
  const snapshot=controller.snapshot(),out:SearchEntry[]=[];
  const visit=(items:readonly EditorMenuItem[],path:string[])=>{for(const item of items) {

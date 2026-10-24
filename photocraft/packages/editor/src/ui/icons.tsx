@@ -13,6 +13,18 @@
 import {
   Activity,PaintBucket,Pencil,Pipette,
   AppWindow,
+  Bandage,
+  Brush,
+  Droplets,
+  Flame,
+  Palette,
+  ScanEye,
+  Stamp,
+  SunMedium,
+  Syringe,
+  Wand,
+  Waves,
+  Wind,
 
   AlignHorizontalJustifyStart,
   AlignHorizontalJustifyCenter,
@@ -313,3 +325,19 @@ export const PencilIcon=withDefaults(Pencil);
 
 
 export const PipetteIcon=withDefaults(Pipette);
+
+// 工具栏绘画与润饰工具（change: refactor-photocraft-toolbar）：每个槽位成员有各自的图形，
+// 不同槽位不复用同一个图标。
+export const BrushIcon=withDefaults(Brush);
+export const StampIcon=withDefaults(Stamp);
+export const BandageIcon=withDefaults(Bandage);
+export const SyringeIcon=withDefaults(Syringe);
+export const ScanEyeIcon=withDefaults(ScanEye);
+export const PaletteIcon=withDefaults(Palette);
+export const DropletsIcon=withDefaults(Droplets);
+export const WavesIcon=withDefaults(Waves);
+export const WindIcon=withDefaults(Wind);
+export const FlameIcon=withDefaults(Flame);
+export const SunMediumIcon=withDefaults(SunMedium);
+export const WandIcon=withDefaults(Wand);
+export const SquareDashedIcon=withDefaults(SquareDashed);

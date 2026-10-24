@@ -4,9 +4,33 @@ import {DEFAULT_SAMPLE,SAMPLE_LAYERS,SAMPLE_SIZES,type SampleSettings} from "./e
 import {DEFAULT_MAGIC_WAND,COLOR_RANGE_SELECTIONS,DEFAULT_COLOR_RANGE,type MagicWandSettings,type ColorRangeSettings} from "./photo-editor-tools.js";
 import {DEFAULT_RETOUCH,RETOUCH_SPECS,type RetouchSettings,type RetouchToolId} from "./retouch-tools.js";
 import type {PhotoEditorTool} from "./photo-editor-shortcuts.js";
-export const decodeRememberedTool=(value:unknown):PhotoEditorTool=>memoryChoice(value,["pan","zoom","bucket","pencil","eyedropper","move","marquee","lasso","magicWand","brush","eraser","text"] as const,"marquee");
+export const decodeRememberedTool=(value:unknown):PhotoEditorTool=>{
+ // 旧值 `retouch` 是已撤下的伪工具：迁移到它当时的默认子工具，不只回落到选框。
+ if(value==="retouch") return "colorReplacement";
+ return memoryChoice(value,["pan","zoom","bucket","pencil","eyedropper","move","marquee","lasso","magicWand","brush","eraser","text","spotHealing","healingBrush","redEye","mixer","colorReplacement","cloneStamp","patternStamp","historyBrush","backgroundEraser","magicEraser","blur","sharpen","smudge","dodge","burn","sponge"] as const,"marquee");
+};
 export const decodeMoveTarget=(value:unknown)=>memoryChoice(value,["layer","group"] as const,"group");
-export const decodeSelectionMode=(value:unknown)=>memoryChoice(value,["replace","add","subtract","intersect"] as const,"replace");
+/** 工具栏记忆（change: refactor-photocraft-toolbar，design D4）：只保存本机工具选择，不进文档。 */
+export const decodeSlotMemory=(value:unknown):Record<string,string>=>{
+ const raw=memoryRecord(value),out:Record<string,string>={};
+ for(const [key,entry] of Object.entries(raw)) {
+  // 槽键是十进制槽索引；值必须是工具栏里真实存在的成员 id。
+  if(!/^\d+$/.test(key)) continue;
+  if(typeof entry!=="string" || !entry || entry.length>48) continue;
+  out[key]=entry;
+ }
+ return out;
+};
+export const decodeGroupMemory=(value:unknown):Record<string,string>=>{
+ const raw=memoryRecord(value),out:Record<string,string>={};
+ for(const [key,entry] of Object.entries(raw)) {
+  // 组键是单个大写字母；值必须是真实工具 id。
+  if(!/^[A-Z]$/.test(key)) continue;
+  if(typeof entry!=="string" || !entry || entry.length>48) continue;
+  out[key]=entry;
+ }
+ return out;
+};export const decodeSelectionMode=(value:unknown)=>memoryChoice(value,["replace","add","subtract","intersect"] as const,"replace");
 export const decodeFeather=(value:unknown)=>memoryNumber(value,0,0,100);
 export const decodeFalse=(value:unknown)=>memoryBoolean(value,false);
 export const decodeTrue=(value:unknown)=>memoryBoolean(value,true);

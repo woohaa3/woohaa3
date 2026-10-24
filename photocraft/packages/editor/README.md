@@ -118,6 +118,23 @@ const controller = new EditorWorkspaceController({
 存储受限时保留当前内存库并提示重新加载可能丢失；坏存储不覆盖已有库。写入顺序由包内串行队列
 保证，旧快照不会覆盖新快照；退出或禁用后的迟到写入不落到新会话。
 
+## 工具栏结构
+
+工具栏不在组件里手写分支：`src/toolbar-slots.ts` 是唯一的槽位注册表，逐项对应上游
+`crates/ui-egui/src/panels.rs::TOOL_SECTIONS`（段、槽索引、槽内成员顺序、组键、循环序、
+未开放理由）。`src/photo-editor-chrome.tsx` 只把投影渲染成分段工具列，
+`src/tool-slot-button.tsx` 是**唯一**的 flyout 实现（长按 350ms、拖出即开、右键、拖出释放选取、
+外部释放取消、再次点击关闭、禁用/隐藏/卸载清理计时器）。
+
+- 未开放成员在注册表里带 `unsupported` 理由，不渲染、不入组、不进命令面板；槽位成员全部未开放
+  时整槽与整段一起省略，不留空占位。
+- 字母键按组解析：组由注册表的组键派生，成员按**循环序**（`Tool::ALL` 下标）排列。
+  `Blur/Sharpen/Smudge` 与单行/单列选框没有组键，只能从槽位展开列表进入。
+- 槽位记忆（`photocraft.tools.v1.slots`）和组记忆（`photocraft.tools.v1.groups`）都是本机状态，
+  由「选中工具」这一个动作写入，不进入文档内容、修订或历史。
+- 结构由 `tests/fixtures/toolbar-slots.json` 机械比对（`toolbar-slots.test.ts`）：分组或顺序漂移
+  会直接失败，而不是靠人眼在浏览器里发现。
+
 ## 取消、释放与重试
 
 - 画布手势、自由变换、文字/调整/属性草稿都可取消；取消恢复正式内容，不新增历史。

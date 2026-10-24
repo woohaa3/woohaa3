@@ -19,6 +19,7 @@ import {resizeBrush,type BrushResizeValues} from "./brush-resize.js";
 import {isEditorMac} from "./photo-editor-shortcuts.js";
 import {StrokeConstraint} from "./stroke-constraint.js";
 import {measureBoxes,measureLabels,shouldMeasure} from "./move-distance.js";
+import {isRetouchTool} from "./retouch-tools.js";
 import {decodeGuides,gridLines,guideAt,guideList,rulerTicks,snapPoint,type GuidePreferences} from "./guides.js";
 /** 透明交互层：图片仍由原节点呈现，取景与聚焦动画共用工作区状态。 */
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useId, useRef, useState, type ReactNode } from "react";
@@ -179,7 +180,15 @@ type LocalRect = { x: number; y: number; width: number; height: number };
 
 /** 需要画布手势的工具。 */
 function isGestureTool(tool: EditorToolId): boolean {
-  return tool === "marquee" || tool === "lasso" || tool === "brush" || tool === "pencil" || tool === "eraser" || tool === "retouch";
+  return tool === "marquee" || tool === "lasso" || isPaintTool(tool);
+}
+
+/**
+ * 画笔类工具：绘制手势、笔头光标与修饰键反馈共用同一判定。
+ * 包含画笔/铅笔/橡皮与全部绘画、润饰工具（`retouch-tools.ts` 的参数编译范围）。
+ */
+function isPaintTool(tool: EditorToolId): boolean {
+  return tool === "brush" || tool === "pencil" || tool === "eraser" || isRetouchTool(tool);
 }
 
 /**
@@ -313,7 +322,7 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
   const toDocument = useCallback(
     (clientX: number, clientY: number, clamp = true): DocumentPoint | null => {
       const current = viewport();
-      return current ? screenToDocument(clientX, clientY, current, clamp && !selectionRef.current && tool !== "brush" && tool !== "pencil" && tool !== "eraser" && tool !== "retouch" && tool !== "move" && !moveRef.current) : null;
+      return current ? screenToDocument(clientX, clientY, current, clamp && !selectionRef.current && !isPaintTool(tool) && tool !== "move" && !moveRef.current) : null;
     },
     [viewport, tool]
   );
@@ -416,7 +425,7 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
     samplingRef.current = false;setSampleBase(null);
     selectionRef.current = null;
     selectionSpace.current = false;
-    if (pointer !== null && !resizeValues && (gestureTool.current === "brush" || gestureTool.current === "pencil" || gestureTool.current === "eraser" || gestureTool.current === "retouch")) onStrokeCancel?.();
+    if (pointer !== null && !resizeValues && isPaintTool(gestureTool.current)) onStrokeCancel?.();
     setBox(null); setPath(null); setPan(null);
     if (!preserveTouches && pointer !== null && containerRef.current?.hasPointerCapture(pointer)) containerRef.current.releasePointerCapture(pointer);
     for(const id of touchIds){if(containerRef.current?.hasPointerCapture(id))containerRef.current.releasePointerCapture(id);}
@@ -513,7 +522,7 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
   // 将文档边界投影到当前视图；缩放与平移不改变选区状态。
   const originX = (stageSize.width - documentWidth * actualScale) / 2 + offset.x;
   const originY = (stageSize.height - documentHeight * actualScale) / 2 + offset.y;
-  const paintingTool=tool==="brush" || tool==="pencil" || tool==="eraser" || tool==="retouch";
+  const paintingTool=isPaintTool(tool);
   const cursorTip=brushCursor(cursors,brushSize??0,tool==="pencil" || tool==="eraser" && eraserMode==="pencil"?1:brushHardness,zoom,!!pathRef.current,tool==="eraser" && eraserMode==="block");
   const preciseOther=cursors.other==="precise" && ["move","text","marquee","lasso","bucket","eyedropper"].includes(tool);
   const marquee: LocalRect | null = box ? {x:originX+box.x*zoom,y:originY+box.y*zoom,width:box.width*zoom,height:box.height*zoom} : null;
@@ -746,7 +755,7 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
         const click = clickRef.current;
         if (click && (click.threshold===2 ? Math.hypot(event.clientX-click.x,event.clientY-click.y)>=2 : Math.hypot(event.clientX-click.x,event.clientY-click.y)>click.threshold)) click.moved=true;
         autoPan.update();
-        if(tool==="brush" || tool==="pencil" || tool==="eraser" || tool==="retouch") setFeedbackKeys({shift:event.shiftKey,alt:event.altKey,mod:event.ctrlKey || event.metaKey});
+        if(isPaintTool(tool)) setFeedbackKeys({shift:event.shiftKey,alt:event.altKey,mod:event.ctrlKey || event.metaKey});
         const local = toLocal(event.clientX, event.clientY);
         const point = toDocument(event.clientX, event.clientY);
         if (point) setCursor({ local, doc: point });

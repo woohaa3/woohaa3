@@ -1367,3 +1367,69 @@ I177 的「Kind/Name 筛选」只依赖已投影的图层行，属于纯显示�
 - 平台为 Linux 容器；`ls /dev/dri` 返回非零（无 `renderD*`），因此**未运行**任何渲染、截图、GPU 计时或性能测试，也未用软件渲染替代。
 - 无系统 IME、无实体数位笔、无 Pad 设备、无相机/打印等外部服务，因此相关条目一律标待人工并写明复现步骤。
 - 未提交、未推送 Git；未删除 worktree。
+
+## B128 工具栏按上游槽位重构（2026-10-25）
+
+### 为什么上一轮会漏掉分组错误
+
+用户第一眼就看出「画笔和铅笔被拆开了，很多不该合并的工具又被合到了一个图标里」，而当时
+599 项编辑器测试全绿。复盘出四个具体原因：
+
+1. **读了基线文本，没有读它的结构语义。** 基线原文已经写清分组（"Brush 工具组 flyout"、
+   "Clone Stamp 工具组 flyout"、"独立 History Brush"、"独立 Blur、Sharpen、Smudge 工具组"、
+   "Dodge、Burn、Sponge 工具组"、"从工具栏修复工具组选择 Red Eye"），但实施时被当成背景描述，
+   只提取了「哪些工具不存在」。
+2. **只读了平铺清单，没读权威常量。** 上游 `state.rs::Tool::ALL` 是 67 项的**顺序表**，不是 UI
+   结构；真正的结构在 `panels.rs::TOOL_SECTIONS`（5 段 21 槽）。前一轮只读了前者。
+3. **把命令接线当成交互复刻。** 验收标准是「命令进白名单 + 有测试 + 能执行」，16 条 `paint.*`
+   命令全部可执行即记为补齐；入口归组这一层没有任何一条断言。
+4. **测试把错误结构写成了预期。** `retouch-tools.test.ts` 断言 `retouchToolIds()` 长度为 16，
+   等于把「16 个工具同组」固化；`marquee-tool-group.test.tsx` 只验证 flyout 机制，却被用于
+   闭合「工具组 flyout」条目（I210）。矩阵门禁只查命令白名单与证据路径存在，看不见 UI 结构。
+
+### 本批做的事
+
+- 新增 `toolbar-slots.ts`：5 段 21 槽 67 成员逐项对应 `TOOL_SECTIONS`，含段号、槽索引、槽内
+  顺序、组键、循环序（`Tool::ALL` 下标）与未开放理由；投影为 5 段 16 槽。
+- 撤下伪工具 `retouch`，16 个绘画/润饰工具各自成为一级工具 id；`decodeRememberedTool` 把旧值
+  `retouch` 迁移为 `colorReplacement`。
+- 新增 `tool-slot-button.tsx` 作为**唯一** flyout 实现，替换三份手写组件（已删除）。
+- 快捷键改为组模型：`TOOL_GROUP_KEYS` 由注册表派生，`resolveEditorShortcut` 返回 `toolGroup`；
+  补齐 J/S/Y/O 四组；`Blur/Sharpen/Smudge` 与单行/单列无组键（与上游 `Tool::key()` 的 `'\0'`
+  一致）；`Shift+M` 只在矩形与椭圆之间循环。
+- 每槽记忆（`slots`）与每组记忆（`groups`）分开，均由「选中工具」单动作写入，不进文档。
+- 工具列底部补常驻 Quick Mask 按钮；16 个绘画工具各有独立图标（`retouch` 与 `magicWand` 不再
+  共用）。
+- 新增结构门禁 `toolbar-slots.test.ts`，比对独立 fixture `tests/fixtures/toolbar-slots.json`
+  （从上游源码解析生成，非被测数据）。
+
+### 为什么新门禁能挡住这类回归
+
+- fixture 是**独立数据**：把 `pencil` 移出槽 8、调换槽 16 的成员顺序、或把 `Slice` 的循环序写错
+  都会直接失败（本批开发中确实各触发过一次）。
+- 断言分三个口径：16 个**槽位按钮**、32 个**槽位成员**、28 个**工具 id**，不再用「16 个工具
+  同组」这类混淆口径。
+- `retouch-tools.test.ts` 改为断言「每个工具在工具栏里有唯一归属槽位」与「颜色替换/混合画笔
+  属于 B 组而不是修复组」。
+
+### 本轮实际运行的检查
+
+- `pnpm -C packages/editor run typecheck`：通过。
+- `pnpm -C packages/editor test`：**119 文件 655 项**全部通过（新增 `toolbar-slots.test.ts`
+  16 项、`tool-slot-button.test.tsx` 5 项、`toolbar-memory.test.ts` 11 项、
+  `paint-dispatch.test.ts` 10 项、快捷键组测试 8 项）。
+- `pnpm run check`：build + typecheck + test 通过（editor 119/655、protocol 97、project-verifier 43）。
+- `cargo test --manifest-path rust/Cargo.toml --workspace --offline`：17 个测试组全部 `ok`。
+- `node scripts/build-verifier.mjs`：工程核验工具构建通过。
+- `node scripts/build-wasm.mjs --debug --skip-opt` + `node tests/wasm-interactions.mjs`：真实 WASM
+  冒烟通过（含 16 条 `paint.*` 命令）。
+- `node scripts/check-public-boundary.mjs`：通过。
+- 开发服务器已用新代码重启并核对：`photo-editor-chrome.tsx` 下发的是 `visibleToolSections` /
+  `ToolSlotButton`，不再含 `PHOTO_TOOLS`，也不再引用已删除的 `marquee-tool-group` / `retouch-tool-group` / `text-tool-group`。
+- `node scripts/check-disposition-matrix.mjs`：通过（301 行唯一、302 个白名单命令、24 个关闭
+  能力）。该门禁在本批**发现两条旧证据引用了已删除的 `marquee-tool-group.tsx` /
+  `retouch-tool-group.tsx`**（I017、I144），已改为指向新归属。
+- `openspec validate --specs --strict` 与 `openspec validate refactor-photocraft-toolbar --strict`：
+  通过。
+- 真实浏览器/Pad/GPU、真实指针与笔迹画面：**未运行**（本机 `ls /dev/dri` 无 `renderD*`），
+  保持待人工，不用软件渲染替代。
