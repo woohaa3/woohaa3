@@ -65,7 +65,7 @@ export async function completeImage(ctx: EditCompletionContext, request: ImageEd
       return recordFailure(ctx, request, fingerprint, "EDIT_SESSION_MEDIA_UNRESOLVABLE", "编辑媒体对象不可解析");
     }
     // 工程分支：工程对象也是恢复所必需的对象；配对不可解析时整次提交失败
-    // （change: 2026-10-16-integrate-photocraft-image-editing，design D6）。
+    // （编辑扩展工作区，design D6）。
     if (request.media.project) {
       const projectOk = await existsSafe(ctx, request.media.project.storageKey, request.canvasId);
       if (!projectOk) {

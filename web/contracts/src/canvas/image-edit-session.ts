@@ -84,7 +84,7 @@ export type ImageEditCompleteMedia = {
   imageEdit?: ImageEditDocument;
   /**
    * 裁剪后的当前画布尺寸（工程分支必填；不等于原始来源尺寸）。
-   * （change: 2026-10-16-integrate-photocraft-image-editing，design D4/D6）
+   * （编辑扩展工作区，design D4/D6）
    */
   canvasWidth?: number;
   canvasHeight?: number;

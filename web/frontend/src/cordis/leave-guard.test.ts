@@ -1,6 +1,6 @@
 /**
  * 页面离开守卫回归
- * （change: 2026-10-21-add-photocraft-document-workspace，task 4.1 / design D6）。
+ * （编辑扩展工作区，task 4.1 / design D6）。
  *
  * 覆盖：无未保存时不询问、失败停止离开、重复请求合并，以及参与者异常的安全默认值。
  */

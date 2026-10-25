@@ -388,7 +388,7 @@ function panelResetKey(route: CanvasPanelRoute): string | CanvasPanelRoute {
 }
 
 /**
- * 独立文档工作区 host（change: 2026-10-21-add-photocraft-document-workspace，design D1/D4）。
+ * 独立文档工作区 host（编辑扩展工作区，design D1/D4）。
  *
  * 只在 Canvas Navigation mode 为 `document-workspace` 时渲染**唯一**贡献。宿主不按业务类型
  * 分支，也不伪造节点聚焦：贡献方自持不透明内容背景、文档预览、取景与输入，宿主只提供内容

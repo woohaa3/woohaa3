@@ -42,7 +42,7 @@ export type PlanPasteOptions = {
   createId?: (prefix: string, index: number) => string;
   /**
    * 调用方已确认**无法**在目标画布解析的工程对象 storageKey
-   * （change: 2026-10-16-integrate-photocraft-image-editing，任务 2.4）。
+   * （编辑扩展工作区，任务 2.4）。
    *
    * 未授权/对象缺失的跨画布复制必须在这里显式列出：命中即拒绝整次粘贴，不写悬空引用。
    */

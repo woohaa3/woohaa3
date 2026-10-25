@@ -560,7 +560,7 @@ export type SlotContributionMap = {
     }) => string | null;
   };
   /**
-   * 独立文档工作区呈现（change: 2026-10-21-add-photocraft-document-workspace，design D1/D4）。
+   * 独立文档工作区呈现（编辑扩展工作区，design D1/D4）。
    *
    * 当 Canvas Navigation mode 为 `document-workspace` 时，宿主渲染**唯一**贡献；它与节点聚焦
    * 互斥，且不伪造画布节点。贡献方自己提供不透明内容背景、取景与输入 owner；宿主只提供内容

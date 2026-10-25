@@ -27,7 +27,7 @@ export type FocusHeaderProps = {
   /** 该 editor 的专用操作（工具开关、取景控件等），按顺序插入标题之后。 */
   actions?: ReactNode;
   /**
-   * 独立文档工作区（change: 2026-10-21-add-photocraft-document-workspace）的标题与来源补充。
+   * 独立文档工作区（编辑扩展工作区）的标题与来源补充。
    *
    * 提供时按文件文档语义渲染：无节点历史按钮、无「当前版本」，标题取该值而不是节点标题。
    */

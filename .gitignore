@@ -9,7 +9,6 @@ server-dist/
 bevy/target/
 bevy/target-host/
 bevy/core/target/
-photocraft/rust/target/
 desktop/target/
 desktop/supervisor/target/
 # Tauri 构建生成的能力/权限 schema（tauri-build 每次构建重写，不入库）
@@ -23,10 +22,6 @@ web/frontend/src/bevy-wasm/*.wasm
 web/frontend/src/bevy-wasm/*.wasm.d.ts
 # 字体由构建脚本从 bevy/assets/fonts/ 复制到 public/，不入库（源文件在 bevy/ 下）。
 web/frontend/public/assets/
-# PhotoCraft WASM 由根构建复制进前端源码图，产物不入库（唯一构建者仍是 photocraft/）。
-web/frontend/src/photocraft-wasm/
-# PhotoCraft 内核/核验产物由子项目构建到各包 `dist/`（已被上面的 `dist/` 覆盖）；
-# 编译缓存固定在子项目 `.local/`（已被下面的 `.local/` 覆盖）。旧路径不再生成。
 
 # env / secrets
 .env
@@ -116,7 +111,3 @@ config.local.json
 
 # Locally injected private provider branding
 /web/frontend/public/plugin-icons/litellm-provider.png
-
-# PhotoCraft 覆盖层产物：权威源在仓库根 tools/photocraft-web/app（入库），
-# 运行副本由 scripts/sync-photocraft-app.mjs 复制到这里。
-web/frontend/public/tools/photocraft-web/

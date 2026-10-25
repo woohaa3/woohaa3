@@ -71,7 +71,7 @@ export function currentIdentityOfNode(canvas: ServerCanvas, nodeId: string, kind
     const baseStorageKey = baseAsset?.metadata && typeof (baseAsset.metadata as { storageKey?: unknown }).storageKey === "string"
       ? (baseAsset.metadata as { storageKey: string }).storageKey
       : "";
-    // 工程分支与 v1 标注分支共用同一入口，但身份公式不同（change: 2026-10-16-integrate-photocraft-image-editing）。
+    // 工程分支与 v1 标注分支共用同一入口，但身份公式不同（编辑扩展工作区）。
     return imageEditDocumentContentIdentity({
       document: imageEdit.value,
       baseStorageKey,

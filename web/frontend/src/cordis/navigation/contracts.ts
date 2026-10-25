@@ -17,8 +17,8 @@ import type { ComponentType } from "react";
 export type CanvasFocusKind = "image" | "video" | "model" | "extension";
 
 /**
- * 独立 PhotoCraft 文档的轻量 presentation identity
- * （change: 2026-10-21-add-photocraft-document-workspace，design D1/D4）。
+ * 独立编辑文档的轻量 presentation identity
+ * （编辑扩展工作区，design D1/D4）。
  *
  * 只带不透明文档 id；**不**伪造画布节点、不携带字节/草稿/取景。完整文档列表与实例仍归
  * 编辑 feature。它与其他 focus 互斥，同一时刻只有一个活动呈现。
@@ -36,7 +36,7 @@ export type CanvasMode =
    */
   | { type: "node-focus"; nodeId: string; kind: CanvasFocusKind; owner: "direct" | "history" }
   /**
-   * 独立文档工作区呈现（change: 2026-10-21-add-photocraft-document-workspace，design D1/D4）。
+   * 独立文档工作区呈现（编辑扩展工作区，design D1/D4）。
    *
    * 与 `node-focus` 互斥：文件文档没有画布节点身份，也不操纵底层画布。`documentId` 是不透明
    * 文档 identity，由编辑 feature 分配与解释；navigation 只保存它用于原子切换。
@@ -167,13 +167,13 @@ export type CanvasNavigationIntent =
        * 复用当前呈现期已捕获的 overview 返回上下文。
        *
        * 文档工作区的 tab 切换（节点↔节点、节点↔文件）不覆盖首次进入时记录的返回位置
-       * （change: 2026-10-21-add-photocraft-document-workspace，D4）。从 overview 首次进入或
+       * （编辑扩展工作区，D4）。从 overview 首次进入或
        * 显式跨节点跳转保持缺省 false（重新捕获用户当前位置）。
        */
       preserveOverviewReturn?: boolean;
     }
   /**
-   * 进入/切换独立文档工作区呈现（change: 2026-10-21-add-photocraft-document-workspace，D1/D4）。
+   * 进入/切换独立文档工作区呈现（编辑扩展工作区，D1/D4）。
    *
    * 与节点聚焦互斥且不伪造节点；同一 `documentId` 的重入为无操作，不重新捕获返回上下文。
    */
@@ -307,7 +307,7 @@ export type CanvasLayoutAdapter = {
    * nodeId 相同）必须到达这里；失败时不得留下与 snapshot 不一致的 owner/projection。
    *
    * 独立文档工作区的目标为 `{ kind: "document" }`：adapter 只清除节点投影与历史 override，
-   * 不为文件文档伪造画布节点（change: 2026-10-21-add-photocraft-document-workspace，D4）。
+   * 不为文件文档伪造画布节点（编辑扩展工作区，D4）。
    */
   apply: (
     target: CanvasFocusTarget | null,

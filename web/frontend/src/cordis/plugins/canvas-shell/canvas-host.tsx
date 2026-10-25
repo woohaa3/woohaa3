@@ -105,7 +105,7 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
   const snapshotFocus = presentation.mode.type === "node-focus"
     ? { nodeId: presentation.mode.nodeId, kind: presentation.mode.kind }
     : null;
-  // 独立文档工作区呈现（change: 2026-10-21-add-photocraft-document-workspace）：与节点聚焦互斥，
+  // 独立文档工作区呈现（编辑扩展工作区）：与节点聚焦互斥，
   // 走自己的 slot；宿主不伪造节点 focus。
   const documentFocus = presentation.mode.type === "document-workspace"
     ? { documentId: presentation.mode.documentId }
@@ -185,7 +185,7 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
           <CanvasFocusNodeHistoryHost writable={writable} />
         </>
       ) : documentFocus ? (
-        // 独立文档工作区（change: 2026-10-21-add-photocraft-document-workspace）：
+        // 独立文档工作区（编辑扩展工作区）：
         // 唯一活动文档贡献自行呈现不透明背景与取景；底层节点媒体 overlay 与节点历史不呈现，
         // 因此不存在输入穿透、旧纹理覆盖或双主图。
         <DocumentWorkspaceHost {...slotProps} document={documentFocus} />

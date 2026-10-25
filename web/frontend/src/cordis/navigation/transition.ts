@@ -266,7 +266,7 @@ export function planTransition(
  *
  * `options.panel` 为聚焦建立后要显示的 panel（`null` 表示不显示，仅切换 owner）。
  * `options.preserveOverviewReturn` 表示本次切换属于同一呈现期的文档 tab 切换：保留首次
- * 进入时捕获的 overview 返回位置，不重新捕获（change: 2026-10-21-add-photocraft-document-workspace，D4）。
+ * 进入时捕获的 overview 返回位置，不重新捕获（编辑扩展工作区，D4）。
  * 所有可失败校验（adapter / target）在 mutation 前完成。
  */
 function planFocusIntent(

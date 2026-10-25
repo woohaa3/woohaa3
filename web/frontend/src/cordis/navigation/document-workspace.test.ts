@@ -1,6 +1,6 @@
 /**
  * 多文档工作区 presentation 回归
- * （change: 2026-10-21-add-photocraft-document-workspace，任务 2.1/2.5 / design D1/D4）。
+ * （编辑扩展工作区，任务 2.1/2.5 / design D1/D4）。
  *
  * 覆盖独立文档 mode 的原子切换、与节点聚焦互斥、overview 返回上下文复用，以及活动操作门禁。
  * 纯 reducer/service 测试，不涉及 React 或渲染。

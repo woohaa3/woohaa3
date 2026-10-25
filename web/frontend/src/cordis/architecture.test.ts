@@ -103,7 +103,7 @@ describe("前端协议边界审计", () => {
     // 共用的只读契约与基础 UI（shared/）是显式分层，不再是 cordis 子树下的 feature。
     // change: 2026-10-10-unify-extension-frontend-entry：`extension-api/` 是对外的公共前端能力
     // 入口（leaf API），与 cordis 宿主树分层。
-    const allowedTop = new Set(["bevy-wasm", "cordis", "desktop", "image-editor-wasm", "pages", "photocraft-wasm", "shared", "extension-api", "plugin-api"]);
+    const allowedTop = new Set(["bevy-wasm", "cordis", "desktop", "pages", "shared", "extension-api", "plugin-api"]);
     const entries = readdirSync(SRC_ROOT, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)

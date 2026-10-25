@@ -362,7 +362,7 @@ export async function installCanvasPageServices(
   // 不 import 宿主内部 canvas store，也不假定默认画布。
   ctx.provide("canvasScope" as never, { canvasId: () => canvasId } as never);
   /**
-   * 页面离开守卫（change: 2026-10-21-add-photocraft-document-workspace，design D6）。
+   * 页面离开守卫（编辑扩展工作区，design D6）。
    *
    * 切换画布、离开页面与可用的窗口关闭拦截先问它；返回画布/关闭 tab 不经过这里。
    */

@@ -44,7 +44,7 @@ export function canvasNavigationExtension(options: CanvasNavigationExtensionOpti
             return result.ok ? { ok: true } : { ok: false, reason: result.reason };
           },
           hasUnsavedChanges: () => focusExit.hasUnsavedChanges(),
-          // 文档切换/返回画布前同步校验活动操作（笔迹、未确认草稿）；由 PhotoCraft 适配层注册。
+          // 文档切换/返回画布前同步校验活动操作（笔迹、未确认草稿）；由编辑扩展注册。
           focusSwitchGate: () => navigateGate(),
           canvasIdentity: () => (ctx.get("canvasScope" as never) as { canvasId(): string } | undefined)?.canvasId() ?? null
         });
@@ -67,7 +67,7 @@ export function canvasNavigationExtension(options: CanvasNavigationExtensionOpti
           const canvasId = (ctx.get("canvasScope" as never) as { canvasId(): string } | undefined)?.canvasId();
           if (!owner.sessionId) return false;
           // 独立文件文档：不要求 nodeId，只要求当前活动呈现就是同一 documentId
-          // （change: 2026-10-21-add-photocraft-document-workspace，D1/D7）。
+          // （编辑扩展工作区，D1/D7）。
           if (owner.documentId) {
             if (owner.canvasId !== canvasId) return false;
             if (mode.type !== "document-workspace" || mode.documentId !== owner.documentId) return false;

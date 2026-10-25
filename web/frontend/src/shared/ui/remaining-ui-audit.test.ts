@@ -43,9 +43,7 @@ function productionFiles(dir: string): string[] {
 /**
  * 允许保留的自绘通用图形/装饰符号的显式例外（文件相对路径）。
  *
- * 图片编辑器界面已迁至 `photocraft/packages/editor`（change:
- * 2026-10-21-extract-photocraft-subproject），由该包自有 UI primitives 与样式管理，
- * 不在本宿主的插件目录内；本审计只看 `cordis/plugins`。
+ * 独立安装的编辑器由各扩展自行维护 UI primitives 与样式；本审计只看宿主 `cordis/plugins`。
  */
 const SVG_EXCEPTIONS = new Set<string>([
   // 发送/执行的实心纸飞机是产品专有图形（Lucide Send 线条风格不等价）。

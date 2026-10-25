@@ -39,7 +39,7 @@ import type { MediaFormatRegistry } from "@woohaa3/contracts";
 export const DEFAULT_MEDIA_BASE_PATH = "/api/media";
 
 /**
- * 工程对象专用入口（change: 2026-10-16-integrate-photocraft-image-editing，任务 2.3）。
+ * 工程对象专用入口（编辑扩展工作区，任务 2.3）。
  *
  * 与普通上传分开：只有这条路径设置 `projectIngest`，因此普通 `POST /api/media` 改 MIME
  * 也拿不到核验。工程 MIME 在普通入口被直接拒绝（`project-requires-verification`）。

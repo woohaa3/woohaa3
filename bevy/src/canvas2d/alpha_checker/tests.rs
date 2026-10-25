@@ -139,3 +139,28 @@ fn checker_waits_for_the_presentation_ready_gate() {
     run(&mut world);
     assert!(checker_entities(&mut world).is_empty());
 }
+
+#[test]
+fn captured_viewport_removes_host_checker_and_restores_it_for_plain_media() {
+    let mut world = world();
+    world.resource_mut::<CurrentScene>().0.image_focus = Some(
+        serde_json::from_value(serde_json::json!({
+            "version": "woohaa-image-focus-v1", "nodeId": "poster",
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+            "sourceWidth": 1200, "sourceHeight": 700, "presentationReady": true
+        })).unwrap(),
+    );
+    run(&mut world);
+    assert_eq!(checker_entities(&mut world).len(), 1);
+    world.resource_mut::<CurrentScene>().0.image_focus.as_mut().unwrap().document_view = Some(
+        serde_json::from_value(serde_json::json!({
+            "sourceWidth": 320, "sourceHeight": 240,
+            "viewport": {"x": 0, "y": 0, "zoom": 2}
+        })).unwrap(),
+    );
+    run(&mut world);
+    assert!(checker_entities(&mut world).is_empty(), "viewport margins must reveal the canvas");
+    world.resource_mut::<CurrentScene>().0.image_focus.as_mut().unwrap().document_view = None;
+    run(&mut world);
+    assert_eq!(checker_entities(&mut world).len(), 1);
+}

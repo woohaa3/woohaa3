@@ -117,7 +117,7 @@ export type FocusWorkspaceProps = {
  */
 export function FocusWorkspace({ presentation, runtime, surfaceRef, sidePanel = false, children }: FocusWorkspaceProps) {
   const mode = presentation.mode;
-  // 独立文档工作区（change: 2026-10-21-add-photocraft-document-workspace）与节点聚焦共用同一
+  // 独立文档工作区（编辑扩展工作区）与节点聚焦共用同一
   // 内容矩形与 tool/panel 布局；它没有节点历史 drawer，也没有公共连接栏。
   const focused = mode.type === "node-focus" || mode.type === "document-workspace";
   const history = mode.type === "node-focus" && presentation.panel?.type === "node-history";

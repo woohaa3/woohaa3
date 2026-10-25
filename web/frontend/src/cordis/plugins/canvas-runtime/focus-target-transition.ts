@@ -29,7 +29,7 @@ export type FocusTransitionHost = {
  *
  * - 节点目标（image/video/model/extension）：由对应 feature 拥有实际 session，这里维护 owner
  *   标记与投影清除。
- * - `{ kind: "document" }`（change: 2026-10-21-add-photocraft-document-workspace，D4）：独立文件
+ * - `{ kind: "document" }`（编辑扩展工作区，D4）：独立文件
  *   文档没有画布节点身份。清除所有节点聚焦目标与投影（含模型/历史 override），**不**进入任何
  *   节点相机、也不委托 controller；文档自己的取景由编辑 feature 的呈现层负责。
  */

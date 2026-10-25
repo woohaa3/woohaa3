@@ -38,7 +38,6 @@ describe("业务源码规模门禁（≤500 物理行）", () => {
       "web/e2e/helpers.ts",
       "web/frontend/src/bevy-wasm/woohaa_bevy_canvas.d.ts",
       "web/frontend/src/bevy-wasm/woohaa_bevy_canvas.js",
-      "photocraft/packages/editor/dist/wasm/photocraft_editor.js",
       "web/contracts/src/theme/generated-default.ts",
       "web/showcase/src/fixtures/catalog.ts"
     ]) {
@@ -78,8 +77,6 @@ describe("业务源码规模门禁（≤500 物理行）", () => {
     expect(isBusinessSourceFile("web/e2e/helpers.ts")).toBe(false);
     expect(isBusinessSourceFile("web/frontend/src/bevy-wasm/x.d.ts")).toBe(false);
     expect(isBusinessSourceFile("web/frontend/src/bevy-wasm/woohaa_bevy_canvas.js")).toBe(false);
-    expect(isBusinessSourceFile("photocraft/packages/editor/dist/wasm/photocraft_editor.js")).toBe(false);
-    expect(isBusinessSourceFile("photocraft/rust/crates/editor-core/src/editor.rs")).toBe(true);
     expect(isBusinessSourceFile("web/contracts/src/theme/generated-default.ts")).toBe(false);
     expect(isBusinessSourceFile("web/showcase/src/fixtures/canvas.ts")).toBe(false);
   });

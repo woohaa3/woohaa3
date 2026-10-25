@@ -34,7 +34,7 @@ export type NodeGenerationSourceIdentity =
   | { kind: "model-edit"; sourceHash: string; snapshotKey: string }
   | { kind: "image-baseline"; baseStorageKey: string }
   | { kind: "image-edit"; baseStorageKey: string; editKey: string }
-  /** PhotoCraft 工程版本去重键（change: 2026-10-16-integrate-photocraft-image-editing）。 */
+  /** 编辑工程版本去重键（编辑扩展工作区）。 */
   | { kind: "image-project"; baseStorageKey: string; projectKey: string }
   /** 失败/取消/中断的 task run 归档（change: 2026-10-12-unify-generation-history-strip）。 */
   | { kind: "task-run-failure"; runId: string }
@@ -77,7 +77,7 @@ export type NodeHistoryMediaPayload = {
   imageEdit?: ImageEditDocument;
   /**
    * 图片工程版本的工程对象稳定 metadata
-   * （change: 2026-10-16-integrate-photocraft-image-editing，design D6）。
+   * （编辑扩展工作区，design D6）。
    *
    * 只在 `imageEdit` 为工程分支时存在；缺失时该版本只能预览 PNG、不可继续编辑。
    */

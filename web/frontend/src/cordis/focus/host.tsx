@@ -73,7 +73,7 @@ export function isFocusWorkspaceActive(mode: { type: string }, hasWorkspace: boo
 }
 
 /**
- * 独立文档工作区是否有可用贡献（change: 2026-10-21-add-photocraft-document-workspace）。
+ * 独立文档工作区是否有可用贡献（编辑扩展工作区）。
  *
  * 由 Canvas Runtime 的 focus adapter 用作 `isDocumentTargetValid`：没有贡献方的文档身份不能
  * 进入呈现，已撤下的贡献也不会继续占用活动呈现。
@@ -88,7 +88,7 @@ export function documentWorkspaceAvailable(slots: Pick<SlotsService, "list">, do
 /**
  * 是否为 2D 媒体聚焦（图片/视频），其取景覆盖层在 extension 工作区聚焦时保留。
  *
- * 独立文档工作区（change: 2026-10-21-add-photocraft-document-workspace）由编辑 feature 自己
+ * 独立文档工作区（编辑扩展工作区）由编辑 feature 自己
  * 呈现不透明背景，不保留节点媒体取景覆盖层，避免双主图与事件穿透。
  */
 export function showsMediaFocusOverlay(mode: { type: string; kind?: string }): boolean {

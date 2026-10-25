@@ -34,7 +34,7 @@ export type FocusExitResult =
   | { ok: false; code: "focus-exit-required" | "exit-prepare-failed"; reason: string };
 
 /**
- * 活动操作门禁（change: 2026-10-21-add-photocraft-document-workspace，D3）。
+ * 活动操作门禁（编辑扩展工作区，D3）。
  *
  * 返回非空原因表示当前活动文档仍有未结束操作（笔迹、未确认文字/变换/调整/属性草稿），
  * 切换文档或返回画布必须被拒绝且现场保留。由编辑 feature 注册；没有文档打开时不注册。

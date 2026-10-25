@@ -48,7 +48,7 @@ export type PayloadValidator<T = unknown> = (
  * Trusted registration-only identity; never read from request payload.
  *
  * 节点文档带 `nodeId`；独立文件文档带 `documentId` 且没有画布节点身份
- * （change: 2026-10-21-add-photocraft-document-workspace，D1/D7）。
+ * （编辑扩展工作区，D1/D7）。
  */
 export type DialogEditingOwner = {
   canvasId: string;

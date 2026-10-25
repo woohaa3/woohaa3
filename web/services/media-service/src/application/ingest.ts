@@ -86,7 +86,7 @@ export type IngestMediaOptions = {
   allowedTypes?: readonly string[];
   computeChecksum?: (bytes: Uint8Array) => Promise<string>;
   /**
-   * 受控工程 ingest 开关（change: 2026-10-16-integrate-photocraft-image-editing）。
+   * 受控工程 ingest 开关（编辑扩展工作区）。
    *
    * 只有专用工程入口可置 true；普通媒体上传即使改 MIME 也拿不到核验，必须被拒绝。
    */

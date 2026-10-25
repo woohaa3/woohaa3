@@ -67,7 +67,12 @@ pub(crate) fn sync(
     }
     let scene = &scene.0;
     let entity = visuals.media_alpha_checker;
-    let focus = presented_media_focus(scene);
+    // A captured editor viewport includes its own document transparency treatment.
+    // Its alpha outside the document must reveal the actual canvas, not another
+    // checker sized from the captured viewport's aspect ratio.
+    let focus = presented_media_focus(scene).filter(|_| {
+        !scene.image_focus.as_ref().is_some_and(|image| image.document_view.is_some())
+    });
     let node = focus
         .as_ref()
         .and_then(|focus| scene.nodes.iter().find(|node| node.id == focus.node_id));

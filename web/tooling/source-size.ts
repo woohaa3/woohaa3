@@ -68,7 +68,7 @@ export const BUSINESS_EXCLUDE_DIRS = new Set([
   "fixtures",
   "e2e",
   /**
-   * wasm-bindgen JS glue 生成目录（Bevy 与图片内核构建脚本产出，gitignored）。
+   * wasm-bindgen JS glue 生成目录（Bevy 构建脚本产出，gitignored）。
    * 计数它会把机器生成的胶水（约 2500 行）当成维护业务源码，使门禁在「已构建 WASM」
    * 的正常开发/CI 状态下产生假阳性。运行时资源在 `public/assets`（已排除）。
    */

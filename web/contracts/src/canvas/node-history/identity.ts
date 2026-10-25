@@ -69,7 +69,7 @@ export function nodeHistoryContentIdentity(payload: NodeHistoryContentPayload): 
       if (payload.imageEdit && payload.base) {
         if (isImageProjectDocument(payload.imageEdit)) {
           // 工程分支：以引擎/格式版本、来源与画布尺寸、文档内容 hash 与工程对象身份表述，
-          // 同 PNG 不同图层结构可区分（change 2026-10-16-integrate-photocraft-image-editing）。
+          // 同 PNG 不同图层结构可区分（change editor-extension-workspace）。
           return `image-project:${payload.base.storageKey}:${payload.imageEdit.sourceWidth}x${payload.imageEdit.sourceHeight}:${payload.imageEdit.canvasWidth}x${payload.imageEdit.canvasHeight}:${payload.imageEdit.engineVersion}:${payload.imageEdit.formatVersion}:${payload.imageEdit.documentContentHash}:${payload.imageEdit.project.storageKey}:${payload.storageKey}`;
         }
         return `image-edit:${payload.base.storageKey}:${payload.imageEdit.sourceWidth}x${payload.imageEdit.sourceHeight}:${imageEditShapesHash(payload.imageEdit)}:${payload.storageKey}`;
@@ -212,8 +212,8 @@ export function imageEditSnapshotKey(input: {
 }
 
 /**
- * PhotoCraft 工程版本的稳定去重键
- * （change: 2026-10-16-integrate-photocraft-image-editing，design D4/D5）。
+ * 编辑工程版本的稳定去重键
+ * （编辑扩展工作区，design D4/D5）。
  *
  * 由 base storageKey、来源/画布尺寸、定义身份（引擎/格式/文档内容 hash）与输出 storageKey
  * 派生：同一内容重试命中同一 identity，不同图层结构产生不同键。

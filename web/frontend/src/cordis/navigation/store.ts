@@ -55,7 +55,7 @@ export type CanvasNavigationOptions = {
   /** 退出协调前置（change: 图片聚焦编辑，design D7）：返回失败保留现场。 */
   prepareExit?: () => Promise<{ ok: true } | { ok: false; reason: string }>;
   /**
-   * 活动操作门禁（change: 2026-10-21-add-photocraft-document-workspace，D3/D4）。
+   * 活动操作门禁（编辑扩展工作区，D3/D4）。
    *
    * 文档切换/返回画布前同步校验：当前文档仍有活动笔迹或未确认草稿时返回原因，transition
    * 被拒绝且现场保留。缺省表示无门禁。
@@ -200,7 +200,7 @@ export class CanvasNavigationStore implements CanvasNavigationService {
   };
 
   private applyIntent(intent: CanvasNavigationIntent): CanvasNavigationResult {
-    // 活动操作门禁（change: 2026-10-21-add-photocraft-document-workspace，D3）：切换或退出聚焦前
+    // 活动操作门禁（编辑扩展工作区，D3）：切换或退出聚焦前
     // 拒绝仍在进行的笔迹与未确认草稿，现场与活动 tab 保留；同一呈现身份的幂等重入不受影响。
     const gate = this.entryGuardFor(intent) ?? this.switchGateFor(intent);
     if (gate) {
@@ -423,7 +423,7 @@ export class CanvasNavigationStore implements CanvasNavigationService {
   }
 
   /**
-   * 请求进入独立文档工作区呈现（change: 2026-10-21-add-photocraft-document-workspace，D4）。
+   * 请求进入独立文档工作区呈现（编辑扩展工作区，D4）。
    *
    * 先经退出协调器结算当前文档的净变化（由编辑 feature 决定是否需要结算），再原子发布；
    * 等待期间聚焦/画布已变化时迟到结果被丢弃。

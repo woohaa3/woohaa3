@@ -1,7 +1,7 @@
 /**
  * 前端文件体积守卫（change: 2026-09-28-split-frontend-god-plugins，design D6）。
  *
- * 遍历 `web/frontend/src` 下全部 `.ts`/`.tsx`（排除 `bevy-wasm/` 与 `photocraft-wasm/` 生成
+ * 遍历 `web/frontend/src` 下全部 `.ts`/`.tsx`（排除 `bevy-wasm/` 生成
  * 产物），按**物理行**计数（与 `wc -l` 一致；末尾未换行的一行计为一行，注释、空行与测试代码
  * 都计入），任何超过 800 行的文件都会让测试失败并逐一列出。
  *
@@ -24,10 +24,8 @@ const SRC_ROOT = fileURLToPath(new URL("../", import.meta.url));
  * 生成产物目录：都是构建脚本写入、`.gitignore` 忽略的派生物，不由人维护，因此不参与
  * 可评审性计行。
  * - `bevy-wasm/`：`scripts/build-bevy-wasm.mjs` 产出的 glue 与 `.d.ts`；
- * - `photocraft-wasm/`：`scripts/ensure-photocraft-wasm.mjs` 从子项目复制的内核产物
- *   （其 `.d.ts` 由 wasm-bindgen 生成，远超 800 行）。
  */
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "bevy-wasm", "photocraft-wasm"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "bevy-wasm"]);
 
 /**
  * 拆分进行中的豁免清单（相对 SRC_ROOT 的 posix 路径）。

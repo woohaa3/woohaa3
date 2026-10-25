@@ -47,7 +47,7 @@ declare module "@deepseek-ai/cordis" {
      */
     canvasEdit: import("./services/canvas-state/index.js").CanvasEditService;
     /**
-     * 页面离开守卫（change: 2026-10-21-add-photocraft-document-workspace，design D6）。
+     * 页面离开守卫（编辑扩展工作区，design D6）。
      *
      * 多文档工作区注册自己的未结算文档与串行结算；切换画布 / 离开页面先问它。
      */
@@ -55,7 +55,7 @@ declare module "@deepseek-ai/cordis" {
     /**
      * 通用扩展画布命令提交能力（change: 2026-10-10-add-game-furnace-extension，design D4）。
      *
-     * 扩展经此提交**通用语义画布命令**；只读会话拒绝。PhotoCraft“添加到画布”用它提交
+     * 扩展经此提交**通用语义画布命令**；只读会话拒绝。编辑扩展“添加到画布”用它提交
      * 工程资产 + 输出资产 + 带工程的图片节点这一原子批次。
      */
     canvasCommands: import("./contract/platform.js").CanvasCommandsService;

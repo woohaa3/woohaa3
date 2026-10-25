@@ -59,7 +59,7 @@ export type CanvasCopyPayload = {
   assets?: StoredAsset[];
   /**
    * 复制携带的图片工程对象引用（去重；内容寻址，目标画布可继续解析）。
-   * （change: 2026-10-16-integrate-photocraft-image-editing，任务 2.4）
+   * （编辑扩展工作区，任务 2.4）
    *
    * 只在载荷内含工程图片节点时出现。粘贴方据此确认工程对象可用；缺失时拒绝粘贴，
    * 不留下跨画布悬空引用。旧载荷（无此字段）保持可解析。

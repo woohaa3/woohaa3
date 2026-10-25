@@ -842,7 +842,7 @@ describe("画布级历史 repository 契约", () => {
 });
 
 /**
- * 工程历史恢复回归（change: 2026-10-16-integrate-photocraft-image-editing，任务 4.4）。
+ * 工程历史恢复回归（编辑扩展工作区，任务 4.4）。
  *
  * 覆盖：工程版本的快照身份为 `image-project:`；工程对象与 PNG **成对**恢复，工程对象缺失时
  * 明确拒绝且不改当前节点（不部分恢复）。
