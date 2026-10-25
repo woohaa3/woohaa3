@@ -5,8 +5,13 @@
  * R12）。复用 domain 结构校验，语义与 edit.apply 的对应操作完全一致。
  */
 import { minimumNodeSizeFor } from "../node-dimensions.js";
-import { filmSetObjectOwnershipOf } from "../film-set-object-container.js";
+import {
+  filmSetObjectContainerId,
+  filmSetObjectOwnershipOf,
+  isFilmSetObjectModelNode
+} from "../film-set-object-container.js";
 import type { CanvasCommand } from "../commands.js";
+import { isGroupBadgeScale } from "../group-badge.js";
 import {
   DEFAULT_NODE_DIMS,
   collectWoohaa3CanvasRemovalIds,
@@ -25,6 +30,8 @@ import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewNodeId, shotPreviewOwnershi
 import { findActiveRunNode, isModelDefinitionNode } from "./working-state.js";
 import {
   normalizeSelfContained3D,
+  validateGroupAppearancePatch,
+  validateMediaContentPatch,
   validateImageEditPatch,
   validateModelCamerasPatch,
   validateSelfContained3DNodePatch,
@@ -51,7 +58,7 @@ export function validateNodeSize(width: number | undefined, height: number | und
  * （change: add-canvas-node-grouping，design D1）。
  *
  * - parent 必须存在；
- * - parent 必须是 `group` 类型（成员关系只允许指向结构容器）；
+ * - parent 必须是 `group` 类型；唯一例外是片场对象容器下与归属匹配的真实 `model3d` 子节点；
  * - 不能自指；
  * - 不能形成 parent 环。
  *
@@ -60,14 +67,26 @@ export function validateNodeSize(width: number | undefined, height: number | und
 export function validateGroupParent(
   work: WorkingState,
   nodeId: string,
-  parentId: string | null | undefined
+  parentId: string | null | undefined,
+  nodeData?: CanvasNodeData,
+  nodeType?: string
 ): CommandApplyResult | null {
   if (parentId === undefined || parentId === null) return null;
   const parent = work.nodes.find((entry) => entry.id === parentId);
   if (!parent) {
     return reject("invalid-parent", `父节点 ${parentId} 不存在`);
   }
-  if (parent.type !== "group") {
+  const child = work.nodes.find((entry) => entry.id === nodeId);
+  const childData = nodeData ?? (child ? work.nodeData[nodeId] : undefined);
+  const ownership = filmSetObjectOwnershipOf(childData);
+  const childIdentity = child ?? (nodeData && nodeType ? { id: nodeId, type: nodeType } : undefined);
+  const parentOwnership = filmSetObjectOwnershipOf(work.nodeData[parent.id]);
+  const isFilmSetModelChild = isFilmSetObjectModelNode(childIdentity, childData)
+    && parent.type === "composite-asset"
+    && parentOwnership?.filmSetNodeId === ownership?.filmSetNodeId
+    && parentOwnership?.itemId === ownership?.itemId
+    && parent.id === filmSetObjectContainerId(ownership!.filmSetNodeId, ownership!.itemId);
+  if (parent.type !== "group" && !isFilmSetModelChild) {
     return reject("invalid-parent", `父节点 ${parentId} 不是 group`);
   }
   if (parentId === nodeId) {
@@ -135,6 +154,8 @@ export function addNode(
 ): CommandApplyResult {
   const { node } = command;
   if (command.nodeData?.retainWhenEmpty !== undefined && (node.type !== "group" || typeof command.nodeData.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
+  if (command.nodeData?.groupCollapsed !== undefined && (node.type !== "group" || typeof command.nodeData.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
+  if (command.nodeData?.groupBadgeScale !== undefined && (node.type !== "group" || !isGroupBadgeScale(command.nodeData.groupBadgeScale))) return reject("invalid-group-config", "groupBadgeScale 只允许 group 的 0.5 至 2.5 倍率");
   // 预览节点只能由源镜头生命周期派生（D3）：普通新建路径禁止预览类型；恢复路径（撤销删除
   // 镜头）允许重建，但必须携带合法归属、派生 ID 与存在的源片场，最终不变式仍会复核。
   if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE) {
@@ -158,7 +179,7 @@ export function addNode(
   const sizeRejection = validateNodeSize(node.width, node.height, node.type);
   if (sizeRejection) return sizeRejection;
   // group parent 不变式（change: add-canvas-node-grouping）：新节点必须挂在已有 group 下。
-  const parentRejection = validateGroupParent(work, node.id, node.parentId);
+  const parentRejection = validateGroupParent(work, node.id, node.parentId, command.nodeData, node.type);
   if (parentRejection) return parentRejection;
   const nextNode: Woohaa3CanvasNode = {
     id: node.id,
@@ -229,6 +250,11 @@ export function updateNode(
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === command.nodeId);
   if (!node) return reject("unknown-node", `节点 ${command.nodeId} 不存在`);
+  if (isFilmSetObjectModelNode(node, work.nodeData[node.id])) {
+    if (command.position || command.parentId !== undefined || command.zIndex !== undefined) {
+      return reject("invalid-self-contained-node", "片场对象内的 model3d 节点不能移动或改父级");
+    }
+  }
   // 预览节点不得独立改归属（D4）：重父化只随所属片场移动由 reconciliation 补齐。
   if (command.parentId !== undefined && isProtectedShotPreview(work, command.nodeId)) {
     const owner = shotPreviewOwnershipOf(work.nodeData[command.nodeId]);
@@ -258,6 +284,15 @@ export function removeNodes(work: WorkingState, nodeIds: readonly string[]): Com
   if (nodeIds.length === 0) return OK;
   const missing = nodeIds.find((id) => !work.nodes.some((node) => node.id === id));
   if (missing) return reject("unknown-node", `节点 ${missing} 不存在`);
+
+  const directModelChild = nodeIds.find((id) => {
+    const node = work.nodes.find((entry) => entry.id === id);
+    return isFilmSetObjectModelNode(node, work.nodeData[id])
+      && !nodeIds.includes(node?.parentId ?? "");
+  });
+  if (directModelChild) {
+    return reject("invalid-self-contained-node", `片场对象内的 model3d 节点 ${directModelChild} 需随片场对象生命周期管理`);
+  }
 
   // 受保护预览不能独立删除（D2）：合法级联（源片场同批删除）由 reconciliation 在同一批次
   // 维护闭包，因此这里直接拒绝任何直接命中的预览；只删受保护预览的原始 node.remove 明确拒绝。
@@ -297,6 +332,10 @@ export function patchNodeData(
   nodeId: string,
   value: CanvasNodeData | null
 ): CommandApplyResult {
+  const node = work.nodes.find((entry) => entry.id === nodeId);
+  if (isFilmSetObjectModelNode(node, work.nodeData[nodeId])) {
+    return reject("invalid-self-contained-node", "片场对象内的 model3d 节点模型由片场自动同步，不能直接修改");
+  }
   if (filmSetObjectOwnershipOf(work.nodeData[nodeId])) return reject("invalid-self-contained-node", "对象容器只保存归属；请拖入模型替换对象，或移除容器");
   // 受保护预览的 nodeData 不能被普通 patch 改写或清除（D2）：归属只能随源镜头生命周期变化。
   if (hasShotPreviewOwnership(value) || isProtectedShotPreview(work, nodeId)) {
@@ -307,6 +346,8 @@ export function patchNodeData(
     return OK;
   }
   if (value.retainWhenEmpty !== undefined && (work.nodes.find(node => node.id === nodeId)?.type !== "group" || typeof value.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
+  if (value.groupCollapsed !== undefined && (node?.type !== "group" || typeof value.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
+  if (value.groupBadgeScale !== undefined && (node?.type !== "group" || !isGroupBadgeScale(value.groupBadgeScale))) return reject("invalid-group-config", "groupBadgeScale 只允许 group 的 0.5 至 2.5 倍率");
   if (!work.nodes.some((node) => node.id === nodeId)) {
     return reject("node-data-orphan", `节点业务数据指向不存在的节点 ${nodeId}`);
   }
@@ -318,6 +359,10 @@ export function patchNodeData(
   if (cameraRejection) return cameraRejection;
   const imageEditRejection = validateImageEditPatch(value);
   if (imageEditRejection) return imageEditRejection;
+  const mediaRejection = validateMediaContentPatch(work, nodeId, value);
+  if (mediaRejection) return mediaRejection;
+  const appearanceRejection = validateGroupAppearancePatch(work, nodeId, value);
+  if (appearanceRejection) return appearanceRejection;
   const nodeRejection = validateSelfContained3DNodePatch(work, nodeId, value);
   if (nodeRejection) return nodeRejection;
   const merged = { ...(work.nodeData[nodeId] ?? {}), ...value };

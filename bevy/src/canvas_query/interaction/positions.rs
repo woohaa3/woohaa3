@@ -66,6 +66,10 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
     let mut next = node.clone();
     let (_, _, w, h) = node.layout_bounds;
     next.layout_bounds = (p.x, p.y, w, h);
+    let delta = Vec2::new(p.x - node.layout_bounds.0, p.y - node.layout_bounds.1);
+    for point in &mut next.group_outline { *point += delta; }
+    for point in &mut next.group_badge { *point += delta; }
+    next.group_badge_resize = node.group_badge_resize.map(|p| p + delta);
     // 复合资产范围几何是基准矩形/形状/地面的仿射派生，对平移封闭：整体位移即可与
     // 全量 `build_snapshot` 一致（无需重跑 `node_scope`）。
     next.scope = node
@@ -99,6 +103,9 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
     if !rect_finite(next.layout_bounds)
         || !rect_finite(next.bounds)
         || !next.center.is_finite()
+        || next.group_outline.iter().any(|p| !p.is_finite())
+        || next.group_badge.iter().any(|p| !p.is_finite())
+        || next.group_badge_resize.is_some_and(|p| !p.is_finite())
         || [next.history_strip, next.group_status, next.preview]
             .into_iter()
             .flatten()

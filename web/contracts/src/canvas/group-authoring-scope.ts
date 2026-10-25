@@ -1,4 +1,5 @@
 import type { ServerCanvas } from "./domain/index.js";
+import { decodeGroupAppearance } from "./group-appearance.js";
 import { stableStringify } from "./canvas-script/planner/hash.js";
 
 export type CanvasGroupScope = { canvasId: string; rootGroupId: string; scopeEpoch: number };
@@ -33,7 +34,10 @@ export function validateCanvasGroupChange(before: ServerCanvas, after: ServerCan
   const { width: _width, height: _height, ...rootIdentity } = root;
   const { width: _nextWidth, height: _nextHeight, ...nextIdentity } = nextRoot;
   if (!same(rootIdentity, nextIdentity)) return "不能移动、重挂或修改根组结构";
-  if (root.parentId !== nextRoot.parentId || root.position.x !== nextRoot.position.x || root.position.y !== nextRoot.position.y || (nextRoot.width ?? 0) < (root.width ?? 0) || (nextRoot.height ?? 0) < (root.height ?? 0) || !same(before.nodeData[rootGroupId], after.nodeData[rootGroupId])) return "根组只允许随内容扩展边界";
+  const { groupAppearance: oldAppearance, ...oldRootData } = before.nodeData[rootGroupId] ?? {};
+  const { groupAppearance: nextAppearance, ...nextRootData } = after.nodeData[rootGroupId] ?? {};
+  if (!same(oldAppearance, nextAppearance) && !decodeGroupAppearance(nextAppearance).ok) return "根组形象必须是合法本地静态模型";
+  if (root.parentId !== nextRoot.parentId || root.position.x !== nextRoot.position.x || root.position.y !== nextRoot.position.y || (nextRoot.width ?? 0) < (root.width ?? 0) || (nextRoot.height ?? 0) < (root.height ?? 0) || !same(oldRootData, nextRootData)) return "根组只允许随内容扩展边界";
   const nextNodes = new Map(after.document.nodes.map(n => [n.id, n]));
   const originalNodes = new Map(before.document.nodes.map(n => [n.id, n]));
   for (const n of after.document.nodes) if (nextIds.has(n.id) && n.id !== rootGroupId && !same(n, originalNodes.get(n.id))) {

@@ -49,16 +49,29 @@ pub(crate) fn hex(value: u32) -> Color {
 /// 节点「丰富卡片」的高度阈值（超过即显示正文/状态内容区）。
 pub(crate) const RICH_NODE_HEIGHT: f32 = 116.0;
 
-/// 节点是否有内容区（富内容卡片且非 3D 模型节点）。运行中进度环也复用该门禁
-/// （change: add-node-running-progress）：只有会显示内容区的节点才用进度环替代它。
+/// Small display rectangles keep a single readable title and maximize preview area.
+pub(crate) fn compact_card(node: &GraphNode) -> bool {
+    node.width < 196.0 && node.height >= 64.0
+}
+
+/// 节点是否有内容区（富内容卡片或紧凑卡片，且非 3D 模型节点/容器）。运行中进度环也复用
+/// 该门禁（change: add-node-running-progress）：只有会显示内容区的节点才用进度环替代它。
 pub(crate) fn shows_content(node: &GraphNode) -> bool {
-    node.height > RICH_NODE_HEIGHT && node.composite_asset.is_none() && node.group.is_none()
+    (node.height > RICH_NODE_HEIGHT || compact_card(node))
+        && node.composite_asset.is_none()
+        && node.group.is_none()
+        && (node.kind != "model" || node.model_preview.is_some())
 }
 
 /// 节点内容区矩形 `(x, y, width, height)`：左右与底部各留 16px 内边距，顶部为标签行
 /// （52px）。状态文案已移除（change: add-node-running-progress），内容区不再为底部状态行
 /// 预留空间，而是延伸到卡片底部内缘。
 pub(crate) fn content_rect(node: &GraphNode) -> (f32, f32, f32, f32) {
+    if compact_card(node) {
+        let padding = 8_f32.min(node.width / 8.).min(node.height / 8.);
+        let header = 30_f32.min(node.height * 0.4);
+        return (node.x + padding, node.y + header, (node.width - padding * 2.).max(1.), (node.height - header - padding).max(1.));
+    }
     content_rect_for_bounds(node.x, node.y, node.width, node.height)
 }
 
@@ -486,9 +499,13 @@ mod tests {
         // group 无进度环。
         let mut group = kind_node("group", 400.0, 300.0, true);
         group.group = Some(crate::protocol::GroupPresentation {
+            collapsed: false,
+                badge_scale: 1.,
+                badge_resizable: false,
             title: String::new(),
             member_count: 1,
             output_capable_leaf_count: 1,
+            model_bounds: None,
             run_status: None,
         });
         assert!(!shows_generation_ring(&group));

@@ -1,3 +1,5 @@
+import { ShotMediaDrag } from "../../authoring/browser/shot-media-drag.js";
+import { createShotMediaProvider } from "../../authoring/browser/shot-media-provider.js";
 import "../../authoring/browser/styles.css";
 import { createElement } from "react";
 import { defineExtensionFrontend, defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
@@ -22,6 +24,7 @@ import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser
 import { contributionLifetime } from "./contributions.js";
 import { createFilmSetNodeData } from "../../state/shared/node.js";
 import { installFilmSetObjectContainers } from "../../authoring/browser/object-containers.js";
+import { setFilmSetObjectContainerVisible } from "../../authoring/browser/object-container-commands.js";
 import { filmSetObjectOwnershipOf } from "@woohaa3/contracts";
 import { gizmoParentBasis } from "../../authoring/browser/gizmo-constraint.js";
 
@@ -67,6 +70,13 @@ export function filmSetExtension() {
         // 2026-10-12-align-film-set-scope-with-isometric-grid）。范围形状仍是复合资产类别默认
         // （等距地面范围），无需按业务显式声明；通用宿主与 Rust 只消费声明，不按 film-set 业务 ID 分支。
         label: FILM_SET_LABEL,
+        closeChild(canvas, childNodeId) {
+          const object = filmSetObjectOwnershipOf(canvas.nodeData[childNodeId]);
+          const result = object ? setFilmSetObjectContainerVisible(ctx, object.filmSetNodeId, object.itemId, false) : null;
+          if (result) void result.then(outcome => {
+            if (!outcome.ok) ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法关闭容器", description: outcome.reason } });
+          }).catch(error => ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法关闭容器", description: String(error) } }));
+        },
         projectPresentation(node, data, resource) {
           projectObjectPresentation(preview)(node, data, resource);
           if (!node.compositeAsset) return;
@@ -154,6 +164,11 @@ export function filmSetExtension() {
       // 播放时钟显式传入：本插件未声明 `filmSetPlayback` 的 inject，走服务解析会在装配时抛错。
       const shotReferenceRecording = installShotReferenceRecording(ctx, { playback });
       lifetime.own(() => shotReferenceRecording.dispose());
+      lifetime.own(ctx.mediaContent.register(createShotMediaProvider(ctx, images, shotReferenceRecording)));
+      lifetime.own(ctx.slots.register("canvas.overlay", {
+        id: "film-set-shot-media-drag", owner: FILM_SET_EXTENSION_ID, priority: 21,
+        render: ({ writable }) => createElement(ShotMediaDrag, { ctx, writable }),
+      }));
       // 原生录制任务 → 活动浮层（任务 5.5）。宿主只提供权威状态；事件属于页面 scope，
       // 因此由前端轮询并投影。断开只停止观察，不取消原生任务。
       const recordingActivity = nativeRecordingAvailable()
@@ -171,7 +186,7 @@ export function filmSetExtension() {
       lifetime.dispose();
       throw error;
     }
-  }, { name: FILM_SET_EXTENSION_ID, inject: ["theme", "dialogs", "slots", "compositeAssets", "canvasState", "canvasSession", "canvasRuntime", "canvasEdit", "canvasNavigation", "mediaRemote", "modelWorkspace", "hoverState", "canvasScope", "canvasRemote", "canvasLocate"] });
+  }, { name: FILM_SET_EXTENSION_ID, inject: ["theme", "dialogs", "slots", "compositeAssets", "mediaContent", "selection", "canvasState", "canvasSession", "canvasRuntime", "canvasEdit", "canvasNavigation", "mediaRemote", "modelWorkspace", "hoverState", "canvasScope", "canvasRemote", "canvasLocate"] });
 }
 export const descriptor = defineExtensionFrontend({ ...FILM_SET_FRONTEND_METADATA, plugin: filmSetExtension });
 

@@ -134,6 +134,8 @@ export function createDragGestureFamily(
     const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
     const index = sharedCanvasNodeIndex(canvasState);
     if (!index) return planMoveNodes(Object.fromEntries(previews));
+    // 收起/隐藏的容器不接收拖入，避免落入它不可见的展开范围。
+    const eligibleGroupIds = index.dropTargetGroupIds;
     // 拖动非 group 节点才可能触发重父化；只有 group 被拖动时是纯位置更新。
     const draggedNonGroup = [...origins.keys()].filter((id) => index.byId.get(id)?.type !== "group");
     if (draggedNonGroup.length === 0) {
@@ -151,7 +153,7 @@ export function createDragGestureFamily(
         const size = indexNodeSize(node);
         const cx = position.x + size.width / 2, cy = position.y + size.height / 2;
         return index.groupBounds.find(group =>
-          cx >= group.x && cx <= group.x + group.width
+          eligibleGroupIds.has(group.id) && cx >= group.x && cx <= group.x + group.width
           && cy >= group.y && cy <= group.y + group.height)?.id ?? null;
       };
       const explicitTarget = groupAt(draggedNonGroup[0]!);
@@ -162,8 +164,10 @@ export function createDragGestureFamily(
       if (!reparent) return planMoveNodes(netPositionUpdates(index, previews));
     }
     const projected = projectPreviewNodes(index, previews);
-    const target = findGroupContainingCenter(projected, draggedNonGroup[0]!);
-    const { nodes: reparented, reparented: didReparent } = reparentDraggedNodes(projected, draggedNonGroup, target);
+    // Freeze group sizes from the working snapshot, before applying dragged member positions.
+    const groupSizes = new Map(index.groupBounds.map(group => [group.id, {width: group.width, height: group.height}]));
+    const target = findGroupContainingCenter(projected, draggedNonGroup[0]!, groupSizes, eligibleGroupIds);
+    const { nodes: reparented, reparented: didReparent } = reparentDraggedNodes(projected, draggedNonGroup, target, groupSizes, eligibleGroupIds);
     if (!didReparent) {
       // 无重父化/容器尺寸变化：直接生成选中根的净位置（持久化相对坐标），
       // 不构造全场 before/after 再比较（design D5）。

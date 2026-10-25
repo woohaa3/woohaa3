@@ -7,6 +7,7 @@
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasNodeData, ModelContentVersion } from "@woohaa3/contracts";
 import {
+  readGroupAppearanceForNode,
   animationSnapshotHash,
   filmSetAnimationsOf,
   decodeFilmSetNodeData,
@@ -77,7 +78,7 @@ export async function getModelNode(
   if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${canvasId} 不存在` };
   const exported = room.exportCanvas();
   if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
-  const projected = projectModelNode(exported.canvas, nodeId);
+  const projected = projectModelNode(exported.canvas, nodeId, input.resource);
   if (!projected.ok || input.includeStatistics !== true || !statistics) return projected;
   if (projected.source.trim() === "") return projected;
   // 统计失败不把读取整体降级：节点内容仍可读，只是没有可引用的数字。
@@ -91,12 +92,22 @@ export async function getModelNode(
 }
 
 /** Pure projection shared by single and batch reads of one authority snapshot. */
-export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanvas, nodeId: string): GetModelNodeOutcome {
+export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanvas, nodeId: string, resource?: "group-appearance"): GetModelNodeOutcome {
   const canvasId = canvas.id;
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
+  if (resource === "group-appearance") {
+    const data = canvas.nodeData[nodeId];
+    if (node.type !== "group" && !isFilmSetNode(node.type, data)) return { ok: false, code: "invalid-node-type", message: "该节点没有组形象" };
+    const appearance = readGroupAppearanceForNode(data);
+    const model = appearance.value.model;
+    return { ok: true, canvasId, nodeId, nodeType: node.type, resource, appearanceSource: appearance.source,
+      ...(appearance.diagnostic ? { diagnostic: appearance.diagnostic } : {}), contentHash: model.contentVersion.contentHash,
+      modelContentVersion: model.contentVersion, placement: model.placement, title: String(data?.title ?? "组形象"),
+      prompt: "", source: model.modelScript, language: model.modelScriptLanguage, version: model.modelScriptVersion, references: [], cameras: [] };
+  }
   if (!isModelAuthoringNodeType(node.type)) {
-    return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点` };
+    return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点，组形象必须显式指定 resource` };
   }
 
   const data = canvas.nodeData[nodeId] as CanvasNodeData | undefined;

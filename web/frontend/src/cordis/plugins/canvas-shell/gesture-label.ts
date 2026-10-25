@@ -7,6 +7,8 @@ import type { Gesture } from "./interaction-types.js";
 /** 由手势种类派生可读的中文动作名。 */
 export function gestureLabel(kind: Gesture["kind"]): string {
   switch (kind) {
+    case "group-badge-resize": return "缩放组徽标";
+    case "group-badge-press": return "收起/展开组";
     case "drag": return "移动作品";
     case "resize": return "调整尺寸";
     case "connect": return "连线";

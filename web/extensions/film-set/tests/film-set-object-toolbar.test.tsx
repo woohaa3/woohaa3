@@ -194,3 +194,22 @@ it("对象容器默认显示，列表可关闭且不要求先选择对象", () =
   act(() => button.click());
   expect(exposed).toEqual([["photo", false]]);
 });
+
+
+it("外显满六个时关闭按钮仍可用，隐藏对象的显示按钮禁用并说明原因", () => {
+  const h = setup();
+  const first = h.content.items[0];
+  h.content.items = Array.from({ length: 8 }, (_, i) => ({ ...structuredClone(first), id: `object-${i}` }));
+  const changes: unknown[] = [];
+  const render = (hiddenContainerIds: string[]) => act(() => root!.render(<FilmSetObjectToolbar session={h.session} nodeId="film" writable readOnly={false} onDelete={() => {}} hiddenContainerIds={hiddenContainerIds} onContainerVisibilityChange={(...args) => changes.push(args)} />));
+  render(["object-6", "object-7"]);
+  const buttons = () => [...document.querySelectorAll<HTMLButtonElement>(".film-set-object-list__item > button:last-child")];
+  expect(document.body.textContent).toContain("外显 6/6");
+  expect(buttons().slice(0, 6).every(button => !button.disabled && button.textContent === "关闭容器")).toBe(true);
+  expect(buttons().slice(6).every(button => button.disabled && button.title.includes("最多外显 6 个对象"))).toBe(true);
+  render(["object-0", "object-6", "object-7"]);
+  expect(document.body.textContent).toContain("外显 5/6");
+  expect(buttons()[6].disabled).toBe(false);
+  act(() => buttons()[6].click());
+  expect(changes).toEqual([["object-6", true]]);
+});

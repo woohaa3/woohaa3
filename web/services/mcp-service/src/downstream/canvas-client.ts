@@ -67,7 +67,7 @@ export type CanvasMcpClient = {
   submitScripts?: (input: ModelScriptBatchRequest) => Promise<ModelScriptBatchOutcome>;
 
   listModelNodes(input: { canvasId?: string }): Promise<McpListNodesResult>;
-  getModelNode(input: { canvasId: string; nodeId: string; includeStatistics?: boolean }): Promise<McpGetNodeResult>;
+  getModelNode(input: { canvasId: string; nodeId: string; resource?: "group-appearance"; includeStatistics?: boolean }): Promise<McpGetNodeResult>;
   /** 当前或候选脚本的模型规模（与聚焦信息面板同源）。 */
   getModelStatistics(input: { canvasId: string; nodeId: string; source?: string }): Promise<McpModelStatisticsResult>;
   submitScript(input: {
@@ -79,6 +79,8 @@ export type CanvasMcpClient = {
     requestId: string;
     /** model3d 编辑的模型内容 precondition。 */
     expectedModelContentHash?: string;
+  resource?: "group-appearance";
+  expectedContentHash?: string;
   }): Promise<McpSubmitScriptResult>;
   renderPreview(input: {
     canvasId: string;

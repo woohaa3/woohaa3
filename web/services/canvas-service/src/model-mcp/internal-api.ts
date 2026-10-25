@@ -239,6 +239,7 @@ export function createModelMcpInternalHandler(
       const outcome = await options.service.getModelNode({
         canvasId: decoded.value.canvasId,
         nodeId: decoded.value.nodeId,
+        ...(decoded.value.resource ? { resource: decoded.value.resource } : {}),
         ...(decoded.value.includeStatistics === true ? { includeStatistics: true } : {})
       });
       return sendOutcome(res, outcome, log);
@@ -265,6 +266,7 @@ export function createModelMcpInternalHandler(
         nodeId: decoded.value.nodeId,
         source: decoded.value.source,
         requestId: decoded.value.requestId ?? "",
+        ...(decoded.value.resource ? { resource: decoded.value.resource, expectedContentHash: decoded.value.expectedContentHash } : {}),
         ...(decoded.value.version ? { version: decoded.value.version as SupportedModelScriptVersion } : {}),
         ...(decoded.value.expectedModelContentHash === undefined
           ? {}

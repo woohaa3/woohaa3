@@ -669,7 +669,9 @@ describe("FilmSetConversionService：占位片场节点生命周期（任务 1.3
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export");
     expect(exported.canvas.document.nodes.filter((node) => node.id === "film-ph")).toHaveLength(1);
-    expect(exported.canvas.document.nodes.filter(node => node.type !== "film-set-shot-preview" && !node.id.startsWith("film-object:"))).toHaveLength(2);
+    // 对象容器及其内嵌 model3d 卡片都是容器派生物，不参与「目标片场节点」计数。
+    expect(exported.canvas.document.nodes.filter(node => node.type !== "film-set-shot-preview"
+      && !node.id.startsWith("film-object:") && !node.id.startsWith("film-object-model:"))).toHaveLength(2);
     const target = filmSetNode(room, "film-ph")!;
     const decoded = decodeFilmSetNodeData(target.data);
     if (!decoded.ok) throw new Error(decoded.reason);

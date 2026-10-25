@@ -31,7 +31,7 @@ function canvasWithModelNode(): ServerCanvas {
 function sceneWith(runState: { summaries: CanvasNodeRunSummary[]; records: CanvasOperationRecord[] }) {
   const options = {
     canvas: {} as HTMLCanvasElement,
-    getRunState: () => runState
+    getSession: () => null, getRunState: () => runState
   } as unknown as InteractionControllerOptions;
   const built = buildSceneWithResources(options, () => ({ width: 1280, height: 800, pixelRatio: 1 }), () => new Map(), {
     selected: [],

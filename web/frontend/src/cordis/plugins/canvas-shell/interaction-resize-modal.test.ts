@@ -12,14 +12,14 @@ import {
 
 installSharedSession();
 
-function setupResizable(type = "image", width = 300, height = 200) {
+function setupResizable(type = "image", width = 300, height = 200, members: ServerCanvas["document"]["nodes"] = []) {
   const base = createEmptyWoohaa3ServerCanvas("c1");
   const canvasState: ServerCanvas = {
     ...base,
     revision: 1,
     document: {
       ...base.document,
-      nodes: [{ id: "n1", type, position: { x: 0, y: 0 }, width, height }]
+      nodes: [{ id: "n1", type, position: { x: 0, y: 0 }, width, height }, ...members]
     }
   };
   woohaa3CanvasStore.getState().applyRemoteCanvas(canvasState);
@@ -61,6 +61,36 @@ describe("resize 手势（change: add-node-resize）", () => {
     const last = scenes.at(-1) as { nodes: Array<{ id: string; width: number; height: number }> };
     const rendered = last.nodes.find((node) => node.id === "n1")!;
     expect(rendered.width).toBeCloseTo(command.width, 0);
+    controller.dispose();
+  });
+
+  it("组可反复拉大缩小，最小尺寸保护成员和底部模型留白", () => {
+    const member = { id: "m", type: "image", parentId: "n1", position: { x: 40, y: 40 }, width: 200, height: 100 };
+    const { dom, controller, scenes, handle } = setupResizable("group", 500, 400, [member]);
+    dom.fire("pointerdown", { clientX: 20, clientY: 20 });
+    dom.fire("pointerup", { clientX: 20, clientY: 20 });
+    controller.flush();
+    submitted.length = 0;
+    dom.fire("pointerdown", { clientX: handle.x, clientY: handle.y });
+    dom.fire("pointermove", { clientX: handle.x + 100, clientY: handle.y + 80 });
+    dom.fire("pointerup", { clientX: handle.x + 100, clientY: handle.y + 80 });
+    controller.flush();
+    const grow = submitted.filter(entry => entry.type === "node.update");
+    expect(grow).toHaveLength(1);
+    expect(grow[0]).toMatchObject({nodeId: "n1", width: 600, height: 480});
+    expect((scenes.at(-1) as {nodes: Array<{id: string; width: number; height: number}>}).nodes.find(n => n.id === "n1"))
+      .toMatchObject({width: 600, height: 480});
+    submitted.length = 0;
+    dom.fire("pointerdown", { clientX: 590, clientY: 470 });
+    dom.fire("pointermove", { clientX: -1000, clientY: -1000 });
+    dom.fire("pointerup", { clientX: -1000, clientY: -1000 });
+    controller.flush();
+    const shrink = submitted.filter(entry => entry.type === "node.update");
+    expect(shrink).toHaveLength(1);
+    expect(shrink[0]).toMatchObject({nodeId: "n1", width: 280, height: 220});
+    expect(submitted.some(entry => "nodeId" in entry && entry.nodeId === "m")).toBe(false);
+    expect(woohaa3CanvasStore.getState().canvas?.document.nodes.find(n => n.id === "m")?.position)
+      .toEqual({x: 40, y: 40});
     controller.dispose();
   });
 

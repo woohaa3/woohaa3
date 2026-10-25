@@ -11,6 +11,8 @@
  */
 import {
   getWoohaa3CanvasNodeAbsolutePosition,
+  getGroupLayoutSizes,
+  hiddenByCollapsedGroups,
   isCompositeAssetNodeType,
   readNodeHeight,
   readNodeWidth,
@@ -28,6 +30,9 @@ export type CanvasNodeIndex = {
   readonly byId: ReadonlyMap<string, Woohaa3CanvasNode>;
   /** 当前存活节点 id 集合（失效 selection / 粘连 owner 判定）。 */
   readonly liveIds: ReadonlySet<string>;
+  /** 折叠呈现随 working 身份重建，手势热路径不重新遍历文档。 */
+  readonly hiddenNodeIds: ReadonlySet<string>;
+  readonly dropTargetGroupIds: ReadonlySet<string>;
   /** Group candidates in document order, matching the canonical parenting helper. */
   readonly groups: readonly Woohaa3CanvasNode[];
   readonly groupBounds: readonly { id: string; x: number; y: number; width: number; height: number }[];
@@ -101,8 +106,12 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     return positions.get(id)!;
   };
   const groups = [...byId.values()].filter(node => node.type === "group");
+  const hiddenNodeIds = hiddenByCollapsedGroups(canvas);
+  const dropTargetGroupIds = new Set(groups.filter(group => !hiddenNodeIds.has(group.id)
+    && canvas.nodeData[group.id]?.groupCollapsed !== true).map(group => group.id));
+  const groupSizes = getGroupLayoutSizes(nodes);
   const groupBounds = groups.map(group => ({ id: group.id,
-    ...absolutePosition(group.id)!, ...indexNodeSize(group) }));
+    ...absolutePosition(group.id)!, ...groupSizes.get(group.id)! }));
   // 拍摄镜头预览：从归属数据建立 owner（片场）→ 预览索引，供手势阶段按 owner 命中，
   // 不扫描整画布、不重建几何（change 2026-10-15 D4）。
   const shotPreviewsByOwner = new Map<string, string[]>();
@@ -122,6 +131,8 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     compositeNodes: nodes.filter(node => isCompositeAssetNodeType(node.type)),
     shotPreviewsByOwner,
     liveIds: new Set(byId.keys()),
+    hiddenNodeIds,
+    dropTargetGroupIds,
     groups,
     groupBounds,
     absolutePosition,

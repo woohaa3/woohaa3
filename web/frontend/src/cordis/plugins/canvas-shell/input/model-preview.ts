@@ -1,8 +1,9 @@
 import type { InteractionCore } from "../interaction-core.js";
 import type { HitTarget } from "../hit-test.js";
 import { modelPreviewStore } from "../../../services/model-preview-store.js";
-import { clampPitch, normalizeYaw } from "@woohaa3/contracts";
+import { clampPitch, isFilmSetObjectModelNode, normalizeYaw } from "@woohaa3/contracts";
 import { clampPreviewDistanceScale } from "../model-preview-focus.js";
+import { workingCanvasOf, woohaa3CanvasStore } from "../../../services/canvas-state/index.js";
 
 export function modelPreviewPointerDown(
   core: InteractionCore,
@@ -16,6 +17,13 @@ export function modelPreviewPointerDown(
     ![0, 2].includes(event.button)
   )
     return false;
+  // Left-dragging an embedded card moves its container, even over the model preview.
+  // Right-drag orbit and the standalone model card's preview controls stay available.
+  if (event.button === 0) {
+    const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    const node = canvas?.document.nodes.find(node => node.id === hit.nodeId);
+    if (isFilmSetObjectModelNode(node, canvas?.nodeData[hit.nodeId])) return false;
+  }
   core.clearHover();
   event.preventDefault();
   event.stopPropagation();

@@ -17,7 +17,7 @@ function setup(selected: string[] = []) {
   const registry = new CompositeAssetRegistry();
   registry.register({ extensionId: "third-extension", owner: "third-extension", executionKey: () => "", prepare: () => null,
     children: (_canvas, ownerNodeId) => ownerNodeId === "owner" ? [
-      { nodeId: "container", ownerNodeId, kind: "container" }, { nodeId: "entity", ownerNodeId, kind: "entity" }
+      { nodeId: "container", ownerNodeId, kind: "container", role: "object-entry" }, { nodeId: "entity", ownerNodeId, kind: "entity", role: "preview" }
     ] : [] });
   woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
   nodeSelectionStore.setFromRuntime({ nodeIds: selected, primaryNodeId: selected[0] ?? null, editingFocus: false }, new Set(canvas.document.nodes.map(n => n.id)));

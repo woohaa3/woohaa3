@@ -99,7 +99,7 @@ pub(crate) fn apply_focus_projection(
     scene: &CurrentScene,
     camera2d: &mut Query<&mut Camera, (With<crate::canvas2d::MainCanvasCamera>, Without<Camera3d>)>,
 ) {
-    let overlay_active = overlay_camera2d_active(focused);
+    let overlay_active = overlay_camera2d_active(focused) || (focused && !scene.0.model_focus_context.is_empty());
     if focused {
         let fov = scene
             .0

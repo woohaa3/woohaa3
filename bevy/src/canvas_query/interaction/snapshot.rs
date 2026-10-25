@@ -8,7 +8,9 @@
 use bevy::prelude::*;
 
 use crate::canvas_query::aggregate::{aggregate_handle, selection_bounds};
-use crate::canvas_query::scope::{self, ScopeGeometry, ScopeGrip, ScopeRect, DIAMOND_GRIP_TOLERANCE};
+use crate::canvas_query::scope::{
+    self, DIAMOND_GRIP_TOLERANCE, ScopeGeometry, ScopeGrip, ScopeRect,
+};
 use crate::canvas_query::{curve, layout};
 use crate::protocol::{GraphNode, Scene};
 
@@ -28,6 +30,9 @@ pub(super) struct SnapshotNode {
     pub(super) layout_bounds: (f32, f32, f32, f32),
     pub(super) id: String,
     pub(super) group: bool,
+    pub(super) group_outline: Vec<Vec2>,
+    pub(super) group_badge: Vec<Vec2>,
+    pub(super) group_badge_resize: Option<Vec2>,
     pub(super) ghost: bool,
     pub(super) composite_asset: bool,
     /// 粗筛用外接矩形；复合资产为范围 AABB，普通节点为节点矩形。
@@ -71,6 +76,7 @@ pub(crate) struct InteractionSnapshot {
     /// 是否为普通 overview 画布（非模型聚焦/图片聚焦）。纯视口增量只在 overview 下接受
     /// （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3）。
     pub(crate) overview: bool,
+    focus_closes: Option<Vec<(String, (f32, f32, f32, f32))>>,
     pub(super) nodes: Vec<SnapshotNode>,
     pub(super) edges: Vec<SnapshotEdge>,
     /// 点命中顺序：非 group 倒序在前，group 倒序在后（与既有 JS 优先级一致）。
@@ -112,6 +118,9 @@ fn union(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> (f32, f32, f32, f3
 /// 因此它必须计入空间候选，否则「画在哪、点在哪」会出现命不中的回归（design D7 / 任务 7.3）。
 pub(super) fn node_hit_bounds(node: &SnapshotNode) -> (f32, f32, f32, f32) {
     let mut rect = node_bounds(node);
+    for p in &node.group_outline {
+        rect = union(rect, (p.x, p.y, 0., 0.));
+    }
     if let Some(status) = node.group_status {
         rect = union(rect, status);
     }
@@ -231,13 +240,39 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
     let nodes_len = nodes.len();
     InteractionSnapshot {
         generation,
+        focus_closes: scene
+            .model_focus
+            .as_ref()
+            .filter(|_| !scene.model_focus_context.is_empty())
+            .map(|_| {
+                scene
+                    .model_focus_context
+                    .iter()
+                    .filter_map(|entry| {
+                        if !crate::canvas_query::focus_context::close_enabled(scene, &entry.node_id)
+                        {
+                            return None;
+                        }
+                        let original = node_map.get(entry.node_id.as_str())?;
+                        let node = crate::canvas_query::focus_context::node(scene, original);
+                        Some((
+                            entry.node_id.clone(),
+                            crate::canvas_query::focus_context::close_rect(&node),
+                        ))
+                    })
+                    .collect()
+            }),
         overview: scene.model_focus.is_none()
             && scene.image_focus.is_none()
             && scene.video_focus.is_none(),
-        action_descriptors: scene.node_actions.iter().filter_map(|(id, actions)| {
-            let index = *node_index.get(id)?;
-            (!nodes[index].group).then(|| (index, actions.clone()))
-        }).collect(),
+        action_descriptors: scene
+            .node_actions
+            .iter()
+            .filter_map(|(id, actions)| {
+                let index = *node_index.get(id)?;
+                (!nodes[index].group).then(|| (index, actions.clone()))
+            })
+            .collect(),
         viewport,
         surface: scene.surface.as_ref().map(|s| (s.width, s.height)),
         node_index,
@@ -292,12 +327,22 @@ fn snapshot_node(
     let history_strip = if !layout::has_history_strip(node) {
         None
     } else {
-        Some(layout::history_strip_rect(node.x, node.y, node.width, node.height))
+        Some(layout::history_strip_rect(
+            node.x,
+            node.y,
+            node.width,
+            node.height,
+        ))
     };
     // 复合资产：保存真实范围几何（形状由 presentation 声明），AABB 仅作粗筛。
     let scope_geometry = film_set.then(|| scope::node_scope(node));
     let bounds = match &scope_geometry {
-        Some(scope) => (scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height),
+        Some(scope) => (
+            scope.aabb.x,
+            scope.aabb.y,
+            scope.aabb.width,
+            scope.aabb.height,
+        ),
         None => (node.x, node.y, node.width, node.height),
     };
     // 顶部操作横条：复合资产也可贡献操作，锚定其真实范围；group 使用独立横条。
@@ -318,7 +363,14 @@ fn snapshot_node(
         layout_bounds: (node.x, node.y, node.width, node.height),
         id: node.id.clone(),
         group,
-        ghost: node.ghost,
+        group_badge: crate::canvas_query::group_model::badge_path(node),
+        group_badge_resize: crate::canvas_query::group_model::resize_center(node),
+        group_outline: if !crate::canvas_query::group_model::badge_path(node).is_empty() {
+            crate::canvas_query::group_model::outline(node)
+        } else {
+            Vec::new()
+        },
+        ghost: node.ghost || crate::canvas_query::shot_preview::hidden(node),
         composite_asset: film_set,
         bounds,
         scope: scope_geometry,
@@ -363,7 +415,9 @@ pub(super) fn apply_selection(snapshot: &mut InteractionSnapshot, selected: &[St
 
 /// 抓手索引 → 方向名（`n/ne/e/se/s/sw/w/nw`）；`usize::MAX`（普通矩形右下角）返回 `None`。
 fn handle_name(index: usize) -> Option<String> {
-    scope::HANDLE_NAMES.get(index).map(|name| (*name).to_owned())
+    scope::HANDLE_NAMES
+        .get(index)
+        .map(|name| (*name).to_owned())
 }
 
 impl InteractionSnapshot {
@@ -384,23 +438,38 @@ impl InteractionSnapshot {
     /// 世界坐标（约 `48/zoom` 的偏移），因此候选窗口必须同时覆盖两者；这样既不会漏掉横条，
     /// 也不会因为固定 64 世界单位在低 zoom 下漏判。
     fn point_candidate_margin(zoom: f32) -> f32 {
-        let safe_zoom = if zoom.is_finite() && zoom > 0.0 { zoom } else { 1.0 };
+        let safe_zoom = if zoom.is_finite() && zoom > 0.0 {
+            zoom
+        } else {
+            1.0
+        };
         layout::hit_radius(safe_zoom).max(96.0 / safe_zoom)
     }
 
     /// 点周围的候选矩形（`(x, y, width, height)`）。
     fn point_candidate_rect(world: Vec2, zoom: f32) -> (f32, f32, f32, f32) {
         let margin = Self::point_candidate_margin(zoom);
-        (world.x - margin, world.y - margin, margin * 2.0, margin * 2.0)
+        (
+            world.x - margin,
+            world.y - margin,
+            margin * 2.0,
+            margin * 2.0,
+        )
     }
 
     /// 点查询的节点候选：空间网格取邻域，再按 `order`（z/who-owns-the-pixel）排序。
     ///
     /// 候选只是**缩小遍历范围**：命中判定仍用原几何与顺序，因此结果与全量扫描一致。
     pub(super) fn point_node_candidates(&self, world: Vec2, zoom: f32) -> Vec<usize> {
-        let mut candidates = self.node_grid.candidates(Self::point_candidate_rect(world, zoom));
+        let mut candidates = self
+            .node_grid
+            .candidates(Self::point_candidate_rect(world, zoom));
         sort_by_order_rank(&mut candidates, &self.order_rank);
-        candidates.retain(|index| self.order_rank.get(*index).is_some_and(|rank| *rank != u32::MAX));
+        candidates.retain(|index| {
+            self.order_rank
+                .get(*index)
+                .is_some_and(|rank| *rank != u32::MAX)
+        });
         candidates
     }
 
@@ -424,6 +493,17 @@ impl InteractionSnapshot {
         zoom: f32,
         hovered_edge: Option<&str>,
     ) -> Option<PointHit> {
+        if let Some(closes) = &self.focus_closes {
+            return closes.iter().rev().find_map(|(id, (x, y, w, h))| {
+                (world.x >= *x && world.x <= x + w && world.y >= *y && world.y <= y + h).then(
+                    || PointHit::NodeAction {
+                        node_id: id.clone(),
+                        action_id: crate::canvas_query::focus_context::CLOSE_ACTION.into(),
+                        menu: false,
+                    },
+                )
+            });
+        }
         let radius = layout::hit_radius(zoom);
         // 把手 overlay 在节点之上；查询只比较预计算的两个中心，无全场景扫描。
         if let Some(handles) = &self.aggregate_handles {
@@ -453,9 +533,14 @@ impl InteractionSnapshot {
             if node.ghost {
                 continue;
             }
-            if node.group_status.is_some_and(|rect| layout::in_rect(world, rect)) {
+            if node
+                .group_status
+                .is_some_and(|rect| layout::in_rect(world, rect))
+            {
                 return Some(PointHit::NodeAction {
-                    node_id: node.id.clone(), action_id: "group-run-status".into(), menu: false,
+                    node_id: node.id.clone(),
+                    action_id: "group-run-status".into(),
+                    menu: false,
                 });
             }
             // 顶部操作横条优先命中（change: 2026-10-13-add-node-to-film-set-shortcut）：横条浮在
@@ -562,7 +647,21 @@ impl InteractionSnapshot {
                     node_id: node.id.clone(),
                 });
             }
-            if layout::in_rect(world, node.bounds) {
+            if node.group_badge_resize.is_some_and(|center| (world - center).abs().max_element() <= 6. / zoom.max(0.1)) {
+                return Some(PointHit::NodeAction {
+                    node_id: node.id.clone(), action_id: "group-resize-badge".into(), menu: false,
+                });
+            }
+            if crate::canvas_query::group_model::path_contains(&node.group_badge, world) {
+                return Some(PointHit::NodeAction {
+                    node_id: node.id.clone(),
+                    action_id: "group-toggle-collapse".into(),
+                    menu: false,
+                });
+            }
+            if layout::in_rect(world, node.bounds)
+                || crate::canvas_query::group_model::path_contains(&node.group_outline, world)
+            {
                 return Some(PointHit::Node {
                     node_id: node.id.clone(),
                 });
@@ -606,7 +705,9 @@ impl InteractionSnapshot {
             width: right - left,
             height: bottom - top,
         };
-        let mut candidates = self.node_grid.candidates((left, top, right - left, bottom - top));
+        let mut candidates = self
+            .node_grid
+            .candidates((left, top, right - left, bottom - top));
         candidates.sort_unstable();
         candidates
             .into_iter()
@@ -634,11 +735,19 @@ impl InteractionSnapshot {
         let source = &self.nodes[source_index];
         let sign = if direction == "prev" { -1.0 } else { 1.0 };
         // 候选矩形：来源节点中心沿方向的半平面，纵向取网格整体范围（probe 不限制纵向距离）。
-        let extent = self.node_grid.extent().unwrap_or((source.center.x, source.center.y, 0.0, 0.0));
+        let extent =
+            self.node_grid
+                .extent()
+                .unwrap_or((source.center.x, source.center.y, 0.0, 0.0));
         let top = extent.1;
         let bottom = extent.1 + extent.3;
         let query = if sign > 0.0 {
-            (source.center.x, top, extent.0 + extent.2 - source.center.x, bottom - top)
+            (
+                source.center.x,
+                top,
+                extent.0 + extent.2 - source.center.x,
+                bottom - top,
+            )
         } else {
             (extent.0, top, source.center.x - extent.0, bottom - top)
         };
@@ -673,12 +782,18 @@ impl InteractionSnapshot {
                 continue;
             }
             if node.composite_asset {
-                if node.scope.as_ref().is_some_and(|scope| scope::contains(scope, world)) {
+                if node
+                    .scope
+                    .as_ref()
+                    .is_some_and(|scope| scope::contains(scope, world))
+                {
                     return Some(node.id.clone());
                 }
                 continue;
             }
-            if layout::in_rect(world, node.bounds) {
+            if layout::in_rect(world, node.bounds)
+                || crate::canvas_query::group_model::path_contains(&node.group_outline, world)
+            {
                 return Some(node.id.clone());
             }
         }
@@ -717,8 +832,18 @@ impl InteractionSnapshot {
                         [scope.handles[6].x, scope.handles[6].y],
                         [scope.handles[7].x, scope.handles[7].y],
                     ],
-                    aabb: [scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height],
-                    base: [scope.base.x, scope.base.y, scope.base.width, scope.base.height],
+                    aabb: [
+                        scope.aabb.x,
+                        scope.aabb.y,
+                        scope.aabb.width,
+                        scope.aabb.height,
+                    ],
+                    base: [
+                        scope.base.x,
+                        scope.base.y,
+                        scope.base.width,
+                        scope.base.height,
+                    ],
                 })
             })
             .collect()
@@ -726,13 +851,21 @@ impl InteractionSnapshot {
 }
 
 /// 屏幕尺寸固定的横条必须随 zoom/pan 重新派生；其余世界几何保持复用。
-pub(super) fn refresh_node_actions(snapshot: &mut InteractionSnapshot, viewport: Option<&crate::protocol::Viewport>) {
+pub(super) fn refresh_node_actions(
+    snapshot: &mut InteractionSnapshot,
+    viewport: Option<&crate::protocol::Viewport>,
+) {
     if let Some(viewport) = viewport {
         snapshot.viewport = (viewport.x, viewport.y, viewport.zoom);
     }
     for (index, actions) in &snapshot.action_descriptors {
         let node = &mut snapshot.nodes[*index];
-        node.node_actions = layout::node_action_toolbar_for_bounds(node.bounds, actions, Some(snapshot.viewport), snapshot.surface);
+        node.node_actions = layout::node_action_toolbar_for_bounds(
+            node.bounds,
+            actions,
+            Some(snapshot.viewport),
+            snapshot.surface,
+        );
     }
     // 横条几何随 zoom/pan 变化，命中候选范围也必须同步（design D7 / 任务 7.3）：
     // 只搬动带横条的节点，不重建整张索引。

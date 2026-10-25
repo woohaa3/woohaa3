@@ -192,7 +192,7 @@ export function matchNodeDataField(
   const raw: unknown = data?.[field];
   const present = raw !== undefined;
   if (!snapshot.present) return !present;
-  if (field === "filmSetObjectContainersHidden") return present && JSON.stringify(raw) === JSON.stringify(snapshot.value);
+  if (field === "filmSetObjectContainersHidden" || field === "groupAppearance") return present && JSON.stringify(raw) === JSON.stringify(snapshot.value);
   return present && raw === snapshot.value;
 }
 

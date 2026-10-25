@@ -52,6 +52,12 @@ pub(super) fn draw_static(
     node: &GraphNode,
     index: usize,
 ) -> Vec<Label> {
+    if node.kind.starts_with("focus-reference") {
+        return super::focus_reference::draw(geometry, theme, node, index);
+    }
+    if super::layout::compact_card(node) {
+        return super::compact_card::draw(geometry, theme, node, index);
+    }
     let (accent, tint, category) = theme.node_palette(&node.kind);
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);

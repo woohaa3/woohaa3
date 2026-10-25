@@ -141,7 +141,7 @@ pub(crate) fn sync_node_action_bars(
     mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
 ) {
     // 图片/视频聚焦期间不绘制画布横条（横条只属于普通画布）。
-    let focused = super::image_focus::has_presented_media_focus(&scene.0);
+    let focused = super::image_focus::has_presented_media_focus(&scene.0) || scene.0.model_focus.is_some();
     let viewport = (
         scene.0.viewport.x,
         scene.0.viewport.y,

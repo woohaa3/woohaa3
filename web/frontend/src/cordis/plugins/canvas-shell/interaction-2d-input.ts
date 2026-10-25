@@ -1,6 +1,8 @@
 import { createCancellationHandlers } from "./input/cancellation.js";
 import { createContextMenuFallback } from "./input/context-menu.js";
 import { createHistoryClick } from "./input/history-click.js";
+import { createGroupBadgeClick } from "./input/group-badge-click.js";
+import { createGroupBadgeResize } from "./input/group-badge-resize.js";
 /**
  * 2D 画布 gesture family（pointer / wheel / 快捷键 / 双击）
  * （change: 2026-09-28-split-frontend-god-plugins，task 3；design D2）。
@@ -9,7 +11,7 @@ import { createHistoryClick } from "./input/history-click.js";
  * 右键菜单、双击预览。只通过 `InteractionCore` 访问共享坐标系、调度与提交，不自建监听。
  */
 import { modelPreviewPointerDown, modelPreviewPointerMove } from "./input/model-preview.js";
-import { bevyKindForNodeType, builtinNodeCapabilityResolver, explainWoohaa3CanvasConnectionBlock, normalizeWoohaa3CanvasGroupSelection } from "@woohaa3/contracts";
+import { bevyKindForNodeType, builtinNodeCapabilityResolver, explainWoohaa3CanvasConnectionBlock, isFilmSetObjectModelNode, normalizeWoohaa3CanvasGroupSelection } from "@woohaa3/contracts";
 import { nodeSize, type Point } from "./hit-test.js";
 import { planAggregateConnect, planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -32,6 +34,8 @@ export function create2dInputFamily(core: InteractionCore) {
   const viewport = createWheelViewport(core);
   const aggregate = createAggregateConnectFamily(core);
   const history = createHistoryClick(core);
+  const groupBadge = createGroupBadgeClick(core);
+  const badgeResize = createGroupBadgeResize(core);
 
   const drag = createDragGestureFamily(core);
   /**
@@ -159,6 +163,8 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }
 
+    if (badgeResize.down(event, hit) || groupBadge.down(event, hit)) return;
+
     if (hit && hit.kind === "aggregate-handle") {
       // change: add-multi-select-aggregate-connect：从选区聚合把手批量拉线。
       if (aggregate.begin(hit.direction, world, event.pointerId)) {
@@ -248,6 +254,7 @@ export function create2dInputFamily(core: InteractionCore) {
     // 未选中的模型预览与普通卡片一样，先选择并拖动节点；Shift 保留选择操作。
     // 片场范围命中同样选择并整体拖动（change: 2026-10-08-make-film-set-model-only）。
     if (hit && (hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope")) {
+      const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
       if (event.shiftKey) {
         setSelection(
           state.selected.includes(hit.nodeId)
@@ -257,16 +264,25 @@ export function create2dInputFamily(core: InteractionCore) {
       } else if (!state.selected.includes(hit.nodeId)) {
         setSelection([hit.nodeId]);
       }
-      const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
-      const active = state.selected.includes(hit.nodeId) ? state.selected : [hit.nodeId];
       // 结构/位置索引按 working 身份缓存（design D5）：selection/pan 不失效，pending/远端
       // 结构与位置变化会产生新对象并重建。避免每次按下复制带 data 的整表节点数组。
       const index = sharedCanvasNodeIndex(canvasState);
+      // Selection stays on the real model card for copying. Drag its outer container
+      // instead, so the child follows through parentId with its local offset unchanged.
+      const selected = state.selected.includes(hit.nodeId) ? state.selected : [hit.nodeId];
+      const active = [...new Set(selected.map(id => {
+        const node = index?.byId.get(id);
+        return isFilmSetObjectModelNode(node, canvasState?.nodeData[id]) && node?.parentId
+          ? node.parentId : id;
+      }))];
       // selection/gesture 初始化与绝对 origin 解析。
       const origins = (() => {
         const starts = new Map<string, { x: number; y: number }>();
         const moving = new Set(active);
-        for (const id of active) for (const childId of options.compositeAssets?.dragAlongNodeIds(canvasState, id) ?? []) moving.add(childId);
+        for (const id of active) for (const childId of options.compositeAssets?.dragAlongNodeIds(canvasState, id) ?? []) {
+          const childNode = canvasState?.document.nodes.find((entry) => entry.id === childId);
+          if (!isFilmSetObjectModelNode(childNode, canvasState?.nodeData[childId])) moving.add(childId);
+        }
         for (const id of moving) {
           // 拖动预览 `localPositions` 在渲染投影里是**绝对**画布坐标，因此 origin 也必须取
           // 绝对坐标。组内节点 position 是相对父级的局部坐标，直接用它会让节点在按下瞬间
@@ -277,6 +293,8 @@ export function create2dInputFamily(core: InteractionCore) {
         if (canvasState) for (const id of active) {
           const adapter = options.compositeAssets?.resolve(canvasState, id);
           for (const related of adapter?.dragAlongNodeIds?.(canvasState, id) ?? []) {
+            const relatedNode = canvasState.document.nodes.find((entry) => entry.id === related);
+            if (isFilmSetObjectModelNode(relatedNode, canvasState.nodeData[related])) continue;
             const start = index?.absolutePosition(related);
             if (start) starts.set(related, start);
           }
@@ -337,6 +355,8 @@ export function create2dInputFamily(core: InteractionCore) {
   };
 
   const onPointerMove = (event: PointerEvent) => {
+    if (badgeResize.move(event)) return;
+    if (groupBadge.move(event)) return;
     if (history.move(event)) return;
     if (modelPreviewPointerMove(core, event)) return;
     if (model.active) {
@@ -350,6 +370,10 @@ export function create2dInputFamily(core: InteractionCore) {
     // pointer 热路径只查询 Rust interaction snapshot，不扫描全场景或构建渲染快照。
     // 卡片外的片场模型 picking 仍驱动原有 hover 播放。
     const hitResult = core.queryPoint(world, core.activeViewport().zoom, state.hoveredEdgeId);
+    const badge = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-toggle-collapse" ? hitResult.value : null;
+    const badgeGrip = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-resize-badge";
+    canvas.title = badgeGrip ? "拖拽等比缩放徽标" : badge ? (workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[badge.nodeId]?.groupCollapsed === true ? "点击展开组" : "点击收起组") : "";
+    if (canvas.style) canvas.style.cursor = writable() ? badgeGrip ? "nwse-resize" : badge ? "pointer" : "" : "";
     core.settlePointerHover(
       hitResult,
       { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
@@ -432,6 +456,8 @@ export function create2dInputFamily(core: InteractionCore) {
 
   const onPointerUp = (event: PointerEvent) => {
     contextMenu.end(event);
+    if (badgeResize.up(event)) return;
+    if (groupBadge.up(event)) return;
     if (history.up(event)) return;
     if (model.active) {
       model.endFocusPointer(event);
@@ -577,7 +603,7 @@ export function create2dInputFamily(core: InteractionCore) {
   };
 
   const { onPointerCancel, onBlur, onVisibilityChange } = createCancellationHandlers(
-    core, cancelDragGesture, () => aggregate.cancel()
+    core, () => state.gesture.kind === "group-badge-resize" ? badgeResize.cancel() : cancelDragGesture(), () => aggregate.cancel()
   );
 
   const onPointerLeave = (event: PointerEvent) => {
@@ -625,7 +651,7 @@ export function create2dInputFamily(core: InteractionCore) {
     /** working canvas 更新时清理失效 contact/pending（design D6）；返回是否变化。 */
     pruneAttach: (): boolean => drag.prune(),
     /** 取消完整拖动粘连手势（modal pre-open / dispose / host）。 */
-    cancelDragGesture: () => drag.cancel(),
+    cancelDragGesture: () => state.gesture.kind === "group-badge-resize" ? badgeResize.cancel() : drag.cancel(),
     /** 当前拖动粘连瞬时投影；无或未越过移动阈值时 `null`（design D5）。 */
     attachProjection: () => drag.projection(),
     /** 当前聚合把手瞬时投影；无把手时 `null`（change: add-multi-select-aggregate-connect）。 */

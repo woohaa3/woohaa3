@@ -334,6 +334,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
         "canvasNavigation",
         "agentConversationService",
         "canvasGroupRuns",
+        "mediaContent",
         "settingsOpen"
       ]
     });

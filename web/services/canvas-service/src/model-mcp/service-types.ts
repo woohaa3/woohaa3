@@ -22,6 +22,8 @@ import type { RenderCache, RendererClient } from "../model-renderer/index.js";
 import type { ScriptExecutorOptions } from "./script-executor.js";
 
 export type SubmitScriptInput = {
+  resource?: "group-appearance";
+  expectedContentHash?: string;
   canvasId: string;
   nodeId: string;
   source: string;
@@ -76,6 +78,8 @@ export type ReportScriptOutcome =
   | { ok: false; code: string; message: string };
 
 export type GetModelNodeInput = {
+  resource?: "group-appearance";
+  expectedContentHash?: string;
   canvasId: string;
   nodeId: string;
   /**
@@ -93,6 +97,10 @@ export type GetModelNodeOutcome =
       canvasId: string;
       nodeId: string;
       nodeType?: string;
+      resource?: "group-appearance";
+      appearanceSource?: "default" | "custom" | "unsupported";
+      diagnostic?: string;
+      contentHash?: string;
       modelContentVersion?: ModelContentVersion;
       placement?: NodeHistoryModelPlacement;
       snapshotHash?: string;

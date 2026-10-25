@@ -13,7 +13,7 @@
 import type { ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition, Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
 import {
   decodeImageEditDocument,
-  filmSetObjectOwnershipOf, shotPreviewOwnershipOf, FILM_SET_SHOT_PREVIEW_NODE_TYPE,
+  filmSetObjectOwnershipOf, filmSetObjectModelNodeId, shotPreviewOwnershipOf, FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   filmSetAssetReferences,
   isImageProjectDocument, decodeFilmSetNodeData, model3DNodeDataFields,
   readFilmSetContent,
@@ -127,6 +127,13 @@ export function buildCanvasCopyPayload(
     // 对象容器可以在所属片场未被选中时物化为独立 model3d；拍摄镜头预览仍必须丢弃。
     const isObjectContainer = !!filmSetObjectOwnershipOf(canvas.nodeData[id]);
     if (owner && !included.has(owner) && !isObjectContainer) included.delete(id);
+  }
+  // 单独选择外层容器时只复制其真实 model3d 子节点；容器自身不参与复制。
+  for (const id of validSelected) {
+    const node = byId.get(id);
+    const owner = filmSetObjectOwnershipOf(canvas.nodeData[id]);
+    if (node?.type !== "composite-asset" || !owner || included.has(owner.filmSetNodeId)) continue;
+    if (included.has(filmSetObjectModelNodeId(owner.filmSetNodeId, owner.itemId))) included.delete(id);
   }
 
   if (included.size === 0) return null;

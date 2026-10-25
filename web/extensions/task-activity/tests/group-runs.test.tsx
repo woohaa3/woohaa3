@@ -17,6 +17,7 @@ import { TaskActivityFeed } from "../src/frontend/feed.js";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const row = (id: string, active = true, createdAt = "2026-10-20T00:00:00Z"): CanvasGroupRun => ({
+  rootGroupId: id, conversationId: `conversation-${id}`,
   creation: { requestId: `creation-${id}`, canvasId: "c", rootGroupId: id, commandId: `cmd-${id}`, turnRequestId: `request-${id}`, scopeEpoch: 1, stage: "accepted", conversationId: `conversation-${id}`, turnId: `turn-${id}` },
   requestId: `request-${id}`, status: active ? "running" : "succeeded", label: active ? "创作中" : "已完成", active, createdAt
 });
@@ -26,27 +27,27 @@ it("组记录与任务共用同一条终态期限，到期退出后移除，可�
   const store = new TaskActivityStore();
   try {
     store.replaceGroupRuns({ rows: [row("g1", false, "2026-10-20T00:00:01Z"), row("g2", true, "2026-10-20T00:00:02Z")], error: "" });
-    expect(store.getSnapshot().rows.map(entry => entry.key)).toEqual(["group:creation-g2", "group:creation-g1"]);
+    expect(store.getSnapshot().rows.map(entry => entry.key)).toEqual(["group:request-g2", "group:request-g1"]);
     // 终态组记录进入统一计时：与任务、后台活动同一停留时长。
     vi.advanceTimersByTime(ACTIVITY_TERMINAL_LINGER_MS - 1);
     expect(store.getSnapshot().rows).toHaveLength(2);
     vi.advanceTimersByTime(1);
-    expect(store.getSnapshot().exitingKeys).toEqual(["group:creation-g1"]);
+    expect(store.getSnapshot().exitingKeys).toEqual(["group:request-g1"]);
     vi.advanceTimersByTime(ACTIVITY_EXIT_DURATION_MS);
-    expect(store.getSnapshot().rows.map(entry => entry.key)).toEqual(["group:creation-g2"]);
+    expect(store.getSnapshot().rows.map(entry => entry.key)).toEqual(["group:request-g2"]);
 
     // 组来源是整表轮询：重放旧终态不得复活已移除的记录。
     store.replaceGroupRuns({ rows: [row("g1", false, "2026-10-20T00:00:01Z"), row("g2", true, "2026-10-20T00:00:02Z")], error: "" });
-    expect(store.getSnapshot().rows.map(entry => entry.key)).toEqual(["group:creation-g2"]);
+    expect(store.getSnapshot().rows.map(entry => entry.key)).toEqual(["group:request-g2"]);
 
     // 组节点入口是用户显式动作：重开并按新的终态观察重新计时。
     store.openGroup("g1");
-    expect(store.getSnapshot().rows.map(entry => entry.key)).toEqual(["group:creation-g2", "group:creation-g1"]);
+    expect(store.getSnapshot().rows.map(entry => entry.key)).toEqual(["group:request-g2", "group:request-g1"]);
     expect(store.getSnapshot().selectedGroupId).toBe("g1");
     vi.advanceTimersByTime(ACTIVITY_TERMINAL_LINGER_MS - 1);
     expect(store.getSnapshot().rows).toHaveLength(2);
     vi.advanceTimersByTime(1);
-    expect(store.getSnapshot().exitingKeys).toEqual(["group:creation-g1"]);
+    expect(store.getSnapshot().exitingKeys).toEqual(["group:request-g1"]);
     store.dispose();
     const before = store.getSnapshot();
     store.replaceGroupRuns({ rows: [], error: "" });
@@ -59,11 +60,11 @@ it("同一组再次执行：重新 active 清除移除标记并独立计时", ()
   const store = new TaskActivityStore();
   try {
     store.replaceGroupRuns({ rows: [row("g1", false)], error: "" });
-    store.dismissRow("group:creation-g1");
+    store.dismissRow("group:request-g1");
     expect(store.getSnapshot().rows).toHaveLength(0);
     // 再次执行：新的进行中记录出现，不被上一次的移除状态永久屏蔽。
     store.replaceGroupRuns({ rows: [row("g1", true)], error: "" });
-    expect(store.getSnapshot().rows.map(entry => [entry.key, entry.active])).toEqual([["group:creation-g1", true]]);
+    expect(store.getSnapshot().rows.map(entry => [entry.key, entry.active])).toEqual([["group:request-g1", true]]);
     vi.advanceTimersByTime(ACTIVITY_TERMINAL_LINGER_MS * 2);
     expect(store.getSnapshot().rows).toHaveLength(1);
     // 再次结算：从这一刻重新计时，而不是沿用上一次的终态时刻。
@@ -72,7 +73,7 @@ it("同一组再次执行：重新 active 清除移除标记并独立计时", ()
     vi.advanceTimersByTime(ACTIVITY_TERMINAL_LINGER_MS - 1);
     expect(store.getSnapshot().rows).toHaveLength(1);
     vi.advanceTimersByTime(1);
-    expect(store.getSnapshot().exitingKeys).toEqual(["group:creation-g1"]);
+    expect(store.getSnapshot().exitingKeys).toEqual(["group:request-g1"]);
   } finally { store.dispose(); vi.useRealTimers(); }
 });
 

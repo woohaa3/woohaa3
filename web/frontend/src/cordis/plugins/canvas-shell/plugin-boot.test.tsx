@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
+import { createNodeImplementationRegistry } from "../../../extension-api/node-implementations.js";
 import { SlotRegistry } from "../../slots.js";
 import { startFrontendScope, type FrontendRuntime } from "../../kernel.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
@@ -53,7 +54,9 @@ describe("canvas-shell 插件装配", () => {
     runtime = await startFrontendScope(new Context(), {
       install: (ctx) => {
         ctx.provide("slots" as never, new SlotRegistry() as never);
-        ctx.provide("compositeAssets" as never, new CompositeAssetRegistry() as never);
+        const compositeAssets = new CompositeAssetRegistry();
+        ctx.provide("compositeAssets" as never, compositeAssets as never);
+        ctx.provide("nodeImplementations" as never, createNodeImplementationRegistry(compositeAssets) as never);
         ctx.provide("canvasLocate" as never, {} as never);
         ctx.provide("canvasEdit" as never, {} as never);
         ctx.provide("canvasSession" as never, { isWritable: () => true } as never);

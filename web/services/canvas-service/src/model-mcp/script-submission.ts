@@ -4,6 +4,7 @@
  *
  * 权威 room 写入方；不改动外部状态。历史登记失败不阻断权威写入（由 reconciliation 补齐）。
  */
+import { submitGroupAppearance } from "./group-appearance-submission.js";
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasNodeData } from "@woohaa3/contracts";
 import {
@@ -41,6 +42,7 @@ export async function submitScript(
   actorId: string,
   input: SubmitScriptInput
 ): Promise<SubmitScriptOutcome> {
+  if (input.resource === "group-appearance") return submitGroupAppearance(deps, actorId, input);
   const canvasId = input.canvasId?.trim() ?? "";
   const nodeId = input.nodeId?.trim() ?? "";
   if (canvasId === "") return { ok: false, code: "malformed-request", message: "canvasId 不能为空" };

@@ -1,13 +1,32 @@
 import { compositeChildMovementContext, followCompositeChildOwner, createCompositeChildNode, removeCompositeChildNodes, planCompositeChildLayout } from "../composite-children.js";
-/** Maintain a default-visible container for every scene object and explicit hide choices. */
-import { filmSetObjectOwnershipOf, filmSetObjectContainerId, filmSetObjectContainerData, createFilmSetObjectResolver } from "../film-set-object-container.js";
-import { getWoohaa3CanvasNodeAbsolutePosition, type ServerCanvas } from "../domain/index.js";
+/** Maintain at most six external object containers and preserve explicit hide choices. */
+import { FILM_SET_MAX_VISIBLE_OBJECTS, filmSetVisibleObjectIds, FILM_SET_OBJECT_MODEL_PADDING, filmSetObjectOwnershipOf, filmSetObjectContainerId, filmSetObjectContainerData, filmSetObjectModelNodeId, filmSetObjectModelNodeData, createFilmSetObjectResolver } from "../film-set-object-container.js";
+import { getWoohaa3CanvasNodeAbsolutePosition, MIN_NODE_WIDTH, type CanvasNodeData, type ServerCanvas } from "../domain/index.js";
+import { effectiveCanvasNodeSize, MODEL_PREVIEW_MIN_HEIGHT } from "../node-dimensions.js";
 import { decodeFilmSetNodeData } from "../canvas-node-model.js";
 import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import { OK, reject, type WorkingState, type CommandApplyResult } from "./types.js";
 
 export function reconcileFilmSetObjectContainers(work: WorkingState, before: ServerCanvas, positioned: ReadonlySet<string>): CommandApplyResult {
   const canvas = { document: { ...before.document, nodes: work.nodes }, nodeData: work.nodeData };
+  // Normalize legacy/default visibility before reconciling existing children, so overflow is removed too.
+  for (const parent of work.nodes) {
+    const data = work.nodeData[parent.id];
+    if (!isFilmSetNode(parent.type, data)) continue;
+    const decoded = decodeFilmSetNodeData(data);
+    if (!decoded.ok) continue;
+    const hidden = data.filmSetObjectContainersHidden;
+    if (hidden !== undefined && (!Array.isArray(hidden) || hidden.some(id => typeof id !== "string") || new Set(hidden).size !== hidden.length)) return reject("invalid-self-contained-node", "对象容器显示设置非法");
+    const hiddenIds = new Set((hidden ?? []) as string[]);
+    const ids = decoded.value.filmSetContent.items.map(item => item.id);
+    const requested = ids.filter(id => !hiddenIds.has(id));
+    if (requested.length <= FILM_SET_MAX_VISIBLE_OBJECTS) continue;
+    if (hidden !== undefined && JSON.stringify(hidden) !== JSON.stringify(before.nodeData[parent.id]?.filmSetObjectContainersHidden)) {
+      return reject("invalid-self-contained-node", `每个片场最多外显 ${FILM_SET_MAX_VISIBLE_OBJECTS} 个对象，请先关闭一个容器`);
+    }
+    for (const id of requested.slice(FILM_SET_MAX_VISIBLE_OBJECTS)) hiddenIds.add(id);
+    work.nodeData[parent.id] = { ...data, filmSetObjectContainersHidden: [...hiddenIds].sort() } as CanvasNodeData;
+  }
   const removed = new Set<string>();
   const beforeNodes = before.document.nodes.map(node => ({ ...node, data: {} }));
   const movement = compositeChildMovementContext(beforeNodes, work.nodes);
@@ -16,21 +35,29 @@ export function reconcileFilmSetObjectContainers(work: WorkingState, before: Ser
     const data = work.nodeData[node.id];
     const previousOwner = filmSetObjectOwnershipOf(before.nodeData[node.id]);
     const isContainer = data?.extensionId === "film-set" && data.compositeAssetRole !== undefined;
+    const isModelChild = node.type === "model3d" && !!filmSetObjectOwnershipOf(data) && node.id === filmSetObjectModelNodeId(filmSetObjectOwnershipOf(data)!.filmSetNodeId, filmSetObjectOwnershipOf(data)!.itemId);
     if (!isContainer && !previousOwner) continue;
     const owner = filmSetObjectOwnershipOf(data);
-    if (node.type !== "composite-asset" || !owner || node.id !== filmSetObjectContainerId(owner.filmSetNodeId, owner.itemId)) return reject("invalid-self-contained-node", "对象容器归属非法或已被修改");
-    if (Object.keys(data).some(key => !["extensionId", "compositeAssetRole", "filmSetObject"].includes(key))) return reject("invalid-self-contained-node", "对象容器只保存归属，不能保存独立模型或场景内容");
+    const expectedContainerId = owner ? filmSetObjectContainerId(owner.filmSetNodeId, owner.itemId) : null;
+    if ((!isModelChild && (node.type !== "composite-asset" || expectedContainerId === null || node.id !== expectedContainerId)) || (isModelChild && !owner)) return reject("invalid-self-contained-node", "对象容器归属非法或已被修改");
+    if (!isModelChild && Object.keys(data).some(key => !["extensionId", "compositeAssetRole", "filmSetObject"].includes(key))) return reject("invalid-self-contained-node", "对象容器只保存归属，模型内容必须位于 model3d 子节点");
+    if (!owner) return reject("invalid-self-contained-node", "对象容器归属缺失");
     const target = resolve(node.id);
     if (!target) {
       if (previousOwner && resolveBefore(node.id)) { removed.add(node.id); continue; }
       return reject("invalid-self-contained-node", "对象容器对应的片场对象不存在");
     }
     if (Array.isArray(work.nodeData[owner.filmSetNodeId]?.filmSetObjectContainersHidden) && (work.nodeData[owner.filmSetNodeId].filmSetObjectContainersHidden as string[]).includes(owner.itemId)) { removed.add(node.id); continue; }
+    if (isModelChild) {
+      if (target.item.kind !== "model") { removed.add(node.id); continue; }
+      work.nodeData[node.id] = filmSetObjectModelNodeData(owner.filmSetNodeId, target.item);
+      continue;
+    }
     const parent = movement.current.get(owner.filmSetNodeId)!;
     followCompositeChildOwner(node, parent, beforeNodes, work.nodes, positioned.has(node.id), movement);
   }
   removeCompositeChildNodes(work, removed);
-  // Missing visibility settings mean every object is visible, including legacy scenes.
+  // Default to the first six objects; explicit hidden choices remain stable.
   for (const parent of [...work.nodes]) {
     const data = work.nodeData[parent.id];
     if (!isFilmSetNode(parent.type, data)) continue;
@@ -39,15 +66,39 @@ export function reconcileFilmSetObjectContainers(work: WorkingState, before: Ser
     const hidden = data.filmSetObjectContainersHidden;
     if (hidden !== undefined && (!Array.isArray(hidden) || hidden.some(id => typeof id !== "string") || new Set(hidden).size !== hidden.length)) return reject("invalid-self-contained-node", "对象容器显示设置非法");
     const hiddenIds = new Set((hidden ?? []) as string[]);
+    const visibleIds = new Set(filmSetVisibleObjectIds(decoded.value.filmSetContent.items.map(item => item.id), [...hiddenIds]));
     for (const item of decoded.value.filmSetContent.items) {
       const id = filmSetObjectContainerId(parent.id, item.id);
-      if (hiddenIds.has(item.id) || work.nodes.some(node => node.id === id)) continue;
+      if (!visibleIds.has(item.id) || work.nodes.some(node => node.id === id)) continue;
       const map = new Map(work.nodes.map(node => [node.id, node]));
       const absolute = getWoohaa3CanvasNodeAbsolutePosition(parent, map);
       const width = 248, height = 232;
-      const position = planCompositeChildLayout({ ownerBounds: { ...absolute, width: parent.width ?? 320, height: parent.height ?? 240 }, sizes: [{ width, height }], occupied: work.nodes.map(node => ({ ...getWoohaa3CanvasNodeAbsolutePosition(node, map), width: node.width ?? 248, height: node.height ?? 232 })) })[0]!;
+      const position = planCompositeChildLayout({ layout: "row", ownerBounds: { ...absolute, width: parent.width ?? 320, height: parent.height ?? 240 }, sizes: [{ width, height }], occupied: work.nodes.map(node => ({ ...getWoohaa3CanvasNodeAbsolutePosition(node, map), width: node.width ?? 248, height: node.height ?? 232 })) })[0]!;
       work.nodes.push(createCompositeChildNode({ nodes: work.nodes, owner: parent, id, type: "composite-asset", bounds: position }));
       work.nodeData[id] = filmSetObjectContainerData(parent.id, item.id);
+    }
+    for (const item of decoded.value.filmSetContent.items) {
+      if (item.kind !== "model" || !visibleIds.has(item.id)) continue;
+      const containerId = filmSetObjectContainerId(parent.id, item.id);
+      const modelId = filmSetObjectModelNodeId(parent.id, item.id);
+      const container = work.nodes.find(node => node.id === containerId);
+      if (!container) continue;
+      const padding = FILM_SET_OBJECT_MODEL_PADDING;
+      const size = effectiveCanvasNodeSize(container);
+      // A model preview has its own minimum size; keep padding even for small containers.
+      container.width = Math.max(size.width, MIN_NODE_WIDTH + padding * 2);
+      container.height = Math.max(size.height, MODEL_PREVIEW_MIN_HEIGHT + padding * 2);
+      let model = work.nodes.find(node => node.id === modelId);
+      if (!model) {
+        model = { id: modelId, type: "model3d", position: { x: padding, y: padding }, parentId: containerId, zIndex: (work.nodes.at(-1)?.zIndex ?? 0) + 1, data: {} };
+        work.nodes.push(model);
+      }
+      // Reconcile existing cards too, including scenes saved before padded cards existed.
+      model.parentId = containerId;
+      model.position = { x: padding, y: padding };
+      model.width = container.width - padding * 2;
+      model.height = container.height - padding * 2;
+      work.nodeData[modelId] = filmSetObjectModelNodeData(parent.id, item);
     }
   }
   return OK;

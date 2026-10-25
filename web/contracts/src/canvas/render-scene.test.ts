@@ -67,6 +67,7 @@ import {
 } from "./run-state.js";
 import { v2SceneExtent } from "./scene-ir-v2.js";
 import { prepareModelResource } from "./prepared-model.js";
+import { defaultGroupAppearance } from "./group-appearance.js";
 import { MIN_NODE_HEIGHT, MIN_NODE_WIDTH, RESIZE_HANDLE_SIZE } from "./domain/index.js";
 import type { CanvasRenderScene } from "./render-scene.js";
 import { WOOHAA3_CANVAS_MAX_ZOOM, WOOHAA3_CANVAS_MIN_ZOOM } from "./domain/core/viewport-zoom.js";
@@ -189,7 +190,7 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
     const scene = buildCanvasRenderScene({ canvas: groupCanvas(), theme: defaultAppTheme(), selection: { nodes: ["g"] } });
     const g = scene.nodes.find((node) => node.id === "g")!;
     expect(g.type).toBe("group");
-    expect(g.group).toEqual({ title: "", memberCount: 2, outputCapableLeafCount: 2 });
+    expect(g.group).toEqual({ title: "", memberCount: 2, outputCapableLeafCount: 2, collapsed: false, badgeScale: 1, badgeResizable: false });
     // 单选 group 时仍应可 resize（group 支持缩放）。
     expect(g.resizable).toBe(true);
   });
@@ -201,6 +202,34 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
       theme: defaultAppTheme()
     });
     expect(scene.nodes.find((node) => node.id === "g")!.group!.title).toBe("镜头发散");
+  });
+
+  it("group 复用 prepared resource 时同时下发 3D 模型引用", () => {
+    const resource = prepareModelResource({
+      sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION,
+      ops: [{ t: "box", id: "body", parent: null, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], size: [1, 1, 1], material: null, color: "#fff" }]
+    });
+    const scene = buildCanvasRenderScene({ canvas: groupCanvas(), modelResources: new Map([["g", resource]]) });
+    expect(scene.nodes.find((node) => node.id === "g")!.model).toMatchObject({ resourceKey: resource.resourceKey, signature: resource.signature });
+    expect(scene.nodes.find(node => node.id === "g")!.group!.modelBounds).toEqual({ aabb: resource.aabb, extent: resource.extent });
+    const changed = structuredClone(scene);
+    changed.nodes.find(node => node.id === "g")!.group!.modelBounds!.aabb.max[0] += 1;
+    expect(renderSceneFingerprint(changed)).not.toBe(renderSceneFingerprint(scene));
+    expect(renderSceneEquals(changed, scene)).toBe(false);
+  });
+
+  it("group 读取自身 groupAppearance 摆放，瞬时编辑优先", () => {
+    const current = groupCanvas();
+    const appearance = defaultGroupAppearance();
+    appearance.model.placement = { offset: { x: 1, y: 2, z: 3 }, scale: 0.5, yaw: 45 };
+    current.nodeData.g = { groupAppearance: appearance };
+    const resource = prepareModelResource({ sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION, ops: [] });
+    const input = { canvas: current, modelResources: new Map([["g", resource]]) };
+    expect(buildCanvasRenderScene(input).nodes.find(node => node.id === "g")!.model!.placement)
+      .toEqual(appearance.model.placement);
+    const override = { offset: { x: 0, y: 0, z: 0 }, scale: 0.75, yaw: 90 };
+    expect(buildCanvasRenderScene({ ...input, modelPlacements: new Map([["g", override]]) })
+      .nodes.find(node => node.id === "g")!.model!.placement).toEqual(override);
   });
 
   it("嵌套 group 的叶子计数是递归的", () => {
@@ -872,7 +901,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v28");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v29");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));
@@ -1597,6 +1626,18 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     expect(node.typeLabel).toBe("动态镜头");
     // 预览节点不合成为普通内容节点：无 outputAssetId/媒体引用等字段。
     expect(node).not.toHaveProperty("outputAssetId");
+  });
+
+  it("镜头始终外显，旧隐藏设置不影响卡片、连线或规范布局", () => {
+    const source = filmSetCanvas();
+    const before = structuredClone(source.document.nodes);
+    source.nodeData.film.filmSetShotPreviewsHidden = ["clip-1"];
+    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme(), shotPreviewCameraProjection: () => ({ x: 10, y: 10 }) });
+    const shot = scene.nodes.find(node => node.id === shotNodeId)?.shotPreview;
+    expect(shot).toMatchObject({ clipId: "clip-1", kind: "dynamic" });
+    expect(shot?.hidden).toBeUndefined();
+    expect(scene.shotPreviewLinks?.length).toBeGreaterThan(0);
+    expect(source.document.nodes).toEqual(before);
   });
 
   it("projects each shot's custom backdrop to the shared preview/capture rig", () => {

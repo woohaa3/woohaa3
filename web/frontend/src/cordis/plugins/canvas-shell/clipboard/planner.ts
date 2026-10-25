@@ -11,7 +11,7 @@
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { filmSetObjectOwnershipOf, filmSetObjectContainerId, filmSetObjectContainerData, createHighEntropyId, remapFilmSetItemIds, decodeFilmSetNodeData, canonicalFilmSetFields, canonicalShotPreviewFields, filmSetAnimationsOf, cloneFilmSetAnimations, LEGACY_FILM_SET_ANIMATION_FIELDS, isFilmSetNode, shotPreviewNodeId, shotPreviewOwnershipOf, SHOT_PREVIEW_SCHEMA_VERSION, FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "@woohaa3/contracts";
+import { filmSetObjectOwnershipOf, filmSetObjectContainerId, filmSetObjectModelNodeId, filmSetObjectContainerData, createHighEntropyId, remapFilmSetItemIds, decodeFilmSetNodeData, canonicalFilmSetFields, canonicalShotPreviewFields, filmSetAnimationsOf, cloneFilmSetAnimations, LEGACY_FILM_SET_ANIMATION_FIELDS, isFilmSetNode, shotPreviewNodeId, shotPreviewOwnershipOf, SHOT_PREVIEW_SCHEMA_VERSION, FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -153,8 +153,16 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
     if (object) {
       const newOwner = idMap.get(object.filmSetNodeId), newItem = filmSetItemIds.get(object.filmSetNodeId)?.get(object.itemId);
       if (!newOwner || !newItem) { idMap.delete(node.id); continue; }
-      idMap.set(node.id, filmSetObjectContainerId(newOwner, newItem));
-      precomputedPreviewData.set(node.id, filmSetObjectContainerData(newOwner, newItem));
+      // The nested model3d child has the same ownership record as its outer shell,
+      // but keeps its own stable derived identity and complete model snapshot.
+      const isModelChild = node.type === "model3d"
+        && node.id === filmSetObjectModelNodeId(object.filmSetNodeId, object.itemId);
+      idMap.set(node.id, isModelChild
+        ? filmSetObjectModelNodeId(newOwner, newItem)
+        : filmSetObjectContainerId(newOwner, newItem));
+      precomputedPreviewData.set(node.id, isModelChild
+        ? { ...payload.nodeData[node.id], filmSetObject: { schemaVersion: 1, filmSetNodeId: newOwner, itemId: newItem } } as import("@woohaa3/contracts").CanvasNodeData
+        : filmSetObjectContainerData(newOwner, newItem));
       continue;
     }
     const ownership = shotPreviewOwnershipOf(payload.nodeData[node.id]);
@@ -384,6 +392,7 @@ function remapFilmSetNodeData(
   }
   const shared = { ...data };
   if (Array.isArray(shared.filmSetObjectContainersHidden)) shared.filmSetObjectContainersHidden = shared.filmSetObjectContainersHidden.flatMap(id => typeof id === "string" && itemIds.has(id) ? [itemIds.get(id)!] : []);
+  delete shared.filmSetShotPreviewsHidden;
   for (const field of LEGACY_FILM_SET_ANIMATION_FIELDS) delete shared[field];
   return { ...shared, ...canonicalFilmSetFields({ ...decoded.value, filmSetContent: content, filmSetAnimations: collection }) } as Woohaa3CanvasJsonObject;
 }

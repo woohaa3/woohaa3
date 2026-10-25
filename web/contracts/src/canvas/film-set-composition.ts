@@ -3,11 +3,11 @@ import { mediaTimelineLocalTime } from "./media-time.js";
  * 片场组合内容入口（change: 2026-10-09-add-film-set-object-motion-and-editing，
  * 任务 3.1 / design D2）。
  *
- * 组合入口同时读取**顶层 authored 模型**、全部 model items、ground 几何与媒体平面，输出
+ * 组合入口读取自身 groupAppearance、全部 model items 与 ground 几何，输出
  * 可丢弃的**对象图**与无碰撞的 `(itemId, partId)` 运行时身份。组合 IR 只用于发送给执行器，
  * 绝不写回 canonical nodeData。
  *
- * - 顶层 authored 部件映射到保留作用域（`encodeFilmSetPartId("", partId)`）；
+ * - 自身展示模型部件映射到保留作用域（`encodeFilmSetPartId("", partId)`）；
  * - 每个 item 的模型部件映射到 `encodeFilmSetPartId(itemId, partId)`，item 根为
  *   `encodeFilmSetPartId(itemId, "")`；
  * - material / animation 目标 id 一并重映射，避免同名部件/材质跨对象碰撞；
@@ -24,6 +24,7 @@ import {
   type FilmSetMotion,
   type FilmSetPlayback
 } from "./film-set-content.js";
+import type { ModelPlacement } from "./model-definition.js";
 import { executeModelScriptVersioned } from "./model-executor-v2.js";
 import { executeMotionScript } from "./motion-executor.js";
 import { evaluateMotionIr, type ModelMotionDelta, type MotionIr } from "./motion-ir.js";
@@ -43,7 +44,7 @@ export type FilmSetCompositionModel = {
    * 源模型原 placement（change design D4 固定变换链中的「源模型原 placement」）。
    * 作为 item 根 group 与模型层级之间的内层 group。缺省即单位变换。
    */
-  placement?: { offset: { x: number; y: number; z: number }; scale: number; yaw: number };
+  placement?: ModelPlacement;
 };
 
 /** 组合输入中的一个地面对象。 */
@@ -60,6 +61,11 @@ export type FilmSetCompositionInput = {
    * 空片场也保留该根（可编辑整体入口），它不是 authored 模型、不创建任何 mesh/item。
    */
   scenePlacement?: FilmSetLocalTransform;
+  /** 节点自身的展示模型；与普通 group 共用 `groupAppearance`，不属于 items。 */
+  appearance?: {
+    ops: readonly SceneV2Op[];
+    placement?: ModelPlacement;
+  };
   models?: readonly FilmSetCompositionModel[];
   grounds?: readonly FilmSetCompositionGround[];
 };
@@ -78,11 +84,10 @@ const GROUND_DEFAULT_COLOR = "#9aa4b2";
 export const FILM_SET_GROUND_THICKNESS = 0.15;
 
 /**
- * 构建片场组合 Scene IR（items-only，change D7）。
+ * 构建片场组合 Scene IR（items + 自身展示模型）。
  *
- * 顺序稳定：独立片场根 → 各 model item（按输入顺序）→ 各 ground。每个对象包一层 group 根，
- * 承载 `localTransform`（offset/scale/yaw），子部件保持原层级与相对变换。不存在顶层 authored
- * 模型作用域；独立根不与任何 itemId 碰撞。
+ * 顺序稳定：独立片场根 → 可选自身展示模型 → 各 model item → 各 ground。每个对象包一层
+ * group 根，承载 `localTransform`，子部件保持原层级。自身展示模型不进入 itemRoots。
  */
 export function composeFilmSetScene(input: FilmSetCompositionInput): FilmSetComposition {
   const ops: SceneV2Op[] = [];
@@ -91,13 +96,22 @@ export function composeFilmSetScene(input: FilmSetCompositionInput): FilmSetComp
 
   ops.push(groupOp(sceneRoot, null, input.scenePlacement ?? identityTransform()));
 
+  // FilmSet 自身也可以持有一个展示模型。它使用与普通 group 相同的
+  // `groupAppearance` 资源，但保持独立于 filmSetContent.items 的身份和生命周期。
+  // 这样 items 仍然是片场拥有的资产副本，不需要借 parentId 表达引用关系。
+  if (input.appearance) {
+    const rootId = encodeFilmSetPartId("", "");
+    ops.push(groupOp(rootId, sceneRoot, modelPlacementToLocal(input.appearance.placement)));
+    ops.push(...remapOps(input.appearance.ops, "", rootId));
+  }
+
   for (const model of input.models ?? []) {
     const rootId = encodeFilmSetPartId(model.itemId, "");
     itemRoots[model.itemId] = rootId;
     ops.push(groupOp(rootId, sceneRoot, model.localTransform));
     if (model.placement) {
       const placementId = encodeFilmSetPartId(model.itemId, "\u0000placement");
-      ops.push(groupOp(placementId, rootId, model.placement));
+      ops.push(groupOp(placementId, rootId, modelPlacementToLocal(model.placement)));
       ops.push(...remapOps(model.ops, model.itemId, placementId));
     } else {
       ops.push(...remapOps(model.ops, model.itemId, rootId));
@@ -139,6 +153,16 @@ function groupOp(id: string, parent: string | null, transform: FilmSetLocalTrans
 
 function identityTransform(): FilmSetLocalTransform {
   return { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
+}
+
+/** ModelDefinition 的 yaw 是角度；片场局部变换统一使用弧度。 */
+function modelPlacementToLocal(placement?: ModelPlacement): FilmSetLocalTransform {
+  if (!placement) return identityTransform();
+  return {
+    offset: { ...placement.offset },
+    scale: placement.scale,
+    yaw: placement.yaw * Math.PI / 180
+  };
 }
 
 function degrees(radians: number): number {

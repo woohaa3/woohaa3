@@ -94,6 +94,7 @@ function render(animations: FilmSetAnimations, options: { writable?: boolean; ca
     filmSetPlayback: playback,
     modelWorkspace: { session },
     canvasSession: {
+      isWritable: () => options.writable ?? true,
       submitCommands: (commands: typeof submitted) => { submitted.push(...commands); return { ok: true, handle: { settled: Promise.resolve({ state: "committed", error: null }) } }; }
     }
   } as unknown as Context;
@@ -201,4 +202,15 @@ it.each(["短名", "audit-fixes-20261019-这是一个合法的长镜头名称", 
   duration.value="3";
   await act(async()=>duration.dispatchEvent(new FocusEvent("focusout",{bubbles:true})));
   expect(h.submitted).toContainEqual(expect.objectContaining({op:expect.objectContaining({kind:"timeline",timeline:expect.objectContaining({duration:3})})}));
+});
+
+
+it.each([
+  ["static", true], ["dynamic", true], ["static", false], ["dynamic", false]
+] as const)("%s 镜头无容器显示开关（可写：%s）", (kind, writable) => {
+  const shot = kind === "static" ? staticClip("s1", "定妆照") : dynamicClip("s1", "运镜", "");
+  const h = render({ schemaVersion: 3, defaultClipId: "s1", clips: [shot] }, { writable });
+  expect(h.button("关闭容器")).toBeUndefined();
+  expect(h.button("显示容器")).toBeUndefined();
+  expect(h.submitted).toEqual([]);
 });

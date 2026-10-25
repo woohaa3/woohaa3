@@ -34,7 +34,7 @@ export type ModelMcpToolService = {
   validateScripts?: (input: import("@woohaa3/contracts").ModelScriptBatchRequest) => Promise<import("@woohaa3/contracts").ModelScriptBatchOutcome>;
   submitScripts?: (input: import("@woohaa3/contracts").ModelScriptBatchRequest) => Promise<import("@woohaa3/contracts").ModelScriptBatchOutcome>;
 
-  getModelNode: (input: { canvasId: string; nodeId: string; includeStatistics?: boolean }) => Promise<McpGetNodeResult>;
+  getModelNode: (input: { canvasId: string; nodeId: string; resource?: "group-appearance"; includeStatistics?: boolean }) => Promise<McpGetNodeResult>;
   /** 当前或候选脚本的模型规模（与聚焦信息面板同源）。 */
   getModelStatistics?: (input: { canvasId: string; nodeId: string; source?: string }) => Promise<McpModelStatisticsResult>;
   submitScript: (input: {
@@ -44,6 +44,8 @@ export type ModelMcpToolService = {
     version?: SupportedModelScriptVersion;
     requestId: string;
     expectedModelContentHash?: string;
+  resource?: "group-appearance";
+  expectedContentHash?: string;
   }) => Promise<McpSubmitScriptResult>;
   listModelNodes?: (input: { canvasId?: string }) => Promise<McpListNodesResult>;
   renderPreview?: (input: {

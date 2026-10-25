@@ -7,6 +7,7 @@ export type CompositeChildRelation = {
   nodeId: string;
   ownerNodeId: string;
   kind: CompositeChildKind;
+  role: "object-entry" | "preview";
   /** Defaults to true. Explicitly moving the child always wins. */
   followOwner?: boolean;
 };
@@ -16,10 +17,21 @@ export type CompositeChildBounds = { x: number; y: number; width: number; height
 /** Place only new children, preserving all existing saved positions. */
 export function placeCompositeChild(input: {
   preferred: CompositeChildBounds; occupied: readonly CompositeChildBounds[];
-  direction?: "up" | "down"; spacing?: number; step?: number; maxAttempts?: number;
+  direction?: "up" | "down" | "right"; spacing?: number; step?: number; maxAttempts?: number;
 }): CompositeChildBounds {
   const result = { ...input.preferred }, spacing = input.spacing ?? 0;
   const taken = input.occupied;
+  if (input.direction === "right") {
+    const intersects = (rect: CompositeChildBounds) => result.y < rect.y + rect.height && result.y + result.height > rect.y;
+    for (let attempt = 0; attempt < (input.maxAttempts ?? 4096); attempt++) {
+      const conflict = taken.find(rect => intersects(rect) && result.x < rect.x + rect.width + spacing && result.x + result.width + spacing > rect.x);
+      if (!conflict) return result;
+      result.x = conflict.x + conflict.width + spacing;
+    }
+    const overlapping = taken.filter(intersects);
+    if (overlapping.length) result.x = Math.max(result.x, ...overlapping.map(rect => rect.x + rect.width + spacing));
+    return result;
+  }
   const step = input.step ?? result.height + spacing;
   for (let attempt = 0; attempt < (input.maxAttempts ?? 4096); attempt++) {
     const conflict = taken.find(rect => result.x < rect.x + rect.width && result.x + result.width > rect.x && result.y < rect.y + rect.height + spacing && result.y + result.height + spacing > rect.y);
@@ -36,8 +48,18 @@ export function placeCompositeChild(input: {
 export function planCompositeChildLayout(input: {
   ownerBounds: CompositeChildBounds; sizes: readonly { width: number; height: number }[];
   occupied: readonly CompositeChildBounds[]; gap?: number; spacing?: number; step?: number; maxAttempts?: number;
+  /** Row above the owner, or the default column to its right. */
+  layout?: "row" | "column";
 }): CompositeChildBounds[] {
   const taken = input.occupied.map(rect => ({ ...rect })), result: CompositeChildBounds[] = [];
+  if (input.layout === "row") {
+    let x = input.ownerBounds.x;
+    for (const size of input.sizes) {
+      const next = placeCompositeChild({ preferred: { x, y: input.ownerBounds.y - (input.gap ?? 48) - size.height, ...size }, occupied: taken, direction: "right", spacing: input.spacing ?? 24, maxAttempts: input.maxAttempts });
+      taken.push(next); result.push(next); x = next.x + size.width + (input.spacing ?? 24);
+    }
+    return result;
+  }
   let y = input.ownerBounds.y;
   for (const size of input.sizes) {
     const next = placeCompositeChild({ preferred: { x: input.ownerBounds.x + input.ownerBounds.width + (input.gap ?? 48), y, ...size }, occupied: taken, spacing: 0, step: input.step ?? 32, maxAttempts: input.maxAttempts });
@@ -104,4 +126,15 @@ function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
   return JSON.stringify(value) ?? "null";
+}
+
+/** Membership is solely the canonical parent graph; adapters cannot grant membership or write scope. */
+export function canvasContainerRelations(canvas: ServerCanvas): Array<{ role: "member"; nodeId: string; ownerNodeId: string }> {
+  const groups = new Set(canvas.document.nodes.filter(n => n.type === "group").map(n => n.id));
+  return canvas.document.nodes.flatMap(n => n.parentId && groups.has(n.parentId) ? [{ role: "member" as const, nodeId: n.id, ownerNodeId: n.parentId }] : []);
+}
+export function compositeChildPolicy(relation: CompositeChildRelation): { movement: "follow-owner" | "independent"; copy: "owner-closure"; removal: "close-presentation" | "source-only"; navigation: "owner-object" | "owner-preview" } {
+  if (relation.role !== "object-entry" && relation.role !== "preview") throw Error("unknown-composite-child-relation");
+  return { movement: relation.followOwner === false ? "independent" : "follow-owner", copy: "owner-closure",
+    removal: relation.role === "object-entry" ? "close-presentation" : "source-only", navigation: relation.role === "object-entry" ? "owner-object" : "owner-preview" };
 }

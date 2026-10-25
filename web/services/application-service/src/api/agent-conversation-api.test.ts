@@ -29,6 +29,7 @@ function serviceStub(): AgentConversationService {
   return {
     createConversation: notImplemented,
     listConversations: notImplemented,
+    listGroupExecutions: notImplemented,
     readConversation: notImplemented,
     acceptTurn: notImplemented,
     dispatchTurn: notImplemented,

@@ -131,6 +131,7 @@ export function installInteractionController(options: InteractionControllerOptio
   /** 一帧的瞬时态快照（供场景构建读取）。 */
   const frameState = () => ({
     selected: state.selected,
+    badgeResize: state.gesture.kind === "group-badge-resize" ? state.gesture : null,
     draft: state.draft,
     marquee: marqueeRect(),
     localPositions: state.localPositions,
@@ -296,7 +297,9 @@ export function installInteractionController(options: InteractionControllerOptio
     activeViewport: () => activeViewport(),
     schedule: (reason?: string) => schedule(reason ?? "input"),
     nextSeq: () => seq++,
-    queryGizmo: queries.queryGizmo
+    queryGizmo: queries.queryGizmo,
+    queryPoint: queries.queryPoint,
+    focusContextContains: frameSubmission.focusContextContains
   });
   const clearHeldKeys = () => {
     // Space 临时平移也是 held input：与聚焦飞行键/粘连键一起复位，避免失焦、modal 或
@@ -339,6 +342,9 @@ export function installInteractionController(options: InteractionControllerOptio
       syncVideoSessions: () => frameLoop.step("video-sync", () => options.videoSessions?.sync(), undefined),
       syncCompositeAssetMedia: () => frameLoop.step("composite-media-sync", () => options.compositeAssetMediaSessions?.sync() ?? null, compositeAssetMediaReady),
       state,
+      isFocused: () => !!(options.getModelFocus?.() || options.getImageFocus?.() || options.getVideoFocus?.()),
+      setSelection,
+      clearHover,
       cancelTransientGesture,
       cancelDragGesture: () => input.cancelDragGesture(),
       pruneAttach: () => input.pruneAttach(),

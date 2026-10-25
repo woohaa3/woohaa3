@@ -90,7 +90,8 @@ const STATUS_FOR: Record<AgentConversationServiceError["code"], number> = {
   "connection-unavailable": 409,
   "capability-unsupported": 400,
   "budget-exceeded": 429,
-  "storage-failed": 500
+  "storage-failed": 500,
+  "active-turn": 409
 };
 
 export function createAgentConversationApiHandler(deps: AgentConversationApiDependencies): AgentConversationApiHandler {
@@ -125,6 +126,18 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
     const method = req.method ?? "GET";
 
     try {
+      if (suffix === "group-executions" && method === "GET") {
+        const canvasId = url.searchParams.get("canvasId") ?? "";
+        const allowed = await authorizeCanvas(deps, owner, canvasId, "read");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        const limit = Number(url.searchParams.get("limit") ?? 50);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 200) return badRequest(res, "limit 必须在 1–200 之间");
+        try {
+          sendJson(res, 200, deps.service.listGroupExecutions({ owner, canvasId, limit,
+            nodeId: url.searchParams.get("nodeId") ?? undefined, cursor: url.searchParams.get("cursor") ?? undefined }));
+        } catch { return badRequest(res, "无效组执行分页游标"); }
+        return true;
+      }
       if (suffix === "canvas-creations" && method === "GET") {
         const canvasId = url.searchParams.get("canvasId") ?? "";
         const allowed = await authorizeCanvas(deps, owner, canvasId, "read");

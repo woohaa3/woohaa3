@@ -58,6 +58,7 @@ pub(crate) fn sync(
 ) {
     cards.tick = cards.tick.wrapping_add(1);
     let tick = cards.tick;
+    let context_zoom = crate::canvas_query::focus_context::viewport(&scene.0)[2];
     let now = time.elapsed_secs_f64();
     cards.work.waiting = 0;
     let live = scene
@@ -93,7 +94,11 @@ pub(crate) fn sync(
         .map_or(1.0, |surface| surface.pixel_ratio);
 
     // 1. 清理不在目标集合里的卡片（源镜头删除/归属失效/被移除）。
-    let alive: HashSet<&str> = targets.iter().map(|target| target.node_id.as_str()).collect();
+    let alive: HashSet<&str> = targets.iter().filter(|target| {
+        let presentation_hidden = scene.0.model_focus.is_some() || index.node(&scene.0, &target.node_id)
+            .is_some_and(|(_, node)| crate::canvas_query::shot_preview::hidden(node));
+        !presentation_hidden || policy::needs_rig(target.visible, target.live, capture_pins.contains(&target.node_id))
+    }).map(|target| target.node_id.as_str()).collect();
     let stale: Vec<String> = cards
         .cards
         .keys()
@@ -111,6 +116,7 @@ pub(crate) fn sync(
         let (width, height) = index
             .node(&scene.0, &target.node_id)
             .map(|(_, node)| {
+                // Capture/preview resolution always follows the real card, never a focus tag.
                 let (_, _, width, height) = crate::canvas_query::shot_preview::content_rect_of(node);
                 (width, height)
             })
@@ -118,7 +124,7 @@ pub(crate) fn sync(
         // 先按镜头画幅 contain，再分配纹理，避免 resize 改变相机投影。
         let fitted_width = width.min(height * target.aspect);
         let fitted_height = fitted_width / target.aspect;
-        let requested = policy::target_size(fitted_width, fitted_height, scene.0.viewport.zoom, pixel_ratio);
+        let requested = policy::target_size(fitted_width, fitted_height, context_zoom, pixel_ratio);
         // 已保留像素只统计其它卡片（本卡片换档时旧纹理会被释放，不重复计入）。
         let retained = cards
             .retained_pixels()
@@ -133,7 +139,7 @@ pub(crate) fn sync(
             .unwrap_or(UVec2::splat(policy::BUCKET as u32));
         let size = if let Some(card) = cards.cards.get_mut(&target.node_id) {
             let settled = card.resize.update(
-                [width, height, scene.0.viewport.zoom, pixel_ratio], requested, card.size, now,
+                [width, height, context_zoom, pixel_ratio], requested, card.size, now,
             );
             // 一次换档先完成发布，避免保留旧图的预算让待确认尺寸反复收缩。
             if card.published.is_some() && !card.published_current { card.size } else { settled }
@@ -148,6 +154,11 @@ pub(crate) fn sync(
     // 层从共享层池租出（与模型卡片同一池）：池满时本卡片排队等待，不与其他视图共用层。
     let mut owner_layers: HashMap<String, Vec<usize>> = HashMap::new();
     for (index, target) in targets.iter().enumerate() {
+        if !cards.cards.contains_key(&target.node_id)
+            && !policy::needs_rig(target.visible, target.live, capture_pins.contains(&target.node_id)) {
+            cards.pending_layers.remove(&target.node_id);
+            continue;
+        }
         let Some(layer) = acquire_layer(&mut layers, &target.node_id) else {
             // 池满：保留已有卡片的合法画面，新卡片排队（不无界增长层号）。
             cards.pending_layers.insert(target.node_id.clone());
@@ -378,6 +389,9 @@ pub(crate) fn sync(
         let Some((node_index, node)) = index.node(&scene.0, &target.node_id) else {
             continue;
         };
+        let display = crate::canvas_query::focus_context::node(&scene.0, node);
+        let node = display.as_ref();
+        let node_index = crate::canvas_query::focus_context::index(&scene.0, &node.id, node_index);
         let (x, y, width, height) = crate::canvas_query::shot_preview::content_rect_of(node);
         let content = crate::canvas_query::shot_preview::texture_size(
             node,

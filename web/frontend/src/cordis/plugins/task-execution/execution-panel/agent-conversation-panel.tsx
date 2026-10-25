@@ -117,6 +117,7 @@ export type AgentConversationPanelProps = {
    * 传入宽度；`null` 表示释放占位。
    */
   targetExecution?: () => AgentEntryIntent | null;
+  onContinueGroup?: () => void;
   onWidthChange?: (width: number | null) => void;
 };
 
@@ -371,6 +372,8 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
               </button>
             )
           ) : null}
+          {turn?.target.mode === "canvas-group" && props.onContinueGroup ? <button type="button" className="agent-detail__back"
+            disabled={!props.targetExecution?.()} onClick={props.onContinueGroup}>继续组内创作</button> : null}
           <button
             type="button"
             className="agent-detail__back"

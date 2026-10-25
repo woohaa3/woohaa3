@@ -8,8 +8,10 @@ import { DEFAULT_NODE_DIMS } from "./node-factory";
 import {
   applyNodeDimensions,
   getNodeBounds,
+  getGroupLayoutSizes,
   getWoohaa3CanvasNodeAbsolutePosition,
   groupPadding,
+  groupBottomPadding,
   readNodeHeight,
   readNodeWidth
 } from "./group-geometry.js";
@@ -116,7 +118,7 @@ export function groupWoohaa3CanvasNodes(
   const groupNode: Woohaa3CanvasNode = applyNodeDimensions(
     group,
     bounds.width + groupPadding * 2,
-    bounds.height + groupPadding * 2
+    bounds.height + groupPadding + groupBottomPadding
   );
 
   return {
@@ -197,20 +199,23 @@ export function ungroupWoohaa3CanvasNodes(
 export function reparentDraggedNodes(
   nodes: Woohaa3CanvasNode[],
   draggedNodeIds: string[],
-  targetGroupId?: string | null
+  targetGroupId?: string | null,
+  groupSizes?: ReadonlyMap<string, {width: number; height: number}>,
+  eligibleGroupIds?: ReadonlySet<string>
 ): { nodes: Woohaa3CanvasNode[]; reparented: boolean } {
   const draggedSet = new Set(draggedNodeIds);
   if (draggedSet.size === 0) return { nodes, reparented: false };
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const sizes = groupSizes ?? getGroupLayoutSizes(nodes.filter(node => !draggedSet.has(node.id)));
   const groupBounds = nodes
-    .filter((node) => node.type === "group")
+    .filter((node) => node.type === "group" && (!eligibleGroupIds || eligibleGroupIds.has(node.id)))
     .map((group) => {
       const pos = getWoohaa3CanvasNodeAbsolutePosition(group, nodeById);
-      return { id: group.id, x: pos.x, y: pos.y, width: readNodeWidth(group), height: readNodeHeight(group) };
+      return { id: group.id, x: pos.x, y: pos.y, ...sizes.get(group.id)! };
     });
 
-  const hasExplicitTarget = !!targetGroupId && nodeById.has(targetGroupId);
+  const hasExplicitTarget = !!targetGroupId && nodeById.has(targetGroupId) && (!eligibleGroupIds || eligibleGroupIds.has(targetGroupId));
 
   // nodeId -> 新父级 id（null 表示解除父子关系）
   const newParentFor = new Map<string, string | null>();
@@ -273,7 +278,7 @@ export function reparentDraggedNodes(
       groupPosition.x + readNodeWidth(originalGroup)
     );
     const bottom = Math.max(
-      ...absChildren.map((c) => c.y + c.height + groupPadding),
+      ...absChildren.map((c) => c.y + c.height + groupBottomPadding),
       groupPosition.y + readNodeHeight(originalGroup)
     );
     groupRefit.set(groupId, {
@@ -333,7 +338,7 @@ export function refitWoohaa3CanvasGroups(
         x: pos.x - groupPadding,
         y: pos.y - groupPadding,
         width: readNodeWidth(child) + groupPadding * 2,
-        height: readNodeHeight(child) + groupPadding * 2
+        height: readNodeHeight(child) + groupPadding + groupBottomPadding
       };
     });
 

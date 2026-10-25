@@ -293,13 +293,20 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               onManageAssistant={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: { canvasId: ctx.canvasScope.canvasId() } })}
               targetExecution={() => {
                 const detail = agentConversations.getDetail();
-                const target = detail?.turns.slice().reverse().find((turn) => turn.action !== "discuss")?.target;
-                const nodeId = detail?.conversation.nodeId;
+                const target = detail?.turns.find(turn => turn.requestId === route.requestId)?.target;
+                const nodeId = target?.nodeId;
                 const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
                 if (!nodeId || !target || !ctx.canvasSession.isWritable() || !canvas?.document.nodes.some((node) => node.id === nodeId)) return null;
                 if (target.mode === "canvas-group") return canvas.document.nodes.some(node => node.id === nodeId && node.type === "group") ? { ...target, action: "modify", prompt: "", expectedContentHash: undefined } : null;
                 const hash = target.mode === "film-set" ? resolveFilmSetClipHash(nodeId, target.clipId) : (canvas.nodeData[nodeId]?.modelContentVersion as { contentHash?: string } | undefined)?.contentHash;
                 return { ...target, action: "modify", prompt: "", ...(hash ? { expectedContentHash: hash } : {}) };
+              }}
+              onContinueGroup={() => {
+                const target = agentConversations.getDetail()?.turns.find(turn => turn.requestId === route.requestId)?.target;
+                const canvas = ctx.canvasState.getCanvas();
+                if (target?.mode !== "canvas-group" || !target.nodeId || !ctx.canvasSession.isWritable() || !canvas?.document.nodes.some(node => node.id === target.nodeId && node.type === "group")) return;
+                ctx.canvasRuntime.controller()?.selectNode(target.nodeId);
+                ctx.canvasNavigation.openPanel({ type: MODEL_NODE_EDITOR_PANEL_TYPE, nodeId: target.nodeId });
               }}
               // 概览态让 runtime 视口避让侧栏宽度；卸载时释放（0）。聚焦态宽度由
               // FocusWorkspace 统一计算（不重复占位）。
@@ -478,7 +485,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
 
 function isModelEditorNodeType(nodeType: string, nodeData?: unknown): boolean {
   // 宿主模型编辑器只服务 model3d 与片场业务；炉体等其它复合资产业务聚焦到自己的 extension 工作区。
-  return nodeType === "model3d" || isFilmSetNode(nodeType, nodeData);
+  return nodeType === "model3d" || nodeType === "group" || isFilmSetNode(nodeType, nodeData);
 }
 
 /** 读取选中模型节点的真实类型，供模型面板渲染 MCP 指引。 */
@@ -514,10 +521,11 @@ function buildModelRenderGenerate(
   writable: boolean
 ): (() => ReactNode) | undefined {
   const isFilmSet = resolveIsFilmSetNode(nodeId);
-  const mode = isFilmSet ? "film-set" : "model3d";
+  const isGroup = resolvePanelNodeType(nodeId) === "group";
+  const mode = isFilmSet ? "film-set" : isGroup ? "canvas-group" : "model3d";
   // 片场面板无显式片段选择：解析默认片段并带上，否则后端不签发片段写权限（动作写入必带 clipId）。
   const clipId = isFilmSet ? resolveFilmSetTargetClip(nodeId) : undefined;
-  const expectedContentHash = isFilmSet ? resolveFilmSetClipHash(nodeId) : resolveExpectedModelContentHash(nodeId);
+  const expectedContentHash = isFilmSet ? resolveFilmSetClipHash(nodeId) : isGroup ? resolveExpectedGroupAppearanceHash(nodeId) : resolveExpectedModelContentHash(nodeId);
   const blockedReason = isFilmSet && !clipId ? "该片场节点还没有可写入的动画片段，请先创建动画片段。" : null;
   return () => (
     <AuthoringGenerateHost
@@ -531,6 +539,13 @@ function buildModelRenderGenerate(
       onAuthorize={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: {} })}
     />
   );
+}
+
+function resolveExpectedGroupAppearanceHash(nodeId: string): string | undefined {
+  const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
+  const data = canvas?.nodeData?.[nodeId] as { groupAppearance?: { model?: { contentVersion?: { contentHash?: unknown } } } } | undefined;
+  const hash = data?.groupAppearance?.model?.contentVersion?.contentHash;
+  return typeof hash === "string" && hash !== "" ? hash : undefined;
 }
 
 /** 当前画布 id（宿主注入目标身份用）。 */

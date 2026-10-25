@@ -10,7 +10,7 @@
  * Agent 投影与 group 几何因此共享同一数值，避免「读到 196×64、渲染成 248×232」
  * 的世界坐标分叉。
  */
-import { getWoohaa3CanvasNodeAbsolutePosition } from "./domain/core/group-ops.js";
+import { getWoohaa3CanvasNodeAbsolutePosition, getGroupLayoutSizes } from "./domain/core/group-ops.js";
 import type { Woohaa3CanvasSerializedNode } from "./domain/core/document-schema.js";
 import { clampWoohaa3CanvasZoom } from "./domain/core/viewport-zoom.js";
 import { effectiveCanvasNodeSize as effectiveNodeSize } from "./node-dimensions.js";
@@ -26,7 +26,8 @@ export function nodeWorldRect(node: Woohaa3CanvasSerializedNode, byId: ReadonlyM
     { id: node.id, type: node.type, position: node.position, parentId: node.parentId, data: {} },
     map as Map<string, { id: string; type: string; position: Position; parentId?: string; data: unknown }> as never
   );
-  const size = effectiveNodeSize(node);
+  const size = (node.type === "group" ? getGroupLayoutSizes([...byId.values()]).get(node.id) : undefined)
+    ?? effectiveNodeSize(node);
   return { x: abs.x, y: abs.y, width: size.width, height: size.height };
 }
 

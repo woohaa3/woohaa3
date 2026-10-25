@@ -1,3 +1,4 @@
+import { validateGroupAppearanceCommands } from "./group-appearance-validation.js";
 /**
  * 服务端 canvas room：命令验证、事务与持久化管线
  * （自 `room.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R27）。
@@ -167,6 +168,11 @@ export async function executeCommand(
   if (scope && (!scope.valid() || scope.canvasId !== host.canvasId)) return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-revoked", message: "组创作授权已失效" };
   if (scope?.authorize && !await scope.authorize("write")) return { ok: false, status: "rejected", commandId: batch.commandId, code: "write-forbidden", message: "画布写入权限已撤销" };
 
+  if (before.ok) {
+    const appearanceError = await validateGroupAppearanceCommands(before.canvas, batch.commands);
+    if (appearanceError) return { ok: false, status: "rejected", commandId: batch.commandId, code: "invalid-group-appearance", message: appearanceError };
+  }
+  if (scope && !scope.valid()) return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-revoked", message: "组创作授权已失效" };
   const outcome = await applyCommandTransaction({
     doc: authoring,
     batch,

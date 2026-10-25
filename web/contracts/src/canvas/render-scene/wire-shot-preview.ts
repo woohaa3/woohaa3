@@ -25,6 +25,8 @@ export type BevyShotPreviewCardState = "preparing" | "ready" | "stale" | "error"
  * 静态无播放控件。所有字段都由源镜头投影派生，**不写回** ServerCanvas / Y.Doc。
  */
 export type BevyShotPreviewPresentation = {
+  /** Hide the canvas presentation while keeping this target available for offscreen capture. */
+  hidden?: boolean;
   /** 所属片场 canonical 节点 id（归属校验与双击导航）。 */
   filmSetNodeId: string;
   /** 所属镜头稳定 clipId。 */

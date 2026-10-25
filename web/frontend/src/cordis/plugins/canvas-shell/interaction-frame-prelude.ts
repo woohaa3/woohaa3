@@ -9,6 +9,7 @@
  */
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
+import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import type { InteractionState } from "./interaction-core.js";
 
 /** 瞬时态推进所需注入能力（全部来自 controller 闭包）。 */
@@ -29,6 +30,9 @@ export type TransientFrameDeps = {
   /** 同步片场媒体会话并返回就绪平面集合。 */
   syncCompositeAssetMedia: () => ReadonlySet<string> | null;
   state: InteractionState;
+  isFocused: () => boolean;
+  setSelection: (ids: string[]) => void;
+  clearHover: () => void;
   cancelTransientGesture: () => void;
   cancelDragGesture: () => void;
   pruneAttach: () => boolean;
@@ -57,17 +61,21 @@ export function advanceTransientState(deps: TransientFrameDeps): ReadonlySet<str
   // 被拒绝/重基 blocked 导致 working 中消失的节点：清理失效 selection 与连线草稿（任务 4.6）。
   const working = workingCanvasOf(woohaa3CanvasStore.getState());
   if (working) {
-    const liveIds = new Set(working.document.nodes.map((node) => node.id));
+    const index = sharedCanvasNodeIndex(working)!;
+    const liveIds = index.liveIds;
+    const focused = deps.isFocused();
+    const visible = (id: string) => liveIds.has(id) && (focused || !index.hiddenNodeIds.has(id));
     modelPreviewStore.prune(liveIds);
     if (state.gesture.kind === "model-preview" && !liveIds.has(state.gesture.nodeId)) {
       deps.cancelTransientGesture();
     }
-    const survivors = state.selected.filter((id) => liveIds.has(id));
-    if (survivors.length !== state.selected.length) state.selected = survivors;
-    if (state.draft && !liveIds.has(state.draft.source)) state.draft = null;
+    const survivors = state.selected.filter(visible);
+    if (survivors.length !== state.selected.length) deps.setSelection(survivors);
+    if (state.hoveredNodeId && !visible(state.hoveredNodeId)) deps.clearHover();
+    if (state.draft && !visible(state.draft.source)) state.draft = null;
     // 拖动粘连：owner 从 working 消失则取消整次手势；否则只移除失效 target 的预览（D6）。
     if (state.gesture.kind === "drag") {
-      if ([...state.gesture.origins.keys()].some(id => !liveIds.has(id))) {
+      if ([...state.gesture.origins.keys()].some(id => !visible(id))) {
         deps.cancelDragGesture();
       } else if (state.gesture.attach && deps.pruneAttach()) {
         deps.markInvalidated("attach-prune");

@@ -16,10 +16,11 @@ pub(crate) struct GroupMotion {
 
 pub(super) fn visible(node: &GraphNode, scene: &crate::protocol::Scene, size: Vec2) -> bool {
     let v = &scene.viewport;
+    let bottom = node.y + node.height + crate::canvas_query::group_model::badge_outset(node);
     node.x * v.zoom + v.x <= size.x
         && (node.x + node.width) * v.zoom + v.x >= 0.
         && node.y * v.zoom + v.y <= size.y
-        && (node.y + node.height) * v.zoom + v.y >= 0.
+        && bottom * v.zoom + v.y >= 0.
 }
 
 /// Two short strokes circulate at a steady screen-space speed, rather than suggesting a percentage.

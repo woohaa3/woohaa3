@@ -3,7 +3,7 @@
  * （自 `group-ops.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R17）。
  */
 import type { Woohaa3CanvasNode } from "./canvas-runtime";
-import { getWoohaa3CanvasNodeAbsolutePosition, readNodeWidth, readNodeHeight } from "./group-geometry.js";
+import { getGroupLayoutSizes, getWoohaa3CanvasNodeAbsolutePosition, readNodeWidth, readNodeHeight } from "./group-geometry.js";
 
 /** 为需要父级先挂载的 renderer 生成稳定顺序；领域 Store 本身不依赖此顺序。 */
 export function sortNodesParentsFirst(nodes: Woohaa3CanvasNode[]): Woohaa3CanvasNode[] {
@@ -116,22 +116,27 @@ export function expandSelectionWithGroups(
  */
 export function findGroupContainingCenter(
   nodes: Woohaa3CanvasNode[],
-  nodeId: string
+  nodeId: string,
+  groupSizes?: ReadonlyMap<string, {width: number; height: number}>,
+  eligibleGroupIds?: ReadonlySet<string>
 ): string | null {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const node = nodeById.get(nodeId);
   if (!node || node.type === "group") return null;
+  // During drag, freeze the accepted group sizes; the moved member must not expand its own target.
+  const sizes = groupSizes ?? getGroupLayoutSizes(nodes.filter(entry => entry.id !== nodeId));
   const abs = getWoohaa3CanvasNodeAbsolutePosition(node, nodeById);
   const cx = abs.x + readNodeWidth(node) / 2;
   const cy = abs.y + readNodeHeight(node) / 2;
   for (const candidate of nodes) {
-    if (candidate.type !== "group" || candidate.id === nodeId) continue;
+    if (candidate.type !== "group" || candidate.id === nodeId || (eligibleGroupIds && !eligibleGroupIds.has(candidate.id))) continue;
     const pos = getWoohaa3CanvasNodeAbsolutePosition(candidate, nodeById);
+    const size = sizes.get(candidate.id)!;
     if (
       cx >= pos.x &&
-      cx <= pos.x + readNodeWidth(candidate) &&
+      cx <= pos.x + size.width &&
       cy >= pos.y &&
-      cy <= pos.y + readNodeHeight(candidate)
+      cy <= pos.y + size.height
     ) {
       return candidate.id;
     }

@@ -280,6 +280,82 @@ fn model_anchor_falls_back_for_empty_model() {
     assert!(anchor.x.is_finite() && anchor.y.is_finite());
 }
 
+/// 组形象在固定徽章内居中，模型比例不改变徽章锚点。
+#[test]
+fn group_anchor_centers_model_inside_bottom_footer() {
+    let node = GraphNode {
+        model_preview: None,
+        id: "group".into(),
+        kind: "group".into(),
+        x: 100.0,
+        y: 200.0,
+        width: 500.0,
+        height: 400.0,
+        body: String::new(),
+        title: String::new(),
+        type_label: String::new(),
+        progress: 0.0,
+        busy: false,
+        texture: false,
+        media_loading: false,
+        resizable: false,
+        ghost: false,
+        card_label: None,
+        group: Some(crate::protocol::GroupPresentation {
+            collapsed: false,
+                badge_scale: 1.,
+                badge_resizable: false,
+            title: String::new(),
+            member_count: 0,
+            output_capable_leaf_count: 0,
+            model_bounds: None,
+            run_status: None,
+        }),
+        model: None,
+        composite_asset: None,
+        history_strip: None,
+        aggregate_run: None,
+        shot_preview: None,
+    };
+    let model = ModelSnapshot {
+        scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
+        ops: vec![ModelOp::Box {
+            id: "body".into(),
+            parent: None,
+            position: [3.0, 1.0, -2.0],
+            rotation: [0.0; 3],
+            scale: [1.0; 3],
+            color: Some("#ffffff".into()),
+            material: None,
+            size: [1.0, 2.0, 1.0],
+        }],
+        signature: "group-default".into(),
+        extent: 2.0,
+        aabb: None,
+        geometry_keys: None,
+        prepared_bounds: None,
+        placement: ModelPlacement::default(),
+    };
+    let placement = ModelPlacement::default();
+    let unit = model_unit(&node, &model, &placement);
+    let anchor = model_anchor(&node, &model, &placement, unit);
+    let rotation = grid::view_rotation();
+    let anchor_canvas = rotation * anchor;
+    let local = scene::model_world_aabb(&model, rotation, unit).expect("group model bounds");
+    let center_y = -(anchor_canvas.y + (local.min[1] + local.max[1]) / 2.);
+    let center_x = anchor_canvas.x + (local.min[0] + local.max[0]) / 2.0;
+    assert!((center_y - (node.y + node.height - 26.)).abs() < 0.5);
+    assert!((center_x - (node.x + node.width / 2.0)).abs() < 0.5);
+    assert!(local.max[0] - local.min[0] <= node.width);
+    assert!(local.max[1] - local.min[1] <= node.height);
+    assert!(
+        local.max[0] - local.min[0] <= crate::canvas_query::group_model::MODEL_MAX_WIDTH + 0.01
+    );
+    assert!(
+        local.max[1] - local.min[1] <= crate::canvas_query::group_model::MODEL_MAX_HEIGHT + 0.01
+    );
+}
+
 /// 片场（composite-asset）：没有卡片，模型锚定在节点矩形**中心**（无朝下偏移），且模型投影
 /// 高度不超过节点矩形（范围框罩住模型）。change: 2026-10-08-make-film-set-model-only 修订。
 #[test]

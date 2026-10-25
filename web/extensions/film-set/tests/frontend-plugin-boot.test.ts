@@ -73,6 +73,8 @@ function bootFilmSet(canvas: ServerCanvas | null = null, failAt?: string): { ctx
   const dialogs = new DialogService();
   ctx.provide("dialogs" as never, dialogs as never);
   ctx.provide("slots" as never, slots as never);
+  ctx.provide("mediaContent" as never, { register: () => () => undefined } as never);
+  ctx.provide("selection" as never, { getSnapshot: () => ({ nodeIds: [], primaryNodeId: null }), subscribe: () => () => undefined } as never);
   ctx.provide("compositeAssets" as never, new CompositeAssetRegistry() as never);
   ctx.provide("canvasState" as never, {
     getCanvas: () => canvas,

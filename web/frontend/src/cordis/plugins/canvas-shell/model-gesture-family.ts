@@ -9,6 +9,9 @@
  * change: replace-model-node-focus-interactions —— 模型本体拖动已被移除：聚焦编辑只允许镜头
  * gizmo 与焦点三轴 gizmo 写入，`modelPlacement` 不再由直接拖动产生。
  */
+import { CLOSE_FOCUS_REFERENCE_ACTION } from "./composite-focus-context.js";
+import { workingCanvasOf } from "../../services/canvas-state/index.js";
+import type { InteractionQueries } from "./interaction-queries.js";
 import type { ModelFocusProjection } from "@woohaa3/contracts";
 import { focusedTarget, ModelFocusSession } from "./model-focus-session.js";
 import { hitFocusGizmoAxis, hitShotGizmoHandle, type GizmoQuery } from "./model-gizmo-hit.js";
@@ -22,6 +25,7 @@ import type { InteractionControllerOptions } from "./interaction-types.js";
 /** 模型 family 依赖的共享能力（由 controller 注入；不含事件监听所有权）。 */
 export type ModelGestureContext = {
   canvas: HTMLCanvasElement;
+  focusContextContains?: (point: { x: number; y: number }) => boolean;
   options: InteractionControllerOptions;
   writable: () => boolean;
   localViewportSet: (viewport: { x: number; y: number; zoom: number }) => void;
@@ -35,6 +39,7 @@ export type ModelGestureContext = {
    * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 5.4）。
    */
   queryGizmo: GizmoQuery;
+  queryPoint?: InteractionQueries["queryPoint"];
 };
 
 export type ModelGestureFamily = ReturnType<typeof createModelGestureFamily>;
@@ -59,6 +64,15 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
   let objectGesture = options.filmSetObjectGesture ?? null;
   /** 是否正在拖动片场对象。 */
   let activeObjectDrag = false;
+  let focusCloseHovered = false;
+  let previousCursor = "", previousTitle = "";
+  const setCloseHover = (hovered: boolean) => {
+    if (hovered === focusCloseHovered) return;
+    focusCloseHovered = hovered;
+    if (hovered) { previousCursor = canvas.style?.cursor ?? ""; previousTitle = canvas.title; }
+    if (canvas.style) canvas.style.cursor = hovered ? "pointer" : previousCursor;
+    canvas.title = hovered ? "关闭容器" : previousTitle;
+  };
   let feedbackEpoch = 0;
   let cameraDragKey: string | null = null;
   const feedback = (handle: import("@woohaa3/contracts").GizmoHandleName | null, active = false) => {
@@ -198,6 +212,7 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
   const reframeModelFocus = (nodeId: string): void => lifecycle.reframe(nodeId);
 
   const clearHeldKeys = () => {
+    setCloseHover(false);
     navigation.resetHeld();
     // 活动镜头 pose 手势被取消：只清理 preview，不提交（任务 3.2 / 4.4）。
     if (activeShotHandle && shotGesture) {
@@ -236,7 +251,24 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
    * RMB 或 Alt/Option + 左键旋转观察相机，MMB 平移观察相机。
    * 不选中节点、不开始 drag/marquee/connect/right-press/resize，也不打开上下文菜单。
    */
+  const isFocusReferenceEvent = (event: { clientX: number; clientY: number }) => {
+    const rect = canvas.getBoundingClientRect();
+    return ctx.focusContextContains?.({ x: event.clientX - rect.left, y: event.clientY - rect.top }) ?? false;
+  };
   const beginFocusPointer = (event: PointerEvent) => {
+    if (isFocusReferenceEvent(event)) {
+      event.preventDefault();
+      if (event.button === 0 && !event.altKey && writable() && options.getModelFocusMode?.() !== "history") {
+        const rect = canvas.getBoundingClientRect();
+        const hit = ctx.queryPoint?.({ x: event.clientX - rect.left, y: event.clientY - rect.top }, 1);
+        if (hit?.ok && hit.value?.kind === "node-action" && hit.value.actionId === CLOSE_FOCUS_REFERENCE_ACTION) {
+          const current = workingCanvasOf(woohaa3CanvasStore.getState());
+          const child = options.compositeAssets?.children(current).get(hit.value.nodeId);
+          if (current && child?.ownerNodeId === focus.nodeId) options.compositeAssets?.closeChild(current, hit.value.nodeId);
+        }
+      }
+      return;
+    }
     // Alt/Option 主按钮为触摸板提供无需按住右键的旋转入口，优先于 gizmo 编辑。
     const button = event.button === 0 && event.altKey ? 2 : event.button ?? 0;
     if (button === 0) {
@@ -344,6 +376,12 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
       focusGesture.move(activeFocusAxis, point);
       return true;
     }
+    if (ctx.focusContextContains?.(point) && !cameraDragKey) {
+      const hit = writable() && options.getModelFocusMode?.() !== "history" ? ctx.queryPoint?.(point, 1) : null;
+      setCloseHover(!!(hit?.ok && hit.value?.kind === "node-action" && hit.value.actionId === CLOSE_FOCUS_REFERENCE_ACTION));
+      objectGesture?.hover?.(null); feedback(null); return true;
+    }
+    setCloseHover(false);
     objectGesture?.hover?.(placementEditable() ? point : null);
     if (options.getModelEditor?.()?.toolMode === "camera") {
       const handle = placementEditable() ? resolveFocusGizmoAxis(point) ?? resolveShotGizmoHandle(point) : null;
@@ -395,12 +433,24 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     syncModelFocusValid,
     advanceModelFly,
     beginFocusPointer,
+    isFocusReferenceEvent,
     moveFocusPointer,
     endFocusPointer,
     flyKeyName: navigation.flyKeyName,
     applyFlyKey: navigation.applyFlyKey,
-    onDocumentWheel: navigation.onDocumentWheel,
-    onGestureStart: navigation.onGestureStart,
+    onDocumentWheel: (event: WheelEvent, modalActive: boolean) => {
+      if (focus.active && isFocusReferenceEvent(event)) { event.preventDefault(); return true; }
+      return navigation.onDocumentWheel(event, modalActive);
+    },
+    onGestureStart: (event: Event, modalActive: boolean) => {
+      const pointer = event as Event & { clientX?: number; clientY?: number };
+      if (focus.active && typeof pointer.clientX === "number" && typeof pointer.clientY === "number"
+        && isFocusReferenceEvent({ clientX: pointer.clientX, clientY: pointer.clientY })) {
+        navigation.onGestureEnd(event);
+        return;
+      }
+      navigation.onGestureStart(event, modalActive);
+    },
     onGestureChange: navigation.onGestureChange,
     onGestureEnd: navigation.onGestureEnd,
     setShotGesture: (handler: InteractionControllerOptions["shotGesture"] | null) => {

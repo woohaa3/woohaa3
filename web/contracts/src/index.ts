@@ -54,6 +54,7 @@ export * from "./canvas/content-recording-port.js";
 export * from "./canvas/film-set-export-profile.js";
 export * from "./canvas/recording-protocol.js";
 export * from "./canvas/model-definition.js";
+export * from "./canvas/group-appearance.js";
 export * from "./canvas/scene-ir-v2.js";
 export * from "./canvas/model-executor.js";
 export * from "./canvas/model-executor-v2.js";
@@ -137,3 +138,7 @@ export * from "./canvas/composite-children.js";
 
 export * from "./canvas/node-capabilities.js";
 export * from "./canvas/builtin-node-capabilities.js";
+
+export * from "./canvas/media-content.js";
+export * from "./canvas/group-presentation.js";
+export * from "./canvas/group-badge.js";

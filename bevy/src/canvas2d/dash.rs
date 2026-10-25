@@ -13,8 +13,22 @@ const DASH_GAP: f32 = 6.0;
 
 /// Preserve world-length dash spacing across sampled curve segments.
 pub(super) fn dashed_polyline(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32) {
+    dashed_polyline_with_phase(geometry, points, border, z, color, 0.);
+}
+
+/// Seed a branch from its join's distance along the main perimeter.
+pub(super) fn dashed_polyline_with_phase(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32, distance: f32) {
+    dashed_polyline_with_phase_alpha(geometry, points, border, z, color, distance, 1.);
+}
+
+pub(super) fn dashed_polyline_alpha(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32, alpha: f32) {
+    dashed_polyline_with_phase_alpha(geometry, points, border, z, color, 0., alpha);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dashed_polyline_with_phase_alpha(geometry: &mut Geometry, points: &[Vec2], border: f32, z: f32, color: u32, distance: f32, alpha: f32) {
     let period = DASH_LENGTH + DASH_GAP;
-    let mut phase = 0.0_f32;
+    let mut phase = distance.rem_euclid(period);
     for pair in points.windows(2) {
         let length = pair[0].distance(pair[1]);
         if !length.is_finite() || length <= 0.0001 { continue; }
@@ -25,7 +39,7 @@ pub(super) fn dashed_polyline(geometry: &mut Geometry, points: &[Vec2], border: 
             let boundary = if drawing { DASH_LENGTH } else { period };
             let step = (boundary - phase).min(length - offset);
             if drawing && step > 0.0001 {
-                geometry.line(pair[0] + direction * offset, pair[0] + direction * (offset + step), border, z, color);
+                geometry.line_alpha(pair[0] + direction * offset, pair[0] + direction * (offset + step), border, z, color, alpha);
             }
             offset += step;
             phase += step;
@@ -158,6 +172,17 @@ mod tests {
         assert!(points.iter().any(|p| p[0] == 0.));
         assert!(points.iter().any(|p| p[0] == 26.));
         assert!(points.iter().all(|p| p[0] <= 10. || (p[0] >= 16. && p[0] <= 26.)));
+    }
+
+    #[test]
+    fn branch_dashes_continue_the_parent_phase() {
+        let mut geometry = Geometry::default();
+        dashed_polyline_with_phase(&mut geometry, &[Vec2::ZERO, Vec2::new(32.,0.)], 1., 0., 0xffffff, 11.);
+        let mesh = geometry.build();
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!("positions"); };
+        assert!(points.iter().any(|p| p[0] == 5.));
+        assert!(points.iter().any(|p| p[0] == 31.));
+        assert!(points.iter().all(|p| (5.0..=15.).contains(&p[0]) || (21.0..=31.).contains(&p[0])));
     }
 
     fn positions(geometry: Geometry) -> usize {

@@ -89,10 +89,16 @@ pub(crate) fn sync_textures(
                 images.remove(stale.id());
             }
         }
+        let display = crate::canvas_query::focus_context::node(scene, node);
+        let index = crate::canvas_query::focus_context::index(scene, &node.id, index);
+        let overlay = crate::canvas_query::focus_context::overlay(scene);
+        let shown = scene.model_focus.is_none();
+        let visibility = if shown { Visibility::Inherited } else { Visibility::Hidden };
         let (custom_size, center, color, z) =
-            super::image_focus::sprite_layout(scene, node, texture_px, index);
+            super::image_focus::sprite_layout(&overlay, &display, texture_px, index);
         match visuals.textures.get(&id).cloned() {
             Some((entity, _, _)) => {
+                commands.entity(entity).insert(visibility);
                 if let Ok((mut sprite, mut transform)) = sprites.get_mut(entity) {
                     sprite.image = handle.clone();
                     sprite.custom_size = Some(custom_size);
@@ -113,6 +119,7 @@ pub(crate) fn sync_textures(
                             ..default()
                         },
                         Transform::from_xyz(center.x, -center.y, z),
+                        visibility,
                     ))
                     .id();
                 visuals.textures.insert(id, (entity, handle, texture_px));

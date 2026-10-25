@@ -1,3 +1,4 @@
+import { decodeMediaContentRef } from "../media-content.js";
 import { filmSetCompiledBudget } from "../film-set-clip-compilation.js";
 /**
  * 命令 reducer 的 nodeData 字段校验与自包含 3D 内容归一化。
@@ -17,6 +18,7 @@ import { animationSnapshotHash } from "../animation-snapshot.js";
 import { decodeFilmSetLocalTransform } from "../film-set-content.js";
 import { readFilmSetContent } from "../film-set-content.js";
 import { isFilmSetModelItem } from "../film-set-content.js";
+import { decodeGroupAppearance, readGroupAppearanceForNode } from "../group-appearance.js";
 import type { CanvasNodeData } from "../domain/index.js";
 import { reject, type CommandApplyResult, type WorkingState } from "./types.js";
 
@@ -74,6 +76,31 @@ export function validateImageEditPatch(value: CanvasNodeData): CommandApplyResul
   const normalized = decodeImageEditDocument(value.imageEdit);
   if (!normalized.ok) return reject("invalid-image-edit", normalized.error);
   value.imageEdit = normalized.value;
+  return null;
+}
+
+/** 组/片场自身展示模型的严格边界；缺失字段不写回，非法字段整批拒绝。 */
+export function validateGroupAppearancePatch(
+  work: WorkingState,
+  nodeId: string,
+  value: CanvasNodeData,
+): CommandApplyResult | null {
+  if (value.groupAppearance === undefined) return null;
+  const node = work.nodes.find((entry) => entry.id === nodeId);
+  const merged = { ...(work.nodeData[nodeId] ?? {}), ...value } as CanvasNodeData;
+  const allowed = node?.type === "group" || isFilmSetNode(node?.type, merged);
+  if (!allowed) return reject("invalid-group-appearance", "groupAppearance 只允许 group 或 film-set 节点");
+  const decoded = decodeGroupAppearance(value.groupAppearance);
+  if (!decoded.ok) {
+    // A whole film-set rewrite must retain an unsupported saved appearance verbatim.
+    if (JSON.stringify(value.groupAppearance) === JSON.stringify(work.nodeData[nodeId]?.groupAppearance)) return null;
+    return reject("invalid-group-appearance", decoded.reason);
+  }
+  const normalized = normalizeModelDefinition({ ...decoded.value.model,
+    placement: decoded.value.model.placement,
+    previous: readGroupAppearanceForNode(work.nodeData[nodeId]).value.model.contentVersion });
+  if (!normalized.ok) return reject("invalid-group-appearance", normalized.reason);
+  value.groupAppearance = { schemaVersion: 1, model: normalized.value };
   return null;
 }
 
@@ -243,5 +270,16 @@ export function validateFilmSetContentPatch(
       return reject("invalid-self-contained-node", "来源资产已变化，请重新导入");
     }
   }
+  return null;
+}
+
+/** Unknown provider references survive reads; explicit writes validate only the open envelope. */
+export function validateMediaContentPatch(work: WorkingState, nodeId: string, value: CanvasNodeData): CommandApplyResult | null {
+  if (value.mediaContent === undefined) return null;
+  const node = work.nodes.find(n => n.id === nodeId);
+  if (!node || (node.type !== "image" && node.type !== "video")) return reject("invalid-command", "mediaContent 只允许图片/视频节点");
+  const decoded = decodeMediaContentRef(value.mediaContent);
+  if (!decoded.ok) return reject("invalid-command", decoded.reason);
+  value.mediaContent = decoded.value;
   return null;
 }

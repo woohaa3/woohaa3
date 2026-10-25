@@ -13,7 +13,8 @@ import { type FocusTargetInput } from "../canvas-shell/model-focus-session.js";
 import { createAttachedMedia } from "./attached-media.js";
 import { projectFocusContentRect } from "./project-focus-content-rect.js";
 import { queryCompositeAssetItemPick, type CompositeAssetPickInput } from "./composite-asset-picking.js";
-import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { compositeFocusContextIds } from "../canvas-shell/composite-focus-context.js";
+import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { defaultAppTheme, type BevyModelEditor, type GhostRenderNode, type ModelFocusProjection } from "@woohaa3/contracts";
 import type { CanvasRuntimeService, CanvasRuntimeStatus } from "../../contracts.js";
 import { type CanvasRuntimeOptions } from "./canvas-runtime-options.js";
@@ -432,6 +433,11 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     const ids = new Set<string>();
     const add = (nodeId: string | null | undefined) => { if (nodeId) ids.add(nodeId); };
     add(this.modelFocus?.nodeId);
+    if (this.modelFocus) {
+      const working = workingCanvasOf(woohaa3CanvasStore.getState());
+      const projected = this.options.compositeAssets?.projectCanvas(this.options.projectHistoryCanvas?.(working) ?? working) ?? working;
+      for (const id of compositeFocusContextIds(projected, this.options.compositeAssets, this.modelFocus.nodeId)) add(id);
+    }
     add(this.imageFocusStore.getTargetId());
     add(this.videoFocusStore.getTargetId());
     add(this.animationPlaybackStore.current()?.nodeId);

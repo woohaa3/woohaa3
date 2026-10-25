@@ -22,10 +22,13 @@ export function createDoubleClickHandler(core: InteractionCore) {
     if (core.focusInputBlocked()) return;
     const rect = canvas.getBoundingClientRect();
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    // Focus references are visual only; a double click must not enter their card/shot.
+    if (model.active && model.isFocusReferenceEvent(event)) { event.preventDefault(); return; }
     const world = screenToWorld(point, activeViewport());
     // 命中由 Rust interaction snapshot 计算；不可用时不派发卡片命中（design D3）。
     const hitResult = core.queryPoint(world, activeViewport().zoom);
     const hit = hitResult.ok ? hitResult.value : null;
+    if (hit?.kind === "node-action" && (hit.actionId === "group-toggle-collapse" || hit.actionId === "group-resize-badge")) { event.preventDefault(); return; }
     const cardNodeId = hit && (hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope") ? hit.nodeId : null;
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState) return;

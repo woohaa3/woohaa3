@@ -19,7 +19,7 @@ it("对象容器双击打开所属片场，避免进入独立空白工作区", (
   const enter = vi.fn(), select = vi.fn(), preventDefault = vi.fn();
   const compositeAssets = new CompositeAssetRegistry();
   compositeAssets.register({ extensionId: "film-set", owner: "film-set", executionKey: () => "", prepare: () => null,
-    children: (_canvas, ownerNodeId) => ownerNodeId === "film" ? [{ nodeId: id, ownerNodeId, kind: "container", focusOwner: true }] : [] });
+    children: (_canvas, ownerNodeId) => ownerNodeId === "film" ? [{ nodeId: id, ownerNodeId, kind: "container", role: "object-entry", focusOwner: true }] : [] });
   const core = {
     focusInputBlocked: () => false, canvas: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
     options: { onModelFocusIntent: enter, compositeAssets }, model: {}, setSelection: select,

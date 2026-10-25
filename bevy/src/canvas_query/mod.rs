@@ -10,6 +10,8 @@
 //! `canvas2d` 渲染模块复用同一套函数，确保「画在哪、点在哪」一致，且删除 48/64 段差异。
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code))]
 
+pub(crate) mod focus_context;
+pub(crate) mod group_model;
 pub(crate) mod aggregate;
 pub(crate) mod composite_panel;
 pub(crate) mod curve;

@@ -83,6 +83,9 @@ pub(crate) struct GraphNode {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ShotPreviewPresentation {
+    /// Canvas presentation only; offscreen capture still resolves this target.
+    #[serde(default)]
+    pub(crate) hidden: bool,
     /// 所属片场 canonical 节点 id（归属校验与双击导航）。
     #[serde(rename = "filmSetNodeId")]
     pub(crate) film_set_node_id: String,
@@ -448,6 +451,8 @@ pub(crate) struct CompositeAssetPresentation {
 pub(crate) struct CompositeOwnershipLinks {
     pub(crate) anchor: [f32; 3],
     pub(crate) target_node_ids: Vec<String>,
+    #[serde(default)]
+    pub(crate) target_item_ids: std::collections::HashMap<String, String>,
 }
 
 /// 片场媒体平面（change: 2026-10-08-make-film-set-model-only，design D5）。
@@ -568,6 +573,12 @@ pub(crate) struct ModelPreview {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GroupPresentation {
     #[serde(default)]
+    pub(crate) collapsed: bool,
+    #[serde(default = "default_badge_scale")]
+    pub(crate) badge_scale: f32,
+    #[serde(default)]
+    pub(crate) badge_resizable: bool,
+    #[serde(default)]
     pub(crate) title: String,
     #[serde(default)]
     pub(crate) member_count: u32,
@@ -576,6 +587,16 @@ pub(crate) struct GroupPresentation {
     pub(crate) output_capable_leaf_count: u32,
     #[serde(default)]
     pub(crate) run_status: Option<GroupRunStatus>,
+    #[serde(default)]
+    pub(crate) model_bounds: Option<GroupModelBounds>,
+}
+
+fn default_badge_scale() -> f32 { 1. }
+
+#[derive(Clone, Deserialize, PartialEq)]
+pub(crate) struct GroupModelBounds {
+    pub(crate) aabb: super::ModelAabbDto,
+    pub(crate) extent: f32,
 }
 
 #[derive(Clone, Deserialize, PartialEq)]
@@ -642,6 +663,8 @@ pub(crate) struct Scene {
     #[serde(default)]
     pub(crate) version: String,
     pub(crate) nodes: Vec<GraphNode>,
+    #[serde(default, rename = "modelFocusContext")]
+    pub(crate) model_focus_context: Vec<FocusContextNode>,
     pub(crate) edges: Vec<Edge>,
     /// 派生拍摄镜头归属线集合
     /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
@@ -716,14 +739,44 @@ pub(crate) struct Scene {
     pub(crate) node_actions: std::collections::HashMap<String, NodeActions>,
 }
 
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FocusContextNode {
+    pub(crate) node_id: String,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+}
+
 impl Scene {
     /// 边界级防御校验；错误文案与重构前 `set_scene` 保持一致。
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         self.validate_version()?;
         self.theme.validate()?;
+        let mut context_ids = std::collections::HashSet::new();
+        for entry in &self.model_focus_context {
+            if self.model_focus.as_ref().is_none_or(|f| f.node_id == entry.node_id)
+                || !self.nodes.iter().any(|n| n.id == entry.node_id)
+                || !context_ids.insert(&entry.node_id)
+                || ![entry.x, entry.y, entry.width, entry.height].iter().all(|v| v.is_finite())
+                || entry.width <= 0. || entry.height <= 0. {
+                return Err("Invalid model focus context");
+            }
+        }
         for node in &self.nodes {
             if node.resizable && (self.selection.nodes.len() != 1 || self.selection.nodes[0] != node.id) {
                 return Err("Invalid resize projection");
+            }
+            if node.group.as_ref().is_some_and(|g| !g.badge_scale.is_finite() || !(0.5..=2.5).contains(&g.badge_scale)) {
+                return Err("Invalid group badge scale");
+            }
+            if let Some(bounds) = node.group.as_ref().and_then(|g| g.model_bounds.as_ref()) {
+                if node.model.is_none() || !bounds.extent.is_finite() || bounds.extent <= 0.
+                    || (0..3).any(|i| !bounds.aabb.min[i].is_finite()
+                        || !bounds.aabb.max[i].is_finite() || bounds.aabb.min[i] > bounds.aabb.max[i]) {
+                    return Err("Invalid group model bounds");
+                }
             }
             if let Some(run) = &node.aggregate_run {
                 if let Some(film) = &run.film_set {
@@ -831,6 +884,8 @@ impl Scene {
                         .target_node_ids
                         .iter()
                         .any(|id| id.is_empty() || id.len() > 1024 || id == &node.id)
+                    || links.target_item_ids.len() > links.target_node_ids.len()
+                    || links.target_item_ids.iter().any(|(target, item)| !links.target_node_ids.contains(target) || item.is_empty() || item.len() > 1024)
                 {
                     return Err("Invalid composite ownership links");
                 }

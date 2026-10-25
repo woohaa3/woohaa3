@@ -5,7 +5,7 @@ import {
   applyCanvasCommands, planCanvasEdit, createFilmSetSnapshot, canonicalFilmSetFields,
   createModel3DNodeData, model3DNodeDataFields, decodeFilmSetNodeData, filmSetAnimationsOf,
   filmSetItemEditHash, modelSourceHash, shotImageReferenceIdentity, shotReferenceContentIdentity,
-  createFilmSetObjectResolver, filmSetObjectContainerData, filmSetObjectContainerId, resolveFilmSetObject, isFilmSetNode,
+  createFilmSetObjectResolver, filmSetObjectModelNodeData, filmSetObjectContainerData, filmSetObjectContainerId, filmSetObjectModelNodeId, resolveFilmSetObject, isFilmSetNode,
   isCanvasCommandSatisfied, decodeEditApplyCommand
 } from "../index.js";
 
@@ -87,6 +87,35 @@ describe("片场对象容器", () => {
     const explicit = apply(canvas, [{ type: "node.update", nodeId: "film", position: { x: 100, y: 100 } }, { type: "node.update", nodeId: containerId, position: { x: 800, y: 300 } }]);
     expect(explicit.document.nodes.find(node => node.id === containerId)?.position).toEqual({ x: 800, y: 300 });
   });
+  it("容器内真实 model3d 子节点不能被普通命令移动或改写", () => {
+    const canvas = entrance(fixture());
+    const modelId = filmSetObjectModelNodeId("film", "model");
+    expect(applyCanvasCommands(canvas, [{ type: "node.update", nodeId: modelId, position: { x: 80, y: 40 } }]).ok).toBe(false);
+    expect(applyCanvasCommands(canvas, [{ type: "node.update", nodeId: modelId, parentId: null }]).ok).toBe(false);
+    expect(applyCanvasCommands(canvas, [{ type: "nodeData.patch", nodeId: modelId, value: { title: "伪造" } }]).ok).toBe(false);
+    expect(canvas.document.nodes.find(node => node.id === modelId)?.position).toEqual({ x: 12, y: 12 });
+  });
+  it("模型卡片留出内边距，容器缩放、移动及撤销不改变相对位置", () => {
+    const canvas = entrance(fixture());
+    const modelId = filmSetObjectModelNodeId("film", "model");
+    const card = canvas.document.nodes.find(node => node.id === modelId)!;
+    expect(card).toMatchObject({ parentId: containerId, position: { x: 12, y: 12 }, width: 224, height: 208 });
+    const plan = planCanvasEdit(canvas, [{ type: "node.update", nodeId: containerId, position: { x: 720, y: 240 }, width: 320, height: 280 }]);
+    expect(plan.ok).toBe(true); if (!plan.ok) return;
+    const moved = edit(canvas, plan.forward);
+    expect(moved.document.nodes.find(node => node.id === modelId)).toMatchObject({ parentId: containerId, position: { x: 12, y: 12 }, width: 296, height: 256 });
+    expect(edit(moved, plan.inverse).document.nodes.find(node => node.id === modelId)).toEqual(card);
+  });
+  it("旧卡片恢复内边距时不把派生位置写入独立的撤销操作", () => {
+    const canvas = entrance(fixture());
+    const modelId = filmSetObjectModelNodeId("film", "model");
+    Object.assign(canvas.document.nodes.find(node => node.id === modelId)!, { position: { x: 0, y: 0 }, width: 248, height: 232 });
+    const plan = planCanvasEdit(canvas, [{ type: "nodeData.patch", nodeId: "film", value: { title: "新标题" } }]);
+    expect(plan.ok).toBe(true); if (!plan.ok) return;
+    const updated = edit(canvas, plan.forward);
+    expect(updated.document.nodes.find(node => node.id === modelId)).toMatchObject({ position: { x: 12, y: 12 }, width: 224, height: 208 });
+    expect(applyCanvasCommands(updated, [{ type: "edit.apply", ...plan.inverse }]).ok).toBe(true);
+  });
   it("移除容器保留对象；删除对象或片场清理容器，撤销恢复原布局", () => {
     const canvas = entrance(fixture());
     expect(animation(apply(canvas, [{ type: "node.remove", nodeIds: [containerId] }])).filmSetContent.items.some(item => item.id === "model")).toBe(true);
@@ -103,6 +132,20 @@ describe("片场对象容器", () => {
 });
 
 describe("对象容器默认显示和关闭", () => {
+  it("新增对象容器从片场左上方向右横排，后续写入保留手动位置", () => {
+    const source = fixture();
+    const scene = animation(source);
+    const model = scene.filmSetContent.items.find(item => item.kind === "model")!;
+    scene.filmSetContent.items.push({ ...structuredClone(model), id: "second" }, { ...structuredClone(model), id: "third" });
+    source.nodeData.film = canonicalFilmSetFields(scene) as never;
+    const canvas = apply(source, [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
+    const ids = scene.filmSetContent.items.map(item => filmSetObjectContainerId("film", item.id));
+    expect(ids.map(id => canvas.document.nodes.find(node => node.id === id)!.position)).toEqual(ids.map((_, index) => ({ x: index * 272, y: -280 })));
+    const moved = apply(canvas, [{ type: "node.update", nodeId: ids[0], position: { x: -400, y: 100 } }]);
+    const updated = apply(moved, [{ type: "nodeData.patch", nodeId: "film", value: { title: "新标题" } }]);
+    expect(updated.document.nodes.find(node => node.id === ids[0])!.position).toEqual({ x: -400, y: 100 });
+    expect(ids.slice(1).map(id => updated.document.nodes.find(node => node.id === id)!.position)).toEqual(ids.slice(1).map(id => canvas.document.nodes.find(node => node.id === id)!.position));
+  });
   it("旧片场首次写入补齐所有对象，隐藏持久化且不影响对象内容", () => {
     const canvas = apply(fixture(), [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
     for (const item of animation(canvas).filmSetContent.items) expect(resolveFilmSetObject(canvas, filmSetObjectContainerId("film", item.id))?.item.id).toBe(item.id);
@@ -249,4 +292,59 @@ it("保存并重新加载 Yjs 快照后保留容器归属与已复制模型", ()
     expect(resolveFilmSetObject(loaded.canvas, containerId)?.item).toEqual(resolveFilmSetObject(changed, containerId)?.item);
     expect(loaded.canvas.nodeData[containerId]).toEqual(changed.nodeData[containerId]);
   } finally { doc.destroy(); }
+});
+
+
+describe("每片场最多六个外显对象", () => {
+  function manyObjects() {
+    const canvas = fixture(""), data = animation(canvas);
+    const first = data.filmSetContent.items.find(item => item.kind === "model")!;
+    data.filmSetContent.items = Array.from({ length: 8 }, (_, i) => ({ ...structuredClone(first), id: `item-${i}` }));
+    canvas.nodeData.film = canonicalFilmSetFields(data) as never;
+    return canvas;
+  }
+  const shown = (canvas: ServerCanvas) => canvas.document.nodes.filter(node => node.type === "composite-asset" && resolveFilmSetObject(canvas, node.id)).map(node => resolveFilmSetObject(canvas, node.id)!.item.id).sort();
+  it("旧片场和新建片场均默认外显前六个，保留全部对象且不污染输入", () => {
+    const source = manyObjects(), before = structuredClone(source);
+    const legacy = apply(source, [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
+    const created = apply(createEmptyWoohaa3ServerCanvas("new", NOW), [{ type: "node.add", node: source.document.nodes[0], nodeData: source.nodeData.film }]);
+    for (const canvas of [legacy, created]) {
+      expect(shown(canvas)).toEqual(Array.from({ length: 6 }, (_, i) => `item-${i}`));
+      expect(animation(canvas).filmSetContent.items).toHaveLength(8);
+      expect(canvas.nodeData.film.filmSetObjectContainersHidden).toEqual(["item-6", "item-7"]);
+      expect(canvas.document.nodes.filter(node => node.type === "model3d" && node.parentId)).toHaveLength(6);
+    }
+    expect(source).toEqual(before);
+  });
+  it("第七个显示请求整批拒绝；关闭一个后可以替换外显对象，支持撤销重做", () => {
+    const canvas = apply(manyObjects(), [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
+    const rejected = applyCanvasCommands(canvas, [{ type: "nodeData.patch", nodeId: "film", value: { filmSetObjectContainersHidden: ["item-7"] } }]);
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) expect(rejected.rejection.message).toContain("最多外显 6 个对象");
+    const plan = planCanvasEdit(canvas, [{ type: "nodeData.patch", nodeId: "film", value: { filmSetObjectContainersHidden: ["item-0", "item-7"] } }]);
+    expect(plan.ok).toBe(true); if (!plan.ok) return;
+    const swapped = edit(canvas, plan.forward);
+    expect(shown(swapped)).toEqual(["item-1", "item-2", "item-3", "item-4", "item-5", "item-6"]);
+    const restored = edit(swapped, plan.inverse);
+    expect(shown(restored)).toEqual(shown(canvas));
+    expect(shown(edit(restored, plan.forward))).toEqual(shown(swapped));
+  });
+  it("升级已有八个容器的旧片场会同时移除超额容器及其真实子卡片", () => {
+    const source = manyObjects();
+    for (const item of animation(source).filmSetContent.items) {
+      const id = filmSetObjectContainerId("film", item.id);
+      source.document.nodes.push({ id, type: "composite-asset", position: { x: 400, y: 100 } });
+      source.nodeData[id] = filmSetObjectContainerData("film", item.id);
+      if (item.kind === "model") {
+        const modelId = filmSetObjectModelNodeId("film", item.id);
+        source.document.nodes.push({ id: modelId, type: "model3d", parentId: id, position: { x: 12, y: 12 } });
+        source.nodeData[modelId] = filmSetObjectModelNodeData("film", item);
+      }
+    }
+    const result = apply(source, [{ type: "nodeData.patch", nodeId: "film", value: {} }]);
+    expect(shown(result)).toHaveLength(6);
+    expect(result.document.nodes.some(node => node.id === filmSetObjectContainerId("film", "item-6"))).toBe(false);
+    expect(result.document.nodes.some(node => node.id === filmSetObjectModelNodeId("film", "item-6"))).toBe(false);
+    expect(animation(result).filmSetContent.items).toHaveLength(8);
+  });
 });

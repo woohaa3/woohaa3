@@ -16,18 +16,20 @@ let el: HTMLDivElement;
 let canvasId: string;
 let request: ReturnType<typeof vi.fn>;
 let locate: ReturnType<typeof vi.fn>;
+let select: ReturnType<typeof vi.fn>;
 let close: ReturnType<typeof vi.fn>;
 let transport: any;
 beforeEach(() => {
   el = document.createElement("div"); document.body.append(el); root = createRoot(el);
-  canvasId = "canvas"; request = vi.fn(); locate = vi.fn(); close = vi.fn();
+  canvasId = "canvas"; request = vi.fn(); locate = vi.fn(); select = vi.fn(); close = vi.fn();
   transport = { request };
   const identity = { dataScopeId: "space" };
   mocks.services = {
     applicationRemote: { transport }, canvasScope: { canvasId: () => canvasId },
     currentUser: { subscribe: () => () => undefined, getSnapshot: () => identity },
-    canvasLocate: { locateNodes: locate }, canvasNavigation: { openDialog: vi.fn() },
+    canvasLocate: { locateNodes: locate }, canvasRuntime: { controller: () => ({ selectNode: select }) }, canvasGroupRuns: { refresh: vi.fn() }, canvasNavigation: { openDialog: vi.fn(), openPanel: vi.fn() },
     agentConversationService: {
+      queryTurn: vi.fn(),
       listConnections: async () => ({ ok: true, value: [{ connectionId: "connection", adapterId: "adapter", name: "助手", ready: true, authMode: "api-key", configRevision: 1, credentialEpoch: 1, capabilities: { tools: true }, models: [{ id: "model", label: "真实模型", reasoningEfforts: ["high"] }] }] }),
       catalog: async () => ({ ok: true, value: { capabilities: { targets: ["canvas-group"], tools: true }, models: [] } })
     }
@@ -164,7 +166,7 @@ describe("blank creation lifecycle", () => {
     expect(sent.position).toEqual({ x: 40, y: 50 });
     await act(async () => resolve({ ok: true, data: { creation: { ...view, requestId: sent.requestId } } }));
     expect(creationDraft(transport, "space", "canvas").prompt).toBe("");
-    expect(locate).toHaveBeenCalledWith(["root"]); expect(close).toHaveBeenCalledTimes(1);
+    expect(locate).not.toHaveBeenCalled(); expect(select).toHaveBeenCalledWith("root"); expect(close).toHaveBeenCalledTimes(1);
   });
   it("a reopened pending draft observes completion; a different canvas never receives a late selection", async () => {
     let resolve!: (value: unknown) => void;
@@ -200,7 +202,7 @@ describe("blank creation lifecycle", () => {
     const sent = request.mock.calls[0]![0].body;
     expect(request.mock.calls[1]![0].path).toContain(encodeURIComponent(sent.requestId));
     expect(request).toHaveBeenCalledTimes(2);
-    expect(locate).toHaveBeenCalledOnce();
+    expect(locate).not.toHaveBeenCalled(); expect(select).toHaveBeenCalledOnce();
     Object.assign(creationDraft(transport, "space", "canvas"), { prompt: "try again", pending: undefined, result: undefined });
     request.mockResolvedValueOnce({ ok: false, error: "model expired", status: 400, body: { creationRegistered: false } });
     await render("reopened"); await act(async () => button("创建").click());

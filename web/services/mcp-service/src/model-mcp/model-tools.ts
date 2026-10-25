@@ -46,14 +46,16 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
       inputSchema: z.object({
         canvasId: z.string().min(1).describe("画布 ID"),
         nodeId: z.string().min(1).describe("model3d / 片场（composite-asset）节点 ID"),
+        resource: z.literal("group-appearance").optional().describe("读组/片场自身形象时必须显式指定；不是成员或片场 items"),
         includeStatistics: z.boolean().optional().describe("附带当前脚本的对象数/点数/面数统计（会执行一次权威脚本，成本与提交相同）")
       })
     },
-    async ({ canvasId, nodeId, includeStatistics }) => {
+    async ({ canvasId, nodeId, resource, includeStatistics }) => {
       if (!options.service) return toolError("模型 MCP 当前不可用");
       const outcome = await options.service.getModelNode({
         canvasId,
         nodeId,
+        ...(resource ? { resource } : {}),
         ...(includeStatistics === true ? { includeStatistics: true } : {})
       });
       return outcome.ok ? jsonResult(outcome) : toolError(outcome.message, outcome.code);
@@ -120,10 +122,12 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
         source: z.string().min(1).describe("使用 SceneBuilder API 的确定性 JavaScript"),
         version: z.enum(["woohaa-model-js-v2"]).optional().describe("脚本版本；仅支持 woohaa-model-js-v2"),
         requestId: z.string().min(1).describe("model3d/片场编辑的稳定幂等身份（必填）"),
+        resource: z.literal("group-appearance").optional().describe("只编辑组/片场自身形象"),
+        expectedContentHash: z.string().min(1).optional().describe("group-appearance 必填；使用 get_model_node 返回的 contentHash"),
         expectedModelContentHash: z.string().min(1).optional().describe("节点当前模型内容哈希；不一致时拒绝并发覆盖")
       })
     },
-    async ({ canvasId, nodeId, source, version, requestId, expectedModelContentHash }) => {
+    async ({ canvasId, nodeId, source, version, requestId, resource, expectedContentHash, expectedModelContentHash }) => {
       if (!options.service) return toolError("模型 MCP 当前不可用");
       const outcome = await options.service.submitScript({
         canvasId,
@@ -131,6 +135,7 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
         source,
         requestId,
         version: version as never,
+        ...(resource ? { resource, expectedContentHash } : {}),
         ...(expectedModelContentHash === undefined ? {} : { expectedModelContentHash })
       });
       if (!outcome.ok) return toolError(outcome.message, outcome.code);

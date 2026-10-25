@@ -30,7 +30,7 @@ export function resolveSelectionContext(
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return null;
   const panelKind = panelKindForNodeType(node.type);
-  if (!panelKind && !isModelNodeType(node.type)) return null;
+  if (!panelKind && !isModelNodeType(node.type) && node.type !== "group") return null;
   const nodeData = (canvas.nodeData as Record<string, CanvasNodeData | undefined>)[nodeId];
   return {
     nodeId,

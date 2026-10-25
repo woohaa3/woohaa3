@@ -745,3 +745,31 @@ describe("trusted structured assistant execution", () => {
     await facade.cancel(input);expect(controls.seen).toHaveLength(1);
   });
 });
+
+it("discovers every group turn from the owner ledger across pages, archived conversations and restart, without dispatch", () => {
+  const { store, controls } = setup();
+  const service = createAgentConversationService({ store, registry: fakeRegistry(fakeAdapter(controls)), groupScopeEpoch: () => 7 });
+  const accepted: string[] = [];
+  for (const nodeId of ["manual", "manual", "other", "manual", "manual"]) {
+    const created = service.createConversation({ owner: "owner", canvasId: "canvas", nodeId, adapterId: "fake" });
+    if (!created.ok) throw Error(created.error.message);
+    const requestId = `ledger-${accepted.length}`;
+    const result = service.acceptTurn({ owner: "owner", conversationId: created.conversation.conversationId, requestId,
+      entry: { action: "generate", mode: "canvas-group", canvasId: "canvas", nodeId, prompt: "test" } });
+    if (!result.ok) throw Error(result.error.message);
+    accepted.push(requestId);
+    // Archiving the conversation must not hide its outstanding execution.
+    store.clearTarget({ owner: "owner", canvasId: "canvas", nodeId });
+  }
+  store.markUnsettledUnknown("2026-10-25T00:00:00Z");
+  const requests: string[] = []; let cursor: string | undefined;
+  do {
+    const page = service.listGroupExecutions({ owner: "owner", canvasId: "canvas", nodeId: "manual", limit: 2, cursor });
+    requests.push(...page.turns.map(t => t.requestId)); cursor = page.nextCursor;
+  } while (cursor);
+  expect(new Set(requests).size).toBe(4);
+  expect(service.listGroupExecutions({ owner: "other", canvasId: "canvas" }).turns).toEqual([]);
+  expect(service.listGroupExecutions({ owner: "owner", canvasId: "other" }).turns).toEqual([]);
+  expect(controls.seen).toEqual([]); expect(controls.queries).toEqual([]);
+  expect(service.clearContext({ owner: "owner", canvasId: "canvas", nodeId: "manual" })).toMatchObject({ ok: false });
+});

@@ -30,6 +30,22 @@ function controller() {
 }
 
 describe("createCanvasLocateService", () => {
+  it("定位收起组或隐藏后代时，使用可见紧凑组的中心", () => {
+    const source = canvas();
+    source.document.nodes = [
+      {id:"g",type:"group",position:{x:100,y:100},width:600,height:400},
+      {id:"nested",type:"group",parentId:"g",position:{x:40,y:40},width:300,height:200},
+      {id:"member",type:"text",parentId:"nested",position:{x:40,y:40},width:100,height:80}
+    ];
+    source.nodeData.g = {groupCollapsed:true};
+    const ctrl = controller();
+    const service = createCanvasLocateService({getCanvas:()=>source,getController:()=>ctrl as never});
+    expect(service.locateNodes(["member"]).ok).toBe(true);
+    expect(ctrl.selected).toEqual(["g"]);
+    expect(ctrl.viewports[0]).toEqual({x:100,y:-44,zoom:1});
+    expect(service.locateNodes(["g"]).ok).toBe(true);
+    expect(ctrl.viewports[1]).toEqual(ctrl.viewports[0]);
+  });
   it("定位存在节点：选择并用当前缩放居中（走 panViewportTo）", () => {
     const ctrl = controller();
     const panned: Array<{ x: number; y: number; zoom: number }> = [];

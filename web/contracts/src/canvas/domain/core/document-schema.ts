@@ -1,3 +1,4 @@
+import { isGroupBadgeScale } from "../../group-badge.js";
 export const woohaa3CanvasSchemaVersion = "asset-canvas-v1" as const;
 
 export type Woohaa3CanvasSchemaVersion = typeof woohaa3CanvasSchemaVersion;
@@ -106,6 +107,8 @@ export function sanitizeWoohaa3CanvasNodeData(input: unknown): Woohaa3CanvasNode
       const normalizedData = readJsonObject(data);
       // Invalid imported configuration is discarded; strings/numbers never mean true.
       if (normalizedData && normalizedData.retainWhenEmpty !== undefined && typeof normalizedData.retainWhenEmpty !== "boolean") delete normalizedData.retainWhenEmpty;
+      if (normalizedData && normalizedData.groupCollapsed !== undefined && typeof normalizedData.groupCollapsed !== "boolean") delete normalizedData.groupCollapsed;
+      if (normalizedData && normalizedData.groupBadgeScale !== undefined && !isGroupBadgeScale(normalizedData.groupBadgeScale)) delete normalizedData.groupBadgeScale;
       return normalizedNodeId && normalizedData ? [[normalizedNodeId, normalizedData]] : [];
     })
   );

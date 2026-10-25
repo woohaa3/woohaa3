@@ -3,22 +3,7 @@ use super::geometry::Geometry;
 use bevy::prelude::*;
 
 pub(super) fn path(node: &crate::protocol::GraphNode) -> Vec<Vec2> {
-    let (x, y, w, h) = (node.x, node.y, node.width, node.height);
-    let r = 12_f32.min(w / 2.).min(h / 2.);
-    let mut points = Vec::with_capacity(37);
-    for (cx, cy, start) in [
-        (x + w - r, y + r, -std::f32::consts::FRAC_PI_2),
-        (x + w - r, y + h - r, 0.),
-        (x + r, y + h - r, std::f32::consts::FRAC_PI_2),
-        (x + r, y + r, std::f32::consts::PI),
-    ] {
-        for i in 0..=8 {
-            let a = start + i as f32 / 8. * std::f32::consts::FRAC_PI_2;
-            points.push(Vec2::new(cx + r * a.cos(), cy + r * a.sin()));
-        }
-    }
-    points.push(points[0]);
-    points
+    crate::canvas_query::group_model::outline(node)
 }
 
 pub(super) fn length(path: &[Vec2]) -> f32 {

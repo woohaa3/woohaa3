@@ -28,6 +28,13 @@ it("layout includes all saved object transforms, and updates without changing re
   expect(ops.filter(op => op.t === "group").every(op => op.position[0] === 0)).toBe(true);
 });
 
+it("片场自身 groupAppearance 与 items 共用组合资源但保持独立根身份", () => {
+  const appearance = composeFilmSetScene({ appearance: { ops: [box] } });
+  expect(appearance.ops.some(op => op.t === "group" && op.id === "0:" && op.parent === "\u0000scene")).toBe(true);
+  expect(appearance.ops.some(op => op.t === "box" && op.id === "0:body" && op.parent === "0:")).toBe(true);
+  expect(appearance.itemRoots).toEqual({});
+});
+
 it.each([0.2, 1, 4, 100])("whole scale %s and extreme offsets keep the complete model projection inside the frame", scale => {
   const bounds = filmSetLayoutBounds(ops, content)!;
   const input = { sceneVersion: "v2", ops, extent: 4, aabb: bounds, placement: { ...identity, scale, yaw: 37 }, filmSetFit: { width: 260, height: 195 } };

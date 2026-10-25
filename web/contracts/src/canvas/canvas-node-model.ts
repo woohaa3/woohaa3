@@ -124,8 +124,13 @@ export type FilmSetNodeData = {
   camera: InitialShotCamera;
   /** 默认片段派生的运行时时间线视图（规范存储在各片段 timeline）。 */
   timeline: AnimationTimeline;
-  /** 唯一几何来源：内部 items（模型/媒体/地面）。 */
+  /** 内部资产副本（模型/媒体/地面），不包含自身 groupAppearance。 */
   filmSetContent: FilmSetContent;
+  /**
+   * 片场自身展示模型，与普通 group 共用。保留未知版本原文供 canonical 重写；
+   * 呈现时通过 readGroupAppearanceForNode 严格解码，不属于 items。
+   */
+  groupAppearance?: unknown;
   /** 片段集合（schema 2）；缺失按空集合解释。全部镜头/对象动作都保存在此。 */
   filmSetAnimations?: FilmSetAnimations;
   origin?: ModelImportOrigin;
@@ -320,6 +325,7 @@ export function decodeFilmSetNodeData(
       timeline: clip?.timeline ?? { duration: 0, loop: false },
       filmSetContent: content.value,
       filmSetAnimations: animations.value,
+      ...(nodeData.groupAppearance !== undefined ? { groupAppearance: nodeData.groupAppearance } : {}),
       ...(origin ? { origin } : {})
     }
   };

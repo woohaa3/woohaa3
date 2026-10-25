@@ -17,6 +17,7 @@ struct Key {
     panel: Option<crate::protocol::CompositeContainerPanel>,
     has_model: bool,
     group: Option<GroupPresentation>,
+    group_model_layout: Option<crate::canvas_query::group_model::GroupModelLayout>,
     selected: bool,
     resizable: bool,
     hovered: bool,
@@ -40,6 +41,7 @@ impl Key {
             has_model: n.model.is_some(),
             scope_vertices: n.composite_asset.as_ref().map(|_| super::scope::node_scope(n).vertices),
             group: n.group.clone(),
+            group_model_layout: crate::canvas_query::group_model::for_node(n),
             selected: scene.selection.nodes.contains(&n.id),
             resizable: n.resizable,
             hovered: n.composite_asset.is_some()

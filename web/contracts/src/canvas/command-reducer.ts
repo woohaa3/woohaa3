@@ -15,6 +15,7 @@
  * 唯一状态/原子边界不随拆分改变：所有命令作用于同一 `WorkingState`，`finalize` 一次性
  * 规范化写回；输入 mapping reconciliation 与 revision/no-op 判定保持同一原子批次。
  */
+import { stableStringify } from "./canvas-script/planner/hash.js";
 import { reconcileFilmSetObjectContainers } from "./command-reducer/film-set-object-containers.js";
 import type { CanvasCommand } from "./commands.js";
 import type { ServerCanvas } from "./domain/index.js";
@@ -121,6 +122,7 @@ function applyCommand(work: WorkingState, command: CanvasCommand): CommandApplyR
     case "node.remove":
       return removeNodes(work, command.nodeIds);
     case "nodeData.patch":
+      if (command.expectedNodeData && Object.entries(command.expectedNodeData).some(([id, data]) => !work.nodes.some(n => n.id === id) || stableStringify(work.nodeData[id] ?? null) !== stableStringify(data))) return reject("edit-precondition-failed", "媒体来源或目标已变化，请重新解析");
       if (command.expectedInputMapping !== undefined && JSON.stringify(work.nodeData[command.nodeId]?.inputMapping ?? []) !== JSON.stringify(command.expectedInputMapping)) {
         return reject("invalid-connection", "输入连接已变化，请重新执行");
       }

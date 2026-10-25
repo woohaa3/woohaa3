@@ -18,7 +18,8 @@ pub(crate) fn sync_camera(
     if !flags.camera_changed {
         return;
     }
-    let view = &scene.0.viewport;
+    let overlay = crate::canvas_query::focus_context::overlay(&scene.0);
+    let view = &overlay.viewport;
     let (view_x, view_y, view_zoom) = super::image_focus::camera_view(&scene.0)
         .unwrap_or((view.x, view.y, view.zoom));    let size = surface.size;
     if let Ok((mut transform, mut projection)) = camera.single_mut() {

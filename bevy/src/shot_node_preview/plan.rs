@@ -85,7 +85,7 @@ pub(crate) fn pin_visible_owners(scene: &Scene, pins: &mut std::collections::Has
         .map(|surface| Vec2::new(surface.width, surface.height)).unwrap_or(Vec2::ZERO);
     for node in &scene.nodes {
         if let Some(preview) = node.shot_preview.as_ref() {
-            if card_geometry::visible_on_surface(node, viewport, surface) {
+            if !preview.hidden && card_geometry::visible_on_surface(node, viewport, surface) {
                 pins.insert(preview.film_set_node_id.clone());
             }
         }
@@ -118,7 +118,7 @@ pub(super) fn targets_with_preparation(
     display_of: &dyn Fn(&str) -> Option<crate::model3d::shot_adapter::DisplayUnit>,
 ) -> Vec<Target> {
     let hidden = card_geometry::focuses_isolate(scene);
-    let viewport = [scene.viewport.x, scene.viewport.y, scene.viewport.zoom];
+    let viewport = crate::canvas_query::focus_context::viewport(scene);
     let surface = scene
         .surface
         .as_ref()
@@ -194,7 +194,7 @@ pub(super) fn targets_with_preparation(
             } else {
                 0
             },
-            visible: !hidden && card_geometry::visible_on_surface(node, viewport, surface),
+            visible: !preview.hidden && !hidden && card_geometry::visible_on_surface(&crate::canvas_query::focus_context::node(scene, node), viewport, surface),
             awaiting_root: preparing_of(&owner.id),
             backdrop: Some(crate::model3d::scene::parse_hex(backdrop)),
         });
@@ -298,6 +298,25 @@ mod tests {
             preview,
             quality,
         )
+    }
+
+    #[test]
+    fn hidden_shot_keeps_capture_target_and_identity_without_visible_demand() {
+        let mut scene = scene_of(owner_node(0., 1.6), preview_node("shot-preview:x", 100.));
+        scene.surface = Some(serde_json::from_value(serde_json::json!({"width":1200,"height":800,"pixelRatio":1})).unwrap());
+        let before = identity(&scene, "high");
+        scene.nodes[1].shot_preview.as_mut().unwrap().hidden = true;
+        assert_eq!(identity(&scene, "high"), before);
+        let list = targets(&scene, &|_| None, &|_| "high".into(), None);
+        assert_eq!(list.len(), 1);
+        assert!(!list[0].visible);
+        let mut pins = std::collections::HashSet::new();
+        pin_visible_owners(&scene, &mut pins);
+        assert!(pins.is_empty());
+        pins.insert("shot-preview:x".into());
+        pin_capture_owners(&scene, &mut pins);
+        assert!(pins.contains("film"));
+        assert!(crate::canvas_query::focus_context::overlay(&scene).nodes.iter().all(|node| node.id != "shot-preview:x"));
     }
 
     #[test]
@@ -496,6 +515,15 @@ mod tests {
             r#"{"nodeId":"film","target":[0,0,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}"#,
         )
         .unwrap());
+        assert!(!targets(&scene, &bounds, &quality, None)[0].visible);
+        let original = targets(&scene, &bounds, &quality, None);
+        scene.model_focus_context = serde_json::from_value(serde_json::json!([
+            {"nodeId":"shot-preview:x","x":800,"y":20,"width":160,"height":120}
+        ])).unwrap();
+        let context = targets(&scene, &bounds, &quality, None);
+        assert!(!context[0].visible, "focus tags never display a shot thumbnail");
+        assert_eq!(context[0].content, original[0].content, "workspace projection must not change source framing");
+        scene.model_focus_context.clear();
         assert!(!targets(&scene, &bounds, &quality, None)[0].visible);
     }
 

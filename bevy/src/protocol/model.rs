@@ -32,7 +32,10 @@ use serde::Deserialize;
 /// v24 起镜头预览携带独立 backdrop，preview/capture 共用背景，拒绝忽略该字段的旧 renderer。
 /// v27 adds node capability-driven rendering paths.
 /// v28 adds the optional, strictly decoded overview-only empty placeholder.
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v28";
+/// v29 unifies group and film-set authoring: group presentations carry a badge scale,
+/// model bounds and per-object ownership link item sources; media content keeps a
+/// provider identity and schema version.
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v29";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 /// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。

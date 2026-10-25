@@ -72,7 +72,7 @@ export type McpGetNodeRequest = {
    * 附带当前脚本的规模统计（change: 2026-10-18-align-model-statistics-with-agent）。
    * 省略为 false：读取默认不执行脚本，保持轻量。
    */
-  includeStatistics?: boolean;
+  resource?: "group-appearance"; includeStatistics?: boolean;
 };
 export type McpSubmitScriptRequest = {
   canvasId: string;
@@ -86,6 +86,8 @@ export type McpSubmitScriptRequest = {
   requestId?: string;
   /** model3d 编辑的模型内容 precondition；与当前内容不一致时拒绝并发覆盖。 */
   expectedModelContentHash?: string;
+  resource?: "group-appearance";
+  expectedContentHash?: string;
 };
 export type McpReportScriptRequest = {
   canvasId: string;
@@ -402,6 +404,10 @@ export type McpGetNodeResult =
       canvasId: string;
       nodeId: string;
       nodeType?: string;
+      resource?: "group-appearance";
+      appearanceSource?: "default" | "custom" | "unsupported";
+      contentHash?: string;
+      diagnostic?: string;
       modelContentVersion?: { revision: number; sourceHash: string; contentHash: string };
       placement?: { offset: { x: number; y: number; z: number }; scale: number; yaw: number };
       snapshotHash?: string;

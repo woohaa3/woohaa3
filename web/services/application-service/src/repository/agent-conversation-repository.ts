@@ -49,6 +49,8 @@ export type AgentConversationStore = {
   prepareConnectionMigration?(owner: string, connectionId: string): boolean;
   getConversation(conversationId: string): ConversationAdapterBinding | undefined;
   listConversations(scope: OwnerCanvasScope, limit: number): ConversationAdapterBinding[];
+  activeGroupTurnCount(scope: OwnerCanvasScope & { nodeId: string }): number;
+  listGroupTurns(scope: OwnerCanvasScope & { nodeId?: string; cursor?: { createdAt: string; turnId: string } }, limit: number): ConversationTurnRecord[];
   /**
    * 按生成目标查找该节点当前会话（一个节点复用一条；最新优先，design D8）。
    *
@@ -246,6 +248,25 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       .prepare("SELECT * FROM agent_conversations WHERE owner = ? AND canvas_id = ? ORDER BY updated_at DESC LIMIT ?")
       .all(scope.owner, scope.canvasId, limit) as ConversationRow[];
     return rows.map(conversationFromRow);
+  }
+
+  activeGroupTurnCount(scope: OwnerCanvasScope & { nodeId: string }): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE owner = ? AND canvas_id = ?
+      AND json_extract(target_json, '$.mode') = 'canvas-group' AND json_extract(target_json, '$.nodeId') = ?
+      AND action != 'discuss' AND status IN ('queued', 'running', 'committing', 'unknown')`).get(scope.owner, scope.canvasId, scope.nodeId) as { count: number };
+    return row.count;
+  }
+
+  listGroupTurns(scope: OwnerCanvasScope & { nodeId?: string; cursor?: { createdAt: string; turnId: string } }, limit: number): ConversationTurnRecord[] {
+    const rows = this.db.prepare(`SELECT * FROM agent_conversation_turns
+      WHERE owner = ? AND canvas_id = ? AND action != 'discuss'
+      AND json_extract(target_json, '$.mode') = 'canvas-group'
+      AND (? IS NULL OR json_extract(target_json, '$.nodeId') = ?)
+      AND (? IS NULL OR created_at < ? OR (created_at = ? AND turn_id < ?))
+      ORDER BY created_at DESC, turn_id DESC LIMIT ?`).all(scope.owner, scope.canvasId, scope.nodeId ?? null, scope.nodeId ?? null,
+      scope.cursor?.createdAt ?? null, scope.cursor?.createdAt ?? null, scope.cursor?.createdAt ?? null, scope.cursor?.turnId ?? null,
+      Math.min(201, Math.max(1, limit))) as TurnRow[];
+    return rows.map(turnFromRow);
   }
 
   findConversationByTarget(scope: { owner: string; canvasId: string; nodeId: string; connectionId?: string | null }): ConversationAdapterBinding | undefined {

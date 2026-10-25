@@ -12,8 +12,8 @@
 import type { ComponentType } from "react";
 import type { AgentConversationService } from "./agent-conversation.js";
 
-/** 生成目标模式：模型、片场或镜头。`film-set` 于 D6 从旧 `composite-asset` 更名。 */
-export type AuthoringGenerateMode = "model3d" | "film-set" | "camera";
+/** 生成目标模式：模型、组、片场或镜头。 */
+export type AuthoringGenerateMode = "model3d" | "canvas-group" | "film-set" | "camera";
 
 /** A finite domain delivery adapter. Conversation data and presentation remain host owned. */
 export type AssistantDeliveryTarget = {
@@ -36,6 +36,7 @@ export type AssistantDeliveryTarget = {
 export type AuthoringGenerationProps = {
   /** Domain delivery uses the same authoring panel; unfinished delivery locks ordinary edits. */
   deliveryHistory?: AssistantDeliveryTarget;
+  groupRuns?: import("./canvas-group-runs.js").CanvasGroupRunsService;
   canvasId: string;
   nodeId: string;
   mode: AuthoringGenerateMode;

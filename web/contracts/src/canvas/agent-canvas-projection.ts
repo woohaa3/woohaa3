@@ -10,7 +10,6 @@
  *
  * 纯函数，无副作用，可被 Canvas Service 与测试直接复用。
  */
-import { effectiveCanvasNodeSize } from "./node-dimensions.js";
 import { organizationWorldBounds } from "./canvas-script/organization.js";
 import { agentDescriptorForCanonicalType } from "./agent-node-descriptors.js";
 import {
@@ -65,15 +64,16 @@ export function projectAgentNode(
   const descriptor = agentDescriptorForCanonicalType(node.type);
   const task = projectTaskSummary(data);
   const inputs = projectInputSummaries(canvas, node.id, data);
+  const worldBounds = organizationWorldBounds(node, new Map(canvas.document.nodes.map(n => [n.id, n])));
   return {
     nodeId: node.id,
     kind: descriptor?.kind ?? null,
     canonicalType: node.type,
     parentId: node.parentId ?? null,
-    worldBounds: organizationWorldBounds(node, new Map(canvas.document.nodes.map(n => [n.id, n]))),
+    worldBounds,
     ...(node.type === "group" ? { directMemberCount: canvas.document.nodes.filter(n => n.parentId === node.id).length } : {}),
     position: { x: node.position.x, y: node.position.y },
-    size: effectiveCanvasNodeSize(node),
+    size: { width: worldBounds.width, height: worldBounds.height },
     ...(typeof data?.title === "string" && data.title !== "" ? { title: data.title } : {}),
     ...(options.includePrompt && typeof data?.prompt === "string" ? { prompt: data.prompt } : {}),
     ...(task ? { task } : {}),

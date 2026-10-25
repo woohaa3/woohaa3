@@ -130,7 +130,7 @@ pub(super) fn sync_models(
     }
     // 相机每帧推进过渡；即使没有新 scene，也要在结束帧恢复所有模型。
     if flags.changed || *visible_focus != rig.focus_node {
-        visuals.set_visible_focus(&mut commands, rig.focus_node.as_deref());
+        visuals.set_visible_focus(&mut commands, rig.focus_node.as_deref(), &scene.0);
         *visible_focus = rig.focus_node.clone();
     }
     render_work.startup_models(

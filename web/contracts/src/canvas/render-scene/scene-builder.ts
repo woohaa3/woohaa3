@@ -23,6 +23,10 @@ import { prepareModelResource, type PreparedModelResource } from "../prepared-mo
 import { fnv1a64Hex } from "../content-hash.js";
 import { encodeFilmSetPartId, readFilmSetContent } from "../film-set-content.js";
 import type { ModelFocusProjection } from "../model-focus.js";
+import { getGroupLayoutSizes } from "../domain/core/group-geometry.js";
+import { groupAppearanceModel } from "../group-appearance.js";
+import { groupPresentationRect, hiddenByCollapsedGroups } from "../group-presentation.js";
+import { clampGroupBadgeScale } from "../group-badge.js";
 import { defaultAppTheme, validateAppThemePreset, type AppThemeSnapshot } from "../../theme/index.js";
 import { resolveNodeDisplayName, contentTypeLabelForNode } from "../node-display-name.js";
 import {
@@ -71,6 +75,8 @@ import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import type { FilmSetNodeData } from "../canvas-node-model.js";
 
 export type CanvasRenderSceneInput = {
+  groupBadgeScaleOverrides?: ReadonlyMap<string, number>;
+  groupBadgeResizable?: boolean;
   canvas: ServerCanvas;
   nodeCapabilities?: NodeCapabilityResolver;
   modelPreviews?: ReadonlyMap<string, import("./wire-model.js").BevyModelPreview>;
@@ -294,7 +300,9 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     }
     return count;
   };
-  const nodes = canvas.document.nodes.map((node) => {
+  const groupSizes = getGroupLayoutSizes(canvas.document.nodes, input.sizeOverrides);
+  const hidden = input.modelFocus || input.imageFocus || input.videoFocus ? new Set<string>() : hiddenByCollapsedGroups(canvas);
+  const nodes = canvas.document.nodes.filter(node => !hidden.has(node.id)).map((node) => {
     const context = { canvas, node, data: nodeData[node.id] };
     const capabilities = capabilitiesOf(node);
     const kind = capabilities.appearance?.palette ?? "node";
@@ -302,13 +310,17 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     // 纯模型节点（片场 animation3d + 通用扩展节点 extension3d）：无卡片，节点矩形即范围框。
     const pureModel = !!capabilities.scope;
     const filmSet = pureModel;
-    const { width, height } = effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
+    const size = groupSizes.get(node.id) ?? effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
     const override = input.positionOverrides?.get(node.id);
     const offset = absoluteOffset(node);
     // 位置预览（拖拽）是绝对画布坐标；无预览时用文档局部坐标 + 父级绝对偏移投影。
-    const x = override ? override.x : node.position.x + offset.x;
-    const y = override ? override.y : node.position.y + offset.y;
     const data = nodeData[node.id];
+    const collapsed = node.type === "group" && data?.groupCollapsed === true;
+    const { x, y, width, height } = groupPresentationRect(node, collapsed, {
+      x: override ? override.x : node.position.x + offset.x,
+      y: override ? override.y : node.position.y + offset.y,
+      ...size,
+    });
     const displayName = resolveNodeDisplayName({
       type: node.type,
       explicitName: data?.title,
@@ -317,7 +329,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const texture = resolveTextureKey(node.type, data, assets) !== null;
     const modelOpsV2 = input.modelScenesV2?.get(node.id);
     const preparedResource = input.modelResources?.get(node.id);
-    const placement = input.modelPlacements?.get(node.id) ?? readPlacement(data);
+    const placement = input.modelPlacements?.get(node.id)
+      ?? (kind === "group" ? groupAppearanceModel(data).placement : readPlacement(data));
     // 模型资源：prepared resource 优先，缺省时在同一份规范化结果上一次性派生
     // （测试/最小 fixture 兼容）。
     const resource = capabilities.modelPreparation
@@ -358,7 +371,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       texture,
       // 仅当该节点是唯一选中项时才绘制抓手，避免多选时语义歧义（design D1）。
       // group 容器同样支持右下角 resize（design D2）。
-      resizable: !!capabilities.resize && selectedIds.size === 1 && selectedIds.has(node.id),
+      resizable: !!capabilities.resize && !collapsed && selectedIds.size === 1 && selectedIds.has(node.id),
       ...(previewCard ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
       // 片场（animation3d）纯模型：不携带卡片分类名（Bevy 不绘制卡片），只给条件范围几何。
       // 普通 model3d 保留「3D 模型」分类名（change: 2026-10-08-make-film-set-model-only）。
@@ -395,10 +408,20 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       : {})
     };
     if (capabilities.container) {
-      rendered.group = capabilities.container.project(context, {
-        memberCount: directChildren.get(node.id) ?? 0,
-        outputCapableLeafCount: outputCapableLeaves(node.id)
-      });
+      rendered.group = {
+        ...capabilities.container.project(context, {
+          memberCount: directChildren.get(node.id) ?? 0,
+          outputCapableLeafCount: outputCapableLeaves(node.id)
+        }),
+        // Group-only presentation stays a projection of canonical nodeData; defaults are never
+        // written back (change: 2026-10-24-unify-group-and-film-set-authoring).
+        ...(kind === "group" ? {
+          collapsed,
+          badgeScale: clampGroupBadgeScale(input.groupBadgeScaleOverrides?.get(node.id) ?? data?.groupBadgeScale ?? 1),
+          badgeResizable: input.groupBadgeResizable === true && selectedIds.size === 1 && selectedIds.has(node.id),
+          ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {})
+        } : {})
+      };
     }
     if (capabilities.modelPreparation) {
       // prepared resource 优先：映射层只引用 resource key，不遍历顶点/序列化 ops。
@@ -472,7 +495,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     canvas.document.nodes.filter((node) => capabilitiesOf(node).connections?.endpoints({ canvas, node, data: nodeData[node.id] }) === "none").map((node) => node.id)
   );
   const edges = canvas.document.edges
-    .filter((edge) => !filmSetNodeIds.has(edge.source) && !filmSetNodeIds.has(edge.target))
+    .filter((edge) => !hidden.has(edge.source) && !hidden.has(edge.target) && !filmSetNodeIds.has(edge.source) && !filmSetNodeIds.has(edge.target))
     .map((edge) => ({
       id: edge.id,
       source: edge.source,
@@ -487,11 +510,11 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   if (input.shotPreviewCameraProjection) {
     for (const node of canvas.document.nodes) {
       const data = nodeData[node.id];
-      if (!isFilmSetNode(node.type, data)) continue;
+      if (hidden.has(node.id) || !isFilmSetNode(node.type, data)) continue;
       shotPreviewLinks.push(...shotPreviewLinksForFilmSet({
         filmSetNodeId: node.id,
         data: data as FilmSetNodeData | undefined,
-        previewNodeById: (previewId) => previewNodeById.get(previewId),
+        previewNodeById: (previewId) => { const node = previewNodeById.get(previewId); return node?.shotPreview?.hidden ? undefined : node; },
         cameraProjection: (clipId) => input.shotPreviewCameraProjection!(node.id, clipId)
       }));
     }
@@ -504,7 +527,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     edges,
     ...(shotPreviewLinks.length > 0 ? { shotPreviewLinks } : {}),
     selection: {
-      nodes: [...(input.selection?.nodes ?? [])],
+      nodes: [...(input.selection?.nodes ?? [])].filter(id => !hidden.has(id)),
       edge: input.selection?.edge ?? null
     },
     viewport: input.viewportOverride ?? { x: 0, y: 0, zoom: 1 },
@@ -522,7 +545,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     ...(input.animationPlayback ? { animationPlayback: input.animationPlayback } : {}),
     ...(input.focusTransition ? { focusTransition: input.focusTransition } : {}),
     ...(input.nodeActionToolbars && input.nodeActionToolbars.size > 0
-      ? { nodeActions: Object.fromEntries([...input.nodeActionToolbars].filter(([, value]) => value.actions.length > 0)) }
+      ? { nodeActions: Object.fromEntries([...input.nodeActionToolbars].filter(([id, value]) => !hidden.has(id) && value.actions.length > 0)) }
       : {}),
     ...(input.selectionActionToolbar && input.selectionActionToolbar.actions.length > 0
       ? { selectionActions: input.selectionActionToolbar }
@@ -566,6 +589,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
       ? `marquee=${scene.marquee.x},${scene.marquee.y},${scene.marquee.width},${scene.marquee.height}`
       : "marquee=",
     scene.surface ? `surf=${scene.surface.width},${scene.surface.height},${scene.surface.pixelRatio},${scene.surface.contentRight ?? 0},${JSON.stringify(scene.surface.contentRect ?? null)},${scene.surface.originX ?? 0},${scene.surface.originY ?? 0}` : "surf=",
+    JSON.stringify(scene.modelFocusContext ?? null),
     scene.modelFocus
       ? `focus=${scene.modelFocus.nodeId},${scene.modelFocus.yaw},${scene.modelFocus.pitch},${scene.modelFocus.distance},${scene.modelFocus.radius},${scene.modelFocus.target.join(",")}`
       : "focus=",

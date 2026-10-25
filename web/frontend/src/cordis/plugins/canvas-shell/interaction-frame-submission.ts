@@ -32,6 +32,7 @@ export function createFrameSubmission(deps: {
   const indexNow = () => sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
   const transientNow = () => JSON.stringify({
     ...deps.transient(), selected:deps.state.selected, draft:deps.state.draft,
+    badgeResize: deps.state.gesture.kind === "group-badge-resize" ? [deps.state.gesture.nodeId, deps.state.gesture.scale] : null,
     hover:[deps.state.hoveredNodeId,deps.state.hoveredPort,deps.state.hoveredEdgeId]
   });
   const now = deps.now ?? (() => performance.now());
@@ -61,7 +62,7 @@ export function createFrameSubmission(deps: {
   const presentationRows = (index: CanvasNodeIndex, next: Map2D) => {
     const accepted = baseline;
     if (!accepted) return [];
-    return changedPreviewPositions(index, accepted.previews, next).map(position => {
+    return changedPreviewPositions(index, accepted.previews, next).filter(position => mirror.node(accepted.scene, position.id)).map(position => {
       const node = mirror.node(accepted.scene, position.id);
       const previous = accepted.previews.get(position.id) ?? index.absolutePosition(position.id);
       if (!node || !previous) throw new Error("Unknown presentation position node");
@@ -201,5 +202,7 @@ export function createFrameSubmission(deps: {
       || baseline.base !== (runtime?.baseSceneGeneration?.() ?? 0)) return undefined;
     return mirror.node(baseline.scene, nodeId);
   };
-  return {run,dragScene,renderedNode};
+  const focusContextContains = (point: { x: number; y: number }): boolean => !!baseline?.scene.modelFocus
+    && (baseline.scene.modelFocusContext ?? []).some(rect => point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
+  return {run,dragScene,renderedNode,focusContextContains};
 }

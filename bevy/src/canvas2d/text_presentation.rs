@@ -192,6 +192,7 @@ pub(crate) fn present(meta: &LogicalText, zoom: f32, dpr: f32) -> Option<Present
 
 /// 当前有效相机倍率：与实际二维相机一致（含图片/视频聚焦取景），不是只读 overview zoom。
 fn effective_zoom(scene: &CurrentScene) -> f32 {
+    if scene.0.model_focus.is_some() { return 1.; }
     super::image_focus::camera_view(&scene.0)
         .map(|(_, _, zoom)| zoom)
         .unwrap_or(scene.0.viewport.zoom)

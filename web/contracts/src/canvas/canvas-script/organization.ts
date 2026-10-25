@@ -1,5 +1,6 @@
 /** Shared organization projection. Positions remain canonical parent coordinates. */
 import { effectiveCanvasNodeSize } from "../node-dimensions.js";
+import { getGroupLayoutSizes } from "../domain/core/group-geometry.js";
 
 export type OrganizationNode = {
   id: string;
@@ -40,7 +41,9 @@ export function organizationWorldBounds(
     y += parent.position.y;
     parentId = parent.parentId;
   }
-  return { x, y, ...effectiveCanvasNodeSize(node) };
+  const size = (node.type === "group" ? getGroupLayoutSizes([...nodes.values()]).get(node.id) : undefined)
+    ?? effectiveCanvasNodeSize(node);
+  return { x, y, ...size };
 }
 
 export function projectCanvasOrganization(

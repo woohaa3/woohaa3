@@ -40,11 +40,15 @@ describe('page node implementation registry', () => {
     expect(registry.getRevision()).toBe(0);
     expect(registry.resolve(context)).toEqual({ generation: 0 });
   });
-  it('group has independent container/resize/actions without model providers or slots', () => {
+  it('group owns its appearance model as presentation without preview slots or focus', () => {
     const registry = createNodeImplementationRegistry(new CompositeAssetRegistry());
     const capabilities = registry.resolve({ ...context, node: { ...context.node, type: 'group' } });
     expect(capabilities.container).toBeDefined(); expect(capabilities.resize).toBeDefined(); expect(capabilities.actions).toBeDefined();
-    expect(capabilities.modelPreparation).toBeUndefined(); expect(capabilities.modelPreview).toBeUndefined();
-    expect(capabilities.resources).toBeUndefined(); expect(capabilities.focus).toBeUndefined();
+    // 组自身展示模型与普通模型共用 payload lease，但不是模型任务：不写回状态、无预览相机。
+    expect(capabilities.modelPreparation).toBeDefined();
+    expect(capabilities.modelPreparation?.reportsStatus).toBe(false);
+    expect(capabilities.resources).toMatchObject({ channel: 'model', previewSlot: false });
+    expect(capabilities.modelPreview).toBeUndefined();
+    expect(capabilities.focus).toBeUndefined();
   });
 });

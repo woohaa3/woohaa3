@@ -1,4 +1,5 @@
 import { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
+import { createNodeImplementationRegistry } from "../../../extension-api/node-implementations.js";
 /**
  * 模型编辑 gizmo/镜头 Plugin 生命周期测试
  * （change: add-model-editor-gizmo-shot-capture，任务 2.2 / 2.3）。
@@ -128,6 +129,7 @@ async function harness(canvas: ServerCanvas, mode: { value: "edit" | "history" }
   const instance = await startFrontendRuntime({
     installPlatform: (ctx: Context) => {
       ctx.provide("compositeAssets" as never, compositeAssets as never);
+      ctx.provide("nodeImplementations" as never, createNodeImplementationRegistry(compositeAssets) as never);
       ctx.provide("canvasState" as never, { getCanvas: () => woohaa3CanvasStore.getState().canvas, getWorkingCanvas: () => woohaa3CanvasStore.getState().canvas, subscribe: woohaa3CanvasStore.subscribe } as never);
       ctx.provide("slots" as never, slots as never);
       ctx.provide("inputScopes" as never, new InputScopeService() as never);

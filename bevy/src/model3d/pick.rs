@@ -21,7 +21,7 @@ use crate::protocol::{GraphNode, ModelSnapshot, Scene};
 /// 复合资产按通用 presentation 排除——其 overview hover 只能来自共享 interaction snapshot 的
 /// 地面范围命中；普通模型本体与聚焦内部对象候选不受影响（design D4）。
 pub(crate) fn is_model_candidate(node: &GraphNode) -> bool {
-    node.composite_asset.is_none() && node.model_preview.is_none() && node.model.is_some()
+    node.composite_asset.is_none() && node.group.is_none() && node.model_preview.is_none() && node.model.is_some()
 }
 
 /// 派生普通模型候选世界 AABB；`lookup` 提供不可变资源表（`set_scene` 接受点注入 `bridge`）。

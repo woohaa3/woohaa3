@@ -59,6 +59,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     canvas: deps.canvas,
     nodeCapabilities: options.nodeCapabilities,
     onSceneSubmitted: deps.onSceneSubmitted,
+    ...(options.mediaContent ? { mediaContent: options.mediaContent } : {}),
     ...(options.compositeAssets ? { compositeAssets: options.compositeAssets } : {}),
     ...(options.canvasId ? { canvasId: options.canvasId } : {}),
     getRuntime: deps.getRuntime,

@@ -13,6 +13,7 @@ import {
   expandWoohaa3CanvasSelectionWithGroupDescendants,
   findGroupContainingCenter,
   getGroupRequiredMinSize,
+  getGroupLayoutSizes,
   getWoohaa3CanvasNodeAbsolutePosition,
   getWoohaa3CanvasSelectionBounds,
   groupWoohaa3CanvasNodes,
@@ -47,7 +48,7 @@ function byId(nodes: Woohaa3CanvasNode[]): Map<string, Woohaa3CanvasNode> {
 }
 
 describe("groupWoohaa3CanvasNodes", () => {
-  it("用 40px padding 包围顶层节点并转为相对坐标", () => {
+  it("左右上 40px、底部 80px 包围节点并保持成员绝对坐标", () => {
     const nodes = [node("a", { x: 100, y: 100 }), node("b", { x: 400, y: 300 })];
     const result = groupWoohaa3CanvasNodes(nodes, ["a", "b"]);
     expect(result).not.toBeNull();
@@ -58,7 +59,7 @@ describe("groupWoohaa3CanvasNodes", () => {
     // 包围盒 = (100,100)-(600,400)，每侧 padding 40。
     expect(group.position).toEqual({ x: 60, y: 60 });
     expect(group.width).toBe(580); // 500 + 80
-    expect(group.height).toBe(380); // 300 + 80
+    expect(group.height).toBe(420); // 300 + 40 + 80
 
     // 成员相对坐标 = 绝对 - group 原点，绝对位置不变。
     const a = next.find((entry) => entry.id === "a")!;
@@ -372,5 +373,32 @@ describe("mergeDraggedNodePositions", () => {
     const keep = node("k", { x: 5, y: 5 });
     const merged = mergeDraggedNodePositions([keep], [node("k", { x: 99, y: 99 })], ["other"]);
     expect(merged[0]!.position).toEqual({ x: 5, y: 5 });
+  });
+});
+
+
+describe("group footer layout projection", () => {
+  it("existing groups gain footer space without mutating members or stored dimensions", () => {
+    const nodes = [node("g", {x: 0, y: 0}, {type: "group", width: 300, height: 180}),
+      node("m", {x: 40, y: 40}, {parentId: "g"})];
+    const before = structuredClone(nodes);
+    expect(getGroupLayoutSizes(nodes).get("g")).toEqual({width: 300, height: 220});
+    expect(getGroupRequiredMinSize(nodes, "g")).toEqual({minWidth: 280, minHeight: 220});
+    expect(nodes).toEqual(before);
+  });
+  it("nested groups include their own footer and live member size overrides", () => {
+    const nodes = [node("g", {x: 0, y: 0}, {type: "group", width: 300, height: 220}),
+      node("inner", {x: 40, y: 40}, {type: "group", parentId: "g", width: 280, height: 200}),
+      node("m", {x: 40, y: 40}, {parentId: "inner"})];
+    const sizes = getGroupLayoutSizes(nodes, new Map([["m", {width: 400, height: 300}]]));
+    expect(sizes.get("inner")).toEqual({width: 480, height: 420});
+    expect(sizes.get("g")).toEqual({width: 560, height: 540});
+  });
+  it("manual enlargement stays intact; resize previews may shrink back to the protected minimum", () => {
+    const nodes = [node("g", {x: 0, y: 0}, {type: "group", width: 900, height: 800}),
+      node("m", {x: 40, y: 40}, {parentId: "g"})];
+    expect(getGroupLayoutSizes(nodes).get("g")).toEqual({width: 900, height: 800});
+    expect(getGroupLayoutSizes(nodes, new Map([["g", {width: 280, height: 220}]])).get("g"))
+      .toEqual({width: 280, height: 220});
   });
 });

@@ -162,3 +162,4 @@ export * from "./assistant-execution.js";
 
 export * from "./node-implementations.js";
 export { scriptModelPreparation, orbitModelPreview, modelWorkspaceFocus, nodeActionContributions, rectangularNodeResize, modelResourceDemand } from "@woohaa3/contracts";
+export type { MediaContentService, MediaContentProvider, MediaContentState, MediaContentSource, MediaContentContext, MediaContentKind } from "./media-content.js";

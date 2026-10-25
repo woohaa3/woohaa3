@@ -216,3 +216,31 @@ fn composite_node_action_bar_uses_scope_and_tracks_viewport_and_moves() {
     if let Some(ground) = asset.scope_ground.as_mut() { ground.cx += 100.; ground.cy += 100.; }
     assert_hit(moved, &shifted, &zoom);
 }
+
+
+#[test]
+fn focused_references_only_expose_enabled_close_hits_in_css_coordinates() {
+    use crate::canvas_query::focus_context;
+    let mut source = scene_with_actions(vec![node("n1", 900., 700., 200., 120.), node("owner", 0., 0., 400., 300.)]);
+    source.model_focus = Some(serde_json::from_value(serde_json::json!({"version":"woohaa-model-focus-v1","nodeId":"owner","target":[0,0,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87})).unwrap());
+    source.model_focus_context = serde_json::from_value(serde_json::json!([{"nodeId":"n1","x":20,"y":20,"width":184,"height":36}])).unwrap();
+    source.node_actions.get_mut("n1").unwrap().actions = vec![crate::protocol::NodeAction { id: focus_context::CLOSE_ACTION.into(), label: "关闭容器".into(), enabled: true, ..default() }];
+    let generation = accept_scene(&source);
+    let display = focus_context::node(&source, &source.nodes[0]);
+    let (x,y,w,h) = focus_context::close_rect(&display);
+    assert_eq!(point_query(generation, x+w/2., y+h/2., 1., None).hit, Some(results::PointHit::NodeAction { node_id:"n1".into(), action_id:focus_context::CLOSE_ACTION.into(), menu:false }));
+    assert_eq!(point_query(generation, 40., 38., 1., None).hit, None);
+    assert_eq!(point_query(generation, 950., 750., 1., None).hit, None);
+    source.node_actions.get_mut("n1").unwrap().actions[0].enabled = false;
+    let generation = accept_scene(&source);
+    assert_eq!(point_query(generation, x+w/2., y+h/2., 1., None).hit, None);
+}
+
+
+#[test]
+fn hidden_shot_has_no_canvas_hit() {
+    let mut shot = node("hidden", 100., 100., 240., 180.);
+    shot.shot_preview = Some(serde_json::from_value(serde_json::json!({"filmSetNodeId":"owner","clipId":"clip","kind":"static","name":"镜头","hidden":true,"aspect":1.7778,"duration":0,"state":"ready","coverCamera":{"azimuth":0,"elevation":0.4,"distance":4,"focusOffset":[0,0,0]}})).unwrap());
+    let generation = accept_scene(&scene(vec![shot], vec![]));
+    assert_eq!(point_query(generation, 200., 180., 1., None).hit, None);
+}

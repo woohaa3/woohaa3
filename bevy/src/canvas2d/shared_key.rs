@@ -14,6 +14,7 @@ struct Reference {
 }
 #[derive(PartialEq)]
 pub(super) struct SharedKey {
+    pub(super) focus_ownership_links: bool,
     pub(super) ownership_links: Vec<([f32; 2], [f32; 2])>,
     theme: String,
     references: Vec<Reference>,
@@ -64,6 +65,7 @@ impl SharedKey {
             })
             .collect();
         Self {
+            focus_ownership_links: false,
             ownership_links: Vec::new(),
             theme: theme.fingerprint().to_owned(),
             references,

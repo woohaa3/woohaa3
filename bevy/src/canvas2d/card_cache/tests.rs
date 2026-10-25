@@ -449,7 +449,7 @@ fn shared_group_and_overlay_buffers_ignore_unrelated_card_changes() {
 }
 
 #[test]
-fn container_blocks_update_locally_and_sort_transparency_before_high_overlays() {
+fn container_blocks_update_locally_and_keep_group_fill_out_of_overlays() {
     use bevy::mesh::VertexAttributeValues;
     let mut world = world();
     for node in &mut world.resource_mut::<CurrentScene>().0.nodes {
@@ -488,11 +488,9 @@ fn container_blocks_update_locally_and_sort_transparency_before_high_overlays() 
         else {
             panic!()
         };
-        assert!(
-            positions
-                .iter()
-                .all(|p| (p[2] + sort_z - super::super::group::GROUP_Z).abs() < 1e-6)
-        );
+        // Group surfaces belong to the existing 3D camera, never this higher 2D overlay.
+        // A group-only blend buffer therefore contains only the invisible empty-mesh sentinel.
+        assert!(positions.iter().all(|p| p[0] < -100000.));
     }
     world.resource_mut::<CurrentScene>().0.nodes[17].x += 25.;
     render(&mut world);

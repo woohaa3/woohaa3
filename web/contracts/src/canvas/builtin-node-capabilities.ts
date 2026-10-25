@@ -6,6 +6,7 @@ import { prepareModelResource } from './prepared-model.js';
 import { compositeAssetSceneOps } from './composite-asset-scene.js';
 import { isFilmSetNode } from './domain/core/composite-asset-identity.js';
 import { getGroupRequiredMinSize } from './domain/index.js';
+import { readGroupAppearanceForNode } from './group-appearance.js';
 import { minimumNodeSizeFor } from './node-minimum-size.js';
 import { DEFAULT_MODEL_PREVIEW } from './render-scene/wire-model.js';
 import type { NodeCapabilities, NodeCapabilityResolver, NodeModelPreparation } from './node-capabilities.js';
@@ -29,6 +30,27 @@ export const savedCompositePreparation: NodeModelPreparation = {
 };
 export const orbitModelPreview: NonNullable<NodeCapabilities['modelPreview']> = {
   project: (_context, view) => ({ ...DEFAULT_MODEL_PREVIEW, ...view })
+};
+/**
+ * A group's own appearance model is presentation, never a member task: preparation reports no
+ * canonical status (change: 2026-10-24-unify-group-and-film-set-authoring).
+ */
+export const groupAppearancePreparation: NodeModelPreparation = {
+  reportsStatus: false,
+  executionKey: ({ data }) => {
+    const appearance = readGroupAppearanceForNode(data);
+    return `group:${appearance.source}:${String(appearance.value.model.modelScriptVersion)}:${appearance.value.model.modelScript}`;
+  },
+  prepare: ({ data }) => {
+    const model = readGroupAppearanceForNode(data).value.model;
+    const execution = executeModelScriptVersioned(model.modelScript, model.modelScriptVersion);
+    if (!execution.ok) return { status: `fail:${execution.stage}:${execution.code}` };
+    if (!isSupportedModelScriptVersion(model.modelScriptVersion)) return { status: 'fail:compile:version-mismatch' };
+    return {
+      status: 'ok',
+      resource: prepareModelResource({ sceneVersion: sceneIrVersionFor(model.modelScriptVersion), ops: execution.scene.ops })
+    };
+  }
 };
 export const modelWorkspaceFocus: NonNullable<NodeCapabilities['focus']> = { kind: () => 'model' };
 export const nodeActionContributions: NonNullable<NodeCapabilities['actions']> = { accepts: () => true };
@@ -60,7 +82,11 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
   });
   entries.set('group', {
     appearance: { palette: 'group', defaultSize: compact },
+    modelPreparation: groupAppearancePreparation,
     container: { project: ({ data }, counts) => ({ title: typeof data?.title === 'string' ? data.title : '', ...counts }) },
+    // 组保留结构容器身份，其自身展示模型与普通模型共用 payload lease；模型直接绘制在画布
+    // 世界，不创建离屏预览相机，因此只占模型 payload、不占预览槽。
+    resources: { channel: 'model', previewSlot: false, contentKey: context => context.modelResourceKey },
     connections: { endpoints: () => 'aggregate' }, actions: nodeActionContributions,
     resize: { mode: 'rect', minimum: ({ canvas, node }) => {
       const min = getGroupRequiredMinSize(canvas.document.nodes.map(entry => ({ ...entry, data: {} })), node.id);

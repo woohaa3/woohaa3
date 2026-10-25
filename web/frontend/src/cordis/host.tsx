@@ -149,6 +149,7 @@ export function AuthoringGenerateHost(props: import("./contract/authoring.js").A
 
 function AuthoringGenerateContent(props: import("./contract/authoring.js").AuthoringGenerationProps) {
   const contributions = useSlot("authoring.generate");
+  const groupRuns = useOptionalService("canvasGroupRuns");
   const deliveries = useSlot("authoring.delivery");
   const canvasState = useOptionalService("canvasState");
   const canvasSession = useOptionalService("canvasSession");
@@ -327,6 +328,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
     ...(hostSourceSelection ? { sourceSelection: hostSourceSelection } : {}),
     ...(service?.navigateToDetail
       ? {
+          groupRuns: props.mode === "canvas-group" ? groupRuns : undefined,
           agentConversation: {
             service: conversation as never,
             conversationId: resolvedTarget.current === targetKey ? nodeConversation?.conversationId ?? null : null,

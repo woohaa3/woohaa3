@@ -5,8 +5,12 @@ export type CompositeAssetMediaSource = { planeId: string; nodeId: string; asset
 export type CompositeAssetProjection = { resource?: PreparedModelResource; composition?: BevyCompositeAssetCompositionInfo; diagnostic?: string };
 export type CompositeChildPresentation = CompositeChildRelation & {
   panel?: CompositeContainerPanel;
+  /** Optional object inside the owner whose live bounds anchor the focus link. */
+  sourceItemId?: string;
   /** Containers can route double-click back to their owning workspace. */
   focusOwner?: boolean;
+  /** Explicit opt-in to closing this child presentation; defaults to false. */
+  closable?: boolean;
 };
 export type CompositeAssetAdapter = {
   emptyPlaceholder?: import("@woohaa3/contracts").CompositeAssetEmptyPlaceholder;
@@ -23,6 +27,8 @@ export type CompositeAssetAdapter = {
   label?: string;
   /** Declare managed canvas containers and entity cards. The host owns common presentation/dragging. */
   children?(canvas: ServerCanvas, ownerNodeId: string): readonly CompositeChildPresentation[];
+  /** Hide a managed child presentation without deleting its source content. */
+  closeChild?(canvas: ServerCanvas, childNodeId: string): void;
   childLinkAnchor?: [number, number, number];
   /**
    * 通用范围形状**覆盖**声明（change: 2026-10-12-align-film-set-scope-with-isometric-grid，
@@ -214,13 +220,22 @@ export class CompositeAssetRegistry {
       if (!adapter?.children) continue;
       for (const child of adapter.children(canvas, owner.id)) {
         if (child.ownerNodeId !== owner.id || child.nodeId === owner.id || !nodes.has(child.nodeId)) continue;
+        if (child.role !== "object-entry" && child.role !== "preview") continue;
+        if (child.role === "preview" && (child.closable || child.focusOwner)) continue;
         if (child.kind !== "container" && child.kind !== "entity") continue;
         if (children.has(child.nodeId)) throw new Error(`复合资产子节点归属冲突：${child.nodeId}`);
-        if (child.kind === "container" && nodes.get(child.nodeId)?.type !== "composite-asset") throw new Error("容器必须使用 composite-asset 节点");
+        if (child.kind === "container" && !["composite-asset", "model3d"].includes(nodes.get(child.nodeId)?.type ?? "")) throw new Error("容器必须使用 composite-asset 或 model3d 节点");
         children.set(child.nodeId, child);
       }
     }
     return children;
+  }
+  closeChild(canvas: ServerCanvas, childNodeId: string): boolean {
+    const child = this.children(canvas).get(childNodeId);
+    const adapter = child && this.resolve(canvas, child.ownerNodeId);
+    if (child?.closable !== true || !adapter?.closeChild) return false;
+    adapter.closeChild(canvas, childNodeId);
+    return true;
   }
   dragAlongNodeIds(canvas: ServerCanvas | null, ownerNodeId: string): string[] {
     return [...this.children(canvas).values()].filter(child => child.ownerNodeId === ownerNodeId && child.followOwner !== false).map(child => child.nodeId);
@@ -240,7 +255,12 @@ export class CompositeAssetRegistry {
     }
     for (const [ownerId, targetNodeIds] of targets) {
       const owner = nodes.get(ownerId)!;
-      owner.compositeAsset!.ownershipLinks = { anchor: this.resolve(canvas, ownerId)?.childLinkAnchor ?? [0, 0, 0], targetNodeIds };
+      const targetItemIds = Object.fromEntries(targetNodeIds.flatMap(id => {
+        const itemId = children.get(id)?.sourceItemId;
+        return itemId ? [[id, itemId]] : [];
+      }));
+      owner.compositeAsset!.ownershipLinks = { anchor: this.resolve(canvas, ownerId)?.childLinkAnchor ?? [0, 0, 0], targetNodeIds,
+        ...(Object.keys(targetItemIds).length ? { targetItemIds } : {}) };
     }
     // Managed entities share the same ownership links as containers. Their media/shot renderer stays intact.
     scene.shotPreviewLinks = scene.shotPreviewLinks?.filter(link => !children.has(link.previewNodeId)) ?? [];

@@ -2,7 +2,9 @@ import type { CanvasCreationView, ConversationTurn } from "@woohaa3/contracts";
 
 /** Private ledger projection, shared by group chrome and the activity panel; never persisted in nodeData. */
 export type CanvasGroupRun = {
-  creation: CanvasCreationView;
+  rootGroupId: string;
+  conversationId?: string;
+  creation?: CanvasCreationView;
   turn?: ConversationTurn;
   requestId: string;
   status: string;

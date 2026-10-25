@@ -26,6 +26,7 @@ export type RunStateProjectionInput = import("./run-state-projection.js").NodeRu
 
 export type InteractionControllerOptions = {
   nodeCapabilities?: import("../../../extension-api/node-implementations.js").NodeImplementationRegistry;
+  mediaContent?: import("../../../extension-api/media-content.js").MediaContentService;
   compositeAssets?: import("../../../extension-api/composite-assets.js").CompositeAssetRegistry;
   canvas: HTMLCanvasElement;
   getRuntime: () => BevyRuntime | null;
@@ -515,6 +516,8 @@ export type InteractionController = {
 
 export type Gesture =
   | { kind: "none" }
+  | import("./input/group-badge-resize.js").GroupBadgeResizeGesture
+  | { kind: "group-badge-press"; pointerId: number; nodeId: string; collapsed: boolean; startScreen: Point; moved: boolean }
   | { kind: "history-press"; pointerId: number; nodeId: string; presentationId: string; startScreen: Point }
   | { kind: "model-preview"; pointerId: number; nodeId: string; last: Point }
   | { kind: "pan"; pointerId: number; last: Point }

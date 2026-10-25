@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
-import { applyCanvasCommands, canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields, filmSetObjectContainerId, resolveFilmSetObject, planCanvasEdit } from "@woohaa3/contracts";
+import { applyCanvasCommands, decodeFilmSetNodeData, canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields, filmSetObjectContainerId, resolveFilmSetObject, planCanvasEdit, filmSetAnimationsOf, shotPreviewNodeId } from "@woohaa3/contracts";
 import { installFilmSetObjectContainers } from "../src/authoring/browser/object-containers.js";
 import { setFilmSetObjectContainerVisible } from "../src/authoring/browser/object-container-commands.js";
 import { createFilmSetModelAdapter } from "../src/preview/browser/model-adapter.js";
@@ -46,6 +46,26 @@ function harness() {
 }
 
 describe("对象容器公开交互", () => {
+  it("旧片场只外显六个对象，满额不提交显示请求，关闭一个后可以换出另一个", async () => {
+    const h = harness();
+    const decoded = decodeFilmSetNodeData(h.canvas().nodeData.film);
+    expect(decoded.ok).toBe(true); if (!decoded.ok) return;
+    const first = decoded.value.filmSetContent.items[0];
+    decoded.value.filmSetContent.items = Array.from({ length: 8 }, (_, i) => ({ ...structuredClone(first), id: `actor-${i}` }));
+    h.canvas().nodeData.film = canonicalFilmSetFields(decoded.value) as never;
+    const dispose = installFilmSetObjectContainers(h.ctx);
+    const adapter = createFilmSetModelAdapter(undefined, h.canvas);
+    expect(adapter.children!(h.canvas(), "film").map(child => child.sourceItemId)).toEqual(Array.from({ length: 6 }, (_, i) => `actor-${i}`));
+    const rejected = await setFilmSetObjectContainerVisible(h.ctx, "film", "actor-6", true);
+    expect(rejected.ok).toBe(false);
+    expect(h.record).not.toHaveBeenCalled();
+    expect((await setFilmSetObjectContainerVisible(h.ctx, "film", "actor-0", false)).ok).toBe(true);
+    expect((await setFilmSetObjectContainerVisible(h.ctx, "film", "actor-6", true)).ok).toBe(true);
+    expect(adapter.children!(h.canvas(), "film").map(child => child.sourceItemId)).toEqual(["actor-1", "actor-2", "actor-3", "actor-4", "actor-5", "actor-6"]);
+    await Promise.resolve(); h.notify();
+    expect(h.submitCommands).toHaveBeenCalledTimes(1);
+    dispose();
+  });
   it("打开已有片场自动补齐所有对象，不需要手动引出且不进入用户历史", async () => {
     const h = harness(), dispose = installFilmSetObjectContainers(h.ctx);
     const id = filmSetObjectContainerId("film", "actor");
@@ -109,4 +129,21 @@ describe("对象容器公开交互", () => {
     dispose();
     expect(h.contributions.size).toBe(0);
   });
+});
+
+
+it("镜头始终外显，忽略旧隐藏设置，只有对象容器可关闭", () => {
+  const h = harness();
+  h.canvas().nodeData.film = canonicalFilmSetFields(createFilmSetSnapshot({ title: "片场", model: { modelScript: "scene.box({id:'body'});", modelScriptVersion: "woohaa-model-js-v2" }, motionScript: "motion.model.rotate('body', { speed: 1 });", timeline: { duration: 5, loop: false } })) as never;
+  const decoded = decodeFilmSetNodeData(h.canvas().nodeData.film);
+  if (!decoded.ok) throw new Error(decoded.reason);
+  const clip = filmSetAnimationsOf(decoded.value).clips[0];
+  const id = shotPreviewNodeId("film", clip.id);
+  h.canvas().nodeData.film.filmSetShotPreviewsHidden = [clip.id];
+  h.submitCommands([]);
+  const children = createFilmSetModelAdapter().children!(h.canvas(), "film");
+  expect(children.find(child => child.nodeId === id)).toMatchObject({ kind: "entity" });
+  expect(children.find(child => child.nodeId === id)?.closable).not.toBe(true);
+  expect(children.filter(child => child.kind === "container").every(child => child.closable === true)).toBe(true);
+  expect(decodeFilmSetNodeData(h.canvas().nodeData.film)).toEqual(decoded);
 });

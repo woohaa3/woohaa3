@@ -3,7 +3,7 @@ import { effectiveCanvasNodeSize } from "../../node-dimensions.js";
 import { AGENT_CANVAS_LIMITS, type AgentGridLayout } from "../../agent-canvas-protocol.js";
 import type { CanvasCommand } from "../../commands.js";
 import { collectWoohaa3CanvasRemovalIds } from "../../domain/core/node-removal.js";
-import { groupPadding } from "../../domain/core/group-geometry.js";
+import { groupPadding, groupBottomPadding } from "../../domain/core/group-geometry.js";
 import { organizationWorldBounds, type OrganizationNode } from "../organization.js";
 import type { PlannerSnapshot } from "./types.js";
 
@@ -118,7 +118,7 @@ export class PlanGeometry {
       const x = this.snapshot.rootGroupId === id ? n.position.x : Math.min(...children.map((c) => c.position.x)) - groupPadding;
       const y = this.snapshot.rootGroupId === id ? n.position.y : Math.min(...children.map((c) => c.position.y)) - groupPadding;
       const right = Math.max(...children.map((c) => c.position.x + effectiveCanvasNodeSize(c).width)) + groupPadding;
-      const bottom = Math.max(...children.map((c) => c.position.y + effectiveCanvasNodeSize(c).height)) + groupPadding;
+      const bottom = Math.max(...children.map((c) => c.position.y + effectiveCanvasNodeSize(c).height)) + groupBottomPadding;
       this.touch(id);
       n.position = { x, y };
       n.width = Math.max(this.snapshot.rootGroupId === id ? n.width : 248, right - x);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, getWoohaa3CanvasNodeAbsolutePosition, type Woohaa3CanvasNode } from "./domain/index.js";
-import { createCompositeChildNode, followCompositeChildOwner, placeCompositeChild, planCompositeChildNode, removeCompositeChildNodes } from "./composite-children.js";
+import { createCompositeChildNode, followCompositeChildOwner, placeCompositeChild, planCompositeChildLayout, planCompositeChildNode, removeCompositeChildNodes } from "./composite-children.js";
 
 describe("public composite children", () => {
   const group: Woohaa3CanvasNode = { id: "group", type: "group", position: { x: 100, y: 200 }, data: {} };
@@ -32,6 +32,20 @@ describe("public composite children", () => {
     const preferred = { x: 0, y: 0, width: 100, height: 100 }, occupied = [{ ...preferred, y: -500, height: 10000 }];
     expect(placeCompositeChild({ preferred, occupied, maxAttempts: 2, step: 32, spacing: 40 }).y).toBe(9540);
     expect(placeCompositeChild({ preferred, occupied, direction: "up", spacing: 40 }).y).toBe(-640);
+  });
+
+  it("places a row above the owner from left to right, bypassing occupied positions horizontally", () => {
+    const ownerBounds = { x: 100, y: 500, width: 320, height: 240 };
+    const sizes = [{ width: 248, height: 232 }, { width: 248, height: 232 }];
+    expect(planCompositeChildLayout({ layout: "row", ownerBounds, sizes, occupied: [] })).toEqual([
+      { x: 100, y: 220, width: 248, height: 232 },
+      { x: 372, y: 220, width: 248, height: 232 }
+    ]);
+    expect(planCompositeChildLayout({ layout: "row", ownerBounds, sizes, occupied: [{ x: 100, y: 220, width: 248, height: 232 }] })).toEqual([
+      { x: 372, y: 220, width: 248, height: 232 },
+      { x: 644, y: 220, width: 248, height: 232 }
+    ]);
+    expect(placeCompositeChild({ preferred: { x: 0, y: 0, width: 100, height: 100 }, occupied: [{ x: -500, y: 0, width: 10000, height: 100 }], direction: "right", spacing: 24, maxAttempts: 1 }).x).toBe(9524);
   });
 
   it("projection preserves saved positions and stable data; removal cleans edges and data", () => {

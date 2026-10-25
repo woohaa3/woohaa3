@@ -648,7 +648,8 @@ fn publish(
     let visible = scene
         .model_focus
         .as_ref()
-        .is_none_or(|focus| focus.node_id == staging.node);
+        .is_none_or(|focus| focus.node_id == staging.node)
+        || (crate::canvas_query::focus_context::contains(&scene, &staging.node) && node.is_some_and(|n| n.model_preview.is_some()));
     world.entity_mut(root).insert((
         Transform {
             translation,

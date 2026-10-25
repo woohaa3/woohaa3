@@ -471,6 +471,7 @@ pub(crate) fn sync_models(
             .model_focus
             .as_ref()
             .map(|focus| focus.node_id.as_str()),
+        scene,
     );
     purge_unresolved_active(&mut models.active_model, &scene.nodes);
     apply_animation_playback(commands, models, scene);
@@ -567,11 +568,11 @@ impl ModelVisuals {
     /// 只写层级根：Bevy 的可见性传播会把 `Hidden`/`Inherited` 传给全部后代
     /// （`visibility_propagate_system` 保留子级自身的局部 `Hidden`），因此不必
     /// 遍历整棵子树（change: 2026-10-14-scope-film-set-object-picking-to-focus，design D6）。
-    pub(crate) fn set_visible_focus(&mut self, commands: &mut Commands, focus_node: Option<&str>) {
+    pub(crate) fn set_visible_focus(&mut self, commands: &mut Commands, focus_node: Option<&str>, scene: &crate::protocol::Scene) {
         let mut inserts = 0u64;
         let mut skips = 0u64;
         for (id, root) in &self.roots {
-            let visible = focus_node.is_none_or(|selected| selected == id);
+            let visible = focus_node.is_none_or(|selected| selected == id) || (crate::canvas_query::focus_context::contains(scene, id) && scene.nodes.iter().any(|n| n.id == *id && n.model_preview.is_some()));
             let visibility = if visible {
                 Visibility::Inherited
             } else {

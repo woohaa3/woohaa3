@@ -23,8 +23,8 @@ export function groupScopedClient<T extends object>(client: T, canvas: CanvasSer
       }
       if (property === "cancelRun" && !scope.ownsRun?.(String(input.nodeId), String(input.runId))) return { ok: false, code: "group-run-forbidden", message: "只能停止当前回合明确关联的运行" };
       // Existing upstream references are not implicitly made available to this turn.
-      if (["getModelNode", "getModelStatistics", "runNode"].includes(String(property)) && snapshot.canvas.document.edges.some(e => nodeIds.includes(e.target) && !members.has(e.source))) return { ok: false, code: "group-external-input", message: "目标有组外输入，请先明确处理跨组连接" };
-      if (["getModelNode", "getModelStatistics", "runNode"].includes(String(property)) && nodeIds.some(id => hasExternalCanvasReference(snapshot.canvas.nodeData[id], members, canvasGroupAssetIds(snapshot.canvas, members)))) return { ok: false, code: "group-external-input", message: "目标引用了组外输入" };
+      if (input.resource !== "group-appearance" && ["getModelNode", "getModelStatistics", "runNode"].includes(String(property)) && snapshot.canvas.document.edges.some(e => nodeIds.includes(e.target) && !members.has(e.source))) return { ok: false, code: "group-external-input", message: "目标有组外输入，请先明确处理跨组连接" };
+      if (input.resource !== "group-appearance" && ["getModelNode", "getModelStatistics", "runNode"].includes(String(property)) && nodeIds.some(id => hasExternalCanvasReference(snapshot.canvas.nodeData[id], members, canvasGroupAssetIds(snapshot.canvas, members)))) return { ok: false, code: "group-external-input", message: "目标引用了组外输入" };
       const result = await method.call(target, { ...input, canvasId: scope.canvasId });
       if (property === "runNode" && result?.ok) scope.onAction?.({ canvasId: scope.canvasId, nodeId: result.nodeId, runId: result.runId, jobId: result.jobId });
       return result;

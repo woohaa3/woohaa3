@@ -30,6 +30,7 @@ import {
 import { executeMotionScript } from "./motion-executor.js";
 import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
+import { defaultGroupAppearance } from "./group-appearance.js";
 
 const SCRIPT = `scene.box({ id: "torso", size: [1, 2, 0.5] });`;
 const MOTION = `motion.model.rotate("torso", { speed: 0.5 });`;
@@ -191,6 +192,28 @@ describe("两类 3D 节点数据（任务 1.1/1.3）", () => {
     // 几何只来自 items（显式来源模型）。
     expect(decoded.value.filmSetContent.items.map(item => item.id)).toEqual([ITEM_ID]);
     expect(decoded.value.filmSetAnimations!.clips[0]!.bindings[0]!.itemId).toBe(ITEM_ID);
+  });
+
+  it("片场编辑 canonical 重写保留自身 groupAppearance", () => {
+    const appearance = defaultGroupAppearance();
+    const fields = filmSetNodeData({ groupAppearance: appearance });
+    const decoded = decodeFilmSetNodeData(fields);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    const rewritten = canonicalFilmSetFields({
+      ...decoded.value,
+      title: "编辑后的片场"
+    });
+    expect(rewritten.groupAppearance).toEqual(appearance);
+  });
+
+  it("未知 groupAppearance 版本在片场 canonical 重写时保留原文", () => {
+    const unknown = { schemaVersion: 99, model: { opaque: true } };
+    const decoded = decodeFilmSetNodeData(filmSetNodeData({ groupAppearance: unknown }));
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    const rewritten = canonicalFilmSetFields(decoded.value);
+    expect(rewritten.groupAppearance).toEqual(unknown);
   });
 
   it("严格拒绝顶层 authored 模型五字段", () => {

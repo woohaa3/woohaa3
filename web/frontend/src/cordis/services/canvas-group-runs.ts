@@ -1,4 +1,4 @@
-import type { CanvasCreationView } from "@woohaa3/contracts";
+import type { CanvasCreationView, ConversationTurn } from "@woohaa3/contracts";
 import type { CanvasGroupRun, CanvasGroupRunsService, CanvasGroupRunsSnapshot } from "../contract/canvas-group-runs.js";
 import type { ApplicationRemoteTransport } from "../contract/remote.js";
 import type { AgentConversationService } from "../contract/agent-conversation.js";
@@ -37,33 +37,42 @@ export function createCanvasGroupRuns(options: {
     const current = () => !disposed && epoch === generation && options.user.getSnapshot()?.dataScopeId === namespace;
     pending = Promise.resolve().then(async () => {
       try {
-        const result = await options.transport.request({ path: `${PATH}?canvasId=${encodeURIComponent(options.canvasId)}` });
+        const creationResult = await options.transport.request({ path: `${PATH}?canvasId=${encodeURIComponent(options.canvasId)}` });
         if (!current()) return;
-        if (!result.ok) throw new Error(result.error);
-        const creations = (result.data as { creations?: CanvasCreationView[] }).creations ?? [];
-        const errors: string[] = [];
-        const rows = await Promise.all(creations.filter(c => c.canvasId === options.canvasId).map(async creation => {
-          const previous = snapshot.rows.find(row => row.creation.requestId === creation.requestId);
-          let turn = previous?.turn;
-          try {
-            const detail = creation.conversationId ? await options.conversations.readConversation(creation.conversationId, 0) : null;
-            if (detail && !detail.ok) throw new Error(detail.error);
-            turn = detail?.ok ? [...detail.value.turns].reverse().find(t =>
-            t.target.mode === "canvas-group" && t.target.canvasId === options.canvasId && t.target.nodeId === creation.rootGroupId && t.action !== "discuss"
-            ) : undefined;
-          } catch (error) {
-            errors.push(error instanceof Error ? error.message : "对话状态读取失败");
-          }
-          const status = turn?.status ?? creation.stage;
-          return {
-            creation, turn, requestId: turn?.requestId ?? creation.turnRequestId,
+        if (!creationResult.ok) throw new Error(creationResult.error);
+        const creations = ((creationResult.data as { creations?: CanvasCreationView[] }).creations ?? []).filter(c => c.canvasId === options.canvasId);
+        const turns: ConversationTurn[] = [];
+        let cursor: string | undefined;
+        const cursors = new Set<string>();
+        do {
+          const result = await options.transport.request({ path: `/api/agent-conversations/group-executions?canvasId=${encodeURIComponent(options.canvasId)}&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}` });
+          if (!current()) return;
+          if (!result.ok) throw new Error(result.error);
+          const page = result.data as { turns: ConversationTurn[]; nextCursor?: string };
+          turns.push(...page.turns);
+          cursor = page.nextCursor;
+          if (cursor && cursors.has(cursor)) throw new Error("组执行分页游标重复，请刷新重试");
+          if (cursor) cursors.add(cursor);
+        } while (cursor);
+        const seen = new Set<string>();
+        const rows: CanvasGroupRun[] = [];
+        const add = (turn: ConversationTurn | undefined, creation?: CanvasCreationView) => {
+          const requestId = turn?.requestId ?? creation!.turnRequestId;
+          if (seen.has(requestId)) return;
+          seen.add(requestId);
+          const status = turn?.status ?? creation!.stage;
+          rows.push({ rootGroupId: turn?.target.nodeId ?? creation!.rootGroupId,
+            conversationId: turn?.conversationId ?? creation?.conversationId, creation, turn, requestId,
             status, label: labels[status] ?? status,
             active: ["preparing", "root-created", "accepted", "queued", "running", "committing", "unknown"].includes(status),
-            error: turn?.error?.message ?? creation.error?.message,
-            createdAt: turn?.createdAt ?? previous?.createdAt ?? new Date().toISOString()
-          } satisfies CanvasGroupRun;
-        }));
-        if (current()) publish({ rows, error: [...new Set(errors)].join("；") });
+            error: turn?.error?.message ?? creation?.error?.message,
+            createdAt: turn?.createdAt ?? snapshot.rows.find(row => row.requestId === requestId)?.createdAt ?? new Date().toISOString() });
+        };
+        for (const turn of turns) if (turn.target.mode === "canvas-group" && turn.target.canvasId === options.canvasId && turn.action !== "discuss")
+          add(turn, creations.find(c => c.turnRequestId === turn.requestId));
+        for (const creation of creations) if (!seen.has(creation.turnRequestId)) add(undefined, creation);
+        rows.sort((a, b) => Number(b.active) - Number(a.active) || b.createdAt.localeCompare(a.createdAt) || b.requestId.localeCompare(a.requestId));
+        if (current()) publish({ rows, error: "" });
       } catch (error) {
         if (current()) publish({ ...snapshot, error: error instanceof Error ? error.message : "运行状态读取失败" });
       } finally {

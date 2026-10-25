@@ -21,6 +21,12 @@ export type NodePreparationResult = {
 export type NodeModelPreparation = {
   executionKey(context: NodeCapabilityContext): string | undefined;
   prepare(context: NodeCapabilityContext): NodePreparationResult | Promise<NodePreparationResult>;
+  /**
+   * Whether the outcome becomes canonical model-script status (`modelScriptStatus`).
+   * Presentation-only resources — such as a group's own appearance — pass `false`: they are
+   * never model tasks and must not write task state into nodeData.
+   */
+  reportsStatus?: boolean;
 };
 export type NodeResourceContext = NodeCapabilityContext & {
   modelResourceKey: string | null;

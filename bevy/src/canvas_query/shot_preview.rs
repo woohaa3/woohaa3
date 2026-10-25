@@ -56,7 +56,7 @@ pub(crate) fn content_rect(x: f32, y: f32, width: f32, height: f32) -> (f32, f32
 
 /// 节点内容区矩形（复用节点标准字段）。
 pub(crate) fn content_rect_of(node: &GraphNode) -> (f32, f32, f32, f32) {
-    content_rect(node.x, node.y, node.width, node.height)
+    super::layout::content_rect(node)
 }
 
 /// 内容区中心（GPU 预览 Sprite 的锚点）。
@@ -344,4 +344,9 @@ mod tests {
         .unwrap());
         assert!(focuses_isolate(&scene));
     }
+}
+
+/// Presentation visibility does not remove the shot or its offscreen capture target.
+pub(crate) fn hidden(node: &crate::protocol::GraphNode) -> bool {
+    node.shot_preview.as_ref().is_some_and(|preview| preview.hidden)
 }

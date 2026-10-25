@@ -4,7 +4,7 @@
  *
  * 浏览器侧把一份 `FilmSetNodeData` 组合为单个 prepared resource（**只含静态几何**）：
  * - 每个 model item 的 `model.modelScript`；
- * - ground 几何。
+ * - ground 几何及片场自身的 groupAppearance。
  *
  * 动态 child 动作**不烘焙进 ops**，而是作为独立投影（`BevyFilmSetObjectMotion`）交给 Bevy，
  * 由 Rust 按片场统一播放头 T 求值。这样静态几何在播放/seek/摆放时不重编译（design D2）。
@@ -45,6 +45,11 @@ export type FilmSetCompositionResult = {
 export type BuildFilmSetCompositionInput = {
   nodeId: string;
   animation: FilmSetNodeData;
+  /** 片场节点自身的 groupAppearance 展示模型；items 仍保持独立资产身份。 */
+  appearance?: {
+    ops: readonly SceneV2Op[];
+    placement?: { offset: { x: number; y: number; z: number }; scale: number; yaw: number };
+  };
 };
 
 /**
@@ -66,7 +71,7 @@ export function buildFilmSetComposition(input: BuildFilmSetCompositionInput): Fi
     }
   }
 
-  // items-only 片场：几何只来自内部 model/ground items，不存在顶层 authored 模型作用域。
+  // 内部 model/ground 资产保持 items 身份；自身 appearance 使用独立保留根，不冒充成员。
   const models = content.items
     .filter((item) => item.kind === "model")
     .map((item) => ({
@@ -86,6 +91,7 @@ export function buildFilmSetComposition(input: BuildFilmSetCompositionInput): Fi
 
   const composition = composeFilmSetScene({
     scenePlacement: animation.scenePlacement,
+    appearance: input.appearance,
     models,
     grounds
   });

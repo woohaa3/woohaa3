@@ -159,9 +159,9 @@ export class TaskActivityStore {
   replaceGroupRuns(input: CanvasGroupRunsSnapshot): void {
     if (this.disposed) return;
     for (const row of input.rows) {
-      const previous = this.groupRuns.find(entry => entry.creation.requestId === row.creation.requestId);
+      const previous = this.groupRuns.find(entry => entry.requestId === row.requestId);
       // 组记录重新 active（用户重开 / 同组再次执行）视为新活动：清除移除标记并重新计时。
-      if (row.active) this.dismissedGroups.delete(row.creation.requestId);
+      if (row.active) this.dismissedGroups.delete(row.requestId);
       // 与任务一致：首次观察到该组进入终态时记未读，重复终态不重复计数。
       if (!row.active && (!previous || previous.active)) this.unread++;
     }
@@ -173,10 +173,10 @@ export class TaskActivityStore {
   /** 组节点入口：重开已移除的组记录并按新的终态观察重新计时。 */
   openGroup(nodeId: string): void {
     if (this.disposed) return;
-    const row = this.groupRuns.find(entry => entry.creation.rootGroupId === nodeId);
+    const row = this.groupRuns.find(entry => entry.rootGroupId === nodeId);
     if (row) {
-      const key = `group:${row.creation.requestId}`;
-      this.dismissedGroups.delete(row.creation.requestId);
+      const key = `group:${row.requestId}`;
+      this.dismissedGroups.delete(row.requestId);
       // 重开是用户显式动作：撤销可能仍在进行的退出计时，让记录按新的终态观察重新计时。
       this.exiting.delete(key);
       const timer = this.expiryTimers.get(key);
@@ -455,9 +455,9 @@ export class TaskActivityStore {
       if (job) rows.push(adaptJobRow(job, this.capabilities));
     }
     for (const run of this.groupRuns) {
-      if (this.dismissedGroups.has(run.creation.requestId)) continue;
+      if (this.dismissedGroups.has(run.requestId)) continue;
       rows.push(adaptGroupRow(run, this.capabilities, {
-        selected: this.selectedGroupId === run.creation.rootGroupId
+        selected: this.selectedGroupId === run.rootGroupId
       }));
     }
     rows.sort(compareRows);
@@ -477,7 +477,7 @@ export class TaskActivityStore {
         break;
       case "group":
         // 组来源是整表轮询：标记 dismiss，`replaceGroupRuns` 在重新 active 时清除。
-        this.dismissedGroups.add(row.source.run.creation.requestId);
+        this.dismissedGroups.add(row.source.run.requestId);
         break;
     }
     // 未读只统计仍留在面板里的终态记录；移除即回退（任务 / 后台活动 / 组一致）。

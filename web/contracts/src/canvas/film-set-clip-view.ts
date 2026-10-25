@@ -74,6 +74,7 @@ export function canonicalFilmSetFields(animation: FilmSetNodeData): Record<strin
     sceneCamera: animation.sceneCamera,
     filmSetContent: animation.filmSetContent,
     filmSetAnimations: filmSetAnimationsOf(animation),
+    ...(animation.groupAppearance !== undefined ? { groupAppearance: animation.groupAppearance } : {}),
     ...(animation.origin ? { origin: animation.origin } : {})
   };
 }

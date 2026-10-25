@@ -26,6 +26,7 @@ export default function CanvasCreationAgent(props: {
   const user = useService("currentUser");
   const navigation = useService("canvasNavigation");
   const locate = useService("canvasLocate");
+  const runtime = useService("canvasRuntime");
   const groupRuns = useService("canvasGroupRuns");
   const session = useSyncExternalStore(user.subscribe, user.getSnapshot, user.getSnapshot);
   const canvasId = scope.canvasId();
@@ -71,7 +72,10 @@ export default function CanvasCreationAgent(props: {
     void groupRuns?.refresh();
     const state = inputController.getSnapshot();
     if (view.stage === "accepted" && state.revision === state.pending?.revision && isCurrent()) {
-      locate.locateNodes([view.rootGroupId]); props.onClose();
+      runtime.controller()?.selectNode(view.rootGroupId);
+      void conversations.queryTurn(view.turnRequestId);
+      navigation.openPanel({ type: "model-node-editor", nodeId: view.rootGroupId });
+      props.onClose();
     }
     return view.stage === "accepted" ? { kind: "accepted" as const, value: view }
       : { kind: "unknown" as const, message: view.error?.message ?? "创建尚未完成，请核对原请求" };

@@ -38,6 +38,7 @@ const job = (patch: Partial<BackgroundFeedJob> = {}): BackgroundFeedJob => ({
 });
 
 const groupRun = (patch: Partial<CanvasGroupRun> = {}): CanvasGroupRun => ({
+  rootGroupId: "g1", conversationId: "conversation-g1",
   creation: {
     requestId: "creation-g1", canvasId: "c", rootGroupId: "g1", commandId: "cmd", turnRequestId: "request-g1",
     scopeEpoch: 1, stage: "accepted", conversationId: "conversation-g1", turnId: "turn-g1"
@@ -125,7 +126,7 @@ describe("组创作记录适配器", () => {
     expect(groupRunTone("partial")).toBe("danger");
     expect(groupRunTone("unknown")).toBe("danger");
     expect(groupRunTone("cancelled")).toBe("muted");
-    expect(groupRowKey(groupRun())).toBe("group:creation-g1");
+    expect(groupRowKey(groupRun())).toBe("group:request-g1");
   });
 
   it("组动作只在装配能力与来源条件允许时出现", () => {
@@ -151,11 +152,11 @@ describe("组创作记录适配器", () => {
   it("停止与重试的条件由来源语义给出", () => {
     expect(canStopGroupRun(groupRun({ status: "unknown" }))).toBe(true);
     expect(canStopGroupRun(groupRun({ status: "succeeded", active: false }))).toBe(false);
-    expect(canStopGroupRun(groupRun({ creation: { ...groupRun().creation, conversationId: undefined } }))).toBe(false);
-    expect(canRetryGroupRun(groupRun({ creation: { ...groupRun().creation, turnId: undefined } }))).toBe(true);
+    expect(canStopGroupRun(groupRun({ conversationId: undefined, creation: { ...groupRun().creation!, conversationId: undefined } }))).toBe(false);
+    expect(canRetryGroupRun(groupRun({ creation: { ...groupRun().creation!, turnId: undefined } }))).toBe(true);
     expect(canRetryGroupRun(groupRun())).toBe(false);
     expect(canRetryGroupRun(groupRun({
-      creation: { ...groupRun().creation, turnId: undefined, error: { code: "group-target-missing", message: "目标缺失" } }
+      creation: { ...groupRun().creation!, turnId: undefined, error: { code: "group-target-missing", message: "目标缺失" } }
     }))).toBe(false);
   });
 });

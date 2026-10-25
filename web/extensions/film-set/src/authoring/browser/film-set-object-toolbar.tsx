@@ -2,6 +2,7 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import type { FilmSetObjectSession } from "./object-session.js";
 import type { FilmSetObjectAction } from "./object-action.js";
+import { FILM_SET_MAX_VISIBLE_OBJECTS, filmSetVisibleObjectIds } from "@woohaa3/contracts";
 import { Button } from "@woohaa3/frontend/extension-api";
 import { DiamondIcon, ImageIcon, VideoIcon, LayoutGridIcon, TrashIcon } from "@woohaa3/frontend/extension-api";
 import { FilmSetObjectTransformFields } from "./film-set-object-transform-fields.js";
@@ -30,6 +31,8 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" }); }, [state.selectedItemId]);
   if (state.nodeId !== nodeId) return null;
   const objects = session.objects();
+  const visibleIds = new Set(filmSetVisibleObjectIds(objects.map(entry => entry.itemId), hiddenContainerIds));
+  const atLimit = visibleIds.size >= FILM_SET_MAX_VISIBLE_OBJECTS;
   const item = session.selectedItem();
   const editable = writable && !readOnly;
   const pending = state.pendingItemId !== null;
@@ -45,12 +48,14 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
     <section className="film-set-object-dock" aria-label="片场对象">
       <div className="film-set-section-heading">
         <h3>场景对象 <span className="film-set-count">{objects.length}</span></h3>
+        {onContainerVisibilityChange ? <span className="film-set-count">外显 {visibleIds.size}/{FILM_SET_MAX_VISIBLE_OBJECTS}</span> : null}
         {state.selectedItemId ? <Button size="sm" tone="ghost" onClick={() => session.select(null)}>取消选择</Button> : null}
       </div>
       <ul ref={list} className="film-set-object-list" role="listbox" aria-label="片场对象列表" onWheel={event => event.stopPropagation()}>
         {objects.length === 0 ? <li className="film-set-object-list__empty">片场为空，拖入模型开始布置。</li> : null}
         {objects.map(entry => {
           const Icon = KIND_ICON[entry.kind];
+          const visible = visibleIds.has(entry.itemId);
           return (
             <li key={entry.itemId} className="film-set-object-list__item">
               <button type="button" className="film-set-object-row" role="option" aria-selected={entry.itemId === state.selectedItemId}
@@ -90,7 +95,7 @@ export function FilmSetObjectToolbar({ session, writable, readOnly, nodeId, onDe
                 <span className="film-set-object-row__name">{entry.name}</span>
                 <span className="film-set-object-row__kind">{KIND_LABEL[entry.kind]}</span>
               </button>
-              {onContainerVisibilityChange ? <Button size="sm" tone="ghost" disabled={!containerVisibilityWritable || readOnly || pending} onClick={() => onContainerVisibilityChange(entry.itemId, hiddenContainerIds.includes(entry.itemId))}>{hiddenContainerIds.includes(entry.itemId) ? "显示容器" : "关闭容器"}</Button> : null}
+              {onContainerVisibilityChange ? <Button size="sm" tone="ghost" disabled={!containerVisibilityWritable || readOnly || pending || (!visible && atLimit)} title={!visible && atLimit ? `最多外显 ${FILM_SET_MAX_VISIBLE_OBJECTS} 个对象，请先关闭一个容器` : undefined} onClick={() => onContainerVisibilityChange(entry.itemId, !visible)}>{visible ? "关闭容器" : "显示容器"}</Button> : null}
             </li>
           );
         })}

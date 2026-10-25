@@ -258,8 +258,12 @@ pub(crate) fn sync(
         else {
             continue;
         };
-        let (x, y, width, height) = layout::content_rect(node);
-        let visible = rig.focus_node.is_none() && scene.model_focus.is_none()
+        let display = crate::canvas_query::focus_context::node(scene, node);
+        let index = crate::canvas_query::focus_context::index(scene, &node.id, index);
+        let (x, y, width, height) = layout::content_rect(&display);
+        let context = crate::canvas_query::focus_context::contains(scene, &node.id);
+        let viewport = if context { crate::isometric_grid::IsometricGridView { x: 0., y: 0., zoom: 1. } } else { viewport };
+        let visible = (rig.focus_node.is_none() && scene.model_focus.is_none())
             && x * viewport.zoom + viewport.x < surface.size.x
             && (x + width) * viewport.zoom + viewport.x > 0.
             && y * viewport.zoom + viewport.y < surface.size.y

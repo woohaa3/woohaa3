@@ -66,6 +66,7 @@ describe("TaskActivityFeed 受控预览（任务 5.2）", () => {
       // 新的进行中组记录：自动展开。
       act(() => store.replaceGroupRuns({
         rows: [{
+          rootGroupId: "g1",
           creation: {
             requestId: "creation-g1", canvasId: "c", rootGroupId: "g1", commandId: "cmd",
             turnRequestId: "request-g1", scopeEpoch: 1, stage: "accepted"

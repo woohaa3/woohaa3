@@ -10,14 +10,18 @@ import { builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabi
  * 静止热路径（design D7 / 任务 7.1）：候选表按 working canvas 对象身份 memo；视口/选择/hover
  * 变化只重算需求分类，不重新解析资产 URL 或模型身份。文档变化（新对象）才重建候选表。
  */
+import {
+  getGroupLayoutSizes,
+  groupPresentationRect,
+  hiddenByCollapsedGroups,
+  groupBadgeRect
+} from "@woohaa3/contracts";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import type { ContentKeyOf } from "./content-identity.js";
 import type { CanvasResourceCoordinator } from "./coordinator.js";
 
 /** 画布节点（渲染中立）：只依赖几何与父子关系，不读取 `data`。 */
 type CanvasNode = ServerCanvas["document"]["nodes"][number];
-
-/** 参与重资源准入的节点类型（图片/视频/模型/片场）。 */
 
 
 export type ResidencyCandidate = {
@@ -29,6 +33,8 @@ export type ResidencyCandidate = {
   width: number;
   height: number;
   eligible: boolean;
+  /** 总览中被收起组隐藏，聚焦/捕获 pin 可临时恢复内容需求。 */
+  hiddenByGroup?: boolean;
   /**
    * 是否消耗「预览渲染槽」（离屏相机 + 渲染目标）。
    *
@@ -40,7 +46,7 @@ export type ResidencyCandidate = {
 };
 
 /**
- * 从画布派生候选表（只含媒体/模型/复合资产节点）。
+ * 从画布派生候选表（媒体、模型、组展示模型及复合资产节点）。
  *
  * `contentKeyOf` 提供稳定内容身份；返回 `null` 表示该节点目前没有可驻留内容（例如资产未
  * ready），此时 `eligible: false`，但节点仍留在表里，避免每帧重建候选结构。
@@ -66,22 +72,32 @@ export function collectResidencyCandidates(
     }
     return { x, y };
   };
+  const groupSizes = getGroupLayoutSizes(canvas.document.nodes);
+  const hidden = hiddenByCollapsedGroups(canvas);
   const candidates: ResidencyCandidate[] = [];
   for (const node of canvas.document.nodes) {
     const capabilities = resolver.resolve({ canvas, node, data: canvas.nodeData[node.id] });
     if (!capabilities.resources) continue;
-    const size = effectiveCanvasNodeSize(node, undefined, capabilities);
+    const size = groupSizes.get(node.id) ?? effectiveCanvasNodeSize(node, undefined, capabilities);
     const key = contentKeyOf(node);
-    const position = absolute(node);
+    const rect = groupPresentationRect(node, canvas.nodeData[node.id]?.groupCollapsed === true, {
+      ...absolute(node),
+      ...size,
+    });
+    const badge = node.type === "group" ? groupBadgeRect(rect, canvas.nodeData[node.id]?.groupBadgeScale) : null;
     candidates.push({
       nodeId: node.id,
       contentKey: key ?? "",
-      x: position.x,
-      y: position.y,
-      width: size.width,
-      height: size.height,
-      eligible: key !== null,
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      // Use the same footer-expanded group rectangle as the accepted scene.
+      height: rect.height
+        + (badge ? Math.max(0, badge.y + badge.height - rect.y - rect.height) : 0),
+      eligible: !hidden.has(node.id) && key !== null,
+      hiddenByGroup: hidden.has(node.id),
       // 离屏预览相机只为模型/复合资产创建；图片与视频走卡片贴图，不占预览渲染槽。
+      // 组模型直接绘制在画布世界（capability 声明 previewSlot: false）。
       previewSlot: capabilities.resources.previewSlot
     });
   }
@@ -205,7 +221,10 @@ export function createResidencyProjector(input: ResidencyProjectorInput): () => 
       pageVisible: visible,
       interactive,
       pins,
-      candidates: input.candidatesFor(canvas)
+      // 聚焦继续访问原内容；退出聚焦后重新服从组的折叠呈现。
+      candidates: pins.length ? input.candidatesFor(canvas).map(candidate => candidate.hiddenByGroup
+        && candidate.contentKey && (pins.includes(candidate.nodeId) || interactive.includes(candidate.nodeId))
+        ? { ...candidate, eligible: true } : candidate) : input.candidatesFor(canvas)
     });
     coordinator.beginFrame();
     submitLeases();

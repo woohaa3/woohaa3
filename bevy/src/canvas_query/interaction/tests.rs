@@ -25,6 +25,7 @@ fn scene(nodes: Vec<GraphNode>, edges: Vec<Edge>) -> Scene {
     }
 }
 
+mod group_model;
 mod film_set;
 mod node_action;
 mod spatial;
@@ -60,9 +61,13 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
 fn group(id: &str, x: f32, y: f32, w: f32, h: f32, leaves: u32) -> GraphNode {
     GraphNode {
         group: Some(GroupPresentation {
+            collapsed: false,
+                badge_scale: 1.,
+                badge_resizable: false,
             title: String::new(),
             member_count: 1,
             output_capable_leaf_count: leaves,
+            model_bounds: None,
             run_status: None,
         }),
         ..node(id, x, y, w, h)

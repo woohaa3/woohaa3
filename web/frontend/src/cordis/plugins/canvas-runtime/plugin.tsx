@@ -1,3 +1,4 @@
+import { MediaContentStatus } from "./media-content-status.js";
 /**
  * Canvas Runtime Plugin（change: 2026-09-28-split-frontend-god-plugins，task 2）。
  *
@@ -43,6 +44,10 @@ export type CanvasRuntimeExtensionOptions = Pick<
 export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = {}): Plugin.Function<void> {
   return definePlugin(
     (ctx: Context) => {
+      if (ctx.get("mediaContent")) ctx.effect(() => ctx.slots.register("canvas.overlay", {
+        id: "media-content-status", owner: CANVAS_RUNTIME_PLUGIN_ID, priority: 22,
+        render: () => <MediaContentStatus />,
+      }), "media-content-status");
       const canvasId = options.canvasId ?? DEFAULT_CANVAS_ID;
       const resolvedTargets = (): FocusTargetInput[] => {
         const provider = ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider | undefined;
@@ -74,6 +79,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
           canvasId,
           compositeAssets: ctx.compositeAssets,
           nodeCapabilities: ctx.nodeImplementations,
+          mediaContent: ctx.get("mediaContent"),
           getSession: () => ctx.canvasSession,
           getModelResources: () => {
             const provider = ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider | undefined;
@@ -117,7 +123,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               records: snapshot?.records ?? [],
               currentOperationByNode: service?.currentOperationByNode(),
               versionsByNode: versions?.snapshot(),
-              groupStatuses: new Map(ctx.get("canvasGroupRuns")?.getSnapshot().rows.map(row => [row.creation.rootGroupId, { label: row.label, state: row.status }]) ?? []),
+              groupStatuses: new Map(ctx.get("canvasGroupRuns")?.getSnapshot().rows.slice().reverse().map(row => [row.rootGroupId, { label: row.label, state: row.status }]) ?? []),
               selectedByNode: versions?.preview?.selected
             };
           },

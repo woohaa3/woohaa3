@@ -70,7 +70,9 @@ export * from "./wire-shot-preview.js";
  */
 // v27: node capability-driven rendering paths.
 // v28: optional trusted overview-only emptyPlaceholder; older renderers reject the whole frame.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v28" as const;
+// v29: group presentation carries badge scale/resize, model bounds and collapsible members;
+//      media content keeps a provider identity and schema version.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v29" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
@@ -218,7 +220,7 @@ export type BevyCompositeAssetPresentation = {
   /** Shared canvas container surface, rendered inside Bevy. */
   panel?: import("../composite-children.js").CompositeContainerPanel;
   /** Derived ownership only; local model anchor → target card bottoms. Not editable document edges. */
-  ownershipLinks?: { anchor: [number, number, number]; targetNodeIds: string[] };
+  ownershipLinks?: { anchor: [number, number, number]; targetNodeIds: string[]; targetItemIds?: Record<string, string> };
   rootPlacement?: BevyModelPlacement;
   contentExtent?: number;
   /** 范围形状声明；缺失即复合资产类别默认 `isometric-diamond`。 */
@@ -346,12 +348,20 @@ export type BevyAggregateRunPresentation = {
  * 成员关系仍在 `document.nodes[].parentId`，不在此重复。
  */
 export type BevyGroupPresentation = {
+  /** 紧凑折叠态，不改变 canonical 成员与展开尺寸。 */
+  collapsed?: boolean;
+  /** 以模型中点为中心的独立等比显示倍率。 */
+  badgeScale?: number;
+  /** 仅可写单选组显示徽标自己的缩放把手，含收起态。 */
+  badgeResizable?: boolean;
   /** 可编辑标题（nodeData.title）；缺省空串。 */
   title: string;
   /** 直接成员数。 */
   memberCount: number;
   /** 递归叶子成员中具备输出能力的数量（>0 才显示聚合输出端点）。 */
   outputCapableLeafCount: number;
+  /** Prepared local bounds, without ops/mesh; shared model layout and perimeter input. */
+  modelBounds?: { aabb: Aabb; extent: number };
   /** Private run projection: group-header status button; no ledger identity crosses into renderer. */
   runStatus?: { label: string; state: string };
 };
@@ -450,6 +460,8 @@ export type CanvasRenderScene = {
    * 缺省表示普通正交画布；携带时 Bevy 切换到透视聚焦并只渲染目标。
    */
   modelFocus?: BevyModelFocus;
+  /** Read-only references in focus workspace CSS pixels; original node/model geometry stays intact. */
+  modelFocusContext?: { nodeId: string; x: number; y: number; width: number; height: number }[];
   /**
    * 图片聚焦瞬时投影（change: 2026-10-08-add-image-focus-editing-and-unified-node-history，design D2）。
    *

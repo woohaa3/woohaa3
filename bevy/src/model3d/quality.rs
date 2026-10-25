@@ -95,7 +95,7 @@ pub(super) fn has_overview_lod_declaration(node: &GraphNode) -> bool {
 /// Exact card visibility, without the demand/prewarm margin. Unknown surfaces
 /// stay conservative for native callers. Focus/edit/capture bypass this gate.
 pub(super) fn card_visible(node: &GraphNode, scene: &Scene, focus: Option<&str>) -> bool {
-    if focus.is_some() || scene.model_focus.is_some() {
+    if (focus.is_some() || scene.model_focus.is_some()) && !crate::canvas_query::focus_context::contains(scene, &node.id) {
         return false;
     }
     let Some(surface) = scene.surface.as_ref() else { return true; };
@@ -103,12 +103,13 @@ pub(super) fn card_visible(node: &GraphNode, scene: &Scene, focus: Option<&str>)
         || surface.width <= 0.0 || surface.height <= 0.0 {
         return true;
     }
-    let (x, y, width, height) = crate::canvas_query::layout::content_rect(node);
-    let zoom = scene.viewport.zoom;
-    x * zoom + scene.viewport.x < surface.width
-        && (x + width) * zoom + scene.viewport.x > 0.0
-        && y * zoom + scene.viewport.y < surface.height
-        && (y + height) * zoom + scene.viewport.y > 0.0
+    let display = crate::canvas_query::focus_context::node(scene, node);
+    let (x, y, width, height) = crate::canvas_query::layout::content_rect(&display);
+    let [vx, vy, zoom] = crate::canvas_query::focus_context::viewport(scene);
+    x * zoom + vx < surface.width
+        && (x + width) * zoom + vx > 0.0
+        && y * zoom + vy < surface.height
+        && (y + height) * zoom + vy > 0.0
 }
 
 /// 总览规范的保守世界投影（design D2）：以已准备规范 bounds 得到的包围球半径和它在**可视
@@ -377,7 +378,8 @@ pub(super) fn desired(
             .map_or(Quality::High, |projection| Quality::for_projection(projection, current));
     }
     let dpr = scene.surface.as_ref().map_or(1.0, |s| s.pixel_ratio);
-    let (_, _, width, height) = crate::canvas_query::layout::content_rect(node);
+    let display = crate::canvas_query::focus_context::node(scene, node);
+    let (_, _, width, height) = crate::canvas_query::layout::content_rect(&display);
     let radius = node
         .model
         .as_ref()
@@ -394,7 +396,7 @@ pub(super) fn desired(
         return Quality::High;
     };
     let distance_scale = node.model_preview.as_ref().map_or(1.0, |view| view.distance_scale);
-    let metric = projected_card_pixels(width, height, scene.viewport.zoom, dpr, distance_scale, radius);
+    let metric = projected_card_pixels(width, height, crate::canvas_query::focus_context::viewport(scene)[2], dpr, distance_scale, radius);
     purpose.select(metric, current)
 }
 

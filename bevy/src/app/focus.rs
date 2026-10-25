@@ -169,7 +169,7 @@ pub(super) fn sync_focus(
         if !animating {
             let completed_transition = rig.projection_blend.is_some();
             rig.projection_blend = None;
-            for mut cam in &mut camera2d { cam.is_active = !focused; }
+            for mut cam in &mut camera2d { cam.is_active = !focused || !scene.0.model_focus_context.is_empty(); }
             if !focused && completed_transition {
                 // The 2D card takes over at the same pixels; restore the ordinary 3D camera.
                 *transform = model3d::focus::home_camera_transform(surface_size(&scene.0), &view);
@@ -182,6 +182,9 @@ pub(super) fn sync_focus(
     } else {
         // 已交回 orbit：结束过渡计时，避免下次进入时被判定仍在动画。
         rig.transition.elapsed = rig.transition.duration;
+    }
+    if focused && !rig.animating() {
+        for mut cam in &mut camera2d { cam.is_active = !scene.0.model_focus_context.is_empty(); }
     }
     rig.sync_focus_node(
         scene

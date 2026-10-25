@@ -1,5 +1,5 @@
 import { filmSetMediaSources } from "./media-sources.js";
-import { createFilmSetObjectResolver, decodeFilmSetNodeData, resolveFilmSetObject, filmSetObjectOwnershipOf, shotPreviewOwnershipOf, isFilmSetNode, DEFAULT_FILM_SET_LOCAL_TRANSFORM, type ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
+import { createFilmSetObjectResolver, decodeFilmSetNodeData, resolveFilmSetObject, filmSetObjectOwnershipOf, shotPreviewOwnershipOf, shotPreviewNodeId, filmSetAnimationsOf, isFilmSetNode, DEFAULT_FILM_SET_LOCAL_TRANSFORM, executeModelScriptVersioned, readGroupAppearanceForNode, type ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
 import type { CompositeAssetAdapter, CompositeChildPresentation } from "@woohaa3/frontend/extension-api";
 import { buildFilmSetComposition } from "../shared/composition.js";
 import { HistoryFilmSetSnapshots } from "./history-preview.js";
@@ -9,13 +9,29 @@ import { FILM_SET_EXTENSION_ID } from "../../state/shared/identity.js";
 export function filmSetExecutionKey(data: CanvasNodeData): string {
   const decoded = decodeFilmSetNodeData(data);
   if (!decoded.ok) return "film-set:invalid";
+  const appearance = readGroupAppearanceForNode(data);
   return JSON.stringify([decoded.value.scenePlacement, decoded.value.filmSetContent.items.map(item => {
     switch (item.kind) {
       case "model": return [item.id, item.kind, item.model.contentVersion.contentHash, item.model.placement];
       case "ground": return [item.id, item.kind, item.size, item.color];
       default: return [item.id, item.kind, item.assetId, item.aspectRatio];
     }
-  })]);
+  }), appearance.source, appearance.value.model.contentVersion.contentHash]);
+}
+
+function filmSetAppearance(data: CanvasNodeData): { ops: readonly import("@woohaa3/contracts").SceneV2Op[]; placement: import("@woohaa3/contracts").ModelPlacement } | undefined {
+  // 空片场仍由 `emptyPlaceholder` 声明品牌地台，不注入默认外观几何；有内容时才与普通组共用
+  // 同一套托盘展示模型（change: 2026-10-24-unify-group-and-film-set-authoring）。
+  const decoded = decodeFilmSetNodeData(data);
+  if (decoded.ok && decoded.value.filmSetContent.items.length === 0) return undefined;
+  const appearance = readGroupAppearanceForNode(data);
+  const execution = executeModelScriptVersioned(
+    appearance.value.model.modelScript,
+    appearance.value.model.modelScriptVersion,
+  );
+  return execution.ok
+    ? { ops: execution.scene.ops, placement: appearance.value.model.placement }
+    : undefined;
 }
 export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(), canvas: () => ServerCanvas | null = () => null, feedback: (nodeId: string) => string | undefined = () => undefined): CompositeAssetAdapter {
   const object = (id: string) => { const current = canvas(); return current ? resolveFilmSetObject(current, id) : null; };
@@ -28,10 +44,15 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
       const resolve = createFilmSetObjectResolver(current);
       for (const node of current.document.nodes) {
         const target = resolve(node.id);
-        if (target?.owner.filmSetNodeId === ownerNodeId) children.push({ nodeId: node.id, ownerNodeId, kind: "container", focusOwner: true,
-          panel: { title: target.item.name, message: target.item.kind === "model" ? "3D 模型" : target.item.kind === "image" ? "图片对象" : target.item.kind === "video" ? "视频对象" : "",
-            hint: feedback(node.id) ?? "拖入一个 3D 模型以替换 · 复制快照" } });
-        else if (shotPreviewOwnershipOf(current.nodeData[node.id])?.filmSetNodeId === ownerNodeId) children.push({ nodeId: node.id, ownerNodeId, kind: "entity" });
+        // The model3d child is physically nested under its outer object container;
+        // only the outer container participates in composite-child movement links.
+        if (target && node.type === "model3d") continue;
+        if (target?.owner.filmSetNodeId === ownerNodeId) children.push({ nodeId: node.id, ownerNodeId, kind: "container", role: "object-entry", focusOwner: true, closable: true, sourceItemId: target.item.id,
+          panel: { title: target.item.name, hint: feedback(node.id) } });
+        else {
+          const shot = shotPreviewOwnershipOf(current.nodeData[node.id]);
+          if (shot?.filmSetNodeId === ownerNodeId && node.id === shotPreviewNodeId(ownerNodeId, shot.clipId) && (() => { const decoded = decodeFilmSetNodeData(current.nodeData[ownerNodeId]); return decoded.ok && filmSetAnimationsOf(decoded.value).clips.some(clip => clip.id === shot.clipId); })()) children.push({ nodeId: node.id, ownerNodeId, kind: "entity", role: "preview" });
+        }
       }
       return children;
     },
@@ -66,7 +87,7 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
       }
       const decoded = decodeFilmSetNodeData(data);
       if (!decoded.ok) return null;
-      const result = buildFilmSetComposition({ nodeId, animation: decoded.value });
+      const result = buildFilmSetComposition({ nodeId, animation: decoded.value, appearance: filmSetAppearance(data) });
       return { resource: result.resource, composition: { itemRoots: result.itemRoots, failures: result.failures },
         ...(result.failures.length ? { diagnostic: result.failures.map(entry => `${entry.itemId}=${entry.diagnostic}`).join(",") } : {}) };
     }

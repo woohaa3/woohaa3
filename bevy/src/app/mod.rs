@@ -191,7 +191,7 @@ fn configure_canvas(app: &mut App) {
                     scene3d::sync_shot_adapter,
                     scene3d::reclaim_extra_shot_rigs,
                     scene3d::sync_shot_main_view,
-                    (canvas2d::sync_scene, canvas2d::focus_details::sync).chain(),
+                    (canvas2d::sync_group_surfaces, canvas2d::sync_scene, canvas2d::focus_details::sync).chain(),
                     (canvas2d::sync_generation, canvas2d::history_pulse::sync).chain(),
                     canvas2d::sync_attach_probe,
                 )

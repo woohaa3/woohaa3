@@ -95,7 +95,8 @@ export type AgentConversationServiceError = {
     | "connection-unavailable"
     | "capability-unsupported"
     | "budget-exceeded"
-    | "storage-failed";
+    | "storage-failed"
+    | "active-turn";
   message: string;
 };
 
@@ -129,6 +130,7 @@ export type AgentConversationService = {
     | { ok: true; conversation: ConversationSummary }
     | { ok: false; error: AgentConversationServiceError };
   listConversations(input: { owner: string; canvasId: string; limit?: number }): ConversationSummary[];
+  listGroupExecutions(input: { owner: string; canvasId: string; nodeId?: string; cursor?: string; limit?: number }): { turns: ConversationTurn[]; nextCursor?: string };
   /**
    * 按生成目标节点查找该节点当前会话（一个节点复用一条；design D8）。
    *
@@ -484,6 +486,20 @@ export function createAgentConversationService(options: AgentConversationService
       return store.listConversations({ owner: input.owner, canvasId: input.canvasId }, input.limit ?? 50).map(toSummary);
     },
 
+    listGroupExecutions(input) {
+      const limit = Math.min(200, Math.max(1, Math.floor(input.limit ?? 50)));
+      let cursor: { createdAt: string; turnId: string } | undefined;
+      if (input.cursor) {
+        const parsed = JSON.parse(input.cursor);
+        if (typeof parsed?.createdAt !== "string" || typeof parsed?.turnId !== "string") throw new Error("无效组执行分页游标");
+        cursor = parsed;
+      }
+      const rows = store.listGroupTurns({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId, cursor }, limit + 1);
+      const page = rows.slice(0, limit);
+      const last = page.at(-1);
+      return { turns: page.map(toTurn), ...(rows.length > limit && last ? { nextCursor: JSON.stringify({ createdAt: last.createdAt, turnId: last.turnId }) } : {}) };
+    },
+
     findConversationForTarget(input) {
       const binding = store.findConversationByTarget({
         owner: input.owner,
@@ -495,6 +511,7 @@ export function createAgentConversationService(options: AgentConversationService
     },
 
     clearContext(input) {
+      if (store.activeGroupTurnCount(input) > 0) return fail("active-turn", "组仍有活动或待核对回合，请先停止并核对结果");
       if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
       // change: 2026-10-22-remove-agent-execution-limits，任务 3.1/3.2 / design D3：
       // 删除「活动回合阻止清空」。清空只解除目标关联（归档会话），不删除回合/消息/回执，
@@ -504,6 +521,7 @@ export function createAgentConversationService(options: AgentConversationService
     },
 
     async switchConnection(input) {
+      if (store.activeGroupTurnCount(input) > 0) return fail("active-turn", "组仍有活动或待核对回合，请先停止并核对结果");
       if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
       // 先核对目标连接属于该 owner（跨 owner/未知连接拒绝，不静默降级）。
       if (connections) {

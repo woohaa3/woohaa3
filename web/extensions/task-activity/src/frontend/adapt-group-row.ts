@@ -14,19 +14,19 @@ import {
   type ActivityRowCapabilities
 } from "./rows.js";
 
-export function groupRowKey(run: Pick<CanvasGroupRun, "creation">): string {
-  return `group:${run.creation.requestId}`;
+export function groupRowKey(run: Pick<CanvasGroupRun, "requestId">): string {
+  return `group:${run.requestId}`;
 }
 
 /** 该组记录是否允许停止（运行中且已建立对话）。 */
 export function canStopGroupRun(run: CanvasGroupRun): boolean {
-  if (!run.creation.conversationId) return false;
+  if (!run.conversationId) return false;
   return (GROUP_STOPPABLE_STATUSES as readonly string[]).includes(run.status);
 }
 
 /** 该组记录是否允许「重试原请求」（首轮尚未落地，且不是目标缺失导致的失败）。 */
 export function canRetryGroupRun(run: CanvasGroupRun): boolean {
-  if (run.creation.turnId) return false;
+  if (!run.creation || run.turn || run.creation.turnId) return false;
   return run.creation.error?.code !== "group-target-missing";
 }
 
@@ -45,13 +45,13 @@ export function adaptGroupRow(
     ? () => group.action!(run, "retry")
     : undefined;
   const verify = group.action ? () => group.action!(run, "refresh") : undefined;
-  const openConversation = group.openConversation && run.creation.conversationId
+  const openConversation = group.openConversation && run.conversationId
     ? async () => {
       await group.openConversation!(run);
     }
     : undefined;
-  const locate = locateNode ? () => locateNode(run.creation.rootGroupId) : undefined;
-  const title = group.resolveTitle?.(run.creation.rootGroupId) || "节点搭建";
+  const locate = locateNode ? () => locateNode(run.rootGroupId) : undefined;
+  const title = group.resolveTitle?.(run.rootGroupId) || "节点搭建";
   return {
     key: groupRowKey(run),
     kind: "group",
@@ -60,7 +60,7 @@ export function adaptGroupRow(
     state: run.status,
     tone: groupRunTone(run.status),
     ...(run.error ? { detail: run.error } : {}),
-    nodeId: run.creation.rootGroupId,
+    nodeId: run.rootGroupId,
     createdAt: run.createdAt,
     updatedAt: run.createdAt,
     active: run.active,

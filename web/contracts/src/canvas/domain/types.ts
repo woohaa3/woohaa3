@@ -4,6 +4,7 @@ import type { Woohaa3CanvasDocument,
 import type { VideoEditIntent } from "../../video/video-edit.js";
 import type { ModelCamera } from "../model-cameras.js";
 import type { ImageEditDocument } from "../image-edit.js";
+import type { GroupAppearance } from "../group-appearance.js";
 
 export type GenerationKind = "text" | "image" | "video" | "audio";
 export type GenerationStatus = "idle" | "queued" | "running" | "success" | "failed" | "draft" | "ready" | "archived";
@@ -26,6 +27,12 @@ export type CanvasNodeInputMapping = {
 };
 
 export type CanvasNodeData = Woohaa3CanvasJsonObject & {
+  /** 组/片场自身的版本化展示模型；缺失时读取层使用默认值，不回写文档。 */
+  groupAppearance?: GroupAppearance;
+  /** 组的持久化展示状态；缺失为展开，不改变成员或展开尺寸。 */
+  groupCollapsed?: boolean;
+  /** 组徽标独立等比显示倍率，缺失为 1；不改变模型定义或组框尺寸。 */
+  groupBadgeScale?: number;
   title?: string;
   taskKind?: string;
   prompt?: string;
@@ -48,6 +55,7 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   resultPreview?: GenerationResult;
   providerTaskId?: string;
   durationSeconds?: number;
+  mediaContent?: import("../media-content.js").MediaContentRef;
   outputAssetId?: string;
   /** 视频结果的可选海报资产引用（稳定 asset ID）。 */
   posterAssetId?: string;

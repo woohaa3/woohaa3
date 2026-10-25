@@ -31,6 +31,8 @@ export function decodeMcpListNodesRequest(body: unknown): McpDecodeResult<McpLis
 
 export function decodeMcpGetNodeRequest(body: unknown): McpDecodeResult<McpGetNodeRequest> {
   if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是对象");
+  if (body.resource !== undefined && body.resource !== "group-appearance") return fail("malformed-request", "resource 不支持");
+  if (body.expectedContentHash !== undefined && !isBoundedId(body.expectedContentHash)) return fail("malformed-request", "expectedContentHash 非法");
   const canvasId = readRequiredId(body, "canvasId");
   if (typeof canvasId === "object") return fail("malformed-request", canvasId.error);
   if (!isBoundedId(body.nodeId)) return fail("malformed-request", "nodeId 必须是非空字符串");
@@ -39,6 +41,8 @@ export function decodeMcpGetNodeRequest(body: unknown): McpDecodeResult<McpGetNo
   }
   return ok({
     canvasId,
+    ...(body.resource === "group-appearance" ? { resource: body.resource } : {}),
+    ...(typeof body.expectedContentHash === "string" ? { expectedContentHash: body.expectedContentHash } : {}),
     nodeId: body.nodeId,
     ...(typeof body.includeStatistics === "boolean" ? { includeStatistics: body.includeStatistics } : {})
   });
@@ -46,6 +50,8 @@ export function decodeMcpGetNodeRequest(body: unknown): McpDecodeResult<McpGetNo
 
 export function decodeMcpSubmitScriptRequest(body: unknown): McpDecodeResult<McpSubmitScriptRequest> {
   if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是对象");
+  if (body.resource !== undefined && body.resource !== "group-appearance") return fail("malformed-request", "resource 不支持");
+  if (body.expectedContentHash !== undefined && !isBoundedId(body.expectedContentHash)) return fail("malformed-request", "expectedContentHash 非法");
   const canvasId = readRequiredId(body, "canvasId");
   if (typeof canvasId === "object") return fail("malformed-request", canvasId.error);
   if (!isBoundedId(body.nodeId)) return fail("malformed-request", "nodeId 必须是非空字符串");
@@ -62,6 +68,8 @@ export function decodeMcpSubmitScriptRequest(body: unknown): McpDecodeResult<Mcp
   if (typeof expectedModelContentHash === "object") return fail("malformed-request", expectedModelContentHash.error);
   return ok({
     canvasId,
+    ...(body.resource === "group-appearance" ? { resource: body.resource } : {}),
+    ...(typeof body.expectedContentHash === "string" ? { expectedContentHash: body.expectedContentHash } : {}),
     nodeId: body.nodeId,
     source: body.source,
     ...(version === undefined ? {} : { version }),

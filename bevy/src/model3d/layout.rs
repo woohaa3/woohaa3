@@ -13,7 +13,6 @@ use super::scene::{self, ModelAabb};
 /// 卡片由 2D camera（更高的 camera order）绘制，永远盖在 3D 模型之上；因此模型必须整体
 /// 位于卡片**下方**，否则高模型的顶部会被卡片遮挡（change: 卡片与模型不重叠）。
 pub(crate) const MODEL_CARD_GAP: f32 = 40.0;
-
 /// 由已注册资源与节点派生模型**世界** AABB（含 view rotation/unit/anchor）
 /// （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 5.2；
 ///  change: make-shot-framing-zoom-invariant，任务 2.1 / 3.1：固定世界，不读取 viewport/surface）。
@@ -63,6 +62,9 @@ pub(crate) fn model_anchor(
     unit: f32,
 ) -> Vec3 {
     let size = 64.0;
+    if node.group.is_some() {
+        return group_anchor(node, model, placement, unit);
+    }
     if node.composite_asset.is_some() {
         return film_set_anchor(node, model, placement, unit);
     }
@@ -76,6 +78,18 @@ pub(crate) fn model_anchor(
         .unwrap_or(74.0 - MODEL_CARD_GAP);
     let cy = node.y + node.height + MODEL_CARD_GAP + top - placement.offset.y * size;
     canvas_world_position(cx, cy, placement.offset.z * size)
+}
+
+/// The accepted presentation and the model use one layout, including eccentric model origins.
+fn group_layout(node: &GraphNode, model: &ModelSnapshot, placement: &ModelPlacement) -> crate::canvas_query::group_model::GroupModelLayout {
+    crate::canvas_query::group_model::for_node(node).unwrap_or_else(|| {
+        let local = scene::model_local_aabb(model).unwrap_or_else(|| ModelAabb::new([0.;3], [0.;3]));
+        crate::canvas_query::group_model::derive(node, local, model.extent, placement)
+    })
+}
+fn group_anchor(node: &GraphNode, model: &ModelSnapshot, placement: &ModelPlacement, _unit: f32) -> Vec3 {
+    let layout = group_layout(node, model, placement);
+    canvas_world_position(layout.anchor.x, layout.anchor.y, placement.offset.z * 64.)
 }
 
 /// 片场模型适配节点矩形时四周保留的边距（世界单位）。
@@ -131,6 +145,9 @@ pub(crate) fn model_unit(
     let size = 64.0;
     let natural = size * 3.0 / model.extent.max(0.001);
     let base = placement.scale * natural;
+    if node.group.is_some() {
+        return group_layout(node, model, placement).unit;
+    }
     if node.composite_asset.is_some() {
         return placement.scale.min(1.0) * natural * film_set_fit(node, model, placement, natural);
     }

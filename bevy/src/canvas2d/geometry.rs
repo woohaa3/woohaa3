@@ -139,8 +139,12 @@ impl Geometry {
     }
 
     pub(crate) fn line(&mut self, a: Vec2, b: Vec2, width: f32, z: f32, color: u32) {
+        self.line_alpha(a, b, width, z, color, 1.);
+    }
+
+    pub(crate) fn line_alpha(&mut self, a: Vec2, b: Vec2, width: f32, z: f32, color: u32, alpha: f32) {
         let normal = (b - a).normalize_or_zero().perp() * width / 2.0;
-        self.polygon(&[a + normal, a - normal, b - normal, b + normal], z, color);
+        self.polygon_alpha(&[a + normal, a - normal, b - normal, b + normal], z, color, alpha);
     }
 
     /// 圆环（端点圆钮的描边环）：以扇形细分画一圈带线宽的环。
@@ -256,18 +260,23 @@ impl Geometry {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn curve_with_controls(&mut self, a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, width: f32, z: f32, color: u32, dashed: bool) {
+        self.curve_with_controls_alpha(a, c1, c2, b, width, z, color, dashed, 1.);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn curve_with_controls_alpha(&mut self, a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, width: f32, z: f32, color: u32, dashed: bool, alpha: f32) {
         if dashed {
             let points: Vec<_> = (0..=super::curve::EDGE_CURVE_SEGMENTS).map(|i| {
                 super::curve::cubic_point(a, c1, c2, b, i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32)
             }).collect();
-            super::dash::dashed_polyline(self, &points, width, z, color);
+            super::dash::dashed_polyline_alpha(self, &points, width, z, color, alpha);
             return;
         }
         let mut previous = a;
         for i in 1..=super::curve::EDGE_CURVE_SEGMENTS {
             let t = i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32;
             let point = super::curve::cubic_point(a, c1, c2, b, t);
-            self.line(previous, point, width, z, color);
+            self.line_alpha(previous, point, width, z, color, alpha);
             previous = point;
         }
     }

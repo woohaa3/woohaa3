@@ -14,7 +14,7 @@ export function installFilmSetObjectContainers(ctx: FilmSetContext, feedback = n
   try {
     releases.push(installDefaultFilmSetObjectContainers(ctx));
     releases.push(ctx.slots.register("canvas.node-drop", {
-      id: "film-set-object-replacement", owner: "film-set", nodeType: "composite-asset", dropLabel: "放开以替换对象模型（复制快照）",
+      id: "film-set-object-replacement", owner: "film-set", nodeType: "composite-asset", dropLabel: "放开以替换对象模型",
       matchesTarget: ({ canvas, targetNodeId }) => !!filmSetObjectOwnershipOf(canvas.nodeData[targetNodeId]),
       acceptsSources: ({ canvas, sourceNodeIds }) => sourceNodeIds.length === 1 && canvas.document.nodes.some(node => node.id === sourceNodeIds[0] && node.type === "model3d"),
       onPreview: ({ canvas, sourceNodeIds }) => sourceNodeIds.length === 1 && canvas.document.nodes.some(node => node.id === sourceNodeIds[0] && node.type === "model3d") ? null : "一次只能拖入一个普通 3D 模型",

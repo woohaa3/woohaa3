@@ -2,7 +2,7 @@
 //!
 //! group 的几何已由 Web 映射层投影为**绝对画布坐标**；本模块只负责把容器画在成员
 //! **之下**：低 z 的圆角虚线框、左上角标题、成员计数。它不持有 parentId、相对坐标或
-//! 成员关系，也不参与命中测试（命中顺序由 JS `hit-test` 决定）。
+//! 成员关系，命中几何与 Rust canvas_query 共享。
 //!
 //! 抽出独立模块的理由：`render.rs` 已接近文件体积上限（`tests/file_size.rs` 守卫），
 //! 且 group 的绘制与普通卡片差异较大（虚线、无内容区、无端点）。
@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use crate::protocol::GroupPresentation;
 use crate::theme::ThemeResource;
 
-use super::dash::dashed_rounded_rect;
+use super::dash::dashed_polyline;
 use super::geometry::Geometry;
 use super::layout::{hex, shortened};
 
@@ -21,13 +21,12 @@ use super::layout::{hex, shortened};
 pub(crate) const GROUP_Z: f32 = 1.0;
 
 /// 圆角半径与描边宽度。
-const GROUP_RADIUS: f32 = 12.0;
 const GROUP_BORDER: f32 = 1.5;
 
 /// group 容器底的 alpha（change: fix-group-and-marquee-preview）。
 ///
 /// 0.55 与参考实现 `rgba(42,42,48,.55)` 同量级：只暗示容器范围，不遮挡成员卡片边框。
-const GROUP_FILL_ALPHA: f32 = 0.55;
+pub(super) const GROUP_FILL_ALPHA: f32 = 0.55;
 
 pub(super) fn is_running(node: &crate::protocol::GraphNode) -> bool {
     node.group
@@ -61,22 +60,10 @@ pub(crate) fn draw_group(
     } else {
         theme.token_u32("canvasNodeBorder")
     };
-    // 容器面：**半透明**（change: fix-group-and-marquee-preview）。此前用不透明
-    // `canvasNodeSurface` 铺满包围盒，导致成员卡片边框与容器底连成一片而不可见；
-    // 参考实现（旧版画布）用 `rgba(42,42,48,.55)` 只做轻微层次暗示。
-    // 颜色取自既有 token，alpha 是呈现参数（不新增 token）。
-    geometry.rounded_rect_alpha(
-        x,
-        y,
-        width,
-        height,
-        GROUP_RADIUS,
-        GROUP_Z,
-        theme.token_u32("canvasNodeSurface"),
-        GROUP_FILL_ALPHA,
-    );
+    // Continuous group surfaces are drawn behind the model by group_surface, using the same
+    // canvas camera. This overlay owns only the single perimeter, text and controls.
+    let path = super::group_outline::path(node);
     if is_running(node) {
-        let path = super::group_outline::path(node);
         let color = if selected {
             border
         } else {
@@ -92,17 +79,62 @@ pub(crate) fn draw_group(
             color,
         );
     } else {
-        dashed_rounded_rect(
+        dashed_polyline(
             geometry,
-            x,
-            y,
-            width,
-            height,
-            GROUP_RADIUS,
+            &crate::canvas_query::group_model::frame_path(node),
             GROUP_BORDER,
             GROUP_Z + 0.001,
             border,
         );
+    }
+    let badge = crate::canvas_query::group_model::badge_path(node);
+    if !badge.is_empty() {
+        super::group_outline::stroke(
+            geometry,
+            &badge,
+            0.,
+            super::group_outline::length(&badge),
+            GROUP_BORDER,
+            GROUP_Z + 0.002,
+            border,
+        );
+        let rect = crate::canvas_query::group_model::badge_rect(node);
+        let center = Vec2::new(rect.x + rect.z - 10., rect.y + rect.w / 2.);
+        let direction = if presentation.collapsed { 1. } else { -1. };
+        let tip = center + Vec2::Y * (2.5 * direction);
+        for side in [-1., 1.] {
+            geometry.line(
+                center + Vec2::new(side * 3., -2.5 * direction),
+                tip,
+                1.5,
+                GROUP_Z + 0.003,
+                theme.token_u32("canvasBodyText"),
+            );
+        }
+    }
+    if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
+        let color = theme.token_u32("canvasResizeHandle");
+        for length in [5., 9.] {
+            geometry.line(
+                corner - Vec2::X * length,
+                corner - Vec2::Y * length,
+                1.5,
+                GROUP_Z + 0.02,
+                color,
+            );
+        }
+    }
+    if selected && node.resizable {
+        let corner = Vec2::new(x + width - 4., y + height - 4.);
+        for length in [6., 11.] {
+            geometry.line(
+                corner - Vec2::X * length,
+                corner - Vec2::Y * length,
+                1.5,
+                GROUP_Z + 0.02,
+                theme.token_u32("canvasResizeHandle"),
+            );
+        }
     }
     // 左上角标题：`标题 · N 项`；无标题时只显示计数。
     let title = if presentation.title.trim().is_empty() {
@@ -237,9 +269,13 @@ mod tests {
             &theme,
             &node(400.0, 300.0),
             &GroupPresentation {
+                collapsed: false,
+                badge_scale: 1.,
+                badge_resizable: false,
                 title: "镜头发散".into(),
                 member_count: 3,
                 output_capable_leaf_count: 2,
+                model_bounds: None,
                 run_status: None,
             },
             false,
@@ -261,9 +297,13 @@ mod tests {
             &theme,
             &node(200.0, 150.0),
             &GroupPresentation {
+                collapsed: false,
+                badge_scale: 1.,
+                badge_resizable: false,
                 title: "   ".into(),
                 member_count: 1,
                 output_capable_leaf_count: 0,
+                model_bounds: None,
                 run_status: None,
             },
             false,
@@ -287,9 +327,13 @@ mod tests {
             &theme,
             &node(400.0, 300.0),
             &GroupPresentation {
+                collapsed: false,
+                badge_scale: 1.,
+                badge_resizable: false,
                 title: String::new(),
                 member_count: 1,
                 output_capable_leaf_count: 0,
+                model_bounds: None,
                 run_status: None,
             },
             false,
@@ -298,5 +342,58 @@ mod tests {
         let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
         // 圆角矩形（36 点）+ 多段虚线与圆角短线，远超单个矩形。
         assert!(positions.len() > 40);
+    }
+
+    #[test]
+    fn prepared_group_has_one_continuous_outline_in_normal_selected_and_running_states() {
+        let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({
+            "id":"g","type":"group","x":0,"y":0,"width":500,"height":300,
+            "resizable":true,
+            "model":{"resourceKey":"test:box","signature":"box"},
+            "group":{"modelBounds":{"aabb":{"min":[-1,-1,-1],"max":[1,1,1]},"extent":2}}
+        }))
+        .unwrap();
+        for selected in [false, true] {
+            for running in [false, true] {
+                node.group.as_mut().unwrap().run_status =
+                    running.then(|| crate::protocol::GroupRunStatus {
+                        label: "生成中".into(),
+                        state: "running".into(),
+                    });
+                let mut geometry = Geometry::default();
+                draw_group(
+                    &mut geometry,
+                    &ThemeResource::default(),
+                    &node,
+                    node.group.as_ref().unwrap(),
+                    selected,
+                );
+                let (opaque, blend) = geometry.into_layers();
+                let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) =
+                    opaque.attribute(Mesh::ATTRIBUTE_POSITION)
+                else {
+                    panic!("positions");
+                };
+                let layout = crate::canvas_query::group_model::for_node(&node).unwrap();
+                assert!(points.iter().all(|p| -p[1]
+                    <= node.y + node.height + crate::canvas_query::group_model::BADGE_OUTSET + 1.));
+                assert!(
+                    !points
+                        .iter()
+                        .any(|p| p[0] > layout.center.x - layout.radii.x + 2.
+                            && p[0] < layout.center.x + layout.radii.x - 2.
+                            && -p[1] > layout.center.y - layout.radii.y + 2.
+                            && -p[1] < layout.center.y + layout.radii.y - 2.),
+                    "unexpected stroke through footer model in selected={selected} running={running}"
+                );
+                // No model-covering fill can enter the higher camera-order overlay.
+                let Some(bevy::mesh::VertexAttributeValues::Float32x3(fill)) =
+                    blend.attribute(Mesh::ATTRIBUTE_POSITION)
+                else {
+                    panic!("fill");
+                };
+                assert!(fill.iter().all(|p| p[0] < -100000.));
+            }
+        }
     }
 }

@@ -13,6 +13,7 @@ import {
   type CanvasRenderScene,
   type PreparedModelResource
 } from "@woohaa3/contracts";
+import { projectCompositeFocusContext } from "./composite-focus-context.js";
 import { applyRunStateProjection } from "./run-state-projection.js";
 import { buildShotPreviewSceneInput } from "./shot-preview-scene-input.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
@@ -23,6 +24,7 @@ import type { Viewport } from "./interaction-core.js";
 import { applyNodeResourceLoading } from "../../services/node-resource-loading.js";
 
 export type SceneBuildInput = {
+  badgeResize?: {nodeId: string; scale: number} | null;
   selected: readonly string[];
   draft: { source: string; side: "input" | "output"; x: number; y: number } | null;
   /** 框选选区矩形（世界坐标，change: fix-group-and-marquee-preview）。 */
@@ -101,6 +103,8 @@ export function buildSceneWithResources(
     targets: options.getModelFocusTargets?.() ?? []
   });
   const scene = buildCanvasRenderScene({
+    groupBadgeScaleOverrides: input.badgeResize ? new Map([[input.badgeResize.nodeId, input.badgeResize.scale]]) : undefined,
+    groupBadgeResizable: options.isWritable?.() ?? options.getSession()?.isWritable() ?? false,
     canvas: canvasState,
     nodeCapabilities: options.nodeCapabilities,
     modelPreviews: modelPreviewStore.snapshot(),
@@ -189,6 +193,8 @@ export function buildSceneWithResources(
     dot.hovered = input.hoveredHistory?.nodeId === node.id && input.hoveredHistory.presentationId === dot.presentationId;
     dot.pressed = input.pressedHistory?.nodeId === node.id && input.pressedHistory.presentationId === dot.presentationId;
   }
+
+  projectCompositeFocusContext(scene, canvasState, options.compositeAssets, (options.isWritable?.() ?? options.getSession()?.isWritable() ?? false) && options.getModelFocusMode?.() !== "history");
 
   // runtime 按 resourceKey 注册；只收集本帧实际引用的资源（先注册、后提交）。
   const resources = new Map<string, PreparedModelResource>();

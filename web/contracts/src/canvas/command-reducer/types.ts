@@ -25,6 +25,7 @@ export type CanvasCommandRejectionCode =
   | "unsupported-shot-reference"
   | "invalid-node-size"
   | "invalid-group-config"
+  | "invalid-group-appearance"
   | "invalid-video-edit-intent"
   | "invalid-model-cameras"
   | "invalid-image-edit"

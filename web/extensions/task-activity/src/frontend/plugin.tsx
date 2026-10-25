@@ -111,15 +111,15 @@ export function taskActivityExtension(): Plugin.Function<void> {
           },
           action: async (row, action) => {
             if (action === "stop") await groupRuns.stop(row.requestId);
-            else if (action === "retry") await groupRuns.retry(row.creation.requestId);
+            else if (action === "retry") await groupRuns.retry(row.creation!.requestId);
             else await groupRuns.refresh();
           },
           openConversation: (row) => {
             const conversations = ctx.get("agentConversationService" as never) as AgentConversationServiceHandle | undefined;
             if (!conversations?.navigateToDetail) throw new Error("对话服务尚未就绪");
-            const conversationId = row.creation.conversationId;
+            const conversationId = row.conversationId;
             if (!conversationId) throw new Error("该创作尚未建立对话");
-            conversations.navigateToDetail({ conversationId, requestId: row.requestId, nodeId: row.creation.rootGroupId });
+            conversations.navigateToDetail({ conversationId, requestId: row.requestId, nodeId: row.rootGroupId });
             const panel = ctx.canvasNavigation.getSnapshot().panel;
             if (panel?.type !== "agent-conversation" || panel.conversationId !== conversationId || panel.requestId !== row.requestId) {
               throw new Error("无法打开对话详情，详情面板尚未就绪");

@@ -80,6 +80,8 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
         applied.set(nodeId, current.key);
         loading.setLoading(load, false);
         const status = result.status.startsWith("ok") ? "ok" : "failed";
+        // Presentation-only resources (a group's own appearance) never own canonical model status.
+        if (current.provider.reportsStatus === false) continue;
         const data = ctx.canvasState.getCanvas()?.nodeData[nodeId];
         if (!reports.hasPending(nodeId) && data?.modelScriptStatus === status &&
           (status === "ok" ? !data.modelScriptError : data.modelScriptError === result.status)) continue;

@@ -13,7 +13,7 @@
  *
  * 纯函数：只读取传入画布并用共享 reducer 模拟；不访问 DOM/网络/Yjs。
  */
-import { filmSetObjectOwnershipOf } from "./film-set-object-container.js";
+import { filmSetObjectOwnershipOf, isFilmSetObjectModelNode } from "./film-set-object-container.js";
 import { planPositionEdit } from "./edit-plan-position.js";
 import type { CanvasCommand } from "./commands.js";
 import { applyCanvasCommands } from "./command-reducer.js";
@@ -88,7 +88,10 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   // Explicit removals remain in history so hide/delete undo restores the original layout.
   const addedNodes = [...afterNodes.values()].filter((node) => !beforeNodes.has(node.id) && !isShotPreviewNodeType(node.type) && !filmSetObjectOwnershipOf(after.nodeData[node.id]));
   const removedNodes = [...beforeNodes.values()].filter((node) => !afterNodes.has(node.id) && !isShotPreviewNodeType(node.type));
-  const commonNodes = [...afterNodes.values()].filter((node) => beforeNodes.has(node.id));
+  // Embedded model layout/content is derived from the container and film set. Do not
+  // replay its reconciliation as an independent move during resize or legacy hydration.
+  const commonNodes = [...afterNodes.values()].filter((node) => beforeNodes.has(node.id)
+    && !isFilmSetObjectModelNode(node, after.nodeData[node.id]));
   const addedEdges = [...afterEdges.values()].filter((edge) => !beforeEdges.has(edge.id));
   const removedEdges = [...beforeEdges.values()].filter((edge) => !afterEdges.has(edge.id));
 

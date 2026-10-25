@@ -88,3 +88,8 @@ describe("ModelParameterPanel 通用 authoring 生成入口（change: 2026-10-08
     expect(markup).not.toContain(">生成<");
   });
 });
+
+it("普通 group 也显示公共生成入口", () => {
+  const markup = renderToStaticMarkup(<ModelParameterPanel nodeId="group-1" nodeType="group" renderGenerate={() => <div data-testid="group-generate">组内创作</div>} />);
+  expect(markup).toContain("组内创作");
+});

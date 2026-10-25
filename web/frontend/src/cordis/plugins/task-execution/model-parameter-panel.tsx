@@ -146,5 +146,5 @@ export function modelPromptGuide(canvasId: string | undefined, nodeId: string, f
 
 /** 具备 MCP 模型生成面板的节点类型（两类自包含 3D 节点）。 */
 function isModelScriptMcpNodeType(nodeType: string): boolean {
-  return isModelAuthoringNodeType(nodeType);
+  return isModelAuthoringNodeType(nodeType) || nodeType === "group";
 }

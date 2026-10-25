@@ -10,10 +10,10 @@ it("an independent extension shares containers, entity links, dragging and clean
   }
   const dispose = registry.register({ extensionId: "third-extension", owner: "third-extension", executionKey: () => "", prepare: () => null,
     children: (_canvas, ownerNodeId) => ownerNodeId === "owner" ? [
-      { nodeId: "container", ownerNodeId, kind: "container", panel: { title: "References", imageIds: ["thumbnail"] } },
-      { nodeId: "output", ownerNodeId, kind: "entity" },
-      { nodeId: "pinned", ownerNodeId, kind: "entity", followOwner: false },
-      { nodeId: "missing", ownerNodeId, kind: "entity" }
+      { nodeId: "container", ownerNodeId, kind: "container", role: "object-entry", sourceItemId: "object-a", panel: { title: "References", imageIds: ["thumbnail"] } },
+      { nodeId: "output", ownerNodeId, kind: "entity", role: "preview" },
+      { nodeId: "pinned", ownerNodeId, kind: "entity", role: "preview", followOwner: false },
+      { nodeId: "missing", ownerNodeId, kind: "entity", role: "preview" }
     ] : [] });
   const before = JSON.stringify(canvas);
   expect(registry.scopeShapes(canvas).get("container")).toBe("rect");
@@ -21,6 +21,7 @@ it("an independent extension shares containers, entity links, dragging and clean
   const scene = buildCanvasRenderScene({ canvas, compositeAssetScopeShapes: registry.scopeShapes(canvas) });
   registry.projectChildren(scene, canvas);
   expect(scene.nodes.find(n => n.id === "owner")?.compositeAsset?.ownershipLinks?.targetNodeIds).toEqual(["container", "output", "pinned"]);
+  expect(scene.nodes.find(n => n.id === "owner")?.compositeAsset?.ownershipLinks?.targetItemIds).toEqual({ container: "object-a" });
   expect(scene.nodes.find(n => n.id === "container")?.compositeAsset).toMatchObject({ scopeShape: "rect", panel: { title: "References", imageIds: ["thumbnail"] } });
   expect(scene.nodes.find(n => n.id === "output")?.compositeAsset).toBeUndefined();
   expect(JSON.stringify(canvas)).toBe(before);
@@ -36,6 +37,6 @@ it("does not accept ownership from a different owner or unknown extension", () =
     canvas.nodeData[id] = { extensionId: id === "foreign" ? "unknown" : "test" };
   }
   registry.register({ extensionId: "test", owner: "test", executionKey: () => "", prepare: () => null,
-    children: () => [{ nodeId: "output", ownerNodeId: "foreign", kind: "entity" }] });
+    children: () => [{ nodeId: "output", ownerNodeId: "foreign", kind: "entity", role: "preview" }] });
   expect(registry.children(canvas).size).toBe(0);
 });

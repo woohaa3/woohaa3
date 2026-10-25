@@ -28,7 +28,10 @@ pub(super) fn draw(
     let layout = crate::canvas_query::composite_panel::layout(node, panel.image_ids.len());
     let [x, y, width, height] = layout.bounds;
     // A model uses the transparent center; flat image containers use a normal panel background.
-    if node.model.is_none() {
+    let frame_only = panel.title.is_empty() && panel.message.is_empty() && panel.hint.is_empty() && panel.image_ids.is_empty();
+    if frame_only {
+        // The embedded real card owns its surface and title; leave the dashed padding visible.
+    } else if node.model.is_none() {
         geometry.rounded_rect(
             x,
             y,
@@ -79,6 +82,7 @@ pub(super) fn draw(
             z,
         );
     }
+    if frame_only { return Vec::new(); }
     let text = |value: &str, size: f32| -> String {
         let max = ((width - 28.) / (size * 0.85)).max(1.) as usize;
         if value.chars().count() <= max {
@@ -141,9 +145,12 @@ pub(crate) fn sync_images(
     if !flags.changed && batch.0.is_empty() {
         return;
     }
-    let desired = image_slots(&scene.0);
+    let overlay = crate::canvas_query::focus_context::overlay(&scene.0);
+    let desired = image_slots(&overlay);
+    let retained = image_slots(&scene.0);
     state.images.retain(|id, entry| {
-        if desired.contains_key(id) {
+        if retained.contains_key(id) {
+            commands.entity(entry.entity).insert(if desired.contains_key(id) { Visibility::Inherited } else { Visibility::Hidden });
             true
         } else {
             commands.entity(entry.entity).despawn();

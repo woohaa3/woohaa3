@@ -9,7 +9,7 @@
  * 非渲染检查：使用真实 CanvasRoom + in-memory durable 仓库，不采集帧率/GPU/截图。
  */
 import { describe, expect, it } from "vitest";
-import { buildCanvasRenderScene, createEmptyWoohaa3ServerCanvas, defaultAgentNodeData, projectAgentGraph, type ServerCanvas } from "@woohaa3/contracts";
+import { buildCanvasRenderScene, groupBottomPadding, createEmptyWoohaa3ServerCanvas, defaultAgentNodeData, projectAgentGraph, type ServerCanvas } from "@woohaa3/contracts";
 import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
 import { CanvasRoom } from "../sync/room.js";
 import { CanvasScriptService } from "./service.js";
@@ -388,7 +388,7 @@ describe("Canvas Script 分类分组端到端", () => {
     expect(dry.receipt.predicted.g).toEqual({ x: group.x, y: group.y });
     const cards = scene.nodes.filter(n => n.type === "model");
     expect(Math.abs(cards[0].y - cards[1].y)).toBe(244);
-    expect(Math.max(...cards.map(n => n.y + n.height)) + 40).toBe(group.y + group.height);
+    expect(Math.max(...cards.map(n => n.y + n.height)) + groupBottomPadding).toBe(group.y + group.height);
     room.dispose();
   });
   const source = `

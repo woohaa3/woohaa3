@@ -1,4 +1,5 @@
 import { createNodeImplementationRegistry } from "../extension-api/node-implementations.js";
+import { createMediaContentService } from "./services/media-content.js";
 import { installTaskMonitorAction } from "../pages/task-monitor/entry.js";
 import { hoverNodeStore } from "./services/hover-store.js";
 /**
@@ -474,6 +475,19 @@ export async function installCanvasPageServices(
   const groupRuns = createCanvasGroupRuns({ canvasId, transport: applicationRemote.transport, conversations: agentConversations, user: ctx.currentUser, writable: () => session.isWritable() });
   ctx.provide("canvasGroupRuns" as never, groupRuns as never);
   ctx.effect(() => () => groupRuns.dispose(), "canvas-group-runs");
+  const mediaContent = createMediaContentService({
+    canvas: () => woohaa3CanvasStore.getState().canvas,
+    subscribe: listener => woohaa3CanvasStore.subscribe(listener),
+    writable: () => session.isWritable(),
+    async submit(commands, requestId) {
+      const submitted = session.submitCommands(commands, requestId);
+      if (!submitted.ok) throw Error(submitted.reason);
+      const settled = await submitted.handle.settled;
+      if (settled.state === "rejected") throw Error(settled.error ?? "媒体内容登记失败");
+    },
+  });
+  ctx.provide("mediaContent" as never, mediaContent as never);
+  ctx.effect(() => () => mediaContent.dispose(), "media-content-registry");
   if (options.testHooks ?? true) {
     installCanvasSessionTestHooks(session);
   }

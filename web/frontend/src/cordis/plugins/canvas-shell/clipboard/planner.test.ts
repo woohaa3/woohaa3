@@ -65,6 +65,28 @@ describe("复制载荷", () => {
     expect(payload!.nodes.map((node) => node.id).sort()).toEqual(["child-1", "text-1"]);
   });
 
+  it("组徽标独立倍率经复制序列化和粘贴保留，修改副本不影响原组", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("badge-copy", NOW);
+    canvas.document.nodes = [
+      { id: "g", type: "group", position: { x: 0, y: 0 }, width: 600, height: 400 },
+      { id: "m", type: "text", parentId: "g", position: { x: 40, y: 40 } }
+    ];
+    canvas.nodeData = { g: { groupBadgeScale: 2, groupCollapsed: true }, m: { prompt: "成员" } };
+    const payload = parseCanvasCopyPayload(serializeCanvasCopyPayload(buildCanvasCopyPayload(canvas, ["g"])!))!;
+    const plan = planCanvasPaste({ canvas, payload, anchor: null, viewport: { x: 0, y: 0, zoom: 1 },
+      createId: (prefix, index) => `${prefix}-copy-${index}` })!;
+    const pasted = applyCanvasCommands(canvas, plan.commands);
+    if (!pasted.ok) throw new Error(pasted.rejection.message);
+    const groupId = plan.newNodeIds[0]!;
+    expect(pasted.canvas.nodeData[groupId]).toMatchObject({ groupBadgeScale: 2, groupCollapsed: true });
+    expect(pasted.canvas.document.nodes.find(node => node.id === plan.newNodeIds[1])?.parentId).toBe(groupId);
+    const changed = applyCanvasCommands(pasted.canvas, [{ type: "nodeData.patch", nodeId: groupId, value: { groupBadgeScale: 0.5 } }]);
+    if (!changed.ok) throw new Error(changed.rejection.message);
+    expect(changed.canvas.nodeData[groupId]?.groupBadgeScale).toBe(0.5);
+    expect(changed.canvas.nodeData.g?.groupBadgeScale).toBe(2);
+    expect(changed.canvas.nodeData[groupId]?.groupAppearance).toBeUndefined();
+  });
+
   it("空选择或全失效选择返回 null", () => {
     expect(buildCanvasCopyPayload(canvasFixture(), [])).toBeNull();
     expect(buildCanvasCopyPayload(canvasFixture(), ["missing"])).toBeNull();
@@ -177,13 +199,14 @@ describe("粘贴规划", () => {
     collection.clips.push({ ...structuredClone(collection.clips[0]), id: "second", name: "第二段" });
     const fields = canonicalFilmSetFields({ ...snapshot, filmSetAnimations: collection });
     canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
-    canvas.nodeData.film = fields as never;
+    canvas.nodeData.film = { ...fields, filmSetShotPreviewsHidden: [collection.clips[1].id] } as never;
     const payload = buildCanvasCopyPayload(canvas, ["film"])!;
     const plan = planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas, payload, anchor: { kind: "point", position: { x: 0, y: 0 } } })!;
     const added = plan.commands.find(command => command.type === "nodeData.patch");
-    if (!added || added.type !== "nodeData.patch") throw new Error("missing pasted node data");
+    if (!added || added.type !== "nodeData.patch" || !added.value) throw new Error("missing pasted node data");
     const decoded = decodeFilmSetNodeData(added.value);
     if (!decoded.ok) throw new Error(decoded.reason);
+    expect(added.value?.filmSetShotPreviewsHidden).toBeUndefined();
     const data = decoded.value;
     const pastedClips = filmSetAnimationsOf(data);
     const modelItem = data.filmSetContent.items.find((item): item is FilmSetModelItem => item.kind === "model")!;

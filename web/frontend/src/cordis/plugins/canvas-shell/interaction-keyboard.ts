@@ -70,6 +70,22 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     return text;
   };
 
+  const freezeClipboardText = async (): Promise<string | null> => {
+    const copyable = copyableSelection();
+    if (!copyable) return null;
+    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    if (!payload) return null;
+    const liveIds = payload.nodes.filter(n => copyable.canvasState.nodeData[n.id]?.mediaContent).map(n => n.id);
+    if (!liveIds.length) return buildClipboardText();
+    if (!options.mediaContent) throw Error("媒体内容 provider 未就绪，无法复制");
+    const frozen = await options.mediaContent.freeze(copyable.canvasState, liveIds, crypto.randomUUID());
+    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others);
+    if (!frozenPayload) return null;
+    const text = serializeCanvasCopyPayload(frozenPayload);
+    (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
+    return text;
+  };
+
   const runClipboardShortcut = async (action: "copy" | "delete") => {
     if (core.modalActive()) return;
     const canvasState = woohaa3CanvasStore.getState().canvas;
@@ -85,7 +101,8 @@ export function createKeyboardShortcuts(core: InteractionCore) {
       navigator?: { clipboard?: { writeText?: (text: string) => Promise<void> } };
     };
     if (action === "copy") {
-      const text = buildClipboardText();
+      let text: string | null;
+      try { text = await freezeClipboardText(); } catch (error) { options.onInteractionError?.(error); return; }
       if (text === null) return;
       try {
         await clip.navigator?.clipboard?.writeText?.(text);
@@ -234,7 +251,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (event.key === "Escape") {
       // 拖动粘连手势：Escape 取消整次手势（清 held/preview 且不提交），
       // change: add-drag-touch-connections，design D6。
-      if (core.attachActive()) {
+      if (core.attachActive() || state.gesture.kind === "group-badge-resize") {
         event.preventDefault();
         core.cancelDragGesture();
         return;
@@ -283,6 +300,14 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (event.defaultPrevented || core.modalActive()) return;
     if (!nodeSelectionStore.getSnapshot().keyboardActive) return;
     if (isEditableElement(event.target) || hasSelectedText(target)) return;
+    const copyable = copyableSelection();
+    if (!copyable) return;
+    const closure = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    if (closure?.nodes.some(n => copyable.canvasState.nodeData[n.id]?.mediaContent)) {
+      event.preventDefault();
+      void runClipboardShortcut("copy");
+      return;
+    }
     const text = buildClipboardText();
     if (text === null) return;
     const data = event.clipboardData;

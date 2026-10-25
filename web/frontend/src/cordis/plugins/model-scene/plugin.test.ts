@@ -96,6 +96,18 @@ afterEach(async () => {
 });
 
 describe("model-scene plugin version dispatch", () => {
+  it("旧 group 缺少 nodeData 时仍准备默认 groupAppearance 模型", async () => {
+    const harness = await makeHarness();
+    runtime = harness.runtime;
+    const canvas = createEmptyWoohaa3ServerCanvas("c1");
+    canvas.document.nodes.push({ id: "group-1", type: "group", position: { x: 0, y: 0 }, width: 320, height: 220 });
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+    const provider = harness.runtime.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider;
+    await expect.poll(() => provider.getResources().get("group-1")).toBeDefined();
+    expect(provider.getResources().get("group-1")?.ops.length).toBeGreaterThan(0);
+    expect(harness.reports).toEqual([]);
+  });
+
   it("本地节点呈现键独立更新，重复失效复用资源，替换画布/实例重新准备", async () => {
     const harness = await makeHarness();
     runtime = harness.runtime;

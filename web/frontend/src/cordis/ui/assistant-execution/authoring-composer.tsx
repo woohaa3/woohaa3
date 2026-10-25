@@ -37,12 +37,16 @@ const EMPTY_SNAPSHOT: AgentConversationSnapshotView = {
   error: null,
   contextRevision: 0,
 };
+const EMPTY_GROUP_RUNS = { rows: [], error: "" } as import("../../contract/canvas-group-runs.js").CanvasGroupRunsSnapshot;
 const noopSubscribe = () => () => undefined;
 
 export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
   const inspector = props.presentation === "inspector";
   const conversation = props.agentConversation;
   const service = conversation?.service;
+  const groupSnapshot = useSyncExternalStore(props.groupRuns?.subscribe ?? noopSubscribe,
+    props.groupRuns?.getSnapshot ?? (() => EMPTY_GROUP_RUNS), () => EMPTY_GROUP_RUNS);
+  const groupRows = props.mode === "canvas-group" ? groupSnapshot.rows.filter(row => row.rootGroupId === props.nodeId) : [];
   const delivery = props.deliveryHistory?.status !== "succeeded" ? props.deliveryHistory : undefined;
   const deliveryInput = useAssistantDeliveryInput(service, delivery?.execution);
   const deliveryActions = useAssistantExecutionActions();
@@ -119,8 +123,8 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       ? active
       : null;
   const inProgress =
-    turn &&
-    ["queued", "running", "committing"].includes(turn.turn.status);
+    groupRows.some(row => row.active) ||
+    Boolean(turn && ["queued", "running", "committing"].includes(turn.turn.status));
   // 待核对（unknown）不是执行中：宿主重启后没有回执的回合不能继续提交，但主操作不得
   // 谎称仍在执行；用户从详情里停止该回合后即可继续。
   const needsReview = turn?.turn.status === "unknown";
@@ -165,6 +169,12 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
               "描述场景、对象和动作，例如：让主体沿小路前进，镜头缓慢跟随…",
             action: "生成",
           }
+        : props.mode === "canvas-group"
+          ? {
+              title: "生成组",
+              placeholder: "描述组内要搭建或调整的内容，例如：生成分镜、补齐图片和视频，保留已完成结果…",
+              action: "生成",
+            }
         : {
             title: inspector ? "AI 修改" : "生成 3D 模型",
             placeholder: inspector
@@ -308,7 +318,15 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 placeholder={catalog.key === modelKey && catalog.loading ? "正在读取模型…" : toolDefault ? "留空跟随工具设置" : "填写模型 ID"}
                 value={model} disabled={locked} onChange={event => { setModels(current => ({ ...current, [modelKey]: event.target.value })); remember(event.target.value); }} />
           ) : null}
-        detail={<>
+        detail={props.mode === "canvas-group" && groupRows.length ? <>
+          {(groupRows.some(row => row.active) ? groupRows.filter(row => row.active) : groupRows.slice(0, 1)).map(row => <span key={row.requestId} className="authoring-generate__run">
+            <span>{row.label}</span>
+            {row.conversationId ? <Button size="sm" tone="ghost" onClick={() => conversation?.onOpenDetail({ conversationId: row.conversationId!, requestId: row.requestId, nodeId: props.nodeId })}>查看此回合</Button> : null}
+            {row.active && row.conversationId ? <Button size="sm" tone="ghost" disabled={!props.writable || deliveryActions.busy}
+              onClick={() => void deliveryActions.perform(async () => { await props.groupRuns!.stop(row.requestId); return { ok: true }; })}>停止此回合</Button> : null}
+            {row.status === "unknown" ? <Button size="sm" tone="ghost" disabled={deliveryActions.busy} onClick={() => void props.groupRuns?.refresh()}>核对结果</Button> : null}
+          </span>)}
+        </> : <>
           {!delivery && input.pending ? <Button size="sm" tone="ghost" disabled={busy} onClick={() => { if (port) void controller.query(port); }}>查询结果</Button> : null}
           {delivery?.status === "unknown" ? <Button size="sm" tone="ghost" disabled={deliveryActions.busy} onClick={() => void deliveryActions.perform(delivery.query)}>查询结果</Button> : null}
           {detail && detailConversation && detailRequest ? (
@@ -357,6 +375,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         {delivery.reason ? <p className="authoring-generate__reason">{delivery.reason}</p> : null}
         {deliveryActions.error ? <p className="authoring-generate__reason">{deliveryActions.error}</p> : null}
       </> : null}
+      {props.mode === "canvas-group" && (groupSnapshot.error || deliveryActions.error) ? <p className="authoring-generate__reason">{groupSnapshot.error || deliveryActions.error}</p> : null}
       {!delivery && modelError ? <p className="authoring-generate__reason">{modelError}</p> : null}
       {!delivery && emptyDirectory ? (
         <p className="authoring-generate__hint" data-testid="authoring-generate-empty">{ASSISTANT_SETUP_HINT}</p>

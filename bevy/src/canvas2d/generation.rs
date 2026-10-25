@@ -48,7 +48,7 @@ pub(crate) fn sync_generation(
     // 图片/视频聚焦期间隐藏所有普通节点覆盖层
     // （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，任务 4.2；
     //  change: 2026-10-10-add-video-node-focus-workspace 扩展为视频聚焦）。
-    if super::image_focus::has_presented_media_focus(&scene.0) {
+    if super::image_focus::has_presented_media_focus(&scene.0) || scene.0.model_focus.is_some() {
         clear_overlay(&mut commands, &mut visuals, &mut meshes);
         return;
     }

@@ -4,8 +4,11 @@ import { buildCanvasRenderScene } from "./render-scene.js";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 import {
   getWoohaa3CanvasNodeRect,
+  getWoohaa3CanvasSelectionBounds,
+  captureWoohaa3CanvasGroupRects,
   getGroupRequiredMinSize,
   groupPadding,
+  groupBottomPadding,
 } from "./domain/core/group-geometry.js";
 import { compileAgentPlan } from "./canvas-script/planner/compile.js";
 import { applyCanvasCommands } from "./command-reducer.js";
@@ -71,6 +74,25 @@ function assertVisibleGeometry(canvas: ServerCanvas) {
 }
 
 describe("shared effective canvas dimensions", () => {
+  it("uses the same existing nested group footer for scene, navigation, selection and agent bounds", () => {
+    const canvas = empty();
+    canvas.document.nodes = [
+      {id: "outer", type: "group", position: {x: 100, y: 200}, width: 300, height: 220},
+      {id: "inner", type: "group", parentId: "outer", position: {x: 40, y: 40}, width: 280, height: 200},
+      {id: "member", type: "image", parentId: "inner", position: {x: 40, y: 40}, width: 200, height: 100}
+    ];
+    const before = structuredClone(canvas);
+    const scene = assertVisibleGeometry(canvas);
+    const nodes = canvas.document.nodes.map(n => ({...n, data: {}}));
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const outer = {x: 100, y: 200, width: 360, height: 340};
+    expect(scene.nodes.find(n => n.id === "outer")).toMatchObject(outer);
+    expect(getWoohaa3CanvasNodeRect(nodes[0]!, byId)).toEqual(outer);
+    expect(getWoohaa3CanvasSelectionBounds([nodes[0]!], nodes)).toEqual(outer);
+    expect(captureWoohaa3CanvasGroupRects(nodes).get("outer")).toEqual(outer);
+    expect(canvas).toEqual(before);
+  });
+
   it("matches rendering and API for compact, missing, resized and clamped model dimensions", () => {
     const canvas = empty();
     const dimensions = [
@@ -184,7 +206,7 @@ describe("shared effective canvas dimensions", () => {
     const scene = assertVisibleGeometry(grouped);
     const group = scene.nodes.find((n) => n.id === plan.refs.buildings)!;
     // The old calculation ended at 448 while the final card extended to 576.
-    expect(group.y + group.height).toBe(576 + groupPadding);
+    expect(group.y + group.height).toBe(576 + groupBottomPadding);
     expect(
       grouped.document.nodes
         .filter((n) => n.type === "model3d")
