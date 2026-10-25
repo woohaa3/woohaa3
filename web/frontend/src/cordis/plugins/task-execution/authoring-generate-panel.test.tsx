@@ -490,6 +490,33 @@ describe("统一 Agent 创作入口", () => {
     expect(detailEntry.getAttribute("title")).toBe("执行中");
   });
 
+  it("未知回执不谎称执行中：主操作显示待核对并保持禁用", async () => {
+    const { props } = fixture();
+    const snapshot = {
+      active: null, conversations: [], detail: null, loading: false, error: null, mcp: null, contextRevision: 0,
+      turnsByRequest: {
+        "req-1": {
+          conversationId: "conversation",
+          requestId: "req-1",
+          turn: {
+            turnId: "turn", conversationId: "conversation", requestId: "req-1", action: "generate" as const,
+            status: "unknown" as const, stage: "unknown",
+            target: { canvasId: "canvas", nodeId: "model", connectionId: "c1" },
+            tools: [], createdAt: "2026-10-18T00:00:00.000Z", updatedAt: "2026-10-18T00:00:00.000Z",
+          },
+        },
+      },
+    } as unknown as AgentConversationSnapshotView;
+    const service = {
+      ...(props.agentConversation!.service as unknown as Record<string, unknown>),
+      getSnapshot: () => snapshot,
+    } as unknown as AgentConversationService;
+    await render({ ...props, agentConversation: { ...props.agentConversation!, service, conversationId: "conversation", latestRequestId: "req-1" } });
+    const primary = () => el.querySelector<HTMLButtonElement>(".assistant-toolbar__submit .ui-button--primary")!;
+    expect(primary().textContent).toBe("待核对");
+    expect(primary().disabled).toBe(true);
+  });
+
   it("打开既往会话只读导航，不触发生成", async () => {
     const { props, service } = fixture();
     await render({

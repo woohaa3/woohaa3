@@ -120,9 +120,12 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       : null;
   const inProgress =
     turn &&
-    ["queued", "running", "committing", "unknown"].includes(turn.turn.status);
+    ["queued", "running", "committing"].includes(turn.turn.status);
+  // 待核对（unknown）不是执行中：宿主重启后没有回执的回合不能继续提交，但主操作不得
+  // 谎称仍在执行；用户从详情里停止该回合后即可继续。
+  const needsReview = turn?.turn.status === "unknown";
   const locked =
-    busy || Boolean(delivery) || Boolean(selection?.blockedReason) || Boolean(inProgress);
+    busy || Boolean(delivery) || Boolean(selection?.blockedReason) || Boolean(inProgress) || Boolean(needsReview);
   const noConnection = !service || !connectionId || !selectedConnection;
   const emptyDirectory = !connections.length && !selection?.loading && !selection?.error;
   useEffect(() => { if (locked || noConnection) setOpenSelector(null); }, [locked, noConnection]);
@@ -347,7 +350,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
             selection?.loading
           }
         >
-          {busy ? "正在提交" : inProgress ? "执行中" : target.action}
+          {busy ? "正在提交" : needsReview ? "待核对" : inProgress ? "执行中" : target.action}
         </Button>}
       />
       {delivery ? <>

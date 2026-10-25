@@ -752,7 +752,8 @@ export function createAgentConversationService(options: AgentConversationService
         }
       }
       controller?.abort();
-      if (!controller && (JSON.parse(record.targetJson).mode === "canvas-group" || JSON.parse(record.targetJson).delivery) && ["queued", "running", "committing", "unknown"].includes(record.status)) {
+      // 宿主重启后没有在途控制器：任何目标类型都按用户停止结算，否则 unknown 只能靠手工改库脱身。
+      if (!controller && ["queued", "running", "committing", "unknown"].includes(record.status)) {
         store.updateTurn(record.turnId, { status: "cancelled", stage: "cancelled" }, now());
         appendEvent(record.conversationId, record.turnId, record.requestId, "stage", { stage: "cancelled" });
       }
@@ -813,31 +814,39 @@ export function createAgentConversationService(options: AgentConversationService
           continue;
         }
         const resolved = registry.resolve(undefined);
-        if (!resolved.ok) continue;
         const binding = store.getConversation(turn.conversationId);
         const bound = binding ? registry.resolve(binding.adapterId) : resolved;
-        if (!bound.ok || !bound.handle.adapter.query) continue;
+        const query = bound.ok ? bound.handle.adapter.query : undefined;
+        // 重启后无法核对（adapter 不可用/无 query 端口/查不到记录/结构化结果缺正文）时，
+        // 以 failed 结算：unknown 在界面上没有继续/停止出口，留在 unknown 会让节点永久卡在
+        // 执行中。组回合（canvas-group）另有回执与用户停止入口，不在此处改判。
+        const settleUnreconciled = () => finishTurn(turn, {
+          status: "failed",
+          error: { code: "turn-unreconciled", message: "本机宿主重启后未取得执行回执，结果无法确认；请核对后重试" }
+        });
+        if (!query) { settleUnreconciled(); continue; }
         owners.add(turn.turnId);
         try {
-          const outcome = await bound.handle.adapter.query({ owner: turn.owner, requestId: turn.requestId });
-          if (outcome) {
-            if (JSON.parse(turn.targetJson).structuredInputHash) {
-              // A completion without its structured text cannot be adopted as a design result.
-              if (outcome.status !== "succeeded" || outcome.assistantText?.trim()) finishTurn(turn, outcome);
-              continue;
-            }
-            store.updateTurn(turn.turnId, {
-              status: outcome.status,
-              stage: outcome.status,
-              ...(outcome.receipt !== undefined ? { receiptJson: safeJson(outcome.receipt) } : {}),
-              ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}),
-              ...(outcome.taskId !== undefined ? { taskId: outcome.taskId } : {}),
-              ...(outcome.error !== undefined ? { errorCode: outcome.error.code, errorMessage: outcome.error.message } : {})
-            }, now());
-            appendEvent(turn.conversationId, turn.turnId, turn.requestId, "receipt", { status: outcome.status, reconciled: true });
+          const outcome = await query({ owner: turn.owner, requestId: turn.requestId });
+          if (!outcome) { settleUnreconciled(); continue; }
+          if (JSON.parse(turn.targetJson).structuredInputHash) {
+            // A completion without its structured text cannot be adopted as a design result.
+            if (outcome.status !== "succeeded" || outcome.assistantText?.trim()) finishTurn(turn, outcome);
+            else settleUnreconciled();
+            continue;
           }
+          store.updateTurn(turn.turnId, {
+            status: outcome.status,
+            stage: outcome.status,
+            ...(outcome.receipt !== undefined ? { receiptJson: safeJson(outcome.receipt) } : {}),
+            ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}),
+            ...(outcome.taskId !== undefined ? { taskId: outcome.taskId } : {}),
+            ...(outcome.error !== undefined ? { errorCode: outcome.error.code, errorMessage: outcome.error.message } : {})
+          }, now());
+          appendEvent(turn.conversationId, turn.turnId, turn.requestId, "receipt", { status: outcome.status, reconciled: true });
         } catch (error) {
           log({ event: "agent-conversation-reconcile-failed", turnId: turn.turnId, message: error instanceof Error ? error.message : String(error) });
+          settleUnreconciled();
         }
       }
       if (marked.length > 0) log({ event: "agent-conversation-unknown-marked", count: marked.length, reconciled: owners.size });

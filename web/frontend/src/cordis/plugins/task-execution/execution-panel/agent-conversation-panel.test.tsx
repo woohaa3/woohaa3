@@ -326,6 +326,27 @@ describe("AgentConversationPanel · 运行中刷新", () => {
     } finally { await act(async () => root.unmount()); }
   });
 
+  it("重启后未知的单目标回合也提供停止入口，不必改库脱身", async () => {
+    const remote = fakeRemote();
+    const cancel = vi.fn(async () => ({ ok: true as const, value: { ok: true as const } }));
+    remote.cancel = cancel;
+    remote.read = async () => ({ ok: true, value: {
+      ...snapshot(),
+      conversation: { ...snapshot().conversation, nodeId: "n1" },
+      turns: [{ ...turn(), status: "unknown", stage: "unknown", target: { canvasId: "cv", nodeId: "n1", mode: "model3d" } }]
+    } });
+    const { navigation } = navStub(DETAIL);
+    const service = createAgentConversationService({ remote, navigation });
+    const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} onClose={() => undefined} />);
+    try {
+      expect(el.textContent).toContain("未收到执行完成回执");
+      const button = [...el.querySelectorAll('button')].find(b => b.textContent === "停止此回合");
+      expect(button).toBeDefined();
+      await act(async () => button!.click());
+      expect(cancel).toHaveBeenCalledWith("req-1");
+    } finally { await act(async () => root.unmount()); }
+  });
+
   it("运行中按间隔刷新快照，收敛已完成后停止轮询并显示助手消息", async () => {
     vi.useFakeTimers();
     try {

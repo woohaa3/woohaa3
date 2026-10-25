@@ -495,7 +495,7 @@ describe("agent conversation service", () => {
     expect(foreign.error.code).toBe("not-found");
   });
 
-  it("重启把未结算回合标记 unknown 并核对 adapter，不自动重推理", async () => {
+  it("重启把未结算回合标记 unknown 并核对 adapter，无回执时结算为 failed，不自动重推理", async () => {
     const { controls, service } = setup();
     const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
     if (!created.ok) return;
@@ -510,7 +510,9 @@ describe("agent conversation service", () => {
     expect(controls.seen).toHaveLength(0); // 未触发新的推理
     const after = service.queryTurn({ owner: "user-a", requestId: "req-1" });
     if (!after.ok) return;
-    expect(after.turn.status).toBe("unknown");
+    // 重启后 adapter 无法给出回执：不能永久留在 unknown（界面上没有继续/停止出口），按失败结算。
+    expect(after.turn.status).toBe("failed");
+    expect(after.turn.error).toMatchObject({ code: "turn-unreconciled" });
   });
 
   it("catalog 投影真实授权/能力，不静默替换模型", async () => {
@@ -677,6 +679,9 @@ it("无权威回执的目标回复保持 unknown，仍可清空关联且不删�
   expect(service.clearContext({ owner: "user-a", canvasId: "canvas-1", nodeId: "node-1" })).toMatchObject({ ok: true, cleared: 1 });
   expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "unknown" } });
   expect(controls.seen).toHaveLength(1);
+  // 没有在途控制器时，单目标 unknown 也可由用户停止结算（不再是组回合专属出口）。
+  service.cancelTurn({ owner: "user-a", requestId: "no-proof" });
+  expect(service.queryTurn({ owner: "user-a", requestId: "no-proof" })).toMatchObject({ ok: true, turn: { status: "cancelled" } });
 });
 
 
@@ -708,7 +713,7 @@ describe("trusted structured assistant execution", () => {
     await service.reconcileUnknown();
     await service.dispatchStructuredTurn(accepted.turn.turnId,candidate);
     expect(controls.seen).toHaveLength(0);
-    expect(service.acceptStructuredTurn(input)).toMatchObject({ok:true,reused:true,turn:{status:"unknown"}});
+    expect(service.acceptStructuredTurn(input)).toMatchObject({ok:true,reused:true,turn:{status:"failed"}});
     service.cancelTurn({owner:"owner",requestId:"lost"});
     await service.dispatchStructuredTurn(accepted.turn.turnId,candidate);expect(controls.seen).toHaveLength(0);
   });

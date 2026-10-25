@@ -447,7 +447,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
             ) : null}
           </div>
         ) : null}
-        {turn?.status === "unknown" && turn.target.mode === "canvas-group" ? (
+        {turn?.status === "unknown" ? (
           <div className="agent-detail__result">
             <p>{liveReturn ? "可先停止此回合，再返回生成面板继续搭建。" : "可先停止此回合，再关闭详情继续搭建。"}</p>
             <div className="agent-detail__actions">
