@@ -52,6 +52,8 @@ export type AnomalyWindowStats = {
 
 export type AnomalyNameInput = {
   readonly name: TelemetryEventName;
+  /** 分组口径下的分组成员；缺省表示该事件名整体。原样带进每条命中。 */
+  readonly attributeValue?: string;
   readonly current: AnomalyWindowStats;
   readonly previous: AnomalyWindowStats;
   /** `B2` 的计数，只供 `event-silence` 判断"之前确实在发生"。 */
@@ -91,7 +93,8 @@ export function evaluateTelemetryAnomalies(input: TelemetryAnomalyInput): readon
     (left, right) =>
       severityRank(left.severity) - severityRank(right.severity) ||
       compareText(left.ruleId, right.ruleId) ||
-      compareText(left.name, right.name)
+      compareText(left.name, right.name) ||
+      compareText(left.attributeValue ?? "", right.attributeValue ?? "")
   );
 }
 
@@ -112,6 +115,7 @@ export function detectFailureRateSpike(entry: AnomalyNameInput, window: Telemetr
     ruleId: "failure-rate-spike",
     severity: observed >= TELEMETRY_ANOMALY_THRESHOLDS.failureRateError ? "error" : "warn",
     name: entry.name,
+    ...groupOf(entry),
     window,
     observed: round4(observed),
     baseline: round4(baseline),
@@ -144,6 +148,7 @@ export function detectNewErrorCodes(
       ruleId: "new-error-code",
       severity: "warn",
       name: entry.name,
+      ...groupOf(entry),
       window,
       observed: code.count,
       baseline: 0,
@@ -171,6 +176,7 @@ export function detectLatencyRegression(entry: AnomalyNameInput, window: Telemet
     ruleId: "latency-regression",
     severity: "warn",
     name: entry.name,
+    ...groupOf(entry),
     window,
     observed,
     baseline,
@@ -199,12 +205,18 @@ export function detectEventSilence(entry: AnomalyNameInput, window: TelemetryWin
     ruleId: "event-silence",
     severity: "warn",
     name: entry.name,
+    ...groupOf(entry),
     window,
     observed: 0,
     baseline: entry.previous.count,
     samples: 0,
     evidence: { current: 0, previous: entry.previous.count, earlier: entry.earlier }
   };
+}
+
+/** 分组信息只在存在时出现：`undefined` 字段会让"整体命中"被误读成"某个分组命中"。 */
+function groupOf(entry: AnomalyNameInput): { attributeValue?: string } {
+  return entry.attributeValue === undefined ? {} : { attributeValue: entry.attributeValue };
 }
 
 function failureRate(stats: AnomalyWindowStats): number {

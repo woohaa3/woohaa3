@@ -7,8 +7,8 @@
  * 把两者合并成一句"上报异常"就等于让用户去猜。
  */
 import { describe, expect, it } from "vitest";
-import type { TelemetryExportStatus, TelemetryStatus } from "@woohaa3/contracts";
-import { resolveTelemetryViewState, telemetryNotices } from "./model.js";
+import type { TelemetryExportStatus, TelemetryStatus, TelemetrySummaryRow } from "@woohaa3/contracts";
+import { rankByDuration, resolveTelemetryViewState, sortSummaryRows, telemetryNotices } from "./model.js";
 
 function status(overrides: Partial<TelemetryStatus> = {}): TelemetryStatus {
   return {
@@ -116,5 +116,60 @@ describe("视图状态", () => {
         filtered: false
       })
     ).toEqual({ kind: "service-unavailable", message: "读取本机遥测失败" });
+  });
+});
+
+/**
+ * 分组耗时榜的排序口径
+ * （change: 2026-10-25-enhance-telemetry-performance-collection，任务 4.3 / design D5）。
+ *
+ * 两条边界最容易被写错，各有一条用例：
+ * 1. 缺 p95 的组**排最后**而不是当 0ms——把"没测到"排在"很快"前面会让人以为它最快；
+ * 2. 同 p95 时排序要稳定（事件名 → 分组值），否则每次刷新行序跳动。
+ */
+function row(overrides: Partial<TelemetrySummaryRow> & Pick<TelemetrySummaryRow, "name">): TelemetrySummaryRow {
+  return {
+    count: 10,
+    results: { success: 10, failure: 0, cancelled: 0, rejected: 0 },
+    durationSamples: 10,
+    topErrorCodes: [],
+    ...overrides
+  } as TelemetrySummaryRow;
+}
+
+describe("分组耗时榜", () => {
+  it("按 p95 降序排列，缺样本的组排在最后", () => {
+    const rows = rankByDuration([
+      row({ name: "perf.interaction", attributeValue: "zoom", durationP95: 12, durationP50: 8 }),
+      row({ name: "perf.interaction", attributeValue: "pan" }),
+      row({ name: "perf.interaction", attributeValue: "drag", durationP95: 40, durationP50: 30 })
+    ]);
+    expect(rows.map((entry) => entry.attributeValue)).toEqual(["drag", "zoom", "pan"]);
+  });
+
+  it("同 p95 时按事件名、再按分组值稳定排序", () => {
+    const rows = rankByDuration([
+      row({ name: "perf.segment", attributeValue: "b", durationP95: 20 }),
+      row({ name: "perf.interaction", attributeValue: "z", durationP95: 20 }),
+      row({ name: "perf.interaction", attributeValue: "a", durationP95: 20 })
+    ]);
+    expect(rows.map((entry) => `${entry.name}:${entry.attributeValue}`)).toEqual([
+      "perf.interaction:a",
+      "perf.interaction:z",
+      "perf.segment:b"
+    ]);
+  });
+
+  it("聚合表同计数时按事件名与分组值排序（不依赖 SQL 返回顺序）", () => {
+    const rows = sortSummaryRows([
+      row({ name: "perf.interaction", attributeValue: "pan", count: 3 }),
+      row({ name: "canvas.save", count: 3 }),
+      row({ name: "perf.interaction", attributeValue: "drag", count: 3 })
+    ]);
+    expect(rows.map((entry) => `${entry.name}:${entry.attributeValue ?? ""}`)).toEqual([
+      "canvas.save:",
+      "perf.interaction:drag",
+      "perf.interaction:pan"
+    ]);
   });
 });

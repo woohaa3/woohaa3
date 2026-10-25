@@ -192,7 +192,11 @@ export function createTelemetryClient(options: TelemetryClientOptions = {}): Tel
         return;
       }
       if (buffer.length >= bufferLimit) {
-        buffer.shift();
+        // 溢出时优先丢 `perf.frame`：它是窗口聚合的可重算事实，而 `perf.interaction`
+        // 记录的是不可重放的一次输入（change: 2026-10-25-enhance-telemetry-performance-collection，D4）。
+        const frameIndex = buffer.findIndex((entry) => entry.name === "perf.frame");
+        if (frameIndex >= 0) buffer.splice(frameIndex, 1);
+        else buffer.shift();
         droppedOverflow += 1;
       }
       // 构建标识在这里**单点**补盖：新增事件类型/调用点都不必记得传版本。调用点显式带了

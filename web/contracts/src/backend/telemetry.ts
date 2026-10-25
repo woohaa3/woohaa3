@@ -21,6 +21,7 @@ import type {
   TelemetrySummary,
   TelemetryWindow
 } from "../telemetry/query.js";
+import type { TelemetryAttributeKey } from "../telemetry/event.js";
 
 /**
  * 一次投递的结果。
@@ -59,6 +60,20 @@ export type TelemetryExport = {
 };
 
 /**
+ * 分组读取的可选口径（`summary` / `anomalies` 共用）。
+ *
+ * `attributeKey` + `attributeValue` 是**筛选**：只在该属性取值相等的事件上聚合。它是 spec
+ * 「按 production 筛选的耗时分布不包含 dev 样本」的落点——不能靠界面隐藏行来假装分开。
+ */
+export type TelemetryReadOptions = {
+  /** 单键分组；缺省按事件名聚合。 */
+  readonly groupBy?: TelemetryAttributeKey;
+  /** 与 `attributeValue` 成对出现的属性精确匹配；只给其一由路由层拒绝。 */
+  readonly attributeKey?: TelemetryAttributeKey;
+  readonly attributeValue?: string;
+};
+
+/**
  * `ctx.telemetry`：采集、查询与复盘入口。
  *
  * 与 `ctx.generation` / `ctx.storage` 同形的注册面（`register`/`unregister`/`list`/`resolve`），
@@ -77,11 +92,18 @@ export type HostTelemetryService = {
   /** 事件列表：最新在前、游标分页。 */
   query(filter?: TelemetryEventFilter): Promise<TelemetryEventPage>;
 
-  /** 窗口聚合：每个事件名的计数/结果分布/分位数/高频错误码，外加时间序列。 */
-  summary(window: TelemetryWindow, bucket?: TelemetryBucket): Promise<TelemetrySummary>;
+  /**
+   * 窗口聚合：每个事件名的计数/结果分布/分位数/高频错误码，外加时间序列。
+   *
+   * `options.groupBy` 给出时行变成「事件名 × 属性值」组，返回的 `TelemetrySummary.groupBy` 会带上
+   * 该键；分组行的计数与分位数只统计组内样本。`options.attributeKey/attributeValue` 是筛选，
+   * 用来把不同构建模式的样本分开算（spec：按 `production` 筛选的分布不含 dev 样本）。
+   * 详见 change: 2026-10-25-enhance-telemetry-performance-collection，design D5。
+   */
+  summary(window: TelemetryWindow, bucket?: TelemetryBucket, options?: TelemetryReadOptions): Promise<TelemetrySummary>;
 
-  /** 当前窗口命中的异常（确定性规则，见 design D6）。 */
-  anomalies(window: TelemetryWindow): Promise<readonly TelemetryAnomaly[]>;
+  /** 当前窗口命中的异常（确定性规则，见 design D6）；`groupBy` 让规则按输入种类/阶段分组。 */
+  anomalies(window: TelemetryWindow, options?: TelemetryReadOptions): Promise<readonly TelemetryAnomaly[]>;
 
   /** 注册一个出口；返回注销函数（站点扩展放进自己的回滚路径）。 */
   registerExport(provider: TelemetryExport): () => void;

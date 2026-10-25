@@ -11,7 +11,8 @@ import {
   defaultTelemetryBucket,
   isTelemetryBucket,
   isTelemetryWindow,
-  parseTelemetryEventFilter
+  parseTelemetryEventFilter,
+  parseTelemetryGroupBy
 } from "./query.js";
 
 describe("窗口与分桶", () => {
@@ -117,5 +118,55 @@ describe("筛选解析", () => {
       cursor: "42",
       limit: 20
     });
+  });
+});
+
+describe("属性维度筛选与分组（change: 2026-10-25）", () => {
+  it("成对的键值被保留", () => {
+    const parsed = parseTelemetryEventFilter({ attributeKey: "kind", attributeValue: "pan" });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.filter.attributeKey).toBe("kind");
+    expect(parsed.filter.attributeValue).toBe("pan");
+  });
+
+  it("只给键返回 invalid-attribute（不返回未筛选结果）", () => {
+    const parsed = parseTelemetryEventFilter({ attributeKey: "mode" });
+    expect(parsed).toEqual({
+      ok: false,
+      code: "invalid-attribute",
+      message: "属性筛选必须同时给出键与值"
+    });
+  });
+
+  it("只给值返回 invalid-attribute", () => {
+    const parsed = parseTelemetryEventFilter({ attributeValue: "dev" });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.code).toBe("invalid-attribute");
+  });
+
+  it("未知属性键返回 invalid-attribute（不当成没有匹配样本）", () => {
+    for (const attributeKey of ["prompt", "title", ""]) {
+      const parsed = parseTelemetryEventFilter({ attributeKey, attributeValue: "x" });
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.code).toBe("invalid-attribute");
+    }
+  });
+
+  it("属性值必须是字符串", () => {
+    const parsed = parseTelemetryEventFilter({ attributeKey: "fps", attributeValue: 60 });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.code).toBe("invalid-attribute");
+  });
+
+  it("groupBy 解析：缺省不分组、合法键保留、未知键 invalid", () => {
+    expect(parseTelemetryGroupBy(undefined)).toBeUndefined();
+    expect(parseTelemetryGroupBy("")).toBeUndefined();
+    expect(parseTelemetryGroupBy("kind")).toBe("kind");
+    expect(parseTelemetryGroupBy("stage")).toBe("stage");
+    expect(parseTelemetryGroupBy("prompt")).toBe("invalid");
   });
 });

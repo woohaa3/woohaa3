@@ -25,6 +25,7 @@ import { createFrameSubmission } from "./interaction-frame-submission.js";
 import { gestureLabel } from "./gesture-label.js";
 import { createModelFocusFacade } from "./interaction-model-focus-facade.js";
 import { createInteractionFrameLoop } from "./interaction-frame-loop.js";
+import { beginStartupSpan } from "../../services/telemetry-primitives.js";
 import { sharedCanvasNodeIndex, indexNodeSize } from "./canvas-node-index.js";
 import { errorDetail } from "../canvas-runtime/runtime-issues.js";
 import { advanceTransientState } from "./interaction-frame-prelude.js";
@@ -127,29 +128,46 @@ export function installInteractionController(options: InteractionControllerOptio
     current: (() => import("@woohaa3/contracts").BevyAggregateConnect | null) | null;
   } = { current: null };
   // 合成快照并附带本帧引用到的 prepared resources（change: optimize-model-scene-snapshot-hot-path）。
-  const buildSceneWithResources = () =>
-    buildSceneWithResourcesModule(
-      options,
-      surfaceSize,
-      () => modelPlacements(),
-      {
-        selected: state.selected,
-        draft: state.draft,
-        marquee: marqueeRect(),
-        localPositions: state.localPositions,
-        localSizes: state.localSizes,
-        viewportPreview: state.viewportPreview,
-        fallbackViewport: localViewport.get(),
-        hoveredNodeId: state.hoveredNodeId,
-        hoveredPort: state.hoveredPort,
-        hoveredEdgeId: state.hoveredEdgeId,
-        hoveredHistory: state.hoveredHistory,
-        pressedHistory: state.gesture.kind === "history-press" ? state.gesture : null,
-        dragAttach: attachProjectionRef.current?.() ?? null,
-        aggregateConnect: aggregateProjectionRef.current?.() ?? null,
-        compositeAssetReadyPlanes: compositeAssetMediaReady
-      }
-    );
+  /** 一帧的瞬时态快照（供场景构建读取）。 */
+  const frameState = () => ({
+    selected: state.selected,
+    draft: state.draft,
+    marquee: marqueeRect(),
+    localPositions: state.localPositions,
+    localSizes: state.localSizes,
+    viewportPreview: state.viewportPreview,
+    fallbackViewport: localViewport.get(),
+    hoveredNodeId: state.hoveredNodeId,
+    hoveredPort: state.hoveredPort,
+    hoveredEdgeId: state.hoveredEdgeId,
+    hoveredHistory: state.hoveredHistory,
+    pressedHistory: state.gesture.kind === "history-press" ? state.gesture : null,
+    dragAttach: attachProjectionRef.current?.() ?? null,
+    aggregateConnect: aggregateProjectionRef.current?.() ?? null,
+    compositeAssetReadyPlanes: compositeAssetMediaReady
+  });
+  /**
+   * 首个完整场景构建是否已计时。
+   *
+   * `perf.startup` 的 `scene-build` 只记第一次：之后的构建是同一次会话里的增量重建，混进来会
+   * 让"启动有多慢"随用户操作次数变化（task 3.4）。
+   */
+  let firstSceneBuildMeasured = false;
+  const buildSceneWithResources = () => {
+    const build = () => buildSceneWithResourcesModule(options, surfaceSize, () => modelPlacements(), frameState());
+    if (firstSceneBuildMeasured) return build();
+    // 第一次完整构建包含模型资源装配与全表投影，是启动路径上唯一可分离的"建场"成本。
+    const finish = beginStartupSpan("scene-build");
+    try {
+      return build();
+    } catch (error) {
+      finish("failure");
+      throw error;
+    } finally {
+      firstSceneBuildMeasured = true;
+      finish();
+    }
+  };
 
   const frameSubmission = createFrameSubmission({
     options, state, viewport: activeViewport, surface: surfaceSize,
@@ -355,8 +373,10 @@ export function installInteractionController(options: InteractionControllerOptio
     // A cold query or synchronous subscriber can request a flush while this scene
     // is still being built. Finish its acceptance before retrying on the next frame.
     if (frameExecuting) { markInvalidated("input"); return; }
-    const measured = import.meta.env.DEV;
-    const started = measured ? target.performance.now() : 0;
+    // 帧耗时在所有构建里都计时（change: 2026-10-25-enhance-telemetry-performance-collection，
+    // design D4：`perf.frame` 是产品事实，不是开发期采集）。只有控制台启动追踪仍限开发构建。
+    const tracing = import.meta.env.DEV;
+    const started = target.performance.now();
     const previous = frameExecuting; frameExecuting = true;
     try {
       performFrame(force);
@@ -365,10 +385,10 @@ export function installInteractionController(options: InteractionControllerOptio
       sceneInvalidated = true;
     } finally {
       frameExecuting = previous;
-      if (measured) {
-        sceneDiagnostics.frameExecutions++;
-        const totalMs = Math.max(0, target.performance.now() - started);
-        sceneDiagnostics.frameExecutionMs += totalMs;
+      sceneDiagnostics.frameExecutions++;
+      const totalMs = Math.max(0, target.performance.now() - started);
+      sceneDiagnostics.frameExecutionMs += totalMs;
+      if (tracing) {
         const playback = options.getAnimationPlayback?.();
         if (playback?.playing) {
           const key = JSON.stringify([playback.nodeId, playback.clipId, playback.generation]);

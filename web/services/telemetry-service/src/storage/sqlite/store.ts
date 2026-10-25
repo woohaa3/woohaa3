@@ -12,18 +12,28 @@
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  TelemetryAttributeKey,
   TelemetryBucket,
   TelemetryEvent,
   TelemetryEventName,
   TelemetryEventRecord,
   TelemetryOrigin,
   TelemetryResult,
-  TelemetrySeriesPoint,
-  TelemetrySummaryRow,
   TelemetrySurface
 } from "@woohaa3/contracts";
-import { TELEMETRY_PAGE_SIZE_DEFAULT, TELEMETRY_PAGE_SIZE_MAX } from "@woohaa3/contracts";
+import { TELEMETRY_ATTRIBUTE_KEYS, TELEMETRY_PAGE_SIZE_DEFAULT, TELEMETRY_PAGE_SIZE_MAX } from "@woohaa3/contracts";
 import { loadNodeSqlite } from "../../repository/sqlite-loader.js";
+import {
+  selectRangeStats,
+  selectSummary,
+  type NameWindowStats,
+  type RangeStatsQuery,
+  type StoredSummary
+} from "./aggregate.js";
+import { attributeIndexSql, parseAttributes, serializeAttributes } from "./attributes.js";
+import { buildWhere, type SqlParam } from "./queries.js";
+
+export type { ErrorCodeStats, NameWindowStats, RangeStatsQuery, StoredSummary } from "./aggregate.js";
 
 /**
  * 本包自管的 schema 版本（`PRAGMA user_version`）。
@@ -31,8 +41,12 @@ import { loadNodeSqlite } from "../../repository/sqlite-loader.js";
  * 建表用 `CREATE TABLE IF NOT EXISTS` 的面板式迁移（与 `config-store.ts` /
  * `generation-model-store.ts` 同风格）；版本号只为后续**加列**兜底：将来要加列时在这里按
  * `version` 分支执行 `ALTER TABLE` 并提升此常量，而不是猜字段是否已存在。
+ *
+ * 2：属性维度的表达式索引（change: 2026-10-25-enhance-telemetry-performance-collection）。
+ * 索引 DDL 是 `IF NOT EXISTS` 的幂等语句，所以升级不需要单独的数据迁移步骤；提版本号只是
+ * 让「这个库已经是带属性索引的一代」这件事可被观察。
  */
-export const TELEMETRY_SCHEMA_VERSION = 1;
+export const TELEMETRY_SCHEMA_VERSION = 2;
 
 const TABLE = "client_telemetry_events";
 
@@ -56,11 +70,11 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_cte_error         ON ${TABLE}(error_code, received_at);
 `;
 
+/** 属性表达式索引单独建：键集合来自契约，不能在模板字符串里手抄一份。 */
+const ATTRIBUTE_INDEX_SQL: readonly string[] = TELEMETRY_ATTRIBUTE_KEYS.map((key) => attributeIndexSql(TABLE, key));
+
 /** 选列顺序固定，读回时按位置不按名字也可以，但仍用列名以贴合显式字段。 */
 const SELECT_COLUMNS = "id, received_at, occurred_at, name, result, duration_ms, error_code, origin, surface, trace_id, attributes, frontend_version";
-
-/** `BEGIN IMMEDIATE` 事务里能绑定的参数类型子集（够用即可，不引 `node:sqlite` 的命名空间类型）。 */
-type SqlParam = null | number | bigint | string;
 
 type EventRow = {
   id: number;
@@ -77,35 +91,15 @@ type EventRow = {
   frontend_version: string;
 };
 
-/** 一个事件名在某个时间范围内的聚合（异常规则与聚合读面共用同一份口径）。 */
-export type NameWindowStats = {
-  readonly name: TelemetryEventName;
-  readonly count: number;
-  /** `failure` + `rejected`：异常规则里的"失败率"口径（`cancelled` 不算失败）。 */
-  readonly failures: number;
-  /** 带耗时的样本数；分位数只在样本内取位。 */
-  readonly durationSamples: number;
-  readonly durationP50?: number;
-  readonly durationP95?: number;
-  readonly durationMax?: number;
-  /** 按出现次数排序的错误码；只在请求了 `withErrorCodes` 时有值。 */
-  readonly errorCodes?: readonly ErrorCodeStats[];
-};
-
-export type ErrorCodeStats = {
-  readonly name: TelemetryEventName;
-  readonly code: string;
-  readonly count: number;
-  /** 该错误码在窗口内最早出现的时间；`new-error-code` 的"首次出现"证据。 */
-  readonly firstSeenAt: number;
-};
-
 export type StoredEventQuery = {
   readonly since: number;
   readonly until: number;
   readonly names?: readonly TelemetryEventName[];
   readonly results?: readonly TelemetryResult[];
   readonly errorCode?: string;
+  /** 单键属性精确匹配；与 `attributeValue` 成对（契约层已保证，存储层再拒一次）。 */
+  readonly attributeKey?: TelemetryAttributeKey;
+  readonly attributeValue?: string;
   readonly cursor?: string;
   readonly limit?: number;
 };
@@ -113,20 +107,6 @@ export type StoredEventQuery = {
 export type StoredEventPage = {
   readonly events: readonly TelemetryEventRecord[];
   readonly nextCursor?: string;
-};
-
-export type StoredSummary = {
-  readonly total: number;
-  readonly rows: readonly TelemetrySummaryRow[];
-  readonly series: readonly TelemetrySeriesPoint[];
-};
-
-export type RangeStatsQuery = {
-  readonly since: number;
-  readonly until: number;
-  /** 分位数只在异常规则里需要；`event-silence` 的第三个窗口只要计数，跳过可少两次按名排序查询。 */
-  readonly withDurations?: boolean;
-  readonly withErrorCodes?: boolean;
 };
 
 export class SqliteTelemetryStore {
@@ -188,6 +168,9 @@ export class SqliteTelemetryStore {
       throw new Error(`遥测库版本 ${version} 高于本程序支持的 ${TELEMETRY_SCHEMA_VERSION}，拒绝写入以免破坏数据`);
     }
     this.db.exec(SCHEMA_SQL);
+    // 属性索引是幂等 DDL，每次打开都执行一次：旧库（schema 1）升级到这里就补齐了，
+    // 不需要单独的数据迁移步骤。
+    for (const sql of ATTRIBUTE_INDEX_SQL) this.db.exec(sql);
     if (version < TELEMETRY_SCHEMA_VERSION) {
       this.db.exec(`PRAGMA user_version = ${TELEMETRY_SCHEMA_VERSION}`);
     }
@@ -235,24 +218,13 @@ export class SqliteTelemetryStore {
    * 前面，不会把已看过的行推到下一页（design D5 的"游标即上一页最后一条的 id"）。
    */
   listEvents(query: StoredEventQuery): StoredEventPage {
-    const conditions = ["received_at >= ?", "received_at <= ?"];
-    const params: SqlParam[] = [query.since, query.until];
+    const where = buildWhere(query);
+    const conditions = [...where.conditions];
+    const params: SqlParam[] = [...where.params];
     const cursorId = decodeCursor(query.cursor);
     if (cursorId !== undefined) {
       conditions.push("id < ?");
       params.push(cursorId);
-    }
-    if (query.names && query.names.length > 0) {
-      conditions.push(`name IN (${query.names.map(() => "?").join(", ")})`);
-      params.push(...query.names);
-    }
-    if (query.results && query.results.length > 0) {
-      conditions.push(`result IN (${query.results.map(() => "?").join(", ")})`);
-      params.push(...query.results);
-    }
-    if (query.errorCode) {
-      conditions.push("error_code = ?");
-      params.push(query.errorCode);
     }
     const limit = clampLimit(query.limit);
     const rows = this.all<EventRow>(
@@ -272,168 +244,19 @@ export class SqliteTelemetryStore {
     };
   }
 
-  /**
-   * 窗口聚合：每个事件名一行（计数/结果分布/分位数/高频错误码），外加按分桶的时间序列。
-   *
-   * 分位数用"排序后取位"：`ORDER BY duration_ms LIMIT 1 OFFSET floor(p * (n - 1))`。不用近似
-   * 算法——复盘时分位数自己对不上比慢几毫秒更糟（design D5）。
-   */
-  summary(input: { since: number; until: number; bucket: TelemetryBucket }): StoredSummary {
-    const { since, until, bucket } = input;
-    const counts = this.all<{ name: string; result: string; count: number }>(
-      `SELECT name, result, COUNT(*) AS count FROM ${TABLE}
-       WHERE received_at >= ? AND received_at <= ?
-       GROUP BY name, result`,
-      since,
-      until
-    );
-    const byName = new Map<string, { count: number; results: Record<TelemetryResult, number> }>();
-    let total = 0;
-    for (const row of counts) {
-      const name = row.name;
-      const entry = byName.get(name) ?? { count: 0, results: emptyResultCounts() };
-      const count = Number(row.count);
-      entry.count += count;
-      // `result` 已由归一保证是四个值之一；坏文件里的意外值只忽略，不让整页失败。
-      if (isTelemetryResultKey(row.result)) entry.results[row.result] += count;
-      byName.set(name, entry);
-      total += count;
-    }
-
-    const errorCodes = this.errorCodeStats({ since, until });
-    const durations = this.all<{ name: string; samples: number; max: number | null }>(
-      `SELECT name, COUNT(duration_ms) AS samples, MAX(duration_ms) AS max FROM ${TABLE}
-       WHERE received_at >= ? AND received_at <= ? AND duration_ms IS NOT NULL
-       GROUP BY name`,
-      since,
-      until
-    );
-    const durationByName = new Map(durations.map((row) => [row.name, row]));
-
-    const rows: TelemetrySummaryRow[] = [...byName.entries()].map(([name, entry]) => {
-      const duration = durationByName.get(name);
-      const samples = Number(duration?.samples ?? 0);
-      return {
-        name: name as TelemetryEventName,
-        count: entry.count,
-        results: entry.results,
-        ...(samples > 0
-          ? {
-              durationP50: this.quantile({ name, since, until, samples, percentile: 0.5 }),
-              durationP95: this.quantile({ name, since, until, samples, percentile: 0.95 }),
-              durationMax: Number(duration?.max ?? 0)
-            }
-          : {}),
-        durationSamples: samples,
-        topErrorCodes: topErrorCodes(errorCodes.filter((row) => row.name === name))
-      };
-    });
-    // 最活跃的事件名在前面，便于复盘时先看问题最多的那一类；同计数按名字稳定排序。
-    rows.sort((left, right) => right.count - left.count || compareText(left.name, right.name));
-
-    const series = this.all<{ bucket_at: number; name: string; count: number; failures: number }>(
-      `SELECT (received_at - (received_at % ?)) AS bucket_at,
-              name,
-              COUNT(*) AS count,
-              SUM(CASE WHEN result IN ('failure', 'rejected', 'cancelled') THEN 1 ELSE 0 END) AS failures
-       FROM ${TABLE}
-       WHERE received_at >= ? AND received_at <= ?
-       GROUP BY bucket_at, name
-       ORDER BY bucket_at ASC, name ASC`,
-      TELEMETRY_BUCKET_MS_SAFE(bucket),
-      since,
-      until
-    );
-    return {
-      total,
-      rows,
-      series: series.map((row) => ({
-        at: Number(row.bucket_at),
-        name: row.name as TelemetryEventName,
-        count: Number(row.count),
-        failures: Number(row.failures)
-      }))
-    };
+  /** 窗口聚合：每行一个事件名，或「事件名 × 属性值」组（口径见 `aggregate.ts`）。 */
+  summary(input: {
+    since: number;
+    until: number;
+    bucket: TelemetryBucket;
+    groupBy?: TelemetryAttributeKey;
+  }): StoredSummary {
+    return selectSummary(this, TABLE, input);
   }
 
-  /**
-   * 一段时间范围内每个事件名的聚合，供异常规则使用。
-   *
-   * 与 `summary` 分开是因为异常要看三个相邻窗口、且只需要 p95（不要 p50/错误码列表），按需查询
-   * 比先算完整聚合再丢弃更省。
-   */
+  /** 一段时间范围内每个事件名（或分组）的聚合，供异常规则使用。 */
   rangeStats(query: RangeStatsQuery): readonly NameWindowStats[] {
-    const { since, until } = query;
-    const counts = this.all<{ name: string; result: string; count: number }>(
-      `SELECT name, result, COUNT(*) AS count FROM ${TABLE}
-       WHERE received_at >= ? AND received_at <= ?
-       GROUP BY name, result`,
-      since,
-      until
-    );
-    const byName = new Map<string, { count: number; failures: number }>();
-    for (const row of counts) {
-      const entry = byName.get(row.name) ?? { count: 0, failures: 0 };
-      const count = Number(row.count);
-      entry.count += count;
-      if (row.result === "failure" || row.result === "rejected") entry.failures += count;
-      byName.set(row.name, entry);
-    }
-
-    const durationByName = new Map<string, { samples: number; max: number }>();
-    if (query.withDurations) {
-      for (const row of this.all<{ name: string; samples: number; max: number | null }>(
-        `SELECT name, COUNT(duration_ms) AS samples, MAX(duration_ms) AS max FROM ${TABLE}
-         WHERE received_at >= ? AND received_at <= ? AND duration_ms IS NOT NULL
-         GROUP BY name`,
-        since,
-        until
-      )) {
-        durationByName.set(row.name, { samples: Number(row.samples), max: Number(row.max ?? 0) });
-      }
-    }
-
-    const errorCodes = query.withErrorCodes ? this.errorCodeStats({ since, until }) : [];
-
-    return [...byName.entries()]
-      .map(([name, entry]): NameWindowStats => {
-        const duration = durationByName.get(name);
-        const samples = duration?.samples ?? 0;
-        return {
-          name: name as TelemetryEventName,
-          count: entry.count,
-          failures: entry.failures,
-          durationSamples: samples,
-          ...(query.withDurations && samples > 0
-            ? {
-                durationP50: this.quantile({ name, since, until, samples, percentile: 0.5 }),
-                durationP95: this.quantile({ name, since, until, samples, percentile: 0.95 }),
-                durationMax: duration?.max
-              }
-            : {}),
-          ...(query.withErrorCodes
-            ? { errorCodes: errorCodes.filter((row) => row.name === name) }
-            : {})
-        };
-      })
-      .sort((left, right) => compareText(left.name, right.name));
-  }
-
-  /** 窗口内每个（事件名, 错误码）的计数与首次出现时间。 */
-  errorCodeStats(input: { since: number; until: number }): readonly ErrorCodeStats[] {
-    return this.all<{ name: string; code: string; count: number; first_seen: number }>(
-      `SELECT name, error_code AS code, COUNT(*) AS count, MIN(received_at) AS first_seen FROM ${TABLE}
-       WHERE received_at >= ? AND received_at <= ? AND error_code <> ''
-       GROUP BY name, error_code
-       ORDER BY count DESC, code ASC`,
-      input.since,
-      input.until
-    ).map((row) => ({
-      name: row.name as TelemetryEventName,
-      code: row.code,
-      count: Number(row.count),
-      firstSeenAt: Number(row.first_seen)
-    }));
+    return selectRangeStats(this, TABLE, query);
   }
 
   /** 某错误码在 `[since, before)` 是否出现过；`new-error-code` 判定"从未出现"用。 */
@@ -524,33 +347,8 @@ export class SqliteTelemetryStore {
     this.db.close();
   }
 
-  /**
-   * 排序取位分位数。`percentile` 是 0..1；`offset = floor(p * (n - 1))` 让 n=1 时两端都取到唯一
-   * 样本、n=2 时 p50 取较小值（与常见的 nearest-rank 插值口径不同，但可复现、不引入浮点）。
-   */
-  private quantile(input: {
-    name: string;
-    since: number;
-    until: number;
-    samples: number;
-    percentile: number;
-  }): number | undefined {
-    if (input.samples <= 0) return undefined;
-    const offset = Math.floor(input.percentile * (input.samples - 1));
-    const row = this.get<{ duration_ms: number }>(
-      `SELECT duration_ms FROM ${TABLE}
-       WHERE name = ? AND received_at >= ? AND received_at <= ? AND duration_ms IS NOT NULL
-       ORDER BY duration_ms ASC
-       LIMIT 1 OFFSET ?`,
-      input.name,
-      input.since,
-      input.until,
-      offset
-    );
-    return row === undefined ? undefined : Number(row.duration_ms);
-  }
-
-  private all<T>(sql: string, ...params: SqlParam[]): T[] {
+  /** 只读查询入口：`aggregate.ts` 通过这个窄接口拿数据，拿不到连接也就无从写库。 */
+  all<T>(sql: string, ...params: SqlParam[]): T[] {
     return this.db.prepare(sql).all(...params) as unknown as T[];
   }
 
@@ -558,13 +356,6 @@ export class SqliteTelemetryStore {
     return this.db.prepare(sql).get(...params) as unknown as T | undefined;
   }
 }
-
-/** 与契约的 `TELEMETRY_BUCKET_MS` 同源；这里再收敛一次，防止坏值让 SQL 除零。 */
-function TELEMETRY_BUCKET_MS_SAFE(bucket: TelemetryBucket): number {
-  return BUCKET_MS[bucket] ?? BUCKET_MS["1h"];
-}
-
-const BUCKET_MS: Readonly<Record<TelemetryBucket, number>> = { "1m": 60_000, "5m": 300_000, "1h": 3_600_000 };
 
 function clampLimit(limit: number | undefined): number {
   if (limit === undefined || !Number.isFinite(limit)) return TELEMETRY_PAGE_SIZE_DEFAULT;
@@ -579,21 +370,6 @@ function decodeCursor(cursor: string | undefined): number | undefined {
   if (cursor === undefined || !/^[0-9]{1,18}$/.test(cursor)) return undefined;
   const id = Number(cursor);
   return Number.isSafeInteger(id) && id > 0 ? id : undefined;
-}
-
-function emptyResultCounts(): Record<TelemetryResult, number> {
-  return { success: 0, failure: 0, cancelled: 0, rejected: 0 };
-}
-
-function isTelemetryResultKey(value: string): value is TelemetryResult {
-  return value === "success" || value === "failure" || value === "cancelled" || value === "rejected";
-}
-
-function topErrorCodes(rows: readonly ErrorCodeStats[], limit = 5): readonly { code: string; count: number }[] {
-  return [...rows]
-    .sort((left, right) => right.count - left.count || compareText(left.code, right.code))
-    .slice(0, limit)
-    .map((row) => ({ code: row.code, count: row.count }));
 }
 
 function toEventRecord(row: EventRow): TelemetryEventRecord {
@@ -614,31 +390,4 @@ function toEventRecord(row: EventRow): TelemetryEventRecord {
     ...(row.frontend_version === "" ? {} : { frontendVersion: row.frontend_version }),
     ...(attributes === undefined ? {} : { attributes })
   };
-}
-
-function serializeAttributes(attributes: Readonly<Record<string, string | number | boolean>> | undefined): string {
-  return attributes === undefined || Object.keys(attributes).length === 0 ? "{}" : JSON.stringify(attributes);
-}
-
-/**
- * 属性列是 JSON。落库内容由本包写入，理论上总是合法；但文件可能被手工改坏，一条坏行不该让整页
- * 查询失败，所以解析失败按"没有属性"处理。
- */
-function parseAttributes(raw: string): Record<string, string | number | boolean> | undefined {
-  if (raw === "" || raw === "{}") return undefined;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    const entries = Object.entries(parsed as Record<string, unknown>).filter(
-      (entry): entry is [string, string | number | boolean] =>
-        typeof entry[1] === "string" || typeof entry[1] === "number" || typeof entry[1] === "boolean"
-    );
-    return entries.length === 0 ? undefined : Object.fromEntries(entries);
-  } catch {
-    return undefined;
-  }
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

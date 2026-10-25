@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  TELEMETRY_ATTRIBUTE_KEYS,
   TELEMETRY_LIMITS,
   foldSingleLine,
   isTelemetryEventName,
@@ -143,7 +144,9 @@ describe("属性", () => {
 
   it("超过条数上限时按排序丢弃尾部", () => {
     const attributes: Record<string, string> = {};
-    const keys = ["canvas", "node", "provider", "model", "phase", "status", "code", "source", "version"];
+    // 用白名单全集而不是手写几个键：上限是契约常量，键集合也来自同一个常量，
+    // 这样新增属性键时不会悄悄把这条测试变成"没到上限也通过"。
+    const keys = [...TELEMETRY_ATTRIBUTE_KEYS];
     for (const [index, key] of keys.entries()) attributes[key] = `v${index}`;
     const event = normalizeTelemetryEvent(base({ attributes }), { now: NOW });
     expect(Object.keys(event?.attributes ?? {})).toHaveLength(TELEMETRY_LIMITS.maxAttributes);
@@ -169,5 +172,114 @@ describe("辅助函数", () => {
 
   it("foldSingleLine 去掉首尾空白", () => {
     expect(foldSingleLine("  a  b  ")).toBe("a b");
+  });
+});
+
+describe("性能事件（change: 2026-10-25-enhance-telemetry-performance-collection）", () => {
+  it("四个新事件名都在白名单里", () => {
+    for (const name of ["perf.startup", "perf.interaction", "perf.segment", "perf.frame"]) {
+      expect(isTelemetryEventName(name)).toBe(true);
+    }
+  });
+
+  it("perf.startup 归一：durationMs + stage + mode", () => {
+    const event = normalizeTelemetryEvent(
+      base({ name: "perf.startup", durationMs: 128, attributes: { mode: "dev", stage: "wasm-module" } }),
+      { now: NOW }
+    );
+    expect(event?.name).toBe("perf.startup");
+    expect(event?.durationMs).toBe(128);
+    expect(event?.attributes).toEqual({ mode: "dev", stage: "wasm-module" });
+  });
+
+  it("perf.interaction 归一：kind + mode", () => {
+    const event = normalizeTelemetryEvent(
+      base({ name: "perf.interaction", durationMs: 4.4, attributes: { mode: "production", kind: "wheel-pan" } }),
+      { now: NOW }
+    );
+    expect(event?.durationMs).toBe(4);
+    expect(event?.attributes).toEqual({ mode: "production", kind: "wheel-pan" });
+  });
+
+  it("perf.segment 归一：kind + stage + mode", () => {
+    const event = normalizeTelemetryEvent(
+      base({ name: "perf.segment", durationMs: 2, attributes: { mode: "dev", kind: "drag", stage: "gesture-commit" } }),
+      { now: NOW }
+    );
+    expect(event?.attributes).toEqual({ mode: "dev", kind: "drag", stage: "gesture-commit" });
+  });
+
+  it("perf.frame 归一：窗口计数进属性，平均帧耗时进 durationMs", () => {
+    const event = normalizeTelemetryEvent(
+      base({
+        name: "perf.frame",
+        durationMs: 7,
+        attributes: { mode: "dev", fps: 60, sceneBuilds: 3, sceneSubmits: 2, wasmAcceptMs: 12 }
+      }),
+      { now: NOW }
+    );
+    expect(event?.durationMs).toBe(7);
+    expect(event?.attributes?.sceneBuilds).toBe(3);
+    expect(event?.attributes?.mode).toBe("dev");
+  });
+
+  it("缺 mode 的性能事件整条丢弃", () => {
+    for (const name of ["perf.startup", "perf.interaction", "perf.segment", "perf.frame"]) {
+      expect(normalizeTelemetryEvent(base({ name, attributes: {} }), { now: NOW })).toBeNull();
+      expect(normalizeTelemetryEvent(base({ name }), { now: NOW })).toBeNull();
+    }
+  });
+
+  it("mode 不是封闭枚举值时整条丢弃（不以 unknown 占位）", () => {
+    const event = normalizeTelemetryEvent(
+      base({ name: "perf.interaction", attributes: { mode: "unknown", kind: "pan" } }),
+      { now: NOW }
+    );
+    expect(event).toBeNull();
+  });
+
+  it("未知 stage 整条丢弃", () => {
+    const event = normalizeTelemetryEvent(
+      base({ name: "perf.segment", attributes: { mode: "dev", kind: "pan", stage: "not-a-stage" } }),
+      { now: NOW }
+    );
+    expect(event).toBeNull();
+  });
+
+  it("未知 kind 整条丢弃", () => {
+    const event = normalizeTelemetryEvent(
+      base({ name: "perf.interaction", attributes: { mode: "dev", kind: "pointermove" } }),
+      { now: NOW }
+    );
+    expect(event).toBeNull();
+  });
+
+  it("属性键超出该事件的封闭集合时整条丢弃", () => {
+    // perf.interaction 不接受 stage：混进来会让 groupBy 分组出现无法解释的空组。
+    expect(
+      normalizeTelemetryEvent(
+        base({ name: "perf.interaction", attributes: { mode: "dev", kind: "pan", stage: "hit-query" } }),
+        { now: NOW }
+      )
+    ).toBeNull();
+  });
+
+  it("同批里合法性能事件仍被保留（丢弃只针对坏的那条）", () => {
+    const events = [
+      base({ name: "perf.interaction", attributes: { mode: "dev", kind: "pan" } }),
+      base({ name: "perf.interaction", attributes: { mode: "dev" } }),
+      base({ name: "canvas.save" })
+    ];
+    const normalized = events.map((input) => normalizeTelemetryEvent(input, { now: NOW }));
+    expect(normalized.filter((event) => event !== null)).toHaveLength(2);
+    expect(normalized[1]).toBeNull();
+  });
+
+  it("非性能事件不受性能校验影响", () => {
+    const event = normalizeTelemetryEvent(
+      base({ name: "canvas.open", attributes: { phase: "load", mode: "dev" } }),
+      { now: NOW }
+    );
+    expect(event?.attributes).toEqual({ mode: "dev", phase: "load" });
   });
 });

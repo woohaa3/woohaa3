@@ -15,10 +15,12 @@ import {
   TELEMETRY_PAGE_SIZE_MAX,
   defaultTelemetryBucket,
   type TelemetryAnomaly,
+  type TelemetryAttributeKey,
   type TelemetryBucket,
   type TelemetryEventName,
   type TelemetryEventPage,
   type TelemetryEventRecord,
+  type TelemetryPerfMode,
   type TelemetryResult,
   type TelemetryStatus,
   type TelemetrySummary,
@@ -51,15 +53,31 @@ export type TelemetryEventsRequest = {
   name?: TelemetryEventName;
   result?: TelemetryResult;
   errorCode?: string;
+  /** 构建模式筛选；与聚合用同一个键，保证"列表看到的样本"与"聚合算的样本"是一批。 */
+  mode?: TelemetryPerfMode;
   cursor?: string;
   limit?: number;
   signal?: AbortSignal;
 };
 
+export type TelemetrySummaryRequest = {
+  window: TelemetryWindow;
+  bucket?: TelemetryBucket;
+  /** 单键分组；缺省按事件名聚合。 */
+  groupBy?: TelemetryAttributeKey;
+  /** 只看某个构建模式（spec：按 production 筛选的耗时分布不含 dev 样本）。 */
+  mode?: TelemetryPerfMode;
+  signal?: AbortSignal;
+};
+
 export type TelemetryRemote = {
   status(input?: { signal?: AbortSignal }): Promise<TelemetryRemoteResult<TelemetryStatus>>;
-  summary(input: { window: TelemetryWindow; bucket?: TelemetryBucket; signal?: AbortSignal }): Promise<TelemetryRemoteResult<TelemetrySummary>>;
-  anomalies(input: { window: TelemetryWindow; signal?: AbortSignal }): Promise<TelemetryRemoteResult<readonly TelemetryAnomaly[]>>;
+  summary(input: TelemetrySummaryRequest): Promise<TelemetryRemoteResult<TelemetrySummary>>;
+  anomalies(input: {
+    window: TelemetryWindow;
+    groupBy?: TelemetryAttributeKey;
+    signal?: AbortSignal;
+  }): Promise<TelemetryRemoteResult<readonly TelemetryAnomaly[]>>;
   events(input: TelemetryEventsRequest): Promise<TelemetryRemoteResult<TelemetryEventPage>>;
 };
 
@@ -98,10 +116,16 @@ export function createTelemetryRemote(deps: { transport: TelemetryTransport }): 
     status: (input = {}) => call({ path: `${BASE}/status`, ...(input.signal ? { signal: input.signal } : {}) }, readStatus),
 
     summary: (input) => {
-      const bucket = input.bucket ?? defaultTelemetryBucket(input.window);
       const params = new URLSearchParams();
       params.set("window", input.window);
-      params.set("bucket", bucket);
+      params.set("bucket", input.bucket ?? defaultTelemetryBucket(input.window));
+      if (input.groupBy) params.set("groupBy", input.groupBy);
+      // 构建模式是属性维度上的**筛选**，不是分组：查询参数与列表一致用 `attributeKey/attributeValue`，
+      // 这样宿主只需要一份属性筛选实现（design D5）。
+      if (input.mode) {
+        params.set("attributeKey", "mode");
+        params.set("attributeValue", input.mode);
+      }
       return call(
         { path: `${BASE}/summary?${params.toString()}`, ...(input.signal ? { signal: input.signal } : {}) },
         readSummary
@@ -111,6 +135,7 @@ export function createTelemetryRemote(deps: { transport: TelemetryTransport }): 
     anomalies: (input) => {
       const params = new URLSearchParams();
       params.set("window", input.window);
+      if (input.groupBy) params.set("groupBy", input.groupBy);
       return call(
         { path: `${BASE}/anomalies?${params.toString()}`, ...(input.signal ? { signal: input.signal } : {}) },
         readAnomalies
@@ -123,6 +148,10 @@ export function createTelemetryRemote(deps: { transport: TelemetryTransport }): 
       if (input.name) params.set("name", input.name);
       if (input.result) params.set("result", input.result);
       if (input.errorCode) params.set("errorCode", input.errorCode);
+      if (input.mode) {
+        params.set("attributeKey", "mode");
+        params.set("attributeValue", input.mode);
+      }
       if (input.cursor) params.set("cursor", input.cursor);
       params.set("limit", String(clampLimit(input.limit)));
       return call(
@@ -174,6 +203,8 @@ function readSummary(data: unknown): TelemetrySummary | null {
     since: numberOr(data.since, 0),
     until: numberOr(data.until, 0),
     total: numberOr(data.total, 0),
+    // 分组维度必须原样带出：界面靠它决定是否显示分组列与耗时榜，也靠它写"按X"的标题。
+    ...(typeof data.groupBy === "string" ? { groupBy: data.groupBy as TelemetryAttributeKey } : {}),
     rows: data.rows.filter(isSummaryRow) as TelemetrySummary["rows"],
     series: data.series.filter(isSeriesPoint) as TelemetrySummary["series"]
   };

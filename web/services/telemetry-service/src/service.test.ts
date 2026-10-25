@@ -313,6 +313,34 @@ describe("聚合", () => {
       expect(row.count).toBe(listed.events.filter((event) => event.name === row.name).length);
     }
   });
+
+  it("groupBy 透传到存储并在结果里回带维度", async () => {
+    const service = startService();
+    service.emit(makeInput({ name: "perf.interaction", durationMs: 12, attributes: { mode: "dev", kind: "pan" } }));
+    service.emit(makeInput({ name: "perf.interaction", durationMs: 30, attributes: { mode: "dev", kind: "pan" } }));
+    service.emit(makeInput({ name: "perf.interaction", durationMs: 4, attributes: { mode: "dev", kind: "zoom" } }));
+    await service.flush();
+
+    const grouped = await service.summary("24h", undefined, { groupBy: "kind" });
+    expect(grouped.groupBy).toBe("kind");
+    expect(grouped.rows.map((row) => [row.attributeValue, row.count])).toEqual([
+      ["pan", 2],
+      ["zoom", 1]
+    ]);
+    // 未请求分组时不带 `groupBy` 键：界面据此决定显示"按事件名"还是"按组"。
+    expect((await service.summary("24h")).groupBy).toBeUndefined();
+  });
+
+  it("属性筛选透传到列表查询", async () => {
+    const service = startService();
+    service.emit(makeInput({ name: "perf.interaction", attributes: { mode: "dev", kind: "pan" } }));
+    service.emit(makeInput({ name: "perf.interaction", attributes: { mode: "dev", kind: "zoom" } }));
+    await service.flush();
+
+    const page = await service.query({ attributeKey: "kind", attributeValue: "zoom" });
+    expect(page.events).toHaveLength(1);
+    expect(page.events[0]?.attributes?.kind).toBe("zoom");
+  });
 });
 
 describe("异常规则接线", () => {
@@ -404,6 +432,42 @@ describe("异常规则接线", () => {
 
     expect(latency).toMatchObject({ name: "canvas.save", observed: 300, baseline: 100, samples: 20 });
     expect(latency?.evidence.ratio).toBe(3);
+  });
+
+  it("latency-regression 可按 kind 分组：只有变慢的那一类命中，并带上分组成员", async () => {
+    let clock = NOW - 8 * HOUR;
+    const service = startService({ clock: () => clock });
+    // 基线：两类输入都 100ms。
+    for (const kind of ["pan", "zoom"] as const) {
+      for (let index = 0; index < 20; index += 1) {
+        service.emit(
+          makeInput({ name: "perf.interaction", durationMs: 100, attributes: { mode: "dev", kind } })
+        );
+      }
+    }
+    await service.flush();
+
+    clock = NOW - 2 * HOUR;
+    // 当前：`pan` 涨到 300ms，`zoom` 不变。按事件名整体看会被摊平，按 kind 才能分开。
+    for (let index = 0; index < 20; index += 1) {
+      service.emit(makeInput({ name: "perf.interaction", durationMs: 300, attributes: { mode: "dev", kind: "pan" } }));
+    }
+    for (let index = 0; index < 20; index += 1) {
+      service.emit(makeInput({ name: "perf.interaction", durationMs: 100, attributes: { mode: "dev", kind: "zoom" } }));
+    }
+    await service.flush();
+
+    clock = NOW;
+    const grouped = (await service.anomalies("6h", { groupBy: "kind" })).filter(
+      (anomaly) => anomaly.ruleId === "latency-regression"
+    );
+    expect(grouped.map((anomaly) => [anomaly.attributeValue, anomaly.observed, anomaly.baseline])).toEqual([
+      ["pan", 300, 100]
+    ]);
+
+    // 未分组时同一条规则算的是整体 p95（240ms 的混合样本），不会带分组成员。
+    const plain = (await service.anomalies("6h")).filter((anomaly) => anomaly.ruleId === "latency-regression");
+    expect(plain.map((anomaly) => anomaly.attributeValue)).toEqual([undefined]);
   });
 });
 

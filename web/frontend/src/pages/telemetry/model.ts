@@ -132,8 +132,36 @@ export function failureRate(row: Pick<TelemetrySummaryRow, "count" | "results">)
 export function sortSummaryRows(rows: readonly TelemetrySummaryRow[]): TelemetrySummaryRow[] {
   return [...rows].sort((left, right) => {
     if (right.count !== left.count) return right.count - left.count;
-    return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+    return (
+      compareText(left.name, right.name) || compareText(left.attributeValue ?? "", right.attributeValue ?? "")
+    );
   });
+}
+
+/**
+ * 耗时榜排序：p95 降序，缺样本的排最后。
+ *
+ * 为什么不用计数排序：复盘问的是"哪一类最卡"，计数高只说明发生得多。为什么缺样本要排最后
+ * 而不是当 0ms：把"没测到"排在"很快"前面（或混在一起）都会让人误读。
+ */
+export function rankByDuration(rows: readonly TelemetrySummaryRow[]): TelemetrySummaryRow[] {
+  return [...rows].sort((left, right) => {
+    const leftP95 = left.durationP95;
+    const rightP95 = right.durationP95;
+    if (leftP95 === undefined && rightP95 === undefined) return compareSummaryKey(left, right);
+    if (leftP95 === undefined) return 1;
+    if (rightP95 === undefined) return -1;
+    if (rightP95 !== leftP95) return rightP95 - leftP95;
+    return compareSummaryKey(left, right);
+  });
+}
+
+function compareSummaryKey(left: TelemetrySummaryRow, right: TelemetrySummaryRow): number {
+  return compareText(left.name, right.name) || compareText(left.attributeValue ?? "", right.attributeValue ?? "");
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /** 一个桶的合计（趋势用）：把按事件名拆开的点合并成时间轴。 */

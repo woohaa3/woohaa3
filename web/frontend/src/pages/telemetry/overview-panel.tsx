@@ -10,6 +10,7 @@
  */
 import type {
   TelemetryAnomaly,
+  TelemetryAttributeKey,
   TelemetryStatus,
   TelemetrySummary,
   TelemetryWindow
@@ -23,6 +24,7 @@ import {
   formatCount,
   formatDuration,
   formatPercent,
+  groupByLabel,
   ratioToMax,
   resultLabel,
   ruleLabel,
@@ -33,6 +35,7 @@ import {
   bucketTotals,
   failureRate,
   isEmptySummary,
+  rankByDuration,
   sortAnomalies,
   sortSummaryRows,
   type TelemetryNotice
@@ -82,10 +85,18 @@ export function TelemetryNotices({ notices }: { notices: readonly TelemetryNotic
 export function AnomalyOverview({
   anomalies,
   window,
+  groupBy,
   testId = "telemetry-anomalies"
 }: {
   anomalies: readonly TelemetryAnomaly[];
   window: TelemetryWindow;
+  /**
+   * 当前聚合的分组维度（change: 2026-10-25-enhance-telemetry-performance-collection）。
+   *
+   * 命中本身只带 `attributeValue`，不带键名；把键名从查询口径传进来，界面才能写出
+   * 「输入种类：pan」，而不是让人猜这个 `pan` 是分组值还是事件名的一部分。
+   */
+  groupBy?: TelemetryAttributeKey;
   testId?: string;
 }) {
   const sorted = sortAnomalies(anomalies);
@@ -103,7 +114,7 @@ export function AnomalyOverview({
         <ul className="telemetry__anomalies">
           {sorted.map((anomaly, index) => (
             <li
-              key={`${anomaly.ruleId}:${anomaly.name}:${index}`}
+              key={`${anomaly.ruleId}:${anomaly.name}:${anomaly.attributeValue ?? ""}:${index}`}
               className={`telemetry__anomaly is-${anomaly.severity}`}
               data-testid="telemetry-anomaly"
               data-severity={anomaly.severity}
@@ -112,6 +123,12 @@ export function AnomalyOverview({
                 <span className="telemetry__severity">{severityLabel(anomaly.severity)}</span>
                 <span className="telemetry__anomaly-rule">{ruleLabel(anomaly.ruleId)}</span>
                 <span className="telemetry__anomaly-name">{eventNameLabel(anomaly.name)}</span>
+                {anomaly.attributeValue === undefined ? null : (
+                  // 分组命中要能与"整体变慢"区分开：只显示值，但前面带上分组维度名。
+                  <span className="telemetry__anomaly-group" data-testid="telemetry-anomaly-group">
+                    {groupByLabel(groupBy)}：{anomaly.attributeValue}
+                  </span>
+                )}
               </div>
               <dl className="telemetry__anomaly-metrics">
                 <div>
@@ -136,28 +153,34 @@ export function AnomalyOverview({
   );
 }
 
-/** 窗口聚合表：每行一个事件名；失败率与分位数同列，便于"哪里变慢/哪里在错"一眼对照。 */
+/** 窗口聚合表：每行一个事件名（或「事件名 × 属性值」组）；失败率与分位数同列，便于"哪里变慢/哪里在错"一眼对照。 */
 export function WindowSummaryTable({ summary }: { summary: TelemetrySummary | null }) {
   const rows = summary ? sortSummaryRows(summary.rows) : [];
+  const grouped = summary?.groupBy !== undefined;
   return (
     <section className="telemetry__section" data-testid="telemetry-summary">
       <header className="telemetry__section-head">
         <h2>窗口聚合</h2>
         <span className="telemetry__section-hint">
-          {summary ? `${summary.window} · ${BUCKET_LABELS[summary.bucket]} · 共 ${formatCount(summary.total)} 条` : "尚未读取"}
+          {summary
+            ? `${summary.window} · ${BUCKET_LABELS[summary.bucket]} · 共 ${formatCount(summary.total)} 条 · 按${groupByLabel(summary.groupBy)}`
+            : "尚未读取"}
         </span>
       </header>
       {isEmptySummary(rows) ? (
         <p className="telemetry__empty" data-testid="telemetry-summary-empty">
-          当前窗口没有聚合数据。
+          {grouped ? "当前窗口没有带该属性的样本，分组后无可聚合数据。" : "当前窗口没有聚合数据。"}
         </p>
       ) : (
         <div className="telemetry__table-wrap">
           <table className="telemetry__table">
-            <caption className="visually-hidden">按事件名的窗口聚合</caption>
+            <caption className="visually-hidden">
+              按事件名{grouped ? `与${groupByLabel(summary.groupBy)}` : ""}的窗口聚合
+            </caption>
             <thead>
               <tr>
                 <th scope="col">事件</th>
+                {grouped ? <th scope="col">{groupByLabel(summary.groupBy)}</th> : null}
                 <th scope="col">计数</th>
                 <th scope="col">失败率</th>
                 <th scope="col">p50</th>
@@ -169,8 +192,13 @@ export function WindowSummaryTable({ summary }: { summary: TelemetrySummary | nu
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.name} data-testid="telemetry-summary-row">
+                <tr key={`${row.name}:${row.attributeValue ?? ""}`} data-testid="telemetry-summary-row">
                   <th scope="row">{eventNameLabel(row.name)}</th>
+                  {grouped ? (
+                    <td className="telemetry__cell-group" data-testid="telemetry-summary-group">
+                      {row.attributeValue ?? "—"}
+                    </td>
+                  ) : null}
                   <td>{formatCount(row.count)}</td>
                   <td>{formatPercent(failureRate(row))}</td>
                   <td>{formatDuration(row.durationP50)}</td>
@@ -200,6 +228,56 @@ export function WindowSummaryTable({ summary }: { summary: TelemetrySummary | nu
             </tbody>
           </table>
         </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * 分组耗时榜（change: 2026-10-25-enhance-telemetry-performance-collection，design D5）。
+ *
+ * 回答的是复盘时最先问的那句话：**哪一类输入/哪一个阶段最慢**。所以排序用 p95 而不是计数
+ * ——计数高只说明"发生得多"，不能说明"卡"。没有耗时样本的组排在最后并显示「无样本」：
+ * 把缺样本当 0ms 会让"没测到"看起来像"很快"。
+ *
+ * 只在 `groupBy` 存在时渲染：未分组时这张表与「窗口聚合」内容重复，多一块只会增加噪音。
+ */
+export function DurationRanking({ summary }: { summary: TelemetrySummary | null }) {
+  if (!summary || summary.groupBy === undefined) return null;
+  const rows = rankByDuration(summary.rows);
+  return (
+    <section className="telemetry__section" data-testid="telemetry-duration-ranking">
+      <header className="telemetry__section-head">
+        <h2>耗时榜</h2>
+        <span className="telemetry__section-hint">
+          按{groupByLabel(summary.groupBy)} · p95 从高到低 · {formatCount(rows.length)} 组
+        </span>
+      </header>
+      {rows.length === 0 ? (
+        <p className="telemetry__empty" data-testid="telemetry-duration-ranking-empty">
+          当前窗口没有可排名的分组样本。
+        </p>
+      ) : (
+        <ol className="telemetry__ranking">
+          {rows.map((row, index) => (
+            <li
+              key={`${row.name}:${row.attributeValue ?? ""}`}
+              className="telemetry__ranking-row"
+              data-testid="telemetry-duration-row"
+            >
+              <span className="telemetry__ranking-index">{index + 1}</span>
+              <span className="telemetry__ranking-group">{row.attributeValue ?? "—"}</span>
+              <span className="telemetry__ranking-name">{eventNameLabel(row.name)}</span>
+              <span className="telemetry__ranking-value">
+                p95 {formatDuration(row.durationP95)}
+                <span className="telemetry__ranking-sub">
+                  p50 {formatDuration(row.durationP50)} · max {formatDuration(row.durationMax)} ·{" "}
+                  {formatCount(row.durationSamples)} 样本 · {formatCount(row.count)} 条
+                </span>
+              </span>
+            </li>
+          ))}
+        </ol>
       )}
     </section>
   );

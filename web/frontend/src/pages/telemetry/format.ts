@@ -9,11 +9,14 @@
  * - 标签表集中在这里，页面与详情共用同一份命名，避免两处叫法不一致。
  */
 import {
+  TELEMETRY_ATTRIBUTE_KEYS,
   TELEMETRY_WINDOW_MS,
   type TelemetryAnomalyRuleId,
   type TelemetryAnomalySeverity,
+  type TelemetryAttributeKey,
   type TelemetryBucket,
   type TelemetryEventName,
+  type TelemetryPerfMode,
   type TelemetryResult,
   type TelemetryWindow
 } from "@woohaa3/contracts";
@@ -46,7 +49,12 @@ export const EVENT_NAME_LABELS: Readonly<Record<TelemetryEventName, string>> = {
   "sync.connect": "同步连接",
   "sync.reconcile": "同步对账",
   "local.validation": "本地校验",
-  "task.terminal": "任务终态"
+  "task.terminal": "任务终态",
+  // 性能事实（change: 2026-10-25-enhance-telemetry-performance-collection，design D2）。
+  "perf.startup": "启动阶段",
+  "perf.interaction": "输入耗时",
+  "perf.segment": "输入子阶段",
+  "perf.frame": "帧窗口"
 };
 
 export const RESULT_LABELS: Readonly<Record<TelemetryResult, string>> = {
@@ -71,6 +79,47 @@ export const SEVERITY_LABELS: Readonly<Record<TelemetryAnomalySeverity, string>>
 
 export function eventNameLabel(name: TelemetryEventName): string {
   return EVENT_NAME_LABELS[name] ?? name;
+}
+
+/**
+ * 构建模式标签（change: 2026-10-25-enhance-telemetry-performance-collection，design D3）。
+ *
+ * 中文标签只是可读性糖：**筛选与分组用的是英文原值**，因为 URL 与查询参数里必须是不变标识。
+ */
+export const PERF_MODE_LABELS: Readonly<Record<TelemetryPerfMode, string>> = {
+  dev: "开发构建",
+  preview: "预发布构建",
+  production: "发布构建"
+};
+
+/**
+ * 可分组属性的中文标签。
+ *
+ * 只列本页真的会拿来分组的键：`TELEMETRY_ATTRIBUTE_KEYS` 里还有 `node`/`provider` 这类
+ * 业务维度，它们在性能复盘里没有"拆开看"的意义，全部列出来只会让下拉框变成技术清单。
+ */
+export const GROUP_BY_LABELS: Readonly<Partial<Record<TelemetryAttributeKey, string>>> = {
+  mode: "构建模式",
+  kind: "输入种类",
+  stage: "阶段",
+  code: "错误码",
+  phase: "阶段（旧口径）",
+  status: "状态",
+  source: "来源"
+};
+
+/** 性能复盘推荐的分组维度顺序：先"哪类输入"，再"哪一段"，最后"哪个构建"。 */
+export const GROUP_BY_OPTIONS: readonly TelemetryAttributeKey[] = TELEMETRY_ATTRIBUTE_KEYS.filter(
+  (key) => GROUP_BY_LABELS[key] !== undefined
+);
+
+export function perfModeLabel(mode: TelemetryPerfMode): string {
+  return PERF_MODE_LABELS[mode] ?? mode;
+}
+
+export function groupByLabel(key: TelemetryAttributeKey | undefined): string {
+  if (key === undefined) return "事件名";
+  return GROUP_BY_LABELS[key] ?? key;
 }
 
 export function resultLabel(result: TelemetryResult): string {

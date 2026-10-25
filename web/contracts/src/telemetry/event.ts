@@ -10,8 +10,8 @@
  *
  * 与 `woohaa.telemetry.v1alpha1` 的关系：`name`/`result`/`origin`/`surface` 与 proto 的
  * `Action`/`Result`/`Client`/`Surface` 一一对应（`task.terminal` 除外，它没有对应枚举）；
- * `durationMs`/`errorCode`/`attributes` 是本地独有，导出时丢弃。本地是事实的形状，proto 是
- * 它的一个有损投影。
+ * `durationMs`/`errorCode`/`attributes` 也随协议扩展上报（change:
+ * 2026-10-25-enhance-telemetry-performance-collection，design D6），不再是有损投影。
  */
 
 /** 事件名白名单。新增一个名字等于新增一类可复盘事实，必须同时补异常规则与文档。 */
@@ -22,7 +22,14 @@ export const TELEMETRY_EVENT_NAMES = [
   "sync.connect",
   "sync.reconcile",
   "local.validation",
-  "task.terminal"
+  "task.terminal",
+  // 性能事实（change: 2026-10-25-enhance-telemetry-performance-collection，design D2）。
+  // 四个名字代替一个 `perf.sample`：`kind` 与 `stage` 的取值集合不同，混在一个名字里
+  // 会让 `groupBy` 的分组结果无法解释。
+  "perf.startup",
+  "perf.interaction",
+  "perf.segment",
+  "perf.frame"
 ] as const;
 
 export type TelemetryEventName = (typeof TELEMETRY_EVENT_NAMES)[number];
@@ -53,15 +60,149 @@ export const TELEMETRY_ATTRIBUTE_KEYS = [
   "status",
   "code",
   "source",
-  "version"
+  "version",
+  // 性能事件的维度与计数（change: 2026-10-25-enhance-telemetry-performance-collection）。
+  // `mode` / `kind` / `stage` 是封闭枚举；其余是窗口累计计数（数值型属性）。
+  "mode",
+  "kind",
+  "stage",
+  "fps",
+  "sceneBuilds",
+  "sceneSubmits",
+  "sceneDedupes",
+  "viewportSubmits",
+  "positionSubmits",
+  "stringify",
+  "wasmAcceptMs",
+  "frameExecMs",
+  "frameExecutions"
 ] as const;
 
 export type TelemetryAttributeKey = (typeof TELEMETRY_ATTRIBUTE_KEYS)[number];
 
+/**
+ * 构建模式（change: 2026-10-25-enhance-telemetry-performance-collection，design D3）。
+ *
+ * 取值由编译期常量决定，MUST NOT 来自 URL、设置项或运行时探测：回归对比的第一条前提是
+ * "两次样本来自同一构建模式"。`preview` 与 `production` 必须可区分——preview 不压缩、
+ * 带 sourcemap，帧时间与发布构建不同。
+ */
+export const TELEMETRY_PERF_MODES = ["dev", "preview", "production"] as const;
+export type TelemetryPerfMode = (typeof TELEMETRY_PERF_MODES)[number];
+
+/**
+ * 启动阶段（`perf.startup` 的 `stage`）。
+ *
+ * 名字与已删除的 `LifecycleStage` 刻意不重合：那套 span 记录的是"落盘管线里的阶段"，这套
+ * 只记录"启动路径上可计时的墙钟段"，两者的边界不同，复用名字会让读者以为是同一件事。
+ */
+export const TELEMETRY_PERF_STARTUP_STAGES = [
+  "wasm-module",
+  "scene-build",
+  "app-scope",
+  "canvas-scope",
+  "session-open",
+  "bevy-runtime"
+] as const;
+
+/** 一次输入内可计时的子段（`perf.segment` 的 `stage`，并集含启动阶段名以外的固定集合）。 */
+export const TELEMETRY_PERF_SEGMENT_STAGES = [
+  "hit-query",
+  "gesture-begin",
+  "gesture-move",
+  "gesture-commit",
+  "viewport-apply",
+  "scene-build",
+  "frame-submit"
+] as const;
+
+/** `stage` 的完整封闭集合 = 启动阶段 ∪ 输入子段。 */
+export const TELEMETRY_PERF_STAGES = [
+  ...TELEMETRY_PERF_STARTUP_STAGES,
+  ...TELEMETRY_PERF_SEGMENT_STAGES
+] as const;
+export type TelemetryPerfStage = (typeof TELEMETRY_PERF_STAGES)[number];
+
+/**
+ * 被消费的画布输入种类（`perf.interaction` / `perf.segment` 的 `kind`）。
+ *
+ * 只记"被消费的手势"，不记 `pointermove`：一次平移拖动会消费成百上千次 PointerMove，
+ * 逐条写库既撞保留上限，也让"这一类输入有多慢"被移动噪声淹没。
+ */
+export const TELEMETRY_PERF_INPUT_KINDS = [
+  "pan",
+  "wheel-pan",
+  "zoom",
+  "drag",
+  "resize",
+  "connect",
+  "marquee",
+  "double-click",
+  "context-menu"
+] as const;
+export type TelemetryPerfInputKind = (typeof TELEMETRY_PERF_INPUT_KINDS)[number];
+
+/**
+ * 每类性能事件的合法属性键集合（封闭）。
+ *
+ * 校验与文档都引用这一份：`perf.startup` 不该出现 `kind`，`perf.interaction` 不该出现
+ * `stage`——混进来会让 `groupBy` 的分组结果出现"这个 kind 的 stage 是空的"这种无法解释的行。
+ */
+export const TELEMETRY_PERF_ATTRIBUTE_KEYS: Readonly<
+  Record<"perf.startup" | "perf.interaction" | "perf.segment" | "perf.frame", readonly TelemetryAttributeKey[]>
+> = {
+  "perf.startup": ["mode", "stage"],
+  "perf.interaction": ["mode", "kind"],
+  "perf.segment": ["mode", "kind", "stage"],
+  "perf.frame": [
+    "mode",
+    "fps",
+    "sceneBuilds",
+    "sceneSubmits",
+    "sceneDedupes",
+    "viewportSubmits",
+    "positionSubmits",
+    "stringify",
+    "wasmAcceptMs",
+    "frameExecMs",
+    "frameExecutions"
+  ]
+};
+
+/** 每类性能事件必须携带的属性键；缺任何一个整条丢弃（不是补默认值）。 */
+export const TELEMETRY_PERF_REQUIRED_ATTRIBUTES: Readonly<
+  Record<"perf.startup" | "perf.interaction" | "perf.segment" | "perf.frame", readonly TelemetryAttributeKey[]>
+> = {
+  "perf.startup": ["mode", "stage"],
+  "perf.interaction": ["mode", "kind"],
+  "perf.segment": ["mode", "kind", "stage"],
+  "perf.frame": ["mode"]
+};
+
+/**
+ * 帧窗口长度（`perf.frame` 的聚合窗口）。
+ *
+ * 常量而不是设置项：采样窗口一变，历史样本的 p95 立刻不可比，而本机没有任何机制标注
+ * "这条样本用的是哪档采样"（design D7）。60 s 一条 = 60 行/小时，与既有事件量级同阶。
+ */
+export const TELEMETRY_PERF_FRAME_WINDOW_MS = 60_000;
+
+/** 是否性能事件名（决定属性校验走严格分支）。 */
+export function isTelemetryPerfEventName(value: unknown): value is keyof typeof TELEMETRY_PERF_ATTRIBUTE_KEYS {
+  return (
+    value === "perf.startup" || value === "perf.interaction" || value === "perf.segment" || value === "perf.frame"
+  );
+}
+
 /** 唯一的上限来源；实现与测试都读这里，不各自写数字。 */
 export const TELEMETRY_LIMITS = {
-  /** 单条事件最多属性对。 */
-  maxAttributes: 8,
+  /**
+   * 单条事件最多属性对。
+   *
+   * 从 8 提到 12：`perf.frame` 要一条装下窗口内的十项计数 + `mode`（design D2/D4）。
+   * 上限仍在，属性键集合也仍是封闭枚举，所以基数与长度都有界。
+   */
+  maxAttributes: 12,
   /** 属性值单行最大字符数（按码点截断，中文不会被切坏）。 */
   maxAttributeValueLength: 128,
   /** 属性序列化后最大字节数；超预算按排序确定性丢弃。 */
@@ -115,6 +256,9 @@ const RESULT_SET: ReadonlySet<string> = new Set(TELEMETRY_RESULTS);
 const ORIGIN_SET: ReadonlySet<string> = new Set(TELEMETRY_ORIGINS);
 const SURFACE_SET: ReadonlySet<string> = new Set(TELEMETRY_SURFACES);
 const ATTRIBUTE_KEY_SET: ReadonlySet<string> = new Set(TELEMETRY_ATTRIBUTE_KEYS);
+const PERF_MODE_SET: ReadonlySet<string> = new Set(TELEMETRY_PERF_MODES);
+const PERF_STAGE_SET: ReadonlySet<string> = new Set(TELEMETRY_PERF_STAGES);
+const PERF_INPUT_KIND_SET: ReadonlySet<string> = new Set(TELEMETRY_PERF_INPUT_KINDS);
 
 const ERROR_CODE_PATTERN = /^[a-z0-9][a-z0-9_.:-]{0,63}$/;
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -140,6 +284,18 @@ export function isTelemetryAttributeKey(value: unknown): value is TelemetryAttri
   return typeof value === "string" && ATTRIBUTE_KEY_SET.has(value);
 }
 
+export function isTelemetryPerfMode(value: unknown): value is TelemetryPerfMode {
+  return typeof value === "string" && PERF_MODE_SET.has(value);
+}
+
+export function isTelemetryPerfStage(value: unknown): value is TelemetryPerfStage {
+  return typeof value === "string" && PERF_STAGE_SET.has(value);
+}
+
+export function isTelemetryPerfInputKind(value: unknown): value is TelemetryPerfInputKind {
+  return typeof value === "string" && PERF_INPUT_KIND_SET.has(value);
+}
+
 /** 按码点截断，避免把代理对或中文切坏。 */
 export function truncateByCodePoints(value: string, max: number): string {
   if (value.length <= max) return value;
@@ -163,7 +319,6 @@ export function normalizeTelemetryEvent(input: unknown, options: { now?: number 
   const raw = input as Record<string, unknown>;
   const { name, result, origin } = raw;
   if (!isTelemetryEventName(name) || !isTelemetryResult(result) || !isTelemetryOrigin(origin)) return null;
-
   const now = options.now ?? Date.now();
   const event: {
     -readonly [K in keyof TelemetryEvent]: TelemetryEvent[K];
@@ -194,7 +349,37 @@ export function normalizeTelemetryEvent(input: unknown, options: { now?: number 
   // 全零 trace_id 单独判掉：形状合法但没有关联意义。
   if (event.traceId !== undefined && /^0{32}$/.test(event.traceId)) delete event.traceId;
 
+  // 性能事件比其它事件严格：属性键集合封闭、必填键缺一不可、枚举值必须合法。
+  // 这些条件下"丢该字段"没有意义——没有 `mode` 的样本进不了任何可比的分位数
+  // （design D3），因此整条丢弃。
+  if (isTelemetryPerfEventName(name) && !isValidPerfAttributes(name, event.attributes)) return null;
+
   return event;
+}
+
+/**
+ * 校验性能事件的属性。
+ *
+ * 三条规则都来自 spec：属性键集合封闭、必填键必须存在、`mode`/`stage`/`kind` 必须是
+ * 封闭枚举里的值。返回 `false` 表示整条丢弃（与其它事件的"丢字段"策略不同）。
+ */
+function isValidPerfAttributes(
+  name: keyof typeof TELEMETRY_PERF_ATTRIBUTE_KEYS,
+  attributes: Readonly<Record<string, string | number | boolean>> | undefined
+): boolean {
+  const allowed = TELEMETRY_PERF_ATTRIBUTE_KEYS[name];
+  const required = TELEMETRY_PERF_REQUIRED_ATTRIBUTES[name];
+  const current = attributes ?? {};
+  for (const key of Object.keys(current)) {
+    if (!(allowed as readonly string[]).includes(key)) return false;
+  }
+  for (const key of required) {
+    if (current[key] === undefined) return false;
+  }
+  if (current.mode !== undefined && !isTelemetryPerfMode(current.mode)) return false;
+  if (current.stage !== undefined && !isTelemetryPerfStage(current.stage)) return false;
+  if (current.kind !== undefined && !isTelemetryPerfInputKind(current.kind)) return false;
+  return true;
 }
 
 function normalizeOccurredAt(value: unknown, now: number): number {

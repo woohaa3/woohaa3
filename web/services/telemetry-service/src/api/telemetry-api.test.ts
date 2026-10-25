@@ -287,6 +287,42 @@ describe("GET summary / anomalies / status", () => {
     expect(invalidBucket.body).toEqual({ error: "invalid-bucket" });
   });
 
+  it("summary 支持 groupBy；未知分组键返回 invalid-attribute（不静默降级成不分组）", async () => {
+    const service = startService();
+    service.emit({
+      name: "perf.interaction",
+      result: "success",
+      origin: "browser",
+      durationMs: 12,
+      attributes: { mode: "dev", kind: "pan" }
+    });
+    service.emit({
+      name: "perf.interaction",
+      result: "success",
+      origin: "browser",
+      durationMs: 20,
+      attributes: { mode: "dev", kind: "zoom" }
+    });
+    await service.flush();
+
+    const grouped = await call(service, { method: "GET", url: "/api/telemetry/summary?window=1h&groupBy=kind" });
+    expect(grouped.status).toBe(200);
+    expect(grouped.body).toMatchObject({ groupBy: "kind", total: 2 });
+    expect((grouped.body?.rows as Array<{ attributeValue?: string }>).map((row) => row.attributeValue)).toEqual([
+      "pan",
+      "zoom"
+    ]);
+
+    const unknown = await call(service, { method: "GET", url: "/api/telemetry/summary?groupBy=prompt" });
+    expect(unknown.status).toBe(400);
+    expect(unknown.body).toEqual({ error: "invalid-attribute" });
+
+    // 空串表示不分组（URL 里删掉值是很自然的手改结果），不该报错。
+    const blank = await call(service, { method: "GET", url: "/api/telemetry/summary?groupBy=" });
+    expect(blank.status).toBe(200);
+    expect(blank.body).not.toHaveProperty("groupBy");
+  });
+
   it("anomalies 返回数组；非法窗口 400 invalid-window", async () => {
     const service = startService();
     const ok = await call(service, { method: "GET", url: "/api/telemetry/anomalies?window=6h" });
@@ -296,6 +332,58 @@ describe("GET summary / anomalies / status", () => {
     const invalid = await call(service, { method: "GET", url: "/api/telemetry/anomalies?window=2h" });
     expect(invalid.status).toBe(400);
     expect(invalid.body).toEqual({ error: "invalid-window" });
+
+    const unknownGroup = await call(service, { method: "GET", url: "/api/telemetry/anomalies?groupBy=prompt" });
+    expect(unknownGroup.status).toBe(400);
+    expect(unknownGroup.body).toEqual({ error: "invalid-attribute" });
+  });
+
+  it("summary / anomalies 的属性筛选成对校验；无关参数不会把聚合打成 400", async () => {
+    const service = startService();
+
+    // 只给键：这是"无法回答"的请求，与列表口径一致返回 invalid-attribute。
+    const halfPair = await call(service, { method: "GET", url: "/api/telemetry/summary?attributeKey=mode" });
+    expect(halfPair.status).toBe(400);
+    expect(halfPair.body).toEqual({ error: "invalid-attribute" });
+
+    const unknownKey = await call(
+      service,
+      { method: "GET", url: "/api/telemetry/summary?attributeKey=prompt&attributeValue=secret" }
+    );
+    expect(unknownKey.status).toBe(400);
+    expect(unknownKey.body).toEqual({ error: "invalid-attribute" });
+
+    // 从列表链接带过来的 cursor/limit 与聚合无关，不应导致 400。
+    const withListParams = await call(
+      service,
+      { method: "GET", url: "/api/telemetry/summary?window=1h&cursor=abc&limit=10&name=perf.frame" }
+    );
+    expect(withListParams.status).toBe(200);
+
+    // 成对且合法：按 mode 筛选后只统计该模式的样本。
+    service.emit({
+      name: "perf.frame",
+      result: "success",
+      origin: "browser",
+      durationMs: 6,
+      attributes: { mode: "dev" }
+    });
+    service.emit({
+      name: "perf.frame",
+      result: "success",
+      origin: "browser",
+      durationMs: 60,
+      attributes: { mode: "production" }
+    });
+    await service.flush();
+
+    const devOnly = await call(
+      service,
+      { method: "GET", url: "/api/telemetry/summary?window=1h&attributeKey=mode&attributeValue=dev" }
+    );
+    expect(devOnly.status).toBe(200);
+    expect(devOnly.body).toMatchObject({ total: 1 });
+    expect((devOnly.body?.rows as Array<{ durationP50?: number }>)[0]?.durationP50).toBe(6);
   });
 
   it("status 返回存储可用与计数", async () => {

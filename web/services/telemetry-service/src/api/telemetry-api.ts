@@ -10,10 +10,10 @@
  *
  * 路由（未命中的路径返回 `false`，让宿主继续走它自己的链）：
  * - `POST   /api/telemetry/events`    批量上报，≤100 条且 body ≤64 KiB → `202 {accepted, dropped}`
- * - `GET    /api/telemetry/events`    事件列表（窗口/名字/结果/错误码/游标分页）
+ * - `GET    /api/telemetry/events`    事件列表（窗口/名字/结果/错误码/属性/游标分页）
  * - `DELETE /api/telemetry/events`    清空 → `{removed}`
- * - `GET    /api/telemetry/summary`   窗口聚合
- * - `GET    /api/telemetry/anomalies` 异常命中
+ * - `GET    /api/telemetry/summary`   窗口聚合（`bucket` 分桶、`groupBy` 单键分组）
+ * - `GET    /api/telemetry/anomalies` 异常命中（`groupBy` 与聚合同口径）
  * - `GET    /api/telemetry/status`    只读状态快照
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -24,8 +24,10 @@ import {
   isTelemetryWindow,
   normalizeTelemetryEvent,
   parseTelemetryEventFilter,
+  parseTelemetryGroupBy,
   type HostTelemetryService,
   type TelemetryEventInput,
+  type TelemetryFilterParse,
   type TelemetryWindow
 } from "@woohaa3/contracts";
 
@@ -81,7 +83,23 @@ export async function handleTelemetryRequest(
         sendError(res, 400, "invalid-window");
         return true;
       }
-      sendJson(res, 200, { anomalies: await service.anomalies(parsed.window) });
+      const groupBy = parseTelemetryGroupBy(url.searchParams.get("groupBy"));
+      if (groupBy === "invalid") {
+        sendError(res, 400, "invalid-attribute");
+        return true;
+      }
+      const parsedFilter = parseAttributeOnly(url);
+      if (!parsedFilter.ok) {
+        sendError(res, 400, parsedFilter.code);
+        return true;
+      }
+      const { attributeKey, attributeValue } = parsedFilter.filter;
+      sendJson(res, 200, {
+        anomalies: await service.anomalies(parsed.window, {
+          ...(groupBy === undefined ? {} : { groupBy }),
+          ...(attributeKey === undefined || attributeValue === undefined ? {} : { attributeKey, attributeValue })
+        })
+      });
       return true;
     }
     sendJson(res, 200, await service.status());
@@ -152,7 +170,38 @@ async function summary(service: HostTelemetryService, url: URL, res: ServerRespo
     sendError(res, 400, "invalid-bucket");
     return;
   }
-  sendJson(res, 200, await service.summary(parsedWindow.window, bucket));
+  // 未知 `groupBy` 与未知属性键同待遇：`invalid-attribute`，不静默降级成"不分组"——
+  // 否则界面会显示一份看起来分组了、实际是全量聚合的表（spec「未知属性键」）。
+  const groupBy = parseTelemetryGroupBy(url.searchParams.get("groupBy"));
+  if (groupBy === "invalid") {
+    sendError(res, 400, "invalid-attribute");
+    return;
+  }
+  // 属性筛选复用事件列表的解析器：两条读面若各写一份，"只给键"的判定迟早分叉。
+  const parsedFilter = parseAttributeOnly(url);
+  if (!parsedFilter.ok) {
+    sendError(res, 400, parsedFilter.code);
+    return;
+  }
+  const { attributeKey, attributeValue } = parsedFilter.filter;
+  const options = {
+    ...(groupBy === undefined ? {} : { groupBy }),
+    ...(attributeKey === undefined || attributeValue === undefined ? {} : { attributeKey, attributeValue })
+  };
+  sendJson(res, 200, await service.summary(parsedWindow.window, bucket, options));
+}
+
+/**
+ * 只解析属性筛选这一对参数。
+ *
+ * 不复用整份 `toQueryRecord`：`summary` 与 `anomalies` 不认 `cursor`/`limit`/`result`，
+ * 让无关参数（例如从列表链接带过来的 `cursor`）把聚合请求打成 400 是纯粹的噪声。
+ */
+function parseAttributeOnly(url: URL): TelemetryFilterParse {
+  return parseTelemetryEventFilter({
+    attributeKey: url.searchParams.get("attributeKey") ?? undefined,
+    attributeValue: url.searchParams.get("attributeValue") ?? undefined
+  });
 }
 
 type WindowParse = { readonly ok: true; readonly window: TelemetryWindow } | { readonly ok: false };

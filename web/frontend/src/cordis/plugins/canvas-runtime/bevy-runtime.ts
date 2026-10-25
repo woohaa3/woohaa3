@@ -27,6 +27,7 @@ import type {
 import { canvasPositionUpdateRequest, modelDescriptorOf, modelDescriptorPayload, modelPayloadLeaseRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
 
 import { sceneDiagnostics, measureSceneWork } from "./scene-diagnostics.js";
+import { beginStartupSpan } from "../../services/telemetry-primitives.js";
 import { createRuntimeViewport } from "./runtime-viewport.js";
 import { createRuntimeObserver } from "./runtime-observer.js";
 import {FocusDetailEncoder} from "./focus-details.js";
@@ -169,6 +170,11 @@ export function loadBevyRuntime(options: BevyLoaderOptions = {}): Promise<BevyRu
 async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntime> {
   const target = options.target ?? (globalThis as typeof globalThis);
   options.signal?.throwIfAborted();
+  // 启动阶段埋点（change: 2026-10-25-enhance-telemetry-performance-collection，task 3.4）。
+  // `bevy-runtime` 是整段创建，`wasm-module` 只包模块装载与初始化：两者分开是因为前者含
+  // realm/iframe、supervisor 与镜像安装，后者是下载+实例化+首次 start，慢在哪一段必须能分开看。
+  const finishRuntimeSpan = beginStartupSpan("bevy-runtime");
+  const finishWasmModuleSpan = beginStartupSpan("wasm-module");
 
   const issues = new RuntimeIssues();
   let supervisor: RuntimeSupervisor | null = null;
@@ -187,7 +193,11 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     realm = await createRuntimeRealm(target, fault, options.signal);
     return protectWasmModule(realm.module, issues, () => candidate || callsAllowed());
   };
-  let module = await loadModule();
+  let module = await loadModule().catch((error: unknown) => {
+    finishWasmModuleSpan("failure");
+    finishRuntimeSpan("failure");
+    throw error;
+  });
   try {
     await module.default();
     options.signal?.throwIfAborted();
@@ -199,7 +209,9 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     if (!options.importModule) readRuntimeHealth(module.runtime_health!());
     module.start();
 
-  } catch (error) { disposeRealm(); throw error; }
+  } catch (error) { finishWasmModuleSpan("failure"); finishRuntimeSpan("failure"); disposeRealm(); throw error; }
+  // 模块装载 + 实例化 + 首次 start：这一段结束时 `wasm-module` 才有意义（此后是场景/健康协议）。
+  finishWasmModuleSpan("success");
 
   let disposed = false;
   /** 最近一次提交的快照（E2E/排障观察用；change: add-node-endpoint-hover）。 */
@@ -709,8 +721,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
   }
 
   // 页面级镜像：供 E2E / 排障观察运行时状态（生产无副作用）。
-  (target as unknown as { __bevyRuntime?: unknown }).__bevyRuntime = {
-    isReady: () => runtime.isReady(),
+  (target as unknown as { __bevyRuntime?: unknown }).__bevyRuntime = {    isReady: () => runtime.isReady(),
     renderedRevision: () => runtime.renderedRevision(),
     lastScene: () => lastScene,
     getWorkDiagnostics: runtime.getWorkDiagnostics,
@@ -745,5 +756,6 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       runtime.queryDropTarget?.({ generation: interactionGeneration, x: point.x, y: point.y, excludedIds }) ??
       { ok: false, reason: "unsupported" }
   };
+  finishRuntimeSpan("success");
   return runtime;
 }

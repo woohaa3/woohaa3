@@ -103,6 +103,33 @@ describe("通用 extension page URL 编解码", () => {
     expect(locationToPath({ page: "extension", extensionPageId: "missing" }, registry)).toBe("/");
   });
 
+  it("遥测页的 mode/groupBy 进 URL 并能解回（否则分享链接丢筛选）", () => {
+    // change: 2026-10-25-enhance-telemetry-performance-collection，任务 4.3。
+    // `defaultOnly` 漏判这两个键时，带筛选的链接会被规范化成"什么都没有"，刷新即失效。
+    const path = locationToPath({
+      page: "telemetry",
+      telemetry: { window: "7d", mode: "production", groupBy: "kind" }
+    });
+    expect(path).toContain("/telemetry?");
+    expect(path).toContain("mode=production");
+    expect(path).toContain("groupBy=kind");
+    expect(resolvePageLocation("/telemetry", path.split("?")[1] ?? "", registry)).toEqual({
+      page: "telemetry",
+      telemetry: { window: "7d", mode: "production", groupBy: "kind" }
+    });
+  });
+
+  it("遥测页的纯缺省查询不写入 `?`", () => {
+    // 缺省窗口 + 无筛选 → location 里不带 `telemetry`，URL 保持 `/telemetry`。
+    expect(resolvePageLocation("/telemetry", "?window=24h", registry)).toEqual({ page: "telemetry" });
+  });
+
+  it("遥测页的非法 mode/groupBy 被丢弃，不产生空筛选对象", () => {
+    expect(resolvePageLocation("/telemetry", "?window=24h&mode=staging&groupBy=prompt", registry)).toEqual({
+      page: "telemetry"
+    });
+  });
+
   it("extension page 的 canvasId/nodeId 是筛选而不是 Canvas 目标（不触发 scope 重建）", () => {
     const store = new AppRouterStore({ initialPathname: "/admin/fake", initialSearch: "", appPages: registry });
     const scopeBefore = store.currentScopeId();
