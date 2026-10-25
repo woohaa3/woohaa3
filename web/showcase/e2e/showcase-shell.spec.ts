@@ -6,7 +6,7 @@
  * - 紧凑品牌工具栏与 story header 层级；
  * - theme segmented control 键盘切换 default/sentinel，story 状态不重置；
  * - fixture 操作记录默认收起、计数更新、可键盘展开并保留稳定 JSON/test id；
- * - 生产 fixed `.node-execution-dock` 完全收拢在 `.showcase__panel-box` 内、不贴浏览器底部；
+ * - 生产 `.node-execution-dock` 使用虚拟节点锚点，并完全收拢在 `.showcase__panel-box` 内；
  * - 桌面与 390px 均无页面级横向溢出。
  */
 import { expect, test, type Page } from "@playwright/test";
@@ -16,9 +16,9 @@ const SIDEBAR_STORY = "画布组件--执行面板--生产组合--侧栏面";
 const NARROW_STORY = "画布组件--执行面板--生产组合--390px-窄屏";
 const WINDOW_STORY = "画布组件--弹窗--基础--标准-md";
 
-async function openStory(page: Page, story: string): Promise<void> {
+async function openStory(page: Page, story: string, dockCount = 1): Promise<void> {
   await page.goto(`/?story=${encodeURIComponent(story)}&mode=preview`);
-  await expect(page.locator(".node-execution-dock")).toHaveCount(1);
+  await expect(page.locator(".node-execution-dock")).toHaveCount(dockCount);
 }
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
@@ -100,22 +100,57 @@ test.describe("fixture 操作记录 diagnostics", () => {
 });
 
 test.describe("fixed surface containment", () => {
-  test("生产 fixed dock 完全位于舞台内，不贴浏览器底部", async ({ page }) => {
-    await openStory(page, IMAGE_STORY);
+  test("生产锚定 dock 位于虚拟节点下方并保持在可用舞台内", async ({ page }) => {
+    await openStory(page, "画布组件--执行面板--生产组合--锚点-·-下方");
     const box = await page.locator(".showcase__panel-box").boundingBox();
     const dock = await page.locator(".showcase__panel-box > .node-execution-dock").boundingBox();
-    const viewport = page.viewportSize()!;
     expect(box).not.toBeNull();
     expect(dock).not.toBeNull();
+    await expect(page.locator(".node-execution-dock")).toHaveAttribute("data-placement", "below");
 
     // dock 收拢在舞台边界内（允许 1px 亚像素误差）。
     expect(dock!.x).toBeGreaterThanOrEqual(box!.x - 1);
     expect(dock!.x + dock!.width).toBeLessThanOrEqual(box!.x + box!.width + 1);
     expect(dock!.y + dock!.height).toBeLessThanOrEqual(box!.y + box!.height + 1);
-    // 不是贴到浏览器底部（fixed 未收拢时 dock 底部接近视口底部）。
-    expect(box!.y + box!.height).toBeLessThan(viewport.height - 40);
     // 页面里只有一个 dock，且 Ladle sidebar 未被遮挡。
     await expect(page.locator(".node-execution-dock")).toHaveCount(1);
+  });
+
+  test("Pad 正常窗口尺寸下锚点面板仍收拢在舞台内", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openStory(page, "画布组件--执行面板--生产组合--锚点-·-下方");
+    const box = await page.locator(".showcase__panel-box").boundingBox();
+    const dock = await page.locator(".showcase__panel-box > .node-execution-dock").boundingBox();
+    expect(dock!.x).toBeGreaterThanOrEqual(box!.x);
+    expect(dock!.x + dock!.width).toBeLessThanOrEqual(box!.x + box!.width);
+    expect(dock!.y + dock!.height).toBeLessThanOrEqual(box!.y + box!.height);
+  });
+
+  test("舞台节点靠底边时使用生产上翻位置", async ({ page }) => {
+    await openStory(page, "画布组件--执行面板--生产组合--锚点-·-上方翻转");
+    await expect(page.locator(".node-execution-dock")).toHaveAttribute("data-placement", "above");
+    const box = await page.locator(".showcase__panel-box").boundingBox();
+    const dock = await page.locator(".node-execution-dock").boundingBox();
+    expect(dock!.y).toBeGreaterThanOrEqual(box!.y - 1);
+    expect(dock!.y + dock!.height).toBeLessThanOrEqual(box!.y + box!.height + 1);
+  });
+
+  test("离屏或缺少锚点时隐藏面板", async ({ page }) => {
+    await openStory(page, "画布组件--执行面板--生产组合--锚点-·-离屏与未就绪", 2);
+    await expect(page.locator(".node-execution-dock")).toHaveCount(2);
+    for (const dock of await page.locator(".node-execution-dock").all()) await expect(dock).toBeHidden();
+  });
+
+  test("骨架替换为真实内容时复用同一锚定位置", async ({ page }) => {
+    await openStory(page, "画布组件--执行面板--生产组合--锚点-·-骨架替换");
+    const dock = page.locator(".node-execution-dock");
+    await expect(page.locator(".authoring-generate-placeholder")).toBeVisible();
+    const before = await dock.boundingBox();
+    await expect(page.locator(".showcase__anchor-real-content")).toBeVisible();
+    const after = await dock.boundingBox();
+    expect(await dock.getAttribute("data-placement")).toBe("below");
+    expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
   });
 
   test("sidebar 面 dock 收拢在窄舞台内且无横向溢出", async ({ page }) => {

@@ -12,19 +12,21 @@
  * `woohaa3CanvasStore` 解析上下文），不是第二套状态机。`installShowcaseFixture()` 在 story
  * 挂载时重置 store / 草稿 / 选择 / 操作记录，因此 story 之间互不影响。
  */
-import { useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import type { CanvasTaskCatalog, ServerCanvas } from "@woohaa3/contracts";
 import {
   applyCanvasCommands,
   type CanvasCommand
 } from "@woohaa3/contracts";
 import { ModelExecutionHost } from "../../../frontend/src/cordis/plugins/task-execution/model-execution-host.js";
+import { ExecutionPanelSkeleton, ExecutionPanelSurface } from "../../../frontend/src/cordis/plugins/task-execution/execution-panel-surface.js";
 import { GenericModelPanel } from "../../../frontend/src/cordis/plugins/task-execution/generic-panel.js";
 import { ModelInteractionService } from "../../../frontend/src/cordis/services/model-interaction-service.js";
 import { SeedanceVideoPanel } from "../../../frontend/src/cordis/plugins/video-capture/seedance-panel.js";
 import { normalizeVideoEditIntents } from "@woohaa3/contracts";
 import { createModelDraftStore } from "../../../frontend/src/cordis/plugins/task-execution/model-draft.js";
 import type { ExecutionPanelPresentation } from "../../../frontend/src/cordis/navigation/contracts.js";
+import type { CanvasRuntimeService } from "../../../frontend/src/cordis/contracts.js";
 import { DialogService } from "../../../frontend/src/cordis/services/dialogs/service.js";
 import { ALERT_DIALOG_ID, alertDefinition } from "../../../frontend/src/cordis/services/dialogs/alert-dialog.js";
 import { nodeDraftStore } from "../../../frontend/src/cordis/plugins/task-execution/drafts.js";
@@ -120,11 +122,13 @@ export function createFixtureCanvasRemote(operations: OperationLog): CanvasRemot
       return Promise.resolve({ ok: true });
     },
     reportModelScript: notImplemented as unknown as CanvasRemoteService["reportModelScript"],
+    clearNodeHistory: notImplemented as never,
     listNodeHistory: notImplemented as never,
     listCanvasHistory: notImplemented as never,
     getNodeHistoryDetail: notImplemented as never,
     applyNodeHistory: notImplemented as never,
     nodeHistoryPreviewUrl: notImplemented as never,
+    verifyImageProjectReferences: notImplemented as never,
     editBegin: notImplemented as never,
     editComplete: notImplemented as never,
     editStatus: notImplemented as never,
@@ -141,7 +145,16 @@ export function createFixtureCanvasRemote(operations: OperationLog): CanvasRemot
     resolveSnippetMaterial: notImplemented as never,
     taskActivitySnapshot: notImplemented as never,
     taskActivityChanges: notImplemented as never,
-    subscribeTaskActivity: (() => () => undefined) as unknown as CanvasRemoteService["subscribeTaskActivity"]
+    subscribeTaskActivity: (() => () => undefined) as unknown as CanvasRemoteService["subscribeTaskActivity"],
+    filmSetConversionModels: notImplemented as never,
+    filmSetConversionSubmit: notImplemented as never,
+    filmSetConversionStatus: notImplemented as never,
+    filmSetConversionCancel: notImplemented as never,
+    filmSetConversionRetry: notImplemented as never,
+    recordingSubmit: notImplemented as never,
+    recordingStatus: notImplemented as never,
+    recordingList: notImplemented as never,
+    recordingCancel: notImplemented as never
   };
 }
 
@@ -337,6 +350,50 @@ export function installShowcaseFixture(options: {
 }
 
 export type ShowcasePanelSurface = "canvas" | "sidebar" | "dock";
+export type ShowcaseAnchor = "center" | "bottom" | "left" | "right" | "offscreen" | "missing";
+
+function fixtureRuntime(anchor: ShowcaseAnchor, areaId: string): CanvasRuntimeService {
+  const rect = (nodeId: string) => {
+    if (nodeId !== CANVAS_NODES.targetId) return null;
+    const area = document.getElementById(areaId);
+    if (!area || anchor === "missing") return null;
+    const bounds = area.getBoundingClientRect();
+    if (anchor === "offscreen") return { left: bounds.right + 20, top: bounds.top, width: 80, height: 60 };
+    const left = anchor === "left" ? bounds.left + 24 : anchor === "right" ? bounds.right - 104 : bounds.left + bounds.width / 2 - 40;
+    const top = anchor === "bottom" ? bounds.bottom - 160 : bounds.top + 24;
+    return { left, top, width: 80, height: 60 };
+  };
+  return {
+    nodeScreenRect: rect,
+    nodePresentationScreenRect: rect,
+    subscribeViewport: () => () => undefined,
+    subscribeScene: () => () => undefined
+  } as unknown as CanvasRuntimeService;
+}
+
+/** 生产锚定外壳在骨架与真实内容间切换的浏览器夹具。 */
+export function ShowcaseAnchorSkeletonSwap() {
+  const areaId = `showcase-skeleton-${useId().replace(/:/g, "")}`;
+  const runtime = useMemo(() => fixtureRuntime("center", areaId), [areaId]);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setReady(true), 500);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <div className="showcase__panel-host">
+      <div id={areaId} className="showcase__panel-box" data-node-anchor-area={CANVAS_NODES.targetId}>
+        <ExecutionPanelSurface nodeId={CANVAS_NODES.targetId} presentation="compact" runtime={runtime}>
+          {ready ? (
+            <div className="showcase__anchor-real-content" style={{ minHeight: 260, padding: 16 }}>
+              真实执行面板内容
+            </div>
+          ) : <ExecutionPanelSkeleton />}
+        </ExecutionPanelSurface>
+      </div>
+    </div>
+  );
+}
 
 /**
  * 渲染生产 `ModelExecutionHost`（依赖由 fixture 注入，组件本身是生产实现）。
@@ -354,6 +411,7 @@ export function ShowcasePanelHost({
   catalogId,
   canvas,
   surface = "canvas",
+  anchor = "center",
   width,
   writable = true,
   snippetSource = true,
@@ -365,6 +423,7 @@ export function ShowcasePanelHost({
   catalogId?: CatalogFixtureId;
   canvas?: ServerCanvas;
   surface?: ShowcasePanelSurface;
+  anchor?: ShowcaseAnchor;
   width?: number;
   writable?: boolean;
   /** 未装配片段插件时 `#` 入口不出现（与生产一致）。 */
@@ -386,6 +445,8 @@ export function ShowcasePanelHost({
     });
   });
   const [internalPresentation, setInternalPresentation] = useState<ExecutionPanelPresentation>("compact");
+  const areaId = `showcase-anchor-${useId().replace(/:/g, "")}`;
+  const runtime = useMemo(() => fixtureRuntime(anchor, areaId), [anchor, areaId]);
   const presentation = presentationProp ?? internalPresentation;
   const setPresentation = (next: ExecutionPanelPresentation) => {
     if (presentationProp === undefined) setInternalPresentation(next);
@@ -394,9 +455,10 @@ export function ShowcasePanelHost({
   };
   return (
     <div className="showcase__panel-host" data-surface={surface}>
-      <div className="showcase__panel-box" style={width ? { width } : undefined}>
+      <div id={areaId} className="showcase__panel-box" data-node-anchor-area={CANVAS_NODES.targetId} style={width ? { width } : undefined}>
         <ModelExecutionHost
           canvasId="showcase-canvas"
+          runtime={runtime}
           selectedNodeId={CANVAS_NODES.targetId}
           session={deps.canvasSession}
           runClient={deps.canvasRemote}

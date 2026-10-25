@@ -28,7 +28,7 @@ async function openStory(page: Page, story: string): Promise<void> {
   await page.goto(`/?story=${encodeURIComponent(story)}&mode=preview`);
   await expect(page.locator(".node-execution-dock")).toHaveCount(1);
   await expect(page.locator(".mc-panel__send")).toBeVisible();
-  // 等待 webfont 落地：舞台内 absolute dock 会随字体 swap 重排（生产 fixed dock 不会），
+  // 等待 webfont 落地：面板尺寸变化会触发同一锚定宿主重新计算限高，
   // 稳定后再做位移/遮挡断言，避免把字体竞态误判为菜单遮挡。
   await page.evaluate(async () => {
     await document.fonts.ready;

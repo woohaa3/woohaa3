@@ -85,6 +85,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     snippetSource,
     onPromptSkill,
     presentation = "compact",
+    runtime,
     onPresentationIntent,
     activity,
     registry,
@@ -389,7 +390,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
 
   if (!panelKind) {
     return (
-      <ExecutionPanelSurface nodeId={context.nodeId} presentation="compact">
+      <ExecutionPanelSurface nodeId={context.nodeId} presentation="compact" runtime={runtime}>
         <ModelParameterPanel
           canvasId={canvasId}
           nodeId={context.nodeId}
@@ -521,7 +522,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   );
 
   const wrapper = (
-    <ExecutionPanelSurface nodeId={context.nodeId} presentation={expanded ? "expanded" : "compact"}>
+    <ExecutionPanelSurface nodeId={context.nodeId} presentation={expanded ? "expanded" : "compact"} runtime={runtime}>
       {body}
     </ExecutionPanelSurface>
   );

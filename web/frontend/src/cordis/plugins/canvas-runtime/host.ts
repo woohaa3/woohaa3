@@ -50,6 +50,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private status: CanvasRuntimeStatus = { phase: "booting", error: null };
   private readonly listeners = new Set<() => void>();
   private readonly viewportListeners = new Set<() => void>();
+  private readonly frameListeners = new Set<() => void>();
   private readonly modelFocusListeners = new Set<() => void>();
   private viewportRevision = 0;
   private sceneRevision = 0;
@@ -535,6 +536,10 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       this.viewportListeners.delete(listener);
     };
   };
+  subscribeFrame = (listener: () => void): (() => void) => {
+    this.frameListeners.add(listener);
+    return () => this.frameListeners.delete(listener);
+  };
 
   /**
    * 单节点屏幕矩形（CSS px）（change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1）。
@@ -542,6 +547,24 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
    */
   nodeScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null =>
     this.controllerInstance?.nodeScreenRect(nodeId) ?? null;
+  nodePresentationScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null => {
+    const card = this.nodeScreenRect(nodeId);
+    const scopes = this.controllerInstance?.queryCompositeAssetScopes();
+    if (!scopes?.ok) return card;
+    const scope = scopes.value.find((entry) => entry.nodeId === nodeId);
+    if (!scope) return card;
+    const [worldLeft, worldTop, width, height] = scope.aabb;
+    const start = this.worldToClient({ x: worldLeft, y: worldTop });
+    const end = this.worldToClient({ x: worldLeft + width, y: worldTop + height });
+    if (!start || !end) return card;
+    const left = Math.min(start.x, end.x);
+    const top = Math.min(start.y, end.y);
+    const right = Math.max(start.x, end.x);
+    const bottom = Math.max(start.y, end.y);
+    const x = Math.min(card?.left ?? left, left);
+    const y = Math.min(card?.top ?? top, top);
+    return { left: x, top: y, width: right - x, height: bottom - y };
+  };
 
   /** 上传中的幽灵节点（只渲染、不进规范状态）。 */
   ghostNodes = (): readonly GhostRenderNode[] => this.ghosts;
@@ -680,6 +703,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
           this.viewportRevision += 1;
           for (const listener of this.viewportListeners) listener();
           this.options.onViewportChange?.(this.controllerInstance?.viewport() ?? { x: 0, y: 0, zoom: 1 });
+        },
+        onFrame: () => {
+          for (const listener of this.frameListeners) listener();
         }
       })
     );
@@ -750,6 +776,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.publish({ phase: "booting", error: null });
     this.listeners.clear();
     this.viewportListeners.clear();
+    this.frameListeners.clear();
     this.sceneListeners.clear();
   }
 

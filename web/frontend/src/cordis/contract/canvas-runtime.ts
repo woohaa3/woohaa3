@@ -54,6 +54,8 @@ export interface CanvasRuntimeService {
   /** 本地视口版本号；随 pan/zoom 递增（供 overlay 用 useSyncExternalStore 重排）。 */
   viewportVersion(): number;
   subscribeViewport(listener: () => void): () => void;
+  /** 每个画布刷新帧通知；用于需要跟随画布拖动的瞬时 DOM overlay。 */
+  subscribeFrame?(listener: () => void): () => void;
   /** Read-only geometry invalidation after scene/position/view submission; no frame heartbeat. */
   sceneVersion?(): number;
   subscribeScene?(listener: () => void): () => void;
@@ -65,6 +67,8 @@ export interface CanvasRuntimeService {
    * 节点顶部操作横条据此锚定，不持久化横条位置、不建第二相机。
    */
   nodeScreenRect(nodeId: string): import("@woohaa3/contracts").ScreenRect | null;
+  /** Accepted renderer presentation bounds when a model/composite scope exceeds its card. */
+  nodePresentationScreenRect?(nodeId: string): import("@woohaa3/contracts").ScreenRect | null;
   /**
    * 上传中导入的幽灵节点（只渲染、不进规范状态；change: add-paste-import-workflows，design D7）。
    * 设为空数组即清除。实现负责触发一次 scene flush。

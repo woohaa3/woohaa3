@@ -140,7 +140,7 @@ describe("主题 segmented control", () => {
 			</Provider>,
 		);
 		expect(el.querySelector('[role="radiogroup"][aria-label="主题 preset"]')).not.toBeNull();
-		expect(el.querySelectorAll('[role="radio"]')).toHaveLength(2);
+	expect(el.querySelectorAll('[role="radio"]')).toHaveLength(3);
 	});
 });
 
@@ -213,11 +213,11 @@ describe("fixture 操作记录 diagnostics", () => {
 });
 
 describe("scoped fixed-surface containment（读 CSS）", () => {
-	it("仅以 .showcase__panel-box 为祖先把生产 dock 收拢为舞台内 absolute", () => {
+	it("仅在锚点舞台内把生产 dock 收拢为 absolute", () => {
 		const rule = SHOWCASE_CSS.match(/\.showcase__panel-box > \.node-execution-dock\s*\{[^}]*\}/)?.[0] ?? "";
 		expect(rule).toContain("position: absolute");
-		expect(rule).toContain("bottom: 16px");
-		expect(rule).toContain("translateX(-50%)");
+		expect(rule).toContain("top: 0");
+		expect(rule).toContain("bottom: auto");
 	});
 
 	it("diagnostics 内容有界滚动并安全换行", () => {

@@ -847,38 +847,17 @@
 /*
  * Fixed surface containment（change: 2026-09-29-refresh-showcase-shell，design D5）。
  *
- * 生产 `.node-execution-dock` 是 `position: fixed` bottom dock；这里只在该舞台祖先下把它
- * 收拢为舞台内 absolute bottom dock，bounding box 随舞台 content box 计算、贴底居中。
+ * 生产 compact surface 由虚拟节点矩形驱动；舞台为生产定位函数提供可用内容矩形。
  * 生产 Frontend 的定位 contract 不被修改，selector 也始终以 `.showcase__panel-box` 开头。
  */
 .showcase__panel-box > .node-execution-dock {
 	position: absolute;
-	left: 50%;
-	bottom: 16px;
-	transform: translateX(-50%);
+	left: 0;
+	top: 0;
+	bottom: auto;
+	transform: none;
 	width: calc(100% - 32px);
 	max-width: calc(100% - 32px);
-}
-
-/* dock 面铺满容器（生产 surface="dock" 取容器宽高），仍限制宽度以便做 390px 断言。 */
-.showcase__panel-host[data-surface="dock"] .showcase__panel-box {
-	width: min(520px, 100%);
-	height: 420px;
-	overflow: hidden;
-}
-
-.showcase__panel-host[data-surface="dock"] .showcase__panel-box > .node-execution-dock {
-	position: static;
-	left: auto;
-	bottom: auto;
-	width: 100%;
-	max-width: 100%;
-	height: 100%;
-	transform: none;
-}
-
-.showcase__panel-host[data-surface="dock"] .showcase__panel-box > .node-execution-dock > .mc-panel {
-	height: 100%;
 }
 
 /* 侧栏面是窄栏形态。 */

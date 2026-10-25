@@ -37,7 +37,11 @@ function frameClock() {
   return { dom, advance };
 }
 
-function setup(textureSync?: Parameters<typeof installInteractionController>[0]["textureSync"], onSceneSubmitted?: () => void) {
+function setup(
+  textureSync?: Parameters<typeof installInteractionController>[0]["textureSync"],
+  onSceneSubmitted?: () => void,
+  onFrame?: () => void
+) {
   woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 0, y: 0 }]));
   const { dom, advance } = frameClock();
   const { runtime, scenes, viewports, failNextSetScene, failNextSetViewport } = runtimeCapturing();
@@ -47,12 +51,24 @@ function setup(textureSync?: Parameters<typeof installInteractionController>[0][
     getSession: () => getSession() as never,
     target: dom.target as never,
     textureSync,
-    onSceneSubmitted
+    onSceneSubmitted,
+    onFrame
   });
   return { dom, advance, scenes, viewports, runtime, controller, failNextSetScene, failNextSetViewport };
 }
 
 describe("纯视口增量路由（design D3）", () => {
+  it("每个画布刷新帧都通知瞬时 overlay，即使场景没有失效", () => {
+    const onFrame = vi.fn();
+    const { controller, advance } = setup(undefined, undefined, onFrame);
+    controller.flush();
+    expect(onFrame).toHaveBeenCalledTimes(1);
+    advance();
+    advance();
+    expect(onFrame).toHaveBeenCalledTimes(3);
+    controller.dispose();
+  });
+
   it("首次构建中的范围查询不递归提交未完成的场景", () => {
     woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 0, y: 0 }]));
     const { dom, advance } = frameClock();

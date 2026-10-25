@@ -116,6 +116,67 @@ it("退出聚焦后原画布继续操作概览，controller 释放后无残留�
   expect(wheel(s.stage, { ctrlKey: true, deltaY: -10 }).defaultPrevented).toBe(false);
   expect(s.writes).not.toHaveBeenCalled();
 });
+it("overview wheel 跨入节点面板后由 capture 单次交给画布", () => {
+  const s = setup();
+  s.setFocused(false);
+  const panel = document.createElement("div");
+  panel.className = "node-execution-dock";
+  const textarea = document.createElement("textarea");
+  panel.append(textarea);
+  textarea.addEventListener("wheel", (event) => event.stopPropagation());
+  document.body.append(panel);
+  wheel(s.canvas, { deltaX: 4, deltaY: 0 }, 10);
+  const crossed = wheel(textarea, { deltaX: 6, deltaY: 0 }, 40);
+  expect(crossed.defaultPrevented).toBe(true);
+  expect(controller!.viewport().x).toBe(s.originalViewport.x - 10);
+});
+it("blocked session is cancelled by an explicit interaction and does not retain an old tail", () => {
+  const s = setup();
+  s.setFocused(false);
+  s.setBlocked(true);
+  expect(wheel(s.canvas, { deltaX: 12 }, 10).defaultPrevented).toBe(true);
+  s.setBlocked(false);
+  document.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  const next = wheel(s.canvas, { deltaX: 5 }, 20);
+  expect(next.defaultPrevented).toBe(true);
+  expect(controller!.viewport().x).toBe(s.originalViewport.x - 5);
+});
+it("面板空白可启动同一个 canvas owner", () => {
+  const s = setup();
+  s.setFocused(false);
+  const panel = document.createElement("div");
+  panel.className = "node-execution-dock";
+  document.body.append(panel);
+  const event = wheel(panel, { deltaX: 7, deltaY: 0 }, 15);
+  expect(event.defaultPrevented).toBe(true);
+  expect(controller!.viewport().x).toBe(s.originalViewport.x - 7);
+});
+it("面板原生控件起始的连续手势不会在 canvas 泄漏，idle 后按新目标归属", () => {
+  const s = setup();
+  s.setFocused(false);
+  const panel = document.createElement("div");
+  panel.className = "node-execution-dock";
+  const textarea = document.createElement("textarea");
+  panel.append(textarea);
+  document.body.append(panel);
+  expect(wheel(textarea, { deltaY: 40 }, 10).defaultPrevented).toBe(false);
+  expect(wheel(s.canvas, { deltaX: 12 }, 80).defaultPrevented).toBe(true);
+  expect(wheel(panel, { deltaX: 8 }, 100).defaultPrevented).toBe(true);
+  expect(controller!.viewport()).toEqual(s.originalViewport);
+  expect(wheel(textarea, { deltaY: 30 }, 281).defaultPrevented).toBe(false);
+  expect(controller!.viewport()).toEqual(s.originalViewport);
+});
+it("overview modal 保持最高优先级，Safari gestureend 释放旧 owner", () => {
+  const s = setup();
+  s.setFocused(false);
+  s.setBlocked(true);
+  expect(wheel(s.canvas, { deltaX: 12 }, 10).defaultPrevented).toBe(true);
+  expect(controller!.viewport()).toEqual(s.originalViewport);
+  s.setBlocked(false);
+  document.dispatchEvent(new Event("gestureend", { bubbles: true }));
+  expect(wheel(s.canvas, { deltaX: 5 }, 20).defaultPrevented).toBe(true);
+  expect(controller!.viewport().x).toBe(s.originalViewport.x - 5);
+});
 it("更换取景目标后，旧 owner 的释放不清除新 owner", () => {
   const s = setup();
   const replacement = { read: () => ({ viewport: { x: 0, y: 0, zoom: 1 }, rect: { x: 0, y: 0, width: 1000, height: 800 } }), write: vi.fn() };

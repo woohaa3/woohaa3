@@ -368,7 +368,7 @@ describe("菜单与 catalog（任务 3.1–3.3）", () => {
     expect(narrow.querySelector<HTMLElement>(".showcase__panel-box")!.style.width).toBe("390px");
   });
 
-  it("默认舞台内直接渲染生产 fixed dock（收拢交给 Showcase-scoped CSS）", async () => {
+  it("生产锚定宿主读取虚拟节点矩形与舞台内容区域", async () => {
     const container = await mountHost({ canvas: baseCanvas("image") });
     const box = container.querySelector(".showcase__panel-box");
     expect(box).not.toBeNull();
@@ -378,10 +378,10 @@ describe("菜单与 catalog（任务 3.1–3.3）", () => {
 });
 
 describe("音视频状态（任务 4.1–4.3）", () => {
-  it("执行面板不再提示任务阶段（生成中/已完成）；失败态仍保留", async () => {
+  it("执行面板不再提示生成阶段且允许再次提交；失败态仍保留", async () => {
     const running = await mountHost({ canvas: canvasFixture("audioRunning"), width: 420 });
     expect(running.querySelector(".mc-panel__status")).toBeNull();
-    expect(running.querySelector<HTMLButtonElement>(".mc-panel__send")!.disabled).toBe(true);
+    expect(running.querySelector<HTMLButtonElement>(".mc-panel__send")!.disabled).toBe(false);
     await unmountCurrent();
 
     const succeeded = await mountHost({ canvas: canvasFixture("audioSucceeded"), width: 420 });

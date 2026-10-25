@@ -1,5 +1,5 @@
 import type { Story, StoryDefault } from "@ladle/react";
-import { ShowcasePanelHost } from "../fixtures/panel-fixture.js";
+import { ShowcaseAnchorSkeletonSwap, ShowcasePanelHost } from "../fixtures/panel-fixture.js";
 import { baseCanvas, canvasFixture } from "../fixtures/canvas.js";
 import { FixtureStage, OperationLogPanel, ProductionFixtureHeader } from "../fixtures/stage.js";
 export default {
@@ -23,6 +23,39 @@ export const ImageIdle: Story = () => (
 	</FixtureStage>
 );
 ImageIdle.storyName = "图片 · 生产组合";
+
+export const AnchorBelow: Story = () => (
+	<FixtureStage>
+		<ProductionFixtureHeader title="节点锚点 · 下方" note="生产锚定宿主使用舞台提供的虚拟节点矩形。" />
+		<ShowcasePanelHost canvas={baseCanvas("image")} anchor="center" />
+	</FixtureStage>
+);
+AnchorBelow.storyName = "锚点 · 下方";
+
+export const AnchorFlip: Story = () => (
+	<FixtureStage>
+		<ProductionFixtureHeader title="节点锚点 · 边缘翻转" note="底边节点优先在上方呈现，左右边缘由生产定位函数纠偏。" />
+		<ShowcasePanelHost canvas={baseCanvas("image")} anchor="bottom" />
+	</FixtureStage>
+);
+AnchorFlip.storyName = "锚点 · 上方翻转";
+
+export const AnchorUnavailable: Story = () => (
+	<FixtureStage>
+		<ProductionFixtureHeader title="节点锚点 · 几何失效" note="离屏与未就绪锚点保持隐藏，route 与草稿不变。" />
+		<ShowcasePanelHost canvas={baseCanvas("image")} anchor="offscreen" />
+		<ShowcasePanelHost canvas={baseCanvas("image")} anchor="missing" />
+	</FixtureStage>
+);
+AnchorUnavailable.storyName = "锚点 · 离屏与未就绪";
+
+export const AnchorSkeletonSwap: Story = () => (
+	<FixtureStage>
+		<ProductionFixtureHeader title="节点锚点 · 骨架替换" note="骨架切换为真实内容时沿用同一个节点锚定宿主。" />
+		<ShowcaseAnchorSkeletonSwap />
+	</FixtureStage>
+);
+AnchorSkeletonSwap.storyName = "锚点 · 骨架替换";
 
 /** 侧栏面：参数与执行动作在各状态下的可用性（任务 3.3）。 */
 export const Sidebar: Story = () => (
