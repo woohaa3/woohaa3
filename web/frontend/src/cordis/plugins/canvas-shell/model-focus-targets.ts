@@ -1,3 +1,4 @@
+import { builtinNodeCapabilityResolver, type NodeCapabilityResolver } from "@woohaa3/contracts";
 /**
  * 模型聚焦目标解析
  * （change: add-model-focus-viewing，任务 3.1；design D1/D3）。
@@ -7,11 +8,9 @@
  * 不写 ServerCanvas / CanvasCommand / Y.Doc。
  */
 import {
-  bevyKindForNodeType,
   filmSetLayoutBounds,
   readFilmSetContent,
   isFilmSetNode,
-  isCompositeAssetNodeType,
   v2SceneExtent,
   MODEL_SCRIPT_SCENE_IR_V2_VERSION,
   type BevyModelPlacement,
@@ -21,41 +20,8 @@ import {
 } from "@woohaa3/contracts";
 import type { FocusTargetInput } from "./model-focus-session.js";
 
-/**
- * 可承载 3D 模型**聚焦查看**的节点类型
- * （change: 2026-10-11-extract-film-set-extension：复合资产类别收敛）。
- *
- * 与 `bevyKindForNodeType` 的 model 映射一致：`model3d` 与 `composite-asset`（片场/炉体）。
- */
-export function isModelNodeType(type: string): boolean {
-  return bevyKindForNodeType(type) === "model";
-}
-
-/**
- * 是否进入**宿主模型参数编辑器**聚焦（`model3d` 与片场业务）。
- *
- * 游戏炼丹炉等其他复合资产业务的聚焦工作区由 extension 拥有（双击经 Navigation 进入
- * extension 工作区），因此 MUST NOT 触发宿主模型编辑器面板
- * （change: 2026-10-11-extract-film-set-extension，D11 严格业务判别）。
- */
-export function isModelEditorNodeType(type: string, data?: unknown): boolean {
-  return type === "model3d" || isFilmSetNode(type, data);
-}
-
-/**
- * 双击/聚焦 3D 节点时请求的 Navigation focus kind
- * （change: 2026-10-11-extract-film-set-extension，D11）。
- *
- * 游戏炼丹炉等其他复合资产业务聚焦到 `"extension"` 工作区（由 extension 贡献）；其余
- * 3D 节点（`model3d` 与片场）沿用宿主 `"model"` 聚焦查看/编辑。
- */
-export function focusKindForModelNodeType(type: string, data?: unknown): "model" | "extension" {
-  if (isFilmSetNode(type, data) || type === "model3d") return "model";
-  if (isCompositeAssetNodeType(type)) return "extension";
-  return "model";
-}
-
 export type ModelFocusTargetSource = {
+  nodeCapabilities?: NodeCapabilityResolver;
   /** 当前绘制画布（working projection 优先；命中与渲染同源）。 */
   canvas: ServerCanvas | null;
   viewport: { x: number; y: number; zoom: number };
@@ -76,11 +42,11 @@ export type ModelFocusTargetSource = {
 
 /** 只检查目标成员资格，不派生 placement、extent 或布局包围盒。 */
 export function hasModelFocusTarget(
-  source: Pick<ModelFocusTargetSource, "canvas" | "resources" | "scenesV2">,
+  source: Pick<ModelFocusTargetSource, "canvas" | "resources" | "scenesV2" | "nodeCapabilities">,
   nodeId: string
 ): boolean {
   const node = source.canvas?.document.nodes.find(node => node.id === nodeId);
-  return !!node && isModelNodeType(node.type)
+  return !!node && !!(source.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve({ canvas: source.canvas!, node, data: source.canvas!.nodeData[nodeId] }).focus
     && !!(source.resources?.get(nodeId) || source.scenesV2?.get(nodeId));
 }
 
@@ -92,11 +58,13 @@ export function resolveModelFocusTargets(source: ModelFocusTargetSource): FocusT
   if (!canvas) return [];
   const targets: FocusTargetInput[] = [];
   for (const node of canvas.document.nodes) {
-    if (!isModelNodeType(node.type)) continue;
+    const capabilities = (source.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve({ canvas, node, data: canvas.nodeData[node.id] });
+    if (!capabilities.focus?.kind({ canvas, node, data: canvas.nodeData[node.id] })) continue;
     const placement = readPlacement(canvas.nodeData?.[node.id]);
     const nonCanonical = source.nonCanonicalNodes?.has(node.id) === true;
     const base = {
       canvas,
+      capabilities,
       nodeId: node.id,
       viewport: source.viewport,
       surface: source.surface,

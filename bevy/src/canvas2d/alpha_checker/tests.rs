@@ -16,6 +16,7 @@ fn world() -> World {
     world.insert_resource(FrameFlags::default());
     world.init_resource::<MediaAlphaCheckerTexture>();
     world.insert_resource(super::Visuals {
+        texture_store: Default::default(),
         card_blocks: Vec::new(),
         card_decorations: Vec::new(),
         container_blocks: Vec::new(),

@@ -83,6 +83,8 @@ export function canvasShellExtension(): Plugin.Function<void> {
       const toolbarTarget = () => {
         const selection = nodeSelectionStore.getSnapshot();
         return resolveNodeActionToolbarView({
+          canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
+          nodeCapabilities: ctx.nodeImplementations,
           selectedNodeIds: selection.nodeIds,
           nodes: workingNodes(),
           focused: focused(),
@@ -214,6 +216,6 @@ export function canvasShellExtension(): Plugin.Function<void> {
       // page scope dispose 时关闭查找，避免跨画布残留（任务 4.2）。
       ctx.effect(() => () => canvasSearchStore.close(), "canvas-shell-search-reset");
     },
-    { name: CANVAS_SHELL_PLUGIN_ID, inject: ["slots", "canvasRuntime", "canvasLocate", "canvasEdit", "canvasSession", "canvasNavigation"] }
+    { name: CANVAS_SHELL_PLUGIN_ID, inject: ["nodeImplementations", "slots", "canvasRuntime", "canvasLocate", "canvasEdit", "canvasSession", "canvasNavigation"] }
   );
 }

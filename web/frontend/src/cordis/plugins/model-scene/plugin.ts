@@ -1,289 +1,131 @@
-/**
- * Model Scene Sync Plugin（change: adopt-frontend-cordis-plugin-runtime，design D5/D4；
- *  change: 2026-10-09-add-film-set-object-motion-and-editing —— 片场组合内容同步）。
- *
- * 观察权威画布派生的 `nodeData.modelScript`，用浏览器 SceneBuilder 执行成 Scene IR 交给
- * Bevy，并把结果经 `canvasRemote.reportModelScript` 上报回 Canvas Service。**不写权威状态**。
- *
- * 复合资产通过 scope 注册的业务 adapter 生成资源，宿主不解释扩展内容。
- *
- * 提供 `modelScenes` feature service：canvas runtime 据此合成快照；订阅与执行由 Plugin
- * scope 回收。
- */
-import type { Context } from "@deepseek-ai/cordis";
-import type { Plugin } from "@deepseek-ai/cordis";
+/** Page-owned model preparation. Providers stage results; only current identities publish. */
+import type { Context, Plugin } from "@deepseek-ai/cordis";
 import {
-  compositeAssetSceneOps,
-  executeModelScriptVersioned,
-  isSupportedModelScriptVersion,
-  sceneIrVersionFor,
-  type CanvasNodeData,
-  type SceneV2Op,
+  compositeAssetSceneOps, executeModelScriptVersioned, isSupportedModelScriptVersion,
+  sceneIrVersionFor, nodeCapabilityContext,
+  type CanvasNodeData, type SceneV2Op, type NodePreparationResult,
 } from "@woohaa3/contracts";
-import type { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
-import type { ServerCanvas } from "@woohaa3/contracts";
 import { modelSceneStore, ModelSceneStore } from "./model-scene-store.js";
-import {
-  MODEL_SCENES_SERVICE,
-  type ModelScenesProvider,
-} from "../service-keys.js";
+import { MODEL_SCENES_SERVICE, type ModelScenesProvider } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { NodeResourceLoading } from "../../services/node-resource-loading.js";
 import { createModelScriptReports } from "./model-script-reports.js";
-
 export const MODEL_SCENE_PLUGIN_ID = "model-scene";
-
 export type ModelSceneExtensionOptions = {
   canvasId?: string;
-  /** 执行入口（测试可注入）。返回 `ok` 或 `fail:<code>`。 */
-  applyModelScript?: (
-    nodeId: string,
-    source: string,
-    version: unknown,
-  ) => Promise<string>;
+  applyModelScript?: (nodeId: string, source: string, version: unknown) => Promise<string>;
   schedule?: (run: () => void) => void;
-  /** Yield between preparation batches so ready resources can be painted. */
   yieldToBrowser?: () => Promise<void>;
 };
-
 export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): Plugin.Function<void> {
-  return definePlugin(
-    (ctx: Context) => {
-      const canvasId = options.canvasId ?? DEFAULT_CANVAS_ID;
-      const injected = options.applyModelScript;
-      const schedule = options.schedule ?? createMicScheduler();
-      const scopedScenes = new ModelSceneStore();
-      const applied = new Map<string, string>();
-      const loading = new NodeResourceLoading(undefined);
-      const reports = createModelScriptReports(report => ctx.canvasRemote.reportModelScript(report));
-      let scheduled = false;
-      let running = false;
-      let rerun = false;
-      let stopped = false;
-
-      const apply = async (
-        nodeId: string,
-        source: string,
-        version: unknown,
-        data: CanvasNodeData | undefined,
-        nodeType: string,
-      ): Promise<string> => {
-        if (injected) return injected(nodeId, source, version);
-        if (nodeType === "composite-asset") {
-          const adapter = ctx.compositeAssets.resolve(ctx.canvasState.getCanvas(), nodeId);
-          const projection = adapter && data ? adapter.prepare(nodeId, data) : null;
-          ctx.compositeAssets.setProjection(nodeId, projection, adapter?.extensionId);
-          if (!projection) {
-            // A saved generic model remains visible even if its business UI is unavailable.
-            // This grants no extension commands or workspace ownership.
-            if (!adapter && source.trim()) return applyWithBevy(nodeId, source, version, data, nodeType, scopedScenes);
-            scopedScenes.delete(nodeId);
-            return "fail:compile:unavailable-composite-asset";
-          }
-          if (projection.resource) scopedScenes.set(nodeId, projection.resource);
-          else scopedScenes.delete(nodeId);
-          return projection.diagnostic ? `ok:partial:${projection.diagnostic}` : "ok";
+  return definePlugin((ctx: Context) => {
+    const registry = ctx.nodeImplementations;
+    const scenes = new ModelSceneStore();
+    const applied = new Map<string, string>();
+    const releases = new Map<string, () => void>();
+    const loading = new NodeResourceLoading();
+    const reports = createModelScriptReports(report => ctx.canvasRemote.reportModelScript(report));
+    const schedule = options.schedule ?? queueMicrotask;
+    let stopped = false, scheduled = false, running = false, rerun = false;
+    const identity = (nodeId: string) => {
+      const canvas = ctx.canvasState.getCanvas();
+      const context = canvas && nodeCapabilityContext(canvas, nodeId);
+      if (!context) return null;
+      const capabilities = registry.resolve(context);
+      const provider = capabilities.modelPreparation;
+      const key = provider?.executionKey(context);
+      return provider && key !== undefined
+        ? { context, provider, key: JSON.stringify([canvas!.id, capabilities.generation, key]) }
+        : null;
+    };
+    const discard = (nodeId: string) => {
+      releases.get(nodeId)?.(); releases.delete(nodeId);
+      applied.delete(nodeId); scenes.delete(nodeId);
+      ctx.compositeAssets.setProjection(nodeId, null);
+    };
+    const drain = async () => {
+      let started = performance.now();
+      const canvas = ctx.canvasState.getCanvas();
+      const ids = new Set(canvas?.document.nodes.map(node => node.id) ?? []);
+      ctx.compositeAssets.retain(ids);
+      for (const id of applied.keys()) if (!ids.has(id) || applied.get(id) !== identity(id)?.key) discard(id);
+      for (const nodeId of ids) {
+        if (stopped) return;
+        if (performance.now() - started >= 8) {
+          await (options.yieldToBrowser?.() ?? new Promise(resolve => setTimeout(resolve, 0)));
+          if (stopped) return;
+          started = performance.now();
         }
-        return applyWithBevy(nodeId, source, version, data, nodeType, scopedScenes);
-      };
-
-      const run = () => {
+        const current = identity(nodeId);
+        if (!current || applied.get(nodeId) === current.key) continue;
+        const load = loading.track(nodeId, current.key);
+        let result: NodePreparationResult;
+        try {
+          result = options.applyModelScript
+            ? { status: await options.applyModelScript(nodeId, String(current.context.data?.modelScript ?? ""), current.context.data?.modelScriptVersion) }
+            : await current.provider.prepare(current.context);
+        } catch (error) {
+          result = { status: `fail:execute:${error instanceof Error ? error.message : String(error)}` };
+        }
+        if (stopped || identity(nodeId)?.key !== current.key) {
+          result.release?.(); loading.remove(load); continue;
+        }
+        releases.get(nodeId)?.(); releases.delete(nodeId);
+        if (result.release) releases.set(nodeId, result.release);
+        if (result.resource) scenes.set(nodeId, result.resource); else scenes.delete(nodeId);
+        // Composite metadata is published only by an accepted, strictly owned adapter result.
+        const adapter = ctx.compositeAssets.resolve(current.context.canvas, nodeId);
+        ctx.compositeAssets.setProjection(nodeId, adapter ? { ...(result.resource ? { resource: result.resource } : {}), ...(result.composition ? { composition: result.composition } : {}), ...(result.diagnostic ? { diagnostic: result.diagnostic } : {}) } : null, adapter?.extensionId);
+        applied.set(nodeId, current.key);
+        loading.setLoading(load, false);
+        const status = result.status.startsWith("ok") ? "ok" : "failed";
+        const data = ctx.canvasState.getCanvas()?.nodeData[nodeId];
+        if (!reports.hasPending(nodeId) && data?.modelScriptStatus === status &&
+          (status === "ok" ? !data.modelScriptError : data.modelScriptError === result.status)) continue;
+        reports.enqueue({ canvasId: options.canvasId ?? DEFAULT_CANVAS_ID, nodeId, status,
+          ...(status === "failed" ? { message: result.status } : {}) },
+          () => !stopped && applied.get(nodeId) === current.key && identity(nodeId)?.key === current.key);
+      }
+    };
+    const trigger = () => {
+      if (stopped) return;
+      const sources = new Map<string, string>();
+      for (const node of ctx.canvasState.getCanvas()?.document.nodes ?? []) {
+        const current = identity(node.id);
+        if (current) sources.set(node.id, current.key);
+      }
+      // Remove obsolete published resources immediately, even while an old prepare awaits.
+      for (const [id, key] of applied) if (sources.get(id) !== key) discard(id);
+      loading.retain(sources);
+      for (const [id, key] of sources) {
+        const load = loading.track(id, key);
+        if (applied.get(id) === key) loading.setLoading(load, false);
+      }
+      if (running) { rerun = true; return; }
+      if (scheduled) return;
+      scheduled = true;
+      schedule(() => {
         scheduled = false;
         if (stopped) return;
         running = true;
-        void applyCommitted({
-          canvasId,
-          scenes: scopedScenes,
-          getCanvas: ctx.canvasState.getCanvas,
-          compositeAssets: ctx.compositeAssets,
-          applied,
-          loading,
-          apply,
-          active: () => !stopped,
-          reports,
-          yieldToBrowser: options.yieldToBrowser ?? (() => new Promise(resolve => setTimeout(resolve, 0))),
-        }).finally(() => {
-          running = false;
-          if (rerun) {
-            rerun = false;
-            trigger();
-          }
-        });
-      };
-      const trigger = () => {
-        if (stopped) return;
-        const canvas = ctx.canvasState.getCanvas();
-        const sources = new Map<string, string>();
-        for (const node of canvas?.document.nodes ?? []) {
-          const data = canvas?.nodeData[node.id];
-          if (node.type === "model3d" && typeof data?.modelScript === "string" && data.modelScript) {
-            sources.set(node.id, `${String(data.modelScriptVersion)}:${data.modelScript}`);
-          }
-        }
-        loading.retain(sources);
-        for (const [nodeId, source] of sources) {
-          const load = loading.track(nodeId, source);
-          if (applied.get(nodeId) === source) loading.setLoading(load, false);
-        }
-        if (scheduled) return;
-        // One drain owns the derived resources. Changes during awaits are coalesced.
-        if (running) {
-          rerun = true;
-          return;
-        }
-        scheduled = true;
-        schedule(run);
-      };
-
-      const unsubscribe = ctx.canvasState.subscribe(trigger);
-      const unsubscribeAdapters = ctx.compositeAssets.subscribe(trigger);
-      trigger();
-
-      const provider: ModelScenesProvider = {
-        getResources: () => scopedScenes.snapshot(),
-        isLoading: loading.isLoading,
-        subscribe: listener => {
-          const stopResources = scopedScenes.subscribe(listener);
-          const stopLoading = loading.subscribe(listener);
-          return () => { stopResources(); stopLoading(); };
-        }
-      };
-      ctx.provide(MODEL_SCENES_SERVICE as never, provider as never);
-
-      return () => {
-        stopped = true;
-        reports.dispose();
-        unsubscribe();
-        unsubscribeAdapters();
-        loading.clear();
-        for (const nodeId of applied.keys()) scopedScenes.delete(nodeId);
-        applied.clear();
-      };
-    },
-    { name: MODEL_SCENE_PLUGIN_ID, inject: ["canvasRemote", "canvasState", "compositeAssets"] },
-  );
-}
-
-function createMicScheduler(): (run: () => void) => void {
-  return (run) => {
-    const enqueue =
-      typeof queueMicrotask === "function"
-        ? queueMicrotask
-        : (task: () => void) => void Promise.resolve().then(task);
-    enqueue(run);
-  };
-}
-
-async function applyCommitted(input: {
-  canvasId: string;
-  scenes: ModelSceneStore;
-  getCanvas: () => ServerCanvas | null;
-  compositeAssets: CompositeAssetRegistry;
-  applied: Map<string, string>;
-  loading: NodeResourceLoading;
-  apply: (
-    nodeId: string,
-    source: string,
-    version: unknown,
-    data: CanvasNodeData | undefined,
-    nodeType: string,
-  ) => Promise<string>;
-  active: () => boolean;
-  reports: ReturnType<typeof createModelScriptReports>;
-  yieldToBrowser: () => Promise<void>;
-}): Promise<void> {
-  const canvas = input.getCanvas();
-  if (!canvas) return;
-  const currentIds = new Set(canvas.document.nodes.map(node => node.id));
-  input.compositeAssets.retain(currentIds);
-  for (const nodeId of input.applied.keys()) if (!currentIds.has(nodeId)) { input.applied.delete(nodeId); input.scenes.delete(nodeId); }
-  let batchStarted = performance.now();
-  for (const node of canvas.document.nodes) {
-    if (!input.active()) return;
-    // Awaiting an already resolved apply only yields to microtasks, not painting.
-    // Bound each batch between nodes without changing the serial resource ownership.
-    if (performance.now() - batchStarted >= 8) {
-      await input.yieldToBrowser();
-      if (!input.active()) return;
-      batchStarted = performance.now();
-    }
-    // Source or deletion can change during preparation/yield. Re-read committed data.
-    const latest = input.getCanvas();
-    if (!latest?.document.nodes.some((candidate) => candidate.id === node.id))
-      continue;
-    const latestNode = latest.document.nodes.find(candidate => candidate.id === node.id)!;
-    if (latestNode.type !== "model3d" && latestNode.type !== "composite-asset") {
-      input.applied.delete(node.id);
-      input.scenes.delete(node.id);
-      input.compositeAssets.setProjection(node.id, null);
-      continue;
-    }
-    const data = latest.nodeData[node.id] as CanvasNodeData | undefined;
-    const composite = latestNode.type === "composite-asset";
-    const source =
-      typeof data?.modelScript === "string" ? data.modelScript : "";
-    // 普通模型空源码无内容；片场 items-only 不再有顶层源码，空 items 也是合法内容。
-    if (!composite && source === "") {
-      input.applied.delete(node.id);
-      input.scenes.delete(node.id);
-      continue;
-    }
-    // 版本作为执行键的一部分：同一 source 但版本变化也要重新执行。
-    // 片场执行键覆盖独立根 + 完整内部集合身份，使集合变化触发正确资源失效。
-    const executionKey = modelExecutionKey(input.compositeAssets, latest, node.id);
-    if (executionKey === undefined) continue;
-    if (input.applied.get(node.id) === executionKey) continue;
-    const load = node.type === "model3d" ? input.loading.track(node.id, executionKey) : null;
-    if (load) input.loading.setLoading(load, true);
-    // 单节点失败隔离：一个节点执行失败不阻止其它节点，也不停止 2D 画布。
-    let status: string;
-    try {
-      status = await input.apply(node.id, source, data?.modelScriptVersion, data, latestNode.type);
-    } catch (error) {
-      status = `fail:execute:${error instanceof Error ? error.message : String(error)}`;
-    }
-    if (!input.active()) return;
-    const after = input.getCanvas();
-    const afterNode = after?.document.nodes.find(candidate => candidate.id === node.id);
-    const afterKey = modelExecutionKey(input.compositeAssets, after, node.id);
-    if (afterNode?.type !== latestNode.type || afterKey !== executionKey) {
-      if (load) input.loading.setLoading(load, false);
-      input.scenes.delete(node.id);
-      input.compositeAssets.setProjection(node.id, null);
-      continue;
-    }
-    if (load) input.loading.setLoading(load, false);
-    // Failed identities are terminal until source or adapter generation changes.
-    input.applied.set(node.id, executionKey);
-    const reportStatus = status.startsWith("ok") ? "ok" : "failed";
-    // Reloading a saved canvas should not write back outcomes already acknowledged.
-    if (!input.reports.hasPending(node.id) &&
-        after?.nodeData[node.id]?.modelScriptStatus === reportStatus &&
-        (reportStatus === "ok"
-          ? !after.nodeData[node.id]?.modelScriptError
-          : after.nodeData[node.id]?.modelScriptError === status)) continue;
-    input.reports.enqueue({
-      canvasId: input.canvasId,
-      nodeId: node.id,
-      status: reportStatus,
-      ...(reportStatus === "ok" ? {} : { message: status }),
-    }, () => input.active() &&
-      input.applied.get(node.id) === executionKey &&
-      modelExecutionKey(input.compositeAssets, input.getCanvas(), node.id) === executionKey);
-  }
-}
-
-function modelExecutionKey(registry: CompositeAssetRegistry, canvas: ServerCanvas | null, nodeId: string): string | undefined {
-  const node = canvas?.document.nodes.find(candidate => candidate.id === nodeId);
-  if (!node || (node.type !== "model3d" && node.type !== "composite-asset")) return undefined;
-  const data = canvas?.nodeData[nodeId];
-  const source = typeof data?.modelScript === "string" ? data.modelScript : "";
-  if (node.type !== "composite-asset") return `${String(data?.modelScriptVersion)}:${source}`;
-  const adapter = registry.resolve(canvas, nodeId);
-  return adapter && data
-    ? JSON.stringify([canvas!.id, adapter.extensionId, registry.generation(adapter.extensionId), data.extensionContentRef, adapter.executionKey(data, nodeId)])
-    : `unavailable:${String(data?.extensionId)}:${JSON.stringify(data?.scenePlacement)}:${String(data?.modelScriptVersion)}:${source}`;
+        void drain().finally(() => { running = false; if (rerun) { rerun = false; trigger(); } });
+      });
+    };
+    const stopCanvas = ctx.canvasState.subscribe(trigger);
+    const stopAdapters = ctx.compositeAssets.subscribe(trigger);
+    const stopRegistry = registry.subscribe(trigger);
+    const provider: ModelScenesProvider = {
+      getResources: () => scenes.snapshot(), isLoading: loading.isLoading,
+      subscribe: listener => { const a = scenes.subscribe(listener), b = loading.subscribe(listener); return () => { a(); b(); }; }
+    };
+    ctx.provide(MODEL_SCENES_SERVICE as never, provider as never);
+    trigger();
+    return () => {
+      stopped = true; reports.dispose(); stopCanvas(); stopAdapters(); stopRegistry(); loading.clear();
+      for (const id of applied.keys()) discard(id);
+    };
+  }, { name: MODEL_SCENE_PLUGIN_ID, inject: ["canvasRemote", "canvasState", "compositeAssets", "nodeImplementations"] });
 }
 
 export async function applyWithBevy(

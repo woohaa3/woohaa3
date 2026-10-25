@@ -405,6 +405,7 @@ export function installInteractionController(options: InteractionControllerOptio
 
   /** 指针 hover 与视频播放跟踪（实现见 `interaction-hover.ts`）。 */
   const hover = createHoverTracker({
+    nodeCapabilities: options.nodeCapabilities,
     state,
     historyAt: nodeId => {
       const node = frameSubmission.renderedNode(nodeId);
@@ -524,6 +525,10 @@ export function installInteractionController(options: InteractionControllerOptio
   frameLoop.start();
 
   // 供 E2E/排障观察（生产无副作用）；change: 2026-09-28-split-frontend-god-plugins 后续拆分。
+  const unsubscribeCapabilities = options.nodeCapabilities?.subscribe(() => {
+    if (state.gesture.kind === "resize" || state.gesture.kind === "model-preview") cancelTransientGesture();
+    schedule("node-capabilities");
+  });
   const unsubscribePreview = modelPreviewStore.subscribe(() => schedule("model-preview"));
   const disposeDiagnostics = installCanvasDiagnostics({ core, target, state, activeViewport, setSelection, model,
     renderError: () => renderError,
@@ -603,6 +608,7 @@ export function installInteractionController(options: InteractionControllerOptio
       hover.forgetPointer();
       hoverNodeStore.invalidatePlayback();
       frameLoop.dispose();
+      unsubscribeCapabilities?.();
       unsubscribePreview();
       modelPreviewStore.clear();
       viewportTransition.cancel();

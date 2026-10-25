@@ -63,7 +63,7 @@ pub(crate) fn draw_film_set_scope(
         super::dash::dashed_rounded_rect(geometry, aabb.x, aabb.y, aabb.width, aabb.height, 8., 1.5, base_z, color);
     }
     // 选中时绘制范围抓手：8 个方形（四顶点 + 四边中点）；普通矩形保留右下角方形。
-    if selected {
+    if selected && node.resizable {
         draw_scope_grip(geometry, theme, &super::scope::grip(&scope), base_z);
     }
     Some(draw_scope_title(geometry, theme, node, base_z))

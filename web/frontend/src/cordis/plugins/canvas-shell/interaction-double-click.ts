@@ -11,9 +11,7 @@ import { modelBounds, type FocusHitResult } from "./model-focus-session.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import type { InteractionCore } from "./interaction-core.js";
-import { isModelNodeType } from "./model-focus-targets.js";
-import { focusKindForModelNodeType } from "./model-focus-targets.js";
-import { isModelPreviewNodeType, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver, shotPreviewOwnershipOf } from "@woohaa3/contracts";
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
@@ -31,6 +29,17 @@ export function createDoubleClickHandler(core: InteractionCore) {
     const cardNodeId = hit && (hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope") ? hit.nodeId : null;
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState) return;
+    const resolver = options.nodeCapabilities ?? builtinNodeCapabilityResolver;
+    const contextOf = (id: string) => {
+      const node = canvasState.document.nodes.find(node => node.id === id);
+      return node ? { canvas: canvasState, node, data: canvasState.nodeData[id] } : null;
+    };
+    const capabilitiesOf = (id: string) => {
+      const context = contextOf(id); return context ? resolver.resolve(context) : null;
+    };
+    const focusKind = (id: string) => {
+      const context = contextOf(id); return context ? resolver.resolve(context).focus?.kind(context) : null;
+    };
     const cardEntry = cardNodeId
       ? canvasState.document.nodes.find((candidate) => candidate.id === cardNodeId)
       : undefined;
@@ -52,11 +61,11 @@ export function createDoubleClickHandler(core: InteractionCore) {
     }
 
     const child = cardEntry ? options.compositeAssets?.children(canvasState).get(cardEntry.id) : null;
-    if (child?.kind === "container" && child.focusOwner) {
+    if (child?.kind === "container" && child.focusOwner && focusKind(child.ownerNodeId)) {
       event.preventDefault();
       setSelection([child.ownerNodeId]);
       options.onModelFocusIntent?.({ type: "enter", nodeId: child.ownerNodeId,
-        kind: focusKindForModelNodeType("composite-asset", canvasState.nodeData[child.ownerNodeId]) });
+        kind: focusKind(child.ownerNodeId)! });
       return;
     }
 
@@ -64,18 +73,18 @@ export function createDoubleClickHandler(core: InteractionCore) {
     // 命中由 Rust 相机/bounds/placement 派生（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
     // 没有命中任何卡片，或命中的就是模型卡片时才尝试模型 picking。
     // 射线未打中网格时，双击模型卡片本身仍然进入：网格画在卡片下方，常被底部面板挡住。
-    if (!cardNodeId || (cardEntry && isModelNodeType(cardEntry.type))) {
+    if (!cardNodeId || (cardEntry && !!focusKind(cardEntry.id))) {
       const surface = surfaceSize();
       const runtime = options.getRuntime();
       const generation = runtime?.interactionGeneration?.() ?? 0;
       const pick = runtime?.queryModelPick
         ? runtime.queryModelPick({ generation, x: point.x, y: point.y, width: surface.width, height: surface.height })
         : ({ ok: false as const, reason: "unavailable" as const });
-      const meshHit: FocusHitResult | null = pick.ok && pick.value && !(cardEntry && isModelPreviewNodeType(cardEntry.type))
+      const meshHit: FocusHitResult | null = pick.ok && pick.value && !(cardEntry && !!capabilitiesOf(cardEntry.id)?.modelPreview)
         ? { ok: true, nodeId: pick.value.nodeId, target: pick.value.target, radius: pick.value.radius }
         : null;
       // 卡片回退：射线未命中网格但指针在模型卡片上时，仍进入聚焦（网格常被底部面板遮挡）。
-      const cardFallback: FocusHitResult | null = !meshHit && cardEntry && isModelNodeType(cardEntry.type)
+      const cardFallback: FocusHitResult | null = !meshHit && cardEntry && !!focusKind(cardEntry.id)
         ? (() => {
             const targets = options.getModelFocusTargets?.() ?? [];
             const workingCanvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? canvasState;
@@ -90,14 +99,14 @@ export function createDoubleClickHandler(core: InteractionCore) {
       const canonicalType = resolved !== null
         ? canvasState.document.nodes.find((candidate) => candidate.id === resolved.nodeId)?.type
         : undefined;
-      const canonical = resolved !== null && canonicalType !== undefined && isModelNodeType(canonicalType);
+      const canonical = resolved !== null && canonicalType !== undefined && !!focusKind(resolved.nodeId);
       if (resolved && canonical && canonicalType !== undefined) {
         event.preventDefault();
         setSelection([resolved.nodeId]);
         // 聚焦入口统一经 Canvas Navigation（design D7）；缺省回落到直接控制器调用（测试）。
         // 复合资产类别按严格业务身份（type + extensionId）选择工作区 kind：片场走宿主 model
         // 编辑器，炉体等其他业务走 extension 工作区（change: 2026-10-11-extract-film-set-extension，D11）。
-        const kind = focusKindForModelNodeType(canonicalType, canvasState.nodeData?.[resolved.nodeId]);
+        const kind = focusKind(resolved.nodeId)!;
         if (options.onModelFocusIntent) {
           options.onModelFocusIntent({ type: "enter", nodeId: resolved.nodeId, kind });
           return;

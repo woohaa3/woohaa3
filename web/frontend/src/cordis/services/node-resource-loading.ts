@@ -2,7 +2,7 @@ import type { CanvasRenderScene } from "@woohaa3/contracts";
 
 /** 一次资源加载的身份；换源后旧身份不能结束新资源的加载提示。 */
 export type NodeResourceLoad = { readonly nodeId: string; readonly source: string; loading: boolean };
-export type NodeResourceLoadingReader = { isLoading?(nodeId: string): boolean };
+export type NodeResourceLoadingReader = { isLoading?(nodeId: string): boolean; isResourceNode?(node: CanvasRenderScene["nodes"][number]): boolean };
 
 /** 图片解码、视频首帧/缓冲和模型准备共用的浏览器加载状态，不写规范画布。 */
 export class NodeResourceLoading {
@@ -60,7 +60,6 @@ export function applyNodeResourceLoading(
   readers: Partial<Record<"image" | "video" | "model", NodeResourceLoadingReader | null>>
 ): void {
   for (const node of scene.nodes) {
-    const reader = readers[node.type as keyof typeof readers];
-    if (!node.busy && reader?.isLoading?.(node.id)) node.mediaLoading = true;
+    if (!node.busy && Object.entries(readers).some(([kind, reader]) => reader?.isLoading?.(node.id) && (reader.isResourceNode?.(node) ?? (node.model || ["image", "video", "model"].includes(node.type) || (kind === "model" && !!node.modelPreview))))) node.mediaLoading = true;
   }
 }

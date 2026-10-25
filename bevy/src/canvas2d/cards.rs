@@ -1,5 +1,5 @@
 //! Ordinary card drawing. Groups and film scopes keep their shared overlay order.
-use super::layout::{RESIZE_HANDLE_SIZE, port, shortened, shows_content};
+use super::layout::{port, shortened, shows_content};
 use super::{geometry::Geometry, labels::Label};
 use crate::{
     protocol::{GraphNode, NodeHover},
@@ -202,32 +202,8 @@ pub(super) fn draw_decorations(
             theme.token_u32("canvasNodeSurface"),
         );
     }
-    if node.resizable {
-        // 右下角 resize 抓手：与 contracts.`bevyResizeHandleRect` 共用尺寸
-        // （贴住右下角内缘的 RESIZE_HANDLE_SIZE 正方形）。仅单选节点绘制。
-        let handle_right = x + width;
-        let handle_bottom = y + height;
-        let handle_left = handle_right - RESIZE_HANDLE_SIZE;
-        let handle_top = handle_bottom - RESIZE_HANDLE_SIZE;
-        geometry.polygon(
-            &[
-                Vec2::new(handle_right, handle_bottom),
-                Vec2::new(handle_left, handle_bottom),
-                Vec2::new(handle_right, handle_top),
-            ],
-            z + 0.006,
-            theme.token_u32("canvasResizeHandle"),
-        );
-        // 斜纹把手：两条与对角平行的短线，提示可拖拽方向。
-        for offset in [5.0_f32, 10.0] {
-            geometry.line(
-                Vec2::new(handle_left + offset, handle_bottom - 2.5),
-                Vec2::new(handle_right - 2.5, handle_top + offset),
-                1.0,
-                z + 0.007,
-                theme.token_u32("canvasResizeHandleStripe"),
-            );
-        }
+    if selected && node.resizable {
+        draw_resize_grip(geometry, theme, node, z + 0.005);
     }
     // 端点：静止时 MUST NOT 绘制常驻图形；仅指针悬停该节点时在左右中点显示「+」圆钮
     // （change: add-node-endpoint-hover）。指针落在某侧端点命中区时该侧用节点强调色。
@@ -263,4 +239,11 @@ pub(super) fn draw(
     let labels = draw_static(geometry, theme, node, index);
     draw_decorations(geometry, theme, node, selected, hover, index);
     labels
+}
+
+/// Shared rectangle grip; interaction uses the same layout::resize_rect.
+pub(super) fn draw_resize_grip(geometry: &mut Geometry, theme: &ThemeResource, node: &GraphNode, z: f32) {
+    let (x, y, w, h) = super::layout::resize_rect(node.x, node.y, node.width, node.height);
+    super::film_set::draw_scope_grip(geometry, theme,
+        &super::scope::ScopeGrip::Rect(super::scope::ScopeRect { x, y, width: w, height: h }), z);
 }

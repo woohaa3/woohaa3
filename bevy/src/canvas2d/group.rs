@@ -53,6 +53,7 @@ pub(crate) fn draw_group(
     selected: bool,
 ) -> (String, Vec2, f32, u32) {
     let (x, y, width, height) = (node.x, node.y, node.width, node.height);
+    if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, GROUP_Z + 0.03); }
     // 选中态用更强的虚线框颜色表达，而不是铺一层不透明选中底：容器铺底会盖住成员
     // （change: fix-group-and-marquee-preview）。
     let border = if selected {

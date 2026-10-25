@@ -52,7 +52,7 @@ pub(crate) const RICH_NODE_HEIGHT: f32 = 116.0;
 /// 节点是否有内容区（富内容卡片且非 3D 模型节点）。运行中进度环也复用该门禁
 /// （change: add-node-running-progress）：只有会显示内容区的节点才用进度环替代它。
 pub(crate) fn shows_content(node: &GraphNode) -> bool {
-    node.height > RICH_NODE_HEIGHT && (node.kind != "model" || node.model_preview.is_some())
+    node.height > RICH_NODE_HEIGHT && node.composite_asset.is_none() && node.group.is_none()
 }
 
 /// 节点内容区矩形 `(x, y, width, height)`：左右与底部各留 16px 内边距，顶部为标签行

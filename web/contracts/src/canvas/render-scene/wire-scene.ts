@@ -68,7 +68,7 @@ export * from "./wire-shot-preview.js";
  *   已声明**：payload 未驻留是合法 cold/preparing 状态，重型 IR 由需求 lease 与预算淘汰。
  *   旧 renderer 会把 cold 引用当作未知资源并拒绝整帧，因此必须同步提升能力版本。
  */
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v26" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v27" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {

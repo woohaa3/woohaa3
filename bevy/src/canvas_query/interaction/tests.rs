@@ -45,7 +45,7 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         busy: false,
         texture: false,
         media_loading: false,
-        resizable: false,
+        resizable: true,
         ghost: false,
         card_label: None,
         group: None,
@@ -652,4 +652,30 @@ state: "succeeded".into(),
             node_id: "n".into()
         })
     );
+}
+
+#[test]
+fn group_resize_uses_accepted_capability_and_shared_rect_through_selection_and_positions() {
+    use super::snapshot::{apply_selection, build_snapshot};
+    let mut group = group("g", 0., 0., 400., 300., 0);
+    group.resizable = false;
+    let mut input = scene(vec![group], vec![]);
+    input.selection.nodes = vec!["g".into()];
+    let mut snapshot = build_snapshot(&input, 1);
+    apply_selection(&mut snapshot, &input.selection.nodes);
+    assert!(snapshot.nodes[0].resize.is_none());
+    input.nodes[0].resizable = true;
+    let mut snapshot = build_snapshot(&input, 2);
+    apply_selection(&mut snapshot, &input.selection.nodes);
+    let rect = crate::canvas_query::layout::resize_rect(0., 0., 400., 300.);
+    assert_eq!(snapshot.nodes[0].resize, Some(crate::canvas_query::scope::ScopeGrip::Rect(crate::canvas_query::scope::ScopeRect { x: rect.0, y: rect.1, width: rect.2, height: rect.3 })));
+    let generation = accept_scene(&input);
+    assert!(matches!(point_query(generation, 390., 290., 1., None).hit, Some(PointHit::Resize { .. })));
+    apply_selection(&mut snapshot, &["g".into(), "other".into()]);
+    assert!(snapshot.nodes[0].resize.is_none());
+    apply_selection(&mut snapshot, &["g".into()]);
+    assert!(snapshot.nodes[0].resize.is_some());
+    input.nodes[0].x = 100.; input.nodes[0].y = 50.;
+    let generation = accept_scene(&input);
+    assert!(matches!(point_query(generation, 490., 340., 1., None).hit, Some(PointHit::Resize { .. })));
 }

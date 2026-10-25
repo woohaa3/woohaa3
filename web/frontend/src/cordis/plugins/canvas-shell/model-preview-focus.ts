@@ -1,8 +1,8 @@
+import { builtinNodeCapabilityResolver, type NodeCapabilityResolver } from "@woohaa3/contracts";
 import {
   autoFrameDistance,
   clampDistance,
   FOCUS_ZOOM_OUT_RADIUS_MULTIPLIER,
-  isModelPreviewNodeType,
   MODEL_FOCUS_FOV,
   type ServerCanvas,
 } from "@woohaa3/contracts";
@@ -21,12 +21,12 @@ function facts(targets: readonly FocusTargetInput[], nodeId: string) {
     !target ||
     target.nonCanonical ||
     !node ||
-    !isModelPreviewNodeType(node.type)
+    !(target.capabilities ?? builtinNodeCapabilityResolver.resolve({ canvas: target.canvas, node, data: target.canvas.nodeData[node.id] })).modelPreview
   )
     return null;
   const bounds = modelBounds(target);
   if (!bounds) return null;
-  const size = renderedModelNodeSize(node);
+  const size = renderedModelNodeSize(node, undefined, target.capabilities);
   const width = Math.min(1024, Math.max(1, Math.round(size.width - 32)));
   const height = Math.min(1024, Math.max(1, Math.round(size.height - 68)));
   return {
@@ -115,8 +115,9 @@ export function syncPreviewObserver(
 export function shouldReframeOnInitialLayout(
   canvas: ServerCanvas | null | undefined,
   nodeId: string,
+  resolver: NodeCapabilityResolver = builtinNodeCapabilityResolver,
 ): boolean {
   const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return true;
-  return !isModelPreviewNodeType(node.type);
+  return !resolver.resolve({ canvas: canvas!, node, data: canvas!.nodeData[node.id] }).modelPreview;
 }
