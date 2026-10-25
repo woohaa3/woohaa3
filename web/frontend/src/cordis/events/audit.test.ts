@@ -45,7 +45,12 @@ function walk(dir: string): string[] {
 /** 事件审计扫描集：宿主 cordis 树 + extension 前端生产源码。 */
 function scanFiles(): string[] {
   const hostFiles = walk(CORDIS_ROOT);
-  const extensionFiles = walk(EXTENSIONS_ROOT).filter((file) => file.includes(`${path.sep}src${path.sep}frontend${path.sep}`));
+  // extension 前端代码有两种布局：`src/frontend/` 入口，以及 film-set 这类按领域拆分的
+  // `src/<domain>/browser/` 浏览器侧实现；两者都发布前端事件，必须一起扫描。
+  const extensionFiles = walk(EXTENSIONS_ROOT).filter((file) => {
+    const normalized = file.split(path.sep).join("/");
+    return normalized.includes("/src/frontend/") || (normalized.includes("/src/") && normalized.includes("/browser/"));
+  });
   return [...hostFiles, ...extensionFiles];
 }
 

@@ -17,6 +17,7 @@ import { createAppPageRegistry } from "./extension-entry/app-pages.js";
 import { createFakeExtensionPageEntry } from "./test-support/app-pages.js";
 import { ALERT_DIALOG_ID } from "./services/dialogs/alert-dialog.js";
 import { MEDIA_PREVIEW_DIALOG_ID } from "./plugins/media-preview/media-preview.js";
+import { TEXT_PREVIEW_DIALOG_ID } from "./plugins/media-preview/text-preview.js";
 import { PASTE_REPLACE_DIALOG_ID } from "./plugins/paste-import/replace-dialog.js";
 import { VIDEO_EDIT_DIALOG_ID, VIDEO_FRAME_CAPTURE_DIALOG_ID } from "./plugins/video-capture/ids.js";
 import { CANVAS_HISTORY_DIALOG_ID } from "./plugins/node-history/plugin.js";
@@ -92,6 +93,7 @@ describe("真实平台 + 静态清单", () => {
         SNIPPET_TAG_DELETE_DIALOG_ID,
         GENERATION_TRACE_DIALOG_ID,
         SETTINGS_DIALOG_ID,
+        TEXT_PREVIEW_DIALOG_ID,
         VIDEO_FRAME_CAPTURE_DIALOG_ID,
         VIDEO_EDIT_DIALOG_ID
       ].sort()

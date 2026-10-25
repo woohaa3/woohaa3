@@ -20,12 +20,12 @@ describe("Frontend Event Catalog（任务 2.1）", () => {
       "task.activity.started",
       "task.activity.updated",
       "ui.media-preview.open-requested",
-      "ui.text-preview.open-requested",
       "ui.node-download.save-requested",
       "ui.node-history.open-requested",
       "ui.node-history.switch-requested",
       "ui.shot-preview.enter-requested",
       "ui.task-activity.open-requested",
+      "ui.text-preview.open-requested",
       "ui.video-frame-capture.open-requested"
     ]);
     for (const name of FRONTEND_EVENT_NAMES) {
