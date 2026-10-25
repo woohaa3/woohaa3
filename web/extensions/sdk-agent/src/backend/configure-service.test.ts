@@ -13,10 +13,8 @@ function fixture() {
   const documents = createInMemoryDocumentStore(["sdk-agent"]).forExtension(
     "sdk-agent",
   )!;
-  const service = createConnectionService({
-    documents,
-    secrets: createInMemorySecretStore(),
-  });
+  const secrets = createInMemorySecretStore();
+  const service = createConnectionService({ documents, secrets });
   const fetchImpl = vi.fn<typeof fetch>(
     async () =>
       new Response(
@@ -35,7 +33,7 @@ function fixture() {
     baseUrl: "https://api.example/v1/chat/completions",
     secret: "sk-private",
   };
-  return { service, fetchImpl, deployment, input };
+  return { service, secrets, fetchImpl, deployment, input };
 }
 describe("地址与 Key 一步设置", () => {
   it("接受主流 Base URL 与完整接口地址", () => {
@@ -90,6 +88,7 @@ describe("地址与 Key 一步设置", () => {
     await configureModelService(service, deployment, "u1", {
       ...input,
       secret: undefined,
+      connectionId: records[0].connectionId,
     });
     expect(await service.list("u1")).toHaveLength(1);
     expect(
@@ -149,6 +148,7 @@ describe("地址与 Key 一步设置", () => {
     const second = await configureModelService(service, deployment, "u1", {
       ...input,
       models: ["my-model"],
+      connectionId: (await service.list("u1"))[0].connectionId,
     });
     expect(second).toMatchObject({
       status: 200,
@@ -206,12 +206,9 @@ describe("地址与 Key 一步设置", () => {
     ).toMatchObject({ status: 200, body: { modelsError: expect.any(String) } });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
-  it("首次保存凭据失败清理空配置", async () => {
-    const { service, deployment, input } = fixture();
-    vi.spyOn(service, "saveCredential").mockResolvedValue({
-      ok: false,
-      error: { code: "storage-failed", message: "存储不可用" },
-    });
+  it("首次保存凭据失败不发布空配置", async () => {
+    const { service, secrets, deployment, input } = fixture();
+    vi.spyOn(secrets, "write").mockReturnValue({ ok: false, code: "storage-failed", message: "存储不可用" });
     expect(
       await configureModelService(service, deployment, "u1", input),
     ).toMatchObject({ status: 500 });

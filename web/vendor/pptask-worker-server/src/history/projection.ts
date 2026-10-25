@@ -170,7 +170,8 @@ export async function createPptaskExecutionHistory(
       && (previous.state === 'succeeded' || previous.state === 'failed' || previous.state === 'cancelled');
     // Scheduling may set the initial `queued` state and settle terminal
     // outcomes, but never overrides an execution-side terminal state.
-    const state: ExecutionState = previous === undefined
+    const sourceBlocked = !!(event.detail && typeof event.detail === 'object' && (event.detail as Record<string, unknown>).sourceStale);
+    const state: ExecutionState = sourceBlocked && !executionWasTerminal ? 'pending' : previous === undefined
       ? 'queued'
       : schedulingTerminal && !executionWasTerminal
         ? schedulingTerminal
@@ -210,7 +211,7 @@ export async function createPptaskExecutionHistory(
       consecutiveFailures: event.consecutiveFailures ?? previous?.consecutiveFailures,
       result: previous?.result,
       error: previous?.error
-        ?? (schedulingTerminal === 'failed' && schedulingMessage !== undefined
+        ?? ((schedulingTerminal === 'failed' || sourceBlocked) && schedulingMessage !== undefined
           ? { message: schedulingMessage }
           : undefined),
       createdAt: previous?.createdAt ?? event.at,

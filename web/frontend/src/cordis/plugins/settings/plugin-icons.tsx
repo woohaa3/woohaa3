@@ -13,6 +13,7 @@
  * 新增白名单名字时这里必须同步补一条映射，否则 typecheck 失败。
  */
 import type { ComponentType } from "react";
+import "./plugin-icons.css";
 import { isPluginIconAsset, type PluginIconName } from "@woohaa3/contracts";
 import { appPublicUrl } from "../../services/app-base-path.js";
 import {
@@ -102,7 +103,7 @@ export function PluginIconMark({ icon, size = 18, testId }: { icon: string | und
       aria-hidden="true"
     >
       {resolved.kind === "image" ? (
-        <img className="plugin-card__icon-image" src={appPublicUrl(resolved.src)} alt="" />
+        <img className="plugin-card__icon-image" src={appPublicUrl(resolved.src)} width={30} height={30} alt="" />
       ) : (
         <resolved.Icon size={size} />
       )}

@@ -79,8 +79,32 @@ export function createOAuthAgentExtension(options: OAuthAgentExtensionOptions = 
       const conversationOwnerIdFor = options.conversationOwnerIdFor ?? defaultConversationOwnerIdFor;
       const conversationAdapter = createChatGptConversationAdapter({ service, ownerIdFor: conversationOwnerIdFor });
       host.registerCapability({ id: agentConversationAdapterCapabilityId(CHATGPT_CONVERSATION_ADAPTER_ID), value: conversationAdapter });
-      host.registerCapability({ id: agentConnectionProviderCapabilityId(OAUTH_AGENT_PLUGIN_ID),
-        value: createOAuthConnectionProvider({ service, adapter: conversationAdapter, ownerIdFor: conversationOwnerIdFor }) });
+      const connectionProvider = createOAuthConnectionProvider({ service, adapter: conversationAdapter, ownerIdFor: conversationOwnerIdFor });
+      host.registerCapability({ id: agentConnectionProviderCapabilityId(OAUTH_AGENT_PLUGIN_ID), value: connectionProvider });
+      // Only project a model directory actually returned for this owner and authorization epoch.
+      const observedModels = new Map<string, { epoch: number; models: readonly import("@woohaa3/contracts").AgentModelView[] }>();
+      const readModels = conversationAdapter.models;
+      conversationAdapter.models = async input => {
+        const before = await connectionProvider.listConnections({ owner: input.owner });
+        const result = await readModels(input);
+        const after = await connectionProvider.listConnections({ owner: input.owner });
+        if (!result.error && before[0] && after[0]?.credentialEpoch === before[0].credentialEpoch && after[0].status.credential.state === "ready") observedModels.set(input.owner, { epoch: after[0].credentialEpoch, models: result.models });
+        return result;
+      };
+      const oauthSnapshot = async (owner: string) => {
+        const connections = await connectionProvider.listConnections({ owner });
+        return connections.map(connection => ({ legacyId: connection.connectionId, scope: "personal" as const, kind: "oauth" as const,
+          name: connection.name, endpoints: [], capabilities: (observedModels.get(owner)?.epoch === connection.credentialEpoch ? observedModels.get(owner)!.models : []).flatMap(model => [
+            { purpose: "discussion" as const, protocol: "provider:chatgpt-oauth" as const, modelId: model.id, imageInput: false, evidence: "adapter" as const },
+            ...(connection.capabilities.tools ? [{ purpose: "target-execution" as const, protocol: "provider:chatgpt-oauth" as const, modelId: model.id, imageInput: false, evidence: "adapter" as const }] : []),
+          ]),
+          bindings: [{ bindingId: `oauth:${connection.connectionId}`, extensionId: OAUTH_AGENT_PLUGIN_ID, consumer: "oauth" as const,
+            consumerId: connection.connectionId, purposes: ["discussion" as const, "target-execution" as const], modelKeys: (observedModels.get(owner)?.epoch === connection.credentialEpoch ? observedModels.get(owner)!.models : []).map(model => model.id) }],
+          enabled: connection.status.credential.state === "ready", removed: false, locked: false,
+          credentialConfigured: connection.credentialConfigured ?? false, configRevision: connection.configRevision, credentialEpoch: connection.credentialEpoch }));
+      };
+      const releaseSource = host.services.serviceConnections?.registerSource({ id: "chatgpt", scope: "personal", list: oauthSnapshot,
+        get: async (owner, id) => (await oauthSnapshot(owner)).find(source => source.legacyId === id) ?? null });
 
       // 显式宿主 identity port（任务 1.3 / design D2）：把本插件自身可信的本地 HttpOnly 会话
       // 复用为宿主会话 owner，避免宿主另造浏览器 ID。生产 principal 模式返回 null。
@@ -138,6 +162,7 @@ export function createOAuthAgentExtension(options: OAuthAgentExtensionOptions = 
 
       return {
         dispose: async () => {
+          releaseSource?.();
           await service.close();
         }
       };
@@ -161,6 +186,7 @@ export function oauthProviderRouteRegistrations(provider: OAuthAgentProvider): O
     // 生成不设总时长／输出上限；心跳维持连接，断连和显式取消仍会中止。
     { route: `${prefix}/generate`, method: "POST", purpose: "new-work", streamBudget: { heartbeatMs: 15_000, deadlineMs: 0, maxEvents: Number.POSITIVE_INFINITY, maxBytes: Number.POSITIVE_INFINITY } },
     { route: `${prefix}/cancel`, method: "POST", purpose: "work-control" },
+    { route: `${prefix}/authorize/cancel`, method: "POST", purpose: "auth-transaction" },
     { route: `${prefix}/authorize/start`, method: "POST", purpose: "auth-transaction" },
     { route: `${prefix}/authorize/complete`, method: "POST", purpose: "auth-transaction" },
     { route: `${prefix}/disconnect`, method: "POST", purpose: "auth-transaction" },

@@ -23,6 +23,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   AGENT_CONVERSATION_BASE_PATH,
+  APPLICATION_EXTENSION_LOAD_ACTION,
   resolveRequestDataContext,
   addAppBasePath,
   WOOHAA3_PROTOCOL_VERSION,
@@ -51,6 +52,9 @@ export type AgentConversationApiDependencies = {
    * 来源连接发现（change: 2026-10-16-...，任务 2.1/2.3）。缺失时 `GET /connections` 返回空。
    */
   connections?: AgentConnectionRegistry;
+  accessEnforcer?: import("../extensions/access-enforcement.js").AccessEnforcer;
+  serviceConnectionProviders?: () => readonly import("@woohaa3/contracts").GenerationProvider[];
+  serviceConnections?: import("../service-connections/registry.js").ServiceConnectionRegistry | null;
 
   /**
    * 内置 MCP 真实发现（change: 2026-10-12-add-agent-conversation-panel，任务 3.1/3.2）。
@@ -137,6 +141,84 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
             nodeId: url.searchParams.get("nodeId") ?? undefined, cursor: url.searchParams.get("cursor") ?? undefined }));
         } catch { return badRequest(res, "无效组执行分页游标"); }
         return true;
+      }
+      if (suffix === "service-connections" && method === "GET") {
+        let administrator = deps.accessRuntime?.enabled === false;
+        if (!administrator && deps.accessEnforcer) {
+          try { await deps.accessEnforcer.assertAction(principal, APPLICATION_EXTENSION_LOAD_ACTION); administrator = true; } catch { /* Read-only shared view. */ }
+        }
+        const actor = { owner, administrator, canUseSite: true };
+        sendJson(res, 200, { connections: await deps.serviceConnections?.list(actor) ?? [], duplicates: await deps.serviceConnections?.suspectedDuplicates(actor) ?? [], providers: (deps.serviceConnectionProviders?.() ?? []).filter(provider => provider.serviceConnectionFactory).map(provider => ({ providerId: provider.providerId, protocols: provider.serviceConnectionFactory!.protocols, models: provider.models.map(model => ({ modelId: model.providerModelId, modelKey: `${provider.providerId}:${model.providerModelId}`, type: model.modelType })) })) });
+        return true;
+      }
+      if ((suffix === "service-connections/protocol" || suffix === "service-connections/enabled") && method === "POST") {
+        const origin = firstHeader(req.headers.origin);
+        if (!sameSourceOrigin(req, origin)) { sendJson(res, 403, { code: "forbidden", message: "需要同源请求" }); return true; }
+        const input = await readJson(req, maxBytes) as Record<string, unknown>;
+        if (!input || typeof input.serviceConnectionId !== "string" || ![input.configRevision, input.credentialEpoch].every(value => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)) return badRequest(res, "来源和版本无效");
+        let administrator = deps.accessRuntime?.enabled === false;
+        if (!administrator && deps.accessEnforcer) { try { await deps.accessEnforcer.assertAction(principal, APPLICATION_EXTENSION_LOAD_ACTION); administrator = true; } catch { /* Personal source only. */ } }
+        const actor = { owner, administrator, canUseSite: true };
+        const expected = { configRevision: input.configRevision as number, credentialEpoch: input.credentialEpoch as number };
+        if (!deps.serviceConnections) return badRequest(res, "服务连接未装配");
+        if (suffix.endsWith("/enabled")) {
+          if (typeof input.enabled !== "boolean") return badRequest(res, "启用状态无效");
+          sendJson(res, 200, { connection: await deps.serviceConnections.setEnabled(actor, input.serviceConnectionId, expected, input.enabled) }); return true;
+        }
+        const endpoint = input.endpoint as Record<string, unknown> | undefined;
+        if (!endpoint || !["responses", "messages", "chat-completions", "gemini"].includes(String(endpoint.protocol)) || typeof endpoint.baseUrl !== "string" || !Array.isArray(input.models) || !input.models.every(model => typeof model === "string" && model.trim())) return badRequest(res, "协议入口和模型无效");
+        sendJson(res, 200, { connection: await deps.serviceConnections.addProtocol(actor, input.serviceConnectionId, expected, endpoint as unknown as import("@woohaa3/contracts").ServiceConnectionEndpoint, input.models as string[]) }); return true;
+      }
+      if (suffix === "service-connections/merge" && method === "POST") {
+        const origin = firstHeader(req.headers.origin);
+        if (!sameSourceOrigin(req, origin)) { sendJson(res, 403, { code: "forbidden", message: "需要同源请求" }); return true; }
+        const input = await readJson(req, maxBytes) as Record<string, unknown>;
+        const validVersion = (value: unknown) => !!value && typeof value === "object" && ["configRevision", "credentialEpoch"].every(key => { const entry = (value as Record<string, unknown>)[key]; return typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 0; });
+        if (!input || typeof input.operationId !== "string" || input.operationId.length > 128 || typeof input.retainedId !== "string" || typeof input.removedId !== "string" || !validVersion(input.retained) || !validVersion(input.removed)) return badRequest(res, "合并操作和版本无效");
+        let administrator = deps.accessRuntime?.enabled === false;
+        if (!administrator && deps.accessEnforcer) { try { await deps.accessEnforcer.assertAction(principal, APPLICATION_EXTENSION_LOAD_ACTION); administrator = true; } catch { /* Personal merge only. */ } }
+        if (!deps.serviceConnections) return badRequest(res, "服务连接未装配");
+        const connection = await deps.serviceConnections.merge({ owner, administrator, canUseSite: true }, input as unknown as Parameters<NonNullable<typeof deps.serviceConnections>["merge"]>[1]);
+        sendJson(res, 200, { connection }); return true;
+      }
+      if (suffix === "service-connections/provider" && method === "POST") {
+        const origin = firstHeader(req.headers.origin);
+        if (!sameSourceOrigin(req, origin)) { sendJson(res, 403, { code: "forbidden", message: "需要同源请求" }); return true; }
+        const input = await readJson(req, maxBytes) as Record<string, unknown>;
+        if (!input || typeof input.serviceConnectionId !== "string" || typeof input.providerId !== "string" || typeof input.modelId !== "string" || ![input.configRevision, input.credentialEpoch].every(value => typeof value === "number" && Number.isSafeInteger(value))) return badRequest(res, "来源、模型和版本无效");
+        const actor = { owner, administrator: false, canUseSite: true };
+        const source = await deps.serviceConnections?.get(actor, input.serviceConnectionId);
+        if (!source || source.scope !== "personal") return badRequest(res, "请选择自己的个人 API 来源");
+        if (source.configRevision !== input.configRevision || source.credentialEpoch !== input.credentialEpoch) { sendJson(res, 409, { code: "stale", message: "来源已变化，请重新确认" }); return true; }
+        const provider = deps.serviceConnectionProviders?.().find(provider => provider.providerId === input.providerId && provider.serviceConnectionFactory);
+        const model = provider?.models.find(model => model.providerModelId === input.modelId && model.modelType === "language");
+        const endpoint = source.endpoints.find(endpoint => provider?.serviceConnectionFactory?.protocols.includes(endpoint.protocol));
+        if (!provider || !model || !endpoint || !source.capabilities.some(capability => capability.modelId === model.providerModelId && capability.protocol === endpoint.protocol && capability.purpose === "discussion")) return badRequest(res, "此来源或 Provider 未提供所选模型的文本生成适配");
+        const connection = await deps.serviceConnections!.bind(actor, source.serviceConnectionId, { bindingId: `provider:${provider.providerId}`,
+          extensionId: provider.extensionId, consumer: "provider", consumerId: provider.providerId, purposes: ["text"], modelKeys: [...new Set([...(source.bindings.find(binding => binding.bindingId === `provider:${provider.providerId}`)?.modelKeys ?? []), `${provider.providerId}:${model.providerModelId}`])] }, source,
+          [...source.capabilities.filter(capability => !(capability.purpose === "text" && capability.protocol === endpoint.protocol && capability.modelId === model.providerModelId)),
+            { purpose: "text", protocol: endpoint.protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" }]);
+        sendJson(res, 200, { connection }); return true;
+      }
+      if (suffix === "service-connections/assistant" && method === "POST") {
+        const origin = firstHeader(req.headers.origin);
+        if (!sameSourceOrigin(req, origin)) { sendJson(res, 403, { code: "forbidden", message: "需要同源管理请求" }); return true; }
+        if (deps.accessRuntime?.enabled !== false) {
+          if (!deps.accessEnforcer) { sendJson(res, 403, { code: "forbidden", message: "管理授权不可用" }); return true; }
+          await deps.accessEnforcer.assertAction(principal, APPLICATION_EXTENSION_LOAD_ACTION);
+        }
+        const input = await readJson(req, maxBytes) as Record<string, unknown>;
+        if (!input || typeof input.serviceConnectionId !== "string" || typeof input.enabled !== "boolean" || ![input.configRevision, input.credentialEpoch].every(value => typeof value === "number" && Number.isSafeInteger(value))) return badRequest(res, "来源和冻结版本无效");
+        const actor = { owner, administrator: true, canUseSite: true };
+        const source = await deps.serviceConnections?.get(actor, input.serviceConnectionId);
+        if (!source || source.scope !== "site") return badRequest(res, "请选择站点共享来源");
+        const expected = { configRevision: input.configRevision as number, credentialEpoch: input.credentialEpoch as number };
+        const bindingId = `shared-sdk:${source.serviceConnectionId}`;
+        const connection = input.enabled ? await deps.serviceConnections!.bind(actor, source.serviceConnectionId, {
+          bindingId, extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion"],
+          modelKeys: source.capabilities.filter(capability => capability.purpose === "discussion" && capability.protocol === "chat-completions").map(capability => capability.modelId),
+        }, expected) : await deps.serviceConnections!.unbind(actor, source.serviceConnectionId, bindingId, expected);
+        sendJson(res, 200, { connection }); return true;
       }
       if (suffix === "canvas-creations" && method === "GET") {
         const canvasId = url.searchParams.get("canvasId") ?? "";
@@ -384,6 +466,10 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
       sendError(res, 404, "extension-not-found", "未知的会话路由");
       return true;
     } catch (error) {
+      if (suffix.startsWith("service-connections") && error instanceof Error && "code" in error) {
+        const code = String(error.code);
+        sendJson(res, code === "forbidden" ? 403 : code === "not-found" ? 404 : ["stale", "conflict", "locked"].includes(code) ? 409 : 400, { code, message: error.message }); return true;
+      }
       log({ event: "agent-conversation-api-error", message: error instanceof Error ? error.message : String(error), path: suffix });
       sendError(res, 500, "storage-failed", "会话服务暂时不可用");
       return true;
@@ -419,6 +505,11 @@ function badRequest(res: ServerResponse, message: string, code = "malformed-requ
  *
  * 只派生 URL，不探测外部客户端是否在线；复制地址不等于外部已连接。
  */
+function sameSourceOrigin(req: IncomingMessage, origin: string | undefined): boolean {
+  if (!origin) return false;
+  try { return new URL(origin).origin === new URL(externalMcpUrl(req, "/")).origin; } catch { return false; }
+}
+
 function externalMcpUrl(req: IncomingMessage, basePath: string): string {
   const forwardedHost = firstHeader(req.headers["x-forwarded-host"]);
   const host = forwardedHost ?? req.headers.host ?? "localhost";

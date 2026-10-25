@@ -1,3 +1,4 @@
+import { createSdkServiceSource, withServiceSources } from "./service-source.js";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createFixedEngineRuntime } from "./fixed-engine-runtime.js";
@@ -93,6 +94,10 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
         ...(host.services.secrets ? { secrets: host.services.secrets } : {})
       });
 
+      const releaseConsumer = host.services.serviceConnections?.registerConsumer({ protocols: ["responses", "messages", "chat-completions", "gemini"], purposes: ["discussion", "target-execution"] });
+      const releaseSource = host.services.serviceConnections?.registerSource(createSdkServiceSource(service));
+      const executionService = host.services.serviceConnections ? withServiceSources(service, host.services.serviceConnections) : service;
+
       // 停用后拒绝新回合（dispose 期间置 false）；已接受回合由宿主结算。
       let admitted = true;
       const shutdown = new AbortController();
@@ -103,7 +108,8 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
       const runtimeOptions = {
         ...(runtime ? { runtime } : {}),
         ...(host.services.authoring?.authoring ? { authoring: host.services.authoring.authoring } : {}),
-        service,
+        service: executionService,
+        ...(host.services.serviceConnections ? { serviceConnections: host.services.serviceConnections } : {}),
         // 停用/排空门禁：dispose 后拒绝新回合（宿主 draining 结算已接受回合）。
         admission: () => admitted,
         shutdownSignal: shutdown.signal,
@@ -123,7 +129,7 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
       const provider: AgentConnectionProvider = createConnectionProvider({
         id: SDK_AGENT_PLUGIN_ID,
         extensionId: SDK_AGENT_PLUGIN_ID,
-        service,
+        service: executionService,
         descriptors
       });
       provider.migrateConnection = async ({ owner, connectionId, beforeMigration }) => {
@@ -176,6 +182,8 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
         dispose: async () => {
           // 停用只释放本扩展资源；保留连接配置、凭据与宿主历史（design D9）。
           admitted = false;
+          releaseSource?.();
+          releaseConsumer?.();
           shutdown.abort();
           await Promise.allSettled([...inFlight]);
           host.logger({ event: "sdk-agent-disposed" });

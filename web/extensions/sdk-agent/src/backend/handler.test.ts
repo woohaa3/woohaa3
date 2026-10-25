@@ -366,6 +366,7 @@ it("configure 路由按用户串行保存，双击不重复创建并且只读取
       request("POST", "/api/sdk-agent/configure", {
         adapterId: "compat-chat",
         secret: "sk-secret",
+        operationId: "stable-double-click",
         owner: "attacker",
       }),
       out.res,
@@ -377,5 +378,5 @@ it("configure 路由按用户串行保存，双击不重复创建并且只读取
   await Promise.all([save(), save()]);
   expect(await service.list("u1")).toHaveLength(1);
   expect(await service.list("attacker")).toHaveLength(0);
-  expect(methods).toEqual(["GET", "GET"]);
+  expect(methods).toEqual(["GET"]);
 });

@@ -9,12 +9,18 @@ import { mcpCanvasPrompt } from "../../mcp-hint.js";
 const GROUP_LABEL: Record<McpInstallClient["group"], string> = { cli: "命令行", editor: "编辑器" };
 
 type TargetRef = { client: McpInstallClient; target: McpInstallTarget };
+export type McpPanelSnapshot = {
+  loading: boolean;
+  configured: number;
+  error: string | null;
+  issues: { key: string; label: string; message: string }[];
+};
 
 /** 多目标客户端（DeepSeek Harness 的 profile）在提示里带上目标名，单目标只显示客户端名。 */
 const targetTitle = ({ client, target }: TargetRef) =>
   client.targets.length > 1 ? `${client.label} — ${target.label}` : client.label;
 
-export function McpConnectionPanel({ canvasId, remote: injectedRemote }: { canvasId?: string; remote?: McpInstallationRemote }) {
+export function McpConnectionPanel({ canvasId, remote: injectedRemote, onStatusChange, refreshRevision = 0 }: { canvasId?: string; remote?: McpInstallationRemote; onStatusChange?: (snapshot: McpPanelSnapshot) => void; refreshRevision?: number }) {
   const [remote] = useState(() => injectedRemote ?? createMcpInstallationRemote());
   const [clients, setClients] = useState<McpInstallClient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +50,7 @@ export function McpConnectionPanel({ canvasId, remote: injectedRemote }: { canva
     }).catch(() => { if (!cancelled) setError("客户端检测失败，请重试。"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [remote, revision]);
+  }, [remote, revision, refreshRevision]);
   const report = useCallback((key: string, message: string | null) => setIssues(current => {
     if (!message) {
       if (!(key in current)) return current;
@@ -52,26 +58,31 @@ export function McpConnectionPanel({ canvasId, remote: injectedRemote }: { canva
     }
     return current[key] === message ? current : { ...current, [key]: message };
   }), []);
+  useEffect(() => {
+    onStatusChange?.({ loading, error, configured: clients.flatMap(client => client.targets).filter(target => target.configured && !target.error).length,
+      issues: Object.entries(issues).map(([key, message]) => ({ key, label: issueTarget(key, clients), message })) });
+  }, [loading, error, clients, issues, onStatusChange]);
   return <section className="agent-assistant__mcp" data-ai-tab="mcp">
     <div>
       <div className="agent-assistant__navigation"><h3>安装到本机客户端</h3><Button size="sm" tone="ghost" disabled={loading} onClick={() => refresh(value => value + 1)}>重新检测</Button></div>
-      <p>自动配置应用宿主机器上的客户端。悬停图标查看名称、配置位置与状态，点击即写入。</p>
+      <p>让外部 Agent 调用 WooHaa3。配置写入成功不代表客户端已经连接。</p>
       {loading ? <p>正在检测客户端…</p> : error ? <SettingsFeedback tone="danger">{error}</SettingsFeedback> : clients.length ? <div className="agent-assistant__mcp-groups">
         {(["cli", "editor"] as const).map(group => {
           const members = clients.filter(client => client.group === group);
           return members.length ? <section key={group} className="agent-assistant__mcp-group" data-mcp-group={group}>
             <h4>{GROUP_LABEL[group]}</h4>
-            <div className="agent-assistant__mcp-grid">
-              {members.flatMap(client => client.targets.map(target => <InstallTarget
-                key={`${revision}:${client.id}:${target.key}`}
+            <div className="agent-assistant__table-wrap"><table><thead><tr><th>客户端</th><th>配置状态</th><th>安装</th></tr></thead><tbody>
+              {members.flatMap(client => client.targets.map(target => <tr key={`${client.id}:${target.key}`}><td><strong>{targetTitle({ client, target })}</strong><small title={target.path}>{target.path}</small></td><td><span className="agent-assistant__state" data-tone={issues[`${client.id}:${target.key}`] ? "warning" : "neutral"}>{issues[`${client.id}:${target.key}`] ? "写入失败" : target.configured ? "配置已写入" : "待配置"}</span></td><td><InstallTarget
+                key={`${revision}:${refreshRevision}:${client.id}:${target.key}`}
                 client={client}
                 target={target}
                 remote={remote}
                 reported={issues[`${client.id}:${target.key}`] !== undefined}
                 onIssue={message => report(`${client.id}:${target.key}`, message)}
                 onInstalled={message => setNotice(message)}
-              />))}
-            </div>
+                onUpdated={updated => setClients(current => current.map(item => item.id === updated.id ? updated : item))}
+              /></td></tr>))}
+            </tbody></table></div>
           </section> : null;
         })}
         {notice ? <SettingsFeedback tone="success">{notice}</SettingsFeedback> : null}
@@ -105,12 +116,13 @@ function issueTarget(key: string, clients: McpInstallClient[]) {
  * 一个安装目标是一个图标格：客户端身份由品牌图形表达，名称、配置位置与状态只放在悬停提示里。
  * 已安装的格子带对勾角标并禁用重复点击；失败时格子显示危险色边框，点击即重试。
  */
-function InstallTarget({ client, target, remote, reported, onIssue, onInstalled }: TargetRef & {
+function InstallTarget({ client, target, remote, reported, onIssue, onInstalled, onUpdated }: TargetRef & {
   remote: McpInstallationRemote;
   /** 该目标的错误已列在宫格下方，提示里不重复。 */
   reported: boolean;
   onIssue: (message: string | null) => void;
   onInstalled: (message: string) => void;
+  onUpdated: (client: McpInstallClient) => void;
 }) {
   const [installed, setInstalled] = useState(target.configured);
   const [busy, setBusy] = useState(false);
@@ -128,6 +140,7 @@ function InstallTarget({ client, target, remote, reported, onIssue, onInstalled 
       if (!active.current) return;
       if (!result.ok) { setError(result.error); onIssue(result.error); return; }
       const updated = result.value.client.targets.find(item => item.key === target.key);
+      onUpdated(result.value.client);
       setInstalled(updated?.configured ?? result.value.client.configured);
       if (updated?.error) { setError(updated.error); onIssue(updated.error); }
       else { setError(null); onIssue(null); onInstalled(`${targetTitle({ client, target })}：配置已写入，重新打开客户端后使用。`); }

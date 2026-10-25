@@ -65,6 +65,12 @@ export type GenerationProviderHandle = unknown;
  * 生成模块负责把它交给 worker 运行时。
  */
 export type GenerationProvider = {
+  /** Explicit per-source execution. Omitted Providers reject personal source bindings. */
+  serviceConnectionFactory?: {
+    protocols: readonly import("../extension/service-connection.js").ServiceConnectionProtocol[];
+    assistantProtocol?: import("../extension/service-connection.js").ServiceConnectionProtocol;
+    create(input: { secret: string; endpoint: string; validate: () => Promise<void>; fetch?: typeof globalThis.fetch }): GenerationProviderHandle;
+  };
   extensionId: string;
   providerId: string;
   /** 该 Provider 当前是否可执行（凭据/配置就绪）。 */

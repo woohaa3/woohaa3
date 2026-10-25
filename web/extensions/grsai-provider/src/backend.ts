@@ -11,7 +11,7 @@ import {
   type HostExtensionPlugin,
 } from "@woohaa3/contracts";
 import { discoverGrsaiModels, grsaiModelDefinitions, type GrsaiModel } from "./discovery.js";
-import { createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
+import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { createGrsaiProvider, type GrsaiCatalog } from "./provider.js";
 import { describeGrsaiModel } from "./schema.js";
 import { DEFAULT_GRSAI_BASE_URL, GRSAI_PLUGIN_ID, GRSAI_PROVIDER_ID, grsaiOrigin } from "./shared.js";
@@ -94,7 +94,7 @@ export function createGrsaiRegistration(input: GrsaiRegistrationInput): { regist
       // 参考图直接传到 grsai 的素材服务（令牌 → 七牛上传），不依赖宿主存储的签名能力。
       uploadReference: async ({ bytes, contentType }) => {
         if (!available) return undefined;
-        return uploadGrsaiReference({
+        const url = await uploadGrsaiReference({
           origin: grsaiOrigin(baseUrl),
           apiKey,
           bytes,
@@ -102,6 +102,7 @@ export function createGrsaiRegistration(input: GrsaiRegistrationInput): { regist
           tokenFetch: guarded,
           uploadFetch: input.fetchImpl ?? globalThis.fetch
         });
+        return url ? { url } : undefined;
       }
     }
   };
@@ -112,6 +113,7 @@ export function createGrsaiProviderPlugin(deps: GrsaiPluginDependencies = {}): H
     name: GRSAI_PLUGIN_ID,
     label: "grsai",
     configPrefix: "providers.grsai",
+    modelTypes: ["language", "image", "video"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: { path: REFRESH_PATH, hint: "模型从 grsai 的公开模型表发现，下线或维护中的模型不会注册。保存 API Key 和 API 地址后会发现一次，也可以再刷新。图片和视频走统一生成接口，文本走 OpenAI 兼容对话接口。" },
     inject: ["log", "generation", "gateway", "access"],
@@ -134,6 +136,7 @@ export function createGrsaiProviderPlugin(deps: GrsaiPluginDependencies = {}): H
       const log = ctx.log.scope(GRSAI_PLUGIN_ID);
       const { registration, catalog } = createGrsaiRegistration({
         ...deps,
+        fetchImpl: createProviderLifecycleFetch(ctx, deps.fetchImpl),
         ...(apiKey ? { apiKey } : {}),
         baseUrl
       });

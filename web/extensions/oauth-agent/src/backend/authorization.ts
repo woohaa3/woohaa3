@@ -26,6 +26,7 @@ export type ChatGptAuthorizationService = {
   start: (input: { owner: ResolvedOwner; req: IncomingMessage; redirectUri: string }) => Promise<AuthorizeStartResult>;
   /** 完成授权回调。 */
   complete: (input: { owner: ResolvedOwner; req: IncomingMessage; query: Record<string, string | string[] | undefined> }) => Promise<AuthorizationResult>;
+  cancelAuthorization?: (ownerId: string) => void;
   /** 断开：终止推理、撤销并清除本地 token；返回远程撤销是否确认。 */
   disconnect: (ownerId: string) => Promise<{ revoked: boolean }>;
   /** 确保有效 access token（必要时续期并持久化）；不可用时抛出可读错误。 */
@@ -59,6 +60,11 @@ export function createChatGptAuthorizationService(
 ): ChatGptAuthorizationService {
   const now = options.now ?? (() => Date.now());
   const pending = new Map<string, ChatGptTransaction>();
+  const generations = new Map<string, number>();
+  const cancelAuthorization = (ownerId: string) => {
+    generations.set(ownerId, (generations.get(ownerId) ?? 0) + 1);
+    for (const [state, transaction] of pending) if (transaction.ownerId === ownerId) pending.delete(state);
+  };
   /** 已签发但尚未持久化的 host id（首次授权时）；完成时并入账户记录。 */
   const pendingHosts = new Map<string, string>();
 
@@ -110,9 +116,11 @@ export function createChatGptAuthorizationService(
   return {
     snapshot,
     account: readAccount,
+    cancelAuthorization,
     credentialOwnerKind: (ownerId) => snapshot(ownerId, "local-session").ownerKind,
     async start(input): Promise<AuthorizeStartResult> {
       const owner = input.owner;
+      cancelAuthorization(owner.ownerId);
       const existing = readAccount(owner.ownerId);
       // 稳定 host 标识：优先复用已保存的，否则新建并**立即持久化**（即使授权尚未完成），
       // 使同一 owner 多次授权得到同一 host id。参照已验证 demo 的 ext_agent_host_id 语义。
@@ -155,6 +163,8 @@ export function createChatGptAuthorizationService(
       // 一次性消费：先移除，失败也不能重放。
       pending.delete(state);
       if (!transaction) return fail(400, "invalid-transaction", "授权事务不存在或已被使用，请重新授权。");
+      const generation = generations.get(owner.ownerId) ?? 0;
+      if (transaction.ownerId !== owner.ownerId) return fail(400, "authorization-failed", "授权事务不属于当前账号，请重新登录。");
       try {
         const account = await options.oauth.complete({
           transaction,
@@ -162,6 +172,7 @@ export function createChatGptAuthorizationService(
           ownerId: owner.ownerId,
           sessionBinding: sessionBindingOf(owner, input.req)
         });
+        if ((generations.get(owner.ownerId) ?? 0) !== generation) return fail(409, "authorization-cancelled", "授权已取消或重试，旧回调已丢弃。");
         persistAccount(owner.ownerId, account);
         return {
           ok: true,
@@ -174,22 +185,28 @@ export function createChatGptAuthorizationService(
     },
     async disconnect(ownerId): Promise<{ revoked: boolean }> {
       // 取消本 owner 未完成事务。
-      for (const [state, t] of pending) if (t.ownerId === ownerId) pending.delete(state);
+      cancelAuthorization(ownerId);
       const record = options.store.read(ownerId);
+      // Publish local revocation before waiting for a remote service.
+      options.store.clear(ownerId);
+      pendingHosts.delete(ownerId);
       let revoked = true;
       if (record?.account) revoked = await options.oauth.revoke(record.account);
-      // 无论远程撤销是否成功都清除本地 token（保留映射之外的信息一并清除）。
-      options.store.clear(ownerId);
       return { revoked };
     },
     async ensureAccessToken(ownerId): Promise<string> {
       const account = readAccount(ownerId);
       if (!account) throw new Error("尚未授权 ChatGPT。");
-      return options.oauth.accessToken({
-        ownerId,
-        account,
-        persist: (next) => persistAccount(ownerId, next)
+      const generation = generations.get(ownerId) ?? 0;
+      const stillCurrent = () => (generations.get(ownerId) ?? 0) === generation && readAccount(ownerId)?.connectedAt === account.connectedAt && readAccount(ownerId)?.subject === account.subject;
+      const token = await options.oauth.accessToken({
+        ownerId, account, persist: (next) => {
+          if (!stillCurrent()) throw new Error("授权已撤销，丢弃迟到续期");
+          persistAccount(ownerId, next);
+        },
       });
+      if (!stillCurrent()) throw new Error("授权已撤销");
+      return token;
     }
   };
 }

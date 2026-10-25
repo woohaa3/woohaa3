@@ -347,6 +347,15 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     return row.count;
   }
 
+  hasUnresolvedTurns(): boolean {
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE status IN ('queued','running','committing','unknown')").get() as { count: number }).count > 0;
+  }
+
+  hasUnresolvedConnection(owner: string, connectionId: string): boolean {
+    const row = this.db.prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE owner = ? AND connection_id = ? AND status IN ('queued','running','committing','unknown')").get(owner, connectionId) as { count: number };
+    return row.count > 0;
+  }
+
   prepareConnectionMigration(owner: string, connectionId: string): boolean {
     return this.dbMigration(owner, connectionId);
   }

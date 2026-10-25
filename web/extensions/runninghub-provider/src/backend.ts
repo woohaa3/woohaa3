@@ -107,6 +107,7 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
     label: "RunningHub",
     // 品牌图形由扩展包 assets/ 同步发布，路径由宿主按 extension.json 的 icon.asset 注入。
     configPrefix: "providers.runninghub",
+    modelTypes: ["image", "video"],
     inject: ["log", "generation"],
     Config: RUNNINGHUB_CONFIG,
     // 没配 API Key 时插件照样装载（模型要留在管理面预填配置），只是它们进不了 catalog。

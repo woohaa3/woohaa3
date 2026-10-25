@@ -1,3 +1,5 @@
+import { createSqliteExtensionDocumentStore } from "./repository/extension-document-store.js";
+import { createServiceConnectionRegistry, type ServiceConnectionRegistryOptions, type ServiceConnectionRegistry } from "./service-connections/registry.js";
 import { createExtensionAssistants } from "./extensions/extension-assistants.js";
 import { CanvasCreationStore } from "./repository/canvas-creation-store.js";
 import { CanvasCreationService } from "./extensions/canvas-creation-service.js";
@@ -60,6 +62,8 @@ import type {
 } from "./extensions/contract.js";
 
 export type ApplicationServiceOptions = {
+  serviceConnectionProviders?: () => readonly import("@woohaa3/contracts").GenerationProvider[];
+  serviceConnectionSources?: Omit<ServiceConnectionRegistryOptions, "documents"> & { documents?: ServiceConnectionRegistryOptions["documents"] };
   candidateAssistantProviders?: () => readonly import("@woohaa3/contracts").FilmSetConversionProvider[];
   env?: Record<string, string | undefined>;
   storePath?: string;
@@ -182,6 +186,7 @@ export type ApplicationServiceOptions = {
 };
 
 export type ApplicationService = {
+  serviceConnections: () => ServiceConnectionRegistry | null;
   handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   readiness: () => Promise<{ ready: boolean; reason?: string }>;
   close: () => Promise<void>;
@@ -248,6 +253,13 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
   // 测试可覆盖；生产直接消费可信后端清单。
   const definitions = options.applicationBackendExtensions ?? createApplicationBackendExtensionManifest().definitions;
 
+  const sourceDocuments = options.serviceConnectionSources && !options.serviceConnectionSources.documents
+    ? createSqliteExtensionDocumentStore({ path: config.storePath, owners: ["@service-connections"] }) : null;
+  const serviceConnections = options.serviceConnectionSources ? createServiceConnectionRegistry({
+    ...options.serviceConnectionSources,
+    hasUnresolvedWork: async (owner, bindings) => bindings.some(binding => binding.consumerId.startsWith("shared:")) && conversationStore.hasUnresolvedTurns() || bindings.some(binding => binding.consumer !== "provider" && conversationStore.hasUnresolvedConnection(owner, binding.consumerId)) || !options.serviceConnectionSources?.hasUnresolvedWork || await options.serviceConnectionSources.hasUnresolvedWork(owner, bindings),
+    documents: options.serviceConnectionSources.documents ?? sourceDocuments!.forExtension("@service-connections")!,
+  }) : null;
   const extensionConfigStore = createSqliteSiteExtensionConfigStore({ path: config.storePath });
   const extensionWorkStore = createSqliteExtensionWorkRepository({ path: config.storePath });
   const taskIntentStore = createExtensionTaskIntentRepository({ path: config.storePath });
@@ -316,7 +328,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
 
   const servicesFor = (extensionId: string, configVersion?: number): ApplicationExtensionServices => {
     const services = baseServicesFor(extensionId, configVersion);
-    return { ...services, assistants: createExtensionAssistants(extensionId, services, () => agentConversations) };
+    return { ...services, ...(serviceConnections ? { serviceConnections: serviceConnections.forExtension(extensionId) } : {}), assistants: createExtensionAssistants(extensionId, services, () => agentConversations) };
   };
 
   const extensionHost = options.host ?? createApplicationExtensionHost({
@@ -416,6 +428,9 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     discoverTools: options.mcpDiscovery,
     preflight: async (owner, canvasId) => (await options.conversationCanvasAccess?.authorize({ subject: owner, canvasId, permission: "write" }))?.ok === true });
   const agentConversationApi: AgentConversationApiHandler = createAgentConversationApiHandler({
+    serviceConnections,
+    serviceConnectionProviders: options.serviceConnectionProviders,
+    accessEnforcer,
     service: agentConversations,
     canvasCreations,
     connections: agentConnections,
@@ -496,6 +511,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     config: () => config,
     agentConversations: () => agentConversations,
     agentConnections: () => agentConnections,
+    serviceConnections: () => serviceConnections,
     providers: () => providers,
     accessEnforcer: () => accessEnforcer,
     close: async () => {
@@ -509,6 +525,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
       unbindCreationEpochs?.();
       canvasCreationStore.close();
       conversationStore.close();
+      sourceDocuments?.close();
     }
   };
 }

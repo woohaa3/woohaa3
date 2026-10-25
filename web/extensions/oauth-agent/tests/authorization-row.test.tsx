@@ -172,3 +172,31 @@ it("运行时引导只导航设置，不触发授权或自动安装", async () =
   expect(onOpenRuntimes).toHaveBeenCalledOnce();
   expect(api.authorize).not.toHaveBeenCalled();
 });
+
+it("cancels an in-flight authorization and ignores its late window callback, then allows retry", async () => {
+  const api = service("disconnected");
+  api.cancelAuthorization = vi.fn(async () => ({ ok: true }));
+  let finish!: () => void;
+  let navigate!: (url: string) => void;
+  vi.mocked(api.authorize).mockImplementationOnce(async open => {
+    navigate = open;
+    await new Promise<void>(resolve => { finish = resolve; });
+    return { ok: true };
+  });
+  const popup = { location: { href: "" }, closed: false, close: vi.fn(), focus: vi.fn() };
+  vi.spyOn(globalThis, "open").mockReturnValue(popup as unknown as Window);
+  await act(async () => root.render(<ChatGptAuthorizationRow service={api} />));
+  await act(async () => { [...el.querySelectorAll("button")].find(button => button.textContent === "授权 ChatGPT")!.click(); });
+  await click("取消授权");
+  expect(api.cancelAuthorization).toHaveBeenCalledOnce();
+  await act(async () => { navigate("https://auth.example/late"); finish(); });
+  expect(popup.location.href).toBe("");
+  expect(el.querySelector("a")).toBeNull();
+  expect(popup.close).toHaveBeenCalled();
+  successfulAuthorization(api);
+  vi.mocked(globalThis.open).mockReturnValue(null);
+  await click("授权 ChatGPT");
+  expect(el.querySelector("a")?.href).toContain("auth.example/authorize");
+  await act(async () => root.render(null));
+  expect(api.cancelAuthorization).toHaveBeenCalledTimes(2);
+});

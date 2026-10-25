@@ -75,6 +75,7 @@ export function createSqliteSubmitKeyRepository(options: { path: string }): Sqli
  * 字段变化都必须判为「不同 payload」。
  */
 export function computeSubmitPayloadHash(request: {
+  serviceConnection?: { owner: string; serviceConnectionId: string };
   canvasId: string;
   nodeId: string;
   runId: string;
@@ -87,6 +88,7 @@ export function computeSubmitPayloadHash(request: {
   inputs: readonly { assetId: string; role: string; storageKey: string; mediaType: string }[];
 }): string {
   const canonical = stableStringify({
+    ...(request.serviceConnection ? { serviceConnection: request.serviceConnection } : {}),
     canvasId: request.canvasId,
     nodeId: request.nodeId,
     runId: request.runId,

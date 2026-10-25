@@ -46,6 +46,7 @@ async function loadExtension(ctx: HostContext, services: LoaderServices, plugin:
     layer: "extension",
     ...(plugin.directory ? { directory: plugin.directory } : {}),
     ...(plugin.icon ? { icon: plugin.icon } : {}),
+    ...(plugin.modelTypes ? { modelTypes: plugin.modelTypes } : {}),
     ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {}),
     configPrefix: prefix,
     siteManaged: gated

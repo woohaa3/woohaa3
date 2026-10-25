@@ -14,6 +14,7 @@
  */
 import { isJsonObject } from "../validation.js";
 import type { PluginIcon } from "../plugin-icon.js";
+import type { CanvasTaskModelType } from "../task/dto.js";
 
 export type SettingReload = "hot" | "restart";
 
@@ -375,6 +376,8 @@ export type SettingPluginLayer = "base" | "core" | "extension";
  * 分层与启停范围，让设置页不需要从键名前缀猜插件是谁。
  */
 export type SettingPluginView = {
+  /** 扩展声明的 Provider 输出类型，不等同于当前账号可用模型或已验证权限。 */
+  modelTypes?: readonly CanvasTaskModelType[];
   /** 宿主扫描到的插件绝对目录，仅用于展示。 */
   directory?: string;
   id: string;

@@ -41,15 +41,23 @@ export function ChatGptAuthorizationRow({
   const [authorization, setAuthorization] = useState<{ url: string; blocked: boolean } | null>(null);
   const state = snapshot.auth?.state ?? "disconnected";
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const mounted = useRef(true);
+  const attempt = useRef(0);
+  const popupRef = useRef<Window | null>(null);
+  const authorizationPending = useRef(false);
   const watcherRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopWatching = () => {
     if (watcherRef.current) clearInterval(watcherRef.current);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
   };
-  useEffect(() => stopWatching, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; ++attempt.current; stopWatching(); if (authorizationPending.current) void service.cancelAuthorization?.(); try { popupRef.current?.close(); } catch { /* Closed or cross-origin. */ } };
+  }, []);
   useEffect(() => {
     if (state === "ready") {
+      authorizationPending.current = false;
       stopWatching();
       setAuthorization(null);
     }
@@ -61,6 +69,8 @@ export function ChatGptAuthorizationRow({
   }, [reportEditState, busy]);
 
   const authorize = async () => {
+    const currentAttempt = ++attempt.current;
+    authorizationPending.current = true;
     setBusy(true);
     setNotice(null);
     setAuthorization(null);
@@ -74,7 +84,9 @@ export function ChatGptAuthorizationRow({
       } catch {
         // 浏览器策略可能抛错；下方的普通链接不依赖 window.open。
       }
+      popupRef.current = popup;
       const result = await service.authorize((url) => {
+        if (!mounted.current || attempt.current !== currentAttempt) return;
         let opened = false;
         if (popup && !popup.closed) {
           try {
@@ -87,6 +99,7 @@ export function ChatGptAuthorizationRow({
         }
         setAuthorization({ url, blocked: !opened });
       });
+      if (!mounted.current || attempt.current !== currentAttempt) { try { popup?.close(); } catch { /* Closed. */ } return; }
       if (!result.ok) throw new Error(result.error ?? "无法发起授权");
       // 同源回调通知刷新；关闭 popup 时再刷新，兜底消息丢失。
       if (popup && !popup.closed) {
@@ -101,11 +114,22 @@ export function ChatGptAuthorizationRow({
       }
     } catch (error) {
       try { popup?.close(); } catch { /* 跨源/已关闭 */ }
+      if (!mounted.current || attempt.current !== currentAttempt) return;
+      authorizationPending.current = false;
       setAuthorization(null);
       setNotice(error instanceof Error ? error.message : "无法发起授权，请重试。");
     } finally {
-      setBusy(false);
+      if (mounted.current && attempt.current === currentAttempt) setBusy(false);
     }
+  };
+
+  const cancelAuthorization = async () => {
+    ++attempt.current; authorizationPending.current = false; stopWatching(); setBusy(false);
+    try { popupRef.current?.close(); } catch { /* Closed. */ }
+    const result = await service.cancelAuthorization?.();
+    if (!mounted.current) return;
+    if (result?.ok) { setAuthorization(null); setNotice(null); void service.refresh(); }
+    else setNotice(result?.error ?? "取消授权失败，请重试。");
   };
 
   const disconnect = async () => {
@@ -173,12 +197,14 @@ export function ChatGptAuthorizationRow({
             {snapshot.error ?? snapshot.auth?.message}
           </SettingsFeedback>
         ) : null}
+        {busy && !authorization && service.cancelAuthorization ? <Button size="sm" tone="ghost" onClick={() => void cancelAuthorization()}>取消授权</Button> : null}
         {authorization ? (
           <SettingsFeedback tone={authorization.blocked ? "warning" : "neutral"}>
             <p>{authorization.blocked
               ? "授权窗口未能打开，请点击下方链接继续。"
               : "请在新窗口中完成 ChatGPT 授权。若未看到窗口，可点击下方链接打开。"}</p>
             <a className="chatgpt-auth-row__authorization-link" href={authorization.url} target="woohaa3-chatgpt-auth" rel="opener">打开授权页面</a>
+            {service.cancelAuthorization ? <Button size="sm" tone="ghost" onClick={() => void cancelAuthorization()}>取消授权</Button> : null}
           </SettingsFeedback>
         ) : null}
         {confirmDisconnect ? (

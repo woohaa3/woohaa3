@@ -323,7 +323,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   });
   const withConversation: import("./contract/authoring.js").AuthoringGenerationProps = {
     ...props,
-    onAuthorize: () => { dialogs?.open({ dialogId: "agent-assistant", payload: { canvasId: props.canvasId, nodeId: props.nodeId } }); },
+    onAuthorize: () => { dialogs?.open({ dialogId: "agent-assistant", payload: { canvasId: props.canvasId, nodeId: props.nodeId, ...(effectiveConnectionId ? { connectionId: effectiveConnectionId } : {}) } }); },
     mcpHint: props.mcpHint ?? resolveMcpHint(),
     ...(hostSourceSelection ? { sourceSelection: hostSourceSelection } : {}),
     ...(service?.navigateToDetail

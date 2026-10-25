@@ -17,7 +17,7 @@ export type TaskRuntimeOptions = {
   provider: PptaskProvider;
   providerId: string;
   /** 多 Provider：按 providerId 解析（提供时优先于单一 provider）。 */
-  resolveProvider?: (providerId: string | undefined) => PptaskProvider | undefined;
+  resolveProvider?: import("@sdppp/pptask-worker-server").PptaskWorkerOptions["resolveProvider"];
   mediaClient?: MediaClient;
   jobRepository?: PptaskJobRepository;
   /** 共享 dispatch notifier；submit/cancel 发布 hint，dispatcher 订阅。 */

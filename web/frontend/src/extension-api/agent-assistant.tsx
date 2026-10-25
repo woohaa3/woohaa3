@@ -10,5 +10,5 @@ export function openAgentAssistant(router: AppRouterService, kind: "login" | "in
   }
 }
 export function AgentAssistantSettingsLink({ onOpen }: { onOpen: () => void }) {
-  return <div><p>个人账号、已安装工具和 API Key 在 AI 助手中管理。</p><Button onClick={onOpen}>打开 AI 助手</Button></div>;
+  return <div><p>本地 Agent 与 MCP 在「本地助手」中管理；API 和账号授权在「服务连接」中管理。</p><Button onClick={onOpen}>打开 AI 助手</Button></div>;
 }

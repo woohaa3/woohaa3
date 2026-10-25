@@ -13,6 +13,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { FilmSetConversionProvider } from "../canvas/film-set-conversion/provider.js";
 import type { ApplicationBackendExtensionHealth } from "../extension/runtime.js";
 import type { PluginIcon } from "../plugin-icon.js";
+import type { CanvasTaskModelType } from "../task/dto.js";
 import { parseSettingValue, type SettingDefinition, type SettingPrimitive } from "../settings/index.js";
 import type { GenerationProvider } from "./generation.js";
 import type { HostStorageService } from "./storage.js";
@@ -107,6 +108,8 @@ export type HostExtensionPlugin<F extends HostConfigFields = HostConfigFields> =
   readonly directory?: string;
   /** 设置页插件卡片上的图标：语义图形名（`PLUGIN_ICON_NAMES`）或品牌图形路径；缺省显示通用插件图标。 */
   readonly icon?: PluginIcon;
+  /** Provider 适配器支持的输出类型，用于配置前的能力标签；不代表账号已有模型或授权。 */
+  readonly modelTypes?: readonly CanvasTaskModelType[];
   /**
    * 模型目录刷新入口声明：设置页据此显示「可用模型」一节（说明 + 刷新按钮）。
    *

@@ -1,3 +1,4 @@
+import { sdkSourceFor, sdkSourceProtocol } from "./service-source.js";
 import { filmSetAnimationsOf, filmSetClipHash } from "@woohaa3/contracts";
 /** Fixed framework dispatch. The host ledger owns idempotency; frameworks own inference loops. */
 import type {
@@ -17,6 +18,7 @@ import { ASSISTANT_CANDIDATE_CAPABILITIES } from "@woohaa3/agent-connections";
 
 export type SdkAgentRuntimeOptions = {
   service: ConnectionService;
+  serviceConnections?: import("@woohaa3/contracts").ApplicationServiceConnectionFacade;
   admission?: () => boolean;
   shutdownSignal?: AbortSignal;
   inFlight?: Set<Promise<unknown>>;
@@ -94,7 +96,15 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     if (input.intent.action !== "discuss" && record.modelCapabilities?.[model]?.tools === false) return fail("capability-unsupported", "当前模型明确不支持工具，仅可用于讨论；请选择支持目标工具的模型");
     const preflight = preflightInput({ capabilities: capabilitiesFor(adapter), wantTools: input.intent.action !== "discuss", imageCount: input.intent.references?.filter((ref) => ref.kind === "asset").length ?? 0, wantStructuredResult: false });
     if (!preflight.ok) return fail(preflight.code, preflight.message);
-    const credential = await options.service.readCredential<{ secret: string }>({ owner: input.owner, connectionId: record.connectionId, purpose: "model-api-key" });
+    const source = options.serviceConnections ? await sdkSourceFor(options.serviceConnections, input.owner, record.connectionId, options.service) : null;
+    if (options.serviceConnections && !source) return fail("connection-unavailable", "服务来源尚未迁移，请重试");
+    let credential: { secret: string } | null;
+    try {
+      credential = source && options.serviceConnections ? await options.serviceConnections.resolve(input.owner, {
+        ...source, bindingId: source.bindings.find(binding => binding.extensionId === "sdk-agent" && (binding.consumerId === record.connectionId || record.serviceConnectionId && binding.consumerId === `shared:${sdkSourceProtocol(record.adapterId)}`))?.bindingId ?? "", purpose: input.intent.action === "discuss" ? "discussion" : "target-execution",
+        protocol: sdkSourceProtocol(record.adapterId), modelId: model, endpoint: baseUrl,
+      }) : await options.service.readCredential<{ secret: string }>({ owner: input.owner, connectionId: record.connectionId, purpose: "model-api-key" });
+    } catch { return fail("version-conflict", "服务来源或用途已失效，请重新读取"); }
     if (!credential?.secret) return fail("credential-missing", "该连接尚未保存 API Key");
     let transport: AgentSdkTransport;
     try {
@@ -115,7 +125,9 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     if (input.signal.aborted || options.shutdownSignal?.aborted) abort();
     const valid = async () => {
       const current = await options.service.get(input.owner, record.connectionId);
-      return !controller.signal.aborted && (!options.admission || options.admission()) && current?.configRevision === frozen.configRevision && current.credentialEpoch === frozen.credentialEpoch;
+      const currentSource = source && options.serviceConnections ? await options.serviceConnections.get(input.owner, source.serviceConnectionId) : null;
+      const sourceValid = !source || !!currentSource && currentSource.enabled && !currentSource.removed && currentSource.configRevision === source.configRevision && currentSource.credentialEpoch === source.credentialEpoch;
+      return sourceValid && !controller.signal.aborted && (!options.admission || options.admission()) && current?.configRevision === frozen.configRevision && current.credentialEpoch === frozen.credentialEpoch;
     };
     let relay: Awaited<ReturnType<typeof createModelTransport>> | undefined;
     let gateway: Awaited<ReturnType<typeof createMcpTurnGateway>> | undefined;

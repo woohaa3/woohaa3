@@ -70,3 +70,26 @@ describe("出网守卫", () => {
     await expect(guarded("file:///etc/passwd")).rejects.toThrow(/URL 不合法/);
   });
 });
+
+it("checks frozen source before authenticated calls and never follows credential redirects", async () => {
+  let active = true;
+  const upstream = vi.fn(async () => new Response(null, { status: 302, headers: { location: "https://other.example" } }));
+  const guarded = createGuardedFetch({ ...base, fetchImpl: upstream as typeof fetch, validate: async () => { if (!active) throw Object.assign(new Error("revoked"), { sourceStale: true }); } });
+  await expect(guarded(base.baseUrl, { headers: { authorization: "Bearer key" } })).rejects.toThrow("重定向");
+  expect(upstream.mock.calls[0]).toEqual([base.baseUrl, expect.objectContaining({ redirect: "error" })]);
+  active = false;
+  await expect(guarded(base.baseUrl)).rejects.toMatchObject({ sourceStale: true });
+  expect(upstream).toHaveBeenCalledOnce();
+});
+
+it("keeps CDN downloads separate from the pinned authenticated source and strips model credentials", async () => {
+  const api = vi.fn(async () => Response.json({ ok: true }));
+  const media = vi.fn(async () => new Response(new Uint8Array([1]), { headers: { "content-type": "image/png" } }));
+  const guarded = createGuardedFetch({ ...base, apiFetchImpl: api as typeof fetch, fetchImpl: media as typeof fetch });
+  await guarded(`${base.baseUrl}/generate`, { headers: { authorization: "Bearer key" } });
+  await guarded("https://cdn.example/image.png", { headers: { authorization: "Bearer key", cookie: "session=private" } });
+  expect(api).toHaveBeenCalledOnce();
+  expect(media).toHaveBeenCalledOnce();
+  expect(new Headers((media.mock.calls[0] as unknown as [unknown, RequestInit])[1].headers).has("authorization")).toBe(false);
+  expect(new Headers((media.mock.calls[0] as unknown as [unknown, RequestInit])[1].headers).has("cookie")).toBe(false);
+});

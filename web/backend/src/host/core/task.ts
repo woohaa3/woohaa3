@@ -9,6 +9,7 @@
  * 仓库现成的 `subscribe`，宿主直接 `ctx.telemetry.emit`，不经 HTTP。
  */
 import fs from "node:fs";
+import { createServiceConnectionFetch } from "./service-connection-fetch.js";
 import { createTaskInspectionApi } from "../../api/task-inspection-api.js";
 import {
   TASKS_INSPECT_ACTION,
@@ -84,6 +85,44 @@ export const taskPlugin: HostPlugin<{ env: Record<string, string | undefined>; m
       readReferenceObject: (storageKey, scope?: StorageScope) =>
         ctx.storage.bucket(MEDIA_STORAGE_NAMESPACE, scope).get(storageKey),
       generationProviders: () => ctx.generation.list(),
+      serviceConnections: {
+        freeze: async (providerId, modelId, modelType, selected) => {
+          const registry = ctx.get("application")?.service.serviceConnections();
+          if (!registry) { if (selected) throw new Error("来源注册表未装配"); return null; }
+          const actor = { owner: selected?.owner ?? "@site-task", administrator: !selected, canUseSite: true };
+          const source = selected ? await registry.get(actor, selected.serviceConnectionId) : (await registry.list(actor)).find(source => source.scope === "site" && source.bindings.some(binding => binding.consumer === "provider" && binding.consumerId === providerId));
+          if (selected && (!source || !ctx.generation.resolve(providerId)?.serviceConnectionFactory)) throw new Error("此 Provider 未适配所选个人来源");
+          if (!source) return null; // Non-credential Providers (e.g. remote delegation) keep their original authority.
+          if (!source.enabled) throw new Error("站点来源不可用");
+          const binding = source.bindings.find(binding => binding.consumer === "provider" && binding.consumerId === providerId);
+          if (!binding) throw new Error("来源未绑定此 Provider");
+          const purpose = modelType === "language" ? "text" : modelType as "image" | "video" | "audio";
+          const protocols = selected ? ctx.generation.resolve(providerId)?.serviceConnectionFactory?.protocols ?? [] : [`provider:${providerId}`];
+          const endpoint = source.endpoints.find(endpoint => protocols.includes(endpoint.protocol));
+          // Providers without a configurable endpoint keep their opaque original execution handle.
+          if (!endpoint && selected) throw new Error("来源协议不受此 Provider 支持");
+          if (!endpoint) return null;
+          return { ...(selected ? { owner: selected.owner } : {}), serviceConnectionId: source.serviceConnectionId, configRevision: source.configRevision, credentialEpoch: source.credentialEpoch,
+            bindingId: binding.bindingId, purpose, protocol: endpoint.protocol, modelId, endpoint: endpoint.baseUrl };
+        },
+        resolve: async (reference, providerId) => {
+          const registry = ctx.get("application")?.service.serviceConnections();
+          const provider = ctx.generation.resolve(providerId);
+          const actor = { owner: reference.owner ?? "@site-task", administrator: !reference.owner, canUseSite: true };
+          const validate = async () => {
+            const source = await registry?.get(actor, reference.serviceConnectionId);
+            if (ctx.generation.resolve(providerId) !== provider || !provider?.available) throw Object.assign(new Error("Provider 已停用或重新配置"), { sourceStale: true });
+            if (!source || !source.enabled || source.removed || source.configRevision !== reference.configRevision || source.credentialEpoch !== reference.credentialEpoch) throw Object.assign(new Error("服务来源已失效，不能改用新凭据"), { sourceStale: true });
+          };
+          await validate();
+          if (!registry || !provider) throw Object.assign(new Error("来源适配器不可用"), { sourceStale: true });
+          if (!provider.serviceConnectionFactory) return provider.provider;
+          try {
+            const material = await registry.resolve(actor, provider.extensionId, reference);
+            return provider.serviceConnectionFactory.create({ ...material, validate, fetch: createServiceConnectionFetch({ endpoint: material.endpoint, validate, allowHttp: env.WOOHAA3_SDK_AGENT_ALLOW_HTTP === "1" }) });
+          } catch { throw Object.assign(new Error("服务来源执行材料已失效"), { sourceStale: true }); }
+        },
+      },
       resolveModelSelection: (registry) => {
         // Provider 的模型启用权威来源：`server` 的模型由 Provider 自己的目录决定，
         // 不参与本机运营策略过滤（远端托管生成的新模型不应要求本地再启用一次）。

@@ -11,7 +11,7 @@ import {
   type HostExtensionPlugin,
 } from "@woohaa3/contracts";
 import { discoverFalModels } from "./discovery.js";
-import { createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
+import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { createFalProvider, type FalCatalog } from "./provider.js";
 import { falModelDefinitions, type FalModel } from "./schema.js";
 import { DEFAULT_FAL_BASE_URL, FAL_PLUGIN_ID, FAL_PROVIDER_ID, parseModelIds } from "./shared.js";
@@ -113,6 +113,7 @@ export function createFalProviderPlugin(deps: FalPluginDependencies = {}): HostE
     name: FAL_PLUGIN_ID,
     label: "fal.ai",
     configPrefix: "providers.fal",
+    modelTypes: ["language", "image", "video", "audio"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: { path: REFRESH_PATH, hint: "填写 API Key，以及要使用的模型（逗号或换行分隔，endpoint id，例如 fal-ai/flux/schnell 或 fal-ai/kling-video/v3/pro/text-to-video）。保存后会读取这些模型的队列定义，也可以再刷新。" },
     inject: ["log", "generation", "gateway", "access"],
@@ -137,6 +138,7 @@ export function createFalProviderPlugin(deps: FalPluginDependencies = {}): HostE
       const log = ctx.log.scope(FAL_PLUGIN_ID);
       const { registration, catalog } = createFalRegistration({
         ...deps,
+        fetchImpl: createProviderLifecycleFetch(ctx, deps.fetchImpl),
         ...(apiKey ? { apiKey } : {}),
         baseUrl,
         ...(config.models ? { models: config.models } : {})

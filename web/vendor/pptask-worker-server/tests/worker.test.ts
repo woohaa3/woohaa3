@@ -146,6 +146,35 @@ describe('createPptaskWorker', () => {
     return { key, providerId: 'fake', modelType: 'image', modelId: 'demo', input };
   }
 
+  it('does not call a provider for a stale queued source and parks an existing receipt across restart', async () => {
+    const taskStore = createMemoryPptaskTaskStore();
+    const jobRepository = createMemoryJobRepository();
+    const { provider, counts } = createScriptedProvider({ jobRepository, script: [{ kind: 'completed' }] });
+    const events: Array<{ stage: string; detail?: unknown }> = [];
+    const options = { ...baseOptions(taskStore, jobRepository, provider),
+      resolveProvider: () => { throw Object.assign(new Error('source rotated'), { sourceStale: true }); },
+      reporter: (event: { stage: string; detail?: unknown }) => { events.push(event); },
+    };
+    await taskStore.submit({ key: 'stale-queue', providerId: 'fake', params: { modelType: 'image', modelId: 'demo', input: {} }, now: new Date() });
+    const snapshot = { jobId: 'original-job', record: { id: 'original-job', operation: { id: 'upstream-receipt' } } };
+    await taskStore.submit({ key: 'stale-receipt', providerId: 'fake', params: { modelType: 'image', modelId: 'demo', input: {} }, state: snapshot, now: new Date() });
+    const worker = track(createPptaskWorker(options));
+    await waitFor(async () => (await taskStore.find('stale-queue'))?.status === 'failed');
+    const parked = await waitFor(async () => {
+      const task = await taskStore.find('stale-receipt');
+      return task?.status === 'executing' && !task.leaseUntil ? task : null;
+    });
+    expect(parked.state).toEqual(snapshot);
+    expect(events.some(event => (event.detail as { sourceStale?: boolean })?.sourceStale)).toBe(true);
+    worker.stop(); await worker.drained();
+    track(createPptaskWorker(baseOptions(taskStore, jobRepository, provider)));
+    // A healthy/new provider after restart must never resubmit the parked receipt.
+    await waitFor(async () => (await taskStore.find('stale-receipt'))?.status === 'executing');
+    expect(await taskStore.claimReady({ now: new Date(Date.now() + 60_000), leaseUntil: new Date(Date.now() + 61_000) })).toBeNull();
+    expect(counts.starts).toBe(0);
+    expect((await taskStore.find('stale-receipt'))?.state).toEqual(snapshot);
+  });
+
   it('drives a submitted job to completion through the jobs API', async () => {
     const jobRepository = createMemoryJobRepository();
     const { provider, counts } = createScriptedProvider({

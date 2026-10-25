@@ -26,6 +26,7 @@ describe("OAuth provider 列表（任务 9.6）", () => {
         `GET ${prefix}/*`,
         `POST ${prefix}/generate`,
         `POST ${prefix}/cancel`,
+        `POST ${prefix}/authorize/cancel`,
         `POST ${prefix}/authorize/start`,
         `POST ${prefix}/authorize/complete`,
         `POST ${prefix}/disconnect`,

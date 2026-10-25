@@ -115,15 +115,16 @@ it("discards late canvas feedback and updates only the canvas payload on a conte
   expect(host.textContent).not.toContain("操作当前画布");
 });
 
-it("以宫格展示：每格只有品牌图形，名称与配置路径放在悬停提示里", async () => {
+it("客户端表格显示名称、路径与状态，并保留安装图标提示", async () => {
   remote.detect = vi.fn(async () => ({ ok: true as const, value: { clients: [codexClient] } }));
   await render();
-  const grid = host.querySelector(".agent-assistant__mcp-grid")!;
+  const grid = host.querySelector(".agent-assistant__table-wrap table")!;
   expect(grid).not.toBeNull();
   // 格子里不常驻名称与路径文本，只有图形。
   expect(tile("codex:default")!.textContent).toBe("");
   expect(tile("codex:default")!.querySelector("[data-mcp-client-logo=codex]")).not.toBeNull();
-  expect(host.textContent).not.toContain("/tmp/codex/config.toml");
+  expect(host.textContent).toContain("/tmp/codex/config.toml");
+  expect(grid.textContent).toContain("待配置");
   await hover("codex:default");
   expect(hint()!.textContent).toContain("Codex");
   expect(hint()!.textContent).toContain("/tmp/codex/config.toml");
