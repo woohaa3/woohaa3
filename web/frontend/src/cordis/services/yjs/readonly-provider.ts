@@ -1,4 +1,3 @@
-import { measureInteractionWork } from "../interaction-timing.js";
 /**
  * 只读同步 provider（任务 6.1 / design D9、D4）。
  *
@@ -204,11 +203,11 @@ export class ReadonlyCanvasProvider {
     if (this.state.phase !== "ready") {
       return { ok: false, reason: `画布尚未完成同步（当前 ${this.state.phase}），暂不可写` };
     }
-    const encoded = measureInteractionWork("commandWireMs", () => encodeCommandMessage({
+    const encoded = encodeCommandMessage({
       ...batch,
       canvasId: this.canvasId,
       protocolVersion: this.protocolVersion
-    }));
+    });
     this.socket.send(encoded);
     return { ok: true };
   }

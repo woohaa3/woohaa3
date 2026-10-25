@@ -225,7 +225,7 @@ test.describe("画布交互热路径基准", () => {
 		const cx = box!.x + box!.width / 2;
 		const cy = box!.y + box!.height / 2;
 
-		const buildIdentity = await page.evaluate(() => (globalThis as unknown as { __woohaaBuildIdentity?: unknown }).__woohaaBuildIdentity ?? null);
+		// 开发采集已删除，页面不再注入 `__woohaaBuildIdentity`；只用实际 dist 的 WASM 字节做构建对照。
 		const distWasm = buildWasmIdentity(process.env.E2E_DIST ?? "frontend/dist");
 
 		// ---------- 空闲静止：60 帧内零构建/零提交 ----------
@@ -329,11 +329,11 @@ test.describe("画布交互热路径基准", () => {
 		writeFileSync(resolve(OUT_DIR, `raw-${LABEL}-dpr${DPR}-n${NODES}.jsonl`), rawLines.join("\n") + "\n", { flag: "w" });
 		appendFileSync(
 			resolve(OUT_DIR, "sessions.jsonl"),
-			JSON.stringify({ label: LABEL, dpr: DPR, nodes: NODES, rounds: ROUNDS, buildIdentity, wasm: distWasm, idle: delta(idleBefore, idleAfter), roundSummary: roundSummary }) + "\n"
+			JSON.stringify({ label: LABEL, dpr: DPR, nodes: NODES, rounds: ROUNDS, wasm: distWasm, idle: delta(idleBefore, idleAfter), roundSummary: roundSummary }) + "\n"
 		);
 
 		// eslint-disable-next-line no-console
-		console.log(`[perf-canvas] ${LABEL} dpr=${DPR} nodes=${NODES}\n` + JSON.stringify({ buildIdentity, wasm: distWasm, idle: delta(idleBefore, idleAfter), roundSummary }, null, 2));
+		console.log(`[perf-canvas] ${LABEL} dpr=${DPR} nodes=${NODES}\n` + JSON.stringify({ wasm: distWasm, idle: delta(idleBefore, idleAfter), roundSummary }, null, 2));
 
 		// ---- 确定性门槛 ----
 		// 空闲帧零工作（common 字段在 pre/post 均存在）。

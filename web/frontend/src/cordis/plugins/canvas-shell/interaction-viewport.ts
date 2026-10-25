@@ -7,14 +7,13 @@
 import { clampWoohaa3CanvasZoom, compositeAssetScopeGeometry } from "@woohaa3/contracts";
 import { nodeSize } from "./hit-test.js";
 import { applyWheelToViewport, classifyWheelEvent, type NormalizedWheel } from "./input/wheel-gesture.js";
-import type { InteractionRecorder } from "./interaction-performance.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { InteractionCore, Viewport } from "./interaction-core.js";
 
 /** 触控板平移在停止滚动多久后把视口写入本地存储。 */
 const VIEWPORT_COMMIT_IDLE_MS = 120;
 
-export function createWheelViewport(core: InteractionCore, recorder?: InteractionRecorder) {
+export function createWheelViewport(core: InteractionCore) {
   const { canvas, state, target, schedule, activeViewport } = core;
 
   const canvasCenter = (): { x: number; y: number } => {
@@ -53,11 +52,7 @@ export function createWheelViewport(core: InteractionCore, recorder?: Interactio
   /**
    * 归一化并消费一次 wheel 视口手势；返回实际消费的 kind/source（未消费返回 null）。
    *
-   * 计时不在此处：共享入口 `interaction-2d-input.onWheel` 在**前置 modelPreviewWheel 命中/
-   * 坐标换算之前**开始计时并负责记录。这里只做纯消费，保证计时范围完整且不重复记录
-   * （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D1）。
-   *
-   * `rect` 由共享入口读取（作为独立 DOM rect 分段）后传入；缺省时自读。
+   * `rect` 由共享入口读取后传入；缺省时自读。
    */
   const onWheel = (
     event: WheelEvent,
@@ -156,15 +151,5 @@ export function createWheelViewport(core: InteractionCore, recorder?: Interactio
     schedule("viewport");
   };
 
-  const measureZoom = (action: () => void, source: string) => {
-    if (!recorder) return action();
-    const start = recorder.now();
-    try { action(); } finally { recorder.record("zoom", source, "control", start); }
-  };
-  return { onWheel,
-    zoomBy: (factor: number) => measureZoom(() => zoomBy(factor), "zoom-by"),
-    zoomTo: (zoom: number) => measureZoom(() => zoomTo(zoom), "zoom-to"),
-    zoomToFit: () => measureZoom(zoomToFit, "zoom-to-fit"),
-    applyZoom, scheduleViewportCommit
-  };
+  return { onWheel, zoomBy, zoomTo, zoomToFit, applyZoom, scheduleViewportCommit };
 }

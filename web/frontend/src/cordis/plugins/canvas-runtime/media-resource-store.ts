@@ -1,4 +1,3 @@
-import { beginLifecycleSpan } from "../../performance/lifecycle-performance.js";
 /**
  * Canvas Runtime 有界媒体资源 store
  * （change: 2026-10-12-unify-node-editors-and-focus-transitions，design D8/D9，任务 4.1）。
@@ -197,14 +196,12 @@ export class MediaResourceStore {
   private resolve(source: MediaSourceIdentity): Promise<MediaDecodeResult> {
     const existing = this.inflight.get(source.key);
     if (existing) return existing;
-    const endDecode = beginLifecycleSpan("focus-bitmap-decode");
     const task = this.decode(source)
       .then((result) => {
-        endDecode(result.ok ? "ok" : result.code === "stale" ? "cancelled" : "error");
         if (result.ok) this.cache(source.key, result.value);
         return result;
       })
-      .catch(error => { endDecode("error"); throw error; })
+      .catch(error => { throw error; })
       .finally(() => {
         if (this.inflight.get(source.key) === task) this.inflight.delete(source.key);
       });

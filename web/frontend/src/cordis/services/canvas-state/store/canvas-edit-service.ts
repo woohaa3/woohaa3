@@ -8,7 +8,6 @@
  * 本模块只依赖注入的会话与选择读取，不直接触碰 DOM/Yjs，便于组件与单元测试。
  */
 import type { CanvasCommand, ServerCanvas } from "@woohaa3/contracts";
-import { measureInteractionWork } from "../../interaction-timing.js";
 import { planCanvasEdit, type EditPlan } from "@woohaa3/contracts";
 import type { CanvasSession } from "../../../contracts.js";
 import { EditJournal, type EditJournalSnapshot, type JournalEntry, type JournalPlannedEdit } from "./edit-journal.js";
@@ -137,17 +136,17 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     return cachedSnapshot;
   };
 
-  const publish = () => measureInteractionWork("statePublishMs", () => {
+  const publish = () => {
     invalidate();
     const value = snapshot();
     for (const listener of listeners) listener(value);
     options.onChange?.(value);
-  });
+  };
 
   const plan = (commands: readonly CanvasCommand[]): { ok: true } & EditPlan | { ok: false; reason: string } => {
     const canvas = options.getCanvas();
     if (!canvas) return { ok: false, reason: "画布尚未加载" };
-    const planned = measureInteractionWork("historyPlanMs", () => planCanvasEdit(canvas, commands));
+    const planned = planCanvasEdit(canvas, commands);
     if (!planned.ok) return { ok: false, reason: planned.reason };
     return { ok: true, forward: planned.forward, inverse: planned.inverse };
   };

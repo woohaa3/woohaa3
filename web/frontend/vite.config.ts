@@ -132,30 +132,6 @@ const missingStaticGuard = (basePath: string, strip: (basePath: string, pathname
   }
 });
 
-const interactionPerformance = (env: Record<string, string | undefined>, basePath: string): Plugin => ({
-  name: "dev-interaction-performance",
-  async configureServer(server) {
-    if (env.VITE_WOOHAA_PERFORMANCE === "0") return;
-    const moduleUrl = new URL("../../scripts/lib/dev-performance.mjs", import.meta.url);
-    // Vite config restarts retain Node's ESM cache; reload an edited collector.
-    moduleUrl.searchParams.set("mtime", String(statSync(moduleUrl).mtimeMs));
-    const { createInteractionPerformanceSink, INTERACTION_PERFORMANCE_PATH } = await import(/* @vite-ignore */ moduleUrl.href);
-    const sink = await createInteractionPerformanceSink({
-      root: fileURLToPath(new URL("../../", import.meta.url)),
-      outputDir: env.WOOHAA3_PERFORMANCE_DIR,
-      logger: (message: string) => server.config.logger.warn(message)
-    });
-    server.middlewares.use((req, res, next) => {
-      const pathname = req.url?.split("?")[0];
-      const mounted = `${basePath.replace(/\/$/, "")}${INTERACTION_PERFORMANCE_PATH}`;
-      if (pathname !== INTERACTION_PERFORMANCE_PATH && pathname !== mounted) return next();
-      void sink.handle(req, res);
-    });
-    server.config.logger.info(`[performance] 启动/素材/交互报告 → ${sink.directory}`);
-    server.config.logger.info(`[canvas-input] 输入故障诊断 → ${sink.directory}/canvas-input.jsonl`);
-  }
-});
-
 /**
  * 同步 Bevy 静态资源（change: 2026-10-09-sync-bevy-assets-and-fail-loud）。
  *
@@ -401,14 +377,6 @@ export default defineConfig(async ({ mode, command, isPreview }) => {
     mcp: backend,
     application: backend
   };
-  // 开发采集的源码/二进制身份（A1）：仅 serve 且采集开启时安装；生产构建无此插件。
-  const identityPlugins: Plugin[] = [];
-  if (command === "serve" && env.VITE_WOOHAA_PERFORMANCE !== "0") {
-    const identityUrl = new URL("../../scripts/lib/dev-build-identity.mjs", import.meta.url).href;
-    const { devBuildIdentityPlugin } = await import(/* @vite-ignore */ identityUrl);
-    identityPlugins.push(devBuildIdentityPlugin({ root: fileURLToPath(new URL("../../", import.meta.url)) }));
-  }
-
   return {
     // Bevy WASM 运行时不需要跨源隔离（无 SharedArrayBuffer）；保留同源服务代理即可。
     // `missingStaticGuard` 必须排在 SPA 回退之前，使缺失的 `/assets/*` 显式 404。
@@ -423,8 +391,6 @@ export default defineConfig(async ({ mode, command, isPreview }) => {
       devWatchResilience({ outDir: join(root, "dist") }),
       missingStaticGuard(basePath, stripAppBasePath),
       extensionReleaseStatic(root, basePath, stripAppBasePath, dev ? backend : undefined),
-      ...identityPlugins,
-      interactionPerformance(env, basePath),
       serviceProxy(serviceTargets, basePath),
       // 预览期 HTML 由共享静态处理器在 API 代理之后提供（Vite preview 不执行开发期 transformIndexHtml）。
       appBasePathPlugin({

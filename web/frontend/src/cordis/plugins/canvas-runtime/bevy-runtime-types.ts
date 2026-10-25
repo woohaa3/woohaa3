@@ -188,11 +188,6 @@ export type BevyRuntime = {
   getRenderIssues?(): readonly import("./model-resource-failures.js").ModelRenderIssue[];
   subscribeRenderIssues?(listener: () => void): () => void;
   retryFailedModels?(): void;
-  /** 最近一次（JS 读取的）不可变资源诊断；只读缓存，不调用 WASM（诊断块）。 */
-  getResourceDiagnostics?(): import("./resource-diagnostics.js").ResourceDiagnostics | undefined;
-  /** 开发采集边界刷新 Rust 累计诊断；生产不提供（诊断块）。 */
-  refreshWorkDiagnostics?(): void;
-  backgroundWorkDiagnostics?(): boolean;
   /** Bevy App 是否已 ready（字体/相机就绪）。 */
   isReady(): boolean;
   /** Synchronous owner gate, without crossing the WASM boundary. */

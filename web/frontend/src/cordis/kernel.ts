@@ -1,4 +1,3 @@
-import { beginLifecycleSpan, measureLifecycle } from "./performance/lifecycle-performance.js";
 /**
  * Frontend 页面级插件运行时 kernel（change: adopt-frontend-cordis-plugin-runtime，design D1/D2/D10）。
  *
@@ -86,17 +85,14 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
   // fiber：`parent.extend()` 只创建 Context 子对象、`ctx.fiber` 仍是父 fiber，直接在 install
   // 里 `ctx.fiber.effect()` 会把 disposer 挂到父 fiber 上，导致 scope dispose 不释放这些资源
   // （多画布切换会泄漏旧 socket/session；change: 2026-09-29-add-multi-canvas-workspace）。
-  const endServices = beginLifecycleSpan("page-services");
   const installFiber = ctx.plugin((innerCtx: Context) => options.install(innerCtx)) as Fiber;
   let disposed = false;
 
-  let endPlugins: ReturnType<typeof beginLifecycleSpan> = () => {};
   try {
     await installFiber.await().catch(() => undefined);
     if (fiberStatus(installFiber) !== "active") {
       throw new Error(`scope 服务安装失败（状态 ${fiberStatus(installFiber)}）`);
     }
-    endServices();
     disposers.push(diagnostics.addExtension({ id: "scope-services", required: true, fiber: installFiber }));
 
     for (const entry of options.disabled ?? []) {
@@ -105,7 +101,6 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
       );
     }
 
-    endPlugins = beginLifecycleSpan("page-plugins");
     for (const definition of options.plugins) {
       const fiber = ctx.plugin(definition.plugin as Plugin) as Fiber;
       fibers.push(fiber);
@@ -120,11 +115,9 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
       }
     }
 
-    endPlugins();
     await options.beforeReady?.(ctx);
     diagnostics.markReady();
   } catch (error) {
-    endServices("error"); endPlugins("error");
     const message = error instanceof Error ? error.message : String(error);
     diagnostics.markFailed(message);
     await Promise.allSettled([installFiber, ...fibers].map((fiber) => fiber.dispose()));
@@ -161,7 +154,7 @@ export async function startFrontendRuntime(options: FrontendRuntimeOptions): Pro
   let disposed = false;
 
   try {
-    await measureLifecycle("app-services", () => options.installPlatform(ctx));
+    await options.installPlatform(ctx);
     disposers.push(diagnostics.addExtension({ id: "platform", required: true, fiber: ctx.fiber }));
 
     for (const definition of options.plugins) {

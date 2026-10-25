@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * 开发/E2E 可读的热路径计数器
  * （change: optimize-model-scene-snapshot-hot-path，任务 5.1；
@@ -162,7 +163,7 @@ export const sceneDiagnostics: SceneDiagnostics = state;
 
 /** v4: time wire encoding and synchronous acceptance, including rejected calls. */
 export function measureSceneWork<T>(key: "stringifyMs" | "wasmAcceptMs", now: () => number, run: () => T): T {
-  if (!import.meta.env.DEV || import.meta.env.VITE_WOOHAA_PERFORMANCE === "0") return run();
+  if (!import.meta.env.DEV) return run();
   const started = now();
   try { return run(); }
   finally { state[key] += Math.max(0, now() - started); }

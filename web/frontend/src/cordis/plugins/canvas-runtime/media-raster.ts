@@ -1,4 +1,3 @@
-import { measureVideoPhase } from "../../performance/interaction-phase-profiler.js";
 /**
  * 可绘制媒体（图片/视频帧）→ RGBA 光栅化工具
  * （change: enable-video-node-live-preview，design D1/D4）。
@@ -73,8 +72,7 @@ export function rasterizeDrawable(
   drawable: unknown,
   size: DrawableSource,
   createCanvas: RasterCanvasFactory,
-  maxDimension: number = TEXTURE_MAX_DIMENSION,
-  diagnosticVideoNodeId?: string
+  maxDimension: number = TEXTURE_MAX_DIMENSION
 ): RasterizedMedia | null {
   const sourceWidth = Number(size.width);
   const sourceHeight = Number(size.height);
@@ -88,11 +86,8 @@ export function rasterizeDrawable(
   if (canvas.height !== height) canvas.height = height;
   const context = canvas.getContext("2d", RASTER_READBACK_OPTIONS);
   if (!context) return null;
-  const draw = () => context.drawImage(drawable, 0, 0, width, height);
-  const read = () => context.getImageData(0, 0, width, height);
-  if (diagnosticVideoNodeId) measureVideoPhase("draw-image", diagnosticVideoNodeId, draw);
-  else draw();
-  const imageData = diagnosticVideoNodeId ? measureVideoPhase("read-pixels", diagnosticVideoNodeId, read) : read();
+  context.drawImage(drawable, 0, 0, width, height);
+  const imageData = context.getImageData(0, 0, width, height);
   // 与 ImageData 共享同一块缓冲（1024² = 4 MB，聚焦 2048² = 16 MB），不再整帧复制。
   const pixels = new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength);
   return { pixels, width, height };

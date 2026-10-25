@@ -55,7 +55,7 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
       const schedule = options.schedule ?? createMicScheduler();
       const scopedScenes = new ModelSceneStore();
       const applied = new Map<string, string>();
-      const loading = new NodeResourceLoading(undefined, "model-prepare");
+      const loading = new NodeResourceLoading(undefined);
       const reports = createModelScriptReports(report => ctx.canvasRemote.reportModelScript(report));
       let scheduled = false;
       let running = false;
@@ -248,12 +248,12 @@ async function applyCommitted(input: {
     const afterNode = after?.document.nodes.find(candidate => candidate.id === node.id);
     const afterKey = modelExecutionKey(input.compositeAssets, after, node.id);
     if (afterNode?.type !== latestNode.type || afterKey !== executionKey) {
-      if (load) input.loading.setLoading(load, false, "cancelled");
+      if (load) input.loading.setLoading(load, false);
       input.scenes.delete(node.id);
       input.compositeAssets.setProjection(node.id, null);
       continue;
     }
-    if (load) input.loading.setLoading(load, false, status.startsWith("fail:") ? "error" : "ok");
+    if (load) input.loading.setLoading(load, false);
     // Failed identities are terminal until source or adapter generation changes.
     input.applied.set(node.id, executionKey);
     const reportStatus = status.startsWith("ok") ? "ok" : "failed";

@@ -1,5 +1,3 @@
-import { submitPhotocraftTexture } from "../../performance/photocraft-performance.js";
-import { beginLifecycleSpan, measureLifecycle } from "../../performance/lifecycle-performance.js";
 /**
  * 节点媒体纹理同步（change: replace-godot-canvas-runtime-with-bevy）。
  *
@@ -131,7 +129,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
   const entries = new Map<string, NodeEntry>();
   /** contentKey → 共享解码内容。 */
   const contents = new Map<string, ContentEntry>();
-  const loading = new NodeResourceLoading(options.onChange, "image-prepare");
+  const loading = new NodeResourceLoading(options.onChange);
   const uploads = new MediaOperationBoundary(options.runtime);
   const uploaded = new Set<string>();
   let runtimeGeneration = options.runtime.generation?.() ?? 0;
@@ -250,15 +248,10 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       target.retryTimer = undefined;
     }
     const decode = async (): Promise<void> => {
-      const image = await measureLifecycle("image-load-decode", () => loadImage(url));
+      const image = await loadImage(url);
       if (disposed || contents.get(key) !== target) return;
-      const endRaster = beginLifecycleSpan("image-raster");
-      let raster;
-      try {
-        raster = rasterize(image, createCanvas, tier);
-        if (!raster) throw new Error("图片预览无法读取像素");
-        endRaster();
-      } catch (error) { endRaster("error"); throw error; }
+      const raster = rasterize(image, createCanvas, tier);
+      if (!raster) throw new Error("图片预览无法读取像素");
       target.pixels = raster.pixels;
       target.width = raster.width;
       target.height = raster.height;
@@ -289,7 +282,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         for (const nodeId of target.nodes) {
           const node = entries.get(nodeId);
           if (!node) continue;
-          loading.setLoading(node.load, false, "error");
+          loading.setLoading(node.load, false);
           options.runtime.reportRuntimeIssue?.({ key: `decode:image:${nodeId}`, scope: "texture", operation: "decode-image",
             nodeId, message: "图片预览加载失败，可以重试或更换素材。", detail: errorDetail(error),
             recoverable: true, retainedPreview: uploaded.has(nodeId) });
@@ -446,7 +439,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       }
       if (override && override !== previousOverride) {
         const accepted = uploads.run(`focus:${override.nodeId}`, override, override.nodeId,
-          () => submitPhotocraftTexture(override.pixels, () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels)) !== false);
+          () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels) !== false);
         overrideUploaded = !!accepted;
         if (accepted) {
           const original = entries.get(override.nodeId);
@@ -488,12 +481,10 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         // 每帧上传 staging 预算（design D3）：额度用尽就留到下一帧，不能记成失败
         // （「本帧没上传」不是资源错误，只是被延后）。
         if (!(residency?.spendUploadBytes(content.width * content.height * 4) ?? true)) continue;
-        const endSubmit = beginLifecycleSpan("image-submit");
         const accepted = uploads.run(`image:${id}`, content, id,
           () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
             { sourceKey: content.url, preserveFailure: id === override?.nodeId }) !== false);
-        endSubmit(accepted ? "ok" : "error");
-        loading.setLoading(entry.load, false, accepted ? "ok" : "error");
+        loading.setLoading(entry.load, false);
         if (accepted) { entry.sent = true; uploaded.add(id); changed = true; }
       }
       // 逐层释放（design D4 / 任务 4.5）：所有引用者都已确认上传后，JS 侧不再保留像素副本。

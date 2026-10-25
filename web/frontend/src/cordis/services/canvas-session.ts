@@ -1,4 +1,3 @@
-import { beginLifecycleSpan } from "../performance/lifecycle-performance.js";
 /**
  * 站点侧的画布会话接线
  * （change: replace-godot-canvas-runtime-with-bevy）。
@@ -14,7 +13,6 @@ import { beginLifecycleSpan } from "../performance/lifecycle-performance.js";
  * `canvas-runtime-ready` 或投影 coordinator。
  */
 import { CommandLifecycleRegistry, CanvasDatabase, IndexedDbYjsCacheRepository, WorkingProjectionStore, applyYjsCacheToDoc, createCanonicalProjectionCache, validateYjsCache, woohaa3CanvasStore, type CanvasSyncStatus } from "./canvas-state/index.js";
-import { measureInteractionWork } from "./interaction-timing.js";
 import * as Y from "yjs";
 import type { CanvasAccess, CanvasCommand, ServerCanvas, TelemetryEventInput } from "@woohaa3/contracts";
 import { yDocToServerCanvas, YJS_SYNC_PROTOCOL_VERSION, YJS_CANVAS_FORMAT_VERSION } from "@woohaa3/contracts/canvas-yjs";
@@ -172,7 +170,6 @@ export type CreateCanvasSessionOptions = {
  * 必须能被 dispose 并重新创建（design D2/D7）。
  */
 export async function createCanvasSession(options: CreateCanvasSessionOptions): Promise<CanvasSession> {
-  const endFirstSync = beginLifecycleSpan("canvas-first-sync");
   const canvasId = options.canvasId ?? DEFAULT_CANVAS_ID;
   const remote = options.remote;
   const database = options.database ?? new CanvasDatabase();
@@ -404,8 +401,6 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       }
     }
 
-    if (effectivePhase === "ready" && derived) endFirstSync();
-    if (effectivePhase === "error") endFirstSync("error");
     // 首次打开/首个同步的既有相位各自对应一个终态（design D3）：就绪 / 错误 / 断线。
     // 首次连接失败会落到 `offline-readonly`（socket 关闭但尚未 ready），按 failure 记，
     // 而不是伪装成永久的"进行中"。已经 ready 后的掉线不重复计（settle 幂等）。
@@ -612,7 +607,6 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     detach();
     try { await startYjsSync(); }
     catch (error) {
-      endFirstSync("error");
       settleSync("failure", "session-attach-failed");
       settleOpen("failure", "session-attach-failed");
       throw error;
@@ -708,12 +702,12 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       }
       const revision = deriveCanvas()?.revision ?? 0;
       // 1) 本地 reducer 校验 + 登记 pending（失败不发送）。
-      const appended = measureInteractionWork("pendingProjectionMs", () => projection.appendBatch({
+      const appended = projection.appendBatch({
         commandId,
         commands,
         baseRevision: revision,
         submittedAt: new Date().toISOString()
-      }));
+      });
       if (!appended.ok) {
         // 本地校验拒绝：只记稳定拒绝码（不是文案），复盘时可按 code 聚合。
         recordTelemetry({
@@ -740,8 +734,8 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       if (!sent.ok) {
         settleSave(commandId, "failure", "send-failed");
         // 发送失败：立即移除 pending、重放剩余批次，返回结构化失败。
-        measureInteractionWork("pendingProjectionMs", () => projection.rejectBatch(commandId, sent.reason));
-        measureInteractionWork("statePublishMs", () => woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas));
+        projection.rejectBatch(commandId, sent.reason);
+        woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
         recordTelemetry({
           name: "canvas.edit",
           result: "failure",
@@ -752,10 +746,8 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         });
         return { ok: false, reason: sent.reason, code: "send-failed" };
       }
-      measureInteractionWork("statePublishMs", () => {
-        woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
-        publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });
-      });
+      woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
+      publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });
       // 已交给 wire（本地接受）：这是编辑路径可观测的成功终态；服务端确认另有 lifecycle 事实。
       recordTelemetry({
         name: "canvas.edit",
@@ -768,7 +760,6 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     },
     isWritable: () => yjsProvider?.providerState.phase === "ready" && !isBrowserOffline() && !readOnly,
     shutdown: () => {
-      endFirstSync("cancelled");
       // 未完成的打开/首次同步按取消计（不伪装成失败或成功）。
       settleSync("cancelled");
       settleOpen("cancelled");

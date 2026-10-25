@@ -56,8 +56,6 @@ export type {
   DialogInstance
 } from "../cordis/services/dialogs/types.js";
 
-export { measureInteractionPhase } from "../cordis/performance/interaction-phase-profiler.js";
-export { measurePhotocraft, photocraftPreview } from "../cordis/performance/photocraft-performance.js";
 export { appPublicUrl } from "../cordis/services/app-base-path.js";
 export { createRemoteClient } from "../cordis/plugins/node-history/history-adapters.js";
 export { ImageFocusStore } from "../cordis/plugins/canvas-runtime/image-focus-store.js";

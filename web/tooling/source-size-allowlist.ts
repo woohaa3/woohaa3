@@ -46,7 +46,6 @@ export const PENDING_SPLIT: ReadonlySet<string> = new Set<string>([
   "web/frontend/src/cordis/plugins/canvas-runtime/video-frame-session.ts",
   "web/frontend/src/cordis/plugins/canvas-shell/interaction-2d-input.ts",
   "web/frontend/src/cordis/plugins/canvas-shell/interaction-controller.ts",
-  "web/frontend/src/cordis/plugins/canvas-shell/interaction-performance.ts",
   "web/frontend/src/cordis/plugins/canvas-shell/interaction-types.ts",
   "web/frontend/src/cordis/plugins/task-execution/model-execution-host.tsx",
   "web/frontend/src/cordis/services/canvas-remote.ts",

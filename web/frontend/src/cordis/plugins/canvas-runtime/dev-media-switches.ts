@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * 仅 DEV 的媒体诊断开关（临时工具，用于「有/无视频」帧率 A/B）。
  *

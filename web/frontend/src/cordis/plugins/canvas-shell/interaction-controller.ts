@@ -1,6 +1,6 @@
+/// <reference types="vite/client" />
 import { recordStartupFrame } from "../canvas-runtime/startup-trace.js";
 import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
-import { submissionDiagnosticsEnabled } from "./frame-submission-diagnostics.js";
 /**
  * 浏览器画布交互控制器：共享输入路由、瞬时态、渲染调度和生命周期。
  * 连续手势只更新本地预览，完成后经服务端命令提交；普通模型视角不持久化。
@@ -28,7 +28,6 @@ import { createInteractionFrameLoop } from "./interaction-frame-loop.js";
 import { sharedCanvasNodeIndex, indexNodeSize } from "./canvas-node-index.js";
 import { errorDetail } from "../canvas-runtime/runtime-issues.js";
 import { advanceTransientState } from "./interaction-frame-prelude.js";
-import { measureInteractionPhase } from "../../performance/interaction-phase-profiler.js";
 import { collectModelPlacements } from "./interaction-placements.js";
 import { INITIAL_WHEEL_SOURCE } from "./input/wheel-gesture.js";
 import type { TextureUploader } from "../canvas-runtime/texture-sync.js";
@@ -335,15 +334,15 @@ export function installInteractionController(options: InteractionControllerOptio
       lastHoverOwner = ownerKey;
       hoverNodeStore.invalidatePlayback();
     }
-    const refreshGround = () => measureInteractionPhase("hover-refresh", () => hover.refreshGround(point => queries.queryPoint({
+    const refreshGround = () => hover.refreshGround(point => queries.queryPoint({
       x: (point.x - activeViewport().x) / activeViewport().zoom,
-      y: (point.y - activeViewport().y) / activeViewport().zoom }, activeViewport().zoom)));
+      y: (point.y - activeViewport().y) / activeViewport().zoom }, activeViewport().zoom));
     // 无失效且非强制：跳过全部场景构建/序列化/跨边界（静止画布热路径）。
     if (!force && !sceneInvalidated) { if (ownerChanged || hover.needsRefresh()) refreshGround(); return; }
     sceneInvalidated = false;
     const reasons = new Set(dirtyReasons);
     dirtyReasons.clear();
-    const outcome = measureInteractionPhase("submission", () => frameSubmission.run(reasons, force));
+    const outcome = frameSubmission.run(reasons, force);
     renderError = outcome.error;
     if (outcome.retry) sceneInvalidated = true;
     else refreshGround();
@@ -356,11 +355,11 @@ export function installInteractionController(options: InteractionControllerOptio
     // A cold query or synchronous subscriber can request a flush while this scene
     // is still being built. Finish its acceptance before retrying on the next frame.
     if (frameExecuting) { markInvalidated("input"); return; }
-    const measured = submissionDiagnosticsEnabled();
+    const measured = import.meta.env.DEV;
     const started = measured ? target.performance.now() : 0;
     const previous = frameExecuting; frameExecuting = true;
     try {
-      measureInteractionPhase("frame", () => performFrame(force));
+      performFrame(force);
     } catch (error) {
       reportFrameIssue("scene", error);
       sceneInvalidated = true;

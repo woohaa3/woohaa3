@@ -1,5 +1,4 @@
 import { recordStartupFrame } from "../canvas-runtime/startup-trace.js";
-import { DIRTY_REASONS, recordSubmission, submissionDiagnosticsEnabled, type FullSceneReason, type SubmissionDiagnostic } from "./frame-submission-diagnostics.js";
 import { applyObserverToScene, renderSceneFingerprint, type CanvasRenderScene, type PreparedModelResource } from "@woohaa3/contracts";
 import { noteSceneSubmitRoute, sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
 import { PositionSceneMirror } from "../canvas-runtime/position-scene-mirror.js";
@@ -35,9 +34,8 @@ export function createFrameSubmission(deps: {
     ...deps.transient(), selected:deps.state.selected, draft:deps.state.draft,
     hover:[deps.state.hoveredNodeId,deps.state.hoveredPort,deps.state.hoveredEdgeId]
   });
-  let trace: Omit<SubmissionDiagnostic, "sequence"> | undefined;
   const now = deps.now ?? (() => performance.now());
-  const baselineBlock = (runtime: BevyRuntime, index: CanvasNodeIndex | null): FullSceneReason | null => {
+  const baselineBlock = (runtime: BevyRuntime, index: CanvasNodeIndex | null): string | null => {
     if (!baseline) return "no-baseline";
     if (baseline.runtime !== runtime) return "runtime-changed";
     if (baseline.index !== index) return "index-changed";
@@ -79,7 +77,6 @@ export function createFrameSubmission(deps: {
     const onlyPositions=!force && reasons.has("position-preview")
       && [...reasons].every(r=>r==="position-preview" || r==="viewport" || r==="viewport-transition");
     const block = runtime && index ? baselineBlock(runtime, index) : runtime ? "index-unavailable" : "runtime-unavailable";
-    if (trace) trace.reason = force ? "forced" : block ?? "dirty-reasons";
     const editorUnchanged = JSON.stringify(baseline?.scene.modelEditor ?? null)
       === JSON.stringify(deps.options.getModelEditor?.() ?? null);
     if (runtime && index && baseline && runtime.setObserver && runtime.baseSceneGeneration?.()
@@ -92,7 +89,6 @@ export function createFrameSubmission(deps: {
           preview: modelPreviewStore.get(focus.nodeId),
           yaw: focus.yaw, pitch: focus.pitch, distance: focus.distance, target: focus.target
         };
-        if (trace) { trace.route = "observer"; trace.reason = "incremental"; }
         noteSceneSubmitRoute("observer", reasons);
         try {
           runtime.setObserver(input);
@@ -114,7 +110,6 @@ export function createFrameSubmission(deps: {
             const viewChanged=viewport.x!==old.x || viewport.y!==old.y || viewport.zoom!==old.zoom;
             if (positions.length) {
               const input={baseSceneGeneration:baseline.base,positions,...(viewChanged ? {viewport} : {})};
-              if (trace) { trace.route = "positions"; trace.reason = "incremental"; }
               noteSceneSubmitRoute("positions", reasons);
               runtime.setPositions(input);
               baseline.scene=mirror.apply(baseline.scene,input);
@@ -124,47 +119,35 @@ export function createFrameSubmission(deps: {
               deps.options.onSceneSubmitted?.();
               return {error:null,retry:false};
             }
-            if (!viewChanged) { if (trace) trace.route = "noop"; return {error:null,retry:false}; }
+            if (!viewChanged) return {error:null,retry:false};
             // No moved rows: a combined frame reduces to the one viewport call.
-            if (trace) { trace.route = "viewport"; trace.reason = "incremental"; }
             noteSceneSubmitRoute("viewport", reasons);
             const error=commitViewportUpdate(runtime,viewport);
             if (error) return fail(error);
-            if (trace && runtime.queueViewport) trace.outcome = "queued";
             baseline.scene={...baseline.scene,viewport:{...viewport}};
             deps.options.onSceneSubmitted?.();
             return {error:null,retry:false};
           } catch (error) { return fail(error); }
         }
       }
-      if (onlyPositions && trace) trace.reason = runtime.setPositions ? "position-plan-unavailable" : "positions-unavailable";
       if (shouldRouteViewportOnly(reasons,force)) {
         const viewport=deps.viewport();
-        if (trace) { trace.route = "viewport"; trace.reason = "incremental"; }
         noteSceneSubmitRoute("viewport", reasons);
         const error=commitViewportUpdate(runtime,viewport);
         if (error) return fail(error);
-        if (trace && runtime.queueViewport) trace.outcome = "queued";
         baseline.scene={...baseline.scene,viewport:{...viewport}};
         deps.options.onSceneSubmitted?.();
         return {error:null,retry:false};
       }
     }
-    const measure = <T,>(key: "sceneBuildMs" | "fingerprintMs", run: () => T): T => {
-      if (!trace) return run();
-      const started = now();
-      try { return run(); } finally { sceneDiagnostics[key] += Math.max(0, now() - started); }
-    };
-    const built = measure("sceneBuildMs", deps.build);
-    if (!built || !runtime) { if (trace) trace.outcome = "skipped"; return {error:null,retry:false}; }
-    if (trace) { trace.nodes = built.scene.nodes.length; trace.edges = built.scene.edges.length; }
+    const built = deps.build();
+    if (!built || !runtime) return {error:null,retry:false};
     sceneDiagnostics.fingerprintBuilds+=1;
-    const nextFingerprint = measure("fingerprintMs", () => renderSceneFingerprint(built.scene));
+    const nextFingerprint = renderSceneFingerprint(built.scene);
     // Runtime/source identity changes require replay even for identical wire data.
     const sameRuntime=baseline?.runtime===runtime && baseline.generation===(runtime.generation?.() ?? 0)
       && baseline.base===runtime.baseSceneGeneration?.();
     if (fingerprint===nextFingerprint && sameRuntime && !runtime.getRenderIssues?.().length) {
-      if (trace) trace.route = "dedupe";
       noteSceneSubmitRoute("dedupe", reasons);
       sceneDiagnostics.sceneDedupes+=1;
       return {error:null,retry:false};
@@ -185,38 +168,19 @@ export function createFrameSubmission(deps: {
   let startupKey = "";
   let startupFrames = 0;
   const run = (reasons: ReadonlySet<string>, force: boolean): Outcome => {
-    if (!submissionDiagnosticsEnabled()) return submit(reasons, force);
     const started = now();
-    const before = { build: sceneDiagnostics.sceneBuildMs, fingerprint: sceneDiagnostics.fingerprintMs,
-      stringify: sceneDiagnostics.stringifyMs, accept: sceneDiagnostics.wasmAcceptMs, submits: sceneDiagnostics.sceneSubmits };
-    trace = { startedAt: started, totalMs: 0, route: "full", reason: "no-baseline", outcome: "error",
-      dirtyReasons: [...new Set([...reasons].map(r => DIRTY_REASONS.includes(r as typeof DIRTY_REASONS[number]) ? r : "other"))],
-      nodes: baseline?.scene.nodes.length ?? 0, edges: baseline?.scene.edges.length ?? 0,
-      sceneJsonCodeUnits: 0, buildMs: 0, fingerprintMs: 0, stringifyMs: 0, acceptMs: 0,
-      baseGeneration: deps.options.getRuntime()?.baseSceneGeneration?.() ?? 0, acceptedGeneration: 0 };
     try {
-      const outcome = submit(reasons, force);
-      if (outcome.error) trace.outcome = "error";
-      else if (trace.outcome !== "skipped" && trace.outcome !== "queued") trace.outcome = "ok";
-      return outcome;
+      return submit(reasons, force);
     } finally {
-      trace.totalMs = Math.max(0, now() - started);
-      trace.buildMs = sceneDiagnostics.sceneBuildMs - before.build;
-      trace.fingerprintMs = sceneDiagnostics.fingerprintMs - before.fingerprint;
-      trace.stringifyMs = sceneDiagnostics.stringifyMs - before.stringify;
-      trace.acceptMs = sceneDiagnostics.wasmAcceptMs - before.accept;
-      if (trace.route === "full" && sceneDiagnostics.sceneSubmits > before.submits) trace.sceneJsonCodeUnits = sceneDiagnostics.lastSceneJsonCodeUnits;
-      trace.acceptedGeneration = deps.options.getRuntime()?.interactionGeneration?.() ?? 0;
       const playback = deps.options.getAnimationPlayback?.();
       if (playback?.playing) {
         const key = JSON.stringify([playback.nodeId, playback.clipId, playback.generation]);
         if (key !== startupKey) { startupKey = key; startupFrames = 0; }
         if (startupFrames++ < 120) recordStartupFrame("scene-frame", {
           nodeId: playback.nodeId, clipId: playback.clipId, generation: playback.generation,
-          frame: startupFrames, ...trace
+          frame: startupFrames, totalMs: Math.max(0, now() - started)
         });
       }
-      recordSubmission(trace); trace = undefined;
     }
   };
 

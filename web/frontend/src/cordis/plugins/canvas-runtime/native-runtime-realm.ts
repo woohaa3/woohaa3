@@ -1,8 +1,6 @@
 import type { BevyModule } from "./bevy-runtime-types.js";
 import type { RuntimeRealm } from "./runtime-realm.js";
-import { createNativePerformance } from "./native-performance.js";
 import { createNativeAsyncRpc } from "./native-async-rpc.js";
-import { recordNativeInputCall } from "./native-input-timing.js";
 import { createNativeViewportChannel } from "./native-viewport-channel.js";
 import { nativeProtocolUrl } from "../../../desktop/native-protocol.js";
 import { nativeDrawableLayout } from "./native-surface-layout.js";
@@ -24,7 +22,6 @@ export async function createNativeRuntimeRealm(
   const host = canvas.parentElement;
   // 与浏览器 realm 一致：新 host/画布切换先用主题 curtain 盖住，首个主题画面确认后揭示。
   delete host.dataset.canvasPresented;
-  const timings = createNativePerformance(target, bootstrap.token);
   const asyncRpc = createNativeAsyncRpc(target, bootstrap.token);
   let active = true;
   target.document.documentElement.dataset.nativeCanvas = "true";
@@ -42,37 +39,28 @@ export async function createNativeRuntimeRealm(
   // The current interaction controller requires an exact synchronous query result.
   // WKWebView waits in its own process; the Rust handler queues each call onto
   // Tauri's main thread. Never substitute cached hover results for pointer-down.
-  const request = (path: string, body?: string | Uint8Array, timingName = path.split("?")[0]!): XMLHttpRequest => {
+  const request = (path: string, body?: string | Uint8Array): XMLHttpRequest => {
     if (!active) throw new Error("Native canvas disposed");
     const xhr = new target.XMLHttpRequest();
     xhr.open(body === undefined ? "GET" : "POST", nativeProtocolUrl(path, target), false);
     xhr.setRequestHeader("X-Woohaa-Token", bootstrap.token);
     if (typeof body === "string") xhr.setRequestHeader("Content-Type", "application/json");
     else xhr.overrideMimeType("text/plain; charset=x-user-defined");
-    const started = target.performance.now();
-    try { xhr.send(body === undefined ? null : typeof body === "string" ? body : new Uint8Array(body).buffer); }
-    finally {
-      const elapsed = target.performance.now() - started;
-      timings.record(timingName, elapsed);
-      recordNativeInputCall(timingName, elapsed);
-    }
+    xhr.send(body === undefined ? null : typeof body === "string" ? body : new Uint8Array(body).buffer);
     if (xhr.status !== 200) throw new Error(`桌面画布通信失败 (${xhr.status})`);
     return xhr;
   };
   const rawRpc = (method: string, ...args: unknown[]): unknown => {
-    const result = JSON.parse(request("rpc", JSON.stringify({ method, args }), method === "set_viewport_sequenced" ? "set_viewport" : method).responseText) as
+    const result = JSON.parse(request("rpc", JSON.stringify({ method, args })).responseText) as
       { ok: true; value: unknown } | { ok: false; error: string };
     if (!result.ok) throw new Error(result.error);
     return result.value;
   };
   const viewport = createNativeViewportChannel({
     send: async (json, sequence, signal) => {
-      const started = target.performance.now();
-      try {
-        const value = await asyncRpc.call("set_viewport_sequenced", [json, sequence], signal);
-        if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new Error("Invalid viewport acceptance");
-        return value as number;
-      } finally { timings.record("set_viewport_async", target.performance.now() - started); }
+      const value = await asyncRpc.call("set_viewport_sequenced", [json, sequence], signal);
+      if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new Error("Invalid viewport acceptance");
+      return value as number;
     },
     sync: (json, sequence) => rawRpc("set_viewport_sequenced", json, sequence) as number,
     failed: () => fault("native-viewport")
@@ -111,10 +99,8 @@ export async function createNativeRuntimeRealm(
     start: () => {},
     ...(bootstrap.viewportAsync ? { queue_viewport: (json: string, accepted: (generation: number) => void) => viewport.queue(json, accepted) } : {}),
     async_canvas_work_diagnostics: async () => {
-      const started = target.performance.now();
       const value = await asyncRpc.call("canvas_work_diagnostics");
       if (typeof value !== "string") throw new Error("Invalid native diagnostics");
-      timings.recordWork(JSON.parse(value), started, target.performance.now());
       return value;
     },
     set_texture: (id, w, h, bytes, content) => upload(false, id, w, h, bytes, content ?? ""),
@@ -147,7 +133,6 @@ export async function createNativeRuntimeRealm(
     active = false;
     delete host.dataset.canvasPresented;
     asyncRpc.dispose();
-    timings.dispose();
     delete target.document.documentElement.dataset.nativeCanvas;
   };
   signal?.addEventListener("abort", dispose, { once: true });

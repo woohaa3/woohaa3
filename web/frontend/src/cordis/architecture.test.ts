@@ -331,9 +331,6 @@ describe("前端协议边界审计", () => {
       // canvas-shell ↔ model-scene：场景合成读取片场组合身份（itemRoots）。
       // Render warning UI consumes only the typed renderer status surface, without mutating resources.
       "cordis/plugins/canvas-shell/canvas-render-warnings.tsx -> canvas-runtime",
-      // 交互采集把帧诊断（build/submit/几何工作量）并入样本：只读 canvas-runtime 的共享计数
-      // 快照（change: 2026-10-10-optimize-canvas-interaction-hot-path，任务 1.2）。
-      "cordis/plugins/canvas-shell/interaction-performance.ts -> canvas-runtime",
       // 纯视口增量路由读取 runtime 能力（base/version），不接受第二套 viewport
       // （change: 2026-10-10-optimize-canvas-interaction-hot-path，任务 3.4）。
       "cordis/plugins/canvas-shell/interaction-frame-plan.ts -> canvas-runtime"

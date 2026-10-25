@@ -1,5 +1,5 @@
+/// <reference types="vite/client" />
 import { hoverNodeStore } from "../../services/hover-store.js";
-import { beginLifecycleSpan, measureLifecycle } from "../../performance/lifecycle-performance.js";
 import { RuntimeIssues } from "./runtime-issues.js";
 import { protectWasmModule } from "./wasm-call-boundary.js";
 import { TextureUploadBoundary } from "./texture-upload-boundary.js";
@@ -27,7 +27,6 @@ import type {
 import { canvasPositionUpdateRequest, modelDescriptorOf, modelDescriptorPayload, modelPayloadLeaseRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
 
 import { sceneDiagnostics, measureSceneWork } from "./scene-diagnostics.js";
-import { createWorkDiagnosticsCollector } from "./work-diagnostics-collector.js";
 import { createRuntimeViewport } from "./runtime-viewport.js";
 import { createRuntimeObserver } from "./runtime-observer.js";
 import {FocusDetailEncoder} from "./focus-details.js";
@@ -177,10 +176,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
   let realmFault: string | null = null;
   /** 浏览器 realm 的 iframe 在首个 themed scene 绘制前保持透明，避免切换画布时白闪。 */
   let revealScheduled = false;
-  let endReady: ReturnType<typeof beginLifecycleSpan> = () => {};
-  let endFirstRender: ReturnType<typeof beginLifecycleSpan> = () => {};
   const fault = (reason: string) => {
-    realmFault = reason; endReady("error"); endFirstRender("error"); supervisor?.fail(reason);
+    realmFault = reason; supervisor?.fail(reason);
   };
   const disposeRealm = () => realm?.dispose();
   const callsAllowed = () => !supervisor || supervisor.phase === "running";
@@ -190,9 +187,9 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     realm = await createRuntimeRealm(target, fault, options.signal);
     return protectWasmModule(realm.module, issues, () => candidate || callsAllowed());
   };
-  let module = await measureLifecycle("wasm-module", () => loadModule());
+  let module = await loadModule();
   try {
-    await measureLifecycle("wasm-init", () => module.default());
+    await module.default();
     options.signal?.throwIfAborted();
     if (!options.importModule && (!module.runtime_health || !module.seed_runtime_generation)) throw new Error("Bevy WASM 缺少恢复健康协议");
 
@@ -204,13 +201,9 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
 
   } catch (error) { disposeRealm(); throw error; }
 
-  endReady = beginLifecycleSpan("renderer-ready");
-  endFirstRender = beginLifecycleSpan("renderer-first-render");
-  let firstRenderPending = import.meta.env.DEV && import.meta.env.VITE_WOOHAA_PERFORMANCE !== "0" && !options.importModule;
   let disposed = false;
   /** 最近一次提交的快照（E2E/排障观察用；change: add-node-endpoint-hover）。 */
   let lastScene: CanvasRenderScene | null = null;
-  const workDiagnostics = createWorkDiagnosticsCollector(target, () => module);
   const positionMirror = new PositionSceneMirror();
   /** 当前运行时 generation；每次创建 runtime 递增（WASM 重启后资源需重放）。 */
   let generation = nextRuntimeGeneration();
@@ -396,7 +389,6 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
   const queryBridge = createQueryBridge(() => interactionGeneration);
   const { runQuery, guardGeneration } = queryBridge;
 
-  const mergeRustWorkCounters = workDiagnostics.refresh;
   const now = () => target.performance?.now() ?? performance.now();
 
   const runtime: BevyRuntime = {
@@ -423,22 +415,10 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     getRenderIssues: resourceFailures.getSnapshot,
     subscribeRenderIssues: resourceFailures.subscribe,
     retryFailedModels: resourceFailures.retry,
-    /** 最近一次（JS 读取的）不可变资源诊断；只读缓存，不触发 WASM 调用。 */
-    getResourceDiagnostics: workDiagnostics.resources,
-    backgroundWorkDiagnostics: () => !!module.async_canvas_work_diagnostics,
-    /** 开发采集边界刷新 Rust 累计诊断；生产保持缓存读取（不增加接口）。 */
-    ...(import.meta.env.DEV ? { refreshWorkDiagnostics: mergeRustWorkCounters } : {}),
     acceptsPlayback: () => !disposed && (!supervisor || supervisor.phase === "running"),
     isReady: () => {
       try {
-        const ready = !disposed && (!supervisor || supervisor.phase === "running") && module.is_ready();
-        if (ready) {
-          endReady();
-          if (firstRenderPending && module.runtime_health && readRuntimeHealth(module.runtime_health()).renders > 0) {
-            endFirstRender(); firstRenderPending = false;
-          }
-        }
-        return ready;
+        return !disposed && (!supervisor || supervisor.phase === "running") && module.is_ready();
       } catch { return false; }
     },
     renderedRevision: () => module.rendered_revision(),
@@ -520,9 +500,6 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       interactionGeneration = measureSceneWork("wasmAcceptMs", now, () => module.set_scene(json));
       // full 接受同时刷新 base 身份；纯视口增量沿用该身份直到下次 full。
       baseSceneGeneration = interactionGeneration;
-      // 接受点后合并 Rust 实际工作计数（世界索引/模型候选 AABB 重建）
-      // （change: 2026-10-10-optimize-canvas-interaction-hot-path，任务 1.2）。
-      mergeRustWorkCounters();
       lastScene = positionMirror.reset(accepted);
       supervisor?.accepted(scene.revision, interactionGeneration);
       // 首个完整 scene 已提交：等 Bevy 的健康协议确认该 generation 已应用且完成 render
@@ -646,9 +623,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     },
     dispose: () => {
       if (disposed) return;
-      endReady("cancelled"); endFirstRender("cancelled");
       disposed = true;
-      workDiagnostics.dispose();
       focusDetails.reset();
       retryListeners.clear();
       supervisor?.dispose();
@@ -720,19 +695,16 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         throw new Error("渲染器重建未通过健康检查");
       } catch (error) { disposeRealm(); throw error; }
     }, invalidate: () => { try { resourceFailures.retry(); } finally { runtime.retryRuntimeIssues?.(); } } });
-    if (realmFault) { endReady("error"); endFirstRender("error"); supervisor.fail(realmFault); }
+    if (realmFault) { supervisor.fail(realmFault); }
     target.document.addEventListener("visibilitychange", visibilityChanged);
     healthTimer = target.setInterval(() => {
       if (disposed || supervisor?.phase !== "running") return;
       if (!target.document.getElementById("bevy-canvas")) return;
       if (!realm?.connected()) { supervisor?.fail("surface-detached"); return; }
       try {
-        const health = readRuntimeHealth(module.runtime_health!());
-        if (module.is_ready()) endReady();
-        if (firstRenderPending && health.renders > 0) { endFirstRender(); firstRenderPending = false; }
-        supervisor?.sample(health, target.document.visibilityState === "visible");
+        supervisor?.sample(readRuntimeHealth(module.runtime_health!()), target.document.visibilityState === "visible");
       }
-      catch (error) { endReady("error"); endFirstRender("error"); supervisor?.fail(error instanceof Error ? error.message : "health"); }
+      catch (error) { supervisor?.fail(error instanceof Error ? error.message : "health"); }
     }, 1000);
   }
 

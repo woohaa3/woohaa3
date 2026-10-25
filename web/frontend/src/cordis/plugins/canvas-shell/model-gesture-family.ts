@@ -10,7 +10,6 @@
  * gizmo 与焦点三轴 gizmo 写入，`modelPlacement` 不再由直接拖动产生。
  */
 import type { ModelFocusProjection } from "@woohaa3/contracts";
-import { measureInteractionPhase } from "../../performance/interaction-phase-profiler.js";
 import { focusedTarget, ModelFocusSession } from "./model-focus-session.js";
 import { hitFocusGizmoAxis, hitShotGizmoHandle, type GizmoQuery } from "./model-gizmo-hit.js";
 import { createFocusNavigation } from "./model-focus-navigation.js";
@@ -332,7 +331,7 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
     if (cameraDragKey && (!placementEditable() || cameraDragKey !== dragKey())) { clearHeldKeys(); return true; }
     // 片场对象拖动优先（change: 2026-10-09 片场对象编辑）。
     if (activeObjectDrag && objectGesture) {
-      measureInteractionPhase("object-gesture", () => objectGesture!.move(point));
+      objectGesture!.move(point);
       return true;
     }
     // 镜头 pose 手势优先（design D6）。

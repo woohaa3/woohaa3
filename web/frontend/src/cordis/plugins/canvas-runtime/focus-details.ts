@@ -1,4 +1,3 @@
-import { measurePhotocraft } from "../../performance/photocraft-performance.js";
 /** 图片聚焦的瞬时源像素纹理，与规范文档和宿主剪贴板无关。 */
 export type ImageFocusDetails={nodeId:string;width:number;height:number;tiles:readonly {x:number;y:number;width:number;height:number;pixels:Uint8Array}[];onUploadFailure?:()=>void};
 type EncodedDetails={manifest:string;pixels:Uint8Array};
@@ -31,13 +30,13 @@ export class FocusDetailEncoder {
   upload(frame:ImageFocusDetails|null,send:(manifest:string,pixels:Uint8Array)=>void):void {
     const previous=this.previous;
     const compatible=frame && previous && frame.nodeId===previous.nodeId && frame.width===previous.width && frame.height===previous.height;
-    const encoded=measurePhotocraft("region.pack", () => encode(frame,tile=>{
+    const encoded=encode(frame,tile=>{
       let cacheId=this.ids.get(tile.pixels);
       if(cacheId===undefined){cacheId=++this.nextId;if(cacheId>0xffffffff)throw new Error("图片细节纹理代次超限");this.ids.set(tile.pixels,cacheId);}
       const reuse=!!compatible && previous.tiles.some(old=>old.x===tile.x&&old.y===tile.y&&old.width===tile.width&&old.height===tile.height&&old.pixels===tile.pixels);
       return {cacheId,reuse};
-    }));
-    measurePhotocraft("region.texture-submit", () => send(encoded.manifest,encoded.pixels), encoded.pixels.byteLength);
+    });
+    send(encoded.manifest, encoded.pixels);
     this.previous=frame;
   }
 }

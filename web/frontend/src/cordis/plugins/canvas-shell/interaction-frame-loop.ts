@@ -1,4 +1,3 @@
-import { measureInteractionPhase } from "../../performance/interaction-phase-profiler.js";
 /** One cancellable rAF owner. Independent steps and diagnostics cannot stop it. */
 export function createInteractionFrameLoop(deps: {
   target: Pick<Window, "requestAnimationFrame" | "cancelAnimationFrame">;
@@ -11,7 +10,7 @@ export function createInteractionFrameLoop(deps: {
   let frame: number | null = null;
   const step = <T>(operation: string, invoke: () => T, fallback: T): T => {
     try {
-      const result = operation === "frame" ? invoke() : measureInteractionPhase(operation, invoke);
+      const result = invoke();
       try { deps.recovered(operation); } catch { /* Diagnostic isolation. */ }
       return result;
     } catch (error) {

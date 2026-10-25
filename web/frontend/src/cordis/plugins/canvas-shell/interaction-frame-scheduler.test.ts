@@ -1,4 +1,3 @@
-import { submissionSequence, submissionsSince } from "./frame-submission-diagnostics.js";
 /**
  * 统一失效调度与单帧提交（change: 2026-10-10-optimize-canvas-interaction-hot-path，design D2）。
  *
@@ -97,16 +96,6 @@ describe("纯视口增量路由（design D3）", () => {
     expect(changed).toHaveBeenCalledTimes(3);
     controller.dispose(); controller.invalidate("late"); advance();
     expect(changed).toHaveBeenCalledTimes(3);
-  });
-  it("异步视口只记录 queued，诊断代数仍是最近真实接受值", () => {
-    const { dom, runtime, controller, advance } = setup(); controller.flush();
-    const start = submissionSequence(); runtime.queueViewport = vi.fn();
-    const sync = vi.spyOn(runtime, "setViewport");
-    dom.fire("wheel", { deltaX: 6, deltaY: 2, deltaMode: 0, clientX: 900, clientY: 700, timeStamp: 1 });
-    advance();
-    expect(runtime.queueViewport).toHaveBeenCalledOnce(); expect(sync).not.toHaveBeenCalled();
-    expect(submissionsSince(start).entries.at(-1)).toMatchObject({ route: "viewport", outcome: "queued", acceptedGeneration: 1 });
-    controller.dispose();
   });
   it("滚轮后未到下一 rAF 就点击时，native 查询前先排入最新视口", () => {
     const { dom, runtime, controller } = setup(); controller.flush();
@@ -326,24 +315,6 @@ describe("统一失效账本（design D2）", () => {
     expect(sceneDiagnostics.sceneBuilds).toBe(0);
     expect(sceneDiagnostics.sceneSubmits).toBe(0);
   });
-});
-
-it("records incremental rejection, recovery and mixed-dirty full reasons without node content", () => {
-  const { dom, advance, controller, failNextSetViewport } = setup();
-  controller.flush();
-  const start = submissionSequence();
-  failNextSetViewport("stale-base");
-  dom.fire("wheel", { deltaX: 0, deltaY: -100, deltaMode: 0, ctrlKey: true, timeStamp: 1 });
-  advance(); advance();
-  controller.invalidate("theme");
-  dom.fire("wheel", { deltaX: 0, deltaY: -100, deltaMode: 0, ctrlKey: true, timeStamp: 2 });
-  advance();
-  const { entries } = submissionsSince(start);
-  expect(entries[0]).toMatchObject({ route: "viewport", reason: "incremental", outcome: "error" });
-  expect(entries[1]).toMatchObject({ route: "full", reason: "no-baseline", outcome: "ok" });
-  expect(entries[2]).toMatchObject({ route: "full", reason: "dirty-reasons", dirtyReasons: ["theme", "viewport"] });
-  expect(JSON.stringify(entries)).not.toContain('"n1"');
-  controller.dispose();
 });
 
 describe("聚焦观察镜头增量", () => {

@@ -1,4 +1,3 @@
-import { measureVideoPhase, recordVideoTransition } from "../../performance/interaction-phase-profiler.js";
 /**
  * 画布视频帧会话
  * （change: enable-video-node-live-preview，design D1–D4/D8；
@@ -185,7 +184,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   let boundStructure = "";
   let boundSources: Map<string, { url: string; posterUrl: string | null }> | null = null;
   const notify = () => options.onChange?.();
-  const loading = new NodeResourceLoading(notify, "video-first-frame");
+  const loading = new NodeResourceLoading(notify);
   const purposeOf = (nodeId: string): ResidencyPurpose => options.purposeOf?.(nodeId) ?? "visible";
 
   /** 首帧名额：只有显式 release 才归还（完成/失败/超时/清理）。 */
@@ -227,7 +226,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       session.fallbackTimer = null;
     }
   };
-  const detachSession = (session: Session) => measureVideoPhase("session-detach", session.nodeId, () => {
+  const detachSession = (session: Session) => {
     if (session.detached) return;
     session.detached = true;
     disposedCount += 1;
@@ -242,22 +241,22 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     residency?.cancel(`video-session:${session.nodeId}`);
     residency?.cancel(`video-frame:${session.nodeId}`);
     try {
-      measureVideoPhase("pause-call", session.nodeId, () => session.video.pause());
+      session.video.pause();
     } catch {
       /* 元素可能已被移除 */
     }
     session.video.removeAttribute?.("src");
     try {
-      measureVideoPhase("load-call", session.nodeId, () => session.video.load?.());
+      session.video.load?.();
     } catch {
       /* 忽略 */
     }
-  });
+  };
   /** 会话仍然有效（未被替换/移除/dispose）且 source generation 未过期。 */
   const isCurrent = (session: Session, sourceGeneration: number): boolean =>
     !disposed && !session.detached && sessions.get(session.nodeId) === session && session.generation === sourceGeneration;
   /** 绘制并上传一帧真实画面；返回是否成功上传。 */
-  const uploadRealFrame = (session: Session, sourceGeneration: number): boolean => measureVideoPhase("frame-upload", session.nodeId, () => {
+  const uploadRealFrame = (session: Session, sourceGeneration: number): boolean => {
     if (!isCurrent(session, sourceGeneration) || options.isSuspended?.()) return false;
     const { videoWidth, videoHeight, seeking, readyState } = session.video;
     if (!videoWidth || !videoHeight || seeking || (readyState !== undefined && readyState < 2)) return false;
@@ -268,23 +267,22 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     if (!(residency?.spendUploadBytes(videoWidth * videoHeight * 4, session.state === "playing") ?? true)) return false;
     const uploadedAt = now();
     const accepted = uploads.run(`video:${session.nodeId}`, session.sourceUrl, session.nodeId, () => {
-      const raster = measureVideoPhase("frame-raster", session.nodeId, () => rasterizeDrawable(
+      const raster = rasterizeDrawable(
       session.video,
       { width: videoWidth, height: videoHeight },
       () => session.canvas,
-      TEXTURE_MAX_DIMENSION,
-      session.nodeId
-    ));
+      TEXTURE_MAX_DIMENSION
+    );
       if (!raster) throw new Error("视频预览无法读取像素");
-      return measureVideoPhase("texture-submit", session.nodeId, () => options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels,
-        { sourceKey: session.sourceUrl })) !== false;
+      return options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels,
+        { sourceKey: session.sourceUrl }) !== false;
     });
-    if (!accepted) { loading.setLoading(session.load, false, "error"); return false; }
+    if (!accepted) { loading.setLoading(session.load, false); return false; }
     session.hasRealFrame = true;
     loading.setLoading(session.load, false);
     session.lastUploadedAt = uploadedAt;
     return true;
-  });
+  };
 
   const uploadPosterFallback = (session: Session, sourceGeneration: number) => {
     if (session.hasRealFrame || session.posterSettled) return;
@@ -371,17 +369,17 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       }
     });
   };
-  const stopPlayback = (session: Session) => measureVideoPhase("stop-playback", session.nodeId, () => {
+  const stopPlayback = (session: Session) => {
     if (session.state === "idle") return;
     session.state = "idle";
     if (session.hasRealFrame) loading.setLoading(session.load, false);
     cancelFrameHandle(session);
     try {
-      measureVideoPhase("pause-call", session.nodeId, () => session.video.pause());
+      session.video.pause();
     } catch {
       /* 忽略 */
     }
-  });
+  };
 
   const scheduleNextFrame = (session: Session, sourceGeneration: number) => {
     if (!isCurrent(session, sourceGeneration) || session.state !== "playing") return;
@@ -416,7 +414,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     if (session.video.preload !== "auto") session.video.preload = "auto";
     let playResult: unknown;
     try {
-      playResult = measureVideoPhase("play-call", session.nodeId, () => session.video.play());
+      playResult = session.video.play();
     } catch {
       playResult = undefined;
     }
@@ -478,7 +476,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     });
     video.addEventListener("error", () => {
       if (!isCurrent(session, session.generation)) return;
-      loading.setLoading(session.load, false, "error");
+      loading.setLoading(session.load, false);
       // 解码失败同样终结真实在途名额（不靠超时兜底）。
       releaseStatic(session.nodeId);
       session.staticRequested = false;
@@ -521,13 +519,12 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       retryVersion = retry;
       const suspended = options.isSuspended?.() ?? false;
       const resuming = wasSuspended && !suspended;
-      if (suspended !== wasSuspended) recordVideoTransition(suspended ? "focus-suspend" : "focus-resume", sessions.size);
       wasSuspended = suspended;
       if (suspended) {
         for (const session of sessions.values()) stopPlayback(session);
         hovered = null;
       }
-      const canvas = measureVideoPhase("canvas-projection", null, () => options.getCanvas());
+      const canvas = options.getCanvas();
       if (!canvas) {
         for (const session of sessions.values()) detachSession(session);
         sessions.clear();
@@ -566,7 +563,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       for (const nodeId of admittedIds) {
         if (sessions.has(nodeId)) continue;
         const { url, posterUrl } = next.get(nodeId)!;
-        const session = uploads.run(`video-session:${nodeId}`, url, nodeId, () => measureVideoPhase("session-create", nodeId, () => createSession(nodeId, url, posterUrl)));
+        const session = uploads.run(`video-session:${nodeId}`, url, nodeId, () => createSession(nodeId, url, posterUrl));
         if (!session) continue;
         sessions.set(nodeId, session);
         // 普通静态卡片优先 poster：有 poster 时不抢首帧名额（design D3 / 任务 3.3）。
@@ -591,10 +588,10 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       if (!suspended && pendingRestores.size) {
         const [nodeId, session] = pendingRestores.entries().next().value!;
         pendingRestores.delete(nodeId);
-        if (isCurrent(session, session.generation)) measureVideoPhase("restore-frames", nodeId, () => {
+        if (isCurrent(session, session.generation)) {
           if (uploadRealFrame(session, session.generation)) notify();
           else { session.posterSettled = false; uploadPosterFallback(session, session.generation); }
-        });
+        }
       }
 
       if (hovered) {

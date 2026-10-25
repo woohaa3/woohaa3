@@ -1,31 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildCanvasRenderScene, createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { applyNodeResourceLoading, NodeResourceLoading } from "./node-resource-loading.js";
 
-import { beginLifecycleSpan } from "../performance/lifecycle-performance.js";
-vi.mock("../performance/lifecycle-performance.js", () => ({ beginLifecycleSpan: vi.fn(() => vi.fn()) }));
-
 describe("节点资源加载状态", () => {
-  it("首轮准备只记录一次，换源/销毁取消，失败不记为成功，视频缓冲不重复记录", () => {
-    vi.mocked(beginLifecycleSpan).mockClear();
-    const loading = new NodeResourceLoading(undefined, "video-first-frame");
+  it("换源只保留最新加载身份，视频缓冲复用同一身份", () => {
+    const loading = new NodeResourceLoading();
     const old = loading.track("private-node", "private-url");
     const current = loading.track("private-node", "new-private-url");
-    const ends = vi.mocked(beginLifecycleSpan).mock.results.map(result => result.value);
-    expect(ends[0]).toHaveBeenCalledWith("cancelled");
+    expect(loading.isLoading("private-node")).toBe(true);
     loading.setLoading(old, false);
-    loading.setLoading(current, false, "error");
-    loading.setLoading(current, true);
+    expect(loading.isLoading("private-node")).toBe(true);
     loading.setLoading(current, false);
-    expect(ends[1]).toHaveBeenCalledTimes(1);
-    expect(ends[1]).toHaveBeenCalledWith("error");
-    const last = loading.track("other", "source");
-    const endLast = vi.mocked(beginLifecycleSpan).mock.results.at(-1)!.value;
-    loading.clear(); loading.setLoading(last, false);
-    expect(endLast).toHaveBeenCalledTimes(1);
-    expect(endLast).toHaveBeenCalledWith("cancelled");
-    expect(beginLifecycleSpan).toHaveBeenCalledWith("video-first-frame");
-    expect(beginLifecycleSpan).toHaveBeenCalledTimes(3);
+    expect(loading.isLoading("private-node")).toBe(false);
+    loading.setLoading(current, true);
+    expect(loading.isLoading("private-node")).toBe(true);
   });
   it("换源、删除与清空后，迟到结果不能结束当前加载或重新挂起提示", () => {
     const loading = new NodeResourceLoading();

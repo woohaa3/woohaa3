@@ -21,34 +21,17 @@ import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import { createAggregateConnectFamily } from "./aggregate-connect.js";
 import type { InteractionCore } from "./interaction-core.js";
 import type { Gesture } from "./interaction-types.js";
-import { createInteractionRecorder, defaultBuildIdentity, instrumentPointerHandlers, type InteractionRelease } from "./interaction-performance.js";
-import { createInputSegments } from "./interaction-input-segments.js";
 import { createWheelEntryHandler } from "./input/wheel-entry.js";
 /** 右键位移阈值：小于它视为短点击（开菜单），达到则进入平移并抑制菜单。 */
 const RIGHT_CLICK_PAN_THRESHOLD_PX = 10;
 
 export function create2dInputFamily(core: InteractionCore) {
   const { options, canvas, writable, state, model, setSelection, submit, schedule } = core;
-  const recorder = import.meta.env.DEV ? createInteractionRecorder(core.target, {
-    identity: defaultBuildIdentity,
-    resources: () => options.getRuntime()?.getResourceDiagnostics?.(),
-    refreshDiagnostics: () => options.getRuntime()?.refreshWorkDiagnostics?.(),
-    backgroundDiagnostics: () => options.getRuntime()?.backgroundWorkDiagnostics?.() ?? false,
-    surface: () => {
-      const size = core.surfaceSize();
-      return { width: size.width, height: size.height };
-    }
-  }) : undefined;
-  const viewport = createWheelViewport(core, recorder);
+  const viewport = createWheelViewport(core);
   const aggregate = createAggregateConnectFamily(core);
   const history = createHistoryClick(core);
 
-  // 单次事件分段：pointer 按下与 wheel 进入各自 reset，互不污染（design D1）。
-  const segments = createInputSegments(recorder);
-  const { measure } = segments;
-  let release: InteractionRelease | undefined;
-  let commandId: number | undefined;
-  const drag = createDragGestureFamily(core, measure, outcome => { release = outcome; }, (result, outcome) => { commandId = recorder?.observeCommand(result, outcome); });
+  const drag = createDragGestureFamily(core);
 
   const resizeTarget = (    gesture: Extract<Gesture, { kind: "resize" }>,
     world: Point
@@ -65,7 +48,6 @@ export function create2dInputFamily(core: InteractionCore) {
 
   const onPointerDown = (event: PointerEvent) => {
     contextMenu.begin();
-    segments.reset();
     // 聚焦查看：相机/编辑手势优先，短路一切 2D 手势（design D5）。
     // 非模态 editor/history panel 不得阻断 focus pointer（design D6）。
     if (model.active) {
@@ -92,7 +74,7 @@ export function create2dInputFamily(core: InteractionCore) {
     const beginGesture = () => core.clearHover();
     // 右键（2）用于「短点击开菜单 / 拖拽平移」；其它 >1 的按键忽略。
     const isRight = event.button === 2;
-    const world = measure("coordinatesMs", () => core.pointerWorld(event));
+    const world = core.pointerWorld(event);
     state.lastPointerWorld = world;
     if (event.button !== undefined && event.button > 1 && !isRight) return;
     // 平移手势只用视口，不依赖命中几何：在任何查询之前处理。
@@ -105,9 +87,7 @@ export function create2dInputFamily(core: InteractionCore) {
     }
 
     // 命中由 Rust interaction snapshot 计算（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
-    const hitResult = measure("hitQueryMs", () =>
-      core.queryPoint(world, core.activeViewport().zoom, pressedHoveredEdgeId)
-    );
+    const hitResult = core.queryPoint(world, core.activeViewport().zoom, pressedHoveredEdgeId);
     if (!hitResult.ok) {
       // 几何不可用/过期：不开始新手势（design D3）。
       return;
@@ -231,8 +211,8 @@ export function create2dInputFamily(core: InteractionCore) {
       // 结构/位置索引按 working 身份缓存（design D5）：selection/pan 不失效，pending/远端
       // 结构与位置变化会产生新对象并重建。避免每次按下复制带 data 的整表节点数组。
       const index = sharedCanvasNodeIndex(canvasState);
-      // selection/gesture 初始化与绝对 origin 解析（design D1 分段）。
-      const origins = measure("selectionMs", () => {
+      // selection/gesture 初始化与绝对 origin 解析。
+      const origins = (() => {
         const starts = new Map<string, { x: number; y: number }>();
         const moving = new Set(active);
         for (const id of active) for (const childId of options.compositeAssets?.dragAlongNodeIds(canvasState, id) ?? []) moving.add(childId);
@@ -251,7 +231,7 @@ export function create2dInputFamily(core: InteractionCore) {
           }
         }
         return starts;
-      });
+      })();
       // 拖动 group 时其后代随容器移动，因此只拖动**根**：后代保持相对坐标，
       // 若把后代也纳入 origins 会被平移两次（change: add-canvas-node-grouping，design D3）。
       const dragRoots = index?.dragRoots(origins) ?? new Map<string, { x: number; y: number }>();
@@ -305,15 +285,14 @@ export function create2dInputFamily(core: InteractionCore) {
 
   const onPointerMove = (event: PointerEvent) => {
     if (history.move(event)) return;
-    segments.reset();
     if (modelPreviewPointerMove(core, event)) return;
     if (model.active) {
       model.moveFocusPointer(event);
       return;
     }
     // 同一事件只读一次 canvas 外框（design D1 分段 + 任务 5.2）；world 换算与 hover 结算共用。
-    const bounds = measure("domRectMs", () => core.readBounds());
-    const world = measure("coordinatesMs", () => core.pointerWorld(event, bounds));
+    const bounds = core.readBounds();
+    const world = core.pointerWorld(event, bounds);
     state.lastPointerWorld = world;
     // pointer 热路径只查询 Rust interaction snapshot，不扫描全场景或构建渲染快照。
     // 卡片外的片场模型 picking 仍驱动原有 hover 播放。
@@ -389,9 +368,6 @@ export function create2dInputFamily(core: InteractionCore) {
   const onPointerUp = (event: PointerEvent) => {
     contextMenu.end(event);
     if (history.up(event)) return;
-    commandId = undefined;
-    release = state.gesture.kind === "drag" && state.gesture.moved ? "no-change" : "click";
-    segments.reset();
     if (model.active) {
       model.endFocusPointer(event);
       try {
@@ -512,7 +488,6 @@ export function create2dInputFamily(core: InteractionCore) {
     }
     } catch (error) {
       // 提交/回调失败不得卡住输入：记录但不中断，手势仍在 finally 复位。
-      if (releasedKind === "drag") release = "release-error";
       options.onInteractionError?.(error);
     } finally {
       // 无论提交/回调是否抛错，都必须复位指针捕获与手势，避免拖拽状态卡死
@@ -543,11 +518,10 @@ export function create2dInputFamily(core: InteractionCore) {
     if (model.active && event.buttons === 0) core.clearHeldKeys();
   };
 
-  const onWheel = createWheelEntryHandler(core, recorder, viewport, segments);
+  const onWheel = createWheelEntryHandler(core, viewport);
   const contextMenu = createContextMenuFallback(core, onPointerUp);
   const family = {
     dispose: () => {
-      recorder?.dispose();
       drag.cancel();
       aggregate.cancel();
     },
@@ -583,6 +557,5 @@ export function create2dInputFamily(core: InteractionCore) {
     /** 取消聚合拉线手势（modal pre-open / dispose / host）。 */
     cancelAggregateConnect: () => aggregate.cancel()
   };
-  // 采集只在开发构建注入（生产无 recorder，instrumentPointerHandlers 直接透传）。
-  return import.meta.env.DEV ? instrumentPointerHandlers(family, recorder, () => state.gesture, () => model.active, segments.current, () => release, () => commandId) : family;
+  return family;
 }

@@ -1,4 +1,3 @@
-import { measureLifecycle } from "../../performance/lifecycle-performance.js";
 /**
  * Canvas Runtime Service（change: adopt-frontend-cordis-plugin-runtime，design D3）。
  *
@@ -572,7 +571,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       return loadBevyRuntime({ signal: this.loadAbort.signal });
     });
     try {
-      const runtime = await measureLifecycle("renderer-load", loader);
+      const runtime = await loader();
       if (this.disposed) { runtime.dispose(); return runtime; }
       this.runtimeInstance = runtime;
       this.publish({ phase: "ready", error: null });

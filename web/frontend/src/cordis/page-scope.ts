@@ -1,4 +1,3 @@
-import { measureLifecycle } from "./performance/lifecycle-performance.js";
 /**
  * Page scope 运行时
  * （change: 2026-09-28-unify-canvas-presentation-navigation，task 2.1/2.2/2.5 / design D1；
@@ -485,12 +484,12 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     let resolved: ResolvedPage = { kind: "ready", canvasId: "" };
     let normalized = location;
     if (location.page === "canvas") {
-      const outcome = await measureLifecycle("page-resolve", () => resolveCanvasLocation({
+      const outcome = await resolveCanvasLocation({
         location,
         catalog,
         selection,
         preparation
-      }));
+      });
       if (generation !== transitionGeneration) return;
       if (outcome.kind === "resolved") {
         resolved = { kind: "ready", canvasId: outcome.canvasId };

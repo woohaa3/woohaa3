@@ -75,26 +75,6 @@ it("disposing an older controller preserves the newer controller's mirror", () =
   current();
 });
 
-it("automatically uploads captured rejected clicks and flushes an unsettled click on disposal", async () => {
-  vi.useFakeTimers();
-  const fetch = vi.fn().mockResolvedValue({ ok: true });
-  vi.stubGlobal("fetch", fetch);
-  const h = setup();
-  h.core.target = window as Window & typeof globalThis;
-  const dispose = installInputDiagnostics(h.core, () => null, counters);
-  h.canvas.dispatchEvent(new MouseEvent("pointerdown", { clientX: 20, clientY: 30 }));
-  await vi.advanceTimersByTimeAsync(500);
-  const saved = JSON.parse(fetch.mock.calls[0][1].body).samples[0];
-  expect(saved).toMatchObject({ type: "pointerdown", x: 20, y: 30,
-    before: { canvasBlocked: true }, after: { canvasBlocked: true } });
-  h.canvas.addEventListener("pointerup", event => event.stopImmediatePropagation(), true);
-  h.canvas.dispatchEvent(new MouseEvent("pointerup"));
-  dispose();
-  await vi.advanceTimersByTimeAsync(0);
-  const last = JSON.parse(fetch.mock.calls[1][1].body).samples[0];
-  expect(last).toMatchObject({ type: "pointerup", before: { canvasBlocked: true } });
-});
-
 it("settles after the controller synchronously, including handlers that stop propagation", () => {
   const h = setup();
   h.canvas.addEventListener("pointerdown", event => {

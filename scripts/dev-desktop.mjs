@@ -4,8 +4,8 @@ import { prepareDevelopmentHost } from "./prepare-desktop-host.mjs";
 import { stageDevelopmentExecutable } from "./lib/desktop-dev-app.mjs";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, copyFileSync, readFileSync, openSync, closeSync } from "node:fs";
-import { createHash, randomBytes } from "node:crypto";
+import { mkdirSync, writeFileSync, copyFileSync, openSync, closeSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,7 +38,7 @@ const front = option("--frontend-port", process.env.FRONTEND_PORT ?? "5174");
 const remote = option("--backend-url", process.env.WOOHAA3_BACKEND_URL);
 const back = option("--backend-port", process.env.BACKEND_PORT ?? "5181");
 const url = `http://127.0.0.1:${front}/`;
-const env = { ...process.env, WOOHAA3_BASE_PATH: "/", VITE_WOOHAA_PERFORMANCE: process.env.VITE_WOOHAA_PERFORMANCE ?? "1", PATH: `${join(homedir(), ".cargo/bin")}${delimiter}${process.env.PATH}` };
+const env = { ...process.env, WOOHAA3_BASE_PATH: "/", PATH: `${join(homedir(), ".cargo/bin")}${delimiter}${process.env.PATH}` };
 // The bundled proxy and local identity provider must share their provenance key.
 // A remote backend keeps its explicitly configured key.
 if (!remote && !env.WOOHAA3_TRUSTED_INGRESS_SECRET?.trim()) {
@@ -90,11 +90,6 @@ async function main() {
     env.WOOHAA_DESKTOP_HOST_PORT = back;
     env.WOOHAA_DESKTOP_UI_URL = url;
     env.WOOHAA3_BACKEND_URL = `http://127.0.0.1:${back}`;
-  }  if (env.VITE_WOOHAA_PERFORMANCE !== "0") {
-    const directory = join(root, "artifacts/performance", `native-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-    mkdirSync(directory, { recursive: true });
-    env.WOOHAA_NATIVE_METRICS_PATH = join(directory, "native.json");
-    env.WOOHAA_NATIVE_BINARY_ID = `sha256:${createHash("sha256").update(readFileSync(nativeBinary)).digest("hex")}`;
   }
   const deadline = Date.now() + 120_000;
   while (!stopping) {

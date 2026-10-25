@@ -29,9 +29,6 @@ import { sharedCanvasNodeIndex, indexNodeSize, type CanvasNodeIndex } from "./ca
 import { isShotPreviewOnlySelection } from "./shot-preview-protection.js";
 import type { InteractionCore } from "./interaction-core.js";
 import type { Gesture } from "./interaction-types.js";
-import type { InteractionRelease } from "./interaction-performance.js";
-import type { InputSegments } from "./interaction-input-segments.js";
-import { withInteractionTiming } from "../../services/interaction-timing.js";
 import {nodeDrop} from '../../services/node-drop/index.js';
 
 /** drag gesture 的提交/取消/粘连求值能力。 */
@@ -103,10 +100,7 @@ function projectPreviewNodes(
 }
 
 export function createDragGestureFamily(
-  core: Pick<InteractionCore, "state" | "submit" | "buildScene" | "buildDragScene" | "schedule" | "clearHeldKeys">,
-  measure: InputSegments["measure"] = (_key, run) => run(),
-  release: (outcome: InteractionRelease) => void = () => {},
-  submitted: (result: ReturnType<InteractionCore["submit"]>, release: InteractionRelease) => void = () => {}
+  core: Pick<InteractionCore, "state" | "submit" | "buildScene" | "buildDragScene" | "schedule" | "clearHeldKeys">
 ): DragGestureFamily {
   const { state, submit, buildScene, schedule } = core;
 
@@ -213,33 +207,26 @@ export function createDragGestureFamily(
     // 片场复制拖入在普通移动之前裁决：命中即消费释放，源节点回位、不提交源 move/parent/edge
     // （change: 2026-10-08-make-film-set-model-only，design D4）。受保护预览的拖动只移动卡片，
     // 不进 drop 分派（不显示导入提示，也不消费释放）。
-    if(!previewOnlyDrag(gesture.origins) && gesture.moved && measure("dropPlanMs", () => nodeDrop.drop([...gesture.origins.keys()],state.lastPointerWorld))){
-      release("extension-consumed"); nodeDrop.clear();return;
+    if(!previewOnlyDrag(gesture.origins) && gesture.moved && nodeDrop.drop([...gesture.origins.keys()],state.lastPointerWorld)){
+      nodeDrop.clear();return;
     }
     nodeDrop.clear();
-    const positionCommands = measure("positionPlanMs", () => previews.size > 0 ? dragDropCommands(gesture.origins, previews) : []);
+    const positionCommands = previews.size > 0 ? dragDropCommands(gesture.origins, previews) : [];
     const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
-    const edgeCommands = measure("attachPlanMs", () =>
-      gesture.attach && canvasState
-        ? revalidateDragAttachEdges(gesture.attach, canvasState).map((edge) => ({
-            type: "edge.add" as const,
-            edge: {
-              id: edge.id,
-              source: edge.source,
-              target: edge.target,
-              sourceHandle: null,
-              targetHandle: null
-            }
-          }))
-        : []);
+    const edgeCommands = gesture.attach && canvasState
+      ? revalidateDragAttachEdges(gesture.attach, canvasState).map((edge) => ({
+          type: "edge.add" as const,
+          edge: {
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            sourceHandle: null,
+            targetHandle: null
+          }
+        }))
+      : [];
     const commands = [...positionCommands, ...edgeCommands];
-    if (commands.length > 0) {
-      const outcome = positionCommands.some(c => c.type === "node.update" && c.parentId !== undefined)
-        ? "reparent-submit" : positionCommands.length ? "move-submit" : "attach-submit";
-      release(outcome);
-      const result = measure("editSubmitSyncMs", () => withInteractionTiming(measure, () => submit(commands)));
-      submitted(result, outcome);
-    } else release(gesture.moved ? "no-change" : "click");
+    if (commands.length > 0) submit(commands);
   };
 
   const cancel = (): void => {

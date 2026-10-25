@@ -7,15 +7,11 @@
  * 释放 outgoing scope 再挂载 incoming scope。`beforeunload`、测试 teardown 与 HMR dispose
  * 统一释放。React StrictMode 重放不得创建第二个 App runtime 或页面 scope。
  */
-import { beginLifecycleSpan, measureLifecycle } from "./cordis/performance/lifecycle-performance.js";
-import { StrictMode, useLayoutEffect } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppRoot } from "./cordis/app-host.js";
 import { startApp, type AppRuntime } from "./cordis/page-scope.js";
 import "./index.css";
-import { installPerformanceRecorder } from "./cordis/performance/record-performance.js";
-
-const disposePerformanceRecorder = installPerformanceRecorder();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -26,29 +22,22 @@ let appRuntime: AppRuntime | null = null;
 let unmount: (() => void) | null = null;
 let startupController: AbortController | null = null;
 
-function CommitMarker() {
-  useLayoutEffect(() => { endReactCommit(); }, []);
-  return null;
-}
-let endReactCommit: () => void = () => {};
 async function boot(): Promise<void> {
   // 启动取消信号：teardown/HMR 在 `startApp` 返回前 abort 尚未完成的启动，
   // 避免迟到 root 覆盖较新的一次启动（design D8）。
   const controller = new AbortController();
   startupController = controller;
-  const started = await measureLifecycle("app-start", () => startApp({ signal: controller.signal }));
+  const started = await startApp({ signal: controller.signal });
   if (controller.signal.aborted) {
     await started.dispose();
     return;
   }
   appRuntime = started;
-  endReactCommit = beginLifecycleSpan("react-commit");
 
   const root = createRoot(rootElement as HTMLElement);
   root.render(
     <StrictMode>
       <AppRoot app={appRuntime} />
-      <CommitMarker />
     </StrictMode>
   );
   unmount = () => root.unmount();
@@ -68,7 +57,6 @@ void boot().catch((error: unknown) => {
 });
 
 async function teardown(): Promise<void> {
-  disposePerformanceRecorder();
   startupController?.abort();
   startupController = null;
   unmount?.();

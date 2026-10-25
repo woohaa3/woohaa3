@@ -1,10 +1,10 @@
+/// <reference types="vite/client" />
 import type { InteractionCore } from "./interaction-core.js";
-import { createCanvasInputRecorder } from "../../performance/canvas-input-recorder.js";
 
 const EVENT_TYPES = ["pointerdown", "pointerup", "pointercancel", "wheel", "dblclick", "contextmenu"] as const;
 const MAX_EVENTS = 64;
 
-/** Record rejected input too; performance samples only cover consumed gestures. */
+/** In-memory input mirror for manual/E2E troubleshooting. Records rejected input too. */
 export function installInputDiagnostics(
   core: InteractionCore,
   renderError: () => string | null,
@@ -31,7 +31,6 @@ export function installInputDiagnostics(
     before: Snapshot; after?: Snapshot;
   }>;
   const entries: Entry[] = [];
-  const recorder = createCanvasInputRecorder<Entry>(core.target);
   const unsettled = new Set<Entry>();
   const byEvent = new WeakMap<Event, Entry>();
   const timers = new Map<Entry, ReturnType<typeof setTimeout>>();
@@ -40,11 +39,10 @@ export function installInputDiagnostics(
     if (disposed || !unsettled.delete(entry)) return;
     clearTimeout(timers.get(entry));
     timers.delete(entry);
-    let settled = entry;
-    try { settled = Object.freeze({ ...entry, after: read() }); } catch { /* Keep the captured state. */ }
-    const index = entries.indexOf(entry);
-    if (index >= 0) entries[index] = settled;
-    recorder?.record(settled);
+    try {
+      const index = entries.indexOf(entry);
+      if (index >= 0) entries[index] = Object.freeze({ ...entry, after: read() });
+    } catch { /* Keep the captured state. */ }
   };
   const observe = (event: Event) => {
     try {
@@ -72,11 +70,9 @@ export function installInputDiagnostics(
     core.canvas.addEventListener(type, afterInput);
   }
   return () => {
-    for (const entry of unsettled) recorder?.record(entry);
     unsettled.clear();
     for (const timer of timers.values()) clearTimeout(timer);
     timers.clear();
-    recorder?.dispose();
     disposed = true;
     for (const type of EVENT_TYPES) {
       core.canvas.removeEventListener(type, observe, true);
