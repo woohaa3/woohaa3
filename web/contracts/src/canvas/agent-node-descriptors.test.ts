@@ -25,7 +25,7 @@ describe("Agent 节点描述符（任务 1.2）", () => {
   it("模型语义种类映射为 canonical model3d 且不带任务字段", () => {
     expect(findAgentNodeDescriptor("model")?.canonicalType).toBe("model3d");
     expect(findAgentNodeDescriptor("model")?.taskKind).toBeUndefined();
-    expect(defaultAgentNodeData("model")).toMatchObject({ modelScriptVersion: "woohaa-model-js-v2" });
+    expect(defaultAgentNodeData("model")).toMatchObject({ modelScript: "", modelScriptVersion: "woohaa-model-js-v2" });
     expect(defaultAgentNodeData("model")?.modelContentVersion).toBeDefined();
     expect(defaultAgentNodeData("model")?.taskKind).toBeUndefined();
     expect(agentDescriptorForCanonicalType("model3d")?.kind).toBe("model");

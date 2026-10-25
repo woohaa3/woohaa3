@@ -1,7 +1,9 @@
 import { builtinNodeCapabilitiesForType } from "./builtin-node-capabilities.js";
 import type { NodeCapabilities } from "./node-capabilities.js";
 /** Shared card dimensions for rendering, API projections, placement and group bounds. */
-import { MIN_NODE_HEIGHT, MIN_NODE_WIDTH } from "./domain/core/node-factory.js";
+import { minimumNodeSizeFor } from "./node-minimum-size.js";
+
+export { minimumNodeSizeFor } from "./node-minimum-size.js";
 
 export const RICH_CONTENT_NODE_SIZE = { width: 248, height: 232 } as const;
 export const COMPACT_NODE_SIZE = { width: 196, height: 64 } as const;
@@ -32,12 +34,12 @@ export function compositeAssetNodeBoxSize(node: NodeDimensions): {
     width: dimension(
       node.width,
       COMPOSITE_ASSET_DEFAULT_SIZE.width,
-      MIN_NODE_WIDTH,
+      minimumNodeSizeFor("composite-asset").width,
     ),
     height: dimension(
       node.height,
       COMPOSITE_ASSET_DEFAULT_SIZE.height,
-      MIN_NODE_HEIGHT,
+      minimumNodeSizeFor("composite-asset").height,
     ),
   };
 }
@@ -59,11 +61,11 @@ export function effectiveCanvasNodeSize(
   const base = override ?? (legacyPreview ? fallback : node);
   const group = !!capabilities.container;
   return {
-    width: dimension(base.width, fallback.width, group ? 0 : MIN_NODE_WIDTH),
+    width: dimension(base.width, fallback.width, group ? 0 : minimumNodeSizeFor(node.type).width),
     height: dimension(
       base.height,
       fallback.height,
-      group ? 0 : preview ? MODEL_PREVIEW_MIN_HEIGHT : MIN_NODE_HEIGHT,
+      group ? 0 : preview ? MODEL_PREVIEW_MIN_HEIGHT : minimumNodeSizeFor(node.type).height,
     ),
   };
 }

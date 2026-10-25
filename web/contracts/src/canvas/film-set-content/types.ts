@@ -41,7 +41,7 @@ export const MAX_FILM_SET_NAME_LENGTH = 80;
 export const MAX_FILM_SET_BYTES = 1 << 20;
 /** 整个片场所有对象源码（模型 + 动作）的累计字节预算。 */
 export const MAX_FILM_SET_TOTAL_SOURCE_BYTES = 1 << 20;
-/** 新建片场默认地面边长（世界单位）。 */
+/** 用户添加地面的建议边长（世界单位）。 */
 export const FILM_SET_GROUND_DEFAULT_SIZE = 8;
 /** 导入默认错开布局的水平步长 / 竖直步长（世界单位）。 */
 export const FILM_SET_LAYOUT_STEP = 2.5;

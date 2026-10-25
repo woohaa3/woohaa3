@@ -69,7 +69,12 @@ fn checker_entities(world: &mut World) -> Vec<(Vec2, f32)> {
     let mut query = world.query_filtered::<(&Sprite, &Transform), With<MediaAlphaChecker>>();
     query
         .iter(world)
-        .map(|(sprite, transform)| (sprite.custom_size.unwrap_or(Vec2::ZERO), transform.translation.z))
+        .map(|(sprite, transform)| {
+            (
+                sprite.custom_size.unwrap_or(Vec2::ZERO),
+                transform.translation.z,
+            )
+        })
         .collect()
 }
 
@@ -77,7 +82,10 @@ fn checker_entities(world: &mut World) -> Vec<(Vec2, f32)> {
 fn checker_appears_only_while_media_focus_is_presented() {
     let mut world = world();
     run(&mut world);
-    assert!(checker_entities(&mut world).is_empty(), "普通画布不应铺棋盘格");
+    assert!(
+        checker_entities(&mut world).is_empty(),
+        "普通画布不应铺棋盘格"
+    );
 
     world.resource_mut::<CurrentScene>().0.image_focus = Some(
         serde_json::from_value(serde_json::json!({
@@ -97,11 +105,15 @@ fn checker_appears_only_while_media_focus_is_presented() {
     let scene = &world.resource::<CurrentScene>().0;
     let node = scene.nodes.iter().find(|node| node.id == "poster").unwrap();
     let expected = crate::canvas_query::layout::texture_size(node, Vec2::new(320.0, 240.0));
-    assert!((size.x - expected.x).abs() < 0.01 && (size.y - expected.y).abs() < 0.01,
-        "棋盘格必须与聚焦素材同尺寸：期望 {expected:?}，实际 {size:?}");
+    assert!(
+        (size.x - expected.x).abs() < 0.01 && (size.y - expected.y).abs() < 0.01,
+        "棋盘格必须与聚焦素材同尺寸：期望 {expected:?}，实际 {size:?}"
+    );
     assert!(size.x > 1.0 && size.y > 1.0, "棋盘格尺寸必须为正");
     // 在素材（foreground_z）之下，才能在透明像素处透出来。
-    assert!(z < crate::canvas_query::media_focus::foreground_z(&world.resource::<CurrentScene>().0));
+    assert!(
+        z < crate::canvas_query::media_focus::foreground_z(&world.resource::<CurrentScene>().0)
+    );
 
     // 退出聚焦即撤掉，不留下盖住画布的格子。
     world.resource_mut::<CurrentScene>().0.image_focus = None;

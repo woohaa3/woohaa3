@@ -109,8 +109,8 @@ describe("shared effective canvas dimensions", () => {
       height: 160,
     });
     expect(effectiveCanvasNodeSize(before[5])).toEqual({
-      width: 196,
-      height: 64,
+      width: 200,
+      height: 150,
     });
     const scene = buildCanvasRenderScene({
       canvas,

@@ -6,6 +6,7 @@ import { prepareModelResource } from './prepared-model.js';
 import { compositeAssetSceneOps } from './composite-asset-scene.js';
 import { isFilmSetNode } from './domain/core/composite-asset-identity.js';
 import { getGroupRequiredMinSize } from './domain/index.js';
+import { minimumNodeSizeFor } from './node-minimum-size.js';
 import { DEFAULT_MODEL_PREVIEW } from './render-scene/wire-model.js';
 import type { NodeCapabilities, NodeCapabilityResolver, NodeModelPreparation } from './node-capabilities.js';
 
@@ -55,7 +56,7 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
     resources: { ...modelResourceDemand, contentKey: context => context.modelResourceKey ?? `${context.canvas.id}:composite:${context.node.id}` },
     focus: { kind: context => isFilmSetNode(context.node.type, context.data) ? 'model' : 'extension' },
     actions: nodeActionContributions, connections: { endpoints: context => isPureModelNodeType(context.node.type, context.data as Record<string, unknown>) ? 'none' : 'ordinary' },
-    resize: { ...rectangularNodeResize, mode: 'scope' }
+    resize: { ...rectangularNodeResize, mode: 'scope', minimum: context => minimumNodeSizeFor(context.node.type) }
   });
   entries.set('group', {
     appearance: { palette: 'group', defaultSize: compact },

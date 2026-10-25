@@ -30,7 +30,9 @@ use serde::Deserialize;
 /// （change: 2026-10-15-add-film-set-shooting-shot-previews）。
 /// v23 起复合资产可携带派生 ownershipLinks；旧 renderer 不支持管理关系虚线。
 /// v24 起镜头预览携带独立 backdrop，preview/capture 共用背景，拒绝忽略该字段的旧 renderer。
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v27";
+/// v27 adds node capability-driven rendering paths.
+/// v28 adds the optional, strictly decoded overview-only empty placeholder.
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v28";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 /// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。
@@ -110,7 +112,11 @@ impl ModelDescriptorDto {
             return Err("Invalid model resource extent");
         }
         if let Some(aabb) = &self.aabb
-            && !aabb.min.iter().chain(aabb.max.iter()).all(|v| v.is_finite())
+            && !aabb
+                .min
+                .iter()
+                .chain(aabb.max.iter())
+                .all(|v| v.is_finite())
         {
             return Err("Invalid model resource bounds");
         }
@@ -131,7 +137,8 @@ impl ModelDescriptorDto {
 pub(crate) struct ModelReference {
     /// Scene IR 版本（V1 或 V2）。
     #[serde(default)]
-    #[allow(dead_code)] // 线格式字段：由 contracts 下发，渲染按 resource_key 解析；保留以对齐协议。
+    #[allow(dead_code)]
+    // 线格式字段：由 contracts 下发，渲染按 resource_key 解析；保留以对齐协议。
     pub(crate) scene_version: Option<String>,
     /// 按内容签名注册的资源 key；不含节点 id。
     pub(crate) resource_key: String,
@@ -221,7 +228,8 @@ impl ModelAssetDescriptor {
 pub(crate) struct ModelSnapshot {
     /// Scene IR 版本（V1 或 V2）；显式携带以便选择渲染语义（change: enhance-model-...）。
     #[serde(default, rename = "sceneVersion")]
-    #[allow(dead_code)] // 跨目标字段：native renderer 预览路径读取；wasm 侧按 prepared 结果渲染。
+    #[allow(dead_code)]
+    // 跨目标字段：native renderer 预览路径读取；wasm 侧按 prepared 结果渲染。
     pub(crate) scene_version: Option<String>,
     pub(crate) ops: Vec<ModelOp>,
     /// Renderer-only identities prepared once per immutable content; never accepted from the wire.
@@ -238,7 +246,8 @@ pub(crate) struct ModelSnapshot {
     #[serde(default)]
     pub(crate) aabb: Option<ModelAabbDto>,
     #[serde(default)]
-    #[allow(dead_code)] // 跨目标字段：native renderer 预览路径读取；wasm 侧 placement 由节点引用逐帧提供。
+    #[allow(dead_code)]
+    // 跨目标字段：native renderer 预览路径读取；wasm 侧 placement 由节点引用逐帧提供。
     pub(crate) placement: ModelPlacement,
 }
 

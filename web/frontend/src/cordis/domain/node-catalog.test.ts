@@ -67,7 +67,7 @@ describe("node-catalog", () => {
     expect(connectNodeDataFor({ id: "n1", type: "image" }, "generate")).toBeUndefined();
     // 自包含 3D 节点拉线创建只作来源说明：不注入任务 inputMapping。
     const fromImage = connectNodeDataFor({ id: "n1", type: "image" }, "composite-asset");
-    expect((fromImage?.filmSetContent as { items?: unknown[] } | undefined)?.items?.length).toBeTruthy();
+    expect((fromImage?.filmSetContent as { items?: unknown[] } | undefined)?.items).toEqual([]);
     expect(fromImage?.inputMapping).toBeUndefined();
   });
 
@@ -81,11 +81,11 @@ describe("node-catalog", () => {
 
   it("自包含 3D 节点直接创建携带完整本地模型定义（change: 2026-10-05）", () => {
     const model = defaultNodeDataForType("model3d");
-    expect(model?.modelScript).toBeTruthy();
+    expect(model?.modelScript).toBe("");
     expect(model?.modelScriptVersion).toBe("woohaa-model-js-v2");
     expect(model?.modelContentVersion).toBeTruthy();
 
-    // items-only 片场：没有顶层模型；默认仅一块地面、无 clips（D8）。
+    // items-only 片场：没有顶层模型；默认空 items、无 clips（D8）。
     const animation = defaultNodeDataForType("composite-asset");
     expect(animation?.modelScript).toBeUndefined();
     expect(animation?.extensionId).toBe("film-set");
@@ -93,7 +93,7 @@ describe("node-catalog", () => {
     expect(animation?.timeline).toBeUndefined();
     const content = animation?.filmSetContent as { schemaVersion: number; items: Array<{ kind: string }> };
     expect(content.schemaVersion).toBe(4);
-    expect(content.items.map(item => item.kind)).toEqual(["ground"]);
+    expect(content.items).toEqual([]);
     expect((animation?.filmSetAnimations as { clips: unknown[] }).clips).toEqual([]);
   });
 });

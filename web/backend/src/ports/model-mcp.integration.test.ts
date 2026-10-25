@@ -4,7 +4,7 @@ import { createEmptyWoohaa3ServerCanvas, modelSourceHash } from "@woohaa3/contra
 import { CanvasRoom, InMemoryYjsDocumentRepository, ModelMcpService } from "@woohaa3/canvas-service";
 import { createModelMcpHttpHandler } from "@woohaa3/mcp-service";
 import { modelMcpServiceToClient } from "./mcp-adapters.js";
-import { createFilmSetSnapshot, defaultFilmSetContent, filmSetNodeDataFields } from "@woohaa3/contracts";
+import { createFilmSetSnapshot, filmSetNodeDataFields } from "@woohaa3/contracts";
 import { filmSetMcpRuntime } from "../../../extensions/film-set/src/integration/backend/mcp-runtime.js";
 import { createToolGrantRegistry } from "./authoring-adapters.js";
 
@@ -12,7 +12,7 @@ it("真实 MCP 在只有地面的片场生成独立模型；原子拒绝非法�
   const canvasId = "film-set-direct-generation";
   const canvas = createEmptyWoohaa3ServerCanvas(canvasId, "now");
   canvas.document.nodes = [{ id: "scene", type: "composite-asset", position: { x: 0, y: 0 } }];
-  const initial = createFilmSetSnapshot({ title: "测试场景", timeline: { duration: 0, loop: false }, initialCamera: { azimuth: 0.3, elevation: 0.5, distance: 7, aspect: "4:3", focusOffset: { x: 1, y: 0, z: 0 } }, filmSetContent: defaultFilmSetContent() });
+  const initial = createFilmSetSnapshot({ title: "测试场景", timeline: { duration: 0, loop: false }, initialCamera: { azimuth: 0.3, elevation: 0.5, distance: 7, aspect: "4:3", focusOffset: { x: 1, y: 0, z: 0 } }, filmSetContent: explicitGroundContent() });
   canvas.nodeData.scene = filmSetNodeDataFields(initial) as never;
   const room = new CanvasRoom({ canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
   await room.initialize({ canvas, roomEpoch: "epoch" });
@@ -88,3 +88,7 @@ it("real model MCP commits valid scripts and returns valid text for rejected scr
     expect(room.exportCanvas()).toEqual(snapshot);
   } finally { await handler.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+function explicitGroundContent(): import("@woohaa3/contracts").FilmSetContent {
+  return { schemaVersion: 4, items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }] };
+}

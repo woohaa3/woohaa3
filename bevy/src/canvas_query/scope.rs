@@ -17,6 +17,7 @@ use crate::isometric_grid::plan::{scope_axis_x, scope_axis_y};
 use crate::protocol::{CompositeAssetScopeShape, GraphNode};
 
 /// 空片场/复合资产最小可点击范围半边长（世界坐标），与 contracts 一致。
+// Historical/malformed hit-range fallback only; explicit category writes are validated in contracts.
 pub(crate) const SCOPE_MIN_HALF: f32 = 32.0;
 /// 点包含的边界容差（世界单位）；仅表达「边界包含」，不作为空白区 padding。
 pub(crate) const SCOPE_EPSILON: f32 = 1e-4;
@@ -87,7 +88,11 @@ pub(crate) fn normalize_base_rect(rect: ScopeRect, min_half: f32) -> ScopeRect {
         SCOPE_MIN_HALF
     };
     let width = if finite(rect.width) { rect.width } else { 0.0 };
-    let height = if finite(rect.height) { rect.height } else { 0.0 };
+    let height = if finite(rect.height) {
+        rect.height
+    } else {
+        0.0
+    };
     let x = if finite(rect.x) { rect.x } else { 0.0 };
     let y = if finite(rect.y) { rect.y } else { 0.0 };
     let cx = x + width / 2.0;
@@ -107,10 +112,17 @@ fn midpoint(a: Vec2, b: Vec2) -> Vec2 {
 }
 
 /// 地面矩形 → 画布顶点、AABB 与 8 抓手（唯一公式）。
-fn ground_geometry(ground: ScopeGround, min_half: f32) -> (Vec2, [Vec2; 4], ScopeRect, f32, f32, [Vec2; 8]) {
+fn ground_geometry(
+    ground: ScopeGround,
+    min_half: f32,
+) -> (Vec2, [Vec2; 4], ScopeRect, f32, f32, [Vec2; 8]) {
     let ax = scope_axis_x();
     let ay = scope_axis_y();
-    let safe = if finite(min_half) && min_half > 0.0 { min_half } else { SCOPE_MIN_HALF };
+    let safe = if finite(min_half) && min_half > 0.0 {
+        min_half
+    } else {
+        SCOPE_MIN_HALF
+    };
     let cx = if finite(ground.cx) { ground.cx } else { 0.0 };
     let cy = if finite(ground.cy) { ground.cy } else { 0.0 };
     let min_half_ground = safe / (ax * 2.0);
@@ -162,8 +174,11 @@ pub(crate) fn geometry(
     let normalized = normalize_base_rect(base, min_half);
     let cx = normalized.x + normalized.width / 2.0;
     let cy = normalized.y + normalized.height / 2.0;
-    if instance_of_diamond(shape) && let Some(ground) = ground {
-        let (center, vertices, aabb, radius_x, radius_y, handles) = ground_geometry(ground, min_half);
+    if instance_of_diamond(shape)
+        && let Some(ground) = ground
+    {
+        let (center, vertices, aabb, radius_x, radius_y, handles) =
+            ground_geometry(ground, min_half);
         return ScopeGeometry {
             shape,
             base: normalized,
@@ -424,12 +439,14 @@ pub(crate) fn node_scope(node: &GraphNode) -> ScopeGeometry {
                 }),
                 SCOPE_MIN_HALF,
             );
-            scope.content = crate::model3d::film_set_content_bounds(node)
-                .map(|(x, y, width, height)| ScopeRect {
-                    x,
-                    y,
-                    width,
-                    height,
+            scope.content =
+                crate::model3d::film_set_content_bounds(node).map(|(x, y, width, height)| {
+                    ScopeRect {
+                        x,
+                        y,
+                        width,
+                        height,
+                    }
                 });
             scope
         }
@@ -467,7 +484,12 @@ mod tests {
     use super::*;
 
     fn base(x: f32, y: f32, w: f32, h: f32) -> ScopeRect {
-        ScopeRect { x, y, width: w, height: h }
+        ScopeRect {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
     }
 
     fn ground(cx: f32, cy: f32, hx: f32, hz: f32) -> ScopeGround {
@@ -576,7 +598,10 @@ mod tests {
         // 高于基准矩形顶部（模型上方留白）不命中。
         assert!(!pick_contains(&g, Vec2::new(100.0, g.base.y - 10.0)));
         // 低于范围 AABB 底部、基准矩形内也不命中（下方不属于内容身体）。
-        assert!(!pick_contains(&g, Vec2::new(100.0, g.aabb.y + g.aabb.height + 10.0)));
+        assert!(!pick_contains(
+            &g,
+            Vec2::new(100.0, g.aabb.y + g.aabb.height + 10.0)
+        ));
     }
 
     #[test]
@@ -587,15 +612,31 @@ mod tests {
             Some(ground(0.0, 0.0, 40.0, 40.0)),
             SCOPE_MIN_HALF,
         );
-        assert!(intersects_rect(&g, base(g.aabb.x, g.aabb.y, g.aabb.width, g.aabb.height)));
+        assert!(intersects_rect(
+            &g,
+            base(g.aabb.x, g.aabb.y, g.aabb.width, g.aabb.height)
+        ));
         assert!(intersects_rect(&g, base(-20.0, -10.0, 5.0, 5.0)));
         // 反向拖框与正向一致。
-        assert!(intersects_rect(&g, base(g.aabb.x + g.aabb.width, g.aabb.y + g.aabb.height, -g.aabb.width, -g.aabb.height)));
+        assert!(intersects_rect(
+            &g,
+            base(
+                g.aabb.x + g.aabb.width,
+                g.aabb.y + g.aabb.height,
+                -g.aabb.width,
+                -g.aabb.height
+            )
+        ));
     }
 
     #[test]
     fn rect_shape_stays_axis_aligned() {
-        let g = geometry(base(0.0, 0.0, 200.0, 100.0), CompositeAssetScopeShape::Rect, None, SCOPE_MIN_HALF);
+        let g = geometry(
+            base(0.0, 0.0, 200.0, 100.0),
+            CompositeAssetScopeShape::Rect,
+            None,
+            SCOPE_MIN_HALF,
+        );
         assert_eq!(g.aabb, base(0.0, 0.0, 200.0, 100.0));
         assert!(contains(&g, Vec2::new(0.0, 0.0)));
         assert!(contains(&g, Vec2::new(200.0, 100.0)));

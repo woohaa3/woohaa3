@@ -6,7 +6,7 @@
 //! 就会撞进镜头卡片的层区间，卡片相机互相看见对方的模型，表现为「串画面」。
 //!
 //! 本模块是**唯一**分配预览层的地方：
-//! - 保留层（世界 `0`、编辑器/gizmo `1`、片场相机 `2`、运行特效 `3`、截取 `7`）永不出租；
+//! - 保留层（世界 `0`、编辑器/gizmo `1`、片场相机 `2`、运行特效 `3`、空场占位 `4`、截取 `7`）永不出租；
 //! - 可出租槽数量有界（`CAPACITY`），超出时调用方必须排队/占位，不能无界增长层号；
 //! - 同一个层在旧视图**停止并完成隔离**后才回到空闲表；每次出租推进 `generation`，让迟到的
 //!   GPU 完成按 owner+generation 丢弃，不能发布到新使用者；
@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-/// 保留层：世界、编辑器/gizmo（1）、片场相机（2）、运行特效（3）、截取（7），
+/// 保留层：世界、编辑器/gizmo（1）、片场相机（2）、运行特效（3）、空场占位（4）、截取（7），
 /// 以及「已注册但没有卡片视图」的模型根停放层 31。
 ///
 /// `1` 同时是 transform gizmo 与 shot gizmo；`2` 是片场小相机；`7` 是 capture。
@@ -145,7 +145,10 @@ impl PreviewLayers {
     }
 
     pub fn active(&self) -> usize {
-        self.slots.iter().filter(|slot| slot.owner.is_some()).count()
+        self.slots
+            .iter()
+            .filter(|slot| slot.owner.is_some())
+            .count()
     }
 
     pub fn available(&self) -> usize {
@@ -154,7 +157,12 @@ impl PreviewLayers {
 
     /// `(取得, 复用, 池满, 当前占用)` 诊断计数。
     pub fn stats(&self) -> [u64; 4] {
-        [self.acquired, self.reused, self.exhausted, self.active() as u64]
+        [
+            self.acquired,
+            self.reused,
+            self.exhausted,
+            self.active() as u64,
+        ]
     }
 
     /// 层号是否属于保留集合（诊断与测试共用）。
@@ -185,7 +193,10 @@ mod tests {
             rented.push(slot.layer);
         }
         rented.sort_unstable();
-        assert_eq!(rented, (SLOT_BASE..SLOT_BASE + CAPACITY).collect::<Vec<_>>());
+        assert_eq!(
+            rented,
+            (SLOT_BASE..SLOT_BASE + CAPACITY).collect::<Vec<_>>()
+        );
         for layer in RESERVED_LAYERS {
             assert!(!rented.contains(&layer), "保留层 {layer} 不得出租");
         }

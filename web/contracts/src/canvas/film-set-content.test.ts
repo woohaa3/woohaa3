@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import {
   appendFilmSetItems,
   decodeFilmSetContent,
-  defaultFilmSetContent,
   emptyFilmSetContent,
   extendedTimelineDuration,
   filmSetAssetReferences,
@@ -36,8 +35,8 @@ describe("片场内容 codec（任务 1.2）", () => {
     expect(readFilmSetContent({}).items).toEqual([]);
   });
 
-  it("默认片场带一块可编辑地面", () => {
-    const content = defaultFilmSetContent();
+  it("显式地面夹具保持普通可编辑内容", () => {
+    const content = explicitGroundContent();
     expect(content.items).toHaveLength(1);
     expect(content.items[0]?.kind).toBe("ground");
   });
@@ -84,7 +83,7 @@ describe("片场导入规划与重映射（任务 2.4/1.4）", () => {
   });
 
   it("追加不改动已有内容；重映射只改内部 id 保留 assetId", () => {
-    const existing = defaultFilmSetContent();
+    const existing = explicitGroundContent();
     const planned = planFilmSetImportItems({
       existingItems: existing.items,
       drafts: [{ id: "img", source: { kind: "image", name: "图", assetId: "asset-1", aspectRatio: 2 } }],
@@ -101,7 +100,7 @@ describe("片场导入规划与重映射（任务 2.4/1.4）", () => {
   });
 
   it("内容 hash 随媒体与模型变化", () => {
-    const base = defaultFilmSetContent();
+    const base = explicitGroundContent();
     const withItem = appendFilmSetItems(base, [modelItem("m")]);
     expect(filmSetContentHash(base)).not.toBe(filmSetContentHash(withItem));
   });
@@ -118,3 +117,7 @@ describe("片场导入规划与重映射（任务 2.4/1.4）", () => {
     ])).toBe(5);
   });
 });
+
+function explicitGroundContent(): import("@woohaa3/contracts").FilmSetContent {
+  return { schemaVersion: 4, items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }] };
+}

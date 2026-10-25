@@ -142,6 +142,7 @@ export function buildSceneWithResources(
     compositeAssetTypeLabels: options.compositeAssets?.typeLabels(canvasState),
     // 总览 primitive LOD 策略按严格身份从可信 adapter 解析；仅显式声明的业务用例降档，其它
     // World 用途保持 High（change: 2026-10-15-add-film-set-overview-lod，design D1）。
+    compositeAssetEmptyPlaceholders: options.compositeAssets?.emptyPlaceholders(canvasState),
     compositeAssetGeometryQualities: options.compositeAssets?.geometryQualities(canvasState)
   });
   applyNodeResourceLoading(scene, {

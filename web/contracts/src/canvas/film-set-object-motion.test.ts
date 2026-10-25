@@ -9,7 +9,6 @@ import {
   appendFilmSetItems,
   decodeFilmSetContent,
   decodeFilmSetPartId,
-  defaultFilmSetContent,
   encodeFilmSetPartId,
   filmSetItemById,
   filmSetItemAdapterHash,
@@ -206,9 +205,13 @@ describe("对象级命令经 reducer 原子生效（任务 2.3）", () => {
 
 describe("复制追加保留对象动作（任务 2.2）", () => {
   it("append 不改动已有内容", () => {
-    const existing = defaultFilmSetContent();
+    const existing = explicitGroundContent();
     const appended = appendFilmSetItems(existing, [modelItem("new")]);
     expect(appended.items[0]).toEqual(existing.items[0]);
   });
 
 });
+
+function explicitGroundContent(): import("@woohaa3/contracts").FilmSetContent {
+  return { schemaVersion: 4, items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }] };
+}

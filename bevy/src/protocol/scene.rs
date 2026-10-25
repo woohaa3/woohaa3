@@ -4,13 +4,13 @@
 use serde::Deserialize;
 
 use super::image_focus::ImageFocus;
-use super::video_focus::VideoFocus;
 use super::model::ModelReference;
 use super::scene_instant::{
-    AggregateConnect, AnimationPlayback, CursorPoint, DragAttach, Draft, Marquee, ModelEditor, ModelFocus,
-    NodeActions, NodeHover, SurfaceSize,
+    AggregateConnect, AnimationPlayback, CursorPoint, Draft, DragAttach, Marquee, ModelEditor,
+    ModelFocus, NodeActions, NodeHover, SurfaceSize,
 };
 use super::theme::Theme;
+use super::video_focus::VideoFocus;
 use super::{CANVAS_RENDER_SCENE_VERSION, DEFAULT_NODE_HEIGHT, DEFAULT_NODE_WIDTH};
 
 #[derive(Clone, Deserialize)]
@@ -119,7 +119,8 @@ pub(crate) struct ShotPreviewPresentation {
 
 impl ShotPreviewPresentation {
     /// 边界级防御校验：身份非空/长度、kind 枚举、状态枚举、有限画幅/时长/进度。
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {        if self.film_set_node_id.is_empty()
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if self.film_set_node_id.is_empty()
             || self.film_set_node_id.len() > 256
             || self.clip_id.is_empty()
             || self.clip_id.len() > 256
@@ -129,16 +130,30 @@ impl ShotPreviewPresentation {
         if self.kind != "static" && self.kind != "dynamic" {
             return Err("Invalid shot preview kind");
         }
-        if !matches!(self.state.as_str(), "preparing" | "ready" | "stale" | "error") {
+        if !matches!(
+            self.state.as_str(),
+            "preparing" | "ready" | "stale" | "error"
+        ) {
             return Err("Invalid shot preview state");
         }
-        if !self.aspect.is_finite() || self.aspect <= 0.0 || !self.duration.is_finite() || self.duration < 0.0 {
+        if !self.aspect.is_finite()
+            || self.aspect <= 0.0
+            || !self.duration.is_finite()
+            || self.duration < 0.0
+        {
             return Err("Invalid shot preview framing");
         }
-        if self.progress.is_some_and(|progress| !progress.is_finite() || !(0.0..=1.0).contains(&progress)) {
+        if self
+            .progress
+            .is_some_and(|progress| !progress.is_finite() || !(0.0..=1.0).contains(&progress))
+        {
             return Err("Invalid shot preview progress");
         }
-        if self.diagnostic.as_ref().is_some_and(|text| text.len() > 1024) {
+        if self
+            .diagnostic
+            .as_ref()
+            .is_some_and(|text| text.len() > 1024)
+        {
             return Err("Invalid shot preview diagnostic");
         }
         self.cover_camera.validate()?;
@@ -267,7 +282,13 @@ impl HistoryStripPresentation {
         for dot in &self.dots {
             if !matches!(
                 dot.state.as_str(),
-                "succeeded" | "failed" | "running" | "queued" | "cancelled" | "interrupted" | "partial"
+                "succeeded"
+                    | "failed"
+                    | "running"
+                    | "queued"
+                    | "cancelled"
+                    | "interrupted"
+                    | "partial"
             ) {
                 return Err("Invalid history strip dot state");
             }
@@ -299,10 +320,27 @@ pub(crate) struct FilmSetRunFeedback {
 
 impl FilmSetRunFeedback {
     fn validate(&self) -> Result<(), &'static str> {
-        if self.operation_key.is_empty() || self.operation_key.len() > 2048
-            || !matches!(self.phase.as_str(), "submitting" | "queued" | "running" | "committing" | "verifying")
-            || !matches!(self.source.as_str(), "conversion" | "agent" | "operation" | "legacy" | "submission")
-            || !matches!(self.label_code.as_str(), "submitting" | "queued" | "generating" | "modifying" | "running" | "saving" | "verifying") {
+        if self.operation_key.is_empty()
+            || self.operation_key.len() > 2048
+            || !matches!(
+                self.phase.as_str(),
+                "submitting" | "queued" | "running" | "committing" | "verifying"
+            )
+            || !matches!(
+                self.source.as_str(),
+                "conversion" | "agent" | "operation" | "legacy" | "submission"
+            )
+            || !matches!(
+                self.label_code.as_str(),
+                "submitting"
+                    | "queued"
+                    | "generating"
+                    | "modifying"
+                    | "running"
+                    | "saving"
+                    | "verifying"
+            )
+        {
             return Err("Invalid film set run feedback");
         }
         Ok(())
@@ -348,6 +386,12 @@ pub(crate) struct ScopeGroundDto {
     pub(crate) hz: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+pub(crate) enum CompositeAssetEmptyPlaceholder {
+    #[serde(rename = "brand-plinth-v1")]
+    BrandPlinthV1,
+}
+
 /// 复合资产呈现字段（change: 2026-10-08-make-film-set-model-only，design D1/D2；
 ///  change: 2026-10-12-align-film-set-scope-with-isometric-grid 增加通用形状声明与地面矩形）。
 ///
@@ -359,6 +403,8 @@ pub(crate) struct ScopeGroundDto {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CompositeAssetPresentation {
+    #[serde(default)]
+    pub(crate) empty_placeholder: Option<CompositeAssetEmptyPlaceholder>,
     #[serde(default)]
     pub(crate) panel: Option<super::CompositeContainerPanel>,
     #[serde(default)]
@@ -435,7 +481,9 @@ pub(crate) struct ModelMediaPlane {
     pub(crate) has_texture: bool,
 }
 
-fn default_unit() -> f32 { 1.0 }
+fn default_unit() -> f32 {
+    1.0
+}
 
 fn default_true() -> bool {
     true
@@ -444,7 +492,9 @@ fn default_true() -> bool {
 impl CompositeAssetPresentation {
     /// 范围几何必须有限且非负尺寸；媒体平面几何必须有限、正尺寸。
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
-        if let Some(panel) = &self.panel { panel.validate()?; }
+        if let Some(panel) = &self.panel {
+            panel.validate()?;
+        }
         if ![self.x, self.y, self.width, self.height]
             .iter()
             .all(|v| v.is_finite())
@@ -453,20 +503,39 @@ impl CompositeAssetPresentation {
         {
             return Err("Invalid film set bounds");
         }
-        if self.layout_aabb.is_some_and(|bounds| (0..3).any(|i|
-            !bounds.min[i].is_finite() || !bounds.max[i].is_finite() || bounds.min[i] > bounds.max[i])) {
+        if self.layout_aabb.is_some_and(|bounds| {
+            (0..3).any(|i| {
+                !bounds.min[i].is_finite()
+                    || !bounds.max[i].is_finite()
+                    || bounds.min[i] > bounds.max[i]
+            })
+        }) {
             return Err("Invalid film set layout bounds");
         }
-        if self.item_placements.len() > 256 || self.item_placements.iter().any(|(id, p)|
-            id.is_empty() || ![p.offset.x, p.offset.y, p.offset.z, p.scale, p.yaw].iter().all(|v| v.is_finite()) || p.scale <= 0.0) {
+        if self.item_placements.len() > 256
+            || self.item_placements.iter().any(|(id, p)| {
+                id.is_empty()
+                    || ![p.offset.x, p.offset.y, p.offset.z, p.scale, p.yaw]
+                        .iter()
+                        .all(|v| v.is_finite())
+                    || p.scale <= 0.0
+            })
+        {
             return Err("Invalid film set item placement");
         }
         for plane in &self.media {
             if plane.id.is_empty()
                 || (plane.kind != "image" && plane.kind != "video")
-                || ![plane.x, plane.y, plane.z, plane.width, plane.height, plane.yaw]
-                    .iter()
-                    .all(|v| v.is_finite())
+                || ![
+                    plane.x,
+                    plane.y,
+                    plane.z,
+                    plane.width,
+                    plane.height,
+                    plane.yaw,
+                ]
+                .iter()
+                .all(|v| v.is_finite())
                 || plane.width <= 0.0
                 || plane.height <= 0.0
             {
@@ -658,15 +727,22 @@ impl Scene {
             }
             if let Some(run) = &node.aggregate_run {
                 if let Some(film) = &run.film_set {
-                    if !run.active || node.composite_asset.is_none() { return Err("Invalid film set run owner"); }
+                    if !run.active || node.composite_asset.is_none() {
+                        return Err("Invalid film set run owner");
+                    }
                     film.validate()?;
                 }
             }
             if let Some(view) = &node.model_preview {
-                if ![view.azimuth, view.elevation, view.distance_scale].iter().chain(view.target_offset.iter()).all(|v| v.is_finite())
+                if ![view.azimuth, view.elevation, view.distance_scale]
+                    .iter()
+                    .chain(view.target_offset.iter())
+                    .all(|v| v.is_finite())
                     || view.elevation.abs() >= std::f32::consts::FRAC_PI_2
                     || view.distance_scale <= 0.
-                    || node.group.is_some() || node.composite_asset.is_some() {
+                    || node.group.is_some()
+                    || node.composite_asset.is_some()
+                {
                     return Err("Invalid model preview");
                 }
             }
@@ -703,9 +779,19 @@ impl Scene {
                 return Err("Invalid canvas size");
             }
         }
-        if let Some(rect) = self.surface.as_ref().and_then(|surface| surface.content_rect.as_ref()) {
-            if ![rect.x, rect.y, rect.width, rect.height].iter().all(|v| v.is_finite())
-                || rect.x < 0.0 || rect.y < 0.0 || rect.width <= 0.0 || rect.height <= 0.0 {
+        if let Some(rect) = self
+            .surface
+            .as_ref()
+            .and_then(|surface| surface.content_rect.as_ref())
+        {
+            if ![rect.x, rect.y, rect.width, rect.height]
+                .iter()
+                .all(|v| v.is_finite())
+                || rect.x < 0.0
+                || rect.y < 0.0
+                || rect.width <= 0.0
+                || rect.height <= 0.0
+            {
                 return Err("Invalid focus content rect");
             }
         }
@@ -734,9 +820,18 @@ impl Scene {
             actions.validate()?;
         }
         for node in &self.nodes {
-            if let Some(links) = node.composite_asset.as_ref().and_then(|asset| asset.ownership_links.as_ref()) {
-                if !links.anchor.iter().all(|v| v.is_finite()) || links.target_node_ids.len() > 4096
-                    || links.target_node_ids.iter().any(|id| id.is_empty() || id.len() > 1024 || id == &node.id) {
+            if let Some(links) = node
+                .composite_asset
+                .as_ref()
+                .and_then(|asset| asset.ownership_links.as_ref())
+            {
+                if !links.anchor.iter().all(|v| v.is_finite())
+                    || links.target_node_ids.len() > 4096
+                    || links
+                        .target_node_ids
+                        .iter()
+                        .any(|id| id.is_empty() || id.len() > 1024 || id == &node.id)
+                {
                     return Err("Invalid composite ownership links");
                 }
             }

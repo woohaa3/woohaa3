@@ -9,6 +9,8 @@ export type CompositeChildPresentation = CompositeChildRelation & {
   focusOwner?: boolean;
 };
 export type CompositeAssetAdapter = {
+  emptyPlaceholder?: import("@woohaa3/contracts").CompositeAssetEmptyPlaceholder;
+  showEmptyPlaceholder?(nodeId: string, data: CanvasNodeData): boolean;
   extensionId: string;
   owner: string;
   /**
@@ -85,6 +87,7 @@ export class CompositeAssetRegistry {
     if (adapter.geometryQuality !== undefined && adapter.geometryQuality !== "overview-primitives-v1") {
       throw new Error(`复合资产几何质量策略未知：${String(adapter.geometryQuality)}`);
     }
+    if (adapter.emptyPlaceholder !== undefined && adapter.emptyPlaceholder !== "brand-plinth-v1") throw new Error(`未知复合资产占位：${String(adapter.emptyPlaceholder)}`);
     this.adapters.set(adapter.extensionId, adapter); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate();
     let alive = true;
     return () => { if (!alive) return; alive = false; if (this.adapters.get(adapter.extensionId) === adapter) { this.adapters.delete(adapter.extensionId); for (const [id, owner] of this.projectionOwners) if (owner === adapter.extensionId) { this.projections.delete(id); this.projectionOwners.delete(id); } for (const [id, result] of this.scopeResults) if (result.owner === adapter.extensionId) this.scopeResults.delete(id); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate(); } };
@@ -145,6 +148,17 @@ export class CompositeAssetRegistry {
    * 运行时据此按世界投影尺寸选择整场图元细分。未声明（炉体、第三方、普通卡片）不写入，World
    * 用途保持 High。不从 nodeData 标题、items 形状、动画或历史类型推断。
    */
+  emptyPlaceholders(canvas: ServerCanvas | null): ReadonlyMap<string, import("@woohaa3/contracts").CompositeAssetEmptyPlaceholder> {
+    const placeholders = new Map<string, import("@woohaa3/contracts").CompositeAssetEmptyPlaceholder>();
+    for (const node of canvas?.document.nodes ?? []) {
+      const adapter = this.resolve(canvas, node.id);
+      if (adapter?.emptyPlaceholder !== "brand-plinth-v1") continue;
+      try {
+        if (adapter.showEmptyPlaceholder?.(node.id, canvas!.nodeData[node.id]) === true) placeholders.set(node.id, adapter.emptyPlaceholder);
+      } catch { /* Invalid content cannot imply emptiness. */ }
+    }
+    return placeholders;
+  }
   geometryQualities(canvas: ServerCanvas | null): ReadonlyMap<string, CompositeAssetGeometryQuality> {
     const qualities = new Map<string, CompositeAssetGeometryQuality>();
     if (!canvas) return qualities;

@@ -113,7 +113,7 @@ describe("FilmSetImportService（任务 2.3）", () => {
     });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.itemCount).toBe(4); // ground + model item + obj-model + obj-image
+    expect(outcome.itemCount).toBe(3); // explicit model item + obj-model + obj-image
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export failed");
     // 来源位置不变。

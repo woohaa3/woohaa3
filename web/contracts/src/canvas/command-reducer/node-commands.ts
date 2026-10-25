@@ -4,12 +4,11 @@
  * 自 `command-reducer.ts` 拆出（change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，
  * R12）。复用 domain 结构校验，语义与 edit.apply 的对应操作完全一致。
  */
+import { minimumNodeSizeFor } from "../node-dimensions.js";
 import { filmSetObjectOwnershipOf } from "../film-set-object-container.js";
 import type { CanvasCommand } from "../commands.js";
 import {
   DEFAULT_NODE_DIMS,
-  MIN_NODE_HEIGHT,
-  MIN_NODE_WIDTH,
   collectWoohaa3CanvasRemovalIds,
   createWoohaa3CanvasEdge,
   isValidWoohaa3CanvasConnection,
@@ -33,15 +32,16 @@ import {
 } from "./node-data-validation.js";
 
 /**
- * 校验本次提交的 width/height 是否满足共享最小下限（change: add-node-resize, design D5）。
+ * 校验本次提交的 width/height 是否满足节点类别最小下限（change: add-node-resize, design D5）。
  * 未提供的字段视为「本次不修改」，不参与校验；只有显式提供的过小值才拒绝。
  */
-export function validateNodeSize(width: number | undefined, height: number | undefined): CommandApplyResult | null {
-  if (width !== undefined && (!Number.isFinite(width) || width < MIN_NODE_WIDTH)) {
-    return reject("invalid-node-size", `节点宽度 ${width} 小于下限 ${MIN_NODE_WIDTH}`);
+export function validateNodeSize(width: number | undefined, height: number | undefined, type: string): CommandApplyResult | null {
+  const minimum = minimumNodeSizeFor(type);
+  if (width !== undefined && (!Number.isFinite(width) || width < minimum.width)) {
+    return reject("invalid-node-size", `节点宽度 ${width} 小于下限 ${minimum.width}`);
   }
-  if (height !== undefined && (!Number.isFinite(height) || height < MIN_NODE_HEIGHT)) {
-    return reject("invalid-node-size", `节点高度 ${height} 小于下限 ${MIN_NODE_HEIGHT}`);
+  if (height !== undefined && (!Number.isFinite(height) || height < minimum.height)) {
+    return reject("invalid-node-size", `节点高度 ${height} 小于下限 ${minimum.height}`);
   }
   return null;
 }
@@ -155,7 +155,7 @@ export function addNode(
     return reject("duplicate-node", `节点 ${node.id} 已存在`);
   }
   // 最小尺寸下限：挡住 model MCP 等写入方提交畸形尺寸（design D5）。
-  const sizeRejection = validateNodeSize(node.width, node.height);
+  const sizeRejection = validateNodeSize(node.width, node.height, node.type);
   if (sizeRejection) return sizeRejection;
   // group parent 不变式（change: add-canvas-node-grouping）：新节点必须挂在已有 group 下。
   const parentRejection = validateGroupParent(work, node.id, node.parentId);
@@ -243,7 +243,7 @@ export function updateNode(
   if (parentRejection) return parentRejection;
 
   if (command.position) node.position = { x: command.position.x, y: command.position.y };  // 最小尺寸下限：只校验本次提交的字段，既不改写既有记录也不受其影响（design D5）。
-  const sizeRejection = validateNodeSize(command.width, command.height);
+  const sizeRejection = validateNodeSize(command.width, command.height, node.type);
   if (sizeRejection) return sizeRejection;
   if (command.width !== undefined) node.width = command.width;
   if (command.height !== undefined) node.height = command.height;

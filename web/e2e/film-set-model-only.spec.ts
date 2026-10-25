@@ -132,7 +132,7 @@ test("纯模型片场：无卡片/端口、范围框 hover/选中、空片场可
   expect(edgesAfter).toBe(0);
 
   // 删除地面/清空内容后仍可命中范围（空片场）。
-  // 通过真实对象删除命令清空，包括默认地面；不使用已移除的顶层模型字段。
+  // 通过真实对象删除命令清空，包括显式地面；不使用已移除的顶层模型字段。
   expect(
     (
       await sendCommands(page, [...initialContent.items, modelItem].map(item => ({

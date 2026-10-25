@@ -51,7 +51,7 @@ describe("create_node 编译（任务 4.2）", () => {
     if (!model.ok) throw new Error("expected ok");
     const data = (model.commands[0] as { nodeData?: Record<string, unknown> }).nodeData;
     expect(data?.taskKind).toBeUndefined();
-    expect(data?.modelScript).toBeTruthy();
+    expect(data?.modelScript).toBe("");
     expect(data?.modelContentVersion).toBeDefined();
   });
 

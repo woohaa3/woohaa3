@@ -117,6 +117,7 @@ export type CanvasRenderSceneInput = {
    * 复合资产类别默认即 `isometric-diamond`；可信 adapter 只在需要按严格身份改为轴对齐矩形时
    * 通过宿主注入 `rect`。缺省不写入即使用类别默认。只承载派生呈现声明，不进入 canonical。
    */
+  compositeAssetEmptyPlaceholders?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetEmptyPlaceholder>;
   compositeAssetScopeShapes?: ReadonlyMap<string, CompositeAssetScopeShape>;
   /**
    * 每复合资产节点的总览 primitive LOD 策略声明
@@ -376,6 +377,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
             scopeShape: input.compositeAssetScopeShapes?.get(node.id) ?? capabilities.scope!.shape(context),
             // 总览 LOD 策略只由可信 adapter 声明；缺失即 World 用途保持 High
             // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
+            emptyPlaceholder: input.compositeAssetEmptyPlaceholders?.get(node.id),
             geometryQuality: input.compositeAssetGeometryQualities?.get(node.id),
             mediaPlanes: filmSetMediaPlanes,
             layoutAabb: filmSetLayoutAabb,

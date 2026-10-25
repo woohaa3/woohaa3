@@ -164,7 +164,7 @@ async function seedFilmSet(
 }
 
 test.describe("片场地面范围（change: 2026-10-12）", () => {
-  test("默认地面几何、平行四边形/空白角命中、双击聚焦与 selection 增量", async ({ page }, info) => {
+  test("显式地面几何、平行四边形/空白角命中、双击聚焦与 selection 增量", async ({ page }, info) => {
     test.setTimeout(150_000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));

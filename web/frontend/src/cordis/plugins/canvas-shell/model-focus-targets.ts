@@ -46,7 +46,9 @@ export function hasModelFocusTarget(
   nodeId: string
 ): boolean {
   const node = source.canvas?.document.nodes.find(node => node.id === nodeId);
-  return !!node && !!(source.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve({ canvas: source.canvas!, node, data: source.canvas!.nodeData[nodeId] }).focus
+  if (!node) return false;
+  if (node.type === "model3d" && source.canvas?.nodeData[nodeId]?.modelScript === "") return false;
+  return !!(source.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve({ canvas: source.canvas!, node, data: source.canvas!.nodeData[nodeId] }).focus
     && !!(source.resources?.get(nodeId) || source.scenesV2?.get(nodeId));
 }
 
@@ -58,6 +60,7 @@ export function resolveModelFocusTargets(source: ModelFocusTargetSource): FocusT
   if (!canvas) return [];
   const targets: FocusTargetInput[] = [];
   for (const node of canvas.document.nodes) {
+    if (node.type === "model3d" && canvas.nodeData[node.id]?.modelScript === "") continue;
     const capabilities = (source.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve({ canvas, node, data: canvas.nodeData[node.id] });
     if (!capabilities.focus?.kind({ canvas, node, data: canvas.nodeData[node.id] })) continue;
     const placement = readPlacement(canvas.nodeData?.[node.id]);

@@ -38,6 +38,12 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
     // 总览 primitive LOD：片场按世界投影尺寸选择整场图元细分。声明只承载呈现策略，不进入
     // executionKey/内容 hash 或持久 DTO；普通卡片、炉体、第三方缺省不声明即保持 High
     // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
+    emptyPlaceholder: "brand-plinth-v1",
+    showEmptyPlaceholder(_id, data) {
+      if (!isFilmSetNode("composite-asset", data) || data.filmSetObject !== undefined || data.shotPreview !== undefined) return false;
+      const decoded = decodeFilmSetNodeData(data);
+      return decoded.ok && decoded.value.filmSetContent.items.length === 0;
+    },
     geometryQuality: "overview-primitives-v1",
     scopeShapeForNode: (_id, data) => filmSetObjectOwnershipOf(data) ? "rect" : undefined,
     executionKey: (data, id) => {

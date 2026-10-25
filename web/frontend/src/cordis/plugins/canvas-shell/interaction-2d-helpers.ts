@@ -7,6 +7,7 @@
  */
 import {
   builtinNodeCapabilityResolver, type NodeCapabilityResolver,
+  minimumNodeSizeFor,
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
   scopeScaleFactor
@@ -28,7 +29,7 @@ export const SCOPE_HANDLE_ORDER = ["n", "ne", "e", "se", "s", "sw", "w", "nw"] a
 export function scopeResizeTarget(
   gesture: { handle: Point; anchor: Point; originCenter: Point; originWidth: number; originHeight: number },
   world: Point,
-  minimum = { width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT }
+  minimum = minimumNodeSizeFor("composite-asset")
 ): { width: number; height: number; position: Point } | null {
   const w0 = gesture.originWidth;
   const h0 = gesture.originHeight;

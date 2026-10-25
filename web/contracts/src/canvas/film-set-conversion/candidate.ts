@@ -42,7 +42,7 @@ export type FilmSetConversionCandidateResult =
  * change: 2026-10-22-remove-agent-execution-limits，任务 7.1 / design D7：这里原本以固定
  * 32 世界单位为界**拒绝**结构合法但地面偏大的候选。现在改为世界尺度／取景**质量诊断**：
  * 地面远大于主体时仍完整交付（内容合法即保留），只在结果的 note 中说明主体预览可能偏小。
- * 默认地面为 `FILM_SET_GROUND_DEFAULT_SIZE`（8）。
+ * 用户添加地面的建议边长为 `FILM_SET_GROUND_DEFAULT_SIZE`（8）。
  */
 export const FILM_SET_CONVERSION_GROUND_ADVISORY_EXTENT = 32;
 
