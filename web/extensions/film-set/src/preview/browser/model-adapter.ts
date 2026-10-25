@@ -29,7 +29,7 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
       for (const node of current.document.nodes) {
         const target = resolve(node.id);
         if (target?.owner.filmSetNodeId === ownerNodeId) children.push({ nodeId: node.id, ownerNodeId, kind: "container", focusOwner: true,
-          panel: { title: target.item.name, message: target.item.kind === "image" ? "图片对象" : target.item.kind === "video" ? "视频对象" : "",
+          panel: { title: target.item.name, message: target.item.kind === "model" ? "3D 模型" : target.item.kind === "image" ? "图片对象" : target.item.kind === "video" ? "视频对象" : "",
             hint: feedback(node.id) ?? "拖入一个 3D 模型以替换 · 复制快照" } });
         else if (shotPreviewOwnershipOf(current.nodeData[node.id])?.filmSetNodeId === ownerNodeId) children.push({ nodeId: node.id, ownerNodeId, kind: "entity" });
       }
