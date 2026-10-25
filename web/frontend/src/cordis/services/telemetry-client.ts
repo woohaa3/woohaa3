@@ -110,7 +110,7 @@ export type TelemetryClientOptions = {
 };
 
 // `telemetryNow` / `stableTelemetryErrorCode` 住在 `telemetry-primitives.ts`：它们在入口静态闭包里
-// 被画布会话直接引用，而这个文件（采集实现）由 App scope 启动时动态加载，不进首屏预算。
+// 被画布会话直接引用，而这个文件（采集实现）由 App scope 启动时动态加载，不进启动闭包。
 
 /** 创建采集客户端。**不**开始任何 I/O，直到第一条事件或第一次 flush。 */
 export function createTelemetryClient(options: TelemetryClientOptions = {}): TelemetryClient {

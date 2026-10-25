@@ -3,8 +3,8 @@
  * （change: 2026-10-20-add-local-client-telemetry，任务 5.3 / design D9）。
  *
  * **这个文件必须保持很薄。** 它被 `cordis/manifest.ts` 静态引入（页面清单要插件函数本体），
- * 所以这里只能有槽位注册：一旦静态引入取数层或页面，它们就进入入口静态闭包，把
- * `check-frontend-budget.mjs` 的 host-entry 预算顶破。真正的适配逻辑在 `./route.js`，
+ * 所以这里只能有槽位注册：一旦静态引入取数层或页面，它们就进入入口静态闭包，让每个用户
+ * 都在启动时下载复盘页代码。真正的适配逻辑在 `./route.js`，
  * 由这里动态 import（只在复盘页的 chunk 里）。
  *
  * 职责：注册 `app.route` 贡献；不创建 Canvas Session、sync socket、Bevy/WASM、selection 或任何

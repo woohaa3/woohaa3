@@ -1,10 +1,10 @@
 /**
  * `/telemetry` 页面的适配组件（change: 2026-10-20-add-local-client-telemetry，任务 5.3）。
  *
- * **单独一个文件是为了入口体积**：`plugins/telemetry/plugin.tsx` 里的插件对象会被
+ * **单独一个文件是为了首屏体积**：`plugins/telemetry/plugin.tsx` 里的插件对象会被
  * `cordis/manifest.ts` 静态引入（页面清单需要插件函数本体），所以插件文件只能留槽位注册。
  * 一旦在插件文件里静态引入取数层（`remote`/`model`/`query`）与页面，它们就会进入**入口静态闭包**，
- * 把 `check-frontend-budget.mjs` 的 host-entry 预算顶破。把整段适配逻辑放到这个模块里、由插件
+ * 让每个用户都在启动时下载复盘页代码。把整段适配逻辑放到这个模块里、由插件
  * 动态 import，本模块与页面就只落在复盘页自己的 chunk 中。
  *
  * 职责边界不变：本组件只做适配（订阅 App Router、调宿主同源 API、把纯数据交给页面组件），

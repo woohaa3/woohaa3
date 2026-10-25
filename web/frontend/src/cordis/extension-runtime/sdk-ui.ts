@@ -3,7 +3,7 @@
  * （change: 2026-10-12-build-and-load-extensions-independently，任务 2.2 / design D2）。
  *
  * 只做静态具名 adapter：从公共 UI 叶子模块逐个取具名导出，禁止对整个 UI/Lucide barrel 做
- * namespace 展开，以免保留所有未用代码。分组费用纳入首屏预算审计。
+ * namespace 展开，以免保留所有未用代码、把入口静态闭包撑大。
  */
 import {
   SettingsSection,

@@ -250,8 +250,8 @@ export function installAppServices(ctx: Context, options: PlatformOptions = {}):
   // 归 App scope 持有而不是某个页面：埋点发生在画布编辑/同步里，切页面或关闭设置都不该让缓冲
   // 丢掉。它同步入队、失败只计数，缺失时上游埋点退化为 no-op，因此不影响任何启动路径。
   //
-  // **动态 import 是为了首屏预算**：采集实现与契约的事件模块不该让每个用户都下载
-  // （`check-frontend-budget.mjs` 的 host-entry 闭包）。代价是加载完成前的极少量事件会丢——
+  // **动态 import 是为了首屏体积**：采集实现与契约的事件模块不该让每个用户都在启动时下载
+  // （它们否则会进入入口静态闭包）。代价是加载完成前的极少量事件会丢——
   // 遥测是 best-effort，这个取舍写在 design D7。引用槽在 `telemetry-primitives.ts`，画布会话
   // 只依赖那个零依赖模块。
   void import("./services/telemetry-client.js")

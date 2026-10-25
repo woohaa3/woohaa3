@@ -3,8 +3,8 @@
  * （change: 2026-10-20-add-local-client-telemetry，design D7）。
  *
  * 为什么单独一个模块：`canvas-session` / `canvas-session-transport` / `install-services` 都在
- * **入口静态闭包**里，而采集实现（`telemetry-client.ts` + 契约的事件模块）不该为每个用户都加载进
- * 首屏预算。所以这里只保留三样极小的东西——单调时钟、稳定错误码归一、以及一个可被替换的
+ * **入口静态闭包**里，而采集实现（`telemetry-client.ts` + 契约的事件模块）不该为每个用户都在
+ * 启动时加载。所以这里只保留三样极小的东西——单调时钟、稳定错误码归一、以及一个可被替换的
  * 客户端引用；真正的客户端由 App scope 启动时动态 import 安装。
  *
  * 引用槽的语义：未安装即 `undefined`（埋点整体 no-op）。这是刻意的——遥测永远不是画布启动的前置条件。

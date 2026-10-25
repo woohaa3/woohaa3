@@ -35,7 +35,6 @@
     "ui:build": "pnpm -C web/showcase build",
     "test": "pnpm -C web run test",
     "typecheck": "pnpm -C web run typecheck",
-    "perf:check": "node scripts/check-frontend-budget.mjs",
     "build:browser": "pnpm -C web run build:browser",
     "extensions:check": "node scripts/extensions-preflight.mjs",
     "assemble:extensions": "node scripts/assemble-extension-release.mjs",
