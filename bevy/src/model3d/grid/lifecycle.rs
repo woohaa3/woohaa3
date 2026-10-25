@@ -6,9 +6,9 @@
 //! `Scene`/`ThemeResource`/viewport 投影为通用插件的 config/style/target。网格实体本身由
 //! `IsometricGridPlugin` 拥有与回收。
 
-use bevy::prelude::*;
-use bevy::render::view::Tonemapping;
 use bevy::camera::visibility::RenderLayers;
+use bevy::prelude::*;
+use bevy::render::view::{DebandDither, Tonemapping};
 
 use crate::isometric_grid::{
     IsometricGridConfig, IsometricGridStyle, IsometricGridTarget, canvas_camera_projection,
@@ -34,6 +34,7 @@ pub(crate) fn setup_camera(commands: &mut Commands) -> Entity {
             Projection::Orthographic(canvas_camera_projection()),
             crate::isometric_grid::canvas_camera_transform(Vec2::ZERO),
             Tonemapping::None,
+            DebandDither::Disabled,
         ))
         .id();
     commands.insert_resource(GlobalAmbientLight {

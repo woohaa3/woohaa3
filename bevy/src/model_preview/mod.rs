@@ -371,6 +371,7 @@ pub(crate) fn sync(
                     RenderLayers::from_layers(&[layer]),
                     Msaa::Sample4,
                     bevy::render::view::Tonemapping::None,
+                    bevy::render::view::DebandDither::Disabled,
                     // 就绪门禁只统计可逐项计数的直接绘制队列；Bevy 的 multidraw 实例数是
                     // 私有字段，GPU 间接绘制的卡片会「画出来了却永远不 ready」，Sprite 因此
                     // 一直显示灰底。与截图相机同一策略（shot_camera/capture.rs）。

@@ -204,6 +204,7 @@ fn spawn_offscreen_capture_camera(
         Transform::from_translation(derived.position).looking_at(derived.focus, Vec3::Y),
         lens.projection(),
         bevy::render::view::Tonemapping::None,
+        bevy::render::view::DebandDither::Disabled,
         CaptureCamera {
             camera: request.camera,
             request_id: request.request_id,

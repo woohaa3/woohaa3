@@ -11,7 +11,7 @@ use bevy::{
     render::{
         RenderPlugin,
         render_resource::TextureUsages,
-        view::Tonemapping,
+        view::{DebandDither, Tonemapping},
     },
 };
 
@@ -205,6 +205,7 @@ fn setup_camera(
             ..default()
         },
         Tonemapping::None,
+        DebandDither::Disabled,
     ));
 }
 
@@ -263,6 +264,7 @@ fn setup_animation_camera(
             ..default()
         },
         Tonemapping::None,
+        DebandDither::Disabled,
     ));
 }
 

@@ -320,6 +320,7 @@ pub(crate) fn sync_preview_targets(
                     Transform::from_translation(derived.position).looking_at(derived.focus, Vec3::Y),
                     lens.projection(),
                     bevy::render::view::Tonemapping::None,
+                    bevy::render::view::DebandDither::Disabled,
                     ShotPreviewCamera { rig: entity },
                 ))
                 .id();

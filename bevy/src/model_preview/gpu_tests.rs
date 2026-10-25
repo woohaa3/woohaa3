@@ -245,6 +245,7 @@ fn verify_focused_edit(app: &mut App) {
             RenderLayers::layer(0),
             Msaa::Sample4,
             bevy::render::view::Tonemapping::None,
+            bevy::render::view::DebandDither::Disabled,
         ))
         .id();
     app.world_mut().resource_mut::<FocusRig>().focus_node = Some("building".into());

@@ -1,6 +1,10 @@
 //! Editor handles render over scene geometry using a separate depth buffer.
 use crate::model3d::{editor::EDITOR_LAYER, grid::ModelCanvasCamera};
-use bevy::{camera::visibility::RenderLayers, prelude::*, render::view::Tonemapping};
+use bevy::{
+    camera::visibility::RenderLayers,
+    prelude::*,
+    render::view::{DebandDither, Tonemapping},
+};
 
 use super::CurrentScene;
 
@@ -19,6 +23,7 @@ pub(super) fn setup(mut commands: Commands) {
         EditorOverlayCamera,
         RenderLayers::layer(EDITOR_LAYER),
         Tonemapping::None,
+        DebandDither::Disabled,
     ));
 }
 

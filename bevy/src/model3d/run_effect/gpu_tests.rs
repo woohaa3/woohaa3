@@ -177,6 +177,7 @@ fn hardware_run_effect_shader_and_output_isolation() {
             RenderLayers::from_layers(&[0, WORK_LAYER]),
             Msaa::Off,
             bevy::render::view::Tonemapping::None,
+            bevy::render::view::DebandDither::Disabled,
         ))
         .id();
     // Use the production overview backdrop in the existing 2D work-camera pass.
@@ -216,6 +217,7 @@ fn hardware_run_effect_shader_and_output_isolation() {
             Transform::from_xyz(320., -240., 1000.),
             Msaa::Off,
             bevy::render::view::Tonemapping::None,
+            bevy::render::view::DebandDither::Disabled,
         ))
         .id();
     // Give real asynchronous mesh/material/shader preparation a bounded batch of frames.
