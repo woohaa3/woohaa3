@@ -149,6 +149,10 @@ pub(super) fn sync(
                     group,
                     key.selected,
                 )]
+            } else if key.panel.is_some() && key.has_model {
+                // Model-backed composite children retain their ownership scope, but their
+                // surface is the same ordinary 3D model card used by model3d nodes.
+                super::cards::draw_static(&mut geometry, theme, node, key.index)
             } else if key.panel.is_some() {
                 super::scope_panel::draw(&mut geometry, theme, node, key.selected, z)
             } else {

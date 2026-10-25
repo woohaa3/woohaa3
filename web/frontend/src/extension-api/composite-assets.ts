@@ -222,6 +222,9 @@ export class CompositeAssetRegistry {
         node.compositeAsset.scopeShape = "rect";
         delete node.compositeAsset.scopeGround;
         node.compositeAsset.panel = child.panel ?? { title: node.title };
+        // A model-backed child container keeps its composite identity for ownership/picking,
+        // while using the ordinary model card label in the canvas surface.
+        if (node.model) node.cardLabel = "3D 模型";
       }
     }
     for (const [ownerId, targetNodeIds] of targets) {
