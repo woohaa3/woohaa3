@@ -70,7 +70,6 @@ claude/<version>/darwin-arm64.tar.gz
 dsh/<version>/darwin-arm64.tar.gz
 shot-recorder/<content-version>/darwin-arm64.tar.gz
 model-renderer/<content-version>/darwin-arm64.tar.gz
-image-editor/<content-version>/darwin-arm64.tar.gz
 ```
 
 在 Windows x64 上生成对应平台归档。目录还包含锁文件与公开 trust-key.pem，可一并托管；私钥不在输出目录，不能上传。

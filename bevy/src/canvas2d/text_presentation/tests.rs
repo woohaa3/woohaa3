@@ -268,6 +268,7 @@ fn effective_zoom_follows_media_focus_camera() {
         },
         source_width: 640.0,
         source_height: 480.0,
+        document_view: None,
     });
     app_world.insert_resource(CurrentScene(scene.clone()));
     let focused = effective_zoom(&app_world.resource::<CurrentScene>());

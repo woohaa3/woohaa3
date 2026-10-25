@@ -163,7 +163,7 @@ describe("ingress HTTP 代理（任务 6.3）", () => {
 
   it("工程上传转发到 Media 专用核验入口", async () => {
     const response = await fetch(`${base}/api/media-projects`, {
-      method: "POST", headers: { "content-type": "application/vnd.woohaa.photocraft-project" }, body: "project-bytes"
+      method: "POST", headers: { "content-type": "application/vnd.fixture-project" }, body: "project-bytes"
     });
     expect(response.status).toBe(206);
     expect(media.requests.at(-1)?.url).toBe("/api/media-projects");

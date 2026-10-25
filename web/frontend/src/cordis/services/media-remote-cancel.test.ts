@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { IMAGE_PROJECT_CONTENT_TYPE } from "@woohaa3/contracts";
 import { setAppBasePathForTesting } from "./app-base-path.js";
 import { createMediaRemote } from "./media-remote.js";
 
@@ -55,7 +54,7 @@ it.each(["/", "/dev/editor/"])("工程与 PNG 分别走核验和普通入口，�
     ok: true, status: 201, body: { storageKey: "key", checksum: "hash", contentType: input.file.type, size: input.file.size }
   }));
   const remote = createMediaRemote({ uploadImpl });
-  const project = new File(["project"], "project.pcraft", { type: IMAGE_PROJECT_CONTENT_TYPE });
+  const project = new File(["project"], "project.pcraft", { type: "application/vnd.fixture-project" });
   const png = new File(["png"], "output.png", { type: "image/png" });
   expect((await remote.upload({ file: project })).ok).toBe(true);
   expect((await remote.upload({ file: png })).ok).toBe(true);

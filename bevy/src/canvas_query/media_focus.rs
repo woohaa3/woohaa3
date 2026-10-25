@@ -45,9 +45,14 @@ pub(crate) fn has_presented_media_focus(scene: &Scene) -> bool {
     presented_media_focus(scene).is_some()
 }
 
-/// Focus changes the camera only. The image/video remains in its original node content rectangle.
+/// Document focus drives the shared camera; a captured viewport may have a separate sprite layout.
 pub(crate) fn camera_view(scene: &Scene) -> Option<(f32, f32, f32)> {
-    let focus = media_focus(scene)?;
+    let mut focus = media_focus(scene)?;
+    if let Some(view) = scene.image_focus.as_ref().and_then(|image| image.document_view) {
+        focus.viewport = view.viewport;
+        focus.source_width = view.source_width;
+        focus.source_height = view.source_height;
+    }
     let node = scene.nodes.iter().find(|node| node.id == focus.node_id)?;
     let size = texture_size(node, Vec2::new(focus.source_width, focus.source_height));
     let center = content_center(node);
@@ -137,6 +142,29 @@ mod tests {
         scene.image_focus = None;
         assert!(presented_media_focus(&scene).is_none());
         assert!(backdrop_rect(&scene).is_none());
+    }
+
+    #[test]
+    fn document_pan_zoom_moves_the_real_grid_and_background_with_a_fixed_capture_rect() {
+        let mut scene = focused("image");
+        let frame_viewport = scene.image_focus.as_ref().unwrap().viewport;
+        let mut last = None;
+        for (x, y, zoom) in [(38.0, -24.0, 0.6), (138.0, 76.0, 0.6), (138.0, 76.0, 1.2)] {
+            scene.image_focus.as_mut().unwrap().document_view = Some(serde_json::from_value(serde_json::json!({
+                "sourceWidth":1600,"sourceHeight":900,"viewport":{"x":x,"y":y,"zoom":zoom}
+            })).unwrap());
+            let camera = camera_view(&scene).unwrap();
+            let grid = crate::model3d::grid::scene_view(&scene);
+            assert_eq!((grid.x, grid.y, grid.zoom), camera);
+            let target = content_center(&scene.nodes[0]);
+            assert!((target.x * camera.2 + camera.0 - (482.0 + x)).abs() < 0.001);
+            assert!((target.y * camera.2 + camera.1 - (440.0 + y)).abs() < 0.001);
+            let other = content_center(&scene.nodes[1]);
+            let screen = (other.x * camera.2 + camera.0, other.y * camera.2 + camera.1);
+            if let Some(previous) = last { assert_ne!(screen, previous); }
+            last = Some(screen);
+            assert_eq!(scene.image_focus.as_ref().unwrap().viewport.x, frame_viewport.x);
+        }
     }
 
     #[test]

@@ -38,7 +38,7 @@ test("dev:frontend and build:bevy:dev select the development mode", () => {
 
 test("production entries request release explicitly and ignore the dev mode variable", () => {
   assert.equal(pkg.scripts["build:bevy"], "node scripts/build-bevy-wasm.mjs --mode release");
-  assert.equal(pkg.scripts["build:wasm"].includes("build-bevy-wasm.mjs --mode release"), true);
+  assert.match(pkg.scripts["build:wasm"], /pnpm run build:bevy(?:\s|$)/);
   // 根生产 build 通过 build:bevy 走 release；生产脚本里不得出现 --dev。
   assert.match(pkg.scripts.build, /build:bevy/);
   assert.equal(/build-bevy-wasm\.mjs --dev/.test(pkg.scripts.build), false);

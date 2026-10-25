@@ -78,8 +78,6 @@ const FORBIDDEN_PACKAGES = [
 /** 允许内联的裸依赖（extension 私有 browser 依赖 / 纯 contracts）；其余裸依赖拒绝。 */
 const ALLOWED_BUNDLED_PACKAGES = [
   CONTRACTS_SPECIFIER,
-  // contracts 的协议实现已下沉到 PhotoCraft 子项目；纯函数随 contracts 一起内联。
-  "@woohaa3/photocraft-protocol",
   "mediabunny",
   "lib0",
   "yjs"
@@ -307,7 +305,7 @@ export async function buildExtensionBrowser(options = {}) {
   await fs.writeFile(path.join(targetStaging, "runtime-binding.js"), RUNTIME_BINDING_SOURCE, "utf8");
   await fs.writeFile(
     path.join(targetStaging, "shim-react.js"),
-    shimSource("react", options.reactNames ?? ["createElement", "useState", "useEffect", "useSyncExternalStore", "useCallback", "useMemo", "useRef", "useLayoutEffect", "useContext", "useReducer", "cloneElement", "isValidElement", "forwardRef", "memo", "createContext", "Fragment", "Children", "Component", "startTransition"]),
+    shimSource("react", options.reactNames ?? ["createElement", "useId", "useState", "useEffect", "useSyncExternalStore", "useCallback", "useMemo", "useRef", "useLayoutEffect", "useContext", "useReducer", "cloneElement", "isValidElement", "forwardRef", "memo", "createContext", "Fragment", "Children", "Component", "startTransition"]),
     "utf8"
   );
   await fs.writeFile(
@@ -460,10 +458,30 @@ export async function buildExtensionBrowser(options = {}) {
       kind
     });
   }
+  // Optional package-owned iframe/WASM resources. No host-specific source paths or editor names.
+  const publicRoot = path.join(dir, "public");
+  async function publishAssets(folder, prefix = "") {
+    if (!existsSync(folder)) return;
+    for (const file of (await fs.readdir(folder, { withFileTypes: true })).sort((a,b) => a.name.localeCompare(b.name))) {
+      const relative = `assets/${prefix}${file.name}`;
+      if (file.isSymbolicLink()) throw new Error(`Extension public asset must not be a symlink: ${relative}`);
+      if (file.isDirectory()) { await publishAssets(path.join(folder, file.name), `${prefix}${file.name}/`); continue; }
+      if (!file.isFile()) throw new Error(`Invalid extension public asset: ${relative}`);
+      const abs = path.join(targetOut, relative);
+      if (existsSync(abs)) throw new Error(`Extension public asset collision: ${relative}`);
+      const bytes = await fs.readFile(path.join(folder, file.name));
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      await fs.writeFile(abs, bytes);
+      fileRecords.push({ relative, abs, bytes: bytes.length, gzipBytes: gzipSync(bytes).length,
+        sha256: sha256Hex(bytes), kind: "asset" });
+    }
+  }
+  if (existsSync(publicRoot) && (await fs.lstat(publicRoot)).isSymbolicLink()) throw new Error("Extension public asset root must not be a symlink");
+  await publishAssets(publicRoot);
   if (!entryRelative) throw new Error("browser build 未产出 entry-*.js 薄入口");
   // 修正 entry 分类。
   for (const record of fileRecords) {
-    record.kind = classifyFile(record.relative, entryRelative);
+    if (!record.relative.startsWith("assets/")) record.kind = classifyFile(record.relative, entryRelative);
   }
   const styles = stylesheetRelative ? [stylesheetRelative] : [];
 

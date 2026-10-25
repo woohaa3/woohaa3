@@ -594,7 +594,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
       ? `focus=${scene.modelFocus.nodeId},${scene.modelFocus.yaw},${scene.modelFocus.pitch},${scene.modelFocus.distance},${scene.modelFocus.radius},${scene.modelFocus.target.join(",")}`
       : "focus=",
     scene.imageFocus
-      ? `ifocus=${scene.imageFocus.nodeId},${scene.imageFocus.viewport.x},${scene.imageFocus.viewport.y},${scene.imageFocus.viewport.zoom},${scene.imageFocus.sourceWidth}x${scene.imageFocus.sourceHeight},${scene.imageFocus.presentationReady ?? true}`
+      ? `ifocus=${scene.imageFocus.nodeId},${scene.imageFocus.viewport.x},${scene.imageFocus.viewport.y},${scene.imageFocus.viewport.zoom},${scene.imageFocus.sourceWidth}x${scene.imageFocus.sourceHeight},${scene.imageFocus.presentationReady ?? true},${JSON.stringify(scene.imageFocus.documentView ?? null)}`
       : "ifocus=",
     scene.videoFocus
       ? `vfocus=${scene.videoFocus.nodeId},${scene.videoFocus.viewport.x},${scene.videoFocus.viewport.y},${scene.videoFocus.viewport.zoom},${scene.videoFocus.sourceWidth}x${scene.videoFocus.sourceHeight}`

@@ -45,7 +45,7 @@ Windows dependency bootstrap: root `setup.ps1` checks the native toolchain befor
 
 Optional desktop runtimes: `web/runtime-components/` owns locked, signed component downloads, local CLI selection, installation receipts and leases. `web/backend/src/runtime-components/http.ts` exposes the loopback-only management API; the settings plugin provides explicit installation controls. `scripts/package-runtime-components.mjs` builds self-hosted CDN artifacts; `desktop/runtime-downloads.json` and `desktop/runtime-components.lock.json` define defaults and compatibility. Desktop recording watches verified component readiness; model rendering and Agent transports resolve components lazily. See `desktop/RUNTIMES.md`.
 
-Canvas image editing prepares only after a direct edit request. `web/frontend/src/cordis/services/runtime-components.ts` shares host state and installation with settings; normal canvas viewing does not start it. Navigation owns feature entry guards; `photocraft/integrations/woohaa/src/editor-preparation.ts` merges repeated requests and isolates cancelled/stale completions, while `node-editor-readiness.tsx` shows an anchored loading/retry tip only for the requested node. Readiness resumes entry automatically; history viewing remains available. No automatic runtime alert is opened.
+Image editing is provided by an installed extension through the extension SDK. The host owns generic focus presentation, camera/texture ports, navigation, edit completion receipts and owner-scoped media-format registration. Editor engines, document formats and runtime assets are outside the host.
 
 Local tool setup lives in `web/extensions/local-agent/src/frontend/settings-panel.tsx`: missing tools expose installation actions, including the shared runtime settings for Codex. `src/backend/runtime-executable.ts` bridges managed Codex and local executables; `process-manager.ts` holds the managed executable lease until process exit. Discovery stays read-only.
 
@@ -57,7 +57,7 @@ Runtime release layout: `scripts/lib/runtime-release-layout.mjs` owns platform/A
 
 Shared runtime archives: `scripts/lib/runtime-archive.mjs` owns deterministic streaming USTAR/gzip generation. `web/runtime-components/index.mjs` accepts legacy schema 1 release-local archives and schema 2 SHA-256 blobs resolved under the runtime root; signed release catalogs remain platform/App-version scoped.
 
-PhotoCraft editing: `photocraft/packages/editor/src/features/` owns the 18 feature domains. `features/tool-groups.ts` shares toolbar grouping and Shift cycling; `features/menu-commands.ts` derives runtime menu entries. `editor-sidebar.tsx` hosts independently dockable feature panels. Painting controls share gesture settings through `features/painting/controls-context.tsx`; canvas lasso/crop hooks use the workspace draft gate. Feature boundary fixtures live in `photocraft/tests/fixtures/feature-boundary-*.json`.
+Image editing is provided by an installed extension through the extension SDK. The host owns generic focus presentation, camera/texture ports, navigation, edit completion receipts and owner-scoped media-format registration. Editor engines, document formats and runtime assets are outside the host.
 
 Composite asset node actions use the shared toolbar target contract. Rust toolbar drawing and interaction accept composite assets and anchor their actions to the scope AABB; viewport and position updates retain the same hit geometry. Film-set object rows expose their container action without requiring a selection.
 

@@ -1,17 +1,9 @@
 /**
- * Application 后端插件宿主公共入口
- * （change: 2026-10-05-extract-application-plugin-host，任务 2.2 / design D2/D3；
- *  change: 2026-10-09-refactor-large-source-files-and-remove-compatibility R16 —— 拆分为
- *  类型/facade 与 dispatch 子模块，本文件保留唯一 owner 表与 activation 编排）。
- *
- * 宿主声明受控扩展点：typed capability、命名空间 request handler、后台 resource。插件只在
- * activation 内贡献；宿主负责依赖解析、owner-scoped disposer、反序回滚、认证边界与停用清理。
- *
- * 安全边界：
- * - 插件不能注册任意公网路由、替换根 server 或访问其它服务数据库（注册面只有下列三类）；
- * - handler 的认证等级由宿主在进入插件逻辑**之前**强制；
- * - 相同 capability id / handler route 冲突使后注册 stable 失败；activation 中途失败反序回滚。
+ * Application extension activation and owner-scoped contributions.
+ * Authentication stays in the host; extensions contribute capabilities and bounded handlers.
+ * Failed activation and unload release resources in reverse order.
  */
+import { installMediaFormatRegistration } from "./host-media-formats.js";
 import type {
   ApplicationBackendActivation,
   ApplicationBackendConfigFacade,
@@ -328,6 +320,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       }
     };
 
+    installMediaFormatRegistration(host, owner, options.registerMediaFormatFor?.(definition.extensionId));
     const registerGeneration = options.registerGenerationFor?.(definition.extensionId);
     if (registerGeneration) {
       host.registerGeneration = (provider) => {

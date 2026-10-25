@@ -9,8 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyCanvasCommands,
   createEmptyWoohaa3ServerCanvas,
-  IMAGE_EDIT_DOCUMENT_VERSION, IMAGE_PROJECT_CONTENT_TYPE, PHOTOCRAFT_ENGINE_VERSION,
-  type ServerCanvas,
+  IMAGE_EDIT_DOCUMENT_VERSION, type ServerCanvas,
   type StoredAsset
 } from "@woohaa3/contracts";
 import { InMemoryNodeHistoryRepository } from "../storage/core/in-memory-node-history-repository.js";
@@ -191,9 +190,9 @@ it("begin 的 body 不能改成未经路由授权的目标", async () => {
 
 it("跨画布引用核验要求目标与来源均可读取，并返回权威资产 metadata", async () => {
   const source = imageCanvas();
-  const project = { storageKey: `sha256-${"c".repeat(64)}`, checksum: "c".repeat(64), contentType: IMAGE_PROJECT_CONTENT_TYPE, size: 100 };
+  const project = { storageKey: `sha256-${"c".repeat(64)}`, checksum: "c".repeat(64), contentType: "application/vnd.fixture-project", size: 100 };
   (source.nodeData["node-1"] as Record<string, unknown>).imageEdit = {
-    version: "woohaa-image-project-v1", engine: "photocraft", engineVersion: PHOTOCRAFT_ENGINE_VERSION, formatVersion: 1,
+    version: "woohaa-image-project-v1", engine: "fixture-editor", engineVersion: "fixture-editor-v1", formatVersion: 1,
     baseAssetId: "asset-output", sourceWidth: 100, sourceHeight: 80, canvasWidth: 100, canvasHeight: 80,
     documentContentHash: "1".repeat(16), project, sourceAssetIds: ["asset-output"]
   };

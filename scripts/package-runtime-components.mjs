@@ -29,15 +29,11 @@ export function resolvedRuntimeLock(options={}){
   if(!fs.existsSync(file))throw new Error(`构建组件前请先构建 release 工具：${id} (${file})`);
   lock.components[id]={version:`0.1.0-${sha256(file).slice(0,16)}`};
  }
- // PhotoCraft 覆盖层的 wasm（iframe 静态资源，权威源在仓库根 tools/）。
- const editor=path.join(root,'../tools/photocraft-web/app/photocraft-web_bg.wasm');
- if(!fs.existsSync(editor))throw new Error(`PhotoCraft WASM 缺失：${editor}`);
- lock.components['image-editor']={version:`0.1.0-${sha256(editor).slice(0,16)}`};
  return lock;
 }
 function dependency(source,name){const found=locateDependency(fs.realpathSync(source),name);if(!found)throw new Error(`缺少已安装依赖 ${name}`);return found;}
 function copyLicenses(source,target){for(const name of fs.readdirSync(source))if(/^(license|licence|notice|readme)/i.test(name)&&fs.statSync(path.join(source,name)).isFile())fs.copyFileSync(path.join(source,name),path.join(target,name));}
-export async function packageRuntimeComponents({output=path.join(root,'artifacts/runtimes/upload'),platform=process.platform,arch=process.arch,releaseVersion=readJson(path.join(root,'desktop/tauri.conf.json')).version,keyFile=process.env.WOOHAA_RUNTIME_SIGNING_KEY_FILE,key=process.env.WOOHAA_RUNTIME_SIGNING_KEY,ids=['codex','claude','dsh','shot-recorder','model-renderer','image-editor']}={}){
+export async function packageRuntimeComponents({output=path.join(root,'artifacts/runtimes/upload'),platform=process.platform,arch=process.arch,releaseVersion=readJson(path.join(root,'desktop/tauri.conf.json')).version,keyFile=process.env.WOOHAA_RUNTIME_SIGNING_KEY_FILE,key=process.env.WOOHAA_RUNTIME_SIGNING_KEY,ids=['codex','claude','dsh','shot-recorder','model-renderer']}={}){
  const layout=runtimeReleaseLayout({platform,arch,version:releaseVersion});
  output=path.join(output,...layout.relativeDirectory.split('/'));
  const privateKey=createPrivateKey(keyFile?fs.readFileSync(keyFile):key??(()=>{throw new Error('需要 WOOHAA_RUNTIME_SIGNING_KEY_FILE（Ed25519 PEM 私钥路径）');})());
@@ -92,10 +88,7 @@ export async function packageRuntimeComponents({output=path.join(root,'artifacts
    fs.copyFileSync(path.join(root,'scripts/lib/desktop-runtime-links.mjs'),path.join(staging,'runtime-links.mjs'));
    fs.writeFileSync(path.join(staging,'entry.mjs'),`import { materializeRuntimeLinks } from './runtime-links.mjs';\nimport { fileURLToPath } from 'node:url';\nmaterializeRuntimeLinks(fileURLToPath(new URL('.',import.meta.url)));\nexport async function runCli(options){const cli=await import('./dsh/lib/bin.js');return cli.runCli(options); }\n`);
    entry='entry.mjs';kind='node';
-  }else if(id==='image-editor'){
-   // 桌面端把 PhotoCraft 的静态站点整体带进运行时组件（iframe 需要 index.html + glue + wasm）。
-   kind='asset';entry='photocraft-web';const appDir=path.join(root,'../tools/photocraft-web/app');
-   fs.cpSync(appDir,path.join(staging,entry),{recursive:true});
+
   }else{
    entry=id+(platform==='win32'?'.exe':'');fs.copyFileSync(nativeToolSources({platform,arch})[id],path.join(staging,entry));
   }

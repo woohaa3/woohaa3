@@ -17,8 +17,6 @@ import {
   hashModelScript,
   decodeNodeGenerationHistoryEntry,
   IMAGE_EDIT_DOCUMENT_VERSION,
-  IMAGE_PROJECT_CONTENT_TYPE,
-  PHOTOCRAFT_ENGINE_VERSION,
   type ImageProjectDocument,
   modelContentIdentity,
   type CanvasCommand,
@@ -554,8 +552,8 @@ const PROJECT_KEY = "sha256-" + "d".repeat(64);
 function projectDoc(overrides: Partial<ImageProjectDocument> = {}): ImageProjectDocument {
   return {
     version: "woohaa-image-project-v1",
-    engine: "photocraft",
-    engineVersion: PHOTOCRAFT_ENGINE_VERSION,
+    engine: "fixture-editor",
+    engineVersion: "fixture-editor-v1",
     formatVersion: 1,
     baseAssetId: "asset-base",
     sourceWidth: 400,
@@ -566,7 +564,7 @@ function projectDoc(overrides: Partial<ImageProjectDocument> = {}): ImageProject
     project: {
       storageKey: PROJECT_KEY,
       checksum: "d".repeat(64),
-      contentType: IMAGE_PROJECT_CONTENT_TYPE,
+      contentType: "application/vnd.fixture-project",
       size: 4096
     },
     sourceAssetIds: ["asset-base"],

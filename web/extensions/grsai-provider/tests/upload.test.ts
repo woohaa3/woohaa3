@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { uploadGrsaiReference } from "../src/upload.js";
+import { createGrsaiRegistration } from "../src/backend.js";
 
 const TOKEN_RESPONSE = {
   code: 0,
@@ -17,6 +18,19 @@ function tokenFetchMock(payload: unknown = TOKEN_RESPONSE, status = 200) {
 }
 
 describe("grsai 参考图上传", () => {
+  it("注册的上传端口返回宿主契约要求的 URL 结果", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) =>
+      String(input).includes("newUploadTokenZH")
+        ? Response.json(TOKEN_RESPONSE)
+        : Response.json({ hash: "h", key: "folder/a.png" }));
+    const { registration } = createGrsaiRegistration({ apiKey: "test-key", fetchImpl: fetchImpl as typeof fetch });
+    const input = { reference: { role: "reference", mediaType: "image/png" }, bytes: new Uint8Array([1, 2, 3]), contentType: "image/png" };
+    expect(await registration.uploadReference!(input)).toEqual({ url: "https://grsai-file.dakka.com.cn/folder/a.png" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const unavailable = createGrsaiRegistration({}).registration;
+    expect(await unavailable.uploadReference!(input)).toBeUndefined();
+  });
+
   it("先换令牌再传字节，返回域名 + key 的公网地址", async () => {
     const tokenFetch = tokenFetchMock();
     const uploadFetch = vi.fn(async () => Response.json({ hash: "h", key: "folder/a.png" }));

@@ -4,7 +4,7 @@ import { Button } from "../../../shared/ui/Button.js";
 
 import { runtimeComponents } from "../../services/runtime-components.js";
 
-const LABELS: Record<string, string> = { "image-editor": "图片编辑", codex: "Codex", claude: "Claude", dsh: "DeepSeek DSH", "shot-recorder": "视频录制", "model-renderer": "模型渲染" };
+const LABELS: Record<string, string> = { codex: "Codex", claude: "Claude", dsh: "DeepSeek DSH", "shot-recorder": "视频录制", "model-renderer": "模型渲染" };
 const STATUSES: Record<string, string> = { missing: "未安装", checking: "检查中", downloading: "下载中", verifying: "校验中", extracting: "解压中", ready: "可用", failed: "安装失败", incompatible: "版本不兼容" };
 const BUSY = new Set(["checking", "downloading", "verifying", "extracting"]);
 

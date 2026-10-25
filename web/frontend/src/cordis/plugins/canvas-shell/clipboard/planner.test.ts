@@ -7,8 +7,6 @@ import {
   createWoohaa3CanvasNode,
   toWoohaa3CanvasDocument,
   createFilmSetSnapshot, canonicalFilmSetFields, filmSetAnimationsOf, decodeFilmSetNodeData,
-  IMAGE_PROJECT_CONTENT_TYPE,
-  PHOTOCRAFT_ENGINE_VERSION,
   applyCanvasCommands,
   filmSetObjectContainerId, filmSetObjectContainerData, resolveFilmSetObject,
   FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewOwnershipOf, SHOT_REFERENCE_ROLE,
@@ -478,8 +476,8 @@ function projectImageCanvas(canvasId = "canvas-1"): ServerCanvas {
         outputAssetId: "asset-out",
         imageEdit: {
           version: "woohaa-image-project-v1",
-          engine: "photocraft",
-          engineVersion: PHOTOCRAFT_ENGINE_VERSION,
+          engine: "fixture-editor",
+          engineVersion: "fixture-editor-v1",
           formatVersion: 1,
           baseAssetId: "asset-base",
           sourceWidth: 2048,
@@ -487,7 +485,7 @@ function projectImageCanvas(canvasId = "canvas-1"): ServerCanvas {
           canvasWidth: 800,
           canvasHeight: 600,
           documentContentHash: "0123456789abcdef",
-          project: { storageKey: PROJECT_KEY, checksum: "d".repeat(64), contentType: IMAGE_PROJECT_CONTENT_TYPE, size: 4096 },
+          project: { storageKey: PROJECT_KEY, checksum: "d".repeat(64), contentType: "application/vnd.fixture-project", size: 4096 },
           sourceAssetIds: ["asset-base", "asset-src"]
         }
       }
@@ -501,7 +499,7 @@ describe("图片工程复制与跨画布引用（任务 2.4）", () => {
     expect(payload).not.toBeNull();
     expect(payload!.assets?.map((asset) => asset.id).sort()).toEqual(["asset-base", "asset-out", "asset-src"]);
     expect(payload!.projectObjects).toEqual([
-      { storageKey: PROJECT_KEY, checksum: "d".repeat(64), contentType: IMAGE_PROJECT_CONTENT_TYPE, size: 4096 }
+      { storageKey: PROJECT_KEY, checksum: "d".repeat(64), contentType: "application/vnd.fixture-project", size: 4096 }
     ]);
     expect(parseCanvasCopyPayload(serializeCanvasCopyPayload(payload!))).toEqual(payload);
   });

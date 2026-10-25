@@ -8,13 +8,8 @@
  *
  * 未注入存储时直接抛错，不回退到本地/内存实现。
  */
-import { accessSync, constants } from "node:fs";
-import { isAbsolute } from "node:path";
-import {
-  createNativeProjectVerifier,
-  createProcessOnlyVerifier,
-  type NativeProjectVerifier
-} from "@woohaa3/photocraft-project-verifier";
+import { createMediaFormatRegistry } from "./application/media-formats.js";
+import type { MediaFormatRegistry } from "@woohaa3/contracts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { MediaStorage } from "@woohaa3/contracts";
 import type { BackendMediaPort } from "@woohaa3/contracts";
@@ -54,6 +49,7 @@ export type MediaServiceOptions = {
 };
 
 export type MediaService = {
+  formats: MediaFormatRegistry;
   handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   readiness: () => Promise<{ ready: boolean; reason?: string }>;
   close: () => Promise<void>;
@@ -74,18 +70,7 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
   const identities = options.identities ?? parseServiceIdentityConfig(env);
   const log = options.logger ?? (() => undefined);
 
-  const verifierPath = env.WOOHAA3_PROJECT_VERIFIER_PATH?.trim();
-  // change: 2026-10-21-extract-photocraft-subproject，任务 3.1/3.2 / design D5：
-  // 核验能力已迁入 `@woohaa3/photocraft-project-verifier`。Media 每个服务实例持有**自己的**
-  // 可释放实例，不再共享模块级全局配置 —— 多实例互不影响并发额度，关闭一个也不会清掉
-  // 另一个仍在用的配置。未配置原生工具时用只做进程内有界核验的默认实例。
-  const verifier: NativeProjectVerifier = verifierPath
-    ? (() => {
-        if (!isAbsolute(verifierPath)) throw new Error("WOOHAA3_PROJECT_VERIFIER_PATH 必须为绝对路径");
-        accessSync(verifierPath, constants.X_OK);
-        return createNativeProjectVerifier({ binaryPath: verifierPath });
-      })()
-    : createProcessOnlyVerifier();
+  const formats = createMediaFormatRegistry();
 
   /**
    * 预览派生物：后台转换 + 有界缓存（design D4）。
@@ -104,7 +89,7 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
     basePath: options.publicBasePath ?? DEFAULT_MEDIA_BASE_PATH,
     maxBytes: options.maxBytes,
     logger: log,
-    verifier,
+    formats,
     derivatives
   });
 
@@ -146,6 +131,7 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
   });
 
   return {
+    formats,
     storage,
     readiness,
     derivatives,
@@ -166,7 +152,6 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
     close: async () => {
       // 先等在途派生物结算，再释放存储：中断中的转换不能留在已关闭的存储上写缓存。
       await derivatives.drain();
-      verifier.dispose();
       const closeable = storage as { close?: () => void | Promise<void> };
       await closeable.close?.();
     }

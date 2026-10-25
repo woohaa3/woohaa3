@@ -21,9 +21,6 @@
     },
     "model-renderer": {
       "version": "source-build"
-    },
-    "image-editor": {
-      "version": "source-build"
     }
   }
 }

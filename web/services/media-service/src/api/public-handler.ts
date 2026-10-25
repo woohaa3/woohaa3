@@ -34,7 +34,7 @@ import {
   MediaDerivativeError,
   type MediaDerivativeReadFacade
 } from "../application/media-derivatives.js";
-import type { NativeProjectVerifier } from "@woohaa3/photocraft-project-verifier";
+import type { MediaFormatRegistry } from "@woohaa3/contracts";
 
 export const DEFAULT_MEDIA_BASE_PATH = "/api/media";
 
@@ -57,13 +57,8 @@ export type MediaRequestHandlerOptions = {
   allowedTypes?: readonly string[];
   /** 只用于传递安全字段；不要传 header 或凭据。 */
   logger?: (event: { event: string; status: number; code?: string }) => void;
-  /**
-   * 工程核验实例（change: 2026-10-21-extract-photocraft-subproject，任务 3.2）。
-   *
-   * 由服务装配注入自己的可释放实例，使并发额度与关闭语义按服务实例隔离；缺省用只做
-   * 进程内有界核验的默认实例。
-   */
-  verifier?: NativeProjectVerifier;
+  /** Registered extension-owned formats, shared with the service instance. */
+  formats?: MediaFormatRegistry;
   /**
    * 预览派生物读取面（change: 2026-10-23-scale-canvas-media-residency，任务 4.1）。
    *
@@ -119,7 +114,7 @@ export function createMediaRequestHandler(options: MediaRequestHandlerOptions): 
     }
 
     if (req.method === "POST" && (pathname === basePath || projectUpload)) {
-      await handleUpload(req, res, options.storage, maxBytes, options.allowedTypes, basePath, log, projectUpload, scope, options.verifier);
+      await handleUpload(req, res, options.storage, maxBytes, options.allowedTypes, basePath, log, projectUpload, scope, options.formats);
       return true;
     }
     if ((req.method === "GET" || req.method === "HEAD") && key !== "" && variant) {
@@ -151,7 +146,7 @@ async function handleUpload(
   log: Logger,
   projectIngest = false,
   scope?: MediaStorageScope,
-  verifier?: NativeProjectVerifier
+  formats?: MediaFormatRegistry
 ): Promise<void> {
   try {
     const declared = Number(req.headers["content-length"] ?? "");
@@ -169,7 +164,7 @@ async function handleUpload(
       allowedTypes,
       projectIngest,
       scope,
-      ...(verifier ? { verifier } : {})
+      ...(formats ? { formats } : {})
     });
 
     log?.({ event: "media-upload", status: 201 });

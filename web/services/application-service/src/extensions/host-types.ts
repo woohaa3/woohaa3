@@ -71,6 +71,7 @@ export type ApplicationExtensionHostOptions = {
    * （旧宿主或独立入口本来就没有这个能力）。
    */
   diagnostics?: import("@woohaa3/contracts").ApplicationBackendDiagnostics;
+  registerMediaFormatFor?: (extensionId: string) => ((format: import("@woohaa3/contracts").MediaFormatValidator) => () => void) | undefined;
   registerGenerationFor?: (extensionId: string) => ((provider: import("@woohaa3/contracts").GenerationProvider) => void) | undefined;
   releaseGenerationFor?: (extensionId: string) => ((providerId: string) => void) | undefined;
   /**

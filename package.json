@@ -25,12 +25,12 @@
     "theme:generate": "node scripts/generate-theme-tokens.mjs",
     "theme:check": "node scripts/generate-theme-tokens.mjs --check",
     "dev": "node scripts/dev.mjs",
-    "dev:frontend": "node scripts/build-bevy-wasm.mjs --dev && node scripts/sync-photocraft-app.mjs && pnpm -C web --filter @woohaa3/frontend dev",
+    "dev:frontend": "node scripts/build-bevy-wasm.mjs --dev && pnpm -C web --filter @woohaa3/frontend dev",
     "build": "pnpm run build:bevy && pnpm -C web run build:units && pnpm -C web --filter @woohaa3/frontend build && pnpm run build:browser && pnpm run assemble:extensions",
     "preview": "pnpm run build && node scripts/serve-web.mjs",
     "dev:services": "pnpm run assets:sync && pnpm -C web run build:units && node scripts/dev-orchestrator.mjs",
     "services:build": "pnpm -C web run build:units",
-    "prepare": "node scripts/sync-bevy-assets.mjs && node scripts/sync-photocraft-app.mjs",
+    "prepare": "node scripts/sync-bevy-assets.mjs",
     "ui": "pnpm -C web/showcase dev",
     "ui:build": "pnpm -C web/showcase build",
     "test": "pnpm -C web run test",
@@ -44,10 +44,9 @@
     "desktop:host:check": "node scripts/verify-desktop-host.mjs",
     "boundary:check": "node scripts/check-public-boundary.mjs",
     "test:scripts": "node --test scripts/*.test.mjs scripts/lib/*.test.mjs",
-    "build:wasm": "node scripts/build-bevy-wasm.mjs --mode release",
+    "build:wasm": "pnpm run build:bevy",
     "config:export": "node scripts/export-config.mjs",
-    "desktop:runtimes": "node scripts/package-runtime-components.mjs",
-    "photocraft:app": "node scripts/sync-photocraft-app.mjs"
+    "desktop:runtimes": "node scripts/package-runtime-components.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.3"

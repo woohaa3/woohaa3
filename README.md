@@ -13,7 +13,7 @@ pnpm -C api install
 pnpm dev
 ```
 
-The development and production build commands generate the Bevy and image-editor WASM binaries and JavaScript bindings from source before starting Vite. The first build compiles Rust; later runs reuse build caches. These generated files are not committed. `pnpm build:wasm` builds both bindings explicitly.
+The development and production build commands generate the Bevy WASM binaries and JavaScript bindings from source before starting Vite. The first build compiles Rust; later runs reuse build caches. These generated files are not committed. `pnpm build:wasm` builds the renderer bindings explicitly.
 
 Bevy WASM builds distinguish three modes: `development` (default for `pnpm dev`, `pnpm dev:frontend`, `pnpm dev:desktop` and `pnpm build:bevy:dev`: incremental dev profile, no `wasm-opt`), `performance` (`pnpm build:bevy:perf`, or `WOOHAA_BEVY_DEV_MODE=performance pnpm dev`: release profile with `wasm-opt -Oz -g` for profiling) and `release` (`pnpm build:bevy`, `pnpm build` and desktop frontend assembly: release profile with `wasm-opt -Oz`). `--skip-build` on a development entry skips module and extension builds but still lets Cargo verify and rebuild the selected mode, so changed Rust never loads a stale binary. Build parallelism follows Cargo defaults; set `CARGO_BUILD_JOBS` to limit it. Each build logs its mode, profile, resolved target directory (from `cargo metadata`, honoring `CARGO_TARGET_DIR`), job setting, lock wait and per-stage timings. Legacy `--debug --skip-opt` still means development; `--debug` or `--skip-opt` alone remain documented manual combinations.
 
@@ -25,7 +25,7 @@ The interface targets desktop computers and tablets. Rendering checks require a 
 
 ## Source and third-party rights
 
-The project manifests currently use `UNLICENSED`; a project-wide source license has not yet been selected. This snapshot does not grant an open-source license. Third-party license and attribution files remain with their components, including [pptask](web/vendor/pptask/LICENSE), [Photocraft](photocraft/vendor/photocraft/LICENSE-MIT) and [Photocraft notices](photocraft/vendor/photocraft/NOTICE). Provider logos have separate attribution in each extension’s `assets/README.md`.
+The project manifests currently use `UNLICENSED`; a project-wide source license has not yet been selected. This snapshot does not grant an open-source license. Third-party license and attribution files remain with their components, including [pptask](web/vendor/pptask/LICENSE). Provider logos have separate attribution in each extension’s `assets/README.md`.
 
 ## Share development configuration
 
@@ -44,3 +44,5 @@ It omits machine paths, personal login tokens, sessions, secret references, task
 In a newly built desktop app choose **工作区 → 导入配置…** and select the `.woohaa` file. The host stops, backs up existing data, merges the supplied configuration and restarts. Supplied keys replace matching keys; an initialized model policy collection replaces the target model policy collection. Unrelated destination settings, canvas/task/media data and personal credentials remain. Colleagues log in with their own account. Imported discovered models retain their types, names and extension ownership in the settings model list. The snapshot never registers an execution provider or grants permission: execution requires the destination’s configured provider/login. A provider’s fresh discovered catalog takes precedence, including removed models. The snapshot does not replace provider-specific executable schemas or capabilities. New packages use format version 2; the importer still accepts old version 1 packages. Imported model settings and remote deployment settings live under the writable user `config/` directory, outside the app bundle. **导入工作区…** remains a separate operation that replaces the full workspace; it does not accept configuration packages.
 
 The configuration package contains shared API credentials and is not encrypted. Keep it out of Git and distribute it through your agreed internal channel. An older app without **导入配置…** must be rebuilt/upgraded to use these packages.
+
+Image editing is supplied by an independently installed extension. The host exposes focus presentation, media format registration and completion APIs; editor code and assets are extension-owned.

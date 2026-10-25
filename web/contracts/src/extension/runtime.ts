@@ -462,6 +462,8 @@ export type ApplicationBackendHost = {
    * 写进设置面的静态值。谁注册谁收回，才能保证停用/卸载扩展时 `ctx.storage` 里不残留一个指向
    * 已释放资源的后端（那种残留会让主存储路由到死实现，表现为莫名其妙的字节读写失败）。
    */
+  /** Register a custom media validator; activation cleanup always releases its registration. */
+  registerMediaFormat?: (format: import("../backend/media-formats.js").MediaFormatValidator) => void;
   registerStorage?: (backend: import("../backend/storage.js").StorageBackend) => void;
   /**
    * 注销一个存储后端（按 `backendId`）。

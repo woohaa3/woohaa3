@@ -73,8 +73,6 @@ async function main() {
     // Native UI still imports both generated browser bindings during Vite resolution.
     // change: 2026-10-23-optimize-bevy-development-build —— 与其它开发入口共用模式选择。
     await finish(launch(process.execPath, ["scripts/build-bevy-wasm.mjs", ...bevyModeArgs]));
-    // PhotoCraft 覆盖层的静态产物（iframe 按 URL 取，不经模块图）。
-    await finish(launch(process.execPath, ["scripts/sync-photocraft-app.mjs"]));
     if (!args.includes("--skip-build")) {
       await finish(launch("pnpm", ["--config.verify-deps-before-run=false", "-C", "web", "run", "build:units"]));
       await finish(launch(process.execPath, ["web/scripts/build-extension-browser.mjs", "--all"]));

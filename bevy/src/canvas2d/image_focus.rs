@@ -26,6 +26,19 @@ pub(crate) fn sprite_layout(
 ) -> (Vec2, Vec2, Color, f32) {
     if let Some(focus) = media_focus(scene) {
         if focus.node_id == node.id {
+            if scene.image_focus.as_ref().is_some_and(|image| image.document_view.is_some()) {
+                if let (Some((vx, vy, zoom)), Some(surface)) = (camera_view(scene), scene.surface.as_ref()) {
+                    let (cx, cy) = surface.content_rect.as_ref()
+                        .map(|rect| (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0))
+                        .unwrap_or(((surface.width - surface.content_right) / 2.0, surface.height / 2.0));
+                    return (
+                        Vec2::new(focus.source_width, focus.source_height) * focus.viewport.zoom / zoom,
+                        Vec2::new(cx + focus.viewport.x - vx, cy + focus.viewport.y - vy) / zoom,
+                        Color::WHITE,
+                        if has_presented_media_focus(scene) { foreground_z(scene) } else { 10.01 + index as f32 * 0.1 },
+                    );
+                }
+            }
             return (
                 texture_size(node, Vec2::new(focus.source_width, focus.source_height)),
                 content_center(node),
@@ -41,4 +54,32 @@ pub(crate) fn sprite_layout(
         color,
         10.01 + index as f32 * 0.1,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn captured_viewport_stays_on_screen_while_document_camera_pans_and_zooms() {
+        let mut scene = Scene::default();
+        scene.nodes = serde_json::from_value(serde_json::json!([
+            {"id":"target","type":"image","x":120,"y":80,"width":320,"height":240}
+        ])).unwrap();
+        scene.surface = Some(serde_json::from_value(serde_json::json!({"width":1200,"height":800,
+            "pixelRatio":2,"contentRect":{"x":52,"y":140,"width":860,"height":600}})).unwrap());
+        scene.image_focus = Some(serde_json::from_value(serde_json::json!({"version":"woohaa-image-focus-v1",
+            "nodeId":"target","sourceWidth":2000,"sourceHeight":1200,
+            "viewport":{"x":20,"y":-30,"zoom":0.5}})).unwrap());
+        for (x, zoom) in [(0.0, 0.4), (150.0, 0.4), (-30.0, 1.2)] {
+            scene.image_focus.as_mut().unwrap().document_view = Some(serde_json::from_value(serde_json::json!({
+                "sourceWidth":4000,"sourceHeight":3000,"viewport":{"x":x,"y":10,"zoom":zoom}
+            })).unwrap());
+            let (size, center, _, _) = sprite_layout(&scene, &scene.nodes[0], Vec2::new(2000.0,1200.0), 0);
+            let (vx, vy, scale) = camera_view(&scene).unwrap();
+            assert!((center.x * scale + vx - 502.0).abs() < 0.001);
+            assert!((center.y * scale + vy - 410.0).abs() < 0.001);
+            assert!((size.x * scale - 1000.0).abs() < 0.001);
+            assert!((size.y * scale - 600.0).abs() < 0.001);
+        }
+    }
 }

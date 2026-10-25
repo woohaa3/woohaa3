@@ -1,4 +1,3 @@
-import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getRuntimeComponentManager } from "@woohaa3/runtime-components";
 import { createOriginGuard } from "../http/origin-guard.js";
@@ -29,22 +28,6 @@ export function createRuntimeComponentsHandler(options: { getManager?: () => Man
     try {
       if (pathname === PREFIX && req.method === "GET") {
         send(200, { available: true, components: await manager.list(), configPath: manager.configPath });
-        return true;
-      }
-      if (pathname === `${PREFIX}/image-editor/asset` && req.method === "GET") {
-        let handle;
-        try { handle = await manager.resolve("image-editor"); }
-        catch { send(409, { message: "请在设置 → 运行时组件中下载图片编辑组件" }); return true; }
-        if (res.destroyed) { handle.release(); return true; }
-        const stream = createReadStream(handle.entry);
-        let released = false;
-        const release = () => { if (!released) { released = true; handle.release(); } };
-        res.once("close", () => stream.destroy());
-        stream.once("close", release);
-        stream.once("error", () => { if (!res.headersSent) send(500, { message: "图片编辑组件读取失败" }); else res.destroy(); });
-        res.writeHead(200, { "content-type": "application/wasm", "cache-control": "no-store" });
-        stream.pipe(res);
-        res.once("finish", () => stream.destroy());
         return true;
       }
       const match = /^\/api\/runtime-components\/([a-z0-9-]+)\/(install|cancel|configure|remove|discover)$/.exec(pathname);

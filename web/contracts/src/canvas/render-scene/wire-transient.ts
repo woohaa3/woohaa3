@@ -174,8 +174,8 @@ export type BevyModelFocus = ModelFocusProjection;
  * （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，design D2）。
  *
  * 只承载浏览器本地呈现态：聚焦 canonical 图片 nodeId、按可用矩形计算的本地取景
- * （源像素语义）与可见性。Bevy 保持**同一** Camera2d/画布，隐藏其它内容，按此矩形平移
- * 缩放显示原图纹理；不进入 ServerCanvas / CanvasCommand / Y.Doc。缺省表示普通画布。
+ * （源像素语义）与可见性。Bevy 保持**同一** Camera2d/画布，保留背景内容，按此取景平移
+ * 缩放显示纹理；捕获整块编辑视口时 documentView 单独驱动相机，viewport 决定帧布局；不进入 ServerCanvas / CanvasCommand / Y.Doc。缺省表示普通画布。
  */
 export const IMAGE_FOCUS_VERSION = "woohaa-image-focus-v1" as const;
 export type ImageFocusVersion = typeof IMAGE_FOCUS_VERSION;
@@ -193,6 +193,12 @@ export type BevyImageFocus = {
   /** 源像素尺寸（用于 fit/清晰度判定与校验）。 */
   sourceWidth: number;
   sourceHeight: number;
+  /** 捕获整块编辑视口时，相机仍跟随文档本身的取景，纹理按 viewport 独立对齐。 */
+  documentView?: {
+    sourceWidth: number;
+    sourceHeight: number;
+    viewport: { x: number; y: number; zoom: number };
+  };
 };
 
 /**

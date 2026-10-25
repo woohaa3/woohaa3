@@ -1494,6 +1494,19 @@ describe("renderSceneFingerprint（change: optimize-model-scene-snapshot-hot-pat
     expect(renderSceneFingerprint(scene)).toBe(renderSceneFingerprint(completed));
   });
 
+  it("文档相机改变但帧视口不变时仍更新场景", () => {
+    const imageFocus = { version: "woohaa-image-focus-v1" as const, nodeId: "n1", viewport: { x: 0, y: 0, zoom: 1 },
+      sourceWidth: 640, sourceHeight: 480, documentView: { sourceWidth: 4000, sourceHeight: 3000,
+        viewport: { x: 10, y: 20, zoom: .2 } } };
+    const scene = { ...baseScene(), imageFocus };
+    for (const change of [{ x: 30 }, { y: 50 }, { zoom: .4 }]) {
+      const next = { ...scene, imageFocus: { ...imageFocus, documentView: { ...imageFocus.documentView,
+        viewport: { ...imageFocus.documentView.viewport, ...change } } } };
+      expect(renderSceneEquals(scene, next)).toBe(false);
+      expect(renderSceneFingerprint(scene)).not.toBe(renderSceneFingerprint(next));
+    }
+  });
+
   it("逐个可见字段变化都改变 fingerprint", () => {
     const base = baseScene();
     const baseFp = renderSceneFingerprint(base);

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { externalizeEditorWasm, frontendTarget } from "../../../../frontend-target.js";
+import { frontendTarget } from "../../../../frontend-target.js";
 
 it("desktop removes browser renderer from the build graph, browser keeps it", () => {
   const desktop = frontendTarget("/client/web/frontend", "desktop");
@@ -8,13 +8,4 @@ it("desktop removes browser renderer from the build graph, browser keeps it", ()
   const browser = frontendTarget("/client/web/frontend", "production");
   expect(browser.nativeOnly).toBe(false);
   expect(browser.input.renderer).toBe("/client/web/frontend/renderer.html");
-});
-
-it("desktop editor requests a managed local asset and offers guidance without downloading", () => {
-  const output = externalizeEditorWasm("module_or_path = new URL('./photocraft_editor_bg.wasm', import.meta.url);");
-  expect(output).not.toContain("new URL('./photocraft_editor_bg.wasm'");
-  expect(output).toContain("/api/runtime-components/image-editor/asset");
-  expect(output).not.toContain("dispatchEvent");
-  expect(output).not.toContain("/install");
-  expect(() => externalizeEditorWasm("changed upstream glue")).toThrow("入口已变化");
 });

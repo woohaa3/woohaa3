@@ -1,9 +1,20 @@
 /**
- * 内容指纹 re-export（change: 2026-10-21-extract-photocraft-subproject，任务 2.1）。
+ * 内容指纹（FNV-1a 64-bit，hex）
+ * （change: optimize-model-scene-snapshot-hot-path）。
  *
- * 实现已下沉到 `@woohaa3/photocraft-protocol`：那是 PhotoCraft 与 Rust 内核共同核对的
- * 唯一一份 FNV-1a 64 实现。这里保留原导入路径 `contracts/src/canvas/content-hash.js`，
- * 让既有消费者（画布、媒体、扩展）与测试不改 import 即可拿到**逐字节相同**的结果。
- * 逐条列举的原因见 `image-edit.ts`（esbuild 对 external `export *` 的处理）。
+ * 无副作用、不依赖 crypto：浏览器、Node 与 Rust 可用同一算法复现。仅用于把规范化 Scene IR
+ * 折叠成稳定、紧凑的**资源 key 组成部分**；跨边界注册仍携带完整 descriptor 并拒绝冲突，
+ * 因此 hash 碰撞不会导致静默错误复用（design D2）。
  */
-export { fnv1a64Hex } from "@woohaa3/photocraft-protocol";
+
+/** 计算文本的 FNV-1a 64-bit 指纹（16 位小写 hex）。 */
+export function fnv1a64Hex(text: string): string {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= BigInt(text.charCodeAt(i));
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(16).padStart(16, "0");
+}

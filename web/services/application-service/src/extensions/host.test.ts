@@ -260,3 +260,21 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     expect(sawRegisterStorage).toBe(false);
   });
 });
+
+it("media format registrations are released on unload and activation rollback", async () => {
+  const registrations = new Set<string>();
+  const host = createApplicationExtensionHost({ registerMediaFormatFor: owner => format => {
+    const key = `${owner}:${format.contentType}`;
+    registrations.add(key);
+    return () => { registrations.delete(key); };
+  } });
+  const format = { contentType: "application/vnd.fixture", maxBytes: 100, validate: async () => {} };
+  const active = await host.activate({ extensionId: "format-good", activate(h) { h.registerMediaFormat!(format); } });
+  expect(active.ok).toBe(true);
+  expect(registrations.size).toBe(1);
+  if (active.ok) await active.handle.dispose();
+  expect(registrations.size).toBe(0);
+  const failed = await host.activate({ extensionId: "format-bad", activate(h) { h.registerMediaFormat!(format); throw new Error("activation failed"); } });
+  expect(failed.ok).toBe(false);
+  expect(registrations.size).toBe(0);
+});

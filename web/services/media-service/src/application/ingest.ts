@@ -9,60 +9,12 @@
  */
 import { ALLOWED_MEDIA_TYPES,
   DEFAULT_MAX_UPLOAD_BYTES,
-  IMAGE_PROJECT_CONTENT_TYPE,
-  IMAGE_PROJECT_LIMITS,
   computeGeneratedStorageKey,
   computeStorageKey,
   isAllowedMediaType,
   normalizeMediaType } from "@woohaa3/contracts";
 import type { MediaStorage, MediaStorageScope } from "@woohaa3/contracts";
-import {
-  ProjectVerificationError,
-  createProcessOnlyVerifier,
-  inspectEmbeddedPhotocraftProject,
-  type NativeProjectVerifier
-} from "@woohaa3/photocraft-project-verifier";
-
-/**
- * 默认核验实例：只做进程内有界核验。
- *
- * change: 2026-10-21-extract-photocraft-subproject，任务 3.2 / design D5：核验能力迁入
- * PhotoCraft 后，Media 的**接收政策**（上传路由、认证、部署上限、内容寻址、错误映射、
- * 引用保留）仍在这里，只把「核验实现」换成公共入口。生产装配会注入服务实例自己的
- * `createNativeProjectVerifier()`；未注入时保持迁移前的默认行为。
- */
-const DEFAULT_VERIFIER: NativeProjectVerifier = createProcessOnlyVerifier();
-
-/**
- * 工程保存的核验通道。
- *
- * 先按**普通上传口径**核验：不含智能对象的工程行为完全不变，任何既有拒绝原因原样返回。
- *
- * 只有「因为含嵌入智能对象而被拒」时，才改用专用于含源工程的通道：先用
- * `inspectEmbeddedPhotocraftProject` 做外层有界结构检查（它只放开 `smart` 这一种对象类型，
- * 填充/形状/画板/智能滤镜/外链/坏名称/不可逆仿射继续拒绝），再要求原生核验工具对整棵源树
- * 复核同一预算并校对根摘要（`verifyEmbeddedForIngest` 在原生不可用时**失败**，不回退）。
- *
- * 为什么必须放行这一条：U66「转回图层」只解包当前实例，同工程里其他共享实例仍是智能对象
- * （spec 的成功证据要求「其他共享实例不变」）。若保存入口整体拒绝这类工程，编辑结果在
- * Woohaa 里根本存不下来。放行范围严格限于「嵌入智能对象」，且仍以原生全树核验为前置。
- */
-async function verifyProjectForSave(
-  verifier: NativeProjectVerifier,
-  bytes: Uint8Array,
-  options: { maxBytes?: number }
-): Promise<void> {
-  try {
-    await verifier.verifyForIngest(bytes, IMAGE_PROJECT_CONTENT_TYPE, options);
-    return;
-  } catch (error) {
-    // 不是「含智能对象」的拒绝：保持原有失败语义，不做任何回退。
-    if (!(error instanceof ProjectVerificationError) || error.code !== "unsupported-object") throw error;
-    const summary = inspectEmbeddedPhotocraftProject(bytes, options);
-    if (!summary.objectKinds.includes("smart")) throw error;
-  }
-  await verifier.verifyEmbeddedForIngest(bytes, IMAGE_PROJECT_CONTENT_TYPE, options);
-}
+import type { MediaFormatRegistry } from "@woohaa3/contracts";
 
 export { ALLOWED_MEDIA_TYPES, DEFAULT_MAX_UPLOAD_BYTES };
 
@@ -144,13 +96,8 @@ export type IngestMediaOptions = {
    * 写入当前主存储。
    */
   scope?: MediaStorageScope;
-  /**
-   * 核验实例（change: 2026-10-21-extract-photocraft-subproject，任务 3.2）。
-   *
-   * 由服务装配注入自己的可释放实例，使并发额度与关闭语义按服务实例隔离；缺省用只做
-   * 进程内有界核验的默认实例，与迁移前的「未配置原生工具」路径一致。
-   */
-  verifier?: NativeProjectVerifier;
+  /** Extension-owned format providers; no provider means project ingest is unavailable. */
+  formats?: MediaFormatRegistry;
 };
 
 /**
@@ -165,7 +112,7 @@ export async function ingestMediaObject(options: IngestMediaOptions): Promise<Me
     throw new MediaIngestError("empty-payload", "上传内容为空");
   }
   // 工程 MIME 不能被普通上传使用：必须先经过有界内容核验（spec canvas-media-storage）。
-  if (contentType === IMAGE_PROJECT_CONTENT_TYPE && !options.projectIngest) {
+  if (options.formats?.get(contentType) && !options.projectIngest) {
     throw new MediaIngestError("project-requires-verification", "工程对象必须经专用核验入口上传");
   }
   if (options.bytes.byteLength > maxBytes) {
@@ -175,16 +122,13 @@ export async function ingestMediaObject(options: IngestMediaOptions): Promise<Me
     );
   }
   if (options.projectIngest) {
-    if (contentType !== IMAGE_PROJECT_CONTENT_TYPE) {
-      throw new MediaIngestError("unsupported-media-type", `专用工程入口只接受 ${IMAGE_PROJECT_CONTENT_TYPE}`);
-    }
+    const format = options.formats?.get(contentType);
+    if (!format) throw new MediaIngestError("unsupported-media-type", "没有安装支持此工程格式的扩展");
+    if (options.bytes.byteLength > format.maxBytes) throw new MediaIngestError("payload-too-large", "工程超过格式上限");
     try {
-      await verifyProjectForSave(options.verifier ?? DEFAULT_VERIFIER, options.bytes, {
-        maxBytes: Math.min(maxBytes, IMAGE_PROJECT_LIMITS.maxProjectBytes)
-      });
+      await format.validate(options.bytes, { maxBytes: Math.min(maxBytes, format.maxBytes) });
     } catch (error) {
-      const reason = error instanceof ProjectVerificationError ? `${error.code}: ${error.message}` : "工程核验失败";
-      throw new MediaIngestError("project-verification-failed", reason);
+      throw new MediaIngestError("project-verification-failed", error instanceof Error ? error.message : "工程核验失败");
     }
   } else if (!isAllowedMediaType(contentType, allowed)) {
     throw new MediaIngestError("unsupported-media-type", `不支持的媒体类型：${contentType || "(空)"}`);

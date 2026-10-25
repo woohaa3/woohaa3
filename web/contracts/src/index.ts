@@ -79,8 +79,6 @@ export * from "./canvas/menu-sections.js";
 export * from "./canvas/geometry.js";
 export * from "./canvas/arrange.js";
 export * from "./canvas/image-edit.js";
-export * from "./canvas/image-project-content.js";
-export * from "./canvas/image-project-editor.js";
 export * from "./canvas/image-edit-session.js";
 export * from "./canvas/model-focus.js";
 export * from "./canvas/model-focus-state.js";
@@ -142,3 +140,5 @@ export * from "./canvas/builtin-node-capabilities.js";
 export * from "./canvas/media-content.js";
 export * from "./canvas/group-presentation.js";
 export * from "./canvas/group-badge.js";
+
+export type { MediaFormatValidator, MediaFormatRegistry } from "./backend/media-formats.js";

@@ -12,7 +12,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Context } from "@deepseek-ai/cordis";
-import { createEmptyWoohaa3ServerCanvas, applyCanvasCommands, IMAGE_PROJECT_CONTENT_TYPE, PHOTOCRAFT_ENGINE_VERSION } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, applyCanvasCommands, } from "@woohaa3/contracts";
 import { startFrontendRuntime, type FrontendRuntime } from "../../kernel.js";
 import { pasteImportExtension, PASTE_IMPORT_PLUGIN_ID } from "./plugin.js";
 import { PASTE_REPLACE_DIALOG_ID } from "./replace-dialog.js";
@@ -293,9 +293,9 @@ describe("Paste Import Plugin", () => {
 function projectPasteEvent(): ClipboardEvent {
   const baseAsset = { id: "base", mediaKind: "image", source: "uploaded", status: "ready", createdAt: "2026-10-16T00:00:00Z", title: "base", metadata: { storageKey: `sha256-${"a".repeat(64)}`, checksum: "a".repeat(64), contentType: "image/png", size: 10 } };
   const payload = { format: "infinspire-canvas-copy-v1", sourceCanvasId: "source", nodes: [{ id: "n1", type: "image", position: { x: 0, y: 0 } }], edges: [], incomingEdges: [], assets: [baseAsset],
-    nodeData: { n1: { outputAssetId: "base", imageEdit: { version: "woohaa-image-project-v1", engine: "photocraft", engineVersion: PHOTOCRAFT_ENGINE_VERSION, formatVersion: 1,
+    nodeData: { n1: { outputAssetId: "base", imageEdit: { version: "woohaa-image-project-v1", engine: "fixture-editor", engineVersion: "fixture-editor-v1", formatVersion: 1,
       baseAssetId: "base", sourceWidth: 10, sourceHeight: 10, canvasWidth: 10, canvasHeight: 10, documentContentHash: "1".repeat(16),
-      project: { storageKey: `sha256-${"b".repeat(64)}`, checksum: "b".repeat(64), contentType: IMAGE_PROJECT_CONTENT_TYPE, size: 100 }, sourceAssetIds: ["base"] } } } };
+      project: { storageKey: `sha256-${"b".repeat(64)}`, checksum: "b".repeat(64), contentType: "application/vnd.fixture-project", size: 100 }, sourceAssetIds: ["base"] } } } };
   return { clipboardData: { files: [], items: [], types: [], getData: () => JSON.stringify(payload) } } as unknown as ClipboardEvent;
 }
 

@@ -37,7 +37,6 @@ import {
 } from "./plugins/video-capture/seedance-plugin.js";
 import { pasteImportExtension, PASTE_IMPORT_PLUGIN_ID } from "./plugins/paste-import/plugin.js";
 import { nodeHistoryExtension, NODE_HISTORY_PLUGIN_ID } from "./plugins/node-history/plugin.js";
-import { createPhotoCraftExtension, PHOTOCRAFT_WEB_PLUGIN_ID } from "@woohaa3/photocraft-web";
 import { videoEditorExtension, VIDEO_EDITOR_PLUGIN_ID } from "./plugins/video-editor/video-editor-plugin.js";
 import { focusConnectionsExtension, FOCUS_CONNECTIONS_PLUGIN_ID } from "./plugins/focus-connections/plugin.js";
 import { modelEditorExtension, MODEL_EDITOR_PLUGIN_ID } from "./plugins/model-editor/model-editor-plugin.js";
@@ -239,17 +238,7 @@ export const CANVAS_PLUGIN_CATALOG: readonly CanvasExtensionCatalogEntry[] = [
     configurable: false,
     create: (options) => modelEditorExtension({ canvasId: options.canvasId })
   },
-  // required：图片聚焦编辑工作区（change: 2026-10-08-add-image-focus-editing-and-unified-node-history）。
-  // 图片编辑：官方 PhotoCraft Web 构建的覆盖层，中间镂空露出 Bevy 画布。
-  // （change: 2026-10-25-replace-photocraft-with-punch-through-overlay）
-  {
-    id: PHOTOCRAFT_WEB_PLUGIN_ID,
-    name: "图片编辑",
-    description: "在 Bevy 画布之上打开 PhotoCraft，中间镂空透出画布。",
-    required: true,
-    configurable: false,
-    create: (options) => createPhotoCraftExtension({ canvasId: options.canvasId })
-  },
+  // Image editors are installed extensions contributing canvas.focus-workspace.
   // required：视频聚焦工作区（change: 2026-10-10-add-video-node-focus-workspace）。
   {
     id: VIDEO_EDITOR_PLUGIN_ID,

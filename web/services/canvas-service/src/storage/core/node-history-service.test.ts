@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createEmptyWoohaa3ServerCanvas, hashModelScript, nodeHistoryContentIdentity, NODE_GENERATION_HISTORY_VERSION, filmSetNodeDataFields, createFilmSetSnapshot, filmSetAnimationsOf, IMAGE_PROJECT_CONTENT_TYPE, PHOTOCRAFT_ENGINE_VERSION, type MediaStorageScope, type NodeGenerationHistoryEntry, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, hashModelScript, nodeHistoryContentIdentity, NODE_GENERATION_HISTORY_VERSION, filmSetNodeDataFields, createFilmSetSnapshot, filmSetAnimationsOf, type MediaStorageScope, type NodeGenerationHistoryEntry, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 import { InMemoryNodeHistoryRepository } from "./in-memory-node-history-repository.js";
 import { NodeHistoryApplicationService, snapshotCurrentImageEdit } from "./node-history-service.js";
 import { SqliteNodeHistoryRepository } from "../sqlite/node-history.js";
@@ -854,8 +854,8 @@ const HISTORY_OUT_KEY = "generation-outputs/" + "b".repeat(64) + ".png";
 function projectHistoryCanvas(): ServerCanvas {
   const project = {
     version: "woohaa-image-project-v1",
-    engine: "photocraft",
-    engineVersion: PHOTOCRAFT_ENGINE_VERSION,
+    engine: "fixture-editor",
+    engineVersion: "fixture-editor-v1",
     formatVersion: 1,
     baseAssetId: "asset-base",
     sourceWidth: 400,
@@ -866,7 +866,7 @@ function projectHistoryCanvas(): ServerCanvas {
     project: {
       storageKey: PROJECT_HISTORY_KEY,
       checksum: "d".repeat(64),
-      contentType: IMAGE_PROJECT_CONTENT_TYPE,
+      contentType: "application/vnd.fixture-project",
       size: 4096
     },
     sourceAssetIds: ["asset-base"]

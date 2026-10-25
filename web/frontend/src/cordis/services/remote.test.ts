@@ -5,7 +5,6 @@
  * Media 上传/URL 构造/受控校验；均可用 fake fetch/transport 驱动，不需要真实服务。
  */
 import { describe, expect, it } from "vitest";
-import { IMAGE_PROJECT_CONTENT_TYPE } from "@woohaa3/contracts";
 import { SESSION_CHANNEL, encodeSessionFrame } from "@woohaa3/contracts/canvas-yjs";
 import { createCanvasRemote } from "./canvas-remote.js";
 import { createTaskRemote } from "./task-remote.js";
@@ -426,7 +425,7 @@ describe("mediaRemote", () => {
     const png = new File(["x"], "a.png", { type: "image/png" });
     expect((await remote.upload({ file: png })).ok).toBe(true);
     expect((await remote.upload({ file: png, canvasId: "canvas-1" })).ok).toBe(true);
-    const project = new File(["x"], "p.pcraft", { type: IMAGE_PROJECT_CONTENT_TYPE });
+    const project = new File(["x"], "p.pcraft", { type: "application/vnd.fixture-project" });
     expect((await remote.upload({ file: project, canvasId: "canvas-1" })).ok).toBe(true);
     expect(urls).toEqual([
       "/api/media",

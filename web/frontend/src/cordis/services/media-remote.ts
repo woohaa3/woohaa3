@@ -4,7 +4,7 @@
  * **唯一**浏览器 Media Service 协议出口：上传、稳定同源 URL 构造与受控媒体引用校验。
  * 不持有 COS SDK 或凭据。
  */
-import { IMAGE_PROJECT_CONTENT_TYPE } from "@woohaa3/contracts";
+import { isAllowedMediaType } from "@woohaa3/contracts";
 import type { MediaRemoteService, UploadedMedia, UploadMediaResult } from "../contracts.js";
 import {
   MEDIA_BASE_PATH,
@@ -175,7 +175,7 @@ export function createMediaRemote(options: MediaRemoteOptions = {}): MediaRemote
       if (signal?.aborted) return { ok: false, error: "上传已取消" };
       // 画布提示只加在上传目标的 query 上：写入落在该画布对应的存储后端。
       const targetUrl = withMediaCanvasHint(
-        file.type === IMAGE_PROJECT_CONTENT_TYPE ? projectUploadUrl : uploadUrl,
+        !isAllowedMediaType(file.type) && file.type.startsWith("application/") ? projectUploadUrl : uploadUrl,
         canvasId
       );
       let result: { status: number; ok: boolean; body: unknown };

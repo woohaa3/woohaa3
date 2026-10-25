@@ -38,3 +38,27 @@ test("browser SDK bindings follow facade, reexport and lazy implementation depen
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("package public assets are hashed, reproducible and reject symlinks", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "extension-assets-"));
+  try {
+    await mkdir(path.join(cwd, "src/frontend"), { recursive: true });
+    await mkdir(path.join(cwd, "public/editor"), { recursive: true });
+    await writeFile(path.join(cwd, "package.json"), '{"type":"module"}');
+    await writeFile(path.join(cwd, "src/frontend/index.ts"), 'export const descriptor = {};');
+    await writeFile(path.join(cwd, "src/frontend/metadata.ts"), 'export const metadata = { extensionId: "fixture" };');
+    await writeFile(path.join(cwd, "public/editor/index.html"), '<script type="module" src="./app.js"></script>');
+    await writeFile(path.join(cwd, "public/editor/app.js"), 'export const ready = true;');
+    await writeFile(path.join(cwd, "public/editor/app.wasm"), new Uint8Array([0,97,115,109]));
+    const first = await buildExtensionBrowser({ cwd });
+    const assets = first.manifest.files.filter(file => file.path.startsWith("assets/editor/"));
+    assert.equal(assets.length, 3);
+    for (const asset of assets) { assert.equal(asset.kind, "asset"); assert.ok(asset.bytes > 0); assert.match(asset.sha256, /^[a-f0-9]{64}$/); }
+    assert.equal((await buildExtensionBrowser({ cwd })).artifactId, first.artifactId);
+    await writeFile(path.join(cwd, "public/editor/app.js"), 'export const ready = false;');
+    assert.notEqual((await buildExtensionBrowser({ cwd })).artifactId, first.artifactId);
+    const { symlink } = await import("node:fs/promises");
+    await symlink(path.join(cwd, "package.json"), path.join(cwd, "public/escape.json"));
+    await assert.rejects(buildExtensionBrowser({ cwd }), /symlink/);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});

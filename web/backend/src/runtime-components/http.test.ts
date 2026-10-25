@@ -1,6 +1,3 @@
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntimeComponentsHandler } from "./http.js";
@@ -44,26 +41,6 @@ describe("desktop runtime component routes", () => {
     await fetch(`${url}/codex/cancel`, { method: "POST" });
     expect(signal?.aborted).toBe(true);
   });
-});
-
-it("serves only resolved image assets and releases the lease after streaming", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "runtime-http-"));
-  try {
-    const entry = join(directory, "editor.wasm");
-    await writeFile(entry, Buffer.from([0, 97, 115, 109]));
-    const release = vi.fn();
-    const resolve = vi.fn(async () => ({ entry, release }));
-    const url = await serve({ resolve });
-    const response = await fetch(`${url}/image-editor/asset`);
-    expect(response.headers.get("content-type")).toBe("application/wasm");
-    expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from([0, 97, 115, 109]));
-    expect(resolve).toHaveBeenCalledWith("image-editor");
-    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
-    const unavailable = await serve({ resolve: async () => { throw new Error("missing"); } });
-    const missing = await fetch(`${unavailable}/image-editor/asset`);
-    expect(missing.status).toBe(409);
-    expect(await missing.json()).toMatchObject({ message: expect.stringContaining("运行时组件") });
-  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 it.each(["COMPONENT_IN_USE", "COMPONENT_BUSY"])("reports %s as a recoverable conflict", async (code) => {

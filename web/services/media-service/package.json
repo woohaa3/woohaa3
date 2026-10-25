@@ -24,8 +24,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@woohaa3/contracts": "workspace:*",
-    "@woohaa3/photocraft-project-verifier": "link:../../../../tools/photocraft-project-verifier"
+    "@woohaa3/contracts": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",

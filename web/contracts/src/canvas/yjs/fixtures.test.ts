@@ -53,10 +53,7 @@ describe("包依赖边界（任务 1.6；change: split-web-runtime-services 后�
   it("contracts/canvas-yjs 线格式 codec 不引入数据库/COS/HTTP/浏览器框架", () => {
     const manifest = JSON.parse(readFileSync(path.join(PACKAGE_DIR, "package.json"), "utf8"));
     // 迁移后共享 codec 归属 `@woohaa3/contracts`；其 canvas-yjs 子路径只依赖 Yjs 生态。
-    // `@woohaa3/photocraft-protocol` 是 change 2026-10-21-extract-photocraft-subproject 迁入的
-    // 纯协议包（零宿主、零 Node 驱动），canvas-yjs 经 contracts 间接使用同一内容指纹实现。
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
-      "@woohaa3/photocraft-protocol",
       "lib0",
       "yjs"
     ]);

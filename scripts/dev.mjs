@@ -253,8 +253,6 @@ async function main() {
   // change: 2026-10-23-optimize-bevy-development-build —— 模式由 WOOHAA_BEVY_DEV_MODE 选择。
   await run(process.execPath, ["scripts/build-bevy-wasm.mjs", ...bevyModeArgs]);
   if (stopping) return;
-  // PhotoCraft 覆盖层的静态产物（tools/photocraft-web/app → public）。
-  await run(process.execPath, ["scripts/sync-photocraft-app.mjs"]);
   if (stopping) return;
   if (!options.skipBuild) {
     console.log("[dev] 构建模块（已有产物时可用 --skip-build 快速重启）");
