@@ -149,11 +149,10 @@ pub(super) fn sync(
                     group,
                     key.selected,
                 )]
-            } else if key.panel.is_some() && key.has_model {
-                // Model-backed composite children retain their ownership scope, but their
-                // surface is the same ordinary 3D model card used by model3d nodes.
-                super::cards::draw_static(&mut geometry, theme, node, key.index)
             } else if key.panel.is_some() {
+                // 有模型内容的子容器同样走范围面板：它复用 3D 世界呈现链路，模型由 3D
+                // 相机（order 0）画在画布之下，2D 相机（order 1）只能透出未绘制区域。
+                // 普通卡片会铺不透明的 `canvasNodeSurface`，把模型整块盖住。
                 super::scope_panel::draw(&mut geometry, theme, node, key.selected, z)
             } else {
                 super::film_set::draw_film_set_scope(
