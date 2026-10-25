@@ -59,6 +59,7 @@ export function SdkAgentSettingsPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"clear" | "remove" | null>(null);
   const operation = useRef(false);
+  const saveOperation = useRef<{ content: string; id: string; expectedEpoch?: number; expectedRevision?: number } | null>(null);
   const listRequest = useRef(0);
   const current = services.find((entry) => entry.connectionId === editing);
   const adapter = adapters.find((entry) => entry.adapterId === adapterId);
@@ -176,7 +177,10 @@ export function SdkAgentSettingsPanel({
         .split(/[,，\n]/)
         .map((value) => value.trim())
         .filter(Boolean);
+      const content = JSON.stringify({ adapterId, baseUrl, secret, models, connectionId: current?.connectionId });
+      if (saveOperation.current?.content !== content) saveOperation.current = { content, id: crypto.randomUUID(), expectedEpoch: current?.credentialEpoch, expectedRevision: current?.configRevision };
       const result = await remote.configure({
+        operationId: saveOperation.current.id,
         adapterId,
         ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
         ...(secret.trim() ? { secret: secret.trim() } : {}),
@@ -184,16 +188,18 @@ export function SdkAgentSettingsPanel({
         ...(current
           ? {
               connectionId: current.connectionId,
-              expectedEpoch: current.credentialEpoch,
-              expectedRevision: current.configRevision,
+              expectedEpoch: saveOperation.current.expectedEpoch,
+              expectedRevision: saveOperation.current.expectedRevision,
             }
           : {}),
       });
       if (!result.ok) {
+        if (result.code === "version-conflict") saveOperation.current = null;
         await refresh();
         setNotice({ tone: "danger", text: configurationError(result.error) });
         return;
       }
+      saveOperation.current = null;
       setSecret("");
       setEditing(result.value.connectionId);
       if (!(await refresh(result.value.connectionId))) {

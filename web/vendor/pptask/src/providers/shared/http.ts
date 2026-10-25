@@ -91,6 +91,8 @@ export async function request(
       signal,
     });
   } catch (error) {
+    // Host credential fencing is an execution-control fact, not a retryable network failure.
+    if (error && typeof error === 'object' && (error as { sourceStale?: boolean }).sourceStale) throw error;
     const nested = error && typeof error === 'object' ? (error as { cause?: unknown }).cause : undefined;
     const cause = nested instanceof Error
       ? nested.message

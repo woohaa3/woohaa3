@@ -268,3 +268,56 @@ it("替换 Key 清除旧账号的模型与工具证据，不伪造新账号已�
   await service.saveCredential({ owner: "owner", connectionId, purpose: "model-api-key", secret: "replacement" });
   expect((await service.get("owner", connectionId))?.lastStatus).toBeUndefined();
 });
+
+describe("immutable credential publication", () => {
+  it("a metadata failure during replacement or revocation preserves the old active Key", async () => {
+    const { service, documents, secrets } = setup();
+    const created = await service.create("a", baseInput);
+    if (!created.ok) throw new Error("create failed");
+    const input = { owner: "a", connectionId: created.value.connectionId, purpose: "model-api-key" as const };
+    expect((await service.saveCredential({ ...input, secret: "old" })).ok).toBe(true);
+    // Inject a real failed document CAS after immutable secret staging.
+    const store = documents.forExtension(EXT_ID)!;
+    const failing = { ...store, batch: vi.fn(async () => ({ ok: false as const, code: "revision-conflict" as const, key: "injected", currentRevision: 999 })) };
+    const writer = createConnectionService({ documents: failing, secrets });
+    expect((await writer.saveCredential({ ...input, secret: "new" })).ok).toBe(false);
+    expect(await service.readCredential(input)).toEqual({ secret: "old" });
+    expect((await writer.clearCredential(input)).ok).toBe(false);
+    expect(await service.readCredential(input)).toEqual({ secret: "old" });
+  });
+  it("does not read a guessed orphan secret without live owner-scoped metadata", async () => {
+    const { service, secrets } = setup();
+    secrets!.write("a", credentialPurposeKey("orphan", "model-api-key"), { secret: "orphan-key" }, { version: 0 });
+    const spy = vi.spyOn(secrets!, "read");
+    expect(await service.readCredential({ owner: "a", connectionId: "orphan", purpose: "model-api-key" })).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("atomic SDK configuration", () => {
+  it("lost responses replay the operation, same URLs with independent operations stay independent", async () => {
+    const { service, documents, secrets } = setup();
+    const input = { ...baseInput, operationId: "save", secret: "key" };
+    const saved = await service.configure("a", input);
+    expect(saved.ok).toBe(true);
+    const restarted = createConnectionService({ documents: documents.forExtension(EXT_ID)!, secrets });
+    expect(await restarted.configure("a", input)).toEqual(saved);
+    expect(await restarted.list("a")).toHaveLength(1);
+    expect((await restarted.configure("a", { ...input, secret: "different" })).ok).toBe(false);
+    expect((await restarted.configure("a", { ...input, operationId: "another-account" })).ok).toBe(true);
+    expect(await restarted.list("a")).toHaveLength(2);
+  });
+  it("failed endpoint/key publication leaves the original endpoint and Key together", async () => {
+    const { service, documents, secrets } = setup();
+    const saved = await service.configure("a", { ...baseInput, baseUrl: "https://old.example", operationId: "first", secret: "old" });
+    if (!saved.ok) throw new Error("fixture failed");
+    const store = documents.forExtension(EXT_ID)!;
+    const batch = store.batch.bind(store);
+    const failure: ExtensionDocumentStore = { ...store, batch: async operations => operations.some(item => item.key.startsWith("connections/")) ? { ok: false, code: "invalid", message: "injected" } : batch(operations) };
+    const writer = createConnectionService({ documents: failure, secrets });
+    expect((await writer.configure("a", { ...baseInput, connectionId: saved.value.connectionId, baseUrl: "https://new.example", operationId: "replace", secret: "new", expectedEpoch: saved.value.credentialEpoch, expectedRevision: saved.value.configRevision })).ok).toBe(false);
+    expect((await service.get("a", saved.value.connectionId))?.baseUrl).toBe("https://old.example");
+    expect(await service.readCredential({ owner: "a", connectionId: saved.value.connectionId, purpose: "model-api-key" })).toEqual({ secret: "old" });
+  });
+});

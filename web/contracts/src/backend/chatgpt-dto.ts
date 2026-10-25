@@ -150,6 +150,7 @@ export type ChatGptProgressEvent = {
 export const CHATGPT_ROUTES = {
   status: "status",
   authorizeStart: "authorize/start",
+  authorizeCancel: "authorize/cancel",
   authorizeComplete: "authorize/complete",
   disconnect: "disconnect",
   models: "models",

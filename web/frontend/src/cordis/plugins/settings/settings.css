@@ -296,30 +296,6 @@
 .plugin-card__open:disabled { cursor: default; }
 .plugin-card__open:focus-visible { outline: 2px solid var(--app-interaction-focus); outline-offset: -2px; }
 .plugin-card__head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-/* 插件图标：语义图形名（PLUGIN_ICON_NAMES）在这里落成图形，品牌图形路径（/plugin-icons/*.png）
-   落成图片；未声明时回退通用插件图标，格子照样对齐，卡片不至于只是一行字。 */
-.plugin-card__icon {
-	display: inline-flex;
-	flex: 0 0 auto;
-	align-items: center;
-	justify-content: center;
-	width: 30px;
-	height: 30px;
-	border: 1px solid var(--mc-border);
-	border-radius: 9px;
-	background: var(--app-web-subtle);
-	color: var(--mc-accent);
-}
-.plugin-card__icon[data-plugin-icon="plugin"] { color: var(--mc-text-muted); }
-/* 品牌图自带底色，不再套一层灰底/描边，直接当品牌芯片显示。 */
-.plugin-card__icon.is-image { border: 0; background: transparent; }
-.plugin-card__icon-image {
-	display: block;
-	width: 30px;
-	height: 30px;
-	border-radius: 8px;
-	object-fit: contain;
-}
 .plugin-card__name { font-weight: 600; }
 .plugin-card__badge {
 	font-size: 11px;

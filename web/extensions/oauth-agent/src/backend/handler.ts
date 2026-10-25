@@ -108,6 +108,13 @@ export function createChatGptApiHandler(deps: ChatGptApiDependencies): ChatGptAp
         return true;
       }
 
+      if (suffix === CHATGPT_ROUTES.authorizeCancel && req.method === "POST") {
+        if (!checkOrigin(req, deps.allowedOrigins)) return sendError(res, 403, "invalid-origin", "请求 Origin 无效");
+        applyOwnerCookie(owner);
+        if (!owner.ok) return sendOwnerFailure(res, owner);
+        deps.authorization.cancelAuthorization?.(owner.ownerId);
+        sendJson(res, 200, deps.authorization.snapshot(owner.ownerId, owner.ownerKind)); return true;
+      }
       if (suffix === CHATGPT_ROUTES.disconnect && req.method === "POST") {
         if (!checkOrigin(req, deps.allowedOrigins)) return sendError(res, 403, "invalid-origin", "请求 Origin 无效");
         applyOwnerCookie(owner);

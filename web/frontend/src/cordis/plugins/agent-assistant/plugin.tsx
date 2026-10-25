@@ -10,7 +10,7 @@ import { AssistantSetupTooltip } from "./setup-tooltip.js";
 import { installAssistantFirstUse } from "./first-use.js";
 
 export const AGENT_ASSISTANT_DIALOG_ID = "agent-assistant";
-type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add" };
+type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string };
 const AgentAssistant = lazy(() => import("./assistant.js").then((module) => ({ default: module.AgentAssistant })));
 
 export function agentAssistantExtension(): Plugin.Function<void> {
@@ -32,7 +32,7 @@ export function agentAssistantExtension(): Plugin.Function<void> {
       }
     }) : undefined;
     const unregister = ctx.dialogs.registerDialog(AGENT_ASSISTANT_DIALOG_ID, {
-      definition: { singleton: true, dismissible: true, size: "lg", validatePayload: objectPayload<Payload>(AGENT_ASSISTANT_DIALOG_ID, (value) => ({ ...(typeof value.canvasId === "string" ? { canvasId: value.canvasId } : {}), ...(typeof value.nodeId === "string" ? { nodeId: value.nodeId } : {}), ...(typeof value.kind === "string" ? { kind: value.kind } : {}), ...(value.page === "add" ? { page: "add" as const } : {}) })) },
+      definition: { singleton: true, dismissible: true, size: "lg", validatePayload: objectPayload<Payload>(AGENT_ASSISTANT_DIALOG_ID, (value) => ({ ...(typeof value.canvasId === "string" ? { canvasId: value.canvasId } : {}), ...(typeof value.nodeId === "string" ? { nodeId: value.nodeId } : {}), ...(typeof value.kind === "string" ? { kind: value.kind } : {}), ...(typeof value.connectionId === "string" ? { connectionId: value.connectionId } : {}), ...(value.page === "add" ? { page: "add" as const } : {}) })) },
       renderer: ({ instance, requestClose }) => <Suspense fallback={<p>正在打开 AI 助手…</p>}><AgentAssistant key={instance.instanceId} service={ctx.agentConversationService} payload={{ canvasId: ctx.get("canvasScope")?.canvasId(), ...(instance.payload as Payload) }} onClose={requestClose} settingsStore={settingsStore} onConfigurationSaved={refreshDirectory} /></Suspense>
     });
     // 面板主操作：AI 助手排最前（priority 低于其它入口），并使用 primary 实底图标。

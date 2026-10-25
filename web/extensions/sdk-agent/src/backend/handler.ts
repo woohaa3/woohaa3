@@ -129,6 +129,7 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
       try {
         const result = await configureModelService(service, deployment, owner, {
           adapterId: body.adapterId,
+          ...(typeof body.operationId === "string" ? { operationId: body.operationId } : {}),
           ...(typeof body.connectionId === "string"
             ? { connectionId: body.connectionId }
             : {}),
@@ -277,6 +278,9 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
           ? sendJson(res, 200, { removed: true })
           : sendJson(res, 500, removed.error);
       }
+
+      if (record.serviceConnectionId && segments.length === 3 && ["credential", "clear"].includes(segments[2]) && method === "POST")
+        return sendJson(res, 409, { code: "source-managed", message: "请在服务来源详情管理凭据；此处只保存消费引用" });
 
       if (
         segments.length === 3 &&

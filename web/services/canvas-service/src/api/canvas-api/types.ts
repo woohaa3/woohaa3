@@ -52,7 +52,7 @@ export type CanvasRunPort = {
     modelKey: string;
     prompt: string;
     parameters: Record<string, unknown>;
-  }): Promise<{ ok: true; runId: string; jobId: string; workerTaskKey?: string; state: "accepted" } | { ok: false; code: string; message: string }>;
+  }, context?: { owner: string }): Promise<{ ok: true; runId: string; jobId: string; workerTaskKey?: string; state: "accepted" } | { ok: false; code: string; message: string }>;
   cancel(request: { canvasId: string; nodeId: string; runId: string }): Promise<
     { ok: true; state: "cancel-requested" } | { ok: false; code: string; message: string }
   >;

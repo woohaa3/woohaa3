@@ -84,6 +84,9 @@ export type AgentConversationView = {
  * 关闭**绝不重新 accept 或 dispatch。
  */
 export type AgentConversationService = AgentConversationView & {
+  serviceConnectionDirectory?: () => Promise<AgentConversationResult<import("@woohaa3/contracts").ServiceConnectionDirectory>>;
+  manageServiceConnection?: (input: import("@woohaa3/contracts").ServiceConnectionManagement) => Promise<AgentConversationResult<import("@woohaa3/contracts").ServiceConnectionView>>;
+  listServiceConnections?: () => Promise<AgentConversationResult<import("@woohaa3/contracts").ServiceConnectionView[]>>;
   getDataScopeId?: () => string | null;
   /** 配置保存后清除连接/模型目录请求缓存；不改变会话事实或草稿。 */
   invalidateDirectory: () => void;

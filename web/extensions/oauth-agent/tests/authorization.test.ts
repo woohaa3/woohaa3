@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { IncomingMessage } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChatGptCredentialStore } from "../src/backend/credentials.js";
 import { createOwnerResolver } from "../src/backend/identity.js";
 import { createChatGptAuthorizationService } from "../src/backend/authorization.js";
@@ -45,7 +45,7 @@ function buildService(dir: string, fetchImpl: typeof globalThis.fetch) {
     secure: false
   });
   const authorization = createChatGptAuthorizationService({ store, oauth, owners });
-  return { store, ownership: owners, authorization };
+  return { store, oauth, ownership: owners, authorization };
 }
 
 describe("ChatGPT 授权服务", () => {
@@ -90,4 +90,48 @@ describe("ChatGPT 授权服务", () => {
     expect(authorization.snapshot("local:2", "local-session").state).toBe("ready");
     expect(store.read("local:2")).not.toBeNull();
   });
+});
+
+
+it("cancels an in-flight callback, retries with a fresh transaction and rejects a different owner", async () => {
+  const { authorization, oauth, store } = buildService(tempDir(), (async () => ({ ok: false })) as never);
+  const owner = { ok: true as const, ownerId: "local:1", ownerKind: "local-session" as const, localSession: true };
+  const account = { clientId: "c", subject: "sub", scopes: [CHATGPT_PLAN_SCOPE], accessToken: "token", refreshToken: "refresh", expiresAt: Date.now() + 3600_000, connectedAt: "2026-10-25" };
+  let release!: (value: typeof account) => void;
+  const exchange = vi.spyOn(oauth, "complete").mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const begin = await authorization.start({ owner, req: request(), redirectUri: "http://localhost/cb" });
+  const state = begin.ok ? new URL(begin.url).searchParams.get("state")! : "";
+  const pending = authorization.complete({ owner, req: request(), query: { state, code: "c" } });
+  authorization.cancelAuthorization!(owner.ownerId);
+  release(account);
+  expect(await pending).toMatchObject({ ok: false, code: "authorization-cancelled" });
+  expect(store.read(owner.ownerId)).toBeNull();
+  const retry = await authorization.start({ owner, req: request(), redirectUri: "http://localhost/cb" });
+  const nextState = retry.ok ? new URL(retry.url).searchParams.get("state")! : "";
+  exchange.mockResolvedValueOnce(account);
+  expect(await authorization.complete({ owner, req: request(), query: { state: nextState, code: "c" } })).toMatchObject({ ok: true, snapshot: { state: "ready" } });
+  const again = await authorization.start({ owner, req: request(), redirectUri: "http://localhost/cb" });
+  const otherState = again.ok ? new URL(again.url).searchParams.get("state")! : "";
+  expect(await authorization.complete({ owner: { ...owner, ownerId: "local:2" }, req: request(), query: { state: otherState, code: "c" } })).toMatchObject({ ok: false });
+  expect(store.read("local:2")).toBeNull();
+  expect(exchange).toHaveBeenCalledTimes(2);
+});
+
+it("publishes disconnect before remote revocation and discards a late token renewal", async () => {
+  const { authorization, oauth, store } = buildService(tempDir(), (async () => ({ ok: false })) as never);
+  const account = { clientId: "c", subject: "sub", scopes: [CHATGPT_PLAN_SCOPE], accessToken: "token", refreshToken: "refresh", expiresAt: 0, connectedAt: "2026-10-25" };
+  store.write("local:1", { account, host: { extAgentHostId: "h" } });
+  let renew!: () => void;
+  vi.spyOn(oauth, "accessToken").mockImplementation(input => new Promise((resolve, reject) => { renew = () => { try { input.persist({ ...account, accessToken: "late-token" }); resolve("late-token"); } catch (error) { reject(error); } }; }));
+  let revoke!: () => void;
+  vi.spyOn(oauth, "revoke").mockImplementation(() => new Promise(resolve => { revoke = () => resolve(true); }));
+  const renewal = authorization.ensureAccessToken("local:1");
+  const disconnect = authorization.disconnect("local:1");
+  expect(store.read("local:1")).toBeNull();
+  renew();
+  await expect(renewal).rejects.toThrow("授权已撤销");
+  // The simulated remote operation must settle too; a throwing persistence callback is its rejection.
+  revoke(); await disconnect;
+  expect(authorization.snapshot("local:1", "local-session").state).toBe("disconnected");
+
 });

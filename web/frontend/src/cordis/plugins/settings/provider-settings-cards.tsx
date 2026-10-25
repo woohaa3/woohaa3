@@ -17,10 +17,14 @@ import { PluginIconMark } from "./plugin-icons.js";
 export function ProviderSettingsCards({
   store,
   secretsOnly = false,
-  compact = false
+  compact = false,
+  providerId,
+  onSaved,
 }: {
   store: BackendSettingsStore;
   secretsOnly?: boolean;
+  providerId?: string;
+  onSaved?: () => void;
   /** AI 面板只展示连接所需的字段，按 Provider 一次保存。 */
   compact?: boolean;
 }) {
@@ -45,6 +49,7 @@ export function ProviderSettingsCards({
     );
   }
   const groups = providerConfigGroups(state.snapshot)
+    .filter(group => !providerId || group.providerId === providerId)
     .map((group) => ({ ...group, entries: secretsOnly ? group.entries.filter((entry) => entry.secret) : group.entries }))
     .filter((group) => group.entries.length > 0);
   if (groups.length === 0) {
@@ -55,7 +60,7 @@ export function ProviderSettingsCards({
       {groups.map((group) => (
         <section key={group.id} className="provider-settings__card" data-provider-id={group.providerId ?? group.id}>
           <h3 className="settings-page__group-title"><span className="plugin-card__head">{group.icon ? <PluginIconMark icon={group.icon} /> : null}{group.label}</span></h3>
-          {compact ? <ProviderConnectionForm entries={group.entries} store={store} /> : <ul className="settings-page__list" data-testid={`provider-settings-${group.providerId ?? group.id}`}>
+          {compact ? <ProviderConnectionForm entries={group.entries} store={store} onSaved={onSaved} /> : <ul className="settings-page__list" data-testid={`provider-settings-${group.providerId ?? group.id}`}>
             {group.entries.map((entry) => (
               <SettingRow key={`${entry.key}:${String(entry.value)}:${entry.configured}`} entry={entry} store={store} />
             ))}
@@ -67,7 +72,7 @@ export function ProviderSettingsCards({
 }
 
 /** 只记录用户编辑的字段，其他 Provider 刷新快照时不覆盖未保存的草稿。 */
-function ProviderConnectionForm({ entries, store }: { entries: SettingsEntryView[]; store: BackendSettingsStore }) {
+function ProviderConnectionForm({ entries, store, onSaved }: { entries: SettingsEntryView[]; store: BackendSettingsStore; onSaved?: () => void }) {
   const [drafts, setDrafts] = useState<Record<string, SettingsWriteValue>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +98,7 @@ function ProviderConnectionForm({ entries, store }: { entries: SettingsEntryView
     const values = Object.fromEntries(Object.entries(drafts).filter(([key]) => entries.some(entry => entry.key === key && entry.lockedBy === null)).map(([key, value]) => [key, typeof value === "string" ? value.trim() : value]));
     try {
       const result = await store.save(values);
-      if (result.ok) { setDrafts({}); setSaved(true); setClearing(null); }
+      if (result.ok) { setDrafts({}); setSaved(true); setClearing(null); onSaved?.(); }
       else setError(result.issues.map(issue => `${entries.find(entry => entry.key === issue.key)?.label ?? "配置"}：${issue.message}`).join("；") || result.error);
     } catch { setError("保存失败，请重试。"); }
     finally { setBusy(false); }

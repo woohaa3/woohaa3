@@ -1,0 +1,23 @@
+/* 图标随组件加载，不能依赖设置页或延迟打开的 Provider 表单。 */
+.plugin-card__icon {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	border: 1px solid var(--mc-border, var(--app-web-border));
+	border-radius: 9px;
+	background: var(--app-web-subtle);
+	color: var(--mc-accent, var(--app-interaction-accent));
+}
+.plugin-card__icon[data-plugin-icon="plugin"] { color: var(--mc-text-muted, var(--app-web-text-muted)); }
+/* 品牌图自带底色，保留原图比例，不再叠加灰底与描边。 */
+.plugin-card__icon.is-image { border: 0; background: transparent; }
+.plugin-card__icon-image {
+	display: block;
+	width: 30px;
+	height: 30px;
+	border-radius: 8px;
+	object-fit: contain;
+}

@@ -11,7 +11,7 @@ import {
   type HostExtensionPlugin,
 } from "@woohaa3/contracts";
 import { discoverReplicateModels } from "./discovery.js";
-import { createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
+import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { createReplicateProvider, type ReplicateCatalog } from "./provider.js";
 import { replicateModelDefinitions, type ReplicateModel } from "./schema.js";
 import { DEFAULT_REPLICATE_BASE_URL, parseModelIds, REPLICATE_PLUGIN_ID, REPLICATE_PROVIDER_ID } from "./shared.js";
@@ -117,6 +117,7 @@ export function createReplicateProviderPlugin(deps: ReplicatePluginDependencies 
     name: REPLICATE_PLUGIN_ID,
     label: "Replicate",
     configPrefix: "providers.replicate",
+    modelTypes: ["language", "image", "video", "audio"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: { path: REFRESH_PATH, hint: "填写 API Token，以及要使用的模型（逗号或换行分隔，格式 owner/name，例如 black-forest-labs/flux-schnell）。保存后会读取这些模型的输入定义，也可以再刷新。" },
     inject: ["log", "generation", "gateway", "access"],
@@ -141,6 +142,7 @@ export function createReplicateProviderPlugin(deps: ReplicatePluginDependencies 
       const log = ctx.log.scope(REPLICATE_PLUGIN_ID);
       const { registration, catalog } = createReplicateRegistration({
         ...deps,
+        fetchImpl: createProviderLifecycleFetch(ctx, deps.fetchImpl),
         ...(apiKey ? { apiKey } : {}),
         baseUrl,
         ...(config.models ? { models: config.models } : {})

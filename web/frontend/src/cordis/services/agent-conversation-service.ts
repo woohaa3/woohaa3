@@ -505,6 +505,14 @@ export function createAgentConversationService(
     mcpStatus,
     listConversations,
     findConversationForTarget,
+    ...(remote.manageServiceConnection ? { manageServiceConnection: async (input: import("@woohaa3/contracts").ServiceConnectionManagement) => {
+      const result = await remote.manageServiceConnection!(input);
+      return result.ok ? { ok: true as const, value: result.value.connection } : result;
+    } } : {}),
+    ...(remote.listServiceConnections ? { serviceConnectionDirectory: () => remote.listServiceConnections!(), listServiceConnections: async () => {
+      const result = await remote.listServiceConnections!();
+      return result.ok ? { ok: true as const, value: result.value.connections } : result;
+    } } : {}),
     listConnections: directoryReads.listConnections,
     clearContext,
     switchConnection,

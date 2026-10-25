@@ -292,7 +292,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               {...(route.nodeId ? { nodeId: route.nodeId } : {})}
               {...(detailReturnSource ? { returnToSource: detailReturnSource } : {})}
               service={agentConversations}
-              onManageAssistant={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: { canvasId: ctx.canvasScope.canvasId() } })}
+              onManageAssistant={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: { canvasId: ctx.canvasScope.canvasId(), ...(agentConversations.getDetail()?.conversation.connectionId ? { connectionId: agentConversations.getDetail()!.conversation.connectionId } : {}) } })}
               targetExecution={() => {
                 const detail = agentConversations.getDetail();
                 const target = detail?.turns.slice().reverse().find((turn) => turn.action !== "discuss")?.target;

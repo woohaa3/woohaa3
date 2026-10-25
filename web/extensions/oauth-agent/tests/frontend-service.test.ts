@@ -139,10 +139,10 @@ describe("ChatGPT Service", () => {
     service.generate({ model: "gpt-6.1-sol", prompt: "box", reasoningEffort: "default" });
     expect(lastRequest()).not.toHaveProperty("reasoningEffort");
     await service.disconnect();
-    expect(service.getSnapshot().reasoningEffort).toBe("default");
+    expect(service.getSnapshot().reasoningEffort).toBe("high");
   });
 
-  it("断开清除模型目录与草稿", async () => {
+  it("断开清除模型目录但保留未发送草稿", async () => {
     const { remote } = remoteStub();
     const service = createChatGptService({ remote });
     await service.refresh();
@@ -151,7 +151,7 @@ describe("ChatGPT Service", () => {
     service.setDraft("draft");
     await service.disconnect();
     expect(service.getSnapshot().models).toEqual([]);
-    expect(service.getSnapshot().draftPrompt).toBe("");
+    expect(service.getSnapshot().draftPrompt).toBe("draft");
     expect(service.isReady()).toBe(false);
   });
 

@@ -1,3 +1,5 @@
+import { useOptionalService } from "../../react.js";
+import type { ServiceConnectionView } from "@woohaa3/contracts";
 /**
  * Generic Model Interaction Panel
  * （change: 2026-09-29-add-pluggable-model-interactions，任务 4.4 / design D9）。
@@ -6,7 +8,7 @@
  * 包装成 Model Interaction Panel：它是**一个普通 Plugin Panel**，通过受限 props 消费 Host
  * 提供的 draft/submit/renderers，自身不 import Provider、Task internal API 或 raw store。
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ExecutionPanel,
   type ExecutionPanelData,
@@ -18,6 +20,15 @@ import { projectModelConfig } from "./generic-panel-projection.js";
 
 export function GenericModelPanel(props: ModelPanelProps) {
   const { model, catalogModels, presentation, status, errorMessage, draft, blockingReasons, readOnly } = props;
+  const service = useOptionalService("agentConversationService");
+  const [sources, setSources] = useState<ServiceConnectionView[]>([]);
+  useEffect(() => {
+    let active = true;
+    void service?.listServiceConnections?.().then(result => { if (active && result.ok) setSources(result.value); }).catch(() => {});
+    return () => { active = false; };
+  }, [service, model.modelKey]);
+  const compatibleSources = sources.filter(source => source.scope === "personal" && source.enabled && source.bindings.some(binding => binding.consumer === "provider" && binding.modelKeys.includes(model.modelKey)));
+  const selectedSource = typeof draft.parameters.serviceConnectionId === "string" ? draft.parameters.serviceConnectionId : "";
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const modelConfig = useMemo<ExecutionPanelModelConfig>(
@@ -60,6 +71,12 @@ export function GenericModelPanel(props: ModelPanelProps) {
 
   return (
     <div className="model-panel">
+      {compatibleSources.length || selectedSource ? <label className="settings-page__hint">服务连接 <select value={selectedSource} disabled={readOnly} onChange={event => {
+        const parameters = { ...draft.parameters };
+        if (event.target.value) parameters.serviceConnectionId = event.target.value;
+        else delete parameters.serviceConnectionId;
+        props.patchDraft({ parameters });
+      }}><option value="">站点默认来源</option>{compatibleSources.map(source => <option key={source.serviceConnectionId} value={source.serviceConnectionId}>{source.name}</option>)}{selectedSource && !compatibleSources.some(source => source.serviceConnectionId === selectedSource) ? <option value={selectedSource}>原来源已失效，请重新选择</option> : null}</select></label> : null}
       <ExecutionPanel
         taskKind={modelTypeToTaskKind(model.modelType)}
         modelConfig={modelConfig}

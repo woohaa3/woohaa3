@@ -21,6 +21,8 @@ import { AGENT_CONVERSATION_BASE_PATH } from "./paths.js";
 import type { ApplicationRemoteTransport, ApplicationTransportJsonResult } from "../contract/remote.js";
 
 export type AgentConversationRemote = {
+  listServiceConnections?: () => Promise<AgentConversationResult<import("@woohaa3/contracts").ServiceConnectionDirectory>>;
+  manageServiceConnection?: (input: import("@woohaa3/contracts").ServiceConnectionManagement) => Promise<AgentConversationResult<{ connection: import("@woohaa3/contracts").ServiceConnectionView }>>;
   catalog: (adapterId?: string) => Promise<AgentConversationResult<AgentCatalogResponse>>;
   /**
    * 该 owner 可见的来源连接（不含秘密；change: 2026-10-16-...，任务 2.4）。
@@ -86,6 +88,13 @@ export function createAgentConversationRemote(options: AgentConversationRemoteOp
     async catalog(adapterId) {
       const query = adapterId ? `?adapterId=${encodeURIComponent(adapterId)}` : "";
       return unwrap<AgentCatalogResponse>(await transport.request({ path: path(`catalog${query}`), method: "GET" }));
+    },
+    async manageServiceConnection(input) {
+      const { action, ...body } = input;
+      return unwrap(await transport.request({ path: path(`service-connections/${action}`), method: "POST", body }));
+    },
+    async listServiceConnections() {
+      return unwrap(await transport.request({ path: path("service-connections"), method: "GET" }));
     },
     async listConnections(adapterId) {
       const query = adapterId ? `?adapterId=${encodeURIComponent(adapterId)}` : "";

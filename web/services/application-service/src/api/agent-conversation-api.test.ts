@@ -44,6 +44,8 @@ function serviceStub(): AgentConversationService {
 }
 
 async function boot(options: {
+  serviceConnections?: import("../service-connections/registry.js").ServiceConnectionRegistry;
+  serviceConnectionProviders?: () => import("@woohaa3/contracts").GenerationProvider[];
   discovery?: () => Promise<McpBuiltinDiscoveryView>;
   service?: AgentConversationService;
   canvasAccess?: boolean;
@@ -55,6 +57,8 @@ async function boot(options: {
 } = {}) {
   const handler = createAgentConversationApiHandler({
     service: options.service ?? serviceStub(),
+    serviceConnections: options.serviceConnections,
+    serviceConnectionProviders: options.serviceConnectionProviders,
     canvasCreations: options.canvasCreations,
     ...(options.basePath ? { basePath: options.basePath } : {}),
     ...(options.discovery ? { mcpDiscovery: options.discovery } : {}),
@@ -509,4 +513,35 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
     });
     expect(failResponse.status).toBe(409);
   });
+});
+
+it("service management uses trusted owner, enforces Origin/admin and atomically binds only supported personal text", async () => {
+  const { createServiceConnectionRegistry } = await import("../service-connections/registry.js");
+  const { createSqliteExtensionDocumentStore } = await import("../repository/extension-document-store.js");
+  const store = createSqliteExtensionDocumentStore({ path: ":memory:", owners: ["sources"] });
+  const registry = createServiceConnectionRegistry({ documents: store.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
+  const actor = { owner: "user-a", administrator: false, canUseSite: true };
+  const port = registry.forExtension("demo");
+  port.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
+  const source = (await registry.save(actor, { operationId: "create", name: "Relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], expectedRevision: 0, expectedCredentialEpoch: 0 })).connection;
+  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
+  const providers = () => [{ providerId: "demo", extensionId: "demo", models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"] } }] as unknown as import("@woohaa3/contracts").GenerationProvider[];
+  try {
+    const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
+    const body = { ...evidenced, owner: "victim", scope: "site", providerId: "demo", modelId: "model" };
+    const post = (action: string, origin = base, payload = body) => fetch(`${base}/api/agent-conversations/service-connections/${action}`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(payload) });
+    expect((await post("provider", "https://evil.example")).status).toBe(403);
+    expect((await post("provider", "invalid-url")).status).toBe(403);
+    expect((await post("assistant")).status).toBe(403);
+    const response = await post("provider");
+    expect(response.status).toBe(200);
+    const { connection } = await response.json();
+    expect(connection.scope).toBe("personal");
+    expect(connection.configRevision).toBe(evidenced.configRevision + 1);
+    expect(connection.bindings[0]).toMatchObject({ extensionId: "demo", purposes: ["text"], modelKeys: ["demo:model"] });
+    expect(await registry.list({ ...actor, owner: "victim" })).toEqual([]);
+    expect((await post("provider")).status).toBe(409);
+    const forwarded = await fetch(`${base}/api/agent-conversations/service-connections/enabled`, { method: "POST", headers: { origin: "https://canvas.example", "x-forwarded-host": "canvas.example", "x-forwarded-proto": "https", "content-type": "application/json" }, body: JSON.stringify({ ...connection, enabled: false }) });
+    expect(forwarded.status).toBe(200);
+  } finally { store.close(); }
 });

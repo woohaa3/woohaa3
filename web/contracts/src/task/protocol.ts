@@ -34,6 +34,8 @@ export const DEFAULT_TASK_INTERNAL_BASE_PATH = "/internal/v1";
 
 /** submit 请求体：由 Canvas 从 published Y.Doc 解析后构造。 */
 export type TaskSubmitRequest = {
+  /** In-process Canvas port only; HTTP decoder deliberately does not accept caller-supplied owners. */
+  serviceConnection?: { serviceConnectionId: string; owner: string };
   /** 稳定幂等 key：Canvas 生成，同一 run 重试用同一值。 */
   workerTaskKey: string;
   canvasId: string;

@@ -92,6 +92,7 @@ export type PptaskWorkerOptions = {
   jobRepository: PptaskJobRepository;
   resolveProvider(
     providerId: string | undefined,
+    record?: PptaskTaskRecord,
   ): PptaskProvider | undefined | Promise<PptaskProvider | undefined>;
   /**
    * Shared dispatch notifier. Submit/cancel publish hints through it; the
@@ -169,8 +170,8 @@ export function createPptaskWorker(options: PptaskWorkerOptions): PptaskWorker {
     }
   }
 
-  async function resolveProviderOrFail(providerId: string | undefined): Promise<PptaskProvider> {
-    const provider = await options.resolveProvider(providerId);
+  async function resolveProviderOrFail(providerId: string | undefined, record: PptaskTaskRecord): Promise<PptaskProvider> {
+    const provider = await options.resolveProvider(providerId, record);
     if (!provider) throw new Error(`Provider not found: ${providerId ?? '(none)'}`);
     return provider;
   }
@@ -193,8 +194,9 @@ export function createPptaskWorker(options: PptaskWorkerOptions): PptaskWorker {
 
     let provider: PptaskProvider;
     try {
-      provider = await resolveProviderOrFail(claimed.providerId);
+      provider = await resolveProviderOrFail(claimed.providerId, claimed);
     } catch (error) {
+      if (await parkInvalidSource(claimed, error, claimed.state)) return;
       log('provider-missing', { key, providerId: claimed.providerId });
       report('provider-missing', { jobId: key, providerId: claimed.providerId, attempt: claimed.attempt });
       await finishTask(claimed, 'failed');
@@ -249,6 +251,21 @@ export function createPptaskWorker(options: PptaskWorkerOptions): PptaskWorker {
       clearInterval(heartbeat);
       inFlightLeases.delete(key);
     }
+  }
+
+  /** Once a remote receipt exists, invalid credentials park it for reconciliation.
+   * No lease deadline means recovery cannot silently re-submit or use a new Key.
+   */
+  async function parkInvalidSource(claimed: PptaskTaskRecord, error: unknown, state: unknown): Promise<boolean> {
+    if (!(error && typeof error === 'object' && (error as { sourceStale?: boolean }).sourceStale)) return false;
+    const snapshot = state as { jobId?: string; record?: unknown } | undefined;
+    if (!snapshot?.jobId && !snapshot?.record) return false;
+    const current = await taskStore.find(claimed.key);
+    if (!current || current.claimToken !== claimed.claimToken || isTaskTerminal(current.status)) return true;
+    await taskStore.save({ ...current, state, status: 'executing', leaseUntil: undefined, nextRunAt: undefined, updatedAt: now() });
+    report('provider-missing', { jobId: claimed.key, providerId: claimed.providerId, attempt: claimed.attempt,
+      detail: { sourceStale: true, message: '服务来源已失效；保留上游回执，待核对。不会重新生成或改用新凭据。' } });
+    return true;
   }
 
   /** Job mode: rehydrate (or create) the core job, then poll it to terminal. */
@@ -400,6 +417,7 @@ export function createPptaskWorker(options: PptaskWorkerOptions): PptaskWorker {
     if (!current || current.claimToken !== claimed.claimToken || isTaskTerminal(current.status)) return;
     if (isLeaseAborted()) return;
 
+    if (await parkInvalidSource(claimed, error, currentEngineState())) return;
     const state = (currentEngineState() ?? {}) as PptaskJobEngineState;
 
     let record: PptaskJobRecord | undefined;

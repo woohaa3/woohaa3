@@ -18,3 +18,4 @@ export {
   registerModelRefreshRoute,
   type ModelRefreshResult
 } from "./model-refresh.js";
+export { createProviderLifecycleFetch } from "./lifecycle-fetch.js";

@@ -11,7 +11,7 @@ import {
   type HostExtensionPlugin,
 } from "@woohaa3/contracts";
 import { discoverTokenHubModels, tokenHubModelDefinitions, type DiscoveredModel } from "./discovery.js";
-import { createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
+import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { describeTokenHubModel, createTokenHubProvider } from "./provider.js";
 import { DEFAULT_TOKENHUB_BASE_URL, TOKENHUB_PLUGIN_ID, TOKENHUB_PROVIDER_ID } from "./shared.js";
 
@@ -80,6 +80,17 @@ export function createTokenHubRegistration(input: TokenHubRegistrationInput): { 
       providerId: TOKENHUB_PROVIDER_ID,
       available,
       provider,
+      serviceConnectionFactory: {
+        protocols: [`provider:${TOKENHUB_PROVIDER_ID}`, "chat-completions"], assistantProtocol: "chat-completions",
+        create: ({ secret, endpoint, validate, fetch: sourceFetch }) => createTokenHubProvider({
+          apiKey: secret, baseURL: endpoint,
+          ...(input.jobRepository ? { jobRepository: input.jobRepository as never } : {}),
+          fetch: createGuardedFetch({ baseUrl: endpoint, maxBytes: input.maxBytes ?? DEFAULT_MAX_BYTES,
+            timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS, validate, allowedContentTypes: ["image/", "audio/"],
+            ...(sourceFetch ? { apiFetchImpl: sourceFetch } : {}),
+            ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}) }),
+        } as never),
+      },
       models,
       describeModel: (model) => describeTokenHubModel(model.providerModelId, model.modelType) as GenerationModelDescription | undefined
     }
@@ -91,6 +102,7 @@ export function createTokenHubProviderPlugin(deps: TokenHubPluginDependencies = 
     name: TOKENHUB_PLUGIN_ID,
     label: "TokenHub",
     configPrefix: "providers.tokenhub",
+    modelTypes: ["language", "image", "video"],
     // 设置页「可用模型」一节由插件声明驱动：宿主不硬编码 Provider 的刷新入口。
     modelRefresh: { path: REFRESH_PATH, hint: "模型从 TokenHub 的模型列表接口发现。保存 API Key 和网关地址后会发现一次，也可以再刷新。文本走对话接口；图片和视频按模型系列调用对应的生成接口。" },
     inject: ["log", "generation", "gateway", "access"],
@@ -115,6 +127,7 @@ export function createTokenHubProviderPlugin(deps: TokenHubPluginDependencies = 
       const log = ctx.log.scope(TOKENHUB_PLUGIN_ID);
       const { registration } = createTokenHubRegistration({
         ...deps,
+        fetchImpl: createProviderLifecycleFetch(ctx, deps.fetchImpl),
         ...(apiKey ? { apiKey } : {}),
         baseUrl
       });

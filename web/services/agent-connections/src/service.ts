@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { nativeContextKey, type NativeContext } from "./native-context.js";
 /**
  * 连接生命周期服务（change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 1.3/1.4/1.5 /
@@ -23,6 +24,7 @@ import {
 } from "./metadata.js";
 
 export type ConnectionConfigInput = {
+  serviceConnectionId?: string;
   adapterId: string;
   name: string;
   runCategory: AgentConnectionRunCategory;
@@ -53,7 +55,9 @@ export type ConnectionService = {
   list(owner: string): Promise<ConnectionMetadataRecord[]>;
   get(owner: string, connectionId: string): Promise<ConnectionMetadataRecord | null>;
   create(owner: string, input: ConnectionConfigInput): Promise<ConnectionServiceResult<ConnectionMetadataRecord>>;
-  update(owner: string, connectionId: string, patch: Partial<ConnectionConfigInput>): Promise<ConnectionServiceResult<ConnectionMetadataRecord>>;
+  update(owner: string, connectionId: string, patch: Partial<ConnectionConfigInput>, expected?: { configRevision: number; credentialEpoch: number }): Promise<ConnectionServiceResult<ConnectionMetadataRecord>>;
+  /** Atomic configuration/key publication; stable operation IDs survive lost responses. */
+  configure(owner: string, input: ConnectionConfigInput & { operationId: string; connectionId?: string; secret?: string; expectedEpoch?: number; expectedRevision?: number }): Promise<ConnectionServiceResult<ConnectionMetadataRecord>>;
   /** 删除连接：清其凭据与元数据；不删除宿主历史/画布内容。 */
   remove(owner: string, connectionId: string): Promise<ConnectionServiceResult<{ removed: true }>>;
   /** 保存/替换凭据（明文只在此请求出现；加密保存后不回读）。 */
@@ -170,6 +174,7 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       const timestamp = now();
       const record: ConnectionMetadataRecord = {
         connectionId: createId("conn"),
+        ...(input.serviceConnectionId ? { serviceConnectionId: input.serviceConnectionId } : {}),
         ...(options.runtimeVersionFor?.(input.adapterId) ? { runtimeVersion: options.runtimeVersionFor(input.adapterId) } : {}),
         owner,
         adapterId: input.adapterId,
@@ -187,9 +192,10 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       return written.ok ? { ok: true, value: record } : written;
     },
 
-    async update(owner, connectionId, patch) {
+    async update(owner, connectionId, patch, expected) {
       const found = await readRecord(owner, connectionId);
       if (!found) return { ok: false, error: { code: "not-found", message: "连接不存在或无权访问" } };
+      if (expected && (expected.configRevision !== found.record.configRevision || expected.credentialEpoch !== found.record.credentialEpoch)) return { ok: false, error: { code: "version-conflict", message: "拒绝旧代次配置结果" } };
       const next: ConnectionMetadataRecord = {
         ...found.record,
         ...(patch.adapterId !== undefined ? { adapterId: patch.adapterId } : {}),
@@ -208,18 +214,69 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       return written.ok ? { ok: true, value: next } : written;
     },
 
+    async configure(owner, input) {
+      if (!owner || !input.operationId || input.operationId.length > 128 || !input.name.trim()) return { ok: false, error: { code: "malformed-request", message: "缺少保存操作身份或连接名称" } };
+      const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+      const opKey = `configure-operations/${hash([owner, input.operationId])}`;
+      const fingerprint = hash(input);
+      const prior = await documents.get(opKey);
+      type Operation = { fingerprint: string; connectionId: string; credentialKey: string; state: "pending" | "published"; record?: ConnectionMetadataRecord };
+      let operation = prior.found ? prior.document.value as unknown as Operation : null;
+      if (operation && operation.fingerprint !== fingerprint) return { ok: false, error: { code: "version-conflict", message: "相同操作身份不能保存不同内容" } };
+      if (operation?.state === "published") return { ok: true, value: operation.record! };
+      const id = operation?.connectionId ?? input.connectionId ?? createId("conn");
+      const found = await readRecord(owner, id);
+      if (input.connectionId && !found) return { ok: false, error: { code: "not-found", message: "连接不存在或无权访问" } };
+      if (found && (input.expectedRevision !== undefined && input.expectedRevision !== found.record.configRevision || input.expectedEpoch !== undefined && input.expectedEpoch !== found.record.credentialEpoch)) return { ok: false, error: { code: "version-conflict", message: "连接已变化，请保留草稿并重新读取" } };
+      let operationRevision = prior.found ? prior.document.revision : null;
+      if (!operation) {
+        operation = { fingerprint, connectionId: id, credentialKey: `${credentialPurposeKey(id, "model-api-key")}:${createId("version")}`, state: "pending" };
+        const reserved = await documents.batch([{ op: "set", key: opKey, value: JSON.parse(JSON.stringify(operation)) as ExtensionDocumentValue, expectedRevision: null }]);
+        if (!reserved.ok) return { ok: false, error: { code: "version-conflict", message: "操作正在保存，请重试同一操作" } };
+        operationRevision = reserved.revisions[opKey] ?? null;
+      }
+      const secret = input.secret?.trim();
+      if (secret) {
+        const store = requireCredentials();
+        if (!store.ok) return store;
+        if (!store.value.read(owner, operation.credentialKey)) {
+          const staged = store.value.write(owner, operation.credentialKey, { secret }, { version: 0, epoch: store.value.epoch(owner) });
+          if (!staged.ok) return { ok: false, error: { code: "storage-failed", message: "秘密暂存失败，原配置保持有效" } };
+        }
+      }
+      const timestamp = now();
+      const record: ConnectionMetadataRecord = {
+        ...found?.record, ...(input.serviceConnectionId ? { serviceConnectionId: input.serviceConnectionId } : {}), connectionId: id, owner, adapterId: input.adapterId, name: input.name.trim(),
+        runCategory: input.runCategory, authMode: input.authMode, baseUrl: input.baseUrl,
+        models: input.models ? [...input.models] : found?.record.models,
+        ...(options.runtimeVersionFor?.(input.adapterId) ? { runtimeVersion: options.runtimeVersionFor(input.adapterId) } : {}),
+        configRevision: (found?.record.configRevision ?? 0) + 1,
+        credentialEpoch: (found?.record.credentialEpoch ?? 0) + (secret ? 1 : 0),
+        ...(secret ? { credentialKeys: { ...found?.record.credentialKeys, "model-api-key": operation.credentialKey } } : {}),
+        native: undefined, nativeBindings: undefined, modelCapabilities: undefined, lastStatus: undefined,
+        createdAt: found?.record.createdAt ?? timestamp, updatedAt: timestamp,
+      };
+      const published = await documents.batch([
+        { op: "set", key: connectionMetadataKey(id), value: toDocumentValue(record), expectedRevision: found?.revision ?? null },
+        { op: "set", key: opKey, value: JSON.parse(JSON.stringify({ ...operation, state: "published", record })) as ExtensionDocumentValue, expectedRevision: operationRevision },
+      ]);
+      if (!published.ok) return { ok: false, error: { code: published.code === "revision-conflict" ? "version-conflict" : "storage-failed", message: "配置未发布，原连接保持有效；请重试原操作" } };
+      return { ok: true, value: record };
+    },
+
     async remove(owner, connectionId) {
       const found = await readRecord(owner, connectionId);
       if (!found) return { ok: false, error: { code: "not-found", message: "连接不存在或无权访问" } };
-      if (secrets) {
-        for (const purpose of ["model-api-key", "appserver-auth", "mcp-grant"] as const) {
-          secrets.clear(owner, credentialPurposeKey(connectionId, purpose));
-        }
-      }
       const result = await documents.batch([{ op: "delete", key: connectionMetadataKey(connectionId), expectedRevision: found.revision }]);
       if (!result.ok) {
         if (result.code === "revision-conflict") return { ok: false, error: { code: "version-conflict", message: "连接已被并发修改，请重试" } };
         return { ok: false, error: { code: "storage-failed", message: result.message } };
+      }
+      if (secrets) {
+        for (const purpose of ["model-api-key", "appserver-auth", "mcp-grant"] as const) {
+          const key = found.record.credentialKeys?.[purpose];
+          if (key !== null) secrets.clear(owner, key ?? credentialPurposeKey(connectionId, purpose));
+        }
       }
       return { ok: true, value: { removed: true } };
     },
@@ -234,13 +291,13 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       if (input.expectedEpoch !== undefined && input.expectedEpoch !== found.record.credentialEpoch) {
         return { ok: false, error: { code: "epoch-invalid", message: "凭据已被更新，拒绝迟到写入" } };
       }
-      const purposeKey = credentialPurposeKey(input.connectionId, input.purpose);
-      const current = store.value.read<{ secret: string }>(input.owner, purposeKey);
-      const written = store.value.write(input.owner, purposeKey, { secret: input.secret }, { version: current?.version ?? 0, epoch: store.value.epoch(input.owner) });
+      // Stage an immutable secret version. Failed metadata CAS must leave the old Key usable.
+      const purposeKey = `${credentialPurposeKey(input.connectionId, input.purpose)}:${createId("version")}`;
+      const written = store.value.write(input.owner, purposeKey, { secret: input.secret }, { version: 0, epoch: store.value.epoch(input.owner) });
       if (!written.ok) return { ok: false, error: { code: written.code === "storage-failed" ? "storage-failed" : "epoch-invalid", message: written.message } };
       // 推进连接级 epoch，使旧原生会话/迟到结果失效。
       const nextEpoch = found.record.credentialEpoch + 1;
-      const next: ConnectionMetadataRecord = { ...found.record, credentialEpoch: nextEpoch, native: undefined, nativeBindings: undefined, lastStatus: undefined, modelCapabilities: undefined, updatedAt: now() };
+      const next: ConnectionMetadataRecord = { ...found.record, credentialKeys: { ...found.record.credentialKeys, [input.purpose]: purposeKey }, credentialEpoch: nextEpoch, native: undefined, nativeBindings: undefined, lastStatus: undefined, modelCapabilities: undefined, updatedAt: now() };
       const stored = await writeRecord(next, found.revision);
       if (!stored.ok) {
         // 元数据写入失败：清除刚写入的凭据，保持「未生效」而不是半状态。
@@ -253,24 +310,33 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
     async clearCredential(input) {
       const found = await readRecord(input.owner, input.connectionId);
       if (!found) return { ok: false, error: { code: "not-found", message: "连接不存在或无权访问" } };
-      if (secrets) secrets.clear(input.owner, credentialPurposeKey(input.connectionId, input.purpose));
+      if (found.record.credentialKeys?.[input.purpose] === null) return { ok: true, value: { credentialEpoch: found.record.credentialEpoch } };
       const nextEpoch = found.record.credentialEpoch + 1;
-      const next: ConnectionMetadataRecord = { ...found.record, credentialEpoch: nextEpoch, native: undefined, nativeBindings: undefined, lastStatus: undefined, modelCapabilities: undefined, updatedAt: now() };
+      const next: ConnectionMetadataRecord = { ...found.record, credentialKeys: { ...found.record.credentialKeys, [input.purpose]: null }, credentialEpoch: nextEpoch, native: undefined, nativeBindings: undefined, lastStatus: undefined, modelCapabilities: undefined, updatedAt: now() };
       const stored = await writeRecord(next, found.revision);
       if (!stored.ok) return stored;
+      // Publish revocation before clearing storage; a failed CAS cannot destroy the active Key.
+      const key = found.record.credentialKeys?.[input.purpose] ?? credentialPurposeKey(input.connectionId, input.purpose);
+      secrets?.clear(input.owner, key);
       return { ok: true, value: { credentialEpoch: nextEpoch } };
     },
 
     async credentialConfigured(input) {
-      if (!secrets) return false;
-      const read = secrets.read<{ secret: string }>(input.owner, credentialPurposeKey(input.connectionId, input.purpose));
+      const found = await readRecord(input.owner, input.connectionId);
+      if (!found || !secrets) return false;
+      const key = found.record.credentialKeys?.[input.purpose];
+      if (key === null) return false;
+      const read = secrets.read<{ secret: string }>(input.owner, key ?? credentialPurposeKey(input.connectionId, input.purpose));
       return read !== null && typeof read.value?.secret === "string" && read.value.secret.length > 0;
     },
 
-    readCredential<T>(input: { owner: string; connectionId: string; purpose: AgentCredentialPurpose }): Promise<T | null> {
-      if (!secrets) return Promise.resolve(null);
-      const read = secrets.read<T>(input.owner, credentialPurposeKey(input.connectionId, input.purpose));
-      return Promise.resolve(read ? read.value : null);
+    async readCredential<T>(input: { owner: string; connectionId: string; purpose: AgentCredentialPurpose }): Promise<T | null> {
+      const found = await readRecord(input.owner, input.connectionId);
+      if (!found || !secrets) return null;
+      const key = found.record.credentialKeys?.[input.purpose];
+      if (key === null) return null;
+      const read = secrets.read<T>(input.owner, key ?? credentialPurposeKey(input.connectionId, input.purpose));
+      return read ? read.value : null;
     },
 
     async setNativeBinding(input) {

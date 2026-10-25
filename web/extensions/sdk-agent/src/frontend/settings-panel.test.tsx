@@ -209,6 +209,7 @@ describe("直接配置模型 API", () => {
       await input("API Key", "sk-private-value");
       await click("保存并读取模型");
       expect(api.configure).toHaveBeenCalledWith({
+        operationId: expect.any(String),
         adapterId: "compat-chat",
         baseUrl: "https://models.example/v1",
         secret: "sk-private-value",

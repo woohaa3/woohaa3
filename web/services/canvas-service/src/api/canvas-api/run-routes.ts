@@ -4,6 +4,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
+  resolveRequestDataContext,
   decodeCanvasCancelRequest,
   decodeCanvasRunRequest,
   decodeFilmSetConversionRequest,
@@ -51,14 +52,16 @@ export async function handleRun(
     sendError(res, 503, "NOT_READY", "任务运行未启用");
     return true;
   }
-  if (!(await requireWriteAccess({ req, res, canvasId, options, log })).ok) return true;
+  const access = await requireWriteAccess({ req, res, canvasId, options, log });
+  if (!access.ok) return true;
   const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
   const decoded = decodeCanvasRunRequest({ ...body, canvasId });
   if (!decoded.ok) {
     sendError(res, 400, "INVALID_COMMAND_BATCH", decoded.message);
     return true;
   }
-  const outcome = await options.runService.run(decoded.value);
+  const owner = resolveRequestDataContext(options.accessRuntime ?? { enabled: true }, access.principal ?? null).dataScope.ownerId;
+  const outcome = await options.runService.run(decoded.value, { owner });
   if (!outcome.ok) {
     // task-submit-failed 是上游（Task/Provider 物化）在调用前就失败：2xx 会骗调用方「已受理」。
     const status =

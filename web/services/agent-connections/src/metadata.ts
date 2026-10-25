@@ -25,6 +25,8 @@ export type ConnectionMetadataRecord = {
   runtimeVersion?: string;
   runtimeProbe?: { version: string; evidence: import("@woohaa3/contracts").AgentConnectionStatusEvidence };
   connectionId: string;
+  /** Host-created alias: owns sessions, never a second model credential. */
+  serviceConnectionId?: string;
   owner: string;
   adapterId: string;
   name: string;
@@ -34,6 +36,8 @@ export type ConnectionMetadataRecord = {
   configRevision: number;
   /** 凭据 epoch 镜像（secrets 仓库为事实源）。 */
   credentialEpoch: number;
+  /** Internal immutable secret-version pointers. Missing entries bridge legacy keys; null means revoked. */
+  credentialKeys?: Partial<Record<import("@woohaa3/contracts").AgentCredentialPurpose, string | null>>;
   /** 自定义 endpoint（仅兼容 API；官方 SDK 不接受）。 */
   baseUrl?: string;
   /** 显式模型（无目录时手填；不冒充账号已授权）。 */

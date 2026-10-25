@@ -314,6 +314,7 @@ export type ApplicationExtensionAssistantFacade = {
 };
 
 export type ApplicationExtensionServices = {
+  serviceConnections?: import("./service-connection.js").ApplicationServiceConnectionFacade;
   assistants?: ApplicationExtensionAssistantFacade;
   extensionNodes?: ApplicationExtensionNodeFacade;
   tasks: ApplicationExtensionTaskFacade;

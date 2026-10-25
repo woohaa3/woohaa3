@@ -1,3 +1,4 @@
+import { createSiteProviderSource } from "./service-connection-sources.js";
 import { createCanvasCreationPort } from "../../ports/canvas-creation.js";
 import { createGroupEffects } from "../../ports/group-effects.js";
 /**
@@ -126,7 +127,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
   // （core 层先装载 storagePlugin，因此这里一定拿得到注册表）。
   // 诊断缓冲**不**进 inject：它来自基础层，但 application 在独立入口/测试里可能只装配核心层。
   // 用 `ctx.get` 懒取，缺失时照常工作（扩展拿不到 host.diagnostics），不让整个 application 卡住。
-  inject: ["log", "gateway", "access", "canvas", "task", "media", "mcp", "toolGrants", "generation", "storage", "telemetry"],
+  inject: ["log", "config", "gateway", "access", "canvas", "task", "media", "mcp", "toolGrants", "generation", "storage", "telemetry"],
   async apply(ctx, config) {
     const { env } = config;
     // 用 get 而不是属性访问：诊断是可选能力，独立入口/测试可能没有装载它；
@@ -155,7 +156,28 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     const servicesFor = createServicesFactory(ctx, env, foundationStorage);
     const { generation, mcp, storage } = ctx;
 
+    const sourceSecrets = resolveSecretStore(env, ctx.log.scope("service-connections"));
+    const allowedSourceHosts = new Set([
+      "api.openai.com", "api.anthropic.com", "api.deepseek.com", "generativelanguage.googleapis.com",
+      ...(env.WOOHAA3_SDK_AGENT_ALLOWED_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean),
+    ]);
     const service = createApplicationService({
+      serviceConnectionProviders: () => generation.list(),
+      serviceConnectionSources: {
+        ...(sourceSecrets ? { secrets: sourceSecrets.forExtension("@service-connections") } : {}),
+        checkEndpoint: (raw) => {
+          try {
+            const url = new URL(raw);
+            const configuredHosts = env.WOOHAA3_SDK_AGENT_ALLOWED_HOSTS?.trim();
+            const protocolAllowed = url.protocol === "https:" || env.WOOHAA3_SDK_AGENT_ALLOW_HTTP === "1" && url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+            return protocolAllowed && !url.username && !url.password && !url.search && !url.hash && (!configuredHosts || configuredHosts === "*" || [...allowedSourceHosts].some(host => host === url.hostname || host.startsWith("*.") && url.hostname.endsWith(host.slice(1)) && url.hostname !== host.slice(2)));
+          } catch { return false; }
+        },
+        hasUnresolvedWork: (_owner, bindings) => bindings.some(binding => binding.consumer === "provider") && ctx.task.history().listUnsettled(1).length > 0,
+        // Source consumers must explicitly register evidence before any credential use.
+        // No installed global Provider implicitly acquires access to personal sources.
+        validateBinding: () => false,
+      },
       env,
       accessRuntime,
       authenticator,
@@ -220,5 +242,24 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     ctx.provide("application", module);
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.application, (req, res) => service.handle(req, res)));
     await runtime.activate();
+    const releases: Array<() => void> = [];
+    for (const plugin of ctx.config.plugins()) {
+      if (!plugin.configPrefix?.startsWith("providers.")) continue;
+      const providerId = plugin.configPrefix.slice("providers.".length);
+      const extensionId = generation.resolve(providerId)?.extensionId ?? plugin.id;
+      const release = service.serviceConnections()?.forExtension(extensionId).registerSource(createSiteProviderSource({
+        providerId, extensionId, label: plugin.label, prefix: plugin.configPrefix, settings: ctx.config,
+        provider: () => generation.resolve(providerId),
+      }));
+      if (release) releases.push(release);
+      const provider = generation.resolve(providerId);
+      if (provider?.serviceConnectionFactory) {
+        const releaseConsumer = service.serviceConnections()?.forExtension(extensionId).registerConsumer({
+          protocols: [`provider:${provider.providerId}`, ...provider.serviceConnectionFactory.protocols], purposes: ["text", "image", "video", "audio"],
+        });
+        if (releaseConsumer) releases.push(releaseConsumer);
+      }
+    }
+    ctx.effect(() => () => { for (const release of releases) release(); });
   }
 };

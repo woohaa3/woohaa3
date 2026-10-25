@@ -17,6 +17,10 @@ export type GuardedFetchOptions = {
   maxBytes: number;
   timeoutMs: number;
   fetchImpl?: typeof globalThis.fetch;
+  /** Dedicated pinned transport for authenticated source API calls; media keeps its existing guard. */
+  apiFetchImpl?: typeof globalThis.fetch;
+  /** Check the frozen source before each authenticated upstream call. */
+  validate?: () => Promise<void>;
   maxRedirects?: number;
   /** 受控下载允许的响应类型前缀；缺省只允许图片（`image/`）。 */
   allowedContentTypes?: readonly string[];
@@ -47,10 +51,14 @@ export function createGuardedFetch(options: GuardedFetchOptions): typeof globalT
     // 第 1 类：provider API 自身（含 multipart 参考图上传）。
     // 走可信 origin 也必须带超时：否则上游挂住会一直占用任务请求。
     if (trustedOrigin !== null && parsed.origin === trustedOrigin) {
-      return fetchImpl(input as string, {
+      await options.validate?.();
+      const response = await (options.apiFetchImpl ?? fetchImpl)(input as string, {
         ...init,
+        redirect: "error",
         signal: init?.signal ?? AbortSignal.timeout(options.timeoutMs)
       });
+      if (response.status >= 300 && response.status < 400) throw new Error("拒绝认证请求重定向");
+      return response;
     }
 
     return downloadGuarded(parsed, init);
@@ -61,6 +69,7 @@ export function createGuardedFetch(options: GuardedFetchOptions): typeof globalT
     for (let redirect = 0; redirect <= (options.maxRedirects ?? 2); redirect += 1) {
       assertAllowedHost(current);
       const headers = new Headers(init?.headers);
+      for (const name of ["authorization", "proxy-authorization", "x-api-key", "x-goog-api-key", "cookie"]) headers.delete(name);
       options.prepareDownloadHeaders?.(current, headers);
       const response = await fetchImpl(current, {
         ...init,

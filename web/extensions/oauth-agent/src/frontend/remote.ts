@@ -31,6 +31,7 @@ export type ChatGptGenerationSink = {
 export type ChatGptRemote = {
   fetchStatus: () => Promise<{ ok: true; snapshot: ChatGptAuthSnapshot } | { ok: false; error: string; code?: string }>;
   startAuthorize: () => Promise<{ ok: true; url: string } | { ok: false; error: string }>;
+  cancelAuthorization?: () => Promise<{ ok: boolean; error?: string }>;
   disconnect: () => Promise<{ ok: true; snapshot: ChatGptAuthSnapshot } | { ok: false; error: string }>;
   fetchModels: () => Promise<{ ok: true; snapshot: ChatGptModelsSnapshot } | { ok: false; error: string }>;
   generate: (
@@ -70,6 +71,10 @@ export function createChatGptRemote(options: ChatGptRemoteOptions): ChatGptRemot
       if (!result.ok) return { ok: false, error: readError(result, "无法发起 ChatGPT 授权") };
       if (!isRecord(result.data) || typeof result.data.url !== "string") return { ok: false, error: "授权响应缺失 URL" };
       return { ok: true, url: result.data.url };
+    },
+    async cancelAuthorization() {
+      const result = await transport.request({ path: path(CHATGPT_ROUTES.authorizeCancel), method: "POST", body: {} });
+      return result.ok ? { ok: true } : { ok: false, error: readError(result, "取消授权失败") };
     },
     async disconnect() {
       const result = await transport.request({ path: path(CHATGPT_ROUTES.disconnect), method: "POST", body: {} });

@@ -30,6 +30,8 @@ export type SettingsPluginLayerKind = SettingPluginLayer | "site" | "browser";
 
 /** 插件卡片的一行数据；`entries` 是它自己声明的配置项（没有可配置项时为空）。 */
 export type PluginSettingsGroup = {
+  /** Provider 声明的模型输出类型，配置前也可展示。 */
+  modelTypes?: SettingPluginView["modelTypes"];
   /** 本次启动扫描到的安装信息（目录、是否可写根）；不表达启用状态。 */
   installed?: import("@woohaa3/contracts").InstalledExtensionView;
   directory?: string;
@@ -169,6 +171,7 @@ export function providerConfigGroups(snapshot: SettingsSnapshot | null): PluginS
       label: plugin?.label ?? entry.group ?? providerId,
       description: plugin?.description ?? "",
       ...(plugin?.icon ? { icon: plugin.icon } : {}),
+      ...(plugin?.modelTypes ? { modelTypes: plugin.modelTypes } : {}),
       layer: plugin?.layer ?? "extension",
       siteManaged: plugin?.siteManaged ?? false,
       provider: true,
@@ -353,6 +356,7 @@ function groupOf(plugin: SettingPluginView, entries: SettingsEntryView[]): Plugi
     layer: plugin.layer,
     ...(plugin.directory ? { directory: plugin.directory } : {}),
     ...(plugin.icon ? { icon: plugin.icon } : {}),
+    ...(plugin.modelTypes ? { modelTypes: plugin.modelTypes } : {}),
     siteManaged: plugin.siteManaged,
     provider: plugin.provider,
     providerId: providerIdFromConfigPrefix(plugin.configPrefix),

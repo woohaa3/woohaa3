@@ -61,7 +61,10 @@ export class CanvasRunService {
     this.deps = deps;
   }
 
-  async run(request: CanvasRunRequest): Promise<RunOutcome> {
+  async run(request: CanvasRunRequest, context?: { owner: string }): Promise<RunOutcome> {
+    const selectedSource = request.parameters.serviceConnectionId;
+    const sourceOwner = context?.owner ?? currentCanvasGroupScope()?.owner;
+    if (selectedSource !== undefined && (typeof selectedSource !== "string" || !selectedSource || !sourceOwner)) return { ok: false, code: "source-owner-unavailable", message: "个人来源需要当前可信用户，请重新发起运行" };
     const room = await this.deps.resolveRoom(request.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${request.canvasId} 不存在` };
 
@@ -278,6 +281,7 @@ export class CanvasRunService {
     try {
       await this.deps.taskClient.submit({
         workerTaskKey,
+        ...(selectedSource && sourceOwner ? { serviceConnection: { serviceConnectionId: selectedSource, owner: sourceOwner } } : {}),
         canvasId: request.canvasId,
         nodeId: request.nodeId,
         runId: request.runId,

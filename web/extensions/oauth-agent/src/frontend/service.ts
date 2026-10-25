@@ -57,6 +57,7 @@ export type ChatGptService = {
   setReasoningEffort: (effort: ChatGptReasoningSelection) => void;
   /** 授权：打开授权 URL（同源 popup）；由调用方提供打开实现。 */
   authorize: (open: (url: string) => void) => Promise<{ ok: boolean; error?: string }>;
+  cancelAuthorization?: () => Promise<{ ok: boolean; error?: string }>;
   disconnect: () => Promise<{ ok: boolean; error?: string }>;
   loadModels: () => Promise<void>;
   /** 发起生成；必须显式捕获目标身份，避免用户切换后被旧请求改投。 */
@@ -83,6 +84,8 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
   let modelsError: string | null = null;
   let modelsLoaded = false;
   let disposed = false;
+  let authorizationEpoch = 0;
+  let statusSequence = 0;
   let started = false;
   let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -128,9 +131,10 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
   const loadModels = async (): Promise<void> => {
     if (disposed || modelsLoading) return;
     modelsLoading = true;
+    const epoch = authorizationEpoch;
     const result = await options.remote.fetchModels();
     modelsLoading = false;
-    if (disposed) return;
+    if (disposed || authorizationEpoch !== epoch) return;
     modelsLoaded = true;
     if (!result.ok) {
       models = [];
@@ -144,8 +148,9 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
   };
 
   const refresh = async (): Promise<void> => {
+    const sequence = ++statusSequence, epoch = authorizationEpoch;
     const result = await options.remote.fetchStatus();
-    if (disposed) return;
+    if (disposed || sequence !== statusSequence || epoch !== authorizationEpoch) return;
     loading = false;
     if (!result.ok) {
       error = result.error;
@@ -209,22 +214,27 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
       publish();
     },
     authorize: async (open) => {
+      const epoch = ++authorizationEpoch;
       const result = await options.remote.startAuthorize();
+      if (disposed || epoch !== authorizationEpoch) return { ok: false, error: "授权已取消" };
       if (!result.ok) return { ok: false, error: result.error };
       open(result.url);
       return { ok: true };
     },
+    cancelAuthorization: async () => {
+      ++authorizationEpoch;
+      return await options.remote.cancelAuthorization?.() ?? { ok: false, error: "当前宿主不支持取消授权" };
+    },
     disconnect: async () => {
+      ++authorizationEpoch;
       const result = await options.remote.disconnect();
       if (!result.ok) return { ok: false, error: result.error };
       auth = result.snapshot;
       // 切换账户/断开：清除旧展示与草稿，避免复用旧授权身份。
       models = [];
       modelsError = null;
-      drafts.clear();
-      selectedModels.clear();
-      reasoningEfforts.clear();
-      runs.clear();
+      modelsLoaded = false;
+      // Authorization changes do not discard the user's unsent work.
       publish();
       return { ok: true };
     },

@@ -80,6 +80,10 @@ export type TaskServiceOptions = {
   historyRetentionDays?: number;
   historyMaxRecords?: number;
   generationProviders?: () => readonly import("@woohaa3/contracts").GenerationProvider[];
+  serviceConnections?: {
+    freeze(providerId: string, modelId: string, modelType: string, selected?: TaskSubmitRequest["serviceConnection"]): Promise<(import("@woohaa3/contracts").ServiceConnectionResolve & { owner?: string }) | null>;
+    resolve(reference: import("@woohaa3/contracts").ServiceConnectionResolve & { owner?: string }, providerId: string): Promise<unknown>;
+  };
   /**
    * 运营策略版本戳：只改启用集合时，任务目录（模型 catalog）也要重算。
    * 与 `composition/types.ts` 的同名选项一致；统一后端按当前策略 revision 注入。
@@ -190,7 +194,14 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
         history,
         provider: undefined as never,
         providerId: registry().resources[0]?.providerId ?? "test",
-        resolveProvider: (providerId) => registry().resolveProvider(providerId),
+        resolveProvider: async (providerId, record) => {
+          const reference = (record?.context as { serviceConnection?: import("@woohaa3/contracts").ServiceConnectionResolve } | undefined)?.serviceConnection;
+          if (reference) {
+            if (!options.serviceConnections || !providerId) throw Object.assign(new Error("来源解析器不可用"), { sourceStale: true });
+            return await options.serviceConnections.resolve(reference, providerId) as import("@sdppp/pptask").PptaskProvider;
+          }
+          return registry().resolveProvider(providerId);
+        },
         mediaClient,
         jobRepository,
         notifier,
@@ -284,6 +295,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
     const providerModelId = resource?.providerModelId ?? request.modelKey;
     const generationProvider = options.generationProviders?.().find((entry) => entry.providerId === providerId);
     const existing = history.get(request.workerTaskKey);
+    if (request.parameters.serviceConnectionId && !request.serviceConnection) throw new Error("个人来源缺少可信 owner，禁止从 HTTP 请求自报身份");
 
     /**
      * 提交阶段失败（provider 调用之前）落**安全失败终态**。
@@ -332,6 +344,16 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       });
     };
 
+    if (claim.reused) {
+      const scheduled = await taskStore.find(request.workerTaskKey);
+      if (scheduled) {
+        return { reused: true, state: recordState(scheduled.status) };
+      }
+      options.logger?.({ event: "task-submit-reschedule", taskKey: request.workerTaskKey });
+    }
+    let sourceReference: import("@woohaa3/contracts").ServiceConnectionResolve | null = null;
+    try { if (request.serviceConnection && !options.serviceConnections) throw new Error("来源解析器未装配"); sourceReference = await options.serviceConnections?.freeze(providerId, providerModelId, request.modelType, request.serviceConnection) ?? null; }
+    catch { markSubmitFailed("服务来源不可用或已变化，请重新确认配置", "ServiceConnectionUnavailable"); return { reused: false, state: "failed" }; }
     // 参考输入的位置解析：Provider 先自己上传（拿到 locator 或它自己素材服务的 url），
     // 不行才由存储 expose 签出执行期地址。两种结果都记下来，Provider 按能力挑一个。
     let referenceUrls: string[] = [];
@@ -340,7 +362,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       const resolved = await resolveReferenceUrls({
         inputs: request.inputs,
         ...(extensionAssociation ? {} : { scope: { canvasId: request.canvasId } }),
-        provider: generationProvider,
+        provider: request.serviceConnection ? undefined : generationProvider,
         readReferenceObject: options.readReferenceObject,
         mediaClient,
         expiresSeconds: CANVAS_TASK_LIMITS.referenceUrlTtlSeconds,
@@ -384,23 +406,17 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
     };
     history.upsertRecord(initial);
 
-    if (claim.reused) {
-      const scheduled = await taskStore.find(request.workerTaskKey);
-      if (scheduled) {
-        return { reused: true, state: recordState(scheduled.status) };
-      }
-      options.logger?.({ event: "task-submit-reschedule", taskKey: request.workerTaskKey });
-    }
 
     let providerInput: Record<string, unknown>;
     // 交给 Provider 的不只是执行期 URL：远端托管 Provider 需要画布身份（服务端 ACL/对象键
     // 作用域）、客户端幂等键，以及参考输入的稳定身份（storageKey/assetId）。URL 仍保留给
     // 本机 Provider；远端 Provider 只应使用稳定身份，不把签名地址交给服务端。
+    const { serviceConnectionId: _selectedSource, ...providerParameters } = request.parameters;
     const providerInputContext = {
       providerModelId,
       modelType: request.modelType,
       prompt: request.prompt,
-      parameters: request.parameters,
+      parameters: providerParameters,
       references: request.inputs.map((input, index) => ({
         role: input.role,
         ...(input.mediaKind ? { mediaKind: input.mediaKind } : {}),
@@ -421,7 +437,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
         providerInput = generationProvider.prepareInput({ ...providerInputContext, endpoint: resolvedModelId });
       } else {
         providerInput = await buildProviderInputForResource({
-          request,
+          request: { ...request, parameters: providerParameters },
           referenceUrls,
           providerId,
           mediaClient,
@@ -449,7 +465,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       modelType: request.modelType,
       modelId: resolvedModelId,
       input: providerInput,
-      context: association
+      context: { ...association, ...(sourceReference ? { serviceConnection: sourceReference } : {}) }
     });
     return { reused: !result.created, state: recordState(result.record.status) };
   };

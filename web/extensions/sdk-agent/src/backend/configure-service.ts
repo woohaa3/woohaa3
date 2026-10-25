@@ -9,6 +9,7 @@ import { findSdkAgentAdapter, sdkEngineForAdapter } from "../shared.js";
 import type { SdkAgentHandlerDeployment } from "./handler.js";
 
 export type ModelServiceInput = {
+  operationId?: string;
   connectionId?: string;
   adapterId: string;
   baseUrl?: string;
@@ -60,23 +61,11 @@ export async function configureModelService(
   });
   const allowed = policy.check(baseUrl);
   if (!allowed.ok) return fail(400, allowed.code, allowed.message);
-  const existing = input.connectionId
-    ? await service.get(owner, input.connectionId)
-    : (await service.list(owner)).find(
-        (record) =>
-          record.adapterId === adapter.adapterId &&
-          (record.baseUrl ?? adapter.officialBaseUrl) === baseUrl,
-      );
+  // Stable identity, never URL matching: two accounts at the same relay remain independent.
+  const existing = input.connectionId ? await service.get(owner, input.connectionId) : null;
+  if (existing?.serviceConnectionId) return fail(403, "forbidden", "共享来源由管理员管理，不能另存一份 API Key。");
   if (input.connectionId && !existing)
     return fail(404, "not-found", "服务不存在或无权访问。");
-  if (
-    existing &&
-    ((input.expectedEpoch !== undefined &&
-      input.expectedEpoch !== existing.credentialEpoch) ||
-      (input.expectedRevision !== undefined &&
-        input.expectedRevision !== existing.configRevision))
-  )
-    return fail(409, "version-conflict", "设置已被更新，请重新读取后再保存。");
   const secret = input.secret?.trim() ?? "";
   const endpointChanged = Boolean(
     existing &&
@@ -108,39 +97,22 @@ export async function configureModelService(
     runCategory: adapter.runCategory,
     authMode: adapter.authMode,
   };
-  // 先清掉旧目标的 Key，任何中途失败都不能把旧 Key 发往新地址。
-  if (existing && endpointChanged) {
-    const cleared = await service.clearCredential({
-      owner,
-      connectionId: existing.connectionId,
-      purpose: "model-api-key",
-    });
-    if (!cleared.ok)
-      return fail(500, cleared.error.code, cleared.error.message);
-  }
-  const saved = existing
-    ? await service.update(owner, existing.connectionId, config)
-    : await service.create(owner, config);
-  if (!saved.ok) return fail(500, saved.error.code, saved.error.message);
+  const saved = await service.configure(owner, {
+    ...config, operationId: input.operationId ?? crypto.randomUUID(),
+    ...(existing ? { connectionId: existing.connectionId } : {}),
+    ...(input.expectedEpoch !== undefined ? { expectedEpoch: input.expectedEpoch } : {}),
+    ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}),
+    ...(secret ? { secret } : {}),
+  });
+  if (!saved.ok) return fail(saved.error.code === "version-conflict" ? 409 : 500, saved.error.code, saved.error.message);
   const connectionId = saved.value.connectionId;
-  if (secret) {
-    const key = await service.saveCredential({
-      owner,
-      connectionId,
-      secret,
-      purpose: "model-api-key",
-      expectedEpoch: saved.value.credentialEpoch,
-    });
-    if (!key.ok) {
-      if (!existing) await service.remove(owner, connectionId);
-      return fail(
-        key.error.code === "epoch-invalid" ? 409 : 500,
-        key.error.code,
-        key.error.message,
-      );
-    }
-  }
 
+  const active = await service.get(owner, connectionId);
+  if (!active || active.configRevision !== saved.value.configRevision || active.credentialEpoch !== saved.value.credentialEpoch) {
+    // A published operation must never send a later Key to the earlier operation's endpoint.
+    // Replay is a read-only acknowledgement; callers can explicitly refresh the current directory.
+    return { status: 200, body: { connectionId, models: saved.value.models ?? [], modelsError: "此保存操作已完成，目录或设置已更新；请重新读取当前连接。" } };
+  }
   if (secret || endpointChanged || input.models?.length) {
     const reset = await service.setStatus({
       owner,
@@ -235,8 +207,8 @@ export async function configureModelService(
       "version-conflict",
       "读取模型期间设置已变化，请重新读取后再保存。",
     );
-  const updated = await service.update(owner, connectionId, { models, modelCapabilities });
-  if (!updated.ok) return fail(500, updated.error.code, updated.error.message);
+  const updated = await service.update(owner, connectionId, { models, modelCapabilities }, configured ?? undefined);
+  if (!updated.ok) return fail(updated.error.code === "version-conflict" ? 409 : 500, updated.error.code, updated.error.message);
   return {
     status: 200,
     body: { connectionId, models, ...(modelsError ? { modelsError } : {}) },

@@ -97,6 +97,16 @@ describe("扩展声明流水线", () => {
     expect(byId.get("fal-provider")?.icon).toBe("/plugin-icons/fal-provider.png");
     expect(byId.get("local-storage")?.icon).toBe("storage");
 
+    // 配置前即可说明扩展支持的输出类型，不依赖凭据或上游发现。
+    for (const [id, types] of Object.entries({
+      "tokenhub-provider": ["language", "image", "video"],
+      "replicate-provider": ["language", "image", "video", "audio"],
+      "fal-provider": ["language", "image", "video", "audio"],
+      "grsai-provider": ["language", "image", "video"],
+      "runninghub-provider": ["image", "video"],
+      "ark-provider": ["language", "image", "video"],
+    })) expect(byId.get(id)?.modelTypes, id).toEqual(types);
+
     // 模型刷新入口由插件自己声明（宿主不再有 Provider → 刷新路径的映射表）。
     const litellm = byId.get("tokenhub-provider");
     expect(litellm?.modelRefresh?.path).toBe("/api/providers/tokenhub/refresh");

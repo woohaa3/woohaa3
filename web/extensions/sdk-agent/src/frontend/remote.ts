@@ -49,6 +49,7 @@ export type SdkAgentRemoteResult<T> =
   | { ok: false; error: string; code?: string };
 
 export type SdkAgentConfigureInput = {
+  operationId?: string;
   connectionId?: string;
   adapterId: string;
   baseUrl?: string;
