@@ -4,7 +4,7 @@
  *   change: unify-canvas-presentation-navigation，task 2.1 / design D1）。
  *
  * 启动 App scope（Router/Theme/Dialog/Slots）与当前页面 scope；路由切换由 App Runtime
- * 释放 outgoing scope 再挂载 incoming scope。`beforeunload`、测试 teardown 与 HMR dispose
+ * 释放 outgoing scope 再挂载 incoming scope。`pagehide`、测试 teardown 与 HMR dispose
  * 统一释放。React StrictMode 重放不得创建第二个 App runtime 或页面 scope。
  */
 import { StrictMode } from "react";
@@ -66,8 +66,9 @@ async function teardown(): Promise<void> {
   await current?.dispose();
 }
 
-globalThis.addEventListener?.("beforeunload", () => {
-  void teardown();
+// A beforeunload prompt can be cancelled. Release only after the page actually leaves.
+globalThis.addEventListener?.("pagehide", (event) => {
+  if (!event.persisted) void teardown();
 });
 
 // Vite HMR：开发期替换 composition root 时释放页面级资源。

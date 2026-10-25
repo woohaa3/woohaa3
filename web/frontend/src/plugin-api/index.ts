@@ -48,3 +48,8 @@ export type {
   DialogInstance
 } from "../cordis/services/dialogs/types.js";
 
+export { appPublicUrl } from "../cordis/services/app-base-path.js";
+export { createRemoteClient } from "../cordis/plugins/node-history/history-adapters.js";
+export { ImageFocusStore } from "../cordis/plugins/canvas-runtime/image-focus-store.js";
+
+export { runtimeComponents } from "../cordis/services/runtime-components.js";

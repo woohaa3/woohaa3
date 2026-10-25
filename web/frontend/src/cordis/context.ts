@@ -87,6 +87,7 @@ declare module "@deepseek-ai/cordis" {
     canvasNavigation: CanvasNavigationService;
     /** 应用级顶层页面 Router（App scope 提供）。 */
     appRouter: AppRouterService;
+    persistentSurfaces: import("./services/persistent-surfaces.js").PersistentSurfaces;
     selection: SelectionService;
     parameterPreview: ParameterPreviewService;
     taskCatalog: TaskCatalogService;

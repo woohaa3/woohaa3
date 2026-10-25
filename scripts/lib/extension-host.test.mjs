@@ -493,3 +493,274 @@ test("真实仓库锚点：宿主产出与声明顺序一致", async () => {
     assert.ok(allRegistrations.some((registration) => path.dirname(registration.directory) === secondRoot));
   }
   assert.ok(host.roots.length >= 2);
+});
+
+// ---------------------------------------------------------------------------
+// 槽位实现声明（change: 2026-10-15-scan-bootstrap-slots-as-extension-directories，
+// 任务 2.2、2.3、5.2 / design D2、D5）
+// ---------------------------------------------------------------------------
+
+/** 声明一个槽位实现扩展：`factoryBody` 是工厂函数体（返回值即声明）。 */
+function writeSlotExtension(repoRoot, root, extensionId, { factoryName = "createBootstrap", factoryBody, module = "./bootstrap" } = {}) {
+  return writeExtension(repoRoot, root, extensionId, {
+    descriptor: { schemaVersion: 1, extensionId, bootstrap: { module, export: factoryName } },
+    packageExports: { [module]: { import: "./dist/bootstrap.js" } },
+    extraFiles: { "dist/bootstrap.js": `export function ${factoryName}(input = {}) {\n${factoryBody}\n}\n` }
+  });
+}
+
+const slotDeclaration = (extensionId, slot, { requires = [] } = {}) =>
+  `  return { extensionId: "${extensionId}", providers: [{ slot: "${slot}", requires: ${JSON.stringify(requires)}, create: async () => ({ value: { ${extensionId.replace(/-/g, "_")}: true } }) }] };`;
+
+test("槽位声明：扫描收集入口，调用工厂返回声明，并透传宿主注入的选项", async () => {
+  const repoRoot = makeRepo();
+  writeSlotExtension(repoRoot, "rootA", "sqlite-storage", { factoryBody: slotDeclaration("sqlite-storage", "storage") });
+  writeSlotExtension(repoRoot, "rootB", "fixture-access", {
+    factoryBody: `  return { extensionId: "fixture-access", providers: [\n    { slot: "identity", requires: [], create: async () => ({ value: {} }) },\n    { slot: "access", requires: ["identity"], create: async () => ({ value: { options: input.options, extensionIds: input.extensionIds } }) }\n  ] };`
+  });
+
+  const host = await loadExtensionHost({ repoRoot, env: {}, logger: () => undefined });
+  assert.deepEqual(host.slotEntries.map((entry) => entry.extensionId), ["fixture-access", "sqlite-storage"]);
+  assert.deepEqual(host.slotEntries.map((entry) => entry.rootWritable), [false, false]);
+
+  const declarations = await host.createSlotDeclarations({ "fixture-access": { mode: "local" } });
+  assert.deepEqual(declarations.map((entry) => entry.extensionId), ["fixture-access", "sqlite-storage"]);
+  assert.deepEqual(declarations[0].providers.map((provider) => provider.slot), ["identity", "access"]);
+  // 工厂拿到的 options 就是宿主按 extensionId 注入的对象。
+  const access = await declarations[0].providers[1].create();
+  assert.deepEqual(access.value.options, { mode: "local" });
+  assert.deepEqual(new Set(access.value.extensionIds), new Set(["sqlite-storage", "fixture-access"]));
+
+  // 诊断摘要只含 extensionId/目录/根/工厂，可用于 `extensions:check` 输出。
+  const summary = hostSummary(host);
+  assert.deepEqual(summary.slots.map((slot) => [slot.extensionId, slot.export, slot.rootWritable]), [
+    ["fixture-access", "createBootstrap", false],
+    ["sqlite-storage", "createBootstrap", false]
+  ]);
+});
+
+test("槽位声明：可写根里的 bootstrap 声明被拒绝（EXTENSION_SLOT_WRITABLE_ROOT）", async () => {
+  const repoRoot = makeRepo({ config: { schemaVersion: 1, roots: ["rootA", { path: "rootB", writable: true }] } });
+  writeSlotExtension(repoRoot, "rootB", "sqlite-storage", { factoryBody: slotDeclaration("sqlite-storage", "storage") });
+  await assert.rejects(
+    () => loadExtensionHost({ repoRoot, env: {}, logger: () => undefined }),
+    (error) => error instanceof ExtensionLoadError && error.code === "EXTENSION_SLOT_WRITABLE_ROOT" && /可写扩展根/.test(error.message)
+  );
+});
+
+test("槽位声明：普通根里的其它扩展仍可加载（可写根限制只针对 slot）", async () => {
+  const repoRoot = makeRepo({ config: { schemaVersion: 1, roots: ["rootA", { path: "rootB", writable: true }] } });
+  writeExtension(repoRoot, "rootB", "dropped-in", {
+    descriptor: { schemaVersion: 1, extensionId: "dropped-in" },
+    sharedSource: metadataExport("dropped-in", "DROPPED_IN_METADATA")
+  });
+  const host = await loadExtensionHost({ repoRoot, env: {}, logger: () => undefined });
+  assert.deepEqual(host.slotEntries, []);
+  assert.deepEqual(host.registrations.map((entry) => entry.extensionId), ["dropped-in"]);
+});
+
+test("槽位声明：工厂导出缺失、identity 不符、槽位名未知、声明缺字段、重复实现、未知依赖、依赖成环都 fail-fast", async () => {
+  const cases = [
+    {
+      name: "导出缺失",
+      code: "EXTENSION_EXPORT_MISSING",
+      setup: (repoRoot) => writeExtension(repoRoot, "rootA", "sqlite-storage", {
+        descriptor: { schemaVersion: 1, extensionId: "sqlite-storage", bootstrap: { module: "./bootstrap", export: "createMissing" } },
+        packageExports: { "./bootstrap": { import: "./dist/bootstrap.js" } },
+        extraFiles: { "dist/bootstrap.js": "export const CREATE_OTHER = () => ({ extensionId: \"sqlite-storage\", providers: [] });\n" }
+      })
+    },
+    {
+      name: "identity 不符",
+      code: "EXTENSION_IDENTITY_MISMATCH",
+      setup: (repoRoot) => writeSlotExtension(repoRoot, "rootA", "sqlite-storage", { factoryBody: slotDeclaration("other-extension", "storage") })
+    },
+    {
+      name: "槽位名未知",
+      code: "EXTENSION_SLOT_UNKNOWN",
+      setup: (repoRoot) => writeSlotExtension(repoRoot, "rootA", "sqlite-storage", { factoryBody: slotDeclaration("sqlite-storage", "cache") })
+    },
+    {
+      name: "声明缺 create",
+      code: "EXTENSION_SLOT_DECLARATION_INVALID",
+      setup: (repoRoot) => writeSlotExtension(repoRoot, "rootA", "sqlite-storage", {
+        factoryBody: `  return { extensionId: "sqlite-storage", providers: [{ slot: "storage", requires: [] }] };`
+      })
+    },
+    // 槽位图（任务 2.3）：重复实现、未知依赖、依赖成环都由宿主给出稳定码；`bootstrapProviders`
+    // 保留同样的校验作为纵深防御。
+    {
+      name: "同槽位两个启用实现",
+      code: "EXTENSION_SLOT_DUPLICATE",
+      setup: (repoRoot) => {
+        writeSlotExtension(repoRoot, "rootA", "sqlite-storage", { factoryBody: slotDeclaration("sqlite-storage", "storage") });
+        writeSlotExtension(repoRoot, "rootB", "mongo-storage", { factoryBody: slotDeclaration("mongo-storage", "storage") });
+      }
+    },
+    {
+      name: "requires 指向未知槽位",
+      code: "EXTENSION_REQUIRES_UNKNOWN",
+      setup: (repoRoot) => writeSlotExtension(repoRoot, "rootA", "sqlite-storage", {
+        factoryBody: slotDeclaration("sqlite-storage", "storage", { requires: ["queue"] })
+      })
+    },
+    {
+      name: "requires 成环",
+      code: "EXTENSION_REQUIRES_CYCLE",
+      setup: (repoRoot) => writeSlotExtension(repoRoot, "rootA", "fixture-access", {
+        factoryBody: `  return { extensionId: "fixture-access", providers: [\n    { slot: "identity", requires: ["access"], create: async () => ({ value: {} }) },\n    { slot: "access", requires: ["identity"], create: async () => ({ value: {} }) }\n  ] };`
+      })
+    }
+  ];
+  for (const testCase of cases) {
+    const repoRoot = makeRepo();
+    testCase.setup(repoRoot);
+    const host = await loadExtensionHost({ repoRoot, env: {}, logger: () => undefined });
+    await assert.rejects(
+      () => host.createSlotDeclarations({}),
+      (error) => error instanceof ExtensionLoadError && error.code === testCase.code
+        // 错误信息必须能定位目录（任务 2.3）：fixture 的两个根是 rootA / rootB。
+        && /rootA|rootB/.test(error.message),
+      `${testCase.name} 期望 ${testCase.code} 且信息含目录`
+    );
+  }
+});
+
+test("槽位声明：bootstrap.module 越界（..）在加载阶段就失败", async () => {
+  const repoRoot = makeRepo();
+  writeExtension(repoRoot, "rootA", "sqlite-storage", {
+    descriptor: { schemaVersion: 1, extensionId: "sqlite-storage", bootstrap: { module: "./../outside", export: "createBootstrap" } },
+    extraFiles: { "dist/bootstrap.js": "export const createBootstrap = () => ({ extensionId: \"sqlite-storage\", providers: [] });\n" }
+  });
+  await assert.rejects(
+    () => loadExtensionHost({ repoRoot, env: {}, logger: () => undefined }),
+    (error) => error instanceof ExtensionLoadError && error.code === "EXTENSION_MODULE_INVALID"
+  );
+});
+
+for (const slot of ["identity", "access"]) {
+  test(`槽位声明：只有 ${slot} 时不接受半套鉴权`, async () => {
+    const repoRoot = makeRepo();
+    writeSlotExtension(repoRoot, "rootA", "storage-fixture", { factoryBody: slotDeclaration("storage-fixture", "storage") });
+    writeSlotExtension(repoRoot, "rootB", "controlled-fixture", { factoryBody: slotDeclaration("controlled-fixture", slot) });
+    const host = await loadExtensionHost({ repoRoot, env: {}, logger: () => undefined });
+    await assert.rejects(() => host.createSlotDeclarations({}), error => error.code === "EXTENSION_SLOT_MISSING");
+  });
+}
+
+test("槽位声明：Storage 单独装配，仍拒绝缺失的声明依赖", async () => {
+  const repoRoot = makeRepo();
+  writeSlotExtension(repoRoot, "rootA", "storage-fixture", { factoryBody: slotDeclaration("storage-fixture", "storage") });
+  const host = await loadExtensionHost({ repoRoot, env: {}, logger: () => undefined });
+  assert.deepEqual((await host.createSlotDeclarations({})).map(entry => entry.extensionId), ["storage-fixture"]);
+  const invalidRoot = makeRepo();
+  writeSlotExtension(invalidRoot, "rootA", "storage-fixture", { factoryBody: slotDeclaration("storage-fixture", "storage", { requires: ["identity"] }) });
+  const invalid = await loadExtensionHost({ repoRoot: invalidRoot, env: {}, logger: () => undefined });
+  await assert.rejects(() => invalid.createSlotDeclarations({}), error => error.code === "EXTENSION_REQUIRES_MISSING");
+});
+
+test("槽位声明：受控声明工厂失败不能变成无鉴权结果", async () => {
+  const repoRoot = makeRepo();
+  writeSlotExtension(repoRoot, "rootA", "storage-fixture", { factoryBody: slotDeclaration("storage-fixture", "storage") });
+  writeSlotExtension(repoRoot, "rootB", "controlled-fixture", { factoryBody: 'throw new Error("configuration failed");' });
+  const host = await loadExtensionHost({ repoRoot, env: {}, logger: () => undefined });
+  await assert.rejects(() => host.createSlotDeclarations({}), error => error.code === "EXTENSION_BOOTSTRAP_FACTORY_FAILED" && error.extensionId === "controlled-fixture");
+});
+
+/**
+ * 回归（scripts/lib/extension-host.mjs 曾写成 `requireFoundationCoverage && ownerBySlot.size`）：
+ * 零实现时短路会让「一个槽位实现都没有」的部署静默启动成无存储/无身份，
+ * 与文档承诺的启动期 fail-fast 相反。缺省真值必须对必需槽位照常抛错。
+ */
+test("槽位声明：零实现时必需槽位仍然 fail-fast", async () => {
+  const emptyRoot = makeRepo();
+  const empty = await loadExtensionHost({ repoRoot: emptyRoot, env: {}, logger: () => undefined });
+  await assert.rejects(
+    () => empty.createSlotDeclarations({}),
+    (error) => error instanceof ExtensionLoadError && error.code === "EXTENSION_SLOT_MISSING" && error.slot === "storage",
+    "零槽位实现必须拒绝装配"
+  );
+  // 预检/只读工具路径按 `requireFoundationCoverage: false` 取声明，缺槽位由调用方按告警分级。
+  assert.deepEqual(await empty.createSlotDeclarations({}, undefined, { requireFoundationCoverage: false }), []);
+
+  // 有扩展但都不实现槽位（undeclared）：与零实现同一结果。
+  const nonSlotRoot = makeRepo();
+  writeExtension(nonSlotRoot, "rootA", "plain", { descriptor: null });
+  const nonSlot = await loadExtensionHost({ repoRoot: nonSlotRoot, env: {}, logger: () => undefined });
+  await assert.rejects(
+    () => nonSlot.createSlotDeclarations({}),
+    (error) => error instanceof ExtensionLoadError && error.code === "EXTENSION_SLOT_MISSING" && error.slot === "storage"
+  );
+});
+
+/**
+ * 画布内容扩展（`canvasContent` 声明，change: 2026-10-17-decouple-film-set-from-canvas-service）：
+ * 工厂返回预览/历史帧端口；宿主只做形状校验，不认识具体内容领域。
+ */
+const contentRuntimeSource = `export function createContentRuntime() {
+  return {
+    frames: {
+      matches: () => true,
+      preparePreviewFrame: async () => ({ ok: false, code: "x", message: "x" }),
+      prepareHistoryFrame: () => { throw new Error("x"); },
+      identityMatches: () => true
+    },
+    conversion: {
+      createService: () => ({ submit: async () => ({ ok: false, code: "x", message: "x" }) }),
+      createMediaReader: () => ({ readAsset: async () => ({ bytes: new Uint8Array(), contentType: "x" }) }),
+      createInMemoryRegistry: () => ({ get: async () => undefined, put: async () => undefined })
+    },
+    mcp: {
+      createNodeService: () => ({ createNode: async () => ({ ok: false, code: "x", message: "x" }) }),
+      createImportService: () => ({ importContent: async () => ({ ok: false, code: "x", message: "x" }) }),
+      createItemService: () => ({ mutateItem: async () => ({ ok: false, code: "x", message: "x" }) })
+    }
+  };
+}
+`;
+
+test("画布内容端口：按 canvasContent 声明加载并校验形状", async () => {
+  const repoRoot = makeRepo();
+  writeExtension(repoRoot, "rootA", "content-fixture", {
+    descriptor: {
+      schemaVersion: 1,
+      extensionId: "content-fixture",
+      canvasContent: { module: "./backend", factory: "createContentRuntime" }
+    },
+    backendSource: contentRuntimeSource
+  });
+  const host = await loadExtensionHost({ repoRoot, env: {}, logger: () => undefined });
+  const loaded = await host.createCanvasContent({});
+  assert.deepEqual(loaded.map((entry) => entry.extensionId), ["content-fixture"]);
+  const runtime = loaded[0].runtime;
+  for (const method of ["matches", "preparePreviewFrame", "prepareHistoryFrame", "identityMatches"]) {
+    assert.equal(typeof runtime.frames[method], "function", `frames.${method} 必须是函数`);
+  }
+  for (const method of ["createService", "createMediaReader", "createInMemoryRegistry"]) {
+    assert.equal(typeof runtime.conversion[method], "function", `conversion.${method} 必须是函数`);
+  }
+  for (const method of ["createNodeService", "createImportService", "createItemService"]) {
+    assert.equal(typeof runtime.mcp[method], "function", `mcp.${method} 必须是函数`);
+  }
+  // 宿主摘要暴露声明，便于诊断。
+  const summary = hostSummary(host);
+  assert.equal(summary.loaded.find((entry) => entry.extensionId === "content-fixture").canvasContent.factory, "createContentRuntime");
+});
+
+test("画布内容端口：导出缺失或返回值形状不对时启动期失败", async () => {
+  const missingRepo = makeRepo();
+  writeExtension(missingRepo, "rootA", "content-fixture", {
+    descriptor: { schemaVersion: 1, extensionId: "content-fixture", canvasContent: { module: "./backend", factory: "createMissing" } },
+    backendSource: "export const other = 1;\n"
+  });
+  const missing = await loadExtensionHost({ repoRoot: missingRepo, env: {}, logger: () => undefined });
+  await assert.rejects(() => missing.createCanvasContent({}), (error) => error instanceof ExtensionLoadError && error.code === "EXTENSION_EXPORT_INVALID");
+
+  const badShapeRepo = makeRepo();
+  writeExtension(badShapeRepo, "rootA", "content-fixture", {
+    descriptor: { schemaVersion: 1, extensionId: "content-fixture", canvasContent: { module: "./backend", factory: "createFrameRuntime" } },
+    backendSource: "export function createContentRuntime() { return { frames: { matches: true } }; }\n"
+  });
+  const badShape = await loadExtensionHost({ repoRoot: badShapeRepo, env: {}, logger: () => undefined });
+  await assert.rejects(() => badShape.createCanvasContent({}), (error) => error instanceof ExtensionLoadError && error.code === "EXTENSION_EXPORT_INVALID");
+});

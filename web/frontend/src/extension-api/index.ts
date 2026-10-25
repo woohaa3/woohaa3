@@ -165,3 +165,5 @@ export { scriptModelPreparation, orbitModelPreview, modelWorkspaceFocus, nodeAct
 export type { MediaContentService, MediaContentProvider, MediaContentState, MediaContentSource, MediaContentContext, MediaContentKind } from "./media-content.js";
 
 export { FocusExitCoordinator } from "../cordis/navigation/exit-coordinator.js";
+
+export type { PersistentResource, PersistentSurface, PersistentSurfaces } from "../cordis/services/persistent-surfaces.js";

@@ -189,6 +189,7 @@ export function createApplicationExtensionEntryReconciler(
 
   const reconcile: ApplicationExtensionEntryReconciler["reconcile"] = (plugins) => {
     if (disposed) return;
+    for (const status of plugins) options.ctx.persistentSurfaces?.setEnabled(status.extensionId, status.actualState === "active");
     const activeIds = new Set(plugins.filter((status) => status.actualState === "active").map((status) => status.extensionId));
     for (const extensionId of activeIds) {
       const entry = options.registry.get(extensionId);

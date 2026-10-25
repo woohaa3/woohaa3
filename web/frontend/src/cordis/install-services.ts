@@ -1,5 +1,7 @@
 import { createNodeImplementationRegistry } from "../extension-api/node-implementations.js";
 import { createMediaContentService } from "./services/media-content.js";
+
+import { createPersistentSurfaces } from "./services/persistent-surfaces.js";
 import { installTaskMonitorAction } from "../pages/task-monitor/entry.js";
 import { hoverNodeStore } from "./services/hover-store.js";
 /**
@@ -164,6 +166,9 @@ export function installAppServices(ctx: Context, options: PlatformOptions = {}):
     ...(options.appPages ? { appPages: options.appPages } : {})
   });
   ctx.provide("appRouter" as never, router as never);
+  const persistentSurfaces = createPersistentSurfaces();
+  ctx.provide("persistentSurfaces" as never, persistentSurfaces as never);
+  ctx.effect(() => () => persistentSurfaces.dispose(), "persistent-surfaces");
 
   // 当前可信身份主体（App scope；change: 2026-10-13-...，任务 2.6/5.8）：由 current-user 在解析
   // 当前 session 后写入，供本地用户态缓存做 subject 隔离。
@@ -174,6 +179,16 @@ export function installAppServices(ctx: Context, options: PlatformOptions = {}):
   const currentUser = createCurrentUserService(createApplicationRemote(options.applicationRemoteOptions), identitySubject);
   ctx.provide("currentUser" as never, currentUser as never);
   ctx.provide("siteAccessCapability" as never, currentUser as never);
+  let surfaceIdentity: string | null | undefined;
+  const detachSurfaceIdentity = currentUser.subscribe(() => {
+    // A transient permission refresh is not an identity switch.
+    if (!currentUser.getSnapshot()) return;
+    const next = identitySubject.namespace();
+    if (surfaceIdentity !== undefined && surfaceIdentity !== next) persistentSurfaces.revokeIdentity();
+    surfaceIdentity = next;
+  });
+  ctx.effect(() => detachSurfaceIdentity, "persistent-surface-identity");
+
   void currentUser.initialize().catch(() => undefined);
 
   // 多画布目录（App scope；change: 2026-09-29-add-multi-canvas-workspace，design D2）。

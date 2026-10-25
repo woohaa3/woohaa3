@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import fs, { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import path from "node:path";

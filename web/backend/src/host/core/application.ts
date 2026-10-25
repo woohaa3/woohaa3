@@ -180,3 +180,88 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       },
 
       mediaFormats: ctx.media.formats,
+      env,
+      accessRuntime,
+      authenticator,
+      accessEnforcer,
+      seedProviders,
+      requiredProviders,
+      ...(ctx.access.foundation ? { foundation: ctx.access.foundation } : {}),
+      applicationExtensionMetadata: metadata,
+      applicationBackendExtensions: [...definitions, ...siteGate.definitions],
+      publicRoutes: manifest.publicRoutes,
+      generation: {
+        register: (provider) => {
+          generation.register(provider);
+        },
+        unregister: (providerId) => generation.unregister(providerId)
+      },
+      // 存储扩展点：站点插件注册的后端直接进 core 的注册表。`unregister` 本身幂等，
+      // 所以宿主回滚与插件显式注销可以走同一条路，不必在两边各记一份状态。
+      storage: {
+        register: (backend) => {
+          storage.register(backend);
+        },
+        unregister: (backendId) => storage.unregister(backendId)
+      },
+      // 遥测出口：与存储同形，但语义是"注册即参与投递"。core 不知道目的地，
+      // 只按 `telemetry.export.enabled` 决定发不发（见 design D8）。
+      telemetry: {
+        register: (provider) => {
+          ctx.telemetry.registerExport(provider);
+        },
+        unregister: (exportId) => ctx.telemetry.unregisterExport(exportId)
+      },
+      servicesFor,
+      // 诊断缓冲只读投影：remote-server 扩展用它在调试窗口里展示接入过程。
+      ...(diagnostics ? { diagnostics } : {}),
+      // 宿主 Agent 会话的受控画布授权（owner + canvas 隔离）。
+      canvasCreation: createCanvasCreationPort(ctx.canvas),
+      candidateAssistantProviders: () => ctx.generation.conversions(),
+      groupEffects: createGroupEffects(ctx.canvas, ctx.toolGrants),
+      conversationCanvasAccess: createExtensionCanvasAccessFacade(ctx.canvas),
+      // 内置 MCP 的真实发现结果；缺工具/不可达/协议错误分别带原因，不伪造 ready。
+      mcpDiscovery: async () => projectMcpDiscovery(await mcp.discoverTools()),
+      logger: ctx.log.scope("application")
+    });
+    ctx.effect(() => () => service.close());
+
+    const host = service.host();
+    const sourceRegistry = createCanvasSourceRegistry({
+      hasCapability: (id) => host.hasCapability(id),
+      resolveCapability: (id) => host.resolveCapability(id),
+      resolveCapabilityOwner: (id) => host.resolveCapabilityOwner(id),
+      snapshot: () => host.snapshot()
+    });
+    const runtime = createBackendRuntime({
+      // 站点目录里的插件由控制面按版本启停，runtime 只激活其余的可信后端插件。
+      definitions: definitions.filter((definition) => !siteIds.has(definition.extensionId)),
+      generation,
+      host,
+      logger: ctx.log.scope("cordis")
+    });
+    const module: ApplicationModule = { service, runtime, definitions, sourceRegistry, siteGate };
+    ctx.provide("application", module);
+    ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.application, (req, res) => service.handle(req, res)));
+    await runtime.activate();
+    const releases: Array<() => void> = [];
+    for (const plugin of ctx.config.plugins()) {
+      if (!plugin.configPrefix?.startsWith("providers.")) continue;
+      const providerId = plugin.configPrefix.slice("providers.".length);
+      const extensionId = generation.resolve(providerId)?.extensionId ?? plugin.id;
+      const release = service.serviceConnections()?.forExtension(extensionId).registerSource(createSiteProviderSource({
+        providerId, extensionId, label: plugin.label, prefix: plugin.configPrefix, settings: ctx.config,
+        provider: () => generation.resolve(providerId),
+      }));
+      if (release) releases.push(release);
+      const provider = generation.resolve(providerId);
+      if (provider?.serviceConnectionFactory) {
+        const releaseConsumer = service.serviceConnections()?.forExtension(extensionId).registerConsumer({
+          protocols: [`provider:${provider.providerId}`, ...provider.serviceConnectionFactory.protocols], purposes: ["text", "image", "video", "audio"],
+        });
+        if (releaseConsumer) releases.push(releaseConsumer);
+      }
+    }
+    ctx.effect(() => () => { for (const release of releases) release(); });
+  }
+};
