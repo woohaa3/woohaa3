@@ -1,5 +1,5 @@
 /** Offline-only migration helper. */
-import { cloneFilmSetAnimations, deriveFilmSetShotKind, type MotionDefinition, type InitialShotCamera, type AnimationTimeline, type FilmSetContent, type FilmSetAnimations, type FilmSetAnimationBinding, type FilmSetAnimationClip } from "@woohaa3/contracts";
+import { cloneFilmSetAnimations, deriveFilmSetShotKind, FILM_SET_CONTENT_VERSION, type MotionDefinition, type InitialShotCamera, type AnimationTimeline, type FilmSetContent, type FilmSetAnimations, type FilmSetAnimationBinding, type FilmSetAnimationClip } from "@woohaa3/contracts";
 export function legacyFilmSetAnimations(input: {
   motion: MotionDefinition; camera: InitialShotCamera; timeline: AnimationTimeline; filmSetContent: FilmSetContent;
 }): { content: FilmSetContent; animations: FilmSetAnimations } {
@@ -18,7 +18,7 @@ export function legacyFilmSetAnimations(input: {
     ? { ...draft, kind }
     : { ...draft, kind: "static", timeline: { duration: 0, loop: false }, cameraMotion: { ...input.motion, motionScript: "" } };
   return {
-    content: { schemaVersion: 4, items },
+    content: { schemaVersion: FILM_SET_CONTENT_VERSION, items },
     animations: cloneFilmSetAnimations({ schemaVersion: 3, defaultClipId: "legacy-default", clips: [clip] })
   };
 }

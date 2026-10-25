@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { MODEL_RENDER_BUDGET } from "@woohaa3/contracts";
+import { FILM_SET_CONTENT_PREVIOUS_VERSION, FILM_SET_CONTENT_VERSION, MODEL_RENDER_BUDGET } from "@woohaa3/contracts";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "./mcp-http.js";
 import type { ModelMcpToolService } from "./mcp-http.js";
 
@@ -192,6 +192,63 @@ describe("Model Canvas Streamable HTTP MCP", () => {
     });
     expect(JSON.stringify(importedResult.body)).toContain("cmd-b");
     expect(imported[0]).toMatchObject({ canvasId: "canvas-a", itemId: "actor", expectedSourceHash: "hash-1" });
+  });
+
+  it("submit_film_set 的参数版本跟随片场内容契约（回归：工具钉住 v3、保存端要求 v4）", async () => {
+    const commits: Array<Record<string, unknown>> = [];
+    const { base } = await start({
+      async getModelNode(input) {
+        return { ok: true, ...input, title: "t", prompt: "", source: "", references: [], cameras: [] };
+      },
+      async submitScript(input) {
+        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd", idempotent: false };
+      },
+      async commitAnimation(input) {
+        commits.push(input as unknown as Record<string, unknown>);
+        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd-film", duplicate: false, noop: false };
+      }
+    });
+    const submit = (schemaVersion: number, requestId: string) => mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 13,
+      method: "tools/call",
+      params: {
+        name: "submit_film_set",
+        arguments: {
+          canvasId: "canvas-a",
+          nodeId: "film-1",
+          requestId,
+          expectedSnapshotHash: "hash-1",
+          animation: {
+            filmSetContent: { schemaVersion, items: [] },
+            filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] }
+          }
+        }
+      }
+    });
+
+    // 当前契约版本必须能直达保存端；任何版本漂移都不得被参数校验提前吞掉。
+    const accepted = await submit(FILM_SET_CONTENT_VERSION, "req-current");
+    expect((accepted.body.result as { isError?: boolean }).isError).toBeUndefined();
+    expect(commits).toHaveLength(1);
+    expect(commits[0]).toMatchObject({
+      canvasId: "canvas-a",
+      nodeId: "film-1",
+      requestId: "req-current",
+      expectedSnapshotHash: "hash-1"
+    });
+
+    // 上一代版本由参数校验拒绝，且不到达保存端。
+    const rejected = await submit(FILM_SET_CONTENT_PREVIOUS_VERSION, "req-legacy");
+    expect((rejected.body.result as { isError?: boolean }).isError).toBe(true);
+    expect(commits).toHaveLength(1);
+
+    // 工具声明同样跟随契约常量，不写字面量版本号。
+    const listed = await mcpPost(base, { jsonrpc: "2.0", id: 14, method: "tools/list", params: {} });
+    const tool = (listed.body.result as { tools: Array<{ name: string; inputSchema: { properties?: Record<string, any> } }> })
+      .tools.find((entry) => entry.name === "submit_film_set");
+    expect(tool?.inputSchema.properties?.animation?.properties?.filmSetContent?.properties?.schemaVersion?.const)
+      .toBe(FILM_SET_CONTENT_VERSION);
   });
 
   it("动画能力缺席时两个工具返回稳定不可用错误", async () => {

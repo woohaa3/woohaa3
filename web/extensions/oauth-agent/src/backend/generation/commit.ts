@@ -14,6 +14,7 @@ import {
   createModelSnapshot,
   decodeFilmSetNodeData,
   decodeModelCameras,
+  FILM_SET_CONTENT_VERSION,
   PREFERRED_MODEL_SCRIPT_VERSION,
   validateSelfContainedModel
 } from "@woohaa3/contracts";
@@ -152,7 +153,7 @@ export async function commitAnimation(
     }
     const next: FilmSetNodeData = {
       ...current,
-      filmSetContent: { schemaVersion: 4, items },
+      filmSetContent: { schemaVersion: FILM_SET_CONTENT_VERSION, items },
       filmSetAnimations: { ...collection, clips: nextClips }
     };
     const decoded = decodeFilmSetNodeData(toFlatAnimation(next));

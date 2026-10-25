@@ -120,7 +120,7 @@ describe("FilmSetImportService（任务 2.3）", () => {
     expect(exported.canvas.document.nodes.find((node) => node.id === "model")?.position).toEqual({ x: 400, y: 0 });
     // 导入对象为纯静态 items（动作只在片段 binding，本次未带动作故无绑定）。
     const content = exported.canvas.nodeData.film.filmSetContent as FilmSetContent;
-    expect(content.schemaVersion).toBe(3);
+    expect(content.schemaVersion).toBe(4);
     expect(content.items.find(item => item.id === "obj-model")?.motion).toBeUndefined();
     expect(content.items.find(item => item.id === "obj-image")?.motion).toBeUndefined();
   });

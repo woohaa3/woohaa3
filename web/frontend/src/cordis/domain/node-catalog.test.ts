@@ -92,7 +92,7 @@ describe("node-catalog", () => {
     expect(animation?.motionScript).toBeUndefined();
     expect(animation?.timeline).toBeUndefined();
     const content = animation?.filmSetContent as { schemaVersion: number; items: Array<{ kind: string }> };
-    expect(content.schemaVersion).toBe(3);
+    expect(content.schemaVersion).toBe(4);
     expect(content.items.map(item => item.kind)).toEqual(["ground"]);
     expect((animation?.filmSetAnimations as { clips: unknown[] }).clips).toEqual([]);
   });
