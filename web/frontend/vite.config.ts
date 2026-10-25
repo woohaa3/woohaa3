@@ -1,5 +1,5 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
-import { externalizeEditorWasm, frontendTarget } from "./frontend-target.js";
+import { frontendTarget } from "./frontend-target.js";
 import react from "@vitejs/plugin-react";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -140,6 +140,22 @@ const missingStaticGuard = (basePath: string, strip: (basePath: string, pathname
  * `defineConfig` 回调（配置加载期）就同步，覆盖 `vite`/`vite build` 的所有直接调用入口。
  * 同步是轻量文件复制，不依赖 Rust。
  */
+/**
+ * 配置加载期同步 PhotoCraft 覆盖层产物（`tools/photocraft-web/app/` → public/）。
+ *
+ * 与 `syncBevyAssetsOnConfigLoad` 同样的理由：覆盖层经 URL 读取静态产物，Vite 在配置解析后
+ * 立刻扫描 publicDir；晚于它同步会让 dev 对缺失文件走 SPA 回退返回 HTML。
+ */
+function syncPhotoCraftAppOnConfigLoad(configFileUrl: string): void {
+  const script = fileURLToPath(new URL("../../../scripts/sync-photocraft-app.mjs", configFileUrl));
+  try {
+    execFileSync(process.execPath, [script], { stdio: "inherit" });
+  } catch (error) {
+    // PhotoCraft 是可选能力：缺产物时覆盖层会显示启动失败，但不该阻断整个前端。
+    console.warn(`[photocraft] 同步失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function syncBevyAssetsOnConfigLoad(configFileUrl: string): void {
   const script = fileURLToPath(new URL("../../scripts/sync-bevy-assets.mjs", configFileUrl));
   try {
@@ -366,6 +382,8 @@ export default defineConfig(async ({ mode, command, isPreview }) => {
   // 配置加载期即同步 Bevy 静态资源：必须早于 Vite 扫描 publicDir（否则 dev 仍对
   // `/assets/fonts/...` 走 SPA 回退返回 HTML）。覆盖 `vite` / `vite build` 所有直接入口。
   syncBevyAssetsOnConfigLoad(import.meta.url);
+  // PhotoCraft 覆盖层产物（tools/photocraft-web/app → public/tools/photocraft-web/app）。
+  syncPhotoCraftAppOnConfigLoad(import.meta.url);
 
   // 后端已合并为单一进程（change: 2026-10-06-unify-backend-runtime-with-cordis）：
   // 所有同源路径都指向同一个后端进程。
@@ -382,12 +400,6 @@ export default defineConfig(async ({ mode, command, isPreview }) => {
     // `missingStaticGuard` 必须排在 SPA 回退之前，使缺失的 `/assets/*` 显式 404。
     plugins: [
       react(),
-      ...(target.nativeOnly ? [{
-        name: "desktop-managed-image-editor",
-        transform(code: string, id: string) {
-          return id.endsWith("/src/photocraft-wasm/photocraft_editor.js") ? externalizeEditorWasm(code) : null;
-        }
-      }] : []),
       devWatchResilience({ outDir: join(root, "dist") }),
       missingStaticGuard(basePath, stripAppBasePath),
       extensionReleaseStatic(root, basePath, stripAppBasePath, dev ? backend : undefined),
@@ -403,14 +415,18 @@ export default defineConfig(async ({ mode, command, isPreview }) => {
         servePreview: (dist) => createStaticHandler(dist, { basePath, pageTitle })
       })
     ],
-    // PhotoCraft 的 WASM 在根构建时复制到前端源码图；dev 从自身 root 提供，不依赖
-    // workspace 外的 `@fs` 路径。子项目源码仍按 linked package 正常编译。
-    resolve: {
-      alias: [
-        { find: "@woohaa3/photocraft-editor/wasm", replacement: resolve(root, "src/photocraft-wasm/photocraft_editor.js") }
-      ]
+    // PhotoCraft 覆盖层不再经过模块图：它的 WebAssembly 产物由 iframe 以 URL 加载
+    // （`tools/photocraft-web/app/`，见 scripts/sync-photocraft-app.mjs），因此这里
+    // 不需要 wasm 别名，也不需要 native-only 的 externalize 转换。
+    // PhotoCraft 覆盖层的源码在仓库根 `tools/` 下，在 Vite root（client/web）之外。
+    // Vite 默认只允许 root 与 workspace 根，不放开这里会 403：
+    //   "…/tools/photocraft-web/src/plugin.tsx is outside of Vite serving allow list"
+    // 只放开这个包目录，不用 `searchForWorkspaceRoot` 把整个仓库暴露出去。
+    server: {
+      host: true,
+      port: 5173,
+      fs: { allow: [resolve(root), resolve(root, "../../../tools/photocraft-web")] }
     },
-    server: { host: true, port: 5173 },
     // 构建期注入的构建标识：键名必须与 `src/cordis/services/build-info.ts` 里的 declare 一字不差。
     // define 是**文本替换**：写错不会有任何报错，只会在运行时报 ReferenceError；值必须经
     // JSON.stringify，否则字符串会被当成表达式粘进代码里。

@@ -7,7 +7,9 @@ packages:
   - runtime-components
   - extensions/*
   - ../extensions/*
-  - ../photocraft/integrations/woohaa
+  - ../../tools/photocraft-web
+  - ../../tools/photocraft-protocol
+  - ../../tools/photocraft-project-verifier
   - tooling
   - showcase
 

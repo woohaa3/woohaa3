@@ -15,15 +15,12 @@
     }
   },
   "scripts": {
-    "predev": "node ../../scripts/ensure-photocraft-wasm.mjs",
     "dev": "vite",
-    "prebuild": "node ../../scripts/ensure-photocraft-wasm.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
-    "build:desktop": "tsc -b && vite build --mode desktop",
-    "prebuild:desktop": "node ../../scripts/ensure-photocraft-wasm.mjs"
+    "build:desktop": "tsc -b && vite build --mode desktop"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.5",
@@ -51,7 +48,7 @@
     "three": "^0.186.1",
     "yjs": "^13.6.32",
     "zustand": "^5.0.3",
-    "@woohaa3/photocraft-woohaa": "workspace:*"
+    "@woohaa3/photocraft-web": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

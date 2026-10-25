@@ -29,8 +29,9 @@ export function resolvedRuntimeLock(options={}){
   if(!fs.existsSync(file))throw new Error(`构建组件前请先构建 release 工具：${id} (${file})`);
   lock.components[id]={version:`0.1.0-${sha256(file).slice(0,16)}`};
  }
- const editor=path.join(root,'web/frontend/src/photocraft-wasm/photocraft_editor_bg.wasm');
- if(!fs.existsSync(editor))throw new Error(`图像编辑器 WASM 缺失：${editor}`);
+ // PhotoCraft 覆盖层的 wasm（iframe 静态资源，权威源在仓库根 tools/）。
+ const editor=path.join(root,'../tools/photocraft-web/app/photocraft-web_bg.wasm');
+ if(!fs.existsSync(editor))throw new Error(`PhotoCraft WASM 缺失：${editor}`);
  lock.components['image-editor']={version:`0.1.0-${sha256(editor).slice(0,16)}`};
  return lock;
 }
@@ -92,7 +93,9 @@ export async function packageRuntimeComponents({output=path.join(root,'artifacts
    fs.writeFileSync(path.join(staging,'entry.mjs'),`import { materializeRuntimeLinks } from './runtime-links.mjs';\nimport { fileURLToPath } from 'node:url';\nmaterializeRuntimeLinks(fileURLToPath(new URL('.',import.meta.url)));\nexport async function runCli(options){const cli=await import('./dsh/lib/bin.js');return cli.runCli(options); }\n`);
    entry='entry.mjs';kind='node';
   }else if(id==='image-editor'){
-   entry='photocraft_editor_bg.wasm';kind='asset';fs.copyFileSync(path.join(root,'web/frontend/src/photocraft-wasm',entry),path.join(staging,entry));
+   // 桌面端把 PhotoCraft 的静态站点整体带进运行时组件（iframe 需要 index.html + glue + wasm）。
+   kind='asset';entry='photocraft-web';const appDir=path.join(root,'../tools/photocraft-web/app');
+   fs.cpSync(appDir,path.join(staging,entry),{recursive:true});
   }else{
    entry=id+(platform==='win32'?'.exe':'');fs.copyFileSync(nativeToolSources({platform,arch})[id],path.join(staging,entry));
   }

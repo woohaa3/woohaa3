@@ -6,7 +6,7 @@
   "description": "Woohaa web pnpm workspace",
   "scripts": {
     "icons:sync": "node ../scripts/sync-extension-icons.mjs",
-    "build:contracts": "pnpm --filter @woohaa3/contracts run build",
+    "build:contracts": "pnpm --filter @woohaa3/photocraft-protocol run build && pnpm --filter @woohaa3/contracts run build",
     "build:sdk": "pnpm --filter @sdppp/pptask run build && pnpm --filter @sdppp/pptask-worker-server run build && pnpm --filter @woohaa3/provider-sdk run build",
     "theme:check": "node ../scripts/generate-theme-tokens.mjs --check",
     "build:plugins": "node scripts/build-extension-packages.mjs",

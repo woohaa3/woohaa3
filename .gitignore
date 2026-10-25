@@ -116,3 +116,7 @@ config.local.json
 
 # Locally injected private provider branding
 /web/frontend/public/plugin-icons/litellm-provider.png
+
+# PhotoCraft 覆盖层产物：权威源在仓库根 tools/photocraft-web/app（入库），
+# 运行副本由 scripts/sync-photocraft-app.mjs 复制到这里。
+web/frontend/public/tools/photocraft-web/

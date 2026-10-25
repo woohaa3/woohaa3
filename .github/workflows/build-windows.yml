@@ -93,7 +93,6 @@ jobs:
             pnpm-lock.yaml
             api/pnpm-lock.yaml
             locks/web/pnpm-lock.yaml
-            photocraft/pnpm-lock.yaml
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; explicit toolchain input
@@ -168,10 +167,6 @@ jobs:
       - name: Install dependencies
         run: |
           set -euo pipefail
-          # PhotoCraft is a separate workspace that the root prepare hook also installs
-          # and builds; installing it first reports its own failure clearly and keeps
-          # the ordering visible.
-          pnpm -C photocraft install --frozen-lockfile
           pnpm install --frozen-lockfile
           pnpm -C web install --frozen-lockfile
           pnpm -C api install --frozen-lockfile

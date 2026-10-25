@@ -10,47 +10,47 @@ pnpmfileChecksum: sha256-PVihiLwKgkIWWo4DgSxVWqARFLsPTxpQlCdUxYGeOZ0=
 
 importers:
 
-  ../../photocraft/integrations/woohaa:
+  ../../../tools/photocraft-project-verifier:
     dependencies:
+      '@woohaa3/photocraft-protocol':
+        specifier: workspace:*
+        version: link:../photocraft-protocol
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.2
+        version: 26.6.2
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@26.6.2)(jsdom@30.1.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@26.6.2)(typescript@5.9.3))
+
+  ../../../tools/photocraft-protocol:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@26.6.2)(jsdom@30.1.1)(lightningcss@1.33.0)(msw@2.15.0(@types/node@26.6.2)(typescript@5.9.3))
+
+  ../../../tools/photocraft-web:
+    devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.5
         version: 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
-      '@woohaa3/contracts':
-        specifier: workspace:*
-        version: link:../../../web/contracts
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
       '@woohaa3/frontend':
         specifier: workspace:*
-        version: link:../../../web/frontend
-      '@woohaa3/photocraft-editor':
-        specifier: link:../../packages/editor
-        version: link:../../packages/editor
-      '@woohaa3/photocraft-protocol':
-        specifier: link:../../packages/protocol
-        version: link:../../packages/protocol
-      mediabunny:
-        specifier: ^1.61.3
-        version: 1.61.3
+        version: link:../../client/web/frontend
       react:
         specifier: ^18.3.1
         version: 18.3.1
-      react-dom:
-        specifier: ^18.3.1
-        version: 18.3.1(react@18.3.1)
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.12
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.1
-        version: 18.3.7(@types/react@18.3.31)
-      fake-indexeddb:
-        specifier: ^6.2.5
-        version: 6.2.5
-      jsdom:
-        specifier: ^30.1.1
-        version: 30.1.1
       typescript:
-        specifier: ^5.6.3
+        specifier: ^5.9.3
         version: 5.9.3
       vitest:
         specifier: ^2.0.0
@@ -144,8 +144,8 @@ importers:
   ../../web/contracts:
     dependencies:
       '@woohaa3/photocraft-protocol':
-        specifier: link:../../photocraft/packages/protocol
-        version: link:../../photocraft/packages/protocol
+        specifier: link:../../../tools/photocraft-protocol
+        version: link:../../../tools/photocraft-protocol
       lib0:
         specifier: ^0.2.117
         version: 0.2.117
@@ -797,9 +797,9 @@ importers:
       '@woohaa3/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@woohaa3/photocraft-woohaa':
+      '@woohaa3/photocraft-web':
         specifier: workspace:*
-        version: link:../../photocraft/integrations/woohaa
+        version: link:../../../tools/photocraft-web
       lexical:
         specifier: ^0.51.0
         version: 0.51.0(typescript@5.9.3)
@@ -988,8 +988,8 @@ importers:
         specifier: workspace:*
         version: link:../../contracts
       '@woohaa3/photocraft-project-verifier':
-        specifier: link:../../../photocraft/packages/project-verifier
-        version: link:../../../photocraft/packages/project-verifier
+        specifier: link:../../../../tools/photocraft-project-verifier
+        version: link:../../../../tools/photocraft-project-verifier
     devDependencies:
       '@types/node':
         specifier: ^22.15.3

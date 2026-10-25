@@ -51,7 +51,8 @@ export const MIN_ICON_SOURCE_SIZE = 1024;
 /** Source frontend builds need both WASM bindings, including native desktop UI imports. */
 export const FRONTEND_BUILD_STEPS = [
   ["exec", "node", "scripts/build-bevy-wasm.mjs", "--mode", "release"],
-  ["exec", "node", "scripts/build-image-editor-wasm.mjs"],
+  // PhotoCraft 覆盖层的静态产物（tools/photocraft-web/app → public）。
+  ["exec", "node", "scripts/sync-photocraft-app.mjs"],
   ["run", "assets:sync"],
   ["-C", "web", "run", "build:units"],
   ["-C", "web", "--filter", "@woohaa3/frontend", "run", "build"],

@@ -28,7 +28,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@woohaa3/photocraft-protocol": "link:../../photocraft/packages/protocol",
+    "@woohaa3/photocraft-protocol": "link:../../../tools/photocraft-protocol",
     "lib0": "^0.2.117",
     "yjs": "^13.6.32"
   },
