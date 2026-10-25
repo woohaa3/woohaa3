@@ -31,6 +31,11 @@ export function installCanvasListeners(
   canvas.addEventListener("wheel", input.onWheel, { passive: false });
   // 聚焦缩放在 document capture 阶段：覆盖层上的滚轮/捏合也必须只调相机、取消默认缩放。
   target.document?.addEventListener?.("wheel", handlers.onDocumentWheel, { capture: true, passive: false });
+  target.document?.addEventListener?.("pointerdown", handlers.onDocumentPointerDown, { capture: true });
+  target.document?.addEventListener?.("focusin", handlers.onDocumentFocusChange, { capture: true });
+  target.document?.addEventListener?.("focusout", handlers.onDocumentFocusChange, { capture: true });
+  target.addEventListener("blur", handlers.onDocumentBlur);
+  target.document?.addEventListener?.("visibilitychange", handlers.onDocumentVisibility);
   // Safari 触控板捏合（GestureEvent）。
   target.document?.addEventListener?.("gesturestart", handlers.onGestureStart, { capture: true, passive: false });
   target.document?.addEventListener?.("gesturechange", handlers.onGestureChange, { capture: true, passive: false });
@@ -66,6 +71,11 @@ export function removeCanvasListeners(
   canvas.removeEventListener("pointerleave", input.onPointerLeave);
   canvas.removeEventListener("wheel", input.onWheel);
   target.document?.removeEventListener?.("wheel", handlers.onDocumentWheel, { capture: true });
+  target.document?.removeEventListener?.("pointerdown", handlers.onDocumentPointerDown, { capture: true });
+  target.document?.removeEventListener?.("focusin", handlers.onDocumentFocusChange, { capture: true });
+  target.document?.removeEventListener?.("focusout", handlers.onDocumentFocusChange, { capture: true });
+  target.removeEventListener("blur", handlers.onDocumentBlur);
+  target.document?.removeEventListener?.("visibilitychange", handlers.onDocumentVisibility);
   target.document?.removeEventListener?.("gesturestart", handlers.onGestureStart, { capture: true });
   target.document?.removeEventListener?.("gesturechange", handlers.onGestureChange, { capture: true });
   target.document?.removeEventListener?.("gestureend", handlers.onGestureEnd, { capture: true });

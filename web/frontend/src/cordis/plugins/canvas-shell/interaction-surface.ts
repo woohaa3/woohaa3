@@ -14,6 +14,7 @@
  */
 import type { InteractionState, Viewport } from "./interaction-core.js";
 import type { ModelGestureFamily } from "./model-gesture-family.js";
+import { ContinuousWheelOwner, nativeWheelTarget } from "./input/continuous-wheel-owner.js";
 
 /** 拖动粘连 Q/E 路由与取消（change: add-drag-touch-connections）。 */
 export type AttachKeyboardController = import("./interaction-core.js").DragAttachKeyboardController & {
@@ -53,6 +54,10 @@ export type SurfaceInteractions = {
   /** document capture 阶段滚轮/捏合处理器（注册/注销由控制器负责）。 */
   handlers: {
     onDocumentWheel: (event: WheelEvent) => void;
+    onDocumentPointerDown: () => void;
+    onDocumentFocusChange: () => void;
+    onDocumentBlur: () => void;
+    onDocumentVisibility: () => void;
     onGestureStart: (event: Event) => void;
     onGestureChange: (event: Event) => void;
     onGestureEnd: (event: Event) => void;
@@ -62,12 +67,14 @@ export type SurfaceInteractions = {
 
 export function createSurfaceInteractions(deps: SurfaceInteractionDeps): SurfaceInteractions {
   const { state, target, canvas, model, focusInputBlocked, activeViewport, localViewportSet, schedule } = deps;
+  const wheelOwner = new ContinuousWheelOwner<Element>();
 
   /**
    * 取消尚未提交的瞬时画布交互（design D6 / spec「打开弹窗时终止未完成的瞬时画布交互」）。
    * 只清本地 gesture/draft/preview，不撤销已提交的 pending Canvas command。
    */
   const cancelTransientGesture = () => {
+    wheelOwner.reset();
     // 拖动粘连 / 聚合拉线手势必须走显式取消路径（清 held/preview 且不提交），
     // change: add-drag-touch-connections / add-multi-select-aggregate-connect，design D6。
     if (deps.attach.attachActive()) deps.attach.cancelDragGesture();
@@ -99,6 +106,7 @@ export function createSurfaceInteractions(deps: SurfaceInteractionDeps): Surface
    * 没有恢复。这里先保存用户最后看到的视口，再清理 timer/preview/gesture。
    */
   const settleViewportBeforeFocus = () => {
+    wheelOwner.reset();
     const viewport = activeViewport();
     localViewportSet(viewport);
     state.viewportPreview = null;
@@ -124,8 +132,44 @@ export function createSurfaceInteractions(deps: SurfaceInteractionDeps): Surface
       if (region.getAttribute("data-canvas-viewport-blocked") !== "true") deps.onWheel?.(event);
       return;
     }
-    model.onDocumentWheel(event, focusInputBlocked());
+    if (model.active) {
+      wheelOwner.reset();
+      model.onDocumentWheel(event, focusInputBlocked());
+      return;
+    }
+    const eventTarget = event.target && typeof (event.target as Element).closest === "function"
+      ? event.target as Element
+      : null;
+    const panel = eventTarget?.closest(".node-execution-dock") ?? null;
+    const inCanvas = !!eventTarget && (eventTarget === canvas || canvas.contains(eventTarget));
+    if (!panel && !inCanvas) return;
+    const owner = wheelOwner.resolve(event.timeStamp, () => {
+      if (focusInputBlocked()) return { owner: "blocked" as const, target: null };
+      const nativeTarget = panel ? nativeWheelTarget(eventTarget, panel) : null;
+      return nativeTarget ? { owner: "native" as const, target: nativeTarget } : { owner: "canvas" as const, target: null };
+    });
+    if (owner.owner === "blocked") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (owner.owner === "native") {
+      if (panel && owner.target?.contains(eventTarget)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (panel) {
+      event.preventDefault();
+      event.stopPropagation();
+      deps.onWheel?.(event);
+    }
   };
+
+  const onDocumentPointerDown = () => wheelOwner.reset();
+  const onDocumentFocusChange = () => wheelOwner.reset();
+  const onDocumentBlur = () => wheelOwner.reset();
+  const onDocumentVisibility = () => { if (target.document?.hidden) wheelOwner.reset(); };
 
   /**
    * 窗口 / 容器 resize：surface 尺寸是可见变化，必须失效并重建场景
@@ -140,9 +184,13 @@ export function createSurfaceInteractions(deps: SurfaceInteractionDeps): Surface
     settleViewportBeforeFocus,
     handlers: {
       onDocumentWheel,
+      onDocumentPointerDown,
+      onDocumentFocusChange,
+      onDocumentBlur,
+      onDocumentVisibility,
       onGestureStart: (event) => model.onGestureStart(event, focusInputBlocked()),
       onGestureChange: (event) => model.onGestureChange(event, focusInputBlocked()),
-      onGestureEnd: (event) => model.onGestureEnd(event),
+      onGestureEnd: (event) => { model.onGestureEnd(event); wheelOwner.reset(); },
       onWindowResize
     }
   };

@@ -46,6 +46,7 @@ export type AttachAssemblyDeps = {
   gestures: ModelEditorGestureRefs;
   onModelFocusChange: NonNullable<InteractionControllerOptions["onModelFocusChange"]>;
   onViewportChange: () => void;
+  onFrame?: () => void;
   projectResidency?: NonNullable<InteractionControllerOptions["projectResidency"]>;
   onSurface?: NonNullable<InteractionControllerOptions["onSurface"]>;
   onViewportForResidency?: NonNullable<InteractionControllerOptions["onViewportForResidency"]>;
@@ -106,6 +107,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     ...(deps.gestures.objectAction ? { filmSetObjectAction: deps.gestures.objectAction } : {}),
     onModelFocusChange: deps.onModelFocusChange,
     onViewportChange: deps.onViewportChange,
+    ...(deps.onFrame ? { onFrame: deps.onFrame } : {}),
     ...(deps.projectResidency ? { projectResidency: deps.projectResidency } : {}),
     ...(deps.onSurface ? { onSurface: deps.onSurface } : {}),
     ...(deps.onViewportForResidency ? { onViewportForResidency: deps.onViewportForResidency } : {}),

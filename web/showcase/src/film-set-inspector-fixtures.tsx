@@ -182,6 +182,7 @@ export function FilmSetInspectorStage({ fixtureId, selectedItemId = null, writab
     defaultDistance: () => 5, addCamera: () => undefined, capture: async () => undefined,
     acquireCapture: async () => () => undefined, refreshGizmo: () => undefined,
     renderCameraPreview: () => null,
+    renderGenerate: () => null,
     renderCameraPanel: input => <ModelEditorToolbar {...input} session={session} onAddCamera={() => undefined} onCapture={() => undefined} />
   };
   const runtime = { ctx, subscribe: () => () => undefined, status: () => ({ phase: "ready", error: null }) };

@@ -182,16 +182,15 @@ html[data-native-canvas="true"] .bevy-canvas-surface {
 	backdrop-filter: var(--app-backdrop-filter, blur(8px));
 }
 
-/**
- * 底部执行面板：固定贴底并避让安全区；宽度随视口收缩但不超过 760px。
- * 桌面与窄屏都不产生横向溢出（100vw - 32px 留出两侧各 16px）。
- */
+/** 节点锚定执行面板；位置和可用高度由 runtime 几何投影更新。 */
 .node-execution-dock {
 	position: fixed;
-	left: 50%;
-	transform: translateX(-50%);
-	bottom: max(16px, env(safe-area-inset-bottom));
+	left: 0;
+	top: 0;
 	width: min(760px, calc(100vw - 32px));
+	max-height: calc(100vh - 32px);
+	overflow-y: auto;
+	overscroll-behavior: contain;
 	z-index: 25;
 	display: flex;
 	flex-direction: column;
@@ -206,6 +205,10 @@ html[data-native-canvas="true"] .bevy-canvas-surface {
 	border-radius: 10px;
 	color: var(--app-status-danger);
 	font-size: 13px;
+}
+
+.node-execution-dock :is(textarea, [contenteditable="true"], [data-wheel-native], [data-radix-scroll-area-viewport]) {
+	overscroll-behavior: contain;
 }
 
 /*

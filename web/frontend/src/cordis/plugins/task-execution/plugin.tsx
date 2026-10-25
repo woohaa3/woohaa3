@@ -11,11 +11,10 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { lazy, Suspense, useSyncExternalStore, type ReactNode } from "react";
-import { useDockReveal } from "./use-dock-reveal.js";
 import type { ExecutionLaunchFeedback } from "./execution-launch.js";
 import { resolveFilmSetClipHash, resolveFilmSetTargetClip } from "./film-set-target.js";
 import { AuthoringGenerateHost } from "../../host.js";
-import { ExecutionPanelPending, ExecutionPanelSkeleton, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
+import { ExecutionPanelPending, ExecutionPanelSkeleton, ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { resolveModelMcpServerUrl } from "../../mcp-endpoint.js";
 import {
@@ -185,7 +184,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           const snippetSource = ctx.get(PROMPT_SNIPPET_SOURCE) as PromptSnippetSource | undefined;
           const runtime = ctx.canvasRuntime;
           const presentation = route.presentation ?? "compact";
-          useDockReveal(runtime, route.nodeId, presentation === "compact");
           const submitPresentationIntent = (intent: PanelPresentationIntent) => {
             if (intent.kind === "close") {
               ctx.canvasNavigation.closePanel(panelTypeForNodeType("node-execution"));
@@ -197,7 +195,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           // 呈现表面与骨架、宿主共用同一判断（音频没有 expanded 面）。
           const surface = resolveExecutionPanelSurface(presentation, resolvePanelNodeType(route.nodeId));
           return (
-            <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} />}><ModelExecutionHost
+            <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}><ModelExecutionHost
               submitCoordinator={coordinator}
               canvasId={canvasId}
               selectedNodeId={route.nodeId}
@@ -208,6 +206,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               catalog={ctx.taskCatalog}
               registry={ctx.modelInteractions}
               presentation={presentation}
+              runtime={runtime}
               onPresentationIntent={submitPresentationIntent}
               activity={activitySink}
               panelActions={{
@@ -241,9 +240,8 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           if (route.type !== MODEL_NODE_EDITOR_PANEL_TYPE) return null;
           // 交付完成后重新解析片段与写权限，避免沿用占位节点时期的空 clipId。
           useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
-          useDockReveal(ctx.canvasRuntime, route.nodeId);
           return (
-            <div className="node-execution-dock" data-node-id={route.nodeId} data-presentation="compact">
+            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
               <Suspense fallback={<ExecutionPanelSkeleton />}><ModelParameterPanel
                 canvasId={canvasId}
                 nodeId={route.nodeId}
@@ -253,7 +251,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
                 disabledReason={null}
                 renderGenerate={buildModelRenderGenerate(ctx, route.nodeId, writable)}
               /></Suspense>
-            </div>
+            </ExecutionPanelSurface>
           );
         }
       };

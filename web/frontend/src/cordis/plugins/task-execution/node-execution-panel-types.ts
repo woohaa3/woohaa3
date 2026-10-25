@@ -15,6 +15,7 @@ import type {
   PromptSnippetSource,
   TaskCatalogService
 } from "../../contracts.js";
+import type { CanvasRuntimeService } from "../../contracts.js";
 import type { ModelInteractionRegistry } from "../../contract/model-interaction.js";
 import type { ModelDraftStore } from "./model-draft.js";
 import type { TaskActivityEventSink, SubmitCoordinator } from "./submit-coordinator.js";
@@ -26,6 +27,7 @@ export type ModelExecutionHostProps = {
   /** 当前画布 id（run/cancel 路径用）。 */
   canvasId?: string;  /** Canvas Navigation active panel route 传入的当前选中节点。 */
   selectedNodeId: string | null;
+  runtime?: CanvasRuntimeService;
   /** 页面级画布会话（参数提交与引用连线用）。 */
   session: CanvasSession;
   /** Canvas 远端（run/cancel）。 */

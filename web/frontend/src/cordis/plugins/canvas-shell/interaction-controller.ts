@@ -304,6 +304,8 @@ export function installInteractionController(options: InteractionControllerOptio
     frameLoop.step("viewport-notify", notifyViewport, undefined);
     // 节点屏幕投影通知（节点顶部操作横条锚定）：视口/拖动/改尺寸帧级变化在此随唯一帧结算。
     frameLoop.step("projection-notify", notifyProjection, undefined);
+    // 瞬时 DOM overlay 需要和画布刷新保持同一帧节奏；它们自行读取当前 accepted/working 几何。
+    frameLoop.step("frame-notify", () => options.onFrame?.(), undefined);
     // 推进与场景无关的逐帧工作（瞬时态/会话/失效清理）；返回就绪片场媒体平面集合。
     compositeAssetMediaReady = advanceTransientState({
       focusInputBlocked,
@@ -511,10 +513,14 @@ export function installInteractionController(options: InteractionControllerOptio
       cancelAggregateConnect: () => input.cancelAggregateConnect()
     }
   });
-  const { cancelTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
+  const { cancelTransientGesture, settleViewportBeforeFocus, handlers: { onDocumentWheel, onDocumentPointerDown, onDocumentFocusChange, onDocumentBlur, onDocumentVisibility, onGestureStart, onGestureChange, onGestureEnd, onWindowResize } } = surface;
 
   installCanvasListeners(canvas, target, input, keyboard, dblclick, {
     onDocumentWheel,
+    onDocumentPointerDown,
+    onDocumentFocusChange,
+    onDocumentBlur,
+    onDocumentVisibility,
     onGestureStart,
     onGestureChange,
     onGestureEnd,
@@ -613,6 +619,10 @@ export function installInteractionController(options: InteractionControllerOptio
       state.viewportCommitTimer = null;
       removeCanvasListeners(canvas, target, input, keyboard, dblclick, {
         onDocumentWheel,
+        onDocumentPointerDown,
+        onDocumentFocusChange,
+        onDocumentBlur,
+        onDocumentVisibility,
         onGestureStart,
         onGestureChange,
         onGestureEnd,

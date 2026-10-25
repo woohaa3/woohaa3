@@ -158,6 +158,8 @@ export type InteractionControllerOptions = {
    * 不写服务端 viewport。按帧节流，只在视口实际变化时触发。
    */
   onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
+  /** 每次画布刷新帧回调；供与渲染节奏同步的瞬时 overlay 使用。 */
+  onFrame?: () => void;
   /**
    * 上传中的幽灵节点（只渲染，不进规范状态；change: add-paste-import-workflows）。
    * 由 canvasRuntime 持有，buildScene 每帧读取并合并。
