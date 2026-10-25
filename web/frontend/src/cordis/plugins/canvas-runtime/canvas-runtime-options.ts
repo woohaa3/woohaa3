@@ -11,6 +11,7 @@ import { type AppThemeSnapshot } from "@woohaa3/contracts";
 export type CanvasRuntimeOptions = {
   projectHistoryCanvas?: (canvas: import("@woohaa3/contracts").ServerCanvas | null) => import("@woohaa3/contracts").ServerCanvas | null;
   canvasId: string;
+  nodeCapabilities?: import("../../../extension-api/node-implementations.js").NodeImplementationRegistry;
   compositeAssets?: import("../../../extension-api/composite-assets.js").CompositeAssetRegistry;
   getSession: () => import("../../contracts.js").CanvasSession | null;
   /** 每节点不可变 prepared model resource（change: optimize-model-scene-snapshot-hot-path）。 */

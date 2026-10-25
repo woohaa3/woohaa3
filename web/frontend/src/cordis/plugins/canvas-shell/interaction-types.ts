@@ -25,6 +25,7 @@ import type { BevyRuntime } from "../canvas-runtime/bevy-runtime.js";
 export type RunStateProjectionInput = import("./run-state-projection.js").NodeRunStateProjection;
 
 export type InteractionControllerOptions = {
+  nodeCapabilities?: import("../../../extension-api/node-implementations.js").NodeImplementationRegistry;
   compositeAssets?: import("../../../extension-api/composite-assets.js").CompositeAssetRegistry;
   canvas: HTMLCanvasElement;
   getRuntime: () => BevyRuntime | null;

@@ -71,7 +71,7 @@ pub(super) fn draw(
             "canvasEdgeDefault"
         }),
     );
-    if selected {
+    if selected && node.resizable {
         super::film_set::draw_scope_grip(
             geometry,
             theme,

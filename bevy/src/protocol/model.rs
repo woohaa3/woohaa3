@@ -30,7 +30,7 @@ use serde::Deserialize;
 /// （change: 2026-10-15-add-film-set-shooting-shot-previews）。
 /// v23 起复合资产可携带派生 ownershipLinks；旧 renderer 不支持管理关系虚线。
 /// v24 起镜头预览携带独立 backdrop，preview/capture 共用背景，拒绝忽略该字段的旧 renderer。
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v26";
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v27";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 /// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。

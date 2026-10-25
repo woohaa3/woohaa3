@@ -6,8 +6,7 @@
  * 依赖 working canvas 的 group 最小尺寸约束。
  */
 import {
-  getGroupRequiredMinSize,
-  isModelPreviewNodeType, MODEL_PREVIEW_MIN_HEIGHT,
+  builtinNodeCapabilityResolver, type NodeCapabilityResolver,
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
   scopeScaleFactor
@@ -28,12 +27,13 @@ export const SCOPE_HANDLE_ORDER = ["n", "ne", "e", "se", "s", "sw", "w", "nw"] a
  */
 export function scopeResizeTarget(
   gesture: { handle: Point; anchor: Point; originCenter: Point; originWidth: number; originHeight: number },
-  world: Point
+  world: Point,
+  minimum = { width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT }
 ): { width: number; height: number; position: Point } | null {
   const w0 = gesture.originWidth;
   const h0 = gesture.originHeight;
   if (!(w0 > 0) || !(h0 > 0) || !Number.isFinite(world.x) || !Number.isFinite(world.y)) return null;
-  const minScale = Math.max(MIN_NODE_WIDTH / w0, MIN_NODE_HEIGHT / h0);
+  const minScale = Math.max(minimum.width / w0, minimum.height / h0);
   const k = Math.max(scopeScaleFactor(world, gesture.handle, gesture.anchor), minScale);
   const width = Math.round(w0 * k);
   const height = Math.round(h0 * k);
@@ -46,7 +46,8 @@ export function scopeResizeTarget(
 /** resize 目标尺寸：自由缩放 + 下限 clamp + group 最小包围约束。 */
 export function resizeTarget(
   gesture: { nodeId: string; start: Point; originWidth: number; originHeight: number },
-  world: Point
+  world: Point,
+  resolver: NodeCapabilityResolver = builtinNodeCapabilityResolver
 ): { width: number; height: number } | null {
   const dx = world.x - gesture.start.x;
   const dy = world.y - gesture.start.y;
@@ -57,15 +58,13 @@ export function resizeTarget(
   // （change: add-canvas-node-grouping，design D3）。
   const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
   const node = canvasState?.document.nodes.find((entry) => entry.id === gesture.nodeId);
-  if (node && isModelPreviewNodeType(node.type)) height = Math.max(height, MODEL_PREVIEW_MIN_HEIGHT);
-  if (node?.type === "group") {
-    const min = getGroupRequiredMinSize(
-      canvasState!.document.nodes.map((entry) => ({ ...entry, data: {} })),
-      node.id
-    );
-    width = Math.max(width, min.minWidth);
-    height = Math.max(height, min.minHeight);
-  }
+  if (!node || !canvasState) return null;
+  const context = { canvas: canvasState, node, data: canvasState.nodeData[node.id] };
+  const resize = resolver.resolve(context).resize;
+  if (!resize) return null;
+  const min = resize.minimum(context);
+  width = Math.max(width, min.width);
+  height = Math.max(height, min.height);
   if (Math.abs(width - gesture.originWidth) < 0.5 && Math.abs(height - gesture.originHeight) < 0.5) return null;
   return { width: Math.round(width), height: Math.round(height) };
 }

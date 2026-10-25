@@ -1,3 +1,5 @@
+import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
+import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
  * `CanvasRenderScene` 快照装配与呈现指纹（自 `render-scene.ts` 拆出）
  * （change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R01）。
@@ -23,15 +25,12 @@ import { encodeFilmSetPartId, readFilmSetContent } from "../film-set-content.js"
 import type { ModelFocusProjection } from "../model-focus.js";
 import { defaultAppTheme, validateAppThemePreset, type AppThemeSnapshot } from "../../theme/index.js";
 import { resolveNodeDisplayName, contentTypeLabelForNode } from "../node-display-name.js";
-import { isPureModelNodeType } from "../domain/core/input-role.js";
 import {
   bevyKindForNodeType,
   bevyNodeSize,
   effectiveCanvasNodeSize,
-  isModelPreviewNodeType
 } from "./node-geometry.js";
 import {
-  DEFAULT_MODEL_PREVIEW,
   type BevyModelPlacement
 } from "./wire-model.js";
 import {
@@ -73,6 +72,7 @@ import type { FilmSetNodeData } from "../canvas-node-model.js";
 
 export type CanvasRenderSceneInput = {
   canvas: ServerCanvas;
+  nodeCapabilities?: NodeCapabilityResolver;
   modelPreviews?: ReadonlyMap<string, import("./wire-model.js").BevyModelPreview>;
   selection?: { nodes?: readonly string[]; edge?: string | null };
   draft?: BevyRenderDraft | null;
@@ -243,6 +243,8 @@ export function resolveSceneTheme(input: unknown): AppThemeSnapshot {
 /** 构建 Bevy 快照。 */
 export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRenderScene {
   const { canvas } = input;
+  const resolver = input.nodeCapabilities ?? builtinNodeCapabilityResolver;
+  const capabilitiesOf = (node: ServerCanvas["document"]["nodes"][number]) => resolver.resolve({ canvas, node, data: canvas.nodeData[node.id] });
   const nodeData = canvas.nodeData as Record<string, CanvasNodeData | undefined>;
   const assets = new Map<string, StoredAsset>(canvas.assets.map((asset) => [asset.id, asset]));
   const selectedIds = new Set(input.selection?.nodes ?? []);
@@ -283,7 +285,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       const node = stack.pop()!;
       if (seen.has(node.id)) continue;
       seen.add(node.id);
-      if (node.type === "group") {
+      if (capabilitiesOf(node).container) {
         stack.push(...canvas.document.nodes.filter((candidate) => candidate.parentId === node.id));
       } else {
         count += 1;
@@ -292,12 +294,14 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     return count;
   };
   const nodes = canvas.document.nodes.map((node) => {
-    const kind = bevyKindForNodeType(node.type);
-    const previewCard = isModelPreviewNodeType(node.type);
+    const context = { canvas, node, data: nodeData[node.id] };
+    const capabilities = capabilitiesOf(node);
+    const kind = capabilities.appearance?.palette ?? "node";
+    const previewCard = capabilities.modelPreview;
     // 纯模型节点（片场 animation3d + 通用扩展节点 extension3d）：无卡片，节点矩形即范围框。
-    const pureModel = isPureModelNodeType(node.type);
+    const pureModel = !!capabilities.scope;
     const filmSet = pureModel;
-    const { width, height } = effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id));
+    const { width, height } = effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
     const override = input.positionOverrides?.get(node.id);
     const offset = absoluteOffset(node);
     // 位置预览（拖拽）是绝对画布坐标；无预览时用文档局部坐标 + 父级绝对偏移投影。
@@ -315,7 +319,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const placement = input.modelPlacements?.get(node.id) ?? readPlacement(data);
     // 模型资源：prepared resource 优先，缺省时在同一份规范化结果上一次性派生
     // （测试/最小 fixture 兼容）。
-    const resource = kind === "model"
+    const resource = capabilities.modelPreparation
       ? (preparedResource
         ?? (modelOpsV2
           ? prepareModelResource({ sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION, ops: modelOpsV2 })
@@ -353,11 +357,11 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       texture,
       // 仅当该节点是唯一选中项时才绘制抓手，避免多选时语义歧义（design D1）。
       // group 容器同样支持右下角 resize（design D2）。
-      resizable: selectedIds.size === 1 && selectedIds.has(node.id),
-      ...(previewCard ? { modelPreview: { ...DEFAULT_MODEL_PREVIEW, ...input.modelPreviews?.get(node.id) } } : {}),
+      resizable: !!capabilities.resize && selectedIds.size === 1 && selectedIds.has(node.id),
+      ...(previewCard ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
       // 片场（animation3d）纯模型：不携带卡片分类名（Bevy 不绘制卡片），只给条件范围几何。
       // 普通 model3d 保留「3D 模型」分类名（change: 2026-10-08-make-film-set-model-only）。
-      ...(node.type === "model3d" ? { cardLabel: "3D 模型" } : {}),
+      ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {}),
       ...(filmSet
       ? {
           compositeAsset: compositeAssetScopeForNode({
@@ -369,7 +373,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
             // composite-asset（片场、炼丹炉、未来第三方）一律使用地面占地的等距范围；非
             // composite-asset（text/image/model3d 卡片/group）不进入此分支，保持矩形。
             // （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D3 修订）。
-            scopeShape: input.compositeAssetScopeShapes?.get(node.id) ?? "isometric-diamond",
+            scopeShape: input.compositeAssetScopeShapes?.get(node.id) ?? capabilities.scope!.shape(context),
             // 总览 LOD 策略只由可信 adapter 声明；缺失即 World 用途保持 High
             // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
             geometryQuality: input.compositeAssetGeometryQualities?.get(node.id),
@@ -388,15 +392,13 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         }
       : {})
     };
-    if (kind === "group") {
-      const title = typeof data?.title === "string" ? data.title : "";
-      rendered.group = {
-        title,
+    if (capabilities.container) {
+      rendered.group = capabilities.container.project(context, {
         memberCount: directChildren.get(node.id) ?? 0,
         outputCapableLeafCount: outputCapableLeaves(node.id)
-      };
+      });
     }
-    if (kind === "model") {
+    if (capabilities.modelPreparation) {
       // prepared resource 优先：映射层只引用 resource key，不遍历顶点/序列化 ops。
       // 缺省时回落到裸 ops，在同一份规范化结果上一次性派生（测试/最小 fixture 兼容）。
       if (resource) {
@@ -465,7 +467,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   // canonical 已由 reducer/规范化保证；映射层再做一次防御过滤，避免异常帧绘制纯模型连线
   // （change: 2026-10-08-make-film-set-model-only；change: 2026-10-10 泛化）。
   const filmSetNodeIds = new Set(
-    canvas.document.nodes.filter((node) => isPureModelNodeType(node.type, nodeData[node.id] as Record<string, unknown> | undefined)).map((node) => node.id)
+    canvas.document.nodes.filter((node) => capabilitiesOf(node).connections?.endpoints({ canvas, node, data: nodeData[node.id] }) === "none").map((node) => node.id)
   );
   const edges = canvas.document.edges
     .filter((edge) => !filmSetNodeIds.has(edge.source) && !filmSetNodeIds.has(edge.target))
@@ -601,17 +603,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
       : "sa="
   ];
   for (const node of scene.nodes) {
-    if (node.compositeAsset) parts.push(`film-set=${node.id}:${JSON.stringify(node.compositeAsset)}`);
-    // 历史条与聚合遮罩是瞬时运行反馈：参与指纹，使运行/终态变化能触发一次 set_scene
-    // （change: 2026-10-12-unify-generation-history-strip）。
-    if (node.historyStrip) parts.push(`history-strip=${node.id}:${JSON.stringify(node.historyStrip)}`);
-    if (node.aggregateRun) parts.push(`aggregate-run=${node.id}:${JSON.stringify(node.aggregateRun)}`);
-    // 拍摄镜头预览卡片呈现：标题/类型/状态/进度变化必须触发一次 set_scene
-    // （change: 2026-10-15-add-film-set-shooting-shot-previews）。
-    if (node.shotPreview) parts.push(`shot-preview=${node.id}:${JSON.stringify(node.shotPreview)}`);
-    parts.push(
-      `n=${node.id},${node.type},${node.x},${node.y},${node.width},${node.height},${node.title},${node.typeLabel},${node.body},${node.progress},${node.busy ? 1 : 0},${node.mediaLoading ? 1 : 0},${node.texture ? 1 : 0},${node.resizable ? 1 : 0},${node.ghost ? 1 : 0},${node.cardLabel ?? ""},${node.modelPreview ? JSON.stringify(node.modelPreview) : ""},${node.model ? `${node.model.resourceKey},${node.model.signature},${node.model.placement?.offset.x ?? 0},${node.model.placement?.offset.y ?? 0},${node.model.placement?.offset.z ?? 0},${node.model.placement?.scale ?? 1},${node.model.placement?.yaw ?? 0}` : ""}`
-    );
+    parts.push(`n=${stablePresentationStringify(node)}`);
   }
   for (const edge of scene.edges) {
     parts.push(`e=${edge.id},${edge.source},${edge.target},${edge.label}`);
@@ -629,3 +621,13 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
 
 // 类型再导出：保持 `scene-builder` 作为装配入口时的自解释性。
 export type { CanvasRenderScene };
+
+/** Stable JSON for the complete lightweight wire projection, never prepared payloads. */
+export function stablePresentationStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, item) => {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      return Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]]));
+    }
+    return item;
+  });
+}

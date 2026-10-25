@@ -56,3 +56,7 @@ PhotoCraft editing: `photocraft/packages/editor/src/features/` owns the 18 featu
 Composite asset node actions use the shared toolbar target contract. Rust toolbar drawing and interaction accept composite assets and anchor their actions to the scope AABB; viewport and position updates retain the same hit geometry. Film-set object rows expose their container action without requiring a selection.
 
 Assistant source defaults: `web/extensions/local-agent/extension.json` and `web/extensions/sdk-agent/extension.json` declare `site.defaultEnabled: true`; OAuth declares `defaultEnabled: true` in `web/extensions/oauth-agent/src/shared.ts`. The application control plane initializes defaults only when no persisted config exists; explicit disabled settings survive restarts. Directory scanning controls installation, while `extension_site_config.desired_enabled` controls runtime activation.
+
+## 节点实现能力注册
+
+`web/contracts/src/canvas/node-capabilities.ts` 定义渲染相关能力的纯契约；`web/contracts/src/canvas/builtin-node-capabilities.ts` 集中声明内置节点的能力组合。`web/frontend/src/extension-api/node-implementations.ts` 持有页面 scope 内的不可变实现注册表，负责 revision、generation、作用域隔离和幂等注销；模型准备、驻留、场景构建、聚焦、动作与缩放从同一解析结果消费。Render Scene 只携带轻量能力结果，Bevy v27 校验后统一绘制和命中。

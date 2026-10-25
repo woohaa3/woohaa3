@@ -10,10 +10,11 @@ import type { HitTarget } from "./hit-test.js";
 import type { InteractionQuery, InteractionState } from "./interaction-core.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { hoverNodeStore } from "../../services/hover-store.js";
-import { bevyKindForNodeType, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver, type NodeCapabilityResolver, shotPreviewOwnershipOf } from "@woohaa3/contracts";
 import type { VideoFrameSessions } from "../canvas-runtime/video-frame-session.js";
 
 export type HoverTrackerDeps = {
+  nodeCapabilities?: NodeCapabilityResolver;
   state: InteractionState;
   videoSessions?: VideoFrameSessions | null;
   modalActive: () => boolean;
@@ -27,9 +28,9 @@ export type HoverTrackerDeps = {
 };
 
 /** working 画布是否含 3D 模型节点（无模型时跳过模型 picking 的跨 WASM 调用）。 */
-function canvasHasModelNode(): boolean {
+function canvasHasModelNode(resolver: NodeCapabilityResolver = builtinNodeCapabilityResolver): boolean {
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-  return canvas?.document.nodes.some((node) => bevyKindForNodeType(node.type) === "model") ?? false;
+  return canvas?.document.nodes.some((node) => !!resolver.resolve({ canvas, node, data: canvas.nodeData[node.id] }).focus) ?? false;
 }
 
 /**
@@ -101,7 +102,7 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
     surface: { width: number; height: number }
   ): HitTarget | null => {
     if (cardHit !== null) return cardHit;
-    if (!deps.modelPick || !canvasHasModelNode()) return null;
+    if (!deps.modelPick || !canvasHasModelNode(deps.nodeCapabilities)) return null;
     const pick = deps.modelPick(point, surface);
     return pick.ok && pick.value ? { kind: "node", nodeId: pick.value.nodeId } : null;
   };

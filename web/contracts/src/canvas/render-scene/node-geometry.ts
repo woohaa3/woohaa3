@@ -25,21 +25,14 @@ export function isModelPreviewNodeType(type: string): boolean {
  */
 export function bevyKindForNodeType(type: string): BevyNodeKind {
   switch (type) {
-    case "text":
-      return "text";
-    case "image":
-      return "image";
+    case "text": return "text";
+    case "image": return "image";
     case "model3d":
-    case COMPOSITE_ASSET_NODE_TYPE:
-      return "model";
-    case "audio":
-      return "audio";
-    case "video":
-      return "video";
-    case "group":
-      return "group";
-    default:
-      return "node";
+    case COMPOSITE_ASSET_NODE_TYPE: return "model";
+    case "audio": return "audio";
+    case "video": return "video";
+    case "group": return "group";
+    default: return "node";
   }
 }
 

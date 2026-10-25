@@ -188,6 +188,7 @@ fn selection_resize_handles_still_hit_after_indexing() {
     clear_snapshot();
     let mut scene = grid_scene(5);
     scene.selection = crate::protocol::Selection { nodes: vec!["n0".into()], edge: None };
+    scene.nodes[0].resizable = true;
     let snapshot = build_snapshot(&scene, 1);
     let mut snapshot = snapshot;
     apply_selection(&mut snapshot, &scene.selection.nodes);

@@ -57,6 +57,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
   const { options } = deps;
   return {
     canvas: deps.canvas,
+    nodeCapabilities: options.nodeCapabilities,
     onSceneSubmitted: deps.onSceneSubmitted,
     ...(options.compositeAssets ? { compositeAssets: options.compositeAssets } : {}),
     ...(options.canvasId ? { canvasId: options.canvasId } : {}),

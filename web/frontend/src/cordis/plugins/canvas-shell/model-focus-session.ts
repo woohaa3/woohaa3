@@ -52,6 +52,7 @@ import {
 
 /** 聚焦目标解析输入。 */
 export type FocusTargetInput = {
+  capabilities?: import("@woohaa3/contracts").NodeCapabilities;
   canvas: ServerCanvas;
   nodeId: string;
   viewport: { x: number; y: number; zoom: number };
@@ -74,8 +75,8 @@ export type ModelBounds = { aabb: Aabb; center: Vec3; radius: number; anchor: Ve
 
 function sceneInput(input: FocusTargetInput) {
   const node = input.canvas.document.nodes.find((entry) => entry.id === input.nodeId);
-  const isFilmSet = isFilmSetNode(node?.type, input.canvas.nodeData?.[input.nodeId]);
-  const size = node ? renderedModelNodeSize(node, input.canvas.nodeData?.[input.nodeId]) : null;
+  const isFilmSet = input.capabilities ? !!input.capabilities.scope : isFilmSetNode(node?.type, input.canvas.nodeData?.[input.nodeId]);
+  const size = node ? renderedModelNodeSize(node, input.canvas.nodeData?.[input.nodeId], input.capabilities) : null;
   return {
     sceneVersion: input.sceneVersion,
     ops: input.ops as never,
@@ -93,8 +94,8 @@ export function modelBounds(input: FocusTargetInput): ModelBounds | null {
 
   const node = input.canvas.document.nodes.find((entry) => entry.id === input.nodeId);
   if (!node) return null;
-  const isFilmSet = isFilmSetNode(node.type, input.canvas.nodeData?.[input.nodeId]);
-  const size = renderedModelNodeSize(node, input.canvas.nodeData?.[input.nodeId]);
+  const isFilmSet = input.capabilities ? !!input.capabilities.scope : isFilmSetNode(node.type, input.canvas.nodeData?.[input.nodeId]);
+  const size = renderedModelNodeSize(node, input.canvas.nodeData?.[input.nodeId], input.capabilities);
   const position = getWoohaa3CanvasNodeAbsolutePosition(
     { ...node, data: {} }, new Map(input.canvas.document.nodes.map(entry => [entry.id, { ...entry, data: {} }]))
   );
@@ -139,8 +140,8 @@ export function renderedModelNodeSize(node: {
   type: string;
   width?: number;
   height?: number;
-}, _data?: unknown): { width: number; height: number } {
-  return effectiveCanvasNodeSize(node);
+}, _data?: unknown, capabilities?: import("@woohaa3/contracts").NodeCapabilities): { width: number; height: number } {
+  return effectiveCanvasNodeSize(node, undefined, capabilities);
 }
 
 /**

@@ -1,3 +1,4 @@
+import { nodeCapabilityContext, type NodeCapabilityResolver } from "@woohaa3/contracts";
 /**
  * 节点顶部操作横条的纯判定逻辑
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1/3.2 / design D7）。
@@ -42,9 +43,16 @@ export function resolveNodeActionToolbarView(input: {
   nodes: readonly { id: string; type: string }[];
   focused: boolean;
   writable: boolean;
+  canvas?: ServerCanvas | null;
+  nodeCapabilities?: NodeCapabilityResolver;
 }): NodeActionToolbarView | null {
   if (input.focused) return null;
-  const target = resolveNodeActionToolbarTarget({ selectedNodeIds: input.selectedNodeIds, nodes: input.nodes });
+  const target = resolveNodeActionToolbarTarget({ selectedNodeIds: input.selectedNodeIds, nodes: input.nodes,
+    ...(input.nodeCapabilities ? { accepts: (id: string) => {
+      const context = input.canvas && nodeCapabilityContext(input.canvas, id);
+      return !!context && !!input.nodeCapabilities!.resolve(context).actions?.accepts(context);
+    } } : {})
+  });
   if (!target) return null;
   return { nodeId: target.nodeId, nodeType: target.nodeType, writable: input.writable };
 }

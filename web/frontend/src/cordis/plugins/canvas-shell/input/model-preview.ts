@@ -64,7 +64,7 @@ export function modelPreviewWheel(
     const node = core.renderedNode?.(id);
     if (node === undefined) return true;
     if (node === null) return false;
-    return (node.type === "model" || (!!node.model && !!node.modelPreview)) && !node.compositeAsset
+    return !!node.modelPreview && !node.compositeAsset
       && world.x >= node.x && world.x <= node.x + node.width
       && world.y >= node.y && world.y <= node.y + node.height;
   });

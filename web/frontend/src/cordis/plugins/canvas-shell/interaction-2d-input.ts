@@ -9,7 +9,7 @@ import { createHistoryClick } from "./input/history-click.js";
  * 右键菜单、双击预览。只通过 `InteractionCore` 访问共享坐标系、调度与提交，不自建监听。
  */
 import { modelPreviewPointerDown, modelPreviewPointerMove } from "./input/model-preview.js";
-import { bevyKindForNodeType, explainWoohaa3CanvasConnectionBlock, normalizeWoohaa3CanvasGroupSelection } from "@woohaa3/contracts";
+import { bevyKindForNodeType, builtinNodeCapabilityResolver, explainWoohaa3CanvasConnectionBlock, normalizeWoohaa3CanvasGroupSelection } from "@woohaa3/contracts";
 import { nodeSize, type Point } from "./hit-test.js";
 import { planAggregateConnect, planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -62,13 +62,20 @@ export function create2dInputFamily(core: InteractionCore) {
 
   const resizeTarget = (    gesture: Extract<Gesture, { kind: "resize" }>,
     world: Point
-  ): { width: number; height: number; position?: Point } | null =>
-    gesture.mode === "scope" && gesture.handle && gesture.anchor
+  ): { width: number; height: number; position?: Point } | null => {
+    const current = workingCanvasOf(woohaa3CanvasStore.getState());
+    const node = current?.document.nodes.find(node => node.id === gesture.nodeId);
+    if (!current || !node) return null;
+    const context = { canvas: current, node, data: current.nodeData[node.id] };
+    const resize = (options.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve(context).resize;
+    if (!resize) return null;
+    return gesture.mode === "scope" && gesture.handle && gesture.anchor
       ? scopeResizeTarget(
           { handle: gesture.handle, anchor: gesture.anchor, originCenter: gesture.originCenter, originWidth: gesture.originWidth, originHeight: gesture.originHeight },
-          world
+          world, resize.minimum(context)
         )
-      : resizeTargetHelper(gesture, world);
+      : resizeTargetHelper(gesture, world, options.nodeCapabilities);
+  };
 
   const commitDragGesture = drag.commit;
   /** 取消路径：手势作废，性能事实按 `cancelled` 结算（不记成 success）。 */
@@ -194,7 +201,7 @@ export function create2dInputFamily(core: InteractionCore) {
     if (hit && hit.kind === "resize") {
       const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
       const entry = canvasState?.document.nodes.find((node) => node.id === hit.nodeId);
-      if (entry) {
+      if (entry && canvasState && (options.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve({ canvas: canvasState, node: entry, data: canvasState.nodeData[entry.id] }).resize) {
         const scene2 = core.buildScene();
         const renderNode = scene2?.nodes.find((node) => node.id === hit.nodeId);
         const kind = renderNode?.type ?? bevyKindForNodeType(entry.type);

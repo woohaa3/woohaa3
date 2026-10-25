@@ -1,3 +1,4 @@
+import { builtinNodeCapabilitiesForType } from "../builtin-node-capabilities.js";
 /**
  * 节点顶部操作横条的纯几何与可见性判定
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1 / design D6/D7 修订）。
@@ -228,11 +229,9 @@ export function nodeActionToolbarLayout(
  * node type 判定是否呈现单节点横条，MUST NOT 按 film-set 业务 ID 分支。复合资产
  * 可以提供自己的动作；没有贡献时不绘制横条。
  */
-export const NODE_ACTION_TOOLBAR_NODE_TYPES = ["image", "video", "audio", "model3d", "group", "composite-asset"] as const;
-export type NodeActionToolbarNodeType = (typeof NODE_ACTION_TOOLBAR_NODE_TYPES)[number];
-
-export function isNodeActionToolbarNodeType(nodeType: string): nodeType is NodeActionToolbarNodeType {
-  return (NODE_ACTION_TOOLBAR_NODE_TYPES as readonly string[]).includes(nodeType);
+export type NodeActionToolbarNodeType = string;
+export function isNodeActionToolbarNodeType(nodeType: string): boolean {
+  return !!builtinNodeCapabilitiesForType(nodeType).actions;
 }
 
 /**
@@ -247,11 +246,12 @@ export function isNodeActionToolbarNodeType(nodeType: string): nodeType is NodeA
 export function resolveNodeActionToolbarTarget(input: {
   selectedNodeIds: readonly string[];
   nodes: readonly { id: string; type: string }[];
+  accepts?: (nodeId: string) => boolean;
 }): { nodeId: string; nodeType: NodeActionToolbarNodeType } | null {
   if (input.selectedNodeIds.length !== 1) return null;
   const nodeId = input.selectedNodeIds[0]!;
   const node = input.nodes.find((entry) => entry.id === nodeId);
-  if (!node || !isNodeActionToolbarNodeType(node.type)) return null;
+  if (!node || !(input.accepts ? input.accepts(node.id) : isNodeActionToolbarNodeType(node.type))) return null;
   return { nodeId, nodeType: node.type };
 }
 

@@ -1,3 +1,11 @@
+import { scriptModelPreparation, orbitModelPreview, modelResourceDemand, modelWorkspaceFocus, nodeActionContributions, rectangularNodeResize, buildCanvasRenderScene, type NodePreparationResult } from "@woohaa3/contracts";
+import { createContentIdentity, createResidencyCandidateCache, CanvasResourceCoordinator } from "../canvas-runtime/residency/index.js";
+import { applyNodeResourceLoading } from "../../services/node-resource-loading.js";
+import { resolveModelFocusTargets } from "../canvas-shell/model-focus-targets.js";
+import { resolveNodeActionToolbarView } from "../canvas-shell/node-action-toolbar-view.js";
+import { createDoubleClickHandler } from "../canvas-shell/interaction-double-click.js";
+import type { InteractionCore } from "../canvas-shell/interaction-core.js";
+import { createNodeImplementationRegistry } from "../../../extension-api/node-implementations.js";
 /**
  * Model Scene Plugin 测试
  * （change: enhance-model-scene-authoring-api，任务 5.4；
@@ -65,6 +73,7 @@ async function makeHarness(
   const installPlatform = (ctx: Context) => {
     ctx.provide("canvasState" as never, { getCanvas: () => woohaa3CanvasStore.getState().canvas, subscribe: woohaa3CanvasStore.subscribe } as never);
     ctx.provide("compositeAssets" as never, registry as never);
+    ctx.provide("nodeImplementations" as never, createNodeImplementationRegistry(registry) as never);
     ctx.provide("canvasRemote" as never, {
       reportModelScript: async (report: { nodeId: string; status: string }) => {
         reports.push({ nodeId: report.nodeId, status: report.status });
@@ -418,4 +427,82 @@ describe("model-scene plugin version dispatch", () => {
     expect((runtime!.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider).getResources().get("asset")?.ops).toHaveLength(1);
     expect(harness.registry.resolve(canvas, "asset")).toBeNull();
   });
+});
+
+it('one unknown implementation registration activates preparation, loading, residency, projection, focus and actions; unload/reload cleans all entrances', async () => {
+  const harness = await makeHarness(); runtime = harness.runtime;
+  const registry = runtime.ctx.get('nodeImplementations')!;
+  const canvas = canvasWith([{ id: 'new', source: V2_SIMPLE, version: 'woohaa-model-js-v2' }]);
+  canvas.document.nodes[0].type = 'not-hardcoded-anywhere';
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  const provider = runtime.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider;
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(provider.getResources().size).toBe(0);
+  const contentKeyOf = createContentIdentity({ nodeCapabilities: registry, modelResourceKey: id => provider.getResources().get(id)?.resourceKey ?? null });
+  let contentVersion = 0; const unsubscribe = provider.subscribe(() => contentVersion++);
+  const candidates = createResidencyCandidateCache(contentKeyOf, () => contentVersion, registry);
+  expect(candidates(canvas)).toHaveLength(0);
+  const prepare = vi.fn(scriptModelPreparation.prepare);
+  const binding = { type: 'not-hardcoded-anywhere', capabilities: {
+    appearance: { palette: 'node' as const, defaultSize: { width: 248, height: 232 } },
+    modelPreparation: { ...scriptModelPreparation, prepare }, modelPreview: orbitModelPreview,
+    resources: modelResourceDemand, focus: modelWorkspaceFocus, actions: nodeActionContributions,
+    resize: rectangularNodeResize,
+  } };
+  const stop = registry.register(binding);
+  expect(provider.isLoading?.('new')).toBe(true);
+  const pending = buildCanvasRenderScene({ canvas, nodeCapabilities: registry });
+  applyNodeResourceLoading(pending, { model: provider });
+  expect(pending.nodes[0].type).toBe('node');
+  await expect.poll(() => provider.getResources().size).toBe(1);
+  const scene = buildCanvasRenderScene({ canvas, nodeCapabilities: registry, modelResources: provider.getResources(), selection: { nodes: ['new'] } });
+  expect(scene.nodes[0]).toMatchObject({ type: 'node', resizable: true, model: { resourceKey: provider.getResources().get('new')!.resourceKey } });
+  expect(scene.nodes[0].modelPreview).toBeDefined();
+  expect(candidates(canvas)).toMatchObject([{ nodeId: 'new', eligible: true, previewSlot: true }]);
+  const coordinator = new CanvasResourceCoordinator({ policy: { previewSlots: 1 } });
+  coordinator.project({ viewport: { x: 0, y: 0, zoom: 1 }, surface: { width: 1024, height: 768, pixelRatio: 1 }, pageVisible: true, interactive: [], pins: [], candidates: candidates(canvas) });
+  expect(coordinator.isAdmitted('new')).toBe(true);
+  const targets = resolveModelFocusTargets({ canvas, resources: provider.getResources(), nodeCapabilities: registry, viewport: { x: 0, y: 0, zoom: 1 }, surface: { width: 1024, height: 768 } });
+  expect(targets.map(target => target.nodeId)).toEqual(['new']);
+  expect(resolveNodeActionToolbarView({ canvas, nodeCapabilities: registry, nodes: canvas.document.nodes, selectedNodeIds: ['new'], focused: false, writable: false })).toMatchObject({ nodeId: 'new', writable: false });
+  const intent = vi.fn();
+  const core = {
+    options: { nodeCapabilities: registry, getRuntime: () => null, getModelFocusTargets: () => targets, onModelFocusIntent: intent },
+    canvas: { getBoundingClientRect: () => ({ left: 0, top: 0 }) }, model: {},
+    focusInputBlocked: () => false, activeViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+    surfaceSize: () => ({ width: 1024, height: 768 }), queryPoint: () => ({ ok: true, value: { kind: 'model-preview', nodeId: 'new' } }), setSelection: vi.fn(),
+  } as unknown as InteractionCore;
+  createDoubleClickHandler(core).onDoubleClick({ clientX: 50, clientY: 50, preventDefault: vi.fn() } as unknown as MouseEvent);
+  expect(intent).toHaveBeenCalledWith({ type: 'enter', nodeId: 'new', kind: 'model' });
+  registry.subscribe(() => {}); // Repeated document notification must not rerun preparation.
+  woohaa3CanvasStore.getState().applyRemoteCanvas({ ...canvas });
+  await new Promise(resolve => setTimeout(resolve, 0)); expect(prepare).toHaveBeenCalledTimes(1);
+  stop();
+  expect(provider.getResources().size).toBe(0); expect(provider.isLoading?.('new')).toBe(false);
+  expect(candidates(canvas)).toHaveLength(0);
+  expect(resolveModelFocusTargets({ canvas, resources: provider.getResources(), nodeCapabilities: registry, viewport: { x: 0, y: 0, zoom: 1 }, surface: { width: 1024, height: 768 } })).toEqual([]);
+  registry.register(binding); stop();
+  await expect.poll(() => provider.getResources().size).toBe(1); expect(prepare).toHaveBeenCalledTimes(2);
+  unsubscribe();
+});
+
+it('late generation results release themselves without ending the next loading identity or publishing resources', async () => {
+  const harness = await makeHarness(); runtime = harness.runtime;
+  const registry = runtime.ctx.get('nodeImplementations')!;
+  const canvas = canvasWith([{ id: 'new', source: V2_SIMPLE, version: 'woohaa-model-js-v2' }]);
+  canvas.document.nodes[0].type = 'late-custom';
+  let finishOld!: (result: NodePreparationResult) => void;
+  const release = vi.fn();
+  const stop = registry.register({ type: 'late-custom', capabilities: { modelPreparation: {
+    executionKey: () => 'same', prepare: () => new Promise(resolve => { finishOld = resolve; })
+  } } });
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  await expect.poll(() => typeof finishOld).toBe('function');
+  stop(); registry.register({ type: 'late-custom', capabilities: { modelPreparation: scriptModelPreparation } });
+  const provider = runtime.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider;
+  expect(provider.isLoading?.('new')).toBe(true);
+  finishOld({ status: 'ok', release, resource: prepareModelResource({ sceneVersion: 'woohaa-model-scene-ir-v2', ops: [] }) });
+  await expect.poll(() => provider.getResources().get('new')?.ops.length).toBe(1);
+  expect(release).toHaveBeenCalledTimes(1);
+  expect(provider.isLoading?.('new')).toBe(false);
 });

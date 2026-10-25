@@ -134,3 +134,6 @@ export * from "./canvas/group-authoring-scope.js";
 export * from "./canvas/node-history/execution-presentation.js";
 
 export * from "./canvas/composite-children.js";
+
+export * from "./canvas/node-capabilities.js";
+export * from "./canvas/builtin-node-capabilities.js";

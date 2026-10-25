@@ -48,7 +48,6 @@ import {
 import { captureSelected, renderWithBevy, acquireCaptureLock } from "./model-shot-capture-run.js";
 import type { InteractionControllerOptions } from "../canvas-shell/interaction-controller.js";
 import { filmSetDisplayRotation, filmSetDisplayScale } from "../canvas-shell/model-focus-session.js";
-import { isModelEditorNodeType } from "../canvas-shell/model-focus-targets.js";
 
 type ShotGestureHandler = NonNullable<InteractionControllerOptions["shotGesture"]>;
 type ShotFocusGestureHandler = NonNullable<InteractionControllerOptions["focusGesture"]>;
@@ -97,7 +96,7 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
         previousHistoryMode = historyMode;
         const candidate = ctx.canvasRuntime.modelFocusProjection()?.nodeId ?? null;
         const currentCanvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
-        const focused = currentCanvas?.document.nodes.some(node => node.id === candidate && isModelEditorNodeType(node.type, currentCanvas?.nodeData?.[node.id])) ? candidate : null;
+        const focused = currentCanvas?.document.nodes.some(node => node.id === candidate && (ctx.get("nodeImplementations")?.resolve({ canvas: currentCanvas, node, data: currentCanvas.nodeData[node.id] }).focus?.kind({ canvas: currentCanvas, node, data: currentCanvas.nodeData[node.id] }) ?? (node.type === "model3d" || node.type === "composite-asset")) === "model") ? candidate : null;
         const current = session.getState().nodeId;
         if (focused && focused !== current) {
           session.enter(focused);
@@ -590,7 +589,7 @@ export function modelEditorExtension(options: ModelEditorPluginOptions = {}): Pl
         session.exit();
       };
     },
-    { name: MODEL_EDITOR_PLUGIN_ID, inject: ["canvasState", "compositeAssets", "slots", "canvasRuntime", "canvasRemote", "canvasSession", "canvasEdit", "mediaRemote", "focusExit", "canvasNavigation"] }
+    { name: MODEL_EDITOR_PLUGIN_ID, inject: ["nodeImplementations", "canvasState", "compositeAssets", "slots", "canvasRuntime", "canvasRemote", "canvasSession", "canvasEdit", "mediaRemote", "focusExit", "canvasNavigation"] }
   );
 }
 

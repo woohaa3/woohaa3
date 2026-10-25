@@ -7,7 +7,7 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
-import { bevyKindForNodeType, prepareModelResource } from "@woohaa3/contracts";
+import { prepareModelResource } from "@woohaa3/contracts";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { canvasSearchStore } from "../../services/canvas-search-store.js";
@@ -64,6 +64,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
           viewport: controller?.viewport() ?? { x: 0, y: 0, zoom: 1 },
           surface: controller?.surface() ?? { width: 1, height: 1, pixelRatio: 1 },
           resources,
+          nodeCapabilities: ctx.nodeImplementations,
           nonCanonicalNodes: provider?.nonCanonicalNodes?.() ?? new Set()
         });
       };
@@ -72,6 +73,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
         new CanvasRuntimeHost({
           canvasId,
           compositeAssets: ctx.compositeAssets,
+          nodeCapabilities: ctx.nodeImplementations,
           getSession: () => ctx.canvasSession,
           getModelResources: () => {
             const provider = ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider | undefined;
@@ -92,9 +94,9 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               && host.modelSceneOverride(nodeId);
             if (focusedOverride) {
               const node = canvas?.document.nodes.find(node => node.id === nodeId);
-              return !!node && bevyKindForNodeType(node.type) === "model";
+              return !!node && !!ctx.nodeImplementations.resolve({ canvas: canvas!, node, data: canvas!.nodeData[node.id] }).focus;
             }
-            return hasModelFocusTarget({ canvas, resources }, nodeId);
+            return hasModelFocusTarget({ canvas, resources, nodeCapabilities: ctx.nodeImplementations }, nodeId);
           },
           getTheme: () => ctx.theme.getSnapshot(),
           subscribeTheme: (listener) => ctx.theme.subscribe(listener),
@@ -102,7 +104,8 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
             const provider = ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider | undefined;
             const stop = provider?.subscribe(listener);
             const stopComposite = ctx.compositeAssets.subscribe(listener);
-            return () => { stop?.(); stopComposite(); };
+            const stopNodes = ctx.nodeImplementations.subscribe(listener);
+            return () => { stop?.(); stopComposite(); stopNodes(); };
           },
           getRunState: () => {
             const service = ctx.get(RUN_STATE_SERVICE) as RunStateService | undefined;
@@ -287,7 +290,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
         };
       }, "canvas-runtime-load");
     },
-    { name: CANVAS_RUNTIME_PLUGIN_ID, inject: ["compositeAssets", "canvasState", "canvasSession", "inputScopes", "theme", "canvasNavigation", "canvasEdit", "slots"] }
+    { name: CANVAS_RUNTIME_PLUGIN_ID, inject: ["nodeImplementations", "compositeAssets", "canvasState", "canvasSession", "inputScopes", "theme", "canvasNavigation", "canvasEdit", "slots"] }
   );
 }
 

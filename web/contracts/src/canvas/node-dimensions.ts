@@ -1,6 +1,7 @@
+import { builtinNodeCapabilitiesForType } from "./builtin-node-capabilities.js";
+import type { NodeCapabilities } from "./node-capabilities.js";
 /** Shared card dimensions for rendering, API projections, placement and group bounds. */
 import { MIN_NODE_HEIGHT, MIN_NODE_WIDTH } from "./domain/core/node-factory.js";
-import { isCompositeAssetNodeType } from "./domain/core/composite-asset-identity.js";
 
 export const RICH_CONTENT_NODE_SIZE = { width: 248, height: 232 } as const;
 export const COMPACT_NODE_SIZE = { width: 196, height: 64 } as const;
@@ -49,19 +50,14 @@ export function compositeAssetNodeBoxSize(node: NodeDimensions): {
 export function effectiveCanvasNodeSize(
   node: NodeDimensions & { type: string },
   override?: { width: number; height: number },
+  capabilities: NodeCapabilities = builtinNodeCapabilitiesForType(node.type),
 ): { width: number; height: number } {
-  const preview = node.type === "model3d";
-  const rich =
-    preview || ["text", "image", "audio", "video"].includes(node.type);
-  const fallback = isCompositeAssetNodeType(node.type)
-    ? COMPOSITE_ASSET_DEFAULT_SIZE
-    : rich
-      ? RICH_CONTENT_NODE_SIZE
-      : COMPACT_NODE_SIZE;
-  const legacyPreview =
-    preview && (node.height ?? COMPACT_NODE_SIZE.height) <= 116;
+  const preview = !!capabilities.modelPreview;
+  const fallback = capabilities.appearance?.defaultSize ?? COMPACT_NODE_SIZE;
+  const legacyPreview = capabilities.resize?.legacyPreviewHeight !== undefined
+    && (node.height ?? COMPACT_NODE_SIZE.height) <= capabilities.resize.legacyPreviewHeight;
   const base = override ?? (legacyPreview ? fallback : node);
-  const group = node.type === "group";
+  const group = !!capabilities.container;
   return {
     width: dimension(base.width, fallback.width, group ? 0 : MIN_NODE_WIDTH),
     height: dimension(

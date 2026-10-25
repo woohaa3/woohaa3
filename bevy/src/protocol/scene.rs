@@ -653,6 +653,9 @@ impl Scene {
         self.validate_version()?;
         self.theme.validate()?;
         for node in &self.nodes {
+            if node.resizable && (self.selection.nodes.len() != 1 || self.selection.nodes[0] != node.id) {
+                return Err("Invalid resize projection");
+            }
             if let Some(run) = &node.aggregate_run {
                 if let Some(film) = &run.film_set {
                     if !run.active || node.composite_asset.is_none() { return Err("Invalid film set run owner"); }
@@ -663,7 +666,7 @@ impl Scene {
                 if ![view.azimuth, view.elevation, view.distance_scale].iter().chain(view.target_offset.iter()).all(|v| v.is_finite())
                     || view.elevation.abs() >= std::f32::consts::FRAC_PI_2
                     || view.distance_scale <= 0.
-                    || node.kind != "model" || node.group.is_some() {
+                    || node.group.is_some() || node.composite_asset.is_some() {
                     return Err("Invalid model preview");
                 }
             }

@@ -1,3 +1,4 @@
+import { builtinNodeCapabilityResolver, type NodeCapabilityResolver } from "@woohaa3/contracts";
 /**
  * 节点的稳定内容身份
  * （change: 2026-10-23-scale-canvas-media-residency，design D4）。
@@ -9,7 +10,6 @@
  * 性能口径（design D7 / 任务 7.1）：资产表按画布对象身份 memo，静止帧不重建索引；身份解析
  * 只做 map 查找，不逐节点线性搜索资产数组。
  */
-import { isCompositeAssetNodeType } from "@woohaa3/contracts";
 import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
 
 /** 画布节点（渲染中立）：只依赖身份、类型与位置，不读取 `data`。 */
@@ -27,6 +27,7 @@ export function assetContentKey(asset: StoredAsset | undefined): string | null {
 }
 
 export type ContentIdentityOptions = {
+  nodeCapabilities?: NodeCapabilityResolver;
   /** 模型 prepared resource key（nodeId → resourceKey）；缺省视为无模型内容。 */
   modelResourceKey?: (nodeId: string) => string | null;
   /** 复合资产内容身份；缺省用「画布 + 节点」稳定身份。 */
@@ -55,23 +56,14 @@ export function createContentIdentity(
   };
   return (canvas) => (node) => {
     if (!canvas) return null;
-    if (node.type === "image" || node.type === "video") {
-      const outputId = (canvas.nodeData as Record<string, { outputAssetId?: unknown } | undefined>)[node.id]
-        ?.outputAssetId;
-      if (typeof outputId !== "string") return null;
-      return assetContentKey(assetsOf(canvas).get(outputId));
-    }
-    if (node.type === "model3d") return options.modelResourceKey?.(node.id) ?? null;
-    if (isCompositeAssetNodeType(node.type)) {
-      // 复合资产若已派生 prepared model resource（片场/游戏炼丹炉的模型投影），内容身份必须是
-      // 该资源的 `resourceKey`：只有模型 key 才会被 `setModelPayloadLeases` 认作 payload lease。
-      // 用合成身份会让片场的模型 payload 永远进不了需求集合，被 Rust 侧淘汰后不再重建，
-      // 表现为「片场节点的模型全部不显示」。非模型复合资产（如生物视频资产）没有 prepared
-      // 资源，才回落到合成身份。
-      const modelKey = options.modelResourceKey?.(node.id);
-      if (modelKey) return modelKey;
-      return options.compositeKey?.(node, canvas) ?? `${canvas.id}:composite:${node.id}`;
-    }
-    return null;
+    const context = { canvas, node, data: canvas.nodeData[node.id] };
+    const resources = (options.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve(context).resources;
+    if (!resources) return null;
+    const outputId = context.data?.outputAssetId;
+    const assetKey = typeof outputId === "string" ? assetContentKey(assetsOf(canvas).get(outputId)) : null;
+    return resources.contentKey({ ...context,
+      assetContentKey: assetKey,
+      modelResourceKey: options.modelResourceKey?.(node.id) ?? null,
+    });
   };
 }

@@ -47,6 +47,7 @@ pub(super) struct SnapshotNode {
     pub(super) shot_preview_content: Option<(f32, f32, f32, f32)>,
     /// 选中时的 resize 抓手；复合资产为菱形右顶点三角，普通节点为右下方形。
     pub(super) resize: Option<ScopeGrip>,
+    pub(super) resizable: bool,
     /// 顶部操作横条世界几何（change: 2026-10-13-add-node-to-film-set-shortcut）；无横条为 `None`。
     pub(super) node_actions: Option<layout::NodeActionLayout>,
 }
@@ -329,6 +330,7 @@ fn snapshot_node(
         group_status: layout::group_run_status_rect(node),
         // resize 抓手只在选中时命中；快照构建时按 selection 决定（见 `apply_selection`）。
         resize: None,
+        resizable: node.resizable,
         preview: if film_set {
             None
         } else {
@@ -347,18 +349,14 @@ pub(super) fn apply_selection(snapshot: &mut InteractionSnapshot, selected: &[St
     let set: std::collections::HashSet<&str> = selected.iter().map(String::as_str).collect();
     for node in &mut snapshot.nodes {
         // 片场：范围右顶点/右下角可拖拽缩放（拖动即等比缩放整个片场内容）。
-        // group 容器维持“选中不可 resize”的既有语义。
-        if !set.contains(node.id.as_str()) || node.group {
+        // Selection can narrow an accepted capability, never grant a missing one.
+        if set.len() != 1 || !set.contains(node.id.as_str()) || !node.resizable {
             node.resize = None;
         } else if let Some(scope) = &node.scope {
             node.resize = Some(scope::grip(scope));
         } else {
-            node.resize = Some(ScopeGrip::Rect(ScopeRect {
-                x: node.bounds.0 + node.bounds.2 - layout::RESIZE_HANDLE_SIZE,
-                y: node.bounds.1 + node.bounds.3 - layout::RESIZE_HANDLE_SIZE,
-                width: layout::RESIZE_HANDLE_SIZE,
-                height: layout::RESIZE_HANDLE_SIZE,
-            }));
+            let (x, y, width, height) = layout::resize_rect(node.bounds.0, node.bounds.1, node.bounds.2, node.bounds.3);
+            node.resize = Some(ScopeGrip::Rect(ScopeRect { x, y, width, height }));
         }
     }
 }

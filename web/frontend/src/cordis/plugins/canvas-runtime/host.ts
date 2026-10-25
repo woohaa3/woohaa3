@@ -159,7 +159,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     rect: import("../../focus/types.js").FocusContentRect | null,
     initial: boolean
   ): void {
-    projectFocusContentRect(this.controllerInstance, rect, this.focusRectStore.contentRectRight(), initial, this.modelFocus);
+    projectFocusContentRect(this.controllerInstance, rect, this.focusRectStore.contentRectRight(), initial, this.modelFocus, this.options.nodeCapabilities);
   }
   /** 本地已校验模型 Scene IR override（nodeId → ops），只影响聚焦 ModelRoot。 */
   private readonly modelSceneOverrides = new ModelSceneOverrideStore();

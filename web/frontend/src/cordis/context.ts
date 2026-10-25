@@ -72,6 +72,7 @@ declare module "@deepseek-ai/cordis" {
      */
     modelWorkspace: import("../extension-api/model-workspace.js").ModelWorkspaceService;
     hoverState: import("../extension-api/model-workspace.js").HoverStateService;
+    nodeImplementations: import("../extension-api/node-implementations.js").NodeImplementationRegistry;
     compositeAssets: import("../extension-api/composite-assets.js").CompositeAssetRegistry;
     canvasState: import("./contract/platform.js").CanvasStoreFacade;
     dialogs: DialogsService;

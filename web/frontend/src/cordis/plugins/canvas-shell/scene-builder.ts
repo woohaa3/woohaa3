@@ -102,6 +102,7 @@ export function buildSceneWithResources(
   });
   const scene = buildCanvasRenderScene({
     canvas: canvasState,
+    nodeCapabilities: options.nodeCapabilities,
     modelPreviews: modelPreviewStore.snapshot(),
     selection: { nodes: [...input.selected], edge: null },
     draft: input.draft,
@@ -146,7 +147,13 @@ export function buildSceneWithResources(
   applyNodeResourceLoading(scene, {
     image: options.textureSync,
     video: options.videoSessions,
-    model: options.isModelLoading ? { isLoading: options.isModelLoading } : undefined
+    model: options.isModelLoading ? {
+      isLoading: options.isModelLoading,
+      isResourceNode: node => {
+        const source = canvasState.document.nodes.find(entry => entry.id === node.id);
+        return !!source && !!(options.nodeCapabilities?.resolve({ canvas: canvasState, node: source, data: canvasState.nodeData[node.id] }).modelPreparation);
+      }
+    } : undefined
   });
   for (const node of scene.nodes) {
     // 内容投影回调只改内容/媒体/对象，不拥有形状声明；先记录 mapper 派生的形状，回调后恢复，

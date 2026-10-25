@@ -1,3 +1,4 @@
+import { builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabilityResolver } from "@woohaa3/contracts";
 /**
  * 从 working 画布投影页面资源需求
  * （change: 2026-10-23-scale-canvas-media-residency，design D1/D7）。
@@ -9,11 +10,6 @@
  * 静止热路径（design D7 / 任务 7.1）：候选表按 working canvas 对象身份 memo；视口/选择/hover
  * 变化只重算需求分类，不重新解析资产 URL 或模型身份。文档变化（新对象）才重建候选表。
  */
-import {
-  isCompositeAssetNodeType,
-  readNodeHeight,
-  readNodeWidth
-} from "@woohaa3/contracts";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import type { ContentKeyOf } from "./content-identity.js";
 import type { CanvasResourceCoordinator } from "./coordinator.js";
@@ -22,7 +18,7 @@ import type { CanvasResourceCoordinator } from "./coordinator.js";
 type CanvasNode = ServerCanvas["document"]["nodes"][number];
 
 /** 参与重资源准入的节点类型（图片/视频/模型/片场）。 */
-const MEDIA_NODE_TYPES = new Set(["image", "video", "model3d"]);
+
 
 export type ResidencyCandidate = {
   nodeId: string;
@@ -51,7 +47,8 @@ export type ResidencyCandidate = {
  */
 export function collectResidencyCandidates(
   canvas: ServerCanvas,
-  contentKeyOf: ContentKeyOf
+  contentKeyOf: ContentKeyOf,
+  resolver: NodeCapabilityResolver = builtinNodeCapabilityResolver
 ): ResidencyCandidate[] {
   const byId = new Map<string, CanvasNode>(canvas.document.nodes.map((node) => [node.id, node]));
   const absolute = (node: CanvasNode): { x: number; y: number } => {
@@ -71,7 +68,9 @@ export function collectResidencyCandidates(
   };
   const candidates: ResidencyCandidate[] = [];
   for (const node of canvas.document.nodes) {
-    if (!MEDIA_NODE_TYPES.has(node.type) && !isCompositeAssetNodeType(node.type)) continue;
+    const capabilities = resolver.resolve({ canvas, node, data: canvas.nodeData[node.id] });
+    if (!capabilities.resources) continue;
+    const size = effectiveCanvasNodeSize(node, undefined, capabilities);
     const key = contentKeyOf(node);
     const position = absolute(node);
     candidates.push({
@@ -79,11 +78,11 @@ export function collectResidencyCandidates(
       contentKey: key ?? "",
       x: position.x,
       y: position.y,
-      width: readNodeWidth(node as never),
-      height: readNodeHeight(node as never),
+      width: size.width,
+      height: size.height,
       eligible: key !== null,
       // 离屏预览相机只为模型/复合资产创建；图片与视频走卡片贴图，不占预览渲染槽。
-      previewSlot: node.type === "model3d" || isCompositeAssetNodeType(node.type)
+      previewSlot: capabilities.resources.previewSlot
     });
   }
   return candidates;
@@ -103,18 +102,21 @@ export function collectResidencyCandidates(
  */
 export function createResidencyCandidateCache(
   contentKeyOfOf: (canvas: ServerCanvas | null) => ContentKeyOf,
-  contentVersion: () => number = () => 0
+  contentVersion: () => number = () => 0,
+  resolver: NodeCapabilityResolver = builtinNodeCapabilityResolver
 ): (canvas: ServerCanvas | null) => readonly ResidencyCandidate[] {
   let memoSource: ServerCanvas | null = null;
   let memoVersion = -1;
+  let memoRegistryRevision = -1;
   let memo: readonly ResidencyCandidate[] = [];
   return (canvas) => {
     if (!canvas) return [];
     const version = contentVersion();
-    if (canvas === memoSource && version === memoVersion) return memo;
+    if (canvas === memoSource && version === memoVersion && memoRegistryRevision === resolver.getRevision()) return memo;
     memoSource = canvas;
     memoVersion = version;
-    memo = collectResidencyCandidates(canvas, contentKeyOfOf(canvas));
+    memoRegistryRevision = resolver.getRevision();
+    memo = collectResidencyCandidates(canvas, contentKeyOfOf(canvas), resolver);
     return memo;
   };
 }

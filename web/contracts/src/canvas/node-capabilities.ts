@@ -1,0 +1,49 @@
+/** Runtime implementation contracts. Never persisted and never sent as executable wire data. */
+import type { CanvasNodeData, ServerCanvas } from './domain/index.js';
+import type { PreparedModelResource } from './prepared-model.js';
+import type { BevyModelPreview } from './render-scene/wire-model.js';
+import type { BevyCompositeAssetCompositionInfo, CompositeAssetScopeShape } from './render-scene/wire-scene.js';
+import type { BevyNodeKind } from './render-scene/node-geometry.js';
+
+export type NodeCapabilityContext = {
+  canvas: ServerCanvas;
+  node: ServerCanvas['document']['nodes'][number];
+  data: CanvasNodeData | undefined;
+};
+export type NodePreparationResult = {
+  resource?: PreparedModelResource;
+  composition?: BevyCompositeAssetCompositionInfo;
+  diagnostic?: string;
+  status: string;
+  /** Optional ownership-specific resource cleanup, including discarded late results. */
+  release?: () => void;
+};
+export type NodeModelPreparation = {
+  executionKey(context: NodeCapabilityContext): string | undefined;
+  prepare(context: NodeCapabilityContext): NodePreparationResult | Promise<NodePreparationResult>;
+};
+export type NodeResourceContext = NodeCapabilityContext & {
+  modelResourceKey: string | null;
+  assetContentKey: string | null;
+};
+export type NodeCapabilities = {
+  appearance?: Readonly<{ palette: BevyNodeKind; defaultSize: Readonly<{ width: number; height: number }>; cardLabel?: string }>;
+  modelPreparation?: NodeModelPreparation;
+  modelPreview?: { project(context: NodeCapabilityContext, view?: BevyModelPreview): BevyModelPreview };
+  scope?: { shape(context: NodeCapabilityContext): CompositeAssetScopeShape };
+  container?: { project(context: NodeCapabilityContext, counts: { memberCount: number; outputCapableLeafCount: number }): { title: string; memberCount: number; outputCapableLeafCount: number } };
+  connections?: { endpoints(context: NodeCapabilityContext): 'ordinary' | 'none' | 'aggregate' };
+  resources?: { channel: 'image' | 'video' | 'model'; previewSlot: boolean; contentKey(context: NodeResourceContext): string | null };
+  focus?: { kind(context: NodeCapabilityContext): 'model' | 'extension' | null };
+  resize?: { mode: 'rect' | 'scope'; minimum(context: NodeCapabilityContext): { width: number; height: number }; legacyPreviewHeight?: number };
+  actions?: { accepts(context: NodeCapabilityContext): boolean };
+};
+export type ResolvedNodeCapabilities = Readonly<NodeCapabilities> & { readonly generation: number };
+export interface NodeCapabilityResolver {
+  resolve(context: NodeCapabilityContext): ResolvedNodeCapabilities;
+  getRevision(): number;
+}
+export function nodeCapabilityContext(canvas: ServerCanvas, nodeId: string): NodeCapabilityContext | null {
+  const node = canvas.document.nodes.find(node => node.id === nodeId);
+  return node ? { canvas, node, data: canvas.nodeData[nodeId] } : null;
+}

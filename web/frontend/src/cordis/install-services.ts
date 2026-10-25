@@ -1,3 +1,4 @@
+import { createNodeImplementationRegistry } from "../extension-api/node-implementations.js";
 import { installTaskMonitorAction } from "../pages/task-monitor/entry.js";
 import { hoverNodeStore } from "./services/hover-store.js";
 /**
@@ -364,6 +365,9 @@ export async function installCanvasPageServices(
   const compositeAssets = new CompositeAssetRegistry();
   ctx.provide("compositeAssets" as never, compositeAssets as never);
   ctx.effect(() => () => compositeAssets.clear(), "composite-asset-registry");
+  const nodeImplementations = createNodeImplementationRegistry(compositeAssets);
+  ctx.provide("nodeImplementations" as never, nodeImplementations as never);
+  ctx.effect(() => () => nodeImplementations.clear(), "node-implementation-registry");
   const inputScopes = new InputScopeService();
   const taskCatalog = new TaskCatalogStore(taskRemote);
   const selection: SelectionService = nodeSelectionStore;

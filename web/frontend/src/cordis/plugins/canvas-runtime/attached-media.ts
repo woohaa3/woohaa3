@@ -87,6 +87,7 @@ export function createAttachedMedia(input: {
     });
   }
   const contentKeyOfOf = createContentIdentity({
+    nodeCapabilities: options.nodeCapabilities,
     // 模型内容身份用 prepared resource key（不含 nodeId）；缺资源视为无内容。
     modelResourceKey: (nodeId) => options.getModelResources?.().get(nodeId)?.resourceKey ?? null
   });
@@ -94,8 +95,8 @@ export function createAttachedMedia(input: {
   // 变成「有内容」。候选表与准入投影都必须据此失效，否则首次投影早于资源就绪时，模型永远不会
   // 进入需求集合（真实故障：片场模型与模型卡片不显示，只有 hover 提升 interactive 才出现）。
   // 版本由宿主在 model-scene 通知时单调推进：O(1)，静止帧不遍历资源表。
-  const contentVersion = input.getModelContentVersion ?? (() => 0);
-  const candidatesFor = createResidencyCandidateCache(contentKeyOfOf, contentVersion);
+  const contentVersion = () => (input.getModelContentVersion?.() ?? 0) + (options.nodeCapabilities?.getRevision() ?? 0);
+  const candidatesFor = createResidencyCandidateCache(contentKeyOfOf, contentVersion, options.nodeCapabilities);
   const projectResidency = createResidencyProjector({
     coordinator: residency,
     getCanvas,

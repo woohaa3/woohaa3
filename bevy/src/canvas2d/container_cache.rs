@@ -18,6 +18,7 @@ struct Key {
     has_model: bool,
     group: Option<GroupPresentation>,
     selected: bool,
+    resizable: bool,
     hovered: bool,
     /// 聚合节点运行遮罩（change: 2026-10-12-unify-generation-history-strip，design D5）：
     /// 仅聚合节点（复合资产）出现，运行中时绘制半透明遮罩 + 「运行中」。
@@ -40,6 +41,7 @@ impl Key {
             scope_vertices: n.composite_asset.as_ref().map(|_| super::scope::node_scope(n).vertices),
             group: n.group.clone(),
             selected: scene.selection.nodes.contains(&n.id),
+            resizable: n.resizable,
             hovered: n.composite_asset.is_some()
                 && scene.hover.as_ref().and_then(|h| h.node_id.as_deref()) == Some(n.id.as_str()),
             aggregate_run: n.aggregate_run.as_ref().is_some_and(|run| run.active && run.film_set.is_none()),

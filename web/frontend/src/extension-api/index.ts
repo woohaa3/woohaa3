@@ -159,3 +159,6 @@ export type { RunStateService } from "../cordis/plugins/service-keys.js";
 
 export { AgentAssistantSettingsLink, openAgentAssistant } from "./agent-assistant.js";
 export * from "./assistant-execution.js";
+
+export * from "./node-implementations.js";
+export { scriptModelPreparation, orbitModelPreview, modelWorkspaceFocus, nodeActionContributions, rectangularNodeResize, modelResourceDemand } from "@woohaa3/contracts";
