@@ -3,7 +3,8 @@
  * （change: 2026-10-20-add-local-client-telemetry，任务 5.2 / design D9）。
  *
  * 筛选分两层，与 URL 的边界一致：
- * - **URL 承载**：窗口（分段控件）、事件名、结果——都是有界枚举，改了立即生效并重置游标；
+ * - **URL 承载**：窗口（分段控件）、事件名、结果、构建模式（`mode`）与聚合分组（`groupBy`）
+ *   ——都是有界枚举，改了立即生效；前三项与 `mode` 会重置游标，`groupBy` 只换聚合维度；
  * - **页面本地**：错误码是运行时取值（有 64 字符形状但取值空间不受控），不放进可分享的 URL，
  *   因此用草稿输入 + 显式「应用」，且草稿不触发请求（同 task-monitor 的草稿/已应用分离）。
  *
@@ -12,10 +13,13 @@
 import { useEffect, useState } from "react";
 import {
   TELEMETRY_EVENT_NAMES,
+  TELEMETRY_PERF_MODES,
   TELEMETRY_RESULTS,
   TELEMETRY_WINDOWS,
+  type TelemetryAttributeKey,
   type TelemetryEventName,
   type TelemetryEventRecord,
+  type TelemetryPerfMode,
   type TelemetryResult,
   type TelemetryWindow
 } from "@woohaa3/contracts";
@@ -28,9 +32,12 @@ import {
   eventNameLabel,
   formatDuration,
   formatLocalTime,
+  groupByLabel,
   localTimeZoneName,
+  perfModeLabel,
   resultLabel
 } from "./format.js";
+import { GROUP_BY_OPTIONS } from "./format.js";
 import { normalizeErrorCodeFilter } from "./query.js";
 
 const ALL = "__all__";
@@ -45,25 +52,45 @@ const RESULT_OPTIONS: readonly ListboxOption[] = [
   ...TELEMETRY_RESULTS.map((result) => ({ value: result, label: resultLabel(result) }))
 ];
 
+/** 构建模式筛选：只列三个封闭取值，缺省"全部"。 */
+const MODE_OPTIONS: readonly ListboxOption[] = [
+  { value: ALL, label: "全部构建" },
+  ...TELEMETRY_PERF_MODES.map((mode) => ({ value: mode, label: perfModeLabel(mode) }))
+];
+
+/** 分组维度：第一项是"不分组"（按事件名）。 */
+const GROUP_BY_OPTIONS_LIST: readonly ListboxOption[] = [
+  { value: ALL, label: "按事件名" },
+  ...GROUP_BY_OPTIONS.map((key) => ({ value: key, label: `按${groupByLabel(key)}` }))
+];
+
 /** 筛选工具栏。 */
 export function EventFilters({
   window,
   name,
   result,
+  mode,
+  groupBy,
   errorCode,
   onWindowChange,
   onNameChange,
   onResultChange,
+  onModeChange,
+  onGroupByChange,
   onErrorCodeApply,
   onClear
 }: {
   window: TelemetryWindow;
   name?: TelemetryEventName;
   result?: TelemetryResult;
+  mode?: TelemetryPerfMode;
+  groupBy?: TelemetryAttributeKey;
   errorCode?: string;
   onWindowChange: (window: TelemetryWindow) => void;
   onNameChange: (name: TelemetryEventName | undefined) => void;
   onResultChange: (result: TelemetryResult | undefined) => void;
+  onModeChange: (mode: TelemetryPerfMode | undefined) => void;
+  onGroupByChange: (groupBy: TelemetryAttributeKey | undefined) => void;
   onErrorCodeApply: (errorCode: string | undefined) => void;
   onClear: () => void;
 }) {
@@ -85,7 +112,7 @@ export function EventFilters({
           dataAttributes={{ "data-testid": "telemetry-window" }}
         />
         <div className="telemetry__filter-spacer" />
-        <Button size="sm" tone="ghost" onClick={onClear} disabled={!name && !result && !errorCode}>
+        <Button size="sm" tone="ghost" onClick={onClear} disabled={!name && !result && !mode && !groupBy && !errorCode}>
           清除筛选
         </Button>
       </div>
@@ -108,6 +135,26 @@ export function EventFilters({
             onValueChange={(next) => onResultChange(next === ALL ? undefined : (next as TelemetryResult))}
           />
         </div>
+        <div className="telemetry__field">
+          <span>构建模式</span>
+          <SelectInput
+            label="按构建模式筛选"
+            value={mode ?? ALL}
+            options={MODE_OPTIONS}
+            onValueChange={(next) => onModeChange(next === ALL ? undefined : (next as TelemetryPerfMode))}
+          />
+        </div>
+        <div className="telemetry__field">
+          <span>分组</span>
+          <SelectInput
+            label="聚合分组维度"
+            value={groupBy ?? ALL}
+            options={GROUP_BY_OPTIONS_LIST}
+            onValueChange={(next) => onGroupByChange(next === ALL ? undefined : (next as TelemetryAttributeKey))}
+          />
+        </div>
+      </div>
+      <div className="telemetry__filter-row">
         <div className="telemetry__field">
           <span>错误码</span>
           <TextInput

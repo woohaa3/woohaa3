@@ -34,6 +34,7 @@ import { readNodeActionToolbars, activateNodeAction, readSelectionActionToolbar,
 import { ImageFocusStore } from "./image-focus-store.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
+import { installPerfFrameWindow } from "./perf-frame-window.js";
 import {
   applyFilmSetObjectAction,
   applyFilmSetObjectGesture,
@@ -168,6 +169,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private detach: (() => void) | null = null;
   private disposed = false;
   private loadPromise: Promise<BevyRuntime> | null = null;
+  /** 帧窗口（`perf.frame`）：DOM canvas 挂上后开，卸载/释放时关（design D4）。 */
+  private frameWindow: import("../../services/telemetry-performance.js").PerfFrameWindow | null = null;
   private readonly loadAbort = new AbortController();
 
   constructor(private readonly options: CanvasRuntimeOptions) {}
@@ -682,6 +685,10 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     );
     controller.start();
     this.controllerInstance = controller;
+    // 帧窗口只在挂载后开：没有 DOM canvas 就没有帧，先开窗会让 fps 的分母包含等待时间
+    // （change: 2026-10-25-enhance-telemetry-performance-collection，design D4）。
+    this.frameWindow?.dispose();
+    this.frameWindow = installPerfFrameWindow();
     const unsubscribe = this.options.subscribeModelScenes(() => {
       // prepared resource 就绪/替换不改变画布对象，但会改变内容身份与可准入性。
       this.modelContentVersion += 1;
@@ -699,6 +706,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       unsubscribeTheme?.();
       unsubscribeRunState?.();
       unsubscribeCanvas();
+      // 卸载即关闭窗口：残留的定时器会在没有画布时继续聚合，发出与用户所见无关的样本。
+      this.frameWindow?.dispose();
+      this.frameWindow = null;
       controller.dispose();
       textureSync.dispose();
       videoSessions.dispose();
@@ -729,6 +739,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     if (this.disposed) return;
     this.disposed = true;
     this.detach?.();
+    this.frameWindow?.dispose();
+    this.frameWindow = null;
     this.loadAbort.abort();
     this.runtimeInstance?.dispose();
     this.controllerInstance = null;

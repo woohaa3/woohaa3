@@ -19,22 +19,23 @@ import {
   normalizeTelemetryEvent,
   type HostTelemetryService,
   type TelemetryAnomaly,
+  type TelemetryAttributeKey,
   type TelemetryBucket,
   type TelemetryEvent,
   type TelemetryEventFilter,
   type TelemetryEventInput,
-  type TelemetryEventName,
   type TelemetryEventPage,
   type TelemetryExport,
   type TelemetryExportStatus,
+  type TelemetryReadOptions,
   type TelemetryStatus,
   type TelemetrySummary,
   type TelemetryWindow
 } from "@woohaa3/contracts";
-import { evaluateTelemetryAnomalies, type AnomalyWindowStats } from "./anomaly.js";
+import { collectAnomalies } from "./anomalies-window.js";
 import { TELEMETRY_FLUSH_BATCH, TELEMETRY_FLUSH_INTERVAL_MS, TelemetryEventQueue } from "./queue.js";
 import type { TelemetrySettings } from "./settings.js";
-import { SqliteTelemetryStore, type NameWindowStats } from "./storage/sqlite/store.js";
+import { SqliteTelemetryStore } from "./storage/sqlite/store.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** 与设计 D5 一致：缺省窗口 24h。 */
@@ -64,9 +65,6 @@ const FALLBACK_EXPORT_ENABLED = Boolean(SETTING_DEFINITIONS["telemetry.export.en
 /** 出口返回的错误码必须是稳定短标识；形状不对就归为一个我们自己的稳定码，避免把外部正文带进状态面。 */
 const EXPORT_CODE_PATTERN = /^[a-z0-9][a-z0-9_.:-]{0,63}$/;
 const FALLBACK_EXPORT_ERROR_CODE = "send-failed";
-
-/** 空窗口的聚合：名字只出现在一侧时用它补零，让规则函数不必处理 undefined。 */
-const EMPTY_WINDOW_STATS: AnomalyWindowStats = { count: 0, failures: 0, durationSamples: 0 };
 
 type ExportEntry = {
   readonly provider: TelemetryExport;
@@ -303,60 +301,45 @@ export function createTelemetryService(options: {
       ...(filter.names === undefined ? {} : { names: filter.names }),
       ...(filter.results === undefined ? {} : { results: filter.results }),
       ...(filter.errorCode === undefined ? {} : { errorCode: filter.errorCode }),
+      ...(filter.attributeKey === undefined ? {} : { attributeKey: filter.attributeKey }),
+      ...(filter.attributeValue === undefined ? {} : { attributeValue: filter.attributeValue }),
       ...(filter.cursor === undefined ? {} : { cursor: filter.cursor }),
       ...(filter.limit === undefined ? {} : { limit: filter.limit })
     });
   };
 
-  const summary = async (window: TelemetryWindow, bucket?: TelemetryBucket): Promise<TelemetrySummary> => {
+  const summary = async (
+    window: TelemetryWindow,
+    bucket?: TelemetryBucket,
+    options: TelemetryReadOptions = {}
+  ): Promise<TelemetrySummary> => {
     const resolvedBucket = bucket ?? defaultTelemetryBucket(window);
     const until = now();
     const since = windowSince(window, until);
-    const base = { window, bucket: resolvedBucket, since, until };
+    const scope = attributeScope(options);
+    const base = {
+      window,
+      bucket: resolvedBucket,
+      since,
+      until,
+      ...(scope.groupBy === undefined ? {} : { groupBy: scope.groupBy })
+    };
     if (!store) return { ...base, total: 0, rows: [], series: [] };
-    const stored = store.summary({ since, until, bucket: resolvedBucket });
+    const stored = store.summary({ since, until, bucket: resolvedBucket, ...scope });
     return { ...base, total: stored.total, rows: stored.rows, series: stored.series };
   };
 
-  const anomalies = async (window: TelemetryWindow): Promise<readonly TelemetryAnomaly[]> => {
+  const anomalies = async (
+    window: TelemetryWindow,
+    options: TelemetryReadOptions = {}
+  ): Promise<readonly TelemetryAnomaly[]> => {
     if (!store) return [];
     const until = now();
-    const windowMs = TELEMETRY_WINDOW_MS[window];
-    const retentionSince = retentionCutoff(until);
-    const currentSince = Math.max(until - windowMs, retentionSince);
-    const previousSince = Math.max(until - windowMs * 2, retentionSince);
-    const earlierSince = Math.max(until - windowMs * 3, retentionSince);
-    const currentStats = store.rangeStats({ since: currentSince, until, withDurations: true, withErrorCodes: true });
-    const previousStats = store.rangeStats({ since: previousSince, until: currentSince, withDurations: true });
-    const earlierStats = store.rangeStats({ since: earlierSince, until: previousSince });
-
-    const currentByName = new Map<TelemetryEventName, NameWindowStats>(currentStats.map((stats) => [stats.name, stats]));
-    const previousByName = new Map<TelemetryEventName, NameWindowStats>(previousStats.map((stats) => [stats.name, stats]));
-    const earlierByName = new Map<TelemetryEventName, number>(earlierStats.map((stats) => [stats.name, stats.count]));
-
-    // `new-error-code` 需要跨保留期的"从未出现"判断：这一步必须查库，所以在这里算好集合，
-    // 再把它作为纯函数规则的输入（规则本身不碰存储，便于单测）。
-    const previouslySeenErrorCodes = new Set<string>();
-    for (const stats of currentStats) {
-      for (const code of stats.errorCodes ?? []) {
-        if (previouslySeenErrorCodes.has(code.code)) continue;
-        if (store.hasErrorCodeBefore(code.code, { since: retentionSince, before: currentSince })) {
-          previouslySeenErrorCodes.add(code.code);
-        }
-      }
-    }
-
-    // 并集里要包含基线窗口的名字：`event-silence` 描述的正是"当前窗口没有、之前有"。
-    const names = [...new Set([...currentByName.keys(), ...previousByName.keys()])].sort();
-    return evaluateTelemetryAnomalies({
+    return collectAnomalies(store, {
       window,
-      names: names.map((name) => ({
-        name,
-        current: currentByName.get(name) ?? EMPTY_WINDOW_STATS,
-        previous: previousByName.get(name) ?? EMPTY_WINDOW_STATS,
-        earlier: earlierByName.get(name) ?? 0
-      })),
-      previouslySeenErrorCodes
+      until,
+      retentionSince: retentionCutoff(until),
+      ...attributeScope(options)
     });
   };
 
@@ -480,4 +463,28 @@ function sanitizeExportCode(code: unknown): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 把读面的可选口径整理成存储层认的形状。
+ *
+ * 三件事：只要 `groupBy` 时不动筛选；只要筛选时不动分组；两样都要时同时生效。""空字符串"" 一律
+ * 当作未给（URL 里删掉值很常见），避免 `attributeValue=""` 变成"筛空值"。
+ */
+function attributeScope(options: TelemetryReadOptions): {
+  groupBy?: TelemetryAttributeKey;
+  attributeKey?: TelemetryAttributeKey;
+  attributeValue?: string;
+} {
+  const scope: {
+    groupBy?: TelemetryAttributeKey;
+    attributeKey?: TelemetryAttributeKey;
+    attributeValue?: string;
+  } = {};
+  if (options.groupBy !== undefined) scope.groupBy = options.groupBy;
+  if (options.attributeKey !== undefined && options.attributeValue !== undefined && options.attributeValue !== "") {
+    scope.attributeKey = options.attributeKey;
+    scope.attributeValue = options.attributeValue;
+  }
+  return scope;
 }

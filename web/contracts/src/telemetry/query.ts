@@ -9,8 +9,10 @@
  *   不含建议动作，也不触发任何副作用。
  */
 import {
+  isTelemetryAttributeKey,
   isTelemetryEventName,
   isTelemetryResult,
+  type TelemetryAttributeKey,
   type TelemetryEvent,
   type TelemetryEventName,
   type TelemetryResult
@@ -73,6 +75,15 @@ export type TelemetryEventFilter = {
   readonly results?: readonly TelemetryResult[];
   /** 稳定错误码精确匹配；缺省不限。 */
   readonly errorCode?: string;
+  /**
+   * 属性维度的单键精确匹配（change: 2026-10-25-enhance-telemetry-performance-collection，D5）。
+   *
+   * 必须与 `attributeValue` 成对出现：只给键或只给值是**无法回答**的请求，返回
+   * `invalid-attribute`，绝不静默当成"没有筛选"。
+   */
+  readonly attributeKey?: TelemetryAttributeKey;
+  /** 与 `attributeKey` 成对；值按字符串精确比较（数值属性按十进制文本比较）。 */
+  readonly attributeValue?: string;
   /** 上一页最后一条的 id（不透明）。 */
   readonly cursor?: string;
   /** 单页条数；缺省 50、上限 200。 */
@@ -94,6 +105,13 @@ export type TelemetryEventPage = {
 /** 聚合表的一行：一个事件名在窗口内的表现。 */
 export type TelemetrySummaryRow = {
   readonly name: TelemetryEventName;
+  /**
+   * 分组行的分组成员（只在 `TelemetrySummary.groupBy` 存在时出现）。
+   *
+   * 形状与按事件名聚合的行完全相同，只是多这一项：这样表格、排序与分位数口径都只有一份
+   * 实现，不需要为分组另写一套。
+   */
+  readonly attributeValue?: string;
   readonly count: number;
   readonly results: Readonly<Record<TelemetryResult, number>>;
   /** 以下分位数只统计带 `durationMs` 的事件；没有样本时为 `undefined`。 */
@@ -120,6 +138,13 @@ export type TelemetrySummary = {
   readonly since: number;
   readonly until: number;
   readonly total: number;
+  /**
+   * 分组维度（change: 2026-10-25-enhance-telemetry-performance-collection，design D5）。
+   *
+   * 单键。多键组合会让 SQL 与 URL 状态都变复杂，而现有样本量（本机单实例）不足以支撑
+   * 高基数交叉。存在时 `rows` 是「事件名 × 属性值」的组，缺省时是每个事件名一行。
+   */
+  readonly groupBy?: TelemetryAttributeKey;
   readonly rows: readonly TelemetrySummaryRow[];
   readonly series: readonly TelemetrySeriesPoint[];
 };
@@ -144,6 +169,13 @@ export type TelemetryAnomaly = {
   readonly ruleId: TelemetryAnomalyRuleId;
   readonly severity: TelemetryAnomalySeverity;
   readonly name: TelemetryEventName;
+  /**
+   * 分组命中时的分组成员（`latency-regression` 可按 `kind` / `stage` / `mode` 分组）。
+   *
+   * 缺省表示这条命中是针对该事件名整体的。规则本身不判断"要不要分组"——那是调用方的
+   * 查询口径（design D5）；这里只如实带出，界面据此把「`pan` 变慢」与「整体变慢」分开显示。
+   */
+  readonly attributeValue?: string;
   readonly window: TelemetryWindow;
   readonly observed: number;
   readonly baseline: number;
@@ -195,6 +227,7 @@ export type TelemetryFilterParseErrorCode =
   | "invalid-name"
   | "invalid-result"
   | "invalid-error-code"
+  | "invalid-attribute"
   | "invalid-cursor"
   | "invalid-limit";
 
@@ -233,6 +266,26 @@ export function parseTelemetryEventFilter(input: Record<string, unknown>): Telem
     filter.errorCode = input.errorCode;
   }
 
+  // 属性筛选必须成对：只给键或只给值都无法回答"筛了什么"，静默忽略会让界面显示
+  // "筛选后的结果"其实没筛（design D5）。
+  const attributeKey = input.attributeKey;
+  const attributeValue = input.attributeValue;
+  const hasKey = attributeKey !== undefined && attributeKey !== "";
+  const hasValue = attributeValue !== undefined && attributeValue !== "";
+  if (hasKey || hasValue) {
+    if (!hasKey || !hasValue) {
+      return { ok: false, code: "invalid-attribute", message: "属性筛选必须同时给出键与值" };
+    }
+    if (!isTelemetryAttributeKey(attributeKey)) {
+      return { ok: false, code: "invalid-attribute", message: "未知的属性键" };
+    }
+    if (typeof attributeValue !== "string") {
+      return { ok: false, code: "invalid-attribute", message: "属性值必须是字符串" };
+    }
+    filter.attributeKey = attributeKey;
+    filter.attributeValue = attributeValue;
+  }
+
   if (input.cursor !== undefined && input.cursor !== "") {
     if (typeof input.cursor !== "string" || input.cursor.length > TELEMETRY_CURSOR_MAX_LENGTH) {
       return { ok: false, code: "invalid-cursor", message: "游标非法" };
@@ -251,6 +304,17 @@ export function parseTelemetryEventFilter(input: Record<string, unknown>): Telem
   }
 
   return { ok: true, filter };
+}
+
+/**
+ * 解析 `groupBy`：缺省（`undefined`/空串）表示不分组，未知键返回 `"invalid"`。
+ *
+ * 与筛选同取向：未知键不能静默降级成"不分组"，否则界面会显示一份看起来分组了、
+ * 实际是全量聚合的表（spec: 未知属性键 MUST 返回 `invalid-attribute`）。
+ */
+export function parseTelemetryGroupBy(value: unknown): TelemetryAttributeKey | "invalid" | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  return isTelemetryAttributeKey(value) ? value : "invalid";
 }
 
 function parseEnumList<T extends string>(

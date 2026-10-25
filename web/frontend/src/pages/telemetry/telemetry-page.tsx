@@ -21,7 +21,14 @@ import "./telemetry.css";
 import { EventDetailPanel } from "./detail-panel.js";
 import { EventFilters, EventTable, LoadMoreBar } from "./event-list.js";
 import { localTimeZoneName } from "./format.js";
-import { AnomalyOverview, CountTrend, TelemetryFooter, TelemetryNotices, WindowSummaryTable } from "./overview-panel.js";
+import {
+  AnomalyOverview,
+  CountTrend,
+  DurationRanking,
+  TelemetryFooter,
+  TelemetryNotices,
+  WindowSummaryTable
+} from "./overview-panel.js";
 import { TelemetryStatePanel } from "./state-panel.js";
 import { hasTelemetryFilters, patchTelemetryQuery, type TelemetryQuery } from "./query.js";
 import { findEvent, resolveTelemetryViewState, telemetryNotices } from "./model.js";
@@ -99,7 +106,8 @@ export function TelemetryPage({
 
   const clearFilters = () => {
     onErrorCodeChange(undefined);
-    // 只清筛选，**保留 canvasId**：那是返回目标，不是筛选条件。
+    // 只清筛选，**保留 canvasId**：那是返回目标，不是筛选条件。分组也不算筛选，一并清掉
+    // （清除筛选的语义是"回到默认视图"，留着分组会让聚合表与事件名口径不一致）。
     onChangeQuery({ window: query.window, ...(query.canvasId ? { canvasId: query.canvasId } : {}) });
   };
 
@@ -136,8 +144,9 @@ export function TelemetryPage({
       {browse ? (
         <div className="telemetry__content">
           <div className="telemetry__main">
-            <AnomalyOverview anomalies={anomalies} window={query.window} />
+            <AnomalyOverview anomalies={anomalies} window={query.window} {...(query.groupBy ? { groupBy: query.groupBy } : {})} />
             <WindowSummaryTable summary={summary} />
+            <DurationRanking summary={summary} />
             <CountTrend summary={summary} />
 
             <section className="telemetry__section" data-testid="telemetry-events-section">
@@ -149,10 +158,14 @@ export function TelemetryPage({
                 window={query.window}
                 {...(query.name ? { name: query.name } : {})}
                 {...(query.result ? { result: query.result } : {})}
+                {...(query.mode ? { mode: query.mode } : {})}
+                {...(query.groupBy ? { groupBy: query.groupBy } : {})}
                 {...(errorCode ? { errorCode } : {})}
                 onWindowChange={(window) => changeFilters({ window })}
                 onNameChange={(name) => changeFilters({ name: name ?? "" })}
                 onResultChange={(result) => changeFilters({ result: result ?? "" })}
+                onModeChange={(mode) => changeFilters({ mode: mode ?? "" })}
+                onGroupByChange={(groupBy) => changeFilters({ groupBy: groupBy ?? "" })}
                 onErrorCodeApply={(next) => {
                   // 错误码是页面本地筛选：先清游标与选中项，再交给适配层重取。
                   onErrorCodeChange(next);

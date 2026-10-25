@@ -27,6 +27,8 @@ function queryFromLocation(query: AppTelemetryQuery | undefined): TelemetryQuery
     window: query?.window ?? DEFAULT_TELEMETRY_WINDOW,
     ...(query?.name ? { name: query.name } : {}),
     ...(query?.result ? { result: query.result } : {}),
+    ...(query?.mode ? { mode: query.mode } : {}),
+    ...(query?.groupBy ? { groupBy: query.groupBy } : {}),
     ...(query?.cursor ? { cursor: query.cursor } : {}),
     ...(query?.eventId ? { eventId: query.eventId } : {}),
     ...(query?.canvasId ? { canvasId: query.canvasId } : {})
@@ -71,15 +73,21 @@ export function TelemetryRoute({
     setLoading(true);
     setEventsError(null);
 
-    const { window, name, result, cursor } = query;
+    const { window, name, result, mode, groupBy, cursor } = query;
     const [statusOutcome, summaryOutcome, anomaliesOutcome, eventsOutcome] = await Promise.all([
       remote.status({ signal: controller.signal }),
-      remote.summary({ window, signal: controller.signal }),
-      remote.anomalies({ window, signal: controller.signal }),
+      remote.summary({
+        window,
+        ...(mode ? { mode } : {}),
+        ...(groupBy ? { groupBy } : {}),
+        signal: controller.signal
+      }),
+      remote.anomalies({ window, ...(groupBy ? { groupBy } : {}), signal: controller.signal }),
       remote.events({
         window,
         ...(name ? { name } : {}),
         ...(result ? { result } : {}),
+        ...(mode ? { mode } : {}),
         ...(errorCode ? { errorCode } : {}),
         ...(cursor ? { cursor } : {})
       })
@@ -140,6 +148,7 @@ export function TelemetryRoute({
       window: query.window,
       ...(query.name ? { name: query.name } : {}),
       ...(query.result ? { result: query.result } : {}),
+      ...(query.mode ? { mode: query.mode } : {}),
       ...(errorCode ? { errorCode } : {}),
       cursor: nextCursor
     });

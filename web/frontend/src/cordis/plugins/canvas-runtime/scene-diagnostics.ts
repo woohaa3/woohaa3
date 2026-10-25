@@ -161,9 +161,14 @@ const state: SceneDiagnostics = {
 /** 页面级单例（字段可直接读写，便于热路径 `+=`）。 */
 export const sceneDiagnostics: SceneDiagnostics = state;
 
-/** v4: time wire encoding and synchronous acceptance, including rejected calls. */
+/**
+ * v4: time wire encoding and synchronous acceptance, including rejected calls.
+ *
+ * 计时在所有构建里都做（change: 2026-10-25-enhance-telemetry-performance-collection，D4）：
+ * `perf.frame` 要上报窗口内的 wire 编码次数与同步接受耗时之和，而它是产品事实，不是开发期
+ * 采集。代价只是两次单调时钟读取，不改变返回值或异常。
+ */
 export function measureSceneWork<T>(key: "stringifyMs" | "wasmAcceptMs", now: () => number, run: () => T): T {
-  if (!import.meta.env.DEV) return run();
   const started = now();
   try { return run(); }
   finally { state[key] += Math.max(0, now() - started); }
@@ -174,7 +179,7 @@ const emptyRustCounters = { rustRenderQueueMs: 0, rustRenderPrepareMs: 0, rustRe
 
 const defaultRustOwner = {};
 let rustBaselines = new WeakMap<object, typeof emptyRustCounters>();
-let renderBaselines = import.meta.env.DEV ? new WeakMap<object, { renderMs: number; renderFrames: number }>() : undefined;
+let renderBaselines = new WeakMap<object, { renderMs: number; renderFrames: number }>();
 
 /**
  * 合并 Rust `scene_work_diagnostics` 上报的累计计数。
@@ -212,8 +217,9 @@ export function mergeRustWorkDiagnostics(input: {
   apply("rustRenderPrepareMs", input.renderStages?.work?.prepareMs);
   apply("rustRenderPrepareFrames", input.renderStages?.work?.prepareFrames);
   if (import.meta.env.DEV) {
-    const baseline = renderBaselines!.get(owner) ?? { renderMs: 0, renderFrames: 0 };
-    renderBaselines!.set(owner, baseline);
+    // 启动窗口的逐帧追踪仍只属于开发构建（它写控制台）；累计帧计数本身在所有构建里都记。
+    const baseline = renderBaselines.get(owner) ?? { renderMs: 0, renderFrames: 0 };
+    renderBaselines.set(owner, baseline);
     for (const [field, key] of [["renderMs", "rustRenderMs"], ["renderFrames", "rustRenderFrames"]] as const) {
       const value = input.renderStages?.work?.[field];
       if (typeof value !== "number" || !Number.isFinite(value) || value < 0

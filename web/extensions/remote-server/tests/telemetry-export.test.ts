@@ -1,8 +1,11 @@
 /**
- * 遥测上报出口测试（change: 2026-10-20-add-local-client-telemetry，tasks 7.6）。
+ * 遥测上报出口测试（change: 2026-10-20-add-local-client-telemetry，tasks 7.6；
+ * change: 2026-10-25-enhance-telemetry-performance-collection 改为无损映射）。
  *
- * 守四件事：
- * - **有损映射是对的**：`task.terminal` 没有对应 `Action` 必须跳过，`task` surface 不写；
+ * 守五件事：
+ * - **枚举映射与跳过是对的**：`task.terminal` 与 `perf.*` 没有对应 `Action` 必须跳过，
+ *   `task` surface 不写；
+ * - **保真字段无损**：`durationMs` / `errorCode` / `attributes` 全部上报，属性值统一字符串化；
  * - **切批同时受条数与字节约束**（目标契约是 ≤100 条且 ≤16 KiB）；
  * - **不重试**：失败只回错误码，请求次数不增加——proto 没有幂等键，重投会让计数翻倍；
  * - **没有会话时立刻失败**且不发请求（"开着开关但没连服务端"要能说清）。
@@ -93,6 +96,35 @@ describe("事件映射", () => {
 
   it("task.terminal 没有对应 Action，返回 null（不是塞一个别的值）", () => {
     expect(toClientEvent(event({ name: "task.terminal", origin: "local-host" }))).toBeNull();
+  });
+
+  it("四个 perf.* 也没有对应 Action，全部跳过", () => {
+    // change: 2026-10-25-enhance-telemetry-performance-collection。
+    // 塞进 ACTION_EDITOR_EDIT 之类会让服务端的分类计数撒谎，所以显式返回 null。
+    for (const name of ["perf.startup", "perf.interaction", "perf.segment", "perf.frame"] as const) {
+      expect(toClientEvent(event({ name, attributes: { mode: "dev", stage: "app-scope" } }))).toBeNull();
+    }
+  });
+
+  it("保真字段无损上报：耗时按 int64 字符串、错误码与属性原样", () => {
+    const mapped = toClientEvent(
+      event({
+        name: "canvas.save",
+        durationMs: 250,
+        errorCode: "save-failed",
+        attributes: { mode: "production", fps: 59.5, stringify: true }
+      })
+    );
+    expect(mapped).toMatchObject({ durationMs: "250", errorCode: "save-failed" });
+    // 属性值一律字符串：proto 是 map<string,string>，且与本地 SQLite 的比较语义一致。
+    expect(mapped?.attributes).toEqual({ mode: "production", fps: "59.5", stringify: "true" });
+  });
+
+  it("零耗时与非法错误码不上报（proto3 JSON 省略零值，本地归一也已丢弃非法值）", () => {
+    const mapped = toClientEvent(event({ name: "canvas.open", durationMs: 0, errorCode: "" }));
+    expect(mapped).not.toHaveProperty("durationMs");
+    expect(mapped).not.toHaveProperty("errorCode");
+    expect(mapped).not.toHaveProperty("attributes");
   });
 
   it("surface 必填：本地声明 task（proto 无此值）时按名称推导，绝不省略", () => {

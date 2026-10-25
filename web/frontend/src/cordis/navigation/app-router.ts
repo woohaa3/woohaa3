@@ -14,7 +14,9 @@ import type { Context } from "@deepseek-ai/cordis";
 import type {
   AccessAction,
   ExtensionAppPageQuery,
+  TelemetryAttributeKey,
   TelemetryEventName,
+  TelemetryPerfMode,
   TelemetryResult,
   TelemetryWindow
 } from "@woohaa3/contracts";
@@ -32,6 +34,15 @@ export type AppTelemetryQuery = {
   window?: TelemetryWindow;
   name?: TelemetryEventName;
   result?: TelemetryResult;
+  /**
+   * 构建模式筛选（change: 2026-10-25-enhance-telemetry-performance-collection，D3/D5）。
+   *
+   * 封闭枚举，因此可以进 URL；它同时作用于事件列表与窗口聚合（spec：按 `production` 筛选的
+   * 耗时分布不包含 `dev` 样本）。
+   */
+  mode?: TelemetryPerfMode;
+  /** 聚合分组维度（单个属性键，同样是有界枚举）。只影响聚合，不影响列表结果集。 */
+  groupBy?: TelemetryAttributeKey;
   cursor?: string;
   eventId?: string;
   /**

@@ -122,6 +122,10 @@ export function resolveAppRoute(
       telemetry.window === DEFAULT_TELEMETRY_WINDOW &&
       !telemetry.name &&
       !telemetry.result &&
+      // `mode`/`groupBy` 是 URL 承载的筛选与视图口径：漏判会让带它们的链接被规范化成
+      // "什么都没有"，刷新后筛选静默消失。
+      !telemetry.mode &&
+      !telemetry.groupBy &&
       !telemetry.cursor &&
       !telemetry.eventId &&
       !telemetry.canvasId;
@@ -171,6 +175,8 @@ export function locationToPath(location: AppPageLocation, registry: AppPageRegis
       window: location.telemetry?.window ?? DEFAULT_TELEMETRY_WINDOW,
       ...(location.telemetry?.name ? { name: location.telemetry.name } : {}),
       ...(location.telemetry?.result ? { result: location.telemetry.result } : {}),
+      ...(location.telemetry?.mode ? { mode: location.telemetry.mode } : {}),
+      ...(location.telemetry?.groupBy ? { groupBy: location.telemetry.groupBy } : {}),
       ...(location.telemetry?.cursor ? { cursor: location.telemetry.cursor } : {}),
       ...(location.telemetry?.eventId ? { eventId: location.telemetry.eventId } : {}),
       ...(location.telemetry?.canvasId ? { canvasId: location.telemetry.canvasId } : {})

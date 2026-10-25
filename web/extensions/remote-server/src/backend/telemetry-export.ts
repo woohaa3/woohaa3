@@ -1,14 +1,23 @@
 /**
  * 遥测上报出口：把本机遥测映射到 `woohaa.telemetry.v1alpha1.TelemetryService.ReportEvents`
- * （change: 2026-10-20-add-local-client-telemetry，tasks 7.3/7.4）。
+ * （change: 2026-10-20-add-local-client-telemetry，tasks 7.3/7.4；
+ *  change: 2026-10-25-enhance-telemetry-performance-collection 改为无损映射）。
  *
  * 为什么出口住在这里而不是 core：目标是**这台服务端**，凭据是**这份会话**。core 只回答"发不发"
  * （`telemetry.export.enabled`），发到哪由扩展自己的部署配置与会话决定——core 里没有任何
  * 目的地设置，所以也不会出现"配了 id 却没人读"的死控件。
  *
- * 有损映射（改 `telemetry.proto` 之前必须接受）：
- * - `durationMs` / `errorCode` / `attributes` **丢弃**：proto 没有这些字段。
- * - `task.terminal` **跳过**：`Action` 里没有对应枚举，硬塞一个别的值会让服务端计数撒谎。
+ * 映射口径（design D6）：
+ * - `durationMs` / `errorCode` / `attributes` **无损上报**，不再丢弃；
+ * - `perf.*` 与 `task.terminal` 仍**跳过**：proto 的 `Action` 枚举里没有对应值，硬塞一个别的
+ *   值会让服务端计数撒谎。跳过是显式的一行 `null`，不是"忘了填"。
+ *
+ * 属性一律转成字符串（数值按十进制、布尔按 `"true"`/`"false"`）：proto 的
+ * `map<string,string>` 只收文本，而"本地是什么类型"不该成为对端要解释的东西——这与客户端
+ * 契约里"属性筛选只有一种比较语义"是同一个取向。
+ *
+ * 不在这里再截断一遍：事件进本地存储前已经过 `normalizeTelemetryEvent`，属性键在白名单内、
+ * 条数与字节都有界。出口若再截一次，就会出现"本地与远端各有一套上限"的第二来源。
  *
  * 投递语义是**宁可丢、不重复**：proto 没有幂等键，重试会让每个计数翻倍，而计数正是这条通道
  * 唯一的产出。因此失败只回错误码、不重试，也不在本地留待发队列。
@@ -40,6 +49,13 @@ const ACTION_BY_NAME: Readonly<Record<TelemetryEventName, string | null>> = {
   "sync.connect": "ACTION_SYNC_CONNECT",
   "sync.reconcile": "ACTION_SYNC_RECONCILE",
   "local.validation": "ACTION_LOCAL_VALIDATION",
+  // 这四条性能事实没有 `Action` 枚举值。proto 侧的 `Action` 是"用户做了什么"的分类，
+  // 把 `perf.frame` 塞进 `ACTION_EDITOR_EDIT` 之类会让服务端与管理端的分类计数撒谎，
+  // 因此显式跳过（而不是省略这一行让 typecheck 拦住改动）。
+  "perf.startup": null,
+  "perf.interaction": null,
+  "perf.segment": null,
+  "perf.frame": null,
   "task.terminal": null
 };
 
@@ -79,6 +95,11 @@ const SURFACE_BY_NAME: Readonly<Record<TelemetryEventName, string | null>> = {
   "sync.connect": "SURFACE_SYNC",
   "sync.reconcile": "SURFACE_SYNC",
   "local.validation": "SURFACE_LOCAL_VALIDATION",
+  // 与 `ACTION_BY_NAME` 同步为 null：这些事件本来就不会被映射。
+  "perf.startup": null,
+  "perf.interaction": null,
+  "perf.segment": null,
+  "perf.frame": null,
   "task.terminal": null
 };
 
@@ -94,10 +115,32 @@ export function toClientEvent(event: TelemetryEvent): Record<string, unknown> | 
     result: RESULT_BY_VALUE[event.result],
     client: CLIENT_BY_ORIGIN[event.origin],
     surface,
-    // 省略零值：proto3 JSON 里空串等价于"没声明"，写进去只是噪音。
+    // 省略零值：proto3 JSON 里空串/0 等价于"没声明"，写进去只是噪音。
     ...(event.traceId ? { traceId: event.traceId } : {}),
-    ...(event.frontendVersion ? { frontendVersion: event.frontendVersion } : {})
+    ...(event.frontendVersion ? { frontendVersion: event.frontendVersion } : {}),
+    // int64 在 proto3 JSON 里是**字符串**（长度超过 JS 安全整数范围），这里显式转换：
+    // 数字发过去会被 Connect 的解码器拒成 invalid_argument。
+    ...(event.durationMs ? { durationMs: String(event.durationMs) } : {}),
+    ...(event.errorCode ? { errorCode: event.errorCode } : {}),
+    ...(event.attributes === undefined ? {} : { attributes: stringifyAttributes(event.attributes) })
   };
+}
+
+/**
+ * 属性值统一字符串化。
+ *
+ * proto 的 `map<string,string>` 只收文本，而本地属性可以是数字或布尔。按"十进制文本 /
+ * `true`|`false`"转换与客户端 SQLite 的 `attributeValueSql` 完全同口径——否则同一个
+ * `fps=60` 在本机是数字、在服务端是 `"60"`，两边按属性筛选会得到不同结果。
+ */
+function stringifyAttributes(
+  attributes: Readonly<Record<string, string | number | boolean>>
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    result[key] = String(value);
+  }
+  return result;
 }
 
 /** 按条数与字节数同时切批；单条就超预算时仍然单独发（服务端会拒绝并被计为失败）。 */
