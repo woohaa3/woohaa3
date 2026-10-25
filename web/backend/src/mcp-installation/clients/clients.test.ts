@@ -39,7 +39,7 @@ describe("检测证据", () => {
 
   it("仅应用安装位置命中即发现，且不要求 PATH 可执行文件", async () => {
     await app("Zed");
-    expect((await installer({ env }).detect(url)).clients.map(item => item.id)).toEqual(["zed"]);
+    expect((await installer({ env, platform: "darwin" }).detect(url)).clients.map(item => item.id)).toEqual(["zed"]);
   });
 
   it("仅旧版归档路径命中仍发现客户端，但安装写新版路径", async () => {
@@ -242,7 +242,7 @@ describe("国产客户端", () => {
 
   it("ZCode 检测应用安装位置并写 mcp.servers", async () => {
     await app("ZCode");
-    const result = await installer({ env }).install("zcode", url);
+    const result = await installer({ env, platform: "darwin" }).install("zcode", url);
     expect(result.client.targets.map(item => item.path)).toEqual([path.join(home, ".zcode/cli/config.json")]);
     expect(result.client.configured).toBe(true);
   });
@@ -282,13 +282,13 @@ describe("编辑器客户端", () => {
   it("Windsurf/Devin 写 serverUrl 且不重复写 url", async () => {
     await app("Windsurf");
     const target = path.join(home, ".config/devin/mcp_config.json");
-    await installer({ env }).install("windsurf", url);
+    await installer({ env, platform: "darwin" }).install("windsurf", url);
     expect(parse(await readFile(target, "utf8")).mcpServers[name]).toEqual({ serverUrl: url });
   });
 
   it("Copilot 写 ~/.copilot/mcp-config.json，不写 .vscode/mcp.json", async () => {
     await app("Visual Studio Code");
-    const result = await installer({ env }).install("copilot", url);
+    const result = await installer({ env, platform: "darwin" }).install("copilot", url);
     expect(result.client.configPath).toBe(path.join(home, ".copilot/mcp-config.json"));
     await expect(readFile(path.join(home, ".vscode/mcp.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });

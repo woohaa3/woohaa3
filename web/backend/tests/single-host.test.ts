@@ -83,8 +83,7 @@ describe("单一生产插件宿主", () => {
       modelsConfig: { version: 1, models: [] },
       mediaStorage: memoryStorage() as never,
       enableYjsSync: false,
-      applicationBackendExtensions: [definition],
-      applicationExtensionMetadata: [{ extensionId: "single-host-gen", name: "g", description: "d", version: "1.0.0", managementScope: "site", host: "backend", configSchema: { schemaId: "s", schemaVersion: 1 }, dependencies: [], capabilities: [] }]
+      applicationBackendExtensions: [definition]
     });
     try {
       const modules = service.modules();

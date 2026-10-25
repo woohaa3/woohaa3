@@ -56,6 +56,7 @@ async function start(): Promise<{ base: string; token: string; room: import("./s
     repository: canvasRepository,
     yjsRepository,
     now: () => NOW,
+    accessRuntime: { enabled: false } as never,
     contentRuntime: filmSetCanvasContentRuntime,
     mediaClient: { async verify() { return { exists: true, matches: true }; } }
   });

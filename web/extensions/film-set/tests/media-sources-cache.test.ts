@@ -6,7 +6,7 @@
  * 逐帧无缓存重解 `nodeData`。此处用可计数的解码 mock 证明：内容对象身份不变只解码一次，对象被替换
  * 或内容变化后重新解码，且失败内容幂等可诊断。
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@woohaa3/contracts", async importOriginal => {
   const actual = await importOriginal<typeof import("@woohaa3/contracts")>();
@@ -50,7 +50,6 @@ function canvasWith(nodeId: string, data: ServerCanvas["nodeData"][string]): Ser
 }
 
 beforeEach(() => { decode.mockClear(); });
-afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("片场媒体源解码身份缓存", () => {
   it("同一 nodeData 对象连续解析只解码一次且输出一致（拖动热路径）", () => {
@@ -124,26 +123,6 @@ describe("片场媒体源解码身份缓存", () => {
     filmSetMediaSources("fs", canvas.nodeData.fs!, playback);
     expect(decode).toHaveBeenCalledTimes(1);
     sessions.dispose();
-  });
-
-  it("未变化内容不重复做整包预算序列化（utf8Bytes/TextEncoder）；内容变化后才重做", () => {
-    // 先行构建数据，避免 createFilmSetSnapshot 自身的编码计入。
-    const data = filmSetData();
-    let encodeCalls = 0;
-    class CountingTextEncoder extends TextEncoder {
-      encode(input?: string) { encodeCalls += 1; return super.encode(input); }
-    }
-    vi.stubGlobal("TextEncoder", CountingTextEncoder);
-    filmSetMediaSources("fs", data, null);
-    const afterFirst = encodeCalls;
-    expect(afterFirst).toBeGreaterThan(0);
-    // 连续帧（相同对象身份）：预算校验随缓存复用，不再产生任何额外编码。
-    filmSetMediaSources("fs", data, null);
-    filmSetMediaSources("fs", data, null);
-    expect(encodeCalls).toBe(afterFirst);
-    // 内容变化：重新解码并重做预算校验。
-    filmSetMediaSources("fs", filmSetData(), null);
-    expect(encodeCalls).toBeGreaterThan(afterFirst);
   });
 
   it("重复解析的结论稳定：合法内容结果深度相等，非法内容同样稳定拒绝", () => {

@@ -7,6 +7,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { createServer } from "node:net";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createProcessManager, createLineStreams, processKey, type SpawnSpec, type SpawnedProcess } from "./process-manager.js";
@@ -16,6 +18,20 @@ function tempDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "woohaa3-local-agent-"));
   dirs.push(dir);
   return dir;
+}
+
+/**
+ * 取一个 OS 分配的临时回环端口，而不是写死 42xxx。
+ * 共享机器上多个 worktree 可能并行跑同一套用例，固定端口段会互相抢。
+ */
+async function freeLoopbackPort(): Promise<number> {
+  const probe = createServer();
+  const port = await new Promise<number>((resolve, reject) => {
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => resolve((probe.address() as AddressInfo).port));
+  });
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  return port;
 }
 
 function fakeSpawn(record: SpawnSpec[]): (spec: SpawnSpec) => SpawnedProcess {
@@ -38,9 +54,10 @@ function fakeSpawn(record: SpawnSpec[]): (spec: SpawnSpec) => SpawnedProcess {
 describe("专用进程管理（任务 3.2/3.3）", () => {
   it("simultaneous groups share a single process even during asynchronous configuration", async () => {
     const record: SpawnSpec[] = [];
+    const port = await freeLoopbackPort();
     let release!: () => void;
     const ready = new Promise<void>(resolve => { release = resolve; });
-    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42010 }, executableFor: () => "/usr/bin/codex", spawnFn: fakeSpawn(record), prepareConfigDir: () => ready });
+    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: port, max: port + 10 }, executableFor: () => "/usr/bin/codex", spawnFn: fakeSpawn(record), prepareConfigDir: () => ready });
     const input = { adapterId: "codex-appserver", owner: "u1", connectionId: "c1", args: [], kind: "stdio" as const };
     const a = manager.ensure(input), b = manager.ensure(input);
     release();
@@ -66,7 +83,8 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
   it("每 owner/连接独立目录与专用回环端口；幂等复用同一句柄", async () => {
     const record: SpawnSpec[] = [];
     const root = tempDir();
-    const manager = createProcessManager({ workDirRoot: root, portRange: { min: 42000, max: 42010 }, executableFor: () => "/usr/bin/opencode", spawnFn: fakeSpawn(record) });
+    const port = await freeLoopbackPort();
+    const manager = createProcessManager({ workDirRoot: root, portRange: { min: port, max: port + 10 }, executableFor: () => "/usr/bin/opencode", spawnFn: fakeSpawn(record) });
     const first = await manager.ensure({ adapterId: "opencode-server", owner: "u1", connectionId: "c1", args: ["serve"], kind: "http" });
     const again = await manager.ensure({ adapterId: "opencode-server", owner: "u1", connectionId: "c1", args: ["serve"], kind: "http" });
     expect(again).toBe(first);
@@ -82,7 +100,7 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
     // HTTP agents keep the existing CLI login while cwd/port/session remain isolated.
     expect(record[0].env.HOME).toBe(process.env.HOME ?? "");
     expect(record[1].env.HOME).toBe(process.env.HOME ?? "");
-    expect(record[0].args).toEqual(["serve", "--port", "42000"]);
+    expect(record[0].args).toEqual(["serve", "--port", String(port)]);
     expect(record[0].env.OPENCODE_SERVER_PASSWORD).not.toBe(record[1].env.OPENCODE_SERVER_PASSWORD);
     expect(first.httpHeaders?.Authorization).toBe(`Basic ${Buffer.from(`opencode:${record[0].env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`);
   });
@@ -90,7 +108,8 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
   it("进程意外退出会释放缓存和端口，下一轮可以重新启动", async () => {
     let exit!: () => void;
     let launches = 0;
-    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42000 }, executableFor: () => "/bin/opencode",
+    const port = await freeLoopbackPort();
+    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: port, max: port }, executableFor: () => "/bin/opencode",
       spawnFn: () => ({ pid: ++launches, exited: new Promise<void>(resolve => { exit = resolve; }), kill: () => exit() }) });
     const request = { adapterId: "opencode-server", owner: "u1", connectionId: "c1", args: ["serve"], kind: "http" as const };
     const first = await manager.ensure(request);
@@ -105,12 +124,13 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
 
   it("同步启动异常也释放端口", async () => {
     let fail = true;
-    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42000 }, executableFor: () => "/bin/opencode",
+    const port = await freeLoopbackPort();
+    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: port, max: port }, executableFor: () => "/bin/opencode",
       spawnFn: () => { if (fail) throw new Error("spawn EINVAL"); return { pid: 1, exited: new Promise<void>(() => {}), kill: () => undefined }; } });
     const request = { adapterId: "opencode-server", owner: "u1", connectionId: "c1", args: ["serve"], kind: "http" as const };
     await expect(manager.ensure(request)).rejects.toThrow("EINVAL");
     fail = false;
-    expect((await manager.ensure(request)).loopbackUrl).toBe("http://127.0.0.1:42000");
+    expect((await manager.ensure(request)).loopbackUrl).toBe(`http://127.0.0.1:${port}`);
   });
 
   it("启动前准备专用配置目录（复用 Codex home 的链接钩子）", async () => {
@@ -141,7 +161,8 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
 
   it("停止只回收自有句柄并释放端口；stopAll 幂等", async () => {
     const record: SpawnSpec[] = [];
-    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42001 }, executableFor: () => "/usr/bin/opencode", spawnFn: fakeSpawn(record) });
+    const port = await freeLoopbackPort();
+    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: port, max: port + 10 }, executableFor: () => "/usr/bin/opencode", spawnFn: fakeSpawn(record) });
     await manager.ensure({ adapterId: "opencode-server", owner: "u1", connectionId: "c1", args: [], kind: "http" });
     await manager.ensure({ adapterId: "opencode-server", owner: "u2", connectionId: "c1", args: [], kind: "http" });
     expect(manager.activeCount()).toBe(2);
@@ -156,7 +177,8 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
 
   it("端口用尽时明确报错", async () => {
     const record: SpawnSpec[] = [];
-    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42000 }, executableFor: () => "/usr/bin/opencode", spawnFn: fakeSpawn(record) });
+    const port = await freeLoopbackPort();
+    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: port, max: port }, executableFor: () => "/usr/bin/opencode", spawnFn: fakeSpawn(record) });
     await manager.ensure({ adapterId: "opencode-server", owner: "u1", connectionId: "c1", args: [], kind: "http" });
     await expect(manager.ensure({ adapterId: "opencode-server", owner: "u2", connectionId: "c1", args: [], kind: "http" })).rejects.toThrow("回环端口已用尽");
   });
@@ -165,6 +187,7 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
     // 真实缺陷：入口不可执行时 Node 抛 'error' 事件，未监听会变成未捕获异常，
     // 直接终止整个后端进程（所有 API 返回 502）。
     const record: SpawnSpec[] = [];
+    const port = await freeLoopbackPort();
     const failingSpawn = (spec: SpawnSpec): SpawnedProcess => {
       record.push(spec);
       return {
@@ -174,12 +197,12 @@ describe("专用进程管理（任务 3.2/3.3）", () => {
         kill: () => undefined,
       };
     };
-    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42000 }, executableFor: () => "/usr/bin/codex", spawnFn: failingSpawn });
+    const manager = createProcessManager({ workDirRoot: tempDir(), portRange: { min: port, max: port }, executableFor: () => "/usr/bin/codex", spawnFn: failingSpawn });
     await expect(manager.ensure({ adapterId: "opencode-server", owner: "u1", connectionId: "c1", args: [], kind: "http" })).rejects.toThrow("启动 opencode-server 失败");
     expect(manager.activeCount()).toBe(0);
     expect(manager.get({ adapterId: "opencode-server", owner: "u1", connectionId: "c1" })).toBeNull();
     // 端口必须归还，否则唯一可用端口被永久占用。
-    const ok = createProcessManager({ workDirRoot: tempDir(), portRange: { min: 42000, max: 42000 }, executableFor: () => "/usr/bin/opencode", spawnFn: fakeSpawn(record) });
+    const ok = createProcessManager({ workDirRoot: tempDir(), portRange: { min: port, max: port }, executableFor: () => "/usr/bin/opencode", spawnFn: fakeSpawn(record) });
     await expect(ok.ensure({ adapterId: "opencode-server", owner: "u1", connectionId: "c1", args: [], kind: "http" })).resolves.toBeDefined();
   });
 

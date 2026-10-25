@@ -15,6 +15,8 @@ import type { InstallTarget, McpClientSpec, SpecContext } from "./clients/types.
 export { InstallationError };
 export type McpInstallerOptions = {
   env?: NodeJS.ProcessEnv;
+  /** 检测平台；默认 `process.platform`（测试可覆盖以验证 macOS 应用目录证据）。 */
+  platform?: NodeJS.Platform;
   /** macOS 应用安装目录；测试可指向临时目录。 */
   applicationsDir?: string;
   /** 任意客户端的官方 MCP 命令执行器；默认 execFile（不经 shell）。 */
@@ -36,7 +38,7 @@ const defaultRunner = async (executable: string, args: string[], env: NodeJS.Pro
 export function createMcpInstaller(options: McpInstallerOptions = {}) {
   const env = options.env ?? process.env;
   const home = env.HOME || env.USERPROFILE || homedir();
-  const platform = process.platform;
+  const platform = options.platform ?? process.platform;
   const exists = (file: string) => access(file).then(() => true, () => false);
   const applicationsDir = options.applicationsDir ?? "/Applications";
   const ctx = (): SpecContext => ({ env, home, platform, applicationsDir, exists });

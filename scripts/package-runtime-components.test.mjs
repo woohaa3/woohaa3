@@ -20,7 +20,7 @@ test('component archive rejects links before creating archive',{skip:process.pla
 
 test('runtime packaging validates release layout before reading keys or build outputs',async()=>{
  const {packageRuntimeComponents}=await import('./package-runtime-components.mjs');
- await assert.rejects(packageRuntimeComponents({releaseVersion:'../invalid',key:'not-a-key'}),/version/i);
+ await assert.rejects(packageRuntimeComponents({releaseVersion:'../invalid',platform:'darwin',arch:'arm64',key:'not-a-key'}),/version/i);
  await assert.rejects(packageRuntimeComponents({releaseVersion:'1.2.3',platform:'win32',arch:'arm64',key:'not-a-key'}),/platform/i);
 });
 

@@ -24,7 +24,7 @@ function candidate() {
     model: { modelScript: "scene.box({ id: 'body', size: [1, 2, 1] });", modelScriptVersion: "woohaa-model-js-v2" } });
   return { filmSetContent: snapshot.filmSetContent, filmSetAnimations: snapshot.filmSetAnimations, sceneCamera: snapshot.sceneCamera };
 }
-async function fixture(generator: FilmSetConversionGenerator, options: { generationTimeoutMs?: number; authorize?: () => Promise<boolean>; candidateOnly?: boolean } = {}) {
+async function fixture(generator: FilmSetConversionGenerator, options: { generationTimeoutMs?: number; submitBudgetMs?: number; authorize?: () => Promise<boolean>; candidateOnly?: boolean } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "delivery-integration-"));
   cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
   const ledgerPath = path.join(directory, "ledger.sqlite");
@@ -181,7 +181,7 @@ describe("conversion delivery through the real ledger and Canvas authority", () 
       await gate.promise;
       return { ok: true as const, candidate: candidate() };
     });
-    const f = await fixture(generate);
+    const f = await fixture(generate, { submitBudgetMs: 1000 });
     const accepted = await f.domain.submit(f.request());
     expect(accepted).toMatchObject({ ok: true, status: { status: "running", execution: { domainRequestId: "a", turnRequestId: "conversion:a:1" } } });
     await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());

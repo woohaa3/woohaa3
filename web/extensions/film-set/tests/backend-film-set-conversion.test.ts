@@ -422,65 +422,81 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
     expect(status.ok && status.status?.status).toBe("failed");
   });
 
-  it("非法候选整份拒绝并返回诊断，占位节点保留诊断且无部分创建", async () => {
+  it("非法候选不部分写入：回喂诊断继续修复，真实上游失败后占位仅保留默认地面", async () => {
     const room = await readyRoom("c-bad", [{ id: "img-src", type: "image", data: { outputAssetId: "asset-1" } as CanvasNodeData }], [readyImageAsset()]);
-    const generator: FilmSetConversionGenerator = async () => ({
-      ok: true,
-      candidate: {
-        filmSetContent: { schemaVersion: 4, items: [{ id: "x", kind: "video", name: "v", assetId: "missing-asset", aspectRatio: 1 }] },
-        sceneCamera: undefined
-      }
-    });
+    const invalid = {
+      filmSetContent: { schemaVersion: 4, items: [{ id: "x", kind: "video", name: "v", assetId: "missing-asset", aspectRatio: 1 }] },
+      sceneCamera: undefined
+    };
+    const repairs: Array<FilmSetConversionRepair | undefined> = [];
+    let calls = 0;
+    // change: 2026-10-22-remove-agent-execution-limits 之后修复不再有次数上限：
+    // 持续返回非法候选会一直修复，因此用真实上游失败结束循环。
+    const generator: FilmSetConversionGenerator = async (input) => {
+      calls += 1;
+      repairs.push(input.repair);
+      if (calls === 1) return { ok: true, candidate: invalid };
+      return { ok: false, code: "generation-failed", message: "上游真实失败", retryable: false };
+    };
     const service = serviceFor(room, { generator });
     const outcome = await service.submit(request("c-bad", {
       sourceNodeId: "img-src", targetNodeId: "film-bad", sourceKind: "image"
     }));
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
-    expect(outcome.code).toBe("candidate-invalid");
-    // 失败保留占位片场节点并在其上给出具体诊断（design D4）；画布无第二个节点/部分内容。
+    expect(outcome.code).toBe("generation-failed");
+    // 第一份非法候选的具体校验诊断被回喂给下一轮；终端原因是上游真实失败。
+    expect(calls).toBe(2);
+    expect(repairs[0]).toBeUndefined();
+    expect(repairs[1]?.message).toBeTruthy();
+    expect(repairs[1]?.candidate).toEqual(invalid);
+    // 失败保留占位片场节点并在其上给出具体诊断（design D4）。
     const target = filmSetNode(room, "film-bad");
     expect(target).not.toBeNull();
     const nodeStatus = readFilmSetConversionNodeStatus(target!.data);
     expect(nodeStatus?.status).toBe("failed");
-    expect(nodeStatus?.status === "failed" ? nodeStatus.code : null).toBe("candidate-invalid");
     const decoded = decodeFilmSetNodeData(target!.data);
     expect(decoded.ok).toBe(true);
     // 占位节点只有默认地面，未写入任何候选对象（无半个片场定义）。
     if (decoded.ok) {
       expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual(["ground"]);
     }
-    const exported = room.exportCanvas();
-    if (!exported.ok) throw new Error("export");
-    expect(exported.canvas.document.nodes).toHaveLength(2);
     const status = await service.status({ canvasId: "c-bad", requestId: "req-1" });
     expect(status.ok && status.status?.status).toBe("failed");
   });
 
-  it("只放入源素材（平媒）而无模型对象的候选整份拒绝（必须真正重建画面）", async () => {
+  it("只放入源素材（平媒）而无模型对象的候选被拒绝，诊断回喂且不写入部分内容", async () => {
     const room = await readyRoom("c-flat", [{ id: "img-src", type: "image", data: { outputAssetId: "asset-1" } as CanvasNodeData }], [readyImageAsset()]);
-    const generator: FilmSetConversionGenerator = async () => ({
-      ok: true,
-      candidate: {
-        filmSetContent: {
-          schemaVersion: 4,
-          // 引用合法且 ready 的源资产，但整份片场只有平面媒体项、没有 model 对象。
-          items: [{ id: "img", kind: "image", name: "源图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-1", aspectRatio: 1.5 }]
-        },
-        sceneCamera: undefined
-      }
-    });
+    const invalid = {
+      filmSetContent: {
+        schemaVersion: 4,
+        // 引用合法且 ready 的源资产，但整份片场只有平面媒体项、没有 model 对象。
+        items: [{ id: "img", kind: "image", name: "源图", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, assetId: "asset-1", aspectRatio: 1.5 }]
+      },
+      sceneCamera: undefined
+    };
+    const repairs: Array<FilmSetConversionRepair | undefined> = [];
+    let calls = 0;
+    // 与上一用例一致：修复无次数上限，用真实上游失败结束，避免无限重试。
+    const generator: FilmSetConversionGenerator = async (input) => {
+      calls += 1;
+      repairs.push(input.repair);
+      if (calls === 1) return { ok: true, candidate: invalid };
+      return { ok: false, code: "generation-failed", message: "上游真实失败", retryable: false };
+    };
     const service = serviceFor(room, { generator });
     const outcome = await service.submit(request("c-flat", {
       sourceNodeId: "img-src", targetNodeId: "film-flat", sourceKind: "image"
     }));
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
-    expect(outcome.code).toBe("candidate-invalid");
+    expect(outcome.code).toBe("generation-failed");
+    expect(calls).toBe(2);
+    expect(repairs[1]?.message).toContain("模型对象");
+    // 占位节点仍是默认地面，没有把源素材当作成功结果写入。
     const target = filmSetNode(room, "film-flat");
     expect(target).not.toBeNull();
     expect(readFilmSetConversionNodeStatus(target!.data)?.status).toBe("failed");
-    // 占位节点仍是默认地面，没有把源素材当作成功结果写入。
     const decoded = decodeFilmSetNodeData(target!.data);
     if (decoded.ok) {
       expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual(["ground"]);
@@ -648,10 +664,11 @@ describe("FilmSetConversionService：占位片场节点生命周期（任务 1.3
     const outcome = await pending;
     expect(outcome.ok && outcome.status.status).toBe("completed");
     // 目标只有一个节点：占位即最终片场（原地填入，不新增第二个）。
+    // 片场对象（含默认地面）各自有 film-object 容器节点，不参与「目标片场节点」计数。
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export");
     expect(exported.canvas.document.nodes.filter((node) => node.id === "film-ph")).toHaveLength(1);
-    expect(exported.canvas.document.nodes.filter(node => node.type !== "film-set-shot-preview")).toHaveLength(2);
+    expect(exported.canvas.document.nodes.filter(node => node.type !== "film-set-shot-preview" && !node.id.startsWith("film-object:"))).toHaveLength(2);
     const target = filmSetNode(room, "film-ph")!;
     const decoded = decodeFilmSetNodeData(target.data);
     if (!decoded.ok) throw new Error(decoded.reason);
