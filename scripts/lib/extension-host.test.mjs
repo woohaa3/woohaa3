@@ -484,8 +484,14 @@ test("真实仓库锚点：宿主产出与声明顺序一致", async () => {
   assert.ok(host.siteExtensionIds.every(installed), "站点扩展必须来自扫描登记");
   assert.ok(host.metadata.every(entry => installed(entry.extensionId)), "公开元数据必须来自扫描登记");
   assert.ok(host.publicRoutes.every(route => installed(route.extensionId)), "公开路由必须来自扫描登记");
-  // 两个配置根都参与了扫描。
-  assert.ok(allRegistrations.some((registration) => path.dirname(registration.directory) === path.join(repoRoot, "extensions")));
+  // 两个配置根都参与了扫描。开源检出里 `extensions/` 只带 README（私有扩展不随公开仓发布），
+  // 此时不能强求第二个根产出登记；存在已安装扩展目录时才校验登记归属。
+  const secondRoot = path.join(repoRoot, "extensions");
+  const hasSecondRootExtensions = fs.existsSync(secondRoot) && fs.readdirSync(secondRoot, { withFileTypes: true })
+    .some((entry) => entry.isDirectory() && !entry.name.startsWith("."));
+  if (hasSecondRootExtensions) {
+    assert.ok(allRegistrations.some((registration) => path.dirname(registration.directory) === secondRoot));
+  }
   assert.ok(host.roots.length >= 2);
 });
 
