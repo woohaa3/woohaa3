@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "db69b93e7485a1eb4d20f67e06deb432926e1e7d80edd1c0d14df53216476e3f",
+  "metadata": {
+    "extensionId": "photocraft",
+    "version": "0.1.0",
+    "label": "PhotoCraft 图片编辑",
+    "description": "PhotoCraft 工具、真实画布取景与 PNG 写回",
+    "icon": "media",
+    "activation": "server-active",
+    "configScope": "site",
+    "required": false,
+    "sdkAbi": 1
+  },
+  "protocolVersion": 1,
+  "sdkAbi": 1,
+  "reactMajor": 18,
+  "entry": "entry-7OKGSWTZ.js",
+  "styles": [
+    "entry-64CJO5LK.css"
+  ],
+  "requiredSdkGroups": [
+    "core",
+    "ui",
+    "model",
+    "authoring"
+  ],
+  "requiredSdkExports": [
+    "defineExtensionPlugin",
+    "resolvePublicUrl"
+  ],
+  "files": [
+    {
+      "path": "entry-7OKGSWTZ.js",
+      "bytes": 478,
+      "gzipBytes": 356,
+      "sha256": "bdb20ca15a9103e1bbe5e991cc37a16a99d77090c39179998194e28952388e3b",
+      "kind": "entry"
+    },
+    {
+      "path": "chunks/frontend-RDHM3NQ6.js",
+      "bytes": 115178,
+      "gzipBytes": 35597,
+      "sha256": "ae322b794d37681c129cb8d8d8c8215c3fdd946b477623ab00ca2666746ceadb",
+      "kind": "private-chunk"
+    },
+    {
+      "path": "chunks/chunk-JN2CHJ4H.js",
+      "bytes": 447,
+      "gzipBytes": 251,
+      "sha256": "340e54e042ffae3e74a4fb2ae8da7b2d77cf2e21db9b02244bda05d380a9f22f",
+      "kind": "private-chunk"
+    },
+    {
+      "path": "entry-64CJO5LK.css",
+      "bytes": 3272,
+      "gzipBytes": 1020,
+      "sha256": "4fa925724a72af100974dd5449c9c1d2fb42722276e26af326ebc5fc05ddb2e8",
+      "kind": "style"
+    },
+    {
+      "path": "chunks/frontend-UC466DHW.css",
+      "bytes": 3272,
+      "gzipBytes": 1020,
+      "sha256": "4fa925724a72af100974dd5449c9c1d2fb42722276e26af326ebc5fc05ddb2e8",
+      "kind": "style"
+    },
+    {
+      "path": "assets/photocraft/frame-channel.js",
+      "bytes": 1259,
+      "gzipBytes": 557,
+      "sha256": "0f884c964a28965de352769cb3c4e0fb0feb70ff5278b710ee710e61c57beb55",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/host-bridge-core.js",
+      "bytes": 9589,
+      "gzipBytes": 3379,
+      "sha256": "18dfdc0f74226d564e3d35784fd072ee491e72c69775c878217648a1bc92532a",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/host-bridge.js",
+      "bytes": 55,
+      "gzipBytes": 75,
+      "sha256": "dc4eb7919e8305cc2b8946374b8e7b9f290fca2c851d385615adc8ab8855c27b",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/index.html",
+      "bytes": 143,
+      "gzipBytes": 154,
+      "sha256": "306aad7fe5133821e0cf4147c4563ba58b1123d088fa9f62cbbc1f516b0945f4",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/LICENSE-APACHE",
+      "bytes": 10174,
+      "gzipBytes": 3540,
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/LICENSE-MIT",
+      "bytes": 1102,
+      "gzipBytes": 671,
+      "sha256": "1a8f66d8a86b146f5336fa0d4b1186576c8aa98e60823080c85c7811cfd810af",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/photocraft-web_bg.wasm",
+      "bytes": 27793175,
+      "gzipBytes": 11955576,
+      "sha256": "7860ffe47ff3c01724d9da64fcbd255da367d419ee2b52c83c1b0460ddc06e17",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/photocraft-web.js",
+      "bytes": 180953,
+      "gzipBytes": 27129,
+      "sha256": "7d50e5802138adb565dbc6ceac90620e9e20001e52735b268c644926fb775649",
+      "kind": "asset"
+    },
+    {
+      "path": "assets/photocraft/source.sha256",
+      "bytes": 65,
+      "gzipBytes": 72,
+      "sha256": "9db1d55863ebd75e132eaf78f899e22a2bfb2d72e25f71140b3e3e9a2d022c93",
+      "kind": "asset"
+    }
+  ],
+  "imports": [
+    {
+      "from": "chunks/frontend-RDHM3NQ6.js",
+      "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
+      "resolved": "chunks/chunk-JN2CHJ4H.js"
+    },
+    {
+      "from": "entry-7OKGSWTZ.js",
+      "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
+      "resolved": "chunks/chunk-JN2CHJ4H.js"
+    },
+    {
+      "from": "entry-7OKGSWTZ.js",
+      "specifier": "../browser-dist/chunks/frontend-RDHM3NQ6.js",
+      "resolved": "chunks/frontend-RDHM3NQ6.js"
+    }
+  ]
+}

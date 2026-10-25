@@ -220,6 +220,17 @@ test("扫描：browser 入口识别与过滤", (t) => {
   assert.deepEqual(browserExtensions(scan).map((entry) => entry.extensionId), ["browser-ext"]);
 });
 
+test("扫描：预构建 browser 扩展无需源码入口", (t) => {
+  const repoRoot = makeRepo(t);
+  const dir = path.join(repoRoot, "extensions", "prebuilt");
+  addExtension(dir, { extensionId: "prebuilt" });
+  fs.mkdirSync(path.join(dir, "browser-dist"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "browser-dist", "artifact-manifest.json"), "{}");
+  const scan = scanExtensions({ repoRoot, env: {} });
+  assert.equal(scan.extensions[0].hasBrowserEntry, false);
+  assert.deepEqual(browserExtensions(scan).map(entry => entry.extensionId), ["prebuilt"]);
+});
+
 test("工作区覆盖检查：跨根 glob 覆盖，普通相对 glob 不覆盖", (t) => {
   const repoRoot = makeRepo(t);
   const workspaceFile = path.join(repoRoot, "web", "pnpm-workspace.yaml");

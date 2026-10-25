@@ -47,11 +47,10 @@ const extensions = scan.extensions.filter((extension) => fs.existsSync(path.join
 const cyclic = cyclicExtensionNames(extensions);
 const buildable = extensions.filter((extension) => {
   const pkg = readPackageJson(path.join(extension.dir, "package.json"));
-  return !cyclic.has(pkg.name);
+  return !cyclic.has(pkg.name) && typeof pkg.scripts?.build === 'string';
 });
 if (buildable.length === 0) {
-  console.error("没有可构建的扩展包");
-  process.exit(1);
+  console.log("没有需要从源码构建的扩展包；复用已安装产物");
 }
 if (cyclic.size > 0) {
   console.log(`跳过与 @woohaa3/frontend 互为依赖的扩展（pnpm 工作区环）：${[...cyclic].sort().join("、")}`);

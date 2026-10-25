@@ -63,6 +63,11 @@ web/extensions/*/.browser-test/
 extensions/*/browser-dist/
 extensions/*/.browser-build/
 extensions/*/.browser-test/
+# Built-in distributable extension: runtime artifacts are intentionally versioned.
+!extensions/photocraft/dist/
+!extensions/photocraft/dist/**
+!extensions/photocraft/browser-dist/
+!extensions/photocraft/browser-dist/**
 # assembled release output（host dist 内组合的扩展资源与发布目录）
 web/frontend/dist/extensions/
 web/frontend/dist/extension-releases/

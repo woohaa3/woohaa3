@@ -77,8 +77,7 @@ async function loadContracts() {
 }
 
 /**
- * 发布发现：扫描 `web/extensions/<dir>/`，只登记同时具备
- * `src/frontend/metadata.ts` 与 `browser-dist/artifact-manifest.json` 的生产入口。
+ * 发布发现：扫描 `web/extensions/<dir>/`，同时识别源码扩展与只有 `browser-dist/artifact-manifest.json` 的预构建扩展。
  * 目录名与 extensionId 可以不同——身份一律以 artifact manifest 的 metadata 为准。
  */
 function discoverArtifacts() {
@@ -98,14 +97,16 @@ function discoverArtifacts() {
     .sort((a, b) => (a.directory < b.directory ? -1 : a.directory > b.directory ? 1 : 0));
 }
 
-/** 显式 `--extensions-dir` 时的单根读取（保持既有行为：只认 metadata 约定）。 */
+/** 显式 `--extensions-dir` 时的单根读取（识别 metadata 源码约定或 browser artifact）。 */
 function readSingleRoot() {
   if (!existsSync(extensionsDir)) return [];
   const found = [];
   for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const dir = path.join(extensionsDir, entry.name);
-    if (!existsSync(path.join(dir, "src", "frontend", "metadata.ts"))) continue;
+    if (entry.name.startsWith('.')) continue;
+    if (!existsSync(path.join(dir, "src", "frontend", "metadata.ts")) &&
+        !existsSync(path.join(dir, 'browser-dist', 'artifact-manifest.json'))) continue;
     found.push({ directory: entry.name, dir });
   }
   return found;

@@ -229,9 +229,10 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
   return { ...resolved, extensions, disabled, skipped };
 }
 
-/** 具备约定 browser 入口的扩展（browser build / 前端装配用）。 */
+/** Browser 扩展包括源码包和仅包含预构建产物的安装包。 */
 export function browserExtensions(scan) {
-  return scan.extensions.filter((extension) => extension.hasBrowserEntry);
+  return scan.extensions.filter((extension) => extension.hasBrowserEntry ||
+    fs.existsSync(path.join(extension.dir, 'browser-dist', 'artifact-manifest.json')));
 }
 
 /**

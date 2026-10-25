@@ -10,6 +10,8 @@ pnpmfileChecksum: sha256-PVihiLwKgkIWWo4DgSxVWqARFLsPTxpQlCdUxYGeOZ0=
 
 importers:
 
+  ../../extensions/photocraft: {}
+
   ../../web:
     devDependencies:
       '@playwright/test':

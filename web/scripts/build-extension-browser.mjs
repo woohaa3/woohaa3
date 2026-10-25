@@ -587,6 +587,13 @@ async function main() {
     console.error("[extension-browser] --watch 由 dev 编排使用；此处执行一次构建后退出。");
   }
   if (process.argv.includes("--all")) {
+    // Installed prebuilt packages have no authoring entry. Verify and preserve their assets.
+    const prebuilt = browserExtensions(scanExtensions({ repoRoot: REPO_ROOT })).filter(entry => !entry.hasBrowserEntry);
+    if (prebuilt.length) {
+      const { buildBrowserRelease } = await import('../../scripts/lib/extension-release-catalog.mjs');
+      await buildBrowserRelease({ artifacts: prebuilt.map(entry => ({ extensionId: entry.extensionId, directory: entry.dir })), repoRoot: REPO_ROOT });
+      console.log(`[extension-browser] verified ${prebuilt.length} prebuilt extension(s)`);
+    }
     // 构建全部具备约定入口与纯 metadata 的生产扩展（fixture/仅后端包自动跳过）。
     const results = [];
     for (const entry of await discoverBrowserExtensions()) {
@@ -601,7 +608,7 @@ async function main() {
       );
       results.push(result);
     }
-    if (results.length === 0) throw new Error("未发现可构建的 browser extension（需 src/frontend/index.ts 与 metadata.ts）");
+    if (results.length === 0 && prebuilt.length === 0) throw new Error("未发现 browser extension 源码或预构建产物");
     return;
   }
   const result = await buildExtensionBrowser({ cwd: extensionDir, outDir, stagingDir });
@@ -617,7 +624,7 @@ async function discoverBrowserExtensions() {
   const coverage = checkRootsCoveredByWorkspace({ repoRoot: REPO_ROOT, roots: scan.roots });
   const hint = formatWorkspaceCoverageHint(coverage, { repoRoot: REPO_ROOT });
   if (hint) process.stderr.write(`${hint}\n`);
-  return browserExtensions(scan).map((extension) => ({
+  return browserExtensions(scan).filter(extension => extension.hasBrowserEntry).map((extension) => ({
     directory: extension.directory,
     dir: extension.dir,
     extensionId: extension.extensionId,

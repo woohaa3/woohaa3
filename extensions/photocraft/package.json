@@ -1,0 +1,17 @@
+{
+  "name": "@woohaa3/extension-photocraft",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "exports": {
+    "./backend": {
+      "import": "./dist/backend.js"
+    }
+  },
+  "files": [
+    "dist",
+    "browser-dist",
+    "extension.json",
+    "README.md"
+  ]
+}
