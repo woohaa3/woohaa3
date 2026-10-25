@@ -89,6 +89,20 @@ export function dshExecutable(): string {
   return require.resolve("@deepseek-ai/dsh/package.json");
 }
 
+/**
+ * dsh 的可选原生包（`node-addon-*-<platform>`）与加载器分属 pnpm 的全局虚拟仓；
+ * 加载器从自己的目录 `require` 平台包，默认解析不到 require-builtin 的同级目录。
+ * 这里只把 dsh 自己的依赖目录挂到子进程 `NODE_PATH`，不暴露宿主模块，也不改共享 store。
+ */
+function dshNativeModulesPath(entry: string): string | undefined {
+  try {
+    const dshRequire = createRequire(entry);
+    return path.dirname(path.dirname(dshRequire.resolve("node-addon-require-builtin/package.json")));
+  } catch {
+    return undefined;
+  }
+}
+
 /** 运行时入口是否存在（不启动进程）；供 fixed-engine-runtime 探测。 */
 export const dshRuntimePath = dshRuntimeEntry;
 
@@ -250,6 +264,8 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
       const work = path.join(options.workspaceDir, key);
       const launcher = path.join(home, "dsh-launcher.mjs");
       const patchPath = path.join(home, "woohaa.patch.yml");
+      const runtimeEntry = options.runtimeEntry ?? dshRuntimeEntry();
+      const nativeModules = dshNativeModulesPath(runtimeEntry);
       let harness: DshHarness | null = null;
       try {
         await mkdir(home, { recursive: true, mode: 0o700 });
@@ -260,10 +276,11 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           PATH: path.dirname(process.execPath),
           HOME: home,
           ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {}),
+          ...(nativeModules ? { NODE_PATH: nativeModules } : {}),
           [input.restrictions.configDirEnvVar]: home,
           [credentialEnv]: input.apiKey
         };
-        await writeFile(launcher, launcherSource(options.runtimeEntry ?? dshRuntimeEntry()), { mode: 0o600 });
+        await writeFile(launcher, launcherSource(runtimeEntry), { mode: 0o600 });
         await writeFile(patchPath, buildDshPatch({
           modelBaseUrl: input.modelBaseUrl,
           model: input.model,
