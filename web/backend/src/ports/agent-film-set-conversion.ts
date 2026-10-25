@@ -46,7 +46,7 @@ export function createAgentFilmSetConversionProvider(options: { host: () => Agen
       try {
         input.onStep?.("prepare-source");
         const source = input.frozenSource;
-        const visual = await readFilmSetConversionMediaInput({ media, sourceKind: source.kind, ...input.media,
+        const visual = await readFilmSetConversionMediaInput({ media, sourceKind: source.kind, ...input.media, canvasId: input.canvasId,
           ...(source.range ? { range: source.range } : {}), ...(source.durationSeconds !== undefined ? { durationSeconds: source.durationSeconds } : {}), capabilities });
         input.onStep?.("analyze-content");
         const prompt = buildFilmSetConversionInstruction({ sourceKind: source.kind, title: input.title,

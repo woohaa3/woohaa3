@@ -30,7 +30,7 @@ describe("转片场复用助手连接", () => {
     expect(f.set.listModels()).toEqual([]);
     expect(f.set.resolveCapabilities({ modelKey: f.input.modelKey, sourceKind: "image" })).not.toBeNull();
     expect(await f.generate(f.input)).toMatchObject({ ok: true });
-    expect(f.readAsset).toHaveBeenCalledWith("source-image");
+    expect(f.readAsset).toHaveBeenCalledWith("source-image", "canvas");
     expect(f.run).toHaveBeenCalledOnce();
     expect(f.run.mock.calls[0]).toEqual([expect.objectContaining({ owner: "instance-owner", connection: expect.objectContaining({ connectionId: "local-codex", configRevision: 2, credentialEpoch: 3 }), history: [], images: [expect.objectContaining({ bytes: f.bytes, contentType: "image/png" })], intent: expect.objectContaining({ action: "discuss", prompt: expect.stringContaining("还原建筑") }) })]);
     expect(f.run.mock.calls[0]![0].intent).not.toHaveProperty("model");
