@@ -45,7 +45,6 @@ import {
   cloneFilmSetContent,
   cloneFilmSetLocalTransform,
   DEFAULT_FILM_SET_LOCAL_TRANSFORM,
-  defaultFilmSetContent,
   emptyFilmSetContent,
   filmSetContentHash,
   FILM_SET_CONTENT_VERSION,
@@ -169,7 +168,7 @@ export type CreateAnimationSnapshotInput = {
   /** 可选初始镜头；缺失时按 aabb 派生默认镜头。 */
   initialCamera?: InitialShotCamera;
   aabb?: Aabb | null;
-  /** 显式内容；缺失时新建片场默认提供一块普通可编辑地面（D8）。 */
+  /** 显式内容；缺失时新建片场保持空 items。 */
   filmSetContent?: FilmSetContent;
   /** D7 独立片场根；缺失即单位变换。 */
   scenePlacement?: FilmSetLocalTransform;
@@ -180,14 +179,14 @@ export type CreateAnimationSnapshotInput = {
  *
  * - 全部几何来自 items；提供了 `model` 时创建为普通 model item（可选择/编辑/绑定/删除）；
  * - `motionScript` 作为该 item 的 binding 动作并建立到自身内容的适配关联；
- * - 无来源模型时仅默认地面（删除最后对象不补内容）；
+ * - 无来源模型时保持空内容（删除最后对象不补内容）；
  * - 不生成顶层 authored 模型/动作/镜头字段；初始镜头进入 `camera` 运行时视图（片段为空时）。
  */
 export function createFilmSetSnapshot(input: CreateAnimationSnapshotInput): FilmSetNodeData {
   const scenePlacement = input.scenePlacement
     ? cloneFilmSetLocalTransform(input.scenePlacement)
     : cloneFilmSetLocalTransform(DEFAULT_FILM_SET_LOCAL_TRANSFORM);
-  const base = input.filmSetContent ? cloneFilmSetContent(input.filmSetContent) : defaultFilmSetContent();
+  const base = input.filmSetContent ? cloneFilmSetContent(input.filmSetContent) : emptyFilmSetContent();
   const items = [...base.items];
   const camera = input.initialCamera
     ? cloneInitialCamera(input.initialCamera)

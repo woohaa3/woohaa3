@@ -476,15 +476,15 @@ describe("buildCanvasRenderScene", () => {
       elevation: DEFAULT_MODEL_PREVIEW.elevation
     });
     expect(DEFAULT_MODEL_PREVIEW.azimuth).toBe(0);
-    // 复合资产尺寸由持久化数据决定，旧默认值只由离线迁移工具转换。
+    // 旧小尺寸只在呈现中按类别下限 clamp，不回写文档。
     const filmNode = scene.nodes[1];
-    expect(filmNode).toMatchObject({width:196,height:64});
+    expect(filmNode).toMatchObject({width:200,height:150});
     // 片场纯模型：无卡片分类名、无卡片预览，只有条件范围几何。
     expect(filmNode.cardLabel).toBeUndefined();
     expect(filmNode.modelPreview).toBeUndefined();
     expect(filmNode.compositeAsset).toBeDefined();
     // 范围框 = 节点矩形。
-    expect(filmNode.compositeAsset).toMatchObject({x:300,y:0,width:196,height:64});
+    expect(filmNode.compositeAsset).toMatchObject({x:300,y:0,width:200,height:150});
     const rotated = buildCanvasRenderScene({canvas:current,modelPreviews:new Map([["model",{azimuth:1,elevation:.3,distanceScale:1}]])});
     expect(renderSceneEquals(scene,rotated)).toBe(false);
     expect(current.document.nodes[0].height).toBe(64);
@@ -872,7 +872,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v26");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v28");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));
@@ -1669,4 +1669,20 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     });
     expect(renderSceneFingerprint(scene)).not.toBe(renderSceneFingerprint(moved));
   });
+});
+
+it("占位声明只改变总览呈现与指纹，缺省/未知不改变范围和内容", () => {
+  const current = canvas();
+  current.document.nodes = [{ id: "empty", type: "composite-asset", position: { x: 0, y: 0 }, width: 260, height: 195 }];
+  current.nodeData = {};
+  const before = JSON.stringify(current);
+  const absent = buildCanvasRenderScene({ canvas: current });
+  const declared = buildCanvasRenderScene({ canvas: current, compositeAssetEmptyPlaceholders: new Map([["empty", "brand-plinth-v1"]]) });
+  expect(declared.nodes[0].compositeAsset?.emptyPlaceholder).toBe("brand-plinth-v1");
+  expect(renderSceneFingerprint(declared)).not.toBe(renderSceneFingerprint(absent));
+  delete declared.nodes[0].compositeAsset!.emptyPlaceholder;
+  expect(renderSceneEquals(declared, absent)).toBe(true);
+  const unknown = buildCanvasRenderScene({ canvas: current, compositeAssetEmptyPlaceholders: new Map([["empty", "unknown" as never]]) });
+  expect(renderSceneEquals(unknown, absent)).toBe(true);
+  expect(JSON.stringify(current)).toBe(before);
 });

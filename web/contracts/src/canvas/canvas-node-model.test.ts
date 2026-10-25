@@ -188,8 +188,8 @@ describe("两类 3D 节点数据（任务 1.1/1.3）", () => {
     expect(decoded.value.timeline).toEqual({ duration: 4, loop: false });
     expect(decoded.value.camera.aspect).toBe("16:9");
     expect(decoded.value.origin).toBeUndefined();
-    // 几何只来自 items（新建默认地面 + 来源模型）。
-    expect(decoded.value.filmSetContent.items.map(item => item.id)).toEqual(["ground", ITEM_ID]);
+    // 几何只来自 items（显式来源模型）。
+    expect(decoded.value.filmSetContent.items.map(item => item.id)).toEqual([ITEM_ID]);
     expect(decoded.value.filmSetAnimations!.clips[0]!.bindings[0]!.itemId).toBe(ITEM_ID);
   });
 

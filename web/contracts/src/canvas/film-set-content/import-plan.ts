@@ -8,9 +8,7 @@
 import type { ModelDefinition } from "../model-definition.js";
 import { isBoundedId, isFiniteNumber } from "../../validation.js";
 import {
-  DEFAULT_FILM_SET_LOCAL_TRANSFORM,
   FILM_SET_CONTENT_VERSION,
-  FILM_SET_GROUND_DEFAULT_SIZE,
   FILM_SET_LAYOUT_STEP,
   MAX_FILM_SET_NAME_LENGTH,
   isFilmSetMediaItem,
@@ -23,30 +21,9 @@ import {
   type FilmSetPlayback
 } from "./types.js";
 import {
-  cloneFilmSetItem,
-  cloneFilmSetLocalTransform
+  cloneFilmSetItem
 } from "./codec.js";
 import { validateItemBudget } from "./motion.js";
-
-/**
- * 新建片场默认内容：一块普通可编辑地面（change design D2）。
- *
- * 地面是普通内容，无不可删除标记；旧片场不会被批量补加地面。
- */
-export function defaultFilmSetContent(): FilmSetContent {
-  return {
-    schemaVersion: FILM_SET_CONTENT_VERSION,
-    items: [
-      {
-        id: "ground",
-        kind: "ground",
-        name: "地面",
-        localTransform: cloneFilmSetLocalTransform(DEFAULT_FILM_SET_LOCAL_TRANSFORM),
-        size: { width: FILM_SET_GROUND_DEFAULT_SIZE, depth: FILM_SET_GROUND_DEFAULT_SIZE }
-      }
-    ]
-  };
-}
 
 /**
  * 内容标识：片场完整内部集合的确定性哈希（参与片场完整身份）。

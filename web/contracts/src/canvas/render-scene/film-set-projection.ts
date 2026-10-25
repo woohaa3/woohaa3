@@ -6,7 +6,7 @@
  * 渲染、聚焦、drop 命中与 Rust 共用同一公式。
  */
 import type { CanvasNodeData } from "../domain/index.js";
-import { MIN_NODE_HEIGHT, MIN_NODE_WIDTH } from "../domain/index.js";
+import { compositeAssetNodeBoxSize as nodeBoxSize } from "../node-dimensions.js";
 import { decodeFilmSetLocalTransform, readFilmSetContent } from "../film-set-content.js";
 import { filmSetFitFactor, modelAnchor, modelLayoutAabbRelative, modelWorldAabbRelative, worldToCanvasPoint, type ModelSceneInput } from "../model-focus.js";
 import type { Aabb } from "../model-transform.js";
@@ -28,14 +28,11 @@ export const COMPOSITE_ASSET_SCOPE_MIN_HALF = 32;
  * 外接菱形。拖动菱形右顶点抓手等比缩放基准矩形即等比缩放整个片场内容
  * （change: 2026-10-08-make-film-set-model-only 修订；change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
  */
-export const COMPOSITE_ASSET_DEFAULT_SIZE: { width: number; height: number } = { width: 260, height: 195 };
+export { COMPOSITE_ASSET_DEFAULT_SIZE } from "../node-dimensions.js";
 
 /** Canonical dimensions only. Old compact defaults are handled by the offline migration. */
 export function compositeAssetNodeBoxSize(node: { width?: number; height?: number }): { width: number; height: number } {
-  return {
-    width: Math.max(MIN_NODE_WIDTH, node.width && node.width > 0 ? node.width : COMPOSITE_ASSET_DEFAULT_SIZE.width),
-    height: Math.max(MIN_NODE_HEIGHT, node.height && node.height > 0 ? node.height : COMPOSITE_ASSET_DEFAULT_SIZE.height)
-  };
+  return nodeBoxSize(node);
 }
 
 /** 沿地面轴等比外扩固定边距：`k = 1 + margin / max(hx, hz)`，保持地面宽深比（design D2）。 */
@@ -124,6 +121,7 @@ export function compositeAssetScopeForNode(input: {
   width: number;
   height: number;
   scopeShape?: CompositeAssetScopeShape;
+  emptyPlaceholder?: import("./wire-scene.js").CompositeAssetEmptyPlaceholder;
   geometryQuality?: CompositeAssetGeometryQuality;
   mediaPlanes?: readonly BevyModelMediaPlane[];
   itemRoots?: Record<string, string>;
@@ -155,6 +153,7 @@ export function compositeAssetScopeForNode(input: {
     ...(input.scopeShape && input.scopeShape !== "rect" ? { scopeShape: input.scopeShape } : {}),
     // 总览 LOD 策略由可信 adapter 声明后注入；缺失即 World 用途保持 High
     // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
+    ...(input.emptyPlaceholder === "brand-plinth-v1" ? { emptyPlaceholder: input.emptyPlaceholder } : {}),
     ...(input.geometryQuality ? { geometryQuality: input.geometryQuality } : {}),
     ...(scopeGround ? { scopeGround } : {}),
     ...(input.mediaPlanes && input.mediaPlanes.length > 0 ? { media: [...input.mediaPlanes] } : {}),

@@ -1,9 +1,9 @@
 //! 片场标题面板布局测试（自 `layout.rs` 内联测试拆出，控制单文件体积）。
 
 use crate::canvas_query::layout::{
-    estimated_text_width, film_title_chip_height, film_title_layout, FILM_TITLE_CHIP_PAD,
-    FILM_TITLE_FONT, FILM_TITLE_GAP, FILM_TITLE_MIN_TEXT_WIDTH, FILM_TITLE_MIN_WIDTH,
-    FILM_TITLE_TYPE_FONT,
+    FILM_TITLE_CHIP_PAD, FILM_TITLE_FONT, FILM_TITLE_GAP, FILM_TITLE_MIN_TEXT_WIDTH,
+    FILM_TITLE_MIN_WIDTH, FILM_TITLE_TYPE_FONT, estimated_text_width, film_title_chip_height,
+    film_title_layout,
 };
 use crate::protocol::GraphNode;
 
@@ -28,6 +28,7 @@ fn film_node_typed(title: &str, scope: (f32, f32, f32, f32), half: f32) -> Graph
         root_placement: None,
         content_extent: None,
         layout_aabb: None,
+        empty_placeholder: None,
         geometry_quality: None,
         scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond,
         scope_ground: Some(crate::protocol::ScopeGroundDto {

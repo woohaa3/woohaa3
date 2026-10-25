@@ -8,6 +8,11 @@ export const MODEL_PREVIEW_MIN_HEIGHT = 160;
 /** Composite assets use this base rectangle to fit their content and scope. */
 export const COMPOSITE_ASSET_DEFAULT_SIZE = { width: 260, height: 195 };
 
+/** Minimum applies to explicit writes and derived display sizes, never rewrites records. */
+export function minimumNodeSizeFor(type: string): { width: number; height: number } {
+  return isCompositeAssetNodeType(type) ? { width: 200, height: 150 } : { width: MIN_NODE_WIDTH, height: MIN_NODE_HEIGHT };
+}
+
 type NodeDimensions = { width?: number; height?: number };
 function dimension(
   value: number | undefined,
@@ -31,12 +36,12 @@ export function compositeAssetNodeBoxSize(node: NodeDimensions): {
     width: dimension(
       node.width,
       COMPOSITE_ASSET_DEFAULT_SIZE.width,
-      MIN_NODE_WIDTH,
+      minimumNodeSizeFor("composite-asset").width,
     ),
     height: dimension(
       node.height,
       COMPOSITE_ASSET_DEFAULT_SIZE.height,
-      MIN_NODE_HEIGHT,
+      minimumNodeSizeFor("composite-asset").height,
     ),
   };
 }
@@ -63,11 +68,11 @@ export function effectiveCanvasNodeSize(
   const base = override ?? (legacyPreview ? fallback : node);
   const group = node.type === "group";
   return {
-    width: dimension(base.width, fallback.width, group ? 0 : MIN_NODE_WIDTH),
+    width: dimension(base.width, fallback.width, group ? 0 : minimumNodeSizeFor(node.type).width),
     height: dimension(
       base.height,
       fallback.height,
-      group ? 0 : preview ? MODEL_PREVIEW_MIN_HEIGHT : MIN_NODE_HEIGHT,
+      group ? 0 : preview ? MODEL_PREVIEW_MIN_HEIGHT : minimumNodeSizeFor(node.type).height,
     ),
   };
 }

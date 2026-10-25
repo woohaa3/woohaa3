@@ -3,6 +3,7 @@
  * （自 `mcp-http.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R11）。
  */
 import { z } from "zod";
+import { FILM_SET_CONTENT_VERSION } from "@woohaa3/contracts";
 import { createToolRegistrar } from "./guide.js";
 import { jsonResult, toolError } from "./tool-results.js";
 import type { ModelMcpHttpOptions, ToolRegistration } from "./http-types.js";
@@ -21,7 +22,7 @@ export function registerAnimationTools(reg: ToolRegistration, options: ModelMcpH
         scenePlacement: z.record(z.string(), z.unknown()).optional(),
         sceneCamera: z.record(z.string(), z.unknown()).optional(),
         origin: z.record(z.string(), z.unknown()).optional(),
-        filmSetContent: z.object({ schemaVersion: z.literal(3), items: z.array(z.record(z.string(), z.unknown())) }).describe("完整对象集合，保留原有地面和未修改对象；模型源码位于 item.model 中"),
+        filmSetContent: z.object({ schemaVersion: z.literal(FILM_SET_CONTENT_VERSION), items: z.array(z.record(z.string(), z.unknown())) }).describe("完整对象集合，保留原有地面和未修改对象；模型源码位于 item.model 中"),
         filmSetAnimations: z.record(z.string(), z.unknown()).describe("复制读取到的完整 filmSetAnimations；不要丢弃已有片段和 binding")
       })
     })

@@ -122,16 +122,13 @@ export function defaultAgentNodeData(kind: string): CanvasNodeData | undefined {
 }
 
 /** 浏览器与 MCP 新建 3D 节点共用完整、合法的本地定义。 */
-export const DEFAULT_3D_PLACEHOLDER_SCRIPT = `scene.group({ id: "root" });
-scene.box({ id: "body", parent: "root", size: [1, 1, 1] });`;
-
 export function defaultSelfContained3DNodeData(nodeType: string): CanvasNodeData | undefined {
-  const model = { modelScript: DEFAULT_3D_PLACEHOLDER_SCRIPT, modelScriptVersion: MODEL_SCRIPT_V2_VERSION };
+  const model = { modelScript: "", modelScriptVersion: MODEL_SCRIPT_V2_VERSION };
   if (nodeType === "model3d") {
     return model3DNodeDataFields(createModel3DNodeData({ title: "3D 模型", model })) as CanvasNodeData;
   }
   // 复合资产类别默认落到片场业务（extensionId="film-set"）；炉体有自己的工厂，不经此路径。
-  // D8：新建片场默认只有一块可编辑地面，不再有「无法删除的默认中央正方体」。
+  // D8：新建片场保持空内容，不注入默认几何。
   if (nodeType === COMPOSITE_ASSET_NODE_TYPE) {
     return { extensionId: FILM_SET_EXTENSION_ID, ...canonicalFilmSetFields(createFilmSetSnapshot({
       title: DIRECTOR_STUDIO_DEFAULT_TITLE, timeline: { duration: 0, loop: false }

@@ -469,7 +469,7 @@ mod tests {
     fn ring_gate_excludes_aggregate_and_group() {
         // 复合资产（片场）用运行遮罩而非进度环。
         let mut film = kind_node("model", 260.0, 195.0, true);
-        film.composite_asset = Some(crate::protocol::CompositeAssetPresentation { panel: None, ownership_links: None, root_placement: None, content_extent: None,
+        film.composite_asset = Some(crate::protocol::CompositeAssetPresentation { empty_placeholder: None, panel: None, ownership_links: None, root_placement: None, content_extent: None,
             layout_aabb: None,
             geometry_quality: None,
             scope_shape: crate::protocol::CompositeAssetScopeShape::Rect,

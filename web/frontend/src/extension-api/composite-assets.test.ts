@@ -176,3 +176,26 @@ describe("复合资产严格 owner 与 scope", () => {
     expect(resolved?.executionKey(canvas.nodeData.film)).toBe("static");
   });
 });
+
+it("占位只由可信声明投影，未知值拒绝，释放后清除且不改变范围/拾取输入", () => {
+  const registry = new CompositeAssetRegistry();
+  expect(() => registry.register({ ...adapter("bad"), emptyPlaceholder: "unknown" as never })).toThrow();
+  const dispose = registry.register({ ...adapter("custom"), emptyPlaceholder: "brand-plinth-v1", showEmptyPlaceholder: id => id === "empty" });
+  const canvas = createEmptyWoohaa3ServerCanvas("c");
+  for (const id of ["empty", "full"]) {
+    canvas.document.nodes.push({ id, type: "composite-asset", position: { x: 0, y: 0 } });
+    canvas.nodeData[id] = { extensionId: "custom" } as never;
+  }
+  const before = JSON.stringify(canvas);
+  const plain = buildCanvasRenderScene({ canvas });
+  const scene = buildCanvasRenderScene({ canvas, compositeAssetEmptyPlaceholders: registry.emptyPlaceholders(canvas) });
+  expect(scene.nodes[0].compositeAsset?.emptyPlaceholder).toBe("brand-plinth-v1");
+  expect(scene.nodes[1].compositeAsset).not.toHaveProperty("emptyPlaceholder");
+  delete scene.nodes[0].compositeAsset!.emptyPlaceholder;
+  expect(scene).toEqual(plain);
+  expect(JSON.stringify(canvas)).toBe(before);
+  const unknown = buildCanvasRenderScene({ canvas, compositeAssetEmptyPlaceholders: new Map([["empty", "unknown" as never]]) });
+  expect(unknown.nodes[0].compositeAsset).not.toHaveProperty("emptyPlaceholder");
+  dispose();
+  expect(registry.emptyPlaceholders(canvas).size).toBe(0);
+});

@@ -165,3 +165,15 @@ describe("hasModelFocusTarget", () => {
     expect(hasModelFocusTarget({ canvas: null, resources }, "m")).toBe(false);
   });
 });
+
+it("空脚本即使暂存旧资源也不建立聚焦，提交脚本后恢复真实 bounds", () => {
+  const c = canvas([{ id: "empty", type: "model3d" }]);
+  c.nodeData.empty = { modelScript: "" };
+  const resource = prepareModelResource({ sceneVersion: V2, ops: [v2Box()] });
+  const source = { canvas: c, ...base, resources: new Map([["empty", resource]]) };
+  expect(hasModelFocusTarget(source, "empty")).toBe(false);
+  expect(resolveModelFocusTargets(source)).toEqual([]);
+  c.nodeData.empty.modelScript = "scene.box({id:'b'});";
+  expect(hasModelFocusTarget(source, "empty")).toBe(true);
+  expect(resolveModelFocusTargets(source)[0].aabb).toEqual(resource.aabb);
+});

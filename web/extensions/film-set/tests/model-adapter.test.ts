@@ -36,3 +36,34 @@ describe("片场总览 LOD 策略声明（change: 2026-10-15-add-film-set-overvi
     expect(adapter.executionKey(data)).toBe(filmSetExecutionKey(data));
   });
 });
+
+it("空内容声明地台，地面/坏内容/对象/镜头不声明，释放后消失", () => {
+  const registry = new CompositeAssetRegistry();
+  const dispose = registry.register(createFilmSetModelAdapter());
+  const canvas = createEmptyWoohaa3ServerCanvas("empty-plinth");
+  canvas.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 } });
+  const fields = canonicalFilmSetFields(createFilmSetSnapshot({ title: "空", timeline: { duration: 0, loop: false } }));
+  canvas.nodeData.film = { ...fields, extensionId: "film-set" } as never;
+  const before = JSON.stringify(canvas);
+  const projection = createFilmSetModelAdapter().prepare("film", canvas.nodeData.film);
+  expect(projection?.resource?.aabb).toBeNull();
+  expect(projection?.composition?.itemRoots).toEqual({});
+  expect([...registry.emptyPlaceholders(canvas)]).toEqual([["film", "brand-plinth-v1"]]);
+  expect(JSON.stringify(canvas)).toBe(before);
+  const content = canvas.nodeData.film.filmSetContent as { items: unknown[] };
+  content.items.push({ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } });
+  expect(registry.emptyPlaceholders(canvas).size).toBe(0);
+  content.items = [];
+  expect(registry.emptyPlaceholders(canvas).size).toBe(1);
+  canvas.nodeData.film.filmSetObject = { filmSetNodeId: "owner", itemId: "object" } as never;
+  expect(registry.emptyPlaceholders(canvas).size).toBe(0);
+  delete canvas.nodeData.film.filmSetObject;
+  canvas.nodeData.film.shotPreview = { schemaVersion: 1, filmSetNodeId: "owner", clipId: "shot" } as never;
+  expect(registry.emptyPlaceholders(canvas).size).toBe(0);
+  delete canvas.nodeData.film.shotPreview;
+  canvas.nodeData.film.filmSetContent = { schemaVersion: -1, items: [] } as never;
+  expect(registry.emptyPlaceholders(canvas).size).toBe(0);
+  canvas.nodeData.film = { ...fields, extensionId: "film-set" } as never;
+  dispose();
+  expect(registry.emptyPlaceholders(canvas).size).toBe(0);
+});

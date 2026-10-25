@@ -419,3 +419,18 @@ describe("model-scene plugin version dispatch", () => {
     expect(harness.registry.resolve(canvas, "asset")).toBeNull();
   });
 });
+
+it("空模型不注册资源，提交脚本后恢复，清空后释放而不回填", async () => {
+  const harness = await makeHarness(); runtime = harness.runtime;
+  const provider = runtime.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider;
+  const empty = canvasWith([{ id: "empty", source: "", version: "woohaa-model-js-v2" }]);
+  woohaa3CanvasStore.getState().applyRemoteCanvas(empty);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(provider.getResources().has("empty")).toBe(false);
+  const full = canvasWith([{ id: "empty", source: V2_SIMPLE, version: "woohaa-model-js-v2" }]);
+  woohaa3CanvasStore.getState().applyRemoteCanvas(full);
+  await expect.poll(() => provider.getResources().has("empty")).toBe(true);
+  woohaa3CanvasStore.getState().applyRemoteCanvas(empty);
+  await expect.poll(() => provider.getResources().has("empty")).toBe(false);
+  expect(woohaa3CanvasStore.getState().canvas?.nodeData.empty.modelScript).toBe("");
+});

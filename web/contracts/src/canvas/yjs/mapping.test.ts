@@ -11,6 +11,8 @@ import { YJS_CANVAS_FORMAT_VERSION, YJS_SHARED_TYPES } from "./format.js";
 import { serverCanvasToYDoc,
   yDocToServerCanvas,
   yjsSharedTypes } from "./mapping.js";
+import { defaultSelfContained3DNodeData } from "../agent-node-descriptors.js";
+import { applyCanvasCommands } from "../command-reducer.js";
 import { ALL_FIXTURES, FIXTURE_NOW } from "./__fixtures__/canvases.js";
 
 function normalize(canvas: ServerCanvas): ServerCanvas {
@@ -207,4 +209,29 @@ describe("非法状态与格式闸门（任务 2.1）", () => {
       expect(doc.getMap(key)).toBeTruthy();
     }
   });
+});
+
+it("空模型与空片场在保存/同步/复制/撤销后不注入几何", () => {
+  const canvas = normalize(ALL_FIXTURES[0].build());
+  const created = applyCanvasCommands(canvas, ["model3d", "composite-asset"].map(type => ({
+    type: "node.add" as const, node: { id: type, type, position: { x: 0, y: 0 } }, nodeData: defaultSelfContained3DNodeData(type),
+  })));
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+  const doc = serverCanvasToYDoc(created.canvas);
+  const peer = new Y.Doc();
+  Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+  const restored = yDocToServerCanvas(peer, { now: FIXTURE_NOW });
+  expect(restored.ok).toBe(true);
+  if (!restored.ok) return;
+  expect(restored.canvas.nodeData.model3d.modelScript).toBe("");
+  expect(restored.canvas.nodeData["composite-asset"].filmSetContent).toMatchObject({ items: [] });
+  const copied = applyCanvasCommands(restored.canvas, [{ type: "node.add", node: { id: "copy", type: "model3d", position: { x: 300, y: 0 } }, nodeData: structuredClone(restored.canvas.nodeData.model3d) }]);
+  expect(copied.ok).toBe(true);
+  if (!copied.ok) return;
+  expect(copied.canvas.nodeData.copy.modelScript).toBe("");
+  const undone = applyCanvasCommands(copied.canvas, [{ type: "node.remove", nodeIds: ["copy"] }]);
+  expect(undone.ok).toBe(true);
+  if (undone.ok) expect(persistedShape(undone.canvas)).toEqual(persistedShape(restored.canvas));
+  doc.destroy(); peer.destroy();
 });

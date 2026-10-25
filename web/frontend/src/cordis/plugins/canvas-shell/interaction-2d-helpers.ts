@@ -6,10 +6,9 @@
  * 依赖 working canvas 的 group 最小尺寸约束。
  */
 import {
+  minimumNodeSizeFor,
   getGroupRequiredMinSize,
   isModelPreviewNodeType, MODEL_PREVIEW_MIN_HEIGHT,
-  MIN_NODE_HEIGHT,
-  MIN_NODE_WIDTH,
   scopeScaleFactor
 } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
@@ -28,12 +27,14 @@ export const SCOPE_HANDLE_ORDER = ["n", "ne", "e", "se", "s", "sw", "w", "nw"] a
  */
 export function scopeResizeTarget(
   gesture: { handle: Point; anchor: Point; originCenter: Point; originWidth: number; originHeight: number },
-  world: Point
+  world: Point,
+  nodeType = "composite-asset"
 ): { width: number; height: number; position: Point } | null {
   const w0 = gesture.originWidth;
   const h0 = gesture.originHeight;
   if (!(w0 > 0) || !(h0 > 0) || !Number.isFinite(world.x) || !Number.isFinite(world.y)) return null;
-  const minScale = Math.max(MIN_NODE_WIDTH / w0, MIN_NODE_HEIGHT / h0);
+  const minimum = minimumNodeSizeFor(nodeType);
+  const minScale = Math.max(minimum.width / w0, minimum.height / h0);
   const k = Math.max(scopeScaleFactor(world, gesture.handle, gesture.anchor), minScale);
   const width = Math.round(w0 * k);
   const height = Math.round(h0 * k);
@@ -50,13 +51,14 @@ export function resizeTarget(
 ): { width: number; height: number } | null {
   const dx = world.x - gesture.start.x;
   const dy = world.y - gesture.start.y;
-  // 节点自由缩放为任意宽高比；媒体内容在 Bevy 侧按自身比例 contain。
-  let width = Math.max(MIN_NODE_WIDTH, gesture.originWidth + dx);
-  let height = Math.max(MIN_NODE_HEIGHT, gesture.originHeight + dy);
-  // group 容器不得小于其直接成员的最小包围尺寸
-  // （change: add-canvas-node-grouping，design D3）。
   const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
   const node = canvasState?.document.nodes.find((entry) => entry.id === gesture.nodeId);
+  const minimum = minimumNodeSizeFor(node?.type ?? "");
+  // 节点自由缩放为任意宽高比；媒体内容在 Bevy 侧按自身比例 contain。
+  let width = Math.max(minimum.width, gesture.originWidth + dx);
+  let height = Math.max(minimum.height, gesture.originHeight + dy);
+  // group 容器不得小于其直接成员的最小包围尺寸
+  // （change: add-canvas-node-grouping，design D3）。
   if (node && isModelPreviewNodeType(node.type)) height = Math.max(height, MODEL_PREVIEW_MIN_HEIGHT);
   if (node?.type === "group") {
     const min = getGroupRequiredMinSize(

@@ -593,3 +593,29 @@ describe("输入 mapping finalizer（change: add-reference-inputs-and-mentions�
     expect(removed.canvas.nodeData.b?.inputMapping ?? []).toHaveLength(0);
   });
 });
+
+describe("类别最小尺寸与历史记录", () => {
+  it("显式尺寸写入按类别拒绝，拒绝时不改变规范画布", () => {
+    const canvas = withFilmSet();
+    const before = JSON.stringify(canvas);
+    for (const size of [{ width: 180, height: 64 }, { width: 199 }, { height: 149 }]) {
+      const result = applyCanvasCommands(canvas, [{ type: "node.update", nodeId: "anim", ...size }], { now: NOW });
+      expect(result).toMatchObject({ ok: false, rejection: { code: "invalid-node-size" } });
+      expect(JSON.stringify(canvas)).toBe(before);
+    }
+    const resized = applyCanvasCommands(canvas, [{ type: "node.update", nodeId: "anim", width: 200, height: 150 }], { now: NOW });
+    expect(resized.ok).toBe(true);
+    const normal = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "normal", type: "text", position: { x: 0, y: 0 }, width: 180, height: 64 } }], { now: NOW });
+    expect(normal.ok).toBe(true);
+    const added = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "small", type: "composite-asset", position: { x: 0, y: 0 }, width: 180, height: 64 }, nodeData: canvas.nodeData.anim }], { now: NOW });
+    expect(added).toMatchObject({ ok: false, rejection: { code: "invalid-node-size" } });
+  });
+  it("历史小片场可移动和改标题，不回写尺寸", () => {
+    const result = applyCanvasCommands(withFilmSet(), [
+      { type: "node.update", nodeId: "anim", position: { x: 40, y: 50 } },
+      { type: "nodeData.patch", nodeId: "anim", value: { title: "空场" } },
+    ], { now: NOW });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.canvas.document.nodes[0]).toMatchObject({ width: 196, height: 64, position: { x: 40, y: 50 } });
+  });
+});

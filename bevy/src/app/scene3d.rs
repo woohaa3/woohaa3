@@ -84,7 +84,8 @@ pub(super) fn sync_models(
     let mut pins = capture.pins(&scene.0);
     crate::shot_node_preview::pin_visible_owners(&scene.0, &mut pins);
     let now = time.elapsed_secs_f64();
-    let demand_changed = model3d::demand::update(models, &scene.0, rig.focus_node.as_deref(), &pins, now);
+    let demand_changed =
+        model3d::demand::update(models, &scene.0, rig.focus_node.as_deref(), &pins, now);
     // 模型 payload lease：只有当前需求引用重型 IR（design D5）。先按最新需求收敛预算，
     // 再同步根：本次淘汰掉的 cold payload 会在同步里以缺资源跳过，等待重新取得需求。
     let leases = model3d::demand::payload_lease_keys(&scene.0, models);
@@ -107,7 +108,8 @@ pub(super) fn sync_models(
     model3d::apply_animation_playback(&mut commands, models, &scene.0);
     // 活动动画节点的运动求值（change: 2026-10-05-bind-model-animation-to-shots）：独立模型
     // 姿态与唯一时钟；相机姿态写入共享资源供 shot adapter / 聚焦相机复用。
-    animation_camera.0 = model3d::apply_motion_playback(&mut commands, models, &mut materials, &scene.0);
+    animation_camera.0 =
+        model3d::apply_motion_playback(&mut commands, models, &mut materials, &scene.0);
     // 质量档位只替换共享 handle，不重建 hierarchy、不执行脚本、不改 canonical AABB。
     let quality_changed = model3d::sync_quality(
         &mut commands,
@@ -230,7 +232,11 @@ pub(super) fn sync_shot_main_view(
     let width = surface.map(|size| size.width).unwrap_or(0.0);
     let height = surface.map(|size| size.height).unwrap_or(0.0);
     let right = surface.map(|size| size.content_right).unwrap_or(0.0);
-    let right = if right.is_finite() && right > 0.0 { right } else { 0.0 };
+    let right = if right.is_finite() && right > 0.0 {
+        right
+    } else {
+        0.0
+    };
     let aspect = scene
         .0
         .model_editor
@@ -317,16 +323,23 @@ fn rig_preview_rect(content_width: f32, height: f32, aspect: f32) -> Vec4 {
 /// 观察相机始终铺满主画面，用来看 rig 和模型。它没有可画的本体。
 pub(super) fn drive_observer_from_shot(
     scene: Res<CurrentScene>,
+    rig: Res<FocusRig>,
     mut observer: Query<
         (&mut Camera, &mut bevy::camera::visibility::RenderLayers),
         With<model3d::grid::ModelCanvasCamera>,
     >,
 ) {
     for (mut camera, mut layers) in &mut observer {
-        camera.is_active = !scene.0.animation_playback.as_ref().is_some_and(|p| p.view_mode == "focus-preview");
+        camera.is_active = !scene
+            .0
+            .animation_playback
+            .as_ref()
+            .is_some_and(|p| p.view_mode == "focus-preview");
         camera.order = 0;
         camera.viewport = None;
-        *layers = bevy::camera::visibility::RenderLayers::from_layers(&[0, model3d::RUN_EFFECT_LAYER]);
+        *layers = model3d::empty_placeholder::overview_layers(
+            model3d::empty_placeholder::is_overview(&scene.0, rig.focus_node.is_some()),
+        );
     }
 }
 

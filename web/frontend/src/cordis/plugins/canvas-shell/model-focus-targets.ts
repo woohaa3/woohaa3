@@ -80,7 +80,7 @@ export function hasModelFocusTarget(
   nodeId: string
 ): boolean {
   const node = source.canvas?.document.nodes.find(node => node.id === nodeId);
-  return !!node && isModelNodeType(node.type)
+  return !!node && !(node.type === "model3d" && source.canvas?.nodeData[nodeId]?.modelScript === "") && isModelNodeType(node.type)
     && !!(source.resources?.get(nodeId) || source.scenesV2?.get(nodeId));
 }
 
@@ -92,7 +92,7 @@ export function resolveModelFocusTargets(source: ModelFocusTargetSource): FocusT
   if (!canvas) return [];
   const targets: FocusTargetInput[] = [];
   for (const node of canvas.document.nodes) {
-    if (!isModelNodeType(node.type)) continue;
+    if (!isModelNodeType(node.type) || (node.type === "model3d" && canvas.nodeData[node.id]?.modelScript === "")) continue;
     const placement = readPlacement(canvas.nodeData?.[node.id]);
     const nonCanonical = source.nonCanonicalNodes?.has(node.id) === true;
     const base = {

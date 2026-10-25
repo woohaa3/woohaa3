@@ -7,7 +7,7 @@
  */
 import { RESIZE_HANDLE_SIZE } from "../domain/index.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "../domain/core/composite-asset-identity.js";
-export { effectiveCanvasNodeSize } from "../node-dimensions.js";
+export { effectiveCanvasNodeSize, minimumNodeSizeFor } from "../node-dimensions.js";
 
 /** 参考实现的 palette kind（决定 Bevy 中的配色与图标）。 */
 export type BevyNodeKind = "text" | "image" | "model" | "audio" | "video" | "node" | "group";

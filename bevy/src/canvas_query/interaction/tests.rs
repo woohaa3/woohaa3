@@ -80,8 +80,52 @@ fn film_set(
     GraphNode {
         kind: "model".into(),
         composite_asset: Some(match scope {
-            Some((sx, sy, sw, sh)) => crate::protocol::CompositeAssetPresentation { panel: None, ownership_links: None, root_placement: None, content_extent: None, layout_aabb: None, geometry_quality: None, scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond, scope_ground: Some(crate::protocol::ScopeGroundDto { cx: sx + sw / 2.0, cy: sy + sh / 2.0, hx: 80.0, hz: 80.0 }), x: sx, y: sy, width: sw, height: sh, media: Vec::new(), item_roots: std::collections::HashMap::new(), item_placements: std::collections::HashMap::new() },
-            None => crate::protocol::CompositeAssetPresentation { panel: None, ownership_links: None, root_placement: None, content_extent: None, layout_aabb: None, geometry_quality: None, scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond, scope_ground: Some(crate::protocol::ScopeGroundDto { cx: x + w / 2.0, cy: y + h / 2.0, hx: 80.0, hz: 80.0 }), x: 0.0, y: 0.0, width: w, height: h, media: Vec::new(), item_roots: std::collections::HashMap::new(), item_placements: std::collections::HashMap::new() },
+            Some((sx, sy, sw, sh)) => crate::protocol::CompositeAssetPresentation {
+                panel: None,
+                ownership_links: None,
+                root_placement: None,
+                content_extent: None,
+                layout_aabb: None,
+                empty_placeholder: None,
+                geometry_quality: None,
+                scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond,
+                scope_ground: Some(crate::protocol::ScopeGroundDto {
+                    cx: sx + sw / 2.0,
+                    cy: sy + sh / 2.0,
+                    hx: 80.0,
+                    hz: 80.0,
+                }),
+                x: sx,
+                y: sy,
+                width: sw,
+                height: sh,
+                media: Vec::new(),
+                item_roots: std::collections::HashMap::new(),
+                item_placements: std::collections::HashMap::new(),
+            },
+            None => crate::protocol::CompositeAssetPresentation {
+                panel: None,
+                ownership_links: None,
+                root_placement: None,
+                content_extent: None,
+                layout_aabb: None,
+                empty_placeholder: None,
+                geometry_quality: None,
+                scope_shape: crate::protocol::CompositeAssetScopeShape::IsometricDiamond,
+                scope_ground: Some(crate::protocol::ScopeGroundDto {
+                    cx: x + w / 2.0,
+                    cy: y + h / 2.0,
+                    hx: 80.0,
+                    hz: 80.0,
+                }),
+                x: 0.0,
+                y: 0.0,
+                width: w,
+                height: h,
+                media: Vec::new(),
+                item_roots: std::collections::HashMap::new(),
+                item_placements: std::collections::HashMap::new(),
+            },
         }),
         ..node(id, x, y, w, h)
     }
@@ -91,10 +135,13 @@ fn film_set(
 fn rect_film_set(id: &str, x: f32, y: f32, w: f32, h: f32) -> GraphNode {
     GraphNode {
         kind: "model".into(),
-        composite_asset: Some(crate::protocol::CompositeAssetPresentation { panel: None, ownership_links: None,
+        composite_asset: Some(crate::protocol::CompositeAssetPresentation {
+            panel: None,
+            ownership_links: None,
             root_placement: None,
             content_extent: None,
             layout_aabb: None,
+            empty_placeholder: None,
             geometry_quality: None,
             scope_shape: crate::protocol::CompositeAssetScopeShape::Rect,
             scope_ground: None,
@@ -118,7 +165,6 @@ fn rhombus_marks(cx: f32, cy: f32, half: f32) -> ((f32, f32), (f32, f32)) {
     let ry = ay * 2.0 * half;
     ((cx + rx, cy), (cx - rx, cy - ry))
 }
-
 
 #[test]
 fn accept_scene_bumps_generation_and_rejects_stale() {
@@ -312,7 +358,14 @@ fn drop_target_uses_real_scope_and_excludes_sources() {
     clear_snapshot();
     // 地面矩形 hx=hz=80 → 菱形，中心 (130,97.5)。
     let g = accept_scene(&scene(
-        vec![film_set("fs", 0.0, 0.0, 260.0, 195.0, Some((0.0, 0.0, 260.0, 195.0)))],
+        vec![film_set(
+            "fs",
+            0.0,
+            0.0,
+            260.0,
+            195.0,
+            Some((0.0, 0.0, 260.0, 195.0)),
+        )],
         vec![],
     ));
     let ((right_x, right_y), (blank_x, blank_y)) = rhombus_marks(130.0, 97.5, 80.0);
@@ -322,7 +375,10 @@ fn drop_target_uses_real_scope_and_excludes_sources() {
         Some("fs".into())
     );
     // AABB 空白角在菱形外：不命中。
-    assert_eq!(drop_target_query(g, blank_x + 2.0, blank_y + 2.0, &[]).target_node_id, None);
+    assert_eq!(
+        drop_target_query(g, blank_x + 2.0, blank_y + 2.0, &[]).target_node_id,
+        None
+    );
     // 来源排除：范围内但被排除时不命中。
     assert_eq!(
         drop_target_query(g, 130.0, 97.5, &["fs".to_owned()]).target_node_id,
@@ -355,7 +411,14 @@ fn drop_target_fixes_topmost_node_before_business_filter() {
 fn scope_geometry_query_returns_parallelogram_vertices_and_base() {
     clear_snapshot();
     let g = accept_scene(&scene(
-        vec![film_set("fs", 0.0, 0.0, 260.0, 195.0, Some((0.0, 0.0, 260.0, 195.0)))],
+        vec![film_set(
+            "fs",
+            0.0,
+            0.0,
+            260.0,
+            195.0,
+            Some((0.0, 0.0, 260.0, 195.0)),
+        )],
         vec![],
     ));
     let result = scope_geometry_query(g);
@@ -516,7 +579,10 @@ fn accept_observer_rejects_overview_and_stale_base() {
         radius: 1.0,
     });
     let focused = accept_scene(&s);
-    assert_eq!(accept_observer(focused.wrapping_add(3), "n"), Err("stale-base"));
+    assert_eq!(
+        accept_observer(focused.wrapping_add(3), "n"),
+        Err("stale-base")
+    );
     assert_eq!(point_query(focused, 10.0, 10.0, 1.0, None).available, true);
 }
 
@@ -578,7 +644,13 @@ fn shot_preview_hits_content_region_only() {
     clear_snapshot();
     // 卡片 (100,200,240,167)：内容区 (116,252,208,99)，与媒体卡片内边距一致。
     let g = accept_scene(&scene(
-        vec![shot_preview_node("shot-preview:p", 100.0, 200.0, 240.0, 167.0)],
+        vec![shot_preview_node(
+            "shot-preview:p",
+            100.0,
+            200.0,
+            240.0,
+            167.0,
+        )],
         vec![],
     ));
     // 内容区中心 → 拍摄播放入口。
@@ -596,10 +668,17 @@ fn shot_preview_hits_content_region_only() {
         })
     );
     // 标题下半行、左右与底部留白都不能触发播放。
-    for (x, y) in [(220.0, 240.0), (108.0, 300.0), (332.0, 300.0), (220.0, 358.0)] {
+    for (x, y) in [
+        (220.0, 240.0),
+        (108.0, 300.0),
+        (332.0, 300.0),
+        (220.0, 358.0),
+    ] {
         assert_eq!(
             point_query(g, x, y, 1.0, None).hit,
-            Some(PointHit::Node { node_id: "shot-preview:p".into() })
+            Some(PointHit::Node {
+                node_id: "shot-preview:p".into()
+            })
         );
     }
     // 普通节点不产生拍摄命中。
@@ -619,13 +698,25 @@ fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
     n.history_strip = Some(crate::protocol::HistoryStripPresentation {
         dots: vec![
             crate::protocol::HistoryStripDot {
-                selected: None, hovered: false, pressed: false, presentation_id: None, entry_id: None, operation_id: None, recoverable: None,
-state: "succeeded".into(),
+                selected: None,
+                hovered: false,
+                pressed: false,
+                presentation_id: None,
+                entry_id: None,
+                operation_id: None,
+                recoverable: None,
+                state: "succeeded".into(),
                 current: true,
             },
             crate::protocol::HistoryStripDot {
-                selected: None, hovered: false, pressed: false, presentation_id: None, entry_id: None, operation_id: None, recoverable: None,
-state: "succeeded".into(),
+                selected: None,
+                hovered: false,
+                pressed: false,
+                presentation_id: None,
+                entry_id: None,
+                operation_id: None,
+                recoverable: None,
+                state: "succeeded".into(),
                 current: false,
             },
         ],

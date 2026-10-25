@@ -68,9 +68,7 @@ pub(crate) fn start() {
                 //   shader/渲染错误，对诊断无价值。压到 error。
                 // - mesh_view_bindings 等模块缺失、shader 编译失败这类问题只在 WARN/ERROR 出现，
                 //   因此不能整体降级 `level`；只按 target 静音已知噪音。
-                filter: format!(
-                    "{DEFAULT_FILTER}bevy_ecs::world::command_queue=error,"
-                ),
+                filter: format!("{DEFAULT_FILTER}bevy_ecs::world::command_queue=error,"),
                 ..default()
             }),
     );
@@ -116,6 +114,7 @@ fn configure_canvas(app: &mut App) {
         .add_systems(Last, startup_timing::end)
         .insert_resource(ClearColor(ThemeResource::default().backdrop_color()))
         .init_resource::<CurrentScene>()
+        .init_resource::<model3d::empty_placeholder::Placeholders>()
         .init_resource::<positions::PositionIndex>()
         .init_resource::<TextureBatch>()
         .init_resource::<canvas2d::focus_details::FocusDetailBatch>()
@@ -164,7 +163,12 @@ fn configure_canvas(app: &mut App) {
                     sync_surface,
                     sync_ready,
                     canvas2d::sync_textures,
-                    (model3d::film_set_media::sync_film_set_planes, canvas2d::scope_panel::sync_images, model3d::film_set_media::sync_film_set_textures).chain(),
+                    (
+                        model3d::film_set_media::sync_film_set_planes,
+                        canvas2d::scope_panel::sync_images,
+                        model3d::film_set_media::sync_film_set_textures,
+                    )
+                        .chain(),
                     canvas2d::sync_camera,
                     focus::sync_focus,
                     scene3d::sync_grid.before(crate::isometric_grid::IsometricGridSet::Style),
@@ -173,7 +177,12 @@ fn configure_canvas(app: &mut App) {
                     scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
                     // Native 片场后台准备：非阻塞 poll + 全局预算装配，排在消费者之前
                     // （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
-                    (scene3d::advance_preparation, model3d::run_effect::sync).chain(),
+                    (
+                        scene3d::advance_preparation,
+                        model3d::run_effect::sync,
+                        model3d::empty_placeholder::sync,
+                    )
+                        .chain(),
                     crate::model_preview::sync,
                     // 卡片预览：消费同一帧的采样镜头/播放投影，并在模型落位后并入卡片渲染层
                     // （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。

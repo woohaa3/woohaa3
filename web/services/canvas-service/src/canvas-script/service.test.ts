@@ -413,7 +413,7 @@ describe("Canvas Script 分类分组端到端", () => {
     expect(read.canvas.document.nodes.filter(n => n.type === "group")).toHaveLength(3);
     expect(read.canvas.document.nodes.find(n => n.id === saved.receipt.refs.a)?.parentId).toBe(saved.receipt.refs.characters);
     expect(read.canvas.document.edges).toHaveLength(0);
-    expect(read.canvas.nodeData[saved.receipt.refs.a]?.modelScript).toBeTruthy();
+    expect(read.canvas.nodeData[saved.receipt.refs.a]?.modelScript).toBe("");
     const rename = await service.submit(request({requestId:"rename", source:`canvas.setTitle(canvas.existing(${JSON.stringify(saved.receipt.refs.kit)}), "新标题");`}));
     expect(rename.ok).toBe(true);
     const retry = await service.submit(input); if (!retry.ok) throw new Error("retry");
@@ -429,7 +429,7 @@ describe("Canvas Script 分类分组端到端", () => {
     expect(dissolved.receipt.deletedNodeIds).toEqual([refs.characters]);
     const read=room.exportCanvas();if(!read.ok)throw new Error("export");
     expect(read.canvas.document.nodes.find(n=>n.id===refs.a)?.parentId).toBe(refs.kit);
-    expect(read.canvas.nodeData[refs.a]?.modelScript).toBeTruthy();
+    expect(read.canvas.nodeData[refs.a]?.modelScript).toBe("");
     const removed=await service.submit(request({requestId:"remove",source:`canvas.remove(canvas.existing(${JSON.stringify(refs.kit)}));`}));
     if(!removed.ok)throw new Error(JSON.stringify(removed));
     expect(removed.receipt.deletedNodeIds).toHaveLength(5);

@@ -446,9 +446,9 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
     expect(nodeStatus?.status === "failed" ? nodeStatus.code : null).toBe("candidate-invalid");
     const decoded = decodeFilmSetNodeData(target!.data);
     expect(decoded.ok).toBe(true);
-    // 占位节点只有默认地面，未写入任何候选对象（无半个片场定义）。
+    // 占位节点保持空内容，未写入任何候选对象（无半个片场定义）。
     if (decoded.ok) {
-      expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual(["ground"]);
+      expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual([]);
     }
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export");
@@ -480,10 +480,10 @@ describe("FilmSetConversionService：媒体候选与端口（任务 1.1/2.4 / D5
     const target = filmSetNode(room, "film-flat");
     expect(target).not.toBeNull();
     expect(readFilmSetConversionNodeStatus(target!.data)?.status).toBe("failed");
-    // 占位节点仍是默认地面，没有把源素材当作成功结果写入。
+    // 占位节点仍是空内容，没有把源素材当作成功结果写入。
     const decoded = decodeFilmSetNodeData(target!.data);
     if (decoded.ok) {
-      expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual(["ground"]);
+      expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual([]);
     }
   });
 
@@ -678,7 +678,7 @@ describe("FilmSetConversionService：占位片场节点生命周期（任务 1.3
     expect(exported.canvas.document.edges).toHaveLength(0);
   });
 
-  it("占位节点可由片场 decoder 读取（初始空内容，仅默认地面）", async () => {
+  it("占位节点可由片场 decoder 读取（初始空内容，无默认地面）", async () => {
     const room = await readyRoom("c-ph-empty", [{ id: "img-src", type: "image", data: { outputAssetId: "asset-1" } as CanvasNodeData }], [readyImageAsset()]);
     let release: (() => void) | null = null;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -699,7 +699,7 @@ describe("FilmSetConversionService：占位片场节点生命周期（任务 1.3
     expect(target.data?.extensionId).toBe("film-set");
     const decoded = decodeFilmSetNodeData(target.data);
     if (!decoded.ok) throw new Error(decoded.reason);
-    expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual(["ground"]);
+    expect(decoded.value.filmSetContent.items.map((item) => item.kind)).toEqual([]);
     release!();
     await pending;
   });

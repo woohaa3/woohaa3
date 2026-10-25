@@ -22,7 +22,7 @@ import {
   type AgentSemanticKind,
   type CanvasNodeData
 } from "@woohaa3/contracts";
-export { DEFAULT_3D_PLACEHOLDER_SCRIPT, defaultSelfContained3DNodeData } from "@woohaa3/contracts";
+export { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
 
 /** 前端菜单项 id：五类共享语义 kind + 两类自包含 3D 节点（change: 2026-10-05）。 */
 export type CanvasNodeTemplateId = AgentSemanticKind | "model3d" | "composite-asset";

@@ -24,22 +24,24 @@
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code, unused_imports))]
 
 pub(crate) mod animation;
-pub(crate) mod media_geometry;
-pub(crate) mod pick;
-pub(crate) mod filmset_camera;
-#[cfg(feature = "canvas-core")]
-pub(crate) mod run_effect;
-pub(crate) mod film_set_pick;
 #[cfg(feature = "canvas-core")]
 pub(crate) mod capture;
 pub(crate) mod editor;
 #[cfg(feature = "canvas-core")]
+pub(crate) mod empty_placeholder;
+#[cfg(feature = "canvas-core")]
 pub(crate) mod film_set_media;
+pub(crate) mod film_set_pick;
+pub(crate) mod filmset_camera;
 pub(crate) mod focus;
 pub(crate) mod focus_transition;
 pub(crate) mod grid;
-pub(crate) mod shot_adapter;
+pub(crate) mod media_geometry;
+pub(crate) mod pick;
+#[cfg(feature = "canvas-core")]
+pub(crate) mod run_effect;
 pub(crate) mod scene;
+pub(crate) mod shot_adapter;
 // 跨后端容差比较：不依赖 Bevy，可在 CI 上单测；真实取图由带 GPU 的环境提供。
 // change: 2026-10-09-refactor-large-source-files-and-remove-compatibility D02 —— 该模块只被
 // 自身内联测试消费，收敛为 test-only 编译面，避免 native/wasm 生产构建携带未用代码。
@@ -47,36 +49,36 @@ pub(crate) mod scene;
 pub(crate) mod visual_compare;
 
 #[cfg(feature = "native-renderer")]
-pub mod preview;
-#[cfg(feature = "native-renderer")]
 pub mod lod_benchmark;
+#[cfg(feature = "native-renderer")]
+pub mod preview;
 
 mod layout;
 pub(crate) use layout::film_set_content_bounds;
+mod batch_cache;
+mod batch_strategy;
+mod batching;
+pub(crate) mod demand;
+mod diagnostics;
+#[cfg(feature = "explicit-instancing")]
+pub(crate) mod instancing;
 mod item_placement;
 mod mesh;
-pub(crate) mod quality;
-mod runtime;
-mod resources;
-mod resource_ownership;
-mod resource_work;
-mod simplification;
-mod simplification_jobs;
-mod simplification_allocator;
-mod diagnostics;
-mod preparation;
-pub(crate) mod demand;
-mod motion_reset;
 mod motion_plan;
+mod motion_reset;
 mod opacity;
 mod part_id;
 mod playback_prepare;
+mod preparation;
+pub(crate) mod quality;
+mod resource_ownership;
+mod resource_work;
+mod resources;
+mod runtime;
+mod simplification;
+mod simplification_allocator;
+mod simplification_jobs;
 mod spawn;
-mod batching;
-mod batch_cache;
-mod batch_strategy;
-#[cfg(feature = "explicit-instancing")]
-pub(crate) mod instancing;
 
 pub(crate) use animation::TransformAnimationSet;
 pub(crate) use layout::film_set_root_transform;
@@ -121,6 +123,8 @@ pub(crate) use film_set_pick::FilmSetItemPreparation;
 
 use bevy::camera::visibility::RenderLayers;
 pub(crate) const RUN_EFFECT_LAYER: usize = 3;
+/// Reserved overview chrome layer, excluded from all model/capture masks.
+pub(crate) const FILM_SET_PLACEHOLDER_LAYER: usize = 4;
 
 /// 模型实体渲染层：主画布层（0）+ 截图层，使截图像机只看到模型，不含网格/gizmo/2D chrome
 /// （change: add-model-editor-gizmo-shot-capture，任务 3.3）。

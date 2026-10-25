@@ -30,7 +30,11 @@ pub(crate) fn setup_camera(commands: &mut Commands) -> Entity {
         .spawn((
             Camera3d::default(),
             ModelCanvasCamera,
-            RenderLayers::from_layers(&[0, super::super::RUN_EFFECT_LAYER]),
+            RenderLayers::from_layers(&[
+                0,
+                super::super::RUN_EFFECT_LAYER,
+                super::super::FILM_SET_PLACEHOLDER_LAYER,
+            ]),
             Projection::Orthographic(canvas_camera_projection()),
             crate::isometric_grid::canvas_camera_transform(Vec2::ZERO),
             Tonemapping::None,
@@ -64,7 +68,11 @@ pub(crate) fn setup_camera(commands: &mut Commands) -> Entity {
 fn model_light_layers() -> RenderLayers {
     #[cfg(feature = "canvas-core")]
     {
-        RenderLayers::from_layers(&[0, crate::model3d::capture::CAPTURE_LAYER])
+        RenderLayers::from_layers(&[
+            0,
+            crate::model3d::capture::CAPTURE_LAYER,
+            crate::model3d::empty_placeholder::FILM_SET_PLACEHOLDER_LAYER,
+        ])
     }
     #[cfg(not(feature = "canvas-core"))]
     {

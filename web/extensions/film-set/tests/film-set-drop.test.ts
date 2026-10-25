@@ -10,7 +10,6 @@ import {
   createFilmSetSnapshot,
   createModel3DNodeData,
   model3DNodeDataFields,
-  defaultFilmSetContent,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import {
@@ -36,7 +35,7 @@ function base(): ServerCanvas {
   canvas.nodeData = {
     film: filmSetNodeDataFields(createFilmSetSnapshot({
       title: "片场",
-      timeline: { duration: 0, loop: false }, filmSetContent: defaultFilmSetContent()
+      timeline: { duration: 0, loop: false }, filmSetContent: explicitGroundContent()
     })),
     model: model3DNodeDataFields(createModel3DNodeData({
       title: "模型", model: { modelScript: SCRIPT, modelScriptVersion: "woohaa-model-js-v2" }
@@ -135,3 +134,7 @@ describe("planFilmSetImportCommand", () => {
     expect(plan.ok).toBe(false);
   });
 });
+
+function explicitGroundContent(): import("@woohaa3/contracts").FilmSetContent {
+  return { schemaVersion: 4, items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }] };
+}

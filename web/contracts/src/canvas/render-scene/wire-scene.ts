@@ -68,7 +68,8 @@ export * from "./wire-shot-preview.js";
  *   已声明**：payload 未驻留是合法 cold/preparing 状态，重型 IR 由需求 lease 与预算淘汰。
  *   旧 renderer 会把 cold 引用当作未知资源并拒绝整帧，因此必须同步提升能力版本。
  */
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v26" as const;
+// v27: optional trusted overview-only emptyPlaceholder; older renderers reject the whole frame.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v28" as const;
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
@@ -209,7 +210,10 @@ export type CompositeAssetGeometryQuality = "overview-primitives-v1";
  * 平行地面投影轴）派生；**不**把 AABB 写回 width/height。可信 adapter 可按严格身份覆盖为 `rect`，
  * 此时基准矩形即范围框。这是纯派生呈现几何，不写规范文档、不进镜头成片。
  */
+export type CompositeAssetEmptyPlaceholder = "brand-plinth-v1";
+
 export type BevyCompositeAssetPresentation = {
+  emptyPlaceholder?: CompositeAssetEmptyPlaceholder;
   /** Shared canvas container surface, rendered inside Bevy. */
   panel?: import("../composite-children.js").CompositeContainerPanel;
   /** Derived ownership only; local model anchor → target card bottoms. Not editable document edges. */

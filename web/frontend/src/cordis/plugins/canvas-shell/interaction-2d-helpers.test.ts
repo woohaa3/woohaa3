@@ -3,8 +3,9 @@
  * （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D6）。
  */
 import { describe, expect, it } from "vitest";
-import { MIN_NODE_HEIGHT, MIN_NODE_WIDTH } from "@woohaa3/contracts";
-import { scopeResizeTarget } from "./interaction-2d-helpers.js";
+import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { resizeTarget, scopeResizeTarget } from "./interaction-2d-helpers.js";
 
 describe("scopeResizeTarget（对角锁定等比缩放）", () => {
   // 节点中心 (130,100)，尺寸 260×195；拖右下角，锚点左上角 (0, 2.5)。
@@ -37,7 +38,7 @@ describe("scopeResizeTarget（对角锁定等比缩放）", () => {
   it("缩小遵守最小节点尺寸对应比例 kMin", () => {
     const world = { x: handle.x - 100000, y: handle.y - 100000 };
     const target = scopeResizeTarget(base, world);
-    const kMin = Math.max(MIN_NODE_WIDTH / 260, MIN_NODE_HEIGHT / 195);
+    const kMin = Math.max(200 / 260, 150 / 195);
     expect(target!.width).toBe(Math.round(260 * kMin));
     expect(target!.height).toBe(Math.round(195 * kMin));
   });
@@ -45,4 +46,16 @@ describe("scopeResizeTarget（对角锁定等比缩放）", () => {
   it("非有限输入不产生目标", () => {
     expect(scopeResizeTarget(base, { x: Number.NaN, y: 100 })).toBeNull();
   });
+});
+
+it("普通矩形缩放也使用目标节点类别下限", () => {
+  const previous = woohaa3CanvasStore.getState().canvas;
+  const canvas = createEmptyWoohaa3ServerCanvas("resize");
+  canvas.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 }, width: 260, height: 195 });
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  try {
+    const gesture = { nodeId: "film", start: { x: 0, y: 0 }, originWidth: 260, originHeight: 195 };
+    expect(resizeTarget(gesture, { x: -1000, y: -1000 })).toEqual({ width: 200, height: 150 });
+    expect(resizeTarget(gesture, { x: 0, y: 0 })).toBeNull();
+  } finally { woohaa3CanvasStore.getState().applyRemoteCanvas(previous!); }
 });

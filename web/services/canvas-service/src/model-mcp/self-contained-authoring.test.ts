@@ -175,7 +175,7 @@ describe("model3d / 复合资产片场作者接口（items-only，D7/D8/D10）",
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error(outcome.message);
     const after = dataOf(room, "animation");
-    // 片段集合保持；其他 items（这里只有默认地面）保持；目标 item 模型更新。
+    // 片段集合保持；其他显式 items 保持；目标 item 模型更新。
     expect(after.filmSetAnimations).toEqual(beforeAnimations);
     const afterContent = after.filmSetContent as FilmSetContent;
     const ground = beforeContent.items.find(item => item.kind === "ground");
