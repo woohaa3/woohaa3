@@ -99,7 +99,8 @@ describe("真实平台 + 静态清单", () => {
       ].sort()
     );
     expect(dialogs.resolveRenderer(MEDIA_PREVIEW_DIALOG_ID)).not.toBeNull();
-    expect(dialogs.resolveRenderer(CANVAS_HISTORY_DIALOG_ID)).not.toBeNull();
+    expect(dialogs.resolveRenderer(CANVAS_HISTORY_DIALOG_ID)).toBeNull();
+    expect(dialogs.registeredDialogIds()).toContain(CANVAS_HISTORY_DIALOG_ID);
     expect(dialogs.resolveRenderer(VIDEO_EDIT_DIALOG_ID)).not.toBeNull();
     expect(dialogs.resolveRenderer(VIDEO_FRAME_CAPTURE_DIALOG_ID)).not.toBeNull();
   });

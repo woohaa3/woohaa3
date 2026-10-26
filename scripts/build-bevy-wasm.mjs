@@ -52,7 +52,9 @@ const lockRoot = join(root, ".local", "locks");
 /** stamp 结构版本；旧版缺失模式/输出摘要时一次性失效，不迁移成命中。 */
 const STAMP_VERSION = 2;
 /** glue 后处理与稳定 d.ts 模板的版本；任一改动都必须使缓存失效。 */
-const GLUE_POSTPROCESS_VERSION = "2";
+const GLUE_POSTPROCESS_VERSION = "3";
+// change: 2026-10-26-move-generation-history-to-ai-center —— 新增
+// request_history_thumbnail / poll_history_thumbnail 导出，模板版本提升。
 // change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm —— 新增 query_* / prepare_and_register_*
 // / model_asset_diagnostics 导出，模板版本提升使缓存失效。
 // change: 2026-10-07-remove-residual-compatibility —— request_shot_capture/poll_shot_capture 替换
@@ -92,6 +94,8 @@ export function set_image_focus_details(manifest:string,pixels:Uint8Array):void;
 export function set_model_media_texture(id: string, width: number, height: number, rgba: Uint8Array): void;
 export function request_shot_capture(json: string): void;
 export function poll_shot_capture(requestId: number, generation: number): Uint8Array;
+export function request_history_thumbnail(json: string): void;
+export function poll_history_thumbnail(requestId: number, generation: number): Uint8Array;
 export function shot_diagnostics(): string;
 export function start(): void;
 export function query_point_hit(json: string): string;

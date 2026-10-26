@@ -132,3 +132,26 @@ describe("CanvasHistoryBrowser", () => {
     expect(html).not.toContain("disabled=\"\"");
   });
 });
+
+it("节点在点击前删除、关闭被拒绝时不导航；成功关闭后传递确切 entryId", async () => {
+  const { act } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { vi } = await import("vitest");
+  const controller = new CanvasHistoryController(client({ items: [item("version")] }));
+  await controller.open({ canvasId: "c1" });
+  let available = true; let closeAllowed = false;
+  const jump = vi.fn(); const close = vi.fn(() => closeAllowed);
+  const container = document.createElement("div"); const root = createRoot(container);
+  act(() => root.render(<CanvasHistoryBrowser embedded controller={controller} onClose={close} onOpenNodeVersion={jump} canOpenNodeVersion={() => available ? { ok: true } : { ok: false, reason: "节点已删除" }} />));
+  const button = [...container.querySelectorAll("button")].find(button => button.textContent === "前往节点查看版本")!;
+  act(() => button.click()); expect(jump).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("当前界面无法关闭");
+  available = false; closeAllowed = true;
+  act(() => button.click()); expect(jump).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("节点已删除");
+  available = true;
+  act(() => root.render(<CanvasHistoryBrowser embedded controller={controller} onClose={close} onOpenNodeVersion={jump} canOpenNodeVersion={() => ({ ok: true })} />));
+  act(() => button.click()); expect(jump).toHaveBeenCalledWith({ nodeId: "n1", entryId: "version" });
+  expect(close).toHaveBeenCalledTimes(2);
+  act(() => root.unmount());
+});

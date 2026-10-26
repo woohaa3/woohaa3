@@ -140,3 +140,42 @@ describe("CanvasHistoryController", () => {
     expect(state.status).not.toBe("empty");
   });
 });
+
+it("更多页失败保留条目、选中和 cursor，重试相同页并去重", async () => {
+  const cursors: Array<string | undefined> = [];
+  let failed = false;
+  const controller = new CanvasHistoryController({ listCanvas: async input => {
+    cursors.push(input.cursor);
+    if (!input.cursor) return { ok: true, items: [item("a")], nextCursor: "next", total: 2, kindCounts: COUNTS };
+    if (!failed) { failed = true; throw new Error("分页读取断开"); }
+    return { ok: true, items: [item("a"), item("b")], nextCursor: null, total: 2, kindCounts: COUNTS };
+  } });
+  await controller.open({ canvasId: "c" });
+  controller.select("a");
+  await controller.loadMore();
+  expect(controller.getState()).toMatchObject({ status: "ready", nextCursor: "next", error: "分页读取断开", selectedEntryId: "a", loadingMore: false });
+  expect(controller.getState()!.items.map(entry => entry.entryId)).toEqual(["a"]);
+  await controller.loadMore();
+  expect(cursors).toEqual([undefined, "next", "next"]);
+  expect(controller.getState()!.items.map(entry => entry.entryId)).toEqual(["a", "b"]);
+  expect(controller.getState()!.error).toBeNull();
+});
+
+it("同画布在途打开幂等，切画布与关闭丢弃旧响应，重开读取最新首页", async () => {
+  const pending: Array<{ canvasId: string; resolve: (page: Awaited<ReturnType<CanvasHistoryClient["listCanvas"]>>) => void }> = [];
+  const controller = new CanvasHistoryController({ listCanvas: input => new Promise(resolve => pending.push({ canvasId: input.canvasId, resolve })) });
+  const old = controller.open({ canvasId: "old" });
+  await controller.open({ canvasId: "old" });
+  expect(pending).toHaveLength(1);
+  const current = controller.open({ canvasId: "new" });
+  const page = (id: string) => ({ ok: true as const, items: [item(id)], nextCursor: null, total: 1, kindCounts: COUNTS });
+  pending[1]!.resolve(page("new")); await current;
+  pending[0]!.resolve(page("old")); await old;
+  expect(controller.getState()!.items[0]!.entryId).toBe("new");
+  controller.close();
+  const reopening = controller.open({ canvasId: "new" });
+  controller.close();
+  pending[2]!.resolve(page("late")); await reopening;
+  expect(controller.getState()).toBeNull();
+  expect(pending.map(request => request.canvasId)).toEqual(["old", "new", "new"]);
+});

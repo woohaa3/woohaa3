@@ -581,6 +581,10 @@ export type SlotContributionMap = {
    * 由 feature plugin 贡献授权行；弹窗宿主按 priority 渲染在 API Key 条目之前，不硬编码
    * 任何具体 Provider/OAuth 逻辑。
    */
+  /** Read-only canvas history workspace. The contributing feature owns its state and media. */
+  "ai-center.generation-history": {
+    render: ComponentType<{ canvasId: string; active: boolean; onClose: () => boolean }>;
+  };
   "agent-assistant.configuration": {
     kind: "login" | "installed" | "api-key";
     label: string;

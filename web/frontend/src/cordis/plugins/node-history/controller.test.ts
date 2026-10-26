@@ -281,3 +281,18 @@ describe("NodeHistoryController", () => {
     });
   });
 });
+
+it("历史跳转的确切版本失效时保留当前作品和列表，只报告读取失败", async () => {
+  let applied = 0;
+  const controller = new NodeHistoryController(fakeClient({
+    list: async () => ({ ok: true, items: [item("available")], nextCursor: null }),
+    detail: async () => ({ ok: false, code: "not-found", error: "目标版本已失效" }),
+    apply: async () => { applied++; return { ok: true }; }
+  }));
+  await controller.open({ canvasId: "c", nodeId: "n", kind: "text", writable: false });
+  const current = controller.getState()!.current;
+  await controller.select("expired-exact-id");
+  expect(controller.getState()).toMatchObject({ selectedEntryId: "expired-exact-id", detail: null, error: "目标版本已失效", current });
+  expect(controller.getState()!.items.map(item => item.entryId)).toEqual(["available"]);
+  expect(applied).toBe(0);
+});

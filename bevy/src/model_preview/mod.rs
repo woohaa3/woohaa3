@@ -53,6 +53,12 @@ impl Ready {
     pub(crate) fn matches(&self, camera: Entity, generation: u64) -> bool {
         self.0.lock().unwrap().get(&camera).copied() == Some(generation)
     }
+
+    /// 丢弃一次一次性视图（历史缩略图的临时相机）的就绪记录。
+    /// 卡片视图由 `remove_card` 清理；一次性视图没有卡片生命周期，必须自己归还。
+    pub(crate) fn forget(&self, camera: Entity) {
+        self.0.lock().unwrap().remove(&camera);
+    }
 }
 #[derive(Resource, Default)]
 pub(crate) struct Previews {

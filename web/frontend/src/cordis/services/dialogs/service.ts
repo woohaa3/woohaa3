@@ -44,9 +44,16 @@ export class DialogService implements DialogsService {
   subscribe = (listener: (snapshot: DialogHostSnapshot) => void): (() => void) => this.store.subscribe(listener);
 
   open(request: OpenDialogRequest): OpenDialogResult {
-    const validation = this.registry.validate(request.dialogId, request.payload);
-    if (!validation.ok) return this.store.open(request);
-    return this.store.open(request);
+    const visited = new Set<string>();
+    while (true) {
+      if (visited.has(request.dialogId)) return { ok: false, error: "Dialog redirect cycle" };
+      visited.add(request.dialogId);
+      const validation = this.registry.validate(request.dialogId, request.payload);
+      if (!validation.ok || !validation.definition.redirect) return this.store.open(request);
+      const payload = validation.definition.validatePayload(request.payload);
+      if (!payload.ok) return this.store.open(request);
+      request = validation.definition.redirect(payload.payload);
+    }
   }
 
   replace(payload: unknown, instanceId?: string): boolean {

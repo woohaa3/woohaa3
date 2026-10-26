@@ -18,7 +18,7 @@ function DraftInput() {
   return <input aria-label="新增 API Key" value={value} onChange={event => setValue(event.target.value)} />;
 }
 afterEach(async () => { act(() => root?.unmount()); await runtime?.dispose(); document.body.innerHTML = ""; });
-async function render(connections: AgentConnectionView[] = [], configure = false, settingsStore?: ReturnType<typeof createBackendSettingsStore>, payload: {canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string} = {canvasId: "canvas", nodeId: "node"}, overrides: Partial<AgentConversationService> = {}, models?: Pick<GenerationModelsStatusService, "getSnapshot" | "subscribe">) {
+async function render(connections: AgentConnectionView[] = [], configure = false, settingsStore?: ReturnType<typeof createBackendSettingsStore>, payload: {canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics"} = {canvasId: "canvas", nodeId: "node"}, overrides: Partial<AgentConversationService> = {}, models?: Pick<GenerationModelsStatusService, "getSnapshot" | "subscribe">) {
   const slots = new SlotRegistry();
   if (configure) slots.register("agent-assistant.configuration", { id: "api", owner: "sdk-agent", kind: "api-key", label: "API Key", render: ({ onSaved }) => <><DraftInput /><button onClick={() => onSaved?.("c1")}>保存测试连接</button><SelectInput label="配置类型" value="one" onValueChange={() => {}} options={[{value:"one",label:"类型一"},{value:"two",label:"类型二"}]} /></> });
   if (configure) slots.register("agent-assistant.configuration", { id: "local", owner: "local-agent", kind: "installed", label: "我有本地 agent", render: () => <p>本机工具配置</p> });
@@ -43,9 +43,9 @@ const api = { connectionId: "c1", extensionId: "sdk-agent", name: "我的 API", 
 const local = { ...api, connectionId: "local", extensionId: "local-agent", authMode: "local-login", name: "本地 Codex" } as AgentConnectionView;
 const oauth = { ...api, connectionId: "oauth", extensionId: "oauth-agent", authMode: "oauth", name: "me@example.com" } as AgentConnectionView;
 
-it("按 demo 显示能力总览和五项侧栏，MCP 与服务来源独立", async () => {
+it("按 demo 显示能力总览和六项侧栏，MCP 与服务来源独立", async () => {
   const f = await render();
-  expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "MCP 服务", "服务来源", "诊断与历史"]);
+  expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "MCP 服务", "服务来源", "生成历史", "连接诊断"]);
   expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"]')?.getAttribute("data-page")).toBe("overview");
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("模型服务");
   expect(f.el.textContent).not.toContain("添加本地助手");
@@ -367,30 +367,25 @@ it("诊断只展示实际状态与画布历史，未知证据不会变成检查�
   expect(listConversations).not.toHaveBeenCalled();
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个可用");
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个来源");
-  await f.click("诊断与历史");
+  await f.click("连接诊断");
   const page = f.el.querySelector('[data-ai-page="diagnostics"]')!;
-  expect(listConversations).toHaveBeenCalledOnce();
-  expect(listConversations).toHaveBeenCalledWith("canvas");
-  expect(page.textContent).toContain("真实会话标题");
-  expect(page.textContent).toContain("失败");
+  expect(listConversations).not.toHaveBeenCalled();
+  expect(page.textContent).not.toContain("真实会话标题");
+  await f.click("刷新状态");
+  expect(listConversations).not.toHaveBeenCalled();
   expect(page.querySelector('[data-state="unknown"]')?.textContent).toBe("待验证");
   expect(page.textContent).not.toContain("运行完整诊断");
   expect(submitTurn).not.toHaveBeenCalled();
 });
 
-it("迟到的历史响应不会覆盖新画布，缺少画布时停止加载", async () => {
-  let resolveOld!: (value: any) => void;
-  const listConversations = vi.fn().mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; })).mockResolvedValue({ ok: true, value: [] });
+it("切换画布及缺少画布时诊断均不查询会话", async () => {
+  const listConversations = vi.fn();
   const f = await render([], false, undefined, { canvasId: "old" }, { listConversations });
-  await f.click("诊断与历史");
+  await f.click("连接诊断");
   await f.updatePayload({ canvasId: "new" });
-  await act(async () => resolveOld({ ok: true, value: [{ conversationId: "old", title: "旧画布迟到历史" }] }));
-  const page = f.el.querySelector('[data-ai-page="diagnostics"]')!;
-  expect(page.textContent).not.toContain("旧画布迟到历史");
-  expect(page.textContent).toContain("当前画布暂无会话历史");
   await f.updatePayload({});
-  expect(page.textContent).toContain("从画布打开后可查看对应会话历史");
-  expect(page.textContent).not.toContain("正在读取历史");
+  expect(listConversations).not.toHaveBeenCalled();
+  expect(f.el.textContent).not.toContain("会话历史");
 });
 
 it("服务目录失败时总览报告失败，服务页提供重试而不假称空目录", async () => {
@@ -403,4 +398,24 @@ it("服务目录失败时总览报告失败，服务页提供重试而不假称�
   expect(page.querySelector(".agent-assistant__empty--service")).toBeNull();
   await f.click("重新读取");
   expect(directory).toHaveBeenCalledTimes(2);
+});
+
+
+it("显式历史定位优先于连接 ID，用户侧栏选择不被迟到目录抢走", async () => {
+  let resolveConnections!: (value: any) => void;
+  const listConnections = vi.fn(() => new Promise<any>(resolve => { resolveConnections = resolve; }));
+  const f = await render([], false, undefined, { canvasId: "canvas", section: "generation-history", connectionId: "c1" }, { listConnections });
+  expect(f.el.querySelector('[data-page="generation-history"]')?.getAttribute("data-state")).toBe("active");
+  expect(f.el.querySelector('[data-ai-page="generation-history"]')?.textContent).toContain("历史模块未装配");
+  await f.click("本地 Agent");
+  await act(async () => resolveConnections({ ok: true, value: [api] }));
+  expect(f.el.querySelector('[data-page="agents"]')?.getAttribute("data-state")).toBe("active");
+});
+
+it("无显式定位的旧连接入口也尊重用户先行选择", async () => {
+  let resolveConnections!: (value: any) => void;
+  const f = await render([], false, undefined, { connectionId: "c1" }, { listConnections: () => new Promise<any>(resolve => { resolveConnections = resolve; }) });
+  await f.click("MCP 服务");
+  await act(async () => resolveConnections({ ok: true, value: [api] }));
+  expect(f.el.querySelector('[data-page="mcp"]')?.getAttribute("data-state")).toBe("active");
 });

@@ -18,36 +18,25 @@ import {
   nodeHistoryKindForNodeType
 } from "@woohaa3/contracts";
 import { NodeHistoryController, type NodeHistoryClient, CURRENT_PRESENTATION_ID } from "./controller.js";
-import type { CanvasHistoryController, CanvasHistoryClient } from "./canvas-history-controller.js";
-import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
-import { lazy, Suspense } from "react";
+import { createModelThumbnailRenderer, type ModelThumbnailRenderer } from "./model-thumbnail-render.js";
+import type { CanvasHistoryClient } from "./canvas-history-controller.js";
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ComponentType } from "react";
 const NodeHistoryPanel = lazy(() => import("./panel.js").then(module => ({ default: module.NodeHistoryPanel })));
-// The canvas-wide browser is only needed when its dialog opens, not at canvas startup.
-type CanvasHistoryRendererArgs = Parameters<typeof import("./canvas-history-browser.js")["createCanvasHistoryRenderer"]>;
-function createCanvasHistoryRenderer(getController: () => Promise<CanvasHistoryController>, ...args: CanvasHistoryRendererArgs extends [unknown, ...infer Rest] ? Rest : never) {
-  const Renderer = lazy(async () => {
-    const [module, controller] = await Promise.all([import("./canvas-history-browser.js"), getController()]);
-    return { default: module.createCanvasHistoryRenderer(controller, ...args) };
-  });
-  return function CanvasHistoryDialog(props: DialogRendererProps) {
-    return <Suspense fallback={<div className="canvas-history__state">正在加载生成历史…</div>}><Renderer {...props} /></Suspense>;
-  };
-}
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { NODE_HISTORY_SERVICE, INLINE_HISTORY_SERVICE, RUN_STATE_SERVICE, IMAGE_EDIT_SERVICE, VIDEO_FOCUS_SERVICE, type InlineHistoryService, type RunStateService, type ImageEditService, type VideoFocusService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
-import { GenerationHistoryIcon } from "../../../shared/ui/icons.js";
+import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { objectPayload } from "../../services/dialogs/registry.js";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
 
 export const NODE_HISTORY_PLUGIN_ID = "node-history";
 export const NODE_HISTORY_PANEL_TYPE = "node-history";
 export const CANVAS_HISTORY_DIALOG_ID = "canvas-generation-history";
-const CANVAS_HISTORY_ACTION_ID = "node-history-all";
 
 /** 只读画布历史弹窗的 payload：无必需字段。 */
 const canvasHistoryDefinition: DialogDefinition = {
+  redirect: () => ({ dialogId: "agent-assistant", payload: { section: "generation-history" } }),
   dismissible: true,
   singleton: true,
   size: "lg",
@@ -59,6 +48,8 @@ export type NodeHistoryExtensionOptions = {
   canvasId?: string;
   /** 测试注入：替身 client。 */
   client?: NodeHistoryClient;
+  /** 测试注入：页面内缩略图渲染器（缺省创建真实渲染器）。 */
+  renderModelThumbnail?: ModelThumbnailRenderer;
 };
 
 export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}): Plugin.Function<void> {
@@ -66,6 +57,8 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
     (ctx: Context) => {
       const canvasId = options.canvasId ?? DEFAULT_CANVAS_ID;
       const client = options.client ?? createRemoteClient(ctx);
+      // 页面内模型缩略图：面板与能力中心共用一个渲染器（共享页面内 LRU 与单飞锁）。
+      const renderModelThumbnail = options.renderModelThumbnail ?? createModelThumbnailRenderer(ctx);
       const disposeInlineVersions = installInlineVersions(ctx, canvasId, client);
       const controller = new NodeHistoryController(client);
       const runState = ctx.get(RUN_STATE_SERVICE as never) as RunStateService | undefined;
@@ -81,55 +74,49 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         if (item) controller.includeHistory(item);
         void controller.select(target);
       };
-      let canvasHistoryController: CanvasHistoryController | undefined;
       /** 已投影 override 的条目（避免重复执行/覆盖新选择）。 */
       let appliedOverrideEntryId: string | null = null;
 
-      // 右下角控件面板：打开「全部生成历史」只读弹窗。
-      const removeHistoryAction = ctx.slots.register("canvas.toolbar-action", {
-        id: CANVAS_HISTORY_ACTION_ID,
-        owner: NODE_HISTORY_PLUGIN_ID,
-        priority: 20,
-        label: "作品生成历史",
-        icon: GenerationHistoryIcon,
-        onActivate: () => {
-          ctx.canvasNavigation.openDialog({ dialogId: CANVAS_HISTORY_DIALOG_ID, payload: {} });
+      const canOpenNodeVersion = (nodeId: string): { ok: true } | { ok: false; reason: string } => {
+        const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
+        const node = canvas?.document.nodes.find(entry => entry.id === nodeId);
+        if (!node) return { ok: false, reason: "该作品已被删除，无法查看版本" };
+        return nodeHistoryKindForNodeType(node.type) ? { ok: true } : { ok: false, reason: "该类型暂不支持节点版本" };
+      };
+      const openNodeVersion = (item: { nodeId: string; entryId: string }) => {
+        // Revalidate after the center closes. Never restore or write content here.
+        if (!canOpenNodeVersion(item.nodeId).ok) {
+          ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "无法查看节点版本", description: "该作品已被删除或不支持节点版本。" } });
+          return;
         }
+        pendingEntryId = item.entryId;
+        const result = ctx.canvasNavigation.openPanel({ type: NODE_HISTORY_PANEL_TYPE, nodeId: item.nodeId });
+        if (!result.ok) pendingEntryId = null;
+      };
+      type WorkspaceProps = { canvasId: string; active: boolean; onClose: () => boolean };
+      function HistoryContribution(props: WorkspaceProps) {
+        const catalog = ctx.get("canvasCatalog");
+        const title = useSyncExternalStore(catalog?.subscribe ?? (() => () => {}), () => catalog?.getState().entries.find(item => item.id === props.canvasId)?.title ?? "");
+        const [Workspace, setWorkspace] = useState<ComponentType<WorkspaceProps> | null>(null);
+        const [error, setError] = useState(false);
+        const [revision, retry] = useState(0);
+        useEffect(() => {
+          let alive = true;
+          setError(false);
+          void import("./canvas-history-browser.js").then(module => {
+            if (alive) setWorkspace(() => module.createCanvasHistoryWorkspace(client as unknown as CanvasHistoryClient, openNodeVersion, canOpenNodeVersion, renderModelThumbnail));
+          }).catch(() => { if (alive) setError(true); });
+          return () => { alive = false; };
+        }, [revision]);
+        if (props.canvasId !== canvasId) return <p>画布已切换，请从当前画布重新打开生成历史。</p>;
+        if (error) return <p>生成历史模块加载失败。<button onClick={() => retry(value => value + 1)}>重新加载</button></p>;
+        return <><p className="agent-assistant__muted">{title ? `当前画布 · ${title}` : "当前画布"}</p>{Workspace ? <Workspace {...props} /> : <p>正在加载生成历史…</p>}</>;
+      }
+      const removeHistoryView = ctx.slots.register("ai-center.generation-history", {
+        id: "node-history", owner: NODE_HISTORY_PLUGIN_ID, render: HistoryContribution
       });
-      ctx.effect(() => () => removeHistoryAction(), "node-history-canvas-action");
-
-      const disposeCanvasHistoryDialog = ctx.dialogs.registerDialog(CANVAS_HISTORY_DIALOG_ID, {
-        definition: canvasHistoryDefinition,
-        renderer: createCanvasHistoryRenderer(
-          async () => {
-            const { CanvasHistoryController } = await import("./canvas-history-controller.js");
-            return canvasHistoryController ??= new CanvasHistoryController(client as unknown as CanvasHistoryClient);
-          },
-          canvasId,
-          // 显式跳转到节点版本（任务 6.3）：先关闭总览，再定位并打开节点版本面板。
-          (item) => {
-            const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
-            const node = canvas?.document.nodes.find((entry) => entry.id === item.nodeId);
-            const kind = node ? nodeHistoryKindForNodeType(node.type) : null;
-            if (!node || !kind) return;
-            ctx.canvasNavigation.openPanel({
-              type: NODE_HISTORY_PANEL_TYPE,
-              nodeId: item.nodeId
-            });
-            // 传递 entryId 作为待选记录（不自动恢复、不覆盖当前草稿）。
-            pendingEntryId = item.entryId;
-          },
-          // 目标校验：节点存在且类型受版本支持；否则禁用并说明原因。
-          (nodeId) => {
-            const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
-            const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-            if (!node) return { ok: false, reason: "该作品已被删除，无法查看版本" };
-            if (!nodeHistoryKindForNodeType(node.type)) return { ok: false, reason: "该类型暂不支持节点版本" };
-            return { ok: true };
-          }
-        )
-      });
-      ctx.effect(() => () => disposeCanvasHistoryDialog(), "node-history-canvas-dialog");
+      const disposeCanvasHistoryDialog = ctx.dialogs.registerDialog(CANVAS_HISTORY_DIALOG_ID, { definition: canvasHistoryDefinition });
+      ctx.effect(() => () => { removeHistoryView(); disposeCanvasHistoryDialog(); }, "node-history-canvas-workspace");
 
       // 事件入口 → 显式 navigation intent（不直接改 controller/聚焦）。
       // 当前输出不可用时直接显示通用历史面板，避免聚焦目标校验阻断入口。
@@ -212,6 +199,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
             controller={controller}
             writable={writable}
             onClose={closeFromPanel}
+            renderModelThumbnail={renderModelThumbnail}
             onWidthChange={(width) => {
               if (ctx.canvasNavigation.getSnapshot().mode.type === "overview") ctx.canvasRuntime.setContentRect({ right: width });
             }}
@@ -483,9 +471,8 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       return () => {
         offOperations?.(); offHistoryRefresh?.();
         disposeInlineVersions();
-        removeHistoryAction();
+        removeHistoryView();
         disposeCanvasHistoryDialog();
-        canvasHistoryController?.close();
         offEvent();
         disposePanel();
         unsubscribeNav();

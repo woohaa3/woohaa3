@@ -60,6 +60,8 @@ export type DialogEditingOwner = {
 
 /** registry 中一个 dialog 的声明。 */
 export type DialogDefinition = {
+  /** Registration-owned compatibility mapping, resolved before any stack or navigation changes. */
+  redirect?: (payload: unknown) => OpenDialogRequest;
   editingOwner?: () => DialogEditingOwner | null;
   /** 允许隐式关闭（Escape/遮罩/关闭按钮）。 */
   dismissible?: boolean;

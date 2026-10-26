@@ -80,6 +80,8 @@ mod simplification_allocator;
 mod simplification_jobs;
 mod spawn;
 
+pub(crate) use spawn::{PreviewRoot, spawn_preview_root};
+
 pub(crate) use animation::TransformAnimationSet;
 pub(crate) use layout::film_set_root_transform;
 

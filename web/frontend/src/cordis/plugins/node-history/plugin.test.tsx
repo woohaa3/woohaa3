@@ -157,19 +157,19 @@ describe("Node History Plugin", () => {
     expect(harness.runtime.ctx.get(NODE_HISTORY_SERVICE as never)).toBeDefined();
   });
 
-  it("激活后注册右下角生成历史入口与只读弹窗", async () => {
+  it("贡献历史视图并将旧 ID 转到能力中心，无独立工具栏与浏览器", async () => {
     const harness = await makeHarness({ canvas: textCanvas() });
     runtime = harness.runtime;
-    const action = harness.slots.list("canvas.toolbar-action").find((entry) => entry.id === "node-history-all");
-    expect(action).toBeDefined();
-    expect(action?.label).toBe("作品生成历史");
-    // dialog 已可逆注册（可被 Dialogs Service 解析）。
-    expect(harness.dialogs.registeredDialogIds()).toContain(CANVAS_HISTORY_DIALOG_ID);
-    expect(harness.dialogs.resolveRenderer(CANVAS_HISTORY_DIALOG_ID)).not.toBeNull();
-    // 触发入口打开弹窗：入栈且可关闭（只读，无写入）。
-    action!.onActivate();
-    expect(harness.dialogs.top()?.dialogId).toBe(CANVAS_HISTORY_DIALOG_ID);
-    expect(harness.dialogs.requestCloseTop().closed).toBe(true);
+    harness.dialogs.registerDialog("agent-assistant", { definition: { singleton: true, validatePayload: payload => ({ ok: true, payload }) } });
+    expect(harness.slots.list("canvas.toolbar-action")).toHaveLength(0);
+    expect(harness.slots.list("ai-center.generation-history")).toHaveLength(1);
+    expect(harness.dialogs.resolveRenderer(CANVAS_HISTORY_DIALOG_ID)).toBeNull();
+    const opened = harness.dialogs.open({ dialogId: CANVAS_HISTORY_DIALOG_ID, payload: {} });
+    expect(opened.ok).toBe(true);
+    expect(harness.dialogs.top()?.dialogId).toBe("agent-assistant");
+    expect(harness.dialogs.top()?.payload).toEqual({ section: "generation-history" });
+    harness.dialogs.open({ dialogId: CANVAS_HISTORY_DIALOG_ID, payload: {} });
+    expect(harness.dialogs.getSnapshot().stack).toHaveLength(1);
   });
 
   it("圆点选择只更新本页选择，不打开右侧历史面板", async () => {
@@ -279,7 +279,7 @@ describe("Node History Plugin", () => {
             recoverable: true,
             previewable: true,
             source: { label: "模型编辑" },
-            preview: { kind: "model", thumbnailHref: null }
+            preview: { kind: "model", thumbnailHref: null, entry: { canvasId: "c1", nodeId: "m1", entryId: "e1" } }
           }
         ] as never,
         nextCursor: null
@@ -514,12 +514,12 @@ describe("Node History Plugin", () => {
 
   it("重复启停不累积入口或 dialog", async () => {
     const first = await makeHarness({ canvas: textCanvas() });
-    expect(first.slots.list("canvas.toolbar-action").filter((entry) => entry.id === "node-history-all")).toHaveLength(1);
+    expect(first.slots.list("canvas.toolbar-action").filter((entry) => entry.id === "node-history-all")).toHaveLength(0);
     await first.runtime.dispose();
     runtime = null;
     const second = await makeHarness({ canvas: textCanvas() });
     runtime = second.runtime;
-    expect(second.slots.list("canvas.toolbar-action").filter((entry) => entry.id === "node-history-all")).toHaveLength(1);
+    expect(second.slots.list("canvas.toolbar-action").filter((entry) => entry.id === "node-history-all")).toHaveLength(0);
     expect(second.dialogs.registeredDialogIds().filter((id) => id === CANVAS_HISTORY_DIALOG_ID)).toHaveLength(1);
   });
 
@@ -643,7 +643,7 @@ describe("NodeHistoryPanel 静态渲染", () => {
     const controller = new NodeHistoryController({
       list: async () => ({
         ok: true,
-        items: [item("e1", { kind: "model", source: { label: "模型编辑" }, preview: { kind: "model", thumbnailHref: null } })],
+        items: [item("e1", { kind: "model", source: { label: "模型编辑" }, preview: { kind: "model", thumbnailHref: null, entry: { canvasId: "c1", nodeId: "n1", entryId: "e1" } } })],
         nextCursor: null
       }),
       detail: async () => ({

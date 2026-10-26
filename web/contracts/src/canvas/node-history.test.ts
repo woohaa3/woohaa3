@@ -25,7 +25,8 @@ import {
   toNodeHistoryDetail,
   toNodeHistoryListItem,
   type NodeGenerationHistoryEntry,
-  type NodeHistoryContentPayload
+  type NodeHistoryContentPayload,
+  type NodeHistoryMediaPayload
 } from "../canvas/node-history.js";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "../canvas/yjs/mapping.js";
 import { createEmptyWoohaa3ServerCanvas } from "../canvas/domain/aggregate.js";
@@ -170,7 +171,27 @@ describe("节点历史契约", () => {
       nodeTitle: "视频节点"
     });
     expect(JSON.stringify(mediaItem)).not.toContain("sha256-");
-    expect(mediaItem.preview).toMatchObject({ kind: "video", href: expect.stringContaining("preview") });
+    // 没有稳定海报的版本不暴露 poster 引用，避免列表请求必然 404 的地址并误报失败。
+    expect(mediaItem.preview).toMatchObject({
+      kind: "video",
+      href: expect.stringContaining("preview"),
+      posterHref: null
+    });
+
+    const withPoster: NodeGenerationHistoryEntry = {
+      ...media,
+      payload: {
+        ...(media.payload as NodeHistoryMediaPayload),
+        poster: { storageKey: "sha256-" + "b".repeat(64), checksum: "b".repeat(64), contentType: "image/png", size: 10 }
+      }
+    };
+    const postedItem = toCanvasHistoryListItem(withPoster, {
+      current: true,
+      previewHref: (suffix) => `/api/canvas-node-history/x/${suffix}`,
+      nodeTitle: "视频节点"
+    });
+    expect(postedItem.preview).toMatchObject({ kind: "video", posterHref: expect.stringContaining("poster") });
+    expect(JSON.stringify(postedItem)).not.toContain("sha256-");
   });
 
   it("详情按 entryId 返回完整内容", () => {

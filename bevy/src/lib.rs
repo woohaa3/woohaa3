@@ -55,6 +55,10 @@ mod shot_node_preview;
 mod pick_index;
 #[cfg(feature = "canvas-core")]
 mod shot_capture_wire;
+/// 页面内模型历史缩略图：同一 Bevy App 内一次性离屏渲染
+/// （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+#[cfg(feature = "canvas-core")]
+mod history_preview;
 
 #[cfg(feature = "native-renderer")]
 pub mod renderer_protocol;
@@ -762,6 +766,27 @@ pub fn request_shot_capture(json: &str) -> Result<(), BoundaryError> {
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn poll_shot_capture(request_id: f64, generation: f64) -> Vec<u8> {
     shot_capture_wire::poll(request_id, generation)
+}
+
+/// 请求一次页面内模型历史缩略图（change: 2026-10-26-move-generation-history-to-ai-center，D6）。
+///
+/// 入参是服务端权威脚本派生并校验过的 V2 Scene IR 与稳定 identity：
+/// `{requestId, generation, sceneVersion, ops, width, height}`。渲染在**既有** Bevy App 内
+/// 一次性完成，不新建 App/context；完成后用 `poll_history_thumbnail` 取回。
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn request_history_thumbnail(json: &str) -> Result<(), BoundaryError> {
+    history_preview::wire::request(json)
+}
+
+/// 轮询历史缩略图结果：返回匹配 (requestId, generation) 的帧（无则空数组）。
+///
+/// 帧布局与截图一致：`[u32 LE width][u32 LE height][u32 LE status][payload...]`；
+/// `status == 0` 成功（RGBA），`status == 1` 失败（UTF-8 失败码）。
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn poll_history_thumbnail(request_id: f64, generation: f64) -> Vec<u8> {
+    history_preview::wire::poll(request_id, generation)
 }
 
 /// 启动 Bevy App（幂等）。

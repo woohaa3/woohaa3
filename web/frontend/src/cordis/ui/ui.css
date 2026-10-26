@@ -1931,7 +1931,8 @@
 	overflow: hidden;
 }
 
-.node-history__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.node-history__thumb img,
+.node-history__thumb video { display: block; width: 100%; height: 100%; object-fit: cover; }
 .node-history__thumb-fallback { font-size: 11px; color: var(--app-web-text-muted); }
 .node-history__excerpt {
 	padding: 4px;

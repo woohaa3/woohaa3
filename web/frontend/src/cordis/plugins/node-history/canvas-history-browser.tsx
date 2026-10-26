@@ -7,13 +7,14 @@
  *
  * 通过 Dialog primitives 渲染，焦点/Escape/inert/输入隔离由 Dialog Host 统一拥有。
  */
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { NodeGenerationKind } from "@woohaa3/contracts";
+import type { ModelThumbnailRenderer } from "./model-thumbnail-render.js";
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "../../services/dialogs/Dialog.js";
 import { Button, SegmentedControl } from "../../../shared/ui/index.js";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import { HistoryPreview } from "./preview.js";
-import type { CanvasHistoryController, CanvasHistoryFilter } from "./canvas-history-controller.js";
+import { CanvasHistoryController, type CanvasHistoryClient, type CanvasHistoryFilter } from "./canvas-history-controller.js";
 
 const FILTERS: Array<{ id: CanvasHistoryFilter; label: string }> = [
   { id: "all", label: "全部" },
@@ -37,10 +38,15 @@ export function CanvasHistoryBrowser({
   controller,
   onClose,
   onOpenNodeVersion,
-  canOpenNodeVersion
+  canOpenNodeVersion,
+  embedded = false,
+  active = true,
+  renderModelThumbnail
 }: {
+  embedded?: boolean;
+  active?: boolean;
   controller: CanvasHistoryController;
-  onClose: () => void;
+  onClose: () => void | boolean;
   /**
    * 显式「前往节点查看版本」（change: 2026-10-09-improve-canvas-workflow，任务 6.3）。
    * 缺省时不显示该入口（独立预览/测试用）；实际恢复仍在节点版本面板完成，总览只负责跳转。
@@ -48,8 +54,27 @@ export function CanvasHistoryBrowser({
   onOpenNodeVersion?: (item: { nodeId: string; entryId: string }) => void;
   /** 目标是否可跳转；返回不可用原因时禁用并说明。 */
   canOpenNodeVersion?: (nodeId: string) => { ok: true } | { ok: false; reason: string };
+  /**
+   * 页面内模型缩略图渲染器
+   * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+   */
+  renderModelThumbnail?: ModelThumbnailRenderer;
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
+  const [showDetail, setShowDetail] = useState(false);
+  const scrollTop = useRef(0);
+  const listPanel = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (active && listPanel.current) listPanel.current.scrollTop = scrollTop.current;
+  }, [active, showDetail]);
+  const [compact, setCompact] = useState(() => globalThis.matchMedia?.("(max-width: 1100px)").matches ?? false);
+  useEffect(() => {
+    const query = globalThis.matchMedia?.("(max-width: 1100px)");
+    if (!query) return;
+    const update = () => setCompact(query.matches);
+    update(); query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
   if (!state) return null;
   const selected = state.items.find((item) => item.entryId === state.selectedEntryId) ?? state.items[0] ?? null;
   const counts: Record<CanvasHistoryFilter, number> = {
@@ -58,13 +83,13 @@ export function CanvasHistoryBrowser({
   };
 
   return (
-    <div className="canvas-history" data-testid="canvas-history-browser">
+    <div className={`canvas-history${embedded ? " canvas-history--embedded" : ""}`} data-detail={showDetail} data-testid="canvas-history-browser">
       <SegmentedControl
         className="canvas-history__filters"
         optionClassName="canvas-history__filter"
         label="生成历史筛选"
         value={state.filter}
-        onValueChange={(next) => void controller.setFilter(next as typeof state.filter)}
+        onValueChange={(next) => { setShowDetail(false); scrollTop.current = 0; void controller.setFilter(next as typeof state.filter); }}
         options={FILTERS.map((filter) => ({
           value: filter.id,
           ariaLabel: `${filter.label}，${counts[filter.id]} 条`,
@@ -77,7 +102,7 @@ export function CanvasHistoryBrowser({
         }))}
       />
 
-      <div className="canvas-history__list-panel">
+      <div ref={listPanel} className="canvas-history__list-panel" onScroll={event => { if (active && (!compact || !showDetail)) scrollTop.current = event.currentTarget.scrollTop; }}>
         <div className="canvas-history__list">
           {state.status === "loading" ? <div className="canvas-history__state" role="status">正在加载生成历史…</div> : null}
           {state.status === "empty" ? (
@@ -86,10 +111,10 @@ export function CanvasHistoryBrowser({
               <small>完成生成后，结果会显示在这里。</small>
             </div>
           ) : null}
-          {state.status === "error" ? (
+          {state.error ? (
             <div className="canvas-history__state canvas-history__state--error" role="alert">
               <span>{state.error ?? "生成历史加载失败"}</span>
-              <button type="button" onClick={() => void controller.retry()}>重试</button>
+              <button type="button" onClick={() => void (state.items.length && state.nextCursor ? controller.loadMore() : controller.retry())}>重试</button>
             </div>
           ) : null}
           {state.items.map((item) => (
@@ -98,9 +123,9 @@ export function CanvasHistoryBrowser({
               type="button"
               className={`canvas-history__item${selected?.entryId === item.entryId ? " is-selected" : ""}`}
               aria-label={`查看 ${item.nodeTitle} 的${KIND_LABELS[item.kind]}生成结果`}
-              onClick={() => controller.select(item.entryId)}
+              onClick={() => { controller.select(item.entryId); setShowDetail(true); }}
             >
-              <HistoryPreview preview={item.preview} />
+              {active ? <HistoryPreview preview={item.preview} renderModelThumbnail={renderModelThumbnail} /> : null}
               <span className="canvas-history__item-copy">
                 <strong>{item.nodeTitle}</strong>
                 <small>{KIND_LABELS[item.kind]} · {formatTime(item.createdAt)}</small>
@@ -123,8 +148,9 @@ export function CanvasHistoryBrowser({
 
       {selected ? (
         <div className="canvas-history__detail">
+          {embedded ? <Button className="canvas-history__back" size="sm" onClick={() => setShowDetail(false)}>返回列表</Button> : null}
           <div className="canvas-history__detail-preview">
-            <HistoryPreview preview={selected.preview} thumbnail={false} />
+            {active && (!embedded || !compact || showDetail) ? <HistoryPreview key={selected.entryId} preview={selected.preview} thumbnail={false} renderModelThumbnail={renderModelThumbnail} /> : null}
           </div>
           <div className="canvas-history__detail-title">
             <strong>{selected.nodeTitle}</strong>
@@ -140,6 +166,7 @@ export function CanvasHistoryBrowser({
           </dl>
           {onOpenNodeVersion ? (
             <NodeVersionJump
+              key={selected.entryId}
               item={selected}
               onOpenNodeVersion={onOpenNodeVersion}
               canOpenNodeVersion={canOpenNodeVersion}
@@ -151,10 +178,28 @@ export function CanvasHistoryBrowser({
 
       <div className="canvas-history__footer">
         <span>{state.total} 条记录</span>
-        <Button onClick={onClose}>关闭</Button>
+        {embedded ? null : <Button onClick={onClose}>关闭</Button>}
       </div>
     </div>
   );
+}
+
+/** A fresh controller belongs to one center instance and canvas, never a long-lived plugin cache. */
+export function createCanvasHistoryWorkspace(
+  client: CanvasHistoryClient,
+  onOpenNodeVersion: (item: { nodeId: string; entryId: string }) => void,
+  canOpenNodeVersion: (nodeId: string) => { ok: true } | { ok: false; reason: string },
+  renderModelThumbnail?: ModelThumbnailRenderer
+) {
+  return function CanvasHistoryWorkspace({ canvasId, active, onClose }: { canvasId: string; active: boolean; onClose: () => void }) {
+    const [controller] = useState(() => new CanvasHistoryController(client));
+    useEffect(() => {
+      void controller.open({ canvasId });
+      return () => controller.close();
+    }, [canvasId, controller]);
+    return <CanvasHistoryBrowser controller={controller} active={active} embedded onClose={onClose} onOpenNodeVersion={onOpenNodeVersion} canOpenNodeVersion={canOpenNodeVersion}
+      {...(renderModelThumbnail ? { renderModelThumbnail } : {})} />;
+  };
 }
 
 /**
@@ -216,8 +261,9 @@ function NodeVersionJump({
   item: { nodeId: string; entryId: string };
   onOpenNodeVersion: (item: { nodeId: string; entryId: string }) => void;
   canOpenNodeVersion?: (nodeId: string) => { ok: true } | { ok: false; reason: string };
-  onClose: () => void;
+  onClose: () => void | boolean;
 }) {
+  const [jumpError, setJumpError] = useState<string | null>(null);
   const availability = canOpenNodeVersion?.(item.nodeId) ?? { ok: true as const };
   return (
     <div className="canvas-history__jump">
@@ -228,13 +274,15 @@ function NodeVersionJump({
         disabled={!availability.ok}
         title={availability.ok ? undefined : availability.reason}
         onClick={() => {
-          // 正常关闭总览后再导航（顺序由宿主保证）。
-          onClose();
+          const current = canOpenNodeVersion?.(item.nodeId);
+          if (current && !current.ok) { setJumpError(current.reason); return; }
+          if (onClose() === false) { setJumpError("当前界面无法关闭，请结束操作后重试。"); return; }
           onOpenNodeVersion({ nodeId: item.nodeId, entryId: item.entryId });
         }}
       >
         前往节点查看版本
       </Button>
+      {jumpError ? <p className="canvas-history__jump-reason">{jumpError}</p> : null}
       {!availability.ok ? (
         <span className="canvas-history__jump-reason" role="note">{availability.reason}</span>
       ) : null}

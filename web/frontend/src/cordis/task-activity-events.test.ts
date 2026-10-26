@@ -93,11 +93,14 @@ describe("Task Activity 事件总线", () => {
     expect(isValidElement<{ onOpenHistory: () => void }>(feed)).toBe(true);
     if (!isValidElement<{ onOpenHistory: () => void }>(feed)) throw new Error("Missing activity feed");
     feed.props.onOpenHistory();
-    expect(ctx.dialogs.top()?.dialogId).toBe("canvas-generation-history");
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(ctx.dialogs.top()?.dialogId).toBe("agent-assistant");
     ctx.dialogs.close();
-    const historyAction = ctx.slots.list("canvas.toolbar-action").find((entry) => entry.label === "作品生成历史");
-    historyAction?.onActivate?.();
-    expect(ctx.dialogs.top()?.dialogId).toBe("canvas-generation-history");
+    expect(ctx.slots.list("canvas.toolbar-action").find(entry => entry.label === "作品生成历史")).toBeUndefined();
+    const opened = ctx.dialogs.open({ dialogId: "canvas-generation-history", payload: {} });
+    expect(opened.ok).toBe(true);
+    expect(ctx.dialogs.top()?.dialogId).toBe("agent-assistant");
+    expect((ctx.dialogs.top()?.payload as { section: string }).section).toBe("generation-history");
 
   });
 

@@ -120,7 +120,8 @@ describe("Page scope 生命周期", () => {
     const actions = page.ctx.slots.list("canvas.toolbar-action").map((entry) => entry.id);
     // node-history 通过 slot 可观察；disabled 诊断不应存在。
     expect(page.diagnostics.getStatus().plugins.find((plugin) => plugin.status === "disabled")).toBeUndefined();
-    expect(actions).toContain("node-history-all");
+    expect(actions).not.toContain("node-history-all");
+    expect(page.ctx.slots.list("ai-center.generation-history")).toHaveLength(1);
   });
 
   it("浏览器本地禁用记录决定启动装配：禁用的 browser-local 插件不装配，required 不受影响", async () => {

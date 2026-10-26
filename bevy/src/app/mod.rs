@@ -137,6 +137,7 @@ fn configure_canvas(app: &mut App) {
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::model_preview::ModelPreviewPlugin)
+        .add_plugins(crate::history_preview::HistoryThumbnailPlugin)
         .add_plugins(model3d::run_effect::RunEffectPlugin)
         .add_plugins(crate::shot_node_preview::ShotNodePreviewPlugin)
         .add_plugins(crate::isometric_grid::IsometricGridPlugin)
@@ -175,6 +176,9 @@ fn configure_canvas(app: &mut App) {
                     // 门禁结算（含 hover stop/reset/start）与模型 spawn 同一系统，且在动画求值前
                     // 完成（change: play-model-animations-on-hover，design D4）。
                     scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
+                    // 页面内历史缩略图：同一 App 内一次性离屏渲染，排在模型根同步之后
+                    // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+                    crate::history_preview::sync,
                     // Native 片场后台准备：非阻塞 poll + 全局预算装配，排在消费者之前
                     // （change: 2026-10-18-prepare-native-film-sets-in-background，design D4/D5）。
                     (

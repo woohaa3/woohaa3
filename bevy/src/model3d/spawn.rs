@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelSnapshot};
@@ -52,6 +53,56 @@ pub(super) fn spawn_model(
     );
     root.content_signature = model.signature.clone();
     root
+}
+
+/// 一次性预览根的句柄：只有「建起来的是哪些实体/资产」与「用完怎么拆」。
+///
+/// 历史缩略图作业**不**把根登记进 `ModelVisuals`（那会被主场景同步清理），而是持有一份
+/// 临时根，渲染一帧后整体拆除（change: 2026-10-26-move-generation-history-to-ai-center，D6）。
+pub(crate) struct PreviewRoot {
+    pub(crate) entities: Vec<Entity>,
+    pub(crate) meshes: Vec<bevy::asset::AssetId<Mesh>>,
+    pub(crate) materials: Vec<bevy::asset::AssetId<StandardMaterial>>,
+}
+
+/// 在给定渲染层上建立一次性模型根（单位缩放、原点摆放、无 batching）。
+///
+/// 供页面内历史缩略图使用：内容来自服务端权威脚本派生的 Scene IR，只在一个租用的
+/// 预览层上可见，主画布相机看不到它。
+pub(crate) fn spawn_preview_root(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    model: &ModelSnapshot,
+    layer: usize,
+) -> PreviewRoot {
+    // 预览根不与主场景共享 mesh/material 缓存：共享表按根持有资源，临时根退出后
+    // 留下的条目只会污染 LRU 归属。每帧成本由缩略图尺寸与串行队列限定。
+    let mut shared = SharedResources::default();
+    let root = spawn_v2(
+        commands,
+        meshes,
+        materials,
+        model,
+        Vec3::ZERO,
+        1.0,
+        Quat::IDENTITY,
+        Quality::High,
+        &mut shared,
+        false,
+        super::batch_strategy::BatchStrategy::Spatial,
+        false,
+    );
+    // 每个实体单独写入租用层：`RenderLayers` 不随层级继承，缺省层（0）会被主画布相机看到。
+    let layers = RenderLayers::from_layers(&[layer]);
+    for entity in &root.entities {
+        commands.entity(*entity).insert(layers.clone());
+    }
+    PreviewRoot {
+        entities: root.entities,
+        meshes: root.mesh_handles.iter().map(|handle| handle.id()).collect(),
+        materials: root.material_handles.iter().map(|handle| handle.id()).collect(),
+    }
 }
 
 /// V2：建立真实 entity hierarchy；根 entity 承载 placement yaw 与单位缩放。

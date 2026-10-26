@@ -25,7 +25,7 @@ function publicPreview(preview: NodeHistoryPreview): NodeHistoryPreview {
     case "audio":
       return { kind: "audio", href: resolve(preview.href), durationSeconds: preview.durationSeconds };
     case "model":
-      return { kind: "model", thumbnailHref: resolveNullable(preview.thumbnailHref) };
+      return { kind: "model", thumbnailHref: resolveNullable(preview.thumbnailHref), entry: preview.entry };
     default:
       return preview;
   }

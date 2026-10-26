@@ -72,13 +72,17 @@ function buildPreview(
     }
     case "image":
       return { kind: "image", href: href("preview") };
-    case "video":
+    case "video": {
+      const payload = entry.payload as NodeHistoryMediaPayload;
       return {
         kind: "video",
         href: href("preview"),
-        posterHref: entry.previewable ? href("poster") : null,
-        durationSeconds: (entry.payload as NodeHistoryMediaPayload).durationSeconds ?? null
+        // 只有携带稳定海报的版本才暴露 poster 引用：缺失海报时该路由必然 404，
+        // 暴露它会把「该版本没有海报」误报成「预览加载失败」并要求无意义的重试。
+        posterHref: entry.previewable && payload.poster ? href("poster") : null,
+        durationSeconds: payload.durationSeconds ?? null
       };
+    }
     case "audio":
       return {
         kind: "audio",
@@ -86,7 +90,11 @@ function buildPreview(
         durationSeconds: (entry.payload as NodeHistoryMediaPayload).durationSeconds ?? null
       };
     case "model":
-      return { kind: "model", thumbnailHref: entry.previewable ? href("thumbnail") : null };
+      return {
+        kind: "model",
+        thumbnailHref: entry.previewable ? href("thumbnail") : null,
+        entry: { canvasId: entry.canvasId, nodeId: entry.nodeId, entryId: entry.entryId }
+      };
   }
 }
 

@@ -61,7 +61,11 @@ const modelItem: NodeGenerationHistoryListItem = {
   ...base,
   entryId: "entry-4",
   kind: "model",
-  preview: { kind: "model", thumbnailHref: "/api/canvas-node-history/canvas-1/node-1/entry-4/thumbnail" }
+  preview: {
+    kind: "model",
+    thumbnailHref: "/api/canvas-node-history/canvas-1/node-1/entry-4/thumbnail",
+    entry: { canvasId: "canvas-1", nodeId: "node-1", entryId: "entry-4" }
+  }
 };
 
 const textItem: NodeGenerationHistoryListItem = {
@@ -113,7 +117,11 @@ describe("history-adapters 预览引用挂载映射", () => {
         href: "/dev/abc/api/canvas-node-history/canvas-1/node-1/entry-3/preview",
         durationSeconds: null
       },
-      { kind: "model", thumbnailHref: "/dev/abc/api/canvas-node-history/canvas-1/node-1/entry-4/thumbnail" },
+      {
+        kind: "model",
+        thumbnailHref: "/dev/abc/api/canvas-node-history/canvas-1/node-1/entry-4/thumbnail",
+        entry: { canvasId: "canvas-1", nodeId: "node-1", entryId: "entry-4" }
+      },
       { kind: "text", excerpt: "摘要" }
     ]);
   });
@@ -132,7 +140,8 @@ describe("history-adapters 预览引用挂载映射", () => {
     });
     expect(result.items[1]?.preview).toEqual({
       kind: "model",
-      thumbnailHref: "/dev/abc/api/canvas-node-history/canvas-1/node-1/entry-4/thumbnail"
+      thumbnailHref: "/dev/abc/api/canvas-node-history/canvas-1/node-1/entry-4/thumbnail",
+      entry: { canvasId: "canvas-1", nodeId: "node-1", entryId: "entry-4" }
     });
   });
 

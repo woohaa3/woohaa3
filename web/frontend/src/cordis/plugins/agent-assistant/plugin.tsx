@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useSyncExternalStore, useMemo } from "react";
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { definePlugin } from "../../plugin.js";
 import { SparklesIcon } from "../../../shared/ui/icons.js";
@@ -10,7 +10,7 @@ import { AssistantSetupTooltip } from "./setup-tooltip.js";
 import { installAssistantFirstUse } from "./first-use.js";
 
 export const AGENT_ASSISTANT_DIALOG_ID = "agent-assistant";
-type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string };
+type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics" };
 const AgentAssistant = lazy(() => import("./assistant.js").then((module) => ({ default: module.AgentAssistant })));
 
 export function agentAssistantExtension(): Plugin.Function<void> {
@@ -32,8 +32,14 @@ export function agentAssistantExtension(): Plugin.Function<void> {
       }
     }) : undefined;
     const unregister = ctx.dialogs.registerDialog(AGENT_ASSISTANT_DIALOG_ID, {
-      definition: { singleton: true, dismissible: true, size: "lg", validatePayload: objectPayload<Payload>(AGENT_ASSISTANT_DIALOG_ID, (value) => ({ ...(typeof value.canvasId === "string" ? { canvasId: value.canvasId } : {}), ...(typeof value.nodeId === "string" ? { nodeId: value.nodeId } : {}), ...(typeof value.kind === "string" ? { kind: value.kind } : {}), ...(typeof value.connectionId === "string" ? { connectionId: value.connectionId } : {}), ...(value.page === "add" ? { page: "add" as const } : {}) })) },
-      renderer: ({ instance, requestClose }) => <Suspense fallback={<p>正在打开 AI 助手…</p>}><AgentAssistant key={instance.instanceId} service={ctx.agentConversationService} payload={{ canvasId: ctx.get("canvasScope")?.canvasId(), ...(instance.payload as Payload) }} onClose={requestClose} settingsStore={settingsStore} onConfigurationSaved={refreshDirectory} /></Suspense>
+      definition: { singleton: true, dismissible: true, size: "lg", validatePayload: objectPayload<Payload>(AGENT_ASSISTANT_DIALOG_ID, (value) => ({ ...(typeof value.canvasId === "string" ? { canvasId: value.canvasId } : {}), ...(typeof value.nodeId === "string" ? { nodeId: value.nodeId } : {}), ...(typeof value.kind === "string" ? { kind: value.kind } : {}), ...(typeof value.connectionId === "string" ? { connectionId: value.connectionId } : {}), ...(["generation-history", "diagnostics"].includes(String(value.section)) ? { section: value.section as Payload["section"] } : {}), ...(value.page === "add" ? { page: "add" as const } : {}) })) },
+      renderer: ({ instance, requestClose }) => {
+        const user = ctx.get("currentUser");
+        const scope = useSyncExternalStore(user?.subscribe ?? (() => () => {}), () => user ? user.getSnapshot()?.dataScopeId ?? null : "local");
+        const payload = useMemo(() => ({ canvasId: ctx.get("canvasScope")?.canvasId(), ...(instance.payload as Payload) }), [instance.payload]);
+        if (scope === null) return <p>正在确认用户数据空间…</p>;
+        return <Suspense fallback={<p>正在打开 AI 助手…</p>}><AgentAssistant key={`${instance.instanceId}:${scope}:${payload.canvasId ?? ""}`} service={ctx.agentConversationService} payload={payload} onClose={requestClose} onHistoryClose={() => ctx.dialogs.requestClose(instance.instanceId).closed} settingsStore={settingsStore} onConfigurationSaved={refreshDirectory} /></Suspense>;
+      }
     });
     // 面板主操作：AI 助手排最前（priority 低于其它入口），并使用 primary 实底图标。
     const remove = ctx.slots.register("canvas.toolbar-action", { id: AGENT_ASSISTANT_DIALOG_ID, owner: AGENT_ASSISTANT_DIALOG_ID, priority: 0, label: "AI 助手", icon: SparklesIcon, tone: "primary", tooltip: AssistantSetupTooltip, onActivate: () => { ctx.canvasNavigation.openDialog({ dialogId: AGENT_ASSISTANT_DIALOG_ID, payload: {} }); } });

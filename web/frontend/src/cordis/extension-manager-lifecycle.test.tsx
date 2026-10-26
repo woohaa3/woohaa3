@@ -61,7 +61,7 @@ function startWith(storage: PreferenceStorage): Promise<AppRuntime> {
 function nodeHistoryAssembled(instance: AppRuntime): boolean {
   const page = instance.currentPage();
   if (!page) return false;
-  return page.ctx.slots.list("canvas.toolbar-action").some((entry) => entry.id === "node-history-all");
+  return page.ctx.slots.list("ai-center.generation-history").some((entry) => entry.id === "node-history");
 }
 
 afterEach(async () => {

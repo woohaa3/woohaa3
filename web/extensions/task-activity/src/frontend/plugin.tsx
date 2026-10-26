@@ -101,7 +101,9 @@ export function taskActivityExtension(): Plugin.Function<void> {
         },
         openHistory: () => {
           store.markRead();
-          ctx.canvasNavigation.openDialog({ dialogId: "canvas-generation-history", payload: {} });
+          void ctx.canvasNavigation.requestOpenDialog({ dialogId: "agent-assistant", canvasId: ctx.canvasScope.canvasId(), payload: { canvasId: ctx.canvasScope.canvasId(), section: "generation-history" } }).then(result => {
+            if (!result.ok) ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法打开作品生成历史", description: result.reason } });
+          });
         },
         group: {
           writable: () => (ctx.get("canvasSession" as never) as CanvasSession | undefined)?.isWritable() ?? false,
@@ -191,10 +193,12 @@ export function taskActivityExtension(): Plugin.Function<void> {
         // 活动面板只属于当前画布 scope：媒体读请求带上画布，同步到远端的画布会路由到托管存储。
         store,
         resolveMediaUrl: (storageKey) => ctx.mediaRemote.urlFor(storageKey, ctx.canvasScope.canvasId()),
-        // 受控打开宿主已注册的「作品生成历史」弹窗，与工具栏入口一致。
+        // 受控直达能力中心的生成历史页，沿用聚焦编辑退出门禁。
         onOpenHistory: () => {
           store.markRead();
-          ctx.canvasNavigation.openDialog({ dialogId: "canvas-generation-history", payload: {} });
+          void ctx.canvasNavigation.requestOpenDialog({ dialogId: "agent-assistant", canvasId: ctx.canvasScope.canvasId(), payload: { canvasId: ctx.canvasScope.canvasId(), section: "generation-history" } }).then(result => {
+            if (!result.ok) ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法打开作品生成历史", description: result.reason } });
+          });
         }
       };
       const removeOverlay = ctx.slots.register("canvas.overlay", {

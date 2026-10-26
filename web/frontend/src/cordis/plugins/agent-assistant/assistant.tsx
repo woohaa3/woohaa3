@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
 import { useSlot } from "../../host.js";
 import { useOptionalService } from "../../react.js";
@@ -16,7 +16,7 @@ import { useServiceDirectory, serviceSourceState } from "./service-directory.js"
 import "./style.css";
 
 type Page = "connections" | "add" | "configuration";
-type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string };
+type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics" };
 const kinds = [
   { id: "installed", label: "我有本地 agent", title: "连接本地 agent", services: [{ id: "chatgpt", name: "本地 ChatGPT" }, { id: "opencode", name: "本地 OpenCode" }, { id: "codebuddy", name: "本地 CodeBuddy" }], detail: "使用运行本应用的电脑上已安装的 agent。" },
   { id: "api-key", label: "按协议接入 LLM", title: "按协议接入 LLM", services: [{ id: "responses-protocol", name: "Responses" }, { id: "messages-protocol", name: "Messages" }, { id: "chat-protocol", name: "Chat Completions" }, { id: "gemini-protocol", name: "Gemini" }], detail: "选择接口协议，填写服务地址与 API Key，接入兼容的 LLM 服务。" },
@@ -31,13 +31,17 @@ function connectionState(connection: AgentConnectionView) {
   return issue ? connection.reason ?? issue.reason ?? "连接不可用，请检查配置。" : connection.authMode === "api-key" && connection.credentialConfigured === false ? "尚未保存 API Key" : null;
 }
 
-export function AgentAssistant({ service, payload, onClose, settingsStore, onConfigurationSaved }: { service: AgentConversationService; payload: Payload; onClose: () => void; settingsStore?: BackendSettingsStore; onConfigurationSaved?: () => void }) {
+export function AgentAssistant({ service, payload, onClose, settingsStore, onConfigurationSaved, onHistoryClose }: { service: AgentConversationService; payload: Payload; onClose: () => void; settingsStore?: BackendSettingsStore; onConfigurationSaved?: () => void; onHistoryClose?: () => boolean }) {
   const contributions = useSlot("agent-assistant.configuration");
-  const initialPage: CapabilityPage = ["generation", "api-key", "login"].includes(payload.kind ?? "") || payload.page === "add" ? "sources" : payload.kind === "installed" ? "agents" : payload.kind === "mcp" ? "mcp" : "overview";
+  const initialPage: CapabilityPage = payload.section === "generation-history" || payload.section === "diagnostics" ? payload.section : ["generation", "api-key", "login"].includes(payload.kind ?? "") || payload.page === "add" ? "sources" : payload.kind === "installed" ? "agents" : payload.kind === "mcp" ? "mcp" : payload.kind === "diagnostics" ? "diagnostics" : "overview";
   const [page, setPage] = useState<CapabilityPage>(initialPage);
   const [servicesVisited, setServicesVisited] = useState(initialPage === "sources");
   const [localVisited, setLocalVisited] = useState(initialPage === "agents");
-  const [diagnosticsVisited, setDiagnosticsVisited] = useState(false);
+  const [diagnosticsVisited, setDiagnosticsVisited] = useState(initialPage === "diagnostics");
+  const [historyVisited, setHistoryVisited] = useState(initialPage === "generation-history");
+  const historyContributions = useSlot("ai-center.generation-history");
+  const History = historyContributions[0]?.render;
+  const userNavigated = useRef(false);
   const [addRequest, requestAdd] = useState(0);
   const [connections, setConnections] = useState<AgentConnectionView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +50,9 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
   const [mcp, setMcp] = useState<McpPanelSnapshot | null>(null);
   const directoryState = useServiceDirectory(service, revision);
   const navigate = (next: CapabilityPage) => {
+    userNavigated.current = true;
     setPage(next);
+    if (next === "generation-history") setHistoryVisited(true);
     if (next === "sources") setServicesVisited(true);
     if (next === "agents") setLocalVisited(true);
     if (next === "diagnostics") setDiagnosticsVisited(true);
@@ -62,11 +68,19 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     return () => { cancelled = true; };
   }, [service, revision]);
   useEffect(() => {
-    if (!payload.connectionId) return;
+    userNavigated.current = false;
+    setPage(initialPage);
+    if (initialPage === "generation-history") setHistoryVisited(true);
+    if (initialPage === "diagnostics") setDiagnosticsVisited(true);
+    if (initialPage === "sources") setServicesVisited(true);
+    if (initialPage === "agents") setLocalVisited(true);
+  }, [payload]);
+  useEffect(() => {
+    if (!payload.connectionId || payload.section || userNavigated.current) return;
     const connection = connections.find(item => item.connectionId === payload.connectionId);
     if (connection) navigate(isLocalConnection(connection) ? "agents" : "sources");
     else if (directoryState.directory?.connections.some(source => source.serviceConnectionId === payload.connectionId || source.bindings.some(binding => binding.consumerId === payload.connectionId))) navigate("sources");
-  }, [payload.connectionId, connections, directoryState.directory]);
+  }, [payload, connections, directoryState.directory]);
   const saved = () => { onConfigurationSaved?.(); refresh(value => value + 1); };
   const choose = (connection: AgentConnectionView) => {
     if (!connection.ready) return;
@@ -84,7 +98,8 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     { id: "agents", label: "本地 Agent", count: localConnections.length },
     { id: "mcp", label: "MCP 服务", count: mcp?.configured },
     { id: "sources", label: "服务来源", count: directoryState.directory ? sources.length : sourceConnections.length },
-    { id: "diagnostics", label: "诊断与历史" },
+    { id: "generation-history", label: "生成历史" },
+    { id: "diagnostics", label: "连接诊断" },
   ];
   return <Dialog.Content size="lg" className="agent-assistant" ariaLabel="AI 能力中心">
     <UiPortalScope>
@@ -106,11 +121,23 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
           {servicesVisited ? <section hidden={page !== "sources"} className="agent-assistant__page" data-ai-page="sources"><UiPortalScope>
             {service.listServiceConnections || service.serviceConnectionDirectory ? <ServiceSources service={service} connections={connections} contributions={contributions.filter(entry => entry.kind !== "installed")} payload={payload} settingsStore={settingsStore} directoryState={directoryState} addRequest={addRequest} onSaved={saved} onChoose={choose} /> : <ConnectionPanel local={false} connections={sourceConnections} contributions={contributions.filter(entry => entry.kind !== "installed")} payload={payload} loading={loading} onSaved={saved} onChoose={choose} />}
           </UiPortalScope></section> : null}
-          {diagnosticsVisited ? <section hidden={page !== "diagnostics"} className="agent-assistant__page" data-ai-page="diagnostics"><UiPortalScope><CapabilityDiagnostics service={service} connections={connections} sources={sources} mcp={mcp} canvasId={payload.canvasId} revision={revision} loading={loading || directoryState.loading} onRefresh={() => refresh(value => value + 1)} /></UiPortalScope></section> : null}
+          {historyVisited ? <section hidden={page !== "generation-history"} className="agent-assistant__page agent-assistant__history" data-ai-page="generation-history">
+            <div className="agent-assistant__page-heading"><h2>生成历史</h2></div>
+            {!payload.canvasId ? <p>从画布打开后查看生成历史。</p> : History ? <HistoryBoundary key={`${payload.canvasId}:${historyContributions[0]?.id}`}><Suspense fallback={<p>正在加载生成历史…</p>}><History canvasId={payload.canvasId} active={page === "generation-history"} onClose={onHistoryClose ?? (() => { onClose(); return true; })} /></Suspense></HistoryBoundary> : <SettingsFeedback tone="danger">生成历史不可用：历史模块未装配。</SettingsFeedback>}
+          </section> : null}
+          {diagnosticsVisited ? <section hidden={page !== "diagnostics"} className="agent-assistant__page" data-ai-page="diagnostics"><UiPortalScope><CapabilityDiagnostics connections={connections} sources={sources} mcp={mcp} error={error ?? directoryState.error} loading={loading || directoryState.loading} onRefresh={() => refresh(value => value + 1)} /></UiPortalScope></section> : null}
         </div>
       </DialogBody>
     </UiPortalScope>
   </Dialog.Content>;
+}
+
+class HistoryBoundary extends Component<{ children: ReactNode }, { failed: boolean; revision: number }> {
+  state = { failed: false, revision: 0 };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    return this.state.failed ? <SettingsFeedback tone="danger">生成历史模块加载失败。<Button onClick={() => this.setState({ failed: false, revision: this.state.revision + 1 })}>重新加载</Button></SettingsFeedback> : <div key={this.state.revision} className="agent-assistant__history-view">{this.props.children}</div>;
+  }
 }
 
 function AssistantDrawer({ title, onClose, children, hidden = false, wide = false }: { title: string; onClose: () => void; children: ReactNode; hidden?: boolean; wide?: boolean }) {
@@ -241,7 +268,7 @@ function ServiceSources({ service, connections, contributions, payload, settings
   const showAdd = () => { setAdding(true); setAddVisited(true); setSelected(null); };
   const open = (id: string) => { setSelected(id); setAdding(false); setVisited(current => current.includes(id) ? current : [...current, id]); };
   useEffect(() => {
-    if (!payload.connectionId) return;
+    if (!payload.connectionId || payload.section) return;
     const source = sources.find(item => item.serviceConnectionId === payload.connectionId || item.bindings.some(binding => binding.consumerId === payload.connectionId));
     if (source) open(source.serviceConnectionId);
   }, [payload.connectionId, sources]);

@@ -31,6 +31,16 @@ export type BevyModule = {
   request_shot_capture?: (json: string) => void;
   /** 轮询匹配 (requestId, generation) 的结果帧（无则空数组）。 */
   poll_shot_capture?: (requestId: number, generation: number) => Uint8Array;
+  /**
+   * 请求一次页面内模型历史缩略图
+   * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+   *
+   * 入参是服务端权威脚本派生并校验过的 V2 Scene IR 与稳定 identity；渲染在同一 App 内
+   * 一次性离屏完成，不新建 App/context。
+   */
+  request_history_thumbnail?: (json: string) => void;
+  /** 轮询历史缩略图结果帧（布局与截图通道一致；无则空数组）。 */
+  poll_history_thumbnail?: (requestId: number, generation: number) => Uint8Array;
   /** shot camera 运行时诊断快照 JSON（change: add-reusable-bevy-shot-camera）。 */
   shot_diagnostics?: () => string;
   /**
@@ -368,5 +378,21 @@ export type BevyRuntime = {
   }): Promise<{ rgba: Uint8Array; width: number; height: number } | null>;
   /** shot camera 运行时诊断快照（rig/preview/gizmo/capture 计数）。 */
   shotDiagnostics(): { rigs: number; previewImages: number; gizmoEntities: number; capturesInFlight: number; capturesQueued: number };
+  /**
+   * 请求一次模型历史缩略图并等待 RGBA 像素
+   * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+   *
+   * 入参是服务端权威脚本派生并校验过的 V2 Scene IR；在同一 App 内一次性离屏渲染，
+   * 不新建 App/context，也不写规范状态。不支持/失败/超时返回 null。
+   *
+   * 与 `requestCapture` 共用 latest-wins 单一回读通道，调用方必须串行发送。
+   */
+  requestHistoryThumbnail?(input: {
+    generation: number;
+    sceneVersion: string;
+    ops: readonly unknown[];
+    width?: number;
+    height?: number;
+  }): Promise<import("./history-thumbnail-poll.js").HistoryThumbnailFrame | null>;
   dispose(): void;
 };

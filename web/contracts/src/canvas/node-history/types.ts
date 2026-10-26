@@ -221,15 +221,24 @@ export type NodeHistorySourceSummary = {
 /**
  * 受控预览引用。
  *
- * 图片/视频/音频只给**条目作用域**的受控 href；文本给安全截断摘要；模型给缓存缩略图 href 或 null。
+ * 图片/视频/音频只给**条目作用域**的受控 href；文本给安全截断摘要；模型给**条目身份**
+ * 与可选缩略图 href——模型缩略图由页面内同一 Bevy 运行时按权威脚本一次性离屏渲染
+ * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
  */
 export type NodeHistoryPreview =
   | { kind: "text"; excerpt: string }
   | { kind: "image"; href: string }
   | { kind: "video"; href: string; posterHref: string | null; durationSeconds: number | null }
   | { kind: "audio"; href: string; durationSeconds: number | null }
-  | { kind: "model"; thumbnailHref: string | null }
+  | { kind: "model"; thumbnailHref: string | null; entry: NodeHistoryPreviewEntry }
   | { kind: "failure"; outcome: NodeHistoryOutcome; message: string };
+
+/** 模型预览的条目身份：渲染器按它读取权威脚本并缓存结果。 */
+export type NodeHistoryPreviewEntry = {
+  canvasId: string;
+  nodeId: string;
+  entryId: string;
+};
 
 /** 列表项：只含卡片所需的安全 metadata。 */
 export type NodeGenerationHistoryListItem = {

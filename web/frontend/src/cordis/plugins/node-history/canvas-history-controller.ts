@@ -94,7 +94,7 @@ export class CanvasHistoryController {
     const state = this.state;
     if (!state || state.filter === filter) return;
     const generation = ++this.generation;
-    this.state = { ...state, filter, status: "loading", error: null, items: [], nextCursor: null, selectedEntryId: null };
+    this.state = { ...state, filter, status: "loading", error: null, items: [], nextCursor: null, loadingMore: false, selectedEntryId: null };
     this.emit();
     await this.loadFirstPage(generation);
   }
@@ -113,9 +113,9 @@ export class CanvasHistoryController {
     const state = this.state;
     if (!state || state.loadingMore || !state.nextCursor || state.status !== "ready") return;
     const generation = ++this.generation;
-    this.state = { ...state, loadingMore: true };
+    this.state = { ...state, loadingMore: true, error: null };
     this.emit();
-    const result = await this.client.listCanvas({
+    const result = await this.read({
       canvasId: state.canvasId,
       cursor: state.nextCursor,
       limit: PAGE_SIZE,
@@ -123,7 +123,7 @@ export class CanvasHistoryController {
     });
     if (generation !== this.generation || !this.state) return;
     if (!result.ok) {
-      this.state = { ...this.state, loadingMore: false, error: result.error, status: "error" };
+      this.state = { ...this.state, loadingMore: false, error: result.error };
       this.emit();
       return;
     }
@@ -131,6 +131,7 @@ export class CanvasHistoryController {
     this.state = {
       ...this.state,
       items: merged,
+      error: null,
       nextCursor: result.nextCursor,
       loadingMore: false,
       total: result.total,
@@ -150,7 +151,7 @@ export class CanvasHistoryController {
   private async loadFirstPage(generation: number): Promise<void> {
     const state = this.state;
     if (!state) return;
-    const result = await this.client.listCanvas({
+    const result = await this.read({
       canvasId: state.canvasId,
       limit: PAGE_SIZE,
       ...(state.filter === "all" ? {} : { kind: state.filter })
@@ -170,6 +171,11 @@ export class CanvasHistoryController {
       status: result.items.length === 0 ? "empty" : "ready"
     };
     this.emit();
+  }
+
+  private async read(input: Parameters<CanvasHistoryClient["listCanvas"]>[0]): ReturnType<CanvasHistoryClient["listCanvas"]> {
+    try { return await this.client.listCanvas(input); }
+    catch (error) { return { ok: false, code: "transport", error: error instanceof Error ? error.message : "生成历史读取失败，请重试。" }; }
   }
 
   private emit(): void {

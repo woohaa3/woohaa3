@@ -151,3 +151,19 @@
 
 .agent-assistant__mcp .agent-assistant__mcp-tile-button.ui-icon-button { width: 34px; height: 34px; border-radius: 8px; }
 .agent-assistant__mcp-tile .mcp-client-logo { width: 20px; height: 20px; }
+
+.agent-assistant__history { display: flex; flex-direction: column; gap: 12px; }
+.agent-assistant__history .agent-assistant__page-heading { margin-bottom: 0; }
+.agent-assistant__history-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.agent-assistant .canvas-history--embedded { flex: 1; grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+.canvas-history--embedded .canvas-history__back { display: none; }
+.canvas-history--embedded .canvas-history__item-copy strong { overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+  .agent-assistant .canvas-history--embedded { grid-template-columns: minmax(0, 1fr); }
+  .canvas-history--embedded[data-detail="true"] .canvas-history__list-panel,
+  .canvas-history--embedded[data-detail="false"] .canvas-history__detail { display: none; }
+  .canvas-history--embedded .canvas-history__back { display: inline-flex; align-self: flex-start; }
+}
+
+.canvas-history--embedded .canvas-history__detail-preview video { width: 100%; max-height: 300px; }
+.canvas-history--embedded .canvas-history__detail-preview .ui-audio-player { width: 100%; padding: 16px; }

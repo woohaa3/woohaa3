@@ -32,6 +32,7 @@ import { createRuntimeViewport } from "./runtime-viewport.js";
 import { createRuntimeObserver } from "./runtime-observer.js";
 import {FocusDetailEncoder} from "./focus-details.js";
 import { pollShotCapture } from "./shot-capture-poll.js";
+import { pollHistoryThumbnail } from "./history-thumbnail-poll.js";
 import {
   createQueryBridge,
   encodeCompositeAssetScopesRequest,
@@ -78,6 +79,13 @@ let captureRequestSeq = 1;
 function nextCaptureRequestId(): number {
   captureRequestSeq += 1;
   return captureRequestSeq;
+}
+
+/** 历史缩略图 request id（与截图共用回读通道，但 identity 各自单调）。 */
+let thumbnailRequestSeq = 1;
+function nextThumbnailRequestId(): number {
+  thumbnailRequestSeq += 1;
+  return thumbnailRequestSeq;
 }
 
 /** 稳定模块诊断标识；实际 glue 在 runtime-realm-entry 通过字面量 import 打包。 */
@@ -632,6 +640,23 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       } catch {
         return empty;
       }
+    },
+    /**
+     * 页面内模型历史缩略图（change: 2026-10-26-move-generation-history-to-ai-center，D6）。
+     *
+     * 与截图共用 latest-wins 回读通道；调用方通过共享捕获锁串行发送。
+     */
+    requestHistoryThumbnail: async (input) => {
+      const thumbnailGeneration = generation;
+      const frame = await pollHistoryThumbnail(module, {
+        requestId: nextThumbnailRequestId(),
+        generation: input.generation,
+        sceneVersion: input.sceneVersion,
+        ops: input.ops,
+        ...(input.width ? { width: input.width } : {}),
+        ...(input.height ? { height: input.height } : {})
+      }, () => !disposed && thumbnailGeneration === generation && (!supervisor || supervisor.phase === "running"));
+      return frame;
     },
     dispose: () => {
       if (disposed) return;

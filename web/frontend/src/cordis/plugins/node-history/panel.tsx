@@ -13,6 +13,7 @@ import type { NodeGenerationHistoryListItem } from "@woohaa3/contracts";
 import type { NodeHistoryController } from "./controller.js";
 import { CURRENT_PRESENTATION_ID } from "./controller.js";
 import { HistoryPreview } from "./preview.js";
+import type { ModelThumbnailRenderer } from "./model-thumbnail-render.js";
 import { Button, IconButton } from "../../../shared/ui/Button.js";
 import { Tooltip } from "../../../shared/ui/Tooltip.js";
 import { CloseIcon } from "../../../shared/ui/icons.js";
@@ -33,9 +34,14 @@ export type NodeHistoryPanelProps = {
    * UI 只提交 Navigation intent；controller `close()` 仅由 route cleanup 调用。
    */
   onClose?: () => void;
+  /**
+   * 页面内模型缩略图渲染器
+   * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+   */
+  renderModelThumbnail?: ModelThumbnailRenderer;
 };
 
-export function NodeHistoryPanel({ controller, writable, variant, onWidthChange, onClose }: NodeHistoryPanelProps) {
+export function NodeHistoryPanel({ controller, writable, variant, onWidthChange, onClose, renderModelThumbnail }: NodeHistoryPanelProps) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const rootRef = useRef<HTMLDivElement | null>(null);
   // 统一右侧抽屉：五类节点的历史面板位置一致（模型以外的类型同样贴右）。
@@ -132,6 +138,7 @@ export function NodeHistoryPanel({ controller, writable, variant, onWidthChange,
             preview={state.items.find((item) => item.current)?.preview ?? null}
             selected={state.selectedEntryId === CURRENT_PRESENTATION_ID}
             onSelect={() => void controller.select(CURRENT_PRESENTATION_ID)}
+            {...(renderModelThumbnail ? { renderModelThumbnail } : {})}
           />
         </ul>
 
@@ -148,6 +155,7 @@ export function NodeHistoryPanel({ controller, writable, variant, onWidthChange,
                 applying={state.applyingEntryId === record.entryId || state.pendingCurrentEntryId === record.entryId}
                 writable={writable && !state.operations.some(item => item.state === "queued" || item.state === "running") && state.current.draftState === "saved"}
                 controller={controller}
+                {...(renderModelThumbnail ? { renderModelThumbnail } : {})}
               />
             ) : (
               <li key={record.presentationId} className={`node-history__card${state.selectedEntryId === record.presentationId ? " node-history__card--selected" : ""}`}>
@@ -228,13 +236,15 @@ function ClearHistoryAction({ controller, clearing }: { controller: NodeHistoryC
 function NodeHistoryCurrentCard({ current,
   preview,
   selected,
-  onSelect
+  onSelect,
+  renderModelThumbnail
 }: {
   current: import("./controller.js").NodeHistoryCurrentPresentation;
   /** 当前内容对应的受控预览（取「被标记为 current 的已归档条目」）；无则只显示空占位。 */
   preview?: import("@woohaa3/contracts").NodeHistoryPreview | null;
   selected: boolean;
   onSelect: () => void;
+  renderModelThumbnail?: ModelThumbnailRenderer;
 }) {
   const draftLabel =
     current.draftState === "unsaved" ? "当前版本 · 未保存"
@@ -250,7 +260,7 @@ function NodeHistoryCurrentCard({ current,
     >
       <button type="button" className="node-history__select" aria-label="选择当前版本" onClick={onSelect}>
         {preview && !unavailable
-          ? <HistoryPreview preview={preview} />
+          ? <HistoryPreview preview={preview} {...(renderModelThumbnail ? { renderModelThumbnail } : {})} />
           : <div className="node-history__thumb node-history__thumb--current" data-preview-kind="empty">
               <span className="node-history__thumb-fallback">当前</span>
             </div>}
@@ -271,13 +281,15 @@ function NodeHistoryCard({
   selected,
   applying,
   writable,
-  controller
+  controller,
+  renderModelThumbnail
 }: {
   item: NodeGenerationHistoryListItem;
   selected: boolean;
   applying: boolean;
   writable: boolean;
   controller: NodeHistoryController;
+  renderModelThumbnail?: ModelThumbnailRenderer;
 }) {
   const preview = item.preview;
   return (
@@ -294,7 +306,7 @@ function NodeHistoryCard({
         onClick={() => void controller.select(item.entryId)}
       >
         <div className="node-history__thumb" data-preview-kind={preview.kind}>
-          <HistoryPreview preview={preview} />
+          <HistoryPreview preview={preview} {...(renderModelThumbnail ? { renderModelThumbnail } : {})} />
         </div>
         <div className="node-history__meta">
           <span className="node-history__time">{formatTime(item.createdAt)}</span>

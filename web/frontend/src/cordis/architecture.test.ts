@@ -142,8 +142,9 @@ describe("前端协议边界审计", () => {
       const source = stripComments(readFileSync(file, "utf8"));
       // controller.close 不再是 UI open identity 入口：只能由 route cleanup 调用（plugin 的订阅）。
       const closeCalls = source.match(/controller\.close\(\)/g) ?? [];
+      const inWorkspaceCleanup = relative.endsWith("canvas-history-browser.tsx") && /return \(\) => controller\.close\(\);/.test(source);
       const inSubscription = /else if \(state\) \{\s*controller\.close\(\);/m.test(source);
-      if (closeCalls.length > 1 || (closeCalls.length === 1 && !inSubscription)) {
+      if (closeCalls.length > 1 || (closeCalls.length === 1 && !inSubscription && !inWorkspaceCleanup)) {
         offenders.push(`${relative}: controller.close as open identity`);
       }
       // 历史 UI 不得直接驱动 runtime focus owner。
@@ -241,6 +242,11 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/canvas-runtime/query-bridge.ts -> canvas-shell",
       // canvas-runtime ↔ media-preview：共享受控媒体 URL 解析。
       "cordis/plugins/canvas-runtime/video-source.ts -> media-preview",
+      // node-history / model-editor ↔ canvas-runtime：共享同一离屏回读通道的单飞锁与
+      // RGBA→PNG 编码（桥接槽 latest-wins，两类作业必须串行）
+      // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+      "cordis/plugins/node-history/model-thumbnail-render.ts -> canvas-runtime",
+      "cordis/plugins/model-editor/model-shot-capture-run.ts -> canvas-runtime",
       // canvas-shell ↔ canvas-runtime：运行时是 canvas-shell 的低层依赖。
       "cordis/plugins/canvas-shell/interaction-controller.ts -> canvas-runtime",
       "cordis/plugins/canvas-shell/interaction-core.ts -> canvas-runtime",

@@ -49,6 +49,11 @@ thread_local! {
     static SHOT_CAPTURE_REQUEST: RefCell<Option<ShotCaptureBridgeRequest>> = const { RefCell::new(None) };
     /// 完成的截图结果，按 (requestId, generation) 匹配后由 JS 取走。
     static SHOT_CAPTURE_RESULT: RefCell<Option<ShotCaptureBridgeResult>> = const { RefCell::new(None) };
+    /// 页面内历史缩略图请求（latest-wins 单槽；JS 串行发送）
+    /// （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+    static HISTORY_THUMBNAIL_REQUEST: RefCell<Option<HistoryThumbnailRequest>> = const { RefCell::new(None) };
+    /// 完成的历史缩略图结果，按 (requestId, generation) 匹配后由 JS 取走。
+    static HISTORY_THUMBNAIL_RESULT: RefCell<Option<HistoryThumbnailResult>> = const { RefCell::new(None) };
     /// shot camera 运行时诊断快照
     /// （change: add-reusable-bevy-shot-camera；JSON 字符串，宿主/Showcase 读取）。
     static SHOT_DIAGNOSTICS: RefCell<String> = RefCell::new(String::new());
@@ -299,6 +304,66 @@ pub(crate) fn take_shot_capture_result(
                 if result.request_id == request_id
                     && result.bridge_generation == bridge_generation =>
             {
+                guard.take()
+            }
+            _ => None,
+        }
+    })
+}
+
+/// 页面内历史缩略图请求：服务端权威脚本派生出的 Scene IR + 输出尺寸 + 稳定 identity
+/// （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
+pub(crate) struct HistoryThumbnailRequest {
+    pub(crate) request_id: u64,
+    pub(crate) generation: u64,
+    pub(crate) snapshot: std::sync::Arc<crate::protocol::ModelSnapshot>,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
+
+/// 历史缩略图完成结果。
+pub(crate) struct HistoryThumbnailResult {
+    pub(crate) request_id: u64,
+    pub(crate) generation: u64,
+    pub(crate) outcome: HistoryThumbnailOutcome,
+}
+
+/// 成功（RGBA + 尺寸）或失败（稳定 code）。
+pub(crate) enum HistoryThumbnailOutcome {
+    Ok {
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    Failed {
+        code: String,
+    },
+}
+
+/// 排队一次历史缩略图请求（latest-wins；调用方串行发送）。
+pub(crate) fn queue_history_thumbnail_request(request: HistoryThumbnailRequest) {
+    HISTORY_THUMBNAIL_REQUEST.with(|slot| *slot.borrow_mut() = Some(request));
+}
+
+/// 一次性取走历史缩略图请求。
+pub(crate) fn take_history_thumbnail_request() -> Option<HistoryThumbnailRequest> {
+    HISTORY_THUMBNAIL_REQUEST.with(|slot| slot.borrow_mut().take())
+}
+
+/// 发布完成的历史缩略图结果（latest-wins）。
+pub(crate) fn set_history_thumbnail_result(result: HistoryThumbnailResult) {
+    HISTORY_THUMBNAIL_RESULT.with(|slot| *slot.borrow_mut() = Some(result));
+}
+
+/// 取走匹配 (request_id, generation) 的结果；不匹配则保留（迟到结果不影响新请求）。
+pub(crate) fn take_history_thumbnail_result(
+    request_id: u64,
+    generation: u64,
+) -> Option<HistoryThumbnailResult> {
+    HISTORY_THUMBNAIL_RESULT.with(|slot| {
+        let mut guard = slot.borrow_mut();
+        match guard.as_ref() {
+            Some(result) if result.request_id == request_id && result.generation == generation => {
                 guard.take()
             }
             _ => None,

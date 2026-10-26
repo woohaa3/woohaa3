@@ -6,12 +6,18 @@ import type { Context } from "@deepseek-ai/cordis";
 import { modelCameraAspectSize, type BevyModelEditor } from "@woohaa3/contracts";
 import type { ModelEditorSession } from "../../../extension-api/model-workspace-session.js";
 import type { ModelShotCaptureSession } from "./model-shot-capture.js";
+import { acquireCaptureLock, rgbaToPngBlob } from "../canvas-runtime/model-capture-shared.js";
+
+export { acquireCaptureLock, rgbaToPngBlob } from "../canvas-runtime/model-capture-shared.js";
 
 /**
  * 通过同一 Bevy renderer 的离屏目标渲染并回读，再用 canvas 编码 PNG
  * （change: add-model-editor-gizmo-shot-capture，任务 3.3/3.4；
  *   change: fix-model-focus-navigation-and-camera-parity，task 5.5：画幅决定输出像素尺寸）。
  */
+/** 进程内单调的截图作用域代数：切镜头/关闭后旧结果按它丢弃。 */
+let captureGeneration = 1;
+
 export async function renderWithBevy(
   ctx: Context,
   input: { captureId: string; nodeId: string; shot: NonNullable<BevyModelEditor["shot"]> }
@@ -38,51 +44,6 @@ export async function renderWithBevy(
     release();
   }
 }
-
-/** 捕获通道互斥锁：保证任一时刻只有一个离屏捕获在飞行。 */
-let captureLock: Promise<void> = Promise.resolve();
-export function acquireCaptureLock(): Promise<() => void> {
-  let release!: () => void;
-  const next = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const previous = captureLock;
-  captureLock = previous.then(() => next);
-  return previous.then(() => release);
-}
-
-/** RGBA 字节 → PNG Blob（OffscreenCanvas / DOM canvas；无可用 canvas 时返回 null）。 */
-export async function rgbaToPngBlob(rgba: Uint8Array, width: number, height: number): Promise<Blob | null> {
-  const data = new Uint8ClampedArray(rgba.length);
-  // Readback 可能带行对齐填充；只取 width*height*4。
-  const expected = width * height * 4;
-  data.set(rgba.subarray(0, Math.min(rgba.length, expected)));
-  try {
-    const offscreen = (globalThis as { OffscreenCanvas?: new (w: number, h: number) => OffscreenCanvas }).OffscreenCanvas;
-    if (offscreen) {
-      const canvas = new offscreen(width, height);
-      const context = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D | null;
-      if (context) {
-        context.putImageData(new ImageData(data, width, height), 0, 0);
-        return await canvas.convertToBlob({ type: "image/png" });
-      }
-    }
-    if (typeof document !== "undefined") {
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext("2d");
-      if (context) {
-        context.putImageData(new ImageData(data, width, height), 0, 0);
-        return await new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/png"));
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-let captureGeneration = 1;
 
 /** 截图节点类型映射：模型/当前帧截图（change: 2026-10-12-unify-generation-history-strip，design D8）。 */
 

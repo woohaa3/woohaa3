@@ -75,3 +75,29 @@ describe("DialogService", () => {
     expect(b.open({ dialogId: "only-a" }).ok).toBe(false);
   });
 });
+
+it("注册映射在入栈前完成，复用目标单例且只运行目标门禁", () => {
+  const service = new DialogService();
+  service.registerDialog("target", { definition: definition({ singleton: true }) });
+  service.registerDialog("legacy", { definition: definition({ redirect: () => ({ dialogId: "target", payload: {} }) }) });
+  const seen: string[] = [];
+  const remove = service.registerOpenParticipant(request => { seen.push(request.dialogId); return true; });
+  const first = service.open({ dialogId: "legacy" });
+  const second = service.open({ dialogId: "legacy" });
+  expect(first.ok && second.ok && first.instance.instanceId === second.instance.instanceId).toBe(true);
+  expect(service.getSnapshot().stack.map(instance => instance.dialogId)).toEqual(["target"]);
+  expect(seen).toEqual(["target", "target"]);
+  remove(); service.close();
+  service.registerOpenParticipant(() => false);
+  expect(service.open({ dialogId: "legacy" }).ok).toBe(false);
+  expect(service.getSnapshot().stack).toHaveLength(0);
+});
+
+it("兼容目标缺失和映射循环明确失败，不创建旧界面", () => {
+  const service = new DialogService();
+  service.registerDialog("old", { definition: definition({ redirect: () => ({ dialogId: "missing" }) }) });
+  expect(service.open({ dialogId: "old" })).toMatchObject({ ok: false });
+  service.registerDialog("cycle", { definition: definition({ redirect: () => ({ dialogId: "cycle" }) }) });
+  expect(service.open({ dialogId: "cycle" })).toEqual({ ok: false, error: "Dialog redirect cycle" });
+  expect(service.getSnapshot().stack).toHaveLength(0);
+});
