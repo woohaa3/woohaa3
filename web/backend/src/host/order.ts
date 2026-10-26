@@ -7,11 +7,11 @@ export const ROUTE_ORDER = {
    */
   extensionInstall: 5,
   /**
-   * 受管扩展子进程的 gateway 转发（change: 2026-10-21-isolate-extension-host-process，D6）：只认子进程登记的
-   * 前缀与宿主授予的保底前缀（`/api/extensions/<id>/`、modelRefresh 路径），其余交下游；必须排在
-   * application（10）的 `/api/extensions/*` 宽前缀之前，否则会被它以「未知的插件路由」截走。
+   * 换版窗口拦截（C 方向：进程内热切换）：正在换版的扩展，其 `/api/extensions/<id>/*` 请求返回
+   * 可重试的 `extension-reloading`，而不是落到下游 404 被当成「扩展不存在」。必须排在
+   * application（10）之前——那个宽前缀会以「未知的插件路由」截走。
    */
-  extensionHostForward: 7,
+  extensionReloading: 6,
   application: 10,
   /** `/api/application/session`：身份/权限读模型，前端 `current-user.ts` 每次启动都请求。 */
   session: 15,

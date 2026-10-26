@@ -143,7 +143,14 @@ export function ManagedExtensionDetails({
         <dt>来源</dt>
         <dd data-testid={`managed-source-${id}`}>{installed.sourceId === "local-file" ? "本地文件" : installed.sourceId ?? "未知"}</dd>
         <dt>信任</dt>
-        <dd data-testid={`managed-trust-${id}`}>{trustLabel(installed.trust)}</dd>
+        <dd data-testid={`managed-trust-${id}`}>
+          {trustLabel(installed.trust)}
+          {/* C 方向取消进程边界后，这是安装前必须让人看见的一件事：签名只证明来源与完整性，
+              不代表执行边界——扩展与宿主同进程、同权限。 */}
+          <span className="managed-extension__note" data-testid={`managed-trust-note-${id}`}>
+            （与本机宿主同权限，不是沙箱）
+          </span>
+        </dd>
         {installed.observeUntil ? (
           <>
             <dt>观察期</dt>

@@ -16,6 +16,8 @@ import { createExtensionInstallApiHandler } from "../../../api/extension-install
 import type { HostPlugin } from "../../context.js";
 import { ROUTE_ORDER } from "../../order.js";
 import { createExtensionManager, type ExtensionManager, type ObservedHealth } from "./manager.js";
+import { beginSwap, endSwap } from "./swap-registry.js";
+import { createReloadingHandler } from "./swap-reloading-route.js";
 import { loadPackageToolkit } from "./toolkit.js";
 import { createVersionStatusCache, managedVersionStatus, marketplaceExtensionDetail } from "./marketplace-detail.js";
 import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, parseRepoList } from "./github-source.js";
@@ -148,20 +150,27 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
         async swap(extensionId, directory, _version, previousDirectory) {
           const target = layer();
           if (!target) throw Object.assign(new Error("宿主不支持运行期装配"), { code: "extension-host-unsupported" });
-          // 先撤旧：同名插件不能并存。
-          await target.remove(extensionId);
+          // 换版窗口：从撤旧到装配完成之间，该扩展的路由 / Provider 都不存在。
+          // 网关据此返回可重试的 extension-reloading，而不是让调用方看到 404。
+          beginSwap(extensionId);
           try {
-            await mount(extensionId, directory);
-            return { swapped: true };
-          } catch (error) {
-            if (previousDirectory) {
-              try {
-                await mount(extensionId, previousDirectory);
-              } catch (restoreError) {
-                log({ event: "extension-swap-restore-failed", extensionId, message: restoreError instanceof Error ? restoreError.message : String(restoreError) });
+            // 先撤旧：同名插件不能并存。
+            await target.remove(extensionId);
+            try {
+              await mount(extensionId, directory);
+              return { swapped: true };
+            } catch (error) {
+              if (previousDirectory) {
+                try {
+                  await mount(extensionId, previousDirectory);
+                } catch (restoreError) {
+                  log({ event: "extension-swap-restore-failed", extensionId, message: restoreError instanceof Error ? restoreError.message : String(restoreError) });
+                }
               }
+              throw error;
             }
-            throw error;
+          } finally {
+            endSwap(extensionId);
           }
         },
         async remove(extensionId) {
@@ -282,5 +291,9 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
       logger: log
     });
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.extensionInstall, handler));
+
+    // 换版窗口拦截：进程内热切换是「先卸后装」，这段时间该扩展的路由不存在。直接落到下游会变成
+    // 404（被读成「扩展不存在」这一永久失败），所以这里先答「正在换版，稍后重试」。
+    ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.extensionReloading, createReloadingHandler()));
   }
 };
