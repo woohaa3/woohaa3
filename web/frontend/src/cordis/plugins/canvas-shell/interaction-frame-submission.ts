@@ -1,4 +1,3 @@
-import { recordStartupFrame } from "../canvas-runtime/startup-trace.js";
 import { applyObserverToScene, renderSceneFingerprint, type CanvasRenderScene, type PreparedModelResource } from "@woohaa3/contracts";
 import { noteSceneSubmitRoute, sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
 import { PositionSceneMirror } from "../canvas-runtime/position-scene-mirror.js";
@@ -20,7 +19,6 @@ type Outcome = { error: string | null; retry: boolean };
 /** The controller's sole frame submission owner: full, viewport, positions or observer. */
 export function createFrameSubmission(deps: {
   options: InteractionControllerOptions; state: InteractionState;
-  now?: () => number;
   viewport: () => Viewport;
   surface: () => {width:number;height:number;pixelRatio:number;originX?:number;originY?:number};
   transient: () => {dragAttach: CanvasRenderScene["dragAttach"] | null; aggregateConnect: CanvasRenderScene["aggregateConnect"] | null};
@@ -35,7 +33,6 @@ export function createFrameSubmission(deps: {
     badgeResize: deps.state.gesture.kind === "group-badge-resize" ? [deps.state.gesture.nodeId, deps.state.gesture.scale] : null,
     hover:[deps.state.hoveredNodeId,deps.state.hoveredPort,deps.state.hoveredEdgeId]
   });
-  const now = deps.now ?? (() => performance.now());
   const baselineBlock = (runtime: BevyRuntime, index: CanvasNodeIndex | null): string | null => {
     if (!baseline) return "no-baseline";
     if (baseline.runtime !== runtime) return "runtime-changed";
@@ -166,24 +163,7 @@ export function createFrameSubmission(deps: {
     } catch(error) { return fail(error); }
   };
 
-  let startupKey = "";
-  let startupFrames = 0;
-  const run = (reasons: ReadonlySet<string>, force: boolean): Outcome => {
-    const started = now();
-    try {
-      return submit(reasons, force);
-    } finally {
-      const playback = deps.options.getAnimationPlayback?.();
-      if (playback?.playing) {
-        const key = JSON.stringify([playback.nodeId, playback.clipId, playback.generation]);
-        if (key !== startupKey) { startupKey = key; startupFrames = 0; }
-        if (startupFrames++ < 120) recordStartupFrame("scene-frame", {
-          nodeId: playback.nodeId, clipId: playback.clipId, generation: playback.generation,
-          frame: startupFrames, totalMs: Math.max(0, now() - started)
-        });
-      }
-    }
-  };
+  const run = (reasons: ReadonlySet<string>, force: boolean): Outcome => submit(reasons, force);
 
   /** Active Q/E contacts reuse rendered dimensions; no resources or full rebuild. */
   const dragScene = (): CanvasRenderScene | null => {

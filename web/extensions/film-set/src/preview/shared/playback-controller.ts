@@ -49,20 +49,6 @@ export class AnimationPlaybackController {
   private readonly deps: Required<Pick<AnimationPlaybackControllerDeps, "readAnimation" | "publish">> & AnimationPlaybackControllerDeps;
   private session: Session | null = null;
   private generation = 0;
-  private startupFrames = 0;
-  private startupPublishedAt = 0;
-  private startupSamples: Record<string, unknown>[] = [];
-  private startupTimer: ReturnType<typeof setTimeout> | null = null;
-  private recordStartup(kind: string, sample: Record<string, unknown>): void {
-    if (this.startupSamples.length < 240) this.startupSamples.push({ kind, ...sample, atBrowserMs: performance.now() });
-  }
-  private flushStartup(reason: string): void {
-    if (this.startupTimer !== null) clearTimeout(this.startupTimer);
-    this.startupTimer = null;
-    this.startupFrames = 0;
-    this.startupSamples.forEach((sample, index) => console.info("[shot-startup] js-batch " + JSON.stringify({ reason, part: index + 1, parts: this.startupSamples.length, samples: [sample] })));
-    this.startupSamples = [];
-  }
   private cancelFrame: (() => void) | null = null;
   private running = false;
   private error: string | null = null;
@@ -129,12 +115,9 @@ export class AnimationPlaybackController {
       this.disposeSession();
       return;
     }
-    const startedAt = performance.now();
     const source = this.deps.readAnimation(nodeId);
-    const readAt = performance.now();
     const animation = source ? resolveFilmSetClip(source, options.clipId) : null;
     if (!animation) {
-      console.info("[shot-startup] select-rejected " + JSON.stringify({ nodeId, reason: "clip-unavailable" }));
       this.disposeSession();
       return;
     }
@@ -153,31 +136,18 @@ export class AnimationPlaybackController {
     ) {
       // 定义未变：保留当前时钟与播放状态。
       this.session.view = animation;
-      const totalMs = performance.now() - startedAt;
-      if (this.startupFrames > 0 && totalMs >= 4) this.recordStartup("js-select-reuse", {
-        nodeId, clipId: clip.id, generation: this.generation, totalMs,
-        readMs: readAt - startedAt, resolveHashMs: performance.now() - readAt
-      });
       return;
     }
     this.error = null;
     const cacheKey = JSON.stringify([nodeId, hash, clip.id]);
-    const resolvedAt = performance.now();
-    let validationMs = 0;
-    let compileMs = 0;
     let prepared = this.compiledClips.get(cacheKey);
-    const cacheHit = !!prepared;
     if (prepared) {
       this.compiledClips.delete(cacheKey);
       this.compiledClips.set(cacheKey, prepared);
     } else {
-      const validationAt = performance.now();
       const state = checkAnimationMotion(animation);
       const gate = resolveAnimationGate(state);
-      const compileAt = performance.now();
-      validationMs = compileAt - validationAt;
       const compiled = gate.canPreview ? compileFilmSetClip(nodeId, animation) : null;
-      compileMs = performance.now() - compileAt;
       if (compiled) this.compilations++;
       prepared = { state, gate, compiled };
       this.compiledClips.set(cacheKey, prepared);
@@ -187,12 +157,11 @@ export class AnimationPlaybackController {
     // 检查未通过时不建立可播放会话：保留节点身份，但冻结在第 0 秒且不发布投影。
     if (!gate.canPreview) {
       this.error = gate.reason;
-      console.info("[shot-startup] select-rejected " + JSON.stringify({ nodeId, clipId: clip.id, reason: gate.reason }));
       this.disposeSession();
       return;
     }
     if (!compiled) { this.disposeSession(); return; }
-    if (!compiled.ok) { console.info("[shot-startup] select-rejected " + JSON.stringify({ nodeId, clipId: clip.id, reason: compiled.reason })); this.error = compiled.reason; this.disposeSession(); return; }
+    if (!compiled.ok) { this.error = compiled.reason; this.disposeSession(); return; }
     this.stopLoop();
     this.deps.publish(null);
     this.generation += 1;
@@ -220,18 +189,7 @@ export class AnimationPlaybackController {
       forceLoop,
       lastTickMs: null
     };
-    const publishAt = performance.now();
     this.publish();
-    this.startupPublishedAt = performance.now();
-    this.flushStartup("session-replaced");
-    this.startupFrames = 120;
-    this.startupTimer = setTimeout(() => this.flushStartup("window-complete"), 3000);
-    console.info("[shot-startup] js-select " + JSON.stringify({
-      nodeId, clipId: clip.id, generation: this.generation, targetPreviewNodeId,
-      cacheHit, readMs: readAt - startedAt, resolveHashMs: resolvedAt - readAt,
-      validationMs, compileMs, publishMs: this.startupPublishedAt - publishAt,
-      totalMs: this.startupPublishedAt - startedAt, atBrowserMs: this.startupPublishedAt
-    }));
     this.ensureRunning();
   }
 
@@ -320,15 +278,6 @@ export class AnimationPlaybackController {
       if (session) session.lastTickMs = null;
       return;
     }
-    const traceFrame = this.startupFrames > 0;
-    if (traceFrame) {
-      this.recordStartup("js-frame", {
-        nodeId: session.nodeId, clipId: session.clipId, generation: this.generation,
-        frame: 121 - this.startupFrames, sincePublishMs: performance.now() - this.startupPublishedAt,
-        rafGapMs: session.lastTickMs === null ? null : nowMs - session.lastTickMs
-      });
-      this.startupFrames--;
-    }
     if (session.lastTickMs === null) {
       session.lastTickMs = nowMs;
       return;
@@ -347,23 +296,16 @@ export class AnimationPlaybackController {
     } else {
       session.time += deltaSeconds;
     }
-    const publishStarted = performance.now();
     this.publish();
-    if (traceFrame) this.recordStartup("js-tick-publish", {
-      nodeId: session.nodeId, generation: this.generation, frame: 120 - this.startupFrames,
-      publishMs: performance.now() - publishStarted
-    });
   }
 
   dispose(): void {
-    this.flushStartup("disposed");
     this.compiledClips.clear();
     this.stopLoop();
     this.session = null;
   }
 
   private disposeSession(): void {
-    this.flushStartup("session-ended");
     this.stopLoop();
     this.generation += 1;
     if (!this.session) {

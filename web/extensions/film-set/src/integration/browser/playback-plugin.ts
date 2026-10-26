@@ -82,13 +82,6 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
       refreshCandidates();
       const delay = new HoverPlaybackDelay(() => reconcile());
       let reconciling = false;
-      let lastGateLog = "";
-      const logGate = (reason: string, details: Record<string, unknown>) => {
-        const signature = JSON.stringify({ reason, ...details });
-        if (signature === lastGateLog) return;
-        lastGateLog = signature;
-        console.info("[shot-startup] hover-gate " + signature);
-      };
       const reconcile = (): void => {
         // 播放状态会同步 invalidate registry；发布中不能重入尚未完成的控制器切换。
         if (reconciling || disposed) return;
@@ -149,12 +142,6 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
           const candidateKey = target && snapshotHash
             ? JSON.stringify([target.filmSetNodeId, target.clipId, target.previewNodeId, snapshotHash, eligibility.epoch, runtime?.generation() ?? 0]) : null;
           const ready = delay.sync(candidateKey);
-          const reason = focused ? "focused" : !visible ? "hidden"
-            : eligibility.blocked ? "input-blocked" : runtime?.acceptsPlayback?.() === false ? "runtime-blocked"
-            : !target ? "no-hit" : !snapshotHash ? "not-dynamic-or-invalid-owner" : !ready ? "waiting-delay" : "ready";
-          logGate(reason, { previewNodeId: eligibility.target?.previewNodeId ?? null,
-            epoch: eligibility.epoch, renderer: runtime?.generation() ?? 0,
-            documentFocused: document.hasFocus(), activeElement: document.activeElement?.tagName ?? null });
           if (!ready) {
             controller.select(null);
             return;

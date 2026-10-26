@@ -1,5 +1,3 @@
-/// <reference types="vite/client" />
-import { recordStartupFrame } from "../canvas-runtime/startup-trace.js";
 import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
 /**
  * 浏览器画布交互控制器：共享输入路由、瞬时态、渲染调度和生命周期。
@@ -172,7 +170,6 @@ export function installInteractionController(options: InteractionControllerOptio
 
   const frameSubmission = createFrameSubmission({
     options, state, viewport: activeViewport, surface: surfaceSize,
-    now: () => target.performance?.now() ?? performance.now(),
     transient: () => ({ dragAttach: attachProjectionRef.current?.() ?? null,
       aggregateConnect: aggregateProjectionRef.current?.() ?? null }),
     build: buildSceneWithResources
@@ -375,15 +372,12 @@ export function installInteractionController(options: InteractionControllerOptio
   };
 
   // 资源同步和场景构建也可能抛错；保护整个帧，避免纹理错误终止永久 rAF。
-  let startupFrameKey = "";
-  let startupFrameCount = 0;
   const runFrame = (force: boolean) => {
     // A cold query or synchronous subscriber can request a flush while this scene
     // is still being built. Finish its acceptance before retrying on the next frame.
     if (frameExecuting) { markInvalidated("input"); return; }
     // 帧耗时在所有构建里都计时（change: 2026-10-25-enhance-telemetry-performance-collection，
-    // design D4：`perf.frame` 是产品事实，不是开发期采集）。只有控制台启动追踪仍限开发构建。
-    const tracing = import.meta.env.DEV;
+    // design D4：`perf.frame` 是产品事实，不是开发期采集）。
     const started = target.performance.now();
     const previous = frameExecuting; frameExecuting = true;
     try {
@@ -394,18 +388,7 @@ export function installInteractionController(options: InteractionControllerOptio
     } finally {
       frameExecuting = previous;
       sceneDiagnostics.frameExecutions++;
-      const totalMs = Math.max(0, target.performance.now() - started);
-      sceneDiagnostics.frameExecutionMs += totalMs;
-      if (tracing) {
-        const playback = options.getAnimationPlayback?.();
-        if (playback?.playing) {
-          const key = JSON.stringify([playback.nodeId, playback.clipId, playback.generation]);
-          if (key !== startupFrameKey) { startupFrameKey = key; startupFrameCount = 0; }
-          if (startupFrameCount++ < 120) recordStartupFrame("host-frame", {
-            nodeId: playback.nodeId, generation: playback.generation, frame: startupFrameCount, totalMs
-          });
-        }
-      }
+      sceneDiagnostics.frameExecutionMs += Math.max(0, target.performance.now() - started);
     }
   };
 

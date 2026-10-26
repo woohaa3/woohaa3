@@ -79,18 +79,10 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
       clipId: ownership.clipId
     };
   };
-  let lastQueryLog = "";
   const publishPlaybackTarget = (hit: HitTarget | null) => {
     const target = playbackTargetFromHit(hit);
     const blocked = deps.modalActive() || state.gesture.kind !== "none";
-    const previous = hoverNodeStore.getPlaybackSnapshot().target;
     hoverNodeStore.setPlaybackTarget(target, blocked);
-    const snapshot = hoverNodeStore.getPlaybackSnapshot();
-    const signature = JSON.stringify({ hit: hit?.kind ?? null,
-      previewNodeId: target?.previewNodeId ?? null, gesture: state.gesture.kind,
-      modal: deps.modalActive(), blocked: snapshot.blocked, epoch: snapshot.epoch });
-    if (signature !== lastQueryLog && (target || previous)) console.info("[shot-startup] hover-hit " + signature);
-    lastQueryLog = signature;
   };
 
   /**
@@ -181,7 +173,6 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
     queryPending = !cardHit.ok;
     nextQueryAt = performance.now() + 100;
     if (!cardHit.ok) {
-      console.info("[shot-startup] hover-query " + JSON.stringify({ status: "unavailable", retry: true }));
       // 几何不可用/过期：清除悬停；进行中的手势按既有取消规则处理（design D3）。
       clearHover();
       return;
