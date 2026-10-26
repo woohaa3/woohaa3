@@ -66,6 +66,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     getSession: () => options.getSession(),
     getModelResources: deps.getModelResources,
     ...(options.isModelLoading ? { isModelLoading: options.isModelLoading } : {}),
+    ...(options.getModelLoading ? { getModelLoading: options.getModelLoading } : {}),
     getTheme: deps.theme,
     textureSync: deps.textureSync,
     videoSessions: deps.videoSessions,

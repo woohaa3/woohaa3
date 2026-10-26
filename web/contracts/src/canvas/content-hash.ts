@@ -9,12 +9,16 @@
 
 /** 计算文本的 FNV-1a 64-bit 指纹（16 位小写 hex）。 */
 export function fnv1a64Hex(text: string): string {
-  let hash = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  const mask = 0xffffffffffffffffn;
+  let high = 0xcbf29ce4;
+  let low = 0x84222325;
   for (let i = 0; i < text.length; i += 1) {
-    hash ^= BigInt(text.charCodeAt(i));
-    hash = (hash * prime) & mask;
+    // Preserve the original UTF-16 code-unit XOR, including unpaired surrogates.
+    low = (low ^ text.charCodeAt(i)) >>> 0;
+    // The FNV prime is 2^40 + 435. low * 435 stays below 2^53,
+    // so its carry is exact; only the low 32 bits of the high word survive.
+    const product = low * 435;
+    high = (Math.imul(high, 435) + (low << 8) + Math.floor(product / 0x100000000)) >>> 0;
+    low = product >>> 0;
   }
-  return hash.toString(16).padStart(16, "0");
+  return high.toString(16).padStart(8, "0") + low.toString(16).padStart(8, "0");
 }

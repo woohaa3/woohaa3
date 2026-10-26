@@ -327,9 +327,30 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
   }
 }
 
+/**
+ * 当前 codec 对同一份 raw 会写出的 projection（`canvas` 是离线 reader 从 raw 重建的聚合）。
+ *
+ * 为什么需要：应用每次提交都用生产 codec 重新派生 projection，而规范化会按设计剥掉当前
+ * schema 无法表达的内容（例：片场 `filmSetContent` schema < 当前版本）。这样的库里 raw 保留
+ * 用户数据、projection 是规范化视图，二者本就不相等。若启动迁移仍按"原样相等"判定，就会
+ * 一直拒绝开放画布；用派生视图作为期望值即可区分"缓存陈旧/半写"与"规范化差异"。
+ */
+const expectDerivedProjection = (canvas: ServerCanvas) => {
+  const doc = serverCanvasToYDoc(canvas);
+  try {
+    const exported = yDocToServerCanvas(doc, { now: canvas.updatedAt });
+    return exported.ok ? exported.canvas : null;
+  } finally {
+    doc.destroy();
+  }
+};
+
 /** 纯计划：读取全部画布与历史，产出自包含、可审计的迁移计划。不写库。 */
 export function planMigration(db: unknown, _options: MigrationOptions = {}) {
-  const sources = loadOfflineYjsCanvasSources(db as never, { transaction: _options.transaction ?? true }) as Array<{ canvas: ServerCanvas; report: Record<string, unknown>; raw: { meta: { createdAt: string } } }>;
+  const sources = loadOfflineYjsCanvasSources(db as never, {
+    transaction: _options.transaction ?? true,
+    expectProjection: expectDerivedProjection
+  }) as Array<{ canvas: ServerCanvas; report: Record<string, unknown>; raw: { meta: { createdAt: string } } }>;
   const documents = sources.map(convertCanvas);
 
   const tables = new Set<string>(

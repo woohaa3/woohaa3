@@ -87,13 +87,60 @@ function entities(records, name, id) {
   });
 }
 
-function assertProjection(raw, projection, id) {
+/**
+ * 纯模型旧类型（边不能命中它们）。
+ * 旧版应用曾把这些节点相关的边从 projection 里省略；见下方 v1 例外与派生路径。
+ */
+function pureModelNodeIds(raw) {
+  return new Set(raw.nodes.filter(node => node.type === "animation3d" || node.type === "extension3d").map(node => node.id));
+}
+
+/** 被 projection 省略、但仍留在 raw 里的纯模型相关边（仅供报告，不参与判定）。 */
+function omittedPureModelEdges(raw, projectedEdges) {
+  const endpoints = pureModelNodeIds(raw);
+  const projected = new Set(projectedEdges.map(edge => edge.id));
+  return raw.edges
+    .filter(edge => (endpoints.has(edge.source) || endpoints.has(edge.target)) && !projected.has(edge.id))
+    .map(edge => edge.id)
+    .sort();
+}
+
+function assertProjectionShape(projection, id) {
   if (!object(projection) || !object(projection.document)) fail("invalid-projection", id);
   const expectedKeys = ["id", "title", "revision", "document", "nodeData", "assets", "jobs", "updatedAt"];
   if (!same(Object.keys(projection).sort(), expectedKeys.sort())
       || !same(Object.keys(projection.document).sort(), ["schemaVersion", "nodes", "edges", "updatedAt"].sort())) {
     fail("unknown-projection-fields", id);
   }
+}
+
+/**
+ * 校验 stored projection 与 raw 一致。
+ *
+ * 主路径是**原样相等**：旧客户端写下的 projection 是 raw 的忠实视图。
+ * 但当前应用每次提交都用生产 codec 从 raw 重新派生 projection，而规范化会按设计剥掉
+ * 当前 schema 无法表达的内容（例：片场 `filmSetContent` schema < 当前版本）。这种库里
+ * raw 保留用户数据、projection 是规范化视图，两者**本来就不相等**；若继续按原样相等判定，
+ * 启动迁移会永久拒绝开放画布（`projection-mismatch` → "画布尚未开放"）。
+ *
+ * 因此调用方可注入 `expectProjection(canvas, id)`（`canvas` 是从 raw 重建的规范聚合）：
+ * 返回"当前 codec 从同一份 raw 会写出的 projection"。只要 stored projection 与之完全
+ * 相等，就认为缓存是新鲜的；否则仍按不一致拒绝（保持对陈旧/半写 projection 的检测能力）。
+ */
+function assertProjection(raw, projection, id, expectProjection, canvas) {
+  assertProjectionShape(projection, id);
+  try {
+    return assertProjectionEqualsRaw(raw, projection, id);
+  } catch (error) {
+    if (!expectProjection || !(error instanceof OfflineCanvasSourceError)) throw error;
+    const derived = expectProjection(canvas, id);
+    if (!object(derived) || !same(derived, projection)) throw error;
+    if (!Array.isArray(projection.document.edges)) fail("projection-mismatch", id, { path: "edges" });
+    return omittedPureModelEdges(raw, projection.document.edges);
+  }
+}
+
+function assertProjectionEqualsRaw(raw, projection, id) {
   for (const [path, left, right] of [
     ["id", projection.id, raw.meta.id],
     ["title", projection.title, raw.meta.title],
@@ -121,7 +168,7 @@ function assertProjection(raw, projection, id) {
   if (raw.meta.formatVersion !== "woohaa3-ycanvas-v1") {
     fail("projection-mismatch", id, { path: "edges" });
   }
-  const endpoints = new Set(raw.nodes.filter(node => node.type === "animation3d" || node.type === "extension3d").map(node => node.id));
+  const endpoints = pureModelNodeIds(raw);
   const omitted = raw.edges.filter(edge => endpoints.has(edge.source) || endpoints.has(edge.target));
   const kept = raw.edges.filter(edge => !endpoints.has(edge.source) && !endpoints.has(edge.target));
   if (!omitted.length || !same(byId(projected), byId(kept))) {
@@ -168,8 +215,13 @@ function observeHistoricalNodeIdentities(doc, seq, canvasId, history, active) {
   for (const nodeId of active.keys()) if (!present.has(nodeId)) active.delete(nodeId);
 }
 
-/** Restore and validate one stored document plus ALL of its ordered update rows. */
-export function readOfflineYjsCanvasSource({ document: row, updates }) {
+/**
+ * Restore and validate one stored document plus ALL of its ordered update rows.
+ *
+ * `expectProjection(raw, id)` 是可选的"当前 codec 派生视图"注入：见 `assertProjection`。
+ * 不注入时保持原样相等判定（离线工具沿用更严格的保证）。
+ */
+export function readOfflineYjsCanvasSource({ document: row, updates, expectProjection }) {
   const id = row?.canvas_id;
   if (!object(row) || !string(id) || !FORMATS.has(row.format_version)) fail("unsupported-format", id);
   if (!(row.snapshot instanceof Uint8Array) || !integer(row.snapshot_seq)
@@ -245,12 +297,13 @@ export function readOfflineYjsCanvasSource({ document: row, updates }) {
     let projection;
     try { projection = JSON.parse(row.projection_json); } catch { fail("invalid-projection", id); }
     assertJson(projection, id, "projection");
-    const omittedEdgeIds = assertProjection(raw, projection, id);
+    // 规范聚合先于断言构造：期望值回调直接用它，避免重复实现 raw → 聚合的映射。
     const canvas = {
       id, title: meta.title, revision: meta.revision,
       document: { schemaVersion: meta.documentSchemaVersion, nodes: byId(raw.nodes), edges: byId(raw.edges), updatedAt: meta.updatedAt },
       nodeData: raw.nodeData, assets: byId(raw.assets), jobs: byId(raw.jobs), updatedAt: meta.updatedAt,
     };
+    const omittedEdgeIds = assertProjection(raw, projection, id, expectProjection, canvas);
     return {
       raw, canvas, projection,
       report: {
@@ -274,7 +327,7 @@ export function readOfflineYjsCanvasSource({ document: row, updates }) {
  * opens the connection read-only; no table creation, PRAGMA mutation or writer
  * lock acquisition is performed here. Errors never produce a partial plan.
  */
-export function loadOfflineYjsCanvasSources(db, { transaction = true } = {}) {
+export function loadOfflineYjsCanvasSources(db, { transaction = true, expectProjection } = {}) {
   if (transaction) db.exec("BEGIN");
   try {
     const integrity = db.prepare("PRAGMA integrity_check").all();
@@ -287,6 +340,7 @@ export function loadOfflineYjsCanvasSources(db, { transaction = true } = {}) {
     return rows.map(document => readOfflineYjsCanvasSource({
       document,
       updates: db.prepare("SELECT * FROM canvas_yjs_updates WHERE canvas_id = ? ORDER BY seq").all(document.canvas_id),
+      ...(expectProjection ? { expectProjection } : {}),
     }));
   } finally { if (transaction) db.exec("ROLLBACK"); }
 }

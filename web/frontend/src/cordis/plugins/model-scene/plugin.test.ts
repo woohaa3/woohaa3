@@ -95,6 +95,30 @@ afterEach(async () => {
   woohaa3CanvasStore.getState().applyRemoteCanvas(null as never);
 });
 
+it("scans canonical nodes linearly when triggering preparation for a text-only canvas", async () => {
+  const scheduled: Array<() => void> = [];
+  const harness = await makeHarness(undefined, { schedule: run => scheduled.push(run) });
+  runtime = harness.runtime;
+  const canvas = createEmptyWoohaa3ServerCanvas("c1");
+  for (let i = 0; i < 256; i++) {
+    canvas.document.nodes.push({ id: `text-${i}`, type: "text", position: { x: 0, y: 0 } });
+  }
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  // Instrument the canonical array after store normalization, then exercise a real
+  // registry notification and its scheduled drain rather than a helper in isolation.
+  const nodes = woohaa3CanvasStore.getState().canvas!.document.nodes;
+  let visits = 0;
+  const find = nodes.find.bind(nodes);
+  vi.spyOn(nodes, "find").mockImplementation(predicate => find((node, index, array) => {
+    visits++;
+    return predicate(node, index, array);
+  }));
+  harness.registry.invalidate();
+  while (scheduled.length) scheduled.shift()!();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(visits).toBeLessThanOrEqual(nodes.length * 4);
+});
+
 describe("model-scene plugin version dispatch", () => {
   it("旧 group 缺少 nodeData 时仍准备默认 groupAppearance 模型", async () => {
     const harness = await makeHarness();
@@ -532,4 +556,34 @@ it("空模型不注册资源，提交脚本后恢复，清空后释放而不回�
   woohaa3CanvasStore.getState().applyRemoteCanvas(empty);
   await expect.poll(() => provider.getResources().has("empty")).toBe(false);
   expect(woohaa3CanvasStore.getState().canvas?.nodeData.empty.modelScript).toBe("");
+});
+
+it.each(["canvas", "deletion", "type", "extension", "key"] as const)("rejects stale preparation after async %s changes", async change => {
+  const harness = await makeHarness(); runtime = harness.runtime;
+  const implementations = runtime.ctx.get("nodeImplementations")!;
+  const canvas = canvasWith([{ id: "async", source: V2_SIMPLE, version: "woohaa-model-js-v2" }]);
+  canvas.document.nodes[0].type = "async-test";
+  let finish!: (result: NodePreparationResult) => void;
+  let key = "first";
+  implementations.register({ type: "async-test", capabilities: { modelPreparation: {
+    reportsStatus: false,
+    executionKey: context => `${key}:${context.data?.extensionId ?? ""}`,
+    prepare: () => new Promise(resolve => { finish = resolve; }),
+  } } });
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  await expect.poll(() => typeof finish).toBe("function");
+  const finishOld = finish;
+  const replacement = structuredClone(canvas);
+  if (change === "canvas") replacement.id = "different-canvas";
+  if (change === "deletion") replacement.document.nodes = [];
+  if (change === "type") replacement.document.nodes[0].type = "text";
+  if (change === "extension") replacement.nodeData.async.extensionId = "different-extension";
+  if (change === "key") key = "next";
+  woohaa3CanvasStore.getState().applyRemoteCanvas(replacement);
+  const release = vi.fn();
+  finishOld({ status: "ok", release, resource: prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: [] }) });
+  await expect.poll(() => release.mock.calls.length).toBe(1);
+  const provider = runtime.ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider;
+  expect(provider.getResources().has("async")).toBe(false);
+  expect(harness.reports).toEqual([]);
 });

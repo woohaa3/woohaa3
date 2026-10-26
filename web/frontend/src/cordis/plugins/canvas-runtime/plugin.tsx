@@ -86,9 +86,9 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
             const versions = ctx.get(INLINE_HISTORY_SERVICE) as InlineHistoryService | undefined;
             return new Map([...(provider?.getResources() ?? []), ...(versions?.preview?.models ?? [])]);
           },
-          isModelLoading: nodeId => {
+          getModelLoading: () => {
             const provider = ctx.get(MODEL_SCENES_SERVICE) as ModelScenesProvider | undefined;
-            return provider?.isLoading?.(nodeId) ?? false;
+            return nodeId => provider?.isLoading?.(nodeId) ?? false;
           },
           getModelFocusTargets: resolvedTargets,
           hasModelFocusTarget: (nodeId) => {

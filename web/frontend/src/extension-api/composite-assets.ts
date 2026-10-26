@@ -100,8 +100,12 @@ export class CompositeAssetRegistry {
   }
   resolve(canvas: ServerCanvas | null, nodeId: string): CompositeAssetAdapter | null {
     const node = canvas?.document.nodes.find(node => node.id === nodeId);
-    const identity = canvas?.nodeData[nodeId]?.extensionId;
-    return node?.type === "composite-asset" && typeof identity === "string" ? this.adapters.get(identity) ?? null : null;
+    return node && canvas ? this.resolveNode(canvas, node) : null;
+  }
+  /** Resolve an actual node from this canvas without searching the document again. */
+  resolveNode(canvas: ServerCanvas, node: ServerCanvas["document"]["nodes"][number]): CompositeAssetAdapter | null {
+    const identity = canvas.nodeData[node.id]?.extensionId;
+    return node.type === "composite-asset" && typeof identity === "string" ? this.adapters.get(identity) ?? null : null;
   }
   setProjection(nodeId: string, projection: CompositeAssetProjection | null, owner?: string): void {
     if (projection) { this.projections.set(nodeId, projection); if (owner) this.projectionOwners.set(nodeId, owner); }
@@ -121,7 +125,7 @@ export class CompositeAssetRegistry {
     if (!canvas) { this.scopeResults.clear(); return shapes; }
     const retained = new Set<string>();
     for (const node of canvas.document.nodes) {
-      const adapter = this.resolve(canvas, node.id);
+      const adapter = this.resolveNode(canvas, node);
       if (!adapter) continue;
       retained.add(node.id);
       const data = canvas.nodeData[node.id];
@@ -156,11 +160,12 @@ export class CompositeAssetRegistry {
    */
   emptyPlaceholders(canvas: ServerCanvas | null): ReadonlyMap<string, import("@woohaa3/contracts").CompositeAssetEmptyPlaceholder> {
     const placeholders = new Map<string, import("@woohaa3/contracts").CompositeAssetEmptyPlaceholder>();
-    for (const node of canvas?.document.nodes ?? []) {
-      const adapter = this.resolve(canvas, node.id);
+    if (!canvas) return placeholders;
+    for (const node of canvas.document.nodes) {
+      const adapter = this.resolveNode(canvas, node);
       if (adapter?.emptyPlaceholder !== "brand-plinth-v1") continue;
       try {
-        if (adapter.showEmptyPlaceholder?.(node.id, canvas!.nodeData[node.id]) === true) placeholders.set(node.id, adapter.emptyPlaceholder);
+        if (adapter.showEmptyPlaceholder?.(node.id, canvas.nodeData[node.id]) === true) placeholders.set(node.id, adapter.emptyPlaceholder);
       } catch { /* Invalid content cannot imply emptiness. */ }
     }
     return placeholders;
@@ -169,7 +174,7 @@ export class CompositeAssetRegistry {
     const qualities = new Map<string, CompositeAssetGeometryQuality>();
     if (!canvas) return qualities;
     for (const node of canvas.document.nodes) {
-      const adapter = this.resolve(canvas, node.id);
+      const adapter = this.resolveNode(canvas, node);
       if (adapter?.geometryQuality) qualities.set(node.id, adapter.geometryQuality);
     }
     return qualities;
@@ -186,7 +191,7 @@ export class CompositeAssetRegistry {
     const labels = new Map<string, string>();
     if (!canvas) return labels;
     for (const node of canvas.document.nodes) {
-      const adapter = this.resolve(canvas, node.id);
+      const adapter = this.resolveNode(canvas, node);
       if (adapter?.label?.trim()) labels.set(node.id, adapter.label.trim());
     }
     return labels;
@@ -194,7 +199,7 @@ export class CompositeAssetRegistry {
   mediaSources(canvas: ServerCanvas | null, playback: BevyAnimationPlayback | null): CompositeAssetMediaSource[] {
     if (!canvas) return [];
     return canvas.document.nodes.flatMap(node => {
-      const adapter = this.resolve(canvas, node.id);
+      const adapter = this.resolveNode(canvas, node);
       if (!adapter) return [];
       return (adapter.mediaSources?.(node.id, canvas.nodeData[node.id], playback) ?? []).filter(source => source.nodeId === node.id).map(source => ({ ...source, sourceIdentity: `${canvas.id}:${adapter.extensionId}:${this.generation(adapter.extensionId)}:${source.sourceIdentity}` }));
     });
@@ -216,7 +221,7 @@ export class CompositeAssetRegistry {
     if (!canvas) return children;
     const nodes = new Map(canvas.document.nodes.map(node => [node.id, node]));
     for (const owner of canvas.document.nodes) {
-      const adapter = this.resolve(canvas, owner.id);
+      const adapter = this.resolveNode(canvas, owner);
       if (!adapter?.children) continue;
       for (const child of adapter.children(canvas, owner.id)) {
         if (child.ownerNodeId !== owner.id || child.nodeId === owner.id || !nodes.has(child.nodeId)) continue;
@@ -242,6 +247,7 @@ export class CompositeAssetRegistry {
   }
   projectChildren(scene: CanvasRenderScene, canvas: ServerCanvas): void {
     const children = this.children(canvas), nodes = new Map(scene.nodes.map(node => [node.id, node]));
+    const sourceNodes = new Map(canvas.document.nodes.map(node => [node.id, node]));
     const targets = new Map<string, string[]>();
     for (const child of children.values()) {
       const node = nodes.get(child.nodeId), owner = nodes.get(child.ownerNodeId);
@@ -259,7 +265,8 @@ export class CompositeAssetRegistry {
         const itemId = children.get(id)?.sourceItemId;
         return itemId ? [[id, itemId]] : [];
       }));
-      owner.compositeAsset!.ownershipLinks = { anchor: this.resolve(canvas, ownerId)?.childLinkAnchor ?? [0, 0, 0], targetNodeIds,
+      const sourceOwner = sourceNodes.get(ownerId);
+      owner.compositeAsset!.ownershipLinks = { anchor: (sourceOwner && this.resolveNode(canvas, sourceOwner)?.childLinkAnchor) ?? [0, 0, 0], targetNodeIds,
         ...(Object.keys(targetItemIds).length ? { targetItemIds } : {}) };
     }
     // Managed entities share the same ownership links as containers. Their media/shot renderer stays intact.
