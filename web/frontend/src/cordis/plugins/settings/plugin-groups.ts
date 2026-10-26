@@ -4,7 +4,7 @@
  * 宿主随 `GET /api/settings` 返回两样东西：每项配置的 `ownerExtensionId`（这段配置由哪个插件声明）
  * 与整棵插件树 `plugins`（base / core / extension 三层）。设置页据此只分两份：
  * - 没有归属插件的配置项 → 「核心服务」（宿主自己的、与插件无关的配置，按服务再分页签）；
- * - 每个插件一组 → 「插件配置」的卡片，配置项与「什么时候生效」的启停同处。
+ * - 每个插件一组 → 「插件配置」的一行，配置项与「什么时候生效」的启停同处。
  *
  * 只在站点或浏览器登记的插件（站点应用插件、浏览器功能插件）不在这棵宿主插件树里，由设置页把
  * 插件管理 facade 的行当作额外种子传进来，插件清单才是完整的。
@@ -28,26 +28,26 @@ import type {
 /** 插件在设置面上的归属层：宿主三层，加两种只登记在站点 / 浏览器侧的插件。 */
 export type SettingsPluginLayerKind = SettingPluginLayer | "site" | "browser";
 
-/** 插件卡片的一行数据；`entries` 是它自己声明的配置项（没有可配置项时为空）。 */
+/** 插件行数据；`entries` 是它自己声明的配置项（没有可配置项时为空）。 */
 export type PluginSettingsGroup = {
   /** Provider 声明的模型输出类型，配置前也可展示。 */
   modelTypes?: SettingPluginView["modelTypes"];
   /** 本次启动扫描到的安装信息（目录、是否可写根）；不表达启用状态。 */
   installed?: import("@woohaa3/contracts").InstalledExtensionView;
   directory?: string;
-  /** 扩展声明的版本；卡片与详情按 `v<version>` 展示，缺省时不显示。 */
+  /** 扩展声明的版本；行与详情按 `v<version>` 展示，缺省时不显示。 */
   version?: string;
   id: string;
   label: string;
   description: string;
   layer: SettingsPluginLayerKind;
-  /** 插件声明的图标名；未声明时卡片回退通用插件图标。 */
+  /** 插件声明的图标名；未声明时行回退通用插件图标。 */
   icon?: PluginIcon;
   /** 站点插件：可由站点插件服务启停。 */
   siteManaged: boolean;
   /** Provider 类插件：配置段在 `providers.<providerId>` 下。 */
   provider: boolean;
-  /** Provider id；生成模型据此归到对应 Provider 卡片。 */
+  /** Provider id；生成模型据此归到对应 Provider 行。 */
   providerId: string | null;
   /** 插件声明的模型目录刷新入口；缺省表示该插件没有「可用模型」一节。 */
   modelRefresh?: { path: string; hint: string };
@@ -134,7 +134,7 @@ export function settingsPartition(
  * 声明了 Provider 配置段的插件 id 集合。
  *
  * 插件管理用它把 Provider 类插件从「站点插件」清单里摘出去：它们的启停跟配置一起显示在自己的
- * 卡片上，两处不再各有一个开关。
+ * 行上，两处不再各有一个开关。
  */
 export function providerExtensionIds(snapshot: SettingsSnapshot | null): ReadonlySet<string> {
   const ids = new Set<string>();
@@ -182,7 +182,7 @@ export function providerConfigGroups(snapshot: SettingsSnapshot | null): PluginS
   return [...groups.values()];
 }
 
-/** 分层在设置面上的分组标题与卡片徽标。 */
+/** 分层在设置面上的分组标题与行徽标。 */
 export const PLUGIN_LAYER_LABELS: Record<SettingsPluginLayerKind, { section: string; badge: string }> = {
   base: { section: "内置插件", badge: "基础层" },
   core: { section: "内置插件", badge: "核心层" },
@@ -191,7 +191,7 @@ export const PLUGIN_LAYER_LABELS: Record<SettingsPluginLayerKind, { section: str
   browser: { section: "此浏览器插件", badge: "此浏览器" }
 };
 
-/** 兜底分组 id：Provider 没有对应插件卡片时，模型单独列一组。 */
+/** 兜底分组 id：Provider 没有对应插件行时，模型单独列一组。 */
 export const LEFTOVER_MODEL_GROUP_ID = "generation-models";
 
 /** 「插件配置」渲染要的全部输入：分组、各自的启停行与模型。 */
@@ -210,7 +210,7 @@ export type PluginViewIndex = {
 /**
  * 把设置快照与插件管理快照合成一份插件索引。
  *
- * 卡片网格与配置弹窗都读这一份，避免两处各自拼装「哪个插件有开关、模型归谁」。
+ * 插件行与配置详情都读这一份，避免两处各自拼装「哪个插件有开关、模型归谁」。
  */
 export function indexPlugins(snapshot: SettingsSnapshot | null, view: ExtensionManagerView): PluginViewIndex {
   const siteRows = new Map(view.siteRows.map((row) => [row.extensionId, row]));
@@ -235,7 +235,7 @@ export function indexPlugins(snapshot: SettingsSnapshot | null, view: ExtensionM
     }))
   ];
   const partition = settingsPartition(snapshot, extras);
-  // 卡片以本次启动扫描到的已安装扩展为准：宿主内置插件与旧浏览器偏好不产生插件卡片。
+  // 行以本次启动扫描到的已安装扩展为准：宿主内置插件与旧浏览器偏好不产生插件行。
   // 启用状态不来自目录——站点插件看服务端 `desiredEnabled`/`actualState`，浏览器本地看本地偏好。
   const installedEntries = snapshot?.installedExtensions ?? [];
   const installedIds = new Set(installedEntries.map((entry) => entry.id));
@@ -253,7 +253,7 @@ export function indexPlugins(snapshot: SettingsSnapshot | null, view: ExtensionM
     };
   });
   // 宿主登记插件时只有名字与（可能没有的）图标；站点/浏览器行带来的说明与图标补上空缺，
-  // 卡片与弹窗才有话可说、有图形可放。
+  // 行与详情才有话可说、有图形可放。
   for (const group of groups) {
     const row = siteRows.get(group.id) ?? browserRows.get(group.id);
     if (!row) continue;
@@ -269,8 +269,8 @@ export function indexPlugins(snapshot: SettingsSnapshot | null, view: ExtensionM
     const group =
       groups.find((candidate) => candidate.providerId !== null && candidate.providerId === row.providerId) ??
       (row.extensionId !== undefined ? groups.find((candidate) => candidate.id === row.extensionId) : undefined);
-    // Provider 已停用（不在已安装集合里是卸载，这里是不再有对应卡片）时模型不另立分组：
-    // 服务端仍会用 `executable: false` 报告撤出，卡片消失即代表该 Provider 不再可用。
+    // Provider 已停用（不在已安装集合里是卸载，这里是不再有对应行）时模型不另立分组：
+    // 服务端仍会用 `executable: false` 报告撤出，行消失即代表该 Provider 不再可用。
     if (!group) continue;
     const list = models.get(group.id) ?? [];
     list.push(row);
@@ -289,7 +289,7 @@ export function isConfigurable(index: PluginViewIndex, group: PluginSettingsGrou
 }
 
 /**
- * 卡片上的启停开关归属：站点插件走服务端权威状态，browser-local 走浏览器本地偏好，
+ * 行上的启停开关归属：站点插件走服务端权威状态，browser-local 走浏览器本地偏好，
  * 两者都没有的（宿主内置 / 纯后端 hostPlugin 不在站点清单里）不显示开关。
  */
 export function pluginStateKind(index: PluginViewIndex, group: PluginSettingsGroup): "site" | "browser" | null {
@@ -298,7 +298,7 @@ export function pluginStateKind(index: PluginViewIndex, group: PluginSettingsGro
   return null;
 }
 
-/** 卡片上有启停开关：站点插件或浏览器功能插件。 */
+/** 行上有启停开关：站点插件或浏览器功能插件。 */
 export function isManageable(index: PluginViewIndex, group: PluginSettingsGroup): boolean {
   return pluginStateKind(index, group) !== null;
 }
@@ -308,7 +308,7 @@ export function isActionable(index: PluginViewIndex, group: PluginSettingsGroup)
   return isConfigurable(index, group) || isManageable(index, group);
 }
 
-/** 卡片上的配置规模文案。 */
+/** 行上的配置规模文案。 */
 export function configCountLabel(index: PluginViewIndex, group: PluginSettingsGroup, hasSettingsPanel = false): string {
   const rows = modelsOf(index, group);
   const enabled = rows.filter((row) => row.enabled && !row.tombstone).length;

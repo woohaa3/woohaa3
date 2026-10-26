@@ -119,16 +119,22 @@ export function PluginConfigContent({
 
   return (
     <div className="settings-workbench__detail" data-testid={`plugin-config-${group.id}`}>
-      <PluginDetailHeader title={group.label} onBack={onBack}>
-        <PluginIconMark icon={group.icon} testId={`plugin-config-icon-${group.id}`} />
-        <span className="plugin-card__badge">{layer.badge}</span>
-        {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
-        {group.version ? (
-          <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
-            {versionLabel(group.version)}
-          </span>
-        ) : null}
-      </PluginDetailHeader>
+      <PluginDetailHeader
+        title={group.label}
+        onBack={onBack}
+        icon={<PluginIconMark icon={group.icon} testId={`plugin-config-icon-${group.id}`} />}
+        meta={
+          <>
+            <span className="plugin-card__badge">{layer.badge}</span>
+            {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
+            {group.version ? (
+              <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
+                {versionLabel(group.version)}
+              </span>
+            ) : null}
+          </>
+        }
+      />
 
       {group.directory ? (
         <p className="plugin-directory" title={group.directory}>
@@ -245,19 +251,22 @@ export function PluginConfigContent({
 function PluginDetailHeader({
   title,
   onBack,
-  children
+  icon,
+  meta
 }: {
   title: string;
   onBack: () => void;
-  children?: ReactNode;
+  icon?: ReactNode;
+  meta?: ReactNode;
 }) {
   return (
     <header className="settings-workbench__detail-head">
       <Button size="sm" tone="ghost" icon={<BackIcon />} onClick={onBack} data-testid="plugin-config-back">
         返回插件列表
       </Button>
+      {icon}
       <h2 className="settings-workbench__detail-title">{title}</h2>
-      {children ? <div className="plugin-config__meta">{children}</div> : null}
+      {meta ? <div className="plugin-config__meta">{meta}</div> : null}
     </header>
   );
 }

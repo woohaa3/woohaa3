@@ -2,8 +2,8 @@
  * 设置弹窗的外壳：共享 Dialog primitives + 设置专属布局类
  * （change: 2026-10-17-move-settings-into-canvas-dialog，任务 2.1 / design D2）。
  *
- * 只负责一张大弹窗的结构：固定 Header（标题 + 关闭）与左栏/右栏两列布局；右栏正文是唯一
- * 滚动容器。尺寸用设置专属 class（`.settings-dialog`），不改所有 `lg` 弹窗宽度。
+ * 只负责一张大弹窗的结构：左侧轨道（品牌 + 关闭 + 分区导航 + 本机状态）与右侧正文；
+ * 右侧正文是唯一滚动容器。尺寸用设置专属 class（`.settings-dialog`），不改所有 `lg` 弹窗宽度。
  *
  * 关闭只经 `onRequestClose`（Host 的 guard 通路）：本组件不监听 Escape/遮罩，也不直接调用
  * Dialog Service，保证 dirty 确认、busy 拒绝与 forced dispose 共用一条路径。
@@ -39,14 +39,25 @@ export function SettingsDialogChrome({
       {...(instanceId ? { instanceId } : {})}
       onOverlayClick={onRequestClose}
     >
-      <Dialog.Header onClose={onRequestClose} closeLabel="关闭设置">
-        <Dialog.Title id={SETTINGS_DIALOG_TITLE_ID}>设置</Dialog.Title>
-        <Dialog.Description>配置核心服务、插件与外观。关闭不会刷新页面或重启宿主。</Dialog.Description>
-      </Dialog.Header>
       <div className="settings-workbench">
-        {nav}
-        <div className="settings-workbench__body" data-testid="settings-workspace" {...(section ? { "data-section": section } : {})}>
-          {children}
+        <aside className="settings-rail">
+          <div className="settings-rail__brand">
+            <Dialog.Header onClose={onRequestClose} closeLabel="关闭设置">
+              <Dialog.Title id={SETTINGS_DIALOG_TITLE_ID}>设置</Dialog.Title>
+              <Dialog.Description>本机工作区</Dialog.Description>
+            </Dialog.Header>
+          </div>
+          {nav}
+          <div className="settings-rail__footer" aria-hidden="true">
+            <span className="settings-rail__dot" />
+            <span>本机宿主</span>
+            <span className="settings-rail__muted">设置只影响本机</span>
+          </div>
+        </aside>
+        <div className="settings-main">
+          <div className="settings-workbench__body" data-testid="settings-workspace" {...(section ? { "data-section": section } : {})}>
+            {children}
+          </div>
         </div>
       </div>
     </Dialog.Content>

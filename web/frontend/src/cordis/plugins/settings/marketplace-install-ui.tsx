@@ -20,14 +20,19 @@ function formatSize(bytes: number): string {
 export function MarketplaceInstallPanel({
   controller,
   snapshot,
-  canManage
+  canManage,
+  defaultOpen = false,
+  view = false
 }: {
   controller: MarketplaceInstallController;
   snapshot: SettingsSnapshot | null;
   canManage: boolean;
+  /** 作为设置内的独立安装视图时默认展开，不显示额外的「从市场安装」开关。 */
+  defaultOpen?: boolean;
+  view?: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [text, setText] = useState("");
   const [confirmKey, setConfirmKey] = useState<MarketplaceSigningKey | null>(null);
   const enabled = !!snapshot?.extensionInstallations && canManage;
@@ -56,13 +61,15 @@ export function MarketplaceInstallPanel({
       : `安装 v${selected?.version ?? ""}`;
 
   return (
-    <div className="marketplace-install" data-testid="marketplace-install">
-      <div className="managed-install__row">
-        <Button size="sm" tone={open ? "primary" : "neutral"} onClick={() => setOpen(!open)} data-testid="marketplace-install-toggle">
-          从市场安装
-        </Button>
-        <span className="settings-page__hint">从服务端团队市场搜索并安装；签名公钥必须先被本机信任。</span>
-      </div>
+    <div className={view ? "marketplace-install is-view" : "marketplace-install"} data-testid="marketplace-install">
+      {!view ? (
+        <div className="managed-install__row">
+          <Button size="sm" tone={open ? "primary" : "neutral"} onClick={() => setOpen(!open)} data-testid="marketplace-install-toggle">
+            从市场安装
+          </Button>
+          <span className="settings-page__hint">从服务端团队市场搜索并安装；签名公钥必须先被本机信任。</span>
+        </div>
+      ) : null}
       {open ? (
         <div className="marketplace-install__body" data-testid="marketplace-install-body">
           {state.sources.length === 0 && !state.searching ? (

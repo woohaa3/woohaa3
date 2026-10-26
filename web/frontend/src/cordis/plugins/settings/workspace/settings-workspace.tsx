@@ -4,8 +4,8 @@
  *
  * 原来这里是独立 `/settings` 页面（`100vh` 整页滚动 + 返回画布按钮）。现在设置是画布壳内的
  * 大型模态工作区：
- * - 固定 Header「设置」与关闭按钮（关闭经 Host 的 guard，不在组件里挂全局 Escape/遮罩监听）；
- * - 左栏 180px 保留三个分区，右侧 `minmax(0,1fr)` + `min-height:0`，只有正文滚动；
+ * - 固定左轨「设置」、关闭按钮与分区导航（关闭经 Host 的 guard，不在组件里挂全局 Escape/遮罩监听）；
+ * - 左侧 200px 轨道，右侧 `minmax(0,1fr)` + `min-height:0`，只有正文滚动；
  * - 插件列表点击后在右栏替换为插件详情（同一实例内），返回列表时保留列表滚动位置。
  *
  * 不持有第二份配置：各分区读写注入的既有服务（设置 store / 插件管理 facade / ThemeService）。
@@ -14,11 +14,13 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button } from "../../../../shared/ui/Button.js";
 import { SegmentedControl } from "../../../../shared/ui/SegmentedControl.js";
+import { ActivityIcon, ChatIcon, PluginIcon, SettingsIcon, SunIcon } from "../../../../shared/ui/icons.js";
 import type { ThemeService } from "../../../contract/platform.js";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
 import { RuntimeComponentsSection } from "../runtime-components-section.js";
 import { BackendSettingsSection } from "../backend-settings-section.js";
 import { PluginSettingsSection, type ManagedExtensionsSource } from "../plugin-settings-section.js";
+import { indexPlugins } from "../plugin-groups.js";
 import type { SettingsPanelSource } from "../plugin-panels.js";
 import type { BackendSettingsStore } from "../backend-settings-store.js";
 import type { SettingsEditSession } from "../edit-session.js";
@@ -45,6 +47,14 @@ const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: "runtimes", label: SECTION_LABEL.runtimes },
   { id: "notifications", label: SECTION_LABEL.notifications }
 ];
+
+const SECTION_ICONS: Record<SettingsSectionId, ReactNode> = {
+  backend: <SettingsIcon size={16} />,
+  plugins: <PluginIcon size={16} />,
+  appearance: <SunIcon size={16} />,
+  runtimes: <ActivityIcon size={16} />,
+  notifications: <ChatIcon size={16} />
+};
 
 const THEME_LABELS: Record<string, string> = { default: "浅色", dark: "暗色" };
 
@@ -129,6 +139,10 @@ export function SettingsWorkspace({
   const [serviceId, setServiceId] = useState<string | null>(null);
   // 插件列表滚动位置：进入详情再返回时恢复（同一实例内）。
   const listScrollRef = useRef<number>(0);
+  const settingsState = useSyncExternalStore(backend.subscribe, backend.getState, backend.getState);
+  const managerView = useSyncExternalStore(extensions.subscribe, extensions.getSnapshot, extensions.getSnapshot);
+  const pluginCount =
+    settingsState.status === "ready" ? indexPlugins(settingsState.snapshot, managerView).groups.length : null;
   useEffect(() => {
     void backend.load();
   }, [backend]);
@@ -208,7 +222,11 @@ export function SettingsWorkspace({
               onClick={() => changeSection(entry.id)}
               data-testid={`settings-nav-${entry.id}`}
             >
-              {entry.label}
+              {SECTION_ICONS[entry.id]}
+              <span>{entry.label}</span>
+              {entry.id === "plugins" && pluginCount !== null ? (
+                <span className="settings-workbench__nav-count">{pluginCount}</span>
+              ) : null}
             </button>
           ))}
         </nav>
@@ -246,11 +264,7 @@ export function SettingsWorkspace({
           />
         </Panel>
       ) : view.section === "plugins" ? (
-        <Panel
-          title="插件配置"
-          hint="宿主插件树与站点、浏览器插件都在这里；点卡片进去改这个插件的配置，启停就在卡片上。"
-          wide
-        >
+        <>
           <PluginSettingsSection
             store={backend}
             manager={extensions}
@@ -259,7 +273,7 @@ export function SettingsWorkspace({
             {...(managed ? { managed } : {})}
           />
           <ScrollRestore position={listScrollRef.current} />
-        </Panel>
+        </>
       ) : view.section === "runtimes" ? (
         <Panel title="运行时组件" hint="管理按需下载的可选功能。"><RuntimeComponentsSection /></Panel>
       ) : view.section === "appearance" ? (

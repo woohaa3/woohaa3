@@ -14,6 +14,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
 import type { InstalledExtensionView, SettingsSnapshot } from "@woohaa3/contracts";
 import { Button } from "../../../shared/ui/Button.js";
+import { FileTextIcon } from "../../../shared/ui/icons.js";
 import { describeJob, type ManagedExtensionsController } from "./managed-extensions.js";
 import { ManagedVersionStatusNotice } from "./managed-version-status.js";
 
@@ -34,11 +35,14 @@ function needsRestart(entry: InstalledExtensionView): boolean {
 export function ManagedInstallBar({
   controller,
   snapshot,
-  canManage
+  canManage,
+  variant = "bar"
 }: {
   controller: ManagedExtensionsController;
   snapshot: SettingsSnapshot | null;
   canManage: boolean;
+  /** `view`：作为「从文件安装」独立视图时，主按钮改为选择文件，不重复页面标题。 */
+  variant?: "bar" | "view";
 }) {
   const state = useController(controller);
   const input = useRef<HTMLInputElement | null>(null);
@@ -48,33 +52,53 @@ export function ManagedInstallBar({
   const needsRestart =
     restartPending(snapshot) || state.jobs.some((job) => job.status === "succeeded" && job.outcome === "restart-required");
   return (
-    <div className="managed-install" data-testid="managed-install">
-      <div className="managed-install__row">
-        <Button
-          size="sm"
-          tone="primary"
-          disabled={state.submitting}
-          onClick={() => input.current?.click()}
-          data-testid="managed-install-file"
-        >
-          从文件安装
-        </Button>
-        <span className="settings-page__hint">
-          选择 .wxt 扩展包；安装前校验签名与声明{installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
-        </span>
-        <input
-          ref={input}
-          type="file"
-          accept=".wxt"
-          hidden
-          data-testid="managed-install-input"
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (file) void controller.installFile(file);
-          }}
-        />
-      </div>
+    <div className={variant === "view" ? "managed-install is-view" : "managed-install"} data-testid="managed-install">
+      {variant === "view" ? (
+        <div className="managed-install__drop">
+          <span className="managed-install__drop-icon"><FileTextIcon size={21} /></span>
+          <strong>拖入 .wxt 扩展包</strong>
+          <p>
+            或选择本机文件。安装前会校验签名、逐文件摘要与扩展声明
+            {installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
+          </p>
+          <Button
+            size="sm"
+            tone="primary"
+            disabled={state.submitting}
+            onClick={() => input.current?.click()}
+            data-testid="managed-install-file"
+          >
+            选择 .wxt 文件
+          </Button>
+        </div>
+      ) : (
+        <div className="managed-install__row">
+          <Button
+            size="sm"
+            tone="primary"
+            disabled={state.submitting}
+            onClick={() => input.current?.click()}
+            data-testid="managed-install-file"
+          >
+            从文件安装
+          </Button>
+          <span className="settings-page__hint">
+            选择 .wxt 扩展包；安装前校验签名与声明{installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
+          </span>
+        </div>
+      )}
+      <input
+        ref={input}
+        type="file"
+        accept=".wxt"
+        hidden
+        data-testid="managed-install-input"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) void controller.installFile(file);
+        }}
+      />
       {state.error ? (
         <p className="settings-page__error" role="alert" data-testid="managed-install-error">{state.error}</p>
       ) : null}

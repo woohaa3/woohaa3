@@ -1,13 +1,13 @@
 /* 设置专属样式：颜色与字体消费 `--mc-*` / `--app-*` token，不复制主题。 */
 /*
  * change: 2026-10-17-move-settings-into-canvas-dialog：设置不再是独立整页，而是画布内的大弹窗。
- * 下面这一段只描述弹窗外框（固定 Header + 左栏 + 右栏正文滚动），沿用共享 Dialog primitives；
+ * 下面这一段只描述弹窗外框（左侧轨道 + 右侧正文滚动），沿用共享 Dialog primitives；
  * 尺寸用设置专属 class，不改所有 `lg` 弹窗宽度。
- * 桌面目标宽 1160px（1100–1200 可调），最大宽为视口减 48px，高约 85vh、上限 850px。
+ * 桌面目标宽 1280px，最大宽为视口减 48px，高约 90vh、上限 900px。
  */
 .dlg.settings-dialog {
-	max-width: min(1160px, calc(100vw - 48px));
-	height: min(850px, 85vh);
+	max-width: min(1280px, calc(100vw - 48px));
+	height: min(900px, 90vh);
 	position: relative;
 }
 
@@ -17,41 +17,118 @@
 
 .settings-workbench {
 	display: grid;
-	grid-template-columns: 180px minmax(0, 1fr);
+	grid-template-columns: 200px minmax(0, 1fr);
 	gap: 0;
 	flex: 1;
 	min-height: 0;
-	border-top: 1px solid var(--mc-border);
+	background: var(--mc-panel);
 }
+
+/* 左侧轨道：品牌、分区导航与本机状态。表单正文只在右栏滚动。 */
+.settings-rail {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	background: var(--app-web-subtle);
+	border-right: 1px solid var(--mc-border);
+}
+.settings-rail__brand { flex: none; }
+.settings-rail .dlg__header {
+	align-items: center;
+	padding: 16px 12px 12px 16px;
+	gap: 6px;
+}
+.settings-rail .dlg__title { font-size: 15px; letter-spacing: -0.01em; }
+.settings-rail .dlg__description { margin-top: 2px; font-size: 11px; }
+.settings-rail .dlg__close { width: 26px; height: 26px; }
+.settings-rail .dlg__close-icon { width: 14px; height: 14px; }
+.settings-rail__footer {
+	flex: none;
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 5px;
+	margin-top: auto;
+	padding: 12px 14px;
+	border-top: 1px solid var(--mc-border);
+	color: var(--mc-text-muted);
+	font-size: 11px;
+	line-height: 1.4;
+}
+.settings-rail__dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--app-status-success);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-status-success) 16%, transparent);
+}
+.settings-rail__muted { flex-basis: 100%; padding-left: 11px; opacity: 0.8; }
 
 .settings-workbench__nav {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	padding: 16px 12px;
+	gap: 2px;
+	padding: 4px 10px 12px;
 	min-height: 0;
 	overflow: auto;
-	border-right: 1px solid var(--mc-border);
 }
 .settings-workbench__nav-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 34px;
 	text-align: left;
-	padding: 8px 12px;
+	padding: 0 9px;
 	border: 1px solid transparent;
 	border-radius: 8px;
 	background: transparent;
 	color: var(--mc-text-muted);
 	cursor: pointer;
 	font: inherit;
+	font-size: 12.5px;
+	line-height: 1.3;
 }
-.settings-workbench__nav-item:hover { color: var(--mc-text); background: var(--app-web-subtle); }
-.settings-workbench__nav-item.is-active { color: var(--mc-text); background: var(--mc-panel); border-color: var(--mc-border); }
+.settings-workbench__nav-item svg { flex: none; opacity: 0.72; }
+.settings-workbench__nav-item:hover { color: var(--mc-text); background: var(--mc-panel); }
+.settings-workbench__nav-item.is-active {
+	color: var(--mc-accent);
+	background: var(--app-interaction-accent-soft);
+	border-color: color-mix(in srgb, var(--mc-accent) 28%, var(--mc-border));
+	font-weight: 600;
+}
+.settings-workbench__nav-item.is-active svg { opacity: 1; }
+.settings-workbench__nav-count {
+	margin-left: auto;
+	min-width: 20px;
+	padding: 0 5px;
+	border: 1px solid var(--mc-border);
+	border-radius: 999px;
+	background: var(--mc-panel);
+	color: var(--mc-text-muted);
+	font-size: 10.5px;
+	line-height: 17px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.settings-workbench__nav-item.is-active .settings-workbench__nav-count {
+	color: var(--mc-accent);
+	border-color: color-mix(in srgb, var(--mc-accent) 30%, var(--mc-border));
+}
 
 /* 右栏：唯一滚动容器。`min-width: 0` 防止长键名/路径把列撑开导致横向裁切。 */
+.settings-main {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	background: var(--mc-panel);
+}
 .settings-workbench__body {
+	flex: 1;
 	min-width: 0;
 	min-height: 0;
 	overflow: auto;
-	padding: 20px 24px 24px;
+	padding: 22px 26px 26px;
 	background: var(--mc-panel);
 }
 
@@ -231,9 +308,8 @@
 .settings-services__empty .settings-page__hint { margin: 0; }
 
 /* ------------------------------------------------------------------ *
- * 插件配置：一节一个分层的卡片网格，点卡片进入配置弹窗
- * 卡片只放基本信息与启停；表单在设置弹窗右栏的插件详情里
- * （cordis/plugins/settings/workspace/plugin-config-content.tsx）。
+ * 插件配置：按分层分组的一行一个插件；行样式见文件末尾的重设计段。
+ * 下面保留的 .plugin-card__badge / __version / __fault / __icon 仍被行与详情复用。
  * ------------------------------------------------------------------ */
 .settings-plugins__summary { display: block; margin: 0 0 4px; font-size: 12px; color: var(--mc-text-muted); font-variant-numeric: tabular-nums; }
 
@@ -786,3 +862,325 @@
 .settings-runtime__local { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .settings-runtime__component .ui-button { flex: 0 0 auto; white-space: nowrap; }
 .settings-runtime__local .settings-page__input { flex: 1 1 280px; width: 0; }
+
+/* ------------------------------------------------------------------ *
+ * 插件配置重设计（change: 2026-10-26-redesign-settings-plugin-page）
+ * 列表按可扫描行组织；安装是同一弹窗内的视图，不再叠抽屉。
+ * ------------------------------------------------------------------ */
+.settings-plugin-page { display: flex; flex-direction: column; min-width: 0; }
+.settings-plugin-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 18px;
+	flex-wrap: wrap;
+	margin-bottom: 10px;
+}
+.settings-plugin-head__title { min-width: 260px; flex: 1 1 360px; }
+.settings-plugin-head__title h2 {
+	margin: 0;
+	font-size: 24px;
+	line-height: 1.2;
+	font-weight: 650;
+	letter-spacing: -0.025em;
+}
+.settings-plugin-head__title p {
+	margin: 6px 0 0;
+	font-size: 12.5px;
+	line-height: 1.55;
+	color: var(--mc-text-muted);
+	max-width: 64ch;
+}
+.settings-plugin-head__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.settings-plugin-head__actions .ui-button { height: 36px; }
+.settings-plugin-search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 252px;
+	height: 36px;
+	padding: 0 10px;
+	border: 1px solid var(--mc-border);
+	border-radius: 9px;
+	background: var(--app-web-subtle);
+	color: var(--mc-text-muted);
+	transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.settings-plugin-search:focus-within {
+	border-color: color-mix(in srgb, var(--mc-accent) 62%, var(--mc-border));
+	background: var(--mc-panel);
+	box-shadow: 0 0 0 3px var(--app-interaction-accent-soft);
+}
+.settings-plugin-search svg { flex: none; }
+.settings-plugin-search input {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: var(--mc-text);
+	font: inherit;
+	font-size: 12.5px;
+}
+.settings-plugin-search input::placeholder { color: var(--mc-text-muted); opacity: 0.9; }
+.settings-plugin-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.settings-plugin-statusbar {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	flex-wrap: wrap;
+	padding: 9px 0;
+	border-bottom: 1px solid var(--mc-border);
+	color: var(--mc-text-muted);
+	font-size: 12px;
+}
+.settings-plugin-live { display: inline-flex; align-items: center; gap: 6px; color: var(--mc-text); font-weight: 550; }
+.settings-plugin-live__dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--app-status-success);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-status-success) 16%, transparent);
+}
+.settings-plugin-statusbar__rule { width: 1px; height: 12px; background: var(--mc-border); }
+.settings-plugin-statusbar .settings-plugins__summary { margin: 0; font-size: 12px; }
+.settings-plugin-statusbar__count { color: var(--mc-text-muted); font-variant-numeric: tabular-nums; }
+.settings-plugin-statusbar__count strong { color: var(--mc-text); font-weight: 600; }
+.settings-plugin-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 0;
+	border-bottom: 1px solid var(--mc-border);
+}
+.settings-plugin-filters { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.settings-plugin-filter {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 28px;
+	padding: 0 9px;
+	border: 1px solid transparent;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--mc-text-muted);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+.settings-plugin-filter:hover { color: var(--mc-text); background: var(--app-web-subtle); }
+.settings-plugin-filter.is-active {
+	color: var(--mc-text);
+	background: var(--app-web-subtle);
+	border-color: var(--mc-border);
+	font-weight: 600;
+}
+.settings-plugin-filter span { color: var(--mc-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.settings-plugin-result { color: var(--mc-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.settings-plugins__section { margin-top: 18px; }
+.settings-plugins__head { display: flex; align-items: center; gap: 8px; }
+.settings-plugins__heading { margin: 0; font-size: 12px; font-weight: 650; color: var(--mc-text-muted); letter-spacing: 0.01em; }
+.settings-plugins__count {
+	min-width: 18px;
+	height: 18px;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: var(--app-web-subtle);
+	color: var(--mc-text-muted);
+	font-size: 10.5px;
+	line-height: 18px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.settings-plugins__rule { flex: 1; height: 1px; background: var(--mc-border); margin-left: 4px; }
+.settings-plugins__section-hint { margin: 5px 0 0; font-size: 11.5px; }
+.settings-plugins__list { display: flex; flex-direction: column; margin-top: 4px; }
+
+.plugin-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 8px;
+	border: 1px solid transparent;
+	border-radius: 9px;
+	transition: background 140ms ease, border-color 140ms ease;
+}
+.plugin-row + .plugin-row { border-top: 1px solid var(--mc-border); border-top-left-radius: 0; border-top-right-radius: 0; }
+.plugin-row:hover { background: var(--app-web-subtle); }
+.plugin-row.is-openable:hover { border-color: var(--mc-border); }
+.plugin-row__open {
+	display: flex;
+	align-items: center;
+	gap: 11px;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.plugin-row__open:disabled { cursor: default; }
+.plugin-row__open:focus-visible { outline: 2px solid var(--app-interaction-focus); outline-offset: 3px; border-radius: 6px; }
+.plugin-row .plugin-card__icon { width: 34px; height: 34px; border-radius: 9px; }
+.plugin-row .plugin-card__icon-image { width: 30px; height: 30px; }
+.plugin-row__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.plugin-row__title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.plugin-row__name { font-size: 13px; font-weight: 600; color: var(--mc-text); letter-spacing: -0.005em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.plugin-row__description { font-size: 12px; color: var(--mc-text-muted); line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-row__meta { font-size: 11px; color: var(--mc-text-muted); font-variant-numeric: tabular-nums; }
+.plugin-row__side { display: flex; align-items: center; gap: 9px; min-width: 112px; justify-content: flex-end; }
+.plugin-row__status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--mc-text-muted); white-space: nowrap; }
+.plugin-row__status i { width: 5px; height: 5px; border-radius: 999px; background: currentColor; }
+.plugin-row__status[data-tone="success"] { color: var(--app-status-success); }
+.plugin-row__status[data-tone="warning"] { color: var(--app-status-warning); }
+.plugin-row__version { font-size: 11px; color: var(--mc-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plugin-row__switch .plugin-state { margin-left: 0; gap: 6px; }
+.plugin-row__switch .plugin-state__label,
+.plugin-row__switch .plugin-state .settings-page__hint { display: none; }
+.plugin-row__chevron { display: grid; place-items: center; color: var(--mc-text-muted); opacity: 0.5; }
+.plugin-row:hover .plugin-row__chevron { opacity: 1; }
+.plugin-row__directory { display: none; }
+.plugin-row__diagnostics { grid-column: 1 / -1; margin: 0; padding: 0 0 2px 45px; font-size: 11px; color: var(--mc-text-muted); }
+.plugin-row > .plugin-card__fault { grid-column: 1 / -1; padding: 0 0 2px 45px; }
+.plugin-row > .managed-extension { grid-column: 1 / -1; padding: 7px 0 2px 45px; border-top: 1px dashed var(--mc-border); margin-top: 4px; }
+.plugin-row > .managed-extension .managed-extension__actions { margin-top: 2px; }
+
+/* 添加扩展：同一弹窗内的视图，不盖第二层遮罩。 */
+.settings-plugin-install { display: flex; flex-direction: column; min-width: 0; }
+.settings-plugin-install__head { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 13px; border-bottom: 1px solid var(--mc-border); }
+.settings-plugin-install__title { min-width: 0; flex: 1; }
+.settings-plugin-install__title h2 { margin: 0; font-size: 21px; line-height: 1.25; font-weight: 650; letter-spacing: -0.02em; }
+.settings-plugin-install__title p { margin: 5px 0 0; font-size: 12px; line-height: 1.55; color: var(--mc-text-muted); }
+.settings-plugin-install__body { min-width: 0; padding-top: 14px; }
+.settings-plugin-install-shell[hidden] { display: none; }
+.marketplace-install.is-view { margin: 0; padding: 0; border: 0; gap: 12px; }
+.marketplace-install.is-view .marketplace-install__body { gap: 12px; }
+.marketplace-install.is-view .settings-page__list { margin: 0; border-top: 1px solid var(--mc-border); }
+.marketplace-install.is-view .settings-page__item { padding: 12px 0; }
+.marketplace-install.is-view .settings-page__item + .settings-page__item { border-top: 1px solid var(--mc-border); }
+.marketplace-install.is-view .settings-page__item-head { align-items: center; }
+.marketplace-install.is-view .settings-page__item-label { font-size: 13px; }
+.marketplace-install.is-view .settings-page__item-description { margin: 3px 0 0; font-size: 12px; }
+.marketplace-install.is-view .marketplace-install__detail { padding-top: 12px; border-top: 1px solid var(--mc-border); }
+.marketplace-install.is-view .ui-text-input { height: 36px; }
+.marketplace-install.is-view .ui-button { height: 32px; }
+.managed-install.is-view {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	align-items: stretch;
+	text-align: left;
+}
+.managed-install__drop {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 32px 20px;
+	border: 1px dashed var(--mc-border);
+	border-radius: 12px;
+	background: var(--app-web-subtle);
+	text-align: center;
+}
+.managed-install__drop-icon {
+	width: 44px;
+	height: 44px;
+	border-radius: 12px;
+	display: grid;
+	place-items: center;
+	background: var(--mc-panel);
+	border: 1px solid var(--mc-border);
+	color: var(--mc-accent);
+}
+.managed-install__drop strong { font-size: 13px; font-weight: 600; }
+.managed-install__drop p { max-width: 42ch; margin: 0; font-size: 12px; line-height: 1.55; color: var(--mc-text-muted); }
+.managed-install__drop .ui-button { height: 36px; margin-top: 2px; }
+.managed-install.is-view .managed-install__jobs { width: 100%; text-align: left; margin-top: 10px; }
+
+/* 详情头部：返回、图标、标题、版本/徽标。 */
+.settings-workbench__detail { gap: 10px; max-width: 920px; }
+.settings-workbench__detail-head {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--mc-border);
+}
+.settings-workbench__detail-head > .ui-button { flex: none; }
+.settings-workbench__detail-title { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 650; letter-spacing: -0.02em; }
+.settings-workbench__detail-head .plugin-card__icon { width: 38px; height: 38px; }
+.settings-workbench__detail-head .plugin-config__meta { flex: 1 1 auto; padding-left: 0; justify-content: flex-end; }
+.plugin-config__status { justify-content: flex-start; margin-top: 2px; }
+.settings-workbench__detail > .plugin-directory { padding: 0; }
+.settings-workbench__detail > .settings-page__hint { margin-bottom: 4px; }
+
+@media (max-width: 1060px) {
+	.settings-workbench { grid-template-columns: 184px minmax(0, 1fr); }
+	.settings-workbench__body { padding: 18px 20px 22px; }
+	.settings-plugin-head__actions { flex: 1 1 100%; }
+	.settings-plugin-search { flex: 1; width: auto; min-width: 200px; }
+}
+@media (max-width: 900px) {
+	.settings-dialog { max-width: min(980px, calc(100vw - 20px)); height: calc(100dvh - 20px); }
+	.settings-workbench { grid-template-columns: 168px minmax(0, 1fr); }
+	.settings-rail .dlg__header { padding: 14px 10px 10px 12px; }
+	.settings-workbench__body { padding: 16px 16px 20px; }
+	.settings-plugin-head__title h2 { font-size: 21px; }
+	.settings-plugin-head__actions .ui-button .ui-button__label { display: none; }
+	.settings-plugin-head__actions .ui-button { width: 36px; padding: 0; }
+	.settings-plugin-statusbar { gap: 7px; }
+	.plugin-row__description { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+	.plugin-row__side { min-width: 104px; }
+}
+
+.marketplace-install.is-view form.managed-install__row {
+	flex-wrap: nowrap;
+	align-items: center;
+}
+.marketplace-install.is-view form.managed-install__row .ui-text-input {
+	flex: 1;
+	min-width: 0;
+	height: 36px;
+}
+.marketplace-install.is-view .settings-page__list {
+	margin-top: 4px;
+	padding: 0 12px;
+	border: 1px solid var(--mc-border);
+	border-radius: 10px;
+	background: var(--app-web-surface);
+}
+.marketplace-install.is-view .settings-page__item:first-child { border-top: 0; }
+.marketplace-install.is-view .marketplace-install__detail {
+	margin-top: 4px;
+	padding: 14px;
+	border: 1px solid var(--mc-border);
+	border-radius: 10px;
+	background: var(--app-web-surface);
+}
+.marketplace-install.is-view .marketplace-install__detail > .settings-page__item-head {
+	padding-bottom: 10px;
+	border-bottom: 1px solid var(--mc-border);
+}
+.marketplace-install.is-view .marketplace-install__meta {
+	margin: 2px 0 0;
+	line-height: 1.75;
+}
+.marketplace-install.is-view [data-testid="marketplace-install-submit"] {
+	width: 100%;
+	height: 36px;
+	margin-top: 6px;
+}
+.marketplace-install.is-view [data-testid="marketplace-install-submit"]:disabled {
+	background: var(--app-web-subtle);
+	border-color: var(--mc-border);
+	color: var(--mc-text-muted);
+}
