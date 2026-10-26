@@ -232,6 +232,12 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
     if (!prompt || snapshot.detail.turns.some(turn => !isTurnSettled(turn.status))) return;
     setReplyError(null);
     const session = replySession.current;
+    // 详情回复仍属于原目标会话。把上一轮目标的稳定标识带回去，
+    // 本机 Agent 才能命中同一原生线程（尤其是 model3d / film-set 的 mode、clip）。
+    const continuationTarget = [...snapshot.detail.turns].reverse().find((turn) =>
+      (!props.nodeId || turn.target.nodeId === props.nodeId) &&
+      (turn.target.mode || turn.target.cameraId || turn.target.clipId || turn.target.itemId),
+    )?.target;
     void controller.submit({
       canvasId: snapshot.detail.conversation.canvasId, conversationId: props.conversationId,
       connectionId: snapshot.detail.conversation.connectionId, adapterId: snapshot.detail.conversation.adapterId,
@@ -242,6 +248,10 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ...(replyEffort ? { reasoningEffort: replyEffort } : {}),
         action: "discuss", canvasId: snapshot.detail.conversation.canvasId,
         ...(props.nodeId ? { nodeId: props.nodeId } : {}), prompt,
+        ...(continuationTarget?.mode ? { mode: continuationTarget.mode } : {}),
+        ...(continuationTarget?.cameraId ? { cameraId: continuationTarget.cameraId } : {}),
+        ...(continuationTarget?.clipId ? { clipId: continuationTarget.clipId } : {}),
+        ...(continuationTarget?.itemId ? { itemId: continuationTarget.itemId } : {}),
       },
     }, port).then(result => {
       if (result?.kind === "accepted" && replySession.current === session) void service.openDetail(result.value.conversationId);
