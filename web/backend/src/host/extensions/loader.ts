@@ -10,32 +10,62 @@
  *
  * 有站点元数据的扩展由插件管理里的开关启停（见 `core/site-gate.ts`）：控制面激活时才启动，启动失败
  * 抛给控制面，显示为「激活失败」。其余扩展直接启动；失败只记日志，配置改对后再次尝试。
+ *
+ * 时限（change: 2026-10-21-harden-extension-fault-isolation，D4/D5）：启动、配置更新后的重启与释放
+ * 各有有界时限（宿主设置 `extensions.activationTimeoutMs` / `extensions.disposeTimeoutMs`）。
+ * 超时按失败处理且不自动重试；迟到的 fiber 用单调 attempt 计数识别并立即释放。非 gated 的可选
+ * 插件并发启动、不 await，宿主就绪不再等它们；`optional: false` 的插件仍按顺序等待。
  */
 import type { Fiber } from "@deepseek-ai/cordis";
 import type { AnyHostExtensionPlugin } from "@woohaa3/contracts";
 import type { HostContext, HostServices } from "../context.js";
 import type { SiteGate } from "../core/site-gate.js";
+import type { HostPluginOrigin } from "../core/marketplace.js";
+import {
+  DEFAULT_ACTIVATION_TIMEOUT_MS,
+  DEFAULT_DISPOSE_TIMEOUT_MS,
+  boundedTimeout,
+  isDeadlineError,
+  withDeadline
+} from "./deadline.js";
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function settle(fiber: PromiseLike<unknown>): Promise<unknown> {
-  try {
-    await fiber;
-    return undefined;
-  } catch (error) {
-    return error ?? new Error("扩展启动失败");
-  }
+function codeOf(error: unknown): string | undefined {
+  return isDeadlineError(error) ? error.code : undefined;
 }
 
-export type LoadedExtension = { name: string; dispose: () => Promise<void> };
+export type LoadedExtension = {
+  name: string;
+  dispose: () => Promise<void>;
+  /** 非 gated 插件的首次启动（可选插件不被装载器 await）；gated 插件为已完成的 promise。 */
+  started: Promise<void>;
+};
 
 type LoaderServices = Pick<HostServices, "log" | "config"> & { siteGate?: SiteGate };
 
-async function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHostExtensionPlugin): Promise<LoadedExtension | null> {
+/** 每个插件的装载声明：缺省可选（并发启动、不阻塞就绪）；`optional: false` 表示就绪必须等它。 */
+export type ExtensionLayerEntry = AnyHostExtensionPlugin | { plugin: AnyHostExtensionPlugin; optional: boolean };
+
+function entryOf(entry: ExtensionLayerEntry): { plugin: AnyHostExtensionPlugin; optional: boolean } {
+  return "plugin" in entry && typeof (entry as { apply?: unknown }).apply !== "function"
+    ? (entry as { plugin: AnyHostExtensionPlugin; optional: boolean })
+    : { plugin: entry as AnyHostExtensionPlugin, optional: true };
+}
+
+function timeouts(config: LoaderServices["config"]) {
+  return {
+    activation: () => boundedTimeout(config.get("extensions.activationTimeoutMs" as never), DEFAULT_ACTIVATION_TIMEOUT_MS),
+    dispose: () => boundedTimeout(config.get("extensions.disposeTimeoutMs" as never), DEFAULT_DISPOSE_TIMEOUT_MS)
+  };
+}
+
+function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHostExtensionPlugin): LoadedExtension | null {
   const { config, siteGate } = services;
   const log = services.log.scope("extensions");
+  const limits = timeouts(config);
   const gated = siteGate?.managed(plugin.name) ?? false;
   const { configPrefix: prefix } = plugin;
   const fields = plugin.Config.fields;
@@ -69,12 +99,17 @@ async function loadExtension(ctx: HostContext, services: LoaderServices, plugin:
   }
 
   const report = (event: string, error: unknown) => {
-    if (error !== undefined) log({ event, extension: plugin.name, message: message(error) });
+    if (error !== undefined) {
+      const code = codeOf(error);
+      log({ event, extension: plugin.name, message: message(error), ...(code ? { code } : {}) });
+    }
   };
   const values = () => config.section(prefix);
 
   let fiber: (Fiber & PromiseLike<Fiber>) | null = null;
   let holders = 0;
+  /** 单调递增：每次 start/stop 推进一次，超时后迟到的 fiber 凭它识别出「已过期」。 */
+  let attempt = 0;
   // 启停与配置更新串行执行，避免交错。
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(task: () => Promise<T>): Promise<T> => {
@@ -83,23 +118,61 @@ async function loadExtension(ctx: HostContext, services: LoaderServices, plugin:
     return next;
   };
 
-  /** 启动；失败时卸掉半成品并返回错误。 */
+  /** 释放一个 fiber，受 dispose 时限约束；超时只记诊断并放弃等待（资源由下次重启回收）。 */
+  const disposeBounded = async (target: Fiber): Promise<void> => {
+    try {
+      await withDeadline(target.dispose(), limits.dispose(), "dispose-timeout");
+    } catch (error) {
+      if (isDeadlineError(error)) {
+        log({ event: "extension-dispose-timeout", extension: plugin.name, timeoutMs: error.timeoutMs });
+        return;
+      }
+      log({ event: "extension-dispose-failed", extension: plugin.name, message: message(error) });
+    }
+  };
+
+  /** 启动；失败或超时时卸掉半成品并返回错误。超时后迟到成功的 fiber 被立即释放。 */
   const start = async (): Promise<unknown> => {
-    const started = ctx.plugin(plugin as never, values() as never) as Fiber & PromiseLike<Fiber>;
-    const error = await settle(started);
-    if (error !== undefined) {
-      await started.dispose();
-      return error;
+    const mine = ++attempt;
+    // 每个扩展层插件拿到带宿主 origin 盖章的 `ctx.marketplace`（change: 2026-10-21-add-extension-marketplace-point，D3）：
+    // 受管根 / 可写根 / 缺少 origin 的插件注册市场来源会被拒绝。没有市场服务（测试最小装配）时原样装载。
+    const marketplace = ctx.get("marketplace");
+    const host = marketplace
+      ? ctx.extend({ marketplace: marketplace.scoped((plugin as { origin?: HostPluginOrigin }).origin) } as never)
+      : ctx;
+    const started = host.plugin(plugin as never, values() as never) as Fiber & PromiseLike<Fiber>;
+    try {
+      await withDeadline(started, limits.activation(), "activation-timeout");
+    } catch (error) {
+      if (isDeadlineError(error)) {
+        // 迟到结果：无论之后成功还是失败，都不装进当前状态。释放在后台进行（自身受 dispose 时限约束），
+        // 不把「激活超时」的报告再拖一个 dispose 时限。
+        void Promise.resolve(started).then(
+          () => log({ event: "extension-late-start-released", extension: plugin.name }),
+          () => undefined
+        );
+        void disposeBounded(started);
+        return error;
+      }
+      await disposeBounded(started);
+      return error ?? new Error("扩展启动失败");
+    }
+    if (mine !== attempt) {
+      // 等待期间被 stop 推进了 attempt（理论上 serial 已排除；纵深防御）。
+      await disposeBounded(started);
+      return undefined;
     }
     fiber = started;
     return undefined;
   };
   const stop = async () => {
+    attempt += 1;
     const current = fiber;
     fiber = null;
-    await current?.dispose();
+    if (current) await disposeBounded(current);
   };
 
+  let started: Promise<void> = Promise.resolve();
   if (gated) {
     siteGate!.attach(plugin.name, {
       acquire: () =>
@@ -110,7 +183,10 @@ async function loadExtension(ctx: HostContext, services: LoaderServices, plugin:
           if (error !== undefined) {
             holders -= 1;
             report("extension-start-failed", error);
-            throw error instanceof Error ? error : new Error(message(error));
+            const code = codeOf(error);
+            const failure = error instanceof Error ? error : new Error(message(error));
+            if (code) Object.assign(failure, { code });
+            throw failure;
           }
         }),
       release: () =>
@@ -125,7 +201,7 @@ async function loadExtension(ctx: HostContext, services: LoaderServices, plugin:
         : {})
     });
   } else {
-    report("extension-start-failed", await serial(start));
+    started = serial(start).then((error) => report("extension-start-failed", error));
   }
 
   const keys = Object.keys(fields).map((key) => `${prefix}.${key}`);
@@ -141,12 +217,22 @@ async function loadExtension(ctx: HostContext, services: LoaderServices, plugin:
         report("extension-config-invalid", error);
         return;
       }
-      report("extension-restart-failed", await settle(fiber.await()));
+      const current = fiber;
+      try {
+        await withDeadline(current.await(), limits.activation(), "activation-timeout");
+      } catch (error) {
+        report("extension-restart-failed", error);
+        if (isDeadlineError(error) && fiber === current) {
+          // 重启挂起：释放这个 fiber，不留下半启动实例；不自动重试。
+          await stop();
+        }
+      }
     })
   );
 
   return {
     name: plugin.name,
+    started,
     dispose: () =>
       serial(async () => {
         stopConfig();
@@ -158,8 +244,31 @@ async function loadExtension(ctx: HostContext, services: LoaderServices, plugin:
   };
 }
 
-/** 按顺序装载；返回的 disposer 按相反顺序卸载。 */
-export async function loadExtensionLayer(ctx: HostContext, plugins: readonly AnyHostExtensionPlugin[]): Promise<LoadedExtension[]> {
+export type ExtensionLayer = LoadedExtension[] & {
+  /** 必需（`optional: false`）插件已启动完成、可选插件已发起；可选插件的完成在 `settled` 里。 */
+  settled: Promise<void>;
+  /**
+   * 运行期追加一个扩展层插件（change: 2026-10-21-isolate-extension-host-process，任务 8.4）：
+   * 与启动期同一条 `loadExtension` 路径——配置段登记、站点门禁（`siteGate.managed(name)` 时 attach，
+   * 由控制面 acquire）、P0 激活 / 释放时限、serial 队列都不变。同名已装载时抛 `extension-exists`。
+   * 返回装载记录；非 gated 插件的首次启动结果在 `started`。配置段非法时返回 null（与启动期一致）。
+   */
+  add(plugin: AnyHostExtensionPlugin): LoadedExtension | null;
+  /** 卸载一个已装载（启动期或运行期追加）的插件：停 fiber、撤配置段与插件清单登记。未装载时为 no-op。 */
+  remove(name: string): Promise<void>;
+  /** 是否已装载。 */
+  has(name: string): boolean;
+  /** 卸载全部（组合根关闭时调用；包含运行期追加的插件）。 */
+  disposeAll(): Promise<void>;
+};
+
+/**
+ * 装载扩展层；返回的 disposer 按相反顺序卸载。
+ *
+ * 必需插件（`optional: false`）按顺序 await；可选插件并发发起、不 await（D5）。可选插件的启动结果
+ * 写日志与站点状态，宿主就绪不等它们。站点开关管着的插件仍由控制面 acquire，与此无关。
+ */
+export async function loadExtensionLayer(ctx: HostContext, entries: readonly ExtensionLayerEntry[]): Promise<ExtensionLayer> {
   const siteGate = ctx.get("application")?.siteGate;
   const services: LoaderServices = {
     log: ctx.get("log")!,
@@ -167,11 +276,46 @@ export async function loadExtensionLayer(ctx: HostContext, plugins: readonly Any
     ...(siteGate ? { siteGate } : {})
   };
   const loaded: LoadedExtension[] = [];
-  for (const plugin of plugins) {
-    const extension = await loadExtension(ctx, services, plugin);
-    if (extension) loaded.push(extension);
+  const pending: Promise<void>[] = [];
+  for (const entry of entries) {
+    const { plugin, optional } = entryOf(entry);
+    const extension = loadExtension(ctx, services, plugin);
+    if (!extension) continue;
+    loaded.push(extension);
+    if (optional) pending.push(extension.started);
+    else await extension.started;
   }
   const unknown = services.config.unknownKeys();
   if (unknown.length > 0) services.log.scope("settings")({ event: "settings-unknown-keys", keys: unknown });
-  return loaded;
+  const byName = () => new Map(loaded.map((extension) => [extension.name, extension]));
+  // 运行期追加时 siteGate 可能已由控制面新登记（`siteGate.add`）：每次现取，不缓存启动期的引用。
+  const runtimeServices = (): LoaderServices => {
+    const gate = ctx.get("application")?.siteGate;
+    return { log: services.log, config: services.config, ...(gate ? { siteGate: gate } : {}) };
+  };
+  const layer: ExtensionLayer = Object.assign(loaded, {
+    settled: Promise.all(pending).then(() => undefined),
+    add(plugin: AnyHostExtensionPlugin) {
+      if (byName().has(plugin.name)) {
+        throw Object.assign(new Error(`扩展层已装载同名插件：${plugin.name}`), { code: "extension-exists" });
+      }
+      const extension = loadExtension(ctx, runtimeServices(), plugin);
+      if (extension) loaded.push(extension);
+      services.log.scope("extensions")({ event: "extension-layer-added", extension: plugin.name, loaded: extension !== null });
+      return extension;
+    },
+    async remove(name: string) {
+      const index = loaded.findIndex((extension) => extension.name === name);
+      if (index < 0) return;
+      const [extension] = loaded.splice(index, 1);
+      await extension!.dispose();
+      services.log.scope("extensions")({ event: "extension-layer-removed", extension: name });
+    },
+    has: (name: string) => byName().has(name),
+    async disposeAll() {
+      // 按装载的反序卸载（与组合根 disposers 的语义一致）。
+      for (const extension of loaded.splice(0).reverse()) await extension.dispose();
+    }
+  });
+  return layer;
 }

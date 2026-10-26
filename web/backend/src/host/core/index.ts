@@ -7,6 +7,8 @@ import { adminApiPlugin } from "./admin-api.js";
 import { applicationPlugin, type ApplicationPluginConfig } from "./application.js";
 import { canvasPlugin } from "./canvas.js";
 import { generationPlugin } from "./generation.js";
+import { marketplacePlugin } from "./marketplace.js";
+import { extensionManagerPlugin } from "./extension-manager/index.js";
 import { mcpPlugin } from "./mcp.js";
 import { mcpInstallationPlugin } from "./mcp-installation.js";
 import { mediaPlugin } from "./media.js";
@@ -28,12 +30,13 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
   const { env } = options;
   // 插件对象按装载顺序留一份，供设置面登记插件清单。
   // 遥测排在任务之前：任务终态经 `ctx.get("telemetry")` 写入（懒取，不影响单独装载 taskPlugin 的场景）。
-  const plugins = [storagePlugin, telemetryPlugin, mediaPlugin, generationPlugin, adminApiPlugin, taskPlugin, recordingExecutorPlugin, canvasPlugin, mcpPlugin, mcpInstallationPlugin, applicationPlugin];
+  const plugins = [storagePlugin, telemetryPlugin, mediaPlugin, generationPlugin, marketplacePlugin, adminApiPlugin, taskPlugin, recordingExecutorPlugin, canvasPlugin, mcpPlugin, mcpInstallationPlugin, applicationPlugin, extensionManagerPlugin];
   const fibers = [
     await ctx.plugin(storagePlugin),
     await ctx.plugin(telemetryPlugin, { env }),
     await ctx.plugin(mediaPlugin, { env, ...(options.mediaStorage ? { storage: options.mediaStorage } : {}) }),
     await ctx.plugin(generationPlugin, { env }),
+    await ctx.plugin(marketplacePlugin),
     await ctx.plugin(adminApiPlugin),
     // 录制通道在 canvas 之前：canvas 的录制编排按 `ctx.get("recordingExecutor")` 懒取。
     await ctx.plugin(recordingExecutorPlugin, {
@@ -55,8 +58,11 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
       ...(options.applicationBackendExtensions ? { applicationBackendExtensions: options.applicationBackendExtensions } : {}),
       ...(options.chatgptServiceOptions ? { chatgptServiceOptions: options.chatgptServiceOptions } : {}),
       ...(options.extensionHost ? { extensionHost: options.extensionHost } : {}),
-      ...(options.treeExtensions ? { treeExtensions: options.treeExtensions } : {})
-    })
+      ...(options.treeExtensions ? { treeExtensions: options.treeExtensions } : {}),
+      ...(options.safeMode ? { safeMode: options.safeMode } : {})
+    }),
+    // 排在 application 之后：卸载 / 观察期读站点控制面（按调用现取）。没有受管根时插件不提供服务。
+    await ctx.plugin(extensionManagerPlugin, { env, ...(options.extensionHost ? { extensionHost: options.extensionHost } : {}) })
   ];
   registerHostPlugins(ctx, "core", plugins);
   return fibers;

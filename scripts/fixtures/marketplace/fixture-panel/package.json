@@ -1,0 +1,11 @@
+{
+  "name": "@woohaa3/extension-fixture-panel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "扩展市场测试 fixture：纯前端站点扩展。",
+  "scripts": {
+    "build:browser": "node ../../../../web/scripts/build-extension-browser.mjs",
+    "pack:extension": "node ../../../pack-extension.mjs ."
+  }
+}

@@ -51,7 +51,9 @@ function makePlane(overrides: {
   metadata?: ApplicationExtensionMetadata[];
   requiredProviders?: RequiredProviderProfiles;
   logger?: (event: Record<string, unknown>) => void;
-} = {}): { plane: SiteExtensionControlPlane; store: ReturnType<typeof createSqliteSiteExtensionConfigStore>; work: ReturnType<typeof createSqliteExtensionWorkRepository> } {
+  activationTimeoutMs?: number;
+  suspended?: ReadonlySet<string>;
+} = {}): { plane: SiteExtensionControlPlane; store: ReturnType<typeof createSqliteSiteExtensionConfigStore>; work: ReturnType<typeof createSqliteExtensionWorkRepository>; host: ReturnType<typeof createApplicationExtensionHost> } {
   const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
   const work = createSqliteExtensionWorkRepository({ path: tempDb() });
   const host = createApplicationExtensionHost();
@@ -74,9 +76,11 @@ function makePlane(overrides: {
     ...(overrides.validateConfig ? { validateConfig: overrides.validateConfig } : {}),
     ...(overrides.requiredProviders ? { requiredProviders: overrides.requiredProviders } : {}),
     ...(overrides.logger ? { logger: overrides.logger } : {}),
+    ...(overrides.activationTimeoutMs ? { activationTimeoutMs: () => overrides.activationTimeoutMs! } : {}),
+    ...(overrides.suspended ? { suspended: overrides.suspended } : {}),
     now: () => new Date("2026-10-04T00:00:00.000Z")
   });
-  return { plane, store, work };
+  return { plane, store, work, host };
 }
 
 describe("站点配置提交（任务 3.1）", () => {
@@ -371,5 +375,300 @@ describe("站点插件健康（degraded）", () => {
     expect(events).toContainEqual(
       expect.objectContaining({ event: "site-extension-health-failed", extensionId: metadata.extensionId, message: "health boom" })
     );
+  });
+});
+
+describe("激活时限、安全模式暂停与就绪门（change: 2026-10-21-harden-extension-fault-isolation）", () => {
+  it("激活挂起：超时记 failed / activation-timeout；迟到成功被立即释放", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const events: Array<Record<string, unknown>> = [];
+    const { plane, store, host } = makePlane({
+      activationTimeoutMs: 50,
+      logger: (event) => events.push(event),
+      definitions: [{ extensionId: "sample-site-extension", activate: async () => { await gate; } }]
+    });
+    const result = await plane.write({ extensionId: "sample-site-extension", expectedRevision: 0, enabled: true, values: {}, secretRefs: [], actor: "admin" });
+    expect(result.ok).toBe(true);
+    const status = plane.status("sample-site-extension")!;
+    expect(status.actualState).toBe("failed");
+    expect(status.diagnostics[0]?.code).toBe("activation-timeout");
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(host.activeVersions("sample-site-extension")).toEqual([]);
+    expect(events.some((event) => event.event === "site-extension-late-activation-released")).toBe(true);
+    expect(plane.status("sample-site-extension")!.actualState).toBe("failed");
+    store.close();
+  });
+
+  it("安全模式暂停：不激活、不改写 desiredEnabled，实际状态为 suspended", async () => {
+    let activations = 0;
+    const { plane, store } = makePlane({
+      suspended: new Set(["sample-site-extension"]),
+      definitions: [{ extensionId: "sample-site-extension", activate: () => { activations += 1; } }]
+    });
+    store.commit({ expectedRevision: 0, extensionId: "sample-site-extension", enabled: true, values: {}, secretRefs: [], actor: "admin", now: "2026-10-04T00:00:00.000Z" });
+    await plane.reconcile();
+    const status = plane.status("sample-site-extension")!;
+    expect(status.actualState).toBe("suspended");
+    expect(status.desiredEnabled).toBe(true);
+    expect(activations).toBe(0);
+    // 已停用的扩展在安全模式下仍显示停用，而不是 suspended。
+    const off = await plane.write({ extensionId: "sample-site-extension", expectedRevision: store.revision(), enabled: false, values: {}, secretRefs: [], actor: "admin" });
+    expect(off.ok && off.status.actualState).toBe("disabled");
+    store.close();
+  });
+
+  it("就绪门：必需提供者协调完后即放行，不等可选扩展激活完成", async () => {
+    let releaseOptional!: () => void;
+    const optionalGate = new Promise<void>((resolve) => {
+      releaseOptional = resolve;
+    });
+    const optional: ApplicationExtensionMetadata = { ...METADATA, extensionId: "optional-ext", defaultEnabled: true };
+    const required: ApplicationExtensionMetadata = { ...METADATA, extensionId: "required-ext", defaultEnabled: true };
+    const { plane, store } = makePlane({
+      metadata: [optional, required],
+      requiredProviders: [{ extensionId: "required-ext", slot: "identity" } as never],
+      definitions: [
+        { extensionId: "optional-ext", activate: async () => { await optionalGate; } },
+        { extensionId: "required-ext", activate: () => undefined }
+      ]
+    });
+    const settled = plane.reconcile();
+    await plane.requiredReconciled();
+    expect(plane.status("required-ext")!.actualState).toBe("active");
+    expect(plane.status("optional-ext")!.actualState).toBe("configuring");
+    releaseOptional();
+    await settled;
+    expect(plane.status("optional-ext")!.actualState).toBe("active");
+    store.close();
+  });
+});
+
+describe("崩溃熔断 quarantined（change: 2026-10-21-isolate-extension-host-process，D7）", () => {
+  const countingDefinitions = (counter: { activations: number; disposals: number }) => [
+    {
+      extensionId: "sample-site-extension",
+      activate: () => {
+        counter.activations += 1;
+        return { dispose: () => void (counter.disposals += 1) };
+      }
+    } satisfies ApplicationBackendExtensionDefinition
+  ];
+
+  it("隔离 → 解除 → 恢复 active；desiredEnabled 不变；revision 推进且有审计；重复调用幂等", async () => {
+    const counter = { activations: 0, disposals: 0 };
+    const { plane, store, host } = makePlane({ definitions: countingDefinitions(counter) });
+    const enabled = await plane.write({ extensionId: "sample-site-extension", expectedRevision: 0, enabled: true, values: {}, secretRefs: [], actor: "admin" });
+    expect(enabled.ok && enabled.status.actualState).toBe("active");
+    const before = store.revision();
+
+    const isolated = await plane.quarantine("sample-site-extension", { code: "crash-loop", message: "5 分钟内崩溃 3 次" });
+    expect(isolated).toMatchObject({ ok: true, changed: true });
+    expect(isolated.ok && isolated.revision).toBeGreaterThan(before);
+    const status = plane.status("sample-site-extension")!;
+    expect(status).toMatchObject({ actualState: "quarantined", desiredEnabled: true });
+    expect(status.diagnostics).toEqual([{ code: "crash-loop", message: "5 分钟内崩溃 3 次" }]);
+    expect(host.activeVersions("sample-site-extension")).toEqual([]);
+    expect(plane.changes(before).changes.map((change) => change.status.actualState)).toEqual(["quarantined"]);
+
+    const again = await plane.quarantine("sample-site-extension");
+    expect(again).toMatchObject({ ok: true, changed: false });
+
+    const released = await plane.unquarantine("sample-site-extension", "admin:alice");
+    expect(released).toMatchObject({ ok: true, changed: true });
+    expect(plane.status("sample-site-extension")).toMatchObject({ actualState: "active", desiredEnabled: true });
+    expect(counter.activations).toBe(2);
+    const events = store.audit("sample-site-extension").map((entry) => [entry.actor, entry.summary.event]).filter(([, event]) => event);
+    expect(events).toEqual([["admin:alice", "unquarantined"], ["system:extension-host", "quarantined"]]);
+    expect(await plane.unquarantine("sample-site-extension")).toMatchObject({ ok: true, changed: false });
+    expect(await plane.quarantine("nope")).toMatchObject({ ok: false, code: "extension-not-found" });
+    store.close();
+  });
+
+  it("隔离期间的配置提交落库但不激活；解除后按新版本激活", async () => {
+    const counter = { activations: 0, disposals: 0 };
+    const { plane, store } = makePlane({ definitions: countingDefinitions(counter) });
+    await plane.write({ extensionId: "sample-site-extension", expectedRevision: 0, enabled: true, values: { v: 1 }, secretRefs: [], actor: "admin" });
+    await plane.quarantine("sample-site-extension");
+    const activationsBefore = counter.activations;
+    const updated = await plane.write({ extensionId: "sample-site-extension", expectedRevision: store.revision(), enabled: true, values: { v: 2 }, secretRefs: [], actor: "admin" });
+    expect(updated.ok && updated.status).toMatchObject({ actualState: "quarantined", configVersion: 2 });
+    await plane.reconcile();
+    expect(counter.activations).toBe(activationsBefore);
+    expect(plane.status("sample-site-extension")!.actualState).toBe("quarantined");
+
+    await plane.unquarantine("sample-site-extension");
+    expect(plane.status("sample-site-extension")).toMatchObject({ actualState: "active", configVersion: 2 });
+    expect(counter.activations).toBe(activationsBefore + 1);
+    store.close();
+  });
+
+  it("管理员停用优先显示 disabled；重新启用后仍隔离；解除后按停用保持关闭", async () => {
+    const counter = { activations: 0, disposals: 0 };
+    const { plane, store } = makePlane({ definitions: countingDefinitions(counter) });
+    await plane.write({ extensionId: "sample-site-extension", expectedRevision: 0, enabled: true, values: {}, secretRefs: [], actor: "admin" });
+    await plane.quarantine("sample-site-extension");
+    const off = await plane.write({ extensionId: "sample-site-extension", expectedRevision: store.revision(), enabled: false, values: {}, secretRefs: [], actor: "admin" });
+    expect(off.ok && off.status.actualState).toBe("disabled");
+    const on = await plane.write({ extensionId: "sample-site-extension", expectedRevision: store.revision(), enabled: true, values: {}, secretRefs: [], actor: "admin" });
+    expect(on.ok && on.status.actualState).toBe("quarantined");
+    await plane.write({ extensionId: "sample-site-extension", expectedRevision: store.revision(), enabled: false, values: {}, secretRefs: [], actor: "admin" });
+    const activations = counter.activations;
+    await plane.unquarantine("sample-site-extension");
+    expect(plane.status("sample-site-extension")).toMatchObject({ actualState: "disabled", desiredEnabled: false });
+    expect(counter.activations).toBe(activations);
+    store.close();
+  });
+
+  it("安全模式下 suspended 优先于 quarantined；退出安全模式（重启）后仍隔离，审计是事实源", async () => {
+    const dbPath = tempDb();
+    const workPath = tempDb();
+    const definitions = countingDefinitions({ activations: 0, disposals: 0 });
+    const first = createSiteExtensionControlPlane({
+      host: createApplicationExtensionHost(),
+      store: createSqliteSiteExtensionConfigStore({ path: dbPath }),
+      workStore: createSqliteExtensionWorkRepository({ path: workPath }),
+      metadata: metadataSource(),
+      definitions
+    });
+    await first.write({ extensionId: "sample-site-extension", expectedRevision: 0, enabled: true, values: {}, secretRefs: [], actor: "admin" });
+    await first.quarantine("sample-site-extension");
+
+    // 重启进入安全模式：扩展被暂停，投影 suspended（安全模式下根本不装配，不会再崩溃）。
+    const safeStore = createSqliteSiteExtensionConfigStore({ path: dbPath });
+    const safe = createSiteExtensionControlPlane({
+      host: createApplicationExtensionHost(),
+      store: safeStore,
+      workStore: createSqliteExtensionWorkRepository({ path: workPath }),
+      metadata: metadataSource(),
+      definitions,
+      suspended: new Set(["sample-site-extension"])
+    });
+    await safe.reconcile();
+    expect(safe.status("sample-site-extension")!.actualState).toBe("suspended");
+
+    // 再次正常重启：隔离从审计恢复，不自动激活。
+    const normalStore = createSqliteSiteExtensionConfigStore({ path: dbPath });
+    const counter = { activations: 0, disposals: 0 };
+    const normal = createSiteExtensionControlPlane({
+      host: createApplicationExtensionHost(),
+      store: normalStore,
+      workStore: createSqliteExtensionWorkRepository({ path: workPath }),
+      metadata: metadataSource(),
+      definitions: countingDefinitions(counter)
+    });
+    await normal.reconcile();
+    expect(normal.status("sample-site-extension")!.actualState).toBe("quarantined");
+    expect(counter.activations).toBe(0);
+    await normal.unquarantine("sample-site-extension");
+    expect(normal.status("sample-site-extension")!.actualState).toBe("active");
+    safeStore.close();
+    normalStore.close();
+  });
+});
+
+describe("运行期登记 addExtension / removeExtension（首次安装的受管后端扩展）", () => {
+  const LATE: ApplicationExtensionMetadata = { ...METADATA, extensionId: "late-ext", name: "运行期扩展", defaultEnabled: true };
+  const lateDefinition = (counter: { activations: number }, activate?: () => Promise<void>) =>
+    ({
+      extensionId: "late-ext",
+      activate: async () => {
+        counter.activations += 1;
+        await activate?.();
+      }
+    }) satisfies ApplicationBackendExtensionDefinition;
+
+  it("add：首次 defaultEnabled → 版本化提交并激活；snapshot 出现；重复 add / 启动期 id → extension-exists", async () => {
+    const counter = { activations: 0 };
+    const { plane, store } = makePlane();
+    const before = store.revision();
+    const added = await plane.addExtension({ metadata: LATE, definition: lateDefinition(counter) });
+    expect(added).toMatchObject({ ok: true, status: { extensionId: "late-ext", actualState: "active", desiredEnabled: true } });
+    expect(added.ok && added.revision).toBeGreaterThan(before);
+    expect(counter.activations).toBe(1);
+    expect(plane.snapshot().catalog.map((entry) => entry.extensionId)).toEqual(["sample-site-extension", "late-ext"]);
+    expect(plane.changes(before).changes.some((change) => change.extensionId === "late-ext")).toBe(true);
+    expect(await plane.addExtension({ metadata: LATE, definition: lateDefinition(counter) })).toMatchObject({ ok: false, code: "extension-exists" });
+    expect(await plane.addExtension({ metadata: METADATA, definition: { extensionId: METADATA.extensionId, activate: () => undefined } })).toMatchObject({
+      ok: false,
+      code: "extension-exists"
+    });
+    expect(await plane.addExtension({ metadata: LATE, definition: { extensionId: "other", activate: () => undefined } })).toMatchObject({
+      ok: false,
+      code: "extension-invalid"
+    });
+    store.close();
+  });
+
+  it("激活失败：登记保留、状态 failed，可按配置变化重试；remove 只允许运行期扩展", async () => {
+    const counter = { activations: 0 };
+    let fail = true;
+    const { plane, store } = makePlane();
+    const added = await plane.addExtension({
+      metadata: LATE,
+      definition: lateDefinition(counter, async () => {
+        if (fail) throw new Error("boom");
+      })
+    });
+    expect(added.ok && added.status?.actualState).toBe("failed");
+    fail = false;
+    const retried = await plane.write({ extensionId: "late-ext", expectedRevision: store.revision(), enabled: true, values: { v: 2 }, secretRefs: [], actor: "admin" });
+    expect(retried.ok && retried.status.actualState).toBe("active");
+    expect(await plane.removeExtension(METADATA.extensionId)).toMatchObject({ ok: false, code: "extension-not-removable" });
+    expect(await plane.removeExtension("nope")).toMatchObject({ ok: false, code: "extension-not-found" });
+    store.close();
+  });
+
+  it("remove：有在途工作 → extension-busy；收尾后移除，实例释放、snapshot 不再有它；配置保留，重装后沿用停用", async () => {
+    const counter = { activations: 0 };
+    const { plane, store, host } = makePlane();
+    await plane.addExtension({ metadata: LATE, definition: lateDefinition(counter) });
+    const work = plane.workFacade("late-ext").admit();
+    expect(work.ok).toBe(true);
+    const busy = await plane.removeExtension("late-ext");
+    expect(busy).toMatchObject({ ok: false, code: "extension-busy", activeWorkCount: 1 });
+    // 先停用（draining），收尾后再移除。
+    await plane.write({ extensionId: "late-ext", expectedRevision: store.revision(), enabled: false, values: {}, secretRefs: [], actor: "admin" });
+    expect(plane.status("late-ext")!.actualState).toBe("draining");
+    plane.workFacade("late-ext").resume((work as { workId: string }).workId)!.settle("succeeded");
+    const before = store.revision();
+    const removed = await plane.removeExtension("late-ext");
+    expect(removed).toMatchObject({ ok: true });
+    expect(removed.ok && removed.revision).toBeGreaterThan(before);
+    expect(host.activeVersions("late-ext")).toEqual([]);
+    expect(plane.status("late-ext")).toBeUndefined();
+    expect(plane.snapshot().catalog.map((entry) => entry.extensionId)).toEqual(["sample-site-extension"]);
+    expect(await plane.removeExtension("late-ext")).toMatchObject({ ok: false, code: "extension-not-found" });
+
+    // 重装：沿用已保存的停用配置，不因 defaultEnabled 再次启用。
+    const reinstalled = await plane.addExtension({ metadata: LATE, definition: lateDefinition(counter) });
+    expect(reinstalled.ok && reinstalled.status).toMatchObject({ actualState: "disabled", desiredEnabled: false });
+    store.close();
+  });
+
+  it("安全模式 / 隔离下的运行期 add 不激活；隔离记录从审计恢复", async () => {
+    const counter = { activations: 0 };
+    const { plane, store } = makePlane({ suspended: new Set(["late-ext"]) });
+    const added = await plane.addExtension({ metadata: LATE, definition: lateDefinition(counter) });
+    expect(added.ok && added.status?.actualState).toBe("suspended");
+    expect(counter.activations).toBe(0);
+    store.close();
+
+    const second = makePlane();
+    await second.plane.addExtension({ metadata: LATE, definition: lateDefinition(counter) });
+    await second.plane.quarantine("late-ext");
+    await second.plane.write({ extensionId: "late-ext", expectedRevision: second.store.revision(), enabled: false, values: {}, secretRefs: [], actor: "admin" });
+    await second.plane.removeExtension("late-ext");
+    const activations = counter.activations;
+    // 重装后沿用停用配置；重新启用时隔离记录（审计恢复）仍生效，不激活。
+    const readded = await second.plane.addExtension({ metadata: LATE, definition: lateDefinition(counter) });
+    expect(readded.ok && readded.status?.actualState).toBe("disabled");
+    const enabled = await second.plane.write({ extensionId: "late-ext", expectedRevision: second.store.revision(), enabled: true, values: {}, secretRefs: [], actor: "admin" });
+    expect(enabled.ok && enabled.status.actualState).toBe("quarantined");
+    expect(counter.activations).toBe(activations);
+    second.store.close();
   });
 });

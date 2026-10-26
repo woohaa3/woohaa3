@@ -178,3 +178,57 @@ describe("createExtensionReleaseCatalogLoader", () => {
     await expect(loader.load()).resolves.not.toBeNull();
   });
 });
+
+describe("repin（change: 2026-10-21-harden-extension-fault-isolation）", () => {
+  const NEXT_ID = "9".repeat(64);
+  const bodyFor = (releaseId: string) => ({ ...(catalogBody() as Record<string, unknown>), releaseId });
+
+  it("新目录加载成功后替换固定 release，后续 load 返回新目录且不再读 HTML link", async () => {
+    const requested: string[] = [];
+    const loader = createExtensionReleaseCatalogLoader({
+      document: fakeDocument(`/extension-releases/${RELEASE_ID}.json`),
+      fetch: (async (url: string) => {
+        requested.push(url);
+        return new Response(JSON.stringify(bodyFor(url.includes(NEXT_ID) ? NEXT_ID : RELEASE_ID)));
+      }) as unknown as typeof fetch
+    });
+    await loader.load();
+    expect(loader.currentReleaseId()).toBe(RELEASE_ID);
+    const next = await loader.repin(`/extension-releases/${NEXT_ID}.json`);
+    expect(next.releaseId).toBe(NEXT_ID);
+    expect(loader.currentReleaseId()).toBe(NEXT_ID);
+    expect((await loader.load())?.releaseId).toBe(NEXT_ID);
+    expect(requested).toHaveLength(2);
+  });
+
+  it("非法地址或加载失败：抛出且原 release 保持不变", async () => {
+    let fail = false;
+    const loader = createExtensionReleaseCatalogLoader({
+      document: fakeDocument(`/extension-releases/${RELEASE_ID}.json`),
+      fetch: (async () => (fail ? new Response("nope", { status: 503 }) : new Response(JSON.stringify(catalogBody())))) as unknown as typeof fetch
+    });
+    await loader.load();
+    await expect(loader.repin("https://evil.example/x.json")).rejects.toMatchObject({ code: "invalid-catalog" });
+    fail = true;
+    await expect(loader.repin(`/extension-releases/${NEXT_ID}.json`)).rejects.toMatchObject({ code: "network" });
+    expect(loader.currentReleaseId()).toBe(RELEASE_ID);
+    expect((await loader.load())?.releaseId).toBe(RELEASE_ID);
+  });
+});
+
+describe("peek（change: 2026-10-21-add-extension-marketplace-point，6.3）", () => {
+  const NEXT_ID = "8".repeat(64);
+  it("读取并校验新目录但不改变固定的 release；非法地址拒绝", async () => {
+    const loader = createExtensionReleaseCatalogLoader({
+      document: fakeDocument(`/extension-releases/${RELEASE_ID}.json`),
+      fetch: (async (url: string) =>
+        new Response(JSON.stringify({ ...(catalogBody() as Record<string, unknown>), releaseId: url.includes(NEXT_ID) ? NEXT_ID : RELEASE_ID }))) as unknown as typeof fetch
+    });
+    await loader.load();
+    const next = await loader.peek(`/extension-releases/${NEXT_ID}.json`);
+    expect(next.releaseId).toBe(NEXT_ID);
+    expect(loader.currentReleaseId()).toBe(RELEASE_ID);
+    expect((await loader.load())?.releaseId).toBe(RELEASE_ID);
+    await expect(loader.peek("https://evil.example/x.json")).rejects.toMatchObject({ code: "invalid-catalog" });
+  });
+});

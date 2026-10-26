@@ -364,7 +364,7 @@ describe("服务端托管生成：目录归一", () => {
     // fake 用字符串回 catalogRevision；客户端能读到同一个值（进入 admission 的也是数字）。
     expect(fake.generation.catalog.catalogRevision).toBe(42);
     const registration = harness.providers[0];
-    const prepared = registration?.prepareInput?.({
+    const prepared = await registration?.prepareInput?.({
       providerModelId: "server-text-1",
       modelType: "language",
       prompt: "p",
@@ -382,7 +382,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     const { harness } = activateWithCatalog({ models: [imageModel()] });
     await loginAndRefresh(harness);
     const registration = harness.providers[0];
-    const prepared = registration?.prepareInput?.({
+    const prepared = await registration?.prepareInput?.({
       providerModelId: "server-image-1",
       modelType: "image",
       prompt: "画一只猫",
@@ -500,7 +500,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     });
     await loginAndRefresh(harness);
     const registration = harness.providers[0];
-    const prepared = registration?.prepareInput?.({
+    const prepared = await registration?.prepareInput?.({
       providerModelId: "server-text-1",
       modelType: "language",
       prompt: "写一句话",
@@ -557,7 +557,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     });
     await loginAndRefresh(harness);
     const registration = harness.providers[0];
-    const prepared = registration?.prepareInput?.({
+    const prepared = await registration?.prepareInput?.({
       providerModelId: "server-image-1",
       modelType: "image",
       prompt: "p",
@@ -595,7 +595,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     });
     await loginAndRefresh(harness);
     const registration = harness.providers[0];
-    const prepared = registration?.prepareInput?.({
+    const prepared = await registration?.prepareInput?.({
       providerModelId: "server-text-1",
       modelType: "language",
       prompt: "p",
@@ -619,7 +619,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     const { harness } = activateWithCatalog({ models: [textModel()], rejectSubmitWith: "key-reused" });
     await loginAndRefresh(harness);
     const registration = harness.providers[0];
-    const prepared = registration?.prepareInput?.({
+    const prepared = await registration?.prepareInput?.({
       providerModelId: "server-text-1",
       modelType: "language",
       prompt: "p",
@@ -640,7 +640,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     await loginAndRefresh(harness);
     expect(harness.providers[0]?.models[0]?.cancel).toBe("remote");
     const registration = harness.providers[0];
-    const prepared = registration?.prepareInput?.({
+    const prepared = await registration?.prepareInput?.({
       providerModelId: "server-text-1",
       modelType: "language",
       prompt: "p",
@@ -661,7 +661,7 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     const { harness } = activateWithCatalog({ models: [textModel()] });
     await loginAndRefresh(harness);
     const registration = harness.providers[0];
-    const prepared = registration?.prepareInput?.({
+    const prepared = await registration?.prepareInput?.({
       providerModelId: "server-text-1",
       modelType: "language",
       prompt: "p",

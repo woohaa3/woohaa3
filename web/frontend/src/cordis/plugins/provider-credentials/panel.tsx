@@ -11,6 +11,7 @@ import { useSyncExternalStore, type ComponentType } from "react";
 import { Dialog } from "../../services/dialogs/Dialog.js";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import { ProviderSettingsCards } from "../settings/provider-settings-cards.js";
+import { ContributionBoundary } from "../../contribution-boundary.js";
 import type { BackendSettingsStore } from "../settings/backend-settings-store.js";
 
 export const PROVIDER_CREDENTIALS_DIALOG_TITLE = "Provider 凭据";
@@ -65,7 +66,9 @@ export function ProviderCredentialsSections({
               const Render = contribution.render;
               return (
                 <div key={contribution.id} data-contribution-id={contribution.id}>
-                  <Render {...(requestClose ? { requestClose } : {})} />
+                  <ContributionBoundary entry={contribution} slot="provider-credentials.top" fallback="card">
+                    <Render {...(requestClose ? { requestClose } : {})} />
+                  </ContributionBoundary>
                 </div>
               );
             })}

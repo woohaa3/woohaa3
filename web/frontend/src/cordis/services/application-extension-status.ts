@@ -12,6 +12,7 @@
  */
 import type {
   ApplicationExtensionChange,
+  ApplicationExtensionReleasePointer,
   ApplicationExtensionStatus
 } from "@woohaa3/contracts";
 import type {
@@ -29,6 +30,11 @@ export type ApplicationExtensionStatusSnapshot = {
   error: string | null;
   /** 尚未取得任何权威状态。 */
   loading: boolean;
+  /**
+   * 宿主当前发布目录指针（change: 2026-10-21-add-extension-marketplace-point，6.2）。
+   * 受管扩展热登记后变化；旧宿主不返回时为 null。与插件 revision 独立。
+   */
+  extensionRelease?: ApplicationExtensionReleasePointer | null;
 };
 
 export type ApplicationExtensionCatalogSummary = {
@@ -62,7 +68,7 @@ export type ApplicationExtensionStatusService = {
   dispose: () => void;
 };
 
-const EMPTY: ApplicationExtensionStatusSnapshot = { revision: -1, catalog: [], plugins: [], error: null, loading: true };
+const EMPTY: ApplicationExtensionStatusSnapshot = { revision: -1, catalog: [], plugins: [], error: null, loading: true, extensionRelease: null };
 
 export function createApplicationExtensionStatusService(
   options: ApplicationExtensionStatusServiceOptions
@@ -84,10 +90,13 @@ export function createApplicationExtensionStatusService(
     revision: number,
     plugins: ApplicationExtensionStatus[],
     catalog: ApplicationExtensionCatalogSummary[],
-    error: string | null
+    error: string | null,
+    extensionRelease: ApplicationExtensionReleasePointer | null | undefined
   ) => {
     if (revision < snapshot.revision) return;
-    publish({ revision, catalog, plugins, error, loading: false });
+    // 指针缺省（旧宿主或该响应未携带）时沿用已知值，不回退为 null。
+    const release = extensionRelease ?? snapshot.extensionRelease ?? null;
+    publish({ revision, catalog, plugins, error, loading: false, extensionRelease: release });
   };
 
   const mergeChange = (existing: ApplicationExtensionStatus[], change: ApplicationExtensionChange): ApplicationExtensionStatus[] => {
@@ -106,7 +115,7 @@ export function createApplicationExtensionStatusService(
       publish({ ...snapshot, error: result.error, loading: false });
       return;
     }
-    applyMonotonic(result.snapshot.revision, result.snapshot.plugins, result.snapshot.catalog, null);
+    applyMonotonic(result.snapshot.revision, result.snapshot.plugins, result.snapshot.catalog, null, result.snapshot.extensionRelease);
   };
 
   const refreshChanges: ApplicationExtensionStatusService["refreshChanges"] = async () => {
@@ -133,7 +142,7 @@ export function createApplicationExtensionStatusService(
       if (batch.revision < snapshot.revision) return;
       let plugins = snapshot.plugins;
       for (const change of batch.changes) plugins = mergeChange(plugins, change);
-      applyMonotonic(batch.revision, plugins, snapshot.catalog, null);
+      applyMonotonic(batch.revision, plugins, snapshot.catalog, null, batch.extensionRelease);
     } finally {
       inFlight = false;
     }

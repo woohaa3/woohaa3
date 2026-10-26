@@ -10,6 +10,7 @@ import { configPlugin } from "./config.js";
 import { diagnosticsPlugin } from "./diagnostics.js";
 import { gatewayPlugin } from "./gateway.js";
 import { logPlugin } from "./log.js";
+import { restartPlugin } from "./restart.js";
 
 export type BaseLayerOptions = {
   env: Record<string, string | undefined>;
@@ -27,7 +28,7 @@ export type BaseLayerOptions = {
 export async function loadBaseLayer(ctx: HostContext, options: BaseLayerOptions) {
   // 插件对象按装载顺序留一份，供设置面登记插件清单。
   // diagnostics 必须先于 log：log 出口把每条事件喂给它做白名单投影。
-  const plugins = [diagnosticsPlugin, logPlugin, gatewayPlugin, accessPlugin, configPlugin];
+  const plugins = [diagnosticsPlugin, logPlugin, gatewayPlugin, accessPlugin, configPlugin, restartPlugin];
   const fibers = [
     await ctx.plugin(diagnosticsPlugin),
     await ctx.plugin(logPlugin, { sink: options.sink }),
@@ -38,7 +39,8 @@ export async function loadBaseLayer(ctx: HostContext, options: BaseLayerOptions)
       ...(options.seedProviders ? { seedProviders: options.seedProviders } : {}),
       ...(options.bootstrapExtensions ? { bootstrapExtensions: options.bootstrapExtensions } : {})
     }),
-    await ctx.plugin(configPlugin, { env: options.env, directoryControl: options.directoryControl, ...(options.settings ? { settings: options.settings } : {}) })
+    await ctx.plugin(configPlugin, { env: options.env, directoryControl: options.directoryControl, ...(options.settings ? { settings: options.settings } : {}) }),
+    await ctx.plugin(restartPlugin, { env: options.env })
   ];
   registerHostPlugins(ctx, "base", plugins);
   return fibers;

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "fixture-panel",
+  "version": "1.0.0",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1
+  },
+  "permissions": {
+    "canvas": "read"
+  },
+  "site": {
+    "name": "市场测试面板",
+    "description": "扩展市场测试 fixture：纯前端站点扩展。",
+    "version": "1.0.0",
+    "configSchema": {
+      "schemaId": "fixture-panel-config",
+      "schemaVersion": 1
+    },
+    "capabilities": [
+      {
+        "id": "fixture-panel.status",
+        "kind": "capability",
+        "description": "在画布工具栏显示一个状态小字"
+      }
+    ],
+    "defaultEnabled": true,
+    "order": 900
+  }
+}

@@ -54,7 +54,8 @@ export const EVENT_NAME_LABELS: Readonly<Record<TelemetryEventName, string>> = {
   "perf.startup": "启动阶段",
   "perf.interaction": "输入耗时",
   "perf.segment": "输入子阶段",
-  "perf.frame": "帧窗口"
+  "perf.frame": "帧窗口",
+  "extension.render-failed": "扩展渲染失败"
 };
 
 export const RESULT_LABELS: Readonly<Record<TelemetryResult, string>> = {

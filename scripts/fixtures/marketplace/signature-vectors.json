@@ -1,0 +1,224 @@
+{
+  "schema": 1,
+  "generatedBy": "scripts/lib/extension-signature-vectors.mjs",
+  "note": "Generated from the JS implementation. Do not edit by hand; Go tests only read this file.",
+  "alg": "ed25519",
+  "keyIdRule": "first 16 lowercase hex characters of sha256(SPKI DER)",
+  "keys": {
+    "primary": {
+      "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "publicKeySpkiBase64": "MCowBQYDK2VwAyEAA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+      "keyId": "a050837d85070582"
+    },
+    "other": {
+      "seedHex": "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100",
+      "publicKeySpkiBase64": "MCowBQYDK2VwAyEAcSZR9FC6BbY4mLme9fe6RWMujiUn9/cVzWcexAJMxR4=",
+      "keyId": "acb5cb1d78563a35"
+    }
+  },
+  "canonical": [
+    {
+      "name": "空对象与空数组",
+      "input": "{\"b\":[],\"a\":{}}",
+      "canonical": "{\"a\":{},\"b\":[]}"
+    },
+    {
+      "name": "键按 UTF-16 码元排序：U+FF5E 排在代理对（U+1F600）之后",
+      "input": "{\"～\":1,\"😀\":2,\"z\":3,\"Z\":4,\"é\":5}",
+      "canonical": "{\"Z\":4,\"z\":3,\"é\":5,\"😀\":2,\"～\":1}"
+    },
+    {
+      "name": "HTML 字符不转义",
+      "input": "{\"s\":\"<a href=\\\"x\\\">&amp;</a>\"}",
+      "canonical": "{\"s\":\"<a href=\\\"x\\\">&amp;</a>\"}"
+    },
+    {
+      "name": "U+2028 / U+2029 不转义",
+      "input": "{\"s\":\"line sep end\"}",
+      "canonical": "{\"s\":\"line sep end\"}"
+    },
+    {
+      "name": "控制字符与转义",
+      "input": "{\"s\":\"\\u0000\\u0001\\b\\t\\n\\u000b\\f\\r\\u001f\\\"\\\\/\"}",
+      "canonical": "{\"s\":\"\\u0000\\u0001\\b\\t\\n\\u000b\\f\\r\\u001f\\\"\\\\/\"}"
+    },
+    {
+      "name": "非 ASCII 原样输出",
+      "input": "{\"s\":\"中文 · 絵文字 😀 ñ\"}",
+      "canonical": "{\"s\":\"中文 · 絵文字 😀 ñ\"}"
+    },
+    {
+      "name": "整数：0、负数、2^32、最大安全整数",
+      "input": "{\"n\":[0,-1,4294967296,9007199254740991,-9007199254740991]}",
+      "canonical": "{\"n\":[0,-1,4294967296,9007199254740991,-9007199254740991]}"
+    },
+    {
+      "name": "布尔与 null",
+      "input": "{\"t\":true,\"f\":false,\"n\":null}",
+      "canonical": "{\"f\":false,\"n\":null,\"t\":true}"
+    },
+    {
+      "name": "嵌套对象键序",
+      "input": "{\"outer\":{\"b\":{\"d\":1,\"c\":2},\"a\":[{\"y\":1,\"x\":2}]}}",
+      "canonical": "{\"outer\":{\"a\":[{\"x\":2,\"y\":1}],\"b\":{\"c\":2,\"d\":1}}}"
+    }
+  ],
+  "signatures": [
+    {
+      "name": "基本清单",
+      "key": "primary",
+      "files": [
+        {
+          "path": "extension.json",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 120
+        },
+        {
+          "path": "package.json",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 64
+        }
+      ],
+      "canonical": "[{\"path\":\"extension.json\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size\":120},{\"path\":\"package.json\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size\":64}]",
+      "keyId": "a050837d85070582",
+      "sig": "Z+nY+dvPQ7v6oofof6vg3i/juJVPQL1P/NC/TD1YfImv6h69VE8nn2kChyV7cD74mm+aYV1w2G6A2F/MKXLpAQ==",
+      "valid": true
+    },
+    {
+      "name": "非 ASCII 路径（按 UTF-16 码元排序）",
+      "key": "primary",
+      "files": [
+        {
+          "path": "assets/中文.md",
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "size": 3
+        },
+        {
+          "path": "assets/😀.png",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "size": 2
+        },
+        {
+          "path": "assets/～.txt",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "size": 1
+        },
+        {
+          "path": "browser-dist/entry-ab12.js",
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "size": 4
+        }
+      ],
+      "canonical": "[{\"path\":\"assets/中文.md\",\"sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"size\":3},{\"path\":\"assets/😀.png\",\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"size\":2},{\"path\":\"assets/～.txt\",\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"size\":1},{\"path\":\"browser-dist/entry-ab12.js\",\"sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"size\":4}]",
+      "keyId": "a050837d85070582",
+      "sig": "Eklycg9uonvMTwpvg9myO5waC2O1ryn/TMyXHC6b+pcI62aIVcnj24JgNh9nrMSnXdyGrdmuVmY6YE44/3MkCA==",
+      "valid": true
+    },
+    {
+      "name": "大整数 size 与空文件",
+      "key": "primary",
+      "files": [
+        {
+          "path": "backend-dist/entry.mjs",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "size": 9007199254740991
+        },
+        {
+          "path": "empty.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        {
+          "path": "large.bin",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 4294967296
+        }
+      ],
+      "canonical": "[{\"path\":\"backend-dist/entry.mjs\",\"sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"size\":9007199254740991},{\"path\":\"empty.txt\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},{\"path\":\"large.bin\",\"sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"size\":4294967296}]",
+      "keyId": "a050837d85070582",
+      "sig": "WzXU7Vxlrn+ePjze6KF7K0lnM2YbtlBLVW1EzaV2GMKXeYkjIoRBlkmdeTzQgHPKXTw+FieiWsmyv1c0OKKbBg==",
+      "valid": true
+    },
+    {
+      "name": "空清单",
+      "key": "primary",
+      "files": [],
+      "canonical": "[]",
+      "keyId": "a050837d85070582",
+      "sig": "EIPnYuFyUP4F/eD9l4QZTJduZIE6MFhV4iI1LRX6kNKWJu2MdItwgI0xEHvKrFI2eGa34kOCTu9AumNeFQn+BA==",
+      "valid": true
+    },
+    {
+      "name": "负例：清单被篡改（size 变化）",
+      "key": "primary",
+      "files": [
+        {
+          "path": "extension.json",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 121
+        },
+        {
+          "path": "package.json",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 64
+        }
+      ],
+      "canonical": "[{\"path\":\"extension.json\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size\":121},{\"path\":\"package.json\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size\":64}]",
+      "keyId": "a050837d85070582",
+      "sig": "Z+nY+dvPQ7v6oofof6vg3i/juJVPQL1P/NC/TD1YfImv6h69VE8nn2kChyV7cD74mm+aYV1w2G6A2F/MKXLpAQ==",
+      "valid": false
+    },
+    {
+      "name": "负例：用另一把公钥验签",
+      "key": "other",
+      "files": [
+        {
+          "path": "extension.json",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 120
+        },
+        {
+          "path": "package.json",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 64
+        }
+      ],
+      "canonical": "[{\"path\":\"extension.json\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size\":120},{\"path\":\"package.json\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size\":64}]",
+      "keyId": "a050837d85070582",
+      "sig": "Z+nY+dvPQ7v6oofof6vg3i/juJVPQL1P/NC/TD1YfImv6h69VE8nn2kChyV7cD74mm+aYV1w2G6A2F/MKXLpAQ==",
+      "valid": false
+    }
+  ],
+  "samplePackage": {
+    "file": "signed-sample.wxt",
+    "key": "primary",
+    "extensionId": "vector-sample",
+    "version": "1.2.3",
+    "label": "向量样例",
+    "packageDigest": "sha256:05dc84cff82355fa8b6f925971f90282ac6facffdd24cc74779db76424e6fcf3",
+    "filesDigest": "sha256:b66f086e3d3ca91718ec5ddcb7b31084e9c87298ae4a14af6cd338429f6541fa",
+    "keyId": "a050837d85070582",
+    "files": [
+      {
+        "path": "README.md",
+        "sha256": "1ddb9a1390096567feb2c1677f90ccacb36301ff9fffc7142f4214ef4204dd57",
+        "size": 16
+      },
+      {
+        "path": "assets/说明.txt",
+        "sha256": "fe23c3ced0c822ee6d5de7613b926f7d8dd2dbabc9eafec18237c2836c5d2ba7",
+        "size": 18
+      },
+      {
+        "path": "extension.json",
+        "sha256": "aa5c1cb2b84c87848c5708b4231505e12551af751899fc8187c24cced5b4e374",
+        "size": 505
+      },
+      {
+        "path": "package.json",
+        "sha256": "5707c712010abae08b0c858bbe370c299813400117702e5875dc1ab49b8d374e",
+        "size": 161
+      }
+    ]
+  }
+}

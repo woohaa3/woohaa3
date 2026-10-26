@@ -22,6 +22,9 @@ test("Agent 来源扩展的公开路径路由到 Application Service", () => {
   // 旧 ChatGPT 前缀保留在 ingress（改名后仅作兼容入口；后端是否注册由公开路由表决定）。
   assert.equal(routeFor("/api/chatgpt/status"), "application");
   assert.equal(routeFor("/api/task-inspection/snapshot"), "application");
+  // 宿主受控重启（change: 2026-10-21-harden-extension-fault-isolation，D6）。
+  assert.equal(routeFor("/api/host/restart"), "application");
+  assert.equal(routeFor("/api/hostile"), "none");
 });
 
 test("服务端接入扩展的本机 OAuth 公开路径路由到 Application Service", () => {

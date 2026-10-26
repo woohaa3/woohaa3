@@ -72,11 +72,12 @@ const backend = await createBackendService({ env: serviceEnv, basePath, extensio
 if (backend.logDir) process.stderr.write(`[backend] logs → ${backend.logDir}\n`);
 
 // 发布目录 link 在**服务时**注入（任务 5.3）：运行期 release 由同一宿主生成。
-const releaseHref = extensionHost?.browserRelease?.href ?? null;
+// 每次服务 HTML 时读当前 release：受管扩展热登记后 link 随之切换（change: 2026-10-21-add-extension-marketplace-point，6.1）。
+const currentReleaseHref = () => extensionHost?.browserRelease?.href ?? null;
 const serveStatic = createStaticHandler(dist, {
   basePath,
   pageTitle: resolveAppPageTitle(serviceEnv),
-  ...(releaseHref ? { transformHtml: (html) => injectReleaseLinkHtml(html, releaseHref) } : {})
+  ...(extensionHost?.browserRelease ? { transformHtml: (html) => { const href = currentReleaseHref(); return href ? injectReleaseLinkHtml(html, href) : html; } } : {})
 });
 
 const server = http.createServer((req, res) => {

@@ -62,6 +62,8 @@ export function routeFor(pathname) {
   if (pathname === "/api/generation-models" || pathname.startsWith("/api/generation-models/")) return "application";
   // 后端统一配置（设置页「后端配置」与「模型 Provider」分区）：由统一后端 SettingsService 承载，仅管理员可读写。
   if (pathname === "/api/settings" || pathname.startsWith("/api/settings/")) return "application";
+  // 宿主受控重启（change: 2026-10-21-harden-extension-fault-isolation，D6）：管理员授权后排空并以 75 退出。
+  if (pathname === "/api/host" || pathname.startsWith("/api/host/")) return "application";
   if (pathname === "/api/mcp-installation" || pathname.startsWith("/api/mcp-installation/")) return "application";
   // 设置页刷新网关模型目录：路径形如 `/api/providers/<providerId>/refresh`，注册它的是声明该路径的
   // Provider 插件（宿主 gateway 层）。按**模式**路由：新增 Provider 不需要改这里。

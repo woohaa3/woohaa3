@@ -38,7 +38,53 @@ export function createExtensionReleaseRuntime(
   catalog: ExtensionReleaseCatalog,
   loader: ExtensionArtifactLoader
 ): ExtensionReleaseRuntime {
-  const entries: ExtensionRuntimeEntry[] = catalog.entries.map((releaseEntry) => ({
+  return runtimeFromEntries(catalog.releaseId, catalog.entries, loader);
+}
+
+/**
+ * 热登记的差异（change: 2026-10-21-add-extension-marketplace-point，6.3 / design D8）：
+ * 新 release 相对当前运行时目录新增、artifact 变化（升级）与消失（卸载）的 extensionId。
+ */
+export type ExtensionReleaseDelta = { added: string[]; upgraded: string[]; removed: string[] };
+
+export function diffReleaseEntries(
+  current: readonly ExtensionBrowserReleaseEntry[],
+  next: readonly ExtensionBrowserReleaseEntry[]
+): ExtensionReleaseDelta {
+  const before = new Map(current.map((entry) => [entry.metadata.extensionId, entry.artifactId]));
+  const after = new Map(next.map((entry) => [entry.metadata.extensionId, entry.artifactId]));
+  const added: string[] = [];
+  const upgraded: string[] = [];
+  for (const [id, artifactId] of after) {
+    if (!before.has(id)) added.push(id);
+    else if (before.get(id) !== artifactId) upgraded.push(id);
+  }
+  const removed = [...before.keys()].filter((id) => !after.has(id));
+  return { added: added.sort(), upgraded: upgraded.sort(), removed: removed.sort() };
+}
+
+/**
+ * 在已固定的运行时目录上**只追加**新 release 的新增条目：已有条目（含被升级的）保持原 artifact，
+ * 已装配的页面与已加载的模块都不受影响；releaseId 仍是固定的那一个。
+ */
+export function extendReleaseRuntime(
+  runtime: ExtensionReleaseRuntime,
+  next: ExtensionReleaseCatalog,
+  loader: ExtensionArtifactLoader
+): { runtime: ExtensionReleaseRuntime; delta: ExtensionReleaseDelta } {
+  const current = runtime.entries.map((entry) => entry.releaseEntry);
+  const delta = diffReleaseEntries(current, next.entries);
+  if (delta.added.length === 0) return { runtime, delta };
+  const additions = next.entries.filter((entry) => delta.added.includes(entry.metadata.extensionId));
+  return { runtime: runtimeFromEntries(runtime.releaseId, [...current, ...additions], loader), delta };
+}
+
+function runtimeFromEntries(
+  releaseId: string | null,
+  releaseEntries: readonly ExtensionBrowserReleaseEntry[],
+  loader: ExtensionArtifactLoader
+): ExtensionReleaseRuntime {
+  const entries: ExtensionRuntimeEntry[] = releaseEntries.map((releaseEntry) => ({
     metadata: releaseEntry.metadata,
     artifactId: releaseEntry.artifactId,
     releaseEntry,
@@ -53,7 +99,7 @@ export function createExtensionReleaseRuntime(
     .map((entry) => entry.metadata.extensionId)
     .sort();
   return {
-    releaseId: catalog.releaseId,
+    releaseId,
     entries,
     byId: (extensionId) => byIdMap.get(extensionId),
     browserLocalIds: () => [...browserLocal]

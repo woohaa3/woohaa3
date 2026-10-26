@@ -14,6 +14,20 @@ export {
   type GuardedFetchOptions
 } from "./guarded-fetch.js";
 export {
+  NetworkDeniedError,
+  effectivePort,
+  isHostAllowed,
+  isLocalHostname,
+  isPrivateAddress,
+  isPrivateHost,
+  isPrivateIpv4,
+  isPrivateIpv6,
+  isUrlAllowed,
+  parseHostRule,
+  parseHostRules,
+  type HostRule
+} from "./network-policy.js";
+export {
   DEFAULT_MODEL_REFRESH_ROUTE_ORDER,
   registerModelRefreshRoute,
   type ModelRefreshResult

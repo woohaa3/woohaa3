@@ -16,6 +16,7 @@ describe("Frontend Event Catalog（任务 2.1）", () => {
   it("目录事件名集合固定且每个事件都有 producer/consumer", () => {
     expect([...FRONTEND_EVENT_NAMES].sort()).toEqual([
       "extension.activity.updated",
+      "extension.release.changed",
       "task.activity.finished",
       "task.activity.started",
       "task.activity.updated",
@@ -37,11 +38,11 @@ describe("Frontend Event Catalog（任务 2.1）", () => {
     }
   });
 
-  it("命名规则：UI 请求用 ui.*-requested，事实事件用 task.activity.* 或 extension.activity.*", () => {
+  it("命名规则：UI 请求用 ui.*-requested，事实事件用 task.activity.*、extension.activity.* 或 extension.release.*", () => {
     for (const name of FRONTEND_EVENT_NAMES) {
       const descriptor = frontendEventCatalog[name];
       if (descriptor.kind === "request") expect(name).toMatch(/^ui\..+-requested$/);
-      if (descriptor.kind === "fact") expect(name).toMatch(/^(task|extension)\.activity\./);
+      if (descriptor.kind === "fact") expect(name).toMatch(/^(task|extension)\.activity\.|^extension\.release\./);
     }
   });
 

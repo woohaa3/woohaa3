@@ -78,6 +78,8 @@ declare module "@deepseek-ai/cordis" {
     canvasState: import("./contract/platform.js").CanvasStoreFacade;
     dialogs: DialogsService;
     slots: SlotsService;
+    /** 扩展渲染故障与会话内熔断（App scope；change: 2026-10-21-harden-extension-fault-isolation）。 */
+    extensionFaults: import("./extension-faults.js").ExtensionFaultService;
     inputScopes: InputScopesService;
     canvasRuntime: CanvasRuntimeService;
     /**

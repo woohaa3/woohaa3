@@ -16,6 +16,7 @@
  */
 import type { BackgroundActivityJob } from "@woohaa3/contracts";
 import type { TaskActivityFinished, TaskActivityStarted, TaskActivityUpdated } from "./task-activity.js";
+import type { ReleaseChangedPayload } from "../extension-entry/release-adoption.js";
 
 /** 所有跨插件事件的 payload 类型（编译期事实源）。 */
 export type FrontendEventPayloads = {
@@ -42,6 +43,11 @@ export type FrontendEventPayloads = {
    * 由 task-activity 浮层展示（如镜头参考录制）。payload 只含可读摘要。
    */
   "extension.activity.updated": { job: BackgroundActivityJob };
+  /**
+   * 宿主发布目录已切换并完成热登记（change: 2026-10-21-add-extension-marketplace-point，6.2/6.3）：
+   * 新增条目已按资格装配；升级/卸载的条目当前页面仍用旧版本，`pendingReopen` 供设置面提示重开画布。
+   */
+  "extension.release.changed": ReleaseChangedPayload;
 };
 
 /** Cordis `Events` 需要函数签名；由 payload map 派生。 */
@@ -123,6 +129,12 @@ export const frontendEventCatalog = {
     kind: "fact",
     producers: ["film-set"],
     consumers: ["task-activity"]
+  },
+  "extension.release.changed": {
+    scope: "canvas",
+    kind: "fact",
+    producers: ["canvas-page-services"],
+    consumers: ["settings"]
   }
 } satisfies Record<FrontendEventName, EventDescriptor>;
 

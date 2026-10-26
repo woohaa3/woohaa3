@@ -31,7 +31,16 @@ export type GuardedFetchOptions = {
    * 那条路径的请求头由 provider 自己构造。
    */
   prepareDownloadHeaders?: (url: URL, headers: Headers) => void;
+  /**
+   * 出网主机白名单（change: 2026-10-21-isolate-extension-host-process，D5）：受管扩展在 Extension Host
+   * 子进程里由入口注入 `permissions.network`。给出时 `baseUrl` 必须命中白名单（否则构造即抛
+   * `EXTENSION_NETWORK_DENIED`，让配置错误在激活时暴露），受控下载的目标与重定向目标也必须命中。
+   * 不给出（现有 Provider）时行为不变。
+   */
+  allowedHosts?: readonly string[];
 };
+
+import { NetworkDeniedError, effectivePort, isLocalHostname, isPrivateIpv4, isPrivateIpv6, isUrlAllowed, parseHostRules } from "./network-policy.js";
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const DEFAULT_ALLOWED_CONTENT_TYPES: readonly string[] = ["image/"];
@@ -39,6 +48,15 @@ const DEFAULT_ALLOWED_CONTENT_TYPES: readonly string[] = ["image/"];
 export function createGuardedFetch(options: GuardedFetchOptions): typeof globalThis.fetch {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const trustedOrigin = safeOrigin(options.baseUrl);
+  const hostRules = options.allowedHosts === undefined ? null : parseHostRules(options.allowedHosts);
+  if (hostRules !== null) {
+    const base = safeUrl(options.baseUrl);
+    if (!base) throw new Error("出网守卫：baseUrl 不合法");
+    if (!isUrlAllowed(hostRules, base)) throw new NetworkDeniedError(base.hostname, effectivePort(base), "not-allowed", "baseUrl");
+  }
+  const assertWithinAllowList = (url: URL) => {
+    if (hostRules !== null && !isUrlAllowed(hostRules, url)) throw new NetworkDeniedError(url.hostname, effectivePort(url), "not-allowed", "受控下载");
+  };
   const allowedContentTypes = (options.allowedContentTypes ?? DEFAULT_ALLOWED_CONTENT_TYPES).map((type) =>
     type.toLowerCase()
   );
@@ -68,6 +86,7 @@ export function createGuardedFetch(options: GuardedFetchOptions): typeof globalT
     let current = parsed;
     for (let redirect = 0; redirect <= (options.maxRedirects ?? 2); redirect += 1) {
       assertAllowedHost(current);
+      assertWithinAllowList(current);
       const headers = new Headers(init?.headers);
       for (const name of ["authorization", "proxy-authorization", "x-api-key", "x-goog-api-key", "cookie"]) headers.delete(name);
       options.prepareDownloadHeaders?.(current, headers);
@@ -124,40 +143,12 @@ function assertAllowedHost(url: URL): void {
     throw new Error(`受控下载：只允许 https（收到 ${url.protocol}）`);
   }
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "" || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
+  if (host === "" || isLocalHostname(host)) {
     throw new Error("受控下载：拒绝本机主机名");
   }
   if (isPrivateIpv4(host) || isPrivateIpv6(host)) {
     throw new Error("受控下载：拒绝私网地址");
   }
-}
-
-function isPrivateIpv4(host: string): boolean {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!match) return false;
-  const octets = match.slice(1).map(Number);
-  if (octets.some((value) => value > 255)) return true;
-  const [a, b] = octets;
-  if (a === 0 || a === 10 || a === 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  return false;
-}
-
-function isPrivateIpv6(host: string): boolean {
-  if (!host.includes(":")) return false;
-  // ::1 回环、fc00::/7 唯一本地、fe80::/10 链路本地。
-  return (
-    host === "::1" ||
-    host.startsWith("fc") ||
-    host.startsWith("fd") ||
-    host.startsWith("fe8") ||
-    host.startsWith("fe9") ||
-    host.startsWith("fea") ||
-    host.startsWith("feb")
-  );
 }
 
 /** 流式读取并强制字节上限；超限即中止，而不是读完再判断。 */

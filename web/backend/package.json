@@ -18,7 +18,8 @@
     "src"
   ],
   "scripts": {
-    "build": "node ../scripts/build-package.mjs --platform node",
+    "build": "node ../scripts/build-package.mjs --platform node && pnpm run build:extension-host-child",
+    "build:extension-host-child": "node scripts/build-extension-host-child.mjs",
     "server:build": "node ../scripts/build-package.mjs --platform node --entry src/server.ts --outdir server-dist",
     "watch": "node ../scripts/build-package.mjs --platform node --watch",
     "start": "node server-dist/index.js",
@@ -27,9 +28,11 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.5",
+    "@sdppp/pptask": "workspace:*",
     "@woohaa3/application-service": "workspace:*",
     "@woohaa3/canvas-service": "workspace:*",
     "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/provider-sdk": "workspace:*",
     "@woohaa3/extension-local-agent": "workspace:*",
     "@woohaa3/extension-oauth-agent": "workspace:*",
     "@woohaa3/extension-sdk-agent": "workspace:*",

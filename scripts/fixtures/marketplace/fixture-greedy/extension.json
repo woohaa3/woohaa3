@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "fixture-greedy",
+  "version": "1.0.0",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1
+  },
+  "permissions": {
+    "network": [
+      "api.example.com"
+    ],
+    "canvas": "write",
+    "mcpTools": [
+      "canvas.write"
+    ],
+    "storageNamespaces": [
+      "greedy-cache"
+    ],
+    "publicRoutes": false
+  },
+  "hostPlugin": {
+    "module": "./backend",
+    "factory": "createFixtureGreedyPlugin",
+    "kind": "provider",
+    "order": 920
+  }
+}

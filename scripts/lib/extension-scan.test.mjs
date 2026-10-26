@@ -20,6 +20,7 @@ import {
   readWorkspaceGlobs,
   browserExtensions
 } from "./extension-scan.mjs";
+import { MANAGED_DIR_ENV, managedLayout, openInstallations } from "./extension-installations.mjs";
 
 const TEST_TMP_ROOT = "/data/tmp/opencode";
 
@@ -271,5 +272,99 @@ test("工作区覆盖检查：strict 时未覆盖根抛错，默认只提示", (
   assert.throws(
     () => assertRootsCoveredByWorkspace({ repoRoot, roots, workspaceFile, strict: true }),
     (error) => error.code === "EXTENSION_ROOT_NOT_IN_WORKSPACE" && error.message.includes("extensions")
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 受管根（change: 2026-10-21-add-extension-marketplace-point，任务 4.1 / 4.3）
+// ---------------------------------------------------------------------------
+
+function writeManagedVersion(managedRoot, extensionId, version, { packageName, descriptorId = extensionId } = {}) {
+  const dir = managedLayout(managedRoot).versionDir(extensionId, version);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: packageName ?? `@woohaa3/extension-${extensionId}`, version }));
+  fs.writeFileSync(path.join(dir, "extension.json"), JSON.stringify({ schemaVersion: 1, extensionId: descriptorId, version }));
+  return dir;
+}
+
+function commitPointers(managedRoot, pointers) {
+  const handle = openInstallations({ managedRoot });
+  try {
+    const state = handle.read();
+    handle.commit((draft) => {
+      for (const [id, current] of Object.entries(pointers)) draft.extensions[id] = { current, previous: null, sourceId: "local-file", state: "active", history: [] };
+    }, { expectedRevision: state.revision });
+  } finally {
+    handle.release();
+  }
+}
+
+test("受管根：缺省位于仓库根 .woohaa3/extensions，不存在时视为空", (t) => {
+  const repoRoot = makeRepo(t);
+  const scan = scanExtensions({ repoRoot, env: {} });
+  assert.equal(scan.managedRoot, path.join(repoRoot, ".woohaa3", "extensions"));
+  assert.deepEqual(scan.warnings, []);
+  assert.equal(scan.extensions.some((entry) => entry.managed), false);
+});
+
+test("受管根：按版本指针加入记录，带 managed / managedVersion，rootWritable=false", (t) => {
+  const repoRoot = makeRepo(t);
+  const managedRoot = path.join(repoRoot, "data", "managed");
+  writeManagedVersion(managedRoot, "foo", "1.0.0");
+  const current = writeManagedVersion(managedRoot, "foo", "1.1.0");
+  commitPointers(managedRoot, { foo: "1.1.0" });
+  const scan = scanExtensions({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot } });
+  const record = scan.extensions.find((entry) => entry.extensionId === "foo");
+  assert.equal(record.dir, current);
+  assert.equal(record.managed, true);
+  assert.equal(record.managedVersion, "1.1.0");
+  assert.equal(record.rootWritable, false);
+  assert.equal(record.root, managedRoot);
+});
+
+test("受管根：指针目录被删 / 身份不一致 / 包名不符只告警跳过，不让扫描失败", (t) => {
+  const repoRoot = makeRepo(t);
+  const managedRoot = path.join(repoRoot, "data", "managed");
+  writeManagedVersion(managedRoot, "ok", "1.0.0");
+  writeManagedVersion(managedRoot, "liar", "1.0.0", { descriptorId: "someone-else" });
+  writeManagedVersion(managedRoot, "badpkg", "1.0.0", { packageName: "left-pad" });
+  commitPointers(managedRoot, { ok: "1.0.0", gone: "2.0.0", liar: "1.0.0", badpkg: "1.0.0" });
+  const scan = scanExtensions({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot } });
+  assert.deepEqual(scan.extensions.filter((entry) => entry.managed).map((entry) => entry.extensionId), ["ok"]);
+  const codes = Object.fromEntries(scan.warnings.map((warning) => [warning.extensionId, warning.code]));
+  assert.equal(codes.gone, "EXTENSION_MANAGED_VERSION_MISSING");
+  assert.equal(codes.liar, "EXTENSION_MANAGED_IDENTITY_MISMATCH");
+  assert.equal(codes.badpkg, "EXTENSION_MANAGED_PACKAGE_INVALID");
+});
+
+test("受管根：损坏的 installations.json 只告警，内置扩展照常扫描", (t) => {
+  const repoRoot = makeRepo(t);
+  addExtension(path.join(repoRoot, "web", "extensions", "alpha"), { extensionId: "alpha" });
+  const managedRoot = path.join(repoRoot, "data", "managed");
+  fs.mkdirSync(managedRoot, { recursive: true });
+  fs.writeFileSync(path.join(managedRoot, "installations.json"), "{");
+  const scan = scanExtensions({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot } });
+  assert.deepEqual(scan.extensions.map((entry) => entry.extensionId), ["alpha"]);
+  assert.equal(scan.warnings[0].code, "EXTENSION_MANAGED_INSTALLATIONS_INVALID");
+});
+
+test("受管根：与内置扩展同 id 时内置优先并告警（不报重复）", (t) => {
+  const repoRoot = makeRepo(t);
+  addExtension(path.join(repoRoot, "web", "extensions", "alpha"), { extensionId: "alpha" });
+  const managedRoot = path.join(repoRoot, "data", "managed");
+  writeManagedVersion(managedRoot, "alpha", "9.0.0");
+  commitPointers(managedRoot, { alpha: "9.0.0" });
+  const scan = scanExtensions({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot } });
+  const alpha = scan.extensions.filter((entry) => entry.extensionId === "alpha");
+  assert.equal(alpha.length, 1);
+  assert.equal(alpha[0].managed, undefined);
+  assert.equal(scan.warnings[0].code, "EXTENSION_MANAGED_SHADOWED");
+});
+
+test("受管根不能与配置根重叠", (t) => {
+  const repoRoot = makeRepo(t);
+  assert.throws(
+    () => resolveExtensionRoots({ repoRoot, env: { [MANAGED_DIR_ENV]: path.join(repoRoot, "web", "extensions", "managed") } }),
+    (error) => error instanceof ExtensionScanError && error.code === "EXTENSION_MANAGED_ROOT_OVERLAP"
   );
 });

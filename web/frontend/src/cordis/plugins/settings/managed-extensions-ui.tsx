@@ -1,0 +1,264 @@
+/**
+ * 受管扩展的设置面 UI（change: 2026-10-21-add-extension-marketplace-point，任务 7.2 / design D10）。
+ *
+ * - `ManagedInstallBar`：插件配置顶部「从文件安装」、进行中/最近任务的阶段进度与失败原因、
+ *   需要重启时的「立即重启」；只有管理员且宿主启用了受管安装时出现；
+ * - `ManagedExtensionDetails`：受管扩展卡片上的来源 / 信任 / 权限 / 观察期与「卸载」「回滚到 x.y.z」；
+ *   内置根扩展（`managed !== true`）不渲染任何入口；
+ * - `ReleaseChangedNotice`：已打开页面的升级/卸载不热换，提示重开画布。
+ *
+ * 子进程隔离（change: 2026-10-21-isolate-extension-host-process，任务 9.1–9.2 / design D4、D7、D10）：
+ * - 卡片显示隔离方式（独立进程 / 未隔离）、崩溃次数与崩溃隔离状态，隔离中提供「解除隔离」；
+ * - 隔离开启时权限标注「已强制」，画布 / MCP 工具声明标注「本期未支持」；未隔离时注明「声明项，未强制」；
+ * - 隔离开启的含后端扩展升级走蓝绿切换，卡片不再显示「需重启」（宿主也不再置 restartRequired）。
+ */
+import { useRef, useState, useSyncExternalStore } from "react";
+import type { ExtensionPermissions, InstalledExtensionView, SettingsSnapshot } from "@woohaa3/contracts";
+import { Button } from "../../../shared/ui/Button.js";
+import { describeJob, type ManagedExtensionsController } from "./managed-extensions.js";
+import { ManagedVersionStatusNotice } from "./managed-version-status.js";
+
+function useController(controller: ManagedExtensionsController) {
+  return useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
+}
+
+/** 快照里是否有需要重启才生效的受管扩展。 */
+export function restartPending(snapshot: SettingsSnapshot | null): boolean {
+  return (snapshot?.installedExtensions ?? []).some((entry) => needsRestart(entry));
+}
+
+/** 卡片是否需要提示重启：只有未隔离（进程内）的受管扩展才会因后端更新而需要重启。 */
+function needsRestart(entry: InstalledExtensionView): boolean {
+  return entry.managed === true && entry.restartRequired === true && entry.isolation !== "process";
+}
+
+export function ManagedInstallBar({
+  controller,
+  snapshot,
+  canManage
+}: {
+  controller: ManagedExtensionsController;
+  snapshot: SettingsSnapshot | null;
+  canManage: boolean;
+}) {
+  const state = useController(controller);
+  const input = useRef<HTMLInputElement | null>(null);
+  const installations = snapshot?.extensionInstallations;
+  // 宿主没有受管安装能力（旧宿主或未配置受管根）：不出现入口。
+  if (!installations || !canManage) return null;
+  const needsRestart =
+    restartPending(snapshot) || state.jobs.some((job) => job.status === "succeeded" && job.outcome === "restart-required");
+  return (
+    <div className="managed-install" data-testid="managed-install">
+      <div className="managed-install__row">
+        <Button
+          size="sm"
+          tone="primary"
+          disabled={state.submitting}
+          onClick={() => input.current?.click()}
+          data-testid="managed-install-file"
+        >
+          从文件安装
+        </Button>
+        <span className="settings-page__hint">
+          选择 .wxt 扩展包；安装前校验签名与声明{installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
+        </span>
+        <input
+          ref={input}
+          type="file"
+          accept=".wxt"
+          hidden
+          data-testid="managed-install-input"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (file) void controller.installFile(file);
+          }}
+        />
+      </div>
+      {state.error ? (
+        <p className="settings-page__error" role="alert" data-testid="managed-install-error">{state.error}</p>
+      ) : null}
+      {state.jobs.length > 0 ? (
+        <ul className="managed-install__jobs" data-testid="managed-install-jobs">
+          {state.jobs.map((job) => {
+            const view = describeJob(job);
+            return (
+              <li key={job.jobId} className="managed-install__job" data-tone={view.tone} data-testid={`managed-job-${job.jobId}`}>
+                <span className="managed-install__job-title">{view.title}</span>
+                <span className="managed-install__job-detail" data-testid={`managed-job-detail-${job.jobId}`}>{view.detail}</span>
+                {job.status === "running" && (job.phase === "queued" || job.phase === "resolve" || job.phase === "download" || job.phase === "verify" || job.phase === "stage" || job.phase === "preflight") ? (
+                  <Button size="sm" tone="ghost" onClick={() => void controller.cancel(job.jobId)}>取消</Button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {needsRestart ? (
+        <div className="managed-install__restart" role="status" data-testid="managed-restart">
+          <span>
+            {state.restart.message ??
+              (installations.restartSupported ? "含后端代码的扩展已更新，重启本机服务后生效。" : "含后端代码的扩展已更新，请手动重启本机服务后生效。")}
+          </span>
+          {installations.restartSupported && state.restart.status !== "unsupported" ? (
+            <Button
+              size="sm"
+              disabled={state.restart.status === "requesting" || state.restart.status === "requested"}
+              onClick={() => void controller.restart()}
+              data-testid="managed-restart-now"
+            >
+              立即重启
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function trustLabel(trust: InstalledExtensionView["trust"]): string {
+  if (!trust) return "未知";
+  if (trust === "unsigned") return "未签名（本地开发）";
+  return `已签名 · ${trust.slice("signed:".length)}`;
+}
+
+/**
+ * 权限展示。隔离开启（独立进程）时宿主强制出网 / 公开路由 / 存储命名空间；画布与 MCP 工具本期不授予。
+ * 未隔离时一律只是声明（P1 语义）。
+ */
+export function permissionLines(permissions: ExtensionPermissions | undefined, enforced: boolean): string[] {
+  const lines: string[] = [];
+  const unsupported = enforced ? "（本期未支持，未授予）" : "";
+  const network = permissions?.network ?? [];
+  if (network.length) lines.push(`出网：${network.join("、")}`);
+  else if (enforced) lines.push("出网：不允许");
+  if (permissions?.canvas) lines.push(`${permissions.canvas === "write" ? "画布：读写" : "画布：只读"}${unsupported}`);
+  if (permissions?.mcpTools?.length) lines.push(`MCP 工具：${permissions.mcpTools.join("、")}${unsupported}`);
+  if (permissions?.publicRoutes) lines.push("公开路由");
+  if (permissions?.storageNamespaces?.length) lines.push(`存储：${permissions.storageNamespaces.join("、")}`);
+  return lines;
+}
+
+function isolationLabel(installed: InstalledExtensionView): string | null {
+  if (installed.isolation === "process") return "独立进程";
+  if (installed.isolation === "in-process") return "未隔离（与本机服务同进程）";
+  return null;
+}
+
+export function ManagedExtensionDetails({
+  installed,
+  controller,
+  canManage
+}: {
+  installed: InstalledExtensionView | undefined;
+  controller: ManagedExtensionsController;
+  canManage: boolean;
+}) {
+  useController(controller);
+  const [confirming, setConfirming] = useState(false);
+  const [purge, setPurge] = useState(false);
+  if (!installed || installed.managed !== true) return null;
+  const id = installed.id;
+  const state = controller.getState();
+  const busy = controller.busy(id);
+  const enforced = installed.isolation === "process";
+  const permissions = permissionLines(installed.permissions, enforced);
+  const isolation = isolationLabel(installed);
+  const quarantined = Boolean(installed.quarantinedAt);
+  const unquarantining = state.unquarantining.includes(id);
+  return (
+    <div className="managed-extension" data-testid={`managed-extension-${id}`}>
+      <dl className="managed-extension__facts">
+        <dt>来源</dt>
+        <dd data-testid={`managed-source-${id}`}>{installed.sourceId === "local-file" ? "本地文件" : installed.sourceId ?? "未知"}</dd>
+        <dt>信任</dt>
+        <dd data-testid={`managed-trust-${id}`}>{trustLabel(installed.trust)}</dd>
+        {isolation ? (
+          <>
+            <dt>运行方式</dt>
+            <dd data-testid={`managed-isolation-${id}`}>{isolation}</dd>
+          </>
+        ) : null}
+        <dt>权限</dt>
+        <dd data-testid={`managed-permissions-${id}`}>
+          {permissions.length > 0 ? permissions.join("；") : "未声明"}
+          <span className="managed-extension__note" data-testid={`managed-permissions-note-${id}`}>
+            {enforced ? "（已强制）" : installed.isolation === "in-process" ? "（声明项，未强制：未隔离）" : "（声明项，暂未强制）"}
+          </span>
+        </dd>
+        {installed.crashCount ? (
+          <>
+            <dt>崩溃</dt>
+            <dd data-testid={`managed-crashes-${id}`}>最近 5 分钟 {installed.crashCount} 次</dd>
+          </>
+        ) : null}
+        {installed.observeUntil ? (
+          <>
+            <dt>观察期</dt>
+            <dd>至 {new Date(installed.observeUntil).toLocaleString()}，期间失败将自动回滚</dd>
+          </>
+        ) : null}
+      </dl>
+      {needsRestart(installed) ? (
+        <p className="managed-extension__restart" data-testid={`managed-restart-required-${id}`}>新版本需重启本机服务后生效。</p>
+      ) : null}
+      <ManagedVersionStatusNotice installed={installed} />
+      {quarantined ? (
+        <p className="managed-extension__quarantine" role="status" data-testid={`managed-quarantined-${id}`}>
+          已隔离：后端进程频繁崩溃，已停止自动重启（{new Date(installed.quarantinedAt as string).toLocaleString()} 起）。可升级到其他版本，或确认问题后解除隔离。
+        </p>
+      ) : null}
+      {canManage ? (
+        <div className="managed-extension__actions">
+          {quarantined ? (
+            <Button size="sm" tone="primary" disabled={busy || unquarantining} onClick={() => void controller.unquarantine(id)} data-testid={`managed-unquarantine-${id}`}>
+              {unquarantining ? "正在解除…" : "解除隔离"}
+            </Button>
+          ) : null}
+          {installed.previousVersion ? (
+            <Button size="sm" disabled={busy} onClick={() => void controller.rollback(id)} data-testid={`managed-rollback-${id}`}>
+              回滚到 v{installed.previousVersion}
+            </Button>
+          ) : null}
+          {confirming ? (
+            <>
+              <label className="managed-extension__purge">
+                <input type="checkbox" checked={purge} onChange={(event) => setPurge(event.currentTarget.checked)} />
+                同时清除扩展数据
+              </label>
+              <Button
+                size="sm"
+                tone="danger"
+                disabled={busy}
+                onClick={() => {
+                  setConfirming(false);
+                  void controller.uninstall(id, { purgeData: purge });
+                }}
+                data-testid={`managed-uninstall-confirm-${id}`}
+              >
+                确认卸载
+              </Button>
+              <Button size="sm" tone="ghost" onClick={() => setConfirming(false)}>取消</Button>
+            </>
+          ) : (
+            <Button size="sm" tone="ghost" disabled={busy} onClick={() => setConfirming(true)} data-testid={`managed-uninstall-${id}`}>
+              卸载
+            </Button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 已打开页面里仍在用旧版本的扩展：提示重开画布（升级/卸载不在当前页面热换）。 */
+export function ReleaseChangedNotice({ pending, onReopen }: { pending: readonly string[]; onReopen?: () => void }) {
+  if (pending.length === 0) return null;
+  return (
+    <p className="settings-page__pending" role="status" data-testid="managed-release-pending">
+      <span>{pending.join("、")} 已更新，重新打开画布后使用新版本。</span>
+      {onReopen ? <Button size="sm" onClick={onReopen} data-testid="managed-release-reopen">重新打开画布</Button> : null}
+    </p>
+  );
+}

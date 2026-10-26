@@ -17,6 +17,9 @@ import type { FrontendRuntime } from "./kernel.js";
 
 const RuntimeContext = createContext<FrontendRuntime | null>(null);
 
+/** 只供宿主的扩展贡献错误边界可选读取 runtime（无 Provider 时为 null，不抛错）。 */
+export const RuntimeContextForBoundary = RuntimeContext;
+
 export function RuntimeProvider({ runtime, children }: { runtime: FrontendRuntime; children: ReactNode }) {
   return <RuntimeContext.Provider value={runtime}>{children}</RuntimeContext.Provider>;
 }

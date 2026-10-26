@@ -219,6 +219,120 @@ export function injectReleaseLinkHtml(html, href) {
 }
 
 /**
+ * 运行期发布器（change: 2026-10-21-add-extension-marketplace-point，任务 6.1 / design D8）。
+ *
+ * 持有「当前 release」与本进程内发布过的**全部** release：
+ * - `publish({ upsert, remove })` 基于当前 artifact 集合新增/替换/移除条目，调用 `buildBrowserRelease`
+ *   重算；新目录通过自身严格解码后，才把新 catalog 与新增 artifact 文件**追加**进托管表，再切换
+ *   `current.json` 与服务期 HTML link。旧 release 的目录与旧 artifact 文件继续可读，保留到进程退出，
+ *   已打开页面固定的旧 release 不受影响。
+ * - 校验失败抛 `ExtensionReleaseError`，当前 release、托管表与 artifact 集合都不变。
+ * - 发布串行；同一内容重放得到同一 releaseId，返回 `changed: false`（幂等，不通知订阅者）。
+ */
+export function createBrowserReleasePublisher({ release, artifacts = [], repoRoot, contracts = null, logger = () => undefined, build = buildBrowserRelease } = {}) {
+  let current = release ?? null;
+  /** extensionId → { extensionId, directory }：下一次重算的输入集合。 */
+  const inputs = new Map(artifacts.map((artifact) => [artifact.extensionId, { extensionId: artifact.extensionId, directory: artifact.directory }]));
+  /** releaseId → catalog JSON；只增不删。 */
+  const catalogs = new Map();
+  /** 逻辑 URL → 磁盘路径；只增不删（artifactId 内容寻址，同 URL 必然同内容）。 */
+  const files = new Map();
+  const listeners = new Set();
+  const absorb = (next) => {
+    catalogs.set(next.releaseId, next.catalogJson);
+    for (const [url, file] of next.files) if (!files.has(url)) files.set(url, file);
+  };
+  if (current) absorb(current);
+
+  let queue = Promise.resolve();
+  const publish = ({ upsert = [], remove = [] } = {}) => {
+    const task = async () => {
+      const candidate = new Map(inputs);
+      for (const id of remove) candidate.delete(id);
+      for (const entry of upsert) {
+        if (!entry || typeof entry.extensionId !== "string" || typeof entry.directory !== "string") {
+          throw new ExtensionReleaseError("EXTENSION_RELEASE_INPUT_INVALID", "publishBrowserRelease 的 upsert 条目需要 extensionId 与 directory");
+        }
+        candidate.set(entry.extensionId, { extensionId: entry.extensionId, directory: entry.directory });
+      }
+      const next = await build({ artifacts: [...candidate.values()], repoRoot, contracts, logger });
+      // 构建（含严格解码）成功后才提交：先追加托管表，再切指针，保证切换后的每个地址都可读。
+      inputs.clear();
+      for (const [id, value] of candidate) inputs.set(id, value);
+      const changed = current?.releaseId !== next.releaseId;
+      absorb(next);
+      current = next;
+      if (changed) {
+        logger({ event: "extension-release-published", releaseId: next.releaseId, upsert: upsert.map((entry) => entry.extensionId), remove });
+        for (const listener of [...listeners]) {
+          try {
+            listener({ releaseId: next.releaseId, href: next.href });
+          } catch (error) {
+            logger({ event: "extension-release-listener-failed", message: error instanceof Error ? error.message : String(error) });
+          }
+        }
+      }
+      return { releaseId: next.releaseId, href: next.href, changed };
+    };
+    const result = queue.then(task, task);
+    queue = result.catch(() => undefined);
+    return result;
+  };
+
+  return {
+    current: () => current,
+    publish,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    /** 目录改名（安装/卸载改名）后同步磁盘路径；URL 不变。 */
+    relocate(from, to) {
+      const fix = (map) => {
+        for (const [url, file] of map) if (file.startsWith(`${from}${path.sep}`)) map.set(url, to + file.slice(from.length));
+      };
+      fix(files);
+      if (current) fix(current.files);
+      for (const value of inputs.values()) if (value.directory === from) value.directory = to;
+    },
+    handler(req, res) {
+      if (!current) return false;
+      return serveRelease(req, res, {
+        discoveryBody: `${JSON.stringify({ releaseId: current.releaseId, href: current.href })}\n`,
+        catalogFor: (releaseId) => catalogs.get(releaseId),
+        fileFor: (pathname) => files.get(pathname)
+      });
+    }
+  };
+}
+
+function serveRelease(req, res, { discoveryBody, catalogFor, fileFor }) {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  let pathname;
+  try {
+    pathname = decodeURIComponent(new URL(req.url ?? "/", "http://localhost").pathname);
+  } catch {
+    return false;
+  }
+  if (pathname === RELEASE_DISCOVERY_PATH) {
+    // 指针随发布切换：不可缓存。
+    sendJson(req, res, discoveryBody);
+    return true;
+  }
+  const match = pathname.match(/^\/extension-releases\/([a-f0-9]{64})\.json$/);
+  if (match) {
+    const body = catalogFor(match[1]);
+    if (body === undefined) return false;
+    sendJson(req, res, body, { immutable: true });
+    return true;
+  }
+  const filePath = fileFor(pathname);
+  if (filePath === undefined) return false;
+  serveFile(req, res, filePath, { immutable: true });
+  return true;
+}
+
+/**
  * 返回发布目录请求处理器。命中当前 release 的目录端点与不可变资源时返回 `true`，
  * 其余路径返回 `false`（交给后端/静态资源，旧 release 仍由保留窗口目录回退）。
  */

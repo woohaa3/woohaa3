@@ -15,6 +15,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { managedLayout, readInstallations, resolveManagedRoot } from "./extension-installations.mjs";
+
 export const EXTENSION_DIRS_ENV = "WOOHAA3_EXTENSION_DIRS";
 /**
  * 可写扩展根（change: 2026-10-15-scan-bootstrap-slots-as-extension-directories，任务 5.1）。
@@ -124,7 +126,30 @@ export function resolveExtensionRoots({ repoRoot, env = process.env, configFile 
     if (!writableRoots.includes(absolute)) writableRoots.push(absolute);
   }
 
-  return { roots, writableRoots, source, configPath, configFile: path.resolve(repoRoot, configFile) };
+  // 受管安装根（change: 2026-10-21-add-extension-marketplace-point，任务 4.1 / design D7）：不是配置根——
+  // 它不按「直接子目录」扫描，而按 installations.json 的版本指针取 installed/<id>/<current>。
+  // 与配置根重叠会让同一目录被两种规则解释，直接拒绝：受管根等于某个配置根、包含某个配置根，
+  // 或恰好是某个配置根的非点号直接子目录（会被当成一个扩展目录扫描）。受管根位于配置根更深处或
+  // 点号目录下（如缺省的 <repo>/.woohaa3/extensions）不会被扫描到，允许。
+  const managedRoot = resolveManagedRoot({ repoRoot, env });
+  for (const root of roots) {
+    const parent = path.dirname(managedRoot);
+    const directChild = parent === root && !path.basename(managedRoot).startsWith(".");
+    if (isInsideOrSame(managedRoot, root) || directChild) {
+      throw new ExtensionScanError(
+        "EXTENSION_MANAGED_ROOT_OVERLAP",
+        `受管扩展根不能与配置根重叠：${managedRoot} ↔ ${root}（检查 WOOHAA3_EXTENSION_MANAGED_DIR）`
+      );
+    }
+  }
+
+  return { roots, writableRoots, managedRoot, source, configPath, configFile: path.resolve(repoRoot, configFile) };
+}
+
+function isInsideOrSame(parent, candidate) {
+  const a = path.resolve(parent);
+  const b = path.resolve(candidate);
+  return a === b || b.startsWith(`${a}${path.sep}`);
 }
 
 function sourceWithPath(source, configPath) {
@@ -161,6 +186,10 @@ export function readExtensionDescriptor(dir) {
  * - `extensions`：`{ extensionId, directory, dir, root, packageName, packageVersion, declaredId, descriptorPath, hasBrowserEntry }`
  * - `disabled`：`.` 前缀目录（未安装）
  * - `skipped`：目录存在但不是扩展（无 package.json / 包名不符）
+ * - `warnings`：受管根的非致命问题（指针损坏、版本目录缺失、与内置根同 id）；受管扩展是可选插件，
+ *   这些问题只跳过该扩展，不让启动失败。
+ *
+ * 受管根记录带 `managed: true`、`rootWritable: false`、`managedVersion`；内置根同 id 优先。
  */
 export function scanExtensions({ repoRoot, env = process.env, configFile = EXTENSION_CONFIG_FILE } = {}) {
   const resolved = resolveExtensionRoots({ repoRoot, env, configFile });
@@ -225,8 +254,94 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
     }
   }
 
+  const warnings = [];
+  for (const record of scanManagedRoot(resolved.managedRoot, warnings)) {
+    const previous = byId.get(record.extensionId);
+    if (previous) {
+      // 安装前 resolve 已拒绝与内置同 id 的包；走到这里只能是手工改了受管根。内置优先，告警而不失败。
+      warnings.push({
+        code: "EXTENSION_MANAGED_SHADOWED",
+        extensionId: record.extensionId,
+        directory: record.dir,
+        message: `受管扩展 ${record.extensionId}@${record.managedVersion} 与内置扩展同 id（${path.relative(repoRoot, previous.dir)}），内置优先，受管版本不装配`
+      });
+      continue;
+    }
+    byId.set(record.extensionId, record);
+    extensions.push(record);
+  }
+
   extensions.sort((a, b) => (a.extensionId === b.extensionId ? (a.dir < b.dir ? -1 : 1) : a.extensionId < b.extensionId ? -1 : 1));
-  return { ...resolved, extensions, disabled, skipped };
+  return { ...resolved, extensions, disabled, skipped, warnings };
+}
+
+/**
+ * 按 `installations.json` 的版本指针读取受管扩展（只读；不存在的受管根视为空）。
+ *
+ * 每个条目必须满足：版本目录存在、带 `@woohaa3/extension-*` 的 package.json、`extension.json` 的
+ * extensionId 与指针键一致。任一不满足都只告警跳过——指针目录被手工删除时宿主照常启动。
+ * `uninstalling` 状态的条目仍装配（卸载流程先停用再删指针）。
+ */
+export function scanManagedRoot(managedRoot, warnings = []) {
+  if (typeof managedRoot !== "string" || !fs.existsSync(managedRoot)) return [];
+  const { state, warnings: readWarnings } = readInstallations(managedRoot);
+  for (const message of readWarnings) warnings.push({ code: "EXTENSION_MANAGED_INSTALLATIONS_INVALID", extensionId: null, directory: managedRoot, message });
+  const layout = managedLayout(managedRoot);
+  const records = [];
+  for (const [extensionId, entry] of Object.entries(state.extensions).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const skip = (code, message, dir = null) => warnings.push({ code, extensionId, directory: dir, message });
+    let dir;
+    try {
+      dir = layout.versionDir(extensionId, entry.current);
+    } catch (error) {
+      skip("EXTENSION_MANAGED_POINTER_INVALID", `受管扩展 ${extensionId} 的版本指针非法：${error.message}`);
+      continue;
+    }
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+      skip("EXTENSION_MANAGED_VERSION_MISSING", `受管扩展 ${extensionId} 的版本目录缺失：${dir}；本次不装配（可在插件配置里回滚或重新安装）`, dir);
+      continue;
+    }
+    const packageFile = path.join(dir, "package.json");
+    let pkg = null;
+    try {
+      pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
+    } catch (error) {
+      skip("EXTENSION_MANAGED_PACKAGE_INVALID", `受管扩展 ${extensionId} 的 package.json 无法读取：${error.message}`, dir);
+      continue;
+    }
+    if (typeof pkg?.name !== "string" || !pkg.name.startsWith(EXTENSION_PACKAGE_PREFIX)) {
+      skip("EXTENSION_MANAGED_PACKAGE_INVALID", `受管扩展 ${extensionId} 的包名必须以 ${EXTENSION_PACKAGE_PREFIX} 开头：${String(pkg?.name)}`, dir);
+      continue;
+    }
+    let descriptor;
+    let descriptorPath;
+    try {
+      ({ descriptor, descriptorPath } = readExtensionDescriptor(dir));
+    } catch (error) {
+      skip("EXTENSION_MANAGED_DESCRIPTOR_INVALID", error.message, dir);
+      continue;
+    }
+    if (!descriptorPath || descriptor?.extensionId !== extensionId) {
+      skip("EXTENSION_MANAGED_IDENTITY_MISMATCH", `受管扩展 ${extensionId} 的 extension.json 缺失或 extensionId 不一致（${String(descriptor?.extensionId)}）`, dir);
+      continue;
+    }
+    records.push({
+      extensionId,
+      declaredId: extensionId,
+      directory: `${extensionId}@${entry.current}`,
+      dir,
+      root: managedRoot,
+      rootWritable: false,
+      managed: true,
+      managedVersion: entry.current,
+      managedSourceId: entry.sourceId,
+      packageName: pkg.name,
+      packageVersion: typeof pkg.version === "string" ? pkg.version : null,
+      descriptorPath,
+      hasBrowserEntry: hasBrowserEntry(dir)
+    });
+  }
+  return records;
 }
 
 /** Browser 扩展包括源码包和仅包含预构建产物的安装包。 */

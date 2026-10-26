@@ -135,3 +135,107 @@ describe("createExtensionRuntimeService", () => {
     await expect(service.ensureCatalog()).rejects.toMatchObject({ code: "evaluation" });
   });
 });
+
+describe("repin（change: 2026-10-21-harden-extension-fault-isolation）", () => {
+  const NEXT_ID = "d".repeat(64);
+  const nextCatalog = (): ExtensionReleaseCatalog => ({ ...catalog(), releaseId: NEXT_ID, entries: [releaseEntry("demo"), releaseEntry("added")] });
+
+  it("成功后替换运行时目录、清空诊断并返回新 releaseId", async () => {
+    let mode: "ok" | "fail" = "fail";
+    const service = createExtensionRuntimeService({
+      catalogLoader: {
+        load: async () => catalog(),
+        repin: async () => nextCatalog(),
+        currentReleaseId: () => RELEASE_ID,
+        dispose() {}
+      } as never,
+      artifactLoader: artifactLoader(() => mode)
+    });
+    await service.ensureCatalog();
+    await expect(service.loadDescriptor("demo")).rejects.toBeTruthy();
+    expect(service.diagnostics()).toHaveLength(1);
+    await expect(service.repin(`/extension-releases/${NEXT_ID}.json`)).resolves.toBe(NEXT_ID);
+    expect(service.current()?.releaseId).toBe(NEXT_ID);
+    expect(service.metadata().map((entry) => entry.extensionId)).toEqual(["demo", "added"]);
+    expect(service.diagnostics()).toEqual([]);
+    mode = "ok";
+    await expect(service.loadDescriptor("added")).resolves.toMatchObject({ extensionId: "added" });
+  });
+
+  it("新目录加载失败：抛出且保留原目录与诊断", async () => {
+    const service = createExtensionRuntimeService({
+      catalogLoader: {
+        load: async () => catalog(),
+        repin: async () => { throw new ExtensionLoadError("network", "发布目录请求失败", true); },
+        currentReleaseId: () => RELEASE_ID,
+        dispose() {}
+      } as never,
+      artifactLoader: artifactLoader(() => "ok")
+    });
+    await service.ensureCatalog();
+    await expect(service.repin(`/extension-releases/${NEXT_ID}.json`)).rejects.toMatchObject({ code: "network" });
+    expect(service.current()?.releaseId).toBe(RELEASE_ID);
+  });
+
+  it("dispose 后拒绝 repin", async () => {
+    const service = createExtensionRuntimeService({
+      catalogLoader: { load: async () => catalog(), repin: async () => nextCatalog(), currentReleaseId: () => RELEASE_ID, dispose() {} } as never
+    });
+    service.dispose();
+    await expect(service.repin(`/extension-releases/${NEXT_ID}.json`)).rejects.toMatchObject({ code: "evaluation" });
+  });
+});
+
+describe("adoptRelease 热登记（change: 2026-10-21-add-extension-marketplace-point，6.3）", () => {
+  const NEXT_ID = "f".repeat(64);
+  const upgraded = (): ExtensionBrowserReleaseEntry => ({ ...releaseEntry("demo"), artifactId: "c".repeat(64), entryURL: `/extensions/demo/${"c".repeat(64)}/entry.js` });
+  const pointer = { releaseId: NEXT_ID, href: `/extension-releases/${NEXT_ID}.json` };
+
+  function service(next: ExtensionReleaseCatalog, loads: string[] = []) {
+    const loader = artifactLoader(() => "ok");
+    return createExtensionRuntimeService({
+      catalogLoader: { load: async () => catalog(), peek: async () => next, repin: async () => next, currentReleaseId: () => RELEASE_ID, dispose() {} } as never,
+      artifactLoader: { ...loader, load: async (entry) => { loads.push(entry.entryURL); return loader.load(entry); } }
+    });
+  }
+
+  it("只追加新增条目：固定的 releaseId 不变，旧条目保持原 artifact，升级记为待重开", async () => {
+    const loads: string[] = [];
+    const svc = service({ ...catalog(), releaseId: NEXT_ID, entries: [upgraded(), releaseEntry("added")] }, loads);
+    await svc.ensureCatalog();
+    const delta = await svc.adoptRelease(pointer);
+    expect(delta).toEqual({ added: ["added"], upgraded: ["demo"], removed: [] });
+    expect(svc.current()?.releaseId).toBe(RELEASE_ID);
+    expect(svc.entry("demo")?.artifactId).toBe("b".repeat(64));
+    expect(svc.staleExtensionIds()).toEqual(["demo"]);
+    await svc.loadDescriptor("added");
+    // 只为新增条目发请求，不碰被升级的旧条目。
+    expect(loads).toEqual([`/extensions/added/${"b".repeat(64)}/entry.js`]);
+  });
+
+  it("同一 releaseId 幂等；卸载的条目保留在当前页面并提示重开", async () => {
+    const svc = service({ ...catalog(), releaseId: NEXT_ID, entries: [] });
+    await svc.ensureCatalog();
+    expect(await svc.adoptRelease(pointer)).toEqual({ added: [], upgraded: [], removed: ["demo"] });
+    expect(svc.entry("demo")).toBeDefined();
+    expect(svc.staleExtensionIds()).toEqual(["demo"]);
+    expect(await svc.adoptRelease(pointer)).toBeNull();
+  });
+
+  it("指针与目录 releaseId 不一致或读取失败：拒绝且运行时目录不变", async () => {
+    const svc = service({ ...catalog(), releaseId: "9".repeat(64), entries: [releaseEntry("demo"), releaseEntry("added")] });
+    await svc.ensureCatalog();
+    await expect(svc.adoptRelease(pointer)).rejects.toMatchObject({ code: "invalid-catalog" });
+    expect(svc.entry("added")).toBeUndefined();
+  });
+
+  it("目录尚未固定：不发请求，首次加载即用新目录", async () => {
+    let peeked = false;
+    const svc = createExtensionRuntimeService({
+      catalogLoader: { load: async () => catalog(), peek: async () => { peeked = true; return catalog(); }, currentReleaseId: () => null, dispose() {} } as never,
+      artifactLoader: artifactLoader(() => "ok")
+    });
+    await expect(svc.adoptRelease(pointer)).resolves.toBeNull();
+    expect(peeked).toBe(false);
+  });
+});

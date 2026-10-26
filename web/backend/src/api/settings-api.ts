@@ -10,6 +10,8 @@ import {
   DEFAULT_SETTINGS_BASE_PATH,
   WOOHAA3_PROTOCOL_VERSION,
   decodeSettingsWrite,
+  type HostSafeModeView,
+  type InstalledExtensionView,
   type SettingsSnapshot
 } from "@woohaa3/contracts";
 import type { AccessEnforcer, ApplicationRequestAuthenticator } from "@woohaa3/application-service";
@@ -24,6 +26,20 @@ export type SettingsApiDependencies = {
    * 缺省时不提供可选后端，设置页保持纯文本编辑（独立入口与测试）。
    */
   storageBackends?: () => readonly { backendId: string; label?: string; ownerExtensionId?: string }[] | undefined;
+  /** 宿主安全模式（D7）；按请求现取（application 在核心层，比 config 晚装载）。 */
+  safeMode?: () => HostSafeModeView | null | undefined;
+  /**
+   * 受管扩展（change: 2026-10-21-add-extension-marketplace-point，D10）：按请求现取 Extension Manager。
+   * 缺省时 `installedExtensions` 只有目录扫描信息、没有 `extensionInstallations`。
+   */
+  extensionManager?: () => import("../host/core/extension-manager/manager.js").ExtensionManager | undefined;
+  /**
+   * 受管扩展的运行时隔离视图（change: 2026-10-21-isolate-extension-host-process，D7）：按请求现取。
+   * 缺省或返回 undefined 表示隔离关闭——受管扩展标注 `isolation: "in-process"`。
+   */
+  extensionIsolation?: () =>
+    | { views(): readonly { extensionId: string; supervisor: { crashCount: number; quarantinedAt: string | null } }[] }
+    | undefined;
   authenticator?: ApplicationRequestAuthenticator;
   accessEnforcer?: AccessEnforcer;
   basePath?: string;
@@ -35,8 +51,11 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
   const log = deps.logger ?? (() => undefined);
   const snapshot = (): SettingsSnapshot => {
     const backends = deps.storageBackends?.() ?? [];
+    const manager = deps.extensionManager?.();
     return {
-      installedExtensions: deps.directoryControl?.list() ?? [],
+      safeMode: deps.safeMode?.() ?? null,
+      installedExtensions: mergeManaged(deps.directoryControl?.list() ?? [], manager?.installed() ?? [], deps.extensionIsolation?.()),
+      ...(manager ? { extensionInstallations: manager.view() } : {}),
       settings: deps.settings.describe(),
       plugins: deps.settings.plugins(),
       extensionPoints: {
@@ -133,4 +152,47 @@ async function readJson(req: IncomingMessage, maxBytes = 64 * 1024): Promise<unk
   }
   const text = Buffer.concat(chunks).toString("utf8");
   return text === "" ? {} : JSON.parse(text);
+}
+
+/**
+ * 把受管记录并入目录扫描得到的已安装清单：同 id 补 managed / 版本 / 来源 / 信任 / 权限 / 重启提示；
+ * 受管记录在本次启动尚未装配（例如刚安装、待重启）时也列出来，目录显示受管版本目录。
+ */
+function mergeManaged(
+  installed: InstalledExtensionView[],
+  managed: readonly import("../host/core/extension-manager/manager.js").ManagedInstallView[],
+  isolation?: { views(): readonly { extensionId: string; supervisor: { crashCount: number; quarantinedAt: string | null } }[] }
+): InstalledExtensionView[] {
+  const byId = new Map(managed.map((entry) => [entry.extensionId, entry]));
+  const runtime = new Map((isolation?.views() ?? []).map((view) => [view.extensionId, view.supervisor]));
+  /** 受管扩展的隔离投影：隔离开启时为 process（含崩溃次数 / 隔离时刻），否则 in-process（「未隔离」）。 */
+  const isolationOf = (extensionId: string): Pick<InstalledExtensionView, "isolation" | "crashCount" | "quarantinedAt"> => {
+    if (!isolation) return { isolation: "in-process" };
+    const supervisor = runtime.get(extensionId);
+    return {
+      isolation: "process",
+      ...(supervisor && supervisor.crashCount > 0 ? { crashCount: supervisor.crashCount } : {}),
+      ...(supervisor?.quarantinedAt ? { quarantinedAt: supervisor.quarantinedAt } : {})
+    };
+  };
+  const project = (base: InstalledExtensionView | null, entry: (typeof managed)[number]): InstalledExtensionView => ({
+    ...(base ?? { id: entry.extensionId, label: entry.extensionId, description: "", directory: entry.directory, writable: false }),
+    managed: true,
+    version: entry.version,
+    sourceId: entry.sourceId,
+    restartRequired: entry.restartRequired,
+    ...(entry.previousVersion ? { previousVersion: entry.previousVersion } : {}),
+    ...(entry.trust ? { trust: entry.trust } : {}),
+    ...(entry.permissions ? { permissions: entry.permissions } : {}),
+    ...(entry.observeUntil ? { observeUntil: entry.observeUntil } : {}),
+    ...isolationOf(entry.extensionId)
+  });
+  const merged = installed.map((item) => {
+    const entry = byId.get(item.id);
+    if (!entry) return item;
+    byId.delete(item.id);
+    return project(item, entry);
+  });
+  for (const entry of byId.values()) merged.push(project(null, entry));
+  return merged;
 }

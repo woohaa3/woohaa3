@@ -488,6 +488,18 @@ export type ApplicationBackendHost = {
   /** 注销一个遥测出口（按 `exportId`；实现须幂等）。 */
   unregisterTelemetryExport?: (exportId: string) => void;
   /**
+   * 注册一个扩展市场来源（`ctx.marketplace` 扩展点；change: 2026-10-21-add-server-extension-marketplace，D6）。
+   *
+   * 与 `registerStorage` 同形：谁注册谁收回，宿主按 owner 记 `sourceId` 并在停用 / 回滚时反序注销。
+   * 宿主按本扩展的扫描来源（内置根 / 可写根 / 受管根）断言：**只有内置根扩展可以注册来源**，其余抛
+   * `EXTENSION_MARKETPLACE_SOURCE_UNTRUSTED_ROOT`。来源只交付字节，签名信任仍由本机信任根决定。
+   *
+   * 缺失表示宿主没有市场扩展点：扩展必须记日志跳过，不得把它当成激活失败。
+   */
+  registerMarketplaceSource?: (source: import("../backend/marketplace.js").MarketplaceSource) => void;
+  /** 注销一个市场来源（按 `sourceId`；实现须幂等）。 */
+  unregisterMarketplaceSource?: (sourceId: string) => void;
+  /**
    * 基础提供者注册面（change: 2026-10-13-...，任务 0.3/1.1）。只有后端宿主提供；
    * 同一 slot 的重复 owner 在开放入口前拒绝。
    */

@@ -57,6 +57,16 @@ export type ExtensionReleaseCatalogLoader = {
   load(): Promise<ExtensionReleaseCatalog | null>;
   /** 已固定的 releaseId（未加载为 null）。 */
   currentReleaseId(): string | null;
+  /**
+   * 改固定到另一个发布目录（change: 2026-10-21-harden-extension-fault-isolation，D6）：
+   * 地址按 HTML link 同一规则校验，加载成功后才替换；失败保留原 release 不变。
+   */
+  repin(releaseHref: string): Promise<ExtensionReleaseCatalog>;
+  /**
+   * 只读取并校验另一个发布目录，**不**改变已固定的 release
+   * （change: 2026-10-21-add-extension-marketplace-point，6.3：热登记只取新增条目）。
+   */
+  peek(releaseHref: string): Promise<ExtensionReleaseCatalog>;
   dispose(): void;
 };
 
@@ -74,12 +84,10 @@ export function createExtensionReleaseCatalogLoader(
     return readExtensionReleaseHref(doc);
   };
 
-  const loadOnce = async (): Promise<ExtensionReleaseCatalog | null> => {
-    const href = resolveHref();
-    if (!href) {
-      log({ event: "extension-release-catalog-absent" });
-      return null;
-    }
+  /** 显式 repin 后的目录地址；优先于 HTML link 与构造参数。 */
+  let pinnedHref: string | null = null;
+
+  const fetchCatalog = async (href: string): Promise<ExtensionReleaseCatalog> => {
     if (!isValidPublishedExtensionUrl(href) || !href.startsWith(EXTENSION_RELEASE_PREFIX)) {
       throw new ExtensionLoadError("invalid-catalog", "发布目录地址非法", false);
     }
@@ -109,9 +117,19 @@ export function createExtensionReleaseCatalogLoader(
         throw new ExtensionLoadError("invalid-catalog", `artifact 地址前缀非法：${entry.entryURL}`, false);
       }
     }
-    releaseId = decoded.value.releaseId;
-    log({ event: "extension-release-catalog-loaded", releaseId, entries: decoded.value.entries.length });
     return decoded.value;
+  };
+
+  const loadOnce = async (): Promise<ExtensionReleaseCatalog | null> => {
+    const href = pinnedHref ?? resolveHref();
+    if (!href) {
+      log({ event: "extension-release-catalog-absent" });
+      return null;
+    }
+    const catalog = await fetchCatalog(href);
+    releaseId = catalog.releaseId;
+    log({ event: "extension-release-catalog-loaded", releaseId, entries: catalog.entries.length });
+    return catalog;
   };
 
   return {
@@ -126,9 +144,23 @@ export function createExtensionReleaseCatalogLoader(
       return pending;
     },
     currentReleaseId: () => releaseId,
+    async repin(releaseHref) {
+      const href = stripAppLocationPathname(releaseHref.trim());
+      // 先完整加载并校验新目录，成功后才替换固定的 release；失败时原 release 保持不变。
+      const catalog = await fetchCatalog(href);
+      pinnedHref = href;
+      releaseId = catalog.releaseId;
+      pending = Promise.resolve(catalog);
+      log({ event: "extension-release-catalog-repinned", releaseId, entries: catalog.entries.length });
+      return catalog;
+    },
+    async peek(releaseHref) {
+      return fetchCatalog(stripAppLocationPathname(releaseHref.trim()));
+    },
     dispose() {
       pending = null;
       releaseId = null;
+      pinnedHref = null;
     }
   };
 }

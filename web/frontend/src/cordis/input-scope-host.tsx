@@ -8,6 +8,8 @@ import { useEffect } from "react";
 import { useService } from "./react.js";
 import { useSlot } from "./host.js";
 import { isEditableElement } from "./plugins/canvas-shell/input/shortcuts.js";
+import { guardContributionCall } from "./contribution-guard.js";
+import { useExtensionFaults } from "./host.js";
 
 /** 事件目标是否位于编辑面（input/textarea/contenteditable/菜单/弹窗）。 */
 function isEditorTarget(target: EventTarget | null): boolean {
@@ -18,6 +20,7 @@ export function InputScopeHost() {
   const inputScopes = useService("inputScopes");
   const pasteContributions = useSlot("input.paste");
   const dropContributions = useSlot("input.drop");
+  const faults = useExtensionFaults();
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -25,7 +28,8 @@ export function InputScopeHost() {
     const onPaste = (event: ClipboardEvent) => {
       if (inputScopes.blocksCanvas() || isEditorTarget(event.target)) return;
       for (const entry of pasteContributions) {
-        if (entry.handle(event) === true) {
+        // 扩展处理器抛错：归因计入熔断并跳过，交给下一个处理器或浏览器默认行为。
+        if (guardContributionCall(entry, "input.paste", faults, () => entry.handle(event), undefined) === true) {
           event.preventDefault();
           return;
         }
@@ -34,7 +38,7 @@ export function InputScopeHost() {
     const onDrop = (event: DragEvent) => {
       if (inputScopes.blocksCanvas() || isEditorTarget(event.target)) return;
       for (const entry of dropContributions) {
-        if (entry.handle(event) === true) {
+        if (guardContributionCall(entry, "input.drop", faults, () => entry.handle(event), undefined) === true) {
           event.preventDefault();
           return;
         }
@@ -48,7 +52,9 @@ export function InputScopeHost() {
     const onDragAccept = (event: DragEvent) => {
       if (inputScopes.blocksCanvas() || isEditorTarget(event.target)) return;
       // 只为**可接受**的 transfer 显示 drop 反馈；至少一个 contribution 接受时才阻止默认。
-      const acceptable = dropContributions.some((entry) => entry.canAccept?.(event) ?? true);
+      const acceptable = dropContributions.some((entry) =>
+        entry.canAccept ? guardContributionCall(entry, "input.drop", faults, () => entry.canAccept!(event), false) : true
+      );
       if (!acceptable) return;
       event.preventDefault();
       // 明确告知浏览器这是复制语义（文件不会被导航打开）。
@@ -64,7 +70,7 @@ export function InputScopeHost() {
       document.removeEventListener("dragover", onDragAccept);
       document.removeEventListener("dragenter", onDragAccept);
     };
-  }, [dropContributions, inputScopes, pasteContributions]);
+  }, [dropContributions, faults, inputScopes, pasteContributions]);
 
   return null;
 }

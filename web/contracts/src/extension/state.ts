@@ -14,8 +14,18 @@ export const APPLICATION_EXTENSION_ACTUAL_STATES = [
   "active",
   "degraded",
   "failed",
-  "draining"
+  "draining",
+  /** 安全模式下暂停（change: 2026-10-21-harden-extension-fault-isolation，D7）：不改写 desiredEnabled。 */
+  "suspended",
+  /**
+   * 崩溃熔断（change: 2026-10-21-isolate-extension-host-process，D7）：5 分钟内 3 次崩溃后停止自动重启，
+   * 诊断码 `crash-loop`；需要升级版本或管理员「解除隔离」。不改写 desiredEnabled。
+   */
+  "quarantined"
 ] as const;
+
+/** `quarantined` 的诊断码。 */
+export const EXTENSION_CRASH_LOOP_DIAGNOSTIC = "crash-loop";
 export type ApplicationExtensionActualState = (typeof APPLICATION_EXTENSION_ACTUAL_STATES)[number];
 
 export function isApplicationExtensionActualState(value: unknown): value is ApplicationExtensionActualState {
@@ -64,7 +74,15 @@ export type ApplicationExtensionSnapshot = {
   /** 服务端可信清单的公开元数据摘要（名称/说明；不含代码位置）。 */
   catalog: ApplicationExtensionMetadataSummary[];
   plugins: ApplicationExtensionStatus[];
+  /**
+   * 当前浏览器发布目录指针（change: 2026-10-21-add-extension-marketplace-point，任务 6.2 / design D8）。
+   * 受管扩展安装/卸载后随之切换；前端据此为新增条目热登记，已固定的 release 不变。旧宿主不返回此字段。
+   */
+  extensionRelease?: ApplicationExtensionReleasePointer;
 };
+
+/** 浏览器发布目录指针：`href` 是固定发布逻辑前缀 `/extension-releases/<releaseId>.json`。 */
+export type ApplicationExtensionReleasePointer = { releaseId: string; href: string };
 
 /** 有界增量项：要么是完整状态，要么是删除通知。 */
 export type ApplicationExtensionChange = {
@@ -78,6 +96,8 @@ export type ApplicationExtensionChangeBatch = {
   changes: ApplicationExtensionChange[];
   /** 增量不可用（cursor 过旧/丢失）时为 true，客户端必须重取 snapshot。 */
   resyncRequired: boolean;
+  /** 同 `ApplicationExtensionSnapshot.extensionRelease`：随增量带回，变化不推进插件 revision。 */
+  extensionRelease?: ApplicationExtensionReleasePointer;
 };
 
 /** 递归剔除敏感键与秘密载体后的安全值（永不回显配置秘密）。 */
@@ -138,7 +158,18 @@ export function isApplicationExtensionSnapshot(value: unknown): value is Applica
   if (!isNonNegativeInteger(value.revision)) return false;
   if (!Array.isArray(value.catalog)) return false;
   if (!Array.isArray(value.plugins)) return false;
+  if (value.extensionRelease !== undefined && !isApplicationExtensionReleasePointer(value.extensionRelease)) return false;
   return value.plugins.every((entry) => isApplicationExtensionStatus(entry));
+}
+
+const RELEASE_POINTER_HREF = /^\/extension-releases\/([a-f0-9]{64})\.json$/;
+
+/** 发布目录指针：releaseId 为 64-hex，href 必须是同一 releaseId 的固定发布逻辑地址。 */
+export function isApplicationExtensionReleasePointer(value: unknown): value is ApplicationExtensionReleasePointer {
+  if (!isJsonObject(value)) return false;
+  if (typeof value.releaseId !== "string" || typeof value.href !== "string") return false;
+  const match = RELEASE_POINTER_HREF.exec(value.href);
+  return match !== null && match[1] === value.releaseId;
 }
 
 export function isApplicationExtensionChangeBatch(value: unknown): value is ApplicationExtensionChangeBatch {
@@ -147,6 +178,7 @@ export function isApplicationExtensionChangeBatch(value: unknown): value is Appl
     isNonNegativeInteger(value.revision) &&
     typeof value.resyncRequired === "boolean" &&
     Array.isArray(value.changes) &&
+    (value.extensionRelease === undefined || isApplicationExtensionReleasePointer(value.extensionRelease)) &&
     value.changes.every((entry) => isJsonObject(entry) && isApplicationExtensionStatus(entry.status))
   );
 }

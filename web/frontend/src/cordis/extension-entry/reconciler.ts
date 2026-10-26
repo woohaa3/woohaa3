@@ -18,6 +18,8 @@
 import type { Context, Fiber } from "@deepseek-ai/cordis";
 import type { ApplicationExtensionStatus } from "@woohaa3/contracts";
 import { fiberStatus } from "../diagnostics.js";
+import { scopedExtensionServices } from "../slots.js";
+import type { ExtensionFaultService } from "../extension-faults.js";
 import type { ApplicationExtensionFrontendEntryRegistry, RegisteredApplicationExtensionEntry } from "./contract.js";
 
 export type ApplicationExtensionEntryReconcilerOptions = {
@@ -73,6 +75,8 @@ type EntryState = {
   closing: Promise<void> | null;
   /** 已报告失败的 epoch（相同 epoch 不自动重试）。 */
   failedEpoch: number | null;
+  /** 熔断注销（change: 2026-10-21-harden-extension-fault-isolation，design D3）。 */
+  detachFaults: (() => void) | null;
   /** 可公开诊断。 */
   status: ApplicationExtensionEntryDiagnostic["status"];
   error: string | null;
@@ -89,7 +93,7 @@ export function createApplicationExtensionEntryReconciler(
   const stateOf = (extensionId: string): EntryState => {
     let state = states.get(extensionId);
     if (!state) {
-      state = { desired: false, epoch: 0, pending: null, owned: null, closing: null, failedEpoch: null, status: "registered", error: null };
+      state = { desired: false, epoch: 0, pending: null, owned: null, closing: null, failedEpoch: null, detachFaults: null, status: "registered", error: null };
       states.set(extensionId, state);
     }
     return state;
@@ -120,8 +124,11 @@ export function createApplicationExtensionEntryReconciler(
       // 同步区间内再次检查，再创建 Fiber 并立即登记 owner。
       if (state.epoch !== epoch || !state.desired || state.owned || state.closing) return;
       let fiber: Fiber;
+      // 来源身份由宿主盖章（design D1）：扩展经代理 slots 注册，嵌套插件同样继承。
+      const scoped = scopedExtensionServices(options.ctx, extensionId);
+      const assemblyEpoch = scoped.epoch;
       try {
-        fiber = options.ctx.plugin(descriptor.plugin()) as Fiber;
+        fiber = options.ctx.extend({ slots: scoped.slots, dialogs: scoped.dialogs } as never).plugin(descriptor.plugin()) as Fiber;
       } catch (error) {
         state.status = "failed";
         state.error = error instanceof Error ? error.message : "插件构造失败";
@@ -131,6 +138,7 @@ export function createApplicationExtensionEntryReconciler(
       }
       state.owned = { fiber, epoch };
       state.status = "waiting";
+      attachFaults(extensionId, fiber, assemblyEpoch, registryEntry.metadata.required === true);
       void fiber.await().catch((error: unknown) => {
         // apply 失败：主动 dispose + await 回滚，避免留下部分 contribution。
         void rollback(extensionId, fiber, error);
@@ -148,6 +156,35 @@ export function createApplicationExtensionEntryReconciler(
     }
   };
 
+  /**
+   * 向 App 级 `extensionFaults` 登记本次装配（design D3）：
+   * - 熔断：标记 failed（原因 render-fault-threshold）、failedEpoch=当前 epoch 并释放 fiber，
+   *   同一 epoch 内不自动重试；
+   * - 重新加载：等价显式 `retry`（推进 epoch 后重新装配）。
+   */
+  const attachFaults = (extensionId: string, fiber: Fiber, assemblyEpoch: number, required: boolean) => {
+    const faults = options.ctx.get("extensionFaults" as never) as ExtensionFaultService | undefined;
+    if (!faults) return;
+    const state = stateOf(extensionId);
+    state.detachFaults?.();
+    state.detachFaults = faults.attach(extensionId, {
+      required,
+      epoch: assemblyEpoch,
+      trip: (reason) => {
+        if (state.owned?.fiber !== fiber) return;
+        log({ event: "site-extension-entry-failed", extensionId, message: reason });
+        void disposeOne(extensionId).then(() => {
+          state.status = "failed";
+          state.error = "本次会话已停用：渲染错误过多";
+          state.failedEpoch = state.epoch;
+        });
+        // disposeOne 的 finally 会在 desired 时重新装配；熔断语义是同一 epoch 不重试。
+        state.failedEpoch = state.epoch;
+      },
+      reload: () => retryOne(extensionId)
+    });
+  };
+
   const rollback = async (extensionId: string, fiber: Fiber, error: unknown): Promise<void> => {
     const state = stateOf(extensionId);
     log({ event: "site-extension-entry-failed", extensionId, message: error instanceof Error ? error.message : String(error) });
@@ -158,6 +195,8 @@ export function createApplicationExtensionEntryReconciler(
     }
     if (state.owned?.fiber === fiber) {
       state.owned = null;
+      state.detachFaults?.();
+      state.detachFaults = null;
       state.status = "failed";
       state.error = error instanceof Error ? error.message : "插件激活失败";
       state.failedEpoch = state.epoch;
@@ -170,6 +209,8 @@ export function createApplicationExtensionEntryReconciler(
     const owned = state.owned;
     if (!owned) return Promise.resolve();
     state.owned = null;
+    state.detachFaults?.();
+    state.detachFaults = null;
     state.status = "unloading";
     const pending = Promise.resolve(owned.fiber.dispose())
       .catch((error: unknown) => {
@@ -178,8 +219,9 @@ export function createApplicationExtensionEntryReconciler(
       .finally(() => {
         state.closing = null;
         state.status = state.desired ? "loading" : "registered";
-        // 释放完成后，若最新权威状态仍要求 active，则按最新 epoch 重新装配。
-        if (!disposed && state.desired && isScopeAlive() && !state.owned) {
+        // 释放完成后，若最新权威状态仍要求 active，则按最新 epoch 重新装配；
+        // 当前 epoch 已失败（例如渲染熔断）时不自动重试，等显式 retry 或新激活 epoch。
+        if (!disposed && state.desired && isScopeAlive() && !state.owned && state.failedEpoch !== state.epoch) {
           void enter(extensionId, state.epoch);
         }
       });
@@ -214,18 +256,20 @@ export function createApplicationExtensionEntryReconciler(
     }
   };
 
+  function retryOne(extensionId: string): void {
+    const state = stateOf(extensionId);
+    state.failedEpoch = null;
+    state.error = null;
+    state.status = "registered";
+    if (state.desired && !state.owned && !state.closing && !state.pending) {
+      state.epoch += 1;
+      void enter(extensionId, state.epoch);
+    }
+  }
+
   return {
     reconcile,
-    retry: (extensionId) => {
-      const state = stateOf(extensionId);
-      state.failedEpoch = null;
-      state.error = null;
-      state.status = "registered";
-      if (state.desired && !state.owned && !state.closing && !state.pending) {
-        state.epoch += 1;
-        void enter(extensionId, state.epoch);
-      }
-    },
+    retry: retryOne,
     activeExtensionIds: () => [...states.entries()].filter(([, state]) => state.owned).map(([id]) => id),
     diagnostics: () =>
       [...states.entries()].map(([extensionId, state]) => {
@@ -252,6 +296,8 @@ export function createApplicationExtensionEntryReconciler(
       await Promise.allSettled([...states.keys()].map((extensionId) => disposeOne(extensionId)));
       await Promise.allSettled([...states.values()].map((state) => state.closing).filter((p): p is Promise<void> => p !== null));
       for (const state of states.values()) {
+        state.detachFaults?.();
+        state.detachFaults = null;
         state.owned = null;
         state.pending = null;
         state.closing = null;

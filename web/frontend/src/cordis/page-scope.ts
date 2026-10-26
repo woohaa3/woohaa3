@@ -47,6 +47,8 @@ import type { CanvasPreparationRemote, CanvasPreparationService } from "./contra
 import type { CanvasExtensionMetadata } from "./plugins/extension-manager/contract.js";
 import { createExtensionRuntimeService, type ExtensionRuntimeService } from "./extension-runtime/service.js";
 import { resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
+import { installAppHostConnectivity, type AppConnectivityOptions, type AppConnectivityRuntime } from "./app-host-connectivity.js";
+import { browserHistory, subscribePreparationReady } from "./page-scope-helpers.js";
 
 /** App 运行时快照：页面、location 与兼容设置意图的诊断必须原子发布。 */
 export type AppRuntimeSnapshot = {
@@ -56,7 +58,7 @@ export type AppRuntimeSnapshot = {
   settingsError: string | null;
 };
 
-export type AppRuntime = {
+export type AppRuntime = AppConnectivityRuntime & {
   /** App scope runtime（Theme/Dialog/Slots/Router/Catalog）。 */
   app: FrontendRuntime;
   router: AppRouterStore;
@@ -83,7 +85,7 @@ export type AppRuntime = {
   dispose(): Promise<void>;
 };
 
-export type StartAppOptions = {
+export type StartAppOptions = AppConnectivityOptions & {
   /** 初始 pathname（测试注入）。 */
   initialPathname?: string;
   initialSearch?: string;
@@ -166,6 +168,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
 
   finishAppScope();
   const router = app.ctx.appRouter as AppRouterStore;
+  const connectivity = installAppHostConnectivity({ appCtx: app.ctx, runtime: runtimeService, ...(options.hostProbe ? { probe: options.hostProbe } : {}) });
   const catalog = app.ctx.canvasCatalog;
   const selection = app.ctx.canvasSelection;
   const preparation = app.ctx.canvasPreparation;
@@ -259,7 +262,8 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
           configurable: result.entry.configScope === "browser-local",
           name: result.entry.label,
           description: result.entry.description,
-          plugin: result.descriptor.plugin() as Plugin
+          plugin: result.descriptor.plugin() as Plugin,
+          extension: true
         });
       } else if (result.entry.required) {
         // required 资源加载失败：进入稳定 page error，不挂载半可用画布。
@@ -496,6 +500,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     const outgoing = page;
     page = null;
     pageLocation = null;
+    connectivity.watchPage(null);
     publish();
     if (outgoing) await outgoing.dispose();
     if (generation !== transitionGeneration) return;
@@ -561,6 +566,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
       }
       page = incoming;
       pageLocation = normalized;
+      connectivity.watchPage(incoming);
       // page 与其 location 原子发布：React 只会看到「无 page」或「page 与 location 一致」。
       publish();
       router.reportScope({ id: router.currentScopeId(), page: location.page, phase: "ready", error: null });
@@ -621,6 +627,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
   };
   globalThis.addEventListener?.("popstate", onPop);
 
+  connectivity.bindPageReopen({ location: () => pageLocation ?? router.getLocation(), apply: applyLocation });
   return {
     app,
     router,
@@ -639,8 +646,10 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
       };
     },
     applyLocation,
+    ...connectivity.runtimeFields(),
     async dispose() {
       transitionGeneration += 1;
+      connectivity.dispose();
       preparationWatcher?.();
       preparationWatcher = null;
       globalThis.removeEventListener?.("popstate", onPop);
@@ -657,40 +666,5 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
       await app.dispose();
       runtimeService.dispose();
     }
-  };
-}
-
-/**
- * 订阅某 canvasId 的准备态：仅当状态转为 `ready` 时回调一次（用于把 preparing scope 迁移到
- * 真正的 Canvas scope）。返回取消订阅函数。
- */
-function subscribePreparationReady(
-  preparation: CanvasPreparationService,
-  canvasId: string,
-  onReady: () => void
-): () => void {
-  let fired = false;
-  const listener = () => {
-    if (fired) return;
-    const state = preparation.getState();
-    if (state.canvasId !== null && state.canvasId !== canvasId) return;
-    if (state.status === "ready") {
-      fired = true;
-      onReady();
-    }
-  };
-  const unsubscribe = preparation.subscribe(listener);
-  // 订阅后立即检查一次（可能订阅前已 ready）。
-  listener();
-  return unsubscribe;
-}
-
-/** 浏览器 history 适配；无 `history` 时返回 undefined（SSR/测试）。 */
-function browserHistory(): AppHistoryAdapter | undefined {
-  const history = globalThis.history;
-  if (!history) return undefined;
-  return {
-    pushState: (data, title, url) => history.pushState(data, title, url),
-    replaceState: (data, title, url) => history.replaceState(data, title, url)
   };
 }

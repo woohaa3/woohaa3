@@ -56,7 +56,9 @@ const ACTION_BY_NAME: Readonly<Record<TelemetryEventName, string | null>> = {
   "perf.interaction": null,
   "perf.segment": null,
   "perf.frame": null,
-  "task.terminal": null
+  "task.terminal": null,
+  /** 本地故障复盘事实；proto 无对应 Action，不导出。 */
+  "extension.render-failed": null
 };
 
 const RESULT_BY_VALUE: Readonly<Record<TelemetryResult, string>> = {
@@ -100,7 +102,8 @@ const SURFACE_BY_NAME: Readonly<Record<TelemetryEventName, string | null>> = {
   "perf.interaction": null,
   "perf.segment": null,
   "perf.frame": null,
-  "task.terminal": null
+  "task.terminal": null,
+  "extension.render-failed": null
 };
 
 /** 一条本机事件 → Connect JSON 的 `ClientEvent`；无对应枚举时返回 `null`。 */

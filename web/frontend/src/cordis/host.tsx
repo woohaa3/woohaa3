@@ -7,6 +7,8 @@
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import { useOptionalService, useService } from "./react.js";
 import { PanelRenderErrorFallback, RenderErrorBoundary } from "./app-error-boundary.js";
+import { ContributionBoundary as Guard, guardedToolbarAction, useExtensionFaults } from "./contribution-boundary.js";
+import { guardedContextMenuItems, selectGuardedContextMenuItem } from "./contribution-guard.js";
 import type { SyncStatusView } from "./sync-status.js";
 import { useFocusLayoutSource } from "./focus/workspace.js";
 import { Button, IconButton } from "../shared/ui/Button.js";
@@ -57,7 +59,7 @@ export function RouteHost({ path, navigate }: { path: string; navigate: (to: str
   const match = routes.find((route) => route.path === path);
   if (!match) return null;
   const Component = match.render;
-  return <Component path={path} navigate={navigate} />;
+  return <Guard entry={match} slot="app.route" fallback="card"><Component path={path} navigate={navigate} /></Guard>;
 }
 
 /** 渲染 `canvas.overlay` contributions。 */
@@ -67,7 +69,7 @@ export function CanvasOverlayHost(props: CanvasSlotProps) {
     <>
       {contributions.map((entry) => {
         const Component = entry.render;
-        return <Component key={entry.id} {...props} />;
+        return <Guard key={entry.id} entry={entry} slot="canvas.overlay" fallback="hidden"><Component {...props} /></Guard>;
       })}
     </>
   );
@@ -94,7 +96,7 @@ export function CanvasTopBarHost({ overview = true, ...props }: CanvasSlotProps 
   const Readout = statusReadout?.render;
   const content = contributions.map((entry) => {
     const Component = entry.render;
-    return <Component key={entry.id} {...props} />;
+    return <Guard key={entry.id} entry={entry} slot="canvas.topbar"><Component {...props} /></Guard>;
   });
   if (desktopBootstrap(globalThis)) {
     // 合并读数：同步/连接状态始终在，性能读数作为同一按钮的紧凑内容。
@@ -112,10 +114,10 @@ export function CanvasTopBarHost({ overview = true, ...props }: CanvasSlotProps 
     const trailing = !Readout
       ? renderStatus()
       : statusReadout.wrapsStatus
-        // 新贡献自己调用 renderStatus 装配气泡（仍使用本宿主的合并版本）。
-        ? <Readout {...props} renderStatus={renderStatus} />
+        // 新贡献自己调用 renderStatus 装配气泡（仍使用本宿主的合并版本）；出错退回宿主同步读数。
+        ? <Guard replacement={renderStatus()} entry={statusReadout} slot="canvas.topbar-status"><Readout {...props} renderStatus={renderStatus} /></Guard>
         // 旧贡献只返回紧凑读数，由宿主放进同一个气泡。
-        : renderStatus(<Readout {...props} renderStatus={renderStatus} />);
+        : renderStatus(<Guard entry={statusReadout} slot="canvas.topbar-status"><Readout {...props} renderStatus={renderStatus} /></Guard>);
     return (
       <DesktopCanvasBar status={<div className="desktop-canvas-bar__readouts" role="group" aria-label="画布状态读数">{trailing}</div>}>
         {content}
@@ -611,6 +613,7 @@ export function CanvasControlPanel({
  */
 export function CanvasToolbarHost(props: CanvasSlotProps) {
   const onDesktop = desktopBootstrap(globalThis) !== undefined;
+  const faults = useExtensionFaults();
   const contributions = useSlot("canvas.toolbar");
   const actions = useSlot("canvas.toolbar-action");
   const statusReadouts = useSlot("canvas.toolbar-status");
@@ -619,27 +622,19 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
   const renderStatus = (readout: ReactNode, details?: ReactNode) => (
     <CanvasControlStatus status={props.sync} details={details} onReconnect={props.onReconnect}>{readout}</CanvasControlStatus>
   );
-  const readout = Readout ? <Readout {...props} renderStatus={renderStatus} /> : undefined;
+  const readout = Readout ? <Guard entry={statusReadout!} slot="canvas.toolbar-status"><Readout {...props} renderStatus={renderStatus} /></Guard> : undefined;
   const viewport =
     contributions.length > 0 ? (
       <>
         {contributions.map((entry) => {
           const Component = entry.render;
-          return <Component key={entry.id} {...props} />;
+          return <Guard key={entry.id} entry={entry} slot="canvas.toolbar"><Component {...props} /></Guard>;
         })}
       </>
     ) : null;
   return (
     <CanvasControlPanel
-      actions={actions.map((entry) => ({
-        id: entry.id,
-        label: entry.label,
-        icon: entry.icon,
-        tone: entry.tone,
-        tooltip: entry.tooltip,
-        onActivate: entry.onActivate,
-        disabled: entry.available ? !entry.available() : false
-      }))}
+      actions={actions.map((entry) => guardedToolbarAction(entry, faults))}
       viewport={viewport}
       onReconnect={props.onReconnect}
       {...(onDesktop ? {} : { status: props.sync })}
@@ -651,13 +646,12 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
 /** 合并 `canvas.context-menu` contributions 的菜单项，并按 section/order 规范化分隔线。 */
 export function useContextMenuItems(context: import("./contracts.js").ContextMenuContext) {
   const contributions = useSlot("canvas.context-menu");
-  return normalizeCanvasMenuSections(contributions.flatMap((entry) => entry.items(context)));
+  return normalizeCanvasMenuSections(guardedContextMenuItems(contributions, useExtensionFaults(), context));
 }
 
 /** 分发 context-menu 选择到各 contribution。 */
 export function useSelectContextMenuItem() {
-  const contributions = useSlot("canvas.context-menu");
-  return (itemId: string, context: import("./contracts.js").ContextMenuContext) => {
-    for (const entry of contributions) entry.onSelect(itemId, context);
-  };
+  return selectGuardedContextMenuItem(useSlot("canvas.context-menu"), useExtensionFaults());
 }
+
+export { useExtensionFaults };

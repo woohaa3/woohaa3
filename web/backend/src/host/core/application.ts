@@ -26,6 +26,7 @@ import { createInProcessAuthoringServices } from "../../ports/authoring-adapters
 import { createExtensionCanvasAccessFacade, createExtensionNodeFacade } from "../../ports/extension-nodes.js";
 import { createBackendRuntime } from "../../runtime/backend-runtime.js";
 import { createSiteGate } from "./site-gate.js";
+import { DEFAULT_ACTIVATION_TIMEOUT_MS, boundedTimeout } from "../extensions/deadline.js";
 import { internalModelMcpEndpoint } from "./model-mcp-url.js";
 import type { ApplicationModule, HostContext, HostPlugin } from "../context.js";
 import { ROUTE_ORDER } from "../order.js";
@@ -41,6 +42,8 @@ export type ApplicationPluginConfig = {
   extensionHost?: LoadedExtensionHost;
   /** 扩展层插件名；其中有站点元数据的由插件管理里的开关启停。 */
   treeExtensions?: readonly string[];
+  /** 本次启动的安全模式（D7）；缺省表示正常启动。 */
+  safeMode?: import("@woohaa3/contracts").HostSafeModeView;
 };
 
 /**
@@ -189,7 +192,23 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       ...(ctx.access.foundation ? { foundation: ctx.access.foundation } : {}),
       applicationExtensionMetadata: metadata,
       applicationBackendExtensions: [...definitions, ...siteGate.definitions],
+      // 版本激活时限（D4）：按调用现取宿主设置，热更新生效；取值有界。
+      extensionActivationTimeoutMs: () =>
+        boundedTimeout(ctx.get("config")?.get("extensions.activationTimeoutMs" as never), DEFAULT_ACTIVATION_TIMEOUT_MS),
+      // 安全模式（D7）：扫描期已跳过装配的扩展，控制面把它们投影为 suspended，不改写 desiredEnabled。
+      ...(config.safeMode || config.extensionHost?.safeMode
+        ? { suspendedExtensions: new Set([...(config.safeMode?.suspended ?? []), ...(config.extensionHost?.safeMode?.suspended ?? [])]) }
+        : {}),
       publicRoutes: manifest.publicRoutes,
+      // 发布目录指针随状态快照/增量返回（change: 2026-10-21-add-extension-marketplace-point，6.2）。
+      ...(config.extensionHost?.browserRelease
+        ? {
+            extensionRelease: () => {
+              const release = config.extensionHost?.browserRelease;
+              return release ? { releaseId: release.releaseId, href: release.href } : null;
+            }
+          }
+        : {}),
       generation: {
         register: (provider) => {
           generation.register(provider);
@@ -212,6 +231,18 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         },
         unregister: (exportId) => ctx.telemetry.unregisterExport(exportId)
       },
+      // 市场来源（change: 2026-10-21-add-server-extension-marketplace，D6）：按扩展的扫描来源取
+      // `ctx.marketplace.scoped(origin)`，非内置根 / 无来源记录的站点扩展注册即被拒。
+      ...(ctx.get("marketplace")
+        ? {
+            marketplace: {
+              register: (extensionId: string, source: import("@woohaa3/contracts").MarketplaceSource) => {
+                ctx.get("marketplace")!.scoped(siteExtensionOrigin(config.extensionHost, extensionId)).register(source);
+              },
+              unregister: (sourceId: string) => ctx.get("marketplace")?.unregister(sourceId)
+            }
+          }
+        : {}),
       servicesFor,
       // 诊断缓冲只读投影：remote-server 扩展用它在调试窗口里展示接入过程。
       ...(diagnostics ? { diagnostics } : {}),
@@ -240,7 +271,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       host,
       logger: ctx.log.scope("cordis")
     });
-    const module: ApplicationModule = { service, runtime, definitions, sourceRegistry, siteGate };
+    const module: ApplicationModule = { service, runtime, definitions, sourceRegistry, siteGate, safeMode: config.safeMode ?? null };
     ctx.provide("application", module);
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.application, (req, res) => service.handle(req, res)));
     await runtime.activate();
@@ -265,3 +296,15 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     ctx.effect(() => () => { for (const release of releases) release(); });
   }
 };
+
+/**
+ * 站点扩展的扫描来源（D6）：取扩展宿主 registrations 里同 id 记录的 `managed` / `rootWritable`。
+ * 找不到记录（测试注入的定义、未经扫描的扩展）返回 undefined，由 `scoped` 按「缺少来源」拒绝。
+ */
+export function siteExtensionOrigin(
+  host: { registrations?: readonly { extensionId: string; managed?: boolean; rootWritable?: boolean }[] } | undefined,
+  extensionId: string
+): import("./marketplace.js").HostPluginOrigin | undefined {
+  const record = host?.registrations?.find((entry) => entry.extensionId === extensionId);
+  return record ? { managed: record.managed === true, rootWritable: record.rootWritable === true } : undefined;
+}

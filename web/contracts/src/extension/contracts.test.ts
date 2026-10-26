@@ -193,6 +193,17 @@ describe("公开状态脱敏（任务 1.1）", () => {
     expect(isApplicationExtensionChangeBatch({ revision: 4, changes: [], resyncRequired: false })).toBe(true);
   });
 
+  it("发布目录指针（change: 2026-10-21-add-extension-marketplace-point，6.2）：href 必须对应同一 releaseId", () => {
+    const releaseId = "a".repeat(64);
+    const pointer = { releaseId, href: `/extension-releases/${releaseId}.json` };
+    const base = { revision: 1, catalog: [], plugins: [] };
+    expect(isApplicationExtensionSnapshot({ ...base, extensionRelease: pointer })).toBe(true);
+    expect(isApplicationExtensionSnapshot({ ...base, extensionRelease: { releaseId, href: `/extension-releases/${"b".repeat(64)}.json` } })).toBe(false);
+    expect(isApplicationExtensionSnapshot({ ...base, extensionRelease: { releaseId, href: "https://evil.example/x.json" } })).toBe(false);
+    expect(isApplicationExtensionChangeBatch({ revision: 1, changes: [], resyncRequired: false, extensionRelease: pointer })).toBe(true);
+    expect(isApplicationExtensionChangeBatch({ revision: 1, changes: [], resyncRequired: false, extensionRelease: { releaseId: "x", href: "/" } })).toBe(false);
+  });
+
   it("含秘密字段的对象被检出，诊断 detail 丢弃 URL/data 载体", () => {
     expect(containsSensitiveExtensionKey({ values: { token: "x" } })).toBe(true);
     expect(containsSensitiveExtensionKey({ code: "ok", message: "m" })).toBe(false);

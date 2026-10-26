@@ -15,7 +15,8 @@ export const BASE_LAYER_INFOS: Readonly<Record<string, HostPluginInfo>> = {
   log: { label: "日志", description: "结构化日志出口，Cordis 自己的日志也走这里", icon: "logs" },
   gateway: { label: "网关", description: "WebView 经 HTTP / WebSocket 进入本机宿主的唯一入口", icon: "network" },
   access: { label: "访问与身份", description: "部署身份：认证适配器、站点 action 与实例作用域", icon: "identity" },
-  config: { label: "配置", description: "YAML 配置文件、密钥文件与设置面读写", icon: "config" }
+  config: { label: "配置", description: "YAML 配置文件、密钥文件与设置面读写", icon: "config" },
+  restart: { label: "受控重启", description: "管理员请求重启：排空在途工作后以退出码 75 退出，由拉起方重新启动", icon: "config" }
 };
 
 /** 核心层插件（`host/core/index.ts` 的装载顺序）的显示信息。 */
@@ -24,6 +25,8 @@ export const CORE_LAYER_INFOS: Readonly<Record<string, HostPluginInfo>> = {
   telemetry: { label: "本机遥测", description: "本机事件记录、聚合与异常复盘，数据不出本机", icon: "activity" },
   media: { label: "媒体", description: "内容寻址、导入校验与 /api/media", icon: "media" },
   generation: { label: "生成", description: "生成 Provider 注册表与站点级模型策略", icon: "generation" },
+  marketplace: { label: "扩展市场", description: "市场来源注册表（只接受内置根扩展注册来源）", icon: "apps" },
+  extensionManager: { label: "扩展安装", description: "受管扩展的安装、校验、回滚、卸载与观察期", icon: "apps" },
   adminApi: { label: "管理接口", description: "会话读模型与 Provider 凭据管理面", icon: "identity" },
   task: { label: "任务", description: "生成任务的目录、worker 与历史", icon: "task" },
   canvas: { label: "画布", description: "画布、Yjs 同步与画布侧 MCP 服务", icon: "canvas" },

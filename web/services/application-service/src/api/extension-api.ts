@@ -22,7 +22,7 @@ import {
   type ApplicationExtensionHandlerLimits
 } from "./extension-api/types.js";
 import { safeUrl, sendError, sendJson } from "./extension-api/http-helpers.js";
-import { handleChanges, handleConfigWrite } from "./extension-api/admin-routes.js";
+import { handleChanges, handleConfigWrite, withExtensionRelease } from "./extension-api/admin-routes.js";
 import { handleExtensionHandler } from "./extension-api/handler-routes.js";
 import { handlePublicHttp, matchPublicRoute } from "./extension-api/public-http.js";
 import { handleInternal } from "./extension-api/internal-routes.js";
@@ -77,7 +77,7 @@ export function createApplicationExtensionApiHandler(deps: ApplicationExtensionA
       return true;
     }
     if (req.method === "GET" && suffix === "") {
-      sendJson(res, 200, deps.controlPlane.snapshot());
+      sendJson(res, 200, withExtensionRelease(deps, deps.controlPlane.snapshot()));
       return true;
     }
     if (req.method === "GET" && suffix === "changes") {

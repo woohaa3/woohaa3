@@ -150,6 +150,11 @@ export type CreateCanvasSessionOptions = {
    */
   telemetry?: TelemetryClient;
   /**
+   * 宿主重连门禁（change: 2026-10-21-harden-extension-fault-isolation，D6）：返回 true 时宿主正在重连
+   * （受控重启/掉线），`submitCommands` 立即返回可重试失败 `host-reconnecting`，不进入 pending、不发送。
+   */
+  blocksSubmissions?: () => boolean;
+  /**
    * 显式重连等待 provider 结算（ready/error）的上限（毫秒，默认 8s）。
    *
    * 超时只清「重建中」并保留只读，不谎称已连接；测试注入较短值。
@@ -164,6 +169,9 @@ export type CreateCanvasSessionOptions = {
    */
   access?: CanvasAccess | null;
 };
+
+/** 宿主重连期间拒绝提交的稳定失败码；调用方据此提示「稍后重试」，命令没有被发送或丢弃到队列。 */
+export const HOST_RECONNECTING_SUBMIT_CODE = "host-reconnecting";
 
 /**
  * 创建一个画布会话。**不**使用模块级单例：生命周期由页面级 Plugin 拥有，
@@ -704,6 +712,10 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       // 不留 pending、不发 wire，界面拿到的 reason 能直接解释原因。
       if (readOnly) {
         return { ok: false, reason: readOnlyReason ?? "只读画布，修改不会被保存", code: "read-only" };
+      }
+      // 宿主重连中：明确拒绝（可重试），不登记 pending、不发 wire——不静默吞掉也不积压。
+      if (options.blocksSubmissions?.()) {
+        return { ok: false, reason: "本机服务正在重新连接，请稍后重试", code: HOST_RECONNECTING_SUBMIT_CODE };
       }
       if (!yjsProvider) {
         // 未连接属于门禁条件（离线只读时每次按键都会走到这里），不作为编辑失败观测，避免噪声。

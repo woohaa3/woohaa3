@@ -51,7 +51,7 @@ import {
   ApplicationExtensionFrontendEntryRegistry,
   type ApplicationExtensionFrontendAsyncEntry
 } from "./extension-entry/contract.js";
-import { createApplicationExtensionEntryReconciler } from "./extension-entry/reconciler.js";
+import { createPageExtensionReconciler, hostSubmissionGate, provideSlotsAndFaults } from "./canvas-extension-wiring.js";
 import type { ExtensionRuntimeService } from "./extension-runtime/service.js";
 import type { ExtensionLoadDiagnostic } from "@woohaa3/contracts";
 import { CanvasCatalogStore } from "./services/canvas-catalog-store.js";
@@ -153,7 +153,7 @@ export function installAppServices(ctx: Context, options: PlatformOptions = {}):
   const slots = new SlotRegistry();
   const theme = new AppThemeService({ ...(options.themeOptions ?? {}) });
   ctx.provide("dialogs" as never, dialogs as never);
-  ctx.provide("slots" as never, slots as never);
+  provideSlotsAndFaults(ctx, slots);
   ctx.provide("theme" as never, theme as never);
 
   const detachThemeRoot = applyThemeRoot(theme);
@@ -446,7 +446,7 @@ export async function installCanvasPageServices(
   for (const entry of options.serverActiveEntries ?? []) {
     entryRegistry.register(entry);
   }
-  const reconciler = createApplicationExtensionEntryReconciler({ registry: entryRegistry, ctx, logger: options.logger });
+  const reconciler = createPageExtensionReconciler(ctx, { registry: entryRegistry, status: applicationExtensionStatus, runtime: options.extensionRuntime, logger: options.logger });
   // 记录 page startup 上报的加载诊断（含 optional 失败）。
   for (const diagnostic of options.loadDiagnostics ?? []) {
     options.extensionRuntime?.report(diagnostic);
@@ -484,7 +484,9 @@ export async function installCanvasPageServices(
         .then((result) => (result.ok ? result.summary.access ?? null : null))
         .catch(() => null)
     : null;
-  const session = await createCanvasSession({ canvasId, remote: canvasRemote, ...(access ? { access } : {}) });
+  // 宿主重连门禁（fault-isolation D6）：App 级 hostConnectivity 存在时才设置，会话在重连期间拒绝提交。
+  const submissionGate = hostSubmissionGate(ctx);
+  const session = await createCanvasSession({ canvasId, remote: canvasRemote, ...(access ? { access } : {}), ...submissionGate });
   ctx.provide("canvasSession" as never, session as never);
   ctx.effect(() => preloadAgentDirectory(agentConversations, ctx.currentUser, session), "agent-directory-preload");
   const groupRuns = createCanvasGroupRuns({ canvasId, transport: applicationRemote.transport, conversations: agentConversations, user: ctx.currentUser, writable: () => session.isWritable() });

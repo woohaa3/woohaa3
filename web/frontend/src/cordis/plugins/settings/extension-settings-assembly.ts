@@ -12,6 +12,7 @@
  * query、localStorage 构造模块地址。
  */
 import type { Context } from "@deepseek-ai/cordis";
+import { scopedExtensionServices } from "../../slots.js";
 import type { Fiber } from "@deepseek-ai/cordis";
 import { fiberStatus } from "../../diagnostics.js";
 import type { ExtensionRuntimeService } from "../../extension-runtime/service.js";
@@ -71,7 +72,9 @@ export function createCanvasSettingsAssembly(input: {
           return { ok: false, reason: "该扩展版本未提供设置专用入口" };
         }
         const plugin = descriptor.settingsPlugin();
-        const fiber = scope.plugin(plugin) as Fiber;
+        // 设置专用贡献同样由宿主盖章来源身份（change: 2026-10-21-harden-extension-fault-isolation，design D1）。
+        const scoped = scopedExtensionServices(scope, extensionId);
+        const fiber = scope.extend({ slots: scoped.slots, dialogs: scoped.dialogs } as never).plugin(plugin) as Fiber;
         await fiber.await().catch(() => undefined);
         if (disposed) {
           await fiber.dispose();

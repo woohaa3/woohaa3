@@ -144,6 +144,11 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       owner.releaseTelemetryExport?.(exportId);
     }
     owner.telemetryExportIds = [];
+    // 市场来源同样随 activation 收回：来源带着会话，停用后不能还留在 `ctx.marketplace` 里。
+    for (const sourceId of [...owner.marketplaceSourceIds].reverse()) {
+      owner.releaseMarketplaceSource?.(sourceId);
+    }
+    owner.marketplaceSourceIds = [];
     for (const [route] of [...owner.handlers].reverse()) {
       if (globalHandlers.get(route) === handle) globalHandlers.delete(route);
     }
@@ -228,6 +233,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       generationProviderIds: [],
       storageBackendIds: [],
       telemetryExportIds: [],
+      marketplaceSourceIds: [],
       order: ++orderCounter
     };
     owners.set(key, owner);
@@ -321,6 +327,22 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     };
 
     installMediaFormatRegistration(host, owner, options.registerMediaFormatFor?.(definition.extensionId));
+    const registerMarketplaceSource = options.registerMarketplaceSourceFor?.(definition.extensionId);
+    if (registerMarketplaceSource) {
+      host.registerMarketplaceSource = (source) => {
+        registerMarketplaceSource(source);
+        owner.marketplaceSourceIds.push(source.sourceId);
+      };
+    }
+    const releaseMarketplaceSource = options.releaseMarketplaceSourceFor?.(definition.extensionId);
+    if (releaseMarketplaceSource) {
+      owner.releaseMarketplaceSource = releaseMarketplaceSource;
+      host.unregisterMarketplaceSource = (sourceId: string) => {
+        const index = owner.marketplaceSourceIds.lastIndexOf(sourceId);
+        if (index >= 0) owner.marketplaceSourceIds.splice(index, 1);
+        releaseMarketplaceSource(sourceId);
+      };
+    }
     const registerGeneration = options.registerGenerationFor?.(definition.extensionId);
     if (registerGeneration) {
       host.registerGeneration = (provider) => {

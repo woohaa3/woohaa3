@@ -1,12 +1,20 @@
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { definePlugin } from "../../plugin.js";
+import { guardContributionMethods } from "../../contribution-guard.js";
+import type { ExtensionFaultService } from "../../extension-faults.js";
 import { nodeDrop } from "../../services/node-drop/index.js";
 import { createNodeDropOverlay } from "./drop-overlay.js";
 import { dropNodeDrop, type DropTargetResolution, type NodeDropTarget } from "../canvas-shell/node-drop-dispatch.js";
 export const NODE_DROP_PLUGIN_ID = "node-drop";
 export function nodeDropExtension(): Plugin.Function<void> {
   return definePlugin((ctx: Context) => {
-    const targets = () => ctx.slots.list("canvas.node-drop") as unknown as NodeDropTarget[];
+    // 扩展接收方的回调抛错：归因并计入熔断，再交回 dispatch 既有的默认处理（拒绝/不可用）。
+    const targets = () => {
+      const faults = ctx.get?.("extensionFaults" as never) as ExtensionFaultService | undefined;
+      return (ctx.slots.list("canvas.node-drop") as unknown as NodeDropTarget[]).map((target) =>
+        guardContributionMethods(target, "canvas.node-drop", faults, ["matchesTarget", "acceptsSources", "onDrop", "onPreview"])
+      );
+    };
     const overlay = createNodeDropOverlay(ctx.canvasRuntime);
     let currentDrag: Parameters<typeof overlay.update>[2] = null;
     let frame: number | null = null;

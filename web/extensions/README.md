@@ -100,6 +100,8 @@ export const descriptor: ExtensionFrontendDescriptor = {
 | `browser-local` | `browser-local` | 由当前 origin 的本地偏好决定是否加入启动清单（prompt-snippets、task-activity） | optional 失败隔离，不影响 required |
 | `browser-local` + `required` | — | **非法组合**，装配前报错 | — |
 
+**故障隔离**（change: 2026-10-21-harden-extension-fault-isolation）：宿主给扩展注入盖章的 `ctx.slots` / `ctx.dialogs`，扩展只能经它们注册；每个贡献单独包错误边界，同步回调抛错会被跳过并回落宿主默认行为。同一扩展 60 秒内 3 次故障即本会话停用（required 除外），设置卡片可重新加载。后端激活默认 30 秒、释放 10 秒时限，超时即 `failed`。宿主连续 3 次未就绪会以**安全模式**启动：只装 bootstrap 槽位与 required 扩展，其余显示 `suspended`。扩展 MUST NOT 绕过注入的 ctx 取宿主 registry 单例，也 MUST NOT 依赖装配顺序（可选 hostPlugin 并发激活）。
+
 ## 独立 browser build
 
 每个扩展有独立 `browser-dist/`（`pnpm --filter @woohaa3/extension-<id> run build:browser`，
@@ -162,6 +164,43 @@ remote-server 的「同步远端」：只在已连接且条目为「仅本机」
 仅修改某扩展 UI/CSS 时，重新 `build:browser` 该扩展并 `assemble:extensions` 即可：只有它的
 `artifactId` 变化，其余 artifact 与宿主全部 JS/CSS hash 不变，`index.html` 的发布 link 指向新
 release。旧 release 与旧 artifact 保留在发布目录，供已打开页面继续加载（回滚窗口）。
+
+## 打包与分发（`.wxt`）
+
+change: 2026-10-21-add-extension-marketplace-point。仓库内的扩展（内置根）照旧随发布装配；要**单独分发**一个扩展，打成 `.wxt` 包，由本机宿主的 Extension Manager 安装到**受管根**（`WOOHAA3_EXTENSION_MANAGED_DIR`，开发缺省 `.woohaa3/extensions/`，生产 `shared/extensions-managed`）。
+
+```bash
+pnpm pack:extension <扩展目录> --genkey ./my-signing        # 生成 Ed25519 密钥对（my-signing.key 0600 / my-signing.pub.pem）
+pnpm pack:extension <扩展目录> --key ./my-signing.key       # build:browser + build:backend → 预检 → 签名 → artifacts/extensions/<id>-<ver>.wxt
+```
+
+包内容：改写后的 `extension.json`（补齐 `version` / `engines`）、`package.json`、`browser-dist/`、`backend-dist/entry.mjs`（单文件，`@woohaa3/contracts` 内联，React / extension-api 走宿主运行时）、`FILES.json`（逐文件 SHA-256）与 `SIGNATURE`。
+
+安装：设置弹窗「插件配置」→「从文件安装」，或 `POST /api/extensions/install`（`application/octet-stream`）。本机信任根是 `extensions.marketplace.trustedKeys`（`<别名>=<公钥>`，公钥可为 PEM、base64 SPKI 或 32 字节原始公钥），签名不在信任根里的包一律拒绝。未签名包只在本机显式允许（`extensions.marketplace.allowUnsigned` 或 `WOOHAA3_EXTENSION_ALLOW_UNSIGNED=1`）时、且只对本地文件生效。
+
+| 受管扩展可以 | 受管扩展不可以（预检拒绝） |
+| --- | --- |
+| `server-active` / `browser-local` 前端入口：安装后已打开页面**不刷新**即可装配 | `always` / `required` activation |
+| 后端 `hostPlugin.kind = provider`：在**独立子进程**（Extension Host）里运行；首次安装、升级、回滚都不重启宿主（升级为蓝绿切换） | `bootstrap` 槽位、`canvasContent`、市场来源（`marketplace-source`）——只允许内置根 |
+| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）与 `permissions`（**强制**：出网只到 `network` 白名单，存储只到 `storageNamespaces`，公开路由要 `publicRoutes`） | `hostPlugin.kind = storage`（存储后端必须进程内）、包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
+| 用 `ctx.log`、自身配置段、`ctx.generation`、`ctx.gateway.route`（限 `/api/extensions/<id>/` 与刷新路由）、health | `migrate`（本期不支持数据迁移）、`workspace:` 依赖；documents / canvas / MCP / marketplace 等其它 ctx 面（访问即 `permission-denied`） |
+
+升级保留上一版本：新版本有观察期，期间激活失败或健康持续失败会**自动回滚**；也可在卡片上手动回滚。卸载先经站点控制面停用并等在途工作收尾，再删指针；勾选「同时清除数据」会删除该扩展的 documents。
+
+**进程隔离**（change: 2026-10-21-isolate-extension-host-process，细节见 [extensions.md 的「Extension Host 子进程」](../../docs/code-map/extensions.md#extension-host-子进程)）：每个受管后端扩展一个子进程，堆上限缺省 256 MiB，只拿到最小环境变量（不含宿主凭据），配置按段经 RPC 下发。子进程崩溃只撤销它自己的 Provider 与路由（路由回 503，在途调用 `extension-crashed`），然后退避重启；5 分钟内崩溃 3 次进入 `quarantined`，需升级版本或在卡片上「解除隔离」。本机 `extensions.host.isolation = false` 可关闭隔离退回进程内 + 受控重启，只用于降级排障。
+
+**剩余风险**：子进程隔离**不是 OS 级沙箱**——它与宿主同一操作系统用户，文件系统访问不受限；出网守卫在 JS 层，原生模块与 `process.binding` 可绕过（因此预检拒绝 `.node`）。只安装来自可信签名者的包。另外后端单文件内联了一份 contracts，且跨进程传递的对象都是序列化副本，**不要**用 `instanceof` 判断宿主类，改用错误码。
+
+### 经 woohaa-server 市场分发
+
+change: 2026-10-21-add-server-extension-marketplace（设计见 [server-extension-marketplace.md](../../docs/design/server-extension-marketplace.md)）。同一部署内的团队不必再手工传文件：
+
+1. **打包签名**：`pnpm pack:extension <扩展目录> --key ./my-signing.key`。服务端只收已签名的包，本机的「允许未签名」开关对服务端无效；签名公钥须由服务端管理员加入 `marketplace.signing_keys`。
+2. **提交与审核**：上传 `.wxt` 后提交（需要 `marketplace.publish`），版本进入「待审核」；管理端「扩展市场」页由持有 `marketplace.review` 的管理员通过、拒绝（必填理由）或撤回。拒绝与撤回都是终态，同一版本号不能复用，重新发布要升版本。
+3. **客户端信任**：服务端公开它接受的发布公钥，客户端**只展示** keyId，不会自动信任——本机管理员要在 woohaa-server 来源上确认「信任此公钥」，写入本机 `extensions.marketplace.trustedKeys`。
+4. **从市场安装**：设置「插件配置 → 从市场安装」，或 `POST /api/extensions/install` 的 `{ sourceId: "woohaa-server", extensionId, range }`。安装仍走同一条校验链（摘要、签名、预检），服务端返回的审核状态与 keyId 不参与信任判断。
+
+撤回立即阻止新的解析与下载（含未过期的下载地址），但**不会**卸载已安装的副本。
 
 ## 示例
 

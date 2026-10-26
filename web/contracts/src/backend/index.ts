@@ -3,6 +3,8 @@ export * from "./ports.js";
 export * from "./generation.js";
 export * from "./storage.js";
 export * from "./telemetry.js";
+export * from "./marketplace.js";
+export * from "./extension-host.js";
 export * from "./generation-models-dto.js";
 export * from "./providers-dto.js";
 export * from "./chatgpt-dto.js";

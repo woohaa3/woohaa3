@@ -9,6 +9,8 @@ import type { Plugin } from "@deepseek-ai/cordis";
 import { DiagnosticsService } from "./diagnostics.js";
 import type { RuntimeStatus } from "./contracts.js";
 import { fiberStatus } from "./diagnostics.js";
+import { scopedExtensionServices } from "./slots.js";
+import type { ExtensionFaultService } from "./extension-faults.js";
 
 export type FrontendExtensionDefinition = {
   id: string;
@@ -28,7 +30,61 @@ export type FrontendExtensionDefinition = {
    * 选择过滤；required 定义一律强制装配，MUST NOT 被用户配置禁用。
    */
   configurable?: boolean;
+  /**
+   * 是否来自扩展发布目录（change: 2026-10-21-harden-extension-fault-isolation，design D1）。
+   *
+   * 为 true 时 kernel 以注入的 slots 代理装配它：贡献由宿主盖章 `origin: extension`，
+   * 渲染错误逐项隔离，可选扩展可在本会话内熔断。宿主内置插件保持缺省（builtin）。
+   */
+  extension?: boolean;
 };
+
+/** 一个定义的当前装配（扩展熔断后重新加载会换成新 fiber）。 */
+type Assembly = { current: Fiber; dispose: () => Promise<void> };
+
+/**
+ * 按定义装配一个 fiber。扩展定义：
+ * - 在子 Context 上覆盖 `slots` 为盖章代理（同一扩展内嵌套的插件同样继承该代理）；
+ * - 向 App 级 `extensionFaults` 登记熔断（释放 fiber）与重新加载（新 epoch 重新装配）。
+ */
+function assemble(ctx: Context, definition: FrontendExtensionDefinition): Assembly {
+  if (!definition.extension) {
+    const fiber = ctx.plugin(definition.plugin as Plugin) as Fiber;
+    return { current: fiber, dispose: async () => { await fiber.dispose(); } };
+  }
+  const faults = ctx.get("extensionFaults" as never) as ExtensionFaultService | undefined;
+  let detach: (() => void) | null = null;
+  let disposed = false;
+  const start = (): Fiber => {
+    const { slots, dialogs, epoch } = scopedExtensionServices(ctx, definition.id);
+    const fiber = ctx.extend({ slots, dialogs } as never).plugin(definition.plugin as Plugin) as Fiber;
+    detach?.();
+    detach = faults?.attach(definition.id, {
+      required: definition.required,
+      epoch,
+      trip: () => { void fiber.dispose(); },
+      reload: () => {
+        if (disposed) return;
+        void (async () => {
+          await assembly.current.dispose();
+          if (!disposed) assembly.current = start();
+        })();
+      }
+    }) ?? null;
+    return fiber;
+  };
+  const assembly: Assembly = {
+    current: null as unknown as Fiber,
+    dispose: async () => {
+      disposed = true;
+      detach?.();
+      detach = null;
+      await assembly.current.dispose();
+    }
+  };
+  assembly.current = start();
+  return assembly;
+}
 
 export type FrontendRuntimeOptions = {
   plugins: FrontendExtensionDefinition[];
@@ -81,6 +137,7 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
   const diagnostics = new DiagnosticsService(ctx);
   const disposers: Array<() => void> = [];
   const fibers: Fiber[] = [];
+  const assemblies: Assembly[] = [];
   // install-phase effects（remote/session/taskCatalog 等 scope 资源）必须属于本 scope 自己的
   // fiber：`parent.extend()` 只创建 Context 子对象、`ctx.fiber` 仍是父 fiber，直接在 install
   // 里 `ctx.fiber.effect()` 会把 disposer 挂到父 fiber 上，导致 scope dispose 不释放这些资源
@@ -102,7 +159,9 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
     }
 
     for (const definition of options.plugins) {
-      const fiber = ctx.plugin(definition.plugin as Plugin) as Fiber;
+      const assembly = assemble(ctx, definition);
+      assemblies.push(assembly);
+      const fiber = assembly.current;
       fibers.push(fiber);
       disposers.push(diagnostics.addExtension({ id: definition.id, required: definition.required, fiber }));
     }
@@ -120,7 +179,7 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     diagnostics.markFailed(message);
-    await Promise.allSettled([installFiber, ...fibers].map((fiber) => fiber.dispose()));
+    await Promise.allSettled([installFiber.dispose(), ...assemblies.map((assembly) => assembly.dispose())]);
     throw error;
   }
 
@@ -133,7 +192,7 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
       if (disposed) return;
       disposed = true;
       // 先释放 scope 的 install-phase 资源（remote/session 等），再撤销 feature plugins。
-      await Promise.allSettled(fibers.map((fiber) => fiber.dispose()));
+      await Promise.allSettled(assemblies.map((assembly) => assembly.dispose()));
       await installFiber.dispose();
       for (const dispose of disposers.reverse()) dispose();
     }
@@ -151,6 +210,7 @@ export async function startFrontendRuntime(options: FrontendRuntimeOptions): Pro
   const diagnostics = new DiagnosticsService(ctx);
   const disposers: Array<() => void> = [];
   const fibers: Fiber[] = [];
+  const assemblies: Assembly[] = [];
   let disposed = false;
 
   try {
@@ -158,7 +218,9 @@ export async function startFrontendRuntime(options: FrontendRuntimeOptions): Pro
     disposers.push(diagnostics.addExtension({ id: "platform", required: true, fiber: ctx.fiber }));
 
     for (const definition of options.plugins) {
-      const fiber = ctx.plugin(definition.plugin as Plugin) as Fiber;
+      const assembly = assemble(ctx, definition);
+      assemblies.push(assembly);
+      const fiber = assembly.current;
       fibers.push(fiber);
       disposers.push(diagnostics.addExtension({ id: definition.id, required: definition.required, fiber }));
     }
@@ -178,7 +240,7 @@ export async function startFrontendRuntime(options: FrontendRuntimeOptions): Pro
     const message = error instanceof Error ? error.message : String(error);
     diagnostics.markFailed(message);
     // 启动失败：回滚所有已启动的 fiber 与 platform，保证零活动资源。
-    await Promise.allSettled(fibers.map((fiber) => fiber.dispose()));
+    await Promise.allSettled(assemblies.map((assembly) => assembly.dispose()));
     await ctx.fiber.dispose();
     throw error;
   }
@@ -192,7 +254,7 @@ export async function startFrontendRuntime(options: FrontendRuntimeOptions): Pro
       if (disposed) return;
       disposed = true;
       // 逆序释放：consumer contribution 先撤销，再关闭 provider resource。
-      await Promise.allSettled(fibers.map((fiber) => fiber.dispose()));
+      await Promise.allSettled(assemblies.map((assembly) => assembly.dispose()));
       for (const dispose of disposers.reverse()) dispose();
       await ctx.fiber.dispose();
     }

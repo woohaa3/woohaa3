@@ -101,7 +101,7 @@ export type GenerationProvider = {
    * RunningHub 之类需要 `providerOptions.<providerId>.input` 的 Provider 提供本钩子。
    * 输入只含稳定引用与已校验参数，不含凭据或任意 URL。
    */
-  prepareInput?: (input: GenerationPrepareInput) => Record<string, unknown>;
+  prepareInput?: (input: GenerationPrepareInput) => Record<string, unknown> | Promise<Record<string, unknown>>;
   /**
    * Provider 自带上传参考素材（设计稿 storage-extension-point 的生成链路 ①）。
    *
@@ -123,8 +123,11 @@ export type GenerationProvider = {
    * 逻辑模型 → 具体执行 endpoint 的路由（change: 2026-10-06-add-runninghub-api-models-and-provider-credentials，
    * design D1b）。合并模型（如 t2i/i2i 合并）在提交时按输入选择具体 providerModelId；
    * 缺省时执行身份仍是 catalog 的 providerModelId。
+   *
+   * 两个钩子都允许返回 Promise：隔离在 Extension Host 子进程里的受管 Provider 只能异步应答
+   * （change: 2026-10-21-isolate-extension-host-process）。
    */
-  resolveProviderModel?: (input: GenerationResolveModelInput) => string;
+  resolveProviderModel?: (input: GenerationResolveModelInput) => string | Promise<string>;
 };
 
 /** Provider 对单个模型的动态描述（catalog 用；身份仍由注册表固定）。 */

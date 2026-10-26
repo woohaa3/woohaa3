@@ -22,6 +22,7 @@ import {
   buildBrowserRelease,
   canonicalJson,
   createBrowserReleaseHandler,
+  createBrowserReleasePublisher,
   sha256Hex,
   verifyArtifactFiles
 } from "./extension-release-catalog.mjs";
@@ -231,4 +232,98 @@ test("真实仓库：releaseId 与已装配发布目录逐字节一致", async (
   if (!fs.existsSync(catalogPath)) { t.skip("当前扩展尚未装配发布目录"); return; }
   const assembled = fs.readFileSync(catalogPath, "utf8");
   assert.equal(release.catalogJson, assembled);
+});
+
+// ── 运行期发布器（change: 2026-10-21-add-extension-marketplace-point，任务 6.1 / design D8）──
+
+/** 复制一份夹具 artifact，并把 metadata.extensionId 改成指定 id（artifactId 随之重算）。 */
+function makeNamedArtifactDir(extensionId, { tweak = "" } = {}) {
+  const dir = makeArtifactDir();
+  const manifest = readManifest(dir);
+  const metadata = { ...manifest.metadata, extensionId };
+  let entryBytes = fs.readFileSync(path.join(dir, "browser-dist", manifest.entry));
+  if (tweak) {
+    entryBytes = Buffer.concat([entryBytes, Buffer.from(`\n// ${tweak}\n`)]);
+    fs.writeFileSync(path.join(dir, "browser-dist", manifest.entry), entryBytes);
+  }
+  const files = manifest.files.map((file) =>
+    file.path === manifest.entry ? { ...file, bytes: entryBytes.length, sha256: sha256Hex(entryBytes) } : file
+  );
+  const artifactId = sha256Hex(Buffer.from(`${extensionId}:${tweak}:${manifest.artifactId}`));
+  writeManifest(dir, { ...manifest, metadata, files, artifactId });
+  return dir;
+}
+
+async function getBody(handler, url) {
+  const res = makeRes();
+  const handled = await callHandler(handler, res, url);
+  return handled ? res.body() : null;
+}
+
+test("发布器：新增条目后切换指针，旧 release 与旧文件继续可读", async () => {
+  const base = makeNamedArtifactDir("alpha");
+  const initial = await buildBrowserRelease({ artifacts: [{ extensionId: "alpha", directory: base }] });
+  const publisher = createBrowserReleasePublisher({ release: initial, artifacts: [{ extensionId: "alpha", directory: base }] });
+  const seen = [];
+  publisher.subscribe((change) => seen.push(change));
+  const handler = (req, res) => publisher.handler(req, res);
+
+  const added = makeNamedArtifactDir("beta");
+  const result = await publisher.publish({ upsert: [{ extensionId: "beta", directory: added }] });
+  assert.equal(result.changed, true);
+  assert.notEqual(result.releaseId, initial.releaseId);
+  assert.deepEqual(seen, [{ releaseId: result.releaseId, href: result.href }]);
+  assert.deepEqual(JSON.parse(await getBody(handler, RELEASE_DISCOVERY_PATH)), { releaseId: result.releaseId, href: result.href });
+
+  // 新 release 是旧 release 的超集：旧条目的 artifactId 不变。
+  const next = JSON.parse(await getBody(handler, result.href));
+  const old = JSON.parse(await getBody(handler, initial.href));
+  assert.deepEqual(next.entries.map((entry) => entry.metadata.extensionId), ["alpha", "beta"]);
+  assert.equal(next.entries[0].artifactId, old.entries[0].artifactId);
+  // 旧 release 的资源仍可读。
+  for (const url of initial.files.keys()) assert.notEqual(await getBody(handler, url), null);
+  for (const url of publisher.current().files.keys()) assert.notEqual(await getBody(handler, url), null);
+});
+
+test("发布器：升级替换条目，旧 artifact 保留；移除条目；同内容重放幂等", async () => {
+  const v1 = makeNamedArtifactDir("alpha");
+  const initial = await buildBrowserRelease({ artifacts: [{ extensionId: "alpha", directory: v1 }] });
+  const publisher = createBrowserReleasePublisher({ release: initial, artifacts: [{ extensionId: "alpha", directory: v1 }] });
+  const handler = (req, res) => publisher.handler(req, res);
+  const v2 = makeNamedArtifactDir("alpha", { tweak: "v2" });
+  const upgraded = await publisher.publish({ upsert: [{ extensionId: "alpha", directory: v2 }] });
+  assert.equal(upgraded.changed, true);
+  const catalog = JSON.parse(await getBody(handler, upgraded.href));
+  assert.notEqual(catalog.entries[0].artifactId, initial.entries[0].artifactId);
+  for (const url of initial.files.keys()) assert.notEqual(await getBody(handler, url), null, `旧 artifact 仍可读：${url}`);
+
+  const replay = await publisher.publish({ upsert: [{ extensionId: "alpha", directory: v2 }] });
+  assert.equal(replay.changed, false);
+  assert.equal(replay.releaseId, upgraded.releaseId);
+
+  const removed = await publisher.publish({ remove: ["alpha"] });
+  assert.equal(removed.changed, true);
+  assert.deepEqual(JSON.parse(await getBody(handler, removed.href)).entries, []);
+  assert.notEqual(await getBody(handler, upgraded.href), null);
+});
+
+test("发布器：新条目校验失败不切换，当前 release 与输入集合不变", async () => {
+  const base = makeNamedArtifactDir("alpha");
+  const initial = await buildBrowserRelease({ artifacts: [{ extensionId: "alpha", directory: base }] });
+  const publisher = createBrowserReleasePublisher({ release: initial, artifacts: [{ extensionId: "alpha", directory: base }] });
+  const seen = [];
+  publisher.subscribe((change) => seen.push(change));
+  const broken = makeNamedArtifactDir("beta");
+  const manifest = readManifest(broken);
+  fs.appendFileSync(path.join(broken, "browser-dist", manifest.entry), "// tampered\n");
+  await assert.rejects(
+    () => publisher.publish({ upsert: [{ extensionId: "beta", directory: broken }] }),
+    (error) => error instanceof ExtensionReleaseError && error.code === "EXTENSION_ARTIFACT_FILE_MISMATCH"
+  );
+  assert.equal(publisher.current().releaseId, initial.releaseId);
+  assert.deepEqual(seen, []);
+  // 失败后的下一次发布不带上坏条目。
+  const ok = await publisher.publish({ upsert: [] });
+  assert.equal(ok.changed, false);
+  await assert.rejects(() => publisher.publish({ upsert: [{ extensionId: "x" }] }), (error) => error.code === "EXTENSION_RELEASE_INPUT_INVALID");
 });

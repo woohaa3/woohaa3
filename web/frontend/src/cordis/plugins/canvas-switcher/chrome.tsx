@@ -23,6 +23,7 @@ import type { CanvasCatalogService, CanvasSelectionService, CanvasSummary } from
 import type { CanvasSession } from "../../contract/session.js";
 import type { CanvasNavigationService } from "../../navigation/index.js";
 import type { CanvasCreateOptionContribution, SlotsService } from "../../contracts.js";
+import { ContributionBoundary } from "../../contribution-boundary.js";
 
 export const CANVAS_SWITCHER_DIALOG_ID = "canvas-switcher";
 
@@ -677,12 +678,13 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
                             {catalogItemActions.map((contribution) => {
                               const Action = contribution.render;
                               return (
-                                <Action
-                                  key={contribution.id}
-                                  entry={entry}
-                                  openCanvas={deps.switchTo}
-                                  refreshCatalog={refreshCatalog}
-                                />
+                                <ContributionBoundary key={contribution.id} entry={contribution} slot="canvas.catalog-item-action">
+                                  <Action
+                                    entry={entry}
+                                    openCanvas={deps.switchTo}
+                                    refreshCatalog={refreshCatalog}
+                                  />
+                                </ContributionBoundary>
                               );
                             })}
                           </div>

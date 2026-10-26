@@ -126,6 +126,11 @@ describe("事件映射", () => {
     expect(mapped).not.toHaveProperty("errorCode");
     expect(mapped).not.toHaveProperty("attributes");
   });
+  it("extension.render-failed 是本地复盘事实，没有对应 Action，跳过不导出", () => {
+    expect(
+      toClientEvent(event({ name: "extension.render-failed", errorCode: "extension.render", attributes: { extension: "x", slot: "canvas.toolbar", epoch: "3" } }))
+    ).toBeNull();
+  });
 
   it("surface 必填：本地声明 task（proto 无此值）时按名称推导，绝不省略", () => {
     // 服务端 CleanEvent 要求 surface 落在 1..4，缺省会**整批**拒绝，所以这里必须有值。

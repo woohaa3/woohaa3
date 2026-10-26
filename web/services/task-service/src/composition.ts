@@ -25,6 +25,9 @@ import { createMediaClient, type MediaClient } from "./clients/media-client.js";
 import { resolveTaskServiceConfig, type PptaskEnvConfig } from "./config/env.js";
 import type { ArkVideoImageAsset, ArkVideoImageAssetInput } from "./providers/ark-types.js";
 import { parseModelsConfig, type ModelsConfig } from "./config/models-config.js";
+
+export { parseModelsConfig };
+export type { PptaskEnvConfig };
 import { createTaskApiHandler } from "./api/internal-api.js";
 import { createTaskHistoryHandler } from "./api/history-api.js";
 import { createExtensionTaskFacade } from "./application/extension-tasks.js";
@@ -194,7 +197,7 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
         history,
         provider: undefined as never,
         providerId: registry().resources[0]?.providerId ?? "test",
-        resolveProvider: async (providerId, record) => {
+        resolveProvider: async (providerId: string | undefined, record?: import("@sdppp/pptask-worker-server").PptaskTaskRecord) => {
           const reference = (record?.context as { serviceConnection?: import("@woohaa3/contracts").ServiceConnectionResolve } | undefined)?.serviceConnection;
           if (reference) {
             if (!options.serviceConnections || !providerId) throw Object.assign(new Error("来源解析器不可用"), { sourceStale: true });
@@ -431,10 +434,10 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
       taskKey: request.workerTaskKey,
       ...(association.runId ? { runId: association.runId } : {})
     };
-    const resolvedModelId = generationProvider?.resolveProviderModel?.(providerInputContext) ?? providerModelId;
+    const resolvedModelId = (await generationProvider?.resolveProviderModel?.(providerInputContext)) ?? providerModelId;
     try {
       if (generationProvider?.prepareInput) {
-        providerInput = generationProvider.prepareInput({ ...providerInputContext, endpoint: resolvedModelId });
+        providerInput = await generationProvider.prepareInput({ ...providerInputContext, endpoint: resolvedModelId });
       } else {
         providerInput = await buildProviderInputForResource({
           request: { ...request, parameters: providerParameters },
@@ -649,5 +652,3 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
   };
 }
 
-export { parseModelsConfig };
-export type { PptaskEnvConfig };

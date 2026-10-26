@@ -16,6 +16,7 @@ import type { PluginIcon } from "../plugin-icon.js";
 import type { CanvasTaskModelType } from "../task/dto.js";
 import { parseSettingValue, type SettingDefinition, type SettingPrimitive } from "../settings/index.js";
 import type { GenerationProvider } from "./generation.js";
+import type { HostMarketplaceService } from "./marketplace.js";
 import type { HostStorageService } from "./storage.js";
 
 export type HostLog = (event: Record<string, unknown>) => void;
@@ -42,7 +43,19 @@ export type HostExtensionContext = Context & {
   readonly log: HostLogService;
   readonly generation: HostGenerationService;
   readonly storage: HostStorageService;
+  /**
+   * 扩展市场来源注册面（change: 2026-10-21-add-extension-marketplace-point，D1/D3）。
+   * 只有内置根扩展可以注册来源；受管根 / 可写根扩展调用 `register` 会被宿主拒绝。
+   */
+  readonly marketplace: HostMarketplaceService;
 };
+
+/**
+ * 扩展层 Cordis 插件的种类（`extension.json` 的 `hostPlugin.kind`）：`provider` 注入 `ctx.generation`，
+ * `storage` 注入 `ctx.storage`，`marketplace-source` 注入 `ctx.marketplace`（只允许内置根）。
+ */
+export const HOST_PLUGIN_KINDS = ["provider", "storage", "marketplace-source"] as const;
+export type HostPluginKind = (typeof HOST_PLUGIN_KINDS)[number];
 
 export type HostConfigField = SettingDefinition extends infer D ? (D extends unknown ? Omit<D, "group" | "ownerExtensionId"> : never) : never;
 export type HostConfigFields = Readonly<Record<string, HostConfigField>>;

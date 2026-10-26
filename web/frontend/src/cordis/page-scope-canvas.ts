@@ -101,7 +101,8 @@ export function createCanvasPageScopeStarter(
           configurable: result.entry.configScope === "browser-local",
           name: result.entry.label,
           description: result.entry.description,
-          plugin: result.descriptor.plugin()
+          plugin: result.descriptor.plugin(),
+          extension: true
         });
       } else if (result.entry.required) {
         // required 资源加载失败：进入稳定 page error，不挂载半可用画布。

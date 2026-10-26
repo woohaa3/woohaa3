@@ -64,7 +64,7 @@ function fakeSitePolicy(adminSubjects: readonly string[]): SiteAccessPolicy {
   };
 }
 
-function makeHarness(options: { serviceToken?: string; auth?: "authenticated" | "disabled"; withHandler?: boolean; withHttp?: boolean; adminSubjects?: readonly string[] } = {}) {
+function makeHarness(options: { serviceToken?: string; auth?: "authenticated" | "disabled"; withHandler?: boolean; withHttp?: boolean; adminSubjects?: readonly string[]; extensionRelease?: () => { releaseId: string; href: string } | null } = {}) {
   const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
   const work = createSqliteExtensionWorkRepository({ path: tempDb() });
   resources.push(store, work);
@@ -147,7 +147,8 @@ function makeHarness(options: { serviceToken?: string; auth?: "authenticated" | 
           ]
         }
       : {}),
-    ...(options.serviceToken ? { serviceToken: options.serviceToken } : {})
+    ...(options.serviceToken ? { serviceToken: options.serviceToken } : {}),
+    ...(options.extensionRelease ? { extensionRelease: options.extensionRelease } : {})
   });
   return { handler, plane, store, work, host };
 }
@@ -227,6 +228,20 @@ describe("站点插件公开状态 API", () => {
     expect((result.body as { resyncRequired: boolean }).resyncRequired).toBe(false);
     const stale = await call(handler, makeRequest({ method: "GET", url: "/api/extensions/changes?after=99" }));
     expect((stale.body as { resyncRequired: boolean }).resyncRequired).toBe(true);
+  });
+
+  it("发布目录指针随 snapshot 与 changes 返回，切换后立即反映（change: 2026-10-21-add-extension-marketplace-point，6.2）", async () => {
+    let pointer: { releaseId: string; href: string } | null = { releaseId: "a".repeat(64), href: `/extension-releases/${"a".repeat(64)}.json` };
+    const { handler, plane } = makeHarness({ extensionRelease: () => pointer });
+    const snapshot = await call(handler, makeRequest({ method: "GET", url: "/api/extensions" }));
+    expect((snapshot.body as { extensionRelease?: unknown }).extensionRelease).toEqual(pointer);
+    pointer = { releaseId: "b".repeat(64), href: `/extension-releases/${"b".repeat(64)}.json` };
+    const changes = await call(handler, makeRequest({ method: "GET", url: `/api/extensions/changes?after=${plane.snapshot().revision}` }));
+    expect((changes.body as { extensionRelease?: unknown }).extensionRelease).toEqual(pointer);
+    // 宿主没有指针：字段缺省，旧客户端不受影响。
+    pointer = null;
+    const none = await call(handler, makeRequest({ method: "GET", url: "/api/extensions" }));
+    expect(none.body).not.toHaveProperty("extensionRelease");
   });
 });
 
