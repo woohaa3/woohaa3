@@ -60,6 +60,28 @@ export function RouteHost({ path, navigate }: { path: string; navigate: (to: str
   return <Component path={path} navigate={navigate} />;
 }
 
+/** Compose status contributors in slot order, retaining their mounted state and one shared bubble. */
+function CanvasStatusContributions({ entries, canvasProps, renderStatus, index = 0, readout, details }: {
+  entries: ReadonlyArray<SlotContribution<"canvas.toolbar-status"> | SlotContribution<"canvas.topbar-status">>;
+  canvasProps: CanvasSlotProps;
+  renderStatus: (readout?: ReactNode, details?: ReactNode) => ReactNode;
+  index?: number;
+  readout?: ReactNode;
+  details?: ReactNode;
+}): ReactNode {
+  const entry = entries[index];
+  if (!entry) return renderStatus(readout, details);
+  const Component = entry.render;
+  const renderNext = (nextReadout?: ReactNode, nextDetails?: ReactNode) => (
+    <CanvasStatusContributions entries={entries} canvasProps={canvasProps} renderStatus={renderStatus} index={index + 1}
+      readout={readout == null ? nextReadout : nextReadout == null ? readout : <span className="canvas-control-panel__status-parts">{readout}{nextReadout}</span>}
+      details={<>{details}{nextDetails}</>} />
+  );
+  return entry.wrapsStatus
+    ? <Component key={entry.id} {...canvasProps} renderStatus={renderNext} />
+    : renderNext(<Component key={entry.id} {...canvasProps} renderStatus={renderNext} />);
+}
+
 /** 渲染 `canvas.overlay` contributions。 */
 export function CanvasOverlayHost(props: CanvasSlotProps) {
   const contributions = useSlot("canvas.overlay");
@@ -90,8 +112,6 @@ export function CanvasOverlayHost(props: CanvasSlotProps) {
 export function CanvasTopBarHost({ overview = true, ...props }: CanvasSlotProps & { overview?: boolean }) {
   const contributions = useSlot("canvas.topbar");
   const statusReadouts = useSlot("canvas.topbar-status");
-  const statusReadout = statusReadouts[0];
-  const Readout = statusReadout?.render;
   const content = contributions.map((entry) => {
     const Component = entry.render;
     return <Component key={entry.id} {...props} />;
@@ -109,13 +129,7 @@ export function CanvasTopBarHost({ overview = true, ...props }: CanvasSlotProps 
         {readout}
       </CanvasControlStatus>
     );
-    const trailing = !Readout
-      ? renderStatus()
-      : statusReadout.wrapsStatus
-        // 新贡献自己调用 renderStatus 装配气泡（仍使用本宿主的合并版本）。
-        ? <Readout {...props} renderStatus={renderStatus} />
-        // 旧贡献只返回紧凑读数，由宿主放进同一个气泡。
-        : renderStatus(<Readout {...props} renderStatus={renderStatus} />);
+    const trailing = <CanvasStatusContributions entries={statusReadouts} canvasProps={props} renderStatus={renderStatus} />;
     return (
       <DesktopCanvasBar status={<div className="desktop-canvas-bar__readouts" role="group" aria-label="画布状态读数">{trailing}</div>}>
         {content}
@@ -614,12 +628,10 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
   const contributions = useSlot("canvas.toolbar");
   const actions = useSlot("canvas.toolbar-action");
   const statusReadouts = useSlot("canvas.toolbar-status");
-  const statusReadout = onDesktop ? undefined : statusReadouts[0];
-  const Readout = statusReadout?.render;
-  const renderStatus = (readout: ReactNode, details?: ReactNode) => (
+  const renderStatus = (readout?: ReactNode, details?: ReactNode) => (
     <CanvasControlStatus status={props.sync} details={details} onReconnect={props.onReconnect}>{readout}</CanvasControlStatus>
   );
-  const readout = Readout ? <Readout {...props} renderStatus={renderStatus} /> : undefined;
+  const readout = onDesktop || statusReadouts.length === 0 ? undefined : <CanvasStatusContributions entries={statusReadouts} canvasProps={props} renderStatus={renderStatus} />;
   const viewport =
     contributions.length > 0 ? (
       <>
@@ -643,7 +655,7 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
       viewport={viewport}
       onReconnect={props.onReconnect}
       {...(onDesktop ? {} : { status: props.sync })}
-      {...(readout === undefined ? {} : { statusContent: readout && !statusReadout?.wrapsStatus ? renderStatus(readout) : readout })}
+      {...(readout === undefined ? {} : { statusContent: readout })}
     />
   );
 }

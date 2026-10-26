@@ -147,3 +147,15 @@ describe("CanvasCatalogStore", () => {
     expect(store.getState().entries.map((entry) => entry.id)).toEqual(["fresh"]);
   });
 });
+
+it("explicit canvasId survives the public store and refreshes the catalog", async () => {
+  let received: unknown;
+  let lists = 0;
+  const store = new CanvasCatalogStore({ remote: fakeRemote({
+    create: async input => { received = input; return { ok: true, canvasId: input.canvasId!, revision: 1, title: input.title! }; },
+    list: async input => { lists++; return { ok: true, entries: [], total: 0, ...input }; }
+  }) });
+  expect((await store.create({ canvasId: "fixed-board", title: "Board" })).ok).toBe(true);
+  expect(received).toEqual({ canvasId: "fixed-board", title: "Board" });
+  expect(lists).toBe(1);
+});

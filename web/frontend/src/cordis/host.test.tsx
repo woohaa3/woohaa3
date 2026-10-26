@@ -282,6 +282,29 @@ describe("CanvasToolbarHost 统一面板", () => {
     expect(panel()!.querySelector('[role="tooltip"]')?.textContent).not.toContain("Draw Call");
   });
 
+  it("合并多个状态贡献，低优先级读数不被覆盖，卸载后保留其它贡献", async () => {
+    const slots = new SlotRegistry();
+    const remove = slots.register("canvas.toolbar-status", {
+      id: "board-status", owner: "board", priority: 100, wrapsStatus: true,
+      render: ({ renderStatus }) => renderStatus(<span>Board 21 项</span>, <span>最近保存 10:00</span>)
+    });
+    slots.register("canvas.toolbar-status", {
+      id: "performance", owner: "test", priority: 1000, wrapsStatus: true,
+      render: ({ renderStatus }) => renderStatus(<span>FPS 60</span>, <span>Draw Call 120</span>)
+    });
+    runtime = await makeRuntime(slots);
+    renderHost(runtime, { tone: "danger", label: "只读", detail: "网络断开", pinned: true });
+    expect(panel()!.querySelector(".canvas-control-panel__status-readout")!.textContent).toBe("Board 21 项FPS 60");
+    const bubbles = panel()!.querySelectorAll('[role="tooltip"]');
+    expect(bubbles).toHaveLength(1);
+    expect(bubbles[0].textContent).toContain("最近保存 10:00");
+    expect(bubbles[0].textContent).toContain("Draw Call 120");
+    expect(bubbles[0].textContent).toContain("网络断开");
+    await act(async () => remove());
+    expect(panel()!.querySelector(".canvas-control-panel__status-readout")!.textContent).toBe("FPS 60");
+    expect(panel()!.querySelector('[role="tooltip"]')!.textContent).not.toContain("最近保存");
+  });
+
   it("HMR 后仍加载旧版 SVG 贡献时，宿主继续提供 hover 气泡", async () => {
     const slots = new SlotRegistry();
     slots.register("canvas.toolbar-status", {

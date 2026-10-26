@@ -103,8 +103,8 @@ export class CanvasCatalogStore implements CanvasCatalogService {
     });
   }
 
-  async create(input: { title?: string } = {}): Promise<CanvasCatalogCreateResult> {
-    const result = await this.remote.create(input.title ? { title: input.title } : {});
+  async create(input: { canvasId?: string; title?: string } = {}): Promise<CanvasCatalogCreateResult> {
+    const result = await this.remote.create({ ...(input.canvasId ? { canvasId: input.canvasId } : {}), ...(input.title ? { title: input.title } : {}) });
     if (!result.ok) return result;
     // 创建成功后失效并刷新目录，使新画布立即可发现。
     this.invalidate();

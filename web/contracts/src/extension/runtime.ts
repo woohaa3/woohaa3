@@ -316,6 +316,8 @@ export type ApplicationExtensionAssistantFacade = {
 export type ApplicationExtensionServices = {
   serviceConnections?: import("./service-connection.js").ApplicationServiceConnectionFacade;
   assistants?: ApplicationExtensionAssistantFacade;
+  /** Host-bound background access to this extension's own canvases. */
+  extensionCanvases?: import("./owned-canvases.js").ApplicationExtensionOwnedCanvases;
   extensionNodes?: ApplicationExtensionNodeFacade;
   tasks: ApplicationExtensionTaskFacade;
   media: ApplicationExtensionMediaFacade;

@@ -167,3 +167,5 @@ export type { MediaContentService, MediaContentProvider, MediaContentState, Medi
 export { FocusExitCoordinator } from "../cordis/navigation/exit-coordinator.js";
 
 export type { PersistentResource, PersistentSurface, PersistentSurfaces } from "../cordis/services/persistent-surfaces.js";
+
+export type { CanvasCatalogService, CanvasCatalogRemote, CanvasCatalogCreateResult } from "./context-api.js";

@@ -166,3 +166,5 @@ export type TaskActivityStoreService = {
   getSnapshot(): TaskActivityStoreSnapshot;
   subscribe(listener: () => void): () => void;
 };
+
+export type { CanvasCatalogService, CanvasCatalogRemote, CanvasCatalogCreateResult } from "../cordis/contract/canvas-catalog.js";

@@ -3344,3 +3344,9 @@
 .authoring-generate-placeholder__prompt { height: 104px; }
 .authoring-generate-placeholder__footer > span { width: 64px; height: 36px; }
 .authoring-generate-placeholder__footer > span:last-child { margin-left: auto; }
+
+.canvas-control-panel__status-parts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}

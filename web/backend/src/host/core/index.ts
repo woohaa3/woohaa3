@@ -52,6 +52,7 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
       env,
       basePath: options.basePath,
       ...(options.applicationExtensionMetadata ? { applicationExtensionMetadata: options.applicationExtensionMetadata } : {}),
+      ...(options.extensionCanvasPrincipal ? { extensionCanvasPrincipal: options.extensionCanvasPrincipal } : {}),
       ...(options.applicationBackendExtensions ? { applicationBackendExtensions: options.applicationBackendExtensions } : {}),
       ...(options.chatgptServiceOptions ? { chatgptServiceOptions: options.chatgptServiceOptions } : {}),
       ...(options.extensionHost ? { extensionHost: options.extensionHost } : {}),

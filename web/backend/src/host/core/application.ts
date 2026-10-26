@@ -1,3 +1,4 @@
+import { createExtensionOwnedCanvases } from "../../ports/extension-canvases.js";
 import { createSiteProviderSource } from "./service-connection-sources.js";
 import { createCanvasCreationPort } from "../../ports/canvas-creation.js";
 import { createGroupEffects } from "../../ports/group-effects.js";
@@ -13,7 +14,7 @@ import type {
   ApplicationExtensionSecretStore,
   ApplicationExtensionServices
 } from "@woohaa3/contracts";
-import { TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
+import { EXTENSION_CANVAS_REGISTRY_OWNER, TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
 import {
   createApplicationService,
   createCanvasSourceRegistry
@@ -32,6 +33,8 @@ import { ROUTE_ORDER } from "../order.js";
 
 export type ApplicationPluginConfig = {
   env: Record<string, string | undefined>;
+  /** Trusted deployment resolver for background canvas work; absent in controlled deployments denies work. */
+  extensionCanvasPrincipal?: () => Promise<import("@woohaa3/contracts").PrincipalContext | null>;
   /** 公开挂载路径（已规范化）。 */
   basePath: string;
   applicationExtensionMetadata?: readonly ApplicationExtensionMetadata[];
@@ -67,7 +70,8 @@ function resolveSecretStore(
 function createServicesFactory(
   ctx: HostContext,
   env: Record<string, string | undefined>,
-  foundationStorage: import("@woohaa3/contracts").StorageProvider | null
+  foundationStorage: import("@woohaa3/contracts").StorageProvider | null,
+  backgroundPrincipal?: ApplicationPluginConfig["extensionCanvasPrincipal"]
 ) {
   const secrets = resolveSecretStore(env, ctx.log.scope("application"));
   const { canvas, task, media, toolGrants } = ctx;
@@ -76,6 +80,20 @@ function createServicesFactory(
     // storage 槽位的 owner-scoped 文档存储：宿主注册的基础实现按 extensionId 隔离，
     // 缺失时插件 fail closed（不伪造内存实现）。
     ...(foundationStorage?.documents.forExtension(extensionId) ? { documents: foundationStorage.documents.forExtension(extensionId)! } : {}),
+    ...(foundationStorage?.documents.forExtension(EXTENSION_CANVAS_REGISTRY_OWNER) ? {
+      extensionCanvases: createExtensionOwnedCanvases({ canvas, extensionId,
+        registry: foundationStorage.documents.forExtension(EXTENSION_CANVAS_REGISTRY_OWNER)!,
+        authority: {
+          principal: async () => {
+            if (ctx.access.runtime.enabled && !ctx.access.providers.resourceLifecyclePolicy()) return null;
+            return backgroundPrincipal ? backgroundPrincipal() : ctx.access.runtime.enabled ? null
+              : { subject: ctx.access.runtime.instance.ownerId, identityProvider: "instance" };
+          },
+          authorize: (principal, id, permission) => accessEnforcer.assertResource(principal, { kind: "canvas", id }, permission),
+          lifecycle: () => ctx.access.runtime.enabled ? ctx.access.providers.resourceLifecyclePolicy() : null
+        }
+      })
+    } : {}),
     extensionNodes: createExtensionNodeFacade(canvas, extensionId),
     canvasAccess: createExtensionCanvasAccessFacade(canvas),
     // 受限任务监控 facade（显式请求监控能力的可信扩展消费）：查询前用站点策略重查 `tasks.inspect`
@@ -153,7 +171,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     // 启停由站点控制面管理：本次装配的扩展层 Cordis 插件（站点插件与 hostPlugin Provider/存储）
     // 都在可信清单里，因此统一登记到 gate；开关即 acquire/release，运行中生效。
     const siteGate = createSiteGate((config.treeExtensions ?? []).filter((name) => siteIds.has(name)));
-    const servicesFor = createServicesFactory(ctx, env, foundationStorage);
+    const servicesFor = createServicesFactory(ctx, env, foundationStorage, config.extensionCanvasPrincipal);
     const { generation, mcp, storage } = ctx;
 
     const sourceSecrets = resolveSecretStore(env, ctx.log.scope("service-connections"));

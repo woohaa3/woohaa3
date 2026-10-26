@@ -47,7 +47,7 @@ export interface CanvasCatalogService {
   /** 追加下一页。 */
   loadMore(): Promise<void>;
   /** 创建画布，成功后失效并刷新目录。 */
-  create(input?: { title?: string }): Promise<CanvasCatalogCreateResult>;
+  create(input?: { canvasId?: string; title?: string }): Promise<CanvasCatalogCreateResult>;
   /** 按 ID 读取摘要（用于校验显式 canvasId 是否存在/展示当前标题）。 */
   get(canvasId: string): Promise<CanvasCatalogSummaryResult>;
   /** 失效缓存，使下一次 `load()` 重新请求。 */

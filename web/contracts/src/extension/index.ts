@@ -26,6 +26,7 @@ export * from "./agent-connection.js";
 export * from "./agent-connection-codec.js";
 export * from "./services.js";
 export * from "./runtime.js";
+export * from "./owned-canvases.js";
 export * from "./frontend-runtime.js";
 export * from "./frontend-browser.js";
 export * from "./archive.js";

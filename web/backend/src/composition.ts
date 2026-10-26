@@ -51,6 +51,8 @@ import type { SettingsService } from "./settings/settings-service.js";
 const PROVISIONING_RESERVATION_GRACE_MS = 60_000;
 
 export type BackendServiceOptions = {
+  /** Trusted background identity; never sourced from browser request parameters. */
+  extensionCanvasPrincipal?: () => Promise<import("@woohaa3/contracts").PrincipalContext | null>;
   env?: Record<string, string | undefined>;
   /** 模型配置（Task catalog）；缺省从仓库文件读取。 */
   modelsConfig?: ModelsConfig;
@@ -191,6 +193,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
         ...(options.mediaStorage ? { mediaStorage: options.mediaStorage } : {}),
         ...(options.enableYjsSync !== undefined ? { enableYjsSync: options.enableYjsSync } : {}),
         ...(options.applicationExtensionMetadata ? { applicationExtensionMetadata: options.applicationExtensionMetadata } : {}),
+        ...(options.extensionCanvasPrincipal ? { extensionCanvasPrincipal: options.extensionCanvasPrincipal } : {}),
         ...(options.applicationBackendExtensions ? { applicationBackendExtensions: options.applicationBackendExtensions } : {}),
         ...(options.chatgptServiceOptions ? { chatgptServiceOptions: options.chatgptServiceOptions } : {}),
         treeExtensions: extensions.map((plugin) => plugin.name)

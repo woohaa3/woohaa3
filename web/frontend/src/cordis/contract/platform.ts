@@ -440,7 +440,7 @@ export type SlotContributionMap = {
   /** 公共聚焦标题栏的可选贡献；插件拥有其内容和交互。 */
   "canvas.focus-header": { position?: "before-title" | "after-title"; render: ComponentType<{ nodeId: string }> };
   "canvas.toolbar": { render: ComponentType<CanvasSlotProps> };
-  /** 工具栏状态位置的紧凑读数；宿主保留同步状态气泡与色调，采用首个可用贡献。 */
+  /** 工具栏状态位置的紧凑读数；按槽位顺序合并所有贡献的读数及详情，共用同步状态气泡与色调。 */
   "canvas.toolbar-status": {
     /** 新贡献通过 renderStatus 自行装配气泡；旧贡献缺省由宿主包裹，兼容已加载产物。 */
     wrapsStatus?: boolean;

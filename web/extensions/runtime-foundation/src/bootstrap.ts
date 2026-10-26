@@ -1,3 +1,4 @@
+import { EXTENSION_CANVAS_REGISTRY_OWNER } from "@woohaa3/contracts";
 import { readFileSync } from "node:fs";
 import { createSqliteExtensionDocumentStore, createMongoExtensionDocumentStoreFromUri, createSqliteSiteExtensionConfigStore, extensionDocumentStorePath } from "@woohaa3/application-service";
 import { migrateSqliteCanvasBeforeStartup, SqliteCanvasRepository, SqliteYjsRepository, MongoCanvasRepository, MongoYjsRepository, createDurableWriterLock, createSqliteWriterLockStore, resolveCanvasStorageConfig, CANVAS_STORAGE_BACKEND_ENV, MONGODB_DB_ENV, MONGODB_URI_ENV, SqliteNodeHistoryRepository, SqliteEditCompletionRepository, SqliteSnippetRepository, type CanvasStorageUnit, type DurableWriterLockStore } from "@woohaa3/canvas-service";
@@ -125,7 +126,7 @@ export function storageBootstrap(backend: "sqlite" | "mongo", env: Record<string
       const yjsRepository = backend === "sqlite" ? new SqliteYjsRepository({ path: config.sqlitePath! }) : await MongoYjsRepository.connect({ uri: config.mongoUri!, database: config.mongoDb! });
       disposers.push(() => yjsRepository.close());
       const writerLock = createDurableWriterLock(backend === "sqlite" ? createSqliteWriterLockStore(yjsRepository as SqliteYjsRepository) : mongoWriterLockStore(yjsRepository as MongoYjsRepository, directory));
-      const documents = backend === "sqlite" ? createSqliteExtensionDocumentStore({ path: extensionDocumentStorePath(appPath), owners }) : createMongoExtensionDocumentStoreFromUri({ uri: config.mongoUri!, database: config.mongoDb!, owners });
+      const documents = backend === "sqlite" ? createSqliteExtensionDocumentStore({ path: extensionDocumentStorePath(appPath), owners: [...owners, EXTENSION_CANVAS_REGISTRY_OWNER] }) : createMongoExtensionDocumentStoreFromUri({ uri: config.mongoUri!, database: config.mongoDb!, owners: [...owners, EXTENSION_CANVAS_REGISTRY_OWNER] });
       disposers.push(() => documents.close());
       if ("initialize" in documents && typeof documents.initialize === "function") await documents.initialize();
       const listIds = async () => {
