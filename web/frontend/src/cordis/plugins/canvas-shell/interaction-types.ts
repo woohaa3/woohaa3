@@ -236,6 +236,11 @@ export type InteractionControllerOptions = {
    */
   isImageFocused?: () => boolean;
   getImageFocus?: () => import("@woohaa3/contracts").BevyImageFocus | null;
+  /**
+   * 图片聚焦已进入、编辑器却还没接管画面（引擎/首帧未就绪）。
+   * 此时没有编辑面消费输入，滚轮与 Space 平移按普通画布处理，画布不会被"聚焦取景目标缺失"吃掉。
+   */
+  isImageFocusPending?: () => boolean;
   getImageViewportTarget?: () => import("../../focus/types.js").FocusViewportTarget | null;
   /**
    * 当前视频聚焦投影（change: 2026-10-10-add-video-node-focus-workspace）。

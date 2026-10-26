@@ -23,7 +23,7 @@ import { focusHarness, modelCenter } from "./test-support/model-focus-harness.js
 
 installSharedSession();
 
-function setup(options: { isModalActive?: () => boolean } = {}) {
+function setup(options: { isModalActive?: () => boolean; imageFocused?: () => boolean; imagePending?: () => boolean } = {}) {
   woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 100, y: 100 }]));
   const dom = harness();
   const { runtime } = runtimeCapturing();
@@ -32,7 +32,9 @@ function setup(options: { isModalActive?: () => boolean } = {}) {
     getRuntime: () => runtime,
     getSession: () => getSession() as never,
     target: dom.target as never,
-    ...(options.isModalActive ? { isModalActive: options.isModalActive } : {})
+    ...(options.isModalActive ? { isModalActive: options.isModalActive } : {}),
+    ...(options.imageFocused ? { isImageFocused: options.imageFocused } : {}),
+    ...(options.imagePending ? { isImageFocusPending: options.imagePending } : {})
   });
   const selection = (dom.target as unknown as {
     __canvasSelection: () => { nodeIds: string[] };
@@ -102,6 +104,22 @@ describe("Space 临时平移不因输入框或丢失 keyup 而闩死", () => {
     const { dom, controller, selection } = setup({ isModalActive: () => modal });
     spaceDown(dom);
     modal = false;
+    dom.fire("pointerdown", { clientX: 150, clientY: 150 });
+    expect(selection().nodeIds).toEqual(["n1"]);
+    dom.fire("pointerup", { clientX: 150, clientY: 150 });
+    controller.dispose();
+  });
+
+  it("图片聚焦尚未接管画面时仍可用空格平移，接管后不再武装", () => {
+    let pending = true;
+    const { dom, controller, selection } = setup({ imageFocused: () => true, imagePending: () => pending });
+    spaceDown(dom);
+    dom.fire("pointerdown", { clientX: 150, clientY: 150 });
+    expect(selection().nodeIds).toEqual([]);
+    dom.fire("pointerup", { clientX: 150, clientY: 150 });
+    spaceUp(dom);
+    pending = false;
+    spaceDown(dom);
     dom.fire("pointerdown", { clientX: 150, clientY: 150 });
     expect(selection().nodeIds).toEqual(["n1"]);
     dom.fire("pointerup", { clientX: 150, clientY: 150 });

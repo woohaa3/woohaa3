@@ -79,7 +79,9 @@ export function createWheelViewport(core: InteractionCore) {
   ): { kind: "pan" | "zoom"; source: string } | null => {
     event.preventDefault();
     const target = core.options.getImageViewportTarget?.();
-    const focus = (core.options.isImageFocused?.() ?? !!core.options.getImageFocus?.()) ? target?.read() : null;
+    const imageFocused = core.options.isImageFocused?.() ?? !!core.options.getImageFocus?.();
+    // 编辑器尚未接管画面时按普通画布取景，避免把滚轮写到不存在的聚焦取景状态里。
+    const focus = imageFocused && !(core.options.isImageFocusPending?.() ?? false) ? target?.read() : null;
     const base = focus?.viewport ?? state.viewportPreview ?? core.localViewport.get();
     const bounds = rect ?? canvas.getBoundingClientRect();
     const classification = classifyWheelEvent(

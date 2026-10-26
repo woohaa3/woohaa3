@@ -92,7 +92,7 @@ export function createWheelEntryHandler(
   const handler = (event: WheelEvent): void => {
     // modal 打开时滚轮不得缩放画布（design D6）。
     const imageFocused = core.options.isImageFocused?.() ?? !!core.options.getImageFocus?.();
-    if (imageFocused) {
+    if (imageFocused && !(core.options.isImageFocusPending?.() ?? false)) {
       event.preventDefault();
       if (!core.focusInputBlocked() && core.options.getImageViewportTarget?.()?.read()) consume(event);
       return;

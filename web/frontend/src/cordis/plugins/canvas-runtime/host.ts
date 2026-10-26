@@ -246,6 +246,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   };
   /** 订阅图片聚焦投影变化。 */
   subscribeImageFocus = (listener: () => void): (() => void) => this.imageFocusStore.subscribe(listener);
+  /** 编辑器接管画面之前，图片聚焦期间的画布导航按普通画布处理（见契约注释）。 */
+  setImageFocusPending = (pending: boolean): void => { this.imageFocusStore.setPending(pending); };
 
   // ── 视频聚焦（change: 2026-10-10-add-video-node-focus-workspace） ─────────────
 
@@ -682,6 +684,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
             ?? this.resolveModelFocusTargets().some(target => target.nodeId === nodeId),
         imageFocusTargetId: () => this.imageFocusStore.getTargetId(),
         imageFocus: () => this.imageFocusStore.get(),
+        imageFocusPending: () => this.imageFocusStore.isPending(),
         imageViewportTarget: this.imageFocusStore.getViewportTarget,
         videoFocusTargetId: () => this.videoFocusStore.getTargetId(),
         videoFocus: () => this.videoFocusStore.get(),

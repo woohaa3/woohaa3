@@ -26,6 +26,7 @@ function deps(overrides: Partial<AttachAssemblyDeps> = {}): AttachAssemblyDeps {
     focusTargets: () => [],
     imageFocusTargetId: () => null,
     imageFocus: () => null,
+    imageFocusPending: () => false,
     videoFocusTargetId: () => null,
     videoFocus: () => null,
     modelSceneOverride: () => null,

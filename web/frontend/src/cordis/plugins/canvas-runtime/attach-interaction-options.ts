@@ -32,6 +32,7 @@ export type AttachAssemblyDeps = {
   hasFocusTarget?: (nodeId: string) => boolean;
   imageFocusTargetId: () => string | null;
   imageFocus: () => import("@woohaa3/contracts").BevyImageFocus | null;
+  imageFocusPending: () => boolean;
   imageViewportTarget?: () => import("../../focus/types.js").FocusViewportTarget | null;
   videoFocusTargetId: () => string | null;
   videoFocus: () => import("@woohaa3/contracts").BevyVideoFocus | null;
@@ -89,6 +90,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     getModelFocusMode: deps.modelFocusMode,
     isImageFocused: () => deps.imageFocusTargetId() !== null,
     getImageFocus: deps.imageFocus,
+    isImageFocusPending: deps.imageFocusPending,
     getImageViewportTarget: deps.imageViewportTarget,
     isVideoFocused: () => deps.videoFocusTargetId() !== null,
     getVideoFocus: deps.videoFocus,

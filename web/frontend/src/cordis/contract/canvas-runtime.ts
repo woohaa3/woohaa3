@@ -118,6 +118,14 @@ export interface CanvasRuntimeService {
   registerImageViewportTarget(target: import("../focus/types.js").FocusViewportTarget): () => void;
   setImageFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void;
   setImageFocusDetails(frame:import("../plugins/canvas-runtime/focus-details.js").ImageFocusDetails|null):void;
+  /**
+   * 图片聚焦已进入、但编辑器还没接管画面（引擎或首帧未就绪）。
+   *
+   * 这段时间没有任何编辑面消费输入，画布仍必须可滚动/平移，因此滚轮与 Space 平移按普通
+   * 画布处理（否则图片聚焦的“取景目标缺失”分支会把滚轮吃掉，表现为画布卡死）。
+   * 首帧提交、退出聚焦或覆盖层卸载时清除。
+   */
+  setImageFocusPending(pending: boolean): void;
   /** 订阅图片聚焦投影变化（change: 图片聚焦编辑）。 */
   subscribeImageFocus(listener: () => void): () => void;
   /** 有效视频焦点目标（adapter 目标校验；change: 2026-10-10-add-video-node-focus-workspace）。 */

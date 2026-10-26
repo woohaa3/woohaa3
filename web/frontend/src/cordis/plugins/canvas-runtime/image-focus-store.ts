@@ -18,6 +18,12 @@ export class ImageFocusStore {
   getViewportTarget = (): import("../../focus/types.js").FocusViewportTarget | null => this.viewportTarget;
 
   private projection: import("@woohaa3/contracts").BevyImageFocus | null = null;
+  private pending = false;
+
+  /** 编辑器尚未接管画面：只在聚焦目标仍然成立时生效，避免过期标记泄漏到普通画布。 */
+  setPending = (pending: boolean): void => { this.pending = pending; };
+
+  isPending = (): boolean => this.pending && this.targetId !== null;
   private targets: readonly string[] = [];
   private targetId: string | null = null;
   private texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null = null;

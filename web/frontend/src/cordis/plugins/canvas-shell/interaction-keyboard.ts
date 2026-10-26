@@ -125,12 +125,14 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     // 画布快捷键在 modal/panel 打开时不参与；但聚焦相机的飞行/退出只被真正 modal 阻断
     // （change: fix-model-focus-navigation-and-camera-parity，design D6）。
     const imageFocused = options.isImageFocused?.() ?? !!options.getImageFocus?.();
+    const imagePending = imageFocused && (options.isImageFocusPending?.() ?? false);
     const videoFocused = options.isVideoFocused?.() ?? !!options.getVideoFocus?.();
     // Space 临时平移只在**普通画布**握着输入时武装：编辑面（prompt / 输入框 / 菜单）、图片、
     // 视频与模型聚焦里的 Space 是输入字符或播放暂停，武装平移会让之后的左键点击全部变成
     // 平移、无法再点选节点（change: fix-space-pan-latch-after-focus-exit）。
+    // 例外：图片聚焦已进入但编辑器还没接管画面（加载中）没有输入面，画布仍要能平移。
     if (event.code === "Space") {
-      state.spacePressed = !isEditableElement(event.target) && !model.active && !imageFocused && !videoFocused;
+      state.spacePressed = !isEditableElement(event.target) && !model.active && (!imageFocused || imagePending) && !videoFocused;
     }
     if (core.modalActive() && (!(model.active || imageFocused || videoFocused) || core.focusInputBlocked())) return;
     if (imageFocused) {

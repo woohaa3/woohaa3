@@ -24,6 +24,7 @@ function setup() {
   document.body.append(sidebar);
   let focused = true;
   let blocked = false;
+  let pending = false;
   let viewport = { x: 0, y: 0, zoom: 0.5 };
   const rect = { x: 52, y: 96, width: 864, height: 514 };
   const writes = vi.fn((next: typeof viewport) => { viewport = next; });
@@ -35,12 +36,14 @@ function setup() {
     canvas, target: dom.target as never, getRuntime: () => captured.runtime,
     getSession: () => getSession() as never,
     isImageFocused: () => focused,
+    isImageFocusPending: () => pending,
     getImageViewportTarget: store.getViewportTarget,
     isFocusInputBlocked: () => blocked
   });
   const originalViewport = controller.viewport();
   return { canvas, stage, sidebar, store, unregister, writes, originalViewport,
     getViewport: () => viewport, setFocused: (value: boolean) => { focused = value; },
+    setPending: (value: boolean) => { pending = value; },
     setBlocked: (value: boolean) => { blocked = value; } };
 }
 function wheel(element: Element, init: WheelEventInit = {}, timeStamp = 1) {
@@ -58,6 +61,15 @@ it("覆盖层与 canvas 本体都由画布原入口处理，双指平移只更�
   expect(s.getViewport()).toEqual({ x: -12, y: -68, zoom: 0.5 });
   expect(s.writes).toHaveBeenCalledTimes(2);
   expect(controller!.viewport()).toEqual(s.originalViewport);
+});
+it("编辑器还没接管画面时滚轮按普通画布移动，不再被聚焦取景吃掉", () => {
+  const s = setup();
+  s.unregister();
+  s.setPending(true);
+  const before = controller!.viewport();
+  expect(wheel(s.canvas, { deltaX: 12, deltaY: 8 }).defaultPrevented).toBe(true);
+  expect(controller!.viewport()).not.toEqual(before);
+  expect(s.writes).not.toHaveBeenCalled();
 });
 it("原入口连续捏合保留指针下的文档坐标，同时取消浏览器页面缩放", () => {
   const s = setup();

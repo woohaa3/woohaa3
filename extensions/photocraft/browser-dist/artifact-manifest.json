@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "artifactId": "db69b93e7485a1eb4d20f67e06deb432926e1e7d80edd1c0d14df53216476e3f",
+  "artifactId": "59b6abdd84bae24c5bc13c2c7e99f56655756a276b1cfe05058685f7c39592ae",
   "metadata": {
     "extensionId": "photocraft",
     "version": "0.1.0",
@@ -15,9 +15,9 @@
   "protocolVersion": 1,
   "sdkAbi": 1,
   "reactMajor": 18,
-  "entry": "entry-7OKGSWTZ.js",
+  "entry": "entry-6H3F5AAC.js",
   "styles": [
-    "entry-64CJO5LK.css"
+    "entry-CZGMDUPZ.css"
   ],
   "requiredSdkGroups": [
     "core",
@@ -31,17 +31,17 @@
   ],
   "files": [
     {
-      "path": "entry-7OKGSWTZ.js",
+      "path": "entry-6H3F5AAC.js",
       "bytes": 478,
-      "gzipBytes": 356,
-      "sha256": "bdb20ca15a9103e1bbe5e991cc37a16a99d77090c39179998194e28952388e3b",
+      "gzipBytes": 358,
+      "sha256": "72dbf1c2a66355b2de7edf180438dcde16fcdb5daf0a0dc248190275976ac628",
       "kind": "entry"
     },
     {
-      "path": "chunks/frontend-RDHM3NQ6.js",
-      "bytes": 115178,
-      "gzipBytes": 35597,
-      "sha256": "ae322b794d37681c129cb8d8d8c8215c3fdd946b477623ab00ca2666746ceadb",
+      "path": "chunks/frontend-CIN6KUZU.js",
+      "bytes": 115741,
+      "gzipBytes": 35775,
+      "sha256": "2550f3a2465f6a2b1e12b8a0d3b65f4029e2a5b0611e536dc1992e9968173a3a",
       "kind": "private-chunk"
     },
     {
@@ -52,17 +52,17 @@
       "kind": "private-chunk"
     },
     {
-      "path": "entry-64CJO5LK.css",
-      "bytes": 3272,
-      "gzipBytes": 1020,
-      "sha256": "4fa925724a72af100974dd5449c9c1d2fb42722276e26af326ebc5fc05ddb2e8",
+      "path": "entry-CZGMDUPZ.css",
+      "bytes": 4060,
+      "gzipBytes": 1217,
+      "sha256": "78ca88081fefc01ccb9c36e8ca89c3a1194b8c6c71a4789f5959bfedea6c5ab1",
       "kind": "style"
     },
     {
-      "path": "chunks/frontend-UC466DHW.css",
-      "bytes": 3272,
-      "gzipBytes": 1020,
-      "sha256": "4fa925724a72af100974dd5449c9c1d2fb42722276e26af326ebc5fc05ddb2e8",
+      "path": "chunks/frontend-7765L2LP.css",
+      "bytes": 4060,
+      "gzipBytes": 1217,
+      "sha256": "78ca88081fefc01ccb9c36e8ca89c3a1194b8c6c71a4789f5959bfedea6c5ab1",
       "kind": "style"
     },
     {
@@ -109,9 +109,9 @@
     },
     {
       "path": "assets/photocraft/photocraft-web_bg.wasm",
-      "bytes": 27793175,
-      "gzipBytes": 11955576,
-      "sha256": "7860ffe47ff3c01724d9da64fcbd255da367d419ee2b52c83c1b0460ddc06e17",
+      "bytes": 27793279,
+      "gzipBytes": 11955619,
+      "sha256": "9aa2597e8e7bbbaf586844ac2692646d010ff3328cf3d47c255512ced456f4be",
       "kind": "asset"
     },
     {
@@ -125,25 +125,25 @@
       "path": "assets/photocraft/source.sha256",
       "bytes": 65,
       "gzipBytes": 72,
-      "sha256": "9db1d55863ebd75e132eaf78f899e22a2bfb2d72e25f71140b3e3e9a2d022c93",
+      "sha256": "ac8993f6c116a86e8ad79357ce0f41ac4d3ffd9f91a85b09c0765327c7d70fad",
       "kind": "asset"
     }
   ],
   "imports": [
     {
-      "from": "chunks/frontend-RDHM3NQ6.js",
+      "from": "chunks/frontend-CIN6KUZU.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-7OKGSWTZ.js",
+      "from": "entry-6H3F5AAC.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-7OKGSWTZ.js",
-      "specifier": "../browser-dist/chunks/frontend-RDHM3NQ6.js",
-      "resolved": "chunks/frontend-RDHM3NQ6.js"
+      "from": "entry-6H3F5AAC.js",
+      "specifier": "../browser-dist/chunks/frontend-CIN6KUZU.js",
+      "resolved": "chunks/frontend-CIN6KUZU.js"
     }
   ]
 }
