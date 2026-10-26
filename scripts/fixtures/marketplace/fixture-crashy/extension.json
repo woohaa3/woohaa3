@@ -7,9 +7,6 @@
     "sdkAbi": "^1.0.0",
     "protocolVersion": 1
   },
-  "permissions": {
-    "network": []
-  },
   "hostPlugin": {
     "module": "./backend",
     "factory": "createFixtureCrashyPlugin",

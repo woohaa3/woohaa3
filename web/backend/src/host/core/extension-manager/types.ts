@@ -6,7 +6,7 @@
  * 后端打包入口不能静态 import 仓库根脚本，因此运行期按路径加载（见 `toolkit.ts`），测试注入替身。
  * 所有失败都以带 `code` 的错误抛出，`code` 取 `MARKETPLACE_FAILURE_CODES`。
  */
-import type { AnyHostExtensionPlugin, ExtensionEngines, ExtensionPermissions, ExtensionTrust } from "@woohaa3/contracts";
+import type { AnyHostExtensionPlugin, ExtensionEngines, ExtensionTrust } from "@woohaa3/contracts";
 
 export type TrustedKey = { keyId: string; publicKey: string };
 
@@ -17,7 +17,6 @@ export type PreflightResult = {
   extensionId?: string;
   version?: string;
   engines?: ExtensionEngines;
-  permissions?: ExtensionPermissions;
   /** 声明了 backend / hostPlugin / metadata / publicRoutes：提交后需要受控重启（D8）。 */
   requiresRestart?: boolean;
   /** 扩展声明的依赖（extensionId → semver range）；缺省无依赖。 */
@@ -31,7 +30,6 @@ export type InstallationRecord = {
   packageDigest?: string;
   filesDigest?: string;
   trust?: ExtensionTrust;
-  permissions?: ExtensionPermissions;
   state?: "active" | "observing" | "uninstalling";
   observeUntil?: string | null;
   /** 含后端代码：观察期从下一次启动开始计时。 */

@@ -193,14 +193,17 @@ test("分发字段可选：旧扩展声明不受影响", () => {
   assert.equal(validateExtensionDescriptor(complete()).ok, true);
 });
 
-test("version / engines / permissions 合法时通过", () => {
+test("version / engines 合法时通过", () => {
   const result = validateExtensionDescriptor({
     ...MINIMAL,
     version: "1.2.0-beta.1",
-    engines: { hostAbi: "^1.0.0", sdkAbi: ">=1 <2", protocolVersion: 1 },
-    permissions: { network: ["api.example.com", "*.example.org:8443"], canvas: "write", mcpTools: ["canvas.read"], publicRoutes: true, storageNamespaces: ["my-cache"] }
+    engines: { hostAbi: "^1.0.0", sdkAbi: ">=1 <2", protocolVersion: 1 }
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test("permissions 已移除：声明它按未知字段拒绝", () => {
+  assert.match(errorsOf({ ...MINIMAL, permissions: { network: ["api.example.com"] } }), /未知字段：permissions/);
 });
 
 test("version 非 semver、engines 缺字段或 range 非法：失败并指出字段", () => {
@@ -209,13 +212,6 @@ test("version 非 semver、engines 缺字段或 range 非法：失败并指出�
   assert.match(text, /engines\.sdkAbi 不是合法的 semver range/);
   assert.match(text, /engines\.protocolVersion 必须是正整数/);
   assert.match(text, /engines 未知字段：extra/);
-});
-
-test("permissions.network 不是字符串数组、含协议或路径、canvas 非法：失败", () => {
-  assert.match(errorsOf({ ...MINIMAL, permissions: { network: "api.example.com" } }), /permissions\.network 必须是字符串数组/);
-  assert.match(errorsOf({ ...MINIMAL, permissions: { network: ["https://api.example.com/v1"] } }), /permissions\.network\[0\] 必须是域名/);
-  assert.match(errorsOf({ ...MINIMAL, permissions: { canvas: "admin" } }), /permissions\.canvas 必须是 read \/ write/);
-  assert.match(errorsOf({ ...MINIMAL, permissions: { secrets: true } }), /permissions 未知字段：secrets/);
 });
 
 test("migrate 只做格式校验（是否允许由受管预检决定）", () => {

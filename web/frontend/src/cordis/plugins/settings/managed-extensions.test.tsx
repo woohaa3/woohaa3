@@ -38,7 +38,6 @@ const managedEntry = (id: string, overrides: Partial<InstalledExtensionView> = {
   previousVersion: "1.0.0",
   sourceId: "local-file",
   trust: "signed:woohaa-dev",
-  permissions: { network: ["api.example.com"], canvas: "read" },
   ...overrides
 });
 
@@ -134,7 +133,7 @@ const baseSnapshot = (installed: InstalledExtensionView[], extra: Partial<Settin
 });
 
 describe("受管扩展设置面", () => {
-  it("内置扩展卡片没有来源/卸载/回滚入口；受管卡片显示来源、信任、权限与回滚", async () => {
+  it("内置扩展卡片没有来源/卸载/回滚入口；受管卡片显示来源、信任与回滚", async () => {
     const { container } = await render(baseSnapshot([builtin("film-set"), managedEntry("demo")]), remoteWith());
     expect(container.querySelector('[data-testid="managed-extension-film-set"]')).toBeNull();
     expect(container.querySelector('[data-testid="managed-uninstall-film-set"]')).toBeNull();
@@ -142,7 +141,6 @@ describe("受管扩展设置面", () => {
     expect(container.querySelector('[data-testid="settings-plugin-managed-demo"]')?.textContent).toBe("已安装");
     expect(container.querySelector('[data-testid="managed-source-demo"]')?.textContent).toBe("本地文件");
     expect(container.querySelector('[data-testid="managed-trust-demo"]')?.textContent).toContain("woohaa-dev");
-    expect(container.querySelector('[data-testid="managed-permissions-demo"]')?.textContent).toContain("api.example.com");
     expect(container.querySelector('[data-testid="managed-rollback-demo"]')?.textContent).toBe("回滚到 v1.0.0");
   });
 

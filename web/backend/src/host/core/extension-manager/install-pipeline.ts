@@ -167,7 +167,6 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
         packageDigest: digest,
         filesDigest,
         trust,
-        permissions: preflight.permissions ?? {},
         state: "observing",
         observeUntil,
         observeAfterRestart: requiresRestart,

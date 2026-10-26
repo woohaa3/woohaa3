@@ -85,7 +85,7 @@ function isPlainObject(value) {
 
 /**
  * 校验一份 installations.json。返回 { ok, value, errors }。只校验扫描与指针所需的字段；
- * Manager 写入的其余字段（packageDigest、trust、permissions、observeUntil、requiresRestart、rejected…）原样保留。
+ * Manager 写入的其余字段（packageDigest、trust、observeUntil、requiresRestart、rejected…）原样保留。
  */
 export function validateInstallations(raw) {
   const errors = [];

@@ -186,7 +186,7 @@ test("preflightDirectory：engines 不兼容 → MARKETPLACE_ENGINES_INCOMPATIBL
   assert.ok(codesOf(result).includes("MARKETPLACE_ENGINES_INCOMPATIBLE:engines"));
 });
 
-test("preflightDirectory：受管扩展缺 version / engines、版本不一致、workspace 依赖、permissions 格式错误", async () => {
+test("preflightDirectory：受管扩展缺 version / engines、版本不一致、workspace 依赖", async () => {
   const noEngines = managedTree();
   const descriptor = JSON.parse(fs.readFileSync(path.join(noEngines, "extension.json"), "utf8"));
   delete descriptor.engines;
@@ -195,9 +195,6 @@ test("preflightDirectory：受管扩展缺 version / engines、版本不一致�
   assert.deepEqual(codesOf(await preflightDirectory(noEngines, { managed: true })).sort(), ["MARKETPLACE_PREFLIGHT_FAILED:engines", "MARKETPLACE_PREFLIGHT_FAILED:version"]);
   assert.ok(codesOf(await preflightDirectory(managedTree({ pkg: { version: "1.0.1" } }), { managed: true })).includes("MARKETPLACE_PREFLIGHT_FAILED:version"));
   assert.ok(codesOf(await preflightDirectory(managedTree({ pkg: { dependencies: { "@woohaa3/contracts": "workspace:*" } } }), { managed: true })).includes("MARKETPLACE_PREFLIGHT_FAILED:package.json.dependencies"));
-  const badPermissions = await preflightDirectory(managedTree({ descriptor: { permissions: { network: "api.example.com" } } }), { managed: true });
-  assert.equal(badPermissions.ok, false);
-  assert.match(badPermissions.errors.map((error) => error.message).join("\n"), /permissions\.network 必须是字符串数组/);
 });
 
 test("preflightDirectory：模块缺失、browser 产物缺失/被篡改/身份不符", async () => {

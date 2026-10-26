@@ -7,9 +7,6 @@
     "sdkAbi": "^1.0.0",
     "protocolVersion": 1
   },
-  "permissions": {
-    "canvas": "read"
-  },
   "site": {
     "name": "市场测试面板",
     "description": "扩展市场测试 fixture：纯前端站点扩展。",

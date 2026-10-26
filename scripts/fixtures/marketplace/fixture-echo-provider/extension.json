@@ -7,10 +7,6 @@
     "sdkAbi": "^1.0.0",
     "protocolVersion": 1
   },
-  "permissions": {
-    "network": [],
-    "publicRoutes": false
-  },
   "metadata": {
     "module": "./shared",
     "export": "FIXTURE_ECHO_PLUGIN_METADATA",

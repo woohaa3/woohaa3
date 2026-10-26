@@ -146,18 +146,6 @@ export type ExtensionInstallJobView = {
 /** 受管扩展的信任级别：`signed:<keyId>` 或 `unsigned`（仅 local-file 且本机显式允许）。 */
 export type ExtensionTrust = `signed:${string}` | "unsigned";
 
-/**
- * 扩展声明的权限（`extension.json` 的 `permissions`）。本期只做格式校验并记录展示，**不强制**；
- * 字段与后续进程隔离 change 的 ctx 裁剪一一对应。
- */
-export type ExtensionPermissions = {
-  readonly network?: readonly string[];
-  readonly canvas?: "read" | "write";
-  readonly mcpTools?: readonly string[];
-  readonly publicRoutes?: boolean;
-  readonly storageNamespaces?: readonly string[];
-};
-
 /** 来源侧的一个可见版本（展示用；来源返回的状态与 keyId 不参与信任判定）。 */
 export type MarketplaceVersionInfo = {
   readonly version: string;

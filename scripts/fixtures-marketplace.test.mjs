@@ -25,7 +25,6 @@ import { unpackExtensionPackage } from "./lib/extension-package.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..");
 export const MARKETPLACE_FIXTURES = path.join(HERE, "fixtures", "marketplace");
-const GUARD = path.join(REPO_ROOT, "web", "backend", "src", "extension-host", "child", "network-guard.ts");
 
 /**
  * 打包一个 fixture。`version` 给出时在临时副本里同步改 extension.json / package.json / shared.ts 的版本。
@@ -72,41 +71,6 @@ const callRoute = async (method, url) => {
   }
   return { status: 404, body: null };
 };`;
-
-/**
- * 在独立 node 子进程里：装出网守卫（allowedHosts = permissions.network，lockdown）→ 加载 entry → 用最小 ctx 调 apply →
- * 执行 `script`（拿到 { plugin, regs, routes, ctx, mod }）→ stdout 输出 JSON。用 --experimental-strip-types 直接加载守卫源码。
- */
-function runInChild(tree, script, { ctxExtras = "{}" } = {}) {
-  const descriptor = JSON.parse(fs.readFileSync(path.join(tree, "extension.json"), "utf8"));
-  const entry = pathToFileURL(path.join(tree, "backend-dist", "entry.mjs")).href;
-  const source = `
-const { installNetworkGuard } = await import(${JSON.stringify(pathToFileURL(GUARD).href)});
-installNetworkGuard({ allowedHosts: ${JSON.stringify(descriptor.permissions?.network ?? [])}, lockdown: true });
-const mod = await import(${JSON.stringify(entry)});
-const regs = []; const routes = [];
-const ctx = Object.assign({
-  log: { scope: () => () => undefined },
-  generation: { register: (r) => (regs.push(r), () => undefined) },
-  gateway: { route: (order, handler, declaration) => { if (declaration?.prefix && !declaration.prefix.startsWith("/api/extensions/${descriptor.extensionId}/")) throw Object.assign(new Error("越权路由"), { code: "permission-denied" }); routes.push(handler); return () => undefined; } },
-  get: () => undefined,
-  effect: (fn) => fn()
-}, ${ctxExtras});
-const plugin = mod[${JSON.stringify(descriptor.hostPlugin.factory)}]();
-await plugin.apply(ctx, Object.fromEntries(Object.entries(plugin.Config.fields).map(([k, f]) => [k, f.default])));
-${CALL_ROUTE}
-const result = await (async () => { ${script} })();
-process.stdout.write(JSON.stringify(result));
-process.exit(0);
-`;
-  const run = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", source], {
-    cwd: path.join(REPO_ROOT, "web", "backend"),
-    encoding: "utf8",
-    timeout: 60_000,
-    env: { PATH: process.env.PATH ?? "", NODE_ENV: "test" }
-  });
-  return { status: run.status, signal: run.signal, stdout: run.stdout, stderr: run.stderr, json: run.status === 0 && run.stdout ? JSON.parse(run.stdout) : null };
-}
 
 for (const name of ["fixture-echo-provider", "fixture-crashy", "fixture-greedy"]) {
   test(`${name}：build:backend 产出单文件入口，受管预检通过，包内无 src/`, async (t) => {

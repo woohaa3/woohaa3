@@ -12,7 +12,7 @@ import path from "node:path";
 import { EXTENSION_DESCRIPTOR_NAME, ExtensionScanError } from "./extension-scan.mjs";
 
 export const EXTENSION_DESCRIPTOR_SCHEMA_VERSION = 1;
-export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "permissions", "migrate", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "icon", "required"];
+export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "migrate", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "icon", "required"];
 export const EXTENSION_CAPABILITY_KINDS = ["capability", "handler"];
 export const EXTENSION_CAPABILITY_AUTH = ["public", "authenticated"];
 export const EXTENSION_ROUTE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -34,7 +34,6 @@ export const EXTENSION_HOST_PLUGIN_KINDS = ["provider", "storage", "marketplace-
 export const HOST_ENGINES = Object.freeze({ hostAbi: "1.0.0", sdkAbi: "1.0.0", protocolVersion: 1 });
 
 /** 权限声明字段（本期只校验格式并记录，不强制；与后续进程隔离 change 的 ctx 裁剪一一对应）。 */
-export const EXTENSION_PERMISSION_KEYS = ["network", "canvas", "mcpTools", "publicRoutes", "storageNamespaces"];
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const HOSTNAME = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:\d{1,5})?$/;
@@ -147,34 +146,6 @@ function validateEngines(engines, errors) {
   if (!Number.isInteger(engines.protocolVersion) || engines.protocolVersion < 1) errors.push("engines.protocolVersion 必须是正整数");
 }
 
-function validatePermissions(permissions, errors) {
-  if (!isPlainObject(permissions)) {
-    errors.push("permissions 必须是对象");
-    return;
-  }
-  for (const key of unknownKeys(permissions, EXTENSION_PERMISSION_KEYS)) errors.push(`permissions 未知字段：${key}`);
-  const stringList = (key, check, hint) => {
-    const value = permissions[key];
-    if (value === undefined) return;
-    if (!Array.isArray(value) || !value.every(isNonEmptyString)) {
-      errors.push(`permissions.${key} 必须是字符串数组`);
-      return;
-    }
-    value.forEach((entry, index) => {
-      if (check && !check(entry)) errors.push(`permissions.${key}[${index}] ${hint}：${entry}`);
-    });
-  };
-  stringList("network", (entry) => HOSTNAME.test(entry.toLowerCase()), "必须是域名（可带 *. 前缀与端口，不含协议与路径）");
-  stringList("mcpTools", (entry) => /^[A-Za-z0-9_.:-]+$/.test(entry), "必须是工具名");
-  stringList("storageNamespaces", (entry) => KEBAB_ID.test(entry), "必须是 kebab-case 命名空间");
-  if (permissions.canvas !== undefined && permissions.canvas !== "read" && permissions.canvas !== "write") {
-    errors.push("permissions.canvas 必须是 read / write");
-  }
-  if (permissions.publicRoutes !== undefined && typeof permissions.publicRoutes !== "boolean") {
-    errors.push("permissions.publicRoutes 必须是布尔值");
-  }
-}
-
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const KEBAB_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 /** 只接受包内相对模块（`./backend` 这类子路径），拒绝 URL/绝对路径/脚本地址。 */
@@ -217,7 +188,6 @@ export function validateExtensionDescriptor(value) {
   // 受管扩展（.wxt 安装）在预检阶段要求 version 与 engines 必填。
   if (value.version !== undefined && !isSemver(value.version)) errors.push("version 必须是 semver（如 1.2.0）");
   if (value.engines !== undefined) validateEngines(value.engines, errors);
-  if (value.permissions !== undefined) validatePermissions(value.permissions, errors);
   // `migrate` 只预留：声明了数据迁移的包在受管安装预检时被拒绝（需要进程隔离支持）。
   if (value.migrate !== undefined) {
     if (!isPlainObject(value.migrate)) {

@@ -202,7 +202,7 @@ export async function probeDeclaredExports(host) {
  * - 有 browser 源码约定或 `browser-dist/` 时，artifact manifest 必须存在、可解码、与宿主 SDK 兼容，
  *   身份与声明一致，清单里每个文件存在且 sha256/大小一致。
  *
- * 返回 `{ ok, errors, warnings, extensionId, version, descriptor, packageJson, engines, permissions,
+ * 返回 `{ ok, errors, warnings, extensionId, version, descriptor, packageJson, engines,
  * activation, requiresRestart }`；errors/warnings 是 `{ code, field?, message }`。
  * `requiresRestart`：声明了后端代码（backend / hostPlugin / metadata / publicRoutes）→ 受控重启生效（D8）。
  */
@@ -311,7 +311,6 @@ export async function preflightDirectory(dir, { managed = false, contracts = nul
     descriptor,
     packageJson,
     engines: descriptor.engines ?? null,
-    permissions: descriptor.permissions ?? null,
     activation,
     requiresRestart
   });

@@ -3,7 +3,7 @@
  * 从 `settings/index.ts` 拆出（源码规模门禁 ≤500 行），由它统一 re-export。
  */
 import type { PluginIcon } from "../plugin-icon.js";
-import type { ExtensionInstallJobView, ExtensionPermissions, ExtensionTrust } from "../backend/marketplace.js";
+import type { ExtensionInstallJobView, ExtensionTrust } from "../backend/marketplace.js";
 
 /**
  * 本次启动扫描并装配的扩展（「在场」信息，只读展示）。
@@ -37,8 +37,6 @@ export type InstalledExtensionView = {
   /** 安装来源（`local-file` 或某个市场来源）。 */
   sourceId?: string;
   trust?: ExtensionTrust;
-  /** 声明的权限（本期只展示，不强制）。 */
-  permissions?: ExtensionPermissions;
   /** 含后端代码的受管扩展已提交新版本，需要受控重启后生效。 */
   restartRequired?: boolean;
   /** 观察期截止时间（ISO）；观察期内激活失败或健康连续失败会自动回滚。 */

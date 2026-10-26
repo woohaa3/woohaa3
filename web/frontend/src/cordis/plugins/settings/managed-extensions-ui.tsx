@@ -13,7 +13,7 @@
  * - 隔离开启的含后端扩展升级走蓝绿切换，卡片不再显示「需重启」（宿主也不再置 restartRequired）。
  */
 import { useRef, useState, useSyncExternalStore } from "react";
-import type { ExtensionPermissions, InstalledExtensionView, SettingsSnapshot } from "@woohaa3/contracts";
+import type { InstalledExtensionView, SettingsSnapshot } from "@woohaa3/contracts";
 import { Button } from "../../../shared/ui/Button.js";
 import { describeJob, type ManagedExtensionsController } from "./managed-extensions.js";
 import { ManagedVersionStatusNotice } from "./managed-version-status.js";
@@ -123,23 +123,6 @@ function trustLabel(trust: InstalledExtensionView["trust"]): string {
   return `已签名 · ${trust.slice("signed:".length)}`;
 }
 
-/**
- * 权限展示。隔离开启（独立进程）时宿主强制出网 / 公开路由 / 存储命名空间；画布与 MCP 工具本期不授予。
- * 未隔离时一律只是声明（P1 语义）。
- */
-export function permissionLines(permissions: ExtensionPermissions | undefined, enforced: boolean): string[] {
-  const lines: string[] = [];
-  const unsupported = enforced ? "（本期未支持，未授予）" : "";
-  const network = permissions?.network ?? [];
-  if (network.length) lines.push(`出网：${network.join("、")}`);
-  else if (enforced) lines.push("出网：不允许");
-  if (permissions?.canvas) lines.push(`${permissions.canvas === "write" ? "画布：读写" : "画布：只读"}${unsupported}`);
-  if (permissions?.mcpTools?.length) lines.push(`MCP 工具：${permissions.mcpTools.join("、")}${unsupported}`);
-  if (permissions?.publicRoutes) lines.push("公开路由");
-  if (permissions?.storageNamespaces?.length) lines.push(`存储：${permissions.storageNamespaces.join("、")}`);
-  return lines;
-}
-
 export function ManagedExtensionDetails({
   installed,
   controller,
@@ -155,7 +138,6 @@ export function ManagedExtensionDetails({
   if (!installed || installed.managed !== true) return null;
   const id = installed.id;
   const busy = controller.busy(id);
-  const permissions = permissionLines(installed.permissions, false);
   return (
     <div className="managed-extension" data-testid={`managed-extension-${id}`}>
       <dl className="managed-extension__facts">
@@ -163,13 +145,6 @@ export function ManagedExtensionDetails({
         <dd data-testid={`managed-source-${id}`}>{installed.sourceId === "local-file" ? "本地文件" : installed.sourceId ?? "未知"}</dd>
         <dt>信任</dt>
         <dd data-testid={`managed-trust-${id}`}>{trustLabel(installed.trust)}</dd>
-        <dt>权限</dt>
-        <dd data-testid={`managed-permissions-${id}`}>
-          {permissions.length > 0 ? permissions.join("；") : "未声明"}
-          <span className="managed-extension__note" data-testid={`managed-permissions-note-${id}`}>
-            （声明项，未强制：与本机服务同权限）
-          </span>
-        </dd>
         {installed.observeUntil ? (
           <>
             <dt>观察期</dt>

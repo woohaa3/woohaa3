@@ -5,7 +5,6 @@ import type { Readable } from "node:stream";
 import type {
   ExtensionInstallJobView,
   ExtensionInstallationsView,
-  ExtensionPermissions,
   ExtensionTrust,
   HostMarketplaceService,
   MarketplaceFailureCode,
@@ -85,7 +84,6 @@ export type ManagedInstallView = {
   previousVersion?: string;
   sourceId: string;
   trust?: ExtensionTrust;
-  permissions?: ExtensionPermissions;
   restartRequired: boolean;
   observeUntil?: string;
   directory: string;

@@ -927,7 +927,6 @@ function writeIsolatedManaged(managedRoot, extensionId, { entrySource, schema, d
       schemaVersion: 1,
       extensionId,
       version,
-      permissions: { network: ["api.example.com"] },
       hostPlugin: { module: "./backend-dist/entry", factory: "createPlugin", kind: "provider", order: 7 },
       metadata: { module: "./backend-dist/entry", export: "META" },
       ...descriptor
