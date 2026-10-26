@@ -34,6 +34,7 @@ export function AuthoringGenerateLayout({
   inspector, references, mcp, prompt, assistant, model, detail, submit, onRefresh, onManage, disabled, refreshing,
 }: AuthoringLayoutProps) {
   const toolbar = <AssistantToolbar assistant={assistant} parameters={model} submit={submit}
+    beforeSubmit={detail ? <div className="authoring-generate__actions">{detail}</div> : undefined}
     onRefresh={onRefresh} onManage={onManage} disabled={disabled} refreshing={refreshing} />;
   if (inspector) return <>
     <div className="authoring-generate__inspector-heading">
@@ -43,7 +44,6 @@ export function AuthoringGenerateLayout({
     {references ? <div className="authoring-generate__references">{references}</div> : null}
     {prompt}
     {toolbar}
-    {detail ? <div className="authoring-generate__actions">{detail}</div> : null}
   </>;
 
   return <>
@@ -53,6 +53,5 @@ export function AuthoringGenerateLayout({
     </div>
     {prompt}
     {toolbar}
-    {detail ? <div className="authoring-generate__actions">{detail}</div> : null}
   </>;
 }

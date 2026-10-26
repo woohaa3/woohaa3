@@ -379,6 +379,21 @@ export function ExecutionPanel({
 	const blockingBlock = <BlockingBlock {...(blockingReasons ? { reasons: blockingReasons } : {})} />;
 	// Agent 详情具名入口：与阶段/错误/结果摘要同排，位于状态区、临近主操作（design D6）。
 	const agentDetailBlock = <AgentDetailBlock action={agentDetailAction} {...(onViewAgentDetail ? { onView: onViewAgentDetail } : {})} />;
+	const runActionGroup = showRunActions ? (
+		<div className="mc-panel__run-action-group">
+			{agentDetailBlock}
+			<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-run">
+				<span className="mc-panel__grid-control">{runBlock}</span>
+			</div>
+		</div>
+	) : agentDetailBlock;
+	const runGridItem = showRunActions ? (
+		<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-run">
+			<span className="mc-panel__grid-control">
+				<div className="mc-panel__inline-run-actions">{agentDetailBlock}{runBlock}</div>
+			</span>
+		</div>
+	) : agentDetailBlock;
 	const executionFeedback = expanded ? (
 		<ExecutionStatus
 			status={status}
@@ -405,12 +420,14 @@ export function ExecutionPanel({
 					</div>
 				</div>
 				<div className="mc-panel__audio-footer-right">
-					<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-run">
-						<span className="mc-panel__grid-control">{runBlock}</span>
+					<div className="mc-panel__run-action-group">
+						{agentDetailBlock}
+						<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-run">
+							<span className="mc-panel__grid-control">{runBlock}</span>
+						</div>
 					</div>
 				</div>
 			</div>
-			{agentDetailBlock}
 			{blockingBlock}
 		</div>
 	);
@@ -443,18 +460,13 @@ export function ExecutionPanel({
 						</div>
 					</div>
 					<div className="mc-panel__grid mc-panel__sectioned-footer">
-						{agentDetailBlock}
 						{executionFeedback}
 						{showParameterSheet ? (
 							<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-parameter">
 								<span className="mc-panel__grid-control">{parameterSheet}</span>
 							</div>
 						) : null}
-						{showRunActions ? (
-							<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-run">
-								<span className="mc-panel__grid-control">{runBlock}</span>
-							</div>
-						) : null}
+						{runActionGroup}
 						{blockingBlock}
 						{videoEditEntryBlock}
 					</div>
@@ -476,13 +488,8 @@ export function ExecutionPanel({
 							<span className="mc-panel__grid-control">{parameterSheet}</span>
 						</div>
 					) : null}
-					{showRunActions ? (
-						<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-run">
-							<span className="mc-panel__grid-control">{runBlock}</span>
-						</div>
-					) : null}
+					{runGridItem}
 					{blockingBlock}
-					{agentDetailBlock}
 					{videoEditEntryBlock}
 				</div>
 			)}

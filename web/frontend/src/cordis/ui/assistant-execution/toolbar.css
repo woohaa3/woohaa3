@@ -31,6 +31,8 @@
 .assistant-toolbar .mc-panel__chevron { flex: none; width: 12px; }
 .assistant-toolbar .ui-icon-button { flex: 0 0 32px; width: 32px; height: 32px; min-height: 32px; }
 .assistant-toolbar__submit { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; margin-left: auto; padding-left: 16px; min-width: 0; }
+.assistant-toolbar__before-submit { display: flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.assistant-toolbar__before-submit > * { flex: 0 1 auto; min-width: 0; }
 .assistant-toolbar__submit > .ui-button { min-width: 0; height: 32px; min-height: 32px; padding-inline: 10px; white-space: nowrap; }
 .assistant-toolbar__submit .ui-button__icon { display: none; }
 .assistant-toolbar__placeholder:disabled, .assistant-toolbar .mc-panel__model-trigger:disabled { opacity: .55; cursor: default; }

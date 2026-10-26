@@ -1940,6 +1940,24 @@
   flex: 0 0 auto;
   margin-left: auto;
 }
+.mc-panel__run-action-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+.mc-panel__run-action-group .mc-panel__grid-run { margin-left: 0; }
+.mc-panel__inline-run-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+.mc-panel__inline-run-actions .mc-panel__agent-detail { flex: 0 1 auto; }
 .mc-panel__sectioned-footer .mc-panel__grid-errors,
 .mc-panel__sectioned-footer .mc-panel__video-edit-entry {
   flex-basis: 100%;
@@ -1988,7 +2006,7 @@
    具名文字 + 摘要常驻，颜色仅辅助；strong 用于运行/终态，low 用于 idle 既往会话。 */
 .mc-panel__agent-detail {
   display: flex;
-  flex: 1 0 100%;
+  flex: 0 1 auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -2038,6 +2056,7 @@
   .mc-panel__sectioned-footer .mc-panel__grid-parameter { flex-basis: 100%; }
   .mc-panel__sectioned-footer .mc-panel__grid-run { flex-basis: 100%; }
 }
+.mc-panel__sectioned-footer .mc-panel__run-action-group .mc-panel__grid-run { flex-basis: auto; }
 .mc-panel__sectioned-footer .mc-panel__model { min-width: 0; max-width: 100%; }
 .mc-panel__sectioned-footer .mc-panel__model-trigger { max-width: 100%; }
 .mc-panel__model-menu, .mc-panel__settings-menu { max-width: calc(100vw - 32px); }

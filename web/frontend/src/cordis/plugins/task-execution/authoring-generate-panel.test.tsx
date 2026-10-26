@@ -530,8 +530,11 @@ describe("统一 Agent 创作入口", () => {
     const button = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
       (entry) => entry.textContent === "对话详情",
     )!;
-    // 详情入口在生成按钮左侧的同一工具栏里，不额外占一行状态区。
-    expect(button.closest(".authoring-generate__actions")).not.toBeNull();
+    // 详情入口在生成按钮左侧的同一提交组里，不额外占一行状态区。
+    const beforeSubmit = button.closest(".assistant-toolbar__before-submit");
+    expect(beforeSubmit).not.toBeNull();
+    expect(beforeSubmit?.closest(".assistant-toolbar__submit")).not.toBeNull();
+    expect(beforeSubmit?.nextElementSibling?.matches("button")).toBe(true);
     expect(el.querySelector(".authoring-generate__session")).toBeNull();
     await act(async () => button.click());
     expect(props.agentConversation!.onOpenDetail).toHaveBeenCalledWith({
