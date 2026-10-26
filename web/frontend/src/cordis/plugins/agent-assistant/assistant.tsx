@@ -204,6 +204,10 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
   const [selectedKind, setSelectedKind] = useState<string | null>(initial);
   const [visited, setVisited] = useState<string[]>(initial ? [initial] : []);
   const providerMethods = local ? [] : providerGroups;
+  const selectedMethod = selectedKind
+    ? kinds.find(item => item.id === selectedKind) ?? providerMethods.find(group => `provider:${group.providerId}` === selectedKind)
+    : null;
+  const selectedLabel = selectedMethod?.label ?? null;
   return <div className="agent-assistant__add">
     <div className="agent-assistant__methods">{kinds.filter(item => local ? item.id === "installed" : item.id !== "installed").map(item => {
       const available = contributions.some(entry => entry.kind === item.id);
@@ -213,6 +217,7 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
         <span className="agent-assistant__brands">{item.services.map(service => <span className="service-identity" key={service.id}><ServiceLogo service={service.id} size={18} />{service.name}</span>)}</span>
         <span className="agent-assistant__method-description">{available ? item.detail : "当前环境未启用"}</span>
         {item.id !== "installed" ? <ModelTypeTags types={["language"]} /> : null}
+        <span className="agent-assistant__method-state">{!available ? "不可用" : selectedKind === item.id ? "正在配置" : "点击配置"}</span>
       </button>;
     })}{providerMethods.map(group => {
       const id = `provider:${group.providerId}`;
@@ -222,16 +227,20 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
         <strong>{group.label}</strong>
         <span className="agent-assistant__method-description">{group.description || "使用此供应商的现有配置。"}</span>
         <ModelTypeTags types={group.modelTypes} />
+        <span className="agent-assistant__method-state">{selectedKind === id ? "正在配置" : "点击配置"}</span>
       </button>;
     })}</div>
-    <div className="agent-assistant__forms">{visited.map(id => {
+    <div className={`agent-assistant__forms${selectedKind ? " agent-assistant__forms--active" : ""}`}>
+      {selectedLabel ? <div className="agent-assistant__form-heading"><div><span>正在配置</span><strong>{selectedLabel}</strong></div><p>填写完成后保存，这个服务会出现在服务来源列表中。</p></div> : <div className="agent-assistant__form-empty"><strong>选择一种接入方式</strong><p>点击左侧选项，在这里打开对应的配置详情。</p></div>}
+      {visited.map(id => {
       const Entry = contributions.find(entry => entry.kind === id)?.render;
       const providerId = id.startsWith("provider:") ? id.slice("provider:".length) : undefined;
       // Keep the instance and its portal container together under the hidden owner.
       return <div key={id} data-form-kind={id} hidden={selectedKind !== id} className="agent-assistant__add-form">
         <UiPortalScope>{providerId && settingsStore ? <Suspense fallback={<p>正在读取 Provider 配置…</p>}><GenerationProviders store={settingsStore} compact providerId={providerId} onSaved={() => onSaved(providerId)} /></Suspense> : Entry ? <Entry onSaved={onSaved} /> : <p>当前环境未启用此连接的配置扩展。</p>}</UiPortalScope>
       </div>;
-    })}</div>
+      })}
+    </div>
   </div>;
 }
 
