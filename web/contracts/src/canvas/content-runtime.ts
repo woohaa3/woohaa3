@@ -17,6 +17,8 @@ import type { ContentMcpRuntime } from "./film-set-mcp.js";
 import type { ContentRecordingRuntime } from "./content-recording.js";
 
 export type CanvasContentRuntime = {
+  managedLifecycles?: readonly import("./managed-node-lifecycle.js").ManagedNodeLifecycleAdapter[];
+  managedMigrations?: readonly import("./managed-node-lifecycle.js").ManagedNodeMigrationAdapter[];
   /** 预览/历史帧端口。 */
   frames?: ContentFrameRuntime;
   /** 转片场能力端口。 */

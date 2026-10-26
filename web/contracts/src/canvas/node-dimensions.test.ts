@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
 import { effectiveCanvasNodeSize } from "./node-dimensions.js";
 import { buildCanvasRenderScene } from "./render-scene.js";
@@ -11,7 +12,7 @@ import {
   groupBottomPadding,
 } from "./domain/core/group-geometry.js";
 import { compileAgentPlan } from "./canvas-script/planner/compile.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { nodeWorldRect } from "./geometry.js";
 import { projectAgentGraph } from "./agent-canvas-projection.js";
 import type { AgentPlanOperation } from "./agent-canvas-protocol.js";

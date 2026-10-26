@@ -1,8 +1,9 @@
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "./yjs/index.js";
 import {
   createEmptyWoohaa3ServerCanvas, type ServerCanvas, type CanvasCommand, type EditPlan,
-  applyCanvasCommands, planCanvasEdit, createFilmSetSnapshot, canonicalFilmSetFields,
+  createFilmSetSnapshot, canonicalFilmSetFields,
   createModel3DNodeData, model3DNodeDataFields, decodeFilmSetNodeData, filmSetAnimationsOf,
   filmSetItemEditHash, modelSourceHash, shotImageReferenceIdentity, shotReferenceContentIdentity,
   createFilmSetObjectResolver, filmSetObjectModelNodeData, filmSetObjectContainerData, filmSetObjectContainerId, filmSetObjectModelNodeId, resolveFilmSetObject, isFilmSetNode,

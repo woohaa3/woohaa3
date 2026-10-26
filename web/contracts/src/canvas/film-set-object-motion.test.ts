@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 import { mediaTimelineLocalTime } from "./media-time.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 /**
@@ -23,7 +24,7 @@ import {
 } from "./film-set-item-ops.js";
 import { composeFilmSetScene } from "./film-set-composition.js";
 import { createModelSnapshot, createFilmSetSnapshot, filmSetNodeDataFields } from "./animation-snapshot.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 
 function modelItem(id: string, script = `scene.box({ id: "body" });`): FilmSetItem {

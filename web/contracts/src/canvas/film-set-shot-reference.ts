@@ -12,6 +12,7 @@
 import { fnv1a64Hex } from "./content-hash.js";
 import { resolveFilmSetClip } from "./film-set-clip-view.js";
 import { shotPreviewOwnershipOf } from "./film-set-shot-preview.js";
+import { managedNodeRelationOf } from "./managed-node.js";
 import type { FilmSetItem } from "./film-set-content.js";
 import type { FilmSetNodeData } from "./canvas-node-model.js";
 import { shotAspectValue } from "./film-set-shot-preview.js";
@@ -25,6 +26,8 @@ export type ShotReferenceOwnership = { filmSetNodeId: string; clipId: string };
  * 客户端与服务端共用本判据，避免两处归属解析分叉。
  */
 export function shotReferenceOwnershipOf(previewNodeData: unknown): ShotReferenceOwnership | null {
+  const relation = managedNodeRelationOf(previewNodeData);
+  if (relation?.extensionId === "film-set") return { filmSetNodeId: relation.ownerNodeId, clipId: relation.entityId };
   const ownership = shotPreviewOwnershipOf(previewNodeData);
   return ownership ? { filmSetNodeId: ownership.filmSetNodeId, clipId: ownership.clipId } : null;
 }

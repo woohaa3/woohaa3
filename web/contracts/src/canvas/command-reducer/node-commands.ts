@@ -26,8 +26,10 @@ import {
   hasShotPreviewOwnership,
   isProtectedShotPreview
 } from "./film-set-shot-previews.js";
-import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewNodeId, shotPreviewOwnershipOf } from "../film-set-shot-preview.js";
+import { FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "../film-set-shot-preview.js";
 import { findActiveRunNode, isModelDefinitionNode } from "./working-state.js";
+import { decodeManagedNodeRelation, managedNodeRelationOf } from "../managed-node.js";
+import { shotReferenceOwnershipOf } from "../film-set-shot-reference.js";
 import {
   normalizeSelfContained3D,
   validateGroupAppearancePatch,
@@ -153,23 +155,20 @@ export function addNode(
   command: Extract<CanvasCommand, { type: "node.add" }>
 ): CommandApplyResult {
   const { node } = command;
+  const managed = command.nodeData?.managedBy;
+  if (managed !== undefined) {
+    const decoded = decodeManagedNodeRelation(managed);
+    if (!decoded.ok) return reject("invalid-command", decoded.reason);
+    if (decoded.value.ownerNodeId === node.id) return reject("invalid-command", "托管节点不能把自身作为 owner");
+    if (!work.nodes.some(entry => entry.id === decoded.value.ownerNodeId)) return reject("unknown-node", `托管 owner ${decoded.value.ownerNodeId} 不存在`);
+    if (work.nodes.some(entry => managedNodeRelationOf(work.nodeData[entry.id])?.extensionId === decoded.value.extensionId && managedNodeRelationOf(work.nodeData[entry.id])?.ownerNodeId === decoded.value.ownerNodeId && managedNodeRelationOf(work.nodeData[entry.id])?.entityId === decoded.value.entityId)) return reject("duplicate-node", "同一托管实体已经存在节点");
+  }
   if (command.nodeData?.retainWhenEmpty !== undefined && (node.type !== "group" || typeof command.nodeData.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
   if (command.nodeData?.groupCollapsed !== undefined && (node.type !== "group" || typeof command.nodeData.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
   if (command.nodeData?.groupBadgeScale !== undefined && (node.type !== "group" || !isGroupBadgeScale(command.nodeData.groupBadgeScale))) return reject("invalid-group-config", "groupBadgeScale 只允许 group 的 0.5 至 2.5 倍率");
   // 预览节点只能由源镜头生命周期派生（D3）：普通新建路径禁止预览类型；恢复路径（撤销删除
   // 镜头）允许重建，但必须携带合法归属、派生 ID 与存在的源片场，最终不变式仍会复核。
-  if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE) {
-    const ownership = shotPreviewOwnershipOf(command.nodeData);
-    if (!ownership) {
-      return reject("invalid-shot-preview", "拍摄镜头预览必须携带合法归属，不能独立创建");
-    }
-    if (node.id !== shotPreviewNodeId(ownership.filmSetNodeId, ownership.clipId)) {
-      return reject("invalid-shot-preview", `预览节点 ${node.id} 的 ID 与归属不一致`);
-    }
-    if (!work.nodes.some((entry) => entry.id === ownership.filmSetNodeId)) {
-      return reject("invalid-shot-preview", `预览节点 ${node.id} 的源片场不存在`);
-    }
-  } else if (hasShotPreviewOwnership(command.nodeData)) {
+  if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || hasShotPreviewOwnership(command.nodeData)) {
     return reject("invalid-shot-preview", "普通节点不能写入拍摄镜头预览归属");
   }
   if (work.nodes.some((entry) => entry.id === node.id)) {
@@ -257,7 +256,7 @@ export function updateNode(
   }
   // 预览节点不得独立改归属（D4）：重父化只随所属片场移动由 reconciliation 补齐。
   if (command.parentId !== undefined && isProtectedShotPreview(work, command.nodeId)) {
-    const owner = shotPreviewOwnershipOf(work.nodeData[command.nodeId]);
+    const owner = shotReferenceOwnershipOf(work.nodeData[command.nodeId]);
     const parent = owner ? work.nodes.find(entry => entry.id === owner.filmSetNodeId) : null;
     // 受保护编辑重放会显式携带由 owner 派生的 parent 更新，允许与当前 owner 一致的值。
     if (!parent || (command.parentId ?? null) !== (parent.parentId ?? null)) {
@@ -296,23 +295,37 @@ export function removeNodes(work: WorkingState, nodeIds: readonly string[]): Com
 
   // 受保护预览不能独立删除（D2）：合法级联（源片场同批删除）由 reconciliation 在同一批次
   // 维护闭包，因此这里直接拒绝任何直接命中的预览；只删受保护预览的原始 node.remove 明确拒绝。
-  const directPreview = nodeIds.find((id) => isProtectedShotPreview(work, id));
+  const removed = collectWoohaa3CanvasRemovalIds(work.nodes, nodeIds, work.nodeData);
+  const directManaged = nodeIds.find((id) => {
+    const relation = managedNodeRelationOf(work.nodeData[id]);
+    return relation && !removed.has(relation.ownerNodeId);
+  });
+  if (directManaged) return reject("invalid-command", `托管节点 ${directManaged} 需由 owner 生命周期管理`);
+  const directPreview = nodeIds.find((id) => isProtectedShotPreview(work, id) && !managedNodeRelationOf(work.nodeData[id]));
   if (directPreview) {
     return reject("invalid-shot-preview", `拍摄镜头预览 ${directPreview} 需在拍摄镜头管理中删除`);
   }
 
   // 递归删除后代 + 空父容器，再清理关联边与 nodeData。
   // 刻意**不**级联删除 assets / jobs：资产是内容寻址且可能被历史或其它节点引用。
-  const removed = collectWoohaa3CanvasRemovalIds(work.nodes, nodeIds, work.nodeData);
+  // Owner deletion is a generic lifecycle operation. It remains valid while the
+  // extension is unavailable because the persisted relation is authoritative.
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const [id, data] of Object.entries(work.nodeData)) {
+      const relation = managedNodeRelationOf(data);
+      if (relation && removed.has(relation.ownerNodeId) && !removed.has(id)) { removed.add(id); expanded = true; }
+    }
+  }
   // 删除闭包若因级联携带了受保护预览（例如与源片场同批删除），保留由 reconciliation 处理；
   // 但若预览的来源仍存在，则该删除不是合法源级联，拒绝。
-  const cascadedPreview = [...removed].find((id) => id !== directPreview && isProtectedShotPreview(work, id));
-  if (cascadedPreview) {
-    const ownership = shotPreviewOwnershipOf(work.nodeData[cascadedPreview]);
-    if (ownership && work.nodes.some((node) => node.id === ownership.filmSetNodeId)) {
-      return reject("invalid-shot-preview", `拍摄镜头预览 ${cascadedPreview} 的源片场仍存在，不能随删除移除`);
-    }
-  }  // 任务边界保护（change: 2026-10-09-improve-canvas-workflow，任务 1.2 / design D5.2）：
+  const invalidManagedRemoval = [...removed].find(id => {
+    const relation = managedNodeRelationOf(work.nodeData[id]);
+    return relation && !removed.has(relation.ownerNodeId);
+  });
+  if (invalidManagedRemoval) return reject("invalid-command", `托管节点 ${invalidManagedRemoval} 的 owner 仍存在，不能随分组删除`);
+  // 任务边界保护（change: 2026-10-09-improve-canvas-workflow，任务 1.2 / design D5.2）：
   // 涉及 queued/pending/running 任务的目标或级联节点一律原子拒绝，不隐式取消任务。
   // 所有删除写入口（原生 node.remove、撤销/恢复 edit.apply、容器移入）复用同一门禁。
   const activeNode = findActiveRunNode(work, [...removed]);
@@ -333,12 +346,23 @@ export function patchNodeData(
   value: CanvasNodeData | null
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === nodeId);
+  const currentManaged = managedNodeRelationOf(work.nodeData[nodeId]);
+  const hasManagedField = !!work.nodeData[nodeId] && Object.prototype.hasOwnProperty.call(work.nodeData[nodeId], "managedBy");
+  if (value && Object.prototype.hasOwnProperty.call(value, "managedBy")) {
+    const incoming = managedNodeRelationOf(value);
+    if (!currentManaged || !incoming || JSON.stringify(currentManaged) !== JSON.stringify(incoming)) return reject("invalid-command", "托管归属只能由生命周期事务修改");
+  }
+  if (value === null && hasManagedField) return reject("invalid-command", "托管归属不能通过普通 patch 清除");
   if (isFilmSetObjectModelNode(node, work.nodeData[nodeId])) {
     return reject("invalid-self-contained-node", "片场对象内的 model3d 节点模型由片场自动同步，不能直接修改");
   }
   if (filmSetObjectOwnershipOf(work.nodeData[nodeId])) return reject("invalid-self-contained-node", "对象容器只保存归属；请拖入模型替换对象，或移除容器");
-  // 受保护预览的 nodeData 不能被普通 patch 改写或清除（D2）：归属只能随源镜头生命周期变化。
-  if (hasShotPreviewOwnership(value) || isProtectedShotPreview(work, nodeId)) {
+  // Legacy cards have no writable media cache. Canonical managed image/video
+  // nodes do: managedBy is protected above, while outputAssetId/status must be
+  // writable by the media host without changing ownership.
+  if (hasShotPreviewOwnership(value)
+    || node?.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE
+    || hasShotPreviewOwnership(work.nodeData[nodeId])) {
     return reject("invalid-shot-preview", "拍摄镜头预览归属不能通过普通数据写入修改");
   }
   if (value === null) {
@@ -366,6 +390,7 @@ export function patchNodeData(
   const nodeRejection = validateSelfContained3DNodePatch(work, nodeId, value);
   if (nodeRejection) return nodeRejection;
   const merged = { ...(work.nodeData[nodeId] ?? {}), ...value };
+  if (merged.managedBy !== undefined && !managedNodeRelationOf(merged)) return reject("invalid-command", "托管归属非法");
   // 内容身份归一化（change: 2026-10-06-fix-animation3d-runtime-and-authoring，任务 1.2/1.4）：
   // 任何来源的 patch（通用命令、MCP、导入、粘贴、恢复）都不能依赖客户端声明的 hash；模型源码/
   // 语言/API 版本/摆放的实际内容决定 contentHash 与 revision，只改源码的 patch 不会保留旧身份。
@@ -393,6 +418,7 @@ export function unsetNodeDataFields(
   }
   const data = work.nodeData[nodeId];
   if (!data) return OK;
+  if (fields.includes("managedBy" as never) && managedNodeRelationOf(data)) return reject("invalid-command", "托管归属不能通过 unset 清除");
   const next = { ...data };
   let changed = false;
   for (const field of fields) {

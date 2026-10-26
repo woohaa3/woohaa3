@@ -91,7 +91,7 @@ export function readMongoStorageConfig(input: {
 }
 
 /** 一个工厂持有匹配的 canonical/Yjs/lock/documents；领域服务借用句柄。 */
-export function storageBootstrap(backend: "sqlite" | "mongo", env: Record<string, string | undefined>, owners: readonly string[], options: { directory?: string; mongoConfigFile?: string } = {}): BootstrapExtension<RuntimeStorageProvider> {
+export function storageBootstrap(backend: "sqlite" | "mongo", env: Record<string, string | undefined>, owners: readonly string[], options: { directory?: string; mongoConfigFile?: string; managedMigrations?: readonly import("@woohaa3/contracts").ManagedNodeMigrationAdapter[] } = {}): BootstrapExtension<RuntimeStorageProvider> {
   // 扩展目录标签（change: 2026-10-15-scan-bootstrap-slots-as-extension-directories，任务 4.3）：
   // 缺路径/缺连接串这类部署错误必须能一眼看到是哪个扩展目录。
   const directory = options.directory ?? `${backend}-storage`;
@@ -117,7 +117,7 @@ export function storageBootstrap(backend: "sqlite" | "mongo", env: Record<string
       if (errors.length) throw new AggregateError(errors, "Storage 释放失败");
     };
     try {
-      if (backend === "sqlite") migrateSqliteCanvasBeforeStartup(config.sqlitePath!);
+      if (backend === "sqlite") migrateSqliteCanvasBeforeStartup(config.sqlitePath!, { managedMigrations: options.managedMigrations });
       const settings = createSqliteSiteExtensionConfigStore({ path: appPath });
       disposers.push(() => settings.close());
       const repository = backend === "sqlite" ? new SqliteCanvasRepository({ path: config.sqlitePath! }) : await MongoCanvasRepository.connect({ uri: config.mongoUri!, database: config.mongoDb! });

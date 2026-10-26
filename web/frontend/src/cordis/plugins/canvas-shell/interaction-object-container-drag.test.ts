@@ -1,5 +1,6 @@
+import { applyCanvasCommands } from "../../../../../test-support/managed-shot-commands.js";
 import { afterEach, expect, it } from "vitest";
-import { applyCanvasCommands, canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, filmSetObjectContainerId, filmSetObjectModelNodeId, type CanvasRenderScene } from "@woohaa3/contracts";
+import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, filmSetObjectContainerId, filmSetObjectModelNodeId, type CanvasRenderScene } from "@woohaa3/contracts";
 import { installInteractionController } from "./interaction-controller.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";

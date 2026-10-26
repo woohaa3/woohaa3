@@ -14,20 +14,15 @@ import { compareByZIndexThenId, YJS_CANVAS_FORMAT_VERSION, serverCanvasToYDoc, y
 import * as Y from "yjs";
 import {
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
-  SHOT_PREVIEW_SCHEMA_VERSION,
   canonicalFilmSetFields,
-  canonicalShotPreviewFields,
+  readNodeWidth,
+  readNodeHeight,
   decodeFilmSetNodeData,
   filmSetAnimationsOf,
   isFilmSetNode,
-  isShotPreviewNodeType,
-  planShotPreviewLayout,
-  readNodeHeight,
-  readNodeWidth,
-  shotPreviewCardSize,
+  managedNodeRelationOf,
   shotPreviewNodeId,
-  type ServerCanvas,
-  type ShotPreviewBounds
+  type ServerCanvas
 } from "@woohaa3/contracts";
 import { planFilmSetNodeV3 } from "../../animation/film-set-shooting-shot-migration.js";
 import { auditFilmSetSceneSpace, planFilmSetSceneSpaceNode } from "../../animation/film-set-scene-space-migration.js";
@@ -43,37 +38,7 @@ const stable = (value: unknown): string =>
 const digest = (value: unknown) => createHash("sha256").update(stable(value)).digest("hex");
 function fail(message: string): never { throw new Error(message); }
 
-export type MigrationOptions = { transaction?: boolean };
-
-type NodeLike = ServerCanvas["document"]["nodes"][number];
-
-/** 绝对坐标（含祖先链），与 reducer 同义，供预览布局使用。 */
-function absolutePosition(node: NodeLike, byId: ReadonlyMap<string, NodeLike>): { x: number; y: number } {
-  let x = node.position.x;
-  let y = node.position.y;
-  let parentId = node.parentId;
-  const seen = new Set<string>([node.id]);
-  while (parentId && !seen.has(parentId)) {
-    seen.add(parentId);
-    const parent = byId.get(parentId);
-    if (!parent) break;
-    x += parent.position.x;
-    y += parent.position.y;
-    parentId = parent.parentId;
-  }
-  return { x, y };
-}
-
-function nodeBounds(node: NodeLike, byId: ReadonlyMap<string, NodeLike>): ShotPreviewBounds {
-  const position = absolutePosition(node, byId);
-  return { x: position.x, y: position.y, width: readNodeWidth({ ...node, data: {} }), height: readNodeHeight({ ...node, data: {} }) };
-}
-
-function nextZIndex(nodes: readonly NodeLike[]): number {
-  let max = 0;
-  for (const node of nodes) if (typeof node.zIndex === "number" && node.zIndex > max) max = node.zIndex;
-  return max + 1;
-}
+export type MigrationOptions = { transaction?: boolean; managedMigrations?: readonly import("@woohaa3/contracts").ManagedNodeMigrationAdapter[] };
 
 /** 画布内全部片场节点（composite-asset + film-set 身份）。 */
 function filmSetNodeIds(canvas: ServerCanvas): string[] {
@@ -101,72 +66,6 @@ function aspectRatioOf(aspect: string): number {
   const width = Number(parts[0]);
   const height = Number(parts[1]);
   return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? width / height : 16 / 9;
-}
-
-/**
- * 为迁移后的画布补齐预览闭包：删除无源预览（含 nodeData），补齐缺失预览（确定性布局）。
- *
- * 只处理「源镜头 ↔ 预览」这一层，不移动既有预览节点（保留用户布局）；同批返回净变化标记。
- */
-function reconcilePreviews(canvas: ServerCanvas): { changed: boolean } {
-  const byId = new Map(canvas.document.nodes.map((node) => [node.id, node]));
-  let changed = false;
-  const desired = new Map<string, { filmSetId: string; clipId: string; aspect: number }>();
-  for (const filmSetId of filmSetNodeIds(canvas)) {
-    for (const preview of desiredPreviews(canvas, filmSetId)) {
-      desired.set(preview.nodeId, { filmSetId, clipId: preview.clipId, aspect: preview.aspect });
-    }
-  }
-  // 删除：无对应镜头的既有预览（或归属不匹配的伪预览）。
-  const removalIds = new Set<string>();
-  for (const node of canvas.document.nodes) {
-    const ownership = canvas.nodeData[node.id]?.shotPreview as { filmSetNodeId?: string; clipId?: string } | undefined;
-    const isPreview = isShotPreviewNodeType(node.type) || !!ownership;
-    if (!isPreview) continue;
-    const expected = ownership?.filmSetNodeId && ownership?.clipId ? shotPreviewNodeId(ownership.filmSetNodeId, ownership.clipId) : null;
-    if (!desired.has(node.id) || node.id !== expected || node.type !== FILM_SET_SHOT_PREVIEW_NODE_TYPE) removalIds.add(node.id);
-  }
-  if (removalIds.size > 0) {
-    canvas.document.nodes = canvas.document.nodes.filter((node) => !removalIds.has(node.id));
-    for (const id of removalIds) {
-      delete canvas.nodeData[id];
-      byId.delete(id);
-    }
-    changed = true;
-  }
-  // 创建：按源片场与镜头顺序补齐。布局以每片场为单位，避免跨片场互相影响。
-  const present = new Set(canvas.document.nodes.map((node) => node.id));
-  for (const filmSetId of filmSetNodeIds(canvas)) {
-    const source = canvas.document.nodes.find((node) => node.id === filmSetId);
-    if (!source) continue;
-    const missing = desiredPreviews(canvas, filmSetId).filter((preview) => !present.has(preview.nodeId));
-    if (missing.length === 0) continue;
-    const occupied = canvas.document.nodes.map((node) => nodeBounds(node, byId));
-    const placements = planShotPreviewLayout({
-      filmSetBounds: nodeBounds(source, byId),
-      sizes: missing.map((preview) => shotPreviewCardSize(preview.aspect)),
-      occupied
-    });
-    const parentAbs = source.parentId ? absolutePosition(byId.get(source.parentId)!, byId) : { x: 0, y: 0 };
-    missing.forEach((preview, index) => {
-      const placement = placements[index]!;
-      canvas.document.nodes.push({
-        id: preview.nodeId,
-        type: FILM_SET_SHOT_PREVIEW_NODE_TYPE,
-        position: { x: placement.x - parentAbs.x, y: placement.y - parentAbs.y },
-        width: placement.width,
-        height: placement.height,
-        ...(source.parentId ? { parentId: source.parentId } : {}),
-        zIndex: nextZIndex(canvas.document.nodes)
-      } as NodeLike);
-      canvas.nodeData[preview.nodeId] = canonicalShotPreviewFields({
-        shotPreview: { schemaVersion: SHOT_PREVIEW_SCHEMA_VERSION, filmSetNodeId: filmSetId, clipId: preview.clipId }
-      }) as never;
-      present.add(preview.nodeId);
-      changed = true;
-    });
-  }
-  return { changed };
 }
 
 type HistoryWrite = { row: Record<string, unknown>; payload: unknown; currentIdentity: string; bytes: number; changed: boolean };
@@ -264,8 +163,8 @@ function convertCompletionRow(row: Record<string, unknown>, identityRemap: Reado
  * 并按该节点当时的显示映射把世界单位反解成场景单位。缺少节点尺寸的片场明确阻断该画布，
  * 保留原件（change: 2026-10-23-isolate-film-set-camera-space，design D5）。
  */
-function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, unknown>; raw: { meta: { createdAt: string } } }) {
-  const canvas: ServerCanvas = structuredClone(source.canvas);
+function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, unknown>; raw: { meta: { createdAt: string } } }, options: MigrationOptions) {
+  let canvas: ServerCanvas = structuredClone(source.canvas);
   let changed = false;
   const conflicts: Array<{ nodeId: string; conflict: string; reason: string }> = [];
   for (const filmSetId of filmSetNodeIds(canvas)) {
@@ -300,7 +199,17 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
       afterHash: digest(source.canvas)
     };
   }
-  changed = reconcilePreviews(canvas).changed || changed;
+  const migrations = options.managedMigrations ?? [];
+  if (new Set(migrations.map(m => m.extensionId)).size !== migrations.length || migrations.some(m => m.schemaVersion !== 1)) fail("managed-media-migration-registration-conflict");
+  if (!migrations.some(m => m.extensionId === "film-set")) {
+    const legacy = canvas.document.nodes.some(n => n.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || canvas.nodeData[n.id]?.shotPreview !== undefined);
+    const missing = filmSetNodeIds(canvas).some(id => desiredPreviews(canvas, id).some(p => !canvas.document.nodes.some(n => n.id === p.nodeId)));
+    if (legacy || missing) fail(`managed-media-migration-unavailable: ${canvas.id}`);
+  }
+  for (const migration of migrations) {
+    const migrated = migration.migrate(canvas);
+    canvas = migrated.canvas; changed = migrated.changed || changed;
+  }
 
   // 预览应为派生新节点：节点顺序按 zIndex 排序（与 mapping 一致）。
   canvas.document.nodes = [...canvas.document.nodes].sort(compareByZIndexThenId);
@@ -351,7 +260,7 @@ export function planMigration(db: unknown, _options: MigrationOptions = {}) {
     transaction: _options.transaction ?? true,
     expectProjection: expectDerivedProjection
   }) as Array<{ canvas: ServerCanvas; report: Record<string, unknown>; raw: { meta: { createdAt: string } } }>;
-  const documents = sources.map(convertCanvas);
+  const documents = sources.map(source => convertCanvas(source, _options));
 
   const tables = new Set<string>(
     (db as { prepare: (sql: string) => { all: () => Array<{ name: string }> } })
@@ -418,7 +327,7 @@ export function planMigration(db: unknown, _options: MigrationOptions = {}) {
         canvasId: canvas.id,
         revision: canvas.revision,
         nodeCount: canvas.document.nodes.length,
-        previewCount: canvas.document.nodes.filter((node: NodeLike) => isShotPreviewNodeType(node.type)).length,
+        previewCount: canvas.document.nodes.filter(node => managedNodeRelationOf(canvas.nodeData[node.id])?.extensionId === "film-set").length,
         restoredUpdates: sourceReport.restoredUpdates,
         beforeHash,
         afterHash,

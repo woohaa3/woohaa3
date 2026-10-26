@@ -18,6 +18,7 @@ import { planPositionEdit } from "./edit-plan-position.js";
 import type { CanvasCommand } from "./commands.js";
 import { applyCanvasCommands } from "./command-reducer.js";
 import { isShotPreviewNodeType } from "./domain/core/shot-preview-node.js";
+import { managedNodeRelationOf } from "./managed-node.js";
 import type { EditOperation, EditPrecondition, EditFieldSnapshot, EditNodeField, EditNodeFieldSnapshot } from "./edit-command.js";
 import { EDIT_NODE_FIELDS, EDIT_NODE_DATA_FIELDS } from "./edit-command.js";
 import { planNodeDataFieldDiffs } from "./edit-plan-node-data.js";
@@ -59,14 +60,14 @@ function isPlannable(command: CanvasCommand): boolean {
  *
  * 返回 `ok:false` 时调用方 MUST NOT 宣称可撤销（例如动作无净变化、或包含不支持记录的字段）。
  */
-export function planCanvasEdit(canvas: ServerCanvas, commands: readonly CanvasCommand[]): EditPlanResult {
+export function planCanvasEdit(canvas: ServerCanvas, commands: readonly CanvasCommand[], options: { lifecycle?: import("./managed-node-lifecycle.js").ManagedNodeLifecycleResolver } = {}): EditPlanResult {
   const relevant = commands.filter(isPlannable);
   if (relevant.length === 0) return { ok: false, reason: "没有可记录的结构动作" };
 
   const positionPlan = planPositionEdit(canvas, relevant);
   if (positionPlan) return positionPlan;
 
-  const applied = applyCanvasCommands(canvas, relevant);
+  const applied = applyCanvasCommands(canvas, relevant, options);
   if (!applied.ok) return { ok: false, reason: applied.rejection.message };
   if (!applied.changed) return { ok: false, reason: "操作没有产生净变化" };
 
@@ -86,8 +87,8 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   // Default object containers are also derived; recording their automatic creation would
   // make redo fail after reconciliation restores them during undo of a legacy scene edit.
   // Explicit removals remain in history so hide/delete undo restores the original layout.
-  const addedNodes = [...afterNodes.values()].filter((node) => !beforeNodes.has(node.id) && !isShotPreviewNodeType(node.type) && !filmSetObjectOwnershipOf(after.nodeData[node.id]));
-  const removedNodes = [...beforeNodes.values()].filter((node) => !afterNodes.has(node.id) && !isShotPreviewNodeType(node.type));
+  const addedNodes = [...afterNodes.values()].filter((node) => !beforeNodes.has(node.id) && !isShotPreviewNodeType(node.type) && !managedNodeRelationOf(after.nodeData[node.id]) && !filmSetObjectOwnershipOf(after.nodeData[node.id]));
+  const removedNodes = [...beforeNodes.values()].filter((node) => !afterNodes.has(node.id) && !isShotPreviewNodeType(node.type) && !managedNodeRelationOf(before.nodeData[node.id]));
   // Embedded model layout/content is derived from the container and film set. Do not
   // replay its reconciliation as an independent move during resize or legacy hydration.
   const commonNodes = [...afterNodes.values()].filter((node) => beforeNodes.has(node.id)

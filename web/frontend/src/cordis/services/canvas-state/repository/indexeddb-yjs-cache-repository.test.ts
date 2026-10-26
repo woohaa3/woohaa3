@@ -169,3 +169,10 @@ describe("cache 校验与重建（任务 6.3）", () => {
     expect(load?.metadata.revision).toBe(1);
   });
 });
+
+it("rejects legacy or older-capability caches before hydration and accepts the current capability", () => {
+  const load = { metadata: { canvasId: "capability", formatVersion: FORMAT, roomEpoch: "epoch", revision: 4, updatedAt: "2026-10-26" }, updates: [] };
+  expect(validateYjsCache(load, { formatVersion: FORMAT, roomEpoch: null, protocolVersion: 7 }).ok).toBe(false);
+  expect(validateYjsCache({ ...load, metadata: { ...load.metadata, protocolVersion: 6 } }, { formatVersion: FORMAT, roomEpoch: null, protocolVersion: 7 }).ok).toBe(false);
+  expect(validateYjsCache({ ...load, metadata: { ...load.metadata, protocolVersion: 7 } }, { formatVersion: FORMAT, roomEpoch: null, protocolVersion: 7 }).ok).toBe(true);
+});

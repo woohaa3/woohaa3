@@ -1,9 +1,11 @@
 import { filmSetMediaSources } from "./media-sources.js";
-import { createFilmSetObjectResolver, decodeFilmSetNodeData, resolveFilmSetObject, filmSetObjectOwnershipOf, shotPreviewOwnershipOf, shotPreviewNodeId, filmSetAnimationsOf, isFilmSetNode, DEFAULT_FILM_SET_LOCAL_TRANSFORM, executeModelScriptVersioned, readGroupAppearanceForNode, type ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
+import { createFilmSetObjectResolver, decodeFilmSetNodeData, resolveFilmSetObject, filmSetObjectOwnershipOf, shotReferenceOwnershipOf, shotPreviewNodeId, filmSetAnimationsOf, isFilmSetNode, DEFAULT_FILM_SET_LOCAL_TRANSFORM, executeModelScriptVersioned, readGroupAppearanceForNode, type ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
 import type { CompositeAssetAdapter, CompositeChildPresentation } from "@woohaa3/frontend/extension-api";
 import { buildFilmSetComposition } from "../shared/composition.js";
 import { HistoryFilmSetSnapshots } from "./history-preview.js";
 import { FILM_SET_EXTENSION_ID } from "../../state/shared/identity.js";
+import { projectManagedShotMediaCanvas } from "./managed-shot-media-projection.js";
+import { filmSetManagedLifecycle } from "../../state/shared/managed-shot-media-lifecycle.js";
 
 /** Geometry identity excludes local transforms and animation clocks, which use frame projections. */
 export function filmSetExecutionKey(data: CanvasNodeData): string {
@@ -37,6 +39,7 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
   const object = (id: string) => { const current = canvas(); return current ? resolveFilmSetObject(current, id) : null; };
   return {
     extensionId: FILM_SET_EXTENSION_ID, owner: FILM_SET_EXTENSION_ID,
+    managedLifecycle: filmSetManagedLifecycle,
     children(current, ownerNodeId) {
       const owner = current.document.nodes.find(node => node.id === ownerNodeId);
       if (!isFilmSetNode(owner?.type, current.nodeData[ownerNodeId])) return [];
@@ -50,7 +53,7 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
         if (target?.owner.filmSetNodeId === ownerNodeId) children.push({ nodeId: node.id, ownerNodeId, kind: "container", role: "object-entry", focusOwner: true, closable: true, sourceItemId: target.item.id,
           panel: { title: target.item.name, hint: feedback(node.id) } });
         else {
-          const shot = shotPreviewOwnershipOf(current.nodeData[node.id]);
+          const shot = shotReferenceOwnershipOf(current.nodeData[node.id]);
           if (shot?.filmSetNodeId === ownerNodeId && node.id === shotPreviewNodeId(ownerNodeId, shot.clipId) && (() => { const decoded = decodeFilmSetNodeData(current.nodeData[ownerNodeId]); return decoded.ok && filmSetAnimationsOf(decoded.value).clips.some(clip => clip.id === shot.clipId); })()) children.push({ nodeId: node.id, ownerNodeId, kind: "entity", role: "preview" });
         }
       }
@@ -73,7 +76,7 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
       return JSON.stringify([data.filmSetObject, target?.item]);
     },
     mediaSources: (id, data, playback) => filmSetObjectOwnershipOf(data) ? [] : filmSetMediaSources(id, data, playback),
-    projectCanvas: canvas => history.project(canvas)!,
+    projectCanvas: canvas => projectManagedShotMediaCanvas(history.project(canvas)!),
     history: (nodeId, detail) => { if (!detail) { history.clear(nodeId); return true; } return history.set(nodeId, detail); },
     historyProjection: nodeId => { const record = history.get(nodeId); return record ? { resource: record.composition.resource, composition: record.composition } : null; },
     prepare(nodeId, data) {

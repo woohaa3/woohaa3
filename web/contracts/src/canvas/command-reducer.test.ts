@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 共享命令 reducer 与 satisfaction 判定（change: add-frontend-speculative-canvas-state）。
  *
@@ -6,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas, type StoredAsset } from "./domain/index.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { isCanvasCommandBatchSatisfied, isCanvasCommandSatisfied } from "./command-satisfaction.js";
 import { createWoohaa3CanvasNodeId, createHighEntropyId } from "./domain/index.js";
 import { createWoohaa3CanvasEdge } from "./domain/index.js";

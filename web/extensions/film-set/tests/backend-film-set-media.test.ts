@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 片场媒体条目受控导入（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）。
  *
@@ -8,7 +9,6 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  applyCanvasCommands,
   createEmptyWoohaa3ServerCanvas,
   createFilmSetSnapshot,
   decodeFilmSetNodeData,

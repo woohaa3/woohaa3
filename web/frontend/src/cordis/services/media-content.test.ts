@@ -1,11 +1,48 @@
+import { applyCanvasCommands } from "../../../../test-support/managed-shot-commands.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyCanvasCommands, createEmptyWoohaa3ServerCanvas, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, createMotionSnapshot, shotPreviewNodeId, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 import type { MediaContentProvider } from "../../extension-api/media-content.js";
 import { createMediaContentService } from "./media-content.js";
 const asset = (id: string, mediaKind: "image" | "video" = "image"): StoredAsset => ({ id, mediaKind, status: "ready", source: "generated", title: id, createdAt: "2026-10-25", metadata: { storageKey: `sha256-${"a".repeat(64)}`, checksum: id } });
 const disposers: (() => void)[] = [];
 afterEach(() => disposers.splice(0).forEach(f => f()));
-function fixture() {
+
+it.each(["image", "video"] as const)("persists the provider result on a real managed film-set %s node", async kind => {
+  let canvas = createEmptyWoohaa3ServerCanvas("managed-provider");
+  const animation = createFilmSetSnapshot({ title: "Film", model: { modelScript: 'scene.box({id:"body"});', modelScriptVersion: "woohaa-model-js-v2" }, motionScript: 'motion.model.rotate("body", {speed:1});', timeline: { duration: 4, loop: false } });
+  if (kind === "image") animation.filmSetAnimations!.clips[0] = {
+    ...animation.filmSetAnimations!.clips[0]!, kind: "static", timeline: { duration: 0, loop: false }, bindings: [],
+    cameraMotion: createMotionSnapshot({ motionScript: "", basedOnModelVersion: { revision: 1, sourceHash: "camera", contentHash: "camera" } }),
+  };
+  canvas.document.nodes = [{ id: "film", type: "composite-asset", position: { x: 0, y: 0 } }];
+  canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
+  const initial = applyCanvasCommands(canvas, [{ type: "canvas.setTitle", title: "Film" }]);
+  if (!initial.ok) throw Error(initial.rejection.message);
+  canvas = initial.canvas;
+  const id = shotPreviewNodeId("film", "clip-1"), ownership = structuredClone(canvas.nodeData[id].managedBy);
+  const listeners = new Set<() => void>();
+  const submit = vi.fn(async commands => {
+    const result = applyCanvasCommands(canvas, commands);
+    if (!result.ok) throw Error(result.rejection.message);
+    canvas = result.canvas; listeners.forEach(fn => fn());
+  });
+  const service = createMediaContentService({ canvas: () => canvas, subscribe: fn => { listeners.add(fn); return () => { listeners.delete(fn); }; }, writable: () => true, submit });
+  disposers.push(service.dispose);
+  const ready = asset("generated-shot", kind);
+  service.register({ providerId: "film-set.shot", owner: "film-set", schemaVersions: [1], mediaKinds: [kind],
+    describe: () => ({ mediaKind: kind, sourceIdentity: "current-shot", dependencyNodeIds: ["film"] }),
+    resolvePreview: async () => ready, materialize: async () => ready, snapshot: async () => ready,
+  });
+  await vi.waitFor(() => expect(service.state(id)?.status).toBe("ready"));
+  expect(submit).toHaveBeenCalledTimes(1);
+  expect(canvas.nodeData[id]).toMatchObject({ outputAssetId: ready.id, status: "ready", managedBy: ownership, mediaContent: { providerId: "film-set.shot" } });
+  expect(canvas.assets).toContainEqual(ready);
+  const frozen = await service.freeze(canvas, [id], "copy");
+  expect(frozen.nodeData[id]).toMatchObject({ outputAssetId: ready.id });
+  expect(frozen.nodeData[id].managedBy).toBeUndefined();
+  expect(frozen.nodeData[id].mediaContent).toBeUndefined();
+});
+function fixture(writable = false) {
   let canvas = createEmptyWoohaa3ServerCanvas("media", "2026-10-25");
   canvas.document.nodes = [{ id: "source", type: "text", position: { x: 0, y: 0 } }, { id: "live", type: "image", position: { x: 50, y: 0 } }];
   canvas.nodeData = { source: { title: "one" }, live: { mediaContent: { providerId: "test.content", schemaVersion: 1, payload: { nodeId: "source" } } } };
@@ -16,7 +53,7 @@ function fixture() {
     if (!result.ok) throw Error(result.rejection.message);
     canvas = result.canvas; changed();
   });
-  const service = createMediaContentService({ canvas: () => canvas, subscribe: fn => { listeners.add(fn); return () => { listeners.delete(fn); }; }, writable: () => false, submit });
+  const service = createMediaContentService({ canvas: () => canvas, subscribe: fn => { listeners.add(fn); return () => { listeners.delete(fn); }; }, writable: () => writable, submit });
   disposers.push(service.dispose);
   const provider: MediaContentProvider = { providerId: "test.content", owner: "test", schemaVersions: [1], mediaKinds: ["image"],
     describe: c => ({ mediaKind: "image", sourceIdentity: String(c.nodeData.source?.title), dependencyNodeIds: ["source"] }),
@@ -24,6 +61,40 @@ function fixture() {
   return { service, provider, submit, changed, canvas: () => canvas, setCanvas: (next: ServerCanvas) => { canvas = next; changed(); } };
 }
 describe("page-scoped open media content", () => {
+  it("reads only a verified preview on a read-only canvas without materializing or writing", async () => {
+    const f = fixture(false);
+    f.provider.resolvePreview = async () => asset("verified-current");
+    f.service.register(f.provider);
+    await vi.waitFor(() => expect(f.service.state("live")).toMatchObject({ status: "ready", sourceIdentity: "one", asset: { id: "verified-current" } }));
+    expect(f.provider.materialize).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled();
+    f.canvas().nodeData.source.title = "two";
+    f.provider.resolvePreview = async () => null;
+    f.changed();
+    await vi.waitFor(() => expect(f.service.state("live")).toMatchObject({ status: "unavailable", sourceIdentity: "two" }));
+    expect(f.provider.materialize).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled();
+  });
+  it("recovers a failed producer when readiness changes without editing its source", async () => {
+    const f = fixture(true);
+    const callbacks = new Set<() => void>();
+    let ready = false;
+    const unsubscribe = vi.fn();
+    f.provider.subscribe = fn => { callbacks.add(fn); return () => { callbacks.delete(fn); unsubscribe(); }; };
+    f.provider.resolvePreview = vi.fn(async () => ready ? asset("ready-after-startup") : null);
+    f.provider.materialize = vi.fn(async () => {
+      if (!ready) throw Error("renderer-not-ready");
+      return asset("ready-after-startup");
+    });
+    const release = f.service.register(f.provider);
+    await vi.waitFor(() => expect(f.service.state("live")).toMatchObject({ status: "failed", diagnostic: "Error: renderer-not-ready" }));
+    expect(f.submit).not.toHaveBeenCalled();
+    ready = true;
+    callbacks.forEach(fn => fn());
+    await vi.waitFor(() => expect(f.service.state("live")?.status).toBe("ready"));
+    expect(f.canvas().nodeData.live.outputAssetId).toBe("ready-after-startup");
+    expect(f.provider.resolvePreview).toHaveBeenCalledTimes(2);
+    expect(f.submit).toHaveBeenCalledOnce();
+    release(); expect(unsubscribe).toHaveBeenCalledOnce();
+  });
   it("rejects collisions, unsupported versions and kind mismatch; unknown content stays intact", () => {
     const f = fixture(); const before = structuredClone(f.canvas().nodeData.live);
     expect(() => f.service.describe(f.canvas(), before.mediaContent!, "image")).toThrow("provider-unavailable");

@@ -1,10 +1,11 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 选区整理规划测试（change: 2026-10-09-improve-canvas-workflow，任务 4.3）。
  */
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
 import { planArrangeNodes } from "./arrange.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { nodeWorldRect } from "./geometry.js";
 
 const NOW = "2026-10-09T00:00:00.000Z";

@@ -1,3 +1,4 @@
+import { ownsShotMedia } from "../../state/shared/managed-shot-media.js";
 /**
  * 单节点快捷「转为片场」的权威转换服务
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 1.1–1.4 / design D3/D4/D5）。
@@ -188,6 +189,7 @@ export class FilmSetConversionService {
       return this.resumeExisting(existing, room);
     }
 
+    if (ownsShotMedia(exported.canvas, request.sourceNodeId)) return { ok: false, code: "unsupported-source", message: "片场镜头媒体不能再次创建片场" };
     // 冻结来源（权威读取；不猜测）。范围缺省=整个视频。
     const snapshot = readFilmSetConversionSource({
       canvas: exported.canvas,
@@ -723,6 +725,7 @@ export class FilmSetConversionService {
           return { ok: true, batch: emptyBatch(record.canvasId, commandId, this.actorId, live.revision) };
         }
         // 提交边界复核：来源节点仍存在（删除/提交竞态），否则拒绝且不创建占位。
+        if (ownsShotMedia(live, record.sourceNodeId)) return { ok: false, code: "unsupported-source", message: "片场镜头媒体不能再次创建片场" };
         const source = readFilmSetConversionSource({ canvas: live, sourceNodeId: record.sourceNodeId });
         if (!source.ok) return { ok: false, code: source.code, message: source.message };
         const position = planFilmSetConversionPlacement(live, record.sourceNodeId);

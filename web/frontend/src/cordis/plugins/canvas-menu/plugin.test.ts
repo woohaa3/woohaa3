@@ -23,6 +23,11 @@ function ids(items: Array<{ id: string }>): string[] {
 }
 
 describe("nodeContextMenuItems（change: add-canvas-node-grouping）", () => {
+  it("hides independent deletion for a managed node from an unrelated extension", () => {
+    const nodeData = { b: { managedBy: { schemaVersion: 1, extensionId: "test.extension", ownerNodeId: "c", entityId: "entry", lifecycle: "owner-managed" } } };
+    expect(ids(nodeContextMenuItems(nodes, ["b"], true, { activeNodeId: "b", nodeData }))).not.toContain("delete-node");
+    expect(ids(nodeContextMenuItems(nodes, ["c"], true, { activeNodeId: "c", nodeData }))).toContain("delete-node");
+  });
   it("选中两个顶层非 group 节点时提供打组", () => {
     const items = nodeContextMenuItems(nodes, ["b", "c"], true);
     expect(ids(items)).toContain("group-selection");
@@ -72,29 +77,15 @@ describe("nodeContextMenuItems（change: add-canvas-node-grouping）", () => {
   });
 });
 
-describe("nodeContextMenuItems 预览保护（change: 2026-10-15 任务 5.5）", () => {
-  const withPreview: CanvasMenuNode[] = [
-    ...nodes,
-    { id: "shot-preview:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", type: "film-set-shot-preview" }
-  ];
-  const PREVIEW = "shot-preview:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
-  it("选择集只含受保护预览时只给说明项，不提供删除/重命名/打组", () => {
-    const items = nodeContextMenuItems(withPreview, [PREVIEW], true, { activeNodeId: PREVIEW });
-    expect(ids(items)).toEqual(["shot-preview-protected"]);
+describe("nodeContextMenuItems neutral managed policy", () => {
+  const managedNodes: CanvasMenuNode[] = [...nodes, { id: "owned", type: "image" }];
+  const nodeData = { owned: { managedBy: { schemaVersion: 1 as const, extensionId: "test.entities", ownerNodeId: "b", entityId: "entity", lifecycle: "owner-managed" as const } } };
+  it("hides independent deletion without a film-set implementation", () => {
+    expect(ids(nodeContextMenuItems(managedNodes, ["owned"], true, { activeNodeId: "owned", nodeData }))).not.toContain("delete-node");
   });
-
-  it("指针位于预览上时隐藏删除与重命名", () => {
-    const items = ids(nodeContextMenuItems(withPreview, [PREVIEW], true, { activeNodeId: PREVIEW }));
-    expect(items).not.toContain("delete-node");
-    expect(items).not.toContain("rename-node");
-  });
-
-  it("混合选择时过滤预览后仍可操作普通节点", () => {
-    const items = ids(nodeContextMenuItems(withPreview, [PREVIEW, "b"], true, { activeNodeId: "b" }));
-    // 预览被剔除后只剩 b：「打组」不可用，但删除仍可用。
-    expect(items).not.toContain("group-selection");
-    expect(items).toContain("delete-node");
+  it("keeps owner deletion and ordinary mixed selections available", () => {
+    expect(ids(nodeContextMenuItems(managedNodes, ["owned", "b"], true, { nodeData }))).toContain("delete-node");
+    expect(ids(nodeContextMenuItems(managedNodes, ["owned", "a"], true, { activeNodeId: "a", nodeData }))).toContain("delete-node");
   });
 });
 

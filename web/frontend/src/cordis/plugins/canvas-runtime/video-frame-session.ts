@@ -76,6 +76,7 @@ export type PosterImage = { naturalWidth?: number; naturalHeight?: number; width
 export type VideoFrameSessionOptions = {
   runtime: BevyRuntime;
   getCanvas: () => ServerCanvas | null;
+  getMediaAsset?: (nodeId: string) => import("@woohaa3/contracts").StoredAsset | null | undefined;
   /** 用户是否偏好减少动态效果（design D3）：为 true 时只上传静态真帧，不自动播放。 */
   isReducedMotion?: () => boolean;
   /** 聚焦工作区接管共享纹理时暂停卡片解码上传；退出后恢复 canonical 帧。 */
@@ -538,7 +539,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       if (canvas !== boundCanvas || structure !== boundStructure || !boundSources) {
         for (const node of canvas.document.nodes) {
           if (node.type !== "video") continue;
-          const resolved = resolveNodeVideoSource(canvas, node.id);
+          const resolved = resolveNodeVideoSource(canvas, node.id, options.getMediaAsset?.(node.id));
           if (resolved) next.set(node.id, resolved);
         }
         boundCanvas = canvas;

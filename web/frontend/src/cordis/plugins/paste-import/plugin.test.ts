@@ -130,9 +130,17 @@ afterEach(async () => {
   await runtime?.dispose();
   runtime = null;
   woohaa3CanvasStore.getState().applyRemoteCanvas(null as never);
+  delete (globalThis as unknown as Record<string, unknown>).__canvasMemoryClipboard;
 });
 
 describe("Paste Import Plugin", () => {
+  it("uses the completed in-page snapshot when a native copy leaves empty clipboard text", async () => {
+    const harness = await makeHarness(); runtime = harness.runtime;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(imageNodeCanvas());
+    (globalThis as unknown as Record<string, unknown>).__canvasMemoryClipboard = JSON.stringify({ format: "infinspire-canvas-copy-v1", nodes: [{ id: "copied", type: "text", position: { x: 0, y: 0 } }], nodeData: { copied: { title: "Frozen" } }, edges: [], incomingEdges: [] });
+    expect(harness.slots.list("input.paste")[0]!.handle(fakeEvent([]))).toBe(true);
+    await flush(); expect(harness.record).toHaveBeenCalledOnce();
+  });
   it("激活后只注册一个 paste/drop owner 与替换 dialog", async () => {
     const harness = await makeHarness();
     runtime = harness.runtime;

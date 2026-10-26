@@ -18,7 +18,7 @@ import {
   findNodeTemplate
 } from "../../domain/node-catalog.js";
 import { planGroupNodes, planInsertNode, planUngroupNodes } from "../../../extension-api/command-planner.js";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, resolveShotReferenceSource } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, partitionManagedNodeDeletion, resolveShotReferenceSource } from "@woohaa3/contracts";
 import { shotReferenceTemplateItems } from "./shot-reference-menu.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
@@ -43,7 +43,6 @@ export const CANVAS_MENU_PLUGIN_ID = "canvas-context-menu";
 export const CANVAS_MENU_CONTRIBUTION_ID = "canvas-menu";
 
 /** 拍摄镜头预览保护的菜单说明（change: 2026-10-15，任务 5.5 / design D2）。 */
-export const SHOT_PREVIEW_MENU_HINT = "拍摄镜头预览需在拍摄镜头管理中删除";
 
 /** 节点右键菜单使用的结构节点形状（change: add-canvas-node-grouping）。 */
 export type CanvasMenuNode = { id: string; type: string; parentId?: string };
@@ -98,6 +97,7 @@ export function selectionActionDescriptor(input: {
  * 可不传，缺省视为「未提交、无预览」。
  */
 export type NodeContextMenuFacts = {
+  nodeData?: Readonly<Record<string, unknown>>;
   /** 该分组是否仍在编排一批提交；true 时分组三个动作都禁用（不能绕过提交门禁）。 */
   groupSubmitting?: (groupId: string) => boolean;
   /** 该分组的只读预览（N 与是否可用）；缺省时不显示数量。 */
@@ -117,17 +117,10 @@ export function nodeContextMenuItems(
   writable: boolean,
   facts: NodeContextMenuFacts = {}
 ): Array<{ id: string; label: string; danger?: boolean; disabled?: boolean; reason?: string }> {
-  // 拍摄镜头预览保护（change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.5 / design D2）：
-  // 预览由源镜头生命周期维护，菜单不显示单独删除/剪切/复制/重命名/打组等普通动作；只允许在拍摄
-  // 镜头管理中操作。减少噪声：预览从「可操作选择集」中剔除，仅当选择集只剩预览时给出说明项。
   const activeNodeId = facts.activeNodeId;
-  const activeIsPreview = !!activeNodeId && nodes.find((node) => node.id === activeNodeId)?.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE;
-  const selected = selectedNodeIds.filter((id) => nodes.find((node) => node.id === id)?.type !== FILM_SET_SHOT_PREVIEW_NODE_TYPE);
-  if (selectedNodeIds.length > 0 && selected.length === 0) {
-    return [{ id: "shot-preview-protected", label: SHOT_PREVIEW_MENU_HINT, disabled: true }];
-  }
-  // 指针位于预览上时隐藏删除（删除身份来自 context.nodeId，无法安全地排除预览）。
-  const canDelete = !activeIsPreview;
+  const selected = [...selectedNodeIds];
+  const deletion = partitionManagedNodeDeletion(nodes, facts.nodeData ?? {}, activeNodeId ? [activeNodeId] : selected);
+  const canDelete = deletion.allowed.length > 0;
   const canGroup = selected.filter((id) => nodes.find((node) => node.id === id)?.type !== "group").length >= 2;
   const canUngroup = selected.some((id) => {
     const node = nodes.find((candidate) => candidate.id === id);
@@ -164,8 +157,7 @@ export function nodeContextMenuItems(
       : []),
     ...(soloGroup ? [{ id: "ungroup-group", label: GROUP_STRUCTURE_ACTION_LABELS.ungroup, disabled: groupGate, ...(groupGateReason ? { reason: groupGateReason } : {}) }] : []),
     // 重命名（change: 2026-10-09-improve-canvas-workflow，任务 2.3）：单个作品可重命名；
-    // 预览的标题由源镜头派生，不能重命名（design D2/D8）。
-    ...(selected.length === 1 && !activeIsPreview ? [{ id: "rename-node", label: "重命名作品", disabled: !writable }] : []),
+    ...(selected.length === 1 ? [{ id: "rename-node", label: "重命名作品", disabled: !writable }] : []),
     ...(canDelete ? [{ id: "delete-node", label: "删除作品", danger: true, disabled: !writable }] : [])
   ];
 }
@@ -231,7 +223,8 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
         owner: CANVAS_MENU_PLUGIN_ID,
         order,
         describe: ({ selectedNodeIds, writable }) => {
-          const nodes = workingCanvasOf(woohaa3CanvasStore.getState())?.document.nodes ?? [];
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const nodes = canvas?.document.nodes ?? [];
           const descriptor = selectionActionDescriptor({ nodes, selectedNodeIds, writable, kind });
           if (!descriptor) return null;
           return {
@@ -268,10 +261,12 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
       items: (context: ContextMenuContext) => {
         const { nodeId, writable, selectedNodeIds, connectFrom } = context;
         if (nodeId) {
-          const nodes = workingCanvasOf(woohaa3CanvasStore.getState())?.document.nodes ?? [];
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const nodes = canvas?.document.nodes ?? [];
           const service = groupRun();
           return nodeContextMenuItems(nodes, selectedNodeIds ?? [], writable, {
             activeNodeId: nodeId,
+            nodeData: canvas?.nodeData,
             ...(service ? { groupSubmitting: (groupId: string) => service.isSubmitting(groupId) } : {}),
             ...(service ? { groupPreview: (groupId: string) => service.preview(groupId) } : {})
           });
@@ -387,6 +382,8 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
 
 function submitDelete(ctx: Context, nodeId: string): void {
   if (!ctx.canvasSession.isWritable()) return;
+  const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+  if (!canvas || !partitionManagedNodeDeletion(canvas.document.nodes, canvas.nodeData, [nodeId]).allowed.length) return;
   void ctx.canvasEdit.record([{ type: "node.remove", nodeIds: [nodeId] }], "删除作品");
 }
 

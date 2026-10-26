@@ -1,3 +1,4 @@
+import { mergeCanvasContentRuntimes } from "./canvas-content.js";
 /**
  * 启动期槽位实现装配
  * （change: 2026-10-15-scan-bootstrap-slots-as-extension-directories，任务 3.1 / design D3）。
@@ -40,6 +41,11 @@ export function slotImplementationSource(
   return {
     extensionIds: (host?.slotEntries ?? []).map((entry) => entry.extensionId),
     // 运行期 env 用后端实际生效的那一份：测试与部署入口经常注入自定义 env，槽位实现必须读同一份。
-    createDeclarations: (optionsByExtensionId) => createSlotDeclarations.call(host, optionsByExtensionId, env)
+    createDeclarations: async (optionsByExtensionId) => {
+      const runtimes = await host?.createCanvasContent?.({}) ?? [];
+      const managedMigrations = mergeCanvasContentRuntimes(runtimes)?.managedMigrations ?? [];
+      const trustedOptions = Object.fromEntries((host?.slotEntries ?? []).map(entry => [entry.extensionId, { ...(optionsByExtensionId[entry.extensionId] as object ?? {}), managedMigrations }]));
+      return createSlotDeclarations.call(host, { ...optionsByExtensionId, ...trustedOptions }, env);
+    }
   };
 }

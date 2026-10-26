@@ -13,6 +13,6 @@ export type { RuntimeStorageProvider };
 /** 本实现的目录标签：启动失败信息必须能直接定位到目录。 */
 const DIRECTORY = "web/extensions/sqlite-storage";
 
-export function createSqliteStorageBootstrap(input: { env: Record<string, string | undefined>; extensionIds?: readonly string[] }) {
-  return storageBootstrap("sqlite", input.env, input.extensionIds ?? [], { directory: DIRECTORY });
+export function createSqliteStorageBootstrap(input: { env: Record<string, string | undefined>; extensionIds?: readonly string[]; options?: { managedMigrations?: readonly import("@woohaa3/contracts").ManagedNodeMigrationAdapter[] } }) {
+  return storageBootstrap("sqlite", input.env, input.extensionIds ?? [], { directory: DIRECTORY, managedMigrations: input.options?.managedMigrations });
 }

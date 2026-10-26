@@ -1,3 +1,4 @@
+import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 import type { FilmSetConversionRegistry, MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
 import { MCP_INTERNAL_ACTOR_ID } from "@woohaa3/contracts";
 import { createFilmSetConversionProviderSet } from "@woohaa3/contracts";
@@ -121,6 +122,8 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   // 「服务令牌 / loopback」边界（独立单元与本机部署行为不变）。
   const authentication = options.accessRuntime?.enabled === false ? undefined : options.authenticate;
   const env = options.env ?? (process.env as Record<string, string | undefined>);
+  const managedLifecycles = new ManagedNodeLifecycleRegistry();
+  for (const adapter of options.contentRuntime?.managedLifecycles ?? []) managedLifecycles.register(adapter);
   const log = options.logger ?? (() => undefined);
   const canvasEnabled =
     options.enableCanvasStorage ??
@@ -140,7 +143,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     const resolved = resolveStorageConfig();
     if (resolved.ok && resolved.config.backend === "sqlite") {
       const { migrateSqliteCanvasBeforeStartup } = await import("./storage/migrations/startup.js");
-      const result = migrateSqliteCanvasBeforeStartup(resolved.config.sqlitePath as string);
+      const result = migrateSqliteCanvasBeforeStartup(resolved.config.sqlitePath as string, { managedMigrations: options.contentRuntime?.managedMigrations });
       if (result.changed) log({ event: "canvas-startup-migrated", ...result });
     }
   }
@@ -192,6 +195,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         });
       }
       composition = await composeCanvasStorage({
+        managedLifecycles,
         env,
         ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
         mediaStorage,
@@ -375,6 +379,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   const createSyncHandler = (): SyncUpgradeHandler => {
     const verifier = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
     syncHandler ??= createSyncUpgradeHandler({
+      lifecycle: managedLifecycles,
       ...(upstream ? { upstream } : {}),
       // 资源授权接管后，room 建立前的存在性判定改由下面的 principal read 判定负责；
       // 未注入认证（独立单元 / 本机单实例）时保留打开准入：本机有内容，或目录里是

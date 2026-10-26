@@ -16,7 +16,7 @@ import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
 type CanvasNode = ServerCanvas["document"]["nodes"][number];
 
 /** 资产的内容身份：storageKey 优先（内容寻址），其次 checksum，最后受控 url。 */
-export function assetContentKey(asset: StoredAsset | undefined): string | null {
+export function assetContentKey(asset: StoredAsset | null | undefined): string | null {
   if (!asset || asset.status !== "ready") return null;
   const storageKey = (asset.metadata as { storageKey?: unknown } | undefined)?.storageKey;
   if (typeof storageKey === "string" && storageKey) return `asset:${storageKey}`;
@@ -32,6 +32,8 @@ export type ContentIdentityOptions = {
   modelResourceKey?: (nodeId: string) => string | null;
   /** 复合资产内容身份；缺省用「画布 + 节点」稳定身份。 */
   compositeKey?: (node: CanvasNode, canvas: ServerCanvas) => string | null;
+  /** Runtime-resolved provider asset when outputAssetId is not persisted yet. */
+  assetForNode?: (nodeId: string) => StoredAsset | null | undefined;
 };
 
 /** 节点 → 当前可驻留内容身份（`null` 表示没有合法内容）。 */
@@ -60,7 +62,8 @@ export function createContentIdentity(
     const resources = (options.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve(context).resources;
     if (!resources) return null;
     const outputId = context.data?.outputAssetId;
-    const assetKey = typeof outputId === "string" ? assetContentKey(assetsOf(canvas).get(outputId)) : null;
+    const assetKey = (typeof outputId === "string" ? assetContentKey(assetsOf(canvas).get(outputId)) : null)
+      ?? assetContentKey(options.assetForNode?.(node.id));
     return resources.contentKey({ ...context,
       assetContentKey: assetKey,
       modelResourceKey: options.modelResourceKey?.(node.id) ?? null,

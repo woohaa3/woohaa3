@@ -20,6 +20,7 @@ import { SlotRegistry } from "../../slots.js";
 import { startFrontendScope, type FrontendRuntime } from "../../kernel.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
+import { createMediaContentService } from "../../services/media-content.js";
 import { readNodeActionToolbars, setNodeActionBridge } from "./node-action-bridge.js";
 import { CANVAS_SHELL_PLUGIN_ID, canvasShellExtension } from "./plugin.js";
 
@@ -54,6 +55,9 @@ describe("canvas-shell 插件装配", () => {
     runtime = await startFrontendScope(new Context(), {
       install: (ctx) => {
         ctx.provide("slots" as never, new SlotRegistry() as never);
+        const mediaContent = createMediaContentService({ canvas: () => canvas, subscribe: () => () => {}, writable: () => false, submit: async () => {} });
+        ctx.provide("mediaContent" as never, mediaContent as never);
+        ctx.effect(() => () => mediaContent.dispose(), "test-media-content");
         const compositeAssets = new CompositeAssetRegistry();
         ctx.provide("compositeAssets" as never, compositeAssets as never);
         ctx.provide("nodeImplementations" as never, createNodeImplementationRegistry(compositeAssets) as never);

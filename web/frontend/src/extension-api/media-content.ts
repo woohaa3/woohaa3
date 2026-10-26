@@ -11,6 +11,8 @@ export type MediaContentProvider = {
   resolvePreview(context: MediaContentContext): Promise<StoredAsset | null>;
   materialize(context: MediaContentContext): Promise<StoredAsset>;
   snapshot(context: MediaContentContext): Promise<StoredAsset>;
+  /** Notify when browser-local producer readiness changes without a source edit. */
+  subscribe?(listener: () => void): () => void;
   dispose?(): void;
 };
 export type MediaContentState = { status: "pending" | "ready" | "unavailable" | "failed"; diagnostic?: string; asset?: StoredAsset; sourceIdentity?: string };

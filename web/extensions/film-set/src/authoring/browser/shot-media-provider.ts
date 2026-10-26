@@ -1,7 +1,7 @@
 /** Film-set owns payload semantics and full clip production; the host sees only open content refs. */
 import {
   decodeFilmSetNodeData, filmSetAnimationsOf, isFilmSetNode, readShotReferenceAssetLink,
-  shotReferenceContentIdentity, shotImageReferenceIdentity,
+  shotReferenceContentIdentity, shotImageReferenceIdentity, readyShotImageAsset,
   type MediaContentRef, type ServerCanvas, type StoredAsset,
 } from "@woohaa3/contracts";
 import type { MediaContentContext, MediaContentProvider } from "@woohaa3/frontend/extension-api";
@@ -29,13 +29,22 @@ export function shotMediaSource(canvas: ServerCanvas, ref: MediaContentRef, back
   if (!contentIdentity) throw Error("film-set.shot: 镜头内容不可用");
   return { mediaKind: clip.kind === "static" ? "image" as const : "video" as const,
     sourceIdentity: `${clip.kind}:${contentIdentity}:${still?.profileKey ?? SHOT_REFERENCE_PROFILE_KEY}`,
-    dependencyNodeIds: [filmSetNodeId], filmSetNodeId, clipId, contentIdentity, name: clip.name };
+    dependencyNodeIds: [filmSetNodeId], filmSetNodeId, clipId, contentIdentity,
+    profileKey: still?.profileKey ?? SHOT_REFERENCE_PROFILE_KEY, name: clip.name };
 }
 export function createShotMediaProvider(ctx: FilmSetHostContext, images: ShotImageReferences, recording: ShotReferenceRecordingController): MediaContentProvider {
   const source = (canvas: ServerCanvas, ref: MediaContentRef) => shotMediaSource(canvas, ref, recordingThemeBackdrop(ctx));
   const ready = (canvas: ServerCanvas, ref: MediaContentRef): StoredAsset | null => {
     const target = source(canvas, ref);
-    if (target.mediaKind === "image") return images.state(target.filmSetNodeId, target.clipId).asset ?? null;
+    if (target.mediaKind === "image") {
+      // The image producer keeps a browser-local state while the authoritative
+      // asset is being acknowledged. Read the canvas asset table first so a
+      // ready shot reference remains resolvable after a page reload or plugin
+      // restart, even when the local producer state is still dirty.
+      const local = images.state(target.filmSetNodeId, target.clipId).asset;
+      return readyShotImageAsset(canvas.assets, target)
+        ?? readyShotImageAsset(local ? [local] : [], target);
+    }
     return canvas.assets.find(asset => {
       const link = readShotReferenceAssetLink(asset.metadata);
       return asset.mediaKind === "video" && asset.status === "ready" && link?.filmSetNodeId === target.filmSetNodeId && link.clipId === target.clipId && link.contentIdentity === target.contentIdentity && link.profileKey === SHOT_REFERENCE_PROFILE_KEY;
@@ -73,5 +82,6 @@ export function createShotMediaProvider(ctx: FilmSetHostContext, images: ShotIma
     });
   };
   return { providerId: SHOT_MEDIA_PROVIDER_ID, owner: "film-set", schemaVersions: [1], mediaKinds: ["image", "video"],
+    subscribe: images.subscribe,
     describe: source, resolvePreview: async context => ready(context.canvas, context.ref), materialize, snapshot: materialize };
 }

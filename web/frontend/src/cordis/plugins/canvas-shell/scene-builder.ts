@@ -70,8 +70,30 @@ export function buildSceneWithResources(
   // Bevy/hit test 使用 working projection：立即反映本页 pending 命令（design D11）。
   const source = workingCanvasOf(woohaa3CanvasStore.getState());
   const working = options.projectHistoryCanvas?.(source) ?? source;
-  const canvasState = options.compositeAssets?.projectCanvas(working) ?? working;
-  if (!canvasState) return null;
+  const projectedCanvas = options.compositeAssets?.projectCanvas(working) ?? working;
+  if (!projectedCanvas) return null;
+  // Provider-backed media resolves asynchronously. Project the ready runtime asset into
+  // this render snapshot so the canonical scene can expose `texture: true` immediately,
+  // before the persistence command writes outputAssetId back to nodeData.
+  const runtimeMedia = options.mediaContent;
+  const runtimeAssets = runtimeMedia
+    ? projectedCanvas.document.nodes
+      .map(node => runtimeMedia.state(node.id)?.asset)
+      .filter((asset): asset is import("@woohaa3/contracts").StoredAsset => !!asset && asset.status === "ready")
+    : [];
+  const canvasState: import("@woohaa3/contracts").ServerCanvas = runtimeAssets.length
+    ? {
+        ...projectedCanvas,
+        assets: [...projectedCanvas.assets, ...runtimeAssets.filter(asset => !projectedCanvas.assets.some(existing => existing.id === asset.id))],
+        nodeData: Object.fromEntries(projectedCanvas.document.nodes.map(node => {
+          const asset = runtimeMedia?.state(node.id)?.asset;
+          const data = projectedCanvas.nodeData[node.id] ?? {};
+          return [node.id, asset?.status === "ready" && (node.type === "image" || node.type === "video") && typeof data.outputAssetId !== "string"
+            ? { ...data, outputAssetId: asset.id }
+            : data];
+        })) as import("@woohaa3/contracts").ServerCanvas["nodeData"]
+      } as import("@woohaa3/contracts").ServerCanvas
+    : projectedCanvas;
   const sourceNodes = new Map(canvasState.document.nodes.map(node => [node.id, node]));
   // provider 的 prepared resource 按 nodeId 索引；映射层按 nodeId 取用。
   const byNode = new Map<string, PreparedModelResource>(options.getModelResources?.() ?? []);

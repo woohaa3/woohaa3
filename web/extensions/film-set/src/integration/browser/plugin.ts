@@ -1,4 +1,3 @@
-import { ShotMediaDrag } from "../../authoring/browser/shot-media-drag.js";
 import { createShotMediaProvider } from "../../authoring/browser/shot-media-provider.js";
 import "../../authoring/browser/styles.css";
 import { createElement } from "react";
@@ -165,10 +164,6 @@ export function filmSetExtension() {
       const shotReferenceRecording = installShotReferenceRecording(ctx, { playback });
       lifetime.own(() => shotReferenceRecording.dispose());
       lifetime.own(ctx.mediaContent.register(createShotMediaProvider(ctx, images, shotReferenceRecording)));
-      lifetime.own(ctx.slots.register("canvas.overlay", {
-        id: "film-set-shot-media-drag", owner: FILM_SET_EXTENSION_ID, priority: 21,
-        render: ({ writable }) => createElement(ShotMediaDrag, { ctx, writable }),
-      }));
       // 原生录制任务 → 活动浮层（任务 5.5）。宿主只提供权威状态；事件属于页面 scope，
       // 因此由前端轮询并投影。断开只停止观察，不取消原生任务。
       const recordingActivity = nativeRecordingAvailable()

@@ -1,3 +1,4 @@
+import { filmSetTestLifecycles } from "../../../test-support/managed-shot-commands.js";
 /**
  * 单节点快捷「转为片场」转换服务测试
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 1.1–1.4）。
@@ -10,6 +11,8 @@ import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
   createFilmSetSnapshot,
+  canonicalFilmSetFields,
+  shotPreviewNodeId,
   decodeFilmSetNodeData,
   filmSetConversionInputHash,
   readFilmSetConversionNodeStatus,
@@ -31,6 +34,23 @@ import {
 const NOW = "2026-10-13T00:00:00.000Z";
 const SCRIPT = "scene.box({ id: 'torso', size: [1, 2, 0.5] });";
 
+it("rejects its own managed shot at the authority boundary before creating a placeholder", async () => {
+  const animation = createFilmSetSnapshot({ title: "Film", model: { modelScript: SCRIPT, modelScriptVersion: "woohaa-model-js-v2" }, motionScript: 'motion.model.rotate("torso", {speed:1});', timeline: { duration: 4, loop: false } });
+  const id = shotPreviewNodeId("film", "clip-1");
+  const room = await readyRoom("managed-conversion", [
+    { id: "film", type: "composite-asset", data: canonicalFilmSetFields(animation) as CanvasNodeData },
+    { id, type: "video", data: { managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: "film", entityId: "clip-1", lifecycle: "owner-managed" }, outputAssetId: "asset-1", mediaContent: { providerId: "film-set.shot", schemaVersion: 1, payload: { filmSetNodeId: "film", clipId: "clip-1" } } } },
+  ], [readyVideoAsset()]);
+  let calls = 0;
+  const service = serviceFor(room, { generator: async () => { calls++; return { ok: true, candidate: validCandidate("Film") }; } });
+  const before = room.exportCanvas();
+  expect(before.ok && before.canvas.document.nodes.some(node => node.id === id)).toBe(true);
+  const outcome = await service.submit(request("managed-conversion", { sourceNodeId: id, sourceKind: "video", targetNodeId: "forbidden-conversion" }));
+  expect(outcome).toMatchObject({ ok: false, code: "unsupported-source" });
+  expect(calls).toBe(0);
+  expect(room.exportCanvas()).toEqual(before);
+});
+
 type TestNode = { id: string; type: string; data?: CanvasNodeData };
 
 async function readyRoom(
@@ -39,7 +59,7 @@ async function readyRoom(
   assets: StoredAsset[] = []
 ): Promise<CanvasRoom> {
   const repository = new InMemoryYjsDocumentRepository();
-  const room = new CanvasRoom({ canvasId, repository, now: () => NOW });
+  const room = new CanvasRoom({ canvasId, repository, lifecycle: filmSetTestLifecycles, now: () => NOW });
   const base = createEmptyWoohaa3ServerCanvas(canvasId, NOW);
   await room.initialize({
     canvas: {
@@ -670,7 +690,7 @@ describe("FilmSetConversionService：占位片场节点生命周期（任务 1.3
     if (!exported.ok) throw new Error("export");
     expect(exported.canvas.document.nodes.filter((node) => node.id === "film-ph")).toHaveLength(1);
     // 对象容器及其内嵌 model3d 卡片都是容器派生物，不参与「目标片场节点」计数。
-    expect(exported.canvas.document.nodes.filter(node => node.type !== "film-set-shot-preview"
+    expect(exported.canvas.document.nodes.filter(node => !node.id.startsWith("shot-preview:")
       && !node.id.startsWith("film-object:") && !node.id.startsWith("film-object-model:"))).toHaveLength(2);
     const target = filmSetNode(room, "film-ph")!;
     const decoded = decodeFilmSetNodeData(target.data);
@@ -970,7 +990,7 @@ describe("FilmSetConversionService：提交预算与上游硬超时（design D4/
     expect(clips.clips[0]).toMatchObject({ kind: "static", timeline: { duration: 0 } });
     expect(clips.clips[0]!.bindings.map(binding => binding.itemId)).toEqual(decoded.value.filmSetContent.items.filter(item => item.kind !== "ground").map(item => item.id));
     const canvas = room.exportCanvas();
-    expect(canvas.ok && canvas.canvas.document.nodes.some(node => node.type === "film-set-shot-preview")).toBe(true);
+    expect(canvas.ok && canvas.canvas.document.nodes.some(node => node.type === "image" && canvas.canvas.nodeData[node.id]?.managedBy?.ownerNodeId === "film-target")).toBe(true);
   });
 
   it("生成器意外抛错也将具体失败写回目标节点", async () => {

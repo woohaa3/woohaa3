@@ -30,11 +30,7 @@ import {
 } from "./command-reducer/node-commands.js";
 import { addEdge, removeAsset, removeEdge, removeJob, upsertAsset, upsertJob } from "./command-reducer/edge-resource-commands.js";
 import { finalize } from "./command-reducer/finalize.js";
-import {
-  reconcileShotPreviews,
-  type ShotPreviewBatchContext
-} from "./command-reducer/film-set-shot-previews.js";
-import { isShotPreviewNodeType } from "./domain/core/shot-preview-node.js";
+import { ManagedNodeLifecycleRegistry, planManagedNodeLifecycles, type ManagedNodeLifecycleResolver } from "./managed-node-lifecycle.js";
 import { isCanvasCommandShape, toWorkingState } from "./command-reducer/working-state.js";
 import { OK, reject, type ApplyCanvasCommandsResult, type CommandApplyResult, type WorkingState } from "./command-reducer/types.js";
 
@@ -53,14 +49,11 @@ export type {
 export function applyCanvasCommands(
   canvas: ServerCanvas,
   commands: readonly CanvasCommand[],
-  options: { now?: string } = {}
+  options: { now?: string; lifecycle?: ManagedNodeLifecycleResolver } = {}
 ): ApplyCanvasCommandsResult {
   const now = options.now ?? new Date().toISOString();
   const work = toWorkingState(canvas);
-  const shotPreviewContext: ShotPreviewBatchContext = {
-    beforeNodes: canvas.document.nodes.map((node) => ({ ...node, position: { ...node.position }, data: {} })),
-    explicitPreviewIds: explicitShotPreviewPositions(commands, canvas)
-  };
+  const positionedNodeIds = explicitNodePositions(commands);
 
   for (const [index, command] of commands.entries()) {
     if (!isCanvasCommandShape(command)) {
@@ -70,10 +63,14 @@ export function applyCanvasCommands(
     if (!result.ok) return result;
   }
 
-  // 源镜头生命周期 reconciliation 与最终不变式（change D3）：与源写入处于同一批次、
+  // 可信扩展生命周期规划与通用校验：与源写入处于同一批次、
   // 同一 revision 与同一广播；重试不新增副本，失败不保留半张图。
-  const previewResult = reconcileShotPreviews(work, shotPreviewContext);
-  if (!previewResult.ok) return previewResult;
+  {
+    try {
+      const planned = planManagedNodeLifecycles({ before: canvas, canvas: { ...canvas, title: work.title, document: { ...canvas.document, nodes: work.nodes, edges: work.edges }, nodeData: work.nodeData, assets: work.assets, jobs: work.jobs }, positionedNodeIds: [...positionedNodeIds] }, options.lifecycle ?? new ManagedNodeLifecycleRegistry());
+      work.nodes = planned.document.nodes.map(node => ({ ...node, data: {} })); work.edges = planned.document.edges; work.nodeData = planned.nodeData;
+    } catch (error) { return reject("invalid-command", String(error)); }
+  }
 
   const positioned = new Set<string>();
   for (const command of commands) {
@@ -92,10 +89,7 @@ export function applyCanvasCommands(
  * `position` 的既有预览即视为用户直接给出的落点；拖动提交会同时更新预览与片场，因此这里按
  * 「本批显式更新了 position 的预览节点」识别，避免与 owner 闭包重复位移。
  */
-function explicitShotPreviewPositions(commands: readonly CanvasCommand[], canvas: ServerCanvas): Set<string> {
-  const previewIds = new Set(
-    canvas.document.nodes.filter((node) => isShotPreviewNodeType(node.type)).map((node) => node.id)
-  );
+function explicitNodePositions(commands: readonly CanvasCommand[]): Set<string> {
   const positioned = new Set<string>();
   for (const command of commands) {
     if (command.type === "node.update" && command.position) positioned.add(command.nodeId);
@@ -105,7 +99,7 @@ function explicitShotPreviewPositions(commands: readonly CanvasCommand[], canvas
       }
     }
   }
-  return new Set([...positioned].filter((id) => previewIds.has(id)));
+  return positioned;
 }
 
 function applyCommand(work: WorkingState, command: CanvasCommand): CommandApplyResult {

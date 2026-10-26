@@ -7,6 +7,7 @@
  */
 import type { ServerCanvas } from "@woohaa3/contracts";
 import { decodeModel3DNodeData, readFilmSetConversionSourceKind } from "@woohaa3/contracts";
+import { ownsShotMedia } from "../../../state/shared/managed-shot-media.js";
 
 /** 转换动作可用性：`available: false` 时给出可读原因（按钮禁用并说明）。 */
 export type FilmSetConversionAvailability = { available: true } | { available: false; reason: string };
@@ -31,6 +32,7 @@ export function resolveFilmSetConversionAvailability(input: {
   if (!kind) return { available: false, reason: "此类节点暂不支持转为片场" };
   if (!writable) return { available: false, reason: "当前会话不可写，无法创建片场" };
   const data = canvas.nodeData[nodeId];
+  if (ownsShotMedia(canvas, nodeId)) return { available: false, reason: "片场镜头媒体不能再次创建片场" };
   if (kind === "model3d") {
     return decodeModel3DNodeData(data).ok ? { available: true } : { available: false, reason: "模型内容不完整，无法转换" };
   }

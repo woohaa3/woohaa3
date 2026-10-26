@@ -1,6 +1,6 @@
 import type { Woohaa3CanvasInputRole } from "./input-role-contract";
 import { isCompositeAssetNodeType } from "./composite-asset-identity";
-import { isShotPreviewNodeType } from "./shot-preview-node";
+import { isShotPreviewNode } from "./shot-preview-node";
 import { SHOT_REFERENCE_ROLE, resolveShotReferenceSource, shotReferenceRoleForKind } from "./shot-reference";
 
 type NodeLike = { id: string; type: string };
@@ -56,7 +56,7 @@ export function inferWoohaa3CanvasInputRole(options: {
   const targetKind = resolveWoohaa3CanvasTaskKind(options.targetNode.type, options.targetData) ?? options.targetNode.type;
   // 镜头参考（D9 / 任务 8.1）：动态镜头预览来源 → 视频生成节点使用**专用**角色，
   // 与普通媒体参考区分；预处理顺序在一切通用候选之前，避免被回落成 reference_video。
-  if (isShotPreviewNodeType(options.sourceNode.type)) {
+  if (isShotPreviewNode(options.sourceNode.type, options.sourceData)) {
     const source = resolveShotReferenceSource(options.sourceNode.id, options.sourceData as Record<string, unknown> | undefined, options.readNodeData ?? (() => undefined));
     return source ? shotReferenceRoleForKind(source.kind) : SHOT_REFERENCE_ROLE;
   }

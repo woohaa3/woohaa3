@@ -14,6 +14,19 @@ beforeEach(() => vi.stubGlobal("window", globalThis));
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("node download recovery", () => {
+  it("resolves the current provider version and never downloads an old output pointer", async () => {
+    const state = canvas(), save = vi.fn();
+    state.nodeData.image.mediaContent = { providerId: "test.content", schemaVersion: 1, payload: {} };
+    const readMedia = vi.fn(async (_asset: import("@woohaa3/contracts").StoredAsset) => new Blob(["current"], { type: "image/png" }));
+    const resolve = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ ...state.assets[0], id: "current-version" });
+    const service = new NodeDownloadService({ getCanvas: () => state, save, readMedia, mediaContent: { resolve } });
+    await service.download("image");
+    expect(readMedia).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
+    await service.download("image");
+    expect(resolve).toHaveBeenLastCalledWith("image", "resolvePreview", expect.any(String));
+    expect(readMedia.mock.calls[0]?.[0]).toMatchObject({ id: "current-version" });
+    expect(save).toHaveBeenCalledOnce(); service.dispose();
+  });
   it("retries after failure, uses the actual MIME extension and never writes canvas data", async () => {
     const state = canvas(), before = JSON.stringify(state), save = vi.fn();
     const readMedia = vi.fn().mockRejectedValueOnce(new Error("HTTP 404"))

@@ -13,6 +13,7 @@ import type { CanvasSession } from "../../../contracts.js";
 import { EditJournal, type EditJournalSnapshot, type JournalEntry, type JournalPlannedEdit } from "./edit-journal.js";
 
 export type CanvasEditServiceOptions = {
+  lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   session: CanvasSession;
   /** 当前规范画布（working projection 的 committed 部分）。 */
   getCanvas: () => ServerCanvas | null;
@@ -146,7 +147,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   const plan = (commands: readonly CanvasCommand[]): { ok: true } & EditPlan | { ok: false; reason: string } => {
     const canvas = options.getCanvas();
     if (!canvas) return { ok: false, reason: "画布尚未加载" };
-    const planned = planCanvasEdit(canvas, commands);
+    const planned = planCanvasEdit(canvas, commands, { lifecycle: options.lifecycle });
     if (!planned.ok) return { ok: false, reason: planned.reason };
     return { ok: true, forward: planned.forward, inverse: planned.inverse };
   };

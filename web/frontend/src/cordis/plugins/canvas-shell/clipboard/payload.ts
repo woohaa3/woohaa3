@@ -13,7 +13,7 @@
 import type { ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition, Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
 import {
   decodeImageEditDocument,
-  filmSetObjectOwnershipOf, filmSetObjectModelNodeId, shotPreviewOwnershipOf, FILM_SET_SHOT_PREVIEW_NODE_TYPE,
+  filmSetObjectOwnershipOf, filmSetObjectModelNodeId,
   filmSetAssetReferences,
   isImageProjectDocument, decodeFilmSetNodeData, model3DNodeDataFields,
   readFilmSetContent,
@@ -21,6 +21,7 @@ import {
   type ImageEditProjectObjectRef,
   type StoredAsset
 } from "@woohaa3/contracts";
+import { managedNodeRelationOf } from "@woohaa3/contracts";
 
 export const CANVAS_COPY_FORMAT = "infinspire-canvas-copy-v1";
 
@@ -81,7 +82,8 @@ export type CanvasCopyPayload = {
  */
 export function buildCanvasCopyPayload(
   canvas: ServerCanvas,
-  selectedNodeIds: readonly string[]
+  selectedNodeIds: readonly string[],
+  options: { snapshotNodeIds?: readonly string[] } = {}
 ): CanvasCopyPayload | null {
   const nodes = canvas.document.nodes;
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -101,32 +103,28 @@ export function buildCanvasCopyPayload(
     }
   }
 
-  // 拍摄镜头预览闭包（change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.5 / design D2）：
-  // 预览节点与源片场是**兄弟**（同一 group parent），不随「选中片场 → 后代扩展」自动进入载荷。
-  // 复制片场时按其归属索引补齐其全部预览，保持相对布局；反之不属于载荷内片场的预览一律剔除
-  // （不产生指向原片场的副本引用）。预览不能单独复制：选择集里没有非预览节点时返回 null（无操作）。
+  // Owner closures are relation-driven, independent of media provider identity.
   const previewOwnerByNode = new Map<string, string>();
   for (const node of nodes) {
     const object = filmSetObjectOwnershipOf(canvas.nodeData[node.id]);
     if (object) { previewOwnerByNode.set(node.id, object.filmSetNodeId); continue; }
-    if (node.type !== FILM_SET_SHOT_PREVIEW_NODE_TYPE) continue;
-    const ownership = shotPreviewOwnershipOf(canvas.nodeData[node.id]);
-    if (ownership) previewOwnerByNode.set(node.id, ownership.filmSetNodeId);
+    const managed = managedNodeRelationOf(canvas.nodeData[node.id]);
+    if (managed) { previewOwnerByNode.set(node.id, managed.ownerNodeId); continue; }
   }
-  const hasNonPreviewSelection = validSelected.some((id) => {
-    const node = byId.get(id);
-    return !!node && node.type !== FILM_SET_SHOT_PREVIEW_NODE_TYPE;
-  });
-  if (!hasNonPreviewSelection) return null;
-  for (const node of nodes) {
-    const owner = previewOwnerByNode.get(node.id);
-    if (owner && included.has(owner)) included.add(node.id);
+  let closureGrew = true;
+  while (closureGrew) {
+    closureGrew = false;
+    for (const node of nodes) {
+      const owner = previewOwnerByNode.get(node.id);
+      if (owner && included.has(owner) && !included.has(node.id)) { included.add(node.id); closureGrew = true; }
+    }
   }
   for (const id of [...included]) {
     const owner = previewOwnerByNode.get(id);
     // 对象容器可以在所属片场未被选中时物化为独立 model3d；拍摄镜头预览仍必须丢弃。
     const isObjectContainer = !!filmSetObjectOwnershipOf(canvas.nodeData[id]);
-    if (owner && !included.has(owner) && !isObjectContainer) included.delete(id);
+    const isManagedMedia = !!managedNodeRelationOf(canvas.nodeData[id]);
+    if (owner && !included.has(owner) && !isObjectContainer && !isManagedMedia) included.delete(id);
   }
   // 单独选择外层容器时只复制其真实 model3d 子节点；容器自身不参与复制。
   for (const id of validSelected) {
@@ -191,7 +189,12 @@ export function buildCanvasCopyPayload(
   for (const id of [...included].sort()) {
     const raw = rawNodeData[id];
     const cleaned = materializedModelData.get(id) ?? sanitizeNodeDataForClipboard(raw ?? {});
-    restoreContentReferences(raw, cleaned, nodeTypeById.get(id), assetsById);
+    // A standalone provider-backed media copy is a frozen ordinary node. Keep
+    // the source reference for the async snapshot path, but never paste the
+    // extension lifecycle lock into another canvas.
+    const relation = managedNodeRelationOf(cleaned);
+    if (cleaned.mediaContent && relation && !included.has(relation.ownerNodeId)) delete cleaned.managedBy;
+    restoreContentReferences(raw, cleaned, nodeTypeById.get(id), assetsById, options.snapshotNodeIds?.includes(id) ?? false);
     if (Object.keys(cleaned).length > 0) nodeData[id] = cleaned;
   }
 
@@ -245,7 +248,8 @@ function restoreContentReferences(
   raw: Woohaa3CanvasJsonObject | undefined,
   cleaned: Woohaa3CanvasJsonObject,
   nodeType: string | undefined,
-  assetsById: ReadonlyMap<string, StoredAsset>
+  assetsById: ReadonlyMap<string, StoredAsset>,
+  providerSnapshot = false
 ): void {
   // 带编辑定义/工程版本的图片节点：`outputAssetId` 是版本的一部分（工程与 PNG 成对）。
   const hasImageEdit = raw !== undefined && decodeImageEditDocument(raw.imageEdit).ok;
@@ -258,7 +262,9 @@ function restoreContentReferences(
   if (!nodeType) return;
   const asset = assetsById.get(outputAssetId);
   if (!asset || asset.status !== "ready") return;
-  if (asset.source !== "uploaded" && asset.source !== "external") return;
+  // A confirmed provider snapshot is content even when its immutable asset was
+  // generated. It is no longer a task-result pointer on the copied node.
+  if (!providerSnapshot && asset.source !== "uploaded" && asset.source !== "external") return;
   if (asset.mediaKind !== nodeType) return;
   cleaned.outputAssetId = outputAssetId;
   // 上传节点的就绪状态同样属于「节点可用」的一部分（服务端上传路径写入 successed）。

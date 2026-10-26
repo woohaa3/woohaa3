@@ -6,15 +6,15 @@ import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 /** 从 canonical 画布解析节点**自身** ready 视频输出（design D5）。 */
 export function resolveNodeVideoSource(
   canvas: ServerCanvas | null,
-  nodeId: string
+  nodeId: string,
+  runtimeAsset?: StoredAsset | null
 ): { url: string; posterUrl: string | null } | null {
   if (!canvas) return null;
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node || node.type !== "video") return null;
   const nodeData = canvas.nodeData as Record<string, { outputAssetId?: unknown } | undefined>;
   const outputId = nodeData[nodeId]?.outputAssetId;
-  if (typeof outputId !== "string" || outputId === "") return null;
-  const asset = canvas.assets.find((candidate) => candidate.id === outputId) as StoredAsset | undefined;
+  const asset = (typeof outputId === "string" && outputId !== "" ? canvas.assets.find((candidate) => candidate.id === outputId) : undefined) ?? runtimeAsset ?? undefined;
   if (!asset || asset.status !== "ready" || asset.mediaKind !== "video") return null;
   const storageKey = typeof asset.metadata?.storageKey === "string" ? asset.metadata.storageKey : "";
   if (!storageKey) return null;

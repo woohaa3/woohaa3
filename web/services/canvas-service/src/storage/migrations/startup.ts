@@ -18,7 +18,7 @@ function assertNoWriter(db: DatabaseSync): void {
 }
 
 /** Runs before repositories or rooms open. Only this SQLite file is modified. */
-export function migrateSqliteCanvasBeforeStartup(databasePath: string): { changed: boolean; backup?: string } {
+export function migrateSqliteCanvasBeforeStartup(databasePath: string, options: Pick<import("./film-set-shooting-shots.js").MigrationOptions, "managedMigrations"> = {}): { changed: boolean; backup?: string } {
   if (databasePath === ":memory:" || !fs.existsSync(databasePath)) return { changed: false };
   const filename = fs.realpathSync(databasePath);
   const { DatabaseSync } = loadNodeSqlite();
@@ -31,7 +31,7 @@ export function migrateSqliteCanvasBeforeStartup(databasePath: string): { change
     if (!hasTable(db, "canvas_yjs_documents")) return { changed: false };
     const version = () => JSON.stringify(db.prepare("PRAGMA data_version").get());
     const before = version();
-    const plan = planMigration(db);
+    const plan = planMigration(db, options);
     // 存在无法精确反解坐标单位的片场：明确阻断并保留原件（不猜测单位、不写任何记录）。
     if (plan.conflicts.length > 0) {
       throw new Error(
@@ -63,7 +63,7 @@ export function migrateSqliteCanvasBeforeStartup(databasePath: string): { change
     if (version() !== before) throw new Error("备份期间画布发生变化，已取消迁移，请停止其它写入后重启");
     assertNoWriter(db);
     applyMigration(db, plan);
-    if (planMigration(db, { transaction: false }).changed) throw new Error("迁移后仍存在待转换的数据");
+    if (planMigration(db, { ...options, transaction: false }).changed) throw new Error("迁移后仍存在待转换的数据");
     const integrity = db.prepare("PRAGMA integrity_check").all();
     if (integrity.length !== 1 || Object.values(integrity[0]!)[0] !== "ok") throw new Error("迁移后 SQLite 完整性校验失败");
     db.exec("COMMIT");

@@ -82,7 +82,7 @@ export function pasteImportExtension(): Plugin.Function<void> {
           if (!writable() || disposed) return;
           const current = woohaa3CanvasStore.getState().canvas;
           if (!current || current.id !== canonical.id) return;
-          const plan = planCanvasPaste({ canvas: current, payload: verified, anchor, viewport: controller.viewport() });
+          const plan = planCanvasPaste({ lifecycle: ctx.get("compositeAssets")?.managedLifecycles, canvas: current, payload: verified, anchor, viewport: controller.viewport() });
           if (plan) void ctx.canvasEdit.record(plan.commands, plan.newNodeIds.length > 1 ? `粘贴 ${plan.newNodeIds.length} 个作品` : "粘贴作品");
         };
         const projects = payload.nodes.flatMap((node) => {
@@ -196,7 +196,7 @@ export function pasteImportExtension(): Plugin.Function<void> {
           const text = data?.getData("text/plain") ?? null;
           const internal = parseCanvasCopyPayload(text);
           // 页内 fallback：浏览器未派发可用文本时使用复制时的内存载荷。
-          const fallbackText = text ?? readMemoryClipboard();
+          const fallbackText = text || readMemoryClipboard();
           const resolvedInternal = internal ?? parseCanvasCopyPayload(fallbackText);
           const { files } = classifyTransferFiles(data);
           const intent = resolvePasteIntent({

@@ -1,7 +1,8 @@
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
-import { diffPlan, planCanvasEdit } from "./edit-plan.js";
+
+import { diffPlan} from "./edit-plan.js";
 import { planPositionEdit } from "./edit-plan-position.js";
 import type { CanvasCommand } from "./commands.js";
 

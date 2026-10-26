@@ -25,8 +25,9 @@ import { applyFilmSetClipEditRemove, applyFilmSetClipEditSet, filmSetClipStateHa
 import { patchNodeData } from "./node-commands.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf, LEGACY_FILM_SET_ANIMATION_FIELDS, LEGACY_FILM_SET_TOP_MODEL_FIELDS } from "../film-set-clip-view.js";
 import { animationSnapshotHash } from "../animation-snapshot.js";
-import { decodeShotPreviewData, shotPreviewNodeId } from "../film-set-shot-preview.js";
-import { FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "../domain/core/shot-preview-node.js";
+import { shotPreviewNodeId } from "../film-set-shot-preview.js";
+import { shotReferenceOwnershipOf } from "../film-set-shot-reference.js";
+import { isShotPreviewNode } from "../domain/core/shot-preview-node.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
 
 /** 片场对象相关条件种类（用于 edit-command 主分发）。 */
@@ -200,11 +201,10 @@ export function applyFilmSetOperation(work: WorkingState, operation: EditOperati
 /** 预览节点是否存在、类型正确、归属与派生 ID 完全匹配（并发布局/归属前置条件）。 */
 function shotPreviewBelongsTo(work: WorkingState, previewNodeId: string, filmSetNodeId: string, clipId: string): boolean {
   const node = work.nodes.find((entry) => entry.id === previewNodeId);
-  if (!node || node.type !== FILM_SET_SHOT_PREVIEW_NODE_TYPE) return false;
+  if (!node || !isShotPreviewNode(node.type, work.nodeData[previewNodeId])) return false;
   if (previewNodeId !== shotPreviewNodeId(filmSetNodeId, clipId)) return false;
-  const decoded = decodeShotPreviewData(work.nodeData[previewNodeId]);
-  if (!decoded.ok) return false;
-  return decoded.value.shotPreview.filmSetNodeId === filmSetNodeId && decoded.value.shotPreview.clipId === clipId;
+  const ownership = shotReferenceOwnershipOf(work.nodeData[previewNodeId]);
+  return ownership?.filmSetNodeId === filmSetNodeId && ownership.clipId === clipId;
 }
 
 /**

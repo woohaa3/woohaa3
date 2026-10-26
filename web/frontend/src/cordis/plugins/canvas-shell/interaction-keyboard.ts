@@ -14,13 +14,8 @@ import { buildCanvasCopyPayload, serializeCanvasCopyPayload } from "./clipboard/
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { planDeleteNodes } from "../../../extension-api/command-planner.js";
-import {
-  partitionShotPreviewSelection,
-  SHOT_PREVIEW_CLIPBOARD_HINT,
-  SHOT_PREVIEW_DELETE_HINT,
-  PARTITION_SELECTION_DELETE_HINT
-} from "./shot-preview-protection.js";
 import type { InteractionCore } from "./interaction-core.js";
+import { managedNodeRelationOf, partitionManagedNodeDeletion } from "@woohaa3/contracts";
 
 /** 页内剪贴板 fallback 的全局键。 */
 export const MEMORY_CLIPBOARD_KEY = "__canvasMemoryClipboard";
@@ -34,23 +29,14 @@ function hasSelectedText(target: { getSelection?: () => Selection | null }): boo
 export function createKeyboardShortcuts(core: InteractionCore) {
   const { options, target, writable, state, model, schedule } = core;
 
-  /** 当前选择可复制的节点（已剔除受保护预览）；无普通节点时返回 `null`。 */
+  /** Live media is frozen by the existing provider before publishing a copy. */
   const copyableSelection = () => {
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState) return null;
     const snapshot = nodeSelectionStore.getSnapshot();
-    // 拍摄镜头预览保护（change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.5 / design D2）：
-    // 预览不能单独复制/剪切；删除选择集过滤受保护预览（可删除其余普通节点），只含预览时明确拒绝。
-    const protection = partitionShotPreviewSelection({
-      selectedNodeIds: snapshot.nodeIds,
-      nodes: canvasState.document.nodes.map((node) => ({ id: node.id, type: node.type })),
-      nodeData: canvasState.nodeData
-    });
-    if (protection.others.length === 0) {
-      if (protection.previewIds.length > 0) notifyShotPreviewRejected(SHOT_PREVIEW_CLIPBOARD_HINT);
-      return null;
-    }
-    return { canvasState, others: protection.others };
+    if (!snapshot.nodeIds.length) return null;
+    return { canvasState, others: snapshot.nodeIds };
+
   };
 
   /**
@@ -62,7 +48,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
   const buildClipboardText = (): string | null => {
     const copyable = copyableSelection();
     if (!copyable) return null;
-    // 只复制普通节点；预览闭包由 payload 依据被复制的片场补齐（不单独复制受保护预览）。
+    // Payload includes the generic owner closure; standalone media is frozen below.
     const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
     if (!payload) return null;
     const text = serializeCanvasCopyPayload(payload);
@@ -75,11 +61,16 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (!copyable) return null;
     const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
     if (!payload) return null;
-    const liveIds = payload.nodes.filter(n => copyable.canvasState.nodeData[n.id]?.mediaContent).map(n => n.id);
+    const included = new Set(payload.nodes.map(n => n.id));
+    const liveIds = payload.nodes.filter(n => {
+      const data = copyable.canvasState.nodeData[n.id];
+      const relation = managedNodeRelationOf(data);
+      return data?.mediaContent && !(relation && included.has(relation.ownerNodeId));
+    }).map(n => n.id);
     if (!liveIds.length) return buildClipboardText();
     if (!options.mediaContent) throw Error("媒体内容 provider 未就绪，无法复制");
     const frozen = await options.mediaContent.freeze(copyable.canvasState, liveIds, crypto.randomUUID());
-    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others);
+    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others, { snapshotNodeIds: liveIds });
     if (!frozenPayload) return null;
     const text = serializeCanvasCopyPayload(frozenPayload);
     (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
@@ -92,11 +83,6 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     const session = options.getSession();
     if (!canvasState || !session) return;
     const snapshot = nodeSelectionStore.getSnapshot();
-    const protection = partitionShotPreviewSelection({
-      selectedNodeIds: snapshot.nodeIds,
-      nodes: canvasState.document.nodes.map((node) => ({ id: node.id, type: node.type })),
-      nodeData: canvasState.nodeData
-    });
     const clip = target as unknown as {
       navigator?: { clipboard?: { writeText?: (text: string) => Promise<void> } };
     };
@@ -111,15 +97,16 @@ export function createKeyboardShortcuts(core: InteractionCore) {
       }
       return;
     }
-    const deletable = protection.others;
+    const deletion = partitionManagedNodeDeletion(canvasState.document.nodes, canvasState.nodeData, snapshot.nodeIds);
+    const deletable = deletion.allowed;
     if (deletable.length === 0) {
-      if (protection.previewIds.length > 0) notifyShotPreviewRejected(SHOT_PREVIEW_DELETE_HINT);
+      if (deletion.blocked.length > 0) notifyManagedRejected("托管节点需通过所属作品管理");
       return;
     }
     if (!writable()) return;
     // 删除经页面编辑历史（可撤销）；回退直接提交（任务 1.5/1.7）。
     const label = deletable.length > 1 ? `删除 ${deletable.length} 个作品` : "删除作品";
-    if (protection.previewIds.length > 0) notifyShotPreviewRejected(PARTITION_SELECTION_DELETE_HINT);
+    if (deletion.blocked.length > 0) notifyManagedRejected("已删除其余作品；托管节点需通过所属作品管理");
     if (options.onEditCommands) {
       void options.onEditCommands(planDeleteNodes(deletable), label);
       return;
@@ -127,8 +114,8 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     session.submitCommands(planDeleteNodes(deletable), `web-delete-${Date.now().toString(36)}-${core.nextSeq()}`);
   };
 
-  /** 预览保护提示：走同一交互诊断出口，不静默丢弃用户操作。 */
-  const notifyShotPreviewRejected = (message: string): void => {
+  /** Relation-policy diagnostics share the normal interaction error outlet. */
+  const notifyManagedRejected = (message: string): void => {
     options.onInteractionError?.(new Error(message));
   };
 
@@ -303,7 +290,16 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     const copyable = copyableSelection();
     if (!copyable) return;
     const closure = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
-    if (closure?.nodes.some(n => copyable.canvasState.nodeData[n.id]?.mediaContent)) {
+    const included = new Set(closure?.nodes.map(n => n.id));
+    if (closure?.nodes.some(n => {
+      const data = copyable.canvasState.nodeData[n.id];
+      const relation = managedNodeRelationOf(data);
+      return data?.mediaContent && !(relation && included.has(relation.ownerNodeId));
+    })) {
+      // A native copy event cannot await a provider. Publish only the completed
+      // snapshot through the async clipboard writer and the in-page fallback.
+      // Never put a still-live reference on the clipboard as an interim copy.
+      event.clipboardData?.setData("text/plain", "");
       event.preventDefault();
       void runClipboardShortcut("copy");
       return;

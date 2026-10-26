@@ -11,5 +11,6 @@
  */
 // v5: static shot image references; v4 normalizers cannot safely write these documents.
 // v6: film-set object containers and protected model snapshot replacement.
-export const YJS_SYNC_PROTOCOL_VERSION = 6 as const;
+// v7: persistent managed entities and trusted extension lifecycle closure.
+export const YJS_SYNC_PROTOCOL_VERSION = 7 as const;
 export type YjsSyncProtocolVersion = typeof YJS_SYNC_PROTOCOL_VERSION;

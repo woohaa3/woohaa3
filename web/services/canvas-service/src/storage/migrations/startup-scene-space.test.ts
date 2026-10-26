@@ -1,3 +1,5 @@
+import { filmSetTestMigrations } from "../../../../../test-support/managed-shot-commands.js";
+const migrateSqliteCanvasBeforeStartup = (filename: string) => migrateBeforeStartup(filename, { managedMigrations: filmSetTestMigrations });
 import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,7 +15,7 @@ import {
 } from "@woohaa3/contracts";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "@woohaa3/contracts/canvas-yjs";
 import { loadNodeSqlite } from "../sqlite/sqlite-loader.js";
-import { migrateSqliteCanvasBeforeStartup } from "./startup.js";
+import { migrateSqliteCanvasBeforeStartup as migrateBeforeStartup } from "./startup.js";
 import {
   auditFilmSetSceneSpace,
   legacyDisplayMapping,

@@ -12,6 +12,8 @@ import { FilmSetConversionService } from "../../authoring/backend/film-set-conve
 import { filmSetFrameRuntime } from "./frame-runtime.js";
 import { filmSetMcpRuntime } from "./mcp-runtime.js";
 import { createFilmSetRecordingRuntime } from "./recording-runtime.js";
+import { filmSetManagedLifecycle } from "../../state/shared/managed-shot-media-lifecycle.js";
+import { filmSetManagedMediaMigration } from "../../state/shared/managed-shot-media-migration.js";
 
 const conversionRuntime: ContentConversionRuntime = {
   createService: (deps) => new FilmSetConversionService(deps),
@@ -27,6 +29,8 @@ const conversionRuntime: ContentConversionRuntime = {
 const recordingRuntime = createFilmSetRecordingRuntime();
 
 export const filmSetCanvasContentRuntime: CanvasContentRuntime = {
+  managedLifecycles: [filmSetManagedLifecycle],
+  managedMigrations: [filmSetManagedMediaMigration],
   frames: filmSetFrameRuntime,
   conversion: conversionRuntime,
   mcp: filmSetMcpRuntime,

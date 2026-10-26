@@ -1,6 +1,7 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, createMotionSnapshot, applyCanvasCommands, type CanvasCommand, type StoredAsset } from "@woohaa3/contracts";
+import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, createMotionSnapshot, type CanvasCommand, type StoredAsset } from "@woohaa3/contracts";
 import { installShotImageReferences, type ShotImageReferences } from "../src/authoring/browser/shot-image-reference.js";
 import type { FilmSetHostContext } from "../src/state/browser/host-ports.js";
 

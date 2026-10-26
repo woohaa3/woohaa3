@@ -163,5 +163,6 @@ export * from "./assistant-execution.js";
 export * from "./node-implementations.js";
 export { scriptModelPreparation, orbitModelPreview, modelWorkspaceFocus, nodeActionContributions, rectangularNodeResize, modelResourceDemand } from "@woohaa3/contracts";
 export type { MediaContentService, MediaContentProvider, MediaContentState, MediaContentSource, MediaContentContext, MediaContentKind } from "./media-content.js";
+export type { ManagedNodeRelation, ManagedNodeLifecycleAdapter, ManagedNodeLifecycleContext, ManagedNodeLifecyclePlan } from "@woohaa3/contracts";
 
 export type { PersistentResource, PersistentSurface, PersistentSurfaces } from "../cordis/services/persistent-surfaces.js";

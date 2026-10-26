@@ -1,3 +1,4 @@
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 /**
  * 共享 edit planner / effect capture 往返测试
  * （change: 2026-10-09-improve-canvas-workflow，任务 1.4）。
@@ -7,8 +8,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
-import { planCanvasEdit } from "./edit-plan.js";
+
+
 
 const NOW = "2026-10-09T00:00:00.000Z";
 

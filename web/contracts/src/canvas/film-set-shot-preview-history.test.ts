@@ -1,3 +1,4 @@
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 /**
  * 拍摄镜头受保护编辑（源镜头定义 + 预览布局闭包）测试
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 2.5）。
@@ -8,14 +9,15 @@
 import { describe, expect, it } from "vitest";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { filmSetClipPrecondition, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";
 import { decodeFilmSetNodeData, type FilmSetNodeData } from "./canvas-node-model.js";
-import { planCanvasEdit, type EditPlan } from "./edit-plan.js";
+import { type EditPlan } from "./edit-plan.js";
 import { staticShotCameraMotion, type FilmSetAnimationClip } from "./film-set-animations.js";
-import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewNodeId } from "./film-set-shot-preview.js";
+import { shotPreviewNodeId } from "./film-set-shot-preview.js";
+import { managedNodeRelationOf } from "./managed-node.js";
 
 const NOW = "2026-10-15T00:00:00.000Z";
 const CLIP_1 = "clip-1";
@@ -70,7 +72,7 @@ function clip(canvas: ServerCanvas, clipId: string): FilmSetAnimationClip {
 }
 
 function previewNode(canvas: ServerCanvas, nodeId: string) {
-  return canvas.document.nodes.find((node) => node.id === nodeId && node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE);
+  return canvas.document.nodes.find((node) => node.id === nodeId && managedNodeRelationOf(canvas.nodeData[node.id])?.extensionId === "film-set");
 }
 
 function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = CLIP_1) {

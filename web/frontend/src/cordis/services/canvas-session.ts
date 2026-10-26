@@ -131,6 +131,7 @@ function isBrowserOffline(): boolean {
 }
 
 export type CreateCanvasSessionOptions = {
+  lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   canvasId?: string;
   /** Canvas 远端 adapter；会话在其上维护投影与写入门禁。 */
   remote: CanvasRemoteService;
@@ -297,7 +298,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       durationMs: elapsedMs(started), ...(errorCode ? { errorCode } : {}) });
   };
   /** 会话内 working projection：canonical + 有序 pending batches，仅内存。 */
-  const projection = new WorkingProjectionStore();
+  const projection = new WorkingProjectionStore(options.lifecycle);
   /**
    * 规范投影复用缓存（change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 8.1）。
    *
@@ -507,6 +508,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     if (cached && cache) {
       const validation = validateYjsCache(cached, {
         formatVersion: YJS_CANVAS_FORMAT_VERSION,
+        protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
         // 本地无法在连接前得知服务端 room epoch（握手时才拿到），因此这里只能做 format 校验；
         // epoch 不一致在 provider 回报 roomEpoch 后处理（见下方 onChange 的 staleCache 判定）。
         roomEpoch: null
@@ -583,6 +585,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
           await cache.saveMetadata({
             canvasId: cacheId,
             formatVersion: YJS_CANVAS_FORMAT_VERSION,
+        protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
             roomEpoch: provider.providerState.roomEpoch,
             revision,
             updatedAt: new Date().toISOString()

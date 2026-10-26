@@ -1,3 +1,6 @@
+import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
+import { testManagedLifecycle, testManagedOwner } from "../../../../../../test-support/managed-test-extension.js";
+import { applyCanvasCommands } from "../../../../../../test-support/managed-shot-commands.js";
 /**
  * 剪贴板载荷与粘贴规划（change: align-godot-canvas-interactions，任务 4.1 / 4.3 / 4.4）。
  */
@@ -7,15 +10,16 @@ import {
   createWoohaa3CanvasNode,
   toWoohaa3CanvasDocument,
   createFilmSetSnapshot, canonicalFilmSetFields, filmSetAnimationsOf, decodeFilmSetNodeData,
-  applyCanvasCommands,
   filmSetObjectContainerId, filmSetObjectContainerData, resolveFilmSetObject,
-  FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewOwnershipOf, SHOT_REFERENCE_ROLE,
+  managedNodeRelationOf, shotReferenceOwnershipOf, SHOT_REFERENCE_ROLE,
   type FilmSetModelItem, type FilmSetMediaItem,
   type ServerCanvas,
   type StoredAsset
 } from "@woohaa3/contracts";
 import { buildCanvasCopyPayload, parseCanvasCopyPayload, serializeCanvasCopyPayload } from "./payload.js";
-import { checkPasteReferences, planCanvasPaste } from "./planner.js";
+import { checkPasteReferences, planCanvasPaste as planPaste } from "./planner.js";
+import { filmSetTestLifecycles } from "../../../../../../test-support/managed-shot-commands.js";
+const planCanvasPaste = (options: Parameters<typeof planPaste>[0]) => planPaste({ lifecycle: filmSetTestLifecycles, ...options });
 
 const NOW = "2026-09-24T00:00:00.000Z";
 
@@ -200,11 +204,11 @@ describe("粘贴规划", () => {
     canvas.nodeData.film = { ...fields, filmSetShotPreviewsHidden: [collection.clips[1].id] } as never;
     const payload = buildCanvasCopyPayload(canvas, ["film"])!;
     const plan = planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas, payload, anchor: { kind: "point", position: { x: 0, y: 0 } } })!;
-    const added = plan.commands.find(command => command.type === "nodeData.patch");
-    if (!added || added.type !== "nodeData.patch" || !added.value) throw new Error("missing pasted node data");
-    const decoded = decodeFilmSetNodeData(added.value);
+    const added = plan.commands.find(command => command.type === "node.add");
+    if (!added || added.type !== "node.add" || !added.nodeData) throw new Error("missing pasted node data");
+    const decoded = decodeFilmSetNodeData(added.nodeData);
     if (!decoded.ok) throw new Error(decoded.reason);
-    expect(added.value?.filmSetShotPreviewsHidden).toBeUndefined();
+    expect(added.nodeData?.filmSetShotPreviewsHidden).toBeUndefined();
     const data = decoded.value;
     const pastedClips = filmSetAnimationsOf(data);
     const modelItem = data.filmSetContent.items.find((item): item is FilmSetModelItem => item.kind === "model")!;
@@ -233,9 +237,9 @@ describe("粘贴规划", () => {
     const materialized = applyCanvasCommands(canvas, [], { now: NOW });
     if (!materialized.ok) throw new Error(materialized.rejection.message);
     const withPreview = materialized.canvas;
-    const sourcePreview = withPreview.document.nodes.find((node) => node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE);
+    const sourcePreview = withPreview.document.nodes.find((node) => managedNodeRelationOf(withPreview.nodeData[node.id])?.extensionId === "film-set");
     expect(sourcePreview).toBeDefined();
-    const sourceOwnership = shotPreviewOwnershipOf(withPreview.nodeData[sourcePreview!.id]);
+    const sourceOwnership = shotReferenceOwnershipOf(withPreview.nodeData[sourcePreview!.id]);
     expect(sourceOwnership).not.toBeNull();
 
     // 只选片场：载荷必须补齐其预览闭包（预览与片场是兄弟节点，不随后代扩展进入）。
@@ -245,12 +249,12 @@ describe("粘贴规划", () => {
     const plan = planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas: withPreview, payload, anchor: { kind: "point", position: { x: 0, y: 0 } } })!;
     const result = applyCanvasCommands(withPreview, plan.commands, { now: NOW });
     if (!result.ok) throw new Error(`${result.rejection.code}:${result.rejection.message}`);
-    const previews = result.canvas.document.nodes.filter((node) => node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE);
+    const previews = result.canvas.document.nodes.filter((node) => managedNodeRelationOf(result.canvas.nodeData[node.id])?.extensionId === "film-set");
     // 源片场 + 副本各一个预览；副本预览必须是新身份且归属指向副本与新 clipId。
     expect(previews).toHaveLength(2);
     const pastedPreview = previews.find((node) => node.id !== sourcePreview!.id)!;
     expect(pastedPreview).toBeDefined();
-    const ownership = shotPreviewOwnershipOf(result.canvas.nodeData[pastedPreview.id]);
+    const ownership = shotReferenceOwnershipOf(result.canvas.nodeData[pastedPreview.id]);
     expect(ownership).not.toBeNull();
     expect(ownership!.filmSetNodeId).not.toBe(sourceOwnership!.filmSetNodeId);
     expect(ownership!.clipId).not.toBe(sourceOwnership!.clipId);
@@ -277,7 +281,7 @@ describe("粘贴规划", () => {
     const materialized = applyCanvasCommands(canvas, [], { now: NOW });
     if (!materialized.ok) throw new Error(materialized.rejection.message);
     const source = materialized.canvas;
-    const preview = source.document.nodes.find((node) => node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE)!;
+    const preview = source.document.nodes.find((node) => managedNodeRelationOf(source.nodeData[node.id])?.extensionId === "film-set")!;
     source.document.nodes.push({ ...createWoohaa3CanvasNode("video", { x: 800, y: 0 }, "video-1") });
     source.nodeData["video-1"] = { taskKind: "video-generation", taskStatus: "idle" } as never;
     const linked = applyCanvasCommands(source, [{
@@ -623,4 +627,38 @@ describe("片场对象容器复制", () => {
     expect((ownerData.filmSetContent as any).items.some((item: any) => item.id === hiddenId)).toBe(true);
     expect(result.canvas.document.nodes.some(node => node.id === filmSetObjectContainerId(object.owner.filmSetNodeId, hiddenId))).toBe(false);
   });
+});
+
+it("copies a managed closure through an unrelated extension and fails closed after unload", () => {
+  const lifecycle = new ManagedNodeLifecycleRegistry();
+  lifecycle.register({ ...testManagedLifecycle, remapCopy({ nodes, nodeData, nodeIds, createId }) {
+    const entries: import("@woohaa3/contracts").ManagedNodeCopyEntry[] = [];
+    for (const owner of nodes.filter(n => nodeData[n.id]?.extensionId === "test.entities")) {
+      const oldEntities = nodeData[owner.id].entries as string[];
+      const entities = oldEntities.map((_, index) => createId("entity", index));
+      const ownerId = nodeIds.get(owner.id)!;
+      entries.push({ sourceNodeId: owner.id, nodeId: ownerId, data: { ...nodeData[owner.id], entries: entities } as import("@woohaa3/contracts").CanvasNodeData });
+      oldEntities.forEach((entity, index) => {
+        entries.push({ sourceNodeId: `${owner.id}:${entity}`, nodeId: `${ownerId}:${entities[index]}`, data: {
+          managedBy: { schemaVersion: 1, extensionId: "test.entities", ownerNodeId: ownerId, entityId: entities[index], lifecycle: "owner-managed" }
+        } });
+      });
+    }
+    return entries;
+  } });
+  const source = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("source", NOW), [testManagedOwner], { lifecycle, now: NOW });
+  if (!source.ok) throw Error(source.rejection.message);
+  // Child appears first after a user z-order edit. The generic planner must still
+  // submit its owner first, independently of extension business identity.
+  source.canvas.document.nodes.reverse();
+  const payload = buildCanvasCopyPayload(source.canvas, ["owner"])!;
+  const destination = createEmptyWoohaa3ServerCanvas("destination", NOW);
+  expect(planPaste({ canvas: destination, payload, anchor: null, viewport: { x: 0, y: 0, zoom: 1 } })).toBeNull();
+  const plan = planPaste({ lifecycle, canvas: destination, payload, anchor: null, viewport: { x: 0, y: 0, zoom: 1 }, createId: (prefix, index) => `${prefix}-${index}` })!;
+  expect(plan).not.toBeNull();
+  const applied = applyCanvasCommands(destination, plan.commands, { lifecycle, now: NOW });
+  if (!applied.ok) throw Error(applied.rejection.message);
+  const relation = Object.values(applied.canvas.nodeData).map(managedNodeRelationOf).find(Boolean)!;
+  expect(relation).toMatchObject({ extensionId: "test.entities", ownerNodeId: "text-1", entityId: "entity-0" });
+  expect(applied.canvas.document.nodes.map(n => n.id)).toEqual(["text-1", "text-1:entity-0"]);
 });

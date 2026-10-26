@@ -1,6 +1,7 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 
 describe("复合资产扩展内容引用", () => {
   function canvas(extensionId: string) {

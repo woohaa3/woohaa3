@@ -1,7 +1,7 @@
 import { createHighEntropyId } from "./node-factory";
 import type { Woohaa3CanvasConnection, Woohaa3CanvasEdge, Woohaa3CanvasNode } from "./canvas-runtime";
 import { isPureModelNodeType } from "./input-role";
-import { isShotPreviewNodeType } from "./shot-preview-node";
+import { isShotPreviewNode } from "./shot-preview-node";
 import { decideShotReferenceConnection, resolveShotReferenceSource, isShotReferenceEdgeKind, SHOT_REFERENCE_SCHEMA_VERSION } from "./shot-reference";
 
 export type Woohaa3CanvasConnectionNodeDataReader = { get: (nodeId: string) => Record<string, unknown> | undefined };
@@ -52,8 +52,8 @@ export function isValidWoohaa3CanvasConnection(
 
   // 拍摄镜头预览：归属线由派生呈现表达（D5），不进入普通边拓扑；唯一例外是
   // **专用镜头参考**——动态镜头预览可拉线到视频生成节点（D9，change 2026-10-15 任务 8.1）。
-  const sourceIsPreview = isShotPreviewNodeType(sourceNode.type);
-  const targetIsPreview = isShotPreviewNodeType(targetNode.type);
+  const sourceIsPreview = isShotPreviewNode(sourceNode.type, nodeDataOf(sourceNode.id, nodes, data));
+  const targetIsPreview = isShotPreviewNode(targetNode.type, nodeDataOf(targetNode.id, nodes, data));
   if (sourceIsPreview || targetIsPreview) {
     return shotReferenceDecision(connection, nodes, edges, data).ok;
   }
@@ -81,8 +81,8 @@ export function shotReferenceDecision(
   return decideShotReferenceConnection({
     sourceId,
     targetId,
-    sourceIsPreview: isShotPreviewNodeType(sourceNode?.type),
-    targetIsPreview: isShotPreviewNodeType(targetNode?.type),
+    sourceIsPreview: isShotPreviewNode(sourceNode?.type, reader(sourceId)),
+    targetIsPreview: isShotPreviewNode(targetNode?.type, reader(targetId)),
     sourceData: reader(sourceId),
     targetType: targetNode?.type,
     targetData: reader(targetId),
@@ -107,9 +107,9 @@ export function createWoohaa3CanvasEdge(
   const targetNode = nodes.find((node) => node.id === connection.target);
   if (!sourceNode || !targetNode) return null;
 
-  const source = isShotPreviewNodeType(sourceNode.type)
+  const source = isShotPreviewNode(sourceNode.type, nodeDataOf(sourceNode.id, nodes, data))
     ? resolveShotReferenceSource(sourceNode.id, nodeDataOf(sourceNode.id, nodes, data), id => nodeDataOf(id, nodes, data)) : null;
-  const kind = source?.kind === "static" ? "shot-image-reference" : resolveEdgeKind(sourceNode, targetNode);
+  const kind = source ? (source.kind === "static" ? "shot-image-reference" : "shot-reference") : resolveEdgeKind(sourceNode, targetNode);
   return {
     id: createHighEntropyId(`edge-${connection.source}-${connection.target}`),
     source: connection.source,
@@ -132,7 +132,7 @@ export function explainWoohaa3CanvasConnectionBlock(
   if (isValidWoohaa3CanvasConnection(connection, nodes, edges, data)) return null;
   const sourceNode = nodes.find((node) => node.id === connection.source);
   const targetNode = nodes.find((node) => node.id === connection.target);
-  if (sourceNode && targetNode && (isShotPreviewNodeType(sourceNode.type) || isShotPreviewNodeType(targetNode.type))) {
+  if (sourceNode && targetNode && (isShotPreviewNode(sourceNode.type, nodeDataOf(sourceNode.id, nodes, data)) || isShotPreviewNode(targetNode.type, nodeDataOf(targetNode.id, nodes, data)))) {
     const decision = shotReferenceDecision(connection, nodes, edges, data);
     return decision.ok ? "重复连线" : decision.reason;
   }
@@ -147,7 +147,6 @@ export function explainWoohaa3CanvasConnectionBlock(
 
 function resolveEdgeKind(sourceNode: Woohaa3CanvasConnectionNode, targetNode: Woohaa3CanvasConnectionNode): Woohaa3CanvasEdgeKind {
   // 镜头参考边：来源是拍摄镜头预览（D9）。目标必然是视频生成节点（由连接规则保证）。
-  if (isShotPreviewNodeType(sourceNode.type)) return "shot-reference";
   if (sourceNode.type !== "group" && targetNode.type !== "group") return "dependency";
   if (sourceNode.type === "group" && targetNode.type !== "group") return "input";
   return "reference";

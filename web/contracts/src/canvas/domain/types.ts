@@ -27,6 +27,8 @@ export type CanvasNodeInputMapping = {
 };
 
 export type CanvasNodeData = Woohaa3CanvasJsonObject & {
+  /** Neutral extension-owned lifecycle relation. Business payload stays opaque. */
+  managedBy?: import("../managed-node.js").ManagedNodeRelation;
   /** 组/片场自身的版本化展示模型；缺失时读取层使用默认值，不回写文档。 */
   groupAppearance?: GroupAppearance;
   /** 组的持久化展示状态；缺失为展开，不改变成员或展开尺寸。 */

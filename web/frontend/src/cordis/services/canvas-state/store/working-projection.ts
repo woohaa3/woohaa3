@@ -52,6 +52,7 @@ const NO_CANVAS = "画布尚未 hydrate，拒绝变更";
  * Working projection store。纯内存、可丢弃；不持有任何持久化能力。
  */
 export class WorkingProjectionStore {
+  constructor(private readonly lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver) {}
   private canonical: ServerCanvas | null = null;
   private pending: PendingBatch[] = [];
   private working: ServerCanvas | null = null;
@@ -123,7 +124,7 @@ export class WorkingProjectionStore {
       return { ok: false, code: rejection.code, message: rejection.message };
     }
     // 本地原子验证：用固定 submittedAt 应用在 working 上（与重放同一语义）。
-    const applied = applyCanvasCommands(base, input.commands, { now: input.submittedAt });
+    const applied = applyCanvasCommands(base, input.commands, { now: input.submittedAt, lifecycle: this.lifecycle });
     if (!applied.ok) {
       this.rejections = [...this.rejections, {
         commandId: input.commandId,
@@ -251,7 +252,7 @@ export class WorkingProjectionStore {
         survivors.push(batch);
         continue;
       }
-      const applied = applyCanvasCommands(working, batch.commands, { now: batch.submittedAt });
+      const applied = applyCanvasCommands(working, batch.commands, { now: batch.submittedAt, lifecycle: this.lifecycle });
       if (!applied.ok) {
         // 远端变化导致无法重放：blocked，不把部分结果加入 working。
         batch.state = "blocked";

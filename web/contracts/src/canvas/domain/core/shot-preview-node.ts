@@ -8,6 +8,8 @@
  * 预览节点是内部类型，不在普通「新建节点」菜单暴露；其稳定身份与归属闭包见
  * `canvas/film-set-shot-preview.ts`（codec、SHA-256 身份与布局纯函数）。
  */
+import { managedNodeRelationOf } from "../../managed-node.js";
+
 export const FILM_SET_SHOT_PREVIEW_NODE_TYPE = "film-set-shot-preview" as const;
 
 /** 稳定节点 ID 前缀（`shot-preview:` + 完整 SHA-256 的 base64url，固定 43 字符）。 */
@@ -22,6 +24,12 @@ export const SHOT_PREVIEW_ID_ENCODED_LENGTH = 43;
 /** 是否为拍摄镜头预览节点类型（只按 canonical type 判别，不看归属数据）。 */
 export function isShotPreviewNodeType(type: string | undefined): boolean {
   return type === FILM_SET_SHOT_PREVIEW_NODE_TYPE;
+}
+
+/** Canonical media retains shot reference semantics after the legacy type upgrade. */
+export function isShotPreviewNode(type: string | undefined, data: unknown): boolean {
+  return isShotPreviewNodeType(type)
+    || ((type === "image" || type === "video") && managedNodeRelationOf(data)?.extensionId === "film-set");
 }
 
 /** 是否为本画布中合法形态的预览节点 ID（前缀 + 固定长度 base64url）。 */

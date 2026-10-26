@@ -14,6 +14,8 @@
  * 「视觉内容身份 + 录制 profile」缓存，并在下游执行准备阶段冻结版本后解析（见任务 8.3–8.7）。
  */
 
+import { managedNodeRelationOf } from "../../managed-node.js";
+
 /** 镜头参考映射角色（目标节点的 `inputMapping[].role`）。 */
 export const SHOT_REFERENCE_ROLE = "shot_reference" as const;
 export const SHOT_IMAGE_REFERENCE_ROLE = "shot_image_reference" as const;
@@ -80,6 +82,8 @@ export type ShotReferenceSourceShape = {
 };
 
 function readOwnership(nodeData: Record<string, unknown> | undefined): { filmSetNodeId: string; clipId: string } | null {
+  const relation = managedNodeRelationOf(nodeData);
+  if (relation?.extensionId === "film-set") return { filmSetNodeId: relation.ownerNodeId, clipId: relation.entityId };
   const ownership = nodeData?.shotPreview;
   if (!ownership || typeof ownership !== "object" || Array.isArray(ownership)) return null;
   const record = ownership as Record<string, unknown>;

@@ -7,6 +7,7 @@ import { createFilmSetConversionClient } from "../../../authoring/browser/film-s
 import { createFilmSetConversionController, type FilmSetConversionController } from "../../../authoring/browser/film-set-conversion/controller.js";
 import { resolveFilmSetConversionAvailability } from "../../../authoring/browser/film-set-conversion/view.js";
 import { createFilmSetConversionPreferenceStore } from "../../../authoring/browser/film-set-conversion/preference.js";
+import { ownsShotMedia } from "../../../state/shared/managed-shot-media.js";
 
 /**
  * 「转为片场」入口注册（toolbar / 右键菜单 / 聚焦标题栏）
@@ -106,8 +107,12 @@ export function installFilmSetConversionEntries(ctx: ConversionContext): () => v
     id: "film-set-conversion",
     owner: "film-set",
     order: -10,
-    // Visibility follows supported source types; readiness and write permission only disable the action.
-    available: ({ nodeType }) => readFilmSetConversionSourceKind(nodeType) !== null,
+    // Hide the action for the extension's own managed shot media; other supported
+    // sources remain visible while readiness and write permission only disable it.
+    available: ({ nodeId, nodeType }) => {
+      if (readFilmSetConversionSourceKind(nodeType) === null) return false;
+      return !ownsShotMedia(deps.getCanvas(), nodeId);
+    },
     describe: ({ nodeId, nodeType, writable }) => {
       const availability = resolveFilmSetConversionAvailability({ canvas: deps.getCanvas(), nodeId, nodeType, writable });
       return {
@@ -130,6 +135,7 @@ export function installFilmSetConversionEntries(ctx: ConversionContext): () => v
     priority: 12,
     items: ({ nodeId, connectFrom }: ContextMenuContext) => {
       if (!nodeId || connectFrom) return [];
+      if (ownsShotMedia(deps.getCanvas(), nodeId)) return [];
       const node = deps.getCanvas()?.document.nodes.find((entry) => entry.id === nodeId);
       if (!node) return [];
       const availability = resolveFilmSetConversionAvailability({ canvas: deps.getCanvas(), nodeId, nodeType: node.type, writable: deps.controller.state.isWritable() });

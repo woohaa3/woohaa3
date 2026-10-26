@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 拍摄镜头预览生命周期与保护测试
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 2.1–2.3）。
@@ -8,16 +9,16 @@
 import { describe, expect, it } from "vitest";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { filmSetClipPrecondition, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";
 import { decodeFilmSetNodeData } from "./canvas-node-model.js";
 import {
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
-  decodeShotPreviewData,
   shotPreviewNodeId
 } from "./film-set-shot-preview.js";
+import { managedNodeRelationOf } from "./managed-node.js";
 
 const NOW = "2026-10-15T00:00:00.000Z";
 
@@ -56,7 +57,7 @@ function materialize(canvas: ServerCanvas): ServerCanvas {
 }
 
 function previewNodes(canvas: ServerCanvas) {
-  return canvas.document.nodes.filter((node) => node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE);
+  return canvas.document.nodes.filter((node) => managedNodeRelationOf(canvas.nodeData[node.id])?.extensionId === "film-set");
 }
 
 function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = "clip-1") {
@@ -79,9 +80,10 @@ describe("预览闭包随源镜头生命周期维护（任务 2.1）", () => {
     const previews = previewNodes(canvas);
     expect(previews).toHaveLength(1);
     expect(previews[0]!.id).toBe(PREVIEW_ID);
-    const ownership = decodeShotPreviewData(canvas.nodeData[PREVIEW_ID]);
-    expect(ownership.ok).toBe(true);
-    if (ownership.ok) expect(ownership.value.shotPreview).toEqual({ schemaVersion: 1, filmSetNodeId: "film", clipId: "clip-1" });
+    expect(previews[0]!.type).toBe("video");
+    expect(managedNodeRelationOf(canvas.nodeData[PREVIEW_ID])).toEqual({ schemaVersion: 1, extensionId: "film-set", ownerNodeId: "film", entityId: "clip-1", lifecycle: "owner-managed" });
+    expect(canvas.nodeData[PREVIEW_ID].mediaContent).toEqual({ providerId: "film-set.shot", schemaVersion: 1, payload: { filmSetNodeId: "film", clipId: "clip-1" } });
+    expect(canvas.nodeData[PREVIEW_ID].shotPreview).toBeUndefined();
 
     const again = expectOk(apply(canvas, [{ type: "canvas.setTitle", title: "改名" }]));
     expect(previewNodes(again)).toHaveLength(1);
@@ -162,7 +164,7 @@ describe("预览保护（任务 2.2）", () => {
     const canvas = materialize(withFilmSet());
     const result = apply(canvas, [{ type: "node.remove", nodeIds: [PREVIEW_ID] }]);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.rejection.code).toBe("invalid-shot-preview");
+    if (!result.ok) expect(result.rejection.code).toBe("invalid-command");
   });
 
   it("拒绝伪造预览新增（缺归属或 ID 不匹配）", () => {
@@ -179,14 +181,13 @@ describe("预览保护（任务 2.2）", () => {
     if (!mismatched.ok) expect(mismatched.rejection.code).toBe("invalid-shot-preview");
   });
 
-  it("拒绝改写预览归属与写入媒体/任务字段", () => {
+  it("拒绝改写预览归属，允许媒体缓存写回并保留来源", () => {
     const canvas = materialize(withFilmSet());
     const rewrite = apply(canvas, [{ type: "nodeData.patch", nodeId: PREVIEW_ID, value: { shotPreview: { schemaVersion: 1, filmSetNodeId: "film", clipId: "other" } } }]);
     expect(rewrite.ok).toBe(false);
     const media = apply(canvas, [{ type: "nodeData.patch", nodeId: PREVIEW_ID, value: { outputAssetId: "asset-1" } }]);
-    expect(media.ok).toBe(false);
-    const task = apply(canvas, [{ type: "nodeData.patch", nodeId: PREVIEW_ID, value: { taskStatus: "processing" } }]);
-    expect(task.ok).toBe(false);
+    expect(media.ok).toBe(true);
+    if (media.ok) expect(media.canvas.nodeData[PREVIEW_ID]).toEqual({ ...canvas.nodeData[PREVIEW_ID], outputAssetId: "asset-1" });
   });
 
   it("拒绝独立改变预览归属分组", () => {

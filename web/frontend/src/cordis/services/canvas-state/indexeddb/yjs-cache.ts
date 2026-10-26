@@ -15,6 +15,8 @@ export type YjsCacheMetadata = {
   canvasId: string;
   /** 共享 Y.Doc 格式版本；与当前格式不匹配的 cache 必须丢弃。 */
   formatVersion: string;
+  /** Command/normalization capability that produced this cache. Missing means legacy. */
+  protocolVersion?: number;
   /** 服务端 room epoch；不一致说明 cache 属于旧房间，必须丢弃。 */
   roomEpoch: string | null;
   /** cache 覆盖到的业务 revision。 */
@@ -57,11 +59,14 @@ export class YjsCacheError extends Error {
 /** 校验 cache 是否可用于当前会话；不匹配时调用方必须丢弃 cache。 */
 export function validateYjsCache(
   load: YjsCacheLoadResult | null,
-  expected: { formatVersion: string; roomEpoch: string | null }
+  expected: { formatVersion: string; roomEpoch: string | null; protocolVersion?: number }
 ): YjsCacheValidation {
   if (!load) return { ok: false, reason: "没有本地 Yjs cache" };
   if (load.metadata.formatVersion !== expected.formatVersion) {
     return { ok: false, reason: `cache 格式 ${load.metadata.formatVersion} 与当前 ${expected.formatVersion} 不匹配` };
+  }
+  if (expected.protocolVersion !== undefined && load.metadata.protocolVersion !== expected.protocolVersion) {
+    return { ok: false, reason: "cache 同步能力已过期，须重新同步" };
   }
   // roomEpoch 为 null 表示客户端尚无 epoch（首次连接），此时接受 cache。
   if (

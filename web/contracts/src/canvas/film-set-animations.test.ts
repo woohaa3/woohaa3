@@ -1,5 +1,6 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 import { describe, expect, it } from "vitest";
 import { filmSetNodeDataFields, animationSnapshotHash, createFilmSetSnapshot, createMotionSnapshot } from "./animation-snapshot.js";

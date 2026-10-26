@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 拍摄镜头预览闭包的**全部权威写入口**回归测试
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 2.6）。
@@ -9,13 +10,14 @@
 import { describe, expect, it } from "vitest";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 import { filmSetClipPrecondition, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";
 import { decodeFilmSetNodeData, type FilmSetNodeData } from "./canvas-node-model.js";
 import { staticShotCameraMotion, type FilmSetAnimationClip } from "./film-set-animations.js";
 import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewNodeId } from "./film-set-shot-preview.js";
+import { managedNodeRelationOf } from "./managed-node.js";
 
 const NOW = "2026-10-15T00:00:00.000Z";
 const CLIP_1 = "clip-1";
@@ -40,7 +42,7 @@ function animation(canvas: ServerCanvas): FilmSetNodeData {
 }
 
 function preview(canvas: ServerCanvas, nodeId: string) {
-  return canvas.document.nodes.find((node) => node.id === nodeId && node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE);
+  return canvas.document.nodes.find((node) => node.id === nodeId && managedNodeRelationOf(canvas.nodeData[node.id])?.extensionId === "film-set");
 }
 
 function staticClip(id: string, name: string): FilmSetAnimationClip {
@@ -130,7 +132,7 @@ describe("转换占位成功写回（任务 2.6）", () => {
       node: { id: "film", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 }, width: 320, height: 240 },
       nodeData: canonicalFilmSetFields(placeholder)
     }]);
-    expect(created.document.nodes.filter((node) => node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE)).toHaveLength(0);
+    expect(created.document.nodes.filter((node) => managedNodeRelationOf(created.nodeData[node.id])?.extensionId === "film-set")).toHaveLength(0);
 
     // 成功写回完整片场定义（含两个镜头）。
     const full = createFilmSetSnapshot({
@@ -167,7 +169,7 @@ describe("片场粘贴/导入批次（任务 2.6）", () => {
     const pastedPreview = preview(pasted, shotPreviewNodeId("film", "clip-pasted"));
     expect(pastedPreview).toBeDefined();
     const ownership = pastedPreview ? pasted.nodeData[pastedPreview.id] : undefined;
-    expect(ownership).toMatchObject({ shotPreview: { schemaVersion: 1, filmSetNodeId: "film", clipId: "clip-pasted" } });
+    expect(ownership).toMatchObject({ managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: "film", entityId: "clip-pasted", lifecycle: "owner-managed" }, mediaContent: { providerId: "film-set.shot", payload: { filmSetNodeId: "film", clipId: "clip-pasted" } } });
   });
 
   it("携带旧画布归属的预览节点不能被粘贴进新画布（整批拒绝）", () => {

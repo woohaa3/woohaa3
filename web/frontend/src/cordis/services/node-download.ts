@@ -5,6 +5,7 @@ import { downloadFilename, saveDownload } from "./file-download.js";
 type DownloadSnapshot = { busy: boolean; error: boolean; text: string } | null;
 type DownloadOptions = {
   getCanvas(): ServerCanvas | null;
+  mediaContent?: Pick<import("../../extension-api/media-content.js").MediaContentService, "resolve">;
   /** 第三参数是画布身份：浏览器读画布媒体时带 `?canvas=` 提示。 */
   readMedia?: (asset: StoredAsset, signal: AbortSignal, canvasId?: string) => Promise<Blob>;
   exportModel?: (source: string, version: unknown, signal: AbortSignal) => Promise<Blob>;
@@ -48,7 +49,9 @@ export class NodeDownloadService {
         const exporter = this.options.exportModel ?? (await import("./model-download.js")).downloadModelBlob;
         blob = await exporter(data.modelScript, data.modelScriptVersion, abort.signal);
       } else if (node.type === "image" || node.type === "video") {
-        const asset = canvas.assets.find(asset => asset.id === data?.outputAssetId);
+        const asset = data?.mediaContent
+          ? await this.options.mediaContent?.resolve(nodeId, "resolvePreview", `download:${crypto.randomUUID()}`)
+          : canvas.assets.find(asset => asset.id === data?.outputAssetId);
         if (!asset || asset.status !== "ready" || asset.mediaKind !== node.type) throw new Error("资源尚未就绪，暂时无法下载");
         blob = await (this.options.readMedia ?? readCanonicalMedia)(asset, abort.signal, canvas.id);
         if (!blob.type.startsWith(`${node.type}/`)) throw new Error("资源返回的文件类型不正确，请重试");

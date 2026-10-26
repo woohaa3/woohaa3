@@ -15,7 +15,7 @@
 import type { EditOperation, EditPrecondition } from "./edit-command.js";
 import { decodeFilmSetNodeData, type FilmSetNodeData } from "./canvas-node-model.js";
 import { isFilmSetNode } from "./domain/core/composite-asset-identity.js";
-import { isShotPreviewNodeType, FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "./domain/core/shot-preview-node.js";
+import { isShotPreviewNode } from "./domain/core/shot-preview-node.js";
 import { absentFilmSetClipHash, filmSetClipStateHash } from "./film-set-clip-edit.js";
 import { shotPreviewNodeId } from "./film-set-shot-preview.js";
 import { filmSetAnimationsOf } from "./film-set-clip-view.js";
@@ -133,14 +133,14 @@ function pushPreviewAdd(
   clipId: string
 ): void {
   const previewId = shotPreviewNodeId(filmSetNodeId, clipId);
-  const node = layoutSource.document.nodes.find((entry) => entry.id === previewId && isShotPreviewNodeType(entry.type));
+  const node = layoutSource.document.nodes.find((entry) => entry.id === previewId && isShotPreviewNode(entry.type, layoutSource.nodeData[entry.id]));
   if (!node) return;
   const nodeData = layoutSource.nodeData[previewId] as CanvasNodeData | undefined;
   operations.push({
     kind: "node-add",
     node: {
       id: node.id,
-      type: FILM_SET_SHOT_PREVIEW_NODE_TYPE,
+      type: node.type,
       position: { ...node.position },
       ...(node.width !== undefined ? { width: node.width } : {}),
       ...(node.height !== undefined ? { height: node.height } : {}),
@@ -156,7 +156,7 @@ function pushPreviewAdd(
 /** 读取画布中某个既有预览节点（用于删除镜头前保护归属与布局）。 */
 function existingPreview(canvas: ServerCanvas, filmSetNodeId: string, clipId: string) {
   const previewId = shotPreviewNodeId(filmSetNodeId, clipId);
-  return canvas.document.nodes.find((entry) => entry.id === previewId && isShotPreviewNodeType(entry.type));
+  return canvas.document.nodes.find((entry) => entry.id === previewId && isShotPreviewNode(entry.type, canvas.nodeData[entry.id]));
 }
 
 /**

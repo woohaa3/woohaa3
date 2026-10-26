@@ -43,6 +43,7 @@ export type CommandTransactionOutcome =
     };
 
 export type ApplyCommandTransactionOptions = {
+  lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   /** 权威 authoring Y.Doc（应为 published 的可写副本）。 */
   doc: Y.Doc;
   batch: CanvasCommandBatch;
@@ -74,7 +75,7 @@ export async function applyCommandTransaction(
   const current = exported.canvas;
 
   // 2) 复用前置 change 的纯 reducer：Yjs 路径与 remote-CAS 路径共享同一命令语义。
-  const applied = applyCanvasCommands(current, batch.commands, { now });
+  const applied = applyCanvasCommands(current, batch.commands, { now, lifecycle: options.lifecycle });
   if (!applied.ok) {
     return {
       ok: false,

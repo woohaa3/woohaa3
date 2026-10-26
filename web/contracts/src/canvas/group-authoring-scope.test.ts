@@ -1,6 +1,7 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { compileAgentPlan } from "./canvas-script/planner/compile.js";
 import { canvasGroupMembers, projectCanvasGroup, validateCanvasGroupChange } from "./group-authoring-scope.js";
 import { collectWoohaa3CanvasRemovalIds } from "./domain/core/node-removal.js";

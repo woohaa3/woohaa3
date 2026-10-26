@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 模型镜头子资源契约测试
  * （change: add-model-editor-gizmo-shot-capture，任务 1.1 / 1.3）。
@@ -34,7 +35,7 @@ import {
   type ModelCamera
 } from "./model-cameras.js";
 import { sanitizeNodeDataForClipboard, sanitizeRuntimeNodeConfigPatch } from "./domain/runtime-node-data.js";
-import { applyCanvasCommands } from "./command-reducer.js";
+
 import { createEmptyWoohaa3ServerCanvas } from "./domain/aggregate.js";
 
 const NOW = "2026-09-27T00:00:00.000Z";

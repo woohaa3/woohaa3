@@ -9,6 +9,7 @@ export function createMediaContentService(options: {
   submit(commands: CanvasCommand[], requestId: string): Promise<void>;
 }): MediaContentService & { dispose(): void } {
   const providers = new Map<string, MediaContentProvider>();
+  const providerSubscriptions = new Map<string, () => void>();
   const states = new Map<string, MediaContentState>();
   const attempts = new Map<string, string>();
   const controllers = new Map<AbortController, { nodeId: string; current(): boolean }>();
@@ -76,8 +77,9 @@ export function createMediaContentService(options: {
       catch (error) {
         states.set(node.id, { ...states.get(node.id), status: "unavailable", diagnostic: String(error) }); continue;
       }
-      const fingerprint = identity([generation, ref, source.sourceIdentity]);
-      if (attempts.get(node.id) === fingerprint || !options.writable()) continue;
+      const writable = options.writable();
+      const fingerprint = identity([generation, ref, source.sourceIdentity, writable]);
+      if (attempts.get(node.id) === fingerprint) continue;
       attempts.set(node.id, fingerprint);
       const old = states.get(node.id);
       states.set(node.id, { ...old, status: "pending", sourceIdentity: source.sourceIdentity });
@@ -85,6 +87,14 @@ export function createMediaContentService(options: {
         try {
           const preview = await resolve(node.id, "resolvePreview", `preview:${source.sourceIdentity}`);
           if (preview && !disposed && attempts.get(node.id) === fingerprint) { states.set(node.id, { status: "pending", asset: preview, sourceIdentity: source.sourceIdentity }); notify(); }
+          if (!writable) {
+            if (!disposed && attempts.get(node.id) === fingerprint) {
+              states.set(node.id, preview ? { status: "ready", asset: preview, sourceIdentity: source.sourceIdentity }
+                : { status: "unavailable", diagnostic: "当前版本尚无可读取的媒体缓存", sourceIdentity: source.sourceIdentity });
+              notify();
+            }
+            return;
+          }
           const asset = await resolve(node.id, "materialize", `live:${source.sourceIdentity}`);
           const latest = options.canvas();
           if (!asset || disposed || latest?.id !== canvas!.id || attempts.get(node.id) !== fingerprint) return;
@@ -107,9 +117,24 @@ export function createMediaContentService(options: {
     if (disposed || providers.has(provider.providerId)) throw Error(`provider-id-conflict: ${provider.providerId}`);
     if (!provider.owner || (provider.providerId !== "asset" && !provider.providerId.startsWith(`${provider.owner}.`)) || !provider.schemaVersions.length || provider.schemaVersions.some(v => !Number.isSafeInteger(v) || v < 1) || !provider.mediaKinds.length || provider.mediaKinds.some(v => v !== "image" && v !== "video")) throw Error("provider-invalid-registration");
     providers.set(provider.providerId, provider); generation++; attempts.clear(); schedule();
+    if (provider.subscribe) providerSubscriptions.set(provider.providerId, provider.subscribe(() => {
+      if (disposed || providers.get(provider.providerId) !== provider) return;
+      const canvas = options.canvas();
+      for (const node of canvas?.document.nodes ?? []) {
+        if (canvas!.nodeData[node.id]?.mediaContent?.providerId !== provider.providerId) continue;
+        const status = states.get(node.id)?.status;
+        if (status === "failed" || status === "unavailable") {
+          attempts.delete(node.id);
+          for (const key of receipts.keys()) if (JSON.parse(key)[1] === node.id) receipts.delete(key);
+        }
+      }
+      schedule();
+    }));
     let active = true;
     return () => {
       if (!active) return; active = false;
+      providerSubscriptions.get(provider.providerId)?.();
+      providerSubscriptions.delete(provider.providerId);
       if (providers.get(provider.providerId) === provider) providers.delete(provider.providerId);
       // Invalidating all in-flight requests is safe and prevents released handles being published.
       for (const controller of controllers.keys()) controller.abort();
@@ -153,11 +178,14 @@ export function createMediaContentService(options: {
       }
       for (const { id, asset } of snapshots) {
         delete frozen.nodeData[id].mediaContent;
+        // A copied provider-backed node is a frozen ordinary media node. Its
+        // extension ownership must not follow the copy into another canvas.
+        delete frozen.nodeData[id].managedBy;
         frozen.nodeData[id].outputAssetId = asset.id;
         frozen.assets = [...frozen.assets.filter(a => a.id !== asset.id), asset];
       }
       return frozen;
     },
-    dispose() { if (disposed) return; disposed = true; unsubscribe(); for (const c of controllers.keys()) c.abort(); for (const p of providers.values()) p.dispose?.(); providers.clear(); receipts.clear(); requests.clear(); states.clear(); attempts.clear(); listeners.clear(); },
+    dispose() { if (disposed) return; disposed = true; unsubscribe(); for (const stop of providerSubscriptions.values()) stop(); providerSubscriptions.clear(); for (const c of controllers.keys()) c.abort(); for (const p of providers.values()) p.dispose?.(); providers.clear(); receipts.clear(); requests.clear(); states.clear(); attempts.clear(); listeners.clear(); },
   };
 }

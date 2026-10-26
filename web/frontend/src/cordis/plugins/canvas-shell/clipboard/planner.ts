@@ -11,7 +11,7 @@
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { filmSetObjectOwnershipOf, filmSetObjectContainerId, filmSetObjectModelNodeId, filmSetObjectContainerData, createHighEntropyId, remapFilmSetItemIds, decodeFilmSetNodeData, canonicalFilmSetFields, canonicalShotPreviewFields, filmSetAnimationsOf, cloneFilmSetAnimations, LEGACY_FILM_SET_ANIMATION_FIELDS, isFilmSetNode, shotPreviewNodeId, shotPreviewOwnershipOf, SHOT_PREVIEW_SCHEMA_VERSION, FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "@woohaa3/contracts";
+import { createHighEntropyId, managedNodeRelationOf, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -34,6 +34,7 @@ export type PasteAnchor =
 export type PlanPasteOptions = {
   /** 当前规范画布（用于过滤失效入边）。 */
   canvas: ServerCanvas;
+  lifecycle?: ManagedNodeLifecycleResolver;
   payload: CanvasCopyPayload;
   anchor: PasteAnchor;
   /** 当前本地视口（视口是各浏览器本地状态，不在规范画布内）。 */
@@ -130,65 +131,29 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
     idMap.set(node.id, makeId(node.type, index));
   });
 
-  // 1b. 片场内部 clipId 映射与预览**派生身份**重算
-  //     （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.5 / design D2/D3）。
-  //     clipId 映射先算一次并复用：nodeData 重写与预览归属必须落到同一份新 clipId，且不得重复
-  //     调用 makeId（默认实现会推进模块级序列，重复调用会产生不同 ID）。
-  const filmSetClipIds = new Map<string, Map<string, string>>();
-  const filmSetItemIds = new Map<string, Map<string, string>>();
-  for (const node of payload.nodes) {
-    const data = payload.nodeData[node.id];
-    if (!data || !isFilmSetNode(node.type, data)) continue;
-    const decoded = decodeFilmSetNodeData(data);
-    if (!decoded.ok) continue;
-    filmSetItemIds.set(node.id, new Map(decoded.value.filmSetContent.items.map((item, index) => [item.id, makeId("film-object", index)])));
-    const clips = filmSetAnimationsOf(decoded.value).clips;
-    filmSetClipIds.set(node.id, new Map(clips.map((clip, index) => [clip.id, makeId("clip", index)])));
-  }
-  // 预览节点 ID 是 (filmSetNodeId, clipId) 的纯派生值：粘贴后所属片场与镜头都是新 ID，
-  // 必须重算节点 ID 与归属。源片场不在载荷内（不应发生）时丢弃该预览，不产生悬空归属。
-  const precomputedPreviewData = new Map<string, import("@woohaa3/contracts").CanvasNodeData>();
-  for (const node of payload.nodes) {
-    const object = filmSetObjectOwnershipOf(payload.nodeData[node.id]);
-    if (object) {
-      const newOwner = idMap.get(object.filmSetNodeId), newItem = filmSetItemIds.get(object.filmSetNodeId)?.get(object.itemId);
-      if (!newOwner || !newItem) { idMap.delete(node.id); continue; }
-      // The nested model3d child has the same ownership record as its outer shell,
-      // but keeps its own stable derived identity and complete model snapshot.
-      const isModelChild = node.type === "model3d"
-        && node.id === filmSetObjectModelNodeId(object.filmSetNodeId, object.itemId);
-      idMap.set(node.id, isModelChild
-        ? filmSetObjectModelNodeId(newOwner, newItem)
-        : filmSetObjectContainerId(newOwner, newItem));
-      precomputedPreviewData.set(node.id, isModelChild
-        ? { ...payload.nodeData[node.id], filmSetObject: { schemaVersion: 1, filmSetNodeId: newOwner, itemId: newItem } } as import("@woohaa3/contracts").CanvasNodeData
-        : filmSetObjectContainerData(newOwner, newItem));
-      continue;
+  // Trusted extensions remap their business entities and content references.
+  const remappedData = new Map<string, import("@woohaa3/contracts").CanvasNodeData>();
+  try {
+    for (const adapter of options.lifecycle?.implementations() ?? []) {
+      for (const entry of adapter.remapCopy?.({ nodes: payload.nodes, nodeData: payload.nodeData, nodeIds: new Map(idMap), createId: makeId }) ?? []) {
+        if (!idMap.has(entry.sourceNodeId) || remappedData.has(entry.sourceNodeId)) return null;
+        idMap.set(entry.sourceNodeId, entry.nodeId);
+        remappedData.set(entry.sourceNodeId, entry.data);
+      }
     }
-    const ownership = shotPreviewOwnershipOf(payload.nodeData[node.id]);
-    if (!ownership) continue;
-    const newOwner = idMap.get(ownership.filmSetNodeId);
-    const newClipId = filmSetClipIds.get(ownership.filmSetNodeId)?.get(ownership.clipId);
-    if (!newOwner || !newClipId) {
-      idMap.delete(node.id);
-      continue;
-    }
-    idMap.set(node.id, shotPreviewNodeId(newOwner, newClipId));
-    const fields = canonicalShotPreviewFields({
-      shotPreview: { schemaVersion: SHOT_PREVIEW_SCHEMA_VERSION, filmSetNodeId: newOwner, clipId: newClipId }
-    }) as import("@woohaa3/contracts").CanvasNodeData;
-    precomputedPreviewData.set(node.id, fields);
+  } catch { return null; }
+  // Missing extension support is explicit: never create a partial owner closure.
+  for (const node of payload.nodes) {
+    const relation = managedNodeRelationOf(payload.nodeData[node.id]);
+    if (relation && (!idMap.has(relation.ownerNodeId) || !remappedData.has(node.id))) return null;
   }
+  if (new Set(idMap.values()).size !== idMap.size) return null;
 
   // 2. 计算包围盒中心，用于对齐锚点。
   //    包围盒与偏移都必须在**绝对坐标**下计算：成员节点保存的是相对父级的局部坐标，
   //    直接对它们加偏移会把子树整体推走（change: add-canvas-node-grouping，design D6）。
   //    预览节点排在源节点之后：`node.add` 校验源片场已存在（design D2/D3）。
-  const orderedNodes = [
-    ...payload.nodes.filter((node) => node.type !== FILM_SET_SHOT_PREVIEW_NODE_TYPE),
-    ...payload.nodes.filter((node) => node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE)
-  ];
-  const absolute = toAbsoluteNodes(orderedNodes);
+  const absolute = toAbsoluteNodes(payload.nodes, payload.nodeData);
   const bounds = boundingBox(absolute.map((entry) => entry.node));
   const anchor = resolveAnchorPosition(options.anchor, options.viewport);
   const dx = anchor.x - (bounds.minX + bounds.maxX) / 2;
@@ -204,13 +169,12 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
 
   // 3. 节点：parent 重写为新 ID；只有**顶层节点**承载整体平移，成员保持相对坐标。
   //    父节点先于子节点输出（拓扑排序），保证服务端 applyCommand 时 parent 存在。
-  //    预览节点的归属必须在**同一条** `node.add` 内携带：`nodeData.patch` 对携带 `shotPreview`
-  //    的值一律拒绝（归属只能随源生命周期变化，design D2）。
+  //    扩展重映射的数据随 node.add 一起提交，可信生命周期复核完整闭包。
   for (const { node, isTopLevel } of absolute) {
     const newId = idMap.get(node.id);
     if (newId === undefined) continue;
     newNodeIds.push(newId);
-    const previewData = precomputedPreviewData.get(node.id);
+    const mappedData = remappedData.get(node.id);
     commands.push({
       type: "node.add",
       node: {
@@ -226,21 +190,19 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
           : {}),
         ...(node.zIndex !== undefined ? { zIndex: node.zIndex } : {})
       },
-      ...(previewData ? { nodeData: previewData } : {})
+      ...(mappedData ? { nodeData: mappedData } : {})
     });
   }
 
   // 4. nodeData：清理后的用户配置。放在节点之后，保证 node 存在。
-  //    片场（composite-asset）的内部对象与镜头 ID 按节点稳定重映射，媒体资产共享不复制
-  //    （change: 2026-10-08-make-film-set-model-only，design D3）。
-  //    预览节点的归属已随 `node.add` 写入，这里跳过。
+  //    扩展重映射的数据已随 node.add 写入，其它配置保持通用 patch 语义。
   for (const node of payload.nodes) {
-    if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || precomputedPreviewData.has(node.id)) continue;
+    if (remappedData.has(node.id)) continue;
     const data = payload.nodeData[node.id];
     if (!data || Object.keys(data).length === 0) continue;
     const newId = idMap.get(node.id);
     if (newId === undefined) continue;
-    const remapped = isFilmSetNode(node.type, data) ? remapFilmSetNodeData(data, filmSetItemIds.get(node.id), filmSetClipIds.get(node.id)) : data;
+    const remapped = data;
     if (!remapped) continue;
     commands.push({
       type: "nodeData.patch",
@@ -329,7 +291,7 @@ function boundingBox(nodes: readonly CopyNode[]): {
   return { minX, minY, maxX, maxY };
 }
 
-function orderParentsFirst(nodes: readonly CopyNode[]): CopyNode[] {
+function orderParentsFirst(nodes: readonly CopyNode[], nodeData: CanvasCopyPayload["nodeData"]): CopyNode[] {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const result: CopyNode[] = [];
   const visiting = new Set<string>();
@@ -339,6 +301,9 @@ function orderParentsFirst(nodes: readonly CopyNode[]): CopyNode[] {
     visiting.add(node.id);
     const parent = node.parentId ? byId.get(node.parentId) : undefined;
     if (parent) visit(parent);
+    const relation = managedNodeRelationOf(nodeData[node.id]);
+    const owner = relation ? byId.get(relation.ownerNodeId) : undefined;
+    if (owner) visit(owner);
     visiting.delete(node.id);
     done.add(node.id);
     result.push(node);
@@ -354,9 +319,9 @@ function orderParentsFirst(nodes: readonly CopyNode[]): CopyNode[] {
  * 成员节点保存的是相对 parent 的局部坐标，平移必须只作用于顶层，
  * 否则嵌套子树会被偏移两次。父级先于子级输出，保证服务端 `node.add` 时 parent 已存在。
  */
-function toAbsoluteNodes(nodes: readonly CopyNode[]): Array<{ node: CopyNode; isTopLevel: boolean }> {
+function toAbsoluteNodes(nodes: readonly CopyNode[], nodeData: CanvasCopyPayload["nodeData"]): Array<{ node: CopyNode; isTopLevel: boolean }> {
   const included = new Set(nodes.map((node) => node.id));
-  return orderParentsFirst(nodes).map((node) => ({
+  return orderParentsFirst(nodes, nodeData).map((node) => ({
     node,
     // parent 不在载荷内（被过滤）时该节点退化为顶层，需要承载平移。
     isTopLevel: node.parentId === undefined || !included.has(node.parentId)
@@ -365,34 +330,4 @@ function toAbsoluteNodes(nodes: readonly CopyNode[]): Array<{ node: CopyNode; is
 
 function cloneJson(value: Woohaa3CanvasJsonObject): Woohaa3CanvasJsonObject {
   return JSON.parse(JSON.stringify(value)) as Woohaa3CanvasJsonObject;
-}
-
-/**
- * 重写片场 nodeData 的内部对象与镜头 ID（复制片场语义，change design D3）。
- *
- * 媒体资产共享不复制；只分配新的内部对象 ID 与新的 clipId，保持来源引用（assetId）不变。
- * `clipIds` 由调用方预分配并复用：预览节点归属必须落到**同一份**新 clipId，因此这里不能重复
- * 调用 `makeId`（默认实现会推进模块级序列）。内容非法时返回 `null`（调用方跳过该 nodeData，
- * 不写入部分/悬空内容）。
- */
-function remapFilmSetNodeData(
-  data: Woohaa3CanvasJsonObject,
-  itemIds: Map<string, string> | undefined,
-  clipIds: Map<string, string> | undefined
-): Woohaa3CanvasJsonObject | null {
-  const decoded = decodeFilmSetNodeData(data);
-  if (!decoded.ok) return null;
-  if (!clipIds || !itemIds) return null;
-  const content = remapFilmSetItemIds(decoded.value.filmSetContent, item => itemIds.get(item.id)!);
-  const collection = cloneFilmSetAnimations(filmSetAnimationsOf(decoded.value));
-  collection.defaultClipId = collection.defaultClipId ? clipIds.get(collection.defaultClipId)! : null;
-  for (const clip of collection.clips) {
-    clip.id = clipIds.get(clip.id)!;
-    for (const binding of clip.bindings) binding.itemId = itemIds.get(binding.itemId)!;
-  }
-  const shared = { ...data };
-  if (Array.isArray(shared.filmSetObjectContainersHidden)) shared.filmSetObjectContainersHidden = shared.filmSetObjectContainersHidden.flatMap(id => typeof id === "string" && itemIds.has(id) ? [itemIds.get(id)!] : []);
-  delete shared.filmSetShotPreviewsHidden;
-  for (const field of LEGACY_FILM_SET_ANIMATION_FIELDS) delete shared[field];
-  return { ...shared, ...canonicalFilmSetFields({ ...decoded.value, filmSetContent: content, filmSetAnimations: collection }) } as Woohaa3CanvasJsonObject;
 }

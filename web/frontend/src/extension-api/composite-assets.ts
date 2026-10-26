@@ -1,5 +1,6 @@
 /** Trusted, scope-owned composite asset adapters. Business identity is never inferred from content. */
-import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene } from "@woohaa3/contracts";
+import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene, ManagedNodeLifecycleAdapter } from "@woohaa3/contracts";
+import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 export type CompositeAssetMediaSource = { planeId: string; nodeId: string; assetId: string; kind: "image" | "video"; playback?: ModelMediaTimeMap; sourceIdentity: string };
 /** A valid content projection may have no 3D resource; null prepare means unavailable. */
 export type CompositeAssetProjection = { resource?: PreparedModelResource; composition?: BevyCompositeAssetCompositionInfo; diagnostic?: string };
@@ -67,14 +68,18 @@ export type CompositeAssetAdapter = {
   awaitCaptureReady?(nodeId: string): Promise<boolean>;
   /** Business owner decides whether explicit frame capture is available for this target. */
   captureEnabled?(nodeId: string, cameraId: string): boolean;
+  /** Optional pure lifecycle planner for extension-owned managed media/entities. */
+  managedLifecycle?: ManagedNodeLifecycleAdapter;
   blocksFocusInput?(): boolean;
   keydown?(event: KeyboardEvent, focusedNodeId: string | null): boolean;
 };
 export class CompositeAssetRegistry {
+  readonly managedLifecycles = new ManagedNodeLifecycleRegistry();
   private revision = 0;
   getRevision = (): number => this.revision;
   private generations = new Map<string, number>();
   generation(extensionId: string): number { return this.generations.get(extensionId) ?? 0; }
+  lifecycle(extensionId: string): ManagedNodeLifecycleAdapter | null { return this.adapters.get(extensionId)?.managedLifecycle ?? null; }
   private adapters = new Map<string, CompositeAssetAdapter>();
   private listeners = new Set<() => void>();
   private projectionOwners = new Map<string, string>();
@@ -94,9 +99,11 @@ export class CompositeAssetRegistry {
       throw new Error(`复合资产几何质量策略未知：${String(adapter.geometryQuality)}`);
     }
     if (adapter.emptyPlaceholder !== undefined && adapter.emptyPlaceholder !== "brand-plinth-v1") throw new Error(`未知复合资产占位：${String(adapter.emptyPlaceholder)}`);
+    if (adapter.managedLifecycle && adapter.managedLifecycle.extensionId !== adapter.extensionId) throw Error("托管生命周期与注册扩展身份不一致");
+    const releaseLifecycle = adapter.managedLifecycle ? this.managedLifecycles.register(adapter.managedLifecycle) : () => {};
     this.adapters.set(adapter.extensionId, adapter); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate();
     let alive = true;
-    return () => { if (!alive) return; alive = false; if (this.adapters.get(adapter.extensionId) === adapter) { this.adapters.delete(adapter.extensionId); for (const [id, owner] of this.projectionOwners) if (owner === adapter.extensionId) { this.projections.delete(id); this.projectionOwners.delete(id); } for (const [id, result] of this.scopeResults) if (result.owner === adapter.extensionId) this.scopeResults.delete(id); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate(); } };
+    return () => { if (!alive) return; alive = false; releaseLifecycle(); if (this.adapters.get(adapter.extensionId) === adapter) { this.adapters.delete(adapter.extensionId); for (const [id, owner] of this.projectionOwners) if (owner === adapter.extensionId) { this.projections.delete(id); this.projectionOwners.delete(id); } for (const [id, result] of this.scopeResults) if (result.owner === adapter.extensionId) this.scopeResults.delete(id); this.generations.set(adapter.extensionId, this.generation(adapter.extensionId) + 1); this.invalidate(); } };
   }
   resolve(canvas: ServerCanvas | null, nodeId: string): CompositeAssetAdapter | null {
     const node = canvas?.document.nodes.find(node => node.id === nodeId);
@@ -276,5 +283,5 @@ export class CompositeAssetRegistry {
   keydown(event: KeyboardEvent, canvas: ServerCanvas | null, nodeId: string | null): boolean { return nodeId ? this.resolve(canvas, nodeId)?.keydown?.(event, nodeId) ?? false : false; }
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   invalidate = (): void => { this.revision += 1; for (const listener of this.listeners) listener(); };
-  clear(): void { this.adapters.clear(); this.projections.clear(); this.projectionOwners.clear(); this.scopeResults.clear(); this.invalidate(); }
+  clear(): void { this.managedLifecycles.clear(); this.adapters.clear(); this.projections.clear(); this.projectionOwners.clear(); this.scopeResults.clear(); this.invalidate(); }
 }

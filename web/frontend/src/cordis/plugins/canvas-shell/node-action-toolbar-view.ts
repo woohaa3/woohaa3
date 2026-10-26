@@ -67,6 +67,7 @@ export function resolveNodeDownloadAvailability(input: {
   canvas: ServerCanvas | null;
   nodeId: string;
   nodeType: string;
+  mediaContent?: Pick<import("../../../extension-api/media-content.js").MediaContentService, "state" | "describe">;
 }): { available: true } | { available: false; reason: string } {
   const { canvas, nodeId, nodeType } = input;
   if (!canvas) return { available: false, reason: "作品尚未加载，暂时无法下载" };
@@ -78,6 +79,14 @@ export function resolveNodeDownloadAvailability(input: {
       : { available: false, reason: "模型尚无可下载的内容" };
   }
   if (nodeType === "image" || nodeType === "video") {
+    if (data?.mediaContent) {
+      try {
+        const source = input.mediaContent?.describe(canvas, data.mediaContent, nodeType);
+        const state = input.mediaContent?.state(nodeId);
+        if (source && state?.status === "ready" && state.sourceIdentity === source.sourceIdentity && state.asset?.mediaKind === nodeType) return { available: true };
+      } catch { /* A missing provider or stale source is not downloadable. */ }
+      return { available: false, reason: "当前版本的资源尚未就绪，暂时无法下载" };
+    }
     const assetId = (data as { outputAssetId?: unknown } | undefined)?.outputAssetId;
     const asset = canvas.assets.find((entry) => entry.id === assetId);
     if (!asset || asset.status !== "ready" || asset.mediaKind !== nodeType) {

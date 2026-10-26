@@ -51,6 +51,8 @@ export type TextureAdmission = {
 export type TextureSyncOptions = {
   runtime: BevyRuntime;
   getCanvas: () => ServerCanvas | null;
+  /** Runtime-resolved provider asset for mediaContent nodes before persistence lands. */
+  getMediaAsset?: (nodeId: string) => StoredAsset | null | undefined;
   /**
    * 额外的 nodeId → 本地预览 URL（上传中的幽灵节点）。
    * 与规范资产一样走同一解码/上传路径，使 ghost 卡片内能显示本地图片。
@@ -172,8 +174,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       // 只处理图片节点；视频画面由 video-frame-session 负责（design D1/D2）。
       if (node.type !== "image") continue;
       const outputId = nodeData[node.id]?.outputAssetId;
-      if (typeof outputId !== "string") continue;
-      const asset = assets.get(outputId);
+      const asset = (typeof outputId === "string" ? assets.get(outputId) : undefined) ?? options.getMediaAsset?.(node.id);
       if (!asset || asset.status !== "ready") continue;
       // asset.url 是应用逻辑受控路径（`/api/media/<storageKey>`）；DOM/解码出口在此加一次公开
       // 前缀，并带上本画布的读提示（`?canvas=<id>`），让宿主按画布路由到远端存储。

@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../../../test-support/managed-shot-commands.js";
 /**
  * 桌面原生 Edit 菜单下的画布复制（change: fix-desktop-native-menu-clipboard-shortcuts）。
  *
@@ -9,7 +10,11 @@
  * 1. `#bevy-canvas` 必须可聚焦并在指针按下时取得焦点——否则 WebKit 不派发 DOM `copy`；
  * 2. `copy` 事件命中画布时写 `clipboardData` 并 `preventDefault`，编辑面与文本选区不介入。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { canonicalFilmSetFields, createFilmSetSnapshot, type ServerCanvas } from "@woohaa3/contracts";
+import { createMediaContentService } from "../../services/media-content.js";
+import { parseCanvasCopyPayload } from "./clipboard/payload.js";
+import { planCanvasPaste } from "./clipboard/planner.js";
 import { installInteractionController } from "./interaction-controller.js";
 import { MEMORY_CLIPBOARD_KEY } from "./interaction-keyboard.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
@@ -35,15 +40,16 @@ function clipboardData(): CopyClipboardData {
   };
 }
 
-function mountCopyTarget() {
-  woohaa3CanvasStore.getState().applyRemoteCanvas(canvasWith([{ id: "n1", x: 0, y: 0 }]));
+function mountCopyTarget(canvas = canvasWith([{ id: "n1", x: 0, y: 0 }]), mediaContent?: ReturnType<typeof createMediaContentService>) {
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
   const dom = harness();
   const { runtime } = runtimeCapturing();
   const controller = installInteractionController({
     canvas: dom.canvas,
     getRuntime: () => runtime,
     getSession: () => getSession() as never,
-    target: dom.target as never
+    target: dom.target as never,
+    mediaContent
   });
   return { dom, controller };
 }
@@ -54,6 +60,77 @@ function selectedNode() {
 }
 
 describe("画布 Mod+C（change: fix-desktop-native-menu-clipboard-shortcuts）", () => {
+  it("Delete filters a managed entity from another extension while preserving a mixed ordinary selection", () => {
+    const canvas = canvasWith([{ id: "n1", x: 0, y: 0 }, { id: "owner", x: 200, y: 0 }, { id: "ordinary", x: 400, y: 0 }]);
+    canvas.nodeData.n1 = { managedBy: { schemaVersion: 1, extensionId: "test", ownerNodeId: "owner", entityId: "entry", lifecycle: "owner-managed" } };
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+    nodeSelectionStore.setFromRuntime({ nodeIds: ["n1", "ordinary"], primaryNodeId: "n1", editingFocus: false }, new Set(["n1", "ordinary", "owner"]));
+    nodeSelectionStore.setKeyboardActive(true);
+    const dom = harness(), { runtime } = runtimeCapturing();
+    const edit = vi.fn(), error = vi.fn();
+    const controller = installInteractionController({ canvas: dom.canvas, getRuntime: () => runtime, getSession: () => getSession() as never, target: dom.target as never, onEditCommands: edit, onInteractionError: error });
+    dom.fireKey("keydown", { key: "Delete" });
+    expect(edit).toHaveBeenCalledWith([{ type: "node.remove", nodeIds: ["ordinary"] }], "删除作品");
+    expect(error).toHaveBeenCalledOnce();
+    controller.dispose(); nodeSelectionStore.reset();
+  });
+  it("native copying live media publishes a frozen asset without an interim live payload", async () => {
+    selectedNode();
+    const canvas = canvasWith([{ id: "n1", x: 0, y: 0 }, { id: "owner", x: 200, y: 0 }]);
+    canvas.nodeData.n1 = {
+      managedBy: { schemaVersion: 1, extensionId: "test", ownerNodeId: "owner", entityId: "entry", lifecycle: "owner-managed" },
+      mediaContent: { providerId: "test.content", schemaVersion: 1, payload: {} }
+    };
+    const service = createMediaContentService({ canvas: () => canvas, subscribe: () => () => {}, writable: () => false, submit: async () => {} });
+    let complete!: () => void;
+    const ready = { id: "immutable", mediaKind: "image" as const, status: "ready" as const, source: "generated" as const, title: "Snapshot", createdAt: "2026-10-26", metadata: { storageKey: "sha256-ready" } };
+    service.register({ providerId: "test.content", owner: "test", schemaVersions: [1], mediaKinds: ["image"],
+      describe: () => ({ mediaKind: "image", sourceIdentity: "one", dependencyNodeIds: ["owner"] }),
+      resolvePreview: async () => ready, materialize: async () => ready,
+      snapshot: () => new Promise(resolve => { complete = () => resolve(ready); })
+    });
+    const { dom, controller } = mountCopyTarget(canvas, service);
+    const data = clipboardData();
+    dom.fire("copy", { target: dom.canvas, clipboardData: data });
+    expect(data.getData("text/plain")).toBe("");
+    expect(dom.target[MEMORY_CLIPBOARD_KEY]).toBeUndefined();
+    await vi.waitFor(() => expect(complete).toBeTypeOf("function"));
+    complete();
+    await vi.waitFor(() => expect(dom.target[MEMORY_CLIPBOARD_KEY]).toBeTypeOf("string"));
+    const copied = parseCanvasCopyPayload(String(dom.target[MEMORY_CLIPBOARD_KEY]));
+    expect(copied?.nodeData.n1).toMatchObject({ outputAssetId: "immutable" });
+    expect(copied?.nodeData.n1.mediaContent).toBeUndefined();
+    expect(copied?.nodeData.n1.managedBy).toBeUndefined();
+    expect(copied?.assets).toContainEqual(ready);
+    const pasted = planCanvasPaste({ canvas, payload: copied!, anchor: { kind: "point", position: { x: 300, y: 300 } }, viewport: { x: 0, y: 0, zoom: 1 }, createId: () => "independent" });
+    expect(pasted).not.toBeNull();
+    const applied = applyCanvasCommands(canvas, pasted!.commands);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) throw Error(applied.rejection.message);
+    expect(applied.canvas.nodeData.independent.outputAssetId).toBe("immutable");
+    expect(applyCanvasCommands(applied.canvas, [{ type: "node.remove", nodeIds: ["independent"] }]).ok).toBe(true);
+    expect(canvas.nodeData.n1.mediaContent).toBeDefined();
+    controller.dispose(); service.dispose(); nodeSelectionStore.reset();
+  });
+
+  it("copies a whole film-set closure synchronously without freezing its managed media", () => {
+    selectedNode();
+    let canvas: ServerCanvas = canvasWith([{ id: "n1", x: 0, y: 0 }]);
+    canvas.document.nodes[0]!.type = "composite-asset";
+    canvas.nodeData.n1 = canonicalFilmSetFields(createFilmSetSnapshot({ title: "Film", model: { modelScript: 'scene.box({id:"body"});', modelScriptVersion: "woohaa-model-js-v2" }, motionScript: 'motion.model.rotate("body", {speed:1});', timeline: { duration: 4, loop: false } })) as never;
+    const result = applyCanvasCommands(canvas, [{ type: "canvas.setTitle", title: "Film" }]);
+    if (!result.ok) throw Error(result.rejection.message);
+    canvas = result.canvas;
+    // No media service: owner closure copying must not need materialization.
+    const { dom, controller } = mountCopyTarget(canvas);
+    const data = clipboardData();
+    dom.fire("copy", { target: dom.canvas, clipboardData: data });
+    const copied = parseCanvasCopyPayload(data.getData("text/plain"));
+    const media = copied?.nodes.find(node => node.id !== "n1");
+    expect(media?.type).toBe("video");
+    expect(copied?.nodeData[media!.id]).toMatchObject({ managedBy: { ownerNodeId: "n1" }, mediaContent: { providerId: "film-set.shot" } });
+    controller.dispose(); nodeSelectionStore.reset();
+  });
   it("DOM copy 事件把画布载荷写入 clipboardData 并认领事件", () => {
     selectedNode();
     const { dom, controller } = mountCopyTarget();

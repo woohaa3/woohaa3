@@ -135,12 +135,12 @@ describe("握手闸门（任务 5.2）", () => {
     expect(status?.kind === "status" && status.status.status).toBe("error");
   });
 
-  it.each([1, 2, 3, 4])("旧协议版本（v%s）在交换文档内容前被拒绝并提示刷新", async (version) => {
+  it.each([1, 2, 3, 4, 5, 6])("旧协议版本（v%s）在交换文档内容前被拒绝并提示刷新", async (version) => {
     const { room } = await readyRoom();
     await seedRoom(room, 1);
     const { fake } = await connect(room, { clientProtocolVersion: version });
     expect(fake.closed).not.toBeNull();
-    expect(YJS_SYNC_PROTOCOL_VERSION).toBe(6);
+    expect(YJS_SYNC_PROTOCOL_VERSION).toBe(7);
     expect(fake.sent.some((entry) => entry.kind === "sync" && entry.syncType === SYNC_MESSAGE_TYPE.UPDATE)).toBe(false);
     const status = fake.sent.find((entry) => entry.kind === "status");
     expect(status?.kind === "status" && status.status.code).toBe("protocol-version-unsupported");

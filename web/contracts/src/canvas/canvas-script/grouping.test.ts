@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
 import { compileAgentPlan } from "./planner/compile.js";
 import {
@@ -8,7 +9,7 @@ import {
   decodeAgentPlanOperations,
   type AgentPlanOperation,
 } from "../agent-canvas-protocol.js";
-import { applyCanvasCommands } from "../command-reducer.js";
+
 import { createEmptyWoohaa3ServerCanvas } from "../domain/index.js";
 import {
   projectAgentGraph,

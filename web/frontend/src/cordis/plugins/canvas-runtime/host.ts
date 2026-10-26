@@ -628,7 +628,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       current: (() => { width: number; height: number; pixelRatio: number }) | null;
     } = { current: null };
     const {
-      textureSync, videoSessions, compositeAssetMediaSessions, residency, projectResidency
+      textureSync, videoSessions, compositeAssetMediaSessions, residency, projectResidency, dispose: disposeAttachedMedia
     } = createAttachedMedia({
       runtime,
       options: this.options,
@@ -728,6 +728,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     });
     const unsubscribeTheme = this.options.subscribeTheme?.(() => controller.invalidate("theme"));
     const unsubscribeRunState = this.options.subscribeRunState?.(() => controller.flush());
+    const unsubscribeMediaContent = this.options.mediaContent?.subscribe(() => controller.invalidate("media-content"));
     // 规范画布变化（目标删除/失效）也触发一次重算（任务 3.4）。
     const unsubscribeCanvas = woohaa3CanvasStore.subscribe(() => controller.invalidate("canvas-store"));
     let attached = true;
@@ -737,6 +738,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       unsubscribe();
       unsubscribeTheme?.();
       unsubscribeRunState?.();
+      unsubscribeMediaContent?.();
+      disposeAttachedMedia();
       unsubscribeCanvas();
       // 卸载即关闭窗口：残留的定时器会在没有画布时继续聚合，发出与用户所见无关的样本。
       this.frameWindow?.dispose();

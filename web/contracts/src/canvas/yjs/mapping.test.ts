@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../../test-support/managed-shot-commands.js";
 /**
  * `ServerCanvas` ⇄ Y.Doc 映射测试（任务 2.1）。
  *
@@ -12,7 +13,7 @@ import { serverCanvasToYDoc,
   yDocToServerCanvas,
   yjsSharedTypes } from "./mapping.js";
 import { defaultSelfContained3DNodeData } from "../agent-node-descriptors.js";
-import { applyCanvasCommands } from "../command-reducer.js";
+
 import { ALL_FIXTURES, FIXTURE_NOW } from "./__fixtures__/canvases.js";
 
 function normalize(canvas: ServerCanvas): ServerCanvas {

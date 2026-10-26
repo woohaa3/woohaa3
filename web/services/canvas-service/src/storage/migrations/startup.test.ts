@@ -1,3 +1,5 @@
+import { filmSetTestMigrations } from "../../../../../test-support/managed-shot-commands.js";
+const migrateSqliteCanvasBeforeStartup = (filename: string) => migrateBeforeStartup(filename, { managedMigrations: filmSetTestMigrations });
 import { afterEach, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -7,7 +9,7 @@ import * as Y from "yjs";
 import { createFilmSetSnapshot, canonicalFilmSetFields, createMotionSnapshot, createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "@woohaa3/contracts/canvas-yjs";
 import { loadNodeSqlite } from "../sqlite/sqlite-loader.js";
-import { migrateSqliteCanvasBeforeStartup } from "./startup.js";
+import { migrateSqliteCanvasBeforeStartup as migrateBeforeStartup } from "./startup.js";
 import { createCanvasService } from "../../composition.js";
 
 const directories: string[] = [];
@@ -50,7 +52,7 @@ it("backs up committed WAL, converts previews and animation, then skips repeat s
     const canvas = JSON.parse(String(row.projection_json));
     expect(canvas.nodeData.film.filmSetAnimations.schemaVersion).toBe(3);
     expect(canvas.nodeData.film.filmSetAnimations.clips[0].kind).toBe("dynamic");
-    expect(canvas.document.nodes.filter((node: { type: string }) => node.type === "film-set-shot-preview")).toHaveLength(1);
+    expect(canvas.document.nodes.filter((node: { type: string }) => node.type === "video")).toHaveLength(1);
     expect(row.room_epoch).not.toBe("epoch");
     const { DatabaseSync } = loadNodeSqlite();
     const backup = new DatabaseSync(result.backup!, { readOnly: true });
@@ -99,6 +101,7 @@ it("normal service startup migrates before exposing the canvas service", async (
   db.close();
   const service = await createCanvasService({
     env: { WOOHAA3_CANVAS_STORAGE_BACKEND: "sqlite", WOOHAA3_CANVAS_STORAGE_SQLITE_PATH: filename },
+    contentRuntime: { managedMigrations: filmSetTestMigrations },
     enableYjsSync: false,
     enableModelMcp: false,
     enablePromptSnippets: false,
@@ -119,4 +122,15 @@ it("normal service startup rejects migration failure instead of serving degraded
   db.prepare("INSERT INTO canvas_writer_lock VALUES(1,?,?)").run(`${os.hostname()}:${process.pid}`, new Date().toISOString());
   db.close();
   await expect(createCanvasService({ env: { WOOHAA3_CANVAS_STORAGE_BACKEND: "sqlite", WOOHAA3_CANVAS_STORAGE_SQLITE_PATH: filename } })).rejects.toThrow(/片场数据自动升级失败/);
+});
+
+it("missing migration extension fails before backup or writes and keeps the original recoverable", () => {
+  const { db, filename, directory } = fixture();
+  try {
+    const original = db.prepare("SELECT * FROM canvas_yjs_documents").get();
+    expect(() => migrateBeforeStartup(filename)).toThrow("managed-media-migration-unavailable: test");
+    expect(db.prepare("SELECT * FROM canvas_yjs_documents").get()).toEqual(original);
+    expect(db.prepare("SELECT * FROM canvas_yjs_updates").all()).toHaveLength(1);
+    expect(fs.existsSync(path.join(directory, "canvas-migrations"))).toBe(false);
+  } finally { db.close(); }
 });

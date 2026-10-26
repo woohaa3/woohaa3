@@ -1,8 +1,9 @@
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
 import { groupBadgeRect } from "./group-badge.js";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
-import { planCanvasEdit } from "./edit-plan.js";
+
+
 import { buildCanvasRenderScene } from "./render-scene.js";
 
 describe("independent group badge scale", () => {

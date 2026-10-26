@@ -1,3 +1,4 @@
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 /**
  * 动态镜头参考协议测试
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 8.1）。
@@ -10,8 +11,8 @@ import { shotImageReferenceIdentity, freezeShotImageReferences, shotImageReferen
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
 import { normalizeCanvas } from "./domain/normalization.js";
-import { applyCanvasCommands } from "./command-reducer.js";
-import { planCanvasEdit } from "./edit-plan.js";
+
+
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { filmSetClipPrecondition, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";

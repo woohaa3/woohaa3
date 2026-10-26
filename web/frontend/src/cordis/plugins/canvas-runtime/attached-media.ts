@@ -22,6 +22,7 @@ export type AttachedMedia = {
   residency: CanvasResourceCoordinator;
   /** 每帧投影需求（必须先于各媒体 owner 的 `sync()`）。 */
   projectResidency: () => string[];
+  dispose: () => void;
 };
 
 export function createAttachedMedia(input: {
@@ -56,6 +57,11 @@ export function createAttachedMedia(input: {
   residencyPolicy?: Partial<import("./residency/index.js").ResidencyPolicy>;
 }): AttachedMedia {
   const { runtime, options } = input;
+  let mediaContentVersion = 0;
+  const unsubscribeMediaContent = options.mediaContent?.subscribe(() => {
+    mediaContentVersion += 1;
+    input.invalidate("media-content");
+  });
   const projectCanvas = (canvas: import("@woohaa3/contracts").ServerCanvas | null) => {
     const projected = options.projectHistoryCanvas?.(canvas) ?? canvas;
     return options.compositeAssets?.projectCanvas(projected) ?? projected;
@@ -88,6 +94,7 @@ export function createAttachedMedia(input: {
   }
   const contentKeyOfOf = createContentIdentity({
     nodeCapabilities: options.nodeCapabilities,
+    assetForNode: nodeId => options.mediaContent?.state(nodeId)?.asset,
     // 模型内容身份用 prepared resource key（不含 nodeId）；缺资源视为无内容。
     modelResourceKey: (nodeId) => options.getModelResources?.().get(nodeId)?.resourceKey ?? null
   });
@@ -95,7 +102,7 @@ export function createAttachedMedia(input: {
   // 变成「有内容」。候选表与准入投影都必须据此失效，否则首次投影早于资源就绪时，模型永远不会
   // 进入需求集合（真实故障：片场模型与模型卡片不显示，只有 hover 提升 interactive 才出现）。
   // 版本由宿主在 model-scene 通知时单调推进：O(1)，静止帧不遍历资源表。
-  const contentVersion = () => (input.getModelContentVersion?.() ?? 0) + (options.nodeCapabilities?.getRevision() ?? 0);
+  const contentVersion = () => (input.getModelContentVersion?.() ?? 0) + mediaContentVersion + (options.nodeCapabilities?.getRevision() ?? 0);
   const candidatesFor = createResidencyCandidateCache(contentKeyOfOf, contentVersion, options.nodeCapabilities);
   const projectResidency = createResidencyProjector({
     coordinator: residency,
@@ -124,6 +131,7 @@ export function createAttachedMedia(input: {
   const textureSync = createTextureSync({
     runtime,
     getCanvas: () => projectCanvas(woohaa3CanvasStore.getState().canvas),
+    getMediaAsset: nodeId => options.mediaContent?.state(nodeId)?.asset,
     getPreviewUrls: input.getPreviewUrls,
     getFocusTexture: input.getFocusTexture,
     getFocusDetails:input.getFocusDetails,
@@ -133,6 +141,7 @@ export function createAttachedMedia(input: {
   });
   const videoSessions = options.createVideoSessions?.(runtime) ?? createVideoFrameSessions({
     runtime, getCanvas: getVideoCanvas,
+    getMediaAsset: nodeId => options.mediaContent?.state(nodeId)?.asset,
     isReducedMotion: () => options.prefersReducedMotion?.() ?? false,
     isSuspended: input.isFocused,
     getFocusTextureNodeId: () => input.getFocusTexture?.()?.nodeId ?? null,
@@ -153,5 +162,8 @@ export function createAttachedMedia(input: {
   input.playback.setTimeSink((value) => {
     if (value.nodeId !== null) compositeAssetMediaSessions.setMediaTime(value.nodeId, value.time, value.playing);
   });
-  return { textureSync, videoSessions, compositeAssetMediaSessions, residency, projectResidency };
+  return {
+    textureSync, videoSessions, compositeAssetMediaSessions, residency, projectResidency,
+    dispose: () => unsubscribeMediaContent?.()
+  };
 }

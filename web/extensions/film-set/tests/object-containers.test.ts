@@ -1,6 +1,7 @@
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
-import { applyCanvasCommands, decodeFilmSetNodeData, canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields, filmSetObjectContainerId, resolveFilmSetObject, planCanvasEdit, filmSetAnimationsOf, shotPreviewNodeId } from "@woohaa3/contracts";
+import { decodeFilmSetNodeData, canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields, filmSetObjectContainerId, resolveFilmSetObject, filmSetAnimationsOf, shotPreviewNodeId } from "@woohaa3/contracts";
 import { installFilmSetObjectContainers } from "../src/authoring/browser/object-containers.js";
 import { setFilmSetObjectContainerVisible } from "../src/authoring/browser/object-container-commands.js";
 import { createFilmSetModelAdapter } from "../src/preview/browser/model-adapter.js";

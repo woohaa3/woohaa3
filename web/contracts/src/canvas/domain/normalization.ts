@@ -11,7 +11,7 @@ import { DEFAULT_CANVAS_TITLE,
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeFilmSetContent, FILM_SET_CONTENT_FIELD } from "../film-set-content.js";
 import { isPureModelNodeType } from "./core/input-role.js";
-import { FILM_SET_SHOT_PREVIEW_NODE_TYPE } from "./core/shot-preview-node.js";
+import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, isShotPreviewNode } from "./core/shot-preview-node.js";
 import { isSupportedShotReferenceEdgeData, resolveShotReferenceSource, shotReferenceRoleForKind, SHOT_IMAGE_REFERENCE_EDGE_KIND, SHOT_REFERENCE_EDGE_KIND } from "./core/shot-reference.js";
 import { shotReferenceDecision } from "./core/connection-rules.js";
 import { isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
@@ -69,7 +69,7 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   // 拍摄镜头预览是归属呈现，不是普通边端点（change 2026-10-15 D2/D5）：同批清除相关边。
   // 唯一例外是合法镜头参考边（D9 / 任务 8.1）：动态镜头预览 → 视频生成节点。
   const shotPreviewIds = new Set(
-    sanitizedNodes.filter((node) => node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE).map((node) => node.id)
+    sanitizedNodes.filter((node) => isShotPreviewNode(node.type, sanitizedNodeData[node.id])).map((node) => node.id)
   );
   const readSanitizedNodeData = (nodeId: string) =>
     sanitizedNodeData[nodeId] as Record<string, unknown> | undefined;
@@ -254,7 +254,7 @@ function cleanShotPreviewInputMappings(
   edges: readonly Woohaa3CanvasEdge[]
 ): void {
   const previewIds = new Set(
-    [...nodeTypes.entries()].filter(([, type]) => type === FILM_SET_SHOT_PREVIEW_NODE_TYPE).map(([id]) => id)
+    [...nodeTypes.entries()].filter(([id, type]) => isShotPreviewNode(type, nodeData[id])).map(([id]) => id)
   );
   if (previewIds.size === 0) return;
   for (const [nodeId, data] of Object.entries(nodeData)) {

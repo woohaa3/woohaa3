@@ -1,3 +1,4 @@
+import { mergeCanvasContentRuntimes } from "../../extensions/canvas-content.js";
 /**
  * 核心层 · canvas：画布、Yjs 同步与画布侧 MCP 服务。
  *
@@ -166,7 +167,7 @@ export const canvasPlugin: HostPlugin<{
   async apply(ctx, { env, enableYjsSync, extensionHost }) {
     // 画布内容聚合端口（预览/历史帧 + 转片场）：由扩展声明驱动，canvas-service 只认识契约接口。
     const contentRuntime: CanvasContentRuntime | undefined = extensionHost?.createCanvasContent
-      ? (await extensionHost.createCanvasContent({}))[0]?.runtime
+      ? mergeCanvasContentRuntimes(await extensionHost.createCanvasContent({}))
       : undefined;
     const mediaRead = ctx.media.port().resources?.read;
     // bootstrap `storage` 槽位（扩展目录的存储实现）已装配时，画布存储**只借**它持有的连接与

@@ -77,7 +77,7 @@ async function writeCacheWithEpoch(factory: IDBFactory, epoch: string): Promise<
   await repository.appendUpdate({ canvasId: CANVAS, seq: 1, update, createdAt: NOW });
   await repository.saveMetadata({
     canvasId: CANVAS,
-    formatVersion: YJS_CANVAS_FORMAT_VERSION,
+    formatVersion: YJS_CANVAS_FORMAT_VERSION, protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
     roomEpoch: epoch,
     revision: 1,
     updatedAt: NOW

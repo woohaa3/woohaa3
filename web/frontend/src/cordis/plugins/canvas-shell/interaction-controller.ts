@@ -433,6 +433,7 @@ export function installInteractionController(options: InteractionControllerOptio
 
   /** 指针 hover 与视频播放跟踪（实现见 `interaction-hover.ts`）。 */
   const hover = createHoverTracker({
+    projectCanvas: canvas => options.compositeAssets?.projectCanvas(canvas) ?? canvas,
     nodeCapabilities: options.nodeCapabilities,
     state,
     historyAt: nodeId => {

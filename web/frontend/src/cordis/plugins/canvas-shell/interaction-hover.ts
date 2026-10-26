@@ -14,6 +14,7 @@ import { builtinNodeCapabilityResolver, type NodeCapabilityResolver, shotPreview
 import type { VideoFrameSessions } from "../canvas-runtime/video-frame-session.js";
 
 export type HoverTrackerDeps = {
+  projectCanvas?: (canvas: import("@woohaa3/contracts").ServerCanvas | null) => import("@woohaa3/contracts").ServerCanvas | null;
   nodeCapabilities?: NodeCapabilityResolver;
   state: InteractionState;
   videoSessions?: VideoFrameSessions | null;
@@ -67,7 +68,8 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
     hit: HitTarget | null
   ): import("../../../extension-api/model-workspace.js").HoverPlaybackTarget => {
     if (!hit || hit.kind !== "shot-preview") return null;
-    const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
+    const canonical = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
+    const canvas = deps.projectCanvas?.(canonical) ?? canonical;
     const ownership = shotPreviewOwnershipOf(canvas?.nodeData?.[hit.nodeId]);
     if (!ownership) return null;
     return {

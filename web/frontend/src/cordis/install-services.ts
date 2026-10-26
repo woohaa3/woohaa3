@@ -486,7 +486,7 @@ export async function installCanvasPageServices(
     : null;
   // 宿主重连门禁（fault-isolation D6）：App 级 hostConnectivity 存在时才设置，会话在重连期间拒绝提交。
   const submissionGate = hostSubmissionGate(ctx);
-  const session = await createCanvasSession({ canvasId, remote: canvasRemote, ...(access ? { access } : {}), ...submissionGate });
+  const session = await createCanvasSession({ canvasId, remote: canvasRemote, lifecycle: compositeAssets.managedLifecycles, ...(access ? { access } : {}), ...submissionGate });
   ctx.provide("canvasSession" as never, session as never);
   ctx.effect(() => preloadAgentDirectory(agentConversations, ctx.currentUser, session), "agent-directory-preload");
   const groupRuns = createCanvasGroupRuns({ canvasId, transport: applicationRemote.transport, conversations: agentConversations, user: ctx.currentUser, writable: () => session.isWritable() });
@@ -507,9 +507,28 @@ export async function installCanvasPageServices(
   ctx.effect(() => () => mediaContent.dispose(), "media-content-registry");
   if (options.testHooks ?? true) {
     installCanvasSessionTestHooks(session);
+    const target = globalThis as unknown as { __canvasMediaContentSnapshot?: () => unknown };
+    const snapshot = () => {
+      const canvas = woohaa3CanvasStore.getState().canvas;
+      return {
+        canvasId: canvas?.id,
+        nodes: (canvas?.document.nodes ?? []).filter(node => !!canvas?.nodeData[node.id]?.mediaContent).map(node => {
+          const data = canvas!.nodeData[node.id];
+          let source: unknown;
+          try { source = mediaContent.describe(canvas!, data.mediaContent!, node.type as "image" | "video"); }
+          catch (error) { source = { error: String(error) }; }
+          return { id: node.id, type: node.type, outputAssetId: data.outputAssetId, source, state: mediaContent.state(node.id) };
+        })
+      };
+    };
+    target.__canvasMediaContentSnapshot = snapshot;
+    ctx.effect(() => () => {
+      if (target.__canvasMediaContentSnapshot === snapshot) delete target.__canvasMediaContentSnapshot;
+    }, "media-content-diagnostics");
   }
   // 页面级编辑历史（撤销/重做）；随 page scope dispose 清空（change: 2026-10-09，任务 1.5）。
   const canvasEdit = createCanvasEditService({
+    lifecycle: compositeAssets.managedLifecycles,
     session,
     getCanvas: () => woohaa3CanvasStore.getState().canvas
   });

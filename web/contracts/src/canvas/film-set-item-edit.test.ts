@@ -1,3 +1,4 @@
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 /**
  * 片场对象类型化受保护编辑测试
@@ -8,8 +9,8 @@ import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identit
  */
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "./domain/index.js";
-import { applyCanvasCommands } from "./command-reducer.js";
-import { planCanvasEdit } from "./edit-plan.js";
+
+
 import { filmSetNodeDataFields, createFilmSetSnapshot, animationSnapshotHash, createModelSnapshot, createMotionSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 

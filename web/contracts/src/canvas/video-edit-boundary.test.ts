@@ -1,3 +1,4 @@
+import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 视频编辑 intent 的 canonical 边界测试
  * （change: port-video-editing-dialogs，任务 1.3 / design D6）。
@@ -6,7 +7,7 @@
  * object URL 或临时签名 URL 作为 video edit intent 或 annotation preview。
  */
 import { describe, expect, it } from "vitest";
-import { applyCanvasCommands } from "./command-reducer";
+
 import { normalizeCanvas } from "./domain/normalization";
 import { sanitizeNodeDataForClipboard } from "./domain/runtime-node-data";
 import { containsForbiddenHistoryKey } from "../task/history";
