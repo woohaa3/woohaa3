@@ -1,15 +1,11 @@
 /**
- * 受管根 / 可写根的信任边界与受管扩展的 isolated 描述
- * （change: 2026-10-21-add-extension-marketplace-point 与 2026-10-21-isolate-extension-host-process）。
+ * 受管根 / 可写根的信任边界（change: 2026-10-21-add-extension-marketplace-point）。
  *
  * 从 `extension-host.mjs` 拆出，行为不变；宿主主文件只在扫描循环里调用 `screenExtension`。
+ * C 方向取消进程隔离后，这里只剩声明层的信任检查——「市场来源只能来自内置根」、
+ * 「受管扩展不得声明 bootstrap / storage / canvasContent」与模块越界探测。
  */
-import fs from "node:fs";
-import path from "node:path";
-
-import { EXTENSION_DESCRIPTOR_NAME } from "./extension-scan.mjs";
 import { loadExtensionDescriptor } from "./extension-descriptor.mjs";
-import { CONFIG_SCHEMA_RELATIVE, readConfigSchema, validateConfigSchema } from "./extension-config-schema.mjs";
 import { extensionIconAssetFile, extensionIconPublicPath } from "./extension-icon-assets.mjs";
 import { ExtensionLoadError, FALLBACK_ORDER, resolveModuleFile } from "./extension-host-modules.mjs";
 
@@ -88,74 +84,6 @@ export function probeDeclaredModules(extension, descriptor) {
   return null;
 }
 
-/**
- * 运行期为一个已提交到受管根的版本目录生成 isolated 描述（change: 2026-10-21-isolate-extension-host-process，任务 8.4）。
- *
- * 与启动扫描的 `isolatedDescriptorOf` 同形：只读 `extension.json` 与 `backend-dist/config-schema.json`、解析模块
- * 路径，**不 import 包内任何模块**。首次安装的受管后端扩展据此在运行期追加代理插件，不必重启。
- * 失败抛 `ExtensionLoadError`（code 同扫描期：`MARKETPLACE_PACKAGE_INVALID` / `EXTENSION_MANAGED_FORBIDDEN_DECLARATION` 等）。
- * 返回 `{ descriptor, metadata }`：`metadata` 是 config-schema 里的站点元数据（没有声明 metadata 时为 null）。
- */
-export function describeIsolatedExtension({ dir, extensionId, version }) {
-  const extension = { extensionId, dir, directory: `${extensionId}@${version}`, descriptorPath: path.join(dir, EXTENSION_DESCRIPTOR_NAME), managed: true, rootWritable: false, managedVersion: version };
-  const descriptor = loadExtensionDescriptor(extension);
-  if (!descriptor?.hostPlugin) {
-    throw new ExtensionLoadError("EXTENSION_MODULE_INVALID", `受管扩展 ${extensionId} 没有声明 hostPlugin，不需要子进程`, { extensionId, directory: dir });
-  }
-  const violation = untrustedRootViolation(extension, descriptor);
-  if (violation) throw new ExtensionLoadError(violation.code, violation.message, { extensionId, directory: dir, field: violation.field });
-  const raw = readConfigSchema(dir);
-  if (raw === null) throw new ExtensionLoadError("MARKETPLACE_PACKAGE_INVALID", `缺少 ${CONFIG_SCHEMA_RELATIVE}（旧包，请重新打包）`, { extensionId, directory: dir });
-  const validated = validateConfigSchema(raw, { extensionId, descriptor });
-  if (!validated.ok) throw new ExtensionLoadError("MARKETPLACE_PACKAGE_INVALID", `${CONFIG_SCHEMA_RELATIVE} 不合法：${validated.errors.join("；")}`, { extensionId, directory: dir });
-  const problem = probeDeclaredModules({ ...extension, extensionId }, { ...descriptor, metadata: undefined, publicRoutes: undefined });
-  if (problem) throw new ExtensionLoadError(problem.code, problem.message, { extensionId, directory: dir });
-  const context = { extensionId, directory: dir, descriptorPath: extension.descriptorPath };
-  const iconPath = extensionIconPublicPath(descriptor, extensionId);
-  const registration = {
-    extensionId,
-    directory: dir,
-    descriptor,
-    managedVersion: version,
-    hostPluginOrder: descriptor.hostPlugin.order ?? FALLBACK_ORDER,
-    iconPath,
-    hostPlugin: {
-      module: resolveModuleFile(dir, descriptor.hostPlugin.module ?? "./backend", context),
-      factory: descriptor.hostPlugin.factory,
-      kind: descriptor.hostPlugin.kind,
-      configSchema: validated.value
-    }
-  };
-  const staticRoutes = (descriptor.publicRoutes ?? []).map((route) => ({ ...route, ...(route.publicPathExport ? { staticPublicPath: validated.value.publicPaths?.[route.publicPathExport] } : {}) }));
-  registration.descriptor = { ...descriptor, publicRoutes: staticRoutes };
-  return {
-    descriptor: isolatedDescriptorOf(registration),
-    metadata: validated.value.metadata ? { ...validated.value.metadata.value, directory: dir } : null
-  };
-}
-
-/**
- * 受管扩展的 isolated 描述（change: 2026-10-21-isolate-extension-host-process，任务 6.2 / design D1）。
- * 纯数据，可序列化：宿主据此构造代理插件，子进程据 `entry` + `factory` 加载真实插件。
- */
-export function isolatedDescriptorOf(registration) {
-  const schema = registration.hostPlugin.configSchema;
-  return Object.freeze({
-    isolated: true,
-    extensionId: registration.extensionId,
-    version: registration.managedVersion,
-    directory: registration.directory,
-    entry: registration.hostPlugin.module,
-    factory: registration.hostPlugin.factory,
-    kind: registration.hostPlugin.kind,
-    order: registration.hostPluginOrder,
-    permissions: registration.descriptor.permissions ?? {},
-    publicRoutes: (registration.descriptor.publicRoutes ?? []).map((route) => route.publicPath ?? route.staticPublicPath).filter(Boolean),
-    plugin: schema.plugin,
-    ...(registration.iconPath ? { icon: registration.iconPath } : {}),
-    origin: Object.freeze({ managed: true, rootWritable: false })
-  });
-}
 
 /**
  * 受管扩展后端是否走 Extension Host 子进程（change: 2026-10-21-isolate-extension-host-process，D1）。
@@ -204,32 +132,9 @@ export function screenExtension({ extension, repoRoot, isolate, rejected, logger
       return null;
     }
   }
-  /**
-   * 受管根的 hostPlugin 在隔离开启时不进宿主进程（D1）：读包内静态描述 config-schema.json，
-   * 缺失或不合法的旧包只拒绝该扩展（MARKETPLACE_PACKAGE_INVALID，提示重新打包）。
-   */
-  let configSchema = null;
-  const isolated = isolate && extension.managed === true && Boolean(descriptor?.hostPlugin);
-  if (isolated) {
-    let problem = null;
-    try {
-      const raw = readConfigSchema(extension.dir);
-      if (raw === null) problem = `缺少 ${CONFIG_SCHEMA_RELATIVE}（旧包，请用新版 pack:extension 重新打包安装）`;
-      else {
-        const validated = validateConfigSchema(raw, { extensionId: extension.extensionId, descriptor });
-        if (validated.ok) configSchema = validated.value;
-        else problem = `${CONFIG_SCHEMA_RELATIVE} 不合法：${validated.errors.join("；")}`;
-      }
-    } catch (error) {
-      problem = `${CONFIG_SCHEMA_RELATIVE} 不是合法 JSON：${error?.message ?? String(error)}`;
-    }
-    if (problem) {
-      rejected.push({ extensionId: extension.extensionId, directory: extension.dir, code: "MARKETPLACE_PACKAGE_INVALID", message: problem });
-      logger({ event: "extension-managed-rejected", extensionId: extension.extensionId, directory: extension.dir, code: "MARKETPLACE_PACKAGE_INVALID", message: problem });
-      return null;
-    }
-  }
-  return { descriptor, isolated, configSchema };
+  // C 方向取消了进程隔离：受管根的后端插件与内置根一样被 import，不再需要从
+  // config-schema.json 静态描述配置段（那份产物只是打包期的历史遗留）。
+  return { descriptor };
 }
 
 /** 插件对象的来源章：宿主 `ctx.marketplace.register` 据此做运行期来源断言（design D3 纵深防御）。 */

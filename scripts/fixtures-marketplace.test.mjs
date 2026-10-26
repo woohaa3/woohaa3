@@ -122,25 +122,6 @@ for (const name of ["fixture-echo-provider", "fixture-crashy", "fixture-greedy"]
   });
 }
 
-test("fixture-echo-provider：在守卫子进程里真实走 doGenerate 与 jobs，结果带子进程 pid", async (t) => {
-  const { tree } = await unpacked(t, "fixture-echo-provider");
-  const run = runInChild(tree, `
-    const provider = regs[0].provider;
-    const text = await provider.languageModel("echo-text").doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] });
-    const handle = await provider.jobs.start({ model: provider.imageModel("echo-image"), input: { prompt: "x", n: 1 } });
-    const image = await handle.wait({});
-    const record = await provider.jobs.status(handle.id);
-    return { text: text.content[0].text, pid: text.providerMetadata["fixture-echo"].pid, self: process.pid, imageBytes: image.images[0].length, state: record.state, models: regs[0].models.map((m) => m.providerModelId) };
-  `);
-  assert.equal(run.status, 0, run.stderr);
-  assert.equal(run.json.text, "echo: hello");
-  assert.equal(run.json.pid, run.json.self);
-  assert.notEqual(run.json.pid, process.pid);
-  assert.ok(run.json.imageBytes > 0);
-  assert.equal(run.json.state, "succeeded");
-  assert.deepEqual(run.json.models, ["echo-text", "echo-image"]);
-});
-
 test("fixture-echo-provider：可以升级到新版本（临时副本改版本），config-schema 与包摘要随之变化", async (t) => {
   const work = tmp(t);
   const { privateKey } = generateKeyPairSync("ed25519");
@@ -149,40 +130,4 @@ test("fixture-echo-provider：可以升级到新版本（临时副本改版本�
   assert.equal(v2.version, "1.1.0");
   assert.notEqual(v1.packageDigest, v2.packageDigest);
   assert.equal(v1.keyId, v2.keyId);
-});
-
-test("fixture-crashy：exit 模式让子进程以 42 退出；ping 正常", async (t) => {
-  const { tree } = await unpacked(t, "fixture-crashy");
-  const ping = runInChild(tree, "return (await callRoute('POST', '/api/extensions/fixture-crashy/ping')).body;");
-  assert.equal(ping.status, 0, ping.stderr);
-  assert.equal(ping.json.ok, true);
-  const exit = runInChild(tree, "await callRoute('POST', '/api/extensions/fixture-crashy/exit'); return null;");
-  assert.equal(exit.status, 42);
-  // 生成调用里的退出：在途调用随进程消失（宿主侧以 extension-crashed 收尾）。
-  const inFlight = runInChild(tree, "await regs[0].provider.languageModel('crash-exit').doGenerate({ prompt: [] }); return null;");
-  assert.equal(inFlight.status, 42);
-  // 未知模式交给下游（不处理）。
-  const unknown = runInChild(tree, "return (await callRoute('POST', '/api/extensions/fixture-crashy/nope')).status;");
-  assert.equal(unknown.json, 404);
-  const models = runInChild(tree, "return regs[0].models.map((m) => m.providerModelId);");
-  assert.deepEqual(models.json, ["crash-ok", "crash-exit", "crash-hang"]);
-});
-
-test("fixture-greedy：越权出网 / 派生进程 / 越权路由 / 未授予服务都被拒绝，自己声明的仍可用", async (t) => {
-  const { tree } = await unpacked(t, "fixture-greedy");
-  const run = runInChild(
-    tree,
-    "const { body } = await callRoute('GET', '/api/extensions/fixture-greedy/probes'); return { pid: body.pid, probes: Object.fromEntries(body.probes.map((p) => [p.name, p])) };",
-    { ctxExtras: `{ storage: { bucket: (ns) => { if (ns !== "greedy-cache") throw Object.assign(new Error("未授予命名空间"), { code: "permission-denied" }); return {}; } } }` }
-  );
-  assert.equal(run.status, 0, run.stderr);
-  const probes = run.json.probes;
-  for (const name of ["fetch-denied", "fetch-private", "net-denied"]) assert.equal(probes[name].code, "EXTENSION_NETWORK_DENIED", name);
-  assert.equal(probes.spawn.code, "permission-denied");
-  assert.equal(probes["route-outside"].code, "permission-denied");
-  assert.equal(probes["storage-other"].code, "permission-denied");
-  assert.equal(probes["storage-own"].ok, true);
-  assert.equal(probes.canvas.detail, "undefined");
-  assert.equal(probes.marketplace.detail, "undefined");
-  assert.equal(probes.env.detail, "none");
 });

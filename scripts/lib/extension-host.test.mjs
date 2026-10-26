@@ -960,73 +960,37 @@ function writeIsolatedManaged(managedRoot, extensionId, { entrySource, schema, d
   return dir;
 }
 
-test("隔离开启：受管 Provider 的包内模块一个都不被 import（顶层抛错的入口），产出 isolated 描述", async () => {
+test("C 方向：受管 Provider 与内置根一样被 import，产出普通插件对象", async () => {
   const repoRoot = makeRepo();
   const managedRoot = path.join(repoRoot, "managed");
   writeExtension(repoRoot, "rootA", "builtin-provider", {
     descriptor: { schemaVersion: 1, extensionId: "builtin-provider", hostPlugin: { module: "./backend", factory: "createBuiltin", kind: "provider" } },
     backendSource: hostPluginSource("builtin-provider", "createBuiltin")
   });
-  const dir = writeIsolatedManaged(managedRoot, "iso-provider", { entrySource: 'throw new Error("受管模块被宿主 import 了");\n' });
+  writeIsolatedManaged(managedRoot, "iso-provider", {
+    entrySource:
+      'export function createPlugin() {\n  return { name: "iso-provider", label: "x", configPrefix: "providers.iso-provider", inject: [], Config: { fields: {} }, apply() {} };\n}\nexport const META = { extensionId: "iso-provider" };\n'
+  });
   const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot }, logger: () => undefined });
   assert.deepEqual(host.managedRejected, []);
   const plugins = await host.createHostPlugins({});
-  // 内置根行为不变：进程内插件对象。
-  assert.deepEqual(plugins.provider.map((plugin) => plugin.name), ["builtin-provider"]);
-  assert.equal(plugins.isolated.length, 1);
-  const isolated = plugins.isolated[0];
-  assert.equal(isolated.isolated, true);
-  assert.equal(isolated.extensionId, "iso-provider");
-  assert.equal(isolated.version, "1.0.0");
-  assert.equal(isolated.entry, fs.realpathSync(path.join(dir, "backend-dist", "entry.mjs")));
-  assert.equal(isolated.factory, "createPlugin");
-  assert.equal(isolated.kind, "provider");
-  assert.equal(isolated.order, 7);
-  assert.deepEqual(isolated.permissions, { network: ["api.example.com"] });
-  assert.equal(isolated.plugin.configPrefix, "providers.iso-provider");
-  assert.equal(isolated.plugin.fields.apiKey.secret, true);
-  assert.equal(isolated.plugin.health, true);
-  assert.deepEqual(isolated.origin, { managed: true, rootWritable: false });
-  assert.doesNotThrow(() => JSON.stringify(isolated), "isolated 描述可序列化");
-  // metadata 取自静态描述，仍进入设置面元数据。
-  assert.ok(host.metadata.some((entry) => entry.extensionId === "iso-provider" && entry.name === "隔离样例"));
+  // 受管与内置走同一条 import 分支：两者都是插件对象，没有 isolated 描述。
+  assert.deepEqual(plugins.provider.map((plugin) => plugin.name).sort(), ["builtin-provider", "iso-provider"]);
+  assert.equal(plugins.isolated, undefined);
+  const managed = plugins.provider.find((plugin) => plugin.name === "iso-provider");
+  assert.deepEqual(managed.origin, { managed: true, rootWritable: false });
+  assert.equal(managed.configPrefix, "providers.iso-provider");
+  assert.ok(host.metadata.some((entry) => entry.extensionId === "iso-provider"));
 });
 
-test("隔离开启：缺 config-schema.json 的旧包只拒绝该扩展（MARKETPLACE_PACKAGE_INVALID）", async () => {
-  const repoRoot = makeRepo();
-  const managedRoot = path.join(repoRoot, "managed");
-  writeIsolatedManaged(managedRoot, "legacy-pkg", { entrySource: "export function createPlugin() {}\nexport const META = {};\n", schema: null });
-  writeIsolatedManaged(managedRoot, "bad-schema", {
-    entrySource: "export {};\n",
-    schema: { schemaVersion: 1, extensionId: "bad-schema", kind: "provider", factory: "createPlugin", plugin: { name: "bad-schema", label: "x", configPrefix: "storage.primary", fields: {}, health: false }, metadata: { export: "META", value: { extensionId: "bad-schema" } }, publicPaths: {} }
-  });
-  const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot }, logger: () => undefined });
-  assert.deepEqual(Object.fromEntries(host.managedRejected.map((entry) => [entry.extensionId, entry.code])), { "bad-schema": "MARKETPLACE_PACKAGE_INVALID", "legacy-pkg": "MARKETPLACE_PACKAGE_INVALID" });
-  assert.deepEqual((await host.createHostPlugins({})).isolated, []);
-});
-
-test("隔离开启：受管 storage 插件被拒绝（与可写根同一闸门）", async () => {
+test("受管 storage 插件被拒绝（声明层闸门，与进程边界无关）", async () => {
   const repoRoot = makeRepo();
   const managedRoot = path.join(repoRoot, "managed");
   writeIsolatedManaged(managedRoot, "managed-store", {
-    entrySource: "export {};\n",
+    entrySource: "export {};",
     descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createPlugin", kind: "storage" } }
   });
   const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot }, logger: () => undefined });
   assert.equal(host.managedRejected[0].code, "EXTENSION_MANAGED_FORBIDDEN_DECLARATION");
   assert.equal(host.managedRejected[0].field, "hostPlugin.kind");
-});
-
-test("降级开关：isolation=false 或 WOOHAA3_EXTENSION_HOST_ISOLATION=0 时退回进程内导入", async () => {
-  const repoRoot = makeRepo();
-  const managedRoot = path.join(repoRoot, "managed");
-  writeIsolatedManaged(managedRoot, "iso-provider", {
-    entrySource: 'export function createPlugin() { return { name: "iso-provider", label: "x", configPrefix: "providers.iso-provider", inject: [], Config: { fields: {} }, apply() {} }; }\nexport const META = { extensionId: "iso-provider" };\n'
-  });
-  for (const options of [{ isolation: false }, { env: { WOOHAA3_EXTENSION_HOST_ISOLATION: "0" } }]) {
-    const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot, ...(options.env ?? {}) }, logger: () => undefined, ...(options.isolation === false ? { isolation: false } : {}) });
-    const plugins = await host.createHostPlugins({});
-    assert.deepEqual(plugins.isolated, []);
-    assert.deepEqual(plugins.provider.map((plugin) => [plugin.name, plugin.origin.managed]), [["iso-provider", true]]);
-  }
 });

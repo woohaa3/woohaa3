@@ -76,12 +76,4 @@ export type ExtensionPackageToolkit = {
   satisfiesRange(version: string, range: string): boolean | null;
   /** 公钥 → keyId（sha256(SPKI DER) 前 16 hex）；市场详情用它判断本机信任根里有没有某个 keyId。 */
   keyIdOf?(publicKey: string): string;
-  /**
-   * 为已提交的受管后端版本目录生成 isolated 描述（只读 JSON，不 import 包内模块）；首次安装运行期热装用
-   * （change: 2026-10-21-isolate-extension-host-process，任务 8.4）。`metadata` 是站点元数据（未声明时 null）。
-   */
-  describeIsolatedExtension?(input: { dir: string; extensionId: string; version: string }): { descriptor: IsolatedDescriptorJson; metadata: Record<string, unknown> | null };
 };
-
-/** `scripts/lib/extension-host.mjs` 的 `isolatedDescriptorOf` 产出（纯 JSON；宿主侧类型在 extension-host/host/descriptor.ts）。 */
-export type IsolatedDescriptorJson = Readonly<Record<string, unknown>> & { readonly extensionId: string; readonly isolated: true };

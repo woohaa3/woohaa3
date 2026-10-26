@@ -168,17 +168,14 @@ describe("扩展市场端到端（真实宿主 + HTTP）", () => {
     expect((await currentRelease(base)).extensions).not.toContain("fixture-panel");
   }, 120_000);
 
-  it("含后端扩展：进程隔离开启时首次安装即热装（不要求重启），回显路由立即可用", async () => {
-    // change: 2026-10-21-isolate-extension-host-process —— 受管后端扩展在独立子进程里运行，
-    // 首次安装由 Extension Manager 运行期追加代理插件，不再标记"需要重启"。
+  it("含后端扩展：C 方向下安装成功但要求受控重启，指针已提交", async () => {
+    // C 方向取消了 Extension Host 子进程：扩展后端与宿主同进程，没有可并行的第二份实例，
+    // 因此含后端代码的安装在提交指针后一律以 restart-required 收尾，重启后由扩展层装配。
     const { base, managed } = await boot();
     const job = await install(base, await packFixture("fixture-echo-provider", "1.0.0"));
     expect(job.status).toBe("succeeded");
-    expect(JSON.stringify(job)).not.toMatch(/restart-required/);
+    expect(job.outcome).toBe("restart-required");
     expect(managedRecord(managed, "fixture-echo-provider")).toMatchObject({ current: "1.0.0" });
-    const res = await fetch(`${base}/api/extensions/fixture-echo-provider/refresh`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-    expect(res.status).toBe(200);
-    expect((await json(res)).pid).not.toBe(process.pid);
   }, 120_000);
 
   it("签名不受信与路径穿越包被拒绝，当前版本不变", async () => {

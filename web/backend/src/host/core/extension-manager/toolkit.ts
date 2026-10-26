@@ -14,12 +14,11 @@ export async function loadPackageToolkit(env: ExtensionHostEnv): Promise<Extensi
   if (!resolved) return null;
   const lib = path.dirname(resolved.modulePath);
   const load = async (file: string) => (await import(pathToFileURL(file).href)) as Record<string, unknown>;
-  const [pkg, installations, descriptor, preflight, host] = await Promise.all([
+  const [pkg, installations, descriptor, preflight] = await Promise.all([
     load(path.join(lib, "extension-package.mjs")),
     load(path.join(lib, "extension-installations.mjs")),
     load(path.join(lib, "extension-descriptor.mjs")),
-    load(path.join(lib, "..", "extensions-preflight.mjs")),
-    load(resolved.modulePath)
+    load(path.join(lib, "..", "extensions-preflight.mjs"))
   ]);
   const pick = <T>(module: Record<string, unknown>, name: string): T => {
     const value = module[name];
@@ -37,7 +36,6 @@ export async function loadPackageToolkit(env: ExtensionHostEnv): Promise<Extensi
     listOrphanVersionDirs: pick(installations, "listOrphanVersionDirs"),
     checkEnginesCompatible: pick(descriptor, "checkEnginesCompatible"),
     satisfiesRange: pick(descriptor, "satisfiesRange"),
-    preflightDirectory: pick(preflight, "preflightDirectory"),
-    ...(typeof host.describeIsolatedExtension === "function" ? { describeIsolatedExtension: host.describeIsolatedExtension as ExtensionPackageToolkit["describeIsolatedExtension"] } : {})
+    preflightDirectory: pick(preflight, "preflightDirectory")
   };
 }

@@ -30,7 +30,7 @@ import { loadExtensionDescriptor } from "./extension-descriptor.mjs";
 import { extensionIconAssetFile, extensionIconPublicPath } from "./extension-icon-assets.mjs";
 import { ExtensionLoadError, FALLBACK_ORDER, hasBrowserArtifact, resolveModuleFile } from "./extension-host-modules.mjs";
 import { isSafeModeEssential, suspendedRegistration } from "./extension-host-safe-mode.mjs";
-import { hostPluginOrigin, isolatedDescriptorOf, resolveIsolation, screenExtension } from "./extension-host-managed.mjs";
+import { hostPluginOrigin, resolveIsolation, screenExtension } from "./extension-host-managed.mjs";
 import { createReleaseFacade } from "./extension-host-release.mjs";
 // 分支未搬 `extension-release.mjs`（release 布局校验依赖部署模块）；这里直接用协议模块。
 import { loadExtensionContracts } from "./extension-release-protocol.mjs";
@@ -38,7 +38,7 @@ import { loadExtensionContracts } from "./extension-release-protocol.mjs";
 // 拆出的模块（行为不变）：调用方继续从本文件导入这些名字。
 export { ExtensionLoadError, FALLBACK_ORDER, hasBrowserArtifact, resolveModuleFile } from "./extension-host-modules.mjs";
 export { isSafeModeEssential } from "./extension-host-safe-mode.mjs";
-export { describeIsolatedExtension, isolatedDescriptorOf, probeDeclaredModules, resolveIsolation, untrustedRootViolation } from "./extension-host-managed.mjs";
+export { probeDeclaredModules, resolveIsolation, untrustedRootViolation } from "./extension-host-managed.mjs";
 
 /**
  * 基础槽位名单（与 `@woohaa3/application-service` 的 `FOUNDATION_SLOTS` 同口径）。
@@ -318,7 +318,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
   for (const extension of scan.extensions) {
     const screened = screenExtension({ extension, repoRoot, isolate, rejected, logger });
     if (!screened) continue;
-    const { descriptor, isolated, configSchema } = screened;
+    const { descriptor } = screened;
     if (safeMode && !isSafeModeEssential(extension, descriptor)) {
       // 不导入任何扩展模块、不发布浏览器产物；只保留纯 JSON 的站点目录条目，供控制面投影 suspended。
       suspended.push({ extensionId: extension.extensionId, directory: extension.dir, rootWritable: extension.rootWritable === true });
@@ -341,19 +341,15 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
           optional: descriptor.backend.optional === true
         }
       : null;
-    // 隔离的受管扩展：metadata 与 publicPathExport 取自静态描述，不 import 包内模块。
     const metadata = descriptor.metadata
-      ? isolated
-        ? { module: null, exportName: descriptor.metadata.export, staticValue: configSchema.metadata.value }
-        : {
-            module: resolveModuleFile(extension.dir, descriptor.metadata.module ?? "./shared", context),
-            exportName: descriptor.metadata.export
-          }
+      ? {
+          module: resolveModuleFile(extension.dir, descriptor.metadata.module ?? "./shared", context),
+          exportName: descriptor.metadata.export
+        }
       : null;
     const publicRoutes = (descriptor.publicRoutes ?? []).map((route) => ({
       ...route,
-      module: route.publicPathExport && !isolated ? resolveModuleFile(extension.dir, route.module ?? "./shared", context) : null,
-      ...(route.publicPathExport && isolated ? { staticPublicPath: configSchema.publicPaths[route.publicPathExport] } : {})
+      module: route.publicPathExport ? resolveModuleFile(extension.dir, route.module ?? "./shared", context) : null
     }));
 
     /**
@@ -367,9 +363,8 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
           module: resolveModuleFile(extension.dir, descriptor.hostPlugin.module ?? "./backend", context),
           factory: descriptor.hostPlugin.factory,
           kind: descriptor.hostPlugin.kind,
-          optional: descriptor.hostPlugin.optional === true,
-          // 只解析出入口路径，不 import：入口交给 Extension Host 子进程加载。
-          ...(isolated ? { isolated: true, configSchema } : {})
+          optional: descriptor.hostPlugin.optional === true
+          // 只解析出入口路径；真正的 import 由扩展层装载器完成。
         }
       : null;
 
@@ -446,8 +441,6 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       iconPath,
       metadataExport: metadata ? metadata.exportName : null,
       metadataModule: metadata ? metadata.module : null,
-      metadataStatic: metadata && "staticValue" in metadata ? metadata.staticValue : undefined,
-      isolated,
       publicRoutes,
       site: descriptor.site ? true : false,
       hasBrowserArtifact: hasBrowserArtifact(extension.dir),
@@ -506,7 +499,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
   // provider metadata：从 `metadata` 段加载的具名导出（不含站点目录条目）。
   // 排序与生成器一致：先按 `metadata.order`，再按导出名。
   const providerRegistrations = registrations
-    .filter((registration) => registration.metadataModule || registration.metadataStatic !== undefined)
+    .filter((registration) => registration.metadataModule)
     .sort(
       compareByOrder(
         (registration) => registration.metadataOrder,
@@ -515,17 +508,14 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     );
   const providerMetadata = [];
   for (const registration of providerRegistrations) {
-    const value =
-      registration.metadataStatic !== undefined
-        ? registration.metadataStatic
-        : (
-            await importModule(registration.metadataModule, {
-              extensionId: registration.extensionId,
-              directory: registration.directory,
-              subpath: registration.metadataExport,
-              descriptorPath: registration.descriptorPath
-            })
-          )[registration.metadataExport];
+    const value = (
+      await importModule(registration.metadataModule, {
+        extensionId: registration.extensionId,
+        directory: registration.directory,
+        subpath: registration.metadataExport,
+        descriptorPath: registration.descriptorPath
+      })
+    )[registration.metadataExport];
     if (value === undefined) {
       throw new ExtensionLoadError(
         "EXTENSION_EXPORT_MISSING",

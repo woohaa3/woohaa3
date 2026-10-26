@@ -83,19 +83,13 @@ test("打包含后端 fixture：签名包可解包、校验、通过受管预检
   const registration = host.registrations.find((entry) => entry.extensionId === "fixture-echo-provider");
   assert.equal(registration.managed, true);
   assert.deepEqual(host.managedRejected, []);
-  // 隔离开启（缺省）：宿主不 import 包内后端，只得到 isolated 静态描述（config-schema.json 来自 build:backend）。
+  // C 方向：受管根与内置根一样被 import，第一个 provider 插件就是它本身。
   const plugins = await host.createHostPlugins({});
-  assert.equal(plugins.provider.some((entry) => entry.name === "fixture-echo-provider"), false);
-  const isolated = plugins.isolated.find((entry) => entry.extensionId === "fixture-echo-provider");
-  assert.deepEqual(isolated.origin, { managed: true, rootWritable: false });
-  assert.equal(isolated.plugin.configPrefix, "providers.fixture-echo");
-  assert.ok(isolated.entry.endsWith(path.join("backend-dist", "entry.mjs")));
-  assert.ok(host.metadata.some((entry) => entry.extensionId === "fixture-echo-provider"));
-  // 降级开关：隔离关闭时退回 P1 进程内装配。
-  const inProcess = await loadExtensionHost({ repoRoot: REPO_ROOT, env: { [MANAGED_DIR_ENV]: managedRoot }, logger: () => undefined, isolation: false });
-  const plugin = (await inProcess.createHostPlugins({})).provider.find((entry) => entry.name === "fixture-echo-provider");
+  const plugin = plugins.provider.find((entry) => entry.name === "fixture-echo-provider");
+  assert.ok(plugin, "受管 Provider 应作为普通插件进入 provider 桶");
   assert.deepEqual(plugin.origin, { managed: true, rootWritable: false });
   assert.equal(plugin.configPrefix, "providers.fixture-echo");
+  assert.ok(host.metadata.some((entry) => entry.extensionId === "fixture-echo-provider"));
 });
 
 test("build:backend 产物自包含：除 node: 外没有外部 import，可直接 import 并构造插件", async (t) => {
