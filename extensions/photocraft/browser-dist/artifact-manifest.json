@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "artifactId": "59b6abdd84bae24c5bc13c2c7e99f56655756a276b1cfe05058685f7c39592ae",
+  "artifactId": "9fe1e8c923f8333b5c09ebb28b73bb54a0ee8e75fd49ea576e18bc74fd00b642",
   "metadata": {
     "extensionId": "photocraft",
     "version": "0.1.0",
@@ -15,7 +15,7 @@
   "protocolVersion": 1,
   "sdkAbi": 1,
   "reactMajor": 18,
-  "entry": "entry-6H3F5AAC.js",
+  "entry": "entry-Q53Q4ZY6.js",
   "styles": [
     "entry-CZGMDUPZ.css"
   ],
@@ -31,17 +31,17 @@
   ],
   "files": [
     {
-      "path": "entry-6H3F5AAC.js",
+      "path": "entry-Q53Q4ZY6.js",
       "bytes": 478,
-      "gzipBytes": 358,
-      "sha256": "72dbf1c2a66355b2de7edf180438dcde16fcdb5daf0a0dc248190275976ac628",
+      "gzipBytes": 359,
+      "sha256": "65246683434dc391bdf82b450c5a0e29a93acd47a405e5627cd7c977a178ce18",
       "kind": "entry"
     },
     {
-      "path": "chunks/frontend-CIN6KUZU.js",
-      "bytes": 115741,
-      "gzipBytes": 35775,
-      "sha256": "2550f3a2465f6a2b1e12b8a0d3b65f4029e2a5b0611e536dc1992e9968173a3a",
+      "path": "chunks/frontend-BUXWYEPR.js",
+      "bytes": 115563,
+      "gzipBytes": 35725,
+      "sha256": "732eecd31f11b00a0d43c6112bfa400bddea2fd7694c03455a12a11780822c14",
       "kind": "private-chunk"
     },
     {
@@ -109,41 +109,41 @@
     },
     {
       "path": "assets/photocraft/photocraft-web_bg.wasm",
-      "bytes": 27793279,
-      "gzipBytes": 11955619,
-      "sha256": "9aa2597e8e7bbbaf586844ac2692646d010ff3328cf3d47c255512ced456f4be",
+      "bytes": 27818147,
+      "gzipBytes": 12005704,
+      "sha256": "666eb4fe73f9d2560bf74de8fc560983c2ccc0e4a47bad6b09e133bd408dce76",
       "kind": "asset"
     },
     {
       "path": "assets/photocraft/photocraft-web.js",
-      "bytes": 180953,
-      "gzipBytes": 27129,
-      "sha256": "7d50e5802138adb565dbc6ceac90620e9e20001e52735b268c644926fb775649",
+      "bytes": 180483,
+      "gzipBytes": 27069,
+      "sha256": "d8231cc26fb71f7565b8285a92006186d0659730cb8fa49521286b8a5c4cf03c",
       "kind": "asset"
     },
     {
       "path": "assets/photocraft/source.sha256",
       "bytes": 65,
       "gzipBytes": 72,
-      "sha256": "ac8993f6c116a86e8ad79357ce0f41ac4d3ffd9f91a85b09c0765327c7d70fad",
+      "sha256": "31dcef9c6c59da48d9f9b477d0f2815c4a2da719a18088bb3dbdf3b12bbc0fda",
       "kind": "asset"
     }
   ],
   "imports": [
     {
-      "from": "chunks/frontend-CIN6KUZU.js",
+      "from": "chunks/frontend-BUXWYEPR.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-6H3F5AAC.js",
+      "from": "entry-Q53Q4ZY6.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-6H3F5AAC.js",
-      "specifier": "../browser-dist/chunks/frontend-CIN6KUZU.js",
-      "resolved": "chunks/frontend-CIN6KUZU.js"
+      "from": "entry-Q53Q4ZY6.js",
+      "specifier": "../browser-dist/chunks/frontend-BUXWYEPR.js",
+      "resolved": "chunks/frontend-BUXWYEPR.js"
     }
   ]
 }
