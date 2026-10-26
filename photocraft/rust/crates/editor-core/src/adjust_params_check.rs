@@ -63,6 +63,24 @@ pub(crate) fn invalid(id: &str, params: &Value) -> Option<String> {
         return Some(format!("调整参数必须为对象（{id}）"));
     }
     match kind {
+        "brightnessContrast" => {
+            if !no_extra(params, &["brightness", "contrast", "legacy"])
+                || !finite(params, "brightness", -150.0, 150.0)
+                || !finite(params, "contrast", -50.0, 100.0)
+                || !boolean(params, "legacy") {
+                return bad("亮度/对比度参数无效");
+            }
+        }
+        "curves" => {
+            if !no_extra(params, &["points"]) {
+                return bad("曲线参数包含未知字段");
+            }
+            if let Some(points) = params.get("points") {
+                if let Err(error) = crate::adjustment_preview::validate_points(points) {
+                    return bad(&error.to_string());
+                }
+            }
+        }
         "invert" | "desaturate" | "equalize" => {
             if !no_extra(params, &[]) {
                 return bad("该调整不接受参数");
@@ -196,7 +214,12 @@ mod tests {
         assert!(invalid("image.adjustments.notOpen", &json!({})).is_some());
         assert!(invalid("edit.fade", &json!({"opacity":101})).is_some());
         assert!(invalid("edit.fade", &json!({"opacity":50,"mode":"Normal"})).is_none());
-        // 调整层参数（brightnessContrast/hueSaturation/curves）不在此处校验，仍由调整层草稿路径负责。
-        assert!(invalid("image.adjustments.brightnessContrast", &json!({})).is_some());
+        assert!(invalid("image.adjustments.brightnessContrast", &json!({"brightness":35,"contrast":20,"legacy":false})).is_none());
+        assert!(invalid("image.adjustments.brightnessContrast", &json!({"brightness":151})).is_some());
+        assert!(invalid("image.adjustments.brightnessContrast", &json!({"legacy":1})).is_some());
+        assert!(invalid("image.adjustments.curves", &json!({"points":[[0,0],[100,180],[255,255]]})).is_none());
+        for points in [json!([[0,0]]),json!([[0,0],[0,255]]),json!([[0,0],[256,255]]),json!([[0,0],[0.1,255]])] {
+            assert!(invalid("image.adjustments.curves", &json!({"points":points})).is_some());
+        }
     }
 }

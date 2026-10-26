@@ -32,7 +32,7 @@ impl ThemeResource {
 
     /// 画布背景清屏色。
     ///
-    /// WebGPU 的 canvas 合成被 wgpu 强制为 `Opaque`（surface capabilities 只提供 Opaque），
+    /// 浏览器 wgpu 的 canvas 合成被后端强制为 `Opaque`（surface capabilities 只提供 Opaque），
     /// 透明清屏会呈现为黑，因此引擎必须自绘不透明背景。取 `webBackdrop` 与页面
     /// `--app-web-backdrop` 同源。
     pub(crate) fn backdrop_color(&self) -> Color {
@@ -105,7 +105,7 @@ mod tests {
         );
     }
 
-    /// WebGPU 下 canvas 合成被强制为 `Opaque`，透明清屏会呈现为黑；背景必须由引擎自绘，
+    /// 浏览器 wgpu 下 canvas 合成被强制为 `Opaque`，透明清屏会呈现为黑；背景必须由引擎自绘，
     /// 因此清屏色取自 `webBackdrop`（与页面 `--app-web-backdrop` 同源），并跟随主题。
     #[test]
     fn backdrop_color_follows_web_backdrop_token() {

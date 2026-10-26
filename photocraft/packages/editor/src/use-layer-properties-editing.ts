@@ -7,6 +7,7 @@ import type {EditorLayerRow} from "./editor-view-model.js";
 import {canPositionStyle,translateStyle,readStyleGradientFrame,type StyleGradientFrame,type StylePositionTarget,type StylePositionPort} from "./style-positioning.js";
 import type {DocumentPoint} from "./photo-editor-tools.js";
 import {FrameEditSession} from "./frame-edit-session.js";
+import {createEditorId} from "./editor-id.js";
 
 export type {StylePatternPreset} from "./editor-wasm.js";
 export type PatternLibraryActions={owner?:object;ready:boolean;presets:UserPatternPreset[];import:(bytes:Uint8Array)=>boolean;rename:(key:string,name:string)=>boolean;remove:(key:string)=>boolean;export:(key?:string)=>Uint8Array|null};
@@ -180,7 +181,7 @@ export function useLayerPropertiesEditing(controller:EditorWorkspaceController,l
   };
   const createContour=(name:string,contour:unknown)=>{
     const trimmed=name.trim();
-    return updateLibrary([...library.current,{id:crypto.randomUUID(),name:trimmed,contour:namedContour(contour,trimmed)}]);
+    return updateLibrary([...library.current,{id:createEditorId(),name:trimmed,contour:namedContour(contour,trimmed)}]);
   };
   const renameContour=(id:string,name:string)=>{
     if(!library.current.some(preset=>preset.id===id)) return false;
@@ -195,7 +196,7 @@ export function useLayerPropertiesEditing(controller:EditorWorkspaceController,l
     if(!session.active || field.current!=="style" || disabled || !styleRef.current) return false;
     const result=controller.importContourPresets(bytes);
     if(!result.ok) {error(result.message);return false;}
-    return updateLibrary([...library.current,...result.value.map(preset=>({...preset,id:crypto.randomUUID()}))]);
+    return updateLibrary([...library.current,...result.value.map(preset=>({...preset,id:createEditorId()}))]);
   };
   const exportContour=(value:unknown)=>{
     if(!session.active || field.current!=="style" || disabled) return null;

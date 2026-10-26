@@ -1,9 +1,9 @@
 //! Shot camera 异步 capture 队列。并发或像素预算满时返回 `Busy`。
-//! 统一从 rig 的**临时离屏相机**回读（原生 wgpu 与浏览器 WebGPU 都支持纹理回读），
+//! 统一从 rig 的**临时离屏相机**回读（原生 wgpu 与浏览器 WebGL2/wgpu 都支持纹理回读），
 //! 成片保留请求尺寸；不读窗口、不做裁剪，也不依赖额外帧隐藏 chrome。
 //!
-//! change: 2026-10-15-add-film-set-shooting-shot-previews —— 浏览器后端从 WebGL2 切到
-//! WebGPU 后，离屏 `Screenshot::image` 回读可用，窗口裁剪回退整条路径移除。
+//! change: 2026-10-15-add-film-set-shooting-shot-previews —— 离屏
+//! `Screenshot::image` 回读可用，窗口裁剪回退整条路径移除。
 
 use std::collections::HashMap;
 
@@ -280,7 +280,7 @@ pub(crate) fn tick_capture_timeouts(
 
 /// 提交一次抓取 observer（完成后写入结果或失败，并释放临时相机）。
 ///
-/// 统一回读离屏 Image：原生 wgpu 与浏览器 WebGPU 都支持 `copy_texture_to_buffer`，
+/// 统一回读离屏 Image：原生 wgpu 与浏览器 WebGL2/wgpu 都支持 `copy_texture_to_buffer`，
 /// 成片保留请求尺寸，因此不再需要窗口抓取与 CSS 矩形裁剪。
 fn spawn_capture_observer(
     commands: &mut Commands,

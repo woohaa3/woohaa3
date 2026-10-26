@@ -5,6 +5,18 @@ import { expect, it, vi } from "vitest";
 import { DialogService } from "@woohaa3/frontend/plugin-api";
 import { setup, press, canvasPort, root } from "../src/test-support/photo-editor-harness.js";
 
+function chooseNativeTool(container:HTMLElement,id:string,slot=8) {
+ let button=container.querySelector<HTMLButtonElement>(`.photo-editor__toolrail [data-tool-member="${id}"]`);
+ if(!button){act(()=>container.querySelector<HTMLButtonElement>(`.photo-editor__toolrail [data-tool-slot="${slot}"]`)!.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true})));button=document.querySelector<HTMLButtonElement>(`.photo-editor__tool-group-menu [data-tool-member="${id}"]`);}
+ expect(button).toBeTruthy();act(()=>button!.click());
+}
+async function closeNavigatorGroup(container:HTMLElement) {
+ const group=container.querySelector<HTMLElement>('[data-panel-group="navigator"]')!;
+ await act(async()=>group.querySelector<HTMLButtonElement>('.photo-editor__panel-group-menu')!.dispatchEvent(new MouseEvent('pointerdown',{button:0,bubbles:true})));
+ await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item=>item.textContent==='关闭面板组')!.click());
+ expect(group.hidden).toBe(true);
+}
+
 it("工具选择仅展开当前参数，裁剪入口已移除", () => {
   const { container, dispatch } = setup();
   const sections = () => [...container.querySelectorAll<HTMLElement>(".photo-editor__options-group")].filter((node) => !node.hidden);
@@ -653,9 +665,9 @@ it("Shift+M 与工具列、标题和实际选框一致，切换其他工具后�
   press(editor,"b");press(editor,"m");expect(current()).toBe("椭圆选框");expect(canvasPort.props!.ellipse).toBe(true);
   act(()=>canvasPort.props!.onMarquee?.({x:10,y:20,width:40,height:30},"replace"));
   expect(dispatch.mock.lastCall).toEqual(["select.rect",expect.objectContaining({ellipse:true})]);
-  press(editor,"M",{shiftKey:true});expect(current()).toBe("单行选框");expect(canvasPort.props!.marqueeLine).toBe("row");
-  press(editor,"M",{shiftKey:true});expect(current()).toBe("单列选框");
   press(editor,"M",{shiftKey:true});expect(current()).toBe("矩形选框");expect(canvasPort.props!.ellipse).toBe(false);
+  chooseNativeTool(container,"singleRowMarquee",1);expect(current()).toBe("单行选框");expect(canvasPort.props!.marqueeLine).toBe("row");
+  chooseNativeTool(container,"singleColumnMarquee",1);expect(current()).toBe("单列选框");
 });
 
 it.each([
@@ -665,8 +677,8 @@ it.each([
 ])("所选%s属性显示在侧栏，折叠不重建图层或历史",(label,layer,editTarget)=>{
   const {container,dispatch}=setup(false,{document:{editTarget,activeTextStyle:{size:30,font:"Inter",color:"#112233"},layers:[{id:1,name:"所选图层",opacity:1,blend:"Normal",...layer as object}]}});
   const sidebar=container.querySelector(".photo-editor__sidebar")!;
-  expect(sidebar.querySelector(`[aria-label="${label}"]`)!.hasAttribute("hidden")).toBe(false);
-  expect(container.querySelector(`.photo-editor__contextbar [aria-label="${label}"]`)).toBeNull();
+  expect(sidebar.querySelector(`[aria-label="${label==="橡皮"?"橡皮擦":label}"]`)!.hasAttribute("hidden")).toBe(false);
+  expect(container.querySelector(`.photo-editor__contextbar [aria-label="${label==="橡皮"?"橡皮擦":label}"]`)).toBeNull();
   const layers=sidebar.querySelector(".photo-editor__layers"),history=sidebar.querySelector(".photo-editor__history");
   act(()=>sidebar.querySelector<HTMLButtonElement>('[title="折叠图层"]')!.click());
   expect(layers!.parentElement!.parentElement!.getAttribute("data-collapsed")).toBe("true");
@@ -758,14 +770,14 @@ it("选框宽高交换同步画布，空字段关闭创建而不复用上次有�
 });
 
 
-it("命令搜索复用已有命令与工具入口，最近项持久化，关闭不执行，门禁变化拒绝迟到选择",()=>{
+it("命令搜索复用已有命令与工具入口，最近项持久化，关闭不执行，门禁变化拒绝迟到选择",async()=>{
  const dialogs=new DialogService();const {container,dispatch,snapshot,render}=setup(false,{dialogs});
  snapshot.commands.set("layer.renameLayer",{allowed:true,enabled:true} as never);snapshot.commands.set("layer.delete",{allowed:true,enabled:true} as never);render(false);
  const editor=container.querySelector(".photo-editor")!;
  const open=()=>{press(editor,"f",{ctrlKey:true});expect(dialogs.isModalActive()).toBe(true);};
  const query=(value:string)=>{const input=container.querySelector<HTMLInputElement>('.photo-editor-command-search__query')!;act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("input",{bubbles:true}));});return input;};
  const row=()=>container.querySelector<HTMLButtonElement>('.photo-editor-command-search__results button')!;
- open();query("画笔");act(()=>row().click());expect(dialogs.isModalActive()).toBe(false);expect(canvasPort.props!.tool).toBe("brush");expect(dispatch).not.toHaveBeenCalled();
+ open();query("画笔");await act(async()=>row().click());expect(dialogs.isModalActive()).toBe(false);expect(canvasPort.props!.tool).toBe("brush");expect(dispatch).not.toHaveBeenCalled();
  expect(JSON.parse(localStorage.getItem("photocraft.command-search.recent.v1")!)[0]).toBe("tool:brush");
  open();expect(row().textContent).toContain("画笔");query("删除图层");snapshot.commands.set("layer.delete",{allowed:true,enabled:false} as never);act(()=>row().click());expect(dialogs.isModalActive()).toBe(true);expect(dispatch).not.toHaveBeenCalled();
  const input=query("不存在的命令");expect(container.textContent).toContain("没有匹配的命令");press(input,"Enter");expect(dispatch).not.toHaveBeenCalled();
@@ -802,7 +814,7 @@ it("工具短按保持，按住300ms恢复；使用画布后等半笔结束再�
 it("按住工具时显式点击另一个工具取消旧恢复请求，失焦不遗留临时工具",()=>{
  let now=0;const clock=vi.spyOn(performance,"now").mockImplementation(()=>now);
  try {const {container}=setup(),editor=container.querySelector<HTMLElement>(".photo-editor")!,canvas=container.querySelector<HTMLElement>('[data-canvas]')!;
- press(editor,"b");act(()=>container.querySelector<HTMLButtonElement>('button[aria-label="橡皮"]')!.click());now=500;act(()=>editor.dispatchEvent(new KeyboardEvent("keyup",{key:"b",bubbles:true})));expect(canvas.dataset.tool).toBe("eraser");
+ press(editor,"b");act(()=>container.querySelector<HTMLButtonElement>('button[aria-label="橡皮擦"]')!.click());now=500;act(()=>editor.dispatchEvent(new KeyboardEvent("keyup",{key:"b",bubbles:true})));expect(canvas.dataset.tool).toBe("eraser");
  press(editor,"h");act(()=>window.dispatchEvent(new Event("blur")));expect(canvas.dataset.tool).toBe("eraser");
  }finally{clock.mockRestore();}
 });
@@ -838,7 +850,7 @@ it("Shift+B循环铅笔，独立笔头记忆，自动擦除与橡皮模式控件
  const group=container.querySelector<HTMLElement>('section[aria-label="画笔"]')!;
  const auto=[...group.querySelectorAll("label")].find(label=>label.textContent?.includes("自动擦除"))!.querySelector<HTMLInputElement>("input")!;
  expect(auto.checked).toBe(false);act(()=>auto.click());expect(auto.checked).toBe(true);
- press(editor,"B",{shiftKey:true});expect(canvasPort.props!.tool).toBe("brush");expect(canvasPort.props!.brushSize).not.toBe(1);
+ press(editor,"B",{shiftKey:true});expect(canvasPort.props!.tool).toBe("mixer");press(editor,"B",{shiftKey:true});expect(canvasPort.props!.tool).toBe("colorReplacement");press(editor,"B",{shiftKey:true});expect(canvasPort.props!.tool).toBe("brush");expect(canvasPort.props!.brushSize).not.toBe(1);
  press(editor,"e");const mode=[...group.querySelectorAll("select")].find(select=>[...select.options].some(option=>option.value==="block"))!;
  act(()=>{mode.value="block";mode.dispatchEvent(new Event("change",{bubbles:true}));});expect(canvasPort.props!.eraserMode).toBe("block");
  expect(group.querySelector<HTMLInputElement>('input[data-numeric-input]')!.disabled).toBe(true);expect(mode.disabled).toBe(false);expect(dispatch).not.toHaveBeenCalled();
@@ -853,7 +865,7 @@ it("反引号临时擦除不切工具，keyup跨字段恢复，失焦与IME不�
  press(editor,"`",{code:"Backquote",isComposing:true});expect(stroke()).toMatchObject({erase:false});
  press(input,"`",{code:"Backquote"});expect(stroke()).toMatchObject({erase:false});
  press(editor,"`",{code:"Backquote"});act(()=>window.dispatchEvent(new Event("blur")));expect(stroke()).toMatchObject({erase:false});
- act(()=>container.querySelector<HTMLButtonElement>('.photo-editor__toolrail [aria-label="铅笔"]')!.click());press(editor,"~",{code:"Backquote",shiftKey:true});expect(stroke()).toMatchObject({erase:true,strokeCommand:"paint.pencil",autoErase:false});
+ chooseNativeTool(container,"pencil");press(editor,"~",{code:"Backquote",shiftKey:true});expect(stroke()).toMatchObject({erase:true,strokeCommand:"paint.pencil",autoErase:false});
 });
 
 it("绘画对称拖动只改轴候选，释放消费最终位置，Enter一次确认、Escape与失焦取消",()=>{
@@ -861,7 +873,7 @@ it("绘画对称拖动只改轴候选，释放消费最终位置，Enter一次�
  for(const id of ["paint.setSymmetry","paint.symmetryFromPath","paint.symmetryDisable"])snapshot.commands.set(id,{allowed:true,enabled:true} as never);
  const symmetry={mode:"vertical" as const,center:[8,6] as [number,number],rotation:0,segments:[[[8,0],[8,12]]]};
  snapshot.view.document!.paintingSymmetry=symmetry;render(false);
- act(()=>container.querySelector<HTMLButtonElement>('.photo-editor__toolrail [aria-label="铅笔"]')!.click());
+ chooseNativeTool(container,"pencil");
  const begin=()=>act(()=>[...container.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="变换对称")!.click());
  begin();expect(canvasPort.props!.tool).toBe("none");
  const svg=container.querySelector<SVGSVGElement>(".photo-editor-canvas__symmetry")!;svg.setPointerCapture=vi.fn();svg.hasPointerCapture=()=>true;svg.releasePointerCapture=vi.fn();
@@ -885,7 +897,7 @@ it("独立吸管共享取样设置，Alt只更新背景色，不触发文档写�
 it("状态栏数值缩放和信息切换只更新取景/本机选择，不分派文档命令",()=>{
  const {container,dispatch,snapshot}=setup();const revision=snapshot.view.document!.revision;const input=container.querySelector<HTMLInputElement>(".photo-editor__zoom-field")!;
  act(()=>{input.focus();Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,"150%");input.dispatchEvent(new Event("input",{bubbles:true}));});press(input,"Enter");expect(canvasPort.zoomTo).toHaveBeenCalledWith(1.5);
- const select=container.querySelector<HTMLSelectElement>(".photo-editor__status-choice")!;act(()=>{select.value="tool";select.dispatchEvent(new Event("change",{bubbles:true}));});act(()=>container.querySelector<HTMLButtonElement>('.photo-editor__toolrail [aria-label="铅笔"]')!.click());expect(container.querySelector('[data-document-status="tool"]')!.textContent).toBe("铅笔");expect(dispatch).not.toHaveBeenCalled();expect(snapshot.view.document!.revision).toBe(revision);
+ const select=container.querySelector<HTMLSelectElement>(".photo-editor__status-choice")!;act(()=>{select.value="tool";select.dispatchEvent(new Event("change",{bubbles:true}));});chooseNativeTool(container,"pencil");expect(container.querySelector('[data-document-status="tool"]')!.textContent).toBe("铅笔");expect(dispatch).not.toHaveBeenCalled();expect(snapshot.view.document!.revision).toBe(revision);
  localStorage.removeItem("photocraft.status-info.v1");
 });
 
@@ -918,7 +930,7 @@ it("偏好弹窗不会因自身modalActive立即关闭，配色覆盖renderer且
 
 it("工具图标右键重置仅当前画笔，全部重置先确认并保留前后景色和工程",async()=>{
  const dialogs=new DialogService();const {container,dispatch}=setup(false,{dialogs});
- const choose=(label:string)=>act(()=>container.querySelector<HTMLButtonElement>(`.photo-editor__toolrail [aria-label="${label}"]`)!.click());
+ const choose=(label:string)=>chooseNativeTool(container,label==="铅笔"?"pencil":"brush");
  const editSize=(value:string)=>act(()=>{const input=[...container.querySelectorAll<HTMLInputElement>('.photo-editor__contextbar input[data-numeric-input]')].find(input=>input.parentElement!.textContent?.includes("尺寸"))!;expect(input).toBeDefined();Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("input",{bubbles:true}));});
  const menu=async(label:string)=>{await act(async()=>container.querySelector(".photo-editor__tool-label")!.dispatchEvent(new MouseEvent("contextmenu",{clientX:20,clientY:20,bubbles:true,cancelable:true})));const item=[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item=>item.textContent===label)!;expect(item).toBeDefined();await act(async()=>item.click());};
  choose("画笔");editSize("77");choose("铅笔");editSize("9");choose("画笔");expect(canvasPort.props!.brushSize).toBe(77);
@@ -1055,7 +1067,7 @@ it("F8与Window信息面板同状态，原生读数跟随指针/尺寸偏好，�
 
 it("像素网格切换只读候选端口，Extras隐藏后停读且不改文档",async()=>{
   const {container,dispatch}=setup();const editor=container.querySelector(".photo-editor")!;
-  const clickGrid=async()=>{await act(async()=>[...container.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent?.trim()==="视图")!.dispatchEvent(new MouseEvent("pointerdown",{button:0,bubbles:true})));await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"],[role="menuitem"]')].find(button=>button.textContent?.trim()==="像素网格")!.click());};
+  const clickGrid=async()=>{await act(async()=>[...container.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent?.trim()==="视图")!.dispatchEvent(new MouseEvent("pointerdown",{button:0,bubbles:true})));await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(button=>button.textContent?.trim()==="显示")!.click());await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"],[role="menuitem"]')].find(button=>button.textContent?.trim()==="像素网格")!.click());};
   expect(canvasPort.props!.pixelGrid).toBeUndefined();await clickGrid();expect(canvasPort.props!.pixelGrid?.contextKey).toBeTruthy();
   press(editor,"h",{ctrlKey:true});expect(canvasPort.props!.pixelGrid).toBeUndefined();press(editor,"h",{ctrlKey:true});expect(canvasPort.props!.pixelGrid).toBeTruthy();
   await clickGrid();expect(canvasPort.props!.pixelGrid).toBeUndefined();expect(dispatch).not.toHaveBeenCalled();
@@ -1065,7 +1077,7 @@ it("Window直方图只读原生缓存，关闭后停止更新且不派发文档�
   const {container,dispatch,histogramPort}=setup();
   const open=async()=>{await act(async()=>[...container.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="窗口")!.dispatchEvent(new MouseEvent("pointerdown",{button:0,bubbles:true})));await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item=>item.textContent==="直方图")!.click());};
   await open();await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});expect(container.querySelector("[data-histogram-panel]")).not.toBeNull();expect(histogramPort).toHaveBeenCalledTimes(1);expect(container.querySelector("[data-histogram-panel]")?.textContent).toContain("480000");
-  await open();expect(container.querySelector("[data-histogram-panel]")).toBeNull();expect(dispatch).not.toHaveBeenCalled();
+  await open();await closeNavigatorGroup(container);expect(dispatch).not.toHaveBeenCalled();
 });
 
 it("Window导航器从主画布读取范围并路由缩放，关闭停止读取且不分派工程命令",async()=>{
@@ -1075,7 +1087,7 @@ it("Window导航器从主画布读取范围并路由缩放，关闭停止读取�
   await open();expect(canvasPort.props!.onNavigatorFrame).toBeDefined();act(()=>{for(const fn of callbacks.splice(0))fn(0);canvasPort.props!.onNavigatorFrame?.({viewport:{x:0,y:0,zoom:.5},size:{width:800,height:600},document:{width:800,height:600}});});
   expect(navigatorPort).toHaveBeenCalledTimes(1);expect(container.querySelector("[data-navigator-panel]")?.textContent).toContain("导航预览不可用");
   const panel=container.querySelector("[data-navigator-panel]")!;act(()=>[...panel.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="+")!.click());expect(canvasPort.zoomTo).toHaveBeenLastCalledWith(2/3);
-  await open();expect(container.querySelector("[data-navigator-panel]")).toBeNull();expect(canvasPort.props!.onNavigatorFrame).toBeUndefined();expect(dispatch).not.toHaveBeenCalled();
+  await open();await closeNavigatorGroup(container);expect(canvasPort.props!.onNavigatorFrame).toBeUndefined();expect(dispatch).not.toHaveBeenCalled();
 });
 
 it("F2/F3/F4仅在画布无半手势时路由内部剪贴板，不抢字段/IME且只读拒绝",()=>{
@@ -1199,8 +1211,8 @@ it("润饰工具组短按启用润饰工具，笔画在释放时一次提交对�
  const {container,dispatch,snapshot,render}=first;
  snapshot.commands.set("paint.colorReplacement",{allowed:true,enabled:true} as never);
  render(false);
- act(()=>container.querySelector(".photo-editor__toolrail")!.querySelector<HTMLButtonElement>('[data-retouch-tool="colorReplacement"]')!.click());
- expect(canvasPort.props!.tool).toBe("retouch");
+ chooseNativeTool(container,"colorReplacement");
+ expect(canvasPort.props!.tool).toBe("colorReplacement");
  act(()=>canvasPort.props!.onStrokeStart!({x:10,y:10},{shift:false}));
  act(()=>canvasPort.props!.onStrokeMove!([{x:20,y:20},{x:30,y:30}]));
  act(()=>canvasPort.props!.onStroke!([{x:10,y:10},{x:20,y:20},{x:30,y:30}]));
@@ -1218,7 +1230,7 @@ it("润饰点按工具在按下时提交一次坐标，选中不可用命令时�
  const {container,dispatch,snapshot,render}=setup();
  snapshot.commands.set("paint.redEye",{allowed:true,enabled:true} as never);
  render(false);
- act(()=>container.querySelector(".photo-editor__toolrail")!.querySelector<HTMLButtonElement>('[data-retouch-tool="redEye"]')!.click());
+ chooseNativeTool(container,"redEye",7);
  act(()=>canvasPort.props!.onStrokeStart!({x:44.6,y:55.2},{shift:false}));
  expect(dispatch).toHaveBeenLastCalledWith("paint.redEye",{x:45,y:55,pupilSize:50,darken:50});
  dispatch.mockClear();snapshot.commands.set("paint.redEye",{allowed:true,enabled:false,disabledReason:"仅支持像素层"} as never);render(false);

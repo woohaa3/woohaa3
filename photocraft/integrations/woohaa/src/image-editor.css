@@ -36,7 +36,7 @@
   min-height: 0;
 }
 
-/* tab 条之下的剩余空间：编辑器/文件背景/动作条都在这里，独立滚动。
+/* 内容矩形：编辑器/文件背景/动作条都在这里，独立滚动。
  * 注意**不能**用 overflow: hidden：Woohaa 刻意把编辑器的菜单/工具栏/侧栏/状态条
  * 绝对定位到内容矩形之外（见 photo-editor.css 的 `.image-edit-workspace .photo-editor__*`），
  * 裁掉溢出会把整个界面裁没。tab 条与它们的层级关系由 z-index 处理。 */

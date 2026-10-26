@@ -69,10 +69,26 @@ pub(super) fn invalid(params: &Value) -> Option<String> {
     }
     for (key, value) in fields {
         let name = key.as_str();
+        if name=="preset" {
+            if !value.as_str().is_some_and(|name|!name.trim().is_empty() && name.chars().count()<=128) {return Some(bad("预设名称无效"));}
+            continue;
+        }
         if let Some((_, min, max)) = SCALARS.iter().find(|(id, _, _)| *id == name) {
             match value.as_f64() {
                 Some(number) if number.is_finite() && number >= *min && number <= *max => {}
                 _ => return Some(bad(format!("{name} 必须在 {min}–{max} 之间"))),
+            }
+            continue;
+        }
+        if name=="mode" {
+            if !value.as_str().is_some_and(|mode|mode.eq_ignore_ascii_case("clear") || photocraft_engine::commands::blend_from_str(mode).is_some_and(|blend|photocraft_doc::BlendMode::LAYER_MODES.contains(&blend))) {return Some(bad("画笔混合模式无效"));}
+            continue;
+        }
+        if name=="smoothing" {
+            let Some(fields)=value.as_object() else {return Some(bad("smoothing 必须为对象"));};
+            for (key,entry) in fields {
+                if key=="amount" {if !entry.as_f64().is_some_and(|n|n.is_finite() && (0.0..=1.0).contains(&n)){return Some(bad("smoothing.amount 必须在 0–1 之间"));}}
+                else if !["enabled","pulledString","catchUp","catchUpOnEnd","adjustForZoom"].contains(&key.as_str()) || !entry.is_boolean(){return Some(bad("平滑选项无效"));}
             }
             continue;
         }

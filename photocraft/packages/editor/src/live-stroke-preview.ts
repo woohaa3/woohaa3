@@ -10,6 +10,8 @@ export class LiveStrokePreview {
   private pending: DocumentPoint[] = [];
   private frame: number | null = null;
   private generation=0;
+  private last:DocumentPoint|null=null;
+  private timed=false;
 
   constructor(
     private readonly controller: EditorWorkspaceController,
@@ -24,6 +26,9 @@ export class LiveStrokePreview {
     this.initial=structuredClone(params);
     this.pencil = params.strokeCommand === "paint.pencil";
     this.active = true;
+    this.timed=false;
+    const points=params.points as number[][],tail=points.at(-1);
+    this.last=tail?{x:tail[0],y:tail[1],pressure:tail[2],tiltX:tail[3],tiltY:tail[4],rotation:tail[5],time:tail[6]}:null;
     this.schedule();
     return true;
   }
@@ -31,11 +36,14 @@ export class LiveStrokePreview {
   append(points: DocumentPoint[]): void {
     if (!this.active) return;
     this.pending.push(...points);
+    this.last=points.at(-1)??this.last;
     this.schedule();
   }
 
   replaceTap(point:DocumentPoint):boolean {
     if(!this.active || !this.initial || !Array.isArray(this.initial.points) || this.initial.points.length!==1)return false;
+    if(this.timed){this.append([{...point,time:Math.max(point.time??0,this.last?.time??0)}]);return true;}
+    this.last=point;
     this.stopFrame();this.pending=[];this.controller.cancelStroke();
     const result=this.controller.beginStroke({...this.initial,points:strokePoints([point],this.pencil)});
     if(!this.check(result))return false;
@@ -64,10 +72,16 @@ export class LiveStrokePreview {
   private schedule(): void {
     if (this.frame !== null) return;
     const generation=this.generation;
-    this.frame = requestAnimationFrame(() => {
+    this.frame = requestAnimationFrame(time => {
       if(generation!==this.generation)return;
       this.frame = null;
-      if (this.active && this.flush()) this.refreshStroke();
+      if(!this.active || !this.flush())return;
+      if(this.last && this.controller.strokeWantsTime?.()){
+        const held={...this.last,time:Math.max(time,this.last.time??0)};
+        if(held.time>(this.last.time??0)){this.timed=true;this.last=held;this.pending.push(held);if(!this.flush())return;}
+        this.schedule();
+      }
+      this.refreshStroke();
     });
   }
 

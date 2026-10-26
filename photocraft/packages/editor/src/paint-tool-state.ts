@@ -1,6 +1,6 @@
 /** 绘画偏好属于当前编辑器；颜色共用、笔头分别记忆，目标读取内核。 */
 import { useCallback, useRef, type SetStateAction } from "react";
-import { DEFAULT_BRUSH, type BrushSettings } from "./photo-editor-tools.js";
+import { DEFAULT_BRUSH, clampBrushSize, type BrushSettings } from "./photo-editor-tools.js";
 
 import {useToolMemory,memoryRecord,memoryNumber,memoryChoice,memoryBoolean,memoryColor} from "./tool-memory.js";
 import {PAINT_MODES} from "./paint-modes.js";
@@ -68,4 +68,19 @@ export function usePaintTools(tool: string, target?: "pixels"|"mask",report?:(me
     setSettings(all=>tool==="all"?fresh:{...all,[tool]:fresh[tool]});digits.current.reset();
   };
   return {brush,setBrush,resetPaint,colors,pixelBackground:pixelColors.background,setColor,setBackground:(background:string)=>setColors((value)=>({...value,background})),colorAction,percent,resetDigits};
+}
+
+/** Read preset tool settings back before local options can override them on the next stroke. */
+export function nativeBrushSettings(value:unknown):Partial<BrushSettings> {
+  if(!value || typeof value!=="object")return {};
+  const raw=value as Record<string,unknown>,patch:Partial<BrushSettings>={};
+  for(const key of ["size","hardness","opacity","flow","angle"] as const){const n=raw[key];if(typeof n==="number" && Number.isFinite(n))patch[key]=key==="size"?clampBrushSize(n):n;}
+  if(raw.smoothing && typeof raw.smoothing==="object"){
+    const smoothing=raw.smoothing as {enabled?:boolean;amount?:unknown};if(typeof smoothing.amount==="number" && Number.isFinite(smoothing.amount))patch.smoothing=smoothing.enabled===false?0:Math.max(0,Math.min(1,smoothing.amount));
+  }
+  if(typeof raw.mode==="string"){
+    const normalize=(s:string)=>s.toLowerCase().replace(/\s|\(add\)/g,"");
+    const mode=PAINT_MODES.find(mode=>normalize(mode)===normalize(raw.mode as string));if(mode)patch.mode=raw.erase===true?"Clear":mode;
+  }
+  return patch;
 }

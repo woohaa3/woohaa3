@@ -107,14 +107,15 @@ describe("命令表过滤", () => {
     };
   }
 
-  it("只保留首期白名单内、且出现在菜单里的命令", () => {
+  it("保留能力白名单内的菜单、工具和无菜单面板命令", () => {
     const index = indexRenderableCommands([
       command({}),
       command({ id: "select.subject", allowed: false }),
       command({ id: "edit.undo", menu: [] }),
+      command({id:"brush.presets.list",menu:[]}),
       command({ id: "layer.select", menu: ["Layer"] })
     ]);
-    expect([...index.keys()].sort()).toEqual(["layer.delete", "layer.select"]);
+    expect([...index.keys()].sort()).toEqual(["brush.presets.list","edit.undo","layer.delete", "layer.select"]);
   });
 
   it("命令表结构非法时返回空表", () => {

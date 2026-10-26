@@ -18,9 +18,9 @@ vi.mock("../../../../packages/editor/src/photo-editor-canvas.js", () => ({ Photo
 }) }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 export let root: Root;
-afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; vi.clearAllMocks(); localStorage.removeItem("woohaa.image-editor.panels.v1"); localStorage.removeItem("woohaa.image-editor.workspace-visibility.v1"); vi.unstubAllGlobals(); canvasPort.cancelGesture.mockReturnValue(false); canvasPort.hasGesture.mockReturnValue(false); canvasPort.selectionKey.mockReturnValue(false); });
+afterEach(() => { act(() => root?.unmount()); document.body.innerHTML = ""; vi.clearAllMocks(); localStorage.clear(); vi.unstubAllGlobals(); canvasPort.cancelGesture.mockReturnValue(false); canvasPort.hasGesture.mockReturnValue(false); canvasPort.selectionKey.mockReturnValue(false); });
 
-export function setup(readonly = false, options: { hover?:import("@woohaa3/photocraft-editor").MoveHover; missingFonts?:string[]; hasSelection?: boolean; dirty?: boolean; onApply?: () => void; document?: Record<string, unknown>; maskCommands?: boolean; fillCommands?: boolean; dialogs?: DialogService; onDetailPreview?:(frame:import("@woohaa3/photocraft-editor").DetailFrame|null)=>void; zoom?:number; documents?:import("@woohaa3/photocraft-editor").EditorDocumentsMenu } = {}) {
+export function setup(readonly = false, options: { hover?:import("@woohaa3/photocraft-editor").MoveHover; missingFonts?:string[]; hasSelection?: boolean; dirty?: boolean; onApply?: () => void; document?: Record<string, unknown>; maskCommands?: boolean; fillCommands?: boolean; dialogs?: DialogService; onDetailPreview?:(frame:import("@woohaa3/photocraft-editor").DetailFrame|null)=>void; zoom?:number; documents?:import("@woohaa3/photocraft-editor").EditorDocumentsMenu; chromeMode?: "standalone" | "embedded" } = {}) {
   const view = decodeEditorState({ document: {
     width: 800, height: 600, activeLayer: 1, hasSelection: options.hasSelection ?? false, selectionOutline: [[10, 20, 50, 20], [50, 20, 50, 60], [50, 60, 10, 60], [10, 60, 10, 20]], canUndo: true, canRedo: true,
     history: ["打开", "新建图层", "画笔"], redoHistory: ["重命名", "蒙版"], layers: [
@@ -72,7 +72,7 @@ export function setup(readonly = false, options: { hover?:import("@woohaa3/photo
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  const render = (readonly: boolean) => act(() => root.render(<><PhotoEditorApp controller={controller} canvasView={{ contentSize:{width:800,height:600},viewport: { x: 0, y: 0, zoom: options.zoom??0.5 }, fitZoom: 0.5, transitioning: false, onChange: vi.fn() }} onPreview={vi.fn()} onDetailPreview={options.onDetailPreview} readonly={readonly} onApply={options.onApply} dialogs={options.dialogs} documents={options.documents} />{options.dialogs ? <DialogHost dialogs={options.dialogs} /> : null}</>));
+  const render = (readonly: boolean) => act(() => root.render(<><PhotoEditorApp chromeMode={options.chromeMode} controller={controller} canvasView={{ contentSize:{width:800,height:600},viewport: { x: 0, y: 0, zoom: options.zoom??0.5 }, fitZoom: 0.5, transitioning: false, onChange: vi.fn() }} onPreview={vi.fn()} onDetailPreview={options.onDetailPreview} readonly={readonly} onApply={options.onApply} dialogs={options.dialogs} documents={options.documents} />{options.dialogs ? <DialogHost dialogs={options.dialogs} /> : null}</>));
   render(readonly);
   return { clipboardBoundsPort,navigatorPort,histogramPort,container, dispatch, transform, textPort, adjustmentPort, render, snapshot,region,strokePort,samplePort,hoverPort,infoPort,controller };
 }

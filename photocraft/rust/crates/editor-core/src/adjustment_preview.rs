@@ -81,7 +81,7 @@ impl AdjustmentPreview {
     }
 }
 
-fn validate_points(value: &Value) -> Result<()> {
+pub(crate) fn validate_points(value: &Value) -> Result<()> {
     let points=value.as_array().filter(|p|(2..=16).contains(&p.len())).ok_or_else(||error("曲线需要 2–16 个控制点"))?;
     let mut previous=-1.0;
     for point in points {

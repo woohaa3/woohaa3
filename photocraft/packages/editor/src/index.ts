@@ -14,6 +14,7 @@ export * from "./editor-artifacts.js";
 export * from "./editor-display.js";
 export * from "./document-workspace.js";
 export * from "./editor-entry.js";
+export {createEditorId} from "./editor-id.js";
 export * from "./editor-panel-layout.js";
 export * from "./editor-view-model.js";
 export * from "./editor-wasm.js";

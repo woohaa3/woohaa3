@@ -14,7 +14,7 @@ it("严格解码原生 BrushSettings：缺失/越界回退默认，动态按百�
     spacing:0.25,spacingEnabled:false,pressureSize:false,pressureOpacity:true,angle:45,roundness:0.5,
     flipX:true,noise:true,wetEdges:true,buildUp:true,buildUpRate:30,
     shapeDynamics:{enabled:true,size:{jitter:0.5,minimum:0.2}},
-    scattering:{enabled:true,scatter:1.5,bothAxes:true},
+    scattering:{enabled:true,scatter:{jitter:1.5},bothAxes:true},
     transfer:{enabled:true,opacity:{jitter:0.3},flow:{jitter:0.1}}
   });
   expect(value).toMatchObject({spacing:0.25,spacingEnabled:false,pressureSize:false,pressureOpacity:true,angle:45,roundness:0.5,
@@ -54,4 +54,9 @@ it("面板只在启用某分区时显示其子字段，并在禁用时不派发"
   render(DEFAULT_BRUSH_DYNAMICS,true);
   act(()=>[...host.querySelectorAll("label")].find(node=>node.textContent==="湿边")!.querySelector("input")!.click());
   expect(onChange).not.toHaveBeenCalled();
+});
+
+it("深合并补丁允许最小直径清零，切换散布不覆盖预设中的其他动态",()=>{
+  expect(brushDynamicsPatch({...DEFAULT_BRUSH_DYNAMICS,sizeMinimum:0},{sizeMinimum:0})).toEqual({shapeDynamics:{size:{minimum:0}}});
+  expect(brushDynamicsPatch({...DEFAULT_BRUSH_DYNAMICS,scattering:true},{scattering:true})).toEqual({scattering:{enabled:true}});
 });

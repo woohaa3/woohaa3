@@ -276,9 +276,9 @@ it("工具组直接选择竖排，新建点文字和段落文字保留方向记�
  const frames:FrameRequestCallback[]=[];vi.stubGlobal("requestAnimationFrame",vi.fn((frame:FrameRequestCallback)=>{frames.push(frame);return frames.length;}));vi.stubGlobal("cancelAnimationFrame",vi.fn());
  const {container,snapshot,render,textPort,dispatch}=setup();for(const id of ["type.create","type.orientation.horizontal","type.orientation.vertical"])snapshot.commands.set(id,{allowed:true,enabled:true} as never);render(false);
  textPort.beginText.mockReturnValue({ok:true,value:{layer:null,new:true,text:""}} as never);
- const trigger=container.querySelector<HTMLButtonElement>('.photo-editor__toolrail button[aria-label="文字"]')!;
+ const trigger=container.querySelector<HTMLButtonElement>('.photo-editor__toolrail button[data-tool-slot="16"]')!;
  await act(async()=>trigger.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true})));
- const vertical=document.querySelector<HTMLButtonElement>('[data-text-orientation="vertical"]')!;expect(vertical).not.toBeNull();await act(async()=>vertical.click());
+ const vertical=document.querySelector<HTMLButtonElement>('[data-tool-member="verticalType"]')!;expect(vertical).not.toBeNull();await act(async()=>vertical.click());
  for(const placement of [{x:20,y:20},{x:20,y:20,box:[20,20,30,80] as [number,number,number,number]}]){
   act(()=>canvasPort.props!.onText?.(placement));act(()=>frames.splice(0).forEach(frame=>frame(0)));
   expect(textPort.previewText).toHaveBeenLastCalledWith(expect.objectContaining({orientation:"vertical"}));

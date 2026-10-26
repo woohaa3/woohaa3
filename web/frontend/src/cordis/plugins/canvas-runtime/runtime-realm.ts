@@ -14,6 +14,16 @@ export type RuntimeRealm = {
   reveal(): void;
 };
 
+function createRuntimeToken(): string {
+  const cryptoRef = globalThis.crypto;
+  if (typeof cryptoRef.randomUUID === "function") return cryptoRef.randomUUID();
+  const bytes = cryptoRef.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** 宿主是否注入了原生画布引导（Tauri 桌面窗口）。 */
 export function hasNativeBootstrap(target: typeof globalThis): boolean {
   return (target as typeof globalThis & { __WOOHAA_NATIVE__?: unknown }).__WOOHAA_NATIVE__ !== undefined;
@@ -78,7 +88,7 @@ export async function createRuntimeRealm(target: typeof globalThis, fault: (reas
     cleanups.push(() => target.clearTimeout(timer));
     host.prepend(iframe);
     // A same-origin bootstrap handoff survives the document navigation via the parent.
-    const token = crypto.randomUUID();
+    const token = createRuntimeToken();
     const registry = target as typeof globalThis & { __rendererRealms?: Map<string, { ready(module: BevyModule): void; fault(reason: string): void }> };
     registry.__rendererRealms ??= new Map();
     registry.__rendererRealms.set(token, {

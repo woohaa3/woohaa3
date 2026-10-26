@@ -3,14 +3,14 @@ import {useEffect,useRef,useState} from "react";
 import type {EditorWorkspaceController} from "./editor-workspace.js";
 import type {EditorDialogPort,EditorDialogRendererProps} from "./ports.js";
 import {EDITOR_MENUS,type EditorMenuItem,type WorkspacePurgePort} from "./photo-editor-menu.js";
-import {commandShortcutLabel,TOOL_KEYS,type PhotoEditorTool} from "./photo-editor-shortcuts.js";
+import {commandShortcutLabel,type PhotoEditorTool} from "./photo-editor-shortcuts.js";
 import {toolbarMembers} from "./toolbar-slots.js";
 import {DialogBody,DialogContent,DialogHeader,DialogTitle} from "./ui/Dialog.js";
 import {Button} from "./ui/Button.js";
 const DIALOG="image-editor.command-search",RECENTS="photocraft.command-search.recent.v1";
-export type SearchEntry={id:string;label:string;path:string;shortcut?:string;enabled:boolean;reason?:string|null;tool?:PhotoEditorTool};
+export type SearchEntry={id:string;label:string;path:string;shortcut?:string;enabled:boolean;reason?:string|null;tool?:PhotoEditorTool;variant?:string};
 /** 工具条目直接来自槽位注册表：工具栏里有的工具，命令面板都能切到，反之亦然。 */
-const tools:readonly [PhotoEditorTool,string][]=toolbarMembers().map(member=>[member.tool,member.label]);
+const tools=toolbarMembers();
 export function commandSearchEntries(controller:EditorWorkspaceController,purge?:WorkspacePurgePort):SearchEntry[] {
  const snapshot=controller.snapshot(),out:SearchEntry[]=[];
  const visit=(items:readonly EditorMenuItem[],path:string[])=>{for(const item of items) {
@@ -21,7 +21,7 @@ export function commandSearchEntries(controller:EditorWorkspaceController,purge?
   out.push({id:item.id,label:item.label,path:path.join(" › "),shortcut:commandShortcutLabel(item.id),enabled:!!enabled,reason:purgeState?purgeState.reason:command.disabledReason});
  }};
  for(const menu of EDITOR_MENUS) visit(menu.items,[menu.label]);
- if(snapshot.view.document) for(const [tool,label] of tools) out.push({id:`tool:${tool}`,tool,label,path:"工具",enabled:true,shortcut:TOOL_KEYS[tool]});
+ if(snapshot.view.document) for(const {tool,label,variant,key} of tools) out.push({id:`tool:${tool}${variant?`:${variant}`:""}`,tool,variant,label,path:"工具",enabled:true,shortcut:key??undefined});
  for(const theme of EDITOR_THEMES) out.push({id:`window.theme.${theme.id}`,label:theme.label,path:"窗口 › 主题",enabled:true});
  out.push({id:"tool.reset",label:"重置当前工具",path:"工具",enabled:true},{id:"tool.resetAll",label:"重置全部工具…",path:"工具",enabled:true});
  out.push({id:"window.theme.system",label:"跟随系统外观",path:"窗口 › 主题",enabled:true},
@@ -33,8 +33,8 @@ export function searchCommands(entries:readonly SearchEntry[],query:string,recen
  const words=query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
  const matches=(text:string,word:string)=>{let from=0;for(const char of word) {const next=text.indexOf(char,from);if(next<0)return false;from=next+1;}return true;};
  const rank=(entry:SearchEntry)=>{const index=recent.indexOf(entry.id);return index<0?1000:index;};
- return entries.filter(entry=>words.every(word=>matches(`${entry.label} ${entry.path} ${entry.id}`.toLocaleLowerCase(),word)))
- .sort((a,b)=>words.length?Number(!a.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))-Number(!b.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())):rank(a)-rank(b));
+ return entries.filter(entry=>words.every(word=>matches(`${entry.path} ${entry.label} ${entry.id}`.toLocaleLowerCase(),word)))
+ .sort((a,b)=>words.length?Number(a.label.toLocaleLowerCase()!==query.trim().toLocaleLowerCase())-Number(b.label.toLocaleLowerCase()!==query.trim().toLocaleLowerCase()) || Number(!a.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))-Number(!b.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())):rank(a)-rank(b));
 }
 function readRecent():string[] {try{const value:unknown=JSON.parse(localStorage.getItem(RECENTS)??"[]");return Array.isArray(value)?value.filter((id):id is string=>typeof id==="string").slice(0,20):[];}catch{return [];}}
 function SearchDialog({instance,requestClose,entries,recent,execute}:EditorDialogRendererProps & {entries:SearchEntry[];recent:string[];execute:(id:string)=>void}) {

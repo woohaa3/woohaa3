@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import init,{WasmEditor} from '../packages/editor/dist/wasm/photocraft_editor.js';
 await init({module_or_path:await readFile(new URL('../packages/editor/dist/wasm/photocraft_editor_bg.wasm',import.meta.url))});
 const editor=new WasmEditor();
+// One malformed synthetic record used to hide the entire menu/toolbar catalogue in the browser.
+for(const entry of JSON.parse(editor.commandsJson())){
+  assert.equal(typeof entry.id,'string');assert.equal(typeof entry.label,'string');assert.ok(Array.isArray(entry.menu));
+  assert.ok(entry.shortcut===null || typeof entry.shortcut==='string',entry.id);
+  assert.equal(typeof entry.params,'string');assert.equal(typeof entry.enabled,'boolean');assert.equal(typeof entry.allowed,'boolean');
+  assert.equal(typeof entry.needsDocument,'boolean',entry.id);assert.ok(entry.disabledReason===null || typeof entry.disabledReason==='string',entry.id);
+}
 const run=(id,params=null)=>JSON.parse(editor.execute(id,JSON.stringify(params)));
 const state=()=>JSON.parse(editor.stateJson()).document;
 assert.match(JSON.parse(WasmEditor.buildInfoJson()).engineVersion,/woohaa-resolution-v1$/);
@@ -697,4 +704,32 @@ const boxEditor=new WasmEditor();try{
  boxEditor.cancelText();assert.equal(boxEditor.contentHash(),styleHash);
 }finally{boxEditor.free();}
 
+
+
+// Held samples are driven by the native generator. Queries/candidates stay outside history.
+{
+ const held=new WasmEditor(),write=(id,params)=>JSON.parse(held.execute(id,JSON.stringify(params)));
+ write('file.new',{width:16,height:16,background:'transparent'});const before=held.contentHash(),history=JSON.parse(held.stateJson()).document.history.length;
+ assert.equal(held.strokeWantsTime(),false);
+ held.beginStroke(JSON.stringify({points:[[8.25,8.75,.5,12,-10,30,100]],size:4,smoothing:0,brush:{buildUp:true,buildUpRate:20}}));
+ assert.equal(held.strokeWantsTime(),true);held.appendStroke(JSON.stringify({points:[[8.25,8.75,.5,12,-10,30,200]]}));assert.equal(held.contentHash(),before);
+ held.commitStroke();assert.equal(held.strokeWantsTime(),false);assert.equal(JSON.parse(held.stateJson()).document.history.length,history+1);held.undo();assert.equal(held.contentHash(),before);held.free();
+}
+
+// Menu adjustments and saved brush settings must work through the actual public bridge.
+{
+ const review=new WasmEditor(),write=(id,params={})=>JSON.parse(review.execute(id,JSON.stringify(params))),view=()=>JSON.parse(review.stateJson()).document;
+ try {
+  write('file.new',{width:16,height:16});write('edit.fillForeground',{color:'#486b8a'});
+  const hash=review.contentHash(),history=view().history.length;
+  for(const [kind,params] of [['brightnessContrast',{brightness:35,contrast:20,legacy:false}],['hueSaturation',{hue:45,saturation:20,lightness:10}],['curves',{points:[[0,0],[100,180],[255,255]]}]]) {
+   write('image.adjustments.'+kind,params);assert.notEqual(review.contentHash(),hash,kind);assert.equal(view().history.length,history+1,kind);review.undo();assert.equal(review.contentHash(),hash,kind);
+  }
+  write('tools.setBrush',{size:37,mode:'Color Dodge',smoothing:{enabled:true,amount:0.65}});
+  write('brush.presets.save',{name:'ui-roundtrip'});write('tools.setBrush',{size:12,mode:'Normal',smoothing:{amount:0}});write('tools.setBrush',{preset:'ui-roundtrip'});
+  const brush=JSON.parse(review.brushGet());assert.equal(brush.size,37);assert.equal(brush.mode,'ColorDodge');assert.equal(brush.smoothing.amount,0,'native preset picking preserves the current smoothing tool option');assert.equal(brush.smoothing.enabled,true);
+  assert.equal(review.contentHash(),hash);assert.equal(view().history.length,history);
+  assert.throws(()=>write('tools.setBrush',{smoothing:{amount:2}}));assert.throws(()=>write('tools.setBrush',{smoothing:{fake:true}}));
+ } finally {review.free();}
+}
 console.log('Real WASM interaction smoke passed (state and bounded CPU font samples; no GPU rendering).');

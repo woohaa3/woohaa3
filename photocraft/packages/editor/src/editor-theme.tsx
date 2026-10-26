@@ -58,10 +58,10 @@ export function useEditorTheme() {
  };
  return {preference,resolved,select,error,step:(lighter:boolean)=>select(stepThemeBrightness(resolved,lighter))};
 }
-export function EditorThemeRoot({children,dialog=false}:{children:ReactNode;dialog?:boolean}) {
+export function EditorThemeRoot({children,dialog=false,transparentChrome=false}:{children:ReactNode;dialog?:boolean;transparentChrome?:boolean}) {
  const [animations,setAnimations]=useState(readInterfaceAnimations);
  useEffect(()=>subscribeInterfaceAnimations(setAnimations),[]);
- const theme=useEditorTheme();const style=useMemo(()=>themeStyle(theme.resolved),[theme.resolved]);
+ const theme=useEditorTheme();const style=useMemo(()=>transparentChrome?{...themeStyle(theme.resolved),background:"transparent"}:themeStyle(theme.resolved),[theme.resolved,transparentChrome]);
  return <div className={dialog?"photo-editor-theme-scope photo-editor-theme-scope--dialog":"photo-editor-theme-scope"} data-editor-theme={theme.resolved} data-editor-animations={animations?"on":"off"} style={style}><UiProvider>{children}</UiProvider></div>;
 }
 /** Only decorates this editor's registered renderers. Stack and dismiss policy stay with the host. */

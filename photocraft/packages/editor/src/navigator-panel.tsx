@@ -5,13 +5,13 @@ import {navigatorVisibleRect,type NavigatorFrame,type NavigatorAction} from "./n
 import {stepEditorZoom,minimumZoom} from "./zoom-levels.js";
 import {WheelNavigation} from "./wheel-navigation.js";
 import type {EditorPreview,EditorResult} from "./editor-wasm.js";
-export function NavigatorPanel({contextKey,frame,read,navigate,zoomTo,blocked=false,pinch=true,transparency=DEFAULT_TRANSPARENCY_GRID}:{contextKey:string;frame:NavigatorFrame|null;read:()=>EditorResult<EditorPreview>;navigate:(action:NavigatorAction)=>void;zoomTo:(zoom:number)=>void;blocked?:boolean;pinch?:boolean;transparency?:TransparencyGrid}) {
+export function NavigatorPanel({active=true,contextKey,frame,read,navigate,zoomTo,blocked=false,pinch=true,transparency=DEFAULT_TRANSPARENCY_GRID}:{active?:boolean;contextKey:string;frame:NavigatorFrame|null;read:()=>EditorResult<EditorPreview>;navigate:(action:NavigatorAction)=>void;zoomTo:(zoom:number)=>void;blocked?:boolean;pinch?:boolean;transparency?:TransparencyGrid}) {
   const canvas=useRef<HTMLCanvasElement>(null),area=useRef<HTMLDivElement>(null),generation=useRef(0);
   const [preview,setPreview]=useState<{key:string;value:EditorPreview|null;error?:string}|null>(null);
   const [box,setBox]=useState<{x:number;y:number;width:number;height:number}|null>(null);
   const drag=useRef<{id:number;key:string;start:{x:number;y:number};rectangle:boolean}|null>(null),wheel=useRef(new WheelNavigation());
   const current=useRef({frame,navigate,zoomTo,blocked,pinch,contextKey});current.current={frame,navigate,zoomTo,blocked,pinch,contextKey};
-  useEffect(()=>{const token=++generation.current,id=requestAnimationFrame(()=>{if(token!==generation.current)return;try{const result=read();if(token===generation.current)setPreview({key:contextKey,value:result.ok?result.value:null,error:result.ok?undefined:result.message});}catch{if(token===generation.current)setPreview({key:contextKey,value:null,error:"导航预览暂不可用"});}});return()=>{generation.current++;cancelAnimationFrame(id);};},[contextKey,read]);
+  useEffect(()=>{if(!active)return;const token=++generation.current,id=requestAnimationFrame(()=>{if(token!==generation.current)return;try{const result=read();if(token===generation.current)setPreview({key:contextKey,value:result.ok?result.value:null,error:result.ok?undefined:result.message});}catch{if(token===generation.current)setPreview({key:contextKey,value:null,error:"导航预览暂不可用"});}});return()=>{generation.current++;cancelAnimationFrame(id);};},[active,contextKey,read]);
   const value=preview?.key===contextKey?preview.value:null;
   useEffect(()=>{const context=canvas.current?.getContext("2d");if(context&&value)context.putImageData(new ImageData(new Uint8ClampedArray(value.pixels),value.width,value.height),0,0);},[value]);
   useEffect(()=>{drag.current=null;setBox(null);wheel.current.reset();},[blocked,contextKey]);

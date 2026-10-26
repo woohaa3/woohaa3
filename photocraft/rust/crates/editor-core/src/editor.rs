@@ -510,6 +510,11 @@ impl Editor {
         if id=="layer.new.layerViaCut" {crate::layer_locks::check_via_cut(&self.session,&params)?;}
         if id=="tools.setBrush" {
             if let Some(message)=crate::brush_prefs_check::invalid(&params) {return Err(EditorError::CommandFailed{id:id.into(),message});}
+            if let Some(mode)=params["mode"].as_str() {
+                let clear=mode.eq_ignore_ascii_case("clear");
+                let mode=if clear {photocraft_doc::BlendMode::Normal} else {photocraft_engine::commands::blend_from_str(mode).unwrap()};
+                params["mode"]=serde_json::to_value(mode).unwrap();params["erase"]=json!(clear);
+            }
         }
         if id=="paint.stroke" || id=="paint.pencil" {Self::check_paint_mode(&params)?;let state=self.active_doc()?;crate::layer_preview::require_visible(state,&params["layer"].as_u64().map(photocraft_doc::LayerId).or(state.active_layer).into_iter().collect::<Vec<_>>(),id)?;}
         if id.starts_with("image.adjustments.") || id=="edit.fade" {

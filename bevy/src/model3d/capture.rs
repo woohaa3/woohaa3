@@ -64,7 +64,7 @@ struct PendingShotCapture {
 /// 2. **拍摄预览卡片 rig**（镜头参考录制在**非聚焦**状态下使用）：请求 node 是预览节点 id，
 ///    卡片 rig 独占所属片场的渲染层与当前 T 的相机姿态。
 ///
-/// 两条路由都走离屏 Image 回读（WebGPU / 原生 wgpu），成片保留请求尺寸。
+/// 两条路由都走离屏 Image 回读（浏览器 WebGL2/wgpu / 原生 wgpu），成片保留请求尺寸。
 /// 无 rig / node 不匹配 / 排队失败时立即以稳定失败码结束请求。
 pub(crate) fn route_capture_request(
     mut routing: ResMut<ShotCaptureRouting>,

@@ -80,7 +80,7 @@ it.each([false,true])("同一工作区连续编辑后成对保存（工程上传
     canvasView={{viewport:{x:0,y:0,zoom:.5},fitZoom:.5,transitioning:false,onChange:vi.fn()}}/>));
   const editor=container.querySelector<HTMLElement>(".photo-editor")!,stage=container.querySelector<HTMLElement>(".photo-editor-canvas")!;
   const key=(key:string,ctrlKey=false,shiftKey=false,node:Element=editor)=>act(()=>node.dispatchEvent(new KeyboardEvent("keydown",{key,ctrlKey,shiftKey,bubbles:true,cancelable:true})));
-  const choose=(name:string)=>act(()=>container.querySelector<HTMLButtonElement>(`.photo-editor__toolrail [aria-label="${name}"]`)!.click());
+  const choose=(name:string)=>act(()=>container.querySelector<HTMLButtonElement>(`.photo-editor__toolrail [aria-label="${name==="文字"?"横排文字":name==="橡皮"?"橡皮擦":name}"]`)!.click());
   const capture=(element:HTMLElement)=>{element.setPointerCapture=vi.fn();element.hasPointerCapture=()=>true;element.releasePointerCapture=vi.fn();};capture(stage);
   const pointer=(type:string,x=100,y=100,node:Element=stage)=>{const event=new MouseEvent(type,{button:0,clientX:x,clientY:y,bubbles:true});Object.defineProperty(event,"pointerId",{value:1});act(()=>node.dispatchEvent(event));};
   const input=(node:HTMLInputElement|HTMLTextAreaElement,value:string)=>act(()=>{Object.getOwnPropertyDescriptor(node instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,"value")!.set!.call(node,value);node.dispatchEvent(new Event("input",{bubbles:true}));});

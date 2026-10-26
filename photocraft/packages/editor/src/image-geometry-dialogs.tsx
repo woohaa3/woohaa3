@@ -7,15 +7,16 @@ import type {EditorPreview,EditorResult} from "./editor-wasm.js";
 import type {EditorWorkspaceController} from "./editor-workspace.js";
 import {DialogBody,DialogContent,DialogFooter,DialogHeader,DialogTitle} from "./ui/Dialog.js";
 import {Button} from "./ui/Button.js";
-export type GeometryAction="canvas"|"rotate"|"size"|"fit"|"trim";
-const ids={canvas:"image.canvasSize",rotate:"image.rotation.arbitrary",size:"image.imageSize",fit:"file.automate.fitImage",trim:"image.trim"} as const;
+export type GeometryAction="canvas"|"rotate"|"size"|"fit"|"trim"|"guide";
+const ids={guide:"view.newGuide",canvas:"image.canvasSize",rotate:"image.rotation.arbitrary",size:"image.imageSize",fit:"file.automate.fitImage",trim:"image.trim"} as const;
 const anchors=[["topLeft","左上"],["top","上"],["topRight","右上"],["left","左"],["center","中心"],["right","右"],["bottomLeft","左下"],["bottom","下"],["bottomRight","右下"]] as const;
 function GeometryDialog({instance,requestClose,action,width,height,dpi,apply,preview}:EditorDialogRendererProps & {action:Exclude<GeometryAction,"trim">;width:number;height:number;dpi:number;preview?:(params:unknown)=>EditorResult<EditorPreview>;apply:(params:unknown)=>string|null}) {
  const [w,setW]=useState(String(width)),[h,setH]=useState(String(height)),[relative,setRelative]=useState(false),[anchor,setAnchor]=useState("center"),[color,setColor]=useState("background");
  const [angle,setAngle]=useState("0"),[direction,setDirection]=useState("cw"),[interpolation,setInterpolation]=useState("bicubic"),[error,setError]=useState<string|null>(null);
  const [resolution,setResolution]=useState(String(dpi)),[resample,setResample]=useState("bicubic"),[aspect,setAspect]=useState(true),[percent,setPercent]=useState(false);
  const [dontEnlarge,setDontEnlarge]=useState(false);
- const title=action==="fit"?"适合图像":action==="size"?"图像大小":action==="canvas"?"画布大小":"旋转画布";
+ const [orientation,setOrientation]=useState("horizontal"),[position,setPosition]=useState("0");
+ const title=action==="guide"?"新建参考线":action==="fit"?"适合图像":action==="size"?"图像大小":action==="canvas"?"画布大小":"旋转画布";
  const previewCanvas=useRef<HTMLCanvasElement|null>(null),previewPort=useRef(preview);previewPort.current=preview;
  const [previewError,setPreviewError]=useState<string|null>(null);
  useEffect(()=>{
@@ -34,10 +35,13 @@ function GeometryDialog({instance,requestClose,action,width,height,dpi,apply,pre
  const validSize=validNumber(resolution) && Number(resolution)>=1 && Number(resolution)<=10000 && (resample==="none" || validNumber(w) && validNumber(h) && Number(w)>0 && Number(h)>0 && (percent || Number.isInteger(Number(w)) && Number.isInteger(Number(h)) && Number(w)<=8192 && Number(h)<=8192));
  const validFit=validNumber(w) && validNumber(h) && Number.isInteger(Number(w)) && Number.isInteger(Number(h)) && Number(w)>=1 && Number(h)>=1 && Number(w)<=8192 && Number(h)<=8192;
  const fitScale=Math.min(Number(w)/width,Number(h)/height,dontEnlarge?1:Infinity);
- const valid=action==="fit"?validFit:action==="size"?validSize:action==="canvas"?validCanvas:validNumber(angle) && Math.abs(Number(angle))<=359.99;
- return <DialogContent size="sm" ariaLabel={title} instanceId={instance.instanceId}><form onSubmit={event=>{event.preventDefault();if(!valid){setError(action==="fit"?"最大宽高须为 1–8192 的整数像素。":action==="size"?"请输入有效的图像尺寸及 1–10000 DPI 分辨率。":action==="canvas"?"结果宽高须为 1–8192 的整数像素。":"请输入 -359.99–359.99° 范围内的角度。");return;}const failure=apply(action==="fit"?{width:Number(w),height:Number(h),dontEnlarge,resample:"bicubic"}:action==="size"?{...(resample==="none"?{}:percent?{percent:Number(w)}:{width:Number(w),height:Number(h)}),resolution:Number(resolution),resample}:action==="canvas"?{width:Number(w),height:Number(h),relative,anchor,extensionColor:color}:{angle:Number(angle),direction,interpolation});if(failure)setError(failure);else requestClose();}}>
+ const valid=action==="guide"?validNumber(position) && Math.abs(Number(position))<=300000:action==="fit"?validFit:action==="size"?validSize:action==="canvas"?validCanvas:validNumber(angle) && Math.abs(Number(angle))<=359.99;
+ return <DialogContent size="sm" ariaLabel={title} instanceId={instance.instanceId}><form onSubmit={event=>{event.preventDefault();if(!valid){setError(action==="guide"?"请输入有效的参考线位置。":action==="fit"?"最大宽高须为 1–8192 的整数像素。":action==="size"?"请输入有效的图像尺寸及 1–10000 DPI 分辨率。":action==="canvas"?"结果宽高须为 1–8192 的整数像素。":"请输入 -359.99–359.99° 范围内的角度。");return;}const failure=apply(action==="guide"?{orientation,position:Number(position)}:action==="fit"?{width:Number(w),height:Number(h),dontEnlarge,resample:"bicubic"}:action==="size"?{...(resample==="none"?{}:percent?{percent:Number(w)}:{width:Number(w),height:Number(h)}),resolution:Number(resolution),resample}:action==="canvas"?{width:Number(w),height:Number(h),relative,anchor,extensionColor:color}:{angle:Number(angle),direction,interpolation});if(failure)setError(failure);else requestClose();}}>
  <DialogHeader onClose={requestClose}><DialogTitle>{title}</DialogTitle></DialogHeader><DialogBody>
- {action==="fit"?<>
+ {action==="guide"?<>
+ <label>方向<select value={orientation} onChange={event=>setOrientation(event.currentTarget.value)}><option value="horizontal">水平</option><option value="vertical">垂直</option></select></label>
+ <label>位置（px）<ArithmeticInput autoFocus invalidate min={-300000} max={300000} units={{unit:"px",dpi}} value={position} onChange={event=>setPosition(event.currentTarget.value)}/></label>
+ </>:action==="fit"?<>
  <label>最大宽度（px）<ArithmeticInput autoFocus invalidate min={1} max={8192} step={1} units={{unit:"px",dpi}} value={w} onChange={event=>setW(event.currentTarget.value)}/></label>
  <label>最大高度（px）<ArithmeticInput invalidate min={1} max={8192} step={1} units={{unit:"px",dpi}} value={h} onChange={event=>setH(event.currentTarget.value)}/></label>
  <label><input type="checkbox" checked={dontEnlarge} onChange={event=>setDontEnlarge(event.currentTarget.checked)}/>禁止放大</label>
@@ -74,7 +78,7 @@ export function useImageGeometryDialogs(dialogs:EditorDialogPort|undefined,contr
   const unsubscribe=dialogs.subscribe(()=>{
     if(instance.current && dialogs.top()?.instanceId!==instance.current){if(request.current?.action==="rotate"){controller.cancelImageRotation();latest.current.refresh();}instance.current=null;request.current=null;}
   });
-  const cleanups=(["canvas","rotate","size","fit","trim"] as const).map(action=>dialogs.registerDialog(`image-editor.geometry-${action}`,{definition:{singleton:true,size:"sm",editingOwner:()=>opening.current && !latest.current.blocked?controller.dialogOwner():null,validatePayload:payload=>payload==null?{ok:true,payload:null}:{ok:false,error:"无效的图像操作"}},renderer:props=>action==="trim"?<TrimImageDialog {...props} initial={latest.current.trim} apply={value=>{
+  const cleanups=(["canvas","rotate","size","fit","trim","guide"] as const).map(action=>dialogs.registerDialog(`image-editor.geometry-${action}`,{definition:{singleton:true,size:"sm",editingOwner:()=>opening.current && !latest.current.blocked?controller.dialogOwner():null,validatePayload:payload=>payload==null?{ok:true,payload:null}:{ok:false,error:"无效的图像操作"}},renderer:props=>action==="trim"?<TrimImageDialog {...props} initial={latest.current.trim} apply={value=>{
    const expected=request.current,command=controller.snapshot().commands.get(ids.trim);
    if(latest.current.blocked || instance.current!==props.instance.instanceId || dialogs.top()?.instanceId!==props.instance.instanceId || expected?.action!=="trim" || expected.owner!==owner())return "文档已变化，请关闭后重新打开。";
    if(!command?.allowed || !command.enabled)return command?.disabledReason??"当前无法修整图像。";

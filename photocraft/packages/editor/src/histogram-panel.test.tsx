@@ -30,3 +30,14 @@ it("failed reads clear the former bins and show the error",()=>{
   try{act(()=>root.render(<HistogramPanel documentKey="a" contextKey="1" read={()=>({ok:false,code:"unavailable",message:"内核读取失败"})}/>));act(()=>vi.runAllTimers());expect(node.textContent).toContain("内核读取失败");expect(node.querySelector("path")?.getAttribute("d")).toBe("");}
   finally{act(()=>root.unmount());}
 });
+it("inactive mounted tabs cancel pending reads and refresh when reopened",()=>{
+ vi.useFakeTimers({toFake:["setTimeout","clearTimeout","performance"]});
+ const read=vi.fn(()=>({ok:true as const,value:sample})),node=document.createElement("div"),root=createRoot(node);
+ const render=(active:boolean,contextKey:string)=>act(()=>root.render(<HistogramPanel documentKey="a" contextKey={contextKey} active={active} read={read}/>));
+ try {
+  render(true,"1");act(()=>vi.advanceTimersByTime(0));expect(read).toHaveBeenCalledTimes(1);
+  render(true,"2");render(false,"2");act(()=>vi.advanceTimersByTime(1000));expect(read).toHaveBeenCalledTimes(1);
+  render(false,"3");act(()=>vi.advanceTimersByTime(1000));expect(read).toHaveBeenCalledTimes(1);
+  render(true,"3");act(()=>vi.advanceTimersByTime(250));expect(read).toHaveBeenCalledTimes(2);
+ } finally {act(()=>root.unmount());}
+});

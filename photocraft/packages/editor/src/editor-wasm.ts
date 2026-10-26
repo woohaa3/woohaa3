@@ -189,6 +189,7 @@ export type EditorInstance = {
   commandsJson(): string;
   allowedCommandIdsJson(): string;
   stateJson(): string;
+  strokeWantsTime?():boolean;
   beginStroke(paramsJson: string): void;
   appendStroke(paramsJson: string): void;
   takeStrokeDamage():string;
@@ -418,8 +419,10 @@ export class EditorHandle {
   }
 
   execute(id: string, params: unknown = null): EditorResult<unknown> {
-    return this.call((i) => i.execute(id, JSON.stringify(params ?? null)));
+    return this.call((i) => JSON.parse(i.execute(id, JSON.stringify(params ?? null))));
   }
+
+  strokeWantsTime():boolean {const result=this.call(i=>i.strokeWantsTime?.()??false);return result.ok && result.value;}
 
   beginStroke(params: unknown): EditorResult<void> {
     return this.call((i) => i.beginStroke(JSON.stringify(params)));

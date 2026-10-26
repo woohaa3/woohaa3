@@ -63,7 +63,7 @@ fn error(id:&str,message:&str)->EditorError {EditorError::CommandFailed{id:id.in
 /// 分隔线命令以两个相邻同级层作为显式目标，不受当前选择集合的菜单门禁影响。
 pub(crate) const LINE_ID:&str="layer.toggleClippingAt";
 pub(crate) fn line_entry(session:&Session)->Value {
-    serde_json::json!({"id":LINE_ID,"label":"切换分隔线剪贴关系","menu":[],"params":"{upper:id,lower:id}","allowed":true,"enabled":session.active().is_some_and(|state|crate::layer_preview::layer_count(&state.doc.layers)>1)})
+    serde_json::json!({"id":LINE_ID,"label":"切换分隔线剪贴关系","menu":[],"shortcut":null,"needsDocument":true,"disabledReason":null,"params":"{upper:id,lower:id}","allowed":true,"enabled":session.active().is_some_and(|state|crate::layer_preview::layer_count(&state.doc.layers)>1)})
 }
 pub(crate) fn toggle_line(session:&mut Session,params:&Value)->Result<Value> {
     let fail=|message:&str|error(LINE_ID,message);

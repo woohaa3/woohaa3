@@ -120,6 +120,17 @@ const controller = new EditorWorkspaceController({
 
 ## 工具栏结构
 
+编辑器 chrome 按 PhotoCraft 原生的 options bar、分段工具栏、右侧面板组和状态栏组织。嵌入 Woohaa
+时，宿主提供的内容矩形是唯一画布承载；`photo-editor.css` 把菜单、选项栏、工具栏、dock 和状态栏
+镂空定位到矩形外围，不为画布再做一次 fit。右侧面板按 Color、Properties、Character、Navigator、History、Layers、Brushes
+的能力投影纵向停靠；组内 Tab、关闭/重开、组排序与高度只写本机偏好。颜色/色板、字符/段落、
+画笔/画笔设置各自复用已有编辑能力。`EditorThemeRoot` 在 embedded 模式必须使用透明背景，
+否则根节点的内联主题背景会遮住宿主画布。
+
+`editor-wasm.ts` 在命令边界解码 JSON 响应；`tools.setBrush({preset})` 真正加载预设，
+`brush.presets.setCurrent` 只标记名称。笔迹保持子像素、压感、倾角、旋转和时间；
+`LiveStrokePreview` 只在原生 `strokeWantsTime()` 请求时推进停留采样，提交仍是一条历史。
+
 工具栏不在组件里手写分支：`src/toolbar-slots.ts` 是唯一的槽位注册表，逐项对应上游
 `crates/ui-egui/src/panels.rs::TOOL_SECTIONS`（段、槽索引、槽内成员顺序、组键、循环序、
 未开放理由）。`src/photo-editor-chrome.tsx` 只把投影渲染成分段工具列，

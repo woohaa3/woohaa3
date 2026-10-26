@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   EditorWorkspaceController,
+  createEditorId,
   PhotoEditorApp,
   type EditorPreview,
   type EditorViewport
@@ -123,11 +124,11 @@ export function PhotoCraftDevApp() {
 
   const importImage = async (file: File) => run(async () => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    return controller.openImage({ name: file.name, assetId: `dev-${crypto.randomUUID()}`, bytes });
+    return controller.openImage({ name: file.name, assetId: `dev-${createEditorId()}`, bytes });
   });
   const importProject = async (file: File) => run(async () => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    return controller.openProject({ bytes, baseAssetId: `dev-${crypto.randomUUID()}` });
+    return controller.openProject({ bytes, baseAssetId: `dev-${createEditorId()}` });
   });
   const apply = async () => {
     const outcome = await controller.save();

@@ -263,3 +263,11 @@ it("internal clipboard bounds are strict read-only geometry and support empty da
  const raw=vi.fn(()=>"null"),handle=new EditorHandle({clipboardBounds:raw} as unknown as EditorInstance,buildInfo);
  expect(handle.clipboardBounds()).toEqual({ok:true,value:null});raw.mockReturnValueOnce("[1,2,4,6]");expect(handle.clipboardBounds()).toEqual({ok:true,value:[1,2,4,6]});for(const bad of ["[1,2,1,4]","[1.5,2,4,6]","{}"]) {raw.mockReturnValueOnce(bad);expect(handle.clipboardBounds()).toMatchObject({ok:false});}
 });
+
+it("命令 JSON 响应在 WASM 边界解码，面板不收到双重编码的字符串",()=>{
+ const execute=vi.fn(()=>'{"presets":[{"name":"Hard Round"}]}');
+ const handle=new EditorHandle({execute} as unknown as EditorInstance,buildInfo);
+ expect(handle.execute("brush.presets.list",{full:false})).toEqual({ok:true,value:{presets:[{name:"Hard Round"}]}});
+ expect(execute).toHaveBeenCalledWith("brush.presets.list",'{"full":false}');
+ execute.mockReturnValueOnce('not JSON');expect(handle.execute("brush.presets.list")).toMatchObject({ok:false});
+});

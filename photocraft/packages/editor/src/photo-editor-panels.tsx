@@ -236,7 +236,7 @@ export function LayerPanel({ view, commands, readonly, onSelect, onToggleVisible
           return <Button key={key} size="sm" tone="ghost" data-lock={key} data-lock-state={mixed ? "mixed" : on ? "on" : "off"}
             disabled={readonly || selected.length===0 || !commands.get("layer.lockLayers")?.allowed || !commands.get("layer.lockLayers")?.enabled || (key!=="all" && selected.some(layer=>layer.effectiveLocks.all))}
             title={`${on ? "取消锁定" : "锁定"}${label}${mixed ? "（部分已锁定）" : ""}`} onClick={()=>onCommand("layer.lockLayers",{[key]:!on})}>
-            {key==="all" ? <LockIcon size={13}/> : null}{label}
+            <LockIcon size={13}/><span className="photo-editor__lock-label">{label}</span>
           </Button>;
         })}
       </div>

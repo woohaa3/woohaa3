@@ -24,6 +24,18 @@ it("真正移除 realm 并释放交接 token，旧故障回调无效；宿主移
   handoff.fault("late-error"); expect(fault).not.toHaveBeenCalled();
 });
 
+it("HTTP 安全上下文外没有 randomUUID 时仍能创建 realm token", async () => {
+  const { host } = surface();
+  const currentCrypto = globalThis.crypto;
+  vi.stubGlobal("crypto", { getRandomValues: currentCrypto.getRandomValues.bind(currentCrypto) });
+  const pending = createRuntimeRealm(globalThis, vi.fn());
+  const handoff = [...registry().values()][0]!;
+  handoff.ready({} as BevyModule);
+  const realm = await pending;
+  expect(host.querySelector("iframe")).not.toBeNull();
+  realm.dispose();
+});
+
 it("首个 scene 绘制前 iframe 保持透明，reveal 后淡入并解除 curtain", async () => {
   const { host } = surface();
   const pending = createRuntimeRealm(globalThis, vi.fn());

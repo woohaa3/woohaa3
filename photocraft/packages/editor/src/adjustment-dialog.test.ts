@@ -13,6 +13,14 @@ describe("直接图像调整参数",()=>{
   expect(buildAdjustmentParams("levels",values("levels") as never)).toEqual({inBlack:0,gamma:1,inWhite:255,outBlack:0,outWhite:255});
  });
 
+ it("亮度、色相和曲线可直接提交且拒绝无效候选",()=>{
+  expect(buildAdjustmentParams("brightnessContrast",values("brightnessContrast"))).toEqual({brightness:0,contrast:0,legacy:false});
+  expect(buildAdjustmentParams("hueSaturation",values("hueSaturation"))).toEqual({hue:0,saturation:0,lightness:0});
+  expect(buildAdjustmentParams("curves",{points:[[0,0],[100,180],[255,255]]})).toEqual({points:[[0,0],[100,180],[255,255]]});
+  expect(buildAdjustmentParams("curves",{points:[[0,0],[0,255]]})).toBeNull();
+  expect(buildAdjustmentParams("brightnessContrast",{brightness:151,contrast:0,legacy:false})).toBeNull();
+ });
+
  it("渐变映射输出 0–1 位置的两端色标，不发送界面内部结构",()=>{
   expect(buildAdjustmentParams("gradientMap",{stops:["#112233","#ddeeff"],reverse:false,dither:true})).toEqual({stops:[[0,"#112233"],[1,"#ddeeff"]],reverse:false,dither:true});
   expect(buildAdjustmentParams("gradientMap",{stops:["#112233","not-a-color"],reverse:false,dither:false})).toBeNull();

@@ -3,7 +3,7 @@ import {useScreenModeWindow,type EditorScreenModeWindowPort} from "./screen-mode
 import {NO_STICKY_MODIFIERS,type StickyModifiers} from "./modifier-keys.js";
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 
-import {DEFAULT_PANEL_LAYOUT,normalizePanelLayout,readPanelLayout,savePanelLayout,type EditorPanelLayout} from "./editor-panel-layout.js";
+import {DEFAULT_PANEL_LAYOUT,normalizePanelLayout,readPanelLayout,savePanelLayout,type EditorPanelLayout,type PanelGroupId} from "./editor-panel-layout.js";
 
 export type EditorScreenMode = "standard" | "fullScreenWithMenuBar" | "fullScreen";
 export const EDITOR_SCREEN_MODES = [{id:"standard",label:"标准屏幕模式"},{id:"fullScreenWithMenuBar",label:"带菜单栏全屏"},{id:"fullScreen",label:"全屏模式"}] as const;
@@ -39,7 +39,7 @@ export type EditorLayoutConfig = {
   panelMaxWidth: number;
 };
 
-export type EditorDisplayControls = {state:EditorDisplayState;toggle:(action:EditorDisplayAction)=>void;setScreenMode?:(mode:EditorScreenMode)=>void;toggleStickyModifier?:(key:keyof StickyModifiers)=>void;updatePanels?:(patch:Partial<EditorPanelLayout>)=>void};
+export type EditorDisplayControls = {showPanel?:(group:PanelGroupId,tab?:string)=>void;state:EditorDisplayState;toggle:(action:EditorDisplayAction)=>void;setScreenMode?:(mode:EditorScreenMode)=>void;toggleStickyModifier?:(key:keyof StickyModifiers)=>void;updatePanels?:(patch:Partial<EditorPanelLayout>)=>void};
 export const INITIAL_EDITOR_DISPLAY:EditorDisplayState={modifiersVisible:false,stickyModifiers:NO_STICKY_MODIFIERS,extrasVisible:true,toolsVisible:true,optionsVisible:true,sidebarVisible:true,restore:null};
 
 export function toggleEditorDisplay(state:EditorDisplayState,action:EditorDisplayAction):EditorDisplayState {
@@ -89,8 +89,15 @@ export function useEditorDisplay(beforeLayoutChange?:()=>void,windowPort?:Editor
   useEffect(()=>{if(enabled && rememberRef.current && state.panelLayout)savePanelLayout(state.panelLayout);},[state.panelLayout,remember,enabled]);
   // Tab hides are temporary: persist the combination to restore rather than the hidden shell.
   useEffect(()=>{if(enabled && rememberRef.current)saveWorkspaceVisibility({...state,...state.restore});},[state.toolsVisible,state.optionsVisible,state.sidebarVisible,state.navigatorVisible,state.histogramVisible,state.infoVisible,state.cloneSourceVisible,state.brushPresetsVisible,state.modifiersVisible,state.restore,remember,enabled]);
+  const showPanel=useCallback((group:PanelGroupId,tab?:string)=>{
+    const current=latest.current,layout=current.panelLayout??DEFAULT_PANEL_LAYOUT;
+    const panelLayout=normalizePanelLayout({...layout,...(group==="layers"?{layersCollapsed:false}:group==="history"?{historyCollapsed:false}:group==="properties"?{propertiesCollapsed:false}:{}),hiddenGroups:{...layout.hiddenGroups,[group]:false},collapsedGroups:{...layout.collapsedGroups,[group]:false},activeTabs:{...layout.activeTabs,...(tab?{[group]:tab}:{})}});
+    const next={...current,sidebarVisible:true,panelLayout,...(group==="brushes"?{brushPresetsVisible:true}:{}),...(group==="navigator"?{[tab==="histogram"?"histogramVisible":tab==="info"?"infoVisible":tab==="cloneSource"?"cloneSourceVisible":"navigatorVisible"]:true}:{})};
+    if(!current.sidebarVisible)beforeLayoutChange?.();
+    latest.current=next;setState(next);
+  },[beforeLayoutChange]);
   const toggleStickyModifier=useCallback((key:keyof StickyModifiers)=>{const previous=latest.current,sticky=previous.stickyModifiers??NO_STICKY_MODIFIERS,next={...previous,stickyModifiers:{...sticky,[key]:!sticky[key]}};latest.current=next;setState(next);},[]);
   const publishMode=useCallback((mode:EditorScreenMode,error?:string)=>{const next={...setEditorScreenMode(latest.current,mode),screenModeError:error};beforeLayoutChange?.();latest.current=next;setState(next);},[beforeLayoutChange]);
   const setScreenMode=useScreenModeWindow(publishMode,windowPort);
-  return useMemo(()=>({state,toggle,updatePanels,toggleStickyModifier,setScreenMode}),[state,toggle,updatePanels,toggleStickyModifier,setScreenMode]);
+  return useMemo(()=>({state,toggle,showPanel,updatePanels,toggleStickyModifier,setScreenMode}),[state,toggle,showPanel,updatePanels,toggleStickyModifier,setScreenMode]);
 }

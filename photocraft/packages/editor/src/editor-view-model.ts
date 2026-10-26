@@ -299,9 +299,10 @@ export function isFirstPhaseBlend(label: string): boolean {
   return FIRST_PHASE_BLENDS.some((blend) => blend.toLowerCase() === normalized);
 }
 
-/** 命令是否可作为工具栏/菜单项渲染：首期白名单 + 引擎当前可用。 */
+/** Capability index also retains commands used by panels and tools without a native menu path.
+ * Visible menus are explicitly projected by photo-editor-menu, never from this entire index. */
 export function isRenderableCommand(command: PhotocraftCommand): boolean {
-  return command.allowed && (command.menu.length > 0 || command.id === "edit.transform" || command.id === "layer.setExpanded");
+  return command.allowed;
 }
 
 /**

@@ -13,6 +13,8 @@ import {navigateViewport,type ViewportNavigation} from "./viewport-navigation.js
 import {ZoomToolGesture,type ZoomGestureContext,type ZoomRectangle} from "./zoom-gesture.js";
 import {DEFAULT_TRANSPARENCY_GRID,transparencyGridStyle,type TransparencyGrid} from "./transparency-grid.js";
 const clampPenPressure=(pressure:number)=>Math.max(0,Math.min(1,pressure));
+/** Pointer timestamps share requestAnimationFrame's time origin. Keep pen orientation in native degrees. */
+const strokeSample=(point:DocumentPoint,event:{pointerType?:string;pressure:number;tiltX?:number;tiltY?:number;twist?:number;timeStamp:number}):DocumentPoint=>({...point,time:event.timeStamp,...(event.pointerType==="pen"?{pressure:event.pressure,tiltX:event.tiltX??0,tiltY:event.tiltY??0,rotation:event.twist??0}:{})});
 import {clampEditorZoom,stepEditorZoom} from "./zoom-levels.js";
 import {FlickPan,interpolateViewport,zoomAt} from "./viewport-motion.js";
 import {resizeBrush,type BrushResizeValues} from "./brush-resize.js";
@@ -467,7 +469,7 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
       else if (moveRef.current) {const matrix=moveMatrix(point,pointer.shiftKey);onMovePreview?.(matrix);}
       else if(textStart.current){const start=textStart.current;setBox({x:Math.min(start.x,point.x),y:Math.min(start.y,point.y),width:Math.abs(point.x-start.x),height:Math.abs(point.y-start.y)});}
       else if(pathRef.current){
-        const last=pathRef.current.at(-1),sample={...point,...(last?.pressure!==undefined?{pressure:last.pressure}:{})};
+        const last=pathRef.current.at(-1),sample={...last,...point,time:performance.now()};
         const next=strokeConstraint.current?.update(sample,pointer.shiftKey)??sample;
         if(last && (next.x!==last.x || next.y!==last.y)){if(penTap.current)penTap.current.moved=true;pathRef.current.push(next);onStrokeMove?.([next]);}
       }
@@ -712,7 +714,7 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
               {shift:event.shiftKey,alt:event.altKey,space:false},tool==="marquee"?marqueeLine:undefined,hasSelection,tool==="marquee"?marqueeConstraint:undefined);
             showSelection(); autoPan.update();
           } else {
-            const first = { ...point, ...(event.pointerType === "pen" ? { pressure: event.pressure } : {}) };
+            const first=strokeSample(point,event);
             penTap.current=event.pointerType==="pen"?{x:point.x,y:point.y,pressure:Number.isFinite(event.pressure)?clampPenPressure(event.pressure):0,moved:false}:null;
             strokeConstraint.current=new StrokeConstraint(first,event.shiftKey,zoom);
             pathRef.current = [first];
@@ -793,7 +795,7 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
             if(!point) return [];
             const tap=penTap.current;
             if(tap){if(Number.isFinite(sample.pressure))tap.pressure=Math.max(tap.pressure,clampPenPressure(sample.pressure));if(point.x!==tap.x || point.y!==tap.y)tap.moved=true;if(!tap.moved)return [];}
-            const pressure={...point,...(event.pointerType === "pen" ? {pressure:sample.pressure}:{})};
+            const pressure=strokeSample(point,{...sample,pointerType:event.pointerType,pressure:sample.pressure,tiltX:sample.tiltX,tiltY:sample.tiltY,twist:sample.twist,timeStamp:sample.timeStamp});
             return [strokeConstraint.current?.update(pressure,event.shiftKey)??pressure];
           });
           pathRef.current.push(...points);
@@ -907,12 +909,18 @@ export const PhotoCanvas = forwardRef<PhotoCanvasHandle, PhotoCanvasProps>(funct
         if (pathRef.current) {
           const path = pathRef.current;
           pathRef.current = null;
+          for(const sample of event.nativeEvent.getCoalescedEvents?.()??[]){
+            const at=toDocument(sample.clientX,sample.clientY);if(!at)continue;
+            const tap=penTap.current;if(tap){if(Number.isFinite(sample.pressure))tap.pressure=Math.max(tap.pressure,clampPenPressure(sample.pressure));if(at.x!==tap.x || at.y!==tap.y)tap.moved=true;if(!tap.moved)continue;}
+            const next=strokeSample(at,sample),constrained=strokeConstraint.current?.update(next,event.shiftKey)??next;
+            path.push(constrained);onStrokeMove?.([constrained]);
+          }
           const rawEnd = toDocument(event.clientX, event.clientY);
           const tap=penTap.current;penTap.current=null;
           if(tap && rawEnd){if(rawEnd.x!==tap.x || rawEnd.y!==tap.y)tap.moved=true;if(Number.isFinite(event.pressure))tap.pressure=Math.max(tap.pressure,clampPenPressure(event.pressure));}
           const end=rawEnd ? strokeConstraint.current?.update(rawEnd,event.shiftKey)??rawEnd:null;strokeConstraint.current=null;
           // 抬笔的 0 压感不是最后一笔的压力，沿用最后一个实际采样值。
-          let points = end && (end.x !== path.at(-1)?.x || end.y !== path.at(-1)?.y) ? [...path, { ...end, pressure: path.at(-1)?.pressure }] : path;
+          let points = end && (end.x !== path.at(-1)?.x || end.y !== path.at(-1)?.y) ? [...path, {...path.at(-1),...end,time:event.timeStamp,pressure:path.at(-1)?.pressure}] : path;
           if(tap && !tap.moved && points.length){const point={...points[0],pressure:tap.pressure};points=[point];if(tap.pressure!==path[0]?.pressure)onStrokeTap?.(point);}
           setPath(null);
           if (points.length === 0) return;

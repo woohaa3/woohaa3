@@ -8,8 +8,8 @@
  */
 
 .photo-document-tabs {
-  /* 在内容区的文档流内占据自身高度；编辑器把菜单/工具栏绝对定位到内容矩形上方
-     （`--focus-toolbar` 已含 tab 高度），因此三者不会重叠。 */
+  /* 宿主已在内容矩形上方预留高度；外层 wrapper 将整个条带定位在该预留区，
+     不再从编辑器交互区域扣除第二次高度。 */
   position: relative;
   flex: 0 0 auto;
   display: flex;
@@ -208,7 +208,24 @@
 
 .image-edit-presentation > [hidden], .image-edit-workspace > [hidden] { display: none; }
 
-.image-edit-workspace > [data-document-tabs-wrap]:not([hidden]) { display: contents; }
+/* Focus layout already reserves this strip above the content rectangle.
+ * Do not subtract its height again from the renderer's gesture surface. */
+.image-edit-workspace {
+  --photo-document-tabs-height: 34px;
+}
+.image-edit-workspace:has(.photo-document-tabs[data-large-tabs]) {
+  --photo-document-tabs-height: 42px;
+}
+.image-edit-presentation:not([data-screen-mode="standard"]) > .image-edit-workspace {
+  --photo-document-tabs-height: 0px;
+}
+.image-edit-workspace > [data-document-tabs-wrap]:not([hidden]) {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+}
 
 .photo-document-tab[data-drop-before] {box-shadow:inset 3px 0 var(--app-interaction-accent);}
 

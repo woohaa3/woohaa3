@@ -1,10 +1,11 @@
 import {useEffect,useRef,useState} from "react";
 import type {EditorResult} from "./editor-wasm.js";
 import type {HistogramReadout} from "./histogram-data.js";
-export function HistogramPanel({documentKey,contextKey,read}:{documentKey:string;contextKey:string;read:()=>EditorResult<HistogramReadout>}) {
+export function HistogramPanel({active=true,documentKey,contextKey,read}:{active?:boolean;documentKey:string;contextKey:string;read:()=>EditorResult<HistogramReadout>}) {
   const [channel,setChannel]=useState(0),[state,setState]=useState<{documentKey:string;contextKey:string;value:HistogramReadout|null;error?:string}|null>(null);
   const generation=useRef(0),lastRead=useRef(-Infinity);
   useEffect(()=>{
+    if(!active)return;
     const token=++generation.current;
     const delay=state?.documentKey===documentKey?Math.max(0,250-(performance.now()-lastRead.current)):0;
     const timer=setTimeout(()=>{
@@ -13,7 +14,7 @@ export function HistogramPanel({documentKey,contextKey,read}:{documentKey:string
       catch{if(token===generation.current)setState({documentKey,contextKey,value:null,error:"直方图暂不可用"});}
     },delay);
     return()=>{generation.current++;clearTimeout(timer);};
-  },[documentKey,contextKey,read]);
+  },[active,documentKey,contextKey,read]);
   const current=state?.documentKey===documentKey?state:null,value=current?.value,hist=value?.channels[channel];
   const cached=current?.contextKey!==contextKey;
   const bins=hist?.bins??[],top=Math.max(1,...bins),path=bins.map((v,i)=>`${i===0?"M":"L"}${i+0.5} ${100-v/top*100}`).join("");

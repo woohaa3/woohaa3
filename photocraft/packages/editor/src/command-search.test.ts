@@ -20,3 +20,15 @@ it("主题及亮度菜单可通过路径或命令名搜索，不依赖文档写�
  const controller={snapshot:()=>({view:{document:null},commands:new Map()})} as unknown as import("./editor-workspace.js").EditorWorkspaceController;
  const entries=commandSearchEntries(controller);expect(searchCommands(entries,"窗口 主题",[])).toHaveLength(15);expect(searchCommands(entries,"view.lightenInterface",[])[0]).toMatchObject({enabled:true,shortcut:"Mod+Shift+F2"});
 });
+
+it("工具变体具有独立身份，精确工具名优先于包含该名称的其他工具",()=>{
+ const controller={snapshot:()=>({view:{document:{}},commands:new Map()})} as unknown as import("./editor-workspace.js").EditorWorkspaceController;
+ const entries=commandSearchEntries(controller);
+ expect(new Set(entries.map(entry=>entry.id)).size).toBe(entries.length);
+ expect(searchCommands(entries,"画笔",[])[0]).toMatchObject({id:"tool:brush",tool:"brush",label:"画笔"});
+ expect(searchCommands(entries,"椭圆选框",[])[0]).toMatchObject({tool:"marquee",variant:"ellipse"});
+ expect(searchCommands(entries,"竖排文字",[])[0]).toMatchObject({tool:"text",variant:"vertical"});
+});
+it("子菜单路径在名称之前匹配，例如删除图层",()=>{
+ expect(searchCommands([{id:"layer.delete",label:"图层",path:"图层 › 删除",enabled:true}],"删除图层",[])[0]?.id).toBe("layer.delete");
+});

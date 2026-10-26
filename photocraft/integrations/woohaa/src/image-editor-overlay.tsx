@@ -167,7 +167,7 @@ export function ImageEditorWorkspace({ store, projectPort, onActivateDocument, o
       <div className="image-edit-workspace" data-image-edit-workspace="true"
         data-document-kind={active?.nodeDocument ? "node" : active ? "file" : undefined}
         data-image-edit-history={view?.isReadOnlyPreview() ? "true" : undefined}>
-        {/* tab 条位于内容区顶部、编辑菜单与工具区之上（design D2）。 */}
+        {/* tab 条位于菜单/选项栏下方的宿主预留区，不占用画布内容矩形。 */}
         <div data-document-tabs-wrap="true" hidden={!!display.state.screenMode && display.state.screenMode!=="standard"}>
         <DocumentTabs
           snapshot={ui.documents} activeContext={tabContext} large={display.state.largeDocumentTabs}

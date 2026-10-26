@@ -187,8 +187,8 @@ it("同批指针事件与合并采样不丢点，保留笔压并在抬笔前发�
     ] as PointerEvent[]));
     stage.dispatchEvent(event("pointerup", 140, 0));
   });
-  expect(onStrokeStart).toHaveBeenCalledWith({ x: 136, y: 136, pressure: .4 },{shift:false});
-  expect(onStrokeMove.mock.calls).toEqual([
+  expect(onStrokeStart).toHaveBeenCalledWith(expect.objectContaining({ x: 136, y: 136, pressure: .4,tiltX:0,tiltY:0,rotation:0,time:expect.any(Number) }),{shift:false});
+  expect(onStrokeMove.mock.calls).toMatchObject([
     [[{ x: 156, y: 136, pressure: .5 }, { x: 196, y: 136, pressure: .7 }]],
     [[{ x: 216, y: 136, pressure: .7 }]]
   ]);
@@ -235,9 +235,9 @@ it.each(["brush", "eraser"] as const)("%s 保留越界采样，不将图外运�
     act(() => stage.dispatchEvent(event));
   };
   send("pointerdown", 10, 100); send("pointermove", 10, 200); send("pointermove", 100, 200); send("pointerup", 100, 200);
-  expect(onStrokeStart).toHaveBeenCalledWith({ x: -44, y: 136 },{shift:false});
-  expect(onStrokeMove.mock.calls).toEqual([[[{ x: -44, y: 336 }]], [[{ x: 136, y: 336 }]]]);
-  expect(onStroke.mock.calls[0][0]).toEqual([{ x: -44, y: 136 }, { x: -44, y: 336 }, { x: 136, y: 336 }]);
+  expect(onStrokeStart).toHaveBeenCalledWith(expect.objectContaining({ x: -44, y: 136,time:expect.any(Number) }),{shift:false});
+  expect(onStrokeMove.mock.calls).toMatchObject([[[{ x: -44, y: 336 }]], [[{ x: 136, y: 336 }]]]);
+  expect(onStroke.mock.calls[0][0]).toMatchObject([{ x: -44, y: 136 }, { x: -44, y: 336 }, { x: 136, y: 336 }]);
 });
 
 it("移动在整幅交互层开始，保留图外真实坐标，松手一次提交且取消不补交", () => {
@@ -539,11 +539,11 @@ it("画笔Shift约束含抬笔坐标，连线预览随修饰键和活动手势�
  const send=(type:string,x:number,y:number,shiftKey=true)=>{const event=new MouseEvent(type,{button:0,clientX:x,clientY:y,bubbles:true,shiftKey});Object.defineProperty(event,"pointerId",{value:1});act(()=>stage.dispatchEvent(event));};
  send("pointermove",100,100);expect(container.querySelector('[data-testid="stroke-line-preview"]')).not.toBeNull();
  act(()=>ref.current!.selectionKey("Shift",false));expect(container.querySelector('[data-testid="stroke-line-preview"]')).toBeNull();
- send("pointerdown",100,100);send("pointermove",130,104);expect(append.mock.lastCall?.[0][0]).toEqual({x:196,y:136});
+ send("pointerdown",100,100);send("pointermove",130,104);expect(append.mock.lastCall?.[0][0]).toMatchObject({x:196,y:136});
  expect(container.querySelector('[data-testid="stroke-line-preview"]')).toBeNull();
  send("pointerup",140,150);expect(finish.mock.lastCall?.[0].at(-1)).toMatchObject({x:216,y:136});
  send("pointerdown",100,100);send("pointermove",130,104);send("pointercancel",130,104);
- send("pointerdown",100,100,false);send("pointermove",130,120,false);expect(append.mock.lastCall?.[0][0]).toEqual({x:196,y:176});
+ send("pointerdown",100,100,false);send("pointermove",130,120,false);expect(append.mock.lastCall?.[0][0]).toMatchObject({x:196,y:176});
 });
 
 it("Ctrl+Alt笔刷调整固定HUD且整次只提交一次工具设置，不进入笔迹；取消不写",()=>{

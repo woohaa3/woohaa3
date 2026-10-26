@@ -38,6 +38,8 @@ export function normalizePresetName(value:string):string|null {
 }
 
 export type BrushPresetPanelProps = {
+  onApplied?:()=>void;
+  syncCurrent?:()=>{ok:boolean;message?:string};
   controller:EditorWorkspaceController;
   /** 面板可见时才读取预设，关闭时不发命令。 */
   visible:boolean;
@@ -49,7 +51,7 @@ export type BrushPresetPanelProps = {
   defineBlockedReason?:string;
 };
 
-export function BrushPresetPanel({controller,visible,disabled,documentKey,canDefineFromSelection,defineBlockedReason}:BrushPresetPanelProps) {
+export function BrushPresetPanel({controller,visible,disabled,documentKey,canDefineFromSelection,defineBlockedReason,onApplied,syncCurrent}:BrushPresetPanelProps) {
   const [presets,setPresets]=useState<BrushPresetRow[]>([]);
   const [name,setName]=useState("");
   const [error,setError]=useState<string|null>(null);
@@ -66,10 +68,11 @@ export function BrushPresetPanel({controller,visible,disabled,documentKey,canDef
     if(!result.ok){setError(result.message??"画笔预设操作失败");return false;}
     setError(null);after?.();refresh();return true;
   };
+  const prepare=()=>{if(!syncCurrent)return true;const result=syncCurrent();if(!result.ok)setError(result.message??"画笔参数同步失败");return result.ok;};
   const save=()=>{
     const normalized=normalizePresetName(name);
     if(!normalized){setError("请输入预设名称（最多 128 个字符）");return;}
-    if(run(()=>controller.saveBrushPreset(normalized)))setName("");
+    if(prepare() && run(()=>controller.saveBrushPreset(normalized)))setName("");
   };
   const define=()=>{
     const normalized=normalizePresetName(name);
@@ -93,9 +96,9 @@ export function BrushPresetPanel({controller,visible,disabled,documentKey,canDef
       {presets.map(preset=><li key={preset.name} data-brush-preset={preset.name} data-builtin={preset.builtin?"true":undefined}>
         <span>{preset.name}</span>
         <small>{preset.size}px · {Math.round(preset.hardness*100)}% · {preset.tip==="sampled"?"采样笔尖":"圆笔尖"}</small>
-        <Button size="sm" disabled={disabled} onClick={()=>run(()=>controller.setBrushPreset(preset.name))}>应用</Button>
+        <Button size="sm" disabled={disabled} onClick={()=>run(()=>controller.setBrushPreset(preset.name),onApplied)}>应用</Button>
         {preset.builtin?null:<>
-          <Button size="sm" disabled={disabled} onClick={()=>run(()=>controller.updateBrushPreset(preset.name))}>更新</Button>
+          <Button size="sm" disabled={disabled} onClick={()=>{if(prepare())run(()=>controller.updateBrushPreset(preset.name));}}>更新</Button>
           <Button size="sm" disabled={disabled} onClick={()=>run(()=>controller.deleteBrushPreset(preset.name))}>删除</Button>
         </>}
       </li>)}

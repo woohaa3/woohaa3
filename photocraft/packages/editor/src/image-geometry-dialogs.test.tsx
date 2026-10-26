@@ -23,11 +23,11 @@ function dialogPort() {
 function setup() {
  const {port,Host}=dialogPort();let revision=1,blocked=false;
  const dispatch=vi.fn((..._args:unknown[])=>({ok:true} as {ok:boolean;message?:string})),error=vi.fn();
- const controller={dialogOwner:()=>({canvasId:"c",sessionId:"s"}),snapshot:()=>({view:{document:{width:12,height:8,revision}},commands:new Map(["image.canvasSize","image.rotation.arbitrary","image.imageSize","file.automate.fitImage","image.trim"].map(id=>[id,{allowed:true,enabled:true}]))}),dispatch,beginImageRotation:vi.fn(()=>({ok:true,value:{width:12,height:8}})),previewImageRotation:(params:unknown)=>{dispatch("preview-rotation",params);return {ok:true,value:{width:12,height:8}};},commitImageRotation:()=>{dispatch("commit-rotation");return {ok:true};},cancelImageRotation:vi.fn(),render:()=>({ok:false,message:"测试不运行合成"})} as unknown as EditorWorkspaceController;
+ const controller={dialogOwner:()=>({canvasId:"c",sessionId:"s"}),snapshot:()=>({view:{document:{width:12,height:8,revision}},commands:new Map(["image.canvasSize","image.rotation.arbitrary","image.imageSize","file.automate.fitImage","image.trim","view.newGuide"].map(id=>[id,{allowed:true,enabled:true}]))}),dispatch,beginImageRotation:vi.fn(()=>({ok:true,value:{width:12,height:8}})),previewImageRotation:(params:unknown)=>{dispatch("preview-rotation",params);return {ok:true,value:{width:12,height:8}};},commitImageRotation:()=>{dispatch("commit-rotation");return {ok:true};},cancelImageRotation:vi.fn(),render:()=>({ok:false,message:"测试不运行合成"})} as unknown as EditorWorkspaceController;
  let actions:ReturnType<typeof useImageGeometryDialogs>;
  function Probe(){actions=useImageGeometryDialogs(port,controller,blocked,vi.fn(),error,{foreground:"#112233",background:"#ffffff"});return <Host/>;}
  const node=document.createElement("div");document.body.append(node);root=createRoot(node);const render=()=>act(()=>root.render(<Probe/>));render();
- return {node,dispatch,error,port,controller,open:(action:"canvas"|"rotate"|"size"|"fit"|"trim")=>act(()=>actions!.open(action)),changeRevision:()=>{revision++;},block:()=>{blocked=true;render();}};
+ return {node,dispatch,error,port,controller,open:(action:"canvas"|"rotate"|"size"|"fit"|"trim"|"guide")=>act(()=>actions!.open(action)),changeRevision:()=>{revision++;},block:()=>{blocked=true;render();}};
 }
 function input(node:HTMLElement,index:number,value:string){const field=node.querySelectorAll<HTMLInputElement>('input[data-numeric-input]')[index]!;act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(field,value);field.dispatchEvent(new Event("input",{bubbles:true}));});}
 function submit(node:HTMLElement){act(()=>node.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})));}
@@ -81,4 +81,12 @@ it("修整按四边/颜色确认，成功记忆；失败与取消不覆盖记忆
  open("trim");expect(node.querySelector("select")!.value).toBe("topLeft");expect(node.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[2]!.checked).toBe(false);
  act(()=>{const select=node.querySelector("select")!;select.value="bottomRight";select.dispatchEvent(new Event("change",{bubbles:true}));});dispatch.mockReturnValueOnce({ok:false,message:"没有可修整内容"});submit(node);expect(node.textContent).toContain("没有可修整内容");act(()=>[...node.querySelectorAll("button")].find(b=>b.textContent==="取消")!.click());
  open("trim");expect(node.querySelector("select")!.value).toBe("topLeft");
+});
+
+it("新建参考线只有确认才分派，文档更换拒绝旧请求",()=>{
+ const {node,dispatch,open,changeRevision}=setup();open("guide");input(node,0,"120.5");
+ const orientation=node.querySelector("select")!;act(()=>{orientation.value="vertical";orientation.dispatchEvent(new Event("change",{bubbles:true}));});
+ submit(node);expect(dispatch.mock.lastCall).toEqual(["view.newGuide",{orientation:"vertical",position:120.5}]);
+ open("guide");input(node,0,"");submit(node);expect(dispatch).toHaveBeenCalledTimes(1);
+ input(node,0,"20");changeRevision();submit(node);expect(dispatch).toHaveBeenCalledTimes(1);expect(node.textContent).toContain("文档已变化");
 });

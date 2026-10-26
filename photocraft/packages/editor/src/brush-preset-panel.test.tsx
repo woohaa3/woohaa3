@@ -24,9 +24,9 @@ function setup(initial=rows as unknown) {
     defineBrushFromSelection:vi.fn((name:string)=>({ok:true as const,value:{name}}))
   } as unknown as EditorWorkspaceController;
   const host=document.createElement("div");document.body.append(host);root=createRoot(host);
-  const render=(props:{visible?:boolean;disabled?:boolean;canDefine?:boolean}={})=>act(()=>root.render(
+  const render=(props:{visible?:boolean;disabled?:boolean;canDefine?:boolean;onApplied?:()=>void;syncCurrent?:()=>{ok:boolean;message?:string}}={})=>act(()=>root.render(
     <BrushPresetPanel controller={controller} visible={props.visible??true} disabled={props.disabled??false}
-      documentKey="doc" canDefineFromSelection={props.canDefine??true} defineBlockedReason="请先建立非空像素选区"/>));
+      onApplied={props.onApplied} syncCurrent={props.syncCurrent} documentKey="doc" canDefineFromSelection={props.canDefine??true} defineBlockedReason="请先建立非空像素选区"/>));
   return {host,render,controller,get:()=>list};
 }
 
@@ -95,4 +95,13 @@ it("严格解码预设列表并规范化名称",()=>{
   expect(normalizePresetName("   ")).toBeNull();
   expect(normalizePresetName("x".repeat(129))).toBeNull();
   expect(normalizePresetName("x".repeat(128))).toHaveLength(128);
+});
+
+it("只有应用成功才回填参数，保存和更新先同步当前工具参数",()=>{
+ const {host,render,controller}=setup(),onApplied=vi.fn(),syncCurrent=vi.fn(()=>({ok:true}));render({onApplied,syncCurrent});
+ const buttons=()=>[...host.querySelector('[data-brush-preset="我的笔尖"]')!.querySelectorAll('button')];
+ act(()=>buttons()[0]!.click());expect(onApplied).toHaveBeenCalledOnce();
+ vi.mocked(controller.setBrushPreset).mockReturnValueOnce({ok:false,code:"failed",message:"无法应用"});act(()=>buttons()[0]!.click());expect(onApplied).toHaveBeenCalledOnce();
+ act(()=>buttons()[1]!.click());expect(syncCurrent).toHaveBeenCalledOnce();expect(controller.updateBrushPreset).toHaveBeenCalledOnce();
+ syncCurrent.mockReturnValueOnce({ok:false});act(()=>buttons()[1]!.click());expect(controller.updateBrushPreset).toHaveBeenCalledOnce();
 });

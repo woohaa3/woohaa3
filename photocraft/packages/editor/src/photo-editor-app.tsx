@@ -77,7 +77,7 @@ import {useLayerActionDialogs} from "./layer-action-dialogs.js";
 import { useNewLayerDialog } from "./new-layer-dialog.js";
 import {editorChromeVisible,EDITOR_SCREEN_MODES,useEditorDisplay,type EditorScreenMode,type EditorDisplayControls,type EditorDisplayAction} from "./editor-display.js";
 import { useAdjustmentEditing } from "./use-adjustment-editing.js";
-import {EditorSidebar} from "./editor-sidebar.js";
+import {EditorSidebar,PanelTabs} from "./editor-sidebar.js";
 import {DEFAULT_PANEL_LAYOUT,type EditorPanelLayout} from "./editor-panel-layout.js";
 import {ChevronDownIcon,ChevronRightIcon} from "./ui/icons.js";
 import { ToolOptionsPanel, type PhotoEditorProperty } from "./photo-editor-tool-options.js";
@@ -87,7 +87,7 @@ import { useTextEditing } from "./use-text-editing.js";
 import { TextInputOverlay } from "./text-input-overlay.js";
 import { LiveStrokePreview } from "./live-stroke-preview.js";
 import {SourceDetailPreview,type DetailFrame} from "./source-detail-preview.js";
-import { PaintPercentInput, usePaintTools } from "./paint-tool-state.js";
+import { nativeBrushSettings, PaintPercentInput, usePaintTools } from "./paint-tool-state.js";
 import { TransformSession } from "./transform-session.js";
 import { IDENTITY_MATRIX, frameCenter, type TransformPoint } from "./transform-layer.js";
 import { Button } from "./ui/Button.js";
@@ -95,6 +95,7 @@ import { EditorCanvasMenu } from "./photo-editor-context-menu.js";
 import { EditorWorkspaceController } from "./editor-workspace.js";
 import type { EditorDialogPort } from "./ports.js";
 import type { EditorDocumentsMenu } from "./photo-editor-menu.js";
+import {ColorPanel} from "./color-panel.js";
 import { EditorMenuBar, EditorToolRail, type PhotoEditorTool } from "./photo-editor-chrome.js";
 import {groupOf, isCanvasTool, memberIdFor, slotOf, toolGroups, toolLabelFor, toolbarMembers, type ToolMember} from "./toolbar-slots.js";
 import {paintDispatch} from "./paint-dispatch.js";
@@ -118,6 +119,8 @@ import { editorInputConsumesKeys, FILL_SHORTCUTS, isEditorMac, nudgeTarget, reso
 import "./photo-editor.css";
 
 export type PhotoEditorAppProps = {
+  /** Chrome layout context. Embedded mode is positioned around the host content rectangle. */
+  chromeMode?: "standalone" | "embedded";
   display?:EditorDisplayControls;
   dialogs?: EditorDialogPort;
   controller: EditorWorkspaceController;
@@ -147,9 +150,9 @@ export type PhotoEditorAppProps = {
  */
 export function PhotoEditorApp(props:PhotoEditorAppProps) {
   const dialogs=useMemo(()=>props.dialogs?themedEditorDialogs(props.dialogs):undefined,[props.dialogs]);
-  return <EditorThemeRoot><PhotoEditorContents {...props} dialogs={dialogs}/></EditorThemeRoot>;
+  return <EditorThemeRoot transparentChrome={props.chromeMode === "embedded"}><PhotoEditorContents {...props} dialogs={dialogs}/></EditorThemeRoot>;
 }
-function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPreview, renderCanvasBackground, readonly = false, onApply, closing = false, dialogs, display: controlledDisplay, documents }: PhotoEditorAppProps) {
+function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPreview, renderCanvasBackground, readonly = false, onApply, closing = false, dialogs, display: controlledDisplay, documents, chromeMode = "standalone" }: PhotoEditorAppProps) {
   const theme=useEditorTheme();
   const localDisplay=useEditorDisplay(undefined,undefined,!controlledDisplay);
   const display=controlledDisplay??localDisplay;
@@ -223,11 +226,18 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
     if(result.ok)setBrushDynamics(decodeBrushDynamics(result.value));
   },[controller,tool]);
 
+  const readAppliedBrush=()=>{
+    const result=controller.currentBrush();if(!result.ok){setMessage(result.message);return;}
+    setBrushDynamics(decodeBrushDynamics(result.value));
+    setBrush(current=>({...current,...nativeBrushSettings(result.value)}));
+  };
   const changeBrushDynamics=(patch:Partial<BrushDynamics>)=>{
-    const next={...brushDynamics,...patch};setBrushDynamics(next);
-    if(typeof controller.setBrushDynamics!=="function")return;
-    const result=controller.setBrushDynamics(brushDynamicsPatch(next));
-    if(!result.ok)setMessage(result.message);
+    if(displayDisabled || transforming || canvasRef.current?.hasGesture())return;
+    const next={...brushDynamics,...patch};
+    const result=controller.setBrushDynamics(brushDynamicsPatch(next,patch));
+    if(!result.ok){setMessage(result.message);return;}
+    setBrushDynamics(next);
+    if(patch.angle!==undefined)setBrush(current=>({...current,angle:patch.angle}));
   };
 
   const [altHeld,setAltHeld] = useState(false);
@@ -394,7 +404,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
       if(id==="file.fileInfo") {if(canvasRef.current?.hasGesture() || nudge.current)return false;return fileInfoDialog.open();}
       if(id==="file.new" && params===null){if(!newDocumentDialog.available)return false;return newDocumentDialog.open();}
       if(id==="edit.fade" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return fadeDialog.open(documentView?.history.at(-1)??"最近一步");}
-      const destructive=id.startsWith("image.adjustments.") && !["image.adjustments.brightnessContrast","image.adjustments.hueSaturation","image.adjustments.curves"].includes(id) ? id.slice("image.adjustments.".length) : null;
+      const destructive=id.startsWith("image.adjustments.") ? id.slice("image.adjustments.".length) : null;
       if(destructive && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return adjustmentDialog.open(destructive as AdjustmentKind);}
       if(id==="edit.checkSpelling" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return spelling.open();}
       if(id==="edit.findAndReplaceText" && params===null){if(canvasRef.current?.hasGesture() || nudge.current)return false;return findReplace.open();}
@@ -402,6 +412,8 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
       if(id==="file.scripts.browse" && params===null)return scriptImport.open();
       if((id==="edit.pasteSpecial.pasteInto" || id==="edit.pasteSpecial.pasteOutside") && (canvasRef.current?.hasGesture() || nudge.current))return false;
       canvasRef.current?.cancelGesture();
+      if(id==="layer.layerStyle.scaleEffects" && params===null)return layerDialogs.scale();
+      if(id==="layer.renameLayer" && params===null)return layerDialogs.rename();
       if(id==="layer.lockLayers" && params===null) return layerDialogs.locks();
       if (id === "layer.new.layer" && params === null) {
         const command = controller.snapshot().commands.get(id);
@@ -413,6 +425,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
       if(documents?.purge && (id==="edit.purge.clipboard" || id==="edit.purge.histories" || id==="edit.purge.all")) {
         const result=documents.purge.execute(id);setMessage(result.ok?null:result.message??"清理失败");return result.ok;
       }
+      if(params===null && id==="view.newGuide") return geometryDialogs.open("guide");
       if(params===null && id==="image.trim") return geometryDialogs.open("trim");
       if(params===null && id==="file.automate.fitImage") return geometryDialogs.open("fit");
       if(params===null && id==="image.imageSize") return geometryDialogs.open("size");
@@ -432,7 +445,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
       setMessage(result.ok ? id==="edit.purge.videoCache"?"没有视频图层可清理":null : result.message);
       return result.ok;
     },
-    [controller, documents, geometryDialogs.open, scriptImport.open, definePattern.open,findReplace.open,spelling.open,edgeStroke.open,fillDialog.open,colorRangeDialog.open,colorRange,fadeDialog.open,adjustmentDialog.open,fileInfoDialog.open,colorModeDialog.open,retouchPatterns, readonly, busy, closing, textEditing.active, adjustmentEditing.active, propertiesEditing.active, newLayer.modalActive, newLayer.open, layerDialogs.locks, layerDialogs.find, layerDialogs.defringe, layerDialogs.decontaminate, colors.foreground, colors.background,pixelBackground, documentView, canvasView.viewport]
+    [controller, documents, geometryDialogs.open, scriptImport.open, definePattern.open,findReplace.open,spelling.open,edgeStroke.open,fillDialog.open,colorRangeDialog.open,colorRange,fadeDialog.open,adjustmentDialog.open,fileInfoDialog.open,colorModeDialog.open,retouchPatterns, readonly, busy, closing, textEditing.active, adjustmentEditing.active, propertiesEditing.active, newLayer.modalActive, newLayer.open, layerDialogs.locks, layerDialogs.rename, layerDialogs.scale, layerDialogs.find, layerDialogs.defringe, layerDialogs.decontaminate, colors.foreground, colors.background,pixelBackground, documentView, canvasView.viewport]
   );
 
   // 画布手势 → 命令参数（编译在 photo-editor-tools.ts，这里只做提交）。
@@ -587,7 +600,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
   const marqueeVariantValue = ():string => marqueeLine ?? (ellipse ? "ellipse" : "rectangle");
   /**
    * 记录槽位与组记忆（design D4）：只由「选中工具」这一个动作写入，两张表不会各自漂移。
-   * 槽位记忆按 `<槽索引>` 存成员 id；组记忆按组字母存工具 id。
+   * 槽位记忆按 `<槽索引>` 存成员 id；组记忆按组字母存成员 id，保留子工具变体。
    */
   const rememberToolForSlots = (next: PhotoEditorTool, variant?: string) => {
     const slot = slotOf(next);
@@ -597,10 +610,16 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
     const group = groupOf(next);
     if (group) {
       const key = toolbarMembers().find(entry => entry.tool === next)?.key;
-      if (key) setGroupMemory(current => current[key] === next ? current : {...current, [key]: next});
+      if (key) setGroupMemory(current => current[key] === member?.id ? current : {...current, [key]: member?.id??next});
     }
   };
-  const chooseTool = (next: PhotoEditorTool, selectionOnly = false, keyboard=false) => {    if (locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active) return;
+  const chooseTool = (next: PhotoEditorTool, selectionOnly = false, keyboard=false, variant?:string) => {
+    if (locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active) return;
+    if(next==="marquee" && variant) {
+      setEllipse(variant==="ellipse");setMarqueeLine(variant==="row" || variant==="column"?variant:undefined);
+    } else if(next==="text" && variant && commands.get(`type.orientation.${variant}`)?.allowed) {
+      textEditing.update({orientation:variant==="vertical"?"vertical":"horizontal"});
+    }
     if(!keyboard)springTools.current.reset();
     if (nudge.current) { nudge.current = null; endTransform(true); }
     if (next === "transform") {
@@ -615,7 +634,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
     if(next==="text") revealProperties();
     setTextToolProperties(next==="text");
     setTool(next);
-    rememberToolForSlots(next,next==="marquee"?marqueeVariantValue():next==="text"?textEditing.style.orientation:undefined);
+    rememberToolForSlots(next,variant??(next==="marquee"?marqueeVariantValue():next==="text"?textEditing.style.orientation:undefined));
   };
   useEffect(()=>{const previous=springTools.current.reset();if(previous!==null)setTool(previous);},[controller]);
   const springBusy=()=>!!canvasRef.current?.hasGesture() || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active;
@@ -671,7 +690,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
   }, [releaseInput]);
   useEffect(() => { if (baseLocked) releaseInput(); }, [baseLocked, releaseInput]);
 
-  const applyShortcut = (action: EditorShortcut): void => {
+  const applyShortcut = (action: EditorShortcut, springKey?:string): void => {
     if(action.kind==="display") {toggleDisplay(action.action);return;}
     if (action.kind !== "paintPercent") {resetDigits();layerDigits.current.reset();}
     if(action.kind==="navigate"){if(!viewDisabled)canvasRef.current?.navigate?.(action.navigation);return;}
@@ -729,7 +748,8 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
         const mode=next.variant==="vertical"?"vertical" as const:"horizontal" as const;
         if(commands.get(`type.orientation.${mode}`)?.allowed)textEditing.update({orientation:mode});
       }
-      chooseTool(next.tool, false, true);
+      if(springKey)springTools.current.press(springKey,tool,next.tool,performance.now());
+      chooseTool(next.tool, false, true,next.variant);
     } else if (action.kind === "tool") {
       chooseTool(action.tool,false,true);
     } else if (action.kind === "color") {
@@ -782,10 +802,13 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
     before:()=>!propertiesEditing.styleActive && propertiesEditing.finish(true) && adjustmentEditing.finish(true),apply:applyShortcut});
 
   const revealProperties=()=>{
-    if(!display.state.sidebarVisible) display.toggle("sidebar");
+    display.showPanel?.("properties","properties");
     display.updatePanels?.({propertiesCollapsed:false});
   };
   const panelLayout=display.state.panelLayout??DEFAULT_PANEL_LAYOUT;
+  const panelVisible=(group:"color"|"properties"|"character"|"navigator"|"history"|"layers"|"brushes")=>chromeVisible && display.state.sidebarVisible && !panelLayout.hiddenGroups[group] && !panelLayout.collapsedGroups[group];
+  const navigatorTab=panelLayout.activeTabs.navigator??(display.state.navigatorVisible?"navigator":display.state.histogramVisible?"histogram":display.state.infoVisible?"info":"cloneSource");
+  const navigatorActive=(tab:string)=>panelVisible("navigator") && navigatorTab===tab;
   const propertyFrame=documentView?.layerTransformFrame??(!documentView?.hasSelection?documentView?.transformFrame:null);
   const propertyTool:PhotoEditorProperty|null=textEditing.active || textToolProperties?"text":adjustmentEditing.active?"adjustment":documentView?.editTarget==="mask"?"mask":activeLayer?.kind==="text"?"text":activeLayer?.kind==="adjustment"?"adjustment":null;
   const canInsertLorem=!!commands.get("type.create")?.allowed && !locked && !transforming && !propertiesEditing.active && !adjustmentEditing.active && !textEditing.composing;
@@ -799,6 +822,10 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
     textEditing.finish(true);
   };
   const runLayerAction = (id: string) => {
+    if(id==="layer.layerStyle.blendingOptions"){
+      if(locked || transforming || !activeLayer || propertiesEditing.active || textEditing.active || adjustmentEditing.active || canvasRef.current?.hasGesture() || nudge.current)return false;
+      display.showPanel?.("layers","layers");propertiesEditing.styleEditing.start();return true;
+    }
     if(id==="type.resolveMissingFonts")return missingFonts.open();
     const adjustment = ADJUSTMENT_LAYER_ACTIONS.find(action => action.id === id);
     const result=run(id, adjustment?.params ?? null);
@@ -828,7 +855,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
     const selectedTheme=EDITOR_THEMES.find(item=>entry.id===`window.theme.${item.id}`);
     if(selectedTheme){theme.select(selectedTheme.id);return true;}
     if(entry.id==="view.darkenInterface"||entry.id==="view.lightenInterface"){theme.step(entry.id==="view.lightenInterface");return true;}
-    if(entry.tool) {chooseTool(entry.tool);return true;}
+    if(entry.tool) {chooseTool(entry.tool,false,false,entry.variant);return true;}
     if(entry.id==="edit.transform" || entry.id==="select.transformSelection") {chooseTool("transform",entry.id==="select.transformSelection");return true;}
     return runLayerAction(entry.id);
   },error:setMessage});
@@ -888,7 +915,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
   };
 
   return (
-    <div ref={editorRef} className="photo-editor" data-editor-chrome={chromeVisible?undefined:"hidden"} data-screen-mode={display.state.screenMode??"standard"} role="application" aria-label="PhotoCraft 图像编辑器" tabIndex={-1}
+    <div ref={editorRef} className="photo-editor" data-editor-chrome-mode={chromeMode} data-editor-chrome={chromeVisible?undefined:"hidden"} data-screen-mode={display.state.screenMode??"standard"} role="application" aria-label="PhotoCraft 图像编辑器" tabIndex={-1}
       onCopy={(event)=>clipboardEvent(event,"edit.copy")}
       onCut={(event)=>clipboardEvent(event,"edit.cut")}
       onPaste={(event)=>clipboardEvent(event,"edit.paste")}
@@ -1033,7 +1060,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
         event.preventDefault(); event.stopPropagation();
         if (event.repeat && action.kind !== "brush" && action.kind !== "view" && action.kind !== "navigate" && action.kind !== "nudge") return;
         if(action.kind==="tool" && action.tool!=="transform" && !event.shiftKey && !locked && !springBusy())springTools.current.press(event.key.toLowerCase(),tool,action.tool==="brush" && action.cycle && (tool==="brush" || tool==="pencil") ? tool==="brush"?"pencil":"brush":action.tool,performance.now());
-        applyShortcut(action);
+        applyShortcut(action,action.kind==="toolGroup" && !event.shiftKey && !locked && !springBusy()?event.key.toLowerCase():undefined);
       }}>
 
       {scriptImport.input}
@@ -1068,15 +1095,15 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
           {tool==="eyedropper"?<EyedropperOptions value={sampleSettings} onChange={setSampleSettings} disabled={locked}/>:null}
           {tool==="magicWand"?<MagicWandOptions value={magicWand} onChange={patch=>setMagicWand(current=>({...current,...patch}))} disabled={locked}/>:null}
           {isRetouchTool(tool)?<RetouchOptions tool={tool} value={retouch} onChange={patch=>setRetouch(current=>({...current,...patch}))} disabled={locked || transforming} patterns={retouchPatterns} resolutionDpi={documentView?.resolutionDpi??72}/>:null}
-          {tool==="text"?<TextStyleControls style={textEditing.textStyle} size={textEditing.style.size} disabled={locked || transforming || textEditing.composing} onChange={patch=>textEditing.updateStyle(patch)}/>:null}
-          {painting?<div className="photo-editor__brush-settings" data-brush-settings-wrap="true"><BrushSettingsPanel value={brushDynamics} disabled={locked||transforming} onChange={changeBrushDynamics}/></div>:null}
+          {tool==="text"?<Button size="sm" tone="ghost" disabled={locked || transforming} onClick={()=>display.showPanel?.("character","character")}>字符 / 段落</Button>:null}
+          {painting?<Button size="sm" tone="ghost" disabled={locked || transforming} onClick={()=>display.showPanel?.("brushes","settings")}>画笔设置</Button>:null}
           {painting?symmetry.controls:null}
           {renderOptions("tools")}
 
       </div>
       {display.state.screenModeError && !chromeVisible?<div className="photo-editor__screen-error">{display.state.screenModeError}</div>:null}
       <div className="photo-editor__body">
-        <EditorToolRail tool={tool} onTool={chooseTool} shownMemberFor={shownMemberFor} onTextOrientation={mode=>{
+        <EditorToolRail tool={tool} onTool={(next,variant)=>chooseTool(next,false,false,variant)} shownMemberFor={shownMemberFor} onTextOrientation={mode=>{
           if(locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active || canvasRef.current?.hasGesture() || nudge.current || mode==="vertical" && !commands.get("type.orientation.vertical")?.allowed)return;
           chooseTool("text");if(commands.get(`type.orientation.${mode}`)?.allowed)textEditing.update({orientation:mode});
         }} quickMask={!!documentView?.quickMask} onQuickMask={()=>run("select.editInQuickMaskMode")} screenMode={display.state.screenMode} onScreenMode={display.setScreenMode?setScreenMode:undefined} onView={action=>canvasRef.current?.view(action)} doubleColumn={panelLayout.toolbarDouble} onToggleColumns={()=>updatePanels({toolbarDouble:!panelLayout.toolbarDouble})} onMarqueeKind={(ellipse,line)=>{setEllipse(ellipse);setMarqueeLine(line);}} readonly={locked || transforming || textEditing.active || adjustmentEditing.active || propertiesEditing.active}
@@ -1088,9 +1115,9 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
           canConfirm={transformValid} hasGesture={() => !!canvasRef.current?.hasGesture() || !!nudge.current}
           onTransform={selectionOnly => chooseTool("transform", selectionOnly)} onEndTransform={endTransform} onCommand={run}>
           <StickyModifierContext.Provider value={display.state.stickyModifiers??NO_STICKY_MODIFIERS}><PhotoCanvas ref={canvasRef}
-            onNavigatorFrame={display.state.navigatorVisible?onNavigatorFrame:undefined}
+            onNavigatorFrame={display.state.navigatorVisible && navigatorActive("navigator")?onNavigatorFrame:undefined}
             pixelGrid={display.state.pixelGridVisible&&display.state.extrasVisible?{contextKey:`${documentView?.documentKey??snapshot.view.sessionActiveIndex}:${documentView?.revision}:${detailVersion}`,read:readPixelGrid}:undefined}
-            onPointerPosition={display.state.infoVisible?setInfoPoint:undefined}
+            onPointerPosition={display.state.infoVisible && navigatorActive("info")?setInfoPoint:undefined}
             showScrollbars={!display.state.screenMode || display.state.screenMode==="standard"}
             view={canvasView}
             {...(renderCanvasBackground ? { renderBackground: renderCanvasBackground } : {})}
@@ -1260,8 +1287,16 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
           /></StickyModifierContext.Provider>
         </EditorCanvasMenu>
 
-        <EditorSidebar info={<>{display.state.navigatorVisible?<NavigatorPanel key={navigatorDocumentKey} contextKey={`${navigatorDocumentKey}:${documentView?.revision}:${detailVersion}`} frame={navigatorFrame?.key===navigatorDocumentKey?navigatorFrame.frame:null} read={readNavigator} transparency={preferences.value.transparency} navigate={navigatorNavigate} zoomTo={navigatorZoom} blocked={displayDisabled} pinch={preferences.value.zoomWithTrackpadPinch}/>:null}{display.state.histogramVisible?<HistogramPanel documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} contextKey={`${documentView?.revision}:${detailVersion}`} read={readHistogram}/>:null}{display.state.infoVisible?<InfoPanel key={snapshot.view.sessionActiveIndex} contextKey={`${documentView?.documentKey??snapshot.view.sessionActiveIndex}:${documentView?.revision}:${detailVersion}`} point={infoPoint} size={sampleSettings.size} unit={preferences.value.measurementUnit} pointPicaSize={preferences.value.pointPicaSize} resolutionDpi={documentView?.resolutionDpi??72} read={readInfo}/>:null}<CloneSourcePanel controller={controller} visible={!!display.state.cloneSourceVisible} disabled={displayDisabled||transforming} documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} allowed={!!commands.get("cloneSource.list")?.allowed} message={setMessage}/><BrushPresetPanel controller={controller} visible={!!display.state.brushPresetsVisible} disabled={displayDisabled||transforming} documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} canDefineFromSelection={!!commands.get("brush.defineFromSelection")?.allowed && !!commands.get("brush.defineFromSelection")?.enabled} defineBlockedReason={commands.get("brush.defineFromSelection")?.disabledReason ?? "请先建立非空像素选区"}/></>} display={{...display,state:{...display.state,sidebarVisible:chromeVisible && display.state.sidebarVisible}}} canChange={()=>!canvasRef.current?.hasGesture()} disabled={displayDisabled || transforming}
-          properties={<section className="photo-editor__panel photo-editor__panel--properties">
+        <EditorSidebar color={<ColorPanel foreground={colors.foreground} background={colors.background} onForeground={setColor} onBackground={setBackground} onPick={background=>colorPicker.available && colorPicker.open(background?colors.background:colors.foreground,background?setBackground:setColor)} onAction={colorAction} disabled={displayDisabled} active={panelLayout.activeTabs.color} onActive={id=>updatePanels({activeTabs:{...panelLayout.activeTabs,color:id}})} report={setMessage}/>} character={<PanelTabs active={panelLayout.activeTabs.character} onActive={id=>updatePanels({activeTabs:{...panelLayout.activeTabs,character:id}})} tabs={(["character","paragraph"] as const).map(group=>({id:group,label:group==="character"?"字符":"段落",content:<TextStyleControls group={group} style={textEditing.textStyle} size={textEditing.style.size} disabled={displayDisabled || transforming || textEditing.composing || !textEditing.active && activeLayer?.kind!=="text"} onChange={patch=>{if(!textEditing.active && activeLayer?.kind==="text" && !textEditing.begin({layer:activeLayer.id}))return;textEditing.updateStyle(patch);}}/>}))}/> } characterVisible={!!commands.get("type.create")?.allowed} infoVisible={!!(display.state.navigatorVisible || display.state.histogramVisible || display.state.infoVisible || display.state.cloneSourceVisible)} info={<PanelTabs active={panelLayout.activeTabs.navigator} onActive={id=>updatePanels({activeTabs:{...panelLayout.activeTabs,navigator:id}})} tabs={[
+          ...(display.state.navigatorVisible ? [{id:"navigator",label:"导航器",content:<NavigatorPanel active={navigatorActive("navigator")} key={navigatorDocumentKey} contextKey={`${navigatorDocumentKey}:${documentView?.revision}:${detailVersion}`} frame={navigatorFrame?.key===navigatorDocumentKey?navigatorFrame.frame:null} read={readNavigator} transparency={preferences.value.transparency} navigate={navigatorNavigate} zoomTo={navigatorZoom} blocked={displayDisabled} pinch={preferences.value.zoomWithTrackpadPinch}/>}] : []),
+          ...(display.state.histogramVisible ? [{id:"histogram",label:"直方图",content:<HistogramPanel active={navigatorActive("histogram")} documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} contextKey={`${documentView?.revision}:${detailVersion}`} read={readHistogram}/>}] : []),
+          ...(display.state.infoVisible ? [{id:"info",label:"信息",content:<InfoPanel active={navigatorActive("info")} key={snapshot.view.sessionActiveIndex} contextKey={`${documentView?.documentKey??snapshot.view.sessionActiveIndex}:${documentView?.revision}:${detailVersion}`} point={infoPoint} size={sampleSettings.size} unit={preferences.value.measurementUnit} pointPicaSize={preferences.value.pointPicaSize} resolutionDpi={documentView?.resolutionDpi??72} read={readInfo}/>}] : []),
+          ...(display.state.cloneSourceVisible ? [{id:"cloneSource",label:"克隆源",content:<CloneSourcePanel controller={controller} visible={navigatorActive("cloneSource")} disabled={displayDisabled||transforming} documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} allowed={!!commands.get("cloneSource.list")?.allowed} message={setMessage}/>}] : [])
+        ]}/>} brushes={<PanelTabs active={panelLayout.activeTabs.brushes} onActive={id=>updatePanels({activeTabs:{...panelLayout.activeTabs,brushes:id}})} tabs={[
+          {id:"presets",label:"画笔",content:<BrushPresetPanel controller={controller} syncCurrent={()=>controller.setBrushDynamics({size:brush.size,hardness:brush.hardness,opacity:brush.opacity,flow:brush.flow,smoothing:{amount:brush.smoothing,enabled:true},angle:brush.angle??brushDynamics.angle,mode:brush.mode??"Normal"})} onApplied={readAppliedBrush} visible={!!display.state.brushPresetsVisible && panelVisible("brushes") && (panelLayout.activeTabs.brushes??"presets")==="presets"} disabled={displayDisabled||transforming} documentKey={documentView?.documentKey??String(snapshot.view.sessionActiveIndex)} canDefineFromSelection={!!commands.get("brush.defineFromSelection")?.allowed && !!commands.get("brush.defineFromSelection")?.enabled} defineBlockedReason={commands.get("brush.defineFromSelection")?.disabledReason ?? "请先建立非空像素选区"}/>},
+          {id:"settings",label:"画笔设置",content:<BrushSettingsPanel value={brushDynamics} disabled={displayDisabled||transforming} onChange={changeBrushDynamics}/>}
+        ]}/>} brushesVisible={!!display.state.brushPresetsVisible && !!commands.get("brush.presets.list")?.allowed} display={{...display,state:{...display.state,sidebarVisible:chromeVisible && display.state.sidebarVisible}}} canChange={()=>!canvasRef.current?.hasGesture()} disabled={displayDisabled || transforming}
+          properties={<PanelTabs active={panelLayout.activeTabs.properties} onActive={id=>updatePanels({activeTabs:{...panelLayout.activeTabs,properties:id}})} tabs={[{id:"properties",label:"属性",content:<section className="photo-editor__panel photo-editor__panel--properties">
             <header className="photo-editor__panel-title"><span>{collapseControl("propertiesCollapsed","属性")}属性</span><span>{propertyTool==="mask"?"蒙版":propertyTool==="text"?"文字":propertyTool==="adjustment"?"调整":"图层"}</span></header>
             <div className="photo-editor__object-properties">
               <p className="photo-editor__property-name">{activeLayer?.name??"未选择图层"}</p>
@@ -1279,7 +1314,7 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
                     if(!transformSession.commit()){transformSession.cancel();return false;}setMessage(null);return true;
                   }}/>:null}
             </div>
-          </section>}
+          </section>},{id:"adjustments",label:"调整",content:<div className="photo-editor__adjustment-presets">{ADJUSTMENT_LAYER_ACTIONS.filter(action=>commands.get(action.id)?.allowed).map(action=><Button key={action.id} size="sm" tone="ghost" disabled={displayDisabled || transforming || !commands.get(action.id)?.enabled} onClick={()=>runLayerAction(action.id)}>{action.label}</Button>)}</div>}]}/>}
           layers={
           <LayerPanel workspaceOwner={controller} collapseControl={collapseControl("layersCollapsed","图层")}
             view={view}
@@ -1325,12 +1360,12 @@ function PhotoEditorContents({ controller, canvasView, onPreview, onDetailPrevie
       </div>
 
       <div className="photo-editor__status" hidden={!chromeVisible}>
-        <span>{readonly ? "只读" : ({ idle: "准备中", "loading-module": "加载中", opening: "打开中", editing: "编辑中", freezing: "正在导出", saving: snapshot.state.savePercent===undefined ? "正在保存" : `正在保存 ${snapshot.state.savePercent}%`, saved: "已保存", unavailable: "不可用", failed: "操作失败" })[snapshot.state.phase]}</span>
         {documentView ? (
-          <><ZoomField key={snapshot.view.sessionActiveIndex??"none"} zoom={canvasView.viewport.zoom} width={documentView.width} height={documentView.height} disabled={locked} onChange={zoom=>canvasRef.current?.zoomTo(zoom)}/><DocumentStatus document={documentView} tool={toolLabel??tool}/>{documentView.hasSelection?<span>{display.state.extrasVisible?"有选区":"有选区（边界已隐藏）"}</span>:null}</>
+          <><ZoomField key={snapshot.view.sessionActiveIndex??"none"} zoom={canvasView.viewport.zoom} width={documentView.width} height={documentView.height} disabled={locked} onChange={zoom=>canvasRef.current?.zoomTo(zoom)}/><Button size="sm" tone="ghost" disabled={locked} onClick={()=>canvasRef.current?.view("fit")}>适合屏幕</Button><DocumentStatus document={documentView} tool={toolLabel??tool}/>{documentView.hasSelection?<span>{display.state.extrasVisible?"有选区":"有选区（边界已隐藏）"}</span>:null}</>
         ) : (
           <span>未打开文档</span>
         )}
+        <span>{readonly ? "只读" : ({ idle: "准备中", "loading-module": "加载中", opening: "打开中", editing: "编辑中", freezing: "正在导出", saving: snapshot.state.savePercent===undefined ? "正在保存" : `正在保存 ${snapshot.state.savePercent}%`, saved: "已保存", unavailable: "不可用", failed: "操作失败" })[snapshot.state.phase]}</span>
         {snapshot.state.dirty ? <span>有未保存修改</span> : null}
         {missingFonts.fonts.length?<span className="photo-editor__message" title={missingFonts.fonts.join("、")}>缺少字体：{missingFonts.fonts.slice(0,3).join("、")}{missingFonts.fonts.length>3?` 等 ${missingFonts.fonts.length} 种`:""}，正在使用替代字体。{dialogs && !readonly?<Button size="sm" disabled={displayDisabled || transforming} onClick={()=>missingFonts.open()}>替换…</Button>:null}</span>:null}
         {message || snapshot.state.message || theme.error || display.state.screenModeError ? <span className="photo-editor__message">{message ?? snapshot.state.message ?? theme.error ?? display.state.screenModeError}</span> : null}

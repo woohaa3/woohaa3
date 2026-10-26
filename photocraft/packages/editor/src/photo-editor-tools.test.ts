@@ -121,6 +121,11 @@ describe("选区与绘画参数", () => {
     expect(params?.size).toBe(IMAGE_PROJECT_LIMITS.maxBrushSizeSourcePixels);
   });
 
+  it("笔刷笔迹不覆盖会话里的间距设置", () => {
+    const params = buildStroke([{ x: 3, y: 4 }], DEFAULT_BRUSH);
+    expect(params).not.toHaveProperty("spacing");
+  });
+
   it("text.create 与调整层参数", () => {
     expect(buildTextCreate({ x: 10.4, y: 20.6, text: "标题", size: 48, color: "#ff0000", align: "center" })).toEqual({
       x: 10,
@@ -217,4 +222,9 @@ it("选区修改命令使用固定引擎半径范围并在越界时夹紧",()=>{
   expect(buildSelectionModify("select.modify.expand",12.6)).toEqual({radius:13});
   expect(buildSelectionModify("select.modify.contract",Number.NaN)).toEqual({radius:1});
   expect(clampSelectionRadius("select.modify.smooth",501)).toBe(500);
+});
+
+it("画笔保留亚像素笔迹与原生时间/倾角字段，不让低缩放绘画落到整像素台阶",()=>{
+  const points=[{x:10.25,y:20.75,pressure:.4,tiltX:25,tiltY:-15,rotation:45,time:12.5}];
+  expect(buildStroke(points,DEFAULT_BRUSH)?.points).toEqual([[10.25,20.75,.4,25,-15,45,12.5]]);
 });

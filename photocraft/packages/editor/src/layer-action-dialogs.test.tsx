@@ -22,7 +22,7 @@ function dialogPort() {
 }
 it("页脚默认确认，取消不写；目标变化拒绝，Alt 绕过且跳过偏好只在成功确认后保存；锁定一次提交五项",()=>{
   const {port,Host}=dialogPort();let selected=[1,2],owner={canvasId:"c",documentId:"d",sessionId:"s"};
-  const dispatch=vi.fn(()=>({ok:true}));const controller={dialogOwner:()=>owner,snapshot:()=>({view:{document:{layers:selected.map(id=>({id,selected:true,active:id===selected[0],hasMask:true}))}},commands:new Map(["layer.matting.colorDecontaminate","layer.matting.defringe","layer.delete","layer.lockLayers","layer.layerMask.delete","layer.layerMask.apply"].map(id=>[id,{allowed:true,enabled:true}]))}),dispatch} as unknown as EditorWorkspaceController;
+  const dispatch=vi.fn(()=>({ok:true}));const controller={dialogOwner:()=>owner,snapshot:()=>({view:{document:{layers:selected.map(id=>({id,selected:true,active:id===selected[0],hasMask:true}))}},commands:new Map(["layer.renameLayer","layer.layerStyle.scaleEffects","layer.matting.colorDecontaminate","layer.matting.defringe","layer.delete","layer.lockLayers","layer.layerMask.delete","layer.layerMask.apply"].map(id=>[id,{allowed:true,enabled:true}]))}),dispatch} as unknown as EditorWorkspaceController;
   const error=vi.fn(),refresh=vi.fn();let actions:ReturnType<typeof useLayerActionDialogs>;let blocked=false;
   function Probe() {actions=useLayerActionDialogs(port,controller,blocked,refresh,error);return <Host/>;}
   const node=document.createElement("div");document.body.append(node);root=createRoot(node);const render=()=>act(()=>root.render(<Probe/>));render();
@@ -41,6 +41,11 @@ it("页脚默认确认，取消不写；目标变化拒绝，Alt 绕过且跳过
   act(()=>actions!.mask(3));submit();expect(dispatch.mock.lastCall).toEqual(["layer.layerMask.delete",{layer:3}]);
   act(()=>actions!.defringe());submit();expect(dispatch.mock.lastCall).toEqual(["layer.matting.defringe",{width:1}]);
   act(()=>actions!.decontaminate());submit();expect(dispatch.mock.lastCall).toEqual(["layer.matting.colorDecontaminate",{amount:100,radius:4}]);
+  act(()=>actions!.rename());const rename=node.querySelector<HTMLInputElement>('input[maxlength="200"]')!;
+  act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(rename,"Updated layer");rename.dispatchEvent(new Event("input",{bubbles:true}));});submit();
+  expect(dispatch.mock.lastCall).toEqual(["layer.renameLayer",{name:"Updated layer"}]);
+  act(()=>actions!.scale());submit();expect(dispatch.mock.lastCall).toEqual(["layer.layerStyle.scaleEffects",{scale:100}]);
+  act(()=>actions!.scale());selected=[4];const before=dispatch.mock.calls.length;submit();expect(dispatch).toHaveBeenCalledTimes(before);expect(node.textContent).toContain("已更换");cancel();
   blocked=true;render();act(()=>actions!.delete(true));expect(error.mock.lastCall).toEqual(["请先结束当前操作"]);
 });
 it("新建图层预填内核名称，模式/不透明度/剪贴和中性色只在确认创建一次；取消不创建",()=>{

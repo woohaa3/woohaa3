@@ -24,11 +24,12 @@ native-canvas = ["canvas-core", "bevy/multi_threaded"]
 # 仅开启 Bevy 的 `debug` feature，让 pass/资源/系统名进入 GPU 抓帧标记；默认与 release
 # 构建不携带，避免诊断开销和名称泄露。它是**独立开关**，不改变 canvas-core/native-canvas 语义。
 gpu-debug = ["bevy/debug"]
-# 浏览器 WASM 运行时（默认）：需要窗口/winit 与 WebGPU 后端。
+# 浏览器 WASM 运行时（默认）：需要窗口/winit 与 WebGL2 后端；WebGL2 可在 HTTP
+# 体验地址中工作，避免 WebGPU 对安全上下文的硬性要求。
 wasm = [
   "canvas-core",
   "bevy/bevy_winit",
-  "bevy/webgpu",
+  "bevy/webgl2",
   "dep:wasm-bindgen",
   "dep:js-sys",
   "dep:wasm-bindgen-futures",

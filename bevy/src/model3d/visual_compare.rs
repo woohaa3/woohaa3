@@ -1,4 +1,4 @@
-//! 跨后端（WASM WebGPU ↔ native wgpu）容差视觉比较
+//! 跨后端（WASM WebGL2/wgpu ↔ native wgpu）容差视觉比较
 //! （change: enhance-model-scene-authoring-api，任务 9.3 / design D13）。
 //!
 //! 只比较**语义**指标，不以逐像素哈希相同作为通过条件：

@@ -76,6 +76,11 @@ impl Editor {
         result
     }
 
+    /// Read the native dab generator; only time-dependent strokes need held-point frames.
+    pub fn stroke_wants_time(&self) -> bool {
+        self.live_stroke.as_ref().is_some_and(|(live,_,_,_)| live.wants_time())
+    }
+
     pub fn cancel_stroke(&mut self) {
         self.stroke_damage=photocraft_geom::Rect::EMPTY;
         self.live_stroke = None;

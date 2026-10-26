@@ -43,95 +43,120 @@ export function editorMenusFor(documents?: EditorDocumentsMenu): readonly { labe
   const items: EditorMenuItem[] = [];
   if (documents.onNewDocument) items.push({ id: "file.new", label: "新建…" });
   if (documents.onOpenFile) items.push({ id: "file.open", label: "打开文件…" });
-  if (documents.onExport) items.push({ id: "file.exportAs", label: "导出…" });
-  if (documents.onOpenFile || documents.onCloseDocument) items.push({ id: "file.fileInfo", label: "文件信息…" });
+
+
   if (documents.onCloseDocument) items.push({ id: "file.close", label: "关闭", separatorBefore: items.length > 0 });
   if(documents.onCloseAllDocuments)items.push({id:"file.closeAll",label:"关闭全部"});
   if(documents.onCloseOtherDocuments)items.push({id:"file.closeOthers",label:"关闭其他文档"});
-  return EDITOR_MENUS.map(menu=>menu.label==="文件" ? {...menu,items:[...items,...menu.items.map((item,index)=>index===0?{...item,separatorBefore:true}:item)]}:menu.label==="图像" && documents.onDuplicateDocument?{...menu,items:[{id:"image.duplicateDocument",label:"复制文档"},...menu.items]}:menu);
+  if (documents.onExport) items.push(group("export", "导出", [command("file.exportAs", "导出为…")], true));
+  return EDITOR_MENUS.map(menu=>menu.label==="文件" ? {...menu,items:[...items,...menu.items.map((item,index)=>index===0?{...item,separatorBefore:true}:item)]}:menu.label==="图像" && documents.onDuplicateDocument?{...menu,items:[...menu.items,{id:"image.duplicateDocument",label:"复制文档",separatorBefore:true}]}:menu);
 }
 
 export const EDITOR_MENUS: readonly { label: string; items: readonly EditorMenuItem[] }[] = [
-  {label:"文件",items:[group("automate","自动",[command("file.automate.fitImage","适合图像…"),command("file.automate.conditionalModeChange","条件模式转换…")]),group("scripts","脚本",[command("file.scripts.deleteAllEmptyLayers","删除全部空图层"),command("file.scripts.flattenAllMasks","扁平化全部蒙版"),command("file.scripts.flattenAllLayerEffects","扁平化全部图层效果"),command("file.scripts.browse","浏览脚本…")])]},
+  {label:"文件",items:[group("automate","自动",[command("file.automate.conditionalModeChange","条件模式转换…"),command("file.automate.fitImage","适合图像…")]),group("scripts","脚本",[command("file.scripts.deleteAllEmptyLayers","删除全部空图层"),command("file.scripts.flattenAllLayerEffects","扁平化全部图层效果"),command("file.scripts.flattenAllMasks","扁平化全部蒙版"),command("file.scripts.browse","浏览脚本…")]),command("file.fileInfo","文件信息…",true)]},
   { label: "编辑", items: [
-    command("edit.undo", "撤销"), command("edit.redo", "重做"), command("edit.toggleLastState", "切换上一次状态"),
-    command("edit.cut", "剪切", true), command("edit.copy", "复制"), command("edit.copyMerged", "合并复制"),
+    command("edit.undo", "撤销"),
+    command("edit.redo", "重做"),
+    command("edit.toggleLastState", "切换上一次状态"),
+    command("edit.fade", "淡化…"),
+    command("edit.cut", "剪切", true),
+    command("edit.copy", "复制"),
+    command("edit.copyMerged", "合并复制"),
     command("edit.paste", "粘贴"),
     group("pasteSpecial", "选择性粘贴", [command("edit.pasteSpecial.pasteInPlace", "原位粘贴"),command("edit.pasteSpecial.pasteInto","粘贴入"),command("edit.pasteSpecial.pasteOutside","粘贴外部")]),
     command("edit.clear", "清除"),
-    command("edit.fade", "淡化…"),
-    command("edit.stroke", "描边…"),
-    command("edit.fill", "填充…"),
-    command("edit.definePattern", "定义图案…"),
+    command("edit.search","搜索命令…",true),
     command("edit.checkSpelling", "检查拼写…"),
     command("edit.findAndReplaceText", "查找和替换文字…"),
-    group("purge","清理",[command("edit.purge.undo","最近撤销状态"),command("edit.purge.clipboard","应用剪贴板"),command("edit.purge.histories","全部操作历史"),command("edit.purge.videoCache","视频缓存"),command("edit.purge.all","全部",true)]),
+    command("edit.fill", "填充…", true),
+    command("edit.stroke", "描边…"),
     group("fill", "填充", [
       command("edit.fillForeground", "前景色"), command("edit.fillBackground", "背景色"),
       command("edit.fillForegroundPreserve", "前景色并保留透明度", true), command("edit.fillBackgroundPreserve", "背景色并保留透明度"),command("edit.fillHistory","从历史记录填充",true)
     ], true),
     command("edit.transform", "自由变换", true),
-    command("edit.transform.again", "再次变换"),
-    command("edit.transform.againCopy", "再次变换并复制"),
     group("transform", "变换", [
+      command("edit.transform.again", "再次变换"),command("edit.transform.againCopy", "再次变换并复制"),
       command("edit.transform.rotate180", "旋转 180°"),
       command("edit.transform.rotate90Cw", "顺时针旋转 90°"), command("edit.transform.rotate90Ccw", "逆时针旋转 90°"),
       command("edit.transform.flipHorizontal", "水平翻转", true), command("edit.transform.flipVertical", "垂直翻转")
-    ])
+    ]),
+    command("edit.defineBrushPreset","定义画笔预设…",true),
+    command("edit.definePattern", "定义图案…"),
+    group("purge","清理",[command("edit.purge.undo","最近撤销状态"),command("edit.purge.clipboard","应用剪贴板"),command("edit.purge.histories","全部操作历史"),command("edit.purge.videoCache","视频缓存"),command("edit.purge.all","全部",true)])
+
   ] },
-  { label: "图像", items: [command("image.imageSize","图像大小…"),command("image.canvasSize","画布大小…"),command("image.trim","修整…"),command("image.revealAll","显示全部"),
-    group("adjustments","调整",[command("image.autoTone","自动色调"),command("image.autoContrast","自动对比度"),command("image.autoColor","自动颜色"),command("image.adjustments.levels","色阶…"),command("image.adjustments.exposure","曝光度…"),command("image.adjustments.vibrance","自然饱和度…"),command("image.adjustments.colorBalance","色彩平衡…"),command("image.adjustments.blackWhite","黑白…"),command("image.adjustments.photoFilter","照片滤镜…"),command("image.adjustments.channelMixer","通道混合器…"),command("image.adjustments.invert","反相"),command("image.adjustments.posterize","色调分离…"),command("image.adjustments.threshold","阈值…"),command("image.adjustments.gradientMap","渐变映射…"),command("image.adjustments.selectiveColor","可选颜色…"),command("image.adjustments.desaturate","去色"),command("image.adjustments.equalize","色调均化")]),
-    command("image.colorMode","图像模式与位深…",true),
+  { label: "图像", items: [
+    group("imageMode", "模式", [
+      command("image.mode.bitmap", "位图"), command("image.mode.grayscale", "灰度"), command("image.mode.duotone", "双色调"),
+      command("image.mode.rgb", "RGB 颜色"), command("image.mode.cmyk", "CMYK 颜色"), command("image.mode.lab", "Lab 颜色"), command("image.mode.multichannel", "多通道"),
+      command("image.mode.bits8", "8 位/通道", true), command("image.mode.bits16", "16 位/通道"), command("image.mode.bits32", "32 位/通道")
+    ]),
+    group("adjustments","调整",[command("image.adjustments.brightnessContrast","亮度 / 对比度…"),command("image.adjustments.levels","色阶…"),command("image.adjustments.curves","曲线…"),command("image.adjustments.exposure","曝光度…"),command("image.adjustments.vibrance","自然饱和度…"),command("image.adjustments.hueSaturation","色相 / 饱和度…"),command("image.adjustments.colorBalance","色彩平衡…"),command("image.adjustments.blackWhite","黑白…"),command("image.adjustments.photoFilter","照片滤镜…"),command("image.adjustments.channelMixer","通道混合器…"),command("image.adjustments.invert","反相",true),command("image.adjustments.posterize","色调分离…"),command("image.adjustments.threshold","阈值…"),command("image.adjustments.gradientMap","渐变映射…"),command("image.adjustments.selectiveColor","可选颜色…"),command("image.adjustments.desaturate","去色",true),command("image.adjustments.equalize","色调均化")]),
+    command("image.autoTone", "自动色调", true), command("image.autoContrast", "自动对比度"), command("image.autoColor", "自动颜色"),
+    command("image.imageSize", "图像大小…", true), command("image.canvasSize", "画布大小…"),
     group("imageRotation", "图像旋转", [
-    command("image.rotation.arbitrary", "任意角度…"),
-    command("image.imageRotation.180", "旋转图像 180°"),
-    command("image.imageRotation.90cw", "顺时针旋转图像 90°"), command("image.imageRotation.90ccw", "逆时针旋转图像 90°"),
-    command("image.imageRotation.flipCanvasHorizontal", "水平翻转画布", true), command("image.imageRotation.flipCanvasVertical", "垂直翻转画布")
-  ])] },
+      command("image.imageRotation.180", "旋转图像 180°"), command("image.imageRotation.90cw", "顺时针旋转图像 90°"), command("image.imageRotation.90ccw", "逆时针旋转图像 90°"),
+      command("image.rotation.arbitrary", "任意角度…"),
+      command("image.imageRotation.flipCanvasHorizontal", "水平翻转画布", true), command("image.imageRotation.flipCanvasVertical", "垂直翻转画布")
+    ]),
+    command("image.trim", "修整…"), command("image.revealAll", "显示全部")
+  ] },
   { label: "图层", items: [
-    group("new", "新建", [command("layer.new.layer", "新建图层…"), command("layer.new.group", "组"),command("layer.new.layerFromBackground","从背景创建图层"),command("layer.new.backgroundFromLayer","从图层创建背景"), command("layer.new.layerViaCopy", "通过拷贝的图层", true), command("layer.new.layerViaCut", "通过剪切的图层")]),
-    group("rasterize","栅格化",[command("layer.rasterize.type","文字"),command("layer.rasterize.allLayers","全部图层"),command("layer.rasterize.layerStyle","图层样式")]),
-    group("layerStyleMenu","图层样式",[command("layer.layerStyle.createLayer","创建图层"),command("layer.layerStyle.scaleEffects","缩放效果…")]),
-    command("layer.linkLayers", "链接 / 取消链接图层"), command("layer.selectLinkedLayers", "选择链接图层"),
-    command("layer.lockLayers", "锁定图层…"),
-    command("layer.duplicate", "复制图层"), command("layer.delete", "删除图层"), command("layer.delete.hiddenLayers", "删除隐藏图层"),
-    command("layer.hideLayers", "隐藏 / 显示所选图层"),
+    group("new", "新建", [command("layer.new.layer", "新建图层…"), command("layer.new.layerFromBackground","从背景创建图层"),command("layer.new.backgroundFromLayer","从图层创建背景"),command("layer.new.group", "组"), command("layer.new.layerViaCopy", "通过拷贝的图层", true), command("layer.new.layerViaCut", "通过剪切的图层")]),
+    command("layer.duplicate", "复制图层"),
+    group("delete","删除",[command("layer.delete", "图层"), command("layer.delete.hiddenLayers", "隐藏图层")]),
+    command("layer.renameLayer","重命名图层…"),
+    group("layerStyleAll","图层样式",[command("layer.layerStyle.blendingOptions","混合选项…"),
+      command("layer.layerStyle.copyLayerStyle","拷贝图层样式",true),command("layer.layerStyle.pasteLayerStyle","粘贴图层样式"),command("layer.layerStyle.clear","清除图层样式"),
+      command("layer.layerStyle.createLayer","创建图层",true),command("layer.layerStyle.hideAllEffects","隐藏全部图层效果"),command("layer.layerStyle.showAllEffects","显示全部图层效果"),command("layer.layerStyle.scaleEffects","缩放效果…")
+    ]),
     group("adjustment", "新建调整图层", ADJUSTMENT_LAYER_ACTIONS.map(({id, label}) => command(id, label)), true),
     group("layerMask", "图层蒙版", [
       command("layer.layerMask.revealAll", "显示全部"), command("layer.layerMask.hideAll", "隐藏全部"),
       command("layer.layerMask.revealSelection", "显示选区", true), command("layer.layerMask.hideSelection", "隐藏选区"),
       command("layer.layerMask.fromTransparency", "从透明区域", true),
-      command("layer.layerMask.apply", "应用蒙版", true), command("layer.layerMask.delete", "删除蒙版"),
+      command("layer.layerMask.delete", "删除蒙版", true),command("layer.layerMask.apply", "应用蒙版"),
       command("layer.toggleMaskOverlay", "显示蒙版叠加（红色）", true)
     ], true),
-    command("layer.createClippingMask", "创建剪贴蒙版"), command("layer.releaseClippingMask", "释放剪贴蒙版"),
-    command("layer.groupLayers", "图层编组", true), command("layer.ungroupLayers", "取消图层编组"),
+    command("layer.createClippingMask", "创建剪贴蒙版"),
+    command("layer.releaseClippingMask", "释放剪贴蒙版"),
+    group("rasterize","栅格化",[command("layer.rasterize.type","文字"),command("layer.rasterize.allLayers","全部图层"),command("layer.rasterize.layerStyle","图层样式")]),
+    command("layer.groupLayers", "图层编组", true),
+    command("layer.ungroupLayers", "取消图层编组"),
+    command("layer.hideLayers", "隐藏 / 显示所选图层"),
     group("arrange", "排列", [
       command("layer.arrange.bringToFront", "置为顶层"), command("layer.arrange.bringForward", "前移一层"),
       command("layer.arrange.sendBackward", "后移一层"), command("layer.arrange.sendToBack", "置为底层"), command("layer.arrange.reverse", "反转所选图层顺序")
     ]),
-    group("matting","去边",[command("layer.matting.defringe","去边…"),command("layer.matting.colorDecontaminate","颜色净化…"),command("layer.matting.removeBlackMatte","移去黑色杂边"),command("layer.matting.removeWhiteMatte","移去白色杂边")]),
-    group("layerStyleAll","图层样式",[
-      command("layer.layerStyle.copyLayerStyle","拷贝图层样式"),command("layer.layerStyle.pasteLayerStyle","粘贴图层样式"),command("layer.layerStyle.clear","清除图层样式"),
-      command("layer.layerStyle.hideAllEffects","隐藏全部图层效果",true),command("layer.layerStyle.showAllEffects","显示全部图层效果")
-    ]),
-    command("layer.stampDown","盖印图层"),command("layer.stampVisible","盖印可见图层"),
-    command("layer.mergeLayers", "合并图层", true), command("layer.mergeVisible", "合并可见图层"), command("layer.flattenImage", "拼合图像")
+    group("align","对齐",[command("layer.align.topEdges","顶端对齐"),command("layer.align.verticalCenters","垂直居中"),command("layer.align.bottomEdges","底端对齐"),command("layer.align.leftEdges","左对齐",true),command("layer.align.horizontalCenters","水平居中"),command("layer.align.rightEdges","右对齐")]),
+    group("distribute","分布",[command("layer.distribute.topEdges","顶边缘分布"),command("layer.distribute.verticalCenters","垂直中心分布"),command("layer.distribute.bottomEdges","底边缘分布"),command("layer.distribute.leftEdges","左边缘分布",true),command("layer.distribute.horizontalCenters","水平中心分布"),command("layer.distribute.rightEdges","右边缘分布"),command("layer.distribute.horizontally","水平等间距"),command("layer.distribute.vertically","垂直等间距")]),
+    command("layer.lockLayers", "锁定图层…"),
+    command("layer.linkLayers", "链接 / 取消链接图层"),
+    command("layer.selectLinkedLayers", "选择链接图层"),
+    command("layer.stampDown","盖印图层"),
+    command("layer.stampVisible","盖印可见图层"),
+    command("layer.mergeLayers", "合并图层", true),
+    command("layer.mergeVisible", "合并可见图层"),
+    command("layer.flattenImage", "拼合图像"),
+    group("matting","去边",[command("layer.matting.colorDecontaminate","颜色净化…"),command("layer.matting.defringe","去边…"),command("layer.matting.removeBlackMatte","移去黑色杂边"),command("layer.matting.removeWhiteMatte","移去白色杂边")])
+
   ] },
-  {label:"文字",items:[group("typeOrientation","方向",[command("type.orientation.horizontal","横排"),command("type.orientation.vertical","竖排")]),group("typeAntiAlias","抗锯齿",TEXT_ANTIALIAS.map(mode=>command(`type.antiAlias.${mode.id}`,mode.label))),command("type.rasterizeTypeLayer","栅格化文字图层"),command("type.updateAllTextLayers","刷新全部文字图层"),command("type.createSelection","文字蒙版转选区…"),command("type.saveDefaultTypeStyles","保存默认文字样式",true),command("type.loadDefaultTypeStyles","载入默认文字样式"),command("type.resolveMissingFonts","替换缺失字体…",true),command("type.replaceAllMissingFonts","全部缺失字体替换为 Inter")]},
-  // Filter 菜单：只列固定引擎已实现、参数契约明确的滤镜（I035）。
-  { label: "滤镜", items: [
-    ...FILTER_GROUPS.map(group => group2(`filter.${group}`, group, FILTER_SPECS.filter(spec => spec.group === group).map(spec => command(spec.id, spec.label)))),
-    command("filter.lastFilter", "重复上一次滤镜", true)
-  ].filter(item => item.children?.length || item.id === "filter.lastFilter") },
+  {label:"文字",items:[group("typePanels","面板",[command("type.panels.character","字符面板"),command("type.panels.paragraph","段落面板")]),group("typeAntiAlias","抗锯齿",TEXT_ANTIALIAS.map(mode=>command(`type.antiAlias.${mode.id}`,mode.label))),group("typeOrientation","方向",[command("type.orientation.horizontal","横排"),command("type.orientation.vertical","竖排")]),command("type.rasterizeTypeLayer","栅格化文字图层"),command("type.updateAllTextLayers","刷新全部文字图层"),command("type.createSelection","文字蒙版转选区…"),command("type.saveDefaultTypeStyles","保存默认文字样式",true),command("type.loadDefaultTypeStyles","载入默认文字样式"),command("type.resolveMissingFonts","替换缺失字体…",true),command("type.replaceAllMissingFonts","全部缺失字体替换为 Inter")]},
   { label: "选择", items: [
     command("select.all", "全部"), command("select.deselect", "取消选择"), command("select.reselect", "重新选择"), command("select.inverse", "反向"),
-    command("select.colorRange", "颜色范围…", true),
+    command("select.allLayers", "所有非背景图层", true), command("select.deselectLayers", "取消图层选择"), command("select.findLayers", "查找图层…"), command("select.isolateLayers", "隔离 / 恢复图层列表"),
+    command("select.colorRange", "颜色范围…", true),command("select.focusArea","焦点区域…"),command("select.subject","主体"),command("select.sky","天空"),
     group("modify","修改",[command("select.modify.border","边框…"),command("select.modify.smooth","平滑…"),command("select.modify.expand","扩展…"),command("select.modify.contract","收缩…"),command("select.modify.feather","羽化…")]),
     command("select.grow","扩展相似像素"),command("select.similar","选择相似颜色"),
-    command("select.saveSelection","存储选区…",true),command("select.loadSelection","载入选区…"),
+
     command("select.editInQuickMaskMode","以快速蒙版模式编辑",true),
     command("select.transformSelection", "变换选区", true),
-    command("select.allLayers", "所有非背景图层", true), command("select.deselectLayers", "取消图层选择"), command("select.findLayers", "查找图层…"), command("select.isolateLayers", "隔离 / 恢复图层列表")
-  ] }
+    command("select.loadSelection","载入选区…",true),command("select.saveSelection","存储选区…"),
+  ] },
+  // Filter 菜单：只列固定引擎已实现、参数契约明确的滤镜（I035）。
+  { label: "滤镜", items: [
+    command("filter.lastFilter", "重复上一次滤镜"),
+    ...FILTER_GROUPS.map(group => group2(`filter.${group}`, group, FILTER_SPECS.filter(spec => spec.group === group).map(spec => command(spec.id, spec.label)))),
+  ].filter(item => item.children?.length || item.id === "filter.lastFilter") }
 ];

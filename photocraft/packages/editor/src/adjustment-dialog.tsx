@@ -3,6 +3,7 @@ import type {EditorDialogPort,EditorDialogRendererProps} from "./ports.js";
 import type {EditorWorkspaceController} from "./editor-workspace.js";
 import {DialogBody,DialogContent,DialogFooter,DialogHeader,DialogTitle} from "./ui/Dialog.js";
 import {Button} from "./ui/Button.js";
+import {RgbCurveEditor,validCurve,type CurvePoint} from "./rgb-curve-editor.js";
 import {ArithmeticInput} from "./arithmetic-input.js";
 
 /**
@@ -12,7 +13,7 @@ import {ArithmeticInput} from "./arithmetic-input.js";
  * 像素算法。调整层仍限于三个已版本化的类型，因此这些入口是破坏性调整，不产生新工程字段。
  */
 export type AdjustmentKind =
-  | "levels" | "exposure" | "vibrance" | "colorBalance" | "blackWhite" | "photoFilter"
+  | "brightnessContrast" | "hueSaturation" | "curves" | "levels" | "exposure" | "vibrance" | "colorBalance" | "blackWhite" | "photoFilter"
   | "channelMixer" | "invert" | "posterize" | "threshold" | "gradientMap" | "selectiveColor"
   | "desaturate" | "equalize";
 
@@ -20,6 +21,7 @@ export type AdjustmentRequest = { kind: AdjustmentKind; label: string };
 const ID = "image-editor.adjustment";
 
 type Field =
+  | {type:"curve";key:string;label:string;value:CurvePoint[]}
   | { type: "number"; key: string; label: string; min: number; max: number; step?: number; value: number }
   | { type: "boolean"; key: string; label: string; value: boolean }
   | { type: "choice"; key: string; label: string; options: readonly (readonly [string, string])[]; value: string }
@@ -35,6 +37,9 @@ const SELECTIVE_RANGES = [["reds", "红色"], ["yellows", "黄色"], ["greens", 
 export function adjustmentFields(kind: AdjustmentKind): readonly Field[] {
   const n = (key: string, label: string, min: number, max: number, value: number, step = 1): Field => ({ type: "number", key, label, min, max, value, step });
   switch (kind) {
+    case "brightnessContrast": return [n("brightness","亮度",-150,150,0),n("contrast","对比度",-50,100,0),{type:"boolean",key:"legacy",label:"使用旧版",value:false}];
+    case "hueSaturation": return [n("hue","色相",-180,180,0),n("saturation","饱和度",-100,100,0),n("lightness","明度",-100,100,0)];
+    case "curves": return [{type:"curve",key:"points",label:"RGB 曲线",value:[[0,0],[255,255]]}];
     case "levels": return [n("inBlack", "输入黑场", 0, 253, 0), n("gamma", "灰度系数", 0.01, 9.99, 1, 0.01), n("inWhite", "输入白场", 2, 255, 255), n("outBlack", "输出黑场", 0, 255, 0), n("outWhite", "输出白场", 0, 255, 255)];
     case "exposure": return [n("exposure", "曝光度", -20, 20, 0, 0.01), n("offset", "位移", -0.5, 0.5, 0, 0.001), n("gamma", "灰度系数校正", 0.01, 9.99, 1, 0.01)];
     case "vibrance": return [n("vibrance", "自然饱和度", -100, 100, 0), n("saturation", "饱和度", -100, 100, 0)];
@@ -74,7 +79,7 @@ export function adjustmentFields(kind: AdjustmentKind): readonly Field[] {
   }
 }
 
-type Values = Record<string, number | boolean | string | [number, number, number] | [number, number, number, number] | [string, string]>;
+type Values = Record<string, number | boolean | string | [number, number, number] | [number, number, number, number] | [string, string] | CurvePoint[]>;
 
 function initialValues(kind: AdjustmentKind): Values {
   const out: Values = {};
@@ -89,7 +94,10 @@ export function buildAdjustmentParams(kind: AdjustmentKind, values: Values): Rec
   const out: Record<string, unknown> = {};
   for (const field of fields) {
     const value = values[field.key];
-    if (field.type === "number") {
+    if (field.type === "curve") {
+      if(!Array.isArray(value) || !value.every(point=>Array.isArray(point) && point.length===2) || !validCurve(value as CurvePoint[]))return null;
+      out[field.key]=value;
+    } else if (field.type === "number") {
       if (typeof value !== "number" || !Number.isFinite(value) || value < field.min || value > field.max) return null;
       out[field.key] = value;
     } else if (field.type === "boolean") {
@@ -119,6 +127,7 @@ function FieldEditor({ field, value, onChange }: { field: Field; value: Values[s
   const number = (_key: string, label: string, current: unknown, min: number, max: number, step = 1) => (
     <label key={label}>{label}<ArithmeticInput invalidate min={min} max={max} step={step} value={String(current ?? "")} onChange={event => onChange(Number(event.currentTarget.value))}/></label>
   );
+  if(field.type==="curve")return <RgbCurveEditor points={value as CurvePoint[]} onChange={onChange} readonly={false} editing onApply={()=>{}}/>;
   if (field.type === "number") return number(field.key, field.label, value, field.min, field.max, field.step ?? 1);
   if (field.type === "boolean") return <label><input type="checkbox" checked={value === true} onChange={event => onChange(event.currentTarget.checked)}/>{field.label}</label>;
   if (field.type === "choice") return <label>{field.label}<select value={String(value)} onChange={event => onChange(event.currentTarget.value)}>{field.options.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>;
@@ -126,7 +135,7 @@ function FieldEditor({ field, value, onChange }: { field: Field; value: Values[s
   if (field.type === "stops") { const stops = value as [string, string]; return <><label>渐变起点<input type="color" value={stops[0]} onChange={event => onChange([event.currentTarget.value, stops[1]])}/></label><label>渐变终点<input type="color" value={stops[1]} onChange={event => onChange([stops[0], event.currentTarget.value])}/></label></>; }
   const tuple = value as number[];
   const labels = field.type === "triple" ? field.labels : ["红", "绿", "蓝", "常数"];
-  return <fieldset><legend>{field.label}</legend>{labels.map((label, index) => number(field.key, label, tuple[index], field.min, field.max) as React.ReactElement)}</fieldset>;
+  return <fieldset><legend>{field.label}</legend>{labels.map((label, index) => <label key={label}>{label}<ArithmeticInput invalidate min={field.min} max={field.max} value={String(tuple[index])} onChange={event=>onChange(tuple.map((entry,i)=>i===index?Number(event.currentTarget.value):entry) as [number,number,number])}/></label>)}</fieldset>;
 }
 
 function AdjustmentDialog({ instance, requestClose, request, apply }: EditorDialogRendererProps & { request: AdjustmentRequest; apply: (params: Record<string, unknown>) => string | null }) {
@@ -145,6 +154,7 @@ function AdjustmentDialog({ instance, requestClose, request, apply }: EditorDial
 }
 
 const LABELS: Record<AdjustmentKind, string> = {
+  brightnessContrast:"亮度 / 对比度",hueSaturation:"色相 / 饱和度",curves:"曲线",
   levels: "色阶", exposure: "曝光度", vibrance: "自然饱和度", colorBalance: "色彩平衡", blackWhite: "黑白",
   photoFilter: "照片滤镜", channelMixer: "通道混合器", invert: "反相", posterize: "色调分离", threshold: "阈值",
   gradientMap: "渐变映射", selectiveColor: "可选颜色", desaturate: "去色", equalize: "色调均化"

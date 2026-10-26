@@ -79,7 +79,7 @@ export function decodeBrushDynamics(value:unknown):BrushDynamics {
     shapeDynamics:flag("enabled",false,shape),
     sizeJitter:sizeDynamic.jitter,sizeMinimum:sizeDynamic.minimum,
     scattering:flag("enabled",false,scatter),
-    scatter:clamp(number("scatter",0,10,0,scatter)*100,0,1000),
+    scatter:clamp(number("jitter",0,10,0,scatter.scatter && typeof scatter.scatter==="object"?scatter.scatter as Record<string,unknown>:{})*100,0,1000),
     scatterBothAxes:flag("bothAxes",false,scatter),
     transfer:flag("enabled",false,transfer),
     opacityJitter:dynamic(transfer,"opacity").jitter,flowJitter:dynamic(transfer,"flow").jitter,
@@ -89,9 +89,9 @@ export function decodeBrushDynamics(value:unknown):BrushDynamics {
 }
 
 /** 编译成 `tools.setBrush` 的深合并补丁（原生按 camelCase 分区字段合并）。 */
-export function brushDynamicsPatch(value:BrushDynamics):Record<string,unknown> {
-  const dynamic=(jitter:number,minimum=0)=>({jitter:clamp(jitter,0,100)/100,...(minimum?{minimum:clamp(minimum,0,100)/100}:{})});
-  return {
+export function brushDynamicsPatch(value:BrushDynamics,changed?:Partial<BrushDynamics>):Record<string,unknown> {
+  const dynamic=(jitter:number,minimum=0)=>({jitter:clamp(jitter,0,100)/100,minimum:clamp(minimum,0,100)/100});
+  const full:Record<string,unknown>={
     spacing:clamp(value.spacing,0.01,10),spacingEnabled:value.spacingEnabled,
     pressureSize:value.pressureSize,pressureOpacity:value.pressureOpacity,
     angle:clamp(value.angle,-180,180),roundness:clamp(value.roundness,0,1),
@@ -99,10 +99,19 @@ export function brushDynamicsPatch(value:BrushDynamics):Record<string,unknown> {
     shapeDynamics:{enabled:value.shapeDynamics,size:dynamic(value.sizeJitter,value.sizeMinimum)},
     // `scatter` 原生是 1.0 = 100%，面板同样按百分比输入，因此这里不重复除以 100。
     scattering:{enabled:value.scattering,scatter:{jitter:clamp(value.scatter,0,1000)/100},bothAxes:value.scatterBothAxes},
-    transfer:{enabled:value.transfer,opacity:dynamic(value.opacityJitter),flow:dynamic(value.flowJitter)},
+    transfer:{enabled:value.transfer,opacity:{jitter:clamp(value.opacityJitter,0,100)/100},flow:{jitter:clamp(value.flowJitter,0,100)/100}},
     noise:value.noise,wetEdges:value.wetEdges,
     buildUp:value.buildUp,buildUpRate:clamp(value.buildUpRate,0.1,120)
   };
+  if(!changed)return full;
+  const paths:Partial<Record<keyof BrushDynamics,string[]>>={shapeDynamics:["shapeDynamics","enabled"],sizeJitter:["shapeDynamics","size","jitter"],sizeMinimum:["shapeDynamics","size","minimum"],scattering:["scattering","enabled"],scatter:["scattering","scatter","jitter"],scatterBothAxes:["scattering","bothAxes"],transfer:["transfer","enabled"],opacityJitter:["transfer","opacity","jitter"],flowJitter:["transfer","flow","jitter"]};
+  const patch:Record<string,unknown>={};
+  for(const key of Object.keys(changed) as (keyof BrushDynamics)[]){
+    const path=paths[key]??[key];let source=full,target=patch;
+    for(const part of path.slice(0,-1)){source=source[part] as Record<string,unknown>;target=(target[part]??= {}) as Record<string,unknown>;}
+    const last=path.at(-1)!;target[last]=source[last];
+  }
+  return patch;
 }
 
 const number=(label:string,value:number,min:number,max:number,step:number,unit:NumericUnit|undefined,onCommit:(next:number)=>void,disabled:boolean,key:string)=>(
@@ -117,8 +126,8 @@ const toggle=(label:string,checked:boolean,onChange:(next:boolean)=>void,disable
 );
 
 export function BrushSettingsPanel({value,disabled,onChange}:{value:BrushDynamics;disabled:boolean;onChange:(patch:Partial<BrushDynamics>)=>void}) {
-  // 使用普通容器而不是新的选项分组：画笔设置是当前画笔选项的一部分，不应另起一个工具分组。
-  return <section className="photo-editor__options-subgroup" aria-label="画笔设置" data-brush-settings="true">
+  // 详细笔尖与动态放在停靠面板；顶部只保留当前工具的常用参数。
+  return <section className="photo-editor__brush-settings-panel" aria-label="画笔设置" data-brush-settings="true">
     {number("间距（%）",value.spacing*100,1,1000,1,"%",next=>onChange({spacing:next/100}),disabled,"spacing")}
     {toggle("间距启用",value.spacingEnabled,next=>onChange({spacingEnabled:next}),disabled,"spacingEnabled")}
     {toggle("压力控制大小",value.pressureSize,next=>onChange({pressureSize:next}),disabled,"pressureSize")}

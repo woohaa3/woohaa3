@@ -39,7 +39,7 @@ export type SelectionMode = "replace" | "add" | "subtract" | "intersect";
 export type PixelRect = { x: number; y: number; width: number; height: number };
 
 /** 文档坐标点。 */
-export type DocumentPoint = { x: number; y: number; pressure?: number };
+export type DocumentPoint = { x: number; y: number; pressure?: number;tiltX?:number;tiltY?:number;rotation?:number;time?:number };
 
 /** Shift 移动吸附到四/八方向，越过分界线 8° 后才切换，避免对角附近抖动。 */
 export function constrainMoveOffset(offset:DocumentPoint,previous:DocumentPoint|null,directions:4|8):DocumentPoint {
@@ -268,9 +268,12 @@ export function buildLasso(
 }
 
 /** 开始与增量采样共用编码，保留笔压。 */
-export function strokePoints(points: readonly DocumentPoint[], preserveCoordinates=false): number[][] {
-  const xy=(v:number)=>preserveCoordinates?v:roundPixel(v);
-  return points.map((point) => point.pressure === undefined ? [xy(point.x), xy(point.y)] : [xy(point.x), xy(point.y), clamp(point.pressure, 0, 1)]);
+export function strokePoints(points: readonly DocumentPoint[], _preserveCoordinates=false): number[][] {
+  return points.map(point=>{
+    const xy=[point.x,point.y];
+    if([point.tiltX,point.tiltY,point.rotation,point.time].some(value=>value!==undefined))return [...xy,clamp(point.pressure??1,0,1),clamp(point.tiltX??0,-90,90),clamp(point.tiltY??0,-90,90),clamp(point.rotation??0,0,360),Math.max(0,Number.isFinite(point.time)?point.time!:0)];
+    return point.pressure===undefined?xy:[...xy,clamp(point.pressure,0,1)];
+  });
 }
 
 /** `paint.stroke` 参数：整笔保持同一组设置。 */
@@ -290,7 +293,9 @@ export function buildStroke(
     ...(pencil?{}:{hardness:clamp(brush.hardness,0,1)}),
     opacity: clamp(brush.opacity, 0, 1),
     ...(pencil?{}:{flow:clamp(brush.flow,0,1)}),
-    spacing: 0.25,
+    // Spacing and brush dynamics come from the session BrushSettings updated by
+    // `tools.setBrush`. Sending a scalar here would override the native value for
+    // every stroke (and made the Brush Settings spacing control ineffective).
     smoothing: clamp(brush.smoothing, 0, 1),
     color: brush.color,
     mode: brush.mode ?? "normal",

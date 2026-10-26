@@ -16,6 +16,20 @@ vi.mock("./ui/Menu.js", async importOriginal => {
     <div data-menu={label}>{entries(items)}</div>};
 });
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+it("顶部菜单块按原生顺序排列：文字、选择、滤镜位于视图之前", () => {
+  const ids = ["edit.undo", "image.imageSize", "layer.new.layer", "type.rasterizeTypeLayer", "select.all", "filter.lastFilter"];
+  const commands = new Map(ids.map(id => [id, {id, allowed:true, enabled:true} as PhotocraftCommand]));
+  const container = document.createElement("div"), root = createRoot(container);
+  try {
+    act(() => root.render(<EditorMenuBar commands={commands} readonly={false} canUndo canRedo={false}
+      onCommand={vi.fn()} onApply={vi.fn()} canSave={false} saving={false} onView={vi.fn()} onSearch={vi.fn()}
+      display={{state:INITIAL_EDITOR_DISPLAY,toggle:vi.fn()}}/>));
+    expect([...container.querySelectorAll<HTMLElement>("[data-menu]")].map(node => node.dataset.menu)).toEqual([
+      "编辑", "图像", "图层", "文字", "选择", "滤镜", "视图", "窗口", "帮助"
+    ]);
+  } finally { act(() => root.unmount()); container.remove(); }
+});
+
 it("整图与图层旋转使用不同命令，未允许入口隐藏、暂不可用入口禁用", () => {
   const ids = ["image.imageRotation.90cw", "edit.transform.rotate90Cw", "layer.delete"];
   const commands = new Map(ids.map((id) => [id, { id, allowed: true, enabled: id !== "layer.delete" } as PhotocraftCommand]));
@@ -72,7 +86,7 @@ it("视图菜单使用共用显示动作和提示，禁用时不切换或分派�
     const windows=container.querySelectorAll<HTMLButtonElement>('[data-menu="窗口"] button');
     expect(windows).toHaveLength(8);expect(windows[1].textContent).toContain("Shift+Tab");
     act(()=>[...buttons,...windows].forEach(button=>button.click()));
-    expect(toggle.mock.calls).toEqual([["extras"],["pixelGrid"],["panels"],["sidebar"],["tools"],["options"],["modifiers"],["navigator"],["histogram"],["info"]]);
+    expect(toggle.mock.calls).toEqual([["extras"],["pixelGrid"],["panels"],["sidebar"],["histogram"],["info"],["navigator"],["tools"],["options"],["modifiers"]]);
     render(true);act(()=>container.querySelectorAll<HTMLButtonElement>('[data-menu="视图"] button, [data-menu="窗口"] button').forEach(button=>button.click()));
     expect(toggle).toHaveBeenCalledTimes(10);expect(onCommand).not.toHaveBeenCalled();
   } finally {act(()=>root.unmount());}
@@ -93,7 +107,7 @@ it("菜单变换进入会话、缩放走视图动作，未出现置入入口", (
     act(()=>container.querySelector<HTMLButtonElement>('[data-command="select.transformSelection"]')!.click());
     expect(onTransform.mock.calls).toEqual([[false],[true]]);expect(onCommand).not.toHaveBeenCalled();
     act(()=>container.querySelectorAll<HTMLButtonElement>('[data-menu="视图"] button').forEach(button=>button.click()));
-    expect(onView.mock.calls).toEqual([["zoomIn"],["zoomOut"],["fit"],["actualSize"],["twoHundredPercent"],["printSize"],["fitLayers"]]);
+    expect(onView.mock.calls).toEqual([["zoomIn"],["zoomOut"],["fit"],["fitLayers"],["actualSize"],["twoHundredPercent"],["printSize"]]);
     expect(container.querySelector<HTMLButtonElement>('[data-command="edit.redo"]')!.disabled).toBe(true);
     render(true);
     act(()=>container.querySelectorAll<HTMLButtonElement>('[data-menu] button').forEach(button=>button.click()));
@@ -276,4 +290,21 @@ it("粘贴入/外使用选择性粘贴菜单，能力关闭隐藏、缺选区禁
  const into="edit.pasteSpecial.pasteInto",outside="edit.pasteSpecial.pasteOutside",run=vi.fn(),node=document.createElement("div"),root=createRoot(node),commands=new Map([[into,{allowed:true,enabled:true}],[outside,{allowed:true,enabled:false}]]) as Map<string,PhotocraftCommand>;
  const render=(readonly=false)=>act(()=>root.render(<EditorMenuBar commands={commands} readonly={readonly} canUndo={false} canRedo={false} onCommand={run} onApply={()=>{}} canSave={false} saving={false}/>));
  try{render();const inside=node.querySelector<HTMLButtonElement>(`[data-submenu="pasteSpecial"] [data-command="${into}"]`)!;expect(inside.textContent).toContain("粘贴入");act(()=>inside.click());expect(run.mock.calls).toEqual([[into]]);expect(node.querySelector<HTMLButtonElement>(`[data-command="${outside}"]`)!.disabled).toBe(true);render(true);expect(inside.disabled).toBe(true);commands.set(outside,{allowed:false,enabled:true} as PhotocraftCommand);render();expect(node.querySelector(`[data-command="${outside}"]`)).toBeNull();}finally{act(()=>root.unmount());}
+});
+
+it("宿主导出递归进入原生子菜单；图像调整、对齐与面板入口保留正确路径和门禁",()=>{
+ const ids=["image.adjustments.brightnessContrast","image.adjustments.curves","image.adjustments.hueSaturation","layer.align.leftEdges","layer.layerStyle.replace","type.create","view.clearGuides"];
+ const commands=new Map(ids.map(id=>[id,{id,allowed:true,enabled:id!=="view.clearGuides"} as PhotocraftCommand]));
+ const host=document.createElement("div"),root=createRoot(host),onExport=vi.fn(),onCommand=vi.fn(),showPanel=vi.fn();
+ try{
+  act(()=>root.render(<EditorMenuBar commands={commands} readonly={false} canUndo={false} canRedo={false} onCommand={onCommand} onApply={vi.fn()} canSave={false} saving={false} documents={{onExport}} display={{state:INITIAL_EDITOR_DISPLAY,toggle:vi.fn(),showPanel}} brushPresetsAvailable guides={{showRulers:true,showGuides:true,showGrid:false,snapToGuides:true,snapToGrid:false,toggle:vi.fn()}}/>));
+  act(()=>host.querySelector<HTMLButtonElement>('[data-submenu="export"] button')!.click());expect(onExport).toHaveBeenCalledOnce();
+  expect(host.querySelectorAll('[data-submenu="adjustments"] button')).toHaveLength(3);
+  act(()=>host.querySelector<HTMLButtonElement>('[data-submenu="align"] button')!.click());expect(onCommand).toHaveBeenLastCalledWith("layer.align.leftEdges");
+  act(()=>host.querySelector<HTMLButtonElement>('[data-command="layer.layerStyle.blendingOptions"]')!.click());expect(onCommand).toHaveBeenLastCalledWith("layer.layerStyle.blendingOptions");
+  expect(host.querySelector('[data-submenu="view.show"]')).not.toBeNull();expect(host.querySelector('[data-submenu="view.snapTo"]')).not.toBeNull();
+  expect(host.querySelector<HTMLButtonElement>('[data-command="view.clearGuides"]')!.disabled).toBe(true);
+  act(()=>host.querySelector<HTMLButtonElement>('[data-command="window.panel.paragraph"]')!.click());expect(showPanel).toHaveBeenLastCalledWith("character","paragraph");
+  act(()=>host.querySelector<HTMLButtonElement>('[data-command="window.panel.settings"]')!.click());expect(showPanel).toHaveBeenLastCalledWith("brushes","settings");
+ }finally{act(()=>root.unmount());}
 });

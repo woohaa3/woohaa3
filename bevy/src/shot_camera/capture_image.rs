@@ -1,6 +1,6 @@
 //! capture 离屏 Image 建立与像素读取（纯函数）
 //! （change: add-reusable-bevy-shot-camera；change: 2026-10-15-add-film-set-shooting-shot-previews
-//! 切到 WebGPU 后移除窗口裁剪）。
+//! 使用统一离屏回读后移除窗口裁剪）。
 
 use bevy::prelude::*;
 

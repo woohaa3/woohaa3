@@ -38,7 +38,7 @@ it("T 定位、按帧文字和样式、取消与确认均沿原节点预览，�
   const container=document.createElement("div");document.body.append(container);root=createRoot(container);
   const onPreview=vi.fn();
   act(()=>root.render(<PhotoEditorApp controller={controller} canvasView={{viewport:{x:0,y:0,zoom:0.5},fitZoom:0.5,transitioning:false,onChange:vi.fn()}} onPreview={onPreview}/>));
-  act(()=>container.querySelector<HTMLButtonElement>('.photo-editor__toolrail [aria-label="文字"]')!.click());
+  act(()=>container.querySelector<HTMLButtonElement>('.photo-editor__toolrail [data-tool-slot="16"]')!.click());
   const stage=container.querySelector<HTMLElement>(".photo-editor-canvas")!;
   stage.setPointerCapture=vi.fn();stage.hasPointerCapture=()=>true;stage.releasePointerCapture=vi.fn();
   const send=(type:string)=>{const event=new MouseEvent(type,{button:0,clientX:100,clientY:100,bubbles:true});Object.defineProperty(event,"pointerId",{value:1});act(()=>stage.dispatchEvent(event));};

@@ -77,7 +77,7 @@ it.each([["画笔", false,false,false], ["橡皮", true,false,false],["画笔",f
     canvasView={{contentSize:{width:864,height:514}, viewport: { x: 0, y: 0, zoom }, fitZoom: 0.5, transitioning: false, onChange: vi.fn() }} onPreview={onPreview} onDetailPreview={detail?onDetails:undefined} />));
   render();
   if(detail)drain();
-  act(() => container.querySelector<HTMLButtonElement>(`.photo-editor__toolrail [aria-label="${label}"]`)!.click());
+  act(() => container.querySelector<HTMLButtonElement>(`.photo-editor__toolrail [aria-label="${label==="橡皮"?"橡皮擦":label}"]`)!.click());
   const stage = container.querySelector<HTMLDivElement>(".photo-editor-canvas")!;
   const captured = new Set<number>();
   stage.setPointerCapture = (id) => { captured.add(id); };
@@ -101,7 +101,10 @@ it.each([["画笔", false,false,false], ["橡皮", true,false,false],["画笔",f
   expect(execute).toHaveBeenCalledOnce();
   const [id, json] = execute.mock.calls[0] as unknown as [string, string];
   expect(id).toBe("paint.stroke");
-  expect(JSON.parse(json)).toMatchObject({ erase, target: mask ? "mask" : "pixels", points: detail?[[1716,1343],[1766,1363],[1816,1393]]:[[136, 136], [236, 176], [336, 236]] });
+  const params=JSON.parse(json);expect(params).toMatchObject({erase,target:mask?"mask":"pixels"});
+  const expected=detail?[[1716,1343],[1766,1363],[1816,1393]]:[[136,136],[236,176],[336,236]];
+  expect(params.points).toHaveLength(expected.length);
+  params.points.forEach((point:number[],index:number)=>{expect(point[0]).toBeCloseTo(expected[index]![0]!,5);expect(point[1]).toBeCloseTo(expected[index]![1]!,5);expect(point[2]).toBe(1);expect(point[6]).toBeGreaterThanOrEqual(params.points[0][6]);});
   expect(controller.currentView().document?.revision).toBe(2);
   expect(controller.isDirty()).toBe(true);
   expect(onPreview).toHaveBeenCalledTimes(detail?2:3);
@@ -135,7 +138,8 @@ it.each([["画笔", false,false,false], ["橡皮", true,false,false],["画笔",f
   // 取消的半笔不替换上一笔锚点；Shift 点击从最后成功位置连接直线。
   pointer("pointerdown",250,200,{shiftKey:true}); pointer("pointerup",250,200,{shiftKey:true});
   expect(execute).toHaveBeenCalledTimes(2);
-  expect(JSON.parse(execute.mock.calls[1][1])).toMatchObject({points:[[336,236],[436,336]],smoothing:0,erase});
+  const line=JSON.parse(execute.mock.calls[1][1]);expect(line).toMatchObject({smoothing:0,erase});expect(line.points).toHaveLength(2);
+  line.points.forEach((point:number[],i:number)=>{expect(point[0]).toBeCloseTo(i?436:336,5);expect(point[1]).toBeCloseTo(i?336:236,5);});
   const editor=container.querySelector(".photo-editor")!;
   act(() => editor.dispatchEvent(new KeyboardEvent("keydown",{key:"Alt",altKey:true,bubbles:true})));
   if(erase) {
@@ -149,5 +153,9 @@ it.each([["画笔", false,false,false], ["橡皮", true,false,false],["画笔",f
   expect(container.querySelector<HTMLInputElement>('.photo-editor__swatch input')!.value).toBe("#336699");
   act(() => editor.dispatchEvent(new KeyboardEvent("keyup",{key:"Alt",bubbles:true})));
   pointer("pointerdown",100,100); pointer("pointerup",100,100);
-  expect(JSON.parse(execute.mock.calls[2][1])).toMatchObject({color:"#336699",points:[[136,136]],erase});
+  const sampled=JSON.parse(execute.mock.calls[2][1]);
+  expect(sampled).toMatchObject({color:"#336699",erase});
+  expect(sampled.points).toHaveLength(1);
+  expect(sampled.points[0].slice(0,6)).toEqual([136,136,1,0,0,0]);
+  expect(sampled.points[0][6]).toBeGreaterThan(0);
 });

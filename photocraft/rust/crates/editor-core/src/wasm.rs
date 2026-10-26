@@ -309,6 +309,9 @@ impl WasmEditor {
         Ok(WasmPreview{width:preview.width,height:preview.height,pixels:preview.pixels})
     }
 
+    #[wasm_bindgen(js_name = strokeWantsTime)]
+    pub fn stroke_wants_time(&self) -> bool { self.inner.stroke_wants_time() }
+
     #[wasm_bindgen(js_name = beginStroke)]
     pub fn begin_stroke(&mut self, params_json: &str) -> Result<(), JsValue> {
         self.inner.begin_stroke(parse_params(params_json)?).map_err(|e| js_error(&e))

@@ -229,6 +229,7 @@ export function ProjectEditorPane({ view, writable, port, entry, display, contro
     <div className="photo-editor-host">
       {status ? <p className="photo-editor-host__status">{status}</p> : null}
       <PhotoEditorApp
+        chromeMode="embedded"
         dialogs={port.dialogs}
         display={display}
         controller={controller}

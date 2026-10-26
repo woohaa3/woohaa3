@@ -11,6 +11,7 @@ import type {EditorTextStyle, EditorTextStyleDetail} from "./editor-view-model.j
 import type {NumericUnit} from "./numeric-expression.js";
 
 type Props = {
+  group?:"character"|"paragraph";
   style: EditorTextStyleDetail | null;
   /** 当前字号，用于「自动行距」的显示基准。 */
   size: number;
@@ -38,9 +39,10 @@ const toggle = (label: string, checked: boolean | undefined, onChange: (next: bo
     onChange={event => onChange(event.currentTarget.checked)}/>{label}</label>
 );
 
-export function TextStyleControls({style, size, disabled, onChange}: Props) {
+export function TextStyleControls({style, size, disabled, onChange,group}: Props) {
   const leading = style?.leading;
   return <section className="photo-editor__options-group" aria-label="文字样式" data-text-style="true">
+    {group!=="paragraph"?<>
     {number("行距", leading ?? Math.round(size * 1.2 * 100) / 100, 0.01, 5000, 0.5, next => onChange({leading: next}), disabled, "leading", "pt")}
     {number("字距", style?.tracking, -1000, 10000, 10, next => onChange({tracking: next}), disabled, "tracking")}
     {number("基线偏移", style?.baselineShift, -5000, 5000, 0.5, next => onChange({baselineShift: next}), disabled, "baselineShift", "pt")}
@@ -56,12 +58,15 @@ export function TextStyleControls({style, size, disabled, onChange}: Props) {
     {toggle("删除线", style?.strikethrough, next => onChange({strikethrough: next}), disabled, "strikethrough")}
     {toggle("连字", style?.ligatures, next => onChange({ligatures: next}), disabled, "ligatures")}
     {toggle("自由连字", style?.discretionaryLigatures, next => onChange({discretionaryLigatures: next}), disabled, "discretionaryLigatures")}
+    </>:null}
+    {group!=="character"?<>
     {toggle("连字符", style?.hyphenate, next => onChange({hyphenate: next}), disabled, "hyphenate")}
     {number("首行缩进", style?.firstLineIndent, -5000, 5000, 0.5, next => onChange({firstLineIndent: next}), disabled, "firstLineIndent", "pt")}
     {number("左缩进", style?.startIndent, -5000, 5000, 0.5, next => onChange({startIndent: next}), disabled, "startIndent", "pt")}
     {number("右缩进", style?.endIndent, -5000, 5000, 0.5, next => onChange({endIndent: next}), disabled, "endIndent", "pt")}
     {number("段前", style?.spaceBefore, 0, 5000, 0.5, next => onChange({spaceBefore: next}), disabled, "spaceBefore", "pt")}
     {number("段后", style?.spaceAfter, 0, 5000, 0.5, next => onChange({spaceAfter: next}), disabled, "spaceAfter", "pt")}
+    </>:null}
   </section>;
 }
 

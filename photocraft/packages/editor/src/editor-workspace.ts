@@ -456,6 +456,8 @@ export class EditorWorkspaceController {
     return this.handle.appendStroke(points);
   }
 
+  strokeWantsTime():boolean {return this.strokeActive && (this.handle?.strokeWantsTime()??false);}
+
   takeStrokeDamage():EditorResult<EditorPreviewRegion[]> {
     return this.handle&&this.strokeActive ? this.handle.takeStrokeDamage() : this.unavailable();
   }
@@ -551,7 +553,7 @@ export class EditorWorkspaceController {
   }  saveBrushPreset(name:string):EditorResult<unknown> {return this.brushPresetWrite("brush.presets.save",{name});}
   updateBrushPreset(name?:string):EditorResult<unknown> {return this.brushPresetWrite("brush.presets.update",name===undefined?{}:{name});}
   deleteBrushPreset(name:string):EditorResult<unknown> {return this.brushPresetWrite("brush.presets.delete",{name});}
-  setBrushPreset(name:string):EditorResult<unknown> {return this.brushPresetWrite("brush.presets.setCurrent",{name});}
+  setBrushPreset(name:string):EditorResult<unknown> {return this.brushPresetWrite("tools.setBrush",{preset:name});}
   defineBrushFromSelection(name:string):EditorResult<unknown> {return this.brushPresetWrite("brush.defineFromSelection",{name});}
   private brushPresetWrite(id:string,params:unknown):EditorResult<unknown> {
     const handle=this.handle;
