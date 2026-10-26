@@ -66,7 +66,7 @@
 .agent-assistant__brands { display: flex; flex-wrap: wrap; gap: 5px 10px; font-size: 11px; }
 .agent-assistant__provider-mark { display: inline-flex; align-items: center; justify-content: center; height: 24px; }
 .agent-assistant__forms { min-height: 280px; padding: 20px; border: 1px solid var(--app-web-border); border-radius: 12px; background: var(--app-web-panel); }
-.agent-assistant__forms--active { border-color: var(--app-interaction-accent); box-shadow: 0 8px 24px color-mix(in srgb, var(--app-web-shadow) 65%, transparent); }
+.agent-assistant__forms--active { border-color: var(--app-interaction-accent); }
 .agent-assistant__form-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--app-web-border); }
 .agent-assistant__form-heading > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .agent-assistant__form-heading span { color: var(--app-interaction-accent-pressed); font-size: 11px; font-weight: 600; }
@@ -135,7 +135,7 @@
   .agent-assistant__overview-row { grid-template-columns: minmax(0, 1fr) 140px 58px; gap: 8px; }
   .agent-assistant__source-list li { grid-template-columns: minmax(0, 1fr) 100px auto; gap: 10px; }
 }
-@media (max-width: 900px) {
+@media (max-width: 720px) {
   .agent-assistant__add { grid-template-columns: 1fr; }
   .agent-assistant__methods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .agent-assistant__forms { min-height: 0; }

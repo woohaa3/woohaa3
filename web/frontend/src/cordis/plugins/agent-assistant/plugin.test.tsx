@@ -183,6 +183,72 @@ it("服务连接按需读取现有 Provider 配置，空密钥不从浏览器回
 });
 
 
+it("在能力中心保存 Provider Key 后重读来源并立即刷新插件和模型状态，失败时保留草稿", async () => {
+  const { agentAssistantExtension } = await import("./plugin.js");
+  const { DialogService } = await import("../../services/dialogs/service.js");
+  const { CanvasNavigationStore } = await import("../../navigation/store.js");
+  const slots = new SlotRegistry();
+  const dialogs = new DialogService();
+  const navigation = new CanvasNavigationStore({ openDialog: request => dialogs.open({ dialogId: request.dialogId, payload: request.payload }) });
+  let configured = false;
+  const snapshot = () => ({ settings: [{
+    key: "providers.test.apiKey", kind: "string", label: "API Key", description: "", reload: "hot", secret: true,
+    source: null, lockedBy: null, value: null, configured, pendingRestart: false, group: "测试 Provider",
+  }], plugins: [], files: { config: "c", secrets: "s" } });
+  const write = vi.fn(async () => { configured = true; return { ok: true, snapshot: snapshot() }; })
+    .mockResolvedValueOnce({ ok: false, code: "unavailable", error: "保存失败，请重试" } as never);
+  const extensionRefresh = vi.fn(async () => {});
+  const modelRefresh = vi.fn(async () => {});
+  const invalidateCatalog = vi.fn();
+  const listServiceConnections = vi.fn(async () => ({ ok: true, value: [{
+    serviceConnectionId: "provider:test", scope: "site", kind: "api", name: "测试 Provider", endpoints: [], capabilities: [],
+    bindings: [{ bindingId: "test", extensionId: "test", consumer: "provider", consumerId: "test", purposes: [], modelKeys: [] }],
+    enabled: true, removed: false, credentialConfigured: configured, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
+  }] }));
+  runtime = await startFrontendRuntime({ installPlatform: ctx => {
+    ctx.provide("slots" as never, slots as never);
+    ctx.provide("dialogs" as never, dialogs as never);
+    ctx.provide("canvasNavigation" as never, navigation as never);
+    ctx.provide("agentConversationService" as never, { listConnections: async () => ({ ok: true, value: [] }), listServiceConnections } as never);
+    ctx.provide("settingsRemote" as never, { fetchSnapshot: async () => ({ ok: true, snapshot: snapshot() }), write } as never);
+    ctx.provide("applicationExtensionStatus" as never, { refresh: extensionRefresh } as never);
+    ctx.provide("generationModelsStatus" as never, { refresh: modelRefresh, subscribe: () => () => {}, getSnapshot: () => null } as never);
+    ctx.provide("taskCatalog" as never, { invalidate: invalidateCatalog } as never);
+  }, plugins: [{ id: "agent-assistant", required: true, plugin: agentAssistantExtension() }] });
+  dialogs.open({ dialogId: "agent-assistant", payload: { page: "add" } });
+  const Renderer = dialogs.resolveRenderer("agent-assistant")!;
+  const el = document.createElement("div"); document.body.append(el); root = createRoot(el);
+  await act(async () => {
+    root!.render(<RuntimeProvider runtime={runtime!}><Renderer instance={dialogs.top()!} requestClose={() => {}} setBusy={() => {}} replace={() => {}} /></RuntimeProvider>);
+    await import("./assistant.js");
+  });
+  const sourceState = () => el.querySelector(".agent-assistant__source-list .agent-assistant__state")?.textContent;
+  expect(sourceState()).toBe("待配置密钥");
+  await act(async () => {
+    el.querySelector<HTMLButtonElement>('[data-kind="provider:test"]')!.click();
+    await import("../settings/provider-settings-cards.js");
+  });
+  const field = el.querySelector<HTMLInputElement>('[data-setting-key="providers.test.apiKey"] input')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "test-key");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(sourceState()).toBe("待配置密钥");
+  const save = () => act(async () => field.closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await save();
+  expect(field.value).toBe("test-key");
+  expect(extensionRefresh).not.toHaveBeenCalled();
+  expect(modelRefresh).not.toHaveBeenCalled();
+  expect(sourceState()).toBe("待配置密钥");
+  await save();
+  expect(sourceState()).toBe("已配置");
+  expect(extensionRefresh).toHaveBeenCalledOnce();
+  expect(modelRefresh).toHaveBeenCalledOnce();
+  expect(invalidateCatalog).toHaveBeenCalledOnce();
+  expect(listServiceConnections).toHaveBeenCalledTimes(2);
+  expect(el.querySelector('.agent-assistant__drawer-layer:not([hidden])')).toBeNull();
+});
+
 it("工具栏单例打开且不读取模型，dispose 撤销事件、槽位和 Dialog 注册", async () => {
   const { agentAssistantExtension } = await import("./plugin.js");
   const { DialogService } = await import("../../services/dialogs/service.js");

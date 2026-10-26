@@ -5,6 +5,8 @@ import { SparklesIcon } from "../../../shared/ui/icons.js";
 import { objectPayload } from "../../services/dialogs/registry.js";
 import { createBackendSettingsStore } from "../settings/backend-settings-store.js";
 import type { SettingsRemote } from "../../services/settings-remote.js";
+import type { ApplicationExtensionStatusService } from "../../services/application-extension-status.js";
+import type { GenerationModelsStatusService } from "../../services/generation-models-status.js";
 import { agentDirectory } from "../../services/agent-directory.js";
 import { AssistantSetupTooltip } from "./setup-tooltip.js";
 import { installAssistantFirstUse } from "./first-use.js";
@@ -19,6 +21,8 @@ export function agentAssistantExtension(): Plugin.Function<void> {
       const namespace = ctx.get("currentUser")?.getSnapshot()?.dataScopeId;
       if (namespace) void agentDirectory(ctx.agentConversationService, namespace).load(true);
     };
+    const extensionStatus = ctx.get("applicationExtensionStatus" as never) as ApplicationExtensionStatusService | undefined;
+    const generationModels = ctx.get("generationModelsStatus" as never) as GenerationModelsStatusService | undefined;
     const remote = ctx.get("settingsRemote" as never) as SettingsRemote | undefined;
     const settingsStore = remote ? createBackendSettingsStore({
       fetchSnapshot: () => remote.fetchSnapshot(),
@@ -27,6 +31,8 @@ export function agentAssistantExtension(): Plugin.Function<void> {
         if (result.ok) {
           (ctx.get("taskCatalog" as never) as { invalidate?: () => void } | undefined)?.invalidate?.();
           refreshDirectory();
+          void extensionStatus?.refresh().catch(() => undefined);
+          void generationModels?.refresh().catch(() => undefined);
         }
         return result;
       }
