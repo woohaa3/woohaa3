@@ -202,6 +202,43 @@ change: 2026-10-21-add-server-extension-marketplace（设计见 [server-extensio
 
 撤回立即阻止新的解析与下载（含未过期的下载地址），但**不会**卸载已安装的副本。
 
+### 经 GitHub Release 分发
+
+核心自带第二个来源 `github-release`（与 `local-file` 同级，非扩展插件）：把 `.wxt` 资产传到
+GitHub 仓库的 Release 即可被发现。适合开源 / 跨团队的分发现状——不需要自建 woohaa-server。
+
+**发布侧**：`pnpm pack:extension <扩展目录> --key ./my-signing.key` 产出
+`artifacts/extensions/<id>-<version>.wxt`，把它作为 Release 资产原样上传（文件名保持
+`<extensionId>-<version>.wxt` 约定，不要重命名）。本机管理员照旧把签名公钥写入本机
+`extensions.marketplace.trustedKeys`——GitHub 不发布公钥，信任判定完全在本机。
+
+**安装侧**：本机配置（`web/woohaa.config.yml`）：
+
+```yaml
+extensions:
+  marketplace:
+    github:
+      enabled: true
+      repos: "my-org/my-extension, my-org/another-extension"
+      # GitHub Enterprise Server 才需要：
+      # apiBase: "https://github.example.com/api/v3"
+```
+
+令牌（访问私有仓库或提高限流，缺省匿名 60 次/小时）写在密钥文件 `web/woohaa.secrets.yml`：
+
+```yaml
+extensions:
+  marketplace:
+    github:
+      token: "ghp_xxx"
+```
+
+也可用环境变量 `WOOHAA3_GITHUB_TOKEN` 兜底。之后设置「插件配置 → 从市场安装」会出现
+`GitHub Release` 来源；安装仍走同一条校验链（摘要、签名、预检）。
+
+注意：GitHub API 需为资产提供 `digest`（`sha256:...`）才能安装——未返回 digest 的资产会被
+跳过（来源宁可失败也不安装无法复核摘要的包）。
+
 ## 示例
 
 `extensions/oauth-agent` 是完整样例（原 `chatgpt`，change: 2026-10-17-add-agent-appserver-and-sdk-connections 改名）：

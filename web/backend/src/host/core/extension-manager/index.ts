@@ -5,6 +5,8 @@
  * - 受管根取自扩展宿主扫描结果（`extensionHost.managedRoot`，与扫描器同一个值）；没有受管根时不装配。
  * - 信任根与未签名开关来自本机配置（`extensions.marketplace.*`），按调用现取，不经站点配置面写入。
  * - 本地文件来源（`local-file`）在这里注册进 `ctx.marketplace`（核心自带，非扩展）。
+ * - GitHub Release 来源（`github-release`）同样核心自带：D3「来源插件只能来自内置根」防的是
+ *   「市场装市场」的信任提升，核心自带来源随宿主发布、没有这个问题。
  * - 受管根被另一个进程锁住时 Manager 不可写（`MARKETPLACE_WRITER_LOCKED` 记日志），宿主照常启动。
  */
 import type { ExtensionDocumentStore } from "@woohaa3/contracts";
@@ -16,6 +18,7 @@ import { createExtensionManager, type ExtensionManager, type ObservedHealth } fr
 import { loadPackageToolkit } from "./toolkit.js";
 import { createRuntimeAttach } from "./runtime-attach.js";
 import { createVersionStatusCache, managedVersionStatus, marketplaceExtensionDetail } from "./marketplace-detail.js";
+import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, parseRepoList } from "./github-source.js";
 import type { ExtensionPackageToolkit, InstallationsHandle, TrustedKey } from "./types.js";
 
 export type { ExtensionManager } from "./manager.js";
@@ -91,6 +94,20 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
     const builtinIds = new Set((host.metadata ?? []).map((entry) => entry.extensionId));
 
     const runtimeAttach = createRuntimeAttach(ctx, toolkit, log);
+    // GitHub Release 来源（核心自带第二个来源，与 local-file 同级）：配置按调用现取（热重载即刻生效）；
+    // enabled 缺省 false——出网行为必须显式开启，未开启时 available() 不可用且绝不发请求。
+    // 令牌优先取密钥文件里的 extensions.marketplace.github.token，环境变量 WOOHAA3_GITHUB_TOKEN 兜底。
+    const githubSource = createGithubReleaseSource({
+      config: () => ({
+        enabled: settings.get("extensions.marketplace.github.enabled" as never) === true,
+        repos: parseRepoList(settings.get("extensions.marketplace.github.repos" as never)),
+        apiBase: (settings.get("extensions.marketplace.github.apiBase" as never) as string | undefined) ?? "https://api.github.com",
+        token: (settings.get("extensions.marketplace.github.token" as never) as string | undefined) ?? config.env.WOOHAA3_GITHUB_TOKEN ?? ""
+      })
+    });
+    const unregisterGithub = ctx.marketplace.resolve(GITHUB_RELEASE_SOURCE_ID)
+      ? () => undefined
+      : ctx.marketplace.register(githubSource);
     const manager: ExtensionManager = createExtensionManager(
       {
         managedRoot,
@@ -183,6 +200,7 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
     );
     ctx.provide("extensionManager", manager);
     ctx.effect(() => () => manager.close());
+    ctx.effect(() => unregisterGithub);
 
     const interval = config.observeIntervalMs ?? OBSERVE_INTERVAL_MS;
     const timer = setInterval(() => {

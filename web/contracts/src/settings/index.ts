@@ -157,6 +157,43 @@ export const SETTING_DEFINITIONS = {
     label: "允许未签名的本地扩展包",
     description: "仅用于开发：允许从本地文件安装未签名的 .wxt；市场来源的包始终要求签名。未签名扩展与宿主同进程运行，没有隔离"
   },
+  /**
+   * GitHub Release 市场来源（核心自带，与 local-file 同级）。出网行为必须显式开启：
+   * enabled 未开时来源不可用，不发起任何请求。repos 为逗号分隔的 `owner/repo` 列表。
+   */
+  "extensions.marketplace.github.enabled": {
+    kind: "boolean",
+    default: false,
+    reload: "hot",
+    label: "启用 GitHub 扩展来源",
+    description: "允许从 GitHub Release 安装 .wxt 扩展包。开启后本机会访问 GitHub（api.github.com 或下面配置的 API 地址）；关闭时不发起任何请求"
+  },
+  /** GitHub 仓库列表：逗号分隔的 `owner/repo`；每个仓库的 Release 资产都是候选包。 */
+  "extensions.marketplace.github.repos": {
+    kind: "string",
+    default: "",
+    reload: "hot",
+    label: "GitHub 扩展仓库列表",
+    description: "逗号分隔的 owner/repo 列表（如 my-org/my-extension）。安装候选来自这些仓库 Release 的 .wxt 资产，文件名须为 <extensionId>-<version>.wxt"
+  },
+  /** GitHub REST API 地址；企业自建 GitHub（GitHub Enterprise Server）可改为 https://<host>/api/v3。 */
+  "extensions.marketplace.github.apiBase": {
+    kind: "url",
+    protocols: ["https:", "http:"],
+    default: "https://api.github.com",
+    reload: "hot",
+    label: "GitHub API 地址",
+    description: "GitHub REST API 基址，缺省 https://api.github.com；GitHub Enterprise Server 改为 https://<host>/api/v3"
+  },
+  /** GitHub 访问令牌：私有仓库或提高限流用；只应写在密钥文件，缺省匿名访问（60 次/小时限流）。 */
+  "extensions.marketplace.github.token": {
+    kind: "string",
+    default: "",
+    reload: "hot",
+    secret: true,
+    label: "GitHub 访问令牌",
+    description: "访问私有仓库或提高 API 限流用；留空为匿名访问。请写在密钥文件（woohaa.secrets.yml），不要写进普通配置文件"
+  },
   ...EXTENSION_HOST_SETTING_DEFINITIONS
 } as const satisfies Record<string, SettingDefinition>;
 
