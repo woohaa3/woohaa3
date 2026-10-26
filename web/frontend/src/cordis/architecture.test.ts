@@ -15,9 +15,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC_ROOT = fileURLToPath(new URL("../", import.meta.url));
-// wasm 绑定目录由构建生成（bevy-wasm 由 Rust 产物注入，photocraft-wasm 由 PhotoCraft 构建产出），
+// wasm 绑定目录由构建生成（bevy-wasm 由 Rust 产物注入），
 // 不参与「页面 / 共享 / feature 三层」的源码归属审计。
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "bevy-wasm", "photocraft-wasm"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "bevy-wasm"]);
 
 function walk(dir: string, match: RegExp): string[] {
   const out: string[] = [];
