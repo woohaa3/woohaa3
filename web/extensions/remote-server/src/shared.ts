@@ -996,3 +996,5 @@ export function pickLoginAssertionHeaders(
 export const OPS_SERVICE = "woohaa.ops.v1.OpsService";
 /** 画布自服务（建/查/我的画布/成员）。目录合并读的是 `ListMyCanvases`。 */
 export const CANVAS_SERVICE = "woohaa.canvas.v1.CanvasService";
+/** 部署托管的扩展市场（只读目录面）：搜索、版本详情与签名下载地址。 */
+export const MARKETPLACE_SERVICE = "woohaa.marketplace.v1alpha1.MarketplaceService";

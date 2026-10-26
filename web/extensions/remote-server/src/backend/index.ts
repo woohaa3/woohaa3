@@ -87,6 +87,7 @@ import { callConnect, connectErrorText, exchangeLogin } from "./connect.js";
 import { createRemoteGenerationBridge, type RemoteGenerationStatus } from "./generation/index.js";
 import { createOAuthLogin } from "./oauth-login.js";
 import { createRemoteTelemetryExport } from "./telemetry-export.js";
+import { createServerMarketplaceSource, registerServerMarketplaceSource, type RemoteLogSink } from "./marketplace/register.js";
 import {
   SESSION_UNCONFIGURED_CODE,
   createMemorySessionStore,
@@ -592,6 +593,18 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * `ensure()` 允许「没有会话时用部署凭证换一份」——存储后端没有交互入口，而部署凭证本来就是
        * 无人值守场景的凭据；并发调用共享同一次登录（冷启动时三个 RPC 不该换三份会话）。
        */
+      /**
+       * 本部署市场来源（`MarketplaceSource`）。
+       *
+       * 放在 sessionSource 之前创建：它需要一个**同步**的会话镜像来回答 `available()`，
+       * 而会话源本身是异步的。镜像由下面的 `onSessionChanged` 与启动时的一次预取维护。
+       */
+      let sessionSourceRef: ReturnType<typeof createRemoteSessionSource> | null = null;
+      const marketplaceSource = createServerMarketplaceSource({
+        currentSession: async () => (sessionSourceRef ? sessionSourceRef.current() : null),
+        fetchImpl
+      });
+
       const sessionSource = createRemoteSessionSource({
         store,
         configuredServerUrl,
@@ -618,8 +631,12 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           // 存储后端跟着会话走：登录成功前没有地址（注册被跳过），登录后才该出现；
           // 登出后地址随会话消失（部署配置没配时），后端要撤掉，别留一个打不通的实现。
           void syncStorageBackendWithSession().catch(() => undefined);
+          // 市场来源的同步镜像：`available()` 是同步契约，边界处必须先把会话喂进去。
+          void sessionSource.current().then((current) => marketplaceSource.setSession(current)).catch(() => undefined);
         }
       });
+      sessionSourceRef = sessionSource;
+      void sessionSource.current().then((current) => marketplaceSource.setSession(current)).catch(() => undefined);
 
       /**
        * 当前**可用**的远端地址：部署配置优先，其次已登录会话（与存储后端同一个判据）。
@@ -1005,6 +1022,16 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         id: canvasUpstreamCapabilityId(REMOTE_SERVER_EXTENSION_ID),
         value: upstreamProvider
       });
+
+      /**
+       * 把「本部署市场」作为一个市场来源交给宿主（`ctx.marketplace` 扩展点）。
+       *
+       * 三条失败都不是激活失败（与 registerMarketplaceSource 的契约一致）：
+       * - 宿主没有这个扩展点（旧宿主/独立入口）→ 记日志跳过；
+       * - 宿主判定本扩展不在内置根（市场装市场的场景）→ 记日志跳过，其余能力照常；
+       * - sourceId 已被占用（热重载残留）→ 同上。
+       */
+      registerServerMarketplaceSource(host, marketplaceSource, log as RemoteLogSink);
 
       host.registerHandler({
         route: REMOTE_SERVER_SESSION_ROUTE,

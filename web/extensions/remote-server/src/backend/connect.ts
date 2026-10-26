@@ -36,18 +36,21 @@ export async function callConnect<T>(
   serverUrl: string,
   procedure: string,
   body: unknown,
-  options: { token?: string; timeoutMs?: number; headers?: Record<string, string> } = {}
+  options: { token?: string; timeoutMs?: number; headers?: Record<string, string>; signal?: AbortSignal } = {}
 ): Promise<RemoteCallResult<T>> {
   const { rpcBase } = resolveRemoteEndpoints(serverUrl);
   const headers: Record<string, string> = { "Content-Type": "application/json", ...(options.headers ?? {}) };
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  // 调用方的取消与固定超时同时生效：市场搜索会被 UI 取消，不该被 8s 超时钉住。
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   let response: Response;
   try {
     response = await fetchImpl(`${rpcBase}${procedure}`, {
       method: "POST",
       headers,
       body: JSON.stringify(body ?? {}),
-      signal: AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS)
+      signal
     });
   } catch (error) {
     const timedOut = error instanceof Error && error.name === "TimeoutError";
