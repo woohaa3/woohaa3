@@ -223,6 +223,28 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(new Set(ensureCalls.map((call) => call.connectionId)).size).toBe(3);
   });
 
+  it("原生线程无法恢复时，讨论回合回放宿主账本历史", async () => {
+    const { service } = fakeService([record()]);
+    const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
+    const { transport, inputs } = fakeTransport({ ok: true, outcome: { status: "succeeded", assistantText: "reply" } });
+    const adapter = createLocalAgentConversationAdapter(codexAdapter, {
+      service,
+      processManager: manager,
+      transports: { "codex-appserver": transport },
+      argsFor: () => []
+    });
+    const outcome = await adapter.run(runInput({
+      intent: { action: "discuss", canvasId: "canvas-1", nodeId: "n1", mode: "model3d", prompt: "继续刚才的模型" },
+      history: [
+        { messageId: "m1", conversationId: "conv-1", turnId: "old", requestId: "old", role: "user", content: "生成一个立方体", truncated: false, sequence: 1, createdAt: "2026-10-16T00:00:00.000Z" },
+        { messageId: "m2", conversationId: "conv-1", turnId: "old", requestId: "old", role: "assistant", content: "已生成一个立方体。", truncated: false, sequence: 2, createdAt: "2026-10-16T00:00:01.000Z" }
+      ]
+    }));
+    expect(outcome.status).toBe("succeeded");
+    expect(inputs[0]?.prompt).toContain("已生成一个立方体");
+    expect(inputs[0]?.prompt).toContain("继续刚才的模型");
+  });
+
   it("执行时启动专用进程并按连接传入隔离目录；成功登记原生会话", async () => {
     const { service, natives, patches } = fakeService([record()]);
     const { manager, ensureCalls } = fakeProcessManager({ executable: "/usr/bin/codex" });

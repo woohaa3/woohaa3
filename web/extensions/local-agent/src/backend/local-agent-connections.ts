@@ -50,6 +50,20 @@ function capabilitiesFor(): AgentConnectionCapabilities {
   return { discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
 }
 
+/** 原生线程不可恢复时，仍把宿主账本中的合法历史交给讨论回合。 */
+function buildDiscussionPrompt(
+  history: ReadonlyArray<AgentAdapterRunInput["history"][number]>,
+  prompt: string,
+): string {
+  if (history.length === 0) return prompt;
+  const lines = ["以下是本对话之前的消息，仅作为上下文参考："];
+  for (const message of history) {
+    lines.push(`${message.role === "user" ? "用户" : "助手"}：${message.content}`);
+  }
+  lines.push("", `用户：${prompt}`);
+  return lines.join("\n");
+}
+
 /**
  * 经宿主 grant facade 签发本轮 grant（仅在目标执行且宿主配置了工具委托时）。
  *
@@ -246,7 +260,9 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         stdio: handle.stdio ?? null,
         model: input.intent.model ?? record.models?.[0] ?? "",
         ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}),
-        prompt: discussion ? input.intent.prompt : buildTargetPrompt(input.intent, input.requestId),
+        prompt: discussion
+          ? (binding ? input.intent.prompt : buildDiscussionPrompt(input.history, input.intent.prompt))
+          : buildTargetPrompt(input.intent, input.requestId),
         ...(input.candidate ? { images: input.candidate.images, outputSchema: input.candidate.outputSchema } : {}),
         allowedTools: toolNames,
         toolToken,
