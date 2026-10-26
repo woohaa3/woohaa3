@@ -30,8 +30,19 @@ export type CanvasRoomRegistryOptions = {
    * 透传给每个 `CanvasRoom`（见 `CanvasRoomOptions.onCommitted`）。
    */
   onCommitted?: (input: { canvasId: string; canvas: ServerCanvas; commands: readonly unknown[] }) => void;
-  /** room 加载成功（ready）后调用；返回值在 room 销毁时调用，用于挂接远端同步上游。 */
-  onRoomReady?: (room: CanvasRoom) => (() => void) | void;
+  /**
+   * room **第一次被客户端（浏览器会话）持有**时调用；返回值在 room 销毁时调用，
+   * 用于挂接远端同步上游。
+   *
+   * 刻意不挂在「room 创建」上：任务对账、节点历史、片场转换这些**内部消费者**也会
+   * `resolve()` 出 room（它们只读/写文档，不希望在无人观看时把整张画布推给远端）。
+   * 2026-10-26 现场：启动期对账把三张「用户根本没打开」的画布都加载了，如果那时就挂
+   * 上游，远端会看到三张画布同时「有变化」。只有真的有人在看，才值得同步。
+   *
+   * 语义是**粘性**的：一张画布在一次 room 生命周期内被打开过，就一直保持挂载，直到
+   * room 被回收——这样「关掉标签页后后台任务刚出的结果」仍会推上去。
+   */
+  onClientAcquired?: (room: CanvasRoom) => (() => void) | void;
   /** 本地文档不存在时从远端同步上游取完整状态（见 `CanvasRoomOptions.seedFromUpstream`）。 */
   seedFromUpstream?: (canvasId: string) => Promise<Uint8Array | null>;
 };
@@ -58,7 +69,7 @@ export class CanvasRoomRegistry {
   private readonly bootstrap: ((canvasId: string) => Promise<ServerCanvas | null>) | undefined;
   private readonly generateRoomEpoch: (() => string) | undefined;
   private readonly onCommitted: ((input: { canvasId: string; canvas: ServerCanvas; commands: readonly unknown[] }) => void) | undefined;
-  private readonly onRoomReady: CanvasRoomRegistryOptions["onRoomReady"];
+  private readonly onClientAcquired: CanvasRoomRegistryOptions["onClientAcquired"];
   private readonly seedFromUpstream: CanvasRoomRegistryOptions["seedFromUpstream"];
   private readonly roomDetachers = new Map<string, () => void>();
 
@@ -72,7 +83,7 @@ export class CanvasRoomRegistry {
     this.bootstrap = options.bootstrap;
     this.generateRoomEpoch = options.generateRoomEpoch;
     this.onCommitted = options.onCommitted;
-    this.onRoomReady = options.onRoomReady;
+    this.onClientAcquired = options.onClientAcquired;
     this.seedFromUpstream = options.seedFromUpstream;
     this.schedule = options.schedule ?? ((run, delayMs) => {
       const handle = setTimeout(run, delayMs);
@@ -97,7 +108,14 @@ export class CanvasRoomRegistry {
    */
   async acquire(canvasId: string): Promise<RoomLease> {
     const room = await this.loadRoom(canvasId);
-    this.refCounts.set(canvasId, (this.refCounts.get(canvasId) ?? 0) + 1);
+    const previousCount = this.refCounts.get(canvasId) ?? 0;
+    this.refCounts.set(canvasId, previousCount + 1);
+    // 第一个客户端持有 = 真的有人在看这张画布：这时才挂远端同步上游。
+    // 同一 room 生命周期内只挂一次（粘性），release 到 0 也不拆——room 回收时才拆。
+    if (previousCount === 0 && !this.roomDetachers.has(canvasId)) {
+      const detach = this.onClientAcquired?.(room);
+      if (detach) this.roomDetachers.set(canvasId, detach);
+    }
     // 有连接了：取消待回收。
     const cancel = this.pendingReclaim.get(canvasId);
     if (cancel) {
@@ -189,9 +207,8 @@ export class CanvasRoomRegistry {
         this.rooms.set(canvasId, room);
         return room;
       }
+      // 只创建，不挂上游：内部消费者（对账/历史/转换）也会走到这里。
       this.rooms.set(canvasId, room);
-      const detach = this.onRoomReady?.(room);
-      if (detach) this.roomDetachers.set(canvasId, detach);
       return room;
     })();
 

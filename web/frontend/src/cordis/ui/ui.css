@@ -2306,6 +2306,13 @@
 	color: var(--app-web-text-primary, inherit);
 }
 
+/* 未连接：属于远端却还没有上游链路。必须比「已同步」更显眼，否则故障会被读成稳态。 */
+.canvas-switcher-trigger__sync[data-sync="unlinked"] {
+	opacity: 1;
+	color: var(--app-status-warning, var(--app-web-text-primary));
+	border-color: currentColor;
+}
+
 .canvas-switcher-trigger__caret {
 	display: flex;
 	align-items: center;
@@ -2721,6 +2728,12 @@
 .canvas-switcher__source[data-sync="failed"] {
 	color: var(--app-status-danger);
 	border-color: var(--app-status-danger);
+}
+
+/* 属于远端但没有上游链路：不是「已同步」，也不是硬失败（重开画布/重启宿主可恢复），用警示色。 */
+.canvas-switcher__source[data-sync="unlinked"] {
+	color: var(--app-status-warning, var(--app-web-text-muted));
+	border-color: var(--app-status-warning, var(--app-web-border));
 }
 
 .canvas-switcher__status {

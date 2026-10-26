@@ -48,6 +48,15 @@ export type SyncStatusInput = {
   readOnly?: boolean;
   /** 只读原因文案。 */
   readOnlyReason?: string | null;
+  /**
+   * 这张画布此刻有没有**宿主→远端**的上游链路（目录 `sync === "unlinked"` 时传 `"unlinked"`）。
+   *
+   * 与 `mode`/`phase` 不是一回事：那两个说的是「浏览器↔本机宿主」，它们全绿也只能证明改动
+   * 到了本机。本文件此前只表达那一段，于是上游整条断掉时气泡仍然显示「已同步」——
+   * 2026-10-26 的现场就是这样（宿主重启后房间先建好、解析拿不到凭据，之后没有任何重试）。
+   * 省略表示调用方不掌握这个事实（例如纯本机画布），不显示任何提示。
+   */
+  upstream?: "linked" | "unlinked";
 };
 
 const OFFLINE_LABEL = "画布连接已断开，只读";
@@ -62,7 +71,7 @@ const RECONNECT_ACTION = (busy: boolean): SyncStatusAction => ({ kind: "reconnec
 /**
  * 由同步状态派生展示模型。
  *
- * 判定优先级：重建中 → 断线 → 错误/不可用 → 待保存 → 同步中 → 稳态。
+ * 判定优先级：重建中 → 断线 → 错误/不可用 → 上游未连接 → 待保存 → 同步中 → 稳态。
  * 断线/错误都必须给出显式「重新连接」入口：页面不依赖浏览器 `online` 事件或
  * 刷新才能恢复（change: 2026-10-21-recover-canvas-connection-explicitly）。
  */
@@ -97,6 +106,16 @@ export function syncStatusView(input: SyncStatusInput): SyncStatusView {
       tone: "warning",
       label: "只读画布",
       detail: input.readOnlyReason ?? "你对这张画布只有只读权限，修改不会被保存。",
+      pinned: true
+    };
+  }
+  // 上游链路缺失：本机一切正常（mode/phase 都是绿的），但改动没有发往远端。
+  // 必须常驻可见——稳态文案「已同步」在这里是错误陈述。
+  if (input.upstream === "unlinked") {
+    return {
+      tone: "warning",
+      label: "未同步到远端",
+      detail: "与远端的同步链路没有建立：改动目前只保存在本机。重新打开这张画布或重启应用后会重新建链。",
       pinned: true
     };
   }

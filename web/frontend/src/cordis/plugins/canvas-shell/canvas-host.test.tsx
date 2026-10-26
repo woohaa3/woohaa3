@@ -145,7 +145,7 @@ function focusRuntimeService() {
   };
 }
 
-async function render(navigationOverride?: unknown, extensionMatches?: (props: { focus?: { nodeId: string } | null }) => boolean): Promise<ReturnType<typeof focusRuntimeService> & { focusProps: Array<{ modalActive?: boolean; writable?: boolean }>; slots: SlotRegistry }> {
+async function render(navigationOverride?: unknown, extensionMatches?: (props: { focus?: { nodeId: string } | null }) => boolean, catalogSync?: "unlinked" | "synced"): Promise<ReturnType<typeof focusRuntimeService> & { focusProps: Array<{ modalActive?: boolean; writable?: boolean }>; slots: SlotRegistry }> {
   const focus = focusRuntimeService();
   const slots = new SlotRegistry();
   slots.register("canvas.toolbar", {
@@ -190,6 +190,29 @@ async function render(navigationOverride?: unknown, extensionMatches?: (props: {
       ctx.provide("dialogs" as never, focus.dialogs as never);
       // CanvasHost 按 Canvas Navigation snapshot 渲染菜单/面板（change: unify-canvas-presentation-navigation）。
       ctx.provide("canvasNavigation" as never, (navigationOverride ?? focus.navigation) as never);
+      // 目录条目：CanvasHost 读当前画布的 sync 判断「属于远端但本机没有上游链路」。
+      // getState 必须返回稳定引用：useSyncExternalStore 每次渲染都比较快照身份，
+      // 每次新建对象会被判定为「一直在变」而无限重渲染。
+      const catalogState = {
+        status: "ready" as const,
+        entries: [{
+          id: "c1", title: "c1", revision: 1,
+          updatedAt: "2026-10-26T00:00:00.000Z", createdAt: "2026-10-26T00:00:00.000Z",
+          nodeCount: 0, assetCount: 0, sources: ["local", "remote"] as const,
+          ...(catalogSync === undefined ? {} : { sync: catalogSync })
+        }],
+        total: 1, offset: 0, limit: 20, loadingMore: false, error: null
+      };
+      ctx.provide("canvasCatalog" as never, {
+        getState: () => catalogState,
+        subscribe: () => () => undefined,
+        load: async () => ({ ok: true, entries: [], total: 0, offset: 0, limit: 20 }),
+        loadMore: async () => undefined,
+        create: async () => ({ ok: false, code: "unavailable", error: "unavailable" }),
+        get: async () => ({ ok: false, code: "unavailable", error: "unavailable" }),
+        invalidate: () => undefined,
+        dispose: () => undefined
+      } as never);
     },
     plugins: []
   });
@@ -242,6 +265,26 @@ describe("CanvasHost 聚焦隐藏普通画布工具栏", () => {
     await render();
     expect(panel()).not.toBeNull();
     expect(document.querySelector('button[aria-label="生成历史"]')).not.toBeNull();
+  });
+
+  /**
+   * 2026-10-26 现场回归：浏览器↔宿主一切正常、目录说这张画布属于远端，但宿主→远端的上游
+   * 链路没有建立。此前右下角气泡只表达前一段，于是显示「已同步」，把整条上传链路的缺失藏住。
+   */
+  const statusLabel = () => document.querySelector(".canvas-control-panel__status-readout")?.getAttribute("aria-label") ?? "";
+  const statusBubble = () => document.querySelector(".canvas-control-panel__status-bubble-text")?.textContent ?? "";
+
+  it("属于远端但本机没有上游链路：右下角气泡常驻「未同步到远端」", async () => {
+    await render(undefined, undefined, "unlinked");
+    expect(statusLabel()).toBe("未同步到远端");
+    expect(statusBubble()).toContain("只保存在本机");
+    expect(document.querySelector(".canvas-control-panel__status-bubble")?.getAttribute("data-pinned")).toBe("true");
+  });
+
+  it("链路正常时回到稳态「已同步」，不出现上游提示", async () => {
+    await render(undefined, undefined, "synced");
+    expect(statusLabel()).toBe("已同步");
+    expect(statusBubble()).not.toContain("只保存在本机");
   });
 
   it("进入聚焦后隐藏整个普通画布工具栏；退出后恢复", async () => {

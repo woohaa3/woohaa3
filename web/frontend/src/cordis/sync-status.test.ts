@@ -111,6 +111,32 @@ describe("syncStatusView", () => {
     expect(view.detail).toBe("你对这张画布只有只读权限，修改不会被保存。");
   });
 
+  it("上游未连接：warning、常驻，明确说改动只在本机（不能显示「已同步」）", () => {
+    const view = syncStatusView(input({ upstream: "unlinked" }));
+    expect(view.tone).toBe("warning");
+    expect(view.pinned).toBe(true);
+    expect(view.label).toBe("未同步到远端");
+    expect(view.detail).toContain("只保存在本机");
+    // 不是权限问题也不是会话断线：不给「重新连接」（重连浏览器会重建，但不一定补上游）。
+    expect(view.action).toBeUndefined();
+  });
+
+  it("上游未连接不覆盖断线/只读/重建中（这些更贴近当下的可操作性）", () => {
+    expect(syncStatusView(input({ upstream: "unlinked", mode: "offline" })).label)
+      .toBe("画布连接已断开，只读");
+    expect(syncStatusView(input({ upstream: "unlinked", readOnly: true })).label).toBe("只读画布");
+    expect(syncStatusView(input({ upstream: "unlinked", reconnecting: true })).label).toBe("正在重新连接…");
+  });
+
+  it("上游已连接或缺省不引入提示：稳态仍是 ok", () => {
+    for (const patch of [{ upstream: "linked" as const }, {}]) {
+      const view = syncStatusView(input(patch));
+      expect(view.tone).toBe("ok");
+      expect(view.pinned).toBe(false);
+      expect(view.label).toBe("已同步");
+    }
+  });
+
   it("气泡只承载同步信息，不含 MCP 指引（已移到页面级底部提示）", () => {
     for (const patch of [
       {},

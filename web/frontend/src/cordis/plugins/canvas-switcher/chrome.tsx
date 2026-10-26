@@ -81,7 +81,9 @@ const SYNC_LABELS: Record<NonNullable<CanvasSummary["sync"]>, string> = {
   syncing: "同步中",
   offline: "离线",
   failed: "同步失败",
-  "remote-only": "仅远端"
+  "remote-only": "仅远端",
+  // 属于远端、但本机还没有上游链路：改动只落在本机，必须显式说出来。
+  unlinked: "未连接"
 };
 
 /**

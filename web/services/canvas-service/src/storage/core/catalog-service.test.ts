@@ -161,6 +161,70 @@ describe("CanvasCatalogService 多来源合并", () => {
     expect(remoteOnly.sync).toBe("remote-only");
   });
 
+  /**
+   * 2026-10-26 现场：宿主重启后房间先于扩展会话就绪建好，解析拿不到凭据，之后没有任何
+   * 重试。此时远端列得到这张画布、归属记录也在，但本机没有链路——目录此前回落成
+   * 「已同步」，界面把整条上传链路的缺失藏了起来。
+   */
+  it("属于远端但没有上游链路：标成 unlinked，不回落成已同步", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({
+      repository,
+      published: createPublishedReader(yjs),
+      remoteSources: [{ id: "remote:test", label: "远端 test", list: async () => [remoteEntry("canvas-a", "2026-09-30T00:00:00.000Z")] }],
+      isRemoteOwned: (canvasId) => canvasId === "canvas-a"
+    });
+
+    const page = await catalog.listCanvases({ limit: 10 });
+    const shared = page.items.find((item) => item.id === "canvas-a")!;
+    expect(shared.sources).toEqual(["local", "remote"]);
+    expect(shared.sync).toBe("unlinked");
+  });
+
+  it("只在远端存在：保持仅远端，不因没有链路报未连接（本机没有待推送内容）", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({
+      repository,
+      published: createPublishedReader(yjs),
+      remoteSources: [{ id: "remote:test", label: "远端 test", list: async () => [remoteEntry("canvas-only-remote", "2026-09-30T00:00:00.000Z")] }],
+      isRemoteOwned: () => true
+    });
+
+    const page = await catalog.listCanvases({ limit: 10 });
+    expect(page.items.find((item) => item.id === "canvas-only-remote")!.sync).toBe("remote-only");
+  });
+
+  it("远端列得到但不是归属记录的一部分：结论保持不变（旧行为）", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({
+      repository,
+      published: createPublishedReader(yjs),
+      remoteSources: [{ id: "remote:test", label: "远端 test", list: async () => [remoteEntry("canvas-a", "2026-09-30T00:00:00.000Z")] }],
+      isRemoteOwned: () => false
+    });
+
+    const page = await catalog.listCanvases({ limit: 10 });
+    expect(page.items.find((item) => item.id === "canvas-a")!.sync).toBe("synced");
+  });
+
+  it("链路状态优先于归属推断：有链路时按链路报", async () => {
+    const repository = await seedRepository();
+    const yjs = new InMemoryYjsDocumentRepository();
+    const catalog = new CanvasCatalogService({
+      repository,
+      published: createPublishedReader(yjs),
+      remoteSources: [{ id: "remote:test", label: "远端 test", list: async () => [remoteEntry("canvas-a", "2026-09-30T00:00:00.000Z")] }],
+      isRemoteOwned: () => true,
+      syncStateOf: (canvasId) => (canvasId === "canvas-a" ? "syncing" : undefined)
+    });
+
+    const page = await catalog.listCanvases({ limit: 10 });
+    expect(page.items.find((item) => item.id === "canvas-a")!.sync).toBe("syncing");
+  });
+
   it("来源故障不影响本地部分", async () => {
     const repository = await seedRepository();
     const yjs = new InMemoryYjsDocumentRepository();

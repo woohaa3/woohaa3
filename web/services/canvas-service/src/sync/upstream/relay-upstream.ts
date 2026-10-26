@@ -158,6 +158,18 @@ export type SyncUpstreamOptions = {
    * 不知道这张画布属于远端，会把托管存储里的对象报成不存在。
    */
   ownership?: SyncCanvasOwnershipStore;
+  /**
+   * 「这张画布属于远端、但这次没解析到链路」时的重试基数（毫秒，缺省 1000）。
+   *
+   * 为什么需要重试：解析发生在 room 就绪的那一刻，而宿主启动时扩展是**逐个激活**的。
+   * 浏览器往往在扩展注册 `canvas-upstream` capability 之前就重连并建好房间，于是第一次
+   * 解析必然拿不到提供者；此后 room 被页面占着（idle 回收要 30 秒不活动），不会重新 attach，
+   * 这条画布就永久停在「没有上游链路」。2026-10-26 现场：四张远端画布从重启起再没同步过，
+   * 刷新页面与重启宿主都会重演同一个竞态。
+   */
+  resolveRetryBaseMs?: number;
+  /** 解析重试次数上限（缺省 4，退避 1s/2s/4s/8s）。只在画布归属远端时使用。 */
+  resolveRetryMaxAttempts?: number;
 };
 
 /**
@@ -208,7 +220,7 @@ export function syncStateOf(
 }
 
 export type SyncUpstream = {
-  /** 挂到 registry 的 `onRoomReady`：为 room 建立上游连接，返回断开函数。 */
+  /** 挂到 registry 的 `onClientAcquired`：为 room 建立上游连接，返回断开函数。 */
   attach(room: UpstreamRoom): () => void;
   /** 挂到 registry 的 broadcast：把本机命令产生的 durable update 推给中继。 */
   publish: RoomBroadcast;
@@ -305,6 +317,38 @@ export function createSyncUpstream(
     }
   };
 
+  /** 「解析没拿到链路」的有界退避重试（见 resolveRetryBaseMs 的注释）。 */
+  const resolveRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const resolveRetryAttempts = new Map<string, number>();
+
+  const clearResolveRetry = (canvasId: string): void => {
+    const timer = resolveRetryTimers.get(canvasId);
+    if (timer !== undefined) clearTimeout(timer);
+    resolveRetryTimers.delete(canvasId);
+  };
+
+  /**
+   * 安排一次重试；次数用尽后放弃（不无限循环——同一份解析失败重试不会自愈时应当停下）。
+   *
+   * 只在「画布属于远端」时调用：纯本地画布本来就不该有链路，重试只会白烧定时器。
+   */
+  const scheduleResolveRetry = (room: UpstreamRoom): void => {
+    clearResolveRetry(room.canvasId);
+    const used = resolveRetryAttempts.get(room.canvasId) ?? 0;
+    const maxAttempts = options.resolveRetryMaxAttempts ?? 4;
+    if (used >= maxAttempts) return;
+    resolveRetryAttempts.set(room.canvasId, used + 1);
+    const base = options.resolveRetryBaseMs ?? 1_000;
+    const timer = setTimeout(() => {
+      resolveRetryTimers.delete(room.canvasId);
+      // 房间已经被回收/替换就不必再问：新房间会在 attach 时重新解析。
+      if (rooms.get(room.canvasId) !== room) return;
+      void link(room, generation);
+    }, base * 2 ** used);
+    timer.unref?.();
+    resolveRetryTimers.set(room.canvasId, timer);
+  };
+
   const link = async (room: UpstreamRoom, attempt: number): Promise<void> => {
     let config: SyncUpstreamConfig | null = null;
     try {
@@ -319,6 +363,23 @@ export function createSyncUpstream(
     // 失败不是终态：refresh（重新登录、重新启用同步、宿主重启后的重新解析）应当允许
     // 再试一次——容量错误可能已经在服务端修好，但同一份超限数据不该自动死循环。
     const failedLink = links.get(room.canvasId)?.state.phase === "failed";
+    /**
+     * 「归属远端却没有解析到链路」是必须能被看见的事实。
+     *
+     * 唯一会产生这个状态的地方是扩展的 `resolve()` 返回 null（未登录、没列到这张画布、
+     * 或者解析那一下会话还没就绪），而那条分支在扩展侧是 debug 级。宿主在这里按
+     * 「归属记录命中」补一条 info：否则整条上传链路不存在时，日志里什么都不会留下
+     * （2026-10-26 现场：四张远端画布从重启起就没建过链，日志安静得像一切正常）。
+     */
+    if (config === null && remoteCanvasIds.has(room.canvasId)) {
+      options.logger?.({ event: "sync-upstream-unresolved", canvasId: room.canvasId });
+      // 归属远端的画布拿不到链路：多半是扩展还没激活完（启动竞态），退避重试即可自愈。
+      scheduleResolveRetry(room);
+    } else if (config !== null) {
+      // 拿到链路就没必要再重试；下次解析失败会重新开始计数。
+      resolveRetryAttempts.delete(room.canvasId);
+      clearResolveRetry(room.canvasId);
+    }
     if (sameConfig(applied.get(room.canvasId), config) && hasLink === (config !== null) && !(hasLink && failedLink)) return;
     applied.set(room.canvasId, config);
     // 归属只增不减：解析到远端配置就是"字节归远端"。解析为 null 只表示"此刻不建立链路"
@@ -341,11 +402,18 @@ export function createSyncUpstream(
   return {
     attach(room) {
       rooms.set(room.canvasId, room);
+      // 归属远端的画布在 room 就绪时一定会走一次解析：有这条日志才能区分
+      // 「根本没 attach」与「attach 了但没拿到链路」。普通本地画布不打，避免噪音。
+      if (remoteCanvasIds.has(room.canvasId)) {
+        options.logger?.({ event: "sync-upstream-attach", canvasId: room.canvasId });
+      }
       void link(room, generation);
       return () => {
         if (rooms.get(room.canvasId) !== room) return;
         rooms.delete(room.canvasId);
         applied.delete(room.canvasId);
+        resolveRetryAttempts.delete(room.canvasId);
+        clearResolveRetry(room.canvasId);
         links.get(room.canvasId)?.stop();
         links.delete(room.canvasId);
       };
@@ -370,6 +438,10 @@ export function createSyncUpstream(
     },
     async refresh() {
       const attempt = ++generation;
+      // 显式 refresh（登录/登出/启用同步/宿主就绪）重新给一次预算：
+      // 上一轮把次数用尽不代表现在仍然解析不到。
+      resolveRetryAttempts.clear();
+      for (const canvasId of [...resolveRetryTimers.keys()]) clearResolveRetry(canvasId);
       await Promise.all([...rooms.values()].map((room) => link(room, attempt)));
     },
     linkState: (canvasId) => links.get(canvasId)?.state ?? null,
@@ -386,6 +458,8 @@ export function createSyncUpstream(
     },
     close() {
       generation += 1;
+      for (const canvasId of [...resolveRetryTimers.keys()]) clearResolveRetry(canvasId);
+      resolveRetryAttempts.clear();
       applied.clear();
       remoteCanvasIds.clear();
       for (const entry of links.values()) entry.stop();

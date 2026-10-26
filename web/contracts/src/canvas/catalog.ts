@@ -25,9 +25,15 @@ export type CanvasCatalogOrigin = "local" | "remote";
  * - `syncing`：正在连/正在补差；
  * - `offline`：配置了远端但当前连不上（离线编辑仍会落到本机）；
  * - `failed`：远端明确拒绝（如已删除），重连不会自愈；
- * - `remote-only`：只在远端存在，本机还没有内容副本。
+ * - `remote-only`：只在远端存在，本机还没有内容副本；
+ * - `unlinked`：**属于远端、远端此刻也列得到，本机有副本，但本机还没有建立上游链路**
+ *   （比如宿主重启后房间在会话就绪之前创建、解析没有得到凭据）。本地改动只落本机，尚未推送。
+ *   只在远端存在的画布不算 unlinked：那里没有「改动推不上去」的风险，结论是 `remote-only`。
+ *
+ * `synced` 的判据是"两边都有内容"，不是"链路此刻在线"；没有链路时必须用 `unlinked`
+ * 表态，不能回落成 `synced`——否则界面会在整条上传链路不存在时显示"已同步"。
  */
-export type CanvasSyncState = "local-only" | "synced" | "syncing" | "offline" | "failed" | "remote-only";
+export type CanvasSyncState = "local-only" | "synced" | "syncing" | "offline" | "failed" | "remote-only" | "unlinked";
 
 /**
  * 调用者在这张画布上的**内容权限**（服务端判定，客户端只渲染）。
@@ -111,7 +117,7 @@ export const DEFAULT_CANVAS_CATALOG_PAGE_SIZE = 20;
 export const MAX_CANVAS_CATALOG_PAGE_SIZE = 100;
 
 const CATALOG_ORIGINS: readonly string[] = ["local", "remote"];
-const SYNC_STATES: readonly string[] = ["local-only", "synced", "syncing", "offline", "failed", "remote-only"];
+const SYNC_STATES: readonly string[] = ["local-only", "synced", "syncing", "offline", "failed", "remote-only", "unlinked"];
 
 /** 可选字段一旦出现就必须合法：坏值不能悄悄变成"没有远端"。 */
 function isOptionalSources(value: unknown): boolean {

@@ -157,7 +157,8 @@ export function createSyncUpgradeHandler(options: SyncUpgradeOptions): SyncUpgra
       : toHub,
     ...(upstream
       ? {
-          onRoomReady: (room) => upstream.attach(room),
+          // 只有真的被客户端打开过才挂上游（内部对账/历史加载不算），见 onClientAcquired 的说明。
+          onClientAcquired: (room) => upstream.attach(room),
           seedFromUpstream: (canvasId: string) => upstream.fetchSnapshot(canvasId)
         }
       : {}),

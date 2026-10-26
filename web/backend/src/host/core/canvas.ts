@@ -67,18 +67,38 @@ function filmSetConversionProviders(ctx: HostContext): readonly FilmSetConversio
  * `CanvasService.refreshUpstream()`（或启动完成的 `host/ready`）触发重新解析。
  */
 function resolveUpstreamCredential(ctx: HostContext): import("@woohaa3/canvas-service").SyncUpstreamCredentialSource {
+  const log = ctx.log.scope("canvas");
   const provider = (): CanvasUpstreamProvider | null => {
     const host = ctx.get("application")?.service.host();
-    if (!host) return null;
+    if (!host) {
+      log({ event: "canvas-upstream-provider-missing", level: "warn", reason: "application 宿主不可用" });
+      return null;
+    }
     const seen = new Set<string>();
+    // 命中失败必须留下证据：返回 null 的后果是「画布静默保持纯本地」，
+    // 没有这两项计数就分不清「扩展没注册 capability」与「注册了但形状不合格」
+    // （2026-10-26 现场：整条上传链路不存在，日志里一条线索都没有）。
+    let registrations = 0;
+    let capabilities = 0;
     for (const registration of host.snapshot()) {
+      registrations += 1;
       for (const id of registration.capabilities) {
-        if (!isCanvasUpstreamCapabilityId(id) || seen.has(id)) continue;
+        if (!isCanvasUpstreamCapabilityId(id)) continue;
+        capabilities += 1;
+        if (seen.has(id)) continue;
         seen.add(id);
         const value = host.resolveCapability(id);
         if (isCanvasUpstreamProviderShape(value)) return value as CanvasUpstreamProvider;
+        log({ event: "canvas-upstream-provider-invalid", level: "warn", code: id });
       }
     }
+    // 纯本地部署是正常形态（没装接入扩展），因此用 debug：真正的告警在画布侧
+    // （`sync-upstream-unresolved`：归属远端却拿不到链路）。
+    log({
+      event: "canvas-upstream-provider-missing",
+      level: "debug",
+      reason: `没有可用的 canvas-upstream 提供者（注册 ${registrations}，候选 ${capabilities}）`
+    });
     return null;
   };
   return {

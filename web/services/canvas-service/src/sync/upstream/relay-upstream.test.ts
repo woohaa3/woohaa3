@@ -176,7 +176,7 @@ function startSidecar(
       broadcasts.push(input);
       upstream.publish(input);
     },
-    onRoomReady: (room) => upstream.attach(room),
+    onClientAcquired: (room) => upstream.attach(room),
     seedFromUpstream: (canvasId) => upstream.fetchSnapshot(canvasId),
     bootstrap: async () => bootstrap
   });
@@ -213,8 +213,22 @@ function setTitle(title: string) {
   };
 }
 
+/**
+ * 以**客户端**身份打开画布（等价于浏览器进页面）。
+ *
+ * 上游挂载点已从「room 创建」移到「第一次被客户端持有」：内部消费者调
+ * `registry.resolve()` 只拿文档、不挂链路（任务对账加载的画布不该推给远端）。
+ * 因此用例里凡是要验证同步的，都必须走 acquire。
+ */
+const openLeases: Array<{ release: () => void }> = [];
+async function open(sidecar: Sidecar, canvasId: string = CANVAS) {
+  const lease = await sidecar.registry.acquire(canvasId);
+  openLeases.push(lease);
+  return lease.room;
+}
+
 async function nodeIds(sidecar: Sidecar): Promise<string[]> {
-  const exported = (await sidecar.registry.resolve(CANVAS)).exportCanvas();
+  const exported = (await open(sidecar)).exportCanvas();
   return exported.ok ? exported.canvas.document.nodes.map((node) => node.id).sort() : [];
 }
 
@@ -228,6 +242,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 3_00
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
+  for (const lease of openLeases.splice(0)) lease.release();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -252,7 +267,7 @@ describe("经中继同步的两个本地 sidecar", () => {
   it("运行中在纯本地与远端之间切换", async () => {
     const { relay, spawn } = await setup();
     const a = spawn(createEmptyWoohaa3ServerCanvas(CANVAS, NOW), { local: true });
-    const roomA = await a.registry.resolve(CANVAS);
+    const roomA = await open(a);
     expect((await roomA.submit(addNode("before-switch", "a-1"))).ok).toBe(true);
     expect(a.upstream.linkState(CANVAS)).toBeNull();
     expect(relay.records).toHaveLength(0);
@@ -260,14 +275,14 @@ describe("经中继同步的两个本地 sidecar", () => {
     await a.setTarget(relay.url);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "synced" && relay.records.length === 1);
     const b = spawn(null);
-    await b.registry.resolve(CANVAS);
+    await open(b);
     expect(await nodeIds(b)).toEqual(["before-switch"]);
-    expect((await (await b.registry.resolve(CANVAS)).submit(addNode("from-b", "b-1"))).ok).toBe(true);
+    expect((await (await open(b)).submit(addNode("from-b", "b-1"))).ok).toBe(true);
     await waitFor(async () => (await nodeIds(a)).includes("from-b"));
 
     await a.setTarget(null);
     expect(a.upstream.linkState(CANVAS)).toBeNull();
-    expect((await (await b.registry.resolve(CANVAS)).submit(addNode("after-local", "b-2"))).ok).toBe(true);
+    expect((await (await open(b)).submit(addNode("after-local", "b-2"))).ok).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await nodeIds(a)).not.toContain("after-local");
   });
@@ -275,14 +290,14 @@ describe("经中继同步的两个本地 sidecar", () => {
   it("新机器本地没有画布时从中继初始化，之后双向同步命令结果", async () => {
     const { relay, spawn } = await setup();
     const a = spawn(createEmptyWoohaa3ServerCanvas(CANVAS, NOW));
-    const roomA = await a.registry.resolve(CANVAS);
+    const roomA = await open(a);
     // 同步完成前的命令与初始状态合并成一次补推。
     expect((await roomA.submit(addNode("from-a", "a-1"))).ok).toBe(true);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "synced" && relay.records.length === 1);
 
     // B 的结构化存储里没有这个画布：只能从中继取。
     const b = spawn(null);
-    const roomB = await b.registry.resolve(CANVAS);
+    const roomB = await open(b);
     expect(roomB.roomState).toBe("ready");
     expect(await nodeIds(b)).toEqual(["from-a"]);
 
@@ -302,10 +317,10 @@ describe("经中继同步的两个本地 sidecar", () => {
   it("断线期间的本机命令在重连后补推", async () => {
     const { relay, spawn } = await setup();
     const a = spawn(createEmptyWoohaa3ServerCanvas(CANVAS, NOW));
-    const roomA = await a.registry.resolve(CANVAS);
+    const roomA = await open(a);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "synced");
     const b = spawn(null);
-    await b.registry.resolve(CANVAS);
+    await open(b);
     await waitFor(() => b.upstream.linkState(CANVAS)?.phase === "synced");
 
     relay.pause();
@@ -320,7 +335,7 @@ describe("经中继同步的两个本地 sidecar", () => {
   it("只读令牌不推送本机修改", async () => {
     const { relay, spawn } = await setup({ canWrite: false });
     const a = spawn(createEmptyWoohaa3ServerCanvas(CANVAS, NOW));
-    const roomA = await a.registry.resolve(CANVAS);
+    const roomA = await open(a);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "synced");
     expect(a.upstream.linkState(CANVAS)?.canWrite).toBe(false);
     expect((await roomA.submit(addNode("local-only", "a-1"))).ok).toBe(true);
@@ -338,7 +353,7 @@ describe("本地创建、远端登记", () => {
   it("首次推送声明创建意图，读取快照与重连都不声明", async () => {
     const { relay, spawn } = await setup();
     const a = spawn({ ...createEmptyWoohaa3ServerCanvas(CANVAS, NOW), title: "片场 A" });
-    await a.registry.resolve(CANVAS);
+    await open(a);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "synced" && relay.records.length === 1);
 
     // 第一帧来自 seedFromUpstream 的读取（本地无文档时先问远端），它必须是 false：
@@ -353,14 +368,14 @@ describe("本地创建、远端登记", () => {
 
     // 新机器本地没有画布，只读取：不产生新的创建意图。
     const b = spawn(null);
-    await b.registry.resolve(CANVAS);
+    await open(b);
     expect(relay.hellos.filter(Boolean)).toHaveLength(1);
   });
 
   it("重连时不再声明创建意图", async () => {
     const { relay, spawn } = await setup();
     const a = spawn(createEmptyWoohaa3ServerCanvas(CANVAS, NOW));
-    await a.registry.resolve(CANVAS);
+    await open(a);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "synced");
     expect(relay.hellos.filter(Boolean)).toHaveLength(1);
 
@@ -415,7 +430,7 @@ describe("按画布启用同步", () => {
   it("同步完成后声明标题，改名后实时同步给服务端（中继）", async () => {
     const { relay, spawn } = await setup();
     const a = spawn({ ...createEmptyWoohaa3ServerCanvas(CANVAS, NOW), title: "旧名字" });
-    const room = await a.registry.resolve(CANVAS);
+    const room = await open(a);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "synced");
     // 首次同步完成就声明当前标题：服务端不解析 Yjs，只能靠这次声明拿到展示名。
     await waitFor(() => relay.declaredTitles.at(-1) === "旧名字");
@@ -438,7 +453,7 @@ describe("客户端自报元数据（观测用）", () => {
       clientInfo: { name: "woohaa3-host", version: "9.9.9-test", platform: "test-os" }
     });
     // 读取 room 才会建立上游链路（以及首次快照读取）。
-    await sidecar.registry.resolve(CANVAS);
+    await open(sidecar);
 
     // 首次读取快照与后续链路至少有一次 Hello；两种情况都应带同一份元数据。
     await waitFor(() => relay.clientInfos.length > 0);
@@ -460,7 +475,7 @@ describe("客户端自报元数据（观测用）", () => {
   it("缺省用本包版本与当前平台，不编造空版本", async () => {
     const { relay, spawn } = await setup();
     const sidecar = spawn(createEmptyWoohaa3ServerCanvas(CANVAS, NOW));
-    await sidecar.registry.resolve(CANVAS);
+    await open(sidecar);
     await waitFor(() => relay.clientInfos.length > 0);
     const info = relay.clientInfos[0]!;
     // 名称与平台总是有值；版本来自 package.json 或 WOOHAA3_APP_VERSION，不会为空。
@@ -485,7 +500,7 @@ describe("断线重连的退避与容量型失败", () => {
       a.upstream.close();
     });
 
-    await a.registry.resolve(CANVAS);
+    await open(a);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "failed");
     expect(a.upstream.linkState(CANVAS)?.error).toContain("接收上限");
 
@@ -518,7 +533,7 @@ describe("断线重连的退避与容量型失败", () => {
         .filter((event) => event.event === "sync-upstream-reconnect")
         .map((event) => Number(/retry in (\d+)ms/.exec(event.message ?? "")?.[1] ?? 0));
 
-    await a.registry.resolve(CANVAS);
+    await open(a);
     await waitFor(() => a.upstream.linkState(CANVAS)?.phase === "synced");
 
     // 每次都是"刚连上就被踢"：退避必须递增，而不是固定回到基线。
@@ -600,6 +615,66 @@ describe("远端归属的持久记录（宿主注入）", () => {
     // 停同步只断链路，不收回归属：字节已经在托管存储里，下次读还得去那里找。
     expect(ownership.forgotten).toEqual([]);
     expect(upstream.remoteCanvasIds()).toContain("canvas-owned");
+  });
+
+  /**
+   * 2026-10-26 现场：浏览器在扩展注册 `canvas-upstream` capability 之前就重连并建好房间，
+   * 首次解析必然拿不到链路；房间又被页面占着不会重新 attach，于是这张画布永久停在
+   * 「没有上游链路」。刷新页面与重启宿主都会重演同一个竞态——只有重试能自愈。
+   */
+  /**
+   * 2026-10-26 第二个现场：启动期任务对账会为「用户根本没打开」的画布加载 room，
+   * 如果那时就挂上游，远端会看到好几张画布同时「有变化」（管理端「最近变化」被一起刷新）。
+   * 上游归「第一次被客户端持有」所有，内部消费者只读写文档。
+   */
+  it("内部消费者 resolve() 加载 room 不挂上游；客户端打开后才挂", async () => {
+    const { relay, spawn } = await setup();
+    const sidecar = spawn(null);
+
+    // 等价于任务对账/节点历史：只拿文档。
+    await sidecar.registry.resolve(CANVAS);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(sidecar.upstream.linkedCanvasIds()).toEqual([]);
+    // 允许 seed 读取（本地没有文档时要从上游取一次），但**不能有任何推送**。
+    expect(relay.records).toEqual([]);
+
+    // 等价于浏览器进入这张画布。
+    await open(sidecar);
+    await waitFor(() => sidecar.upstream.linkedCanvasIds().includes(CANVAS));
+    await waitFor(() => relay.connections === 1);
+  });
+
+  it("启动竞态：首次解析拿不到提供者，退避重试后自动建链", async () => {
+    const { relay } = await setup();
+    const ownership = memoryOwnership(["canvas-race"]);
+    let calls = 0;
+    const upstream = createSyncUpstream(
+      async () => {
+        calls += 1;
+        return calls === 1 ? null : { url: relay.url };
+      },
+      { reconnectBaseMs: 10, reconnectMaxMs: 20, resolveRetryBaseMs: 20, ownership: ownership.store }
+    );
+    cleanups.push(() => upstream.close());
+    cleanups.push(upstream.attach(quietRoom("canvas-race")));
+
+    await waitFor(() => upstream.linkedCanvasIds().includes("canvas-race"));
+    expect(calls).toBeGreaterThanOrEqual(2);
+    // 归属本来就来自持久记录，重试成功不应再重复写盘。
+    expect(ownership.remembered).not.toContain("canvas-race");
+  });
+
+  it("纯本地画布解析为 null 时不重试（没有归属就不该烧定时器）", async () => {
+    let calls = 0;
+    const upstream = createSyncUpstream(async () => {
+      calls += 1;
+      return null;
+    }, { resolveRetryBaseMs: 10 });
+    cleanups.push(() => upstream.close());
+    cleanups.push(upstream.attach(quietRoom("canvas-local-only")));
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(calls).toBe(1);
   });
 
   it("画布被删除才收回归属（forgetOwnership 同时落盘）", () => {

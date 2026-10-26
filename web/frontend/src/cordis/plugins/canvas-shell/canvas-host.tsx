@@ -31,6 +31,20 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
   const canvasSession = useService("canvasSession");
   const canvasNavigation = useService("canvasNavigation");
   const canvasState = useService("canvasState");
+  // 目录只读一次当前画布的 `sync`：它区分「属于远端且链路在」（synced）与
+  // 「属于远端但本机没有上游链路」（unlinked，见 CanvasSyncState）。右下角气泡需要后者，
+  // 否则宿主→远端整条断掉时气泡仍显示「已同步」。
+  const catalog = useService("canvasCatalog");
+  const catalogEntry = useSyncExternalStore(
+    catalog.subscribe,
+    () => catalog.getState().entries.find((entry) => entry.id === canvasId) ?? null,
+    () => null
+  );
+  // 进入画布时强制取一次目录：缓存命中时 load() 不会重新请求，沿用启动时的 sync 结论
+  // 会让「链路上游断了」和「已经恢复」都延迟到用户下次打开切换器才可见。
+  useEffect(() => {
+    void catalog.load(true);
+  }, [catalog, canvasId]);
   // 模态门禁：宿主从 Dialog Service 派生**通用**布尔，供聚焦工作区贡献在模态打开时暂停/停止
   // 自身瞬态；宿主不知道任何具体业务。只在 React 侧订阅，不写入 Navigation 状态。
   const dialogs = useService("dialogs");
@@ -100,7 +114,9 @@ export function CanvasHost({ canvasId }: { canvasId: string }) {
     // 权限只读（服务端判定）与断线无关：链路正常也要在进入画布时提示，
     // 并让生成/编辑入口按 session.isWritable() 置灰。
     readOnly: sessionStatus.remote.readOnly ?? false,
-    readOnlyReason: sessionStatus.remote.readOnlyReason ?? null
+    readOnlyReason: sessionStatus.remote.readOnlyReason ?? null,
+    // 上游（宿主→远端）链路缺失：与浏览器↔宿主那段无关，必须单独表达。
+    ...(catalogEntry?.sync === "unlinked" ? { upstream: "unlinked" as const } : {})
   });
   const snapshotFocus = presentation.mode.type === "node-focus"
     ? { nodeId: presentation.mode.nodeId, kind: presentation.mode.kind }
