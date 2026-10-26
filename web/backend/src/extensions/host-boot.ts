@@ -47,15 +47,19 @@ export function resolveExtensionHostModule({
   }
 }
 
+
 /**
  * 按环境加载启动期扩展宿主。返回 `undefined` 表示宿主不可用（未找到模块），本次启动不加载扩展。
  */
 export async function loadExtensionHostFromEnv({
   logger,
-  env = process.env
+  env = process.env,
+  safeMode = false
 }: {
   logger?: (event: Record<string, unknown>) => void;
   env?: ExtensionHostEnv;
+  /** 启动守卫判定的安全模式（D7）：只装配 bootstrap 槽位实现与 required 扩展。 */
+  safeMode?: boolean;
 } = {}): Promise<LoadedExtensionHost | undefined> {
   const repoRoot = env.WOOHAA3_REPO_ROOT && env.WOOHAA3_REPO_ROOT.trim().length > 0 ? path.resolve(env.WOOHAA3_REPO_ROOT) : process.cwd();
   const resolved = resolveExtensionHostModule({ repoRoot, env });
@@ -64,7 +68,8 @@ export async function loadExtensionHostFromEnv({
     return undefined;
   }
   const hostModule = (await import(pathToFileURL(resolved.modulePath).href)) as {
-    loadExtensionHost: (input: { repoRoot: string; env: ExtensionHostEnv; logger?: (event: Record<string, unknown>) => void }) => Promise<LoadedExtensionHost>;
+    loadExtensionHost: (input: { repoRoot: string; env: ExtensionHostEnv; logger?: (event: Record<string, unknown>) => void; safeMode?: boolean; isolation?: boolean }) => Promise<LoadedExtensionHost>;
   };
-  return await hostModule.loadExtensionHost({ repoRoot: resolved.hostRoot, env, logger });
+  // 进程隔离已随 C 方向删除：宿主模块的 resolveIsolation() 恒为 false，这里不再传 isolation。
+  return await hostModule.loadExtensionHost({ repoRoot: resolved.hostRoot, env, logger, safeMode });
 }

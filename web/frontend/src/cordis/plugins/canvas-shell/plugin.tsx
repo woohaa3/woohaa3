@@ -26,6 +26,8 @@ import { describeNodeActions, describeSelectionActions, nodeActionSettingsStore,
 import { setNodeActionBridge } from "./node-action-bridge.js";
 import type { BevyNodeActionsPresentation } from "@woohaa3/contracts";
 import type { NodeActionContribution, NodeActionContext, SelectionActionContribution, SelectionActionContext } from "../../contract/platform.js";
+import { guardContributionMethods } from "../../contribution-guard.js";
+import type { ExtensionFaultService } from "../../extension-faults.js";
 
 export const CANVAS_SHELL_PLUGIN_ID = "canvas-shell";
 
@@ -75,8 +77,13 @@ export function canvasShellExtension(): Plugin.Function<void> {
       });
       // 下行桥：canvas-runtime 每帧据此下发 `nodeActions`；上行：Rust 命中回传派发。
       // 目标是当前**单选**的适用类型节点（横条显隐与 selection/focus 一致）。
-      const contributions = () => ctx.slots.list("canvas.node-action") as unknown as NodeActionContribution[];
-      const selectionContributions = () => ctx.slots.list("canvas.selection-action") as unknown as SelectionActionContribution[];
+      // 扩展动作的 available/describe/activate 抛错：归因并计入熔断，再交回横条既有的跳过逻辑
+      // （change: 2026-10-21-harden-extension-fault-isolation）。
+      const faults = () => ctx.get?.("extensionFaults" as never) as ExtensionFaultService | undefined;
+      const contributions = () => (ctx.slots.list("canvas.node-action") as unknown as NodeActionContribution[])
+        .map((entry) => guardContributionMethods(entry, "canvas.node-action", faults(), ["available", "describe", "activate"]));
+      const selectionContributions = () => (ctx.slots.list("canvas.selection-action") as unknown as SelectionActionContribution[])
+        .map((entry) => guardContributionMethods(entry, "canvas.selection-action", faults(), ["available", "describe", "activate"]));
       /** 当前 working 画布节点的 `{ id, type }` 轻量视图（横条判定共用）。 */
       const workingNodes = () => workingCanvasOf(woohaa3CanvasStore.getState())?.document.nodes.map((node) => ({ id: node.id, type: node.type })) ?? [];
       const focused = () => ctx.canvasNavigation.getSnapshot().mode.type === "node-focus";

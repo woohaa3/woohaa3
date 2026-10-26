@@ -27,9 +27,11 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.5",
+    "@sdppp/pptask": "workspace:*",
     "@woohaa3/application-service": "workspace:*",
     "@woohaa3/canvas-service": "workspace:*",
     "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/provider-sdk": "workspace:*",
     "@woohaa3/extension-local-agent": "workspace:*",
     "@woohaa3/extension-oauth-agent": "workspace:*",
     "@woohaa3/extension-sdk-agent": "workspace:*",

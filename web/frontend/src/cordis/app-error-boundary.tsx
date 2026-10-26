@@ -41,6 +41,8 @@ export type RenderErrorBoundaryProps = {
    * 失败态（否则一次错误会永久屏蔽该位置上后续所有 panel）。
    */
   resetKey?: unknown;
+  /** 捕获到错误时回调（诊断/熔断上报）；不改变 fallback 行为。 */
+  onError?: (message: string) => void;
 };
 
 type RenderErrorBoundaryState = { error: string | null };
@@ -60,6 +62,11 @@ export class RenderErrorBoundary extends Component<RenderErrorBoundaryProps, Ren
   override componentDidCatch(error: unknown): void {
     // 保留原始错误与组件栈，便于开发期排障。
     console.error("[render-error-boundary]", error);
+    try {
+      this.props.onError?.(error instanceof Error ? error.message : String(error));
+    } catch {
+      // 上报失败不能让错误边界本身抛错。
+    }
   }
 
   override componentDidUpdate(previous: RenderErrorBoundaryProps): void {

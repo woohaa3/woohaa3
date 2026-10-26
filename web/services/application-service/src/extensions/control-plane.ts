@@ -12,91 +12,37 @@
  *
  * 本模块只负责站点配置生命周期；真实插件由 fixture/后续 change 注入。
  */
-import {
-  safeDiagnosticDetail,
-  type ApplicationBackendExtensionHealth,
-  type ApplicationExtensionActualState,
-  type ApplicationExtensionMetadata,
-  type ApplicationExtensionSafeDiagnostic,
-  type ApplicationExtensionStatus,
-  type RequiredProviderProfiles
+import type {
+  ApplicationBackendExtensionHealth,
+  ApplicationExtensionActualState,
+  ApplicationExtensionMetadata,
+  ApplicationExtensionStatus
 } from "@woohaa3/contracts";
-import type { ApplicationBackendExtensionDefinition, ApplicationBackendConfigFacade, ApplicationBackendWorkFacade } from "./contract.js";
-import type { ApplicationExtensionHost } from "./host.js";
-import type { SqliteSiteExtensionConfigStore } from "./config-store.js";
-import { createExtensionWorkLease, type ExtensionWorkLease, type ExtensionWorkReferenceStore } from "./work.js";
+import { awaitActivationWithDeadline, resolveActivationTimeout } from "./activation-deadline.js";
+import { createQuarantineOperations, fallbackDiagnostics, heldStateOf, prepareCandidate } from "./control-plane-states.js";
+import { createRuntimeCatalog, createRuntimeRegistration } from "./control-plane-runtime.js";
+import type { SiteExtensionControlPlane, SiteExtensionControlPlaneOptions } from "./control-plane-types.js";
+import { createQuarantineRegistry } from "./quarantine.js";
+import { createExtensionWorkLease, type ExtensionWorkLease } from "./work.js";
 
-export type SiteExtensionControlPlaneError =
-  | { ok: false; code: "extension-not-found"; message: string }
-  | { ok: false; code: "config-invalid"; message: string }
-  | { ok: false; code: "prepare-failed"; message: string }
-  | { ok: false; code: "required-provider"; message: string }
-  | { ok: false; code: "revision-conflict"; message: string; currentRevision: number }
-  | { ok: false; code: "storage-failed"; message: string };
-
-export type SiteExtensionWriteOutcome =
-  | { ok: true; revision: number; status: ApplicationExtensionStatus }
-  | SiteExtensionControlPlaneError;
-
-export type SiteExtensionMetadataSource = {
-  list: () => readonly ApplicationExtensionMetadata[];
-  get: (extensionId: string) => ApplicationExtensionMetadata | undefined;
-};
-
-export type SiteExtensionControlPlaneOptions = {
-  host: ApplicationExtensionHost;
-  store: SqliteSiteExtensionConfigStore;
-  workStore: ExtensionWorkReferenceStore;
-  metadata: SiteExtensionMetadataSource;
-  /** 构建时可信后端入口（按 extensionId 静态登记；生产/测试清单不同）。 */
-  definitions: readonly ApplicationBackendExtensionDefinition[];
-  /**
-   * 可信部署 profile 里必需基础提供者（按 extensionId）。用于拒绝在线停用必需 provider
-   * （change: 2026-10-13-...，任务 1.5）：必需提供者只能经发布/重启更新，不能由站点控制面关闭。
-   */
-  requiredProviders?: RequiredProviderProfiles;
-  /**
-   * 候选配置校验：返回 null 表示通过，否则为安全错误信息。
-   * 由插件 config schema owner 提供；缺省接受任意已校验 JSON。
-   */
-  validateConfig?: (extensionId: string, values: Record<string, unknown>, metadata: ApplicationExtensionMetadata) => string | null;
-  now?: () => Date;
-  logger?: (event: Record<string, unknown>) => void;
-};
-
-export type SiteExtensionControlPlane = {
-  /** 公开 snapshot：全部已配置插件 + 实际状态（不含秘密）。 */
-  snapshot: () => { revision: number; catalog: Array<{ extensionId: string; name: string; description: string; version: string; directory?: string }>; plugins: ApplicationExtensionStatus[] };
-  /** 有界增量：cursor 过旧时 resyncRequired。 */
-  changes: (after: number) => { revision: number; changes: Array<{ revision: number; extensionId: string; status: ApplicationExtensionStatus }>; resyncRequired: boolean };
-  /** 单插件状态（含未配置插件）。 */
-  status: (extensionId: string) => ApplicationExtensionStatus | undefined;
-  /** 带 expectedRevision 的管理写入。 */
-  write: (input: { extensionId: string; expectedRevision: number; enabled: boolean; values: Record<string, unknown>; secretRefs: string[]; actor: string }) => Promise<SiteExtensionWriteOutcome>;
-  /** 进程启动/重启后依据已提交版本重建实际状态（commit 后崩溃的恢复路径）。 */
-  reconcile: () => Promise<void>;
-  /** 在途工作 lease（供插件 facade / 内部工作接线）。 */
-  workLease: (extensionId: string) => ExtensionWorkLease | undefined;
-  /** 宿主注入的配置 facade（只读已提交配置；不含秘密值）。 */
-  configFacade: (extensionId: string) => ApplicationBackendConfigFacade;
-  /** 宿主注入的在途工作 facade（admit/resume/计数）。 */
-  workFacade: (extensionId: string) => ApplicationBackendWorkFacade;
-  dispose: () => Promise<void>;
-};
-
-const ACTUAL_TO_DIAGNOSTIC: Partial<Record<ApplicationExtensionActualState, string>> = {
-  failed: "插件激活失败",
-  degraded: "插件处于降级状态",
-  unconfigured: "插件尚未配置"
-};
+export type * from "./control-plane-types.js";
+export { DEFAULT_SITE_ACTIVATION_TIMEOUT_MS } from "./activation-deadline.js";
 
 export function createSiteExtensionControlPlane(options: SiteExtensionControlPlaneOptions): SiteExtensionControlPlane {
   const now = options.now ?? (() => new Date());
   const log = options.logger ?? (() => undefined);
   const definitionById = new Map(options.definitions.map((definition) => [definition.extensionId, definition]));
+  // 启动期清单之上叠加运行期登记（control-plane-runtime.ts）；以下一律经 catalog 读元数据。
+  const catalog = createRuntimeCatalog(options.metadata);
   // 必需基础提供者的 owner extension（任务 1.5）：在线停用一律拒绝，必须经发布/重启更新 profile。
   const requiredProviderOwners = new Set((options.requiredProviders ?? []).map((profile) => profile.extensionId));
+  const suspended = options.suspended ?? new Set<string>();
   const leases = new Map<string, ExtensionWorkLease>();
+  // 隔离记录从审计恢复（重启后仍隔离）；优先级见 quarantine.ts。
+  const quarantine = createQuarantineRegistry(
+    catalog.source.list().map((metadata) => metadata.extensionId),
+    (extensionId) => options.store.audit(extensionId, 200)
+  );
   /** extensionId -> 当前 public 实例的配置版本（undefined 表示未激活公共实例）。 */
   const publicVersion = new Map<string, number>();
 
@@ -116,18 +62,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     return lease;
   };
 
-  const diagnosticsFor = (extensionId: string): ApplicationExtensionSafeDiagnostic[] => {
-    const actual = options.store.actual(extensionId);
-    if (actual && actual.diagnostics.length > 0) return actual.diagnostics;
-    const state = actual?.actualState;
-    if (state && ACTUAL_TO_DIAGNOSTIC[state]) {
-      return [{ code: state, message: ACTUAL_TO_DIAGNOSTIC[state] as string }];
-    }
-    if (!options.store.get(extensionId)) {
-      return [{ code: "unconfigured", message: "插件尚未配置" }];
-    }
-    return [];
-  };
+  const diagnosticsFor = (extensionId: string) => fallbackDiagnostics(options.store, extensionId);
 
   /**
    * 插件自报健康：activation 成功不等于能力可用（生成 Provider 缺凭据时仍装载）。
@@ -151,7 +86,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
   };
 
   const statusFor = (extensionId: string): ApplicationExtensionStatus | undefined => {
-    const metadata = options.metadata.get(extensionId);
+    const metadata = catalog.source.get(extensionId);
     if (!metadata) return undefined;
     const config = options.store.get(extensionId);
     const lease = leaseFor(extensionId);
@@ -161,8 +96,14 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
       config !== undefined && config.desiredEnabled && publicVersion.get(extensionId) === config.configVersion;
     const health = publicCurrent ? healthFor(extensionId) : undefined;
     let actualState: ApplicationExtensionActualState;
-    if (!config) {
+    if (suspended.has(extensionId) && (config?.desiredEnabled ?? metadata.defaultEnabled === true)) {
+      // 安全模式暂停：只改投影，不改已保存的 desiredEnabled；退出安全模式后按原配置恢复。
+      actualState = "suspended";
+    } else if (!config) {
       actualState = "unconfigured";
+    } else if (quarantine.has(extensionId) && config.desiredEnabled) {
+      // 崩溃熔断：优先于 failed / configuring；管理员停用（desiredEnabled=false）仍显示停用。
+      actualState = "quarantined";
     } else if (actual?.actualState === "failed" && !publicVersion.has(extensionId) && config.desiredEnabled) {
       actualState = "failed";
     } else if (!config.desiredEnabled) {
@@ -180,23 +121,28 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
       configVersion: config?.configVersion ?? null,
       extensionRevision: options.store.revision(),
       activeWorkCount: lease.activeWorkCount(),
-      diagnostics: health?.diagnostics && health.diagnostics.length > 0 ? [...health.diagnostics] : diagnosticsFor(extensionId)
+      diagnostics:
+        actualState === "quarantined"
+          ? [quarantine.get(extensionId)!.diagnostic]
+          : health?.diagnostics && health.diagnostics.length > 0
+            ? [...health.diagnostics]
+            : diagnosticsFor(extensionId)
     };
   };
 
   const snapshot = () => {
-    const metadataList = options.metadata.list();
+    const metadataList = catalog.source.list();
     const plugins = metadataList
       .map((metadata) => statusFor(metadata.extensionId))
       .filter((status): status is ApplicationExtensionStatus => status !== undefined);
-    const catalog = metadataList.map((metadata) => ({
+    const entries = metadataList.map((metadata) => ({
       extensionId: metadata.extensionId,
       name: metadata.name,
       description: metadata.description,
       ...(metadata.directory ? { directory: metadata.directory } : {}),
       version: metadata.version
     }));
-    return { revision: options.store.revision(), catalog, plugins };
+    return { revision: options.store.revision(), catalog: entries, plugins };
   };
 
   const changes = (after: number) => {
@@ -206,7 +152,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     }
     // 目标与实际状态变化都记录在 status log；配置审计作为兜底。
     const changedIds = new Set<string>(options.store.changedExtensionIdsSince(after));
-    for (const metadata of options.metadata.list()) {
+    for (const metadata of catalog.source.list()) {
       for (const audit of options.store.audit(metadata.extensionId, 200)) {
         if (audit.toRevision > after) changedIds.add(metadata.extensionId);
       }
@@ -225,22 +171,20 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
   const activateExtensionVersion = async (
     extensionId: string,
     configVersion: number
-  ): Promise<{ ok: true } | { ok: false; message: string }> => {
+  ): Promise<{ ok: true } | { ok: false; code: "activation-failed" | "activation-timeout"; message: string }> => {
     if (publicVersion.get(extensionId) === configVersion) return { ok: true };
     const definition = definitionById.get(extensionId);
     if (!definition) {
-      return { ok: false, message: `插件 ${extensionId} 没有可信后端入口` };
+      return { ok: false, code: "activation-failed", message: `插件 ${extensionId} 没有可信后端入口` };
     }
-    try {
-      const result = await options.host.activateVersioned(definition, configVersion, "public");
-      if (!result.ok) {
-        return { ok: false, message: result.message };
-      }
-      publicVersion.set(extensionId, configVersion);
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) };
-    }
+    const timeoutMs = resolveActivationTimeout(options.activationTimeoutMs?.());
+    const outcome = await awaitActivationWithDeadline(options.host.activateVersioned(definition, configVersion, "public"), timeoutMs, async () => {
+      if (publicVersion.get(extensionId) === configVersion) return;
+      log({ event: "site-extension-late-activation-released", extensionId, configVersion });
+      await options.host.disposeVersion(extensionId, configVersion);
+    });
+    if (outcome.ok) publicVersion.set(extensionId, configVersion);
+    return outcome;
   };
 
   /** 释放某插件的 public 实例（幂等）。 */
@@ -263,7 +207,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
   };
 
   const write: SiteExtensionControlPlane["write"] = async (input) => {
-    const metadata = options.metadata.get(input.extensionId);
+    const metadata = catalog.source.get(input.extensionId);
     if (!metadata) {
       return { ok: false, code: "extension-not-found", message: `插件 ${input.extensionId} 不在可信清单中` };
     }
@@ -317,7 +261,11 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     }
 
     // 3) 提交后 activation：提交后失败不伪称回滚，保存 failed/degraded 实际状态。
-    if (input.enabled) {
+    const held = input.enabled ? heldStateOf(input.extensionId, suspended, quarantine) : null;
+    if (held) {
+      // 安全模式 / 隔离期间（D7）：配置照常提交，但不激活；恢复后按已提交版本激活。
+      options.store.setActual(input.extensionId, held.actualState, held.diagnostics, timestamp);
+    } else if (input.enabled) {
       options.store.setActual(input.extensionId, "configuring", [], timestamp);
       // 旧版本若被在途工作引用，保留为 recovery 实例；新版本成为 public 入口。
       const newVersion = committed.config.configVersion;
@@ -331,10 +279,10 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
         options.store.setActual(
           input.extensionId,
           "failed",
-          [{ code: "activation-failed", message: activation.message }],
+          [{ code: activation.code, message: activation.message }],
           now().toISOString()
         );
-        log({ event: "site-extension-activation-failed", extensionId: input.extensionId, message: activation.message });
+        log({ event: "site-extension-activation-failed", extensionId: input.extensionId, code: activation.code, message: activation.message });
       }
     } else {
       // 停用：不取消已有工作。有在途引用时保留资源直至引用消失（draining）；
@@ -356,8 +304,32 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     return { ok: true, revision: committed.revision, status };
   };
 
+  let markRequiredReconciled!: () => void;
+  const requiredReconciled = new Promise<void>((resolve) => {
+    markRequiredReconciled = resolve;
+  });
   const runReconcile = async (): Promise<void> => {
-    for (const metadata of options.metadata.list()) {
+    // 必需提供者先协调，随后通知宿主「必需部分已就绪」；可选扩展继续在后台按顺序协调（D5）。
+    const all = catalog.source.list();
+    const ordered = [
+      ...all.filter((metadata) => requiredProviderOwners.has(metadata.extensionId)),
+      null,
+      ...all.filter((metadata) => !requiredProviderOwners.has(metadata.extensionId))
+    ];
+    try {
+      await reconcileEach(ordered);
+    } finally {
+      markRequiredReconciled();
+    }
+    log({ event: "site-extension-reconciled", revision: options.store.revision() });
+  };
+
+  const reconcileEach = async (ordered: ReadonlyArray<ApplicationExtensionMetadata | null>): Promise<void> => {
+    for (const metadata of ordered) {
+      if (metadata === null) {
+        markRequiredReconciled();
+        continue;
+      }
       const config = options.store.get(metadata.extensionId);
       if (!config) {
         if (metadata.defaultEnabled && definitionById.has(metadata.extensionId)) {
@@ -386,6 +358,13 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
         );
         continue;
       }
+      const held = heldStateOf(metadata.extensionId, suspended, quarantine);
+      if (held) {
+        // 安全模式 / 崩溃熔断（D7）：不激活、不改写 desiredEnabled；隔离时释放可能残留的 public 实例。
+        if (held.actualState === "quarantined") await deactivatePublic(metadata.extensionId);
+        options.store.setActual(metadata.extensionId, held.actualState, held.diagnostics, now().toISOString());
+        continue;
+      }
       // 已启用：依据已提交版本恢复 public 实例；被引用的旧版本恢复为 recovery 实例。
       options.store.setActual(metadata.extensionId, "configuring", [], now().toISOString());
       await restoreReferencedVersions(metadata.extensionId);
@@ -397,12 +376,12 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
         options.store.setActual(
           metadata.extensionId,
           "failed",
-          [{ code: "activation-failed", message: activation.message }],
+          [{ code: activation.code, message: activation.message }],
           now().toISOString()
         );
+        log({ event: "site-extension-activation-failed", extensionId: metadata.extensionId, code: activation.code, message: activation.message });
       }
     }
-    log({ event: "site-extension-reconciled", revision: options.store.revision() });
   };
 
   /**
@@ -439,13 +418,38 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     }
   };
 
+  const quarantineOps = createQuarantineOperations({
+    metadata: catalog.source,
+    store: options.store,
+    quarantine,
+    now,
+    log,
+    statusFor,
+    release: async (extensionId) => {
+      await deactivatePublic(extensionId);
+      await releaseUnreferencedVersions(extensionId);
+    },
+    reconcileOne: async (extensionId) => reconcileEach([catalog.source.get(extensionId)!])
+  });
+  const runtime = createRuntimeRegistration({
+    catalog, definitionById, host: options.host, store: options.store, quarantine, publicVersion, statusFor, log,
+    activeWorkCount: (extensionId) => leases.get(extensionId)?.activeWorkCount() ?? 0,
+    disposeLease: (extensionId) => void (leases.get(extensionId)?.dispose(), leases.delete(extensionId)),
+    reconcileOne: (metadata) => reconcileEach([metadata])
+  });
+
   return {
     snapshot,
     changes,
     status: statusFor,
     write,
     reconcile,
-    workLease: (extensionId) => (options.metadata.get(extensionId) ? leaseFor(extensionId) : undefined),
+    requiredReconciled: () => requiredReconciled,
+    addExtension: runtime.addExtension,
+    removeExtension: runtime.removeExtension,
+    quarantine: quarantineOps.quarantine,
+    unquarantine: quarantineOps.unquarantine,
+    workLease: (extensionId) => (catalog.source.get(extensionId) ? leaseFor(extensionId) : undefined),
     configFacade: (extensionId) => ({
       configVersion: () => options.store.get(extensionId)?.configVersion ?? null,
       values: () => options.store.get(extensionId)?.values ?? {},
@@ -481,23 +485,4 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
       publicVersion.clear();
     }
   };
-}
-
-/**
- * prepare 候选配置：只接受已校验的非秘密值与 opaque secret reference，且不允许 URL/data 载体。
- * 真正的资源准备（如打开连接）由插件 activation 完成；这里保证候选本身可安全提交。
- */
-function prepareCandidate(extensionId: string, values: Record<string, unknown>, secretRefs: readonly string[]): void {
-  void extensionId;
-  for (const ref of secretRefs) {
-    const lower = ref.toLowerCase();
-    if (lower.includes("://") || lower.startsWith("data:") || lower.startsWith("blob:")) {
-      throw new Error("secret reference 不得是 URL/data/blob 载体");
-    }
-  }
-  const serialized = JSON.stringify(values);
-  if (serialized !== undefined && serialized.length > 64 * 1024) {
-    throw new Error("候选配置超出大小上限");
-  }
-  void safeDiagnosticDetail;
 }

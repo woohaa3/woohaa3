@@ -63,6 +63,11 @@ export type ApplicationExtensionApiDependencies = {
   internalBasePath?: string;
   /** 可信清单声明的固定公开路径映射（如 `/api/chatgpt/*`）。 */
   publicRoutes?: readonly ApplicationExtensionPublicRouteMapping[];
+  /**
+   * 当前浏览器发布目录指针（change: 2026-10-21-add-extension-marketplace-point，6.2）：随状态快照与增量
+   * 一起返回，受管扩展热登记后前端据此加载新增条目。缺省不返回该字段。
+   */
+  extensionRelease?: () => import("@woohaa3/contracts").ApplicationExtensionReleasePointer | null;
   logger?: (event: Record<string, unknown>) => void;
 };
 

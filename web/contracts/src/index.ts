@@ -115,6 +115,7 @@ export * from "./video/index.js";
 export * from "./extension/index.js";
 export * from "./extension/canvas-source.js";
 export * from "./extension/canvas-upstream.js";
+export { compareSemver, isSemver as isStrictSemver, maxSatisfying, satisfiesRange } from "./extension/semver.js";
 export * from "./backend/index.js";
 export * from "./settings/index.js";
 export * from "./telemetry/event.js";

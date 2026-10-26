@@ -111,6 +111,8 @@ export type ApplicationModule = {
   sourceRegistry: CanvasSourceRegistry;
   /** 插件管理里的站点开关与扩展层的衔接。 */
   siteGate: SiteGate;
+  /** 本次启动的安全模式（change: 2026-10-21-harden-extension-fault-isolation，D7）；正常启动为 null。 */
+  safeMode: import("@woohaa3/contracts").HostSafeModeView | null;
 };
 
 /**
@@ -132,6 +134,8 @@ export type HostServices = {
   gateway: GatewayService;
   access: AccessService;
   config: SettingsService;
+  /** 受控重启控制器（change: 2026-10-21-harden-extension-fault-isolation，D6）；进程入口订阅后执行排空与 exit(75)。 */
+  hostRestart: import("../api/host-restart-api.js").HostRestartController;
   media: MediaService;
   generation: GenerationService;
   /** 存储扩展点：后端插件注册，media/task 只用 `bucket(namespace)`。 */
@@ -141,6 +145,15 @@ export type HostServices = {
    * 业务路径只用 `emit`（同步入队、不等待 I/O）；读写面由 `/api/telemetry/*` 暴露。
    */
   telemetry: HostTelemetryService;
+  /**
+   * 扩展市场来源注册表（change: 2026-10-21-add-extension-marketplace-point，D1/D3）。扩展层插件拿到的是
+   * `scoped(origin)` 视图（由扩展装载器注入），受管根 / 可写根插件不能注册来源。
+   */
+  marketplace: import("./core/marketplace.js").MarketplaceRegistry;
+  /** 扩展安装管理（Extension Manager）；宿主没有受管根时不存在。 */
+  extensionManager: import("./core/extension-manager/index.js").ExtensionManager;
+  /** 扩展层装载器的运行期入口（追加 / 卸载插件；change: 2026-10-21-isolate-extension-host-process，任务 8.4）。 */
+  extensionLayer: import("./extensions/loader.js").ExtensionLayer;
   task: TaskService;
   canvas: CanvasService;
   mcp: McpService;

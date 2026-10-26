@@ -146,3 +146,24 @@ describe("applicationExtensionStatusService（任务 4.1）", () => {
     expect(listener).toHaveBeenCalledTimes(before + 1);
   });
 });
+
+describe("发布目录指针（change: 2026-10-21-add-extension-marketplace-point，6.2）", () => {
+  const pointer = (c: string) => ({ releaseId: c.repeat(64), href: `/extension-releases/${c.repeat(64)}.json` });
+
+  it("snapshot 与增量携带指针；增量缺省时沿用已知指针", async () => {
+    const responses: unknown[] = [
+      { revision: 1, catalog: [], plugins: [], extensionRelease: pointer("a") },
+      { revision: 1, changes: [], resyncRequired: false, extensionRelease: pointer("b") },
+      { revision: 1, changes: [], resyncRequired: false }
+    ];
+    const remote = createApplicationRemote({ fetchImpl: (async () => jsonResponse(responses.shift())) as unknown as typeof fetch });
+    const service = createApplicationExtensionStatusService({ remote, subscribeToChanges: false });
+    await service.refresh();
+    expect(service.getSnapshot().extensionRelease).toEqual(pointer("a"));
+    await service.refreshChanges();
+    expect(service.getSnapshot().extensionRelease).toEqual(pointer("b"));
+    await service.refreshChanges();
+    expect(service.getSnapshot().extensionRelease).toEqual(pointer("b"));
+    service.dispose();
+  });
+});

@@ -23,13 +23,25 @@
  * 用法：
  *   node scripts/extensions-preflight.mjs [--strict] [--json]
  */
+import { createHash } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { hasBrowserEntry } from "./lib/extension-scan.mjs";
+import { EXTENSION_PACKAGE_PREFIX, hasBrowserEntry, readExtensionDescriptor } from "./lib/extension-scan.mjs";
 import { syncExtensionIconAssets } from "./lib/extension-icon-assets.mjs";
-import { FOUNDATION_SLOT_NAMES, requiredFoundationSlots, hasBrowserArtifact, hostSummary, loadExtensionHost } from "./lib/extension-host.mjs";
+import { checkEnginesCompatible, validateExtensionDescriptor } from "./lib/extension-descriptor.mjs";
+import { loadExtensionContracts } from "./lib/extension-release-protocol.mjs";
+import {
+  FOUNDATION_SLOT_NAMES,
+  requiredFoundationSlots,
+  hasBrowserArtifact,
+  hostSummary,
+  loadExtensionHost,
+  probeDeclaredModules,
+  untrustedRootViolation
+} from "./lib/extension-host.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_REPO_ROOT = path.resolve(HERE, "..");
@@ -173,6 +185,186 @@ export async function probeDeclaredExports(host) {
     }
   }
   return errors;
+}
+
+/**
+ * 对任意扩展目录做与 `pnpm extensions:check` 同口径的静态预检
+ * （change: 2026-10-21-add-extension-marketplace-point，任务 2.3 / design D4、D6、D8）。
+ *
+ * 供 Extension Manager 对 staging 目录调用：**只读 JSON、解析模块路径与校验 browser 产物，不 import、
+ * 不执行包内任何代码**（受管扩展此时尚未被信任为可执行）。
+ *
+ * `managed: true` 额外施加受管扩展规则：
+ * - 必须有 `extension.json`，且声明 `version`（与 package.json 一致）与 `engines`；engines 与宿主兼容；
+ * - 包名 `@woohaa3/extension-*`，依赖里不得有 `workspace:`（受管扩展不在 pnpm 工作区里）；
+ * - 禁止 `bootstrap` / `canvasContent` / 市场来源（与装配期 `untrustedRootViolation` 同一函数）/ `migrate`
+ *   / `required: true` / 前端 activation `always`（design D8：它们参与 page ready，不能热登记）；
+ * - 有 browser 源码约定或 `browser-dist/` 时，artifact manifest 必须存在、可解码、与宿主 SDK 兼容，
+ *   身份与声明一致，清单里每个文件存在且 sha256/大小一致。
+ *
+ * 返回 `{ ok, errors, warnings, extensionId, version, descriptor, packageJson, engines,
+ * activation, requiresRestart }`；errors/warnings 是 `{ code, field?, message }`。
+ * `requiresRestart`：声明了后端代码（backend / hostPlugin / metadata / publicRoutes）→ 受控重启生效（D8）。
+ */
+export async function preflightDirectory(dir, { managed = false, contracts = null } = {}) {
+  const errors = [];
+  const warnings = [];
+  const fail = (code, message, field) => errors.push({ code, message, ...(field ? { field } : {}) });
+  const root = path.resolve(dir);
+  const result = (extra = {}) => ({ ok: errors.length === 0, errors, warnings, extensionId: null, version: null, descriptor: null, packageJson: null, engines: null, permissions: null, activation: null, requiresRestart: false, ...extra });
+
+  let packageJson = null;
+  try {
+    packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  } catch (error) {
+    fail("MARKETPLACE_PREFLIGHT_FAILED", `package.json 缺失或不是合法 JSON：${error.message}`, "package.json");
+    return result();
+  }
+  if (typeof packageJson?.name !== "string" || !packageJson.name.startsWith(EXTENSION_PACKAGE_PREFIX)) {
+    fail("MARKETPLACE_PREFLIGHT_FAILED", `package.json 的 name 必须以 ${EXTENSION_PACKAGE_PREFIX} 开头：${String(packageJson?.name)}`, "package.json.name");
+  }
+
+  let raw;
+  try {
+    raw = readExtensionDescriptor(root);
+  } catch (error) {
+    fail("MARKETPLACE_PREFLIGHT_FAILED", error.message, "extension.json");
+    return result({ packageJson });
+  }
+  if (!raw.descriptorPath) {
+    if (managed) fail("MARKETPLACE_PREFLIGHT_FAILED", "受管扩展必须带 extension.json", "extension.json");
+    return result({ packageJson });
+  }
+  const validated = validateExtensionDescriptor(raw.descriptor);
+  if (!validated.ok) {
+    for (const message of validated.errors) fail("MARKETPLACE_PREFLIGHT_FAILED", `extension.json：${message}`, "extension.json");
+    return result({ packageJson });
+  }
+  const descriptor = validated.value;
+  const extensionId = descriptor.extensionId;
+  const version = descriptor.version ?? (typeof packageJson.version === "string" ? packageJson.version : null);
+  const extension = { extensionId, dir: root, directory: path.basename(root), descriptorPath: raw.descriptorPath, managed, rootWritable: false };
+
+  if (managed) {
+    if (descriptor.version === undefined) fail("MARKETPLACE_PREFLIGHT_FAILED", "受管扩展的 extension.json 必须声明 version", "version");
+    else if (packageJson.version !== descriptor.version) {
+      fail("MARKETPLACE_PREFLIGHT_FAILED", `extension.json 的 version（${descriptor.version}）与 package.json（${String(packageJson.version)}）不一致`, "version");
+    }
+    if (descriptor.engines === undefined) fail("MARKETPLACE_PREFLIGHT_FAILED", "受管扩展的 extension.json 必须声明 engines", "engines");
+    for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
+      for (const [name, spec] of Object.entries(packageJson[field] ?? {})) {
+        if (typeof spec === "string" && spec.startsWith("workspace:")) {
+          fail("MARKETPLACE_PREFLIGHT_FAILED", `package.json 的 ${field}.${name} 使用 workspace: 依赖；受管扩展必须是自包含产物（先 pack:extension）`, `package.json.${field}`);
+        }
+      }
+    }
+    const violation = untrustedRootViolation(extension, descriptor);
+    if (violation) fail("MARKETPLACE_FORBIDDEN_DECLARATION", violation.message, violation.field);
+    if (descriptor.migrate) fail("MARKETPLACE_FORBIDDEN_DECLARATION", "受管扩展暂不支持数据迁移（migrate）：需要进程隔离支持", "migrate");
+    // 子进程隔离（change: 2026-10-21-isolate-extension-host-process，任务 6.3 / design D9）。
+    for (const native of findNativeModules(root)) {
+      fail("MARKETPLACE_FORBIDDEN_DECLARATION", `受管扩展不得包含原生模块（可绕过子进程的出网守卫）：${native}`, "native-module");
+    }
+    if (descriptor.hostPlugin) {
+      const entries = [descriptor.hostPlugin.module, descriptor.metadata?.module, ...(descriptor.publicRoutes ?? []).filter((route) => route.publicPathExport).map((route) => route.module)].filter(Boolean);
+      for (const subpath of new Set(entries)) {
+        if (!String(subpath).startsWith("./backend-dist/")) {
+          fail("MARKETPLACE_FORBIDDEN_DECLARATION", `受管扩展的后端入口必须在 backend-dist/ 下（先 pack:extension）：${subpath}`, "hostPlugin.module");
+        }
+      }
+      // 不再要求 backend-dist/config-schema.json：C 方向下受管后端插件在宿主进程内 import，
+      // 配置段由装载器按工厂返回值登记，构建期静态描述已无消费者。
+    }
+    if (descriptor.required === true) fail("MARKETPLACE_FORBIDDEN_DECLARATION", "受管扩展不得声明 required: true", "required");
+  }
+  if (descriptor.engines !== undefined) {
+    const compatible = checkEnginesCompatible(descriptor.engines);
+    if (!compatible.ok) for (const reason of compatible.reasons) fail("MARKETPLACE_ENGINES_INCOMPATIBLE", reason, "engines");
+  }
+
+  // 模块路径与品牌图形：只解析，不 import（与装配期 probeDeclaredModules 同一函数）。
+  const moduleProblem = probeDeclaredModules(extension, descriptor);
+  if (moduleProblem) fail("MARKETPLACE_PREFLIGHT_FAILED", moduleProblem.message, moduleProblem.code);
+
+  // browser 产物完整性。
+  let activation = null;
+  const hasArtifact = hasBrowserArtifact(root);
+  if (!hasArtifact && (hasBrowserEntry(root) || fs.existsSync(path.join(root, "browser-dist")))) {
+    if (managed) fail("MARKETPLACE_PREFLIGHT_FAILED", "缺少 browser-dist/artifact-manifest.json；先 build:browser", "browser-dist");
+    else warnings.push({ code: "EXTENSION_BROWSER_ARTIFACT_MISSING", message: "有 browser 源码但缺 browser-dist/artifact-manifest.json；先运行 build:browser" });
+  }
+  if (hasArtifact) {
+    const resolvedContracts = contracts ?? (await loadExtensionContracts());
+    const artifactProblems = checkBrowserArtifact(root, extensionId, resolvedContracts);
+    for (const message of artifactProblems.errors) fail("MARKETPLACE_PREFLIGHT_FAILED", message, "browser-dist");
+    activation = artifactProblems.activation;
+    if (managed && artifactProblems.required) fail("MARKETPLACE_FORBIDDEN_DECLARATION", "受管扩展的前端 metadata 不得声明 required: true", "browser-dist.metadata.required");
+    if (managed && activation === "always") {
+      fail("MARKETPLACE_FORBIDDEN_DECLARATION", "受管扩展的前端 activation 不得为 always（只允许 server-active / browser-local）", "browser-dist.metadata.activation");
+    }
+  }
+
+  const requiresRestart = Boolean(descriptor.backend || descriptor.hostPlugin || descriptor.metadata || (descriptor.publicRoutes?.length ?? 0) > 0);
+  return result({
+    extensionId,
+    version,
+    descriptor,
+    packageJson,
+    engines: descriptor.engines ?? null,
+    activation,
+    requiresRestart
+  });
+}
+
+/** 包内的原生模块（.node 文件），返回相对路径；不跟随符号链接。 */
+function findNativeModules(root) {
+  const out = [];
+  const walk = (dir, prefix) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(path.join(dir, entry.name), relative);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(".node")) out.push(relative);
+      if (out.length >= 20) return;
+    }
+  };
+  walk(root, "");
+  return out;
+}
+
+/** browser artifact 静态校验（不执行产物代码）：解码、兼容、身份、文件清单一致。 */
+function checkBrowserArtifact(root, extensionId, contracts) {
+  const errors = [];
+  const outDir = path.join(root, "browser-dist");
+  let manifestRaw;
+  try {
+    manifestRaw = JSON.parse(fs.readFileSync(path.join(outDir, "artifact-manifest.json"), "utf8"));
+  } catch (error) {
+    return { errors: [`browser-dist/artifact-manifest.json 不是合法 JSON：${error.message}`], activation: null, required: false };
+  }
+  const decoded = contracts.decodeExtensionBrowserArtifactManifest ? contracts.decodeExtensionBrowserArtifactManifest(manifestRaw) : { ok: true, value: manifestRaw };
+  if (!decoded.ok) return { errors: [`browser artifact manifest 无效：${decoded.message ?? decoded.code ?? "malformed"}`], activation: null, required: false };
+  const manifest = decoded.value;
+  if (contracts.isArtifactCompatibleWithHost && !contracts.isArtifactCompatibleWithHost(manifest, { sdkAbi: contracts.EXTENSION_SDK_ABI_VERSION, reactMajor: contracts.HOST_REACT_MAJOR })) {
+    errors.push(`browser artifact 与宿主 SDK/React 不兼容：sdkAbi=${manifest.sdkAbi} reactMajor=${manifest.reactMajor}`);
+  }
+  if (manifest.metadata?.extensionId !== extensionId) {
+    errors.push(`browser artifact 的 extensionId（${String(manifest.metadata?.extensionId)}）与 extension.json（${extensionId}）不一致`);
+  }
+  for (const file of manifest.files ?? []) {
+    const reason = typeof file.path === "string" && !file.path.split("/").includes("..") && !file.path.startsWith("/") ? null : "路径非法";
+    const full = path.join(outDir, ...String(file.path).split("/"));
+    if (reason || !fs.existsSync(full)) {
+      errors.push(`browser artifact 清单里的文件缺失或路径非法：${String(file.path)}`);
+      continue;
+    }
+    const bytes = fs.readFileSync(full);
+    if (bytes.length !== file.bytes || createHashHex(bytes) !== file.sha256) errors.push(`browser artifact 文件与清单不一致：${file.path}`);
+  }
+  return { errors, activation: manifest.metadata?.activation ?? null, required: manifest.metadata?.required === true };
+}
+
+function createHashHex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 async function main() {

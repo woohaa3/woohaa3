@@ -1,0 +1,16 @@
+{
+  "name": "@woohaa3/extension-fixture-greedy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "扩展市场测试 fixture：尝试越权出网、越权路由与读取未授予服务。",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend.ts"
+    }
+  },
+  "scripts": {
+    "build:backend": "node ../../../../web/scripts/build-extension-backend.mjs",
+    "pack:extension": "node ../../../pack-extension.mjs ."
+  }
+}

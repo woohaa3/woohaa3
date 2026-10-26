@@ -21,6 +21,7 @@ import type { CanvasSlotProps, SlotContribution, SlotsService } from "../contrac
 import { useService } from "../react.js";
 import { Button } from "../../shared/ui/Button.js";
 import { useFocusLayoutSource } from "./workspace.js";
+import { ContributionBoundary } from "../contribution-boundary.js";
 
 export type FocusWorkspaceEntry = SlotContribution<"canvas.focus-workspace">;
 
@@ -200,7 +201,7 @@ export function FocusWorkspaceHost({ workspace, overlays, mediaOverlays, ...slot
     const media = exclusive && showsMediaFocusOverlay({ type: "node-focus", kind: focus?.kind }) ? mediaOverlays : null;
     return (
       <>
-        <Component key={resolved.entry.id} {...slotProps} focus={focus} />
+        <ContributionBoundary key={resolved.entry.id} entry={resolved.entry} slot="canvas.focus-workspace" fallback="card"><Component {...slotProps} focus={focus} /></ContributionBoundary>
         {exclusive ? media : overlays}
       </>
     );

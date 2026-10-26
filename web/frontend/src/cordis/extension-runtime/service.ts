@@ -16,9 +16,15 @@ import type {
   ExtensionFrontendMetadata,
   ExtensionLoadDiagnostic
 } from "@woohaa3/contracts";
-import { createExtensionReleaseCatalogLoader } from "./catalog.js";
+import { createExtensionReleaseCatalogLoader, EXTENSION_RELEASE_LINK_REL } from "./catalog.js";
 import { createExtensionArtifactLoader, ExtensionLoadError, type ExtensionArtifactLoader } from "./loader.js";
-import { createExtensionReleaseRuntime, type ExtensionReleaseRuntime, type ExtensionRuntimeEntry } from "./runtime.js";
+import {
+  createExtensionReleaseRuntime,
+  extendReleaseRuntime,
+  type ExtensionReleaseDelta,
+  type ExtensionReleaseRuntime,
+  type ExtensionRuntimeEntry
+} from "./runtime.js";
 import { createExtensionRuntimeProvider, type ExtensionRuntimeProvider } from "./runtime-provider.js";
 
 export type ExtensionRuntimeServiceOptions = {
@@ -48,6 +54,26 @@ export type ExtensionRuntimeService = {
   report(diagnostic: ExtensionLoadDiagnostic): void;
   /** 显式重试：清除该 ID 的失败诊断（不改变权威状态）。 */
   retry(extensionId: string): void;
+  /**
+   * 改固定到另一个发布目录（change: 2026-10-21-harden-extension-fault-isolation，D6；P1 热登记在此扩展）。
+   *
+   * 新目录加载并校验成功后才替换运行时目录、清空加载诊断，并同步更新 HTML 上的发布 link
+   * （后续读 link 的地方与之一致）；返回新 releaseId。已加载的 module/CSS 缓存按 artifact URL
+   * 保留（artifact 不可变，可直接复用）。已装配的页面不受影响：新 release 只在下一次创建
+   * page scope 时生效。失败时抛出且原 release 保持不变。
+   */
+  repin(releaseHref: string): Promise<string>;
+  /**
+   * 热登记（change: 2026-10-21-add-extension-marketplace-point，6.3 / design D8）：读取宿主新发布的目录，
+   * **不**改变已固定的 release，只把新增条目追加进运行时目录；升级（artifact 变化）与卸载的条目
+   * 不在已打开页面热换，只记录为待重开提示。
+   *
+   * 同一 releaseId 重复调用幂等（返回 null）；目录尚未固定时只更新 HTML link，首次加载即用新目录。
+   * 读取或校验失败时抛出，运行时目录保持不变。
+   */
+  adoptRelease(pointer: { releaseId: string; href: string }): Promise<ExtensionReleaseDelta | null>;
+  /** 自页面打开以来已发布、但当前页面仍在用旧版本的扩展（升级/卸载）；重开画布后生效。 */
+  staleExtensionIds(): readonly string[];
   dispose(): void;
 };
 
@@ -61,6 +87,10 @@ export function createExtensionRuntimeService(
   const diagnostics = new Map<string, ExtensionLoadDiagnostic>();
   let runtime: ExtensionReleaseRuntime | null = null;
   let disposed = false;
+  /** 已采纳的最新 releaseId（热登记去重）。 */
+  let adoptedReleaseId: string | null = null;
+  /** 待重开才生效的扩展（升级/卸载）。 */
+  const stale = new Set<string>();
 
   const ensureCatalog = async (): Promise<ExtensionReleaseRuntime | null> => {
     if (disposed) throw new ExtensionLoadError("evaluation", "extension runtime 已释放", false);
@@ -131,14 +161,66 @@ export function createExtensionRuntimeService(
         diagnostics.delete(extensionId);
       }
     },
+    async adoptRelease(pointer) {
+      if (disposed) throw new ExtensionLoadError("evaluation", "extension runtime 已释放", false);
+      const pinned = runtime?.releaseId ?? catalogLoader.currentReleaseId();
+      if (pointer.releaseId === adoptedReleaseId || (pointer.releaseId === pinned && adoptedReleaseId === null)) return null;
+      if (!runtime) {
+        // 目录尚未固定：让首次加载直接使用新目录。
+        replaceReleaseLink(pointer.href);
+        adoptedReleaseId = pointer.releaseId;
+        return null;
+      }
+      const next = await catalogLoader.peek(pointer.href);
+      if (next.releaseId !== pointer.releaseId) {
+        throw new ExtensionLoadError("invalid-catalog", "发布目录与指针不一致", false);
+      }
+      const result = extendReleaseRuntime(runtime, next, artifactLoader);
+      runtime = result.runtime;
+      adoptedReleaseId = pointer.releaseId;
+      for (const id of [...result.delta.upgraded, ...result.delta.removed]) stale.add(id);
+      // 升级后又回到原 artifact（回滚）：不再提示。
+      for (const entry of next.entries) {
+        const current = runtime.byId(entry.metadata.extensionId);
+        if (current && current.artifactId === entry.artifactId) stale.delete(entry.metadata.extensionId);
+      }
+      log({ event: "extension-runtime-release-adopted", releaseId: pointer.releaseId, ...result.delta });
+      return result.delta;
+    },
+    staleExtensionIds: () => [...stale].sort(),
+    async repin(releaseHref) {
+      if (disposed) throw new ExtensionLoadError("evaluation", "extension runtime 已释放", false);
+      const catalog = await catalogLoader.repin(releaseHref);
+      runtime = createExtensionReleaseRuntime(catalog, artifactLoader);
+      adoptedReleaseId = catalog.releaseId;
+      stale.clear();
+      diagnostics.clear();
+      replaceReleaseLink(releaseHref);
+      log({ event: "extension-runtime-repinned", releaseId: catalog.releaseId });
+      return catalog.releaseId;
+    },
     dispose() {
       disposed = true;
       artifactLoader.dispose();
       catalogLoader.dispose();
       runtime = null;
       diagnostics.clear();
+      stale.clear();
     }
   };
+}
+
+/** 同步 HTML 上的发布 link（没有 document 的环境直接跳过）。 */
+function replaceReleaseLink(href: string): void {
+  const doc = (globalThis as { document?: Document }).document;
+  if (!doc?.head) return;
+  let link = doc.querySelector(`link[rel="${EXTENSION_RELEASE_LINK_REL}"]`) as HTMLLinkElement | null;
+  if (!link) {
+    link = doc.createElement("link");
+    link.rel = EXTENSION_RELEASE_LINK_REL;
+    doc.head.append(link);
+  }
+  link.setAttribute("href", href);
 }
 
 /** 从发布目录 entry 取加载所需的运行时要求（诊断/测试）。 */

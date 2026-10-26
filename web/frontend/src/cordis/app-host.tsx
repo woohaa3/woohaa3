@@ -22,6 +22,8 @@ import { InputScopeHost } from "./input-scope-host.js";
 import { RuntimeProvider, useRuntimeContext, useService, useRuntimeStatus } from "./react.js";
 import { RouteHost } from "./host.js";
 import { RuntimeDiagnosticsPanel } from "./diagnostics-panel.js";
+import { HostConnectivityOverlay } from "./services/host-connectivity-overlay.js";
+import { SafeModeBanner } from "./services/safe-mode-banner.js";
 import type { FrontendRuntime } from "./kernel.js";
 import type { AppRuntime, AppRuntimeSnapshot } from "./page-scope.js";
 import type { AppPageId, AppPageLocation } from "./navigation/app-router.js";
@@ -67,6 +69,9 @@ function AppContent({ app }: { app: AppRuntime }) {
           </AppErrorBoundary>
         ) : null}
         <DialogHost dialogs={dialogs} />
+        {/* 宿主重连遮罩 / 「扩展已更新」提示与安全模式提示条（change: 2026-10-21-harden-extension-fault-isolation）。 */}
+        <HostConnectivityOverlay connectivity={app.hostConnectivity} />
+        <SafeModeBanner connectivity={app.hostConnectivity} />
         {/* 旧 `/settings` 兼容打开失败：可识别错误 + 显式重试（不自动重试、不改页面）。 */}
         {settingsError ? (
           <div className="settings-intent-error" role="alert" data-testid="settings-intent-error">

@@ -1,0 +1,11 @@
+/* 扩展贡献渲染失败的紧凑占位（change: 2026-10-21-harden-extension-fault-isolation，design D2）。 */
+.contribution-error {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  color: var(--app-status-danger);
+  font-size: 13px;
+  cursor: help;
+}

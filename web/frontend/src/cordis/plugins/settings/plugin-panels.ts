@@ -35,6 +35,8 @@ export type SettingsPanelContribution = {
   /** 归属插件 id，与插件卡片 / 站点目录 extensionId 一致。 */
   pluginId: string;
   render: ComponentType<SettingsPanelRenderProps>;
+  /** 原始 slot 贡献（宿主据此读取来源身份并上报扩展故障；change: 2026-10-21-harden-extension-fault-isolation）。 */
+  source?: object;
 };
 
 /** 面板读取口：设置工作区用 `useSyncExternalStore` 订阅 slot 变化。 */

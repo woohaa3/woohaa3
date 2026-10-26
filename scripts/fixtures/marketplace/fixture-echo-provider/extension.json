@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "fixture-echo-provider",
+  "version": "1.0.0",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1
+  },
+  "metadata": {
+    "module": "./shared",
+    "export": "FIXTURE_ECHO_PLUGIN_METADATA",
+    "order": 900
+  },
+  "hostPlugin": {
+    "module": "./backend",
+    "factory": "createFixtureEchoProviderPlugin",
+    "kind": "provider",
+    "order": 900
+  }
+}

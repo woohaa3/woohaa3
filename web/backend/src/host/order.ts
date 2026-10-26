@@ -1,6 +1,17 @@
 /** 同源处理器的匹配顺序：运行期扩展发布资源最先（未命中即交下游），站点插件公开路由其次，领域服务的宽前缀在后。 */
 export const ROUTE_ORDER = {
   releaseCatalog: 0,
+  /**
+   * `/api/extensions/install|restart|marketplace|<id>/uninstall|<id>/rollback`：扩展安装（change: 2026-10-21-add-extension-marketplace-point）。
+   * 必须排在 application（10）的 `/api/extensions/*` 宽前缀之前；只认这几条路径，其余交下游。
+   */
+  extensionInstall: 5,
+  /**
+   * 换版窗口拦截（C 方向：进程内热切换）：正在换版的扩展，其 `/api/extensions/<id>/*` 请求返回
+   * 可重试的 `extension-reloading`，而不是落到下游 404 被当成「扩展不存在」。必须排在
+   * application（10）之前——那个宽前缀会以「未知的插件路由」截走。
+   */
+  extensionReloading: 6,
   application: 10,
   /** `/api/application/session`：身份/权限读模型，前端 `current-user.ts` 每次启动都请求。 */
   session: 15,
@@ -8,6 +19,8 @@ export const ROUTE_ORDER = {
   /** `/api/providers`：Provider 凭据状态与写入；排在 Provider 自己的 `/api/providers/<id>/refresh`（25）之后。 */
   providers: 30,
   settings: 40,
+  /** `/api/host/restart`：受控重启（change: 2026-10-21-harden-extension-fault-isolation，D6）。 */
+  hostRestart: 41,
   /**
    * `/api/telemetry/*`：本机遥测的 intake 与复盘查询（change: 2026-10-20-add-local-client-telemetry）。
    * 路径不落进 canvas / task / mcp / media 的宽前缀；同源 ingress 的对应登记在

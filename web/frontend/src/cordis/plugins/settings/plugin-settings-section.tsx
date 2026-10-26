@@ -25,6 +25,10 @@ import {
   type PluginViewIndex
 } from "./plugin-groups.js";
 import { PluginStateControl } from "./plugin-state-control.js";
+import { ExtensionFaultNotice } from "./extension-fault-notice.js";
+import { ManagedExtensionDetails, ManagedInstallBar, ReleaseChangedNotice } from "./managed-extensions-ui.js";
+import { MarketplaceInstallPanel } from "./marketplace-install-ui.js";
+import type { ManagedExtensionsController } from "./managed-extensions.js";
 import {
   EMPTY_SETTINGS_PANELS,
   settingsPanelIds,
@@ -49,10 +53,31 @@ export type PluginSettingsSectionProps = {
   onOpenPlugin?: (pluginId: string) => void;
   /** 扩展自带设置面板（`settings.plugin-config` slot）；有面板的插件卡片也可打开配置弹窗。 */
   settingsPanels?: SettingsPanelSource;
+  /**
+   * 受管扩展（change: 2026-10-21-add-extension-marketplace-point，7.2）：安装入口、任务进度与受管卡片操作；
+   * `pendingReopen` 是当前页面仍在用旧版本、重开画布后生效的扩展。缺省不显示这些入口。
+   */
+  managed?: ManagedExtensionsSource;
 };
 
-export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPanels }: PluginSettingsSectionProps) {
+export type ManagedExtensionsSource = {
+  controller: ManagedExtensionsController;
+  pendingReopen: { get(): readonly string[]; subscribe(listener: () => void): () => void };
+  /** 重新打开画布以加载新版本（repin 新 release 后只重建 Canvas scope）；缺省只提示不给按钮。 */
+  reopenCanvas?: () => Promise<void>;
+  /** 「从市场安装」（change: 2026-10-21-add-server-extension-marketplace，7.5）；缺省不显示。 */
+  marketplace?: import("./marketplace-install.js").MarketplaceInstallController;
+};
+
+const NO_PENDING: readonly string[] = [];
+
+export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPanels, managed }: PluginSettingsSectionProps) {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
+  const pendingReopen = useSyncExternalStore(
+    managed?.pendingReopen.subscribe ?? noopSubscribe,
+    managed?.pendingReopen.get ?? emptyPending,
+    managed?.pendingReopen.get ?? emptyPending
+  );
   const view = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
   const panels = settingsPanels ?? EMPTY_SETTINGS_PANELS;
   // 订阅 slot 版本：扩展前端按需加载、注册面板后卡片立即变为可打开。
@@ -64,7 +89,10 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
   const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view);
   const sections = sectionize(index.groups).map((section) => ({
     ...section,
-    informational: section.groups.every((group) => !isActionable(index, group) && !panelIds.has(group.id))
+    // 受管扩展卡片带卸载/回滚操作，所在分区不算「纯信息」，不默认收起。
+    informational: section.groups.every(
+      (group) => !isActionable(index, group) && !panelIds.has(group.id) && !(managed && group.installed?.managed)
+    )
   }));
 
   return (
@@ -81,6 +109,16 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
           <Button size="sm" onClick={() => void store.load()}>重试</Button>
         </div>
       ) : null}
+      {managed ? (
+        <ManagedInstallBar controller={managed.controller} snapshot={state.status === "ready" ? state.snapshot : null} canManage={store.canManage()} />
+      ) : null}
+      {managed?.marketplace ? (
+        <MarketplaceInstallPanel controller={managed.marketplace} snapshot={state.status === "ready" ? state.snapshot : null} canManage={store.canManage()} />
+      ) : null}
+      <ReleaseChangedNotice
+        pending={pendingReopen}
+        {...(managed?.reopenCanvas ? { onReopen: () => void managed.reopenCanvas?.() } : {})}
+      />
       {view.siteError ? (
         <p className="settings-page__error" role="alert" data-testid="plugins-settings-site-error">{view.siteError}</p>
       ) : null}
@@ -134,6 +172,7 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
                     store={store}
                     siteManageable={view.siteManageable}
                     hasSettingsPanel={panelIds.has(group.id)}
+                    {...(managed ? { managed: managed.controller } : {})}
                     {...(onOpenPlugin ? { onOpen: () => onOpenPlugin(group.id) } : {})}
                   />
                 ))}
@@ -163,6 +202,7 @@ function PluginCard({
   store,
   siteManageable,
   hasSettingsPanel,
+  managed,
   onOpen
 }: {
   index: PluginViewIndex;
@@ -172,6 +212,7 @@ function PluginCard({
   siteManageable: boolean;
   /** 该插件有扩展自带设置面板（`settings.plugin-config`）。 */
   hasSettingsPanel: boolean;
+  managed?: ManagedExtensionsController;
   onOpen?: () => void;
 }) {
   const openable = (isConfigurable(index, group) || hasSettingsPanel) && onOpen !== undefined;
@@ -199,6 +240,9 @@ function PluginCard({
           <span className="plugin-card__name">{group.label}</span>
           <span className="plugin-card__badge">{layer.badge}</span>
           {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
+          {group.installed?.managed ? (
+            <span className="plugin-card__badge is-managed" data-testid={`settings-plugin-managed-${group.id}`}>已安装</span>
+          ) : null}
           {group.version ? (
             <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`settings-plugin-version-${group.id}`}>
               {versionLabel(group.version)}
@@ -219,6 +263,8 @@ function PluginCard({
       {diagnostics.length > 0 ? (
         <p className="plugin-card__diagnostics" role="status">{diagnostics.join("；")}</p>
       ) : null}
+      <ExtensionFaultNotice extensionId={group.id} />
+      {managed ? <ManagedExtensionDetails installed={group.installed} controller={managed} canManage={store.canManage()} /> : null}
       {manageable ? (
         <div className="plugin-card__foot">
           <PluginStateControl
@@ -234,6 +280,9 @@ function PluginCard({
     </article>
   );
 }
+
+const noopSubscribe = () => () => undefined;
+const emptyPending = () => NO_PENDING;
 
 /** 按分层标题归组，保持插件树顺序；base 与 core 合成「内置插件」一节。 */
 function sectionize(groups: readonly PluginSettingsGroup[]): Array<{ title: string; groups: PluginSettingsGroup[] }> {

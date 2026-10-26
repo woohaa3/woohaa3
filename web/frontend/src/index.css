@@ -141,6 +141,92 @@ html[data-native-canvas="true"] .bevy-canvas-surface {
 	z-index: 40;
 }
 
+/*
+ * 宿主重连遮罩与「扩展已更新」提示（change: 2026-10-21-harden-extension-fault-isolation，D6）：
+ * 重连时半透明盖住画布（不卸载、吞掉指针事件）；更新提示在底部，不阻断。
+ */
+.host-reconnecting {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--app-web-overlay);
+	z-index: 60;
+	cursor: progress;
+}
+
+.host-reconnecting__panel {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 16px 20px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 10px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-primary);
+	box-shadow: 0 8px 24px var(--app-web-shadow);
+	text-align: center;
+}
+
+.host-reconnecting__title {
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.host-reconnecting__detail {
+	font-size: 12px;
+	color: var(--app-web-text-muted);
+}
+
+.host-restarted {
+	position: fixed;
+	left: 50%;
+	bottom: 24px;
+	transform: translateX(-50%);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	border: 1px solid var(--app-web-border-strong);
+	border-radius: 10px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-primary);
+	box-shadow: 0 8px 24px var(--app-web-shadow);
+	font-size: 12px;
+	z-index: 45;
+}
+
+/*
+ * 安全模式提示条（change: 2026-10-21-harden-extension-fault-isolation，D7）：顶部常驻，不遮挡画布交互。
+ */
+.safe-mode-banner {
+	position: fixed;
+	top: 8px;
+	left: 50%;
+	transform: translateX(-50%);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	max-width: min(860px, 92vw);
+	padding: 8px 12px;
+	border: 1px solid var(--app-status-warning);
+	border-radius: 10px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-primary);
+	box-shadow: 0 8px 24px var(--app-web-shadow);
+	font-size: 12px;
+	z-index: 44;
+}
+
+.safe-mode-banner__detail {
+	color: var(--app-web-text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 360px;
+}
+
 .status-title {
 	font-size: 20px;
 	font-weight: 600;

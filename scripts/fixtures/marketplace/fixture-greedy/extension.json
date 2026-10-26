@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "fixture-greedy",
+  "version": "1.0.0",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1
+  },
+  "hostPlugin": {
+    "module": "./backend",
+    "factory": "createFixtureGreedyPlugin",
+    "kind": "provider",
+    "order": 920
+  }
+}

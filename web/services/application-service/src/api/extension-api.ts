@@ -22,7 +22,7 @@ import {
   type ApplicationExtensionHandlerLimits
 } from "./extension-api/types.js";
 import { safeUrl, sendError, sendJson } from "./extension-api/http-helpers.js";
-import { handleChanges, handleConfigWrite } from "./extension-api/admin-routes.js";
+import { handleChanges, handleConfigWrite, withExtensionRelease } from "./extension-api/admin-routes.js";
 import { handleExtensionHandler } from "./extension-api/handler-routes.js";
 import { handlePublicHttp, matchPublicRoute } from "./extension-api/public-http.js";
 import { handleInternal } from "./extension-api/internal-routes.js";
@@ -77,7 +77,7 @@ export function createApplicationExtensionApiHandler(deps: ApplicationExtensionA
       return true;
     }
     if (req.method === "GET" && suffix === "") {
-      sendJson(res, 200, deps.controlPlane.snapshot());
+      sendJson(res, 200, withExtensionRelease(deps, deps.controlPlane.snapshot()));
       return true;
     }
     if (req.method === "GET" && suffix === "changes") {
@@ -91,6 +91,10 @@ export function createApplicationExtensionApiHandler(deps: ApplicationExtensionA
     if (handlerMatch) {
       return handleExtensionHandler(req, res, deps, limits, decodeURIComponent(handlerMatch[1]!), decodeURIComponent(handlerMatch[2]!), log);
     }
+    // 扩展自有路由（例如 Provider 的 POST /api/extensions/<id>/refresh）由扩展层用 gateway.route
+    // 注册，顺序排在 application（10）之后。这里必须**交下游**而不是 405——否则取消子进程转发后，
+    // 受管扩展自己的路由永远收不到请求。未知子路径最终由下游 404，语义仍然正确。
+    if (/^[^/]+\//.test(suffix)) return false;
     if (req.method !== "GET") {
       sendError(res, 405, "unsupported", "不支持的管理路由");
       return true;

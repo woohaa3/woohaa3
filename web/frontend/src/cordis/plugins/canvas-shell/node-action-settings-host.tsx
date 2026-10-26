@@ -11,6 +11,7 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { ScreenRect } from "@woohaa3/contracts";
 import { useService } from "../../react.js";
 import { useSlot } from "../../host.js";
+import { ContributionBoundary } from "../../contribution-boundary.js";
 import { resolveSettingsComponent, nodeActionSettingsStore } from "./node-action-host.js";
 import type { NodeActionContribution } from "../../contract/platform.js";
 
@@ -30,12 +31,18 @@ export function NodeActionSettingsHost() {
   const style = { left: `${Math.round(screenRect.left)}px`, top: `${Math.round(screenRect.top)}px` };
   return (
     <div className="node-action-settings" style={style} data-node-id={state.nodeId}>
-      <Settings
-        nodeId={state.nodeId}
-        nodeType={state.nodeType}
-        writable={state.writable}
-        onClose={close}
-      />
+      <ContributionBoundary
+        entry={contributions.find((entry) => entry.id === state.contributionId) ?? { id: state.contributionId }}
+        slot="canvas.node-action"
+        fallback="card"
+      >
+        <Settings
+          nodeId={state.nodeId}
+          nodeType={state.nodeType}
+          writable={state.writable}
+          onClose={close}
+        />
+      </ContributionBoundary>
     </div>
   );
 }

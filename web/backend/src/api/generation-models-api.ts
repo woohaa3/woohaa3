@@ -104,12 +104,10 @@ export function createGenerationModelsApiHandler(
       sendJson(res, 200, { revision: outcome.revision, snapshot: outcome.snapshot });
       return true;
     }
-    if (req.method !== "GET") {
-      sendError(res, 405, "unsupported", "不支持的管理路由");
-      return true;
-    }
-    sendError(res, 404, "extension-not-found", "未知的生成模型路由");
-    return true;
+    // 本 handler 只拥有 `GET <base>` 与 `PUT <base>/config`；其余 `/api/extensions/*` 必须交下游，
+    // 否则扩展层用 gateway.route 注册的自有路由（如 `POST /api/extensions/<id>/refresh`）会被这里
+    // 以 405 截走——C 方向取消子进程转发后，这条遮蔽才暴露出来。
+    return false;
   };
 }
 

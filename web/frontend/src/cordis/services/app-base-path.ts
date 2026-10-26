@@ -73,7 +73,44 @@ export function stripAppLocationPathname(pathname: string): string {
  */
 export function getAppPublicFetch(): typeof globalThis.fetch {
   return (input: RequestInfo | URL, init?: RequestInit) => {
-    const mapped = typeof input === "string" && input.startsWith("/") ? appPublicUrl(input) : input;
-    return globalThis.fetch(mapped, init);
+    const sameOrigin = typeof input === "string" && input.startsWith("/");
+    const mapped = sameOrigin ? appPublicUrl(input) : input;
+    const pending = globalThis.fetch(mapped, init);
+    if (!sameOrigin || publicFetchObservers.size === 0) return pending;
+    // 只把「宿主不可达」当失败：网络错误与 ingress 在后端不可达时回的 502/503/504。
+    // 4xx 是业务结论，不能触发重连遮罩。
+    return pending.then(
+      (response) => {
+        notifyPublicFetch(!(response.status === 502 || response.status === 503 || response.status === 504));
+        return response;
+      },
+      (error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) notifyPublicFetch(false);
+        throw error;
+      }
+    );
+  };
+}
+
+/**
+ * 同源请求的可达性观察者（change: 2026-10-21-harden-extension-fault-isolation，D6）：
+ * App 级宿主连通性据此判断「本机服务是否掉线」。观察者异常不影响请求本身。
+ */
+const publicFetchObservers = new Set<(ok: boolean) => void>();
+
+function notifyPublicFetch(ok: boolean): void {
+  for (const observer of [...publicFetchObservers]) {
+    try {
+      observer(ok);
+    } catch {
+      /* 观察者失败不影响请求 */
+    }
+  }
+}
+
+export function observeAppPublicFetch(observer: (ok: boolean) => void): () => void {
+  publicFetchObservers.add(observer);
+  return () => {
+    publicFetchObservers.delete(observer);
   };
 }

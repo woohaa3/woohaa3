@@ -97,6 +97,17 @@ export type ApplicationExtensionHostOptions = {
   /** 注销遥测出口的宿主钩子（按 exportId；须幂等）。 */
   releaseTelemetryExportFor?: (extensionId: string) => ((exportId: string) => void) | undefined;
   /**
+   * 市场来源注册面（change: 2026-10-21-add-server-extension-marketplace，D6）：与存储后端同形。
+   * 宿主钩子内部按扩展的扫描来源做「非内置根拒绝」断言（`ctx.marketplace.scoped(origin)`），
+   * 因此拒绝在这里抛出，插件 activation 收到的是带 `EXTENSION_MARKETPLACE_SOURCE_UNTRUSTED_ROOT` 的错误。
+   * 缺失时插件拿不到 `host.registerMarketplaceSource`，必须记日志跳过。
+   */
+  registerMarketplaceSourceFor?: (
+    extensionId: string
+  ) => ((source: import("@woohaa3/contracts").MarketplaceSource) => void) | undefined;
+  /** 注销市场来源的宿主钩子（按 sourceId；须幂等）。 */
+  releaseMarketplaceSourceFor?: (extensionId: string) => ((sourceId: string) => void) | undefined;
+  /**
    * 基础提供者注册面（change: 2026-10-13-...，任务 1.1）：宿主把登记转发给 registry；
    * 缺失时插件得不到 `host.providers`（不伪造内存提供者）。
    */
@@ -161,6 +172,10 @@ export type OwnerState = {
   telemetryExportIds: string[];
   /** 注销遥测出口的宿主钩子（与 options 同源）。 */
   releaseTelemetryExport?: (exportId: string) => void;
+  /** 本 activation 注册过的市场来源 id（停用/回滚时按反序注销）。 */
+  marketplaceSourceIds: string[];
+  /** 注销市场来源的宿主钩子（与 options 同源）。 */
+  releaseMarketplaceSource?: (sourceId: string) => void;
   /** 释放本 activation 登记的基础提供者（rollback 时调用）。 */
   releaseProviders?: () => void;
   activation?: ApplicationBackendActivation;

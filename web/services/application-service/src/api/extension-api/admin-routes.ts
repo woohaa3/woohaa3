@@ -30,8 +30,14 @@ export function handleChanges(
     return true;
   }
   log({ event: "extension-changes", status: 200 });
-  sendJson(res, 200, deps.controlPlane.changes(decoded.after));
+  sendJson(res, 200, withExtensionRelease(deps, deps.controlPlane.changes(decoded.after)));
   return true;
+}
+
+/** 给状态响应附上当前发布目录指针（6.2）；宿主没有指针时原样返回。 */
+export function withExtensionRelease<T extends object>(deps: ApplicationExtensionApiDependencies, body: T): T {
+  const pointer = deps.extensionRelease?.() ?? null;
+  return pointer ? { ...body, extensionRelease: { releaseId: pointer.releaseId, href: pointer.href } } : body;
 }
 
 export async function handleConfigWrite(

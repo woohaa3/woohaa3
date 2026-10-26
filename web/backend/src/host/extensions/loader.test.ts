@@ -8,6 +8,7 @@ import { createSettingsService, type SettingsService } from "../../settings/sett
 import { loadBaseLayer } from "../base/index.js";
 import type { HostContext } from "../context.js";
 import { createSiteGate } from "../core/site-gate.js";
+import { createMarketplaceRegistry } from "../core/marketplace.js";
 import { loadExtensionLayer, type LoadedExtension } from "./loader.js";
 
 const SAMPLE_CONFIG = defineConfigSchema({
@@ -133,7 +134,7 @@ describe("扩展层装载器", () => {
     const { settings, load } = await setup();
     // 基础层先登记：宿主自带插件也要在「插件配置」里露面。
     // `diagnostics` 是 base 层新增的诊断缓冲（服务端接入日志窗口的数据源）。
-    expect(settings.plugins().map((plugin) => plugin.id)).toEqual(["diagnostics", "log", "gateway", "access", "config"]);
+    expect(settings.plugins().map((plugin) => plugin.id)).toEqual(["diagnostics", "log", "gateway", "access", "config", "restart"]);
 
     const starts: Start[] = [];
     const loaded = await load([samplePlugin(starts)]);
@@ -155,7 +156,7 @@ describe("扩展层装载器", () => {
   it("配置段非法的扩展只跳过启动，仍留在插件清单里", async () => {
     const { settings, load } = await setup("providers:\n  broken:\n    baseUrl: not-a-url\n");
     const loaded = await load([samplePlugin([], "broken")]);
-    expect(loaded).toEqual([]);
+    expect([...loaded]).toEqual([]);
     expect(settings.plugins().find((plugin) => plugin.id === "broken")).toMatchObject({ label: "样例", settingCount: 0, provider: true });
   });
 
@@ -214,5 +215,113 @@ describe("扩展层装载器", () => {
     const activation = await siteGate.definitions[0]!.activate({} as never);
     expect(siteGate.definitions[0]!.health?.()).toBeUndefined();
     await activation?.dispose?.();
+  });
+});
+
+describe("扩展层装载时限与就绪（D4/D5）", () => {
+  const hangingPlugin = (name: string, gate: Promise<void>, applied: string[]): HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> => ({
+    ...samplePlugin([], name),
+    async apply() {
+      await gate;
+      applied.push(name);
+    }
+  });
+
+  it("可选插件激活挂起：超时记 activation-timeout，不阻塞装载返回；迟到成功被立即释放", async () => {
+    const { ctx, events, load, settings } = await setup("extensions:\n  activationTimeoutMs: 1000\n");
+    void settings;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const applied: string[] = [];
+    const started = Date.now();
+    const loaded = await load([hangingPlugin("slow", gate, applied)]);
+    // 可选插件不被 await：装载立即返回。
+    expect(Date.now() - started).toBeLessThan(500);
+    await loaded[0]!.started;
+    expect(events.some((event) => event.event === "extension-start-failed" && event.code === "activation-timeout")).toBe(true);
+    // 迟到完成不会让插件留在已装载状态：配置变化时按「未运行」重新尝试，而不是更新一个幽灵 fiber。
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(events.some((event) => event.event === "extension-restart-failed")).toBe(false);
+    void ctx;
+  }, 10_000);
+
+  it("optional: false 的插件被 await；失败只记日志", async () => {
+    const { ctx } = await setup();
+    const starts: Start[] = [];
+    const layer = await loadExtensionLayer(ctx, [{ plugin: samplePlugin(starts, "primary"), optional: false }]);
+    expect(starts).toHaveLength(1);
+    for (const extension of layer.reverse()) await extension.dispose();
+  });
+
+  it("gated 插件激活超时：acquire 以 activation-timeout 拒绝", async () => {
+    const { ctx, load } = await setup("extensions:\n  activationTimeoutMs: 1000\n");
+    const siteGate = createSiteGate(["slow"]);
+    ctx.provide("application", { siteGate } as never);
+    await load([hangingPlugin("slow", new Promise<void>(() => undefined), [])]);
+    await expect(siteGate.definitions[0]!.activate({} as never)).rejects.toMatchObject({ code: "activation-timeout" });
+  }, 10_000);
+
+  it("dispose 挂起不阻塞停用：超时后完成状态转换并记诊断", async () => {
+    const { ctx, events, load } = await setup("extensions:\n  disposeTimeoutMs: 1000\n");
+    const siteGate = createSiteGate(["stuck"]);
+    ctx.provide("application", { siteGate } as never);
+    const plugin: HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> = {
+      ...samplePlugin([], "stuck"),
+      apply(pluginCtx) {
+        pluginCtx.effect(() => () => new Promise<void>(() => undefined));
+      }
+    };
+    await load([plugin]);
+    const active = await siteGate.definitions[0]!.activate({} as never);
+    const started = Date.now();
+    await active?.dispose?.();
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(events.some((event) => event.event === "extension-dispose-timeout")).toBe(true);
+  });
+});
+
+describe("扩展层插件的 ctx.marketplace（change: 2026-10-21-add-extension-marketplace-point，D3）", () => {
+  const sourceFor = (sourceId: string) => ({
+    sourceId,
+    label: sourceId,
+    available: () => ({ ok: true as const }),
+    search: async () => ({ items: [] }),
+    resolve: async () => null,
+    download: async () => {
+      throw new Error("unused");
+    }
+  });
+
+  async function withMarketplace(plugins: Array<HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> & { origin?: { managed: boolean; rootWritable: boolean } }>) {
+    const { ctx } = await setup();
+    const registry = createMarketplaceRegistry();
+    ctx.provide("marketplace", registry);
+    const loaded = await loadExtensionLayer(ctx, plugins);
+    await (loaded as unknown as { settled: Promise<void> }).settled;
+    cleanups.push(async () => {
+      for (const extension of loaded.reverse()) await extension.dispose();
+    });
+    return registry;
+  }
+
+  const sourcePlugin = (name: string, origin?: { managed: boolean; rootWritable: boolean }) => ({
+    ...samplePlugin([], name),
+    inject: ["marketplace"],
+    ...(origin ? { origin } : {}),
+    apply(ctx: { marketplace: { register(source: unknown): () => void }; effect(fn: () => () => void): void }) {
+      ctx.effect(() => ctx.marketplace.register(sourceFor(name)));
+    }
+  }) as unknown as HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> & { origin?: { managed: boolean; rootWritable: boolean } };
+
+  it("内置根插件能注册来源；受管根 / 缺少 origin 的插件注册被拒绝（插件启动失败，来源不出现）", async () => {
+    const registry = await withMarketplace([
+      sourcePlugin("builtin-src", { managed: false, rootWritable: false }),
+      sourcePlugin("managed-src", { managed: true, rootWritable: false }),
+      sourcePlugin("anon-src")
+    ]);
+    expect(registry.list().map((source) => source.sourceId)).toEqual(["builtin-src"]);
   });
 });

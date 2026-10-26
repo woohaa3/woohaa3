@@ -17,6 +17,11 @@ import type { RuntimeStorageProvider } from "./slot-contract.js";
  */
 export type LoadedExtensionHost = {
   /**
+   * 安全模式（change: 2026-10-21-harden-extension-fault-isolation，D7）：`null`/缺省表示正常启动；
+   * 否则 `suspended` 是本次扫描跳过装配的扩展（可写根扩展与非 required、非 bootstrap 扩展）。
+   */
+  safeMode?: { suspended: readonly string[] } | null;
+  /**
    * 扩展目录的安装/卸载：`list()` 给出本次启动扫描到的已安装扩展（展示用），
    * `setInstalled` 只改目录名，下一次启动才影响装配。**不参与启停**——启停由站点控制面
    * 的 `desiredEnabled` 在运行中生效（change: 2026-10-19-restore-runtime-extension-toggling）。
@@ -69,8 +74,26 @@ export type LoadedExtensionHost = {
   }>;
   /** 站点控制面 scope 的 extensionId（runtime 只装配非站点入口）。 */
   siteExtensionIds: readonly string[];
-  /** 运行期发布目录：内容寻址 releaseId 与 href。缺省表示不托管发布目录。 */
+  /** 受管安装根（change: 2026-10-21-add-extension-marketplace-point，D7）；Extension Manager 据此定位。 */
+  managedRoot?: string;
+  /**
+   * 扫描到并装配的扩展注册记录（只读）：宿主据 `managed` / `rootWritable` 判断扩展来源
+   * （change: 2026-10-21-add-server-extension-marketplace，D6 的站点扩展来源断言）。
+   */
+  registrations?: readonly { extensionId: string; managed?: boolean; rootWritable?: boolean }[];
+  /** 运行期发布目录：内容寻址 releaseId 与 href。缺省表示不托管发布目录；读取方每次取当前值。 */
   browserRelease?: { releaseId: string; href: string };
+  /**
+   * 运行期重算发布目录（change: 2026-10-21-add-extension-marketplace-point，任务 6.1 / design D8）：
+   * `upsert` 按 extensionId 新增/替换（`directory` 为含 `browser-dist/` 的版本目录），`remove` 删除条目。
+   * 新目录校验失败时抛错且当前 release 不变；同内容重放返回 `changed: false`。
+   */
+  publishBrowserRelease?: (change: {
+    upsert?: ReadonlyArray<{ extensionId: string; directory: string }>;
+    remove?: readonly string[];
+  }) => Promise<{ releaseId: string; href: string; changed: boolean }>;
+  /** 订阅发布目录切换；返回退订函数。 */
+  onBrowserReleaseChange?: (listener: (release: { releaseId: string; href: string }) => void) => () => void;
   /**
    * 托管 `/extension-releases/<releaseId>.json`、`/extension-releases/current.json` 与
    * `/extensions/<id>/<artifactId>/...`；返回 `true` 表示已写响应。

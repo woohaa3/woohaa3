@@ -25,7 +25,7 @@ import { MESSAGE_TYPE,
   yDocToServerCanvas } from "@woohaa3/contracts/canvas-yjs";
 import type { SyncSocket } from "@woohaa3/contracts/canvas-yjs";
 import { CanvasDatabase, IndexedDbYjsCacheRepository } from "./canvas-state/index.js";
-import { createCanvasSession } from "./canvas-session.js";
+import { createCanvasSession, HOST_RECONNECTING_SUBMIT_CODE } from "./canvas-session.js";
 import type { CanvasRemoteService } from "../contracts.js";
 
 const CANVAS = "canvas-epoch";
@@ -615,5 +615,57 @@ describe("确认回流只发布一次规范/working 快照", () => {
       synced(1); result();
       expect(saves()).toHaveLength(1);
     } finally { now.mockRestore(); session.shutdown(); }
+  });
+});
+describe("宿主重连门禁（change: 2026-10-21-harden-extension-fault-isolation，D6）", () => {
+  it("重连中提交返回可重试的 host-reconnecting：不发送、不登记 pending；恢复后正常提交", async () => {
+    const factory = new IDBFactory();
+    (globalThis as { indexedDB?: IDBFactory }).indexedDB = factory;
+    const serverDoc = serverCanvasToYDoc(createEmptyWoohaa3ServerCanvas(CANVAS, NOW));
+    const sockets: Array<ReturnType<typeof fakeSocket>> = [];
+    const sent: Uint8Array[] = [];
+    const remote: CanvasRemoteService = {
+      openCanvasSession: () => {
+        const entry = fakeSocket([]);
+        const original = entry.socket.send.bind(entry.socket);
+        entry.socket.send = (data: Uint8Array) => {
+          sent.push(data);
+          original(data);
+        };
+        sockets.push(entry);
+        return entry.socket;
+      },
+      closeCanvasSession: () => undefined
+    } as unknown as CanvasRemoteService;
+    let blocked = true;
+    const session = await createCanvasSession({
+      canvasId: CANVAS,
+      remote,
+      database: new CanvasDatabase({ indexedDb: factory }),
+      blocksSubmissions: () => blocked
+    });
+    try {
+      sockets[0]!.socket.receive(
+        encodeStatusMessage({ status: "syncing", protocolVersion: YJS_SYNC_PROTOCOL_VERSION, roomEpoch: OLD_EPOCH, revision: 1 })
+      );
+      sockets[0]!.socket.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, Y.encodeStateAsUpdate(serverDoc)));
+      sockets[0]!.socket.receive(
+        encodeStatusMessage({ status: "synced", protocolVersion: YJS_SYNC_PROTOCOL_VERSION, roomEpoch: OLD_EPOCH, revision: 1 })
+      );
+      await expect.poll(() => session.isWritable()).toBe(true);
+      const command = { type: "node.add", node: { id: "n-1", type: "text", position: { x: 0, y: 0 } } } as never;
+      const before = sent.length;
+      const rejected = session.submitCommands([command], "cmd-blocked");
+      expect(rejected).toEqual({ ok: false, reason: "本机服务正在重新连接，请稍后重试", code: HOST_RECONNECTING_SUBMIT_CODE });
+      expect(sent.length).toBe(before);
+      expect(session.getStatus().remote.pendingCount).toBe(0);
+      blocked = false;
+      const accepted = session.submitCommands([command], "cmd-after");
+      expect(accepted.ok).toBe(true);
+      expect(sent.length).toBeGreaterThan(before);
+    } finally {
+      session.shutdown();
+      delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+    }
   });
 });

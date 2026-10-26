@@ -26,21 +26,66 @@ export type SiteGate = {
   managed(extensionId: string): boolean;
   /** 装载器登记扩展；控制面的激活会等到登记后才执行。 */
   attach(extensionId: string, handle: SiteGateHandle): void;
+  /** 启动期定义（构造时的扩展集合）。运行期 add 的定义不在这里，由 `add` 返回。 */
   readonly definitions: readonly ApplicationBackendExtensionDefinition[];
+  /**
+   * 运行期登记（change: 2026-10-21-isolate-extension-host-process；首次安装的受管后端扩展）：之后装载器按
+   * `managed(id)` 走 gated 分支并 attach。已登记时返回原定义（幂等）。
+   */
+  add(extensionId: string): ApplicationBackendExtensionDefinition;
+  /**
+   * 运行期移除：之后的 activate 以 `extension-unavailable` 拒绝，等待中的 activate 同样拒绝；`managed(id)` 变为 false。
+   * 已激活的实例由控制面先释放（removeExtension），这里不再调 release。未登记时为 no-op。
+   */
+  remove(extensionId: string): void;
 };
 
+type GateEntry = {
+  promise: Promise<SiteGateHandle>;
+  resolve: (handle: SiteGateHandle) => void;
+  reject: (error: Error) => void;
+  current?: SiteGateHandle;
+  removed: boolean;
+  definition: ApplicationBackendExtensionDefinition;
+};
+
+function unavailable(extensionId: string): Error {
+  return Object.assign(new Error(`扩展 ${extensionId} 已移除`), { code: "extension-unavailable" });
+}
+
+function createEntry(extensionId: string): GateEntry {
+  let resolve!: (handle: SiteGateHandle) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<SiteGateHandle>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  // 未被 activate 等待时 remove 产生的拒绝不能变成未处理拒绝。
+  promise.catch(() => undefined);
+  const entry: GateEntry = {
+    promise,
+    resolve,
+    reject,
+    removed: false,
+    definition: {
+      extensionId,
+      async activate() {
+        if (entry.removed) throw unavailable(extensionId);
+        const handle = await entry.promise;
+        if (entry.removed) throw unavailable(extensionId);
+        await handle.acquire();
+        return { dispose: () => handle.release() };
+      },
+      // 未装载（配置中/已停用）时状态投影自己会给出 configuring/disabled，这里没有额外健康信息。
+      health: () => (entry.removed ? undefined : entry.current?.health?.())
+    }
+  };
+  return entry;
+}
+
 export function createSiteGate(extensionIds: Iterable<string>): SiteGate {
-  const handles = new Map<
-    string,
-    { promise: Promise<SiteGateHandle>; resolve: (handle: SiteGateHandle) => void; current?: SiteGateHandle }
-  >();
-  for (const id of extensionIds) {
-    let resolve!: (handle: SiteGateHandle) => void;
-    const promise = new Promise<SiteGateHandle>((done) => {
-      resolve = done;
-    });
-    handles.set(id, { promise, resolve });
-  }
+  const handles = new Map<string, GateEntry>();
+  for (const id of extensionIds) handles.set(id, createEntry(id));
   return {
     managed: (extensionId) => handles.has(extensionId),
     attach(extensionId, handle) {
@@ -49,15 +94,21 @@ export function createSiteGate(extensionIds: Iterable<string>): SiteGate {
       entry.current = handle;
       entry.resolve(handle);
     },
-    definitions: [...handles].map(([extensionId, entry]) => ({
-      extensionId,
-      async activate() {
-        const handle = await entry.promise;
-        await handle.acquire();
-        return { dispose: () => handle.release() };
-      },
-      // 未装载（配置中/已停用）时状态投影自己会给出 configuring/disabled，这里没有额外健康信息。
-      health: () => entry.current?.health?.()
-    }))
+    definitions: [...handles.values()].map((entry) => entry.definition),
+    add(extensionId) {
+      const existing = handles.get(extensionId);
+      if (existing) return existing.definition;
+      const entry = createEntry(extensionId);
+      handles.set(extensionId, entry);
+      return entry.definition;
+    },
+    remove(extensionId) {
+      const entry = handles.get(extensionId);
+      if (!entry) return;
+      entry.removed = true;
+      delete entry.current;
+      entry.reject(unavailable(extensionId));
+      handles.delete(extensionId);
+    }
   };
 }

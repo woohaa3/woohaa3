@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "fixture-crashy",
+  "version": "1.0.0",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1
+  },
+  "hostPlugin": {
+    "module": "./backend",
+    "factory": "createFixtureCrashyPlugin",
+    "kind": "provider",
+    "order": 910
+  }
+}

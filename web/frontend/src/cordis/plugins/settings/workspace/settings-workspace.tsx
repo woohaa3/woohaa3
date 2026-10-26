@@ -18,7 +18,7 @@ import type { ThemeService } from "../../../contract/platform.js";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
 import { RuntimeComponentsSection } from "../runtime-components-section.js";
 import { BackendSettingsSection } from "../backend-settings-section.js";
-import { PluginSettingsSection } from "../plugin-settings-section.js";
+import { PluginSettingsSection, type ManagedExtensionsSource } from "../plugin-settings-section.js";
 import type { SettingsPanelSource } from "../plugin-panels.js";
 import type { BackendSettingsStore } from "../backend-settings-store.js";
 import type { SettingsEditSession } from "../edit-session.js";
@@ -63,6 +63,8 @@ export type SettingsWorkspaceProps = {
   extensions: ExtensionManagerFacade;
   /** 扩展自带设置面板（`settings.plugin-config` slot）；有面板的插件卡片也可打开详情。 */
   settingsPanels?: SettingsPanelSource;
+  /** 受管扩展安装与卡片操作（change: 2026-10-21-add-extension-marketplace-point，7.2）。 */
+  managed?: ManagedExtensionsSource;
   /** 请求关闭整个设置（Header 关闭按钮）。经 Dialog Host guard，dirty 时先确认。 */
   onRequestClose: () => void;
   /**
@@ -107,6 +109,7 @@ export function SettingsWorkspace({
   theme,
   extensions,
   settingsPanels,
+  managed,
   onRequestClose,
   onRequestNavigate,
   editSession,
@@ -253,6 +256,7 @@ export function SettingsWorkspace({
             manager={extensions}
             onOpenPlugin={openPlugin}
             {...(settingsPanels ? { settingsPanels } : {})}
+            {...(managed ? { managed } : {})}
           />
           <ScrollRestore position={listScrollRef.current} />
         </Panel>

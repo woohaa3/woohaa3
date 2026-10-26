@@ -21,6 +21,10 @@ export const configPlugin: HostPlugin<{ env: Record<string, string | undefined>;
       directoryControl,
       // 核心层比 config 晚装载：按请求现查注册表，构造时不缓存。
       storageBackends: () => ctx.get("storage")?.list(),
+      // 安全模式视图归 application（核心层）所有，按请求现取。
+      safeMode: () => ctx.get("application")?.safeMode ?? null,
+      // 受管扩展归核心层 extensionManager，按请求现取。
+      extensionManager: () => ctx.get("extensionManager"),
       authenticator: ctx.access.authenticator,
       accessEnforcer: ctx.access.accessEnforcer,
       logger: log

@@ -347,6 +347,27 @@
 	border-top: 1px solid var(--mc-border);
 }
 .plugin-card__diagnostics { margin: 0; padding: 0 14px 10px; font-size: 11px; color: var(--mc-text-muted); }
+/* 会话内熔断提示（change: 2026-10-21-harden-extension-fault-isolation）。 */
+.plugin-card__fault { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 14px 10px; font-size: 11px; color: var(--app-status-danger); }
+
+/* 受管扩展（change: 2026-10-21-add-extension-marketplace-point，7.2）：安装入口、任务进度与卡片操作。 */
+.managed-install { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 4px; padding: 12px 14px; border: 1px solid var(--mc-border); border-radius: 10px; }
+.managed-install__row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.managed-install__jobs { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.managed-install__job { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.managed-install__job-title { font-weight: 600; }
+.managed-install__job-detail { color: var(--mc-text-muted); font-variant-numeric: tabular-nums; }
+.managed-install__job[data-tone="success"] .managed-install__job-detail { color: var(--app-status-success); }
+.managed-install__job[data-tone="failed"] .managed-install__job-detail { color: var(--app-status-danger); }
+.managed-install__restart { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
+.plugin-card__badge.is-managed { color: var(--mc-text); }
+.managed-extension { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 10px; font-size: 11px; color: var(--mc-text-muted); }
+.managed-extension__facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; margin: 0; }
+.managed-extension__facts > dt { color: var(--mc-text-muted); }
+.managed-extension__facts > dd { margin: 0; color: var(--mc-text); overflow-wrap: anywhere; }
+.managed-extension__restart { margin: 0; color: var(--app-status-warning); }
+.managed-extension__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.managed-extension__purge { display: inline-flex; align-items: center; gap: 4px; }
 
 /* 启停控制：卡片脚与配置弹窗头共用同一份状态。 */
 .plugin-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }

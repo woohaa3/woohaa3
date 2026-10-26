@@ -97,9 +97,12 @@ describe("canvas-upstream capability 交接", () => {
       const canvasService = service.modules().canvas.composition!.service;
       await canvasService.createCanvas({ canvasId: "c-sync", title: "同步测试" });
 
-      // room 建立（onRoomReady）时宿主必须已经能解析到提供者，并按画布询问。
-      await service.modules().canvas.sync!.registry.resolve("c-sync");
-      await waitFor(() => resolvedCanvases.includes("c-sync"));
+      // 客户端打开画布（acquire）时宿主必须已经能解析到提供者，并按画布询问。
+      // 内部消费者用 resolve() 只拿文档、不挂上游（任务对账不该把没打开的画布推给远端），
+      // 所以这里必须走 acquire，与浏览器进页面同一条路径。
+      const lease = await service.modules().canvas.sync!.registry.acquire("c-sync");
+      try {
+        await waitFor(() => resolvedCanvases.includes("c-sync"));
 
       // 未启用：提供者给 null，不应出现任何中继链路事件。
       expect(syncCalls().some((event) => event.canvasId === "c-sync")).toBe(false);
@@ -117,6 +120,9 @@ describe("canvas-upstream capability 交接", () => {
       await service.modules().canvas.refreshUpstream();
       await waitFor(() => resolvedCanvases.length > beforeRelogin);
       expect(resolvedCanvases.every((id) => id === "c-sync")).toBe(true);
+      } finally {
+        lease.release();
+      }
     } finally {
       await service.close();
     }

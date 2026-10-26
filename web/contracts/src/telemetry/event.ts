@@ -29,7 +29,12 @@ export const TELEMETRY_EVENT_NAMES = [
   "perf.startup",
   "perf.interaction",
   "perf.segment",
-  "perf.frame"
+  "perf.frame",
+  /**
+   * 扩展贡献在宿主中渲染或回调失败（change: 2026-10-21-harden-extension-fault-isolation）。
+   * 只带 `extension`/`slot`/`epoch` 属性与错误类别 `errorCode`，不带错误消息与堆栈。
+   */
+  "extension.render-failed"
 ] as const;
 
 export type TelemetryEventName = (typeof TELEMETRY_EVENT_NAMES)[number];
@@ -75,7 +80,13 @@ export const TELEMETRY_ATTRIBUTE_KEYS = [
   "stringify",
   "wasmAcceptMs",
   "frameExecMs",
-  "frameExecutions"
+  "frameExecutions",
+  /** 扩展身份（`extension.render-failed`）：宿主盖章的 extensionId，不是用户内容。 */
+  "extension",
+  /** 宿主 slot 名（`extension.render-failed`）。 */
+  "slot",
+  /** 扩展装配 epoch（`extension.render-failed`）。 */
+  "epoch"
 ] as const;
 
 export type TelemetryAttributeKey = (typeof TELEMETRY_ATTRIBUTE_KEYS)[number];

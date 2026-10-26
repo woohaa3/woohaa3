@@ -6,6 +6,9 @@ import { createRuntimeComponentsHandler } from "./runtime-components/http.js";
  * task / canvas / mcp / application）→ 扩展层（Provider 与存储后端，向 `ctx.generation` /
  * `ctx.storage` 注册并声明自己的配置项）。
  * 三层装载完成后发出 `host/ready`。浏览器可见的同源路径都由 `gateway` 按插件登记的顺序分派。
+ *
+ * 就绪语义（change: 2026-10-21-harden-extension-fault-isolation，D5）：只等基础层、核心层、
+ * 主存储后端与必需站点提供者；可选扩展激活已**发起**即可，完成前其站点状态为 configuring。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
@@ -105,6 +108,16 @@ export type BackendServiceOptions = {
   chatgptServiceOptions?: ChatGptServiceOptions;
   /** 统一配置服务（测试注入）；缺省按 `WOOHAA3_CONFIG_FILE` / `WOOHAA3_SECRETS_FILE` 定位文件并监听。 */
   settings?: SettingsService;
+  /**
+   * 启动守卫判定的安全模式（change: 2026-10-21-harden-extension-fault-isolation，D7）。进程入口在
+   * 扫描前用 `beginBoot` 判定，并以 `safeMode` 扫描扩展宿主；这里只负责把视图交给控制面与设置面。
+   */
+  safeMode?: { reason: "boot-failures" | "forced"; since: string; suspended: readonly string[]; lastFailure?: string };
+  /**
+   * 结构化日志旁路（不替换出口）：进程入口用它在就绪前捕获扩展启动失败，写入启动守卫（D7）。
+   * 旁路抛错不影响日志与启动。
+   */
+  logTap?: (event: Record<string, unknown>) => void;
 };
 
 export type BackendService = {
@@ -116,6 +129,16 @@ export type BackendService = {
   log: (event: Record<string, unknown>) => void;
   /** 内置默认 sink 的落盘目录；调用方注入了 `logger` 或 `WOOHAA3_LOG_DIR` 为空串时为 null。 */
   logDir: string | null;
+  /**
+   * 订阅受控重启请求（change: 2026-10-21-harden-extension-fault-isolation，D6）。进程入口订阅后
+   * 走排空关闭并以 75 退出；未订阅时 `POST /api/host/restart` 回 503、宿主不退出。
+   */
+  onRestartRequested: (listener: (request: import("./api/host-restart-api.js").HostRestartRequest) => void) => () => void;
+  /**
+   * 可选扩展（并发激活、不阻塞就绪）与站点控制面首次协调全部结束（D5）。只用于测试与诊断：
+   * 就绪本身不等它；失败已在各自的站点状态里，这里不抛错。
+   */
+  settled: () => Promise<void>;
   modules: () => {
     settings: SettingsService;
     canvas: CanvasService;
@@ -134,7 +157,18 @@ export type BackendService = {
 export async function createBackendService(options: BackendServiceOptions = {}): Promise<BackendService> {
   const env = options.env ?? (process.env as Record<string, string | undefined>);
   const hostLog = options.logger === undefined ? createHostLogSink({ env }) : null;
-  const sink = options.logger ?? hostLog!.log;
+  const baseSink = options.logger ?? hostLog!.log;
+  const tap = options.logTap;
+  const sink = tap
+    ? (event: Record<string, unknown>) => {
+        baseSink(event);
+        try {
+          tap(event);
+        } catch {
+          // 旁路只做观察；失败不能影响日志出口或启动。
+        }
+      }
+    : baseSink;
   // 启动期槽位发现（change: 2026-10-15-scan-bootstrap-slots-as-extension-directories，任务 3.1/3.2）：
   // 调用方显式注入槽位实现时不再扫目录（测试/受控部署路径）；否则扫描扩展目录，`bootstrapExtensions`
   // 缺省也能发现槽位实现。声明非法、跨根重复 identity、槽位冲突由宿主抛出，启动 fail-fast。
@@ -164,6 +198,10 @@ export async function createBackendService(options: BackendServiceOptions = {}):
   const declaredPlugins = extensionHost?.createHostPlugins ? await extensionHost.createHostPlugins({}) : undefined;
   const extensions = options.providerPlugins ?? declaredPlugins?.provider ?? [];
   const storageExtensions = options.storagePlugins ?? declaredPlugins?.storage ?? [];
+  // 市场来源插件（change: 2026-10-21-add-extension-marketplace-point，D1/D3）：只来自内置根，宿主扫描已拒绝其余根。
+  const sourceExtensions = (declaredPlugins as { "marketplace-source"?: readonly AnyHostExtensionPlugin[] } | undefined)?.["marketplace-source"] ?? [];
+  let layerSettled: Promise<void> = Promise.resolve();
+  const isolatedPlugins: AnyHostExtensionPlugin[] = [];
   try {
     track(
       await loadBaseLayer(ctx, {
@@ -193,13 +231,36 @@ export async function createBackendService(options: BackendServiceOptions = {}):
         ...(options.applicationExtensionMetadata ? { applicationExtensionMetadata: options.applicationExtensionMetadata } : {}),
         ...(options.applicationBackendExtensions ? { applicationBackendExtensions: options.applicationBackendExtensions } : {}),
         ...(options.chatgptServiceOptions ? { chatgptServiceOptions: options.chatgptServiceOptions } : {}),
-        treeExtensions: extensions.map((plugin) => plugin.name)
+        treeExtensions: [...extensions, ...isolatedPlugins, ...sourceExtensions].map((plugin) => plugin.name),
+        ...(options.safeMode
+          ? {
+              safeMode: {
+                reason: options.safeMode.reason,
+                since: options.safeMode.since,
+                suspended: [...options.safeMode.suspended],
+                suspendedCount: options.safeMode.suspended.length,
+                ...(options.safeMode.lastFailure ? { lastFailure: options.safeMode.lastFailure } : {})
+              }
+            }
+          : {})
       })
     );
-    for (const extension of await loadExtensionLayer(ctx, [...storageExtensions, ...extensions])) {
-      disposers.push(extension.dispose);
-    }
-    // 站点开关管着的扩展要等控制面的首次 reconcile 才启动。
+    // 可选插件并发启动、不阻塞就绪（change: 2026-10-21-harden-extension-fault-isolation，D5）：
+    // 只有当前主存储后端（`storage.primary`）是就绪前提，必须等它；其余存储后端与 Provider 并发发起。
+    // 判定来自设置值与插件声明，不写死扩展身份（extension-purity）。
+    const primaryStorage = String(ctx.config.get("storage.primary") ?? "local");
+    const layer = await loadExtensionLayer(ctx, [
+      ...storageExtensions.map((plugin) => ({ plugin, optional: !providesStorage(plugin, primaryStorage) })),
+      ...extensions,
+      ...isolatedPlugins,
+      ...sourceExtensions
+    ]);
+    // 运行期追加入口（change: 2026-10-21-isolate-extension-host-process，任务 8.4）：首次安装的受管后端扩展
+    // 由 Extension Manager 追加代理插件；关闭时连同运行期追加的一起卸载（disposeAll 覆盖启动期与运行期）。
+    ctx.provide("extensionLayer", layer);
+    disposers.push(() => layer.disposeAll());
+    layerSettled = layer.settled;
+    // 站点开关管着的扩展由控制面的首次 reconcile 启动；就绪只等必需提供者，可选扩展继续在后台协调。
     await ctx.get("application")?.service.ready();
     // 创建崩溃恢复（change: 2026-10-13-...，任务 11.2 / D1；恢复自迁移前的统一后端）：
     // 启动时结算遗留 provisioning 预留（内容已建 → 补 finalize；内容未建 → 清理预留）。只结算早于
@@ -253,6 +314,11 @@ export async function createBackendService(options: BackendServiceOptions = {}):
     close,
     log: sink,
     logDir: hostLog?.dir ?? null,
+    onRestartRequested: (listener) => service("hostRestart").subscribe(listener),
+    settled: async () => {
+      await layerSettled.catch(() => undefined);
+      await ctx.get("application")?.service.settled?.().catch(() => undefined);
+    },
     modules: () => ({
       settings: service("config"),
       canvas: service("canvas"),
@@ -266,6 +332,19 @@ export async function createBackendService(options: BackendServiceOptions = {}):
       recordingExecutor: ctx.get("recordingExecutor") ?? null
     })
   };
+}
+
+/**
+ * 存储插件是否提供当前主存储后端：声明的 backendId、配置段末段（`storage.local` → `local`）或插件名匹配即视为必需。
+ * 匹配不上时按可选处理——主存储缺失本身由 storage 就绪检查报出，不靠装载顺序兜底。
+ */
+function providesStorage(plugin: AnyHostExtensionPlugin, backendId: string): boolean {
+  const declared = (plugin as { backendId?: unknown }).backendId;
+  return (
+    declared === backendId ||
+    plugin.configPrefix.split(".").pop() === backendId ||
+    plugin.name === backendId
+  );
 }
 
 /** 写请求 Origin 校验失败：稳定 403 JSON，不回显请求来源细节。 */

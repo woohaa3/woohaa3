@@ -37,6 +37,8 @@ import type { ExtensionSettingsAssembly } from "../plugin.js";
 import { useSettingsEditReport } from "./use-settings-edit-report.js";
 import type { SettingsPanelRenderProps } from "../plugin-panels.js";
 import { GeneratedModelsSection } from "./model-catalog.js";
+import { useExtensionFaults } from "../../../host.js";
+import { slotContributionOrigin } from "../../../slots.js";
 import "../settings.css";
 
 export type PluginConfigContentProps = {
@@ -167,6 +169,7 @@ export function PluginConfigContent({
                   id={panel.id}
                   pluginId={group.id}
                   render={panel.render}
+                  {...(panel.source ? { source: panel.source } : {})}
                   {...(editSession ? { editSession } : {})}
                   onRequestClose={onBack}
                   onError={setPanelError}
@@ -269,6 +272,7 @@ function ExtensionSettingsPanelHost({
   id,
   pluginId,
   render,
+  source,
   editSession,
   onRequestClose,
   onError
@@ -276,11 +280,13 @@ function ExtensionSettingsPanelHost({
   id: string;
   pluginId: string;
   render: ComponentType<SettingsPanelRenderProps>;
+  source?: object;
   editSession?: SettingsEditSession;
   onRequestClose: () => void;
   onError: (message: string | null) => void;
 }) {
   const [failed, setFailed] = useState<string | null>(null);
+  const faults = useExtensionFaults();
   const reportEditState = useMemo(() => {
     if (!editSession) return { report: undefined, dispose: () => undefined };
     return editSession.register({ id: `panel:${pluginId}:${id}` });
@@ -304,6 +310,11 @@ function ExtensionSettingsPanelHost({
       onError={(message) => {
         setFailed(message);
         onError(message);
+        // 扩展来源的面板同时计入会话内熔断（design D2/D3）；内置面板只走本地提示。
+        const origin = source ? slotContributionOrigin(source) : null;
+        if (origin?.kind === "extension") {
+          faults?.report({ extensionId: origin.extensionId, epoch: origin.epoch, slot: "settings.plugin-config", contributionId: id, message });
+        }
       }}
     >
       <Render requestClose={onRequestClose} {...(onReport ? { reportEditState: onReport } : {})} />

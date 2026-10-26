@@ -36,6 +36,8 @@ import {
 } from "./group-structure-actions.js";
 import type { CanvasContextMenuItem } from "./canvas-context-menu.js";
 import type { SlotsService } from "../../contract/platform.js";
+import { reportContributionFault } from "../../contribution-guard.js";
+import type { ExtensionFaultService } from "../../extension-faults.js";
 
 export const CANVAS_MENU_PLUGIN_ID = "canvas-context-menu";
 export const CANVAS_MENU_CONTRIBUTION_ID = "canvas-menu";
@@ -516,14 +518,17 @@ export type ExtensionNodeTemplateContribution = {
 export function extensionNodeTemplateMenuItems(
   contributions: ReadonlyArray<ExtensionNodeTemplateContribution>,
   writable: boolean,
-  context: ContextMenuContext
+  context: ContextMenuContext,
+  faults?: ExtensionFaultService
 ): CanvasContextMenuItem[] {
   const items: CanvasContextMenuItem[] = [];
   for (const contribution of contributions) {
     let nodeData: unknown;
     try {
       nodeData = contribution.createNodeData(context);
-    } catch {
+    } catch (error) {
+      // 扩展模板抛错：归因并计入熔断，跳过该菜单项（change: 2026-10-21-harden-extension-fault-isolation）。
+      reportContributionFault(contribution, "canvas.node-template", faults, error);
       nodeData = undefined;
     }
     if (nodeData === undefined) continue;
@@ -543,7 +548,7 @@ export function extensionNodeTemplateMenuItems(
 function extensionNodeTemplateItems(ctx: Context, context: ContextMenuContext): CanvasContextMenuItem[] {
   const slots = ctx.get("slots") as SlotsService | undefined;
   const contributions = slots?.list("canvas.node-template") ?? [];
-  return extensionNodeTemplateMenuItems(contributions, context.writable, context);
+  return extensionNodeTemplateMenuItems(contributions, context.writable, context, ctx.get("extensionFaults" as never) as ExtensionFaultService | undefined);
 }
 
 /** 选中扩展节点模板：由宿主用扩展产出的 nodeData 创建通用节点。 */
@@ -555,7 +560,8 @@ function insertExtensionTemplateNode(ctx: Context, contributionId: string, conte
   let nodeData: ReturnType<(typeof contribution)["createNodeData"]>;
   try {
     nodeData = contribution.createNodeData(context);
-  } catch {
+  } catch (error) {
+    reportContributionFault(contribution, "canvas.node-template", ctx.get("extensionFaults" as never) as ExtensionFaultService | undefined, error);
     nodeData = undefined;
   }
   if (nodeData === undefined) return;

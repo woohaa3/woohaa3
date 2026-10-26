@@ -26,6 +26,7 @@
     "e2e:yjs": "playwright test -c playwright.yjs.config.ts",
     "e2e:telemetry": "playwright test -c playwright.telemetry.config.ts",
     "build:browser": "node scripts/build-extension-browser.mjs --all",
+    "build:extension-backend": "node scripts/build-extension-backend.mjs",
     "assemble:extensions": "node ../scripts/assemble-extension-release.mjs",
     "dev:extensions": "node scripts/build-extension-browser.mjs --all"
   },

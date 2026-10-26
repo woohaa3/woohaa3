@@ -28,12 +28,17 @@ import {
 } from "./extension-scan.mjs";
 import { loadExtensionDescriptor } from "./extension-descriptor.mjs";
 import { extensionIconAssetFile, extensionIconPublicPath } from "./extension-icon-assets.mjs";
+import { ExtensionLoadError, FALLBACK_ORDER, hasBrowserArtifact, resolveModuleFile } from "./extension-host-modules.mjs";
+import { isSafeModeEssential, suspendedRegistration } from "./extension-host-safe-mode.mjs";
+import { hostPluginOrigin, resolveIsolation, screenExtension } from "./extension-host-managed.mjs";
+import { createReleaseFacade } from "./extension-host-release.mjs";
 // 分支未搬 `extension-release.mjs`（release 布局校验依赖部署模块）；这里直接用协议模块。
 import { loadExtensionContracts } from "./extension-release-protocol.mjs";
-import { buildBrowserRelease, createBrowserReleaseHandler } from "./extension-release-catalog.mjs";
 
-/** 声明未给出 `order` 时的兜底排序值（与生成器口径一致）。 */
-export const FALLBACK_ORDER = 1000;
+// 拆出的模块（行为不变）：调用方继续从本文件导入这些名字。
+export { ExtensionLoadError, FALLBACK_ORDER, hasBrowserArtifact, resolveModuleFile } from "./extension-host-modules.mjs";
+export { isSafeModeEssential } from "./extension-host-safe-mode.mjs";
+export { probeDeclaredModules, resolveIsolation, untrustedRootViolation } from "./extension-host-managed.mjs";
 
 /**
  * 基础槽位名单（与 `@woohaa3/application-service` 的 `FOUNDATION_SLOTS` 同口径）。
@@ -43,22 +48,6 @@ export const FALLBACK_ORDER = 1000;
 const slotContracts = await loadExtensionContracts();
 export const FOUNDATION_SLOT_NAMES = slotContracts.FOUNDATION_SLOTS;
 export const requiredFoundationSlots = slotContracts.requiredFoundationSlots;
-
-/** 声明指向的模块不存在时的候选相对路径（仅无 `exports` 映射时使用）。 */
-const MODULE_FALLBACKS = (subpath) => {
-  const relative = subpath.replace(/^\.\//, "");
-  return [`./dist/${relative}.js`, `./${relative}.js`, `./${relative}/index.js`];
-};
-
-/** 加载期错误：带稳定 code 与扩展目录，便于启动日志与运维处置。 */
-export class ExtensionLoadError extends Error {
-  constructor(code, message, details = {}) {
-    super(message);
-    this.name = "ExtensionLoadError";
-    this.code = code;
-    for (const [key, value] of Object.entries(details)) this[key] = value;
-  }
-}
 
 function isInside(parent, candidate) {
   return candidate === parent || candidate.startsWith(`${parent}${path.sep}`);
@@ -161,84 +150,6 @@ function assertSlotGraph(sources, { requireFoundationCoverage = true } = {}) {
   }
 }
 
-function readPackageJson(dir, { extensionId, descriptorPath }) {
-  const packageFile = path.join(dir, "package.json");
-  try {
-    return JSON.parse(fs.readFileSync(packageFile, "utf8"));
-  } catch (error) {
-    throw new ExtensionLoadError(
-      "EXTENSION_PACKAGE_INVALID",
-      `扩展 ${extensionId} 的 package.json 无法解析（${packageFile}）：${error.message}`,
-      { extensionId, directory: dir, descriptorPath }
-    );
-  }
-}
-
-/** 从 `exports` 映射取运行时入口目标（`import` 优先，其次 `default`/`node`）。 */
-function exportTarget(pkg, subpath) {
-  const entry = pkg.exports?.[subpath];
-  if (typeof entry === "string") return entry;
-  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-    return entry.import ?? entry.default ?? entry.node ?? null;
-  }
-  return null;
-}
-
-/**
- * 把声明里的包内相对子路径解析成扩展目录内的绝对文件路径。
- *
- * 只接受 `./x` 形态；候选目标必须是包内相对路径，解析后（含 realpath）必须落在扩展目录内。
- */
-export function resolveModuleFile(dir, subpath, { extensionId, descriptorPath = null } = {}) {
-  if (typeof subpath !== "string" || !subpath.startsWith("./") || subpath.includes("\\") || subpath.split("/").includes("..")) {
-    throw new ExtensionLoadError(
-      "EXTENSION_MODULE_INVALID",
-      `扩展 ${extensionId} 的模块子路径非法（只接受包内相对路径如 ./backend）：${String(subpath)}`,
-      { extensionId, directory: dir, descriptorPath, subpath }
-    );
-  }
-  const pkg = readPackageJson(dir, { extensionId, descriptorPath });
-  const declared = exportTarget(pkg, subpath);
-  if (declared !== null && (typeof declared !== "string" || !declared.startsWith("./") || declared.includes("\\") || declared.split("/").includes(".."))) {
-    throw new ExtensionLoadError(
-      "EXTENSION_MODULE_INVALID",
-      `扩展 ${extensionId} 的 package.json exports["${subpath}"] 不是包内相对路径：${String(declared)}`,
-      { extensionId, directory: dir, descriptorPath, subpath }
-    );
-  }
-  const candidates = declared === null ? MODULE_FALLBACKS(subpath) : [declared];
-  for (const candidate of candidates) {
-    const absolute = path.resolve(dir, candidate);
-    if (!isInside(dir, absolute)) {
-      throw new ExtensionLoadError(
-        "EXTENSION_MODULE_ESCAPES_DIR",
-        `扩展 ${extensionId} 的模块目标越出扩展目录：${candidate}`,
-        { extensionId, directory: dir, descriptorPath, subpath }
-      );
-    }
-    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) continue;
-    const realDir = fs.realpathSync(dir);
-    const real = fs.realpathSync(absolute);
-    if (!isInside(realDir, real)) {
-      throw new ExtensionLoadError(
-        "EXTENSION_MODULE_ESCAPES_DIR",
-        `扩展 ${extensionId} 的模块目标经软链越出扩展目录：${candidate}`,
-        { extensionId, directory: dir, descriptorPath, subpath }
-      );
-    }
-    return real;
-  }
-  throw new ExtensionLoadError(
-    "EXTENSION_MODULE_MISSING",
-    `扩展 ${extensionId} 的模块不存在（${subpath} → 试过 ${candidates.join("、")}）；先构建该扩展`,
-    { extensionId, directory: dir, descriptorPath, subpath }
-  );
-}
-
-/** 扩展是否具备已构建的 browser 产物（发布目录发现的唯一依据）。 */
-export function hasBrowserArtifact(dir) {
-  return fs.existsSync(path.join(dir, "browser-dist", "artifact-manifest.json"));
-}
 
 /** 站点目录条目（`ApplicationExtensionTrustedEntry` 形状；由 contracts 校验器复核）。 */
 function siteEntryOf(extension, descriptor, { hasBrowser }) {
@@ -380,7 +291,8 @@ export async function collectSlotDeclarations({ directories, env = process.env, 
  * - `browserArtifacts`：已构建 browser 产物（供发布目录生成与托管）；
  * - `browserRelease` / `handleReleaseRequest`：运行期发布目录与它的 HTTP 托管。
  */
-export async function loadExtensionHost({ repoRoot, env = process.env, configFile, logger = () => undefined, contracts = null } = {}) {
+export async function loadExtensionHost({ repoRoot, env = process.env, configFile, logger = () => undefined, contracts = null, safeMode = false, isolation } = {}) {
+  const isolate = resolveIsolation({ isolation, env });
   if (typeof repoRoot !== "string" || repoRoot.length === 0) {
     throw new ExtensionLoadError("EXTENSION_REPO_ROOT_MISSING", "缺少 repoRoot");
   }
@@ -395,11 +307,27 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
   const undeclared = [];
   const browserArtifacts = [];
   const slotEntries = [];
+  /** 安全模式下暂停的扩展（change: 2026-10-21-harden-extension-fault-isolation，D7）。 */
+  const suspended = [];
+  /**
+   * 因信任边界或声明问题未装配的受管扩展（change: 2026-10-21-add-extension-marketplace-point）。
+   * 受管扩展是可选插件：单个受管扩展的问题只拒绝它自己，其他扩展照常装配。
+   */
+  const rejected = [];
+  for (const warning of scan.warnings ?? []) logger({ event: "extension-managed-skipped", ...warning });
   for (const extension of scan.extensions) {
+    const screened = screenExtension({ extension, repoRoot, isolate, rejected, logger });
+    if (!screened) continue;
+    const { descriptor } = screened;
+    if (safeMode && !isSafeModeEssential(extension, descriptor)) {
+      // 不导入任何扩展模块、不发布浏览器产物；只保留纯 JSON 的站点目录条目，供控制面投影 suspended。
+      suspended.push({ extensionId: extension.extensionId, directory: extension.dir, rootWritable: extension.rootWritable === true });
+      if (descriptor?.site) registrations.push(suspendedRegistration(extension, descriptor));
+      continue;
+    }
     if (hasBrowserArtifact(extension.dir)) {
       browserArtifacts.push({ extensionId: extension.extensionId, directory: extension.dir });
     }
-    const descriptor = loadExtensionDescriptor(extension, { repoRoot });
     if (!descriptor) {
       undeclared.push({ extensionId: extension.extensionId, directory: extension.dir });
       continue;
@@ -436,6 +364,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
           factory: descriptor.hostPlugin.factory,
           kind: descriptor.hostPlugin.kind,
           optional: descriptor.hostPlugin.optional === true
+          // 只解析出入口路径；真正的 import 由扩展层装载器完成。
         }
       : null;
 
@@ -515,6 +444,9 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       publicRoutes,
       site: descriptor.site ? true : false,
       hasBrowserArtifact: hasBrowserArtifact(extension.dir),
+      managed: extension.managed === true,
+      managedVersion: extension.managedVersion ?? null,
+      rootWritable: extension.rootWritable === true,
       modules: [...modules]
     });
 
@@ -576,13 +508,14 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     );
   const providerMetadata = [];
   for (const registration of providerRegistrations) {
-    const module = await importModule(registration.metadataModule, {
-      extensionId: registration.extensionId,
-      directory: registration.directory,
-      subpath: registration.metadataExport,
-      descriptorPath: registration.descriptorPath
-    });
-    const value = module[registration.metadataExport];
+    const value = (
+      await importModule(registration.metadataModule, {
+        extensionId: registration.extensionId,
+        directory: registration.directory,
+        subpath: registration.metadataExport,
+        descriptorPath: registration.descriptorPath
+      })
+    )[registration.metadataExport];
     if (value === undefined) {
       throw new ExtensionLoadError(
         "EXTENSION_EXPORT_MISSING",
@@ -605,7 +538,9 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
   for (const registration of registrations) {
     for (const route of registration.publicRoutes) {
       let publicPath = route.publicPath ?? null;
-      if (route.publicPathExport) {
+      if (route.publicPathExport && route.staticPublicPath !== undefined) {
+        publicPath = route.staticPublicPath;
+      } else if (route.publicPathExport) {
         const module = await importModule(route.module, {
           extensionId: registration.extensionId,
           directory: registration.directory,
@@ -692,7 +627,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
    * 每个插件的 `name` 必须等于扩展 identity：装配日志、配置归属与站点状态都以它为键。
    */
   const createHostPlugins = async (optionsByExtensionId = {}) => {
-    const byKind = { provider: [], storage: [] };
+    const byKind = { provider: [], storage: [], "marketplace-source": [] };
     const moduleCache = new Map();
     const ordered = registrations
       .filter((registration) => registration.hostPlugin)
@@ -741,7 +676,9 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
         );
       }
       // 品牌图形由声明注入（扩展源码不写死宿主目录里的路径）；未声明的插件保持自己的语义图标名。
-      byKind[declared.kind].push({ ...plugin, directory: registration.directory, ...(registration.iconPath ? { icon: registration.iconPath } : {}) });
+      // `origin`：插件来自哪类根，供宿主做运行期来源断言（见 extension-host-managed.mjs）。
+      const origin = hostPluginOrigin(registration);
+      byKind[declared.kind].push({ ...plugin, origin, directory: registration.directory, ...(registration.iconPath ? { icon: registration.iconPath } : {}) });
     }
     return byKind;
   };
@@ -910,15 +847,8 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     return declarations;
   };
 
-  // 运行期发布目录（design D4/D7）：读已构建 browser 产物，复用旧装配器口径算 releaseId 与
-  // artifactId 路径映射，并在内存里托管；构建产物不再被就地改写。
-  const browserRelease = await buildBrowserRelease({
-    artifacts: browserArtifacts,
-    repoRoot,
-    contracts: resolvedContracts,
-    logger
-  });
-  const releaseHandler = createBrowserReleaseHandler(browserRelease);
+  // 运行期发布目录与发布器（见 extension-host-release.mjs）。
+  const release = await createReleaseFacade({ artifacts: browserArtifacts, repoRoot, contracts: resolvedContracts, logger });
 
   // 目录控制只做安装/卸载（改名）；启用/停用走站点控制面，因此它不参与运行状态。
   // 改名写入必须落在配置声明的可写根内，否则管理员能把受版本控制的目录改走。
@@ -927,15 +857,19 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     writableRoots: scan.writableRoots ?? [],
     metadata,
     onRename(from, to) {
-      for (const [url, file] of browserRelease.files) {
-        if (file.startsWith(`${from}${path.sep}`)) browserRelease.files.set(url, to + file.slice(from.length));
-      }
+      release.relocate(from, to);
     }
   });
   const host = {
     directoryControl,
     repoRoot,
     roots: scan.roots,
+    /** 受管安装根（change: 2026-10-21-add-extension-marketplace-point，D7）；未配置时为 undefined。 */
+    managedRoot: scan.managedRoot,
+    /** 受管后端扩展是否以 Extension Host 子进程运行（change: 2026-10-21-isolate-extension-host-process，D1）。 */
+    isolation: isolate,
+    /** 受管扩展被拒绝装配的记录（信任边界/声明/模块缺失）；不让启动失败。 */
+    managedRejected: rejected,
     source: scan.source,
     configPath: scan.configPath,
     configFile: scan.configFile,
@@ -949,15 +883,17 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     siteEntries,
     siteExtensionIds: siteEntries.map((entry) => entry.extensionId),
     browserArtifacts,
-    browserRelease,
     slotEntries,
+    /**
+     * 安全模式（D7）：`null` 表示正常启动；否则列出本次未装配的扩展。宿主据此把它们的站点实际状态
+     * 投影为 `suspended`，不改写已保存的启停配置。
+     */
+    safeMode: safeMode ? { suspended: suspended.map((entry) => entry.extensionId) } : null,
     /**
      * 调用槽位声明工厂并校验（形状、identity、槽位名，以及重复实现/未知依赖/依赖成环）。
      * 「依赖缺失」与「每槽位恰一个」仍由 bootstrapProviders 兜底（纵深防御）。
      */
     createSlotDeclarations,
-    /** 托管 `/extension-releases/` 与 `/extensions/`；返回 `true` 表示已响应。 */
-    handleReleaseRequest: (req, res) => releaseHandler(req, res),
     createDefinitions,
     /**
      * 插件树扩展层的 Cordis 插件（Provider / 存储后端），由 `hostPlugin` 声明驱动。
@@ -967,5 +903,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     /** 画布内容扩展（预览/历史帧端口）：由 `canvasContent` 声明驱动。 */
     createCanvasContent
   };
+  // 发布相关成员（含 browserRelease getter）按属性描述符并入，getter 保持「每次取当前值」。
+  Object.defineProperties(host, Object.getOwnPropertyDescriptors(release.members));
   return host;
 }

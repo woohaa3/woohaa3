@@ -165,6 +165,15 @@ export function createSourceExtensionRuntimeService(
       return entry.loadDescriptor();
     },
     diagnostics: () => [...diagnostics.values()],
+    // 源码型 runtime 没有发布目录：热登记无事可做（不抛错，状态轮询会调用它）。
+    async adoptRelease() {
+      return null;
+    },
+    staleExtensionIds: () => [],
+    // 源码型 runtime 没有发布目录可换：repin 明确拒绝（测试不应走到这里）。
+    async repin() {
+      throw new Error("源码型 runtime 不支持 repin");
+    },
     report: (diagnostic) => {
       diagnostics.set(diagnostic.extensionId, diagnostic);
     },

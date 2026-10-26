@@ -23,6 +23,7 @@ import type { CanvasCatalogService, CanvasSelectionService, CanvasSummary } from
 import type { CanvasSession } from "../../contract/session.js";
 import type { CanvasNavigationService } from "../../navigation/index.js";
 import type { CanvasCreateOptionContribution, SlotsService } from "../../contracts.js";
+import { ContributionBoundary } from "../../contribution-boundary.js";
 
 export const CANVAS_SWITCHER_DIALOG_ID = "canvas-switcher";
 
@@ -80,7 +81,9 @@ const SYNC_LABELS: Record<NonNullable<CanvasSummary["sync"]>, string> = {
   syncing: "同步中",
   offline: "离线",
   failed: "同步失败",
-  "remote-only": "仅远端"
+  "remote-only": "仅远端",
+  // 属于远端、但本机还没有上游链路：改动只落在本机，必须显式说出来。
+  unlinked: "未连接"
 };
 
 /**
@@ -677,12 +680,13 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
                             {catalogItemActions.map((contribution) => {
                               const Action = contribution.render;
                               return (
-                                <Action
-                                  key={contribution.id}
-                                  entry={entry}
-                                  openCanvas={deps.switchTo}
-                                  refreshCatalog={refreshCatalog}
-                                />
+                                <ContributionBoundary key={contribution.id} entry={contribution} slot="canvas.catalog-item-action">
+                                  <Action
+                                    entry={entry}
+                                    openCanvas={deps.switchTo}
+                                    refreshCatalog={refreshCatalog}
+                                  />
+                                </ContributionBoundary>
                               );
                             })}
                           </div>

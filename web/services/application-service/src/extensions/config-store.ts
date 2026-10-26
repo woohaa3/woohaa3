@@ -38,6 +38,13 @@ export type SiteExtensionAuditSummary = {
   enabled: boolean;
   secretRefCount: number;
   valueKeys: string[];
+  /**
+   * 非配置提交的运维事件（change: 2026-10-21-isolate-extension-host-process，D7）：崩溃熔断进入 / 解除隔离。
+   * 配置提交的审计没有此字段。
+   */
+  event?: "quarantined" | "unquarantined";
+  /** 事件的安全诊断码（如 `crash-loop`）。 */
+  diagnosticCode?: string;
 };
 
 export type SiteExtensionAuditRecord = {
@@ -331,6 +338,38 @@ export class SqliteSiteExtensionConfigStore {
       .run(extensionId, actualState, JSON.stringify(diagnostics), now);
     const revision = this.bumpRevision();
     this.recordStatusChange(revision, extensionId);
+  }
+
+  /**
+   * 记录一条运维事件审计（不改配置、不新建配置版本）：推进 revision 并写 status log，
+   * 让 `changes(after)` 与前端刷新看到它。返回新 revision。
+   */
+  recordEvent(input: {
+    extensionId: string;
+    actor: string;
+    event: NonNullable<SiteExtensionAuditSummary["event"]>;
+    diagnosticCode?: string;
+    now: string;
+  }): number {
+    const current = this.revision();
+    const config = this.get(input.extensionId);
+    const revision = this.bumpRevision();
+    const summary: SiteExtensionAuditSummary = {
+      enabled: config?.desiredEnabled ?? false,
+      secretRefCount: config?.secretRefs.length ?? 0,
+      valueKeys: Object.keys(config?.values ?? {}).sort(),
+      event: input.event,
+      ...(input.diagnosticCode ? { diagnosticCode: input.diagnosticCode } : {})
+    };
+    this.db
+      .prepare(
+        `INSERT INTO extension_site_audit
+           (extension_id, actor, from_revision, to_revision, config_version, summary_json, occurred_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(input.extensionId, input.actor, current, revision, config?.configVersion ?? 0, JSON.stringify(summary), input.now);
+    this.recordStatusChange(revision, input.extensionId);
+    return revision;
   }
 
   /** 读取某插件的不可变配置版本快照（被旧版本工作引用时仍可读）。 */

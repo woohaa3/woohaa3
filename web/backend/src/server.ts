@@ -6,7 +6,9 @@
  * 前端静态资源由部署侧入口（`scripts/serve-web.mjs`）加载并把同源 API/WS 交给本进程。
  */
 import http from "node:http";
+import { HOST_RESTART_EXIT_CODE } from "./api/host-restart-api.js";
 import { createBackendService } from "./composition.js";
+import { beginBoot, bootFailureFromLog, formatBootFailure, markReady, recordBootFailure } from "./host/boot-state.js";
 import { loadExtensionHostFromEnv } from "./extensions/host-boot.js";
 import { applyHttpMount, applyUpgradeMount, resolveBasePathFromEnv } from "./mount.js";
 
@@ -28,11 +30,39 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   let service;
+  let boot: ReturnType<typeof beginBoot>;
   try {
     // 不传 logger：组合根用内置 sink（stderr 一行 JSON + 默认日志目录的轮转文件）。
     // 启动期扫描配置根并加载扩展声明（槽位发现与运行期发布目录）：声明非法时在监听前 fail-fast。
-    const extensionHost = await loadExtensionHostFromEnv({ logger: logEvent });
-    service = await createBackendService({ basePath, ...(extensionHost ? { extensionHost } : {}) });
+    // 启动守卫（change: 2026-10-21-harden-extension-fault-isolation，D7）：加载扩展前计数加一，
+    // 连续未就绪次数超过阈值时本次以安全模式启动；就绪后清零。
+    boot = beginBoot({ log: logEvent });
+    const bootFile = boot.file;
+    // 就绪前的扩展启动失败写进启动守卫（只记 extensionId / 错误码 / 脱敏截断消息），供下一次安全模式提示。
+    let ready = false;
+    const captureFailure = (event: Record<string, unknown>) => {
+      if (ready) return;
+      const failure = bootFailureFromLog(event);
+      if (failure) recordBootFailure(bootFile, failure, undefined, logEvent);
+    };
+    const extensionHost = await loadExtensionHostFromEnv({
+      logger: (event) => {
+        logEvent(event);
+        captureFailure(event);
+      },
+      safeMode: boot.safeMode !== null
+    });
+    const lastFailure = boot.lastFailure ? formatBootFailure(boot.lastFailure) : undefined;
+    service = await createBackendService({
+      basePath,
+      logTap: captureFailure,
+      ...(extensionHost ? { extensionHost } : {}),
+      ...(boot.safeMode
+        ? { safeMode: { ...boot.safeMode, suspended: extensionHost?.safeMode?.suspended ?? [], ...(lastFailure ? { lastFailure } : {}) } }
+        : {})
+    });
+    ready = true;
+    markReady(bootFile, undefined, logEvent);
   } catch (error) {
     // 稳定错误码一并打印：运维要能直接区分「声明非法 / 槽位冲突 / 配置缺失」。
     const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
@@ -76,13 +106,27 @@ async function main(): Promise<void> {
   });
 
   let stopping = false;
-  const shutdown = () => {
+  // 受控重启与终止信号走同一条排空关闭，只是退出码不同（75 = 请求重启，
+  // change: 2026-10-21-harden-extension-fault-isolation，D6）。
+  const shutdown = (exitCode = 0) => {
     if (stopping) return;
     stopping = true;
-    void service.close().finally(() => server.close(() => process.exit(0)));
+    void service.close().finally(() => {
+      server.close(() => process.exit(exitCode));
+      // 浏览器的 keep-alive 连接会让 close 回调一直不来：排空完成后不再接新请求，直接断开剩余连接。
+      server.closeIdleConnections?.();
+      setTimeout(() => {
+        server.closeAllConnections?.();
+        process.exit(exitCode);
+      }, 5000).unref();
+    });
   };
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", () => shutdown(0));
+  process.on("SIGINT", () => shutdown(0));
+  service.onRestartRequested((request) => {
+    process.stderr.write(`[backend] 受控重启：${JSON.stringify({ reason: request.reason, exitSafeMode: request.exitSafeMode })}，排空后以 ${HOST_RESTART_EXIT_CODE} 退出\n`);
+    shutdown(HOST_RESTART_EXIT_CODE);
+  });
 
   server.listen(port, host, () => {
     process.stderr.write(`[backend] http://${host}:${port}\n`);

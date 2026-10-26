@@ -226,7 +226,7 @@ export class CanvasCatalogService {
       /**
        * 没有链路状态时的缺省结论（本机视角）：
        * - 只在远端有 → 本机还没有内容副本，界面显示「仅远端」，点开才落地；
-       * - 两边都有 → 这张画布已经在远端，界面显示「已同步」（链路未加载时不必再问一次）；
+       * - 两边都有 → 默认「已同步」，但必须先排除「属于远端却没有链路」，见下；
        * - 只在本地 → 「仅本机」。是否提供「同步远端」动作由接入方按它自己的会话状态决定。
        */
       const defaultSync: CanvasSummary["sync"] = sources.includes("local")
@@ -234,10 +234,27 @@ export class CanvasCatalogService {
           ? "synced"
           : "local-only"
         : "remote-only";
+      /**
+       * 「属于远端 + 远端这次确实列得到它 + 本机没有上游链路」= 未连接，不能算已同步。
+       *
+       * sources 只说明「这张画布的字节归远端、目录里也有它」，不说明「此刻有没有一条链路
+       * 在往上推」。宿主重启后房间可能先于扩展会话就绪而建好，解析拿不到凭据，这张画布就
+       * 再也没有链路（直到房间回收或宿主重启）；此时若回落成 synced，界面会在上传链路整个
+       * 不存在时显示「已同步」，把真正的故障藏起来。
+       *
+       * remote 在 sources 里意味着这次列目录成功（登出/远端不可达时远端来源为空），因此
+       * 这个状态下「远端可达」是已知事实，只差链路——这正是用户需要看见的信息。
+       *
+       * 只在远端存在（本机没有副本）时不报 unlinked：那张画布没有「本机改动推不上去」的风险，
+       * 「仅远端」才是准确结论；它连不上会表现为打开时的会话错误，不必提前吓人。
+       */
+      const unlinked = sources.includes("local") && sources.includes("remote")
+        && (this.isRemoteOwned?.(summary.id) ?? false);
+      const linkedState = this.syncStateOf?.(summary.id);
       const marked: CanvasSummary = {
         ...summary,
         sources,
-        sync: this.syncStateOf?.(summary.id) ?? defaultSync
+        sync: linkedState ?? (unlinked ? "unlinked" : defaultSync)
       };
       return marked;
     });

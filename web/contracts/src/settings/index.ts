@@ -15,6 +15,15 @@
 import { isJsonObject } from "../validation.js";
 import type { PluginIcon } from "../plugin-icon.js";
 import type { CanvasTaskModelType } from "../task/dto.js";
+import type { ExtensionInstallationsView, HostSafeModeView, InstalledExtensionView, SettingsExtensionPoints } from "./extension-views.js";
+
+export type {
+  ExtensionInstallationsView,
+  HostSafeModeView,
+  InstalledExtensionView,
+  SettingExtensionPointProvider,
+  SettingsExtensionPoints
+} from "./extension-views.js";
 
 export type SettingReload = "hot" | "restart";
 
@@ -105,6 +114,84 @@ export const SETTING_DEFINITIONS = {
     reload: "hot",
     label: "外部上报遥测",
     description: "总开关：把本机遥测交给已注册的上报出口。目的地与凭据由对应扩展自己配置（如服务端接入）；没有安装这类扩展时此项不产生任何外发"
+  },
+  /**
+   * 扩展激活 / 释放时限（change: 2026-10-21-harden-extension-fault-isolation，D4）。
+   * 超时按失败处理（`activation-timeout`），不自动重试；取值有界，防止设成 0 或无穷。
+   */
+  "extensions.activationTimeoutMs": {
+    kind: "integer",
+    default: 30000,
+    min: 1000,
+    max: 600000,
+    reload: "hot",
+    label: "扩展激活时限（毫秒）",
+    description: "单个扩展启动或配置更新后重启的最长等待；超时视为激活失败，不拖住宿主就绪"
+  },
+  "extensions.disposeTimeoutMs": {
+    kind: "integer",
+    default: 10000,
+    min: 1000,
+    max: 600000,
+    reload: "hot",
+    label: "扩展释放时限（毫秒）",
+    description: "停用扩展时等待其释放的最长时间；超时后放弃等待并完成停用，残留资源由下次重启回收"
+  },
+  /**
+   * 受管扩展的签名信任根（change: 2026-10-21-add-extension-marketplace-point，D2）。
+   * 只在本机配置文件里维护；来源返回的任何「已验证」标志都不被信任。
+   */
+  "extensions.marketplace.trustedKeys": {
+    kind: "string",
+    default: "",
+    reload: "hot",
+    label: "扩展签名信任根",
+    description: "Ed25519 公钥列表，逗号分隔，每项为 <keyId>=<base64 公钥> 或 base64 公钥；签名不在此列表中的扩展包拒绝安装"
+  },
+  /** D5：只允许 local-file 来源，且仅本机显式开启（开发用）。也可用 WOOHAA3_EXTENSION_ALLOW_UNSIGNED=1。 */
+  "extensions.marketplace.allowUnsigned": {
+    kind: "boolean",
+    default: false,
+    reload: "hot",
+    label: "允许未签名的本地扩展包",
+    description: "仅用于开发：允许从本地文件安装未签名的 .wxt；市场来源的包始终要求签名。未签名扩展与宿主同进程运行，没有隔离"
+  },
+  /**
+   * GitHub Release 市场来源（核心自带，与 local-file 同级）。出网行为必须显式开启：
+   * enabled 未开时来源不可用，不发起任何请求。repos 为逗号分隔的 `owner/repo` 列表。
+   */
+  "extensions.marketplace.github.enabled": {
+    kind: "boolean",
+    default: false,
+    reload: "hot",
+    label: "启用 GitHub 扩展来源",
+    description: "允许从 GitHub Release 安装 .wxt 扩展包。开启后本机会访问 GitHub（api.github.com 或下面配置的 API 地址）；关闭时不发起任何请求"
+  },
+  /** GitHub 仓库列表：逗号分隔的 `owner/repo`；每个仓库的 Release 资产都是候选包。 */
+  "extensions.marketplace.github.repos": {
+    kind: "string",
+    default: "",
+    reload: "hot",
+    label: "GitHub 扩展仓库列表",
+    description: "逗号分隔的 owner/repo 列表（如 my-org/my-extension）。安装候选来自这些仓库 Release 的 .wxt 资产，文件名须为 <extensionId>-<version>.wxt"
+  },
+  /** GitHub REST API 地址；企业自建 GitHub（GitHub Enterprise Server）可改为 https://<host>/api/v3。 */
+  "extensions.marketplace.github.apiBase": {
+    kind: "url",
+    protocols: ["https:", "http:"],
+    default: "https://api.github.com",
+    reload: "hot",
+    label: "GitHub API 地址",
+    description: "GitHub REST API 基址，缺省 https://api.github.com；GitHub Enterprise Server 改为 https://<host>/api/v3"
+  },
+  /** GitHub 访问令牌：私有仓库或提高限流用；只应写在密钥文件，缺省匿名访问（60 次/小时限流）。 */
+  "extensions.marketplace.github.token": {
+    kind: "string",
+    default: "",
+    reload: "hot",
+    secret: true,
+    label: "GitHub 访问令牌",
+    description: "访问私有仓库或提高 API 限流用；留空为匿名访问。请写在密钥文件（woohaa.secrets.yml），不要写进普通配置文件"
   }
 } as const satisfies Record<string, SettingDefinition>;
 
@@ -401,53 +488,14 @@ export type SettingPluginView = {
   modelRefresh?: { path: string; hint: string };
 };
 
-/**
- * 本次启动扫描并装配的扩展（「在场」信息，只读展示）。
- *
- * 启用/停用不在这里：它是站点控制面的 `desiredEnabled`，运行中生效。目录名只表达扩展是否
- * **已安装**（`.` 前缀 = 未安装，沿用扫描语义），不表达「已装但停用」。
- */
-export type InstalledExtensionView = {
-  id: string;
-  label: string;
-  description: string;
-  /** 扩展所在绝对目录，仅用于展示。 */
-  directory: string;
-  icon?: PluginIcon;
-  /**
-   * 扩展声明的版本，设置面按 `v<version>` 展示。
-   *
-   * 来源按可信程度取值：宿主已加载的可信元数据（站点声明 / provider metadata）> 浏览器产物
-   * `artifact-manifest.json` 的 metadata > `package.json`；都没有时缺省（不展示版本）。
-   */
-  version?: string;
-  /** 所在扩展根是否被声明为可写根；只有可写根允许在面板里安装/卸载。 */
-  writable: boolean;
-};
 
-/**
- * 扩展点当前可用的提供者。
- *
- * 设置页据此把「选哪个」渲染成可选项，并把选择直接链到提供者插件的配置——扩展点自己的配置
- * （选谁）与提供者的深配置（桶、密钥、地址）因此能在同一处衔接。
- */
-export type SettingExtensionPointProvider = {
-  /** 设置值里引用的 id（例如存储的 `backendId`）。 */
-  id: string;
-  /** 面向用户的显示名；提供者没声明时回退 id。 */
-  label: string;
-  /** 注册这个能力的插件 id；宿主用它打开对应插件详情。未声明时为 null。 */
-  ownerExtensionId: string | null;
-};
-
-/** 宿主扩展点的可用提供者；按扩展点分组，新增扩展点时在这里加一段。 */
-export type SettingsExtensionPoints = {
-  /** 存储后端（`storage.primary` / `storage.expose` 的可选值）。 */
-  storage?: SettingExtensionPointProvider[];
-};
 
 export type SettingsSnapshot = {
+  /** 安全模式；缺省或 null 表示正常启动。 */
+  safeMode?: HostSafeModeView | null;
   installedExtensions?: InstalledExtensionView[];
+  /** 受管安装概览；宿主未装配 Extension Manager 时缺省。 */
+  extensionInstallations?: ExtensionInstallationsView;
   settings: SettingsEntryView[];
   /** 宿主插件树（基础层 / 核心层 / 扩展层）；「插件配置」按它列出每个插件。 */
   plugins: SettingPluginView[];

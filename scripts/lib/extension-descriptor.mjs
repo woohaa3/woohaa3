@@ -12,7 +12,7 @@ import path from "node:path";
 import { EXTENSION_DESCRIPTOR_NAME, ExtensionScanError } from "./extension-scan.mjs";
 
 export const EXTENSION_DESCRIPTOR_SCHEMA_VERSION = 1;
-export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "icon", "required"];
+export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "migrate", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "icon", "required"];
 export const EXTENSION_CAPABILITY_KINDS = ["capability", "handler"];
 export const EXTENSION_CAPABILITY_AUTH = ["public", "authenticated"];
 export const EXTENSION_ROUTE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -22,7 +22,129 @@ export const EXTENSION_ROUTE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE",
  * `provider` 注入 `ctx.generation`（模型 Provider），`storage` 注入 `ctx.storage`（存储后端）。
  * 两者都是宿主插件树扩展层的插件，由声明驱动装配——宿主不再维护逐插件的手写注册表。
  */
-export const EXTENSION_HOST_PLUGIN_KINDS = ["provider", "storage"];
+export const EXTENSION_HOST_PLUGIN_KINDS = ["provider", "storage", "marketplace-source"];
+
+/**
+ * 宿主自身满足的运行环境（change: 2026-10-21-add-extension-marketplace-point，design D4）。
+ *
+ * `hostAbi`：宿主后端 SDK ABI（`HostExtensionContext` 形状）；`sdkAbi`：浏览器 SDK ABI，与
+ * `EXTENSION_SDK_ABI_VERSION` 同步；`protocolVersion`：browser artifact / 包格式协议版本。
+ * 扩展 `extension.json` 的 `engines` 用 semver range 声明要求，在 resolve 与预检两处检查。
+ */
+export const HOST_ENGINES = Object.freeze({ hostAbi: "1.0.0", sdkAbi: "1.0.0", protocolVersion: 1 });
+
+/** 权限声明字段（本期只校验格式并记录，不强制；与后续进程隔离 change 的 ctx 裁剪一一对应）。 */
+
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const HOSTNAME = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:\d{1,5})?$/;
+
+/** 严格 semver（`1.2.3`，可带预发布/构建后缀）。 */
+export function isSemver(value) {
+  return typeof value === "string" && SEMVER.test(value);
+}
+
+function parseVersion(value) {
+  const match = /^(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?$/.exec(value);
+  if (!match) return null;
+  const part = (raw) => (raw === undefined || raw === "x" || raw === "*" ? null : Number(raw));
+  return [Number(match[1]), part(match[2]), part(match[3])];
+}
+
+function compareTriples(a, b) {
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return 0;
+}
+
+function coreOf(version) {
+  const match = SEMVER.exec(version);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+/**
+ * 判断版本是否满足一个 semver range（只支持本仓库需要的子集，不引入依赖）：
+ * `*`、`1` / `1.x` / `1.2.x`、精确版本、`^1.2.3`、`~1.2.3`、比较符 `>= > <= < =`，空格表示交集，`||` 表示并集。
+ * 预发布后缀只比较核心三段。无法解析的 range 返回 `null`（由调用方当作非法声明）。
+ */
+export function satisfiesRange(version, range) {
+  const target = coreOf(version);
+  if (!target || typeof range !== "string" || range.trim().length === 0) return null;
+  let anyValid = false;
+  for (const alternative of range.split("||").map((entry) => entry.trim())) {
+    if (alternative.length === 0) return null;
+    const comparators = alternative.split(/\s+/);
+    let ok = true;
+    for (const comparator of comparators) {
+      const result = matchComparator(target, comparator);
+      if (result === null) return null;
+      if (!result) ok = false;
+    }
+    anyValid = true;
+    if (ok) return true;
+  }
+  return anyValid ? false : null;
+}
+
+function matchComparator(target, comparator) {
+  if (comparator === "*" || comparator === "x") return true;
+  const match = /^(\^|~|>=|<=|>|<|=)?v?(.+)$/.exec(comparator);
+  if (!match) return null;
+  const operator = match[1] ?? "";
+  const parsed = parseVersion(match[2].replace(/-.*$/, ""));
+  if (!parsed) return null;
+  const [major, minor, patch] = parsed;
+  const floor = [major, minor ?? 0, patch ?? 0];
+  if (operator === "^") {
+    const ceiling = major > 0 ? [major + 1, 0, 0] : minor === null ? [1, 0, 0] : minor > 0 ? [0, minor + 1, 0] : [0, 0, (patch ?? 0) + 1];
+    return compareTriples(target, floor) >= 0 && compareTriples(target, ceiling) < 0;
+  }
+  if (operator === "~") {
+    const ceiling = minor === null ? [major + 1, 0, 0] : [major, minor + 1, 0];
+    return compareTriples(target, floor) >= 0 && compareTriples(target, ceiling) < 0;
+  }
+  if (operator === "" || operator === "=") {
+    if (minor === null) return target[0] === major;
+    if (patch === null) return target[0] === major && target[1] === minor;
+    return compareTriples(target, floor) === 0;
+  }
+  const order = compareTriples(target, floor);
+  if (operator === ">=") return order >= 0;
+  if (operator === ">") return order > 0;
+  if (operator === "<=") return order <= 0;
+  return order < 0;
+}
+
+/**
+ * 检查扩展声明的 `engines` 是否与宿主兼容。返回 `{ ok: true }` 或 `{ ok: false, reasons }`。
+ * 未声明 `engines` 视为兼容（内置扩展与宿主同版本发布）；受管扩展的"必须声明"由预检负责。
+ */
+export function checkEnginesCompatible(engines, host = HOST_ENGINES) {
+  if (engines === undefined || engines === null) return { ok: true };
+  const reasons = [];
+  for (const key of ["hostAbi", "sdkAbi"]) {
+    const result = satisfiesRange(host[key], engines[key]);
+    if (result === null) reasons.push(`engines.${key} 不是合法的 semver range：${String(engines[key])}`);
+    else if (!result) reasons.push(`engines.${key}（${engines[key]}）不包含宿主 ${host[key]}`);
+  }
+  if (engines.protocolVersion !== host.protocolVersion) {
+    reasons.push(`engines.protocolVersion（${String(engines.protocolVersion)}）与宿主协议 ${host.protocolVersion} 不一致`);
+  }
+  return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
+}
+
+function validateEngines(engines, errors) {
+  if (!isPlainObject(engines)) {
+    errors.push("engines 必须是对象");
+    return;
+  }
+  for (const key of unknownKeys(engines, ["hostAbi", "sdkAbi", "protocolVersion"])) errors.push(`engines 未知字段：${key}`);
+  for (const key of ["hostAbi", "sdkAbi"]) {
+    if (!isNonEmptyString(engines[key])) errors.push(`engines.${key} 必须是非空 semver range（如 ^1.0.0）`);
+    else if (satisfiesRange("0.0.0", engines[key]) === null) errors.push(`engines.${key} 不是合法的 semver range：${engines[key]}`);
+  }
+  if (!Number.isInteger(engines.protocolVersion) || engines.protocolVersion < 1) errors.push("engines.protocolVersion 必须是正整数");
+}
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const KEBAB_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
@@ -60,6 +182,22 @@ export function validateExtensionDescriptor(value) {
   }
   if (!isNonEmptyString(value.extensionId) || !KEBAB_ID.test(value.extensionId)) {
     errors.push("extensionId 必须是非空 kebab-case 字符串（如 sample-access）");
+  }
+
+  // 分发字段（change: 2026-10-21-add-extension-marketplace-point，任务 1.3）：全部可选，旧扩展不受影响；
+  // 受管扩展（.wxt 安装）在预检阶段要求 version 与 engines 必填。
+  if (value.version !== undefined && !isSemver(value.version)) errors.push("version 必须是 semver（如 1.2.0）");
+  if (value.engines !== undefined) validateEngines(value.engines, errors);
+  // `migrate` 只预留：声明了数据迁移的包在受管安装预检时被拒绝（需要进程隔离支持）。
+  if (value.migrate !== undefined) {
+    if (!isPlainObject(value.migrate)) {
+      errors.push("migrate 必须是对象");
+    } else {
+      for (const key of unknownKeys(value.migrate, ["module", "export"])) errors.push(`migrate 未知字段：${key}`);
+      const moduleValue = value.migrate.module ?? "./backend";
+      if (!isNonEmptyString(moduleValue) || !PACKAGE_SUBPATH.test(moduleValue)) errors.push("migrate.module 必须是包内相对子路径");
+      if (!isNonEmptyString(value.migrate.export) || !IDENTIFIER.test(value.migrate.export)) errors.push("migrate.export 必须是导出函数名");
+    }
   }
 
   const site = value.site;

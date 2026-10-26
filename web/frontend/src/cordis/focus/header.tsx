@@ -11,6 +11,7 @@
  */
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { useSlot } from "../host.js";
+import { ContributionBoundary } from "../contribution-boundary.js";
 import { useService } from "../react.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../services/canvas-state/index.js";
 import { Button } from "../../shared/ui/Button.js";
@@ -82,7 +83,7 @@ export function FocusHeader({ fallbackTitle = "节点", help, hint, actions, doc
           {busy ? "返回中…" : "返回"}
         </Button>
         <div className="focus-workspace__context focus-connections-header">
-          {nodeId ? headerEntries.filter(entry => entry.position === "before-title").map(entry => { const Component = entry.render; return <Component key={`${entry.id}:${nodeId}`} nodeId={nodeId} />; }) : null}
+{nodeId ? headerEntries.filter(entry => entry.position === "before-title").map(entry => { const Component = entry.render; return <ContributionBoundary key={`${entry.id}:${nodeId}`} entry={entry} slot="canvas.focus-header"><Component nodeId={nodeId} /></ContributionBoundary>; }) : null}
           <span className="focus-workspace__identity" title={title}>
             <span className="focus-workspace__title">{title}</span>
             {documentMode
@@ -91,7 +92,7 @@ export function FocusHeader({ fallbackTitle = "节点", help, hint, actions, doc
                   {mode.owner === "history" ? "历史预览 · 只读" : "当前版本"}
                 </span>}
           </span>
-          {nodeId ? headerEntries.filter(entry => entry.position !== "before-title").map(entry => { const Component = entry.render; return <Component key={`${entry.id}:${nodeId}`} nodeId={nodeId} />; }) : null}
+{nodeId ? headerEntries.filter(entry => entry.position !== "before-title").map(entry => { const Component = entry.render; return <ContributionBoundary key={`${entry.id}:${nodeId}`} entry={entry} slot="canvas.focus-header"><Component nodeId={nodeId} /></ContributionBoundary>; }) : null}
         </div>
         <div className="focus-workspace__toolbar"><div className="focus-workspace__actions">{actions}</div></div>
         {nodeId ? (

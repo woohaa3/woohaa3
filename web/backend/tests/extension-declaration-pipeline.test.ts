@@ -70,6 +70,9 @@ async function boot(): Promise<ReturnType<BackendService["modules"]>> {
     mediaStorage: memoryStorage() as never,
     enableYjsSync: false
   });
+  // 可选 Provider 并发激活、不阻塞就绪（change: 2026-10-21-harden-extension-fault-isolation，D5）；
+  // 断言注册表前等扩展层全部完成。
+  await service.settled();
   return service.modules();
 }
 

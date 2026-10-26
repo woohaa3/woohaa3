@@ -458,6 +458,13 @@ type RemoteLogInput = {
   modelCount?: number;
   skippedModels?: number;
   catalogRevision?: number;
+  /**
+   * 这一次上游解析看到的远端画布数量（非秘密计数）。
+   *
+   * 「宿主说画布属于远端、扩展却说没有链路」时，0 与 N 指向完全不同的原因：
+   * 0 = 列目录那次没拿到答案（网络/鉴权/缓存），N = 确实没匹配上这张画布。
+   */
+  remoteCount?: number;
 };
 
 /**
@@ -793,9 +800,14 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 但**登录不等于上传**：解析按画布逐个回答，只有「已在远端目录里」或「用户显式启用过」
        * 的画布才拿到链路；其余本地画布返回 null，宿主保持纯本地。
        */
-      const upstreamProvider: CanvasUpstreamProvider = {
-        providerId: REMOTE_SERVER_EXTENSION_ID,
-        async resolve(canvasId: string): Promise<CanvasUpstreamLink | null> {
+      /**
+       * 单张画布的上游解析（按画布回答「要不要给链路」）。
+       *
+       * 放在 provider 之前，是为了让 `resolve` 能整体包一层 try/catch：解析一旦抛错，
+       * 宿主侧会静默当成「这次没有链路」（resolveUpstreamConfig 的 catch），整条上传链路
+       * 就此消失且日志无痕——2026-10-26 现场正是排查不到这一步。
+       */
+      const resolveUpstream = async (canvasId: string): Promise<CanvasUpstreamLink | null> => {
           const session = await sessionSource.current();
           if (!session) {
             // 没有会话是正常形态（= 纯本地），不是错误：用 debug 级别，别在界面上冒充故障。
@@ -830,13 +842,36 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
             return { url: toWsBase(session.serverUrl), token: session.token };
           }
           // c) 缺省：登录 ≠ 上传。这张画布保持本地，宿主按静态配置/纯本地同步。
+          //
+          // 这条分支是「宿主说画布属于远端、扩展却说没有链路」时的唯一解释，因此带上判据：
+          // remoteCount 是这次解析看到的远端画布数，pending=false 表示待同步集合里也没有它。
+          // 没有这两个数，线上只能看到「宿主未连接」而不知道是列目录失败还是确实没启用。
+          // 级别用 info：它只在画布已经归属远端、却拿不到链路时才有解释价值。
           log({
             event: "remote-upstream-local",
-            level: "debug",
+            level: "info",
             reason: "画布未启用远端同步，保持本地",
-            serverUrl: session.serverUrl
+            serverUrl: session.serverUrl,
+            remoteCount: remoteIds.size
           });
           return null;
+      };
+
+      const upstreamProvider: CanvasUpstreamProvider = {
+        providerId: REMOTE_SERVER_EXTENSION_ID,
+        async resolve(canvasId: string): Promise<CanvasUpstreamLink | null> {
+          try {
+            return await resolveUpstream(canvasId);
+          } catch (error) {
+            // 只记错误类型，不记 message（它可能带 URL / query token）。
+            log({
+              event: "remote-upstream-threw",
+              level: "info",
+              code: error instanceof Error && error.name !== "" ? error.name : "unknown",
+              reason: "解析上游时抛出异常，本次按无链路处理"
+            });
+            return null;
+          }
         },
         describe(): string {
           const serverUrl = configuredServerUrl();

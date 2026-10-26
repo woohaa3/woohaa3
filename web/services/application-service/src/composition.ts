@@ -26,6 +26,7 @@ import {
 } from "@woohaa3/contracts";
 import { createApplicationBackendExtensionManifest } from "./extensions/manifest.js";
 import { createApplicationExtensionHost, type ApplicationExtensionHost } from "./extensions/host.js";
+import { registrationHooksFor } from "./extensions/registration-seams.js";
 import { createSiteExtensionControlPlane, type SiteExtensionControlPlane } from "./extensions/control-plane.js";
 import { createSqliteSiteExtensionConfigStore } from "./extensions/config-store.js";
 import { createSqliteExtensionWorkRepository } from "./repository/extension-work-repository.js";
@@ -102,6 +103,12 @@ export type ApplicationServiceOptions = {
    */
   requiredProviders?: RequiredProviderProfiles;
   /**
+   * 站点扩展版本激活时限（毫秒，按调用现取；change: 2026-10-21-harden-extension-fault-isolation，D4）。
+   */
+  extensionActivationTimeoutMs?: () => number;
+  /** 安全模式暂停的扩展（D7）：控制面不激活它们，实际状态投影为 `suspended`。 */
+  suspendedExtensions?: ReadonlySet<string>;
+  /**
    * 显式注入的基础提供者（测试/受控部署）。生产由可信扩展在 activation 中登记；这里只允许
    * 显式 fake/等价实现，不引入隐式回退（change: 2026-10-13-...，design D1「测试可注入明确 fake provider」）。
    */
@@ -146,6 +153,15 @@ export type ApplicationServiceOptions = {
    * 记日志跳过自己的上报能力。core 只持有注册表与总开关，不持有任何目的地配置。
    */
   telemetry?: { register: (provider: import("@woohaa3/contracts").TelemetryExport) => void; unregister: (exportId: string) => void };
+  /**
+   * 市场来源注册面（可选；change: 2026-10-21-add-server-extension-marketplace，D6）。`register` 收到
+   * 扩展 id，由宿主按该扩展的扫描来源做「非内置根拒绝」断言。缺省时站点插件拿不到
+   * `host.registerMarketplaceSource`。
+   */
+  marketplace?: {
+    register: (extensionId: string, source: import("@woohaa3/contracts").MarketplaceSource) => void;
+    unregister: (sourceId: string) => void;
+  };
   /** 受限服务 facade 覆盖（统一后端注入进程内 authoring/秘密仓库）。缺省用网络客户端 facade。 */
   servicesFor?: (extensionId: string, configVersion?: number) => ApplicationExtensionServices;
   /**
@@ -155,6 +171,8 @@ export type ApplicationServiceOptions = {
   diagnostics?: import("@woohaa3/contracts").ApplicationBackendDiagnostics;
   /** 可信清单声明的固定公开路径映射（如 `/api/chatgpt/*`；design D4）。 */
   publicRoutes?: readonly import("@woohaa3/contracts").ApplicationExtensionPublicRouteMapping[];
+  /** 当前浏览器发布目录指针（change: 2026-10-21-add-extension-marketplace-point，6.2）；随状态响应返回。 */
+  extensionRelease?: () => import("@woohaa3/contracts").ApplicationExtensionReleasePointer | null;
   /**
    * 当前公开挂载路径（change: 2026-10-15-support-configurable-app-base-path）。
    * 用于派生对浏览器可见的绝对/公开 URL（外部 MCP 指引、插件 CSP 作用域）。
@@ -193,8 +211,13 @@ export type ApplicationService = {
   readiness: () => Promise<{ ready: boolean; reason?: string }>;
   close: () => Promise<void>;
   plugins: () => SiteExtensionControlPlane;
-  /** 启动时的那次 reconcile 完成（站点插件已按保存的启停状态激活或停用）。 */
+  /**
+   * 宿主就绪门（change: 2026-10-21-harden-extension-fault-isolation，D5）：首次 reconcile 里
+   * **必需提供者**已协调完毕、可选扩展的协调已**发起**。可选扩展完成前保持 configuring 并拒绝新工作。
+   */
   ready: () => Promise<void>;
+  /** 首次 reconcile 全部完成（含可选扩展）；测试与诊断用，宿主就绪不等它。 */
+  settled: () => Promise<void>;
   host: () => ApplicationExtensionHost;
   config: () => ApplicationServiceConfig;
   /** 宿主 Agent 会话/回合服务（change: 2026-10-12-add-agent-conversation-panel）。 */
@@ -343,45 +366,8 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
     registerMediaFormatFor: () => options.mediaFormats ? format => options.mediaFormats!.register(format) : undefined,
     registerProviderFor: () => accessRuntime.enabled ? providers : undefined,
-    ...(options.generation
-      ? {
-          registerGenerationFor: (extensionId: string) => (provider: import("@woohaa3/contracts").GenerationProvider) => {
-            if (provider.extensionId !== extensionId) {
-              throw new Error(`生成 Provider extensionId 不一致：${provider.extensionId} != ${extensionId}`);
-            }
-            options.generation!.register(provider);
-          },
-          releaseGenerationFor: (_extensionId: string) => (providerId: string) => {
-            options.generation!.unregister(providerId);
-          }
-        }
-      : {}),
-    ...(options.storage
-      ? {
-          // 存储后端直接进 core 的注册表：站点插件注册的就是 `storage.primary` / `storage.expose`
-          // 能选中的那个后端，中间不做转发层（那样会出现两份「有哪些后端」的真相）。
-          registerStorageFor: (_extensionId: string) => (backend: import("@woohaa3/contracts").StorageBackend) => {
-            options.storage!.register(backend);
-          },
-          releaseStorageFor: (_extensionId: string) => (backendId: string) => {
-            options.storage!.unregister(backendId);
-          }
-        }
-      : {}),
-    ...(options.telemetry
-      ? {
-          // 遥测出口同样直接进 core 的注册表：core 不挑选目的地，注册即参与投递
-          // （总开关是 `telemetry.export.enabled`）。中间不做转发层，避免两份"有哪些出口"的真相。
-          registerTelemetryExportFor: (
-            _extensionId: string
-          ) => (provider: import("@woohaa3/contracts").TelemetryExport) => {
-            options.telemetry!.register(provider);
-          },
-          releaseTelemetryExportFor: (_extensionId: string) => (exportId: string) => {
-            options.telemetry!.unregister(exportId);
-          }
-        }
-      : {})
+    // 生成 / 存储 / 遥测出口 / 市场来源：站点插件注册的直接进 core 的注册表（见 registration-seams.ts）。
+    ...registrationHooksFor(options)
   });
 
   const extensionControlPlane = createSiteExtensionControlPlane({
@@ -396,6 +382,8 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     // 必需基础提供者 profile（任务 1.5）：控制面据此拒绝在线停用必需 provider。
     requiredProviders,
     ...(options.logger ? { logger: options.logger } : {}),
+    ...(options.extensionActivationTimeoutMs ? { activationTimeoutMs: options.extensionActivationTimeoutMs } : {}),
+    ...(options.suspendedExtensions ? { suspended: options.suspendedExtensions } : {}),
     now
   });
 
@@ -464,6 +452,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     accessRuntime,
     accessEnforcer,
     ...(options.publicRoutes ? { publicRoutes: options.publicRoutes } : {}),
+    ...(options.extensionRelease ? { extensionRelease: options.extensionRelease } : {}),
     ...(options.alternateHandlerBasePaths ? { alternateBasePaths: options.alternateHandlerBasePaths } : {}),
     ...(config.serviceToken ? { serviceToken: config.serviceToken } : {}),
     ...(options.logger ? { logger: options.logger } : {})
@@ -509,7 +498,8 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     },
     readiness,
     plugins: () => extensionControlPlane,
-    ready: () => initialReconcile,
+    ready: () => Promise.race([extensionControlPlane.requiredReconciled(), initialReconcile]),
+    settled: () => initialReconcile,
     host: () => extensionHost,
     config: () => config,
     agentConversations: () => agentConversations,

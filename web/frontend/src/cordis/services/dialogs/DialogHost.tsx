@@ -20,6 +20,8 @@ import { captureFocus, focusInitial, restoreFocus } from "./focus.js";
 import { DialogSurfaceRoot } from "../../../shared/ui/DialogSurface.js";
 import type { DialogInstance } from "./types.js";
 import type { DialogsService } from "../../contracts.js";
+import { Dialog } from "./Dialog.js";
+import { ContributionBoundary } from "../../contribution-boundary.js";
 
 /** 订阅 Host 快照；未变更时返回同一引用（service 保证）。 */
 export function useDialogHost(dialogs: DialogsService): DialogHostSnapshot {
@@ -135,5 +137,26 @@ export function DialogHost({ dialogs, renderDialog }: DialogHostProps) {
 function renderRegistered(dialogs: DialogsService, instance: DialogInstance, api: DialogRendererProps): React.ReactNode {
   const Renderer = dialogs.resolveRenderer(instance.dialogId);
   if (!Renderer) return null;
-  return <Renderer {...api} />;
+  // 扩展注册的弹窗逐项隔离（change: 2026-10-21-harden-extension-fault-isolation）：出错只替换该
+  // 弹窗内容为可关闭的错误卡片；宿主内置弹窗原样渲染。
+  return (
+    <ContributionBoundary entry={Renderer} slot="dialog.renderer" replacement={<DialogRenderFailure api={api} />}>
+      <Renderer {...api} />
+    </ContributionBoundary>
+  );
+}
+
+function DialogRenderFailure({ api }: { api: DialogRendererProps }) {
+  return (
+    <Dialog.Content size="sm" ariaLabel="扩展弹窗渲染失败">
+      <Dialog.Header onClose={api.requestClose}>
+        <Dialog.Title>扩展弹窗渲染失败</Dialog.Title>
+      </Dialog.Header>
+      <Dialog.Body>
+        <p className="render-error-fallback__message" data-diagnostic="extension-render-error" data-slot="dialog.renderer">
+          该扩展的弹窗遇到错误，已停止显示。关闭后可继续使用画布。
+        </p>
+      </Dialog.Body>
+    </Dialog.Content>
+  );
 }

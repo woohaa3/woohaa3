@@ -66,6 +66,7 @@ function finish(child) {
 }
 async function main() {
   env.TAURI_CONFIG = JSON.stringify({ identifier: "com.woohaa.desktop.dev" });
+  const sharedArgs = ["scripts/dev.mjs", "--native", "--frontend-port", String(front), "--backend-port", String(back)];
   let server;
   if (remote) {
     server = launch(process.execPath, ["scripts/dev.mjs", "--native", "--frontend-port", front, "--backend-port", back, "--backend-url", remote, ...(args.includes("--skip-build") ? ["--skip-build"] : []), ...(args.includes("--no-watch") ? ["--no-watch"] : [])]);
@@ -78,8 +79,10 @@ async function main() {
       await finish(launch(process.execPath, ["web/scripts/build-extension-browser.mjs", "--all"]));
     }
     env.WOOHAA3_BACKEND_URL = `http://127.0.0.1:${back}`;
-    server = launch(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", front, "--strictPort"], join(root,"web/frontend"));
+    server = launch(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(front), "--strictPort"], join(root, "web/frontend"));
   }
+  // 后端由 dev.mjs 监督：受控重启（退出码 75）在 dev.mjs 内重新拉起后端，dev.mjs 本身不退出，
+  // 所以这里只需在 dev 会话真正结束时收尾（change: 2026-10-21-harden-extension-fault-isolation，D6）。
   server.once("close", code => { if (!stopping) stop(code || 1); });
   await finish(launch("cargo", ["build", "--bin", "woohaa-desktop"], nativeRoot));
   if (!remote) {

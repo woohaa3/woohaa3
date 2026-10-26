@@ -10,7 +10,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { validateExtensionDescriptor, loadExtensionDescriptor } from "./extension-descriptor.mjs";
+import {
+  HOST_ENGINES,
+  checkEnginesCompatible,
+  isSemver,
+  satisfiesRange,
+  validateExtensionDescriptor,
+  loadExtensionDescriptor
+} from "./extension-descriptor.mjs";
 
 const MINIMAL = { schemaVersion: 1, extensionId: "sample-access" };
 
@@ -175,4 +182,67 @@ test("loadExtensionDescriptor：无声明返回 null，identity 不一致与非�
   const loaded = loadExtensionDescriptor(extension, { repoRoot: root });
   assert.equal(loaded.backend.module, undefined);
   assert.equal(loaded.backend.factory, "createThing");
+});
+
+// ---------------------------------------------------------------------------
+// 分发字段（change: 2026-10-21-add-extension-marketplace-point，任务 1.3）
+// ---------------------------------------------------------------------------
+
+test("分发字段可选：旧扩展声明不受影响", () => {
+  assert.equal(validateExtensionDescriptor(MINIMAL).ok, true);
+  assert.equal(validateExtensionDescriptor(complete()).ok, true);
+});
+
+test("version / engines 合法时通过", () => {
+  const result = validateExtensionDescriptor({
+    ...MINIMAL,
+    version: "1.2.0-beta.1",
+    engines: { hostAbi: "^1.0.0", sdkAbi: ">=1 <2", protocolVersion: 1 }
+  });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test("permissions 已移除：声明它按未知字段拒绝", () => {
+  assert.match(errorsOf({ ...MINIMAL, permissions: { network: ["api.example.com"] } }), /未知字段：permissions/);
+});
+
+test("version 非 semver、engines 缺字段或 range 非法：失败并指出字段", () => {
+  const text = errorsOf({ ...MINIMAL, version: "1.0", engines: { hostAbi: "^1", sdkAbi: "not a range!", protocolVersion: 0, extra: 1 } });
+  assert.match(text, /version 必须是 semver/);
+  assert.match(text, /engines\.sdkAbi 不是合法的 semver range/);
+  assert.match(text, /engines\.protocolVersion 必须是正整数/);
+  assert.match(text, /engines 未知字段：extra/);
+});
+
+test("migrate 只做格式校验（是否允许由受管预检决定）", () => {
+  assert.equal(validateExtensionDescriptor({ ...MINIMAL, migrate: { module: "./backend", export: "migrateData" } }).ok, true);
+  assert.match(errorsOf({ ...MINIMAL, migrate: { module: "https://x", export: "m" } }), /migrate\.module 必须是包内相对子路径/);
+});
+
+test("hostPlugin.kind 接受 marketplace-source", () => {
+  assert.equal(validateExtensionDescriptor({ ...MINIMAL, hostPlugin: { module: "./backend", factory: "createSource", kind: "marketplace-source" } }).ok, true);
+});
+
+test("semver 工具：isSemver 与 range 子集", () => {
+  assert.equal(isSemver("1.2.3"), true);
+  assert.equal(isSemver("1.2"), false);
+  const cases = [
+    ["1.4.0", "^1.2.0", true], ["2.0.0", "^1.2.0", false], ["0.2.5", "^0.2.1", true], ["0.3.0", "^0.2.1", false],
+    ["1.2.9", "~1.2.0", true], ["1.3.0", "~1.2.0", false], ["1.9.0", "1.x", true], ["2.0.0", "1", false],
+    ["1.0.0", ">=1.0.0 <2.0.0", true], ["2.0.0", ">=1.0.0 <2.0.0", false], ["3.1.0", "^1 || ^3", true], ["5.0.0", "*", true],
+    ["1.0.0-beta.1", "^1.0.0", true]
+  ];
+  for (const [version, range, expected] of cases) assert.equal(satisfiesRange(version, range), expected, `${version} ∈ ${range}`);
+  assert.equal(satisfiesRange("1.0.0", "garbage!"), null);
+  assert.equal(satisfiesRange("1.0.0", ""), null);
+});
+
+test("engines 兼容：缺省兼容；主版本或协议不符时给出原因", () => {
+  assert.deepEqual(checkEnginesCompatible(undefined), { ok: true });
+  assert.deepEqual(checkEnginesCompatible({ hostAbi: "^1.0.0", sdkAbi: "^1.0.0", protocolVersion: HOST_ENGINES.protocolVersion }), { ok: true });
+  const result = checkEnginesCompatible({ hostAbi: "^2.0.0", sdkAbi: "^1.0.0", protocolVersion: 99 });
+  assert.equal(result.ok, false);
+  assert.equal(result.reasons.length, 2);
+  assert.match(result.reasons.join("\n"), /hostAbi/);
+  assert.match(result.reasons.join("\n"), /protocolVersion/);
 });

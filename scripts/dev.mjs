@@ -12,6 +12,7 @@ import { resolveAppPageTitle } from "./lib/app-html.mjs";
 import { canBindPort, findPortOwners, freePort } from "./lib/dev-port-guard.mjs";
 import { startHostWatch } from "./lib/dev-host-watch.mjs";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
+import { decideBackendExit, RESTART_LOOP_LIMIT, RESTART_LOOP_WINDOW_MS } from "./lib/dev-restart-policy.mjs";
 import { syncBevyAssets } from "./sync-bevy-assets.mjs";
 import { resolveDevEntryArgs, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
 
@@ -173,13 +174,34 @@ async function rebuildStep(step, target) {
   }
 }
 
-function supervise(name, child) {
+/**
+ * @param {string} name
+ * @param {import("node:child_process").ChildProcess} child
+ * @param {{ relaunch?: () => import("node:child_process").ChildProcess, restarts?: number[] }} [options]
+ *   relaunch：受控重启（退出码 75）时重新拉起同一条命令；不提供则任何退出都结束会话。
+ */
+function supervise(name, child, options = {}) {
   child.once("error", (error) => {
     console.error(`[dev] ${name} 启动失败：${error.message}`);
     void stop(1);
   });
   child.once("close", (code, signal) => {
     if (stopping) return;
+    if (options.relaunch) {
+      const restarts = options.restarts ?? [];
+      const decision = decideBackendExit({ restarts }, { code, signal, stopping });
+      if (decision.action === "ignore") return;
+      if (decision.action === "restart") {
+        console.log(`[dev] ${name} 请求重启（退出码 75），重新拉起（第 ${decision.attempt} 次）`);
+        supervise(name, options.relaunch(), { ...options, restarts });
+        return;
+      }
+      if (decision.reason === "restart-loop") {
+        console.error(`[dev] ${name} 在 ${RESTART_LOOP_WINDOW_MS / 1000} 秒内连续 ${RESTART_LOOP_LIMIT} 次请求重启，按崩溃处理并关闭开发服务器`);
+        void stop(decision.code);
+        return;
+      }
+    }
     console.error(`[dev] ${name} 已退出（${signal ?? code}），关闭开发服务器`);
     void stop(code || 1);
   });
@@ -292,12 +314,15 @@ async function main() {
 
   console.log(`[dev] 前端：http://localhost:${frontendPort}${basePath === "/" ? "" : basePath} → 后端：${backendUrl}`);
   // node --watch：宿主崩溃或改坏代码时不结束会话，等待文件变化后自动重启（输出保留在终端）。
+  // 退出码 75（受控重启，change: 2026-10-21-harden-extension-fault-isolation）：重新拉起同一条命令，
+  // 会话不结束；连续重启循环按崩溃处理（见 lib/dev-restart-policy.mjs）。
   const backendWatchArgs = process.platform === "win32"
     ? ["--watch", `--watch-path=${backendEntry}`, "--watch-preserve-output", backendEntry]
     : ["--watch", "--watch-preserve-output", backendEntry];
-  supervise("backend", start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
+  const startBackend = () => start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
     env: { ...serviceEnv, WOOHAA3_BASE_PATH: basePath, PORT: String(backendPort), BACKEND_PORT: String(backendPort) }
-  }));
+  });
+  supervise("backend", startBackend(), { relaunch: startBackend });
   // 显式监听 IPv4，避免容器禁用 IPv6 回环时 ATC 无法连接通配地址。
   supervise("frontend", start(process.execPath, [vite, "--host", "0.0.0.0", "--port", String(frontendPort), "--strictPort"], {
     cwd: path.join(root, "web/frontend"),

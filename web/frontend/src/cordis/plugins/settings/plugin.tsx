@@ -31,6 +31,11 @@ import { createSettingsEditSession, type SettingsEditSession } from "./edit-sess
 import type { SettingsPanelSource } from "./plugin-panels.js";
 import { SETTINGS_DIALOG_ID, SETTINGS_DIALOG_TITLE_ID, SettingsDialogChrome } from "./workspace/settings-dialog-chrome.js";
 import { SETTINGS_ENTRY_PLUGIN_ID } from "./entry.js";
+import { createExtensionInstallRemote } from "../../services/extension-install-remote.js";
+import { createManagedExtensionsController } from "./managed-extensions.js";
+import { createMarketplaceInstallController, TRUSTED_KEYS_SETTING } from "./marketplace-install.js";
+import { createMarketplaceRemote } from "../../services/marketplace-remote.js";
+import type { ManagedExtensionsSource } from "./plugin-settings-section.js";
 
 export const SETTINGS_PLUGIN_ID = "settings";
 export { SETTINGS_DIALOG_ID, SETTINGS_DIALOG_TITLE_ID, SETTINGS_ENTRY_PLUGIN_ID };
@@ -96,7 +101,8 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
           ctx.slots.list("settings.plugin-config").map((entry) => ({
             id: entry.id,
             pluginId: entry.pluginId,
-            render: entry.render
+            render: entry.render,
+            source: entry
           })),
         subscribe: (listener) => ctx.slots.subscribe("settings.plugin-config", listener),
         version: () => ctx.slots.version()
@@ -129,6 +135,70 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
         ...(generationModels ? { generationModels } : {})
       });
       const unsubscribeBackend = backend.subscribe((...args) => notify(...args));
+
+      // 受管扩展（change: 2026-10-21-add-extension-marketplace-point，7.2）：任务进度与卡片操作。
+      // 任务终态后重取设置与插件状态（新扩展的启停/版本以权威快照为准）。
+      const managedController = createManagedExtensionsController({
+        remote: createExtensionInstallRemote(),
+        reload: async () => {
+          await backend.load();
+          await statusService?.refresh();
+        }
+      });
+      const unsubscribeManagedAdopt = backend.subscribe(() => {
+        const state = backend.getState();
+        managedController.adoptSnapshot(state.status === "ready" ? state.snapshot : null);
+      });
+      // 当前页面仍在用旧版本的扩展（升级/卸载不热换），来自 `extension.release.changed`。
+      let pendingReopen: readonly string[] = [];
+      let latestRelease: { releaseId: string; href: string } | null = null;
+      const pendingListeners = new Set<() => void>();
+      const offReleaseChanged = ctx.on("extension.release.changed", (payload) => {
+        pendingReopen = [...payload.pendingReopen];
+        latestRelease = { releaseId: payload.releaseId, href: payload.href };
+        for (const listener of [...pendingListeners]) listener();
+      });
+      // 「重新打开画布」复用 P0 的 HostConnectivity 提示路径：先 repin 新 release，再只重建 Canvas scope。
+      const hostConnectivity = service<{
+        offerRelease(next: { releaseId: string; href: string }): void;
+        reopenCanvas(): Promise<void>;
+      }>("hostConnectivity");
+      // 「从市场安装」（change: 2026-10-21-add-server-extension-marketplace，7.5）：受理后交给同一任务列表。
+      const marketplaceController = createMarketplaceInstallController({
+        remote: createMarketplaceRemote(),
+        onJob: (jobId, job) => managedController.track(jobId, job),
+        readTrustedKeys: () => {
+          const state = backend.getState();
+          const entry = state.status === "ready" ? state.snapshot.settings.find((item) => item.key === TRUSTED_KEYS_SETTING) : undefined;
+          return typeof entry?.value === "string" ? entry.value : "";
+        },
+        writeSetting: async (key, value) => {
+          const result = await (settingsRemote ?? unavailableSettingsRemote).write({ [key]: value });
+          if (!result.ok) return { ok: false, error: result.error };
+          await backend.load();
+          return { ok: true };
+        }
+      });
+      const managed: ManagedExtensionsSource = {
+        controller: managedController,
+        marketplace: marketplaceController,
+        pendingReopen: {
+          get: () => pendingReopen,
+          subscribe: (listener) => {
+            pendingListeners.add(listener);
+            return () => pendingListeners.delete(listener);
+          }
+        },
+        ...(hostConnectivity
+          ? {
+              reopenCanvas: async () => {
+                if (!latestRelease) return;
+                hostConnectivity.offerRelease(latestRelease);
+                await hostConnectivity.reopenCanvas();
+              }
+            }
+          : {})
+      };
 
       /** 当前打开的设置实例（singleton；关闭即丢弃）。 */
       let instance: SettingsInstance | null = null;
@@ -278,6 +348,7 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
                 theme={ctx.theme}
                 extensions={facade}
                 settingsPanels={settingsPanels}
+                managed={managed}
                 {...(notifications ? { notifications } : {})}
                 onRequestClose={requestClose}
                 onRequestNavigate={async () => {
@@ -353,6 +424,10 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
           disposeDialog();
           disposeGuard();
           unsubscribeBackend();
+          unsubscribeManagedAdopt();
+          offReleaseChanged();
+          pendingListeners.clear();
+          managedController.dispose();
           dispose();
           disposeInstance();
           options.extensionSettings?.dispose();

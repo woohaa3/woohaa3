@@ -1,0 +1,16 @@
+{
+  "name": "@woohaa3/extension-fixture-crashy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "扩展市场测试 fixture：按请求崩溃 / 死循环 / 内存超限的 Provider。",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend.ts"
+    }
+  },
+  "scripts": {
+    "build:backend": "node ../../../../web/scripts/build-extension-backend.mjs",
+    "pack:extension": "node ../../../pack-extension.mjs ."
+  }
+}

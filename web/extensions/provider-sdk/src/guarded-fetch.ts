@@ -124,40 +124,12 @@ function assertAllowedHost(url: URL): void {
     throw new Error(`受控下载：只允许 https（收到 ${url.protocol}）`);
   }
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "" || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
+  if (host === "" || isLocalHostname(host)) {
     throw new Error("受控下载：拒绝本机主机名");
   }
   if (isPrivateIpv4(host) || isPrivateIpv6(host)) {
     throw new Error("受控下载：拒绝私网地址");
   }
-}
-
-function isPrivateIpv4(host: string): boolean {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!match) return false;
-  const octets = match.slice(1).map(Number);
-  if (octets.some((value) => value > 255)) return true;
-  const [a, b] = octets;
-  if (a === 0 || a === 10 || a === 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  return false;
-}
-
-function isPrivateIpv6(host: string): boolean {
-  if (!host.includes(":")) return false;
-  // ::1 回环、fc00::/7 唯一本地、fe80::/10 链路本地。
-  return (
-    host === "::1" ||
-    host.startsWith("fc") ||
-    host.startsWith("fd") ||
-    host.startsWith("fe8") ||
-    host.startsWith("fe9") ||
-    host.startsWith("fea") ||
-    host.startsWith("feb")
-  );
 }
 
 /** 流式读取并强制字节上限；超限即中止，而不是读完再判断。 */
@@ -210,4 +182,67 @@ function safeUrl(value: string): URL | null {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// 本机 / 私网判定（受控下载的 SSRF 防护）
+//
+// 与进程边界无关：Provider 下载的是上游返回的任意 URL，必须拒绝把它指到回环、私网、
+// 链路本地或云元数据地址。对外只经 `assertPublicHttpsUrl` 暴露。
+// ---------------------------------------------------------------------------
+
+function normalizeHost(value: string): string {
+  return value.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+}
+
+/** 本机 / mDNS 主机名。 */
+function isLocalHostname(host: string): boolean {
+  const value = normalizeHost(host);
+  return value === "localhost" || value.endsWith(".localhost") || value.endsWith(".local");
+}
+
+function parseIpv4(host: string): number[] | null {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!match) return null;
+  const octets = match.slice(1).map(Number);
+  return octets.some((value) => value > 255) ? null : octets;
+}
+
+/** IPv4 字面量是否为回环 / 私网 / 链路本地 / CGNAT / 保留。非 IPv4 返回 false；超范围八位组按不安全处理。 */
+function isPrivateIpv4(host: string): boolean {
+  const value = normalizeHost(host);
+  if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(value) && parseIpv4(value) === null) return true;
+  const octets = parseIpv4(value);
+  if (!octets) return false;
+  const [a, b] = octets;
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 192 && b === 0 && octets[2] === 0) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a >= 224) return true; // 组播与保留
+  return false;
+}
+
+/** IPv6 字面量是否为回环 / 未指定 / 唯一本地 / 链路本地，或映射到私网 IPv4。非 IPv6 返回 false。 */
+function isPrivateIpv6(host: string): boolean {
+  const value = normalizeHost(host);
+  if (!value.includes(":")) return false;
+  if (value === "::1" || value === "::" || /^0*:0*:0*:0*:0*:0*:0*:0*1$/.test(value)) return true;
+  const mapped = /^(?:0*:)*:?ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(value);
+  if (mapped) return isPrivateIpv4(mapped[1]);
+  const mappedHex = /^(?:0*:)*:?ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(value);
+  if (mappedHex) {
+    const high = parseInt(mappedHex[1], 16);
+    const low = parseInt(mappedHex[2], 16);
+    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
+  const first = value.split(":")[0] ?? "";
+  const head = parseInt(first.length === 0 ? "0" : first, 16);
+  if ((head & 0xfe00) === 0xfc00) return true; // fc00::/7
+  if ((head & 0xffc0) === 0xfe80) return true; // fe80::/10
+  if ((head & 0xff00) === 0xff00) return true; // 组播
+  return false;
 }

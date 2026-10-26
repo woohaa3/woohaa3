@@ -108,6 +108,8 @@ export function siteActualStateLabel(actualState: string): string {
       return "激活失败";
     case "draining":
       return "正在收尾（draining）";
+    case "suspended":
+      return "安全模式下已暂停";
     default:
       return "未知状态";
   }
