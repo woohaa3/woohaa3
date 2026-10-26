@@ -10,11 +10,9 @@
  * 宿主缺失时不注册任何扩展（只记录一条日志），让测试/嵌入式用法不受影响；声明非法、跨根
  * 重复 identity 等由宿主抛出，进程入口据此 fail-fast。
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { parse as parseYaml } from "yaml";
-import { resolveSettingsFiles } from "../settings/settings-service.js";
 
 import type { LoadedExtensionHost } from "./manifest.js";
 
@@ -49,25 +47,6 @@ export function resolveExtensionHostModule({
   }
 }
 
-/**
- * 本机设置 `extensions.host.isolation`（change: 2026-10-21-isolate-extension-host-process，D1/D10）。
- *
- * 扩展宿主在设置服务之前加载，因此这里直接读配置文件（只读这一键，不做完整校验）。返回 undefined
- * 表示未设置：由宿主按 `WOOHAA3_EXTENSION_HOST_ISOLATION` 与缺省（开启）决定。读失败按未设置处理。
- */
-export function readIsolationSetting(env: ExtensionHostEnv, cwd = process.cwd()): boolean | undefined {
-  try {
-    const { configFile } = resolveSettingsFiles(env, cwd);
-    if (!existsSync(configFile)) return undefined;
-    const document = parseYaml(readFileSync(configFile, "utf8")) as Record<string, unknown> | null;
-    const extensions = document?.extensions as { host?: { isolation?: unknown } } | undefined;
-    const flat = document?.["extensions.host.isolation"];
-    const value = extensions?.host?.isolation ?? flat;
-    return typeof value === "boolean" ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * 按环境加载启动期扩展宿主。返回 `undefined` 表示宿主不可用（未找到模块），本次启动不加载扩展。
@@ -75,15 +54,12 @@ export function readIsolationSetting(env: ExtensionHostEnv, cwd = process.cwd())
 export async function loadExtensionHostFromEnv({
   logger,
   env = process.env,
-  safeMode = false,
-  isolation
+  safeMode = false
 }: {
   logger?: (event: Record<string, unknown>) => void;
   env?: ExtensionHostEnv;
   /** 启动守卫判定的安全模式（D7）：只装配 bootstrap 槽位实现与 required 扩展。 */
   safeMode?: boolean;
-  /** 受管扩展是否进程隔离；缺省读本机设置 `extensions.host.isolation`，环境变量覆盖由宿主处理。 */
-  isolation?: boolean;
 } = {}): Promise<LoadedExtensionHost | undefined> {
   const repoRoot = env.WOOHAA3_REPO_ROOT && env.WOOHAA3_REPO_ROOT.trim().length > 0 ? path.resolve(env.WOOHAA3_REPO_ROOT) : process.cwd();
   const resolved = resolveExtensionHostModule({ repoRoot, env });
@@ -94,8 +70,6 @@ export async function loadExtensionHostFromEnv({
   const hostModule = (await import(pathToFileURL(resolved.modulePath).href)) as {
     loadExtensionHost: (input: { repoRoot: string; env: ExtensionHostEnv; logger?: (event: Record<string, unknown>) => void; safeMode?: boolean; isolation?: boolean }) => Promise<LoadedExtensionHost>;
   };
-  // 环境变量 WOOHAA3_EXTENSION_HOST_ISOLATION 优先于本机设置（排障开关）；都没有时宿主缺省开启。
-  const envOverride = typeof env.WOOHAA3_EXTENSION_HOST_ISOLATION === "string" && env.WOOHAA3_EXTENSION_HOST_ISOLATION.trim() !== "";
-  const effective = isolation ?? (envOverride ? undefined : readIsolationSetting(env));
-  return await hostModule.loadExtensionHost({ repoRoot: resolved.hostRoot, env, logger, safeMode, ...(effective !== undefined ? { isolation: effective } : {}) });
+  // 进程隔离已随 C 方向删除：宿主模块的 resolveIsolation() 恒为 false，这里不再传 isolation。
+  return await hostModule.loadExtensionHost({ repoRoot: resolved.hostRoot, env, logger, safeMode });
 }

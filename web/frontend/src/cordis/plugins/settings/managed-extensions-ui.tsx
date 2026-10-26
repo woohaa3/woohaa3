@@ -7,10 +7,9 @@
  *   内置根扩展（`managed !== true`）不渲染任何入口；
  * - `ReleaseChangedNotice`：已打开页面的升级/卸载不热换，提示重开画布。
  *
- * 子进程隔离（change: 2026-10-21-isolate-extension-host-process，任务 9.1–9.2 / design D4、D7、D10）：
- * - 卡片显示隔离方式（独立进程 / 未隔离）、崩溃次数与崩溃隔离状态，隔离中提供「解除隔离」；
- * - 隔离开启时权限标注「已强制」，画布 / MCP 工具声明标注「本期未支持」；未隔离时注明「声明项，未强制」；
- * - 隔离开启的含后端扩展升级走蓝绿切换，卡片不再显示「需重启」（宿主也不再置 restartRequired）。
+ * C 方向（子进程隔离已取消）：后端扩展与宿主同进程，含后端代码的升级走**进程内热切换**，
+ * 因此卡片默认不显示「需重启」；只有没装配扩展层的最小组合才会置 restartRequired，此时才出现
+ * 「立即重启」。崩溃隔离、解除隔离、权限强制标注与蓝绿切换都随子进程一起删除。
  */
 import { useRef, useState, useSyncExternalStore } from "react";
 import type { InstalledExtensionView, SettingsSnapshot } from "@woohaa3/contracts";
