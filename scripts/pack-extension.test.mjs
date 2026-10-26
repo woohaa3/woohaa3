@@ -46,8 +46,8 @@ test("rewriteDescriptorForPackage：后端模块改写到单文件产物，补�
   assert.equal(next.metadata.module, "./backend-dist/entry");
   assert.equal(next.publicRoutes[0].module, "./backend-dist/entry");
   assert.equal(next.version, "1.2.3");
-  assert.deepEqual(packagedPackageJson({ name: "@woohaa3/extension-x", dependencies: { a: "workspace:*" }, scripts: {} }, { version: "1.2.3", hasBackend: true }), {
-    name: "@woohaa3/extension-x", version: "1.2.3", private: true, type: "module", exports: { "./backend-dist/entry": "./backend-dist/entry.mjs" }
+  assert.deepEqual(packagedPackageJson({ name: "@woohaa3/extension-x", displayName: "演示扩展", dependencies: { a: "workspace:*" }, scripts: {} }, { version: "1.2.3", hasBackend: true }), {
+    name: "@woohaa3/extension-x", displayName: "演示扩展", version: "1.2.3", private: true, type: "module", exports: { "./backend-dist/entry": "./backend-dist/entry.mjs" }
   });
 });
 
@@ -61,6 +61,8 @@ test("打包含后端 fixture：签名包可解包、校验、通过受管预检
   assert.equal(packed.requiresRestart, true);
   assert.ok(packed.files.some((file) => file.path === "backend-dist/entry.mjs"));
   assert.ok(!packed.files.some((file) => file.path.startsWith("src/")), "源码不进包");
+  // 声明了 icon.asset 的扩展也会走品牌图形探测；缺 fs 导入时打包会在这一步抛 ReferenceError。
+  assert.ok(packed.files.some((file) => file.path === "assets/icon.png"), "品牌图形随包发布");
 
   const managedRoot = path.join(work, "managed");
   const handle = openInstallations({ managedRoot });

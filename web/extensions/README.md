@@ -176,6 +176,8 @@ pnpm pack:extension <扩展目录> --key ./my-signing.key       # build:browser 
 
 包内容：改写后的 `extension.json`（补齐 `version` / `engines`）、`package.json`、`browser-dist/`、`backend-dist/entry.mjs`（单文件，`@woohaa3/contracts` 内联，React / extension-api 走宿主运行时）、`FILES.json`（逐文件 SHA-256）与 `SIGNATURE`。
 
+市场目录的展示名取 `package.json.displayName`（缺省回落 `extension.json` 的 `site.name`，再回落 extensionId），描述取 `package.json.description`（`site.description` 优先）。纯后端插件不需要为了展示名补 `site` 段。
+
 安装：设置弹窗「插件配置」→「从文件安装」，或 `POST /api/extensions/install`（`application/octet-stream`）。本机信任根是 `extensions.marketplace.trustedKeys`（`<别名>=<公钥>`，公钥可为 PEM、base64 SPKI 或 32 字节原始公钥），签名不在信任根里的包一律拒绝。未签名包只在本机显式允许（`extensions.marketplace.allowUnsigned` 或 `WOOHAA3_EXTENSION_ALLOW_UNSIGNED=1`）时、且只对本地文件生效。
 
 | 受管扩展可以 | 受管扩展不可以（预检拒绝） |
