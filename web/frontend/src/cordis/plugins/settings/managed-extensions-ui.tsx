@@ -151,6 +151,14 @@ export function ManagedExtensionDetails({
             （与本机宿主同权限，不是沙箱）
           </span>
         </dd>
+        {installed.builtinVersion ? (
+          <>
+            <dt>内置版本</dt>
+            <dd data-testid={`managed-builtin-${id}`}>
+              当前受管版本覆盖内置 v{installed.builtinVersion}；卸载后回到内置版本
+            </dd>
+          </>
+        ) : null}
         {installed.observeUntil ? (
           <>
             <dt>观察期</dt>

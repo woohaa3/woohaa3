@@ -199,8 +199,10 @@ change: 2026-10-21-add-server-extension-marketplace（设计见 [server-extensio
 
 1. **打包签名**：`pnpm pack:extension <扩展目录> --key ./my-signing.key`。服务端只收已签名的包，本机的「允许未签名」开关对服务端无效；签名公钥须由服务端管理员加入 `marketplace.signing_keys`。
 2. **提交与审核**：上传 `.wxt` 后提交（需要 `marketplace.publish`），版本进入「待审核」；管理端「扩展市场」页由持有 `marketplace.review` 的管理员通过、拒绝（必填理由）或撤回。拒绝与撤回都是终态，同一版本号不能复用，重新发布要升版本。
-3. **客户端信任**：服务端公开它接受的发布公钥，客户端**只展示** keyId，不会自动信任——本机管理员要在 woohaa-server 来源上确认「信任此公钥」，写入本机 `extensions.marketplace.trustedKeys`。
+3. **客户端信任**：官方市场的发布公钥随客户端发布内置（dev / Web release / 桌面宿主同一份后端代码），因此官方包不需要再手工配置；本机 `extensions.marketplace.trustedKeys` 只能**追加**其它发布者，不能移除内置官方 key。服务端 `GetMarketplaceInfo` 下发的其它公钥仍然只展示，管理员确认后才会写入。
 4. **从市场安装**：设置「插件配置 → 从市场安装」，或 `POST /api/extensions/install` 的 `{ sourceId: "woohaa-server", extensionId, range }`。安装仍走同一条校验链（摘要、签名、预检），服务端返回的审核状态与 keyId 不参与信任判断。
+5. **内置插件升级**：dev、Web release 与桌面宿主都带内置插件；市场版本按**严格 semver** 与内置分发版本（`extension.json.version`，否则 `package.json.version`）比较。只有市场版本更高时才允许安装并覆盖同 id 内置版本；相同或更低版本会被 `MARKETPLACE_BUILTIN_CONFLICT` 拒绝。卸载覆盖版本后回到内置版本（能热切换时立即恢复，否则下一次启动）。站点后端（`backend` 工厂）暂不支持覆盖升级。计划经市场发布的内置插件应让分发版本与 `site.version` / provider metadata 的 `version` 保持一致，否则设置面可能同时显示站点版本与内置包版本。
+6. **发布者绑定**：内置扩展只接受官方发布者 key 的覆盖；已安装受管扩展绑定首次安装的签名 key（TOFU），后续更新 key 变了会被 `MARKETPLACE_PUBLISHER_CHANGED` 拒绝，需要先卸载再安装。未签名本地包不能升级已签名扩展。
 
 撤回立即阻止新的解析与下载（含未过期的下载地址），但**不会**卸载已安装的副本。
 

@@ -74,6 +74,8 @@ export const MARKETPLACE_FAILURE_CODES = [
   "MARKETPLACE_ENGINES_INCOMPATIBLE",
   "MARKETPLACE_DEPENDENCY_UNSATISFIED",
   "MARKETPLACE_BUILTIN_CONFLICT",
+  /** 更新包的签名发布者与已安装版本（或内置官方发布者）不一致。 */
+  "MARKETPLACE_PUBLISHER_CHANGED",
   "MARKETPLACE_DOWNLOAD_FAILED",
   "MARKETPLACE_PACKAGE_TOO_LARGE",
   "MARKETPLACE_DIGEST_MISMATCH",
@@ -210,6 +212,15 @@ export type MarketplaceExtensionDetailView = {
   readonly trustedKeyIds: readonly string[];
   /** 来源声明的发布公钥（只用于「信任此公钥」入口展示指纹；不自动信任）。 */
   readonly signingKeys: readonly (MarketplaceSigningKey & { readonly trusted: boolean })[];
-  /** 本机已安装的受管版本（若有）。 */
+  /**
+   * 本机当前生效的版本（受管优先；没有受管版本时取内置版本）。
+   * 内置与受管同 id 时，只有更高的受管版本才会覆盖内置版本。
+   */
   readonly installedVersion?: string;
+  /** 当前生效版本来自哪里：`builtin` 为随客户端打包的内置版本，`managed` 为市场安装的受管版本。 */
+  readonly installedKind?: "builtin" | "managed";
+  /** 来源当前可安装的最高已审核版本（仅展示；撤回/待审不参与）。 */
+  readonly latestVersion?: string;
+  /** 是否存在比本机当前版本更高的可安装版本（严格 semver）。 */
+  readonly updateAvailable?: boolean;
 };

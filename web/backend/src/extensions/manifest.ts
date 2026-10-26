@@ -77,6 +77,17 @@ export type LoadedExtensionHost = {
   /** 受管安装根（change: 2026-10-21-add-extension-marketplace-point，D7）；Extension Manager 据此定位。 */
   managedRoot?: string;
   /**
+   * 内置根里可参与市场升级比较的扩展（即使某个 id 已被更高的受管版本覆盖也保留）。
+   * 版本是分发版本（extension.json.version / package.json.version），与 .wxt 包版本同口径。
+   */
+  builtinExtensions?: readonly {
+    extensionId: string;
+    version: string;
+    directory: string;
+    requiresBackend: boolean;
+    hotSwappable: boolean;
+  }[];
+  /**
    * 扫描到并装配的扩展注册记录（只读）：宿主据 `managed` / `rootWritable` 判断扩展来源
    * （change: 2026-10-21-add-server-extension-marketplace，D6 的站点扩展来源断言）。
    */

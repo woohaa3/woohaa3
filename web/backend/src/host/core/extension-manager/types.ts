@@ -10,6 +10,22 @@ import type { AnyHostExtensionPlugin, ExtensionEngines, ExtensionTrust } from "@
 
 export type TrustedKey = { keyId: string; publicKey: string };
 
+/**
+ * 内置根里与市场版本可比较的扩展（dev / release / 桌面宿主都从同一份扫描结果生成）。
+ *
+ * - `version` 是**分发版本**（`extension.json.version` 优先，否则 `package.json.version`），
+ *   与 `pack:extension` 打进 `.wxt` 的版本是同一个口径；
+ * - `requiresBackend` / `hotSwappable` 用来决定同 id 受管版本能否覆盖内置版本：
+ *   纯前端或 hostPlugin 可以在运行期切换；站点后端（`backend`）暂不支持覆盖升级。
+ */
+export type BuiltinExtension = {
+  extensionId: string;
+  version: string;
+  directory: string;
+  requiresBackend: boolean;
+  hotSwappable: boolean;
+};
+
 export type PreflightResult = {
   ok: boolean;
   errors: Array<{ code?: string; message: string }>;

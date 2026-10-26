@@ -124,7 +124,7 @@ type Harness = {
   marketplace: ReturnType<typeof createMarketplaceRegistry>;
 };
 
-async function harness(overrides: Partial<ExtensionManagerDeps> & { trustedKeys?: Array<{ keyId: string; publicKey: string }>; allowUnsignedLocal?: boolean; builtin?: string[] } = {}): Promise<Harness> {
+async function harness(overrides: Partial<ExtensionManagerDeps> & { trustedKeys?: Array<{ keyId: string; publicKey: string }>; allowUnsignedLocal?: boolean; builtin?: string[]; builtinVersion?: string; builtinRequiresBackend?: boolean; builtinHotSwappable?: boolean; officialPublisherKeys?: string[] } = {}): Promise<Harness> {
   await setup();
   const managedRoot = temp("mgr-root-");
   const published: Array<Record<string, unknown>> = [];
@@ -139,7 +139,20 @@ async function harness(overrides: Partial<ExtensionManagerDeps> & { trustedKeys?
       toolkit,
       marketplace,
       trust: () => ({ trustedKeys: overrides.trustedKeys ?? [], allowUnsignedLocal: overrides.allowUnsignedLocal ?? false }),
-      builtinIds: () => new Set(overrides.builtin ?? []),
+      ...(overrides.officialPublisherKeys ? { officialPublisherKeyIds: () => new Set(overrides.officialPublisherKeys) } : {}),
+      builtins: () =>
+        new Map(
+          (overrides.builtin ?? []).map((id) => [
+            id,
+            {
+              extensionId: id,
+              version: overrides.builtinVersion ?? "0.0.0",
+              directory: path.join(managedRoot, "builtin", id),
+              requiresBackend: overrides.builtinRequiresBackend === true,
+              hotSwappable: overrides.builtinHotSwappable !== false
+            }
+          ])
+        ),
       publishBrowserRelease: async (change) => {
         published.push(change);
         return { releaseId: `r${published.length}`, href: `/extension-releases/r${published.length}.json`, changed: true };
@@ -254,10 +267,71 @@ describe("Extension Manager", () => {
     expect(broken.failure?.issues?.length).toBeGreaterThan(0);
   });
 
-  it("与内置扩展同 id → MARKETPLACE_BUILTIN_CONFLICT", async () => {
+  it("与内置扩展同 id：不高于内置版本 → MARKETPLACE_BUILTIN_CONFLICT；严格更高且官方签名 → 允许覆盖", async () => {
     await setup();
-    const h = await harness({ allowUnsignedLocal: true, builtin: ["demo"] });
-    expect((await installFile(h, packTree(extensionTree(), null).file)).failure?.code).toBe("MARKETPLACE_BUILTIN_CONFLICT");
+    const same = await harness({ allowUnsignedLocal: true, builtin: ["demo"], builtinVersion: "1.0.0" });
+    expect((await installFile(same, packTree(extensionTree(), null).file)).failure?.code).toBe("MARKETPLACE_BUILTIN_CONFLICT");
+    const older = await harness({ allowUnsignedLocal: true, builtin: ["demo"], builtinVersion: "2.0.0" });
+    expect((await installFile(older, packTree(extensionTree(), null).file)).failure?.code).toBe("MARKETPLACE_BUILTIN_CONFLICT");
+    const key = keys();
+    const newer = await harness({
+      trustedKeys: [{ keyId: key.keyId, publicKey: key.raw }],
+      builtin: ["demo"],
+      builtinVersion: "0.9.0",
+      officialPublisherKeys: [key.keyId]
+    });
+    expect((await installFile(newer, packTree(extensionTree(), key.privateKey).file)).outcome).toBe("installed");
+    const unsigned = await harness({ allowUnsignedLocal: true, builtin: ["demo"], builtinVersion: "0.9.0" });
+    expect((await installFile(unsigned, packTree(extensionTree(), null).file)).failure?.code).toBe("MARKETPLACE_PUBLISHER_CHANGED");
+  });
+
+  it("内置版本被更高受管版本覆盖：安装把内置目录当回退，卸载后热切回内置", async () => {
+    await setup();
+    const swaps: Array<{ id: string; dir: string | null; previous: string | null }> = [];
+    const runtime = {
+      available: () => true,
+      swap: async (id: string, dir: string, _version: string, previous: string | null) => {
+        swaps.push({ id, dir, previous });
+        return { swapped: true };
+      },
+      remove: async () => undefined
+    };
+    const key = keys();
+    const h = await harness({
+      trustedKeys: [{ keyId: key.keyId, publicKey: key.raw }],
+      builtin: ["demo"],
+      builtinVersion: "0.9.0",
+      builtinRequiresBackend: true,
+      builtinHotSwappable: true,
+      officialPublisherKeys: [key.keyId],
+      runtime
+    });
+    await installFile(h, packTree(extensionTree({ backend: true }), key.privateKey).file);
+    const builtinDir = path.join(h.managedRoot, "builtin", "demo");
+    const managedDir = path.join(h.managedRoot, "installed/demo/1.0.0");
+    expect(swaps[0]).toEqual({ id: "demo", dir: managedDir, previous: builtinDir });
+
+    const job = h.manager.uninstall("demo", { actor: "tester" });
+    const done = await h.manager.wait(job.jobId);
+    expect(done?.outcome).toBe("installed");
+    expect(swaps.at(-1)).toEqual({ id: "demo", dir: builtinDir, previous: managedDir });
+    expect(installations(h.managedRoot).extensions.demo).toBeUndefined();
+  });
+
+  it("已安装扩展的发布者 key 变更 → MARKETPLACE_PUBLISHER_CHANGED，指针不变", async () => {
+    await setup();
+    const first = keys();
+    const second = keys();
+    const h = await harness({
+      trustedKeys: [
+        { keyId: first.keyId, publicKey: first.raw },
+        { keyId: second.keyId, publicKey: second.raw }
+      ]
+    });
+    expect((await installFile(h, packTree(extensionTree({ version: "1.0.0" }), first.privateKey).file)).outcome).toBe("installed");
+    const changed = await installFile(h, packTree(extensionTree({ version: "1.1.0" }), second.privateKey).file);
+    expect(changed.failure?.code).toBe("MARKETPLACE_PUBLISHER_CHANGED");
+    expect(installations(h.managedRoot).extensions.demo.current).toBe("1.0.0");
   });
 
   it("重复安装同一内容 → already-current，不推进 revision；同版本不同内容 → MARKETPLACE_VERSION_CONTENT_CONFLICT", async () => {
@@ -330,7 +404,7 @@ describe("Extension Manager", () => {
     fs.mkdirSync(path.join(h.managedRoot, "staging", "crashed-job", "tree"), { recursive: true });
     const handle = toolkit.openInstallations({ managedRoot: h.managedRoot, lock: true });
     const next = createExtensionManager(
-      { managedRoot: h.managedRoot, toolkit, marketplace: createMarketplaceRegistry(), trust: () => ({ trustedKeys: [], allowUnsignedLocal: true }), builtinIds: () => new Set(), now: () => new Date(h.now.value), observeMs: 60_000 },
+      { managedRoot: h.managedRoot, toolkit, marketplace: createMarketplaceRegistry(), trust: () => ({ trustedKeys: [], allowUnsignedLocal: true }), builtins: () => new Map(), now: () => new Date(h.now.value), observeMs: 60_000 },
       handle
     );
     managers.push(next);
@@ -480,7 +554,7 @@ describe("Extension Manager", () => {
   it("没有受管根句柄时：安装直接失败为 MARKETPLACE_UNAVAILABLE", async () => {
     await setup();
     const manager = createExtensionManager(
-      { managedRoot: "/nonexistent", toolkit, marketplace: createMarketplaceRegistry(), trust: () => ({ trustedKeys: [], allowUnsignedLocal: false }), builtinIds: () => new Set() },
+      { managedRoot: "/nonexistent", toolkit, marketplace: createMarketplaceRegistry(), trust: () => ({ trustedKeys: [], allowUnsignedLocal: false }), builtins: () => new Map() },
       null
     );
     managers.push(manager);

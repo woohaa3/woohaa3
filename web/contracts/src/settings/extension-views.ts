@@ -34,6 +34,11 @@ export type InstalledExtensionView = {
   managed?: boolean;
   /** 受管扩展可回滚到的上一版本。 */
   previousVersion?: string;
+  /**
+   * 同 id 受管版本覆盖的内置版本。仅在受管版本严格高于内置版本时出现；
+   * 卸载受管版本后本机回到这个内置版本（能热切换时立即恢复，否则下一次启动）。
+   */
+  builtinVersion?: string;
   /** 安装来源（`local-file` 或某个市场来源）。 */
   sourceId?: string;
   trust?: ExtensionTrust;

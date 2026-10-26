@@ -73,7 +73,29 @@ export function uninstall(ctx: ManagerContext, extensionId: string, options: { p
       });
       if (needsRestart) restartPendingRemoved.add(extensionId);
       board.update(job, { phase: "reload" });
-      const outcome = await reload(extensionId, null, hasBackend);
+      // 受管版本覆盖过内置版本：卸载后回到内置版本（能热切换就当场装回，否则等下一次启动）。
+      const builtin = deps.builtins?.().get(extensionId);
+      const managedDir = handle.layout.versionDir(extensionId, record.current);
+      let outcome: Awaited<ReturnType<typeof reload>>;
+      try {
+        if (builtin?.requiresBackend && builtin.hotSwappable) {
+          outcome = await reload(extensionId, builtin.directory, true, { previousDirectory: managedDir });
+        } else if (builtin?.requiresBackend) {
+          // 站点后端内置扩展没有运行期装配入口：撤下受管实例，下一次启动按内置目录装配。
+          if (deps.runtime?.available()) await deps.runtime.remove(extensionId);
+          restartPendingRemoved.add(extensionId);
+          outcome = await reload(extensionId, null, false);
+        } else if (builtin) {
+          if (record.requiresRestart && deps.runtime?.available()) await deps.runtime.remove(extensionId);
+          outcome = await reload(extensionId, builtin.directory, false);
+        } else {
+          outcome = await reload(extensionId, null, hasBackend);
+        }
+      } catch (error) {
+        // 指针已经删除：卸载本身不回滚，装回内置失败只记日志（下次启动仍会扫描内置根）。
+        log({ event: "extension-uninstall-reload-failed", extensionId, message: error instanceof Error ? error.message : String(error) });
+        outcome = "installed";
+      }
       // 指针已删、扩展已卸载：清除数据失败不回滚卸载，只记日志（数据保留，重复卸载/清除是幂等的）。
       let purged: boolean | "failed" = false;
       if (options.purgeData && deps.purgeData) {

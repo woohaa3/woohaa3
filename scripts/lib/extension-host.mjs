@@ -866,6 +866,8 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     roots: scan.roots,
     /** 受管安装根（change: 2026-10-21-add-extension-marketplace-point，D7）；未配置时为 undefined。 */
     managedRoot: scan.managedRoot,
+    /** 内置根的可升级元数据（版本 / 目录 / 是否需要后端），即使被受管版本覆盖也保留。 */
+    builtinExtensions: scan.builtinExtensions ?? [],
     /** 受管后端扩展是否以 Extension Host 子进程运行（change: 2026-10-21-isolate-extension-host-process，D1）。 */
     isolation: isolate,
     /** 受管扩展被拒绝装配的记录（信任边界/声明/模块缺失）；不让启动失败。 */

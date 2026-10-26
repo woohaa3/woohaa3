@@ -33,6 +33,26 @@ export const EXTENSION_DESCRIPTOR_NAME = "extension.json";
 export const DEFAULT_EXTENSION_ROOTS = ["web/extensions", "extensions"];
 export const WORKSPACE_FILE = "web/pnpm-workspace.yaml";
 
+/**
+ * 严格 semver 的核心三段比较（预发布后缀不参与；非法版本排最前）。
+ *
+ * 与 contracts 的 compareSemver / extension-descriptor 的 satisfiesRange 同一口径；
+ * 扫描器在这里单独实现是为了避免与 extension-descriptor 形成循环 import。
+ */
+export function compareExtensionVersions(a, b) {
+  const parse = (value) => {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(typeof value === "string" ? value : "");
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+  };
+  const left = parse(a);
+  const right = parse(b);
+  if (!left || !right) return left ? 1 : right ? -1 : 0;
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+  }
+  return 0;
+}
+
 /** 扫描/配置错误：带稳定 code，便于脚本与测试断言。 */
 export class ExtensionScanError extends Error {
   constructor(code, message) {
@@ -230,6 +250,11 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
       }
       const declaredId = descriptorPath ? descriptor.extensionId.trim() : null;
       const extensionId = declaredId ?? pkg.name.slice(EXTENSION_PACKAGE_PREFIX.length);
+      const packageVersion = typeof pkg.version === "string" && pkg.version.trim() ? pkg.version.trim() : null;
+      // 分发版本与 pack:extension 同一口径：extension.json.version 优先，否则 package.json.version。
+      // site.version / metadata.version 是展示口径，不参与「能不能升级」的判断。
+      const distributionVersion =
+        typeof descriptor?.version === "string" && descriptor.version.trim() ? descriptor.version.trim() : packageVersion;
       const record = {
         extensionId,
         declaredId,
@@ -238,7 +263,10 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
         root,
         rootWritable: isWritableRoot(root),
         packageName: pkg.name,
-        packageVersion: typeof pkg.version === "string" ? pkg.version : null,
+        packageVersion,
+        distributionVersion,
+        hasBackend: Boolean(descriptor?.backend || descriptor?.hostPlugin || descriptor?.metadata || (descriptor?.publicRoutes?.length ?? 0) > 0),
+        hotSwappable: Boolean(descriptor?.hostPlugin),
         descriptorPath,
         hasBrowserEntry: hasBrowserEntry(dir)
       };
@@ -254,16 +282,50 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
     }
   }
 
+  // 内置候选在合并受管根之前固定下来：即使某个内置 id 被受管版本覆盖，宿主仍需要它的版本与目录
+  // 做 semver 判断、卸载回退和「内置 vX」展示。可写根不算内置（运维手放目录，不随发布打包）。
+  const builtinExtensions = extensions
+    .filter((entry) => entry.rootWritable !== true)
+    .map((entry) => ({
+      extensionId: entry.extensionId,
+      version: entry.distributionVersion ?? "",
+      directory: entry.dir,
+      requiresBackend: entry.hasBackend === true,
+      hotSwappable: entry.hotSwappable === true
+    }));
+
   const warnings = [];
   for (const record of scanManagedRoot(resolved.managedRoot, warnings)) {
     const previous = byId.get(record.extensionId);
     if (previous) {
-      // 安装前 resolve 已拒绝与内置同 id 的包；走到这里只能是手工改了受管根。内置优先，告警而不失败。
+      const previousIsBuiltin = previous.rootWritable !== true && previous.managed !== true;
+      const managedVersion = record.distributionVersion ?? record.managedVersion;
+      const builtinVersion = previous.distributionVersion;
+      // 同 id 只允许「受管版本严格高于内置版本」覆盖。手工改 installations.json、或旧客户端
+      // 绕过 resolve 写入的不更高版本，一律继续用内置，避免降级/同版本不同内容。
+      if (!previousIsBuiltin || !managedVersion || !builtinVersion || compareExtensionVersions(managedVersion, builtinVersion) <= 0) {
+        warnings.push({
+          code: "EXTENSION_MANAGED_SHADOWED",
+          extensionId: record.extensionId,
+          directory: record.dir,
+          message: previousIsBuiltin
+            ? `受管扩展 ${record.extensionId}@${managedVersion ?? "?"} 不高于内置版本 ${builtinVersion ?? "未知"}（${path.relative(repoRoot, previous.dir)}），内置优先，受管版本不装配`
+            : `受管扩展 ${record.extensionId}@${managedVersion ?? "?"} 与可写根扩展同 id（${path.relative(repoRoot, previous.dir)}），可写根优先，受管版本不装配`
+        });
+        continue;
+      }
+      record.builtinVersion = builtinVersion;
+      record.builtinDirectory = previous.dir;
+      record.builtinRequiresBackend = previous.hasBackend === true;
+      record.builtinHotSwappable = previous.hotSwappable === true;
+      const index = extensions.indexOf(previous);
+      if (index >= 0) extensions[index] = record;
+      byId.set(record.extensionId, record);
       warnings.push({
-        code: "EXTENSION_MANAGED_SHADOWED",
+        code: "EXTENSION_MANAGED_OVERRIDES_BUILTIN",
         extensionId: record.extensionId,
         directory: record.dir,
-        message: `受管扩展 ${record.extensionId}@${record.managedVersion} 与内置扩展同 id（${path.relative(repoRoot, previous.dir)}），内置优先，受管版本不装配`
+        message: `受管扩展 ${record.extensionId}@${managedVersion} 高于内置版本 ${builtinVersion}，本次装配受管版本（内置目录 ${path.relative(repoRoot, previous.dir)}）`
       });
       continue;
     }
@@ -272,7 +334,7 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
   }
 
   extensions.sort((a, b) => (a.extensionId === b.extensionId ? (a.dir < b.dir ? -1 : 1) : a.extensionId < b.extensionId ? -1 : 1));
-  return { ...resolved, extensions, disabled, skipped, warnings };
+  return { ...resolved, extensions, builtinExtensions, disabled, skipped, warnings };
 }
 
 /**
@@ -337,6 +399,10 @@ export function scanManagedRoot(managedRoot, warnings = []) {
       managedSourceId: entry.sourceId,
       packageName: pkg.name,
       packageVersion: typeof pkg.version === "string" ? pkg.version : null,
+      distributionVersion:
+        typeof descriptor?.version === "string" && descriptor.version.trim() ? descriptor.version.trim() : entry.current,
+      hasBackend: Boolean(descriptor?.backend || descriptor?.hostPlugin || descriptor?.metadata || (descriptor?.publicRoutes?.length ?? 0) > 0),
+      hotSwappable: Boolean(descriptor?.hostPlugin),
       descriptorPath,
       hasBrowserEntry: hasBrowserEntry(dir)
     });

@@ -3,7 +3,8 @@
  * （change: 2026-10-21-add-extension-marketplace-point，D6–D10）。
  *
  * - 受管根取自扩展宿主扫描结果（`extensionHost.managedRoot`，与扫描器同一个值）；没有受管根时不装配。
- * - 信任根与未签名开关来自本机配置（`extensions.marketplace.*`），按调用现取，不经站点配置面写入。
+ * - 信任根 = 内置官方公钥（`official-trust.ts`，dev / release / 桌面同一份代码）+ 本机配置
+ *   （`extensions.marketplace.trustedKeys`，只能追加）；未签名开关也来自本机配置，按调用现取，不经站点配置面写入。
  * - 本地文件来源（`local-file`）在这里注册进 `ctx.marketplace`（核心自带，非扩展）。
  * - GitHub Release 来源（`github-release`）同样核心自带：D3「来源插件只能来自内置根」防的是
  *   「市场装市场」的信任提升，核心自带来源随宿主发布、没有这个问题。
@@ -21,6 +22,7 @@ import { createReloadingHandler } from "./swap-reloading-route.js";
 import { loadPackageToolkit } from "./toolkit.js";
 import { createVersionStatusCache, managedVersionStatus, marketplaceExtensionDetail } from "./marketplace-detail.js";
 import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, parseRepoList } from "./github-source.js";
+import { OFFICIAL_MARKETPLACE_TRUSTED_KEYS } from "./official-trust.js";
 import type { ExtensionRuntimePort } from "./manager-types.js";
 import type { ExtensionPackageToolkit, InstallationsHandle, TrustedKey } from "./types.js";
 
@@ -35,6 +37,21 @@ export type ExtensionManagerPluginConfig = {
 };
 
 const OBSERVE_INTERVAL_MS = 30_000;
+
+/** 合并信任根：内置官方公钥 + 本机配置，按 keyId 去重（内置优先，不能被同 keyId 的配置替换）。 */
+export function mergeTrustedKeys(...groups: ReadonlyArray<readonly TrustedKey[]>): TrustedKey[] {
+  const merged: TrustedKey[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const key of group) {
+      const identity = key.keyId ? `id:${key.keyId}` : `key:${key.publicKey}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      merged.push(key);
+    }
+  }
+  return merged;
+}
 
 /** `extensions.marketplace.trustedKeys`：逗号分隔的 `<keyId>=<base64 公钥>` 或单个 base64 公钥。 */
 export function parseTrustedKeys(raw: unknown): TrustedKey[] {
@@ -92,9 +109,19 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
 
     const settings = ctx.config;
     const envAllow = config.env.WOOHAA3_EXTENSION_ALLOW_UNSIGNED === "1";
+    // 官方公钥随客户端发布内置（dev / Web release / 桌面宿主同一份后端代码）；
+    // 本机配置只能追加信任根，不能移除内置 key。
+    const trustedKeys = () =>
+      mergeTrustedKeys(
+        OFFICIAL_MARKETPLACE_TRUSTED_KEYS,
+        parseTrustedKeys(settings.get("extensions.marketplace.trustedKeys" as never))
+      );
     const application = () => ctx.get("application");
     const siteStatus = (extensionId: string) => application()?.service.plugins().status(extensionId);
-    const builtinIds = new Set((host.metadata ?? []).map((entry) => entry.extensionId));
+    // 内置根的版本/目录来自启动期扫描；即使当前被更高的受管版本覆盖也保留（卸载回退、版本比较要用）。
+    const builtins = new Map(
+      (host.builtinExtensions ?? []).map((entry) => [entry.extensionId, entry] as const)
+    );
 
     // GitHub Release 来源（核心自带第二个来源，与 local-file 同级）：配置按调用现取（热重载即刻生效）；
     // enabled 缺省 false——出网行为必须显式开启，未开启时 available() 不可用且绝不发请求。
@@ -185,19 +212,19 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
         ...(runtimeSwap() ? { runtime: runtimeSwap()! } : {}),
         marketplace: ctx.marketplace,
         trust: () => ({
-          trustedKeys: parseTrustedKeys(settings.get("extensions.marketplace.trustedKeys" as never)),
+          trustedKeys: trustedKeys(),
           allowUnsignedLocal: envAllow || settings.get("extensions.marketplace.allowUnsigned" as never) === true
         }),
-        builtinIds: () => {
-          // 受管扩展也会出现在 metadata 里：内置集合 = 扫描到的扩展 − 受管记录。
-          const managed = new Set(manager.installed().map((entry) => entry.extensionId));
-          return new Set([...builtinIds].filter((id) => !managed.has(id)));
-        },
+        builtins: () => builtins,
         installedVersions: () => {
           const versions = new Map<string, string>();
+          for (const entry of builtins.values()) {
+            if (entry.version) versions.set(entry.extensionId, entry.version);
+          }
+          // 兼容旧宿主：内置扫描结果里没有的站点扩展，仍按 metadata 的 site.version 参与依赖检查。
           for (const entry of host.metadata ?? []) {
             const version = (entry as { site?: { version?: string } }).site?.version;
-            if (typeof version === "string") versions.set(entry.extensionId, version);
+            if (!versions.has(entry.extensionId) && typeof version === "string") versions.set(entry.extensionId, version);
           }
           for (const entry of manager.installed()) versions.set(entry.extensionId, entry.version);
           return versions;
@@ -270,7 +297,7 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
     // 市场版本详情（change: 2026-10-21-add-server-extension-marketplace，tasks 7.4）。
     const detailDeps = {
       marketplace: ctx.marketplace,
-      trustedKeys: () => parseTrustedKeys(settings.get("extensions.marketplace.trustedKeys" as never)),
+      trustedKeys: () => trustedKeys(),
       keyIdOf: (publicKey: string) => {
         try {
           return toolkit.keyIdOf ? toolkit.keyIdOf(publicKey) : null;
@@ -278,7 +305,14 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
           return null;
         }
       },
-      installedVersion: (extensionId: string) => manager.installed().find((entry) => entry.extensionId === extensionId)?.version
+      installedVersion: (extensionId: string) =>
+        manager.installed().find((entry) => entry.extensionId === extensionId)?.version ?? builtins.get(extensionId)?.version,
+      installedKind: (extensionId: string) =>
+        manager.installed().some((entry) => entry.extensionId === extensionId)
+          ? ("managed" as const)
+          : builtins.has(extensionId)
+            ? ("builtin" as const)
+            : undefined
     };
     // 已撤回提示：按需查询 + 5 分钟缓存（不轮询）。
     const versionStatus = createVersionStatusCache((input) => managedVersionStatus(detailDeps, input, AbortSignal.timeout(10_000)));

@@ -5,7 +5,7 @@
  * keyId 未被本机信任：安装按钮仍可点，旁边提示会失败并给出「信任此公钥」（二次确认后写本机配置）。
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { MarketplaceSigningKey, SettingsSnapshot } from "@woohaa3/contracts";
+import { compareSemver, type MarketplaceSigningKey, type SettingsSnapshot } from "@woohaa3/contracts";
 import { Button } from "../../../shared/ui/Button.js";
 import { SelectInput, TextInput } from "../../../shared/ui/FormControls.js";
 import { versionTrusted, type MarketplaceInstallController } from "./marketplace-install.js";
@@ -47,6 +47,13 @@ export function MarketplaceInstallPanel({
   const version = detail?.extension.versions.find((entry) => entry.version === selected?.version) ?? null;
   const trusted = detail && selected?.version ? versionTrusted(detail, selected.version) : null;
   const signingKey = version?.keyId ? detail?.signingKeys.find((key) => key.keyId === version.keyId) ?? null : null;
+  const builtinInstalled = detail?.installedKind === "builtin" ? detail.installedVersion : undefined;
+  const selectedIsNewer = selected?.version && builtinInstalled ? compareSemver(selected.version, builtinInstalled) > 0 : true;
+  const canInstall = Boolean(selected?.version) && !state.installing && selectedIsNewer;
+  const upgradeLabel =
+    selected?.version && detail?.installedVersion && compareSemver(selected.version, detail.installedVersion) > 0
+      ? `升级到 v${selected.version}`
+      : `安装 v${selected?.version ?? ""}`;
 
   return (
     <div className="marketplace-install" data-testid="marketplace-install">
@@ -104,7 +111,16 @@ export function MarketplaceInstallPanel({
             <div className="marketplace-install__detail" data-testid="marketplace-detail">
               <div className="settings-page__item-head">
                 <span className="settings-page__item-label">{detail?.extension.label ?? selected.extensionId}</span>
-                {detail?.installedVersion ? <span className="settings-page__badge is-muted">本机 v{detail.installedVersion}</span> : null}
+                {detail?.installedVersion ? (
+                  <span className="settings-page__badge is-muted" data-testid="marketplace-installed-version">
+                    {detail.installedKind === "builtin" ? "内置" : "本机"} v{detail.installedVersion}
+                  </span>
+                ) : null}
+                {detail?.updateAvailable && detail.latestVersion ? (
+                  <span className="settings-page__badge" data-testid="marketplace-update-available">
+                    可升级到 v{detail.latestVersion}
+                  </span>
+                ) : null}
                 <Button size="sm" tone="ghost" onClick={() => controller.close()}>返回</Button>
               </div>
               {selected.loading ? <p className="settings-page__hint" role="status">正在读取版本…</p> : null}
@@ -155,8 +171,13 @@ export function MarketplaceInstallPanel({
                       <Button size="sm" tone="ghost" onClick={() => setConfirmKey(null)}>取消</Button>
                     </div>
                   ) : null}
-                  <Button size="sm" tone="primary" disabled={!selected.version || state.installing} onClick={() => void controller.install()} data-testid="marketplace-install-submit">
-                    安装 v{selected.version}
+                  {!selectedIsNewer ? (
+                    <p className="settings-page__hint" data-testid="marketplace-builtin-not-newer">
+                      内置版本 v{builtinInstalled} 不低于所选版本；同一扩展只允许从市场安装更高的版本。
+                    </p>
+                  ) : null}
+                  <Button size="sm" tone="primary" disabled={!canInstall} onClick={() => void controller.install()} data-testid="marketplace-install-submit">
+                    {upgradeLabel}
                   </Button>
                 </>
               ) : null}

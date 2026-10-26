@@ -50,7 +50,12 @@ export type ManagerContext = {
    *   因此不存在蓝绿切换，也没有运行期装配后端插件的路径。
    * `directory = null` 表示卸载。
    */
-  reload(extensionId: string, directory: string | null, hasBackend: boolean): Promise<ExtensionInstallOutcome>;
+  reload(
+    extensionId: string,
+    directory: string | null,
+    hasBackend: boolean,
+    options?: { previousDirectory?: string | null }
+  ): Promise<ExtensionInstallOutcome>;
   /** 把指针切到 target（安装后重载失败 / 观察期失败 / 手动回滚共用）。`backend` = 含后端代码；`restart` = 需要受控重启才生效。 */
   switchPointer(extensionId: string, target: string, action: string, actor: string, rejected?: string): { record: InstallationRecord | null; restart: boolean; backend: boolean };
 };
@@ -101,7 +106,12 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
     if (job.controller.signal.aborted) throw new ExtensionManagerError("MARKETPLACE_CANCELLED", "安装已取消");
   };
 
-  const reload = async (extensionId: string, directory: string | null, hasBackend: boolean): Promise<ExtensionInstallOutcome> => {
+  const reload = async (
+    extensionId: string,
+    directory: string | null,
+    hasBackend: boolean,
+    options: { previousDirectory?: string | null } = {}
+  ): Promise<ExtensionInstallOutcome> => {
     if (hasBackend) {
       // 进程内热切换（C 方向）：扩展层 add / remove 建在 Cordis fiber 上，撤下的 fiber 会回滚自己
       // 注册的 Provider / 路由 / 监听；每个版本一个目录，换版本就是换模块 URL，不会命中 ESM 缓存。
@@ -117,10 +127,13 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
         }
       } else {
         const current = requireHandle();
-        const previous = current.read().extensions[extensionId]?.previous ?? null;
+        const previous = options.previousDirectory !== undefined
+          ? options.previousDirectory
+          : current.read().extensions[extensionId]?.previous
+            ? current.layout.versionDir(extensionId, current.read().extensions[extensionId]!.previous!)
+            : null;
         try {
-          const previousDir = previous ? current.layout.versionDir(extensionId, previous) : null;
-          await runtime.swap(extensionId, directory, path.basename(directory), previousDir);
+          await runtime.swap(extensionId, directory, path.basename(directory), previous);
           log({ event: "extension-swapped", extensionId, directory });
         } catch (error) {
           const cause = (error as { code?: unknown })?.code;

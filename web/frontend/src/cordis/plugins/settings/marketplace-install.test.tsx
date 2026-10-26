@@ -27,7 +27,10 @@ afterEach(() => {
 
 const ENGINES = { hostAbi: "^1.0.0", sdkAbi: "^1.0.0", protocolVersion: 1 };
 
-function detail(trusted: string[]): MarketplaceExtensionDetailView {
+function detail(
+  trusted: string[],
+  installed?: { version: string; kind: "builtin" | "managed"; latest?: string; update?: boolean }
+): MarketplaceExtensionDetailView {
   return {
     sourceId: "woohaa-server",
     extension: {
@@ -42,11 +45,23 @@ function detail(trusted: string[]): MarketplaceExtensionDetailView {
     signingKeys: [
       { keyId: "k1", publicKey: "PUB1", trusted: trusted.includes("k1") },
       { keyId: "k2", label: "团队", publicKey: "PUB2", trusted: trusted.includes("k2") }
-    ]
+    ],
+    ...(installed
+      ? {
+          installedVersion: installed.version,
+          installedKind: installed.kind,
+          ...(installed.latest ? { latestVersion: installed.latest } : {}),
+          ...(installed.update ? { updateAvailable: true } : {})
+        }
+      : {})
   };
 }
 
-function fakeRemote(overrides: Partial<MarketplaceRemote> = {}, trustedRef = { current: ["k1"] }): MarketplaceRemote & { calls: Record<string, unknown[]> } {
+function fakeRemote(
+  overrides: Partial<MarketplaceRemote> = {},
+  trustedRef = { current: ["k1"] },
+  installed?: { version: string; kind: "builtin" | "managed"; latest?: string; update?: boolean }
+): MarketplaceRemote & { calls: Record<string, unknown[]> } {
   const calls: Record<string, unknown[]> = { search: [], extension: [], install: [] };
   return {
     calls,
@@ -61,7 +76,7 @@ function fakeRemote(overrides: Partial<MarketplaceRemote> = {}, trustedRef = { c
     }),
     extension: vi.fn(async (input) => {
       calls.extension!.push(input);
-      return { ok: true as const, detail: detail(trustedRef.current) };
+      return { ok: true as const, detail: detail(trustedRef.current, installed) };
     }),
     install: vi.fn(async (input) => {
       calls.install!.push(input);
@@ -205,5 +220,39 @@ describe("MarketplaceInstallPanel", () => {
     await flush();
     expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0" }]);
     expect(container.querySelector('[data-testid="marketplace-notice"]')?.textContent).toContain("demo@1.1.0");
+  });
+
+  it("内置版本：显示内置 vX 与可升级；不高于内置时禁用安装并说明", async () => {
+    const controller = createMarketplaceInstallController({
+      remote: fakeRemote({}, { current: ["k1"] }, { version: "1.0.0", kind: "builtin", latest: "1.1.0", update: true }),
+      onJob: () => undefined,
+      readTrustedKeys: () => "k1=PUB1",
+      writeSetting: async () => ({ ok: true })
+    });
+    const container = render(<MarketplaceInstallPanel controller={controller} snapshot={snapshot()} canManage />);
+    click(container.querySelector('[data-testid="marketplace-install-toggle"]'));
+    await flush();
+    click(container.querySelector('[data-testid="marketplace-item-demo"] button'));
+    await flush();
+    expect(container.querySelector('[data-testid="marketplace-installed-version"]')?.textContent).toContain("内置 v1.0.0");
+    expect(container.querySelector('[data-testid="marketplace-update-available"]')?.textContent).toContain("可升级到 v1.1.0");
+    const submit = container.querySelector('[data-testid="marketplace-install-submit"]') as HTMLButtonElement;
+    expect(submit.textContent).toContain("升级到 v1.1.0");
+    expect(submit.disabled).toBe(false);
+
+    const same = createMarketplaceInstallController({
+      remote: fakeRemote({}, { current: ["k1"] }, { version: "1.1.0", kind: "builtin" }),
+      onJob: () => undefined,
+      readTrustedKeys: () => "k1=PUB1",
+      writeSetting: async () => ({ ok: true })
+    });
+    const sameContainer = render(<MarketplaceInstallPanel controller={same} snapshot={snapshot()} canManage />);
+    click(sameContainer.querySelector('[data-testid="marketplace-install-toggle"]'));
+    await flush();
+    click(sameContainer.querySelector('[data-testid="marketplace-item-demo"] button'));
+    await flush();
+    const blocked = sameContainer.querySelector('[data-testid="marketplace-install-submit"]') as HTMLButtonElement;
+    expect(blocked.disabled).toBe(true);
+    expect(sameContainer.querySelector('[data-testid="marketplace-builtin-not-newer"]')?.textContent).toContain("不低于所选版本");
   });
 });

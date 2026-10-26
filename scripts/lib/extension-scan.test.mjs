@@ -14,6 +14,7 @@ import {
   ExtensionScanError,
   checkRootsCoveredByWorkspace,
   assertRootsCoveredByWorkspace,
+  compareExtensionVersions,
   formatWorkspaceCoverageHint,
   resolveExtensionRoots,
   scanExtensions,
@@ -23,6 +24,14 @@ import {
 import { MANAGED_DIR_ENV, managedLayout, openInstallations } from "./extension-installations.mjs";
 
 const TEST_TMP_ROOT = "/data/tmp/opencode";
+
+test("compareExtensionVersions：严格 semver 核心三段，非法版本排最前", () => {
+  assert.equal(compareExtensionVersions("0.1.1", "0.1.0"), 1);
+  assert.equal(compareExtensionVersions("0.1.0", "0.1.1"), -1);
+  assert.equal(compareExtensionVersions("1.0.0", "1.0.0"), 0);
+  assert.equal(compareExtensionVersions("1.0.0-beta.1", "1.0.0"), 0);
+  assert.equal(compareExtensionVersions("bad", "0.0.1"), -1);
+});
 
 /**
  * 测试临时根：本机存在 `/data/tmp/opencode` 时沿用它（历史开发环境），否则回退到系统临时目录，
@@ -348,12 +357,31 @@ test("受管根：损坏的 installations.json 只告警，内置扩展照常扫
   assert.equal(scan.warnings[0].code, "EXTENSION_MANAGED_INSTALLATIONS_INVALID");
 });
 
-test("受管根：与内置扩展同 id 时内置优先并告警（不报重复）", (t) => {
+test("受管根：同 id 且 semver 更高时受管版本覆盖内置，并保留内置版本/目录", (t) => {
   const repoRoot = makeRepo(t);
   addExtension(path.join(repoRoot, "web", "extensions", "alpha"), { extensionId: "alpha" });
   const managedRoot = path.join(repoRoot, "data", "managed");
   writeManagedVersion(managedRoot, "alpha", "9.0.0");
   commitPointers(managedRoot, { alpha: "9.0.0" });
+  const scan = scanExtensions({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot } });
+  const alpha = scan.extensions.filter((entry) => entry.extensionId === "alpha");
+  assert.equal(alpha.length, 1);
+  assert.equal(alpha[0].managed, true);
+  assert.equal(alpha[0].managedVersion, "9.0.0");
+  assert.equal(alpha[0].builtinVersion, "0.1.0");
+  assert.equal(scan.warnings[0].code, "EXTENSION_MANAGED_OVERRIDES_BUILTIN");
+  assert.deepEqual(
+    scan.builtinExtensions.map((entry) => [entry.extensionId, entry.version]),
+    [["alpha", "0.1.0"]]
+  );
+});
+
+test("受管根：同 id 但版本不高于内置（含同版本）时内置优先并告警", (t) => {
+  const repoRoot = makeRepo(t);
+  addExtension(path.join(repoRoot, "web", "extensions", "alpha"), { extensionId: "alpha" });
+  const managedRoot = path.join(repoRoot, "data", "managed");
+  writeManagedVersion(managedRoot, "alpha", "0.1.0");
+  commitPointers(managedRoot, { alpha: "0.1.0" });
   const scan = scanExtensions({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot } });
   const alpha = scan.extensions.filter((entry) => entry.extensionId === "alpha");
   assert.equal(alpha.length, 1);

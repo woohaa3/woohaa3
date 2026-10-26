@@ -160,6 +160,7 @@ function mergeManaged(
     ...(base ?? { id: entry.extensionId, label: entry.extensionId, description: "", directory: entry.directory, writable: false }),
     managed: true,
     version: entry.version,
+    ...(base && !base.writable && base.version ? { builtinVersion: base.version } : {}),
     sourceId: entry.sourceId,
     restartRequired: entry.restartRequired,
     ...(entry.previousVersion ? { previousVersion: entry.previousVersion } : {}),

@@ -36,14 +36,20 @@ function source(overrides: Partial<MarketplaceSource & MarketplaceSourceDetails>
   };
 }
 
-function deps(registered: MarketplaceSource | null, trusted: Array<{ keyId?: string; publicKey: string }> = [{ publicKey: "PUB1" }]) {
+function deps(
+  registered: MarketplaceSource | null,
+  trusted: Array<{ keyId?: string; publicKey: string }> = [{ publicKey: "PUB1" }],
+  installed = "1.0.0",
+  kind: "builtin" | "managed" = "managed"
+) {
   const marketplace = createMarketplaceRegistry();
   if (registered) marketplace.register(registered);
   return {
     marketplace,
     trustedKeys: () => trusted as never,
     keyIdOf: (publicKey: string) => (publicKey === "PUB1" ? "trusted1" : null),
-    installedVersion: (id: string) => (id === "demo" ? "1.0.0" : undefined)
+    installedVersion: (id: string) => (id === "demo" ? installed : undefined),
+    installedKind: (id: string) => (id === "demo" ? kind : undefined)
   };
 }
 
@@ -57,6 +63,21 @@ describe("marketplaceExtensionDetail", () => {
       { keyId: "unknown2", publicKey: "PUB2", trusted: false }
     ]);
     expect(view.installedVersion).toBe("1.0.0");
+    expect(view.installedKind).toBe("managed");
+    expect(view.latestVersion).toBe("1.1.0");
+    expect(view.updateAvailable).toBe(true);
+  });
+
+  it("内置版本也参与比较：市场版本更高时给可升级提示，不改变信任判定", async () => {
+    const view = await marketplaceExtensionDetail(deps(source(), undefined, "1.0.0", "builtin"), { sourceId: "woohaa-server", extensionId: "demo" }, signal);
+    expect(view.installedKind).toBe("builtin");
+    expect(view.updateAvailable).toBe(true);
+    expect(view.latestVersion).toBe("1.1.0");
+  });
+
+  it("本机版本已是最高 → 不提示升级", async () => {
+    const view = await marketplaceExtensionDetail(deps(source(), undefined, "1.1.0", "builtin"), { sourceId: "woohaa-server", extensionId: "demo" }, signal);
+    expect(view.updateAvailable).toBeUndefined();
   });
 
   it("本机信任根带显式 keyId 也识别", async () => {

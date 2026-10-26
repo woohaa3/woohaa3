@@ -10,7 +10,7 @@ import type {
   MarketplaceFailureCode,
   MarketplaceListing
 } from "@woohaa3/contracts";
-import type { ExtensionPackageToolkit, TrustedKey } from "./types.js";
+import type { BuiltinExtension, ExtensionPackageToolkit, TrustedKey } from "./types.js";
 
 /** 站点扩展健康（观察期用）：`failed` 立即回滚，`degraded` 连续 N 次回滚，`unknown`（纯前端等）视为正常。 */
 export type ObservedHealth = "ok" | "degraded" | "failed" | "unknown";
@@ -41,10 +41,18 @@ export type ExtensionManagerDeps = {
   toolkit: ExtensionPackageToolkit;
   /** 未限定的市场注册表：本地文件来源由 Manager 注册在这里。 */
   marketplace: HostMarketplaceService;
-  /** 本机信任根与未签名开关（本机配置，按调用现取）。 */
+  /** 本机信任根与未签名开关（本机配置 + 内置官方公钥，按调用现取）。 */
   trust: () => { trustedKeys: readonly TrustedKey[]; allowUnsignedLocal: boolean };
-  /** 内置根扩展 id：受管扩展不能与之同 id。 */
-  builtinIds: () => ReadonlySet<string>;
+  /**
+   * 官方发布者 keyId 集合（内置官方公钥）。测试可注入；缺省取 official-trust.ts。
+   * 内置扩展的受管覆盖只接受这里列出的发布者，防止其它已信任 key 用同名包顶替。
+   */
+  officialPublisherKeyIds?: () => ReadonlySet<string>;
+  /**
+   * 内置根扩展（按 extensionId）。同 id 的市场版本只有在 semver **严格更高** 时才能覆盖；
+   * 卸载受管版本时回到这里记录的内置目录。
+   */
+  builtins?: () => ReadonlyMap<string, BuiltinExtension>;
   /** 当前已装配扩展的版本（内置 + 受管），用于依赖检查。 */
   installedVersions?: () => ReadonlyMap<string, string>;
   /** 纯前端扩展的热登记（mp-reload-ui 的 `publishBrowserRelease`）；缺省时一律按需要重启处理。 */

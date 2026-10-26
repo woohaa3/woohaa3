@@ -5,6 +5,7 @@
  * 信任只看本机 `extensions.marketplace.trustedKeys`；来源声明的状态与 keyId 只用于展示（D6）。
  */
 import {
+  compareSemver,
   MARKETPLACE_LOCAL_FILE_SOURCE_ID,
   type HostMarketplaceService,
   maxSatisfying,
@@ -22,7 +23,10 @@ export type MarketplaceDetailDeps = {
   trustedKeys: () => readonly TrustedKey[];
   /** 本机信任根公钥 → keyId（与包工具 `keyIdOf` 同一算法）；无法解析的公钥返回 null。 */
   keyIdOf: (publicKey: string) => string | null;
+  /** 本机当前生效的版本（受管优先，否则内置）。 */
   installedVersion: (extensionId: string) => string | undefined;
+  /** 当前生效版本的来源；没有安装记录时返回 undefined。 */
+  installedKind: (extensionId: string) => "builtin" | "managed" | undefined;
 };
 
 export function trustedKeyIdSet(deps: Pick<MarketplaceDetailDeps, "trustedKeys" | "keyIdOf">): Set<string> {
@@ -62,12 +66,24 @@ export async function marketplaceExtensionDetail(
   }
   const trusted = trustedKeyIdSet(deps);
   const installedVersion = deps.installedVersion(input.extensionId);
+  const installedKind = deps.installedKind(input.extensionId);
+  // 只把来源当前可安装的已审核版本计入「最新」：撤回 / 待审 / 拒绝都不算。
+  const latestVersion =
+    maxSatisfying(
+      extension.versions.filter((entry) => !entry.state || entry.state === APPROVED_STATE).map((entry) => entry.version),
+      "*"
+    ) ?? undefined;
+  const updateAvailable =
+    installedVersion !== undefined && latestVersion !== undefined && compareSemver(latestVersion, installedVersion) > 0;
   return {
     sourceId: input.sourceId,
     extension,
     trustedKeyIds: [...new Set(extension.versions.map((entry) => entry.keyId).filter((id): id is string => !!id && trusted.has(id)))],
     signingKeys: signingKeys.map((key) => ({ ...key, trusted: trusted.has(key.keyId) })),
-    ...(installedVersion ? { installedVersion } : {})
+    ...(installedVersion ? { installedVersion } : {}),
+    ...(installedKind ? { installedKind } : {}),
+    ...(latestVersion ? { latestVersion } : {}),
+    ...(updateAvailable ? { updateAvailable } : {})
   };
 }
 
