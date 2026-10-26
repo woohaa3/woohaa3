@@ -276,23 +276,27 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.application, (req, res) => service.handle(req, res)));
     await runtime.activate();
     const releases: Array<() => void> = [];
-    for (const plugin of ctx.config.plugins()) {
-      if (!plugin.configPrefix?.startsWith("providers.")) continue;
-      const providerId = plugin.configPrefix.slice("providers.".length);
-      const extensionId = generation.resolve(providerId)?.extensionId ?? plugin.id;
-      const release = service.serviceConnections()?.forExtension(extensionId).registerSource(createSiteProviderSource({
-        providerId, extensionId, label: plugin.label, prefix: plugin.configPrefix, settings: ctx.config,
-        provider: () => generation.resolve(providerId),
-      }));
-      if (release) releases.push(release);
-      const provider = generation.resolve(providerId);
-      if (provider?.serviceConnectionFactory) {
-        const releaseConsumer = service.serviceConnections()?.forExtension(extensionId).registerConsumer({
-          protocols: [`provider:${provider.providerId}`, ...provider.serviceConnectionFactory.protocols], purposes: ["text", "image", "video", "audio"],
-        });
-        if (releaseConsumer) releases.push(releaseConsumer);
+    // Provider settings are registered by the extension layer after this core plugin starts.
+    // Wait for all layers, then keep adapters reading the current settings/provider instances.
+    ctx.on("host/ready", () => {
+      for (const plugin of ctx.config.plugins()) {
+        if (!plugin.configPrefix?.startsWith("providers.")) continue;
+        const providerId = plugin.configPrefix.slice("providers.".length);
+        const extensionId = generation.resolve(providerId)?.extensionId ?? plugin.id;
+        const release = service.serviceConnections()?.forExtension(extensionId).registerSource(createSiteProviderSource({
+          providerId, extensionId, label: plugin.label, prefix: plugin.configPrefix, settings: ctx.config,
+          provider: () => generation.resolve(providerId),
+        }));
+        if (release) releases.push(release);
+        const provider = generation.resolve(providerId);
+        if (provider?.serviceConnectionFactory) {
+          const releaseConsumer = service.serviceConnections()?.forExtension(extensionId).registerConsumer({
+            protocols: [`provider:${provider.providerId}`, ...provider.serviceConnectionFactory.protocols], purposes: ["text", "image", "video", "audio"],
+          });
+          if (releaseConsumer) releases.push(releaseConsumer);
+        }
       }
-    }
+    });
     ctx.effect(() => () => { for (const release of releases) release(); });
   }
 };

@@ -50,8 +50,8 @@
 .agent-assistant__identity > strong { font-size: 13px; font-weight: 600; }
 .agent-assistant__status { margin-top: 4px !important; font-size: 12px; }
 .agent-assistant__actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.agent-assistant__add { display: grid; grid-template-columns: minmax(180px, .82fr) minmax(260px, 1.18fr); align-items: start; gap: 16px; }
-.agent-assistant__methods { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.agent-assistant__add { min-width: 0; }
+.agent-assistant__methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .agent-assistant__method { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; min-height: 116px; padding: 16px; border: 1px solid var(--app-web-border); border-radius: 12px; background: var(--app-web-panel); color: var(--app-web-text-primary); text-align: left; font: inherit; cursor: pointer; }
 .agent-assistant__method strong { padding-right: 76px; font-size: 13px; font-weight: 600; }
 .agent-assistant__method-description { color: var(--assistant-secondary); font-size: 11px; }
@@ -65,16 +65,9 @@
 .agent-assistant__method[data-selected="true"] .agent-assistant__method-state { color: var(--app-interaction-accent-pressed); font-weight: 600; }
 .agent-assistant__brands { display: flex; flex-wrap: wrap; gap: 5px 10px; font-size: 11px; }
 .agent-assistant__provider-mark { display: inline-flex; align-items: center; justify-content: center; height: 24px; }
-.agent-assistant__forms { min-height: 280px; padding: 20px; border: 1px solid var(--app-web-border); border-radius: 12px; background: var(--app-web-panel); }
-.agent-assistant__forms--active { border-color: var(--app-interaction-accent); }
-.agent-assistant__form-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--app-web-border); }
-.agent-assistant__form-heading > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.agent-assistant__form-heading span { color: var(--app-interaction-accent-pressed); font-size: 11px; font-weight: 600; }
-.agent-assistant__form-heading strong { font-size: 15px; font-weight: 600; }
-.agent-assistant__form-heading p { max-width: 220px; font-size: 11px; text-align: right; }
-.agent-assistant__form-empty { display: grid; min-height: 240px; place-content: center; gap: 6px; text-align: center; }
-.agent-assistant__form-empty strong { font-size: 15px; font-weight: 600; }
-.agent-assistant__form-empty p { font-size: 12px; }
+.agent-assistant__forms { min-width: 0; }
+.agent-assistant__form-heading { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--app-web-border); }
+.agent-assistant__form-heading h3 { font-size: 17px; overflow-wrap: anywhere; }
 .agent-assistant__add-form .settings-section__header > div { display: none; }
 .agent-assistant__configuration { padding-bottom: 8px; }
 .agent-assistant__drawer-layer { position: absolute; z-index: 20; inset: 0; display: flex; justify-content: flex-end; background: color-mix(in srgb, var(--app-web-overlay) 40%, transparent); }
@@ -134,17 +127,6 @@
   .agent-assistant__page { padding: 22px 20px 28px; }
   .agent-assistant__overview-row { grid-template-columns: minmax(0, 1fr) 140px 58px; gap: 8px; }
   .agent-assistant__source-list li { grid-template-columns: minmax(0, 1fr) 100px auto; gap: 10px; }
-}
-@media (max-width: 720px) {
-  .agent-assistant__add { grid-template-columns: 1fr; }
-  .agent-assistant__methods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .agent-assistant__forms { min-height: 0; }
-  .agent-assistant__form-empty { min-height: 120px; }
-}
-@media (max-width: 620px) {
-  .agent-assistant__methods { grid-template-columns: 1fr; }
-  .agent-assistant__form-heading { flex-direction: column; gap: 6px; }
-  .agent-assistant__form-heading p { max-width: none; text-align: left; }
 }
 .agent-assistant__mcp-tile { position: relative; display: flex; justify-content: center; }
 .agent-assistant__mcp .agent-assistant__mcp-tile-button.ui-icon-button {

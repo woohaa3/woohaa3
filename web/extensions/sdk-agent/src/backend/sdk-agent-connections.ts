@@ -97,14 +97,14 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     const preflight = preflightInput({ capabilities: capabilitiesFor(adapter), wantTools: input.intent.action !== "discuss", imageCount: input.intent.references?.filter((ref) => ref.kind === "asset").length ?? 0, wantStructuredResult: false });
     if (!preflight.ok) return fail(preflight.code, preflight.message);
     const source = options.serviceConnections ? await sdkSourceFor(options.serviceConnections, input.owner, record.connectionId, options.service) : null;
-    if (options.serviceConnections && !source) return fail("connection-unavailable", "服务来源尚未迁移，请重试");
+    if (options.serviceConnections && !source) return fail("connection-unavailable", "模型提供商尚未迁移，请重试");
     let credential: { secret: string } | null;
     try {
       credential = source && options.serviceConnections ? await options.serviceConnections.resolve(input.owner, {
         ...source, bindingId: source.bindings.find(binding => binding.extensionId === "sdk-agent" && (binding.consumerId === record.connectionId || record.serviceConnectionId && binding.consumerId === `shared:${sdkSourceProtocol(record.adapterId)}`))?.bindingId ?? "", purpose: input.intent.action === "discuss" ? "discussion" : "target-execution",
         protocol: sdkSourceProtocol(record.adapterId), modelId: model, endpoint: baseUrl,
       }) : await options.service.readCredential<{ secret: string }>({ owner: input.owner, connectionId: record.connectionId, purpose: "model-api-key" });
-    } catch { return fail("version-conflict", "服务来源或用途已失效，请重新读取"); }
+    } catch { return fail("version-conflict", "模型提供商或用途已失效，请重新读取"); }
     if (!credential?.secret) return fail("credential-missing", "该连接尚未保存 API Key");
     let transport: AgentSdkTransport;
     try {

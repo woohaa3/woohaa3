@@ -97,7 +97,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     { id: "overview", label: "能力总览" },
     { id: "agents", label: "本地 Agent", count: localConnections.length },
     { id: "mcp", label: "MCP 服务", count: mcp?.configured },
-    { id: "sources", label: "服务来源", count: directoryState.directory ? sources.length : sourceConnections.length },
+    { id: "sources", label: "模型提供商", count: directoryState.directory ? sources.length : sourceConnections.length },
     { id: "generation-history", label: "生成历史" },
     { id: "diagnostics", label: "连接诊断" },
   ];
@@ -181,7 +181,7 @@ function ConnectionPanel({ local, compact = false, connections, contributions, p
   const showAddAction = !local;
   const showNavigation = !compact || notice || showAddAction;
   return <>
-    {page !== "connections" ? <nav className="agent-assistant__back"><Button size="sm" tone="ghost" icon={<BackIcon size={14} />} onClick={back}>{local ? "所有本地助手" : "所有服务连接"}</Button></nav> : null}
+    {page !== "connections" ? <nav className="agent-assistant__back"><Button size="sm" tone="ghost" icon={<BackIcon size={14} />} onClick={back}>{local ? "所有本地助手" : "所有模型提供商"}</Button></nav> : null}
     {page === "connections" ? <>
       {showNavigation ? <div className={`agent-assistant__navigation${compact ? " agent-assistant__navigation--compact" : ""}`}>{compact ? null : <h3>{heading}</h3>}{notice ? <span>{notice}</span> : null}{showAddAction ? <Button size="sm" onClick={() => { setSelected(null); setPage("add"); }}>添加连接</Button> : null}</div> : null}
       {loading ? <p>正在读取连接…</p> : connections.length === 0 ? local ? <div className="agent-assistant__local-empty"><div className="agent-assistant__local-empty-copy"><strong>连接宿主电脑上的 Agent</strong><p>检测到本机 Agent 后，它们会直接出现在这里。也可以先选择一种本地 Agent 完成配置。</p></div><AddConnectionForm contributions={contributions} onSaved={saved} local /></div> : <div className="agent-assistant__empty"><p>尚未配置 API 或账号授权。</p></div> : <ul className="agent-assistant__list">{connections.map(connection => <li key={connection.connectionId}>
@@ -203,16 +203,28 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
   const initial = ["api-key", "login"].includes(initialKind ?? "") ? initialKind! : null;
   const [selectedKind, setSelectedKind] = useState<string | null>(initial);
   const [visited, setVisited] = useState<string[]>(initial ? [initial] : []);
+  const addRef = useRef<HTMLDivElement>(null);
+  const selectionScrollTop = useRef(0);
+  const selectMethod = (id: string) => {
+    const container = addRef.current?.closest<HTMLElement>(".agent-assistant__drawer-body, .agent-assistant__page");
+    selectionScrollTop.current = container?.scrollTop ?? 0;
+    setSelectedKind(id);
+    setVisited(current => current.includes(id) ? current : [...current, id]);
+  };
+  useEffect(() => {
+    const container = addRef.current?.closest<HTMLElement>(".agent-assistant__drawer-body, .agent-assistant__page");
+    if (container) container.scrollTop = selectedKind ? 0 : selectionScrollTop.current;
+  }, [selectedKind]);
   const providerMethods = local ? [] : providerGroups;
   const selectedMethod = selectedKind
     ? kinds.find(item => item.id === selectedKind) ?? providerMethods.find(group => `provider:${group.providerId}` === selectedKind)
     : null;
   const selectedLabel = selectedMethod?.label ?? null;
-  return <div className="agent-assistant__add">
-    <div className="agent-assistant__methods">{kinds.filter(item => local ? item.id === "installed" : item.id !== "installed").map(item => {
+  return <div ref={addRef} className="agent-assistant__add" data-step={selectedKind ? "configuration" : "selection"}>
+    <div className="agent-assistant__methods" hidden={selectedKind !== null}>{kinds.filter(item => local ? item.id === "installed" : item.id !== "installed").map(item => {
       const available = contributions.some(entry => entry.kind === item.id);
       return <button key={item.id} type="button" className="agent-assistant__method" data-kind={item.id} data-selected={selectedKind === item.id} disabled={!available}
-        onClick={() => { setSelectedKind(item.id); setVisited(current => current.includes(item.id) ? current : [...current, item.id]); }}>
+        onClick={() => selectMethod(item.id)}>
         <strong>{item.label}</strong>
         <span className="agent-assistant__brands">{item.services.map(service => <span className="service-identity" key={service.id}><ServiceLogo service={service.id} size={18} />{service.name}</span>)}</span>
         <span className="agent-assistant__method-description">{available ? item.detail : "当前环境未启用"}</span>
@@ -222,7 +234,7 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
     })}{providerMethods.map(group => {
       const id = `provider:${group.providerId}`;
       return <button key={id} type="button" className="agent-assistant__method agent-assistant__method--provider" data-kind={id} data-selected={selectedKind === id}
-        onClick={() => { setSelectedKind(id); setVisited(current => current.includes(id) ? current : [...current, id]); }}>
+        onClick={() => selectMethod(id)}>
         <span className="agent-assistant__provider-mark"><PluginIconMark icon={group.icon} size={22} /></span>
         <strong>{group.label}</strong>
         <span className="agent-assistant__method-description">{group.description || "使用此供应商的现有配置。"}</span>
@@ -230,15 +242,18 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
         <span className="agent-assistant__method-state">{selectedKind === id ? "正在配置" : "点击配置"}</span>
       </button>;
     })}</div>
-    <div className={`agent-assistant__forms${selectedKind ? " agent-assistant__forms--active" : ""}`}>
-      {selectedLabel ? <div className="agent-assistant__form-heading"><div><span>正在配置</span><strong>{selectedLabel}</strong></div><p>填写完成后保存，这个服务会出现在服务来源列表中。</p></div> : <div className="agent-assistant__form-empty"><strong>选择一种接入方式</strong><p>点击左侧选项，在这里打开对应的配置详情。</p></div>}
+    <div className="agent-assistant__forms" hidden={selectedKind === null}>
+      <div className="agent-assistant__form-heading">
+        <Button size="sm" tone="ghost" icon={<BackIcon size={14} />} onClick={() => setSelectedKind(null)}>返回选择</Button>
+        <h3>{selectedLabel}</h3>
+      </div>
       {visited.map(id => {
-      const Entry = contributions.find(entry => entry.kind === id)?.render;
-      const providerId = id.startsWith("provider:") ? id.slice("provider:".length) : undefined;
-      // Keep the instance and its portal container together under the hidden owner.
-      return <div key={id} data-form-kind={id} hidden={selectedKind !== id} className="agent-assistant__add-form">
-        <UiPortalScope>{providerId && settingsStore ? <Suspense fallback={<p>正在读取 Provider 配置…</p>}><GenerationProviders store={settingsStore} compact providerId={providerId} onSaved={() => onSaved(providerId)} /></Suspense> : Entry ? <Entry onSaved={onSaved} /> : <p>当前环境未启用此连接的配置扩展。</p>}</UiPortalScope>
-      </div>;
+        const Entry = contributions.find(entry => entry.kind === id)?.render;
+        const providerId = id.startsWith("provider:") ? id.slice("provider:".length) : undefined;
+        // Keep the instance and its portal container together under the hidden owner.
+        return <div key={id} data-form-kind={id} hidden={selectedKind !== id} className="agent-assistant__add-form">
+          <UiPortalScope>{providerId && settingsStore ? <Suspense fallback={<p>正在读取 Provider 配置…</p>}><GenerationProviders store={settingsStore} compact providerId={providerId} onSaved={() => onSaved(providerId)} /></Suspense> : Entry ? <Entry onSaved={onSaved} /> : <p>当前环境未启用此连接的配置扩展。</p>}</UiPortalScope>
+        </div>;
       })}
     </div>
   </div>;
@@ -295,16 +310,16 @@ function ServiceSources({ service, connections, contributions, payload, settings
   const current = sources.find(source => source.serviceConnectionId === selected);
   const selectedProvider = selected?.startsWith("template:") ? selected.slice("template:".length) : current?.bindings.find(binding => binding.consumer === "provider")?.consumerId;
   return <>
-    <div className="agent-assistant__page-heading"><h2>服务来源</h2><Button tone="primary" onClick={showAdd}>添加连接</Button></div>
-    {loading ? <p>正在读取服务连接…</p> : null}
+    <div className="agent-assistant__page-heading"><h2>模型提供商</h2><Button tone="primary" onClick={showAdd}>添加连接</Button></div>
+    {loading ? <p>正在读取模型提供商…</p> : null}
     {directoryError ? <SettingsFeedback tone="danger">{directoryError} <Button size="sm" onClick={onSaved}>重新读取</Button></SettingsFeedback> : null}
-    {!loading && !directoryError && !sources.length ? <div className="agent-assistant__empty agent-assistant__empty--service"><h3>连接你的第一个模型服务</h3><p>添加 API、中转站或账号授权，用于助手与生成。</p><Button size="lg" tone="primary" onClick={showAdd}>添加第一个服务连接</Button></div> : null}
+    {!loading && !directoryError && !sources.length ? <div className="agent-assistant__empty agent-assistant__empty--service"><h3>添加你的第一个模型提供商</h3><p>添加 API、中转站或账号授权，用于助手与生成。</p><Button size="lg" tone="primary" onClick={showAdd}>添加第一个模型提供商</Button></div> : null}
     {sources.length ? <ul className="agent-assistant__list agent-assistant__source-list">{sources.map(source => {
       const connection = connections.find(item => source.bindings.some(binding => binding.consumerId === item.connectionId));
       const state = serviceSourceState(source);
       return <li key={source.serviceConnectionId}><div className="agent-assistant__identity"><strong>{source.name}</strong></div><span className="agent-assistant__state" data-tone={state.tone}>{state.label}{source.managedByAdministrator ? " · 只读" : ""}</span><div className="agent-assistant__actions"><Button size="sm" tone="ghost" onClick={() => open(source.serviceConnectionId)}>配置</Button>{connection && payload.canvasId && payload.nodeId ? <Button size="sm" disabled={!connection.ready} onClick={() => onChoose(connection)}>使用</Button> : null}</div></li>;
     })}</ul> : null}
-    {addVisited ? <AssistantDrawer title="添加服务" onClose={back} hidden={!adding} wide>
+    {addVisited ? <AssistantDrawer title="添加模型提供商" onClose={back} hidden={!adding} wide>
       <AddConnectionForm local={false} initialKind={payload.kind} contributions={contributions} providerGroups={providerGroups} settingsStore={settingsStore} onSaved={() => { onSaved(); back(); }} />
       {settings?.status === "loading" ? <p>正在读取供应商…</p> : settings?.status === "error" ? <SettingsFeedback tone="danger">{settings.error} <Button size="sm" onClick={() => void settingsStore?.load()}>重试</Button></SettingsFeedback> : settings?.status === "unauthorized" ? <p>供应商配置由管理员管理。个人 API 与账号授权仍可使用。</p> : null}
     </AssistantDrawer> : null}

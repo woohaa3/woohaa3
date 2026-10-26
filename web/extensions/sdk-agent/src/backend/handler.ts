@@ -280,7 +280,7 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
       }
 
       if (record.serviceConnectionId && segments.length === 3 && ["credential", "clear"].includes(segments[2]) && method === "POST")
-        return sendJson(res, 409, { code: "source-managed", message: "请在服务来源详情管理凭据；此处只保存消费引用" });
+        return sendJson(res, 409, { code: "source-managed", message: "请在模型提供商详情管理凭据；此处只保存消费引用" });
 
       if (
         segments.length === 3 &&

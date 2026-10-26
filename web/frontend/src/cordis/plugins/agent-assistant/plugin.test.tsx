@@ -43,13 +43,13 @@ const api = { connectionId: "c1", extensionId: "sdk-agent", name: "我的 API", 
 const local = { ...api, connectionId: "local", extensionId: "local-agent", authMode: "local-login", name: "本地 Codex" } as AgentConnectionView;
 const oauth = { ...api, connectionId: "oauth", extensionId: "oauth-agent", authMode: "oauth", name: "me@example.com" } as AgentConnectionView;
 
-it("按 demo 显示能力总览和六项侧栏，MCP 与服务来源独立", async () => {
+it("按 demo 显示能力总览和六项侧栏，MCP 与模型提供商独立", async () => {
   const f = await render();
-  expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "MCP 服务", "服务来源", "生成历史", "连接诊断"]);
+  expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "MCP 服务", "模型提供商", "生成历史", "连接诊断"]);
   expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"]')?.getAttribute("data-page")).toBe("overview");
-  expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("模型服务");
+  expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("模型提供商");
   expect(f.el.textContent).not.toContain("添加本地助手");
-  await f.click("服务来源");
+  await f.click("模型提供商");
   await f.click("添加连接");
   const drawer = f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')!;
   expect([...drawer.querySelectorAll('.agent-assistant__method')].map(item => item.querySelector("strong")?.textContent)).toEqual(["按协议接入 LLM", "账号授权"]);
@@ -62,7 +62,7 @@ it("按真实来源分区，本地 Agent 不进入服务连接，账号邮箱保
   await f.click("本地 Agent");
   expect(f.el.querySelector('[data-ai-page="agents"] .agent-assistant__list')?.textContent).toContain("本地 Codex");
   expect(f.el.querySelector('[data-ai-page="agents"] .agent-assistant__list')?.textContent).not.toContain("我的 API");
-  await f.click("服务来源");
+  await f.click("模型提供商");
   const list = f.el.querySelector('[data-ai-page="sources"] .agent-assistant__list')!;
   expect(list.textContent).toContain("我的 API");
   expect(list.textContent).toContain("me@example.com");
@@ -72,7 +72,7 @@ it("按真实来源分区，本地 Agent 不进入服务连接，账号邮箱保
 it.each(["api-key", "installed", "login", "generation", "mcp"])("旧 kind=%s 定位新 Tab，保留原配置入口", async kind => {
   const f = await render([], true, undefined, { canvasId: "canvas", kind });
   const services = ["api-key", "login", "generation"].includes(kind);
-  expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"] > span')?.textContent).toBe(services ? "服务来源" : kind === "mcp" ? "MCP 服务" : "本地 Agent");
+  expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"] > span')?.textContent).toBe(services ? "模型提供商" : kind === "mcp" ? "MCP 服务" : "本地 Agent");
   if (kind === "api-key") expect(f.el.querySelector('input[aria-label="新增 API Key"]')).not.toBeNull();
   if (kind === "installed") expect(f.el.textContent).toContain("本机工具配置");
   if (kind === "mcp") expect(f.el.textContent).toContain("复制安装指引");
@@ -82,18 +82,23 @@ it.each(["api-key", "installed", "login", "generation", "mcp"])("旧 kind=%s 定
 
 it.each([api, local, oauth])("按 connectionId=$connectionId 解析真实来源而非旧 Tab", async connection => {
   const f = await render([api, local, oauth], true, undefined, { connectionId: connection.connectionId, kind: "mcp" });
-  expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"] > span')?.textContent).toBe(connection === local ? "本地 Agent" : "服务来源");
+  expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"] > span')?.textContent).toBe(connection === local ? "本地 Agent" : "模型提供商");
   if (connection === api) expect(f.el.querySelector('input[aria-label="新增 API Key"]')).not.toBeNull();
   if (connection === local) expect(f.el.textContent).toContain("本机工具配置");
 });
 
-it("API 与授权方式只通过点击切换，跨 Tab 保留 Key 草稿与浮层归属", async () => {
+it("点击接入方式切换到独立配置页，返回恢复选择位置并保留 Key 草稿与浮层归属", async () => {
   const f = await render([], true, undefined, { kind: "generation", page: "add" });
   const apiButton = f.el.querySelector<HTMLButtonElement>('[data-kind="api-key"]')!;
   const login = f.el.querySelector<HTMLButtonElement>('[data-kind="login"]')!;
   await act(async () => apiButton.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
   expect(f.el.querySelector("input")).toBeNull();
+  const drawerBody = apiButton.closest<HTMLElement>(".agent-assistant__drawer-body")!;
+  drawerBody.scrollTop = 320;
   await f.click("按协议接入 LLM");
+  expect(apiButton.closest("[hidden]")).not.toBeNull();
+  expect(drawerBody.scrollTop).toBe(0);
+  expect(f.el.querySelector(".agent-assistant__form-heading h3")?.textContent).toBe("按协议接入 LLM");
   const field = f.el.querySelector<HTMLInputElement>('input[aria-label="新增 API Key"]')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "draft-key");
@@ -105,13 +110,21 @@ it("API 与授权方式只通过点击切换，跨 Tab 保留 Key 草稿与浮�
   await act(async () => f.el.querySelector<HTMLButtonElement>('button[aria-label="配置类型"]')!.click());
   const option = [...document.querySelectorAll('[role="option"]')].find(item => item.textContent === "类型二");
   expect(option?.closest(".agent-assistant")).toBe(f.el.querySelector(".agent-assistant"));
-  await f.click("账号授权");
+  await f.click("返回选择");
+  expect(drawerBody.scrollTop).toBe(320);
+  expect(apiButton.closest("[hidden]")).toBeNull();
   expect(field.closest("[hidden]")).not.toBeNull();
   expect(option?.closest("[hidden]")).not.toBeNull();
+  await f.click("账号授权");
+  expect(drawerBody.scrollTop).toBe(0);
+  expect(f.el.querySelector(".agent-assistant__form-heading h3")?.textContent).toBe("账号授权");
+  expect(field.closest("[hidden]")).not.toBeNull();
+  expect(option?.closest("[hidden]")).not.toBeNull();
+  await f.click("返回选择");
   await f.click("按协议接入 LLM");
   await f.click("本地 Agent");
   expect(field.closest("[hidden]")).not.toBeNull();
-  await f.click("服务来源");
+  await f.click("模型提供商");
   expect(field.closest("[hidden]")).toBeNull();
   expect(field.value).toBe("draft-key");
   expect(f.listConnections).toHaveBeenCalledTimes(1);
@@ -173,7 +186,7 @@ it("服务连接按需读取现有 Provider 配置，空密钥不从浏览器回
   const source = { serviceConnectionId: "site-test", scope: "site", kind: "api", name: "测试 Provider", endpoints: [], capabilities: [], bindings: [{ bindingId: "provider:test", extensionId: "test", consumer: "provider", consumerId: "test", purposes: ["text"], modelKeys: [] }], enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1 } as import("@woohaa3/contracts").ServiceConnectionView;
   const f = await render([], false, createBackendSettingsStore({ fetchSnapshot, write }), { kind: "mcp" }, { listServiceConnections: async () => ({ ok: true, value: [source] }) });
   expect(fetchSnapshot).not.toHaveBeenCalled();
-  await act(async () => { await f.click("服务来源"); await import("../settings/provider-settings-cards.js"); });
+  await act(async () => { await f.click("模型提供商"); await import("../settings/provider-settings-cards.js"); });
   await f.click("添加连接");
   expect(f.el.querySelector('[data-ai-page="sources"] [data-kind="provider:test"]')).not.toBeNull();
   await f.click("关闭详情");
@@ -183,7 +196,7 @@ it("服务连接按需读取现有 Provider 配置，空密钥不从浏览器回
 });
 
 
-it("在能力中心保存 Provider Key 后重读来源并立即刷新插件和模型状态，失败时保留草稿", async () => {
+it("保存首个 Provider Key 后空引导消失并显示已配置的模型提供商，失败时保留草稿", async () => {
   const { agentAssistantExtension } = await import("./plugin.js");
   const { DialogService } = await import("../../services/dialogs/service.js");
   const { CanvasNavigationStore } = await import("../../navigation/store.js");
@@ -200,11 +213,11 @@ it("在能力中心保存 Provider Key 后重读来源并立即刷新插件和�
   const extensionRefresh = vi.fn(async () => {});
   const modelRefresh = vi.fn(async () => {});
   const invalidateCatalog = vi.fn();
-  const listServiceConnections = vi.fn(async () => ({ ok: true, value: [{
+  const listServiceConnections = vi.fn(async () => ({ ok: true, value: configured ? [{
     serviceConnectionId: "provider:test", scope: "site", kind: "api", name: "测试 Provider", endpoints: [], capabilities: [],
     bindings: [{ bindingId: "test", extensionId: "test", consumer: "provider", consumerId: "test", purposes: [], modelKeys: [] }],
     enabled: true, removed: false, credentialConfigured: configured, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
-  }] }));
+  }] : [] }));
   runtime = await startFrontendRuntime({ installPlatform: ctx => {
     ctx.provide("slots" as never, slots as never);
     ctx.provide("dialogs" as never, dialogs as never);
@@ -223,7 +236,7 @@ it("在能力中心保存 Provider Key 后重读来源并立即刷新插件和�
     await import("./assistant.js");
   });
   const sourceState = () => el.querySelector(".agent-assistant__source-list .agent-assistant__state")?.textContent;
-  expect(sourceState()).toBe("待配置密钥");
+  expect(el.querySelector(".agent-assistant__empty--service")).not.toBeNull();
   await act(async () => {
     el.querySelector<HTMLButtonElement>('[data-kind="provider:test"]')!.click();
     await import("../settings/provider-settings-cards.js");
@@ -233,15 +246,18 @@ it("在能力中心保存 Provider Key 后重读来源并立即刷新插件和�
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "test-key");
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  expect(sourceState()).toBe("待配置密钥");
+  expect(el.querySelector(".agent-assistant__source-list")).toBeNull();
   const save = () => act(async () => field.closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await save();
   expect(field.value).toBe("test-key");
   expect(extensionRefresh).not.toHaveBeenCalled();
   expect(modelRefresh).not.toHaveBeenCalled();
-  expect(sourceState()).toBe("待配置密钥");
+  expect(el.querySelector(".agent-assistant__empty--service")).not.toBeNull();
   await save();
   expect(sourceState()).toBe("已配置");
+  expect(el.querySelector(".agent-assistant__empty--service")).toBeNull();
+  expect(el.querySelector(".agent-assistant__source-list")?.textContent).toContain("测试 Provider");
+  expect(el.querySelector('[data-page="sources"] small')?.textContent).toBe("1");
   expect(extensionRefresh).toHaveBeenCalledOnce();
   expect(modelRefresh).toHaveBeenCalledOnce();
   expect(invalidateCatalog).toHaveBeenCalledOnce();
@@ -300,7 +316,7 @@ it("unified directory keeps source identity, readonly shared views and original 
     serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [source, shared], duplicates: [], providers: [] } }),
     manageServiceConnection: manage,
   });
-  await f.click("服务来源");
+  await f.click("模型提供商");
   const list = f.el.querySelector('[data-ai-page="sources"] .agent-assistant__list')!;
   expect(list.querySelectorAll("li")).toHaveLength(2);
   expect(list.textContent).toContain("Unified relay");
@@ -319,7 +335,7 @@ it("unified directory keeps source identity, readonly shared views and original 
   expect(f.el.textContent).toContain("版本冲突，草稿保留");
   await f.click("取消");
   await f.click("关闭详情");
-  await f.click("本地 Agent"); await f.click("服务来源"); await f.click("配置");
+  await f.click("本地 Agent"); await f.click("模型提供商"); await f.click("配置");
   expect(f.el.querySelector<HTMLInputElement>('input[aria-label="新增 API Key"]')?.value).toBe("unsaved-key");
   await f.click("关闭详情");
   const manageButtons = [...f.el.querySelectorAll<HTMLButtonElement>("button")].filter(button => button.textContent === "配置" && !button.closest("[hidden]"));
@@ -331,9 +347,9 @@ it("unified directory keeps source identity, readonly shared views and original 
 
 it("空服务目录的大引导直接打开宫格抽屉", async () => {
   const f = await render([], true, undefined, { kind: "mcp" });
-  await f.click("服务来源");
-  expect(f.el.textContent).toContain("连接你的第一个模型服务");
-  await f.click("添加第一个服务连接");
+  await f.click("模型提供商");
+  expect(f.el.textContent).toContain("添加你的第一个模型提供商");
+  await f.click("添加第一个模型提供商");
   expect(f.el.querySelectorAll('.agent-assistant__drawer-layer:not([hidden]) .agent-assistant__method')).toHaveLength(2);
   expect(f.el.querySelector('.agent-assistant__drawer-layer:not([hidden]) .agent-assistant__list')).toBeNull();
 });
@@ -344,7 +360,7 @@ it("已有服务连接时，点击添加直接替换为宫格选择面板", asyn
     serviceConnectionDirectory: async () => ({ ok: true as const, value: { connections: [source], duplicates: [], providers: [] } }),
     listServiceConnections: async () => ({ ok: true as const, value: [] }),
   });
-  await f.click("服务来源");
+  await f.click("模型提供商");
   expect(f.el.querySelector('[data-ai-page="sources"] .agent-assistant__list')?.textContent).toContain("Unified relay");
   await f.click("添加连接");
   const services = f.el.querySelector('[data-ai-page="sources"]')!;
@@ -379,12 +395,14 @@ it("全部供应商直接出现于添加宫格，关闭抽屉和切换页面后�
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "unsaved-provider-key");
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
+  await f.click("返回选择");
   await f.click("tokenhub");
   expect(field.closest("[hidden]")).not.toBeNull();
   await f.click("本地 Agent");
-  await f.click("服务来源");
+  await f.click("模型提供商");
   await f.click("关闭详情");
   await f.click("添加连接");
+  await f.click("返回选择");
   await f.click("litellm");
   expect(field.closest("[hidden]")).toBeNull();
   expect(field.value).toBe("unsaved-provider-key");
@@ -432,7 +450,7 @@ it("诊断只展示实际状态与画布历史，未知证据不会变成检查�
   const f = await render([api, local], true, undefined, { canvasId: "canvas" }, { listConversations, submitTurn });
   expect(listConversations).not.toHaveBeenCalled();
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个可用");
-  expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个来源");
+  expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个提供商");
   await f.click("连接诊断");
   const page = f.el.querySelector('[data-ai-page="diagnostics"]')!;
   expect(listConversations).not.toHaveBeenCalled();
@@ -458,7 +476,7 @@ it("服务目录失败时总览报告失败，服务页提供重试而不假称�
   const directory = vi.fn(async () => ({ ok: false as const, code: "offline", error: "目录暂不可用" }));
   const f = await render([], true, undefined, {}, { serviceConnectionDirectory: directory });
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("读取失败");
-  await f.click("服务来源");
+  await f.click("模型提供商");
   const page = f.el.querySelector('[data-ai-page="sources"]')!;
   expect(page.textContent).toContain("目录暂不可用");
   expect(page.querySelector(".agent-assistant__empty--service")).toBeNull();

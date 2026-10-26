@@ -3,7 +3,7 @@ export function createProviderLifecycleFetch(host: { effect(callback: () => () =
   let active = true;
   host.effect(() => () => { active = false; });
   return (async (input, init) => {
-    if (!active) throw Object.assign(new Error("服务来源已停用或认证配置已变化"), { sourceStale: true });
+    if (!active) throw Object.assign(new Error("模型提供商已停用或认证配置已变化"), { sourceStale: true });
     return upstream(input, init);
   }) as typeof fetch;
 }

@@ -20,7 +20,7 @@ export function useServiceDirectory(service: AgentConversationService, revision:
       if (!active) return;
       if (result.ok) { setDirectory(result.value); setError(null); }
       else setError(result.error);
-    }).catch(() => { if (active) setError("服务来源读取失败，请重试。"); })
+    }).catch(() => { if (active) setError("模型提供商读取失败，请重试。"); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [service, revision]);
