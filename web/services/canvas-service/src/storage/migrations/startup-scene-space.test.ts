@@ -11,7 +11,7 @@ import {
   createMotionSnapshot,
   decodeFilmSetNodeData
 } from "@woohaa3/contracts";
-import { serverCanvasToYDoc } from "@woohaa3/contracts/canvas-yjs";
+import { serverCanvasToYDoc, yDocToServerCanvas } from "@woohaa3/contracts/canvas-yjs";
 import { loadNodeSqlite } from "../sqlite/sqlite-loader.js";
 import { migrateSqliteCanvasBeforeStartup } from "./startup.js";
 import {
@@ -62,7 +62,11 @@ function legacyNodeData(cameraMotionScript =
   } as never);
 }
 
-function writeProfile(nodeData: Record<string, unknown>, now: string) {
+function writeProfile(
+  nodeData: Record<string, unknown>,
+  now: string,
+  projection: "source" | "derived" = "source"
+) {
   const canvas = createEmptyWoohaa3ServerCanvas("scene-space", now);
   canvas.document.nodes.push({ id: "film", type: "composite-asset", width: 260, height: 195, position: { x: 100, y: 60 } } as never);
   canvas.nodeData.film = nodeData as never;
@@ -76,7 +80,10 @@ function writeProfile(nodeData: Record<string, unknown>, now: string) {
   const doc = serverCanvasToYDoc(canvas as never);
   const snapshot = Y.encodeStateAsUpdate(doc);
   doc.destroy();
-  // 旧客户端写入的正是这份 projection：当前 codec 按设计拒绝 schema 3，因此直接写源 JSON。
+  // `source`：旧客户端写入的正是这份 projection（当前 codec 按设计拒绝 schema 3，故直接写源 JSON）。
+  // `derived`：真实库的另一种状态——文档被重建/提交过一次，projection 由当前 codec 从同一份 raw
+  // 派生（schema 3 内容按规范化被剥除），而 raw 仍保留旧内容。
+  const stored = projection === "source" ? canvas : derivedProjection(snapshot, now);
   db.prepare("INSERT INTO canvas_yjs_documents VALUES(?,?,?,?,?,?,?,?,?)").run(
     canvas.id,
     "woohaa3-ycanvas-v2",
@@ -84,11 +91,21 @@ function writeProfile(nodeData: Record<string, unknown>, now: string) {
     snapshot,
     0,
     canvas.revision,
-    JSON.stringify(canvas),
+    JSON.stringify(stored),
     now,
     now
   );
   return { db, filename };
+}
+
+/** 用当前生产 codec 从同一份 raw 派生 projection：这正是应用真实写入的形态。 */
+function derivedProjection(snapshot: Uint8Array, now: string) {
+  const doc = new Y.Doc();
+  Y.applyUpdate(doc, snapshot);
+  const exported = yDocToServerCanvas(doc, { now });
+  doc.destroy();
+  if (!exported.ok) throw new Error(exported.failure.message);
+  return exported.canvas;
 }
 
 describe("片场坐标契约迁移（纯计划）", () => {
@@ -163,6 +180,56 @@ describe("片场坐标契约迁移（启动前）", () => {
       // 迁移产物必须是生产严格解码可接受的 schema 4。
       expect(decodeFilmSetNodeData(migrated.nodeData.film).ok).toBe(true);
       expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("projection 已是当前 codec 的规范化形态时仍能迁移（raw 保留旧内容）", () => {
+    const now = "2026-10-23T00:00:00.000Z";
+    const { db, filename } = writeProfile(legacyNodeData(), now, "derived");
+    try {
+      // 前置条件：raw 里的 schema 3 内容在派生 projection 中按规范化被剥除。
+      const before = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
+      expect(before.nodeData.film.filmSetContent).toBeUndefined();
+
+      const result = migrateSqliteCanvasBeforeStartup(filename);
+      expect(result.changed).toBe(true);
+      const row = db.prepare("SELECT * FROM canvas_yjs_documents").get()!;
+      const migrated = JSON.parse(String(row.projection_json));
+      expect(migrated.nodeData.film.filmSetContent.schemaVersion).toBe(FILM_SET_CONTENT_VERSION);
+      expect(decodeFilmSetNodeData(migrated.nodeData.film).ok).toBe(true);
+      // 迁移后 raw 与 projection 一致，重启无净变化。
+      expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("派生视图也不匹配时仍然拒绝（不放过陈旧/半写 projection）", () => {
+    const now = "2026-10-23T00:00:00.000Z";
+    const { db, filename } = writeProfile(legacyNodeData(), now, "derived");
+    try {
+      const stored = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
+      // 篡改一个 raw 不存在的 nodeData 值：既不是 raw 原样，也不是当前 codec 的派生结果。
+      stored.nodeData.film = { ...stored.nodeData.film, title: "被改过的标题" };
+      db.prepare("UPDATE canvas_yjs_documents SET projection_json = ?").run(JSON.stringify(stored));
+      expect(() => migrateSqliteCanvasBeforeStartup(filename)).toThrow(/projection-mismatch/);
+      // 拒绝时不得改动数据。
+      expect(db.prepare("SELECT room_epoch FROM canvas_yjs_documents").get()!.room_epoch).toBe("epoch");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("projection 缺节点时仍然拒绝", () => {
+    const now = "2026-10-23T00:00:00.000Z";
+    const { db, filename } = writeProfile(legacyNodeData(), now, "derived");
+    try {
+      const stored = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
+      stored.document.nodes = [];
+      db.prepare("UPDATE canvas_yjs_documents SET projection_json = ?").run(JSON.stringify(stored));
+      expect(() => migrateSqliteCanvasBeforeStartup(filename)).toThrow(/projection-mismatch/);
     } finally {
       db.close();
     }
