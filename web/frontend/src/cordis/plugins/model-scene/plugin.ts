@@ -2,8 +2,8 @@
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import {
   compositeAssetSceneOps, executeModelScriptVersioned, isSupportedModelScriptVersion,
-  sceneIrVersionFor, nodeCapabilityContext,
-  type CanvasNodeData, type SceneV2Op, type NodePreparationResult,
+  sceneIrVersionFor,
+  type CanvasNodeData, type SceneV2Op, type NodePreparationResult, type ServerCanvas,
 } from "@woohaa3/contracts";
 import { modelSceneStore, ModelSceneStore } from "./model-scene-store.js";
 import { MODEL_SCENES_SERVICE, type ModelScenesProvider } from "../service-keys.js";
@@ -28,15 +28,14 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     const reports = createModelScriptReports(report => ctx.canvasRemote.reportModelScript(report));
     const schedule = options.schedule ?? queueMicrotask;
     let stopped = false, scheduled = false, running = false, rerun = false;
-    const identity = (nodeId: string) => {
-      const canvas = ctx.canvasState.getCanvas();
-      const context = canvas && nodeCapabilityContext(canvas, nodeId);
-      if (!context) return null;
+    const identity = (canvas: ServerCanvas | null | undefined, node: ServerCanvas["document"]["nodes"][number] | undefined) => {
+      if (!canvas || !node) return null;
+      const context = { canvas, node, data: canvas.nodeData[node.id] };
       const capabilities = registry.resolve(context);
       const provider = capabilities.modelPreparation;
       const key = provider?.executionKey(context);
       return provider && key !== undefined
-        ? { context, provider, key: JSON.stringify([canvas!.id, capabilities.generation, key]) }
+        ? { context, provider, key: JSON.stringify([canvas.id, capabilities.generation, key]) }
         : null;
     };
     const discard = (nodeId: string) => {
@@ -47,9 +46,21 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     const drain = async () => {
       let started = performance.now();
       const canvas = ctx.canvasState.getCanvas();
-      const ids = new Set(canvas?.document.nodes.map(node => node.id) ?? []);
+      // This index belongs to one drain. Refresh on canonical snapshot replacement,
+      // including after a browser yield or asynchronous preparation.
+      let indexedCanvas = canvas;
+      let nodes = new Map(canvas?.document.nodes.map(node => [node.id, node]) ?? []);
+      const currentIdentity = (nodeId: string) => {
+        const latest = ctx.canvasState.getCanvas();
+        if (latest !== indexedCanvas) {
+          indexedCanvas = latest;
+          nodes = new Map(latest?.document.nodes.map(node => [node.id, node]) ?? []);
+        }
+        return identity(latest, nodes.get(nodeId));
+      };
+      const ids = new Set(nodes.keys());
       ctx.compositeAssets.retain(ids);
-      for (const id of applied.keys()) if (!ids.has(id) || applied.get(id) !== identity(id)?.key) discard(id);
+      for (const id of applied.keys()) if (!ids.has(id) || applied.get(id) !== currentIdentity(id)?.key) discard(id);
       for (const nodeId of ids) {
         if (stopped) return;
         if (performance.now() - started >= 8) {
@@ -57,7 +68,7 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
           if (stopped) return;
           started = performance.now();
         }
-        const current = identity(nodeId);
+        const current = currentIdentity(nodeId);
         if (!current || applied.get(nodeId) === current.key) continue;
         const load = loading.track(nodeId, current.key);
         let result: NodePreparationResult;
@@ -68,14 +79,14 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
         } catch (error) {
           result = { status: `fail:execute:${error instanceof Error ? error.message : String(error)}` };
         }
-        if (stopped || identity(nodeId)?.key !== current.key) {
+        if (stopped || currentIdentity(nodeId)?.key !== current.key) {
           result.release?.(); loading.remove(load); continue;
         }
         releases.get(nodeId)?.(); releases.delete(nodeId);
         if (result.release) releases.set(nodeId, result.release);
         if (result.resource) scenes.set(nodeId, result.resource); else scenes.delete(nodeId);
         // Composite metadata is published only by an accepted, strictly owned adapter result.
-        const adapter = ctx.compositeAssets.resolve(current.context.canvas, nodeId);
+        const adapter = ctx.compositeAssets.resolveNode(current.context.canvas, current.context.node);
         ctx.compositeAssets.setProjection(nodeId, adapter ? { ...(result.resource ? { resource: result.resource } : {}), ...(result.composition ? { composition: result.composition } : {}), ...(result.diagnostic ? { diagnostic: result.diagnostic } : {}) } : null, adapter?.extensionId);
         applied.set(nodeId, current.key);
         loading.setLoading(load, false);
@@ -87,14 +98,15 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
           (status === "ok" ? !data.modelScriptError : data.modelScriptError === result.status)) continue;
         reports.enqueue({ canvasId: options.canvasId ?? DEFAULT_CANVAS_ID, nodeId, status,
           ...(status === "failed" ? { message: result.status } : {}) },
-          () => !stopped && applied.get(nodeId) === current.key && identity(nodeId)?.key === current.key);
+          () => !stopped && applied.get(nodeId) === current.key && currentIdentity(nodeId)?.key === current.key);
       }
     };
     const trigger = () => {
       if (stopped) return;
       const sources = new Map<string, string>();
-      for (const node of ctx.canvasState.getCanvas()?.document.nodes ?? []) {
-        const current = identity(node.id);
+      const canvas = ctx.canvasState.getCanvas();
+      for (const node of canvas?.document.nodes ?? []) {
+        const current = identity(canvas, node);
         if (current) sources.set(node.id, current.key);
       }
       // Remove obsolete published resources immediately, even while an old prepare awaits.

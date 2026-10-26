@@ -18,6 +18,8 @@ export type CanvasRuntimeOptions = {
   /** 每节点不可变 prepared model resource（change: optimize-model-scene-snapshot-hot-path）。 */
   getModelResources?: () => ReadonlyMap<string, import("@woohaa3/contracts").PreparedModelResource>;
   isModelLoading?: (nodeId: string) => boolean;
+  /** Resolve the current loading provider once per scene build, allowing late registration/reload. */
+  getModelLoading?: () => ((nodeId: string) => boolean) | undefined;
   /**
    * 当前可聚焦模型目标（change: add-model-focus-viewing，任务 3.1）。
    * 由宿主从 model-scene provider + canonical/working 画布解析；缺省无模型。

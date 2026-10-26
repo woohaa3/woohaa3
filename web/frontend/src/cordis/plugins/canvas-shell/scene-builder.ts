@@ -72,6 +72,7 @@ export function buildSceneWithResources(
   const working = options.projectHistoryCanvas?.(source) ?? source;
   const canvasState = options.compositeAssets?.projectCanvas(working) ?? working;
   if (!canvasState) return null;
+  const sourceNodes = new Map(canvasState.document.nodes.map(node => [node.id, node]));
   // provider 的 prepared resource 按 nodeId 索引；映射层按 nodeId 取用。
   const byNode = new Map<string, PreparedModelResource>(options.getModelResources?.() ?? []);
   // 历史本地 snapshot override：只覆盖对应节点的 Scene IR，不写规范状态（任务 4.3）。
@@ -149,13 +150,14 @@ export function buildSceneWithResources(
     compositeAssetEmptyPlaceholders: options.compositeAssets?.emptyPlaceholders(canvasState),
     compositeAssetGeometryQualities: options.compositeAssets?.geometryQualities(canvasState)
   });
+  const isModelLoading = options.getModelLoading?.() ?? options.isModelLoading;
   applyNodeResourceLoading(scene, {
     image: options.textureSync,
     video: options.videoSessions,
-    model: options.isModelLoading ? {
-      isLoading: options.isModelLoading,
+    model: isModelLoading ? {
+      isLoading: isModelLoading,
       isResourceNode: node => {
-        const source = canvasState.document.nodes.find(entry => entry.id === node.id);
+        const source = sourceNodes.get(node.id);
         return !!source && !!(options.nodeCapabilities?.resolve({ canvas: canvasState, node: source, data: canvasState.nodeData[node.id] }).modelPreparation);
       }
     } : undefined
@@ -167,7 +169,8 @@ export function buildSceneWithResources(
     // 总览 LOD 策略同属 mapper 派生呈现声明，回调不拥有；回调后恢复为宿主注入值
     // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
     const geometryQuality = node.compositeAsset?.geometryQuality;
-    options.compositeAssets?.resolve(canvasState, node.id)?.projectPresentation?.(node, canvasState.nodeData[node.id], byNode.get(node.id));
+    const sourceNode = sourceNodes.get(node.id);
+    if (sourceNode) options.compositeAssets?.resolveNode(canvasState, sourceNode)?.projectPresentation?.(node, canvasState.nodeData[node.id], byNode.get(node.id));
     if (node.compositeAsset) {
       if (scopeShape) node.compositeAsset.scopeShape = scopeShape;
       else delete node.compositeAsset.scopeShape;
@@ -186,7 +189,7 @@ export function buildSceneWithResources(
       node.aggregateRun.reduceMotion = reduceMotion;
       // Historical model/media projections are read-only outputs of an older work, never live executions.
       if ((node.id === focusNode && options.getModelSceneOverride?.(node.id))
-        || options.compositeAssets?.resolve(canvasState, node.id)?.historyProjection?.(node.id)) delete node.aggregateRun;
+        || (sourceNodes.has(node.id) && options.compositeAssets?.resolveNode(canvasState, sourceNodes.get(node.id)!)?.historyProjection?.(node.id))) delete node.aggregateRun;
     }
   }
   for (const node of scene.nodes) for (const dot of node.historyStrip?.dots ?? []) {

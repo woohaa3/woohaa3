@@ -37,6 +37,8 @@ export type InteractionControllerOptions = {
    */
   getModelResources?: () => ReadonlyMap<string, import("@woohaa3/contracts").PreparedModelResource>;
   isModelLoading?: (nodeId: string) => boolean;
+  /** Resolve the current loading provider once per scene build, allowing late registration/reload. */
+  getModelLoading?: () => ((nodeId: string) => boolean) | undefined;
   /**
    * 当前主题 snapshot（change: unify-application-theme-tokens，design D4）。
    * 缺省用内置默认主题；非法值由 buildCanvasRenderScene 拒绝。

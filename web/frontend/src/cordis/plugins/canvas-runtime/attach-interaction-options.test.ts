@@ -92,3 +92,14 @@ describe("buildAttachInteractionOptions 片场对象键盘 action（任务 4.1/5
     expect(options.filmSetObjectAction).toBe(ACTION);
   });
 });
+
+
+it("forwards the per-scene model-loading reader getter without resolving it during assembly", () => {
+  const getModelLoading = vi.fn(() => (_id: string) => false);
+  const assembly = deps();
+  assembly.options = { ...assembly.options, getModelLoading };
+  const options = buildAttachInteractionOptions(assembly);
+  expect(options.getModelLoading).toBe(getModelLoading);
+  expect(getModelLoading).not.toHaveBeenCalled();
+  expect(buildAttachInteractionOptions(deps()).getModelLoading).toBeUndefined();
+});

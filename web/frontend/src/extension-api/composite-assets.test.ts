@@ -199,3 +199,69 @@ it("占位只由可信声明投影，未知值拒绝，释放后清除且不改�
   dispose();
   expect(registry.emptyPlaceholders(canvas).size).toBe(0);
 });
+
+
+it("bulk projections inspect document nodes linearly, including ordinary cards", () => {
+  const registry = new CompositeAssetRegistry();
+  const canvas = createEmptyWoohaa3ServerCanvas("linear");
+  for (let i = 0; i < 100; i++) canvas.document.nodes.push({ id: `text-${i}`, type: "text", position: { x: 0, y: 0 } });
+  let comparisons = 0;
+  const find = canvas.document.nodes.find.bind(canvas.document.nodes);
+  vi.spyOn(canvas.document.nodes, "find").mockImplementation((predicate, thisArg) => find((node, index, nodes) => { comparisons++; return predicate.call(thisArg, node, index, nodes); }));
+  registry.mediaSources(canvas, null);
+  registry.scopeShapes(canvas);
+  registry.typeLabels(canvas);
+  registry.emptyPlaceholders(canvas);
+  registry.geometryQualities(canvas);
+  registry.children(canvas);
+  expect(comparisons).toBeLessThanOrEqual(canvas.document.nodes.length * 8);
+});
+
+it("bulk projections preserve mixed identities, order and live mutations without cached adapters", () => {
+  const registry = new CompositeAssetRegistry();
+  const canvas = createEmptyWoohaa3ServerCanvas("mixed");
+  for (const [id, type, identity] of [["b", "composite-asset", "b"], ["text", "text", "a"], ["unknown", "composite-asset", "missing"], ["a", "composite-asset", "a"]] as const) {
+    canvas.document.nodes.push({ id, type, position: { x: 0, y: 0 } });
+    canvas.nodeData[id] = { extensionId: identity } as never;
+  }
+  const definition = (identity: string) => ({ ...adapter(identity), label: identity, mediaSources: (id: string) => [{ nodeId: id, planeId: id, assetId: id, kind: "image" as const, sourceIdentity: "source" }, { nodeId: "wrong", planeId: id, assetId: id, kind: "image" as const, sourceIdentity: "bad" }] });
+  const stop = registry.register(definition("a"));
+  registry.register(definition("b"));
+  expect([...registry.typeLabels(canvas)]).toEqual([["b", "b"], ["a", "a"]]);
+  expect(registry.mediaSources(canvas, null).map(source => [source.nodeId, source.sourceIdentity])).toEqual([["b", "mixed:b:1:source"], ["a", "mixed:a:1:source"]]);
+  canvas.document.nodes[0].type = "text";
+  canvas.nodeData.a.extensionId = "b";
+  expect([...registry.typeLabels(canvas)]).toEqual([["a", "b"]]);
+  canvas.document.nodes[0].type = "composite-asset";
+  canvas.nodeData.a.extensionId = "a";
+  stop();
+  expect([...registry.typeLabels(canvas)]).toEqual([["b", "b"]]);
+  registry.register(definition("a"));
+  expect(registry.mediaSources(canvas, null).at(-1)?.sourceIdentity).toBe("mixed:a:3:source");
+  canvas.document.nodes.pop();
+  expect([...registry.typeLabels(canvas)]).toEqual([["b", "b"]]);
+});
+
+
+it("child projection keeps validation, declaration order and ownership errors", () => {
+  const registry = new CompositeAssetRegistry();
+  const canvas = createEmptyWoohaa3ServerCanvas("children");
+  for (const [id, type] of [["owner", "composite-asset"], ["card", "text"], ["container", "model3d"]]) {
+    canvas.document.nodes.push({ id, type, position: { x: 0, y: 0 } });
+    canvas.nodeData[id] = { extensionId: "a" } as never;
+  }
+  let mode = "valid";
+  registry.register({ ...adapter("a"), children: (_canvas, ownerNodeId) => {
+    if (ownerNodeId !== "owner") return [];
+    const card = { nodeId: "card", ownerNodeId, kind: "entity" as const, role: "object-entry" as const };
+    if (mode === "duplicate") return [card, card];
+    if (mode === "container") return [{ ...card, kind: "container" as const }];
+    return [{ ...card, ownerNodeId: "foreign" }, { ...card, nodeId: "missing" }, { ...card, role: "preview" as const, closable: true }, card,
+      { nodeId: "container", ownerNodeId, kind: "container" as const, role: "object-entry" as const }];
+  } });
+  expect([...registry.children(canvas).keys()]).toEqual(["card", "container"]);
+  mode = "duplicate";
+  expect(() => registry.children(canvas)).toThrow("归属冲突");
+  mode = "container";
+  expect(() => registry.children(canvas)).toThrow("容器必须");
+});
