@@ -152,9 +152,10 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
       fs.mkdirSync(path.dirname(versionDir), { recursive: true });
       fs.renameSync(tree, versionDir);
     }
-    // 含后端代码：C 方向下扩展后端与宿主同进程，换版只能靠受控重启生效，没有蓝绿或运行期装配。
+    // 含后端代码：有运行期热切换能力时不需要重启（扩展层 add/remove + 各版本独立模块 URL）；
+    // 宿主不支持热切换（最小装配 / 无扩展层）时才退回受控重启。
     const hasBackend = Boolean(preflight.requiresRestart) || Boolean(existing?.requiresRestart);
-    const requiresRestart = hasBackend;
+    const requiresRestart = hasBackend && !ctx.deps.runtime?.available();
     // 观察期：热生效（纯前端 / 蓝绿）从切换完成开始计时（reload 成功后再写），重启生效从下次启动开始。
     const observeUntil: string | null = null;
     commit((draft) => {

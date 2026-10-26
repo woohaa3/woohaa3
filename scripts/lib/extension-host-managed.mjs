@@ -5,9 +5,64 @@
  * C 方向取消进程隔离后，这里只剩声明层的信任检查——「市场来源只能来自内置根」、
  * 「受管扩展不得声明 bootstrap / storage / canvasContent」与模块越界探测。
  */
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { EXTENSION_DESCRIPTOR_NAME } from "./extension-scan.mjs";
 import { loadExtensionDescriptor } from "./extension-descriptor.mjs";
 import { extensionIconAssetFile, extensionIconPublicPath } from "./extension-icon-assets.mjs";
 import { ExtensionLoadError, FALLBACK_ORDER, resolveModuleFile } from "./extension-host-modules.mjs";
+
+/**
+ * 运行期从一个已提交到受管根的版本目录加载**真实**扩展层插件（热切换用）。
+ *
+ * 与启动期扫描走同一套声明校验（`untrustedRootViolation` / `probeDeclaredModules`），区别只是
+ * 目录是运行期才知道的。返回可直接交给 `ExtensionLayer.add` 的插件对象；插件名必须等于扩展 identity。
+ *
+ * 不同版本位于 `installed/<id>/<version>/`，因此 `import()` 的 URL 天然不同，不会命中 ESM 模块缓存——
+ * 这正是进程内换版可行的原因。同一版本重装会命中缓存，等于复用同一模块实例，符合预期。
+ */
+export async function loadRuntimePlugin({ dir, extensionId, version }) {
+  const extension = {
+    extensionId,
+    dir,
+    directory: `${extensionId}@${version}`,
+    descriptorPath: path.join(dir, EXTENSION_DESCRIPTOR_NAME),
+    managed: true,
+    rootWritable: false
+  };
+  const descriptor = loadExtensionDescriptor(extension);
+  if (!descriptor?.hostPlugin) {
+    throw new ExtensionLoadError("EXTENSION_MODULE_INVALID", `扩展 ${extensionId} 没有声明 hostPlugin，无法作为后端插件装配`, { extensionId, directory: dir });
+  }
+  const violation = untrustedRootViolation(extension, descriptor);
+  if (violation) throw new ExtensionLoadError(violation.code, violation.message, { extensionId, directory: dir, field: violation.field });
+  const problem = probeDeclaredModules(extension, descriptor);
+  if (problem) throw new ExtensionLoadError(problem.code, problem.message, { extensionId, directory: dir });
+
+  const context = { extensionId, directory: dir, descriptorPath: extension.descriptorPath };
+  const modulePath = resolveModuleFile(dir, descriptor.hostPlugin.module ?? "./backend", context);
+  const module = await import(pathToFileURL(modulePath).href);
+  const factory = module[descriptor.hostPlugin.factory];
+  if (typeof factory !== "function") {
+    throw new ExtensionLoadError("EXTENSION_EXPORT_INVALID", `扩展 ${extensionId} 的 hostPlugin 工厂导出不是函数：${descriptor.hostPlugin.factory}`, { extensionId, directory: dir, export: descriptor.hostPlugin.factory });
+  }
+  const plugin = factory({});
+  if (!plugin || typeof plugin.apply !== "function" || typeof plugin.configPrefix !== "string") {
+    throw new ExtensionLoadError("EXTENSION_EXPORT_INVALID", `扩展 ${extensionId} 的 hostPlugin 工厂返回值不是扩展层插件（需要 name/configPrefix/apply）`, { extensionId, directory: dir });
+  }
+  if (plugin.name !== extensionId) {
+    throw new ExtensionLoadError("EXTENSION_IDENTITY_MISMATCH", `插件名与扩展 identity 不一致：${plugin.name} ≠ ${extensionId}`, { extensionId, directory: dir });
+  }
+  return {
+    plugin: {
+      ...plugin,
+      directory: dir,
+      origin: Object.freeze({ managed: true, rootWritable: false })
+    },
+    descriptor
+  };
+}
 
 /**
  * 受管根 / 可写根的信任边界（change: 2026-10-21-add-extension-marketplace-point，任务 2.2 / design D3、D4）。

@@ -66,8 +66,8 @@ export function uninstall(ctx: ManagerContext, extensionId: string, options: { p
         }
       }
       const hasBackend = Boolean(record.requiresRestart);
-      // C 方向下含后端的扩展卸载同样要重启才彻底生效。
-      const needsRestart = hasBackend;
+      // 热切换可用时卸载直接撤下运行期实例；否则仍提示重启。
+      const needsRestart = hasBackend && !ctx.deps.runtime?.available();
       commit((draft) => {
         delete draft.extensions[extensionId];
       });

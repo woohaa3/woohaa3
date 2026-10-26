@@ -9,6 +9,7 @@
  *   「市场装市场」的信任提升，核心自带来源随宿主发布、没有这个问题。
  * - 受管根被另一个进程锁住时 Manager 不可写（`MARKETPLACE_WRITER_LOCKED` 记日志），宿主照常启动。
  */
+import path from "node:path";
 import type { ExtensionDocumentStore } from "@woohaa3/contracts";
 import type { LoadedExtensionHost } from "../../../extensions/manifest.js";
 import { createExtensionInstallApiHandler } from "../../../api/extension-install-api.js";
@@ -18,6 +19,7 @@ import { createExtensionManager, type ExtensionManager, type ObservedHealth } fr
 import { loadPackageToolkit } from "./toolkit.js";
 import { createVersionStatusCache, managedVersionStatus, marketplaceExtensionDetail } from "./marketplace-detail.js";
 import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, parseRepoList } from "./github-source.js";
+import type { ExtensionRuntimePort } from "./manager-types.js";
 import type { ExtensionPackageToolkit, InstallationsHandle, TrustedKey } from "./types.js";
 
 export type { ExtensionManager } from "./manager.js";
@@ -106,10 +108,72 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
     const unregisterGithub = ctx.marketplace.resolve(GITHUB_RELEASE_SOURCE_ID)
       ? () => undefined
       : ctx.marketplace.register(githubSource);
+    /**
+     * 进程内热切换（C 方向）：先撤下旧 fiber（Cordis effect 回滚它注册的 Provider / 路由 / 监听），
+     * 再 import 新版本目录并 add 新插件。同名插件不能并存，因此这段时间该扩展缺席；
+     * 失败时尽力装回 `previousDirectory`，由 Manager 按换版失败处理。
+     */
+    const runtimeSwap = (): ExtensionRuntimePort | undefined => {
+      // 注意：扩展层是核心层装载后才 `ctx.provide` 的，因此这里**不能**在构造期判断它是否存在，
+      // 否则永远拿到 undefined。能力判定一律推到调用期（`available()`）。
+      if (!toolkit.loadRuntimePlugin) return undefined;
+      const layer = () => ctx.get("extensionLayer");
+      const versionOf = (directory: string) => path.basename(directory);
+      const mount = async (extensionId: string, directory: string) => {
+        const loaded = await toolkit.loadRuntimePlugin!({ dir: directory, extensionId, version: versionOf(directory) });
+        const plane = application()?.service.plugins();
+        const gate = application()?.siteGate;
+        const metadata = host.metadata?.find((entry) => entry.extensionId === extensionId) ?? null;
+        let definition = null as ReturnType<NonNullable<typeof gate>["add"]> | null;
+        if (metadata && plane && gate) {
+          definition = gate.add(extensionId);
+        }
+        const entry = layer()!.add(loaded.plugin);
+        if (!entry) {
+          if (definition && gate) gate.remove(extensionId);
+          throw Object.assign(new Error(`扩展 ${extensionId} 的配置段无效，无法热切换`), { code: "extension-config-invalid" });
+        }
+        await entry.started;
+        if (definition && plane) {
+          const outcome = await plane.addExtension({ metadata: metadata as never, definition });
+          if (!outcome.ok) {
+            await layer()!.remove(extensionId);
+            gate?.remove(extensionId);
+            throw Object.assign(new Error(outcome.message), { code: outcome.code });
+          }
+        }
+      };
+      return {
+        available: () => Boolean(layer()),
+        async swap(extensionId, directory, _version, previousDirectory) {
+          const target = layer();
+          if (!target) throw Object.assign(new Error("宿主不支持运行期装配"), { code: "extension-host-unsupported" });
+          // 先撤旧：同名插件不能并存。
+          await target.remove(extensionId);
+          try {
+            await mount(extensionId, directory);
+            return { swapped: true };
+          } catch (error) {
+            if (previousDirectory) {
+              try {
+                await mount(extensionId, previousDirectory);
+              } catch (restoreError) {
+                log({ event: "extension-swap-restore-failed", extensionId, message: restoreError instanceof Error ? restoreError.message : String(restoreError) });
+              }
+            }
+            throw error;
+          }
+        },
+        async remove(extensionId) {
+          await layer()?.remove(extensionId);
+        }
+      };
+    };
     const manager: ExtensionManager = createExtensionManager(
       {
         managedRoot,
         toolkit,
+        ...(runtimeSwap() ? { runtime: runtimeSwap()! } : {}),
         marketplace: ctx.marketplace,
         trust: () => ({
           trustedKeys: parseTrustedKeys(settings.get("extensions.marketplace.trustedKeys" as never)),

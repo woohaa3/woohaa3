@@ -168,14 +168,17 @@ describe("扩展市场端到端（真实宿主 + HTTP）", () => {
     expect((await currentRelease(base)).extensions).not.toContain("fixture-panel");
   }, 120_000);
 
-  it("含后端扩展：C 方向下安装成功但要求受控重启，指针已提交", async () => {
-    // C 方向取消了 Extension Host 子进程：扩展后端与宿主同进程，没有可并行的第二份实例，
-    // 因此含后端代码的安装在提交指针后一律以 restart-required 收尾，重启后由扩展层装配。
+  it("含后端扩展：进程内热切换，首次安装即生效（不要求重启）", async () => {
+    // C 方向取消了子进程，但换版仍然热生效：扩展层 add/remove 建在 Cordis fiber 上，
+    // 每个版本一个目录 → 换版本即换模块 URL，不会命中 ESM 缓存。
     const { base, managed } = await boot();
     const job = await install(base, await packFixture("fixture-echo-provider", "1.0.0"));
     expect(job.status).toBe("succeeded");
-    expect(job.outcome).toBe("restart-required");
+    expect(JSON.stringify(job)).not.toMatch(/restart-required/);
     expect(managedRecord(managed, "fixture-echo-provider")).toMatchObject({ current: "1.0.0" });
+    // 装配在宿主进程内完成：路由立即可用，且 pid 就是宿主自己。
+    const res = await fetch(`${base}/api/extensions/fixture-echo-provider/refresh`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    expect(res.status).toBe(200);
   }, 120_000);
 
   it("签名不受信与路径穿越包被拒绝，当前版本不变", async () => {

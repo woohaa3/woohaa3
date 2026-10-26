@@ -16,8 +16,29 @@ import type { ExtensionPackageToolkit, TrustedKey } from "./types.js";
 /** 站点扩展健康（观察期用）：`failed` 立即回滚，`degraded` 连续 N 次回滚，`unknown`（纯前端等）视为正常。 */
 export type ObservedHealth = "ok" | "degraded" | "failed" | "unknown";
 
+/**
+ * 进程内热切换端口（C 方向）：扩展层已提供 `add` / `remove`（Cordis fiber），
+ * 结合「每个版本一个目录」带来的模块 URL 隔离，换版可以在不重启宿主的情况下完成。
+ *
+ * 与蓝绿的区别是**没有重叠期**：同名插件不能并存，只能先 `remove` 再 `add`，
+ * 期间该扩展缺席（在途调用失败）。端口负责把这段空窗压缩到最短，并在失败时装回旧版本。
+ */
+export type ExtensionRuntimePort = {
+  /** 宿主是否具备运行期装配能力（扩展层存在且能加载插件）。 */
+  available(): boolean;
+  /**
+   * 把该扩展切到 `directory`（版本见 `version`）。失败时尽力装回 `previousDirectory`，
+   * 并抛错交由 Manager 按失败处理。
+   */
+  swap(extensionId: string, directory: string, version: string, previousDirectory: string | null): Promise<{ swapped: boolean }>;
+  /** 卸载时把该扩展从扩展层撤下（幂等）。 */
+  remove(extensionId: string): Promise<void>;
+};
+
 export type ExtensionManagerDeps = {
   managedRoot: string;
+  /** 进程内热切换端口；缺省表示不支持热切换，含后端的变化退回受控重启。 */
+  runtime?: ExtensionRuntimePort;
   toolkit: ExtensionPackageToolkit;
   /** 未限定的市场注册表：本地文件来源由 Manager 注册在这里。 */
   marketplace: HostMarketplaceService;

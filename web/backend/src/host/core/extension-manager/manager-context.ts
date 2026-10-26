@@ -102,9 +102,33 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
   };
 
   const reload = async (extensionId: string, directory: string | null, hasBackend: boolean): Promise<ExtensionInstallOutcome> => {
-    // C 方向：含后端的变化一律要求受控重启。扩展后端与宿主同进程，没有第二份实例可以并行起停，
-    // 也没有运行期追加后端插件的路径。浏览器产物仍可热发布，下面继续处理。
-    if (hasBackend) return "restart-required";
+    if (hasBackend) {
+      // 进程内热切换（C 方向）：扩展层 add / remove 建在 Cordis fiber 上，撤下的 fiber 会回滚自己
+      // 注册的 Provider / 路由 / 监听；每个版本一个目录，换版本就是换模块 URL，不会命中 ESM 缓存。
+      // 同名插件不能并存，所以是「先卸后装」——这段空窗无法消除，只能靠装回旧版本兜住失败。
+      const runtime = deps.runtime;
+      if (!runtime?.available()) return "restart-required";
+      if (!directory) {
+        // 卸载：撤下运行期实例即可，插件清单与指针由调用方处理。
+        try {
+          await runtime.remove(extensionId);
+        } catch (error) {
+          log({ event: "extension-runtime-remove-failed", extensionId, message: error instanceof Error ? error.message : String(error) });
+        }
+      } else {
+        const current = requireHandle();
+        const previous = current.read().extensions[extensionId]?.previous ?? null;
+        try {
+          const previousDir = previous ? current.layout.versionDir(extensionId, previous) : null;
+          await runtime.swap(extensionId, directory, path.basename(directory), previousDir);
+          log({ event: "extension-swapped", extensionId, directory });
+        } catch (error) {
+          const cause = (error as { code?: unknown })?.code;
+          throw new ExtensionManagerError("MARKETPLACE_SWAP_FAILED", `新版本未能在进程内就绪${typeof cause === "string" ? `（${cause}）` : ""}：${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (!deps.publishBrowserRelease) return "installed";
+    }
     if (!deps.publishBrowserRelease) return "restart-required";
     try {
       await deps.publishBrowserRelease(directory ? { upsert: [{ extensionId, directory }] } : { remove: [extensionId] });
@@ -123,7 +147,7 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
       if (!record) throw new ExtensionManagerError("MARKETPLACE_NOT_INSTALLED", `扩展 ${extensionId} 不是受管扩展`);
       const from = record.current;
       const backend = Boolean(record.requiresRestart);
-      const restart = backend;
+      const restart = backend && !deps.runtime?.available();
       let next: InstallationRecord = {
         ...record,
         current: target,
