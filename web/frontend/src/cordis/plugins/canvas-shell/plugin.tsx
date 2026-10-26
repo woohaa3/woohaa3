@@ -11,6 +11,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { CanvasZoomControls } from "./canvas-zoom-controls.js";
+import { CanvasMinimap } from "./canvas-minimap.js";
 import { CanvasSearchPanel } from "../../ui/CanvasSearchPanel.js";
 import { CanvasUndoControls } from "./canvas-undo-controls.js";
 import { CanvasUndoToast } from "./canvas-undo-toast.js";
@@ -160,12 +161,13 @@ export function canvasShellExtension(): Plugin.Function<void> {
         nodeActionSettingsStore.close();
         downloads.dispose();
       }, "canvas-shell-downloads");
-      // 缩放控件作为 toolbar contribution（原 App 直接渲染；现由 Plugin 注册）。
+      // 缩放控件排在小地图右侧的概览区（2026-10-26）：与工具行分离，行里只留动作图标。
       // 百分比刷新由控件内部订阅本地视口完成，不依赖画布 revision
       // （change: fix-viewport-zoom-range）。
-      const removeToolbar = ctx.slots.register("canvas.toolbar", {
+      const removeToolbar = ctx.slots.register("canvas.minimap-side", {
         id: "canvas-zoom",
         owner: CANVAS_SHELL_PLUGIN_ID,
+        position: "right",
         priority: 0,
         render: ({ revision }) => (
           <CanvasZoomControls getController={() => ctx.canvasRuntime.controller()} revision={revision} />
@@ -173,6 +175,23 @@ export function canvasShellExtension(): Plugin.Function<void> {
       });
 
       ctx.effect(() => () => removeToolbar(), "canvas-shell-toolbar");
+
+      // 右下角控件面板顶部的小地图（2026-10-26）：
+      // 只读 working 画布与本地视口，点击/拖动经同一 InteractionController 平移；
+      // 收起按钮浮在地图边缘，状态由宿主保存并经 onCollapse 注入。
+      const removeMinimap = ctx.slots.register("canvas.minimap", {
+        id: "canvas-minimap",
+        owner: CANVAS_SHELL_PLUGIN_ID,
+        priority: 0,
+        render: ({ revision, onCollapse }) => (
+          <CanvasMinimap
+            getController={() => ctx.canvasRuntime.controller()}
+            revision={revision}
+            onCollapse={onCollapse}
+          />
+        )
+      });
+      ctx.effect(() => () => removeMinimap(), "canvas-shell-minimap");
 
       // 撤销/重做工具按钮（change: 2026-10-09-improve-canvas-workflow，任务 1.7）。
       // 与快捷键共用页面编辑历史；无记录时禁用并给出可读原因。

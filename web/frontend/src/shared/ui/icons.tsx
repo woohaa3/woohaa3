@@ -73,6 +73,7 @@ import {
   List,
   ListChecks,
   LoaderCircle,
+  Map,
   Maximize,
   Maximize2,
   Menu,
@@ -165,6 +166,8 @@ export const ChevronRightIcon = withDefaults(ChevronRight);
 export const MenuIcon = withDefaults(Menu);
 export const MenuListIcon = withDefaults(List);
 export const LocateIcon = withDefaults(Crosshair);
+/** 小地图开关（概览区显隐，2026-10-26）。 */
+export const MapIcon = withDefaults(Map);
 export const BackIcon = withDefaults(ArrowLeft);
 export const GenerationHistoryIcon = withDefaults(ClockArrowLeft);
 export const SnippetLibraryIcon = withDefaults(Library);

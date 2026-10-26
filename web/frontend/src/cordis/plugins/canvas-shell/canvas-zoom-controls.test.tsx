@@ -35,29 +35,30 @@ function makeController() {
   return {
     viewport: () => ({ zoom: 1 }),
     subscribeViewport: () => () => undefined,
-    zoomBy: vi.fn(),
     zoomTo: vi.fn(),
-    zoomToFit: vi.fn()
+    zoomBy: vi.fn()
   } as unknown as InteractionController & {
-    zoomBy: ReturnType<typeof vi.fn>;
     zoomTo: ReturnType<typeof vi.fn>;
-    zoomToFit: ReturnType<typeof vi.fn>;
+    zoomBy: ReturnType<typeof vi.fn>;
   };
 }
 
 describe("CanvasZoomControls（任务 3.1）", () => {
-  it("渲染紧凑缩放控件：图标放大/缩小、滑杆、百分比、图标适合屏幕", () => {
+  it("渲染窄竖向缩放条：百分比、滑杆与上下叠放的放大/缩小", () => {
     const html = renderToStaticMarkup(<CanvasZoomControls getController={() => null} revision={0} />);
-    // IconButton 仍带无障碍名；可见说明改由共享 Tooltip 承载（不再是 title）。
-    expect(html).toContain('aria-label="缩小"');
-    expect(html).toContain('aria-label="放大"');
-    expect(html).toContain('aria-label="适合屏幕"');
+    expect(html).toContain("canvas-zoom__value");
+    expect(html).toContain("canvas-zoom__slider-track");
     expect(html).toContain('type="range"');
     expect(html).toContain("canvas-zoom__slider");
-    expect(html).not.toContain(">适合屏幕<");
+    expect(html).toContain('aria-label="放大"');
+    expect(html).toContain('aria-label="缩小"');
+    expect(html).toContain("canvas-zoom__step--in");
+    expect(html).toContain("canvas-zoom__step--out");
+    // 适合屏幕在小地图悬停边缘，不放进缩放条。
+    expect(html).not.toContain("适合屏幕");
   });
 
-  it("缩小/放大/适合屏幕经 InteractionController 提交，数值与调用次数不变", () => {
+  it("放大/缩小步进经 InteractionController 提交", () => {
     const controller = makeController();
     const container = render(
       <UiProvider>
@@ -69,12 +70,10 @@ describe("CanvasZoomControls（任务 3.1）", () => {
       expect(button).not.toBeNull();
       act(() => button.click());
     };
-    click("缩小");
     click("放大");
-    click("适合屏幕");
-    expect(controller.zoomBy).toHaveBeenNthCalledWith(1, 1 / 1.2);
-    expect(controller.zoomBy).toHaveBeenNthCalledWith(2, 1.2);
-    expect(controller.zoomToFit).toHaveBeenCalledTimes(1);
+    click("缩小");
+    expect(controller.zoomBy).toHaveBeenNthCalledWith(1, 1.2);
+    expect(controller.zoomBy).toHaveBeenNthCalledWith(2, 1 / 1.2);
   });
 
   it("滑杆仅调用一次 zoomTo 且百分比由受控缩放驱动", () => {

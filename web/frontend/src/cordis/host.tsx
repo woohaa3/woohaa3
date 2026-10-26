@@ -13,6 +13,7 @@ import type { SyncStatusView } from "./sync-status.js";
 import { useFocusLayoutSource } from "./focus/workspace.js";
 import { Button, IconButton } from "../shared/ui/Button.js";
 import { Tooltip } from "../shared/ui/Tooltip.js";
+import { MapIcon } from "../shared/ui/icons.js";
 import { DesktopCanvasBar } from "../desktop/canvas-window-controls.js";
 import { desktopBootstrap } from "../desktop/window-controls.js";
 import { normalizeCanvasMenuSections } from "@woohaa3/contracts";
@@ -547,30 +548,38 @@ export function CanvasControlStatus({
 /**
  * 右下角统一控件面板的**纯展示**组件（无 Context 依赖，可独立预览/测试）。
  *
- * 分排：上排功能图标（靠左）与状态读数（靠右）、下排画布视图
- * 控件（缩放 + 适合屏幕）。内容为空时不渲染。
+ * 顶部是概览区（展开时的小地图）或收起条（缩放条 + 展开小地图），下方是唯一一条工具行
+ * （动作图标 + 视图控件 + 状态）。内容为空时不渲染。
  */
 export function CanvasControlPanel({
+  overview,
+  collapsedBar,
   actions = [],
-  viewport,
+  tools,
   status,
   statusContent,
   onReconnect
 }: {
   actions?: readonly ControlPanelAction[];
-  /** 下排内容（通常是 `CanvasZoomControls`）。 */
-  viewport?: ReactNode;
-  /** 上排靠右的同步状态（change: move-sync-status-to-corner-panel）。 */
+  /** 概览区（`canvas.minimap` 与 `canvas.minimap-side` 贡献）；缺省不占高度。 */
+  overview?: ReactNode;
+  /** 概览收起后的窄条（缩放条 + 展开小地图），位于工具行上方。 */
+  collapsedBar?: ReactNode;
+  /** 工具行内的视图控件（`canvas.toolbar` 贡献，通常是撤销/重做）。 */
+  tools?: ReactNode;
+  /** 工具行靠右的同步状态（change: move-sync-status-to-corner-panel）。 */
   status?: SyncStatusView;
   statusContent?: ReactNode;
   /** 状态气泡内的显式重连入口（change: 2026-10-21-recover-canvas-connection-explicitly）。 */
   onReconnect?: () => void;
 }) {
-  if (actions.length === 0 && !viewport && !status && !statusContent) return null;
+  if (!overview && !collapsedBar && actions.length === 0 && !tools && !status && !statusContent) return null;
   return (
     <div className="canvas-control-panel" role="toolbar" aria-label="画布控件">
-      {actions.length > 0 || status || statusContent ? (
-        <div className="canvas-control-panel__row canvas-control-panel__row--actions">
+      {overview ? <div className="canvas-control-panel__overview">{overview}</div> : null}
+      {collapsedBar ? <div className="canvas-control-panel__collapsed-bar">{collapsedBar}</div> : null}
+      {actions.length > 0 || tools || status || statusContent ? (
+        <div className="canvas-control-panel__row">
           <div className="canvas-control-panel__actions" role="group" aria-label="功能">
             {actions.map((action) => {
               const Icon = action.icon;
@@ -587,13 +596,9 @@ export function CanvasControlPanel({
               );
               return Guidance ? <Guidance key={action.id}>{button}</Guidance> : <Tooltip key={action.id} content={action.label}>{button}</Tooltip>;
             })}
+            {tools ? <div className="canvas-control-panel__tools" role="group" aria-label="视图">{tools}</div> : null}
           </div>
           {statusContent ?? (status ? <CanvasControlStatus status={status} onReconnect={onReconnect} /> : null)}
-        </div>
-      ) : null}
-      {viewport ? (
-        <div className="canvas-control-panel__row canvas-control-panel__row--viewport" role="group" aria-label="视图">
-          {viewport}
         </div>
       ) : null}
     </div>
@@ -601,12 +606,13 @@ export function CanvasControlPanel({
 }
 
 /**
- * 渲染同步状态、`canvas.toolbar-action` 图标动作（上排）与 `canvas.toolbar` contributions（下排）。
+ * 渲染概览区（`canvas.minimap` + 两侧内容）、收起条（缩放条 + 展开小地图）与唯一一条
+ * 工具行（`canvas.toolbar-action` 图标动作 + `canvas.toolbar` 视图控件 + 状态）。
  *
- * 所有内容聚合到**屏幕右下角的同一个面板**（`.canvas-control-panel`），分排：
- * - 上排右侧：状态读数（同步详情稳态按需、异常态气泡常驻）；
- * - 上排：feature 图标按钮（如提示词片段管理，后续会追加更多功能）；
- * - 下排：画布控件主体（缩放 + 适合屏幕）。
+ * 所有内容聚合到**屏幕右下角的同一个面板**（`.canvas-control-panel`）：
+ * - 展开：小地图与 `canvas.minimap-side` 贡献（如右侧竖向缩放条）；地图悬停边缘提供
+ *   收起小地图与适合屏幕按钮；
+ * - 收起：工具行上方保留一条窄条（横向缩放条 + 展开小地图按钮），工具行不变。
  *
  * 桌面壳（Tauri）的同步状态与性能读数已合并进窗口横栏右侧，这里**不再重复渲染状态位**，
  * 只保留功能图标与视图控件；浏览器保持原行为。
@@ -614,28 +620,76 @@ export function CanvasControlPanel({
 export function CanvasToolbarHost(props: CanvasSlotProps) {
   const onDesktop = desktopBootstrap(globalThis) !== undefined;
   const faults = useExtensionFaults();
-  const contributions = useSlot("canvas.toolbar");
+  const toolbars = useSlot("canvas.toolbar");
+  const minimaps = useSlot("canvas.minimap");
+  const minimapSides = useSlot("canvas.minimap-side");
   const actions = useSlot("canvas.toolbar-action");
   const statusReadouts = useSlot("canvas.toolbar-status");
   const statusReadout = onDesktop ? undefined : statusReadouts[0];
   const Readout = statusReadout?.render;
+  const MiniMap = minimaps[0]?.render;
+  // 概览区默认展开；收起后由工具行上方的窄条重新展开。
+  const [overviewOpen, setOverviewOpen] = useState(true);
+  const hasOverview = Boolean(MiniMap) || minimapSides.length > 0;
   const renderStatus = (readout: ReactNode, details?: ReactNode) => (
     <CanvasControlStatus status={props.sync} details={details} onReconnect={props.onReconnect}>{readout}</CanvasControlStatus>
   );
   const readout = Readout ? <Guard entry={statusReadout!} slot="canvas.toolbar-status"><Readout {...props} renderStatus={renderStatus} /></Guard> : undefined;
-  const viewport =
-    contributions.length > 0 ? (
+  const tools =
+    toolbars.length > 0 ? (
       <>
-        {contributions.map((entry) => {
+        {toolbars.map((entry) => {
           const Component = entry.render;
           return <Guard key={entry.id} entry={entry} slot="canvas.toolbar"><Component {...props} /></Guard>;
         })}
       </>
     ) : null;
+  const side = (position: "left" | "right") => {
+    const entries = minimapSides.filter((entry) => (entry.position ?? "right") === position);
+    if (entries.length === 0) return null;
+    return (
+      <div className="canvas-control-panel__overview-side" data-side={position}>
+        {entries.map((entry) => {
+          const Component = entry.render;
+          return <Guard key={entry.id} entry={entry} slot="canvas.minimap-side"><Component {...props} /></Guard>;
+        })}
+      </div>
+    );
+  };
+  const overview = hasOverview && overviewOpen ? (
+    <>
+      {side("left")}
+      {MiniMap ? <Guard entry={minimaps[0]!} slot="canvas.minimap"><MiniMap {...props} onCollapse={() => setOverviewOpen(false)} /></Guard> : null}
+      {side("right")}
+    </>
+  ) : null;
+  const collapsedBar = hasOverview && !overviewOpen ? (
+    <>
+      {minimapSides.length > 0 ? (
+        <div className="canvas-control-panel__overview-side">
+          {minimapSides.map((entry) => {
+            const Component = entry.render;
+            return <Guard key={entry.id} entry={entry} slot="canvas.minimap-side"><Component {...props} /></Guard>;
+          })}
+        </div>
+      ) : null}
+      <Tooltip content="展开小地图">
+        <IconButton
+          className="canvas-control-panel__overview-expand"
+          label="展开小地图"
+          onClick={() => setOverviewOpen(true)}
+        >
+          <MapIcon className="canvas-control-panel__icon-svg" />
+        </IconButton>
+      </Tooltip>
+    </>
+  ) : null;
   return (
     <CanvasControlPanel
+      overview={overview}
+      collapsedBar={collapsedBar}
       actions={actions.map((entry) => guardedToolbarAction(entry, faults))}
-      viewport={viewport}
+      tools={tools}
       onReconnect={props.onReconnect}
       {...(onDesktop ? {} : { status: props.sync })}
       {...(readout === undefined ? {} : { statusContent: readout && !statusReadout?.wrapsStatus ? renderStatus(readout) : readout })}

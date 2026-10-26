@@ -2,7 +2,8 @@
  * 右下角统一控件面板渲染测试
  * （change: unify-canvas-corner-controls）。
  *
- * 断言 `canvas.toolbar` contribution（缩放控件）与 `canvas.toolbar-action` 图标按钮
+ * 断言概览区（`canvas.minimap` + `canvas.minimap-side`）、唯一工具行
+ * （`canvas.toolbar` 视图控件 + `canvas.toolbar-action` 图标按钮）与状态读数
  * 聚合到同一个 `.canvas-control-panel` 容器，而不是各自浮动。
  *
  * @vitest-environment jsdom
@@ -99,12 +100,23 @@ function reconnectButton(scope: ParentNode): HTMLButtonElement | undefined {
 const panel = () => document.querySelector(".canvas-control-panel");
 
 describe("CanvasToolbarHost 统一面板", () => {
-  it("缩放 contribution 与图标动作在同一面板内", async () => {
+  it("小地图与右侧缩放同处概览区，动作与撤销同处唯一工具行", async () => {
     const slots = new SlotRegistry();
-    slots.register("canvas.toolbar", {
+    slots.register("canvas.minimap", {
+      id: "canvas-minimap",
+      owner: "canvas-shell",
+      render: () => <span data-testid="minimap">map</span>
+    });
+    slots.register("canvas.minimap-side", {
       id: "canvas-zoom",
       owner: "canvas-shell",
+      position: "right",
       render: () => <span data-testid="zoom">zoom</span>
+    });
+    slots.register("canvas.toolbar", {
+      id: "canvas-undo",
+      owner: "canvas-shell",
+      render: () => <span data-testid="undo">undo</span>
     });
     slots.register("canvas.toolbar-action", {
       id: "prompt-snippets-library",
@@ -114,20 +126,22 @@ describe("CanvasToolbarHost 统一面板", () => {
       onActivate: () => undefined
     });
     runtime = await makeRuntime(slots);
-    renderHost(runtime);
-    const el = panel();
-    expect(el).not.toBeNull();
-    const actionRow = el!.querySelector(".canvas-control-panel__row--actions");
-    const viewportRow = el!.querySelector(".canvas-control-panel__row--viewport");
-    expect(actionRow).not.toBeNull();
-    expect(viewportRow).not.toBeNull();
-    // 上排：feature 图标动作。
-    const button = actionRow!.querySelector('button[aria-label="提示词片段管理"]');
-    expect(button).not.toBeNull();
-    expect(button!.querySelector('[data-testid="snippet-icon"]')).not.toBeNull();
-    // 下排：缩放控件；且上排在 DOM 中先于下排。
-    expect(viewportRow!.querySelector('[data-testid="zoom"]')).not.toBeNull();
-    expect(actionRow!.compareDocumentPosition(viewportRow!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const el = renderHost(runtime);
+    const overview = el.querySelector(".canvas-control-panel__overview")!;
+    const rows = el.querySelectorAll(".canvas-control-panel__row");
+    // 底部只剩一条工具行。
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    const minimap = overview.querySelector('[data-testid="minimap"]')!;
+    const zoom = overview.querySelector('[data-testid="zoom"]')!;
+    expect(minimap).not.toBeNull();
+    expect(zoom).not.toBeNull();
+    // 小地图在前，侧栏内容在后。
+    expect(minimap.compareDocumentPosition(zoom) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 概览区在工具行上方。
+    expect(overview.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row.querySelector('button[aria-label="提示词片段管理"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="undo"]')).not.toBeNull();
   });
 
   it("无 contribution 时不渲染面板", async () => {
@@ -136,11 +150,60 @@ describe("CanvasToolbarHost 统一面板", () => {
     expect(panel()).toBeNull();
   });
 
-  it("缩放控件与多个功能图标（含生成历史）同处一个面板", async () => {
+  it("小地图悬停收起后，工具行上方保留缩放条与展开按钮", async () => {
     const slots = new SlotRegistry();
-    slots.register("canvas.toolbar", {
+    slots.register("canvas.minimap", {
+      id: "canvas-minimap",
+      owner: "canvas-shell",
+      render: ({ onCollapse }) => (
+        <button type="button" data-testid="minimap-collapse" onClick={() => onCollapse?.()}>
+          map
+        </button>
+      )
+    });
+    slots.register("canvas.minimap-side", {
       id: "canvas-zoom",
       owner: "canvas-shell",
+      position: "right",
+      render: () => <span data-testid="zoom">zoom</span>
+    });
+    slots.register("canvas.toolbar-action", {
+      id: "minimap-test-action",
+      owner: "canvas-shell",
+      label: "测试动作",
+      icon: () => <svg data-testid="test-icon" />,
+      onActivate: () => undefined
+    });
+    runtime = await makeRuntime(slots);
+    const el = renderHost(runtime);
+    expect(el.querySelector(".canvas-control-panel__overview")).not.toBeNull();
+    // 不显示「小地图」三个字：收起按钮只给图标与悬停说明。
+    expect(el.textContent).not.toContain("小地图");
+    act(() => el.querySelector<HTMLButtonElement>('[data-testid="minimap-collapse"]')!.click());
+    expect(el.querySelector(".canvas-control-panel__overview")).toBeNull();
+    expect(el.querySelector('[data-testid="minimap-collapse"]')).toBeNull();
+    // 收起后工具行上方保留一条窄条：横向缩放条 + 展开小地图。
+    const bar = el.querySelector(".canvas-control-panel__collapsed-bar")!;
+    expect(bar).not.toBeNull();
+    expect(bar.querySelector('[data-testid="zoom"]')).not.toBeNull();
+    const expand = bar.querySelector<HTMLButtonElement>('button[aria-label="展开小地图"]');
+    expect(expand).not.toBeNull();
+    // 动作仍在工具行，不在收起条里。
+    expect(bar.querySelector('[data-testid="test-icon"]')).toBeNull();
+    expect(el.querySelector('[data-testid="test-icon"]')).not.toBeNull();
+    const row = el.querySelector(".canvas-control-panel__row")!;
+    expect(bar.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    act(() => expand!.click());
+    expect(el.querySelector(".canvas-control-panel__overview")).not.toBeNull();
+    expect(el.querySelector(".canvas-control-panel__collapsed-bar")).toBeNull();
+  });
+
+  it("缩放条与多个功能图标（含生成历史）同处一个面板，只有一条工具行", async () => {
+    const slots = new SlotRegistry();
+    slots.register("canvas.minimap-side", {
+      id: "canvas-zoom",
+      owner: "canvas-shell",
+      position: "right",
       render: () => <span data-testid="zoom">zoom</span>
     });
     slots.register("canvas.toolbar-action", {
@@ -161,11 +224,12 @@ describe("CanvasToolbarHost 统一面板", () => {
     renderHost(runtime);
     const el = panel();
     expect(el).not.toBeNull();
-    const actionRow = el!.querySelector(".canvas-control-panel__row--actions");
-    const viewportRow = el!.querySelector(".canvas-control-panel__row--viewport");
-    expect(actionRow!.querySelector('button[aria-label="提示词片段管理"]')).not.toBeNull();
-    expect(actionRow!.querySelector('button[aria-label="生成历史"] [data-testid="history-icon"]')).not.toBeNull();
-    expect(viewportRow!.querySelector('[data-testid="zoom"]')).not.toBeNull();
+    const rows = el!.querySelectorAll(".canvas-control-panel__row");
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.querySelector('button[aria-label="提示词片段管理"]')).not.toBeNull();
+    expect(row.querySelector('button[aria-label="生成历史"] [data-testid="history-icon"]')).not.toBeNull();
+    expect(el!.querySelector('.canvas-control-panel__overview [data-testid="zoom"]')).not.toBeNull();
   });
 
   it("图标动作 tone=primary 时用强调色实底并保持注册顺序", async () => {
@@ -236,7 +300,7 @@ describe("CanvasToolbarHost 统一面板", () => {
     expect(bubble!.textContent).toContain("revision 7");
   });
 
-  it("同步状态与功能图标同处上排：功能靠左、状态靠右", async () => {
+  it("同步状态与功能图标同处唯一工具行：功能靠左、状态靠右", async () => {
     const slots = new SlotRegistry();
     slots.register("canvas.toolbar-action", {
       id: "prompt-snippets-library",
@@ -248,7 +312,7 @@ describe("CanvasToolbarHost 统一面板", () => {
     runtime = await makeRuntime(slots);
     renderHost(runtime, { tone: "ok", label: "已同步", detail: "已同步 · revision 7", pinned: false });
     const el = panel();
-    const actionRow = el!.querySelector(".canvas-control-panel__row--actions");
+    const actionRow = el!.querySelector(".canvas-control-panel__row");
     expect(actionRow).not.toBeNull();
     // 同一行同时包含功能图标与状态图标。
     expect(actionRow!.querySelector(".canvas-control-panel__actions button")).not.toBeNull();

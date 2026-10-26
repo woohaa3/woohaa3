@@ -439,6 +439,26 @@ export type SlotContributionMap = {
   };
   /** 公共聚焦标题栏的可选贡献；插件拥有其内容和交互。 */
   "canvas.focus-header": { position?: "before-title" | "after-title"; render: ComponentType<{ nodeId: string }> };
+  /**
+   * 右下角控件面板顶部的小地图（2026-10-26）。
+   *
+   * 宿主只提供面板位置与画布 props；贡献自己读取 working 画布、订阅本地视口并经
+   * `InteractionController` 平移。小地图与 `canvas.minimap-side` 同处概览区，
+   * 收起后一起隐藏；地图内部的收起/适合屏幕按钮在悬停边缘浮出，收起动作经
+   * 宿主注入的 `onCollapse` 交给宿主保存状态。没有贡献时不占高度。
+   */
+  "canvas.minimap": {
+    render: ComponentType<CanvasSlotProps & { onCollapse?: () => void }>;
+  };
+  /**
+   * 小地图两侧的紧凑内容（2026-10-26），例如右侧的缩放条。
+   *
+   * 只在小地图概览区展开时渲染；缺省放在右侧，`left` 排在小地图之前。
+   */
+  "canvas.minimap-side": {
+    position?: "left" | "right";
+    render: ComponentType<CanvasSlotProps>;
+  };
   "canvas.toolbar": { render: ComponentType<CanvasSlotProps> };
   /** 工具栏状态位置的紧凑读数；宿主保留同步状态气泡与色调，采用首个可用贡献。 */
   "canvas.toolbar-status": {

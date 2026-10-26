@@ -47,7 +47,10 @@ function productionFiles(dir: string): string[] {
  */
 const SVG_EXCEPTIONS = new Set<string>([
   // 发送/执行的实心纸飞机是产品专有图形（Lucide Send 线条风格不等价）。
-  "cordis/plugins/task-execution/execution-panel/icons.tsx"
+  "cordis/plugins/task-execution/execution-panel/icons.tsx",
+  // 小地图是画布空间的自定义数据可视化（节点/连线/视口框），不是可替换的通用操作图标
+  // （2026-10-26）。
+  "cordis/plugins/canvas-shell/canvas-minimap.tsx"
 ]);
 
 /** 允许保留字体/装饰符号的文件（纯装饰、无独立交互语义）。 */

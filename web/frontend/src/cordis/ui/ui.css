@@ -50,8 +50,8 @@
 }
 
 /* ------------------------------------------------------------------ *
- * 统一控件面板（上排 feature 图标 + 下排缩放/适合屏幕）
- * change: unify-canvas-corner-controls
+ * 统一控件面板（概览区：小地图 + 右侧缩放条；下方唯一一条工具行）
+ * change: unify-canvas-corner-controls；2026-10-26 合并为单行工具条
  * 按钮组位于右下角，活动栈位于左下角。
  * ------------------------------------------------------------------ */
 .canvas-control-panel {
@@ -61,7 +61,7 @@
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
-	gap: 4px;
+	gap: 6px;
 	padding: 6px 8px;
 	border: 1px solid var(--app-web-border);
 	border-radius: 12px;
@@ -70,21 +70,108 @@
 	z-index: 20;
 }
 
+/* 概览区：小地图 + 两侧内容（如右侧缩放条）；收起后整块不渲染。 */
+.canvas-control-panel__overview {
+	display: flex;
+	align-items: stretch;
+	gap: 8px;
+}
+
+.canvas-control-panel__overview-side {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+/* 概览收起后的窄条：横向缩放条 + 展开小地图，位于工具行上方。 */
+.canvas-control-panel__collapsed-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 26px;
+}
+
+.canvas-control-panel__collapsed-bar .canvas-control-panel__overview-side {
+	flex: 1;
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+}
+
+.canvas-control-panel__collapsed-bar .canvas-zoom {
+	flex: 1;
+	flex-direction: row;
+	align-items: center;
+	gap: 6px;
+	width: auto;
+	min-width: 0;
+}
+
+.canvas-control-panel__collapsed-bar .canvas-zoom__step--out {
+	order: 0;
+}
+
+.canvas-control-panel__collapsed-bar .canvas-zoom__slider-track {
+	order: 1;
+	position: static;
+	flex: 1;
+	width: auto;
+	height: 20px;
+	min-width: 0;
+}
+
+.canvas-control-panel__collapsed-bar .canvas-zoom__value {
+	order: 2;
+	width: auto;
+	min-width: 40px;
+	font-size: 11px;
+	text-align: center;
+	white-space: nowrap;
+}
+
+.canvas-control-panel__collapsed-bar .canvas-zoom__step--in {
+	order: 3;
+}
+
+.canvas-control-panel__collapsed-bar .canvas-zoom__slider {
+	position: static;
+	width: 100%;
+	min-width: 0;
+	transform: none;
+}
+
+.canvas-control-panel .canvas-control-panel__overview-expand {
+	width: 26px;
+	height: 26px;
+}
+
+/* 唯一一条工具行：动作图标与视图控件靠左，状态读数靠右。 */
 .canvas-control-panel__row {
 	display: flex;
 	align-items: center;
 	gap: 4px;
 }
 
-/* 上排：feature 图标动作靠左、同步状态靠右。 */
-.canvas-control-panel__row--actions {
-	justify-content: space-between;
+.canvas-control-panel__row > .canvas-control-panel__status {
+	margin-left: auto;
 }
 
 .canvas-control-panel__actions {
 	display: flex;
 	align-items: center;
 	gap: 4px;
+}
+
+/* 视图控件（撤销/重做等）与动作图标用细分隔线分组。 */
+.canvas-control-panel__tools {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: 2px;
+	padding-left: 6px;
+	border-left: 1px solid var(--app-web-border);
 }
 
 /* 紧凑状态读数（同步详情通过气泡查看）。 */
@@ -216,16 +303,6 @@
 	pointer-events: auto;
 }
 
-.canvas-control-panel__row--actions:not(:last-child) {
-	padding-bottom: 4px;
-	border-bottom: 1px solid var(--app-web-border);
-}
-
-/* 下排：缩放 + 适合屏幕。 */
-.canvas-control-panel__row--viewport {
-	justify-content: flex-end;
-}
-
 .canvas-control-panel__icon {
 	display: inline-flex;
 	align-items: center;
@@ -271,23 +348,219 @@
 	height: 16px;
 }
 
+/* 缩放条竖排在小地图右侧：百分比 / 放大 / 竖向滑杆 / 缩小；步进按钮上下叠放，
+ * 宽度保持 32px。收起条里通过 order 改为「缩小 · 滑杆 · 百分比 · 放大」横排。 */
 .canvas-zoom {
 	display: flex;
+	flex-direction: column;
 	align-items: center;
+	justify-content: center;
 	gap: 4px;
+	width: 32px;
 }
 
-.canvas-zoom__slider {
-	width: 84px;
-	accent-color: var(--app-interaction-accent);
+.canvas-zoom .canvas-zoom__step {
+	width: 24px;
+	height: 24px;
 }
 
 .canvas-zoom__value {
-	min-width: 38px;
+	width: 100%;
 	color: var(--app-web-text-muted);
-	font-size: 11px;
+	font-size: 9px;
 	font-variant-numeric: tabular-nums;
-	text-align: right;
+	text-align: center;
+	white-space: nowrap;
+}
+
+/* 竖向滑杆：旋转原生 range，避免各引擎对 vertical-lr 支持不一。 */
+.canvas-zoom__slider-track {
+	position: relative;
+	width: 24px;
+	height: 62px;
+}
+
+.canvas-zoom__slider {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	width: 62px;
+	margin: 0;
+	transform: translate(-50%, -50%) rotate(-90deg);
+	accent-color: var(--app-interaction-accent);
+}
+
+/* ------------------------------------------------------------------ *
+ * 右下角控件面板的小地图（2026-10-26）
+ *
+ * 只表达画布空间关系：节点按类型填色，3D 内容节点用等距小方块（积木）缩略图；
+ * 视口框可点击/拖动平移。不加载节点真实预览，避免小地图成为第二套资源消费者。
+ * ------------------------------------------------------------------ */
+.canvas-minimap {
+	/* 概览区里吃掉剩余宽度：缩放条保持窄的同时不留下右侧空白。 */
+	flex: 1;
+	min-width: 216px;
+	max-width: calc(100vw - 44px);
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.canvas-minimap__frame {
+	position: relative;
+	overflow: hidden;
+	border: 1px solid var(--app-web-border);
+	border-radius: 8px;
+	background: var(--app-web-subtle);
+}
+
+/* 悬停地图时在边缘浮出「收起」与「适合屏幕」；平时不占位、不拦指针。 */
+.canvas-minimap .canvas-minimap__edge {
+	position: absolute;
+	width: 24px;
+	height: 24px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 6px;
+	background: var(--app-web-panel);
+	color: var(--app-web-text-muted);
+	box-shadow: 0 2px 6px var(--app-web-shadow);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 120ms ease;
+}
+
+.canvas-minimap .canvas-minimap__collapse {
+	top: 4px;
+	right: 4px;
+}
+
+.canvas-minimap .canvas-minimap__fit {
+	right: 4px;
+	bottom: 4px;
+}
+
+.canvas-minimap:hover .canvas-minimap__edge,
+.canvas-minimap:focus-within .canvas-minimap__edge {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.canvas-minimap .canvas-minimap__edge:hover:not(:disabled) {
+	background: var(--app-web-subtle);
+	color: var(--app-web-text-primary);
+}
+
+.canvas-minimap__svg {
+	display: block;
+	width: 100%;
+	height: auto;
+	cursor: grab;
+	touch-action: none;
+}
+
+.canvas-minimap__svg:active {
+	cursor: grabbing;
+}
+
+.canvas-minimap__grid-line {
+	stroke: var(--app-web-border);
+	stroke-width: 0.5;
+	stroke-opacity: 0.55;
+}
+
+.canvas-minimap__edge {
+	stroke: var(--app-canvas-edge-default);
+	stroke-width: 0.75;
+	stroke-opacity: 0.35;
+}
+
+.canvas-minimap__node {
+	fill: var(--app-node-default-foreground);
+	fill-opacity: 0.5;
+	stroke: transparent;
+	stroke-width: 0;
+}
+
+.canvas-minimap__node[data-kind="text"] {
+	fill: var(--app-node-text-foreground);
+}
+
+.canvas-minimap__node[data-kind="image"] {
+	fill: var(--app-node-image-foreground);
+}
+
+.canvas-minimap__node[data-kind="video"] {
+	fill: var(--app-node-video-foreground);
+}
+
+.canvas-minimap__node[data-kind="audio"] {
+	fill: var(--app-node-audio-foreground);
+}
+
+.canvas-minimap__node[data-kind="model"] {
+	fill: var(--app-node-model-foreground);
+}
+
+.canvas-minimap__node[data-group="true"] {
+	fill: var(--app-node-default-tint);
+	fill-opacity: 0.45;
+	stroke: var(--app-node-default-foreground);
+	stroke-width: 0.75;
+	stroke-opacity: 0.7;
+	stroke-dasharray: 2 1.5;
+}
+
+.canvas-minimap__node[data-selected="true"]:not(.canvas-minimap__node--model),
+.canvas-minimap__node--model[data-selected="true"] .canvas-minimap__model-plate {
+	stroke: var(--app-interaction-accent);
+	stroke-width: 1.25;
+	stroke-opacity: 1;
+	stroke-dasharray: none;
+}
+
+.canvas-minimap__node--model {
+	stroke: none;
+	fill: none;
+}
+
+.canvas-minimap__model-plate {
+	fill: var(--app-node-model-foreground);
+	fill-opacity: 0.16;
+	stroke: transparent;
+	stroke-width: 0;
+}
+
+.canvas-minimap__node--model[data-selected="true"] .canvas-minimap__model-plate {
+	fill-opacity: 0.3;
+	stroke-width: 1.25;
+}
+
+.canvas-minimap__block-top {
+	fill: var(--app-node-model-foreground);
+	fill-opacity: 0.95;
+}
+
+.canvas-minimap__block-left {
+	fill: var(--app-node-model-foreground);
+	fill-opacity: 0.66;
+}
+
+.canvas-minimap__block-right {
+	fill: var(--app-node-model-foreground);
+	fill-opacity: 0.42;
+}
+
+.canvas-minimap__viewport-rect {
+	fill: var(--app-interaction-accent);
+	fill-opacity: 0.08;
+	stroke: var(--app-interaction-accent);
+	stroke-width: 1;
+	pointer-events: none;
+}
+
+.canvas-minimap__empty {
+	fill: var(--app-web-text-muted);
+	font-family: var(--app-font);
+	font-size: 10px;
 }
 
 
