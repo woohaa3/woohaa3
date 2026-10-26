@@ -5,6 +5,7 @@
  * C 方向取消进程隔离后，这里只剩声明层的信任检查——「市场来源只能来自内置根」、
  * 「受管扩展不得声明 bootstrap / storage / canvasContent」与模块越界探测。
  */
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 

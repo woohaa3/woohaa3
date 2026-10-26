@@ -60,6 +60,8 @@ export function rewriteDescriptorForPackage(descriptor, { version, engines, hasB
 /** 包内 package.json：只保留身份与 ESM 声明；后端产物经 exports 映射。 */
 export function packagedPackageJson(pkg, { version, hasBackend }) {
   const out = { name: pkg.name, version, private: true, type: "module" };
+  // displayName 是市场目录的展示名；保留它，受管安装的预检与运行期都不读它。
+  if (typeof pkg.displayName === "string" && pkg.displayName.trim().length > 0) out.displayName = pkg.displayName;
   if (typeof pkg.description === "string") out.description = pkg.description;
   if (typeof pkg.license === "string") out.license = pkg.license;
   if (hasBackend) out.exports = { [BACKEND_ENTRY_SUBPATH]: BACKEND_ENTRY_TARGET };

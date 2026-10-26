@@ -17,5 +17,6 @@
     "factory": "createFixtureEchoProviderPlugin",
     "kind": "provider",
     "order": 900
-  }
+  },
+  "icon": { "asset": "./assets/icon.png" }
 }
