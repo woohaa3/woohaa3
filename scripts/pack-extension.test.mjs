@@ -97,10 +97,8 @@ test("build:backend 产物自包含：除 node: 外没有外部 import，可直�
   const { buildExtensionBackend } = await import("../web/scripts/build-extension-backend.mjs");
   const result = await buildExtensionBackend({ cwd: dir });
   assert.deepEqual(result.exports.filter((name) => name !== "FIXTURE_ECHO_CONFIG").sort(), ["FIXTURE_ECHO_PLUGIN_METADATA", "createFixtureEchoProviderPlugin"]);
-  // config-schema.json：打包机上求值一次，纯 JSON。
-  const schema = JSON.parse(fs.readFileSync(path.join(dir, "backend-dist", "config-schema.json"), "utf8"));
-  assert.equal(schema.plugin.name, "fixture-echo-provider");
-  assert.equal(schema.metadata.value.extensionId, "fixture-echo-provider");
+  // C 方向：不再产出 config-schema.json（进程内直接 import 插件，静态描述已无消费者）。
+  assert.ok(!fs.existsSync(path.join(dir, "backend-dist", "config-schema.json")));
   const source = fs.readFileSync(result.outFile, "utf8");
   for (const match of source.matchAll(/^import .* from "([^"]+)";$/gm)) assert.match(match[1], /^node:/);
   const mod = await import(pathToFileURL(result.outFile).href);

@@ -109,10 +109,10 @@ process.exit(0);
 }
 
 for (const name of ["fixture-echo-provider", "fixture-crashy", "fixture-greedy"]) {
-  test(`${name}：build:backend 产出 config-schema.json，受管预检通过，包内无 src/`, async (t) => {
+  test(`${name}：build:backend 产出单文件入口，受管预检通过，包内无 src/`, async (t) => {
     const { packed, tree } = await unpacked(t, name);
     assert.equal(packed.requiresRestart, true);
-    assert.ok(fs.existsSync(path.join(tree, "backend-dist", "config-schema.json")));
+    assert.ok(!fs.existsSync(path.join(tree, "backend-dist", "config-schema.json")));
     assert.ok(!fs.existsSync(path.join(tree, "src")));
     const preflight = await preflightDirectory(tree, { managed: true });
     assert.equal(preflight.ok, true, JSON.stringify(preflight.errors));

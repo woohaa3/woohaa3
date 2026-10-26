@@ -916,7 +916,7 @@ test("受管根：安全模式下受管扩展一律暂停", async () => {
 // 受管后端隔离：扫描不 import 受管模块（change: 2026-10-21-isolate-extension-host-process，任务 6.2 / 6.4）
 // ---------------------------------------------------------------------------
 
-/** 在受管根写一个**打包后形态**的后端扩展：入口在 backend-dist/，带 config-schema.json。 */
+/** 在受管根写一个**打包后形态**的后端扩展：入口在 backend-dist/（不再产出 config-schema.json）。 */
 function writeIsolatedManaged(managedRoot, extensionId, { entrySource, schema, descriptor = {}, version = "1.0.0" } = {}) {
   const dir = managedLayout(managedRoot).versionDir(extensionId, version);
   fs.mkdirSync(path.join(dir, "backend-dist"), { recursive: true });
@@ -934,20 +934,6 @@ function writeIsolatedManaged(managedRoot, extensionId, { entrySource, schema, d
     })
   );
   fs.writeFileSync(path.join(dir, "backend-dist", "entry.mjs"), entrySource);
-  if (schema !== null) {
-    fs.writeFileSync(
-      path.join(dir, "backend-dist", "config-schema.json"),
-      JSON.stringify(schema ?? {
-        schemaVersion: 1,
-        extensionId,
-        kind: "provider",
-        factory: "createPlugin",
-        plugin: { name: extensionId, label: "隔离样例", configPrefix: `providers.${extensionId}`, fields: { apiKey: { kind: "string", label: "Key", description: "d", reload: "hot", secret: true } }, health: true, modelRefresh: { path: `/api/extensions/${extensionId}/models`, hint: "h" } },
-        metadata: { export: "META", value: { extensionId, name: "隔离样例" } },
-        publicPaths: {}
-      })
-    );
-  }
   const handle = openInstallations({ managedRoot });
   try {
     const state = handle.read();

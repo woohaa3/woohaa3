@@ -17,7 +17,7 @@ React / extension-api 由前端 shim 解析。
 ```bash
 # 生成本机签名密钥（keyId 与 base64 公钥写进本机信任根 extensions.marketplace.trustedKeys）
 pnpm pack:extension --genkey .local/wxt/dev
-# 打包（含后端的会同时产出 backend-dist/entry.mjs 与 config-schema.json）
+# 打包（含后端的产出单文件 backend-dist/entry.mjs；C 方向起不再产出 config-schema.json）
 pnpm pack:extension scripts/fixtures/marketplace/fixture-echo-provider --key .local/wxt/dev.key --out .local/wxt/echo-1.0.0.wxt
 pnpm pack:extension scripts/fixtures/marketplace/fixture-crashy        --key .local/wxt/dev.key --out .local/wxt/crashy.wxt
 pnpm pack:extension scripts/fixtures/marketplace/fixture-greedy        --key .local/wxt/dev.key --out .local/wxt/greedy.wxt

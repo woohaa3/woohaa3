@@ -137,18 +137,6 @@ function managedTree({ descriptor = {}, pkg = {}, files = {}, browser = null } =
   return dir;
 }
 
-/** 合法的 config-schema.json（build:backend 产出的形状）。 */
-function configSchemaFor(extensionId, factory, plugin = {}) {
-  return {
-    schemaVersion: 1,
-    extensionId,
-    kind: "provider",
-    factory,
-    plugin: { name: extensionId, label: extensionId, configPrefix: `providers.${extensionId}`, fields: {}, health: false, ...plugin },
-    publicPaths: {}
-  };
-}
-
 const codesOf = (result) => result.errors.map((error) => `${error.code}:${error.field ?? ""}`);
 
 test("preflightDirectory：合法的纯前端受管扩展通过，requiresRestart=false", async () => {
@@ -168,7 +156,6 @@ test("preflightDirectory：含后端声明 → requiresRestart=true；只解析�
     descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", kind: "provider" } },
     files: {
       "backend-dist/entry.mjs": `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "ran"); export function createX() {}\n`,
-      "backend-dist/config-schema.json": JSON.stringify(configSchemaFor("demo", "createX"))
     }
   });
   const result = await preflightDirectory(dir, { managed: true });
@@ -237,14 +224,13 @@ function backendTree({ descriptor = {}, schema = undefined, files = {} } = {}) {
     descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", kind: "provider" }, ...descriptor },
     files: {
       "backend-dist/entry.mjs": "export function createX() {}\n",
-      ...(schema === null ? {} : { "backend-dist/config-schema.json": JSON.stringify(schema ?? configSchemaFor("demo", "createX")) }),
       ...files
     }
   });
 }
 
 test("preflightDirectory：受管 hostPlugin.kind=storage 被拒绝", async () => {
-  const result = await preflightDirectory(backendTree({ descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", kind: "storage" } }, schema: { ...configSchemaFor("demo", "createX"), kind: "storage" } }), { managed: true });
+  const result = await preflightDirectory(backendTree({ descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", kind: "storage" } } }), { managed: true });
   assert.ok(codesOf(result).includes("MARKETPLACE_FORBIDDEN_DECLARATION:hostPlugin.kind"), codesOf(result).join(", "));
 });
 
@@ -257,27 +243,11 @@ test("preflightDirectory：包内 .node 原生模块被拒绝", async () => {
   assert.ok(codesOf(front).includes("MARKETPLACE_FORBIDDEN_DECLARATION:native-module"));
 });
 
-test("preflightDirectory：缺 config-schema.json / 内容不合法 → MARKETPLACE_PACKAGE_INVALID", async () => {
-  const missing = await preflightDirectory(backendTree({ schema: null }), { managed: true });
-  assert.ok(codesOf(missing).includes("MARKETPLACE_PACKAGE_INVALID:backend-dist/config-schema.json"));
-  const legacyEnv = await preflightDirectory(
-    backendTree({ schema: configSchemaFor("demo", "createX", { fields: { apiKey: { kind: "string", label: "k", description: "d", reload: "hot", secret: true, legacyEnv: "OPENAI_API_KEY" } } }) }),
-    { managed: true }
-  );
-  assert.match(legacyEnv.errors.map((error) => error.message).join("\n"), /legacyEnv/);
-  const badPrefix = await preflightDirectory(backendTree({ schema: configSchemaFor("demo", "createX", { configPrefix: "storage.primary" }) }), { managed: true });
-  assert.match(badPrefix.errors.map((error) => error.message).join("\n"), /configPrefix/);
-  const wrongName = await preflightDirectory(backendTree({ schema: configSchemaFor("other", "createX") }), { managed: true });
-  assert.equal(wrongName.ok, false);
-  const refreshEscape = await preflightDirectory(backendTree({ schema: configSchemaFor("demo", "createX", { modelRefresh: { path: "/api/settings/x", hint: "h" } }) }), { managed: true });
-  assert.match(refreshEscape.errors.map((error) => error.message).join("\n"), /modelRefresh\.path/);
-});
-
 test("preflightDirectory：后端入口不在 backend-dist/ 下被拒绝", async () => {
   const dir = managedTree({
     pkg: { exports: { "./backend": "./dist/backend.js" } },
     descriptor: { hostPlugin: { module: "./backend", factory: "createX", kind: "provider" } },
-    files: { "dist/backend.js": "export function createX() {}\n", "backend-dist/config-schema.json": JSON.stringify(configSchemaFor("demo", "createX")) }
+    files: { "dist/backend.js": "export function createX() {}\n" }
   });
   const result = await preflightDirectory(dir, { managed: true });
   assert.ok(codesOf(result).includes("MARKETPLACE_FORBIDDEN_DECLARATION:hostPlugin.module"));

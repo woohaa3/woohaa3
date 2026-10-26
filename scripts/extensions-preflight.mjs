@@ -32,7 +32,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { EXTENSION_PACKAGE_PREFIX, hasBrowserEntry, readExtensionDescriptor } from "./lib/extension-scan.mjs";
 import { syncExtensionIconAssets } from "./lib/extension-icon-assets.mjs";
 import { checkEnginesCompatible, validateExtensionDescriptor } from "./lib/extension-descriptor.mjs";
-import { CONFIG_SCHEMA_RELATIVE, readConfigSchema, validateConfigSchema } from "./lib/extension-config-schema.mjs";
 import { loadExtensionContracts } from "./lib/extension-release-protocol.mjs";
 import {
   FOUNDATION_SLOT_NAMES,
@@ -273,19 +272,8 @@ export async function preflightDirectory(dir, { managed = false, contracts = nul
           fail("MARKETPLACE_FORBIDDEN_DECLARATION", `受管扩展的后端入口必须在 backend-dist/ 下（先 pack:extension）：${subpath}`, "hostPlugin.module");
         }
       }
-      let schema = null;
-      try {
-        schema = readConfigSchema(root);
-      } catch (error) {
-        fail("MARKETPLACE_PACKAGE_INVALID", `${CONFIG_SCHEMA_RELATIVE} 不是合法 JSON：${error.message}`, CONFIG_SCHEMA_RELATIVE);
-        schema = undefined;
-      }
-      if (schema === null) {
-        fail("MARKETPLACE_PACKAGE_INVALID", `缺少 ${CONFIG_SCHEMA_RELATIVE}：请用新版 pack:extension 重新打包（宿主不执行受管后端代码，需要构建期产出的静态描述）`, CONFIG_SCHEMA_RELATIVE);
-      } else if (schema) {
-        const validated = validateConfigSchema(schema, { extensionId, descriptor });
-        for (const message of validated.errors) fail("MARKETPLACE_PACKAGE_INVALID", `${CONFIG_SCHEMA_RELATIVE}：${message}`, CONFIG_SCHEMA_RELATIVE);
-      }
+      // 不再要求 backend-dist/config-schema.json：C 方向下受管后端插件在宿主进程内 import，
+      // 配置段由装载器按工厂返回值登记，构建期静态描述已无消费者。
     }
     if (descriptor.required === true) fail("MARKETPLACE_FORBIDDEN_DECLARATION", "受管扩展不得声明 required: true", "required");
   }

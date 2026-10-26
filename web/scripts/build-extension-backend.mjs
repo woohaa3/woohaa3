@@ -22,7 +22,7 @@
  * configPrefix / Config.fields / modelRefresh / 是否实现 health，以及 metadata 与 publicPathExport 常量。
  * 求值只发生在打包机上（不在宿主），结果是纯 JSON；宿主据此构造代理插件而不 import 受管扩展代码。
  *
- * 输出 { outFile, exports, modules, configSchema }；不改写扩展目录里的 extension.json / package.json（改写由 pack:extension 在暂存目录完成）。
+ * 输出 { outFile, exports, modules }；不改写扩展目录里的 extension.json / package.json（改写由 pack:extension 在暂存目录完成）。
  */
 import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
@@ -36,7 +36,6 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 import { validateExtensionDescriptor } from "../../scripts/lib/extension-descriptor.mjs";
-import { CONFIG_SCHEMA_FILE, CONFIG_SCHEMA_VERSION, validateConfigSchema } from "../../scripts/lib/extension-config-schema.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(SCRIPT_DIR, "..");
@@ -176,77 +175,13 @@ export async function buildExtensionBackend(options = {}) {
     }
   }
   if (externals.length > 0) throw new Error("backend 产物残留外部依赖（必须内联）：" + [...new Set(externals)].join("、"));
-  const configSchema = descriptor.hostPlugin ? writeConfigSchema({ descriptor, outFile, outDir }) : null;
+
   return {
     outFile,
     exports: [...byName.keys()].sort(),
     modules: [...modules.keys()],
-    configSchema
-  };
-}
 
-/** 求值脚本：在子进程里运行，stdout 输出一行 JSON。只读插件的静态部分，不调用 apply。 */
-const EVALUATE_SOURCE = `
-const [entry, request] = process.argv.slice(1);
-const spec = JSON.parse(request);
-const mod = await import(entry);
-const pick = (value, keys) => Object.fromEntries(keys.filter((key) => value[key] !== undefined).map((key) => [key, value[key]]));
-const out = { publicPaths: {} };
-if (spec.factory) {
-  const factory = mod[spec.factory];
-  if (typeof factory !== "function") throw new Error("hostPlugin 工厂导出不是函数：" + spec.factory);
-  const plugin = factory({});
-  if (!plugin || typeof plugin !== "object" || typeof plugin.apply !== "function") throw new Error("hostPlugin 工厂返回值不是扩展层插件");
-  const fields = plugin.Config && typeof plugin.Config === "object" ? plugin.Config.fields ?? {} : {};
-  out.plugin = {
-    name: plugin.name,
-    label: plugin.label,
-    configPrefix: plugin.configPrefix,
-    fields: Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, pick(field ?? {}, ["kind","label","description","reload","secret","default","min","max","protocols","legacyEnv"])])),
-    health: typeof plugin.health === "function",
-    ...(plugin.modelRefresh ? { modelRefresh: pick(plugin.modelRefresh, ["path", "hint"]) } : {})
   };
-}
-if (spec.metadata) out.metadata = { export: spec.metadata, value: JSON.parse(JSON.stringify(mod[spec.metadata] ?? null)) };
-for (const name of spec.publicPaths) out.publicPaths[name] = mod[name];
-process.stdout.write(JSON.stringify(out));
-`;
-
-/** 在独立子进程里求值插件静态描述并写 config-schema.json；校验不过即构建失败。 */
-function writeConfigSchema({ descriptor, outFile, outDir }) {
-  const spec = {
-    factory: descriptor.hostPlugin.factory,
-    metadata: descriptor.metadata?.export ?? null,
-    publicPaths: (descriptor.publicRoutes ?? []).filter((route) => route.publicPathExport).map((route) => route.publicPathExport)
-  };
-  let raw;
-  try {
-    raw = execFileSync(process.execPath, ["--input-type=module", "-e", EVALUATE_SOURCE, pathToFileURL(outFile).href, JSON.stringify(spec)], {
-      encoding: "utf8",
-      timeout: 30_000,
-      maxBuffer: 4 * 1024 * 1024,
-      env: { PATH: process.env.PATH ?? "", NODE_ENV: "production" },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-  } catch (error) {
-    const stderr = typeof error?.stderr === "string" ? error.stderr.trim().split("\n").slice(-3).join(" ") : "";
-    throw new Error("求值 hostPlugin 静态描述失败（工厂在打包机上被调用一次以生成 config-schema.json）：" + (stderr || error.message));
-  }
-  const evaluated = JSON.parse(raw);
-  const schema = {
-    schemaVersion: CONFIG_SCHEMA_VERSION,
-    extensionId: descriptor.extensionId,
-    kind: descriptor.hostPlugin.kind,
-    factory: descriptor.hostPlugin.factory,
-    plugin: evaluated.plugin,
-    ...(evaluated.metadata ? { metadata: evaluated.metadata } : {}),
-    publicPaths: evaluated.publicPaths
-  };
-  const validated = validateConfigSchema(schema, { extensionId: descriptor.extensionId, descriptor });
-  if (!validated.ok) throw new Error(CONFIG_SCHEMA_FILE + " 不合法：\n  " + validated.errors.join("\n  "));
-  const file = path.join(outDir, CONFIG_SCHEMA_FILE);
-  writeFileSync(file, JSON.stringify(schema, null, 2) + "\n");
-  return { file, value: schema };
 }
 
 async function main() {
