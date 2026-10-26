@@ -159,14 +159,13 @@ export function isolatedDescriptorOf(registration) {
 
 /**
  * 受管扩展后端是否走 Extension Host 子进程（change: 2026-10-21-isolate-extension-host-process，D1）。
- * 缺省开启；本机设置 `extensions.host.isolation = false` 由调用方传入 `isolation: false`，
- * 或部署侧用环境变量 `WOOHAA3_EXTENSION_HOST_ISOLATION=0` 关闭（排障降级开关）。
+ *
+ * **C 方向已取消进程隔离**：受管根的后端插件与内置根一样进宿主进程，这里恒返回 false。
+ * 保留函数签名是为了不改动调用方；声明层的信任检查（`untrustedRootViolation`、
+ * `probeDeclaredModules`）与它无关，仍然生效。
  */
-export function resolveIsolation({ isolation, env } = {}) {
-  if (typeof isolation === "boolean") return isolation;
-  const raw = env?.WOOHAA3_EXTENSION_HOST_ISOLATION;
-  if (typeof raw === "string" && /^(0|false|off|no)$/i.test(raw.trim())) return false;
-  return true;
+export function resolveIsolation() {
+  return false;
 }
 
 /**

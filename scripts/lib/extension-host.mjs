@@ -637,8 +637,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
    * 每个插件的 `name` 必须等于扩展 identity：装配日志、配置归属与站点状态都以它为键。
    */
   const createHostPlugins = async (optionsByExtensionId = {}) => {
-    // `isolated`：受管扩展的静态描述（不是插件对象），由宿主 Extension Host 管理器构造代理插件（D1）。
-    const byKind = { provider: [], storage: [], "marketplace-source": [], isolated: [] };
+    const byKind = { provider: [], storage: [], "marketplace-source": [] };
     const moduleCache = new Map();
     const ordered = registrations
       .filter((registration) => registration.hostPlugin)
@@ -652,10 +651,6 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     for (const registration of ordered) {
       const declared = registration.hostPlugin;
       if (declared.optional && optionsByExtensionId[registration.extensionId] === undefined) continue;
-      if (declared.isolated) {
-        byKind.isolated.push(isolatedDescriptorOf(registration));
-        continue;
-      }
       if (!moduleCache.has(declared.module)) {
         moduleCache.set(
           declared.module,

@@ -37,7 +37,6 @@ import { createHostLogSink } from "./host/log-sink.js";
 import { loadBaseLayer } from "./host/base/index.js";
 import { loadCoreLayer } from "./host/core/index.js";
 import { loadExtensionLayer } from "./host/extensions/loader.js";
-import { installExtensionHost } from "./extension-host/host/install.js";
 import { ROUTE_ORDER } from "./host/order.js";
 import { parseAllowedOrigins } from "./composition/config.js";
 import { createOriginGuard } from "./http/origin-guard.js";
@@ -215,19 +214,6 @@ export async function createBackendService(options: BackendServiceOptions = {}):
         ...(options.settings ? { settings: options.settings } : {})
       })
     );
-    // 受管扩展的 Extension Host 子进程（change: 2026-10-21-isolate-extension-host-process，D1）：
-    // 代理插件进扩展层；服务先于核心层 provide，Extension Manager 装载时即可取到蓝绿切换入口。
-    const isolatedHost = extensionHost
-      ? installExtensionHost(ctx, { descriptors: declaredPlugins?.isolated ?? [], env, enabled: extensionHost.isolation !== false })
-      : null;
-    if (isolatedHost) {
-      const unmount = isolatedHost.mountRoutes();
-      disposers.push(async () => {
-        unmount();
-        await isolatedHost.close();
-      });
-      isolatedPlugins.push(...isolatedHost.plugins);
-    }
     // 运行期扩展发布目录（内容寻址资源 + release catalog）：命中即响应，未命中交下游。
     if (extensionHost?.handleReleaseRequest) {
       const releaseRequest = extensionHost.handleReleaseRequest;

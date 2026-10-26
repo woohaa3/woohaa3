@@ -27,9 +27,9 @@ export function restartPending(snapshot: SettingsSnapshot | null): boolean {
   return (snapshot?.installedExtensions ?? []).some((entry) => needsRestart(entry));
 }
 
-/** 卡片是否需要提示重启：只有未隔离（进程内）的受管扩展才会因后端更新而需要重启。 */
+/** 卡片是否需要提示重启：C 方向下含后端代码的变更一律需要重启才生效。 */
 function needsRestart(entry: InstalledExtensionView): boolean {
-  return entry.managed === true && entry.restartRequired === true && entry.isolation !== "process";
+  return entry.managed === true && entry.restartRequired === true;
 }
 
 export function ManagedInstallBar({
@@ -140,12 +140,6 @@ export function permissionLines(permissions: ExtensionPermissions | undefined, e
   return lines;
 }
 
-function isolationLabel(installed: InstalledExtensionView): string | null {
-  if (installed.isolation === "process") return "独立进程";
-  if (installed.isolation === "in-process") return "未隔离（与本机服务同进程）";
-  return null;
-}
-
 export function ManagedExtensionDetails({
   installed,
   controller,
@@ -160,13 +154,8 @@ export function ManagedExtensionDetails({
   const [purge, setPurge] = useState(false);
   if (!installed || installed.managed !== true) return null;
   const id = installed.id;
-  const state = controller.getState();
   const busy = controller.busy(id);
-  const enforced = installed.isolation === "process";
-  const permissions = permissionLines(installed.permissions, enforced);
-  const isolation = isolationLabel(installed);
-  const quarantined = Boolean(installed.quarantinedAt);
-  const unquarantining = state.unquarantining.includes(id);
+  const permissions = permissionLines(installed.permissions, false);
   return (
     <div className="managed-extension" data-testid={`managed-extension-${id}`}>
       <dl className="managed-extension__facts">
@@ -174,25 +163,13 @@ export function ManagedExtensionDetails({
         <dd data-testid={`managed-source-${id}`}>{installed.sourceId === "local-file" ? "本地文件" : installed.sourceId ?? "未知"}</dd>
         <dt>信任</dt>
         <dd data-testid={`managed-trust-${id}`}>{trustLabel(installed.trust)}</dd>
-        {isolation ? (
-          <>
-            <dt>运行方式</dt>
-            <dd data-testid={`managed-isolation-${id}`}>{isolation}</dd>
-          </>
-        ) : null}
         <dt>权限</dt>
         <dd data-testid={`managed-permissions-${id}`}>
           {permissions.length > 0 ? permissions.join("；") : "未声明"}
           <span className="managed-extension__note" data-testid={`managed-permissions-note-${id}`}>
-            {enforced ? "（已强制）" : installed.isolation === "in-process" ? "（声明项，未强制：未隔离）" : "（声明项，暂未强制）"}
+            （声明项，未强制：与本机服务同权限）
           </span>
         </dd>
-        {installed.crashCount ? (
-          <>
-            <dt>崩溃</dt>
-            <dd data-testid={`managed-crashes-${id}`}>最近 5 分钟 {installed.crashCount} 次</dd>
-          </>
-        ) : null}
         {installed.observeUntil ? (
           <>
             <dt>观察期</dt>
@@ -204,18 +181,8 @@ export function ManagedExtensionDetails({
         <p className="managed-extension__restart" data-testid={`managed-restart-required-${id}`}>新版本需重启本机服务后生效。</p>
       ) : null}
       <ManagedVersionStatusNotice installed={installed} />
-      {quarantined ? (
-        <p className="managed-extension__quarantine" role="status" data-testid={`managed-quarantined-${id}`}>
-          已隔离：后端进程频繁崩溃，已停止自动重启（{new Date(installed.quarantinedAt as string).toLocaleString()} 起）。可升级到其他版本，或确认问题后解除隔离。
-        </p>
-      ) : null}
       {canManage ? (
         <div className="managed-extension__actions">
-          {quarantined ? (
-            <Button size="sm" tone="primary" disabled={busy || unquarantining} onClick={() => void controller.unquarantine(id)} data-testid={`managed-unquarantine-${id}`}>
-              {unquarantining ? "正在解除…" : "解除隔离"}
-            </Button>
-          ) : null}
           {installed.previousVersion ? (
             <Button size="sm" disabled={busy} onClick={() => void controller.rollback(id)} data-testid={`managed-rollback-${id}`}>
               回滚到 v{installed.previousVersion}

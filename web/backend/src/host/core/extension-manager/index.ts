@@ -16,7 +16,6 @@ import type { HostPlugin } from "../../context.js";
 import { ROUTE_ORDER } from "../../order.js";
 import { createExtensionManager, type ExtensionManager, type ObservedHealth } from "./manager.js";
 import { loadPackageToolkit } from "./toolkit.js";
-import { createRuntimeAttach } from "./runtime-attach.js";
 import { createVersionStatusCache, managedVersionStatus, marketplaceExtensionDetail } from "./marketplace-detail.js";
 import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, parseRepoList } from "./github-source.js";
 import type { ExtensionPackageToolkit, InstallationsHandle, TrustedKey } from "./types.js";
@@ -93,7 +92,6 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
     const siteStatus = (extensionId: string) => application()?.service.plugins().status(extensionId);
     const builtinIds = new Set((host.metadata ?? []).map((entry) => entry.extensionId));
 
-    const runtimeAttach = createRuntimeAttach(ctx, toolkit, log);
     // GitHub Release 来源（核心自带第二个来源，与 local-file 同级）：配置按调用现取（热重载即刻生效）；
     // enabled 缺省 false——出网行为必须显式开启，未开启时 available() 不可用且绝不发请求。
     // 令牌优先取密钥文件里的 extensions.marketplace.github.token，环境变量 WOOHAA3_GITHUB_TOKEN 兜底。
@@ -133,24 +131,6 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
         },
         ...(host.publishBrowserRelease ? { publishBrowserRelease: host.publishBrowserRelease } : {}),
         ...(ctx.get("hostRestart") ? { restart: ctx.get("hostRestart")! } : {}),
-        // 子进程隔离（change: 2026-10-21-isolate-extension-host-process，D10）：服务只在隔离开启时 provide；
-        // 每次调用现取（不依赖装载顺序），服务不存在或未启用时等同未隔离（P1 受控重启语义）。
-        isolation: {
-          isolated: (extensionId) => {
-            const service = ctx.get("extensionHostIsolation");
-            return service?.enabled() === true && service.isolated(extensionId);
-          },
-          swap: (extensionId, nextDirectory) => {
-            const service = ctx.get("extensionHostIsolation");
-            if (!service) return Promise.reject(Object.assign(new Error("子进程隔离未启用"), { code: "MARKETPLACE_NOT_INSTALLED" }));
-            return service.swap(extensionId, nextDirectory);
-          },
-          remove: async (extensionId) => {
-            await ctx.get("extensionHostIsolation")?.remove(extensionId);
-          },
-          // 首次安装热装（任务 8.4）：隔离服务支持运行期 add 且宿主有扩展层入口时才提供，否则 Manager 退回重启。
-          ...(runtimeAttach ? { attach: runtimeAttach.attach, detach: runtimeAttach.detach, canAttach: runtimeAttach.supported } : {})
-        },
         // 卸载时「同时清除数据」：删除该扩展 owner 下的全部 documents（storage 槽位的通用文档存储）。
         // 没有文档存储（或该扩展未登记 owner）时什么都不做；密钥文件与媒体不在这里清理。
         purgeData: async (extensionId) => {
@@ -233,16 +213,6 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
       manager: () => manager,
       marketplaceDetail: () => (input, signal) => marketplaceExtensionDetail(detailDeps, input, signal),
       versionStatus: () => versionStatus,
-      // 解除崩溃隔离（change: 2026-10-21-isolate-extension-host-process，D7）：隔离关闭时服务不存在 → 路由不可用。
-      unquarantine: () => {
-        const isolation = ctx.get("extensionHostIsolation");
-        if (!isolation) return undefined;
-        return async (extensionId: string, actor?: string) => {
-          if (!isolation.isolated(extensionId)) return { ok: false as const, code: "MARKETPLACE_NOT_INSTALLED", message: `扩展 ${extensionId} 不是受管隔离扩展` };
-          const result = await isolation.unquarantine(extensionId, actor);
-          return { ok: true as const, unquarantined: result.unquarantined, status: ctx.get("application")?.service.plugins().status(extensionId) };
-        };
-      },
       authenticator: ctx.access.authenticator,
       accessEnforcer: ctx.access.accessEnforcer,
       logger: log

@@ -152,11 +152,6 @@ export type HostServices = {
   marketplace: import("./core/marketplace.js").MarketplaceRegistry;
   /** 扩展安装管理（Extension Manager）；宿主没有受管根时不存在。 */
   extensionManager: import("./core/extension-manager/index.js").ExtensionManager;
-  /**
-   * 受管扩展的 Extension Host 子进程隔离（change: 2026-10-21-isolate-extension-host-process）：蓝绿切换、
-   * 卸载、解除隔离与状态视图。隔离关闭或没有受管后端扩展时不提供。
-   */
-  extensionHostIsolation: import("../extension-host/host/service.js").ExtensionHostIsolationService;
   /** 扩展层装载器的运行期入口（追加 / 卸载插件；change: 2026-10-21-isolate-extension-host-process，任务 8.4）。 */
   extensionLayer: import("./extensions/loader.js").ExtensionLayer;
   task: TaskService;

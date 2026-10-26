@@ -75,7 +75,7 @@ export function checkBuiltinConflict(ctx: ManagerContext, extensionId: string): 
 
 /** 共用的 verify → stage → preflight → commit → reload。 */
 export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: string, ref: ReleaseRef | null) {
-  const { deps, toolkit, board, maxPackageBytes, observeMs, now, log, requireHandle, stagingFor, assertNotAborted, cleanupStaging, commit, history, reload, switchPointer, hotSwappable } = ctx;
+  const { deps, toolkit, board, maxPackageBytes, observeMs, now, log, requireHandle, stagingFor, assertNotAborted, cleanupStaging, commit, history, reload, switchPointer } = ctx;
   const h = requireHandle();
   const sourceId = job.sourceId;
   // verify：整包摘要（来源声明）
@@ -152,10 +152,9 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
       fs.mkdirSync(path.dirname(versionDir), { recursive: true });
       fs.renameSync(tree, versionDir);
     }
-    // 含后端代码：隔离开启且该扩展已由子进程托管（升级 / 重装）时走蓝绿切换，不需要重启（D10）；
-    // 隔离关闭，或首次安装还没有子进程托管（代理插件在下次启动装配）时，按 P1 受控重启生效。
+    // 含后端代码：C 方向下扩展后端与宿主同进程，换版只能靠受控重启生效，没有蓝绿或运行期装配。
     const hasBackend = Boolean(preflight.requiresRestart) || Boolean(existing?.requiresRestart);
-    const requiresRestart = hasBackend && !hotSwappable(extensionId);
+    const requiresRestart = hasBackend;
     // 观察期：热生效（纯前端 / 蓝绿）从切换完成开始计时（reload 成功后再写），重启生效从下次启动开始。
     const observeUntil: string | null = null;
     commit((draft) => {

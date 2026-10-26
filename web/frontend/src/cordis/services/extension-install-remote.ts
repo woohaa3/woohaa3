@@ -5,8 +5,6 @@
  * - `POST /api/extensions/install`：原始字节流上传 `.wxt`（不经 multipart、不在前端缓冲）→ 202 `{ jobId }`；
  * - `GET / DELETE /api/extensions/install/:jobId`：任务进度 / 取消（commit 前有效）；
  * - `POST /api/extensions/:id/uninstall`、`POST /api/extensions/:id/rollback` → 202 `{ jobId }`；
- * - `POST /api/extensions/:id/unquarantine`：解除崩溃隔离（change: 2026-10-21-isolate-extension-host-process，D7）；
- *   2xx 即受理，宿主清空崩溃窗口并重新激活，状态以随后的设置快照为准；
  * - 受控重启复用 P0 的唯一入口 `POST /api/host/restart`（`host-restart-remote.ts`）：不支持时
  *   宿主回 503 `restart-unsupported`，这里映射为 `MARKETPLACE_RESTART_UNSUPPORTED` 供设置面提示手动重启。
  *
@@ -32,7 +30,6 @@ export type ExtensionInstallRemote = {
   uninstall(extensionId: string, options?: { purgeData?: boolean }): Promise<ExtensionJobAccepted>;
   rollback(extensionId: string): Promise<ExtensionJobAccepted>;
   restart(): Promise<ExtensionRestartResult>;
-  unquarantine(extensionId: string): Promise<ExtensionUnquarantineResult>;
 };
 
 async function failure(response: Response, fallback: string): Promise<ExtensionInstallRemoteError> {
@@ -103,14 +100,6 @@ export function createExtensionInstallRemote(options: { fetchImpl?: typeof globa
       ),
     rollback: (extensionId) =>
       accepted(path(extensionId, "rollback"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }, "回滚请求失败"),
-    async unquarantine(extensionId) {
-      try {
-        const response = await fetchImpl(path(extensionId, "unquarantine"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-        return response.ok ? { ok: true } : await failure(response, "解除隔离失败");
-      } catch {
-        return UNAVAILABLE;
-      }
-    },
     async restart() {
       const result = await hostRestart.restart({ reason: "extension-installed" });
       if (result.ok) return { ok: true };

@@ -54,14 +54,4 @@ describe("createExtensionInstallRemote", () => {
     });
   });
 
-  it("解除隔离：POST /api/extensions/:id/unquarantine；拒绝时带稳定码", async () => {
-    const ok = recorder(() => json(202, { ok: true }));
-    await expect(createExtensionInstallRemote({ fetchImpl: ok.fetchImpl }).unquarantine("my ext")).resolves.toEqual({ ok: true });
-    expect(ok.calls[0]!.url).toBe("/api/extensions/my%20ext/unquarantine");
-    expect(ok.calls[0]!.init.method).toBe("POST");
-    const denied = recorder(() => json(403, {}));
-    await expect(createExtensionInstallRemote({ fetchImpl: denied.fetchImpl }).unquarantine("demo")).resolves.toMatchObject({ ok: false, code: "forbidden" });
-    const down = createExtensionInstallRemote({ fetchImpl: (async () => { throw new Error("down"); }) as unknown as typeof fetch });
-    await expect(down.unquarantine("demo")).resolves.toMatchObject({ ok: false, code: "unavailable" });
-  });
 });

@@ -71,16 +71,9 @@ export type LoadedExtensionHost = {
   createHostPlugins?: (optionsByExtensionId?: Record<string, unknown>) => Promise<{
     provider: readonly AnyHostExtensionPlugin[];
     storage: readonly AnyHostExtensionPlugin[];
-    /**
-     * 受管根的后端插件（change: 2026-10-21-isolate-extension-host-process，D1）：纯数据描述，宿主不 import
-     * 任何包内模块，按描述构造代理插件并在 Extension Host 子进程里运行。隔离关闭时为空。
-     */
-    isolated?: readonly import("../extension-host/host/descriptor.js").IsolatedPluginDescriptor[];
   }>;
   /** 站点控制面 scope 的 extensionId（runtime 只装配非站点入口）。 */
   siteExtensionIds: readonly string[];
-  /** 本次启动受管扩展是否进程隔离（change: 2026-10-21-isolate-extension-host-process；缺省视为开启）。 */
-  isolation?: boolean;
   /** 受管安装根（change: 2026-10-21-add-extension-marketplace-point，D7）；Extension Manager 据此定位。 */
   managedRoot?: string;
   /**

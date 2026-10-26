@@ -13,8 +13,6 @@
  * GET    /api/extensions/marketplace/search   ?q=&sourceId=&cursor=&limit= → { items, nextCursor?, unavailable }
  * GET    /api/extensions/:id/version-status    受管扩展当前版本在来源侧的状态（已撤回提示；失败为 unknown）
  * GET    /api/extensions/marketplace/extension ?sourceId=&extensionId= → MarketplaceExtensionDetailView（版本 + 本机是否信任 keyId）
- * POST   /api/extensions/:id/unquarantine     解除崩溃熔断隔离（change: 2026-10-21-isolate-extension-host-process，D7）
- *                                             → 200 { unquarantined, status? }；未隔离时 unquarantined:false
  *
  * 鉴权沿用插件管理的具名 action（`extensions.configure`）。这些路径排在 application-service 的
  * `/api/extensions/*` 之前；未命中即交下游，不替整条前缀做鉴权。
@@ -41,13 +39,6 @@ export type ExtensionInstallApiDependencies = AdminAuthDependencies & {
   marketplaceDetail?: () =>
     | ((input: { sourceId: string; extensionId: string }, signal: AbortSignal) => Promise<import("@woohaa3/contracts").MarketplaceExtensionDetailView>)
     | undefined;
-  /**
-   * 解除隔离（D7）：清空崩溃窗口、写审计，并按 desiredEnabled 重新协调（启用即重新激活）。不改写 desiredEnabled。
-   * 缺省时该路由回 503。
-   */
-  unquarantine?: () =>
-    | ((extensionId: string, actor: string) => Promise<{ ok: true; unquarantined: boolean; status?: unknown } | { ok: false; code: string; message: string }>)
-    | undefined;
   logger?: (event: Record<string, unknown>) => void;
 };
 
@@ -56,7 +47,6 @@ type Route =
   | { kind: "job"; jobId: string }
   | { kind: "uninstall"; extensionId: string }
   | { kind: "rollback"; extensionId: string }
-  | { kind: "unquarantine"; extensionId: string }
   | { kind: "search" }
   | { kind: "extension" }
   | { kind: "versionStatus"; extensionId: string };
@@ -72,7 +62,6 @@ function match(pathname: string): Route | null {
   if (rest.length === 2 && rest[0] && EXTENSION_ID.test(rest[0]) && rest[1] === "version-status") return { kind: "versionStatus", extensionId: rest[0] };
   if (rest.length === 2 && rest[0] && EXTENSION_ID.test(rest[0]) && rest[1] === "uninstall") return { kind: "uninstall", extensionId: rest[0] };
   if (rest.length === 2 && rest[0] && EXTENSION_ID.test(rest[0]) && rest[1] === "rollback") return { kind: "rollback", extensionId: rest[0] };
-  if (rest.length === 2 && rest[0] && EXTENSION_ID.test(rest[0]) && rest[1] === "unquarantine") return { kind: "unquarantine", extensionId: rest[0] };
   return null;
 }
 
@@ -81,7 +70,6 @@ const ALLOWED: Record<Route["kind"], readonly string[]> = {
   job: ["GET", "DELETE"],
   uninstall: ["POST"],
   rollback: ["POST"],
-  unquarantine: ["POST"],
   search: ["GET"],
   extension: ["GET"],
   versionStatus: ["GET"]
@@ -101,28 +89,6 @@ export function createExtensionInstallApiHandler(deps: ExtensionInstallApiDepend
     const auth = await authorizeAdmin(req, deps, APPLICATION_EXTENSION_LOAD_ACTION);
     if (!auth.ok) {
       sendJson(res, auth.status, { code: auth.code, message: "需要站点管理员授权" });
-      return true;
-    }
-    if (route.kind === "unquarantine") {
-      // 不依赖 Extension Manager：隔离属于运行期故障处置（supervisor + 站点控制面）。
-      const unquarantine = deps.unquarantine?.();
-      if (!unquarantine) {
-        sendJson(res, 503, { code: "extension-host-unavailable", message: "本机未启用扩展进程隔离" });
-        return true;
-      }
-      const actor = auth.principal?.subject ? `principal:${auth.principal.subject}` : `principal:${auth.actor}`;
-      try {
-        const result = await unquarantine(route.extensionId, actor);
-        if (!result.ok) {
-          sendJson(res, result.code === "extension-not-found" || result.code === "MARKETPLACE_NOT_INSTALLED" ? 404 : 409, { code: result.code, message: result.message });
-          return true;
-        }
-        log({ event: "extension-unquarantine-requested", extensionId: route.extensionId, actor, unquarantined: result.unquarantined });
-        sendJson(res, 200, { unquarantined: result.unquarantined, ...(result.status !== undefined ? { status: result.status } : {}) });
-      } catch (error) {
-        log({ event: "extension-unquarantine-failed", extensionId: route.extensionId, message: error instanceof Error ? error.message : String(error) });
-        sendJson(res, 500, { code: "internal", message: "解除隔离失败" });
-      }
       return true;
     }
     const manager = deps.manager();

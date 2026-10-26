@@ -33,13 +33,6 @@ export type SettingsApiDependencies = {
    * 缺省时 `installedExtensions` 只有目录扫描信息、没有 `extensionInstallations`。
    */
   extensionManager?: () => import("../host/core/extension-manager/manager.js").ExtensionManager | undefined;
-  /**
-   * 受管扩展的运行时隔离视图（change: 2026-10-21-isolate-extension-host-process，D7）：按请求现取。
-   * 缺省或返回 undefined 表示隔离关闭——受管扩展标注 `isolation: "in-process"`。
-   */
-  extensionIsolation?: () =>
-    | { views(): readonly { extensionId: string; supervisor: { crashCount: number; quarantinedAt: string | null } }[] }
-    | undefined;
   authenticator?: ApplicationRequestAuthenticator;
   accessEnforcer?: AccessEnforcer;
   basePath?: string;
@@ -54,7 +47,7 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
     const manager = deps.extensionManager?.();
     return {
       safeMode: deps.safeMode?.() ?? null,
-      installedExtensions: mergeManaged(deps.directoryControl?.list() ?? [], manager?.installed() ?? [], deps.extensionIsolation?.()),
+      installedExtensions: mergeManaged(deps.directoryControl?.list() ?? [], manager?.installed() ?? []),
       ...(manager ? { extensionInstallations: manager.view() } : {}),
       settings: deps.settings.describe(),
       plugins: deps.settings.plugins(),
@@ -160,21 +153,9 @@ async function readJson(req: IncomingMessage, maxBytes = 64 * 1024): Promise<unk
  */
 function mergeManaged(
   installed: InstalledExtensionView[],
-  managed: readonly import("../host/core/extension-manager/manager.js").ManagedInstallView[],
-  isolation?: { views(): readonly { extensionId: string; supervisor: { crashCount: number; quarantinedAt: string | null } }[] }
+  managed: readonly import("../host/core/extension-manager/manager.js").ManagedInstallView[]
 ): InstalledExtensionView[] {
   const byId = new Map(managed.map((entry) => [entry.extensionId, entry]));
-  const runtime = new Map((isolation?.views() ?? []).map((view) => [view.extensionId, view.supervisor]));
-  /** 受管扩展的隔离投影：隔离开启时为 process（含崩溃次数 / 隔离时刻），否则 in-process（「未隔离」）。 */
-  const isolationOf = (extensionId: string): Pick<InstalledExtensionView, "isolation" | "crashCount" | "quarantinedAt"> => {
-    if (!isolation) return { isolation: "in-process" };
-    const supervisor = runtime.get(extensionId);
-    return {
-      isolation: "process",
-      ...(supervisor && supervisor.crashCount > 0 ? { crashCount: supervisor.crashCount } : {}),
-      ...(supervisor?.quarantinedAt ? { quarantinedAt: supervisor.quarantinedAt } : {})
-    };
-  };
   const project = (base: InstalledExtensionView | null, entry: (typeof managed)[number]): InstalledExtensionView => ({
     ...(base ?? { id: entry.extensionId, label: entry.extensionId, description: "", directory: entry.directory, writable: false }),
     managed: true,
@@ -184,8 +165,7 @@ function mergeManaged(
     ...(entry.previousVersion ? { previousVersion: entry.previousVersion } : {}),
     ...(entry.trust ? { trust: entry.trust } : {}),
     ...(entry.permissions ? { permissions: entry.permissions } : {}),
-    ...(entry.observeUntil ? { observeUntil: entry.observeUntil } : {}),
-    ...isolationOf(entry.extensionId)
+    ...(entry.observeUntil ? { observeUntil: entry.observeUntil } : {})
   });
   const merged = installed.map((item) => {
     const entry = byId.get(item.id);

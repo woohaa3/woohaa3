@@ -37,7 +37,7 @@ if (handle) {
 }
 
 export function uninstall(ctx: ManagerContext, extensionId: string, options: { purgeData?: boolean; actor: string }): ExtensionInstallJobView {
-  const { handle, deps, board, commit, history, now, sleep, drainTimeoutMs, drainPollMs, restartPendingRemoved, reload, log, hotSwappable } = ctx;
+  const { handle, deps, board, commit, history, now, sleep, drainTimeoutMs, drainPollMs, restartPendingRemoved, reload, log } = ctx;
   if (!handle) return failedJob(ctx, "uninstall", MARKETPLACE_LOCAL_FILE_SOURCE_ID, unavailableError(), extensionId);
   const record = handle.read().extensions[extensionId];
   if (!record) return failedJob(ctx, "uninstall", MARKETPLACE_LOCAL_FILE_SOURCE_ID, new ExtensionManagerError("MARKETPLACE_NOT_INSTALLED", `扩展 ${extensionId} 不是受管扩展`), extensionId);
@@ -66,8 +66,8 @@ export function uninstall(ctx: ManagerContext, extensionId: string, options: { p
         }
       }
       const hasBackend = Boolean(record.requiresRestart);
-      // 子进程托管的扩展卸载时直接停掉子进程（reload 里 remove），不需要重启；隔离关闭时仍按 P1 提示重启。
-      const needsRestart = hasBackend && !hotSwappable(extensionId);
+      // C 方向下含后端的扩展卸载同样要重启才彻底生效。
+      const needsRestart = hasBackend;
       commit((draft) => {
         delete draft.extensions[extensionId];
       });

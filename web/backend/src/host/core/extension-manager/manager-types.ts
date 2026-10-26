@@ -16,36 +16,7 @@ import type { ExtensionPackageToolkit, TrustedKey } from "./types.js";
 /** 站点扩展健康（观察期用）：`failed` 立即回滚，`degraded` 连续 N 次回滚，`unknown`（纯前端等）视为正常。 */
 export type ObservedHealth = "ok" | "degraded" | "failed" | "unknown";
 
-/**
- * Extension Host 子进程隔离端口（change: 2026-10-21-isolate-extension-host-process，D10）。
- * 装配处接到 `ctx.extensionHost`（swap.ts）；隔离关闭（`extensions.host.isolation = false`）或宿主没有
- * 受管后端扩展时不传——含后端扩展按 P1 受控重启生效。
- */
-export type ExtensionIsolationPort = {
-  /** 本进程有没有为该扩展装配隔离控制器（首次安装的扩展在下次启动才有）。 */
-  isolated(extensionId: string): boolean;
-  /**
-   * 蓝绿切换到新版本目录。`swapped: false` = 目录与当前相同（no-op）；站点停用时只记下新目录、返回 true。
-   * 失败抛 `code = "MARKETPLACE_SWAP_FAILED"`（绿已清理、蓝未动）；未装配的扩展抛 `MARKETPLACE_NOT_INSTALLED`。
-   */
-  swap(extensionId: string, nextDirectory: string): Promise<{ swapped: boolean }>;
-  /** 停止该扩展的子进程并撤镜像（卸载时；幂等）。 */
-  remove?(extensionId: string): Promise<void>;
-  /**
-   * 首次安装热装（任务 8.4）：为新提交的版本目录装配代理插件并追加到扩展层（站点元数据存在时同时
-   * 登记到站点门禁与控制面并按 desiredEnabled 激活），等到「就绪 + 首次健康」或站点停用 / 隔离为止。
-   * 失败抛错（Manager 按热登记失败撤销记录）；不支持（隔离关闭）时缺省，Manager 退回 restart-required。
-   */
-  attach?(extensionId: string, directory: string, version: string): Promise<{ state: string }>;
-  /** 当前能否运行期装配（隔离服务已启用且宿主有扩展层入口）；缺省视为与 `attach` 是否存在一致。 */
-  canAttach?(): boolean;
-  /** 卸载运行期装配的扩展：控制面移除 → 站点门禁移除 → 扩展层卸载 → 停子进程（幂等）。 */
-  detach?(extensionId: string): Promise<void>;
-};
-
 export type ExtensionManagerDeps = {
-  /** 子进程隔离端口；缺省 = 未隔离（P1 受控重启语义）。 */
-  isolation?: ExtensionIsolationPort;
   managedRoot: string;
   toolkit: ExtensionPackageToolkit;
   /** 未限定的市场注册表：本地文件来源由 Manager 注册在这里。 */

@@ -43,15 +43,7 @@ export type InstalledExtensionView = {
   restartRequired?: boolean;
   /** 观察期截止时间（ISO）；观察期内激活失败或健康连续失败会自动回滚。 */
   observeUntil?: string;
-  /**
-   * 后端隔离方式（change: 2026-10-21-isolate-extension-host-process）：受管扩展缺省 `process`；
-   * 本机关闭隔离时为 `in-process`（设置面标注「未隔离」）。内置扩展缺省不带此字段。
-   */
-  isolation?: import("../backend/extension-host.js").ExtensionIsolation;
-  /** 当前崩溃窗口（5 分钟）内的崩溃次数。 */
-  crashCount?: number;
-  /** 进入 `quarantined` 的时刻（ISO）；未隔离时缺省。 */
-  quarantinedAt?: string;
+
 };
 
 /** `/api/settings` 附带的受管安装概览（进行中的任务，供设置面恢复进度）。 */

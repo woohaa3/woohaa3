@@ -13,7 +13,6 @@ import type { ExtensionInstallJobView, InstalledExtensionView, SettingPluginView
 import { createBackendSettingsStore } from "./backend-settings-store.js";
 import { PluginSettingsSection } from "./plugin-settings-section.js";
 import { createManagedExtensionsController, describeJob, failureReason } from "./managed-extensions.js";
-import { permissionLines } from "./managed-extensions-ui.js";
 import type { ExtensionInstallRemote } from "../../services/extension-install-remote.js";
 import type { ExtensionManagerFacade, ExtensionManagerView } from "../extension-manager/contract.js";
 
@@ -90,7 +89,6 @@ function remoteWith(overrides: Partial<ExtensionInstallRemote> = {}): ExtensionI
     uninstall: vi.fn(async () => ({ ok: true as const, jobId: "job-u" })),
     rollback: vi.fn(async () => ({ ok: true as const, jobId: "job-r" })),
     restart: vi.fn(async () => ({ ok: true as const })),
-    unquarantine: vi.fn(async () => ({ ok: true as const })),
     ...overrides
   };
 }
@@ -277,71 +275,7 @@ describe("失败码与任务文案", () => {
   });
 });
 
-describe("子进程隔离（change: 2026-10-21-isolate-extension-host-process，任务 9.1–9.3）", () => {
-  it("隔离开启：显示独立进程、权限「已强制」，画布 / MCP 工具标注本期未支持", async () => {
-    const entry = managedEntry("demo", { isolation: "process", permissions: { network: ["api.example.com"], canvas: "write", mcpTools: ["canvas.read"] } });
-    const { container } = await render(baseSnapshot([entry]), remoteWith());
-    expect(container.querySelector('[data-testid="managed-isolation-demo"]')?.textContent).toBe("独立进程");
-    const permissions = container.querySelector('[data-testid="managed-permissions-demo"]')?.textContent ?? "";
-    expect(permissions).toContain("出网：api.example.com");
-    expect(permissions).toContain("画布：读写（本期未支持，未授予）");
-    expect(permissions).toContain("MCP 工具：canvas.read（本期未支持，未授予）");
-    expect(container.querySelector('[data-testid="managed-permissions-note-demo"]')?.textContent).toBe("（已强制）");
-  });
-
-  it("隔离关闭：显示未隔离，权限注明「声明项，未强制」", async () => {
-    const { container } = await render(baseSnapshot([managedEntry("demo", { isolation: "in-process" })]), remoteWith());
-    expect(container.querySelector('[data-testid="managed-isolation-demo"]')?.textContent).toContain("未隔离");
-    expect(container.querySelector('[data-testid="managed-permissions-note-demo"]')?.textContent).toBe("（声明项，未强制：未隔离）");
-    expect(container.querySelector('[data-testid="managed-permissions-demo"]')?.textContent).not.toContain("本期未支持");
-  });
-
-  it("权限文案：隔离开启且未声明出网时显示「不允许」", () => {
-    expect(permissionLines({}, true)).toEqual(["出网：不允许"]);
-    expect(permissionLines(undefined, false)).toEqual([]);
-  });
-
-  it("quarantined：显示崩溃次数与隔离说明，「解除隔离」调用宿主并重取设置", async () => {
-    const entry = managedEntry("demo", { isolation: "process", crashCount: 3, quarantinedAt: "2026-10-21T10:00:00.000Z" });
-    const remote = remoteWith();
-    const { container, reload } = await render(baseSnapshot([entry]), remote);
-    expect(container.querySelector('[data-testid="managed-crashes-demo"]')?.textContent).toContain("3 次");
-    expect(container.querySelector('[data-testid="managed-quarantined-demo"]')?.textContent).toContain("已隔离");
-    await act(async () => {
-      (container.querySelector('[data-testid="managed-unquarantine-demo"]') as HTMLButtonElement).click();
-    });
-    expect(remote.unquarantine).toHaveBeenCalledWith("demo");
-    expect(reload).toHaveBeenCalledTimes(1);
-  });
-
-  it("解除隔离失败（无权限）：显示原因，扩展保持隔离", async () => {
-    const entry = managedEntry("demo", { isolation: "process", quarantinedAt: "2026-10-21T10:00:00.000Z" });
-    const remote = remoteWith({ unquarantine: vi.fn(async () => ({ ok: false as const, code: "forbidden", error: "x" })) });
-    const { container, reload } = await render(baseSnapshot([entry]), remote);
-    await act(async () => {
-      (container.querySelector('[data-testid="managed-unquarantine-demo"]') as HTMLButtonElement).click();
-    });
-    expect(container.querySelector('[data-testid="managed-install-error"]')?.textContent).toBe("没有管理插件的权限");
-    expect(container.querySelector('[data-testid="managed-quarantined-demo"]')).not.toBeNull();
-    expect(reload).not.toHaveBeenCalled();
-  });
-
-  it("非隔离扩展没有「解除隔离」入口", async () => {
-    const { container } = await render(baseSnapshot([managedEntry("demo", { isolation: "process" })]), remoteWith());
-    expect(container.querySelector('[data-testid="managed-unquarantine-demo"]')).toBeNull();
-    expect(container.querySelector('[data-testid="managed-quarantined-demo"]')).toBeNull();
-  });
-
-  it("隔离开启的含后端扩展升级：不显示「需要重启」；隔离关闭时保留原提示", async () => {
-    const isolated = await render(baseSnapshot([managedEntry("demo", { isolation: "process", restartRequired: true })]), remoteWith());
-    expect(isolated.container.querySelector('[data-testid="managed-restart-required-demo"]')).toBeNull();
-    expect(isolated.container.querySelector('[data-testid="managed-restart"]')).toBeNull();
-    document.body.innerHTML = "";
-    const inProcess = await render(baseSnapshot([managedEntry("demo", { isolation: "in-process", restartRequired: true })]), remoteWith());
-    expect(inProcess.container.querySelector('[data-testid="managed-restart-required-demo"]')).not.toBeNull();
-    expect(inProcess.container.querySelector('[data-testid="managed-restart"]')).not.toBeNull();
-  });
-
+describe("受管扩展任务跟踪与失败码", () => {
   it("track：其他入口受理的任务进入同一任务列表并轮询", async () => {
     const remote = remoteWith();
     const { container, controller, timers } = await render(baseSnapshot([]), remote);
@@ -352,9 +286,7 @@ describe("子进程隔离（change: 2026-10-21-isolate-extension-host-process，
     });
     expect(remote.job).toHaveBeenCalledWith("job-m");
   });
-
-  it("新失败码：缺构建期描述提示重新打包，蓝绿失败带原因", () => {
+  it("新失败码：缺构建期描述提示重新打包", () => {
     expect(failureReason("MARKETPLACE_PACKAGE_INVALID")).toContain("重新打包");
-    expect(failureReason("MARKETPLACE_SWAP_FAILED", "激活超时")).toBe("新版本未能在独立进程中就绪，已保留原版本：激活超时");
   });
 });

@@ -105,8 +105,6 @@ export type ManagedExtensionsController = {
   rollback(extensionId: string): Promise<void>;
   cancel(jobId: string): Promise<void>;
   restart(): Promise<void>;
-  /** 解除崩溃隔离；成功后重取设置快照。 */
-  unquarantine(extensionId: string): Promise<void>;
   /** 其他入口受理的任务交给同一个任务列表（行为同安装受理成功后）。 */
   track(jobId: string, job?: ExtensionInstallJobView): void;
   /** 接管设置快照里的任务（进行中的继续轮询）。 */
@@ -209,18 +207,6 @@ export function createManagedExtensionsController(options: ManagedExtensionsOpti
       if (result.ok) set({ restart: { status: "requested", message: "正在重启本机服务，连接恢复后自动继续。" } });
       else if (result.code === "MARKETPLACE_RESTART_UNSUPPORTED") set({ restart: { status: "unsupported", message: failureReason(result.code) } });
       else set({ restart: { status: "failed", message: failureReason(result.code, result.error) } });
-    },
-    async unquarantine(extensionId) {
-      if (state.unquarantining.includes(extensionId)) return;
-      set({ unquarantining: [...state.unquarantining, extensionId], error: null });
-      const result = await options.remote.unquarantine(extensionId);
-      if (disposed) return;
-      set({ unquarantining: state.unquarantining.filter((id) => id !== extensionId) });
-      if (!result.ok) {
-        set({ error: failureReason(result.code, result.error) });
-        return;
-      }
-      await options.reload().catch(() => undefined);
     },
     track: (jobId, job) => track(jobId, job, { action: "install", sourceId: job?.sourceId ?? "unknown" }),
     adoptSnapshot(snapshot) {

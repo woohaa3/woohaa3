@@ -15,7 +15,6 @@
 import { isJsonObject } from "../validation.js";
 import type { PluginIcon } from "../plugin-icon.js";
 import type { CanvasTaskModelType } from "../task/dto.js";
-import { EXTENSION_HOST_SETTING_DEFINITIONS } from "../backend/extension-host.js";
 import type { ExtensionInstallationsView, HostSafeModeView, InstalledExtensionView, SettingsExtensionPoints } from "./extension-views.js";
 
 export type {
@@ -193,8 +192,7 @@ export const SETTING_DEFINITIONS = {
     secret: true,
     label: "GitHub 访问令牌",
     description: "访问私有仓库或提高 API 限流用；留空为匿名访问。请写在密钥文件（woohaa.secrets.yml），不要写进普通配置文件"
-  },
-  ...EXTENSION_HOST_SETTING_DEFINITIONS
+  }
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof SETTING_DEFINITIONS;
