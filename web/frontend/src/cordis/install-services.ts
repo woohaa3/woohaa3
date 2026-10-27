@@ -572,10 +572,12 @@ export async function installCanvasPageServices(
   if (options.testHooks ?? true) {
     // E2E：查找面板与重命名输入的确定性驱动（任务 7.1）。
     const target = globalThis as unknown as {
+      __canvasLocate?: typeof canvasLocate.locateNodes;
       __canvasSearch?: { open: () => void; setQuery: (value: string) => void; snapshot: () => unknown };
       __canvasRename?: { open: (nodeId: string, initial: string) => void; close: () => void };
       __canvasPanTo?: (viewport: { x: number; y: number; zoom: number }, durationMs?: number) => void;
     };
+    target.__canvasLocate = (ids, settings) => canvasLocate.locateNodes(ids, settings);
     target.__canvasSearch = {
       open: () => canvasSearchStore.open(),
       setQuery: (value) => canvasSearchStore.setQuery(value),

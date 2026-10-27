@@ -225,7 +225,7 @@ const taskService = createTaskService({
 	serviceToken: TASK_TOKEN,
 	generationProviders: () => [fixtureProvider, runningHubProvider].filter(Boolean),
 	workerServer: fakeWorkerServer(),
-	logger: (event) => process.stderr.write(`[task-service] ${JSON.stringify(event)}\n`)
+	logger: (event) => process.env.E2E_QUIET === "1" ? undefined : process.stderr.write(`[task-service] ${JSON.stringify(event)}\n`)
 });
 
 // ---------------------------------------------------------------------------
@@ -384,7 +384,7 @@ const canvasService = await createCanvasService({
 	...(controlledSource ? { canvasSources: controlledSource } : {}),
 	...(controlledSource ? { canvasSubjectResolver: () => "e2e-user" } : {}),
 	reconcileIntervalMs: 25,
-	logger: (event) => process.stderr.write(`[canvas-service] ${JSON.stringify(event)}\n`)
+	logger: (event) => process.env.E2E_QUIET === "1" ? undefined : process.stderr.write(`[canvas-service] ${JSON.stringify(event)}\n`)
 });
 
 const canvasListener = await listenService(canvasService);
@@ -394,6 +394,12 @@ const canvasListener = await listenService(canvasService);
 // Canvas/Task/Media operations continue through the deterministic three-service fixture.
 const { createBackendService } = await import(pathToFileURL(path.resolve(root, "web/backend/dist/index.js")).href);
 const applicationBackend = await createBackendService({
+  // Benchmark profile isolates canvas rendering from optional paid/agent providers.
+  // The normal E2E/application profile is unchanged.
+  ...(process.env.E2E_BENCHMARK === '1' ? {
+    bootstrapExtensions: [], providerPlugins: [], storagePlugins: [],
+    applicationBackendExtensions: [], applicationExtensionMetadata: []
+  } : {}),
   env: {
     WOOHAA3_TASK_STORE_PATH: path.join(canvasDbDir, "application-task.sqlite"),
     WOOHAA3_APPLICATION_STORE_PATH: path.join(canvasDbDir, "application.sqlite"),
@@ -420,7 +426,7 @@ const ingress = createIngress({
 		media: `http://127.0.0.1:${mediaListener.port}`,
 		application: `http://127.0.0.1:${applicationListener.port}`
 	},
-	logger: (event) => process.stderr.write(`[ingress] ${JSON.stringify(event)}\n`)
+	logger: (event) => process.env.E2E_QUIET === "1" ? undefined : process.stderr.write(`[ingress] ${JSON.stringify(event)}\n`)
 });
 
 const serveStatic = createStaticHandler(dist, { basePath, pageTitle: resolveAppPageTitle(process.env) });
