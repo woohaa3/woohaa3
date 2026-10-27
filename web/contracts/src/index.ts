@@ -117,9 +117,7 @@ export * from "./theme/index.js";
 export * from "./prompt-snippets/index.js";
 export * from "./video/index.js";
 export * from "./extension/index.js";
-export * from "./extension/canvas-source.js";
-export * from "./extension/canvas-upstream.js";
-export { compareSemver, isSemver as isStrictSemver, maxSatisfying, satisfiesRange } from "./extension/semver.js";
+export { compareSemver, isSemver as isStrictSemver, maxSatisfying, satisfiesRange } from "./extension/host/semver.js";
 export * from "./backend/index.js";
 export * from "./settings/index.js";
 export * from "./telemetry/event.js";
@@ -146,4 +144,4 @@ export * from "./canvas/media-content.js";
 export * from "./canvas/group-presentation.js";
 export * from "./canvas/group-badge.js";
 
-export type { MediaFormatValidator, MediaFormatRegistry } from "./backend/media-formats.js";
+export type { MediaFormatValidator, MediaFormatRegistry } from "./extension/services/host/media-formats.js";

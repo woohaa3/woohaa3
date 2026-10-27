@@ -9,7 +9,7 @@
  * 纯函数 / JSON-only 叶子模块：只依赖 validation 原语与同目录类型，不 import 任何 codec 或服务。
  */
 import { isJsonObject } from "../../validation.js";
-import { decodeAssistantExecutionRef } from "../../extension/assistant-execution.js";
+import { decodeAssistantExecutionRef } from "../../extension/assistant/assistant-execution.js";
 import {
   FILM_SET_CONVERSION_ERROR_CODES,
   FILM_SET_CONVERSION_STEPS,

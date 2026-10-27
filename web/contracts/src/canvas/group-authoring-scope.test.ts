@@ -6,10 +6,10 @@ import { compileAgentPlan } from "./canvas-script/planner/compile.js";
 import { filmSetObjectContainerData, filmSetObjectContainerId } from "./film-set-object-container.js";
 import { canvasGroupMembers, projectCanvasGroup, validateCanvasGroupChange } from "./group-authoring-scope.js";
 import { collectWoohaa3CanvasRemovalIds } from "./domain/core/node-removal.js";
-import { decodeCanvasCreationRequest } from "../extension/canvas-creation.js";
+import { decodeCanvasCreationRequest } from "../extension/assistant/canvas-creation.js";
 import { sanitizeWoohaa3CanvasNodeData } from "./domain/core/document-schema.js";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "./yjs/mapping.js";
-import { decodeAcceptTurnRequest } from "../extension/conversation-codec.js";
+import { decodeAcceptTurnRequest } from "../extension/assistant/conversation-codec.js";
 
 function fixture() {
   const canvas = createEmptyWoohaa3ServerCanvas("c", "2026-10-20T00:00:00Z");

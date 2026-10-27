@@ -4,11 +4,9 @@ import {
   EXTENSION_INSTALL_PHASES,
   MARKETPLACE_FAILURE_CODES,
   MARKETPLACE_LOCAL_FILE_SOURCE_ID,
-  isMarketplaceFailureCode,
-  type HostMarketplaceService,
-  type MarketplaceSource,
-  type ReleaseRef
+  isMarketplaceFailureCode
 } from "./index";
+import type { HostMarketplaceService, MarketplaceSource, ReleaseRef } from "../extension/services/host/marketplace.js";
 import type { HostExtensionContext } from "../extension/service.js";
 import type { InstalledExtensionView } from "../settings/index";
 

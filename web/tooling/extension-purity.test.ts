@@ -57,7 +57,7 @@ const REGISTRATION_SURFACES = [
   "web/package.json",
   "web/backend/package.json",
   "web/backend/src/extensions/manifest.ts",
-  "web/contracts/src/extension/trusted-manifest.ts",
+  "web/contracts/src/extension/host/trusted-manifest.ts",
   "web/services/application-service/src/extensions/manifest.ts"
 ];
 

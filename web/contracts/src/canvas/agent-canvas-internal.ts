@@ -1,4 +1,4 @@
-import { isAgentReasoningEffort } from "../extension/conversation.js";
+import { isAgentReasoningEffort } from "../extension/assistant/conversation.js";
 /**
  * MCP Service ⇄ Canvas Service 内部 Agent 协议 v2
  * （change: add-agent-canvas-authoring-mcp，任务 1.5 / 3.5 / 4.7）。
@@ -293,7 +293,7 @@ export function decodeAgentApplyRequest(body: unknown, principalId: string): Dec
 // ---------------------------------------------------------------------------
 
 export type AgentRunRequest = {
-  assistant?: import("../extension/assistant-text.js").AssistantTextSelection;
+  assistant?: import("../extension/assistant/assistant-text.js").AssistantTextSelection;
   principalId: string;
   canvasId?: string;
   requestId: string;
@@ -305,7 +305,7 @@ export type AgentRunRequest = {
 };
 
 export type AgentRunResponse =
-  | { ok: true; protocolVersion: number; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted"; execution?: import("../extension/assistant-execution.js").AssistantExecutionRef }
+  | { ok: true; protocolVersion: number; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted"; execution?: import("../extension/assistant/assistant-execution.js").AssistantExecutionRef }
   | { ok: false; code: string; message: string; retryable?: boolean };
 
 export type AgentRunStatusRequest = {
@@ -364,7 +364,7 @@ export function decodeAgentRunRequest(body: unknown, principalId: string): Decod
     const binding = assistant.connection;
     if (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0)) return fail("malformed-request", "助手连接身份非法");
     if (assistant.reasoningEffort !== undefined && !isAgentReasoningEffort(assistant.reasoningEffort)) return fail("malformed-request", "助手 Variant 非法");
-    request.assistant = assistant as import("../extension/assistant-text.js").AssistantTextSelection;
+    request.assistant = assistant as import("../extension/assistant/assistant-text.js").AssistantTextSelection;
   }
   if (canvasId !== undefined) request.canvasId = canvasId;
   if (modelKey !== undefined) request.modelKey = modelKey;

@@ -28,7 +28,7 @@ export const PENDING_SPLIT: ReadonlySet<string> = new Set<string>([
   "scripts/lib/extension-host.mjs",
   // 跨端契约（2）
   "web/contracts/src/canvas/render-scene/scene-builder.ts",
-  "web/contracts/src/extension/frontend-browser.ts",
+  "web/contracts/src/extension/host/frontend-browser.ts",
   // vendor 库（1）：不再因目录名 `vendor` 豁免门禁；worker.ts 是 worker 生命周期/调度装配，待按职责拆分。
   "web/vendor/pptask-worker-server/src/worker.ts",
   // 扩展协议实现（1）：RunningHub 协议已从 vendor 迁回本扩展（747 行），待按 App/API 两条链路拆分。

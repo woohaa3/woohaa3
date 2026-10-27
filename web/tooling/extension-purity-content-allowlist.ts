@@ -462,19 +462,19 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
   {
-    file: "web/contracts/src/extension/assistant-execution.ts",
+    file: "web/contracts/src/extension/assistant/assistant-execution.ts",
     literals: ["film-set"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
   {
-    file: "web/contracts/src/extension/conversation-codec.ts",
+    file: "web/contracts/src/extension/assistant/conversation-codec.ts",
     literals: ["film-set"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
   {
-    file: "web/contracts/src/extension/conversation.ts",
+    file: "web/contracts/src/extension/assistant/conversation.ts",
     literals: ["film-set"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"

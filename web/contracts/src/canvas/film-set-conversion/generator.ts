@@ -66,7 +66,7 @@ export type FilmSetConversionMediaInput = {
 /** 生成端口输入：冻结来源、解析后的媒体引用、实际模型身份与能力。 */
 export type FilmSetConversionGenerationInput = {
   /** Public adapter messages, persisted by the trusted host parent turn. */
-  emit?: (event: import("../../extension/conversation.js").AgentConversationAdapterEvent) => void;
+  emit?: (event: import("../../extension/assistant/conversation.js").AgentConversationAdapterEvent) => void;
   canvasId: string;
   requestId: string;
   frozenSource: FilmSetConversionFrozenSource;

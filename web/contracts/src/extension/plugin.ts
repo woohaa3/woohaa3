@@ -11,7 +11,7 @@
  * 合并进设置定义表，设置页据此生成表单并经设置接口写回（密钥写进本地密钥文件）；配置变化后
  * 宿主以新配置重启该插件。
  */
-import type { ApplicationBackendExtensionHealth } from "./runtime.js";
+import type { ApplicationBackendExtensionHealth } from "./host/runtime.js";
 import type { PluginIcon } from "../plugin-icon.js";
 import type { CanvasTaskModelType } from "../task/dto.js";
 import { parseSettingValue, type SettingDefinition, type SettingPrimitive } from "../settings/index.js";

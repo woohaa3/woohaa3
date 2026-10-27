@@ -3,7 +3,7 @@
  * （change: 2026-10-20-reserve-remote-generation-provider）。
  */
 import { describe, expect, it } from "vitest";
-import { isGenerationStableMediaResult } from "./generation";
+import { isGenerationStableMediaResult } from "../extension/services/host/generation.js";
 
 const KEY = "generation-outputs/" + "a".repeat(64) + ".png";
 const VIDEO_KEY = "generation-outputs/" + "b".repeat(64) + ".mp4";

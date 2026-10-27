@@ -50,7 +50,7 @@ export type FilmSetConversionProvenanceFields = {
 export type FilmSetConversionRecord = {
   /** Explicit save-only recovery, retaining the original validated candidate and Canvas command. */
   saveAttempt?: number;
-  execution?: import("../../extension/assistant-execution.js").AssistantExecutionRef;
+  execution?: import("../../extension/assistant/assistant-execution.js").AssistantExecutionRef;
   canvasId: string;
   requestId: string;
   sourceNodeId: string;

@@ -69,8 +69,8 @@ export type FilmSetConversionFrozenSource = {
  * `range` 为本次视频素材设置，不迁移到另一段视频。
  */
 export type FilmSetConversionSettings = {
-  connection?: import("../../extension/conversation.js").AgentConnectionBinding;
-  reasoningEffort?: import("../../extension/conversation.js").AgentReasoningEffort;
+  connection?: import("../../extension/assistant/conversation.js").AgentConnectionBinding;
+  reasoningEffort?: import("../../extension/assistant/conversation.js").AgentReasoningEffort;
   modelKey?: string;
   instruction?: string;
   range?: FilmSetConversionRange;
@@ -169,7 +169,7 @@ export type FilmSetConversionReceipt =
  * `completed` 只由**权威创建事务成功**产生，携带最终片场 nodeId 与 commandId；模型完成但
  * 尚未提交时保持 `running` + `validate-and-save` 阶段。
  */
-export type FilmSetConversionStatus = { execution?: import("../../extension/assistant-execution.js").AssistantExecutionRef } & (
+export type FilmSetConversionStatus = { execution?: import("../../extension/assistant/assistant-execution.js").AssistantExecutionRef } & (
   | { status: "running"; requestId: string; sourceNodeId: string; step: FilmSetConversionStep }
   | {
       status: "completed";
