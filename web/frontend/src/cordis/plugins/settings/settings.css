@@ -1406,3 +1406,52 @@
 	cursor: pointer;
 }
 .plugin-overview__copy:hover { color: var(--mc-text); background: var(--mc-panel); }
+
+/* 详情内容在正文区内居中，避免右侧多出一整块空白造成左右 padding 不对称。 */
+.settings-workbench__detail { width: 100%; margin-inline: auto; }
+
+/* 正文滚动条：细、无箭头、无轨道底色；仅在滚动期间显示，停止后淡出。 */
+.settings-workbench__body {
+	scrollbar-width: thin;
+	scrollbar-color: transparent transparent;
+	scrollbar-gutter: stable;
+}
+.settings-workbench__body.is-scrolling { scrollbar-color: color-mix(in srgb, var(--mc-text-muted) 72%, transparent) transparent; }
+.settings-workbench__body::-webkit-scrollbar { width: 6px; height: 6px; }
+.settings-workbench__body::-webkit-scrollbar-track,
+.settings-workbench__body::-webkit-scrollbar-corner { background: transparent; }
+.settings-workbench__body::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.settings-workbench__body::-webkit-scrollbar-thumb {
+	min-height: 36px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	background-clip: padding-box;
+}
+.settings-workbench__body.is-scrolling::-webkit-scrollbar-thumb {
+	background: color-mix(in srgb, var(--mc-text-muted) 72%, transparent);
+	background-clip: padding-box;
+}
+.settings-workbench__body.is-scrolling::-webkit-scrollbar-thumb:hover {
+	background: var(--mc-text);
+	background-clip: padding-box;
+}
+
+/* 各设置分区共用同一条内容列，避免切换分区时左右边距跳动。 */
+.settings-workbench__panel,
+.settings-plugin-page {
+	width: 100%;
+	max-width: 920px;
+	margin-inline: auto;
+}
+.settings-workbench__panel.is-wide { max-width: none; }
+
+/* 滚动条只保留正文这一条：滚动条槽两侧对称，避免右侧多出滚动条宽度造成视觉偏移。 */
+.settings-workbench__body { scrollbar-gutter: stable both-edges; }
+
+/* 模型与接入点列表不再单独滚动，统一由正文滚动，避免内外两条滚动条联动。 */
+.plugin-config__models,
+.ark-endpoints {
+	max-height: none;
+	overflow: visible;
+}

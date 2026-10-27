@@ -8,7 +8,7 @@
  * 关闭只经 `onRequestClose`（Host 的 guard 通路）：本组件不监听 Escape/遮罩，也不直接调用
  * Dialog Service，保证 dirty 确认、busy 拒绝与 forced dispose 共用一条路径。
  */
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog } from "../../../services/dialogs/Dialog.js";
 
 export const SETTINGS_DIALOG_ID = "settings";
@@ -30,6 +30,21 @@ export function SettingsDialogChrome({
   /** 当前分区（仅供样式/测试定位，不参与状态）。 */
   section?: string;
 }) {
+  const [scrolling, setScrolling] = useState(false);
+  const scrollEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (scrollEnd.current) clearTimeout(scrollEnd.current);
+    };
+  }, []);
+
+  const handleScroll = () => {
+    setScrolling(true);
+    if (scrollEnd.current) clearTimeout(scrollEnd.current);
+    scrollEnd.current = setTimeout(() => setScrolling(false), 700);
+  };
+
   return (
     <Dialog.Content
       variant="standard"
@@ -55,7 +70,12 @@ export function SettingsDialogChrome({
           </div>
         </aside>
         <div className="settings-main">
-          <div className="settings-workbench__body" data-testid="settings-workspace" {...(section ? { "data-section": section } : {})}>
+          <div
+            className={scrolling ? "settings-workbench__body is-scrolling" : "settings-workbench__body"}
+            data-testid="settings-workspace"
+            onScroll={handleScroll}
+            {...(section ? { "data-section": section } : {})}
+          >
             {children}
           </div>
         </div>
