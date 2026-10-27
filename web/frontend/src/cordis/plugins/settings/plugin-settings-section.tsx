@@ -331,6 +331,7 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
         >
           <MarketplaceInstallPanel
             controller={managed.marketplace}
+            jobs={managed.controller}
             snapshot={state.status === "ready" ? state.snapshot : null}
             canManage={store.canManage()}
             defaultOpen
