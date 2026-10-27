@@ -128,10 +128,23 @@ export type HostDiagnosticsService = {
   snapshot(input?: { since?: number; limit?: number }): ApplicationBackendDiagnosticEntry[];
 };
 
+/**
+ * 宿主插件树上的全部服务。
+ *
+ * 两种条目的区别要看清：
+ * - **扩展可见**（`log` / `generation` / `storage` / `telemetry` / `marketplace`）：形状由
+ *   `@woohaa3/contracts` 的 `extension/service.js` 声明，扩展通过 `apply(ctx)` 的
+ *   `HostExtensionContext` 拿到同一份类型。这里可以再交叉宿主自己的实现扩展
+ *   （如 `GenerationService` = 契约服务 + `policy`），但契约那部分只有一个定义处。
+ * - **宿主内部**（`gateway` / `access` / `task` / `canvas` / …）：只在本机宿主自己的插件之间用，
+ *   不进契约、不给扩展。
+ */
 export type HostServices = {
   log: HostLogService;
   diagnostics: HostDiagnosticsService;
+  /** 宿主内部：基础层的 HTTP 分派。扩展改用 `ctx.webServer` 注册路由。 */
   gateway: GatewayService;
+  /** 宿主内部：认证与授权执行边界。 */
   access: AccessService;
   config: SettingsService;
   /** 受控重启控制器（change: 2026-10-21-harden-extension-fault-isolation，D6）；进程入口订阅后执行排空与 exit(75)。 */

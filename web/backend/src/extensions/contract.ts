@@ -6,10 +6,7 @@
  * 内通过 `ctx` 贡献能力、请求处理、后台资源与**生成 Provider**。宿主保证依赖解析、
  * owner-scoped disposer、反序回滚与停用 draining。
  */
-import type {
-  ApplicationBackendExtensionDefinition,
-  HostGenerationService
-} from "@woohaa3/contracts";
+import type { HostGenerationService } from "@woohaa3/contracts";
 
 export type {
   ApplicationBackendActivation,
@@ -32,10 +29,4 @@ export type {
 
 /** 生成扩展点 `ctx.generation`：插件注册后可被生成模块（Task 领域）解析。 */
 export type GenerationExtension = HostGenerationService;
-
-/** 统一后端宿主的插件装载选项。 */
-export type BackendExtensionHostOptions = {
-  definitions: readonly ApplicationBackendExtensionDefinition[];
-  logger?: (event: Record<string, unknown>) => void;
-};
 

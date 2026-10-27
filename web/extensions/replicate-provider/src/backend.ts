@@ -8,7 +8,7 @@ import {
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
-  type HostExtensionPlugin,
+  type ExtensionPlugin,
 } from "@woohaa3/contracts";
 import { discoverReplicateModels } from "./discovery.js";
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
@@ -112,7 +112,7 @@ export function createReplicateRegistration(input: ReplicateRegistrationInput): 
   };
 }
 
-export function createReplicateProviderPlugin(deps: ReplicatePluginDependencies = {}): HostExtensionPlugin<typeof REPLICATE_CONFIG.fields> {
+export function createReplicateProviderPlugin(deps: ReplicatePluginDependencies = {}): ExtensionPlugin<typeof REPLICATE_CONFIG.fields> {
   return {
     name: REPLICATE_PLUGIN_ID,
     label: "Replicate",

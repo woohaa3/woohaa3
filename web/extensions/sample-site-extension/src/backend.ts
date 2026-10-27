@@ -10,7 +10,7 @@ import type {
   ApplicationBackendWorkHandle
 } from "@woohaa3/contracts";
 import { APPLICATION_EXTENSION_LOAD_ACTION } from "@woohaa3/contracts";
-import { SAMPLE_SITE_EXTENSION_ID, SAMPLE_SITE_EXTENSION_METADATA } from "./shared.js";
+import { SAMPLE_SITE_EXTENSION_ID } from "./shared.js";
 
 export type SampleExtensionProbe = {
   started: boolean;
@@ -23,7 +23,6 @@ export function createSampleSiteExtensionDefinition(probe: SampleExtensionProbe)
   return {
     extensionId: SAMPLE_SITE_EXTENSION_ID,
     requiredDependencies: ["sample.fixture.runtime"],
-    capabilities: SAMPLE_SITE_EXTENSION_METADATA.capabilities,
     activate: (host) => {
       // runtime 由依赖的 owner 提供；插件只注册自己的能力，避免覆盖依赖。
       host.registerCapability({ id: "sample.fixture.action", value: { kind: "sample-action" } });

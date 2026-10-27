@@ -3,14 +3,14 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
-import { defineConfigSchema, type HostExtensionPlugin, type ServiceConnectionDirectory } from "@woohaa3/contracts";
+import { defineConfigSchema, type ExtensionPlugin, type ServiceConnectionDirectory } from "@woohaa3/contracts";
 import { createBackendService } from "../src/composition.js";
 
 const Config = defineConfigSchema({
   apiKey: { kind: "string", secret: true, label: "API Key", description: "Key", reload: "hot" },
   baseUrl: { kind: "url", protocols: ["https:"], label: "地址", description: "地址", reload: "hot", default: "https://provider.example/v1" },
 });
-const provider: HostExtensionPlugin<typeof Config.fields> = {
+const provider: ExtensionPlugin<typeof Config.fields> = {
   name: "settings-test-provider", label: "测试模型提供商", configPrefix: "providers.settings-test", Config, inject: ["generation"],
   apply(ctx, config) {
     ctx.effect(() => ctx.generation.register({

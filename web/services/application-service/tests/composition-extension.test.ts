@@ -27,7 +27,6 @@ afterEach(() => {
 function testBackendExtension(): ApplicationBackendExtensionDefinition {
   return {
     extensionId: "test-fixture-extension",
-    capabilities: [{ id: "test-fixture-extension.run", kind: "capability", description: "装配路径 fixture" }],
     activate() {},
   };
 }

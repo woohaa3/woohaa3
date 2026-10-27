@@ -11,7 +11,6 @@
  */
 import type {
   ApplicationExtensionAuthLevel,
-  ApplicationExtensionCapabilitySummary,
   ApplicationExtensionHostIdentity
 } from "./manifest.js";
 import type { ApplicationExtensionSecretStore } from "./secrets.js";
@@ -563,10 +562,6 @@ export type ApplicationBackendExtensionDefinition = {
   mcpTools?: readonly ApplicationExtensionMcpTool[];
   /** 必需依赖的 capability/service id；缺失时不得产生部分可用贡献。 */
   requiredDependencies?: readonly string[];
-  /** 可选依赖：缺失不阻塞 activation。 */
-  optionalDependencies?: readonly string[];
-  /** 声明的贡献摘要（诊断/状态展示用）。 */
-  capabilities?: readonly ApplicationExtensionCapabilitySummary[];
   /**
    * 当前健康状态：`undefined` 表示健康（状态投影为 `active`）。
    *

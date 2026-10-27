@@ -15,6 +15,18 @@
     "./canvas-yjs": {
       "types": "./src/canvas/yjs/index.ts",
       "import": "./dist/canvas-yjs/index.js"
+    },
+    "./extension": {
+      "types": "./src/extension/index.ts",
+      "import": "./dist/extension/index.js"
+    },
+    "./extension/plugin": {
+      "types": "./src/extension/plugin.ts",
+      "import": "./dist/extension/plugin.js"
+    },
+    "./extension/service": {
+      "types": "./src/extension/service.ts",
+      "import": "./dist/extension/service.js"
     }
   },
   "files": [
@@ -22,7 +34,7 @@
     "src"
   ],
   "scripts": {
-    "build": "node ../scripts/build-package.mjs && node ../scripts/build-package.mjs --entry src/canvas/yjs/index.ts --outdir dist/canvas-yjs --platform neutral",
+    "build": "node ../scripts/build-package.mjs && node ../scripts/build-package.mjs --entry src/canvas/yjs/index.ts --outdir dist/canvas-yjs --platform neutral && node ../scripts/build-package.mjs --entry src/extension/index.ts --outdir dist/extension && node ../scripts/build-package.mjs --entry src/extension/plugin.ts --outdir dist/extension --entry-name plugin && node ../scripts/build-package.mjs --entry src/extension/service.ts --outdir dist/extension --entry-name service",
     "watch": "node ../scripts/build-package.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

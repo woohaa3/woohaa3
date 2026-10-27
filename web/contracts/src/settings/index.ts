@@ -507,7 +507,7 @@ export type SettingPluginView = {
   /** Provider 类插件：配置段在 `providers.<providerId>` 下。 */
   provider: boolean;
   /**
-   * 插件声明的模型目录刷新入口（`HostExtensionPlugin.modelRefresh`）；缺省表示该插件没有这一节。
+   * 插件声明的模型目录刷新入口（`ExtensionPlugin.modelRefresh`）；缺省表示该插件没有这一节。
    * 宿主只透传，不在管理面硬编码具体 Provider。
    */
   modelRefresh?: { path: string; hint: string };

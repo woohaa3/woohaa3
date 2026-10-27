@@ -11,7 +11,7 @@
  * 每次生成把子进程 pid 写进 providerMetadata，端到端用它证明执行发生在子进程。
  */
 import { createPptaskProvider } from "@sdppp/pptask";
-import { defineConfigSchema, type GenerationProvider, type HostExtensionPlugin } from "@woohaa3/contracts";
+import { defineConfigSchema, type GenerationProvider, type ExtensionPlugin } from "@woohaa3/contracts";
 import {
   FIXTURE_ECHO_IMAGE_MODEL,
   FIXTURE_ECHO_PLUGIN_ID,
@@ -86,7 +86,7 @@ export function createFixtureEchoProvider(config: { greeting: string; delayMs: n
   });
 }
 
-export function createFixtureEchoProviderPlugin(): HostExtensionPlugin<typeof FIXTURE_ECHO_CONFIG.fields> {
+export function createFixtureEchoProviderPlugin(): ExtensionPlugin<typeof FIXTURE_ECHO_CONFIG.fields> {
   return {
     name: FIXTURE_ECHO_PLUGIN_ID,
     label: "市场测试 Provider",

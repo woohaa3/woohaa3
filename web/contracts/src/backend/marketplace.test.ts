@@ -2,15 +2,14 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   EXTENSION_INSTALL_PHASES,
-  HOST_PLUGIN_KINDS,
   MARKETPLACE_FAILURE_CODES,
   MARKETPLACE_LOCAL_FILE_SOURCE_ID,
   isMarketplaceFailureCode,
-  type HostExtensionContext,
   type HostMarketplaceService,
   type MarketplaceSource,
   type ReleaseRef
 } from "./index";
+import type { HostExtensionContext } from "../extension/service.js";
 import type { InstalledExtensionView } from "../settings/index";
 
 describe("marketplace 契约", () => {
@@ -27,10 +26,6 @@ describe("marketplace 契约", () => {
     expect(isMarketplaceFailureCode("MARKETPLACE_DIGEST_MISMATCH")).toBe(true);
     expect(isMarketplaceFailureCode("nope")).toBe(false);
     expect(isMarketplaceFailureCode(1)).toBe(false);
-  });
-
-  it("hostPlugin.kind 包含 marketplace-source", () => {
-    expect(HOST_PLUGIN_KINDS).toEqual(["provider", "storage", "marketplace-source"]);
   });
 
   it("类型形状：ctx.marketplace 与来源", () => {

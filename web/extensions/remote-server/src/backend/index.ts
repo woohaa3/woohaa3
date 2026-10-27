@@ -22,7 +22,7 @@ import type {
   CanvasUpstreamLink,
   CanvasUpstreamProvider
 } from "@woohaa3/contracts";
-import { canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type HostExtensionPlugin } from "@woohaa3/contracts";
+import { canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type ExtensionPlugin } from "@woohaa3/contracts";
 import {
   CANVAS_SERVICE,
   IDENTITY_SERVICE,
@@ -558,7 +558,7 @@ export const REMOTE_SERVER_CONFIG_PREFIX = `extensions.${REMOTE_SERVER_EXTENSION
  *
  * `options` 仍保留：它是**测试注入点**（fake fetch、内存会话存储等），不是配置来源。
  */
-export function createRemoteServerPlugin(options: RemoteServerExtensionOptions = {}): HostExtensionPlugin<typeof REMOTE_SERVER_CONFIG.fields> {
+export function createRemoteServerPlugin(options: RemoteServerExtensionOptions = {}): ExtensionPlugin<typeof REMOTE_SERVER_CONFIG.fields> {
   return {
     name: REMOTE_SERVER_EXTENSION_ID,
     label: "服务端接入",

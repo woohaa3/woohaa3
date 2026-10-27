@@ -10,7 +10,7 @@ import {
   type GenerationModelDescription,
   type GenerationProvider,
   type HostConfigValues,
-  type HostExtensionPlugin
+  type ExtensionPlugin
 } from "@woohaa3/contracts";
 import { arkApiRoot, createArkProvider, describeArkModel } from "./provider/index.js";
 import { ARK_DEFAULT_BASE_URL, ARK_PLUGIN_ID, ARK_PROVIDER_ID, arkEndpointFields, arkModelDefinitions, endpointsFromConfig, type ArkEndpointMap } from "./shared.js";
@@ -156,7 +156,7 @@ export function createArkRegistration(input: ArkRegistrationInput): GenerationPr
   };
 }
 
-export function createArkProviderPlugin(deps: ArkPluginDependencies = {}): HostExtensionPlugin<typeof ARK_CONFIG.fields> {
+export function createArkProviderPlugin(deps: ArkPluginDependencies = {}): ExtensionPlugin<typeof ARK_CONFIG.fields> {
   return {
     name: ARK_PLUGIN_ID,
     label: "Ark（火山方舟）",

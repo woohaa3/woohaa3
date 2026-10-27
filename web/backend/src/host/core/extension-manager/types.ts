@@ -6,7 +6,7 @@
  * 后端打包入口不能静态 import 仓库根脚本，因此运行期按路径加载（见 `toolkit.ts`），测试注入替身。
  * 所有失败都以带 `code` 的错误抛出，`code` 取 `MARKETPLACE_FAILURE_CODES`。
  */
-import type { AnyHostExtensionPlugin, ExtensionEngines, ExtensionTrust } from "@woohaa3/contracts";
+import type { AnyExtensionPlugin, ExtensionEngines, ExtensionTrust } from "@woohaa3/contracts";
 
 export type TrustedKey = { keyId: string; publicKey: string };
 
@@ -94,5 +94,5 @@ export type ExtensionPackageToolkit = {
    * 运行期从受管版本目录加载真实扩展层插件（热切换）：读声明、校验信任边界与模块存在性、
    * `import()` 该版本目录的入口并调用 `hostPlugin` 工厂。不同版本目录是不同 URL，不命中 ESM 缓存。
    */
-  loadRuntimePlugin?(input: { dir: string; extensionId: string; version: string }): Promise<{ plugin: AnyHostExtensionPlugin; descriptor: unknown }>;
+  loadRuntimePlugin?(input: { dir: string; extensionId: string; version: string }): Promise<{ plugin: AnyExtensionPlugin; descriptor: unknown }>;
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SETTING_DEFINITIONS, decodeSettingsWrite, describeSettings, diffSettings, legacyEnvInUse, providerIdFromConfigPrefix, resolveSettings } from "./index.js";
-import { defineConfigSchema } from "../backend/host.js";
+import { defineConfigSchema } from "../extension/plugin.js";
 
 /**
  * 解析器测试用的定义表：url + secret + 旧环境变量语义。

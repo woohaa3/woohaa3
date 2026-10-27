@@ -86,19 +86,6 @@ export function createLocalAgentExtension(
 ): ApplicationBackendExtensionDefinition {
   return {
     extensionId: LOCAL_AGENT_PLUGIN_ID,
-    capabilities: [
-      {
-        id: agentConnectionProviderCapabilityId(LOCAL_AGENT_PLUGIN_ID),
-        kind: "capability",
-        description: "本机 Agent 来源连接发现",
-      },
-      ...LOCAL_AGENT_ADAPTERS.map(adapter => ({ id: filmSetConversionCapabilityId(adapter.adapterId), kind: "capability" as const, description: `${adapter.label} film-set candidate generation` })),
-      ...LOCAL_AGENT_ADAPTERS.map((adapter) => ({
-        id: agentConversationAdapterCapabilityId(adapter.adapterId),
-        kind: "capability" as const,
-        description: `${adapter.label} 会话适配器`,
-      })),
-    ],
     activate: (host) => {
       const env = options.env ?? (process.env as Record<string, string | undefined>);
       const deployment: LocalAgentDeployment = {

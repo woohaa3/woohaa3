@@ -34,3 +34,6 @@ export * from "./session.js";
 export * from "./assistant-execution.js";
 export * from "./service-connection.js";
 export * from "./assistant-text.js";
+// 扩展插件形状（ExtensionPlugin / defineConfigSchema）与扩展可见的宿主服务面。
+export * from "./plugin.js";
+export * from "./service.js";
