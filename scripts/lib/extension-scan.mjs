@@ -26,6 +26,53 @@ export const EXTENSION_DIRS_ENV = "WOOHAA3_EXTENSION_DIRS";
  * `{ "path": "...", "writable": true }`。
  */
 export const EXTENSION_WRITABLE_DIRS_ENV = "WOOHAA3_EXTENSION_WRITABLE_DIRS";
+
+/**
+ * 开发者模式登记目录（change: 2026-10-27-add-extension-dev-reload，D3）。
+ *
+ * 逗号分隔的本机扩展目录。与配置根不同：**开发构建专属**、只告警不抛错、优先级最高
+ * （dev > managed > builtin），且不写入 installations.json、不参与签名信任。
+ */
+export const EXTENSION_DEV_DIRS_ENV = "WOOHAA3_EXTENSION_DEV_DIRS";
+
+/**
+ * 开发者模式是否可用（change: 2026-10-27-add-extension-dev-reload，D10）。
+ *
+ * 只认**显式开启**，不按 `NODE_ENV` 推断：桌面宿主无论开发还是发布都设 `NODE_ENV=production`
+ * （见 `desktop-host-data.mjs`），用 NODE_ENV 判断会把 `pnpm dev:desktop` 一起误杀。
+ * 因此发布形态天然没有该变量 → 没有入口；开发编排显式注入 `WOOHAA3_EXTENSION_DEV_MODE=1`。
+ */
+export const EXTENSION_DEV_MODE_ENV = "WOOHAA3_EXTENSION_DEV_MODE";
+
+export function devSourceAllowed(env = process.env) {
+  const flag = String(env?.[EXTENSION_DEV_MODE_ENV] ?? "").trim().toLowerCase();
+  return flag === "1" || flag === "true";
+}
+
+/**
+ * 解析开发者登记目录。生产构建立即返回空集（视为「没有这个入口」），
+ * 目录不存在只记告警，不让启动失败。
+ */
+export function resolveDevSourceDirs({ repoRoot, env = process.env, warnings = [] } = {}) {
+  if (!devSourceAllowed(env)) return [];
+  const raw = env?.[EXTENSION_DEV_DIRS_ENV];
+  if (typeof raw !== "string" || raw.trim().length === 0) return [];
+  const dirs = [];
+  for (const entry of raw.split(",").map((value) => value.trim()).filter(Boolean)) {
+    const absolute = path.resolve(repoRoot, entry);
+    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isDirectory()) {
+      warnings.push({
+        code: "EXTENSION_DEV_DIR_MISSING",
+        extensionId: null,
+        directory: absolute,
+        message: `开发者登记目录不存在或不是目录：${entry} → ${absolute}`
+      });
+      continue;
+    }
+    if (!dirs.includes(absolute)) dirs.push(absolute);
+  }
+  return dirs;
+}
 export const EXTENSION_CONFIG_FILE = "extensions.config.json";
 export const EXTENSION_CONFIG_SCHEMA_VERSION = 1;
 export const EXTENSION_PACKAGE_PREFIX = "@woohaa3/extension-";
@@ -261,6 +308,7 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
         directory: entry.name,
         dir,
         root,
+        origin: "builtin",
         rootWritable: isWritableRoot(root),
         packageName: pkg.name,
         packageVersion,
@@ -333,8 +381,120 @@ export function scanExtensions({ repoRoot, env = process.env, configFile = EXTEN
     extensions.push(record);
   }
 
+  // 开发者模式（change: 2026-10-27-add-extension-dev-reload，D3/D4）：优先级高于受管与内置。
+  // 只告警、不抛错——登记目录由开发者自己维护，写坏了不应让整个宿主起不来。
+  const devDirs = resolveDevSourceDirs({ repoRoot, env, warnings });
+  for (const record of scanDevSources(devDirs, repoRoot, warnings)) {
+    const previous = byId.get(record.extensionId);
+    if (previous) {
+      record.shadowedOrigin = originOf(previous);
+      record.shadowedDirectory = previous.dir;
+      const index = extensions.indexOf(previous);
+      if (index >= 0) extensions[index] = record;
+      byId.set(record.extensionId, record);
+      warnings.push({
+        code: "EXTENSION_DEV_OVERRIDES_INSTALLED",
+        extensionId: record.extensionId,
+        directory: record.dir,
+        message: `开发者模式覆盖了 ${record.shadowedOrigin} 版本 ${record.extensionId}（${path.relative(repoRoot, previous.dir)}）；退出开发者模式后回落`
+      });
+      continue;
+    }
+    byId.set(record.extensionId, record);
+    extensions.push(record);
+  }
+
   extensions.sort((a, b) => (a.extensionId === b.extensionId ? (a.dir < b.dir ? -1 : 1) : a.extensionId < b.extensionId ? -1 : 1));
-  return { ...resolved, extensions, builtinExtensions, disabled, skipped, warnings };
+  return { ...resolved, devDirs, extensions, builtinExtensions, disabled, skipped, warnings };
+}
+
+/** 在场形态（D4）：dev > managed > builtin。可写根沿用内置口径，不单列。 */
+export function originOf(record) {
+  if (record?.dev === true) return "dev";
+  if (record?.managed === true) return "managed";
+  return "builtin";
+}
+
+/**
+ * 扫描开发者登记目录（每个目录可以是单个扩展，也可以是一组扩展的父目录）。
+ *
+ * 与配置根的区别：不解析 `.name` 停用前缀（开发者不会用改名来停用），
+ * 但要求 `package.json` 与 `extension.json` 至少有一个能给出 identity；冲突只告警跳过。
+ */
+export function scanDevSources(devDirs, repoRoot = devDirs[0] ?? process.cwd(), warnings = []) {
+  const records = [];
+  const seen = new Set();
+  for (const root of devDirs) {
+    const candidates = [];
+    if (fs.existsSync(path.join(root, "package.json")) || fs.existsSync(path.join(root, EXTENSION_DESCRIPTOR_NAME))) {
+      candidates.push(root);
+    } else {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+        if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+        candidates.push(path.join(root, entry.name));
+      }
+    }
+    for (const dir of candidates) {
+      const record = readDevSource(dir, root, warnings);
+      if (!record) continue;
+      if (seen.has(record.extensionId)) {
+        warnings.push({
+          code: "EXTENSION_DEV_DUPLICATE",
+          extensionId: record.extensionId,
+          directory: dir,
+          message: `开发者模式重复登记了同一个扩展：${record.extensionId}（${path.relative(repoRoot, dir)}）`
+        });
+        continue;
+      }
+      seen.add(record.extensionId);
+      records.push(record);
+    }
+  }
+  return records;
+}
+
+/** 读一个开发者目录；不合格只告警并返回 null。 */
+function readDevSource(dir, root, warnings) {
+  let pkg = null;
+  try {
+    pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+  } catch {
+    pkg = null;
+  }
+  let descriptor = null;
+  let descriptorPath = null;
+  try {
+    ({ descriptor, descriptorPath } = readExtensionDescriptor(dir));
+  } catch (error) {
+    warnings.push({ code: "EXTENSION_DEV_REJECTED", extensionId: null, directory: dir, message: `开发者目录声明无法读取：${error.message}` });
+    return null;
+  }
+  const declaredId = typeof descriptor?.extensionId === "string" && descriptor.extensionId.trim() ? descriptor.extensionId.trim() : null;
+  const packageId = typeof pkg?.name === "string" && pkg.name.startsWith(EXTENSION_PACKAGE_PREFIX) ? pkg.name.slice(EXTENSION_PACKAGE_PREFIX.length) : null;
+  const extensionId = declaredId ?? packageId;
+  if (!extensionId) {
+    warnings.push({ code: "EXTENSION_DEV_REJECTED", extensionId: null, directory: dir, message: `开发者目录既无 extension.json 也无合法包名，已跳过：${dir}` });
+    return null;
+  }
+  const packageVersion = typeof pkg?.version === "string" && pkg.version.trim() ? pkg.version.trim() : null;
+  return {
+    extensionId,
+    declaredId,
+    directory: path.basename(dir),
+    dir,
+    root,
+    dev: true,
+    origin: "dev",
+    rootWritable: false,
+    packageName: typeof pkg?.name === "string" ? pkg.name : null,
+    packageVersion,
+    distributionVersion:
+      typeof descriptor?.version === "string" && descriptor.version.trim() ? descriptor.version.trim() : packageVersion,
+    hasBackend: Boolean(descriptor?.backend || descriptor?.hostPlugin || descriptor?.metadata || (descriptor?.publicRoutes?.length ?? 0) > 0),
+    hotSwappable: Boolean(descriptor?.hostPlugin),
+    descriptorPath,
+    hasBrowserEntry: hasBrowserEntry(dir)
+  };
 }
 
 /**
@@ -394,6 +554,7 @@ export function scanManagedRoot(managedRoot, warnings = []) {
       dir,
       root: managedRoot,
       rootWritable: false,
+      origin: "managed",
       managed: true,
       managedVersion: entry.current,
       managedSourceId: entry.sourceId,

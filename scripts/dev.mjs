@@ -34,6 +34,7 @@ const usage = `启动 Vite 和统一后端：
   --skip-build            使用已有模块/扩展产物；仍按所选 Bevy 模式检查 Rust 源码新鲜度
   --allow-stale           配合 --skip-build：即使产物比源码旧也继续启动（默认直接报错退出）
   --free-port             启动前结束占用前后端端口的残留进程（SIGTERM，超时后 SIGKILL）
+  --dev-source <dir>      登记开发者扩展目录（可重复）；启用开发者模式，产物变化即热重载
   --watch                 显式开启宿主源码 watch（默认开启）
   --no-watch              关闭宿主源码 watch
   --help                 显示帮助
@@ -63,6 +64,10 @@ function parseOptions() {
       options.freePort = true;
     } else if ((name === "--watch" || name === "--no-watch") && inline === undefined) {
       options.watch = name === "--watch";
+    } else if (name === "--dev-source") {
+      const value = inline ?? args[++i];
+      if (!value || value.trim().length === 0) throw new Error("--dev-source 需要目录");
+      (options.devSources ??= []).push(value.trim());
     } else if (name === "--frontend-port" || name === "--backend-port") {
       const value = inline ?? args[++i];
       if (!value || !/^\d+$/.test(value)) throw new Error(`${name} 需要整数端口`);
@@ -453,10 +458,22 @@ async function main() {
   const backendWatchArgs = process.platform === "win32"
     ? ["--watch", `--watch-path=${backendEntry}`, "--watch-preserve-output", backendEntry]
     : ["--watch", "--watch-preserve-output", backendEntry];
+  // 开发者模式（change: 2026-10-27-add-extension-dev-reload，6.3）：显式登记目录才注入开关；
+  // 发布形态没有这个参数，因此没有入口。
+  const devSourceEnv = (options.devSources?.length ?? 0) > 0
+    ? {
+        WOOHAA3_EXTENSION_DEV_MODE: "1",
+        WOOHAA3_EXTENSION_DEV_DIRS: options.devSources.map((dir) => path.resolve(root, dir)).join(",")
+      }
+    : {};
+  if (Object.keys(devSourceEnv).length > 0) {
+    console.log(`[dev] 开发者模式：${options.devSources.length} 个登记目录，产物变化将触发热重载`);
+  }
   const startBackend = () => {
     const child = start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
       env: {
         ...serviceEnv,
+        ...devSourceEnv,
         WOOHAA3_BASE_PATH: basePath,
         PORT: String(backendPort),
         BACKEND_PORT: String(backendPort),

@@ -79,6 +79,34 @@ export function extendReleaseRuntime(
   return { runtime: runtimeFromEntries(runtime.releaseId, [...current, ...additions], loader), delta };
 }
 
+/**
+ * 把目录中**某个条目**切到新版本（change: 2026-10-27-add-extension-dev-reload，D1/D5）。
+ *
+ * 与 `extendReleaseRuntime` 的区别：只替换一个 id，其余条目与已固定 release 不变。
+ * 这是实例级重装所需的「按 id 换 artifact」原语——它不改变「已开页面固定旧 release」的既有语义，
+ * 因为调用方只有开发者模式的热重载，而且是显式针对单个扩展的。
+ *
+ * `nextEntry` 为 null 表示该扩展已不在新目录里：条目被移除，调用方应按升级失败或卸载处理。
+ */
+export function replaceReleaseEntry(
+  runtime: ExtensionReleaseRuntime,
+  extensionId: string,
+  nextEntry: ExtensionBrowserReleaseEntry | null,
+  loader: ExtensionArtifactLoader
+): { runtime: ExtensionReleaseRuntime; changed: boolean } {
+  const index = runtime.entries.findIndex((entry) => entry.metadata.extensionId === extensionId);
+  if (index < 0) return { runtime, changed: false };
+  const current = runtime.entries[index]!;
+  if (!nextEntry) {
+    const remaining = runtime.entries.filter((entry) => entry.metadata.extensionId !== extensionId);
+    return { runtime: runtimeFromEntries(runtime.releaseId, remaining.map((entry) => entry.releaseEntry), loader), changed: true };
+  }
+  if (current.artifactId === nextEntry.artifactId) return { runtime, changed: false };
+  const releaseEntries = runtime.entries.map((entry) => entry.releaseEntry);
+  releaseEntries[index] = nextEntry;
+  return { runtime: runtimeFromEntries(runtime.releaseId, releaseEntries, loader), changed: true };
+}
+
 function runtimeFromEntries(
   releaseId: string | null,
   releaseEntries: readonly ExtensionBrowserReleaseEntry[],

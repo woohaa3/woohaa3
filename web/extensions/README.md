@@ -165,6 +165,25 @@ remote-server 的「同步远端」：只在已连接且条目为「仅本机」
 `artifactId` 变化，其余 artifact 与宿主全部 JS/CSS hash 不变，`index.html` 的发布 link 指向新
 release。旧 release 与旧 artifact 保留在发布目录，供已打开页面继续加载（回滚窗口）。
 
+## 本地开发与热重载（开发者模式）
+
+改扩展代码后不必重新打包、刷新页面或重启宿主：宿主认一个本机目录作为 `dev-source`，**构建留在你这边**，宿主只监听产物并触发一次重装。
+
+```bash
+# 终端 1：作者侧增量构建（产物写到 browser-dist/ 与 backend-dist/）
+pnpm --filter @woohaa3/extension-<id> run build:browser -- --watch
+node web/scripts/build-extension-backend.mjs --cwd web/extensions/<id> --watch
+
+# 终端 2：宿主登记该目录；之后每次构建产物变化都会自动热重载
+pnpm dev --dev-source web/extensions/<id>
+```
+
+- `--dev-source` 可重复；也可以直接设 `WOOHAA3_EXTENSION_DEV_MODE=1` 与 `WOOHAA3_EXTENSION_DEV_DIRS`。
+- 生效范围：**只换这一个扩展的实例**。页面、Canvas scope、其它扩展与画布会话都不动。
+- 已知代价：该扩展自己持有的模块级状态会重置（store 单例、未持久化的草稿会话）。
+- 边界：不签名、不进 `installations.json`、不参与市场信任；同 id 时开发者目录优先于受管与内置版本，移除即回落。
+- 发布形态没有这个入口：它只在本机开发时由你显式开启。
+
 ## 打包与分发（`.wxt`）
 
 change: 2026-10-21-add-extension-marketplace-point。仓库内的扩展（内置根）照旧随发布装配；要**单独分发**一个扩展，打成 `.wxt` 包，由本机宿主的 Extension Manager 安装到**受管根**（`WOOHAA3_EXTENSION_MANAGED_DIR`，开发缺省 `.woohaa3/extensions/`，生产 `shared/extensions-managed`）。

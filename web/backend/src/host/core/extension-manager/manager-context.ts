@@ -133,7 +133,8 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
             ? current.layout.versionDir(extensionId, current.read().extensions[extensionId]!.previous!)
             : null;
         try {
-          await runtime.swap(extensionId, directory, path.basename(directory), previous);
+          // `previousVersion` 只在「同目录不同模块」的开发者模式下与目录名不同；受管版本取目录 basename 即可。
+          await runtime.swap(extensionId, directory, path.basename(directory), previous, previous ? path.basename(previous) : null);
           log({ event: "extension-swapped", extensionId, directory });
         } catch (error) {
           const cause = (error as { code?: unknown })?.code;
