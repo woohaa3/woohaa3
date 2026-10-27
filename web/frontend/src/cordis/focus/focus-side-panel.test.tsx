@@ -15,7 +15,8 @@ import type { Context } from "@deepseek-ai/cordis";
 import { RuntimeProvider } from "../react.js";
 import { startFrontendRuntime, type FrontendRuntime } from "../kernel.js";
 import { CanvasPanelHost, CanvasFocusNodeHistoryHost, CanvasFocusSidePanelHost } from "../host.js";
-import { FocusWorkspace } from "./workspace.js";
+import { FocusWorkspace, useFocusLayout } from "./workspace.js";
+import type { FocusLayoutConfig } from "./layout.js";
 import type { CanvasPanelDefinition, CanvasPanelRoute, CanvasPresentationSnapshot } from "../navigation/contracts.js";
 import type { CanvasRuntimeService } from "../contract/canvas-runtime.js";
 
@@ -165,7 +166,7 @@ describe("FocusWorkspace 聚焦侧栏占位（与检查器互斥）", () => {
     return { rects, service: service as unknown as CanvasRuntimeService };
   }
 
-  async function mountWorkspace(options: { sidePanel?: boolean; panel: CanvasPanelRoute | null }) {
+  async function mountWorkspace(options: { sidePanel?: boolean; panel: CanvasPanelRoute | null; layout?: FocusLayoutConfig }) {
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     const stub = stubRuntime();
     const surface = document.createElement("div");
@@ -175,9 +176,14 @@ describe("FocusWorkspace 聚焦侧栏占位（与检查器互斥）", () => {
       panel: options.panel,
       menu: null
     };
+    function Child({ layout }: { layout?: FocusLayoutConfig }) {
+      // 缺省空配置与公共默认布局一致；显式配置用于自绘 chrome 用例。
+      useFocusLayout(layout ?? {});
+      return <div data-testid="workspace">workspace</div>;
+    }
     await mount(
       <FocusWorkspace presentation={presentation} runtime={stub.service} surfaceRef={{ current: surface }} sidePanel={options.sidePanel}>
-        <div data-testid="workspace">workspace</div>
+        <Child {...(options.layout ? { layout: options.layout } : {})} />
       </FocusWorkspace>,
       navigationStub({})
     );
@@ -199,5 +205,22 @@ describe("FocusWorkspace 聚焦侧栏占位（与检查器互斥）", () => {
   it("无侧栏 panel 时不记为 detail", async () => {
     await mountWorkspace({ sidePanel: false, panel: null });
     expect(document.querySelector(".app")!.getAttribute("data-focus-panel")).toBe("closed");
+  });
+
+  it("自绘 chrome 的工作区把 header/footer 归零，并让历史 drawer 收缩内容宽度", async () => {
+    const stub = await mountWorkspace({
+      sidePanel: false,
+      panel: HISTORY_ROUTE,
+      layout: { chromeOwner: "workspace" }
+    });
+    const app = document.querySelector(".app")!;
+    const style = app.getAttribute("style")!;
+    expect(app.getAttribute("data-focus-panel")).toBe("history");
+    expect(style).toContain("--focus-header: 0px");
+    expect(style).toContain("--focus-footer: 0px");
+    expect(style).toContain("--focus-panel-width: 320px");
+    expect(style).toContain("--focus-content-width: 1120px");
+    expect(style).toContain("--focus-content-height: 1000px");
+    expect(stub.rects.at(-1)).toEqual({ x: 0, y: 0, width: 1120, height: 1000 });
   });
 });

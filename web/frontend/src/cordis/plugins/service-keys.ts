@@ -61,25 +61,13 @@ export type ModelEditorService = {
 
 /**
  * 图片聚焦编辑 feature capability
- * （change: 2026-10-08-add-image-focus-editing-and-unified-node-history）。
+ * （change: 2026-10-08-add-image-focus-editing-and-unified-node-history；
+ *   change: 2026-10-27-add-image-history-to-photocraft-focus，design D4）。
+ *
+ * key 与类型定义在公共 extension-api leaf，宿主与扩展共享同一契约：
+ * `export * from "./capability-keys.js"` 已从 `@woohaa3/frontend/extension-api` 导出。
  */
-export const IMAGE_EDIT_SERVICE = "imageEdit";
-
-export type ImageEditService = {
-  isActive(): boolean;
-  nodeId(): string | null;
-  /**
-   * 安装/清除只读历史预览 override（任务 8.3/8.4）。
-   *
-   * `nodeId` 必须由调用方（历史面板）显式给出：多标签下 `active()` 可能是另一篇文档，
-   * 只改活动文档会让预览看起来「点了没反应」，标题栏也停在「当前版本」（2026-10-24 审片 A3）。
-   */
-  setHistoryOverride(override: { url: string } | null, nodeId?: string): void;
-  /** 历史恢复成功后，等待对应权威修订并刷新当前编辑内容。 */
-  refreshFromCanonical(revision: number): void;
-  /** 当前草稿状态（供历史面板「当前版本 · 未保存」呈现；任务 8.1）。 */
-  draftState(): "saved" | "unsaved" | "saving" | "history-pending" | "error";
-};
+export { IMAGE_EDIT_SERVICE, type ImageEditService } from "../../extension-api/capability-keys.js";
 
 /**
  * 视频聚焦 feature capability（由 Video Focus Plugin 提供；

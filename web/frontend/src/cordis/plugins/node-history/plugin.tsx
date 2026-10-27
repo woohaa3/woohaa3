@@ -216,6 +216,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
             writable={writable}
             onClose={closeFromPanel}
             renderModelThumbnail={renderModelThumbnail}
+            onRefreshCurrent={syncCurrentDraftState}
             onWidthChange={(width) => {
               if (ctx.canvasNavigation.getSnapshot().mode.type === "overview") ctx.canvasRuntime.setContentRect({ right: width });
             }}
@@ -247,10 +248,11 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         if (!state) return;
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
         const active = imageEdit?.isActive() === true && imageEdit.nodeId() === state.nodeId;
-        controller.setCurrentPresentation({
-          draftState: active ? imageEdit!.draftState() : "saved",
-          hasOutput: currentNodeHasOutput(canvas, state.nodeId, state.kind)
-        });
+        const draftState = active ? imageEdit!.draftState() : "saved";
+        const hasOutput = currentNodeHasOutput(canvas, state.nodeId, state.kind);
+        const current = state.current;
+        if (current.draftState === draftState && current.hasOutput === hasOutput) return;
+        controller.setCurrentPresentation({ draftState, hasOutput });
       }
 
       // 聚焦退出（Escape / 清除选择 / 目标失效）时同步关闭历史面板。
@@ -288,6 +290,8 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
 
       // 模型选择：详情回流后本地生成并校验 Scene IR，原子覆盖同一 ModelRoot。
       let previousApplyingEntryId: string | null = null;
+      /** 图片恢复成功的一次性回执（在重置 applying 身份前捕获，避免重入订阅重复处理）。 */
+      let revertImageSuccess = false;
       /** 当前本地 override 的节点（关闭/失效时据此清除，避免丢失 nodeId）。 */
       let overrideNodeId: string | null = null;
       const clearOverride = () => {
@@ -431,7 +435,29 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
             ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "video", owner: "direct" });
           }
         }
+        // 图片恢复成功：清只读 override、切回 direct 并保留历史面板；选中当前首项
+        // （change: 2026-10-27-add-image-history-to-photocraft-focus，design D6）。
+        // canonical 的重开由 imageEdit.refreshFromCanonical 在同一工作区完成。
+        // 注意在 `previousApplyingEntryId` 归零后再发 select，否则重入订阅会把同一次回执
+        // 再判成一次成功恢复。
+        if (
+          state.kind === "image" &&
+          previousApplyingEntryId !== null &&
+          state.applyingEntryId === null &&
+          state.applyError === null
+        ) revertImageSuccess = true;
         previousApplyingEntryId = state.applyingEntryId;
+        if (revertImageSuccess) {
+          revertImageSuccess = false;
+          const imageEdit = ctx.get(IMAGE_EDIT_SERVICE as never) as ImageEditService | undefined;
+          imageEdit?.setHistoryOverride?.(null, state.nodeId);
+          appliedImageOverrideEntryId = null;
+          const mode = ctx.canvasNavigation.getSnapshot().mode;
+          if (mode.type === "node-focus" && mode.kind === "image" && mode.nodeId === state.nodeId) {
+            ctx.canvasNavigation.enterNodeFocus({ nodeId: state.nodeId, kind: "image", owner: "direct" });
+          }
+          void controller.select(CURRENT_PRESENTATION_ID);
+        }
         if (state.kind === "image") {
           applyImageOverride(state);
           return;

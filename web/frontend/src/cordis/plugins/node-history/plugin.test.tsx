@@ -477,6 +477,36 @@ describe("Node History Plugin", () => {
     expect(harness.navigation.getSnapshot().mode).toEqual({ type: "node-focus", nodeId: "n1", kind: "image", owner: "history" });
   });
 
+  it("打开图片历史时把 PhotoCraft 未保存草稿投影到当前首项", async () => {
+    const client: NodeHistoryClient = {
+      list: async () => ({ ok: true, items: [], nextCursor: null }),
+      detail: async () => ({ ok: false, code: "not-found", error: "no" }),
+      apply: async () => ({ ok: true }),
+      previewUrl: () => "/preview"
+    };
+    const imageEditStub = {
+      isActive: () => true,
+      nodeId: () => "n1",
+      draftState: () => "unsaved" as const,
+      setHistoryOverride: () => undefined,
+      refreshFromCanonical: () => undefined
+    };
+    const harness = await makeHarness({ canvas: imageCanvas(), client, imageEdit: imageEditStub });
+    runtime = harness.runtime;
+    harness.navigation.setFocusAdapter({
+      apply: () => ({ ok: true }),
+      isFocused: () => true,
+      isTargetValid: () => true
+    });
+    harness.navigation.enterNodeFocus({ nodeId: "n1", kind: "image", owner: "direct" });
+    harness.navigation.openNodeHistory({ nodeId: "n1", kind: "image" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const service = harness.runtime.ctx.get(NODE_HISTORY_SERVICE as never) as unknown as {
+      getState: () => { current: { draftState: string } } | null;
+    };
+    expect(service.getState()?.current.draftState).toBe("unsaved");
+  });
+
   it("缺失 canvasRuntime 时保持 pending 且零副作用", async () => {
     const slots = new SlotRegistry();
     const instance = await startFrontendRuntime({

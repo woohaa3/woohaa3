@@ -39,13 +39,29 @@ export type NodeHistoryPanelProps = {
    * （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
    */
   renderModelThumbnail?: ModelThumbnailRenderer;
+  /**
+   * 刷新固定当前首项的草稿状态（change: 2026-10-27-add-image-history-to-photocraft-focus）。
+   *
+   * 图片编辑器与 drawer 并排时可继续编辑，而编辑不会推进画布回流；面板打开期间按短周期
+   * 重读宿主能力，保证「设为当前」的禁用状态与「当前版本 · 未保存」文案及时更新。
+   */
+  onRefreshCurrent?: () => void;
 };
 
-export function NodeHistoryPanel({ controller, writable, variant, onWidthChange, onClose, renderModelThumbnail }: NodeHistoryPanelProps) {
+export function NodeHistoryPanel({ controller, writable, variant, onWidthChange, onClose, renderModelThumbnail, onRefreshCurrent }: NodeHistoryPanelProps) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const rootRef = useRef<HTMLDivElement | null>(null);
   // 统一右侧抽屉：五类节点的历史面板位置一致（模型以外的类型同样贴右）。
   const isDrawer = (variant ?? "drawer") === "drawer";
+
+  // 草稿状态不是 canonical 回流的一部分：面板打开期间短周期重读，避免用户并排编辑后
+  // 「设为当前」仍按旧的 saved 状态可点。回调自身按值去重，不会触发无谓 emit。
+  useEffect(() => {
+    if (!onRefreshCurrent) return undefined;
+    onRefreshCurrent();
+    const timer = setInterval(onRefreshCurrent, 500);
+    return () => clearInterval(timer);
+  }, [onRefreshCurrent, state?.nodeId]);
 
   // 投影实际占用宽度（ResizeObserver）；不改变 canonical 状态。
   useEffect(() => {

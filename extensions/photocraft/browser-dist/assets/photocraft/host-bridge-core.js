@@ -1,7 +1,44 @@
 import { FrameChannel, captureGeometry } from "./frame-channel.js";
 
+const PREFERENCES_KEY = "photocraft.preferences";
+const LIGHT_DEFAULT_MARKER = "photocraft.integration-light-default-v1";
+
+/**
+ * Integrated PhotoCraft starts on its light appearance. Seed a missing preference set, and migrate
+ * the old default (dark Pro Medium) once; an explicit non-default theme remains the user's choice.
+ */
+export function seedDefaultPreferences(storage) {
+  try {
+    storage ??= globalThis.localStorage;
+    if (!storage) return;
+    const raw = storage.getItem(PREFERENCES_KEY);
+    if (raw === null) {
+      storage.setItem(PREFERENCES_KEY, JSON.stringify({ interface: { appearanceMode: "light", lightTheme: "proLight" } }));
+      storage.setItem(LIGHT_DEFAULT_MARKER, "1");
+      return;
+    }
+    if (storage.getItem(LIGHT_DEFAULT_MARKER)) return;
+    let preferences;
+    try { preferences = JSON.parse(raw); }
+    catch { return; }
+    if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) return;
+    const current = preferences.interface;
+    const ui = current && typeof current === "object" && !Array.isArray(current) ? current : {};
+    const oldDefault = ui.appearanceMode === undefined
+      || (ui.appearanceMode === "dark" && (ui.darkTheme === undefined || ui.darkTheme === "proMedium"));
+    if (oldDefault) {
+      preferences.interface = { ...ui, appearanceMode: "light", lightTheme: ui.lightTheme ?? "proLight" };
+      storage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+    }
+    storage.setItem(LIGHT_DEFAULT_MARKER, "1");
+  } catch {
+    // Storage can be unavailable (privacy modes); PhotoCraft then uses its own defaults.
+  }
+}
+
 /** Direct instance port. No globals are installed until createRuntime is called. */
 export async function createRuntime({ canvas, assetBaseUrl, onEvent }, loadModule = url => import(url)) {
+  seedDefaultPreferences();
   const base = new URL(assetBaseUrl, location.href);
   const photocraft = await loadModule(new URL("photocraft-web.js", base).href);
   await photocraft.default({ module_or_path: new URL("photocraft-web_bg.wasm", base) });
