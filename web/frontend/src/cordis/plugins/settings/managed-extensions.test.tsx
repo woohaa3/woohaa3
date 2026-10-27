@@ -12,6 +12,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { ExtensionInstallJobView, InstalledExtensionView, SettingPluginView, SettingsSnapshot } from "@woohaa3/contracts";
 import { createBackendSettingsStore } from "./backend-settings-store.js";
 import { PluginSettingsSection } from "./plugin-settings-section.js";
+import { PluginConfigContent } from "./workspace/plugin-config-content.js";
 import { createManagedExtensionsController, describeJob, failureReason } from "./managed-extensions.js";
 import type { ExtensionInstallRemote } from "../../services/extension-install-remote.js";
 import type { ExtensionManagerFacade, ExtensionManagerView } from "../extension-manager/contract.js";
@@ -123,6 +124,21 @@ async function render(
   return { container, controller, reload, timers };
 }
 
+/** 详情页：受管扩展的卸载 / 回滚 / 身份说明只在这里出现（行里只留徽标）。 */
+async function renderDetail(snapshot: SettingsSnapshot, remote: ExtensionInstallRemote, timers = manualTimers()) {
+  const store = createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write: async () => ({ ok: false, code: "x", error: "x" }) });
+  await store.load();
+  const controller = createManagedExtensionsController({ remote, reload: async () => undefined, setTimer: timers.setTimer, clearTimer: timers.clearTimer });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  roots.add(root);
+  await act(async () => {
+    root.render(<PluginConfigContent pluginId="demo" store={store} manager={facade()} managed={controller} onBack={() => undefined} />);
+  });
+  return { container, controller };
+}
+
 const baseSnapshot = (installed: InstalledExtensionView[], extra: Partial<SettingsSnapshot> = {}): SettingsSnapshot => ({
   settings: [],
   plugins: installed.map((entry) => plugin(entry.id)),
@@ -133,17 +149,24 @@ const baseSnapshot = (installed: InstalledExtensionView[], extra: Partial<Settin
 });
 
 describe("受管扩展设置面", () => {
-  it("内置扩展卡片没有来源/卸载/回滚入口；受管卡片显示来源、信任与回滚", async () => {
+  it("列表行只展示来源/信任徽标，不再挂卸载与明细", async () => {
     const { container } = await render(baseSnapshot([builtin("film-set"), managedEntry("demo")]), remoteWith());
-    expect(container.querySelector('[data-testid="managed-extension-film-set"]')).toBeNull();
-    expect(container.querySelector('[data-testid="managed-uninstall-film-set"]')).toBeNull();
     expect(container.querySelector('[data-testid="settings-plugin-source-film-set"]')).toBeNull();
     // 来源从「已安装」这种无信息量的徽标改成具体来源：内置也在行上标出来，便于按来源扫读。
     expect(container.querySelector('[data-testid="settings-plugin-source-demo"]')?.textContent).toBe("本地文件");
-    // 签名与同权限说明：信任从 <dl> 行改成行头徽标，说明留成一句话。
     expect(container.querySelector('[data-testid="settings-plugin-trust-demo"]')?.textContent).toBe("已签名");
+    // 行里不再有受管明细：卸载/回滚/同权限说明都在详情页。
+    expect(container.querySelector('[data-testid="managed-extension-demo"]')).toBeNull();
+    expect(container.querySelector('[data-testid="managed-uninstall-demo"]')).toBeNull();
+    expect(container.querySelector('[data-testid="managed-rollback-demo"]')).toBeNull();
+  });
+
+  it("详情页展示来源身份、同权限说明与卸载/回滚", async () => {
+    const { container } = await renderDetail(baseSnapshot([managedEntry("demo")]), remoteWith());
+    expect(container.querySelector('[data-testid="managed-extension-demo"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="managed-trust-note-demo"]')?.textContent).toContain("同权限");
     expect(container.querySelector('[data-testid="managed-rollback-demo"]')?.textContent).toBe("回滚到 v1.0.0");
+    expect(container.querySelector('[data-testid="managed-uninstall-demo"]')).not.toBeNull();
   });
 
   it("宿主未启用受管安装（无 extensionInstallations）：不显示「从文件安装」", async () => {
@@ -194,10 +217,13 @@ describe("受管扩展设置面", () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it("需要重启：卡片与顶部提示；立即重启不支持时提示手动重启", async () => {
+  it("需要重启：详情页说明 + 列表顶部提示；立即重启不支持时提示手动重启", async () => {
     const remote = remoteWith({ restart: vi.fn(async () => ({ ok: false as const, code: "MARKETPLACE_RESTART_UNSUPPORTED", error: "x" })) });
-    const { container } = await render(baseSnapshot([managedEntry("demo", { restartRequired: true })]), remote);
-    expect(container.querySelector('[data-testid="managed-restart-required-demo"]')).not.toBeNull();
+    const snapshot = baseSnapshot([managedEntry("demo", { restartRequired: true })]);
+    const detail = await renderDetail(snapshot, remote);
+    expect(detail.container.querySelector('[data-testid="managed-restart-required-demo"]')).not.toBeNull();
+
+    const { container } = await render(snapshot, remote);
     const button = container.querySelector('[data-testid="managed-restart-now"]') as HTMLButtonElement;
     await act(async () => {
       button.click();
@@ -215,9 +241,9 @@ describe("受管扩展设置面", () => {
     expect(container.querySelector('[data-testid="managed-restart-now"]')).toBeNull();
   });
 
-  it("卸载需二次确认并带上是否清除数据；进行中禁用该卡片按钮", async () => {
+  it("详情页卸载需二次确认并带上是否清除数据；进行中禁用该按钮", async () => {
     const remote = remoteWith({ job: vi.fn(async () => ({ ok: true as const, job: job({ jobId: "job-u", action: "uninstall", extensionId: "demo" }) })) });
-    const { container } = await render(baseSnapshot([managedEntry("demo")]), remote);
+    const { container } = await renderDetail(baseSnapshot([managedEntry("demo")]), remote);
     await act(async () => {
       (container.querySelector('[data-testid="managed-uninstall-demo"]') as HTMLButtonElement).click();
     });

@@ -237,6 +237,7 @@ export function SettingsWorkspace({
           pluginId={view.pluginId}
           store={backend}
           manager={extensions}
+          {...(managed ? { managed: managed.controller } : {})}
           {...(settingsPanels ? { settingsPanels } : {})}
           {...(editSession ? { editSession } : {})}
           {...(extensionSettings ? { extensionSettings } : {})}

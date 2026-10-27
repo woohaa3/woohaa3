@@ -40,6 +40,8 @@ import type { ExtensionSettingsAssembly } from "../plugin.js";
 import { useSettingsEditReport } from "./use-settings-edit-report.js";
 import type { SettingsPanelRenderProps } from "../plugin-panels.js";
 import { extensionObservationBadge, extensionSource, extensionTrustBadge } from "../extension-source.js";
+import { ManagedExtensionDetails } from "../managed-extensions-ui.js";
+import type { ManagedExtensionsController } from "../managed-extensions.js";
 import { GeneratedModelsSection } from "./model-catalog.js";
 import { useExtensionFaults } from "../../../host.js";
 import { slotContributionOrigin } from "../../../slots.js";
@@ -64,11 +66,12 @@ export function PluginConfigContent({
   pluginId,
   store,
   manager,
+  managed,
   settingsPanels,
   onBack,
   editSession,
   extensionSettings
-}: PluginConfigContentProps) {
+}: PluginConfigContentProps & { /** 受管扩展的卸载/回滚/身份说明只在详情页出现。 */ managed?: ManagedExtensionsController }) {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const view = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
   const panels = settingsPanels ?? EMPTY_SETTINGS_PANELS;
@@ -262,6 +265,9 @@ export function PluginConfigContent({
           </div>
         ) : null}
       </section>
+      {managed && group.installed?.managed ? (
+        <ManagedExtensionDetails installed={group.installed} controller={managed} canManage={store.canManage()} />
+      ) : null}
       {inactive ? (
         <p className="settings-page__hint" data-testid={`plugin-config-inactive-${group.id}`}>
           该插件当前未运行（{inactive}）：这里保存的配置要等启用后才生效。

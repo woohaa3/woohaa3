@@ -30,7 +30,7 @@ import {
 } from "./plugin-groups.js";
 import { PluginStateControl } from "./plugin-state-control.js";
 import { ExtensionFaultNotice } from "./extension-fault-notice.js";
-import { ManagedExtensionDetails, ManagedInstallBar, ReleaseChangedNotice } from "./managed-extensions-ui.js";
+import { ManagedInstallBar, ReleaseChangedNotice } from "./managed-extensions-ui.js";
 import { extensionObservationBadge, extensionSource, extensionTrustBadge, signedKeyId } from "./extension-source.js";
 import { MarketplaceInstallPanel } from "./marketplace-install-ui.js";
 import type { ManagedExtensionsController } from "./managed-extensions.js";
@@ -340,7 +340,6 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
                         store={store}
                         siteManageable={view.siteManageable}
                         hasSettingsPanel={panelIds.has(group.id)}
-                        {...(managed ? { managed: managed.controller } : {})}
                         {...(onOpenPlugin ? { onOpen: () => onOpenPlugin(group.id) } : {})}
                       />
                     ))}
@@ -406,7 +405,6 @@ function PluginRow({
   store,
   siteManageable,
   hasSettingsPanel,
-  managed,
   onOpen
 }: {
   index: PluginViewIndex;
@@ -415,7 +413,6 @@ function PluginRow({
   store: BackendSettingsStore;
   siteManageable: boolean;
   hasSettingsPanel: boolean;
-  managed?: ManagedExtensionsController;
   onOpen?: () => void;
 }) {
   const openable = (isConfigurable(index, group) || hasSettingsPanel) && onOpen !== undefined;
@@ -523,7 +520,7 @@ function PluginRow({
         </p>
       ) : null}
       <ExtensionFaultNotice extensionId={group.id} />
-      {managed ? <ManagedExtensionDetails installed={group.installed} controller={managed} canManage={store.canManage()} /> : null}
+      {/* 受管明细（来源身份、同权限说明、卸载/回滚）在详情页；行里只留来源/信任徽标。 */}
     </article>
   );
 }

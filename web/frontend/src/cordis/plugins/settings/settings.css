@@ -1191,12 +1191,17 @@
 	color: var(--mc-text-muted);
 }
 
-/* 行高统一：标题 + 说明/配置元信息固定两行，右侧状态与开关始终居中对齐。 */
+/* 行高统一：标题 + 说明/配置元信息固定两行，右侧状态与开关始终居中对齐。
+   受管扩展会在行下方多出一块明细，grid 因此变成两行——只靠容器 min-height 时第一行会缩回
+   内容高度，图标和标题就比普通行贴顶；显式给第一行同样的下限，并去掉行间距（明细自带
+   margin-top 与虚线分隔）。 */
 .plugin-row {
 	min-height: 60px;
 	align-items: center;
 	line-height: 1.4;
 	padding: 8px;
+	grid-template-rows: minmax(76px, auto);
+	row-gap: 0;
 }
 .plugin-row__main {
 	gap: 3px;
