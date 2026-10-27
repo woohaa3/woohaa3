@@ -616,6 +616,12 @@ export type ExtensionRuntimeBindings = {
   sdkAbi: number;
   react: object;
   jsxRuntime: object;
+  /**
+   * 宿主实际的 `react-dom` / `react-dom/client` 导出。扩展内联的第三方 UI 库（如 antd）依赖 react-dom，
+   * 它必须与宿主共用同一份 React 内部状态，否则实现在加载阶段就会失败，因此绝不另打包第二份。
+   */
+  reactDom: object;
+  reactDomClient: object;
   sdk: Readonly<Record<string, unknown>>;
 };
 

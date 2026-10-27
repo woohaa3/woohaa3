@@ -54,6 +54,32 @@ const CORDIS_SPECIFIER = "@deepseek-ai/cordis";
 const REACT_SPECIFIER = "react";
 const JSX_RUNTIME_SPECIFIER = "react/jsx-runtime";
 const JSX_DEV_RUNTIME_SPECIFIER = "react/jsx-dev-runtime";
+const REACT_DOM_SPECIFIER = "react-dom";
+const REACT_DOM_CLIENT_SPECIFIER = "react-dom/client";
+
+/**
+ * 重定向到宿主实例的 React 具名导出。扩展内联的第三方库（如 antd / rc-*）会按名字取这些导出；
+ * 缺失项在 shim 里是静默的 `undefined`（构建期不报错、运行时才暴露），所以新增依赖前先对照
+ * 这份清单，宿主 React 18 上实际存在的导出都应当列在这里。
+ */
+const DEFAULT_REACT_NAMES = [
+  "createElement", "useId", "useState", "useEffect", "useSyncExternalStore", "useCallback", "useMemo",
+  "useRef", "useLayoutEffect", "useContext", "useReducer", "cloneElement", "isValidElement", "forwardRef",
+  "memo", "createContext", "Fragment", "Children", "Component", "startTransition",
+  "useImperativeHandle", "useInsertionEffect", "useDeferredValue", "useTransition", "useDebugValue",
+  "createRef", "PureComponent", "Suspense", "StrictMode", "Profiler", "lazy", "version"
+];
+
+/**
+ * `react-dom` 必须由宿主提供：它内部经 `__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED` 读取
+ * React 的 dispatcher / batch config。内联第二份 react-dom 时，这些内部对象在 shim 上不存在，
+ * 扩展实现在**加载阶段**就会抛 `Cannot read properties of undefined (reading 'ReactCurrentBatchConfig')`。
+ */
+const DEFAULT_REACT_DOM_NAMES = [
+  "__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED", "version", "createPortal", "flushSync",
+  "unstable_batchedUpdates", "findDOMNode"
+];
+const DEFAULT_REACT_DOM_CLIENT_NAMES = ["createRoot", "hydrateRoot"];
 const PROTOCOL_VERSION = 1;
 const SDK_ABI_VERSION = 1;
 const REACT_MAJOR = 18;
@@ -305,7 +331,17 @@ export async function buildExtensionBrowser(options = {}) {
   await fs.writeFile(path.join(targetStaging, "runtime-binding.js"), RUNTIME_BINDING_SOURCE, "utf8");
   await fs.writeFile(
     path.join(targetStaging, "shim-react.js"),
-    shimSource("react", options.reactNames ?? ["createElement", "useId", "useState", "useEffect", "useSyncExternalStore", "useCallback", "useMemo", "useRef", "useLayoutEffect", "useContext", "useReducer", "cloneElement", "isValidElement", "forwardRef", "memo", "createContext", "Fragment", "Children", "Component", "startTransition"]),
+    shimSource("react", options.reactNames ?? DEFAULT_REACT_NAMES),
+    "utf8"
+  );
+  await fs.writeFile(
+    path.join(targetStaging, "shim-react-dom.js"),
+    shimSource("reactDom", options.reactDomNames ?? DEFAULT_REACT_DOM_NAMES),
+    "utf8"
+  );
+  await fs.writeFile(
+    path.join(targetStaging, "shim-react-dom-client.js"),
+    shimSource("reactDomClient", options.reactDomClientNames ?? DEFAULT_REACT_DOM_CLIENT_NAMES),
     "utf8"
   );
   await fs.writeFile(
@@ -338,7 +374,9 @@ export async function buildExtensionBrowser(options = {}) {
       redirect(REACT_SPECIFIER, "shim-react.js");
       redirect(JSX_RUNTIME_SPECIFIER, "shim-jsx-runtime.js");
       redirect(JSX_DEV_RUNTIME_SPECIFIER, "shim-jsx-runtime.js");
-      build.onLoad({ filter: /shim-(react|jsx-runtime)\.js$/ }, (args) => ({
+      redirect(REACT_DOM_SPECIFIER, "shim-react-dom.js");
+      redirect(REACT_DOM_CLIENT_SPECIFIER, "shim-react-dom-client.js");
+      build.onLoad({ filter: /shim-(react|react-dom|react-dom-client|jsx-runtime)\.js$/ }, (args) => ({
         contents: readFileSync(args.path, "utf8"),
         loader: "js",
         resolveDir: path.dirname(args.path)

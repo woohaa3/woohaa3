@@ -83,6 +83,13 @@ describe("createExtensionRuntimeProvider", () => {
     expect(bindings.token).toBe(instance.token);
     expect(typeof (bindings.react as { createElement?: unknown }).createElement).toBe("function");
     expect(typeof (bindings.jsxRuntime as { jsx?: unknown }).jsx).toBe("function");
+    // react-dom 必须来自宿主：内联第二份会因拿不到 React 内部状态在加载阶段失败。
+    expect(typeof (bindings.reactDom as { createPortal?: unknown }).createPortal).toBe("function");
+    expect(typeof (bindings.reactDom as { flushSync?: unknown }).flushSync).toBe("function");
+    expect(
+      (bindings.reactDom as Record<string, unknown>).__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
+    ).toBeDefined();
+    expect(typeof (bindings.reactDomClient as { createRoot?: unknown }).createRoot).toBe("function");
     // 未请求的组不加载。
     expect(instance.loadedGroups()).toEqual(["core", "ui"]);
     // 第二次请求复用缓存。

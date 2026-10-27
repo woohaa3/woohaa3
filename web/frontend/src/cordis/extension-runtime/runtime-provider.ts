@@ -13,6 +13,8 @@
  */
 import * as ReactNamespace from "react";
 import * as JsxRuntimeNamespace from "react/jsx-runtime";
+import * as ReactDomNamespace from "react-dom";
+import * as ReactDomClientNamespace from "react-dom/client";
 import {
   EXTENSION_SDK_ABI_VERSION,
   EXTENSION_SDK_GROUPS,
@@ -147,6 +149,8 @@ export function createExtensionRuntimeProvider(
         sdkAbi,
         react: ReactNamespace as unknown as object,
         jsxRuntime: JsxRuntimeNamespace as unknown as object,
+        reactDom: ReactDomNamespace as unknown as object,
+        reactDomClient: ReactDomClientNamespace as unknown as object,
         sdk
       };
     }
