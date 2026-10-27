@@ -459,6 +459,9 @@
 
 /* 插件配置弹窗 */
 .plugin-config__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+/* 详情头部右侧操作（受管扩展的回滚 / 卸载）。 */
+.plugin-config__actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.plugin-config__note { font-size: 11px; color: var(--mc-text-muted); }
 .plugin-config__description { font-size: 12px; color: var(--mc-text-muted); }
 .plugin-config__status { display: flex; justify-content: flex-end; margin-top: 8px; }
 .plugin-config__status .plugin-state { margin-left: 0; }

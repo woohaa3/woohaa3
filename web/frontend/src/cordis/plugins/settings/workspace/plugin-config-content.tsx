@@ -40,7 +40,7 @@ import type { ExtensionSettingsAssembly } from "../plugin.js";
 import { useSettingsEditReport } from "./use-settings-edit-report.js";
 import type { SettingsPanelRenderProps } from "../plugin-panels.js";
 import { extensionObservationBadge, extensionSource, extensionTrustBadge } from "../extension-source.js";
-import { ManagedExtensionDetails } from "../managed-extensions-ui.js";
+import { ManagedExtensionActions, ManagedExtensionDetails } from "../managed-extensions-ui.js";
 import type { ManagedExtensionsController } from "../managed-extensions.js";
 import { GeneratedModelsSection } from "./model-catalog.js";
 import { useExtensionFaults } from "../../../host.js";
@@ -165,6 +165,9 @@ export function PluginConfigContent({
         title={group.label}
         onBack={onBack}
         icon={<PluginIconMark icon={group.icon} testId={`plugin-config-icon-${group.id}`} />}
+        {...(managed && group.installed?.managed
+          ? { actions: <ManagedExtensionActions installed={group.installed} controller={managed} canManage={store.canManage()} /> }
+          : {})}
         meta={
           <>
             <span className="plugin-card__badge">{layer.badge}</span>
@@ -199,6 +202,12 @@ export function PluginConfigContent({
             {group.version ? (
               <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
                 {versionLabel(group.version)}
+              </span>
+            ) : null}
+            {/* 安全说明跟着徽标走：签名只证来源与完整性，扩展与宿主同进程、同权限。 */}
+            {group.installed?.managed ? (
+              <span className="plugin-config__note" data-testid={`managed-trust-note-${group.id}`}>
+                与本机宿主同权限，不是沙箱
               </span>
             ) : null}
           </>
@@ -265,9 +274,7 @@ export function PluginConfigContent({
           </div>
         ) : null}
       </section>
-      {managed && group.installed?.managed ? (
-        <ManagedExtensionDetails installed={group.installed} controller={managed} canManage={store.canManage()} />
-      ) : null}
+      <ManagedExtensionDetails installed={group.installed} />
       {inactive ? (
         <p className="settings-page__hint" data-testid={`plugin-config-inactive-${group.id}`}>
           该插件当前未运行（{inactive}）：这里保存的配置要等启用后才生效。
@@ -368,12 +375,15 @@ function PluginDetailHeader({
   title,
   onBack,
   icon,
-  meta
+  meta,
+  actions
 }: {
   title: string;
   onBack: () => void;
   icon?: ReactNode;
   meta?: ReactNode;
+  /** 头部右侧操作（受管扩展的回滚 / 卸载）。 */
+  actions?: ReactNode;
 }) {
   return (
     <header className="settings-workbench__detail-head">
@@ -382,7 +392,9 @@ function PluginDetailHeader({
       </Button>
       {icon}
       <h2 className="settings-workbench__detail-title">{title}</h2>
+      {/* meta 在标题行里 flex-grow 并右对齐，操作块必须排在它之后才能贴到最右。 */}
       {meta ? <div className="plugin-config__meta">{meta}</div> : null}
+      {actions ? <div className="plugin-config__actions">{actions}</div> : null}
     </header>
   );
 }

@@ -140,7 +140,12 @@ export function ManagedInstallBar({
   );
 }
 
-export function ManagedExtensionDetails({
+/**
+ * 受管扩展的操作（回滚 / 卸载）：挂在详情头部右侧，和「返回」同一层。
+ *
+ * 正文只留提示，不再把卸载按钮泡在说明文字下面——操作属于头部操作区。
+ */
+export function ManagedExtensionActions({
   installed,
   controller,
   canManage
@@ -152,56 +157,72 @@ export function ManagedExtensionDetails({
   useController(controller);
   const [confirming, setConfirming] = useState(false);
   const [purge, setPurge] = useState(false);
-  if (!installed || installed.managed !== true) return null;
+  if (!installed || installed.managed !== true || !canManage) return null;
   const id = installed.id;
   const busy = controller.busy(id);
   return (
+    <div className="managed-extension__actions" data-testid={`managed-actions-${id}`}>
+      {installed.previousVersion ? (
+        <Button size="sm" disabled={busy} onClick={() => void controller.rollback(id)} data-testid={`managed-rollback-${id}`}>
+          回滚到 v{installed.previousVersion}
+        </Button>
+      ) : null}
+      {confirming ? (
+        <>
+          <label className="managed-extension__purge">
+            <input type="checkbox" checked={purge} onChange={(event) => setPurge(event.currentTarget.checked)} />
+            同时清除扩展数据
+          </label>
+          <Button
+            size="sm"
+            tone="danger"
+            disabled={busy}
+            onClick={() => {
+              setConfirming(false);
+              void controller.uninstall(id, { purgeData: purge });
+            }}
+            data-testid={`managed-uninstall-confirm-${id}`}
+          >
+            确认卸载
+          </Button>
+          <Button size="sm" tone="ghost" onClick={() => setConfirming(false)}>取消</Button>
+        </>
+      ) : (
+        <Button size="sm" tone="ghost" disabled={busy} onClick={() => setConfirming(true)} data-testid={`managed-uninstall-${id}`}>
+          卸载
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** 受管扩展的状态提示（需重启 / 覆盖内置 / 观察期 / 版本状态）；没有可说的就什么都不渲染。 */
+export function ManagedExtensionDetails({
+  installed
+}: {
+  installed: InstalledExtensionView | undefined;
+}) {
+  if (!installed || installed.managed !== true) return null;
+  const id = installed.id;
+  const observing = installed.observeUntil ? new Date(installed.observeUntil) : null;
+  const hasNotice = needsRestart(installed) || installed.builtinVersion || observing;
+  if (!hasNotice) return null;
+  return (
     <div className="managed-extension" data-testid={`managed-extension-${id}`}>
-      {/* 来源 / 签名 / 观察期都在行头徽标上；这里只留必须读到的安全说明，
-          C 方向取消进程边界后这句话不能藏进 tooltip。 */}
-      <p className="managed-extension__note" data-testid={`managed-trust-note-${id}`}>
-        签名只证明来源与完整性：扩展与本机宿主同进程、同权限，不是沙箱。
-        {installed.builtinVersion ? ` 当前受管版本覆盖内置 v${installed.builtinVersion}，卸载后回到内置版本。` : ""}
-        {installed.observeUntil ? ` 观察期至 ${new Date(installed.observeUntil).toLocaleString()}，期间失败将自动回滚。` : ""}
-      </p>
       {needsRestart(installed) ? (
         <p className="managed-extension__restart" data-testid={`managed-restart-required-${id}`}>新版本需重启本机服务后生效。</p>
       ) : null}
-      <ManagedVersionStatusNotice installed={installed} />
-      {canManage ? (
-        <div className="managed-extension__actions">
-          {installed.previousVersion ? (
-            <Button size="sm" disabled={busy} onClick={() => void controller.rollback(id)} data-testid={`managed-rollback-${id}`}>
-              回滚到 v{installed.previousVersion}
-            </Button>
-          ) : null}
-          {confirming ? (
-            <>
-              <label className="managed-extension__purge">
-                <input type="checkbox" checked={purge} onChange={(event) => setPurge(event.currentTarget.checked)} />
-                同时清除扩展数据
-              </label>
-              <Button
-                size="sm"
-                tone="danger"
-                disabled={busy}
-                onClick={() => {
-                  setConfirming(false);
-                  void controller.uninstall(id, { purgeData: purge });
-                }}
-                data-testid={`managed-uninstall-confirm-${id}`}
-              >
-                确认卸载
-              </Button>
-              <Button size="sm" tone="ghost" onClick={() => setConfirming(false)}>取消</Button>
-            </>
-          ) : (
-            <Button size="sm" tone="ghost" disabled={busy} onClick={() => setConfirming(true)} data-testid={`managed-uninstall-${id}`}>
-              卸载
-            </Button>
-          )}
-        </div>
+      {installed.builtinVersion ? (
+        <p className="managed-extension__note" data-testid={`managed-builtin-${id}`}>
+          当前受管版本覆盖内置 v{installed.builtinVersion}，卸载后回到内置版本。
+        </p>
       ) : null}
+      {observing ? (
+        <p className="managed-extension__note" data-testid={`managed-observe-${id}`}>
+          观察期至 {observing.toLocaleString()}，期间失败将自动回滚。
+        </p>
+      ) : null}
+      <ManagedVersionStatusNotice installed={installed} />
     </div>
   );
 }

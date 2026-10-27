@@ -161,12 +161,17 @@ describe("受管扩展设置面", () => {
     expect(container.querySelector('[data-testid="managed-rollback-demo"]')).toBeNull();
   });
 
-  it("详情页展示来源身份、同权限说明与卸载/回滚", async () => {
+  it("详情页把卸载/回滚放头部操作区，同权限说明跟着徽标", async () => {
     const { container } = await renderDetail(baseSnapshot([managedEntry("demo")]), remoteWith());
-    expect(container.querySelector('[data-testid="managed-extension-demo"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="managed-trust-note-demo"]')?.textContent).toContain("同权限");
+    const actions = container.querySelector('[data-testid="managed-actions-demo"]');
+    expect(actions).not.toBeNull();
+    // 挂在详情头部，而不是正文说明下面。
+    expect(actions?.closest(".settings-workbench__detail-head")).not.toBeNull();
     expect(container.querySelector('[data-testid="managed-rollback-demo"]')?.textContent).toBe("回滚到 v1.0.0");
     expect(container.querySelector('[data-testid="managed-uninstall-demo"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="managed-trust-note-demo"]')?.textContent).toContain("同权限");
+    // 没有需要提示的状态时，正文不再渲染受管明细块。
+    expect(container.querySelector('[data-testid="managed-extension-demo"]')).toBeNull();
   });
 
   it("宿主未启用受管安装（无 extensionInstallations）：不显示「从文件安装」", async () => {
