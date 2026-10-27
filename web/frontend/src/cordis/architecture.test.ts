@@ -304,6 +304,9 @@ describe("前端协议边界审计", () => {
       "cordis/plugins/node-drop/plugin.ts -> canvas-shell",
       // drop overlay 消费共享分派的 accepted 目标解析类型（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
       "cordis/plugins/node-drop/drop-overlay.ts -> canvas-shell",
+      // node-merge 高亮复用共享节点索引的 `mergeRectsByType`（折叠/托管/有效尺寸只有一份判定；
+      // change: 2026-10-27-merge-same-type-node-history，design D2）。
+      "cordis/plugins/node-merge/merge-overlay.ts -> canvas-shell",
       // canvas-runtime ↔ media-preview：片场媒体会话与既有视频会话共用受控媒体 URL 解析。
       "cordis/plugins/canvas-runtime/composite-asset-media-session.ts -> media-preview",
       // canvas-runtime 装配契约复用聚焦目标类型（type-only；从 host 抽出）。

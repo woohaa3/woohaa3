@@ -130,6 +130,50 @@ describe("canvasRemote", () => {
     expect(missing).toMatchObject({ ok: false, code: "NODE_HISTORY_NOT_FOUND" });
   });
 
+  it("同类型节点合并走 merge 动作段并保留稳定错误码", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const remote = createCanvasRemote({
+      canvasId: "c",
+      fetchImpl: (async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+        if (String(url).includes("/blocked/")) {
+          return jsonResponse({ code: "NODE_HISTORY_CONFLICT", message: "节点开始了新的生成" }, 409);
+        }
+        return jsonResponse({
+          ok: true, targetNodeId: "target", sourceNodeId: "source", revision: 7,
+          copied: 2, duplicates: 1, evicted: 0, alreadyMerged: false
+        });
+      }) as unknown as typeof fetch
+    });
+
+    const merged = await remote.mergeNodeHistory({
+      canvasId: "c1",
+      targetNodeId: "target",
+      sourceNodeId: "source",
+      operationId: "op-1",
+      expectedSourceCurrentIdentity: "text:abc"
+    });
+    expect(merged).toEqual({
+      ok: true,
+      value: {
+        targetNodeId: "target", sourceNodeId: "source", revision: 7,
+        copied: 2, duplicates: 1, evicted: 0, alreadyMerged: false
+      }
+    });
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toBe("/api/canvas-node-history/c1/target/merge");
+    expect(calls[0]?.body).toEqual({
+      sourceNodeId: "source",
+      operationId: "op-1",
+      expectedSourceCurrentIdentity: "text:abc"
+    });
+
+    const conflict = await remote.mergeNodeHistory({
+      canvasId: "c1", targetNodeId: "blocked", sourceNodeId: "source", operationId: "op-2"
+    });
+    expect(conflict).toMatchObject({ ok: false, code: "NODE_HISTORY_CONFLICT" });
+  });
+
   it("片段目录 401/503 映射为 unauthorized/unavailable", async () => {
     const unauthorized = createCanvasRemote({
       canvasId: "c",

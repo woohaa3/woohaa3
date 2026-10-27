@@ -72,6 +72,7 @@ export * from "./canvas/prepared-model.js";
 export * from "./canvas/content-hash.js";
 export * from "./canvas/source-descriptor.js";
 export * from "./canvas/node-history.js";
+export * from "./canvas/merge-target.js";
 export * from "./canvas/run-state.js";
 export * from "./canvas/node-display-name.js";
 export * from "./canvas/director-studio-title.js";

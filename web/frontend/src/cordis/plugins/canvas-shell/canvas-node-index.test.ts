@@ -97,6 +97,62 @@ describe("结构与位置索引缓存（design D5）", () => {
   });
 });
 
+describe("合并候选几何（mergeRectsByType / 任务 2.1）", () => {
+  function mergeCanvas(nodes: NodeSpec[], data: Record<string, Record<string, unknown>> = {}): ServerCanvas {
+    return { ...nodesCanvas(nodes), nodeData: data as ServerCanvas["nodeData"] };
+  }
+
+  it("按类型分桶：使用绝对坐标、有效尺寸与文档顺序", () => {
+    const index = createCanvasNodeIndex(mergeCanvas([
+      { id: "g", type: "group", x: 100, y: 200, width: 500, height: 400 },
+      { id: "img-1", x: 10, y: 20, width: 200, height: 120, parentId: "g" },
+      { id: "img-2", x: 300, y: 0 },
+      { id: "m-1", type: "model3d", x: 0, y: 300, width: 200, height: 180 }
+    ]))!;
+    // 组内节点用完整祖先链换算出绝对坐标；未显式尺寸的回退到类型默认尺寸。
+    expect(index.mergeRectsByType.get("image")).toEqual([
+      { nodeId: "img-1", type: "image", x: 110, y: 220, width: 200, height: 120 },
+      { nodeId: "img-2", type: "image", x: 300, y: 0, width: 248, height: 232 }
+    ]);
+    // 用户尺寸覆盖类型默认尺寸。
+    expect(index.mergeRectsByType.get("model3d")).toEqual([
+      { nodeId: "m-1", type: "model3d", x: 0, y: 300, width: 200, height: 180 }
+    ]);
+    // 组与复合资产不进入候选。
+    expect(index.mergeRectsByType.has("group")).toBe(false);
+    expect(index.mergeRectsByType.has("composite-asset")).toBe(false);
+  });
+
+  it("折叠组内的成员被排除，组本身从不入桶", () => {
+    const index = createCanvasNodeIndex(mergeCanvas([
+      { id: "g", type: "group", x: 0, y: 0, width: 400, height: 400 },
+      { id: "child", x: 40, y: 40, width: 100, height: 100, parentId: "g" },
+      { id: "free", x: 600, y: 0 }
+    ], { g: { groupCollapsed: true } }))!;
+    expect(index.mergeRectsByType.get("image")?.map(entry => entry.nodeId)).toEqual(["free"]);
+  });
+
+  it("托管节点与预览不进入候选", () => {
+    const index = createCanvasNodeIndex(mergeCanvas([
+      { id: "managed", x: 0, y: 0 },
+      { id: "preview", type: "film-set-shot-preview", x: 300, y: 0 }
+    ], {
+      managed: {
+        managedBy: {
+          schemaVersion: 1, extensionId: "film-set", ownerNodeId: "owner",
+          entityId: "entity", lifecycle: "owner-managed"
+        }
+      }
+    }))!;
+    expect(index.mergeRectsByType.size).toBe(0);
+  });
+
+  it("空画布没有候选桶", () => {
+    const index = createCanvasNodeIndex(mergeCanvas([]))!;
+    expect(index.mergeRectsByType.size).toBe(0);
+  });
+});
+
 /** 构造只暴露 drag 族所需能力的最小 core。 */
 function dragCore(submissions: unknown[]): Pick<InteractionCore, "state" | "submit" | "buildScene" | "schedule" | "clearHeldKeys"> {
   return {

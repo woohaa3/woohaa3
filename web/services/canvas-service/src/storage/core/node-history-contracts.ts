@@ -31,6 +31,17 @@ export type NodeHistoryInsertResult = {
   entry: NodeGenerationHistoryEntry;
 };
 
+/**
+ * 批量幂等登记结果（change: 2026-10-27-merge-same-type-node-history，任务 3.1）。
+ *
+ * 单事务写入：要么全部判定并写入，要么整体失败（调用方据此补偿）。`insertedIds` 只含
+ * 本次真正新增的条目；`duplicateIds` 是已存在、未追加的条目。
+ */
+export type NodeHistoryInsertManyResult = {
+  insertedIds: string[];
+  duplicateIds: string[];
+};
+
 export type NodeHistoryListInput = {
   canvasId: string;
   nodeId: string;
@@ -61,6 +72,14 @@ export type NodeHistoryCanvasListInput = {
 export type NodeHistoryRepository = {
   /** 幂等登记一条历史（同 entryId 返回 duplicate）。 */
   insert(entry: NodeGenerationHistoryEntry): Promise<NodeHistoryInsertResult>;
+
+  /**
+   * 单事务批量幂等登记（change: 2026-10-27-merge-same-type-node-history，任务 3.1）。
+   *
+   * 用于合并复制来源历史：调用方按目标节点重算 `entryId` 后一次写入，重复项只报告不追加。
+   * 任一条写入失败必须整体回滚（不留下部分复制）。
+   */
+  insertMany(entries: readonly NodeGenerationHistoryEntry[]): Promise<NodeHistoryInsertManyResult>;
 
   /** 把条目降级为不可恢复/不可预览（媒体对象缺失或脚本失效）。 */
   markUnrecoverable(canvasId: string, nodeId: string, entryId: string): Promise<void>;

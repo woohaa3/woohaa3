@@ -19,6 +19,7 @@ import {
   type NodeHistoryCanvasListInput,
   type NodeHistoryCanvasStats,
   type NodeHistoryIndexRow,
+  type NodeHistoryInsertManyResult,
   type NodeHistoryInsertResult,
   type NodeHistoryListInput,
   type NodeHistoryListResult,
@@ -132,33 +133,64 @@ export class SqliteNodeHistoryRepository implements NodeHistoryRepository {
 
   async insert(entry: NodeGenerationHistoryEntry): Promise<NodeHistoryInsertResult> {
     return this.inImmediateTransaction(() => {
-      const existing = this.db.prepare("SELECT * FROM node_generation_history WHERE entry_id = ?").get(entry.entryId) as
-        | Row
-        | undefined;
+      const existing = this.findRow(entry.entryId);
       if (existing) return { status: "duplicate", entry: rowToEntry(existing) };
-      this.db
-        .prepare(
-          `INSERT INTO node_generation_history
-             (entry_id, canvas_id, node_id, kind, created_at, source_identity, current_identity,
-              recoverable, previewable, payload_json, source_json, bytes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          entry.entryId,
-          entry.canvasId,
-          entry.nodeId,
-          entry.kind,
-          entry.createdAt,
-          entry.sourceIdentity,
-          entry.currentIdentity,
-          entry.recoverable ? 1 : 0,
-          entry.previewable ? 1 : 0,
-          JSON.stringify(entry.payload),
-          JSON.stringify(entry.source),
-          nodeHistoryEntryBytes(entry)
-        );
+      this.insertRow(entry);
       return { status: "inserted", entry };
     });
+  }
+
+  /**
+   * 单事务批量幂等登记（change: 2026-10-27-merge-same-type-node-history，任务 3.1）。
+   *
+   * 一次 `BEGIN IMMEDIATE` 内逐条判定并写入：重复 `entry_id` 只记录不追加；任一条失败
+   * 整体回滚，调用方不会看到部分复制。
+   */
+  async insertMany(entries: readonly NodeGenerationHistoryEntry[]): Promise<NodeHistoryInsertManyResult> {
+    if (entries.length === 0) return { insertedIds: [], duplicateIds: [] };
+    return this.inImmediateTransaction(() => {
+      const insertedIds: string[] = [];
+      const duplicateIds: string[] = [];
+      for (const entry of entries) {
+        if (this.findRow(entry.entryId)) {
+          duplicateIds.push(entry.entryId);
+          continue;
+        }
+        this.insertRow(entry);
+        insertedIds.push(entry.entryId);
+      }
+      return { insertedIds, duplicateIds };
+    });
+  }
+
+  private findRow(entryId: string): Row | undefined {
+    return this.db.prepare("SELECT * FROM node_generation_history WHERE entry_id = ?").get(entryId) as
+      | Row
+      | undefined;
+  }
+
+  private insertRow(entry: NodeGenerationHistoryEntry): void {
+    this.db
+      .prepare(
+        `INSERT INTO node_generation_history
+           (entry_id, canvas_id, node_id, kind, created_at, source_identity, current_identity,
+            recoverable, previewable, payload_json, source_json, bytes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        entry.entryId,
+        entry.canvasId,
+        entry.nodeId,
+        entry.kind,
+        entry.createdAt,
+        entry.sourceIdentity,
+        entry.currentIdentity,
+        entry.recoverable ? 1 : 0,
+        entry.previewable ? 1 : 0,
+        JSON.stringify(entry.payload),
+        JSON.stringify(entry.source),
+        nodeHistoryEntryBytes(entry)
+      );
   }
 
   async get(canvasId: string, nodeId: string, entryId: string): Promise<NodeGenerationHistoryEntry | null> {

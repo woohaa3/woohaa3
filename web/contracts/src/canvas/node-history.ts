@@ -19,6 +19,9 @@
 // 类型与常量。
 export * from "./node-history/types.js";
 
+// 同类型节点合并请求/回执。
+export * from "./node-history/merge.js";
+
 // 稳定身份、内容身份与哈希。
 export * from "./node-history/identity.js";
 
