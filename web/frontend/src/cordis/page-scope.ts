@@ -36,6 +36,13 @@ import {
 } from "./manifest.js";
 import { isAssembledAtStartup } from "./services/extension-preferences/selector.js";
 import { ExtensionPreferenceStore } from "./services/extension-preferences/store.js";
+import {
+  defaultLegacyStorage,
+  migrateLegacyPreferences,
+  persistFrontendExtension,
+  readFrontendExtensionPreferences,
+  watchFrontendExtensionPreferences
+} from "./services/extension-preferences/config-source.js";
 import { beginStartupSpan } from "./services/telemetry-primitives.js";
 import type { PreferenceStorage } from "./services/extension-preferences/codec.js";
 import { AppRouterStore, type AppHistoryAdapter } from "./navigation/app-router-store.js";
@@ -49,6 +56,7 @@ import { createExtensionRuntimeService, type ExtensionRuntimeService } from "./e
 import { resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
 import { installAppHostConnectivity, type AppConnectivityOptions, type AppConnectivityRuntime } from "./app-host-connectivity.js";
 import { browserHistory, subscribePreparationReady } from "./page-scope-helpers.js";
+import { createSettingsRemote, type SettingsRemote } from "./services/settings-remote.js";
 
 /** App 运行时快照：页面、location 与兼容设置意图的诊断必须原子发布。 */
 export type AppRuntimeSnapshot = {
@@ -102,10 +110,15 @@ export type StartAppOptions = AppConnectivityOptions & {
   /** History 适配（测试注入；缺省用 globalThis.history）。 */
   history?: AppHistoryAdapter;
   /**
-   * 插件偏好存储（测试注入；缺省 globalThis.localStorage）。
-   * change: add-frontend-plugin-manager，design D2/D3。
+   * 旧版浏览器偏好的读取介质：**只用于一次性迁移**到宿主配置文件。
+   * 传 null 表示跳过迁移；缺省读 globalThis.localStorage。
    */
   extensionPreferenceStorage?: PreferenceStorage | null;
+  /**
+   * 宿主设置 API 客户端（测试注入；缺省按同源路径创建）。
+   * 插件启停的读取与写入都走它，配置落在宿主配置文件里。
+   */
+  settingsRemote?: SettingsRemote;
   /** 测试注入的刷新适配（传递到 Plugin Manager；缺省页面 reload）。 */
   extensionManagerReload?: () => void;
   /**
@@ -226,12 +239,34 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     const configurableIds = resolveConfigurableOptionalIds(runtimeCatalogIds);
     const catalogMetadata = canvasExtensionCatalogMetadata(extensionCatalogMetadata(metadata));
 
-    // 2. 读一次浏览器本地选择（design D2/D8）：browser-local optional 由用户偏好决定本次是否装配；
-    //    站点插件（server-active）只登记，由 reconciler 跟随服务端实际状态。
+    // 2. 目标状态来自宿主配置文件（`extensions.frontend.<id>.enabled`）：与 provider 参数同层同格式，
+    //    前端只投影、不自持 localStorage。启动前先读一次权威配置；读取失败按全部启用继续启动
+    //    （缺配置不该拦住画布，面板会显示持久化不可用）。
+    // 配置来源：宿主设置 API（独立 remote 实例，不依赖 scope 内服务装配顺序）。
+    const settingsRemote = options.settingsRemote ?? createSettingsRemote();
+    const initialPreferences = await readFrontendExtensionPreferences(settingsRemote);
     const preferenceStore = new ExtensionPreferenceStore({
       ids: configurableIds,
-      ...(options.extensionPreferenceStorage !== undefined ? { storage: options.extensionPreferenceStorage } : {})
+      ...(initialPreferences.ok ? { desired: initialPreferences.preferences } : {}),
+      persist: persistFrontendExtension(settingsRemote)
     });
+    // 读取失败不阻断启动：这时按全部启用装配，面板据此显示持久化不可用。
+    if (options.extensionPreferenceStorage !== null) {
+      void migrateLegacyPreferences({
+        remote: settingsRemote,
+        storage: options.extensionPreferenceStorage ?? defaultLegacyStorage(),
+        ids: configurableIds,
+        current: preferenceStore.getSnapshot().preferences
+      }).then((outcome) => {
+        if (outcome.migrated.length > 0) {
+          // 迁移写回宿主机配置文件后，以宿主快照为准重新投影。
+          void readFrontendExtensionPreferences(settingsRemote).then((result) => {
+            if (result.ok) preferenceStore.applyDesired(result.preferences);
+          });
+        }
+        return undefined;
+      });
+    }
     const desired = preferenceStore.getSnapshot().preferences;
     const selectionResult = resolveExtensionStartupSelection({ metadata, desired });
     // 内置 optional（node-history）沿用既有 selector 语义。
@@ -294,13 +329,35 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     const optionalFailures: Record<string, string> = {};
     for (const diagnostic of loadDiagnostics) optionalFailures[diagnostic.extensionId] = diagnostic.message ?? "加载失败";
 
+    // 启动时**实际装配**的集合：目标状态 + 加载成功与否。这是 runtime 就绪前的回退值。
+    // 启动时**实际**装配的集合：目标启用、且（发布目录扩展）实现加载成功。
+    // `selectionResult.assembled` 是「目标」（被禁用时同样是 false），不能直接当实际状态用；
+    // 宿主内置 optional（如 node-history）不在 `loadedDefinitions` 里，用 `builtinAssembled`。
+    const loadedIdSet = new Set(loadedDefinitions.map((definition) => definition.id));
+    const assembledAtStartup: Record<string, boolean> = { ...builtinAssembled };
+    for (const id of configurableIds) {
+      if (builtinAssembled[id] !== undefined) continue;
+      assembledAtStartup[id] = (selectionResult.assembled[id] ?? false) && loadedIdSet.has(id);
+    }
+
+    // 面板要读**当前**装配状态：热插拔后 runtime.plugins 才知道真相，用启动快照会一直显示
+    // 「待启用/待停用」（进而提示「重启后生效」，而那条语义已经不存在了）。
+    let liveRuntime: FrontendRuntime | null = null;
+    const assembledNow = (): Readonly<Record<string, boolean>> => {
+      // runtime 就绪后以它为准（热插拔的真相）；之前用启动时的实际装配结果。
+      if (!liveRuntime?.plugins) return assembledAtStartup;
+      const result: Record<string, boolean> = {};
+      for (const id of configurableIds) result[id] = liveRuntime.plugins.has(id);
+      return result;
+    };
+
     const manifest = createCanvasExtensionManifest({
       canvasId,
       catalogMetadata,
       configurableOptionalIds: configurableIds,
       extensions: loadedDefinitions,
       extensionManager: {
-        assembled: { ...builtinAssembled, ...selectionResult.assembled },
+        assembled: assembledNow,
         failed: failedOptionalIds,
         failures: optionalFailures,
         catalog: catalogMetadata,
@@ -309,7 +366,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
         ...(options.extensionManagerReload ? { reload: options.extensionManagerReload } : {})
       }
     });
-    const assembled = { ...builtinAssembled, ...selectionResult.assembled };
+    const assembled = assembledAtStartup;
     const plugins = manifest.filter((definition) => isAssembledAtStartup(definition, assembled));
     const disabled = Object.entries(assembled)
       .filter(([, enabled]) => !enabled)
@@ -346,10 +403,72 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
         "settingsOpen"
       ]
     });
+    // 面板从此刻起读实时装配状态（见上面的 assembledNow）。
+    liveRuntime = runtime;
+    // 配置热生效：宿主配置文件里 `extensions.<id>.enabled` 变了，就装回或卸下对应 fiber，
+    // 不重建页面 scope（旧行为是「下次启动生效」）。
+    // 可换表覆盖**全部** configurable optional：包含宿主内置（如 node-history）与发布目录扩展。
+    // 清单里被过滤掉的定义也保留，才能在配置改回启用时热装回来。
+    const swappableById = new Map<string, FrontendExtensionDefinition>();
+    for (const definition of manifest) {
+      if (definition.required) continue;
+      if (!configurableIds.includes(definition.id)) continue;
+      swappableById.set(definition.id, { ...definition });
+    }
+    // 启动时被禁用、从未加载过实现的发布目录扩展：按 metadata 补一个占位定义，
+    // 首次启用时再取 artifact。
+    for (const entry of catalogMetadata) {
+      if (!entry.configurable || entry.required) continue;
+      if (swappableById.has(entry.id)) continue;
+      swappableById.set(entry.id, {
+        id: entry.id,
+        required: false,
+        configurable: true,
+        name: entry.name,
+        description: entry.description,
+        // 占位：真正启用时用 descriptor.plugin() 替换。
+        plugin: (() => undefined) as unknown as Plugin,
+        extension: true
+      });
+    }
+    const loadedIds = new Set(loadedDefinitions.map((definition) => definition.id));
+    const applyPreferences = async (): Promise<void> => {
+      const snapshot = preferenceStore.getSnapshot().preferences;
+      for (const [id, definition] of swappableById) {
+        const shouldRun = snapshot[id] ?? true;
+        const running = runtime.plugins?.has(id) ?? false;
+        if (shouldRun && !running) {
+          // 启动时被禁用、从未加载过实现：现在才取 artifact。
+          // 只有**发布目录**扩展需要现取 artifact；宿主内置插件（如 node-history）
+          // 的定义自带 plugin 工厂，不在 loadedDefinitions 里也不该去 loadDescriptor。
+          if (!loadedIds.has(id) && definition.extension) {
+            try {
+              const descriptor = await runtimeService.loadDescriptor(id);
+              definition.plugin = descriptor.plugin() as Plugin;
+              loadedIds.add(id);
+            } catch {
+              // 加载失败保持未装配；下一次配置变化或重开页面会再试。
+              continue;
+            }
+          }
+          runtime.plugins?.enable(definition);
+        } else if (!shouldRun && running) {
+          await runtime.plugins?.disable(id);
+        }
+      }
+    };
+    // 两个触发源：面板写入（store 自身变化，立即生效）与配置文件被外部编辑（轮询宿主快照）。
+    // 面板快照由 facade 自己订阅 store 重建，所以这里不必额外通知。
+    const unsubscribeStore = preferenceStore.subscribe(() => void applyPreferences());
+    const unsubscribeConfig = watchFrontendExtensionPreferences(settingsRemote, (preferences) => {
+      preferenceStore.applyDesired(preferences);
+    });
     const disposeRuntime = runtime.dispose;
     return {
       ...runtime,
       async dispose() {
+        unsubscribeStore();
+        unsubscribeConfig();
         await disposeRuntime();
         preferenceStore.dispose();
       }

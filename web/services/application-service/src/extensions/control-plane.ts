@@ -46,13 +46,26 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
   /** extensionId -> 当前 public 实例的配置版本（undefined 表示未激活公共实例）。 */
   const publicVersion = new Map<string, number>();
 
+  /**
+   * 目标启用状态：以配置文件的 `extensions.<id>.enabled` 为准（注入 `toggles` 时），
+   * 未提供注入则回退到 SQLite 的 `desiredEnabled`（旧部署/测试）。
+   */
+  const isDesiredEnabled = (extensionId: string): boolean => {
+    if (options.toggles) {
+      const explicit = options.toggles.all()[extensionId];
+      if (explicit !== undefined) return explicit;
+      return catalog.source.get(extensionId)?.defaultEnabled ?? false;
+    }
+    return options.store.get(extensionId)?.desiredEnabled ?? false;
+  };
+
   const leaseFor = (extensionId: string): ExtensionWorkLease => {
     let lease = leases.get(extensionId);
     if (!lease) {
       lease = createExtensionWorkLease({
         extensionId,
         store: options.workStore,
-        isDesiredEnabled: () => options.store.get(extensionId)?.desiredEnabled ?? false,
+        isDesiredEnabled: () => isDesiredEnabled(extensionId),
         committedVersion: () => options.store.get(extensionId)?.configVersion ?? null,
         isActive: () => publicVersion.has(extensionId),
         logger: options.logger
@@ -91,32 +104,44 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     const config = options.store.get(extensionId);
     const lease = leaseFor(extensionId);
     const actual = options.store.actual(extensionId);
+    // 启停以配置文件为准；没有 SQLite 版本记录不再意味着「未配置」——配置在文件里。
+    const desired = isDesiredEnabled(extensionId);
     // 只有「public 实例就是已提交版本」时插件的健康才有意义：配置中/停用时不问插件。
-    const publicCurrent =
-      config !== undefined && config.desiredEnabled && publicVersion.get(extensionId) === config.configVersion;
+    const publicCurrent = desired && (options.toggles ? publicVersion.has(extensionId) : config !== undefined && publicVersion.get(extensionId) === config.configVersion);
     const health = publicCurrent ? healthFor(extensionId) : undefined;
     let actualState: ApplicationExtensionActualState;
-    if (suspended.has(extensionId) && (config?.desiredEnabled ?? metadata.defaultEnabled === true)) {
-      // 安全模式暂停：只改投影，不改已保存的 desiredEnabled；退出安全模式后按原配置恢复。
+    // 未注入 toggles 且没有 SQLite 记录：沿用「未配置」，不伪称已停用。
+    if (!options.toggles && !config) {
+      return {
+        extensionId,
+        desiredEnabled: false,
+        actualState: "unconfigured" as const,
+        configVersion: null,
+        extensionRevision: options.store.revision(),
+        activeWorkCount: lease.activeWorkCount(),
+        diagnostics: diagnosticsFor(extensionId)
+      };
+    }
+    if (suspended.has(extensionId) && desired) {
+      // 安全模式暂停：只改投影，不改配置里的启停；退出安全模式后按原配置恢复。
       actualState = "suspended";
-    } else if (!config) {
-      actualState = "unconfigured";
-    } else if (quarantine.has(extensionId) && config.desiredEnabled) {
-      // 崩溃熔断：优先于 failed / configuring；管理员停用（desiredEnabled=false）仍显示停用。
-      actualState = "quarantined";
-    } else if (actual?.actualState === "failed" && !publicVersion.has(extensionId) && config.desiredEnabled) {
-      actualState = "failed";
-    } else if (!config.desiredEnabled) {
+    } else if (!desired) {
       actualState = lease.isDraining() ? "draining" : "disabled";
-    } else if (publicVersion.get(extensionId) !== config.configVersion) {
-      actualState = "configuring";
+    } else if (quarantine.has(extensionId)) {
+      // 崩溃熔断：优先于 failed / configuring。
+      actualState = "quarantined";
+    } else if (actual?.actualState === "failed" && !publicVersion.has(extensionId)) {
+      actualState = "failed";
+    } else if (options.toggles ? !publicVersion.has(extensionId) : publicVersion.get(extensionId) !== config?.configVersion) {
+      // 目标启用但还没有对应版本的 public 实例（首次激活中或激活失败）。
+      actualState = actual?.actualState === "failed" ? "failed" : "configuring";
     } else {
       // 装载完成但能力未就绪（缺凭据等）：报 degraded，不伪称「运行中」。
       actualState = health ? "degraded" : "active";
     }
     return {
       extensionId,
-      desiredEnabled: config?.desiredEnabled ?? false,
+      desiredEnabled: desired,
       actualState,
       configVersion: config?.configVersion ?? null,
       extensionRevision: options.store.revision(),
@@ -236,6 +261,13 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     }
 
     const timestamp = now().toISOString();
+    // 启停写入配置文件（注入 toggles 时）：配置文件是事实来源，SQLite 只保留版本快照。
+    if (options.toggles) {
+      const toggled = await options.toggles.set(input.extensionId, input.enabled);
+      if (!toggled.ok) {
+        return { ok: false, code: "storage-failed", message: toggled.message };
+      }
+    }
     let committed;
     try {
       committed = options.store.commit({
@@ -331,7 +363,8 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
         continue;
       }
       const config = options.store.get(metadata.extensionId);
-      if (!config) {
+      // 未注入 toggles 时沿用旧语义：没有 SQLite 记录就是「未配置」。
+      if (!options.toggles && !config) {
         if (metadata.defaultEnabled && definitionById.has(metadata.extensionId)) {
           // 仅首次配置走正常版本化提交；手动停用后的重启不得再次启用。
           const initialized = await write({
@@ -345,7 +378,14 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
         options.store.setActual(metadata.extensionId, "unconfigured", [], now().toISOString());
         continue;
       }
-      if (!config.desiredEnabled) {
+      if (!definitionById.has(metadata.extensionId)) {
+        // 可信清单登记但本部署未提供可信后端入口：保持 unconfigured，不伪称 failed。
+        options.store.setActual(metadata.extensionId, "unconfigured", [], now().toISOString());
+        continue;
+      }
+      // 启停以配置文件为准（注入 toggles 时）；否则沿用 SQLite 的 desiredEnabled。
+      const desired = isDesiredEnabled(metadata.extensionId);
+      if (!desired) {
         const lease = leaseFor(metadata.extensionId);
         // 停用且无在途工作：释放 public 实例；被引用的旧版本仍保留到引用清零。
         if (!lease.isDraining()) await deactivatePublic(metadata.extensionId);
@@ -366,9 +406,11 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
         continue;
       }
       // 已启用：依据已提交版本恢复 public 实例；被引用的旧版本恢复为 recovery 实例。
+      // 没有 SQLite 版本记录时（配置在文件里、从未走版本化提交）用 0 作为基线版本。
+      const configVersion = config?.configVersion ?? 0;
       options.store.setActual(metadata.extensionId, "configuring", [], now().toISOString());
       await restoreReferencedVersions(metadata.extensionId);
-      const activation = await activateExtensionVersion(metadata.extensionId, config.configVersion);
+      const activation = await activateExtensionVersion(metadata.extensionId, configVersion);
       if (activation.ok) {
         options.store.setActual(metadata.extensionId, "active", [], now().toISOString());
         await releaseUnreferencedVersions(metadata.extensionId);
@@ -438,6 +480,14 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     reconcileOne: (metadata) => reconcileEach([metadata])
   });
 
+  // 配置文件里的启停被改动（手工编辑或另一处写入）时自动重新协调；
+  // 否则「目标已启用」会永远停在 configuring。
+  const unsubscribeToggles = options.toggles?.subscribe?.(() => {
+    void reconcile().catch((error: unknown) => {
+      log({ event: "site-extension-toggle-reconcile-failed", message: error instanceof Error ? error.message : String(error) });
+    });
+  });
+
   return {
     snapshot,
     changes,
@@ -452,7 +502,8 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     workLease: (extensionId) => (catalog.source.get(extensionId) ? leaseFor(extensionId) : undefined),
     configFacade: (extensionId) => ({
       configVersion: () => options.store.get(extensionId)?.configVersion ?? null,
-      values: () => options.store.get(extensionId)?.values ?? {},
+      // 配置值来自配置文件（`extensions.<id>.*`）；未提供 toggles 的旧部署仍读 SQLite。
+      values: () => (options.toggles ? (options.toggles.values?.(extensionId) ?? {}) : (options.store.get(extensionId)?.values ?? {})),
       secretRefs: () => options.store.get(extensionId)?.secretRefs ?? [],
       desiredEnabled: () => options.store.get(extensionId)?.desiredEnabled ?? false
     }),
@@ -480,6 +531,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
       };
     },
     dispose: async () => {
+      unsubscribeToggles?.();
       for (const lease of leases.values()) lease.dispose();
       leases.clear();
       publicVersion.clear();

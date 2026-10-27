@@ -566,7 +566,18 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     }
   }
 
-  const metadata = [...providerMetadata.map((entry) => entry.value), ...siteEntries];
+  // provider metadata 与站点目录可能列出同一个 extensionId（扩展同时声明 hostPlugin 与 site）。
+  // 按 extensionId 去重并保持首次出现顺序：重复项会让控制面与设置面把同一个插件列两次。
+  const metadata = (() => {
+    const seen = new Set();
+    const merged = [];
+    for (const entry of [...providerMetadata.map((item) => item.value), ...siteEntries]) {
+      if (seen.has(entry.extensionId)) continue;
+      seen.add(entry.extensionId);
+      merged.push(entry);
+    }
+    return merged;
+  })();
 
   /**
    * 按 extensionId 注入依赖并构造后端定义。

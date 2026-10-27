@@ -9,6 +9,7 @@ import {
   APPLICATION_EXTENSION_LOAD_ACTION,
   DEFAULT_SETTINGS_BASE_PATH,
   WOOHAA3_PROTOCOL_VERSION,
+  decodeFrontendExtensionWrite,
   decodeSettingsWrite,
   type HostSafeModeView,
   type InstalledExtensionView,
@@ -20,7 +21,10 @@ import { authorizeAdmin } from "./admin-auth.js";
 
 export type SettingsApiDependencies = {
   directoryControl?: import("../extensions/manifest.js").LoadedExtensionHost["directoryControl"];
-  settings: Pick<SettingsService, "describe" | "plugins" | "update" | "configFile" | "secretsFile">;
+  settings: Pick<
+    SettingsService,
+    "describe" | "plugins" | "update" | "configFile" | "secretsFile" | "extensionToggles" | "setExtensionToggle"
+  >;
   /**
    * 存储扩展点当前注册的后端；按请求现查（config 在基础层装载，storage 在核心层，构造时还拿不到）。
    * 缺省时不提供可选后端，设置页保持纯文本编辑（独立入口与测试）。
@@ -58,6 +62,8 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
           ownerExtensionId: backend.ownerExtensionId ?? null
         }))
       },
+      // browser-local 插件的启停目标状态：来自配置文件，前端只投影、不自持存储。
+      extensionToggles: deps.settings.extensionToggles(),
       files: { config: deps.settings.configFile, secrets: deps.settings.secretsFile }
     };
   };
@@ -65,7 +71,8 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
   return async (req, res) => {
     const pathname = new URL(req.url ?? "/", "http://localhost").pathname.replace(/\/+$/, "");
     const directoryWrite = pathname === `${basePath}/extensions`;
-    if (pathname !== basePath && !directoryWrite) return false;
+    const frontendPluginWrite = pathname === `${basePath}/extension-toggles`;
+    if (pathname !== basePath && !directoryWrite && !frontendPluginWrite) return false;
 
     if (req.method !== "GET" && req.method !== "PUT") {
       sendJson(res, 405, { code: "unsupported", message: "仅支持 GET / PUT" });
@@ -77,7 +84,33 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
       sendJson(res, auth.status, { code: auth.code, message: "需要站点管理员授权" });
       return true;
     }
-    if (req.method === "GET" && !directoryWrite) {
+    if (req.method === "GET" && !directoryWrite && !frontendPluginWrite) {
+      sendJson(res, 200, snapshot());
+      return true;
+    }
+
+    if (frontendPluginWrite) {
+      // browser-local 插件启停：写入宿主的同一个配置文件（extensions.frontend.<id>.enabled），
+      // 与 provider 参数同层；前端随后按配置热装/热卸，不再自持 localStorage。
+      if (req.method !== "PUT") {
+        sendJson(res, 405, { code: "unsupported", message: "仅支持 PUT" });
+        return true;
+      }
+      const written = decodeFrontendExtensionWrite(await readJson(req).catch(() => null));
+      if (!written.ok) {
+        sendJson(res, 400, { code: "malformed-request", message: written.message });
+        return true;
+      }
+      const outcome = await deps.settings.setExtensionToggle(written.value.extensionId, written.value.enabled);
+      if (!outcome.ok) {
+        sendJson(res, 400, {
+          code: "config-invalid",
+          message: outcome.issues.map((issue) => `${issue.key || "(根)"}：${issue.message}`).join("；"),
+          issues: outcome.issues
+        });
+        return true;
+      }
+      log({ event: "frontend-plugin-toggled", actor: auth.actor, extensionId: written.value.extensionId, enabled: written.value.enabled });
       sendJson(res, 200, snapshot());
       return true;
     }

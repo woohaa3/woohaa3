@@ -128,11 +128,9 @@ export function PluginConfigContent({
       : browserRow
         ? browserRow.status === "failed"
           ? "异常"
-          : browserRow.status.startsWith("pending")
-            ? "重启后生效"
-            : browserRow.status === "disabled"
-              ? "已停用"
-              : "本次已启用"
+          : browserRow.status === "disabled"
+            ? "已停用"
+            : "运行中"
         : inactive
           ? "未运行"
           : "运行中";

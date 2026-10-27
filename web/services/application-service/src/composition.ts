@@ -111,6 +111,13 @@ export type ApplicationServiceOptions = {
   /** 安全模式暂停的扩展（D7）：控制面不激活它们，实际状态投影为 `suspended`。 */
   suspendedExtensions?: ReadonlySet<string>;
   /**
+   * 扩展启停的事实来源（配置文件 `extensions.<id>.enabled`）。
+   *
+   * 提供时控制面读写都走它——启停不再落在站点配置表；不提供时回退到 SQLite 的
+   * `desiredEnabled`（兼容旧部署与单元测试）。
+   */
+  extensionToggles?: import("./extensions/control-plane-types.js").ExtensionToggleStore;
+  /**
    * 显式注入的基础提供者（测试/受控部署）。生产由可信扩展在 activation 中登记；这里只允许
    * 显式 fake/等价实现，不引入隐式回退（change: 2026-10-13-...，design D1「测试可注入明确 fake provider」）。
    */
@@ -388,6 +395,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     ...(options.logger ? { logger: options.logger } : {}),
     ...(options.extensionActivationTimeoutMs ? { activationTimeoutMs: options.extensionActivationTimeoutMs } : {}),
     ...(options.suspendedExtensions ? { suspended: options.suspendedExtensions } : {}),
+    ...(options.extensionToggles ? { toggles: options.extensionToggles } : {}),
     now
   });
 

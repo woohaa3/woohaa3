@@ -36,6 +36,9 @@ async function boot() {
   const dir = tempDir();
   const service = await createBackendService({
     env: {
+      // 配置与密钥必须落在临时目录：本用例会写扩展启停，不能碰仓库里的真实配置。
+      WOOHAA3_CONFIG_FILE: path.join(dir, "woohaa.config.yml"),
+      WOOHAA3_SECRETS_FILE: path.join(dir, "woohaa.secrets.yml"),
       WOOHAA3_TASK_STORE_PATH: path.join(dir, "task.sqlite"),
       WOOHAA3_CANVAS_STORAGE_BACKEND: "sqlite",
       WOOHAA3_CANVAS_STORAGE_SQLITE_PATH: path.join(dir, "canvas.sqlite"),
@@ -84,14 +87,21 @@ describe("ChatGPT 插件公开路由", () => {
     }
   }, 30_000);
 
-  it("ChatGPT 和全部内置 Provider 出现在设置页插件配置使用的站点列表", async () => {
+  it("ChatGPT 在控制面 catalog；Provider 出现在设置页插件清单（带 configPrefix）", async () => {
     const app = await boot();
     try {
       const snapshot = (await (await fetch(`${app.base}/api/extensions`)).json()) as { catalog: Array<{ extensionId: string }> };
       expect(snapshot.catalog.some((entry) => entry.extensionId === "oauth-agent")).toBe(true);
-      // 插件管理器读取同一公共 catalog；所有内置 Provider 都必须可见。
-      for (const extensionId of ["tokenhub-provider", "replicate-provider", "fal-provider", "grsai-provider", "runninghub-provider", "ark-provider"]) {
-        expect(snapshot.catalog.some(entry => entry.extensionId === extensionId), extensionId).toBe(true);
+      // Provider 自带 Config 与装配入口，由设置面按配置段管理；控制面 catalog 只列有后端入口的扩展。
+      const settings = (await (await fetch(`${app.base}/api/settings`)).json()) as {
+        plugins: Array<{ id: string; configPrefix?: string; siteManaged: boolean }>;
+      };
+      for (const providerId of ["tokenhub", "replicate", "fal", "grsai", "runninghub", "ark"]) {
+        const row = settings.plugins.find((entry) => entry.id === `${providerId}-provider`);
+        expect(row, `${providerId}-provider`).toBeDefined();
+        expect(row?.configPrefix, `${providerId}-provider`).toBe(`providers.${providerId}`);
+        // 启停不再由站点控制面管理。
+        expect(row?.siteManaged, `${providerId}-provider`).toBe(false);
       }
     } finally {
       await app.close();

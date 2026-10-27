@@ -147,7 +147,6 @@ async function renderWorkspace(
     catalog: [],
     ids: [],
     assembled: {},
-    storage: null,
     refresh: () => undefined,
     site: {
       canManageSite: () => backend.canManage(),

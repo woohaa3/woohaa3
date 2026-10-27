@@ -153,9 +153,20 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         }, { excludeHostPlugins: true })
       : manifest.definitions);
     const metadata = config.applicationExtensionMetadata ?? manifest.metadata;
-    const siteIds = new Set(metadata.map((entry) => entry.extensionId));
-    // 启停由站点控制面管理：本次装配的扩展层 Cordis 插件（站点插件与 hostPlugin Provider/存储）
-    // 都在可信清单里，因此统一登记到 gate；开关即 acquire/release，运行中生效。
+    /**
+     * 由控制面启停的扩展集合（去重；同一 extensionId 可能同时来自 provider metadata 与站点目录）。
+     *
+     * 只有**声明了后端入口**的扩展需要控制面激活/停用；`hostPlugin`（Provider / 存储后端）自带
+     * `Config` schema 与装配入口，启停跟着配置段走，不再绕进控制面
+     * （概念对齐：扩展不按 site/host 分家，但「有没有可激活的后端实例」仍是客观差异）。
+     */
+    const controlPlaneDefinitionIds = new Set(definitions.map((definition) => definition.extensionId));
+    const siteIds = new Set(
+      metadata
+        .map((entry) => entry.extensionId)
+        .filter((id) => controlPlaneDefinitionIds.has(id))
+    );
+    // 启停由控制面管理：只登记本次装配里**有后端入口**的扩展；开关即 acquire/release，运行中生效。
     const siteGate = createSiteGate((config.treeExtensions ?? []).filter((name) => siteIds.has(name)));
     const servicesFor = createServicesFactory(ctx, env, foundationStorage);
     const { generation, mcp, storage } = ctx;
@@ -191,11 +202,36 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       seedProviders,
       requiredProviders,
       ...(ctx.access.foundation ? { foundation: ctx.access.foundation } : {}),
-      applicationExtensionMetadata: metadata,
+      // 控制面的 catalog 只含「有后端入口」的扩展：provider/存储后端自带 Config 与装配入口，
+      // 启停跟着配置段走；把它们列进控制面却没有定义可激活，只会被投影成 failed。
+      applicationExtensionMetadata: metadata.filter((entry) => siteIds.has(entry.extensionId)),
       applicationBackendExtensions: [...definitions, ...siteGate.definitions],
       // 版本激活时限（D4）：按调用现取宿主设置，热更新生效；取值有界。
       extensionActivationTimeoutMs: () =>
         boundedTimeout(ctx.get("config")?.get("extensions.activationTimeoutMs" as never), DEFAULT_ACTIVATION_TIMEOUT_MS),
+      // 启停的事实来源是配置文件（`extensions.<id>.enabled`）：控制面读它、写它也走它，
+      // 配置文件变化经 settings 热重载后再 reconcile。SQLite 只保留版本快照（任务恢复用）。
+      extensionToggles: {
+        all: () => ctx.get("config")?.extensionToggles() ?? {},
+        async set(extensionId, enabled) {
+          const settings = ctx.get("config");
+          if (!settings) return { ok: false as const, message: "配置服务不可用" };
+          const outcome = await settings.setExtensionToggle(extensionId, enabled);
+          return outcome.ok ? { ok: true as const } : { ok: false as const, message: "配置写入失败" };
+        },
+        // 配置文件变化（含手工编辑）热重载后通知控制面重新协调。
+        subscribe(listener) {
+          const settings = ctx.get("config");
+          if (!settings) return () => undefined;
+          return settings.subscribe(["extensions"], () => listener());
+        },
+        // 扩展自己的配置值：`extensions.<id>.*` 去掉启停键，由扩展的 Config 解释。
+        values(extensionId) {
+          const section = ctx.get("config")?.section(`extensions.${extensionId}`) ?? {};
+          const { enabled: _enabled, ...rest } = section as Record<string, unknown>;
+          return rest;
+        }
+      },
       // 安全模式（D7）：扫描期已跳过装配的扩展，控制面把它们投影为 suspended，不改写 desiredEnabled。
       ...(config.safeMode || config.extensionHost?.safeMode
         ? { suspendedExtensions: new Set([...(config.safeMode?.suspended ?? []), ...(config.extensionHost?.safeMode?.suspended ?? [])]) }

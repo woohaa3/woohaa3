@@ -16,6 +16,11 @@ export type SettingsRemote = {
   /** 安装/卸载一个扩展目录（改名，下一次启动生效）；与启停无关。 */
   setExtensionInstalled?(extensionId: string, installed: boolean): Promise<SettingsRemoteResult>;
   write(values: Record<string, SettingsWriteValue>): Promise<SettingsRemoteResult>;
+  /**
+   * 写一个 browser-local 插件的启停目标状态：宿主把
+   * `extensions.frontend.<id>.enabled` 写进配置文件，并热生效。
+   */
+  setExtensionToggle?(extensionId: string, enabled: boolean): Promise<SettingsRemoteResult>;
 };
 
 export type SettingsRemoteOptions = {
@@ -55,6 +60,7 @@ export function createSettingsRemote(options: SettingsRemoteOptions = {}): Setti
   return {
     fetchSnapshot: () => request("GET"),
     setExtensionInstalled: (extensionId, installed) => request("PUT", { extensionId, installed }, "/extensions"),
-    write: (values) => request("PUT", { values })
+    write: (values) => request("PUT", { values }),
+    setExtensionToggle: (extensionId, enabled) => request("PUT", { extensionId, enabled }, "/extension-toggles")
   };
 }

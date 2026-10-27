@@ -23,7 +23,6 @@ import {
   isConfigurable,
   isManageable,
   isSiteRowRunning,
-  pluginStateKind,
   versionLabel,
   type PluginSettingsGroup,
   type PluginViewIndex
@@ -42,7 +41,7 @@ import {
 import "./settings.css";
 
 const SECTION_HINTS: Record<string, string> = {
-  扩展插件: "站点插件的开关对整个实例生效并立即应用；浏览器本地插件在下一次打开时生效。"
+  扩展插件: "开关写宿主的扩展配置并立即生效：停用即卸下，启用即装回，无需重开页面。"
 };
 
 type PluginFilter = "all" | "running" | "disabled" | "configurable";
@@ -54,11 +53,6 @@ const FILTERS: ReadonlyArray<{ id: PluginFilter; label: string }> = [
   { id: "configurable", label: "可配置" }
 ];
 
-/** 浏览器本地插件：偏好与本次装配不一致时提示「下次打开生效」。 */
-function browserPending(index: PluginViewIndex, group: PluginSettingsGroup): boolean {
-  const row = index.browserRows.get(group.id);
-  return row !== undefined && row.status.startsWith("pending");
-}
 
 /** 行右侧的状态：站点/浏览器用权威状态，宿主内置按安装结果。 */
 function pluginStatus(index: PluginViewIndex, group: PluginSettingsGroup): { label: string; tone: "success" | "warning" | "muted" } {
@@ -73,10 +67,10 @@ function pluginStatus(index: PluginViewIndex, group: PluginSettingsGroup): { lab
   const browser = index.browserRows.get(group.id);
   if (browser) {
     if (browser.status === "failed") return { label: "异常", tone: "warning" };
-    if (browser.status.startsWith("pending")) return { label: "重启后生效", tone: "warning" };
+
     return browser.status === "disabled"
       ? { label: "已停用", tone: "muted" }
-      : { label: "本次已启用", tone: "success" };
+      : { label: "运行中", tone: "success" };
   }
   return index.installedIds.has(group.id) ? { label: "运行中", tone: "success" } : { label: "未安装", tone: "muted" };
 }
@@ -349,11 +343,7 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
             );
           })}
 
-          {index.groups.some((group) => pluginStateKind(index, group) === "browser" && browserPending(index, group)) ? (
-            <p className="settings-page__pending" data-testid="settings-plugins-pending">
-              有浏览器本地插件改动，下次打开应用生效。
-            </p>
-          ) : null}
+
           {!store.canManage() ? (
             <p className="settings-page__hint" data-testid="plugins-settings-readonly">仅管理员可修改插件启停与配置。</p>
           ) : null}

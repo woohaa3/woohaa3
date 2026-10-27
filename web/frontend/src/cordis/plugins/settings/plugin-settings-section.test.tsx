@@ -222,14 +222,17 @@ describe("插件目录管理", () => {
     expect(query(container, "settings-plugins-pending")).toBeNull();
   });
 
-  it("浏览器本地插件的开关写本地偏好并提示下次打开生效", async () => {
+  it("浏览器本地插件的开关写宿主配置并立即生效，不再提示「下次打开」", async () => {
     const { container, setEnabled, setSiteEnabled } = await renderSection(SETTINGS, PLUGINS, {
       rows: [{ id: "local-storage", name: "本地存储", description: "", required: false, configurable: true, status: "active" }]
     });
     await act(async () => query<HTMLButtonElement>(container, "settings-plugin-switch-local-storage")!.click());
     expect(setEnabled).toHaveBeenCalledWith("local-storage", false);
     expect(setSiteEnabled).not.toHaveBeenCalled();
-    expect(query(container, "settings-plugin-local-storage")?.textContent).toContain("下次打开生效");
+    const text = query(container, "settings-plugin-local-storage")?.textContent ?? "";
+    // 启停是运行中立即生效的：旧的「下次打开生效 / 重启后生效」文案必须消失。
+    expect(text).not.toContain("下次打开");
+    expect(text).not.toContain("重启后生效");
   });
 
   it("卡片展示扩展声明的版本，没有版本时不显示空标记", async () => {

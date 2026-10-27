@@ -43,6 +43,28 @@ function startTestApp(options: Parameters<typeof startApp>[0] = {}): Promise<App
   });
 }
 
+/** 以宿主配置（前端启停段）提供启动偏好；避免依赖真实 fetch。 */
+function startWithFrontendConfig(options: {
+  preferences: Record<string, boolean>;
+  extensionRuntime?: ReturnType<typeof createSourceExtensionRuntimeService>;
+}): Promise<AppRuntime> {
+  const snapshot = {
+    settings: [],
+    plugins: [],
+    extensionToggles: options.preferences,
+    files: { config: "/tmp/woohaa.config.yml", secrets: "/tmp/woohaa.secrets.yml" }
+  };
+  return startTestApp({
+    initialPathname: "/",
+    ...(options.extensionRuntime ? { extensionRuntime: options.extensionRuntime } : {}),
+    settingsRemote: {
+      fetchSnapshot: async () => ({ ok: true as const, snapshot: snapshot as never }),
+      write: async () => ({ ok: true as const, snapshot: snapshot as never }),
+      setExtensionToggle: async () => ({ ok: true as const, snapshot: snapshot as never })
+    }
+  });
+}
+
 afterEach(async () => {
   await app?.dispose();
   app = null;
@@ -126,22 +148,9 @@ describe("Page scope 生命周期", () => {
 
   it("浏览器本地禁用记录决定启动装配：禁用的 browser-local 插件不装配，required 不受影响", async () => {
     installGlobals();
-    const storage = {
-      data: {
-        "woohaa:frontend-extensions:v1": JSON.stringify({
-          "task-activity": false,
-          "prompt-snippets": false,
-          "node-history": false
-        })
-      } as Record<string, string>,
-      getItem(key: string) {
-        return this.data[key] ?? null;
-      },
-      setItem(key: string, value: string) {
-        this.data[key] = value;
-      }
-    };
-    app = await startTestApp({ initialPathname: "/", extensionPreferenceStorage: storage });
+    app = await startWithFrontendConfig({
+      preferences: { "task-activity": false, "prompt-snippets": false, "node-history": false }
+    });
     const page = app.currentPage()!;
     const diagnostics = page.diagnostics.getStatus();
     for (const id of ["prompt-snippets", "node-history"]) {
@@ -257,16 +266,7 @@ describe("Page scope 生命周期", () => {
 
   it("跨页面切换按浏览器本地偏好重建装配", async () => {
     installGlobals();
-    const storage = {
-      data: { "woohaa:frontend-extensions:v1": JSON.stringify({ "node-history": false }) } as Record<string, string>,
-      getItem(key: string) {
-        return this.data[key] ?? null;
-      },
-      setItem(key: string, value: string) {
-        this.data[key] = value;
-      }
-    };
-    app = await startTestApp({ initialPathname: "/", extensionPreferenceStorage: storage });
+    app = await startWithFrontendConfig({ preferences: { "node-history": false } });
     const first = app.currentPage()!;
     expect(first.diagnostics.getStatus().plugins.find((plugin) => plugin.id === "node-history")?.status).toBe("disabled");
 
