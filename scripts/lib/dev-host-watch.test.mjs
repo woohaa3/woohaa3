@@ -95,6 +95,23 @@ test("扩展：有 browser 入口时串联 build:browser + assemble:extensions",
   assert.deepEqual(noBrowser.steps, [{ scope: "package", script: "build" }]);
 });
 
+test("扩展：dev 模式（assemble:false）只构建 browser 产物，不装配 dist", () => {
+  const repo = makeRepo();
+  const target = resolveWatchTarget({
+    repoRoot: repo.root,
+    backendDir: path.join(repo.root, "web/backend"),
+    file: path.join(repo.root, "extensions/sample-provider/src/backend.ts"),
+    watchRoots: resolveHostWatchRoots({ repoRoot: repo.root, env: {} }),
+    assemble: false
+  });
+  // dev 从不构建 web/frontend/dist，装配必然以「宿主构建产物不存在」失败；
+  // 失败会中断后续步骤，扩展改动永远进不去。
+  assert.deepEqual(target.steps, [
+    { scope: "package", script: "build" },
+    { scope: "package", script: "build:browser" }
+  ]);
+});
+
 test("package.json 变化同样触发该包重建", () => {
   const repo = makeRepo();
   assert.equal(targetFor(repo, "web/services/canvas-service/package.json").name, "@woohaa3/canvas-service");

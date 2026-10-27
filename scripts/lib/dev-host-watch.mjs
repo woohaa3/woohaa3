@@ -116,10 +116,14 @@ function hasIgnoredSegment(repoRoot, absolute) {
  * - `build`：包自己的公开入口（`dist/`）。
  * - `server:build`：只有统一后端需要 —— dev 跑的宿主入口就是它的 `server-dist/index.js`；
  *   服务包的 `server-dist` 只服务 release 组装与生产入口，dev 不执行。
- * - `build:browser` + `assemble:extensions`：扩展浏览器产物走独立构建与装配，宿主 Vite 不编译
- *   扩展源码；装配后刷新页面生效。
+ * - `build:browser`：扩展浏览器产物走独立构建，宿主 Vite 不编译扩展源码。
+ * - `assemble:extensions`：把产物装配进 `web/frontend/dist` 供**生产/预览**静态托管。
+ *   dev 不需要它：运行中的后端直接从 `browser-dist` 在内存里生成发布目录
+ *   （见 lib/extension-release-catalog.mjs），Vite 把 `/extension-releases/` 透传给后端。
+ *   而 dev 从不构建 `web/frontend/dist`，这一步必然以「宿主构建产物不存在」失败，
+ *   失败又会中断后续步骤（含通知宿主重载），表现为改了扩展却永远不生效。
  */
-function buildSteps({ dir, manifest, backendDir }) {
+function buildSteps({ dir, manifest, backendDir, assemble }) {
   const scripts = manifest.scripts ?? {};
   const steps = [];
   if (typeof scripts.build === "string") steps.push({ scope: "package", script: "build" });
@@ -128,7 +132,7 @@ function buildSteps({ dir, manifest, backendDir }) {
   }
   if (typeof scripts["build:browser"] === "string") {
     steps.push({ scope: "package", script: "build:browser" });
-    steps.push({ scope: "workspace", script: "assemble:extensions" });
+    if (assemble) steps.push({ scope: "workspace", script: "assemble:extensions" });
   }
   return steps;
 }
@@ -138,7 +142,7 @@ function buildSteps({ dir, manifest, backendDir }) {
  *
  * @returns {{ key: string, dir: string, name: string, file: string, steps: { scope: "package"|"workspace", script: string }[] } | null}
  */
-export function resolveWatchTarget({ repoRoot, backendDir, file, watchRoots }) {
+export function resolveWatchTarget({ repoRoot, backendDir, file, watchRoots, assemble = true }) {
   const absolute = path.resolve(file);
   if (!watchRoots.some((root) => isInside(root, absolute) || absolute === root)) return null;
   if (!isSourceFile(repoRoot, absolute)) return null;
@@ -153,7 +157,7 @@ export function resolveWatchTarget({ repoRoot, backendDir, file, watchRoots }) {
   }
   if (typeof manifest?.name !== "string" || manifest.name.length === 0) return null;
 
-  const steps = buildSteps({ dir, manifest, backendDir });
+  const steps = buildSteps({ dir, manifest, backendDir, assemble });
   if (steps.length === 0) return null;
   return { key: dir, dir, name: manifest.name, file: path.relative(repoRoot, absolute), steps };
 }
@@ -229,6 +233,8 @@ export function startHostWatch({
   runStep,
   log = () => {},
   debounceMs = 150,
+  /** 是否在扩展重建后追加 `assemble:extensions`（生产/预览需要；dev 不需要，见 buildSteps）。 */
+  assemble = true,
   reattachDelayMs = 250,
   watch = fs.watch,
   watchRoots = resolveHostWatchRoots({ repoRoot, env })
@@ -240,8 +246,12 @@ export function startHostWatch({
     runBuild: async (target) => {
       for (const step of target.steps) await runStep(step, target);
       // Windows 只监听这个重载入口，避免 Node 隐式监听依赖目录的重复通知。
-      // 浏览器发布目录同样经 fs 读取，需要在装配完成后显式通知宿主。
-      if (process.platform === "win32" || target.steps.some(step => step.script === 'assemble:extensions')) {
+      // 浏览器产物同样经 fs 读取，构建完成后显式通知宿主重载发布目录。
+      // 注意这里是 `build:browser` 而不是 `assemble:extensions`：dev 不装配，但照样要重载。
+      const touchesBrowserArtifact = target.steps.some(
+        (step) => step.script === "assemble:extensions" || step.script === "build:browser"
+      );
+      if (process.platform === "win32" || touchesBrowserArtifact) {
         const entry = path.join(backendDir, 'server-dist/index.js');
         if (fs.existsSync(entry)) {
           const now = new Date();
@@ -268,7 +278,7 @@ export function startHostWatch({
         const digest = sourceDigest(file);
         if (sources.get(file) === digest || !sources.has(file) && digest === null) return;
         sources.set(file, digest);
-        const target = resolveWatchTarget({ repoRoot, backendDir, file, watchRoots });
+        const target = resolveWatchTarget({ repoRoot, backendDir, file, watchRoots, assemble });
         if (target !== null) queue.schedule(target);
       });
     } catch (error) {

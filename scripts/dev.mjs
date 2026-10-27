@@ -347,7 +347,10 @@ async function main() {
         const where = event.root ? ` ${path.relative(root, event.root)}` : "";
         console.warn(`[dev] ${event.event}${where}${event.message ? `：${event.message}` : ""}`);
       },
-      runStep: rebuildStep
+      runStep: rebuildStep,
+      // dev 不装配 web/frontend/dist：发布目录由运行中的后端从 browser-dist 在内存里生成。
+      // 装配只会以「宿主构建产物不存在」失败，并挡住后续的重载通知。
+      assemble: false
     });
     console.log(`[dev] 宿主 watch：${hostWatch.roots.length} 个源码根（--no-watch 关闭）；改宿主代码自动重建，宿主按需重启`);
   }
