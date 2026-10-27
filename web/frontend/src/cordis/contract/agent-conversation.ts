@@ -149,6 +149,7 @@ export type AgentConversationService = AgentConversationView & {
    */
   locateTurnByRun: (runId: string) => Promise<AgentConversationResult<{ conversation: ConversationSummary; turn: ConversationTurn; snapshot: ConversationSnapshot }>>;
   /** 取消在途回合（不撤销已提交领域动作）。 */
+  retryTextSave?: (requestId: string) => Promise<AgentConversationResult<{ turn: ConversationTurn }>>;
   cancelTurn: (requestId: string) => Promise<AgentConversationResult<{ ok: true }>>;
   /** 由宿主领域链在 run/task 接受后显式关联（不从节点 active run 反推）。 */
   linkRun: (requestId: string, input: { runId?: string; taskId?: string }) => Promise<AgentConversationResult<{ turn: ConversationTurn }>>;

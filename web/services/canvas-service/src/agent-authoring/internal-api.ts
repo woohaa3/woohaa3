@@ -166,7 +166,7 @@ export function createAgentInternalHandler(options: AgentInternalHandlerOptions)
       if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
       const authorized = await authorizeRun(options.service, principalId, decoded.value.canvasId, "write");
       if (!authorized.ok) return sendOutcome(res, authorized, log);
-      const outcome = await options.runAdapter.run({ ...decoded.value, canvasId: authorized.canvasId });
+      const outcome = await options.runAdapter.run({ ...decoded.value, canvasId: authorized.canvasId, owner: principalId });
       return sendOutcome(res, outcome, log);
     }
 
@@ -175,7 +175,7 @@ export function createAgentInternalHandler(options: AgentInternalHandlerOptions)
       if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
       const authorized = await authorizeRun(options.service, principalId, decoded.value.canvasId, "read");
       if (!authorized.ok) return sendOutcome(res, authorized, log);
-      const outcome = await options.runAdapter.status({ ...decoded.value, canvasId: authorized.canvasId });
+      const outcome = await options.runAdapter.status({ ...decoded.value, canvasId: authorized.canvasId, owner: principalId });
       return sendOutcome(res, outcome, log);
     }
 
@@ -184,7 +184,7 @@ export function createAgentInternalHandler(options: AgentInternalHandlerOptions)
       if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
       const authorized = await authorizeRun(options.service, principalId, decoded.value.canvasId, "write");
       if (!authorized.ok) return sendOutcome(res, authorized, log);
-      const outcome = await options.runAdapter.cancel({ ...decoded.value, canvasId: authorized.canvasId });
+      const outcome = await options.runAdapter.cancel({ ...decoded.value, canvasId: authorized.canvasId, owner: principalId });
       return sendOutcome(res, outcome, log);
     }
 

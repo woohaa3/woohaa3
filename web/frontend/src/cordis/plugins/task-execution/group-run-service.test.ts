@@ -395,3 +395,24 @@ describe("categorizeSkipReason / belongsToGroup（任务 1.1）", () => {
     expect(belongsToGroup(nodes, "loop1", "missing")).toBe(false);
   });
 });
+
+it("dispatches mixed media/text independently, freezing text drafts and preserving accepted siblings on failure", async () => {
+  const c = canvas([...GROUP, { id: "words", type: "text", parentId: "g" }, { id: "bad", type: "text", parentId: "g" }], { a: { prompt: "image" }, b: { prompt: "image" } });
+  const entry = { action: "generate" as const, mode: "text" as const, canvasId: "c1", nodeId: "words", prompt: "unsent draft", model: "assistant-model" };
+  const text: string[] = [];
+  const f = service({ getCanvas: () => c, textPrecheck: (_canvas, nodeId) => nodeId === "bad" ? { eligible: false, reason: "助手选择失效" } : { eligible: true, input: { canvasId: "c1", entry } },
+    submitText: async input => { text.push(input.entry.prompt); return { ok: false, error: "connection revoked" }; } });
+  expect(f.run.preview("g")).toMatchObject({ count: 3, skipped: [{ nodeId: "bad" }] });
+  const summary = await f.run.runGroup("g");
+  expect(summary).toMatchObject({ accepted: ["a", "b"], failed: [{ nodeId: "words" }], skipped: [{ nodeId: "bad" }] });
+  expect(text).toEqual(["unsent draft"]);
+  expect(f.submitted).toEqual(["a", "b"]);
+});
+
+it("text-only groups can submit with no Task language catalog", async () => {
+  const c = canvas([{ id: "g", type: "group" }, { id: "words", type: "text", parentId: "g" }]);
+  const f = service({ getCanvas: () => c, catalogState: () => ({ status: "loading" }), textPrecheck: () => ({ eligible: true, input: { canvasId: "c1", entry: { action: "generate", mode: "text", canvasId: "c1", nodeId: "words", prompt: "draft" } } }), submitText: async () => ({ ok: true }) });
+  expect(f.run.preview("g")).toMatchObject({ enabled: true, count: 1 });
+  expect(await f.run.runGroup("g")).toMatchObject({ accepted: ["words"] });
+  expect(f.submitted).toEqual([]);
+});

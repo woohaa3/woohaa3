@@ -72,6 +72,7 @@ export function createChatGptConversationAdapter(
   const ownerIdFor = options.ownerIdFor ?? ((owner) => `principal:${owner}`);
 
   const capabilities = (): AgentAdapterCapabilities => ({
+    textDelivery: { imageInput: true, maxImages: 12 },
     candidateGeneration: { imageInput: true, maxImages: 12 },
     discussion: true,
     targets: ["model3d", "film-set", "camera"],
@@ -142,7 +143,7 @@ export function createChatGptConversationAdapter(
     if (!service.generation) {
       return { status: "failed", error: { code: "capability-unsupported", message: "ChatGPT 生成未启用" } };
     }
-    if (input.intent.mode === "canvas-group") return { status: "failed", error: { code: "capability-unsupported", message: "此连接尚不支持受控组创作" } };
+    if (input.intent.mode === "canvas-group" || input.intent.mode === "text") return { status: "failed", error: { code: "capability-unsupported", message: "此连接尚不支持受控组创作" } };
     const mode: ChatGptGenerationMode | null = input.intent.mode ?? (input.intent.nodeId ? "model3d" : null);
     if (!mode) return { status: "failed", error: { code: "malformed-request", message: "缺少目标模式" } };
     if (!input.intent.nodeId) return { status: "failed", error: { code: "malformed-request", message: "目标动作必须带 nodeId" } };

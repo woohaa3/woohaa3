@@ -50,3 +50,12 @@ it("rejected submissions are page-only facts with no archive identity", () => {
   expect(rejected[0]?.entryId).toBeUndefined();
   expect(mergeNodeExecutionPresentation([], [])).toEqual([]);
 });
+
+it("hands a text assistant activity to its durable version as one logical operation", () => {
+  const record = { ...operation("running", "text-run:one"), kind: "text" as const };
+  const version = entry({ kind: "text", source: { label: "文本助手", runId: record.operationId }, preview: { kind: "text", excerpt: "# Markdown" } });
+  const active = mergeNodeExecutionPresentation([record], []);
+  const archived = mergeNodeExecutionPresentation([record], [version]);
+  expect(archived).toHaveLength(1);
+  expect(archived[0]).toMatchObject({ presentationId: active[0]!.presentationId, current: true, recoverable: true });
+});

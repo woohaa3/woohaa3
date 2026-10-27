@@ -1,4 +1,5 @@
 import { createSiteProviderSource } from "./service-connection-sources.js";
+import { createAssistantTextPort } from "../../ports/assistant-text.js";
 import { createCanvasCreationPort } from "../../ports/canvas-creation.js";
 import { createGroupEffects } from "../../ports/group-effects.js";
 /**
@@ -247,6 +248,10 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       // 诊断缓冲只读投影：remote-server 扩展用它在调试窗口里展示接入过程。
       ...(diagnostics ? { diagnostics } : {}),
       // 宿主 Agent 会话的受控画布授权（owner + canvas 隔离）。
+      assistantText: createAssistantTextPort(ctx.canvas, { verify: ctx.media.port().verify, read: async (storageKey, canvasId) => {
+        const result = await ctx.media.port().resources!.read!(storageKey, canvasId);
+        return result;
+      } }),
       canvasCreation: createCanvasCreationPort(ctx.canvas),
       candidateAssistantProviders: () => ctx.generation.conversions(),
       groupEffects: createGroupEffects(ctx.canvas, ctx.toolGrants),

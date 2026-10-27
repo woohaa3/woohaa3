@@ -14,6 +14,8 @@ describe("candidate provider directory projection", () => {
     const connections = () => host.resolveCapability(id) as AgentConnectionProvider;
     expect(await connections().listConnections({ owner: "" })).toEqual([]);
     const first = (await connections().listConnections({ owner: "a" }))[0]!;
+    expect(first.capabilities.textDelivery).toBeUndefined();
+    expect(first.capabilities.tools).toBe(false);
     expect((await connections().listConnections({ owner: "a" }))[0]!.configRevision).toBe(first.configRevision);
     providers = [make()];
     expect((await connections().listConnections({ owner: "a" }))[0]!.configRevision).toBeGreaterThan(first.configRevision);

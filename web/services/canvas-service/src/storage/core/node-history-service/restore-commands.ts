@@ -69,6 +69,7 @@ export function buildRestoreCommands(
           value: {
             outputAssetId: asset.id,
             resourceKind: "text",
+            activeRunId: `history:${entry.entryId}`,
             taskStatus: "successed",
             progress: 100,
             error: null,

@@ -48,7 +48,8 @@ export type CanvasNodeTaskStatus =
   | "processing"
   | "successed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "unknown";
 
 /** 节点 `jobs[].status`（画布域的 `GenerationStatus`）取值。 */
 export type CanvasJobStatus =

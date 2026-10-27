@@ -136,6 +136,7 @@ describe("ChatGPT 会话 adapter · 能力与授权", () => {
     const adapter = build({ service });
     expect(adapter.id).toBe(CHATGPT_CONVERSATION_ADAPTER_ID);
     expect(adapter.capabilities()).toEqual({
+      textDelivery: { imageInput: true, maxImages: 12 },
       candidateGeneration: { imageInput: true, maxImages: 12 },
       discussion: true,
       targets: ["model3d", "film-set", "camera"],

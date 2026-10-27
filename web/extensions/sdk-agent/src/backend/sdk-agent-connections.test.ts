@@ -125,6 +125,7 @@ it("选择的思考强度传入 SDK，未开放的模型在启动前拒绝", asy
 it("candidate run uses native images and no history binding/grant, rejects a stale completion", async () => {
   const f = fixture();
   const candidate = { images: [{ bytes: new Uint8Array([1]), contentType: "image/png" }], outputSchema: { type: "object" } };
+  expect(f.create().capabilities().textDelivery).toEqual({ imageInput: true, maxImages: 12 });
   expect(await f.create().run(f.input({ candidate }))).toMatchObject({ status: "succeeded" });
   expect(f.run.mock.calls[0]![0]).toMatchObject({ images: candidate.images, outputSchema: candidate.outputSchema, mcp: null, restrictions: { allowedTools: [] } });
   expect(f.service.resolveNativeBinding).not.toHaveBeenCalled(); expect(f.service.setNativeBinding).not.toHaveBeenCalled();

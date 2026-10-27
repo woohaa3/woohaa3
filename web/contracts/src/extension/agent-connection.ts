@@ -118,6 +118,7 @@ export function isAgentModelCapabilitySource(value: unknown): value is AgentMode
  * 结构化结果、取消与恢复，供生成入口在发送前做目标/输入预检（design D3/D8）。
  */
 export type AgentConnectionCapabilities = {
+  textDelivery?: import("./conversation.js").AssistantTextCapabilities;
   discussion: boolean;
   imageInput: boolean;
   tools: boolean;
@@ -139,7 +140,7 @@ export type AgentConnectionModel = {
    */
   accountAuthorized: boolean;
   /** 模型级能力覆盖（缺省继承连接能力）。 */
-  capabilities?: Partial<Pick<AgentConnectionCapabilities, "imageInput" | "tools" | "structuredResult">>;
+  capabilities?: Partial<Pick<AgentConnectionCapabilities, "imageInput" | "tools" | "structuredResult" | "textDelivery">>;
 };
 
 /**
@@ -188,6 +189,7 @@ export function isAgentConnectionCapabilities(value: unknown): value is AgentCon
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
+    (candidate.textDelivery === undefined || isTextDelivery(candidate.textDelivery)) &&
     typeof candidate.discussion === "boolean" &&
     typeof candidate.imageInput === "boolean" &&
     typeof candidate.tools === "boolean" &&
@@ -213,6 +215,7 @@ export function isAgentConnectionModel(value: unknown): value is AgentConnection
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
+    (candidate.capabilities === undefined || (typeof candidate.capabilities === "object" && candidate.capabilities !== null && ((candidate.capabilities as Record<string, unknown>).textDelivery === undefined || isTextDelivery((candidate.capabilities as Record<string, unknown>).textDelivery)))) &&
     typeof candidate.id === "string" &&
     candidate.id.length > 0 &&
     typeof candidate.label === "string" &&
@@ -343,4 +346,10 @@ export function connectionReady(
   required: readonly AgentConnectionStatusKind[] = AGENT_CONNECTION_STATUS_KINDS
 ): boolean {
   return required.every((kind) => status[kind].state === "ready");
+}
+
+function isTextDelivery(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const capability = value as Record<string, unknown>;
+  return typeof capability.imageInput === "boolean" && Number.isSafeInteger(capability.maxImages) && (capability.maxImages as number) >= 0;
 }

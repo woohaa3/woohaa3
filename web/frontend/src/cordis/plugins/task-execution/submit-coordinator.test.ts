@@ -18,7 +18,7 @@ function catalog(): CanvasTaskCatalog {
         providerId: "litellm",
         modelKey: "gemini-2.5-flash",
         providerModelId: "gemini-2.5-flash",
-        modelType: "language",
+        modelType: "image",
         title: "Text",
         interaction: { id: "generic-model", version: 1 },
         inputSchema: {},
@@ -33,7 +33,7 @@ function catalog(): CanvasTaskCatalog {
 
 function canvasWithNode() {
   const canvas = createEmptyWoohaa3ServerCanvas("canvas-a");
-  canvas.document.nodes.push({ id: "text-1", type: "text", position: { x: 0, y: 0 } });
+  canvas.document.nodes.push({ id: "text-1", type: "image", position: { x: 0, y: 0 } });
   return canvas;
 }
 
@@ -63,7 +63,7 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
       client: { run: async () => { requests++; return new Promise(done => { resolve = done; }); }, cancel: async () => ({ ok: true }) },
       activity: { started: () => {}, localRejected: () => {}, launch: event => { phases.push(event.phase); if (event.phase === "accepted") throw new Error("overlay released"); } }
     });
-    const input = { nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "language" as const, origin: { x: 10, y: 20, token: "manual" } };
+    const input = { nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "image" as const, origin: { x: 10, y: 20, token: "manual" } };
     await coordinator.submit({ ...input, prompt: "" }); expect(phases).toEqual([]);
     const submitting = coordinator.submit(input);
     expect(requests).toBe(1); expect(phases).toEqual(["started"]);
@@ -78,7 +78,7 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
       client: { run: async () => { throw new Error("offline"); }, cancel: async () => ({ ok: true }) },
       activity: { started: () => {}, localRejected: event => { rejections.push(event); }, launch: event => { phases.push(event.phase); } }
     });
-    const outcome = await coordinator.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "language", origin: { x: 0, y: 0, token: "manual" } });
+    const outcome = await coordinator.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "image", origin: { x: 0, y: 0, token: "manual" } });
     expect(outcome.ok).toBe(false); expect(rejections).toHaveLength(1); expect(phases).toEqual(["started", "rejected"]);
     expect(coordinator.pendingWaiting()).toEqual([]);
   });
@@ -103,9 +103,9 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
       activity: activity as never,
       createRunId: () => "run-fixed"
     });
-    await accepted.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "language" });
+    await accepted.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "image" });
     expect(started).toEqual([
-      { runId: "run-fixed", jobId: "job-run-fixed", nodeId: "text-1", state: "queued", modelType: "language", modelKey: "gemini-2.5-flash", createdAt: expect.any(String) }
+      { runId: "run-fixed", jobId: "job-run-fixed", nodeId: "text-1", state: "queued", modelType: "image", modelKey: "gemini-2.5-flash", createdAt: expect.any(String) }
     ] as never);
     expect(rejections).toEqual([]);
 
@@ -115,7 +115,7 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
       activity: activity as never,
       createRunId: () => "run-denied"
     });
-    await rejected.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "language" });
+    await rejected.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "image" });
     expect(rejections).toEqual([{ runId: "run-denied", nodeId: "text-1", message: "网关拒绝" }]);
   });
 
@@ -150,7 +150,7 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
       prompt: "你好",
       parameters: {},
       catalog: catalog(),
-      expectedModelType: "language"
+      expectedModelType: "image"
     });
     expect(outcome).toEqual({ ok: true, runId: "run-fixed", jobId: "job-run-fixed" });
     expect(calls).toHaveLength(1);
@@ -177,7 +177,7 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
       prompt: "p",
       parameters: {},
       catalog: catalog(),
-      expectedModelType: "language"
+      expectedModelType: "image"
     });
     expect(missing.ok).toBe(false);
     expect(called).toBe(false);
@@ -188,7 +188,7 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
       prompt: "   ",
       parameters: {},
       catalog: catalog(),
-      expectedModelType: "language"
+      expectedModelType: "image"
     });
     expect(emptyPrompt.ok).toBe(false);
     expect(called).toBe(false);
@@ -199,7 +199,7 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
       prompt: "p",
       parameters: {},
       catalog: catalog(),
-      expectedModelType: "image"
+      expectedModelType: "language"
     });
     expect(wrongType.ok).toBe(false);
     expect(called).toBe(false);
@@ -207,7 +207,7 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
 });
 
 describe("等待镜头参考的自动续交（任务 8.6）", () => {
-  const input = { nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "language" as const };
+  const input = { nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "hi", parameters: {}, catalog: catalog(), expectedModelType: "image" as const };
 
   it("等待态入队，画布更新后恰好续交一次并出队", async () => {
     let ready = false;
@@ -270,4 +270,12 @@ describe("run/cancel 客户端（任务 6.2）", () => {
     // 该 client 的直接协议测试随 change: adopt-frontend-cordis-plugin-runtime 迁移。
     expect(true).toBe(true);
   });
+});
+
+it("rejects new text Provider submissions before calling the Task run client", async () => {
+  const canvas = canvasWithNode(); canvas.document.nodes[0]!.type = "text";
+  let calls = 0;
+  const coordinator = createSubmitCoordinator({ store: { getState: () => ({ canvas }) }, client: { run: async () => { calls++; return { ok: true, runId: "run", jobId: "job" }; }, cancel: async () => ({ ok: true }) } });
+  expect(await coordinator.submit({ nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "generate", parameters: {}, catalog: catalog(), expectedModelType: "language" })).toMatchObject({ ok: false, error: expect.stringContaining("助手") });
+  expect(calls).toBe(0);
 });

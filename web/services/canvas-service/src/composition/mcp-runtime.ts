@@ -33,6 +33,7 @@ import { CanvasScriptService } from "../canvas-script/index.js";
 import { CANVAS_AGENT_DEVELOPMENT_PRINCIPAL_ENV, CANVAS_SCRIPT_ENGINE_ENV } from "./deployment.js";
 
 export type McpRuntimeDeps = {
+  assistantTextRuns?: import("@woohaa3/contracts").AssistantTextRunGateway;
   /** 画布内容聚合端口：MCP 能力面由内容扩展实现（片场节点/导入/对象变更）。 */
   contentRuntime?: import("@woohaa3/contracts").CanvasContentRuntime;
   /** 复合内容帧端口（预览/历史缩略图），来自宿主装配。 */
@@ -174,6 +175,7 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
   const agentRunAdapter = modelMcpEnabled
     ? new AgentRunAdapter({
         resolveRoom: roomResolver,
+        assistantText: deps.assistantTextRuns,
         ...(deps.runService ? { runService: deps.runService } : {}),
         now: deps.now
       })

@@ -42,6 +42,7 @@ import type { SqliteCanvasImportStore } from "../storage/sqlite/canvas-import.js
 import type { CanvasAccessPort, CanvasRequestAuthenticator } from "../access/resolve-access.js";
 
 export type CanvasServiceOptions = {
+  assistantTextRuns?: import("@woohaa3/contracts").AssistantTextRunGateway;
   /**
    * 复合内容聚合端口（预览/历史帧 + 转片场等能力）：由内容扩展实现、backend 宿主装配时注入。
    * 注入后 canvas-service 不再 import 任何扩展实现；缺失的组在宿主侧明确不可用。

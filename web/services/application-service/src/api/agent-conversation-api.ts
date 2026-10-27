@@ -42,6 +42,7 @@ import type { AgentConversationService, AgentConversationServiceError } from "..
 import type { AgentConnectionRegistry } from "../extensions/agent-connection-registry.js";
 
 export type AgentConversationApiDependencies = {
+  assistantText?: import("../extensions/assistant-text-service.js").AssistantTextService;
   canvasCreations?: import("../extensions/canvas-creation-service.js").CanvasCreationService;
   accessRuntime?: import("@woohaa3/contracts").AccessRuntime;
   service: AgentConversationService;
@@ -413,16 +414,41 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
             acceptedConversationId = fresh.conversation.conversationId;
           }
         }
-        const accepted = deps.service.acceptTurn({ owner, conversationId: acceptedConversationId, requestId: decoded.value.requestId, entry: decoded.value.entry, connection: connection.binding });
+        const text = decoded.value.entry.mode === "text" && decoded.value.entry.action !== "discuss";
+        if (text && !deps.assistantText) return badRequest(res, "文本交付端口未装配");
+        const acceptInput = { owner, conversationId: acceptedConversationId, requestId: decoded.value.requestId, entry: decoded.value.entry, connection: connection.binding };
+        const accepted = text ? await deps.assistantText!.accept(acceptInput) : deps.service.acceptTurn(acceptInput);
         if (!accepted.ok) return respondError(res, accepted.error);
-        if (!accepted.reused) void deps.service.dispatchTurn(accepted.turn.turnId);
+        if (!text && !accepted.reused) void deps.service.dispatchTurn(accepted.turn.turnId);
         sendJson(res, 200, { conversation: accepted.conversation, turn: accepted.turn, reused: accepted.reused });
         return true;
       }
 
+      const textRetry = /^turns\/([^/]+)\/retry-save$/.exec(suffix);
+      if (textRetry && method === "POST") {
+        const requestId = decodeURIComponent(textRetry[1]!);
+        const known = deps.assistantText?.peek(owner, requestId);
+        if (!known) return badRequest(res, "文本执行不存在");
+        const allowed = await authorizeCanvas(deps, owner, known.canvasId, "write");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        try {
+          const result = await deps.assistantText!.retry(owner, requestId);
+          if (!result.ok) return respondError(res, result.error);
+          sendJson(res, 200, result);
+        } catch (error) {
+          if (error instanceof Error && "code" in error) return badRequest(res, error.message);
+          throw error;
+        }
+        return true;
+      }
       const turnQuery = /^turns\/([^/]+)$/.exec(suffix);
       if (turnQuery && method === "GET") {
         const requestId = decodeURIComponent(turnQuery[1]!);
+        const original = deps.service.queryTurn({ owner, requestId });
+        if (!original.ok) return respondError(res, original.error);
+        const allowed = await authorizeCanvas(deps, owner, original.turn.target.canvasId, "read");
+        if (!allowed.ok) return respondError(res, allowed.error);
+        await deps.assistantText?.reconcile(owner, requestId);
         const result = deps.service.queryTurn({ owner, requestId });
         if (!result.ok) return respondError(res, result.error);
         sendJson(res, 200, result);
@@ -444,7 +470,9 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
       const turnCancel = /^turns\/([^/]+)\/cancel$/.exec(suffix);
       if (turnCancel && method === "POST") {
         const requestId = decodeURIComponent(turnCancel[1]!);
-        const result = deps.service.cancelTurn({ owner, requestId });
+        const text = deps.assistantText?.peek(owner, requestId);
+        if (text) { const allowed = await authorizeCanvas(deps, owner, text.canvasId, "write"); if (!allowed.ok) return respondError(res, allowed.error); }
+        const result = text ? await deps.assistantText!.cancel(owner, requestId) : deps.service.cancelTurn({ owner, requestId });
         if (!result.ok) return respondError(res, result.error);
         sendJson(res, 200, { ok: true });
         return true;
@@ -457,6 +485,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (body === null) return badRequest(res, "请求体非法");
         const decoded = decodeLinkRunRequest(body);
         if (!decoded.ok) return badRequest(res, decoded.message, decoded.code);
+        if (deps.assistantText?.peek(owner, requestId)) return badRequest(res, "文本执行关联由宿主维护");
         const result = deps.service.linkRun({ owner, requestId, ...(decoded.value.runId ? { runId: decoded.value.runId } : {}), ...(decoded.value.taskId ? { taskId: decoded.value.taskId } : {}) });
         if (!result.ok) return respondError(res, result.error);
         sendJson(res, 200, { turn: result.turn });

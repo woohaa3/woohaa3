@@ -121,6 +121,7 @@ export type AgentConversationService = {
     delivery: NonNullable<AgentTargetSnapshot["delivery"]> }): AcceptTurnResult;
   dispatchDeliveryTurn(turnId: string, execute: (context: {
     signal: AbortSignal;
+    history: readonly import("@woohaa3/contracts").ConversationMessage[];
     emit: (event: AgentConversationAdapterEvent) => void;
   }) => Promise<AgentAdapterRunOutcome>): Promise<void>;
   reconcileDeliveryTurn(input: { owner: string; requestId: string; canvasId: string;
@@ -381,7 +382,7 @@ export function createAgentConversationService(options: AgentConversationService
     };
     let outcome: AgentAdapterRunOutcome;
     try {
-      outcome = delivery ? await delivery({ signal: controller.signal, emit }) : await bound.handle.adapter.run({
+      outcome = delivery ? await delivery({ signal: controller.signal, emit, history }) : await bound.handle.adapter.run({
         owner: turn.owner,
         canvasId: turn.canvasId,
         conversationId: turn.conversationId,
@@ -595,7 +596,7 @@ export function createAgentConversationService(options: AgentConversationService
       const record = store.findTurnByRequest(input.owner, input.requestId);
       if (!record || record.canvasId !== input.canvasId || dispatches.has(record.turnId)) return;
       if (JSON.stringify(JSON.parse(record.targetJson).delivery) !== JSON.stringify(input.delivery)) return;
-      if (!["unknown", "queued", "running", "committing"].includes(record.status)) return;
+      if (!["unknown", "queued", "running", "committing"].includes(record.status) && !(input.delivery.purpose === "text-generation" && input.outcome.status === "succeeded" && input.outcome.receipt)) return;
       finishTurn(record, input.outcome);
     },
 
@@ -618,6 +619,7 @@ export function createAgentConversationService(options: AgentConversationService
       if (input.entry.canvasId !== binding.canvasId) return fail("unauthorized", "目标画布与会话不一致");
       if (input.entry.action !== "discuss" && binding.nodeId && input.entry.nodeId !== binding.nodeId) return fail("unauthorized", "目标节点与会话不一致");
 
+      if (input.entry.mode === "text" && input.entry.action !== "discuss" && !acceptingTrustedDelivery) return fail("capability-unsupported", "文本生成必须经过可信文本交付入口");
       const inputHash = hashIntent(input.entry, input.connection ?? null) + (acceptingStructuredHash ? `:${acceptingStructuredHash}` : "");
       const existing = store.findTurnByRequest(input.owner, input.requestId);
       if (existing) {

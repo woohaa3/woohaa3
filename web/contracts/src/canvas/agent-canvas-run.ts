@@ -14,10 +14,11 @@
  */
 
 export type AgentRunPhase = "queued" | "running" | "terminal";
-export type AgentRunTerminalState = "succeeded" | "failed" | "cancelled";
+export type AgentRunTerminalState = "succeeded" | "failed" | "cancelled" | "unknown";
 
 /** 规范 run 视图（structuredContent）。 */
 export type AgentRunView = {
+  execution?: import("../extension/assistant-execution.js").AssistantExecutionRef;
   protocolVersion: number;
   canvasId: string;
   nodeId: string;
@@ -77,6 +78,7 @@ export const AGENT_TEXT_OUTPUT_MAX_CHARS = 200_000 as const;
 
 /** run 工具的稳定输入。 */
 export type AgentRunInput = {
+  assistant?: import("../extension/assistant-text.js").AssistantTextSelection;
   canvasId?: string;
   requestId: string;
   nodeId: string;

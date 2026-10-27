@@ -25,11 +25,12 @@ export type AgentRunPort = Pick<CanvasRunService, "run" | "cancel">;
 export type AgentRunAdapterDependencies = {
   resolveRoom: (canvasId: string) => Promise<CanvasRoom | null>;
   runService?: AgentRunPort;
+  assistantText?: import("@woohaa3/contracts").AssistantTextRunGateway;
   now?: () => string;
 };
 
 export type AgentRunAccepted =
-  | { ok: true; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted" }
+  | { ok: true; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted"; execution?: import("@woohaa3/contracts").AssistantExecutionRef }
   | { ok: false; code: string; message: string; retryable?: boolean };
 
 export type AgentRunStatus =
@@ -58,6 +59,8 @@ export class AgentRunAdapter {
   }
 
   async run(input: {
+    owner?: string;
+    assistant?: import("@woohaa3/contracts").AssistantTextSelection;
     canvasId: string;
     requestId: string;
     nodeId: string;
@@ -65,14 +68,16 @@ export class AgentRunAdapter {
     prompt?: string;
     parameters?: Record<string, unknown>;
   }): Promise<AgentRunAccepted> {
-    if (!this.deps.runService) {
-      return { ok: false, code: "run-unavailable", message: "本部署未启用节点执行" };
-    }
     const room = await this.deps.resolveRoom(input.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${input.canvasId} 不存在` };
     const exported = room.exportCanvas();
     if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message, retryable: true };
 
+    if (exported.canvas.document.nodes.find(node => node.id === input.nodeId)?.type === "text") {
+      if (!input.owner || !this.deps.assistantText || !input.assistant) return { ok: false, code: "assistant-required", message: "文本生成需要显式助手连接和模型" };
+      return this.deps.assistantText.run({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId, requestId: input.requestId, prompt: input.prompt ?? dataPrompt(exported.canvas, input.nodeId), assistant: input.assistant });
+    }
+    if (!this.deps.runService) return { ok: false, code: "run-unavailable", message: "本部署未启用节点执行" };
     // 模型身份只接受 opaque modelKey；节点 nodeData.modelKey 作为缺省（change:
     // 2026-10-07-remove-residual-compatibility）。
     const data = exported.canvas.nodeData[input.nodeId] as CanvasNodeData | undefined;
@@ -101,12 +106,13 @@ export class AgentRunAdapter {
     return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, runId, jobId, state: "accepted" };
   }
 
-  async status(input: { canvasId: string; nodeId: string; runId: string; waitMs?: number }): Promise<AgentRunStatus> {
+  async status(input: { owner?: string; canvasId: string; nodeId: string; runId: string; waitMs?: number }): Promise<AgentRunStatus> {
     const room = await this.deps.resolveRoom(input.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${input.canvasId} 不存在` };
     const exported = room.exportCanvas();
     if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
 
+    if (input.runId.startsWith("text-run:") && input.owner && this.deps.assistantText) return this.deps.assistantText.status({ ...input, owner: input.owner });
     let view = projectRunView(input.canvasId, input.nodeId, input.runId, exported.canvas);
     // 有界 long-poll：仅在 active 且请求了 waitMs 时轮询，最长 AGENT_RUN_MAX_WAIT_MS 由契约钳制。
     const waitMs = input.waitMs ?? 0;
@@ -123,7 +129,8 @@ export class AgentRunAdapter {
     return { ok: true, view };
   }
 
-  async cancel(input: { canvasId: string; nodeId: string; runId: string }): Promise<AgentRunCancel> {
+  async cancel(input: { owner?: string; canvasId: string; nodeId: string; runId: string }): Promise<AgentRunCancel> {
+    if (input.runId.startsWith("text-run:") && input.owner && this.deps.assistantText) return this.deps.assistantText.cancel({ ...input, owner: input.owner });
     const room = await this.deps.resolveRoom(input.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${input.canvasId} 不存在` };
     const exported = room.exportCanvas();
@@ -226,6 +233,12 @@ export function projectOutputView(canvas: ServerCanvas, canvasId: string, nodeId
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return { available: false, reason: "no-output", message: `节点 ${nodeId} 不存在` };
 
+  const archived = canvas.assets.find(asset => asset.nodeId === nodeId && asset.provenance?.runId === runId && asset.mediaKind === "text" && asset.status === "ready");
+  if (runId.startsWith("text-run:") && archived && typeof archived.text === "string") {
+    const job = canvas.jobs.find(job => job.runId === runId && job.nodeId === nodeId);
+    return { available: true, output: boundedTextOutput(runId, archived.text, { canvasId, nodeId, runId, jobId: job?.id ?? "" }) };
+  }
+  if (runId.startsWith("text-run:")) return { available: false, reason: "no-output", message: "此文本执行尚无已保存正文" };
   const view = projectRunView(canvasId, nodeId, runId, canvas);
   if (view.stale) return { available: false, reason: "no-output", message: "run 已不是节点当前 run，无法读取输出" };
   if (view.phase !== "terminal") return { available: false, reason: "running", message: "run 尚未结束" };
@@ -319,3 +332,5 @@ function hashText(text: string): string {
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+function dataPrompt(canvas: ServerCanvas, nodeId: string): string { const prompt = canvas.nodeData[nodeId]?.prompt; return typeof prompt === "string" ? prompt : ""; }

@@ -41,7 +41,7 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   panelPrompt?: string;
   inputMapping?: CanvasNodeInputMapping[];
   status?: GenerationStatus;
-  taskStatus?: "idle" | "pending" | "processing" | "successed" | "failed" | "cancelled";
+  taskStatus?: "idle" | "pending" | "processing" | "successed" | "failed" | "cancelled" | "unknown";
   /**
    * 当前节点的 active run（客户端生成）。任务结果只有在它与返回结果的 runId 一致时
    * 才被接受（latest-run-wins，change: add-image-text-node-execution）。

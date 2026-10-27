@@ -53,6 +53,7 @@ async function boot(options: {
   basePath?: string;
   authenticator?: ApplicationRequestAuthenticator;
   connections?: AgentConnectionRegistry;
+  assistantText?: import("../extensions/assistant-text-service.js").AssistantTextService;
   canvasCreations?: import("../extensions/canvas-creation-service.js").CanvasCreationService;
   access?: import("@woohaa3/contracts").ApplicationExtensionCanvasAccessFacade;
 } = {}) {
@@ -61,6 +62,7 @@ async function boot(options: {
     serviceConnections: options.serviceConnections,
     serviceConnectionProviders: options.serviceConnectionProviders,
     canvasCreations: options.canvasCreations,
+    assistantText: options.assistantText,
     ...(options.basePath ? { basePath: options.basePath } : {}),
     ...(options.discovery ? { mcpDiscovery: options.discovery } : {}),
     ...(options.connections ? { connections: options.connections } : {}),
@@ -545,4 +547,23 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
     const forwarded = await fetch(`${base}/api/agent-conversations/service-connections/enabled`, { method: "POST", headers: { origin: "https://canvas.example", "x-forwarded-host": "canvas.example", "x-forwarded-proto": "https", "content-type": "application/json" }, body: JSON.stringify({ ...connection, enabled: false }) });
     expect(forwarded.status).toBe(200);
   } finally { store.close(); }
+});
+
+
+it("text query, retry and exact stop authorize the trusted owner before touching delivery; public linking is rejected", async () => {
+  const text = {
+    peek: vi.fn((owner: string) => owner === "user-a" ? { canvasId: "canvas" } : null),
+    reconcile: vi.fn(async () => undefined), retry: vi.fn(async () => ({ ok: true })), cancel: vi.fn(async () => ({ ok: true })),
+  };
+  const service = serviceStub();
+  service.queryTurn = vi.fn(() => ({ ok: true, turn: { target: { canvasId: "canvas" } } }) as never);
+  const denied = await boot({ service, assistantText: text as never, access: { authorize: async () => ({ ok: false, code: "forbidden", message: "revoked" }) } as never });
+  for (const [path, method] of [["round", "GET"], ["round/retry-save", "POST"], ["round/cancel", "POST"]]) {
+    expect((await fetch(`${denied.base}/api/agent-conversations/turns/${path}`, { method })).status).toBe(401);
+  }
+  expect(text.reconcile).not.toHaveBeenCalled(); expect(text.retry).not.toHaveBeenCalled(); expect(text.cancel).not.toHaveBeenCalled();
+  expect(text.peek).toHaveBeenCalledWith("user-a", "round");
+  const allowed = await boot({ service, assistantText: text as never });
+  const link = await fetch(`${allowed.base}/api/agent-conversations/turns/round/link`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: "spoofed" }) });
+  expect(link.status).toBe(400);
 });

@@ -60,3 +60,8 @@ describe("projectAgentTurnOperations", () => {
     expect(projectAgentTurnOperations(snapshot(null), "canvas-1")).toEqual([]);
   });
 });
+
+it("text activity uses the actual Canvas run identity, matching the eventual history source", () => {
+  const projected = projectAgentTurnOperations(snapshot(turn({ runId: "text-run:real", target: { canvasId: "canvas-1", nodeId: "n1", mode: "text" } })), "canvas-1");
+  expect(projected).toMatchObject([{ operationId: "text-run:real", kind: "text", state: "running" }]);
+});

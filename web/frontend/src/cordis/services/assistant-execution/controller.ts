@@ -2,6 +2,8 @@
 export type AssistantDraftValue = {
   connection?: import("@woohaa3/contracts").AgentConnectionBinding;
   prompt: string;
+  promptScope?: string;
+  prompts?: Record<string, string>;
   models: Record<string, string>;
   efforts: Record<string, import("@woohaa3/contracts").AgentReasoningEffort | "">;
 };
@@ -34,6 +36,7 @@ export function createAssistantInputController<Input, Accepted>(initial: Partial
     notice: null as string | null,
     pending: null as { requestId: string; input: Input; revision: number } | null,
     accepted: null as Accepted | null,
+    submissions: [] as { requestId: string; input: Input; revision: number; busy: boolean; message?: string }[],
   };
   const listeners = new Set<() => void>();
   const update = (patch: Partial<typeof state>) => {
@@ -56,10 +59,32 @@ export function createAssistantInputController<Input, Accepted>(initial: Partial
       return { kind: "unknown" as const, message: state.notice! };
     } finally { update({ busy: false }); }
   };
+  const runIndependent = async (requestId: string, port: AssistantSubmissionPort<Input, Accepted>, query = false) => {
+    const pending = state.submissions.find(item => item.requestId === requestId);
+    if (!pending || pending.busy) return;
+    const patch = (value: Partial<typeof pending>) => update({ submissions: state.submissions.map(item => item.requestId === requestId ? { ...item, ...value } : item) });
+    patch({ busy: true, message: undefined });
+    let result: AssistantInputResult<Accepted>;
+    try { result = await (query ? port.query : port.submit)(pending.input, pending.requestId); }
+    catch { result = { kind: "unknown", message: "提交结果尚未确认，请核对原请求。" }; }
+    if (result.kind === "unknown") patch({ busy: false, message: result.message });
+    else {
+      update({ submissions: state.submissions.filter(item => item.requestId !== requestId),
+        ...(result.kind === "accepted" ? { accepted: result.value,
+          ...(state.revision === pending.revision ? { draft: { ...state.draft, prompt: "" } } : {}) } : { notice: result.message }) });
+    }
+    return result;
+  };
   return {
     getSnapshot: () => state,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     edit(patch: Partial<AssistantDraftValue>) { update({ draft: { ...state.draft, ...patch }, revision: state.revision + 1 }); },
+    selectPromptScope(key: string) {
+      if (state.draft.promptScope === key) return;
+      const previous = state.draft.promptScope;
+      const prompts = { ...state.draft.prompts, ...(previous ? { [previous]: state.draft.prompt } : {}) };
+      update({ draft: { ...state.draft, promptScope: key, prompts, prompt: prompts[key] ?? (previous ? "" : state.draft.prompt) }, revision: state.revision + 1 });
+    },
     submit(input: Input, port: AssistantSubmissionPort<Input, Accepted>) {
       // Even if the user edited the draft, retry means the original frozen intent.
       if (!state.pending && !state.busy) update({ pending: {
@@ -67,6 +92,12 @@ export function createAssistantInputController<Input, Accepted>(initial: Partial
       } });
       return run(port, false);
     },
+    submitIndependent(input: Input, port: AssistantSubmissionPort<Input, Accepted>) {
+      const requestId = `assistant:${crypto.randomUUID()}`;
+      update({ notice: null, submissions: [...state.submissions, { requestId, input: structuredClone(input), revision: state.revision, busy: false }] });
+      return runIndependent(requestId, port);
+    },
+    querySubmission(requestId: string, port: AssistantSubmissionPort<Input, Accepted>) { return runIndependent(requestId, port, true); },
     query(port: AssistantSubmissionPort<Input, Accepted>) { return run(port, true); },
   };
 }

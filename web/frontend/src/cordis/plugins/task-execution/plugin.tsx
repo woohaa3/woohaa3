@@ -1,3 +1,4 @@
+import { resolveTextSubmission } from "../../services/assistant-execution/text-submission.js";
 /**
  * Task Execution Plugin（change: adopt-frontend-cordis-plugin-runtime，design D5/D6；
  *   change: unify-canvas-presentation-navigation，task 5.2）。
@@ -49,6 +50,7 @@ import {
 } from "../../navigation/contracts.js";
 import type { AgentConversationServiceHandle } from "../../services/agent-conversation-service.js";
 import { AgentConversationPanel } from "./execution-panel/agent-conversation-panel.js";
+const TextExecutionHost = lazy(() => import("./text-execution-host.js").then(module => ({ default: module.TextExecutionHost })));
 const ModelExecutionHost = lazy(() => import("./model-execution-host.js").then((module) => ({ default: module.ModelExecutionHost })));
 const ModelParameterPanel = lazy(() => import("./model-parameter-panel.js").then((module) => ({ default: module.ModelParameterPanel })));
 const GroupRunSummaryOverlay = lazy(() => import("./group-run-summary-overlay.js").then(module => ({ default: module.GroupRunSummaryOverlay })));
@@ -194,6 +196,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           };
           // 呈现表面与骨架、宿主共用同一判断（音频没有 expanded 面）。
           const surface = resolveExecutionPanelSurface(presentation, resolvePanelNodeType(route.nodeId));
+          if (resolvePanelNodeType(route.nodeId) === "text") return <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}>
+            <TextExecutionHost canvasId={canvasId} nodeId={route.nodeId} writable={writable} runtime={runtime} presentation={surface} onPresentationIntent={submitPresentationIntent} />
+          </Suspense>;
           return (
             <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}><ModelExecutionHost
               submitCoordinator={coordinator}
@@ -345,6 +350,8 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         // 统一运行状态按 `(canvasId, nodeId)` 查询；缺失时视为空闲（由提交自身门禁兜底）。
         isBusy: (nodeId) => runStateService()?.isBusy(resolveScopeCanvasId(), nodeId) ?? false,
         submit: (input) => coordinator.submit(input),
+        textPrecheck: (canvas, nodeId) => resolveTextSubmission(ctx.agentConversationService, canvas, nodeId, () => invalidateToolbar()),
+        submitText: async input => { const result = await ctx.agentConversationService.submitTurn({ ...input, requestId: `assistant:${crypto.randomUUID()}` }); return result.ok ? { ok: true } : { ok: false, error: result.error }; },
         onSummary: (summary) => {
           groupSummaryStore.show({ canvasId: resolveScopeCanvasId(), summary });
         }

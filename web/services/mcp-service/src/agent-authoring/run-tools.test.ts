@@ -140,3 +140,13 @@ describe("安全审计（任务 7.5）", () => {
     expect(JSON.stringify(events[0])).not.toContain("SECRET-TOKEN-abc");
   });
 });
+
+it("forwards explicit assistant selection and preserves its real execution reference", async () => {
+  const assistant = { connection: { connectionId: "connection", adapterId: "sdk", configRevision: 2, credentialEpoch: 3 }, model: "text-model", reasoningEffort: "high" as const };
+  const execution = { canvasId: "c1", targetNodeId: "text", conversationId: "conv", turnRequestId: "request", runId: "text-run:one" };
+  let selected: unknown;
+  const base = await start(baseClient({ runNode: async input => { selected = input.assistant; return { ok: true, canvasId: "c1", nodeId: "text", runId: "text-run:one", jobId: "job", state: "accepted", execution }; } }));
+  const result = await callTool(base, "run_canvas_node", { canvasId: "c1", nodeId: "text", requestId: "request", assistant, prompt: "write" });
+  expect(selected).toEqual(assistant);
+  expect(result.structuredContent).toMatchObject({ execution });
+});

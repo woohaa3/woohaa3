@@ -28,6 +28,8 @@ export const AGENT_TURN_OPERATION_PREFIX = "agent:";
 /** Agent 回合的节点运行种类：片场与镜头复用既有种类，其余按 3D 模型处理。 */
 function operationKindForTurn(turn: ConversationTurn): CanvasOperationRecord["kind"] {
   switch (turn.target.mode) {
+    case "text":
+      return "text";
     case "film-set":
       return "film-set";
     case "camera":
@@ -71,7 +73,7 @@ export function projectAgentTurnOperations(
   if (!state) return [];
   return [
     {
-      operationId: `${AGENT_TURN_OPERATION_PREFIX}${turn.requestId}`,
+      operationId: turn.target.mode === "text" && turn.runId ? turn.runId : `${AGENT_TURN_OPERATION_PREFIX}${turn.requestId}`,
       canvasId,
       nodeId,
       kind: operationKindForTurn(turn),

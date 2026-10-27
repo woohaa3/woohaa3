@@ -178,3 +178,29 @@ describe("输出投影（任务 6.5）", () => {
     expect(failed).toMatchObject({ available: false, reason: "failed" });
   });
 });
+
+it("dispatches text through the injected assistant gateway with a real execution ref and exact stop identity", async () => {
+  const c = canvas(); c.document.nodes[0]!.type = "text";
+  let providerCalls = 0; const calls: unknown[] = [];
+  const execution = { canvasId: "c1", targetNodeId: "img-1", conversationId: "conversation", turnRequestId: "request", runId: "text-run:actual", jobId: "text-job:actual" };
+  const assistant = { connection: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 }, model: "model" };
+  const adapter = new AgentRunAdapter({ resolveRoom: async () => roomFor(c), runService: { run: async () => { providerCalls++; return { ok: false, code: "unused", message: "unused" }; }, cancel: async () => { providerCalls++; return { ok: true, state: "cancel-requested" }; } }, assistantText: {
+    run: async input => { calls.push(input); return { ok: true, ...execution, nodeId: "img-1", state: "accepted", execution }; },
+    status: async input => { calls.push(input); return { ok: true, view: { protocolVersion: 1, canvasId: "c1", nodeId: "img-1", runId: input.runId, jobId: execution.jobId, execution, phase: "running", stale: false } }; },
+    cancel: async input => { calls.push(input); return { ok: true, ...input, state: "cancel-requested" }; },
+  } });
+  expect(await adapter.run({ owner: "owner", canvasId: "c1", nodeId: "img-1", requestId: "request", modelKey: "old-provider" })).toMatchObject({ ok: false, code: "assistant-required" });
+  expect(await adapter.run({ owner: "owner", canvasId: "c1", nodeId: "img-1", requestId: "request", assistant, prompt: "write" })).toMatchObject({ ok: true, execution });
+  await adapter.status({ owner: "owner", canvasId: "c1", nodeId: "img-1", runId: execution.runId });
+  await adapter.cancel({ owner: "owner", canvasId: "c1", nodeId: "img-1", runId: execution.runId });
+  expect(calls).toMatchObject([{ owner: "owner", assistant }, { runId: execution.runId }, { runId: execution.runId }]);
+  expect(providerCalls).toBe(0);
+});
+
+it("returns an archived text run's own output and never substitutes canonical text for an unsaved run", () => {
+  const c = canvas(); c.document.nodes[0]!.type = "text";
+  c.nodeData["img-1"] = { activeRunId: "text-run:new", taskStatus: "successed", result: { kind: "text", text: "new" } };
+  c.assets.push({ id: "old", nodeId: "img-1", mediaKind: "text", source: "generated", status: "ready", text: "old", title: "old", createdAt: "2026-10-27", provenance: { runId: "text-run:old" } });
+  expect(projectOutputView(c, "c1", "img-1", "text-run:old")).toMatchObject({ available: true, output: { text: "old", runId: "text-run:old" } });
+  expect(projectOutputView(c, "c1", "img-1", "text-run:missing")).toMatchObject({ available: false });
+});

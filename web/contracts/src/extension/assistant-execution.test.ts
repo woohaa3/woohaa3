@@ -6,8 +6,7 @@ import { isAgentAdapterCapabilities } from "./conversation.js";
 describe("assistant execution identity", () => {
   it("keeps candidate bytes host-only and checks optional delivery capability shape", () => {
     const result = decodeAcceptTurnRequest({ requestId: "request", candidate: { images: ["private"] }, entry: { action: "discuss", canvasId: "canvas", prompt: "Question", candidate: { images: ["private"] } } });
-    expect(result.ok).toBe(true);
-    if (result.ok) { expect(result.value).not.toHaveProperty("candidate"); expect(result.value.entry).not.toHaveProperty("candidate"); }
+    expect(result.ok).toBe(false);
     const caps = { discussion: true, tools: true, models: "remote", targets: [] };
     expect(isAgentAdapterCapabilities(caps)).toBe(true);
     expect(isAgentAdapterCapabilities({ ...caps, candidateGeneration: { imageInput: true, maxImages: 12 } })).toBe(true);

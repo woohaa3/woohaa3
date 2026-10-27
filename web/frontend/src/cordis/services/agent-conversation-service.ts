@@ -520,6 +520,12 @@ export function createAgentConversationService(
     submitTurn,
     queryTurn,
     locateTurnByRun,
+    retryTextSave: async (requestId: string) => {
+      if (!remote.retryTextSave) return { ok: false as const, code: "unavailable", error: "保存重试不可用" };
+      const result = await remote.retryTextSave(requestId);
+      if (result.ok) await queryTurn(requestId);
+      return result;
+    },
     cancelTurn: (requestId) => remote.cancel(requestId),
     linkRun: (requestId, input) => remote.link(requestId, input)
   };

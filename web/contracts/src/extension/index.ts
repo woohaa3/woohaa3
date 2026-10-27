@@ -33,3 +33,4 @@ export * from "./data-scope.js";
 export * from "./session.js";
 export * from "./assistant-execution.js";
 export * from "./service-connection.js";
+export * from "./assistant-text.js";

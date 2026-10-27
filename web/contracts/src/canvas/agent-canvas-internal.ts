@@ -1,3 +1,4 @@
+import { isAgentReasoningEffort } from "../extension/conversation.js";
 /**
  * MCP Service ⇄ Canvas Service 内部 Agent 协议 v2
  * （change: add-agent-canvas-authoring-mcp，任务 1.5 / 3.5 / 4.7）。
@@ -292,6 +293,7 @@ export function decodeAgentApplyRequest(body: unknown, principalId: string): Dec
 // ---------------------------------------------------------------------------
 
 export type AgentRunRequest = {
+  assistant?: import("../extension/assistant-text.js").AssistantTextSelection;
   principalId: string;
   canvasId?: string;
   requestId: string;
@@ -303,7 +305,7 @@ export type AgentRunRequest = {
 };
 
 export type AgentRunResponse =
-  | { ok: true; protocolVersion: number; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted" }
+  | { ok: true; protocolVersion: number; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted"; execution?: import("../extension/assistant-execution.js").AssistantExecutionRef }
   | { ok: false; code: string; message: string; retryable?: boolean };
 
 export type AgentRunStatusRequest = {
@@ -356,6 +358,14 @@ export function decodeAgentRunRequest(body: unknown, principalId: string): Decod
   if (!isBoundedId(body.requestId)) return fail("malformed-request", "requestId 必须是非空字符串");
   if (!isBoundedId(body.nodeId)) return fail("malformed-request", "nodeId 必须是非空字符串");
   const request: AgentRunRequest = { principalId, requestId: body.requestId, nodeId: body.nodeId };
+  if (body.assistant !== undefined) {
+    const assistant = body.assistant;
+    if (!isJsonObject(assistant) || Object.keys(assistant).some(key => !["connection", "model", "reasoningEffort"].includes(key)) || !isBoundedId(assistant.model)) return fail("malformed-request", "助手选择非法");
+    const binding = assistant.connection;
+    if (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0)) return fail("malformed-request", "助手连接身份非法");
+    if (assistant.reasoningEffort !== undefined && !isAgentReasoningEffort(assistant.reasoningEffort)) return fail("malformed-request", "助手 Variant 非法");
+    request.assistant = assistant as import("../extension/assistant-text.js").AssistantTextSelection;
+  }
   if (canvasId !== undefined) request.canvasId = canvasId;
   if (modelKey !== undefined) request.modelKey = modelKey;
   if (body.prompt !== undefined) {

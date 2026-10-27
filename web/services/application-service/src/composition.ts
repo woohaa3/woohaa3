@@ -1,3 +1,5 @@
+import { AssistantTextStore } from "./repository/assistant-text-store.js";
+import { AssistantTextService } from "./extensions/assistant-text-service.js";
 import { createSqliteExtensionDocumentStore } from "./repository/extension-document-store.js";
 import { createServiceConnectionRegistry, type ServiceConnectionRegistryOptions, type ServiceConnectionRegistry } from "./service-connections/registry.js";
 import { createExtensionAssistants } from "./extensions/extension-assistants.js";
@@ -185,6 +187,7 @@ export type ApplicationServiceOptions = {
    * （change: 2026-10-12-add-agent-conversation-panel，任务 1.3）。缺省时会话 API 全部拒绝。
    */
   groupEffects?: import("./extensions/agent-conversation-service.js").AgentConversationServiceOptions["groupEffects"];
+  assistantText?: import("@woohaa3/contracts").AssistantTextPort;
   canvasCreation?: import("@woohaa3/contracts").CanvasCreationPort;
   conversationCanvasAccess?: import("@woohaa3/contracts").ApplicationExtensionCanvasAccessFacade;
   /**
@@ -222,6 +225,7 @@ export type ApplicationService = {
   config: () => ApplicationServiceConfig;
   /** 宿主 Agent 会话/回合服务（change: 2026-10-12-add-agent-conversation-panel）。 */
   agentConversations: () => AgentConversationService;
+  assistantTextRuns: () => import("@woohaa3/contracts").AssistantTextRunGateway;
   /** 来源连接发现注册表（change: 2026-10-16-add-agent-appserver-and-sdk-connections）。 */
   agentConnections: () => AgentConnectionRegistry;
   /** 类型化基础提供者 registry（身份/站点授权/资源策略）。 */
@@ -418,12 +422,15 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
   const canvasCreations = new CanvasCreationService({ store: canvasCreationStore, conversations: agentConversations, connections: agentConnections, canvas: options.canvasCreation,
     discoverTools: options.mcpDiscovery,
     preflight: async (owner, canvasId) => (await options.conversationCanvasAccess?.authorize({ subject: owner, canvasId, permission: "write" }))?.ok === true });
+  const assistantTextStore = new AssistantTextStore(config.storePath);
+  const assistantText = new AssistantTextService({ store: assistantTextStore, conversations: agentConversations, connections: agentConnections, registry: agentAdapterRegistry, canvas: options.assistantText });
   const agentConversationApi: AgentConversationApiHandler = createAgentConversationApiHandler({
     serviceConnections,
     serviceConnectionProviders: options.serviceConnectionProviders,
     accessEnforcer,
     service: agentConversations,
     canvasCreations,
+    assistantText,
     connections: agentConnections,
     authenticator,
     accessRuntime,
@@ -503,6 +510,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     host: () => extensionHost,
     config: () => config,
     agentConversations: () => agentConversations,
+    assistantTextRuns: () => assistantText.gateway(),
     agentConnections: () => agentConnections,
     serviceConnections: () => serviceConnections,
     providers: () => providers,
@@ -517,6 +525,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
       extensionWorkStore.close();
       unbindCreationEpochs?.();
       canvasCreationStore.close();
+      assistantTextStore.close();
       conversationStore.close();
       sourceDocuments?.close();
     }
