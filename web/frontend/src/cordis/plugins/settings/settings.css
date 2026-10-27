@@ -1270,3 +1270,43 @@
 		-webkit-line-clamp: unset;
 	}
 }
+
+/* 右侧信息列固定为「状态 / 版本」两行 + 开关 / 箭头两列，避免不同行横向漂移。 */
+.plugin-row__side {
+	display: grid;
+	grid-template-columns: 92px 40px 16px;
+	grid-template-rows: auto auto;
+	align-items: center;
+	justify-content: end;
+	column-gap: 10px;
+	row-gap: 1px;
+	min-width: 0;
+	align-self: center;
+}
+.plugin-row__status {
+	grid-column: 1;
+	grid-row: 1;
+	justify-self: end;
+}
+.plugin-row__version {
+	grid-column: 1;
+	grid-row: 2;
+	justify-self: end;
+}
+.plugin-row__switch {
+	grid-column: 2;
+	grid-row: 1 / span 2;
+	justify-self: center;
+}
+.plugin-row__chevron {
+	grid-column: 3;
+	grid-row: 1 / span 2;
+	justify-self: end;
+}
+
+@media (max-width: 1060px) {
+	.plugin-row__side {
+		grid-template-columns: 82px 36px 14px;
+		column-gap: 8px;
+	}
+}
