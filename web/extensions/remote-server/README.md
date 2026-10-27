@@ -190,3 +190,9 @@ pnpm -C web/extensions/remote-server run build:browser
 ## 可选的部署登录适配
 
 公开客户端不识别特定企业网关，也不默认转发浏览器请求头。浏览器授权码和设备码登录不需要网关适配。受信部署代码可通过 `createRemoteServerExtension({ loginAssertionHeaders: [...] })` 显式提供断言头白名单；普通配置 API 与浏览器请求不能修改它。Cookie、Authorization 和传输控制头始终不会随断言转发。
+
+## 桌面诊断文件
+
+桌面启动时通过 `WOOHAA_DESKTOP_RUN_DIR` 提供当前运行日志目录；本扩展由受控 resource 生命周期启动独立的诊断上传队列。队列固定在 `logs/upload-queue`，不提供任意文件路径的 HTTP 上传接口。原生 UI 负责确认与归档，本扩展只处理已绑定当前服务端及主体哈希的任务，复用本扩展唯一的会话来源。
+
+目的地描述每五秒独立刷新，慢速上传不阻塞原生菜单判断连接状态；停用时取消在途请求并清除描述。上传快照哈希、上传 key 和阶段持久化，PUT 或登记失败可以重试，登记成功前不会重建日志快照。浏览器宿主没有桌面运行目录时不启动此 worker。事件遥测出口开关与用户明确确认的诊断文件上传相互独立。

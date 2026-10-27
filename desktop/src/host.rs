@@ -304,6 +304,7 @@ mod platform {
                 crate::devtools::handle_menu_event(app, &event);
                 crate::local_host::handle_menu(app, &event);
                 crate::diagnostic_export::handle_menu(app, &event);
+                crate::diagnostic_upload::handle_menu(app, &event);
             });
         let builder = crate::transport::install(builder, token, origin.clone());
         let setup_pending = pending.clone();
@@ -323,6 +324,7 @@ mod platform {
             .setup(move |app| {
                 crate::devtools::install(app.handle())?;
                 crate::diagnostic_export::install(app.handle())?;
+                crate::diagnostic_upload::install(app.handle())?;
                 crate::diagnostics::start_heartbeat(app.handle().clone());
                 // 安装通知 sink：只经既有 native 协议暴露最小操作，不开放通用 IPC。
                 crate::notifications::install_plugin_sink(app.handle().clone());
