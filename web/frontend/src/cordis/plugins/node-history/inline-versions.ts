@@ -106,27 +106,33 @@ export function installInlineVersions(ctx: Context, canvasId: string, client: No
   });
   const retries = new Set<ReturnType<typeof setTimeout>>();
   const observed = new Map<string, string>();
-  const runState = ctx.get(RUN_STATE_SERVICE as never) as RunStateService | undefined;
-  const offRuns = runState?.subscribe(() => {
-    service.preview.observe(runState.snapshot().records);
-    for (const record of runState.snapshot().records) {
-      const previous = observed.get(record.operationId);
-      observed.set(record.operationId, record.state);
-      if (previous === record.state || record.state === "running" || record.state === "queued" || record.localFailure) continue;
-      // Bounded compensation for an activity event arriving before history registration.
-      for (const delay of [0, 400, 1500]) {
-        const retry = setTimeout(() => {
-          retries.delete(retry);
-          if (!service.snapshot().get(record.nodeId)?.some(item => item.source.runId === record.operationId)) void service.refreshNode(record.nodeId);
-        }, delay);
-        retries.add(retry);
+  // 运行态由 **run-state 插件**提供（兄弟插件），apply 窗口内还没 active：装配期 `ctx.get` 只会拿到
+  // undefined，订阅与首次 observe 都不会发生（版本预览因此看不到运行态进度）。声明式等待：
+  // 服务就绪才订阅并补一次 observe，服务撤销随 fiber 释放。
+  ctx.inject([RUN_STATE_SERVICE], (scoped) => {
+    const runState = scoped.get(RUN_STATE_SERVICE as never) as unknown as RunStateService;
+    const offRuns = runState.subscribe(() => {
+      service.preview.observe(runState.snapshot().records);
+      for (const record of runState.snapshot().records) {
+        const previous = observed.get(record.operationId);
+        observed.set(record.operationId, record.state);
+        if (previous === record.state || record.state === "running" || record.state === "queued" || record.localFailure) continue;
+        // Bounded compensation for an activity event arriving before history registration.
+        for (const delay of [0, 400, 1500]) {
+          const retry = setTimeout(() => {
+            retries.delete(retry);
+            if (!service.snapshot().get(record.nodeId)?.some(item => item.source.runId === record.operationId)) void service.refreshNode(record.nodeId);
+          }, delay);
+          retries.add(retry);
+        }
       }
-    }
+    });
+    service.preview.observe(runState.snapshot().records);
+    scoped.effect(() => () => offRuns(), "node-history:inline-run-state");
   });
   const off = ctx.on("ui.node-history.switch-requested", request => {
     service.select(request);
   });
-  service.preview.observe(runState?.snapshot().records ?? []);
   sync();
-  return () => { if (timer) clearTimeout(timer); for (const retry of retries) clearTimeout(retry); offSession?.(); offRuns?.(); unsubscribe(); off(); service.dispose(); };
+  return () => { if (timer) clearTimeout(timer); for (const retry of retries) clearTimeout(retry); offSession?.(); unsubscribe(); off(); service.dispose(); };
 }

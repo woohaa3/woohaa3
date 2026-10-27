@@ -6,12 +6,13 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
+import { withApplyGuard } from "./service-access-guard.js";
 
 export function definePlugin<T extends Context>(
   body: (ctx: T) => void | (() => void | Promise<void>),
   meta: { name: string; inject: readonly string[]; provide?: string | string[] }
 ): Plugin.Function<void> {
-  const plugin = ((ctx: Context) => body(ctx as T)) as Plugin.Function<void>;
+  const plugin = ((ctx: Context) => withApplyGuard(ctx as T, meta.name, body)) as Plugin.Function<void>;
   Object.defineProperty(plugin, "name", { value: meta.name, configurable: true });
   Object.defineProperty(plugin, "inject", { value: [...meta.inject], configurable: true });
   if (meta.provide) Object.defineProperty(plugin, "provide", { value: meta.provide, configurable: true });
