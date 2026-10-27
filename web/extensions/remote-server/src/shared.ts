@@ -89,9 +89,16 @@ export const REMOTE_SERVER_CANVAS_INVITE_REVOKE_ROUTE = "canvas-invite-revoke";
  * 浏览器授权码**只在服务端**出现：浏览器被服务端 302 到这里的回调，回调在本机宿主内部换会话，
  * 然后 302 到完成页——页面脚本、前端 store 都接触不到授权码（design D5）。
  */
-export const REMOTE_SERVER_OAUTH_CALLBACK_ROUTE = "remote-server/auth/callback";
+/**
+ * 回调路径（相对 `publicRoutes[0].publicPath`）。
+ *
+ * 只写**相对**部分：宿主按 `<extensionId>/<route>` 组织注册表，`publicPath` 的前缀
+ * 由公开路由映射负责。把映射前缀写进 route 常量会让同一个路径出现两种拼法
+ * （`remote-server/remote-server/...`），排查时极难发现。
+ */
+export const REMOTE_SERVER_OAUTH_CALLBACK_ROUTE = "auth/callback";
 /** 回调完成页：只渲染「成功/失败，可以关闭此窗口」，不带任何码或令牌。 */
-export const REMOTE_SERVER_OAUTH_DONE_ROUTE = "remote-server/auth/done";
+export const REMOTE_SERVER_OAUTH_DONE_ROUTE = "auth/done";
 /** 公开路径前缀；必须与 extension.json 的 publicRoutes[0].publicPath 一致。 */
 export const REMOTE_SERVER_PUBLIC_PATH = "/api/remote-server";
 

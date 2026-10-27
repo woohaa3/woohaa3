@@ -179,18 +179,23 @@ export type OAuthProviderRouteRegistration = {
 };
 
 export function oauthProviderRouteRegistrations(provider: OAuthAgentProvider): OAuthProviderRouteRegistration[] {
-  const prefix = provider.routePrefix;
+  // 路由只写**相对**于 `publicRoutes[].publicPath` 的部分：宿主按
+  // `<extensionId>/<route>` 组织注册表，URL 前缀由公开路由映射负责。
+  // `routePrefix` 是同一扩展下多 provider 的分组（空前缀表示直接挂在扩展根下）。
+  const group = provider.routePrefix.replace(/^\/+|\/+$/g, "");
+  const at = (suffix: string): string => (group === "" ? suffix : `${group}/${suffix}`);
+  const root = group === "" ? "*" : group;
   return [
-    { route: prefix, method: "GET", purpose: "read" },
-    { route: `${prefix}/*`, method: "GET", purpose: "read" },
+    { route: group === "" ? "*" : group, method: "GET", purpose: "read" },
+    { route: `${root}/*`, method: "GET", purpose: "read" },
     // 生成不设总时长／输出上限；心跳维持连接，断连和显式取消仍会中止。
-    { route: `${prefix}/generate`, method: "POST", purpose: "new-work", streamBudget: { heartbeatMs: 15_000, deadlineMs: 0, maxEvents: Number.POSITIVE_INFINITY, maxBytes: Number.POSITIVE_INFINITY } },
-    { route: `${prefix}/cancel`, method: "POST", purpose: "work-control" },
-    { route: `${prefix}/authorize/cancel`, method: "POST", purpose: "auth-transaction" },
-    { route: `${prefix}/authorize/start`, method: "POST", purpose: "auth-transaction" },
-    { route: `${prefix}/authorize/complete`, method: "POST", purpose: "auth-transaction" },
-    { route: `${prefix}/disconnect`, method: "POST", purpose: "auth-transaction" },
-    { route: `${prefix}/*`, method: "POST", purpose: "work-control" }
+    { route: at("generate"), method: "POST", purpose: "new-work", streamBudget: { heartbeatMs: 15_000, deadlineMs: 0, maxEvents: Number.POSITIVE_INFINITY, maxBytes: Number.POSITIVE_INFINITY } },
+    { route: at("cancel"), method: "POST", purpose: "work-control" },
+    { route: at("authorize/cancel"), method: "POST", purpose: "auth-transaction" },
+    { route: at("authorize/start"), method: "POST", purpose: "auth-transaction" },
+    { route: at("authorize/complete"), method: "POST", purpose: "auth-transaction" },
+    { route: at("disconnect"), method: "POST", purpose: "auth-transaction" },
+    { route: `${root}/*`, method: "POST", purpose: "work-control" }
   ];
 }
 

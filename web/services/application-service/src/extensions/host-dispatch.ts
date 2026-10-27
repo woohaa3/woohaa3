@@ -88,24 +88,34 @@ export function findHandlerRegistration(
   return undefined;
 }
 
+/**
+ * 按「扩展 identity + 相对 route」查找 HTTP 注册。
+ *
+ * 注册时全局键是 `<extensionId>/<route>`；分派时**必须**用同一个 extensionId 拼键，
+ * 否则跨扩展同名 route 会互相串（`/login` 属于谁全看注册顺序）。
+ * `extensionId` 缺省时退化为「按原始 route 查」，只用于宿主内部/测试的旧调用形态。
+ */
 export function findHttpRegistration(
   ctx: HostRegistryContext,
   method: ApplicationExtensionHttpMethod,
-  route: string
+  route: string,
+  extensionId?: string
 ): { owner: OwnerState; registration: ApplicationBackendHttpHandlerRegistration } | undefined {
-  const exactOwnerId = ctx.globalHttpHandlers.get(httpHandlerKey(method, route));
+  const keyRoute = extensionId === undefined ? route : namespacedRoute(extensionId, route);
+  const exactOwnerId = ctx.globalHttpHandlers.get(httpHandlerKey(method, keyRoute));
   if (exactOwnerId) {
     const owner = ctx.owners.get(exactOwnerId);
-    const registration = owner?.httpHandlers.get(httpHandlerKey(method, route));
+    const registration = owner?.httpHandlers.get(httpHandlerKey(method, keyRoute));
     if (owner && registration) return { owner, registration };
   }
   for (const owner of [...ctx.owners.values()].sort((a, b) => a.order - b.order)) {
     if (owner.mode !== "public") continue;
+    if (extensionId !== undefined && owner.extensionId !== extensionId) continue;
     for (const [, registration] of owner.httpHandlers) {
       if (registration.method !== method) continue;
-      if (!registration.route.endsWith("/*")) continue;
-      const prefix = registration.route.slice(0, -1);
-      if (route === registration.route.slice(0, -2) || route.startsWith(prefix)) {
+      if (!isWildcardRoute(registration.route)) continue;
+      // 通配注册的键也带 extensionId 前缀，因此用同一个 keyRoute 前缀比较即可。
+      if (matchesWildcard(owner.extensionId, registration.route, keyRoute)) {
         return { owner, registration };
       }
     }
@@ -113,34 +123,65 @@ export function findHttpRegistration(
   return undefined;
 }
 
+/** 按「扩展 identity + 相对 route」查找 raw HTTP 注册（同 `findHttpRegistration`）。 */
 export function findRawHttpRegistration(
   ctx: HostRegistryContext,
   method: ApplicationExtensionHttpMethod,
-  route: string
+  route: string,
+  extensionId?: string
 ): { owner: OwnerState; registration: ApplicationBackendRawHttpHandlerRegistration } | undefined {
-  const exactOwnerId = ctx.globalRawHttpHandlers.get(httpHandlerKey(method, route));
+  const keyRoute = extensionId === undefined ? route : namespacedRoute(extensionId, route);
+  const exactOwnerId = ctx.globalRawHttpHandlers.get(httpHandlerKey(method, keyRoute));
   if (exactOwnerId) {
     const owner = ctx.owners.get(exactOwnerId);
-    const registration = owner?.rawHttpHandlers.get(httpHandlerKey(method, route));
+    const registration = owner?.rawHttpHandlers.get(httpHandlerKey(method, keyRoute));
     if (owner && registration) return { owner, registration };
   }
   for (const owner of [...ctx.owners.values()].sort((a, b) => a.order - b.order)) {
     if (owner.mode !== "public") continue;
+    if (extensionId !== undefined && owner.extensionId !== extensionId) continue;
     for (const [, registration] of owner.rawHttpHandlers) {
       if (registration.method !== method) continue;
-      if (!registration.route.endsWith("/*")) continue;
-      const prefix = registration.route.slice(0, -1);
-      if (route === registration.route.slice(0, -2) || route.startsWith(prefix)) {
+      if (!isWildcardRoute(registration.route)) continue;
+      if (matchesWildcard(owner.extensionId, registration.route, keyRoute)) {
         return { owner, registration };
       }
     }
   }
   return undefined;
 }
+
+/**
+ * 把「扩展声明的相对 route」转成带 extensionId 命名空间的查找键。
+ *
+ * 注册与分派必须用同一把尺子：注册侧以 `<extensionId>/<route>` 落键，分派侧若不前缀，
+ * 就会永远找不到——所以这里统一加，且 `_recovery` 命名空间由注册侧自己带前缀，
+ * 分派时仍按「公共实例的 extensionId」拼接。
+ */
+/** 通配注册：`*`（全部）或 `prefix/*`（前缀）。 */
+function isWildcardRoute(route: string): boolean {
+  return route === "*" || route.endsWith("/*");
+}
+
+/** 判断带命名空间的查找键是否命中某个通配注册。 */
+function matchesWildcard(extensionId: string, registered: string, keyRoute: string): boolean {
+  const base = `${extensionId}/`;
+  if (registered === "*") return keyRoute.startsWith(base) && keyRoute.length > base.length;
+  const prefix = `${base}${registered.slice(0, -1)}`;
+  const bare = `${base}${registered.slice(0, -2)}`;
+  return keyRoute === bare || keyRoute.startsWith(prefix);
+}
+
+function namespacedRoute(extensionId: string, route: string): string {
+  return `${extensionId}/${route}`;
+}
+
 
 export async function dispatchHttp(
   ctx: HostRegistryContext,
   input: {
+    /** 发起调用的扩展 identity（公共实例）；用它的命名空间查注册表。 */
+    extensionId: string;
     method: ApplicationExtensionHttpMethod;
     route: string;
     req: ApplicationExtensionHttpRequest;
@@ -148,7 +189,7 @@ export async function dispatchHttp(
     context: ExtensionDispatchContext;
   }
 ): Promise<{ registration: ApplicationBackendHttpHandlerRegistration } | undefined> {
-  const found = findHttpRegistration(ctx, input.method, input.route);
+  const found = findHttpRegistration(ctx, input.method, input.route, input.extensionId);
   if (!found) return undefined;
   const { owner, registration } = found;
   if (input.context.accessControl !== false && !isAuthLevelAtLeast(input.context.authLevel, registration.auth)) {
@@ -162,6 +203,8 @@ export async function dispatchHttp(
 export async function dispatchRawHttp(
   ctx: HostRegistryContext,
   input: {
+    /** 发起调用的扩展 identity（公共实例）；用它的命名空间查注册表。 */
+    extensionId: string;
     method: ApplicationExtensionHttpMethod;
     route: string;
     req: ApplicationExtensionRawRequest;
@@ -169,7 +212,7 @@ export async function dispatchRawHttp(
     context: ExtensionDispatchContext;
   }
 ): Promise<{ registration: ApplicationBackendRawHttpHandlerRegistration } | undefined> {
-  const found = findRawHttpRegistration(ctx, input.method, input.route);
+  const found = findRawHttpRegistration(ctx, input.method, input.route, input.extensionId);
   if (!found) return undefined;
   const { owner, registration } = found;
   if (input.context.accessControl !== false && !isAuthLevelAtLeast(input.context.authLevel, registration.auth)) {
@@ -186,6 +229,6 @@ export function resolvePublicRoute(
   route: string,
   method: ApplicationExtensionHttpMethod
 ): { owned: boolean } {
-  const found = findHttpRegistration(ctx, method, route) ?? findRawHttpRegistration(ctx, method, route);
+  const found = findHttpRegistration(ctx, method, route, extensionId) ?? findRawHttpRegistration(ctx, method, route, extensionId);
   return { owned: found?.owner.extensionId === extensionId && found.owner.mode === "public" };
 }

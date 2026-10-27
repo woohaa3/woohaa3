@@ -68,6 +68,8 @@ export type ApplicationExtensionHost = {
     input: { body: unknown; context: ExtensionDispatchContext; extensionId?: string }
   ) => Promise<import("./contract.js").ApplicationExtensionHandlerResult>;
   dispatchHttp: (input: {
+    /** 扩展 identity：注册键按 `<extensionId>/<route>` 命名空间隔离，分派须同源。 */
+    extensionId: string;
     method: import("./contract.js").ApplicationExtensionHttpMethod;
     route: string;
     req: import("./contract.js").ApplicationExtensionHttpRequest;
@@ -75,6 +77,8 @@ export type ApplicationExtensionHost = {
     context: ExtensionDispatchContext;
   }) => Promise<{ registration: import("./contract.js").ApplicationBackendHttpHandlerRegistration } | undefined>;
   dispatchRawHttp: (input: {
+    /** 扩展 identity：同上。 */
+    extensionId: string;
     method: import("./contract.js").ApplicationExtensionHttpMethod;
     route: string;
     req: import("./contract.js").ApplicationExtensionRawRequest;
@@ -241,11 +245,16 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
 
     // recovery 实例贡献隔离到恢复命名空间：不能成为公共新工作入口（design D6）。
     const capabilityKey = (id: string) => (mode === "public" ? id : `_recovery/${definition.extensionId}/${configVersion}/${id}`);
-    const handlerKey = (route: string) => (mode === "public" ? route : `_recovery/${definition.extensionId}/${configVersion}/${route}`);
-    // 普通 JSON handler 全局键额外按 extensionId 命名空间隔离（change: 2026-10-13-...，任务 1.1）：
-    // 不同扩展可各自声明同名 route（如 `me`）。HTTP/raw HTTP handler 仍按公开路径匹配，不前缀。
-    const namedHandlerKey = (route: string) =>
+    /**
+     * 所有 handler 路由都按 extensionId 命名空间隔离（JSON / HTTP / raw HTTP 统一）。
+     *
+     * 公开 URL 形如 `/api/extensions/<extensionId>/handlers/<route>`（JSON）与
+     * `/api/extensions/<extensionId>/http/<route>`（HTTP/raw）；扩展只声明相对 route，
+     * 前缀由宿主添加，插件无法绕过——否则任意扩展都能占用根路径（如 `login`）。
+     */
+    const handlerKey = (route: string) =>
       mode === "public" ? `${definition.extensionId}/${route}` : `_recovery/${definition.extensionId}/${configVersion}/${route}`;
+    const namedHandlerKey = handlerKey;
 
     const configFacade: ApplicationBackendConfigFacade = options.configFacadeFor?.(definition.extensionId) ?? EMPTY_CONFIG_FACADE;
     const workFacade: ApplicationBackendWorkFacade = options.workFacadeFor?.(definition.extensionId) ?? REJECTING_WORK_FACADE;
