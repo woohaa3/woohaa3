@@ -1,0 +1,5 @@
+# 预构建扩展产物按字节原样检出。
+# 这些文件的大小与 SHA-256 记录在 artifact-manifest.json 里，装载时逐个校验；
+# 在 Windows（core.autocrlf=true）上被换行转换后会多出 \r，校验失败，后端因此无法启动
+# （EXTENSION_ARTIFACT_FILE_MISMATCH）。
+extensions/photocraft/** -text

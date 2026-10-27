@@ -289,6 +289,48 @@ function classifyFile(relative, entryRelative) {
 // ---------------------------------------------------------------------------
 
 /**
+ * 扩展自带的构建配置：扩展目录 `package.json` 的 `woohaa.build`。
+ *
+ * 让「原本为 Vite 写的前端」不改源码就能进扩展构建：
+ *   - `define`：`{ "<标识符>": "<JS 表达式>" }`，合并进 esbuild define（如 `import.meta.env.X`）；
+ *   - `loader`：`{ ".md": "text" }`，合并进 esbuild loader；
+ *   - `plugins`：相对扩展目录的模块路径，default 导出 esbuild 插件（或返回插件的工厂），
+ *     追加在宿主的 shim 与依赖守卫**之后**——守卫（node 内置 / 其他扩展 / 后端依赖）照常生效。
+ * 只作用于构建期，不进入产物。
+ */
+async function loadExtensionBuildConfig(dir) {
+  const file = path.join(dir, "package.json");
+  if (!existsSync(file)) return { define: {}, loader: {}, plugins: [], nodePaths: [] };
+  const config = JSON.parse(readFileSync(file, "utf8"))?.woohaa?.build ?? {};
+  const nodePaths = (Array.isArray(config.nodePaths) ? config.nodePaths : []).map((entry) => {
+    if (typeof entry !== "string" || entry.trim() === "") throw new Error(`woohaa.build.nodePaths 只接受非空字符串：${file}`);
+    return path.resolve(dir, entry);
+  });
+  const asRecord = (value, name) => {
+    if (value === undefined) return {};
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`woohaa.build.${name} 必须是对象：${file}`);
+    }
+    return value;
+  };
+  const plugins = [];
+  for (const specifier of Array.isArray(config.plugins) ? config.plugins : []) {
+    if (typeof specifier !== "string" || !specifier.startsWith(".")) {
+      throw new Error(`woohaa.build.plugins 只接受相对扩展目录的路径：${String(specifier)}（${file}）`);
+    }
+    const mod = await import(pathToFileURL(path.resolve(dir, specifier)).href);
+    // 默认导出可以是插件、插件工厂，或工厂返回的插件数组（多插件时按数组声明）。
+    const exported = typeof mod.default === "function" ? mod.default({ extensionDir: dir }) : mod.default;
+    const list = Array.isArray(exported) ? exported : [exported];
+    if (list.length === 0 || list.some((plugin) => !plugin || typeof plugin.setup !== "function")) {
+      throw new Error(`woohaa.build.plugins 的模块必须默认导出 esbuild 插件（或插件数组）：${specifier}`);
+    }
+    plugins.push(...list);
+  }
+  return { define: asRecord(config.define, "define"), loader: asRecord(config.loader, "loader"), plugins, nodePaths };
+}
+
+/**
  * 运行一次 browser build。`cwd` 为 extension 目录。
  */
 export async function buildExtensionBrowser(options = {}) {
@@ -297,6 +339,7 @@ export async function buildExtensionBrowser(options = {}) {
   const targetStaging = options.stagingDir ?? path.join(dir, ".browser-build");
   const entrySource = options.entrySource ?? path.join(dir, "src", "frontend", "index.ts");
   const metadataSource = options.metadataSource ?? path.join(dir, "src", "frontend", "metadata.ts");
+  const extensionBuild = await loadExtensionBuildConfig(dir);
 
   if (!existsSync(entrySource)) throw new Error(`缺少约定前端入口：${entrySource}`);
   if (!existsSync(metadataSource)) throw new Error(`缺少纯 metadata：${metadataSource}`);
@@ -447,7 +490,8 @@ export async function buildExtensionBrowser(options = {}) {
     jsx: "automatic",
     jsxDev: false,
     define: {
-      "process.env.NODE_ENV": '"production"'
+      "process.env.NODE_ENV": '"production"',
+      ...extensionBuild.define
     },
     splitting: true,
     chunkNames: "chunks/[name]-[hash]",
@@ -458,13 +502,15 @@ export async function buildExtensionBrowser(options = {}) {
     absWorkingDir: targetStaging,
     // 单文件 CSS：内部 lazy UI 的样式也纳入同一 stylesheet，避免原生动态 import 丢样式。
     loader: {
-      ".css": "css"
+      ".css": "css",
+      ...extensionBuild.loader
     },
     minify: true,
     sourcemap: false,
     metafile: true,
     logLevel: "warning",
-    plugins: [shimPlugin, guardPlugin],
+    plugins: [shimPlugin, guardPlugin, ...extensionBuild.plugins],
+    ...(extensionBuild.nodePaths.length > 0 ? { nodePaths: extensionBuild.nodePaths } : {}),
     ...(options.esbuild ? options.esbuild : {})
   });
 
@@ -479,14 +525,14 @@ export async function buildExtensionBrowser(options = {}) {
 
   const fileRecords = [];
   let entryRelative = null;
-  let stylesheetRelative = null;
+  const styleRelatives = [];
   for (const file of outputFiles) {
     const abs = path.resolve(metafileBase, file);
     const relative = path.relative(targetOut, abs).split(path.sep).join("/");
     const bytes = await fs.readFile(abs);
     const kind = classifyFile(relative, null);
     if (relative.endsWith(".js") && relative.startsWith("entry-") && !entryRelative) entryRelative = relative;
-    if (relative.endsWith(".css") && !stylesheetRelative) stylesheetRelative = relative;
+    if (relative.endsWith(".css")) styleRelatives.push(relative);
     fileRecords.push({
       relative,
       abs,
@@ -521,7 +567,12 @@ export async function buildExtensionBrowser(options = {}) {
   for (const record of fileRecords) {
     if (!record.relative.startsWith("assets/")) record.kind = classifyFile(record.relative, entryRelative);
   }
-  const styles = stylesheetRelative ? [stylesheetRelative] : [];
+  // 代码分割会产出多份 CSS（入口样式 + 各 chunk 的样式）。只登记第一份会让宿主漏加载
+  // 其余的样式表——表现是「部分样式在产物里、浏览器里却没生效」，很难定位。
+  // 入口样式表优先，其余按路径排序，保证 artifactId 稳定。
+  const styles = [...styleRelatives].sort(
+    (a, b) => (a.startsWith("entry-") ? 0 : 1) - (b.startsWith("entry-") ? 0 : 1) || (a < b ? -1 : a > b ? 1 : 0)
+  );
 
   // 依赖图：从打包器 metafile 读取真实 import 边（不用文本正则，避免误判字符串）。
   // 目标若在本次输出集合内 → resolved 为相对路径；否则视为外部依赖（list 为 null，装配时必须为空）。
