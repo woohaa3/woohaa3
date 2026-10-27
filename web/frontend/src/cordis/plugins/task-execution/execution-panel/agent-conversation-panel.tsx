@@ -223,13 +223,14 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
     titleRef.current?.focus();
   }, [props.conversationId]);
 
-  const submitReply = (event?: React.FormEvent) => {
+  const submitReply = (event?: React.FormEvent, generateText = false) => {
     event?.preventDefault();
     const prompt = draft.trim();
     if (!snapshot.detail || snapshot.detail.conversation.conversationId !== props.conversationId || input.busy) return;
     if (input.pending) { void controller.submit(input.pending.input, port); return; }
     if (selectionReason || switchingConnection) { setReplyError(selectionReason || "正在切换助手…"); return; }
-    if (!prompt || snapshot.detail.turns.some(turn => !isTurnSettled(turn.status))) return;
+    if (!prompt || (!generateText && snapshot.detail.turns.some(turn => !isTurnSettled(turn.status)))) return;
+    if (generateText && props.targetExecution?.()?.mode !== "text") return;
     setReplyError(null);
     const session = replySession.current;
     // 详情回复仍属于原目标会话。把上一轮目标的稳定标识带回去，
@@ -246,7 +247,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ...(replyBinding ? { connection: replyBinding } : {}),
         ...(replyModel ? { model: replyModel } : {}),
         ...(replyEffort ? { reasoningEffort: replyEffort } : {}),
-        action: "discuss", canvasId: snapshot.detail.conversation.canvasId,
+        action: generateText ? "generate" : "discuss", canvasId: snapshot.detail.conversation.canvasId,
         ...(props.nodeId ? { nodeId: props.nodeId } : {}), prompt,
         ...(continuationTarget?.mode ? { mode: continuationTarget.mode } : {}),
         ...(continuationTarget?.cameraId ? { cameraId: continuationTarget.cameraId } : {}),
@@ -435,7 +436,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ) : (
           timeline.map((item) =>
             item.kind === "message" ? (
-              <MessageRow key={item.key} message={item.message} structuredOutput={detail.turns.some(turn => turn.turnId === item.message.turnId && turn.target.delivery?.purpose === "film-set-conversion")} />
+              <MessageRow key={item.key} message={item.message} structuredOutput={detail.turns.some(turn => turn.turnId === item.message.turnId && Boolean(turn.target.delivery))} />
             ) : item.kind === "tool" ? (
               <ToolRow key={item.key} tool={item.tool} turnStatus={item.turnStatus} />
             ) : (
@@ -460,10 +461,15 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
             ) : null}
           </div>
         ) : null}
+        {turn?.target.mode === "text" && ["queued", "running", "committing"].includes(turn.status) ? <Button tone="neutral" disabled={stopping || !props.targetExecution?.()} onClick={() => void stopUnknownTurn()}>停止此回合</Button> : null}
         {turn?.status === "unknown" ? (
           <div className="agent-detail__result">
             <p>{liveReturn ? "可先停止此回合，再返回生成面板继续搭建。" : "可先停止此回合，再关闭详情继续搭建。"}</p>
             <div className="agent-detail__actions">
+              {turn.target.mode === "text" ? <button type="button" disabled={stopping || !props.targetExecution?.()} onClick={() => {
+                if (!service.retryTextSave) return;
+                setStopping(true); void service.retryTextSave(turn.requestId).then(result => { if (!result.ok) setStopError(result.error); else void service.openDetail(props.conversationId); }).finally(() => setStopping(false));
+              }}>重试保存</button> : null}
               <button type="button" disabled={stopping} onClick={() => void stopUnknownTurn()}>{stopping ? "正在停止…" : "停止此回合"}</button>
             </div>
             {stopError ? <p className="agent-detail__error">{stopError}</p> : null}
@@ -471,6 +477,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ) : null}
       </div>
 
+      {turn?.target.mode === "text" ? <Button tone="neutral" disabled={!props.targetExecution?.() || input.busy || !draft.trim() || Boolean(selectionReason)} onClick={() => submitReply(undefined, true)}>按描述继续生成文本</Button> : null}
       <form className="agent-detail__reply" onSubmit={submitReply}>
         <AssistantComposer className="agent-detail__reply-input" rows={2}
           placeholder="继续讨论"

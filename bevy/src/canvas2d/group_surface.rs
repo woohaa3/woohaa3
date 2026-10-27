@@ -1,5 +1,10 @@
 //! Continuous group surfaces behind 3D appearances, using the existing canvas camera.
 //! No overlay cutout, extra camera, offscreen preview or capture-layer geometry.
+//!
+//! Only groups that carry a model keep this 3D surface: they need the opaque badge plate and
+//! the model standing on it. Plain groups are filled by the per-group 2D panel in
+//! [`super::group::draw_group_panel`], so they must not also fill here (two stacked 55%
+//! layers would darken the panel and change the established color).
 use std::collections::{HashMap, HashSet};
 
 use super::geometry::Geometry;
@@ -57,6 +62,8 @@ fn mesh(node: &crate::protocol::GraphNode) -> Mesh {
     }
     // An opaque surface in the same theme makes the identity read as a badge, above the
     // translucent group surface and still behind every model. It intentionally masks its underlay.
+    // The 2D panel leaves a rectangular aperture over exactly this badge (plus the 55% underlay
+    // at its rounded corners), so this plate and its model stay visible under the overlay camera.
     let badge = group_model::badge_path(node);
     if !badge.is_empty() {
         let relative: Vec<_> = badge.iter().map(|point| *point - origin).collect();
@@ -82,7 +89,7 @@ pub(crate) fn sync(
         .0
         .nodes
         .iter()
-        .filter(|node| node.group.is_some() && scene.0.model_focus.is_none())
+        .filter(|node| group_model::has_badge(node) && scene.0.model_focus.is_none())
         .collect();
     let ids: HashSet<_> = nodes.iter().map(|node| node.id.as_str()).collect();
     state.entries.retain(|id, surface| {
@@ -121,7 +128,7 @@ pub(crate) fn sync(
         let key = Key {
             rect: [node.x, node.y, node.width, node.height],
             depth,
-            badge: !group_model::badge_path(node).is_empty(),
+            badge: group_model::has_badge(node),
             badge_scale: group_model::badge_scale(node),
         };
         if state

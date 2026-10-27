@@ -58,6 +58,7 @@ export type AgentConversationRemote = {
    * 回退到原任务详情。只读，不 accept/dispatch。
    */
   locate: (runId: string) => Promise<AgentConversationResult<{ conversation: ConversationSummary; turn: ConversationTurn; snapshot: ConversationSnapshot }>>;
+  retryTextSave?: (requestId: string) => Promise<AgentConversationResult<{ turn: ConversationTurn }>>;
   cancel: (requestId: string) => Promise<AgentConversationResult<{ ok: true }>>;
   link: (requestId: string, input: { runId?: string; taskId?: string }) => Promise<AgentConversationResult<{ turn: ConversationTurn }>>;
 };
@@ -131,6 +132,10 @@ export function createAgentConversationRemote(options: AgentConversationRemoteOp
     },
     async locate(runId) {
       return unwrap(await transport.request({ path: path(`locate?runId=${encodeURIComponent(runId)}`), method: "GET" }));
+    },
+    async retryTextSave(requestId) {
+      const result = unwrap(await transport.request({ path: path(`turns/${encodeURIComponent(requestId)}/retry-save`), method: "POST", body: {} }));
+      return result as AgentConversationResult<{ turn: ConversationTurn }>;
     },
     async cancel(requestId) {
       return unwrap(await transport.request({ path: path(`turns/${encodeURIComponent(requestId)}/cancel`), method: "POST", body: {} }));

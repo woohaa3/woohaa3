@@ -14,6 +14,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
 import type { InstalledExtensionView, SettingsSnapshot } from "@woohaa3/contracts";
 import { Button } from "../../../shared/ui/Button.js";
+import { FileTextIcon } from "../../../shared/ui/icons.js";
 import { describeJob, type ManagedExtensionsController } from "./managed-extensions.js";
 import { ManagedVersionStatusNotice } from "./managed-version-status.js";
 
@@ -34,11 +35,14 @@ function needsRestart(entry: InstalledExtensionView): boolean {
 export function ManagedInstallBar({
   controller,
   snapshot,
-  canManage
+  canManage,
+  variant = "bar"
 }: {
   controller: ManagedExtensionsController;
   snapshot: SettingsSnapshot | null;
   canManage: boolean;
+  /** `view`：作为「从文件安装」独立视图时，主按钮改为选择文件，不重复页面标题。 */
+  variant?: "bar" | "view";
 }) {
   const state = useController(controller);
   const input = useRef<HTMLInputElement | null>(null);
@@ -48,33 +52,53 @@ export function ManagedInstallBar({
   const needsRestart =
     restartPending(snapshot) || state.jobs.some((job) => job.status === "succeeded" && job.outcome === "restart-required");
   return (
-    <div className="managed-install" data-testid="managed-install">
-      <div className="managed-install__row">
-        <Button
-          size="sm"
-          tone="primary"
-          disabled={state.submitting}
-          onClick={() => input.current?.click()}
-          data-testid="managed-install-file"
-        >
-          从文件安装
-        </Button>
-        <span className="settings-page__hint">
-          选择 .wxt 扩展包；安装前校验签名与声明{installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
-        </span>
-        <input
-          ref={input}
-          type="file"
-          accept=".wxt"
-          hidden
-          data-testid="managed-install-input"
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (file) void controller.installFile(file);
-          }}
-        />
-      </div>
+    <div className={variant === "view" ? "managed-install is-view" : "managed-install"} data-testid="managed-install">
+      {variant === "view" ? (
+        <div className="managed-install__drop">
+          <span className="managed-install__drop-icon"><FileTextIcon size={21} /></span>
+          <strong>拖入 .wxt 扩展包</strong>
+          <p>
+            或选择本机文件。安装前会校验签名、逐文件摘要与扩展声明
+            {installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
+          </p>
+          <Button
+            size="sm"
+            tone="primary"
+            disabled={state.submitting}
+            onClick={() => input.current?.click()}
+            data-testid="managed-install-file"
+          >
+            选择 .wxt 文件
+          </Button>
+        </div>
+      ) : (
+        <div className="managed-install__row">
+          <Button
+            size="sm"
+            tone="primary"
+            disabled={state.submitting}
+            onClick={() => input.current?.click()}
+            data-testid="managed-install-file"
+          >
+            从文件安装
+          </Button>
+          <span className="settings-page__hint">
+            选择 .wxt 扩展包；安装前校验签名与声明{installations.allowUnsignedLocal ? "（本机允许未签名的本地包）" : ""}。
+          </span>
+        </div>
+      )}
+      <input
+        ref={input}
+        type="file"
+        accept=".wxt"
+        hidden
+        data-testid="managed-install-input"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) void controller.installFile(file);
+        }}
+      />
       {state.error ? (
         <p className="settings-page__error" role="alert" data-testid="managed-install-error">{state.error}</p>
       ) : null}
@@ -116,13 +140,12 @@ export function ManagedInstallBar({
   );
 }
 
-function trustLabel(trust: InstalledExtensionView["trust"]): string {
-  if (!trust) return "未知";
-  if (trust === "unsigned") return "未签名（本地开发）";
-  return `已签名 · ${trust.slice("signed:".length)}`;
-}
-
-export function ManagedExtensionDetails({
+/**
+ * 受管扩展的操作（回滚 / 卸载）：挂在详情头部右侧，和「返回」同一层。
+ *
+ * 正文只留提示，不再把卸载按钮泡在说明文字下面——操作属于头部操作区。
+ */
+export function ManagedExtensionActions({
   installed,
   controller,
   canManage
@@ -134,76 +157,72 @@ export function ManagedExtensionDetails({
   useController(controller);
   const [confirming, setConfirming] = useState(false);
   const [purge, setPurge] = useState(false);
-  if (!installed || installed.managed !== true) return null;
+  if (!installed || installed.managed !== true || !canManage) return null;
   const id = installed.id;
   const busy = controller.busy(id);
   return (
+    <div className="managed-extension__actions" data-testid={`managed-actions-${id}`}>
+      {installed.previousVersion ? (
+        <Button size="sm" disabled={busy} onClick={() => void controller.rollback(id)} data-testid={`managed-rollback-${id}`}>
+          回滚到 v{installed.previousVersion}
+        </Button>
+      ) : null}
+      {confirming ? (
+        <>
+          <label className="managed-extension__purge">
+            <input type="checkbox" checked={purge} onChange={(event) => setPurge(event.currentTarget.checked)} />
+            同时清除扩展数据
+          </label>
+          <Button
+            size="sm"
+            tone="danger"
+            disabled={busy}
+            onClick={() => {
+              setConfirming(false);
+              void controller.uninstall(id, { purgeData: purge });
+            }}
+            data-testid={`managed-uninstall-confirm-${id}`}
+          >
+            确认卸载
+          </Button>
+          <Button size="sm" tone="ghost" onClick={() => setConfirming(false)}>取消</Button>
+        </>
+      ) : (
+        <Button size="sm" tone="ghost" disabled={busy} onClick={() => setConfirming(true)} data-testid={`managed-uninstall-${id}`}>
+          卸载
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** 受管扩展的状态提示（需重启 / 覆盖内置 / 观察期 / 版本状态）；没有可说的就什么都不渲染。 */
+export function ManagedExtensionDetails({
+  installed
+}: {
+  installed: InstalledExtensionView | undefined;
+}) {
+  if (!installed || installed.managed !== true) return null;
+  const id = installed.id;
+  const observing = installed.observeUntil ? new Date(installed.observeUntil) : null;
+  const hasNotice = needsRestart(installed) || installed.builtinVersion || observing;
+  if (!hasNotice) return null;
+  return (
     <div className="managed-extension" data-testid={`managed-extension-${id}`}>
-      <dl className="managed-extension__facts">
-        <dt>来源</dt>
-        <dd data-testid={`managed-source-${id}`}>{installed.sourceId === "local-file" ? "本地文件" : installed.sourceId ?? "未知"}</dd>
-        <dt>信任</dt>
-        <dd data-testid={`managed-trust-${id}`}>
-          {trustLabel(installed.trust)}
-          {/* C 方向取消进程边界后，这是安装前必须让人看见的一件事：签名只证明来源与完整性，
-              不代表执行边界——扩展与宿主同进程、同权限。 */}
-          <span className="managed-extension__note" data-testid={`managed-trust-note-${id}`}>
-            （与本机宿主同权限，不是沙箱）
-          </span>
-        </dd>
-        {installed.builtinVersion ? (
-          <>
-            <dt>内置版本</dt>
-            <dd data-testid={`managed-builtin-${id}`}>
-              当前受管版本覆盖内置 v{installed.builtinVersion}；卸载后回到内置版本
-            </dd>
-          </>
-        ) : null}
-        {installed.observeUntil ? (
-          <>
-            <dt>观察期</dt>
-            <dd>至 {new Date(installed.observeUntil).toLocaleString()}，期间失败将自动回滚</dd>
-          </>
-        ) : null}
-      </dl>
       {needsRestart(installed) ? (
         <p className="managed-extension__restart" data-testid={`managed-restart-required-${id}`}>新版本需重启本机服务后生效。</p>
       ) : null}
-      <ManagedVersionStatusNotice installed={installed} />
-      {canManage ? (
-        <div className="managed-extension__actions">
-          {installed.previousVersion ? (
-            <Button size="sm" disabled={busy} onClick={() => void controller.rollback(id)} data-testid={`managed-rollback-${id}`}>
-              回滚到 v{installed.previousVersion}
-            </Button>
-          ) : null}
-          {confirming ? (
-            <>
-              <label className="managed-extension__purge">
-                <input type="checkbox" checked={purge} onChange={(event) => setPurge(event.currentTarget.checked)} />
-                同时清除扩展数据
-              </label>
-              <Button
-                size="sm"
-                tone="danger"
-                disabled={busy}
-                onClick={() => {
-                  setConfirming(false);
-                  void controller.uninstall(id, { purgeData: purge });
-                }}
-                data-testid={`managed-uninstall-confirm-${id}`}
-              >
-                确认卸载
-              </Button>
-              <Button size="sm" tone="ghost" onClick={() => setConfirming(false)}>取消</Button>
-            </>
-          ) : (
-            <Button size="sm" tone="ghost" disabled={busy} onClick={() => setConfirming(true)} data-testid={`managed-uninstall-${id}`}>
-              卸载
-            </Button>
-          )}
-        </div>
+      {installed.builtinVersion ? (
+        <p className="managed-extension__note" data-testid={`managed-builtin-${id}`}>
+          当前受管版本覆盖内置 v{installed.builtinVersion}，卸载后回到内置版本。
+        </p>
       ) : null}
+      {observing ? (
+        <p className="managed-extension__note" data-testid={`managed-observe-${id}`}>
+          观察期至 {observing.toLocaleString()}，期间失败将自动回滚。
+        </p>
+      ) : null}
+      <ManagedVersionStatusNotice installed={installed} />
     </div>
   );
 }

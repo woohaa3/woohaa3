@@ -195,6 +195,11 @@ export const canvasPlugin: HostPlugin<{
     };
 
     const canvas = await createCanvasService({
+      assistantTextRuns: {
+        run: (input: Parameters<import("@woohaa3/contracts").AssistantTextRunGateway["run"]>[0]) => ctx.get("application")!.service.assistantTextRuns().run(input),
+        status: (input: Parameters<import("@woohaa3/contracts").AssistantTextRunGateway["status"]>[0]) => ctx.get("application")!.service.assistantTextRuns().status(input),
+        cancel: (input: Parameters<import("@woohaa3/contracts").AssistantTextRunGateway["cancel"]>[0]) => ctx.get("application")!.service.assistantTextRuns().cancel(input),
+      },
       env,
       ...(foundationStorage ? canvasStorageOptions(foundationStorage) : {}),
       ...(accessBoundary

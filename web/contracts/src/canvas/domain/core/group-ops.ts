@@ -15,3 +15,7 @@ export * from "./group-selection.js";
 
 // 成组/解组/reparent/refit 与 parentId 清洗。
 export * from "./group-parenting.js";
+
+// Frozen-size drag release settlement. Kept separate from legacy refit helpers
+// so existing explicit group resize/arrange callers retain their semantics.
+export * from "./group-drop-settlement.js";

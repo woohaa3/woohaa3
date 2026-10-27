@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "extensionId": "film-set",
+  "required": true,
   "canvasContent": {
     "module": "./backend",
     "factory": "createFilmSetCanvasContentRuntime",

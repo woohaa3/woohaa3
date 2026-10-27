@@ -42,3 +42,34 @@ describe("assistant input controller", () => {
     expect(controller.getSnapshot().draft.prompt).toBe("next");
   });
 });
+
+it("text submits independent frozen requests before earlier responses, preserving unknown identities and later drafts", async () => {
+  const controller = createAssistantInputController<{ prompt: string }, string>({ prompt: "first" });
+  const resolve: Array<(result: { kind: "accepted"; value: string } | { kind: "unknown"; message: string }) => void> = [];
+  const submit = vi.fn(() => new Promise<{ kind: "accepted"; value: string } | { kind: "unknown"; message: string }>(done => resolve.push(done)));
+  const port = { submit, query: vi.fn(async () => ({ kind: "accepted" as const, value: "first" })) };
+  const first = controller.submitIndependent({ prompt: "first" }, port);
+  controller.edit({ prompt: "second" });
+  const second = controller.submitIndependent({ prompt: "second" }, port);
+  const original = controller.getSnapshot().submissions[0]!;
+  expect(submit).toHaveBeenCalledTimes(2);
+  expect(submit.mock.calls[0]).not.toEqual(submit.mock.calls[1]);
+  controller.edit({ prompt: "third" });
+  resolve[1]!({ kind: "accepted", value: "second" }); await second;
+  resolve[0]!({ kind: "unknown", message: "lost" }); await first;
+  expect(controller.getSnapshot().submissions).toHaveLength(1);
+  await controller.querySubmission(original.requestId, port);
+  expect(port.query).toHaveBeenCalledWith({ prompt: "first" }, original.requestId);
+  expect(controller.getSnapshot().draft.prompt).toBe("third");
+  expect(submit).toHaveBeenCalledTimes(2);
+});
+
+it("isolates text prompt drafts by connection and model", () => {
+  const controller = createAssistantInputController({ prompt: "legacy authored prompt" });
+  controller.selectPromptScope("connection-a:model-a");
+  expect(controller.getSnapshot().draft.prompt).toBe("legacy authored prompt");
+  controller.edit({ prompt: "a draft" }); controller.selectPromptScope("connection-b:model-b");
+  expect(controller.getSnapshot().draft.prompt).toBe("");
+  controller.edit({ prompt: "b draft" }); controller.selectPromptScope("connection-a:model-a");
+  expect(controller.getSnapshot().draft.prompt).toBe("a draft");
+});

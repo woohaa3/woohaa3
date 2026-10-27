@@ -47,7 +47,7 @@ export type LocalAgentRuntimeOptions = {
 
 /** 本机来源能力：需要工具的执行由宿主 grant 门禁；讨论只读。 */
 function capabilitiesFor(): AgentConnectionCapabilities {
-  return { discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
+  return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
 }
 
 /** 原生线程不可恢复时，仍把宿主账本中的合法历史交给讨论回合。 */
@@ -337,7 +337,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
 
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ ...ADAPTER_CAPS, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: [...ADAPTER_CAPS.targets, ...(options.tools && options.mcpEndpoint ? ["canvas-group" as const] : [])] }),
+    capabilities: () => ({ ...ADAPTER_CAPS, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: [...ADAPTER_CAPS.targets, ...(options.tools && options.mcpEndpoint ? ["canvas-group" as const] : [])] }),
     authorization,
     models,
     run,

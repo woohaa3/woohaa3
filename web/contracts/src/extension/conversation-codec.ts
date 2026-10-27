@@ -95,8 +95,11 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
   if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是对象");
   const requestId = readId(body.requestId, "requestId");
   if (typeof requestId === "object") return fail("malformed-request", requestId.error);
+  if (Object.keys(body).some(key => !["requestId", "entry"].includes(key))) return fail("malformed-request", "请求包含私有或未知字段");
   const entryRaw = body.entry;
   if (!isJsonObject(entryRaw)) return fail("malformed-request", "entry 必须是对象");
+  if (Object.keys(entryRaw).some(key => !["action", "canvasId", "nodeId", "mode", "cameraId", "clipId", "itemId", "model", "reasoningEffort", "connectionId", "connection", "expectedContentHash", "prompt", "references"].includes(key))) return fail("malformed-request", "entry 包含私有或未知字段");
+  if (entryRaw.mode === "text" && ["cameraId", "clipId", "itemId"].some(key => entryRaw[key] !== undefined)) return fail("malformed-request", "文本目标不能带片场或镜头身份");
   const binding = entryRaw.connection;
   if (binding !== undefined && (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0))) return fail("malformed-request", "connection 非法");
   const action = entryRaw.action;

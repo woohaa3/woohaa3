@@ -115,11 +115,20 @@ impl Block {
         focused_id: Option<&str>,
     ) -> bool {
         self.theme == theme
-            && self.keys.len() == nodes.iter().filter(|n| ordinary(n) && focused_id != Some(n.id.as_str())).count()
+            && self.keys.len()
+                == nodes
+                    .iter()
+                    .filter(|n| ordinary(n) && focused_id != Some(n.id.as_str()))
+                    .count()
             && self
                 .keys
                 .iter()
-                .zip(nodes.iter().enumerate().filter(|(_, n)| ordinary(n) && focused_id != Some(n.id.as_str())))
+                .zip(
+                    nodes
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, n)| ordinary(n) && focused_id != Some(n.id.as_str())),
+                )
                 .all(|((old_index, key), (index, node))| {
                     *old_index == index && key.matches(node, attach_owner)
                 })
@@ -141,14 +150,25 @@ pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
-    text: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
+    text: &mut Query<
+        (
+            &mut Text2d,
+            &mut Transform,
+            &mut TextColor,
+            &mut LogicalText,
+        ),
+        Without<Sprite>,
+    >,
     scene: &Scene,
     theme: &ThemeResource,
 ) -> u64 {
     let mut blocks = std::mem::take(&mut visuals.card_blocks);
     let count = scene.nodes.len().div_ceil(BLOCK_SIZE);
     let focused_id = super::image_focus::presented_media_focus(scene).map(|focus| focus.node_id);
-    let attach_owner = scene.drag_attach.as_ref().map(|attach| attach.node_id.as_str());
+    let attach_owner = scene
+        .drag_attach
+        .as_ref()
+        .map(|attach| attach.node_id.as_str());
     for block in blocks.iter_mut().skip(count) {
         block.clear(commands, meshes);
     }
@@ -160,22 +180,35 @@ pub(super) fn sync(
         if block.matches(nodes, theme.fingerprint(), attach_owner, focused_id) {
             continue;
         }
-        if !nodes.iter().any(|node| ordinary(node) && focused_id != Some(node.id.as_str())) {
+        if !nodes
+            .iter()
+            .any(|node| ordinary(node) && focused_id != Some(node.id.as_str()))
+        {
             block.clear(commands, meshes);
             block.theme = theme.fingerprint().to_owned();
             continue;
         }
         let mut geometry = Geometry::default();
         block.keys.clear();
-        for (local_index, node) in nodes.iter().enumerate().filter(|(_, n)| ordinary(n) && focused_id != Some(n.id.as_str())) {
+        for (local_index, node) in nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| ordinary(n) && focused_id != Some(n.id.as_str()))
+        {
             let index = block_index * BLOCK_SIZE + local_index;
             let key = DrawKey::new(node, attach_owner);
-            let labels = super::cards::draw_static(&mut geometry, theme, node, index);
+            let render_index = super::draw_order::render_index(&scene.nodes, index);
+            let labels = super::cards::draw_static(&mut geometry, theme, node, render_index);
             // 节点下方独立历史条（change: 2026-10-12-unify-generation-history-strip，design D4）：
             // 命中用 `canvas_query::layout::history_strip_rect`。拖动粘连 owner 期间其下方已被
             // 操作条占用，暂不让绘制历史条以免重叠。
             if key.history.is_some() && !key.hide_history {
-                super::history_strip::draw_history_strip(&mut geometry, theme, node, 10.0 + index as f32 * 0.1 + 0.05);
+                super::history_strip::draw_history_strip(
+                    &mut geometry,
+                    theme,
+                    node,
+                    10.0 + render_index as f32 * 0.1 + 0.05,
+                );
             }
             sync_labels(
                 commands,
@@ -183,7 +216,7 @@ pub(super) fn sync(
                 text,
                 &node.id,
                 labels,
-                10.0 + index as f32 * 0.1 + 0.02,
+                10.0 + render_index as f32 * 0.1 + 0.02,
             );
             block.keys.push((local_index, key));
         }

@@ -11,7 +11,7 @@ describe("OAuth 同 owner 统一连接发现", () => {
     const provider = createOAuthConnectionProvider({ service, adapter: { id: "chatgpt" } as AgentConversationAdapter, ownerIdFor: (owner) => `principal:${owner}` });
     expect(await provider.listConnections({ owner: "two" })).toEqual([]);
     const [first] = await provider.listConnections({ owner: "one" });
-    expect(first).toMatchObject({ name: "ChatGPT · me@example.com", authMode: "oauth", capabilities: { discussion: true, tools: true }, models: [], ready: false });
+    expect(first).toMatchObject({ name: "ChatGPT · me@example.com", authMode: "oauth", capabilities: { discussion: true, tools: true, textDelivery: { imageInput: true, maxImages: 12 } }, models: [], ready: false });
     expect(JSON.stringify(first)).not.toContain("secret-token");
     expect(JSON.stringify(first)).not.toContain("refresh-secret");
     account.accessToken = "refreshed-token";

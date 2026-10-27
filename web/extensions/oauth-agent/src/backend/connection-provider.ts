@@ -23,7 +23,7 @@ export function createOAuthConnectionProvider(options: {
       credentialEpoch: Number.parseInt(createHash("sha256").update(`${account.subject}:${account.connectedAt}`).digest("hex").slice(0, 12), 16),
       status: { transport: unknown, credential, modelAccess: unknown, tools: unknown },
       ready: false, credentialConfigured: true,
-      capabilities: { discussion: authorized, imageInput: false, tools: authorized, structuredResult: false, cancel: true, resume: true },
+      capabilities: { textDelivery: { imageInput: true, maxImages: 12 }, discussion: authorized, imageInput: false, tools: authorized, structuredResult: false, cancel: true, resume: true },
       models: [], ...(!authorized ? { reason: credential.reason } : {})
     };
   };

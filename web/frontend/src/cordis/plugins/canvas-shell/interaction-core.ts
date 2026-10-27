@@ -45,6 +45,8 @@ export type InteractionState = {
   hoveredEdgeId: string | null;
   hoveredVideoNode: string | null;
   hoveredHistory?: { nodeId: string; presentationId: string } | null;
+  /** Groups whose frozen frame currently contains a dragged node center. */
+  dropTargetGroupIds: string[];
   wheelSource: WheelSourceState;
   viewportCommitTimer: number | null;
   lastNotifiedViewport: Viewport | null;

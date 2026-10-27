@@ -46,7 +46,7 @@ export function sdkReasoningEfforts(adapterId: string, model: string): readonly 
 }
 
 export function capabilitiesFor(_adapter: SdkAgentAdapterDescriptor): AgentConnectionCapabilities {
-  return { discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
+  return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
 }
 
 export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, "allowedHosts" | "allowHttp">): Record<string, ConnectionDescriptor> {
@@ -203,7 +203,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
   };
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ discussion: true, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "film-set", "camera", ...(options.tools && options.authoring && options.mcpServerUrl ? ["canvas-group" as const] : [])], tools: true, models: "remote" }),
+    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "film-set", "camera", ...(options.tools && options.authoring && options.mcpServerUrl ? ["canvas-group" as const] : [])], tools: true, models: "remote" }),
     authorization: async ({ owner }) => {
       const records = (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId);
       for (const record of records) if (await options.service.credentialConfigured({ owner, connectionId: record.connectionId, purpose: "model-api-key" })) return "ready";

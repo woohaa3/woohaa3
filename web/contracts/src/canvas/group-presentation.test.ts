@@ -27,10 +27,12 @@ describe("group collapsed presentation", () => {
     const applied = applyCanvasCommands(canvas, [{ type: "nodeData.patch", nodeId: "g", value: { groupCollapsed: true } }]);
     if (!applied.ok) throw Error(applied.rejection.message);
     const collapsed = buildCanvasRenderScene({ canvas: applied.canvas, selection: { nodes: ["g", "member"] } });
-    expect(collapsed.nodes.map(node => node.id)).toEqual(["g", "external"]);
+    // 无组根节点固定在最低绘制层，组按 id 排序（change: 2026-10-26-settle-group-boundaries-on-drop）。
+    expect(collapsed.nodes.map(node => node.id)).toEqual(["external", "g"]);
     expect(collapsed.edges).toEqual([]);
     expect(collapsed.selection.nodes).toEqual(["g"]);
-    const original = expanded.nodes[0]!, compact = collapsed.nodes[0]!;
+    const ofGroup = (nodes: typeof expanded.nodes) => nodes.find(node => node.id === "g")!;
+    const original = ofGroup(expanded.nodes), compact = ofGroup(collapsed.nodes);
     expect(compact.x + compact.width / 2).toBe(original.x + original.width / 2);
     expect(compact.y + compact.height).toBe(original.y + original.height);
     expect(compact).toMatchObject({ width: 196, height: 112, resizable: false, group: { memberCount: 1, collapsed: true } });
@@ -49,7 +51,7 @@ describe("group collapsed presentation", () => {
     expect([...hiddenByCollapsedGroups(canvas)].sort()).toEqual(["member", "nested"]);
     canvas.nodeData.g.groupCollapsed = false;
     expect([...hiddenByCollapsedGroups(canvas)]).toEqual(["member"]);
-    expect(buildCanvasRenderScene({ canvas }).nodes.map(node => node.id)).toEqual(["g", "nested", "external"]);
+    expect(buildCanvasRenderScene({ canvas }).nodes.map(node => node.id)).toEqual(["external", "g", "nested"]);
   });
 
   it("折叠可撤销、重做；非法类型或非组写入整批拒绝", () => {

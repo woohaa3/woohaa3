@@ -1,7 +1,10 @@
 /**
- * 插件开关：站点插件写服务端权威状态（运行中生效），browser-local 写浏览器本地偏好（下次启动生效）。
+ * 插件开关：站点插件写服务端权威状态，browser-local 写宿主配置文件（`extensions.<id>.enabled`）。
  *
- * 目录名与这里无关——`.提示` 只表示扩展未安装（change: 2026-10-19-restore-runtime-extension-toggling）。
+ * 两者都是**运行中立即生效**——配置写入后宿主热重载、前端按 id 热装/热卸 fiber，
+ * 不存在「重启后生效」或「下次打开生效」这回事。
+ *
+ * 目录名与这里无关——`.` 前缀只表示扩展未安装（change: 2026-10-19-restore-runtime-extension-toggling）。
  */
 import { useState } from "react";
 import { Switch } from "../../../shared/ui/Switch.js";
@@ -54,7 +57,7 @@ export function PluginStateControl({ index, group, manager, siteManageable, stor
   return (
     <div className="plugin-state">
       <span className="plugin-state__label" data-pending={kind === "browser" && browserRow!.status.startsWith("pending") ? "true" : "false"}>
-        {browserEnabled ? "本次已启用" : "本次未启用"}
+        {browserEnabled ? "运行中" : "已停用"}
       </span>
       <Switch
         checked={browserEnabled}
@@ -67,7 +70,6 @@ export function PluginStateControl({ index, group, manager, siteManageable, stor
         }}
         testId={testId}
       />
-      <span className="settings-page__hint">下次打开生效</span>
       {error ? <span className="settings-page__error">{error}</span> : null}
     </div>
   );

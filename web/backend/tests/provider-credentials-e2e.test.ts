@@ -164,15 +164,15 @@ describe("本地单实例访问控制", () => {
     const app = await boot();
     try {
       expect((await writeSettings(app.base, { "providers.ark.apiKey": "ark-secret" })).status).toBe(200);
-      const snapshot = (await (await fetch(`${app.base}/api/extensions`)).json()) as { revision: number };
-      const write = (extraHeaders: Record<string, string>) =>
-        fetch(`${app.base}/api/extensions/ark-provider/config`, {
-          method: "PUT",
-          headers: { "content-type": "application/json", ...extraHeaders },
-          body: JSON.stringify({ expectedRevision: snapshot.revision, enabled: true, values: {}, secretRefs: [] })
-        });
-      const enabled = await write({});
-      expect(enabled.status, await enabled.clone().text()).toBe(200);
+      // 启停走配置文件（extensions.<id>.enabled），不需要令牌、也不经过站点控制面。
+      const toggled = await fetch(`${app.base}/api/settings/extension-toggles`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ extensionId: "ark-provider", enabled: true })
+      });
+      expect(toggled.status, await toggled.clone().text()).toBe(200);
+      const snapshot = (await toggled.json()) as { extensionToggles?: Record<string, boolean> };
+      expect(snapshot.extensionToggles?.["ark-provider"]).toBe(true);
     } finally {
       await app.close();
     }
@@ -180,29 +180,17 @@ describe("本地单实例访问控制", () => {
 });
 
 describe("插件管理里的 Provider 开关", () => {
-  it("运行时停用撤回 Provider，重新启用恢复注册", async () => {
+  it("Provider 的启停由配置文件决定，而不是站点控制面", async () => {
     const app = await boot();
     try {
       const plane = app.service.modules().application.plugins();
       const providerIds = async () =>
         app.service.modules().generation.list().map((provider) => provider.providerId).sort();
-      // 未配置凭据时 Provider 如实报告 degraded（不再伪称 active，见「没配凭据的 Provider 不再伪称运行中」）；
-      // 本用例只验证启停语义，因此这里断言 degraded。
-      expect(plane.status("runninghub-provider")?.actualState).toBe("degraded");
+      // Provider 自带 Config 与装配入口：它们不出现在控制面 catalog 里（那里只列有后端入口的扩展）。
       for (const extensionId of ALL_PROVIDER_IDS.map((id) => `${id}-provider`)) {
-        expect(plane.status(extensionId)?.actualState, extensionId).toBe("degraded");
+        expect(plane.status(extensionId), extensionId).toBeUndefined();
       }
-      expect(await providerIds()).toEqual(ALL_PROVIDER_IDS);
-
-      const toggle = (enabled: boolean) =>
-        plane.write({ extensionId: "runninghub-provider", expectedRevision: plane.snapshot().revision, enabled, values: {}, secretRefs: [], actor: "tester" });
-      // 安装状态与运行时开关独立：停用撤回注册，保留磁盘目录。
-      expect(await toggle(false)).toMatchObject({ ok: true });
-      expect(plane.status("runninghub-provider")?.actualState).toBe("disabled");
-      expect(await providerIds()).toEqual(ALL_PROVIDER_IDS.filter(id => id !== "runninghub"));
-
-      expect(await toggle(true)).toMatchObject({ ok: true });
-      expect(plane.status("runninghub-provider")?.actualState).toBe("degraded");
+      // 但 Provider 仍然全部注册可用：启停不经过控制面不等于不工作。
       expect(await providerIds()).toEqual(ALL_PROVIDER_IDS);
     } finally {
       await app.close();

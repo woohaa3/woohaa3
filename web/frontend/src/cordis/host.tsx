@@ -274,14 +274,15 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
         selectedSourceId: effectiveSourceId ?? "",
         connections: hostOwnedConnections.map((entry) => ({
           connectionId: entry.connectionId,
+          textDelivery: entry.capabilities?.textDelivery,
           binding: { connectionId: entry.connectionId, adapterId: entry.adapterId, configRevision: entry.configRevision, credentialEpoch: entry.credentialEpoch },
           label: entry.name,
-          ready: entry.ready && entry.capabilities?.tools !== false,
-          modelSelection: entry.authMode === "local-login" ? "tool-default" as const : "explicit" as const,
+          ready: entry.ready && (props.mode === "text" ? Boolean(entry.capabilities?.textDelivery) : entry.capabilities?.tools !== false),
+          modelSelection: props.mode !== "text" && entry.authMode === "local-login" ? "tool-default" as const : "explicit" as const,
           models: entry.models,
           modelsError: entry.modelsError,
           revision: `${entry.configRevision}:${entry.credentialEpoch}`,
-          reason: entry.capabilities?.tools === false ? "此连接不支持作品修改，请选择其他助手" : entry.reason ?? null
+          reason: props.mode === "text" && !entry.capabilities?.textDelivery ? "此连接未提供文本交付能力" : props.mode !== "text" && entry.capabilities?.tools === false ? "此连接不支持作品修改，请选择其他助手" : entry.reason ?? null
         })),
         selectedConnectionId: effectiveConnectionId,
         onSelectSource: (sourceId: string) => {
@@ -327,7 +328,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   const withConversation: import("./contract/authoring.js").AuthoringGenerationProps = {
     ...props,
     onAuthorize: () => { dialogs?.open({ dialogId: "agent-assistant", payload: { canvasId: props.canvasId, nodeId: props.nodeId, ...(effectiveConnectionId ? { connectionId: effectiveConnectionId } : {}) } }); },
-    mcpHint: props.mcpHint ?? resolveMcpHint(),
+    mcpHint: props.mode === "text" ? undefined : props.mcpHint ?? resolveMcpHint(),
     ...(hostSourceSelection ? { sourceSelection: hostSourceSelection } : {}),
     ...(service?.navigateToDetail
       ? {

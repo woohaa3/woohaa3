@@ -7,6 +7,7 @@
 import { Context, type Fiber } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { DiagnosticsService } from "./diagnostics.js";
+import { markServiceAccessGuardScope, reportLateServiceReads } from "./service-access-guard.js";
 import type { RuntimeStatus } from "./contracts.js";
 import { fiberStatus } from "./diagnostics.js";
 import { scopedExtensionServices } from "./slots.js";
@@ -99,7 +100,30 @@ export type FrontendRuntime = {
   diagnostics: DiagnosticsService;
   status(): RuntimeStatus;
   subscribe(listener: () => void): () => void;
+  /**
+   * 运行期按 id 装配/卸下 optional 插件（跟着配置热生效）。
+   * 只在 `startFrontendScope` 上提供：App 级运行时没有可换清单。
+   */
+  plugins?: PluginSwap;
   dispose(): Promise<void>;
+};
+
+/**
+ * 运行期按 id 装配/卸下 optional 插件的能力（plugin hot swap）。
+ *
+ * 供 composition root 跟随宿主配置（\`extensions.frontend.<id>.enabled\`）在**不重建页面 scope**的
+ * 前提下装回或卸下某个 optional 插件：启用时按定义装配新 fiber，禁用时释放该 fiber 并撤销它
+ * 注册的 contribution。required 插件不可卸载（调用方负责不把它列进可换清单）。
+ */
+export type PluginSwap = {
+  /** 该 id 当前是否已装配。 */
+  has(id: string): boolean;
+  /** 装配一个此前未装配的 optional 定义；已在装配则忽略。 */
+  enable(definition: FrontendExtensionDefinition): void;
+  /** 卸下一个已装配的 optional 定义；未装配则忽略。 */
+  disable(id: string): Promise<void>;
+  /** 已装配的可换插件 id（稳定排序）。 */
+  ids(): string[];
 };
 
 export type ScopeOptions = {
@@ -129,7 +153,8 @@ export type ScopeOptions = {
  * socket/listener/plugin 只属于本 scope，`dispose()` 时全部撤销。
  */
 export async function startFrontendScope(parent: Context, options: ScopeOptions): Promise<FrontendRuntime> {
-  let scopeCtx = parent.extend({});
+  const guardedScope = markServiceAccessGuardScope(parent.extend({}));
+  let scopeCtx = guardedScope.ctx;
   for (const name of options.isolate ?? []) {
     scopeCtx = scopeCtx.extend(scopeCtx.isolate(name));
   }
@@ -143,6 +168,20 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
   // 里 `ctx.fiber.effect()` 会把 disposer 挂到父 fiber 上，导致 scope dispose 不释放这些资源
   // （多画布切换会泄漏旧 socket/session；change: 2026-09-29-add-multi-canvas-workspace）。
   const installFiber = ctx.plugin((innerCtx: Context) => options.install(innerCtx)) as Fiber;
+  /** 可换插件登记：装配/卸下都走同一张表，diagnostics 随之一并维护。 */
+  const swappable = new Map<string, { definition: FrontendExtensionDefinition; assembly: Assembly; undo: () => void }>();
+  /** 装配一个定义（启动期与运行期热启用共用同一路径）。 */
+  const mountDefinition = (definition: FrontendExtensionDefinition): Fiber => {
+    const assembly = assemble(ctx, definition);
+    assemblies.push(assembly);
+    const fiber = assembly.current;
+    fibers.push(fiber);
+    const undo = diagnostics.addExtension({ id: definition.id, required: definition.required, fiber });
+    if (!definition.required) {
+      swappable.set(definition.id, { definition, assembly, undo });
+    }
+    return fiber;
+  };
   let disposed = false;
 
   try {
@@ -158,13 +197,7 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
       );
     }
 
-    for (const definition of options.plugins) {
-      const assembly = assemble(ctx, definition);
-      assemblies.push(assembly);
-      const fiber = assembly.current;
-      fibers.push(fiber);
-      disposers.push(diagnostics.addExtension({ id: definition.id, required: definition.required, fiber }));
-    }
+    for (const definition of options.plugins) mountDefinition(definition);
 
     await Promise.all(fibers.map((fiber) => fiber.await().catch(() => undefined)));
     for (const [index, definition] of options.plugins.entries()) {
@@ -173,6 +206,9 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
         throw new Error(`required plugin "${definition.id}" 启动失败（状态 ${fiberStatus(fiber)}）`);
       }
     }
+
+    // 批次结算后再判装配期取空：仍不可用的服务属"本来就没有"，不追究。
+    reportLateServiceReads(guardedScope.guard, ctx);
 
     await options.beforeReady?.(ctx);
     diagnostics.markReady();
@@ -188,6 +224,25 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
     diagnostics,
     status: () => diagnostics.getStatus(),
     subscribe: diagnostics.subscribe,
+    plugins: {
+      has: (id) => swappable.has(id),
+      ids: () => [...swappable.keys()].sort(),
+      enable(definition) {
+        if (disposed || definition.required || swappable.has(definition.id)) return;
+        mountDefinition(definition);
+      },
+      async disable(id) {
+        if (disposed) return;
+        const entry = swappable.get(id);
+        if (!entry) return;
+        // 先从可换表与诊断移除，再释放 fiber：面板的「已停用」不该晚于贡献消失。
+        swappable.delete(id);
+        entry.undo();
+        const index = assemblies.indexOf(entry.assembly);
+        if (index >= 0) assemblies.splice(index, 1);
+        await entry.assembly.dispose();
+      }
+    },
     async dispose() {
       if (disposed) return;
       disposed = true;
@@ -206,7 +261,8 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
  * optional 失败：记录诊断并继续；其 contribution 不出现。
  */
 export async function startFrontendRuntime(options: FrontendRuntimeOptions): Promise<FrontendRuntime> {
-  const ctx = new Context();
+  const guardedScope = markServiceAccessGuardScope(new Context());
+  const ctx = guardedScope.ctx;
   const diagnostics = new DiagnosticsService(ctx);
   const disposers: Array<() => void> = [];
   const fibers: Fiber[] = [];
@@ -233,6 +289,8 @@ export async function startFrontendRuntime(options: FrontendRuntimeOptions): Pro
         throw new Error(`required plugin "${definition.id}" 启动失败（状态 ${fiberStatus(fiber)}）`);
       }
     }
+
+    reportLateServiceReads(guardedScope.guard, ctx);
 
     await options.beforeReady?.(ctx);
     diagnostics.markReady();

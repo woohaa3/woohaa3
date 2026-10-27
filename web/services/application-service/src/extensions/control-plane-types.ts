@@ -67,6 +67,35 @@ export type SiteExtensionControlPlaneOptions = {
    * 安全模式下被暂停的扩展（D7）：不激活、不改写 desiredEnabled，实际状态投影为 `suspended`。
    */
   suspended?: ReadonlySet<string>;
+  /**
+   * 扩展启停的事实来源（配置文件 `extensions.<id>.enabled`）。
+   *
+   * 提供时启停读它、写它也走它；不提供时回退到 SQLite 里的 `desiredEnabled`
+   * （兼容旧部署与测试）。这是把「启停」从站点配置表里解耦出来的唯一接缝。
+   */
+  toggles?: ExtensionToggleStore;
+};
+
+/** 扩展启停的读写口：实现了它，启停就不再依赖站点配置表。 */
+export type ExtensionToggleStore = {
+  /** 全部显式声明的启停；未出现的 ID 由 manifest 的 `defaultEnabled` 决定。 */
+  all(): Readonly<Record<string, boolean>>;
+  /** 写一个扩展的启停；失败如实上报（配置文件写入可能被权限或语法问题挡住）。 */
+  set(extensionId: string, enabled: boolean): Promise<{ ok: true } | { ok: false; message: string }>;
+  /**
+   * 订阅启停变化（配置文件被手工编辑、或其它客户端写入）。
+   *
+   * 返回退订函数。控制面收到通知后自行 reconcile——否则「改了配置但没人激活」会让
+   * 状态永远停在 configuring。可选：不实现时只有显式写入路径会触发 reconcile。
+   */
+  subscribe?(listener: () => void): () => void;
+  /**
+   * 扩展自己的配置值（配置文件 `extensions.<id>.*` 去掉 `enabled`）。
+   *
+   * 缺省返回空对象（旧部署与测试）。配置值的 schema 由扩展自己的 `Config` 解释，
+   * 控制面只做透传，不在这里二次校验。
+   */
+  values?(extensionId: string): Record<string, unknown>;
 };
 
 export type SiteExtensionControlPlane = {

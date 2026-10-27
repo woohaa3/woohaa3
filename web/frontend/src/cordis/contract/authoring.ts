@@ -11,13 +11,20 @@
  */
 import type { ComponentType } from "react";
 import type { AgentConversationService } from "./agent-conversation.js";
+import type { PanelPresentationIntent } from "./model-interaction.js";
 
 /** 生成目标模式：模型、组、片场或镜头。 */
-export type AuthoringGenerateMode = "model3d" | "canvas-group" | "film-set" | "camera";
+export type AuthoringGenerateMode =
+  "model3d" | "canvas-group" | "film-set" | "camera" | "text";
 
 /** A finite domain delivery adapter. Conversation data and presentation remain host owned. */
 export type AssistantDeliveryTarget = {
-  domain?: { requestId: string; sourceNodeId: string; targetNodeId: string; commandId?: string };
+  domain?: {
+    requestId: string;
+    sourceNodeId: string;
+    targetNodeId: string;
+    commandId?: string;
+  };
   execution?: import("@woohaa3/contracts").AssistantExecutionRef;
   status: import("@woohaa3/contracts").ConversationTurnStatus;
   stage: string;
@@ -34,14 +41,16 @@ export type AssistantDeliveryTarget = {
  * service；宿主只提供目标身份、可写性与并发 precondition。
  */
 export type AuthoringGenerationProps = {
+  requestPresentation?: (intent: PanelPresentationIntent) => void;
   /** Domain delivery uses the same authoring panel; unfinished delivery locks ordinary edits. */
+  initialPrompt?: string;
   deliveryHistory?: AssistantDeliveryTarget;
   groupRuns?: import("./canvas-group-runs.js").CanvasGroupRunsService;
   canvasId: string;
   nodeId: string;
   mode: AuthoringGenerateMode;
   /** 外侧生成 dock 与聚焦检查器共享执行逻辑，分别组织输入和操作布局。 */
-  presentation?: "dock" | "inspector";
+  presentation?: "dock" | "expanded" | "inspector";
   /** 会话可写性（离线/同步未就绪/历史只读时为 false）。 */
   writable: boolean;
   /** 不可写原因（展示用）；可写时为 null。 */
@@ -50,11 +59,15 @@ export type AuthoringGenerationProps = {
   expectedContentHash?: string;
   /** 当前选中镜头 id（camera 模式，可选）。 */
   selectedCameraId?: string | null;
-  clipId?: string | null; itemId?: string | null;
+  clipId?: string | null;
+  itemId?: string | null;
   /** 打开授权入口（如 Provider 凭据弹窗）；由宿主注入，贡献方只调用。 */
   onAuthorize?: () => void;
   /** 宿主拥有的参考素材 UI，贡献方只决定在生成面板中的呈现位置。 */
-  renderers?: Pick<import("./model-interaction.js").ModelPanelRenderers, "references">;
+  renderers?: Pick<
+    import("./model-interaction.js").ModelPanelRenderers,
+    "references"
+  >;
   /**
    * MCP 相关能力状态与外部连接指引
    * （change: 2026-10-12-add-agent-conversation-panel，任务 5.3 / design D4）。
@@ -83,6 +96,7 @@ export type AuthoringGenerationProps = {
     /** 该来源当前可选连接（不含秘密）。 */
     connections: ReadonlyArray<{
       connectionId: string;
+      textDelivery?: import("@woohaa3/contracts").AssistantTextCapabilities;
       binding?: import("@woohaa3/contracts").AgentConnectionBinding;
       label: string;
       ready: boolean;
@@ -122,8 +136,13 @@ export type AuthoringGenerationProps = {
     /** 该会话最近回合（用于状态区摘要与详情定位）。 */
     latestRequestId?: string | null;
     /** 打开该确切回合的详情（只读；宿主切换到详情面板 route）。 */
-    onOpenDetail: (input: { conversationId: string; requestId: string; nodeId?: string }) => void;
+    onOpenDetail: (input: {
+      conversationId: string;
+      requestId: string;
+      nodeId?: string;
+    }) => void;
   };
 };
 
-export type AuthoringGenerationComponent = ComponentType<AuthoringGenerationProps>;
+export type AuthoringGenerationComponent =
+  ComponentType<AuthoringGenerationProps>;

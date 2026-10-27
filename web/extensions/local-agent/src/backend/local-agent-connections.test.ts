@@ -476,6 +476,7 @@ describe("adapter 形状（宿主校验）", () => {
     const { manager } = fakeProcessManager();
     const adapter: AgentConversationAdapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: {}, argsFor: () => [] });
     expect(adapter.id).toBe("codex-appserver");
+    expect(adapter.capabilities().textDelivery).toEqual({ imageInput: true, maxImages: 12 });
     expect(adapter.capabilities().models).toBe("remote");
     expect(typeof adapter.run).toBe("function");
     expect(typeof adapter.authorization).toBe("function");

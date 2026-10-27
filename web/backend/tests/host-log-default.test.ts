@@ -28,6 +28,8 @@ function memoryStorage() {
 }
 function bootEnv(dir: string, extra: Record<string, string> = {}): Record<string, string> {
   return {
+    WOOHAA3_CONFIG_FILE: path.join(dir, "woohaa.config.yml"),
+    WOOHAA3_SECRETS_FILE: path.join(dir, "woohaa.secrets.yml"),
     WOOHAA3_TASK_STORE_PATH: path.join(dir, "task.sqlite"),
     WOOHAA3_APPLICATION_STORE_PATH: path.join(dir, "application.sqlite"),
     WOOHAA3_CANVAS_STORAGE_BACKEND: "sqlite",

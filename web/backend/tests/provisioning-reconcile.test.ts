@@ -58,6 +58,8 @@ function bareLifecycle(policyId: string): ResourceLifecyclePolicy {
 function baseOptions(dir: string) {
   return {
     env: {
+      WOOHAA3_CONFIG_FILE: path.join(dir, "woohaa.config.yml"),
+      WOOHAA3_SECRETS_FILE: path.join(dir, "woohaa.secrets.yml"),
       WOOHAA3_TASK_STORE_PATH: path.join(dir, "task.sqlite"),
       WOOHAA3_CANVAS_STORAGE_BACKEND: "sqlite",
       WOOHAA3_CANVAS_STORAGE_SQLITE_PATH: path.join(dir, "canvas.sqlite"),

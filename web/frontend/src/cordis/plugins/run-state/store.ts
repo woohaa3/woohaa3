@@ -282,7 +282,7 @@ export class RunStateStore {
    * `activeRunId + taskStatus` 结算对应操作：终态 → succeeded/failed/cancelled（灰点变绿/红），
    * 非终态 → running。已有终态记录不被回退；同一身份已结算则不重复加点。
    */
-  reconcileCanonical(canvas: { document: { nodes: readonly { id: string }[] }; nodeData: Record<string, unknown> } | null): void {
+  reconcileCanonical(canvas: { document: { nodes: readonly { id: string; type?: string }[] }; nodeData: Record<string, unknown> } | null): void {
     if (this.disposed) return;
     this.filmCanvas = canvas;
     if (!canvas) { this.filmTurns.clear(); this.filmConversions.clear(); this.publish(); return; }
@@ -297,7 +297,7 @@ export class RunStateStore {
       if (existing?.state === canonical) continue;
       // 已有终态记录不回退为运行态（避免乱序 canonical 覆盖终态）。
       if (existing && !isActiveOperation(existing) && canonical === "running") continue;
-      const kind = existing?.kind ?? "image";
+      const kind = existing?.kind ?? (node.type === "text" ? "text" : "image");
       const updatedAt = new Date(this.now()).toISOString();
       this.records.set(key, {
         operationId: runId,
@@ -318,9 +318,9 @@ export class RunStateStore {
    * （change: show-agent-turn-running-state-on-node）。
    *
    * Agent 回合不经 `task.activity.*`，但同样需要节点上的执行中呈现。这里按**操作身份前缀**
-   * 整批替换：先移除已不在投影中的 `agent:` 记录，再 upsert 当前投影。
+   * 整批替换：先移除已不在投影中的助手记录，再 upsert 当前投影。
    *
-   * - 只处理 `agent:` 前缀身份，绝不触碰 Task/本地操作记录；
+   * - 只处理 `agent:` / `text-run:` 前缀身份，绝不触碰 Task/本地操作记录；
    * - 终态回合不进入投影，因此节点在回合结束后立即回到正常呈现（不留"执行中"）；
    * - 身份用 `requestId`，同一回合的重复同步是幂等的，不新增第二条。
    */
@@ -328,13 +328,13 @@ export class RunStateStore {
     if (this.disposed) return;
     const next = new Map<OpKey, CanvasOperationRecord>();
     for (const record of records) {
-      if (!record.operationId.startsWith(AGENT_TURN_OPERATION_PREFIX)) continue;
+      if (!record.operationId.startsWith(AGENT_TURN_OPERATION_PREFIX) && !record.operationId.startsWith("text-run:")) continue;
       if (record.canvasId !== this.canvasId) continue;
       next.set(opKey(this.canvasId, record.nodeId, record.operationId), record);
     }
     let changed = false;
     for (const [key, existing] of this.records) {
-      if (!existing.operationId.startsWith(AGENT_TURN_OPERATION_PREFIX)) continue;
+      if (!existing.operationId.startsWith(AGENT_TURN_OPERATION_PREFIX) && !existing.operationId.startsWith("text-run:")) continue;
       if (next.has(key)) continue;
       this.records.delete(key);
       changed = true;
@@ -451,6 +451,7 @@ function operationKindForModelType(modelType: CanvasTaskModelType | undefined): 
  */
 function canonicalState(taskStatus: unknown): CanvasOperationState | null {
   switch (taskStatus) {
+    case "unknown": return "interrupted";
     case "pending":
     case "queued":
       return "queued";

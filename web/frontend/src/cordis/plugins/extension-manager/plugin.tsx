@@ -20,7 +20,6 @@ import type { Plugin } from "@deepseek-ai/cordis";
 import { definePlugin } from "../../plugin.js";
 import { canvasExtensionCatalogMetadata, CONFIGURABLE_OPTIONAL_PLUGIN_IDS } from "../../canvas-manifest.js";
 import type { ExtensionPreferenceStore } from "../../services/extension-preferences/store.js";
-import type { PreferenceStorage } from "../../services/extension-preferences/codec.js";
 import { createExtensionManagerFacade } from "./facade.js";
 import type { CanvasExtensionMetadata } from "./contract.js";
 import type { PluginIcon } from "@woohaa3/contracts";
@@ -39,16 +38,22 @@ export type SiteExtensionManagerOptions = {
 };
 
 export type ExtensionManagerOptions = {
-  /** 本次启动实际装配状态（composition root 注入；缺省按全启用）。 */
-  assembled?: Readonly<Record<string, boolean>>;
+  /**
+   * **当前**实际装配状态（composition root 注入；缺省按全启用）。
+   *
+   * 传函数时每次读都是最新值——热插拔后无需重建面板就能反映真相。
+   */
+  assembled?: Readonly<Record<string, boolean>> | (() => Readonly<Record<string, boolean>>);
   /** 本次启动加载失败的 browser-local optional ID（显示为「启动失败」而非「已启用」）。 */
   failed?: ReadonlySet<string>;
+  /** 失败原因（extensionId → message）；设置面把它显示在状态提示与详情里。 */
+  failures?: Readonly<Record<string, string>>;
   /** Canvas 权威目录（缺省读静态清单；测试可注入）。 */
   catalog?: readonly CanvasExtensionMetadata[];
   /** 可配置 optional allowlist（缺省静态 allowlist；测试可注入）。 */
   ids?: readonly string[];
-  /** 注入存储（缺省 globalThis.localStorage；测试注入内存替身）。 */
-  storage?: PreferenceStorage | null;
+  /** 写入宿主配置的实现（生产实现写 `extensions.frontend.<id>.enabled`）。 */
+  persist?: (id: string, enabled: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
   /**
    * Composition root 注入的偏好 store（与本次启动选择同一实例）。缺省时 Plugin Manager
    * 自建一个；注入时 store 所有权仍归 composition root（Plugin Manager 不 dispose）。
@@ -68,8 +73,9 @@ export function extensionManagerPlugin(options: ExtensionManagerOptions = {}): P
         ids: options.ids ?? CONFIGURABLE_OPTIONAL_PLUGIN_IDS,
         assembled: options.assembled ?? {},
         ...(options.failed ? { failed: options.failed } : {}),
+        ...(options.failures ? { failures: options.failures } : {}),
         ...(options.preferenceStore ? { preferenceStore: options.preferenceStore } : {}),
-        ...(options.storage !== undefined ? { storage: options.storage } : {}),
+        ...(options.persist ? { persist: options.persist } : {}),
         refresh: options.reload ?? defaultReload,
         site: {
           ...(options.site?.metadata ? { metadata: options.site.metadata } : {}),

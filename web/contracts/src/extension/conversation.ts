@@ -69,7 +69,7 @@ export function isAgentEntryAction(value: unknown): value is AgentEntryAction {
 }
 
 /** 目标创作模式：模型、片场或镜头（与 `AuthoringGenerateMode` 同形，避免跨模块耦合）。 */
-export const AGENT_TARGET_MODES = ["model3d", "film-set", "camera", "canvas-group"] as const;
+export const AGENT_TARGET_MODES = ["model3d", "film-set", "camera", "canvas-group", "text"] as const;
 export type AgentTargetMode = (typeof AGENT_TARGET_MODES)[number];
 
 export function isAgentTargetMode(value: unknown): value is AgentTargetMode {
@@ -117,7 +117,7 @@ export type AgentTargetSnapshot = {
   /** Trusted structured runner identity; ordinary dispatch must never execute this turn. */
   structuredInputHash?: string;
   /** Trusted host delivery association; never accepted from a browser entry intent. */
-  delivery?: { purpose: "film-set-conversion"; domainRequestId: string; attemptId: string };
+  delivery?: { purpose: "film-set-conversion" | "text-generation"; domainRequestId: string; attemptId: string };
   canvasId: string;
   nodeId?: string;
   mode?: AgentTargetMode;
@@ -167,8 +167,11 @@ export type AgentEntryIntent = {
  * - `tools`：支持内置 MCP 工具（写范围须服务端门禁）；
  * - `models`：目录来源（`remote` 表示真实账户目录）。
  */
+export type AssistantTextCapabilities = { imageInput: boolean; maxImages: number };
+
 export type AgentAdapterCapabilities = {
   /** Candidate generation uses the same connection/runtime, without canvas tools. */
+  textDelivery?: AssistantTextCapabilities;
   candidateGeneration?: { imageInput: boolean; maxImages: number };
   discussion: boolean;
   targets: readonly AgentTargetMode[];
@@ -478,6 +481,7 @@ export function isAgentAdapterCapabilities(value: unknown): value is AgentAdapte
   if (!isBoolean(value.tools)) return false;
   if (value.models !== "remote" && value.models !== "none") return false;
   if (!Array.isArray(value.targets)) return false;
+  if (value.textDelivery !== undefined && (!isJsonObject(value.textDelivery) || !isBoolean(value.textDelivery.imageInput) || !Number.isSafeInteger(value.textDelivery.maxImages) || (value.textDelivery.maxImages as number) < 0)) return false;
   if (value.candidateGeneration !== undefined) {
     const candidate = value.candidateGeneration;
     if (!isJsonObject(candidate) || !isBoolean(candidate.imageInput) || !Number.isSafeInteger(candidate.maxImages) || (candidate.maxImages as number) < 1) return false;

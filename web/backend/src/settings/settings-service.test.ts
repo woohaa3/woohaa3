@@ -67,6 +67,22 @@ describe("createSettingsService", () => {
     expect(resolveSettingsFiles({ WOOHAA3_SECRETS_FILE: "/etc/woohaa/secrets.yml" }, "/repo").secretsFile).toBe("/etc/woohaa/secrets.yml");
   });
 
+  it("默认位置不随 cwd 漂移：从子包目录启动也落在仓库根的 web/ 下", async () => {
+    // 回归：曾以 `path.resolve(cwd, "web/...")` 解析，从 `web/backend` 启动会在
+    // `web/backend/web/` 下新建一份没人读的配置文件（且不在 .gitignore 覆盖内）。
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-root-"));
+    dirs.push(repoRoot);
+    fs.mkdirSync(path.join(repoRoot, "web", "backend"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "scripts", "lib"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "scripts", "lib", "extension-host.mjs"), "export {};\n");
+    const subpackage = path.join(repoRoot, "web", "backend");
+
+    expect(resolveSettingsFiles({}, subpackage).configFile).toBe(path.join(repoRoot, "web", "woohaa.config.yml"));
+    expect(resolveSettingsFiles({}, path.join(repoRoot, "web")).configFile).toBe(path.join(repoRoot, "web", "woohaa.config.yml"));
+    // 显式环境变量仍优先于任何推导。
+    expect(resolveSettingsFiles({ WOOHAA3_CONFIG_FILE: "/etc/custom.yml" }, subpackage).configFile).toBe("/etc/custom.yml");
+  });
+
   it("启动时配置非法直接失败", async () => {
     const files = tempFiles();
     fs.writeFileSync(files.configFile, "telemetry:\n  local:\n    retentionDays: 0\n");
@@ -261,5 +277,68 @@ describe("createSettingsService", () => {
     expect(await service.update({ [DEMO_PREFIX + ".token"]: "mine" })).toMatchObject({ ok: false });
     expect(fs.existsSync(files.configFile)).toBe(false);
     expect(fs.existsSync(files.secretsFile)).toBe(false);
+  });
+});
+
+describe("扩展启停落在配置文件", () => {
+  it("写入 extensions.<id>.enabled，并保留文件中已有的注释与其它配置", async () => {
+    const files = tempFiles();
+    fs.writeFileSync(
+      files.configFile,
+      ["# 顶部注释不能丢", "providers:", "  demo:", "    url: wss://example.test/ws", ""].join("\n"),
+      "utf8"
+    );
+    const { service } = await start(files);
+    const outcome = await service.setExtensionToggle("prompt-snippets", false);
+    expect(outcome.ok).toBe(true);
+
+    const text = fs.readFileSync(files.configFile, "utf8");
+    // 注释保留，原有配置不丢。
+    expect(text).toContain("# 顶部注释不能丢");
+    expect(text).toContain("wss://example.test/ws");
+    // 启停写进同一个文件、同一段。
+    expect(text).toMatch(new RegExp("^  prompt-snippets:$", "m"));
+    expect(text).toContain("prompt-snippets:");
+    expect(text).toContain("enabled: false");
+    // 读回投影。
+    expect(service.extensionToggles()).toEqual({ "prompt-snippets": false });
+  });
+
+  it("再次写入同一个插件只改值，不产生重复段", async () => {
+    const files = tempFiles();
+    const { service } = await start(files);
+    await service.setExtensionToggle("prompt-snippets", false);
+    await service.setExtensionToggle("prompt-snippets", true);
+    await service.setExtensionToggle("dev-performance", false);
+    const text = fs.readFileSync(files.configFile, "utf8");
+    expect(text.match(/prompt-snippets:/g)).toHaveLength(1);
+    expect(service.extensionToggles()).toEqual({ "prompt-snippets": true, "dev-performance": false });
+  });
+
+  it("拒绝非法插件 ID（不允许路径穿越落到配置文件）", async () => {
+    const files = tempFiles();
+    const { service } = await start(files);
+    const outcome = await service.setExtensionToggle("../../etc/passwd", false);
+    expect(outcome.ok).toBe(false);
+    expect(fs.existsSync(files.configFile)).toBe(false);
+  });
+
+  it("手工编辑配置文件后读取投影反映最新值，非布尔值被忽略", async () => {
+    const files = tempFiles();
+    fs.writeFileSync(
+      files.configFile,
+      [
+        "extensions:",
+        "  prompt-snippets:",
+        "    enabled: false",
+        "  broken:",
+        "    enabled: yes-please"
+      ].join("\n"),
+      "utf8"
+    );
+    const { service } = await start(files);
+    expect(service.extensionToggles()).toEqual({ "prompt-snippets": false });
+    // 这段是动态键，不应被当成未知配置项报错。
+    expect(service.unknownKeys()).not.toContain("extensions.prompt-snippets.enabled");
   });
 });

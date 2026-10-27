@@ -310,6 +310,7 @@ fn group_anchor_centers_model_inside_bottom_footer() {
             output_capable_leaf_count: 0,
             model_bounds: None,
             run_status: None,
+            drop_target: false,
         }),
         model: None,
         composite_asset: None,

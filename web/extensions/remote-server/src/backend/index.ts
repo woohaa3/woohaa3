@@ -87,6 +87,7 @@ import { callConnect, connectErrorText, exchangeLogin } from "./connect.js";
 import { createRemoteGenerationBridge, type RemoteGenerationStatus } from "./generation/index.js";
 import { createOAuthLogin } from "./oauth-login.js";
 import { createRemoteTelemetryExport } from "./telemetry-export.js";
+import { createDiagnosticUploader, desktopDiagnosticUploadRoot } from "./diagnostic-upload.js";
 import { createServerMarketplaceSource, registerServerMarketplaceSource, type RemoteLogSink } from "./marketplace/register.js";
 import {
   SESSION_UNCONFIGURED_CODE,
@@ -2261,6 +2262,25 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       const syncStorageBackendWithSession = async (): Promise<void> => {
         await registerStorageBackend();
       };
+
+      // Native consent creates immutable, account-bound jobs. Browser hosts have no spool.
+      const diagnosticRoot = desktopDiagnosticUploadRoot();
+      if (diagnosticRoot) {
+        const uploader = createDiagnosticUploader({ root: diagnosticRoot, session: () => sessionSource.current(), fetchImpl, now });
+        let timer: ReturnType<typeof setInterval> | undefined;
+        host.registerResource({
+          id: "remote-server.desktop-diagnostic-upload",
+          start() {
+            void uploader.tick();
+            timer = setInterval(() => { void uploader.refreshDestination(); void uploader.tick(); }, 5000);
+            timer.unref?.();
+          },
+          async stop() {
+            if (timer) clearInterval(timer);
+            await uploader.stop();
+          }
+        });
+      }
 
       // 激活末尾就注册一次：activate 返回的 Promise 会被宿主 await，因此这一步是确定的，
       // 不依赖「ready 之后」的时序猜测。此时文档存储已可用，能读到上次持久化的会话。

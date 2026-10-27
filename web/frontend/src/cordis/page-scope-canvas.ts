@@ -21,7 +21,7 @@ import { installCanvasPageServices } from "./install-services.js";
 import { createCanvasExtensionManifest, canvasExtensionCatalogMetadata, resolveConfigurableOptionalIds } from "./manifest.js";
 import { isAssembledAtStartup } from "./services/extension-preferences/selector.js";
 import { ExtensionPreferenceStore } from "./services/extension-preferences/store.js";
-import type { PreferenceStorage } from "./services/extension-preferences/codec.js";
+import type { FrontendExtensionPreferences, PreferenceStorage } from "./services/extension-preferences/codec.js";
 import type { ExtensionRuntimeService } from "./extension-runtime/service.js";
 import { resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
 import type { CanvasExtensionMetadata } from "./plugins/extension-manager/contract.js";
@@ -45,8 +45,18 @@ export type CanvasPageScopeStarterInput = {
   /** App scope 的 Cordis Context（page scope 的 parent）。 */
   appCtx: Context;
   runtimeService: ExtensionRuntimeService;
-  /** 测试注入的偏好存储（缺省 globalThis.localStorage；null 表示无存储）。 */
+  /** 旧版浏览器偏好的读取介质：**只用于一次性迁移**到宿主配置文件；null 表示跳过迁移。 */
   preferenceStorage?: PreferenceStorage | null | undefined;
+  /**
+   * 当前生效的 browser-local 启停目标状态（来自宿主配置文件 `extensions.frontend.*`）。
+   * 缺省表示宿主未提供：全部启用，兼容旧宿主。
+   */
+  frontendExtensions?: FrontendExtensionPreferences | undefined;
+  /**
+   * 写入一个 browser-local 插件启停目标状态（生产实现写宿主配置文件）。
+   * 缺省表示当前宿主不支持保存：面板只读。
+   */
+  persistFrontendExtension?: (id: string, enabled: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** 测试注入的刷新适配；缺省页面 reload。 */
   extensionManagerReload?: () => void;
 };
@@ -66,10 +76,12 @@ export function createCanvasPageScopeStarter(
     const configurableIds = resolveConfigurableOptionalIds(runtimeCatalogIds);
     const catalogMetadata = canvasExtensionCatalogMetadata(extensionCatalogMetadata(metadata));
 
-    // 2. 读一次本地选择，派生启动选择。
+    // 2. 目标状态来自宿主配置文件（`extensions.frontend.<id>.enabled`），不再自持 localStorage。
+    //    旧版本遗留在浏览器里的显式选择只做一次性迁移：写回宿主配置后不再读取。
     const preferenceStore = new ExtensionPreferenceStore({
       ids: configurableIds,
-      ...(input.preferenceStorage !== undefined ? { storage: input.preferenceStorage } : {})
+      ...(input.frontendExtensions !== undefined ? { desired: input.frontendExtensions } : {}),
+      ...(input.persistFrontendExtension !== undefined ? { persist: input.persistFrontendExtension } : {})
     });
     const desired = preferenceStore.getSnapshot().preferences;
     const selectionResult = resolveExtensionStartupSelection({ metadata, desired });
@@ -114,7 +126,8 @@ export function createCanvasPageScopeStarter(
           artifactId: null,
           releaseId: release?.releaseId ?? null,
           errorCode: "network",
-          message: "功能加载失败，请重试"
+          // 真实原因优先：设置面「启动失败」要靠它说明为什么，而不是再让人猜。
+          message: result.error?.message ?? "功能加载失败，请重试"
         });
       }
     }
@@ -129,6 +142,8 @@ export function createCanvasPageScopeStarter(
 
     // 可选入口加载失败必须在管理面板显示「启动失败」，不能沿用目标启用显示为「已启用」。
     const failedOptionalIds = new Set(loadDiagnostics.map((diagnostic) => diagnostic.extensionId));
+    const optionalFailures: Record<string, string> = {};
+    for (const diagnostic of loadDiagnostics) optionalFailures[diagnostic.extensionId] = diagnostic.message ?? "加载失败";
 
     // 设置专项扩展装配：只允许未激活扩展按需装配 settings-only 贡献
     // （change: 2026-10-17-move-settings-into-canvas-dialog，任务 5.2）。
@@ -150,6 +165,7 @@ export function createCanvasPageScopeStarter(
       extensionManager: {
         assembled: { ...builtinAssembled, ...selectionResult.assembled },
         failed: failedOptionalIds,
+        failures: optionalFailures,
         catalog: catalogMetadata,
         ids: configurableIds,
         preferenceStore,
@@ -191,10 +207,44 @@ export function createCanvasPageScopeStarter(
         "canvasNavigation"
       ]
     });
+    // 配置热生效：宿主配置文件里的启停变化经订阅推到这里，装回或卸下对应 fiber，
+    // 不重建页面 scope（区别于旧的「下次启动生效」）。
+    const loadedIds = new Set(loadedDefinitions.map((definition) => definition.id));
+    const swappableById = new Map<string, FrontendExtensionDefinition>();
+    for (const definition of loadedDefinitions) {
+      if (!definition.required) swappableById.set(definition.id, definition);
+    }
+    const unsubscribes: Array<() => void> = [];
+    const applyPreferences = async (): Promise<void> => {
+      const snapshot = preferenceStore.getSnapshot().preferences;
+      for (const [id, definition] of swappableById) {
+        const shouldRun = snapshot[id] ?? true;
+        const running = runtime.plugins?.has(id) ?? false;
+        if (shouldRun && !running) {
+          // 此前未加载过实现（启动时被禁用）：现在才去取 artifact。
+          if (!loadedIds.has(id)) {
+            try {
+              const descriptor = await runtimeService.loadDescriptor(id);
+              definition.plugin = descriptor.plugin();
+              loadedIds.add(id);
+            } catch {
+              // 加载失败保持未装配；下一次配置变化或重新打开页面会再试。
+              continue;
+            }
+          }
+          runtime.plugins?.enable(definition);
+        } else if (!shouldRun && running) {
+          await runtime.plugins?.disable(id);
+        }
+      }
+    };
+    unsubscribes.push(preferenceStore.subscribe(() => void applyPreferences()));
+
     const disposeRuntime = runtime.dispose;
     return {
       ...runtime,
       async dispose() {
+        for (const off of unsubscribes) off();
         settingsAssembly.assembly.dispose();
         await disposeRuntime();
         preferenceStore.dispose();

@@ -108,6 +108,7 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
     }
     const node = canvas.document.nodes.find((entry) => entry.id === input.nodeId);
     if (!node) return { ok: false, error: "节点已不存在，任务未提交" };
+    if (node.type === "text") return { ok: false, error: "文本生成需要助手连接和模型" };
     const model = input.catalog.models.find((entry) => entry.modelKey === input.modelKey);
     if (!model) return { ok: false, error: `模型 ${input.modelKey} 不可用于该节点` };
     if (model.modelType !== input.expectedModelType) {

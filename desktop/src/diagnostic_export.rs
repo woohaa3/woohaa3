@@ -1,4 +1,4 @@
-//! Native menu export remains available when the page is broken. No upload.
+//! Native archive export remains available when the page is broken.
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -29,7 +29,7 @@ pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
     }
     Ok(())
 }
-fn selected_runs(current: &Path) -> Vec<PathBuf> {
+pub(crate) fn selected_runs(current: &Path) -> Vec<PathBuf> {
     let mut result = vec![current.to_owned()];
     if let Some(root) = current.parent() {
         let mut previous: Vec<_> = fs::read_dir(root)
@@ -85,6 +85,12 @@ fn export(current: &Path, destination: &Path) -> Result<(), String> {
     if destination.starts_with(root) {
         return Err("请保存到日志目录之外".into());
     }
+    archive_runs(&selected_runs(current), destination)
+}
+
+/// Snapshot only the explicitly selected run directories; never the upload spool.
+pub(crate) fn archive_runs(runs: &[PathBuf], destination: &Path) -> Result<(), String> {
+    crate::diagnostics::flush();
     let snapshot =
         Snapshot(std::env::temp_dir().join(format!("woohaa-diagnostics-{}", uuid::Uuid::new_v4())));
     fs::create_dir(&snapshot.0).map_err(|e| e.to_string())?;
@@ -94,15 +100,14 @@ fn export(current: &Path, destination: &Path) -> Result<(), String> {
         fs::set_permissions(&snapshot.0, fs::Permissions::from_mode(0o700))
             .map_err(|e| e.to_string())?;
     }
-    let runs = selected_runs(current);
-    for run in &runs {
+    for run in runs {
         copy_logs(run, &snapshot.0.join(run.file_name().ok_or("Invalid run")?))
             .map_err(|e| e.to_string())?;
     }
     let archive = snapshot.0.join("diagnostics.tar.gz");
     let mut command = std::process::Command::new(crate::local_host::diagnostic_tar());
     command.arg("-czf").arg(&archive).arg("-C").arg(&snapshot.0);
-    for run in &runs {
+    for run in runs {
         command.arg(run.file_name().ok_or("Invalid run")?);
     }
     command

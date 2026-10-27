@@ -28,3 +28,4 @@ export { SqliteNodeHistoryRepository } from "./storage/sqlite/node-history.js";
 export { SqliteEditCompletionRepository } from "./storage/sqlite/edit-completion.js";
 export { SqliteSnippetRepository } from "./storage/sqlite/snippets.js";
 export * from "./agent-authoring/group-scope.js";
+export * from "./task/assistant-text.js";

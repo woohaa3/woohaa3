@@ -1,3 +1,5 @@
+import { AssistantTextStore } from "./repository/assistant-text-store.js";
+import { AssistantTextService } from "./extensions/assistant-text-service.js";
 import { createSqliteExtensionDocumentStore } from "./repository/extension-document-store.js";
 import { createServiceConnectionRegistry, type ServiceConnectionRegistryOptions, type ServiceConnectionRegistry } from "./service-connections/registry.js";
 import { createExtensionAssistants } from "./extensions/extension-assistants.js";
@@ -109,6 +111,13 @@ export type ApplicationServiceOptions = {
   /** 安全模式暂停的扩展（D7）：控制面不激活它们，实际状态投影为 `suspended`。 */
   suspendedExtensions?: ReadonlySet<string>;
   /**
+   * 扩展启停的事实来源（配置文件 `extensions.<id>.enabled`）。
+   *
+   * 提供时控制面读写都走它——启停不再落在站点配置表；不提供时回退到 SQLite 的
+   * `desiredEnabled`（兼容旧部署与单元测试）。
+   */
+  extensionToggles?: import("./extensions/control-plane-types.js").ExtensionToggleStore;
+  /**
    * 显式注入的基础提供者（测试/受控部署）。生产由可信扩展在 activation 中登记；这里只允许
    * 显式 fake/等价实现，不引入隐式回退（change: 2026-10-13-...，design D1「测试可注入明确 fake provider」）。
    */
@@ -185,6 +194,7 @@ export type ApplicationServiceOptions = {
    * （change: 2026-10-12-add-agent-conversation-panel，任务 1.3）。缺省时会话 API 全部拒绝。
    */
   groupEffects?: import("./extensions/agent-conversation-service.js").AgentConversationServiceOptions["groupEffects"];
+  assistantText?: import("@woohaa3/contracts").AssistantTextPort;
   canvasCreation?: import("@woohaa3/contracts").CanvasCreationPort;
   conversationCanvasAccess?: import("@woohaa3/contracts").ApplicationExtensionCanvasAccessFacade;
   /**
@@ -222,6 +232,7 @@ export type ApplicationService = {
   config: () => ApplicationServiceConfig;
   /** 宿主 Agent 会话/回合服务（change: 2026-10-12-add-agent-conversation-panel）。 */
   agentConversations: () => AgentConversationService;
+  assistantTextRuns: () => import("@woohaa3/contracts").AssistantTextRunGateway;
   /** 来源连接发现注册表（change: 2026-10-16-add-agent-appserver-and-sdk-connections）。 */
   agentConnections: () => AgentConnectionRegistry;
   /** 类型化基础提供者 registry（身份/站点授权/资源策略）。 */
@@ -384,6 +395,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     ...(options.logger ? { logger: options.logger } : {}),
     ...(options.extensionActivationTimeoutMs ? { activationTimeoutMs: options.extensionActivationTimeoutMs } : {}),
     ...(options.suspendedExtensions ? { suspended: options.suspendedExtensions } : {}),
+    ...(options.extensionToggles ? { toggles: options.extensionToggles } : {}),
     now
   });
 
@@ -418,12 +430,15 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
   const canvasCreations = new CanvasCreationService({ store: canvasCreationStore, conversations: agentConversations, connections: agentConnections, canvas: options.canvasCreation,
     discoverTools: options.mcpDiscovery,
     preflight: async (owner, canvasId) => (await options.conversationCanvasAccess?.authorize({ subject: owner, canvasId, permission: "write" }))?.ok === true });
+  const assistantTextStore = new AssistantTextStore(config.storePath);
+  const assistantText = new AssistantTextService({ store: assistantTextStore, conversations: agentConversations, connections: agentConnections, registry: agentAdapterRegistry, canvas: options.assistantText });
   const agentConversationApi: AgentConversationApiHandler = createAgentConversationApiHandler({
     serviceConnections,
     serviceConnectionProviders: options.serviceConnectionProviders,
     accessEnforcer,
     service: agentConversations,
     canvasCreations,
+    assistantText,
     connections: agentConnections,
     authenticator,
     accessRuntime,
@@ -503,6 +518,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     host: () => extensionHost,
     config: () => config,
     agentConversations: () => agentConversations,
+    assistantTextRuns: () => assistantText.gateway(),
     agentConnections: () => agentConnections,
     serviceConnections: () => serviceConnections,
     providers: () => providers,
@@ -517,6 +533,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
       extensionWorkStore.close();
       unbindCreationEpochs?.();
       canvasCreationStore.close();
+      assistantTextStore.close();
       conversationStore.close();
       sourceDocuments?.close();
     }

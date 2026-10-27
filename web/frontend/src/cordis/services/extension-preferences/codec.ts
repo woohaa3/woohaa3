@@ -1,20 +1,27 @@
 /**
  * Frontend 插件偏好 codec
- * （change: add-frontend-plugin-manager，任务 2.1 / design D3）。
+ * （change: add-frontend-plugin-manager，任务 2.1 / design D3；
+ *  其后改为配置文件投影：localStorage 只剩一次性迁移读取）。
  *
- * 纯函数、无 React/DOM：把版本化 `woohaa:frontend-plugins:v1` 记录在**已知可配置
- * optional Plugin ID** 与布尔选择之间严格互转。
+ * 纯函数、无 React/DOM：
+ * - 从宿主配置投影（`extensions.frontend.<id>.enabled`）规范化出**已知可配置 optional ID**
+ *   到布尔值的映射；
+ * - 读取旧版本遗留在浏览器 localStorage 的 `woohaa:frontend-extensions:v1`，仅供**一次性迁移**
+ *   写回宿主配置文件，之后不再写这个键。
  *
- * 严格解析规则（design D3）：
- * - 缺失（`null`）：返回全部启用默认值，无诊断。
- * - JSON 错误 / 非 object / 已知 ID 的值为非 boolean：**整体**降级到全部启用并报告错误类别。
- * - 未知 ID（含 required ID、清单外 ID）：忽略并报告 `unknown-ids`，合法已知值仍生效。
- *
+ * 严格解析规则：缺失返回全部启用；JSON 错误 / 非 object / 非布尔值整体降级；未知 ID 忽略并上报。
  * codec 只回显**错误类别**，绝不回显原始配置内容。
  */
 
-/** 版本化存储键（新 schema 必须使用新键）。 */
-export const FRONTEND_PLUGIN_PREFERENCES_KEY = "woohaa:frontend-extensions:v1";
+/**
+ * 旧版浏览器偏好键：仅用于**一次性迁移**到宿主配置文件。
+ *
+ * 新写入一律走宿主配置（`extensions.frontend.<id>.enabled`），本键不再被写入。
+ */
+export const LEGACY_FRONTEND_PLUGIN_PREFERENCES_KEY = "woohaa:frontend-extensions:v1";
+
+/** @deprecated 仅为迁移保留；新代码不要引用。 */
+export const FRONTEND_PLUGIN_PREFERENCES_KEY = LEGACY_FRONTEND_PLUGIN_PREFERENCES_KEY;
 
 /** 有效选择：只含可配置 optional ID 到布尔值的映射。 */
 export type FrontendExtensionPreferences = Readonly<Record<string, boolean>>;
@@ -39,13 +46,12 @@ export type PreferencesParseResult = {
   diagnostic: PreferencesDiagnostic | null;
 };
 
-/** 可注入的最小 Storage facade（浏览器 localStorage 或测试替身）。 */
+/** 可注入的最小 Storage facade（只读；仅用于旧版偏好的一次性迁移）。 */
 export type PreferenceStorage = {
   getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
 };
 
-/** 全部启用默认值：缺失配置或降级时保持升级前行为。 */
+/** 全部启用默认值：缺失配置或降级时保持既有行为。 */
 export function defaultPreferences(ids: readonly string[]): FrontendExtensionPreferences {
   const out: Record<string, boolean> = {};
   for (const id of ids) out[id] = true;
@@ -62,7 +68,7 @@ export function normalizePreferences(
   return out;
 }
 
-/** 严格解析存储字符串；缺失或损坏时返回默认值与诊断。 */
+/** 严格解析旧版偏好字符串；缺失或损坏时返回默认值与诊断。 */
 export function parsePreferences(raw: string | null, ids: readonly string[]): PreferencesParseResult {
   const fallback = { preferences: defaultPreferences(ids), diagnostic: null } as const;
   if (raw == null) return fallback;
@@ -110,7 +116,36 @@ export function parsePreferences(raw: string | null, ids: readonly string[]): Pr
   return { preferences: merged, diagnostic: null };
 }
 
-/** 序列化为规范化的完整 map。 */
+/** 序列化为规范化的完整 map（仅迁移/测试用；生产写入走宿主配置）。 */
 export function serializePreferences(ids: readonly string[], values: FrontendExtensionPreferences): string {
   return JSON.stringify(normalizePreferences(ids, values));
+}
+
+/**
+ * 读取旧版浏览器偏好，返回**需要迁移**的显式选择。
+ *
+ * 只返回 allowlist 内、且与默认值不同的条目：迁移只为把用户显式改过的开关带到配置文件，
+ * 不把默认全启用的噪音写进 `extensions.frontend`。
+ */
+export function readLegacyPreferencesForMigration(
+  storage: PreferenceStorage | null,
+  ids: readonly string[]
+): { explicit: Record<string, boolean>; diagnostic: PreferencesDiagnostic | null } {
+  if (storage === null) return { explicit: {}, diagnostic: null };
+  let raw: string | null;
+  try {
+    raw = storage.getItem(LEGACY_FRONTEND_PLUGIN_PREFERENCES_KEY);
+  } catch {
+    return {
+      explicit: {},
+      diagnostic: { code: "storage-read-failed", detail: "浏览器拒绝读取旧版插件选择，跳过迁移" }
+    };
+  }
+  const parsed = parsePreferences(raw, ids);
+  const defaults = defaultPreferences(ids);
+  const explicit: Record<string, boolean> = {};
+  for (const [id, enabled] of Object.entries(parsed.preferences)) {
+    if (defaults[id] !== enabled) explicit[id] = enabled;
+  }
+  return { explicit, diagnostic: parsed.diagnostic };
 }

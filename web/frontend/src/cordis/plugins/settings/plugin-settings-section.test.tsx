@@ -1,5 +1,5 @@
 /**
- * 「插件配置」分区：插件卡片网格、卡片上的启停与状态、点卡片打开配置弹窗。
+ * 「插件配置」分区：插件行、行上的启停与状态、点行打开配置详情。
  *
  * @vitest-environment jsdom
  */
@@ -110,18 +110,44 @@ function facadeWith(view: Partial<ExtensionManagerView>) {
   return { facade, setSiteEnabled, setEnabled, setModelEnabled };
 }
 
+/** 最小受管控制器：分区只有受管扩展时要靠它才不会被当成「纯信息」折叠。 */
+function stubManaged() {
+  const state = { jobs: [], error: null, submitting: false, restart: { status: "idle" as const, message: null }, unquarantining: [] };
+  const controller = {
+    getState: () => state,
+    subscribe: () => () => undefined,
+    busy: () => false,
+    cancel: async () => undefined,
+    track: () => undefined,
+    adoptSnapshot: () => undefined,
+    installFile: async () => undefined,
+    uninstall: async () => undefined,
+    rollback: async () => undefined,
+    restart: async () => undefined,
+    dispose: () => undefined
+  };
+  return { controller, pendingReopen: { get: () => EMPTY_PENDING, subscribe: () => () => undefined } };
+}
+
+const EMPTY_PENDING: readonly string[] = [];
+/** 必须是稳定引用：每次渲染新建会让 useSyncExternalStore 反复订阅。 */
+const MANAGED_STUB = stubManaged();
+
 async function renderSection(
   settings: SettingsEntryView[],
   plugins: SettingPluginView[],
   view: Partial<ExtensionManagerView> = {},
   onOpenPlugin?: (pluginId: string) => void,
   settingsPanels?: import("./plugin-panels.js").SettingsPanelSource,
-  versions: Record<string, string> = {}
+  versions: Record<string, string> = {},
+  installedOverrides: Record<string, Record<string, unknown>> = {},
+  withManaged = false
 ) {
   const installedExtensions = plugins.filter((plugin) => plugin.layer === "extension").map((plugin) => ({
     id: plugin.id, label: plugin.label, description: plugin.description, directory: plugin.directory ?? `/plugins/${plugin.id}`,
     icon: plugin.icon, writable: false,
-    ...(versions[plugin.id] ? { version: versions[plugin.id] } : {})
+    ...(versions[plugin.id] ? { version: versions[plugin.id] } : {}),
+    ...(installedOverrides[plugin.id] ?? {})
   }));
   const snapshot: SettingsSnapshot = { settings, plugins, installedExtensions, files: { config: "c", secrets: "s" } };
   const setExtensionInstalled = vi.fn(async () => ({ ok: true as const, snapshot }));
@@ -138,7 +164,15 @@ async function renderSection(
   const root = createRoot(container);
   roots.add(root);
   await act(async () => {
-    root.render(<PluginSettingsSection store={store} manager={facade} onOpenPlugin={onOpen} {...(settingsPanels ? { settingsPanels } : {})} />);
+    root.render(
+      <PluginSettingsSection
+        store={store}
+        manager={facade}
+        onOpenPlugin={onOpen}
+        {...(settingsPanels ? { settingsPanels } : {})}
+        {...(withManaged ? { managed: MANAGED_STUB } : {})}
+      />
+    );
   });
   return { container, onOpen, setExtensionInstalled, ...spies };
 }
@@ -188,14 +222,17 @@ describe("插件目录管理", () => {
     expect(query(container, "settings-plugins-pending")).toBeNull();
   });
 
-  it("浏览器本地插件的开关写本地偏好并提示下次打开生效", async () => {
+  it("浏览器本地插件的开关写宿主配置并立即生效，不再提示「下次打开」", async () => {
     const { container, setEnabled, setSiteEnabled } = await renderSection(SETTINGS, PLUGINS, {
       rows: [{ id: "local-storage", name: "本地存储", description: "", required: false, configurable: true, status: "active" }]
     });
     await act(async () => query<HTMLButtonElement>(container, "settings-plugin-switch-local-storage")!.click());
     expect(setEnabled).toHaveBeenCalledWith("local-storage", false);
     expect(setSiteEnabled).not.toHaveBeenCalled();
-    expect(query(container, "settings-plugin-local-storage")?.textContent).toContain("下次打开生效");
+    const text = query(container, "settings-plugin-local-storage")?.textContent ?? "";
+    // 启停是运行中立即生效的：旧的「下次打开生效 / 重启后生效」文案必须消失。
+    expect(text).not.toContain("下次打开");
+    expect(text).not.toContain("重启后生效");
   });
 
   it("卡片展示扩展声明的版本，没有版本时不显示空标记", async () => {
@@ -228,6 +265,18 @@ describe("插件目录管理", () => {
     await act(async () => root.render(<PluginSettingsSection store={store} manager={facade} />));
     expect(query(container, "plugins-settings-unauthorized")).not.toBeNull();
     expect(query(container, "settings-plugin-ark-provider")).toBeNull();
+  });
+
+  it("受管扩展即使没有配置项也能点进详情（卸载/回滚在详情页）", async () => {
+    const hello = plugin("hello-marketplace", { label: "市场示例插件", description: "演示插件" });
+    const { container, onOpen } = await renderSection([], [hello], {}, undefined, undefined, {}, {
+      "hello-marketplace": { managed: true, sourceId: "github-release", trust: "signed:afd67694dd46ddcd" }
+    }, true);
+    const open = query<HTMLButtonElement>(container, "settings-plugin-open-hello-marketplace")!;
+    expect(open.disabled).toBe(false);
+    expect(query(container, "settings-plugin-source-hello-marketplace")?.textContent).toBe("GitHub");
+    act(() => open.click());
+    expect(onOpen).toHaveBeenCalledWith("hello-marketplace");
   });
 
   it("扩展自带设置面板的插件也可打开配置弹窗，并标出扩展设置", async () => {

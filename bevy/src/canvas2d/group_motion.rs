@@ -30,6 +30,7 @@ pub(super) fn draw(
     node: &GraphNode,
     now: f32,
     zoom: f32,
+    z: f32,
 ) {
     let path = group_outline::path(node);
     let perimeter = group_outline::length(&path);
@@ -48,7 +49,7 @@ pub(super) fn draw(
                 head + opposite - span + step as f32 * span / 16.,
                 span / 16. + 0.2,
                 (2.8 / zoom).clamp(2.2, 7.),
-                group::GROUP_Z + 0.025,
+                z + 0.025,
                 color,
             );
         }
@@ -60,7 +61,7 @@ pub(super) fn draw(
             now * 3.2,
             accent,
             soft,
-            group::GROUP_Z + 0.045,
+            z + 0.045,
         );
     }
 }
@@ -116,12 +117,22 @@ pub(crate) fn sync(
     state.last_frame = Some(frame);
     let mut geometry = Geometry::default();
     for node in nodes {
+        // Same derived slot as the group panel and its member cards, so the travelling
+        // outline stays inside its own group's depth band.
+        let z = scene
+            .0
+            .nodes
+            .iter()
+            .position(|entry| entry.id == node.id)
+            .map(|index| super::draw_order::render_z(&scene.0.nodes, index))
+            .unwrap_or(group::GROUP_Z);
         draw(
             &mut geometry,
             &theme,
             node,
             time.elapsed_secs(),
             scene.0.viewport.zoom,
+            z,
         );
     }
     let mesh = meshes.add(geometry.build());
@@ -164,7 +175,7 @@ mod tests {
         let group = node("running");
         let positions = |now| {
             let mut geometry = Geometry::default();
-            draw(&mut geometry, &theme, &group, now, 1.);
+            draw(&mut geometry, &theme, &group, now, 1., group::GROUP_Z);
             match geometry
                 .build()
                 .attribute(Mesh::ATTRIBUTE_POSITION)

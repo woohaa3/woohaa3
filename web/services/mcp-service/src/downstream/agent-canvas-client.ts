@@ -86,6 +86,8 @@ export type AgentCanvasClient = {
 };
 
 export type AgentRunClientInput = {
+  assistant?: import("@woohaa3/contracts").AssistantTextSelection;
+  modelKey?: string;
   canvasId?: string;
   requestId: string;
   nodeId: string;
@@ -95,7 +97,7 @@ export type AgentRunClientInput = {
 };
 
 export type AgentRunClientResult =
-  | { ok: true; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted" }
+  | { ok: true; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted"; execution?: import("@woohaa3/contracts").AssistantExecutionRef }
   | { ok: false; code: string; message: string; retryable?: boolean };
 
 export type AgentRunStatusClientResult =

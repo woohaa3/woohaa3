@@ -25,18 +25,20 @@ export function registerAgentRunTools(server: McpServer, deps: AgentAuthoringToo
         requestId: z.string().min(1),
         nodeId: z.string().min(1),
         modelKey: z.string().min(1).optional(),
+        assistant: z.strictObject({ connection: z.strictObject({ connectionId: z.string().min(1), adapterId: z.string().min(1), configRevision: z.number().int().nonnegative(), credentialEpoch: z.number().int().nonnegative() }), model: z.string().min(1), reasoningEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional() }).optional(),
         prompt: z.string().optional(),
         parameters: z.record(z.string(), z.unknown()).optional()
       }),
       outputSchema: z.looseObject({ ok: z.literal(true), runId: z.string(), jobId: z.string() }),
       annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: true }
     },
-    async ({ canvasId, requestId, nodeId, modelKey, prompt, parameters }) => {
+    async ({ canvasId, requestId, nodeId, modelKey, assistant, prompt, parameters }) => {
       return auditWrap(deps, "run_canvas_node", { canvasId, requestId }, async () => {
         const outcome = await deps.client.runNode!({
           ...(canvasId !== undefined ? { canvasId } : {}),
           requestId,
           nodeId,
+          ...(assistant ? { assistant } : {}),
           ...(modelKey !== undefined ? { modelKey } : {}),
           ...(prompt !== undefined ? { prompt } : {}),
           ...(parameters !== undefined ? { parameters } : {})

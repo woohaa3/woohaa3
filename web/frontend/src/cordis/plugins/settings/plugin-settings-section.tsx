@@ -1,13 +1,16 @@
 /**
- * 「插件配置」分区：一棵插件树的卡片网格，点卡片进入该插件的配置弹窗。
+ * 「插件配置」分区：按插件树分层列出的可扫描行，点一行进入该插件的配置详情。
  *
- * 卡片只放基本信息：插件名、版本、分层 / Provider 标记、一句话说明、配置规模，以及启停开关；配置项与
- * 它提供的生成模型在弹窗里改（见 [plugin-config-dialog](plugin-config-dialog.tsx)），卡片不承载表单。
- * 清单以本次启动扫描到的已安装扩展为准，站点插件与 browser-local 行提供启停状态，见 `indexPlugins`。
+ * 行只放身份、说明、配置规模与启停；配置项与它提供的生成模型在详情里改。清单以本次启动
+ * 扫描到的已安装扩展为准，站点插件与 browser-local 行提供启停状态，见 `indexPlugins`。
+ *
+ * change: 2026-10-26-redesign-settings-plugin-page：列表从卡片网格改为分组行，并增加搜索 /
+ * 筛选；市场与文件安装从顶部常驻面板改为「添加扩展」内联视图，不再在设置弹窗里叠第二层浮层。
  */
-import { useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button } from "../../../shared/ui/Button.js";
-import { ChevronDownIcon, ChevronRightIcon } from "../../../shared/ui/icons.js";
+import { Switch } from "../../../shared/ui/Switch.js";
+import { BackIcon, ChevronDownIcon, ChevronRightIcon, FileTextIcon, PlusIcon, SearchIcon } from "../../../shared/ui/icons.js";
 import type { ExtensionManagerFacade } from "../extension-manager/contract.js";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
 import { PluginIconMark } from "./plugin-icons.js";
@@ -19,14 +22,15 @@ import {
   isActionable,
   isConfigurable,
   isManageable,
-  pluginStateKind,
+  isSiteRowRunning,
   versionLabel,
   type PluginSettingsGroup,
   type PluginViewIndex
 } from "./plugin-groups.js";
 import { PluginStateControl } from "./plugin-state-control.js";
 import { ExtensionFaultNotice } from "./extension-fault-notice.js";
-import { ManagedExtensionDetails, ManagedInstallBar, ReleaseChangedNotice } from "./managed-extensions-ui.js";
+import { ManagedInstallBar, ReleaseChangedNotice } from "./managed-extensions-ui.js";
+import { extensionObservationBadge, extensionSource, extensionTrustBadge, signedKeyId } from "./extension-source.js";
 import { MarketplaceInstallPanel } from "./marketplace-install-ui.js";
 import type { ManagedExtensionsController } from "./managed-extensions.js";
 import {
@@ -37,24 +41,53 @@ import {
 import "./settings.css";
 
 const SECTION_HINTS: Record<string, string> = {
-  扩展插件: "站点插件的开关对整个实例生效并立即应用；浏览器本地插件在下一次打开时生效。"
+  扩展插件: "开关写宿主的扩展配置并立即生效：停用即卸下，启用即装回，无需重开页面。"
 };
 
-/** 浏览器本地插件：偏好与本次装配不一致时提示「下次打开生效」。 */
-function browserPending(index: PluginViewIndex, group: PluginSettingsGroup): boolean {
-  const row = index.browserRows.get(group.id);
-  return row !== undefined && row.status.startsWith("pending");
+type PluginFilter = "all" | "running" | "disabled" | "configurable";
+
+const FILTERS: ReadonlyArray<{ id: PluginFilter; label: string }> = [
+  { id: "all", label: "全部" },
+  { id: "running", label: "运行中" },
+  { id: "disabled", label: "已停用" },
+  { id: "configurable", label: "可配置" }
+];
+
+
+/** 行右侧的状态：站点/浏览器用权威状态，宿主内置按安装结果。 */
+function pluginStatus(index: PluginViewIndex, group: PluginSettingsGroup): { label: string; tone: "success" | "warning" | "muted" } {
+  const site = index.siteRows.get(group.id);
+  if (site) {
+    if (site.busy) return { label: "正在应用…", tone: "warning" };
+    return {
+      label: site.actualStateLabel,
+      tone: isSiteRowRunning(site.actualState) ? (site.actualState === "degraded" ? "warning" : "success") : "muted"
+    };
+  }
+  const browser = index.browserRows.get(group.id);
+  if (browser) {
+    if (browser.status === "failed") return { label: "异常", tone: "warning" };
+
+    return browser.status === "disabled"
+      ? { label: "已停用", tone: "muted" }
+      : { label: "运行中", tone: "success" };
+  }
+  return index.installedIds.has(group.id) ? { label: "运行中", tone: "success" } : { label: "未安装", tone: "muted" };
+}
+
+function isStopped(label: string, tone: "success" | "warning" | "muted"): boolean {
+  return tone === "muted" || label.includes("停用") || label.includes("未启用") || label.includes("未安装");
 }
 
 export type PluginSettingsSectionProps = {
   store: BackendSettingsStore;
   manager: ExtensionManagerFacade;
-  /** 打开某个插件的配置弹窗（由 settings 插件注册的 dialog 提供）。 */
+  /** 打开某个插件的配置详情（由 settings 插件注册的 dialog 提供）。 */
   onOpenPlugin?: (pluginId: string) => void;
-  /** 扩展自带设置面板（`settings.plugin-config` slot）；有面板的插件卡片也可打开配置弹窗。 */
+  /** 扩展自带设置面板（`settings.plugin-config` slot）；有面板的插件行也可打开配置。 */
   settingsPanels?: SettingsPanelSource;
   /**
-   * 受管扩展（change: 2026-10-21-add-extension-marketplace-point，7.2）：安装入口、任务进度与受管卡片操作；
+   * 受管扩展（change: 2026-10-21-add-extension-marketplace-point，7.2）：安装入口、任务进度与受管行操作；
    * `pendingReopen` 是当前页面仍在用旧版本、重开画布后生效的扩展。缺省不显示这些入口。
    */
   managed?: ManagedExtensionsSource;
@@ -80,129 +113,288 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
   );
   const view = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
   const panels = settingsPanels ?? EMPTY_SETTINGS_PANELS;
-  // 订阅 slot 版本：扩展前端按需加载、注册面板后卡片立即变为可打开。
+  // 订阅 slot 版本：扩展前端按需加载、注册面板后行立即变为可打开。
   useSyncExternalStore(panels.subscribe, panels.version, panels.version);
   const panelIds = settingsPanelIds(panels);
-  /** 用户手动开关过的整节；没有记录时整节都没有可操作内容的（内置插件现在如此）默认收起。 */
   const [sectionToggled, setSectionToggled] = useState<Record<string, boolean>>({});
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PluginFilter>("all");
+  /** 来源筛选：`all` 或 `builtin`/某个 sourceId（见 extension-source.ts）。 */
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [installMode, setInstallMode] = useState<"market" | "file" | null>(null);
 
   const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view);
-  const sections = sectionize(index.groups).map((section) => ({
+  const canInstallFile = Boolean(
+    state.status === "ready" && state.snapshot?.extensionInstallations && store.canManage()
+  );
+  const canUseMarket = Boolean(canInstallFile && managed?.marketplace);
+  const normalizedQuery = query.trim().toLowerCase();
+  const groups = index.groups.filter((group) => {
+    const status = pluginStatus(index, group);
+    if (normalizedQuery) {
+      const haystack = `${group.label} ${group.description} ${group.id}`.toLowerCase();
+      if (!haystack.includes(normalizedQuery)) return false;
+    }
+    if (filter === "running") return !isStopped(status.label, status.tone);
+    if (filter === "disabled") return isStopped(status.label, status.tone);
+    if (filter === "configurable") return isConfigurable(index, group) || panelIds.has(group.id);
+    if (sourceFilter !== "all" && extensionSource(group.installed).id !== sourceFilter) return false;
+    return true;
+  });
+  // 只在真的有多个来源时出现来源筛选，避免单来源场景多一行噪声。
+  const sourceOptions = (() => {
+    const seen = new Map<string, string>();
+    for (const group of index.groups) {
+      const source = extensionSource(group.installed);
+      if (!seen.has(source.id)) seen.set(source.id, source.label);
+    }
+    return seen.size > 1 ? [...seen].map(([id, label]) => ({ id, label })) : [];
+  })();
+  const totals = {
+    all: index.groups.length,
+    running: index.groups.filter((group) => {
+      const status = pluginStatus(index, group);
+      return !isStopped(status.label, status.tone);
+    }).length,
+    disabled: index.groups.filter((group) => {
+      const status = pluginStatus(index, group);
+      return isStopped(status.label, status.tone);
+    }).length,
+    configurable: index.groups.filter((group) => isConfigurable(index, group) || panelIds.has(group.id)).length
+  };
+  const sections = sectionize(groups).map((section) => ({
     ...section,
-    // 受管扩展卡片带卸载/回滚操作，所在分区不算「纯信息」，不默认收起。
+    // 受管扩展行带卸载/回滚操作，所在分区不算「纯信息」，不默认收起。
     informational: section.groups.every(
       (group) => !isActionable(index, group) && !panelIds.has(group.id) && !(managed && group.installed?.managed)
     )
   }));
+  const configCount = index.groups.reduce((total, group) => total + group.entries.length, 0);
 
   return (
-    <div data-testid="plugin-settings">
-      {state.status === "loading" ? <p className="settings-page__hint" role="status">正在读取插件配置…</p> : null}
-      {state.status === "unauthorized" ? (
-        <p className="settings-page__hint" data-testid="plugins-settings-unauthorized">
-          需要管理员权限才能查看和修改插件配置。
-        </p>
-      ) : null}
-      {state.status === "error" ? (
-        <div className="settings-page__hint">
-          <p className="settings-page__error" role="alert">{state.error}</p>
-          <Button size="sm" onClick={() => void store.load()}>重试</Button>
-        </div>
-      ) : null}
-      {managed ? (
-        <ManagedInstallBar controller={managed.controller} snapshot={state.status === "ready" ? state.snapshot : null} canManage={store.canManage()} />
-      ) : null}
-      {managed?.marketplace ? (
-        <MarketplaceInstallPanel controller={managed.marketplace} snapshot={state.status === "ready" ? state.snapshot : null} canManage={store.canManage()} />
-      ) : null}
-      <ReleaseChangedNotice
-        pending={pendingReopen}
-        {...(managed?.reopenCanvas ? { onReopen: () => void managed.reopenCanvas?.() } : {})}
-      />
-      {view.siteError ? (
-        <p className="settings-page__error" role="alert" data-testid="plugins-settings-site-error">{view.siteError}</p>
-      ) : null}
+    <div className="settings-plugin-page" data-testid="plugin-settings">
+      {installMode === null ? (
+        <>
+          <header className="settings-plugin-head">
+            <div className="settings-plugin-head__title">
+              <h2>插件配置</h2>
+              <p>管理内置扩展与市场安装。点一行进入配置，启停直接在行上操作。</p>
+            </div>
+            <div className="settings-plugin-head__actions">
+              <label className="settings-plugin-search">
+                <SearchIcon size={15} />
+                <input
+                  type="search"
+                  value={query}
+                  placeholder="搜索插件、能力或配置…"
+                  onChange={(event) => setQuery(event.currentTarget.value)}
+                  data-testid="plugins-settings-search"
+                />
+              </label>
+              {canInstallFile ? (
+                <Button size="sm" icon={<FileTextIcon size={15} />} onClick={() => setInstallMode("file")} data-testid="plugin-install-file">
+                  从文件安装
+                </Button>
+              ) : null}
+              {canUseMarket ? (
+                <Button size="sm" tone="primary" icon={<PlusIcon size={15} />} onClick={() => setInstallMode("market")} data-testid="plugin-install-market">
+                  从市场安装
+                </Button>
+              ) : null}
+            </div>
+          </header>
 
-      {index.groups.length > 0 ? (
-        <p className="settings-plugins__summary" data-testid="plugins-settings-summary">
-          {index.groups.length} 个插件 · {index.groups.reduce((total, group) => total + group.entries.length, 0)} 项配置
-        </p>
-      ) : (
-        <p className="settings-page__hint" data-testid="plugins-settings-empty">没有可显示的插件。</p>
-      )}
+          {state.status === "loading" ? <p className="settings-page__hint" role="status">正在读取插件配置…</p> : null}
+          {state.status === "unauthorized" ? (
+            <p className="settings-page__hint" data-testid="plugins-settings-unauthorized">
+              需要管理员权限才能查看和修改插件配置。
+            </p>
+          ) : null}
+          {state.status === "error" ? (
+            <div className="settings-page__hint">
+              <p className="settings-page__error" role="alert">{state.error}</p>
+              <Button size="sm" onClick={() => void store.load()}>重试</Button>
+            </div>
+          ) : null}
 
-      {sections.map((section) => {
-        const collapsed = sectionToggled[section.title] ?? section.informational;
-        return (
-          <section
-            key={section.title}
-            className="settings-plugins__section"
-            data-plugin-section={section.title}
-            data-section-collapsed={section.informational && collapsed ? "true" : "false"}
-          >
-            <div className="settings-plugins__head">
-              {section.informational ? (
+          <ReleaseChangedNotice
+            pending={pendingReopen}
+            {...(managed?.reopenCanvas ? { onReopen: () => void managed.reopenCanvas?.() } : {})}
+          />
+          {view.siteError ? (
+            <p className="settings-page__error" role="alert" data-testid="plugins-settings-site-error">{view.siteError}</p>
+          ) : null}
+
+          <div className="settings-plugin-statusbar">
+            <span className="settings-plugin-live"><span className="settings-plugin-live__dot" />本机宿主运行中</span>
+            <span className="settings-plugin-statusbar__rule" />
+            <p className="settings-plugins__summary" data-testid="plugins-settings-summary">
+              {totals.all} 个插件 · {configCount} 项配置
+            </p>
+            <span className="settings-plugin-statusbar__count"><strong>{totals.running}</strong> 个运行中</span>
+            {totals.disabled > 0 ? <span className="settings-plugin-statusbar__count">{totals.disabled} 个已停用</span> : null}
+          </div>
+
+          <div className="settings-plugin-toolbar">
+            <div className="settings-plugin-filter-groups">
+            <div className="settings-plugin-filters" aria-label="插件筛选">
+              {FILTERS.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className={filter === entry.id ? "settings-plugin-filter is-active" : "settings-plugin-filter"}
+                  onClick={() => setFilter(entry.id)}
+                  data-testid={`plugins-filter-${entry.id}`}
+                >
+                  {entry.label}
+                  <span>{totals[entry.id]}</span>
+                </button>
+              ))}
+            </div>
+            {sourceOptions.length > 0 ? (
+              <div className="settings-plugin-filters" aria-label="按来源筛选" data-testid="plugins-source-filters">
                 <button
                   type="button"
-                  className="settings-plugins__toggle"
-                  aria-expanded={!collapsed}
-                  onClick={() => setSectionToggled((current) => ({ ...current, [section.title]: !collapsed }))}
-                  data-testid={`plugins-section-toggle-${section.title}`}
+                  className={sourceFilter === "all" ? "settings-plugin-filter is-active" : "settings-plugin-filter"}
+                  onClick={() => setSourceFilter("all")}
+                  data-testid="plugins-source-all"
                 >
-                  {collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}
-                  <span className="settings-plugins__heading">{section.title}</span>
-                  <span className="settings-plugins__count">{section.groups.length}</span>
+                  全部来源
                 </button>
-              ) : (
-                <>
-                  <h3 className="settings-plugins__heading">{section.title}</h3>
-                  <span className="settings-plugins__count">{section.groups.length}</span>
-                </>
-              )}
-            </div>
-            <p className="settings-page__hint">{SECTION_HINTS[section.title] ?? ""}</p>
-            {collapsed ? null : (
-              <div className="settings-plugins__grid">
-                {section.groups.map((group) => (
-                  <PluginCard
-                    key={group.id}
-                    index={index}
-                    group={group}
-                    manager={manager}
-                    store={store}
-                    siteManageable={view.siteManageable}
-                    hasSettingsPanel={panelIds.has(group.id)}
-                    {...(managed ? { managed: managed.controller } : {})}
-                    {...(onOpenPlugin ? { onOpen: () => onOpenPlugin(group.id) } : {})}
-                  />
+                {sourceOptions.map((source) => (
+                  <button
+                    key={source.id}
+                    type="button"
+                    className={sourceFilter === source.id ? "settings-plugin-filter is-active" : "settings-plugin-filter"}
+                    onClick={() => setSourceFilter(source.id)}
+                    data-testid={`plugins-source-${source.id}`}
+                  >
+                    {source.label}
+                  </button>
                 ))}
               </div>
-            )}
-          </section>
-        );
-      })}
+            ) : null}
+            </div>
+            <span className="settings-plugin-result">{groups.length} / {totals.all}</span>
+          </div>
 
-      {index.groups.some((group) => pluginStateKind(index, group) === "browser" && browserPending(index, group)) ? (
-        <p className="settings-page__pending" data-testid="settings-plugins-pending">
-          有浏览器本地插件改动，下次打开应用生效。
-        </p>
+          {index.groups.length === 0 ? (
+            <p className="settings-page__hint" data-testid="plugins-settings-empty">没有可显示的插件。</p>
+          ) : null}
+
+          {groups.length === 0 && index.groups.length > 0 ? (
+            <p className="settings-page__hint" data-testid="plugins-settings-empty-filter">
+              没有匹配的插件；换个关键词或清空筛选。
+            </p>
+          ) : null}
+
+          {sections.map((section) => {
+            const collapsed = normalizedQuery || filter !== "all"
+              ? false
+              : sectionToggled[section.title] ?? section.informational;
+            return (
+              <section
+                key={section.title}
+                className="settings-plugins__section"
+                data-plugin-section={section.title}
+                data-section-collapsed={section.informational && collapsed ? "true" : "false"}
+              >
+                <div className="settings-plugins__head">
+                  {section.informational ? (
+                    <button
+                      type="button"
+                      className="settings-plugins__toggle"
+                      aria-expanded={!collapsed}
+                      onClick={() => setSectionToggled((current) => ({ ...current, [section.title]: !collapsed }))}
+                      data-testid={`plugins-section-toggle-${section.title}`}
+                    >
+                      {collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}
+                      <span className="settings-plugins__heading">{section.title}</span>
+                      <span className="settings-plugins__count">{section.groups.length}</span>
+                    </button>
+                  ) : (
+                    <>
+                      <h3 className="settings-plugins__heading">{section.title}</h3>
+                      <span className="settings-plugins__count">{section.groups.length}</span>
+                    </>
+                  )}
+                  <span className="settings-plugins__rule" />
+                </div>
+                {SECTION_HINTS[section.title] && !collapsed ? (
+                  <p className="settings-page__hint settings-plugins__section-hint">{SECTION_HINTS[section.title]}</p>
+                ) : null}
+                {collapsed ? null : (
+                  <div className="settings-plugins__list">
+                    {section.groups.map((group) => (
+                      <PluginRow
+                        key={group.id}
+                        index={index}
+                        group={group}
+                        manager={manager}
+                        store={store}
+                        siteManageable={view.siteManageable}
+                        hasSettingsPanel={panelIds.has(group.id)}
+                        {...(onOpenPlugin ? { onOpen: () => onOpenPlugin(group.id) } : {})}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+
+
+          {!store.canManage() ? (
+            <p className="settings-page__hint" data-testid="plugins-settings-readonly">仅管理员可修改插件启停与配置。</p>
+          ) : null}
+        </>
       ) : null}
-      {!store.canManage() ? (
-        <p className="settings-page__hint" data-testid="plugins-settings-readonly">仅管理员可修改插件启停与配置。</p>
+
+      {installMode === "market" && managed?.marketplace ? (
+        <PluginInstallShell
+          title="从市场安装"
+          hint="从服务端团队市场搜索扩展；安装前会校验签名与发布者声明。"
+          onBack={() => setInstallMode(null)}
+        >
+          <MarketplaceInstallPanel
+            controller={managed.marketplace}
+            jobs={managed.controller}
+            snapshot={state.status === "ready" ? state.snapshot : null}
+            canManage={store.canManage()}
+            defaultOpen
+            view
+          />
+        </PluginInstallShell>
       ) : null}
+
+      <div className="settings-plugin-install-shell" hidden={installMode !== "file"}>
+        <PluginInstallShell
+          title="从文件安装"
+          hint="选择 .wxt 扩展包；安装前会校验签名、逐文件摘要与扩展声明。"
+          onBack={() => setInstallMode(null)}
+        >
+          {managed ? (
+            <ManagedInstallBar
+              controller={managed.controller}
+              snapshot={state.status === "ready" ? state.snapshot : null}
+              canManage={store.canManage()}
+              variant="view"
+            />
+          ) : null}
+        </PluginInstallShell>
+      </div>
     </div>
   );
 }
 
-/** 一张插件卡片：基本信息 + 启停；有配置项或模型时整块可点开配置弹窗。 */
-function PluginCard({
+/** 一张插件行：身份 + 说明 + 配置规模 + 状态；右侧是启停开关。 */
+function PluginRow({
   index,
   group,
   manager,
   store,
   siteManageable,
   hasSettingsPanel,
-  managed,
   onOpen
 }: {
   index: PluginViewIndex;
@@ -210,19 +402,19 @@ function PluginCard({
   manager: ExtensionManagerFacade;
   store: BackendSettingsStore;
   siteManageable: boolean;
-  /** 该插件有扩展自带设置面板（`settings.plugin-config`）。 */
   hasSettingsPanel: boolean;
-  managed?: ManagedExtensionsController;
   onOpen?: () => void;
 }) {
-  const openable = (isConfigurable(index, group) || hasSettingsPanel) && onOpen !== undefined;
+  // 受管扩展的卸载/回滚在详情页，所以即便没有任何配置项也必须能点进去。
+  const openable = (isConfigurable(index, group) || hasSettingsPanel || group.installed?.managed === true) && onOpen !== undefined;
   const layer = PLUGIN_LAYER_LABELS[group.layer];
   const diagnostics = diagnosticsOf(index, group);
   const manageable = isManageable(index, group);
+  const status = pluginStatus(index, group);
 
   return (
     <article
-      className={openable ? "plugin-card is-openable" : "plugin-card"}
+      className={openable ? "plugin-row is-openable" : "plugin-row"}
       data-plugin-id={group.id}
       data-plugin-layer={group.layer}
       data-testid={`settings-plugin-${group.id}`}
@@ -230,54 +422,125 @@ function PluginCard({
     >
       <button
         type="button"
-        className="plugin-card__open"
+        className="plugin-row__open"
         disabled={!openable}
         onClick={onOpen}
         data-testid={`settings-plugin-open-${group.id}`}
       >
-        <span className="plugin-card__head">
-          <PluginIconMark icon={group.icon} testId={`settings-plugin-icon-${group.id}`} />
-          <span className="plugin-card__name">{group.label}</span>
-          <span className="plugin-card__badge">{layer.badge}</span>
-          {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
-          {group.installed?.managed ? (
-            <span className="plugin-card__badge is-managed" data-testid={`settings-plugin-managed-${group.id}`}>已安装</span>
-          ) : null}
-          {group.version ? (
-            <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`settings-plugin-version-${group.id}`}>
-              {versionLabel(group.version)}
-            </span>
-          ) : null}
-        </span>
-        {group.description ? <span className="plugin-card__description">{group.description}</span> : null}
-        <span className="plugin-card__meta">
-          {configCountLabel(index, group, hasSettingsPanel)}
-          {openable ? <ChevronRightIcon size={14} /> : null}
+        <PluginIconMark icon={group.icon} testId={`settings-plugin-icon-${group.id}`} />
+        <span className="plugin-row__main">
+          <span className="plugin-row__title">
+            <span className="plugin-row__name">{group.label}</span>
+            <span className="plugin-card__badge">{layer.badge}</span>
+            {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
+            {group.installed?.managed ? (
+              <span
+                className="plugin-card__badge is-source"
+                data-tone={extensionSource(group.installed).tone}
+                data-testid={`settings-plugin-source-${group.id}`}
+                title={group.installed.sourceId ? `安装来源：${group.installed.sourceId}` : undefined}
+              >
+                {extensionSource(group.installed).label}
+              </span>
+            ) : null}
+            {extensionTrustBadge(group.installed) ? (
+              <span
+                className="plugin-card__badge is-trust"
+                data-tone={extensionTrustBadge(group.installed)!.tone}
+                data-testid={`settings-plugin-trust-${group.id}`}
+                title={signedKeyId(group.installed?.trust)
+                  ? `已签名 · ${signedKeyId(group.installed!.trust)}（与本机宿主同权限，不是沙箱）`
+                  : "未签名：仅本地开发包，与宿主同权限"}
+              >
+                {extensionTrustBadge(group.installed)!.label}
+              </span>
+            ) : null}
+            {extensionObservationBadge(group.installed) ? (
+              <span
+                className="plugin-card__badge is-observe"
+                data-testid={`settings-plugin-observe-${group.id}`}
+                title={extensionObservationBadge(group.installed)!.title}
+              >
+                {extensionObservationBadge(group.installed)!.label}
+              </span>
+            ) : null}
+          </span>
+          <span className="plugin-row__description">{group.description || "暂无说明"}</span>
+          <span className="plugin-row__meta">{configCountLabel(index, group, hasSettingsPanel) || "—"}</span>
         </span>
       </button>
+      <div className="plugin-row__side">
+        <span
+          className="plugin-row__status"
+          data-tone={status.tone}
+          {...(diagnostics.length > 0 ? { title: diagnostics.join("；") } : {})}
+        >
+          <i />{status.label}
+        </span>
+        {group.version ? (
+          <span className="plugin-row__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`settings-plugin-version-${group.id}`}>
+            {versionLabel(group.version)}
+          </span>
+        ) : null}
+        <div className="plugin-row__switch">
+          {manageable ? (
+            <PluginStateControl
+              index={index}
+              group={group}
+              manager={manager}
+              store={store}
+              siteManageable={siteManageable}
+              testId={`settings-plugin-switch-${group.id}`}
+            />
+          ) : (
+            <Switch
+              checked={!isStopped(status.label, status.tone)}
+              disabled
+              onCheckedChange={() => undefined}
+              aria-label={`${group.label} 的启停由宿主管理，不能单独停用`}
+              title="内置扩展由宿主管理，不能单独停用"
+              testId={`settings-plugin-switch-${group.id}`}
+            />
+          )}
+        </div>
+        {openable ? <span className="plugin-row__chevron"><ChevronRightIcon size={15} /></span> : null}
+      </div>
       {group.directory ? (
-        <p className="plugin-directory" title={group.directory}>
+        <p className="plugin-directory plugin-row__directory" title={group.directory}>
           <span>所在目录</span><code>{group.directory}</code>
         </p>
       ) : null}
-      {diagnostics.length > 0 ? (
-        <p className="plugin-card__diagnostics" role="status">{diagnostics.join("；")}</p>
-      ) : null}
       <ExtensionFaultNotice extensionId={group.id} />
-      {managed ? <ManagedExtensionDetails installed={group.installed} controller={managed} canManage={store.canManage()} /> : null}
-      {manageable ? (
-        <div className="plugin-card__foot">
-          <PluginStateControl
-            index={index}
-            group={group}
-            manager={manager}
-            store={store}
-            siteManageable={siteManageable}
-            testId={`settings-plugin-switch-${group.id}`}
-          />
-        </div>
-      ) : null}
+      {/* 受管明细（来源身份、同权限说明、卸载/回滚）在详情页；行里只留来源/信任徽标。 */}
     </article>
+  );
+}
+
+/** 安装视图外壳：返回插件列表，内容留在同一设置弹窗内。 */
+function PluginInstallShell({
+  title,
+  hint,
+  onBack,
+  children
+}: {
+  title: string;
+  hint: string;
+  onBack: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className="settings-plugin-install">
+      <header className="settings-plugin-install__head">
+        <Button size="sm" tone="ghost" icon={<BackIcon />} onClick={onBack} data-testid="plugin-install-back">
+          返回插件列表
+        </Button>
+        <div className="settings-plugin-install__title">
+          <h2>{title}</h2>
+          <p>{hint}</p>
+        </div>
+      </header>
+      <div className="settings-plugin-install__body">{children}</div>
+    </section>
   );
 }
 

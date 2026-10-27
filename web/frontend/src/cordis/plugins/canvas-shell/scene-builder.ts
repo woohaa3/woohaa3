@@ -38,6 +38,8 @@ export type SceneBuildInput = {
   hoveredEdgeId: string | null;
   hoveredHistory?: { nodeId: string; presentationId: string } | null;
   pressedHistory?: { nodeId: string; presentationId: string } | null;
+  /** Group ids highlighted as transient drop receivers. */
+  dropTargetGroupIds?: readonly string[];
   /**
    * 拖动粘连瞬时投影（change: add-drag-touch-connections）。
    * 缺省/`null` 表示当前没有粘连拖动；只在合格 drag 越过移动阈值后投影。
@@ -143,6 +145,7 @@ export function buildSceneWithResources(
     ghostNodes: options.getGhostNodes?.() ?? [],
     nodeActionToolbars: options.getNodeActionToolbars?.(),
     selectionActionToolbar: options.getSelectionActionToolbar?.() ?? undefined,
+    dropTargetGroupIds: input.dropTargetGroupIds,
     shotPreviews: shotPreviews.shotPreviews,
     shotPreviewCameraProjection: shotPreviews.shotPreviewCameraProjection,
     theme: options.getTheme?.() ?? defaultAppTheme(),

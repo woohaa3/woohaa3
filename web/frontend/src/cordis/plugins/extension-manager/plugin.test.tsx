@@ -13,28 +13,17 @@ import { SlotRegistry } from "../../slots.js";
 import { DialogService } from "../../services/dialogs/service.js";
 import { CanvasNavigationStore } from "../../navigation/store.js";
 import { sourceCanvasCatalogMetadata } from "../../test-support/source-extensions.js";
-import type { PreferenceStorage } from "../../services/extension-preferences/codec.js";
 
 let runtime: FrontendRuntime | null = null;
 
 const CATALOG = sourceCanvasCatalogMetadata();
 const IDS = CATALOG.filter((entry) => entry.configurable).map((entry) => entry.id);
 
-function memoryStorage(): PreferenceStorage & { data: Record<string, string> } {
-  const data: Record<string, string> = {};
-  return {
-    data,
-    getItem: (key) => data[key] ?? null,
-    setItem: (key, value) => {
-      data[key] = value;
-    }
-  };
-}
-
 async function makeHarness(options: {
   assembled?: Record<string, boolean>;
   failed?: ReadonlySet<string>;
-  storage?: PreferenceStorage;
+  /** 写入宿主配置的替身（生产实现写 \`extensions.frontend.<id>.enabled\`）。 */
+  persist?: (id: string, enabled: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
   reload?: () => void;
   /** 站点插件状态 Service 替身（验证站点开关提交）。 */
   statusService?: unknown;
@@ -68,7 +57,7 @@ async function makeHarness(options: {
           ids: IDS,
           assembled: options.assembled ?? {},
           ...(options.failed ? { failed: options.failed } : {}),
-          storage: options.storage ?? memoryStorage(),
+          ...(options.persist ? { persist: options.persist } : {}),
           reload: options.reload ?? (() => undefined),
           ...(options.statusService ? { site: { statusService: options.statusService as never, canManageSite: true } } : {})
         })
@@ -119,17 +108,20 @@ describe("Plugin Manager Plugin", () => {
     expect(view.rows.find((row) => row.id === "node-history")?.status).toBe("active");
   });
 
-  it("浏览器本地开关写本地偏好，站点开关提交服务端配置", async () => {
-    const storage = memoryStorage();
+  it("浏览器本地开关写宿主配置，站点开关提交服务端配置", async () => {
+    const persisted: Array<[string, boolean]> = [];
+    const persist = vi.fn(async (id: string, enabled: boolean) => {
+      persisted.push([id, enabled]);
+      return { ok: true as const };
+    });
     const writeConfig = vi.fn(async (_input: { extensionId: string; enabled: boolean }) => ({ ok: true as const, revision: 1, status: { extensionId: "game-furnace" } }));
-    const harness = await makeHarness({ storage, statusService: { writeConfig, getSnapshot: () => ({ revision: 1, catalog: [], plugins: [], error: null, loading: false }), subscribe: () => () => undefined, refresh: async () => undefined } });
+    const harness = await makeHarness({ persist, statusService: { writeConfig, getSnapshot: () => ({ revision: 1, catalog: [], plugins: [], error: null, loading: false }), subscribe: () => () => undefined, refresh: async () => undefined } });
     runtime = harness.runtime;
     harness.facade.setEnabled("prompt-snippets", false);
-    // 只写偏好：本次装配不变（行变为「待停用」），偏好留待下次启动读取。
-    expect(harness.facade.getSnapshot().rows.find(row => row.id === "prompt-snippets")?.status).toBe("pending-disable");
+    // 写入转发给宿主配置；配置随后热生效，装配态与目标态之间的差异先体现为「待停用」。
+    await vi.waitFor(() => expect(persisted).toEqual([["prompt-snippets", false]]));
     expect(harness.facade.getSnapshot().error).toBeNull();
-    expect(Object.keys(storage.data)).toHaveLength(1);
-    expect(storage.data["woohaa:frontend-extensions:v1"]).toContain('"prompt-snippets":false');
+    expect(harness.facade.getSnapshot().rows.find(row => row.id === "prompt-snippets")?.status).toBe("pending-disable");
     expect(harness.facade.getSnapshot().pending).toBe(true);
 
     harness.facade.setSiteEnabled("game-furnace", false);

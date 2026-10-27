@@ -1,3 +1,4 @@
+import { resolveTextSubmission } from "../../services/assistant-execution/text-submission.js";
 /**
  * Task Execution Plugin（change: adopt-frontend-cordis-plugin-runtime，design D5/D6；
  *   change: unify-canvas-presentation-navigation，task 5.2）。
@@ -49,6 +50,7 @@ import {
 } from "../../navigation/contracts.js";
 import type { AgentConversationServiceHandle } from "../../services/agent-conversation-service.js";
 import { AgentConversationPanel } from "./execution-panel/agent-conversation-panel.js";
+const TextExecutionHost = lazy(() => import("./text-execution-host.js").then(module => ({ default: module.TextExecutionHost })));
 const ModelExecutionHost = lazy(() => import("./model-execution-host.js").then((module) => ({ default: module.ModelExecutionHost })));
 const ModelParameterPanel = lazy(() => import("./model-parameter-panel.js").then((module) => ({ default: module.ModelParameterPanel })));
 const GroupRunSummaryOverlay = lazy(() => import("./group-run-summary-overlay.js").then(module => ({ default: module.GroupRunSummaryOverlay })));
@@ -194,6 +196,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           };
           // 呈现表面与骨架、宿主共用同一判断（音频没有 expanded 面）。
           const surface = resolveExecutionPanelSurface(presentation, resolvePanelNodeType(route.nodeId));
+          if (resolvePanelNodeType(route.nodeId) === "text") return <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}>
+            <TextExecutionHost canvasId={canvasId} nodeId={route.nodeId} writable={writable} runtime={runtime} presentation={surface} onPresentationIntent={submitPresentationIntent} />
+          </Suspense>;
           return (
             <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}><ModelExecutionHost
               submitCoordinator={coordinator}
@@ -345,6 +350,8 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         // 统一运行状态按 `(canvasId, nodeId)` 查询；缺失时视为空闲（由提交自身门禁兜底）。
         isBusy: (nodeId) => runStateService()?.isBusy(resolveScopeCanvasId(), nodeId) ?? false,
         submit: (input) => coordinator.submit(input),
+        textPrecheck: (canvas, nodeId) => resolveTextSubmission(ctx.agentConversationService, canvas, nodeId, () => invalidateToolbar()),
+        submitText: async input => { const result = await ctx.agentConversationService.submitTurn({ ...input, requestId: `assistant:${crypto.randomUUID()}` }); return result.ok ? { ok: true } : { ok: false, error: result.error }; },
         onSummary: (summary) => {
           groupSummaryStore.show({ canvasId: resolveScopeCanvasId(), summary });
         }
@@ -398,7 +405,14 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         // 权威画布更新后重试等待中的镜头参考提交（每个节点至多续交一次）。
         void coordinator.retryWaiting();
       });
-      const offRunState = ctx.get(RUN_STATE_SERVICE)?.subscribe(invalidateToolbar);
+      // 运行态服务由 run-state 插件提供（兄弟插件），装配期它的 fiber 还没 active：在这里
+      // `ctx.get` 只会拿到 undefined，订阅永远建不起来，横条的 N/禁用原因就不再随运行态失效。
+      // 声明式等待：服务就绪才订阅，服务撤销随 fiber 一起释放。
+      ctx.inject([RUN_STATE_SERVICE], (scoped) => {
+        const service = scoped.get(RUN_STATE_SERVICE) as RunStateService;
+        const off = service.subscribe(invalidateToolbar);
+        scoped.effect(() => () => off(), "task-execution:run-state-toolbar");
+      });
 
       // selection coordinator：selection → 显式 panel route。
       const resolvePanelRoute = (nodeId: string | null): CanvasPanelRoute | null => {
@@ -466,7 +480,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           offDrafts();
           offCatalog();
           offCanvas();
-          offRunState?.();
           groupRun.dispose();
           groupSummaryStore.dispose();
           unsubscribeSelection();

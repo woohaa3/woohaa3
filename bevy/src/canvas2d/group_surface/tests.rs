@@ -193,34 +193,30 @@ fn focus_removes_group_chrome_and_return_restores_current_surface() {
 }
 
 #[test]
-fn badge_presence_changes_replace_geometry_without_leaking_or_removing_group_fill() {
+fn world_surface_follows_model_presence_and_reclaims_assets() {
     let mut app = app();
     app.update();
-    let (_, with_badge, _) = surface(&mut app);
+    let (with_badge, badge_mesh, _) = surface(&mut app);
+    assert!(app
+        .world()
+        .resource::<Assets<Mesh>>()
+        .get(&badge_mesh)
+        .is_some());
+    // 普通组改由 2D 面板铺底；再画一层 55% 的 3D 面会把背板叠深，因此没有模型时必须释放。
     app.world_mut().resource_mut::<CurrentScene>().0.nodes[0].model = None;
     app.update();
-    let (_, plain, _) = surface(&mut app);
-    assert_ne!(plain, with_badge);
-    assert!(
-        app.world()
-            .resource::<Assets<Mesh>>()
-            .get(&with_badge)
-            .is_none()
-    );
-    let mesh = app.world().resource::<Assets<Mesh>>().get(&plain).unwrap();
-    let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR)
-    else {
-        panic!()
-    };
-    assert!(
-        colors
-            .iter()
-            .all(|c| (c[3] - super::super::group::GROUP_FILL_ALPHA).abs() < 0.0001)
-    );
+    assert!(app.world().get_entity(with_badge).is_err());
+    assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
+    assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 0);
     app.world_mut().resource_mut::<CurrentScene>().0.nodes[0].model = node().model;
     app.update();
-    let (_, restored, _) = surface(&mut app);
-    assert_ne!(restored, plain);
+    let (restored, restored_mesh, _) = surface(&mut app);
+    assert_ne!(restored, with_badge);
+    assert!(app
+        .world()
+        .resource::<Assets<Mesh>>()
+        .get(&restored_mesh)
+        .is_some());
     assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
     assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 1);
 }

@@ -103,6 +103,8 @@ export class CanvasRunService {
     const node = canvas.document.nodes.find((entry) => entry.id === request.nodeId);
     if (!node) return { ok: false, code: "unknown-node", message: `节点 ${request.nodeId} 不存在` };
 
+    if (node.type === "text") return { ok: false, code: "assistant-required", message: "文本生成需要助手连接和模型，请从助手文本入口提交" };
+
     // 聚合节点（片场等）同一时间至多一个运行任务：权威入口保证，而非仅前端禁用
     // （change: 2026-10-12-unify-generation-history-strip，design D5）。
     if (this.deps.isAggregateNode?.(node)) {

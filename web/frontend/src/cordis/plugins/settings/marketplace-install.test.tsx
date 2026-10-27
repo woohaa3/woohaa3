@@ -13,6 +13,7 @@ import type { MarketplaceExtensionDetailView, SettingsSnapshot } from "@woohaa3/
 import type { MarketplaceRemote } from "../../services/marketplace-remote.js";
 import { appendTrustedKey, createMarketplaceInstallController, TRUSTED_KEYS_SETTING, versionTrusted } from "./marketplace-install.js";
 import { MarketplaceInstallPanel } from "./marketplace-install-ui.js";
+import type { ManagedExtensionsController } from "./managed-extensions.js";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -219,7 +220,30 @@ describe("MarketplaceInstallPanel", () => {
     click(submit);
     await flush();
     expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0" }]);
-    expect(container.querySelector('[data-testid="marketplace-notice"]')?.textContent).toContain("demo@1.1.0");
+    // 不再写会过期的「已开始安装」提示；受理后由任务列表给出进度与终态。
+    expect(container.querySelector('[data-testid="marketplace-notice"]')).toBeNull();
+  });
+
+  it("安装视图里直接显示任务进度与取消，不再要求去别的列表找", async () => {
+    const jobsState = {
+      jobs: [{ jobId: "job-9", action: "install" as const, sourceId: "woohaa-server", extensionId: "demo", version: "1.1.0", status: "running" as const, phase: "download" as const, progress: 0.45, startedAt: new Date().toISOString() }],
+      error: null,
+      submitting: false,
+      restart: { status: "idle" as const, message: null },
+      unquarantining: []
+    };
+    const cancel = vi.fn(async () => undefined);
+    const jobs = { getState: () => jobsState, subscribe: () => () => undefined, cancel } as unknown as ManagedExtensionsController;
+    const controller = createMarketplaceInstallController({ remote: fakeRemote(), onJob: () => undefined, readTrustedKeys: () => "k1=PUB1", writeSetting: async () => ({ ok: true }) });
+    const container = render(<MarketplaceInstallPanel controller={controller} jobs={jobs} snapshot={snapshot()} canManage defaultOpen view />);
+    await flush();
+    click(container.querySelector('[data-testid="marketplace-item-demo"] button'));
+    await flush();
+    const row = container.querySelector('[data-testid="marketplace-job-job-9"]');
+    expect(row?.textContent).toContain("读取安装包");
+    expect(row?.textContent).toContain("45%");
+    click(row?.querySelector("button") ?? null);
+    expect(cancel).toHaveBeenCalledWith("job-9");
   });
 
   it("内置版本：显示内置 vX 与可升级；不高于内置时禁用安装并说明", async () => {

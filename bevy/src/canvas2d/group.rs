@@ -16,8 +16,10 @@ use super::dash::dashed_polyline;
 use super::geometry::Geometry;
 use super::layout::{hex, shortened};
 
-/// group 容器的 z 层：必须低于所有节点卡片（卡片为 `10.0 + index * 0.1`），
-/// 也低于边草稿与删除按钮，使成员与控件始终浮在容器之上。
+/// 组选择带等共享覆盖层使用的基础 z。
+///
+/// 组主体与组卡片的实际 z 由 `draw_order::render_index` 派生；该常量只保留给
+/// 不携带节点层级的聚合选择带和几何测试。
 pub(crate) const GROUP_Z: f32 = 1.0;
 
 /// 圆角半径与描边宽度。
@@ -26,7 +28,11 @@ const GROUP_BORDER: f32 = 1.5;
 /// group 容器底的 alpha（change: fix-group-and-marquee-preview）。
 ///
 /// 0.55 与参考实现 `rgba(42,42,48,.55)` 同量级：只暗示容器范围，不遮挡成员卡片边框。
+/// 2D 面板与 3D 组底共用这一个值，两者观感才一致（change: 2026-10-26-settle-group-boundaries-on-drop）。
 pub(super) const GROUP_FILL_ALPHA: f32 = 0.55;
+
+/// 组面板圆角，与组外框的 12 单位语言一致。
+const GROUP_PANEL_RADIUS: f32 = 12.;
 
 pub(super) fn is_running(node: &crate::protocol::GraphNode) -> bool {
     node.group
@@ -40,6 +46,119 @@ pub(super) fn is_running(node: &crate::protocol::GraphNode) -> bool {
         })
 }
 
+/// Build one transparent panel mesh for one group. It deliberately uses local
+/// z=0; the caller puts the entity itself at the group's world z so Bevy's
+/// Transparent2d phase can sort each panel independently.
+///
+/// 面板用 `canvasNodeSurface` + [`GROUP_FILL_ALPHA`]，与 3D 组底同色同透明度，恢复引入
+/// 2D 面板前的观感；不改成不透明（change: 2026-10-26-settle-group-boundaries-on-drop）。
+pub(crate) fn draw_group_panel(
+    theme: &ThemeResource,
+    node: &crate::protocol::GraphNode,
+    presentation: &GroupPresentation,
+) -> Mesh {
+    let mut geometry = Geometry::default();
+    let color = theme.token_u32("canvasNodeSurface");
+    let aperture = badge_aperture(node);
+    panel(&mut geometry, node, aperture, 0., color, GROUP_FILL_ALPHA);
+    if presentation.drop_target {
+        panel(
+            &mut geometry,
+            node,
+            aperture,
+            0.001,
+            theme.token_u32("interactionAccentSoft"),
+            0.22,
+        );
+    }
+    geometry.build()
+}
+
+/// 底部徽章占据的矩形，裁剪到组矩形内；没有徽章时返回 `None`。
+///
+/// 有模型的组由 `group_surface` 在 3D 世界画不透明徽章底座与站在上面的模型，而 3D 相机
+/// （order 0）整体先于 2D 覆盖层（order 1）。2D 面板如果铺满整块组底就会把徽章和模型
+/// 一起盖掉，所以这里留出徽章口，让 3D 内容原样透出。
+fn badge_aperture(node: &crate::protocol::GraphNode) -> Option<Vec4> {
+    if !crate::canvas_query::group_model::has_badge(node) {
+        return None;
+    }
+    let badge = crate::canvas_query::group_model::badge_rect(node);
+    let (x0, y0) = (node.x, node.y);
+    let (x1, y1) = (x0 + node.width, y0 + node.height);
+    let (left, top) = (badge.x.max(x0), badge.y.max(y0));
+    let (right, bottom) = ((badge.x + badge.z).min(x1), (badge.y + badge.w).min(y1));
+    (right > left && bottom > top).then(|| Vec4::new(left, top, right - left, bottom - top))
+}
+
+/// 在组矩形内铺一层底色，`aperture` 处留空。
+///
+/// 带缺口的一整块是凹多边形，扇形三角化会画出缺口外的三角形；因此拆成上片与
+/// 左下/右下片三个凸多边形，各自只保留原矩形对应角上的圆角。
+fn panel(
+    geometry: &mut Geometry,
+    node: &crate::protocol::GraphNode,
+    aperture: Option<Vec4>,
+    z: f32,
+    color: u32,
+    alpha: f32,
+) {
+    let (x0, y0) = (node.x, node.y);
+    let (x1, y1) = (x0 + node.width, y0 + node.height);
+    let radius = GROUP_PANEL_RADIUS;
+    let Some(aperture) = aperture else {
+        geometry.rounded_rect_radii_alpha(
+            x0,
+            y0,
+            node.width,
+            node.height,
+            [radius; 4],
+            z,
+            color,
+            alpha,
+        );
+        return;
+    };
+    let (left, right) = (aperture.x, aperture.x + aperture.z);
+    let top = aperture.y;
+    if top > y0 {
+        geometry.rounded_rect_radii_alpha(
+            x0,
+            y0,
+            x1 - x0,
+            top - y0,
+            [radius, radius, 0., 0.],
+            z,
+            color,
+            alpha,
+        );
+    }
+    if left > x0 {
+        geometry.rounded_rect_radii_alpha(
+            x0,
+            top,
+            left - x0,
+            y1 - top,
+            [0., 0., 0., radius],
+            z,
+            color,
+            alpha,
+        );
+    }
+    if right < x1 {
+        geometry.rounded_rect_radii_alpha(
+            right,
+            top,
+            x1 - right,
+            y1 - top,
+            [0., 0., radius, 0.],
+            z,
+            color,
+            alpha,
+        );
+    }
+}
+
 /// 在共享几何里追加一个 group 容器的虚线框与标题装饰。
 ///
 /// 返回标题标签的 `(文案, 位置, 字号, 颜色)`，由 `render.rs` 统一进 label 实体池，
@@ -50,18 +169,21 @@ pub(crate) fn draw_group(
     node: &crate::protocol::GraphNode,
     presentation: &GroupPresentation,
     selected: bool,
+    z: f32,
 ) -> (String, Vec2, f32, u32) {
     let (x, y, width, height) = (node.x, node.y, node.width, node.height);
-    if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, GROUP_Z + 0.03); }
+    if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, z + 0.03); }
     // 选中态用更强的虚线框颜色表达，而不是铺一层不透明选中底：容器铺底会盖住成员
     // （change: fix-group-and-marquee-preview）。
-    let border = if selected {
+    let border = if presentation.drop_target {
+        theme.token_u32("interactionAccent")
+    } else if selected {
         theme.token_u32("canvasNodeBorderSelected")
     } else {
         theme.token_u32("canvasNodeBorder")
     };
-    // Continuous group surfaces are drawn behind the model by group_surface, using the same
-    // canvas camera. This overlay owns only the single perimeter, text and controls.
+    // Continuous group surfaces are drawn by the per-group transparent panel
+    // entity; this shared mesh owns only the perimeter, text and controls.
     let path = super::group_outline::path(node);
     if is_running(node) {
         let color = if selected {
@@ -75,7 +197,7 @@ pub(crate) fn draw_group(
             0.,
             super::group_outline::length(&path),
             2.,
-            GROUP_Z + 0.001,
+            z + 0.001,
             color,
         );
     } else {
@@ -83,7 +205,7 @@ pub(crate) fn draw_group(
             geometry,
             &crate::canvas_query::group_model::frame_path(node),
             GROUP_BORDER,
-            GROUP_Z + 0.001,
+            z + 0.001,
             border,
         );
     }
@@ -95,7 +217,7 @@ pub(crate) fn draw_group(
             0.,
             super::group_outline::length(&badge),
             GROUP_BORDER,
-            GROUP_Z + 0.002,
+            z + 0.002,
             border,
         );
         let rect = crate::canvas_query::group_model::badge_rect(node);
@@ -107,7 +229,7 @@ pub(crate) fn draw_group(
                 center + Vec2::new(side * 3., -2.5 * direction),
                 tip,
                 1.5,
-                GROUP_Z + 0.003,
+                z + 0.003,
                 theme.token_u32("canvasBodyText"),
             );
         }
@@ -119,7 +241,7 @@ pub(crate) fn draw_group(
                 corner - Vec2::X * length,
                 corner - Vec2::Y * length,
                 1.5,
-                GROUP_Z + 0.02,
+                z + 0.02,
                 color,
             );
         }
@@ -131,7 +253,7 @@ pub(crate) fn draw_group(
                 corner - Vec2::X * length,
                 corner - Vec2::Y * length,
                 1.5,
-                GROUP_Z + 0.02,
+                z + 0.02,
                 theme.token_u32("canvasResizeHandle"),
             );
         }
@@ -154,14 +276,14 @@ pub(crate) fn draw_group(
         geometry.circle(
             port,
             6.0,
-            GROUP_Z + 0.01,
+            z + 0.01,
             theme.token_u32("canvasPortDefault"),
             20,
         );
         geometry.circle(
             port,
             3.7,
-            GROUP_Z + 0.02,
+            z + 0.02,
             theme.token_u32("canvasPortFill"),
             20,
         );
@@ -186,6 +308,7 @@ pub(crate) fn draw_run_status(
     geometry: &mut Geometry,
     theme: &ThemeResource,
     node: &crate::protocol::GraphNode,
+    z: f32,
 ) -> Option<(String, Vec2, f32, u32)> {
     let status = node.group.as_ref()?.run_status.as_ref()?;
     let (x, y, width, height) = crate::canvas_query::layout::group_run_status_rect(node)?;
@@ -203,12 +326,12 @@ pub(crate) fn draw_run_status(
     } else {
         "canvasNodeSurface"
     });
-    geometry.rounded_rect(x, y, width, height, 6., GROUP_Z + 0.03, background);
+    geometry.rounded_rect(x, y, width, height, 6., z + 0.03, background);
     if !active {
         geometry.circle(
             Vec2::new(x + 10., y + height / 2.),
             3.,
-            GROUP_Z + 0.04,
+            z + 0.04,
             color,
             16,
         );
@@ -229,6 +352,7 @@ pub(crate) fn group_label_color(value: u32) -> Color {
 
 #[cfg(test)]
 mod tests {
+    use bevy::mesh::VertexAttributeValues;
     use super::*;
 
     fn node(width: f32, height: f32) -> crate::protocol::GraphNode {
@@ -277,8 +401,10 @@ mod tests {
                 output_capable_leaf_count: 2,
                 model_bounds: None,
                 run_status: None,
+                drop_target: false,
             },
             false,
+            GROUP_Z,
         );
         let mesh = geometry.build();
         let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
@@ -305,8 +431,10 @@ mod tests {
                 output_capable_leaf_count: 0,
                 model_bounds: None,
                 run_status: None,
+                drop_target: false,
             },
             false,
+            GROUP_Z,
         );
         assert_eq!(label, "1 项");
     }
@@ -335,13 +463,140 @@ mod tests {
                 output_capable_leaf_count: 0,
                 model_bounds: None,
                 run_status: None,
+                drop_target: false,
             },
             false,
+            GROUP_Z,
         );
         let mesh = geometry.build();
         let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
         // 圆角矩形（36 点）+ 多段虚线与圆角短线，远超单个矩形。
         assert!(positions.len() > 40);
+    }
+
+    #[test]
+    fn ordinary_group_emits_depth_participating_body() {
+        let theme = ThemeResource::default();
+        let mesh = draw_group_panel(
+            &theme,
+            &node(400.0, 300.0),
+            &GroupPresentation {
+                collapsed: false,
+                badge_scale: 1.,
+                badge_resizable: false,
+                title: String::new(),
+                member_count: 1,
+                output_capable_leaf_count: 0,
+                model_bounds: None,
+                run_status: None,
+                drop_target: false,
+            },
+        );
+        let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
+            panic!("ordinary groups need a transparent background panel");
+        };
+        // 圆角矩形的顶点只落在四段圆角弧上，因此不能断言「中间有顶点」；要断言它铺满整个组矩形。
+        let min_x = points.iter().map(|point| point[0]).fold(f32::MAX, f32::min);
+        let max_x = points.iter().map(|point| point[0]).fold(f32::MIN, f32::max);
+        let min_y = points.iter().map(|point| point[1]).fold(f32::MAX, f32::min);
+        let max_y = points.iter().map(|point| point[1]).fold(f32::MIN, f32::max);
+        assert!((min_x - 0.).abs() < 0.01 && (max_x - 400.).abs() < 0.01, "panel must span the group width");
+        // 画布 y 轴向上、顶点写入时取反，因此组矩形映射为 [-height, 0]。
+        assert!((min_y + 300.).abs() < 0.01 && max_y.abs() < 0.01, "panel must span the group height");
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+    }
+
+    fn panel_presentation(drop_target: bool) -> GroupPresentation {
+        GroupPresentation {
+            collapsed: false,
+            badge_scale: 1.,
+            badge_resizable: false,
+            title: String::new(),
+            member_count: 1,
+            output_capable_leaf_count: 0,
+            model_bounds: None,
+            run_status: None,
+            drop_target,
+        }
+    }
+
+    fn model_group(width: f32, height: f32) -> crate::protocol::GraphNode {
+        serde_json::from_value(serde_json::json!({
+            "id":"g","type":"group","x":0.,"y":0.,"width":width,"height":height,
+            "group":{"modelBounds":{"aabb":{"min":[-1,-1,-1],"max":[1,1,1]},"extent":2}},
+            "model":{"resourceKey":"test:box","signature":"box"}
+        }))
+        .unwrap()
+    }
+
+    /// 背板必须沿用 3D 组底的 `canvasNodeSurface` + 0.55，而不是更亮更实的
+    /// `canvasNodeContent` + 0.9：换成后者会让组底色明显变浅变实。
+    #[test]
+    fn group_panel_keeps_surface_token_and_fill_alpha() {
+        let mesh = draw_group_panel(
+            &ThemeResource::default(),
+            &node(400.0, 300.0),
+            &panel_presentation(false),
+        );
+        let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        else {
+            panic!("panel must carry vertex colors");
+        };
+        assert!(colors.iter().all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6));
+        // canvasNodeSurface 是白色；canvasNodeContent 偏灰，会暴露成另一种背板色。
+        assert!(colors
+            .iter()
+            .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
+    }
+
+    /// 3D 相机（order 0）整体先于 2D 覆盖层（order 1），所以带模型的组必须在底部徽章处
+    /// 留口，否则背板会盖住不透明徽章底座和站在上面的模型。
+    ///
+    /// 缺口用三角形形心判定而不是顶点：缺口边界本来就落在顶点上。
+    #[test]
+    fn model_group_panel_leaves_badge_aperture_open() {
+        let node = model_group(500., 300.);
+        let mesh = draw_group_panel(
+            &ThemeResource::default(),
+            &node,
+            &panel_presentation(false),
+        );
+        let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("panel needs positions");
+        };
+        let indices: Vec<u32> = mesh.indices().unwrap().iter().map(|i| i as u32).collect();
+        let badge = crate::canvas_query::group_model::badge_rect(&node);
+        // 顶点写入时画布 y 取反，因此徽章的画布 y 区间映射为负值区间。
+        let left = badge.x.max(node.x) + 0.5;
+        let right = (badge.x + badge.z).min(node.x + node.width) - 0.5;
+        let a = -(badge.y.max(node.y) + 0.5);
+        let b = -((badge.y + badge.w).min(node.y + node.height) - 0.5);
+        let (lower, upper) = (a.min(b), a.max(b));
+        for triangle in indices.chunks(3) {
+            let centroid = triangle
+                .iter()
+                .map(|index| Vec3::from_array(points[*index as usize]))
+                .sum::<Vec3>()
+                / 3.;
+            assert!(
+                !(centroid.x > left
+                    && centroid.x < right
+                    && centroid.y > lower
+                    && centroid.y < upper),
+                "panel must not cover the 3D badge: {centroid:?}"
+            );
+        }
+        // 缺口只挖在徽章处：组底其余部分仍铺满左右两侧与底边。
+        let min_x = points.iter().map(|point| point[0]).fold(f32::MAX, f32::min);
+        let max_x = points.iter().map(|point| point[0]).fold(f32::MIN, f32::max);
+        assert!((min_x).abs() < 0.01 && (max_x - 500.).abs() < 0.01);
+        assert!(points
+            .iter()
+            .any(|point| point[0] < left && (point[1] + 300.).abs() < 0.01));
+        assert!(points
+            .iter()
+            .any(|point| point[0] > right && (point[1] + 300.).abs() < 0.01));
     }
 
     #[test]
@@ -367,6 +622,7 @@ mod tests {
                     &node,
                     node.group.as_ref().unwrap(),
                     selected,
+                    GROUP_Z,
                 );
                 let (opaque, blend) = geometry.into_layers();
                 let Some(bevy::mesh::VertexAttributeValues::Float32x3(points)) =
@@ -386,7 +642,9 @@ mod tests {
                             && -p[1] < layout.center.y + layout.radii.y - 2.),
                     "unexpected stroke through footer model in selected={selected} running={running}"
                 );
-                // No model-covering fill can enter the higher camera-order overlay.
+                // 组底现在由每组独立的透明 panel 实体绘制；共享 overlay 不得再携带覆盖模型的填充。
+                // `Geometry::into_layers` 对空 blend 仍产出不可见兜底三角形（顶点在 -1e6），
+                // 因此这里断言的是「没有真实填充」而不是属性缺失。
                 let Some(bevy::mesh::VertexAttributeValues::Float32x3(fill)) =
                     blend.attribute(Mesh::ATTRIBUTE_POSITION)
                 else {

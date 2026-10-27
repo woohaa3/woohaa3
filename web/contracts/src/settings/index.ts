@@ -202,6 +202,27 @@ export type SettingValue<K extends SettingKey> = ValueOfDefinition<(typeof SETTI
 /** 宿主自己的键有精确类型；插件声明的键按字符串索引读取。 */
 export type SettingsValues = { [K in SettingKey]?: SettingValue<K> } & { [key: string]: SettingPrimitive | undefined };
 
+/**
+ * 扩展启停的配置段前缀：`extensions.<extensionId>.enabled`。
+ *
+ * **所有**扩展共用这一段（不区分 site / host / browser-local）：启停是配置的一部分，
+ * 与 provider 参数同层同格式，由框架统一读取、校验与热重载。
+ *
+ * 这段是**动态键**（按扩展目录发现产生），不进静态定义表；解析时跳过，由
+ * `SettingsService.extensionToggles()` 单独读取。
+ */
+export const EXTENSION_CONFIG_PREFIX = "extensions";
+
+/**
+ * 是否为扩展启停键：`extensions.<id>.enabled`（恰好三段，且最后一段是 `enabled`）。
+ *
+ * 只认这一种形态，避免把插件自己登记的 `extensions.<plugin>.<field>` 段误判为动态键。
+ */
+export function isExtensionToggleKey(key: string): boolean {
+  const parts = key.split(".");
+  return parts.length === 3 && parts[0] === EXTENSION_CONFIG_PREFIX && parts[2] === "enabled";
+}
+
 export type SettingSource = "default" | "file" | "secrets" | "env";
 export type SettingsLayer = "file" | "secrets" | "env";
 
@@ -263,6 +284,10 @@ export function resolveSettings(layers: SettingsLayers, options: ResolveSettings
       return;
     }
     for (const [key, value] of flattenSettings(raw)) {
+      // 扩展启停键 `extensions.<id>.enabled` 是**动态键**（按扩展目录发现产生），由
+      // `SettingsService.extensionToggles()` 单独读取，不进定义表也不报未知。
+      // 只跳过这一种形态：`extensions.marketplace.*` 这类插件自己登记的段仍按定义表校验。
+      if (isExtensionToggleKey(key)) continue;
       if (!known(key)) {
         if (options.unknownKeys === "collect") unknown.add(key);
         else issues.push({ key, layer, message: "未知配置项" });
@@ -490,6 +515,25 @@ export type SettingPluginView = {
 
 
 
+/**
+ * 扩展启停状态：配置文件 `extensions.<extensionId>.enabled` 的投影。
+ *
+ * 事实来源是宿主配置文件，与扩展自己的参数配置同层同格式；消费方只投影它，不自带持久化。
+ * 未出现的 ID 表示使用默认值（由 manifest 的 `defaultEnabled` 决定，缺省为启用）。
+ */
+export type ExtensionToggles = Readonly<Record<string, boolean>>;
+
+/** @deprecated 旧名，等价于 `ExtensionToggles`；新代码用后者。 */
+export type FrontendExtensionPreferences = ExtensionToggles;
+
+/** 某个扩展在配置文件里的启停键：`extensions.<id>.enabled`。 */
+export function extensionToggleKey(extensionId: string): string {
+  return `${EXTENSION_CONFIG_PREFIX}.${extensionId}.enabled`;
+}
+
+/** @deprecated 旧名，等价于 `extensionToggleKey`；新代码用后者。 */
+export const frontendExtensionSettingKey = extensionToggleKey;
+
 export type SettingsSnapshot = {
   /** 安全模式；缺省或 null 表示正常启动。 */
   safeMode?: HostSafeModeView | null;
@@ -501,11 +545,32 @@ export type SettingsSnapshot = {
   plugins: SettingPluginView[];
   /** 宿主扩展点当前可用的提供者（例如已注册的存储后端）；缺省表示宿主没有暴露注册表。 */
   extensionPoints?: SettingsExtensionPoints;
+  /**
+   * 扩展的启停状态（配置文件 `extensions.<id>.enabled` 的投影）。
+   * 缺省表示宿主没有提供该项（旧宿主）：消费方按 manifest 默认值处理。
+   */
+  extensionToggles?: ExtensionToggles;
   files: { config: string; secrets: string };
 };
 
 export type SettingsWriteValue = string | number | boolean | null;
 export type SettingsWrite = { values: Record<string, SettingsWriteValue> };
+
+/**
+ * 解码 browser-local 插件启停写入：`{ extensionId, enabled }`。
+ *
+ * 与设置项写入分开表达：这类键是按目录发现动态产生的，不进静态定义表。
+ */
+export function decodeFrontendExtensionWrite(
+  body: unknown
+): { ok: true; value: { extensionId: string; enabled: boolean } } | { ok: false; message: string } {
+  if (!isJsonObject(body)) return { ok: false, message: "请求体必须是 JSON 对象" };
+  if (typeof body.extensionId !== "string" || body.extensionId.trim() === "") {
+    return { ok: false, message: "extensionId 必须是非空字符串" };
+  }
+  if (typeof body.enabled !== "boolean") return { ok: false, message: "enabled 必须是布尔值" };
+  return { ok: true, value: { extensionId: body.extensionId, enabled: body.enabled } };
+}
 
 export type SettingsWriteError = { code: "config-invalid"; message: string; issues: SettingsIssue[] };
 

@@ -194,4 +194,31 @@ describe("settings API", () => {
     const denied = await fetch(base, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ values: {} }) });
     expect(denied.status).toBe(401);
   });
+
+  it("扩展启停走 /extension-toggles：写配置文件并回显到快照", async () => {
+    const { base, dir } = await start(disabledAuth);
+    const put = await fetch(`${base}/extension-toggles`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ extensionId: "prompt-snippets", enabled: false })
+    });
+    expect(put.status).toBe(200);
+    const snapshot = (await put.json()) as SettingsSnapshot;
+    expect(snapshot.extensionToggles).toEqual({ "prompt-snippets": false });
+    // 落在宿主配置文件，而不是浏览器存储。
+    const text = await fsp.readFile(path.join(dir, "config.yml"), "utf8");
+    expect(text).toContain("extensions:");
+    expect(text).toContain("enabled: false");
+
+    // 请求体非法被拒绝，且不污染配置。
+    const bad = await fetch(`${base}/extension-toggles`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ extensionId: "prompt-snippets", enabled: "no" })
+    });
+    expect(bad.status).toBe(400);
+    const get = await fetch(base);
+    expect(((await get.json()) as SettingsSnapshot).extensionToggles).toEqual({ "prompt-snippets": false });
+  });
+
 });

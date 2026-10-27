@@ -94,6 +94,7 @@ export function installInteractionController(options: InteractionControllerOptio
     hoveredPort: null,
     hoveredEdgeId: null,
     hoveredVideoNode: null,
+    dropTargetGroupIds: [],
     wheelSource: INITIAL_WHEEL_SOURCE,
     viewportCommitTimer: null,
     lastNotifiedViewport: null
@@ -141,6 +142,7 @@ export function installInteractionController(options: InteractionControllerOptio
     hoveredEdgeId: state.hoveredEdgeId,
     hoveredHistory: state.hoveredHistory,
     pressedHistory: state.gesture.kind === "history-press" ? state.gesture : null,
+    dropTargetGroupIds: state.dropTargetGroupIds,
     dragAttach: attachProjectionRef.current?.() ?? null,
     aggregateConnect: aggregateProjectionRef.current?.() ?? null,
     compositeAssetReadyPlanes: compositeAssetMediaReady

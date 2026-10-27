@@ -67,8 +67,8 @@ export type SettingsPluginOptions = {
   catalog?: readonly CanvasExtensionMetadata[];
   /** 运行时可配置 optional allowlist。 */
   ids?: readonly string[];
-  /** 本次启动实际装配状态（composition root 注入）。 */
-  assembled?: Readonly<Record<string, boolean>>;
+  /** **当前**实际装配状态（composition root 注入）；传函数时每次读都是最新值。 */
+  assembled?: Readonly<Record<string, boolean>> | (() => Readonly<Record<string, boolean>>);
   /** 本次启动加载失败的 browser-local optional。 */
   failed?: ReadonlySet<string>;
   /** composition root 注入的偏好 store（所有权仍归调用方）。 */

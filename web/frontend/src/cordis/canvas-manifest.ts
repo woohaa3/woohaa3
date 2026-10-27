@@ -292,6 +292,7 @@ export const CANVAS_PLUGIN_CATALOG: readonly CanvasExtensionCatalogEntry[] = [
         ids: options.configurableOptionalIds ?? [],
         assembled: options.extensionManager?.assembled ?? {},
         ...(options.extensionManager?.failed ? { failed: options.extensionManager.failed } : {}),
+        ...(options.extensionManager?.failures ? { failures: options.extensionManager.failures } : {}),
         ...(options.extensionManager?.preferenceStore ? { preferenceStore: options.extensionManager.preferenceStore } : {}),
         ...(options.settingsAssembly ? { extensionSettings: options.settingsAssembly } : {})
       })

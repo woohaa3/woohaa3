@@ -62,3 +62,13 @@ continues to enforce its token/source checks.
 Authorization popups share the WebKit session but close independently of the application and local host. On macOS, `Info.plist` allows HTTP in WebKit content for user-configured remote servers and their login pages; the development app uses the same ATS policy. Native networking retains its default ATS policy.
 
 Optional Agent engines, recording, and model rendering use explicit runtime components instead of bundled binaries. CDN configuration, compatible local CLI selection and self-hosted artifact publishing are documented in [runtime components](RUNTIMES.md). The default standalone packaging uses the native desktop frontend and embeds only its startup page; the local host serves the interface.
+
+## 诊断日志上报
+
+原生菜单“上报诊断日志…”会在确认后打包本次运行和最近一次异常运行的日志；“导出诊断日志…”仍可只保存到本机。上报需要已启用服务端接入扩展并登录服务端。确认框展示目标服务端，原始错误输出可能包含路径和业务内容，取消不会上传。
+
+检测到上次异常退出时，在下次启动且服务端会话可用后提示一次；watchdog 检测到卡死恢复时也提示一次。每条普通错误不会触发整包上传。提示被取消后不重复弹出，仍可通过菜单主动上报。
+
+已确认的不可变诊断包暂存在用户数据目录 `logs/upload-queue`，与 `logs/runs` 日志分开。最多五份待上传、每份最多 32 MiB；临时失败按退避重试，最多八次，最多保留七天。任务绑定确认时的服务端与账号，切换账号或服务端后暂停，回到原账号与服务端后才恢复。完成或停止重试后弹出原生结果提示；完成后删除本机队列中的包体。
+
+文件经 `CreatePerformanceUpload` 获取私有 PUT 地址，直传对象存储后用同一个 key 调用 `CommitPerformanceUpload`；登记响应丢失时复用 key 重试，避免重复登记。会话令牌仅由本机宿主持有，不进入诊断包；对象上传不携带会话 Bearer。后台在档案列表中显示“诊断日志”、触发原因和运行 ID。完整分类需要部署含诊断档案元数据迁移的服务端及管理端；旧服务端不认识新增字段。

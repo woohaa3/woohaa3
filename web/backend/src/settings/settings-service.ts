@@ -14,9 +14,11 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { parseDocument, type Document } from "yaml";
 import {
+  EXTENSION_CONFIG_PREFIX,
   SETTING_DEFINITIONS,
   describeSettings,
   diffSettings,
+  extensionToggleKey,
   legacyEnvInUse,
   providerIdFromConfigPrefix,
   resolveSettings,
@@ -36,6 +38,16 @@ import {
 
 export const CONFIG_FILE_ENV = "WOOHAA3_CONFIG_FILE";
 export const SECRETS_FILE_ENV = "WOOHAA3_SECRETS_FILE";
+/**
+ * 扩展启停段的键前缀（`extensions.<id>.enabled`）。
+ *
+ * 所有扩展共用这一段——不区分 site / host / browser-local：启停就是配置的一部分，
+ * 与扩展自己的参数同层同格式。键由扩展目录发现动态产生，不进静态定义表；
+ * 写入走 `setExtensionToggle`。
+ */
+export { EXTENSION_CONFIG_PREFIX };
+/** 扩展 ID 形态：与目录名一致，禁止路径分隔符与 `..`（键会落到配置文件路径上）。 */
+const EXTENSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export type SettingsServiceOptions = {
   configFile: string;
@@ -95,15 +107,52 @@ export type SettingsService = SettingsReader & {
   reload(): Promise<SettingsUpdateResult>;
   /** 写配置项（普通项写配置文件、敏感项写密钥文件）；`null` 表示删除该项。 */
   update(patch: SettingsPatch): Promise<SettingsUpdateResult>;
+  /**
+   * 扩展的启停状态：`extensions.<id>.enabled`（**所有**扩展共用，不区分 site / host）。
+   *
+   * 这些键按扩展目录发现动态产生，不进静态定义表（静态表要求启动时穷举键），
+   * 但和其他配置一样落在同一个配置文件、同样走注释保留写入与热重载。
+   * 未出现的 ID 不在结果里（由消费方按 manifest 的 `defaultEnabled` 取默认值）。
+   */
+  extensionToggles(): Record<string, boolean>;
+  /** 写一个扩展的启停状态；写入配置文件并触发同一次热重载。 */
+  setExtensionToggle(extensionId: string, enabled: boolean): Promise<SettingsUpdateResult>;
   close(): void;
 };
 
-/** 配置文件位置：显式环境变量优先，否则放在 `web/` 下（已被 .gitignore 忽略）。 */
+/**
+ * 配置文件位置：显式环境变量优先，否则从 `cwd` 向上找仓库里的 `web/` 目录。
+ *
+ * 为什么不能直接 `path.resolve(cwd, "web/woohaa.config.yml")`：进程 cwd 不一定是仓库根
+ * （从 `web/backend` 直接启动、或用 `pnpm -C` 跑子包时都会变）。相对解析会在**错误的位置**
+ * 新建一份配置文件，而那份文件既不在 .gitignore 覆盖范围内、也不会被真正读取，表现为
+ * 「设置写进去了但没生效」。找不到仓库根时退回旧的相对路径行为。
+ */
 export function resolveSettingsFiles(env: Record<string, string | undefined>, cwd = process.cwd()): { configFile: string; secretsFile: string } {
+  const root = repoWebRoot(cwd);
   return {
-    configFile: path.resolve(cwd, env[CONFIG_FILE_ENV] || "web/woohaa.config.yml"),
-    secretsFile: path.resolve(cwd, env[SECRETS_FILE_ENV] || "web/woohaa.secrets.yml")
+    configFile: path.resolve(root, env[CONFIG_FILE_ENV] || path.join("web", "woohaa.config.yml")),
+    secretsFile: path.resolve(root, env[SECRETS_FILE_ENV] || path.join("web", "woohaa.secrets.yml"))
   };
+}
+
+/**
+ * 从 `cwd` 向上找到同时含 `web/` 与 `scripts/lib/extension-host.mjs` 的仓库根。
+ *
+ * 用这两个标记而不是只看 `web/`：子包目录（`web/backend`）自己也可能有同名子目录，
+ * 只认 `web/` 会把根定位到错误层级。找不到时返回原 `cwd`（保持旧行为，不强行失败）。
+ */
+function repoWebRoot(cwd: string): string {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    const webDir = path.join(dir, "web");
+    const hostModule = path.join(dir, "scripts", "lib", "extension-host.mjs");
+    if (fs.existsSync(webDir) && fs.existsSync(hostModule)) return dir;
+    // 已在 `web/` 内部（`web/backend`）：退到它的父目录再找。
+    const parent = path.dirname(dir);
+    if (parent === dir) return path.resolve(cwd);
+    dir = parent;
+  }
 }
 
 type RawLayers = { file: unknown; secrets: unknown };
@@ -239,6 +288,52 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
       };
     });
 
+  /**
+   * 读取 `extensions.frontend.<id>.enabled`。
+   *
+   * 直接从**文件层原文**读：这段是动态键，不进定义表，因此不参与 `resolveSettings` 的
+   * 类型校验，也不出现在 `unknownKeys` 里。值不是布尔就当作没配置（回退默认启用）。
+   */
+  const extensionToggles = (): Record<string, boolean> => {
+    const file = layers.file;
+    if (!file || typeof file !== "object" || Array.isArray(file)) return {};
+    const extensions = (file as Record<string, unknown>).extensions;
+    if (!extensions || typeof extensions !== "object" || Array.isArray(extensions)) return {};
+    const result: Record<string, boolean> = {};
+    for (const [extensionId, entry] of Object.entries(extensions)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const enabled = (entry as Record<string, unknown>).enabled;
+      if (typeof enabled === "boolean") result[extensionId] = enabled;
+    }
+    return result;
+  };
+
+  /**
+   * 写 `extensions.frontend.<id>.enabled`（与普通项同一次串行写入、同样保留注释与顺序）。
+   *
+   * 不经过 `update()` 的定义表校验路径：这里的键是运行期发现的，写之前只校验 ID 形态。
+   */
+  const setExtensionToggle = async (extensionId: string, enabled: boolean): Promise<SettingsUpdateResult> => {
+    if (!EXTENSION_ID_PATTERN.test(extensionId)) {
+      return { ok: false, issues: [{ key: EXTENSION_CONFIG_PREFIX, layer: "file", message: "插件 ID 非法" }] };
+    }
+    const target = options.configFile;
+    const doc = parseDocument(await readText(target));
+    if (doc.errors.length > 0) {
+      return { ok: false, issues: [{ key: EXTENSION_CONFIG_PREFIX, layer: "file", message: doc.errors[0]!.message }] };
+    }
+    doc.setIn(["extensions", extensionId, "enabled"], enabled);
+    await writeAtomic(target, doc.toString(), 0o644);
+    const next = await readLayers();
+    if ("issues" in next) return { ok: false, issues: next.issues };
+    layers = next.layers;
+    const { changed, settled } = apply(next.resolved);
+    await settled;
+    const key = extensionToggleKey(extensionId);
+    // 启停键不属于定义表，`diffSettings` 不会给出它；显式通知订阅者这次写入涉及哪个键。
+    log({ event: "extension-toggled", extensionId, enabled });
+    return { ok: true, changed: changed.includes(key) ? changed : [...changed, key] };
+  };
   const section = (prefix: string): SettingsSection => {
     const result: SettingsSection = {};
     const head = `${prefix}.`;
@@ -364,6 +459,8 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     section,
     reload: () => serialize(reload),
     update: (patch) => serialize(() => update(patch)),
+    extensionToggles,
+    setExtensionToggle: (extensionId, enabled) => serialize(() => setExtensionToggle(extensionId, enabled)),
     close() {
       if (debounce) clearTimeout(debounce);
       for (const watcher of watchers) watcher.close();

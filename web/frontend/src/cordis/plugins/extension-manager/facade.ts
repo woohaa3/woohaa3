@@ -7,7 +7,6 @@
  */
 import type { PluginIcon } from "@woohaa3/contracts";
 import { ExtensionPreferenceStore } from "../../services/extension-preferences/store.js";
-import type { PreferenceStorage } from "../../services/extension-preferences/codec.js";
 import {
   hasPendingExtensionChanges,
   isSiteRowBusy,
@@ -29,12 +28,20 @@ const EMPTY_PROVIDER_EXTENSIONS: ReadonlySet<string> = new Set();
 export type ExtensionManagerFacadeOptions = {
   catalog: readonly CanvasExtensionMetadata[];
   ids: readonly string[];
-  /** 本次启动实际装配状态；不在画布页时传入打开时的目标状态。 */
-  assembled: Readonly<Record<string, boolean>>;
+  /**
+   * 当前**实际装配**状态。
+   *
+   * 可以是静态快照（启动时），也可以是函数（热插拔后实时读取）——插件开关现在是
+   * 立即生效的，用启动快照会算出过时的 `pending-*` 状态，让面板显示「重启后生效」。
+   */
+  assembled: Readonly<Record<string, boolean>> | (() => Readonly<Record<string, boolean>>);
   failed?: ReadonlySet<string>;
+  /** 失败原因（extensionId → message）；只影响展示。 */
+  failures?: Readonly<Record<string, string>>;
   /** 注入时所有权仍归调用方（不随 facade 释放）。 */
   preferenceStore?: ExtensionPreferenceStore;
-  storage?: PreferenceStorage | null;
+  /** 写入宿主配置的实现；缺省时面板只读（保留最后成功值）。 */
+  persist?: (id: string, enabled: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
   refresh: () => void;
   site?: {
     metadata?: readonly { extensionId: string; name: string; description: string; directory?: string; icon?: PluginIcon }[];
@@ -50,14 +57,17 @@ export type ExtensionManagerFacadeOptions = {
 };
 
 export function createExtensionManagerFacade(options: ExtensionManagerFacadeOptions): { facade: ExtensionManagerFacade; notify: () => void; dispose: () => void } {
-  const { catalog, ids, assembled } = options;
+  const { catalog, ids } = options;
+  /** 每次读取都是当前装配状态：热插拔后无需重建 facade 也能看到真相。 */
+  const assembledOf = (): Readonly<Record<string, boolean>> =>
+    typeof options.assembled === "function" ? options.assembled() : options.assembled;
   const failed = options.failed ?? new Set<string>();
   const ownedStore = options.preferenceStore === undefined;
   const store =
     options.preferenceStore ??
     new ExtensionPreferenceStore({
       ids,
-      ...(options.storage !== undefined ? { storage: options.storage } : {})
+      ...(options.persist ? { persist: options.persist } : {})
     });
 
   const listeners = new Set<() => void>();
@@ -128,12 +138,17 @@ export function createExtensionManagerFacade(options: ExtensionManagerFacadeOpti
     const snapshot = store.getSnapshot();
     const desired = snapshot.preferences;
     return {
-      rows: projectExtensionManagerRows(catalog, { assembled, desired, failed }),
+      rows: projectExtensionManagerRows(catalog, {
+        assembled: assembledOf(),
+        desired,
+        failed,
+        ...(options.failures ? { failures: options.failures } : {})
+      }),
       siteRows: siteRows(),
       modelRows: modelRows(),
       siteManageable: canManageSite(),
       siteError: statusService?.getSnapshot().error ?? null,
-      pending: hasPendingExtensionChanges(catalog, { assembled, desired }),
+      pending: hasPendingExtensionChanges(catalog, { assembled: assembledOf(), desired }),
       persistenceMessage: snapshot.persistenceAvailable
         ? null
         : (snapshot.diagnostic?.detail ?? "浏览器拒绝持久化，设置无法保存"),
@@ -147,6 +162,8 @@ export function createExtensionManagerFacade(options: ExtensionManagerFacadeOpti
 
   const unsubscribeStatus = statusService?.subscribe(notify);
   const unsubscribeModels = generationModelsService?.subscribe(notify);
+  // 目标状态变化（面板开关、宿主配置热更新）也要重建快照：否则行状态与 pending 停在旧值。
+  const unsubscribePreferences = store.subscribe(notify);
 
   const facade: ExtensionManagerFacade = {
     getSnapshot: () => (cached ??= compute()),
@@ -212,6 +229,7 @@ export function createExtensionManagerFacade(options: ExtensionManagerFacadeOpti
     facade,
     notify,
     dispose() {
+      unsubscribePreferences();
       if (ownedStore) store.dispose();
       unsubscribeStatus?.();
       unsubscribeModels?.();

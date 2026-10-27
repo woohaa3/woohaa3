@@ -67,4 +67,6 @@ pub mod diagnostics;
 
 mod diagnostic_export;
 
+mod diagnostic_upload;
+
 mod diagnostic_history;

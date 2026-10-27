@@ -10,7 +10,7 @@
  *
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Context, type Fiber } from "@deepseek-ai/cordis";
 import type { SlotsService } from "@woohaa3/frontend/extension-api";
 import { remoteServerExtension, remoteServerSettingsExtension } from "../src/frontend/index.js";
@@ -81,6 +81,40 @@ describe("remote-server 主插件", () => {
     // pluginId 必须与站点目录的 extensionId 一致，否则设置里认不到归属。
     expect(panels[0]?.pluginId).toBe(REMOTE_SERVER_EXTENSION_ID);
     expect(panels[0]?.owner).toBe(REMOTE_SERVER_EXTENSION_ID);
+  });
+
+  it("设置能力就绪才注册徽标，且徽标真的可点（装配期快照回归）", async () => {
+    const { ctx, fiber, registered } = boot();
+    disposers.push(() => ctx.fiber.dispose());
+    await fiber.await();
+
+    // 装配期：settings 插件还没提供能力。这里绝不能先注册一个只读 span 把状态固化下来
+    // （真实故障就是它：徽标永久渲染成 span，点不动、文字可选中）。
+    expect(registered.get("canvas.topbar") ?? []).toHaveLength(0);
+
+    const open = vi.fn(async () => ({ ok: true as const }));
+    const disposeCapability = ctx.provide("settingsOpen" as never, { open } as never);
+    for (let i = 0; i < 40; i++) {
+      if ((registered.get("canvas.topbar") ?? []).length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const badges = registered.get("canvas.topbar") ?? [];
+    expect(badges).toHaveLength(1);
+    // 贡献拿到的必须是活引用：点击时才打到当前能力上，而不是装配期的快照。
+    const element = (badges[0] as unknown as { render: () => { props: { onOpen?: () => void } } }).render();
+    expect(typeof element.props.onOpen).toBe("function");
+    element.props.onOpen?.();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith({ section: "plugins", pluginId: REMOTE_SERVER_EXTENSION_ID });
+
+    // 生命周期跟着能力走：能力撤销后贡献一并注销，不留一个点了没反应的按钮。
+    disposeCapability();
+    for (let i = 0; i < 40; i++) {
+      if ((registered.get("canvas.topbar") ?? []).length === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(registered.get("canvas.topbar") ?? []).toHaveLength(0);
   });
 
   it("运行中注册画布目录条目动作，插件释放后一并注销", async () => {

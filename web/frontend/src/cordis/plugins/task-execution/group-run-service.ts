@@ -45,12 +45,15 @@ export type GroupRunServiceOptions = {
   /** 提交单个叶子（复用单节点 `SubmitCoordinator`）。 */
   submit: SubmitCoordinator["submit"];
   /** 每批提交结束回调（供宿主给出结果摘要）。 */
+  textPrecheck?: (canvas: ServerCanvas, nodeId: string) => { eligible: true; input: import("../../contract/agent-conversation.js").AgentConversationSubmitInput } | { eligible: false; reason: string };
+  submitText?: (input: import("../../contract/agent-conversation.js").AgentConversationSubmitInput) => Promise<{ ok: boolean; error?: string }>;
   onSummary?: (summary: GroupRunSummary) => void;
 };
 
 type FrozenMember = {
   nodeId: string;
   /** 冻结时的输入快照（模型身份与参数）；请求前仍复核当前资格。 */
+  textInput?: import("../../contract/agent-conversation.js").AgentConversationSubmitInput;
   snapshot: { modelKey: string; prompt: string; parameters: Record<string, unknown>; expectedModelType: CanvasTaskModelType };
 };
 
@@ -103,22 +106,21 @@ export function createGroupRunService(options: GroupRunServiceOptions): GroupRun
     if (!writable) return { ...disabled, reason: "当前会话不可写（画布只读）" };
 
     const catalogState = options.catalogState();
-    if (catalogState.status === "loading") {
-      return { ...disabled, reason: "任务目录尚未加载" };
-    }
-    if (catalogState.status === "error") {
-      return { ...disabled, reason: `任务目录加载失败：${catalogState.error}` };
-    }
-    const catalog = catalogState.catalog;
-    if (!catalog.available) {
-      return { ...disabled, reason: catalog.reason ?? "任务目录不可用" };
-    }
+    const catalog = catalogState.status === "ready" ? catalogState.catalog : null;
 
     const leafIds = collectGroupLeafDescendants(canvas.document.nodes, groupNodeId);
     const skipped: GroupRunPreviewEntry[] = [];
     let count = 0;
     let running = 0;
     for (const nodeId of leafIds) {
+      const text = canvas.document.nodes.find(node => node.id === nodeId)?.type === "text";
+      if (text) {
+        if (options.isBusy?.(nodeId) || reservedLeaves.has(leafKey(options.canvasId(), nodeId))) { skipped.push({ nodeId, reason: SKIP_RUNNING, category: "running" }); running++; continue; }
+        const result = options.textPrecheck?.(canvas, nodeId);
+        if (result?.eligible) count++;
+        else skipped.push({ nodeId, reason: result?.reason ?? "请为文本成员连接助手", category: "input-missing" });
+        continue;
+      }
       const result = resolveLeafRunPrecheck(precheckInput(canvas, nodeId, catalog, catalogState));
       if (result.eligible) {
         count += 1;
@@ -136,7 +138,7 @@ export function createGroupRunService(options: GroupRunServiceOptions): GroupRun
         ? "分组内没有可执行成员"
         : running === leafIds.length
           ? "成员均在运行中"
-          : "没有可提交的任务（检查提示词、模型与参考素材）";
+          : catalogState.status === "loading" ? "任务目录尚未加载" : catalogState.status === "error" ? `任务目录加载失败：${catalogState.error}` : "没有可提交的任务（检查提示词、模型与参考素材）";
       return { groupId: groupNodeId, count: 0, skipped, enabled: false, reason };
     }
     return { groupId: groupNodeId, count, skipped, enabled: true };
@@ -156,6 +158,13 @@ export function createGroupRunService(options: GroupRunServiceOptions): GroupRun
     const members: FrozenMember[] = [];
     const skipped: Array<{ nodeId: string; reason: string }> = [];
     for (const nodeId of leafIds) {
+      if (canvas.document.nodes.find(node => node.id === nodeId)?.type === "text") {
+        const result = options.textPrecheck?.(canvas, nodeId);
+        if (options.isBusy?.(nodeId)) skipped.push({ nodeId, reason: SKIP_RUNNING });
+        else if (result?.eligible && options.submitText) members.push({ nodeId, textInput: structuredClone(result.input), snapshot: { modelKey: "", prompt: result.input.entry.prompt, parameters: {}, expectedModelType: "language" } });
+        else skipped.push({ nodeId, reason: result && !result.eligible ? result.reason : "请为文本成员连接助手" });
+        continue;
+      }
       const result = resolveLeafRunPrecheck(precheckInput(canvas, nodeId, catalog, catalogState));
       if (!result.eligible || !result.input) {
         skipped.push({ nodeId, reason: result.reason ?? "不可提交" });
@@ -199,6 +208,7 @@ export function createGroupRunService(options: GroupRunServiceOptions): GroupRun
       options.onSummary?.(summary);
       return summary;
     }
+    summary.skipped.push(...frozen.skipped);
     const members = frozen.members;
 
     submittingGroups.add(key);
@@ -220,6 +230,12 @@ export function createGroupRunService(options: GroupRunServiceOptions): GroupRun
         reservedLeaves.add(leaf);
         emit();
         try {
+          if (member.textInput && options.submitText) {
+            const outcome = await options.submitText(member.textInput);
+            if (outcome.ok) summary.accepted.push(member.nodeId);
+            else summary.failed.push({ nodeId: member.nodeId, error: outcome.error ?? "文本提交失败" });
+            continue;
+          }
           const outcome = await options.submit({
             origin,
             nodeId: member.nodeId,
@@ -277,6 +293,7 @@ export function createGroupRunService(options: GroupRunServiceOptions): GroupRun
     // 统一运行状态阻止重复提交（不依赖滞后的 canonical taskStatus）。
     if (options.isBusy?.(member.nodeId)) return { ok: false, reason: SKIP_RUNNING };
     // 模型可用性、参数与参考素材：复用同一纯预检（当前目录/规范数据，不用过期快照绕过）。
+    if (member.textInput) return { ok: true };
     const catalogState = options.catalogState();
     const catalog = catalogState.status === "ready" ? catalogState.catalog : null;
     const current = resolveLeafRunPrecheck(precheckInput(canvas, member.nodeId, catalog, catalogState));
