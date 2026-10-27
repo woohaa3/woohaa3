@@ -449,8 +449,6 @@ it("总览不展示诊断状态或会话历史入口", async () => {
   const f = await render([api, local], true, undefined, { canvasId: "canvas" }, { listConversations });
   expect(f.el.textContent).not.toContain("诊断与历史");
   expect(f.el.textContent).not.toContain("待验证");
-  expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个已配置");
-  expect(listConversations).not.toHaveBeenCalled();
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个可用");
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个提供商");
   expect(listConversations).not.toHaveBeenCalled();

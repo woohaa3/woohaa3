@@ -85,7 +85,7 @@ it("切换数据空间隔离旧响应；未确认身份时卸载，贡献撤销�
   expect(f.el.textContent).toContain("new-owner");
   await act(async () => f.remove());
   expect(f.el.textContent).toContain("历史模块未装配"); expect(f.el.textContent).not.toContain("new-owner");
-  await f.click('[data-page="diagnostics"]'); expect(f.listConversations).not.toHaveBeenCalled();
+  await f.click('[data-page="sources"]'); expect(f.listConversations).not.toHaveBeenCalled();
 });
 
 it("无画布不查询；缺少助手目录不影响历史，显式定位不被迟到目录抢走", async () => {
@@ -109,7 +109,7 @@ it("Pad 返回列表、离页和关闭卸载播放器并暂停，保持选择和
 });
 
 
-it("历史贡献失败可重试且不影响诊断；目录失败不阻断历史", async () => {
+it("历史贡献失败可重试且目录失败不阻断历史", async () => {
   const f = await fixture();
   f.service.listConnections.mockRejectedValue(new Error("连接离线"));
   f.service.listServiceConnections.mockRejectedValue(new Error("目录离线"));
@@ -118,9 +118,9 @@ it("历史贡献失败可重试且不影响诊断；目录失败不阻断历史"
   const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
   await act(async () => { f.slots.register("ai-center.generation-history", { id: "broken", owner: "test", priority: -1, render: () => { if (broken) throw new Error("模块失败"); return <p>模块已恢复</p>; } }); });
   expect(f.el.textContent).toContain("生成历史模块加载失败");
-  await f.click('[data-page="diagnostics"]');
-  expect(f.el.querySelector('[data-page="diagnostics"]')?.getAttribute("data-state")).toBe("active");
-  expect(f.el.querySelector('[data-ai-page="diagnostics"]')?.textContent).toContain("连接读取失败");
+  expect(f.el.textContent).toContain("连接读取失败");
+  await f.click('[data-page="sources"]');
+  expect(f.el.querySelector('[data-page="sources"]')?.getAttribute("data-state")).toBe("active");
   await f.click('[data-page="generation-history"]'); broken = false;
   const retry = [...f.el.querySelectorAll("button")].find(button => button.textContent === "重新加载")!;
   await act(async () => retry.click()); expect(f.el.textContent).toContain("模块已恢复");
