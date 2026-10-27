@@ -168,6 +168,17 @@ export function screenExtension({ extension, repoRoot, isolate, rejected, logger
     logger({ event: "extension-managed-rejected", extensionId: extension.extensionId, directory: extension.dir, code: error?.code, message: error?.message });
     return null;
   }
+  // deprecated-declaration：用了废弃字段就告警，不阻断装载（归一已在校验里完成）。
+  for (const deprecation of descriptor?.deprecations ?? []) {
+    logger({
+      event: "extension-declaration-deprecated",
+      extensionId: extension.extensionId,
+      directory: extension.dir,
+      field: deprecation.field,
+      replacement: deprecation.replacement,
+      message: `${deprecation.field} 已废弃，请改用 ${deprecation.replacement}`
+    });
+  }
   const violation = untrustedRootViolation(extension, descriptor);
   if (violation) {
     // 可写根是运维直接放目录的位置：与 EXTENSION_SLOT_WRITABLE_ROOT 一致 fail-fast。

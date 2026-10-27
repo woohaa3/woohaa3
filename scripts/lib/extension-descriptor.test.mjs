@@ -223,6 +223,25 @@ test("hostPlugin.features 接受 marketplace-source", () => {
   assert.equal(validateExtensionDescriptor({ ...MINIMAL, hostPlugin: { module: "./backend", factory: "createSource", features: ["marketplace-source"] } }).ok, true);
 });
 
+// deprecated-declaration：`hostPlugin.kind` 过渡期用例。删除废弃别名时一并删掉这两条。
+test("hostPlugin.kind 仍被接受：归一成 features 并报告废弃", () => {
+  const validated = validateExtensionDescriptor({ ...MINIMAL, hostPlugin: { module: "./backend", factory: "createSource", kind: "provider" } });
+  assert.equal(validated.ok, true);
+  assert.deepEqual(validated.value.hostPlugin.features, ["provider"]);
+  assert.equal("kind" in validated.value.hostPlugin, false);
+  assert.deepEqual(validated.deprecations, [{ field: "hostPlugin.kind", replacement: "hostPlugin.features" }]);
+});
+
+test("hostPlugin.kind 与 features 同时声明：报错（不猜哪个优先）", () => {
+  const validated = validateExtensionDescriptor({
+    ...MINIMAL,
+    hostPlugin: { module: "./backend", factory: "createSource", kind: "provider", features: ["storage"] }
+  });
+  assert.equal(validated.ok, false);
+  assert.ok(validated.errors.some((error) => error.includes("不能与")), validated.errors.join(", "));
+});
+
+
 test("semver 工具：isSemver 与 range 子集", () => {
   assert.equal(isSemver("1.2.3"), true);
   assert.equal(isSemver("1.2"), false);

@@ -31,6 +31,25 @@ export const EXTENSION_ROUTE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE",
 export const EXTENSION_HOST_PLUGIN_FEATURES = ["provider", "storage", "marketplace-source"];
 
 /**
+ * 已废弃、但仍被接受并自动归一的声明字段。
+ *
+ * 保留它们只是为了给**已有扩展**一个过渡期（外部 / 市场扩展不在本仓，改不到）。
+ * 这里只放「读进来就归一」的字段，不复用旧语义：归一后下游只认新字段。
+ *
+ * **删除清单**（检索标记 `deprecated-declaration`）：
+ * 1. 本表里对应条目；
+ * 2. `validateExtensionDescriptor` 里 `hostPlugin.kind` 的归一分支；
+ * 3. `extension-descriptor.test.mjs` 里 `hostPlugin.kind` 的两条用例；
+ * 4. `docs/code-map/extensions.md` 中关于过渡期的说明。
+ *
+ * TODO(remove-after: 2026-12-31)
+ */
+export const EXTENSION_DEPRECATED_DECLARATIONS = Object.freeze({
+  // deprecated-declaration
+  "hostPlugin.kind": "hostPlugin.features"
+});
+
+/**
  * 宿主自身满足的运行环境（change: 2026-10-21-add-extension-marketplace-point，design D4）。
  *
  * `hostAbi`：宿主后端 SDK ABI（`HostExtensionContext` 形状）；`sdkAbi`：浏览器 SDK ABI，与
@@ -178,6 +197,8 @@ function isNonEmptyString(value) {
  */
 export function validateExtensionDescriptor(value) {
   const errors = [];
+  /** 本次声明里用到的废弃字段（`{ field, replacement }`）；调用方据此告警。 */
+  const deprecations = [];
   if (!isPlainObject(value)) return { ok: false, errors: ["声明必须是 JSON 对象"] };
 
   for (const key of unknownKeys(value, EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS)) {
@@ -280,19 +301,35 @@ export function validateExtensionDescriptor(value) {
     if (!isPlainObject(hostPlugin)) {
       errors.push("hostPlugin 必须是对象");
     } else {
-      for (const key of unknownKeys(hostPlugin, ["module", "factory", "features", "order", "optional"])) errors.push(`hostPlugin 未知字段：${key}`);
+      for (const key of unknownKeys(hostPlugin, ["module", "factory", "features", "kind", "order", "optional"])) errors.push(`hostPlugin 未知字段：${key}`);
       const moduleValue = hostPlugin.module ?? "./backend";
       if (!isNonEmptyString(moduleValue) || !PACKAGE_SUBPATH.test(moduleValue)) {
         errors.push("hostPlugin.module 必须是包内相对子路径（如 ./backend）");
       }
       if (!isNonEmptyString(hostPlugin.factory) || !IDENTIFIER.test(hostPlugin.factory)) errors.push("hostPlugin.factory 必须是导出函数名");
-      // `roles` 可省略（＝不承担任何具名角色）或为数组；重复项视为声明错误。
-      if (hostPlugin.features !== undefined) {
-        if (!Array.isArray(hostPlugin.features)) {
+      // ── deprecated-declaration：`hostPlugin.kind`（单值）已由 `hostPlugin.features` 取代 ──
+      // 删除步骤：删这段、`EXTENSION_DEPRECATED_DECLARATIONS` 里的条目、对应的两条测试。
+      if (hostPlugin.kind !== undefined) {
+        const replacement = EXTENSION_DEPRECATED_DECLARATIONS["hostPlugin.kind"];
+        if (hostPlugin.features !== undefined) {
+          errors.push(`hostPlugin.kind 已废弃，不能与 ${replacement} 同时声明`);
+        } else if (typeof hostPlugin.kind !== "string" || !EXTENSION_HOST_PLUGIN_FEATURES.includes(hostPlugin.kind)) {
+          errors.push(`hostPlugin.kind 取值必须是 ${EXTENSION_HOST_PLUGIN_FEATURES.join(" / ")}（已废弃，改用 ${replacement}）`);
+        } else {
+          // 归一成新字段：下游只认 `features`，不再读 `kind`。
+          value.hostPlugin = { ...hostPlugin, features: [hostPlugin.kind] };
+          delete value.hostPlugin.kind;
+          deprecations.push({ field: "hostPlugin.kind", replacement });
+        }
+      }
+      const declaredFeatures = value.hostPlugin?.features ?? hostPlugin.features;
+      // `features` 可省略（＝不提供具名功能面）或为数组；重复项视为声明错误。
+      if (declaredFeatures !== undefined) {
+        if (!Array.isArray(declaredFeatures)) {
           errors.push("hostPlugin.features 必须是数组");
         } else {
           const seen = new Set();
-          for (const feature of hostPlugin.features) {
+          for (const feature of declaredFeatures) {
             if (!EXTENSION_HOST_PLUGIN_FEATURES.includes(feature)) {
               errors.push(`hostPlugin.features 取值必须是 ${EXTENSION_HOST_PLUGIN_FEATURES.join(" / ")}`);
               continue;
@@ -444,7 +481,7 @@ export function validateExtensionDescriptor(value) {
   }
 
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, value };
+  return { ok: true, value, deprecations };
 }
 
 /**
@@ -466,6 +503,11 @@ export function loadExtensionDescriptor(extension, { repoRoot } = {}) {
   const validated = validateExtensionDescriptor(parsed);
   if (!validated.ok) {
     throw new ExtensionScanError("EXTENSION_DESCRIPTOR_INVALID", `${relative} 声明无效：\n  ${validated.errors.join("\n  ")}`);
+  }
+  // 归一后的声明不该带 `deprecations` 一起流动（它会让 JSON 比较与快照变化）；
+  // 用不可枚举属性挂上去，装载器按需读取并告警。
+  if (validated.deprecations.length > 0) {
+    Object.defineProperty(validated.value, "deprecations", { value: validated.deprecations, enumerable: false });
   }
   if (validated.value.extensionId !== extension.extensionId) {
     throw new ExtensionScanError(
