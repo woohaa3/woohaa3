@@ -11,7 +11,8 @@
 import { Component, useEffect, useMemo, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
 import { Button } from "../../../../shared/ui/Button.js";
-import { BackIcon } from "../../../../shared/ui/icons.js";
+import { Switch } from "../../../../shared/ui/Switch.js";
+import { BackIcon, CopyIcon } from "../../../../shared/ui/icons.js";
 import { appPublicUrl } from "../../../services/app-base-path.js";
 import type { BackendSettingsStore } from "../backend-settings-store.js";
 import {
@@ -19,6 +20,8 @@ import {
   diagnosticsOf,
   inactiveStateOf,
   indexPlugins,
+  isManageable,
+  isSiteRowRunning,
   modelsOf,
   versionLabel,
   type PluginSettingsGroup
@@ -112,6 +115,41 @@ export function PluginConfigContent({
   const inactive = inactiveStateOf(index, group);
   const diagnostics = diagnosticsOf(index, group);
   const models = modelsOf(index, group);
+  const siteRow = index.siteRows.get(group.id);
+  const browserRow = index.browserRows.get(group.id);
+  const statusLabel = siteRow?.busy
+    ? "正在应用…"
+    : siteRow
+      ? siteRow.actualStateLabel
+      : browserRow
+        ? browserRow.status === "failed"
+          ? "异常"
+          : browserRow.status.startsWith("pending")
+            ? "重启后生效"
+            : browserRow.status === "disabled"
+              ? "已停用"
+              : "本次已启用"
+        : inactive
+          ? "未运行"
+          : "运行中";
+  const statusTone = siteRow
+    ? siteRow.busy || siteRow.actualState === "degraded"
+      ? "warning"
+      : isSiteRowRunning(siteRow.actualState)
+        ? "success"
+        : "muted"
+    : browserRow
+      ? browserRow.status === "failed" || browserRow.status.startsWith("pending")
+        ? "warning"
+        : browserRow.status === "disabled"
+          ? "muted"
+          : "success"
+      : inactive
+        ? "muted"
+        : "success";
+  const enabledModels = models.filter((model) => model.enabled).length;
+  const manageable = isManageable(index, group);
+  const directory = group.directory;
   // 刷新入口由 Provider 插件自己声明（路径由插件注册、鉴权）：宿主不硬编码具体 Provider。
   const modelRefresh = group.modelRefresh;
   const endpointEntries = group.entries.filter(isArkEndpointEntry);
@@ -136,22 +174,66 @@ export function PluginConfigContent({
         }
       />
 
-      {group.directory ? (
-        <p className="plugin-directory" title={group.directory}>
-          <span>所在目录</span><code>{group.directory}</code>
-        </p>
-      ) : null}
-      <div className="plugin-config__status">
-        <PluginStateControl
-          index={index}
-          group={group}
-          manager={manager}
-          store={store}
-          siteManageable={view.siteManageable}
-          testId={`plugin-config-switch-${group.id}`}
-        />
-      </div>
-      {group.description ? <p className="settings-page__hint">{group.description}</p> : null}
+      <section className="plugin-overview" data-testid={`plugin-overview-${group.id}`}>
+        <div className="plugin-overview__top">
+          <span className="plugin-overview__status" data-tone={statusTone}>
+            <i />{statusLabel}
+          </span>
+          <div className="plugin-overview__controls">
+            {manageable ? (
+              <PluginStateControl
+                index={index}
+                group={group}
+                manager={manager}
+                store={store}
+                siteManageable={view.siteManageable}
+                testId={`plugin-config-switch-${group.id}`}
+              />
+            ) : (
+              <Switch
+                checked={!inactive}
+                disabled
+                onCheckedChange={() => undefined}
+                aria-label={`${group.label} 的启停由宿主管理，不能单独停用`}
+                title="内置扩展由宿主管理，不能单独停用"
+                testId={`plugin-config-switch-${group.id}`}
+              />
+            )}
+          </div>
+        </div>
+        <p className="plugin-overview__description">{group.description || "暂无说明。"}</p>
+        <div className="plugin-overview__stats">
+          <div className="plugin-overview__stat">
+            <strong>{group.entries.length}</strong>
+            <span>配置项</span>
+          </div>
+          {models.length > 0 ? (
+            <div className="plugin-overview__stat">
+              <strong>{enabledModels}/{models.length}</strong>
+              <span>已启用模型</span>
+            </div>
+          ) : null}
+          <div className="plugin-overview__stat">
+            <strong>{group.installed?.managed ? "市场" : "内置"}</strong>
+            <span>安装来源</span>
+          </div>
+        </div>
+        {directory ? (
+          <div className="plugin-overview__path" title={directory}>
+            <span>安装位置</span>
+            <code>{directory}</code>
+            <button
+              type="button"
+              className="plugin-overview__copy"
+              aria-label="复制安装路径"
+              title="复制安装路径"
+              onClick={() => void navigator.clipboard?.writeText(directory)}
+            >
+              <CopyIcon size={13} />
+            </button>
+          </div>
+        ) : null}
+      </section>
       {inactive ? (
         <p className="settings-page__hint" data-testid={`plugin-config-inactive-${group.id}`}>
           该插件当前未运行（{inactive}）：这里保存的配置要等启用后才生效。
