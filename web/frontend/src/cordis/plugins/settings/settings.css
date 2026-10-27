@@ -1184,3 +1184,89 @@
 	border-color: var(--mc-border);
 	color: var(--mc-text-muted);
 }
+
+/* 行高统一：标题 + 说明/配置元信息固定两行，右侧状态与开关始终居中对齐。 */
+.plugin-row {
+	min-height: 60px;
+	align-items: center;
+	line-height: 1.4;
+	padding: 8px;
+}
+.plugin-row__main {
+	gap: 3px;
+	min-height: 38px;
+	justify-content: center;
+}
+.plugin-row__title { flex-wrap: nowrap; }
+.plugin-row__name { flex: 0 1 auto; min-width: 0; }
+.plugin-row__title .plugin-card__badge { flex: none; }
+.plugin-row__subline {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	min-width: 0;
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--mc-text-muted);
+}
+.plugin-row__description {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: block;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.plugin-row__meta {
+	flex: 0 0 auto;
+	margin: 0;
+	font-size: 11px;
+	line-height: 1.45;
+	white-space: nowrap;
+}
+.plugin-row__side { align-self: center; min-width: 112px; }
+
+@media (max-width: 900px) {
+	.plugin-row__description {
+		display: block;
+		white-space: nowrap;
+		-webkit-line-clamp: unset;
+	}
+}
+
+/* 固定三行：标题 / 说明 / 配置规模；说明和元信息都只占一行，不因内容缺失变矮。 */
+.plugin-row {
+	min-height: 76px;
+	padding: 8px;
+}
+.plugin-row__main {
+	gap: 2px;
+	min-height: 58px;
+}
+.plugin-row__description {
+	display: block;
+	flex: none;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	line-height: 1.45;
+}
+.plugin-row__meta {
+	display: block;
+	flex: none;
+	margin: 0;
+	font-size: 11px;
+	line-height: 1.45;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.plugin-row__subline { display: none; }
+
+@media (max-width: 900px) {
+	.plugin-row__description {
+		display: block;
+		white-space: nowrap;
+		-webkit-line-clamp: unset;
+	}
+}

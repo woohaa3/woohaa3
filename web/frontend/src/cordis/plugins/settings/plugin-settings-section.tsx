@@ -409,12 +409,18 @@ function PluginRow({
               <span className="plugin-card__badge is-managed" data-testid={`settings-plugin-managed-${group.id}`}>已安装</span>
             ) : null}
           </span>
-          {group.description ? <span className="plugin-row__description">{group.description}</span> : null}
-          <span className="plugin-row__meta">{configCountLabel(index, group, hasSettingsPanel)}</span>
+          <span className="plugin-row__description">{group.description || "暂无说明"}</span>
+          <span className="plugin-row__meta">{configCountLabel(index, group, hasSettingsPanel) || "—"}</span>
         </span>
       </button>
       <div className="plugin-row__side">
-        <span className="plugin-row__status" data-tone={status.tone}><i />{status.label}</span>
+        <span
+          className="plugin-row__status"
+          data-tone={status.tone}
+          {...(diagnostics.length > 0 ? { title: diagnostics.join("；") } : {})}
+        >
+          <i />{status.label}
+        </span>
         {group.version ? (
           <span className="plugin-row__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`settings-plugin-version-${group.id}`}>
             {versionLabel(group.version)}
@@ -438,9 +444,6 @@ function PluginRow({
         <p className="plugin-directory plugin-row__directory" title={group.directory}>
           <span>所在目录</span><code>{group.directory}</code>
         </p>
-      ) : null}
-      {diagnostics.length > 0 ? (
-        <p className="plugin-row__diagnostics" role="status">{diagnostics.join("；")}</p>
       ) : null}
       <ExtensionFaultNotice extensionId={group.id} />
       {managed ? <ManagedExtensionDetails installed={group.installed} controller={managed} canManage={store.canManage()} /> : null}
