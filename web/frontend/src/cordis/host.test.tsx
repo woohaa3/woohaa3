@@ -519,7 +519,7 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
         </RuntimeProvider>
       );
       // 等待真实按需模块加载；两个微任务不足以覆盖动态 import。
-      await import("./plugins/task-execution/authoring-model-generate-host.js");
+      await import("./plugins/task-execution/authoring-model-generate-panel.js");
       await import("./plugins/task-execution/authoring-generate-panel.js");
     });
     return { el, listedAdapters, slots, removeContributions };
