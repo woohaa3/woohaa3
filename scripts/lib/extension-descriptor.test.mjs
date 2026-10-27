@@ -13,6 +13,7 @@ import path from "node:path";
 import {
   HOST_ENGINES,
   checkEnginesCompatible,
+  contentDeclarationCollisions,
   isSemver,
   satisfiesRange,
   validateExtensionDescriptor,
@@ -217,6 +218,29 @@ test("version 非 semver、engines 缺字段或 range 非法：失败并指出�
 test("migrate 只做格式校验（是否允许由受管预检决定）", () => {
   assert.equal(validateExtensionDescriptor({ ...MINIMAL, migrate: { module: "./backend", export: "migrateData" } }).ok, true);
   assert.match(errorsOf({ ...MINIMAL, migrate: { module: "https://x", export: "m" } }), /migrate\.module 必须是包内相对子路径/);
+});
+
+test("content 声明校验字段格式，并拒绝跨扩展重名", () => {
+  const content = {
+    ownedFields: ["filmSetContent"],
+    ownedWireFields: ["shotPreview"],
+    routePrefix: "import",
+    mcpTools: ["import_content"],
+    targetModes: ["film-set"],
+    eventOwners: ["film-set"]
+  };
+  assert.equal(validateExtensionDescriptor({ ...MINIMAL, content }).ok, true);
+  assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["film-set"] } }), /ownedFields/);
+  assert.match(errorsOf({ ...MINIMAL, content: { mcpTools: ["Import"] } }), /mcpTools/);
+  assert.match(errorsOf({ ...MINIMAL, content: { routePrefix: "/import" } }), /routePrefix/);
+  assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["title", "title"] } }), /ownedFields 不得重复/);
+  assert.match(errorsOf({ ...MINIMAL, content: { extra: true } }), /content 未知字段：extra/);
+  const collisions = contentDeclarationCollisions([
+    { extensionId: "film-set", directory: "a", descriptor: { content } },
+    { extensionId: "game-furnace", directory: "b", descriptor: { content: { ownedFields: ["filmSetContent"], mcpTools: ["other_tool"] } } }
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.match(collisions[0].message, /ownedFields「filmSetContent」/);
 });
 
 test("hostPlugin.kind 接受 marketplace-source", () => {

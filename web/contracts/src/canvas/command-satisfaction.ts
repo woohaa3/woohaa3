@@ -9,6 +9,7 @@ import { establishItemMotionAdapter } from "./film-set-content.js";
  * 纯函数：输入一次提交前后的规范画布与命令列表，输出是否全部满足。
  */
 import type { CanvasCommand } from "./commands.js";
+import type { ContentContributionResolver } from "./content-contribution.js";
 import type { EditOperation } from "./edit-command.js";
 import { decodeEditApplyCommand } from "./edit-command.js";
 import type { ServerCanvas } from "./domain/index.js";
@@ -30,13 +31,14 @@ function findNode(canvas: ServerCanvas, nodeId: string) {
  */
 export function isCanvasCommandBatchSatisfied(
   canvas: ServerCanvas,
-  commands: readonly CanvasCommand[]
+  commands: readonly CanvasCommand[],
+  content?: ContentContributionResolver
 ): boolean {
-  return commands.every((command) => isCanvasCommandSatisfied(canvas, command));
+  return commands.every((command) => isCanvasCommandSatisfied(canvas, command, content));
 }
 
 /** 单条命令的后置条件判定。 */
-export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCommand): boolean {
+export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCommand, content?: ContentContributionResolver): boolean {
   switch (command.type) {
     case "edit.apply": {
       const decoded = decodeEditApplyCommand(command);
@@ -109,6 +111,16 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       // 对象级操作的后置条件：按稳定 itemId 观察结果，不做数组序号比较。
       // 具体内容由服务端 reducer 派生，这里只要求目标 item 的期望状态成立。
       return filmSetItemSatisfied(canvas, command);
+    case "extension.command": {
+      const owner = content?.resolve(command.extensionId)?.commands;
+      if (!owner || !owner.kinds.includes(command.kind)) return false;
+      try {
+        const decoded = owner.decode({ extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload });
+        return decoded.ok && owner.satisfied(decoded.value, canvas);
+      } catch {
+        return false;
+      }
+    }
     case "edge.add":
       return canvas.document.edges.some((edge) => {
         if (command.edge.id && edge.id !== command.edge.id) return false;

@@ -13,8 +13,8 @@ import {
   type MotionBasedOnModelVersion,
   type MotionDefinition,
   type MotionVersionMatch
-} from "../motion-script.js";
-import { fnv1a64Hex } from "../content-hash.js";
+} from "../../../../../../contracts/src/canvas/motion-script.js";
+import { fnv1a64Hex } from "../../../../../../contracts/src/canvas/content-hash.js";
 import {
   isFilmSetMediaItem,
   type FilmSetItem,

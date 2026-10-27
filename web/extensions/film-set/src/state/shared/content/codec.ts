@@ -5,9 +5,9 @@
  * 校验并规范化不受信任的 `filmSetContent`；纯函数、无副作用、JSON-only。前端、Canvas Service、
  * MCP 与测试共用同一份校验。
  */
-import { decodeModelDefinition, type ModelDefinition } from "../model-definition.js";
-import { decodeMotionDefinition } from "../motion-script.js";
-import { isBoundedId, isFiniteNumber, isJsonObject } from "../../validation.js";
+import { decodeModelDefinition, type ModelDefinition } from "../../../../../../contracts/src/canvas/model-definition.js";
+import { decodeMotionDefinition } from "../../../../../../contracts/src/canvas/motion-script.js";
+import { isBoundedId, isFiniteNumber, isJsonObject } from "../../../../../../contracts/src/validation.js";
 import {
   DEFAULT_FILM_SET_LOCAL_TRANSFORM,
   FILM_SET_CONTENT_FIELD,

@@ -13,6 +13,7 @@
  *
  * 纯函数：只读取传入画布并用共享 reducer 模拟；不访问 DOM/网络/Yjs。
  */
+import { observeContentResolver, type ContentContributionResolver } from "./content-contribution.js";
 import { filmSetObjectOwnershipOf, isFilmSetObjectModelNode } from "./film-set-object-container.js";
 import { planPositionEdit } from "./edit-plan-position.js";
 import type { CanvasCommand } from "./commands.js";
@@ -60,7 +61,8 @@ function isPlannable(command: CanvasCommand): boolean {
  *
  * 返回 `ok:false` 时调用方 MUST NOT 宣称可撤销（例如动作无净变化、或包含不支持记录的字段）。
  */
-export function planCanvasEdit(canvas: ServerCanvas, commands: readonly CanvasCommand[], options: { lifecycle?: import("./managed-node-lifecycle.js").ManagedNodeLifecycleResolver } = {}): EditPlanResult {
+export function planCanvasEdit(canvas: ServerCanvas, commands: readonly CanvasCommand[], options: { lifecycle?: import("./managed-node-lifecycle.js").ManagedNodeLifecycleResolver; content?: ContentContributionResolver } = {}): EditPlanResult {
+  observeContentResolver(options.content);
   const relevant = commands.filter(isPlannable);
   if (relevant.length === 0) return { ok: false, reason: "没有可记录的结构动作" };
 

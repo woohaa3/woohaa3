@@ -31,7 +31,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { EXTENSION_PACKAGE_PREFIX, hasBrowserEntry, readExtensionDescriptor } from "./lib/extension-scan.mjs";
 import { syncExtensionIconAssets } from "./lib/extension-icon-assets.mjs";
-import { checkEnginesCompatible, validateExtensionDescriptor } from "./lib/extension-descriptor.mjs";
+import { checkEnginesCompatible, contentDeclarationCollisions, validateExtensionDescriptor } from "./lib/extension-descriptor.mjs";
 import { loadExtensionContracts } from "./lib/extension-release-protocol.mjs";
 import {
   FOUNDATION_SLOT_NAMES,
@@ -79,6 +79,7 @@ export function collectPreflightProblems(host, { slotDeclarations = null } = {})
     });
     for (const message of iconAssets.errors) errors.push({ extensionId: "品牌图形", directory: "", message });
   }
+  errors.push(...contentDeclarationCollisions(host.registrations));
   for (const extension of host.scan.extensions) {
     const built = hasBrowserArtifact(extension.dir);
     const hasSources = hasBrowserEntry(extension.dir);

@@ -20,8 +20,8 @@ export type ExtensionImportDebt = {
 export const EXTENSION_IMPORT_DEBT: readonly ExtensionImportDebt[] = [
   {
     file: "web/backend/package.json",
-    packages: ["@woohaa3/extension-oauth-agent", "@woohaa3/extension-infinspire-migration", "@woohaa3/extension-sample-site"],
-    reason: "宿主核心的站点插件（ChatGPT、迁移部署绑定）与测试 fixture 的 workspace 依赖；application-extension-runtime 规范允许后端入口来自静态可信清单。"
+    packages: ["@woohaa3/extension-oauth-agent", "@woohaa3/extension-sample-site"],
+    reason: "宿主核心的站点插件（ChatGPT）与测试 fixture 的 workspace 依赖；application-extension-runtime 规范允许后端入口来自静态可信清单。"
   },
   {
     file: "web/backend/src/composition.ts",
@@ -73,20 +73,15 @@ export const PLUGIN_REGISTRATION_DEBT: readonly RegistrationSurfaceDebt[] = [
     file: "scripts/lib/ingress.mjs",
     literals: ["prompt-snippets", "oauth-agent", "sdk-agent", "local-agent", "remote-server"],
     reason: "宿主已有公开 API 路由前缀（片段库及 OAuth/SDK/本机 Agent 来源）；Windows 路径归一化后同步现有清单，不新增业务装配。"
-  },
-  {
-    file: "scripts/assemble-release.mjs",
-    literals: ["local-agent"],
-    reason: "既有发行脚本打包本机 Agent 运行依赖的显式例外；Windows 路径归一化后补录已存在的发行耦合，后续由扩展产物清单承载。"
-  },
-  {
-    file: "scripts/canvas-legacy-migration.mjs",
-    literals: ["infinspire-migration"],
-    reason: "离线迁移工具按扩展目录取旧画布迁移实现；工具不参与宿主装配。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/settings/ark-endpoints.tsx",
-    literals: ["providers.ark"],
-    reason: "Tier C 债（在途）：Ark 接入点的宿主专属设置区块硬编码 `providers.ark`；去向是让扩展声明自己的设置区块，宿主只按声明渲染。"
   }
 ];
+
+/** 字段、身份、路由、工具名与 wire 字段的历史债。清单在 extension-purity-content-allowlist.ts。 */
+export type ContentFieldDebt = {
+  file: string;
+  literals: readonly string[];
+  stage: "node-data" | "command" | "route" | "interaction" | "render" | "identity";
+  reason: string;
+};
+
+export { CONTENT_FIELD_DEBT } from "./extension-purity-content-allowlist.js";
