@@ -66,7 +66,7 @@ const GLUE_POSTPROCESS_VERSION = "3";
 // query_composite_asset_scopes 导出，模板版本提升使缓存失效。
 // change: 2026-10-12-optimize-canvas-model-lod-and-interactions —— 新增 set_positions /
 // position_capability 导出，模板版本提升使缓存失效。
-const DTS_TEMPLATE_VERSION = "10";
+const DTS_TEMPLATE_VERSION = "13";
 
 const OUT_NAME = "woohaa_bevy_canvas";
 const glueName = `${OUT_NAME}.js`;
@@ -86,6 +86,8 @@ const STABLE_DTS = `// wasm-bindgen 生成的 Bevy 运行时 glue 的稳定类�
 
 export function seed_runtime_generation(previous: number): void;
 export function runtime_health(): string;
+export function benchmark_frames(enabled?: boolean): string;
+export function benchmark_media(enabled?: boolean): string;
 export function is_ready(): boolean;
 export function rendered_revision(): number;
 export function set_scene(json: string): number;

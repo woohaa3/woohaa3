@@ -9,7 +9,13 @@ import { compareSemver, type MarketplaceSigningKey, type SettingsSnapshot } from
 import { Button } from "../../../shared/ui/Button.js";
 import { SelectInput, TextInput } from "../../../shared/ui/FormControls.js";
 import { versionTrusted, type MarketplaceInstallController } from "./marketplace-install.js";
+import { describeJob, type ManagedExtensionsController, type ManagedExtensionsState } from "./managed-extensions.js";
 import "./marketplace-install.css";
+
+/** 没有任务控制器时的空状态（hook 必须无条件调用，所以用稳定的兜底函数）。 */
+const NO_JOBS: ManagedExtensionsState = { jobs: [], error: null, submitting: false, restart: { status: "idle", message: null }, unquarantining: [] };
+const subscribeNoJobs = () => () => undefined;
+const getNoJobs = () => NO_JOBS;
 
 function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -19,15 +25,24 @@ function formatSize(bytes: number): string {
 
 export function MarketplaceInstallPanel({
   controller,
+  jobs,
   snapshot,
-  canManage
+  canManage,
+  defaultOpen = false,
+  view = false
 }: {
   controller: MarketplaceInstallController;
+  /** 任务控制器：市场安装受理后的任务与插件列表共用同一份，这里就地显示进度。 */
+  jobs?: ManagedExtensionsController;
   snapshot: SettingsSnapshot | null;
   canManage: boolean;
+  /** 作为设置内的独立安装视图时默认展开，不显示额外的「从市场安装」开关。 */
+  defaultOpen?: boolean;
+  view?: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
-  const [open, setOpen] = useState(false);
+  const jobState = useSyncExternalStore(jobs?.subscribe ?? subscribeNoJobs, jobs?.getState ?? getNoJobs, jobs?.getState ?? getNoJobs);
+  const [open, setOpen] = useState(defaultOpen);
   const [text, setText] = useState("");
   const [confirmKey, setConfirmKey] = useState<MarketplaceSigningKey | null>(null);
   const enabled = !!snapshot?.extensionInstallations && canManage;
@@ -47,6 +62,12 @@ export function MarketplaceInstallPanel({
   const version = detail?.extension.versions.find((entry) => entry.version === selected?.version) ?? null;
   const trusted = detail && selected?.version ? versionTrusted(detail, selected.version) : null;
   const signingKey = version?.keyId ? detail?.signingKeys.find((key) => key.keyId === version.keyId) ?? null : null;
+  // 进行中的任务全显示；都结束后只留最近一条，避免历史「已完成」堆在面板里。
+  const scopedJobs = selected
+    ? jobState.jobs.filter((job) => job.extensionId === selected.extensionId)
+    : jobState.jobs;
+  const runningJobs = scopedJobs.filter((job) => job.status === "running");
+  const visibleJobs = runningJobs.length > 0 ? runningJobs : scopedJobs.slice(0, 1);
   const builtinInstalled = detail?.installedKind === "builtin" ? detail.installedVersion : undefined;
   const selectedIsNewer = selected?.version && builtinInstalled ? compareSemver(selected.version, builtinInstalled) > 0 : true;
   const canInstall = Boolean(selected?.version) && !state.installing && selectedIsNewer;
@@ -56,13 +77,15 @@ export function MarketplaceInstallPanel({
       : `安装 v${selected?.version ?? ""}`;
 
   return (
-    <div className="marketplace-install" data-testid="marketplace-install">
-      <div className="managed-install__row">
-        <Button size="sm" tone={open ? "primary" : "neutral"} onClick={() => setOpen(!open)} data-testid="marketplace-install-toggle">
-          从市场安装
-        </Button>
-        <span className="settings-page__hint">从服务端团队市场搜索并安装；签名公钥必须先被本机信任。</span>
-      </div>
+    <div className={view ? "marketplace-install is-view" : "marketplace-install"} data-testid="marketplace-install">
+      {!view ? (
+        <div className="managed-install__row">
+          <Button size="sm" tone={open ? "primary" : "neutral"} onClick={() => setOpen(!open)} data-testid="marketplace-install-toggle">
+            从市场安装
+          </Button>
+          <span className="settings-page__hint">从服务端团队市场搜索并安装；签名公钥必须先被本机信任。</span>
+        </div>
+      ) : null}
       {open ? (
         <div className="marketplace-install__body" data-testid="marketplace-install-body">
           {state.sources.length === 0 && !state.searching ? (
@@ -88,6 +111,23 @@ export function MarketplaceInstallPanel({
           ) : null}
           {state.error ? <p className="settings-page__error" role="alert" data-testid="marketplace-error">{state.error}</p> : null}
           {state.notice ? <p className="settings-page__hint" role="status" data-testid="marketplace-notice">{state.notice}</p> : null}
+
+          {visibleJobs.length > 0 ? (
+            <ul className="managed-install__jobs" data-testid="marketplace-jobs">
+              {visibleJobs.map((job) => {
+                const jobView = describeJob(job);
+                return (
+                  <li key={job.jobId} className="managed-install__job" data-tone={jobView.tone} data-testid={`marketplace-job-${job.jobId}`}>
+                    <span className="managed-install__job-title">{jobView.title}</span>
+                    <span className="managed-install__job-detail" data-testid={`marketplace-job-detail-${job.jobId}`}>{jobView.detail}</span>
+                    {job.status === "running" ? (
+                      <Button size="sm" tone="ghost" onClick={() => void jobs?.cancel(job.jobId)}>取消</Button>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
 
           {!selected && state.items.length > 0 ? (
             <ul className="settings-page__list" data-testid="marketplace-results">
@@ -137,7 +177,12 @@ export function MarketplaceInstallPanel({
                       <li>大小：{formatSize(version.size)}</li>
                       {version.engines ? <li>运行环境：宿主 {version.engines.hostAbi} · SDK {version.engines.sdkAbi} · 协议 {version.engines.protocolVersion}</li> : null}
                       {version.dependencies ? <li>依赖：{Object.entries(version.dependencies).map(([id, range]) => `${id}@${range}`).join("、")}</li> : null}
-                      <li>签名公钥：{version.keyId ?? "未知"}{trusted === true ? "（本机已信任）" : trusted === false ? "（本机未信任）" : ""}</li>
+                      <li>
+                        签名公钥：
+                        {version.keyId
+                          ? `${version.keyId}${trusted === true ? "（本机已信任）" : trusted === false ? "（本机未信任）" : ""}`
+                          : "来源未声明；安装时按本机信任根校验"}
+                      </li>
                     </ul>
                   ) : null}
                   {trusted === false ? (

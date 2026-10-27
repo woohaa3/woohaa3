@@ -11,7 +11,8 @@
 import { Component, useEffect, useMemo, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
 import { Button } from "../../../../shared/ui/Button.js";
-import { BackIcon } from "../../../../shared/ui/icons.js";
+import { Switch } from "../../../../shared/ui/Switch.js";
+import { BackIcon, CopyIcon } from "../../../../shared/ui/icons.js";
 import { appPublicUrl } from "../../../services/app-base-path.js";
 import type { BackendSettingsStore } from "../backend-settings-store.js";
 import {
@@ -19,6 +20,8 @@ import {
   diagnosticsOf,
   inactiveStateOf,
   indexPlugins,
+  isManageable,
+  isSiteRowRunning,
   modelsOf,
   versionLabel,
   type PluginSettingsGroup
@@ -36,6 +39,9 @@ import type { SettingsEditSession } from "../edit-session.js";
 import type { ExtensionSettingsAssembly } from "../plugin.js";
 import { useSettingsEditReport } from "./use-settings-edit-report.js";
 import type { SettingsPanelRenderProps } from "../plugin-panels.js";
+import { extensionObservationBadge, extensionSource, extensionTrustBadge } from "../extension-source.js";
+import { ManagedExtensionActions, ManagedExtensionDetails } from "../managed-extensions-ui.js";
+import type { ManagedExtensionsController } from "../managed-extensions.js";
 import { GeneratedModelsSection } from "./model-catalog.js";
 import { useExtensionFaults } from "../../../host.js";
 import { slotContributionOrigin } from "../../../slots.js";
@@ -60,11 +66,12 @@ export function PluginConfigContent({
   pluginId,
   store,
   manager,
+  managed,
   settingsPanels,
   onBack,
   editSession,
   extensionSettings
-}: PluginConfigContentProps) {
+}: PluginConfigContentProps & { /** 受管扩展的卸载/回滚/身份说明只在详情页出现。 */ managed?: ManagedExtensionsController }) {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const view = useSyncExternalStore(manager.subscribe, manager.getSnapshot, manager.getSnapshot);
   const panels = settingsPanels ?? EMPTY_SETTINGS_PANELS;
@@ -112,6 +119,41 @@ export function PluginConfigContent({
   const inactive = inactiveStateOf(index, group);
   const diagnostics = diagnosticsOf(index, group);
   const models = modelsOf(index, group);
+  const siteRow = index.siteRows.get(group.id);
+  const browserRow = index.browserRows.get(group.id);
+  const statusLabel = siteRow?.busy
+    ? "正在应用…"
+    : siteRow
+      ? siteRow.actualStateLabel
+      : browserRow
+        ? browserRow.status === "failed"
+          ? "异常"
+          : browserRow.status.startsWith("pending")
+            ? "重启后生效"
+            : browserRow.status === "disabled"
+              ? "已停用"
+              : "本次已启用"
+        : inactive
+          ? "未运行"
+          : "运行中";
+  const statusTone = siteRow
+    ? siteRow.busy || siteRow.actualState === "degraded"
+      ? "warning"
+      : isSiteRowRunning(siteRow.actualState)
+        ? "success"
+        : "muted"
+    : browserRow
+      ? browserRow.status === "failed" || browserRow.status.startsWith("pending")
+        ? "warning"
+        : browserRow.status === "disabled"
+          ? "muted"
+          : "success"
+      : inactive
+        ? "muted"
+        : "success";
+  const enabledModels = models.filter((model) => model.enabled).length;
+  const manageable = isManageable(index, group);
+  const directory = group.directory;
   // 刷新入口由 Provider 插件自己声明（路径由插件注册、鉴权）：宿主不硬编码具体 Provider。
   const modelRefresh = group.modelRefresh;
   const endpointEntries = group.entries.filter(isArkEndpointEntry);
@@ -119,33 +161,120 @@ export function PluginConfigContent({
 
   return (
     <div className="settings-workbench__detail" data-testid={`plugin-config-${group.id}`}>
-      <PluginDetailHeader title={group.label} onBack={onBack}>
-        <PluginIconMark icon={group.icon} testId={`plugin-config-icon-${group.id}`} />
-        <span className="plugin-card__badge">{layer.badge}</span>
-        {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
-        {group.version ? (
-          <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
-            {versionLabel(group.version)}
-          </span>
-        ) : null}
-      </PluginDetailHeader>
+      <PluginDetailHeader
+        title={group.label}
+        onBack={onBack}
+        icon={<PluginIconMark icon={group.icon} testId={`plugin-config-icon-${group.id}`} />}
+        {...(managed && group.installed?.managed
+          ? { actions: <ManagedExtensionActions installed={group.installed} controller={managed} canManage={store.canManage()} /> }
+          : {})}
+        meta={
+          <>
+            <span className="plugin-card__badge">{layer.badge}</span>
+            {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
+            {group.installed?.managed ? (
+              <span
+                className="plugin-card__badge is-source"
+                data-tone={extensionSource(group.installed).tone}
+                data-testid={`plugin-config-source-${group.id}`}
+              >
+                {extensionSource(group.installed).label}
+              </span>
+            ) : null}
+            {extensionObservationBadge(group.installed) ? (
+              <span
+                className="plugin-card__badge is-observe"
+                data-testid={`plugin-config-observe-${group.id}`}
+                title={extensionObservationBadge(group.installed)!.title}
+              >
+                {extensionObservationBadge(group.installed)!.label}
+              </span>
+            ) : null}
+            {extensionTrustBadge(group.installed) ? (
+              <span
+                className="plugin-card__badge is-trust"
+                data-tone={extensionTrustBadge(group.installed)!.tone}
+                data-testid={`plugin-config-trust-${group.id}`}
+              >
+                {extensionTrustBadge(group.installed)!.label}
+              </span>
+            ) : null}
+            {group.version ? (
+              <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
+                {versionLabel(group.version)}
+              </span>
+            ) : null}
+            {/* 安全说明跟着徽标走：签名只证来源与完整性，扩展与宿主同进程、同权限。 */}
+            {group.installed?.managed ? (
+              <span className="plugin-config__note" data-testid={`managed-trust-note-${group.id}`}>
+                与本机宿主同权限，不是沙箱
+              </span>
+            ) : null}
+          </>
+        }
+      />
 
-      {group.directory ? (
-        <p className="plugin-directory" title={group.directory}>
-          <span>所在目录</span><code>{group.directory}</code>
-        </p>
-      ) : null}
-      <div className="plugin-config__status">
-        <PluginStateControl
-          index={index}
-          group={group}
-          manager={manager}
-          store={store}
-          siteManageable={view.siteManageable}
-          testId={`plugin-config-switch-${group.id}`}
-        />
-      </div>
-      {group.description ? <p className="settings-page__hint">{group.description}</p> : null}
+      <section className="plugin-overview" data-testid={`plugin-overview-${group.id}`}>
+        <div className="plugin-overview__top">
+          <span className="plugin-overview__status" data-tone={statusTone}>
+            <i />{statusLabel}
+          </span>
+          <div className="plugin-overview__controls">
+            {manageable ? (
+              <PluginStateControl
+                index={index}
+                group={group}
+                manager={manager}
+                store={store}
+                siteManageable={view.siteManageable}
+                testId={`plugin-config-switch-${group.id}`}
+              />
+            ) : (
+              <Switch
+                checked={!inactive}
+                disabled
+                onCheckedChange={() => undefined}
+                aria-label={`${group.label} 的启停由宿主管理，不能单独停用`}
+                title="内置扩展由宿主管理，不能单独停用"
+                testId={`plugin-config-switch-${group.id}`}
+              />
+            )}
+          </div>
+        </div>
+        <p className="plugin-overview__description">{group.description || "暂无说明。"}</p>
+        <div className="plugin-overview__stats">
+          <div className="plugin-overview__stat">
+            <strong>{group.entries.length}</strong>
+            <span>配置项</span>
+          </div>
+          {models.length > 0 ? (
+            <div className="plugin-overview__stat">
+              <strong>{enabledModels}/{models.length}</strong>
+              <span>已启用模型</span>
+            </div>
+          ) : null}
+          <div className="plugin-overview__stat">
+            <strong>{extensionSource(group.installed).label}</strong>
+            <span>安装来源</span>
+          </div>
+        </div>
+        {directory ? (
+          <div className="plugin-overview__path" title={directory}>
+            <span>安装位置</span>
+            <code>{directory}</code>
+            <button
+              type="button"
+              className="plugin-overview__copy"
+              aria-label="复制安装路径"
+              title="复制安装路径"
+              onClick={() => void navigator.clipboard?.writeText(directory)}
+            >
+              <CopyIcon size={13} />
+            </button>
+          </div>
+        ) : null}
+      </section>
+      <ManagedExtensionDetails installed={group.installed} />
       {inactive ? (
         <p className="settings-page__hint" data-testid={`plugin-config-inactive-${group.id}`}>
           该插件当前未运行（{inactive}）：这里保存的配置要等启用后才生效。
@@ -245,19 +374,27 @@ export function PluginConfigContent({
 function PluginDetailHeader({
   title,
   onBack,
-  children
+  icon,
+  meta,
+  actions
 }: {
   title: string;
   onBack: () => void;
-  children?: ReactNode;
+  icon?: ReactNode;
+  meta?: ReactNode;
+  /** 头部右侧操作（受管扩展的回滚 / 卸载）。 */
+  actions?: ReactNode;
 }) {
   return (
     <header className="settings-workbench__detail-head">
       <Button size="sm" tone="ghost" icon={<BackIcon />} onClick={onBack} data-testid="plugin-config-back">
         返回插件列表
       </Button>
+      {icon}
       <h2 className="settings-workbench__detail-title">{title}</h2>
-      {children ? <div className="plugin-config__meta">{children}</div> : null}
+      {/* meta 在标题行里 flex-grow 并右对齐，操作块必须排在它之后才能贴到最右。 */}
+      {meta ? <div className="plugin-config__meta">{meta}</div> : null}
+      {actions ? <div className="plugin-config__actions">{actions}</div> : null}
     </header>
   );
 }

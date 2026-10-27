@@ -11,6 +11,7 @@
 
 #[cfg(feature = "canvas-core")]
 mod runtime_health;
+mod frame_samples;
 
 mod generation_progress;
 mod startup_trace;
@@ -820,4 +821,4 @@ pub fn native_frame_ready() -> bool {
 }
 
 #[cfg(feature = "canvas-core")]
-pub use runtime_health::{runtime_health, seed_runtime_generation};
+pub use runtime_health::{runtime_health, seed_runtime_generation, benchmark_frames, benchmark_media};

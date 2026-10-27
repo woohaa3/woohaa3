@@ -61,7 +61,11 @@ const ALLOWED_RUNTIME_PREFIXES = [
   // `MentionEditor` 与通用 catalog → ExecutionPanel 纯投影 `projectModelConfig` 作为公共能力
   // 经 extension-api 转出，被 task-execution 与片段扩展共用（叶子模块，无业务状态）。
   "cordis/plugins/task-execution/mention/",
-  "cordis/plugins/task-execution/generic-panel-projection"
+  "cordis/plugins/task-execution/generic-panel-projection",
+  // change: 2026-10-27-harden-plugin-service-access：装配期服务访问守护。零运行时依赖的纯函数
+  // 叶子（只 import type cordis），`defineExtensionPlugin` 必须与宿主 `definePlugin` 用同一套
+  // 判定，否则扩展侧（出事的那一侧）没有守护。见 docs/design/plugin-service-access.md。
+  "cordis/service-access-guard.js"
 ];
 
 /** 禁止的宿主装配根/扫描器/业务插件依赖。 */

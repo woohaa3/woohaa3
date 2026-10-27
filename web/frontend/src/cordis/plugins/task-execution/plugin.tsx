@@ -405,7 +405,14 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         // 权威画布更新后重试等待中的镜头参考提交（每个节点至多续交一次）。
         void coordinator.retryWaiting();
       });
-      const offRunState = ctx.get(RUN_STATE_SERVICE)?.subscribe(invalidateToolbar);
+      // 运行态服务由 run-state 插件提供（兄弟插件），装配期它的 fiber 还没 active：在这里
+      // `ctx.get` 只会拿到 undefined，订阅永远建不起来，横条的 N/禁用原因就不再随运行态失效。
+      // 声明式等待：服务就绪才订阅，服务撤销随 fiber 一起释放。
+      ctx.inject([RUN_STATE_SERVICE], (scoped) => {
+        const service = scoped.get(RUN_STATE_SERVICE) as RunStateService;
+        const off = service.subscribe(invalidateToolbar);
+        scoped.effect(() => () => off(), "task-execution:run-state-toolbar");
+      });
 
       // selection coordinator：selection → 显式 panel route。
       const resolvePanelRoute = (nodeId: string | null): CanvasPanelRoute | null => {
@@ -473,7 +480,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           offDrafts();
           offCatalog();
           offCanvas();
-          offRunState?.();
           groupRun.dispose();
           groupSummaryStore.dispose();
           unsubscribeSelection();

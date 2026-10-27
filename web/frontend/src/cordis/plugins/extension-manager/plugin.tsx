@@ -43,6 +43,8 @@ export type ExtensionManagerOptions = {
   assembled?: Readonly<Record<string, boolean>>;
   /** 本次启动加载失败的 browser-local optional ID（显示为「启动失败」而非「已启用」）。 */
   failed?: ReadonlySet<string>;
+  /** 失败原因（extensionId → message）；设置面把它显示在状态提示与详情里。 */
+  failures?: Readonly<Record<string, string>>;
   /** Canvas 权威目录（缺省读静态清单；测试可注入）。 */
   catalog?: readonly CanvasExtensionMetadata[];
   /** 可配置 optional allowlist（缺省静态 allowlist；测试可注入）。 */
@@ -68,6 +70,7 @@ export function extensionManagerPlugin(options: ExtensionManagerOptions = {}): P
         ids: options.ids ?? CONFIGURABLE_OPTIONAL_PLUGIN_IDS,
         assembled: options.assembled ?? {},
         ...(options.failed ? { failed: options.failed } : {}),
+        ...(options.failures ? { failures: options.failures } : {}),
         ...(options.preferenceStore ? { preferenceStore: options.preferenceStore } : {}),
         ...(options.storage !== undefined ? { storage: options.storage } : {}),
         refresh: options.reload ?? defaultReload,
