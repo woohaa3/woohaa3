@@ -9,6 +9,7 @@
  */
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button } from "../../../shared/ui/Button.js";
+import { Switch } from "../../../shared/ui/Switch.js";
 import { BackIcon, ChevronDownIcon, ChevronRightIcon, FileTextIcon, PlusIcon, SearchIcon } from "../../../shared/ui/icons.js";
 import type { ExtensionManagerFacade } from "../extension-manager/contract.js";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
@@ -426,8 +427,8 @@ function PluginRow({
             {versionLabel(group.version)}
           </span>
         ) : null}
-        {manageable ? (
-          <div className="plugin-row__switch">
+        <div className="plugin-row__switch">
+          {manageable ? (
             <PluginStateControl
               index={index}
               group={group}
@@ -436,8 +437,17 @@ function PluginRow({
               siteManageable={siteManageable}
               testId={`settings-plugin-switch-${group.id}`}
             />
-          </div>
-        ) : null}
+          ) : (
+            <Switch
+              checked={!isStopped(status.label, status.tone)}
+              disabled
+              onCheckedChange={() => undefined}
+              aria-label={`${group.label} 的启停由宿主管理，不能单独停用`}
+              title="内置扩展由宿主管理，不能单独停用"
+              testId={`settings-plugin-switch-${group.id}`}
+            />
+          )}
+        </div>
         {openable ? <span className="plugin-row__chevron"><ChevronRightIcon size={15} /></span> : null}
       </div>
       {group.directory ? (
