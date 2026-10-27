@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { GenerationProvider } from "@woohaa3/contracts";
 import { isGenerationStableMediaResult } from "@woohaa3/contracts";
 import type { PptaskProvider } from "@sdppp/pptask";
-import { createRemoteServerExtension } from "../src/backend/index.js";
+import { createRemoteServerPlugin } from "../src/backend/index.js";
 import { RemoteGenerationError } from "../src/backend/generation/provider.js";
 import {
   REMOTE_SERVER_GENERATION_REFRESH_ROUTE,
@@ -35,13 +35,14 @@ function createHost(options: { registerGeneration?: boolean } = {}) {
   const providers: GenerationProvider[] = [];
   const logEvents: Array<Record<string, unknown>> = [];
   const counts = { register: 0 };
+  const undos: Array<() => void> = [];
   const host: Record<string, unknown> = {
-    registerCapability: (registration: { id: string; value: unknown }) => {
-      capabilities.set(registration.id, registration.value);
-    },
-    config: { values: () => ({}), configVersion: () => 1, secretRefs: () => [], desiredEnabled: () => true },
-    logger: (event: Record<string, unknown>) => {
-      logEvents.push(event);
+    log: { scope: () => (event: Record<string, unknown>) => { logEvents.push(event); } },
+    capabilities: {
+      register: (id: string, value: unknown) => {
+        capabilities.set(id, value);
+        return () => capabilities.delete(id);
+      }
     },
     services: {
       canvas: {
@@ -50,15 +51,33 @@ function createHost(options: { registerGeneration?: boolean } = {}) {
         refreshSyncUpstream: async () => undefined
       }
     },
-    registerHandler: (registration: { route: string; handle: (input: { body: unknown; context: unknown }) => Promise<HandlerResult> | HandlerResult }) => {
-      handlers.set(registration.route, registration.handle);
+    storage: { register: () => () => undefined, unregister: () => undefined },
+    marketplace: { register: () => () => undefined, unregister: () => undefined, list: () => [], resolve: () => undefined },
+    effect: (run: () => (() => void) | void) => {
+      const undo = run();
+      if (typeof undo === "function") undos.push(undo);
     },
-    registerRawHttpHandler: () => undefined
+    webServer: {
+      register: (registration: { route: string; handle: (input: { body: unknown; context: unknown }) => Promise<HandlerResult> | HandlerResult }) => {
+        handlers.set(registration.route, registration.handle);
+      },
+      registerHttp: () => undefined,
+      registerRawHttp: () => undefined
+    }
   };
+  // 生成注册面：与生产一致，`ctx.generation.register(provider)` 收到 provider。
   if (options.registerGeneration !== false) {
-    host.registerGeneration = (provider: GenerationProvider) => {
-      counts.register += 1;
-      providers.push(provider);
+    host.generation = {
+      register: (provider: GenerationProvider) => {
+        counts.register += 1;
+        providers.push(provider);
+        return () => undefined;
+      },
+      unregister: () => undefined,
+      list: () => providers,
+      resolve: () => undefined,
+      conversions: () => [],
+      registerConversion: () => () => undefined
     };
   }
   return {
@@ -83,12 +102,12 @@ function activate(options: {
   deployment?: () => { serverUrl: string | null; deviceToken: string | null; keyPrefix: string };
 }) {
   const harness = createHost({ ...(options.registerGeneration === false ? { registerGeneration: false } : {}) });
-  const definition = createRemoteServerExtension({
+  const definition = createRemoteServerPlugin({
     deployment: options.deployment ?? (() => options.fake.deployment),
     fetchImpl: options.fetchImpl ?? options.fake.fetch,
     generation: { pollIntervalMs: 5, clientTimeoutMs: 2000 }
   });
-  definition.activate(harness.host as never);
+  void definition.apply(harness.host as never, {} as never);
   return harness;
 }
 
