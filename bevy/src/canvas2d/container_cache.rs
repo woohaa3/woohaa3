@@ -1,4 +1,4 @@
-//! Local group/film-scope buffers; transparent fills retain document ordering below overlays.
+//! Local group/film-scope buffers; each group panel owns an independent transparent entity z.
 use super::{Visuals, geometry::Geometry, labels::sync_labels, text_presentation::LogicalText};
 use crate::{
     protocol::{GraphNode, GroupPresentation, Scene},
@@ -37,17 +37,29 @@ impl Key {
                 .as_ref()
                 .map(|asset| (asset.x, asset.y, asset.width, asset.height)),
             title: n.title.clone(),
-            panel: n.composite_asset.as_ref().and_then(|asset| asset.panel.clone()),
+            panel: n
+                .composite_asset
+                .as_ref()
+                .and_then(|asset| asset.panel.clone()),
             has_model: n.model.is_some(),
-            scope_vertices: n.composite_asset.as_ref().map(|_| super::scope::node_scope(n).vertices),
+            scope_vertices: n
+                .composite_asset
+                .as_ref()
+                .map(|_| super::scope::node_scope(n).vertices),
             group: n.group.clone(),
             group_model_layout: crate::canvas_query::group_model::for_node(n),
             selected: scene.selection.nodes.contains(&n.id),
             resizable: n.resizable,
             hovered: n.composite_asset.is_some()
                 && scene.hover.as_ref().and_then(|h| h.node_id.as_deref()) == Some(n.id.as_str()),
-            aggregate_run: n.aggregate_run.as_ref().is_some_and(|run| run.active && run.film_set.is_none()),
-            film_run: n.aggregate_run.as_ref().and_then(|run| run.film_set.clone()),
+            aggregate_run: n
+                .aggregate_run
+                .as_ref()
+                .is_some_and(|run| run.active && run.film_set.is_none()),
+            film_run: n
+                .aggregate_run
+                .as_ref()
+                .and_then(|run| run.film_set.clone()),
         }
     }
 }
@@ -59,9 +71,19 @@ pub(super) struct Block {
     sort_z: f32,
     entities: [Option<Entity>; 2],
     meshes: [Option<Handle<Mesh>>; 2],
+    /// Each group panel is its own transparent entity so its transform z is
+    /// the panel's actual Transparent2d sort key instead of a shared block z.
+    panels: Vec<(Entity, Handle<Mesh>)>,
 }
 impl Block {
+    fn clear_panels(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
+        for (entity, mesh) in self.panels.drain(..) {
+            commands.entity(entity).despawn();
+            meshes.remove(mesh.id());
+        }
+    }
     fn clear(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
+        self.clear_panels(commands, meshes);
         for entity in &mut self.entities {
             if let Some(entity) = entity.take() {
                 commands.entity(entity).despawn();
@@ -92,7 +114,15 @@ pub(super) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     visuals: &mut Visuals,
-    text: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
+    text: &mut Query<
+        (
+            &mut Text2d,
+            &mut Transform,
+            &mut TextColor,
+            &mut LogicalText,
+        ),
+        Without<Sprite>,
+    >,
     scene: &Scene,
     theme: &ThemeResource,
 ) -> u64 {
@@ -132,6 +162,7 @@ pub(super) fn sync(
             block.sort_z = sort_z;
             continue;
         }
+        block.clear_panels(commands, meshes);
         let mut geometry = Geometry::default();
         if band.is_some() {
             super::aggregate::draw_aggregate_selection_band(
@@ -144,14 +175,25 @@ pub(super) fn sync(
         }
         for key in &keys {
             let node = &scene.nodes[key.index];
-            let z = 10.0 + key.index as f32 * 0.1;
+            let z = super::draw_order::render_z(&scene.nodes, key.index);
             let mut labels = if let Some(group) = &node.group {
+                let panel = meshes.add(super::group::draw_group_panel(theme, node, group));
+                let entity = commands
+                    .spawn((
+                        Mesh2d(panel.clone()),
+                        MeshMaterial2d(visuals.blend_material.clone()),
+                        Transform::from_xyz(0., 0., z),
+                        NoFrustumCulling,
+                    ))
+                    .id();
+                block.panels.push((entity, panel));
                 vec![super::group::draw_group(
                     &mut geometry,
                     theme,
                     node,
                     group,
                     key.selected,
+                    z,
                 )]
             } else if key.panel.is_some() {
                 // 有模型内容的子容器同样走范围面板：它复用 3D 世界呈现链路，模型由 3D
@@ -169,7 +211,7 @@ pub(super) fn sync(
                 )
                 .unwrap_or_default()
             };
-            if let Some(label) = super::group::draw_run_status(&mut geometry, theme, node) {
+            if let Some(label) = super::group::draw_run_status(&mut geometry, theme, node, z) {
                 labels.push(label);
             }
             // 聚合节点运行遮罩：覆盖整个范围（change: 2026-10-12-unify-generation-history-strip，
@@ -179,21 +221,55 @@ pub(super) fn sync(
                 let scope = super::scope::node_scope(node);
                 if scope.aabb.width.max(scope.aabb.height) * scene.viewport.zoom >= 48. {
                     let label = match feedback.label_code.as_str() {
-                        "submitting" => "提交中", "queued" => "排队中", "generating" => "生成中", "modifying" => "修改中",
-                        "saving" => "保存中", "verifying" => "待确认", _ => "运行中",
+                        "submitting" => "提交中",
+                        "queued" => "排队中",
+                        "generating" => "生成中",
+                        "modifying" => "修改中",
+                        "saving" => "保存中",
+                        "verifying" => "待确认",
+                        _ => "运行中",
                     };
                     let zoom = scene.viewport.zoom.max(0.1);
-                    let center = Vec2::new(scope.aabb.x + scope.aabb.width / 2., scope.aabb.y + scope.aabb.height + 14. / zoom);
-                    geometry.rounded_rect_alpha(center.x - 27. / zoom, center.y - 10. / zoom, 54. / zoom, 20. / zoom,
-                        5. / zoom, z + 0.02, theme.token_u32("canvasNodeContent"), 0.9);
-                    labels.push((label.to_owned(), center, 12. / zoom, theme.token_u32(if feedback.phase == "verifying" { "statusWarning" } else { "interactionAccent" })));
+                    let center = Vec2::new(
+                        scope.aabb.x + scope.aabb.width / 2.,
+                        scope.aabb.y + scope.aabb.height + 14. / zoom,
+                    );
+                    geometry.rounded_rect_alpha(
+                        center.x - 27. / zoom,
+                        center.y - 10. / zoom,
+                        54. / zoom,
+                        20. / zoom,
+                        5. / zoom,
+                        z + 0.02,
+                        theme.token_u32("canvasNodeContent"),
+                        0.9,
+                    );
+                    labels.push((
+                        label.to_owned(),
+                        center,
+                        12. / zoom,
+                        theme.token_u32(if feedback.phase == "verifying" {
+                            "statusWarning"
+                        } else {
+                            "interactionAccent"
+                        }),
+                    ));
                 }
             }
             if key.aggregate_run {
                 let scope = super::scope::node_scope(node);
-                let bounds = (scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height);
-                let label =
-                    super::history_strip::draw_aggregate_run_overlay(&mut geometry, theme, bounds, z + 0.02);
+                let bounds = (
+                    scope.aabb.x,
+                    scope.aabb.y,
+                    scope.aabb.width,
+                    scope.aabb.height,
+                );
+                let label = super::history_strip::draw_aggregate_run_overlay(
+                    &mut geometry,
+                    theme,
+                    bounds,
+                    z + 0.02,
+                );
                 labels.push((
                     label,
                     Vec2::new(bounds.0 + bounds.2 / 2.0, bounds.1 + bounds.3 / 2.0),
@@ -206,7 +282,9 @@ pub(super) fn sync(
         let (mut opaque, mut blend) = geometry.into_layers();
         let opaque_depth = 0.0002 * block_index as f32 / (count + 1) as f32;
         shift_depth(&mut opaque, opaque_depth);
-        // Compensate the phase-sort transform so transparent world-space depth stays canonical.
+        // The shared blend mesh retains overlays such as run masks. Group
+        // panels were emitted as individual transparent entities above so
+        // their own transform z controls Transparent2d ordering.
         shift_depth(&mut blend, -sort_z);
         for (layer, built) in [opaque, blend].into_iter().enumerate() {
             let handle = meshes.add(built);

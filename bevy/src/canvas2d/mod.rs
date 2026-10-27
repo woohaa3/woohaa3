@@ -24,7 +24,6 @@ mod focus_reference;
 mod container_cache;
 mod dash;
 mod decoration_cache;
-#[cfg(test)]
 mod draw_order;
 mod edge_cache;
 mod film_set;

@@ -60,7 +60,11 @@ pub(super) fn sync(
         let keys: Vec<_> = nodes
             .iter()
             .enumerate()
-            .filter(|(_, n)| n.group.is_none() && n.composite_asset.is_none() && focused_id != Some(n.id.as_str()))
+            .filter(|(_, n)| {
+                n.group.is_none()
+                    && n.composite_asset.is_none()
+                    && focused_id != Some(n.id.as_str())
+            })
             .filter_map(|(local, node)| {
                 let selected = selected.contains(node.id.as_str());
                 let hover = scene
@@ -98,7 +102,7 @@ pub(super) fn sync(
                 node,
                 key.selected,
                 scene.hover.as_ref(),
-                key.index,
+                super::draw_order::render_index(&scene.nodes, key.index),
             );
         }
         let handle = meshes.add(geometry.build());

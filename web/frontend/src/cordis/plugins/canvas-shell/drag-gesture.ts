@@ -11,8 +11,9 @@
  */
 import {
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
-  findGroupContainingCenter,
-  reparentDraggedNodes,
+  resolveDraggedNodeDropTargets,
+  settleDraggedGroups,
+  settleDraggedNodeBoundaries,
   type CanvasCommand,
   type Woohaa3CanvasNode,
 } from "@woohaa3/contracts";
@@ -25,7 +26,7 @@ import {
   pruneDragAttachState,
   revalidateDragAttachEdges,
 } from "./drag-attach.js";
-import { sharedCanvasNodeIndex, indexNodeSize, type CanvasNodeIndex } from "./canvas-node-index.js";
+import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import { isShotPreviewOnlySelection } from "./shot-preview-protection.js";
 import type { InteractionCore } from "./interaction-core.js";
 import type { Gesture } from "./interaction-types.js";
@@ -54,53 +55,9 @@ export type DragGestureFamily = {
   prune: () => boolean;
 };
 
-/** 把绝对落点预览投影为相对其父级的持久化坐标（含完整祖先链），仅保留净变化的节点。 */
-function netPositionUpdates(
-  index: CanvasNodeIndex,
-  previews: Map<string, { x: number; y: number }>
-): Record<string, { x: number; y: number }> {
-  const positions: Record<string, { x: number; y: number }> = {};
-  for (const [id, preview] of previews) {
-    const node = index.byId.get(id);
-    if (!node) continue;
-    const parent = index.parentAbsolutePosition(id);
-    const next = { x: preview.x - parent.x, y: preview.y - parent.y };
-    // 无净变化不产生命令（design D5）；与结构 diff 的严格比较保持一致。
-    if (node.position.x === next.x && node.position.y === next.y) continue;
-    positions[id] = next;
-  }
-  return positions;
-}
-
-/**
- * 用拖动预览覆盖被拖动节点的位置（相对父级；其余节点按引用复用），供命中 group 与
- * 重父化复用。只复制有预览的节点，避免整表深拷贝。
- */
-function projectPreviewNodes(
-  index: CanvasNodeIndex,
-  previews: Map<string, { x: number; y: number }>
-): Woohaa3CanvasNode[] {
-  const nodes = index.source.document.nodes;
-  const projected: Woohaa3CanvasNode[] = new Array(nodes.length);
-  for (let position = 0; position < nodes.length; position += 1) {
-    const node = nodes[position]!;
-    const preview = previews.get(node.id);
-    if (!preview) {
-      projected[position] = node as unknown as Woohaa3CanvasNode;
-      continue;
-    }
-    const parent = index.parentAbsolutePosition(node.id);
-    projected[position] = {
-      ...node,
-      position: { x: preview.x - parent.x, y: preview.y - parent.y },
-      data: {}
-    } as unknown as Woohaa3CanvasNode;
-  }
-  return projected;
-}
-
 export function createDragGestureFamily(
-  core: Pick<InteractionCore, "state" | "submit" | "buildScene" | "buildDragScene" | "schedule" | "clearHeldKeys">
+  core: Pick<InteractionCore, "state" | "submit" | "buildScene" | "buildDragScene" | "schedule" | "clearHeldKeys"> &
+    Partial<Pick<InteractionCore, "options">>
 ): DragGestureFamily {
   const { state, submit, buildScene, schedule } = core;
 
@@ -136,53 +93,61 @@ export function createDragGestureFamily(
     if (!index) return planMoveNodes(Object.fromEntries(previews));
     // 收起/隐藏的容器不接收拖入，避免落入它不可见的展开范围。
     const eligibleGroupIds = index.dropTargetGroupIds;
-    // 拖动非 group 节点才可能触发重父化；只有 group 被拖动时是纯位置更新。
-    const draggedNonGroup = [...origins.keys()].filter((id) => index.byId.get(id)?.type !== "group");
-    if (draggedNonGroup.length === 0) {
-      return planMoveNodes(netPositionUpdates(index, previews));
-    }
-    // With stationary containers, detect the common no-reparent case from the
-    // shared group candidates and the moved roots alone. Complex mixed group
-    // drags keep the canonical full planner below.
-    const movingGroup = [...previews.keys()].some(id => index.byId.get(id)?.type === "group");
-    if (!movingGroup) {
-      const groupAt = (id: string) => {
-        const node = index.byId.get(id);
-        const position = previews.get(id) ?? index.absolutePosition(id);
-        if (!node || !position) return null;
-        const size = indexNodeSize(node);
-        const cx = position.x + size.width / 2, cy = position.y + size.height / 2;
-        return index.groupBounds.find(group =>
-          eligibleGroupIds.has(group.id) && cx >= group.x && cx <= group.x + group.width
-          && cy >= group.y && cy <= group.y + group.height)?.id ?? null;
-      };
-      const explicitTarget = groupAt(draggedNonGroup[0]!);
-      const reparent = draggedNonGroup.some(id => {
-        const node = index.byId.get(id);
-        return node && (node.parentId ?? null) !== (explicitTarget ?? groupAt(id));
-      });
-      if (!reparent) return planMoveNodes(netPositionUpdates(index, previews));
-    }
-    const projected = projectPreviewNodes(index, previews);
-    // Freeze group sizes from the working snapshot, before applying dragged member positions.
-    const groupSizes = new Map(index.groupBounds.map(group => [group.id, {width: group.width, height: group.height}]));
-    const target = findGroupContainingCenter(projected, draggedNonGroup[0]!, groupSizes, eligibleGroupIds);
-    const { nodes: reparented, reparented: didReparent } = reparentDraggedNodes(projected, draggedNonGroup, target, groupSizes, eligibleGroupIds);
-    if (!didReparent) {
-      // 无重父化/容器尺寸变化：直接生成选中根的净位置（持久化相对坐标），
-      // 不构造全场 before/after 再比较（design D5）。
-      return planMoveNodes(netPositionUpdates(index, previews));
-    }
-    const original: Woohaa3CanvasNode[] = index.source.document.nodes.map((node) => ({
+    // 释放结算从 working 快照冻结 group 尺寸；pointermove 期间不碰撞求解。
+    const roots = index.dragRoots(origins);
+    const draggedNonGroup = [...roots.keys()].filter((id) => index.byId.get(id)?.type !== "group");
+    const original: Woohaa3CanvasNode[] = index.orderedNodes.map((node) => ({
       ...node,
       position: { ...node.position },
       data: {}
     })) as unknown as Woohaa3CanvasNode[];
-    return planGroupStructureChange(original, reparented);
+    const groupSizes = new Map(index.groupBounds.map(group => [group.id, {width: group.width, height: group.height}]));
+    const movingGroups = [...roots.keys()].filter(id => index.byId.get(id)?.type === "group");
+    let settled = original;
+    if (movingGroups.length > 0) {
+      const groupIdeal = new Map<string, { x: number; y: number }>();
+      for (const id of movingGroups) {
+        const position = previews.get(id) ?? index.absolutePosition(id);
+        if (position) groupIdeal.set(id, position);
+      }
+      const groupResult = settleDraggedGroups(original, movingGroups, groupIdeal, {
+        groupSizes,
+        eligibleGroupIds,
+        collapsedGroupIds: index.collapsedGroupIds,
+        protectedNodeIds: new Set(index.compositeNodes.map(node => node.id)),
+      });
+      if (!groupResult.ok) {
+        core.options?.onInteractionError?.(new Error("空间不足，已恢复原位"));
+        return [];
+      }
+      settled = groupResult.nodes;
+    }
+    if (draggedNonGroup.length > 0) {
+      const nodeIdeal = new Map<string, { x: number; y: number }>();
+      for (const id of draggedNonGroup) {
+        const position = previews.get(id) ?? index.absolutePosition(id);
+        if (position) nodeIdeal.set(id, position);
+      }
+      const nodeResult = settleDraggedNodeBoundaries(settled, draggedNonGroup, nodeIdeal, {
+        groupSizes,
+        eligibleGroupIds,
+        collapsedGroupIds: index.collapsedGroupIds,
+        documentOrder: index.documentOrder,
+      });
+      if (!nodeResult.ok) {
+        core.options?.onInteractionError?.(new Error(nodeResult.reason === "node-too-large" ? "节点超出组的可用范围" : "空间不足，已恢复原位"));
+        return [];
+      }
+      settled = nodeResult.nodes;
+    }
+    const changedCommands = planGroupStructureChange(original, settled);
+    // Both pure moves and structural drops use the same atomic diff planner.
+    return changedCommands;
   };
 
   const evaluate = (): boolean => {
     const gesture = state.gesture;
+    let dropChanged = false;
     if(gesture.kind==='drag' && gesture.moved){
       // 片场复制导入。受保护预览的拖动只移动卡片，不做接收方预览（不显示导入提示）。
       if (!previewOnlyDrag(gesture.origins)) {
@@ -190,8 +155,28 @@ export function createDragGestureFamily(
       } else {
         nodeDrop.clear();
       }
+      const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+      const index = sharedCanvasNodeIndex(canvasState);
+      const roots = index?.dragRoots(gesture.origins) ?? gesture.origins;
+      const draggedNonGroup = [...roots.keys()].filter((id) => index?.byId.get(id)?.type !== "group");
+      const groupSizes = index ? new Map(index.groupBounds.map(group => [group.id, { width: group.width, height: group.height }])) : undefined;
+      const targets = canvasState && index && draggedNonGroup.length > 0
+        ? resolveDraggedNodeDropTargets(
+          index.orderedNodes,
+          draggedNonGroup,
+          state.localPositions,
+          { groupSizes, eligibleGroupIds: index.dropTargetGroupIds },
+        )
+        : [];
+      dropChanged = targets.length !== state.dropTargetGroupIds.length
+        || targets.some((id, i) => id !== state.dropTargetGroupIds[i]);
+      state.dropTargetGroupIds = targets;
+      if (dropChanged) schedule("input");
+    } else if (state.dropTargetGroupIds.length > 0) {
+      state.dropTargetGroupIds = [];
+      schedule("input");
     }
-    if (gesture.kind !== "drag" || !gesture.attach) return false;
+    if (gesture.kind !== "drag" || !gesture.attach) return dropChanged;
     // Most drags have no held Q/E key: no contact geometry is needed.
     if (!gesture.attach.mode) {
       const changed = gesture.attach.contactNodeId !== null;
@@ -201,7 +186,7 @@ export function createDragGestureFamily(
     const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
     const scene = core.buildDragScene?.() ?? buildScene();
     if (!canvasState || !scene) return false;
-    return evaluateDragAttachContact(gesture.attach, scene, canvasState);
+    return evaluateDragAttachContact(gesture.attach, scene, canvasState) || dropChanged;
   };
 
   const commit = (
@@ -235,6 +220,7 @@ export function createDragGestureFamily(
 
   const cancel = (): void => {
     nodeDrop.clear();
+    state.dropTargetGroupIds = [];
     state.gesture = { kind: "none" };
     state.draft = null;
     state.localPositions = new Map();

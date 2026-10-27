@@ -121,6 +121,17 @@ export function create2dInputFamily(core: InteractionCore) {
     const isRight = event.button === 2;
     const world = core.pointerWorld(event);
     state.lastPointerWorld = world;
+    // pointerup is itself the authoritative release coordinate. A final DOM
+    // event can arrive without an intervening pointermove, so refresh the
+    // drag preview from the release point before constructing the atomic batch.
+    if (state.gesture.kind === "drag" && state.gesture.moved) {
+      const dx = world.x - state.gesture.start.x;
+      const dy = world.y - state.gesture.start.y;
+      const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
+      const roots = index?.dragRoots(state.gesture.origins) ?? state.gesture.origins;
+      state.localPositions = new Map();
+      for (const [id, origin] of roots) state.localPositions.set(id, { x: origin.x + dx, y: origin.y + dy });
+    }
     if (event.button !== undefined && event.button > 1 && !isRight) return;
     // 平移手势只用视口，不依赖命中几何：在任何查询之前处理。
     if (event.button === 1 || state.spacePressed) {
@@ -594,6 +605,7 @@ export function create2dInputFamily(core: InteractionCore) {
         // 指针可能已释放。
       }
       state.gesture = { kind: "none" };
+      state.dropTargetGroupIds = [];
       state.localPositions = new Map();
       state.localSizes = new Map();
       schedule(releasedKind === "pan" ? "viewport" : "input");

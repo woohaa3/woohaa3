@@ -364,6 +364,8 @@ export type BevyGroupPresentation = {
   modelBounds?: { aabb: Aabb; extent: number };
   /** Private run projection: group-header status button; no ledger identity crosses into renderer. */
   runStatus?: { label: string; state: string };
+  /** Render-only target emphasis while a node is being released into this group. */
+  dropTarget?: boolean;
 };
 
 export type BevyRenderEdge = {
