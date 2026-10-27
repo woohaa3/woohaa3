@@ -55,6 +55,33 @@ function entryOf(entry: ExtensionLayerEntry): { plugin: AnyHostExtensionPlugin; 
     : { plugin: entry as AnyHostExtensionPlugin, optional: true };
 }
 
+/**
+ * 构造某扩展的 `ctx.webServer`：把三个注册方法转发到宿主注册表。
+ *
+ * 路由**始终**是扩展声明的相对 route：宿主按 `<extensionId>/<route>` 组织全局键并对外拼
+ * `/api/extensions/<extensionId>/...`，插件无法绕过前缀（否则任意扩展都能占用根路径）。
+ * 宿主不可用（最小装配 / 测试）时返回一个抛稳定错误的 facade：让插件在 `apply` 里就知道
+ * 「这次运行没有 web 能力」，而不是静默注册成功却永不生效。
+ */
+function createWebServerFacade(
+  hostOf: () => import("@woohaa3/contracts").HostWebServerService | undefined,
+  extensionId: string
+): import("@woohaa3/contracts").HostWebServerService {
+  const require = () => {
+    const host = hostOf();
+    if (!host) {
+      throw new Error(`扩展 ${extensionId} 请求了 web 路由，但本次装配没有可用的宿主`);
+    }
+    return host;
+  };
+  // 惰性取：application 模块比扩展层晚装载，注册面只能按调用现取。
+  return {
+    register: (registration) => require().register(registration),
+    registerHttp: (registration) => require().registerHttp(registration),
+    registerRawHttp: (registration) => require().registerRawHttp(registration)
+  };
+}
+
 function timeouts(config: LoaderServices["config"]) {
   return {
     activation: () => boundedTimeout(config.get("extensions.activationTimeoutMs" as never), DEFAULT_ACTIVATION_TIMEOUT_MS),
@@ -137,9 +164,14 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHo
     // 每个扩展层插件拿到带宿主 origin 盖章的 `ctx.marketplace`（change: 2026-10-21-add-extension-marketplace-point，D3）：
     // 受管根 / 可写根 / 缺少 origin 的插件注册市场来源会被拒绝。没有市场服务（测试最小装配）时原样装载。
     const marketplace = ctx.get("marketplace");
-    const host = marketplace
-      ? ctx.extend({ marketplace: marketplace.scoped((plugin as { origin?: HostPluginOrigin }).origin) } as never)
-      : ctx;
+    // `ctx.webServer`：受控 HTTP 路由注册面。由站点 gate 按 extensionId 绑定（路由自动带命名空间），
+    // 与 `ctx.generation` / `ctx.storage` 同级——它是公共基础设施，不是 backend 类插件的专属特权。
+    const webServer = gated ? siteGate?.handle(plugin.name)?.webServer : undefined;
+    const overrides = {
+      ...(marketplace ? { marketplace: marketplace.scoped((plugin as { origin?: HostPluginOrigin }).origin) } : {}),
+      ...(webServer ? { webServer } : {})
+    };
+    const host = Object.keys(overrides).length > 0 ? ctx.extend(overrides as never) : ctx;
     const started = host.plugin(plugin as never, values() as never) as Fiber & PromiseLike<Fiber>;
     try {
       await withDeadline(started, limits.activation(), "activation-timeout");
@@ -194,6 +226,9 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHo
           holders = Math.max(0, holders - 1);
           if (holders === 0) await stop();
         }),
+      // 该扩展的受控 HTTP 注册面：按 extensionId 绑定，路由前缀由宿主添加。
+      // 惰性构造——application 模块比扩展层晚装载，这里只能按调用现取。
+      webServer: createWebServerFacade(() => ctx.get("application")?.service.host()?.webServerFor(plugin.name), plugin.name),
       // 健康用**当前**配置求值：管理员补上 API Key 后，站点状态不必重启插件就回到 active。
       // 只在 fiber 运行期间报告；未装载时状态投影自己会给出 configuring/disabled。
       ...(plugin.health

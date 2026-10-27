@@ -11,7 +11,12 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { FilmSetConversionProvider } from "../canvas/film-set-conversion/provider.js";
-import type { ApplicationBackendExtensionHealth } from "../extension/runtime.js";
+import type {
+  ApplicationBackendExtensionHealth,
+  ApplicationBackendHandlerRegistration,
+  ApplicationBackendHttpHandlerRegistration,
+  ApplicationBackendRawHttpHandlerRegistration
+} from "../extension/runtime.js";
 import type { PluginIcon } from "../plugin-icon.js";
 import type { CanvasTaskModelType } from "../task/dto.js";
 import { parseSettingValue, type SettingDefinition, type SettingPrimitive } from "../settings/index.js";
@@ -48,6 +53,13 @@ export type HostExtensionContext = Context & {
    * 只有内置根扩展可以注册来源；受管根 / 可写根扩展调用 `register` 会被宿主拒绝。
    */
   readonly marketplace: HostMarketplaceService;
+  /**
+   * 受控 HTTP 路由（可选：最小装配/测试里可能没有 gateway）。
+   *
+   * 与 `generation` / `storage` 同级：它是**公共基础设施**，不是某类插件的专属特权。
+   * 声明它是可选的原因：纯 provider 插件不需要它，宿主在无 gateway 的组合里也不提供。
+   */
+  readonly webServer?: HostWebServerService;
 };
 
 /**
@@ -149,3 +161,24 @@ export type HostExtensionPlugin<F extends HostConfigFields = HostConfigFields> =
 };
 
 export type AnyHostExtensionPlugin = HostExtensionPlugin<any>;
+
+/**
+ * `ctx.webServer`：扩展注册受控 HTTP 路由的唯一入口。
+ *
+ * 与 `hostPlugin` 的 `ctx.generation` / `ctx.storage` 同级——不再挂在某个「后端宿主」胖接口上。
+ * 注册仍是**相对 route**：宿主按 `<extensionId>/<route>` 组织全局注册表并对外拼
+ * `/api/extensions/<extensionId>/...`，前缀由宿主添加，插件无法绕过（否则任意扩展都能占用根路径）。
+ *
+ * 三种注册对应三种响应能力：
+ * - `register`：结构化 JSON（自动序列化、受控错误码）；
+ * - `registerHttp`：可写 header / 状态码，仍由宿主构造 req/res 视图；
+ * - `registerRawHttp`：直接操作 Node `req`/`res`（302 重定向、HTML 完成页、SSE 长连接）。
+ */
+export type HostWebServerService = {
+  /** 受控 JSON handler：路由 + 处理函数，宿主统一分派并序列化结果。 */
+  register(registration: ApplicationBackendHandlerRegistration): void;
+  /** HTTP handler：可设置状态码与响应头。 */
+  registerHttp(registration: ApplicationBackendHttpHandlerRegistration): void;
+  /** 原始 HTTP handler：直接读写 Node `req`/`res`（重定向、HTML、SSE）。 */
+  registerRawHttp(registration: ApplicationBackendRawHttpHandlerRegistration): void;
+};

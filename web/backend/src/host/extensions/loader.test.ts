@@ -216,6 +216,38 @@ describe("扩展层装载器", () => {
     expect(siteGate.definitions[0]!.health?.()).toBeUndefined();
     await activation?.dispose?.();
   });
+
+  it("hostPlugin 通过 ctx.webServer 注册受控路由，路由按 extensionId 命名空间隔离", async () => {
+    // 概念对齐：web 路由是**公共基础设施**（与 ctx.generation / ctx.storage 同级），
+    // 不是 backend 类插件的专属特权。注册的 route 只写相对路径，前缀由宿主添加。
+    const { ctx, load } = await setup();
+    const siteGate = createSiteGate(["sample"]);
+    const registered: Array<{ kind: string; route: string }> = [];
+    const webServerFor = (extensionId: string) => ({
+      register: (registration: { route: string }) => registered.push({ kind: "json", route: `${extensionId}/${registration.route}` }),
+      registerHttp: (registration: { route: string }) => registered.push({ kind: "http", route: `${extensionId}/${registration.route}` }),
+      registerRawHttp: (registration: { route: string }) => registered.push({ kind: "raw", route: `${extensionId}/${registration.route}` })
+    });
+    ctx.provide("application", { siteGate, service: { host: () => ({ webServerFor }) } } as never);
+
+    const plugin: HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> = {
+      ...samplePlugin([]),
+      apply(pluginCtx) {
+        pluginCtx.webServer!.register({ route: "status", auth: "public", handle: () => ({ body: {} }) });
+        pluginCtx.webServer!.registerRawHttp({ route: "auth/callback", method: "GET", auth: "public", purpose: "read", handle: async () => undefined });
+      }
+    };
+    await load([plugin]);
+    const definition = siteGate.definitions[0]!;
+    const activation = await definition.activate({} as never);
+
+    expect(registered).toEqual([
+      { kind: "json", route: "sample/status" },
+      { kind: "raw", route: "sample/auth/callback" }
+    ]);
+    await activation?.dispose?.();
+  });
+
 });
 
 describe("扩展层装载时限与就绪（D4/D5）", () => {

@@ -85,6 +85,8 @@ export type ApplicationExtensionHost = {
     res: import("./contract.js").ApplicationExtensionRawResponse;
     context: ExtensionDispatchContext;
   }) => Promise<{ registration: import("./contract.js").ApplicationBackendRawHttpHandlerRegistration } | undefined>;
+  /** 按扩展 identity 取受控 HTTP 注册面（`ctx.webServer` 的宿主实现）。 */
+  webServerFor: (extensionId: string) => import("@woohaa3/contracts").HostWebServerService | undefined;
   resolvePublicRoute: (
     extensionId: string,
     route: string,
@@ -191,6 +193,56 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     return missing.length === 0 ? { ok: true } : { ok: false, missing };
   };
 
+    /**
+     * 按 owner 注册三类 handler。
+     *
+     * `activate` 与 `webServerFor` 共用同一份实现：通过 `ctx.webServer` 注册的路由
+     * 与插件在 `activate` 里注册的完全等价（同一张全局表、同一套冲突检查）。
+     */
+    const registerInto = (
+      target: OwnerState,
+      handle: string,
+      /** 路由 → 全局键（按 extensionId 命名空间隔离；recovery 实例另加命名空间）。 */
+      keyOf: (route: string) => string
+    ): import("@woohaa3/contracts").HostWebServerService => ({
+      register(registration) {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "handler route 必须是非空相对路由");
+        }
+        const route = keyOf(registration.route);
+        if (globalHandlers.has(route)) {
+          throw new ExtensionHostError("duplicate-handler", `handler route 已注册：${registration.route}`);
+        }
+        globalHandlers.set(route, handle);
+        target.handlers.set(route, registration);
+      },
+      registerHttp(registration) {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "HTTP handler route 必须是非空相对路由");
+        }
+        const route = keyOf(registration.route);
+        const key = httpHandlerKey(registration.method, route);
+        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
+          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
+        }
+        globalHttpHandlers.set(key, handle);
+        target.httpHandlers.set(key, registration);
+      },
+      registerRawHttp(registration) {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "原始 HTTP handler route 必须是非空相对路由");
+        }
+        const route = keyOf(registration.route);
+        const key = httpHandlerKey(registration.method, route);
+        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
+          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
+        }
+        globalRawHttpHandlers.set(key, handle);
+        target.rawHttpHandlers.set(key, registration);
+      }
+    });
+
+
   const activateInternal = async (
     definition: ApplicationBackendExtensionDefinition,
     configVersion: number,
@@ -254,7 +306,6 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
      */
     const handlerKey = (route: string) =>
       mode === "public" ? `${definition.extensionId}/${route}` : `_recovery/${definition.extensionId}/${configVersion}/${route}`;
-    const namedHandlerKey = handlerKey;
 
     const configFacade: ApplicationBackendConfigFacade = options.configFacadeFor?.(definition.extensionId) ?? EMPTY_CONFIG_FACADE;
     const workFacade: ApplicationBackendWorkFacade = options.workFacadeFor?.(definition.extensionId) ?? REJECTING_WORK_FACADE;
@@ -288,42 +339,10 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
         globalCapabilities.set(id, handle);
         owner.capabilities.set(id, registration.value);
       },
-      registerHandler: (registration) => {
-        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
-          throw new ExtensionHostError("duplicate-handler", "handler route 必须是非空相对路由");
-        }
-        // 全局键按 `extensionId/route` 命名空间隔离：不同扩展可各自声明同名 route（如 `me`）。
-        const route = namedHandlerKey(registration.route);
-        if (globalHandlers.has(route)) {
-          throw new ExtensionHostError("duplicate-handler", `handler route 已注册：${registration.route}`);
-        }
-        globalHandlers.set(route, handle);
-        owner.handlers.set(route, registration);
-      },
-      registerHttpHandler: (registration) => {
-        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
-          throw new ExtensionHostError("duplicate-handler", "HTTP handler route 必须是非空相对路由");
-        }
-        const route = handlerKey(registration.route);
-        const key = httpHandlerKey(registration.method, route);
-        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
-          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
-        }
-        globalHttpHandlers.set(key, handle);
-        owner.httpHandlers.set(key, registration);
-      },
-      registerRawHttpHandler: (registration) => {
-        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
-          throw new ExtensionHostError("duplicate-handler", "原始 HTTP handler route 必须是非空相对路由");
-        }
-        const route = handlerKey(registration.route);
-        const key = httpHandlerKey(registration.method, route);
-        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
-          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
-        }
-        globalRawHttpHandlers.set(key, handle);
-        owner.rawHttpHandlers.set(key, registration);
-      },
+      // 三类 handler 的注册实现与 webServerFor 共用（见 registerInto）。
+      registerHandler: (registration) => registerInto(owner, handle, handlerKey).register(registration),
+      registerHttpHandler: (registration) => registerInto(owner, handle, handlerKey).registerHttp(registration),
+      registerRawHttpHandler: (registration) => registerInto(owner, handle, handlerKey).registerRawHttp(registration),
       registerResource: (resource) => {
         if (typeof resource.id !== "string" || resource.id === "") {
           throw new ExtensionHostError("duplicate-resource", "resource id 必须是非空字符串");
@@ -477,10 +496,26 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     owners.delete(key);
   };
 
+  /**
+   * 按扩展 identity 绑定的受控 HTTP 注册面（`ctx.webServer` 的宿主实现）。
+   *
+   * 注册键仍是 `<extensionId>/<相对 route>`，与 `activate` 内部走同一张注册表——
+   * 所以通过 `ctx.webServer` 注册的路由与插件在 `activate` 里注册的完全等价。
+   * 扩展未激活/已释放时返回 undefined，调用方据此给出稳定错误。
+   */
+  const webServerFor = (extensionId: string): import("@woohaa3/contracts").HostWebServerService | undefined => {
+    const found = [...owners.entries()].find(([, entry]) => entry.extensionId === extensionId && entry.mode === "public");
+    if (!found) return undefined;
+    const [key, owner] = found;
+    // 公共实例的路由键命名空间：`<extensionId>/<route>`。
+    return registerInto(owner, key, (route) => `${extensionId}/${route}`);
+  };
+
   return {
     activate,
     activateVersioned,
     activateManifest,
+    webServerFor,
     resolveCapability: (id) => globalCapabilities.get(id) !== undefined ? owners.get(globalCapabilities.get(id)!)?.capabilities.get(id) : undefined,
     hasCapability: (id) => globalCapabilities.has(id),
     resolveCapabilityOwner: (id) => {
