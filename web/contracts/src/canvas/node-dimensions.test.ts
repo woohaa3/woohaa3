@@ -75,12 +75,11 @@ function assertVisibleGeometry(canvas: ServerCanvas) {
 }
 
 describe("shared effective canvas dimensions", () => {
-  it("uses the same existing nested group footer for scene, navigation, selection and agent bounds", () => {
+  it("uses the same visible group footer for scene, navigation, selection and agent bounds", () => {
     const canvas = empty();
     canvas.document.nodes = [
       {id: "outer", type: "group", position: {x: 100, y: 200}, width: 300, height: 220},
-      {id: "inner", type: "group", parentId: "outer", position: {x: 40, y: 40}, width: 280, height: 200},
-      {id: "member", type: "image", parentId: "inner", position: {x: 40, y: 40}, width: 200, height: 100}
+      {id: "member", type: "image", parentId: "outer", position: {x: 40, y: 40}, width: 280, height: 220}
     ];
     const before = structuredClone(canvas);
     const scene = assertVisibleGeometry(canvas);
@@ -145,7 +144,7 @@ describe("shared effective canvas dimensions", () => {
     });
   });
 
-  it("creates full preview cards and lays out nested groups using visible extents", () => {
+  it("creates full preview cards and lays out groups using visible extents", () => {
     const operations: AgentPlanOperation[] = Array.from(
       { length: 6 },
       (_, i) => ({ op: "create_node", ref: "m" + i, kind: "model" }),
@@ -156,12 +155,6 @@ describe("shared effective canvas dimensions", () => {
       title: "建筑模块",
       members: Array.from({ length: 6 }, (_, i) => ({ ref: "m" + i })),
       layout: { mode: "grid", columns: 3, gapX: 20, gapY: 24 },
-    });
-    operations.push({
-      op: "create_group",
-      ref: "outer",
-      title: "素材库",
-      members: [{ ref: "buildings" }],
       placement: { mode: "absolute", position: { x: -1000, y: 200 } },
     });
     const { canvas, plan } = apply(empty(), operations);

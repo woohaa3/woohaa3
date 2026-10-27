@@ -28,6 +28,7 @@ import { getGroupLayoutSizes } from "../domain/core/group-geometry.js";
 import { groupAppearanceModel } from "../group-appearance.js";
 import { groupPresentationRect, hiddenByCollapsedGroups } from "../group-presentation.js";
 import { clampGroupBadgeScale } from "../group-badge.js";
+import { canvasGroundAnchor, compareCanvasGroundOrder } from "../ground-anchor.js";
 import { defaultAppTheme, validateAppThemePreset, type AppThemeSnapshot } from "../../theme/index.js";
 import { resolveNodeDisplayName, contentTypeLabelForNode } from "../node-display-name.js";
 import {
@@ -311,14 +312,19 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     ? input.dropTargetGroupIds
     : new Set(input.dropTargetGroupIds ?? []);
   const hidden = input.modelFocus || input.imageFocus || input.videoFocus ? new Set<string>() : hiddenByCollapsedGroups(canvas);
-  // Keep projection input independent from insertion order. Render depth has
-  // a deliberate grouping policy below: ungrouped roots are always the lowest
-  // layer, and group roots are ordered by id. Persisted zIndex remains a
-  // document/edit field; it is not reused as a second visual truth here.
+  // Keep projection input independent from insertion order. Render depth has a
+  // deliberate layering policy below: ungrouped roots are always the lowest
+  // layer and top-level containers are ordered by their structural bottom edge.
+  // Persisted zIndex remains a document/edit field; it is not reused as a second
+  // visual truth here (change: 2026-10-27-order-canvas-layers-by-ground-anchor).
   const canonicalNodes = [...canvas.document.nodes];
+  // 顶层容器身份（group 结构容器与 composite-asset 片场）：只有在容器层按锚点排序，
+  // 普通节点永远留在未归属层（change: 2026-10-27-order-canvas-layers-by-ground-anchor）。
+  const containerIds = new Set<string>();
   const projectedNodes = canonicalNodes.filter(node => !hidden.has(node.id)).map((node) => {
     const context = { canvas, node, data: nodeData[node.id] };
     const capabilities = capabilitiesOf(node);
+    if (capabilities.container || capabilities.scope) containerIds.add(node.id);
     const kind = capabilities.appearance?.palette ?? "node";
     const previewCard = capabilities.modelPreview;
     // 纯模型节点（片场 animation3d + 通用扩展节点 extension3d）：无卡片，节点矩形即范围框。
@@ -476,11 +482,14 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     return rendered;
   });
 
-  // Render depth is intentionally separate from persisted zIndex: ungrouped
-  // roots are always below groups, group roots are sorted by id, and every
-  // group is emitted before its descendants so its panel sits underneath its
-  // members. This is a derived render sequence and never writes a second
-  // persisted ordering field.
+  // Render depth is intentionally separate from persisted zIndex
+  // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D2/D3）：
+  // 1. 未归属层：`parentId` 为空且不是容器的节点按现有文档顺序在最下；
+  // 2. 容器层：顶层容器（`group` 与顶层 `composite-asset` 片场）按**绝对结构底边**锚点
+  //    升序（y 越大越靠前、越后绘制），同锚点按节点 id 升序；每个容器后紧跟它的成员闭包，
+  //    组内片场按成员处理，不重复进入容器排序；
+  // 3. 兜底：被环/异常 parent 关系挤出的节点仍按文档顺序发射，不丢节点。
+  // 这是派生的绘制序列，不写回第二份持久顺序字段。
   const projectedById = new Map(projectedNodes.map((node) => [node.id, node]));
   const documentOrder = new Map(canonicalNodes.map((node, index) => [node.id, index]));
   const children = new Map<string, string[]>();
@@ -511,8 +520,12 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     for (const child of children.get(id) ?? []) visit(child);
   };
   const roots = canonicalNodes.filter((node) => !node.parentId || !projectedById.has(node.parentId));
-  for (const node of roots.filter((entry) => entry.type !== "group")) visit(node.id);
-  for (const node of roots.filter((entry) => entry.type === "group").sort((a, b) => compareId(a.id, b.id))) visit(node.id);
+  for (const node of roots.filter((entry) => !containerIds.has(entry.id))) visit(node.id);
+  const containers = roots
+    .filter((entry) => containerIds.has(entry.id) && projectedById.has(entry.id))
+    .map((entry) => ({ id: entry.id, anchor: canvasGroundAnchor(projectedById.get(entry.id)!) }))
+    .sort(compareCanvasGroundOrder);
+  for (const container of containers) visit(container.id);
   for (const node of projectedNodes) visit(node.id);
   const nodes = orderedIds.map((id) => projectedById.get(id)!);
 

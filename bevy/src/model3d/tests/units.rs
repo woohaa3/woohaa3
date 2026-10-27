@@ -542,3 +542,50 @@ fn model_world_is_stable_and_scale_sensitive() {
         "scale 改变应翻倍世界半径"
     );
 }
+
+/// `offset.z` 保留在协议与内容身份里，但不再参与画布观察深度
+/// （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D5）。
+#[test]
+fn placement_offset_z_never_moves_canvas_anchor() {
+    let node: GraphNode = serde_json::from_value(serde_json::json!({
+        "id": "m", "type": "model3d", "x": 10., "y": 20., "width": 260., "height": 195.
+    }))
+    .unwrap();
+    let model = ModelSnapshot {
+        scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
+        ops: vec![ModelOp::Box {
+            id: "body".into(),
+            parent: None,
+            position: [0.0, 1.0, 0.0],
+            rotation: [0.0; 3],
+            scale: [1.0; 3],
+            color: None,
+            material: None,
+            size: [2.0, 2.0, 2.0],
+        }],
+        signature: "sig".into(),
+        extent: 2.0,
+        aabb: None,
+        geometry_keys: None,
+        prepared_bounds: None,
+        placement: ModelPlacement::default(),
+    };
+    let base = ModelPlacement::default();
+    let with_z = ModelPlacement {
+        offset: crate::protocol::ModelOffset {
+            x: 0.0,
+            y: 0.0,
+            z: -7.0,
+        },
+        ..ModelPlacement::default()
+    };
+    let anchor = |placement: &ModelPlacement| {
+        model_anchor(
+            &node,
+            &model,
+            placement,
+            model_unit(&node, &model, placement),
+        )
+    };
+    assert_eq!(anchor(&base), anchor(&with_z));
+}

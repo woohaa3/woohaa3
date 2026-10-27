@@ -60,7 +60,7 @@ fn continuous_surface_is_between_grid_and_model_and_excluded_from_capture() {
             let world = transform.transform_point(Vec3::from_array(*p));
             let camera_space = crate::isometric_grid::view_rotation() * world;
             assert!(camera_space.z > crate::isometric_grid::GRID_DEPTH);
-            assert!(camera_space.z < -9000.);
+            assert!(camera_space.z < 0.001);
             let screen = crate::isometric_grid::screen_point_from_world(world, &view);
             let expected = Vec2::new(
                 node.x + node.width / 2. + p[0],
@@ -91,23 +91,23 @@ fn continuous_surface_is_between_grid_and_model_and_excluded_from_capture() {
     else {
         panic!();
     };
+    // 3D 帧只剩不透明徽章底座；半透明组底由 2D 面板唯一拥有
+    // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D4）。
     assert!(
-        colors
-            .iter()
-            .all(|c| (c[3] - super::super::group::GROUP_FILL_ALPHA).abs() < 0.0001 || c[3] == 1.)
+        colors.iter().all(|c| c[3] == 1.),
+        "3D group surface must not contain translucent fill geometry"
     );
-    // The badge is opaque on the group underlay; only its shallow lip leaves the rectangle.
-    assert!(colors.iter().any(|c| c[3] == 1.));
+    let badge = group_model::badge_rect(&node);
+    let origin = Vec2::new(node.x + node.width / 2., node.y + node.height / 2.);
     for p in positions {
-        assert!(p[0].abs() <= node.width / 2. + 0.001);
-        assert!(p[1] <= node.height / 2. + 0.001);
-        assert!(-p[1] <= node.height / 2. + group_model::BADGE_OUTSET + 0.001);
+        let x = p[0] + origin.x;
+        let y = origin.y - p[1];
+        assert!(x >= badge.x - 0.001 && x <= badge.x + badge.z + 0.001);
+        assert!(y >= badge.y - 0.001 && y <= badge.y + badge.w + 0.001);
     }
-    assert!(
-        positions
-            .iter()
-            .any(|p| (p[1] + node.height / 2.).abs() < 0.001)
-    );
+    // 徽章底座只比本组深度平面退后一个极小 ε（逐像素合成，不再是深度带后沿）。
+    let camera_depth = (crate::isometric_grid::view_rotation() * transform.translation).z;
+    assert!((camera_depth - crate::depth_order::group_badge_depth("g")).abs() < 0.001);
 }
 
 #[test]
@@ -197,11 +197,12 @@ fn world_surface_follows_model_presence_and_reclaims_assets() {
     let mut app = app();
     app.update();
     let (with_badge, badge_mesh, _) = surface(&mut app);
-    assert!(app
-        .world()
-        .resource::<Assets<Mesh>>()
-        .get(&badge_mesh)
-        .is_some());
+    assert!(
+        app.world()
+            .resource::<Assets<Mesh>>()
+            .get(&badge_mesh)
+            .is_some()
+    );
     // 普通组改由 2D 面板铺底；再画一层 55% 的 3D 面会把背板叠深，因此没有模型时必须释放。
     app.world_mut().resource_mut::<CurrentScene>().0.nodes[0].model = None;
     app.update();
@@ -212,11 +213,12 @@ fn world_surface_follows_model_presence_and_reclaims_assets() {
     app.update();
     let (restored, restored_mesh, _) = surface(&mut app);
     assert_ne!(restored, with_badge);
-    assert!(app
-        .world()
-        .resource::<Assets<Mesh>>()
-        .get(&restored_mesh)
-        .is_some());
+    assert!(
+        app.world()
+            .resource::<Assets<Mesh>>()
+            .get(&restored_mesh)
+            .is_some()
+    );
     assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
     assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 1);
 }

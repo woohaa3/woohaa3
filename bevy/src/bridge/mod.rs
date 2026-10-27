@@ -161,8 +161,11 @@ pub(crate) fn work_diagnostics() -> String {
     let preview = PREVIEW_DIAGNOSTICS.with(Cell::get);
     let shot_preview = SHOT_PREVIEW_DIAGNOSTICS.with(Cell::get);
     let film_set_items = crate::canvas_query::film_set_pick::diagnostics_json();
+    // 3D 根按可见地面顺序做整对象分离；这里只报告接受点结算到的根/重叠簇规模，
+    // 同一根内部的遮挡仍交给深度缓冲（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D3/D4）。
+    let depth = crate::depth_order::diagnostics();
     format!(
-        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"containerBlockBuilds\":{},\"filmSetItems\":{},\"models\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"shotPreviews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}}}}",
+        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"containerBlockBuilds\":{},\"filmSetItems\":{},\"models\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"shotPreviews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}}}}",
         WORK_SNAPSHOT_BUILDS.with(Cell::get),
         WORK_PICK_CANDIDATE_BUILDS.with(Cell::get),
         WORK_MESH_BUILDS.with(Cell::get),
@@ -189,7 +192,10 @@ pub(crate) fn work_diagnostics() -> String {
         shot_preview[4],
         shot_preview[5],
         shot_preview[6],
-        shot_preview[7]
+        shot_preview[7],
+        depth.roots,
+        depth.clusters,
+        depth.compressed_clusters
     )
 }
 

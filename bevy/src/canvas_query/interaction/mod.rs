@@ -85,7 +85,16 @@ pub(crate) fn accept_positions(
             return Err("not-overview");
         }
         let plan = positions::plan(snapshot, &request.positions)?;
-        let models = super::model_pick::plan_positions(&plan.deltas)?;
+        // 候选先按基线平移；任一步失败都在改动 snapshot/深度表之前返回，保持原子拒绝。
+        let mut models = super::model_pick::plan_positions(&plan.deltas)?;
+        // 位置是相对最近完整场景的绝对预览：每次从基线平移根表，再结算逐像素深度
+        // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D3）。
+        crate::depth_order::apply_deltas(
+            plan.deltas
+                .iter()
+                .map(|delta| (delta.id.as_str(), delta.dx, delta.dy)),
+        );
+        super::model_pick::retune_depth(&mut models);
         // 内部对象候选只在片场聚焦存在，overview 位置增量没有需要同步的交集：
         // 不再平移/维护内部候选或其基线（change: 2026-10-14-scope-film-set-object-picking-to-focus，
         // design D3）。普通模型候选、2D snapshot、viewport 与 generation 仍走原有原子提交。
@@ -180,7 +189,7 @@ pub(crate) fn point_query(
     }
 }
 
-/// 框选查询：矩形（世界坐标，允许负宽高）相交的节点，保持文档顺序。
+/// 框选查询：矩形（世界坐标，允许负宽高）相交的节点，保持当前发射顺序。
 pub(crate) fn marquee_query(
     expected: u32,
     x: f32,

@@ -19,11 +19,23 @@ import { sortNodesParentsFirst } from "./group-selection.js";
 
 /**
  * 清除指向不存在父节点的 parentId，并把相对坐标烘焙为绝对坐标。
+ *
+ * 读取/命令收敛路径共用同一套嵌套 group 拆分规则
+ * （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
  */
 export function sanitizeWoohaa3CanvasParentIds(nodes: Woohaa3CanvasNode[]): Woohaa3CanvasNode[] {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   let changed = false;
   const next = nodes.map((node) => {
+    // 嵌套 group 不是合法结构：提升为独立顶层组，位置烘焙为绝对坐标，成员与几何不变。
+    if (node.type === "group" && node.parentId) {
+      changed = true;
+      return {
+        ...node,
+        parentId: undefined,
+        position: getWoohaa3CanvasNodeAbsolutePosition(node, byId)
+      };
+    }
     if (!node.parentId || byId.has(node.parentId)) return node;
     changed = true;
     return {
@@ -36,10 +48,21 @@ export function sanitizeWoohaa3CanvasParentIds(nodes: Woohaa3CanvasNode[]): Wooh
 }
 
 /**
- * 持久化结构节点的 parentId 清洗（change: add-canvas-node-grouping，design D1/D6）。
+ * 持久化结构节点的 parentId 清洗（change: add-canvas-node-grouping，design D1/D6；
+ * change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
+ *
+ * 三类坏结构都收敛成同一个结果：
+ * - 悬空 parent（引用了不存在的节点）；
+ * - 自指或成环（祖先链回到自身）；
+ * - 嵌套 group（group 是另一个 group 的成员）：把该组提升为独立顶层组。
+ *
+ * 清空 `parentId` 时把 position 烘焙为绝对画布坐标，因此节点的**绝对位置**不变；后代保持
+ * 相对坐标，祖先的绝对位置被保留后它们的绝对位置自然不变。规范化是纯函数、幂等、确定性。
  */
 export function sanitizeSerializedParentIds<T extends {
   id: string;
+  /** 结构类型；只有 `group` 参与嵌套拆分，缺失按非容器处理。 */
+  type?: string;
   parentId?: string;
   position: { x: number; y: number };
 }>(nodes: T[]): T[] {
@@ -61,6 +84,11 @@ export function sanitizeSerializedParentIds<T extends {
   };
   let changed = false;
   const next = nodes.map((node) => {
+    // 嵌套 group：提升为独立顶层组，position 烘焙为绝对坐标（成员保持局部坐标）。
+    if (node.type === "group" && node.parentId) {
+      changed = true;
+      return { ...node, parentId: undefined, position: absoluteOf(node) };
+    }
     if (!node.parentId) return node;
     // 悬空 parent、自指或成环（祖先链回到自身）都视为坏结构，清除并烘焙绝对坐标。
     let cyclic = false;

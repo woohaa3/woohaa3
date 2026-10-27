@@ -22,6 +22,9 @@ mod theme_generated;
 /// 2D 共享纯几何与 interaction 查询（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
 /// 不依赖 Bevy/ECS/wasm，可在 native 下单独测试；`canvas2d` 渲染复用其布局与曲线函数。
 mod canvas_query;
+/// 画布级 3D 根逐像素深度的平局偏移：纯几何 + 线程本地已接受表
+/// （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D4）。
+mod depth_order;
 /// 预览渲染层/槽的统一分配与回收
 /// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.3）。
 pub mod preview_layers;
@@ -329,6 +332,9 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
             "Unknown model resource {missing}"
         )));
     }
+    // 接受点先结算 3D 根逐像素平局偏移：后续模型候选 AABB、徽章底座与根锚点都读同一份结果
+    // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D3/D4）。
+    depth_order::accept_scene(&scene);
     // 接受点同步发布 2D interaction snapshot 与 render scene
     // （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，design D2/D3）。
     let generation = canvas_query::accept_scene(&scene);
