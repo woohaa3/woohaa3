@@ -66,8 +66,8 @@ export type HostExtensionContext = Context & {
    * 可选：最小装配里没有。插件按存在与否决定能力，不要假定一定注入。
    */
   readonly services?: import("../extension/runtime.js").ApplicationExtensionServices;
-  /** 遥测出口注册面（可选：宿主没有遥测核心时不提供）。 */
-  readonly telemetryExport?: HostTelemetryExportService;
+  /** 遥测核心：`emit` / `query` / `registerExport` 在同一服务上（core 层必备）。 */
+  readonly telemetry: import("./telemetry.js").HostTelemetryService;
   /**
    * 只读部署上下文（`basePath` 等）。
    *
@@ -78,16 +78,6 @@ export type HostExtensionContext = Context & {
   readonly capabilities?: HostCapabilityService;
   /** 宿主诊断缓冲（可选）：只读投影，用于排障面板。 */
   readonly diagnostics?: import("../extension/runtime.js").ApplicationBackendDiagnostics;
-};
-
-/**
- * 遥测**出口**注册面（与 `HostTelemetryService` 的 emit/query 区分）。
- *
- * 出口是"把本地事实发到远端"的实现；谁注册谁收回（`ctx.effect` 里注销）。
- */
-export type HostTelemetryExportService = {
-  /** 注册一个遥测出口；返回注销函数。 */
-  register(exported: import("../backend/telemetry.js").TelemetryExport): () => void;
 };
 
 /** 能力注册面：`ctx.capabilities.register(id, value)`，注销同 `effect`。 */

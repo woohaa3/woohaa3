@@ -359,6 +359,7 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
         registerConversion: () => () => undefined
       },
       marketplace: { register: () => () => undefined, unregister: () => undefined, list: () => [], resolve: () => undefined },
+      telemetry: { registerExport: () => () => undefined, unregisterExport: () => undefined },
       webServer: { register: () => undefined, registerHttp: () => undefined, registerRawHttp: () => undefined },
       ...(options.registerStorage === false
         ? {}

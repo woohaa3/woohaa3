@@ -558,7 +558,6 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       release = () => releaseRegistrations(extensionId);
     }
     const services = options.servicesFor?.(extensionId, 0);
-    const registerTelemetryExport = options.registerTelemetryExportFor?.(extensionId);
     return {
       ...(webServer ? { webServer } : {}),
       capabilities: {
@@ -573,16 +572,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
         }
       },
       ...(services ? { services } : {}),
-      ...(registerTelemetryExport
-        ? {
-            telemetryExport: {
-              register: (exported: never) => {
-                registerTelemetryExport(exported);
-                return () => undefined;
-              }
-            }
-          }
-        : {}),
+
       ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
       release
     };

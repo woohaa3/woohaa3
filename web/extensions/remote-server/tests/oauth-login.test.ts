@@ -44,6 +44,7 @@ function createHost(input: { basePath?: string; raw?: boolean; canvas?: Record<s
     capabilities: { register: () => () => undefined },
     services: { canvas },
     storage: { register: () => () => undefined, unregister: () => undefined },
+    telemetry: { registerExport: () => () => undefined, emit: () => undefined, query: async () => ({ events: [], nextCursor: null }), unregisterExport: () => undefined },
     generation: {
       register: () => () => undefined,
       unregister: () => undefined,

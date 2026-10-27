@@ -154,7 +154,6 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHo
       ...(surface?.webServer ? { webServer: surface.webServer } : {}),
       ...(surface?.capabilities ? { capabilities: surface.capabilities } : {}),
       ...(surface?.services ? { services: surface.services } : {}),
-      ...(surface?.telemetryExport ? { telemetryExport: surface.telemetryExport } : {}),
       ...(surface?.diagnostics ? { diagnostics: surface.diagnostics } : {}),
       deployment: { basePath: applicationHost()?.basePath ?? "" }
     };

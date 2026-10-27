@@ -85,6 +85,7 @@ function createHost(
       registerConversion: () => () => undefined
     },
     storage: { register: () => () => undefined, unregister: () => undefined },
+    telemetry: { registerExport: () => () => undefined, emit: () => undefined, query: async () => ({ events: [], nextCursor: null }), unregisterExport: () => undefined },
     marketplace: { register: () => () => undefined, unregister: () => undefined, list: () => [], resolve: () => undefined },
     effect: (run: () => (() => void) | void) => {
       const undo = run();

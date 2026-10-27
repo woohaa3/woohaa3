@@ -566,7 +566,7 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
     // 与 `HostExtensionContext` 的必需项一一对应；其余能力（webServer / capabilities / services /
     // diagnostics）是可选服务，由装载器按扩展 provide，缺席时插件按能力分支（例如没有 raw HTTP
     // 接缝就回退短码登录），因此不进 inject。
-    inject: ["log", "generation", "storage", "marketplace"],
+    inject: ["log", "generation", "storage", "marketplace", "telemetry"],
     Config: REMOTE_SERVER_CONFIG,
     async apply(ctx, config) {
       // 部署配置：框架已把配置文件里的值校验好传进来；`config.local.json` 与 env 仍作为
@@ -741,13 +741,16 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       // 与存储后端同形：谁注册谁收回。宿主没有遥测能力时（纯本地宿主/旧版本）静默跳过，
       // 不把它当成激活失败——上报本来就只是 best-effort。
       // 开关在宿主设置 `telemetry.export.enabled`（core 只管发不发），目的地就是这里的部署地址。
-      ctx.telemetryExport?.register(
+      // `ctx.telemetry.registerExport` 是核心服务（与 generation 的 fan-in 同形），
+      // 注销随 fiber 走：谁注册谁收回。
+      const undoTelemetryExport = ctx.telemetry.registerExport(
         createRemoteTelemetryExport({
           sessionSource,
           fetchImpl,
           log
         })
       );
+      ctx.effect(() => undoTelemetryExport);
 
       /** 当前会话的同步范围：远端地址 + 主体。待同步集合与远端目录缓存都按它隔离。 */
       const syncScopeOf = (session: RemoteSession): RemoteSyncScope => ({
