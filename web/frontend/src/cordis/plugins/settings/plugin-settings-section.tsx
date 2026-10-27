@@ -31,7 +31,7 @@ import {
 import { PluginStateControl } from "./plugin-state-control.js";
 import { ExtensionFaultNotice } from "./extension-fault-notice.js";
 import { ManagedExtensionDetails, ManagedInstallBar, ReleaseChangedNotice } from "./managed-extensions-ui.js";
-import { extensionSource } from "./extension-source.js";
+import { extensionObservationBadge, extensionSource, extensionTrustBadge, signedKeyId } from "./extension-source.js";
 import { MarketplaceInstallPanel } from "./marketplace-install-ui.js";
 import type { ManagedExtensionsController } from "./managed-extensions.js";
 import {
@@ -453,6 +453,27 @@ function PluginRow({
                 title={group.installed.sourceId ? `安装来源：${group.installed.sourceId}` : undefined}
               >
                 {extensionSource(group.installed).label}
+              </span>
+            ) : null}
+            {extensionTrustBadge(group.installed) ? (
+              <span
+                className="plugin-card__badge is-trust"
+                data-tone={extensionTrustBadge(group.installed)!.tone}
+                data-testid={`settings-plugin-trust-${group.id}`}
+                title={signedKeyId(group.installed?.trust)
+                  ? `已签名 · ${signedKeyId(group.installed!.trust)}（与本机宿主同权限，不是沙箱）`
+                  : "未签名：仅本地开发包，与宿主同权限"}
+              >
+                {extensionTrustBadge(group.installed)!.label}
+              </span>
+            ) : null}
+            {extensionObservationBadge(group.installed) ? (
+              <span
+                className="plugin-card__badge is-observe"
+                data-testid={`settings-plugin-observe-${group.id}`}
+                title={extensionObservationBadge(group.installed)!.title}
+              >
+                {extensionObservationBadge(group.installed)!.label}
               </span>
             ) : null}
           </span>

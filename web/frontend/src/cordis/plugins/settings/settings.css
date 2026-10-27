@@ -437,10 +437,15 @@
 .managed-install__job[data-tone="failed"] .managed-install__job-detail { color: var(--app-status-danger); }
 .managed-install__restart { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
 .plugin-card__badge.is-managed { color: var(--mc-text); }
+/* 来源徽标：内置不抢注意力，市场/本地各自可辨。 */
+.plugin-card__badge.is-source[data-tone="market"] { color: var(--mc-text); }
+.plugin-card__badge.is-source[data-tone="local"] { color: var(--app-status-warning); border-color: color-mix(in srgb, var(--app-status-warning) 40%, transparent); }
+/* 信任徽标：未签名是要看见的风险，已签名只是事实。 */
+.plugin-card__badge.is-trust[data-tone="signed"] { color: var(--app-status-success); border-color: color-mix(in srgb, var(--app-status-success) 35%, transparent); }
+.plugin-card__badge.is-trust[data-tone="unsigned"] { color: var(--app-status-danger); border-color: color-mix(in srgb, var(--app-status-danger) 40%, transparent); }
+.plugin-card__badge.is-observe { color: var(--app-status-warning); border-color: color-mix(in srgb, var(--app-status-warning) 40%, transparent); }
 .managed-extension { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 10px; font-size: 11px; color: var(--mc-text-muted); }
-.managed-extension__facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; margin: 0; }
-.managed-extension__facts > dt { color: var(--mc-text-muted); }
-.managed-extension__facts > dd { margin: 0; color: var(--mc-text); overflow-wrap: anywhere; }
+.managed-extension__note { margin: 0; line-height: 1.5; color: var(--mc-text-muted); }
 .managed-extension__restart { margin: 0; color: var(--app-status-warning); }
 .managed-extension__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .managed-extension__purge { display: inline-flex; align-items: center; gap: 4px; }

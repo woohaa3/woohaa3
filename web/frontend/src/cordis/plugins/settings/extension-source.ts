@@ -36,6 +36,14 @@ export function extensionTrustBadge(installed?: InstalledExtensionView): { label
   return installed.trust === "unsigned" ? { label: "未签名", tone: "unsigned" } : { label: "已签名", tone: "signed" };
 }
 
+/** 观察期徽标：只在观察尚未结束时出现，截止时间进 title。 */
+export function extensionObservationBadge(installed?: InstalledExtensionView, now = Date.now()): { label: string; title: string } | null {
+  if (!installed?.managed || !installed.observeUntil) return null;
+  const until = Date.parse(installed.observeUntil);
+  if (!Number.isFinite(until) || until <= now) return null;
+  return { label: "观察中", title: `观察期至 ${new Date(until).toLocaleString()}，期间失败将自动回滚` };
+}
+
 /** 受管扩展的 keyId（`signed:<keyId>` 的后半段），用于详情展示。 */
 export function signedKeyId(trust: ExtensionTrust | undefined): string | null {
   return trust && trust !== "unsigned" ? trust.slice("signed:".length) : null;

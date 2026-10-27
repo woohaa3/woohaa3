@@ -140,12 +140,6 @@ export function ManagedInstallBar({
   );
 }
 
-function trustLabel(trust: InstalledExtensionView["trust"]): string {
-  if (!trust) return "未知";
-  if (trust === "unsigned") return "未签名（本地开发）";
-  return `已签名 · ${trust.slice("signed:".length)}`;
-}
-
 export function ManagedExtensionDetails({
   installed,
   controller,
@@ -163,31 +157,13 @@ export function ManagedExtensionDetails({
   const busy = controller.busy(id);
   return (
     <div className="managed-extension" data-testid={`managed-extension-${id}`}>
-      <dl className="managed-extension__facts">
-        <dt>信任</dt>
-        <dd data-testid={`managed-trust-${id}`}>
-          {trustLabel(installed.trust)}
-          {/* C 方向取消进程边界后，这是安装前必须让人看见的一件事：签名只证明来源与完整性，
-              不代表执行边界——扩展与宿主同进程、同权限。 */}
-          <span className="managed-extension__note" data-testid={`managed-trust-note-${id}`}>
-            （与本机宿主同权限，不是沙箱）
-          </span>
-        </dd>
-        {installed.builtinVersion ? (
-          <>
-            <dt>内置版本</dt>
-            <dd data-testid={`managed-builtin-${id}`}>
-              当前受管版本覆盖内置 v{installed.builtinVersion}；卸载后回到内置版本
-            </dd>
-          </>
-        ) : null}
-        {installed.observeUntil ? (
-          <>
-            <dt>观察期</dt>
-            <dd>至 {new Date(installed.observeUntil).toLocaleString()}，期间失败将自动回滚</dd>
-          </>
-        ) : null}
-      </dl>
+      {/* 来源 / 签名 / 观察期都在行头徽标上；这里只留必须读到的安全说明，
+          C 方向取消进程边界后这句话不能藏进 tooltip。 */}
+      <p className="managed-extension__note" data-testid={`managed-trust-note-${id}`}>
+        签名只证明来源与完整性：扩展与本机宿主同进程、同权限，不是沙箱。
+        {installed.builtinVersion ? ` 当前受管版本覆盖内置 v${installed.builtinVersion}，卸载后回到内置版本。` : ""}
+        {installed.observeUntil ? ` 观察期至 ${new Date(installed.observeUntil).toLocaleString()}，期间失败将自动回滚。` : ""}
+      </p>
       {needsRestart(installed) ? (
         <p className="managed-extension__restart" data-testid={`managed-restart-required-${id}`}>新版本需重启本机服务后生效。</p>
       ) : null}

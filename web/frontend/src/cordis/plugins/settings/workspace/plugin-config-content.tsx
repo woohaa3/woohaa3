@@ -39,7 +39,7 @@ import type { SettingsEditSession } from "../edit-session.js";
 import type { ExtensionSettingsAssembly } from "../plugin.js";
 import { useSettingsEditReport } from "./use-settings-edit-report.js";
 import type { SettingsPanelRenderProps } from "../plugin-panels.js";
-import { extensionSource, extensionTrustBadge } from "../extension-source.js";
+import { extensionObservationBadge, extensionSource, extensionTrustBadge } from "../extension-source.js";
 import { GeneratedModelsSection } from "./model-catalog.js";
 import { useExtensionFaults } from "../../../host.js";
 import { slotContributionOrigin } from "../../../slots.js";
@@ -173,6 +173,15 @@ export function PluginConfigContent({
                 data-testid={`plugin-config-source-${group.id}`}
               >
                 {extensionSource(group.installed).label}
+              </span>
+            ) : null}
+            {extensionObservationBadge(group.installed) ? (
+              <span
+                className="plugin-card__badge is-observe"
+                data-testid={`plugin-config-observe-${group.id}`}
+                title={extensionObservationBadge(group.installed)!.title}
+              >
+                {extensionObservationBadge(group.installed)!.label}
               </span>
             ) : null}
             {extensionTrustBadge(group.installed) ? (
