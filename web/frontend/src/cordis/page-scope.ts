@@ -275,7 +275,8 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
           artifactId: null,
           releaseId: release?.releaseId ?? null,
           errorCode: "network",
-          message: "功能加载失败，请重试"
+          // 真实原因优先：设置面「启动失败」要靠它说明为什么，而不是再让人猜。
+          message: result.error?.message ?? "功能加载失败，请重试"
         });
       }
     }
@@ -290,6 +291,8 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
 
     // 可选入口加载失败必须在管理面板显示「启动失败」，不能沿用目标启用显示为「已启用」。
     const failedOptionalIds = new Set(loadDiagnostics.map((diagnostic) => diagnostic.extensionId));
+    const optionalFailures: Record<string, string> = {};
+    for (const diagnostic of loadDiagnostics) optionalFailures[diagnostic.extensionId] = diagnostic.message ?? "加载失败";
 
     const manifest = createCanvasExtensionManifest({
       canvasId,
@@ -299,6 +302,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
       extensionManager: {
         assembled: { ...builtinAssembled, ...selectionResult.assembled },
         failed: failedOptionalIds,
+        failures: optionalFailures,
         catalog: catalogMetadata,
         ids: configurableIds,
         preferenceStore,

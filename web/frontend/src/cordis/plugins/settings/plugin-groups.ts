@@ -332,7 +332,10 @@ export function inactiveStateOf(index: PluginViewIndex, group: PluginSettingsGro
 
 /** 站点插件给出的安全诊断（不含秘密）。 */
 export function diagnosticsOf(index: PluginViewIndex, group: PluginSettingsGroup): readonly string[] {
-  return index.siteRows.get(group.id)?.diagnostics ?? [];
+  const site = index.siteRows.get(group.id)?.diagnostics ?? [];
+  // 浏览器本地插件的加载/激活失败原因：契约里现在有 failureReason，和站点诊断合并展示。
+  const reason = index.browserRows.get(group.id)?.failureReason;
+  return reason ? [...site, reason] : site;
 }
 
 /** 站点插件是否已在运行（降级运行也算：插件已装载，配置改动照常生效）。 */

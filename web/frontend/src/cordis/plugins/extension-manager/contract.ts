@@ -38,6 +38,8 @@ export type ExtensionManagerViewRow = {
   required: boolean;
   configurable: boolean;
   status: ExtensionManagerRowStatus;
+  /** `failed` 时的真实原因（加载/激活失败信息）；没有就只显示状态，不编造文案。 */
+  failureReason?: string;
   /** 插件声明的图标；未声明时设置页回退通用插件图标。 */
   icon?: PluginIcon;
 };

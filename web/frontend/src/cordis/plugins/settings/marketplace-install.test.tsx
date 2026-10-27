@@ -220,7 +220,8 @@ describe("MarketplaceInstallPanel", () => {
     click(submit);
     await flush();
     expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0" }]);
-    expect(container.querySelector('[data-testid="marketplace-notice"]')?.textContent).toContain("demo@1.1.0");
+    // 不再写会过期的「已开始安装」提示；受理后由任务列表给出进度与终态。
+    expect(container.querySelector('[data-testid="marketplace-notice"]')).toBeNull();
   });
 
   it("安装视图里直接显示任务进度与取消，不再要求去别的列表找", async () => {

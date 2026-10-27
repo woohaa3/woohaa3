@@ -62,10 +62,12 @@ export function MarketplaceInstallPanel({
   const version = detail?.extension.versions.find((entry) => entry.version === selected?.version) ?? null;
   const trusted = detail && selected?.version ? versionTrusted(detail, selected.version) : null;
   const signingKey = version?.keyId ? detail?.signingKeys.find((key) => key.keyId === version.keyId) ?? null : null;
-  // 正在看的扩展就显示它的任务（含终态失败原因）；没选扩展时只显示还在跑的任务。
-  const visibleJobs = selected
+  // 进行中的任务全显示；都结束后只留最近一条，避免历史「已完成」堆在面板里。
+  const scopedJobs = selected
     ? jobState.jobs.filter((job) => job.extensionId === selected.extensionId)
-    : jobState.jobs.filter((job) => job.status === "running");
+    : jobState.jobs;
+  const runningJobs = scopedJobs.filter((job) => job.status === "running");
+  const visibleJobs = runningJobs.length > 0 ? runningJobs : scopedJobs.slice(0, 1);
   const builtinInstalled = detail?.installedKind === "builtin" ? detail.installedVersion : undefined;
   const selectedIsNewer = selected?.version && builtinInstalled ? compareSemver(selected.version, builtinInstalled) > 0 : true;
   const canInstall = Boolean(selected?.version) && !state.installing && selectedIsNewer;
