@@ -415,7 +415,8 @@ function PluginRow({
   hasSettingsPanel: boolean;
   onOpen?: () => void;
 }) {
-  const openable = (isConfigurable(index, group) || hasSettingsPanel) && onOpen !== undefined;
+  // 受管扩展的卸载/回滚在详情页，所以即便没有任何配置项也必须能点进去。
+  const openable = (isConfigurable(index, group) || hasSettingsPanel || group.installed?.managed === true) && onOpen !== undefined;
   const layer = PLUGIN_LAYER_LABELS[group.layer];
   const diagnostics = diagnosticsOf(index, group);
   const manageable = isManageable(index, group);
