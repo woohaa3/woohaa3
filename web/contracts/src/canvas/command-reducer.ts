@@ -30,6 +30,7 @@ import {
 } from "./command-reducer/node-commands.js";
 import { addEdge, removeAsset, removeEdge, removeJob, upsertAsset, upsertJob } from "./command-reducer/edge-resource-commands.js";
 import { finalize } from "./command-reducer/finalize.js";
+import { observeContentResolver, type ContentContributionResolver } from "./content-contribution.js";
 import { ManagedNodeLifecycleRegistry, planManagedNodeLifecycles, type ManagedNodeLifecycleResolver } from "./managed-node-lifecycle.js";
 import { isCanvasCommandShape, toWorkingState } from "./command-reducer/working-state.js";
 import { OK, reject, type ApplyCanvasCommandsResult, type CommandApplyResult, type WorkingState } from "./command-reducer/types.js";
@@ -49,8 +50,9 @@ export type {
 export function applyCanvasCommands(
   canvas: ServerCanvas,
   commands: readonly CanvasCommand[],
-  options: { now?: string; lifecycle?: ManagedNodeLifecycleResolver } = {}
+  options: { now?: string; lifecycle?: ManagedNodeLifecycleResolver; content?: ContentContributionResolver } = {}
 ): ApplyCanvasCommandsResult {
+  observeContentResolver(options.content);
   const now = options.now ?? new Date().toISOString();
   const work = toWorkingState(canvas);
   const positionedNodeIds = explicitNodePositions(commands);
@@ -59,7 +61,7 @@ export function applyCanvasCommands(
     if (!isCanvasCommandShape(command)) {
       return reject("invalid-command", `第 ${index} 条命令结构非法`);
     }
-    const result = applyCommand(work, command);
+    const result = applyCommand(work, command, canvas, options.content);
     if (!result.ok) return result;
   }
 
@@ -102,7 +104,46 @@ function explicitNodePositions(commands: readonly CanvasCommand[]): Set<string> 
   return positioned;
 }
 
-function applyCommand(work: WorkingState, command: CanvasCommand): CommandApplyResult {
+function snapshot(canvas: ServerCanvas, work: WorkingState): ServerCanvas {
+  return {
+    ...canvas,
+    title: work.title,
+    document: { ...canvas.document, nodes: work.nodes, edges: work.edges },
+    nodeData: work.nodeData,
+    assets: work.assets,
+    jobs: work.jobs
+  };
+}
+
+function applyExtensionCommand(
+  work: WorkingState,
+  command: Extract<CanvasCommand, { type: "extension.command" }>,
+  canvas: ServerCanvas,
+  content: ContentContributionResolver | undefined
+): CommandApplyResult {
+  const owner = content?.resolve(command.extensionId)?.commands;
+  if (!owner || !owner.kinds.includes(command.kind)) return reject("content-owner-unavailable", command.extensionId);
+  const envelope = { extensionId: command.extensionId, nodeId: command.nodeId, kind: command.kind, payload: command.payload };
+  try {
+    const decoded = owner.decode(envelope);
+    if (!decoded.ok) return reject("content-command-rejected", decoded.code);
+    const current = snapshot(canvas, work);
+    if (!owner.satisfied(decoded.value, current)) return reject("content-command-rejected", "content-command-unsatisfied");
+    const applied = owner.apply(decoded.value, current);
+    if (!applied.ok) return reject("content-command-rejected", applied.code);
+    work.title = applied.canvas.title ?? "";
+    work.nodes = applied.canvas.document.nodes.map((node) => ({ ...node, data: {} }));
+    work.edges = applied.canvas.document.edges;
+    work.nodeData = applied.canvas.nodeData;
+    work.assets = applied.canvas.assets;
+    work.jobs = applied.canvas.jobs;
+    return OK;
+  } catch {
+    return reject("content-codec-failed", command.extensionId);
+  }
+}
+
+function applyCommand(work: WorkingState, command: CanvasCommand, canvas: ServerCanvas, content: ContentContributionResolver | undefined): CommandApplyResult {
   switch (command.type) {
     case "edit.apply":
       return applyEditCommand(work, command);
@@ -125,6 +166,8 @@ function applyCommand(work: WorkingState, command: CanvasCommand): CommandApplyR
       return patchFilmSetClip(work, command);
     case "filmSet.itemPatch":
       return patchFilmSetItem(work, command);
+    case "extension.command":
+      return applyExtensionCommand(work, command, canvas, content);
     case "edge.add":
       return addEdge(work, command.edge);
     case "edge.remove":

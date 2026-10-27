@@ -1,4 +1,4 @@
-import { DEFAULT_MEDIA_TIME_MAP, type ModelMediaTimeMap } from "../media-time.js";
+import { DEFAULT_MEDIA_TIME_MAP, type ModelMediaTimeMap } from "../../../../../../contracts/src/canvas/media-time.js";
 /**
  * 片场内部内容契约：类型、常量与守卫
  * （自 `film-set-content.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R19）。
@@ -6,8 +6,8 @@ import { DEFAULT_MEDIA_TIME_MAP, type ModelMediaTimeMap } from "../media-time.js
  * 纯类型/常量叶子模块，无任何解码器依赖。`FilmSetContent` 集合是片场身份的一部分，参与
  * 保存、复制、历史与资产引用保护；不借用通用 envelope 或任何 opaque plugin state。
  */
-import type { ModelDefinition } from "../model-definition.js";
-import type { MotionDefinition } from "../motion-script.js";
+import type { ModelDefinition } from "../../../../../../contracts/src/canvas/model-definition.js";
+import type { MotionDefinition } from "../../../../../../contracts/src/canvas/motion-script.js";
 
 /**
  * 片场内容契约版本；结构变化必须升版本。

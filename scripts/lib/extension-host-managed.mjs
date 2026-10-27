@@ -108,6 +108,13 @@ export function untrustedRootViolation(extension, descriptor) {
       message: `受管扩展不得声明画布内容端口（canvasContent）：${extension.extensionId}（${extension.dir}）`
     };
   }
+  if (managed && descriptor.content) {
+    return {
+      code: "EXTENSION_MANAGED_FORBIDDEN_DECLARATION",
+      field: "content",
+      message: `受管扩展不得声明内容贡献（content）：${extension.extensionId}（${extension.dir}）`
+    };
+  }
   return null;
 }
 

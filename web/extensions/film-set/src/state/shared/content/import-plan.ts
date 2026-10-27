@@ -5,8 +5,8 @@
  * 内容身份哈希、默认内容、复制导入布局/规划/ID 重映射与时间线时长；复用 composition/几何
  * 层的稳定编码。纯函数、JSON-only。
  */
-import type { ModelDefinition } from "../model-definition.js";
-import { isBoundedId, isFiniteNumber } from "../../validation.js";
+import type { ModelDefinition } from "../../../../../../contracts/src/canvas/model-definition.js";
+import { isBoundedId, isFiniteNumber } from "../../../../../../contracts/src/validation.js";
 import {
   FILM_SET_CONTENT_VERSION,
   FILM_SET_LAYOUT_STEP,

@@ -1,0 +1,240 @@
+/**
+ * 扩展内容贡献（change: 2026-10-26-abstract-extension-content-fields）。
+ *
+ * 注册表实例就是页面或站点作用域，不使用模块级单例。内核函数只接收只读 resolver；
+ * 本阶段不按 owner 分派，缺省空解析器不改变既有结果。
+ */
+import type { ServerCanvas } from "./domain/index.js";
+
+const EXTENSION_ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
+
+export type ContentDiagnostic = { readonly code: string; readonly reason: string };
+
+export type ContentCopyContext = {
+  readonly nodeIds: ReadonlyMap<string, string>;
+  createId(prefix: string, index: number): string;
+};
+
+export type ContentNodeDataCodec = {
+  decode(data: unknown): { ok: true; value: unknown } | { ok: false; code: string; reason: string };
+  validatePatch(previous: unknown, patch: unknown): ContentDiagnostic | null;
+  normalize(data: unknown): unknown;
+  sanitizeRuntime(data: unknown): unknown;
+  copy(nodeData: unknown, context: ContentCopyContext): { data: unknown; assetRefs: readonly string[]; remap: Readonly<Record<string, string>> };
+  diff(before: unknown, after: unknown, context: ContentCopyContext):
+    | { ok: true; forward: unknown; inverse: unknown }
+    | { ok: false; code: string; reason: string };
+  inspect?(data: unknown): { ok: true; report: unknown } | { ok: false; code: string; reason: string };
+};
+
+export type ContentCommandEnvelope = {
+  readonly extensionId: string;
+  readonly nodeId?: string;
+  readonly kind: string;
+  readonly payload: unknown;
+};
+
+export type ContentCommandCodec = {
+  readonly kinds: readonly string[];
+  /** 过渡代认领的旧命令 type。内核据此分派，不写死业务名。 */
+  readonly legacyTypes?: readonly string[];
+  decode(command: ContentCommandEnvelope): { ok: true; value: unknown } | { ok: false; code: string; reason: string };
+  apply(value: unknown, canvas: ServerCanvas): { ok: true; canvas: ServerCanvas } | { ok: false; code: string; reason: string };
+  satisfied(value: unknown, canvas: ServerCanvas): boolean;
+};
+
+export type ContentEditPlanner = {
+  plan(before: ServerCanvas, after: ServerCanvas):
+    | { ok: true; forward: unknown; inverse: unknown; preconditions: readonly unknown[] }
+    | { ok: false; code: string; reason: string };
+};
+
+export type ContentPresentationAdapter = {
+  presentPrimitives(input: { readonly nodeId: string; readonly data: unknown }): unknown;
+};
+
+export type ContentInteractionPolicy = {
+  isManagedNode(type: string, data: unknown): boolean;
+  selectionActions(action: "delete" | "copy" | "cut" | "rename" | "group" | "download" | "convert", type: string, data: unknown): { allowed: true } | { allowed: false; reason: string };
+  hoverPlaybackTarget(type: string, data: unknown): { ownerNodeId: string; entityId: string } | null;
+  doubleClickTarget(type: string, data: unknown): { kind: string; nodeId: string; entityId?: string } | null;
+};
+
+export type ContentMigration = {
+  readonly extensionId: string;
+  readonly from: number;
+  readonly to: number;
+  migrate(data: unknown): unknown;
+};
+
+export type ContentRouteResult = { readonly status: number; readonly body?: unknown };
+
+export type ContentRoute = {
+  readonly method: string;
+  readonly path: readonly string[];
+  handle(request: { readonly body: unknown }): ContentRouteResult | Promise<ContentRouteResult>;
+};
+
+export type ContentMcpTool = {
+  readonly name: string;
+  readonly title: string;
+  readonly description: string;
+  readonly inputSchema: unknown;
+  authorize?(input: unknown): ContentDiagnostic | null;
+  handle(input: unknown): { ok: boolean; text?: string; structured?: unknown } | Promise<{ ok: boolean; text?: string; structured?: unknown }>;
+};
+
+export type ContentContribution = {
+  readonly extensionId: string;
+  readonly nodeData?: ContentNodeDataCodec;
+  readonly commands?: ContentCommandCodec;
+  readonly edit?: ContentEditPlanner;
+  readonly presentation?: ContentPresentationAdapter;
+  readonly interaction?: ContentInteractionPolicy;
+  readonly migrations?: readonly ContentMigration[];
+  readonly routes?: readonly ContentRoute[];
+  readonly mcpTools?: readonly ContentMcpTool[];
+};
+
+export type ContentContributionResolver = {
+  resolve(extensionId: string): ContentContribution | null;
+  implementations(): readonly ContentContribution[];
+};
+
+export const EMPTY_CONTENT_RESOLVER: ContentContributionResolver = {
+  resolve: () => null,
+  implementations: () => []
+};
+
+/** 基座阶段只接收解析器。后续阶段才按 owner 分派。 */
+export function observeContentResolver(resolver: ContentContributionResolver | undefined): void {
+  void resolver;
+}
+
+export type ContentWriteDecision =
+  | { ok: true; extensionId: string }
+  | { ok: false; extensionId: string; code: string };
+
+/**
+ * 按注册表决定一次业务写入。未注册或缺少 codec 时稳定拒绝；codec 抛错不把异常文本写进结果。
+ */
+export function decideContentWrite(
+  extensionId: string,
+  previous: unknown,
+  patch: unknown,
+  content: ContentContributionResolver
+): ContentWriteDecision {
+  const codec = content.resolve(extensionId)?.nodeData;
+  if (!codec) return { ok: false, extensionId, code: "content-owner-unavailable" };
+  try {
+    const diagnostic = codec.validatePatch(previous, patch);
+    if (diagnostic) return { ok: false, extensionId, code: diagnostic.code };
+    return { ok: true, extensionId };
+  } catch {
+    return { ok: false, extensionId, code: "content-codec-failed" };
+  }
+}
+
+function fail(code: string): Error {
+  return new Error(code);
+}
+
+function routeKey(route: ContentRoute): string {
+  return `${route.method.toUpperCase()} ${route.path.join("/")}`;
+}
+
+function assertContribution(contribution: ContentContribution): void {
+  if (!EXTENSION_ID.test(contribution.extensionId) || contribution.extensionId.length > 200) throw fail("content-registration-invalid");
+  if (contribution.nodeData) {
+    for (const name of ["decode", "validatePatch", "normalize", "sanitizeRuntime", "copy", "diff"] as const) {
+      if (typeof contribution.nodeData[name] !== "function") throw fail("content-registration-invalid");
+    }
+  }
+  if (contribution.commands) {
+    const kinds = contribution.commands.kinds;
+    if (!Array.isArray(kinds) || kinds.length === 0 || new Set(kinds).size !== kinds.length || kinds.some((kind) => typeof kind !== "string" || kind.length === 0)) {
+      throw fail("content-registration-invalid");
+    }
+    for (const name of ["decode", "apply", "satisfied"] as const) {
+      if (typeof contribution.commands[name] !== "function") throw fail("content-registration-invalid");
+    }
+  }
+  const toolNames = new Set<string>();
+  for (const tool of contribution.mcpTools ?? []) {
+    if (!tool.name || toolNames.has(tool.name) || typeof tool.handle !== "function") throw fail("content-registration-invalid");
+    toolNames.add(tool.name);
+  }
+  const routes = new Set<string>();
+  for (const route of contribution.routes ?? []) {
+    const key = routeKey(route);
+    if (!route.method || route.path.length === 0 || route.path.some((segment) => !segment || segment.includes("/")) || routes.has(key) || typeof route.handle !== "function") {
+      throw fail("content-registration-invalid");
+    }
+    routes.add(key);
+  }
+}
+
+/** 一个页面或站点作用域内的内容贡献。 */
+export class ContentContributionRegistry implements ContentContributionResolver {
+  private readonly entries = new Map<string, ContentContribution>();
+  private readonly cache = new Map<string, ContentContribution | null>();
+  private readonly tools = new Map<string, string>();
+  private readonly routes = new Map<string, string>();
+
+  register(contribution: ContentContribution): () => void {
+    assertContribution(contribution);
+    if (this.entries.has(contribution.extensionId)) throw fail("content-registration-conflict");
+    for (const tool of contribution.mcpTools ?? []) {
+      if (this.tools.has(tool.name)) throw fail("content-tool-conflict");
+    }
+    for (const route of contribution.routes ?? []) {
+      if (this.routes.has(routeKey(route))) throw fail("content-route-conflict");
+    }
+    this.entries.set(contribution.extensionId, contribution);
+    for (const tool of contribution.mcpTools ?? []) this.tools.set(tool.name, contribution.extensionId);
+    for (const route of contribution.routes ?? []) this.routes.set(routeKey(route), contribution.extensionId);
+    this.cache.delete(contribution.extensionId);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      if (this.entries.get(contribution.extensionId) !== contribution) return;
+      this.entries.delete(contribution.extensionId);
+      for (const tool of contribution.mcpTools ?? []) {
+        if (this.tools.get(tool.name) === contribution.extensionId) this.tools.delete(tool.name);
+      }
+      for (const route of contribution.routes ?? []) {
+        if (this.routes.get(routeKey(route)) === contribution.extensionId) this.routes.delete(routeKey(route));
+      }
+      this.cache.delete(contribution.extensionId);
+    };
+  }
+
+  /** 中途失败时按注册的反序释放本次已发布的贡献。 */
+  activate(contributions: readonly ContentContribution[]): () => void {
+    const releases: Array<() => void> = [];
+    try {
+      for (const contribution of contributions) releases.push(this.register(contribution));
+    } catch (error) {
+      for (let index = releases.length - 1; index >= 0; index -= 1) releases[index]!();
+      throw error;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (let index = releases.length - 1; index >= 0; index -= 1) releases[index]!();
+    };
+  }
+
+  resolve(extensionId: string): ContentContribution | null {
+    if (this.cache.has(extensionId)) return this.cache.get(extensionId) ?? null;
+    const found = this.entries.get(extensionId) ?? null;
+    this.cache.set(extensionId, found);
+    return found;
+  }
+
+  implementations(): readonly ContentContribution[] {
+    return [...this.entries.values()].sort((left, right) => left.extensionId.localeCompare(right.extensionId));
+  }
+}

@@ -13,6 +13,7 @@
  *
  * 新增字段必须同时更新本 allowlist、spec 与 round-trip 测试（见 tasks 6.1）。
  */
+import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import type { CanvasNodeData } from "./types";
 import type { Woohaa3CanvasJsonObject } from "./core";
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
@@ -101,7 +102,8 @@ export type RuntimeNodeConfigPatchResult =
  * - 值必须是合法有限 JSON：非法类型或非有限数值 → 整条 patch 拒绝，不进协调层。
  * - 移除后为空 → 拒绝（不得提交空补丁）。
  */
-export function sanitizeRuntimeNodeConfigPatch(input: unknown): RuntimeNodeConfigPatchResult {
+export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { content?: ContentContributionResolver }): RuntimeNodeConfigPatchResult {
+  observeContentResolver(context?.content);
   if (!isRecord(input)) return { ok: false, reason: "nodeData patch 必须是对象" };
 
   const value: Woohaa3CanvasJsonObject = {};
@@ -149,7 +151,8 @@ export function sanitizeRuntimeNodeConfigPatch(input: unknown): RuntimeNodeConfi
  * 只有拿到画布资产上下文才能区分。剪贴板载荷在清理后按「资产确实存在、ready 且类型匹配」
  * 恢复内容引用（见 `canvas-shell/clipboard/payload.ts`），本函数保持保守口径。
  */
-export function sanitizeNodeDataForClipboard(input: unknown): CanvasNodeData {
+export function sanitizeNodeDataForClipboard(input: unknown, context?: { content?: ContentContributionResolver }): CanvasNodeData {
+  observeContentResolver(context?.content);
   const source = isRecord(input) ? input : {};
   const value: Woohaa3CanvasJsonObject = {};
   for (const [key, raw] of Object.entries(source)) {

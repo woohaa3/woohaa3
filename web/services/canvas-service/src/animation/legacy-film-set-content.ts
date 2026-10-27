@@ -24,8 +24,8 @@ import {
   type FilmSetMotion,
   type FilmSetOrigin,
   type FilmSetPlayback
-} from "../../../../contracts/src/canvas/film-set-content/types.js";
-import { validateItemBudget } from "../../../../contracts/src/canvas/film-set-content/motion.js";
+} from "../../../../extensions/film-set/src/state/shared/content/types.js";
+import { validateItemBudget } from "../../../../extensions/film-set/src/state/shared/content/motion.js";
 
 export type FilmSetContentDecodeResult =
   | { ok: true; value: FilmSetContent }

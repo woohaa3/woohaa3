@@ -12,7 +12,7 @@ import path from "node:path";
 import { EXTENSION_DESCRIPTOR_NAME, ExtensionScanError } from "./extension-scan.mjs";
 
 export const EXTENSION_DESCRIPTOR_SCHEMA_VERSION = 1;
-export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "migrate", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "icon", "required"];
+export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "migrate", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "content", "icon", "required"];
 export const EXTENSION_CAPABILITY_KINDS = ["capability", "handler"];
 export const EXTENSION_CAPABILITY_AUTH = ["public", "authenticated"];
 export const EXTENSION_ROUTE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -173,6 +173,10 @@ function validateEngines(engines, errors) {
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const KEBAB_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+const CONTENT_FIELD_NAME = /^[A-Za-z][A-Za-z0-9]*$/;
+const CONTENT_TOOL_NAME = /^[a-z][a-z0-9_]*$/;
+const CONTENT_ROUTE_PREFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
+const CONTENT_KEYS = ["ownedFields", "ownedWireFields", "routePrefix", "mcpTools", "targetModes", "eventOwners"];
 /** 只接受包内相对模块（`./backend` 这类子路径），拒绝 URL/绝对路径/脚本地址。 */
 const PACKAGE_SUBPATH = /^\.\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 /** 品牌图形允许的扩展名（与 contracts 的图标资产白名单一致）。 */
@@ -188,6 +192,45 @@ function unknownKeys(value, allowed) {
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function validateContentNames(value, label, pattern, errors) {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== "string" || !pattern.test(item))) {
+    errors.push(`${label} 必须是非空且格式合法的字符串数组`);
+    return;
+  }
+  if (new Set(value).size !== value.length) errors.push(`${label} 不得重复`);
+}
+
+/** 跨扩展的内容声明必须唯一：字段、wire、路由前缀、工具、目标模式与事件归属。 */
+export function contentDeclarationCollisions(registrations) {
+  const owners = new Map();
+  const errors = [];
+  const claim = (kind, name, registration) => {
+    const key = `${kind}\0${name}`;
+    const previous = owners.get(key);
+    if (previous) {
+      errors.push({
+        extensionId: registration.extensionId,
+        directory: registration.directory ?? "",
+        message: `content.${kind}「${name}」与扩展 ${previous} 冲突`
+      });
+      return;
+    }
+    owners.set(key, registration.extensionId);
+  };
+  for (const registration of registrations ?? []) {
+    const content = registration.descriptor?.content;
+    if (!content || typeof content !== "object") continue;
+    for (const name of content.ownedFields ?? []) claim("ownedFields", name, registration);
+    for (const name of content.ownedWireFields ?? []) claim("ownedWireFields", name, registration);
+    if (typeof content.routePrefix === "string") claim("routePrefix", content.routePrefix, registration);
+    for (const name of content.mcpTools ?? []) claim("mcpTools", name, registration);
+    for (const name of content.targetModes ?? []) claim("targetModes", name, registration);
+    for (const name of content.eventOwners ?? []) claim("eventOwners", name, registration);
+  }
+  return errors;
 }
 
 /**
@@ -341,6 +384,24 @@ export function validateExtensionDescriptor(value) {
       }
       if (hostPlugin.order !== undefined && !Number.isFinite(hostPlugin.order)) errors.push("hostPlugin.order 必须是数字");
       if (hostPlugin.optional !== undefined && typeof hostPlugin.optional !== "boolean") errors.push("hostPlugin.optional 必须是布尔值");
+    }
+  }
+
+  /** 内容贡献声明：字段、wire、路由前缀、工具名与目标身份，供预检做格式和唯一性校验。 */
+  const content = value.content;
+  if (content !== undefined) {
+    if (!isPlainObject(content)) {
+      errors.push("content 必须是对象");
+    } else {
+      for (const key of unknownKeys(content, CONTENT_KEYS)) errors.push(`content 未知字段：${key}`);
+      validateContentNames(content.ownedFields, "content.ownedFields", CONTENT_FIELD_NAME, errors);
+      validateContentNames(content.ownedWireFields, "content.ownedWireFields", CONTENT_FIELD_NAME, errors);
+      validateContentNames(content.mcpTools, "content.mcpTools", CONTENT_TOOL_NAME, errors);
+      validateContentNames(content.targetModes, "content.targetModes", KEBAB_ID, errors);
+      validateContentNames(content.eventOwners, "content.eventOwners", KEBAB_ID, errors);
+      if (content.routePrefix !== undefined && (typeof content.routePrefix !== "string" || !CONTENT_ROUTE_PREFIX.test(content.routePrefix))) {
+        errors.push("content.routePrefix 必须是相对 kebab 路径");
+      }
     }
   }
 
