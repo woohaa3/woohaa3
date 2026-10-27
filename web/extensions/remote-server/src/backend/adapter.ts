@@ -18,6 +18,7 @@ import { createRemoteServerPlugin, type RemoteServerExtensionOptions } from "./i
 /** 把 backend 宿主适配成扩展看到的 ctx。 */
 function contextOf(host: ApplicationBackendHost): HostExtensionContext {
   const noop = () => undefined;
+  let effectSeq = 0;
   const ctx = {
     log: { scope: () => (event: Record<string, unknown>) => host.logger(event) },
     capabilities: {
@@ -61,9 +62,21 @@ function contextOf(host: ApplicationBackendHost): HostExtensionContext {
     },
     ...(host.diagnostics ? { diagnostics: host.diagnostics } : {}),
     ...(host.deployment ? { deployment: host.deployment } : {}),
-    // 注销由宿主的 rollback 统一负责：这里立刻执行即可，不需要额外记账。
+    // `ctx.effect` 的语义（装载即生效、卸载即撤销）由宿主资源生命周期承接：
+    // 注册成一条 resource，start 时执行、stop 时撤销，定时器一类的东西不会在停用后泄漏。
     effect: (run: () => (() => void) | void) => {
-      run();
+      let undo: (() => void) | undefined;
+      host.registerResource({
+        id: `${REMOTE_SERVER_EXTENSION_ID}.effect-${effectSeq++}`,
+        start() {
+          const result = run();
+          if (typeof result === "function") undo = result;
+        },
+        async stop() {
+          undo?.();
+          undo = undefined;
+        }
+      } as never);
     }
   };
   if (host.registerTelemetryExport) {

@@ -2332,18 +2332,15 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       const diagnosticRoot = desktopDiagnosticUploadRoot();
       if (diagnosticRoot) {
         const uploader = createDiagnosticUploader({ root: diagnosticRoot, session: () => sessionSource.current(), fetchImpl, now });
-        let timer: ReturnType<typeof setInterval> | undefined;
-        host.registerResource({
-          id: "remote-server.desktop-diagnostic-upload",
-          start() {
-            void uploader.tick();
-            timer = setInterval(() => { void uploader.refreshDestination(); void uploader.tick(); }, 5000);
-            timer.unref?.();
-          },
-          async stop() {
-            if (timer) clearInterval(timer);
-            await uploader.stop();
-          }
+        // 启动即开跑、卸载即停：Cordis 的 `ctx.effect` 就是这套语义，不需要单独的 resource 概念。
+        ctx.effect(() => {
+          void uploader.tick();
+          const timer = setInterval(() => { void uploader.refreshDestination(); void uploader.tick(); }, 5000);
+          timer.unref?.();
+          return () => {
+            clearInterval(timer);
+            void uploader.stop();
+          };
         });
       }
 
