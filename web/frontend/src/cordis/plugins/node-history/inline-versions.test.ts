@@ -19,7 +19,9 @@ it("bounds terminal compensation, deduplicates events, refreshes on reconnect an
     let state="running", runListener=()=>{}, sessionListener=(_status:any)=>{};
     const {client}=setup([]);
     const runState={subscribe:(listener:()=>void)=>{runListener=listener;return vi.fn();},snapshot:()=>({records:[{operationId:"run",nodeId:"n",state}]})};
-    const ctx={get:(key:unknown)=>key===RUN_STATE_SERVICE?runState:undefined,provide:vi.fn(),on:()=>vi.fn(),
+    // inject 是真实 Context 的声明式依赖入口：这里让替身"立刻可用"，保持用例仍走装配后的正常路径。
+    const inject=(_deps:unknown,_callback:(scoped:any)=>void)=>{_callback({get:(key:unknown)=>key===RUN_STATE_SERVICE?runState:undefined,effect:vi.fn()});};
+    const ctx={inject,get:(key:unknown)=>key===RUN_STATE_SERVICE?runState:undefined,provide:vi.fn(),on:()=>vi.fn(),
       canvasSession:{isWritable:()=>true,subscribe:(listener:(value:any)=>void)=>{sessionListener=listener;return vi.fn();}}};
     dispose=installInlineVersions(ctx as never,"canvas",client);
     runListener();state="succeeded";runListener();runListener();

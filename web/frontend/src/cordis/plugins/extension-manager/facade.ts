@@ -32,6 +32,8 @@ export type ExtensionManagerFacadeOptions = {
   /** 本次启动实际装配状态；不在画布页时传入打开时的目标状态。 */
   assembled: Readonly<Record<string, boolean>>;
   failed?: ReadonlySet<string>;
+  /** 失败原因（extensionId → message）；只影响展示。 */
+  failures?: Readonly<Record<string, string>>;
   /** 注入时所有权仍归调用方（不随 facade 释放）。 */
   preferenceStore?: ExtensionPreferenceStore;
   storage?: PreferenceStorage | null;
@@ -128,7 +130,12 @@ export function createExtensionManagerFacade(options: ExtensionManagerFacadeOpti
     const snapshot = store.getSnapshot();
     const desired = snapshot.preferences;
     return {
-      rows: projectExtensionManagerRows(catalog, { assembled, desired, failed }),
+      rows: projectExtensionManagerRows(catalog, {
+        assembled,
+        desired,
+        failed,
+        ...(options.failures ? { failures: options.failures } : {})
+      }),
       siteRows: siteRows(),
       modelRows: modelRows(),
       siteManageable: canManageSite(),

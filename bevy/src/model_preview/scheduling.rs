@@ -74,6 +74,11 @@ pub(super) fn schedule(
             .filter(|card| ready.get(&card.camera).copied() == Some(card.generation))
             .count() as u64,
     ]);
+    if crate::runtime_health::benchmark_enabled() {
+        crate::runtime_health::benchmark_models_ready(state.cards.iter()
+            .filter(|(_, card)| card.visible && ready.get(&card.camera).copied() == Some(card.generation))
+            .map(|(id, _)| id.clone()).collect());
+    }
     if let Some(snapshot) = state.latency.snapshot_if_changed() {
         crate::bridge::set_preview_latency_diagnostics(snapshot);
     }

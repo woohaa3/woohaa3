@@ -21,6 +21,8 @@ export type ProjectExtensionRowsInput = {
   desired: Readonly<Record<string, boolean>>;
   /** 启动失败的可配置 optional ID。 */
   failed?: ReadonlySet<string>;
+  /** 启动失败原因（`extensionId → message`）；缺失时只显示状态。 */
+  failures?: Readonly<Record<string, string>>;
 };
 
 /** 目标状态与本次启动实际装配是否不一致（存在待生效变更）。 */
@@ -66,7 +68,8 @@ export function projectExtensionManagerRows(
       } else {
         status = actual ? "pending-disable" : "pending-enable";
       }
-      return { ...base, status };
+      const failureReason = status === "failed" ? input.failures?.[entry.id] : undefined;
+      return { ...base, status, ...(failureReason ? { failureReason } : {}) };
     });
 }
 

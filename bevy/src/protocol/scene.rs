@@ -589,6 +589,9 @@ pub(crate) struct GroupPresentation {
     pub(crate) run_status: Option<GroupRunStatus>,
     #[serde(default)]
     pub(crate) model_bounds: Option<GroupModelBounds>,
+    /// Render-only emphasis while a node is being released into this group.
+    #[serde(default, rename = "dropTarget")]
+    pub(crate) drop_target: bool,
 }
 
 fn default_badge_scale() -> f32 { 1. }

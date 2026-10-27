@@ -61,16 +61,32 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       const renderModelThumbnail = options.renderModelThumbnail ?? createModelThumbnailRenderer(ctx);
       const disposeInlineVersions = installInlineVersions(ctx, canvasId, client);
       const controller = new NodeHistoryController(client);
-      const runState = ctx.get(RUN_STATE_SERVICE as never) as RunStateService | undefined;
-      const syncOperations = () => controller.setOperations(runState?.snapshot().records ?? []);
-      const offOperations = runState?.subscribe(syncOperations);
-      const inline = ctx.get(INLINE_HISTORY_SERVICE as never) as InlineHistoryService | undefined;
-      const offHistoryRefresh = inline?.subscribe(() => { void controller.refresh(); });
+      // 运行态是**兄弟插件**（run-state）提供的服务，内联版本是**本插件自己**刚 provide 的：
+      // 两者在 apply 窗口内都还不 active，`ctx.get` 一律 undefined（cordis 4 的 strict 语义）。
+      // 之前这里取到的就是 undefined，于是「运行态 → 操作列表」和「版本变化 → 刷新」两条订阅
+      // 从来没建立过。改为声明式等待 + 每次调用时再取（活引用），不在装配期落快照。
+      const inline = (): InlineHistoryService | undefined => ctx.get(INLINE_HISTORY_SERVICE as never) as InlineHistoryService | undefined;
+      /** 任意时刻重新读一次运行态并同步操作列表（活引用；调用方都在装配之后）。 */
+      const syncOperations = (): void => {
+        const service = ctx.get(RUN_STATE_SERVICE as never) as RunStateService | undefined;
+        controller.setOperations(service?.snapshot().records ?? []);
+      };
+      ctx.inject([RUN_STATE_SERVICE], (scoped) => {
+        const service = scoped.get(RUN_STATE_SERVICE) as RunStateService;
+        const off = service.subscribe(() => controller.setOperations(service.snapshot().records));
+        controller.setOperations(service.snapshot().records);
+        scoped.effect(() => () => off(), "node-history:run-state");
+      });
+      ctx.inject([INLINE_HISTORY_SERVICE], (scoped) => {
+        const service = scoped.get(INLINE_HISTORY_SERVICE) as InlineHistoryService;
+        const off = service.subscribe(() => { void controller.refresh(); });
+        scoped.effect(() => () => off(), "node-history:inline-refresh");
+      });
       /** 总览传递的待选记录；只消费一次，不自动恢复。 */
       let pendingEntryId: string | null = null;
       const selectTarget = (target: string) => {
         const nodeId = controller.getState()?.nodeId;
-        const item = nodeId ? inline?.snapshot().get(nodeId)?.find(item => item.entryId === target) : undefined;
+        const item = nodeId ? inline()?.snapshot().get(nodeId)?.find(item => item.entryId === target) : undefined;
         if (item) controller.includeHistory(item);
         void controller.select(target);
       };
@@ -469,7 +485,6 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       (globalThis as unknown as { __nodeHistoryState?: unknown }).__nodeHistoryState = () => controller.getState();
 
       return () => {
-        offOperations?.(); offHistoryRefresh?.();
         disposeInlineVersions();
         removeHistoryView();
         disposeCanvasHistoryDialog();

@@ -496,6 +496,23 @@ test("真实仓库锚点：宿主产出与声明顺序一致", async () => {
   assert.ok(host.roots.length >= 2);
 });
 
+/**
+ * 安全模式仍须装配 film-set：画布启动迁移（managed shot media）依赖它注册的
+ * `managedMigrations`。否则失败一次后进入安全模式会永久拿不到迁移适配器，形成启动死循环。
+ */
+test("真实仓库锚点：安全模式保留 film-set 的启动迁移适配器", async () => {
+  const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..");
+  const host = await loadExtensionHost({ repoRoot, env: {}, safeMode: true });
+  assert.ok(!host.safeMode?.suspended.includes("film-set"), "film-set 不得在安全模式被暂停");
+  const content = await host.createCanvasContent({});
+  const filmSet = content.find((entry) => entry.extensionId === "film-set");
+  assert.ok(filmSet, "安全模式必须加载 film-set 的 canvasContent");
+  assert.ok(
+    filmSet.runtime.managedMigrations?.some((migration) => migration.extensionId === "film-set"),
+    "film-set 必须提供启动迁移适配器"
+  );
+});
+
 // ---------------------------------------------------------------------------
 // 槽位实现声明（change: 2026-10-15-scan-bootstrap-slots-as-extension-directories，
 // 任务 2.2、2.3、5.2 / design D2、D5）

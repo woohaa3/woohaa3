@@ -65,13 +65,14 @@ const config = (overrides: Partial<GithubSourceConfig> = {}): GithubSourceConfig
   ...overrides
 });
 
-const release = (tag: string, assets: Array<{ name: string; size?: number; digest?: string; url?: string }>) => ({
+const release = (tag: string, assets: Array<{ name: string; size?: number; digest?: string; url?: string; apiUrl?: string }>) => ({
   tag_name: tag,
   name: `Release ${tag}`,
   assets: assets.map((asset) => ({
     name: asset.name,
     size: asset.size ?? 100,
     digest: asset.digest,
+    ...(asset.apiUrl ? { url: asset.apiUrl } : {}),
     browser_download_url: asset.url ?? `https://github.com/acme/extensions/releases/download/${tag}/${asset.name}`
   }))
 });
@@ -253,6 +254,42 @@ describe("download", () => {
     await source.download(ref, signal);
     expect((log[0]!.init!.headers as Record<string, string>).Authorization).toBe("Bearer ghp_test");
     expect((log[1]!.init!.headers as Record<string, string>).Authorization).toBe("Bearer ghp_test");
+  });
+
+  it("配置 token 且资产带 API 地址时走资产 API（私有仓库），并声明 octet-stream", async () => {
+    const apiUrl = "https://api.github.com/repos/acme/extensions/releases/assets/42";
+    const bytes = new TextEncoder().encode("private bytes");
+    const { fetchImpl, log } = mockFetch([
+      // 资产 API 路径也包含 /releases，所以精确匹配必须排在列表路由之前。
+      { match: (url) => url === apiUrl, respond: () => new Response(bytes, { status: 200 }) },
+      { match: (url) => url.includes("/repos/acme/extensions/releases"), respond: () => ({ status: 200, body: [release("v1", [{ name: "demo-1.0.0.wxt", digest: sha(7), apiUrl }])] }) }
+    ]);
+    const source = createGithubReleaseSource({ config: () => config({ token: "github_pat_test" }), fetchImpl });
+    const download = await source.download(ref, signal);
+    const chunks: Uint8Array[] = [];
+    const reader = download.stream.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    expect(new Uint8Array(chunks[0]!)).toEqual(bytes);
+    // 网页直链对私有仓库带 Bearer 只会 404，所以必须落到资产 API 上。
+    expect(log.at(-1)!.url).toBe(apiUrl);
+    const headers = log.at(-1)!.init!.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer github_pat_test");
+    expect(headers.Accept).toBe("application/octet-stream");
+  });
+
+  it("配置 token 但资产没有 API 地址时退回网页直链（不额外带 Accept）", async () => {
+    const { fetchImpl, log } = mockFetch([
+      { match: (url) => url.includes("/repos/acme/extensions/releases"), respond: () => ({ status: 200, body: [release("v1", [{ name: "demo-1.0.0.wxt", digest: sha(7) }])] }) },
+      { match: (url) => url.startsWith("https://github.com/acme/extensions/releases/download/"), respond: () => new Response("x", { status: 200 }) }
+    ]);
+    const source = createGithubReleaseSource({ config: () => config({ token: "ghp_test" }), fetchImpl });
+    await source.download(ref, signal);
+    expect(log.at(-1)!.url).toContain("/releases/download/");
+    expect((log.at(-1)!.init!.headers as Record<string, string>).Accept).toBeUndefined();
   });
 
   it("资产已删除 / 摘要不符 → MARKETPLACE_SOURCE_NOT_FOUND", async () => {

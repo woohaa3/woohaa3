@@ -97,6 +97,8 @@ type GithubAsset = {
   readonly name: string;
   readonly size?: number;
   readonly digest?: string;
+  /** 资产 API 地址（`{apiBase}/repos/.../releases/assets/<id>`）：私有仓库只能靠它下载。 */
+  readonly url?: string;
   readonly browser_download_url: string;
 };
 
@@ -284,25 +286,30 @@ export function createGithubReleaseSource(options: GithubSourceOptions): Marketp
       const config = options.config();
       // ReleaseRef 不带资产 URL（契约只有 digest/size）：按约定文件名在配置的仓库里定位资产。
       const name = `${ref.extensionId}-${ref.version}.wxt`;
-      let url: string | null = null;
-      let size = ref.size;
+      let asset: GithubAsset | null = null;
       for (const repo of config.repos) {
         const releases = await collectReleases(repo, signal);
         for (const release of releases) {
-          const asset = (release.assets ?? []).find((entry) => entry.name === name && entry.digest === ref.packageDigest);
-          if (asset) {
-            url = asset.browser_download_url;
-            size = assetSize(asset, size);
+          const found = (release.assets ?? []).find((entry) => entry.name === name && entry.digest === ref.packageDigest);
+          if (found) {
+            asset = found;
             break;
           }
         }
-        if (url) break;
+        if (asset) break;
       }
-      if (!url) {
+      if (!asset) {
         throw new ExtensionManagerError("MARKETPLACE_SOURCE_NOT_FOUND", `GitHub 来源没有找到 ${name}（可能已删除或摘要不符）`);
       }
+      // `browser_download_url` 是网页地址：私有仓库带 Bearer 也只会 404，必须改走资产 API。
+      // 公开仓库无令牌时仍用网页直链——它由 CDN 提供，不消耗 API 限额。
+      const viaApi = Boolean(config.token) && typeof asset.url === "string" && asset.url.startsWith(config.apiBase);
+      const url = viaApi ? asset.url! : asset.browser_download_url;
+      const size = assetSize(asset, ref.size);
       const headers: Record<string, string> = {};
       if (config.token) headers.Authorization = `Bearer ${config.token}`;
+      // 资产 API 默认返回 JSON 元数据；只有显式声明 octet-stream 才给字节。
+      if (viaApi) headers.Accept = "application/octet-stream";
       let response: Response;
       try {
         response = await fetchImpl(url, {

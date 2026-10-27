@@ -74,24 +74,14 @@ export { remoteServerSettingsExtension } from "./settings-plugin.js";
 export { REMOTE_SERVER_FRONTEND_METADATA } from "./metadata.js";
 
 /**
- * 宿主内置设置插件的打开能力（结构声明，不从核心 import）。
- *
- * 与 `SettingsPanelHostProps` 同一处理：`settingsOpen` 住在 `cordis/plugins/settings`，
- * 不在公共 extension-api 里；扩展只声明自己用到的那一项，宿主按 capability 形状提供。
+ * `settingsOpen` 的类型来自 `cordis/context.ts` 的 Context 增强（settings 插件提供），
+ * 扩展不重复声明：重复声明会盖掉增强里"一定存在"的类型，让人以为需要判空。
  */
-type SettingsOpenCapability = {
-  open: (input?: { canvasId?: string | null; section?: "backend" | "plugins" | "appearance" | "notifications"; pluginId?: string }) => Promise<
-    { ok: true } | { ok: false; code: string; reason: string }
-  >;
-};
-
 type ExtensionContext = Context & {
   applicationRemote: ApplicationRemoteService;
   slots: SlotsService;
   /** 宿主 Dialog Service：调试窗口注册在这里（宿主没有它时插件不装配，见 inject）。 */
   dialogs: DialogsService;
-  /** 宿主内置设置插件的打开能力（canvas manifest 里排在扩展之前，运行期一定已 provide）。 */
-  settingsOpen?: SettingsOpenCapability;
 };
 
 /**
@@ -103,8 +93,11 @@ type ExtensionContext = Context & {
  *
  * 点击徽标直接打开**本扩展的设置面板**（`settingsOpen.open({ pluginId })`）：徽标是接入
  * 状态的唯一常驻表达，看到「已连接 / 连接异常」的人下一个动作就是「去改配置」，让他再去
- * 设置里找一遍插件卡片是不必要的往返。宿主没提供该能力时（空壳、恢复页）徽标退化为只读，
- * 不渲染一个点了没反应的按钮。
+ * 设置里找一遍插件卡片是不必要的往返。
+ *
+ * 徽标的注册挂在该能力上（见下方 `ctx.inject`）：能力未就绪就不渲染徽标，能力撤销就跟着
+ * 注销。**不渲染"点了没反应的按钮"，也不渲染"点了没反应的文本"**——后者正是装配期快照造出的
+ * 真实故障（徽标被固化成只读 span）。
  */
 export function remoteServerExtension(): ReturnType<typeof defineExtensionPlugin<ExtensionContext>> {
   return defineExtensionPlugin<ExtensionContext>(
@@ -112,14 +105,6 @@ export function remoteServerExtension(): ReturnType<typeof defineExtensionPlugin
       const service = createRemoteServerService(ctx.applicationRemote.transport);
       ctx.provide(REMOTE_SERVER_CAPABILITY, service as never);
       void service.refresh().catch(() => undefined);
-
-      // 惰性取（不进 inject）：空壳/恢复页没有它，而那时的徽标应当只读、不是装载失败。
-      const settingsOpen = ctx.get("settingsOpen" as never) as SettingsOpenCapability | undefined;
-      const openSettings = settingsOpen
-        ? () => {
-            void settingsOpen.open({ section: "plugins", pluginId: REMOTE_SERVER_EXTENSION_ID });
-          }
-        : undefined;
 
       // 运行中的扩展由主插件提供设置面板（见 registerRemoteServerSettingsPanel 的注释）。
       // 调试窗口也由主插件注册：设置面板只负责「打开入口」，窗口本体属于扩展自己的 surface。
@@ -155,14 +140,24 @@ export function remoteServerExtension(): ReturnType<typeof defineExtensionPlugin
         ctx.dialogs.open({ dialogId: REMOTE_SERVER_COLLABORATORS_DIALOG_ID, payload: input });
       };
 
-      const removeBadge = ctx.slots.register("canvas.topbar", {
-        id: `${REMOTE_SERVER_EXTENSION_ID}-badge`,
-        owner: REMOTE_SERVER_EXTENSION_ID,
-        // 比身份徽标（priority 1）更靠右：先显示「我是谁」，再显示「接到哪」。
-        priority: 2,
-        render: createRemoteServerBadgeRenderer(service, openSettings)
+      // 徽标可点依赖「打开设置」能力，用 `ctx.inject` 声明式等待，**不得**在装配期 `ctx.get`：
+      // 提供者在同一启动批次里要等整批 fiber 结算才 active，而 cordis 4 的 `ctx.get` 默认 strict
+      // （未 active 的提供者返回 undefined）。快照一次，徽标就被永久固化成只读 span —— 点不动、
+      // 文字可选中（真实故障）。声明式写法让贡献的生命周期跟着能力走：能力就绪才注册，能力撤销
+      // 随即注销。机制说明见 docs/diagrams/target-plugin-service-defenses.html。
+      ctx.inject(["settingsOpen"], (scoped) => {
+        const settingsOpen = scoped.settingsOpen;
+        const removeBadge = ctx.slots.register("canvas.topbar", {
+          id: `${REMOTE_SERVER_EXTENSION_ID}-badge`,
+          owner: REMOTE_SERVER_EXTENSION_ID,
+          // 比身份徽标（priority 1）更靠右：先显示「我是谁」，再显示「接到哪」。
+          priority: 2,
+          render: createRemoteServerBadgeRenderer(service, () => {
+            void settingsOpen.open({ section: "plugins", pluginId: REMOTE_SERVER_EXTENSION_ID });
+          })
+        });
+        scoped.effect(() => () => removeBadge(), "remote-server-badge");
       });
-      ctx.effect(() => () => removeBadge(), "remote-server-badge");
 
       // 画布切换器的每一条「仅本机」画布旁的动作入口：本地画布默认不上传，由用户逐张点
       // 「同步远端」。贡献只挂一次，宿主对每个条目渲染它；是否呈现由组件按连接状态与条目
@@ -205,7 +200,9 @@ export function remoteServerExtension(): ReturnType<typeof defineExtensionPlugin
     },
     {
       name: "remote-server-extension",
-      // `settingsOpen` 不硬注入：空壳/恢复页没有它，徽标那时应退化为只读而不是让插件装载失败。
+      // `settingsOpen` 不进本插件的 `inject`：只有徽标需要它，其余贡献（目录动作、两个窗口、
+      // 设置面板）不依赖设置能力；让整个插件等它会把调试窗口一并拖住。需要它的那一处用
+      // `ctx.inject` 局部等待（见 badge 注册处）。
       // `dialogs` 则必须注入：调试窗口是扩展自己注册的 surface，没有 Dialog Service 就无处装载。
       inject: ["applicationRemote", "slots", "dialogs"],
       provide: REMOTE_SERVER_CAPABILITY

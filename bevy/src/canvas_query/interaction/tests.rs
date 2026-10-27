@@ -69,6 +69,7 @@ fn group(id: &str, x: f32, y: f32, w: f32, h: f32, leaves: u32) -> GraphNode {
             output_capable_leaf_count: leaves,
             model_bounds: None,
             run_status: None,
+            drop_target: false,
         }),
         ..node(id, x, y, w, h)
     }

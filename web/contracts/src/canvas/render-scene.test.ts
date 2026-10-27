@@ -186,6 +186,58 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
     expect({ x: a.x, y: a.y }).toEqual({ x: 120, y: 130 });
   });
 
+  it("renders each group before its members and later top-level nodes", () => {
+    const base = groupCanvas();
+    const scene = buildCanvasRenderScene({
+      canvas: {
+        ...base,
+        document: {
+          ...base.document,
+          // Deliberately place the member before its parent to exercise the
+          // derived hierarchy order used by the renderer.
+          nodes: [
+            { id: "a", type: "image", parentId: "g", position: { x: 20, y: 30 } },
+            { id: "g", type: "group", position: { x: 100, y: 100 }, width: 500, height: 400 },
+            { id: "outside", type: "image", position: { x: 120, y: 120 } },
+          ],
+        },
+      },
+      theme: defaultAppTheme(),
+    });
+    expect(scene.nodes.map((node) => node.id)).toEqual(["outside", "g", "a"]);
+  });
+
+  it("keeps ungrouped roots at the lowest layer and sorts groups by id", () => {
+    const base = groupCanvas();
+    const scene = buildCanvasRenderScene({
+      canvas: {
+        ...base,
+        document: {
+          ...base.document,
+          nodes: [
+            { id: "top-late", type: "image", position: { x: 0, y: 0 }, zIndex: 4 },
+            { id: "member", type: "image", parentId: "group-late", position: { x: 20, y: 30 }, zIndex: 1 },
+            { id: "group-late", type: "group", position: { x: 100, y: 100 }, width: 500, height: 400, zIndex: 3 },
+            { id: "top-early", type: "image", position: { x: 0, y: 0 }, zIndex: 2 },
+            { id: "group-early", type: "group", position: { x: 300, y: 100 }, width: 500, height: 400, zIndex: 99 },
+          ],
+        },
+      },
+      theme: defaultAppTheme(),
+    });
+    expect(scene.nodes.map((node) => node.id)).toEqual(["top-late", "top-early", "group-early", "group-late", "member"]);
+  });
+
+  it("marks only the transient drop target group", () => {
+    const scene = buildCanvasRenderScene({
+      canvas: groupCanvas(),
+      theme: defaultAppTheme(),
+      dropTargetGroupIds: new Set(["g"]),
+    });
+    expect(scene.nodes.find((node) => node.id === "g")?.group?.dropTarget).toBe(true);
+    expect(scene.nodes.find((node) => node.id === "a")?.group).toBeUndefined();
+  });
+
   it("group 携带 memberCount/outputCapableLeafCount 且不绘制 resize 抓手语义", () => {
     const scene = buildCanvasRenderScene({ canvas: groupCanvas(), theme: defaultAppTheme(), selection: { nodes: ["g"] } });
     const g = scene.nodes.find((node) => node.id === "g")!;

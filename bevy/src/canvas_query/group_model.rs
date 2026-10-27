@@ -122,10 +122,15 @@ pub(crate) fn resize_center(node: &GraphNode) -> Option<Vec2> {
 }
 
 pub(crate) fn badge_path(node: &GraphNode) -> Vec<Vec2> {
-    if node.model.is_none() || node.group.is_none() {
+    if !has_badge(node) {
         return Vec::new();
     }
     rounded_rect_radius(badge_rect(node), CORNER * badge_scale(node))
+}
+
+/// 只有带模型身份的组才有底部徽章；3D 底座与 2D 面板缺口都用这一处判定。
+pub(crate) fn has_badge(node: &GraphNode) -> bool {
+    node.model.is_some() && node.group.is_some()
 }
 
 fn rounded_rect(rect: Vec4) -> Vec<Vec2> {

@@ -6,6 +6,8 @@
 
 export function seed_runtime_generation(previous: number): void;
 export function runtime_health(): string;
+export function benchmark_frames(enabled?: boolean): string;
+export function benchmark_media(enabled?: boolean): string;
 export function is_ready(): boolean;
 export function rendered_revision(): number;
 export function set_scene(json: string): number;

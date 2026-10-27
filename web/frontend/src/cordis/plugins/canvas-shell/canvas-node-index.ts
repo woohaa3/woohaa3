@@ -21,11 +21,14 @@ import {
   type ServerCanvas,
   type Woohaa3CanvasNode
 } from "@woohaa3/contracts";
+import type { DropRect } from "@woohaa3/contracts";
 
 /** 结构/位置索引（丢弃后可重建，不持有规范事实副本）。 */
 export type CanvasNodeIndex = {
   /** 来源 working canvas（身份 key）。 */
   readonly source: ServerCanvas;
+  /** Stable document-order runtime view built once with the working identity. */
+  readonly orderedNodes: readonly Woohaa3CanvasNode[];
   /** id → 节点（直接引用来源节点，不复制；contract helper 不读取 `data`）。 */
   readonly byId: ReadonlyMap<string, Woohaa3CanvasNode>;
   /** 当前存活节点 id 集合（失效 selection / 粘连 owner 判定）。 */
@@ -33,9 +36,15 @@ export type CanvasNodeIndex = {
   /** 折叠呈现随 working 身份重建，手势热路径不重新遍历文档。 */
   readonly hiddenNodeIds: ReadonlySet<string>;
   readonly dropTargetGroupIds: ReadonlySet<string>;
+  /** Collapsed groups remain compact obstacles but never receive drops. */
+  readonly collapsedGroupIds: ReadonlySet<string>;
   /** Group candidates in document order, matching the canonical parenting helper. */
   readonly groups: readonly Woohaa3CanvasNode[];
   readonly groupBounds: readonly { id: string; x: number; y: number; width: number; height: number }[];
+  /** Complete working AABB facts, including off-screen nodes. */
+  readonly workingBounds: readonly ({ id: string } & DropRect)[];
+  /** Query cached working bounds; pan/zoom and pointermove never rebuild it. */
+  readonly queryWorkingAabb: (rect: DropRect) => readonly ({ id: string } & DropRect)[];
   readonly children: ReadonlyMap<string, readonly string[]>;
   /** Canonical document tie-break order, derived once per source identity. */
   readonly documentOrder: ReadonlyMap<string, number>;
@@ -109,9 +118,26 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
   const hiddenNodeIds = hiddenByCollapsedGroups(canvas);
   const dropTargetGroupIds = new Set(groups.filter(group => !hiddenNodeIds.has(group.id)
     && canvas.nodeData[group.id]?.groupCollapsed !== true).map(group => group.id));
+  const collapsedGroupIds = new Set(groups.filter(group => canvas.nodeData[group.id]?.groupCollapsed === true).map(group => group.id));
   const groupSizes = getGroupLayoutSizes(nodes);
   const groupBounds = groups.map(group => ({ id: group.id,
     ...absolutePosition(group.id)!, ...groupSizes.get(group.id)! }));
+  const workingBounds = nodes.flatMap(node => {
+    // Collapsed groups remain as one compact obstacle; every hidden
+    // descendant (including nested groups) is omitted from the independent
+    // candidate set and moves only with its visible ancestor.
+    if (hiddenNodeIds.has(node.id)) return [];
+    const position = absolutePosition(node.id);
+    if (!position) return [];
+    const runtimeNode = node as unknown as Woohaa3CanvasNode;
+    const size = node.type === "group"
+      ? groupSizes.get(node.id) ?? { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) }
+      : { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) };
+    // Include the small group badge lip in the conservative occupied range.
+    const outset = node.type === "group" ? 6 : 0;
+    return [{ id: node.id, x: position.x - outset, y: position.y - outset,
+      width: size.width + outset * 2, height: size.height + outset * 2 }];
+  });
   // 拍摄镜头预览：从归属数据建立 owner（片场）→ 预览索引，供手势阶段按 owner 命中，
   // 不扫描整画布、不重建几何（change 2026-10-15 D4）。
   const shotPreviewsByOwner = new Map<string, string[]>();
@@ -125,6 +151,7 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
   }
   return {
     source: canvas,
+    orderedNodes: [...byId.values()],
     byId,
     children,
     documentOrder,
@@ -133,8 +160,15 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     liveIds: new Set(byId.keys()),
     hiddenNodeIds,
     dropTargetGroupIds,
+    collapsedGroupIds,
     groups,
     groupBounds,
+    workingBounds,
+    queryWorkingAabb: (rect) => {
+      if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) return [];
+      return workingBounds.filter(entry => entry.x < rect.x + rect.width && entry.x + entry.width > rect.x
+        && entry.y < rect.y + rect.height && entry.y + entry.height > rect.y);
+    },
     absolutePosition,
     parentAbsolutePosition: (id) => {
       const parentId = byId.get(id)?.parentId;

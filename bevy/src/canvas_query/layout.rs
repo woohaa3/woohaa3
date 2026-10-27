@@ -507,6 +507,7 @@ mod tests {
             output_capable_leaf_count: 1,
             model_bounds: None,
             run_status: None,
+            drop_target: false,
         });
         assert!(!shows_generation_ring(&group));
     }

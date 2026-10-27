@@ -103,13 +103,46 @@ impl Geometry {
         color: u32,
         alpha: f32,
     ) {
+        self.rounded_rect_radii_alpha(x, y, width, height, [radius; 4], z, color, alpha);
+    }
+
+    /// 四角半径独立的圆角矩形，`radii` 顺序为左上、右上、右下、左下（画布 y 向下）。
+    ///
+    /// 组底需要在底部徽章处留出缺口：缺口把矩形拆成上片与左下/右下片，每片只保留原矩形
+    /// 自身的那几个圆角。三片都是凸多边形，因此可以继续用 [`Self::polygon_alpha`] 的
+    /// 扇形三角化；凹多边形（带缺口的一整块）用扇形会漏画或越界。
+    ///
+    /// 半径 `0` 输出直角顶点；超过短边一半时收缩，避免自相交。
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rounded_rect_radii_alpha(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        radii: [f32; 4],
+        z: f32,
+        color: u32,
+        alpha: f32,
+    ) {
+        if width <= 0.0 || height <= 0.0 {
+            return;
+        }
+        let limit = width.min(height) / 2.0;
+        let [top_left, top_right, bottom_right, bottom_left] = radii.map(|r| r.clamp(0.0, limit));
         let mut points = Vec::with_capacity(36);
-        for (cx, cy, start) in [
-            (x + width - radius, y + height - radius, 0.0),
-            (x + radius, y + height - radius, PI / 2.0),
-            (x + radius, y + radius, PI),
-            (x + width - radius, y + radius, PI * 1.5),
+        // 与 `rounded_rect_alpha` 相同的右下 → 左下 → 左上 → 右上弧段顺序，四角同半径时
+        // 顶点序列与历史输出逐字节一致。
+        for (cx, cy, start, radius) in [
+            (x + width - bottom_right, y + height - bottom_right, 0.0, bottom_right),
+            (x + bottom_left, y + height - bottom_left, PI / 2.0, bottom_left),
+            (x + top_left, y + top_left, PI, top_left),
+            (x + width - top_right, y + top_right, PI * 1.5, top_right),
         ] {
+            if radius <= 0.0 {
+                points.push(Vec2::new(cx, cy));
+                continue;
+            }
             for i in 0..=8 {
                 let angle = start + i as f32 * PI / 16.0;
                 points.push(Vec2::new(
@@ -424,6 +457,24 @@ mod tests {
         assert!(!colors.is_empty());
         // 线性空间 alpha 与原值一致（sRGB→linear 只作用于 RGB）。
         assert!(colors.iter().all(|color| (color[3] - 0.55).abs() < 1e-5));
+    }
+
+    /// 四角半径独立：直角输出单个顶点，圆角输出 9 点弧段。
+    /// 组底靠它把「带徽章缺口的矩形」拆成三块凸多边形。
+    #[test]
+    fn rounded_rect_radii_keeps_square_corners_as_single_vertices() {
+        let mut geometry = Geometry::default();
+        geometry.rounded_rect_radii_alpha(0.0, 0.0, 100.0, 40.0, [0., 0., 0., 12.], 0.0, 0xffffff, 0.5);
+        let (_, blend) = geometry.into_layers();
+        let positions = match blend.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
+            bevy::render::mesh::VertexAttributeValues::Float32x3(values) => values.clone(),
+            other => panic!("意外的位置属性类型：{other:?}"),
+        };
+        assert_eq!(positions.len(), 3 + 9);
+        // 左下圆角的最低点仍在矩形底边上。
+        assert!(positions
+            .iter()
+            .any(|p| (p[0] - 12.).abs() < 1e-4 && (p[1] + 40.).abs() < 1e-4));
     }
 
     #[test]

@@ -76,6 +76,8 @@ import type { FilmSetNodeData } from "../canvas-node-model.js";
 
 export type CanvasRenderSceneInput = {
   groupBadgeScaleOverrides?: ReadonlyMap<string, number>;
+  /** Group ids carrying a render-only drop target highlight. */
+  dropTargetGroupIds?: ReadonlySet<string> | readonly string[];
   groupBadgeResizable?: boolean;
   canvas: ServerCanvas;
   nodeCapabilities?: NodeCapabilityResolver;
@@ -301,8 +303,16 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     return count;
   };
   const groupSizes = getGroupLayoutSizes(canvas.document.nodes, input.sizeOverrides);
+  const dropTargetGroupIds = input.dropTargetGroupIds instanceof Set
+    ? input.dropTargetGroupIds
+    : new Set(input.dropTargetGroupIds ?? []);
   const hidden = input.modelFocus || input.imageFocus || input.videoFocus ? new Set<string>() : hiddenByCollapsedGroups(canvas);
-  const nodes = canvas.document.nodes.filter(node => !hidden.has(node.id)).map((node) => {
+  // Keep projection input independent from insertion order. Render depth has
+  // a deliberate grouping policy below: ungrouped roots are always the lowest
+  // layer, and group roots are ordered by id. Persisted zIndex remains a
+  // document/edit field; it is not reused as a second visual truth here.
+  const canonicalNodes = [...canvas.document.nodes];
+  const projectedNodes = canonicalNodes.filter(node => !hidden.has(node.id)).map((node) => {
     const context = { canvas, node, data: nodeData[node.id] };
     const capabilities = capabilitiesOf(node);
     const kind = capabilities.appearance?.palette ?? "node";
@@ -422,6 +432,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {})
         } : {})
       };
+      if (node.type === "group" && dropTargetGroupIds.has(node.id)) rendered.group.dropTarget = true;
     }
     if (capabilities.modelPreparation) {
       // prepared resource 优先：映射层只引用 resource key，不遍历顶点/序列化 ops。
@@ -460,6 +471,46 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     }
     return rendered;
   });
+
+  // Render depth is intentionally separate from persisted zIndex: ungrouped
+  // roots are always below groups, group roots are sorted by id, and every
+  // group is emitted before its descendants so its panel sits underneath its
+  // members. This is a derived render sequence and never writes a second
+  // persisted ordering field.
+  const projectedById = new Map(projectedNodes.map((node) => [node.id, node]));
+  const documentOrder = new Map(canonicalNodes.map((node, index) => [node.id, index]));
+  const children = new Map<string, string[]>();
+  for (const node of canonicalNodes) {
+    if (!node.parentId || !projectedById.has(node.id) || !projectedById.has(node.parentId)) continue;
+    const list = children.get(node.parentId) ?? [];
+    list.push(node.id);
+    children.set(node.parentId, list);
+  }
+  const compareId = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
+  const compareChildIds = (left: string, right: string): number => {
+    const leftNode = projectedById.get(left);
+    const rightNode = projectedById.get(right);
+    const leftGroup = leftNode?.type === "group" ? 0 : 1;
+    const rightGroup = rightNode?.type === "group" ? 0 : 1;
+    return leftGroup - rightGroup
+      || (leftGroup === 0 ? compareId(left, right) : (documentOrder.get(left) ?? 0) - (documentOrder.get(right) ?? 0));
+  };
+  for (const ids of children.values()) ids.sort(compareChildIds);
+  const orderedIds: string[] = [];
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    const node = projectedById.get(id);
+    if (!node) return;
+    visited.add(id);
+    orderedIds.push(id);
+    for (const child of children.get(id) ?? []) visit(child);
+  };
+  const roots = canonicalNodes.filter((node) => !node.parentId || !projectedById.has(node.parentId));
+  for (const node of roots.filter((entry) => entry.type !== "group")) visit(node.id);
+  for (const node of roots.filter((entry) => entry.type === "group").sort((a, b) => compareId(a.id, b.id))) visit(node.id);
+  for (const node of projectedNodes) visit(node.id);
+  const nodes = orderedIds.map((id) => projectedById.get(id)!);
 
   // 幽灵节点（上传中）：追加为普通 Bevy 节点，复用完全相同的卡片绘制。
   // 同 id 的真实节点已存在时跳过（working projection 接管，避免重复绘制）。

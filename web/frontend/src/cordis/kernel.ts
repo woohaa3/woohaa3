@@ -7,6 +7,7 @@
 import { Context, type Fiber } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { DiagnosticsService } from "./diagnostics.js";
+import { markServiceAccessGuardScope, reportLateServiceReads } from "./service-access-guard.js";
 import type { RuntimeStatus } from "./contracts.js";
 import { fiberStatus } from "./diagnostics.js";
 import { scopedExtensionServices } from "./slots.js";
@@ -129,7 +130,8 @@ export type ScopeOptions = {
  * socket/listener/plugin 只属于本 scope，`dispose()` 时全部撤销。
  */
 export async function startFrontendScope(parent: Context, options: ScopeOptions): Promise<FrontendRuntime> {
-  let scopeCtx = parent.extend({});
+  const guardedScope = markServiceAccessGuardScope(parent.extend({}));
+  let scopeCtx = guardedScope.ctx;
   for (const name of options.isolate ?? []) {
     scopeCtx = scopeCtx.extend(scopeCtx.isolate(name));
   }
@@ -174,6 +176,9 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
       }
     }
 
+    // 批次结算后再判装配期取空：仍不可用的服务属"本来就没有"，不追究。
+    reportLateServiceReads(guardedScope.guard, ctx);
+
     await options.beforeReady?.(ctx);
     diagnostics.markReady();
   } catch (error) {
@@ -206,7 +211,8 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
  * optional 失败：记录诊断并继续；其 contribution 不出现。
  */
 export async function startFrontendRuntime(options: FrontendRuntimeOptions): Promise<FrontendRuntime> {
-  const ctx = new Context();
+  const guardedScope = markServiceAccessGuardScope(new Context());
+  const ctx = guardedScope.ctx;
   const diagnostics = new DiagnosticsService(ctx);
   const disposers: Array<() => void> = [];
   const fibers: Fiber[] = [];
@@ -233,6 +239,8 @@ export async function startFrontendRuntime(options: FrontendRuntimeOptions): Pro
         throw new Error(`required plugin "${definition.id}" 启动失败（状态 ${fiberStatus(fiber)}）`);
       }
     }
+
+    reportLateServiceReads(guardedScope.guard, ctx);
 
     await options.beforeReady?.(ctx);
     diagnostics.markReady();

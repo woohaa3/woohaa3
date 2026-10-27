@@ -152,7 +152,8 @@ export function createMarketplaceInstallController(options: MarketplaceInstallOp
         return;
       }
       options.onJob(result.jobId, result.job);
-      set({ installing: false, notice: `已开始安装 ${selected.extensionId}@${selected.version}，进度见上方任务列表。` });
+      // 受理即交给任务列表：进度与终态都在那里，不再额外写一句会过期的「已开始安装」。
+      set({ installing: false });
     },
     async trustKey(key) {
       if (state.trusting) return;
