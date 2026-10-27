@@ -31,6 +31,7 @@ import {
 import { PluginStateControl } from "./plugin-state-control.js";
 import { ExtensionFaultNotice } from "./extension-fault-notice.js";
 import { ManagedExtensionDetails, ManagedInstallBar, ReleaseChangedNotice } from "./managed-extensions-ui.js";
+import { extensionSource } from "./extension-source.js";
 import { MarketplaceInstallPanel } from "./marketplace-install-ui.js";
 import type { ManagedExtensionsController } from "./managed-extensions.js";
 import {
@@ -124,6 +125,8 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
   const [sectionToggled, setSectionToggled] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PluginFilter>("all");
+  /** 来源筛选：`all` 或 `builtin`/某个 sourceId（见 extension-source.ts）。 */
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [installMode, setInstallMode] = useState<"market" | "file" | null>(null);
 
   const index = indexPlugins(state.status === "ready" ? state.snapshot : null, view);
@@ -141,8 +144,18 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
     if (filter === "running") return !isStopped(status.label, status.tone);
     if (filter === "disabled") return isStopped(status.label, status.tone);
     if (filter === "configurable") return isConfigurable(index, group) || panelIds.has(group.id);
+    if (sourceFilter !== "all" && extensionSource(group.installed).id !== sourceFilter) return false;
     return true;
   });
+  // 只在真的有多个来源时出现来源筛选，避免单来源场景多一行噪声。
+  const sourceOptions = (() => {
+    const seen = new Map<string, string>();
+    for (const group of index.groups) {
+      const source = extensionSource(group.installed);
+      if (!seen.has(source.id)) seen.set(source.id, source.label);
+    }
+    return seen.size > 1 ? [...seen].map(([id, label]) => ({ id, label })) : [];
+  })();
   const totals = {
     all: index.groups.length,
     running: index.groups.filter((group) => {
@@ -229,6 +242,7 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
           </div>
 
           <div className="settings-plugin-toolbar">
+            <div className="settings-plugin-filter-groups">
             <div className="settings-plugin-filters" aria-label="插件筛选">
               {FILTERS.map((entry) => (
                 <button
@@ -242,6 +256,30 @@ export function PluginSettingsSection({ store, manager, onOpenPlugin, settingsPa
                   <span>{totals[entry.id]}</span>
                 </button>
               ))}
+            </div>
+            {sourceOptions.length > 0 ? (
+              <div className="settings-plugin-filters" aria-label="按来源筛选" data-testid="plugins-source-filters">
+                <button
+                  type="button"
+                  className={sourceFilter === "all" ? "settings-plugin-filter is-active" : "settings-plugin-filter"}
+                  onClick={() => setSourceFilter("all")}
+                  data-testid="plugins-source-all"
+                >
+                  全部来源
+                </button>
+                {sourceOptions.map((source) => (
+                  <button
+                    key={source.id}
+                    type="button"
+                    className={sourceFilter === source.id ? "settings-plugin-filter is-active" : "settings-plugin-filter"}
+                    onClick={() => setSourceFilter(source.id)}
+                    data-testid={`plugins-source-${source.id}`}
+                  >
+                    {source.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             </div>
             <span className="settings-plugin-result">{groups.length} / {totals.all}</span>
           </div>
@@ -408,7 +446,14 @@ function PluginRow({
             <span className="plugin-card__badge">{layer.badge}</span>
             {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
             {group.installed?.managed ? (
-              <span className="plugin-card__badge is-managed" data-testid={`settings-plugin-managed-${group.id}`}>已安装</span>
+              <span
+                className="plugin-card__badge is-source"
+                data-tone={extensionSource(group.installed).tone}
+                data-testid={`settings-plugin-source-${group.id}`}
+                title={group.installed.sourceId ? `安装来源：${group.installed.sourceId}` : undefined}
+              >
+                {extensionSource(group.installed).label}
+              </span>
             ) : null}
           </span>
           <span className="plugin-row__description">{group.description || "暂无说明"}</span>

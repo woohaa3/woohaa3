@@ -137,9 +137,9 @@ describe("受管扩展设置面", () => {
     const { container } = await render(baseSnapshot([builtin("film-set"), managedEntry("demo")]), remoteWith());
     expect(container.querySelector('[data-testid="managed-extension-film-set"]')).toBeNull();
     expect(container.querySelector('[data-testid="managed-uninstall-film-set"]')).toBeNull();
-    expect(container.querySelector('[data-testid="settings-plugin-managed-film-set"]')).toBeNull();
-    expect(container.querySelector('[data-testid="settings-plugin-managed-demo"]')?.textContent).toBe("已安装");
-    expect(container.querySelector('[data-testid="managed-source-demo"]')?.textContent).toBe("本地文件");
+    expect(container.querySelector('[data-testid="settings-plugin-source-film-set"]')).toBeNull();
+    // 来源从「已安装」这种无信息量的徽标改成具体来源：内置也在行上标出来，便于按来源扫读。
+    expect(container.querySelector('[data-testid="settings-plugin-source-demo"]')?.textContent).toBe("本地文件");
     expect(container.querySelector('[data-testid="managed-trust-demo"]')?.textContent).toContain("woohaa-dev");
     expect(container.querySelector('[data-testid="managed-rollback-demo"]')?.textContent).toBe("回滚到 v1.0.0");
   });

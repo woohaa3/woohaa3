@@ -956,6 +956,7 @@
 	padding: 10px 0;
 	border-bottom: 1px solid var(--mc-border);
 }
+.settings-plugin-filter-groups { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-width: 0; }
 .settings-plugin-filters { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .settings-plugin-filter {
 	display: inline-flex;

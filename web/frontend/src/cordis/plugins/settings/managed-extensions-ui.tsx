@@ -164,8 +164,6 @@ export function ManagedExtensionDetails({
   return (
     <div className="managed-extension" data-testid={`managed-extension-${id}`}>
       <dl className="managed-extension__facts">
-        <dt>来源</dt>
-        <dd data-testid={`managed-source-${id}`}>{installed.sourceId === "local-file" ? "本地文件" : installed.sourceId ?? "未知"}</dd>
         <dt>信任</dt>
         <dd data-testid={`managed-trust-${id}`}>
           {trustLabel(installed.trust)}

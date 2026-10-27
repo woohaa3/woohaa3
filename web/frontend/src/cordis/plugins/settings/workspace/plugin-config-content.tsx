@@ -39,6 +39,7 @@ import type { SettingsEditSession } from "../edit-session.js";
 import type { ExtensionSettingsAssembly } from "../plugin.js";
 import { useSettingsEditReport } from "./use-settings-edit-report.js";
 import type { SettingsPanelRenderProps } from "../plugin-panels.js";
+import { extensionSource, extensionTrustBadge } from "../extension-source.js";
 import { GeneratedModelsSection } from "./model-catalog.js";
 import { useExtensionFaults } from "../../../host.js";
 import { slotContributionOrigin } from "../../../slots.js";
@@ -165,6 +166,24 @@ export function PluginConfigContent({
           <>
             <span className="plugin-card__badge">{layer.badge}</span>
             {group.provider ? <span className="plugin-card__badge is-provider">Provider</span> : null}
+            {group.installed?.managed ? (
+              <span
+                className="plugin-card__badge is-source"
+                data-tone={extensionSource(group.installed).tone}
+                data-testid={`plugin-config-source-${group.id}`}
+              >
+                {extensionSource(group.installed).label}
+              </span>
+            ) : null}
+            {extensionTrustBadge(group.installed) ? (
+              <span
+                className="plugin-card__badge is-trust"
+                data-tone={extensionTrustBadge(group.installed)!.tone}
+                data-testid={`plugin-config-trust-${group.id}`}
+              >
+                {extensionTrustBadge(group.installed)!.label}
+              </span>
+            ) : null}
             {group.version ? (
               <span className="plugin-card__version" title={`扩展版本 ${versionLabel(group.version)}`} data-testid={`plugin-config-version-${group.id}`}>
                 {versionLabel(group.version)}
@@ -214,7 +233,7 @@ export function PluginConfigContent({
             </div>
           ) : null}
           <div className="plugin-overview__stat">
-            <strong>{group.installed?.managed ? "市场" : "内置"}</strong>
+            <strong>{extensionSource(group.installed).label}</strong>
             <span>安装来源</span>
           </div>
         </div>
