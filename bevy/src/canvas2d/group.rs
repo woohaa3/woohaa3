@@ -25,10 +25,12 @@ pub(crate) const GROUP_Z: f32 = 1.0;
 /// 圆角半径与描边宽度。
 const GROUP_BORDER: f32 = 1.5;
 
-/// group 容器底的 alpha（change: fix-group-and-marquee-preview）。
+/// group 容器底的 alpha（change: fix-group-and-marquee-preview；
+/// change: 2026-10-27-order-canvas-layers-by-ground-anchor 收敛为 2D 唯一组底色）。
 ///
 /// 0.55 与参考实现 `rgba(42,42,48,.55)` 同量级：只暗示容器范围，不遮挡成员卡片边框。
-/// 2D 面板与 3D 组底共用这一个值，两者观感才一致（change: 2026-10-26-settle-group-boundaries-on-drop）。
+/// 2D 面板是**所有**组（带模型或不带模型）的唯一底色来源；3D 相机只画不透明徽章底座，
+/// 不再叠加同透明度的填充面，因此两组观感一致。
 pub(super) const GROUP_FILL_ALPHA: f32 = 0.55;
 
 /// 组面板圆角，与组外框的 12 单位语言一致。
@@ -50,8 +52,8 @@ pub(super) fn is_running(node: &crate::protocol::GraphNode) -> bool {
 /// z=0; the caller puts the entity itself at the group's world z so Bevy's
 /// Transparent2d phase can sort each panel independently.
 ///
-/// 面板用 `canvasNodeSurface` + [`GROUP_FILL_ALPHA`]，与 3D 组底同色同透明度，恢复引入
-/// 2D 面板前的观感；不改成不透明（change: 2026-10-26-settle-group-boundaries-on-drop）。
+/// 面板用 `canvasNodeSurface` + [`GROUP_FILL_ALPHA`]，这是所有组唯一的底色层；3D 相机只画
+/// 不透明徽章底座，不再叠加半透明组底（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
 pub(crate) fn draw_group_panel(
     theme: &ThemeResource,
     node: &crate::protocol::GraphNode,
@@ -503,6 +505,27 @@ mod tests {
         assert!(colors
             .iter()
             .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
+    }
+
+    /// 带模型组与无模型组的 2D 底色必须来自同一 token/alpha；3D 相机只画不透明徽章，
+    /// 不再叠加 0.55 填充层（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
+    #[test]
+    fn model_presence_does_not_change_group_underlay() {
+        let theme = ThemeResource::default();
+        let plain = draw_group_panel(&theme, &node(400., 300.), &panel_presentation(false));
+        let modeled =
+            draw_group_panel(&theme, &model_group(400., 300.), &panel_presentation(false));
+        for mesh in [plain, modeled] {
+            let Some(VertexAttributeValues::Float32x4(colors)) =
+                mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+            else {
+                panic!("panel must carry vertex colors");
+            };
+            assert!(colors.iter().all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6));
+            assert!(colors
+                .iter()
+                .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
+        }
     }
 
     /// 3D 相机（order 0）整体先于 2D 覆盖层（order 1），所以带模型的组必须在底部徽章处

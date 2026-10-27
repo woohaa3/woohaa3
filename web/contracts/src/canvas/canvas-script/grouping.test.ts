@@ -82,6 +82,18 @@ const build: AgentPlanOperation[] = [
     placement: { mode: "absolute", position: { x: 400, y: 0 } },
   },
   {
+    op: "create_node",
+    ref: "c",
+    kind: "image",
+    placement: { mode: "absolute", position: { x: 800, y: 0 } },
+  },
+  {
+    op: "create_node",
+    ref: "d",
+    kind: "image",
+    placement: { mode: "absolute", position: { x: 1200, y: 0 } },
+  },
+  {
     op: "create_group",
     ref: "g1",
     title: "角色",
@@ -93,7 +105,7 @@ const build: AgentPlanOperation[] = [
     op: "create_group",
     ref: "all",
     title: "素材库",
-    members: [ref("g1"), ref("g2")],
+    members: [ref("c"), ref("d")],
     layout: { mode: "grid", columns: 2, gapX: 100 },
     placement: { mode: "absolute", position: { x: -2000, y: 0 } },
   },
@@ -129,14 +141,14 @@ describe("canvas classification groups", () => {
       ).warnings[0].code,
     ).toBe("overlap");
   });
-  it("persists single-member and nested named groups, matching predicted world bounds", () => {
+  it("persists single-member and multi-member named groups, matching predicted world bounds", () => {
     const { plan, canvas } = applied(build);
     expect(plan.organization.groups).toHaveLength(3);
     const all = plan.organization.groups.find(
       (g) => g.nodeId === plan.refs.all,
     )!;
     expect(all.worldBounds.x).toBe(-2000);
-    expect(all.memberIds).toEqual([plan.refs.g1, plan.refs.g2]);
+    expect(all.memberIds).toEqual([plan.refs.c, plan.refs.d]);
     expect(canvas.document.edges).toHaveLength(0);
     const page = projectAgentGraph(canvas, {
       parentId: plan.refs.all,
@@ -147,8 +159,12 @@ describe("canvas classification groups", () => {
     expect(page.graph.nextCursor).toBeTruthy();
     const root = projectAgentGraph(canvas, { parentId: null });
     if (!root.ok) throw new Error("graph");
-    expect(root.graph.nodes.map((n) => n.nodeId)).toEqual([plan.refs.all]);
-    expect(root.graph.nodes[0]).toMatchObject({
+    expect(root.graph.nodes.map((n) => n.nodeId).sort()).toEqual(
+      [plan.refs.g1, plan.refs.g2, plan.refs.all].sort(),
+    );
+    expect(
+      root.graph.nodes.find((n) => n.nodeId === plan.refs.all),
+    ).toMatchObject({
       directMemberCount: 2,
       affordances: { canUngroup: true, canRun: false, canConnect: false },
     });
@@ -208,7 +224,7 @@ describe("canvas classification groups", () => {
       expect.arrayContaining(["old", "new", "a", "b"]),
     );
   });
-  it("world move of nested group moves each descendant once; delta includes unchanged local children", () => {
+  it("world move of a group moves each descendant once; delta includes unchanged local children", () => {
     const { plan, canvas } = applied(build);
     const move = compile(
       [
@@ -225,12 +241,15 @@ describe("canvas classification groups", () => {
     const result = applyCanvasCommands(canvas, move.commands);
     if (!result.ok) throw new Error("apply");
     const delta = computeAgentDelta(canvas, result.canvas);
-    expect(delta.nodes).toHaveLength(5);
+    expect(delta.nodes.map((n) => n.nodeId).sort()).toEqual(
+      [plan.refs.all, plan.refs.c, plan.refs.d].sort(),
+    );
     const before = projectAgentGraph(canvas),
       after = projectAgentGraph(result.canvas);
     if (!before.ok || !after.ok) throw new Error("graph");
-    for (const n of before.graph.nodes) {
-      const next = after.graph.nodes.find((v) => v.nodeId === n.nodeId)!;
+    for (const id of [plan.refs.all, plan.refs.c, plan.refs.d]) {
+      const n = before.graph.nodes.find((v) => v.nodeId === id)!;
+      const next = after.graph.nodes.find((v) => v.nodeId === id)!;
       expect(next.worldBounds!.x - n.worldBounds!.x).toBe(500);
       expect(next.worldBounds!.y - n.worldBounds!.y).toBe(500);
     }
@@ -263,6 +282,37 @@ describe("canvas classification groups", () => {
     ] as AgentPlanOperation[][])
       expect(compile(ops, snap).ok).toBe(false);
   });
+  it("rejects nested groups through create_group, reparent and root-scoped plans", () => {
+    const snap = snapshot([
+      node("g", 0, 0, undefined, "group"),
+      node("a", 40, 40, "g"),
+      node("other", 800, 0, undefined, "group"),
+    ]);
+    for (const ops of [
+      [{ op: "create_group", ref: "nest", title: "nest", members: [existing("g")] }],
+      [{ op: "reparent", targets: [existing("g")], parent: existing("other") }],
+    ] as AgentPlanOperation[][]) {
+      expect(compile(ops, snap)).toMatchObject({
+        ok: false,
+        error: { code: "invalid-parent" },
+      });
+    }
+    const scoped = compile(
+      [
+        {
+          op: "create_group",
+          ref: "nested",
+          title: "nested",
+          members: [existing("a")],
+        },
+      ],
+      { ...snap, rootGroupId: "g" },
+    );
+    expect(scoped).toMatchObject({
+      ok: false,
+      error: { code: "invalid-parent" },
+    });
+  });
   it("moves a small operation affecting many descendants (no affected-node quota)", () => {
     // change: 2026-10-22-remove-agent-execution-limits，任务 5.1：原 256 影响节点额度已删除；
     // 完整派生由同一 planner 处理，仍保持确定性与原子性。
@@ -290,12 +340,12 @@ describe("canvas classification groups", () => {
     const snap = snapshot([node("anchor", 1000, 100)]);
     const { plan } = applied(
       [
-        ...build.slice(0, 3),
+        ...build.slice(0, 4),
         {
           op: "create_group",
           ref: "outer",
           title: "左侧",
-          members: [ref("g1")],
+          members: [ref("a"), ref("b")],
           placement: { mode: "before", anchor: existing("anchor"), gap: 200 },
         },
       ],

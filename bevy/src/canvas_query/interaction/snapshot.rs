@@ -80,7 +80,8 @@ pub(crate) struct InteractionSnapshot {
     focus_closes: Option<Vec<(String, (f32, f32, f32, f32))>>,
     pub(super) nodes: Vec<SnapshotNode>,
     pub(super) edges: Vec<SnapshotEdge>,
-    /// 点命中顺序：非 group 倒序在前，group 倒序在后（与既有 JS 优先级一致）。
+    /// 点命中顺序：按发射序列倒序（最上层先）。容器先于成员发射，因此成员控件先于容器背景命中；
+    /// 与 2D 绘制顺序完全一致（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D2）。
     pub(super) order: Vec<usize>,
     /// 两个把手只在合法 scene 投影声明可见时存在（冷路径生成）。
     pub(super) aggregate_handles: Option<[(String, Vec2); 2]>,
@@ -207,16 +208,8 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
         })
         .collect();
 
-    // 命中顺序：非 group 后绘制者优先，group 背景最后。
-    let order: Vec<usize> = {
-        let (groups, cards): (Vec<usize>, Vec<usize>) =
-            (0..nodes.len()).partition(|index| nodes[*index].group);
-        cards
-            .into_iter()
-            .rev()
-            .chain(groups.into_iter().rev())
-            .collect()
-    };
+    // 命中顺序：按发射序列倒序，最上层（最后绘制）优先；容器背景自然排在成员之后。
+    let order: Vec<usize> = (0..nodes.len()).rev().collect();
 
     let mut adjacency = vec![Vec::new(); nodes.len()];
     for (i, edge) in edges.iter().enumerate() {
@@ -711,11 +704,11 @@ impl InteractionSnapshot {
         None
     }
 
-    /// 框选：与归一化矩形**正面积**相交且可交互（非 ghost）的节点，保持文档顺序。
+    /// 框选：与归一化矩形**正面积**相交且可交互（非 ghost）的节点，保持当前发射顺序。
     ///
     /// 复合资产使用真实范围多边形 SAT；仅触边不选中（change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
-    /// 候选来自空间网格（design D7 / 任务 7.3），因此只遍历可能相交的节点；结果仍按文档顺序返回，
-    /// 未驻留/离屏节点照常参与框选。
+    /// 候选来自空间网格（design D7 / 任务 7.3），因此只遍历可能相交的节点；结果仍按发射顺序返回
+    /// （与 scene.nodes 一致，容器先于成员），未驻留/离屏节点照常参与框选。
     pub(crate) fn marquee(&self, x: f32, y: f32, width: f32, height: f32) -> Vec<String> {
         let left = x.min(x + width);
         let right = x.max(x + width);

@@ -143,5 +143,6 @@ export * from "./canvas/builtin-node-capabilities.js";
 export * from "./canvas/media-content.js";
 export * from "./canvas/group-presentation.js";
 export * from "./canvas/group-badge.js";
+export * from "./canvas/ground-anchor.js";
 
 export type { MediaFormatValidator, MediaFormatRegistry } from "./extension/services/host/media-formats.js";

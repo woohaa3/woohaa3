@@ -116,14 +116,10 @@ for (const [key, title, assets] of [
     key: key + "-" + i, title: name, prompt: "俯视角潜行游戏素材：" + name
   }));
   categories.push(canvas.group(members, {
-    key, title, layout: { mode: "grid", columns: 3, gapX: 60, gapY: 60 }
+    key, title, layout: { mode: "grid", columns: 3, gapX: 60, gapY: 60 },
+    placement: { mode: "absolute", position: { x: -2600, y: categories.length * 760 } }
   }));
-}
-canvas.group(categories, {
-  key: "kit", title: "潜行游戏素材库",
-  layout: { mode: "grid", columns: 2, gapX: 100, gapY: 100 },
-  placement: { mode: "absolute", position: { x: -2600, y: 0 } }
-});`;
+}`;
 
 /** 指南文本：人类可读，但事实与签名表同源。 */
 export const CANVAS_SCRIPT_GUIDE_TEXT = `# Canvas Script API 指南（${DEFAULT_CANVAS_SCRIPT_VERSION}）
@@ -143,7 +139,7 @@ ${CANVAS_SCRIPT_API_SIGNATURES.map((entry) => `- \`${entry.signature}\` — ${en
 
 ## 分类整理
 
-素材库应按用途创建有标题的真实分类组，再将分类组放入总组。只有一个成员也能成组。
+素材库应按用途创建有标题的真实分类组，分类组保持在顶层（画布不支持嵌套组）。只有一个成员也能成组。
 标题前缀、排成几行、文本说明不能代替组。组只表达归属，不应为了分类而添加 connect。
 connect 只表达真实生成输入。canvas.node 不接受 group kind；使用 canvas.group。
 预检检查 organization.groups 中的 title/memberIds/worldBounds，再提交并读回 parentId 核对。

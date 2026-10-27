@@ -171,6 +171,12 @@ export class PlanGeometry {
     const selected = this.roots(ids, false);
     if (parent !== null) {
       planAssert(this.require(parent).type === "group", "invalid-parent", "parent 必须是 group");
+      // 不支持嵌套 group（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
+      planAssert(
+        selected.every((n) => n.type !== "group"),
+        "invalid-parent",
+        "不支持嵌套 group：group 不能成为另一个 group 的成员",
+      );
       for (const id of ids)
         planAssert(id !== parent && !this.isAncestor(id, parent), "invalid-parent", "成员关系不能成环");
     }

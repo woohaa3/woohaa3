@@ -57,12 +57,14 @@ export function validateNodeSize(width: number | undefined, height: number | und
 
 /**
  * 校验 `node.update` / `node.add` 的 group parent 不变式
- * （change: add-canvas-node-grouping，design D1）。
+ * （change: add-canvas-node-grouping，design D1；
+ *  change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
  *
  * - parent 必须存在；
  * - parent 必须是 `group` 类型；唯一例外是片场对象容器下与归属匹配的真实 `model3d` 子节点；
  * - 不能自指；
- * - 不能形成 parent 环。
+ * - 不能形成 parent 环；
+ * - `group` 不能成为另一个 group 的成员（不支持嵌套组，整批拒绝）。
  *
  * 只校验显式提供的 `parentId`；`undefined`（不修改）与 `null`（解除）直接通过。
  */
@@ -88,6 +90,11 @@ export function validateGroupParent(
     && parentOwnership?.filmSetNodeId === ownership?.filmSetNodeId
     && parentOwnership?.itemId === ownership?.itemId
     && parent.id === filmSetObjectContainerId(ownership!.filmSetNodeId, ownership!.itemId);
+  // 嵌套组不支持：group 一旦获得 group parent 就整批拒绝，不写部分 parent/position
+  // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）。
+  if (childIdentity?.type === "group") {
+    return reject("invalid-parent", `group ${nodeId} 不能成为父节点 ${parentId} 的成员`);
+  }
   if (parent.type !== "group" && !isFilmSetModelChild) {
     return reject("invalid-parent", `父节点 ${parentId} 不是 group`);
   }

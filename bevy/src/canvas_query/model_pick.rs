@@ -11,6 +11,7 @@
 use serde::Serialize;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use crate::isometric_grid::CANVAS_CAMERA_Z;
 
@@ -42,6 +43,11 @@ thread_local! {
     /// 最近接受场景派生的模型候选世界 AABB；在 `set_scene` 接受点更新。
     static CANDIDATES: RefCell<Vec<ModelCandidate>> = const { RefCell::new(Vec::new()) };
     static POSITION_BASIS: RefCell<super::position_basis::PositionBasis<ModelCandidate>> = RefCell::new(Default::default());
+    /// 每个候选最近发布的观察深度（逐像素平局偏移）；位置增量只按差值更新 AABB 的 z。
+    ///
+    /// 深度由顶层 `depth_order` 结算（change: 2026-10-27-order-canvas-layers-by-ground-anchor，
+    /// design D1/D3/D4）；本模块不复制第二套排序。
+    static DEPTHS: RefCell<HashMap<String, f32>> = RefCell::new(HashMap::new());
     /// 与候选同 generation 的画布相机快照；查询复用该快照（design D5）。
     static CAMERA: RefCell<ModelPickCamera> = const { RefCell::new(ModelPickCamera {
         viewport: [0.0, 0.0, 1.0],
@@ -60,6 +66,17 @@ pub(crate) fn accept_models(
     camera: ModelPickCamera,
 ) {
     POSITION_BASIS.with(|slot| slot.borrow_mut().reset(&candidates, |c| c.node_id.as_str()));
+    DEPTHS.with(|slot| {
+        *slot.borrow_mut() = candidates
+            .iter()
+            .map(|candidate| {
+                (
+                    candidate.node_id.clone(),
+                    crate::depth_order::depth_of(&candidate.node_id),
+                )
+            })
+            .collect();
+    });
     CANDIDATES.with(|slot| *slot.borrow_mut() = candidates);
     CAMERA.with(|slot| *slot.borrow_mut() = camera);
     GENERATION.with(|cell| cell.set(generation));
@@ -77,6 +94,27 @@ pub(crate) fn plan_positions(
         })
     })
 }
+
+/// 位置接受点后按新观察深度差值平移候选 AABB 的 z；x/y 平移已由 `plan_positions` 完成。
+///
+/// 候选几何本身由共享 `model3d` 从同一深度派生，这里只对齐增量帧，避免位置预览期间
+/// 3D 拾取仍使用旧的遮挡顺序（change: 2026-10-27-order-canvas-layers-by-ground-anchor，
+/// design D3/D4）。
+pub(crate) fn retune_depth(plan: &mut [(usize, ModelCandidate)]) {
+    DEPTHS.with(|slot| {
+        let mut depths = slot.borrow_mut();
+        for (_, candidate) in plan.iter_mut() {
+            let next = crate::depth_order::depth_of(&candidate.node_id);
+            let previous = depths
+                .insert(candidate.node_id.clone(), next)
+                .unwrap_or(next);
+            let shift = next - previous;
+            candidate.min[2] += shift;
+            candidate.max[2] += shift;
+        }
+    });
+}
+
 pub(crate) fn commit_positions(
     plan: Vec<(usize, ModelCandidate)>,
     generation: u32,

@@ -395,32 +395,31 @@ describe("Canvas Script 分类分组端到端", () => {
     const a = canvas.node("model", {key:"a", title:"潜入者"});
     const b = canvas.node("model", {key:"b", title:"守卫"});
     const c = canvas.node("model", {key:"c", title:"地砖"});
-    const characters = canvas.group([a,b], {key:"characters", title:"角色", layout:{mode:"grid", columns:2}});
-    const environment = canvas.group([c], {key:"environment", title:"环境", layout:{mode:"grid", columns:2}});
-    canvas.group([characters,environment], {key:"kit", title:"潜行素材库", layout:{mode:"grid", columns:2, gapX:100}, placement:{mode:"absolute", position:{x:-2000,y:0}}});
+    const characters = canvas.group([a,b], {key:"characters", title:"角色", layout:{mode:"grid", columns:2}, placement:{mode:"absolute", position:{x:-2000,y:0}}});
+    const environment = canvas.group([c], {key:"environment", title:"环境", layout:{mode:"grid", columns:2}, placement:{mode:"absolute", position:{x:-1000,y:0}}});
   `;
   it("预检真实组和最终边界，原子保存并冻结首次组织回执", async () => {
     const { service, room } = await setup();
     const input = request({ source });
     const dry = await service.validate(input);
     expect(dry.ok).toBe(true); if (!dry.ok) throw new Error(JSON.stringify(dry));
-    expect(dry.receipt.organization?.groups.map(g => g.title)).toEqual(["角色", "环境", "潜行素材库"]);
+    expect(dry.receipt.organization?.groups.map(g => g.title)).toEqual(["角色", "环境"]);
     const saved = await service.submit(input);
     expect(saved.ok).toBe(true); if (!saved.ok) throw new Error(JSON.stringify(saved));
     expect(saved.receipt.organization).toEqual(dry.receipt.organization);
-    expect(saved.receipt.nodes).toHaveLength(6);
+    expect(saved.receipt.nodes).toHaveLength(5);
     const read = room.exportCanvas(); if (!read.ok) throw new Error("export");
-    expect(read.canvas.document.nodes.filter(n => n.type === "group")).toHaveLength(3);
+    expect(read.canvas.document.nodes.filter(n => n.type === "group")).toHaveLength(2);
     expect(read.canvas.document.nodes.find(n => n.id === saved.receipt.refs.a)?.parentId).toBe(saved.receipt.refs.characters);
     expect(read.canvas.document.edges).toHaveLength(0);
     expect(read.canvas.nodeData[saved.receipt.refs.a]?.modelScript).toBe("");
-    const rename = await service.submit(request({requestId:"rename", source:`canvas.setTitle(canvas.existing(${JSON.stringify(saved.receipt.refs.kit)}), "新标题");`}));
+    const rename = await service.submit(request({requestId:"rename", source:`canvas.setTitle(canvas.existing(${JSON.stringify(saved.receipt.refs.characters)}), "新标题");`}));
     expect(rename.ok).toBe(true);
     const retry = await service.submit(input); if (!retry.ok) throw new Error("retry");
     expect(retry.receipt.duplicate).toBe(true);
     expect(retry.receipt.organization).toEqual(saved.receipt.organization);
   });
-  it("解组保留模型内容和世界位置，移动组带动后代，删除才级联", async () => {
+  it("解组保留模型内容和世界位置，删除组才级联成员", async () => {
     const {service,room}=await setup();
     const saved=await service.submit(request({source}));if(!saved.ok)throw new Error("build");
     const refs=saved.receipt.refs;
@@ -428,12 +427,14 @@ describe("Canvas Script 分类分组端到端", () => {
     expect(dissolved.ok).toBe(true);if(!dissolved.ok)throw new Error(JSON.stringify(dissolved));
     expect(dissolved.receipt.deletedNodeIds).toEqual([refs.characters]);
     const read=room.exportCanvas();if(!read.ok)throw new Error("export");
-    expect(read.canvas.document.nodes.find(n=>n.id===refs.a)?.parentId).toBe(refs.kit);
+    // 解组后的模型回到顶层，内容与世界位置保持不变；嵌套总组已不存在。
+    expect(read.canvas.document.nodes.find(n=>n.id===refs.a)?.parentId ?? null).toBeNull();
     expect(read.canvas.nodeData[refs.a]?.modelScript).toBe("");
-    const removed=await service.submit(request({requestId:"remove",source:`canvas.remove(canvas.existing(${JSON.stringify(refs.kit)}));`}));
+    const removed=await service.submit(request({requestId:"remove",source:`canvas.remove(canvas.existing(${JSON.stringify(refs.environment)}));`}));
     if(!removed.ok)throw new Error(JSON.stringify(removed));
-    expect(removed.receipt.deletedNodeIds).toHaveLength(5);
-    expect(room.exportCanvas()).toMatchObject({ok:true,canvas:{document:{nodes:[]}}});
+    expect(removed.receipt.deletedNodeIds).toHaveLength(2);
+    const left=room.exportCanvas();if(!left.ok)throw new Error("export");
+    expect(left.canvas.document.nodes.map(n=>n.id).sort()).toEqual([refs.a,refs.b].sort());
   });
   it("后段非法分组拒绝整批创建，预检与提交都零写入", async () => {
     const {service,room}=await setup();
@@ -452,12 +453,13 @@ describe("Canvas Script 分类分组端到端", () => {
     expect(outcome).toMatchObject({ok:false,error:{code:"forbidden"}});
     expect(room.exportCanvas()).toEqual(read);
   });
-  it("公开分类示例可直接执行，五个分类和总组都是真实 group", async () => {
+  it("公开分类示例可直接执行，五个分类都是顶层真实 group", async () => {
     const {CANVAS_SCRIPT_ORGANIZATION_EXAMPLE}=await import("@woohaa3/contracts");
     const {service}=await setup();
     const result=await service.submit(request({source:CANVAS_SCRIPT_ORGANIZATION_EXAMPLE}));
     expect(result.ok).toBe(true);if(!result.ok)throw new Error(JSON.stringify(result));
-    expect(result.receipt.organization?.groups).toHaveLength(6);
-    expect(result.receipt.organization?.groups.find(g=>g.title==="潜行游戏素材库")?.worldBounds.x).toBe(-2600);
+    expect(result.receipt.organization?.groups).toHaveLength(5);
+    expect(result.receipt.organization?.groups.find(g=>g.title==="角色")?.worldBounds.x).toBe(-2600);
+    expect(result.receipt.organization?.groups.every(g=>!g.parentId)).toBe(true);
   });
 });
