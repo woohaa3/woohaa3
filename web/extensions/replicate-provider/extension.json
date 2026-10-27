@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "extensionId": "replicate-provider",
   "metadata": { "module": "./shared", "export": "REPLICATE_PLUGIN_METADATA", "order": 27 },
-  "hostPlugin": { "module": "./backend", "factory": "createReplicateProviderPlugin", "roles": ["provider"], "order": 17 },
+  "hostPlugin": { "module": "./backend", "factory": "createReplicateProviderPlugin", "features": ["provider"], "order": 17 },
   "icon": { "asset": "./assets/icon.png" }
 }

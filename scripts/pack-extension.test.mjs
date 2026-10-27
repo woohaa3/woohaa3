@@ -39,7 +39,7 @@ function copyFixture(t, name) {
 
 test("rewriteDescriptorForPackage：后端模块改写到单文件产物，补齐 version / engines", () => {
   const next = rewriteDescriptorForPackage(
-    { schemaVersion: 1, extensionId: "x", hostPlugin: { module: "./backend", factory: "f", roles: ["provider"] }, metadata: { module: "./shared", export: "M" }, publicRoutes: [{ publicPathExport: "P", module: "./shared", route: "x", methods: ["GET"] }] },
+    { schemaVersion: 1, extensionId: "x", hostPlugin: { module: "./backend", factory: "f", features: ["provider"] }, metadata: { module: "./shared", export: "M" }, publicRoutes: [{ publicPathExport: "P", module: "./shared", route: "x", methods: ["GET"] }] },
     { version: "1.2.3", engines: { hostAbi: "^1.0.0", sdkAbi: "^1.0.0", protocolVersion: 1 }, hasBackend: true }
   );
   assert.equal(next.hostPlugin.module, "./backend-dist/entry");

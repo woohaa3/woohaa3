@@ -10,7 +10,7 @@
   "hostPlugin": {
     "module": "./backend",
     "factory": "createFixtureGreedyPlugin",
-    "roles": ["provider"],
+    "features": ["provider"],
     "order": 920
   }
 }

@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "extensionId": "grsai-provider",
   "metadata": { "module": "./shared", "export": "GRSAI_PLUGIN_METADATA", "order": 29 },
-  "hostPlugin": { "module": "./backend", "factory": "createGrsaiProviderPlugin", "roles": ["provider"], "order": 19 },
+  "hostPlugin": { "module": "./backend", "factory": "createGrsaiProviderPlugin", "features": ["provider"], "order": 19 },
   "icon": { "asset": "./assets/icon.png" }
 }

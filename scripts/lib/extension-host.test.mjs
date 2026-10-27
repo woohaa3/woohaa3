@@ -846,20 +846,20 @@ function writeManagedExtension(managedRoot, extensionId, { descriptor, backendSo
 }
 
 test("untrustedRootViolation：内置根放行；受管根拒绝来源 / bootstrap / canvasContent；可写根只拒绝来源", () => {
-  const source = { hostPlugin: { roles: ["marketplace-source"], factory: "f" } };
+  const source = { hostPlugin: { features: ["marketplace-source"], factory: "f" } };
   assert.equal(untrustedRootViolation({ extensionId: "a", dir: "/a" }, source), null);
   assert.equal(untrustedRootViolation({ extensionId: "a", dir: "/a", managed: true }, source).code, "EXTENSION_MARKETPLACE_SOURCE_UNTRUSTED_ROOT");
   assert.equal(untrustedRootViolation({ extensionId: "a", dir: "/a", rootWritable: true }, source).code, "EXTENSION_MARKETPLACE_SOURCE_UNTRUSTED_ROOT");
   assert.equal(untrustedRootViolation({ extensionId: "a", dir: "/a", managed: true }, { bootstrap: { export: "x" } }).field, "bootstrap");
   assert.equal(untrustedRootViolation({ extensionId: "a", dir: "/a", managed: true }, { canvasContent: { factory: "x" } }).field, "canvasContent");
   assert.equal(untrustedRootViolation({ extensionId: "a", dir: "/a", rootWritable: true }, { canvasContent: { factory: "x" } }), null);
-  assert.equal(untrustedRootViolation({ extensionId: "a", dir: "/a", managed: true }, { hostPlugin: { roles: ["provider"] } }), null);
+  assert.equal(untrustedRootViolation({ extensionId: "a", dir: "/a", managed: true }, { hostPlugin: { features: ["provider"] } }), null);
 });
 
 test("可写根里的市场来源：启动 fail-fast（EXTENSION_MARKETPLACE_SOURCE_UNTRUSTED_ROOT）", async () => {
   const repoRoot = makeRepo({ config: { schemaVersion: 1, roots: ["rootA", { path: "rootB", writable: true }] } });
   writeExtension(repoRoot, "rootB", "rogue-source", {
-    descriptor: { schemaVersion: 1, extensionId: "rogue-source", hostPlugin: { module: "./backend", factory: "createSource", roles: ["marketplace-source"] } },
+    descriptor: { schemaVersion: 1, extensionId: "rogue-source", hostPlugin: { module: "./backend", factory: "createSource", features: ["marketplace-source"] } },
     backendSource: hostPluginSource("rogue-source", "createSource")
   });
   await assert.rejects(
@@ -871,7 +871,7 @@ test("可写根里的市场来源：启动 fail-fast（EXTENSION_MARKETPLACE_SOU
 test("内置根里的市场来源：正常装配到 marketplace-source 分组，origin 为内置", async () => {
   const repoRoot = makeRepo();
   writeExtension(repoRoot, "rootA", "builtin-source", {
-    descriptor: { schemaVersion: 1, extensionId: "builtin-source", hostPlugin: { module: "./backend", factory: "createSource", roles: ["marketplace-source"] } },
+    descriptor: { schemaVersion: 1, extensionId: "builtin-source", hostPlugin: { module: "./backend", factory: "createSource", features: ["marketplace-source"] } },
     backendSource: hostPluginSource("builtin-source", "createSource")
   });
   const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: path.join(repoRoot, "managed") }, logger: () => undefined });
@@ -888,16 +888,16 @@ test("受管根：bootstrap / canvasContent / 来源 / 模块缺失只拒绝该�
     sharedSource: metadataExport("builtin-ok", "BUILTIN_OK")
   });
   writeManagedExtension(managedRoot, "managed-ok", {
-    descriptor: { hostPlugin: { module: "./backend", factory: "createOk", roles: ["provider"] } },
+    descriptor: { hostPlugin: { module: "./backend", factory: "createOk", features: ["provider"] } },
     backendSource: hostPluginSource("managed-ok", "createOk")
   });
   writeManagedExtension(managedRoot, "managed-slot", { descriptor: { bootstrap: { module: "./bootstrap", export: "createBootstrap" } }, backendSource: "export function createBootstrap() {}\n" });
   writeManagedExtension(managedRoot, "managed-canvas", { descriptor: { canvasContent: { module: "./backend", factory: "createContent" } }, backendSource: "export function createContent() {}\n" });
   writeManagedExtension(managedRoot, "managed-source", {
-    descriptor: { hostPlugin: { module: "./backend", factory: "createSource", roles: ["marketplace-source"] } },
+    descriptor: { hostPlugin: { module: "./backend", factory: "createSource", features: ["marketplace-source"] } },
     backendSource: hostPluginSource("managed-source", "createSource")
   });
-  writeManagedExtension(managedRoot, "managed-missing", { descriptor: { hostPlugin: { module: "./backend", factory: "createX", roles: ["provider"] } } });
+  writeManagedExtension(managedRoot, "managed-missing", { descriptor: { hostPlugin: { module: "./backend", factory: "createX", features: ["provider"] } } });
   const events = [];
   // P1 进程内语义（隔离关闭的降级路径）；隔离开启时的行为见下方 isolated 用例。
   const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot }, logger: (event) => events.push(event), isolation: false });
@@ -921,7 +921,7 @@ test("受管根：安全模式下受管扩展一律暂停", async () => {
   const repoRoot = makeRepo();
   const managedRoot = path.join(repoRoot, "managed");
   writeManagedExtension(managedRoot, "managed-req", {
-    descriptor: { required: true, hostPlugin: { module: "./backend", factory: "createOk", roles: ["provider"] } },
+    descriptor: { required: true, hostPlugin: { module: "./backend", factory: "createOk", features: ["provider"] } },
     backendSource: hostPluginSource("managed-req", "createOk")
   });
   const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot }, logger: () => undefined, safeMode: true, isolation: false });
@@ -944,7 +944,7 @@ function writeIsolatedManaged(managedRoot, extensionId, { entrySource, schema, d
       schemaVersion: 1,
       extensionId,
       version,
-      hostPlugin: { module: "./backend-dist/entry", factory: "createPlugin", roles: ["provider"], order: 7 },
+      hostPlugin: { module: "./backend-dist/entry", factory: "createPlugin", features: ["provider"], order: 7 },
       metadata: { module: "./backend-dist/entry", export: "META" },
       ...descriptor
     })
@@ -966,7 +966,7 @@ test("C 方向：受管 Provider 与内置根一样被 import，产出普通插�
   const repoRoot = makeRepo();
   const managedRoot = path.join(repoRoot, "managed");
   writeExtension(repoRoot, "rootA", "builtin-provider", {
-    descriptor: { schemaVersion: 1, extensionId: "builtin-provider", hostPlugin: { module: "./backend", factory: "createBuiltin", roles: ["provider"] } },
+    descriptor: { schemaVersion: 1, extensionId: "builtin-provider", hostPlugin: { module: "./backend", factory: "createBuiltin", features: ["provider"] } },
     backendSource: hostPluginSource("builtin-provider", "createBuiltin")
   });
   writeIsolatedManaged(managedRoot, "iso-provider", {
@@ -990,9 +990,9 @@ test("受管 storage 插件被拒绝（声明层闸门，与进程边界无关�
   const managedRoot = path.join(repoRoot, "managed");
   writeIsolatedManaged(managedRoot, "managed-store", {
     entrySource: "export {};",
-    descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createPlugin", roles: ["storage"] } }
+    descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createPlugin", features: ["storage"] } }
   });
   const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot }, logger: () => undefined });
   assert.equal(host.managedRejected[0].code, "EXTENSION_MANAGED_FORBIDDEN_DECLARATION");
-  assert.equal(host.managedRejected[0].field, "hostPlugin.roles");
+  assert.equal(host.managedRejected[0].field, "hostPlugin.features");
 });

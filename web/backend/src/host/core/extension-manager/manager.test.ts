@@ -61,7 +61,7 @@ function extensionTree(options: { id?: string; version?: string; backend?: boole
   const descriptor: Record<string, unknown> = { schemaVersion: 1, extensionId: id, version, engines: ENGINES, ...(options.descriptor ?? {}) };
   if (options.backend) {
     pkg.exports = { "./backend-dist/entry": "./backend-dist/entry.mjs" };
-    descriptor.hostPlugin = { module: "./backend-dist/entry", factory: "createPlugin", roles: ["provider"] };
+    descriptor.hostPlugin = { module: "./backend-dist/entry", factory: "createPlugin", features: ["provider"] };
     fs.mkdirSync(path.join(dir, "backend-dist"), { recursive: true });
     fs.writeFileSync(path.join(dir, "backend-dist", "entry.mjs"), `export function createPlugin() { return {}; }\n`);
     // 子进程隔离（change: 2026-10-21-isolate-extension-host-process，D9）：受管后端包必须带构建期静态描述。
@@ -70,7 +70,7 @@ function extensionTree(options: { id?: string; version?: string; backend?: boole
       JSON.stringify({
         schemaVersion: 1,
         extensionId: id,
-        roles: ["provider"],
+        features: ["provider"],
         factory: "createPlugin",
         plugin: { name: id, label: id, configPrefix: `providers.${id}`, fields: {}, health: false },
         publicPaths: {}

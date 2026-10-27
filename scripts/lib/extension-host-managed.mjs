@@ -68,7 +68,7 @@ export async function loadRuntimePlugin({ dir, extensionId, version }) {
 /**
  * 受管根 / 可写根的信任边界（change: 2026-10-21-add-extension-marketplace-point，任务 2.2 / design D3、D4）。
  *
- * - 市场来源（`hostPlugin.roles 含 "marketplace-source"`）只能来自内置根：来源决定能拿到什么代码，
+ * - 市场来源（`hostPlugin.features 含 "marketplace-source"`）只能来自内置根：来源决定能拿到什么代码，
  *   市场装来的扩展若能再注册来源，信任链就会被被信任方自己延长。
  * - 受管扩展不得提供 `bootstrap` 槽位实现与 `canvasContent` 端口（与可写根拒绝 bootstrap 同一位置）。
  *
@@ -80,10 +80,10 @@ export function untrustedRootViolation(extension, descriptor) {
   const writable = extension.rootWritable === true;
   if (!descriptor || (!managed && !writable)) return null;
   const where = managed ? "受管扩展根（市场安装）" : "可写扩展根";
-  if ((descriptor.hostPlugin?.roles ?? []).includes("marketplace-source")) {
+  if ((descriptor.hostPlugin?.features ?? []).includes("marketplace-source")) {
     return {
       code: "EXTENSION_MARKETPLACE_SOURCE_UNTRUSTED_ROOT",
-      field: "hostPlugin.roles",
+      field: "hostPlugin.features",
       message: `${where}里的扩展不得提供市场来源：${extension.extensionId}（${extension.dir}）→ 市场来源只能放在内建根`
     };
   }
@@ -94,11 +94,11 @@ export function untrustedRootViolation(extension, descriptor) {
       message: `受管扩展不得声明槽位实现（bootstrap）：${extension.extensionId}（${extension.dir}）`
     };
   }
-  if (managed && (descriptor.hostPlugin?.roles ?? []).includes("storage")) {
+  if (managed && (descriptor.hostPlugin?.features ?? []).includes("storage")) {
     return {
       code: "EXTENSION_MANAGED_FORBIDDEN_DECLARATION",
-      field: "hostPlugin.roles",
-      message: `受管扩展不得提供存储后端（hostPlugin.roles 含 "storage"）：${extension.extensionId}（${extension.dir}）→ 存储属基础能力，必须进程内且来自内建根`
+      field: "hostPlugin.features",
+      message: `受管扩展不得提供存储后端（hostPlugin.features 含 "storage"）：${extension.extensionId}（${extension.dir}）→ 存储属基础能力，必须进程内且来自内建根`
     };
   }
   if (managed && descriptor.canvasContent) {

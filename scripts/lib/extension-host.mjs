@@ -206,7 +206,7 @@ export function hostSummary(host) {
       directory: path.relative(host.repoRoot, registration.directory) || registration.directory,
       modules: registration.modules.map((module) => path.relative(registration.directory, module)),
       backend: registration.backend !== null,
-      hostPlugin: registration.hostPlugin ? { roles: registration.hostPlugin.roles, factory: registration.hostPlugin.factory } : null,
+      hostPlugin: registration.hostPlugin ? { roles: registration.hostPlugin.features, factory: registration.hostPlugin.factory } : null,
       canvasContent: registration.canvasContent ? { factory: registration.canvasContent.factory } : null,
       site: registration.site,
       metadata: registration.metadataExport,
@@ -362,7 +362,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       ? {
           module: resolveModuleFile(extension.dir, descriptor.hostPlugin.module ?? "./backend", context),
           factory: descriptor.hostPlugin.factory,
-          roles: descriptor.hostPlugin.roles ?? [],
+          roles: descriptor.hostPlugin.features ?? [],
           optional: descriptor.hostPlugin.optional === true
           // 只解析出入口路径；真正的 import 由扩展层装载器完成。
         }
@@ -694,7 +694,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       const entry = { ...plugin, origin, directory: registration.directory, ...(registration.iconPath ? { icon: registration.iconPath } : {}) };
       plugins.push(entry);
       // 角色可多选；这里只有 `storage` 有装载语义（谁是主存储就得先就绪）。
-      if ((declared.roles ?? []).includes("storage")) storage.push(entry);
+      if ((declared.features ?? []).includes("storage")) storage.push(entry);
     }
     return { plugins, storage };
   };
