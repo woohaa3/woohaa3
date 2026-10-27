@@ -33,6 +33,26 @@ describe("group authority queue", () => {
     ]) expect((await submit(id!, source!)).ok).toBe(false);
     expect(room.currentRevision).toBe(revision);
   });
+  it("grows the root upward when a script places content above the group", async () => {
+    const { room, canvas } = await setup();
+    const service = new CanvasScriptService({ resolveRoom: async () => room, authorizer: { authorize: async () => ({ allowed: true }) } });
+    const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };
+    const result = await withCanvasGroupScope(scope, () => service.submit({
+      principalId: "u", canvasId: canvas.id, version: "woohaa-canvas-js-v1", requestId: "above-root",
+      source: 'canvas.node("text", {key:"above", placement:{mode:"absolute",position:{x:80,y:-200}}});'
+    }));
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true); if (!exported.ok) return;
+    const nodes = exported.canvas.document.nodes;
+    const root = nodes.find(n => n.id === "root")!;
+    const above = nodes.find(n => !["root", "a", "outside"].includes(n.id))!;
+    const original = nodes.find(n => n.id === "a")!;
+    expect(root.position.y).toBeLessThan(0);
+    expect(above.position.y).toBeGreaterThanOrEqual(0);
+    // 扩组不改变既有内容的世界坐标。
+    expect(original.position.y + root.position.y).toBe(40);
+  });
   it("rechecks membership after a queued user move, rejecting the whole batch", async () => {
     const { room, submit, canvas } = await setup();
     const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };

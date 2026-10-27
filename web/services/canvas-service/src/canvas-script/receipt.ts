@@ -50,10 +50,10 @@ export function summarizeNodes(
     const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
     const created = createdById.get(nodeId);
     const canonicalType = node?.type ?? created?.node.type ?? "unknown";
-    const descriptor = agentDescriptorForCanonicalType(canonicalType);
     const baseData = (node ? canvas.nodeData[nodeId] : created?.nodeData) as CanvasNodeData | undefined;
     const patch = patchedById.get(nodeId)?.value as CanvasNodeData | undefined;
     const data = patch ? { ...(baseData ?? {}), ...patch } : baseData;
+    const descriptor = agentDescriptorForCanonicalType(canonicalType, data);
     const size = effectiveCanvasNodeSize({
       type: canonicalType,
       width: node?.width ?? created?.node.width,

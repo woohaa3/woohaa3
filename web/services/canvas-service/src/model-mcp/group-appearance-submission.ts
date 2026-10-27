@@ -1,7 +1,7 @@
 /** Group appearance uses the same durable model receipt and room authority as model batches. */
 import { createHash } from "node:crypto";
 import {
-  decodeGroupAppearance, deriveModelContentVersion, isFilmSetNode,
+  decodeGroupAppearance, deriveModelContentVersion,
   MODEL_SCRIPT_LANGUAGE, PREFERRED_MODEL_SCRIPT_VERSION, readGroupAppearanceForNode,
   isSupportedModelScriptVersion,
 } from "@woohaa3/contracts";
@@ -39,8 +39,8 @@ export async function submitGroupAppearance(
     commandId, expectedModelBatchHash: submissionHash,
     derive(canvas) {
       const node = canvas.document.nodes.find(n => n.id === input.nodeId);
-      if (!node || (node.type !== "group" && !isFilmSetNode(node.type, canvas.nodeData[node.id])))
-        return { ok: false, code: "invalid-node-type", message: "目标不是组或片场" };
+      if (!node || node.type !== "group")
+        return { ok: false, code: "invalid-node-type", message: "目标不是组" };
       const current = readGroupAppearanceForNode(canvas.nodeData[node.id]);
       if (current.value.model.contentVersion.contentHash !== input.expectedContentHash)
         return { ok: false, code: "stale-source", message: "组形象已被并发修改，请重新读取" };

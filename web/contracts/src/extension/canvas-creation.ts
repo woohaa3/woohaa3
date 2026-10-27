@@ -39,8 +39,7 @@ export const CANVAS_GROUP_TOOLS = [
   "validate_canvas_plan", "apply_canvas_plan", "create_canvas_node", "connect_canvas_nodes", "set_node_prompt", "delete_canvas_entities",
   "run_canvas_node", "get_canvas_run", "cancel_canvas_run", "get_node_output",
   "get_model_api", "get_model_node", "get_model_statistics", "submit_model_script", "submit_model_scripts",
-  "set_model_camera", "create_model_camera", "update_model_camera", "delete_model_camera", "rename_model_camera", "reset_model_camera",
-  "get_model_cameras", "get_film_set_clips", "mutate_film_set_item", "mutate_film_set_clip"
+  "get_film_set_clips", "submit_film_set", "add_film_set_media", "mutate_film_set_item", "mutate_film_set_clip"
 ] as const;
 export function decodeCanvasCreationRequest(body: unknown): AgentConversationDecodeResult<CanvasCreationRequest> {
   const fail = (message: string): AgentConversationDecodeResult<never> => ({ ok: false, code: "malformed-request", message });

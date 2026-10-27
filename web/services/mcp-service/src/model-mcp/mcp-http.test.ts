@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { FILM_SET_CONTENT_PREVIOUS_VERSION, FILM_SET_CONTENT_VERSION, MODEL_RENDER_BUDGET } from "@woohaa3/contracts";
+import { FILM_SET_CONTENT_PREVIOUS_VERSION, FILM_SET_CONTENT_VERSION, MODEL_RENDER_BUDGET, type McpGetNodeResult } from "@woohaa3/contracts";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "./mcp-http.js";
 import type { ModelMcpToolService } from "./mcp-http.js";
 
@@ -444,6 +444,94 @@ describe("模型脚本指南的朝向约定（change: model-orientation-conventi
     expect(text).toContain("set_model_camera");
     // 明确瞬态字段禁令，避免 Agent 写入 session 状态。
     expect(text).toContain("瞬态");
+  });
+
+  it("指南与工具描述明确 sceneCamera 不是拍摄镜头，并要求创建 clip", async () => {
+    const { base } = await start();
+    const guide = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 12,
+      method: "tools/call",
+      params: { name: "get_model_api", arguments: {} }
+    });
+    const text = ((guide.body.result as { content: Array<{ text: string }> }).content[0]?.text) ?? "";
+    expect(text).toContain("sceneCamera 只是无任何拍摄镜头时的回退构图");
+    expect(text).toContain("不是镜头");
+    expect(text).toContain('op:{kind:"create"');
+    expect(text).toContain("静态构图也要创建 static 镜头");
+    expect(text).toContain("clipTemplate");
+    expect(text).toContain("确认 clips 非空");
+
+    const listed = await mcpPost(base, { jsonrpc: "2.0", id: 13, method: "tools/list", params: {} });
+    const submit = ((listed.body.result as { tools: Array<{ name: string; description?: string }> }).tools)
+      .find(tool => tool.name === "submit_film_set");
+    expect(submit?.description).toContain("所有动画字段");
+    expect(submit?.description).toContain("不能只设置 sceneCamera");
+  });
+
+  it("空镜头集合在 get_film_set_clips 与 submit_film_set 上返回创建提示", async () => {
+    const { base } = await start({
+      async getModelNode(input) {
+        return {
+          ok: true, ...input, title: "t", prompt: "", source: "", references: [], cameras: [],
+          animation: {
+            title: "t",
+            scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
+            filmSetContent: { schemaVersion: FILM_SET_CONTENT_VERSION, items: [] },
+            filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] },
+            initialCamera: { azimuth: 0, elevation: 0.35, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } },
+            timeline: { duration: 0, loop: false }
+          }
+        } as unknown as McpGetNodeResult;
+      },
+      async submitScript(input) {
+        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd", idempotent: false };
+      },
+      async commitAnimation(input) {
+        return {
+          ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd-film", duplicate: false, noop: false,
+          animation: { filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] } }
+        } as unknown as import("../downstream/canvas-client.js").McpCreateFilmSetNodeOutcome;
+      }
+    });
+    const result = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 14,
+      method: "tools/call",
+      params: { name: "get_film_set_clips", arguments: { canvasId: "canvas-a", nodeId: "film-1" } }
+    });
+    const structured = (result.body.result as { structuredContent?: Record<string, unknown> }).structuredContent;
+    expect(structured).toMatchObject({ clipCount: 0 });
+    expect(String(structured?.hint)).toContain("sceneCamera");
+    expect(String(structured?.hint)).toContain("clipTemplate");
+    expect(structured?.clipTemplate).toMatchObject({
+      kind: "static",
+      timeline: { duration: 0, loop: false },
+      initialCamera: { azimuth: 0, elevation: 0.35, distance: 4, aspect: "16:9" },
+      bindings: []
+    });
+
+    const submitted = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 15,
+      method: "tools/call",
+      params: {
+        name: "submit_film_set",
+        arguments: {
+          canvasId: "canvas-a",
+          nodeId: "film-1",
+          requestId: "req-empty",
+          expectedSnapshotHash: "hash-a",
+          animation: {
+            filmSetContent: { schemaVersion: FILM_SET_CONTENT_VERSION, items: [] },
+            filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] }
+          }
+        }
+      }
+    });
+    const submittedContent = (submitted.body.result as { structuredContent?: Record<string, unknown> }).structuredContent;
+    expect(submittedContent).toMatchObject({ clipCount: 0 });
+    expect(String(submittedContent?.hint)).toContain("mutate_film_set_clip");
   });
 });
 

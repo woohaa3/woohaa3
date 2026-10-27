@@ -12,24 +12,11 @@ import { CANVAS_GROUP_TOOLS, type AgentTargetMode } from "@woohaa3/contracts";
 /** 3D 模型脚本的只读 API 与权威节点。 */
 const MODEL_READ_TOOLS = ["get_model_api", "get_model_node", "get_model_statistics"] as const;
 
-/** 镜头目标的读取面。 */
-const CAMERA_READ_TOOLS = ["get_model_node", "get_model_cameras"] as const;
-
 /** 片场目标的读取面。 */
 const FILM_SET_READ_TOOLS = ["get_model_api", "get_model_node", "get_film_set_clips", "get_film_set_export"] as const;
 
 /** 写入 3D 模型脚本。 */
 const MODEL_WRITE_TOOLS = ["submit_model_script", "submit_model_scripts"] as const;
-
-/** 镜头增删改。 */
-const CAMERA_WRITE_TOOLS = [
-  "set_model_camera",
-  "create_model_camera",
-  "update_model_camera",
-  "delete_model_camera",
-  "rename_model_camera",
-  "reset_model_camera"
-] as const;
 
 /** 片场模型/运动/片段写入。 */
 const FILM_SET_WRITE_TOOLS = [
@@ -48,7 +35,8 @@ export function localAgentToolsForMode(mode: AgentTargetMode | undefined): reado
     case "canvas-group":
       return CANVAS_GROUP_TOOLS;
     case "camera":
-      return [...CAMERA_READ_TOOLS, ...CAMERA_WRITE_TOOLS];
+      // camera 目标已从可用模式撤下；协议枚举仅用于解码旧会话，不再发放任何工具。
+      return [];
     case "film-set":
       return [...FILM_SET_READ_TOOLS, ...FILM_SET_WRITE_TOOLS];
     case "model3d":

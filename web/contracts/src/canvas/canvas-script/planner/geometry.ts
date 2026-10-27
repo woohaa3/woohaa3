@@ -115,14 +115,22 @@ export class PlanGeometry {
         this.nodes.delete(id);
         continue;
       }
-      const x = this.snapshot.rootGroupId === id ? n.position.x : Math.min(...children.map((c) => c.position.x)) - groupPadding;
-      const y = this.snapshot.rootGroupId === id ? n.position.y : Math.min(...children.map((c) => c.position.y)) - groupPadding;
+      const x = this.snapshot.rootGroupId === id
+        ? Math.min(n.position.x, Math.min(...children.map((c) => c.position.x)) - groupPadding)
+        : Math.min(...children.map((c) => c.position.x)) - groupPadding;
+      const y = this.snapshot.rootGroupId === id
+        ? Math.min(n.position.y, Math.min(...children.map((c) => c.position.y)) - groupPadding)
+        : Math.min(...children.map((c) => c.position.y)) - groupPadding;
       const right = Math.max(...children.map((c) => c.position.x + effectiveCanvasNodeSize(c).width)) + groupPadding;
       const bottom = Math.max(...children.map((c) => c.position.y + effectiveCanvasNodeSize(c).height)) + groupBottomPadding;
+      const root = this.snapshot.rootGroupId === id;
+      // 根组向外扩展时保留原来的右/下边界；否则上/左移动会把另一侧缩小。
+      const rightEdge = root ? Math.max(right, n.position.x + n.width) : right;
+      const bottomEdge = root ? Math.max(bottom, n.position.y + n.height) : bottom;
       this.touch(id);
       n.position = { x, y };
-      n.width = Math.max(this.snapshot.rootGroupId === id ? n.width : 248, right - x);
-      n.height = Math.max(this.snapshot.rootGroupId === id ? n.height : 232, bottom - y);
+      n.width = root ? rightEdge - x : Math.max(248, rightEdge - x);
+      n.height = root ? bottomEdge - y : Math.max(232, bottomEdge - y);
     }
   }
   grid(ids: string[], grid: AgentGridLayout) {

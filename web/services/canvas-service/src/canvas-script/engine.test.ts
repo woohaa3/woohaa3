@@ -2,7 +2,7 @@
  * Canvas Script 受限执行与语义 recorder 测试
  * （change: 2026-10-13-add-canvas-script-authoring，任务 2.1–2.5）。
  *
- * 覆盖：五类节点、连线/移动/提示词/删除、placement/if、伪造/失效 handle、未知字段拒绝、
+ * 覆盖：六类节点、连线/移动/提示词/删除、placement/if、伪造/失效 handle、未知字段拒绝、
  * 宿主逃逸与动态执行阻断、预算（循环/超时/OOM/操作数/并发）、双 realm 确定性与阶段化诊断。
  *
  * 这些是**非渲染**检查：不采集帧率/GPU/截图，只验证隔离执行与语义记录行为。
@@ -13,7 +13,7 @@ import { CanvasScriptRecorder } from "./recorder.js";
 import { CanvasScriptConcurrencyGate } from "./availability.js";
 import { canvasScriptPrelude } from "./prelude.js";
 
-const KINDS = ["text", "image", "model", "video", "audio"] as const;
+const KINDS = ["text", "image", "model", "film-set", "video", "audio"] as const;
 
 function recorder(): CanvasScriptRecorder {
   return new CanvasScriptRecorder();
@@ -29,17 +29,18 @@ async function record(source: string, overrides: Partial<Parameters<CanvasScript
 }
 
 describe("受限执行：合法语义记录（任务 2.1 / 2.3）", () => {
-  it("记录五类节点与规范字段", async () => {
+  it("记录六类节点与规范字段", async () => {
     const outcome = await record(`
       canvas.node("text", { key: "t", title: "文本", prompt: "p" });
       canvas.node("image", { key: "i" });
       canvas.node("video", { key: "v" });
       canvas.node("audio", { key: "a" });
       canvas.node("model", { key: "m" });
+      canvas.node("film-set", { key: "f" });
     `);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.operations.map((op) => (op as { kind?: string }).kind)).toEqual(["text", "image", "video", "audio", "model"]);
+    expect(outcome.operations.map((op) => (op as { kind?: string }).kind)).toEqual(["text", "image", "video", "audio", "model", "film-set"]);
     expect(outcome.operations[0]).toMatchObject({ op: "create_node", ref: "t", title: "文本", prompt: "p" });
   });
 

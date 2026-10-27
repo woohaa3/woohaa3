@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "artifactId": "574fe42d86264bd5940df85ac795762fb593f58a5cc7ec338c5d1787ad3e6117",
+  "artifactId": "16d03c4f80eb5973c91e2263f8de61d6bdb8804e4304210dbea4864587afeb67",
   "metadata": {
     "extensionId": "photocraft",
     "version": "0.1.0",
@@ -15,7 +15,7 @@
   "protocolVersion": 1,
   "sdkAbi": 1,
   "reactMajor": 18,
-  "entry": "entry-7KSZDRE5.js",
+  "entry": "entry-DLAWTLBA.js",
   "styles": [
     "entry-YBVFNOI2.css"
   ],
@@ -32,17 +32,17 @@
   ],
   "files": [
     {
-      "path": "entry-7KSZDRE5.js",
+      "path": "entry-DLAWTLBA.js",
       "bytes": 478,
-      "gzipBytes": 358,
-      "sha256": "8b2db62bcfaf3a5877020451dc87256fa5619f7a5ef790efd7d18481314a3253",
+      "gzipBytes": 356,
+      "sha256": "9d6803eeda966d568d9d3a4000f1fdb63c167e04d5a4f87e91444cfaae4f0b43",
       "kind": "entry"
     },
     {
-      "path": "chunks/frontend-TBMOW2EM.js",
-      "bytes": 124625,
-      "gzipBytes": 38170,
-      "sha256": "cd8fb38ffd0c513a020e6674bacb24f4bc0b93bf1a3e6696fd0b5b8a34d4ef97",
+      "path": "chunks/frontend-N3KHJJDS.js",
+      "bytes": 123550,
+      "gzipBytes": 37848,
+      "sha256": "b276f5f1b01d8048384b61cb28bac190f074d9b99845e82e188a09d609a943e1",
       "kind": "private-chunk"
     },
     {
@@ -96,9 +96,9 @@
     },
     {
       "path": "assets/photocraft/host-bridge-core.js",
-      "bytes": 11238,
-      "gzipBytes": 3949,
-      "sha256": "0bce770da5c353648a89fce371f71608efee19cdb6382ebb5eee53992078a79f",
+      "bytes": 11180,
+      "gzipBytes": 3908,
+      "sha256": "31f48aea0b5a8186da3d3bfd97157096f9b433c8f4219e3f4b2d900722464af8",
       "kind": "asset"
     },
     {
@@ -153,19 +153,19 @@
   ],
   "imports": [
     {
-      "from": "chunks/frontend-TBMOW2EM.js",
+      "from": "chunks/frontend-N3KHJJDS.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-7KSZDRE5.js",
+      "from": "entry-DLAWTLBA.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-7KSZDRE5.js",
-      "specifier": "../browser-dist/chunks/frontend-TBMOW2EM.js",
-      "resolved": "chunks/frontend-TBMOW2EM.js"
+      "from": "entry-DLAWTLBA.js",
+      "specifier": "../browser-dist/chunks/frontend-N3KHJJDS.js",
+      "resolved": "chunks/frontend-N3KHJJDS.js"
     }
   ]
 }

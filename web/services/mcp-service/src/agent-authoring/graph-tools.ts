@@ -193,7 +193,7 @@ export const AGENT_CANVAS_GUIDE = `# Agent Canvas 指南
 
 - 写工具都要求显式 \`requestId\`；重试同一 requestId + 相同 payload 返回首次回执。
 - 先用 \`validate_canvas_plan\` 获得 \`validationToken\`，再提交；basis revision 变化会返回 \`plan-stale\`。
-- 节点只表达语义 kind（text/image/video/audio/model），不传 canonical type 或任意 nodeData。
+- 节点只表达语义 kind（text/image/video/audio/model/film-set），不传 canonical type 或任意 nodeData。
 - \`orchestrate_canvas\` 已 deprecated，请改用上面的类型化工具。
 `;
 

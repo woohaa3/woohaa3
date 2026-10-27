@@ -38,13 +38,13 @@ type CanvasLike = {
 };
 
 /** 语义 kind；未知 canonical 类型返回 null。 */
-export function semanticKindFor(canonicalType: string): AgentCanvasNodeProjection["kind"] {
-  return agentDescriptorForCanonicalType(canonicalType)?.kind ?? null;
+export function semanticKindFor(canonicalType: string, data?: CanvasNodeData): AgentCanvasNodeProjection["kind"] {
+  return agentDescriptorForCanonicalType(canonicalType, data)?.kind ?? null;
 }
 
 /** 节点 affordances；与共享描述符和当前节点状态一致（任务 3.3）。 */
 export function projectNodeAffordances(canvasType: string, data: CanvasNodeData | undefined): AgentNodeAffordances {
-  const descriptor = agentDescriptorForCanonicalType(canvasType);
+  const descriptor = agentDescriptorForCanonicalType(canvasType, data);
   const processing = data?.taskStatus === "processing";
   return {
     canSetPrompt: descriptor?.supportsPrompt === true,
@@ -61,7 +61,7 @@ export function projectAgentNode(
   options: { includePrompt?: boolean } = {}
 ): AgentCanvasNodeProjection {
   const data = canvas.nodeData[node.id];
-  const descriptor = agentDescriptorForCanonicalType(node.type);
+  const descriptor = agentDescriptorForCanonicalType(node.type, data);
   const task = projectTaskSummary(data);
   const inputs = projectInputSummaries(canvas, node.id, data);
   const worldBounds = organizationWorldBounds(node, new Map(canvas.document.nodes.map(n => [n.id, n])));

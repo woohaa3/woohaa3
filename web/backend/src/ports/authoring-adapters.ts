@@ -213,6 +213,7 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
     async issue(request): Promise<ApplicationToolGrant> {
       delegateOrThrow(request.delegation, log);
       if (request.mode !== undefined && !["model3d", "film-set", "camera", "canvas-group"].includes(request.mode)) throw new Error("unsupported-target-mode");
+      if (request.mode === "camera") throw new Error("camera-mode-deprecated");
       if (request.mode === "canvas-group") {
         if (!request.tools?.length) throw new Error("group-tools-required");
         if (request.tools.some(tool => !(CANVAS_GROUP_TOOLS as readonly string[]).includes(tool))) throw new Error("group-tool-not-supported");

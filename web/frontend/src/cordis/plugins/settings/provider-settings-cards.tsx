@@ -1,8 +1,9 @@
 /**
  * Provider 配置卡片（紧凑视图）：Provider 凭据弹窗与设置页共用。
  *
- * 每个已装载的 Provider 一组，复用同一份配置和密钥仓库。AI 面板的 compact 模式默认
- * 只展示主密钥，其他配置放高级设置，按 Provider 合并保存；完整设置页继续按项编辑。
+ * 每个已装载的 Provider 一组，复用同一份配置和密钥仓库。AI 面板的 compact 模式默认只展示
+ * 主密钥，以及没有默认值又还没填的连接地址；其他配置放高级设置，按 Provider 合并保存。
+ * 完整设置页继续按项编辑。
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
 import "./settings.css";
@@ -71,6 +72,17 @@ export function ProviderSettingsCards({
   );
 }
 
+/**
+ * 连接必需、但还没有取值的地址字段（例如 LiteLLM 的网关地址）。
+ *
+ * 这类字段没有默认值，Provider 的可用性又要求它与主凭据同时就绪（`apiKey` 与网关地址都齐才算
+ * available）。把它藏进「高级设置」会让用户只看到主密钥、Provider 却一直不可用。未填写时与主
+ * 凭据并列展示，填好之后收回高级设置。
+ */
+function missingEndpoint(entry: SettingsEntryView): boolean {
+  return entry.kind === "url" && (entry.value === null || entry.value === "");
+}
+
 /** 只记录用户编辑的字段，其他 Provider 刷新快照时不覆盖未保存的草稿。 */
 function ProviderConnectionForm({ entries, store, onSaved }: { entries: SettingsEntryView[]; store: BackendSettingsStore; onSaved?: () => void }) {
   const [drafts, setDrafts] = useState<Record<string, SettingsWriteValue>>({});
@@ -78,7 +90,7 @@ function ProviderConnectionForm({ entries, store, onSaved }: { entries: Settings
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [clearing, setClearing] = useState<string | null>(null);
-  const primary = entries.filter(entry => entry.key.endsWith(".apiKey") || entry.lockedBy !== null || entry.pendingRestart);
+  const primary = entries.filter(entry => entry.key.endsWith(".apiKey") || entry.lockedBy !== null || entry.pendingRestart || missingEndpoint(entry));
   const advanced = entries.filter(entry => !primary.includes(entry));
   const update = (entry: SettingsEntryView, value: SettingsWriteValue) => {
     setSaved(false);

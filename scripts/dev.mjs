@@ -320,7 +320,15 @@ async function main() {
     ? ["--watch", `--watch-path=${backendEntry}`, "--watch-preserve-output", backendEntry]
     : ["--watch", "--watch-preserve-output", backendEntry];
   const startBackend = () => start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
-    env: { ...serviceEnv, WOOHAA3_BASE_PATH: basePath, PORT: String(backendPort), BACKEND_PORT: String(backendPort) }
+    env: {
+      ...serviceEnv,
+      WOOHAA3_BASE_PATH: basePath,
+      PORT: String(backendPort),
+      BACKEND_PORT: String(backendPort),
+      // node --watch keeps its supervisor alive after the child exits with 75.
+      // The backend touches its entry on controlled restart so node --watch starts it again.
+      WOOHAA3_DEV_WATCH: watch ? "1" : "0"
+    }
   });
   supervise("backend", startBackend(), { relaunch: startBackend });
   // 显式监听 IPv4，避免容器禁用 IPv6 回环时 ATC 无法连接通配地址。

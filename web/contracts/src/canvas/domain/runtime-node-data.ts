@@ -147,9 +147,9 @@ export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { conte
  *
  * 粘贴后节点必须处于「无 active run 的可编辑状态」；本机路径也不得跨会话复制。
  *
- * `outputAssetId` 会被删除：它既可能是生成任务的结果指针，也可能是上传素材的唯一内容引用，
- * 只有拿到画布资产上下文才能区分。剪贴板载荷在清理后按「资产确实存在、ready 且类型匹配」
- * 恢复内容引用（见 `canvas-shell/clipboard/payload.ts`），本函数保持保守口径。
+ * `outputAssetId` 会被删除：它既可能是运行中生成任务的结果指针，也可能是上传素材/已结算生成结果
+ * 的唯一内容引用，只有拿到画布资产上下文才能区分。剪贴板载荷在清理后按「资产确实存在、`ready`
+ * 且 `mediaKind` 匹配」恢复内容引用（见 `canvas-shell/clipboard/payload.ts`），本函数保持保守口径。
  */
 export function sanitizeNodeDataForClipboard(input: unknown, context?: { content?: ContentContributionResolver }): CanvasNodeData {
   observeContentResolver(context?.content);

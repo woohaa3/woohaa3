@@ -68,7 +68,7 @@ export function isAgentEntryAction(value: unknown): value is AgentEntryAction {
   return typeof value === "string" && (AGENT_ENTRY_ACTIONS as readonly string[]).includes(value);
 }
 
-/** 目标创作模式：模型、片场或镜头（与 `AuthoringGenerateMode` 同形，避免跨模块耦合）。 */
+/** 目标创作模式；`camera` 仅为旧会话兼容值，新的片场镜头统一使用 `film-set`。 */
 export const AGENT_TARGET_MODES = ["model3d", "film-set", "camera", "canvas-group", "text"] as const;
 export type AgentTargetMode = (typeof AGENT_TARGET_MODES)[number];
 

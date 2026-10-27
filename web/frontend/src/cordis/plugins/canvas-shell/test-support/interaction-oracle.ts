@@ -10,7 +10,8 @@
  */
 import {
   bevyAggregateHandle,
-  bevyEdgeDeleteRect,
+  bevyEdgeDeleteHitRect,
+  bevyEdgeHoverBridgeRect,
   bevyNodeHistoryStripRect,
   bevyNodeSize,
   bevyPort,
@@ -59,19 +60,28 @@ export function hitTestOracle(
 ): PointHit | null {
   const radius = Math.max(10, 10 / zoom);
   const nodeMap = new Map(scene.nodes.map((node) => [node.id, node]));
-  if (hoveredEdgeId) {
-    const hoveredEdge = scene.edges.find((edge) => edge.id === hoveredEdgeId);
-    const hoveredSource = hoveredEdge ? nodeMap.get(hoveredEdge.source) : undefined;
-    const hoveredTarget = hoveredEdge ? nodeMap.get(hoveredEdge.target) : undefined;
-    if (hoveredSource && hoveredTarget && !hoveredSource.ghost && !hoveredTarget.ghost) {
-      const button = bevyEdgeDeleteRect(
-        { x: hoveredSource.x, y: hoveredSource.y, width: nodeSize(hoveredSource).width, height: nodeSize(hoveredSource).height },
-        { x: hoveredTarget.x, y: hoveredTarget.y, width: nodeSize(hoveredTarget).width, height: nodeSize(hoveredTarget).height },
-        (hoveredEdge?.label ?? "") !== ""
-      );
-      if (world.x >= button.x && world.x <= button.x + button.width && world.y >= button.y && world.y <= button.y + button.height) {
-        return { kind: "edge-delete", edgeId: hoveredEdgeId };
-      }
+  const nodeRect = (node: CanvasRenderScene["nodes"][number]) => ({
+    x: node.x,
+    y: node.y,
+    width: nodeSize(node).width,
+    height: nodeSize(node).height
+  });
+  const hoveredEdge = hoveredEdgeId ? scene.edges.find((edge) => edge.id === hoveredEdgeId) : undefined;
+  const hoveredSource = hoveredEdge ? nodeMap.get(hoveredEdge.source) : undefined;
+  const hoveredTarget = hoveredEdge ? nodeMap.get(hoveredEdge.target) : undefined;
+  const hoveredEndpoints =
+    hoveredSource && hoveredTarget && !hoveredSource.ghost && !hoveredTarget.ghost
+      ? { source: nodeRect(hoveredSource), target: nodeRect(hoveredTarget) }
+      : null;
+  if (hoveredEdge && hoveredEndpoints) {
+    // 命中区比视觉按钮略大，补上标签与按钮之间的间隙（修复：删除按钮悬停丢失）。
+    const button = bevyEdgeDeleteHitRect(
+      hoveredEndpoints.source,
+      hoveredEndpoints.target,
+      hoveredEdge.label ?? ""
+    );
+    if (world.x >= button.x && world.x <= button.x + button.width && world.y >= button.y && world.y <= button.y + button.height) {
+      return { kind: "edge-delete", edgeId: hoveredEdge.id };
     }
   }
   const selected = new Set(scene.selection.nodes);
@@ -129,6 +139,18 @@ export function hitTestOracle(
           return { kind: "aggregate-handle", direction: side };
         }
       }
+    }
+  }
+  // 悬停保持区：有标签时删除按钮在标签右侧，曲线只从标签中间穿过；指针从线体经标签走到
+  // 按钮时靠这一段维持悬停，按钮不会在途中消失（修复：删除按钮悬停丢失）。
+  if (hoveredEdge && hoveredEndpoints) {
+    const bridge = bevyEdgeHoverBridgeRect(
+      hoveredEndpoints.source,
+      hoveredEndpoints.target,
+      hoveredEdge.label ?? ""
+    );
+    if (world.x >= bridge.x && world.x <= bridge.x + bridge.width && world.y >= bridge.y && world.y <= bridge.y + bridge.height) {
+      return { kind: "edge", edgeId: hoveredEdge.id };
     }
   }
   for (let index = scene.edges.length - 1; index >= 0; index -= 1) {

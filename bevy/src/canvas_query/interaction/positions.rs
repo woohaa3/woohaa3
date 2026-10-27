@@ -20,7 +20,7 @@ pub(super) fn edge_geometry(
     id: String,
     source: usize,
     target: usize,
-    has_label: bool,
+    label_width: f32,
     a: Vec2,
     b: Vec2,
 ) -> SnapshotEdge {
@@ -40,7 +40,7 @@ pub(super) fn edge_geometry(
         target,
         source_port: a,
         target_port: b,
-        has_label,
+        label_width,
         points,
         aabb: (min, max),
     }
@@ -164,7 +164,7 @@ pub(super) fn plan(
             old.id.clone(),
             old.source,
             old.target,
-            old.has_label,
+            old.label_width,
             port(node_at(old.source), true),
             port(node_at(old.target), false),
         );

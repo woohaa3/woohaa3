@@ -60,6 +60,22 @@ describe("authoritative group appearance resource", () => {
   });
 });
 
+it("rejects film sets: their own model is the items composition, not a group appearance", async () => {
+  const repository = new InMemoryYjsDocumentRepository();
+  const canvas = createEmptyWoohaa3ServerCanvas("film-appearance", "2026-10-25T00:00:00Z");
+  canvas.document.nodes = [{ id: "film", type: "composite-asset", position: { x: 0, y: 0 }, width: 260, height: 195 }];
+  canvas.nodeData.film = { extensionId: "film-set", filmSetContent: { schemaVersion: 4, items: [] } } as never;
+  const room = new CanvasRoom({ canvasId: canvas.id, repository });
+  await room.initialize({ canvas, roomEpoch: "film-appearance", createdAt: "2026-10-25T00:00:00Z" });
+  const service = new ModelMcpService({ resolveRoom: async () => room });
+  const input = { canvasId: canvas.id, nodeId: "film", resource: "group-appearance" as const, requestId: "film", source,
+    expectedContentHash: readGroupAppearanceForNode({}).value.model.contentVersion.contentHash };
+  expect(await service.getModelNode(input)).toMatchObject({ ok: false, code: "invalid-node-type" });
+  expect(await service.submitScript(input)).toMatchObject({ ok: false, code: "invalid-node-type" });
+  expect(room.exportCanvas()).toMatchObject({ ok: true, canvas: { nodeData: { film: { extensionId: "film-set" } } } });
+  room.dispose();
+});
+
 it("retains committed appearance and original receipts across a fresh authority room", async () => {
   const { service, input, repository, room } = await fixture();
   const receipt = await service.submitScript(input); expect(receipt.ok).toBe(true);

@@ -98,7 +98,7 @@ export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanv
   if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
   if (resource === "group-appearance") {
     const data = canvas.nodeData[nodeId];
-    if (node.type !== "group" && !isFilmSetNode(node.type, data)) return { ok: false, code: "invalid-node-type", message: "该节点没有组形象" };
+    if (node.type !== "group") return { ok: false, code: "invalid-node-type", message: "该节点没有组形象" };
     const appearance = readGroupAppearanceForNode(data);
     const model = appearance.value.model;
     return { ok: true, canvasId, nodeId, nodeType: node.type, resource, appearanceSource: appearance.source,

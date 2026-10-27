@@ -4,10 +4,10 @@
  */
 import { describe, expect, it, afterEach } from "vitest";
 import {
+  bevyEdgeDeleteRect,
+  bevyPort,
   createEmptyWoohaa3ServerCanvas,
-  EDGE_DELETE_BUTTON_GAP,
-  EDGE_DELETE_BUTTON_SIZE,
-  EDGE_LABEL_WIDTH,
+  edgeLabelWidth,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import { installInteractionController } from "./interaction-controller.js";
@@ -456,10 +456,72 @@ describe("连线悬停与删除按钮（change: add-edge-hover-delete）", () =>
     expect(submitted.some((command) => command.type === "edge.remove")).toBe(false);
     // 标签右侧按钮处点击：删除。真实指针必有一次移动（按下即清 hover 投影，按钮命中上下文
     // 来自按下那一刻的悬停态，见 interaction-2d-input 的 clearHover 说明）。
-    const buttonX = mid.x + EDGE_LABEL_WIDTH / 2 + EDGE_DELETE_BUTTON_GAP + EDGE_DELETE_BUTTON_SIZE / 2;
+    const button = bevyEdgeDeleteRect(
+      { x: 0, y: 0, width: 248, height: 232 },
+      { x: 600, y: 0, width: 248, height: 232 },
+      "输入"
+    );
+    const buttonX = button.x + button.width / 2;
     dom.fire("pointermove", { clientX: buttonX, clientY: mid.y });
     controller.flush();
     dom.fire("pointerdown", { clientX: buttonX, clientY: mid.y, button: 0 });
+    controller.flush();
+    expect(submitted.filter((command) => command.type === "edge.remove")).toEqual([
+      { type: "edge.remove", edgeId: "e1" }
+    ]);
+    controller.dispose();
+  });
+  it("纵向带标签连线：从线体经标签移到按钮时悬停不丢失，按钮仍可删除", () => {
+    const base = createEmptyWoohaa3ServerCanvas("c1");
+    woohaa3CanvasStore.getState().applyRemoteCanvas({
+      ...base,
+      revision: 1,
+      document: {
+        ...base.document,
+        nodes: [
+          { id: "n1", type: "image", position: { x: 0, y: 0 } },
+          { id: "n2", type: "image", position: { x: 200, y: 400 } }
+        ],
+        edges: [{ id: "e1", source: "n1", target: "n2", data: { label: "图片" }, sourceHandle: null, targetHandle: null }]
+      }
+    });
+    const dom = harness();
+    const { runtime, scenes } = runtimeCapturing();
+    const controller = installInteractionController({
+      canvas: dom.canvas,
+      getRuntime: () => runtime,
+      getSession: () => getSession() as never,
+      target: dom.target as never
+    });
+    // 端口 (248,116) / (200,516) → 中点 (224,316)；两端口几乎竖直，标签居中，按钮在标签右侧。
+    const source = { x: 0, y: 0, width: 248, height: 232 };
+    const target = { x: 200, y: 400, width: 248, height: 232 };
+    const from = bevyPort(source, "output");
+    const to = bevyPort(target, "input");
+    const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    const button = bevyEdgeDeleteRect(source, target, "图片");
+    const buttonCenter = { x: button.x + button.width / 2, y: button.y + button.height / 2 };
+    const labelWidth = edgeLabelWidth("图片");
+    const lastHover = (entries: Array<Record<string, unknown>>) => (entries.at(-1) as { hover?: unknown }).hover;
+
+    // 先悬停线体（曲线穿过标签中点）。
+    dom.fire("pointermove", { clientX: mid.x, clientY: mid.y });
+    controller.flush();
+    expect(lastHover(scenes)).toEqual({ edgeId: "e1" });
+    // 真实指针会连续经过「标签」「间隙」再到按钮；每一步都必须保持悬停，
+    // 否则按钮在途中消失（修复：删除按钮悬停丢失）。
+    for (const point of [
+      // 标签右半部：离曲线 12px，只可能命中标签保持区。
+      { x: mid.x + labelWidth / 2 - 7, y: mid.y },
+      // 标签与按钮之间的间隙（落在按钮命中外扩里）。
+      { x: mid.x + labelWidth / 2 + 1, y: mid.y },
+      buttonCenter
+    ]) {
+      dom.fire("pointermove", { clientX: point.x, clientY: point.y });
+      controller.flush();
+      expect(lastHover(scenes), `hover lost at ${JSON.stringify(point)}`).toEqual({ edgeId: "e1" });
+    }
+    dom.fire("pointerdown", { clientX: buttonCenter.x, clientY: buttonCenter.y, button: 0 });
     controller.flush();
     expect(submitted.filter((command) => command.type === "edge.remove")).toEqual([
       { type: "edge.remove", edgeId: "e1" }

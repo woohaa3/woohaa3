@@ -47,6 +47,15 @@ it("Provider 一次保存多个字段；收起高级设置和刷新快照不丢�
   expect(f.write).toHaveBeenCalledWith({ "providers.test.apiKey": "draft-key", "providers.test.baseUrl": "https://custom.example/v1" });
   expect(f.el.querySelector<HTMLInputElement>('[type="password"]')!.value).toBe("");
 });
+it("没有默认值的连接地址在未填写时直接展示，已填写的仍在高级设置里", async () => {
+  const f = await fixture([entry("gateway", { label: "网关地址", kind: "url", value: "" })]);
+  const gateway = f.el.querySelector<HTMLInputElement>('[data-setting-key="providers.test.gateway"] input')!;
+  expect(gateway.closest("details")).toBeNull();
+  expect(f.el.querySelector<HTMLInputElement>('[data-setting-key="providers.test.baseUrl"]')!.closest("details")).not.toBeNull();
+  await f.input("gateway", "http://127.0.0.1:4000");
+  await f.click("保存");
+  expect(f.write).toHaveBeenCalledWith({ "providers.test.gateway": "http://127.0.0.1:4000" });
+});
 it("空密钥不覆盖已保存密钥；保存失败保留草稿与可重试错误", async () => {
   const f = await fixture();
   await f.input("baseUrl", "https://new.example/v1");

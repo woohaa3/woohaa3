@@ -93,7 +93,7 @@ export async function createRuntime({ canvas, assetBaseUrl, onEvent }, loadModul
     try { snapshot = state(); }
     catch (error) {
       visible = false; input = false; generation++; channel.paused = true; cancelAnimationFrame(raf); raf = 0;
-      post({ type: "photocraft:error", fatal: true, message: `PhotoCraft 运行已中断：${String(error)}。内存工程可能无法导出；请先尝试下载，重新加载会丢失所有未保存文档。` }); return;
+      post({ type: "photocraft:error", fatal: true, message: `PhotoCraft 运行已中断：${String(error)}。重新加载会丢失所有未保存文档。` }); return;
     }
     const serialized = JSON.stringify(snapshot);
     for (const doc of snapshot.documents) {
@@ -136,7 +136,7 @@ export async function createRuntime({ canvas, assetBaseUrl, onEvent }, loadModul
     if (!visible || !input || !canvasFocused || !owns(event) || event.key !== "Escape" || event.isComposing || event.repeat || state().escOwned) return;
     event.preventDefault(); event.stopImmediatePropagation(); post({ type: "photocraft:escape" });
   }, { capture: true });
-  listen(canvas, "webglcontextlost", (event) => { event.preventDefault(); contextLost = true; generation++; previous = null; post({ type: "photocraft:error", message: "图形连接已中断，本地文档仍保留。恢复后可继续；请先尝试保存工程。" }); });
+  listen(canvas, "webglcontextlost", (event) => { event.preventDefault(); contextLost = true; generation++; previous = null; post({ type: "photocraft:error", message: "图形连接已中断，本地文档仍保留。恢复后可继续；未保存内容会随重新加载丢失。" }); });
   listen(canvas, "webglcontextrestored", () => { contextLost = false; generation++; previous = null; channel.pending = null; });
   const presentation = () => photocraft.runtime_presentation(visible && !document.hidden, input && canvasFocused && visible && !document.hidden);
   listen(document, "visibilitychange", presentation);
@@ -167,7 +167,7 @@ export async function createRuntime({ canvas, assetBaseUrl, onEvent }, loadModul
     },
     activate(id) { generation++; previous = null; preparedDocument = null; photocraft.runtime_activate(id); return generation; },
     close(id) { photocraft.runtime_close(id); },
-    export(id, project = false) { return photocraft.runtime_export(id, project); },
+    export(id) { return photocraft.runtime_export(id, false); },
     ack(id, accepted) { if (!accepted) previous = null; channel.ack(id); },
     settle() { const s = state(); if (s.operation || s.modal) throw new Error("请先确认或取消 PhotoCraft 中的当前操作"); return s; },
     dispose() { if (disposed) return; disposed = true; visible = false; generation++; cancelAnimationFrame(raf); lifecycle.abort(); photocraft.runtime_requests(); announced.clear(); photocraft.runtime_destroy(); }

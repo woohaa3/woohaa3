@@ -9,10 +9,12 @@ export function resolveFilmSetAssistantTarget(input: {
   cameras: readonly ModelCamera[];
 }) {
   if (input.tab === "camera") {
+    // 镜头属于片场 clip 的 initialCamera，不再作为独立的 camera 目标模式。
+    // 保留 camera 列表参数只用于校验旧调用方传入的选择；新的 entry 只冻结 clip。
     const cameraId = input.selectedCameraId;
     const valid = cameraId ? input.cameras.some(camera => camera.id === cameraId) : input.cameras.length === 0;
-    return { mode: "camera" as const, clipId: input.clip?.id ?? null, itemId: null,
-      selectedCameraId: cameraId, expectedContentHash: undefined,
+    return { mode: "film-set" as const, clipId: input.clip?.id ?? null, itemId: null,
+      selectedCameraId: null, expectedContentHash: input.clip ? filmSetClipHash(input.clip) : undefined,
       blockedReason: valid ? null : "所选镜头已失效，请明确选择镜头后再调整。" };
   }
   const itemId = input.tab === "object" ? input.selectedItemId : null;

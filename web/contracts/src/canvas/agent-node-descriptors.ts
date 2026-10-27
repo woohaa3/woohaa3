@@ -16,7 +16,7 @@ import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 import { createFilmSetSnapshot, createModel3DNodeData, model3DNodeDataFields } from "./animation-snapshot.js";
 import { MODEL_SCRIPT_V2_VERSION } from "./model-script.js";
 import { isModelAuthoringNodeType } from "./domain/core/input-role.js";
-import { COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID } from "./domain/core/composite-asset-identity.js";
+import { COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, isFilmSetNode } from "./domain/core/composite-asset-identity.js";
 
 /**
  * 片场（复合资产 + `extensionId="film-set"`）展示名事实源
@@ -28,13 +28,14 @@ import { COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID } from "./domain/core/
 export { DIRECTOR_STUDIO_DEFAULT_TITLE, LEGACY_ANIMATION_DEFAULT_TITLE } from "./director-studio-title.js";
 import { DIRECTOR_STUDIO_DEFAULT_TITLE } from "./director-studio-title.js";
 
-/** 对外暴露的语义节点种类。`model` 创建自包含的 canonical `model3d`。 */
-export type AgentSemanticKind = "text" | "image" | "video" | "audio" | "model";
+/** 对外暴露的语义节点种类。`model` 与 `film-set` 都是自包含的 3D 内容节点。 */
+export type AgentSemanticKind = "text" | "image" | "video" | "audio" | "model" | "film-set";
 
 export const AGENT_SEMANTIC_KINDS: readonly AgentSemanticKind[] = [
   "text",
   "image",
   "model",
+  "film-set",
   "video",
   "audio"
 ];
@@ -61,7 +62,7 @@ export type AgentNodeDescriptor = {
 };
 
 /**
- * 节点目录；顺序与前端菜单/旧 Godot 菜单一致（文本、图片、模型、视频、音频）。
+ * 节点目录；顺序与前端菜单/旧 Godot 菜单一致，并补充片场这一自包含 3D 节点。
  *
  * 尺寸来自 `effectiveCanvasNodeSize`，与 Bevy 渲染共用同一数值，避免菜单预览与画布实际尺寸分叉。
  */
@@ -69,6 +70,7 @@ export const AGENT_NODE_DESCRIPTORS: readonly AgentNodeDescriptor[] = [
   descriptor("text", "text", "文本", { task: true, prompt: true, executable: true, sourceLabel: "文本" }),
   descriptor("image", "image", "图片", { task: true, prompt: true, executable: true, sourceLabel: "图片" }),
   descriptor("model", "model3d", "模型", { prompt: true, executable: false, sourceLabel: "模型" }),
+  descriptor("film-set", COMPOSITE_ASSET_NODE_TYPE, "片场", { prompt: false, executable: false, sourceLabel: "片场" }),
   descriptor("video", "video", "视频", { task: true, prompt: true, executable: true, sourceLabel: "" }),
   descriptor("audio", "audio", "音频", { task: true, prompt: true, executable: true, sourceLabel: "" })
 ];
@@ -102,8 +104,11 @@ export function findAgentNodeDescriptor(kind: string): AgentNodeDescriptor | nul
   return AGENT_NODE_DESCRIPTORS.find((entry) => entry.kind === kind) ?? null;
 }
 
-export function agentDescriptorForCanonicalType(canonicalType: string): AgentNodeDescriptor | null {
-  // 自包含 3D 节点（model3d + 复合资产类别）共享同一 `model` 语义种类。
+export function agentDescriptorForCanonicalType(canonicalType: string, nodeData?: unknown): AgentNodeDescriptor | null {
+  // composite-asset 还承载其它扩展；只有明确的 film-set 身份才投影为片场语义，未知/其它业务保持模型兼容。
+  if (canonicalType === COMPOSITE_ASSET_NODE_TYPE) {
+    return isFilmSetNode(canonicalType, nodeData) ? findAgentNodeDescriptor("film-set") : findAgentNodeDescriptor("model");
+  }
   if (isModelAuthoringNodeType(canonicalType)) return findAgentNodeDescriptor("model");
   return AGENT_NODE_DESCRIPTORS.find((entry) => entry.canonicalType === canonicalType) ?? null;
 }
@@ -116,7 +121,9 @@ export function agentDescriptorForCanonicalType(canonicalType: string): AgentNod
  */
 export function defaultAgentNodeData(kind: string): CanvasNodeData | undefined {
   const descriptor = findAgentNodeDescriptor(kind);
-  if (descriptor?.canonicalType === "model3d") return defaultSelfContained3DNodeData("model3d");
+  if (descriptor?.canonicalType === "model3d" || descriptor?.canonicalType === COMPOSITE_ASSET_NODE_TYPE) {
+    return defaultSelfContained3DNodeData(descriptor.canonicalType);
+  }
   if (!descriptor?.taskKind || !descriptor.defaultTaskStatus) return undefined;
   return { taskKind: descriptor.taskKind, taskStatus: descriptor.defaultTaskStatus };
 }

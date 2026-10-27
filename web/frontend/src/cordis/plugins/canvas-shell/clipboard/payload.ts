@@ -82,8 +82,7 @@ export type CanvasCopyPayload = {
  */
 export function buildCanvasCopyPayload(
   canvas: ServerCanvas,
-  selectedNodeIds: readonly string[],
-  options: { snapshotNodeIds?: readonly string[] } = {}
+  selectedNodeIds: readonly string[]
 ): CanvasCopyPayload | null {
   const nodes = canvas.document.nodes;
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -194,7 +193,7 @@ export function buildCanvasCopyPayload(
     // extension lifecycle lock into another canvas.
     const relation = managedNodeRelationOf(cleaned);
     if (cleaned.mediaContent && relation && !included.has(relation.ownerNodeId)) delete cleaned.managedBy;
-    restoreContentReferences(raw, cleaned, nodeTypeById.get(id), assetsById, options.snapshotNodeIds?.includes(id) ?? false);
+    restoreContentReferences(raw, cleaned, nodeTypeById.get(id), assetsById);
     if (Object.keys(cleaned).length > 0) nodeData[id] = cleaned;
   }
 
@@ -232,15 +231,20 @@ export function buildCanvasCopyPayload(
 /**
  * 恢复节点内容的稳定媒体引用（change: fix-copy-keeps-node-media）。
  *
- * `sanitizeNodeDataForClipboard` 保守地删除 `outputAssetId`，但它对上传素材是**唯一内容引用**：
- * 上传节点的 nodeData 只有 `title`/`outputAssetId`/`resourceKind`/`taskStatus`，剪掉后就得到
- * 一个没有图的空节点（复制图片/视频/音频必然丢内容）。
+ * `sanitizeNodeDataForClipboard` 保守地删除 `outputAssetId`，但它是媒体节点在规范画布中的
+ * **唯一内容引用**：上传素材、生成结果与历史恢复的媒体资产（`ngh-asset-*`）都靠它显示；
+ * 剪掉后就得到一个没有图的空节点（复制图片/视频/音频必然丢内容，画面呈现为灰块）。
  *
  * 判定只依赖可核对的事实，不猜语义：
  * - 资产必须在**来源画布**中存在且 `ready`；
- * - 资产 `source` 为 `uploaded`（用户素材本身即内容）或 `external`（稳定外部引用）；
- *   生成结果的资产是 `generated`，仍按任务结果指针剪除；
+ * - 资产 `source` 可以是 `uploaded`（用户素材本身即内容）、`external`（稳定外部引用）
+ *   或 `generated`（生成任务已结算的稳定结果资产，历史恢复资产也带这个来源）；
+ *   `outputAssetId` 指向 ready 资产时它就是节点当前显示的稳定内容——只有**运行中/未结算**
+ *   的任务结果指针才随清理器剪除，把已结算结果当作指针剪掉会让粘贴节点变成灰块；
  * - 资产 `mediaKind` 必须与节点类型匹配，避免把结果图挂到文本节点上。
+ * - 仍带 `mediaContent` 的托管/实时媒体节点**不**在此恢复：它的内容由
+ *   `freeze`（物化为不可变资产）或扩展 `remapCopy`（随 owner 闭包重映射）接管，
+ *   直接恢复会往载荷里塞来源画布的过期引用。
  *
  * 资产会随载荷的 `assets` 一并携带，因此目标画布可解析该引用。
  */
@@ -248,8 +252,7 @@ function restoreContentReferences(
   raw: Woohaa3CanvasJsonObject | undefined,
   cleaned: Woohaa3CanvasJsonObject,
   nodeType: string | undefined,
-  assetsById: ReadonlyMap<string, StoredAsset>,
-  providerSnapshot = false
+  assetsById: ReadonlyMap<string, StoredAsset>
 ): void {
   // 带编辑定义/工程版本的图片节点：`outputAssetId` 是版本的一部分（工程与 PNG 成对）。
   const hasImageEdit = raw !== undefined && decodeImageEditDocument(raw.imageEdit).ok;
@@ -260,11 +263,10 @@ function restoreContentReferences(
     return;
   }
   if (!nodeType) return;
+  // 托管/实时媒体走 freeze / remapCopy，不在这里恢复来源画布的过期引用。
+  if (cleaned.mediaContent) return;
   const asset = assetsById.get(outputAssetId);
   if (!asset || asset.status !== "ready") return;
-  // A confirmed provider snapshot is content even when its immutable asset was
-  // generated. It is no longer a task-result pointer on the copied node.
-  if (!providerSnapshot && asset.source !== "uploaded" && asset.source !== "external") return;
   if (asset.mediaKind !== nodeType) return;
   cleaned.outputAssetId = outputAssetId;
   // 上传节点的就绪状态同样属于「节点可用」的一部分（服务端上传路径写入 successed）。

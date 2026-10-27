@@ -112,18 +112,32 @@ describe("自包含节点内容身份归一化（change: 2026-10-06，任务 1.2
     expect(result.rejection.code).toBe("invalid-self-contained-node");
   });
 
-  it("片场可持有独立 groupAppearance，且不改变 items-only 模型边界", () => {
+  it("片场拒绝新的 groupAppearance：自身模型只由 items 组成", () => {
     const canvas = withFilmSet();
     const appearance = defaultGroupAppearance();
     appearance.model.modelScript = "scene.box({ id: 'appearance', size: [2,2,2] });";
     const result = applyCanvasCommands(canvas, [
       { type: "nodeData.patch", nodeId: "anim", value: { groupAppearance: appearance } }
     ], { now: NOW });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.canvas.nodeData.anim.groupAppearance?.model.modelScript).toContain("appearance");
-    expect(result.canvas.nodeData.anim.modelScript).toBeUndefined();
-    expect(result.canvas.nodeData.anim.filmSetContent).toBeDefined();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid-group-appearance");
+    expect(canvas.nodeData.anim.groupAppearance).toBeUndefined();
+    expect(canvas.nodeData.anim.filmSetContent).toBeDefined();
+  });
+
+  it("片场旧 groupAppearance 原样保留，但不接受修改", () => {
+    const canvas = withFilmSet();
+    const appearance = defaultGroupAppearance();
+    canvas.nodeData.anim.groupAppearance = appearance;
+    const preserved = applyCanvasCommands(canvas, [
+      { type: "nodeData.patch", nodeId: "anim", value: { groupAppearance: appearance } }
+    ], { now: NOW });
+    expect(preserved.ok).toBe(true);
+    const changed = applyCanvasCommands(canvas, [
+      { type: "nodeData.patch", nodeId: "anim", value: { groupAppearance: { ...appearance, model: { ...appearance.model, modelScript: "scene.sphere({ id: 'x' });" } } } }
+    ], { now: NOW });
+    expect(changed.ok).toBe(false);
   });
 });
 
