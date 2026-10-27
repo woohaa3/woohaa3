@@ -17,12 +17,17 @@ export const EXTENSION_CAPABILITY_KINDS = ["capability", "handler"];
 export const EXTENSION_CAPABILITY_AUTH = ["public", "authenticated"];
 export const EXTENSION_ROUTE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 /**
- * 扩展层 Cordis 插件的种类（`hostPlugin.kind`）。
+ * 扩展层 Cordis 插件可以承担的角色（`hostPlugin.roles`，**可多选**）。
  *
- * `provider` 注入 `ctx.generation`（模型 Provider），`storage` 注入 `ctx.storage`（存储后端）。
- * 两者都是宿主插件树扩展层的插件，由声明驱动装配——宿主不再维护逐插件的手写注册表。
+ * 一个插件同时提供 Provider、存储后端与市场来源是正常情况，所以这不是单值枚举：
+ * - `provider`：注入 `ctx.generation`（模型 Provider）；
+ * - `storage`：注入 `ctx.storage`（存储后端），**唯一有装载语义的角色**——
+ *   `storage.primary` 指向它时必须就绪，其余并发装载；
+ * - `marketplace-source`：向 `ctx.marketplace` 注册来源（合法性由运行期 origin 判定）。
+ *
+ * 三者互不排斥，也不决定「装了之后能干什么」——能干什么取决于插件实际调用了哪些服务。
  */
-export const EXTENSION_HOST_PLUGIN_KINDS = ["provider", "storage", "marketplace-source"];
+export const EXTENSION_HOST_PLUGIN_ROLES = ["provider", "storage", "marketplace-source"];
 
 /**
  * 宿主自身满足的运行环境（change: 2026-10-21-add-extension-marketplace-point，design D4）。
@@ -274,14 +279,27 @@ export function validateExtensionDescriptor(value) {
     if (!isPlainObject(hostPlugin)) {
       errors.push("hostPlugin 必须是对象");
     } else {
-      for (const key of unknownKeys(hostPlugin, ["module", "factory", "kind", "order", "optional"])) errors.push(`hostPlugin 未知字段：${key}`);
+      for (const key of unknownKeys(hostPlugin, ["module", "factory", "roles", "order", "optional"])) errors.push(`hostPlugin 未知字段：${key}`);
       const moduleValue = hostPlugin.module ?? "./backend";
       if (!isNonEmptyString(moduleValue) || !PACKAGE_SUBPATH.test(moduleValue)) {
         errors.push("hostPlugin.module 必须是包内相对子路径（如 ./backend）");
       }
       if (!isNonEmptyString(hostPlugin.factory) || !IDENTIFIER.test(hostPlugin.factory)) errors.push("hostPlugin.factory 必须是导出函数名");
-      if (!EXTENSION_HOST_PLUGIN_KINDS.includes(hostPlugin.kind)) {
-        errors.push(`hostPlugin.kind 必须是 ${EXTENSION_HOST_PLUGIN_KINDS.join(" / ")}`);
+      // `roles` 可省略（＝不承担任何具名角色）或为数组；重复项视为声明错误。
+      if (hostPlugin.roles !== undefined) {
+        if (!Array.isArray(hostPlugin.roles)) {
+          errors.push("hostPlugin.roles 必须是数组");
+        } else {
+          const seen = new Set();
+          for (const role of hostPlugin.roles) {
+            if (!EXTENSION_HOST_PLUGIN_ROLES.includes(role)) {
+              errors.push(`hostPlugin.roles 取值必须是 ${EXTENSION_HOST_PLUGIN_ROLES.join(" / ")}`);
+              continue;
+            }
+            if (seen.has(role)) errors.push(`hostPlugin.roles 重复：${role}`);
+            seen.add(role);
+          }
+        }
       }
       if (hostPlugin.order !== undefined && !Number.isFinite(hostPlugin.order)) errors.push("hostPlugin.order 必须是数字");
       if (hostPlugin.optional !== undefined && typeof hostPlugin.optional !== "boolean") errors.push("hostPlugin.optional 必须是布尔值");

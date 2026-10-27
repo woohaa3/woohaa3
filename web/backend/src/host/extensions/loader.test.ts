@@ -223,12 +223,15 @@ describe("扩展层装载器", () => {
     const { ctx, load } = await setup();
     const siteGate = createSiteGate(["sample"]);
     const registered: Array<{ kind: string; route: string }> = [];
-    const webServerFor = (extensionId: string) => ({
-      register: (registration: { route: string }) => registered.push({ kind: "json", route: `${extensionId}/${registration.route}` }),
-      registerHttp: (registration: { route: string }) => registered.push({ kind: "http", route: `${extensionId}/${registration.route}` }),
-      registerRawHttp: (registration: { route: string }) => registered.push({ kind: "raw", route: `${extensionId}/${registration.route}` })
+    const pluginContextFor = (extensionId: string) => ({
+      webServer: {
+        register: (registration: { route: string }) => registered.push({ kind: "json", route: `${extensionId}/${registration.route}` }),
+        registerHttp: (registration: { route: string }) => registered.push({ kind: "http", route: `${extensionId}/${registration.route}` }),
+        registerRawHttp: (registration: { route: string }) => registered.push({ kind: "raw", route: `${extensionId}/${registration.route}` })
+      },
+      release: () => undefined
     });
-    ctx.provide("application", { siteGate, service: { host: () => ({ webServerFor }) } } as never);
+    ctx.provide("application", { siteGate, service: { host: () => ({ pluginContextFor }) } } as never);
 
     const plugin: HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> = {
       ...samplePlugin([]),

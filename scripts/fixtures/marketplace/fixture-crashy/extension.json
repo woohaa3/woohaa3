@@ -10,7 +10,7 @@
   "hostPlugin": {
     "module": "./backend",
     "factory": "createFixtureCrashyPlugin",
-    "kind": "provider",
+    "roles": ["provider"],
     "order": 910
   }
 }

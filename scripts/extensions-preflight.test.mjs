@@ -153,7 +153,7 @@ test("preflightDirectory：含后端声明 → requiresRestart=true；只解析�
   const marker = path.join(os.tmpdir(), `preflight-executed-${process.pid}-${Date.now()}`);
   const dir = managedTree({
     pkg: { exports: { "./backend-dist/entry": "./backend-dist/entry.mjs" } },
-    descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", kind: "provider" } },
+    descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", roles: ["provider"] } },
     files: {
       "backend-dist/entry.mjs": `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "ran"); export function createX() {}\n`,
     }
@@ -168,7 +168,7 @@ test("preflightDirectory：受管禁止项 bootstrap / canvasContent / 市场来
   const cases = [
     [{ descriptor: { bootstrap: { module: "./bootstrap", export: "b" } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:bootstrap"],
     [{ descriptor: { canvasContent: { module: "./backend", factory: "c" } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:canvasContent"],
-    [{ descriptor: { hostPlugin: { module: "./backend", factory: "s", kind: "marketplace-source" } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:hostPlugin.kind"],
+    [{ descriptor: { hostPlugin: { module: "./backend", factory: "s", roles: ["marketplace-source"] } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:hostPlugin.roles"],
     [{ descriptor: { migrate: { module: "./backend", export: "m" } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:migrate"],
     [{ descriptor: { required: true } }, "MARKETPLACE_FORBIDDEN_DECLARATION:required"],
     [{ browser: { activation: "always" } }, "MARKETPLACE_FORBIDDEN_DECLARATION:browser-dist.metadata.activation"],
@@ -198,7 +198,7 @@ test("preflightDirectory：受管扩展缺 version / engines、版本不一致�
 });
 
 test("preflightDirectory：模块缺失、browser 产物缺失/被篡改/身份不符", async () => {
-  assert.ok(codesOf(await preflightDirectory(managedTree({ descriptor: { hostPlugin: { module: "./backend", factory: "x", kind: "provider" } } }), { managed: true })).includes("MARKETPLACE_PREFLIGHT_FAILED:EXTENSION_MODULE_MISSING"));
+  assert.ok(codesOf(await preflightDirectory(managedTree({ descriptor: { hostPlugin: { module: "./backend", factory: "x", roles: ["provider"] } } }), { managed: true })).includes("MARKETPLACE_PREFLIGHT_FAILED:EXTENSION_MODULE_MISSING"));
   const noArtifact = managedTree({ files: { "browser-dist/entry.js": "x" } });
   assert.ok(codesOf(await preflightDirectory(noArtifact, { managed: true })).includes("MARKETPLACE_PREFLIGHT_FAILED:browser-dist"));
   assert.ok(codesOf(await preflightDirectory(managedTree({ browser: { tamper: true } }), { managed: true })).includes("MARKETPLACE_PREFLIGHT_FAILED:browser-dist"));
@@ -218,7 +218,7 @@ test("preflightDirectory：非受管模式不施加受管规则（内置扩展�
 function backendTree({ descriptor = {}, schema = undefined, files = {} } = {}) {
   return managedTree({
     pkg: { exports: { "./backend-dist/entry": "./backend-dist/entry.mjs" } },
-    descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", kind: "provider" }, ...descriptor },
+    descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", roles: ["provider"] }, ...descriptor },
     files: {
       "backend-dist/entry.mjs": "export function createX() {}\n",
       ...files
@@ -226,9 +226,9 @@ function backendTree({ descriptor = {}, schema = undefined, files = {} } = {}) {
   });
 }
 
-test("preflightDirectory：受管 hostPlugin.kind=storage 被拒绝", async () => {
-  const result = await preflightDirectory(backendTree({ descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", kind: "storage" } } }), { managed: true });
-  assert.ok(codesOf(result).includes("MARKETPLACE_FORBIDDEN_DECLARATION:hostPlugin.kind"), codesOf(result).join(", "));
+test("preflightDirectory：受管 hostPlugin.roles 含 storage 被拒绝", async () => {
+  const result = await preflightDirectory(backendTree({ descriptor: { hostPlugin: { module: "./backend-dist/entry", factory: "createX", roles: ["storage"] } } }), { managed: true });
+  assert.ok(codesOf(result).includes("MARKETPLACE_FORBIDDEN_DECLARATION:hostPlugin.roles"), codesOf(result).join(", "));
 });
 
 test("preflightDirectory：包内 .node 原生模块被拒绝", async () => {
@@ -243,7 +243,7 @@ test("preflightDirectory：包内 .node 原生模块被拒绝", async () => {
 test("preflightDirectory：后端入口不在 backend-dist/ 下被拒绝", async () => {
   const dir = managedTree({
     pkg: { exports: { "./backend": "./dist/backend.js" } },
-    descriptor: { hostPlugin: { module: "./backend", factory: "createX", kind: "provider" } },
+    descriptor: { hostPlugin: { module: "./backend", factory: "createX", roles: ["provider"] } },
     files: { "dist/backend.js": "export function createX() {}\n" }
   });
   const result = await preflightDirectory(dir, { managed: true });
@@ -253,7 +253,7 @@ test("preflightDirectory：后端入口不在 backend-dist/ 下被拒绝", async
 test("preflightDirectory：内置根（非受管）不受这些规则影响", async () => {
   const dir = managedTree({
     pkg: { exports: { "./backend": "./dist/backend.js" } },
-    descriptor: { hostPlugin: { module: "./backend", factory: "createX", kind: "storage" } },
+    descriptor: { hostPlugin: { module: "./backend", factory: "createX", roles: ["storage"] } },
     files: { "dist/backend.js": "export function createX() {}\n", "native/x.node": "x" }
   });
   assert.deepEqual((await preflightDirectory(dir)).errors, []);

@@ -111,8 +111,6 @@ import { resolveServerStorageConfig, type ServerStorageConfig } from "./storage/
 
 export type { RemoteSession, RemoteSessionStore };
 export { createMemorySessionStore };
-// 过渡适配（见 adapter.ts）：当前 `extension.json` 的 backend 装载口期望这个工厂名。
-export { createRemoteServerExtension } from "./adapter.js";
 
 export type RemoteServerExtensionOptions = {
   /** 可信部署适配器允许转发的断言头；缺省为空，普通请求头绝不用于远端登录。 */
@@ -565,7 +563,10 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
     name: REMOTE_SERVER_EXTENSION_ID,
     label: "服务端接入",
     configPrefix: REMOTE_SERVER_CONFIG_PREFIX,
-    inject: [],
+    // 与 `HostExtensionContext` 的必需项一一对应；其余能力（webServer / capabilities / services /
+    // diagnostics）是可选服务，由装载器按扩展 provide，缺席时插件按能力分支（例如没有 raw HTTP
+    // 接缝就回退短码登录），因此不进 inject。
+    inject: ["log", "generation", "storage", "marketplace"],
     Config: REMOTE_SERVER_CONFIG,
     async apply(ctx, config) {
       // 部署配置：框架已把配置文件里的值校验好传进来；`config.local.json` 与 env 仍作为

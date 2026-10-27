@@ -196,10 +196,10 @@ export async function createBackendService(options: BackendServiceOptions = {}):
 
   // 扩展层插件来自扩展目录的 `hostPlugin` 声明（启动期宿主扫描）：宿主不登记具体插件。
   const declaredPlugins = extensionHost?.createHostPlugins ? await extensionHost.createHostPlugins({}) : undefined;
-  const extensions = options.providerPlugins ?? declaredPlugins?.provider ?? [];
+  // 扩展层插件是一份扁平列表：角色（provider / storage / marketplace-source）可多选，
+  // 只有 `storage` 影响装载语义（主存储必须先就绪），其余只是标注。
+  const extensions = options.providerPlugins ?? declaredPlugins?.plugins ?? [];
   const storageExtensions = options.storagePlugins ?? declaredPlugins?.storage ?? [];
-  // 市场来源插件（change: 2026-10-21-add-extension-marketplace-point，D1/D3）：只来自内置根，宿主扫描已拒绝其余根。
-  const sourceExtensions = (declaredPlugins as { "marketplace-source"?: readonly AnyHostExtensionPlugin[] } | undefined)?.["marketplace-source"] ?? [];
   let layerSettled: Promise<void> = Promise.resolve();
   const isolatedPlugins: AnyHostExtensionPlugin[] = [];
   try {
@@ -231,7 +231,9 @@ export async function createBackendService(options: BackendServiceOptions = {}):
         ...(options.applicationExtensionMetadata ? { applicationExtensionMetadata: options.applicationExtensionMetadata } : {}),
         ...(options.applicationBackendExtensions ? { applicationBackendExtensions: options.applicationBackendExtensions } : {}),
         ...(options.chatgptServiceOptions ? { chatgptServiceOptions: options.chatgptServiceOptions } : {}),
-        treeExtensions: [...extensions, ...isolatedPlugins, ...sourceExtensions].map((plugin) => plugin.name),
+        // 站点开关只看名字集合：`siteGate` 再用 `siteIds`（有 site 元数据的扩展）过滤，
+        // 所以这里给全部扩展层插件，不需要按角色攒。
+        treeExtensions: [...extensions, ...isolatedPlugins].map((plugin) => plugin.name),
         ...(options.safeMode
           ? {
               safeMode: {
@@ -252,8 +254,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
     const layer = await loadExtensionLayer(ctx, [
       ...storageExtensions.map((plugin) => ({ plugin, optional: !providesStorage(plugin, primaryStorage) })),
       ...extensions,
-      ...isolatedPlugins,
-      ...sourceExtensions
+      ...isolatedPlugins
     ]);
     // 运行期追加入口（change: 2026-10-21-isolate-extension-host-process，任务 8.4）：首次安装的受管后端扩展
     // 由 Extension Manager 追加代理插件；关闭时连同运行期追加的一起卸载（disposeAll 覆盖启动期与运行期）。

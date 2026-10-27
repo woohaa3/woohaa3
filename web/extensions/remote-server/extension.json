@@ -29,7 +29,7 @@
     "defaultEnabled": false,
     "order": 80
   },
-  "backend": { "module": "./backend", "factory": "createRemoteServerExtension", "optionsType": "RemoteServerExtensionOptions", "order": 80 },
+  "hostPlugin": { "module": "./backend", "factory": "createRemoteServerPlugin", "roles": ["storage", "marketplace-source"], "order": 80 },
   "publicRoutes": [
     {
       "publicPath": "/api/remote-server",

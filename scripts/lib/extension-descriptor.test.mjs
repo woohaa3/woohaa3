@@ -123,7 +123,7 @@ test("site.capabilities 校验 kind / auth / 非空", () => {
   assert.match(errorsOf(noCaps), /site\.capabilities 必须是非空数组/);
 
   const badKind = complete();
-  badKind.site.capabilities = [{ id: "x", kind: "provider", description: "d" }];
+  badKind.site.capabilities = [{ id: "x", roles: ["provider"], description: "d" }];
   assert.match(errorsOf(badKind), /kind 必须是 capability \/ handler/);
 
   const badAuth = complete();
@@ -219,8 +219,8 @@ test("migrate 只做格式校验（是否允许由受管预检决定）", () => 
   assert.match(errorsOf({ ...MINIMAL, migrate: { module: "https://x", export: "m" } }), /migrate\.module 必须是包内相对子路径/);
 });
 
-test("hostPlugin.kind 接受 marketplace-source", () => {
-  assert.equal(validateExtensionDescriptor({ ...MINIMAL, hostPlugin: { module: "./backend", factory: "createSource", kind: "marketplace-source" } }).ok, true);
+test("hostPlugin.roles 接受 marketplace-source", () => {
+  assert.equal(validateExtensionDescriptor({ ...MINIMAL, hostPlugin: { module: "./backend", factory: "createSource", roles: ["marketplace-source"] } }).ok, true);
 });
 
 test("semver 工具：isSemver 与 range 子集", () => {

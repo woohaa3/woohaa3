@@ -160,11 +160,16 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
      * `Config` schema 与装配入口，启停跟着配置段走，不再绕进控制面
      * （概念对齐：扩展不按 site/host 分家，但「有没有可激活的后端实例」仍是客观差异）。
      */
-    const controlPlaneDefinitionIds = new Set(definitions.map((definition) => definition.extensionId));
+    const controlPlaneIds = new Set(definitions.map((definition) => definition.extensionId));
+    // 「有后端定义」不再是受管扩展的唯一来源：声明了 `site` 的扩展层插件同样受开关管理。
+    // 判据是「可装载」= 有后端定义（控制面能激活）**或**声明了 `site`（站点目录登记），
+    // 再与 metadata 求交——provider 也导出 metadata（模型目录），只靠它会把 Provider 误判成受管扩展。
+    const declaredSiteIds = new Set(config.extensionHost?.siteExtensionIds ?? []);
+    const loadableIds = new Set([...controlPlaneIds, ...declaredSiteIds]);
     const siteIds = new Set(
       metadata
         .map((entry) => entry.extensionId)
-        .filter((id) => controlPlaneDefinitionIds.has(id))
+        .filter((id) => loadableIds.has(id))
     );
     // 启停由控制面管理：只登记本次装配里**有后端入口**的扩展；开关即 acquire/release，运行中生效。
     const siteGate = createSiteGate((config.treeExtensions ?? []).filter((name) => siteIds.has(name)));

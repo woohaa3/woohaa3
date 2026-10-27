@@ -15,7 +15,7 @@
   "hostPlugin": {
     "module": "./backend",
     "factory": "createFixtureEchoProviderPlugin",
-    "kind": "provider",
+    "roles": ["provider"],
     "order": 900
   },
   "icon": { "asset": "./assets/icon.png" }

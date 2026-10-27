@@ -177,7 +177,16 @@ export type HostExtensionPlugin<F extends HostConfigFields = HostConfigFields> =
    */
   readonly modelRefresh?: { readonly path: string; readonly hint: string };
   readonly configPrefix: string;
-  readonly inject: string[];
+  /**
+   * Cordis 的依赖注入声明（与 `HostExtensionPlugin` 同形）。
+   *
+   * 两种形态：`string[]` 表示全部必需；对象形态可以区分必需与**可选**——
+   * 宿主能力（`webServer` / `capabilities` / `services` / `diagnostics`）在最小装配里可能缺席，
+   * 插件应声明为可选，缺席时按能力分支而不是装载失败。
+   */
+  readonly inject:
+    | readonly string[]
+    | { readonly required?: readonly string[]; readonly optional?: readonly string[] };
   readonly Config: HostConfigSchema<F>;
   /**
    * 插件自报健康：返回 `undefined` 表示健康，返回 degraded 表示「已装载但能力没就绪」

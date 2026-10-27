@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "extensionId": "tokenhub-provider",
   "metadata": { "module": "./shared", "export": "TOKENHUB_PLUGIN_METADATA", "order": 25 },
-  "hostPlugin": { "module": "./backend", "factory": "createTokenHubProviderPlugin", "kind": "provider", "order": 15 },
+  "hostPlugin": { "module": "./backend", "factory": "createTokenHubProviderPlugin", "roles": ["provider"], "order": 15 },
   "icon": { "asset": "./assets/icon.png" }
 }

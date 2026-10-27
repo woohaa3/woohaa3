@@ -69,7 +69,9 @@ export type LoadedExtensionHost = {
    * 驱动，宿主只负责按声明加载。宿主不再维护逐插件的手写注册表。
    */
   createHostPlugins?: (optionsByExtensionId?: Record<string, unknown>) => Promise<{
-    provider: readonly AnyHostExtensionPlugin[];
+    /** 全部扩展层插件（角色可多选：provider / storage / marketplace-source）。 */
+    plugins: readonly AnyHostExtensionPlugin[];
+    /** 其中声明了 `storage` 角色的子集：主存储必须先就绪。 */
     storage: readonly AnyHostExtensionPlugin[];
   }>;
   /** 站点控制面 scope 的 extensionId（runtime 只装配非站点入口）。 */

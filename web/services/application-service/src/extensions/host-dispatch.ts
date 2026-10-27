@@ -10,11 +10,12 @@ import {
   ExtensionHostError,
   httpHandlerKey,
   type ExtensionDispatchContext,
-  type OwnerState
+  type ExtensionRecord
 } from "./host-types.js";
 
 export type HostRegistryContext = {
-  owners: Map<string, OwnerState>;
+  /** 唯一的注册表（键见 `ExtensionRecord`）。 */
+  records: Map<string, ExtensionRecord>;
   globalHandlers: Map<string, string>;
   globalHttpHandlers: Map<string, string>;
   globalRawHttpHandlers: Map<string, string>;
@@ -71,16 +72,16 @@ export function findHandlerRegistration(
   ctx: HostRegistryContext,
   route: string,
   extensionId?: string
-): { owner: OwnerState; registration: ApplicationBackendHandlerRegistration } | undefined {
+): { owner: ExtensionRecord; registration: ApplicationBackendHandlerRegistration } | undefined {
   if (extensionId !== undefined) {
     const key = `${extensionId}/${route}`;
     const ownerId = ctx.globalHandlers.get(key);
-    const owner = ownerId ? ctx.owners.get(ownerId) : undefined;
+    const owner = ownerId ? ctx.records.get(ownerId) : undefined;
     const registration = owner?.handlers.get(key);
     return owner && registration ? { owner, registration } : undefined;
   }
   // 未指定 extensionId（进程内工具调用/测试）：按声明 route 扫描 owner 表。
-  for (const owner of ctx.owners.values()) {
+  for (const owner of ctx.records.values()) {
     for (const registration of owner.handlers.values()) {
       if (registration.route === route) return { owner, registration };
     }
@@ -100,15 +101,15 @@ export function findHttpRegistration(
   method: ApplicationExtensionHttpMethod,
   route: string,
   extensionId?: string
-): { owner: OwnerState; registration: ApplicationBackendHttpHandlerRegistration } | undefined {
+): { owner: ExtensionRecord; registration: ApplicationBackendHttpHandlerRegistration } | undefined {
   const keyRoute = extensionId === undefined ? route : namespacedRoute(extensionId, route);
   const exactOwnerId = ctx.globalHttpHandlers.get(httpHandlerKey(method, keyRoute));
   if (exactOwnerId) {
-    const owner = ctx.owners.get(exactOwnerId);
+    const owner = ctx.records.get(exactOwnerId);
     const registration = owner?.httpHandlers.get(httpHandlerKey(method, keyRoute));
     if (owner && registration) return { owner, registration };
   }
-  for (const owner of [...ctx.owners.values()].sort((a, b) => a.order - b.order)) {
+  for (const owner of [...ctx.records.values()].sort((a, b) => a.order - b.order)) {
     if (owner.mode !== "public") continue;
     if (extensionId !== undefined && owner.extensionId !== extensionId) continue;
     for (const [, registration] of owner.httpHandlers) {
@@ -129,15 +130,15 @@ export function findRawHttpRegistration(
   method: ApplicationExtensionHttpMethod,
   route: string,
   extensionId?: string
-): { owner: OwnerState; registration: ApplicationBackendRawHttpHandlerRegistration } | undefined {
+): { owner: ExtensionRecord; registration: ApplicationBackendRawHttpHandlerRegistration } | undefined {
   const keyRoute = extensionId === undefined ? route : namespacedRoute(extensionId, route);
   const exactOwnerId = ctx.globalRawHttpHandlers.get(httpHandlerKey(method, keyRoute));
   if (exactOwnerId) {
-    const owner = ctx.owners.get(exactOwnerId);
+    const owner = ctx.records.get(exactOwnerId);
     const registration = owner?.rawHttpHandlers.get(httpHandlerKey(method, keyRoute));
     if (owner && registration) return { owner, registration };
   }
-  for (const owner of [...ctx.owners.values()].sort((a, b) => a.order - b.order)) {
+  for (const owner of [...ctx.records.values()].sort((a, b) => a.order - b.order)) {
     if (owner.mode !== "public") continue;
     if (extensionId !== undefined && owner.extensionId !== extensionId) continue;
     for (const [, registration] of owner.rawHttpHandlers) {
@@ -230,5 +231,6 @@ export function resolvePublicRoute(
   method: ApplicationExtensionHttpMethod
 ): { owned: boolean } {
   const found = findHttpRegistration(ctx, method, route, extensionId) ?? findRawHttpRegistration(ctx, method, route, extensionId);
-  return { owned: found?.owner.extensionId === extensionId && found.owner.mode === "public" };
+  // `mode` 缺省即 public：Cordis 装载的扩展没有 recovery 实例。
+  return { owned: found?.owner.extensionId === extensionId && (found.owner.mode ?? "public") === "public" };
 }
