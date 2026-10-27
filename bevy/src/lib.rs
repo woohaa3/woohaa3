@@ -63,6 +63,14 @@ mod history_preview;
 #[cfg(feature = "native-renderer")]
 pub mod renderer_protocol;
 
+/// Host-neutral contract for embedding the native canvas in an external window.
+///
+/// The module contains the lifecycle, bounds, manifest and request validation
+/// rules.  It deliberately does not create a window or own the host's parent
+/// handle; platform adapters remain responsible for those operations.
+#[cfg(feature = "native-canvas")]
+pub mod native_embedding;
+
 /// 本机录制执行器控制协议的 Rust 投影（change: 2026-10-17-add-native-offscreen-film-set-recording）。
 /// 契约的生成绑定是 `api/gen/es/woohaa/recording/v1alpha1/recording_pb.ts`；本模块不含 Bevy 依赖，任何 feature 下可编译。
 pub mod recording_protocol;

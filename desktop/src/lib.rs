@@ -34,6 +34,15 @@ mod window_controls;
 
 pub use host::{HostConfig, NativeCanvasSession, run_host, run_native_only_host};
 pub use view::{CompositionMode, ViewBounds, probe_desktop_session};
+// Public host-neutral embedding contract.  The Tauri protocol remains an
+// adapter; external hosts can use these types without depending on this crate's
+// window controls or WebView labels.
+pub use woohaa_bevy_canvas::native_embedding::{
+    BridgeRequest, CompositionFacts, EmbeddingManifest, NativeCanvasBridge,
+    NativeCanvasError, NativeCanvasOptions as EmbeddingOptions, NativeCanvasRuntime,
+    RuntimeState, TickResult, ViewBounds as EmbeddingBounds, FACTS_SCHEMA_VERSION,
+    PROTOCOL_VERSION,
+};
 
 /// 原型能力标识；用于启动日志与 P1 证据记录，避免把编译通过当成验收通过。
 pub const PROTOTYPE_VERSION: &str = "woohaa-desktop-prototype-p0";

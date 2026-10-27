@@ -5,7 +5,12 @@ import { createNativeViewportChannel } from "./native-viewport-channel.js";
 import { nativeProtocolUrl } from "../../../desktop/native-protocol.js";
 import { nativeDrawableLayout } from "./native-surface-layout.js";
 
-type NativeBootstrap = { protocol: string; token: string; viewportAsync?: boolean };
+export type NativeBridgeTransport = {
+  rpc(method: string, args: unknown[]): unknown;
+  texture?(meta: { plane: boolean; id: string; width: number; height: number; content: string }, bytes: Uint8Array): void;
+  capture?(requestId: number, generation: number): Uint8Array;
+};
+type NativeBootstrap = { protocol: string; token?: string; viewportAsync?: boolean; bridge?: NativeBridgeTransport };
 export function nativeBootstrap(target: typeof globalThis): NativeBootstrap | undefined {
   return (target as typeof globalThis & { __WOOHAA_NATIVE__?: NativeBootstrap }).__WOOHAA_NATIVE__;
 }
@@ -16,13 +21,15 @@ export async function createNativeRuntimeRealm(
 ): Promise<RuntimeRealm> {
   signal?.throwIfAborted();
   const bootstrap = nativeBootstrap(target);
-  if (bootstrap?.protocol !== "woohaa-native-v1") throw new Error("桌面画布协议不匹配");
+  if (bootstrap?.protocol !== "woohaa-native-v1" && bootstrap?.protocol !== "native-canvas-embedding-v1") throw new Error("桌面画布协议不匹配");
+  const hostBridge = bootstrap.bridge;
+  if (bootstrap.protocol === "woohaa-native-v1" && !bootstrap.token) throw new Error("桌面画布引导缺少 token");
   const canvas = target.document.getElementById("bevy-canvas") as HTMLCanvasElement | null;
   if (!canvas?.parentElement) throw new Error("画布输入表面尚未挂载");
   const host = canvas.parentElement;
   // 与浏览器 realm 一致：新 host/画布切换先用主题 curtain 盖住，首个主题画面确认后揭示。
   delete host.dataset.canvasPresented;
-  const asyncRpc = createNativeAsyncRpc(target, bootstrap.token);
+  const asyncRpc = createNativeAsyncRpc(target, bootstrap.token ?? "external-host");
   let active = true;
   target.document.documentElement.dataset.nativeCanvas = "true";
 
@@ -40,10 +47,11 @@ export async function createNativeRuntimeRealm(
   // WKWebView waits in its own process; the Rust handler queues each call onto
   // Tauri's main thread. Never substitute cached hover results for pointer-down.
   const request = (path: string, body?: string | Uint8Array): XMLHttpRequest => {
+    if (hostBridge) throw new Error("External host bridge does not use URI requests");
     if (!active) throw new Error("Native canvas disposed");
     const xhr = new target.XMLHttpRequest();
     xhr.open(body === undefined ? "GET" : "POST", nativeProtocolUrl(path, target), false);
-    xhr.setRequestHeader("X-Woohaa-Token", bootstrap.token);
+    xhr.setRequestHeader("X-Woohaa-Token", bootstrap.token ?? "external-host");
     if (typeof body === "string") xhr.setRequestHeader("Content-Type", "application/json");
     else xhr.overrideMimeType("text/plain; charset=x-user-defined");
     xhr.send(body === undefined ? null : typeof body === "string" ? body : new Uint8Array(body).buffer);
@@ -51,6 +59,7 @@ export async function createNativeRuntimeRealm(
     return xhr;
   };
   const rawRpc = (method: string, ...args: unknown[]): unknown => {
+    if (hostBridge) return hostBridge.rpc(method, args);
     const result = JSON.parse(request("rpc", JSON.stringify({ method, args })).responseText) as
       { ok: true; value: unknown } | { ok: false; error: string };
     if (!result.ok) throw new Error(result.error);
@@ -58,7 +67,9 @@ export async function createNativeRuntimeRealm(
   };
   const viewport = createNativeViewportChannel({
     send: async (json, sequence, signal) => {
-      const value = await asyncRpc.call("set_viewport_sequenced", [json, sequence], signal);
+      const value = hostBridge
+        ? await Promise.resolve(rawRpc("set_viewport_sequenced", json, sequence))
+        : await asyncRpc.call("set_viewport_sequenced", [json, sequence], signal);
       if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new Error("Invalid viewport acceptance");
       return value as number;
     },
@@ -90,6 +101,7 @@ export async function createNativeRuntimeRealm(
   layout();
 
   const upload = (plane: boolean, id: string, width: number, height: number, rgba: Uint8Array, content = "") => {
+    if (hostBridge?.texture) { hostBridge.texture({ plane, id, width, height, content }, rgba); return; }
     const meta = encodeURIComponent(JSON.stringify({ plane, id, width, height, content }));
     const result = JSON.parse(request(`texture?meta=${meta}`, rgba).responseText) as { ok: boolean; error?: string };
     if (!result.ok) throw new Error(result.error ?? "Native texture upload failed");
@@ -99,13 +111,16 @@ export async function createNativeRuntimeRealm(
     start: () => {},
     ...(bootstrap.viewportAsync ? { queue_viewport: (json: string, accepted: (generation: number) => void) => viewport.queue(json, accepted) } : {}),
     async_canvas_work_diagnostics: async () => {
-      const value = await asyncRpc.call("canvas_work_diagnostics");
+      const value = hostBridge
+        ? rawRpc("canvas_work_diagnostics")
+        : await asyncRpc.call("canvas_work_diagnostics");
       if (typeof value !== "string") throw new Error("Invalid native diagnostics");
       return value;
     },
     set_texture: (id, w, h, bytes, content) => upload(false, id, w, h, bytes, content ?? ""),
     set_model_media_texture: (id, w, h, bytes) => upload(true, id, w, h, bytes),
     poll_shot_capture: (id, generation) => {
+      if (hostBridge?.capture) return hostBridge.capture(id, generation);
       const text = request(`capture?requestId=${id}&generation=${generation}`).responseText;
       return Uint8Array.from(text, char => char.charCodeAt(0) & 255);
     }

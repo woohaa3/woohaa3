@@ -23,6 +23,23 @@ The default storage backend is local. Copy [the configuration example](web/wooha
 
 The interface targets desktop computers and tablets. Rendering checks require a real GPU; on macOS inspect `system_profiler SPDisplaysDataType`, and on Linux inspect `/dev/dri/renderD*`.
 
+## Native canvas embedding
+
+`woohaa_bevy_canvas::native_embedding` is the host-neutral Rust contract for
+embedding the Bevy canvas in an external Tauri/native window. A host supplies a
+borrowed parent handle, an explicitly packaged asset root and logical bounds;
+the host owns child-view placement, WebView z-order and its main-thread queue.
+`NativeCanvasRuntime` owns the renderer lifecycle and keeps scene, texture and
+query state across hide/show and resize. Requests carry protocol and generation
+facts and are rejected with stable error codes when stale, oversized or
+disposed. The Woohaa `woohaa-native://` URI remains an adapter for the shell;
+external WebViews do not need a `main` label or Woohaa token.
+
+The embedding surface is source-only and remains `UNLICENSED`/`publish = false`.
+It does not provide a fallback WASM or software renderer. Windows HWND, macOS
+NSView and Linux X11/Wayland child-surface assembly remain host responsibilities
+and require real-GPU/manual verification.
+
 ## Source and third-party rights
 
 The project manifests currently use `UNLICENSED`; a project-wide source license has not yet been selected. This snapshot does not grant an open-source license. Third-party license and attribution files remain with their components, including [pptask](web/vendor/pptask/LICENSE). Provider logos have separate attribution in each extension’s `assets/README.md`.

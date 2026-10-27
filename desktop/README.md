@@ -45,6 +45,20 @@ The host check exercises bundled-runtime startup, storage, persistence, shutdown
 
 Native recording runs in a supervised background worker. Its H.264 encoder is source-built, statically linked OpenH264 (`openh264` 0.9.9), using CPU encoding; rendering still requires a GPU. No system FFmpeg is required. Preserve OpenH264 and dependency license notices. The BSD source license and Cisco's separately distributed binary license have different terms; review applicable codec/patent distribution obligations before publishing a build. This note does not select a license for Woohaa source.
 
+## External host contract
+
+The reusable facade is re-exported by this crate as `EmbeddingOptions`,
+`NativeCanvasRuntime`, `EmbeddingBounds`, `BridgeRequest` and the associated
+facts/error types. `attach → set_bounds/set_visible → tick → dispose` is the
+only lifecycle. Hide/show keeps the same generation and renderer state; a zero
+size suppresses rendering; disposal first drains in-flight work and is
+idempotent. Parent handles are borrowed at attach and never owned by Woohaa.
+
+`examples/native_embed_contract.rs` is a minimal fixture showing parent-handle
+injection, bounds, visibility and shutdown without implementing an external
+window or business tab. The existing Tauri URI transport is an adapter and
+continues to enforce its token/source checks.
+
 Authorization popups share the WebKit session but close independently of the application and local host. On macOS, `Info.plist` allows HTTP in WebKit content for user-configured remote servers and their login pages; the development app uses the same ATS policy. Native networking retains its default ATS policy.
 
 Optional Agent engines, recording, and model rendering use explicit runtime components instead of bundled binaries. CDN configuration, compatible local CLI selection and self-hosted artifact publishing are documented in [runtime components](RUNTIMES.md). The default standalone packaging uses the native desktop frontend and embeds only its startup page; the local host serves the interface.
