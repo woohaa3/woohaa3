@@ -160,17 +160,12 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
      * `Config` schema 与装配入口，启停跟着配置段走，不再绕进控制面
      * （概念对齐：扩展不按 site/host 分家，但「有没有可激活的后端实例」仍是客观差异）。
      */
-    const controlPlaneIds = new Set(definitions.map((definition) => definition.extensionId));
-    // 「有后端定义」不再是受管扩展的唯一来源：声明了 `site` 的扩展层插件同样受开关管理。
-    // 判据是「可装载」= 有后端定义（控制面能激活）**或**声明了 `site`（站点目录登记），
-    // 再与 metadata 求交——provider 也导出 metadata（模型目录），只靠它会把 Provider 误判成受管扩展。
-    const declaredSiteIds = new Set(config.extensionHost?.siteExtensionIds ?? []);
-    const loadableIds = new Set([...controlPlaneIds, ...declaredSiteIds]);
-    const siteIds = new Set(
-      metadata
-        .map((entry) => entry.extensionId)
-        .filter((id) => loadableIds.has(id))
-    );
+    const siteIds = selectControlPlaneExtensionIds({
+      metadataIds: metadata.map((entry) => entry.extensionId),
+      definitionIds: definitions.map((definition) => definition.extensionId),
+      pluginIds: config.treeExtensions ?? [],
+      declaresSiteIds: config.extensionHost?.siteExtensionIds ?? []
+    });
     // 启停由控制面管理：只登记本次装配里**有后端入口**的扩展；开关即 acquire/release，运行中生效。
     const siteGate = createSiteGate((config.treeExtensions ?? []).filter((name) => siteIds.has(name)));
     const servicesFor = createServicesFactory(ctx, env, foundationStorage);
@@ -346,6 +341,34 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     ctx.effect(() => () => { for (const release of releases) release(); });
   }
 };
+
+/**
+ * 谁能进控制面 catalog（`siteIds`）。
+ *
+ * 判据是**可激活**，不是「有 metadata」：
+ * - 有后端定义 → 能按定义激活（`oauth-agent` 这类没有 `site` 段也算）；
+ * - 只有 `hostPlugin` → 必须**同时**声明 `site`（`remote-server` 这类），才是受开关管理的站点扩展。
+ *
+ * 两个反例必须挡住，否则面板会出现不该有的行：
+ * - Provider 也导出 metadata（模型目录），只靠 metadata 会把它误判成受管扩展；
+ * - 纯前端扩展（如市场示例插件）没有可激活的入口，进了 catalog 只会永远停在 `configuring`，
+ *   面板显示成「正在应用…」。
+ */
+export function selectControlPlaneExtensionIds(input: {
+  metadataIds: readonly string[];
+  definitionIds: readonly string[];
+  pluginIds: readonly string[];
+  declaresSiteIds: readonly string[];
+}): Set<string> {
+  const definitionIds = new Set(input.definitionIds);
+  const pluginIds = new Set(input.pluginIds);
+  const declaresSiteIds = new Set(input.declaresSiteIds);
+  return new Set(
+    input.metadataIds.filter(
+      (id) => definitionIds.has(id) || (pluginIds.has(id) && declaresSiteIds.has(id))
+    )
+  );
+}
 
 /**
  * 站点扩展的扫描来源（D6）：取扩展宿主 registrations 里同 id 记录的 `managed` / `rootWritable`。

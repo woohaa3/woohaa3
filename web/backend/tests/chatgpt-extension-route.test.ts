@@ -6,7 +6,7 @@
  * 而不是任何手工在 composition 中注册的路由。
  */
 import http from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -90,8 +90,19 @@ describe("ChatGPT 插件公开路由", () => {
   it("ChatGPT 在控制面 catalog；Provider 出现在设置页插件清单（带 configPrefix）", async () => {
     const app = await boot();
     try {
-      const snapshot = (await (await fetch(`${app.base}/api/extensions`)).json()) as { catalog: Array<{ extensionId: string }> };
+      const snapshot = (await (await fetch(`${app.base}/api/extensions`)).json()) as {
+        catalog: Array<{ extensionId: string; directory: string }>;
+      };
       expect(snapshot.catalog.some((entry) => entry.extensionId === "oauth-agent")).toBe(true);
+      // catalog 只列**可激活**的扩展：有后端定义，或声明了 `site` 的扩展层插件。
+      // 纯前端扩展（两者都没有）进了 catalog 只会永远停在 `configuring`，面板显示「正在应用…」。
+      for (const entry of snapshot.catalog) {
+        const descriptor = JSON.parse(readFileSync(path.join(entry.directory, "extension.json"), "utf8")) as {
+          backend?: unknown;
+          hostPlugin?: unknown;
+        };
+        expect(Boolean(descriptor.backend ?? descriptor.hostPlugin), `${entry.extensionId} 应可激活`).toBe(true);
+      }
       // Provider 自带 Config 与装配入口，由设置面按配置段管理；控制面 catalog 只列有后端入口的扩展。
       const settings = (await (await fetch(`${app.base}/api/settings`)).json()) as {
         plugins: Array<{ id: string; configPrefix?: string; siteManaged: boolean }>;
