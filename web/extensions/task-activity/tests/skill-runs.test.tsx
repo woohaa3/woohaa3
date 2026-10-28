@@ -154,7 +154,7 @@ it("终态 Skill 记录按统一期限移除，轮询不得复活；重新生成
   }
 });
 
-it("详情展开旧尝试并提供核对入口；核对回填权威快照", async () => {
+it("详情展开旧尝试历史；失败记录不再提供核对入口", async () => {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -182,9 +182,8 @@ it("详情展开旧尝试并提供核对入口；核对回填权威快照", asyn
     expect(detail.textContent).toContain("由 run-2 替代");
     expect(detail.textContent).toContain("旧提示词");
     expect(detail.textContent).toContain("第 2 次 · 生成中");
-    // 核对状态：按步骤身份回填，不重新提交生成。
-    await act(async () => [...detail.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "核对状态")!.click());
-    expect(refresh).toHaveBeenCalledWith(expect.objectContaining({ skillRunId: "skill-run-1", stepId: "step-1" }));
+    expect(detail.textContent).not.toContain("核对状态");
+    expect(refresh).not.toHaveBeenCalled();
   } finally {
     act(() => root.unmount());
     store.dispose();

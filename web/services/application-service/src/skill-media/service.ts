@@ -433,8 +433,8 @@ export function createSkillMediaService(options: SkillMediaServiceOptions): Skil
     if (!status.ok) return store.getStep(key);
     const view = status.view;
     if (view.phase === "terminal") {
-      if (view.state === "unknown" || view.state === undefined) {
-        markUnknown(key, attempt);
+      if (!view.state || String(view.state) === "unknown") {
+        await markUnconfirmed(key, attempt, step.nodeId);
       } else {
         settleFromRun({
           canvasId: key.canvasId,
@@ -447,17 +447,32 @@ export function createSkillMediaService(options: SkillMediaServiceOptions): Skil
         });
       }
     } else if (view.stale && !isSkillMediaTerminal(attempt.state)) {
-      markUnknown(key, attempt);
+      await markUnconfirmed(key, attempt, step.nodeId);
     }
     return store.getStep(key);
   }
 
-  function markUnknown(key: SkillMediaStepKey, attempt: SkillMediaAttemptRecord): void {
-    const transition = applySkillMediaTransition(attempt, "unknown");
+  /**
+   * D2：核对窗口结束/终态缺状态时，先撤销仍匹配的 Provider 运行，再按 failed 结算。
+   * 撤销失败不阻塞结算；迟到结果由 settler 只写入该尝试的历史，不覆盖当前输出。
+   */
+  async function markUnconfirmed(key: SkillMediaStepKey, attempt: SkillMediaAttemptRecord, nodeId: string): Promise<void> {
+    const error = "结果无法确认（result-unconfirmed），已撤销匹配的 Provider 运行";
+    await canvas.cancel({
+      owner: key.owner,
+      canvasId: key.canvasId,
+      nodeId,
+      runId: attempt.runId
+    }).catch(() => undefined);
+    const transition = applySkillMediaTransition(attempt, "failed");
     if (!transition.ok || !transition.changed) return;
+    const at = now();
     transaction(() => {
-      store.updateAttempt({ ...key, attempt: attempt.attempt }, { state: "unknown", updatedAt: now() });
-      appendEvent(store.getStep(key)!, store.getAttempt({ ...key, attempt: attempt.attempt })!, "unknown");
+      store.updateAttempt(
+        { ...key, attempt: attempt.attempt },
+        { state: "failed", error, updatedAt: at, settledAt: at }
+      );
+      appendEvent(store.getStep(key)!, store.getAttempt({ ...key, attempt: attempt.attempt })!, "failed", { error });
     });
   }
 

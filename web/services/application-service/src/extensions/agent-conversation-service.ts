@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
  * - accept-before-dispatch：先 durable 写 turn（queued），再异步 dispatch adapter；
  * - requestId + 规范输入 hash 去重：相同身份相同输入返回原运行，不再推理；不同输入拒绝；
  * - 单会话最多一个 active turn；owner/global 有界并发与队列预算；
- * - 重启 discovered nsettled 标记 unknown 并核对 adapter 回执，不自动重推理；
+ * - 重启读取未结算回合并核对 adapter 回执；无法证明时按 D2 结算 failed，不自动重推理；
  * - 打开/关闭/查询只读，不重新 accept 或 dispatch。
  *
  * 本服务不写 Y.Doc、不复制 Task 事实源；领域回执按 adapter discriminant 原样保存与投影。
@@ -26,6 +26,12 @@ import type {
   AgentCatalogSnapshot,
   AgentAdapterAuthState,
   AgentAdapterCapabilities
+} from "@woohaa3/contracts";
+import {
+  UNCONFIRMED_RESULT_ERROR_CODE,
+  UNCONFIRMED_RESULT_MESSAGE,
+  UNCONFIRMED_WRITE_ERROR_CODE,
+  UNCONFIRMED_WRITE_MESSAGE
 } from "@woohaa3/contracts";
 import type {
   AgentConversationStore,
@@ -82,9 +88,34 @@ export type AgentConversationServiceOptions = {
   /** 稳定 id 生成器（按前缀）；测试可注入确定性实现。 */
   createId?: (prefix: string) => string;
   logger?: (event: Record<string, unknown>) => void;
-  /** Supervisor 模式下暂时没有回执时保留 unknown，等待重新 attach，而不是终结回合。 */
+  /** Supervisor 模式下暂时没有回执时保持活动态等待重新 attach，由重连预算结束时结算失败。 */
   preserveUnreconciledOnRestart?: boolean;
 };
+
+/**
+ * 可证明的失败码：权限、连接、冲突等明确事实。
+ *
+ * 这类失败不是「回执丢失」，重试时必须原样呈现，不能被 `result-unconfirmed` / `write-unconfirmed`
+ * 掩盖；已失败回合也可以用它细化错误（状态仍保持 failed）。
+ */
+export const DEFINITE_FAILURE_ERROR_CODES: readonly string[] = [
+  "content-conflict",
+  "target-invalid",
+  "unauthorized",
+  "not-found",
+  "connection-unavailable",
+  "adapter-unavailable",
+  "model-unavailable",
+  "capability-unsupported",
+  "assistant-required",
+  "variant-unavailable",
+  "budget-exceeded",
+  "cancelled",
+];
+
+export function isDefiniteFailureCode(code: string | undefined): boolean {
+  return code !== undefined && DEFINITE_FAILURE_ERROR_CODES.includes(code);
+}
 
 export type AgentConversationServiceError = {
   code:
@@ -190,7 +221,7 @@ export type AgentConversationService = {
   /** 由宿主领域链在 run/task 接受后显式关联（不从节点 active run 反推）。 */
   linkRun(input: { owner: string; requestId: string; runId?: string; taskId?: string }): { ok: true; turn: ConversationTurn } | { ok: false; error: AgentConversationServiceError };
   catalog(input: { owner: string; adapterId?: string }): Promise<{ ok: true; models: AgentCatalogSnapshot["models"]; error?: string; authState: AgentAdapterAuthState; capabilities: AgentAdapterCapabilities } | { ok: false; error: AgentConversationServiceError }>;
-  /** 重启恢复：标记未结算回合为 unknown 并核对 adapter 回执，不自动重推理。 */
+  /** 重启恢复：读取未结算回合并核对 adapter 回执；无法证明时结算 failed，不自动重推理。 */
   reconcileUnknown(): Promise<ConversationTurnRecord[]>;
   deleteAll(input: { owner: string; canvasId: string }): void;
 };
@@ -437,7 +468,7 @@ export function createAgentConversationService(options: AgentConversationService
       if (!assistantDigest?.matches(outcome.assistantText)) appendMessage(turn, "assistant", outcome.assistantText);
     }
     if (turn.action !== "discuss" && outcome.status === "succeeded" && outcome.receipt === undefined && !outcome.runId && !outcome.taskId) {
-      outcome = { ...outcome, status: "unknown", error: { code: "write-unconfirmed", message: "回复完成，作品更新未确认；请核对原请求" } };
+      outcome = { ...outcome, status: "failed", error: { code: UNCONFIRMED_WRITE_ERROR_CODE, message: UNCONFIRMED_WRITE_MESSAGE } };
     }
     const status = outcome.status;
     store.updateTurn(
@@ -463,6 +494,26 @@ export function createAgentConversationService(options: AgentConversationService
       store.updateConversation(turn.conversationId, { status: conversationStatusFor(store.latestTurn(turn.conversationId)), latestRequestId: turn.requestId }, now());
     }
     log({ event: "agent-conversation-turn-settled", conversationId: turn.conversationId, requestId: turn.requestId, status });
+  };
+
+  /**
+   * D2 兜底：无法证明结果时结算 failed。Supervisor 重连预算内保持活动态（不制造用户可见
+   * 待核对状态）；预算结束后由下一次核对调用走同一失败结算。
+   */
+  const settleFailed = (turn: ConversationTurnRecord, reason: string): void => {
+    if (options.preserveUnreconciledOnRestart) {
+      store.updateTurn(turn.turnId, {
+        errorCode: "runtime-reconnecting",
+        errorMessage: "Agent 运行时正在重新连接，结果尚未确认"
+      }, now());
+      appendEvent(turn.conversationId, turn.turnId, turn.requestId, "error", { status: turn.status, code: "runtime-reconnecting", reason });
+      return;
+    }
+    log({ event: "agent-conversation-unconfirmed", turnId: turn.turnId, reason });
+    finishTurn(turn, {
+      status: "failed",
+      error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE }
+    });
   };
 
   const service: AgentConversationService = {
@@ -514,24 +565,24 @@ export function createAgentConversationService(options: AgentConversationService
     },
 
     clearContext(input) {
-      if (store.activeGroupTurnCount(input) > 0) return fail("active-turn", "组仍有活动或待核对回合，请先停止并核对结果");
+      if (store.activeGroupTurnCount(input) > 0) return fail("active-turn", "组仍有活动回合，请先停止");
       if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
       // change: 2026-10-22-remove-agent-execution-limits，任务 3.1/3.2 / design D3：
       // 删除「活动回合阻止清空」。清空只解除目标关联（归档会话），不删除回合/消息/回执，
-      // 因此不会丢掉尚未核对的执行；后续只停止用户明确选择的 requestId。
+      // 因此不会丢掉尚未结算的执行；后续只停止用户明确选择的 requestId。
       const cleared = store.clearTarget({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId });
       return { ok: true, cleared };
     },
 
     async switchConnection(input) {
-      if (store.activeGroupTurnCount(input) > 0) return fail("active-turn", "组仍有活动或待核对回合，请先停止并核对结果");
+      if (store.activeGroupTurnCount(input) > 0) return fail("active-turn", "组仍有活动回合，请先停止");
       if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
       // 先核对目标连接属于该 owner（跨 owner/未知连接拒绝，不静默降级）。
       if (connections) {
         const view = await connections.getConnection({ owner: input.owner, connectionId: input.connectionId });
         if (!view) return fail("connection-unavailable", "连接不存在或无权访问");
       }
-      // 解除目标关联（归档旧会话，保留全部历史与未核对回合）；下一次提交按新连接建立新会话。
+      // 解除目标关联（归档旧会话，保留全部历史与未结算回合）；下一次提交按新连接建立新会话。
       // 活动回合不再阻止切换：执行拥有独立取消身份，旧回合继续按其原冻结连接结算。
       const cleared = store.archiveTargetForConnection({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId });
       return { ok: true, cleared };
@@ -598,7 +649,12 @@ export function createAgentConversationService(options: AgentConversationService
       const record = store.findTurnByRequest(input.owner, input.requestId);
       if (!record || record.canvasId !== input.canvasId || dispatches.has(record.turnId)) return;
       if (JSON.stringify(JSON.parse(record.targetJson).delivery) !== JSON.stringify(input.delivery)) return;
-      if (!["unknown", "queued", "running", "committing"].includes(record.status) && !(input.delivery.purpose === "text-generation" && input.outcome.status === "succeeded" && input.outcome.receipt)) return;
+      // 已失败回合是终态，但允许用可证明的失败细化错误码（例如保存重试时连接已被撤销），
+      // 让用户看到真实原因而不是停在「结果未确认」；状态与回执不被改写。
+      const refinesFailure = record.status === "failed" &&
+        input.outcome.status === "failed" &&
+        isDefiniteFailureCode(input.outcome.error?.code);
+      if (!["queued", "running", "committing"].includes(record.status) && !refinesFailure && !(input.delivery.purpose === "text-generation" && input.outcome.status === "succeeded" && input.outcome.receipt)) return;
       finishTurn(record, input.outcome);
     },
 
@@ -774,8 +830,8 @@ export function createAgentConversationService(options: AgentConversationService
         }
       }
       controller?.abort();
-      // 宿主重启后没有在途控制器：任何目标类型都按用户停止结算，否则 unknown 只能靠手工改库脱身。
-      if (!controller && ["queued", "running", "committing", "unknown"].includes(record.status)) {
+      // 宿主重启后没有在途控制器：活动回合按用户停止结算；旧 unknown 已由启动核对结算失败。
+      if (!controller && ["queued", "running", "committing"].includes(record.status)) {
         store.updateTurn(record.turnId, { status: "cancelled", stage: "cancelled" }, now());
         appendEvent(record.conversationId, record.turnId, record.requestId, "stage", { stage: "cancelled" });
       }
@@ -818,20 +874,27 @@ export function createAgentConversationService(options: AgentConversationService
     },
 
     async reconcileUnknown() {
-      const marked = store.markUnsettledUnknown(now());
+      const unsettled = store.listUnsettledTurns();
       const owners = new Set<string>();
-      for (const turn of marked) {
-        // Candidate completion is not proof of domain delivery. Only the durable domain receipt can settle it.
+      for (const turn of unsettled) {
+        // Candidate delivery 的权威回执在领域侧：文本/片场等 reconciliator 会按原请求结算父回合。
         if (JSON.parse(turn.targetJson).delivery) continue;
-        // Group effects remain evidence in our ledger. An adapter's text completion cannot
-        // settle linked media runs, and restart never reissues a grant or inference.
+        // 组创作只读一次子 run 证据；仍活动/不可读时撤销匹配子 run 后按失败结算。
         if (JSON.parse(turn.targetJson).mode === "canvas-group") {
           if (options.groupEffects) {
             try {
-              const outcome = await options.groupEffects.settle({ owner: turn.owner, requestId: turn.requestId, actions: groupActions(turn.receiptJson), outcome: { status: "unknown" }, signal: new AbortController().signal, recovery: true });
-              store.updateTurn(turn.turnId, { receiptJson: safeJson(outcome.receipt ?? { kind: "canvas-group", actions: groupActions(turn.receiptJson) }) }, now());
-              appendEvent(turn.conversationId, turn.turnId, turn.requestId, "receipt", { status: "unknown", reconciled: true });
-            } catch (error) { log({ event: "agent-group-reconcile-failed", turnId: turn.turnId, message: String(error) }); }
+              const outcome = await options.groupEffects.settle({
+                owner: turn.owner, requestId: turn.requestId, actions: groupActions(turn.receiptJson),
+                outcome: { status: "failed", error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE } },
+                signal: new AbortController().signal, recovery: true
+              });
+              finishTurn(turn, outcome);
+            } catch (error) {
+              log({ event: "agent-group-reconcile-failed", turnId: turn.turnId, message: String(error) });
+              settleFailed(turn, "group-reconcile-failed");
+            }
+          } else {
+            settleFailed(turn, "group-reconcile-unavailable");
           }
           continue;
         }
@@ -839,47 +902,25 @@ export function createAgentConversationService(options: AgentConversationService
         const binding = store.getConversation(turn.conversationId);
         const bound = binding ? registry.resolve(binding.adapterId) : resolved;
         const query = bound.ok ? bound.handle.adapter.query : undefined;
-        // 重启后无法核对（adapter 不可用/无 query 端口/查不到记录/结构化结果缺正文）时，
-        // 以 failed 结算：unknown 在界面上没有继续/停止出口，留在 unknown 会让节点永久卡在
-        // 执行中。组回合（canvas-group）另有回执与用户停止入口，不在此处改判。
-        const settleUnreconciled = () => {
-          if (options.preserveUnreconciledOnRestart) {
-            store.updateTurn(turn.turnId, { status: "unknown", stage: "unknown", errorCode: "runtime-reconnecting", errorMessage: "Agent 运行时正在重新连接，结果尚未确认" }, now());
-            appendEvent(turn.conversationId, turn.turnId, turn.requestId, "error", { status: "unknown", code: "runtime-reconnecting" });
-            return;
-          }
-          finishTurn(turn, {
-            status: "failed",
-            error: { code: "turn-unreconciled", message: "本机宿主重启后未取得执行回执，结果无法确认；请核对后重试" }
-          });
-        };
-        if (!query) { settleUnreconciled(); continue; }
+        if (!query) { settleFailed(turn, "query-unavailable"); continue; }
         owners.add(turn.turnId);
         try {
           const outcome = await query({ owner: turn.owner, requestId: turn.requestId });
-          if (!outcome) { settleUnreconciled(); continue; }
+          if (!outcome) { settleFailed(turn, "receipt-missing"); continue; }
           if (JSON.parse(turn.targetJson).structuredInputHash) {
             // A completion without its structured text cannot be adopted as a design result.
             if (outcome.status !== "succeeded" || outcome.assistantText?.trim()) finishTurn(turn, outcome);
-            else settleUnreconciled();
+            else settleFailed(turn, "structured-text-missing");
             continue;
           }
-          store.updateTurn(turn.turnId, {
-            status: outcome.status,
-            stage: outcome.status,
-            ...(outcome.receipt !== undefined ? { receiptJson: safeJson(outcome.receipt) } : {}),
-            ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}),
-            ...(outcome.taskId !== undefined ? { taskId: outcome.taskId } : {}),
-            ...(outcome.error !== undefined ? { errorCode: outcome.error.code, errorMessage: outcome.error.message } : {})
-          }, now());
-          appendEvent(turn.conversationId, turn.turnId, turn.requestId, "receipt", { status: outcome.status, reconciled: true });
+          finishTurn(turn, outcome);
         } catch (error) {
           log({ event: "agent-conversation-reconcile-failed", turnId: turn.turnId, message: error instanceof Error ? error.message : String(error) });
-          settleUnreconciled();
+          settleFailed(turn, "query-failed");
         }
       }
-      if (marked.length > 0) log({ event: "agent-conversation-unknown-marked", count: marked.length, reconciled: owners.size });
-      return marked;
+      if (unsettled.length > 0) log({ event: "agent-conversation-restart-reconciled", count: unsettled.length, reconciled: owners.size });
+      return unsettled;
     },
 
     deleteAll(input) {

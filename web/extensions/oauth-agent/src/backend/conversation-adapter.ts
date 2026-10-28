@@ -221,7 +221,8 @@ export function createChatGptConversationAdapter(
 /**
  * 领域回执 → 宿主回合结果。
  *
- * succeeded/partial/failed/cancelled/unknown 一律来自权威回执，不从助手正文推断
+ * succeeded/partial/failed/cancelled 一律来自权威回执，不从助手正文推断；
+ * 无法确认的外部工作保留 `outcome-unknown` 错误码，但映射到回合结果时必须是 failed。
  * （change: 2026-10-12-add-agent-conversation-panel，design D7）。
  */
 export function receiptToOutcome(receipt: ChatGptGenerationReceipt): AgentAdapterRunOutcome {
@@ -235,8 +236,8 @@ export function receiptToOutcome(receipt: ChatGptGenerationReceipt): AgentAdapte
     case "cancelled":
       return { status: "cancelled", receipt };
     case "unknown":
-      return { status: "unknown", receipt };
+      return { status: "failed", receipt, error: { code: "outcome-unknown", message: "外部生成结果无法确认；已保留原回执，不自动重试" } };
     default:
-      return { status: "unknown", receipt };
+      return { status: "failed", receipt, error: { code: "outcome-unknown", message: "外部生成回执无法解析；已保留原回执，不自动重试" } };
   }
 }

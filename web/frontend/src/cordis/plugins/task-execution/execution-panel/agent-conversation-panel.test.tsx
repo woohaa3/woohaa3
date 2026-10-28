@@ -277,7 +277,7 @@ describe("AgentConversationPanel · 运行中刷新", () => {
     } finally { await act(async () => root.unmount()); vi.useRealTimers(); }
   });
 
-  it.each(["unknown", "cancelled", "failed", "succeeded"] as const)("%s 回合中的未完成工具不会继续显示为进行中", async status => {
+  it.each(["cancelled", "failed", "succeeded"] as const)("%s 回合中的未完成工具不会继续显示为进行中", async status => {
     const remote = fakeRemote();
     remote.read = async () => ({ ok: true, value: {
       ...snapshot(),
@@ -288,67 +288,60 @@ describe("AgentConversationPanel · 运行中刷新", () => {
     const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" service={service} onClose={() => undefined} />);
     try {
       const tool = el.querySelector('.agent-detail__tool');
-      expect(tool?.textContent).toContain(status === "unknown" ? "调用结果未知" : "未收到完成回执");
+      expect(tool?.textContent).toContain("未收到完成回执");
       expect(tool?.textContent).not.toContain("进行中");
       expect(tool?.textContent).not.toContain("正在调用工具");
       expect(tool?.getAttribute('data-status')).toBe("unknown");
-      if (status === "unknown") {
-        expect(el.textContent).toContain("系统没有在等待你确认");
-        expect(el.querySelector('.agent-detail__working')).toBeNull();
-      }
+      expect(el.querySelector('.agent-detail__working')).toBeNull();
     } finally { await act(async () => root.unmount()); }
   });
 
-  it("重启后未知组回合提供明确说明和停止入口，停止成功后允许继续而不自动推理", async () => {
+  it("重启后无法确认的组回合按失败结算，保留回执证据且不再提供待核对动作", async () => {
     const remote = fakeRemote();
-    let cancelled = false;
     remote.read = async () => ({ ok: true, value: {
       ...snapshot(),
       conversation: { ...snapshot().conversation, nodeId: "n1" },
-      turns: [{ ...turn(), status: cancelled ? "cancelled" : "unknown", stage: cancelled ? "cancelled" : "unknown", target: { canvasId: "cv", nodeId: "n1", mode: "canvas-group" }, tools: [{ tool: "validate_canvas_script", status: "started" }], receipt: { kind: "canvas-group", actions: [] } }],
-      events: [{ sequence: 99, conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", type: "receipt", payload: { status: "unknown", reconciled: true }, createdAt: "2026-10-13T00:01:00Z" }]
+      turns: [{
+        ...turn(),
+        status: "failed",
+        stage: "failed",
+        target: { canvasId: "cv", nodeId: "n1", mode: "canvas-group" },
+        tools: [{ tool: "validate_canvas_script", status: "started" }],
+        receipt: { kind: "canvas-group", actions: [] },
+        error: { code: "result-unconfirmed", message: "本机宿主重启后未取得完整执行回执。" },
+      }],
+      events: [{ sequence: 99, conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", type: "receipt", payload: { status: "failed", reconciled: true }, createdAt: "2026-10-13T00:01:00Z" }]
     } });
-    const cancel = vi.fn().mockResolvedValueOnce({ ok: false, error: "连接中断，请重试" }).mockImplementation(async () => { cancelled = true; return { ok: true, value: { ok: true } }; });
-    remote.cancel = cancel;
     remote.accept = vi.fn(remote.accept);
     const { navigation } = navStub(DETAIL);
     const service = createAgentConversationService({ remote, navigation });
-    const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} targetExecution={() => ({ action: "modify", canvasId: "cv", nodeId: "n1", mode: "canvas-group", prompt: "" })} onClose={() => undefined} />);
+    const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} onClose={() => undefined} />);
     try {
       expect(el.textContent).toContain("本机宿主重启后未取得完整执行回执");
-      expect(el.textContent).toContain("此回合尚无已登记的画布操作");
-      const button = () => [...el.querySelectorAll('button')].find(b => b.textContent === "停止此回合")!;
-      expect(el.textContent).toContain("返回生成面板继续搭建");
-      await act(async () => button().click());
-      expect(el.textContent).toContain("连接中断，请重试");
-      expect(button().disabled).toBe(false);
-      await act(async () => button().click());
-      expect(cancel).toHaveBeenNthCalledWith(1, "req-1");
-      expect(cancel).toHaveBeenNthCalledWith(2, "req-1");
-      expect(button()).toBeUndefined();
+      expect(el.textContent).not.toContain("系统没有在等待你确认");
+      expect(el.textContent).not.toContain("停止此回合");
+      expect(el.textContent).not.toContain("核对");
       expect(el.querySelector('.agent-detail__working')).toBeNull();
       expect(remote.accept).not.toHaveBeenCalled();
     } finally { await act(async () => root.unmount()); }
   });
 
-  it("重启后未知的单目标回合也提供停止入口，不必改库脱身", async () => {
+  it("重启后无法确认的单目标回合按失败显示，不保留停止入口", async () => {
     const remote = fakeRemote();
     const cancel = vi.fn(async () => ({ ok: true as const, value: { ok: true as const } }));
     remote.cancel = cancel;
     remote.read = async () => ({ ok: true, value: {
       ...snapshot(),
       conversation: { ...snapshot().conversation, nodeId: "n1" },
-      turns: [{ ...turn(), status: "unknown", stage: "unknown", target: { canvasId: "cv", nodeId: "n1", mode: "model3d" } }]
+      turns: [{ ...turn(), status: "failed", stage: "failed", target: { canvasId: "cv", nodeId: "n1", mode: "model3d" }, error: { code: "result-unconfirmed", message: "未收到执行完成回执，结果按失败结算。" } }]
     } });
     const { navigation } = navStub(DETAIL);
     const service = createAgentConversationService({ remote, navigation });
     const { el, root, act } = await mount(<AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} onClose={() => undefined} />);
     try {
-      expect(el.textContent).toContain("未收到执行完成回执");
-      const button = [...el.querySelectorAll('button')].find(b => b.textContent === "停止此回合");
-      expect(button).toBeDefined();
-      await act(async () => button!.click());
-      expect(cancel).toHaveBeenCalledWith("req-1");
+      expect(el.textContent).toContain("未收到执行完成回执，结果按失败结算");
+      expect(el.textContent).not.toContain("停止此回合");
+      expect(cancel).not.toHaveBeenCalled();
     } finally { await act(async () => root.unmount()); }
   });
 
@@ -504,12 +497,12 @@ describe("AgentConversationPanel · 收起动作语义", () => {
     await act(async () => root.unmount());
   });
 
-  it("关闭语义下未知组回合的说明也不宣称返回生成面板", async () => {
+  it("关闭语义下的失败回合只显示失败摘要，不宣称返回生成面板", async () => {
     const remote = fakeRemote();
     remote.read = async () => ({ ok: true, value: {
       ...snapshot(),
       conversation: { ...snapshot().conversation, nodeId: "n1" },
-      turns: [{ ...turn(), status: "unknown", stage: "unknown", target: { canvasId: "cv", nodeId: "n1", mode: "canvas-group" } }]
+      turns: [{ ...turn(), status: "failed", stage: "failed", target: { canvasId: "cv", nodeId: "n1", mode: "canvas-group" }, error: { code: "result-unconfirmed", message: "未收到执行完成回执，结果按失败结算。" } }]
     } });
     const { navigation } = navStub(DETAIL);
     const service = createAgentConversationService({ remote, navigation });
@@ -517,8 +510,9 @@ describe("AgentConversationPanel · 收起动作语义", () => {
       <AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} canReturnToSource={false} onClose={() => undefined} />
     );
     await act(async () => undefined);
-    expect(el.textContent).toContain("再关闭详情继续搭建");
+    expect(el.textContent).toContain("未收到执行完成回执，结果按失败结算");
     expect(el.textContent).not.toContain("返回生成面板继续搭建");
+    expect(el.textContent).not.toContain("再关闭详情继续搭建");
     await act(async () => root.unmount());
   });
 });

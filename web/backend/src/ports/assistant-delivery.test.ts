@@ -136,10 +136,10 @@ describe("conversion delivery through the real ledger and Canvas authority", () 
       execution: { canvasId: "canvas", targetNodeId: "target-a", conversationId: created.conversation.conversationId, turnRequestId: "conversion:a:1", domainRequestId: "a", attemptId: "1" },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     const reopened = f.reopen();
-    expect(await reopened.status({ canvasId: "canvas", requestId: "a" })).toMatchObject({ ok: true, status: { status: "unknown" } });
+    expect(await reopened.status({ canvasId: "canvas", requestId: "a" })).toMatchObject({ ok: true, status: { status: "failed", code: "unknown-result" } });
     expect(f.conversations().cancelTurn({ owner: "owner", requestId: "conversion:a:1" })).toEqual({ ok: true });
-    expect(await reopened.status({ canvasId: "canvas", requestId: "a" })).toMatchObject({ ok: true, status: { status: "cancelled" } });
-    expect((await f.records().get("canvas", "a"))?.state).toBe("cancelled");
+    expect(await reopened.status({ canvasId: "canvas", requestId: "a" })).toMatchObject({ ok: true, status: { status: "failed" } });
+    expect((await f.records().get("canvas", "a"))?.state).toBe("failed");
     expect(generate).not.toHaveBeenCalled();
     expect(f.run).not.toHaveBeenCalled();
   });

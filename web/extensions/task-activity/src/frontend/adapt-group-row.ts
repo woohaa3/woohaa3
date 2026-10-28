@@ -3,7 +3,7 @@
  *
  * 组记录来自宿主 `canvasGroupRuns` 的**整表替换**，不是增量事件；「进行中」直接取
  * `CanvasGroupRun.active`（宿主已按 preparing|root-created|accepted|queued|running|
- * committing|unknown 算出）。组专属动作只在装配注入能力时出现，记录只携带动作函数引用，
+ * committing 算出）。组专属动作只在装配注入能力时出现，记录只携带动作函数引用，
  * 因此渲染层不需要按来源分支取 props（design D6）。
  */
 import type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
@@ -44,7 +44,6 @@ export function adaptGroupRow(
   const retry = group.action && canRetryGroupRun(run)
     ? () => group.action!(run, "retry")
     : undefined;
-  const verify = group.action ? () => group.action!(run, "refresh") : undefined;
   const openConversation = group.openConversation && run.conversationId
     ? async () => {
       await group.openConversation!(run);
@@ -70,7 +69,6 @@ export function adaptGroupRow(
       ...(locate ? { locate } : {}),
       ...(stop ? { stop } : {}),
       ...(retry ? { retry } : {}),
-      ...(verify ? { verify } : {}),
       ...(openConversation ? { openConversation } : {}),
       writable,
       pinOnOpen: true,

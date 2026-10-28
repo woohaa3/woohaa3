@@ -87,7 +87,7 @@ export function buildConversationTimeline(detail: ConversationSnapshot): Convers
     }
     rows.sort((a, b) => a.time.localeCompare(b.time) || a.order - b.order);
     result.push(...rows.map((row) => row.item));
-    if (turn.receipt !== undefined || turn.error || turn.status === "unknown") result.push({ kind: "result", key: `${turn.turnId}-result`, turn });
+    if (turn.receipt !== undefined || turn.error || turn.status === "failed") result.push({ kind: "result", key: `${turn.turnId}-result`, turn });
   }
   // 容忍有界回合窗口外仍可读的历史消息。
   const older: ConversationTimelineItem[] = detail.messages.filter((message) => !seen.has(message.messageId))

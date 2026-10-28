@@ -100,8 +100,11 @@ export type AgentConversationStore = {
   maxEventSequence(conversationId: string): number;
   appendTool(tool: ConversationToolRecord): void;
   listTools(conversationId: string, limit: number): ConversationToolRecord[];
-  /** 重启后把非终态回合标记为 unknown（不自动重推理）。 */
-  markUnsettledUnknown(now: string): ConversationTurnRecord[];
+  /**
+   * 重启恢复：只读取非终态回合（含旧版本遗留的 `unknown`），由启动核对按原身份查询；
+   * 不预先改写状态，不自动重推理。
+   */
+  listUnsettledTurns(): ConversationTurnRecord[];
   deleteAll(scope: OwnerCanvasScope): void;
   close(): void;
 };
@@ -217,6 +220,10 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     this.ensureColumn("agent_conversation_turns", "history_sequence", "INTEGER");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target ON agent_conversations(owner, canvas_id, node_id, updated_at DESC);");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target_connection ON agent_conversations(owner, canvas_id, node_id, connection_id, updated_at DESC);");
+    // 旧版本把无法确认写成 `unknown`；迁移后统一按 failed 终态保留证据与已有错误码。
+    this.db.prepare("UPDATE agent_conversation_turns SET status = 'failed', stage = 'failed', error_code = COALESCE(error_code, 'result-unconfirmed'), error_message = COALESCE(error_message, ?) WHERE status = 'unknown'")
+      .run("无法确认执行结果，可能已部分写入；重试前请核对原请求，系统不会自动重试。");
+    this.db.exec("UPDATE agent_conversations SET status = 'failed' WHERE status = 'unknown'");
   }
 
   private ensureColumn(table: string, column: string, ddl: string): void {
@@ -253,7 +260,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
   activeGroupTurnCount(scope: OwnerCanvasScope & { nodeId: string }): number {
     const row = this.db.prepare(`SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE owner = ? AND canvas_id = ?
       AND json_extract(target_json, '$.mode') = 'canvas-group' AND json_extract(target_json, '$.nodeId') = ?
-      AND action != 'discuss' AND status IN ('queued', 'running', 'committing', 'unknown')`).get(scope.owner, scope.canvasId, scope.nodeId) as { count: number };
+      AND action != 'discuss' AND status IN ('queued', 'running', 'committing')`).get(scope.owner, scope.canvasId, scope.nodeId) as { count: number };
     return row.count;
   }
 
@@ -348,11 +355,11 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
   }
 
   hasUnresolvedTurns(): boolean {
-    return (this.db.prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE status IN ('queued','running','committing','unknown')").get() as { count: number }).count > 0;
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE status IN ('queued','running','committing')").get() as { count: number }).count > 0;
   }
 
   hasUnresolvedConnection(owner: string, connectionId: string): boolean {
-    const row = this.db.prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE owner = ? AND connection_id = ? AND status IN ('queued','running','committing','unknown')").get(owner, connectionId) as { count: number };
+    const row = this.db.prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE owner = ? AND connection_id = ? AND status IN ('queued','running','committing')").get(owner, connectionId) as { count: number };
     return row.count > 0;
   }
 
@@ -363,7 +370,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
   private dbMigration(owner: string, connectionId: string): boolean {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const pending = this.db.prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE owner = ? AND connection_id = ? AND status IN ('queued','running','committing','unknown')").get(owner, connectionId) as { count: number };
+      const pending = this.db.prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE owner = ? AND connection_id = ? AND status IN ('queued','running','committing')").get(owner, connectionId) as { count: number };
       if (pending.count > 0) { this.db.exec("ROLLBACK"); return false; }
       this.db.prepare("UPDATE agent_conversations SET node_id = NULL WHERE owner = ? AND connection_id = ?").run(owner, connectionId);
       this.db.exec("COMMIT"); return true;
@@ -372,7 +379,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
 
   activeTurnCount(conversationId: string): number {
     const row = this.db
-      .prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE conversation_id = ? AND status IN ('queued','running','committing','unknown')")
+      .prepare("SELECT COUNT(*) AS count FROM agent_conversation_turns WHERE conversation_id = ? AND status IN ('queued','running','committing')")
       .get(conversationId) as { count: number };
     return row.count;
   }
@@ -534,14 +541,11 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     return rows.map(toolFromRow);
   }
 
-  markUnsettledUnknown(now: string): ConversationTurnRecord[] {
-    const unsettled = this.db
-      .prepare("SELECT * FROM agent_conversation_turns WHERE status IN ('queued','running','committing')")
+  listUnsettledTurns(): ConversationTurnRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM agent_conversation_turns WHERE status IN ('queued','running','committing','unknown')")
       .all() as TurnRow[];
-    if (unsettled.length === 0) return [];
-    const update = this.db.prepare("UPDATE agent_conversation_turns SET status = 'unknown', stage = 'unknown', updated_at = ? WHERE turn_id = ?");
-    for (const row of unsettled) update.run(now, row.turn_id);
-    return unsettled.map((row) => turnFromRow({ ...row, status: "unknown", stage: "unknown", updated_at: now }));
+    return rows.map(turnFromRow);
   }
 
   deleteAll(scope: OwnerCanvasScope): void {

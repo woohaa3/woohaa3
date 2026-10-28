@@ -19,6 +19,33 @@ describe("group effect evidence", () => {
     const controller = new AbortController(); controller.abort();
     expect((await createGroupEffects(s.service, s.grants).settle({ owner: "owner", requestId: "r", actions: [], outcome: { status: "succeeded" }, signal: controller.signal })).status).toBe("cancelled");
   });
+  it("settles a missing receipt as failed instead of leaving an unknown result", async () => {
+    const s = setup();
+    expect((await createGroupEffects(s.service, s.grants).settle({
+      owner: "owner", requestId: "r", actions: [],
+      outcome: { status: "succeeded" }, signal: new AbortController().signal
+    }))).toMatchObject({ status: "failed", error: { code: "write-unconfirmed" } });
+  });
+  it("revokes the matched run and still settles failed when run evidence is unreadable", async () => {
+    const s = setup();
+    (s.service as unknown as { sync: { registry: { resolve: () => Promise<{ exportCanvas: () => { ok: false; message: string } }> } } })
+      .sync.registry.resolve = async () => ({ exportCanvas: () => ({ ok: false, message: "unavailable" }) });
+    expect((await createGroupEffects(s.service, s.grants).settle({
+      owner: "owner", requestId: "r", actions: s.actions,
+      outcome: { status: "succeeded" }, signal: new AbortController().signal, recovery: true
+    })).status).toBe("failed");
+    expect(s.cancel).toHaveBeenCalledWith({ canvasId: "c", nodeId: "n", runId: "run" });
+  });
+  it("settles failed even when revoking the matched run rejects", async () => {
+    const s = setup();
+    s.cancel.mockRejectedValueOnce(new Error("cancel down"));
+    expect((await createGroupEffects(s.service, s.grants).settle({
+      owner: "owner", requestId: "r", actions: s.actions,
+      outcome: { status: "succeeded" }, signal: new AbortController().signal, recovery: true
+    })).status).toBe("failed");
+    // 撤销失败被吞掉、不阻塞结算（避免未处理的 rejection）。
+    await Promise.resolve();
+  });
   it("waits for the linked media result after the assistant finishes", async () => {
     const s = setup();
     const wait = vi.fn(async () => { s.canvas.jobs[0]!.status = "success"; s.canvas.nodeData.n.taskStatus = "successed"; s.canvas.nodeData.n.result = { kind: "text", text: "actual result" }; });
@@ -30,15 +57,21 @@ describe("group effect evidence", () => {
     const s = setup();
     const effects = createGroupEffects(s.service, s.grants);
     const input = { owner: "owner", requestId: "r", actions: s.actions, outcome: { status: "succeeded" as const }, signal: new AbortController().signal, recovery: true };
-    expect((await effects.settle(input)).status).toBe("unknown");
+    // 子 run 仍活动：撤销匹配 run 后按失败结算。
+    expect((await effects.settle(input)).status).toBe("failed");
+    expect(s.cancel).toHaveBeenCalledWith({ canvasId: "c", nodeId: "n", runId: "run" });
     s.canvas.jobs[0]!.status = "failed";
     expect((await effects.settle(input)).status).toBe("partial");
     s.canvas.jobs[0]!.status = "success";
-    expect((await effects.settle(input)).status).toBe("unknown");
+    const cancelAfter = s.cancel.mock.calls.length;
+    // 成功但无产物：同样先撤销再失败。
+    expect((await effects.settle(input)).status).toBe("failed");
+    expect(s.cancel.mock.calls.length).toBeGreaterThan(cancelAfter);
     s.canvas.assets.push({ id: "output", nodeId: "n", title: "output", mediaKind: "image", source: "generated", status: "ready", createdAt: "now", provenance: { runId: "run" } });
     s.canvas.nodeData.n.activeRunId = "newer-run";
     expect((await effects.settle(input)).status).toBe("succeeded");
-    expect((await effects.settle({ ...input, outcome: { status: "unknown" } })).status).toBe("unknown");
+    // 显式失败输入不覆盖已确认的领域成功事实。
+    expect((await effects.settle({ ...input, outcome: { status: "failed" } })).status).toBe("succeeded");
   });
   it("revokes the owner first and only cancels exact linked runs", () => {
     const s = setup();

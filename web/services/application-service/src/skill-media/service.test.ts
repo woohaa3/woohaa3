@@ -168,12 +168,24 @@ describe("Skill 步骤应用服务", () => {
     expect(fallback.ok && fallback.view).toMatchObject({ available: true, current: false, fallback: { runId: "run-1" } });
   });
 
-  it("unknown 不当成功，无输出时返回明确原因", async () => {
+  it("核对窗口结束仍无法证明时撤销 Provider 运行并失败，不视为成功", async () => {
     const h = harness();
     await beginFirst(h);
-    h.states.set("run-1", { view: { ...running("run-1"), phase: "terminal", state: "unknown" } });
+    h.states.set("run-1", { view: { ...running("run-1"), stale: true } });
     const output = await h.service.latestOutput(step);
-    expect(output.ok && output.view).toMatchObject({ available: false, reason: "output-unavailable" });
+    expect(output.ok && output.view).toMatchObject({ available: false, reason: "failed" });
+    expect(h.calls).toContain("cancel:run-1");
+    expect(h.store.getAttempt({ ...step, attempt: 1 })).toMatchObject({ state: "failed" });
+    expect(h.store.getAttempt({ ...step, attempt: 1 })?.error).toContain("result-unconfirmed");
+  });
+
+  it("终态缺少权威状态时同样撤销并失败", async () => {
+    const h = harness();
+    await beginFirst(h);
+    h.states.set("run-1", { view: { ...running("run-1"), phase: "terminal" } as AgentRunView });
+    const snapshot = await h.service.snapshot(step);
+    expect(snapshot.ok && snapshot.step.attempts[0]).toMatchObject({ state: "failed" });
+    expect(h.calls).toContain("cancel:run-1");
   });
 
   it("等待期间用户重生成时跟随新 run", async () => {

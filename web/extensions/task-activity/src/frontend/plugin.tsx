@@ -121,8 +121,7 @@ export function taskActivityExtension(): Plugin.Function<void> {
           },
           action: async (row, action) => {
             if (action === "stop") await groupRuns.stop(row.requestId);
-            else if (action === "retry") await groupRuns.retry(row.creation!.requestId);
-            else await groupRuns.refresh();
+            else await groupRuns.retry(row.creation!.requestId);
           },
           openConversation: (row) => {
             const conversations = ctx.get("agentConversationService" as never) as AgentConversationServiceHandle | undefined;

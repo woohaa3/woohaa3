@@ -535,7 +535,7 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
     expect(el.querySelector('button[aria-label="选择助手"]')?.textContent).toContain(hasHistory ? "节点原助手" : "全局助手");
   });
 
-  it.each(["running", "failed", "unknown", "cancelled"] as const)("片场 %s 交付仍渲染原执行面板与工具栏", async status => {
+  it.each(["running", "failed", "cancelled"] as const)("片场 %s 交付仍渲染原执行面板与工具栏", async status => {
     const { el } = await renderAuthoring({ mode: "film-set", delivery: { status, stage: "转换状态", query: async () => ({ ok: true }) } });
     const panel = el.querySelector('[data-testid="authoring-generate"]');
     expect(panel?.classList.contains("mc-panel")).toBe(true);

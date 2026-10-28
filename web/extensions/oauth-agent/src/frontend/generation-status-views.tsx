@@ -15,13 +15,11 @@ import type { ChatGptRunState } from "./service.js";
  * Agent 权威回合的状态区：展示真实阶段/结果摘要与恢复入口。
  *
  * - 非终态：显示阶段与停止（取消只停止后续执行并核对已提交结果，不宣称撤销）；
- * - unknown：显示“结果待确认”并提供**查询**入口（不直接重复写入）；
- * - 终态：显示权威结果摘要。
+ * - 终态：显示权威结果摘要与失败原因，失败走统一重试/详情入口。
  */
 export function AgentTurnStatus(props: {
   turn: ConversationTurn | null;
   onCancel?: () => void;
-  onQuery?: () => void;
 }) {
   const turn = props.turn;
   if (!turn) return null;
@@ -37,11 +35,6 @@ export function AgentTurnStatus(props: {
       {active && props.onCancel ? (
         <Button size="sm" tone="neutral" onClick={props.onCancel}>
           停止
-        </Button>
-      ) : null}
-      {status === "unknown" && props.onQuery ? (
-        <Button size="sm" tone="neutral" onClick={props.onQuery}>
-          查询执行结果
         </Button>
       ) : null}
       {turn.error ? (
@@ -60,8 +53,7 @@ export const TURN_STATUS_LABEL: Record<string, string> = {
   succeeded: "已完成",
   partial: "部分完成",
   failed: "失败",
-  cancelled: "已停止",
-  unknown: "结果待确认"
+  cancelled: "已停止"
 };
 
 /**

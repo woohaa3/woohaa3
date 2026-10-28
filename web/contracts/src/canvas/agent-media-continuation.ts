@@ -22,13 +22,20 @@ export const SKILL_MEDIA_STATES = [
   "cancelled",
   "superseded",
   "succeeded",
-  "failed",
-  "unknown"
+  "failed"
 ] as const;
 export type SkillMediaState = (typeof SKILL_MEDIA_STATES)[number];
 
 export function isSkillMediaState(value: unknown): value is SkillMediaState {
   return typeof value === "string" && (SKILL_MEDIA_STATES as readonly string[]).includes(value);
+}
+
+/**
+ * 读取期归一：旧 `unknown` 尝试状态按 `failed` 处理（不保留独立待核对状态）。
+ */
+export function normalizeSkillMediaState(value: unknown): SkillMediaState | null {
+  if (value === "unknown") return "failed";
+  return isSkillMediaState(value) ? value : null;
 }
 
 /** 终态：不再接受 Provider 状态推进（迟到回调只作为该尝试的历史事实核对）。 */
@@ -45,10 +52,9 @@ export function isSkillMediaTerminal(state: SkillMediaState): boolean {
  * - `failed/cancelled` 不自动转成 `succeeded`；要恢复必须创建新 attempt。
  */
 const ALLOWED_TRANSITIONS: Readonly<Record<SkillMediaState, readonly SkillMediaState[]>> = {
-  queued: ["running", "cancel-requested", "cancelled", "succeeded", "failed", "superseded", "unknown"],
-  running: ["cancel-requested", "cancelled", "succeeded", "failed", "superseded", "unknown"],
-  "cancel-requested": ["cancelled", "succeeded", "failed", "superseded", "unknown"],
-  unknown: ["queued", "running", "cancel-requested", "cancelled", "succeeded", "failed", "superseded"],
+  queued: ["running", "cancel-requested", "cancelled", "succeeded", "failed", "superseded"],
+  running: ["cancel-requested", "cancelled", "succeeded", "failed", "superseded"],
+  "cancel-requested": ["cancelled", "succeeded", "failed", "superseded"],
   cancelled: [],
   superseded: [],
   succeeded: [],
@@ -251,7 +257,8 @@ export function decodeSkillStepUpdatedEvent(
   if (!Number.isInteger(raw.promptRevision) || (raw.promptRevision as number) < 1) {
     return fail("malformed-event", "promptRevision 必须是正整数");
   }
-  if (!isSkillMediaState(raw.state)) return fail("malformed-event", "state 非法");
+  if (!isSkillMediaState(raw.state) && raw.state !== "unknown") return fail("malformed-event", "state 非法");
+  const state = normalizeSkillMediaState(raw.state)!;
   if (typeof raw.current !== "boolean") return fail("malformed-event", "current 必须是布尔值");
   if (typeof raw.superseded !== "boolean") return fail("malformed-event", "superseded 必须是布尔值");
   const runId = readOptionalBoundedId(raw, "runId");
@@ -278,7 +285,7 @@ export function decodeSkillStepUpdatedEvent(
     stepId: raw.stepId as string,
     attempt: raw.attempt as number,
     promptRevision: raw.promptRevision as number,
-    state: raw.state,
+    state,
     current: raw.current,
     superseded: raw.superseded,
     at: raw.at as string,

@@ -301,6 +301,8 @@ function receiptToRun(receipt: ChatGptGenerationReceipt): ChatGptRunState {
       return { phase: "failed", message: receipt.message, retryable: true, ...(receipt.llmOutput ? { llmOutput: receipt.llmOutput } : {}) };
     case "cancelled":
       return { phase: "failed", message: "已取消", retryable: true };
+    case "unknown":
+      return { phase: "failed", message: "结果无法确认；已保留原回执，请核对后重试", retryable: true };
     default:
       return { phase: "idle" };
   }

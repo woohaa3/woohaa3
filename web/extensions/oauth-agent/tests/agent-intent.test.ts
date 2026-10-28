@@ -36,12 +36,11 @@ describe("isEntryIntentSendable", () => {
 });
 
 describe("isTerminalTurnStatus", () => {
-  it("终态包含 succeeded/partial/failed/cancelled；unknown 仍需显式查询", () => {
+  it("终态包含 succeeded/partial/failed/cancelled；运行中仍需查询", () => {
     expect(isTerminalTurnStatus("succeeded")).toBe(true);
     expect(isTerminalTurnStatus("partial")).toBe(true);
     expect(isTerminalTurnStatus("failed")).toBe(true);
     expect(isTerminalTurnStatus("cancelled")).toBe(true);
-    expect(isTerminalTurnStatus("unknown")).toBe(false);
     expect(isTerminalTurnStatus("running")).toBe(false);
   });
 });

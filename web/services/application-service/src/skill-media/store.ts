@@ -122,6 +122,9 @@ export class SqliteSkillMediaStore {
       CREATE INDEX IF NOT EXISTS skill_media_events_step
         ON skill_media_events(owner, canvas_id, skill_run_id, step_id, sequence);
     `);
+    // 旧 `unknown` 尝试按 failed 归一；保留尝试身份、回执与已有安全错误摘要。
+    this.db.prepare("UPDATE skill_media_attempts SET state = 'failed', error = COALESCE(error, ?), updated_at = updated_at WHERE state = 'unknown'")
+      .run("结果无法确认（result-unconfirmed）");
   }
 
   atomic<T>(run: () => T): T {

@@ -12,7 +12,7 @@
  * - 只读 `active`（最后一次提交/查询得到的权威回合）：会话快照里的 `detail` 可能是更早打开的
  *   历史快照，过期后会让节点永久停在"执行中"，因此不参与投影；
  * - 操作身份用回合的 `requestId`（`agent:` 前缀避免与 Task runId 冲突）；
- * - 终态（succeeded/failed/cancelled/partial/unknown）不产生运行记录：结果仍由领域链路与详情
+ * - 终态（succeeded/failed/cancelled/partial）不产生运行记录：结果仍由领域链路与详情
  *   呈现，节点不应长期停留在"执行中"。
  */
 import type {
@@ -42,7 +42,7 @@ function operationKindForTurn(turn: ConversationTurn): CanvasOperationRecord["ki
 /**
  * 回合状态 → 统一运行状态。
  *
- * 只有非终态回合产生记录；`unknown` 需要用户核对结果，不在节点上继续显示执行中。
+ * 只有非终态回合产生记录；失败与取消是终态，不在节点上继续显示执行中。
  */
 export function operationStateForTurn(status: ConversationTurnStatus): CanvasOperationState | null {
   switch (status) {

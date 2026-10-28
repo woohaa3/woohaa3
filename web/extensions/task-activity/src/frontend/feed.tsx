@@ -225,7 +225,7 @@ function ActivityListRow(props: {
     setPreview(true);
   }, [interactive, row.selected, props.openRevision]);
 
-  const act = useCallback(async (action: "stop" | "retry" | "verify" | "openConversation") => {
+  const act = useCallback(async (action: "stop" | "retry" | "openConversation") => {
     if (busy) return;
     const run = action === "openConversation" ? actions.openConversation : actions[action];
     if (!run) {
@@ -241,7 +241,7 @@ function ActivityListRow(props: {
         setPreview(false);
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "操作未确认，请核对状态");
+      setError(cause instanceof Error ? cause.message : "操作失败，请重试");
     } finally {
       setBusy("");
     }
@@ -376,7 +376,7 @@ function RowDetail(props: { row: ActivityRow; resolveMediaUrl: (storageKey: stri
       return null;
     case "skill": {
       /**
-       * 旧尝试核对入口（任务 5.2）：只有这里展开完整尝试历史，主行状态始终只取
+       * 旧尝试历史入口（任务 5.2）：只有这里展开完整尝试历史，主行状态始终只取
        * `currentAttempt`。提示词属于 owner 可见的历史快照（事件与 MCP 输出已 redact）。
        */
       const step = row.source.step;
@@ -415,11 +415,11 @@ function RowActionsPanel(props: {
   kind: "group" | "skill";
   actions: ActivityRowActions;
   busy: string;
-  onActivate: (action: "stop" | "retry" | "verify" | "openConversation") => void;
+  onActivate: (action: "stop" | "retry" | "openConversation") => void;
 }) {
   const { kind, actions, busy, onActivate } = props;
   const writable = actions.writable !== false;
-  if (!actions.locate && !actions.stop && !actions.retry && !actions.verify && !actions.openConversation) return null;
+  if (!actions.locate && !actions.stop && !actions.retry && !actions.openConversation) return null;
   return (
     <div className="task-activity-feed__group-actions">
       {actions.locate ? <Button size="sm" tone="ghost" onClick={() => actions.locate!()}>{kind === "group" ? "定位创作组" : "定位节点"}</Button> : null}
@@ -436,11 +436,6 @@ function RowActionsPanel(props: {
       {actions.retry ? (
         <Button size="sm" tone="ghost" disabled={!!busy || !writable} onClick={() => onActivate("retry")}>
           {busy === "retry" ? "正在重试…" : "重试原请求"}
-        </Button>
-      ) : null}
-      {actions.verify ? (
-        <Button size="sm" tone="ghost" disabled={!!busy} onClick={() => onActivate("verify")}>
-          {busy === "verify" ? "正在核对…" : "核对状态"}
         </Button>
       ) : null}
     </div>

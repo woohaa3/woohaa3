@@ -2243,7 +2243,7 @@
 .focus-run-strip__overlay { font-size: 14px; color: var(--app-interaction-accent); }
 .focus-run-strip--film-set { top: var(--focus-content-y, 0px); left: var(--focus-content-x, 0px); width: var(--focus-content-width, 100%); height: var(--focus-content-height, 100%); background: color-mix(in srgb, var(--app-canvas-node-content) 45%, transparent); }
 .focus-run-strip--film-set span { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: block; padding: 4px 10px; border-radius: 6px; background: var(--app-web-surface); color: var(--app-interaction-accent); font-size: 12px; }
-.focus-run-strip--film-set[data-phase="verifying"] span { color: var(--app-status-warning); }
+.focus-run-strip--film-set[data-phase="failed"] span { color: var(--app-status-danger); }
 
 .node-history__apply {
 	border: 1px solid var(--app-interaction-accent);

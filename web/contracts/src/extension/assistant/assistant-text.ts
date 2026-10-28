@@ -68,7 +68,8 @@ export type AssistantTextPort = {
     owner: string;
     prepared: PreparedAssistantText;
     run: AssistantTextRun;
-    status: "failed" | "cancelled" | "unknown";
+    /** 无法确认的结算已按 failed 处理，不再有独立待核对状态。 */
+    status: "failed" | "cancelled";
     message: string;
   }): Promise<void>;
   lookup(input: {

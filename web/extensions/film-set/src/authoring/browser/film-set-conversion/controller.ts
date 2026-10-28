@@ -144,7 +144,7 @@ export function createFilmSetConversionController(options: FilmSetConversionCont
       const status = readFilmSetConversionNodeStatus(canvas?.nodeData[node.id]);
       if (!status || status.sourceNodeId !== nodeId) continue;
       observedRequests.add(status.requestId);
-      if (status.status === "running" || status.status === "unknown") return status;
+      if (status.status === "running") return status;
       if (status.requestId === entry?.identity?.requestId) own = status;
     }
     if (own) return own;
@@ -153,7 +153,7 @@ export function createFilmSetConversionController(options: FilmSetConversionCont
 
   /**
    * 主动发起新一次转换：固定**新的** requestId，并记录本次规范设置的稳定 key（幂等身份绑定输入）。
-   * 丢弃上一终态的呈现；失败重试走 `retry`，未知走 `query`。
+   * 丢弃上一终态的呈现；失败重试走 `retry`，刷新/重启核对原提交身份走只读 `query`。
    */
   /** 规范设置的稳定 key（与 `buildFilmSetConversionRequest` 相同的省略规则，保证与服务端 hash 一致）。 */
   const settingsKey = (settings: FilmSetConversionSettings): string => JSON.stringify([
@@ -363,7 +363,7 @@ export function createFilmSetConversionController(options: FilmSetConversionCont
       if (result.ok) publish(input.nodeId, { busy: false, status: result.status, attemptClosed: false });
       else publish(input.nodeId, { busy: false, error: result.error, attemptClosed: true });
     },
-    /** unknown 先查询核对，不自动重跑。 */
+    /** 查询最新权威状态（含失败原因与重试入口），不自动重跑。 */
     async query(input: { nodeId: string }): Promise<void> {
       syncScope();
       const scope = scopeVersion;

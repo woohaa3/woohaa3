@@ -29,7 +29,6 @@ describe("Skill 媒体步骤状态转换", () => {
     ["queued", "running"],
     ["running", "cancel-requested"],
     ["cancel-requested", "cancelled"],
-    ["unknown", "running"],
     ["queued", "superseded"]
   ] as const)("%s → %s 合法", (from, to) => {
     expect(canTransitionSkillMediaState(from, to)).toBe(true);
@@ -41,7 +40,7 @@ describe("Skill 媒体步骤状态转换", () => {
     ["succeeded", "failed"],
     ["cancelled", "running"],
     ["superseded", "succeeded"],
-    ["failed", "unknown"]
+    ["failed", "running"]
   ] as const)("终态 %s → %s 非法回退", (from, to) => {
     expect(canTransitionSkillMediaState(from, to)).toBe(false);
     expect(applySkillMediaTransition({ state: from }, to)).toMatchObject({ ok: false, code: "illegal-transition" });
@@ -93,6 +92,11 @@ describe("skill-step-updated 事件 codec", () => {
   ])("拒绝把秘密/内部 locator 带入事件：%j", (patch) => {
     const encoded = encodeSkillStepUpdatedEvent({ ...event, ...patch });
     expect(encoded).toMatchObject({ ok: false, code: "malformed-event" });
+  });
+
+  it("旧 payload 里的 unknown 状态归一为 failed", () => {
+    expect(decodeSkillStepUpdatedEvent({ ...event, state: "unknown" }))
+      .toMatchObject({ ok: true, value: { state: "failed" } });
   });
 
   it("拒绝未知字段与非法状态", () => {

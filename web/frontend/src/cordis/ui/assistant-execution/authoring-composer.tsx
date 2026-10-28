@@ -246,15 +246,12 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     Boolean(
       turn && ["queued", "running", "committing"].includes(turn.turn.status),
     );
-  // 待核对（unknown）不是执行中：宿主重启后没有回执的回合不能继续提交，但主操作不得
-  // 谎称仍在执行；用户从详情里停止该回合后即可继续。
-  const needsReview = turn?.turn.status === "unknown";
+  // 失败是终态：停止后即可继续提交；不再保留独立的待核对锁定。
   const locked =
     busy ||
     Boolean(delivery) ||
     Boolean(selection?.blockedReason) ||
-    (props.mode !== "text" && Boolean(inProgress)) ||
-    (props.mode !== "text" && Boolean(needsReview));
+    (props.mode !== "text" && Boolean(inProgress));
   const noConnection = !service || !connectionId || !selectedConnection;
   const emptyDirectory =
     !connections.length && !selection?.loading && !selection?.error;
@@ -682,16 +679,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                       停止此回合
                     </Button>
                   ) : null}
-                  {row.status === "unknown" ? (
-                    <Button
-                      size="sm"
-                      tone="ghost"
-                      disabled={deliveryActions.busy}
-                      onClick={() => void props.groupRuns?.refresh()}
-                    >
-                      核对结果
-                    </Button>
-                  ) : null}
                 </span>
               ))}
             </>
@@ -701,11 +688,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 <span key={row.requestId} className="authoring-generate__run">
                   <span>
                     文本回合 {index + 1} ·{" "}
-                    {row.turn.status === "unknown"
-                      ? "待核对"
-                      : row.turn.status === "committing"
-                        ? "正在保存"
-                        : "生成中"}
+                    {row.turn.status === "committing"
+                      ? "正在保存"
+                      : "生成中"}
                   </span>
                   <Button
                     size="sm"
@@ -753,7 +738,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                               );
                           }}
                         >
-                          核对未确认的文本回合
+                          查询提交结果
                         </Button>
                       )}
                     </span>
@@ -767,16 +752,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                   onClick={() => {
                     if (port) void controller.query(port);
                   }}
-                >
-                  查询结果
-                </Button>
-              ) : null}
-              {delivery?.status === "unknown" ? (
-                <Button
-                  size="sm"
-                  tone="ghost"
-                  disabled={deliveryActions.busy}
-                  onClick={() => void deliveryActions.perform(delivery.query)}
                 >
                   查询结果
                 </Button>
@@ -848,11 +823,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
             >
               {busy
                 ? "正在提交"
-                : needsReview
-                  ? "待核对"
-                  : inProgress && props.mode !== "text"
-                    ? "执行中"
-                    : target.action}
+                : inProgress && props.mode !== "text"
+                  ? "执行中"
+                  : target.action}
             </Button>
           )
         }

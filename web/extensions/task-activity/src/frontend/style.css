@@ -237,8 +237,7 @@
 	background: var(--app-status-danger);
 }
 
-/* 组创作的结果待核对 / 部分完成需要用户确认，保持既有告警色而不是失败色。 */
-.task-activity-feed__card[data-state="unknown"] .task-activity-feed__dot,
+/* 部分完成需要用户关注，保持既有告警色而不是失败色。 */
 .task-activity-feed__card[data-state="partial"] .task-activity-feed__dot {
 	background: var(--app-status-warning);
 }
@@ -393,5 +392,4 @@
 	background: color-mix(in srgb, var(--app-interaction-accent) 5%, transparent);
 	color: var(--app-web-text);
 }
-.task-activity-feed__skill-attempts li[data-state="failed"],
-.task-activity-feed__skill-attempts li[data-state="unknown"] { color: var(--app-web-danger, #d9534f); }
+.task-activity-feed__skill-attempts li[data-state="failed"] { color: var(--app-web-danger, #d9534f); }

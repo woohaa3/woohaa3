@@ -17,7 +17,13 @@ import type {
   ConversationSummary,
   ConversationToolActivity,
   ConversationTurn,
-  ConversationTurnStatus
+  ConversationTurnStatus,
+} from "@woohaa3/contracts";
+import {
+  normalizeConversationStatus,
+  normalizeConversationTurnStatus,
+  UNCONFIRMED_RESULT_ERROR_CODE,
+  UNCONFIRMED_RESULT_MESSAGE
 } from "@woohaa3/contracts";
 import type {
   AgentConversationStore,
@@ -34,7 +40,7 @@ export function toSummary(binding: ConversationAdapterBinding): ConversationSumm
     adapterId: binding.adapterId,
     ...(binding.connectionId ? { connectionId: binding.connectionId } : {}),
     title: binding.title,
-    status: binding.status as ConversationSummary["status"],
+    status: normalizeConversationStatus(binding.status) ?? "failed",
     createdAt: binding.createdAt,
     updatedAt: binding.updatedAt,
     ...(binding.latestRequestId ? { latestRequestId: binding.latestRequestId } : {}),
@@ -56,13 +62,16 @@ function turnConnectionBinding(record: ConversationTurnRecord): ConversationTurn
 export function toTurn(store: AgentConversationStore, record: ConversationTurnRecord): ConversationTurn {
   const tools = store.listTools(record.conversationId, 500).filter((tool) => tool.turnId === record.turnId);
   const connection = turnConnectionBinding(record);
+  const normalized = normalizeConversationTurnStatus(record.status);
+  const status: ConversationTurnStatus = normalized ?? "failed";
+  const legacyUnconfirmed = status === "failed" && record.errorCode === null && record.status !== "failed";
   return {
     turnId: record.turnId,
     conversationId: record.conversationId,
     requestId: record.requestId,
     action: record.action as ConversationTurn["action"],
-    status: record.status as ConversationTurnStatus,
-    stage: record.stage,
+    status,
+    stage: record.stage === "unknown" ? "failed" : record.stage,
     target: JSON.parse(record.targetJson) as AgentTargetSnapshot,
     ...(record.assistantText !== null ? { assistantText: record.assistantText } : {}),
     tools: tools.map((tool): ConversationToolActivity => ({
@@ -76,7 +85,8 @@ export function toTurn(store: AgentConversationStore, record: ConversationTurnRe
     ...(record.taskId !== null ? { taskId: record.taskId } : {}),
     ...(record.receiptJson !== null ? { receipt: JSON.parse(record.receiptJson) } : {}),
     ...(connection ? { connection } : {}),
-    ...(record.errorCode !== null ? { error: { code: record.errorCode, message: record.errorMessage ?? "" } } : {}),
+    ...(record.errorCode !== null ? { error: { code: record.errorCode, message: record.errorMessage ?? "" } }
+      : legacyUnconfirmed ? { error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE } } : {}),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
@@ -100,12 +110,11 @@ export function toMessage(record: ConversationMessageRecord): ConversationMessag
 export function conversationStatusFor(latest: ConversationTurnRecord | undefined): ConversationSummary["status"] {
   if (!latest) return "idle";
   if (!isTerminalTurnStatus(latest.status)) return "active";
-  switch (latest.status) {
+  switch (normalizeConversationTurnStatus(latest.status) ?? "failed") {
     case "succeeded": return "succeeded";
     case "partial": return "partial";
     case "failed": return "failed";
     case "cancelled": return "cancelled";
-    case "unknown": return "unknown";
     default: return "active";
   }
 }

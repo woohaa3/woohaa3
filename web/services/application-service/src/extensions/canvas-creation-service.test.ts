@@ -146,7 +146,7 @@ describe("durable canvas creations", () => {
     const accepted = await s.service.accept("owner", s.input);
     const record = s.store.get("owner", s.input.requestId)!;
     s.conversations.dispatchTurn.mockClear();
-    for (const stage of ["preparing", "root-created", "failed", "unknown"] as const) {
+    for (const stage of ["preparing", "root-created", "failed"] as const) {
       s.store.save({ ...record, view: { ...accepted, stage, turnId: undefined } });
       expect((await s.service.query("owner", s.input.requestId))?.turnId).toBe("turn");
     }

@@ -14,7 +14,7 @@
  */
 
 export type AgentRunPhase = "queued" | "running" | "terminal";
-export type AgentRunTerminalState = "succeeded" | "failed" | "cancelled" | "unknown";
+export type AgentRunTerminalState = "succeeded" | "failed" | "cancelled";
 
 /** 规范 run 视图（structuredContent）。 */
 export type AgentRunView = {

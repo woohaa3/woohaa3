@@ -379,7 +379,7 @@ describe("ChatGPT 会话 adapter · 回执映射", () => {
     expect(receiptToOutcome({ status: "failed", requestId: "r", mode: "model3d", code: "c", message: "m" }))
       .toEqual({ status: "failed", receipt: expect.objectContaining({ status: "failed" }), error: { code: "c", message: "m" } });
     expect(receiptToOutcome({ status: "cancelled", requestId: "r", mode: "model3d" })).toMatchObject({ status: "cancelled" });
-    expect(receiptToOutcome({ status: "unknown", requestId: "r" })).toMatchObject({ status: "unknown" });
+    expect(receiptToOutcome({ status: "unknown", requestId: "r" })).toMatchObject({ status: "failed", error: { code: "outcome-unknown" } });
   });
 
   it("回执不含 token", () => {
