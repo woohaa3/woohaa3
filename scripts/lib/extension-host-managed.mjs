@@ -22,8 +22,12 @@ import { ExtensionLoadError, FALLBACK_ORDER, resolveModuleFile } from "./extensi
  *
  * 不同版本位于 `installed/<id>/<version>/`，因此 `import()` 的 URL 天然不同，不会命中 ESM 模块缓存——
  * 这正是进程内换版可行的原因。同一版本重装会命中缓存，等于复用同一模块实例，符合预期。
+ *
+ * `token`（change: 2026-10-27-add-extension-dev-reload，D6）：开发者模式的产物始终落在同一路径，
+ * 版本目录不再变化，于是用内容标识作为 URL query 制造新的模块身份。同 token 复用同一实例，
+ * 不同 token 得到新实例——语义与换版本目录完全一致。
  */
-export async function loadRuntimePlugin({ dir, extensionId, version }) {
+export async function loadRuntimePlugin({ dir, extensionId, version, token }) {
   const extension = {
     extensionId,
     dir,
@@ -43,7 +47,9 @@ export async function loadRuntimePlugin({ dir, extensionId, version }) {
 
   const context = { extensionId, directory: dir, descriptorPath: extension.descriptorPath };
   const modulePath = resolveModuleFile(dir, descriptor.hostPlugin.module ?? "./backend", context);
-  const module = await import(pathToFileURL(modulePath).href);
+  const moduleUrl = pathToFileURL(modulePath);
+  if (typeof token === "string" && token.length > 0) moduleUrl.searchParams.set("v", token);
+  const module = await import(moduleUrl.href);
   const factory = module[descriptor.hostPlugin.factory];
   if (typeof factory !== "function") {
     throw new ExtensionLoadError("EXTENSION_EXPORT_INVALID", `扩展 ${extensionId} 的 hostPlugin 工厂导出不是函数：${descriptor.hostPlugin.factory}`, { extensionId, directory: dir, export: descriptor.hostPlugin.factory });
