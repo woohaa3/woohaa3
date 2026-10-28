@@ -10,61 +10,38 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::protocol::{Edge, GraphNode, Scene};
+use crate::canvas_ecs::components::CanvasLayout;
+use crate::protocol::{Edge, Scene};
 use crate::theme::ThemeResource;
 
-use super::Visuals;
 use super::geometry::Geometry;
 use super::layout::{
     EDGE_DELETE_BUTTON_SIZE, EDGE_LABEL_FONT, EDGE_LABEL_HEIGHT, edge_delete_center,
-    edge_label_text, edge_label_width, hex, port,
+    edge_label_text, edge_label_width,
 };
-use super::text_presentation::LogicalText;
-
-/// 绘制全部边、边标签、悬停删除按钮与草稿线。
-///
-/// 返回的 `overlay_z` 供 `render.rs` 继续摆放更上层的粘连操作条等 overlay。
-pub(crate) fn sync_edges(
-    commands: &mut Commands,
-    scene: &Scene,
-    theme: &ThemeResource,
-    visuals: &mut Visuals,
-    meshes: &mut Assets<Mesh>,
-) -> (f32, u64) {
-    let node_map: HashMap<&str, &GraphNode> =
-        scene.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    // 连线删除按钮高于所有节点卡片（卡片 z = 10.0 + index*0.1），与命中测试「按钮优先于节点」
-    // 保持一致（change: add-edge-hover-delete）。
-    let overlay_z = 10.0 + scene.nodes.len() as f32 * 0.1 + 1.5;
-    let rebuilt = super::edge_cache::sync(
-        commands, meshes, visuals, scene, theme, &node_map, overlay_z,
-    );
-    (overlay_z, rebuilt)
-}
+use super::labels::Label;
 
 /// Draw one retained document-order block; labels belong to that block's lifetime.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_block(
-    commands: &mut Commands,
     edges: &[Edge],
-    node_map: &HashMap<&str, &GraphNode>,
+    layouts: &HashMap<&str, CanvasLayout>,
     scene: &Scene,
     theme: &ThemeResource,
-    font: &Handle<Font>,
     geometry: &mut Geometry,
     overlay_z: f32,
     depth_offset: f32,
-) -> Vec<Entity> {
+) -> Vec<Label> {
     let mut labels = Vec::new();
     for edge in edges {
         if let (Some(source), Some(target)) = (
-            node_map.get(edge.source.as_str()),
-            node_map.get(edge.target.as_str()),
+            layouts.get(edge.source.as_str()),
+            layouts.get(edge.target.as_str()),
         ) {
             let selected = scene.selection.edge.as_ref() == Some(&edge.id);
             geometry.curve(
-                port(source, true),
-                port(target, false),
+                source.port(true),
+                target.port(false),
                 if selected { 3.0 } else { 2.0 },
                 1.0 + depth_offset,
                 if selected {
@@ -74,7 +51,7 @@ pub(super) fn draw_block(
                 },
                 false,
             );
-            let mid = (port(source, true) + port(target, false)) / 2.;
+            let mid = (source.port(true) + target.port(false)) / 2.;
             let label_width = edge_label_width(&edge.label);
             if label_width > 0.0 {
                 geometry.rounded_rect(
@@ -86,21 +63,12 @@ pub(super) fn draw_block(
                     2. + depth_offset,
                     theme.token_u32("canvasEdgeLabelBackground"),
                 );
-                let entity = commands
-                    .spawn((
-                        Text2d::new(edge_label_text(&edge.label)),
-                        TextFont {
-                            font: font.clone().into(),
-                            font_size: FontSize::Px(EDGE_LABEL_FONT),
-                            ..default()
-                        },
-                        TextColor(hex(theme.token_u32("canvasEdgeLabelText"))),
-                        Transform::from_xyz(mid.x, -mid.y, 2.1 + depth_offset),
-                        // 连线标签随世界缩放：栅格表示由共享文字策略按相机/DPR 派生。
-                        LogicalText::world(EDGE_LABEL_FONT, None),
-                    ))
-                    .id();
-                labels.push(entity);
+                labels.push((
+                    edge_label_text(&edge.label),
+                    mid,
+                    EDGE_LABEL_FONT,
+                    theme.token_u32("canvasEdgeLabelText"),
+                ));
             }
             // 悬停该连线时显示删除按钮（change: add-edge-hover-delete）。
             // 位置与 JS 命中测试共用 contracts.`bevyEdgeDeleteRect` 的同一公式与常量：
@@ -113,7 +81,7 @@ pub(super) fn draw_block(
                 .is_some_and(|hover| hover.edge_id.as_deref() == Some(edge.id.as_str()))
             {
                 let center =
-                    edge_delete_center(port(source, true), port(target, false), label_width);
+                    edge_delete_center(source.port(true), target.port(false), label_width);
                 let radius = EDGE_DELETE_BUTTON_SIZE / 2.0;
                 let accent = theme.token_u32("canvasEdgeSelected");
                 // 圆面 + 描边环 + 叉号；z 高于所有卡片与标签，保证可点。
@@ -157,15 +125,15 @@ pub(super) fn draw_draft(
     geometry: &mut Geometry,
     scene: &Scene,
     theme: &ThemeResource,
-    node_map: &HashMap<&str, &GraphNode>,
+    layouts: &HashMap<&str, CanvasLayout>,
 ) {
     if let Some(draft) = &scene.draft {
-        if let Some(source) = node_map.get(draft.source.as_str()) {
+        if let Some(source) = layouts.get(draft.source.as_str()) {
             let cursor = Vec2::new(draft.x, draft.y);
             let (a, b) = if draft.side == "output" {
-                (port(source, true), cursor)
+                (source.port(true), cursor)
             } else {
-                (cursor, port(source, false))
+                (cursor, source.port(false))
             };
             geometry.curve(a, b, 2.2, 2.0, theme.token_u32("canvasEdgeDraft"), true);
         }
@@ -183,7 +151,7 @@ pub(super) fn draw_shot_preview_links(
     geometry: &mut Geometry,
     scene: &Scene,
     theme: &ThemeResource,
-    node_map: &HashMap<&str, &GraphNode>,
+    layouts: &HashMap<&str, CanvasLayout>,
     overlay_z: f32,
 ) {
     if scene.shot_preview_links.is_empty() {
@@ -191,11 +159,16 @@ pub(super) fn draw_shot_preview_links(
     }
     let color = theme.token_u32("canvasEdgeDefault");
     for link in &scene.shot_preview_links {
-        let Some(target) = node_map.get(link.preview_node_id.as_str()) else {
+        let Some(target) = layouts.get(link.preview_node_id.as_str()) else {
             continue;
         };
         let start = Vec2::new(link.start.x, link.start.y);
-        let end = crate::canvas_query::shot_preview::card_attachment_of(target);
+        let end = crate::canvas_query::shot_preview::card_attachment(
+            target.x,
+            target.y,
+            target.width,
+            target.height,
+        );
         geometry.curve(start, end, 2.0, overlay_z, color, false);
     }
 }
@@ -204,7 +177,7 @@ pub(super) fn draw_shot_preview_links(
 mod tests {
     use super::*;
     use crate::canvas_query::curve::EDGE_CURVE_SEGMENTS;
-    use crate::protocol::ShotPreviewLink;
+    use crate::protocol::{GraphNode, ShotPreviewLink};
 
     fn preview_card(id: &str) -> GraphNode {
         GraphNode {
@@ -251,9 +224,9 @@ mod tests {
             ..Default::default()
         };
         let target = preview_card("shot-preview:AAAA");
-        let mut map: HashMap<&str, &GraphNode> = HashMap::new();
+        let mut map: HashMap<&str, CanvasLayout> = HashMap::new();
         if with_target {
-            map.insert(target.id.as_str(), &target);
+            map.insert(target.id.as_str(), CanvasLayout::from_node(&target));
         }
         let mut geometry = Geometry::default();
         draw_shot_preview_links(&mut geometry, &scene, &theme, &map, 20.0);

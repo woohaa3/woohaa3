@@ -13,25 +13,20 @@
 
 use std::collections::HashMap;
 
-use bevy::{
-    camera::visibility::NoFrustumCulling,
-    prelude::*,
-    sprite::Anchor,
-    text::LineBreak,
-};
+use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-use crate::app::CurrentScene;
+use crate::app::{CurrentScene, NodeIndex};
+use crate::canvas_ecs::components::{CanvasLabelRole, CanvasNodeId};
 use crate::protocol::{GraphNode, NodeActions};
 use crate::theme::ThemeResource;
 
 use super::Visuals;
 use super::geometry::Geometry;
-use super::labels::Label;
+use super::labels::{Label, LabelRequests, LabelStyle};
 use super::layout::{
     NODE_ACTION_TOOLBAR_FONT, NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_PAD,
     node_action_toolbar,
 };
-use super::text_presentation::{LogicalText, TextScaleMode};
 
 /// 横条容器圆角半径。
 const BAR_RADIUS: f32 = 8.0;
@@ -44,26 +39,26 @@ fn base_z(node_count: usize) -> f32 {
     10.0 + node_count as f32 * 0.1 + 1.5 + 0.5
 }
 
-/// 绘制全部带 `nodeActions` 的节点横条，返回按 `(label_key, labels)` 分组的标签集合。
+/// 绘制全部带 `nodeActions` 的节点横条，返回按 `(owner, labels)` 分组的标签集合。
 ///
 /// `viewport`/`surface_size` 与命中查询使用**同一组输入**，因此顶部碰撞回退（above/below）
 /// 与命中矩形完全一致。
 pub(crate) fn draw(
     geometry: &mut Geometry,
     theme: &ThemeResource,
-    nodes: &[GraphNode],
+    nodes: &[(Entity, GraphNode)],
     node_actions: &HashMap<String, NodeActions>,
     viewport: Option<(f32, f32, f32)>,
     surface_size: Option<(f32, f32)>,
     z: f32,
-) -> Vec<(String, Vec<Label>)> {
+) -> Vec<(Entity, Vec<Label>)> {
     let border = theme.token_u32("canvasNodeBorder");
     let surface = theme.token_u32("canvasNodeSurface");
     let accent = theme.token_u32("interactionAccent");
     let body_text = theme.token_u32("canvasBodyText");
 
     let mut out = Vec::new();
-    for node in nodes {
+    for (entity, node) in nodes {
         // group 使用独立选区横条；复合资产可声明自己的操作（与命中快照同源）。
         if node.group.is_some() {
             continue;
@@ -121,7 +116,7 @@ pub(crate) fn draw(
                 body_text,
             ));
         }
-        out.push((format!("{}::node-action", node.id), labels));
+        out.push((*entity, labels));
     }
     out
 }
@@ -134,12 +129,15 @@ pub(crate) fn draw(
 pub(crate) fn sync_node_action_bars(
     mut commands: Commands,
     scene: Res<CurrentScene>,
+    index: Res<NodeIndex>,
     surface: Res<crate::app::SurfaceState>,
     theme: Res<ThemeResource>,
     mut visuals: ResMut<Visuals>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
+    mut requests: ResMut<LabelRequests>,
+    nodes: Query<(Entity, &CanvasNodeId)>,
 ) {
+    requests.begin(CanvasLabelRole::NodeAction);
     // 图片/视频聚焦期间不绘制画布横条（横条只属于普通画布）。
     let focused = super::image_focus::has_presented_media_focus(&scene.0) || scene.0.model_focus.is_some();
     let viewport = (
@@ -150,28 +148,41 @@ pub(crate) fn sync_node_action_bars(
     let surface_size = (surface.size.x, surface.size.y);
     let z = base_z(scene.0.nodes.len());
 
-    let labels = if focused {
-        Vec::new()
-    } else {
-        let mut geometry = Geometry::default();
-        let drawn = draw(
-            &mut geometry,
-            &theme,
-            &scene.0.nodes,
-            &scene.0.node_actions,
-            Some(viewport),
-            Some(surface_size),
-            z,
+    if focused {
+        clear_mesh(&mut commands, &mut visuals, &mut meshes);
+        return;
+    }
+    let projected: Vec<(Entity, GraphNode)> = nodes
+        .iter()
+        .filter_map(|(entity, id)| {
+            crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0)
+                .map(|node| (entity, node.into_owned()))
+        })
+        .collect();
+    let mut geometry = Geometry::default();
+    let drawn = draw(
+        &mut geometry,
+        &theme,
+        &projected,
+        &scene.0.node_actions,
+        Some(viewport),
+        Some(surface_size),
+        z,
+    );
+    if drawn.is_empty() {
+        clear_mesh(&mut commands, &mut visuals, &mut meshes);
+        return;
+    }
+    replace_mesh(&mut commands, &mut visuals, &mut meshes, geometry.build());
+    for (owner, labels) in drawn {
+        requests.push(
+            CanvasLabelRole::NodeAction,
+            owner,
+            labels,
+            z + 0.006,
+            LabelStyle::NodeAction,
         );
-        if drawn.is_empty() {
-            clear_mesh(&mut commands, &mut visuals, &mut meshes);
-            sync_labels(&mut commands, &mut visuals, &mut text_query, Vec::new(), z + 0.006);
-            return;
-        }
-        replace_mesh(&mut commands, &mut visuals, &mut meshes, geometry.build());
-        drawn
-    };
-    sync_labels(&mut commands, &mut visuals, &mut text_query, labels, z + 0.006);
+    }
 }
 
 /// 替换横条覆盖层 mesh；实体缺失时按需创建（半透明 Blend 材质，避免写深度遮挡）。
@@ -219,71 +230,6 @@ fn clear_mesh(commands: &mut Commands, visuals: &mut Visuals, meshes: &mut Asset
         }
     }
     visuals.node_action_active = false;
-}
-
-/// 同步横条标签：按 `(节点 id, 索引)` 角色 key 复用实体，独立于普通节点标签池。
-///
-/// 横条文字声明为**固定屏幕字号**（`LogicalText::screen`）：这里不写 `TextFont.font_size`，
-/// 免得每帧/每次缩放重建字形；栅格表示由共享文字策略按 DPR 固定生成，实体尺度抵消相机
-/// 缩放（change: 2026-10-22-improve-canvas-text-clarity，design D3）。
-fn sync_labels(
-    commands: &mut Commands,
-    visuals: &mut Visuals,
-    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
-    groups: Vec<(String, Vec<Label>)>,
-    z: f32,
-) {
-    let mut live: Vec<String> = Vec::new();
-    for (key, labels) in groups {
-        for (index, (text, position, size, color)) in labels.into_iter().enumerate() {
-            let slot = format!("{key}::{index}");
-            live.push(slot.clone());
-            if let Some(entity) = visuals.node_action_labels.get(&slot).copied() {
-                if let Ok((mut existing, mut transform, mut existing_color, mut meta)) =
-                    text_query.get_mut(entity)
-                {
-                    if existing.0 != text {
-                        existing.0 = text.clone();
-                    }
-                    transform.translation = Vec3::new(position.x, -position.y, z);
-                    existing_color.0 = super::layout::hex(color);
-                    // 逐帧路径：先比较再写，避免无谓的组件变更标记让策略系统每帧重扫。
-                    if !meta.matches(size, None, TextScaleMode::Screen) {
-                        meta.set(size, None, TextScaleMode::Screen);
-                    }
-                    continue;
-                }
-            }
-            let entity = commands
-                .spawn((
-                    Text2d::new(text),
-                    TextFont {
-                        font: visuals.font.clone().into(),
-                        font_size: FontSize::Px(size),
-                        ..default()
-                    },
-                    TextColor(super::layout::hex(color)),
-                    TextLayout::new(Justify::Left, LineBreak::NoWrap),
-                    Anchor::TOP_LEFT,
-                    Transform::from_xyz(position.x, -position.y, z),
-                    LogicalText::screen(size),
-                ))
-                .id();
-            visuals.node_action_labels.insert(slot, entity);
-        }
-    }
-    // 回收不再存在的标签（节点取消选择、横条隐藏或动作数减少）。
-    let stale: Vec<String> = visuals
-        .node_action_labels
-        .keys()
-        .filter(|key| !live.contains(key))
-        .cloned()
-        .collect();
-    for key in stale {
-        if let Some(entity) = visuals.node_action_labels.remove(&key) {
-            commands.entity(entity).despawn();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -342,6 +288,15 @@ mod tests {
         }
     }
 
+    fn projected(nodes: Vec<GraphNode>) -> (World, Vec<(Entity, GraphNode)>) {
+        let mut world = World::new();
+        let projected = nodes
+            .into_iter()
+            .map(|node| (world.spawn_empty().id(), node))
+            .collect();
+        (world, projected)
+    }
+
     fn positions(geometry: Geometry) -> usize {
         geometry
             .build()
@@ -354,7 +309,8 @@ mod tests {
     #[test]
     fn draws_bar_and_labels_only_when_present() {
         let theme = ThemeResource::default();
-        let nodes = vec![node("a", 0.0, 200.0), node("b", 400.0, 200.0)];
+        let (_world, nodes) = projected(vec![node("a", 0.0, 200.0), node("b", 400.0, 200.0)]);
+        let owner = nodes[0].0;
         let mut map = HashMap::new();
         map.insert("a".to_owned(), actions(Some("gpt-5")));
         let mut geometry = Geometry::default();
@@ -362,14 +318,14 @@ mod tests {
         assert!(positions(geometry) > 40);
         // 仅带横条的节点产出标签（2 动作 + 1 摘要）。
         assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].0, "a::node-action");
+        assert_eq!(labels[0].0, owner);
         assert_eq!(labels[0].1.len(), 3);
     }
 
     #[test]
     fn labels_declare_screen_font_size_independent_of_zoom() {
         let theme = ThemeResource::default();
-        let nodes = vec![node("a", 0.0, 200.0)];
+        let (_world, nodes) = projected(vec![node("a", 0.0, 200.0)]);
         let mut map = HashMap::new();
         map.insert("a".to_owned(), actions(Some("gpt-5")));
         let surface = (1200.0, 800.0);
@@ -414,7 +370,7 @@ mod tests {
     #[test]
     fn no_actions_no_geometry() {
         let theme = ThemeResource::default();
-        let nodes = vec![node("a", 0.0, 200.0)];
+        let (_world, nodes) = projected(vec![node("a", 0.0, 200.0)]);
         let mut geometry = Geometry::default();
         let labels = draw(
             &mut geometry,
@@ -432,7 +388,7 @@ mod tests {
     #[test]
     fn bar_sits_above_node_with_fixed_gap() {
         let theme = ThemeResource::default();
-        let nodes = vec![node("a", 0.0, 200.0)];
+        let (_world, nodes) = projected(vec![node("a", 0.0, 200.0)]);
         let mut map = HashMap::new();
         map.insert("a".to_owned(), actions(None));
         let mut geometry = Geometry::default();

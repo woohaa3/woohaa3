@@ -17,13 +17,14 @@
 //!
 //! app 在运动求值后调用 [`sync`]，本模块不依赖 `bridge` / wasm，可在 ECS 单测中验证生命周期。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use super::runtime::{ModelAssets, ModelVisuals};
 use super::shot_adapter::{model_bounds_for_node, sampled_camera_pose};
+use crate::canvas_ecs::components::FilmSetCameraMarker;
 use crate::protocol::Scene;
 mod geometry;
 
@@ -52,25 +53,6 @@ pub(crate) struct FilmSetCameraAssets {
     dark: Option<Handle<StandardMaterial>>,
     light: Option<Handle<StandardMaterial>>,
     meshes: Option<[Handle<Mesh>; 4]>,
-}
-
-/// 当前活动的辅助相机实体集合（session-only，不拥有镜头事实）。
-#[derive(Resource, Default)]
-pub(crate) struct FilmSetCameraVisual {
-    /// 预览节点稳定 id → 标记根 entity（多标记各自独立，不残留旧实体）。
-    markers: HashMap<String, Entity>,
-}
-
-impl FilmSetCameraVisual {
-    /// 当前标记根集合（诊断/测试用）。
-    pub(crate) fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
-        self.markers.values().copied()
-    }
-
-    /// 当前标记数量。
-    pub(crate) fn marker_count(&self) -> usize {
-        self.markers.len()
-    }
 }
 
 /// 辅助相机根标记（机身/镜头/视锥子实体的父级）。
@@ -170,30 +152,33 @@ fn facing_rotation(position: Vec3, focus: Vec3) -> Quat {
 ///
 /// 每帧只改根 transform/visibility 或增删标记实体；同目标不重建 mesh/material。活动镜头切换、
 /// 镜头删除、进入 focus、renderer 重建都按 owner 清理，不留旧实体或旧姿态。
+///
+/// `markers` 是**从 ECS 派生的本帧视图**（`FilmSetCameraMarker` 组件），不是 Resource 里的第二份
+/// owner 事实；调用方按当前 World 收集后传入，已销毁的实体不会留在状态里。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     assets: &mut FilmSetCameraAssets,
-    visual: &mut FilmSetCameraVisual,
+    markers: &[(Entity, FilmSetCameraMarker)],
     scene: &Scene,
     sampled: Option<crate::motion::CameraState>,
     models: &ModelVisuals,
     resources: &ModelAssets,
 ) {
     let targets = marker_targets(scene, sampled.as_ref());
+    let find = |id: &str| {
+        markers
+            .iter()
+            .find(|(_, marker)| marker.preview_node_id == id)
+            .map(|(entity, _)| *entity)
+    };
     // 清理：不再合格（镜头删除/聚焦隔离/无有效采样）的标记连同实体回收。
     let alive: HashSet<&str> = targets.iter().map(|target| target.preview_node_id.as_str()).collect();
-    let stale: Vec<String> = visual
-        .markers
-        .keys()
-        .filter(|id| !alive.contains(id.as_str()))
-        .cloned()
-        .collect();
-    for id in stale {
-        if let Some(root) = visual.markers.remove(&id) {
-            commands.entity(root).try_despawn();
+    for (root, marker) in markers {
+        if !alive.contains(marker.preview_node_id.as_str()) {
+            commands.entity(*root).try_despawn();
         }
     }
 
@@ -201,7 +186,7 @@ pub(crate) fn sync(
     for target in &targets {
         let Some(bounds) = model_bounds_for_node(scene, models, resources, &target.owner_node_id) else {
             // 无合法目标边界：不伪造位置，回收旧标记。
-            if let Some(root) = visual.markers.remove(&target.preview_node_id) {
+            if let Some(root) = find(&target.preview_node_id) {
                 commands.entity(root).try_despawn();
             }
             continue;
@@ -210,13 +195,13 @@ pub(crate) fn sync(
         // （change: 2026-10-23-isolate-film-set-camera-space，任务 2.2 / design D2）。
         let display = super::shot_adapter::display_unit_for_node(scene, resources, &target.owner_node_id);
         let Some((focus, position)) = sampled_camera_pose(bounds, display, &target.camera) else {
-            if let Some(root) = visual.markers.remove(&target.preview_node_id) {
+            if let Some(root) = find(&target.preview_node_id) {
                 commands.entity(root).try_despawn();
             }
             continue;
         };
         let rotation = facing_rotation(position, focus);
-        if let Some(root) = visual.markers.get(&target.preview_node_id).copied() {
+        if let Some(root) = find(&target.preview_node_id) {
             // 同目标 tick：只更新根 transform 与可见性，不重建实体或 mesh。
             if let Ok(mut entity) = commands.get_entity(root) {
                 entity.insert((
@@ -237,6 +222,10 @@ pub(crate) fn sync(
             .spawn((
                 Name::new("film-set-shot-camera-marker"),
                 FilmSetCameraRoot,
+                FilmSetCameraMarker {
+                    preview_node_id: target.preview_node_id.clone(),
+                    owner_node_id: target.owner_node_id.clone(),
+                },
                 Transform {
                     translation: position,
                     rotation,
@@ -258,14 +247,13 @@ pub(crate) fn sync(
                 layer.clone(),
             ));
         }
-        visual.markers.insert(target.preview_node_id.clone(), root);
     }
 }
 
 /// 隐藏并回收全部辅助实体（renderer 销毁/失效路径；不保留旧目标资源）。
-pub(crate) fn despawn_all(commands: &mut Commands, visual: &mut FilmSetCameraVisual) {
-    for (_, root) in visual.markers.drain() {
-        commands.entity(root).try_despawn();
+pub(crate) fn despawn_all(commands: &mut Commands, markers: &[(Entity, FilmSetCameraMarker)]) {
+    for (root, _) in markers {
+        commands.entity(*root).try_despawn();
     }
 }
 

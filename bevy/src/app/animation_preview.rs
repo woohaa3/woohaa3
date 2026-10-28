@@ -45,18 +45,23 @@ pub(super) fn sync_film_set_camera(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut assets: ResMut<crate::model3d::filmset_camera::FilmSetCameraAssets>,
-    mut visual: ResMut<crate::model3d::filmset_camera::FilmSetCameraVisual>,
+    markers: Query<(Entity, &crate::canvas_ecs::components::FilmSetCameraMarker)>,
     scene: Res<CurrentScene>,
     sampled: Res<AnimationCameraState>,
     models: Res<ModelVisuals>,
     resources: Res<ModelAssetTable>,
 ) {
+    // 从 ECS 派生本帧视图：Resource 不再保存「预览节点 → 标记实体」第二份 owner map。
+    let markers: Vec<(Entity, crate::canvas_ecs::components::FilmSetCameraMarker)> = markers
+        .iter()
+        .map(|(entity, marker)| (entity, marker.clone()))
+        .collect();
     crate::model3d::filmset_camera::sync(
         &mut commands,
         &mut meshes,
         &mut materials,
         &mut assets,
-        &mut visual,
+        &markers,
         &scene.0,
         sampled.0,
         &models,

@@ -20,6 +20,7 @@ use bevy::prelude::*;
 
 use crate::{
     app::{AnimationCameraState, CurrentScene, ModelAssetTable},
+    canvas_ecs::components::ShotPreviewSprite,
     model3d,
     shot_camera::{
         PreviewTarget, PreviewUpdatePolicy, ShotCameraCommands, ShotCameraConfig,
@@ -201,6 +202,11 @@ pub(crate) fn sync(
                     },
                     Transform::from_xyz(0.0, 0.0, 10.01),
                     Visibility::Hidden,
+                    // 归属 rig 与预览节点身份写在实体上；`ShotPreviewCards` 只保留采样状态。
+                    ShotPreviewSprite {
+                        node_id: target.node_id.clone(),
+                        owner: rig,
+                    },
                 ))
                 .id();
             cards.cards.insert(

@@ -16,6 +16,7 @@ use bevy::camera::primitives::Aabb;
 use bevy::platform::time::Instant;
 use bevy::prelude::*;
 
+use crate::canvas_ecs::components::{ModelBatch, ModelOwner, ModelPart};
 use crate::protocol::{ModelPlacement, Scene};
 
 use super::super::animation::{TransformAnimation, TransformAnimationPlayback};
@@ -413,6 +414,7 @@ fn apply_step(
                     super::super::model_render_layers(),
                 ))
                 .id();
+            world.entity_mut(root).insert(ModelOwner { root });
             staging.root = Some(root);
             staging.spawned.push(root);
             StepOutcome::Progressed
@@ -432,7 +434,7 @@ fn apply_step(
             let Some((root, batch)) = staging.root.zip(prepared.batches.get(index)) else {
                 return StepOutcome::Cancelled;
             };
-            match spawn_batch(world, models, staging, batch, root) {
+            match spawn_batch(world, models, staging, batch, root, index) {
                 Some(()) => StepOutcome::Progressed,
                 None => StepOutcome::Cancelled,
             }
@@ -497,6 +499,11 @@ fn spawn_part(
                 Visibility::default(),
                 super::super::model_render_layers(),
                 ChildOf(parent),
+                ModelOwner { root },
+                ModelPart {
+                    owner: root,
+                    part_id: part.id.clone(),
+                },
             ))
             .id();
         record_part(staging, part, entity);
@@ -520,6 +527,11 @@ fn spawn_part(
         part.transform,
         super::super::model_render_layers(),
         ChildOf(parent),
+        ModelOwner { root },
+        ModelPart {
+            owner: root,
+            part_id: part.id.clone(),
+        },
     ));
     if let Some(kind) = &part.animation {
         // 动画默认停止；只有本根是当前唯一活动模型时才从零播放（与既有门禁一致）。
@@ -567,6 +579,7 @@ fn spawn_batch(
     staging: &mut Staging,
     batch: &PreparedBatch,
     root: Entity,
+    index: usize,
 ) -> Option<()> {
     let parent = batch
         .parent
@@ -592,6 +605,11 @@ fn spawn_batch(
             super::super::model_render_layers(),
             Aabb::from_min_max(asset.min, asset.max),
             ChildOf(parent),
+            ModelOwner { root },
+            ModelBatch {
+                owner: root,
+                batch_id: format!("batch:{index}"),
+            },
         ))
         .id();
     staging.mesh_handles.push(asset.handle.clone());

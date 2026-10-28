@@ -22,6 +22,11 @@ mod theme_generated;
 /// 2D 共享纯几何与 interaction 查询（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
 /// 不依赖 Bevy/ECS/wasm，可在 native 下单独测试；`canvas2d` 渲染复用其布局与曲线函数。
 mod canvas_query;
+/// 画布节点 ECS 投影层与公共组件（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs）。
+/// 组件在全部 feature 下编译（3D 模块复用 owner/part marker）；投影与批处理只在 `canvas-core`。
+/// 实体只活在当前 renderer 实例内：结构变化由唯一投影点处理，位置增量只更新组件，
+/// renderer 重建整体丢弃实体层级。第三方扩展最小接入方式见 `canvas_ecs/README.md`。
+mod canvas_ecs;
 /// 画布级 3D 根逐像素深度的平局偏移：纯几何 + 线程本地已接受表
 /// （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D4）。
 mod depth_order;

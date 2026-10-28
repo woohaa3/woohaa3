@@ -1,19 +1,20 @@
-//! 节点/group/片场标签实体的生命周期（change: refactor-bevy-rust-file-size 后续拆分）。
+//! 标签实体生命周期：owner/role/slot 组件 + 逐帧请求收件箱
+//! （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，design D4 / 任务 4.1、4.5）。
 //!
-//! 普通卡片、group 容器与片场标题共用同一 `Visuals.labels` 实体池：按节点 id keyed，长度可变。
-//! 从 `render.rs` 抽出以保持在文件体积上限内（`tests/file_size.rs` 守卫）。
+//! 标签不再存进 `Visuals` 的 `HashMap<String, Vec<Entity>>`。每个标签实体带
+//! [`CanvasLabel`]（role + slot）并通过 `ChildOf` 归属节点/边批次实体：
 //!
-//! 生命周期必须闭合支持 `0 → 1 → 0 → 1`（change:
-//! 2026-10-10-improve-film-set-editing-and-inspector，design D2）：片场标题只在
-//! hover/选中时出现，反复显隐不能丢失文字或残留实体。因此这里按位置更新已有实体、
-//! 补建不足数量、回收多余数量，并在集合为空时删除池条目。只 zip 已存在实体会让
-//! 「先隐藏再显示」丢失文字，是本次修复的根因。
+//! - 生产者只收集本帧「这个 owner 应该显示哪些文字」，写入 [`LabelRequests`]；
+//! - [`sync_canvas_labels`] 一次性按 owner+role 复用、补建、回收实体；
+//! - owner 删除时子实体随父回收，不再依赖 Resource 里的 stale `Entity` 句柄。
+//!
+//! 生命周期仍必须闭合支持 `0 → 1 → 0 → 1`：集合为空时回收全部槽位，下一次非空重新补建。
 
 use bevy::{prelude::*, sprite::Anchor, text::{LineBreak, TextBounds}};
 
-use super::Visuals;
-use super::layout::{hex, label_pool_plan};
-use super::text_presentation::{LogicalText, TextScaleMode};
+use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
+use crate::canvas2d::Visuals;
+use crate::canvas2d::text_presentation::{LogicalText, TextScaleMode};
 
 /// 标签文案包：`(文案, 位置, 字号, 颜色 0xRRGGBB)`。
 ///
@@ -25,300 +26,268 @@ pub(crate) type Label = (String, Vec2, f32, u32);
 /// 标签逻辑 bounds（世界单位）。截断由调用方按逻辑宽度决定，栅格 bounds 按同一比例换算。
 const LABEL_BOUNDS: Vec2 = Vec2::new(600.0, 48.0);
 
-/// 更新/新增/回收某个节点的标签实体（普通卡片、group 容器与片场标题共用）。
-///
-/// 标签集合长度可变：group/片场只有 1 条标题标签，普通卡片有分类 + 多行正文。
-/// 更新已有部分、补建新增部分、回收多余部分；集合为空时**移除池条目**，使下一次
-/// 非空集合可以重新补建。内存中残留的旧实体（例如旧版本渲染留下的状态槽）必须回收，
-/// 否则已废弃的文案会继续留在卡片上。
-pub(crate) fn sync_labels(
-    commands: &mut Commands,
-    visuals: &mut Visuals,
-    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
-    node_id: &str,
-    labels: Vec<Label>,
-    z: f32,
-) {
-    // 取出现有实体，避免在补建时同时持有池与 visuals 的可变借用。
-    let mut entities = visuals.labels.remove(node_id).unwrap_or_default();
-    let (_, _, despawn, retain) = label_pool_plan(entities.len(), labels.len());
-    // 回收多余额度。
-    for _ in 0..despawn {
-        if let Some(entity) = entities.pop() {
-            commands.entity(entity).despawn();
+/// 标签排版风格。角色固定，复用实体时不需要切换排版组件。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LabelStyle {
+    /// 普通卡片/group/片场标题：左上锚点、单行、逻辑 bounds。
+    Node,
+    /// 拖动粘连操作条：左上锚点、无 bounds。
+    Attach,
+    /// 运行百分比：居中锚点、无 bounds。
+    Running,
+    /// 节点顶部操作横条：固定屏幕字号、左上锚点。
+    NodeAction,
+    /// 连线标签：居中锚点、世界字号。
+    Edge,
+}
+
+impl LabelStyle {
+    fn anchor(self) -> Anchor {
+        match self {
+            LabelStyle::Attach | LabelStyle::Node | LabelStyle::NodeAction => Anchor::TOP_LEFT,
+            LabelStyle::Running | LabelStyle::Edge => Anchor::CENTER,
         }
     }
-    for (index, (label, position, size, color)) in labels.into_iter().enumerate() {
-        if let Some(entity) = entities.get(index).copied() {
-            if let Ok((mut text, mut transform, mut text_color, mut meta)) = text_query.get_mut(entity) {
-                if text.0 != label {
-                    text.0 = label;
-                }
-                transform.translation = Vec3::new(position.x, -position.y, z);
-                text_color.0 = hex(color);
-                // 复用实体必须同步最新逻辑字号/bounds：栅格显示由策略系统按逻辑值重算，
-                // 不把这里的逻辑值直接写进 `TextFont`（change: 2026-10-22-improve-canvas-text-clarity）。
-                if !meta.matches(size, Some(LABEL_BOUNDS), TextScaleMode::World) {
-                    meta.set(size, Some(LABEL_BOUNDS), TextScaleMode::World);
-                }
+
+    fn layout(self) -> TextLayout {
+        match self {
+            LabelStyle::Running => TextLayout::new(Justify::Center, LineBreak::NoWrap),
+            _ => TextLayout::new(Justify::Left, LineBreak::NoWrap),
+        }
+    }
+
+    fn bounds(self) -> Option<Vec2> {
+        match self {
+            LabelStyle::Node => Some(LABEL_BOUNDS),
+            _ => None,
+        }
+    }
+
+    fn meta(self, size: f32) -> LogicalText {
+        match self {
+            LabelStyle::Node => LogicalText::world(size, Some(LABEL_BOUNDS)),
+            LabelStyle::Attach | LabelStyle::Running | LabelStyle::Edge => {
+                LogicalText::world(size, None)
             }
-            continue;
+            LabelStyle::NodeAction => LogicalText::screen(size),
         }
-        entities.push(spawn_label(
-            commands, visuals, label, position, size, color, z,
-        ));
     }
-    // 空集合不保留占位槽：下次非空调用走 `unwrap_or_default` 重新补建，
-    // 这正是「先隐藏再显示」能恢复文字的关键。
-    if retain {
-        visuals.labels.insert(node_id.to_owned(), entities);
+
+    fn bounds_component(self) -> Option<TextBounds> {
+        self.bounds().map(|bounds| TextBounds {
+            width: Some(bounds.x),
+            height: Some(bounds.y),
+        })
+    }
+
+    fn scale_mode(self) -> TextScaleMode {
+        match self {
+            LabelStyle::NodeAction => TextScaleMode::Screen,
+            _ => TextScaleMode::World,
+        }
     }
 }
 
-/// 生成一条标签文字实体；由调用方决定何时进入/退出实体池。
+/// 一个 owner 在一帧内期望的标签集合。
+#[derive(Clone)]
+pub(crate) struct LabelRequest {
+    pub(crate) owner: Entity,
+    pub(crate) labels: Vec<Label>,
+    pub(crate) z: f32,
+    pub(crate) style: LabelStyle,
+}
+
+/// 标签生产者到同步系统的逐帧收件箱。
 ///
-/// `font_size` 只是初始逻辑字号：落位前由策略系统按当前相机/DPR 重算栅格表示，
-/// 新实体首个可呈现帧即具有正确清晰度。
-fn spawn_label(
-    commands: &mut Commands,
+/// 按 role 存：每个生产者在本系统运行前 `begin(role)` 清空自己的角色，再 push 本帧请求。
+/// 未运行的（被 `FrameFlags` 门禁的）生产者保留上一帧请求，标签不会闪失。
+#[derive(Resource, Default)]
+pub(crate) struct LabelRequests {
+    roles: std::collections::HashMap<CanvasLabelRole, Vec<LabelRequest>>,
+}
+
+impl LabelRequests {
+    /// 开始收集某个角色的本帧请求（替换上一帧）。
+    pub(crate) fn begin(&mut self, role: CanvasLabelRole) {
+        self.roles.insert(role, Vec::new());
+    }
+
+    /// 追加一个 owner 的标签集合；空集合等价于「本帧不显示该 owner 的该角色标签」。
+    pub(crate) fn push(
+        &mut self,
+        role: CanvasLabelRole,
+        owner: Entity,
+        labels: Vec<Label>,
+        z: f32,
+        style: LabelStyle,
+    ) {
+        if labels.is_empty() {
+            self.roles
+                .entry(role)
+                .or_default()
+                .retain(|request| request.owner != owner);
+            return;
+        }
+        self.push_request(
+            role,
+            LabelRequest {
+                owner,
+                labels,
+                z,
+                style,
+            },
+        );
+    }
+
+    /// 复用缓存块上一帧的请求（块命中时仍要重新提交本帧收件箱）。
+    pub(crate) fn extend(&mut self, role: CanvasLabelRole, cached: &[LabelRequest]) {
+        for request in cached {
+            self.push_request(role, request.clone());
+        }
+    }
+
+    /// 直接提交一个构造好的请求（缓存块复用时保持同一形状）。
+    pub(crate) fn push_request(&mut self, role: CanvasLabelRole, request: LabelRequest) {
+        let requests = self.roles.entry(role).or_default();
+        match requests
+            .iter_mut()
+            .find(|current| current.owner == request.owner)
+        {
+            Some(current) => *current = request,
+            None => requests.push(request),
+        }
+    }
+
+    /// 清空全部角色（测试/帧边界用）。
+    #[cfg(test)]
+    pub(crate) fn clear(&mut self) {
+        self.roles.clear();
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&CanvasLabelRole, &LabelRequest)> {
+        self.roles
+            .iter()
+            .flat_map(|(role, requests)| requests.iter().map(move |request| (role, request)))
+    }
+}
+
+/// 按 owner+role+slot 同步标签实体。
+///
+/// `labels` 是全部文字实体（只读 owner/role），`text` 是可写呈现组件。两次查询的组件集合
+/// 不重叠，因此可以同时存在。
+pub(crate) fn sync_canvas_labels(
+    mut commands: Commands,
+    requests: Res<LabelRequests>,
+    visuals: Res<Visuals>,
+    existing: Query<(Entity, &CanvasLabel, &ChildOf)>,
+    mut text: Query<(
+        &mut Text2d,
+        &mut Transform,
+        &mut TextColor,
+        &mut LogicalText,
+    )>,
+) {
+    let mut wanted: std::collections::HashMap<(Entity, CanvasLabelRole), &LabelRequest> =
+        std::collections::HashMap::new();
+    for (role, request) in requests.iter() {
+        wanted.insert((request.owner, *role), request);
+    }
+
+    // 1) 回收不再被请求的角色/owner 标签。
+    for (entity, label, child) in &existing {
+        if !wanted.contains_key(&(child.parent(), label.role)) {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    // 2) 每个请求按 slot 复用/补建/缩容。
+    for ((owner, role), request) in &wanted {
+        if commands.get_entity(*owner).is_err() {
+            // 投影已回收的 owner：请求是上一帧残留，安全丢弃。
+            continue;
+        }
+        let mut slots: Vec<(u16, Entity)> = existing
+            .iter()
+            .filter(|(_, label, child)| child.parent() == *owner && label.role == *role)
+            .map(|(entity, label, _)| (label.slot, entity))
+            .collect();
+        slots.sort_by_key(|(slot, _)| *slot);
+        let len = request.labels.len();
+        for (slot, entity) in &slots {
+            if *slot as usize >= len {
+                commands.entity(*entity).despawn();
+            }
+        }
+        for (index, (label, position, size, color)) in request.labels.iter().enumerate() {
+            let slot = index as u16;
+            match slots.iter().find(|(current, _)| *current == slot) {
+                Some((_, entity)) => {
+                    if let Ok((mut text, mut transform, mut text_color, mut meta)) =
+                        text.get_mut(*entity)
+                    {
+                        if text.0 != *label {
+                            text.0 = label.clone();
+                        }
+                        transform.translation = Vec3::new(position.x, -position.y, request.z);
+                        text_color.0 = super::layout::hex(*color);
+                        if !meta.matches(*size, request.style.bounds(), request.style.scale_mode()) {
+                            meta.set(*size, request.style.bounds(), request.style.scale_mode());
+                        }
+                    }
+                }
+                None => {
+                    commands.spawn(label_bundle(
+                        &visuals,
+                        label.clone(),
+                        *position,
+                        *size,
+                        *color,
+                        request.z,
+                        *role,
+                        slot,
+                        request.style,
+                        *owner,
+                    ));
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn label_bundle(
     visuals: &Visuals,
     label: String,
     position: Vec2,
     size: f32,
     color: u32,
     z: f32,
-) -> Entity {
-    commands
-        .spawn((
-            Text2d::new(label),
-            TextFont {
-                font: visuals.font.clone().into(),
-                font_size: FontSize::Px(size),
-                ..default()
-            },
-            TextColor(hex(color)),
-            TextLayout::new(Justify::Left, LineBreak::NoWrap),
-            TextBounds {
-                width: Some(LABEL_BOUNDS.x),
-                height: Some(LABEL_BOUNDS.y),
-            },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(position.x, -position.y, z),
-            LogicalText::world(size, Some(LABEL_BOUNDS)),
-        ))
-        .id()
+    role: CanvasLabelRole,
+    slot: u16,
+    style: LabelStyle,
+    owner: Entity,
+) -> impl Bundle {
+    let bounds = style.bounds();
+    (
+        Text2d::new(label),
+        TextFont {
+            font: visuals.font().into(),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(super::layout::hex(color)),
+        style.layout(),
+        TextBounds {
+            width: bounds.map(|bounds| bounds.x),
+            height: bounds.map(|bounds| bounds.y),
+        },
+        style.anchor(),
+        Transform::from_xyz(position.x, -position.y, z),
+        style.meta(size),
+        CanvasLabel { role, slot },
+        ChildOf(owner),
+    )
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::{CurrentScene, SurfaceState};
-    use crate::canvas2d::text_presentation;
-    use bevy::ecs::system::RunSystemOnce;
-
-    /// 测试入口：把「要应用的标签集合」放进资源，由真实系统签名调用 `sync_labels`。
-    #[derive(Resource, Default)]
-    struct Pending {
-        node_id: String,
-        labels: Vec<Label>,
-        z: f32,
-    }
-
-    fn apply(
-        mut commands: Commands,
-        mut visuals: ResMut<Visuals>,
-        mut query: Query<(
-            &mut Text2d,
-            &mut Transform,
-            &mut TextColor,
-            &mut LogicalText,
-        ), Without<Sprite>>,
-        mut pending: ResMut<Pending>,
-    ) {
-        let node_id = pending.node_id.clone();
-        let z = pending.z;
-        let labels = std::mem::take(&mut pending.labels);
-        sync_labels(
-            &mut commands,
-            &mut visuals,
-            &mut query,
-            &node_id,
-            labels,
-            z,
-        );
-    }
-
-    fn world() -> World {
-        let mut world = World::new();
-        world.insert_resource(CurrentScene(crate::protocol::Scene {
-            viewport: crate::protocol::Viewport {
-                x: 0.0,
-                y: 0.0,
-                zoom: 1.0,
-            },
-            ..Default::default()
-        }));
-        world.insert_resource(SurfaceState::with_size(Vec2::new(800.0, 600.0)));
-        world.insert_resource(text_presentation::PresentationCache::default());
-        world.insert_resource(Pending {
-            node_id: "n1".to_owned(),
-            labels: Vec::new(),
-            z: 5.0,
-        });
-        world.insert_resource(Visuals {
-            card_blocks: Vec::new(),
-            card_decorations: Vec::new(),
-            container_blocks: Vec::new(),
-            mesh: default(),
-            material: default(),
-            mesh_entity: None,
-            blend_mesh: default(),
-            blend_material: default(),
-            blend_mesh_entity: None,
-            font: default(),
-            labels: default(),
-            textures: default(),
-            texture_store: default(),
-            edge_blocks: default(),
-            shared_key: None,
-            attach_labels: default(),
-            attach_probe_mesh: default(),
-            attach_probe_entity: None,
-            attach_probe_active: false,
-        media_alpha_checker: None,
-            running_mesh: default(),
-            running_mesh_entity: None,
-            running_labels: default(),
-            running_active: false,
-            node_action_mesh: default(),
-            node_action_entity: None,
-            node_action_labels: default(),
-            node_action_active: false,
-        });
-        world
-    }
-
-    fn sync(world: &mut World, labels: Vec<Label>) {
-        {
-            let mut pending = world.resource_mut::<Pending>();
-            pending.node_id = "n1".to_owned();
-            pending.z = 5.0;
-            pending.labels = labels;
-        }
-        world.run_system_once(apply).unwrap();
-        world.flush();
-    }
-
-    fn glyph(world: &World, entity: Entity) -> (f32, f32) {
-        let font = world.get::<TextFont>(entity).unwrap().font_size;
-        let size = match font {
-            FontSize::Px(size) => size,
-            other => panic!("unexpected font size {other:?}"),
-        };
-        (size, world.get::<Transform>(entity).unwrap().scale.x)
-    }
-
-    /// 只改逻辑字号/文案的池复用：元数据更新，栅格由策略系统按逻辑值派生（不累乘尺度）。
-    #[test]
-    fn reused_label_keeps_logical_font_size_and_lets_strategy_rasterize() {
-        let mut world = world();
-        sync(&mut world, vec![("标题".to_owned(), Vec2::new(10.0, 20.0), 12.0, 0xFFFFFF)]);
-        let entity = world.resource::<Visuals>().labels["n1"][0];
-        world.run_system_once(text_presentation::sync).unwrap();
-        let (font, scale) = glyph(&world, entity);
-        assert!((font * scale - 12.0).abs() <= 1.0e-3, "100% 档显示逻辑字号");
-
-        sync(&mut world, vec![("新标题".to_owned(), Vec2::new(10.0, 20.0), 16.0, 0xFFFFFF)]);
-        assert_eq!(
-            world.get::<LogicalText>(entity).unwrap().size,
-            16.0,
-            "复用实体必须同步最新逻辑字号"
-        );
-        assert_eq!(world.get::<Text2d>(entity).unwrap().0, "新标题");
-        world.run_system_once(text_presentation::sync).unwrap();
-        let (font, scale) = glyph(&world, entity);
-        assert!((font * scale - 16.0).abs() <= 1.0e-3, "按新逻辑字号显示");
-
-        // 重复应用同一状态不累乘尺度。
-        for _ in 0..3 {
-            sync(&mut world, vec![("新标题".to_owned(), Vec2::new(10.0, 20.0), 16.0, 0xFFFFFF)]);
-            world.run_system_once(text_presentation::sync).unwrap();
-        }
-        let after = glyph(&world, entity);
-        assert!((after.1 - scale).abs() <= 1.0e-6);
-        assert_eq!(after.0, font);
-    }
-
-    /// 先隐藏再显示：实体池重新补建并按当前倍率直接选档，不复用旧累积状态。
-    #[test]
-    fn hide_then_show_rebuilds_and_selects_current_step() {
-        let mut world = world();
-        sync(&mut world, vec![("标题".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)]);
-        let first = world.resource::<Visuals>().labels["n1"][0];
-        sync(&mut world, Vec::new());
-        assert!(!world.resource::<Visuals>().labels.contains_key("n1"));
-        assert!(world.get_entity(first).is_err(), "隐藏必须回收实体");
-
-        // 隐藏期间改变倍率与 DPR。
-        world.resource_mut::<CurrentScene>().0.viewport.zoom = 8.0;
-        world.resource_mut::<SurfaceState>().pixel_ratio = 2.0;
-        sync(&mut world, vec![("标题".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)]);
-        let second = world.resource::<Visuals>().labels["n1"][0];
-        assert_ne!(second, first, "隐藏后必须新建实体");
-        world.run_system_once(text_presentation::sync).unwrap();
-        let (font, scale) = glyph(&world, second);
-        // zoom 8 → 档位 8；DPR 2 → 物理 192px，写回逻辑字号 96。
-        assert!((font - 96.0).abs() <= 1.0e-3);
-        assert!((font * scale - 12.0).abs() <= 1.0e-3);
-    }
-
-    /// 跨档往返不改变文案与业务截断，只改变栅格表示。
-    #[test]
-    fn step_changes_keep_text_content_and_logical_layout() {
-        let mut world = world();
-        let long = "这是一段会被业务逻辑截断的较长中文标题，用来验证栅格档位不影响文案与分行".to_owned();
-        sync(&mut world, vec![(long.clone(), Vec2::new(24.0, 56.0), 12.0, 0xFFFFFF)]);
-        let entity = world.resource::<Visuals>().labels["n1"][0];
-        world.run_system_once(text_presentation::sync).unwrap();
-        let baseline_text = world.get::<Text2d>(entity).unwrap().0.clone();
-        let baseline_translation = world.get::<Transform>(entity).unwrap().translation;
-        for zoom in [2.0, 4.0, 8.0, 12.0, 4.0, 1.0] {
-            world.resource_mut::<CurrentScene>().0.viewport.zoom = zoom;
-            world.run_system_once(text_presentation::sync).unwrap();
-            assert_eq!(world.get::<Text2d>(entity).unwrap().0, baseline_text, "zoom={zoom} 文案必须不变");
-            assert_eq!(
-                world.get::<Transform>(entity).unwrap().translation,
-                baseline_translation,
-                "zoom={zoom} 锚点必须不变"
-            );
-            let (font, scale) = glyph(&world, entity);
-            assert!((font * scale - 12.0).abs() <= 1.0e-3, "zoom={zoom} 逻辑字号必须不变");
-            // 栅格 bounds 与字体同比例换算，逻辑宽度仍是 LABEL_BOUNDS。
-            let bounds = world.get::<TextBounds>(entity).unwrap();
-            let width = bounds.width.expect("标签有界");
-            assert!((width * scale - LABEL_BOUNDS.x).abs() <= 1.0e-3, "zoom={zoom} 逻辑 bounds 必须不变");
-        }
-    }
-
-    /// 池缩容回收多余实体，扩容补建；复用重叠部分。
-    #[test]
-    fn pool_shrink_and_grow_reclaim_entities() {
-        let mut world = world();
-        let rows = |count: usize| -> Vec<Label> {
-            (0..count)
-                .map(|index| (format!("行{index}"), Vec2::ZERO, 12.0, 0xFFFFFF))
-                .collect()
-        };
-        sync(&mut world, rows(3));
-        let three = world.resource::<Visuals>().labels["n1"].clone();
-        sync(&mut world, rows(1));
-        assert_eq!(world.resource::<Visuals>().labels["n1"], vec![three[0]]);
-        assert!(world.get_entity(three[1]).is_err());
-        assert!(world.get_entity(three[2]).is_err());
-        sync(&mut world, rows(2));
-        let two = world.resource::<Visuals>().labels["n1"].clone();
-        assert_eq!(two.len(), 2);
-        assert_eq!(two[0], three[0], "复用重叠部分");
-        assert_ne!(two[1], three[1], "被回收的槽位必须补建新实体");
-    }
-}
+mod tests;

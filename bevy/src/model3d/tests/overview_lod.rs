@@ -428,6 +428,7 @@ fn local_motion_split_keeps_low_and_pose() {
         playback.time = generation as f32;
         scene.animation_playback = Some(playback.clone());
         run_sync(&mut world, &scene, &resources);
+        let instances = super::opacity_instances(&mut world);
         let mut models = world.remove_resource::<ModelVisuals>().unwrap();
         let mut materials = world
             .remove_resource::<Assets<StandardMaterial>>()
@@ -436,6 +437,7 @@ fn local_motion_split_keeps_low_and_pose() {
             &mut world.commands(),
             &mut models,
             &mut materials,
+            &instances,
             &scene,
         );
         world.flush();

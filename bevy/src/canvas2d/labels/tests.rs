@@ -1,0 +1,217 @@
+//! 标签 owner/role/slot 生命周期回归
+//! （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，任务 4.1）。
+use super::*;
+use crate::app::CurrentScene;
+use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
+use crate::canvas2d::text_presentation;
+use bevy::ecs::system::RunSystemOnce;
+
+fn world() -> World {
+    let mut world = World::new();
+    world.insert_resource(CurrentScene(crate::protocol::Scene {
+        viewport: crate::protocol::Viewport {
+            x: 0.0,
+            y: 0.0,
+            zoom: 1.0,
+        },
+        ..Default::default()
+    }));
+    world.insert_resource(crate::app::SurfaceState::with_size(Vec2::new(800.0, 600.0)));
+    world.insert_resource(text_presentation::PresentationCache::default());
+    world.insert_resource(LabelRequests::default());
+    world.insert_resource(Visuals::default_for_test());
+    world
+}
+
+fn owner(world: &mut World) -> Entity {
+    world.spawn(Transform::IDENTITY).id()
+}
+
+fn push(world: &mut World, owner: Entity, labels: Vec<Label>) {
+    world
+        .resource_mut::<LabelRequests>()
+        .begin(CanvasLabelRole::Card);
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Card,
+        owner,
+        labels,
+        5.0,
+        LabelStyle::Node,
+    );
+    world.run_system_once(sync_canvas_labels).unwrap();
+    world.flush();
+}
+
+fn labels_of(world: &mut World, owner: Entity) -> Vec<Entity> {
+    let mut rows: Vec<_> = world
+        .query::<(Entity, &CanvasLabel, &ChildOf)>()
+        .iter(world)
+        .filter(|(_, _, child)| child.parent() == owner)
+        .map(|(entity, label, _)| (label.slot, entity))
+        .collect();
+    rows.sort_by_key(|(slot, _)| *slot);
+    rows.into_iter().map(|(_, entity)| entity).collect()
+}
+
+fn glyph(world: &World, entity: Entity) -> (f32, f32) {
+    let font = world.get::<TextFont>(entity).unwrap().font_size;
+    let size = match font {
+        FontSize::Px(size) => size,
+        other => panic!("unexpected font size {other:?}"),
+    };
+    (size, world.get::<Transform>(entity).unwrap().scale.x)
+}
+
+#[test]
+fn reused_label_keeps_logical_font_size_and_lets_strategy_rasterize() {
+    let mut world = world();
+    let node = owner(&mut world);
+    push(
+        &mut world,
+        node,
+        vec![("标题".to_owned(), Vec2::new(10.0, 20.0), 12.0, 0xFFFFFF)],
+    );
+    let entity = labels_of(&mut world, node)[0];
+    world.run_system_once(text_presentation::sync).unwrap();
+    let (font, scale) = glyph(&world, entity);
+    assert!((font * scale - 12.0).abs() <= 1.0e-3, "100% 档显示逻辑字号");
+
+    push(
+        &mut world,
+        node,
+        vec![("新标题".to_owned(), Vec2::new(10.0, 20.0), 16.0, 0xFFFFFF)],
+    );
+    assert_eq!(world.get::<LogicalText>(entity).unwrap().size, 16.0);
+    assert_eq!(world.get::<Text2d>(entity).unwrap().0, "新标题");
+    world.run_system_once(text_presentation::sync).unwrap();
+    let (font, scale) = glyph(&world, entity);
+    assert!((font * scale - 16.0).abs() <= 1.0e-3, "按新逻辑字号显示");
+
+    for _ in 0..3 {
+        push(
+            &mut world,
+            node,
+            vec![("新标题".to_owned(), Vec2::new(10.0, 20.0), 16.0, 0xFFFFFF)],
+        );
+        world.run_system_once(text_presentation::sync).unwrap();
+    }
+    let after = glyph(&world, entity);
+    assert!((after.1 - scale).abs() <= 1.0e-6);
+    assert_eq!(after.0, font);
+}
+
+#[test]
+fn hide_then_show_rebuilds_and_selects_current_step() {
+    let mut world = world();
+    let node = owner(&mut world);
+    push(
+        &mut world,
+        node,
+        vec![("标题".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)],
+    );
+    let first = labels_of(&mut world, node)[0];
+    push(&mut world, node, Vec::new());
+    assert!(world.get_entity(first).is_err(), "隐藏必须回收实体");
+
+    world.resource_mut::<CurrentScene>().0.viewport.zoom = 8.0;
+    world.resource_mut::<crate::app::SurfaceState>().pixel_ratio = 2.0;
+    push(
+        &mut world,
+        node,
+        vec![("标题".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)],
+    );
+    let second = labels_of(&mut world, node)[0];
+    assert_ne!(second, first, "隐藏后必须新建实体");
+    world.run_system_once(text_presentation::sync).unwrap();
+    let (font, scale) = glyph(&world, second);
+    assert!((font - 96.0).abs() <= 1.0e-3);
+    assert!((font * scale - 12.0).abs() <= 1.0e-3);
+}
+
+#[test]
+fn step_changes_keep_text_content_and_logical_layout() {
+    let mut world = world();
+    let node = owner(&mut world);
+    let long =
+        "这是一段会被业务逻辑截断的较长中文标题，用来验证栅格档位不影响文案与分行".to_owned();
+    push(
+        &mut world,
+        node,
+        vec![(long.clone(), Vec2::new(24.0, 56.0), 12.0, 0xFFFFFF)],
+    );
+    let entity = labels_of(&mut world, node)[0];
+    world.run_system_once(text_presentation::sync).unwrap();
+    let baseline_text = world.get::<Text2d>(entity).unwrap().0.clone();
+    let baseline_translation = world.get::<Transform>(entity).unwrap().translation;
+    for zoom in [2.0, 4.0, 8.0, 12.0, 4.0, 1.0] {
+        world.resource_mut::<CurrentScene>().0.viewport.zoom = zoom;
+        world.run_system_once(text_presentation::sync).unwrap();
+        assert_eq!(
+            world.get::<Text2d>(entity).unwrap().0,
+            baseline_text,
+            "zoom={zoom} 文案必须不变"
+        );
+        assert_eq!(
+            world.get::<Transform>(entity).unwrap().translation,
+            baseline_translation
+        );
+        let (font, scale) = glyph(&world, entity);
+        assert!(
+            (font * scale - 12.0).abs() <= 1.0e-3,
+            "zoom={zoom} 逻辑字号必须不变"
+        );
+        let bounds = world.get::<TextBounds>(entity).unwrap();
+        let width = bounds.width.expect("标签有界");
+        assert!((width * scale - LABEL_BOUNDS.x).abs() <= 1.0e-3);
+    }
+}
+
+#[test]
+fn pool_shrink_and_grow_reclaim_entities() {
+    let mut world = world();
+    let node = owner(&mut world);
+    let rows = |count: usize| -> Vec<Label> {
+        (0..count)
+            .map(|index| (format!("行{index}"), Vec2::ZERO, 12.0, 0xFFFFFF))
+            .collect()
+    };
+    push(&mut world, node, rows(3));
+    let three = labels_of(&mut world, node);
+    assert_eq!(three.len(), 3);
+    push(&mut world, node, rows(1));
+    assert_eq!(labels_of(&mut world, node), vec![three[0]]);
+    assert!(world.get_entity(three[1]).is_err());
+    assert!(world.get_entity(three[2]).is_err());
+    push(&mut world, node, rows(2));
+    let two = labels_of(&mut world, node);
+    assert_eq!(two.len(), 2);
+    assert_eq!(two[0], three[0], "复用重叠部分");
+    assert_ne!(two[1], three[1], "被回收的槽位必须补建新实体");
+}
+
+#[test]
+fn deleting_owner_reclaims_labels_and_roles_are_independent() {
+    let mut world = world();
+    let node = owner(&mut world);
+    push(
+        &mut world,
+        node,
+        vec![("卡片".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)],
+    );
+    world
+        .resource_mut::<LabelRequests>()
+        .begin(CanvasLabelRole::Running);
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Running,
+        node,
+        vec![("50%".to_owned(), Vec2::ZERO, 13.0, 0xFFFFFF)],
+        6.0,
+        LabelStyle::Running,
+    );
+    world.run_system_once(sync_canvas_labels).unwrap();
+    world.flush();
+    assert_eq!(labels_of(&mut world, node).len(), 2, "不同角色各自独立");
+    world.despawn(node);
+    world.flush();
+    assert!(world.query::<&CanvasLabel>().iter(&world).next().is_none());
+}
