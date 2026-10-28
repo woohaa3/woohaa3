@@ -13,42 +13,68 @@ use super::{dash::dashed_polyline, geometry::Geometry, group_outline, scope};
 
 const GROUP_BORDER: f32 = 1.5;
 
-pub(super) enum Target<'a> {
-    Card {
-        node: &'a GraphNode,
-        z: f32,
-    },
-    Group {
-        node: &'a GraphNode,
-        presentation: &'a GroupPresentation,
-        selected: bool,
-        running: bool,
-        z: f32,
-    },
-    FilmSet {
-        node: &'a GraphNode,
-        selected: bool,
-        hovered: bool,
-        z: f32,
-    },
+/// Crate extension point for a persistent selection outline.
+///
+/// Implementations own their geometry and state. New node kinds can add another implementation
+/// without changing a central enum or this dispatch function.
+pub(crate) trait SelectionOutline {
+    fn render(&self, geometry: &mut Geometry, theme: &ThemeResource);
 }
 
-pub(super) fn draw(geometry: &mut Geometry, theme: &ThemeResource, target: Target<'_>) {
-    match target {
-        Target::Card { node, z } => draw_card(geometry, theme, node, z),
-        Target::Group {
-            node,
-            presentation,
-            selected,
-            running,
-            z,
-        } => draw_group(geometry, theme, node, presentation, selected, running, z),
-        Target::FilmSet {
-            node,
-            selected,
-            hovered,
-            z,
-        } => draw_film_set(geometry, theme, node, selected, hovered, z),
+pub(crate) fn draw(geometry: &mut Geometry, theme: &ThemeResource, outline: &dyn SelectionOutline) {
+    outline.render(geometry, theme);
+}
+
+pub(crate) struct Card<'a> {
+    pub(super) node: &'a GraphNode,
+    pub(super) z: f32,
+}
+
+impl SelectionOutline for Card<'_> {
+    fn render(&self, geometry: &mut Geometry, theme: &ThemeResource) {
+        draw_card(geometry, theme, self.node, self.z);
+    }
+}
+
+pub(crate) struct Group<'a> {
+    pub(super) node: &'a GraphNode,
+    pub(super) presentation: &'a GroupPresentation,
+    pub(super) selected: bool,
+    pub(super) running: bool,
+    pub(super) z: f32,
+}
+
+impl SelectionOutline for Group<'_> {
+    fn render(&self, geometry: &mut Geometry, theme: &ThemeResource) {
+        draw_group(
+            geometry,
+            theme,
+            self.node,
+            self.presentation,
+            self.selected,
+            self.running,
+            self.z,
+        );
+    }
+}
+
+pub(crate) struct FilmSet<'a> {
+    pub(super) node: &'a GraphNode,
+    pub(super) selected: bool,
+    pub(super) hovered: bool,
+    pub(super) z: f32,
+}
+
+impl SelectionOutline for FilmSet<'_> {
+    fn render(&self, geometry: &mut Geometry, theme: &ThemeResource) {
+        draw_film_set(
+            geometry,
+            theme,
+            self.node,
+            self.selected,
+            self.hovered,
+            self.z,
+        );
     }
 }
 
@@ -204,25 +230,25 @@ mod tests {
         }));
         let presentation = group.group.as_ref().expect("group presentation");
 
-        let targets = [
-            Target::Card {
-                node: &card,
-                z: 10.,
-            },
-            Target::Group {
-                node: &group,
-                presentation,
-                selected: true,
-                running: false,
-                z: 1.,
-            },
-            Target::FilmSet {
-                node: &film_set,
-                selected: true,
-                hovered: false,
-                z: 10.,
-            },
-        ];
+        let card_outline = Card {
+            node: &card,
+            z: 10.,
+        };
+        let group_outline = Group {
+            node: &group,
+            presentation,
+            selected: true,
+            running: false,
+            z: 1.,
+        };
+        let film_set_outline = FilmSet {
+            node: &film_set,
+            selected: true,
+            hovered: false,
+            z: 10.,
+        };
+        let targets: [&dyn SelectionOutline; 3] =
+            [&card_outline, &group_outline, &film_set_outline];
         for target in targets {
             let mut geometry = Geometry::default();
             draw(&mut geometry, &theme, target);
@@ -237,17 +263,14 @@ mod tests {
             "id": "film", "type": "film-set", "x": 0., "y": 0., "width": 300., "height": 200.,
             "compositeAsset": {"x": 0., "y": 0., "width": 300., "height": 200.}
         }));
+        let outline = FilmSet {
+            node: &film_set,
+            selected: false,
+            hovered: false,
+            z: 10.,
+        };
         let mut geometry = Geometry::default();
-        draw(
-            &mut geometry,
-            &theme,
-            Target::FilmSet {
-                node: &film_set,
-                selected: false,
-                hovered: false,
-                z: 10.,
-            },
-        );
+        draw(&mut geometry, &theme, &outline);
         let mesh = geometry.build();
         let VertexAttributeValues::Float32x3(positions) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION).expect("positions")

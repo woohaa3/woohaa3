@@ -54,7 +54,7 @@ pub(crate) fn draw_film_set_scope(
     super::selection_outline::draw(
         geometry,
         theme,
-        super::selection_outline::Target::FilmSet {
+        &super::selection_outline::FilmSet {
             node,
             selected,
             hovered,

@@ -178,7 +178,7 @@ pub(super) fn draw_decorations(
         super::selection_outline::draw(
             geometry,
             theme,
-            super::selection_outline::Target::Card { node, z },
+            &super::selection_outline::Card { node, z },
         );
     }
     if selected && node.resizable {

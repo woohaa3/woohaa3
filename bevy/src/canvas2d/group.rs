@@ -110,7 +110,7 @@ pub(crate) fn draw_group(
     super::selection_outline::draw(
         geometry,
         theme,
-        super::selection_outline::Target::Group {
+        &super::selection_outline::Group {
             node,
             presentation,
             selected,
