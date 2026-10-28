@@ -141,18 +141,13 @@ export function SkillStepStatusView(props: SkillStepStatusViewProps) {
         <strong>Agent 步骤</strong>
         <span className="skill-step-status__state">{skillStepStatusText(step)}</span>
       </div>
-      <p className="skill-step-status__meta">
-        提示词 r{step.promptRevision}
-        {step.latestSuccessfulRunId ? ` · 最近成功 ${step.latestSuccessfulRunId}` : ""}
-      </p>
       {current?.state === "cancel-requested" ? (
         <p className="skill-step-status__hint">
-          取消请求已发出，Provider 尚未确认；可重复停止或等待权威终态，新尝试不受影响。
+          停止请求已发出，正在等待确认。
         </p>
       ) : null}
-      {current?.error ? <p className="skill-step-status__error">{current.error}</p> : null}
       {actions.needsRecovery ? (
-        <p className="skill-step-status__hint">当前尝试未成功，可按下方最新提示词重新生成；旧版本仅作历史核对。</p>
+        <p className="skill-step-status__hint">当前尝试未成功，可使用最新提示词恢复生成。</p>
       ) : null}
       {history.length > 0 ? (
         <details className="skill-step-status__history">
@@ -161,12 +156,18 @@ export function SkillStepStatusView(props: SkillStepStatusViewProps) {
             {history.map((attempt) => (
               <li key={attempt.attempt} data-state={attempt.state}>
                 第 {attempt.attempt} 次 · {attempt.label}
-                {attempt.supersededByRunId ? ` · 由 ${attempt.supersededByRunId} 接续` : ""}
               </li>
             ))}
           </ul>
         </details>
       ) : null}
+      <details className="skill-step-status__history">
+        <summary>技术详情</summary>
+        <p>步骤 {step.stepId} · 运行 {step.skillRunId} · 提示词版本 r{step.promptRevision}</p>
+        {step.latestSuccessfulRunId ? <p>最近成功运行 {step.latestSuccessfulRunId}</p> : null}
+        {step.attempts.map(attempt => <p key={attempt.attempt}>第 {attempt.attempt} 次 · 运行 {attempt.runId}{attempt.supersededByRunId ? ` · 接续运行 ${attempt.supersededByRunId}` : ""}{attempt.error ? ` · ${attempt.error}` : ""}</p>)}
+        {error ? <p>{error}</p> : null}
+      </details>
       {actions.canStop || actions.canRegenerate ? (
         <div className="skill-step-status__actions">
           {actions.canStop ? (
@@ -181,7 +182,7 @@ export function SkillStepStatusView(props: SkillStepStatusViewProps) {
           ) : null}
         </div>
       ) : null}
-      {error ? <p className="skill-step-status__error" role="alert">{error}</p> : null}
+      {error ? <p className="skill-step-status__error" role="alert">操作未完成，请重试或查看技术详情。</p> : null}
     </section>
   );
 }

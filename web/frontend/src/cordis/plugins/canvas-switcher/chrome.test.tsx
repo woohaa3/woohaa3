@@ -523,6 +523,8 @@ describe("CanvasSwitcher dialog renderer", () => {
     );
     expect(markup).toContain("还没有画布");
     expect(markup).toContain("canvas-switcher-empty");
+    expect(markup).not.toContain("暂无画布");
+    expect(markup.match(/>新建画布</g)).toHaveLength(1);
   });
 
   it("最长名称不破坏主要动作（标题与当前徽标共存）", async () => {

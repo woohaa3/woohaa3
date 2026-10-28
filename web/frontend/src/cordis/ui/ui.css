@@ -1756,6 +1756,10 @@
 .video-edit-dialog__prompt-field { display: flex; flex-direction: column; gap: 4px; }
 .video-edit-dialog__prompt-field textarea { width: 100%; resize: vertical; }
 .video-edit-dialog__range { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.video-edit-dialog__range-editor { margin-top: 10px; }
+.video-edit-dialog__range-inputs { display: flex; gap: 8px; }
+.video-edit-dialog__range-inputs label { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.video-edit-dialog__range-inputs input { min-width: 0; width: 100%; }
 .video-edit-dialog__hint { color: var(--app-web-text-muted); font-size: 12px; }
 
 @media (max-width: 720px) {

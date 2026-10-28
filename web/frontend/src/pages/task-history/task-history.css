@@ -105,7 +105,7 @@
 .task-history__error-summary { display: inline-block; max-width: 320px; color: var(--app-status-danger); overflow: hidden; text-overflow: ellipsis; }
 .task-history__thumb img { width: 48px; height: 48px; object-fit: cover; border: 1px solid var(--mc-border); border-radius: 6px; }
 .task-history__result-icon { width: 14px; height: 14px; vertical-align: -2px; }
-.task-history__result-text { display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.task-history__result-summary { display: -webkit-box; max-width: 320px; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .task-history__cell-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .task-history__jump-reason { color: var(--mc-text-muted); font-size: 11px; }
 

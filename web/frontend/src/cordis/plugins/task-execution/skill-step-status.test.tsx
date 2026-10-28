@@ -132,7 +132,7 @@ describe("面板静态展示", () => {
       />
     );
     expect(html).toContain('data-state="cancel-requested"');
-    expect(html).toContain("取消请求已发出");
+    expect(html).toContain("停止请求已发出，正在等待确认");
     expect(html).toContain("停止");
     expect(html).toContain("改词重新生成");
     expect(html).not.toContain("已取消");
@@ -151,7 +151,7 @@ describe("面板静态展示", () => {
       />
     );
     expect(failed).toContain("恢复生成");
-    expect(failed).toContain("旧版本仅作历史核对");
+    expect(failed).toContain("使用最新提示词恢复生成");
     const busy = renderToStaticMarkup(
       <SkillStepStatusView
         step={step("running")}
@@ -192,8 +192,9 @@ describe("面板静态展示", () => {
         />
       );
       expect(html).toContain("第 2 次 · 已完成");
-      expect(html).toContain("提示词 r2");
-      expect(html).toContain("最近成功 run-2");
+      expect(html).toContain("提示词版本 r2");
+      expect(html).toContain("最近成功运行 run-2");
+      expect(html).toContain("<summary>技术详情</summary>");
       expect(html).toContain("历史尝试（1）");
       expect(html).toContain("第 1 次 · 已被后续尝试替代");
     } finally {

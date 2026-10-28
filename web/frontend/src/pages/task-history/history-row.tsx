@@ -148,7 +148,7 @@ function ResultSummaryCell({ row, resolveMediaUrl }: { row: HistoryRow; resolveM
     );
   }
   return (
-    <span className="task-history__muted task-history__result-text" title={row.result.text}>
+    <span className="task-history__muted task-history__result-summary" title={row.result.text}>
       {row.result.text ?? "文本结果"}
       {row.result.textTruncated ? "（已截断）" : ""}
     </span>

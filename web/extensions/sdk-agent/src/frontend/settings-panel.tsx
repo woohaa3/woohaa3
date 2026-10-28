@@ -257,23 +257,7 @@ export function SdkAgentSettingsPanel({
         >
           <div className="settings-section__field">
             <span>API 协议</span>
-            <SelectInput
-              label="API 协议"
-              value={adapterId}
-              disabled={Boolean(busy) || loading}
-              onValueChange={(value) => {
-                setAdapterId(value);
-                setBaseUrl("");
-                setSecret("");
-                setModelsText("");
-                setConfirm(null);
-                setNotice(null);
-              }}
-              options={adapters.filter((entry) => entry.adapterId === adapterId || !["codex-agent-sdk", "claude-agent-sdk"].includes(entry.adapterId)).map((entry) => ({
-                value: entry.adapterId,
-                label: entry.label,
-              }))}
-            />
+            <SelectInput label="API 协议" value={adapterId} disabled={Boolean(busy) || loading} onValueChange={(value) => { setAdapterId(value); setBaseUrl(""); setSecret(""); setModelsText(""); setConfirm(null); setNotice(null); }} options={adapters.filter(entry => entry.adapterId === adapterId || !["codex-agent-sdk", "claude-agent-sdk"].includes(entry.adapterId)).map(entry => ({ value: entry.adapterId, label: entry.label }))} />
           </div>
           {adapter?.allowCustomBaseUrl ? <label className="settings-section__field">
             <span>Base URL</span>

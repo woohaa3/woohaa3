@@ -19,8 +19,8 @@ type Page = "connections" | "add" | "configuration";
 type Payload = { canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics" };
 const kinds = [
   { id: "installed", label: "我有本地 agent", title: "连接本地 agent", services: [{ id: "chatgpt", name: "本地 ChatGPT" }, { id: "opencode", name: "本地 OpenCode" }, { id: "codebuddy", name: "本地 CodeBuddy" }], detail: "使用运行本应用的电脑上已安装的 agent。" },
-  { id: "api-key", label: "按协议接入 LLM", title: "按协议接入 LLM", services: [{ id: "responses-protocol", name: "Responses" }, { id: "messages-protocol", name: "Messages" }, { id: "chat-protocol", name: "Chat Completions" }, { id: "gemini-protocol", name: "Gemini" }], detail: "选择接口协议，填写服务地址与 API Key，接入兼容的 LLM 服务。" },
-  { id: "login", label: "账号授权", title: "连接 ChatGPT", services: [{ id: "chatgpt", name: "ChatGPT" }], detail: "使用已有的 ChatGPT 账号登录并授权。" },
+  { id: "login", label: "我有 ChatGPT 账号", title: "连接 ChatGPT", services: [{ id: "chatgpt", name: "ChatGPT" }], detail: "使用已有的 ChatGPT 账号登录并授权。" },
+  { id: "api-key", label: "我有 API Key", title: "连接自定义兼容服务", services: [], detail: "填写兼容服务的协议、地址和 API Key。" },
 ] as const;
 const GenerationProviders = lazy(() => import("../settings/provider-settings-cards.js").then(module => ({ default: module.ProviderSettingsCards })));
 

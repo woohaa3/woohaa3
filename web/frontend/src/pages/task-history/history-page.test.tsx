@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HistoryDetail, TaskHistoryPage } from "./history-page.js";
+import { HistoryRowView } from "./history-row.js";
 import type { TaskHistoryClient } from "../../shared/task-history/client.js";
 import type { TaskExecutionDetail } from "@woohaa3/contracts";
 
@@ -75,6 +76,16 @@ describe("HistoryDetail（任务 4.5 / 4.6 / 5.5）", () => {
       { sequence: 1, occurredAt: "2026-09-24T00:00:05Z", kind: "execution", stage: "pptask.failed" }
     ]
   };
+
+  it("长文本在列表与详情使用独立样式，详情保留换行与全文", () => {
+    const text = `第一行\n${"长文本".repeat(100)}\n最后一行`;
+    const detail = { ...base, state: "succeeded" as const, error: undefined, result: { mediaKind: "text" as const, text } };
+    const row = renderToStaticMarkup(<table><tbody><HistoryRowView row={detail} selected={false} onOpen={() => {}} onCopy={async () => true} resolveMediaUrl={key => key} /></tbody></table>);
+    const full = renderToStaticMarkup(<HistoryDetail detail={detail} error={null} resolveMediaUrl={key => key} copyText={async () => true} onClose={() => {}} />);
+    expect(row).toContain("task-history__result-summary");
+    expect(row).not.toContain("task-history__result-text");
+    expect(full).toContain(`class="task-history__result-text">${text}</pre>`);
+  });
 
   it("失败记录优先展示安全错误与可读阶段，保留安全原 stage", () => {
     const markup = renderToStaticMarkup(<HistoryDetail detail={base} error={null} resolveMediaUrl={(k) => `/api/media/${k}`} copyText={async () => true} onClose={() => undefined} />);
