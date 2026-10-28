@@ -338,6 +338,7 @@ fn spawn_v2(
     ModelRoot {
         entities: spawned,
         content_signature: String::new(),
+        texture_revision: crate::model3d::model_textures::revision(),
         resource: std::sync::Arc::new(ModelSnapshot::default()),
         placement: ModelPlacement::default(),
         layout: ModelRootLayout::V2 { root },

@@ -453,7 +453,7 @@ fn local_motion_split_keeps_low_and_pose() {
 fn shared_custom_mesh_stays_high_for_overview_while_card_uses_low() {
     // 片场与普通卡片共享同一自定义 Mesh：片场消费原 High，卡片沿用 Low 简化。
     use crate::model3d::{scene::ModelGeometry, simplification::tests::sphere};
-    let ModelGeometry::Mesh { vertices, faces } = sphere() else {
+    let ModelGeometry::Mesh { vertices, faces, .. } = sphere() else {
         panic!()
     };
     let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
@@ -508,6 +508,9 @@ fn shared_custom_mesh_stays_high_for_overview_while_card_uses_low() {
         &ModelGeometry::Mesh {
             vertices: vertices.clone(),
             faces: faces.clone(),
+            normals: None,
+            uvs: None,
+            colors: None,
         },
         Quality::High,
     )
@@ -811,11 +814,11 @@ fn bevy_overview_tier_triangles_match_tool_table() {
 #[test]
 fn custom_mesh_retains_authored_faces_at_every_tier() {
     use crate::model3d::{scene::ModelGeometry, simplification::tests::sphere};
-    let ModelGeometry::Mesh { vertices, faces } = sphere() else {
+    let ModelGeometry::Mesh { vertices, faces, .. } = sphere() else {
         panic!()
     };
     let authored = faces.len();
-    let geometry = ModelGeometry::Mesh { vertices, faces };
+    let geometry = ModelGeometry::Mesh { vertices, faces, normals: None, uvs: None, colors: None };
     for quality in [Quality::High, Quality::Medium, Quality::Low] {
         let mesh = super::super::mesh::build_mesh_quality(&geometry, quality).unwrap();
         assert_eq!(
@@ -835,6 +838,9 @@ fn effective_quality_only_lowers_supported_primitives() {
     let custom = ModelGeometry::Mesh {
         vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
         faces: vec![[0, 1, 2]],
+        normals: None,
+        uvs: None,
+        colors: None,
     };
     assert_eq!(effective_quality(&box_geometry, Quality::Low, true), Quality::High);
     assert_eq!(effective_quality(&sphere_geometry, Quality::Low, true), Quality::Low);

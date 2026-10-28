@@ -97,7 +97,7 @@ fn invisible_prewarm_stays_low_until_visible_but_capture_pins_high() {
 #[test]
 fn asynchronous_custom_lod_rebinds_shared_roots_without_changing_ids_or_capture_high() {
     use super::super::{scene::ModelGeometry, simplification::tests::sphere};
-    let ModelGeometry::Mesh { vertices, faces } = sphere() else {
+    let ModelGeometry::Mesh { vertices, faces, .. } = sphere() else {
         panic!()
     };
     let (mut scene, mut resources) = scene();

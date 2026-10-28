@@ -1,5 +1,5 @@
 import {
-  decodeModel3DNodeData, filmSetObjectOwnershipOf, filmSetItemEditHash,
+  scriptModel3DNodeData, filmSetObjectOwnershipOf, filmSetItemEditHash,
   modelSourceHash, replaceFilmSetObjectModel, resolveFilmSetObject
 } from "@woohaa3/contracts";
 import type { FilmSetHostContext as FilmSetContext } from "../../state/browser/host-ports.js";
@@ -23,9 +23,9 @@ export function installFilmSetObjectContainers(ctx: FilmSetContext, feedback = n
         if (!target || !ctx.canvasSession.isWritable()) { report(targetNodeId, "当前不可写或对象已不存在"); return true; }
         if (pending.has(targetNodeId)) { report(targetNodeId, "正在替换，请等待完成"); return true; }
         const source = sourceNodeIds.length === 1 ? canvas.document.nodes.find(node => node.id === sourceNodeIds[0] && node.type === "model3d") : null;
-        const decoded = source ? decodeModel3DNodeData(canvas.nodeData[source.id]) : null;
-        if (!source || !decoded?.ok) { report(targetNodeId, "一次只能拖入一个已就绪的普通 3D 模型"); return true; }
-        const op = { kind: "replace-model" as const, sourceNodeId: source.id, expectedSourceHash: modelSourceHash(decoded.value.model.modelScript), expectedModelHash: decoded.value.model.contentVersion.contentHash, expectedItemHash: filmSetItemEditHash(target.item), importedAt: new Date().toISOString() };
+        const decoded = source ? scriptModel3DNodeData(canvas.nodeData[source.id]) : null;
+        if (!source || !decoded) { report(targetNodeId, "文件模型不能替换片场对象；一次只能拖入一个已就绪的普通 3D 模型"); return true; }
+        const op = { kind: "replace-model" as const, sourceNodeId: source.id, expectedSourceHash: modelSourceHash(decoded.model.modelScript), expectedModelHash: decoded.model.contentVersion.contentHash, expectedItemHash: filmSetItemEditHash(target.item), importedAt: new Date().toISOString() };
         const plan = replaceFilmSetObjectModel({ animation: target.animation, itemId: target.item.id, sourceData: canvas.nodeData[source.id], ...op });
         if (!plan.ok) { report(targetNodeId, plan.reason); return true; }
         pending.add(targetNodeId); report(targetNodeId, "正在替换模型…");

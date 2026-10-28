@@ -43,6 +43,13 @@ describe("classifyPasteFile", () => {
     expect(classifyPasteFile({ name: "a.bin", type: "application/octet-stream", size: 10 })).toBeNull();
   });
 
+  it("GLB 归为 model3d（空 MIME 也可），.gltf 明确拒绝", () => {
+    expect(classifyPasteFile({ name: "model.glb", type: "", size: 1024 })).toBe("model3d");
+    expect(classifyPasteFile({ name: "model.glb", type: "application/octet-stream", size: 1024 })).toBe("model3d");
+    expect(classifyPasteFile({ name: "model.glb", type: "model/gltf-binary", size: 1024 })).toBe("model3d");
+    expect(classifyPasteFile({ name: "model.gltf", type: "model/gltf+json", size: 1024 })).toBeNull();
+  });
+
   it("拒绝目录、零字节与无名文件", () => {
     expect(classifyPasteFile({ name: "folder", type: "", size: 0 })).toBeNull();
     expect(classifyPasteFile({ name: "empty.png", type: "image/png", size: 0 })).toBeNull();

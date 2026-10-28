@@ -253,7 +253,18 @@ export function addNode(
   if (command.nodeData) {
     const intentRejection = validateVideoEditIntentsPatch(command.nodeData);
     if (intentRejection) return intentRejection;
-    work.nodeData[nextNode.id] = { ...command.nodeData };
+    const value = { ...command.nodeData };
+    work.nodeData[nextNode.id] = value;
+    // 文件模型（GLB）在创建时就要走与 patch 相同的权威校验与内容身份归一化：导入/粘贴/恢复
+    // 都不能依赖客户端声明的 hash，也不能绕过来源互斥与资产存在性校验。脚本模型的创建语义
+    // 保持原样（历史内容允许带未知/旧版本，由执行侧稳定失败），只有出现来源标记时收口
+    // （change: 2026-10-28-support-glb-model-nodes）。
+    if (value.modelSourceKind !== undefined && isModelDefinitionNode(work, nextNode.id)) {
+      const nodeRejection = validateSelfContained3DNodePatch(work, nextNode.id, value);
+      if (nodeRejection) return nodeRejection;
+      const normalized = normalizeSelfContained3D(work, nextNode.id, value, value);
+      if (normalized) return normalized;
+    }
   }
   return OK;
 }

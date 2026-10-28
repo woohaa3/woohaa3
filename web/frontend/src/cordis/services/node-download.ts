@@ -1,4 +1,10 @@
-import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
+import {
+  GLB_MEDIA_TYPE,
+  isGlbModelNodeData,
+  readGlbModelAssetId,
+  type ServerCanvas,
+  type StoredAsset
+} from "@woohaa3/contracts";
 import { readCanonicalMedia } from "./media-remote.js";
 import { downloadFilename, saveDownload } from "./file-download.js";
 
@@ -45,9 +51,21 @@ export class NodeDownloadService {
       const data = canvas.nodeData[nodeId];
       let blob: Blob;
       if (node.type === "model3d") {
-        if (!data?.modelScript?.trim()) throw new Error("模型尚无可下载的内容");
-        const exporter = this.options.exportModel ?? (await import("./model-download.js")).downloadModelBlob;
-        blob = await exporter(data.modelScript, data.modelScriptVersion, abort.signal);
+        if (isGlbModelNodeData(data)) {
+          // 文件模型：下载**原始 GLB 字节**（change: 2026-10-28-support-glb-model-nodes）。
+          const assetId = readGlbModelAssetId(data);
+          const asset = assetId ? canvas.assets.find((entry) => entry.id === assetId) : undefined;
+          if (!asset || asset.status !== "ready") throw new Error("模型资源尚未就绪，暂时无法下载");
+          const read = this.options.readMedia ?? readCanonicalMedia;
+          const raw = await read(asset, abort.signal, canvas.id);
+          abort.signal.throwIfAborted();
+          if (raw.size === 0) throw new Error("模型文件为空，请重试");
+          blob = new Blob([raw], { type: GLB_MEDIA_TYPE });
+        } else {
+          if (!data?.modelScript?.trim()) throw new Error("模型尚无可下载的内容");
+          const exporter = this.options.exportModel ?? (await import("./model-download.js")).downloadModelBlob;
+          blob = await exporter(data.modelScript, data.modelScriptVersion, abort.signal);
+        }
       } else if (node.type === "image" || node.type === "video") {
         const asset = data?.mediaContent
           ? await this.options.mediaContent?.resolve(nodeId, "resolvePreview", `download:${crypto.randomUUID()}`)

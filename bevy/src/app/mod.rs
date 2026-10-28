@@ -177,6 +177,8 @@ fn configure_canvas(app: &mut App) {
                         (
                             model3d::film_set_media::sync_film_set_planes,
                             canvas2d::scope_panel::sync_images,
+                            // GLB 内嵌纹理 → 共享 Image（先于片场批次 drain 与模型 spawn）。
+                            model3d::model_textures::sync_model_textures,
                             model3d::film_set_media::sync_film_set_textures,
                         )
                             .chain(),

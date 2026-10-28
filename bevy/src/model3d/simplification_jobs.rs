@@ -65,6 +65,9 @@ mod tests {
         let geometry = Arc::new(ModelGeometry::Mesh {
             vertices: vec![[0., 0., 0.]; 100],
             faces: vec![[0, 1, 2]; 100],
+            normals: None,
+            uvs: None,
+            colors: None,
         });
         let mut jobs = Jobs::default();
         for index in 0..MAX_JOBS + 3 {
@@ -80,6 +83,9 @@ mod tests {
         let oversized = Arc::new(ModelGeometry::Mesh {
             vertices: vec![[0., 0., 0.]; simplification::MAX_VERTICES + 1],
             faces: vec![[0, 1, 2]; 100],
+            normals: None,
+            uvs: None,
+            colors: None,
         });
         jobs.enqueue("large".into(), oversized, Quality::Low);
         assert!(jobs.pending.is_empty());
@@ -108,7 +114,7 @@ pub(super) struct Jobs {
 }
 impl Jobs {
     pub fn enqueue(&mut self, key: String, geometry: Arc<ModelGeometry>, quality: Quality) {
-        let ModelGeometry::Mesh { vertices, faces } = geometry.as_ref() else {
+        let ModelGeometry::Mesh { vertices, faces, .. } = geometry.as_ref() else {
             return;
         };
         if faces.len() < 64 {

@@ -726,6 +726,7 @@ fn publish(
     let mut root_state = ModelRoot {
         entities: std::mem::take(&mut staging.spawned),
         content_signature: prepared.content_signature.clone(),
+        texture_revision: crate::model3d::model_textures::revision(),
         resource,
         placement: node
             .and_then(|node| node.model.as_ref())

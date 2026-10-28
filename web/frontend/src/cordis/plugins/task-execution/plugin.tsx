@@ -37,7 +37,7 @@ import { nodeDraftStore } from "./drafts.js";
 import { registerGenerationTraceMenu } from "./generation-trace.js";
 import { GENERATION_TRACE_DIALOG_ID, registerGenerationTraceDialog } from "./generation-trace-dialog.js";
 import { createTaskMonitorRemote } from "../../../shared/task-trace/remote.js";
-import { defaultAppTheme, isFilmSetNode, OPEN_TASK_INSPECTION_ACTION, TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
+import { defaultAppTheme, isFilmSetNode, isGlbModelNodeData, OPEN_TASK_INSPECTION_ACTION, TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
 import {
   panelRouteForIntent,
   panelTypeForNodeType,
@@ -544,13 +544,18 @@ function buildModelRenderGenerate(
   const clipId = isFilmSet ? resolveFilmSetTargetClip(nodeId) : undefined;
   const expectedContentHash = isFilmSet ? resolveFilmSetClipHash(nodeId) : isGroup ? resolveExpectedGroupAppearanceHash(nodeId) : resolveExpectedModelContentHash(nodeId);
   const blockedReason = isFilmSet && !clipId ? "该片场节点还没有可写入的动画片段，请先创建动画片段。" : null;
+  // 文件模型以原始 GLB 为唯一权威内容：脚本/部件生成入口按来源禁用并说明原因
+  // （change: 2026-10-28-support-glb-model-nodes，spec「文件模型仅提供可用操作」）。
+  const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
+  const fileModel = isGlbModelNodeData(canvas?.nodeData?.[nodeId]);
+  const fileModelReason = fileModel ? "文件模型只支持查看和下载原 GLB，不提供脚本修改。" : null;
   return () => (
     <AuthoringGenerateHost
       canvasId={resolveCanvasId()}
       nodeId={nodeId}
       mode={mode}
-      writable={writable && blockedReason === null}
-      disabledReason={!writable ? "当前会话不可写，无法直接生成。" : blockedReason}
+      writable={writable && blockedReason === null && !fileModel}
+      disabledReason={fileModelReason ?? (!writable ? "当前会话不可写，无法直接生成。" : blockedReason)}
       {...(expectedContentHash ? { expectedContentHash } : {})}
       clipId={clipId ?? null}
       onAuthorize={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: {} })}

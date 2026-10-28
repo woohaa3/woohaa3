@@ -71,6 +71,25 @@ describe("下载就绪门禁独立于画布写权限（任务 3.2/design D7）",
     expect(resolveNodeDownloadAvailability({ canvas: empty, nodeId: "model", nodeType: "model3d" }).available).toBe(false);
   });
 
+  it("文件模型按引用资产就绪性判定下载，不再要求脚本", () => {
+    const glbData = {
+      title: "模型.glb",
+      modelSourceKind: "glb" as const,
+      modelAssetId: "asset-glb",
+      modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" },
+      modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
+    };
+    const ready = canvasWith({
+      nodeData: { model: glbData },
+      assets: [{ id: "asset-glb", title: "模型.glb", source: "uploaded", mediaKind: "file", status: "ready", createdAt: "2026-10-28T00:00:00Z", url: "/api/media/g" }]
+    });
+    expect(resolveNodeDownloadAvailability({ canvas: ready, nodeId: "model", nodeType: "model3d" })).toEqual({ available: true });
+    const missing = canvasWith({ nodeData: { model: glbData }, assets: [] });
+    const result = resolveNodeDownloadAvailability({ canvas: missing, nodeId: "model", nodeType: "model3d" });
+    expect(result.available).toBe(false);
+    if (!result.available) expect(result.reason).toContain("尚未就绪");
+  });
+
   it("画布未加载时禁用", () => {
     expect(resolveNodeDownloadAvailability({ canvas: null, nodeId: "img", nodeType: "image" }).available).toBe(false);
   });

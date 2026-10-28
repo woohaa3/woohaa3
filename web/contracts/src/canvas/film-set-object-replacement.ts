@@ -1,5 +1,5 @@
 /** Freeze one model snapshot and adapt only the target object's motion bindings. */
-import { decodeModel3DNodeData, type FilmSetNodeData } from "./canvas-node-model.js";
+import { scriptModel3DNodeData, type FilmSetNodeData } from "./canvas-node-model.js";
 import { cloneFilmSetItem, establishItemMotionAdapter, type FilmSetModelItem } from "./film-set-content.js";
 import { filmSetItemEditHash } from "./film-set-item-edit.js";
 import { filmSetAnimationsOf } from "./film-set-clip-view.js";
@@ -19,11 +19,11 @@ export function replaceFilmSetObjectModel(input: {
   }
   const old = input.animation.filmSetContent.items.find(item => item.id === input.itemId);
   if (!old || filmSetItemEditHash(old) !== input.expectedItemHash) return { ok: false, reason: "对象已变化，请重新拖入模型" };
-  const source = decodeModel3DNodeData(input.sourceData);
-  if (!source.ok || modelSourceHash(source.value.model.modelScript) !== input.expectedSourceHash) return { ok: false, reason: "来源模型已变化或不可用，请重新拖入" };
-  const model = createModelSnapshot({ ...source.value.model, revision: source.value.model.contentVersion.revision });
+  const source = scriptModel3DNodeData(input.sourceData);
+  if (!source || modelSourceHash(source.model.modelScript) !== input.expectedSourceHash) return { ok: false, reason: "来源模型已变化或不可用，请重新拖入" };
+  const model = createModelSnapshot({ ...source.model, revision: source.model.contentVersion.revision });
   if (model.contentVersion.contentHash !== input.expectedModelHash) return { ok: false, reason: "来源模型版本已变化，请重新拖入" };
-  const execution = executeModelScriptVersioned(source.value.model.modelScript, source.value.model.modelScriptVersion);
+  const execution = executeModelScriptVersioned(source.model.modelScript, source.model.modelScriptVersion);
   if (!execution.ok) return { ok: false, reason: `来源模型编译失败：${execution.message}` };
   const next = cloneFilmSetItem({ id: old.id, name: old.name, kind: "model", localTransform: old.localTransform,
     model, origin: { sourceNodeId: input.sourceNodeId, importedAt: input.importedAt } }) as FilmSetModelItem;

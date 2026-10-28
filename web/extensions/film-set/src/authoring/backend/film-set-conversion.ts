@@ -25,7 +25,7 @@ import {
   canonicalFilmSetFields,
   createFilmSetSnapshot,
   createMotionSnapshot,
-  decodeModel3DNodeData,
+  scriptModel3DNodeData,
   filmSetConversionCapabilityRejectionCode,
   filmSetConversionInputHash,
   filmSetConversionNodeTaskStatus,
@@ -457,16 +457,16 @@ export class FilmSetConversionService {
     if (!(await this.ensurePlaceholder(record, room))) return;
     const node = canvas.document.nodes.find((entry) => entry.id === record.sourceNodeId);
     const data = canvas.nodeData[record.sourceNodeId] as CanvasNodeData | undefined;
-    const decoded = decodeModel3DNodeData(data);
-    if (!node || !decoded.ok) {
-      await this.fail(record, "source-not-ready", "来源模型不完整，无法复制", false);
+    const decoded = scriptModel3DNodeData(data);
+    if (!node || !decoded) {
+      await this.fail(record, "unsupported-source", "文件模型无法复制为片场", false);
       return;
     }
     await this.updateRunning(record, { step: "analyze-content" });
     const cameras = readModelCameras(data);
     const built = buildModelCopyCandidate({
       title: filmSetConversionTitle(record.title),
-      model: decoded.value.model,
+      model: decoded.model,
       cameras
     });
     await this.updateRunning(record, { step: "generate-film-set" });

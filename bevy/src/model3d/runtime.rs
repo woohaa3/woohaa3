@@ -157,6 +157,9 @@ pub(crate) struct ModelRoot {
     pub(super) entities: Vec<Entity>,
     /// 内容 identity（Scene IR/version/material/animation）；决定是否重建 hierarchy。
     pub(super) content_signature: String,
+    /// 建立该根时的模型纹理表 revision；纹理晚到/被回收后变化时重建，使材质重新绑定句柄
+    /// （change: 2026-10-28-support-glb-model-nodes）。
+    pub(super) texture_revision: u64,
     /// 该资源表条目的 `Arc`；保证本帧引用期间不被 LRU 淘汰。
     pub(super) resource: std::sync::Arc<ModelSnapshot>,
     /// 实例的 placement；placement 变化只刷新根 transform，不重建。
@@ -368,8 +371,14 @@ pub(crate) fn sync_models(
             );
             continue;
         }
+        let texture_revision = super::model_textures::revision();
+        // 只有真正引用内嵌纹理的模型需要在纹理表变化时重建；脚本模型与无纹理 GLB 不受影响。
+        let needs_textures = resource.ops.iter().any(|op| {
+            matches!(op, crate::protocol::ModelOp::Material { base_color_texture: Some(_), .. })
+        });
         let rebuild = models.roots.get(&node.id).is_none_or(|root| {
             root.content_signature != content_signature || root.batched != batched
+                || (needs_textures && root.texture_revision != texture_revision)
                 || !Arc::ptr_eq(&root.resource, resource)
         });
         if rebuild {
@@ -406,6 +415,7 @@ pub(crate) fn sync_models(
             );
             root.representation_generation = generation;
             root.content_signature = content_signature.to_owned();
+            root.texture_revision = texture_revision;
             root.resource = resource.clone();
             root.placement = reference.placement.clone();
             // 重建后的新动画实体按当前门禁初始化：只有目标仍是唯一合法 hover 模型时从零播放，

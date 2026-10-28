@@ -3,6 +3,8 @@ import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/cont
 import { NodeDownloadService } from "./node-download.js";
 import { readCanonicalMedia } from "./media-remote.js";
 
+const NOW = "2026-10-10T00:00:00Z";
+
 function canvas(): ServerCanvas {
   return { ...createEmptyWoohaa3ServerCanvas("test"),
     document: { schemaVersion: "asset-canvas-v1", updatedAt: "2026-10-10T00:00:00Z", nodes: [{ id: "image", type: "image", position: { x: 20, y: 30 } }], edges: [] },
@@ -80,6 +82,38 @@ describe("node download recovery", () => {
     expect(fetcher).not.toHaveBeenCalled();
     await expect(readCanonicalMedia({ url: "/api/media/missing" })).rejects.toThrow("HTTP 404");
     await expect(readCanonicalMedia({ url: "/api/media/empty" })).rejects.toThrow("文件为空");
+  });
+
+  it("文件模型下载原始 GLB 字节并使用 .glb 扩展名", async () => {
+    const state = canvas();
+    state.document.nodes.push({ id: "glb", type: "model3d", position: { x: 0, y: 0 } });
+    (state.nodeData as Record<string, unknown>).glb = {
+      title: "角色",
+      modelSourceKind: "glb",
+      modelAssetId: "asset-glb",
+      modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" },
+      modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
+    };
+    state.assets.push({ id: "asset-glb", title: "角色.glb", source: "uploaded", mediaKind: "file", status: "ready", createdAt: NOW, url: "/api/media/sha256-glb" });
+    const original = new Blob([new Uint8Array([0x67, 0x6c, 0x54, 0x46])]);
+    const readMedia = vi.fn(async () => original);
+    const save = vi.fn();
+    const exportModel = vi.fn(async () => new Blob(["scene"]));
+    const service = new NodeDownloadService({ getCanvas: () => state, readMedia, save, exportModel });
+    await service.download("glb");
+    expect(exportModel).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledOnce();
+    const [blob, filename] = save.mock.calls[0];
+    expect(filename).toBe("角色.glb");
+    expect((blob as Blob).type).toBe("model/gltf-binary");
+    expect(service.getSnapshot()).toMatchObject({ busy: false, error: false });
+
+    // 资产缺失时明确失败，不退化成导出脚本。
+    state.assets = state.assets.filter((asset) => asset.id !== "asset-glb");
+    await service.download("glb");
+    expect(service.getSnapshot()?.text).toContain("尚未就绪");
+    expect(save).toHaveBeenCalledOnce();
+    service.dispose();
   });
 
   it("times out an unresponsive transfer and allows a fresh download", async () => {

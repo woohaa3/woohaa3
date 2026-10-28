@@ -8,7 +8,7 @@
  *
  * 由拖动族委托调用；渲染与命中复用 contracts 的同一投影逻辑。
  */
-import { createHighEntropyId, decodeFilmSetNodeData, decodeModel3DNodeData, isFilmSetNode, canonicalFilmSetFields, modelSourceHash, planFilmSetImportItems, appendFilmSetItems, type FilmSetNodeData, type FilmSetImportItemDraft, type ServerCanvas, type Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
+import { createHighEntropyId, decodeFilmSetNodeData, scriptModel3DNodeData, isFilmSetNode, canonicalFilmSetFields, modelSourceHash, planFilmSetImportItems, appendFilmSetItems, type FilmSetNodeData, type FilmSetImportItemDraft, type ServerCanvas, type Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
 
 /**
  * 片场拖入可接受的来源节点类型：**只有普通模型**。
@@ -102,8 +102,8 @@ function resolveSource(
 ): { ok: true; value: FilmSetDropSource } | { ok: false; reason: string } {
   const data = canvas.nodeData[source.id];
   if (source.type !== "model3d") return { ok: false, reason: FILM_SET_DROP_UNSUPPORTED_SOURCE };
-  const decoded = decodeModel3DNodeData(data);
-  if (!decoded.ok) return { ok: false, reason: "来源模型不完整" };
+  const decoded = scriptModel3DNodeData(data);
+  if (!decoded) return { ok: false, reason: "文件模型不支持导入片场" };
   return {
     ok: true,
     value: {
@@ -111,7 +111,7 @@ function resolveSource(
       itemId: createHighEntropyId("film-object"),
       name: typeof data?.title === "string" && data.title.trim() ? data.title.trim() : "模型",
       sourceNodeId: source.id,
-      expectedSourceHash: decoded.value.model.contentVersion.sourceHash
+      expectedSourceHash: decoded.model.contentVersion.sourceHash
     }
   };
 }
@@ -158,17 +158,17 @@ function resolveDraft(
 ): { ok: true; value: FilmSetImportItemDraft } | { ok: false; reason: string } {
   const node = canvas.document.nodes.find((entry) => entry.id === source.sourceNodeId);
   if (!node || node.type !== "model3d") return { ok: false, reason: "来源模型不存在" };
-  const decoded = decodeModel3DNodeData(canvas.nodeData[node.id]);
-  if (!decoded.ok) return { ok: false, reason: decoded.reason };
+  const decoded = scriptModel3DNodeData(canvas.nodeData[node.id]);
+  if (!decoded) return { ok: false, reason: "文件模型不支持导入片场" };
   // 与实际源码重新派生哈希比较，避免客户端声明的旧内容身份掩盖源码变化。
-  if (modelSourceHash(decoded.value.model.modelScript) !== source.expectedSourceHash) {
+  if (modelSourceHash(decoded.model.modelScript) !== source.expectedSourceHash) {
     return { ok: false, reason: "来源模型已变化，请重新导入" };
   }
   return {
     ok: true,
     value: {
       id: source.itemId,
-      source: { kind: "model", name: source.name, model: decoded.value.model },
+      source: { kind: "model", name: source.name, model: decoded.model },
       origin: { sourceNodeId: source.sourceNodeId }
     }
   };

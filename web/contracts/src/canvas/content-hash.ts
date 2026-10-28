@@ -22,3 +22,21 @@ export function fnv1a64Hex(text: string): string {
   }
   return high.toString(16).padStart(8, "0") + low.toString(16).padStart(8, "0");
 }
+
+/**
+ * 计算字节序列的 FNV-1a 64-bit 指纹（16 位小写 hex）。
+ *
+ * 用于内嵌纹理等二进制内容身份（change: 2026-10-28-support-glb-model-nodes）：同一字节序列在
+ * 任何入口解析都得到同一 id，跨重载稳定。
+ */
+export function fnv1a64HexBytes(bytes: Uint8Array): string {
+  let high = 0xcbf29ce4;
+  let low = 0x84222325;
+  for (let i = 0; i < bytes.length; i += 1) {
+    low = (low ^ bytes[i]) >>> 0;
+    const product = low * 435;
+    high = (Math.imul(high, 435) + (low << 8) + Math.floor(product / 0x100000000)) >>> 0;
+    low = product >>> 0;
+  }
+  return high.toString(16).padStart(8, "0") + low.toString(16).padStart(8, "0");
+}

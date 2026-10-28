@@ -39,7 +39,7 @@ async function readyRoom(withItem = true): Promise<CanvasRoom> {
                 kind: "model" as const,
                 name: "模型",
                 localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
-                model: createModel3DNodeData({ title: "m", model: { modelScript: SCRIPT, modelScriptVersion: "woohaa-model-js-v2" } }).model
+                model: createModel3DNodeData({ title: "m", model: { modelScript: SCRIPT, modelScriptVersion: "woohaa-model-js-v2" } }).model!
               }
             ]
           }

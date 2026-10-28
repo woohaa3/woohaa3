@@ -73,6 +73,14 @@ export type SceneV2MaterialOp = {
    * 可选：缺失时按 [`SCENE_V2_DEFAULT_BLEND_OPACITY`] 呈现，且不写入规范 op。
    */
   opacity?: number;
+  /**
+   * 内嵌纹理（GLB 文件模型）的稳定纹理 id
+   * （change: 2026-10-28-support-glb-model-nodes）。
+   *
+   * 纹理本身不进入 Scene IR / 规范 nodeData：由前端从原始 GLB 解码后经独立纹理通道上传，
+   * Rust 侧按 id 解析。缺失时保持纯色（旧场景内容身份逐字节不变）。
+   */
+  baseColorTexture?: string;
 };
 
 /** blend 模式下未声明 `opacity` 时的静态透明度（与改动前的固定值一致）。 */
@@ -95,7 +103,19 @@ export type SceneV2BoxOp = SceneV2ShapeBase & { t: "box"; size: Vec3 };
 export type SceneV2CylinderOp = SceneV2ShapeBase & { t: "cylinder"; radius: number; height: number };
 export type SceneV2SphereOp = SceneV2ShapeBase & { t: "sphere"; radius: number };
 export type SceneV2CapsuleOp = SceneV2ShapeBase & { t: "capsule"; radius: number; height: number };
-export type SceneV2MeshOp = SceneV2ShapeBase & { t: "mesh"; vertices: Vec3[]; faces: number[][] };
+export type SceneV2MeshOp = SceneV2ShapeBase & {
+  t: "mesh";
+  vertices: Vec3[];
+  faces: number[][];
+  /**
+   * 可选顶点属性（GLB 文件模型；change: 2026-10-28-support-glb-model-nodes）。
+   *
+   * 长度必须与 `vertices` 一致；缺失时由运行时光滑法线回退（旧脚本场景语义不变）。
+   */
+  normals?: Vec3[];
+  uvs?: [number, number][];
+  colors?: [number, number, number, number][];
+};
 export type SceneV2SegmentOp = SceneV2ShapeBase & {
   t: "segment";
   from: Vec3;

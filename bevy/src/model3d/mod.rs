@@ -64,6 +64,7 @@ mod diagnostics;
 pub(crate) mod instancing;
 mod item_placement;
 mod mesh;
+pub(crate) mod model_textures;
 mod motion_plan;
 mod motion_reset;
 mod opacity;

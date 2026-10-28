@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 use tauri::Manager;
 use woohaa_bevy_canvas as canvas;
 
-const MAX_CONTROL_BYTES: usize = 8 * 1024 * 1024;
+/// 控制消息上限：与浏览器侧模型资源 payload（16MB）一致，容纳含法线/UV/顶点色的 GLB Scene IR
+/// （change: 2026-10-28-support-glb-model-nodes）。
+const MAX_CONTROL_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TEXTURE_BYTES: usize = 2048 * 2048 * 4;
 thread_local! {
     // 最近一次 full 基线、导航序号及真实接受代数；仅宿主主线程访问。

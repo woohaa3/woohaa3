@@ -25,6 +25,9 @@ pub fn measure_json(json: &str) -> Result<serde_json::Value, String> {
         let mut fallbacks = BTreeMap::<String, usize>::new();
         for item in &input {
             let geometry = ModelGeometry::Mesh {
+                normals: None,
+                uvs: None,
+                colors: None,
                 vertices: item.vertices.clone(),
                 faces: item.faces.clone(),
             };

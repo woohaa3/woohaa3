@@ -102,6 +102,10 @@ export type GetModelNodeOutcome =
       diagnostic?: string;
       contentHash?: string;
       modelContentVersion?: ModelContentVersion;
+      /** 文件模型（GLB）来源标记；脚本模型省略（change: 2026-10-28-support-glb-model-nodes）。 */
+      modelSourceKind?: "glb";
+      /** 文件模型引用的画布资产 id；脚本模型省略。 */
+      modelAssetId?: string;
       placement?: NodeHistoryModelPlacement;
       snapshotHash?: string;
       title: string;
@@ -147,7 +151,10 @@ export type ModelNodeSummary = {
   prompt: string;
   references: ModelReferenceInput[];
   hasScript: boolean;
+  /** 文件模型（GLB）标记；脚本模型省略。 */
+  sourceKind?: "glb";
   status?: "ok" | "failed";
+  /** 是否仍缺可执行内容；文件模型只按状态判定（不要求脚本）。 */
   pending: boolean;
   cameraCount: number;
 };
