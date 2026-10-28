@@ -61,3 +61,50 @@ node scripts/canvas-benchmark/report.mjs artifacts/canvas-benchmark/official
 - 回放按计划与实际送达事件数、迟到 p95 复核；超过 20% 容差时报告标记 replay-invalid，仅保留诊断证据，不声称完成相同输入负载。
 
 产物包含 manifest、GPU/环境、每阶段原始帧/输入/观察、系统采样、定位结果、截图、run.json，以及汇总 HTML/JSON/CSV。源文件由 build-id 与环境清单追溯。媒体首次访问仅表示新宿主/浏览器上下文中首次执行该目标定位；产品可能在初始预热中已预取/准备离屏资源，不能称作 asset-cold。后续回访也不证明缓存仍驻留，不能直接称作 warm-cache。OS 文件缓存不清空，不能称作 OS-cold；确认淘汰的补充探针只按其实际证据声明。
+
+### Portable installed-app scene packages
+
+With Node 24 (development generator only), run:
+
+```sh
+pnpm -C web/contracts build
+node --experimental-strip-types scripts/canvas-benchmark/scene-package.mjs text /tmp/text.woohaa-scene
+node --experimental-strip-types scripts/canvas-benchmark/scene-package.mjs image /tmp/image.woohaa-scene
+node --experimental-strip-types scripts/canvas-benchmark/scene-package.mjs model3d /tmp/model3d.woohaa-scene
+node --experimental-strip-types --test scripts/canvas-benchmark/scene-package.test.mjs
+```
+
+Each version 1 ZIP contains `manifest.json`, `scene.json`, and PNGs under
+`media/<sha256>.png`. The fixed recipe creates 3,000 nodes and 12,000 edges.
+Image/model recipes place 200 unique resources at origin and 200 at the distant
+region; an adjacent row block of 100 text nodes makes the 300-node origin view
+complete without overlap. Image resources are 400 distinct 512×512 PNGs;
+model resources are distinct box+sphere scripts, using the existing preview policy.
+
+The manifest's `contentHash` is SHA-256 of canonical sorted-key JSON containing
+`{manifest,canvas}`, omitting `manifest.contentHash`. It includes media digests,
+not ZIP timestamps or the external file name. The host separately hashes the
+complete uploaded file. Asset URLs use `scene-media:<assetId>` until import
+publishes host-owned media. No credentials, local paths or host settings are
+embedded. Packages accept only the versioned built-in text/image/model subset;
+this is deliberately not a general arbitrary-canvas export format.
+
+Version 1 media is explicitly restricted to metadata-free noninterlaced RGBA8
+PNG (`IHDR`, consecutive `IDAT`, `IEND` chunks), at most 8192 per dimension and
+64 MiB of decoded scanlines per image. The decoder verifies every chunk CRC,
+zlib completeness, exact decoded length and scanline filter bytes; JPEG and
+other PNG variants are unsupported. Declared asset dimensions must match PNG
+headers. All allowed JSON fields also have explicit primitive type checks.
+
+Required manifest metadata includes `scene: {sha256,size}` for exact `scene.json`
+bytes, `inventory: {nodes,edges,media}`, and
+`compatibility: {minAppVersion,capabilities}`. The builder targets app 0.1.6 and
+records only used built-in node capabilities. Unsupported app versions or
+capabilities are rejected before publication. Use `finalizeScenePackageManifest`
+from the archive helper to calculate all derived fields and intrinsic identity.
+
+The package-wide decoded image budget is 512 MiB, counting full RGBA scanlines
+including filter bytes. The decoder preflights every PNG's IHDR and sums this
+budget before inflating any PNG, then validates each image exactly once and
+reuses its dimensions for asset checks. The 400-image 512×512 recipe uses about
+400.2 MiB of this budget.

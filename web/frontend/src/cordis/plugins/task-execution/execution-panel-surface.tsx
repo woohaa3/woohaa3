@@ -12,6 +12,7 @@
  * 现在表面只在这里描述，加载骨架与真实面板共用同一份判断与同一套 DOM 结构。
  */
 import { useEffect, useRef, type ReactNode } from "react";
+import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
 import { layoutNodePanel, usableCanvasArea, type AnchoredPanel } from "./node-anchor-layout.js";
@@ -61,7 +62,9 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       const canvas = document.getElementById("bevy-canvas");
       const fixtureArea = dock?.closest<HTMLElement>("[data-node-anchor-area]") ?? null;
       const areaElement = fixtureArea ?? canvas;
-      const badge = runtime.controller()?.groupBadgeScreenRect?.(nodeId);
+      const state = woohaa3CanvasStore.getState();
+      const badge = workingCanvasOf(state)?.document.nodes.find(node => node.id === nodeId)?.type === "group"
+        ? runtime.nodePresentationScreenRect?.(nodeId) : null;
       const node = badge ?? runtime.nodePresentationScreenRect?.(nodeId) ?? runtime.nodeScreenRect(nodeId);
       if (!dock || !areaElement || !node) {
         if (dock) {

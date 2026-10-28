@@ -210,6 +210,12 @@ export type BevyRuntime = {
   generation(): number;
   /** 实际工作计数快照（JSON）：供 E2E/排障读取（D1 卡片/边块/容器块重建计数）。 */
   getWorkDiagnostics?(): Record<string, unknown>;
+  /** Read-only accepted scene geometry; never serialize its content into reports. */
+  acceptedScene?(): CanvasRenderScene | null;
+  /** Bounded low frequency diagnostics. Native uses asynchronous RPC. */
+  readSceneDiagnostics?(): Promise<import("./diagnostics-reader.js").WorkDiagnosticResult>;
+  rendererBackend?(): "native" | "wasm";
+  runtimeHealthSnapshot?(): Record<string,unknown> | null;
   /**
    * 最近接受的 interaction generation；`setScene` 成功后更新，未接受任何场景时为 0
    * （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，design D3）。

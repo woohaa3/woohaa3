@@ -245,6 +245,8 @@ export type CanvasMediaAssetSyncPort = {
 };
 
 export type CanvasService = {
+  /** 本地场景包独立事务/收据；不复用在线来源权限。 */
+  scenePackages: import("../storage/sqlite/scene-package.js").SqliteScenePackageStore | null;
   handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   sync: SyncUpgradeHandler | null;
   readiness: () => Promise<{ ready: boolean; reason?: string }>;

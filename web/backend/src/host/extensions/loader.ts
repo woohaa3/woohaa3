@@ -153,6 +153,7 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyEx
       ...(marketplace ? { marketplace: marketplace.scoped((plugin as { origin?: HostPluginOrigin }).origin) } : {}),
       ...(surface?.webServer ? { webServer: surface.webServer } : {}),
       ...(surface?.capabilities ? { capabilities: surface.capabilities } : {}),
+      ...(surface?.mediaFormats ? { mediaFormats: surface.mediaFormats } : {}),
       ...(surface?.services ? { services: surface.services } : {}),
       ...(surface?.diagnostics ? { diagnostics: surface.diagnostics } : {}),
       deployment: { basePath: applicationHost()?.basePath ?? "" }

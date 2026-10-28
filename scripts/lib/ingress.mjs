@@ -33,6 +33,7 @@ import { stripAppBasePath } from "../../web/contracts/src/base-path/app-base-pat
  * 返回目标单元；`internal` 表示明确的内部协议路径（必须拒绝）；`none` 表示不属于站点 API。
  */
 export function routeFor(pathname) {
+  if (pathname === "/api/scene-packages" || pathname.startsWith("/api/scene-packages/")) return "application";
   if (pathname.startsWith("/internal/")) return "internal";
   // 外部画布来源目录与旧 ID prepare/status（change: 2026-10-12-add-extension-online-canvas-migration）：
   // 由 Canvas Service 承载；prepare 状态与目标 ACL 权威都在 Canvas。

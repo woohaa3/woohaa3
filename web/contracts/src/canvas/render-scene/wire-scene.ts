@@ -164,7 +164,7 @@ export type BevyRenderNode = {
 export type BevyNodeAction = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download";
+  icon?: "download" | "arrange-horizontal" | "arrange-vertical" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 稳定动作 ID；Rust 命中后回传，贡献据此派发。 */
   id: string;

@@ -45,7 +45,7 @@ export function watchDockReveal(runtime: CanvasRuntimeService, nodeId: string): 
       return;
     }
     const rect = groupPresentationRect(node, canvas.nodeData[node.id]?.groupCollapsed === true,
-      nodeWorldRect(node, new Map(canvas.document.nodes.map((entry) => [entry.id, entry]))), canvas.nodeData[node.id]?.groupExpandDirection);
+      nodeWorldRect(node, new Map(canvas.document.nodes.map((entry) => [entry.id, entry]))));
     const start = runtime.worldToClient(rect);
     const end = runtime.worldToClient({ x: rect.x + rect.width, y: rect.y + rect.height });
     const panel = dock!.getBoundingClientRect();

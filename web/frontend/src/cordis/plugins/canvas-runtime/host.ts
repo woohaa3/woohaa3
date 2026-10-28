@@ -424,6 +424,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   /** 当前 attach 的页面级资源需求 owner（change: 2026-10-23-scale-canvas-media-residency）。 */
   private residencyInstance: import("./residency/index.js").CanvasResourceCoordinator | null = null;
   /** 当前资源协调器（诊断/测试；未挂载返回 null）。 */
+  resourceResidencyDiagnostics = (): unknown => this.residencyInstance?.diagnostics() ?? null;
   residency = (): import("./residency/index.js").CanvasResourceCoordinator | null => this.residencyInstance;
 
   /**

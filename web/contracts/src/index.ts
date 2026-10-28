@@ -146,4 +146,5 @@ export * from "./canvas/group-presentation.js";
 export * from "./canvas/group-badge.js";
 export * from "./canvas/ground-anchor.js";
 
-export type { MediaFormatValidator, MediaFormatRegistry } from "./extension/services/host/media-formats.js";
+export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
+export * from "./canvas/scene-package.js";

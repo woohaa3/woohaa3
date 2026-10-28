@@ -132,6 +132,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     order: 0
   });
   const globalCapabilities = new Map<string, string>();
+  const pluginMediaFormats = new Map<string, Set<() => void>>();
   const globalHandlers = new Map<string, string>();
   const globalHttpHandlers = new Map<string, string>();
   const globalRawHttpHandlers = new Map<string, string>();
@@ -583,8 +584,32 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       release = () => releaseRegistrations(extensionId);
     }
     const services = options.servicesFor?.(extensionId, 0);
+    const registerMediaFormat = options.registerMediaFormatFor?.(extensionId);
+    const mediaFormats: import("@woohaa3/contracts").HostMediaFormatService | undefined = registerMediaFormat
+      ? {
+          register: (format: import("@woohaa3/contracts").MediaFormatValidator) => {
+            const dispose = registerMediaFormat(format);
+            if (found) {
+              // 已有 backend owner：登记成资源，停用/回滚时由 rollback 反序 stop。
+              found[1].startedResources.push({ id: `media-format:${format.contentType}`, stop: dispose });
+            } else {
+              let set = pluginMediaFormats.get(extensionId);
+              if (!set) {
+                set = new Set();
+                pluginMediaFormats.set(extensionId, set);
+              }
+              set.add(dispose);
+            }
+            return () => {
+              if (!found) pluginMediaFormats.get(extensionId)?.delete(dispose);
+              dispose();
+            };
+          }
+        }
+      : undefined;
     return {
       ...(webServer ? { webServer } : {}),
+      ...(mediaFormats ? { mediaFormats } : {}),
       capabilities: {
         register: (id: string, value: unknown) => {
           const handle = found ? found[0] : extensionId;
@@ -619,6 +644,17 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     }
     for (const key of scope.rawHttpHandlers.keys()) {
       if (globalRawHttpHandlers.get(key) === extensionId) globalRawHttpHandlers.delete(key);
+    }
+    const formats = pluginMediaFormats.get(extensionId);
+    if (formats) {
+      for (const dispose of formats) {
+        try {
+          dispose();
+        } catch {
+          // 注销失败不应阻断其余注册的释放。
+        }
+      }
+      pluginMediaFormats.delete(extensionId);
     }
     records.delete(extensionId);
   };

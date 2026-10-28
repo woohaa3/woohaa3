@@ -14,6 +14,7 @@
  * - 不采集渲染/合成/性能结论：打包过程不验收画面，这些项保持「待人工验证」。
  * - 不启用 `gpu-debug`（design D8 要求发行构建不携带 Bevy pass 名称）。
  */
+import { readSourceIdentity } from "./lib/source-identity.mjs";
 import { prepareDesktopHost } from "./prepare-desktop-host.mjs";
 import { standaloneBundleConfig, createHostArchive, nodeArtifact, prepareStartupFrontend } from "./lib/desktop-host-package.mjs";
 import { spawnSync } from "node:child_process";
@@ -227,6 +228,7 @@ function runIcons(options) {
 }
 
 async function runBuild(options) {
+  const sourceBefore = readSourceIdentity(root);
   const platform = process.platform;
   const arch = process.arch;
   const config = readConfig();
@@ -358,6 +360,10 @@ async function runBuild(options) {
       hostPackage ? "本机宿主已装配；真实启动验收记录独立保存。" : "显式外部 UI 调试模式：本机宿主未装配。"
     ]
   });
+  // Capture provenance for same-revision installer + offline scene delivery.
+  const sourceAfter = readSourceIdentity(root);
+  manifest.sourceRevision = sourceBefore.revision;
+  manifest.sourceDirty = sourceBefore.dirty || sourceAfter.dirty || sourceBefore.revision !== sourceAfter.revision;
   const manifestPath = path.join(outDir, "manifest.json");
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 

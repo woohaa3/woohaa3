@@ -313,3 +313,19 @@ it("media format registrations are released on unload and activation rollback", 
   expect(failed.ok).toBe(false);
   expect(registrations.size).toBe(0);
 });
+
+it("pluginContextFor 暴露 mediaFormats，并在 release 时注销", () => {
+  const registrations = new Set<string>();
+  const host = createApplicationExtensionHost({ registerMediaFormatFor: owner => format => {
+    const key = `${owner}:${format.contentType}`;
+    registrations.add(key);
+    return () => { registrations.delete(key); };
+  } });
+  const format = { contentType: "application/vnd.host-plugin", maxBytes: 100, validate: async () => {} };
+  const surface = host.pluginContextFor("host-plugin");
+  expect(surface.mediaFormats).toBeDefined();
+  surface.mediaFormats!.register(format);
+  expect([...registrations]).toEqual(["host-plugin:application/vnd.host-plugin"]);
+  surface.release();
+  expect(registrations.size).toBe(0);
+});

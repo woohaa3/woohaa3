@@ -1,3 +1,7 @@
+import path from "node:path";
+import {ScenePackageService} from "../../scene-package/service.js";
+import {createScenePackageHandler} from "../../scene-package/http.js";
+import {readStorePath} from "../../composition/config.js";
 import { mergeCanvasContentRuntimes } from "../../extensions/canvas-content.js";
 /**
  * 核心层 · canvas：画布、Yjs 同步与画布侧 MCP 服务。
@@ -316,7 +320,11 @@ export const canvasPlugin: HostPlugin<{
       if (!service) throw new Error("画布存储未启用");
       return service.getCanvas(canvasId);
     });
-    ctx.effect(() => () => canvas.close());
+    const scenePackages = canvas.scenePackages && !ctx.access.runtime.enabled
+      ? new ScenePackageService({store:canvas.scenePackages,directory:path.join(path.dirname(readStorePath(env)),"scene-packages"),importMedia:input=>ctx.media.port().importBytes(input),verifyMedia:async(key,expected,canvasId)=>{const result=await ctx.media.port().verify(key,expected,{canvasId});return result.exists&&result.matches;}}) : null;
+    const packageHandler=createScenePackageHandler(scenePackages);
+    ctx.effect(()=>ctx.gateway.route(ROUTE_ORDER.canvas-1,packageHandler));
+    ctx.effect(() => async () => {await scenePackages?.close();await canvas.close();});
     ctx.provide("canvas", canvas);
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.canvas, (req, res) => canvas.handle(req, res)));
     ctx.effect(() => ctx.gateway.readiness(READINESS_ORDER.canvas, () => canvas.readiness()));
