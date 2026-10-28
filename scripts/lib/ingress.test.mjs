@@ -76,3 +76,69 @@ test("站点 API 命名空间下的未知路径返回 404，不落 SPA", async (
   assert.deepEqual(JSON.parse(body), { error: "not-found" });
   assert.equal(await ingress.handle({ url: "/dev/test/canvas/1", method: "GET", headers: {} }, res), false);
 });
+test("上游不可达的 502 带错误码、请求与目标（启动窗口可自证原因）", async () => {
+  const http = await import("node:http");
+  // 先占一个端口再放掉：拿到一个几乎确定没人监听的端口，制造 ECONNREFUSED。
+  const probe = http.createServer();
+  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const port = probe.address().port;
+  await new Promise((resolve) => probe.close(resolve));
+
+  const events = [];
+  const ingress = createIngress({
+    targets: { application: `http://127.0.0.1:${port}` },
+    logger: (event) => events.push(event)
+  });
+  const res = { statusCode: 0, headersSent: false, headers: {}, setHeader(name, value) { this.headers[name] = value; }, end() {} };
+  const req = {
+    url: "/api/extensions",
+    method: "GET",
+    headers: {},
+    pipe(upstream) { upstream.end(); return upstream; },
+    on() { return this; }
+  };
+
+  assert.equal(await ingress.handle(req, res), true);
+  assert.equal(res.statusCode, 502);
+  assert.equal(events.length, 1);
+  const [event] = events;
+  // 关键是这五项齐全：没有 code / path / target 时，启动窗口和真故障在日志里无法区分。
+  assert.equal(event.event, "ingress-upstream-error");
+  assert.equal(event.status, 502);
+  assert.equal(event.code, "ECONNREFUSED");
+  assert.equal(event.method, "GET");
+  assert.equal(event.path, "/api/extensions");
+  assert.equal(event.target, `http://127.0.0.1:${port}`);
+  assert.match(String(event.message), /ECONNREFUSED|connect/i);
+});
+
+test("上游超时与连接失败分开报码（upstream-timeout）", async () => {
+  const http = await import("node:http");
+  // 接受连接但永不响应：走 ingress 自己的超时分支。
+  const hanging = http.createServer(() => {});
+  await new Promise((resolve) => hanging.listen(0, "127.0.0.1", resolve));
+  const port = hanging.address().port;
+  const events = [];
+  const ingress = createIngress({
+    targets: { application: `http://127.0.0.1:${port}` },
+    timeoutMs: 120,
+    logger: (event) => events.push(event)
+  });
+  const res = { statusCode: 0, headersSent: false, headers: {}, setHeader(name, value) { this.headers[name] = value; }, end() {} };
+  const req = {
+    url: "/api/extensions",
+    method: "POST",
+    headers: {},
+    pipe(upstream) { upstream.end(); return upstream; },
+    on() { return this; }
+  };
+
+  assert.equal(await ingress.handle(req, res), true);
+  assert.equal(res.statusCode, 502);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].code, "upstream-timeout");
+  assert.equal(events[0].method, "POST");
+  assert.equal(events[0].path, "/api/extensions");
+  hanging.closeAllConnections?.();
+  await new Promise((resolve) => hanging.close(resolve));
+});

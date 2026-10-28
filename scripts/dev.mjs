@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import fs, { existsSync } from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
@@ -117,6 +118,34 @@ function supervisorRpc(config, method, params = {}) {
     socket.once("error", error => finish(error));
     socket.once("connect", () => socket.write(JSON.stringify({ id, token: config.token, workspaceKey: config.workspaceKey, method, params }) + "\n"));
   });
+}
+
+/**
+ * 启动窗口可见性：后端就绪前的 /api 请求必然 502（ingress 连不上上游）。
+ *
+ * 只打「已启动」不够——要明确告诉人这段 502 是启动窗口的预期结果，并给出就绪耗时，
+ * 否则每次启动都要靠猜「后台是不是挂了」。
+ */
+function watchBackendReady(url) {
+  const started = Date.now();
+  const deadline = started + 60_000;
+  const retry = () => {
+    if (Date.now() > deadline) {
+      console.warn(`[dev] 后端 60s 内未就绪：${url}/api/application/health/ready（看上面的后端日志）`);
+      return;
+    }
+    const request = http.get(`${url}/api/application/health/ready`, (res) => {
+      res.resume();
+      if ((res.statusCode ?? 500) < 500) {
+        console.log(`[dev] 后端就绪（${Date.now() - started}ms）`);
+        return;
+      }
+      setTimeout(retry, 500);
+    });
+    request.on("error", () => setTimeout(retry, 500));
+    request.setTimeout(2_000, () => request.destroy(new Error("ready-probe-timeout")));
+  };
+  setTimeout(retry, 300);
 }
 
 async function ensureAgentSupervisor() {
@@ -389,20 +418,26 @@ async function main() {
   const backendWatchArgs = process.platform === "win32"
     ? ["--watch", `--watch-path=${backendEntry}`, "--watch-preserve-output", backendEntry]
     : ["--watch", "--watch-preserve-output", backendEntry];
-  const startBackend = () => start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
-    env: {
-      ...serviceEnv,
-      WOOHAA3_BASE_PATH: basePath,
-      PORT: String(backendPort),
-      BACKEND_PORT: String(backendPort),
-      WOOHAA3_AGENT_RUNTIME_SOCKET: supervisor.socketPath,
-      WOOHAA3_AGENT_RUNTIME_TOKEN: supervisor.token,
-      WOOHAA3_AGENT_WORKSPACE_KEY: supervisor.workspaceKey,
-      // node --watch keeps its supervisor alive after the child exits with 75.
-      // The backend touches its entry on controlled restart so node --watch starts it again.
-      WOOHAA3_DEV_WATCH: watch ? "1" : "0"
-    }
-  });
+  const startBackend = () => {
+    const child = start(process.execPath, watch ? backendWatchArgs : [backendEntry], {
+      env: {
+        ...serviceEnv,
+        WOOHAA3_BASE_PATH: basePath,
+        PORT: String(backendPort),
+        BACKEND_PORT: String(backendPort),
+        WOOHAA3_AGENT_RUNTIME_SOCKET: supervisor.socketPath,
+        WOOHAA3_AGENT_RUNTIME_TOKEN: supervisor.token,
+        WOOHAA3_AGENT_WORKSPACE_KEY: supervisor.workspaceKey,
+        // node --watch keeps its supervisor alive after the child exits with 75.
+        // The backend touches its entry on controlled restart so node --watch starts it again.
+        WOOHAA3_DEV_WATCH: watch ? "1" : "0"
+      }
+    });
+    // 每次（重新）拉起后端都宣告一次启动窗口：这段 502 是预期结果，不是故障。
+    console.log("[dev] 后端启动中：就绪前的 /api 请求会得到 502（启动窗口，不是故障）");
+    watchBackendReady(backendUrl);
+    return child;
+  };
   supervise("backend", startBackend(), { relaunch: startBackend });
   // 显式监听 IPv4，避免容器禁用 IPv6 回环时 ATC 无法连接通配地址。
   supervise("frontend", start(process.execPath, [vite, "--host", "0.0.0.0", "--port", String(frontendPort), "--strictPort"], {

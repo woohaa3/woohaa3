@@ -183,14 +183,27 @@ function proxyHttp(req, res, target, timeoutMs, log) {
         upstreamRes.on("error", () => done(true));
       }
     );
+    // 超时与连接失败都会走下面的 error 分支；标记一下，否则两者在日志里长得一模一样。
+    let timedOut = false;
     upstream.setTimeout(timeoutMs, () => {
       // 超时只终止这一跳；不缓存、不重试业务语义。
+      timedOut = true;
       upstream.destroy(new Error("upstream-timeout"));
     });
-    upstream.on("error", () => {
+    upstream.on("error", (error) => {
       if (!res.headersSent) sendJson(res, 502, { error: "upstream-unreachable" });
       else res.end();
-      log?.({ event: "ingress-upstream-error", status: 502 });
+      // 一行 502 说明不了任何问题：启动窗口里的 ECONNREFUSED、后端崩溃的 ECONNRESET、
+      // 卡死的 upstream-timeout 必须能分辨，所以带上错误码、请求与目标地址。
+      log?.({
+        event: "ingress-upstream-error",
+        status: 502,
+        code: timedOut ? "upstream-timeout" : (error?.code ?? "unknown"),
+        message: error?.message,
+        method: req.method,
+        path: req.url,
+        target
+      });
       done(true);
     });
     req.pipe(upstream);
@@ -235,8 +248,16 @@ function proxyUpgrade(req, socket, head, target, log) {
     upstreamRes.on("error", () => socket.destroy());
     socket.on("error", () => upstreamRes.destroy());
   });
-  upstream.on("error", () => {
-    log?.({ event: "ingress-upgrade-error", status: 502 });
+  upstream.on("error", (error) => {
+    log?.({
+      event: "ingress-upgrade-error",
+      status: 502,
+      code: error?.code ?? "unknown",
+      message: error?.message,
+      method: req.method,
+      path: req.url,
+      target
+    });
     rejectUpgrade(socket, 502, "Bad Gateway");
   });
   upstream.end();
