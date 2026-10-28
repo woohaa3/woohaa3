@@ -6,6 +6,7 @@
  */
 import type { AgentCanvasError } from "@woohaa3/contracts";
 import type { AgentCanvasClient } from "../downstream/agent-canvas-client.js";
+import type { SkillStepClient } from "../downstream/skill-step-client.js";
 
 /** 工具面依赖的能力：只有下游 client。 */
 export type AgentAuthoringToolDeps = {
@@ -14,6 +15,13 @@ export type AgentAuthoringToolDeps = {
     | { available: true }
     | { available: false }
   );
+  /**
+   * Skill 媒体步骤续接 client（change: 2026-10-28-add-agent-skill-media-regeneration）。
+   *
+   * 缺失或 `skillAvailability.available === false` 时不注册续接工具，也不在能力发现里声明。
+   */
+  skillClient?: SkillStepClient;
+  skillAvailability?: { available: boolean; reason?: string };
   /** Canvas script 能力可用性（由 `get_canvas_capabilities` 探测后注入；缺省视为未接入）。 */
   scriptAvailability?: { available: boolean; reason?: string };
   /** 任务模型能力（媒体节点预检）；由同一能力探测注入。 */

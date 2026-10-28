@@ -6,7 +6,8 @@ import { groupScopedClient } from "../../ports/group-scoped-client.js";
  * mcp 与 application；插件扩展的 MCP 工具清单在调用时从 application 懒取。
  */
 import { createMcpService } from "@woohaa3/mcp-service";
-import { canvasGroupEpoch, withCanvasGroupScope } from "@woohaa3/canvas-service";
+import type { SkillStepClient } from "@woohaa3/mcp-service";
+import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from "@woohaa3/canvas-service";
 import type { HostPlugin } from "../context.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
 import { catalogToolsForGrant, createToolGrantRegistry } from "../../ports/authoring-adapters.js";
@@ -24,8 +25,84 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       return module.service;
     };
     const services = ctx.canvas.mcpServices();
+    /**
+     * Skill 步骤续接的 MCP 适配
+     * （change: 2026-10-28-add-agent-skill-media-regeneration，任务 4.1–4.4）。
+     *
+     * owner 与组作用域只来自受信任的请求上下文（`withCanvasGroupScope` / 已认证 principal），
+     * 不接受工具参数自报；等待与查询不提交生成。
+     */
+    const skillClient: SkillStepClient = {
+      async wait(input) {
+        const media = application().skillMedia();
+        if (!media) return { ok: false, code: "unavailable", message: "Skill 续接未启用" };
+        const scope = currentCanvasGroupScope();
+        const owner = scope?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
+        if (!owner) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
+        const result = await media.wait({
+          owner,
+          canvasId: scope?.canvasId ?? input.canvasId,
+          ...(scope ? { rootGroupId: scope.rootGroupId, scopeEpoch: canvasGroupEpoch(scope.canvasId, scope.rootGroupId) } : {}),
+          skillRunId: input.skillRunId,
+          stepId: input.stepId,
+          waitMs: input.waitMs,
+          ...(input.followLatest !== undefined ? { followLatest: input.followLatest } : {})
+        });
+        return result.ok ? { ok: true, value: result.view } : { ok: false, code: result.code, message: result.message };
+      },
+      async latestOutput(input) {
+        const media = application().skillMedia();
+        if (!media) return { ok: false, code: "unavailable", message: "Skill 续接未启用" };
+        const scope = currentCanvasGroupScope();
+        const owner = scope?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
+        if (!owner) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
+        const result = await media.latestOutput({
+          owner,
+          canvasId: scope?.canvasId ?? input.canvasId,
+          ...(scope ? { rootGroupId: scope.rootGroupId, scopeEpoch: canvasGroupEpoch(scope.canvasId, scope.rootGroupId) } : {}),
+          skillRunId: input.skillRunId,
+          stepId: input.stepId,
+          ...(input.allowFallback !== undefined ? { allowFallback: input.allowFallback } : {})
+        });
+        return result.ok ? { ok: true, value: result.view } : { ok: false, code: result.code, message: result.message };
+      },
+      async snapshot(input) {
+        const media = application().skillMedia();
+        if (!media) return { ok: false, code: "unavailable", message: "Skill 续接未启用" };
+        const scope = currentCanvasGroupScope();
+        const owner = scope?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
+        if (!owner) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
+        const result = await media.snapshot({
+          owner,
+          canvasId: scope?.canvasId ?? input.canvasId,
+          ...(scope ? { rootGroupId: scope.rootGroupId, scopeEpoch: canvasGroupEpoch(scope.canvasId, scope.rootGroupId) } : {}),
+          skillRunId: input.skillRunId,
+          stepId: input.stepId
+        });
+        return result.ok ? { ok: true, value: result.step } : { ok: false, code: result.code, message: result.message };
+      },
+      async events(input) {
+        const media = application().skillMedia();
+        if (!media) return { ok: false, code: "unavailable", message: "Skill 续接未启用" };
+        const scope = currentCanvasGroupScope();
+        const owner = scope?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "";
+        if (!owner) return { ok: false, code: "unauthorized", message: "缺少已认证 principal" };
+        const result = await media.events({
+          owner,
+          canvasId: scope?.canvasId ?? input.canvasId,
+          ...(scope ? { rootGroupId: scope.rootGroupId, scopeEpoch: canvasGroupEpoch(scope.canvasId, scope.rootGroupId) } : {}),
+          skillRunId: input.skillRunId,
+          stepId: input.stepId,
+          ...(input.after !== undefined ? { after: input.after } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {})
+        });
+        return result.ok ? { ok: true, value: result.page } : { ok: false, code: result.code, message: result.message };
+      }
+    };
     const mcp = createMcpService({
       env,
+      skillClient,
+      skillAvailability: { available: true },
       extensionTools: createExtensionMcpBridge({
         definitions: () => ctx.get("application")?.definitions ?? [],
         application,

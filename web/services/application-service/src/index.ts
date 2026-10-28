@@ -39,3 +39,4 @@ export * from "./repository/instance-data-scope.js";
 export { createSqliteSiteExtensionConfigStore } from "./extensions/config-store.js";
 
 export * from "./service-connections/registry.js";
+export * from "./skill-media/index.js";

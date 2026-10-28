@@ -240,7 +240,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     const toolCalls: string[] = [];
     let successfulWrite = false;
     let toolFailure: string | undefined;
-    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_film_set_clips", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output"]);
+    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_film_set_clips", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output"]);
 
     const context = nativeContextFor(input, `${adapter.adapterId}:1`);
     const resourceKey = nativeContextKey(input.owner, connectionId, context);

@@ -41,6 +41,7 @@ export * from "./canvas/agent-canvas-protocol.js";
 export * from "./canvas/agent-canvas-projection.js";
 export * from "./canvas/agent-canvas-internal.js";
 export * from "./canvas/agent-canvas-run.js";
+export * from "./canvas/agent-media-continuation.js";
 export * from "./canvas/canvas-script/index.js";
 export * from "./canvas/domain/index.js";
 export * from "./canvas/model-script.js";

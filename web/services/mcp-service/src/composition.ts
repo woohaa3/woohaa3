@@ -9,6 +9,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH, type ModelMcpHttpHandler, type ModelMcpHttpOptions, type ModelMcpDiscoveryResult } from "./model-mcp/mcp-http.js";
 import { createCanvasMcpClient, type CanvasMcpClient } from "./downstream/canvas-client.js";
 import { createAgentCanvasClient, type AgentCanvasClient } from "./downstream/agent-canvas-client.js";
+import type { SkillStepClient } from "./downstream/skill-step-client.js";
 
 export { MODEL_MCP_HTTP_PATH };
 
@@ -63,6 +64,13 @@ export type McpServiceOptions = {
   canvasClient?: CanvasMcpClient;
   /** 测试注入：替换 Agent Canvas v2 client。 */
   agentClient?: AgentCanvasClient;
+  /**
+   * Skill 媒体步骤续接 client（change: 2026-10-28-add-agent-skill-media-regeneration）。
+   *
+   * 宿主注入；缺失时不注册续接工具，能力发现声明 `continuation.available=false`。
+   */
+  skillClient?: SkillStepClient;
+  skillAvailability?: { available: boolean; reason?: string };
   enableModelMcp?: boolean;
   /**
    * MCP 工具授权校验（任务 3.6 / design D8）：请求携带 bearer 时校验工具允许集合/目标范围/预算。
@@ -131,6 +139,8 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
                 agentAuthoring: {
                   client: agentClient,
                   runAvailability: { available: true },
+                  ...(options.skillClient ? { skillClient: options.skillClient } : {}),
+                  ...(options.skillAvailability ? { skillAvailability: options.skillAvailability } : {}),
                   ...(developmentPrincipalId ? { principalId: developmentPrincipalId } : {}),
                   audit: (event) =>
                     log({

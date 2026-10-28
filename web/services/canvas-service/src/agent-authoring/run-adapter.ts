@@ -18,11 +18,23 @@ import {
   type CanvasTaskCatalog,
   type CanvasTaskModelType,
   type ServerCanvas,
+  type SkillMediaRunRef,
   type StoredAsset
 } from "@woohaa3/contracts";
 import type { CanvasRunService } from "../task/run-service.js";
 
 export type AgentRunPort = Pick<CanvasRunService, "run" | "cancel">;
+
+/** Skill 尝试校验端口（由宿主用 Application Service 实现；缺省时旧客户端行为不变）。 */
+export type SkillAttemptGuard = {
+  assertCurrent(input: {
+    owner?: string;
+    canvasId: string;
+    nodeId: string;
+    runId: string;
+    skill: SkillMediaRunRef;
+  }): Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+};
 
 export type AgentRunAdapterDependencies = {
   resolveRoom: (canvasId: string) => Promise<CanvasRoom | null>;
@@ -30,6 +42,8 @@ export type AgentRunAdapterDependencies = {
   assistantText?: import("@woohaa3/contracts").AssistantTextRunGateway;
   /** Agent 省略 modelKey 时按节点类型取任务目录默认模型。 */
   resolveCatalog?: () => Promise<CanvasTaskCatalog>;
+  /** 懒读取：Application Service 在本服务之后装配。 */
+  skillAttempts?: () => SkillAttemptGuard | undefined;
   now?: () => string;
 };
 
@@ -76,10 +90,17 @@ export class AgentRunAdapter {
     assistant?: import("@woohaa3/contracts").AssistantTextSelection;
     canvasId: string;
     requestId: string;
+    /**
+     * 宿主已按步骤身份派生的运行身份（change: 2026-10-28-add-agent-skill-media-regeneration）。
+     *
+     * Skill 续接要求 ledger 与 Canvas 使用同一 runId；缺省时保持旧客户端的确定性派生。
+     */
+    runId?: string;
     nodeId: string;
     modelKey?: string;
     prompt?: string;
     parameters?: Record<string, unknown>;
+    skill?: SkillMediaRunRef;
   }): Promise<AgentRunAccepted> {
     const room = await this.deps.resolveRoom(input.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${input.canvasId} 不存在` };
@@ -119,7 +140,15 @@ export class AgentRunAdapter {
       return { ok: false, code: "model-required", message: "缺少 modelKey 且节点没有默认模型" };
     }
 
-    const { runId, jobId } = deriveRunIdentity(input.canvasId, input.nodeId, input.requestId);
+    const derived = deriveRunIdentity(input.canvasId, input.nodeId, input.requestId);
+    const runId = input.runId ?? derived.runId;
+    const jobId = derived.jobId;
+    // begin 处复核当前 attempt：用户已替代的旧请求不得再启动（任务 3.1）。
+    const guard = this.deps.skillAttempts?.();
+    if (input.skill && guard) {
+      const current = await guard.assertCurrent({ ...(input.owner !== undefined ? { owner: input.owner } : {}), canvasId: input.canvasId, nodeId: input.nodeId, runId, skill: input.skill });
+      if (!current.ok) return { ok: false, code: current.code, message: current.message };
+    }
     const outcome = await this.deps.runService.run({
       canvasId: input.canvasId,
       nodeId: input.nodeId,
@@ -136,7 +165,7 @@ export class AgentRunAdapter {
     return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, runId, jobId, state: "accepted" };
   }
 
-  async status(input: { owner?: string; canvasId: string; nodeId: string; runId: string; waitMs?: number }): Promise<AgentRunStatus> {
+  async status(input: { owner?: string; canvasId: string; nodeId: string; runId: string; waitMs?: number; skill?: SkillMediaRunRef }): Promise<AgentRunStatus> {
     const room = await this.deps.resolveRoom(input.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${input.canvasId} 不存在` };
     const exported = room.exportCanvas();
@@ -156,10 +185,10 @@ export class AgentRunAdapter {
         if (view.phase === "terminal" || view.stale) break;
       }
     }
-    return { ok: true, view };
+    return { ok: true, view: input.skill ? withSkill(view, input.skill) : view };
   }
 
-  async cancel(input: { owner?: string; canvasId: string; nodeId: string; runId: string }): Promise<AgentRunCancel> {
+  async cancel(input: { owner?: string; canvasId: string; nodeId: string; runId: string; skill?: SkillMediaRunRef }): Promise<AgentRunCancel> {
     if (input.runId.startsWith("text-run:") && input.owner && this.deps.assistantText) return this.deps.assistantText.cancel({ ...input, owner: input.owner });
     const room = await this.deps.resolveRoom(input.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${input.canvasId} 不存在` };
@@ -187,7 +216,7 @@ export class AgentRunAdapter {
     return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, runId: input.runId, state: "cancel-requested" };
   }
 
-  async output(input: { canvasId: string; nodeId: string; runId: string }): Promise<AgentOutput> {
+  async output(input: { canvasId: string; nodeId: string; runId: string; skill?: SkillMediaRunRef }): Promise<AgentOutput> {
     const room = await this.deps.resolveRoom(input.canvasId);
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${input.canvasId} 不存在` };
     const exported = room.exportCanvas();
@@ -195,6 +224,11 @@ export class AgentRunAdapter {
     const view = projectOutputView(exported.canvas, input.canvasId, input.nodeId, input.runId);
     return { ok: true, nodeId: input.nodeId, runId: input.runId, view };
   }
+}
+
+function withSkill(view: AgentRunView, skill: SkillMediaRunRef): AgentRunView {
+  // stale 表示该 run 已不是节点当前 run；对 Skill 步骤而言即旧尝试已被替代。
+  return { ...view, skill: { ...skill, current: !view.stale, superseded: view.stale } };
 }
 
 /**

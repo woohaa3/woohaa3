@@ -58,6 +58,8 @@ import { candidateAssistantDirectory } from "./extensions/agent-candidate-direct
 import { createAgentConnectionRegistry, type AgentConnectionRegistry } from "./extensions/agent-connection-registry.js";
 import { createAgentConversationService, type AgentConversationService } from "./extensions/agent-conversation-service.js";
 import { createAgentConversationApiHandler, type AgentConversationApiHandler } from "./api/agent-conversation-api.js";
+import { createSkillMediaService, type SkillMediaCanvasPort, type SkillMediaAuthorizer } from "./skill-media/index.js";
+import { SqliteSkillMediaStore } from "./skill-media/store.js";
 import type {
   ApplicationBackendExtensionDefinition,
   ApplicationExtensionPrincipal,
@@ -127,6 +129,16 @@ export type ApplicationServiceOptions = {
     resourceAccess?: import("@woohaa3/contracts").ResourceAccessPolicy;
     resourceLifecycle?: import("@woohaa3/contracts").ResourceLifecyclePolicy;
     resourceDirectory?: import("@woohaa3/contracts").ResourceDirectory;
+  };
+  /**
+   * Agent Skill 媒体步骤 ledger（change: 2026-10-28-add-agent-skill-media-regeneration）。
+   *
+   * Canvas 端口由宿主注入（run/cancel/status/output 仍归 Canvas Run Service）；缺失时不启用
+   * Skill continuation，MCP 能力发现也不得声明。
+   */
+  skillMedia?: {
+    canvas: SkillMediaCanvasPort;
+    authorize?: SkillMediaAuthorizer;
   };
   taskServiceUrl?: string;
   mediaServiceUrl?: string;
@@ -241,6 +253,8 @@ export type ApplicationService = {
   providers: () => ProviderRegistry;
   /** 统一执行边界（认证后的 action/资源检查）。 */
   accessEnforcer: () => AccessEnforcer;
+  /** Agent Skill 媒体步骤服务；未注入 Canvas 端口时为 null（能力不声明）。 */
+  skillMedia: () => import("./skill-media/index.js").SkillMediaService | null;
 };
 
 export function createApplicationService(options: ApplicationServiceOptions = {}): ApplicationService {
@@ -298,6 +312,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     hasUnresolvedWork: async (owner, bindings) => bindings.some(binding => binding.consumerId.startsWith("shared:")) && conversationStore.hasUnresolvedTurns() || bindings.some(binding => binding.consumer !== "provider" && conversationStore.hasUnresolvedConnection(owner, binding.consumerId)) || !options.serviceConnectionSources?.hasUnresolvedWork || await options.serviceConnectionSources.hasUnresolvedWork(owner, bindings),
     documents: options.serviceConnectionSources.documents ?? sourceDocuments!.forExtension("@service-connections")!,
   }) : null;
+  const skillMediaStore = options.skillMedia ? new SqliteSkillMediaStore({ path: config.storePath }) : null;
   const extensionConfigStore = createSqliteSiteExtensionConfigStore({ path: config.storePath });
   const extensionWorkStore = createSqliteExtensionWorkRepository({ path: config.storePath });
   const taskIntentStore = createExtensionTaskIntentRepository({ path: config.storePath });
@@ -423,6 +438,29 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     ...(options.logger ? { logger: options.logger } : {}),
     now: () => now().toISOString()
   });
+  const skillMedia = options.skillMedia && skillMediaStore
+    ? createSkillMediaService({
+        store: skillMediaStore,
+        canvas: options.skillMedia.canvas,
+        ...(options.skillMedia.authorize ? { authorize: options.skillMedia.authorize } : {}),
+        // 事件进入既有 Agent 会话游标：按节点找到当前会话；找不到时仍保留 skill 事件流。
+        mirrorEvent: ({ owner, canvasId, nodeId, event, createdAt }) => {
+          const conversation = conversationStore.findConversationByTarget({ owner, canvasId, nodeId });
+          if (!conversation) return;
+          const turn = conversationStore.latestTurn(conversation.conversationId);
+          conversationStore.appendEvent({
+            conversationId: conversation.conversationId,
+            turnId: turn?.turnId ?? "skill-step",
+            requestId: turn?.requestId ?? event.skillRunId,
+            type: "skill-step-updated",
+            payloadJson: JSON.stringify(event),
+            createdAt
+          });
+        },
+        now: () => now().toISOString()
+      })
+    : null;
+
   /**
    * 宿主会话身份统一走注入的 Identity provider（任务 1.3 / design D2）。
    *
@@ -440,6 +478,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     serviceConnectionProviders: options.serviceConnectionProviders,
     accessEnforcer,
     service: agentConversations,
+    ...(skillMedia ? { skillMedia } : {}),
     canvasCreations,
     assistantText,
     connections: agentConnections,
@@ -526,6 +565,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     serviceConnections: () => serviceConnections,
     providers: () => providers,
     accessEnforcer: () => accessEnforcer,
+    skillMedia: () => skillMedia,
     close: async () => {
       clearInterval(recoveryTimer);
       await extensionControlPlane.dispose();
@@ -538,6 +578,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
       canvasCreationStore.close();
       assistantTextStore.close();
       conversationStore.close();
+      skillMediaStore?.close();
       sourceDocuments?.close();
     }
   };

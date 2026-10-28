@@ -527,7 +527,12 @@ export function createAgentConversationService(
       return result;
     },
     cancelTurn: (requestId) => remote.cancel(requestId),
-    linkRun: (requestId, input) => remote.link(requestId, input)
+    linkRun: (requestId, input) => remote.link(requestId, input),
+    skillStep: (input) => remote.skillStepByNode(input.canvasId, input.nodeId),
+    skillSteps: (input) => remote.skillSteps(input.canvasId, input.limit),
+    skillStepDetail: (input) => remote.skillStepDetail(input),
+    cancelSkillStep: (input) => remote.cancelSkillStep(input),
+    regenerateSkillStep: (input) => remote.regenerateSkillStep(input)
   };
 }
 

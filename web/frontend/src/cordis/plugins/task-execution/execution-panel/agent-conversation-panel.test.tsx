@@ -68,7 +68,12 @@ function fakeRemote(): AgentConversationRemote {
     query: async () => ({ ok: false, code: "not-found", error: "无" }),
     locate: async () => ({ ok: false, code: "not-found", error: "无" }),
     cancel: async () => ({ ok: true, value: { ok: true } }),
-    link: async () => ({ ok: false, code: "not-found", error: "无" })
+    link: async () => ({ ok: false, code: "not-found", error: "无" }),
+    skillStepByNode: async () => ({ ok: true, value: { step: null } }),
+    skillSteps: async () => ({ ok: true, value: { steps: [] } }),
+    skillStepDetail: async () => ({ ok: false, code: "not-found", error: "无" }),
+    cancelSkillStep: async () => ({ ok: false, code: "not-found", error: "无" }),
+    regenerateSkillStep: async () => ({ ok: false, code: "not-found", error: "无" })
   };
 }
 

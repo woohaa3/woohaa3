@@ -93,6 +93,12 @@ export type CanvasTaskProjectorOptions = {
    * 但不覆盖当前节点。登记失败不阻断当前节点投影（由补偿扫描重试）。
    */
   registerFailure?: (record: PptaskExecutionRecord) => Promise<void>;
+  /**
+   * Skill 尝试结算端口（change: 2026-10-28-add-agent-skill-media-regeneration，任务 3.1）。
+   *
+   * 只接收权威终态记录；不阻断画布投影，查询路径可用 Canvas 权威状态再次复核。
+   */
+  onSettled?: (record: PptaskExecutionRecord) => void;
   now?: () => string;
 };
 
@@ -224,6 +230,7 @@ export class CanvasTaskProjector {
   private readonly receipts: ProjectionReceiptStore;
   private readonly registerHistory?: (record: PptaskExecutionRecord) => Promise<void>;
   private readonly registerFailure?: (record: PptaskExecutionRecord) => Promise<void>;
+  private readonly onSettled?: (record: PptaskExecutionRecord) => void;
   private readonly now: () => string;
 
   constructor(options: CanvasTaskProjectorOptions) {
@@ -231,6 +238,7 @@ export class CanvasTaskProjector {
     this.receipts = options.receipts;
     this.registerHistory = options.registerHistory;
     this.registerFailure = options.registerFailure;
+    this.onSettled = options.onSettled;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -257,6 +265,9 @@ export class CanvasTaskProjector {
         return { status: "failed", code: "failure-history-register-failed", message: "失败历史登记失败" };
       }
     }
+
+    // 1.75) Skill 步骤结算：迟到旧 run 只写自己的历史，不影响当前节点投影。
+    try { this.onSettled?.(record); } catch { /* 查询复核兜底 */ }
 
     // 2) 取 room。
     const room = await this.resolveRoom(record.canvasId);

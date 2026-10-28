@@ -1,0 +1,91 @@
+/*
+ * Skill 媒体步骤状态（change: 2026-10-28-add-agent-skill-media-regeneration，任务 5.1）。
+ * 与执行面板同宽、紧凑排列；状态用文本表达，不依赖颜色单独传达。
+ */
+.skill-step-status {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 6px 8px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 8px;
+	background: var(--app-web-panel);
+	font-size: 12px;
+}
+
+.skill-step-status__header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.skill-step-status__state {
+	color: var(--app-web-text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.skill-step-status__meta,
+.skill-step-status__hint {
+	margin: 0;
+	color: var(--app-web-text-muted);
+	line-height: 1.4;
+	word-break: break-word;
+}
+
+.skill-step-status__error {
+	margin: 0;
+	color: var(--app-web-danger, #d9534f);
+	word-break: break-word;
+}
+
+.skill-step-status[data-state="failed"] .skill-step-status__state,
+.skill-step-status[data-state="unknown"] .skill-step-status__state {
+	color: var(--app-web-danger, #d9534f);
+}
+
+.skill-step-status[data-state="cancel-requested"] .skill-step-status__state {
+	color: var(--app-web-warning, #b7791f);
+}
+
+.skill-step-status__history {
+	color: var(--app-web-text-muted);
+}
+
+.skill-step-status__history summary {
+	cursor: pointer;
+}
+
+.skill-step-status__history ul {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 4px 0 0;
+	padding-left: 16px;
+}
+
+.skill-step-status__history li[data-state="failed"],
+.skill-step-status__history li[data-state="unknown"] {
+	color: var(--app-web-danger, #d9534f);
+}
+
+.skill-step-status__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.skill-step-status__actions button {
+	padding: 3px 10px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 6px;
+	background: var(--app-web-panel);
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+
+.skill-step-status__actions button:disabled {
+	cursor: default;
+	opacity: 0.6;
+}

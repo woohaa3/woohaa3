@@ -309,6 +309,18 @@ export type AgentCanvasCapabilities = {
   run: { available: boolean; reason?: string };
   /** 版本化脚本能力（change: 2026-10-13-add-canvas-script-authoring）。 */
   script?: AgentScriptCapability;
+  /**
+   * Skill 媒体步骤续接能力（change: 2026-10-28-add-agent-skill-media-regeneration）。
+   *
+   * 只有宿主装配了步骤 ledger 时才声明；未声明时新工具不得出现在 tools/list。
+   */
+  continuation?: {
+    available: boolean;
+    reason?: string;
+    tools?: readonly string[];
+    followLatest?: boolean;
+    maxWaitMs?: number;
+  };
   grouping?: { available: boolean; operations: string[] };
   layout?: { available: boolean; modes: string[]; coordinateSpace: "world" };
   models?: { available: boolean; reason?: string; items: unknown[] };

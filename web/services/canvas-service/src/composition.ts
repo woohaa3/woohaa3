@@ -498,6 +498,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       receipts,
       ...(nodeHistory ? { registerHistory: (record) => registerTaskHistoryRecord(nodeHistory!.service, record) } : {}),
       ...(nodeHistory ? { registerFailure: (record) => registerTaskFailureRecord(nodeHistory!.service, record) } : {}),
+      ...(options.onRunSettled ? { onSettled: options.onRunSettled } : {}),
       now: options.now
     });
     runService = new CanvasRunService({
@@ -544,6 +545,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           runService,
           ...(options.resolveCatalog ? { resolveCatalog: options.resolveCatalog } : {}),
           assistantTextRuns: options.assistantTextRuns,
+          ...(options.skillAttempts ? { skillAttempts: options.skillAttempts } : {}),
           modelRenderer,
           mediaClient: mediaClient ?? null,
           ...(options.contentRuntime ? { contentRuntime: options.contentRuntime } : {}),

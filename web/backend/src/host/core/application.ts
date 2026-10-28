@@ -2,6 +2,7 @@ import { createSiteProviderSource } from "./service-connection-sources.js";
 import { createAssistantTextPort } from "../../ports/assistant-text.js";
 import { createCanvasCreationPort } from "../../ports/canvas-creation.js";
 import { createGroupEffects } from "../../ports/group-effects.js";
+import { canvasGroupEpoch, currentCanvasGroupScope, deriveRunIdentity } from "@woohaa3/canvas-service";
 /**
  * 核心层 · application：站点插件宿主（控制面、站点配置 facade、工作 lease、公开路由分派）。
  *
@@ -172,6 +173,103 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     const { generation, mcp, storage } = ctx;
 
     const sourceSecrets = resolveSecretStore(env, ctx.log.scope("service-connections"));
+    /**
+     * Skill 媒体续接的宿主接线
+     * （change: 2026-10-28-add-agent-skill-media-regeneration，任务 3.1 / 4.1）。
+     *
+     * Canvas 保持 run/cancel/status/output 的任务权威；Application Service 只保存步骤尝试
+     * ledger。两者都在本进程，经 `ctx.canvas.mcpServices().agent.runAdapter` 直连，不引入
+     * 服务间 import 或第二套 Provider 调用。
+     */
+    const canvasAgent = () => ctx.canvas.mcpServices().agent;
+    const skillMedia = {
+      deriveRunId: (input: { canvasId: string; nodeId: string; requestId: string }) =>
+        deriveRunIdentity(input.canvasId, input.nodeId, input.requestId).runId,
+      authorize: async (input: {
+        owner: string;
+        canvasId: string;
+        permission: "read" | "write";
+        rootGroupId?: string;
+        scopeEpoch?: number;
+        nodeId?: string;
+      }) => {
+        const scope = currentCanvasGroupScope();
+        if (scope) {
+          if (!scope.valid()) return { ok: false as const, code: "group-scope-revoked" as const, message: "组创作授权已撤销" };
+          if (scope.canvasId !== input.canvasId) return { ok: false as const, code: "forbidden" as const, message: "画布不在当前组作用域" };
+          if (input.rootGroupId !== undefined && input.rootGroupId !== scope.rootGroupId) {
+            return { ok: false as const, code: "forbidden" as const, message: "步骤不属于当前组" };
+          }
+          if (input.scopeEpoch !== undefined && canvasGroupEpoch(input.canvasId, scope.rootGroupId) !== input.scopeEpoch) {
+            return { ok: false as const, code: "group-scope-revoked" as const, message: "组作用域已失效" };
+          }
+          if (scope.authorize && !(await scope.authorize(input.permission))) {
+            return { ok: false as const, code: "forbidden" as const, message: "画布权限已撤销" };
+          }
+          return { ok: true as const };
+        }
+        const agent = canvasAgent();
+        const decision = await agent?.authorizeCanvas({ principalId: input.owner, canvasId: input.canvasId, permission: input.permission });
+        if (decision && !decision.ok) return { ok: false as const, code: decision.code, message: decision.message };
+        return { ok: true as const };
+      },
+      canvas: {
+        run: async (input: {
+          owner: string;
+          canvasId: string;
+          nodeId: string;
+          requestId: string;
+          runId: string;
+          skill: import("@woohaa3/contracts").SkillMediaRunRef;
+          modelKey?: string;
+          prompt?: string;
+          parameters?: Record<string, unknown>;
+        }) => {
+          const adapter = canvasAgent()?.runAdapter;
+          if (!adapter) return { ok: false as const, code: "run-unavailable", message: "本部署未启用节点执行" };
+          return adapter.run({
+            owner: input.owner,
+            canvasId: input.canvasId,
+            nodeId: input.nodeId,
+            requestId: input.requestId,
+            runId: input.runId,
+            skill: input.skill,
+            ...(input.modelKey !== undefined ? { modelKey: input.modelKey } : {}),
+            ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
+            ...(input.parameters !== undefined ? { parameters: input.parameters } : {})
+          });
+        },
+        cancel: async (input: { owner: string; canvasId: string; nodeId: string; runId: string }) => {
+          const adapter = canvasAgent()?.runAdapter;
+          if (!adapter) return { ok: false as const, code: "run-unavailable", message: "本部署未启用节点执行" };
+          return adapter.cancel({ owner: input.owner, canvasId: input.canvasId, nodeId: input.nodeId, runId: input.runId });
+        },
+        status: async (input: {
+          owner: string;
+          canvasId: string;
+          nodeId: string;
+          runId: string;
+          waitMs?: number;
+          skill?: import("@woohaa3/contracts").SkillMediaRunRef;
+        }) => {
+          const adapter = canvasAgent()?.runAdapter;
+          if (!adapter) return { ok: false as const, code: "run-unavailable", message: "本部署未启用节点执行" };
+          return adapter.status({
+            owner: input.owner,
+            canvasId: input.canvasId,
+            nodeId: input.nodeId,
+            runId: input.runId,
+            ...(input.waitMs !== undefined ? { waitMs: input.waitMs } : {}),
+            ...(input.skill !== undefined ? { skill: input.skill } : {})
+          });
+        },
+        output: async (input: { owner: string; canvasId: string; nodeId: string; runId: string }) => {
+          const adapter = canvasAgent()?.runAdapter;
+          if (!adapter) return { ok: false as const, code: "run-unavailable", message: "本部署未启用节点执行" };
+          return adapter.output({ canvasId: input.canvasId, nodeId: input.nodeId, runId: input.runId });
+        }
+      }
+    };
     const allowedSourceHosts = new Set([
       "api.openai.com", "api.anthropic.com", "api.deepseek.com", "generativelanguage.googleapis.com",
       ...(env.WOOHAA3_SDK_AGENT_ALLOWED_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean),
@@ -199,6 +297,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       },
 
       mediaFormats: ctx.media.formats,
+      skillMedia,
       env,
       accessRuntime,
       authenticator,

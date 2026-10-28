@@ -108,6 +108,11 @@ function fakeRemote(overrides: Partial<AgentConversationRemote> = {}): AgentConv
     locate: async () => ({ ok: true, value: { conversation: summary(), turn: turn(), snapshot: snapshot() } }),
     cancel: async () => ({ ok: true, value: { ok: true } }),
     link: async () => ({ ok: true, value: { turn: turn() } }),
+    skillStepByNode: async () => ({ ok: true, value: { step: null } }),
+    skillSteps: async () => ({ ok: true, value: { steps: [] } }),
+    skillStepDetail: async () => ({ ok: false, code: "not-found", error: "无" }),
+    cancelSkillStep: async () => ({ ok: false, code: "not-found", error: "无" }),
+    regenerateSkillStep: async () => ({ ok: false, code: "not-found", error: "无" }),
     ...overrides
   };
 }

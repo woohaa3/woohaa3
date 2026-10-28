@@ -365,3 +365,33 @@
 .task-activity-feed__card[data-selected] { background: color-mix(in srgb, var(--app-interaction-accent) 6%, transparent); }
 .task-activity-feed__pop--group { position: relative; pointer-events: auto; }
 .task-activity-feed__group-actions { display: flex; flex-wrap: wrap; gap: 2px; }
+
+/* Skill 媒体步骤：主行只显示当前尝试，详情列出全部历史尝试供核对（任务 5.2）。 */
+.task-activity-feed__skill { display: flex; flex-direction: column; gap: 4px; }
+.task-activity-feed__skill-attempts {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-height: 180px;
+	margin: 0;
+	padding: 0;
+	overflow-y: auto;
+	list-style: none;
+}
+.task-activity-feed__skill-attempts li {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding: 4px 6px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	color: var(--app-web-text-muted);
+	font-size: 11px;
+}
+.task-activity-feed__skill-attempts li[data-current] {
+	border-color: var(--app-web-border);
+	background: color-mix(in srgb, var(--app-interaction-accent) 5%, transparent);
+	color: var(--app-web-text);
+}
+.task-activity-feed__skill-attempts li[data-state="failed"],
+.task-activity-feed__skill-attempts li[data-state="unknown"] { color: var(--app-web-danger, #d9534f); }
