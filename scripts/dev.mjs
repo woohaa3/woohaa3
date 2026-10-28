@@ -18,6 +18,7 @@ import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
 import { decideBackendExit, RESTART_LOOP_LIMIT, RESTART_LOOP_WINDOW_MS } from "./lib/dev-restart-policy.mjs";
 import { syncBevyAssets } from "./sync-bevy-assets.mjs";
 import { resolveDevEntryArgs, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
+import { supervisorEndpoint } from "./lib/agent-runtime-endpoints.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2).filter((value) => value !== "--");
@@ -151,18 +152,24 @@ function watchBackendReady(url) {
 async function ensureAgentSupervisor() {
   const runtimeDir = path.join(root, ".local", "agent-runtime");
   fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-  const socketPath = path.join(runtimeDir, "supervisor.sock");
+  // Windows 没有 Unix domain socket 的文件语义：net.Server#listen(<文件路径>) 恒返回 EACCES
+  // 且不触发监听回调，dev 会卡在「Agent Supervisor 启动超时」。这里改用命名管道，并带上
+  // workspaceKey——管道名是全机器共享的命名空间，不像 .local/ 下的文件那样按 checkout 隔离。
+  const workspaceKey = crypto.createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 40);
+  const socketPath = supervisorEndpoint({ workspaceKey, runtimeDir });
   const tokenPath = path.join(runtimeDir, "token");
   const token = existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : crypto.randomBytes(32).toString("hex");
   if (!existsSync(tokenPath)) fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-  const workspaceKey = crypto.createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 40);
   const config = { socketPath, token, workspaceKey };
   if (existsSync(socketPath)) {
     try {
       const state = await supervisorRpc(config, "ping");
       if (state?.workspaceKey === workspaceKey) { agentSupervisor = config; return config; }
     } catch { /* stale endpoint; start a replacement below */ }
-    try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
+    // 命名管道没有 unlink 语义：随最后一个句柄关闭由系统回收，跳过清理。
+    if (process.platform !== "win32") {
+      try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
+    }
   }
   const script = path.join(root, "scripts", "agent-runtime-supervisor.mjs");
   const child = spawn(process.execPath, [script, "--socket", socketPath, "--state", runtimeDir, "--token", token, "--workspace", workspaceKey, "--owner-pid", String(process.pid)], {
