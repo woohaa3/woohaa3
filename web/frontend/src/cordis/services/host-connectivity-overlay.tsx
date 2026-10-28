@@ -6,7 +6,7 @@
  * - `restarted`：底部非阻断提示，用户确认后只重建 Canvas scope。
  */
 import { useSyncExternalStore } from "react";
-import { Button } from "../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import type { HostConnectivityService } from "./host-connectivity.js";
 
 export function HostConnectivityOverlay({ connectivity }: { connectivity: HostConnectivityService }) {

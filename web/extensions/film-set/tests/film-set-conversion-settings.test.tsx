@@ -16,7 +16,7 @@ import { createEmptyWoohaa3ServerCanvas, type FilmSetConversionModelCandidate, t
 import { createFilmSetConversionDialog, createFilmSetConversionSettings } from "../src/authoring/browser/film-set-conversion/settings.js";
 import { DialogService } from "../../../frontend/src/cordis/services/dialogs/service.js";
 import { DialogHost } from "../../../frontend/src/cordis/services/dialogs/DialogHost.js";
-import { UiProvider } from "../../../frontend/src/shared/ui/UiProvider.js";
+import { UiProvider } from "@woohaa3/ui/primitives";
 import { createFilmSetConversionController, defaultFilmSetConversionEntry, type FilmSetConversionController, type FilmSetConversionEntry } from "../src/authoring/browser/film-set-conversion/controller.js";
 import type { FilmSetConversionClient } from "../src/authoring/browser/film-set-conversion/client.js";
 import type { FilmSetConversionActionDependencies } from "../src/authoring/browser/film-set-conversion/action.js";

@@ -9,8 +9,8 @@
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { compareSemver, type MarketplaceSigningKey, type MarketplaceVersionInfo, type SettingsSnapshot } from "@woohaa3/contracts";
-import { Button } from "../../../shared/ui/Button.js";
-import { TextInput } from "../../../shared/ui/FormControls.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { TextInput } from "@woohaa3/ui/forms";
 import { appPublicUrl } from "../../services/app-base-path.js";
 import { resolvePluginIcon } from "./plugin-icons.js";
 import { versionTrusted, type MarketplaceInstallController } from "./marketplace-install.js";

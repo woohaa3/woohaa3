@@ -11,7 +11,7 @@
  * presentation 变化时卸载（父级据此条件渲染）。
  */
 import { useMemo } from "react";
-import { Popover } from "../../../shared/ui/index.js";
+import { Popover } from "@woohaa3/ui";
 
 const MAX_WIDTH = 320;
 const MAX_HEIGHT = 240;

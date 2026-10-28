@@ -110,9 +110,6 @@
 .task-history__jump-reason { color: var(--mc-text-muted); font-size: 11px; }
 
 /* 复制字段：成功/失败有可访问文本反馈，不只依赖颜色。 */
-.task-history__copy { display: inline-flex; align-items: center; gap: 4px; }
-.task-history__copy svg { width: 13px; height: 13px; }
-.task-history__copy-feedback { font-size: 11px; color: var(--mc-text-muted); }
 
 .task-history__pager { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
 .task-history__busy { color: var(--mc-text-muted); font-size: 12px; }

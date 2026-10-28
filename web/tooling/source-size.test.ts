@@ -39,7 +39,7 @@ describe("业务源码规模门禁（≤500 物理行）", () => {
       "web/frontend/src/bevy-wasm/woohaa_bevy_canvas.d.ts",
       "web/frontend/src/bevy-wasm/woohaa_bevy_canvas.js",
       "web/contracts/src/theme/generated-default.ts",
-      "web/showcase/src/fixtures/catalog.ts"
+      "web/ui/showcase/src/fixtures/catalog.ts"
     ]) {
       expect(sizes.some((entry) => entry.path === excluded), `${excluded} 不应计入业务源码`).toBe(false);
     }
@@ -78,6 +78,6 @@ describe("业务源码规模门禁（≤500 物理行）", () => {
     expect(isBusinessSourceFile("web/frontend/src/bevy-wasm/x.d.ts")).toBe(false);
     expect(isBusinessSourceFile("web/frontend/src/bevy-wasm/woohaa_bevy_canvas.js")).toBe(false);
     expect(isBusinessSourceFile("web/contracts/src/theme/generated-default.ts")).toBe(false);
-    expect(isBusinessSourceFile("web/showcase/src/fixtures/canvas.ts")).toBe(false);
+    expect(isBusinessSourceFile("web/ui/showcase/src/fixtures/canvas.ts")).toBe(false);
   });
 });

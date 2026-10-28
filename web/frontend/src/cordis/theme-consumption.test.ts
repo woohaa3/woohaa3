@@ -14,7 +14,7 @@ import { THEME_SELECTION_STORAGE_KEY } from "./services/theme/service.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const UI_DIR = resolve(here, "ui");
-const UI_CSS = readFileSync(resolve(UI_DIR, "ui.css"), "utf8");
+const UI_CSS = readFileSync(resolve(UI_DIR, "ui.css"), "utf8") + readFileSync(resolve(here, "../../../ui/src/styles/base.css"), "utf8");
 const INDEX_CSS = readFileSync(resolve(here, "../index.css"), "utf8");
 // 页面专属样式随页面拥有（change: 2026-10-10-extract-task-history-page，design D4）：
 // 与 index.css 同等约束——只消费语义 token，不复制品牌色 literal。

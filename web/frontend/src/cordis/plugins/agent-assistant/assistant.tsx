@@ -2,11 +2,11 @@ import { Component, lazy, Suspense, useEffect, useRef, useState, useSyncExternal
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
 import { useSlot } from "../../host.js";
 import { useOptionalService } from "../../react.js";
-import { Button, SettingsFeedback, ServiceLogo } from "../../../shared/ui/index.js";
-import { BackIcon, CloseIcon, SparklesIcon } from "../../../shared/ui/icons.js";
+import { Button, SettingsFeedback, ServiceLogo } from "@woohaa3/ui";
+import { BackIcon, CloseIcon, SparklesIcon } from "@woohaa3/ui/icons";
 import type { BackendSettingsStore } from "../settings/backend-settings-store.js";
-import { UiPortalScope } from "../../../shared/ui/UiProvider.js";
-import { Dialog, DialogHeader, DialogTitle, DialogBody } from "../../services/dialogs/Dialog.js";
+import { UiPortalScope } from "@woohaa3/ui/primitives";
+import { Dialog, DialogHeader, DialogTitle, DialogBody } from "@woohaa3/ui/dialogs";
 import { McpConnectionPanel, type McpPanelSnapshot } from "./mcp-connection-panel.js";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { providerConfigGroups } from "../settings/plugin-groups.js";

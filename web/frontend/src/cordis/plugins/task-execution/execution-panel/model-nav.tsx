@@ -7,7 +7,7 @@
  * 具体参数、发送、润色仍由 `ExecutionPanel`/宿主负责。
  */
 import { useState } from "react";
-import { Listbox } from "../../../../shared/ui/index.js";
+import { Listbox } from "@woohaa3/ui";
 
 export type ExecutionPanelModelNavProps = {
 	/** 模型选项（与 ExecutionPanel modelConfig.modelOptions 同源）。 */

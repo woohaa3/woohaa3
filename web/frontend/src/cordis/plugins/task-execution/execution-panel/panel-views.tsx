@@ -12,7 +12,7 @@ import {
 	LoadingIcon,
 	Popover,
 	WandSparklesIcon
-} from "../../../../shared/ui/index.js";
+} from "@woohaa3/ui";
 import { SendPlaneIcon } from "./icons.js";
 import { ErrorInspector } from "./error-inspector.js";
 import { formatVideoTime } from "./panel-shared.js";

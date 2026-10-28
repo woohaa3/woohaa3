@@ -8,7 +8,7 @@
  * 变成一句猜测。
  */
 import type { TelemetryEventRecord } from "@woohaa3/contracts";
-import { Button, CloseIcon } from "../../shared/ui/index.js";
+import { Button, CloseIcon } from "@woohaa3/ui";
 import { eventNameLabel, formatDuration, formatLocalTime, resultLabel } from "./format.js";
 
 export function EventDetailPanel({

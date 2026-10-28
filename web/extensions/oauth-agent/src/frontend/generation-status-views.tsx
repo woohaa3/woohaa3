@@ -7,7 +7,7 @@
  * `ChatGptGenerationPanel` 持有；拆分不改变 DOM 结构与样式类。
  */
 import { useEffect, useState } from "react";
-import { Button } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
 import type { ConversationTurn } from "@woohaa3/contracts";
 import type { ChatGptRunState } from "./service.js";
 

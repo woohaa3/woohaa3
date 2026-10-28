@@ -27,10 +27,10 @@ import type { AgentConversationServiceHandle } from "../../../services/agent-con
 import { assistantInputController } from "../../../services/assistant-execution/controller.js";
 import { assistantConversationPort } from "../../../services/assistant-execution/conversation-port.js";
 import type { AgentConversationSubmitInput, AgentConversationSubmitResult } from "../../../contract/agent-conversation.js";
-import { AssistantComposer } from "../../../ui/assistant-execution/composer.js";
-import { AssistantToolbar } from "../../../ui/assistant-execution/toolbar.js";
-import { Button } from "../../../../shared/ui/Button.js";
-import { AssistantModelSelector, AssistantListSelector } from "../../../ui/assistant-execution/model-selector.js";
+import { AssistantComposer } from "@woohaa3/ui/assistant";
+import { AssistantToolbar } from "@woohaa3/ui/assistant";
+import { Button } from "@woohaa3/ui/primitives";
+import { AssistantModelSelector, AssistantListSelector } from "@woohaa3/ui/assistant";
 import { agentDirectory } from "../../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, assistantSelectionMemory, rememberAssistantPreference } from "../../../services/assistant-execution/selection.js";
 import {
@@ -38,7 +38,7 @@ import {
   ChevronRightIcon,
   WarningIcon,
   LoadingIcon,
-} from "../../../../shared/ui/icons.js";
+} from "@woohaa3/ui/icons";
 import { buildConversationTimeline } from "./agent-conversation-timeline.js";
 import "./agent-conversation-panel.css";
 

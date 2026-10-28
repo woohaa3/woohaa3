@@ -8,7 +8,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { definePlugin } from "../../plugin.js";
-import { AppSettingsIcon } from "../../../shared/ui/icons.js";
+import { AppSettingsIcon } from "@woohaa3/ui/icons";
 
 export const SETTINGS_ENTRY_PLUGIN_ID = "settings-entry";
 

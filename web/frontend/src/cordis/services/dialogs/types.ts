@@ -6,9 +6,10 @@
  */
 
 /** 弹窗视觉/布局变体。 */
-export type DialogVariant = "standard" | "alert" | "media" | "sheet";
+import type { DialogVariant, DialogSize } from "@woohaa3/ui/dialogs";
+export type { DialogVariant, DialogSize } from "@woohaa3/ui/dialogs";
 /** 弹窗尺寸档位。 */
-export type DialogSize = "sm" | "md" | "lg" | "fullscreen";
+
 
 /** 一个已入栈弹窗实例的描述符（纯数据，可序列化）。 */
 export type DialogInstance = {

@@ -33,6 +33,7 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import * as esbuild from "esbuild";
+import { uiPublicApi } from "../ui/scripts/public-api.mjs";
 
 import {
   ExtensionScanError,
@@ -172,7 +173,23 @@ async function collectSdkRequirements(entryFiles, baseDir) {
   const ts = await loadTypescript(baseDir);
   const names = new Set();
   const namespaceImports = [];
-  const isSdk = (specifier) => specifier === EXTENSION_API_SPECIFIER;
+  const uiApi = uiPublicApi(ts);
+  const isUi = specifier => specifier === "@woohaa3/ui" || specifier.startsWith("@woohaa3/ui/");
+  const isSdk = specifier => specifier === EXTENSION_API_SPECIFIER || isUi(specifier);
+  const validateUi = (file, specifier, bindings, typeOnly = false) => {
+    if (!isUi(specifier)) return;
+    const allowed = uiApi.get(specifier);
+    if (!allowed) throw new Error(`${file}: 不支持 UI 子路径/样式导入 ${specifier}`);
+    if (!bindings || !(ts.isNamedImports(bindings) || ts.isNamedExports(bindings))) {
+      throw new Error(`${file}: UI ${specifier} 仅支持具名导入/导出，拒绝 namespace/default/side-effect`);
+    }
+    for (const el of bindings.elements) {
+      const name = el.propertyName?.text ?? el.name.text;
+      if (!allowed.has(name) || (!typeOnly && !el.isTypeOnly && !allowed.get(name))) {
+        throw new Error(`${file}: ${specifier} 未知或非运行时 UI 导出 ${name}`);
+      }
+    }
+  };
   const collectNames = (bindingNames) => {
     for (const name of bindingNames) {
       if (name) names.add(name);
@@ -181,12 +198,21 @@ async function collectSdkRequirements(entryFiles, baseDir) {
   for (const file of entryFiles) {
     const source = readFileSync(file, "utf8");
     const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const rejectDynamicUi = node => {
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+          node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && isUi(node.arguments[0].text)) {
+        throw new Error(`${file}: UI 仅支持静态具名导入 ${node.arguments[0].text}`);
+      }
+      ts.forEachChild(node, rejectDynamicUi);
+    };
+    rejectDynamicUi(sourceFile);
     for (const statement of sourceFile.statements) {
       if (ts.isImportDeclaration(statement)) {
         const specifier = statement.moduleSpecifier;
         if (!ts.isStringLiteral(specifier) || !isSdk(specifier.text)) continue;
         const clause = statement.importClause;
-        if (!clause) continue; // 副作用导入：无运行时具名需求
+        validateUi(file, specifier.text, clause?.name ? undefined : clause?.namedBindings, clause?.isTypeOnly);
+        if (!clause) continue;
         if (clause.isTypeOnly) continue;
         if (clause.name) namespaceImports.push(file); // default import
         const bindings = clause.namedBindings;
@@ -198,8 +224,9 @@ async function collectSdkRequirements(entryFiles, baseDir) {
       } else if (ts.isExportDeclaration(statement)) {
         const specifier = statement.moduleSpecifier;
         if (!specifier || !ts.isStringLiteral(specifier) || !isSdk(specifier.text)) continue;
-        if (statement.isTypeOnly) continue;
         const bindings = statement.exportClause;
+        validateUi(file, specifier.text, bindings, statement.isTypeOnly);
+        if (statement.isTypeOnly) continue;
         if (bindings && ts.isNamedExports(bindings)) {
           collectNames(bindings.elements.filter((el) => !el.isTypeOnly).map((el) => el.propertyName?.text ?? el.name.text));
         } else if (bindings && ts.isNamespaceExport(bindings)) {
@@ -276,6 +303,7 @@ export async function buildExtensionBrowser(options = {}) {
   if (!existsSync(entrySource)) throw new Error(`缺少约定前端入口：${entrySource}`);
   if (!existsSync(metadataSource)) throw new Error(`缺少纯 metadata：${metadataSource}`);
 
+  const uiPublicApiCache = uiPublicApi(await loadTypescript(dir));
   const sources = await collectFrontendSources(entrySource, dir);
   const { names: sdkNames, namespaceImports } = await collectSdkRequirements(sources, dir);
   if (namespaceImports.length > 0) {
@@ -353,6 +381,10 @@ export async function buildExtensionBrowser(options = {}) {
       build.onResolve({ filter: /^@woohaa3\/frontend\/extension-api$/ }, () => ({
         path: path.join(targetStaging, "shim-extension-api.js")
       }));
+      build.onResolve({ filter: /^@woohaa3\/ui(?:\/.*)?$/ }, args => {
+        if (!uiPublicApiCache.has(args.path)) return { errors: [{ text: `不支持 UI 子路径/样式导入 ${args.path}` }] };
+        return { path: path.join(targetStaging, "shim-extension-api.js") };
+      });
       build.onLoad({ filter: /shim-extension-api\.js$/ }, () => ({
         contents: [
           `/** 生成物：把 @woohaa3/frontend/extension-api 具名导入解析为宿主 runtime sdk（真实引用）。 */`,

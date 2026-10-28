@@ -24,7 +24,7 @@ import {
 	PlusIcon,
 	Popover,
 	WarningIcon
-} from "../../../shared/ui/index.js";
+} from "@woohaa3/ui";
 
 export type ReferenceTileStripProps = {
   items: readonly ReferenceItem[];

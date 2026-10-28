@@ -23,10 +23,10 @@ import {
   type TelemetryResult,
   type TelemetryWindow
 } from "@woohaa3/contracts";
-import { Button } from "../../shared/ui/Button.js";
-import { SelectInput, TextInput } from "../../shared/ui/FormControls.js";
-import { SegmentedControl } from "../../shared/ui/SegmentedControl.js";
-import type { ListboxOption } from "../../shared/ui/Listbox.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { SelectInput, TextInput } from "@woohaa3/ui/forms";
+import { SegmentedControl } from "@woohaa3/ui/primitives";
+import type { ListboxOption } from "@woohaa3/ui/forms";
 import {
   WINDOW_SHORT_LABELS,
   eventNameLabel,

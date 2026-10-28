@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Button, IconButton } from "../../shared/ui/index.js";
-import { CloseIcon } from "../../shared/ui/index.js";
+import { Button, IconButton } from "@woohaa3/ui";
+import { CloseIcon } from "@woohaa3/ui";
 import { TaskTraceBody } from "../../shared/task-trace/task-trace-body.js";
 import type { MonitorItem } from "./monitor-model.js";
 

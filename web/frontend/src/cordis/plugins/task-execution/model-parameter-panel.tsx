@@ -1,7 +1,7 @@
 /** 模型参数宿主：直接呈现生成入口；外部 MCP 指引由生成面板内的复制按钮承载。 */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
-import { Button, Tooltip } from "../../../shared/ui/index.js";
+import { Button, Tooltip } from "@woohaa3/ui";
 import { resolveModelMcpServerUrl } from "../../mcp-endpoint.js";
 import { MCP_HINT_INSTALL_COPY_PREFIX } from "../../mcp-hint.js";
 import { isModelAuthoringNodeType } from "@woohaa3/contracts";

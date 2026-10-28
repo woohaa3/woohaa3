@@ -8,7 +8,7 @@
  * 本弹窗只作为生成面板授权操作的落点。
  */
 import { useSyncExternalStore, type ComponentType } from "react";
-import { Dialog } from "../../services/dialogs/Dialog.js";
+import { Dialog } from "@woohaa3/ui/dialogs";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import { ProviderSettingsCards } from "../settings/provider-settings-cards.js";
 import { ContributionBoundary } from "../../contribution-boundary.js";

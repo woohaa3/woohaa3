@@ -13,8 +13,8 @@
  */
 import { useRef, useState, useSyncExternalStore } from "react";
 import type { InstalledExtensionView, SettingsSnapshot } from "@woohaa3/contracts";
-import { Button } from "../../../shared/ui/Button.js";
-import { FileTextIcon } from "../../../shared/ui/icons.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { FileTextIcon } from "@woohaa3/ui/icons";
 import { describeJob, type ManagedExtensionsController } from "./managed-extensions.js";
 import { ManagedVersionStatusNotice } from "./managed-version-status.js";
 

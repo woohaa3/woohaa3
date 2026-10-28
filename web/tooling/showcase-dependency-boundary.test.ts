@@ -1,4 +1,4 @@
-/** Radix/Lucide 已进入生产；业务入口必须经过 shared/ui。 */
+/** Radix/Lucide 已进入生产；业务入口必须经过 @woohaa3/ui。 */
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -31,7 +31,7 @@ export function scanUiVendorImports(input: {
   while ((match = pattern.exec(withoutComments))) {
     const specifier = match[1] ?? match[2] ?? match[3];
     if (!specifier) continue;
-    if (!input.file.startsWith("frontend/src/shared/ui/")) {
+    if (!input.file.startsWith("ui/src/")) {
       if (specifier.startsWith("@radix-ui/") || specifier === "lucide-react" || specifier.startsWith("lucide-react/")) {
         violations.push({ file: input.file, specifier, rule: "shared-ui-vendor-boundary" });
       }
@@ -60,10 +60,10 @@ function collectSourceFiles(dir: string): string[] {
   return files;
 }
 
-describe("生产 UI vendor 只能从 shared/ui 适配层引入", () => {
+describe("生产 UI vendor 只能从 @woohaa3/ui 适配层引入", () => {
   it("frontend 明确声明共享适配层所需 Radix / Lucide", () => {
     const pkg = JSON.parse(
-      readFileSync(path.join(WEB_ROOT, "frontend", "package.json"), "utf8"),
+      readFileSync(path.join(WEB_ROOT, "ui", "package.json"), "utf8"),
     ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
     for (const name of UI_VENDOR_PACKAGES) {
@@ -71,9 +71,9 @@ describe("生产 UI vendor 只能从 shared/ui 适配层引入", () => {
     }
   });
 
-  it("frontend 业务源码不绕过 shared/ui import Radix / Lucide", () => {
+  it("frontend 业务源码不绕过 @woohaa3/ui import Radix / Lucide", () => {
     const offenders: DependencyViolation[] = [];
-    for (const file of collectSourceFiles(path.join(WEB_ROOT, "frontend", "src"))) {
+    for (const file of ["frontend", "ui", "extensions"].flatMap(dir => collectSourceFiles(path.join(WEB_ROOT, dir)))) {
       offenders.push(
         ...scanUiVendorImports({ file: path.relative(WEB_ROOT, file), source: readFileSync(file, "utf8") }),
       );
@@ -81,8 +81,8 @@ describe("生产 UI vendor 只能从 shared/ui 适配层引入", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("shared/ui 可以引入 vendor（fixture）", () => {
-    expect(scanUiVendorImports({ file: "frontend/src/shared/ui/Tooltip.tsx", source: 'import * as Tooltip from "@radix-ui/react-tooltip";' })).toEqual([]);
+  it("@woohaa3/ui 可以引入 vendor（fixture）", () => {
+    expect(scanUiVendorImports({ file: "ui/src/Tooltip.tsx", source: 'import * as Tooltip from "@radix-ui/react-tooltip";' })).toEqual([]);
   });
 
   it("守卫能检出 frontend 中故意引入的 Radix / Lucide import（fixture）", () => {

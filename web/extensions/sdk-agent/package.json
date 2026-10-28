@@ -41,7 +41,8 @@
     "@woohaa3/contracts": "workspace:*",
     "@woohaa3/frontend": "workspace:*",
     "react": "^18.3.1",
-    "@woohaa3/runtime-components": "workspace:*"
+    "@woohaa3/runtime-components": "workspace:*",
+    "@woohaa3/ui": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.5"

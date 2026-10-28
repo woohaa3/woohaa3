@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "exclude": [
+    "src/**/*.test.*",
+    "src/**/*.stories.*",
+    "src/test-support/**",
+    "src/test-setup.ts"
+  ]
+}

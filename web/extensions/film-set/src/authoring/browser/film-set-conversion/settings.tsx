@@ -1,6 +1,8 @@
 /** 创建弹窗使用应用 Dialog Host；不再锚定节点，也不显示视频范围。 */
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { agentDirectory, Dialog, DialogBody, DialogHeader, DialogTitle, FilmIcon, ImageIcon, type DialogRendererProps, type DialogsService } from "@woohaa3/frontend/extension-api";
+import { agentDirectory, type DialogRendererProps, type DialogsService } from "@woohaa3/frontend/extension-api";
+import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { FilmIcon, ImageIcon } from "@woohaa3/ui/icons";
 import type { FilmSetConversionSourceKind } from "@woohaa3/contracts";
 import { defaultFilmSetConversionEntry } from "./controller.js";
 import { FilmSetConversionSettingsPanel, type FilmSetConversionActionDependencies } from "./action.js";

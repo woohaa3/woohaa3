@@ -20,8 +20,8 @@ import {
   type VideoEditAnnotationShape,
   type VideoEditIntent
 } from "@woohaa3/contracts";
-import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "../../services/dialogs/Dialog.js";
-import { Button } from "../../../shared/ui/index.js";
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { Button } from "@woohaa3/ui";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import {
   MIN_RANGE_SECONDS,

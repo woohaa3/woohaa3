@@ -14,7 +14,9 @@
  *   丢掉用户刚敲的地址。
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Button, SettingsFeedback, SettingsSection, TextInput } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
+import { SettingsFeedback, SettingsSection } from "@woohaa3/ui/settings";
+import { TextInput } from "@woohaa3/ui/forms";
 import {
   REMOTE_SERVER_OAUTH_POLL_INTERVAL_MS,
   REMOTE_SERVER_OAUTH_POLL_TIMEOUT_MS,

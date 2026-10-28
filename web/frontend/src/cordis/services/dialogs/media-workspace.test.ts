@@ -17,9 +17,10 @@ import { describe, expect, it } from "vitest";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC_ROOT = path.resolve(HERE, "../../../");
-const UI_CSS = readFileSync(path.resolve(HERE, "../../ui/ui.css"), "utf8");
+const UI_ROOT = path.resolve(HERE, "../../../../../ui");
+const UI_CSS = readFileSync(path.join(UI_ROOT, "src/styles/dialogs.css"), "utf8") + readFileSync(path.resolve(HERE, "../../ui/ui.css"), "utf8");
 const FRONTEND_PKG = JSON.parse(
-  readFileSync(path.resolve(HERE, "../../../../package.json"), "utf8")
+  readFileSync(path.join(UI_ROOT, "package.json"), "utf8")
 ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
 
 /** 递归列出生产源码文件。 */
@@ -36,8 +37,8 @@ function productionFiles(dir: string): string[] {
 
 /** 媒体 Dialog 生产源码（renderer + 共享 primitives）。 */
 const MEDIA_SOURCES = [
-  path.resolve(HERE, "Dialog.tsx"),
-  path.resolve(HERE, "MediaDialog.tsx"),
+  path.join(UI_ROOT, "src/dialogs/Dialog.tsx"),
+  path.join(UI_ROOT, "src/media/MediaDialog.tsx"),
   path.resolve(HERE, "../../plugins/video-capture/frame-capture-dialog.tsx"),
   path.resolve(HERE, "../../plugins/video-capture/video-edit-intents.tsx")
 ].map((file) => ({ file, source: readFileSync(file, "utf8") }));
@@ -59,7 +60,7 @@ describe("媒体 Dialog 控件语言（任务 1.2）", () => {
 
   it("图标按钮必须提供可访问名称（label）与可见 focus", () => {
     expect(UI_CSS).toMatch(/\.dlg__icon-button:focus-visible\s*\{[^}]*outline/);
-    const dialog = readFileSync(path.resolve(HERE, "Dialog.tsx"), "utf8");
+    const dialog = readFileSync(path.join(UI_ROOT, "src/dialogs/Dialog.tsx"), "utf8");
     // DialogIconButton 强制 label 作为可访问名；tooltip 作为原生 title 提示。
     expect(dialog).toContain("label: string");
     expect(dialog).toContain('label={props.label}');
@@ -74,7 +75,7 @@ describe("媒体 Dialog 控件语言（任务 1.2）", () => {
     expect(Object.keys(deps).some((name) => /lucide/i.test(name))).toBe(true);
 
     // import firewall：Radix/Lucide imports 只允许出现在 shared/ui。
-    const primitivesDir = path.join(SRC_ROOT, "shared", "ui");
+    const primitivesDir = path.join(UI_ROOT, "src");
     const offenders: string[] = [];
     for (const file of productionFiles(SRC_ROOT)) {
       if (file.startsWith(primitivesDir + path.sep)) continue;
@@ -116,7 +117,7 @@ describe("媒体工作区主题消费（任务 1.3）", () => {
 
 describe("媒体工作区 composition（任务 1.1）", () => {
   it("普通 Dialog DOM 不受影响：standard/sheet 无媒体工作区节点", () => {
-    const dialog = readFileSync(path.resolve(HERE, "Dialog.tsx"), "utf8");
+    const dialog = readFileSync(path.join(UI_ROOT, "src/dialogs/Dialog.tsx"), "utf8");
     // slots 是纯组合函数，仅在业务 renderer 显式使用时才产生节点。
     expect(dialog).toContain("export function DialogMediaWorkspace");
     expect(dialog).toContain("export function DialogStage");

@@ -4,8 +4,8 @@ import type { AgentConversationService } from "../../contract/agent-conversation
 import type { CurrentUserService } from "../../services/current-user.js";
 import { agentDirectory } from "../../services/agent-directory.js";
 import { agentDirectoryModels, agentModelSelection } from "./agent-model-selection.js";
-import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "../../ui/assistant-execution/model-selector.js";
-import { AssistantToolbar } from "../../ui/assistant-execution/toolbar.js";
+import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "@woohaa3/ui/assistant";
+import { AssistantToolbar } from "@woohaa3/ui/assistant";
 
 export type AssistantConnectionSelection = { connection: AgentConnectionBinding; model?: string; reasoningEffort?: AgentReasoningEffort };
 

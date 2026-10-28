@@ -21,19 +21,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { TaskResultSummary } from "@woohaa3/contracts";
 import { SKILL_STATE_LABELS, type ActivityRow, type ActivityRowActions } from "./rows.js";
 import { ACTIVITY_EXIT_DURATION_MS, type TaskActivityStore } from "./store.js";
-import {
-  CollapsibleContent,
-  CollapsibleRoot,
-  CollapsibleTrigger,
-  ScrollArea,
-  Button,
-  IconButton,
-  Tooltip,
-  Popover,
-  ChevronDownIcon,
-  CloseIcon,
-  MenuListIcon
-} from "@woohaa3/frontend/extension-api";
+import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, ScrollArea, Button, IconButton, Tooltip, Popover } from "@woohaa3/ui/primitives";
+import { ChevronDownIcon, CloseIcon, MenuListIcon } from "@woohaa3/ui/icons";
 
 export type TaskActivityFeedProps = {
   store: TaskActivityStore;

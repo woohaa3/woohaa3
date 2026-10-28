@@ -8,7 +8,7 @@ import {
 	AdaptiveRatioIcon,
 	ChevronDownIcon,
 	SegmentedControl
-} from "../../../../shared/ui/index.js";
+} from "@woohaa3/ui";
 import type { ExecutionPanelParameterField } from "./types.js";
 
 export function ParameterField({

@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import { useSyncExternalStore } from "react";
 import type { CanvasEditService, CanvasEditSnapshot } from "../../services/canvas-state/index.js";
-import { CloseIcon } from "../../../shared/ui/icons.js";
+import { CloseIcon } from "@woohaa3/ui/icons";
 
 export function CanvasUndoToast({ edit }: { edit: CanvasEditService }) {
   const snapshot = useSyncExternalStore(

@@ -2,13 +2,14 @@ packages:
   - vendor/*
   - contracts
   - frontend
+  - ui
   - services/*
   - backend
   - runtime-components
   - extensions/*
   - ../extensions/*
   - tooling
-  - showcase
+  - ui/showcase
 
 # 工作区里有一处**刻意**的双向依赖：扩展包依赖 @woohaa3/frontend 拿公共 extension-api
 # （`@woohaa3/frontend/extension-api` 是宿主 UI/对话框/面板的 facade，运行时经 shim 解析）；

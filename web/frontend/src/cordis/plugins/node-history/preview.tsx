@@ -10,8 +10,8 @@
  */
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 const ModelThumbnail = lazy(() => import("./model-thumbnail.js").then(module => ({ default: module.ModelThumbnail })));
-import { Button } from "../../../shared/ui/Button.js";
-import { AudioPlayer } from "../../../shared/ui/AudioPlayer.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { AudioPlayer } from "@woohaa3/ui/media";
 import type { NodeHistoryPreview } from "@woohaa3/contracts";
 import type { ModelThumbnailRenderer } from "./model-thumbnail-render.js";
 

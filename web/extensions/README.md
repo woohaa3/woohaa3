@@ -279,3 +279,14 @@ extensions:
 
 `sample-site-extension` 是仅供测试使用的样例：其前端只验证进入/释放生命周期；生产发布发现
 不登记测试 fixture（其入口不是约定 browser 入口，且无 `browser-dist` artifact）。
+
+### 公共 UI
+
+组件、图标与展示类型从 `@woohaa3/ui` 或 `@woohaa3/ui/primitives`、`forms`、`dialogs`、`media`、`settings`、`assistant`、`feedback`、`icons`、`theme` 具名导入，并声明 workspace 依赖。Context、slots、Dialog 注册和业务 facade 继续从 `@woohaa3/frontend/extension-api` 导入。
+
+```tsx
+import { Button } from "@woohaa3/ui/primitives";
+import { CopyIcon } from "@woohaa3/ui/icons";
+```
+
+扩展 browser build 把公共 UI 绑定到宿主同一 React/UI/portal Context，CSS 由宿主提供。扩展不能导入 UI CSS、私有路径、namespace/default 或动态 UI 模块，也不能自行打包 React/Radix/UI。旧 extension-api 的 UI 导出与旧 artifact 保留同实例兼容。独立普通 Web 消费者显式导入 `@woohaa3/ui/styles.css`。

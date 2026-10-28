@@ -7,8 +7,8 @@
  * busy、Escape、遮罩、焦点与画布输入隔离全部由 Dialog Host 统一拥有（不另建 document listener）。
  */
 import { useState } from "react";
-import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../services/dialogs/Dialog.js";
-import { Button } from "../../../shared/ui/index.js";
+import { Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { Button } from "@woohaa3/ui";
 import { objectPayload } from "../../services/dialogs/registry.js";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";

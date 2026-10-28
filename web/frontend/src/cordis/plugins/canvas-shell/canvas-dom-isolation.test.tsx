@@ -15,13 +15,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { UiProvider } from "../../../shared/ui/UiProvider.js";
+import { UiProvider } from "@woohaa3/ui/primitives";
 import { CanvasControlPanel } from "../../host.js";
-import { IconButton } from "../../../shared/ui/Button.js";
-import { Tooltip } from "../../../shared/ui/Tooltip.js";
-import { DialogSurface, DialogSurfaceRoot } from "../../../shared/ui/DialogSurface.js";
-import { DropdownMenu } from "../../../shared/ui/Menu.js";
-import { ZoomInIcon } from "../../../shared/ui/icons.js";
+import { IconButton } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { DialogSurface, DialogSurfaceRoot } from "@woohaa3/ui/primitives";
+import { DropdownMenu } from "@woohaa3/ui/primitives";
+import { ZoomInIcon } from "@woohaa3/ui/icons";
 import { isEditableElement, resolveCanvasShortcut } from "./input/shortcuts.js";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

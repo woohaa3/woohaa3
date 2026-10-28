@@ -37,7 +37,7 @@ import { nodeDraftStore } from "./drafts.js";
 import { registerGenerationTraceMenu } from "./generation-trace.js";
 import { GENERATION_TRACE_DIALOG_ID, registerGenerationTraceDialog } from "./generation-trace-dialog.js";
 import { createTaskMonitorRemote } from "../../../shared/task-trace/remote.js";
-import { isFilmSetNode, OPEN_TASK_INSPECTION_ACTION, TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
+import { defaultAppTheme, isFilmSetNode, OPEN_TASK_INSPECTION_ACTION, TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
 import {
   panelRouteForIntent,
   panelTypeForNodeType,
@@ -341,7 +341,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         // 镜头参考：录制完成并冻结后（画布更新）自动续交一次（任务 8.6）。
         isWaiting: (error) => error.includes("等待镜头参考"),
         isWritable: () => ctx.canvasSession.isWritable(),
-        imageReferenceBackground: () => (ctx.get("theme") as { getSnapshot?: () => { tokens?: { webSubtle?: string } } } | undefined)?.getSnapshot?.().tokens?.webSubtle ?? "#f6f8f6"
+        imageReferenceBackground: () => (ctx.get("theme") as { getSnapshot?: () => { tokens?: { webSubtle?: string } } } | undefined)?.getSnapshot?.().tokens?.webSubtle ?? defaultAppTheme().tokens.webSubtle
       });
       // 统一运行状态：活动状态优先于滞后的 canonical taskStatus（不依赖鼠标移动刷新）。
       const runStateService = (): RunStateService | undefined => ctx.get(RUN_STATE_SERVICE) as RunStateService | undefined;

@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { resolveAudioPreview } from "./media-preview.js";
-import { AudioPlayer } from "../../../shared/ui/AudioPlayer.js";
+import { AudioPlayer } from "@woohaa3/ui/media";
 
 (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => { vi.restoreAllMocks(); document.body.innerHTML=""; });

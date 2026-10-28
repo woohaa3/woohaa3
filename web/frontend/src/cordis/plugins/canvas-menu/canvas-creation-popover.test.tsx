@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { UiProvider } from "../../../shared/ui/UiProvider.js";
+import { UiProvider } from "@woohaa3/ui/primitives";
 import CanvasCreationPopover from "./canvas-creation-popover.js";
 
 const mocks = vi.hoisted(() => ({ services: {} as Record<string, any> }));

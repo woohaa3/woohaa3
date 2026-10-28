@@ -58,7 +58,7 @@ function requiredSdkExportsForExtension(extensionId: string): string[] {
     for (const statement of parse(file).statements) {
       if (ts.isImportDeclaration(statement)) {
         const specifier = statement.moduleSpecifier;
-        if (!ts.isStringLiteral(specifier) || specifier.text !== EXTENSION_API_SPECIFIER) continue;
+        if (!ts.isStringLiteral(specifier) || !(specifier.text === EXTENSION_API_SPECIFIER || /^@woohaa3\/ui(?:\/|$)/.test(specifier.text))) continue;
         const clause = statement.importClause;
         if (!clause || clause.isTypeOnly) continue;
         const bindings = clause.namedBindings;
@@ -69,7 +69,7 @@ function requiredSdkExportsForExtension(extensionId: string): string[] {
         }
       } else if (ts.isExportDeclaration(statement)) {
         const specifier = statement.moduleSpecifier;
-        if (!specifier || !ts.isStringLiteral(specifier) || specifier.text !== EXTENSION_API_SPECIFIER) continue;
+        if (!specifier || !ts.isStringLiteral(specifier) || !(specifier.text === EXTENSION_API_SPECIFIER || /^@woohaa3\/ui(?:\/|$)/.test(specifier.text))) continue;
         if (statement.isTypeOnly) continue;
         const bindings = statement.exportClause;
         if (bindings && ts.isNamedExports(bindings)) {

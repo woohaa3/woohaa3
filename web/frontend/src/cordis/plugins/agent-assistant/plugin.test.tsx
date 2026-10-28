@@ -7,7 +7,7 @@ import { AgentAssistant } from "./assistant.js";
 import { RuntimeProvider } from "../../react.js";
 import { startFrontendRuntime, type FrontendRuntime } from "../../kernel.js";
 import { SlotRegistry } from "../../slots.js";
-import { SelectInput } from "../../../shared/ui/FormControls.js";
+import { SelectInput } from "@woohaa3/ui/forms";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import type { GenerationModelsStatusService, GenerationModelsStatusSnapshot } from "../../services/generation-models-status.js";
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";

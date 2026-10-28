@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type MutableRefObject } from "react";
 import type { AgentConnectionView, AgentReasoningEffort, CanvasCreationView } from "@woohaa3/contracts";
 import { useService } from "../../react.js";
-import { Button } from "../../../shared/ui/Button.js";
-import { SparklesIcon } from "../../../shared/ui/icons.js";
-import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "../../ui/assistant-execution/model-selector.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { SparklesIcon } from "@woohaa3/ui/icons";
+import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "@woohaa3/ui/assistant";
 import { agentModelSelection, agentDirectoryModels } from "../task-execution/agent-model-selection.js";
 import { agentDirectory } from "../../services/agent-directory.js";
 import { rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
-import { AssistantToolbar } from "../../ui/assistant-execution/toolbar.js";
+import { AssistantToolbar } from "@woohaa3/ui/assistant";
 import "../../ui/assistant-execution/creation-controls.css";
 import { creationInput, creationDraft, creationResponse, readCreation, CANVAS_CREATIONS_PATH, subscribeCreationDraft, creationDraftRevision, notifyCreationDraft } from "./canvas-creation-drafts.js";
 import "../task-execution/execution-panel/execution-panel.css";

@@ -3,8 +3,8 @@ import type { FilmSetConversionModelCandidate, FilmSetConversionSettings, FilmSe
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { agentDirectory } from "../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, readAssistantPreference, rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
-import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "./model-selector.js";
-import { AssistantToolbar } from "./toolbar.js";
+import { AssistantModelSelector, AssistantConnectionSelector, ASSISTANT_SETUP_HINT } from "@woohaa3/ui/assistant";
+import { AssistantToolbar } from "@woohaa3/ui/assistant";
 
 /** Same owner directory as ordinary authoring; unsupported delivery capabilities remain visible. */
 export function AssistantDeliverySelection({ service, candidates, sourceKind, value, disabled, onChange, onValidityChange, onManage, onRefresh, submit }: {

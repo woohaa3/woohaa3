@@ -4,7 +4,7 @@
  *
  * 复用 AlertDialog 语义：busy、失败保留、成功由调用方按 instanceId 关闭。
  */
-import { AlertDialog } from "@woohaa3/frontend/extension-api";
+import { AlertDialog } from "@woohaa3/ui/dialogs";
 import type { DialogRendererProps } from "@woohaa3/frontend/extension-api";
 import type { SnippetDeletePayload, TagDeletePayload } from "./dialogs.js";
 

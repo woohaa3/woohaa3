@@ -12,15 +12,9 @@
  * - 轮询只在本窗口打开时跑（1500ms），关闭即清理，且请求在途时不叠加。
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import {
-  Button,
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  objectPayload
-} from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
+import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+import { objectPayload } from "@woohaa3/frontend/extension-api";
 import type { DialogDefinition, DialogRendererProps, DialogsService } from "@woohaa3/frontend/extension-api";
 import type {
   RemoteDiagnosticEntry,

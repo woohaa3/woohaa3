@@ -18,7 +18,7 @@ import type { ModelEditorSession } from "../../../extension-api/model-workspace-
 import { ModelEditorOverlay } from "./model-editor-overlay.js";
 import { ModelViewControls } from "./model-view-controls.js";
 import { useFocusedModelKind } from "./model-focus-kind.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import { FocusHeader } from "../../focus/header.js";
 import { useFocusLayout } from "../../focus/workspace.js";
 

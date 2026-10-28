@@ -8,7 +8,7 @@ import { SceneExperienceBar } from "../scene-experience/experience-bar.js";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { CanvasRenderWarnings } from "./canvas-render-warnings.js";
 import { FocusRunStrip } from "./focus-run-strip.js";
-import { Button } from "../../../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import { mountBevyCanvas, unmountBevyCanvas } from "./bevy-canvas-element.js";
 import { useService } from "../../react.js";
 import { useSyncStatusView } from "../../use-sync-status.js";

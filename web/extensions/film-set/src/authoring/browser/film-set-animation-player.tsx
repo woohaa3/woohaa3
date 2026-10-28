@@ -1,4 +1,4 @@
-import { Button } from "@woohaa3/frontend/extension-api";
+import { Button } from "@woohaa3/ui/primitives";
 import { useState, useSyncExternalStore } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
 import type { ModelCaptureSession } from "@woohaa3/frontend/extension-api";

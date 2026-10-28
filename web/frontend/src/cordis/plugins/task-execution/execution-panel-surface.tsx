@@ -75,7 +75,7 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       }
       const bounds = areaElement.getBoundingClientRect();
       const area = usableCanvasArea({ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, fixtureArea ? [] : visibleOcclusions());
-      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, badge ? "below" : "auto");
+      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, "auto");
       if (!next) {
         dock.style.visibility = "hidden";
         dock.removeAttribute("data-placement");

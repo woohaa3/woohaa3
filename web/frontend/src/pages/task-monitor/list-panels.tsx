@@ -7,8 +7,8 @@
  */
 import { useState } from "react";
 import { isTerminalTaskState, type TaskExecutionState, type TaskInspectionSnapshot } from "@woohaa3/contracts";
-import { Button } from "../../shared/ui/index.js";
-import { CloseIcon } from "../../shared/ui/index.js";
+import { Button } from "@woohaa3/ui";
+import { CloseIcon } from "@woohaa3/ui";
 import { TIME_SHORTCUTS, effectiveTotalMs, formatDuration, formatLocalTime, actorLabel, isoToLocalDateTime, localDateTimeToIso, localTimeZoneName, shortcutRange, sourceLabel, stateLabel, type TimeShortcut } from "./format.js";
 import type { DraftState } from "./monitor-model.js";
 

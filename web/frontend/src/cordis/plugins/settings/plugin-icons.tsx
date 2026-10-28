@@ -41,7 +41,7 @@ import {
   TaskListIcon,
   ToolsIcon,
   type UiIconProps
-} from "../../../shared/ui/icons.js";
+} from "@woohaa3/ui/icons";
 
 /** 插件图标的组件类型：facade 的统一图标契约，consumer 只传 className / size。 */
 export type PluginIconComponent = ComponentType<UiIconProps>;

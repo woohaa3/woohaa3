@@ -1,13 +1,12 @@
 import { AssistantTextInput } from "./text-input.js";
 /** 宿主统一的 3D 创作入口。草稿属于当前页面，会话事实仍由 Agent 服务持有。 */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { TextInput } from "../../../shared/ui/FormControls.js";
-import { AssistantComposer } from "./composer.js";
+import { AssistantComposer } from "@woohaa3/ui/assistant";
 import {
   AssistantModelSelector,
   AssistantConnectionSelector,
   ASSISTANT_SETUP_HINT,
-} from "./model-selector.js";
+} from "@woohaa3/ui/assistant";
 import { useAssistantExecutionActions } from "./status.js";
 import { useAssistantDeliveryInput } from "./delivery-input.js";
 import {
@@ -21,8 +20,8 @@ import {
 } from "../../services/assistant-execution/selection.js";
 import { AuthoringGenerateLayout } from "../../plugins/task-execution/authoring-generate-layout.js";
 import { AuthoringMcpButton } from "../../plugins/task-execution/model-parameter-panel.js";
-import { Button } from "../../../shared/ui/Button.js";
-import { SendIcon } from "../../../shared/ui/icons.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { SendIcon } from "@woohaa3/ui/icons";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
 import type { AgentConversationSnapshotView } from "../../contract/agent-conversation.js";
 import type { AuthoringGenerationProps } from "../../contract/authoring.js";
@@ -547,97 +546,83 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         }
         model={
           delivery || !noConnection ? (
-            delivery || modelOptions.length > 0 ? (
-              <AssistantModelSelector
-                label="模型"
-                model={model}
-                placeholder={delivery ? "本次模型" : undefined}
-                keepOpenOnModelSelect
-                options={[
-                  {
-                    value: "",
-                    label: toolDefault ? "跟随工具设置" : "选择模型",
-                  },
-                  ...(invalidModel
-                    ? [
-                        {
-                          value: model,
-                          label: delivery ? model : `${model}（已不可用）`,
-                          disabled: true,
-                        },
-                      ]
-                    : []),
-                  ...modelOptions.map((entry) => ({
-                    value: entry.id,
-                    label: entry.label,
-                  })),
-                ]}
-                open={openSelector === "model"}
-                onOpenChange={(open) => setOpenSelector(open ? "model" : null)}
-                disabled={locked}
-                onChange={(value) => {
-                  setModels((current) => ({ ...current, [modelKey]: value }));
-                  setEfforts((current) => ({
-                    ...current,
-                    [`${modelKey}:${value}`]: "",
-                  }));
-                  remember(value);
-                }}
-                variant={
-                  supportedEfforts.length || invalidEffort
-                    ? {
-                        value: effort,
-                        options: [
-                          { value: "", label: "默认" },
-                          ...(invalidEffort
-                            ? [
-                                {
-                                  value: effort,
-                                  label: delivery
-                                    ? effort
-                                    : `${effort}（已不可用）`,
-                                  disabled: true,
-                                },
-                              ]
-                            : []),
-                          ...supportedEfforts.map((value) => ({
-                            value,
-                            label: value,
-                          })),
-                        ],
-                        onChange: (value) => {
-                          setEfforts((current) => ({
-                            ...current,
-                            [effortKey]: value as AgentReasoningEffort | "",
-                          }));
-                          remember(model, value as AgentReasoningEffort | "");
-                        },
-                      }
-                    : undefined
-                }
-              />
-            ) : (
-              <TextInput
-                aria-label="模型 ID"
-                className="authoring-generate__model-id"
-                placeholder={
-                  catalog.key === modelKey && catalog.loading
-                    ? "正在读取模型…"
-                    : toolDefault
-                      ? "留空跟随工具设置"
-                      : "填写模型 ID"
-                }
-                value={model}
-                disabled={locked}
-                onChange={(event) => {
-                  setModels((current) => ({
-                    ...current,
-                    [modelKey]: event.target.value,
-                  }));
-                  remember(event.target.value);
-                }}
-              />
-            )
+            <AssistantModelSelector
+              label="模型"
+              model={model}
+              placeholder={delivery ? "本次模型" : undefined}
+              keepOpenOnModelSelect
+              options={[
+                {
+                  value: "",
+                  label: toolDefault
+                    ? "跟随工具设置"
+                    : modelOptions.length
+                      ? "选择模型"
+                      : catalog.key === modelKey && catalog.loading
+                        ? "正在读取模型…"
+                        : modelError
+                          ? "模型读取失败"
+                          : "暂无可用模型",
+                  disabled: !toolDefault && !modelOptions.length,
+                },
+                ...(invalidModel
+                  ? [
+                      {
+                        value: model,
+                        label: delivery ? model : `${model}（已不可用）`,
+                        disabled: true,
+                      },
+                    ]
+                  : []),
+                ...modelOptions.map((entry) => ({
+                  value: entry.id,
+                  label: entry.label,
+                })),
+              ]}
+              open={openSelector === "model"}
+              onOpenChange={(open) => setOpenSelector(open ? "model" : null)}
+              disabled={locked}
+              onChange={(value) => {
+                setModels((current) => ({ ...current, [modelKey]: value }));
+                setEfforts((current) => ({
+                  ...current,
+                  [`${modelKey}:${value}`]: "",
+                }));
+                remember(value);
+              }}
+              variant={
+                supportedEfforts.length || invalidEffort
+                  ? {
+                      value: effort,
+                      options: [
+                        { value: "", label: "默认" },
+                        ...(invalidEffort
+                          ? [
+                              {
+                                value: effort,
+                                label: delivery
+                                  ? effort
+                                  : `${effort}（已不可用）`,
+                                disabled: true,
+                              },
+                            ]
+                          : []),
+                        ...supportedEfforts.map((value) => ({
+                          value,
+                          label: value,
+                        })),
+                      ],
+                      onChange: (value) => {
+                        setEfforts((current) => ({
+                          ...current,
+                          [effortKey]: value as AgentReasoningEffort | "",
+                        }));
+                        remember(model, value as AgentReasoningEffort | "");
+                      },
+                    }
+                  : undefined
+              }
+            />
           ) : null
         }
         detail={

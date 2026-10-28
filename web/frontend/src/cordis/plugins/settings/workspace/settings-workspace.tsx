@@ -19,9 +19,9 @@
  * 组件本身不创建 popup/poller/socket，也不因打开设置而刷新、重启或重装扩展。
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Button } from "../../../../shared/ui/Button.js";
-import { SegmentedControl } from "../../../../shared/ui/SegmentedControl.js";
-import { ActivityIcon, ChatIcon, PluginIcon, SettingsIcon, SunIcon } from "../../../../shared/ui/icons.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { SegmentedControl } from "@woohaa3/ui/primitives";
+import { ActivityIcon, ChatIcon, PluginIcon, SettingsIcon, SunIcon } from "@woohaa3/ui/icons";
 import type { ThemeService } from "../../../contract/platform.js";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
 import { RuntimeComponentsSection } from "../runtime-components-section.js";

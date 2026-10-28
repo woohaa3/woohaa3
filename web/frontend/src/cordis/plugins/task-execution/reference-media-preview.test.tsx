@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it } from "vitest";
-import { UiProvider } from "../../../shared/ui/index.js";
+import { UiProvider } from "@woohaa3/ui";
 import { ReferenceTileStrip } from "./reference-chips.js";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -3,8 +3,8 @@
  * （change: 2026-09-28-split-frontend-god-plugins，task 5；从 video-edit-dialog.tsx 拆出）。
  */
 import { isVideoEditRange, type VideoEditIntent } from "@woohaa3/contracts";
-import { DialogIconButton } from "../../services/dialogs/Dialog.js";
-import { TrashIcon } from "../../../shared/ui/icons.js";
+import { DialogIconButton } from "@woohaa3/ui/dialogs";
+import { TrashIcon } from "@woohaa3/ui/icons";
 import { formatVideoTime } from "./video-geometry.js";
 
 export function IntentList({

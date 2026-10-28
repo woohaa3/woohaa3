@@ -1,16 +1,10 @@
 /** 模型 API 设置：填写地址和 Key 后一次保存，连接身份由后端管理。 */
 import { useEffect, useRef, useState } from "react";
 import { isAgentConnectionStatus } from "@woohaa3/contracts";
-import {
-  Button,
-  TextInput,
-  SelectInput,
-  Collapsible,
-  ChevronDownIcon,
-  SettingsSection,
-  SettingsFeedback,
-  ServiceLogo,
-} from "@woohaa3/frontend/extension-api";
+import { Button, Collapsible } from "@woohaa3/ui/primitives";
+import { TextInput, SelectInput } from "@woohaa3/ui/forms";
+import { ChevronDownIcon, ServiceLogo } from "@woohaa3/ui/icons";
+import { SettingsSection, SettingsFeedback } from "@woohaa3/ui/settings";
 import type {
   SdkAgentAdapterView,
   SdkAgentConnectionView,

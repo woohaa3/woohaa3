@@ -7,7 +7,7 @@
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRuntimeContext } from "./react.js";
-import { Button } from "../shared/ui/Button.js";
+import { Button } from "@woohaa3/ui/primitives";
 import type { AppPageLocation } from "./navigation/app-router.js";
 import type { CanvasRecoveryService } from "./contract/canvas-catalog.js";
 

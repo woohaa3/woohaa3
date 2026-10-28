@@ -10,9 +10,9 @@
  */
 import { Component, useEffect, useMemo, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import type { ExtensionManagerFacade } from "../../extension-manager/contract.js";
-import { Button } from "../../../../shared/ui/Button.js";
-import { Switch } from "../../../../shared/ui/Switch.js";
-import { CopyIcon } from "../../../../shared/ui/icons.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { Switch } from "@woohaa3/ui/primitives";
+import { CopyIcon } from "@woohaa3/ui/icons";
 import { appPublicUrl } from "../../../services/app-base-path.js";
 import type { BackendSettingsStore } from "../backend-settings-store.js";
 import {

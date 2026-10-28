@@ -9,7 +9,7 @@
  * Dialog Service，保证 dirty 确认、busy 拒绝与 forced dispose 共用一条路径。
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Dialog } from "../../../services/dialogs/Dialog.js";
+import { Dialog } from "@woohaa3/ui/dialogs";
 
 export const SETTINGS_DIALOG_ID = "settings";
 export const SETTINGS_DIALOG_TITLE_ID = `${SETTINGS_DIALOG_ID}-title`;

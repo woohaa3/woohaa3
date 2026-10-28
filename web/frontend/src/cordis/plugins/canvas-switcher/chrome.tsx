@@ -13,11 +13,11 @@ import { ScenePackageImport } from "../scene-experience/import-controls.js";
  * 宿主只做通用布局与上下文注入，不认识任何具体扩展，也不按扩展 ID 分支。
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Dialog } from "../../services/dialogs/Dialog.js";
-import { Button } from "../../../shared/ui/Button.js";
-import { ScrollArea } from "../../../shared/ui/ScrollArea.js";
-import { Tooltip } from "../../../shared/ui/Tooltip.js";
-import { CanvasSwitcherIcon, ChevronDownIcon, CloseIcon, SearchIcon } from "../../../shared/ui/icons.js";
+import { Dialog } from "@woohaa3/ui/dialogs";
+import { Button } from "@woohaa3/ui/primitives";
+import { ScrollArea } from "@woohaa3/ui/primitives";
+import { Tooltip } from "@woohaa3/ui/primitives";
+import { CanvasSwitcherIcon, ChevronDownIcon, CloseIcon, SearchIcon } from "@woohaa3/ui/icons";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
 import type { DialogRenderer, DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import type { CanvasCatalogService, CanvasSelectionService, CanvasSummary } from "../../contract/canvas-catalog.js";

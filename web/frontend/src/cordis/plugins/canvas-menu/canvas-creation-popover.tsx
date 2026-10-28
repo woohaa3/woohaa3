@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { useService } from "../../react.js";
-import { Popover } from "../../../shared/ui/Popover.js";
-import { AssistantComposer } from "../../ui/assistant-execution/composer.js";
-import { FileTextIcon, ImageIcon, VideoIcon, MusicIcon, ProviderIcon, PluginIcon, PlusIcon, SparklesIcon, SearchIcon, ChevronRightIcon } from "../../../shared/ui/icons.js";
+import { Popover } from "@woohaa3/ui/primitives";
+import { AssistantComposer } from "@woohaa3/ui/assistant";
+import { FileTextIcon, ImageIcon, VideoIcon, MusicIcon, ProviderIcon, PluginIcon, PlusIcon, SparklesIcon, SearchIcon, ChevronRightIcon } from "@woohaa3/ui/icons";
 import type { CanvasContextMenuItem } from "./canvas-context-menu.js";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { createWoohaa3CanvasNodeId } from "@woohaa3/contracts";

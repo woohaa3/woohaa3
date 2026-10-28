@@ -9,8 +9,8 @@
  *   只更新服务事实，不复活视图。
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Button } from "../../../shared/ui/Button.js";
-import { Switch } from "../../../shared/ui/Switch.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { Switch } from "@woohaa3/ui/primitives";
 import type { TaskNotificationService } from "../../contract/notification.js";
 
 const PERMISSION_LABELS: Record<string, string> = {

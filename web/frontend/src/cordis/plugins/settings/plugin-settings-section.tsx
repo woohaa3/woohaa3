@@ -8,9 +8,9 @@
  * 筛选；市场与文件安装从顶部常驻面板改为「添加扩展」内联视图，不再在设置弹窗里叠第二层浮层。
  */
 import { useState, useSyncExternalStore } from "react";
-import { Button } from "../../../shared/ui/Button.js";
-import { Switch } from "../../../shared/ui/Switch.js";
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon, SearchIcon } from "../../../shared/ui/icons.js";
+import { Button } from "@woohaa3/ui/primitives";
+import { Switch } from "@woohaa3/ui/primitives";
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, SearchIcon } from "@woohaa3/ui/icons";
 import type { ExtensionManagerFacade } from "../extension-manager/contract.js";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
 import { PluginIconMark } from "./plugin-icons.js";
