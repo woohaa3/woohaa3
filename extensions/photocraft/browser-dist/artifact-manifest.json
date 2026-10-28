@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "artifactId": "16d03c4f80eb5973c91e2263f8de61d6bdb8804e4304210dbea4864587afeb67",
+  "artifactId": "f3a68b46fb15d2def0edde7959efba729cfc9aef9c1acadf1139e3c6cf1041b6",
   "metadata": {
     "extensionId": "photocraft",
     "version": "0.1.0",
@@ -15,7 +15,7 @@
   "protocolVersion": 1,
   "sdkAbi": 1,
   "reactMajor": 18,
-  "entry": "entry-DLAWTLBA.js",
+  "entry": "entry-DDIPSM73.js",
   "styles": [
     "entry-YBVFNOI2.css"
   ],
@@ -32,17 +32,17 @@
   ],
   "files": [
     {
-      "path": "entry-DLAWTLBA.js",
+      "path": "entry-DDIPSM73.js",
       "bytes": 478,
-      "gzipBytes": 356,
-      "sha256": "9d6803eeda966d568d9d3a4000f1fdb63c167e04d5a4f87e91444cfaae4f0b43",
+      "gzipBytes": 359,
+      "sha256": "96b34913db15ae9cf9809e29aef1249b7310ef9ca508af5fc1f85b95b2fdd6a8",
       "kind": "entry"
     },
     {
-      "path": "chunks/frontend-N3KHJJDS.js",
-      "bytes": 123550,
-      "gzipBytes": 37848,
-      "sha256": "b276f5f1b01d8048384b61cb28bac190f074d9b99845e82e188a09d609a943e1",
+      "path": "chunks/frontend-BZOUFZLO.js",
+      "bytes": 123554,
+      "gzipBytes": 37854,
+      "sha256": "3a5d937b16a368ec612c6fa847823def925cf5426d540783355e6ab23fcf5905",
       "kind": "private-chunk"
     },
     {
@@ -153,19 +153,19 @@
   ],
   "imports": [
     {
-      "from": "chunks/frontend-N3KHJJDS.js",
+      "from": "chunks/frontend-BZOUFZLO.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-DLAWTLBA.js",
+      "from": "entry-DDIPSM73.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-DLAWTLBA.js",
-      "specifier": "../browser-dist/chunks/frontend-N3KHJJDS.js",
-      "resolved": "chunks/frontend-N3KHJJDS.js"
+      "from": "entry-DDIPSM73.js",
+      "specifier": "../browser-dist/chunks/frontend-BZOUFZLO.js",
+      "resolved": "chunks/frontend-BZOUFZLO.js"
     }
   ]
 }

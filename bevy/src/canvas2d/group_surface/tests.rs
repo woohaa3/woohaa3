@@ -91,21 +91,25 @@ fn continuous_surface_is_between_grid_and_model_and_excluded_from_capture() {
     else {
         panic!();
     };
-    // 3D 帧只剩不透明徽章底座；半透明组底由 2D 面板唯一拥有
+    // 3D 帧只剩徽标后方的不透明气泡尾巴；徽标固定在气泡外侧，半透明组底由 2D 面板唯一拥有
     // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D4）。
     assert!(
         colors.iter().all(|c| c[3] == 1.),
         "3D group surface must not contain translucent fill geometry"
     );
-    let badge = group_model::badge_rect(&node);
+    let tail = group_model::tail_path(&node);
+    let tail_min_x = tail.iter().map(|point| point.x).fold(f32::MAX, f32::min);
+    let tail_max_x = tail.iter().map(|point| point.x).fold(f32::MIN, f32::max);
+    let tail_min_y = tail.iter().map(|point| point.y).fold(f32::MAX, f32::min);
+    let tail_max_y = tail.iter().map(|point| point.y).fold(f32::MIN, f32::max);
     let origin = Vec2::new(node.x + node.width / 2., node.y + node.height / 2.);
     for p in positions {
         let x = p[0] + origin.x;
         let y = origin.y - p[1];
-        assert!(x >= badge.x - 0.001 && x <= badge.x + badge.z + 0.001);
-        assert!(y >= badge.y - 0.001 && y <= badge.y + badge.w + 0.001);
+        assert!(x >= tail_min_x - 0.001 && x <= tail_max_x + 0.001);
+        assert!(y >= tail_min_y - 0.001 && y <= tail_max_y + 0.001);
     }
-    // 徽章底座只比本组深度平面退后一个极小 ε（逐像素合成，不再是深度带后沿）。
+    // 气泡尾巴只比本组深度平面退后一个极小 ε（逐像素合成，不再是深度带后沿）。
     let camera_depth = (crate::isometric_grid::view_rotation() * transform.translation).z;
     assert!((camera_depth - crate::depth_order::group_badge_depth("g")).abs() < 0.001);
 }

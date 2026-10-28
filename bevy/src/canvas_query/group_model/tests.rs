@@ -43,9 +43,10 @@ fn badge_model_fits_stable_badge_for_size_yaw_scale_and_eccentric_bounds() {
                         for x in [projected.min[0], projected.max[0]] {
                             for y in [projected.min[1], projected.max[1]] {
                                 let point = layout.anchor + Vec2::new(x, -y);
-                                assert!(path_contains(&outline(&n), point));
-                                assert!(point.y >= n.y + HEADER_CLEARANCE - 0.01);
-                                assert!(point.y <= n.y + n.height + 0.01);
+                                assert!(path_contains(&badge_path(&n), point));
+                                let badge = badge_rect(&n);
+                                assert!(point.y >= badge.y - 0.01);
+                                assert!(point.y <= badge.y + badge.w + 0.01);
                             }
                         }
                         assert!((layout.center.x - (n.x + n.width / 2.)).abs() < 0.001);
@@ -126,10 +127,10 @@ fn model_content_does_not_change_badge_size_or_center() {
         assert_eq!(badge_path(&n), badge);
         assert_eq!(for_node(&n).unwrap().center, center);
     }
-    let lower = lower_lip(&n);
+    let tail = tail_path(&n);
     let frame = frame_path(&n);
-    assert!(frame[0].distance(*lower.last().unwrap()) < 0.001);
-    assert!(frame.last().unwrap().distance(lower[0]) < 0.001);
+    assert!(frame.windows(2).any(|pair| pair[0].distance(tail[2]) < 0.001 && pair[1].distance(tail[1]) < 0.001));
+    assert!(frame.windows(2).any(|pair| pair[0].distance(tail[1]) < 0.001 && pair[1].distance(tail[0]) < 0.001));
     assert!(path_contains(
         &outline(&n),
         Vec2::new(n.x + n.width / 2., n.y + n.height + BADGE_OUTSET / 2.)
@@ -145,7 +146,8 @@ fn independent_badge_scale_preserves_model_center_and_aspect() {
         n.group.as_mut().unwrap().badge_scale = scale;
         let next = for_node(&n).unwrap();
         let rect = badge_rect(&n);
-        assert!(next.center.distance(original.center) < 0.001);
+        assert!((rect.y - (n.y + n.height + BADGE_OUTSET)).abs() < 0.001);
+        assert!((next.center.y - (rect.y + rect.w / 2.)).abs() < 0.001);
         assert!((next.radii.x / original.radii.x - scale).abs() < 0.001);
         assert!((next.radii.y / original.radii.y - scale).abs() < 0.001);
         assert!((rect.z / rect.w - base.z / base.w).abs() < 0.001);
@@ -154,5 +156,5 @@ fn independent_badge_scale_preserves_model_center_and_aspect() {
     n.width = 196.;
     n.height = 112.;
     let rect = badge_rect(&n);
-    assert!((rect.y - (n.y + 32.)).abs() < 0.001);
+    assert!((rect.y - (n.y + n.height + BADGE_OUTSET)).abs() < 0.001);
 }

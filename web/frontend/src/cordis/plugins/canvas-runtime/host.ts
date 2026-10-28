@@ -36,6 +36,7 @@ import { ImageFocusStore } from "./image-focus-store.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
 import { installPerfFrameWindow } from "./perf-frame-window.js";
+import { groupBadgeScreenRect } from "@woohaa3/contracts";
 import {
   applyFilmSetObjectAction,
   applyFilmSetObjectGesture,
@@ -557,6 +558,17 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.controllerInstance?.nodeScreenRect(nodeId) ?? null;
   nodePresentationScreenRect = (nodeId: string): import("@woohaa3/contracts").ScreenRect | null => {
     const card = this.nodeScreenRect(nodeId);
+    const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
+    const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
+    // 普通 group 的执行面板跟随外部 3D 徽标，而不是跟随气泡主体。使用当前 screen rect
+    // 保留拖动/缩放预览，再把同一份徽标几何投影到屏幕。
+    if (card && node?.type === "group" && this.controllerInstance) {
+      const controller = this.controllerInstance;
+      const zoom = controller.viewport().zoom;
+      if (Number.isFinite(zoom) && zoom > 0) {
+        return groupBadgeScreenRect(card, zoom, canvas?.nodeData[nodeId]?.groupBadgeScale);
+      }
+    }
     const scopes = this.controllerInstance?.queryCompositeAssetScopes();
     if (!scopes?.ok) return card;
     const scope = scopes.value.find((entry) => entry.nodeId === nodeId);
