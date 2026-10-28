@@ -51,6 +51,13 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 | `required` | 发布装配的必需扩展：缺它的产物就在指针切换前失败（由装配器按扫描汇总，不再写死 id 清单） |
 | `icon` | 插件图标，二选一：品牌图形 `{ "asset": "./assets/icon.png" }`（包内相对路径，宿主按约定注入 `/plugin-icons/<extensionId><ext>`，生成物由 `pnpm -C web run icons:sync` 同步）；语义图形 `{ "glyph": "migration" }`（`PLUGIN_ICON_NAMES` 里的名字，给没有浏览器前端的后端扩展用） |
 
+声明了 `site` 的扩展**必须显式写** `site.defaultEnabled`（布尔）：站点扩展的启停缺省是**关**，
+控制面只认显式 `true`（`extensions.<id>.enabled` 显式值 > `defaultEnabled === true` > 停用）。
+漏写会被 [extension-default-enabled.test.ts](../tooling/extension-default-enabled.test.ts) 判失败。
+默认停用的现实例子是 `remote-server`：公开用户没有可连的 woohaa-server，装了也不该默认占一个点不动的入口。
+只有 `hostPlugin`、没有 `site` 的 Provider / 存储后端不进控制面，它们的 `defaultEnabled` 与
+配置文件里的 `enabled` 都不生效。
+
 Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
 `ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
 

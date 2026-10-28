@@ -12,7 +12,7 @@ import type { ApplicationExtensionMetadata, RequiredProviderProfiles } from "@wo
 import { createSqliteSiteExtensionConfigStore } from "./config-store.js";
 import { createSqliteExtensionWorkRepository } from "../repository/extension-work-repository.js";
 import { createApplicationExtensionHost } from "./host.js";
-import { createSiteExtensionControlPlane, type SiteExtensionControlPlane } from "./control-plane.js";
+import { createSiteExtensionControlPlane, type ExtensionToggleStore, type SiteExtensionControlPlane } from "./control-plane.js";
 import type { ApplicationBackendExtensionDefinition } from "./contract.js";
 
 const dirs: string[] = [];
@@ -53,6 +53,7 @@ function makePlane(overrides: {
   logger?: (event: Record<string, unknown>) => void;
   activationTimeoutMs?: number;
   suspended?: ReadonlySet<string>;
+  toggles?: ExtensionToggleStore;
 } = {}): { plane: SiteExtensionControlPlane; store: ReturnType<typeof createSqliteSiteExtensionConfigStore>; work: ReturnType<typeof createSqliteExtensionWorkRepository>; host: ReturnType<typeof createApplicationExtensionHost> } {
   const store = createSqliteSiteExtensionConfigStore({ path: tempDb() });
   const work = createSqliteExtensionWorkRepository({ path: tempDb() });
@@ -78,6 +79,7 @@ function makePlane(overrides: {
     ...(overrides.logger ? { logger: overrides.logger } : {}),
     ...(overrides.activationTimeoutMs ? { activationTimeoutMs: () => overrides.activationTimeoutMs! } : {}),
     ...(overrides.suspended ? { suspended: overrides.suspended } : {}),
+    ...(overrides.toggles ? { toggles: overrides.toggles } : {}),
     now: () => new Date("2026-10-04T00:00:00.000Z")
   });
   return { plane, store, work, host };
@@ -670,5 +672,56 @@ describe("运行期登记 addExtension / removeExtension（首次安装的受管
     expect(enabled.ok && enabled.status.actualState).toBe("quarantined");
     expect(counter.activations).toBe(activations);
     second.store.close();
+  });
+});
+
+/**
+ * 缺省启停：生产路径是注入 `toggles`（配置文件 `extensions.<id>.enabled`）。
+ *
+ * 语义钉死为「缺省关」——manifest 未声明 `defaultEnabled` 时按停用处理：市场安装的扩展、
+ * 以及以后忘写这个字段的内置扩展都不会被自动激活，启用必须有人显式表达。
+ */
+describe("缺省启停（配置文件 + manifest defaultEnabled）", () => {
+  function memoryToggles(initial: Record<string, boolean> = {}) {
+    const state: Record<string, boolean> = { ...initial };
+    const store: ExtensionToggleStore = {
+      all: () => ({ ...state }),
+      async set(extensionId, enabled) {
+        state[extensionId] = enabled;
+        return { ok: true as const };
+      }
+    };
+    return { store, state };
+  }
+
+  it("配置文件与 manifest 都没有值 → 停用，不产生可激活实例", async () => {
+    const { store: toggles, state } = memoryToggles();
+    const { plane, store } = makePlane({ toggles });
+    await plane.reconcile();
+    expect(plane.status(METADATA.extensionId)).toMatchObject({ desiredEnabled: false, actualState: "disabled" });
+    expect(state).toEqual({});
+
+    const enabled = await plane.write({
+      extensionId: METADATA.extensionId, expectedRevision: store.revision(), enabled: true, values: {}, secretRefs: [], actor: "admin"
+    });
+    expect(enabled).toMatchObject({ ok: true });
+    // 启停写在配置文件（toggles）里，不是 SQLite 的 desiredEnabled。
+    expect(state[METADATA.extensionId]).toBe(true);
+    expect(plane.status(METADATA.extensionId)).toMatchObject({ desiredEnabled: true, actualState: "active" });
+    await plane.dispose();
+  });
+
+  it("manifest 显式 defaultEnabled:true 才算缺省启用，显式停用优先", async () => {
+    const byDefault = memoryToggles();
+    const first = makePlane({ metadata: [{ ...METADATA, defaultEnabled: true }], toggles: byDefault.store });
+    await first.plane.reconcile();
+    expect(first.plane.status(METADATA.extensionId)).toMatchObject({ desiredEnabled: true, actualState: "active" });
+    await first.plane.dispose();
+
+    const explicitlyOff = memoryToggles({ [METADATA.extensionId]: false });
+    const second = makePlane({ metadata: [{ ...METADATA, defaultEnabled: true }], toggles: explicitlyOff.store });
+    await second.plane.reconcile();
+    expect(second.plane.status(METADATA.extensionId)).toMatchObject({ desiredEnabled: false, actualState: "disabled" });
+    await second.plane.dispose();
   });
 });

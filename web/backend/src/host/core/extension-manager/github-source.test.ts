@@ -1,7 +1,7 @@
 /** GitHub Release 市场来源：文件名解析 / semver 选择 / digest 缺失 / 分页 / 下载（mock fetch，不打真实 GitHub）。 */
 import { describe, expect, it } from "vitest";
 import type { MarketplaceSearchPage } from "@woohaa3/contracts";
-import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, githubSourceHostEngines, parseAssetName, parseRepoList, type GithubSourceConfig } from "./github-source.js";
+import { createGithubReleaseSource, GITHUB_RELEASE_SOURCE_ID, githubSourceHostEngines, parseAssetName, parseGithubCatalog, parseRepoList, type GithubSourceConfig } from "./github-source.js";
 
 const signal = new AbortController().signal;
 const sha = (n: number) => `sha256:${String(n).padStart(64, "0")}`;
@@ -38,6 +38,27 @@ describe("parseRepoList", () => {
   });
 });
 
+describe("parseGithubCatalog", () => {
+  it("只收认识的字段；非法 id / 非对象条目忽略", () => {
+    expect(
+      parseGithubCatalog({
+        extensions: {
+          demo: { name: " Demo ", description: " 描述 ", icon: "media", hotReload: true },
+          "Bad_Id": { name: "x" },
+          broken: "nope",
+          empty: {}
+        }
+      })
+    ).toEqual({ demo: { name: "Demo", description: "描述", icon: "media", hotReload: true } });
+  });
+
+  it("不是目录形状时返回空表", () => {
+    expect(parseGithubCatalog(null)).toEqual({});
+    expect(parseGithubCatalog([])).toEqual({});
+    expect(parseGithubCatalog({ extensions: [] })).toEqual({});
+  });
+});
+
 type FetchLog = { url: string; init?: RequestInit }[];
 
 function mockFetch(routes: Array<{ match: (url: string) => boolean; respond: (url: string) => { status: number; body?: unknown } | Response }>, log: FetchLog = []) {
@@ -65,9 +86,10 @@ const config = (overrides: Partial<GithubSourceConfig> = {}): GithubSourceConfig
   ...overrides
 });
 
-const release = (tag: string, assets: Array<{ name: string; size?: number; digest?: string; url?: string; apiUrl?: string }>) => ({
+const release = (tag: string, assets: Array<{ name: string; size?: number; digest?: string; url?: string; apiUrl?: string }>, publishedAt?: string) => ({
   tag_name: tag,
   name: `Release ${tag}`,
+  ...(publishedAt ? { published_at: publishedAt } : {}),
   assets: assets.map((asset) => ({
     name: asset.name,
     size: asset.size ?? 100,
@@ -94,8 +116,8 @@ describe("search", () => {
     const source = createGithubReleaseSource({ config: () => config(), fetchImpl });
     const page: MarketplaceSearchPage = await source.search({}, signal);
     expect(page.items).toEqual([
-      { extensionId: "demo", label: "acme/extensions@v1.0.0", description: "Release v1.0.0", latest: "1.1.0" },
-      { extensionId: "other", label: "acme/extensions@v1.1.0", description: "Release v1.1.0", latest: "0.0.1" }
+      { extensionId: "demo", label: "acme/extensions@v1.0.0", description: "Release v1.0.0", latest: "1.1.0", size: 100 },
+      { extensionId: "other", label: "acme/extensions@v1.1.0", description: "Release v1.1.0", latest: "0.0.1", size: 100 }
     ]);
   });
 
@@ -109,7 +131,8 @@ describe("search", () => {
     const source = createGithubReleaseSource({ config: () => config(), fetchImpl });
     const page = await source.search({}, signal);
     expect(page.items[0]!.latest).toBe("1.0.0");
-    expect(log.map((entry) => new URL(entry.url).searchParams.get("page"))).toEqual(["1", "2"]);
+    const releasePages = log.filter((entry) => entry.url.includes("/releases")).map((entry) => new URL(entry.url).searchParams.get("page"));
+    expect(releasePages).toEqual(["1", "2"]);
   });
 
   it("搜索词按 extensionId 子串过滤（大小写不敏感）", async () => {
@@ -119,6 +142,57 @@ describe("search", () => {
     const source = createGithubReleaseSource({ config: () => config(), fetchImpl });
     const page = await source.search({ text: "Image" }, signal);
     expect(page.items.map((item) => item.extensionId)).toEqual(["image-tools"]);
+  });
+
+  it("catalog.json 补充名称 / 描述 / 图标 / 生效方式；大小与时间取最新 Release", async () => {
+    const { fetchImpl } = mockFetch([
+      {
+        match: (url) => url.includes("/contents/catalog.json"),
+        respond: () => ({
+          status: 200,
+          body: { extensions: { demo: { name: "Demo 扩展", description: "目录里的描述", icon: "media", hotReload: true } } }
+        })
+      },
+      {
+        match: (url) => url.includes("/releases"),
+        respond: () => ({
+          status: 200,
+          body: [
+            release("v1.0.0", [{ name: "demo-1.0.0.wxt", size: 111, digest: sha(1) }], "2026-10-01T00:00:00Z"),
+            release("v1.1.0", [{ name: "demo-1.1.0.wxt", size: 222, digest: sha(2) }], "2026-10-20T00:00:00Z")
+          ]
+        })
+      }
+    ]);
+    const source = createGithubReleaseSource({ config: () => config(), fetchImpl });
+    const page = await source.search({}, signal);
+    expect(page.items).toEqual([
+      {
+        extensionId: "demo",
+        label: "Demo 扩展",
+        latest: "1.1.0",
+        description: "目录里的描述",
+        icon: "media",
+        hotReload: true,
+        size: 222,
+        publishedAt: "2026-10-20T00:00:00Z"
+      }
+    ]);
+    const info = await source.getExtension("demo", signal);
+    expect(info?.label).toBe("Demo 扩展");
+    expect(info?.versions.find((entry) => entry.version === "1.1.0")?.publishedAt).toBe("2026-10-20T00:00:00Z");
+  });
+
+  it("目录缺失或无权限时退回 Release 自身的展示字段", async () => {
+    const { fetchImpl } = mockFetch([
+      { match: (url) => url.includes("/contents/catalog.json"), respond: () => ({ status: 404, body: { message: "Not Found" } }) },
+      { match: (url) => url.includes("/releases"), respond: () => ({ status: 200, body: [release("v1", [{ name: "demo-1.0.0.wxt", digest: sha(1) }])] }) }
+    ]);
+    const source = createGithubReleaseSource({ config: () => config(), fetchImpl });
+    const page = await source.search({}, signal);
+    expect(page.items[0]).toMatchObject({ label: "acme/extensions@v1", description: "Release v1", latest: "1.0.0" });
+    expect(page.items[0]?.icon).toBeUndefined();
+    expect(page.items[0]?.hotReload).toBeUndefined();
   });
 
   it("解析失败的资产直接跳过，不影响其余资产", async () => {

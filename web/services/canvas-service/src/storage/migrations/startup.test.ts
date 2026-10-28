@@ -15,7 +15,7 @@ import { createCanvasService } from "../../composition.js";
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true }); });
 
-function fixture() {
+function fixture(options: { staleFilmSetContent?: boolean } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-auto-migration-"));
   directories.push(directory);
   const filename = path.join(directory, "custom-canvas.sqlite");
@@ -32,6 +32,16 @@ function fixture() {
     id: "clip", name: "动作", timeline: { duration: 4, loop: false }, initialCamera: base.sceneCamera,
     cameraMotion: createMotionSnapshot({ motionScript: "", basedOnModelVersion: { revision: 1, sourceHash: "camera", contentHash: "camera" } }), bindings: []
   }] } } as unknown as typeof base) as typeof canvas.nodeData[string];
+  if (options.staleFilmSetContent) {
+    // 旧版本在对象容器上残留的 filmSetContent：当前 codec 的领域规范化会剥掉它。
+    canvas.document.nodes.push({ id: "container", type: "composite-asset", position: { x: 0, y: 0 }, width: 100, height: 100 });
+    canvas.nodeData.container = {
+      extensionId: "film-set",
+      compositeAssetRole: "object-container",
+      filmSetObject: { schemaVersion: 1, filmSetNodeId: "film", itemId: "item-1" },
+      filmSetContent: { schemaVersion: 3, items: [] }
+    } as never;
+  }
   const doc = serverCanvasToYDoc(canvas);
   const decoded = yDocToServerCanvas(doc, { now });
   if (!decoded.ok) throw new Error(decoded.failure.message);
@@ -64,6 +74,14 @@ it("backs up committed WAL, converts previews and animation, then skips repeat s
     expect(fs.statSync(result.backup!).mode & 0o777).toBe(0o600);
     expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
     expect(db.prepare("SELECT room_epoch FROM canvas_yjs_documents").get()!.room_epoch).toBe(row.room_epoch);
+  } finally { db.close(); }
+});
+
+it("codec normalization of unrelated nodeData does not block startup", () => {
+  const { db, filename } = fixture({ staleFilmSetContent: true });
+  try {
+    // 对象容器上的旧 filmSetContent 会被当前 codec 剥掉；迁移不应把这种规范化误判成丢数据。
+    expect(() => migrateSqliteCanvasBeforeStartup(filename)).not.toThrow();
   } finally { db.close(); }
 });
 

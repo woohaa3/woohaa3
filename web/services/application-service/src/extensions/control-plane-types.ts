@@ -78,7 +78,7 @@ export type SiteExtensionControlPlaneOptions = {
 
 /** 扩展启停的读写口：实现了它，启停就不再依赖站点配置表。 */
 export type ExtensionToggleStore = {
-  /** 全部显式声明的启停；未出现的 ID 由 manifest 的 `defaultEnabled` 决定。 */
+  /** 全部显式声明的启停；未出现的 ID 由 manifest 的 `defaultEnabled` 决定（未声明 = 停用）。 */
   all(): Readonly<Record<string, boolean>>;
   /** 写一个扩展的启停；失败如实上报（配置文件写入可能被权限或语法问题挡住）。 */
   set(extensionId: string, enabled: boolean): Promise<{ ok: true } | { ok: false; message: string }>;

@@ -68,6 +68,38 @@ export type ModelEditorService = {
  * `export * from "./capability-keys.js"` 已从 `@woohaa3/frontend/extension-api` 导出。
  */
 export { IMAGE_EDIT_SERVICE, type ImageEditService } from "../../extension-api/capability-keys.js";
+// 供下方 `resolveImagePreviewOwner` 读取 key（re-export 不引入本地绑定）。
+import { IMAGE_EDIT_SERVICE } from "../../extension-api/capability-keys.js";
+
+/**
+ * 宿主默认图片查看 capability（由 image-viewer plugin 提供；
+ * change: default-image-focus-viewer）。
+ *
+ * 图片编辑器扩展缺席时，历史面板仍需要「换到旧版本只读预览」的能力。本 key 与
+ * `imageEdit` 同形（只实现只读子集），由 node-history 在编辑器缺席时回落使用；编辑器
+ * 装入后始终优先 `imageEdit`。
+ */
+export const IMAGE_VIEW_SERVICE = "imageView";
+
+/** 历史只读预览需要的动作（`ImageEditService` 的对应子集）。 */
+export type ImagePreviewOwner = Pick<
+  import("../../extension-api/capability-keys.js").ImageEditService,
+  "isActive" | "nodeId" | "setHistoryOverride" | "draftState"
+>;
+
+/**
+ * 当前可用的图片预览 owner：编辑器优先，缺席时回落宿主默认查看器。
+ *
+ * 放在 service-keys 而不是 node-history 内部：两个消费点（当前首项草稿态、历史 override）
+ * 与 image-viewer 的 provide 共享同一解析语义，避免各写一份回落顺序。
+ */
+export function resolveImagePreviewOwner(
+  ctx: Pick<import("@deepseek-ai/cordis").Context, "get">
+): ImagePreviewOwner | undefined {
+  const editor = ctx.get(IMAGE_EDIT_SERVICE as never) as ImagePreviewOwner | undefined;
+  if (editor) return editor;
+  return ctx.get(IMAGE_VIEW_SERVICE as never) as ImagePreviewOwner | undefined;
+}
 
 /**
  * 视频聚焦 feature capability（由 Video Focus Plugin 提供；

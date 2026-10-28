@@ -7,6 +7,25 @@ import { decodeFilmSetNodeData } from "../canvas-node-model.js";
 import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import { OK, reject, type WorkingState, type CommandApplyResult } from "./types.js";
 
+/** 容器只拥有归属；其余字段分别归片场节点或真实 `model3d` 子节点所有。 */
+const CONTAINER_OWNERSHIP_KEYS = ["extensionId", "compositeAssetRole", "filmSetObject"] as const;
+
+/**
+ * 把容器上残留的内容字段收敛掉，返回收敛后的数据（无残留时原样返回）。
+ *
+ * 旧版本一度把片场/模型内容写到容器上；严格拒绝会让**整张画布的所有**命令永久失败
+ * （症状：新建节点、连线、从端口拉线全部无效，且没有任何可执行的修复入口），所以历史残留
+ * 在这里就地收敛。新的写入仍由 `patchNodeData` 的归属校验拒绝，不变式不放宽。
+ */
+function dropContainerResidue(work: WorkingState, nodeId: string, data: CanvasNodeData): CanvasNodeData {
+  const residue = Object.keys(data).filter(key => !(CONTAINER_OWNERSHIP_KEYS as readonly string[]).includes(key));
+  if (residue.length === 0) return data;
+  const cleaned = { ...data };
+  for (const key of residue) delete (cleaned as Record<string, unknown>)[key];
+  work.nodeData[nodeId] = cleaned;
+  return cleaned;
+}
+
 export function reconcileFilmSetObjectContainers(work: WorkingState, before: ServerCanvas, positioned: ReadonlySet<string>): CommandApplyResult {
   const canvas = { document: { ...before.document, nodes: work.nodes }, nodeData: work.nodeData };
   // Normalize legacy/default visibility before reconciling existing children, so overflow is removed too.
@@ -32,7 +51,7 @@ export function reconcileFilmSetObjectContainers(work: WorkingState, before: Ser
   const movement = compositeChildMovementContext(beforeNodes, work.nodes);
   const resolve = createFilmSetObjectResolver(canvas), resolveBefore = createFilmSetObjectResolver(before);
   for (const node of work.nodes) {
-    const data = work.nodeData[node.id];
+    let data = work.nodeData[node.id];
     const previousOwner = filmSetObjectOwnershipOf(before.nodeData[node.id]);
     const isContainer = data?.extensionId === "film-set" && data.compositeAssetRole !== undefined;
     const isModelChild = node.type === "model3d" && !!filmSetObjectOwnershipOf(data) && node.id === filmSetObjectModelNodeId(filmSetObjectOwnershipOf(data)!.filmSetNodeId, filmSetObjectOwnershipOf(data)!.itemId);
@@ -40,7 +59,7 @@ export function reconcileFilmSetObjectContainers(work: WorkingState, before: Ser
     const owner = filmSetObjectOwnershipOf(data);
     const expectedContainerId = owner ? filmSetObjectContainerId(owner.filmSetNodeId, owner.itemId) : null;
     if ((!isModelChild && (node.type !== "composite-asset" || expectedContainerId === null || node.id !== expectedContainerId)) || (isModelChild && !owner)) return reject("invalid-self-contained-node", "对象容器归属非法或已被修改");
-    if (!isModelChild && Object.keys(data).some(key => !["extensionId", "compositeAssetRole", "filmSetObject"].includes(key))) return reject("invalid-self-contained-node", "对象容器只保存归属，模型内容必须位于 model3d 子节点");
+    if (!isModelChild && isContainer && data) data = dropContainerResidue(work, node.id, data);
     if (!owner) return reject("invalid-self-contained-node", "对象容器归属缺失");
     const target = resolve(node.id);
     if (!target) {

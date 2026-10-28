@@ -15,6 +15,7 @@ import * as Y from "yjs";
 import {
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   canonicalFilmSetFields,
+  parseCanvasAggregate,
   readNodeWidth,
   readNodeHeight,
   decodeFilmSetNodeData,
@@ -217,7 +218,13 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
   try {
     doc.getMap("meta").set("createdAt", source.raw.meta.createdAt);
     const decoded = yDocToServerCanvas(doc, { now: canvas.updatedAt });
-    if (!decoded.ok || stable(decoded.canvas) !== stable(canvas)) {
+    if (!decoded.ok) fail(`目标 checkpoint 丢失或规范化内容：${canvas.id}`);
+    // 域规范化会按当前 schema 剥掉不合法/过期的字段（例如非片场节点上残留的旧版
+    // `filmSetContent`）。期望值同样过一遍领域校验，避免把「规范化」误判成「迁移丢数据」：
+    // 真正的丢失（编码后领域视图与规范化视图不一致）仍然会被下面的比较拦住。
+    const normalized = parseCanvasAggregate(canvas, { now: canvas.updatedAt });
+    if (!normalized.ok) fail(`迁移结果无法通过领域校验：${canvas.id}/${normalized.failure.code}`);
+    if (stable(decoded.canvas) !== stable(normalized.canvas)) {
       fail(`目标 checkpoint 丢失或规范化内容：${canvas.id}`);
     }
     return {
@@ -229,7 +236,7 @@ function convertCanvas(source: { canvas: ServerCanvas; report: Record<string, un
       roomEpoch: changed ? `film-set-shooting-shots-${randomUUID()}` : String(source.report.roomEpoch),
       snapshotSeq: source.report.storageSeq,
       beforeHash: digest(source.canvas),
-      afterHash: digest(canvas)
+      afterHash: digest(decoded.canvas)
     };
   } finally {
     doc.destroy();

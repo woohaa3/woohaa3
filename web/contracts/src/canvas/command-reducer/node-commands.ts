@@ -179,6 +179,13 @@ export function addNode(
   if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || hasShotPreviewOwnership(command.nodeData)) {
     return reject("invalid-shot-preview", "普通节点不能写入拍摄镜头预览归属");
   }
+  // 容器只保存归属：内容必须落在真实 `model3d` 子节点。旧版本曾把片场/模型内容直接写在容器上，
+  // 之后每个命令的 reconciliation 都会因此整批失败（整张画布不可写），所以在写入入口就拒绝。
+  if (command.nodeData && filmSetObjectOwnershipOf(command.nodeData)
+    && node.type !== "model3d"
+    && Object.keys(command.nodeData).some((key) => !["extensionId", "compositeAssetRole", "filmSetObject"].includes(key))) {
+    return reject("invalid-self-contained-node", "对象容器只保存归属，模型内容必须位于 model3d 子节点");
+  }
   if (work.nodes.some((entry) => entry.id === node.id)) {
     return reject("duplicate-node", `节点 ${node.id} 已存在`);
   }
