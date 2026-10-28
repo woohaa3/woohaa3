@@ -204,11 +204,11 @@ pub(crate) fn outline(node: &GraphNode) -> Vec<Vec2> {
     outline
 }
 
-/// Open dashed group frame with the speech-bubble tail included in the perimeter.
+/// Open dashed group frame around the speech-bubble body.
 ///
-/// Start at the left tail join, walk around the body, then draw the right tail side and return
-/// through the tip. Keeping the join as both the start and end point prevents the dashed frame
-/// from ever inserting a horizontal segment across the tail's base.
+/// Start at the left tail join and walk around the body to the right tail join. The 3D surface
+/// owns the filled tail, so the dashed backplate frame stops at both joins and cannot draw a
+/// horizontal closure or a second outline over the pointed tip.
 pub(crate) fn frame_path(node: &GraphNode) -> Vec<Vec2> {
     let rect = rectangle(node);
     let tail = tail_path(node);
@@ -227,8 +227,6 @@ pub(crate) fn frame_path(node: &GraphNode) -> Vec<Vec2> {
     frame.extend_from_slice(&rect[at + 1..rect.len() - 1]);
     frame.extend_from_slice(&rect[..=at]);
     frame.push(tail[2]);
-    frame.push(tail[1]);
-    frame.push(tail[0]);
     frame
 }
 
