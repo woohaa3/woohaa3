@@ -1151,43 +1151,6 @@
 	.plugin-row__side { min-width: 104px; }
 }
 
-.marketplace-install.is-view form.managed-install__row {
-	flex-wrap: nowrap;
-	align-items: center;
-}
-.marketplace-install.is-view form.managed-install__row .ui-text-input {
-	flex: 1;
-	min-width: 0;
-	height: 36px;
-}
-.marketplace-install.is-view .settings-page__list {
-	margin-top: 4px;
-	padding: 0 12px;
-	border: 1px solid var(--mc-border);
-	border-radius: 10px;
-	background: var(--app-web-surface);
-}
-.marketplace-install.is-view .settings-page__item:first-child { border-top: 0; }
-.marketplace-install.is-view .marketplace-install__detail {
-	margin-top: 4px;
-	padding: 14px;
-	border: 1px solid var(--mc-border);
-	border-radius: 10px;
-	background: var(--app-web-surface);
-}
-.marketplace-install.is-view .marketplace-install__detail > .settings-page__item-head {
-	padding-bottom: 10px;
-	border-bottom: 1px solid var(--mc-border);
-}
-.marketplace-install.is-view .marketplace-install__meta {
-	margin: 2px 0 0;
-	line-height: 1.75;
-}
-.marketplace-install.is-view [data-testid="marketplace-install-submit"] {
-	width: 100%;
-	height: 36px;
-	margin-top: 6px;
-}
 .marketplace-install.is-view [data-testid="marketplace-install-submit"]:disabled {
 	background: var(--app-web-subtle);
 	border-color: var(--mc-border);

@@ -40,6 +40,18 @@ export type MarketplaceListing = {
   readonly description?: string;
   readonly latest: string;
   readonly icon?: string;
+  /**
+   * 最新版本大小（字节）。来源能给出时展示在卡片上；给不出就不显示，不估算。
+   * GitHub Release 取最新版本的资产大小；本部署市场当前只在版本详情里给。
+   */
+  readonly size?: number;
+  /** 最新版本的发布时间（ISO 8601）。来源不提供时缺省，界面不猜测。 */
+  readonly publishedAt?: string;
+  /**
+   * 安装后是否热加载（无需重启宿主）。只有来源明确声明时才带；
+   * 缺省表示未知，界面不显示该标签。
+   */
+  readonly hotReload?: boolean;
 };
 
 export type MarketplaceSearchQuery = { readonly text?: string; readonly cursor?: string; readonly limit?: number };

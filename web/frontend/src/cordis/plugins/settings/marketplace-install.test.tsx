@@ -124,6 +124,29 @@ describe("marketplace install controller", () => {
     expect(versionTrusted(controller.getState().selected!.detail!, "1.0.0")).toBe(true);
   });
 
+  it("再次 load 先用缓存出内容，再后台刷新", async () => {
+    const remote = fakeRemote();
+    const controller = createMarketplaceInstallController({ remote, onJob: () => undefined, readTrustedKeys: () => "", writeSetting: async () => ({ ok: true }) });
+    await controller.load();
+    expect(controller.getState().fetchedAt).not.toBeNull();
+    expect(remote.calls.search).toHaveLength(1);
+
+    await controller.load();
+    expect(controller.getState().items).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(remote.calls.search).toHaveLength(2);
+  });
+
+  it("refresh 保留列表并标记刷新中", async () => {
+    const remote = fakeRemote();
+    const controller = createMarketplaceInstallController({ remote, onJob: () => undefined, readTrustedKeys: () => "", writeSetting: async () => ({ ok: true }) });
+    await controller.load();
+    const refreshing = controller.refresh();
+    expect(controller.getState()).toMatchObject({ refreshing: true, items: [{ extensionId: "demo" }] });
+    await refreshing;
+    expect(controller.getState()).toMatchObject({ refreshing: false });
+  });
+
   it("来源不可用：给出原因、不列结果", async () => {
     const remote = fakeRemote({
       search: async () => ({ ok: true, items: [], sources: [{ sourceId: "woohaa-server", label: "团队市场", ok: false, reason: "本地模式：未配置服务端地址" }], unavailable: [{ sourceId: "woohaa-server", reason: "本地模式：未配置服务端地址" }] })
@@ -222,6 +245,19 @@ describe("MarketplaceInstallPanel", () => {
     expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0" }]);
     // 不再写会过期的「已开始安装」提示；受理后由任务列表给出进度与终态。
     expect(container.querySelector('[data-testid="marketplace-notice"]')).toBeNull();
+  });
+
+  it("卡片主操作直接按精确版本安装，不切换到详情", async () => {
+    const remote = fakeRemote();
+    const controller = createMarketplaceInstallController({ remote, onJob: () => undefined, readTrustedKeys: () => "k1=PUB1", writeSetting: async () => ({ ok: true }) });
+    const container = render(<MarketplaceInstallPanel controller={controller} snapshot={snapshot()} canManage />);
+    click(container.querySelector('[data-testid="marketplace-install-toggle"]'));
+    await flush();
+    const buttons = container.querySelectorAll('[data-testid="marketplace-item-demo"] button');
+    click(buttons[1] ?? null);
+    await flush();
+    expect(remote.calls.install).toEqual([{ sourceId: "woohaa-server", extensionId: "demo", range: "1.1.0" }]);
+    expect(container.querySelector('[data-testid="marketplace-detail"]')).toBeNull();
   });
 
   it("安装视图里直接显示任务进度与取消，不再要求去别的列表找", async () => {
