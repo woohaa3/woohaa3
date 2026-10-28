@@ -173,7 +173,7 @@ mod tests {
         let blank = bevy::prelude::Vec2::new(geometry.aabb.x, geometry.aabb.y);
         assert!(!scope::contains(&geometry, blank), "AABB 空白角在范围外");
         // 投影轴保持等距地面斜率，范围不额外扩张。
-        assert!((scope_axis_y() / scope_axis_x() - 0.5).abs() < 1e-4);
+        assert!((scope_axis_y() / scope_axis_x() - crate::isometric_grid::CANVAS_CAMERA_PITCH.sin()).abs() < 1e-4);
     }
 
     /// 未注册资源或缺失模型引用的节点不产生候选（保持既有接受点语义）。

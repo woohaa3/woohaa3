@@ -16,7 +16,7 @@ pub(crate) use plan::grid_view;
 // 测试面：仅供 `grid::tests` 通过 `super::*` 访问。
 #[cfg(test)]
 pub(crate) use plan::{
-    GRID_BASE_SPACING, GRID_DEPTH, GRID_MIN_SCREEN_SPACING, GridPlan, PROJECTION_SCALE, plan_grid,
+    GRID_BASE_SPACING, GRID_DEPTH, GRID_MIN_SCREEN_SPACING, GridPlan, plan_grid, projection_scale,
     spacing_for_zoom,
 };
 

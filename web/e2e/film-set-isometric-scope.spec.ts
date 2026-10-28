@@ -4,7 +4,7 @@
  *
  * 在真实 Bevy WASM 运行时上用确定性 fixture 验证：
  * - 范围几何：包裹**模型地面占地**（不是内容适配矩形）的地面矩形投影，四边与地面网格
- *   平行（±0.5 斜率）、外包矩形宽高比恒为 2、8 个抓手（四顶点 + 四边中点）；
+ *   平行（斜率由画布相机 pitch 决定）、外包矩形宽高比由同一 pitch 决定、8 个抓手（四顶点 + 四边中点）；
  * - hover/select/double-click：范围内命中、范围顶部之上的模型身体命中、AABB 空白角不命中、
  *   双击整体聚焦；
  * - 框选：与平行四边形正面积相交才选中，只碰 AABB 空白角不选中；
@@ -18,6 +18,7 @@
  * 场景下发的 `scopeGround` 重算，作为跨语言一致性 oracle。
  */
 import {
+  CANVAS_CAMERA_PITCH,
   canonicalFilmSetFields,
   compositeAssetScopeContains,
   compositeAssetScopeGeometry,
@@ -39,8 +40,8 @@ import {
 
 const DEFAULT_W = 260;
 const DEFAULT_H = 195;
-/** 地面投影轴比 `AXIS_Y / AXIS_X = 0.5`（design D1/D2）。 */
-const S = 0.5;
+/** 地面投影轴比由 contracts 的全局画布相机 pitch 决定（design D1/D2）。 */
+const S = Math.sin(CANVAS_CAMERA_PITCH);
 
 type ScopeGround = { cx: number; cy: number; hx: number; hz: number };
 type ScopeEntry = {
@@ -195,12 +196,12 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
 
     const cx = expected.center.x;
     const cy = expected.center.y;
-    // 四边与地面网格平行（斜率 ±0.5）：top→right、bottom→left 为 +0.5，right→bottom、left→top 为 −0.5。
+    // 四边与地面网格平行：top→right、bottom→left 为正，right→bottom、left→top 为负。
     const [top, right, bottom, left] = accepted.vertices;
     expect((right[1] - top[1]) / (right[0] - top[0])).toBeCloseTo(S, 4);
     expect((bottom[1] - right[1]) / (bottom[0] - right[0])).toBeCloseTo(-S, 4);
-    // 外包矩形宽高比恒为 2。
-    expect(accepted.aabb[2] / accepted.aabb[3]).toBeCloseTo(2, 4);
+    // 外包矩形宽高比由同一 pitch 决定。
+    expect(accepted.aabb[2] / accepted.aabb[3]).toBeCloseTo(1 / S, 4);
 
     // 范围包裹模型地面占地，而**不是**内容适配基准矩形：基准矩形角点可落在范围外。
     const [bx, by, bw, bh] = accepted.base;
@@ -494,10 +495,10 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
       const node = s?.nodes.find((n) => n.id === "furnace");
       return node?.compositeAsset?.scopeShape ?? null;
     }).toBe("isometric-diamond");
-    // 炉体也派生地面矩形，AABB 宽高比恒为 2。
+    // 炉体也派生地面矩形，AABB 宽高比由同一 pitch 决定。
     expect((await scopeGroundOf(page, "furnace"))).not.toBeNull();
     const furnaceScope = (await acceptedScope(page, "furnace"))!;
-    expect(furnaceScope.aabb[2] / furnaceScope.aabb[3]).toBeCloseTo(2, 3);
+    expect(furnaceScope.aabb[2] / furnaceScope.aabb[3]).toBeCloseTo(1 / S, 3);
 
     const scopes = await page.evaluate(() => {
       const r = (window as any).__bevyRuntime?.queryCompositeAssetScopes?.();

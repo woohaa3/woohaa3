@@ -25,7 +25,7 @@ import {
   type MotionDefinition,
   type MotionVersionMatch
 } from "./motion-script.js";
-import { DEFAULT_MODEL_CAMERA_ASPECT, MODEL_CAMERA_ASPECTS, type ModelCameraAspect } from "./model-cameras.js";
+import { DEFAULT_MODEL_CAMERA_ASPECT, MODEL_CAMERA_ASPECTS, SHOT_CAMERA_DEFAULT_ELEVATION, type ModelCameraAspect } from "./model-cameras.js";
 import type { MotionIr } from "./motion-ir.js";
 import {
   FILM_SET_CONTENT_VERSION,
@@ -303,7 +303,7 @@ export function decodeFilmSetNodeData(
   // D10 规范静态构图：无片段时 `sceneCamera` 是持久化来源；缺失按调用方回退或稳定默认。
   const fallbackCamera: InitialShotCamera = options.cameraFallback ?? {
     azimuth: 0,
-    elevation: Math.PI / 4,
+    elevation: SHOT_CAMERA_DEFAULT_ELEVATION,
     distance: 4,
     aspect: DEFAULT_MODEL_CAMERA_ASPECT,
     focusOffset: { x: 0, y: 0, z: 0 }

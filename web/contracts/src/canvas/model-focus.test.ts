@@ -10,6 +10,7 @@ import {
   autoFrameDistance,
   canvasCameraRotation,
   canvasPointToWorld,
+  CANVAS_CAMERA_PITCH,
   clampDistance,
   clampFlySpeed,
   clampPitch,
@@ -35,6 +36,7 @@ import {
   MODEL_FOCUS_MAX_DISTANCE,
   MODEL_FOCUS_PITCH_LIMIT
 } from "./model-focus.js";
+import { eulerXyz } from "./model-focus/math.js";
 import { quatRotate, type Vec3 } from "./model-transform.js";
 import type { SceneV2Op } from "./scene-ir-v2.js";
 import type { BevyModelPlacement } from "./render-scene.js";
@@ -67,13 +69,13 @@ describe("screenPointFromWorld / screenPointToWorld", () => {
 });
 
 describe("viewRotation", () => {
-  it("与 Bevy EulerRot::XYZ(PI/6, -PI/4, 0) 一致", () => {
-    // glam: Quat::from_euler(XYZ, PI/6, -PI/4, 0) = [0.23911761,-0.36964384,-0.09904577,0.89239907]
+  it("与 Bevy EulerRot::XYZ(CANVAS_CAMERA_PITCH, -PI/4, 0) 一致", () => {
     const q = viewRotation();
-    expect(q[0]).toBeCloseTo(0.23911761, 6);
-    expect(q[1]).toBeCloseTo(-0.36964384, 6);
-    expect(q[2]).toBeCloseTo(-0.09904577, 6);
-    expect(q[3]).toBeCloseTo(0.89239907, 6);
+    const expected = eulerXyz(CANVAS_CAMERA_PITCH, -Math.PI / 4, 0);
+    expect(q[0]).toBeCloseTo(expected[0], 9);
+    expect(q[1]).toBeCloseTo(expected[1], 9);
+    expect(q[2]).toBeCloseTo(expected[2], 9);
+    expect(q[3]).toBeCloseTo(expected[3], 9);
   });
 });
 

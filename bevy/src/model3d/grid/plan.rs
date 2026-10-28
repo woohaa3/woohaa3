@@ -13,7 +13,7 @@ pub(crate) use crate::isometric_grid::plan::{IsometricGridView, view_rotation};
 #[cfg(test)]
 pub(crate) use crate::isometric_grid::plan::{
     GRID_BASE_SPACING, GRID_DEPTH, GRID_LINE_WIDTH, GRID_MAJOR_EVERY, GRID_MIN_SCREEN_SPACING,
-    GridPlan, MODEL_CAMERA_FAR, PROJECTION_SCALE, plan_grid, spacing_for_zoom,
+    GridPlan, MODEL_CAMERA_FAR, plan_grid, projection_scale, spacing_for_zoom,
 };
 
 /// 协议 `Viewport` → 协议无关的 [`IsometricGridView`]。

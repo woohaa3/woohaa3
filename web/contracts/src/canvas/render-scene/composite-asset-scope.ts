@@ -7,9 +7,9 @@
  * 因此能真正罩住模型底座而不是屏幕矩形。
  *
  * 投影事实：当前地面观察旋转把地面 `(gx,gz)` 投到画布
- * `screenX = AXIS_X×(gx-gz)`、`screenY = AXIS_Y×(gx+gz)`，`s = AXIS_Y/AXIS_X = 0.5`。
+ * `screenX = AXIS_X×(gx-gz)`、`screenY = AXIS_Y×(gx+gz)`，`s = sin(CANVAS_CAMERA_PITCH)`。
  * 地面矩形 `(cx,cy,hx,hz)` 的顶点为 `center ± (AXIS_X×hx, AXIS_Y×hx) ± (-AXIS_X×hz, AXIS_Y×hz)`，
- * 边在画布世界（x 右、y 下）斜率为 ±s，外包矩形宽高比恒为 `1/s = 2`。数值 AXIS_X/AXIS_Y 由
+ * 边在画布世界（x 右、y 下）斜率为 ±s，外包矩形宽高比为 `1/s`。数值 AXIS_X/AXIS_Y 由
  * 跨语言 golden 锁定并与 Rust `isometric_grid::plan::AXIS_X/AXIS_Y` 一致；更换投影必须同时更新
  * 本常量与两侧测试。Rust `canvas_query::scope` 是运行时事实源，本模块供映射、测试 oracle 与
  * 非运行时计算。
@@ -21,15 +21,16 @@
  * 仍只认地面范围。
  */
 import type { CompositeAssetScopeShape } from "./wire-scene.js";
+import { CANVAS_CAMERA_PITCH } from "../model-focus/canvas-projection.js";
 
-/** 地面投影轴在画布世界的边斜率 `abs(AXIS_Y / AXIS_X) = 0.5`。 */
-export const COMPOSITE_ASSET_DIAMOND_EDGE_SLOPE = 0.5;
+/** 地面投影轴在画布世界的边斜率 `abs(AXIS_Y / AXIS_X) = sin(CANVAS_CAMERA_PITCH)`。 */
+export const COMPOSITE_ASSET_DIAMOND_EDGE_SLOPE = Math.sin(CANVAS_CAMERA_PITCH);
 
 /** 地面单位向量在画布世界的 x 分量 `AXIS_X`（与 Rust `isometric_grid::plan::AXIS_X` 一致）。 */
 export const COMPOSITE_ASSET_SCOPE_AXIS_X = 0.70710678;
 
 /** 地面单位向量在画布世界的 y 分量 `AXIS_Y`（与 Rust `isometric_grid::plan::AXIS_Y` 一致）。 */
-export const COMPOSITE_ASSET_SCOPE_AXIS_Y = 0.35355339;
+export const COMPOSITE_ASSET_SCOPE_AXIS_Y = Math.sin(CANVAS_CAMERA_PITCH) * COMPOSITE_ASSET_SCOPE_AXIS_X;
 
 /**
  * 范围相对模型地面占地的固定外扩边距（世界单位）。
@@ -72,7 +73,7 @@ export type CompositeAssetScopeGeometry = {
   center: ScopePoint;
   /** 闭合多边形顶点；rect 为四角，地面矩形为 top/right/bottom/left。 */
   vertices: [ScopePoint, ScopePoint, ScopePoint, ScopePoint];
-  /** 粗筛用外接矩形；地面矩形时为 `(cx-rx, cy-ry, 2rx, 2ry)`（宽高比恒 2）。 */
+  /** 粗筛用外接矩形；地面矩形时为 `(cx-rx, cy-ry, 2rx, 2ry)`。 */
   aabb: ScopeRect;
   /** 地面矩形外包半径；rect 时为半宽/半高。 */
   radiusX: number;
@@ -110,7 +111,7 @@ export function normalizeScopeBaseRect(rect: ScopeRect, minHalf: number): ScopeR
  * 地面矩形 → 画布多边形与抓手。
  *
  * 顶点为 `center ± (AXIS_X×hx, AXIS_Y×hx) ± (-AXIS_X×hz, AXIS_Y×hz)`；四边斜率 ±s，外包矩形
- * 宽高比恒 2。非法/退化输入围绕中心保留最小地面范围。
+ * 宽高比由 `CANVAS_CAMERA_PITCH` 决定。非法/退化输入围绕中心保留最小地面范围。
  */
 export function compositeAssetScopeGround(
   ground: ScopeGround,

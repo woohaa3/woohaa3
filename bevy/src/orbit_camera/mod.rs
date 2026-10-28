@@ -3,7 +3,7 @@
 //!
 //! 提供围绕目标点的自由旋转（yaw/pitch）、平移（pan）和缩放（distance）的 ECS 相机 rig，
 //! 支持透视/正交投影、可选 Bevy pointer adapter 与输入无关命令。它与受限的
-//! [`crate::shot_camera`]（固定 45° 仰角、正交拍摄镜头）**互不接管**彼此的相机、输入或
+//! [`crate::shot_camera`]（全局默认 pitch、正交拍摄镜头）**互不接管**彼此的相机、输入或
 //! preview/capture 资源。
 //!
 //! 边界：本模块只依赖 Bevy 与标准库，不依赖 canvas `protocol`、`bridge`、DOM 或 Y.Doc。

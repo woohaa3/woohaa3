@@ -77,7 +77,7 @@ pub(crate) struct PlaybackCamera {
 fn default_playback_aspect() -> String { "16:9".to_owned() }
 
 fn default_playback_elevation() -> f32 {
-    std::f32::consts::FRAC_PI_4
+    crate::isometric_grid::CANVAS_CAMERA_PITCH
 }
 
 fn default_playback_distance() -> f32 {

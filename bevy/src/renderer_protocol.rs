@@ -86,7 +86,7 @@ pub struct InitialCameraRequest {
 }
 
 fn default_elevation() -> f32 {
-    std::f32::consts::FRAC_PI_4
+    crate::isometric_grid::CANVAS_CAMERA_PITCH
 }
 
 fn default_distance() -> f32 {

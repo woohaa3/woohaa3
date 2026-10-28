@@ -483,7 +483,8 @@ fn scope_geometry_query_returns_parallelogram_vertices_and_base() {
     assert!((entry.vertices[1][0] - right_x).abs() < 1e-3);
     assert!((entry.vertices[1][1] - right_y).abs() < 1e-3);
     assert!((entry.aabb[0] - blank_x).abs() < 1e-3);
-    assert!((entry.aabb[3] / entry.aabb[2] - 0.5).abs() < 1e-3);
+    let axis_ratio = crate::isometric_grid::plan::scope_axis_x() / crate::isometric_grid::plan::scope_axis_y();
+    assert!((entry.aabb[2] / entry.aabb[3] - axis_ratio).abs() < 1e-3);
     // 基准矩形是内容 fit 矩形，不是 AABB。
     assert_eq!(entry.base, [0.0, 0.0, 260.0, 195.0]);
     // JSON 入口 round-trip（camelCase）。

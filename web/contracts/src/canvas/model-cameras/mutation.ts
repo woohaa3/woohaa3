@@ -84,7 +84,7 @@ export function clampCameraElevation(elevation: number): number {
   return Math.min(SHOT_CAMERA_MAX_ELEVATION, Math.max(SHOT_CAMERA_MIN_ELEVATION, elevation));
 }
 
-/** 读取镜头有效仰角；缺省返回 `PI/4`（与既有固定行为兼容）。 */
+/** 读取镜头有效仰角；缺省返回画布全局 pitch。 */
 export function modelCameraElevation(camera: ModelCamera): number {
   return camera.elevation ?? SHOT_CAMERA_DEFAULT_ELEVATION;
 }

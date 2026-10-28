@@ -24,6 +24,7 @@ import { hashMotionScript } from "./motion-script.js";
 import { hashModelScript } from "./model-executor.js";
 import { applyFilmSetClipPatch, filmSetClipPrecondition } from "./film-set-clip-ops.js";
 import { filmSetItemAdapterHash } from "./film-set-content.js";
+import { SHOT_CAMERA_DEFAULT_ELEVATION } from "./model-cameras.js";
 
 const SCRIPT = `scene.box({ id: "torso", size: [1, 2, 0.5] });`;
 const MOTION = `motion.model.rotate("torso", { speed: 0.5 });`;
@@ -89,7 +90,7 @@ describe("动画快照创建与导入（任务 2.1–2.4）", () => {
 
   it("初始镜头按 AABB 派生且不保存在来源节点上", () => {
     const camera = defaultInitialShotCamera({ min: [-1, -1, -1], max: [1, 1, 1] });
-    expect(camera.elevation).toBeCloseTo(Math.PI / 4, 6);
+    expect(camera.elevation).toBeCloseTo(SHOT_CAMERA_DEFAULT_ELEVATION, 6);
     expect(camera.distance).toBeGreaterThan(0);
   });
 

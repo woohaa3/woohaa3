@@ -1,3 +1,5 @@
+import { CANVAS_CAMERA_PITCH } from "../model-focus/canvas-projection.js";
+
 /**
  * 模型镜头契约：类型与常量
  * （自 `model-cameras.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R18）。
@@ -25,8 +27,8 @@ export const MODEL_CAMERA_DEFAULT_NAME_PREFIX = "镜头";
  */
 export const SHOT_CAMERA_MIN_ELEVATION = -Math.PI / 2;
 export const SHOT_CAMERA_MAX_ELEVATION = Math.PI / 2;
-/** 默认仰角（45°），与既有固定行为兼容。 */
-export const SHOT_CAMERA_DEFAULT_ELEVATION = Math.PI / 4;
+/** 默认仰角与画布镜头共用同一全局 pitch。 */
+export const SHOT_CAMERA_DEFAULT_ELEVATION = CANVAS_CAMERA_PITCH;
 
 /** 镜头注视点偏移（相对 placement 后模型 AABB 中心；change: 模型编辑 gizmo 焦点）。 */
 export type ModelCameraFocusOffset = { x: number; y: number; z: number };

@@ -7,7 +7,7 @@
  * 派生相机，不进入 ServerCanvas / CanvasCommand / Y.Doc。
  *
  * 持久化的只有 `{id,name,order,azimuth,elevation,distance,aspect?,focusOffset?}`；position、
- * focus、projection、span 都由本模块从当前模型 AABB 与 placement 派生。仰角默认 45°，
+ * focus、projection、span 都由本模块从当前模型 AABB 与 placement 派生。仰角默认跟随画布全局 pitch，
  * 可在竖直半圆 `[-90°, +90°]` 内变化（change: add-shot-camera-elevation-control）。
  */
 import {
@@ -22,7 +22,7 @@ import {
 import { addVec3, crossVec3, lengthVec3, normalizeVec3, scaleVec3, subVec3, type Aabb, type Vec3 } from "./model-transform.js";
 import { modelCameraAspectRatio, type ModelCamera } from "./model-cameras.js";
 
-/** 固定仰角（45°；design D3）——作为缺省与兼容默认（change: add-shot-camera-elevation-control）。 */
+/** 默认仰角与普通画布镜头共用全局 pitch（design D3）。 */
 export const SHOT_CAMERA_ELEVATION = SHOT_CAMERA_DEFAULT_ELEVATION;
 /** 仰角规范半圆范围（与 `model-cameras.ts` 一致）。 */
 export const SHOT_CAMERA_ELEVATION_RANGE = {
@@ -70,7 +70,7 @@ const MIN_RADIUS = 1e-4;
  */
 export const SHOT_CAMERA_ELEVATION_LIMIT = (89 * Math.PI) / 180;
 
-/** 把仰角钳制到奇点容差以内（派生/手势层）；非有限值回退默认 45°。 */
+/** 把仰角钳制到奇点容差以内（派生/手势层）；非有限值回退全局默认值。 */
 export function clampShotElevation(elevation: number): number {
   if (!Number.isFinite(elevation)) return SHOT_CAMERA_ELEVATION;
   return Math.min(SHOT_CAMERA_ELEVATION_LIMIT, Math.max(-SHOT_CAMERA_ELEVATION_LIMIT, elevation));
@@ -170,7 +170,7 @@ export function shotFocusPlaneHeight(distance: number, fov = SHOT_CAMERA_FOV): n
  *
  * 有效 focus = placement 后模型 AABB 中心 + 镜头 `focusOffset`（缺省零偏移）。distance 以
  * 模型包围球半径自动 fit 并 clamp；focus 偏移不改变自动 fit 的半径基准（仍按模型 AABB）。
- * elevation 缺省 45°，钳入奇点容差。AABB 非法/退化时返回 null。
+ * elevation 缺省为全局默认值，钳入奇点容差。AABB 非法/退化时返回 null。
  */
 export function resolveShotCamera(
   aabb: Aabb,

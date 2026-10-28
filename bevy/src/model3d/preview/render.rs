@@ -179,7 +179,7 @@ fn setup_camera(
     let rotation = Quat::from_euler(
         EulerRot::YXZ,
         -45.0_f32.to_radians(),
-        -30.0_f32.to_radians(),
+        -crate::isometric_grid::CANVAS_CAMERA_PITCH,
         0.0,
     );
     let translation = rotation * Vec3::new(0.0, 0.0, distance);

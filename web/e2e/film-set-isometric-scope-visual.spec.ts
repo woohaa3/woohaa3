@@ -8,7 +8,7 @@
  * - 长标题、空场、选中时可见 8 抓手；
  * - 成片隔离：镜头截图与视频导出不包含范围、名称或抓手 chrome。
  *
- * 范围包裹模型**地面占地**（不是内容适配矩形）：四边与地面网格平行，外包矩形宽高比恒为 2。
+ * 范围包裹模型**地面占地**（不是内容适配矩形）：四边与地面网格平行，外包矩形宽高比由画布相机 pitch 决定。
  * 暗色 token 只覆盖亮度相关的画布/背景/文字 token；未覆盖的沿用默认，保持契约合法。
  */
 import { canonicalFilmSetFields, createFilmSetSnapshot, createModelSnapshot, type FilmSetItem } from "@woohaa3/contracts";
