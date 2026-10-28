@@ -29,8 +29,8 @@ const GROUP_BORDER: f32 = 1.5;
 /// change: 2026-10-27-order-canvas-layers-by-ground-anchor 收敛为 2D 唯一组底色）。
 ///
 /// 0.55 与参考实现 `rgba(42,42,48,.55)` 同量级：只暗示容器范围，不遮挡成员卡片边框。
-/// 2D 面板是**所有**组（带模型或不带模型）的唯一底色来源；3D 相机只画不透明徽章底座，
-/// 不再叠加同透明度的填充面，因此两组观感一致。
+/// 2D 面板是**所有**组（带模型或不带模型）的唯一底色来源；3D 相机只画徽标后方的气泡
+/// 尾巴，不再叠加徽标底座或同透明度的填充面，因此两组观感一致。
 pub(super) const GROUP_FILL_ALPHA: f32 = 0.55;
 
 /// 组面板圆角，与组外框的 12 单位语言一致。
@@ -53,7 +53,7 @@ pub(super) fn is_running(node: &crate::protocol::GraphNode) -> bool {
 /// Transparent2d phase can sort each panel independently.
 ///
 /// 面板用 `canvasNodeSurface` + [`GROUP_FILL_ALPHA`]，这是所有组唯一的底色层；3D 相机只画
-/// 不透明徽章底座，不再叠加半透明组底（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
+/// 徽标后方的气泡尾巴，不再叠加徽标底座或半透明组底（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
 pub(crate) fn draw_group_panel(
     theme: &ThemeResource,
     node: &crate::protocol::GraphNode,
@@ -61,13 +61,11 @@ pub(crate) fn draw_group_panel(
 ) -> Mesh {
     let mut geometry = Geometry::default();
     let color = theme.token_u32("canvasNodeSurface");
-    let aperture = badge_aperture(node);
-    panel(&mut geometry, node, aperture, 0., color, GROUP_FILL_ALPHA);
+    panel(&mut geometry, node, 0., color, GROUP_FILL_ALPHA);
     if presentation.drop_target {
         panel(
             &mut geometry,
             node,
-            aperture,
             0.001,
             theme.token_u32("interactionAccentSoft"),
             0.22,
@@ -76,89 +74,25 @@ pub(crate) fn draw_group_panel(
     geometry.build()
 }
 
-/// 底部徽章占据的矩形，裁剪到组矩形内；没有徽章时返回 `None`。
-///
-/// 有模型的组由 `group_surface` 在 3D 世界画不透明徽章底座与站在上面的模型，而 3D 相机
-/// （order 0）整体先于 2D 覆盖层（order 1）。2D 面板如果铺满整块组底就会把徽章和模型
-/// 一起盖掉，所以这里留出徽章口，让 3D 内容原样透出。
-fn badge_aperture(node: &crate::protocol::GraphNode) -> Option<Vec4> {
-    if !crate::canvas_query::group_model::has_badge(node) {
-        return None;
-    }
-    let badge = crate::canvas_query::group_model::badge_rect(node);
-    let (x0, y0) = (node.x, node.y);
-    let (x1, y1) = (x0 + node.width, y0 + node.height);
-    let (left, top) = (badge.x.max(x0), badge.y.max(y0));
-    let (right, bottom) = ((badge.x + badge.z).min(x1), (badge.y + badge.w).min(y1));
-    (right > left && bottom > top).then(|| Vec4::new(left, top, right - left, bottom - top))
-}
-
-/// 在组矩形内铺一层底色，`aperture` 处留空。
-///
-/// 带缺口的一整块是凹多边形，扇形三角化会画出缺口外的三角形；因此拆成上片与
-/// 左下/右下片三个凸多边形，各自只保留原矩形对应角上的圆角。
+/// 在组矩形内铺一层底色。徽标固定在矩形外侧，因此背板可以完整覆盖组内容。
 fn panel(
     geometry: &mut Geometry,
     node: &crate::protocol::GraphNode,
-    aperture: Option<Vec4>,
     z: f32,
     color: u32,
     alpha: f32,
 ) {
-    let (x0, y0) = (node.x, node.y);
-    let (x1, y1) = (x0 + node.width, y0 + node.height);
     let radius = GROUP_PANEL_RADIUS;
-    let Some(aperture) = aperture else {
-        geometry.rounded_rect_radii_alpha(
-            x0,
-            y0,
-            node.width,
-            node.height,
-            [radius; 4],
-            z,
-            color,
-            alpha,
-        );
-        return;
-    };
-    let (left, right) = (aperture.x, aperture.x + aperture.z);
-    let top = aperture.y;
-    if top > y0 {
-        geometry.rounded_rect_radii_alpha(
-            x0,
-            y0,
-            x1 - x0,
-            top - y0,
-            [radius, radius, 0., 0.],
-            z,
-            color,
-            alpha,
-        );
-    }
-    if left > x0 {
-        geometry.rounded_rect_radii_alpha(
-            x0,
-            top,
-            left - x0,
-            y1 - top,
-            [0., 0., 0., radius],
-            z,
-            color,
-            alpha,
-        );
-    }
-    if right < x1 {
-        geometry.rounded_rect_radii_alpha(
-            right,
-            top,
-            x1 - right,
-            y1 - top,
-            [0., 0., radius, 0.],
-            z,
-            color,
-            alpha,
-        );
-    }
+    geometry.rounded_rect_radii_alpha(
+        node.x,
+        node.y,
+        node.width,
+        node.height,
+        [radius; 4],
+        z,
+        color,
+        alpha,
+    );
 }
 
 /// 在共享几何里追加一个 group 容器的虚线框与标题装饰。
@@ -507,8 +441,8 @@ mod tests {
             .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
     }
 
-    /// 带模型组与无模型组的 2D 底色必须来自同一 token/alpha；3D 相机只画不透明徽章，
-    /// 不再叠加 0.55 填充层（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
+    /// 带模型组与无模型组的 2D 底色必须来自同一 token/alpha；3D 相机只画气泡尾巴，
+    /// 不再叠加徽标底座或 0.55 填充层（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
     #[test]
     fn model_presence_does_not_change_group_underlay() {
         let theme = ThemeResource::default();
@@ -528,12 +462,9 @@ mod tests {
         }
     }
 
-    /// 3D 相机（order 0）整体先于 2D 覆盖层（order 1），所以带模型的组必须在底部徽章处
-    /// 留口，否则背板会盖住不透明徽章底座和站在上面的模型。
-    ///
-    /// 缺口用三角形形心判定而不是顶点：缺口边界本来就落在顶点上。
+    /// 徽标固定在气泡主体外侧，所以组背板完整覆盖结构矩形，尾巴和模型在矩形外绘制。
     #[test]
-    fn model_group_panel_leaves_badge_aperture_open() {
+    fn model_group_panel_keeps_full_body_backplate() {
         let node = model_group(500., 300.);
         let mesh = draw_group_panel(
             &ThemeResource::default(),
@@ -544,38 +475,15 @@ mod tests {
         else {
             panic!("panel needs positions");
         };
-        let indices: Vec<u32> = mesh.indices().unwrap().iter().map(|i| i as u32).collect();
         let badge = crate::canvas_query::group_model::badge_rect(&node);
-        // 顶点写入时画布 y 取反，因此徽章的画布 y 区间映射为负值区间。
-        let left = badge.x.max(node.x) + 0.5;
-        let right = (badge.x + badge.z).min(node.x + node.width) - 0.5;
-        let a = -(badge.y.max(node.y) + 0.5);
-        let b = -((badge.y + badge.w).min(node.y + node.height) - 0.5);
-        let (lower, upper) = (a.min(b), a.max(b));
-        for triangle in indices.chunks(3) {
-            let centroid = triangle
-                .iter()
-                .map(|index| Vec3::from_array(points[*index as usize]))
-                .sum::<Vec3>()
-                / 3.;
-            assert!(
-                !(centroid.x > left
-                    && centroid.x < right
-                    && centroid.y > lower
-                    && centroid.y < upper),
-                "panel must not cover the 3D badge: {centroid:?}"
-            );
-        }
-        // 缺口只挖在徽章处：组底其余部分仍铺满左右两侧与底边。
+        assert!(badge.y >= node.y + node.height + crate::canvas_query::group_model::BADGE_OUTSET);
+        assert!(points.iter().all(|point| {
+            let canvas_y = -point[1];
+            canvas_y >= node.y - 0.01 && canvas_y <= node.y + node.height + 0.01
+        }));
         let min_x = points.iter().map(|point| point[0]).fold(f32::MAX, f32::min);
         let max_x = points.iter().map(|point| point[0]).fold(f32::MIN, f32::max);
-        assert!((min_x).abs() < 0.01 && (max_x - 500.).abs() < 0.01);
-        assert!(points
-            .iter()
-            .any(|point| point[0] < left && (point[1] + 300.).abs() < 0.01));
-        assert!(points
-            .iter()
-            .any(|point| point[0] > right && (point[1] + 300.).abs() < 0.01));
+        assert!((min_x - node.x).abs() < 0.01 && (max_x - (node.x + node.width)).abs() < 0.01);
     }
 
     #[test]
@@ -610,8 +518,10 @@ mod tests {
                     panic!("positions");
                 };
                 let layout = crate::canvas_query::group_model::for_node(&node).unwrap();
-                assert!(points.iter().all(|p| -p[1]
-                    <= node.y + node.height + crate::canvas_query::group_model::BADGE_OUTSET + 1.));
+                let badge = crate::canvas_query::group_model::badge_rect(&node);
+                assert!(points
+                    .iter()
+                    .all(|p| -p[1] <= badge.y + badge.w + 1.));
                 assert!(
                     !points
                         .iter()

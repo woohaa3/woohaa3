@@ -29,7 +29,7 @@ fn footer_model_hits_group_and_keeps_member_controls_and_marquee_rectangular() {
         })
     );
     // No former diamond area remains outside the rectangle.
-    let blank = Vec2::new(group.x + group.width / 2., group.y + group.height + 20.);
+    let blank = Vec2::new(group.x + 10., group.y + group.height + 20.);
     assert_eq!(
         point_query(generation, blank.x, blank.y, 1., None).hit,
         None
@@ -184,7 +184,8 @@ fn badge_lip_hits_group_but_does_not_expand_marquee_or_resize_bounds() {
     s.selection.nodes = vec!["g".into()];
     let g = accept_scene(&s);
     let x = group.x + group.width / 2.;
-    let y = group.y + group.height + group_model::BADGE_OUTSET / 2.;
+    let badge = group_model::badge_rect(&group);
+    let y = badge.y + 2.;
     assert_eq!(
         point_query(g, x, y, 1., None).hit,
         Some(PointHit::NodeAction {

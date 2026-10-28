@@ -106,7 +106,7 @@ describe("group badge click", () => {
     const f = setup();
     f.fire("pointerdown"); f.fire("pointerup");
     const candidates = collectResidencyCandidates(f.current(), node => `resource:${node.id}`);
-    expect(candidates.find(c => c.nodeId === "g")).toMatchObject({ eligible: true, width: 196, height: 118, previewSlot: false });
+    expect(candidates.find(c => c.nodeId === "g")).toMatchObject({ eligible: true, width: 196, height: 182, previewSlot: false });
     expect(candidates.find(c => c.nodeId === "m")).toMatchObject({ eligible: false });
     f.controller.dispose();
   });

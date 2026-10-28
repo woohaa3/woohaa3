@@ -30,7 +30,8 @@ const COPIED = [
 	"scripts/build-bevy-wasm.mjs",
 	"scripts/sync-bevy-assets.mjs",
 	"scripts/lib/bevy-build-mode.mjs",
-	"scripts/lib/wasm-compiler.mjs"
+	"scripts/lib/wasm-compiler.mjs",
+	"scripts/lib/gpu-renderer-selection.mjs"
 ];
 
 const shims = {
@@ -160,10 +161,13 @@ function makeFixture({ withWasmOpt = true, withClang = true } = {}) {
 		"CARGO_TARGET_DIR",
 		"WOOHAA_BEVY_DEV_MODE",
 		"WOOHAA_STATIC_BATCH_STRATEGY",
-		"WOOHAA_RENDER_DRAW_DIAGNOSTICS"
+		"WOOHAA_RENDER_DRAW_DIAGNOSTICS",
+		"WOOHAA_BEVY_RENDERER"
 	]) {
 		delete env[name];
 	}
+	// 构建编排测试只验证流程；后端选择由独立探测单测覆盖，避免依赖宿主 GPU。
+	env.WOOHAA_BEVY_RENDERER = "webgpu";
 	return { root, bin, log, sourceMarker, targetDir, env };
 }
 
@@ -215,6 +219,18 @@ test("development build writes importable glue, wasm and declarations without wa
 	assert.equal(stamp(fixture).optSkipped, true);
 	// 字体由同一位置同步。
 	assert.ok(existsSync(join(fixture.root, "web/frontend/public/assets/fonts/Probe.otf")));
+});
+
+test("renderer override selects the matching Cargo feature and is recorded in the stamp", (t) => {
+	const fixture = makeFixture();
+	t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+
+	const result = build(fixture, ["--mode", "development"], { WOOHAA_BEVY_RENDERER: "webgl2" });
+	assert.equal(result.status, 0, result.log);
+	const buildArgs = logLines(fixture, "cargo-args").find((line) => line.startsWith("build"));
+	assert.match(buildArgs, /--no-default-features --features wasm-webgl2/);
+	assert.equal(stamp(fixture).rendererBackend, "webgl2");
+	assert.equal(stamp(fixture).rendererSelection, "override");
 });
 
 test("raw WASM and stamp come from the Cargo metadata target directory", (t) => {
