@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # Opt-in comparison renderer; default production stays on spatial/automatic.
 explicit-instancing = []
-default = ["wasm"]
+default = ["wasm-webgpu"]
 # 浏览器与原生宿主共用画布系统；平台事件循环由各 adapter 提供。
 canvas-core = [
   "bevy/bevy_window", "bevy/bevy_sprite", "bevy/bevy_sprite_render",
@@ -24,15 +24,24 @@ native-canvas = ["canvas-core", "bevy/multi_threaded"]
 # 仅开启 Bevy 的 `debug` feature，让 pass/资源/系统名进入 GPU 抓帧标记；默认与 release
 # 构建不携带，避免诊断开销和名称泄露。它是**独立开关**，不改变 canvas-core/native-canvas 语义。
 gpu-debug = ["bevy/debug"]
-# 浏览器 WASM 运行时（默认）：需要窗口/winit 与 WebGPU 后端。
+# 浏览器 WASM 绑定（与具体 GPU 后端分离，两个浏览器后端都必须启用）。
+# 保留 `wasm` feature 名称作为源码里的 wasm_bindgen/cfg 开关。
 wasm = [
+  "dep:wasm-bindgen", "dep:js-sys", "dep:wasm-bindgen-futures", "dep:console_error_panic_hook",
+]
+# 浏览器 WASM 运行时（WebGPU）：需要窗口/winit 与 WebGPU 后端。
+wasm-webgpu = [
+  "wasm",
   "canvas-core",
   "bevy/bevy_winit",
   "bevy/webgpu",
-  "dep:wasm-bindgen",
-  "dep:js-sys",
-  "dep:wasm-bindgen-futures",
-  "dep:console_error_panic_hook",
+]
+# 浏览器 WASM 运行时（WebGL2）：与 WebGPU 共用 Rust/ABI，但使用 wgpu 的 WebGL2 后端。
+wasm-webgl2 = [
+  "wasm",
+  "canvas-core",
+  "bevy/bevy_winit",
+  "bevy/webgl2",
 ]
 # 原生无窗口离屏渲染（model-renderer binary）：不创建窗口，不依赖 winit。
 # 只做 Scene IR → 离屏 Image → PNG，与浏览器 adapter 共用 model3d 构建逻辑。

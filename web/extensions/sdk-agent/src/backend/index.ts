@@ -164,8 +164,8 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
           }
         });
       };
-      // route 是**相对 publicPath** 的：宿主会加 `<extensionId>/` 前缀（c5f1cce），
-      // 这里再写一遍 sdk-agent/ 就会变成 sdk-agent/sdk-agent/connections 而永不命中。
+      // route 相对 publicPath：扩展名前缀由宿主按 extensionId 自动添加，插件不要再写一遍。
+      // （写重了会变成 sdk-agent/sdk-agent/connections，全部 404「插件未激活」。）
       register("configure", "POST", "auth-transaction");
       register("connections", "GET", "read");
       register("connections", "POST", "auth-transaction");

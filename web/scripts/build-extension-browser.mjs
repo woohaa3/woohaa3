@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
+import { watch as fsWatch } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -671,9 +672,91 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+/**
+ * 作者侧增量构建（change: 2026-10-27-add-extension-dev-reload，D2 / 6.1）。
+ *
+ * 复用同一条构建函数：产物身份、原子写与校验都不另起一套；只把「跑一次」换成「源码变了再跑一次」。
+ * 构建失败只记录，不退出——改坏代码时作者应当继续能迭代。
+ * 返回的函数用于 Ctrl+C / 测试关闭。
+ */
+async function watchExtensionBrowser({ dir, outDir, stagingDir, debounceMs = 120, watch: watchFn = fsWatch, log = console }) {
+  const sourceRoots = [path.join(dir, "src"), path.join(dir, "package.json"), path.join(dir, "extension.json")];
+  let timer = null;
+  let running = false;
+  let queued = false;
+
+  const build = async () => {
+    if (running) {
+      queued = true;
+      return;
+    }
+    running = true;
+    try {
+      const result = await buildExtensionBrowser({ cwd: dir, outDir, stagingDir });
+      log.log(
+        `[extension-browser] rebuilt ${path.relative(REPO_ROOT, outDir)} artifactId=${result.artifactId.slice(0, 12)} entry=${result.entry}`
+      );
+    } catch (error) {
+      log.error(`[extension-browser] rebuild failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      running = false;
+      if (queued) {
+        queued = false;
+        schedule();
+      }
+    }
+  };
+
+  const schedule = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      void build();
+    }, debounceMs);
+    timer.unref?.();
+  };
+
+  const watchers = [];
+  const attach = (target) => {
+    try {
+      const watcher = watchFn(target, { recursive: true }, () => schedule());
+      watcher.on?.("error", (error) => {
+        log.error(`[extension-browser] watch error: ${error instanceof Error ? error.message : String(error)}`);
+      });
+      watchers.push(watcher);
+    } catch (error) {
+      log.error(`[extension-browser] watch unavailable for ${target}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  for (const target of sourceRoots) {
+    if (existsSync(target)) attach(target);
+  }
+
+  await build();
+  log.log("[extension-browser] watching for changes (Ctrl+C to stop)");
+  return () => {
+    if (timer !== null) clearTimeout(timer);
+    for (const watcher of watchers) {
+      try {
+        watcher.close();
+      } catch {
+        /* 已失效的监听器忽略 */
+      }
+    }
+  };
+}
+
 async function main() {
   if (watch) {
-    console.error("[extension-browser] --watch 由 dev 编排使用；此处执行一次构建后退出。");
+    // 作者侧 watch：真实增量构建，供开发者模式（dev-source）使用（change: 2026-10-27-add-extension-dev-reload）。
+    const stop = await watchExtensionBrowser({ dir: extensionDir, outDir, stagingDir });
+    const shutdown = () => {
+      stop();
+      process.exit(0);
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+    return;
   }
   if (process.argv.includes("--all")) {
     // Installed prebuilt packages have no authoring entry. Verify and preserve their assets.

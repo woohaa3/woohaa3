@@ -10,6 +10,7 @@ import {
   CANVAS_SCRIPT_LIMITS,
   CANVAS_SCRIPT_VERSIONS,
   DEFAULT_CANVAS_SCRIPT_VERSION,
+  SKILL_CONTINUATION_TOOLS,
   agentCanvasError,
   agentProtocolVersion,
   type AgentCanvasCapabilities
@@ -204,11 +205,14 @@ export const AGENT_CANVAS_GUIDE = `# Agent Canvas 指南
 export function buildCapabilities(deps: AgentAuthoringToolDeps): AgentCanvasCapabilities {
   const run = deps.runAvailability ?? { available: false, reason: "本部署未启用 MCP 节点执行" };
   const script = deps.scriptAvailability ?? { available: false, reason: "本部署未启用 Canvas 脚本能力" };
+  const continuation = deps.skillAvailability ?? { available: false, reason: "本部署未启用 Skill 步骤续接" };
+  const continuationAvailable = continuation.available && deps.skillClient !== undefined;
   const baseFlow = ["list_canvases", "get_canvas_capabilities", "get_canvas_graph"];
   const scriptFlow = script.available
     ? ["get_canvas_script_api", "validate_canvas_script", "submit_canvas_script"]
     : ["get_canvas_script_api"];
   const tail = run.available ? ["run_canvas_node", "get_canvas_run", "get_node_output"] : [];
+  const continuationFlow = continuationAvailable ? [...SKILL_CONTINUATION_TOOLS] : [];
   return {
     protocolVersion: agentProtocolVersion(),
     nodeKinds: AGENT_NODE_DESCRIPTORS.map((descriptor) => ({
@@ -225,10 +229,13 @@ export function buildCapabilities(deps: AgentAuthoringToolDeps): AgentCanvasCapa
     placementModes: ["absolute", "auto", "after", "before", "below"],
     limits: AGENT_CANVAS_LIMITS,
     // 批量写入统一走 Canvas Script；不可用时仅引导读取原因，不推荐 JSON 提交。
-    recommendedFlow: [...baseFlow, ...scriptFlow, ...tail],
+    recommendedFlow: [...baseFlow, ...scriptFlow, ...tail, ...continuationFlow],
     run: { available: run.available, ...(run.reason !== undefined ? { reason: run.reason } : {}) },
     // Agent 创建媒体节点前的真实模型可用性；不可用时不得创建伪造的图片/视频节点。
     models: deps.modelsAvailability ?? { available: false, reason: "任务模型目录未接入", items: [] },
+    continuation: continuationAvailable
+      ? { available: true, tools: [...SKILL_CONTINUATION_TOOLS], followLatest: true, maxWaitMs: 30_000 }
+      : { available: false, ...(continuation.reason !== undefined ? { reason: continuation.reason } : {}) },
     script: {
       available: script.available,
       ...(script.available

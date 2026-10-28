@@ -204,15 +204,16 @@ export async function probeDeclaredExports(host) {
  *   身份与声明一致，清单里每个文件存在且 sha256/大小一致。
  *
  * 返回 `{ ok, errors, warnings, extensionId, version, descriptor, packageJson, engines,
- * activation, requiresRestart }`；errors/warnings 是 `{ code, field?, message }`。
- * `requiresRestart`：声明了后端代码（backend / hostPlugin / metadata / publicRoutes）→ 受控重启生效（D8）。
+ * activation, requiresRestart, hotSwappable }`；errors/warnings 是 `{ code, field?, message }`。
+ * `requiresRestart`：声明了后端代码（backend / hostPlugin / metadata / publicRoutes）→ 提交后生效。
+ * `hotSwappable`：运行期能换版的后端形态（hostPlugin 且不声明站点 backend）；否则受控重启生效（D8）。
  */
 export async function preflightDirectory(dir, { managed = false, contracts = null } = {}) {
   const errors = [];
   const warnings = [];
   const fail = (code, message, field) => errors.push({ code, message, ...(field ? { field } : {}) });
   const root = path.resolve(dir);
-  const result = (extra = {}) => ({ ok: errors.length === 0, errors, warnings, extensionId: null, version: null, descriptor: null, packageJson: null, engines: null, permissions: null, activation: null, requiresRestart: false, ...extra });
+  const result = (extra = {}) => ({ ok: errors.length === 0, errors, warnings, extensionId: null, version: null, descriptor: null, packageJson: null, engines: null, permissions: null, activation: null, requiresRestart: false, hotSwappable: false, ...extra });
 
   let packageJson = null;
   try {
@@ -306,6 +307,8 @@ export async function preflightDirectory(dir, { managed = false, contracts = nul
   }
 
   const requiresRestart = Boolean(descriptor.backend || descriptor.hostPlugin || descriptor.metadata || (descriptor.publicRoutes?.length ?? 0) > 0);
+  // 站点 backend 工厂没有运行期换版入口；只有纯 hostPlugin 才能走扩展层的 add/swap。
+  const hotSwappable = Boolean(descriptor.hostPlugin) && descriptor.backend === undefined;
   return result({
     extensionId,
     version,
@@ -313,7 +316,8 @@ export async function preflightDirectory(dir, { managed = false, contracts = nul
     packageJson,
     engines: descriptor.engines ?? null,
     activation,
-    requiresRestart
+    requiresRestart,
+    hotSwappable
   });
 }
 

@@ -8,14 +8,17 @@ import { hiddenByCollapsedGroups } from "./group-presentation.js";
 
 function fixture() {
   const canvas = createEmptyWoohaa3ServerCanvas("groups");
+  // 嵌套 group 已不再合法（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）；
+  // 这里改用两个同级组，验证折叠呈现互不影响。
   canvas.document.nodes = [
     { id: "g", type: "group", position: { x: 100, y: 100 }, width: 600, height: 500 },
-    { id: "nested", type: "group", parentId: "g", position: { x: 40, y: 40 }, width: 300, height: 300 },
-    { id: "member", type: "text", parentId: "nested", position: { x: 40, y: 40 } },
-    { id: "external", type: "text", position: { x: 900, y: 100 } },
+    { id: "member", type: "text", parentId: "g", position: { x: 40, y: 40 } },
+    { id: "other", type: "group", position: { x: 800, y: 100 }, width: 400, height: 300 },
+    { id: "inner", type: "text", parentId: "other", position: { x: 40, y: 40 } },
+    { id: "external", type: "text", position: { x: 900, y: 700 } },
   ];
   canvas.document.edges = [{ id: "out", source: "member", target: "external", sourceHandle: null, targetHandle: null, data: {} }];
-  canvas.nodeData = { g: { title: "作品组" }, nested: {}, member: { prompt: "保留成员任务", taskStatus: "processing" } };
+  canvas.nodeData = { g: { title: "作品组" }, other: { title: "另一组" }, member: { prompt: "保留成员任务", taskStatus: "processing" } };
   return canvas;
 }
 
@@ -27,8 +30,8 @@ describe("group collapsed presentation", () => {
     const applied = applyCanvasCommands(canvas, [{ type: "nodeData.patch", nodeId: "g", value: { groupCollapsed: true } }]);
     if (!applied.ok) throw Error(applied.rejection.message);
     const collapsed = buildCanvasRenderScene({ canvas: applied.canvas, selection: { nodes: ["g", "member"] } });
-    // 无组根节点固定在最低绘制层，组按 id 排序（change: 2026-10-26-settle-group-boundaries-on-drop）。
-    expect(collapsed.nodes.map(node => node.id)).toEqual(["external", "g"]);
+    // 未归属节点固定在最低绘制层；组按结构底边锚点排序（other 底边 400 低于 g 的 600）。
+    expect(collapsed.nodes.map(node => node.id)).toEqual(["external", "other", "inner", "g"]);
     expect(collapsed.edges).toEqual([]);
     expect(collapsed.selection.nodes).toEqual(["g"]);
     const ofGroup = (nodes: typeof expanded.nodes) => nodes.find(node => node.id === "g")!;
@@ -44,14 +47,14 @@ describe("group collapsed presentation", () => {
     expect(JSON.stringify(canvas)).toBe(before);
   });
 
-  it("展开外层时保留内层自己的折叠状态", () => {
+  it("同级组的折叠状态互相独立", () => {
     const canvas = fixture();
     canvas.nodeData.g.groupCollapsed = true;
-    canvas.nodeData.nested.groupCollapsed = true;
-    expect([...hiddenByCollapsedGroups(canvas)].sort()).toEqual(["member", "nested"]);
+    canvas.nodeData.other.groupCollapsed = true;
+    expect([...hiddenByCollapsedGroups(canvas)].sort()).toEqual(["inner", "member"]);
     canvas.nodeData.g.groupCollapsed = false;
-    expect([...hiddenByCollapsedGroups(canvas)]).toEqual(["member"]);
-    expect(buildCanvasRenderScene({ canvas }).nodes.map(node => node.id)).toEqual(["external", "g", "nested"]);
+    expect([...hiddenByCollapsedGroups(canvas)]).toEqual(["inner"]);
+    expect(buildCanvasRenderScene({ canvas }).nodes.map(node => node.id)).toEqual(["external", "other", "g", "member"]);
   });
 
   it("折叠可撤销、重做；非法类型或非组写入整批拒绝", () => {
@@ -62,7 +65,7 @@ describe("group collapsed presentation", () => {
       const result = applyCanvasCommands(canvas, [{ type: "edit.apply", ...edit }]);
       if (!result.ok) throw Error(result.rejection.message);
       canvas = result.canvas;
-      expect(canvas.document.nodes).toHaveLength(4);
+      expect(canvas.document.nodes).toHaveLength(5);
     }
     expect(canvas.nodeData.g.groupCollapsed).toBe(true);
     for (const nodeId of ["g", "external"]) {

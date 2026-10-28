@@ -32,6 +32,7 @@ import { ExtensionLoadError, FALLBACK_ORDER, hasBrowserArtifact, resolveModuleFi
 import { isSafeModeEssential, suspendedRegistration } from "./extension-host-safe-mode.mjs";
 import { hostPluginOrigin, resolveIsolation, screenExtension } from "./extension-host-managed.mjs";
 import { createReleaseFacade } from "./extension-host-release.mjs";
+import { startDevReload } from "./extension-host-dev.mjs";
 // 分支未搬 `extension-release.mjs`（release 布局校验依赖部署模块）；这里直接用协议模块。
 import { loadExtensionContracts } from "./extension-release-protocol.mjs";
 
@@ -866,6 +867,26 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
   // 运行期发布目录与发布器（见 extension-host-release.mjs）。
   const release = await createReleaseFacade({ artifacts: browserArtifacts, repoRoot, contracts: resolvedContracts, logger });
 
+  // 开发者模式热重载（change: 2026-10-27-add-extension-dev-reload）：只在扫描到开发者目录时启动。
+  // 前端面用发布器重登记 artifact；后端面经 Manager 暴露的窄端口换 token（管理器未装配时为空）。
+  const devDirs = scan.devDirs ?? [];
+  /** 后端热切换端口：由扩展管理器装配时注册（管理器比宿主对象晚一步可用）。 */
+  let devSwap = null;
+  const devReload = devDirs.length === 0
+    ? null
+    : startDevReload({
+        devDirs,
+        publishBrowserRelease: (change) => release.members.publishBrowserRelease(change),
+        // 管理器是核心层插件，装配晚于本函数；端口按调用期取，取不到时由编排按「后端失败」处理。
+        swapBackend: async (extensionId, directory, { token, previousToken }) => {
+          const port = devSwap;
+          if (!port) throw new Error("宿主未装配扩展管理器，无法热切换后端产物");
+          await port.swapDev(extensionId, directory, token, previousToken);
+        },
+        log: (event) => logger({ ...event, channel: "dev-reload" }),
+        onReload: (event) => logger({ event: "dev-reload", ...event })
+      });
+
   // 目录控制只做安装/卸载（改名）；启用/停用走站点控制面，因此它不参与运行状态。
   // 改名写入必须落在配置声明的可写根内，否则管理员能把受版本控制的目录改走。
   const directoryControl = createExtensionDirectoryControl({
@@ -919,7 +940,23 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
      */
     createHostPlugins,
     /** 画布内容扩展（预览/历史帧端口）：由 `canvasContent` 声明驱动。 */
-    createCanvasContent
+    createCanvasContent,
+    /** 开发者登记目录（change: 2026-10-27-add-extension-dev-reload）；空数组表示未启用。 */
+    devDirs,
+    /**
+     * 注册后端热切换端口（扩展管理器在 `apply` 里调用）。
+     * 端口只需实现 `swapDev(extensionId, directory, token, previousToken)`。
+     */
+    /** 停止开发者模式监听（宿主关闭时调用；幂等）。 */
+    closeDevReload() {
+      devReload?.close();
+    },
+    registerDevSwapPort(port) {
+      devSwap = port;
+      return () => {
+        if (devSwap === port) devSwap = null;
+      };
+    }
   };
   // 发布相关成员（含 browserRelease getter）按属性描述符并入，getter 保持「每次取当前值」。
   Object.defineProperties(host, Object.getOwnPropertyDescriptors(release.members));

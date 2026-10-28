@@ -40,7 +40,10 @@ export {
   groupRunTone,
   BACKGROUND_KIND_LABELS,
   BACKGROUND_STATUS_LABELS,
-  TASK_STATE_LABELS
+  SKILL_STATE_LABELS,
+  TASK_STATE_LABELS,
+  skillStateActive,
+  skillStateTone
 } from "./rows.js";
 export type {
   ActivityRow,
@@ -48,12 +51,14 @@ export type {
   ActivityRowCapabilities,
   ActivityRowGroupCapabilities,
   ActivityRowKind,
+  ActivityRowSkillCapabilities,
   ActivityRowSource,
   ActivityRowTone
 } from "./rows.js";
 export { adaptTaskRow, defaultTaskTitle, taskRowKey } from "./adapt-task-row.js";
 export { adaptJobRow, isActiveBackgroundJob, jobRowKey } from "./adapt-job-row.js";
 export { adaptGroupRow, canRetryGroupRun, canStopGroupRun, groupRowKey } from "./adapt-group-row.js";
+export { adaptSkillRow, currentSkillAttempt, skillRowKey, skillStepActive, skillStepTitle } from "./adapt-skill-row.js";
 export { createTaskActivityEventBridge } from "./bridge.js";
 export type {
   TaskActivityBridgeOptions,

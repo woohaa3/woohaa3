@@ -34,7 +34,7 @@ describe("group badge independent resize",()=>{
     const group=f.scene().nodes.find(n=>n.id==="g")!;
     expect(group.group?.badgeScale).toBe(2);
     const badge=groupBadgeRect(group,group.group?.badgeScale);
-    expect(badge.center).toEqual({x:300,y:374});
+    expect(badge.center).toEqual({x:300,y:470});
     expect(badge.width/badge.height).toBe(88/64);
     expect(f.current().nodeData.g.groupBadgeScale).toBeUndefined();
     f.pointer("pointerup",44,32);
@@ -43,7 +43,7 @@ describe("group badge independent resize",()=>{
     expect(f.current().document.nodes).toEqual(nodes);
     expect(f.current().nodeData.g.groupCollapsed).toBeUndefined();
     expect(f.current().nodeData.g.groupAppearance).toBeUndefined();
-    expect(collectResidencyCandidates(f.current(),n=>`key:${n.id}`).find(c=>c.nodeId==="g")?.height).toBe(438);
+    expect(collectResidencyCandidates(f.current(),n=>`key:${n.id}`).find(c=>c.nodeId==="g")?.height).toBe(534);
     f.controller.dispose();
   });
 

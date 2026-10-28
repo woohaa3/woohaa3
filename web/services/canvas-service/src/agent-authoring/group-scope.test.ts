@@ -16,16 +16,17 @@ async function setup() {
   return { room, submit, canvas };
 }
 describe("group authority queue", () => {
-  it("runs nested scripts through the same authority scope and rejects root/outside bypasses", async () => {
+  it("runs scoped scripts through the same authority scope, rejects nested groups and root/outside bypasses", async () => {
     const { room, canvas } = await setup();
     const service = new CanvasScriptService({ resolveRoom: async () => room, authorizer: { authorize: async () => ({ allowed: true }) } });
     const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };
     const input = { principalId: "u", canvasId: canvas.id, version: "woohaa-canvas-js-v1" };
     const submit = (requestId: string, source: string) => withCanvasGroupScope(scope, () => service.submit({ ...input, requestId, source }));
-    const good = await submit("nested", `const a = canvas.node("image", {key:"image", placement:{mode:"absolute",position:{x:80,y:90}}}); const b = canvas.node("text",{key:"brief"}); canvas.group([a,b],{key:"nested",title:"Nested",layout:{mode:"grid",columns:2}}); canvas.connect(b,a,{key:"reference"});`);
+    const good = await submit("scoped", `const a = canvas.node("image", {key:"image", placement:{mode:"absolute",position:{x:80,y:90}}}); const b = canvas.node("text",{key:"brief"}); canvas.connect(b,a,{key:"reference"});`);
     expect(good.ok, JSON.stringify(good)).toBe(true);
     const revision = room.currentRevision;
     for (const [id, source] of [
+      ["nested", 'const a=canvas.node("image",{key:"n"}); const b=canvas.node("text",{key:"t"}); canvas.group([a,b],{key:"nested",title:"Nested"});'],
       ["outside", 'canvas.setPrompt(canvas.existing("outside"), "bad");'],
       ["delete-root", 'canvas.remove(canvas.existing("root"));'],
       ["ungroup-root", 'canvas.ungroup(canvas.existing("root"));'],

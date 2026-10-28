@@ -28,8 +28,17 @@ export type ExtensionRuntimePort = {
   /**
    * 把该扩展切到 `directory`（版本见 `version`）。失败时尽力装回 `previousDirectory`，
    * 并抛错交由 Manager 按失败处理。
+   *
+   * `version` / `previousVersion` 同时是模块身份（change: 2026-10-27-add-extension-dev-reload）：
+   * 受管扩展靠版本目录区分，开发者模式的产物始终在同一目录，则靠该值区分。
    */
-  swap(extensionId: string, directory: string, version: string, previousDirectory: string | null): Promise<{ swapped: boolean }>;
+  swap(
+    extensionId: string,
+    directory: string,
+    version: string,
+    previousDirectory: string | null,
+    previousVersion?: string | null
+  ): Promise<{ swapped: boolean }>;
   /** 卸载时把该扩展从扩展层撤下（幂等）。 */
   remove(extensionId: string): Promise<void>;
 };

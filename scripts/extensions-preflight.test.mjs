@@ -147,6 +147,7 @@ test("preflightDirectory：合法的纯前端受管扩展通过，requiresRestar
   assert.equal(result.version, "1.0.0");
   assert.equal(result.activation, "server-active");
   assert.equal(result.requiresRestart, false);
+  assert.equal(result.hotSwappable, false);
 });
 
 test("preflightDirectory：含后端声明 → requiresRestart=true；只解析模块路径，不执行代码", async () => {
@@ -161,7 +162,22 @@ test("preflightDirectory：含后端声明 → requiresRestart=true；只解析�
   const result = await preflightDirectory(dir, { managed: true });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
   assert.equal(result.requiresRestart, true);
+  assert.equal(result.hotSwappable, true);
   assert.equal(fs.existsSync(marker), false, "预检不得执行包内代码");
+});
+
+test("preflightDirectory：站点 backend 工厂 requiresRestart=true 但 hotSwappable=false", async () => {
+  const dir = managedTree({
+    pkg: { exports: { "./backend-dist/entry": "./backend-dist/entry.mjs" } },
+    descriptor: { backend: { module: "./backend-dist/entry", factory: "createDefinition" } },
+    files: {
+      "backend-dist/entry.mjs": "export function createDefinition() { return { extensionId: \"demo\", activate: () => ({ dispose() {} }) }; }\n"
+    }
+  });
+  const result = await preflightDirectory(dir, { managed: true });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.requiresRestart, true);
+  assert.equal(result.hotSwappable, false);
 });
 
 test("preflightDirectory：受管禁止项 bootstrap / canvasContent / 市场来源 / migrate / required / always", async () => {

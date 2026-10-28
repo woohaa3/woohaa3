@@ -61,13 +61,27 @@ pub(crate) fn model_anchor(
     placement: &ModelPlacement,
     unit: f32,
 ) -> Vec3 {
-    let size = 64.0;
     if node.group.is_some() {
         return group_anchor(node, model, placement, unit);
     }
     if node.composite_asset.is_some() {
         return film_set_anchor(node, model, placement, unit);
     }
+    let (cx, cy) = model_anchor_canvas(node, model, placement, unit);
+    // 3D 遮挡逐像素决定；`depth_order` 只提供打破共面平局的极小偏移（change:
+    // 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D3）；
+    // `placement.offset.z` 仍保留在协议与内容身份里，但不再决定前后遮挡。
+    canvas_world_position(cx, cy, root_depth(node))
+}
+
+/// 普通模型根锚点的画布坐标 `(cx, cy)`，不含观察深度。
+fn model_anchor_canvas(
+    node: &GraphNode,
+    model: &ModelSnapshot,
+    placement: &ModelPlacement,
+    unit: f32,
+) -> (f32, f32) {
+    let size = 64.0;
     let cx = node.x + node.width / 2.0 + placement.offset.x * size;
     // 模型顶部相对根锚点的世界高度（含层级/半径/单位缩放）。缺失时用既有固定偏移。
     // 卡片间距按屏幕投影后的顶部计算（等距相机看到的高度），根实体本身不带这层旋转。
@@ -77,7 +91,12 @@ pub(crate) fn model_anchor(
         .filter(|value| value.is_finite())
         .unwrap_or(74.0 - MODEL_CARD_GAP);
     let cy = node.y + node.height + MODEL_CARD_GAP + top - placement.offset.y * size;
-    canvas_world_position(cx, cy, placement.offset.z * size)
+    (cx, cy)
+}
+
+/// 根的观察深度：只含逐像素平局偏移，不做整对象厚度分离。
+fn root_depth(node: &GraphNode) -> f32 {
+    crate::depth_order::depth_of(&node.id)
 }
 
 /// The accepted presentation and the model use one layout, including eccentric model origins.
@@ -89,7 +108,7 @@ fn group_layout(node: &GraphNode, model: &ModelSnapshot, placement: &ModelPlacem
 }
 fn group_anchor(node: &GraphNode, model: &ModelSnapshot, placement: &ModelPlacement, _unit: f32) -> Vec3 {
     let layout = group_layout(node, model, placement);
-    canvas_world_position(layout.anchor.x, layout.anchor.y, placement.offset.z * 64.)
+    canvas_world_position(layout.anchor.x, layout.anchor.y, root_depth(node))
 }
 
 /// 片场模型适配节点矩形时四周保留的边距（世界单位）。
@@ -105,7 +124,7 @@ fn film_set_anchor(
     let layout_rotation = grid::view_rotation() * Quat::from_rotation_y(placement.yaw.to_radians());
     let bounds = layout_aabb(node, model, layout_rotation, unit);
     let (cx, cy) = film_set_anchor_canvas(node, bounds, placement);
-    canvas_world_position(cx, cy, placement.offset.z * 64.0)
+    canvas_world_position(cx, cy, root_depth(node))
 }
 
 /// 片场根锚点的画布坐标 `(cx, cy)`（y 向下）；索引/标题与渲染共用同一居中与偏移夹取公式。

@@ -21,6 +21,7 @@ import type {
   ServiceConnectionManagement,
   ServiceConnectionView
 } from "../../host/service-connection.js";
+import type { SkillMediaStepView, SkillStepUpdatedEvent } from "../../../canvas/agent-media-continuation.js";
 
 /** 会话操作结果：失败携带稳定错误码与可读原因。 */
 export type AgentConversationResult<T> =
@@ -159,4 +160,19 @@ export type AgentConversationService = AgentConversationView & {
   cancelTurn: (requestId: string) => Promise<AgentConversationResult<{ ok: true }>>;
   /** 由宿主领域链在 run/task 接受后显式关联（不从节点 active run 反推）。 */
   linkRun: (requestId: string, input: { runId?: string; taskId?: string }) => Promise<AgentConversationResult<{ turn: ConversationTurn }>>;
+  /** 按节点读取 Skill 步骤快照（无步骤时 step=null；轮询/刷新复用同一读入口）。 */
+  skillStep: (input: { canvasId: string; nodeId: string }) => Promise<AgentConversationResult<{ step: SkillMediaStepView | null }>>;
+  /** 画布内最近 Skill 步骤（活动面板投影；有界）。 */
+  skillSteps: (input: { canvasId: string; limit?: number }) => Promise<AgentConversationResult<{ steps: SkillMediaStepView[] }>>;
+  /** 按步骤身份读取快照 + 事件重放（面板打开/断线恢复）。 */
+  skillStepDetail: (input: { canvasId: string; skillRunId: string; stepId: string; after?: number }) => Promise<AgentConversationResult<{
+    step: SkillMediaStepView;
+    events: Array<SkillStepUpdatedEvent & { sequence: number }>;
+    cursor: number;
+    resetRequired: boolean;
+  }>>;
+  /** 用户停止：只请求取消当前尝试，不伪造已取消。 */
+  cancelSkillStep: (input: { canvasId: string; skillRunId: string; stepId: string }) => Promise<AgentConversationResult<{ step: SkillMediaStepView; state: "cancel-requested" | "already-terminal" }>>;
+  /** 用户改提示词并重新生成：创建递增 attempt，旧尝试保留可核对历史。 */
+  regenerateSkillStep: (input: { canvasId: string; skillRunId: string; stepId: string; requestId: string; prompt?: string; modelKey?: string; parameters?: Record<string, unknown> }) => Promise<AgentConversationResult<{ step: SkillMediaStepView; runId: string }>>;
 };

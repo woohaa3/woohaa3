@@ -1,10 +1,11 @@
 //! Continuous group surfaces behind 3D appearances, using the existing canvas camera.
 //! No overlay cutout, extra camera, offscreen preview or capture-layer geometry.
 //!
-//! Only groups that carry a model keep this 3D surface: they need the opaque badge plate and
-//! the model standing on it. Plain groups are filled by the per-group 2D panel in
-//! [`super::group::draw_group_panel`], so they must not also fill here (two stacked 55%
-//! layers would darken the panel and change the established color).
+//! Only groups that carry a model keep this 3D surface: it draws the speech-bubble tail behind
+//! the free-standing badge. Plain groups are filled by the per-group 2D panel in
+//! [`super::group::draw_group_panel`]. The 3D surface MUST NOT contain a badge plate or a
+//! translucent group fill: the 2D panel owns that 0.55 underlay for every group, while this
+//! layer only provides the small pointed tail behind the model.
 use std::collections::{HashMap, HashSet};
 
 use super::geometry::Geometry;
@@ -56,9 +57,12 @@ fn transform(node: &crate::protocol::GraphNode, depth: f32) -> Transform {
 fn mesh(node: &crate::protocol::GraphNode) -> Mesh {
     let origin = Vec2::new(node.x + node.width / 2., node.y + node.height / 2.);
     let mut geometry = Geometry::default();
-    for region in group_model::fill_regions(node) {
-        let relative: Vec<_> = region.iter().map(|point| *point - origin).collect();
-        geometry.polygon_alpha(&relative, 0., 0xffffff, super::group::GROUP_FILL_ALPHA);
+    // The badge itself has no plate. The tail is a small opaque shape on the 3D camera so
+    // the model stays in front of it while the 2D body panel remains behind the external badge.
+    let tail = group_model::tail_path(node);
+    if !tail.is_empty() {
+        let relative: Vec<_> = tail.iter().map(|point| *point - origin).collect();
+        geometry.polygon_alpha(&relative, 0., 0xffffff, 1.);
     }
     geometry.build()
 }
@@ -113,9 +117,10 @@ pub(crate) fn sync(
     if let Some(mut value) = materials.get_mut(&material) {
         value.base_color = color;
     }
-    let count = nodes.len();
-    for (index, node) in nodes.into_iter().enumerate() {
-        let depth = crate::isometric_grid::GRID_DEPTH / 2. + index as f32 / (count + 1) as f32;
+    for node in nodes {
+        // 气泡尾巴只退到自己组深度平面之后一个极小 ε：本组模型在它前面，与相邻根的遮挡
+        // 交给逐像素深度（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D4/D5）。
+        let depth = crate::depth_order::group_badge_depth(&node.id);
         let key = Key {
             rect: [node.x, node.y, node.width, node.height],
             depth,

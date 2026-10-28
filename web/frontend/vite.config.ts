@@ -65,7 +65,15 @@ async function mountServiceProxy(
     createIngress: (options: {
       targets: { canvas: string; task: string; media: string; mcp: string; application: string };
       basePath?: string;
-      logger: (event: { event: string; status?: number; code?: string }) => void;
+      logger: (event: {
+        event: string;
+        status?: number;
+        code?: string;
+        message?: string;
+        method?: string;
+        path?: string;
+        target?: string;
+      }) => void;
     }) => {
       handle: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
       upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
@@ -74,10 +82,17 @@ async function mountServiceProxy(
   const ingress = mod.createIngress({
     targets,
     basePath,
-    logger: (event) =>
-      logger.info(`[service-proxy] ${event.event}${event.status ? ` ${event.status}` : ""}`, {
+    // 502 必须能自证原因：只打事件名+状态码时，启动窗口的 ECONNREFUSED 与真故障无法区分。
+    logger: (event) => {
+      const detail = [
+        event.code ? `code=${event.code}` : "",
+        event.method && event.path ? `${event.method} ${event.path}` : (event.path ?? ""),
+        event.target ? `target=${event.target}` : ""
+      ].filter(Boolean).join(" ");
+      logger.info(`[service-proxy] ${event.event}${event.status ? ` ${event.status}` : ""}${detail ? ` ${detail}` : ""}`, {
         timestamp: true
-      })
+      });
+    }
   });
   if (server.httpServer) {
     server.httpServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {

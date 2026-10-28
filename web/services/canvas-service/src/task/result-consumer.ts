@@ -11,6 +11,10 @@
  * 重启后同一终态重投）按已投影处理。修复的真实缺陷：重启后补写的终态在 room 尚未就绪时投影
  * 一次就丢，画布节点永远停在 processing。
  *
+ * 终态失败：画布文档已不存在（`not-found`，画布被删而任务还在库里）重试永远不会成功，
+ * 由 projector 标成 `permanent`，这里直接推进水位并计入 `dropped`，只在汇总行里留样本——
+ * 否则每一轮退避都会把同一批任务重新打一遍 `task-projection-failed`。
+ *
  * 本模块不重新执行 provider，也不构造第二套 scheduler。
  */
 import {
@@ -36,7 +40,7 @@ export type TaskResultConsumerOptions = {
 
 export type TaskResultConsumer = {
   /** 拉取一次 history 并投影未处理的终态。 */
-  reconcileOnce: () => Promise<{ projected: number; duplicate: number; skipped: number; failed: number }>;
+  reconcileOnce: () => Promise<{ projected: number; duplicate: number; skipped: number; failed: number; dropped: number }>;
   start: () => void;
   stop: () => void;
 };
@@ -53,9 +57,11 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
   let running = false;
   /** projectionId → 待重试状态（失败次数、下次可试时刻、记录水位；成功后立即清除）。 */
   const retries = new Map<string, { attempts: number; dueAt: number; revision: number }>();
+  /** 已判定为终态失败的投影（画布已删除）：本进程内直接跳过，避免每轮重新投影、重复计数与刷日志。 */
+  const dropped = new Set<string>();
 
   const reconcileOnce = async () => {
-    if (running) return { projected: 0, duplicate: 0, skipped: 0, failed: 0 };
+    if (running) return { projected: 0, duplicate: 0, skipped: 0, failed: 0, dropped: 0 };
     running = true;
     try {
       // 从 cursor 起读取 history：这是重启补偿的事实源。
@@ -66,10 +72,14 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
         .map((item) => ({ item, record: toExecutionRecord(item) }))
         .filter((entry): entry is { item: TaskExecutionDetail; record: PptaskExecutionRecord } => entry.record !== null);
 
-      const summary = { projected: 0, duplicate: 0, skipped: 0, failed: 0 };
+      const summary = { projected: 0, duplicate: 0, skipped: 0, failed: 0, dropped: 0 };
+      // 逐条失败不再单独打一行：一轮 44 条会把日志刷没。汇总进 task-reconcile，带最多 3 条样本。
+      const failedSamples: Array<{ taskKey: string; canvasId: string; code: string; message: string }> = [];
+      const droppedSamples: Array<{ taskKey: string; canvasId: string; code: string }> = [];
       const now = Date.now();
       for (const { item, record } of pending) {
         const projectionId = projectionCommandId(record);
+        if (dropped.has(projectionId)) continue;
         const retry = retries.get(projectionId);
         // 退避未到期：本轮不试（水位仍停在它之前，到期后会再次读到）。
         if (retry && retry.dueAt > now) {
@@ -103,6 +113,17 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
               retries.delete(projectionId);
               break;
             }
+            // 画布文档已经不存在（画布被删、任务还留在库里）：重试永远不会成功，直接放弃并
+            // 推进水位；否则每一轮退避都会把同一批任务重新打一遍日志。
+            if (outcome.permanent) {
+              summary.dropped += 1;
+              retries.delete(projectionId);
+              dropped.add(projectionId);
+              if (droppedSamples.length < 3) {
+                droppedSamples.push({ taskKey: record.taskKey, canvasId: record.canvasId, code: outcome.code });
+              }
+              break;
+            }
             summary.failed += 1;
             const attempts = (retry?.attempts ?? 0) + 1;
             retries.set(projectionId, {
@@ -110,15 +131,10 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
               dueAt: now + Math.min(PROJECTION_RETRY_MAX_MS, PROJECTION_RETRY_BASE_MS * 2 ** (attempts - 1)),
               revision: item.recordRevision
             });
-            // 失败原因要可诊断：room 未装载 vs 媒体校验失败 vs 提交失败，处置完全不同。
-            options.logger?.({
-              event: "task-projection-failed",
-              taskKey: record.taskKey,
-              canvasId: record.canvasId,
-              code: outcome.code,
-              message: outcome.message,
-              attempts
-            });
+            // 逐条失败不单独打日志：一轮几十条会把日志刷没，汇总进 task-reconcile 的样本里。
+            if (failedSamples.length < 3) {
+              failedSamples.push({ taskKey: record.taskKey, canvasId: record.canvasId, code: outcome.code, message: outcome.message });
+            }
             break;
           }
         }
@@ -130,14 +146,20 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
         Number.POSITIVE_INFINITY
       );
       cursor = Number.isFinite(retryFloor) ? Math.min(nextCursor, Math.max(0, retryFloor - 1)) : nextCursor;
-      if (summary.projected > 0 || summary.failed > 0) {
-        options.logger?.({ event: "task-reconcile", count: pending.length, ...summary });
+      if (summary.projected > 0 || summary.failed > 0 || summary.dropped > 0) {
+        options.logger?.({
+          event: "task-reconcile",
+          count: pending.length,
+          ...summary,
+          ...(failedSamples.length > 0 ? { failedSamples } : {}),
+          ...(droppedSamples.length > 0 ? { droppedSamples } : {})
+        });
       }
       return summary;
     } catch (error) {
       options.logger?.({ event: "task-reconcile-failed" });
       void error;
-      return { projected: 0, duplicate: 0, skipped: 0, failed: 0 };
+      return { projected: 0, duplicate: 0, skipped: 0, failed: 0, dropped: 0 };
     } finally {
       running = false;
     }

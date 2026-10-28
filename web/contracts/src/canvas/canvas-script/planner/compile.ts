@@ -165,6 +165,19 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
         case "create_group": {
           const members = operation.members.map((r) => resolve(r, "members")),
             selected = geometry.roots(members, true);
+          // 不支持嵌套 group（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）：
+          // group 不能成为另一个 group 的成员，也不能在 group 内新建 group。命令层同样整批拒绝，
+          // 这里提前给出可诊断的计划错误，避免生成必然被拒绝的批次。
+          planAssert(
+            selected.every((n) => n.type !== "group"),
+            "invalid-parent",
+            "不支持嵌套 group：成员不能是 group，请先 ungroup 或直接纳入其成员",
+          );
+          planAssert(
+            !selected[0].parentId || geometry.require(selected[0].parentId).type !== "group",
+            "invalid-parent",
+            "不支持嵌套 group：不能在 group 内再创建 group",
+          );
           planAssert(
             operation.title.trim() && operation.title.length <= AGENT_CANVAS_LIMITS.titleMaxChars,
             "malformed-request",

@@ -118,7 +118,7 @@ pub(crate) fn sync(
     let mut geometry = Geometry::default();
     for node in nodes {
         // Same derived slot as the group panel and its member cards, so the travelling
-        // outline stays inside its own group's depth band.
+        // outline stays at its own group's z slot.
         let z = scene
             .0
             .nodes

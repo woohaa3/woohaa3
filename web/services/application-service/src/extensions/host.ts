@@ -223,6 +223,29 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
   };
 
     /**
+     * 公开映射的 HTTP / raw HTTP 路由不能自带扩展名前缀。
+     *
+     * 注册键由宿主拼 `<extensionId>/<route>`，而分派端拿的是 publicPath 之后的**相对**
+     * 子路径；自带前缀的注册永远查不到，对外只剩 404（2026-10 回归：local-agent /
+     * sdk-agent；game-furnace 也有两处）。这里只记诊断、不拒绝：预构建或第三方扩展
+     * 可能沿用旧写法，把「一条路由不可达」升级成「整个扩展起不来」不划算——硬门槛放在
+     * CI（web/tooling/extension-route-namespace.test.ts）。
+     *
+     * JSON handler 不走这条规则：它的公开 URL 原样携带声明的 route，前后一致。
+     */
+    const reportNamespacedRoute = (target: ExtensionRecord, route: string, kind: "http" | "raw-http"): void => {
+      const prefix = `${target.extensionId}/`;
+      if (!route.startsWith(prefix)) return;
+      log({
+        event: "extension-route-namespace-mismatch",
+        extensionId: target.extensionId,
+        kind,
+        route,
+        message: `路由自带扩展名前缀，分派端按相对 route 查不到；去掉 "${prefix}"`
+      });
+    };
+
+    /**
      * 按 owner 注册三类 handler。
      *
      * `activate` 与 `webServerFor` 共用同一份实现：通过 `ctx.webServer` 注册的路由
@@ -249,6 +272,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
         if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
           throw new ExtensionHostError("duplicate-handler", "HTTP handler route 必须是非空相对路由");
         }
+        reportNamespacedRoute(target, registration.route, "http");
         const route = keyOf(registration.route);
         const key = httpHandlerKey(registration.method, route);
         if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
@@ -261,6 +285,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
         if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
           throw new ExtensionHostError("duplicate-handler", "原始 HTTP handler route 必须是非空相对路由");
         }
+        reportNamespacedRoute(target, registration.route, "raw-http");
         const route = keyOf(registration.route);
         const key = httpHandlerKey(registration.method, route);
         if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {

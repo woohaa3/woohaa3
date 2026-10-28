@@ -194,21 +194,24 @@ mod tests {
                 width: 224.0,
                 height: 116.0,
                 body: String::new(),
-            title: String::new(),
-            type_label: String::new(),
+                title: String::new(),
+                type_label: String::new(),
                 progress: 0.0,
                 busy: false,
                 texture: false,
                 media_loading: false,
                 resizable: false,
                 ghost: false,
-            card_label: None,
+                card_label: None,
                 group: None,
                 model: Some(reference),
             }],
             ..Scene::default()
         };
-        assert_eq!(missing_model_descriptor(&scene).as_deref(), Some("v2:missing"));
+        assert_eq!(
+            missing_model_descriptor(&scene).as_deref(),
+            Some("v2:missing")
+        );
         // 只声明 descriptor 就足以让场景被接受：payload 未驻留是合法 cold。
         assert!(declare_model_descriptor_dto(light_descriptor("v2:missing", "missing")).is_ok());
         assert!(missing_model_descriptor(&scene).is_none());
@@ -264,7 +267,10 @@ mod tests {
             queue_model_asset(descriptor(&key, &format!("pressure-{index}"), 1.0));
         }
         set_model_payload_leases(std::collections::HashSet::new());
-        assert!(!model_asset_registered(protected), "场景引用不得阻止 payload 淘汰");
+        assert!(
+            !model_asset_registered(protected),
+            "场景引用不得阻止 payload 淘汰"
+        );
         // 但 descriptor 仍在，引用依然是合法 cold：场景不会因 payload 不在而拒绝整帧。
         assert!(model_descriptor_declared(protected));
         clear_model_assets();
@@ -285,19 +291,33 @@ mod tests {
                 "id": format!("object-{index}"), "type": "model",
                 "x": index as f32 * 260.0, "y": 0.0, "width": 248.0, "height": 232.0,
                 "model": { "resourceKey": key, "signature": signature }
-            })).unwrap();
+            }))
+            .unwrap();
             // Object containers and ordinary model cards share the same immutable resource table.
             if index >= 22 {
-                node.composite_asset = Some(serde_json::from_value(serde_json::json!({
-                    "x": 0.0, "y": 0.0, "width": 248.0, "height": 232.0
-                })).unwrap());
+                node.composite_asset = Some(
+                    serde_json::from_value(serde_json::json!({
+                        "x": 0.0, "y": 0.0, "width": 248.0, "height": 232.0
+                    }))
+                    .unwrap(),
+                );
             }
             nodes.push(node);
         }
-        let scene = Scene { nodes, ..Scene::default() };
-        assert!(missing_model_descriptor(&scene).is_none(), "first-frame registration must not evict models before scene acceptance");
+        let scene = Scene {
+            nodes,
+            ..Scene::default()
+        };
+        assert!(
+            missing_model_descriptor(&scene).is_none(),
+            "first-frame registration must not evict models before scene acceptance"
+        );
         queue_scene(scene.clone());
-        assert_eq!(model_assets_snapshot().len(), count, "first-frame registration with live leases keeps every payload");
+        assert_eq!(
+            model_assets_snapshot().len(),
+            count,
+            "first-frame registration with live leases keeps every payload"
+        );
         assert!(missing_model_descriptor(&scene).is_none());
 
         // 需求集合收敛后（lease 只留显式需求），未使用的 payload 才按预算回收；
@@ -335,15 +355,15 @@ mod tests {
                 width: 224.0,
                 height: 116.0,
                 body: String::new(),
-            title: String::new(),
-            type_label: String::new(),
+                title: String::new(),
+                type_label: String::new(),
                 progress: 0.0,
                 busy: false,
                 texture: false,
                 media_loading: false,
                 resizable: false,
                 ghost: false,
-            card_label: None,
+                card_label: None,
                 group: None,
                 model: Some(crate::protocol::ModelReference {
                     scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
@@ -357,7 +377,10 @@ mod tests {
         // 声明超出 descriptor 上限的条目：场景引用的 descriptor 不得被逐出。
         for index in 0..(MODEL_DESCRIPTOR_MAX_ENTRIES + 4) {
             let key = format!("v2:sig-{index}");
-            assert!(declare_model_descriptor_dto(light_descriptor(&key, &format!("sig-{index}"))).is_ok());
+            assert!(
+                declare_model_descriptor_dto(light_descriptor(&key, &format!("sig-{index}")))
+                    .is_ok()
+            );
         }
         assert!(
             model_descriptor_declared(protected),
@@ -383,18 +406,25 @@ mod tests {
             let key = format!("v2:cold-{index}");
             queue_model_asset(descriptor(&key, &format!("cold-{index}"), 1.0));
             // 每轮都撤销 cold 的临时 lease，只保留显式 lease。
-            set_model_payload_leases(
-                ["v2:leased".to_owned()].into_iter().collect(),
-            );
+            set_model_payload_leases(["v2:leased".to_owned()].into_iter().collect());
         }
         assert!(
             model_asset_registered("v2:leased"),
             "lease 内的 payload 不得被新到者或计数预算淘汰"
         );
         let stats = asset_registry_stats();
-        assert!(stats.payloads <= MODEL_ASSET_MAX_ENTRIES, "payload 表受条目上限约束");
-        assert!(stats.payload_evictions > 0, "无 lease 的 cold payload 应被淘汰");
-        assert!(stats.descriptors > stats.payloads, "descriptor 保留、payload 淘汰");
+        assert!(
+            stats.payloads <= MODEL_ASSET_MAX_ENTRIES,
+            "payload 表受条目上限约束"
+        );
+        assert!(
+            stats.payload_evictions > 0,
+            "无 lease 的 cold payload 应被淘汰"
+        );
+        assert!(
+            stats.descriptors > stats.payloads,
+            "descriptor 保留、payload 淘汰"
+        );
         // cold payload 的 descriptor 仍支持轻量引用与查询。
         assert!(model_descriptor_declared("v2:cold-0"));
         clear_model_assets();

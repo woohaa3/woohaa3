@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { TaskResultSummary } from "@woohaa3/contracts";
-import type { ActivityRow, ActivityRowActions } from "./rows.js";
+import { SKILL_STATE_LABELS, type ActivityRow, type ActivityRowActions } from "./rows.js";
 import { ACTIVITY_EXIT_DURATION_MS, type TaskActivityStore } from "./store.js";
 import {
   CollapsibleContent,
@@ -49,22 +49,27 @@ export function TaskActivityFeed({ store, resolveMediaUrl, onOpenHistory }: Task
   const total = rows.length;
 
   // 初始展开状态取决于启动时是否已有记录；后续新项由 effect 自动展开（SSR/静态渲染
-  // 不执行 effect，因此这里必须按首帧快照决定）。只有已结算的组记录不抢开面板。
+  // 不执行 effect，因此这里必须按首帧快照决定）。只有已结算的组/Skill 记录不抢开面板。
   const [expanded, setExpanded] = useState(() =>
-    store.getSnapshot().rows.some((row) => row.kind !== "group" || row.active)
+    store.getSnapshot().rows.some((row) => (row.kind !== "group" && row.kind !== "skill") || row.active)
   );
-  const previousRows = useRef({ count: rows.length, groupKeys: new Set(rows.filter((row) => row.kind === "group").map((row) => row.key)) });
+  const previousRows = useRef({
+    count: rows.length,
+    pollingKeys: new Set(rows.filter((row) => row.kind === "group" || row.kind === "skill").map((row) => row.key))
+  });
 
   // 有新项时自动展开；清空后收起。后台录制随画布加载自动开始，不因它的首条记录抢开面板。
   useEffect(() => {
     const tasks = rows.filter((row) => row.kind === "task").length;
     const previous = previousRows.current;
-    const newlyActiveGroup = rows.some((row) => row.kind === "group" && row.active && !previous.groupKeys.has(row.key));
-    if ((tasks > 0 && previous.count === 0) || newlyActiveGroup) setExpanded(true);
+    const newlyActivePolling = rows.some((row) =>
+      (row.kind === "group" || row.kind === "skill") && row.active && !previous.pollingKeys.has(row.key)
+    );
+    if ((tasks > 0 && previous.count === 0) || newlyActivePolling) setExpanded(true);
     if (rows.length === 0) setExpanded(false);
     previousRows.current = {
       count: rows.length,
-      groupKeys: new Set(rows.filter((row) => row.kind === "group").map((row) => row.key))
+      pollingKeys: new Set(rows.filter((row) => row.kind === "group" || row.kind === "skill").map((row) => row.key))
     };
   }, [rows]);
   useEffect(() => {
@@ -333,8 +338,8 @@ function ActivityListRow(props: {
             <span>{stateText}</span>
             <RowDetail row={row} resolveMediaUrl={resolveMediaUrl} />
             {row.detail || error ? <p>{error || row.detail}</p> : null}
-            {row.kind === "group" ? (
-              <GroupRunActionsPanel actions={actions} busy={busy} onActivate={(action) => void act(action)} />
+            {row.kind === "group" || row.kind === "skill" ? (
+              <RowActionsPanel kind={row.kind === "skill" ? "skill" : "group"} actions={actions} busy={busy} onActivate={(action) => void act(action)} />
             ) : null}
           </div>
         </Popover>
@@ -369,21 +374,55 @@ function RowDetail(props: { row: ActivityRow; resolveMediaUrl: (storageKey: stri
       return null;
     case "group":
       return null;
+    case "skill": {
+      /**
+       * 旧尝试核对入口（任务 5.2）：只有这里展开完整尝试历史，主行状态始终只取
+       * `currentAttempt`。提示词属于 owner 可见的历史快照（事件与 MCP 输出已 redact）。
+       */
+      const step = row.source.step;
+      return (
+        <div className="task-activity-feed__skill">
+          <span>
+            当前尝试 第 {step.currentAttempt} 次 · 提示词 r{step.promptRevision}
+          </span>
+          {step.latestSuccessfulRunId ? <span>最近成功 run：{step.latestSuccessfulRunId}</span> : null}
+          <ul className="task-activity-feed__skill-attempts">
+            {step.attempts.map((attempt) => (
+              <li
+                key={attempt.attempt}
+                data-state={attempt.state}
+                {...(attempt.attempt === step.currentAttempt ? { "data-current": true } : {})}
+              >
+                <span>
+                  第 {attempt.attempt} 次 · {SKILL_STATE_LABELS[attempt.state]}
+                  {attempt.superseded ? " · 已替代" : ""}
+                </span>
+                {attempt.modelKey ? <span>{attempt.modelKey}</span> : null}
+                {attempt.prompt ? <span>{truncate(attempt.prompt, 80)}</span> : null}
+                {attempt.supersededByRunId ? <span>由 {attempt.supersededByRunId} 替代</span> : null}
+                {attempt.error ? <span>{attempt.error}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+    }
   }
 }
 
-/** 组创作的动作集合：只由记录声明的动作决定，不再从组件 props 逐层透传。 */
-function GroupRunActionsPanel(props: {
+/** 组创作 / Skill 步骤的动作集合：只由记录声明的动作决定，不再从组件 props 逐层透传。 */
+function RowActionsPanel(props: {
+  kind: "group" | "skill";
   actions: ActivityRowActions;
   busy: string;
   onActivate: (action: "stop" | "retry" | "verify" | "openConversation") => void;
 }) {
-  const { actions, busy, onActivate } = props;
+  const { kind, actions, busy, onActivate } = props;
   const writable = actions.writable !== false;
   if (!actions.locate && !actions.stop && !actions.retry && !actions.verify && !actions.openConversation) return null;
   return (
     <div className="task-activity-feed__group-actions">
-      {actions.locate ? <Button size="sm" tone="ghost" onClick={() => actions.locate!()}>定位创作组</Button> : null}
+      {actions.locate ? <Button size="sm" tone="ghost" onClick={() => actions.locate!()}>{kind === "group" ? "定位创作组" : "定位节点"}</Button> : null}
       {actions.openConversation ? (
         <Button size="sm" tone="ghost" disabled={!!busy} onClick={() => onActivate("openConversation")}>
           {busy === "openConversation" ? "正在打开…" : "查看对话"}

@@ -33,8 +33,10 @@ export type PreflightResult = {
   extensionId?: string;
   version?: string;
   engines?: ExtensionEngines;
-  /** 声明了 backend / hostPlugin / metadata / publicRoutes：提交后需要受控重启（D8）。 */
+  /** 声明了 backend / hostPlugin / metadata / publicRoutes：提交后需要生效。 */
   requiresRestart?: boolean;
+  /** 后端是否能在运行期换版：纯 hostPlugin 为 true；站点 backend 工厂为 false（需重启）。 */
+  hotSwappable?: boolean;
   /** 扩展声明的依赖（extensionId → semver range）；缺省无依赖。 */
   dependencies?: Readonly<Record<string, string>>;
 };
@@ -51,6 +53,8 @@ export type InstallationRecord = {
   /** 含后端代码：观察期从下一次启动开始计时。 */
   observeAfterRestart?: boolean;
   requiresRestart?: boolean;
+  /** 后端是否能在运行期换版；缺省按旧记录兼容处理（见 manager-context / lifecycle）。 */
+  hotSwappable?: boolean;
   /** 本记录的变更需要受控重启后生效（下一次启动清除）。 */
   restartPending?: boolean;
   rejected?: string[];

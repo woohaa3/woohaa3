@@ -14,6 +14,7 @@ import {
 } from "@woohaa3/contracts";
 import { createCanvasService } from "@woohaa3/canvas-service";
 import type { CanvasMediaAssetSyncPort } from "@woohaa3/canvas-service";
+import { currentCanvasGroupScope } from "@woohaa3/canvas-service";
 import { createCanvasMediaBackfill } from "./canvas-media-backfill.js";
 import { createCanvasStorageOwnership, resolveCanvasOwnershipPath } from "./canvas-storage-ownership.js";
 import { createHostRecordingService } from "../../recording-executor/assembly.js";
@@ -195,6 +196,43 @@ export const canvasPlugin: HostPlugin<{
     };
 
     const canvas = await createCanvasService({
+      // Skill 媒体续接（change: 2026-10-28-add-agent-skill-media-regeneration）：
+      // begin 前用 Application ledger 复核当前 attempt；任务终态只回写该 attempt 的历史。
+      // application 在本插件之后装载，因此两处都在调用时懒取。
+      skillAttempts: () => {
+        const media = ctx.get("application")?.service.skillMedia();
+        if (!media) return undefined;
+        return {
+          assertCurrent: (input: {
+            owner?: string;
+            canvasId: string;
+            nodeId: string;
+            runId: string;
+            skill: import("@woohaa3/contracts").SkillMediaRunRef;
+          }) =>
+            media.assertCurrent({
+              owner: input.owner ?? currentCanvasGroupScope()?.owner ?? env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL ?? "",
+              canvasId: input.canvasId,
+              nodeId: input.nodeId,
+              runId: input.runId,
+              skill: input.skill
+            })
+        };
+      },
+      onRunSettled: (record: import("@woohaa3/canvas-service").PptaskExecutionRecord) => {
+        const media = ctx.get("application")?.service.skillMedia();
+        if (!media) return;
+        media.settleFromRun({
+          canvasId: record.canvasId,
+          nodeId: record.nodeId,
+          runId: record.runId,
+          jobId: record.jobId,
+          state: record.status,
+          ...(record.output?.mediaKind ? { mediaKind: record.output.mediaKind } : {}),
+          ...(record.error ? { error: record.error } : {}),
+          terminalAt: record.terminalAt
+        });
+      },
       assistantTextRuns: {
         run: (input: Parameters<import("@woohaa3/contracts").AssistantTextRunGateway["run"]>[0]) => ctx.get("application")!.service.assistantTextRuns().run(input),
         status: (input: Parameters<import("@woohaa3/contracts").AssistantTextRunGateway["status"]>[0]) => ctx.get("application")!.service.assistantTextRuns().status(input),

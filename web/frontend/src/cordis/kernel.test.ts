@@ -199,3 +199,123 @@ describe("startFrontendScope disabled diagnostics（change: add-frontend-plugin-
     await runtime.dispose();
   });
 });
+
+
+describe("实例级重装（change: 2026-10-27-add-extension-dev-reload）", () => {
+  it("required 扩展重装：替换代码、保留 scope 服务、可重复触发", async () => {
+    const applied: string[] = [];
+    const disposed: string[] = [];
+    const versions = ["v1", "v2", "v3"];
+    let index = 1;
+    const makePlugin = (version: string) =>
+      definePlugin(
+        (ctx: CordisContext) => {
+          applied.push(version);
+          ctx.effect(() => () => disposed.push(version));
+        },
+        { name: `p-${version}`, inject: ["fakeA"] }
+      );
+
+    const runtime = await startFrontendScope(new Context(), {
+      install: installFakePlatform,
+      plugins: [
+        {
+          id: "hot",
+          required: true,
+          plugin: makePlugin(versions[0]!),
+          resolvePlugin: async () => makePlugin(versions[index++]!)
+        }
+      ]
+    });
+
+    expect(applied).toEqual(["v1"]);
+    const platformService = runtime.ctx.get("fakeA" as never);
+
+    await runtime.reloadExtension!("hot");
+    expect(applied).toEqual(["v1", "v2"]);
+    expect(disposed).toEqual(["v1"]);
+    // scope 服务实例不变：没有重建 scope。
+    expect(runtime.ctx.get("fakeA" as never)).toBe(platformService);
+    expect(runtime.status().plugins.find((plugin) => plugin.id === "hot")?.status).toBe("active");
+
+    await runtime.reloadExtension!("hot");
+    expect(applied).toEqual(["v1", "v2", "v3"]);
+    await runtime.dispose();
+  });
+
+  it("未装配的 id 返回 not-mounted，且不因此装配", async () => {
+    const applied: string[] = [];
+    const runtime = await startFrontendScope(new Context(), {
+      install: installFakePlatform,
+      plugins: [
+        {
+          id: "optional-hot",
+          required: false,
+          plugin: definePlugin(
+            (ctx: CordisContext) => {
+              applied.push("mounted");
+              ctx.effect(() => () => undefined);
+            },
+            { name: "optional-hot", inject: ["fakeA"] }
+          )
+        }
+      ]
+    });
+
+    expect(await runtime.reloadExtension!("missing")).toBe("not-mounted");
+    expect(applied).toEqual(["mounted"]);
+    expect(runtime.plugins!.ids()).toEqual(["optional-hot"]);
+    await runtime.dispose();
+  });
+
+  it("重装失败保留上一次成功的装配", async () => {
+    let fail = false;
+    const runtime = await startFrontendScope(new Context(), {
+      install: installFakePlatform,
+      plugins: [
+        {
+          id: "flaky",
+          required: true,
+          plugin: definePlugin(() => undefined, { name: "flaky-v1", inject: ["fakeA"] }),
+          resolvePlugin: async () => {
+            if (fail) throw new Error("产物解析失败");
+            return definePlugin(() => undefined, { name: "flaky-v2", inject: ["fakeA"] });
+          }
+        }
+      ]
+    });
+
+    fail = true;
+    await expect(runtime.reloadExtension!("flaky")).rejects.toThrow("产物解析失败");
+    // 旧实例仍在运行，扩展仍是 active。
+    expect(runtime.status().plugins.find((plugin) => plugin.id === "flaky")?.status).toBe("active");
+
+    fail = false;
+    expect(await runtime.reloadExtension!("flaky")).toBe("reloaded");
+    await runtime.dispose();
+  });
+
+  it("重装与启停无关：停用后不再重装，启用后按其自身代码装配", async () => {
+    const runtime = await startFrontendScope(new Context(), {
+      install: installFakePlatform,
+      plugins: [
+        {
+          id: "optional-swap",
+          required: false,
+          plugin: definePlugin(() => undefined, { name: "optional-swap", inject: ["fakeA"] }),
+          resolvePlugin: async () => definePlugin(() => undefined, { name: "optional-swap-v2", inject: ["fakeA"] })
+        }
+      ]
+    });
+
+    await runtime.plugins!.disable("optional-swap");
+    expect(await runtime.reloadExtension!("optional-swap")).toBe("not-mounted");
+    await runtime.plugins!.enable({
+      id: "optional-swap",
+      required: false,
+      plugin: definePlugin(() => undefined, { name: "optional-swap", inject: ["fakeA"] })
+    });
+    expect(await runtime.reloadExtension!("optional-swap")).toBe("reloaded");
+    await runtime.dispose();
+  });
+});

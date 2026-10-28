@@ -1,59 +1,32 @@
-//! 共享 mesh 的绘制顺序（change: fix-group-and-marquee-preview）。
+//! 共享 mesh 的绘制顺序（change: fix-group-and-marquee-preview；
+//! change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D2）。
 //!
-//! 共享 mesh 没有深度测试，三角形的覆盖顺序**就是**提交顺序；而文档顺序不保证父级先于
-//! 子级——打组会把 group 追加到文档末尾。若按文档顺序画，group 的半透明底与选中态会盖在
-//! 成员卡片之上，表现为「打完组/选中组后节点边界看不见」。这里把group 统一排到前面。
+//! 共享 mesh 没有深度测试，三角形的覆盖顺序**就是**提交顺序。Web 投影已把节点排成
+//! 「未归属层 → 每个容器及其成员闭包」的发射序列：容器先于自己的成员，成员之上再叠后一个
+//! 容器。本模块不再假设文档顺序或 group/card 两段分区，只保留两条稳定规则：
+//!
+//! 1. 非 ghost 节点按发射顺序递增；
+//! 2. ghost 虽在投影末尾追加，仍固定在最低层（相对顺序不变），不因后加而盖住组面板。
 //!
 //! 抽出独立模块的理由：`render.rs` 已接近文件体积上限（`tests/file_size.rs` 守卫）。
 
 use crate::protocol::GraphNode;
 
-/// 返回绘制顺序：group 容器先于普通卡片。
-///
-/// 组内/组间各自的相对顺序保持文档顺序不变。
-#[cfg(test)]
-pub(crate) fn group_first_order(nodes: &[GraphNode]) -> Vec<usize> {
-    let (groups, cards): (Vec<usize>, Vec<usize>) =
-        (0..nodes.len()).partition(|index| nodes[*index].group.is_some());
-    groups.into_iter().chain(cards).collect()
-}
-
 /// Return the derived render slot used by every 2D node primitive.
 ///
-/// The Web projection normally emits ungrouped roots first, then each group
-/// followed by its descendants. Ghost nodes are appended after that sequence,
-/// however, and must still remain in the lowest layer. Keeping this policy in
-/// one helper prevents a late ghost (or a malformed frame with mixed roots)
-/// from receiving a higher z than a group panel.
+/// The Web projection owns the container/member order. Ghost nodes are appended
+/// after that sequence, however, and must still remain in the lowest layer.
+/// Keeping this policy in one helper prevents a late ghost (or a malformed frame
+/// with mixed roots) from receiving a higher z than a group panel.
 pub(crate) fn render_index(nodes: &[GraphNode], index: usize) -> usize {
     if index >= nodes.len() {
         return index;
     }
-    let first_group = nodes
-        .iter()
-        .position(|node| node.group.is_some())
-        .unwrap_or(nodes.len());
-    let is_low_layer = |position: usize, node: &GraphNode| position < first_group || node.ghost;
-    let low_count = nodes
-        .iter()
-        .enumerate()
-        .filter(|(position, node)| is_low_layer(*position, node))
-        .count();
-    if is_low_layer(index, &nodes[index]) {
-        nodes[..=index]
-            .iter()
-            .enumerate()
-            .filter(|(position, node)| is_low_layer(*position, node))
-            .count()
-            - 1
-    } else {
-        low_count
-            + nodes[..index]
-                .iter()
-                .enumerate()
-                .filter(|(position, node)| !is_low_layer(*position, node))
-                .count()
+    if nodes[index].ghost {
+        return nodes[..=index].iter().filter(|node| node.ghost).count() - 1;
     }
+    let ghost_count = nodes.iter().filter(|node| node.ghost).count();
+    ghost_count + nodes[..index].iter().filter(|node| !node.ghost).count()
 }
 
 /// Convert a derived slot to the actual canvas world z.
@@ -115,61 +88,46 @@ mod tests {
         }
     }
 
-    /// 文档顺序把 group 放在成员之后（打组的真实顺序），绘制顺序必须把容器提前。
-    #[test]
-    fn container_drawn_before_its_members() {
-        let nodes = vec![
-            graph_node("a", false),
-            graph_node("b", false),
-            graph_node("g", true),
-        ];
-        assert_eq!(group_first_order(&nodes), vec![2, 0, 1]);
+    fn slots(nodes: &[GraphNode]) -> Vec<usize> {
+        (0..nodes.len())
+            .map(|index| render_index(nodes, index))
+            .collect()
     }
 
-    /// 普通节点之间的相对顺序保持不变（后绘制的仍在后，覆盖语义不回归）。
+    /// 投影已保证「未归属根 → 容器 → 成员」；帮助器不得再按 group 分区重排。
     #[test]
-    fn card_order_is_preserved() {
+    fn emission_order_is_the_render_order() {
         let nodes = vec![
-            graph_node("a", false),
-            graph_node("b", false),
-            graph_node("c", false),
+            graph_node("root", false),
+            graph_node("g", true),
+            graph_node("member", false),
+            graph_node("h", true),
+            graph_node("member2", false),
         ];
-        assert_eq!(group_first_order(&nodes), vec![0, 1, 2]);
+        assert_eq!(slots(&nodes), vec![0, 1, 2, 3, 4]);
     }
 
     #[test]
     fn late_ghost_stays_below_group_phase() {
-        let mut group = graph_node("g", true);
-        group.ghost = false;
         let mut ghost = graph_node("ghost", false);
         ghost.ghost = true;
         let nodes = vec![
             graph_node("root", false),
-            group,
+            graph_node("g", true),
             graph_node("member", false),
             ghost,
         ];
-        assert_eq!(
-            (0..nodes.len())
-                .map(|index| render_index(&nodes, index))
-                .collect::<Vec<_>>(),
-            vec![0, 2, 3, 1]
-        );
+        assert_eq!(slots(&nodes), vec![1, 2, 3, 0]);
     }
 
     #[test]
-    fn no_group_keeps_document_order() {
+    fn no_group_keeps_emission_order() {
         let nodes = vec![
             graph_node("a", false),
             graph_node("b", false),
             graph_node("c", false),
         ];
-        assert_eq!(
-            (0..nodes.len())
-                .map(|index| render_index(&nodes, index))
-                .collect::<Vec<_>>(),
-            vec![0, 1, 2]
-        );
+        assert_eq!(slots(&nodes), vec![0, 1, 2]);
     }
 
     /// Bevy 的 2D 深度方向：`OrthographicProjection::default_2d` 交换 near/far，
@@ -179,13 +137,11 @@ mod tests {
     /// `10.0 - slot * 0.1`，组面板会掉到无组节点之后，重现「背板盖不住底部节点」。
     #[test]
     fn later_slots_render_in_front() {
-        let mut group = graph_node("g", true);
-        group.ghost = false;
         let mut ghost = graph_node("ghost", false);
         ghost.ghost = true;
         let nodes = vec![
             graph_node("root", false),
-            group,
+            graph_node("g", true),
             graph_node("member", false),
             ghost,
         ];
@@ -194,11 +150,20 @@ mod tests {
         let member_z = render_z(&nodes, 2);
         let ghost_z = render_z(&nodes, 3);
         // 无组（含末尾幽灵）在最低层，组面板高于它，组成员高于自己的面板。
-        assert!(root_z < group_z, "ungrouped root must render behind the group panel");
-        assert!(ghost_z < group_z, "late ghost must still render behind the group panel");
-        assert!(member_z > group_z, "group member must render in front of its panel");
+        assert!(
+            root_z < group_z,
+            "ungrouped root must render behind the group panel"
+        );
+        assert!(
+            ghost_z < group_z,
+            "late ghost must still render behind the group panel"
+        );
+        assert!(
+            member_z > group_z,
+            "group member must render in front of its panel"
+        );
         // 与既有卡片公式同一量纲，避免组面板越过操作条/框选等覆盖层。
-        assert!((root_z - 10.0).abs() < f32::EPSILON);
+        assert!(root_z >= 10.0 && ghost_z >= 10.0);
         assert!(render_z(&nodes, 2) < 10.0 + nodes.len() as f32 * 0.1 + 1.5);
     }
 }

@@ -41,6 +41,7 @@ export * from "./canvas/agent-canvas-protocol.js";
 export * from "./canvas/agent-canvas-projection.js";
 export * from "./canvas/agent-canvas-internal.js";
 export * from "./canvas/agent-canvas-run.js";
+export * from "./canvas/agent-media-continuation.js";
 export * from "./canvas/canvas-script/index.js";
 export * from "./canvas/domain/index.js";
 export * from "./canvas/model-script.js";
@@ -143,5 +144,6 @@ export * from "./canvas/builtin-node-capabilities.js";
 export * from "./canvas/media-content.js";
 export * from "./canvas/group-presentation.js";
 export * from "./canvas/group-badge.js";
+export * from "./canvas/ground-anchor.js";
 
 export type { MediaFormatValidator, MediaFormatRegistry } from "./extension/services/host/media-formats.js";

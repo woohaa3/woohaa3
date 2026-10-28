@@ -28,6 +28,13 @@ export type ReleaseChangedPayload = {
 
 export type ExtensionReleaseAdoptionOptions = {
   runtime: Pick<ExtensionRuntimeService, "adoptRelease" | "entry" | "loadDescriptor" | "staleExtensionIds">;
+  /**
+   * 实例级重装入口（change: 2026-10-27-add-extension-dev-reload，D1）。
+   *
+   * 提供时，`upgraded` 条目会尝试原地重装，而不是只提示重开画布——这正是开发者模式要的语义。
+   * 不提供时保持既有行为（升级只记 `pendingReopen`）。
+   */
+  reloadExtension?: (extensionId: string) => Promise<unknown>;
   registry: ApplicationExtensionFrontendEntryRegistry;
   /** 新增 server-active 入口登记后，按最新服务端状态 reconcile。 */
   reconcile: () => void;
@@ -71,6 +78,21 @@ export function createExtensionReleaseAdoption(options: ExtensionReleaseAdoption
       );
     }
     options.reconcile();
+
+    // 升级条目：有重装入口就原地重装（开发者模式），否则保持「重开画布才生效」。
+    const reloaded: string[] = [];
+    if (options.reloadExtension) {
+      for (const extensionId of delta.upgraded) {
+        try {
+          await options.reloadExtension(extensionId);
+          reloaded.push(extensionId);
+        } catch (error) {
+          // 重装失败保留旧实例：它仍是「待重开」，不把失败说成已生效。
+          log({ event: "extension-reload-failed", extensionId, message: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }
+
     options.emit({
       releaseId: pointer.releaseId,
       href: pointer.href,

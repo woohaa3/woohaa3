@@ -52,7 +52,7 @@ function harness(options: { rawResult?: Record<string, unknown>; urlError?: Erro
   const historyUpserts: Array<Record<string, unknown>> = [];
   const mediaClient = {
     async verify() {
-      return { exists: true, matches: true };
+      return { exists: true, matches: true, metadata: metadataFor(IMAGE_KEY, "image") };
     },
     async sign() {
       return "https://cos.example/signed";
@@ -122,6 +122,26 @@ describe("URL 转存失败后的字节回退", () => {
     expect(logs.map((event) => event.event)).toEqual(
       expect.arrayContaining(["media-output-imported-from-store"])
     );
+  });
+
+  it("记录里已是稳定媒体引用（落库前已归档）→ verify-and-adopt，不再 importBytes", async () => {
+    const { runtime, imports, historyUpserts, association } = harness({
+      rawResult: {
+        media: { storageKey: IMAGE_KEY, contentType: "image/png", size: 10, checksum: "a".repeat(64) }
+      }
+    });
+    await materializeBinaryResult(runtime, record(), association, {
+      kind: "url",
+      url: "https://provider.example/out.png",
+      modelType: "image"
+    });
+
+    // 只有 URL 那次尝试：字节已归档成引用，不应该再从 SQLite 读回来 import 一遍。
+    expect(imports.map((call) => call.kind)).toEqual(["url"]);
+    expect(historyUpserts.at(-1)).toMatchObject({
+      state: "succeeded",
+      result: { mediaKind: "image", storageKey: IMAGE_KEY }
+    });
   });
 
   it("音频：URL 失败但记录里有 audios 字节 → 用 importBytes 写 succeeded", async () => {

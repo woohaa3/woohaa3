@@ -32,6 +32,12 @@ export type AgentRunView = {
   stale: boolean;
   /** 安全终态错误（不包含堆栈、本机路径或 provider 凭据）。 */
   error?: string;
+  /**
+   * 可选 Skill 步骤关联（change: 2026-10-28-add-agent-skill-media-regeneration，任务 1.2）。
+   *
+   * 只是应用层 ledger 身份的向后兼容附加字段；旧客户端忽略，不改变 run 身份与语义。
+   */
+  skill?: import("./agent-media-continuation.js").SkillMediaRunRef & { current: boolean; superseded: boolean };
 };
 
 /** 文本输出（有界）。 */
@@ -86,4 +92,6 @@ export type AgentRunInput = {
   modelKey?: string;
   prompt?: string;
   parameters?: Record<string, unknown>;
+  /** 可选 Skill 步骤关联；宿主在受理时校验当前 attempt（任务 3.1）。 */
+  skill?: import("./agent-media-continuation.js").SkillMediaRunRef;
 };

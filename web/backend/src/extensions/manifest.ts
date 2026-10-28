@@ -112,6 +112,18 @@ export type LoadedExtensionHost = {
    * `/extensions/<id>/<artifactId>/...`；返回 `true` 表示已写响应。
    */
   handleReleaseRequest?: (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => boolean;
+  /**
+   * 开发者登记目录（change: 2026-10-27-add-extension-dev-reload）；缺省/空数组表示未启用开发者模式。
+   * 宿主据此启动产物监听。
+   */
+  devDirs?: readonly string[];
+  /**
+   * 注册后端热切换端口：扩展管理器装配后才能提供，宿主在启动 dev 监听后按调用期取用。
+   * 返回退订函数。
+   */
+  registerDevSwapPort?: (port: {
+    swapDev(extensionId: string, directory: string, token: string, previousToken: string | null): Promise<void>;
+  }) => () => void;
 };
 
 export type BackendExtensionManifest = {

@@ -47,6 +47,7 @@ mod node_action;
 mod render;
 mod render_edges;
 mod ownership_links;
+pub(crate) mod selection_outline;
 mod shared_key;
 pub(crate) mod scope_panel;
 pub(crate) mod text_presentation;

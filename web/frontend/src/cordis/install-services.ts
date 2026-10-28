@@ -446,7 +446,15 @@ export async function installCanvasPageServices(
   for (const entry of options.serverActiveEntries ?? []) {
     entryRegistry.register(entry);
   }
-  const reconciler = createPageExtensionReconciler(ctx, { registry: entryRegistry, status: applicationExtensionStatus, runtime: options.extensionRuntime, logger: options.logger });
+  const reconciler = createPageExtensionReconciler(ctx, {
+    registry: entryRegistry,
+    status: applicationExtensionStatus,
+    runtime: options.extensionRuntime,
+    logger: options.logger,
+    // scope 启动完成后由 composition root 写入（change: 2026-10-27-add-extension-dev-reload）：
+    // 这里只为「发布指针变化」与「实例级重装」之间建立一条惰性链路。
+    reloadExtension: () => ctx.get("extensionReload" as never) as ((extensionId: string) => Promise<unknown>) | undefined
+  });
   // 记录 page startup 上报的加载诊断（含 optional 失败）。
   for (const diagnostic of options.loadDiagnostics ?? []) {
     options.extensionRuntime?.report(diagnostic);

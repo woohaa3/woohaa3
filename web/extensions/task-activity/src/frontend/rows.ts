@@ -14,11 +14,11 @@
  * 面板自身只认 `active` 与 `key`：`key` 是稳定身份（`task:<runId>` / `job:<id>` /
  * `group:<requestId>`），`exitingKeys` 也以它为键（design D3）。
  */
-import type { BackgroundActivityJob, CanvasTaskActivity } from "@woohaa3/contracts";
+import type { BackgroundActivityJob, CanvasTaskActivity, SkillMediaStepView } from "@woohaa3/contracts";
 import type { CanvasGroupRun } from "@woohaa3/frontend/extension-api";
 import type { ActivityFeedItem, BackgroundFeedJob } from "./store.js";
 
-export type ActivityRowKind = "task" | "job" | "group";
+export type ActivityRowKind = "task" | "job" | "group" | "skill";
 
 /** 状态语义色，仅用于行内状态灯与状态文案，不承载来源判别。 */
 export type ActivityRowTone = "active" | "success" | "danger" | "muted";
@@ -27,7 +27,8 @@ export type ActivityRowTone = "active" | "success" | "danger" | "muted";
 export type ActivityRowSource =
   | { kind: "task"; item: ActivityFeedItem }
   | { kind: "job"; job: BackgroundFeedJob }
-  | { kind: "group"; run: CanvasGroupRun };
+  | { kind: "group"; run: CanvasGroupRun }
+  | { kind: "skill"; step: SkillMediaStepView };
 
 /**
  * 记录声明的可用动作。字段存在即表示该动作可用，因此 renderer 不需要按来源分支。
@@ -94,6 +95,19 @@ export type ActivityRowCapabilities = {
   /** 主/次行文案解析；缺省按 modelKey 兜底。 */
   resolveTaskDisplay?: (item: ActivityFeedItem) => { primary: string; secondary: string };
   group?: ActivityRowGroupCapabilities;
+  /** Skill 媒体步骤（change: 2026-10-28-add-agent-skill-media-regeneration，任务 5.2）。 */
+  skill?: ActivityRowSkillCapabilities;
+};
+
+/**
+ * Skill 步骤投影能力。
+ *
+ * `refresh` 是「核对状态」入口：按步骤身份重读权威快照与事件重放，成功后把新快照交回
+ * store（`applySkillStep`），用于断线恢复后确认旧尝试的真实终态。它只读，不重新提交生成。
+ */
+export type ActivityRowSkillCapabilities = {
+  refresh?: (step: SkillMediaStepView) => Promise<void>;
+  resolveTitle?: (nodeId: string) => string;
 };
 
 export type ActivityRowGroupCapabilities = {
@@ -159,6 +173,29 @@ export function groupRunTone(status: string): ActivityRowTone {
 
 /** 组记录仍可停止的运行状态（宿主侧语义）。 */
 export const GROUP_STOPPABLE_STATUSES = ["queued", "running", "committing", "unknown"] as const;
+
+/** Skill 尝试状态文案（活动面板；`superseded` 是宿主语义，不等于 Provider 已取消）。 */
+export const SKILL_STATE_LABELS: Record<SkillMediaStepView["attempts"][number]["state"], string> = {
+  queued: "排队中",
+  running: "生成中",
+  "cancel-requested": "取消中",
+  cancelled: "已取消",
+  superseded: "已替代",
+  succeeded: "已完成",
+  failed: "失败",
+  unknown: "待核对"
+};
+
+export function skillStateTone(state: SkillMediaStepView["attempts"][number]["state"]): ActivityRowTone {
+  if (state === "succeeded") return "success";
+  if (state === "failed" || state === "unknown") return "danger";
+  if (state === "cancelled" || state === "superseded") return "muted";
+  return "active";
+}
+
+export function skillStateActive(state: SkillMediaStepView["attempts"][number]["state"]): boolean {
+  return state === "queued" || state === "running" || state === "cancel-requested";
+}
 
 /** 进度只在进行中显示，并按 0..1 夹紧；缺失时保留 undefined（不伪造百分比）。 */
 export function clampProgress(progress: number | undefined): number | undefined {

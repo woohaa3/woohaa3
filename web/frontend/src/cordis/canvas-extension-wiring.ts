@@ -29,6 +29,11 @@ export function createPageExtensionReconciler(
     status: ApplicationExtensionStatusService;
     runtime?: ExtensionRuntimeService | undefined;
     logger?: ((event: Record<string, unknown>) => void) | undefined;
+    /**
+     * 实例级重装入口（change: 2026-10-27-add-extension-dev-reload）。
+     * 惰性取值：reconciler 建于 scope 启动早期，scope runtime 此时还不存在。
+     */
+    reloadExtension?: (() => ((extensionId: string) => Promise<unknown>) | undefined) | undefined;
   }
 ): ApplicationExtensionEntryReconciler {
   const reconciler = createApplicationExtensionEntryReconciler({ registry: input.registry, ctx, logger: input.logger });
@@ -38,6 +43,15 @@ export function createPageExtensionReconciler(
     registry: input.registry,
     reconcile: () => reconciler.reconcile(input.status.getSnapshot().plugins),
     emit: (payload) => ctx.emit("extension.release.changed", payload),
+    // 有重装入口时升级条目原地生效；取不到时保持「重开画布才生效」。
+    ...(input.reloadExtension
+      ? {
+          reloadExtension: async (extensionId: string) => {
+            const reload = input.reloadExtension?.();
+            if (reload) await reload(extensionId);
+          }
+        }
+      : {}),
     ...(input.logger ? { logger: input.logger } : {})
   });
   // 先于调用方的状态订阅登记：每次状态变化先观察发布指针，再由调用方 reconcile。

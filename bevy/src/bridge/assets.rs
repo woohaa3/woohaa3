@@ -77,7 +77,9 @@ pub(crate) fn declare_model_descriptor(descriptor: ModelDescriptor) -> AssetRegi
 }
 
 /// 由 wire DTO 声明 descriptor。
-pub(crate) fn declare_model_descriptor_dto(dto: ModelDescriptorDto) -> Result<ModelDescriptor, &'static str> {
+pub(crate) fn declare_model_descriptor_dto(
+    dto: ModelDescriptorDto,
+) -> Result<ModelDescriptor, &'static str> {
     let descriptor = dto.validate()?;
     match declare_model_descriptor(descriptor.clone()) {
         AssetRegistration::Ok => Ok(descriptor),
@@ -359,7 +361,10 @@ pub(crate) fn asset_registry_stats() -> AssetRegistryStats {
         let table = cache.borrow();
         (
             table.len(),
-            table.values().map(|snapshot| approx_bytes(snapshot)).sum::<usize>(),
+            table
+                .values()
+                .map(|snapshot| approx_bytes(snapshot))
+                .sum::<usize>(),
         )
     });
     let leased = MODEL_PAYLOAD_LEASES.with(|leases| leases.borrow().len());

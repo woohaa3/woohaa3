@@ -40,6 +40,7 @@ import { delimiter, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { wasmCompilerEnvironment } from "./lib/wasm-compiler.mjs";
 import { parseBuildModeArgs, resolveBuildMode, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
+import { resolveRendererBackend, RENDERER_OVERRIDE_ENV } from "./lib/gpu-renderer-selection.mjs";
 import { syncBevyAssets, BEVY_ASSETS_TARGET_DIR } from "./sync-bevy-assets.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -50,7 +51,7 @@ const outDir = join(root, "web", "frontend", "src", "bevy-wasm");
 const lockRoot = join(root, ".local", "locks");
 
 /** stamp 结构版本；旧版缺失模式/输出摘要时一次性失效，不迁移成命中。 */
-const STAMP_VERSION = 2;
+const STAMP_VERSION = 3;
 /** glue 后处理与稳定 d.ts 模板的版本；任一改动都必须使缓存失效。 */
 const GLUE_POSTPROCESS_VERSION = "3";
 // change: 2026-10-26-move-generation-history-to-ai-center —— 新增
@@ -318,7 +319,7 @@ function outputDigests() {
 }
 
 /** 组装影响输出字节的已知输入并求指纹（design D4）。 */
-function buildFingerprint({ rawWasmSha256, plan, bindgenVersion, optIdentity }) {
+function buildFingerprint({ rawWasmSha256, plan, bindgenVersion, optIdentity, renderer }) {
 	const inputs = {
 		rawWasmSha256,
 		mode: plan.mode,
@@ -326,6 +327,7 @@ function buildFingerprint({ rawWasmSha256, plan, bindgenVersion, optIdentity }) 
 		keepNames: plan.keepNames,
 		modelBatchStrategy,
 		renderDrawDiagnostics,
+		rendererBackend: renderer.backend,
 		bindgenVersion,
 		bindgenArgs: ["--target", "web", "--out-name", OUT_NAME],
 		opt: optIdentity,
@@ -430,7 +432,7 @@ function clearStaleStaging() {
  *
  * 失败或中断时保留上一次完整产物（staging 被清理），且不写 stamp；提交中途失败则回滚。
  */
-function generate({ plan, rawWasmSha256, fingerprint, timings }) {
+function generate({ plan, renderer, rawWasmSha256, fingerprint, timings }) {
 	const staging = join(outDir, `.staging-${process.pid}`);
 	const rollback = join(staging, ".rollback");
 	rmSync(staging, { recursive: true, force: true });
@@ -503,6 +505,10 @@ function generate({ plan, rawWasmSha256, fingerprint, timings }) {
 				{
 					version: STAMP_VERSION,
 					mode: plan.mode,
+					rendererBackend: renderer.backend,
+					rendererSelection: renderer.source,
+					buildMachineGpu: renderer.hasGpu,
+					rendererEvidence: renderer.evidence,
 					profile: plan.profile,
 					keepNames: plan.keepNames,
 					release: plan.release,
@@ -554,6 +560,10 @@ const USAGE = `构建 Woohaa3 Bevy WASM 运行时并生成前端绑定。
   WOOHAA_BEVY_DEV_MODE=performance pnpm dev     # 本地性能采集，等价于 performance 模式
   WOOHAA_BEVY_DEV_MODE 只接受 development / performance；release 只能由生产入口显式请求。
 
+渲染后端：
+  默认先探测构建机真实 GPU：有 GPU 编译 WebGPU，没有 GPU 编译 WebGL2。
+  ${RENDERER_OVERRIDE_ENV}=webgpu|webgl2 可显式覆盖；auto 或未设置恢复自动探测。
+
 缓存与诊断：
   相同模式与相同 raw WASM 命中时跳过 bindgen/wasm-opt；日志报告模式、profile、实际 target、
   并发配置、互斥等待和各阶段耗时。缓存记录与当前输出摘要不一致时必须重建。
@@ -566,6 +576,7 @@ function main() {
 		return;
 	}
 	const plan = resolveBuildMode(parsed, { env: process.env });
+	const renderer = resolveRendererBackend({ env: process.env });
 	if (!["automatic", "spatial", "explicit"].includes(modelBatchStrategy)) {
 		throw new Error("WOOHAA_STATIC_BATCH_STRATEGY must be automatic, spatial or explicit");
 	}
@@ -582,6 +593,9 @@ function main() {
 		`[bevy-wasm] 模式=${plan.mode}（profile=${plan.profile}，names=${plan.keepNames ? "retained" : "default"}，` +
 			`optimize=${plan.optArgs ? `wasm-opt ${plan.optArgs.join(" ")}` : "skipped"}，jobs=${jobsLabel()}` +
 			`${parsed.devEntry ? `，来源=${DEV_MODE_ENV}` : ""}${plan.legacy ? "，legacy 参数" : ""}）`
+	);
+	console.log(
+		`[bevy-wasm] renderer=${renderer.backend}（来源=${renderer.source}，构建机 GPU=${renderer.hasGpu === null ? "override" : renderer.hasGpu ? "yes" : "no"}，探测=${renderer.evidence}）`
 	);
 	Object.assign(env, wasmCompilerEnvironment({ env }));
 
@@ -608,7 +622,12 @@ function main() {
 				"build",
 				"--target",
 				"wasm32-unknown-unknown",
-				...(modelBatchStrategy === "explicit" ? ["--features", "explicit-instancing"] : []),
+				"--no-default-features",
+				"--features",
+				[
+					renderer.backend === "webgpu" ? "wasm-webgpu" : "wasm-webgl2",
+					...(modelBatchStrategy === "explicit" ? ["explicit-instancing"] : [])
+				].join(","),
 				...(plan.release ? ["--release"] : [])
 			],
 			crate
@@ -627,6 +646,7 @@ function main() {
 		const { fingerprint } = buildFingerprint({
 			rawWasmSha256,
 			plan,
+			renderer,
 			bindgenVersion: normalizedBindgen,
 			optIdentity
 		});
@@ -645,7 +665,7 @@ function main() {
 			);
 		} else {
 			console.log(`[bevy-wasm] cache miss：${missReason}`);
-			const generated = generate({ plan, rawWasmSha256, fingerprint, timings });
+			const generated = generate({ plan, renderer, rawWasmSha256, fingerprint, timings });
 			optimized = generated.optimized;
 		}
 	} finally {

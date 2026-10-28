@@ -32,6 +32,9 @@ async function main(): Promise<void> {
   }
   let service;
   let boot: ReturnType<typeof beginBoot>;
+  // 启动阶段耗时：调启动速度前先看这几行（模块 boot，落到宿主日志）。
+  const bootStartedAt = Date.now();
+  const phase = (name: string): void => logEvent({ module: "boot", event: "boot-phase", phase: name, ms: Date.now() - bootStartedAt });
   try {
     // 不传 logger：组合根用内置 sink（stderr 一行 JSON + 默认日志目录的轮转文件）。
     // 启动期扫描配置根并加载扩展声明（槽位发现与运行期发布目录）：声明非法时在监听前 fail-fast。
@@ -53,6 +56,7 @@ async function main(): Promise<void> {
       },
       safeMode: boot.safeMode !== null
     });
+    phase("extension-host-scan");
     const lastFailure = boot.lastFailure ? formatBootFailure(boot.lastFailure) : undefined;
     service = await createBackendService({
       basePath,
@@ -62,8 +66,10 @@ async function main(): Promise<void> {
         ? { safeMode: { ...boot.safeMode, suspended: extensionHost?.safeMode?.suspended ?? [], ...(lastFailure ? { lastFailure } : {}) } }
         : {})
     });
+    phase("backend-service");
     ready = true;
     markReady(bootFile, undefined, logEvent);
+    phase("ready");
   } catch (error) {
     // 稳定错误码一并打印：运维要能直接区分「声明非法 / 槽位冲突 / 配置缺失」。
     const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;

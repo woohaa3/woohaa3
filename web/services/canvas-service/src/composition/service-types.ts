@@ -44,6 +44,17 @@ import type { CanvasAccessPort, CanvasRequestAuthenticator } from "../access/res
 export type CanvasServiceOptions = {
   assistantTextRuns?: import("@woohaa3/contracts").AssistantTextRunGateway;
   /**
+   * Skill 尝试校验（change: 2026-10-28-add-agent-skill-media-regeneration）。
+   *
+   * 懒读取 Application Service 的当前 attempt；缺失时保持旧 run 语义（不启用 continuation）。
+   */
+  skillAttempts?: () => import("../agent-authoring/run-adapter.js").SkillAttemptGuard | undefined;
+  /**
+   * 任务终态投影后的 Skill 结算回调。必须只记录历史，不得覆盖节点当前结果；
+   * 实现方可异步收敛，失败由查询复核兜底。
+   */
+  onRunSettled?: (record: import("../sync/task-projector.js").PptaskExecutionRecord) => void;
+  /**
    * 复合内容聚合端口（预览/历史帧 + 转片场等能力）：由内容扩展实现、backend 宿主装配时注入。
    * 注入后 canvas-service 不再 import 任何扩展实现；缺失的组在宿主侧明确不可用。
    */

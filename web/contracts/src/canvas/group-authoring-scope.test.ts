@@ -106,25 +106,41 @@ describe("canvas group scope", () => {
     const result = applyCanvasCommands(canvas, [{ type: "node.remove", nodeIds: ["a"] }]);
     expect(result.ok && result.canvas.document.nodes.map(n => n.id)).toEqual(["root", "outside"]);
   });
-  it("compiles local absolute/auto placement into root membership and expands the root for new content", () => {
+  it("compiles local absolute/auto placement into root membership, expands the root and rejects nested groups", () => {
     const before = fixture();
     const projection = projectCanvasGroup(before, "root");
-    const plan = compileAgentPlan({ canvasId: "c", requestId: "r", scope: "submit_canvas_script", principalId: "u", snapshot: { canvasId: "c", revision: 0, rootGroupId: "root", nodes: projection.document.nodes.map(n => ({ ...n, retainWhenEmpty: projection.nodeData[n.id]?.retainWhenEmpty })), edges: [] }, operations: [
+    const snapshot = {
+      canvasId: "c",
+      revision: 0,
+      rootGroupId: "root",
+      nodes: projection.document.nodes.map(n => ({ ...n, retainWhenEmpty: projection.nodeData[n.id]?.retainWhenEmpty })),
+      edges: [],
+    };
+    const plan = compileAgentPlan({ canvasId: "c", requestId: "r", scope: "submit_canvas_script", principalId: "u", snapshot, operations: [
       { op: "create_node", kind: "image", ref: "new", placement: { mode: "absolute", position: { x: 900, y: 40 } } },
       { op: "create_node", kind: "text", ref: "text" },
-      { op: "create_group", ref: "nested", title: "nested", members: [{ ref: "new" }, { ref: "text" }] }
     ] });
     expect(plan.ok).toBe(true); if (!plan.ok) return;
     const result = applyCanvasCommands(before, plan.commands);
     expect(result.ok).toBe(true); if (!result.ok) return;
     expect(validateCanvasGroupChange(before, result.canvas, "root")).toBeNull();
-    // 组内新增/嵌套内容可以向上/向左撑大根组，但不允许缩小既有边界。
+    // 组内新增内容可以向上/向左撑大根组，但不允许缩小既有边界。
     const root = result.canvas.document.nodes.find(n => n.id === "root")!;
+    const created = result.canvas.document.nodes.filter(n => !before.document.nodes.some(old => old.id === n.id));
+    expect(created.map(n => n.type).sort()).toEqual(["image", "text"]);
+    const image = created.find(n => n.type === "image")!;
     expect(root.position.x).toBeLessThanOrEqual(500);
     expect(root.position.y).toBeLessThanOrEqual(200);
-    expect(root.position.x + (root.width ?? 0)).toBeGreaterThanOrEqual(1300);
-    expect(root.position.y + (root.height ?? 0)).toBeGreaterThanOrEqual(800);
-    expect(canvasGroupMembers(result.canvas, "root").size).toBe(5);
+    expect(root.position.x + (root.width ?? 0)).toBeGreaterThanOrEqual(image.position.x + (image.width ?? 0));
+    expect(root.position.y + (root.height ?? 0)).toBeGreaterThanOrEqual(image.position.y + (image.height ?? 0));
+    expect(canvasGroupMembers(result.canvas, "root").size).toBe(4);
+    // group 不能嵌套（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D7）：
+    // 在根组内再建 group 或把 group 当成员，计划层直接给出 invalid-parent。
+    const nested = compileAgentPlan({ canvasId: "c", requestId: "r2", scope: "submit_canvas_script", principalId: "u", snapshot, operations: [
+      { op: "create_node", kind: "image", ref: "x", placement: { mode: "absolute", position: { x: 1200, y: 40 } } },
+      { op: "create_group", ref: "nested", title: "nested", members: [{ ref: "x" }] },
+    ] });
+    expect(nested).toMatchObject({ ok: false, error: { code: "invalid-parent" } });
   });
   it("rejects forged owner/scope and invalid retained group writes before mutation", () => {
     expect(decodeCanvasCreationRequest({ owner: "forged" }).ok).toBe(false);

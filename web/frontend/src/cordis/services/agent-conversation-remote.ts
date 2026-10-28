@@ -61,6 +61,21 @@ export type AgentConversationRemote = {
   retryTextSave?: (requestId: string) => Promise<AgentConversationResult<{ turn: ConversationTurn }>>;
   cancel: (requestId: string) => Promise<AgentConversationResult<{ ok: true }>>;
   link: (requestId: string, input: { runId?: string; taskId?: string }) => Promise<AgentConversationResult<{ turn: ConversationTurn }>>;
+  /**
+   * Skill 媒体步骤续接（change: 2026-10-28-add-agent-skill-media-regeneration，任务 5.1/5.2）。
+   *
+   * 只读快照与事件；停止/重新生成走独立写入口，不重新提交 Agent 回合。
+   */
+  skillStepByNode: (canvasId: string, nodeId: string) => Promise<AgentConversationResult<{ step: import("@woohaa3/contracts").SkillMediaStepView | null }>>;
+  skillSteps: (canvasId: string, limit?: number) => Promise<AgentConversationResult<{ steps: import("@woohaa3/contracts").SkillMediaStepView[] }>>;
+  skillStepDetail: (input: { canvasId: string; skillRunId: string; stepId: string; after?: number }) => Promise<AgentConversationResult<{
+    step: import("@woohaa3/contracts").SkillMediaStepView;
+    events: Array<import("@woohaa3/contracts").SkillStepUpdatedEvent & { sequence: number }>;
+    cursor: number;
+    resetRequired: boolean;
+  }>>;
+  cancelSkillStep: (input: { canvasId: string; skillRunId: string; stepId: string }) => Promise<AgentConversationResult<{ step: import("@woohaa3/contracts").SkillMediaStepView; state: "cancel-requested" | "already-terminal" }>>;
+  regenerateSkillStep: (input: { canvasId: string; skillRunId: string; stepId: string; requestId: string; prompt?: string; modelKey?: string; parameters?: Record<string, unknown> }) => Promise<AgentConversationResult<{ step: import("@woohaa3/contracts").SkillMediaStepView; runId: string }>>;
 };
 
 export type AgentConversationResult<T> =
@@ -142,6 +157,36 @@ export function createAgentConversationRemote(options: AgentConversationRemoteOp
     },
     async link(requestId, input) {
       return unwrap(await transport.request({ path: path(`turns/${encodeURIComponent(requestId)}/link`), method: "POST", body: input }));
+    },
+    async skillStepByNode(canvasId, nodeId) {
+      const query = `canvasId=${encodeURIComponent(canvasId)}&nodeId=${encodeURIComponent(nodeId)}`;
+      return unwrap(await transport.request({ path: path(`skill-steps/by-node?${query}`), method: "GET" }));
+    },
+    async skillSteps(canvasId, limit) {
+      const query = `canvasId=${encodeURIComponent(canvasId)}${limit !== undefined ? `&limit=${encodeURIComponent(String(limit))}` : ""}`;
+      return unwrap(await transport.request({ path: path(`skill-steps?${query}`), method: "GET" }));
+    },
+    async skillStepDetail(input) {
+      const query = `canvasId=${encodeURIComponent(input.canvasId)}${input.after !== undefined ? `&after=${encodeURIComponent(String(input.after))}` : ""}`;
+      return unwrap(await transport.request({
+        path: path(`skill-steps/${encodeURIComponent(input.skillRunId)}/${encodeURIComponent(input.stepId)}?${query}`),
+        method: "GET"
+      }));
+    },
+    async cancelSkillStep(input) {
+      return unwrap(await transport.request({
+        path: path(`skill-steps/${encodeURIComponent(input.skillRunId)}/${encodeURIComponent(input.stepId)}/cancel`),
+        method: "POST",
+        body: { canvasId: input.canvasId }
+      }));
+    },
+    async regenerateSkillStep(input) {
+      const { canvasId, skillRunId, stepId, ...body } = input;
+      return unwrap(await transport.request({
+        path: path(`skill-steps/${encodeURIComponent(skillRunId)}/${encodeURIComponent(stepId)}/regenerate`),
+        method: "POST",
+        body: { canvasId, ...body }
+      }));
     }
   };
 }

@@ -55,7 +55,8 @@ export type ProjectionOutcome =
   | { status: "projected"; revision: number; noop: boolean }
   | { status: "duplicate"; revision: number }
   | { status: "skipped"; reason: "stale-run" | "unknown-node" }
-  | { status: "failed"; code: string; message: string };
+  /** `permanent`：重试不可能成功（例如画布文档已不存在），消费方应直接放弃而不是退避重试。 */
+  | { status: "failed"; code: string; message: string; permanent?: boolean };
 
 /** receipt 查询/记录：由注入的实现持久化（运维补偿用）。 */
 export type ProjectionReceiptStore = {
@@ -92,6 +93,12 @@ export type CanvasTaskProjectorOptions = {
    * 但不覆盖当前节点。登记失败不阻断当前节点投影（由补偿扫描重试）。
    */
   registerFailure?: (record: PptaskExecutionRecord) => Promise<void>;
+  /**
+   * Skill 尝试结算端口（change: 2026-10-28-add-agent-skill-media-regeneration，任务 3.1）。
+   *
+   * 只接收权威终态记录；不阻断画布投影，查询路径可用 Canvas 权威状态再次复核。
+   */
+  onSettled?: (record: PptaskExecutionRecord) => void;
   now?: () => string;
 };
 
@@ -223,6 +230,7 @@ export class CanvasTaskProjector {
   private readonly receipts: ProjectionReceiptStore;
   private readonly registerHistory?: (record: PptaskExecutionRecord) => Promise<void>;
   private readonly registerFailure?: (record: PptaskExecutionRecord) => Promise<void>;
+  private readonly onSettled?: (record: PptaskExecutionRecord) => void;
   private readonly now: () => string;
 
   constructor(options: CanvasTaskProjectorOptions) {
@@ -230,6 +238,7 @@ export class CanvasTaskProjector {
     this.receipts = options.receipts;
     this.registerHistory = options.registerHistory;
     this.registerFailure = options.registerFailure;
+    this.onSettled = options.onSettled;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -257,6 +266,9 @@ export class CanvasTaskProjector {
       }
     }
 
+    // 1.75) Skill 步骤结算：迟到旧 run 只写自己的历史，不影响当前节点投影。
+    try { this.onSettled?.(record); } catch { /* 查询复核兜底 */ }
+
     // 2) 取 room。
     const room = await this.resolveRoom(record.canvasId);
     if (!room) {
@@ -266,6 +278,11 @@ export class CanvasTaskProjector {
     // 3) 导出当前聚合做校验。
     const exported = room.exportCanvas();
     if (!exported.ok) {
+      // 文档不存在 = 画布已被删除（dev 库里任务还在、画布没了很常见）。重试永远不可能成功，
+      // 标成 permanent 让消费方推进水位并停止每轮 44 行的重试日志。
+      if (exported.code === "not-found") {
+        return { status: "failed", code: "canvas-not-found", message: exported.message, permanent: true };
+      }
       return { status: "failed", code: "canvas-unavailable", message: exported.message };
     }
 

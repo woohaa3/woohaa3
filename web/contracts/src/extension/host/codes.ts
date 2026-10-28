@@ -16,6 +16,11 @@ export const APPLICATION_EXTENSION_ERROR_CODES = [
   "unsupported",
   /** 引用的插件不在可信清单中。 */
   "extension-not-found",
+  /**
+   * 插件已激活但请求的 route 没有注册（或方法/路径拼错）。
+   * 与 `extension-not-found` 分开：后者的文案「插件未激活」会把人引向错误的排查方向。
+   */
+  "route-not-registered",
   /** `expectedRevision` 与当前持久化 revision 不一致。 */
   "revision-conflict",
   /** 候选配置未通过 schema 校验。 */
@@ -48,6 +53,7 @@ export const APPLICATION_EXTENSION_ERROR_STATUS: Readonly<Record<ApplicationExte
   "malformed-request": 400,
   unsupported: 400,
   "extension-not-found": 404,
+  "route-not-registered": 404,
   "revision-conflict": 409,
   "config-invalid": 400,
   "prepare-failed": 409,

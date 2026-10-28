@@ -241,3 +241,67 @@ it("returns an archived text run's own output and never substitutes canonical te
   expect(projectOutputView(c, "c1", "img-1", "text-run:old")).toMatchObject({ available: true, output: { text: "old", runId: "text-run:old" } });
   expect(projectOutputView(c, "c1", "img-1", "text-run:missing")).toMatchObject({ available: false });
 });
+describe("Skill 尝试接线（任务 3.1）", () => {
+  const skill = { skillRunId: "skill-1", stepId: "step-1", attempt: 2, promptRevision: 2 };
+
+  it("宿主提供的 runId 与 ledger 一致，不再二次派生", async () => {
+    const requests: unknown[] = [];
+    const adapter = new AgentRunAdapter({
+      resolveRoom: async () => roomFor(canvas({ nodeData: { "img-1": { modelKey: "litellm:m1" } } })),
+      runService: {
+        run: async (request) => { requests.push(request); return { ok: true, runId: request.runId, jobId: request.jobId, workerTaskKey: "k", state: "accepted" }; },
+        cancel: async () => ({ ok: false, code: "x", message: "x" })
+      }
+    });
+    const outcome = await adapter.run({ canvasId: "c1", requestId: "req-2", nodeId: "img-1", runId: "ledger-run-2", modelKey: "m1" });
+    expect(outcome).toMatchObject({ ok: true, runId: "ledger-run-2" });
+    expect((requests[0] as { runId: string }).runId).toBe("ledger-run-2");
+  });
+
+  it("begin 前拒绝已被替代的旧 attempt，不启动 Provider 请求", async () => {
+    let runCalls = 0;
+    const checked: unknown[] = [];
+    const adapter = new AgentRunAdapter({
+      resolveRoom: async () => roomFor(canvas({ nodeData: { "img-1": { modelKey: "litellm:m1" } } })),
+      runService: {
+        run: async (request) => { runCalls += 1; return { ok: true, runId: request.runId, jobId: request.jobId, workerTaskKey: "k", state: "accepted" }; },
+        cancel: async () => ({ ok: false, code: "x", message: "x" })
+      },
+      skillAttempts: () => ({
+        async assertCurrent(input) {
+          checked.push(input);
+          return { ok: false, code: "skill-attempt-superseded", message: "该尝试已被更新尝试替代" };
+        }
+      })
+    });
+    const outcome = await adapter.run({ owner: "owner", canvasId: "c1", requestId: "req-1", nodeId: "img-1", modelKey: "m1", skill });
+    expect(outcome).toMatchObject({ ok: false, code: "skill-attempt-superseded" });
+    expect(runCalls).toBe(0);
+    expect(checked[0]).toMatchObject({ owner: "owner", canvasId: "c1", nodeId: "img-1", skill });
+  });
+
+  it("status 给旧 run 标记 superseded，当前 run 标记 current", async () => {
+    const adapter = new AgentRunAdapter({
+      resolveRoom: async () => roomFor(canvas({
+        revision: 8,
+        nodeData: { "img-1": { activeRunId: "r2", taskStatus: "processing" } },
+        jobs: [{ id: "j1", nodeId: "img-1", taskId: "t", runId: "r1", status: "success", updatedAt: "x" }]
+      })),
+      runService: { run: async () => ({ ok: false, code: "x", message: "x" }), cancel: async () => ({ ok: false, code: "x", message: "x" }) }
+    });
+    const stale = await adapter.status({ canvasId: "c1", nodeId: "img-1", runId: "r1", skill: { skillRunId: "s", stepId: "p", attempt: 1, promptRevision: 1 } });
+    expect(stale).toMatchObject({ ok: true, view: { stale: true, skill: { attempt: 1, current: false, superseded: true } } });
+    const current = await adapter.status({ canvasId: "c1", nodeId: "img-1", runId: "r2", skill: { skillRunId: "s", stepId: "p", attempt: 2, promptRevision: 2 } });
+    expect(current).toMatchObject({ ok: true, view: { stale: false, skill: { attempt: 2, current: true, superseded: false } } });
+  });
+
+  it("旧 run 迟到成功只作为历史，节点输出仍以当前 run 为准", () => {
+    const c = canvas({
+      revision: 9,
+      nodeData: { "img-1": { activeRunId: "r2", taskStatus: "processing" } },
+      jobs: [{ id: "j1", nodeId: "img-1", taskId: "t", runId: "r1", status: "success", updatedAt: "x" }]
+    });
+    expect(projectRunView("c1", "img-1", "r1", c)).toMatchObject({ phase: "terminal", state: "succeeded", stale: true });
+    expect(projectOutputView(c, "c1", "img-1", "r1")).toMatchObject({ available: false, reason: "no-output" });
+  });
+});

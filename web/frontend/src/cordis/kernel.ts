@@ -38,10 +38,27 @@ export type FrontendExtensionDefinition = {
    * 渲染错误逐项隔离，可选扩展可在本会话内熔断。宿主内置插件保持缺省（builtin）。
    */
   extension?: boolean;
+  /**
+   * 重新求值该扩展的代码来源，返回可装配的插件（change: 2026-10-27-add-extension-dev-reload，D1）。
+   *
+   * 缺省时重装复用 `plugin`（同一份代码再跑一遍）。来源可变的扩展（开发者模式 `dev-source`）
+   * 提供该函数，使 reload 能取到产物更新后的模块，而不必重建页面 scope。
+   */
+  resolvePlugin?: () => Plugin | Promise<Plugin>;
 };
 
-/** 一个定义的当前装配（扩展熔断后重新加载会换成新 fiber）。 */
-type Assembly = { current: Fiber; dispose: () => Promise<void> };
+/**
+ * 一个定义的当前装配（扩展熔断后重新加载会换成新 fiber）。
+ *
+ * `reload` 是实例级重装的唯一入口（change: 2026-10-27-add-extension-dev-reload，D1）：
+ * 释放当前 fiber → 重新求值代码来源 → 按同一份定义重新装配。串行排队，重入只执行一次。
+ */
+type Assembly = {
+  current: Fiber;
+  dispose: () => Promise<void>;
+  /** 用当前定义可求值的代码来源重装；失败时保留上一次成功的装配并抛出。 */
+  reload: () => Promise<Fiber>;
+};
 
 /**
  * 按定义装配一个 fiber。扩展定义：
@@ -49,16 +66,45 @@ type Assembly = { current: Fiber; dispose: () => Promise<void> };
  * - 向 App 级 `extensionFaults` 登记熔断（释放 fiber）与重新加载（新 epoch 重新装配）。
  */
 function assemble(ctx: Context, definition: FrontendExtensionDefinition): Assembly {
+  /** 重新求值代码来源；没有 `resolvePlugin` 时复用同一份 plugin。 */
+  const resolvePlugin = async (): Promise<Plugin> =>
+    definition.resolvePlugin ? await definition.resolvePlugin() : definition.plugin;
+
   if (!definition.extension) {
-    const fiber = ctx.plugin(definition.plugin as Plugin) as Fiber;
-    return { current: fiber, dispose: async () => { await fiber.dispose(); } };
+    let disposed = false;
+    /** 重装串行队列：同一时刻最多一次 dispose + 装配。 */
+    let queue: Promise<unknown> = Promise.resolve();
+    const assembly: Assembly = {
+      current: ctx.plugin(definition.plugin as Plugin) as Fiber,
+      dispose: async () => {
+        disposed = true;
+        await assembly.current.dispose();
+      },
+      reload: () => {
+        const run = queue.then(async () => {
+          if (disposed) throw new Error('装配已释放，不能重装');
+          const plugin = await resolvePlugin();
+          await assembly.current.dispose();
+          if (disposed) throw new Error('装配已释放，不能重装');
+          assembly.current = ctx.plugin(plugin) as Fiber;
+          return assembly.current;
+        });
+        queue = run.catch(() => undefined);
+        return run;
+      }
+    };
+    return assembly;
   }
+
   const faults = ctx.get("extensionFaults" as never) as ExtensionFaultService | undefined;
   let detach: (() => void) | null = null;
   let disposed = false;
-  const start = (): Fiber => {
+  /** 重装串行队列：同一时刻最多一次 dispose + 装配。 */
+  let queue: Promise<unknown> = Promise.resolve();
+
+  const start = (plugin: Plugin): Fiber => {
     const { slots, dialogs, epoch } = scopedExtensionServices(ctx, definition.id);
-    const fiber = ctx.extend({ slots, dialogs } as never).plugin(definition.plugin as Plugin) as Fiber;
+    const fiber = ctx.extend({ slots, dialogs } as never).plugin(plugin) as Fiber;
     detach?.();
     detach = faults?.attach(definition.id, {
       required: definition.required,
@@ -66,10 +112,8 @@ function assemble(ctx: Context, definition: FrontendExtensionDefinition): Assemb
       trip: () => { void fiber.dispose(); },
       reload: () => {
         if (disposed) return;
-        void (async () => {
-          await assembly.current.dispose();
-          if (!disposed) assembly.current = start();
-        })();
+        // 熔断后的重新加载同样走实例重装，复用同一条串行队列。
+        void assembly.reload().catch(() => undefined);
       }
     }) ?? null;
     return fiber;
@@ -81,9 +125,22 @@ function assemble(ctx: Context, definition: FrontendExtensionDefinition): Assemb
       detach?.();
       detach = null;
       await assembly.current.dispose();
+    },
+    reload: () => {
+      const run = queue.then(async () => {
+        if (disposed) throw new Error('装配已释放，不能重装');
+        const plugin = await resolvePlugin();
+        await assembly.current.dispose();
+        if (disposed) throw new Error('装配已释放，不能重装');
+        assembly.current = start(plugin);
+        return assembly.current;
+      });
+      queue = run.catch(() => undefined);
+      return run;
     }
   };
-  assembly.current = start();
+  // 初次装配同步完成（保持既有启动语义），重装才走异步队列。
+  assembly.current = start(definition.plugin as Plugin);
   return assembly;
 }
 
@@ -105,6 +162,11 @@ export type FrontendRuntime = {
    * 只在 `startFrontendScope` 上提供：App 级运行时没有可换清单。
    */
   plugins?: PluginSwap;
+  /**
+   * 运行期按 id 重装单个扩展实例（开发者模式热重载，change: 2026-10-27-add-extension-dev-reload）。
+   * 只在 `startFrontendScope` 上提供。
+   */
+  reloadExtension?: ExtensionReloader["reload"];
   dispose(): Promise<void>;
 };
 
@@ -115,6 +177,16 @@ export type FrontendRuntime = {
  * 前提下装回或卸下某个 optional 插件：启用时按定义装配新 fiber，禁用时释放该 fiber 并撤销它
  * 注册的 contribution。required 插件不可卸载（调用方负责不把它列进可换清单）。
  */
+/**
+ * 实例级重装入口（change: 2026-10-27-add-extension-dev-reload，D1）。
+ *
+ * 与启停分开：`reload` 只换该扩展的代码，不改变它「要不装」；`required` 扩展也可重装。
+ * 未装配的 id 返回 `not-mounted`（不报错，也不因此装配）。
+ */
+export type ExtensionReloader = {
+  reload(id: string): Promise<"reloaded" | "not-mounted">;
+};
+
 export type PluginSwap = {
   /** 该 id 当前是否已装配。 */
   has(id: string): boolean;
@@ -170,6 +242,13 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
   const installFiber = ctx.plugin((innerCtx: Context) => options.install(innerCtx)) as Fiber;
   /** 可换插件登记：装配/卸下都走同一张表，diagnostics 随之一并维护。 */
   const swappable = new Map<string, { definition: FrontendExtensionDefinition; assembly: Assembly; undo: () => void }>();
+  /**
+   * 全部已装配定义的句柄（含 required）：实例级重装用（change: 2026-10-27-add-extension-dev-reload，D5）。
+   *
+   * 与 `swappable` 分开是刻意的：启停改变「要不要装」，重装改变「装哪份代码」，
+   * `required` 扩展可以有后者、不能有前者。
+   */
+  const mounted = new Map<string, { definition: FrontendExtensionDefinition; assembly: Assembly; undo: () => void }>();
   /** 装配一个定义（启动期与运行期热启用共用同一路径）。 */
   const mountDefinition = (definition: FrontendExtensionDefinition): Fiber => {
     const assembly = assemble(ctx, definition);
@@ -177,10 +256,29 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
     const fiber = assembly.current;
     fibers.push(fiber);
     const undo = diagnostics.addExtension({ id: definition.id, required: definition.required, fiber });
+    mounted.set(definition.id, { definition, assembly, undo });
     if (!definition.required) {
       swappable.set(definition.id, { definition, assembly, undo });
     }
     return fiber;
+  };
+  /**
+   * 实例级重装：释放当前 fiber，按定义重新求值代码来源并重新装配。
+   *
+   * 不重建 scope，也不改变启停状态；失败时保留上一次成功的装配并抛错（D1 / D5）。
+   */
+  const reloadDefinition = async (id: string): Promise<"reloaded" | "not-mounted"> => {
+    if (disposed) throw new Error('scope 已释放，不能重装');
+    const entry = mounted.get(id);
+    if (!entry) return "not-mounted";
+    await entry.assembly.reload();
+    // 新 fiber 重新登记诊断：先撤旧条目，再按新 fiber 记录，避免面板读到已释放的 fiber。
+    entry.undo();
+    const undo = diagnostics.addExtension({ id, required: entry.definition.required, fiber: entry.assembly.current });
+    entry.undo = undo;
+    const swappableEntry = swappable.get(id);
+    if (swappableEntry) swappableEntry.undo = undo;
+    return "reloaded";
   };
   let disposed = false;
 
@@ -224,6 +322,7 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
     diagnostics,
     status: () => diagnostics.getStatus(),
     subscribe: diagnostics.subscribe,
+    reloadExtension: reloadDefinition,
     plugins: {
       has: (id) => swappable.has(id),
       ids: () => [...swappable.keys()].sort(),
@@ -237,6 +336,7 @@ export async function startFrontendScope(parent: Context, options: ScopeOptions)
         if (!entry) return;
         // 先从可换表与诊断移除，再释放 fiber：面板的「已停用」不该晚于贡献消失。
         swappable.delete(id);
+        mounted.delete(id);
         entry.undo();
         const index = assemblies.indexOf(entry.assembly);
         if (index >= 0) assemblies.splice(index, 1);

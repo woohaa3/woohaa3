@@ -2,8 +2,8 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { hashKey as safeKey, resolveSpawnTarget, stdioEndpoint } from "./lib/agent-runtime-endpoints.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -20,7 +20,10 @@ if (!socketPath || !stateDir || !token || !workspaceKey) throw new Error("agent 
 fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
 const stdioDir = path.join(stateDir, "stdio");
 fs.mkdirSync(stdioDir, { recursive: true, mode: 0o700 });
-try { fs.unlinkSync(socketPath); } catch (error) { if (error.code !== "ENOENT") throw error; }
+// 命名管道没有文件语义，也没有 unlink：它由系统随最后一个句柄关闭而回收。
+if (process.platform !== "win32") {
+  try { fs.unlinkSync(socketPath); } catch (error) { if (error.code !== "ENOENT") throw error; }
+}
 const ledgerPath = path.join(stateDir, "ledger.json");
 const journalDir = path.join(stateDir, "events");
 fs.mkdirSync(journalDir, { recursive: true, mode: 0o700 });
@@ -63,25 +66,13 @@ let stopping = false;
 let nextId = 1;
 let orphanTimer = null;
 
-const safeKey = value => crypto.createHash("sha256").update(value).digest("hex").slice(0, 40);
 const keyFor = input => `${input.adapterId}\u0000${input.owner}\u0000${input.connectionId}`;
 
-/**
- * stdio 通道的端点。Windows 没有 Unix domain socket 的文件语义 —— `server.listen(<文件路径>)`
- * 直接 EACCES、回调永不触发，所以那边改用命名管道（与 dev 的 supervisor socket 同一处理）。
- * 端点字符串原样交给客户端 `connect()`，两种形态它都支持。
- */
-const stdioEndpoint = key =>
-  process.platform === "win32"
-    ? `\\\\.\\pipe\\woohaa-agent-stdio-${safeKey(key)}`
-    : path.join(stdioDir, `${safeKey(key)}.sock`);
-
-/**
- * Windows 上 npm/pnpm 装的 CLI 是 `.cmd` 垫片，`spawn()` 直接执行会抛 EINVAL。
- * 与 `web/extensions/local-agent/src/backend/process-supervisor.ts` 同一处理：
- * 引号包住命令并交给 shell。
- */
-const isBatchCommand = command => process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+/** 端点命名与 .cmd 垫片处理见 ./lib/agent-runtime-endpoints.mjs。 */
+function spawnChild(command, args, options) {
+  const target = resolveSpawnTarget(command, args);
+  return spawn(target.command, target.args, target.shell ? { ...options, shell: true } : options);
+}
 
 function killTree(child, signal = "SIGTERM") {
   if (!child?.pid) return;
@@ -170,21 +161,26 @@ async function ensure(input) {
     childArgs.push("--port", String(port));
     loopbackUrl = `http://127.0.0.1:${port}`;
   }
-  const stdioPath = input.kind === "stdio" ? stdioEndpoint(key) : null;
+  const stdioPath = input.kind === "stdio" ? stdioEndpoint({ key, stdioDir }) : null;
   if (stdioPath) {
-    try { fs.unlinkSync(stdioPath); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (process.platform !== "win32") {
+      try { fs.unlinkSync(stdioPath); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
     try { fs.unlinkSync(journalPath(key)); } catch (error) { if (error.code !== "ENOENT") throw error; }
   }
-  const batch = isBatchCommand(command);
-  const child = spawn(batch ? `"${command}"` : command, batch ? childArgs.map(arg => (arg === "" ? '""' : arg)) : childArgs, {
-    cwd: input.cwd,
-    env: childEnv,
-    windowsHide: true,
-    detached: process.platform !== "win32",
-    // `.cmd` 垫片只能经 cmd.exe 执行；shell 模式下参数按空格拼接，空参数要显式写成 ""
-    ...(batch ? { shell: true } : {}),
-    stdio: input.kind === "stdio" ? ["pipe", "pipe", "pipe"] : ["ignore", "ignore", "ignore"]
-  });
+  let child;
+  try {
+    child = spawnChild(command, childArgs, {
+      cwd: input.cwd,
+      env: childEnv,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      stdio: input.kind === "stdio" ? ["pipe", "pipe", "pipe"] : ["ignore", "ignore", "ignore"]
+    });
+  } catch (error) {
+    // spawn 对 .cmd 这类不可直接 exec 的目标是同步抛错（EINVAL），不会走 error 事件。
+    throw new Error(`无法启动 Agent 可执行文件「${command}」：${error.message}`);
+  }
   await new Promise((resolve, reject) => {
     child.once("spawn", resolve);
     child.once("error", reject);
@@ -309,6 +305,11 @@ if (ownerPid > 0) {
   setInterval(checkOwner, 2_000).unref();
 }
 
+// 缺少监听错误处理器时，listen 失败会变成未捕获的 'error' 事件（进程直接崩，且堆栈看不出端点）。
+server.on("error", error => {
+  console.error(`[agent-runtime-supervisor] 监听端点失败（${socketPath}）：${error.code ?? ""} ${error.message}`);
+  process.exit(1);
+});
 server.listen(socketPath, () => {
   fs.writeFileSync(path.join(stateDir, "supervisor.json"), JSON.stringify({ workspaceKey, pid: process.pid, socketPath, generation: 1, startedAt: Date.now() }));
 });

@@ -105,7 +105,7 @@ import {
   createMemorySyncPendingStore,
   type RemoteSyncScope
 } from "./sync-pending-store.js";
-import { createHash } from "node:crypto";
+import { uploadReference } from "./storage/reference-upload.js";
 import { createServerStorageBackend, type ServerStorageBackendOptions } from "./storage/backend.js";
 import { resolveServerStorageConfig, type ServerStorageConfig } from "./storage/config.js";
 
@@ -2298,20 +2298,12 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
         const undoRegister = ctx.storage.register(backend);
         ctx.effect(() => undoRegister);
         registeredStorageBackend = backend;
-        referenceUploader = async ({ bytes, contentType, storageKey }) => {
-          // 参考输入是**这次任务的输入**，归调用主体：写主体命名空间，与服务端的
-          // ActorNamespaceOfActor 用同一套派生（sha256(subject)）。画布命名空间要求服务端
-          // 已登记该画布，本地未同步的画布不满足，这也是上一版失败的根因。
+        referenceUploader = async (input) => {
+          // 画布托管对象优先（画布在远端时参考图通常已经在那儿），本地独有的字节才复制到
+          // 主体命名空间。画布命名空间要求服务端已登记该画布；未登记时 head 失败，
+          // uploadReference 会回退到主体命名空间，不会因此交不出输入。
           const session = await sessionSource.current();
-          const subject = session?.subject ?? "";
-          if (subject === "") return undefined;
-          const actorSegment = createHash("sha256").update(subject).digest("hex");
-          const name = storageKey !== undefined && storageKey !== ""
-            ? storageKey.split("/").pop() as string
-            : createHash("sha256").update(bytes).digest("hex");
-          const key = `actor/${actorSegment}/media/reference-inputs/${name}`;
-          await backend.put(key, bytes, contentType, undefined);
-          return backend.locatorOf ? await backend.locatorOf(key, undefined) : undefined;
+          return uploadReference({ backend, subject: session?.subject ?? "" }, input);
         };
         hostLog({
           event: "server-storage-activated",
