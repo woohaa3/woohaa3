@@ -68,6 +68,11 @@ export function migrate(db: DatabaseSync): void {
       pruned_floor INTEGER NOT NULL DEFAULT 0
     );
     INSERT OR IGNORE INTO task_history_cursor (id, sequence) VALUES (1, 0);
+    -- 一次性数据迁移的标记：避免每次启动都重扫大字段（见 backfill 上方注释）。
+    CREATE TABLE IF NOT EXISTS task_history_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
   `);
   // 增量列：老库（已存在表）不会被 CREATE TABLE IF NOT EXISTS 更新，显式补列。
   addColumnIfMissing(db, "task_execution_records", "request_json", "TEXT");
@@ -89,7 +94,13 @@ export function migrate(db: DatabaseSync): void {
   addColumnIfMissing(db, "task_history_cursor", "pruned_floor", "INTEGER NOT NULL DEFAULT 0");
   db.exec("CREATE INDEX IF NOT EXISTS task_execution_records_source ON task_execution_records(source);");
   db.exec("CREATE INDEX IF NOT EXISTS task_execution_records_plugin ON task_execution_records(extension_id);");
-  backfillUpstreamTaskIds(db);
+  // 回填是一次性数据迁移：每次启动都跑会把整张 task_records 的 state_json（dev/生产里可能是 GB 级）
+  // 重新读一遍，实测启动被拖慢 8s；同步 Provider 的行永远补不出值，却每轮都被 json_valid/json_extract 扫到。
+  // 用标记表保证每个库只跑一次；历史表还没数据的新库不落标记，等真有老记录时再补。
+  if (!migrationApplied(db, UPSTREAM_BACKFILL_KEY) && hasHistoryRows(db)) {
+    backfillUpstreamTaskIds(db);
+    markMigration(db, UPSTREAM_BACKFILL_KEY);
+  }
 }
 
 /**
@@ -129,6 +140,21 @@ function tableExists(db: DatabaseSync, name: string): boolean {
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
     .get(name) as { name: string } | undefined;
   return row !== undefined;
+}
+
+/** 一次性数据迁移的标记（同一库只跑一次）。 */
+const UPSTREAM_BACKFILL_KEY = "upstream-task-id-backfill-v1";
+
+function migrationApplied(db: DatabaseSync, id: string): boolean {
+  return db.prepare("SELECT 1 FROM task_history_migrations WHERE id = ?").get(id) !== undefined;
+}
+
+function markMigration(db: DatabaseSync, id: string): void {
+  db.prepare("INSERT OR REPLACE INTO task_history_migrations (id, applied_at) VALUES (?, ?)").run(id, new Date().toISOString());
+}
+
+function hasHistoryRows(db: DatabaseSync): boolean {
+  return db.prepare("SELECT 1 FROM task_execution_records LIMIT 1").get() !== undefined;
 }
 
 /** 幂等补列：已存在时忽略「duplicate column」错误。 */
