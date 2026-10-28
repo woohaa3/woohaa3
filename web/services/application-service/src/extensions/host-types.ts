@@ -26,6 +26,7 @@ import type { ApplicationExtensionAuthLevel, ApplicationExtensionHostIdentity } 
 export type PluginRegistrationSurface = {
   webServer?: import("@woohaa3/contracts").HostWebServerService;
   capabilities?: import("@woohaa3/contracts").HostCapabilityService;
+  mediaFormats?: import("@woohaa3/contracts").HostMediaFormatService;
   services?: ApplicationExtensionServices;
   diagnostics?: import("@woohaa3/contracts").ApplicationBackendDiagnostics;
   /** 撤销本次注册（幂等）；装载器在插件停用时调用。 */

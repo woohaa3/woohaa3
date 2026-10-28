@@ -251,6 +251,33 @@ describe("扩展层装载器", () => {
     await activation?.dispose?.();
   });
 
+  it("hostPlugin 通过 ctx.mediaFormats 注册媒体格式", async () => {
+    const { ctx, load } = await setup();
+    const siteGate = createSiteGate(["sample"]);
+    const registered: string[] = [];
+    const pluginContextFor = (_extensionId: string) => ({
+      mediaFormats: {
+        register: (format: { contentType: string }) => {
+          registered.push(format.contentType);
+          return () => undefined;
+        }
+      },
+      release: () => undefined
+    });
+    ctx.provide("application", { siteGate, service: { host: () => ({ pluginContextFor }) } } as never);
+
+    const plugin: ExtensionPlugin<typeof SAMPLE_CONFIG.fields> = {
+      ...samplePlugin([]),
+      apply(pluginCtx) {
+        pluginCtx.mediaFormats!.register({ contentType: "application/vnd.sample", maxBytes: 16, validate: async () => undefined });
+      }
+    };
+    await load([plugin]);
+    const activation = await siteGate.definitions[0]!.activate({} as never);
+    expect(registered).toEqual(["application/vnd.sample"]);
+    await activation?.dispose?.();
+  });
+
 });
 
 describe("扩展层装载时限与就绪（D4/D5）", () => {

@@ -25,6 +25,7 @@ import type { ApplicationExtensionServices } from "./facades.js";
 import type { HostGenerationService } from "./generation.js";
 import type { HostLogService } from "./log.js";
 import type { HostMarketplaceService } from "./marketplace.js";
+import type { HostMediaFormatService } from "./media-formats.js";
 import type { HostStorageService } from "./storage.js";
 import type { HostTelemetryService } from "./telemetry.js";
 import type { HostWebServerService } from "./web-server.js";
@@ -61,6 +62,12 @@ export type HostExtensionContext = Context & {
   readonly deployment?: { readonly basePath: string };
   /** 能力注册表（可选）：插件把能力对象交给宿主，由核心层按需解析。 */
   readonly capabilities?: HostCapabilityService;
+  /**
+   * 媒体格式注册面（可选）：拥有可编辑媒体格式的站点插件在这里注册校验器。
+   *
+   * 与 `capabilities` 同级：注册按 extensionId 记账，插件停用/回滚时由宿主自动注销。
+   */
+  readonly mediaFormats?: HostMediaFormatService;
   /** 宿主诊断缓冲（可选）：只读投影，用于排障面板。 */
   readonly diagnostics?: ApplicationBackendDiagnostics;
 };
