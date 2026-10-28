@@ -164,12 +164,14 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
           }
         });
       };
-      register("sdk-agent/configure", "POST", "auth-transaction");
-      register("sdk-agent/connections", "GET", "read");
-      register("sdk-agent/connections", "POST", "auth-transaction");
-      register("sdk-agent/connections/*", "POST", "auth-transaction");
-      register("sdk-agent/check", "POST", "read");
-      register("sdk-agent/test-generation", "POST", "new-work");
+      // route 是**相对 publicPath** 的：宿主会加 `<extensionId>/` 前缀（c5f1cce），
+      // 这里再写一遍 sdk-agent/ 就会变成 sdk-agent/sdk-agent/connections 而永不命中。
+      register("configure", "POST", "auth-transaction");
+      register("connections", "GET", "read");
+      register("connections", "POST", "auth-transaction");
+      register("connections/*", "POST", "auth-transaction");
+      register("check", "POST", "read");
+      register("test-generation", "POST", "new-work");
 
       host.logger({ event: "sdk-agent-activated", adapters: SDK_AGENT_ADAPTERS.length, hasSecrets: Boolean(host.services.secrets) });
 

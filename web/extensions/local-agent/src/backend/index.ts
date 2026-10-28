@@ -243,10 +243,12 @@ export function createLocalAgentExtension(
           },
         });
       };
-      register("local-agent/connections", "GET", "read");
-      register("local-agent/connections", "POST", "auth-transaction");
-      register("local-agent/connections/*", "POST", "auth-transaction");
-      register("local-agent/check", "POST", "read");
+      // route 是**相对 publicPath** 的：宿主会加 `<extensionId>/` 前缀（c5f1cce），
+      // 这里再写一遍 local-agent/ 就会变成 local-agent/local-agent/connections 而永不命中。
+      register("connections", "GET", "read");
+      register("connections", "POST", "auth-transaction");
+      register("connections/*", "POST", "auth-transaction");
+      register("check", "POST", "read");
 
       host.logger({
         event: "local-agent-activated",
