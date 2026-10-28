@@ -10,7 +10,7 @@
  * 纯函数，方便在无 DOM 环境下断言「已删除节点」等场景。
  */
 import type { CanvasNodeData, ServerCanvas } from "@woohaa3/contracts";
-import { groupAllowsExecutionPanel, isModelNodeType } from "@woohaa3/contracts";
+import { isModelNodeType } from "@woohaa3/contracts";
 import { panelKindForNodeType, type NodePanelKind } from "./node-panel-registry.js";
 
 export type NodeSelectionContext = {
@@ -32,7 +32,6 @@ export function resolveSelectionContext(
   const panelKind = panelKindForNodeType(node.type);
   if (!panelKind && !isModelNodeType(node.type) && node.type !== "group") return null;
   const nodeData = (canvas.nodeData as Record<string, CanvasNodeData | undefined>)[nodeId];
-  if (node.type === "group" && !groupAllowsExecutionPanel(nodeData)) return null;
   return {
     nodeId,
     nodeType: node.type,

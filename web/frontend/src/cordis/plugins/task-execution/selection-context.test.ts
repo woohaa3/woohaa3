@@ -58,10 +58,3 @@ describe("resolveSelectionContext", () => {
     expect(resolveSelectionContext(canvas, "img-2")?.nodeData).toEqual({});
   });
 });
-
-it("managed containers opt out of execution/editor panels without affecting ordinary groups or member nodes",()=>{
-  const canvas=canvasFixture({nodes:[{id:"list",type:"group",data:{groupConcept:{schemaVersion:1,id:"test:list",label:"List",allowUngroup:false,allowExecutionPanel:false}}},{id:"plain",type:"group"},{id:"member",type:"text",data:{prompt:"Summary"}}]});
-  expect(resolveSelectionContext(canvas,"list")).toBeNull();
-  expect(resolveSelectionContext(canvas,"plain")).toMatchObject({nodeType:"group",panelKind:null});
-  expect(resolveSelectionContext(canvas,"member")?.panelKind).toBe("text-generation");
-});
