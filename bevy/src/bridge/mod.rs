@@ -452,20 +452,35 @@ pub(crate) fn queue_texture(
     rgba: &[u8],
     content: Option<&str>,
 ) {
+    queue_texture_owned(id, width, height, rgba.to_vec(), content);
+}
+
+/// Native requests already own their bytes; move them into the inbox.
+pub(crate) fn queue_texture_owned(
+    id: &str,
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+    content: Option<&str>,
+) {
     TEXTURES.with(|textures| {
         textures.borrow_mut().insert(
             id.to_owned(),
-            (width, height, rgba.to_vec(), content.map(str::to_owned)),
+            (width, height, rgba, content.map(str::to_owned)),
         );
     });
 }
 
 /// 记录一次合法片场媒体平面纹理上传（键为全局唯一 `planeId`；latest-wins）。
 pub(crate) fn queue_film_set_texture(id: &str, width: u32, height: u32, rgba: &[u8]) {
+    queue_film_set_texture_owned(id, width, height, rgba.to_vec());
+}
+
+pub(crate) fn queue_film_set_texture_owned(id: &str, width: u32, height: u32, rgba: Vec<u8>) {
     FILM_SET_TEXTURES.with(|textures| {
         textures
             .borrow_mut()
-            .insert(id.to_owned(), (width, height, rgba.to_vec()));
+            .insert(id.to_owned(), (width, height, rgba));
     });
 }
 
