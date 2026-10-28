@@ -52,15 +52,25 @@ afterEach(() => {
 
 const sha256 = (bytes: Buffer) => crypto.createHash("sha256").update(bytes).digest("hex");
 
-/** 准备一个受管扩展目录（纯前端 server-active，或带后端 hostPlugin）。 */
-function extensionTree(options: { id?: string; version?: string; backend?: boolean; descriptor?: Record<string, unknown>; marker?: string } = {}): string {
+/** 准备一个受管扩展目录（纯前端 server-active、hostPlugin，或站点 backend 工厂）。 */
+function extensionTree(options: { id?: string; version?: string; backend?: boolean; siteBackend?: boolean; descriptor?: Record<string, unknown>; marker?: string } = {}): string {
   const id = options.id ?? "demo";
   const version = options.version ?? "1.0.0";
   const dir = temp("mgr-tree-");
   const pkg: Record<string, unknown> = { name: `@woohaa3/extension-${id}`, version, type: "module" };
   const descriptor: Record<string, unknown> = { schemaVersion: 1, extensionId: id, version, engines: ENGINES, ...(options.descriptor ?? {}) };
-  if (options.backend) {
+  if (options.backend || options.siteBackend) {
     pkg.exports = { "./backend-dist/entry": "./backend-dist/entry.mjs" };
+  }
+  if (options.siteBackend) {
+    descriptor.backend = { module: "./backend-dist/entry", factory: "createDefinition" };
+    fs.mkdirSync(path.join(dir, "backend-dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "backend-dist", "entry.mjs"),
+      `export function createDefinition() { return { extensionId: ${JSON.stringify(id)}, activate: () => ({ dispose() {} }) }; }\n`
+    );
+  }
+  if (options.backend) {
     descriptor.hostPlugin = { module: "./backend-dist/entry", factory: "createPlugin", features: ["provider"] };
     fs.mkdirSync(path.join(dir, "backend-dist"), { recursive: true });
     fs.writeFileSync(path.join(dir, "backend-dist", "entry.mjs"), `export function createPlugin() { return {}; }\n`);
@@ -389,6 +399,48 @@ describe("Extension Manager", () => {
     expect(installations(h.managedRoot).extensions.demo.observeUntil).toBeNull();
     h.manager.requestRestart("admin");
     expect(h.restarts).toEqual(["admin"]);
+  });
+
+  it("站点 backend 扩展：有运行期能力也 restart-required，不 swap、不热登记", async () => {
+    await setup();
+    const swaps: unknown[] = [];
+    const runtime = {
+      available: () => true,
+      swap: async (...args: unknown[]) => {
+        swaps.push(args);
+        return { swapped: true };
+      },
+      remove: async () => undefined
+    };
+    const h = await harness({ allowUnsignedLocal: true, runtime });
+    const job = await installFile(h, packTree(extensionTree({ siteBackend: true }), null).file);
+    expect(job.outcome).toBe("restart-required");
+    expect(swaps).toEqual([]);
+    expect(h.published).toEqual([]);
+    expect(installations(h.managedRoot).extensions.demo).toMatchObject({
+      requiresRestart: true,
+      hotSwappable: false,
+      restartPending: true
+    });
+  });
+
+  it("站点 backend 扩展卸载：不调用运行期 remove，仍要求重启", async () => {
+    await setup();
+    const removes: string[] = [];
+    const runtime = {
+      available: () => true,
+      swap: async () => ({ swapped: true }),
+      remove: async (id: string) => {
+        removes.push(id);
+      }
+    };
+    const h = await harness({ allowUnsignedLocal: true, runtime });
+    await installFile(h, packTree(extensionTree({ siteBackend: true }), null).file);
+    const job = h.manager.uninstall("demo", { actor: "tester" });
+    const done = await h.manager.wait(job.jobId);
+    expect(done?.outcome).toBe("restart-required");
+    expect(removes).toEqual([]);
+    expect(installations(h.managedRoot).extensions.demo).toBeUndefined();
   });
 
   it("不支持受控重启 → MARKETPLACE_RESTART_UNSUPPORTED", async () => {
