@@ -157,6 +157,12 @@ describe("local-agent 连接描述（任务 3.1）", () => {
     }
   });
 
+  it("本地连接不要求在配置页完成预检", async () => {
+    const descriptors = createLocalAgentDescriptors();
+    const described = await descriptors["opencode-server"]!.describe({ record: record({ adapterId: "opencode-server", authMode: "local-login" }), credentialConfigured: false, readCredential: async () => null, recordStatus: async () => undefined });
+    expect(described.required).toEqual([]);
+  });
+
   it("没有手填模型时不伪造 app-server-default，保留真实目录/占位", async () => {
     const descriptors = createLocalAgentDescriptors();
     const empty = await descriptors["codex-appserver"]!.describe({ record: record(), credentialConfigured: false, readCredential: async () => null, recordStatus: async () => undefined });

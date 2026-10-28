@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import fs, { existsSync } from "node:fs";
+import net from "node:net";
+import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import path from "node:path";
@@ -78,6 +80,7 @@ const children = new Set();
 let stopping = false;
 let stopPromise;
 let hostWatch = null;
+let agentSupervisor = null;
 const processGroups = process.platform !== "win32";
 
 function signalChild(child, signal) {
@@ -87,6 +90,71 @@ function signalChild(child, signal) {
   } catch (error) {
     if (error.code !== "ESRCH") console.error(`[dev] ${error.message}`);
   }
+}
+
+function supervisorRpc(config, method, params = {}) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(config.socketPath);
+    let buffer = "";
+    const id = Date.now();
+    const timer = setTimeout(() => { socket.destroy(); reject(new Error("Agent Supervisor 连接超时")); }, 3000);
+    const finish = (error, value) => { clearTimeout(timer); socket.destroy(); error ? reject(error) : resolve(value); };
+    socket.setEncoding("utf8");
+    socket.on("data", chunk => {
+      buffer += String(chunk);
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line) continue;
+        try {
+          const response = JSON.parse(line);
+          if (response.id !== id) continue;
+          if (response.ok) finish(null, response.result);
+          else finish(new Error(response.error || "Agent Supervisor 请求失败"));
+        } catch { /* 等待完整 JSON 行 */ }
+      }
+    });
+    socket.once("error", error => finish(error));
+    socket.once("connect", () => socket.write(JSON.stringify({ id, token: config.token, workspaceKey: config.workspaceKey, method, params }) + "\n"));
+  });
+}
+
+async function ensureAgentSupervisor() {
+  const runtimeDir = path.join(root, ".local", "agent-runtime");
+  fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+  const socketPath = path.join(runtimeDir, "supervisor.sock");
+  const tokenPath = path.join(runtimeDir, "token");
+  const token = existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : crypto.randomBytes(32).toString("hex");
+  if (!existsSync(tokenPath)) fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+  const workspaceKey = crypto.createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 40);
+  const config = { socketPath, token, workspaceKey };
+  if (existsSync(socketPath)) {
+    try {
+      const state = await supervisorRpc(config, "ping");
+      if (state?.workspaceKey === workspaceKey) { agentSupervisor = config; return config; }
+    } catch { /* stale endpoint; start a replacement below */ }
+    try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
+  }
+  const script = path.join(root, "scripts", "agent-runtime-supervisor.mjs");
+  const child = spawn(process.execPath, [script, "--socket", socketPath, "--state", runtimeDir, "--token", token, "--workspace", workspaceKey, "--owner-pid", String(process.pid)], {
+    cwd: root, detached: true, stdio: "ignore", windowsHide: true
+  });
+  child.unref();
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      const state = await supervisorRpc(config, "ping");
+      if (state?.workspaceKey === workspaceKey) { agentSupervisor = config; return config; }
+    } catch { await new Promise(resolve => setTimeout(resolve, 100)); }
+  }
+  throw new Error("Agent Supervisor 启动超时");
+}
+
+async function shutdownAgentSupervisor() {
+  if (!agentSupervisor) return;
+  const current = agentSupervisor;
+  agentSupervisor = null;
+  try { await supervisorRpc(current, "shutdown"); } catch { /* supervisor may already be gone */ }
 }
 
 function stop(code) {
@@ -108,6 +176,7 @@ function stop(code) {
       await Promise.all(exited);
     } finally {
       clearTimeout(timeout);
+      await shutdownAgentSupervisor();
     }
   })();
   return stopPromise;
@@ -313,6 +382,7 @@ async function main() {
   }
 
   console.log(`[dev] 前端：http://localhost:${frontendPort}${basePath === "/" ? "" : basePath} → 后端：${backendUrl}`);
+  const supervisor = await ensureAgentSupervisor();
   // node --watch：宿主崩溃或改坏代码时不结束会话，等待文件变化后自动重启（输出保留在终端）。
   // 退出码 75（受控重启，change: 2026-10-21-harden-extension-fault-isolation）：重新拉起同一条命令，
   // 会话不结束；连续重启循环按崩溃处理（见 lib/dev-restart-policy.mjs）。
@@ -325,6 +395,9 @@ async function main() {
       WOOHAA3_BASE_PATH: basePath,
       PORT: String(backendPort),
       BACKEND_PORT: String(backendPort),
+      WOOHAA3_AGENT_RUNTIME_SOCKET: supervisor.socketPath,
+      WOOHAA3_AGENT_RUNTIME_TOKEN: supervisor.token,
+      WOOHAA3_AGENT_WORKSPACE_KEY: supervisor.workspaceKey,
       // node --watch keeps its supervisor alive after the child exits with 75.
       // The backend touches its entry on controlled restart so node --watch starts it again.
       WOOHAA3_DEV_WATCH: watch ? "1" : "0"

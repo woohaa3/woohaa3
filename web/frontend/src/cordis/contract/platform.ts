@@ -250,7 +250,7 @@ export type NodeActionActivation = NodeActionContext & {
 export type NodeActionDescriptor = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download";
+  icon?: "download" | "arrange-horizontal" | "arrange-vertical" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 按钮文案（中文）。 */
   label: string;

@@ -20,7 +20,7 @@ export function usableCanvasArea(area: Rect, occlusions: readonly Rect[]): Rect 
   return usable;
 }
 
-export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; height: number }, previous?: AnchoredPanel["placement"]): AnchoredPanel | null {
+export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; height: number }, previous?: AnchoredPanel["placement"], policy: "auto" | "below" = "auto"): AnchoredPanel | null {
   const right = node.left + node.width;
   const bottom = node.top + node.height;
   const areaRight = area.left + area.width;
@@ -29,6 +29,9 @@ export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; 
   const width = Math.max(0, Math.min(760, area.width - 32, panel.width));
   const left = Math.max(area.left + 16, Math.min(node.left + node.width / 2 - width / 2, areaRight - 16 - width));
   const below = areaBottom - bottom - 12;
+  if (policy === "below") {
+    return { left, top: bottom + 12, width, maxHeight: Math.max(0, below), placement: "below" };
+  }
   const above = node.top - area.top - 12;
   const fitsBelow = below >= panel.height;
   const fitsAbove = above >= panel.height;

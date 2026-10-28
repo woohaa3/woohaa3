@@ -177,6 +177,10 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       ...(env.WOOHAA3_SDK_AGENT_ALLOWED_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean),
     ]);
     const service = createApplicationService({
+      // The Agent Runtime Supervisor outlives this watched backend.  Preserve
+      // unresolved turns while the backend reconnects instead of converting a
+      // lost in-process receipt into a terminal failure.
+      ...(env.WOOHAA3_AGENT_RUNTIME_SOCKET ? { preserveUnreconciledOnRestart: true } : {}),
       serviceConnectionProviders: () => generation.list(),
       serviceConnectionSources: {
         ...(sourceSecrets ? { secrets: sourceSecrets.forExtension("@service-connections") } : {}),

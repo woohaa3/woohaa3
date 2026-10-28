@@ -11,7 +11,7 @@ import { McpConnectionPanel, type McpPanelSnapshot } from "./mcp-connection-pane
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { providerConfigGroups } from "../settings/plugin-groups.js";
 import { PluginIconMark } from "../settings/plugin-icons.js";
-import { CapabilityOverview, CapabilityDiagnostics, type CapabilityPage } from "./capability-pages.js";
+import { CapabilityOverview, type CapabilityPage } from "./capability-pages.js";
 import { useServiceDirectory, serviceSourceState } from "./service-directory.js";
 import "./style.css";
 
@@ -33,11 +33,10 @@ function connectionState(connection: AgentConnectionView) {
 
 export function AgentAssistant({ service, payload, onClose, settingsStore, onConfigurationSaved, onHistoryClose }: { service: AgentConversationService; payload: Payload; onClose: () => void; settingsStore?: BackendSettingsStore; onConfigurationSaved?: () => void; onHistoryClose?: () => boolean }) {
   const contributions = useSlot("agent-assistant.configuration");
-  const initialPage: CapabilityPage = payload.section === "generation-history" || payload.section === "diagnostics" ? payload.section : ["generation", "api-key", "login"].includes(payload.kind ?? "") || payload.page === "add" ? "sources" : payload.kind === "installed" ? "agents" : payload.kind === "mcp" ? "mcp" : payload.kind === "diagnostics" ? "diagnostics" : "overview";
+  const initialPage: CapabilityPage = payload.section === "generation-history" ? "generation-history" : ["generation", "api-key", "login"].includes(payload.kind ?? "") || payload.page === "add" ? "sources" : payload.kind === "installed" ? "agents" : payload.kind === "mcp" ? "mcp" : "overview";
   const [page, setPage] = useState<CapabilityPage>(initialPage);
   const [servicesVisited, setServicesVisited] = useState(initialPage === "sources");
   const [localVisited, setLocalVisited] = useState(initialPage === "agents");
-  const [diagnosticsVisited, setDiagnosticsVisited] = useState(initialPage === "diagnostics");
   const [historyVisited, setHistoryVisited] = useState(initialPage === "generation-history");
   const historyContributions = useSlot("ai-center.generation-history");
   const History = historyContributions[0]?.render;
@@ -55,7 +54,6 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     if (next === "generation-history") setHistoryVisited(true);
     if (next === "sources") setServicesVisited(true);
     if (next === "agents") setLocalVisited(true);
-    if (next === "diagnostics") setDiagnosticsVisited(true);
   };
   useEffect(() => {
     let cancelled = false;
@@ -71,7 +69,6 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     userNavigated.current = false;
     setPage(initialPage);
     if (initialPage === "generation-history") setHistoryVisited(true);
-    if (initialPage === "diagnostics") setDiagnosticsVisited(true);
     if (initialPage === "sources") setServicesVisited(true);
     if (initialPage === "agents") setLocalVisited(true);
   }, [payload]);
@@ -99,7 +96,6 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
     { id: "mcp", label: "MCP 服务", count: mcp?.configured },
     { id: "sources", label: "模型提供商", count: directoryState.directory ? sources.length : sourceConnections.length },
     { id: "generation-history", label: "生成历史" },
-    { id: "diagnostics", label: "连接诊断" },
   ];
   return <Dialog.Content size="lg" className="agent-assistant" ariaLabel="AI 能力中心">
     <UiPortalScope>
@@ -125,7 +121,6 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
             <div className="agent-assistant__page-heading"><h2>生成历史</h2></div>
             {!payload.canvasId ? <p>从画布打开后查看生成历史。</p> : History ? <HistoryBoundary key={`${payload.canvasId}:${historyContributions[0]?.id}`}><Suspense fallback={<p>正在加载生成历史…</p>}><History canvasId={payload.canvasId} active={page === "generation-history"} onClose={onHistoryClose ?? (() => { onClose(); return true; })} /></Suspense></HistoryBoundary> : <SettingsFeedback tone="danger">生成历史不可用：历史模块未装配。</SettingsFeedback>}
           </section> : null}
-          {diagnosticsVisited ? <section hidden={page !== "diagnostics"} className="agent-assistant__page" data-ai-page="diagnostics"><UiPortalScope><CapabilityDiagnostics connections={connections} sources={sources} mcp={mcp} error={error ?? directoryState.error} loading={loading || directoryState.loading} onRefresh={() => refresh(value => value + 1)} /></UiPortalScope></section> : null}
         </div>
       </DialogBody>
     </UiPortalScope>
@@ -188,7 +183,7 @@ function ConnectionPanel({ local, compact = false, connections, contributions, p
         <div className="agent-assistant__identity"><strong><span className="service-identity"><ServiceLogo service={connection.authMode === "oauth" ? "chatgpt" : connection.adapterId} />{connection.name}</span></strong>{connectionState(connection) ? <p className="agent-assistant__status">{connectionState(connection)}</p> : null}</div>
         <div className="agent-assistant__actions"><Button size="sm" tone="ghost" onClick={() => { setSelected(connection.connectionId); setPage("configuration"); }}>管理</Button>{contextual ? <Button size="sm" tone="primary" disabled={!connection.ready} onClick={() => onChoose(connection)}>使用</Button> : null}</div>
       </li>)}</ul>}
-    </> : page === "add" ? <AddConnectionForm contributions={contributions} onSaved={saved} local={local} /> : selected && !current ? loading ? <p>正在读取连接…</p> : <p>此连接已不存在或属于另一入口，请返回列表重新选择。</p> : Config ? <div className="agent-assistant__configuration"><Config key={selected ?? kind} connectionId={selected ?? undefined} onSaved={saved} />{current && !local ? <ConnectionDiagnostics connection={current} /> : null}</div> : <p>当前环境未启用此连接的配置扩展。请在设置页由管理员启用后重试。</p>}
+    </> : page === "add" ? <AddConnectionForm contributions={contributions} onSaved={saved} local={local} /> : selected && !current ? loading ? <p>正在读取连接…</p> : <p>此连接已不存在或属于另一入口，请返回列表重新选择。</p> : Config ? <div className="agent-assistant__configuration"><Config key={selected ?? kind} connectionId={selected ?? undefined} onSaved={saved} /></div> : <p>当前环境未启用此连接的配置扩展。请在设置页由管理员启用后重试。</p>}
   </>;
 }
 
@@ -258,11 +253,6 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
     </div>
   </div>;
 }
-
-function ConnectionDiagnostics({ connection }: { connection: AgentConnectionView }) {
-  return <details className="agent-assistant__diagnostics"><summary>连接诊断</summary><dl><div><dt>运行位置</dt><dd>本机宿主</dd></div>{Object.entries(connection.status).map(([name, evidence]) => <div key={name}><dt>{({ transport: "连接", credential: connection.authMode === "api-key" ? "API Key" : "认证", modelAccess: "模型访问", tools: "目标工具" } as Record<string, string>)[name]}</dt><dd>{name === "credential" && connection.authMode === "api-key" && evidence.state === "ready" ? "已保存（模型权限待验证）" : evidence.reason ?? ({ unknown: "待验证", ready: "检查通过", unavailable: "不可用", failed: "检查失败", pending: "检查中", unsupported: "不支持" }[evidence.state])}</dd></div>)}</dl>{connection.runtime ? <p>{connection.runtime.engine} · {connection.runtime.engineVersion}</p> : null}</details>;
-}
-
 
 function ServiceSources({ service, connections, contributions, payload, settingsStore, directoryState, addRequest, onSaved, onChoose }: {
   service: AgentConversationService; connections: AgentConnectionView[]; contributions: readonly ConfigurationContribution[];
@@ -352,7 +342,6 @@ function ServiceSources({ service, connections, contributions, payload, settings
           })}
         </> : null}
         {source?.managedByAdministrator ? <p>此共享来源由管理员管理。</p> : provider && settingsStore ? <Suspense fallback={<p>正在读取配置…</p>}><GenerationProviders store={settingsStore} compact providerId={provider} onSaved={() => { onSaved(); back(); }} /></Suspense> : Contribution && binding ? <Contribution connectionId={binding.consumerId} onSaved={() => { onSaved(); back(); }} /> : <p>当前来源未提供配置适配器，请启用对应扩展。</p>}
-        {connections.find(connection => source?.bindings.some(binding => binding.consumerId === connection.connectionId)) ? <ConnectionDiagnostics connection={connections.find(connection => source?.bindings.some(binding => binding.consumerId === connection.connectionId))!} /> : null}
       </UiPortalScope></div>;
     })}
     {confirmation ? <div className="provider-connection__confirmation"><p>{confirmation.action === "protocol" ? "确认新增此协议入口并共用当前认证？请确认该地址属于同一受信任服务。手填模型只开放讨论，不授予目标工具权限。" : confirmation.action === "enabled" ? `确认${confirmation.enabled ? "启用" : "停用"}整个来源？将影响该来源的全部消费绑定和后续调用；已提交回执仍保留。` : confirmation.action === "merge" ? "确认使用保留来源的认证重绑消费者？原来源和历史保留；活动或待核对执行会阻止合并。" : confirmation.action === "assistant" ? "确认调整站点共享讨论用途？此操作影响已获站点使用权限的用户；不会授予作品写入或工具权限。" : "确认让此 Provider 使用当前来源？不会复制 Key，也不会发送生成请求。"}</p><Button size="sm" disabled={busy} onClick={() => setConfirmation(null)}>取消</Button><Button size="sm" disabled={busy} onClick={() => void confirmChange()}>确认</Button></div> : null}

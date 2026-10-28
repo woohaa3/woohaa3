@@ -248,6 +248,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           if (route.type !== MODEL_NODE_EDITOR_PANEL_TYPE) return null;
           // 交付完成后重新解析片段与写权限，避免沿用占位节点时期的空 clipId。
           useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
+          if (!resolveSelectionContext(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), route.nodeId)) return null;
           return (
             <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
               <Suspense fallback={<ExecutionPanelSkeleton />}><ModelParameterPanel
