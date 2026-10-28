@@ -17,6 +17,8 @@ import {
 import { getAppPublicFetch } from "./app-base-path.js";
 import { CANVAS_API_BASE_PATH } from "./paths.js";
 import type {
+  CanvasArchiveExportResult,
+  CanvasArchiveImportResult,
   CanvasCatalogCreateResult,
   CanvasCatalogListResult,
   CanvasCatalogRemote,
@@ -110,6 +112,103 @@ export function createCanvasCatalogRemote(options: CanvasCatalogRemoteOptions = 
       const decoded = decodeCanvasCreateResult(result.json);
       if (!decoded.ok) return { ok: false, code: "malformed-response", error: decoded.error };
       return { ok: true, ...decoded.result };
+    },
+
+    /**
+     * 导出归档包。
+     *
+     * 与其它方法不同，这里的响应是**二进制**而不是 JSON，所以不走共享的 `request()`
+     * （它无条件 `response.json()`）。重试策略保持一致：只读请求可以重试。
+     */
+    async exportArchive(canvasId): Promise<CanvasArchiveExportResult> {
+      const url = `${basePath}/${encodeURIComponent(canvasId)}/archive`;
+      for (let attempt = 0; ; attempt += 1) {
+        const delay = READ_RETRY_DELAYS_MS[attempt];
+        let response: Response;
+        try {
+          response = await fetchImpl(url, { method: "GET" });
+        } catch {
+          if (delay !== undefined) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          return { ok: false, code: "unavailable", error: "无法连接画布目录服务" };
+        }
+        if (!response.ok) {
+          if (delay !== undefined && TRANSIENT_HTTP_STATUSES.has(response.status)) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          const parsed = await response.json().catch(() => null);
+          return {
+            ok: false,
+            code: failureCode(response.status, parsed),
+            error: failureMessage(response.status, parsed, "导出归档失败")
+          };
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        return {
+          ok: true,
+          bytes,
+          filename: filenameFromDisposition(response.headers.get("content-disposition")) ?? `${canvasId}.woohaa-archive`,
+          missingMedia: Number(response.headers.get("x-woohaa-archive-missing-media") ?? 0) || 0
+        };
+      }
+    },
+
+    async importArchive(bytes, options = {}): Promise<CanvasArchiveImportResult> {
+      const params = new URLSearchParams();
+      if (options.dryRun) params.set("dryRun", "1");
+      if (options.replace) params.set("replace", "1");
+      const suffix = params.size > 0 ? `/archive?${params.toString()}` : "/archive";
+      let response: Response;
+      try {
+        response = await fetchImpl(`${basePath}${suffix}`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          // `Uint8Array` 本身不在 `BodyInit` 里（它可能是 SharedArrayBuffer 视图）；
+          // 切出等价的 `ArrayBuffer` 再交出去，语义相同且类型正确。
+          body: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+        });
+      } catch {
+        return { ok: false, code: "unavailable", error: "无法连接画布目录服务" };
+      }
+      const parsed = await response.json().catch(() => null);
+      if (!response.ok) {
+        return {
+          ok: false,
+          code: failureCode(response.status, parsed),
+          error: failureMessage(response.status, parsed, "导入归档失败")
+        };
+      }
+      const record = (parsed ?? {}) as {
+        importedCanvasIds?: unknown;
+        replacedCanvasIds?: unknown;
+        mediaWritten?: unknown;
+      };
+      const ids = (value: unknown): string[] =>
+        Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+      return {
+        ok: true,
+        importedCanvasIds: ids(record.importedCanvasIds),
+        replacedCanvasIds: ids(record.replacedCanvasIds),
+        mediaWritten: typeof record.mediaWritten === "number" ? record.mediaWritten : 0
+      };
     }
   };
+}
+
+/** 从 `Content-Disposition` 取文件名；支持 RFC 5987 的 `filename*=UTF-8''…`。 */
+function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      /* 落在下面的普通 filename 分支 */
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain?.[1] ?? null;
 }

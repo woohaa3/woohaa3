@@ -33,7 +33,14 @@ function fakeRemote(script: {
   return {
     list: script.list ?? (async (input) => ({ ok: true, entries: [], total: 0, offset: input.offset, limit: input.limit })),
     get: script.get ?? (async (canvasId) => ({ ok: true, summary: detail(canvasId) })),
-    create: script.create ?? (async () => ({ ok: true, canvasId: "created", revision: 1, title: "" }))
+    create: script.create ?? (async () => ({ ok: true, canvasId: "created", revision: 1, title: "" })),
+    exportArchive: async (canvasId) => ({
+      ok: true,
+      bytes: new Uint8Array(),
+      filename: `${canvasId}.woohaa-archive`,
+      missingMedia: 0
+    }),
+    importArchive: async () => ({ ok: true, importedCanvasIds: [], replacedCanvasIds: [], mediaWritten: 0 })
   };
 }
 

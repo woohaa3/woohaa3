@@ -74,7 +74,9 @@ async function mountRefreshable(catalog: CanvasCatalogService) {
     currentCanvasId: () => "a",
     switchTo: () => undefined,
     create: async () => ({ ok: true, canvasId: "new" }),
-    rename: async () => ({ ok: true })
+    rename: async () => ({ ok: true }),
+
+    exportArchive: async () => ({ ok: true })
   });
   const container = document.createElement("div");
   document.body.appendChild(container);

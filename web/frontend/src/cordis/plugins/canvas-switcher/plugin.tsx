@@ -12,6 +12,7 @@ import { definePlugin } from "../../plugin.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { submitCanvasRename } from "./rename.js";
+import { saveDownload } from "../../services/file-download.js";
 import type { CanvasSummary } from "../../contract/canvas-catalog.js";
 import type { CanvasSessionStatus } from "../../contract/session.js";
 import {
@@ -166,6 +167,34 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
         return { ok: true };
       };
 
+      /**
+       * 导出归档包并触发下载。
+       *
+       * 浏览器只能把文件送到下载目录，选不了盘符 —— 这是浏览器的限制，不是我们省掉了。
+       * 桌面壳将来接原生保存对话框时，替换的是这一处 `saveDownload` 调用。
+       *
+       * **不在这之后删画布**：归档是把内容搬到别处，「要不要腾出空间」是下一步的独立决定。
+       */
+      const exportArchive = async (entry: CanvasSummary) => {
+        const result = await catalog.exportArchive(entry.id);
+        if (!result.ok) return { ok: false, error: result.error };
+        // `Uint8Array` 可能挂在 SharedArrayBuffer 上，`BlobPart` 只接受 ArrayBuffer 视图；
+        // 切一份等价的 ArrayBuffer 再包。
+        const buffer = result.bytes.buffer.slice(
+          result.bytes.byteOffset,
+          result.bytes.byteOffset + result.bytes.byteLength
+        ) as ArrayBuffer;
+        saveDownload(new Blob([buffer], { type: "application/octet-stream" }), result.filename);
+        if (result.missingMedia > 0) {
+          // 缺件不是失败：画布本身可能已经有断链。但必须说出来，否则用户会以为包是完整的。
+          return {
+            ok: true,
+            error: `已导出，但有 ${result.missingMedia} 个素材文件缺失（画布里的对应图片/视频在恢复后会打不开）`
+          };
+        }
+        return { ok: true };
+      };
+
       const disposeDialog = ctx.dialogs.registerDialog(CANVAS_SWITCHER_DIALOG_ID, {
         definition: canvasSwitcherDefinition,
         renderer: createCanvasSwitcherRenderer({
@@ -179,6 +208,7 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
           switchTo,
           create,
           rename,
+          exportArchive,
           sources
         })
       });

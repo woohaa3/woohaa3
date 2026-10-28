@@ -6,6 +6,8 @@
  * 结果（`requestSerial` + `disposed`）。不创建任何画布运行资源。
  */
 import type {
+  CanvasArchiveExportResult,
+  CanvasArchiveImportResult,
   CanvasCatalogCreateResult,
   CanvasCatalogListResult,
   CanvasCatalogRemote,
@@ -114,6 +116,30 @@ export class CanvasCatalogStore implements CanvasCatalogService {
 
   async get(canvasId: string): Promise<CanvasCatalogSummaryResult> {
     return this.remote.get(canvasId);
+  }
+
+  /**
+   * 导出归档包。
+   *
+   * 刻意**不**在这里落盘或触发下载：浏览器与桌面壳的保存方式不同（前者只能走下载目录，
+   * 后者能弹原生对话框选盘符），由调用方决定。目录 store 只负责把字节拿到手。
+   */
+  async exportArchive(canvasId: string): Promise<CanvasArchiveExportResult> {
+    return this.remote.exportArchive(canvasId);
+  }
+
+  async importArchive(
+    bytes: Uint8Array,
+    options: { dryRun?: boolean; replace?: boolean } = {}
+  ): Promise<CanvasArchiveImportResult> {
+    const result = await this.remote.importArchive(bytes, options);
+    if (!result.ok) return result;
+    // 只有真的写了才刷新：dryRun 不改目录，白刷一次会让「自动刷新」闪一下。
+    if (!options.dryRun) {
+      this.invalidate();
+      await this.load(true);
+    }
+    return result;
   }
 
   invalidate(): void {

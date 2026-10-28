@@ -18,6 +18,7 @@ import { CanvasCatalogStore } from "../../services/canvas-catalog-store.js";
 import { createFakeCanvasCatalogRemote, makeSummary } from "../../test-support/canvas-catalog.js";
 import { CanvasSwitcherTrigger, createCanvasSwitcherRenderer } from "./chrome.js";
 import type { CanvasSwitcherDeps } from "./chrome.js";
+import type { CanvasSummary } from "../../contract/canvas-catalog.js";
 import type { CanvasSession } from "../../contract/session.js";
 import type { CanvasNavigationService } from "../../navigation/index.js";
 import type { CanvasCatalogItemActionProps } from "../../contracts.js";
@@ -61,6 +62,7 @@ async function renderSwitcher(options: {
   phase?: "synced" | "offline";
   create?: () => Promise<{ ok: boolean; error?: string; canvasId?: string }>;
   rename?: (title: string) => Promise<{ ok: boolean; error?: string }>;
+  exportArchive?: (entry: CanvasSummary) => Promise<{ ok: boolean; error?: string }>;
   switchTo?: (canvasId: string) => void;
   slots?: SlotRegistry;
 } = {}): Promise<{ markup: string; deps: CanvasSwitcherDeps }> {
@@ -78,7 +80,8 @@ async function renderSwitcher(options: {
     currentCanvasId: () => options.currentCanvasId ?? "a",
     switchTo: options.switchTo ?? (() => undefined),
     create: options.create ?? (async () => ({ ok: true, canvasId: "new" })),
-    rename: options.rename ?? (async () => ({ ok: true }))
+    rename: options.rename ?? (async () => ({ ok: true })),
+    exportArchive: options.exportArchive ?? (async () => ({ ok: true }))
   };
   const Renderer = createCanvasSwitcherRenderer(deps);
   const markup = renderToStaticMarkup(
@@ -119,6 +122,7 @@ async function mountSwitcher(
     switchTo: options.switchTo ?? (() => undefined),
     create: async () => ({ ok: true, canvasId: "new" }),
     rename: async () => ({ ok: true }),
+    exportArchive: async () => ({ ok: true }),
     ...(options.sources ? { sources: options.sources } : {})
   });
   const dispose = dialogs.registerDialog(CANVAS_SWITCHER_DIALOG_ID, {
@@ -373,7 +377,9 @@ describe("CanvasSwitcher dialog renderer", () => {
       currentCanvasId: () => "a",
       switchTo: () => undefined,
       create: async () => ({ ok: true, canvasId: "new" }),
-      rename: async () => ({ ok: true })
+      rename: async () => ({ ok: true }),
+
+      exportArchive: async () => ({ ok: true })
     });
     const markup = renderToStaticMarkup(
       <Renderer instance={emptyInstance} requestClose={() => undefined} setBusy={() => undefined} replace={() => undefined} />
@@ -396,7 +402,9 @@ describe("CanvasSwitcher dialog renderer", () => {
       currentCanvasId: () => "a",
       switchTo: () => undefined,
       create: async () => ({ ok: true, canvasId: "new" }),
-      rename: async () => ({ ok: true })
+      rename: async () => ({ ok: true }),
+
+      exportArchive: async () => ({ ok: true })
     };
     // 未注入 sources：不出现来源分区。
     const WithoutSources = createCanvasSwitcherRenderer(deps);
@@ -479,7 +487,9 @@ describe("CanvasSwitcher dialog renderer", () => {
       currentCanvasId: () => "c0",
       switchTo: () => undefined,
       create: async () => ({ ok: true, canvasId: "new" }),
-      rename: async () => ({ ok: true })
+      rename: async () => ({ ok: true }),
+
+      exportArchive: async () => ({ ok: true })
     });
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -516,7 +526,9 @@ describe("CanvasSwitcher dialog renderer", () => {
       currentCanvasId: () => "a",
       switchTo: () => undefined,
       create: async () => ({ ok: true, canvasId: "new" }),
-      rename: async () => ({ ok: true })
+      rename: async () => ({ ok: true }),
+
+      exportArchive: async () => ({ ok: true })
     });
     const markup = renderToStaticMarkup(
       <Renderer instance={emptyInstance} requestClose={() => undefined} setBusy={() => undefined} replace={() => undefined} />
@@ -548,7 +560,9 @@ describe("CanvasSwitcher dialog renderer", () => {
       currentCanvasId: () => "a",
       switchTo: () => undefined,
       create: async () => ({ ok: true, canvasId: "new" }),
-      rename: async () => ({ ok: true })
+      rename: async () => ({ ok: true }),
+
+      exportArchive: async () => ({ ok: true })
     });
     const markup = renderToStaticMarkup(
       <Renderer instance={emptyInstance} requestClose={() => undefined} setBusy={() => undefined} replace={() => undefined} />
@@ -573,7 +587,9 @@ describe("CanvasSwitcher dialog renderer", () => {
       currentCanvasId: () => "a",
       switchTo: () => undefined,
       create: async () => ({ ok: true, canvasId: "new" }),
-      rename: async () => ({ ok: true })
+      rename: async () => ({ ok: true }),
+
+      exportArchive: async () => ({ ok: true })
     });
     const markup = renderToStaticMarkup(
       <Renderer instance={emptyInstance} requestClose={() => undefined} setBusy={() => undefined} replace={() => undefined} />
@@ -597,6 +613,7 @@ it("新建完成先清 busy 再关闭真实 DialogHost，失败则保留弹窗",
     catalog, selection: { getRecentCanvasId: () => null, setRecentCanvasId() {} },
     slots: new SlotRegistry(),
     session, currentCanvasId: () => "a", switchTo() {}, rename: async () => ({ ok: true }),
+    exportArchive: async () => ({ ok: true }),
     create: () => new Promise(resolve => { resolveCreate = resolve; })
   });
   const dispose = dialogs.registerDialog("canvas-switcher", { definition: canvasSwitcherDefinition, renderer: Renderer });

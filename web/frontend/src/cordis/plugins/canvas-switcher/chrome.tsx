@@ -195,6 +195,13 @@ export type CanvasSwitcherDeps = {
   create: (options?: readonly CanvasCreateOptionContribution[]) => Promise<{ ok: boolean; error?: string; canvasId?: string }>;
   rename: (title: string) => Promise<{ ok: boolean; error?: string }>;
   /**
+   * 把画布导出成 `.woohaa-archive` 存到本地（含媒体字节）。
+   *
+   * 导出后**不删除**原画布：删不删由用户看完结果再决定，这是「先保留、确认后再删」的
+   * 一半。文件名给的是缺省值，用户可以在浏览器的保存对话框里改。
+   */
+  exportArchive: (entry: CanvasSummary) => Promise<{ ok: boolean; error?: string }>;
+  /**
    * Slot registry：条目右侧的扩展动作（`canvas.catalog-item-action`）从这里读取
    * （change: canvas 同步显式化）。宿主不做任何具体扩展判断。
    */
@@ -405,6 +412,20 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
         const result = await deps.rename(renameValue);
         if (result.ok) setRenaming(false);
         return result;
+      });
+    };
+
+    /**
+     * 归档一条画布：导出成 `.woohaa-archive` 交给浏览器下载。
+     *
+     * `deps.exportArchive` 在成功但缺素材时也返回 `ok: true` 并带 `error` 文案，
+     * 这里按「提示但不当作失败」处理 —— 包已经下下来了，用户要看到的是警告而不是被拒绝。
+     */
+    const onArchive = (entry: CanvasSummary) => {
+      // 显式写出结果类型：`run` 的泛型在只有 `{ ok }` 的返回上会推成 `{}`，
+      // 那样 `result.error` 就不存在了。
+      void run<{ ok: boolean; error?: string }>(() => deps.exportArchive(entry)).then((result) => {
+        if (result?.ok && result.error) setError(result.error);
       });
     };
 
@@ -671,6 +692,19 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
                             重命名
                           </button>
                         ) : null}
+                        {/*
+                          归档：把画布连同素材打包存到本地。
+                          只读的画布也能导出（导出是读操作），所以不受 `writable` 限制。
+                        */}
+                        <button
+                          type="button"
+                          className="canvas-switcher__item-rename"
+                          onClick={() => void onArchive(entry)}
+                          disabled={busy}
+                          title="把这张画布连同素材导出成归档文件"
+                        >
+                          归档
+                        </button>
                         {catalogItemActions.length > 0 ? (
                           <div
                             className="canvas-switcher__item-actions"

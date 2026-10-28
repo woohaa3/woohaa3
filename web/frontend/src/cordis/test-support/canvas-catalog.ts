@@ -6,6 +6,8 @@
  */
 import type { CanvasSummary } from "@woohaa3/contracts";
 import type {
+  CanvasArchiveExportResult,
+  CanvasArchiveImportResult,
   CanvasCatalogCreateResult,
   CanvasCatalogListResult,
   CanvasCatalogRemote,
@@ -51,6 +53,14 @@ export function createFakeCanvasCatalogRemote(
       entries.set(canvasId, entry);
       created.push(canvasId);
       return { ok: true, canvasId, revision: 1, title: entry.title };
+    },
+    // 归档不是本 fake 的关注点：返回空包 / 空结果，够调用方跑通即可。
+    async exportArchive(canvasId): Promise<CanvasArchiveExportResult> {
+      if (!entries.has(canvasId)) return { ok: false, code: "CANVAS_NOT_FOUND", error: `画布 ${canvasId} 不存在` };
+      return { ok: true, bytes: new Uint8Array(), filename: `${canvasId}.woohaa-archive`, missingMedia: 0 };
+    },
+    async importArchive(): Promise<CanvasArchiveImportResult> {
+      return { ok: true, importedCanvasIds: [], replacedCanvasIds: [], mediaWritten: 0 };
     }
   };
   return remote;
