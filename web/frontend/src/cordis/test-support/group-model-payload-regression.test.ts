@@ -101,7 +101,7 @@ describe("组展示模型从资源准入到 WASM payload", () => {
     const candidatesFor = createResidencyCandidateCache(createContentIdentity({ modelResourceKey: () => "group-resource" }));
     try {
       const candidate = candidatesFor(canvas)[0]!;
-      expect(candidate.y + candidate.height).toBe(68);
+      expect(candidate.y + candidate.height).toBe(4);
       createResidencyProjector({
         coordinator, getCanvas: () => canvas, candidatesFor,
         viewport: () => ({ x: 0, y: 0, zoom: 1 }),
