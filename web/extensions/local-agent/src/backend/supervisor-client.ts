@@ -1,5 +1,6 @@
 import net from "node:net";
 import crypto from "node:crypto";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { ProcessHandle, ProcessManager, ProcessManagerOptions, StdioConnection } from "./process-manager.js";
 
@@ -81,6 +82,11 @@ export function createSupervisorProcessManager(options: ProcessManagerOptions, s
     if (existing) return existing;
     const workDir = path.join(options.workDirRoot, safeSegment(input.adapterId), safeSegment(input.owner), safeSegment(input.connectionId));
     const configDir = path.join(workDir, "config");
+    // cwd 必须先存在：supervisor 里 `spawn(command, { cwd })` 在目录缺失时只报
+    // `spawn <可执行文件> ENOENT`，看起来像 CLI 没装，实际是工作目录不存在。
+    // 进程内 spawn 路径（process-manager）一直有这一步；Supervisor 模式漏了，只有带
+    // prepareConfigDir 钩子的 codex 顺手建了目录，opencode / codebuddy 全挂（2026-10-28 回归）。
+    mkdirSync(configDir, { recursive: true, mode: 0o700 });
     await options.prepareConfigDir?.({ adapterId: input.adapterId, owner: input.owner, connectionId: input.connectionId, workDir, configDir });
     const env: Record<string, string> = {
       ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined && !entry[0].startsWith("WOOHAA3_"))),
