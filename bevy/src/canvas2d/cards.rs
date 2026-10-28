@@ -173,39 +173,12 @@ pub(super) fn draw_decorations(
     index: usize,
 ) {
     let (accent, _, _) = theme.node_palette(&node.kind);
-    let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
-    let (width, height) = (node.width, node.height);
+    let z = 10.0 + index as f32 * 0.1;
     if selected {
-        geometry.rounded_rect(
-            x - 4.,
-            y - 4.,
-            width + 8.,
-            height + 8.,
-            11.,
-            z,
-            theme.token_u32("canvasNodeSelectedHalo"),
-        );
-    }
-    if selected {
-        // Cover the normal rim while staying below static icons/content and media.
-        geometry.rounded_rect(
-            x,
-            y,
-            width,
-            height,
-            8.,
-            z + 0.0031,
-            theme.token_u32("canvasNodeBorderSelected"),
-        );
-        let border = 1.7;
-        geometry.rounded_rect(
-            x + border,
-            y + border,
-            width - border * 2.,
-            height - border * 2.,
-            7.,
-            z + 0.0032,
-            theme.token_u32("canvasNodeSurface"),
+        super::selection_outline::draw(
+            geometry,
+            theme,
+            super::selection_outline::Target::Card { node, z },
         );
     }
     if selected && node.resizable {

@@ -129,9 +129,35 @@ fn model_content_does_not_change_badge_size_or_center() {
     }
     let tail = tail_path(&n);
     let frame = frame_path(&n);
-    assert!(frame.first().is_some_and(|point| point.distance(tail[0]) < 0.001));
-    assert!(frame.last().is_some_and(|point| point.distance(tail[2]) < 0.001));
-    assert!(!frame.iter().any(|point| point.distance(tail[1]) < 0.001));
+    assert!(
+        frame
+            .first()
+            .is_some_and(|point| point.distance(tail[2]) < 0.001)
+    );
+    assert!(
+        frame
+            .last()
+            .is_some_and(|point| point.distance(tail[2]) < 0.001)
+    );
+    assert!(
+        frame
+            .windows(2)
+            .any(|pair| pair[0].distance(tail[2]) < 0.001 && pair[1].distance(tail[1]) < 0.001)
+    );
+    assert!(
+        frame
+            .windows(2)
+            .any(|pair| pair[0].distance(tail[1]) < 0.001 && pair[1].distance(tail[0]) < 0.001)
+    );
+    let left = tail[0].x;
+    let right = tail[2].x;
+    let bottom = n.y + n.height;
+    assert!(!frame.windows(2).any(|pair| {
+        (pair[0].y - bottom).abs() < 0.001
+            && (pair[1].y - bottom).abs() < 0.001
+            && pair[0].x.min(pair[1].x) <= left + 0.001
+            && pair[0].x.max(pair[1].x) >= right - 0.001
+    }));
     assert!(path_contains(
         &outline(&n),
         Vec2::new(n.x + n.width / 2., n.y + n.height + BADGE_OUTSET / 2.)

@@ -12,7 +12,6 @@ use bevy::prelude::*;
 use crate::protocol::GroupPresentation;
 use crate::theme::ThemeResource;
 
-use super::dash::dashed_polyline;
 use super::geometry::Geometry;
 use super::layout::{hex, shortened};
 
@@ -21,9 +20,6 @@ use super::layout::{hex, shortened};
 /// 组主体与组卡片的实际 z 由 `draw_order::render_index` 派生；该常量只保留给
 /// 不携带节点层级的聚合选择带和几何测试。
 pub(crate) const GROUP_Z: f32 = 1.0;
-
-/// 圆角半径与描边宽度。
-const GROUP_BORDER: f32 = 1.5;
 
 /// group 容器底的 alpha（change: fix-group-and-marquee-preview；
 /// change: 2026-10-27-order-canvas-layers-by-ground-anchor 收敛为 2D 唯一组底色）。
@@ -109,42 +105,19 @@ pub(crate) fn draw_group(
 ) -> (String, Vec2, f32, u32) {
     let (x, y, width, height) = (node.x, node.y, node.width, node.height);
     if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, z + 0.03); }
-    // 选中态用更强的虚线框颜色表达，而不是铺一层不透明选中底：容器铺底会盖住成员
-    // （change: fix-group-and-marquee-preview）。
-    let border = if presentation.drop_target {
-        theme.token_u32("interactionAccent")
-    } else if selected {
-        theme.token_u32("canvasNodeBorderSelected")
-    } else {
-        theme.token_u32("canvasNodeBorder")
-    };
     // Continuous group surfaces are drawn by the per-group transparent panel
     // entity; this shared mesh owns only the perimeter, text and controls.
-    let path = super::group_outline::path(node);
-    if is_running(node) {
-        let color = if selected {
-            border
-        } else {
-            super::group_motion::mix(border, theme.token_u32("interactionAccent"), 0.55)
-        };
-        super::group_outline::stroke(
-            geometry,
-            &path,
-            0.,
-            super::group_outline::length(&path),
-            2.,
-            z + 0.001,
-            color,
-        );
-    } else {
-        dashed_polyline(
-            geometry,
-            &crate::canvas_query::group_model::frame_path(node),
-            GROUP_BORDER,
-            z + 0.001,
-            border,
-        );
-    }
+    super::selection_outline::draw(
+        geometry,
+        theme,
+        super::selection_outline::Target::Group {
+            node,
+            presentation,
+            selected,
+            running: is_running(node),
+            z,
+        },
+    );
     if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
         let color = theme.token_u32("canvasResizeHandle");
         for length in [5., 9.] {

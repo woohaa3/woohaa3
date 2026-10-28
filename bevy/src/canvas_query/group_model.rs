@@ -145,8 +145,7 @@ pub(crate) fn tail_path(node: &GraphNode) -> Vec<Vec2> {
     }
     let badge = badge_rect(node);
     let center_x = node.x + node.width / 2.;
-    let base_half = (TAIL_BASE * badge_scale(node) / 2.)
-        .min((node.width - 24.).max(8.) / 2.);
+    let base_half = (TAIL_BASE * badge_scale(node) / 2.).min((node.width - 24.).max(8.) / 2.);
     let base_y = node.y + node.height;
     let tip_y = badge.y;
     vec![
@@ -204,11 +203,12 @@ pub(crate) fn outline(node: &GraphNode) -> Vec<Vec2> {
     outline
 }
 
-/// Open dashed group frame around the speech-bubble body.
+/// Open dashed group frame around the speech-bubble body and tail.
 ///
-/// Start at the left tail join and walk around the body to the right tail join. The 3D surface
-/// owns the filled tail, so the dashed backplate frame stops at both joins and cannot draw a
-/// horizontal closure or a second outline over the pointed tip.
+/// Start at the right tail join, draw both slanted tail edges first, then walk around the body
+/// back to the right join. Starting on the tail gives its short slanted edges a fresh dash phase
+/// instead of allowing the preceding long bottom edge to consume the whole visible dash. The
+/// body bottom is split at the joins, so no horizontal segment can cross the tail base.
 pub(crate) fn frame_path(node: &GraphNode) -> Vec<Vec2> {
     let rect = rectangle(node);
     let tail = tail_path(node);
@@ -223,7 +223,10 @@ pub(crate) fn frame_path(node: &GraphNode) -> Vec<Vec2> {
     }) else {
         return rect;
     };
-    let mut frame = vec![tail[0]];
+    // Put the tail first. `dashed_polyline` is an open path and carries one phase across all
+    // segments; beginning at the right join guarantees that both slanted edges contribute a
+    // visible dash even when their length is shorter than one dash period.
+    let mut frame = vec![tail[2], tail[1], tail[0]];
     frame.extend_from_slice(&rect[at + 1..rect.len() - 1]);
     frame.extend_from_slice(&rect[..=at]);
     frame.push(tail[2]);

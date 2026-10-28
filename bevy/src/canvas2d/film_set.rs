@@ -51,17 +51,16 @@ pub(crate) fn draw_film_set_scope(
         return None;
     }
     let scope = super::scope::node_scope(node);
-    let color = if selected {
-        theme.token_u32("canvasNodeBorderSelected")
-    } else {
-        theme.token_u32("canvasNodeBorder")
-    };
-    if super::scope::is_diamond(scope.shape) {
-        super::dash::dashed_polygon(geometry, &scope.vertices, 1.5, base_z, color);
-    } else {
-        let aabb = scope.aabb;
-        super::dash::dashed_rounded_rect(geometry, aabb.x, aabb.y, aabb.width, aabb.height, 8., 1.5, base_z, color);
-    }
+    super::selection_outline::draw(
+        geometry,
+        theme,
+        super::selection_outline::Target::FilmSet {
+            node,
+            selected,
+            hovered,
+            z: base_z,
+        },
+    );
     // 选中时绘制范围抓手：8 个方形（四顶点 + 四边中点）；普通矩形保留右下角方形。
     if selected && node.resizable {
         draw_scope_grip(geometry, theme, &super::scope::grip(&scope), base_z);
