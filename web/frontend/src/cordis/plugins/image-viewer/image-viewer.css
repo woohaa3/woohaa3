@@ -1,0 +1,47 @@
+/**
+ * 宿主默认图片聚焦查看器样式
+ * （change: default-image-focus-viewer）。
+ *
+ * 真实画面由 Bevy 主画布按图片聚焦投影显示；本层只提供命中面与底部取景控件，
+ * 公共框架（contentRect 变量、顶部栏、连接栏、面板占位）仍来自 `cordis/focus/focus.css`。
+ */
+
+.app[data-focus-kind="image"] .image-viewer__stage {
+	position: absolute; inset: auto; left: var(--focus-content-x); top: var(--focus-content-y);
+	width: var(--focus-content-width); height: var(--focus-content-height);
+	z-index: 20; touch-action: none; cursor: grab;
+}
+.app[data-focus-kind="image"] .image-viewer__stage:active { cursor: grabbing; }
+.image-viewer__loading {
+	position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+	width: max-content; max-width: calc(100% - 32px); padding: 8px 12px; box-sizing: border-box;
+	display: flex; align-items: center; justify-content: center; gap: 12px;
+	color: var(--mc-text); background: var(--mc-panel); font-size: 13px; pointer-events: none;
+}
+.image-viewer__loading-ring {
+	width: 28px; height: 28px; border: 3px solid var(--mc-border); border-top-color: currentColor;
+	border-radius: 50%; animation: image-viewer-loading-spin 1s linear infinite;
+}
+@keyframes image-viewer-loading-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .image-viewer__loading-ring { animation: none; } }
+/*
+ * 底部控件**占满公共 footer 区**，不再沿用 video 的「播放器叠在 44px 状态基座之上」。
+ *
+ * 公共几何的 footer = FOCUS_FOOTER_BASE(44) + player；那个 44 是给「底部状态/播放基座」预留的，
+ * 图片查看器没有独立状态行，控件自己就是底部栏。照抄 video 的 `bottom: 44px` 会把这 44px
+ * 原样留成一条空带（截图里的空隙）。这里直接占满 [0, footer]：窄屏的检查面板由公共几何
+ * 追加在 footer **之上**（insets.bottom = footer + panelHeight），不需要在这里再上移。
+ */
+.app[data-focus-kind="image"] .image-viewer__controls {
+	position: absolute; left: 0; right: 0; bottom: 0;
+	height: var(--focus-footer);
+	box-sizing: border-box; display: flex; align-items: center; justify-content: space-between;
+	gap: 8px; padding: 4px 12px; background: var(--mc-panel); border-top: 1px solid var(--mc-border);
+	z-index: 35; font-size: 11px; color: var(--mc-text-muted); font-variant-numeric: tabular-nums;
+}
+.app[data-focus-kind="image"] .image-viewer__buttons { display: flex; gap: 4px; flex-shrink: 0; }
+.app[data-focus-kind="image"] .image-viewer__error {
+	position: absolute; top: var(--focus-header); left: var(--focus-content-x);
+	width: var(--focus-content-width); padding: 8px 12px; z-index: 50;
+	background: var(--mc-panel); color: var(--app-status-danger); font-size: 12px;
+}

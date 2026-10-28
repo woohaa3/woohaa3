@@ -23,7 +23,7 @@ import type { CanvasHistoryClient } from "./canvas-history-controller.js";
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ComponentType } from "react";
 const NodeHistoryPanel = lazy(() => import("./panel.js").then(module => ({ default: module.NodeHistoryPanel })));
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
-import { NODE_HISTORY_SERVICE, INLINE_HISTORY_SERVICE, RUN_STATE_SERVICE, IMAGE_EDIT_SERVICE, VIDEO_FOCUS_SERVICE, type InlineHistoryService, type RunStateService, type ImageEditService, type VideoFocusService } from "../service-keys.js";
+import { NODE_HISTORY_SERVICE, INLINE_HISTORY_SERVICE, RUN_STATE_SERVICE, VIDEO_FOCUS_SERVICE, resolveImagePreviewOwner, type InlineHistoryService, type RunStateService, type VideoFocusService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
@@ -243,7 +243,8 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
        * 首项显示明确空态，绝不把 input mapping / 缓存 URL 当作当前输出。
        */
       function syncCurrentDraftState(): void {
-        const imageEdit = ctx.get(IMAGE_EDIT_SERVICE as never) as ImageEditService | undefined;
+        // 编辑器缺席时由宿主默认查看器报告「已保存」（查看不产生草稿）。
+        const imageEdit = resolveImagePreviewOwner(ctx);
         const state = controller.getState();
         if (!state) return;
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
@@ -312,7 +313,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
        */
       let appliedImageOverrideEntryId: string | null = null;
       const applyImageOverride = (state: NonNullable<ReturnType<typeof controller.getState>>) => {
-        const imageEdit = ctx.get(IMAGE_EDIT_SERVICE as never) as ImageEditService | undefined;
+        const imageEdit = resolveImagePreviewOwner(ctx);
         const mode = ctx.canvasNavigation.getSnapshot().mode;
         if (state.selectedEntryId === CURRENT_PRESENTATION_ID || state.selectedEntryId === null) {
           if (appliedImageOverrideEntryId !== null) {
@@ -394,8 +395,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
           if (ctx.canvasNavigation.getSnapshot().mode.type === "overview") ctx.canvasRuntime.setContentRect({ right: 0 });
           clearOverride();
           if (appliedImageOverrideEntryId !== null) {
-            const imageEdit = ctx.get(IMAGE_EDIT_SERVICE as never) as ImageEditService | undefined;
-            imageEdit?.setHistoryOverride?.(null);
+            resolveImagePreviewOwner(ctx)?.setHistoryOverride?.(null);
             appliedImageOverrideEntryId = null;
           }
           if (appliedVideoOverrideEntryId !== null) {
@@ -449,7 +449,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         previousApplyingEntryId = state.applyingEntryId;
         if (revertImageSuccess) {
           revertImageSuccess = false;
-          const imageEdit = ctx.get(IMAGE_EDIT_SERVICE as never) as ImageEditService | undefined;
+          const imageEdit = resolveImagePreviewOwner(ctx);
           imageEdit?.setHistoryOverride?.(null, state.nodeId);
           appliedImageOverrideEntryId = null;
           const mode = ctx.canvasNavigation.getSnapshot().mode;

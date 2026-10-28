@@ -39,6 +39,7 @@ import {
 import { pasteImportExtension, PASTE_IMPORT_PLUGIN_ID } from "./plugins/paste-import/plugin.js";
 import { nodeHistoryExtension, NODE_HISTORY_PLUGIN_ID } from "./plugins/node-history/plugin.js";
 import { videoEditorExtension, VIDEO_EDITOR_PLUGIN_ID } from "./plugins/video-editor/video-editor-plugin.js";
+import { imageViewerExtension, IMAGE_VIEWER_PLUGIN_ID } from "./plugins/image-viewer/plugin.js";
 import { focusConnectionsExtension, FOCUS_CONNECTIONS_PLUGIN_ID } from "./plugins/focus-connections/plugin.js";
 import { modelEditorExtension, MODEL_EDITOR_PLUGIN_ID } from "./plugins/model-editor/model-editor-plugin.js";
 import { runStateExtension, RUN_STATE_PLUGIN_ID } from "./plugins/run-state/plugin.js";
@@ -247,7 +248,17 @@ export const CANVAS_PLUGIN_CATALOG: readonly CanvasExtensionCatalogEntry[] = [
     configurable: false,
     create: (options) => modelEditorExtension({ canvasId: options.canvasId })
   },
-  // Image editors are installed extensions contributing canvas.focus-workspace.
+  // required：宿主默认图片聚焦查看器（change: default-image-focus-viewer）。
+  // 图片编辑器（PhotoCraft）是市场扩展；它未安装/未启用时仍要能双击看图，因此宿主保留只读
+  // 查看工作区：编辑器扩展一旦贡献 kind=image 工作区，本插件自动让位。
+  {
+    id: IMAGE_VIEWER_PLUGIN_ID,
+    name: "图片查看",
+    description: "图片聚焦的默认查看工作区（扩展缺席时原地取景查看）。",
+    required: true,
+    configurable: false,
+    create: () => imageViewerExtension()
+  },
   // required：视频聚焦工作区（change: 2026-10-10-add-video-node-focus-workspace）。
   {
     id: VIDEO_EDITOR_PLUGIN_ID,
