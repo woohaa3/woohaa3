@@ -46,15 +46,15 @@ export type ManagerContext = {
   /**
    * 重载。`hasBackend` = 声明了后端代码（记录里的 `requiresRestart`）：
    * - 纯前端：运行期发布 release 热登记；
-   * - 含后端：一律 `restart-required`。C 方向下扩展后端与宿主同进程，没有可并行的第二份实例，
-   *   因此不存在蓝绿切换，也没有运行期装配后端插件的路径。
+   * - `hostPlugin`（hotSwappable）：扩展层 add/swap 换版；
+   * - 站点 `backend` 工厂（hotSwappable=false）：没有运行期装配入口，直接 `restart-required`。
    * `directory = null` 表示卸载。
    */
   reload(
     extensionId: string,
     directory: string | null,
     hasBackend: boolean,
-    options?: { previousDirectory?: string | null }
+    options?: { previousDirectory?: string | null; hotSwappable?: boolean }
   ): Promise<ExtensionInstallOutcome>;
   /** 把指针切到 target（安装后重载失败 / 观察期失败 / 手动回滚共用）。`backend` = 含后端代码；`restart` = 需要受控重启才生效。 */
   switchPointer(extensionId: string, target: string, action: string, actor: string, rejected?: string): { record: InstallationRecord | null; restart: boolean; backend: boolean };
@@ -110,8 +110,11 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
     extensionId: string,
     directory: string | null,
     hasBackend: boolean,
-    options: { previousDirectory?: string | null } = {}
+    options: { previousDirectory?: string | null; hotSwappable?: boolean } = {}
   ): Promise<ExtensionInstallOutcome> => {
+    const hotSwappable = options.hotSwappable !== false;
+    // 站点 backend 工厂没有运行期装配入口：即使宿主有扩展层，也只能等下一次启动。
+    if (hasBackend && !hotSwappable) return "restart-required";
     if (hasBackend) {
       // 进程内热切换（C 方向）：扩展层 add / remove 建在 Cordis fiber 上，撤下的 fiber 会回滚自己
       // 注册的 Provider / 路由 / 监听；每个版本一个目录，换版本就是换模块 URL，不会命中 ESM 缓存。
@@ -161,7 +164,8 @@ export function createManagerContext(deps: ExtensionManagerDeps, handle: Install
       if (!record) throw new ExtensionManagerError("MARKETPLACE_NOT_INSTALLED", `扩展 ${extensionId} 不是受管扩展`);
       const from = record.current;
       const backend = Boolean(record.requiresRestart);
-      const restart = backend && !deps.runtime?.available();
+      const hotSwappable = record.hotSwappable !== false;
+      const restart = backend && (!deps.runtime?.available() || !hotSwappable);
       let next: InstallationRecord = {
         ...record,
         current: target,
