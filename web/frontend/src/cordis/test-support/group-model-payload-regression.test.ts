@@ -94,7 +94,8 @@ describe("组展示模型从资源准入到 WASM payload", () => {
 
   it("仅徽章下缘进入视口时仍能准入 payload", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("group-footer");
-    canvas.document.nodes.push({ id: "group", type: "group", position: { x: 100, y: -477 }, width: 500, height: 400 });
+    // 组框整体在视口上方（布局高 475），只有外置徽章的下缘进入顶部 4px。
+    canvas.document.nodes.push({ id: "group", type: "group", position: { x: 100, y: -553 }, width: 500, height: 400 });
     canvas.document.nodes.push({ id: "member", type: "image", parentId: "group", position: { x: 40, y: 200 }, width: 200, height: 195 });
     const coordinator = new CanvasResourceCoordinator();
     const candidatesFor = createResidencyCandidateCache(createContentIdentity({ modelResourceKey: () => "group-resource" }));

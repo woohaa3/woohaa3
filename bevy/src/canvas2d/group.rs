@@ -209,31 +209,6 @@ pub(crate) fn draw_group(
             border,
         );
     }
-    let badge = crate::canvas_query::group_model::badge_path(node);
-    if !badge.is_empty() {
-        super::group_outline::stroke(
-            geometry,
-            &badge,
-            0.,
-            super::group_outline::length(&badge),
-            GROUP_BORDER,
-            z + 0.002,
-            border,
-        );
-        let rect = crate::canvas_query::group_model::badge_rect(node);
-        let center = Vec2::new(rect.x + rect.z - 10., rect.y + rect.w / 2.);
-        let direction = if presentation.collapsed { 1. } else { -1. };
-        let tip = center + Vec2::Y * (2.5 * direction);
-        for side in [-1., 1.] {
-            geometry.line(
-                center + Vec2::new(side * 3., -2.5 * direction),
-                tip,
-                1.5,
-                z + 0.003,
-                theme.token_u32("canvasBodyText"),
-            );
-        }
-    }
     if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
         let color = theme.token_u32("canvasResizeHandle");
         for length in [5., 9.] {
@@ -269,25 +244,6 @@ pub(crate) fn draw_group(
     } else {
         format!("{} · {} 项", title, presentation.member_count)
     };
-    // 聚合输出端点：至少一个递归叶子具备输出能力时才显示（change: add-canvas-node-grouping，
-    // design D5）。它只表示「可从此处拉出成员的真实边」，不是持久化边端点。
-    if presentation.output_capable_leaf_count > 0 {
-        let port = Vec2::new(x + width, y + height / 2.0);
-        geometry.circle(
-            port,
-            6.0,
-            z + 0.01,
-            theme.token_u32("canvasPortDefault"),
-            20,
-        );
-        geometry.circle(
-            port,
-            3.7,
-            z + 0.02,
-            theme.token_u32("canvasPortFill"),
-            20,
-        );
-    }
     (
         shortened(
             &label,

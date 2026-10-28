@@ -17,6 +17,8 @@ import {
   isMergeEligibleNode,
   readNodeHeight,
   readNodeWidth,
+  groupBadgeOutset,
+  groupPresentationRect,
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   shotPreviewOwnershipOf,
   type MergeTargetCandidate,
@@ -143,10 +145,13 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     const size = node.type === "group"
       ? groupSizes.get(node.id) ?? { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) }
       : { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) };
-    // Include the small group badge lip in the conservative occupied range.
-    const outset = node.type === "group" ? 6 : 0;
-    return [{ id: node.id, x: position.x - outset, y: position.y - outset,
-      width: size.width + outset * 2, height: size.height + outset * 2 }];
+    const frame = node.type === "group"
+      ? groupPresentationRect(runtimeNode, collapsedGroupIds.has(node.id), { x: 0, y: 0, ...size })
+      : { x: 0, y: 0, ...size };
+    // Include the outsourced group badge in the conservative occupied range.
+    const outset = node.type === "group" ? groupBadgeOutset : 0;
+    return [{ id: node.id, x: position.x + frame.x - outset, y: position.y + frame.y - outset,
+      width: frame.width + outset * 2, height: frame.height + outset * 2 }];
   });
   // 拍摄镜头预览：从归属数据建立 owner（片场）→ 预览索引，供手势阶段按 owner 命中，
   // 不扫描整画布、不重建几何（change 2026-10-15 D4）。

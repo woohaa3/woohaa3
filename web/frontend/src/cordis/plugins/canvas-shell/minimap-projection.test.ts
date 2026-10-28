@@ -95,12 +95,12 @@ describe("projectMinimap", () => {
     const projection = projectMinimap(state);
     expect(projection.nodes.map((node) => node.id)).toEqual(["group"]);
     expect(projection.nodes[0]!.group).toBe(true);
-    // 紧凑矩形 196×112，固定底边中点；组自身布局尺寸仍按成员派生。
+    // 紧凑矩形 196×48，固定底边中点；组自身布局尺寸仍按成员派生。
     const byId = new Map(state.document.nodes.map((node) => [node.id, node]));
     const layout = nodeWorldRect(state.document.nodes[0]!, byId);
     const rect = projection.nodes[0]!.rect;
     expect(rect.width).toBe(196);
-    expect(rect.height).toBe(112);
+    expect(rect.height).toBe(48);
     expect(rect.y + rect.height).toBe(layout.y + layout.height);
     expect(rect.x + rect.width / 2).toBe(layout.x + layout.width / 2);
   });

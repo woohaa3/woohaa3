@@ -60,15 +60,6 @@ fn mesh(node: &crate::protocol::GraphNode) -> Mesh {
         let relative: Vec<_> = region.iter().map(|point| *point - origin).collect();
         geometry.polygon_alpha(&relative, 0., 0xffffff, super::group::GROUP_FILL_ALPHA);
     }
-    // An opaque surface in the same theme makes the identity read as a badge, above the
-    // translucent group surface and still behind every model. It intentionally masks its underlay.
-    // The 2D panel leaves a rectangular aperture over exactly this badge (plus the 55% underlay
-    // at its rounded corners), so this plate and its model stay visible under the overlay camera.
-    let badge = group_model::badge_path(node);
-    if !badge.is_empty() {
-        let relative: Vec<_> = badge.iter().map(|point| *point - origin).collect();
-        geometry.polygon_alpha(&relative, 0., 0xffffff, 1.);
-    }
     geometry.build()
 }
 
