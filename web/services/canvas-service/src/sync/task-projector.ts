@@ -55,7 +55,8 @@ export type ProjectionOutcome =
   | { status: "projected"; revision: number; noop: boolean }
   | { status: "duplicate"; revision: number }
   | { status: "skipped"; reason: "stale-run" | "unknown-node" }
-  | { status: "failed"; code: string; message: string };
+  /** `permanent`：重试不可能成功（例如画布文档已不存在），消费方应直接放弃而不是退避重试。 */
+  | { status: "failed"; code: string; message: string; permanent?: boolean };
 
 /** receipt 查询/记录：由注入的实现持久化（运维补偿用）。 */
 export type ProjectionReceiptStore = {
@@ -266,6 +267,11 @@ export class CanvasTaskProjector {
     // 3) 导出当前聚合做校验。
     const exported = room.exportCanvas();
     if (!exported.ok) {
+      // 文档不存在 = 画布已被删除（dev 库里任务还在、画布没了很常见）。重试永远不可能成功，
+      // 标成 permanent 让消费方推进水位并停止每轮 44 行的重试日志。
+      if (exported.code === "not-found") {
+        return { status: "failed", code: "canvas-not-found", message: exported.message, permanent: true };
+      }
       return { status: "failed", code: "canvas-unavailable", message: exported.message };
     }
 

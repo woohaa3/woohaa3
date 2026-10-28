@@ -54,6 +54,8 @@ export class CanvasRoom {
 
   private state: CanvasRoomState = "loading";
   private quarantineReason: string | null = null;
+  /** 隔离原因的结构化错误码（`not-found` 表示画布文档已经不存在），供调用方区分可重试与终态。 */
+  private quarantineCode: string | null = null;
   /** 只含已持久化 update 的权威文档。 */
   private published: Y.Doc;
   private storageSeq = 0;
@@ -113,9 +115,13 @@ export class CanvasRoom {
     return typeof value === "string" ? value : "";
   }
 
-  exportCanvas(): { ok: true; canvas: ServerCanvas } | { ok: false; message: string } {
+  exportCanvas(): { ok: true; canvas: ServerCanvas } | { ok: false; code?: string; message: string } {
     if (this.state === "quarantined") {
-      return { ok: false, message: this.quarantineReason ?? "room 已隔离" };
+      return {
+        ok: false,
+        ...(this.quarantineCode ? { code: this.quarantineCode } : {}),
+        message: this.quarantineReason ?? "room 已隔离"
+      };
     }
     const exported = yDocToServerCanvas(this.published, { now: this.now() });
     if (!exported.ok) return { ok: false, message: exported.failure.message };
@@ -157,6 +163,7 @@ export class CanvasRoom {
         canvas = await this.bootstrap();
       } catch (error) {
         this.state = "quarantined";
+        this.quarantineCode = "bootstrap-failed";
         this.quarantineReason = `bootstrap-failed: ${error instanceof Error ? error.message : String(error)}`;
         return { ok: false, message: this.quarantineReason };
       }
@@ -171,6 +178,7 @@ export class CanvasRoom {
     }
 
     this.state = "quarantined";
+    this.quarantineCode = recovered.code;
     this.quarantineReason = `${recovered.code}: ${recovered.message}`;
     return { ok: false, message: this.quarantineReason };
   }
