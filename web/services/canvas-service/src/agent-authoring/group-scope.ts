@@ -21,6 +21,21 @@ export function invalidateRemovedCanvasGroups(before: ServerCanvas, after: Serve
 }
 export const currentCanvasGroupScope = () => active.getStore();
 export function withCanvasGroupScope<T>(scope: TrustedCanvasGroupScope, run: () => T): T { return active.run(scope, run); }
+/**
+ * Projected group reads deliberately hide the root's parent so the group looks like a
+ * top-level canvas. The planner then emits a root `node.update` with `parentId: null`;
+ * applying that to a nested group would detach it from its manager. Preserve the root's
+ * existing parent (omit the field) and let the existing group validator decide whether
+ * any other root structure changed.
+ */
+export function normalizeGroupScopeCommands<T extends import("@woohaa3/contracts").CanvasCommand>(commands: readonly T[], rootGroupId: string): T[] {
+  return commands.map(command => {
+    if (command.type !== "node.update" || command.nodeId !== rootGroupId || command.parentId === undefined) return command;
+    const { parentId: _parentId, ...rest } = command;
+    return rest as T;
+  });
+}
+
 export function scopedCanvas(canvas: ServerCanvas): ServerCanvas {
   const scope = active.getStore();
   if (!scope) return canvas;

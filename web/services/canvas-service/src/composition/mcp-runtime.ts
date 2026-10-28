@@ -42,6 +42,8 @@ export type McpRuntimeDeps = {
   composition: CanvasStorageComposition;
   nodeHistory: NodeHistoryComposition | null;
   runService: CanvasRunService | null;
+  /** 任务模型目录：Agent 能力面与默认模型回退使用同一事实源。 */
+  resolveCatalog?: () => Promise<import("@woohaa3/contracts").CanvasTaskCatalog>;
   modelRenderer: RendererClient | null;
   mediaClient: import("../clients/media-client.js").CanvasMediaClient | null;
   agentDeltaJournal: AgentDeltaJournal;
@@ -169,7 +171,8 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
         journal: deps.agentDeltaJournal,
         authoring: new AgentCanvasAuthoringService({ resolveRoom: roomResolver, now: deps.now }),
         // Canvas script 能力面（任务 3.1/4.1）：授权与 token 密钥缺失时 capability fail-closed。
-        script: buildCanvasScriptService(deps, roomResolver, agentAuthorizer)
+        script: buildCanvasScriptService(deps, roomResolver, agentAuthorizer),
+        ...(deps.resolveCatalog ? { resolveCatalog: deps.resolveCatalog } : {})
       })
     : undefined;
   const agentRunAdapter = modelMcpEnabled
@@ -177,6 +180,7 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
         resolveRoom: roomResolver,
         assistantText: deps.assistantTextRuns,
         ...(deps.runService ? { runService: deps.runService } : {}),
+        ...(deps.resolveCatalog ? { resolveCatalog: deps.resolveCatalog } : {}),
         now: deps.now
       })
     : undefined;

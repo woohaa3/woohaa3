@@ -542,6 +542,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           composition,
           nodeHistory,
           runService,
+          ...(options.resolveCatalog ? { resolveCatalog: options.resolveCatalog } : {}),
           assistantTextRuns: options.assistantTextRuns,
           modelRenderer,
           mediaClient: mediaClient ?? null,

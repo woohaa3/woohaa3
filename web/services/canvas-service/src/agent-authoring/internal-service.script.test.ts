@@ -37,7 +37,7 @@ function authorizer(): CanvasAuthorizer {
   };
 }
 
-async function setup(options: { wireScript?: boolean } = {}) {
+async function setup(options: { wireScript?: boolean; resolveCatalog?: () => Promise<import("@woohaa3/contracts").CanvasTaskCatalog> } = {}) {
   const repository = new InMemoryYjsDocumentRepository();
   const room = new CanvasRoom({ canvasId: CANVAS, repository, now: () => NOW });
   await room.initialize({ canvas: createEmptyWoohaa3ServerCanvas(CANVAS, NOW), roomEpoch: "epoch-1", createdAt: NOW });
@@ -57,6 +57,7 @@ async function setup(options: { wireScript?: boolean } = {}) {
     journal,
     authoring: new AgentCanvasAuthoringService({ resolveRoom: async () => room }),
     ...(script ? { script } : {}),
+    ...(options.resolveCatalog ? { resolveCatalog: options.resolveCatalog } : {}),
     defaultCanvasId: CANVAS
   });
   return { service, room };
@@ -70,6 +71,23 @@ describe("Agent Canvas script 内部能力面（任务 4.3–4.5）", () => {
     if (!capability.ok || !capability.available) throw new Error("unexpected");
     expect(capability.descriptor).toBeDefined();
     expect(capability.nodeKinds?.length).toBeGreaterThan(0);
+  });
+
+  it("能力面暴露可执行媒体模型与默认值", async () => {
+    const { service } = await setup({
+      resolveCatalog: async () => ({
+        available: true,
+        defaultModels: { image: "p:img" },
+        models: [
+          { modelKey: "p:img", providerId: "p", providerModelId: "img", modelType: "image", title: "图片", interaction: { id: "generic", version: 1 }, inputSchema: {}, defaultInput: {}, bindings: [], taskTimeoutMs: 1000 },
+          { modelKey: "p:chat", providerId: "p", providerModelId: "chat", modelType: "language", title: "文本", interaction: { id: "generic", version: 1 }, inputSchema: {}, defaultInput: {}, bindings: [], taskTimeoutMs: 1000 }
+        ]
+      })
+    });
+    expect(await service.scriptCapability({ principalId: PRINCIPAL, canvasId: CANVAS })).toMatchObject({
+      ok: true,
+      models: { available: true, items: [{ modelKey: "p:img", modelType: "image", default: true }] }
+    });
   });
 
   it("未装配 script 时能力 fail-closed，不静默替代", async () => {

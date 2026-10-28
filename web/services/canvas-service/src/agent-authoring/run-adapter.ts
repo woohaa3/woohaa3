@@ -15,6 +15,8 @@ import {
   type AgentNodeOutputView,
   type AgentRunView,
   type CanvasNodeData,
+  type CanvasTaskCatalog,
+  type CanvasTaskModelType,
   type ServerCanvas,
   type StoredAsset
 } from "@woohaa3/contracts";
@@ -26,8 +28,19 @@ export type AgentRunAdapterDependencies = {
   resolveRoom: (canvasId: string) => Promise<CanvasRoom | null>;
   runService?: AgentRunPort;
   assistantText?: import("@woohaa3/contracts").AssistantTextRunGateway;
+  /** Agent 省略 modelKey 时按节点类型取任务目录默认模型。 */
+  resolveCatalog?: () => Promise<CanvasTaskCatalog>;
   now?: () => string;
 };
+
+function nodeModelType(type: string | undefined): CanvasTaskModelType | null {
+  switch (type) {
+    case "image": return "image";
+    case "video": return "video";
+    case "audio": return "audio";
+    default: return null;
+  }
+}
 
 export type AgentRunAccepted =
   | { ok: true; canvasId: string; nodeId: string; runId: string; jobId: string; state: "accepted"; execution?: import("@woohaa3/contracts").AssistantExecutionRef }
@@ -81,10 +94,27 @@ export class AgentRunAdapter {
     // 模型身份只接受 opaque modelKey；节点 nodeData.modelKey 作为缺省（change:
     // 2026-10-07-remove-residual-compatibility）。
     const data = exported.canvas.nodeData[input.nodeId] as CanvasNodeData | undefined;
-    const modelKey =
+    let modelKey =
       input.modelKey ??
       (typeof data?.modelKey === "string" ? data.modelKey : "") ??
       "";
+    if (modelKey === "" && this.deps.resolveCatalog) {
+      // Agent 不知道 opaque modelKey；由宿主按节点类型选择目录默认模型。没有可执行模型时
+      // 明确返回 catalog-unavailable，让 Agent 如实说明而不是猜一个 Provider id。
+      const catalog = await this.deps.resolveCatalog().catch(() => null);
+      if (!catalog || !catalog.available) {
+        return { ok: false, code: "catalog-unavailable", message: catalog?.reason ?? "任务模型目录不可用", retryable: true };
+      }
+      const nodeType = exported.canvas.document.nodes.find(node => node.id === input.nodeId)?.type;
+      const modelType = nodeModelType(nodeType);
+      const candidate = modelType
+        ? catalog.defaultModels[modelType] ?? catalog.models.find(model => model.modelType === modelType)?.modelKey
+        : undefined;
+      if (!candidate) {
+        return { ok: false, code: "catalog-unavailable", message: `没有可用的${modelType ?? "媒体"}模型`, retryable: true };
+      }
+      modelKey = candidate;
+    }
     if (modelKey === "") {
       return { ok: false, code: "model-required", message: "缺少 modelKey 且节点没有默认模型" };
     }

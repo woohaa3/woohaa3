@@ -114,9 +114,22 @@ export type AgentOutputClientResult =
 
 /** 脚本能力投影结果（change: 2026-10-13-add-canvas-script-authoring，任务 4.3）。 */
 export type AgentScriptCapabilityClientResult =
-  | { ok: true; available: true; descriptor: Record<string, unknown>; nodeKinds: Array<Record<string, unknown>> }
-  | { ok: true; available: false; reason: string }
+  | {
+      ok: true;
+      available: true;
+      descriptor: Record<string, unknown>;
+      nodeKinds: Array<Record<string, unknown>>;
+      models?: AgentModelCapabilityClient;
+    }
+  | { ok: true; available: false; reason: string; models?: AgentModelCapabilityClient }
   | { ok: false; code: string; message: string };
+
+/** 任务模型能力（不含凭据）；Agent 在创建媒体节点前用它判断是否可用。 */
+export type AgentModelCapabilityClient = {
+  available: boolean;
+  reason?: string;
+  items: Array<{ modelKey: string; modelType: string; title: string; default: boolean }>;
+};
 
 export type AgentScriptValidateClientResult =
   | { ok: true; receipt: import("@woohaa3/contracts").CanvasScriptValidateReceipt }

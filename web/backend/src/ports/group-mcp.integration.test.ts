@@ -12,11 +12,12 @@ describe("real HTTP group MCP boundary", () => {
   it("carries trusted owner through HTTP, projects reads, confines simple plans and revokes calls", async () => {
     const canvas = createEmptyWoohaa3ServerCanvas("c", "now");
     canvas.document.nodes = [
-      { id: "root", type: "group", position: { x: 300, y: 200 }, width: 600, height: 400 },
+      { id: "manager", type: "group", position: { x: 0, y: 0 }, width: 1200, height: 900 },
+      { id: "root", type: "group", parentId: "manager", position: { x: 300, y: 200 }, width: 600, height: 400 },
       { id: "a", type: "text", parentId: "root", position: { x: 40, y: 50 } },
       { id: "outside", type: "text", position: { x: 2000, y: 0 } }
     ];
-    canvas.nodeData = { root: { retainWhenEmpty: true }, a: { prompt: "inside" }, outside: { prompt: "private-outside" } };
+    canvas.nodeData = { manager: { retainWhenEmpty: true }, root: { retainWhenEmpty: true }, a: { prompt: "inside" }, outside: { prompt: "private-outside" } };
     const room = new CanvasRoom({ canvasId: "c", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
     await room.initialize({ canvas, roomEpoch: "epoch" });
     const principals: string[] = [];
@@ -68,7 +69,8 @@ describe("real HTTP group MCP boundary", () => {
       const filmSet = await call("create_canvas_node", { canvasId: "c", requestId: "film-set", kind: "film-set", title: "片场" });
       expect(filmSet.structuredContent?.ok, JSON.stringify(filmSet)).toBe(true);
       const snapshot = room.exportCanvas();
-      expect(snapshot.ok && snapshot.canvas.document.nodes.filter(n => !["root", "outside", "a"].includes(n.id)).every(n => n.parentId === "root")).toBe(true);
+      expect(snapshot.ok && snapshot.canvas.document.nodes.filter(n => !["manager", "root", "outside", "a"].includes(n.id)).every(n => n.parentId === "root")).toBe(true);
+      expect(snapshot.ok && snapshot.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBe("manager");
       expect(snapshot.ok && snapshot.canvas.document.nodes.some(n => n.type === "composite-asset" && n.parentId === "root" && snapshot.canvas.nodeData[n.id]?.extensionId === "film-set")).toBe(true);
       expect(principals.every(owner => owner === "owner")).toBe(true);
       grants.revoke("turn", "owner");

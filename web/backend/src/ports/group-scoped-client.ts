@@ -1,5 +1,5 @@
 import { canvasGroupMembers, canvasGroupAssetIds, hasExternalCanvasReference, isFilmSetNode } from "@woohaa3/contracts";
-import { currentCanvasGroupScope, type CanvasService } from "@woohaa3/canvas-service";
+import { currentCanvasGroupScope, normalizeGroupScopeCommands, type CanvasService } from "@woohaa3/canvas-service";
 
 /** Covers reads and run submission as well as the room's independent write membrane. */
 export function groupScopedClient<T extends object>(client: T, canvas: CanvasService): T {
@@ -29,7 +29,10 @@ export function groupScopedClient<T extends object>(client: T, canvas: CanvasSer
       // Existing upstream references are not implicitly made available to this turn.
       if (input.resource !== "group-appearance" && ["getModelNode", "getModelStatistics", "runNode"].includes(String(property)) && snapshot.canvas.document.edges.some(e => nodeIds.includes(e.target) && !members.has(e.source))) return { ok: false, code: "group-external-input", message: "目标有组外输入，请先明确处理跨组连接" };
       if (input.resource !== "group-appearance" && ["getModelNode", "getModelStatistics", "runNode"].includes(String(property)) && nodeIds.some(id => hasExternalCanvasReference(snapshot.canvas.nodeData[id], members, canvasGroupAssetIds(snapshot.canvas, members)))) return { ok: false, code: "group-external-input", message: "目标引用了组外输入" };
-      const result = await method.call(target, { ...input, canvasId: scope.canvasId });
+      const scopedInput = property === "applyPlan" && Array.isArray(input.commands)
+        ? { ...input, commands: normalizeGroupScopeCommands(input.commands as never[], scope.rootGroupId) }
+        : input;
+      const result = await method.call(target, { ...scopedInput, canvasId: scope.canvasId });
       if (property === "runNode" && result?.ok) scope.onAction?.({ canvasId: scope.canvasId, nodeId: result.nodeId, runId: result.runId, jobId: result.jobId });
       return result;
     };
