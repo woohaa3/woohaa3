@@ -1,3 +1,16 @@
+/**
+ * 离线场景包的编解码与校验。
+ *
+ * 包内固定三个位置：`manifest.json`、`scene.json`、`media/<sha256>.<ext>`，条目名由
+ * `pathOK` 的白名单正则限定 —— 这里可以严到只认这几种名字，因为场景包要么是我们自己
+ * 生成的，要么在 decode 时整包校验过一遍。
+ *
+ * **与 `web/services/canvas-service/src/storage/core/archive-package.ts` 的关系（刻意不合并）**：
+ * 那边是用户的画布归档（`.woohaa-archive`，`archive.json` + 按 `storageKey` 命名的媒体），
+ * 条目名必须放行任意合法路径。两份手写 zip 编解码**不能抽成一份共用工具**：要么归档装不了
+ * 自定义命名的媒体，要么这里被迫放松对导入包的条目名校验（那是安全倒退）。
+ * 改其中一份时，别去"顺手统一"另一份。
+ */
 import { createHash } from 'node:crypto';
 import { inflateRawSync, inflateSync } from 'node:zlib';
 import type { DecodedScenePackage, ScenePackageManifest, ServerCanvas } from '@woohaa3/contracts';
