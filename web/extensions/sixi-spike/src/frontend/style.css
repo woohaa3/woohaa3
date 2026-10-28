@@ -1,0 +1,80 @@
+/* 扩展样式是全局注入宿主的、不隔离，所以所有选择器都带 `.sixi-*` 前缀，避免污染宿主。 */
+
+/* ───────── 扩展外壳 ─────────
+ * 四喜真实界面挂在宿主里时的容器与两个只有这里才需要的元素。
+ * 四喜自己的样式(global.css、antd token)全部照常生效，这里只补“宿主环境”的差异。 */
+
+/* 四喜外壳在宿主中铺满整个窗口，层级高于宿主画布控件、低于宿主菜单与对话框。 */
+.sixi-host-root {
+	position: fixed;
+	z-index: 55;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	/*
+	 * 不透明底色：宿主画布就在下面，任何透明都会被看见。
+	 * **必须跟随四喜自己的主题**（`--sixi-bg` 由 ThemeVars 按 antd token 写入）：
+	 * 写死白色时，暗色主题下外壳是白的、而 antd 的文字是白的，内容区等于整块消失。
+	 * 变量还没注入时（首帧、变量缺失）仍退回白底，不会透出宿主画布。
+	 */
+	background: var(--sixi-bg, #fff);
+	color: var(--sixi-text, #0f0f0f);
+	font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+	/* 宿主 body 设了 overflow: hidden / touch-action: none，这里恢复成普通应用语义 */
+	overflow: hidden;
+	touch-action: auto;
+}
+
+/*
+ * antd Layout 兜底铺底。
+ *
+ * 只在**变量缺失**时才该生效：`.sixi-host-root .ant-layout`（优先级 0,2,0）压得过
+ * antd 自己生成的 `:where(...).ant-layout`（0,1,0），所以不能在这里写死颜色——
+ * 写死白色会把暗色算法的 `colorBgLayout` 盖掉，正是「暗色下内容区整块变白」的成因。
+ * 现在跟随同一个 `--sixi-bg`：亮色是白，暗色是黑，两者都与 antd 给出的值一致。
+ */
+.sixi-host-root .ant-layout,
+.sixi-host-root .ant-layout-content {
+	background: var(--sixi-bg, #fff);
+}
+
+/* 画布态：四喜外壳全部撤走，只留这一个返回入口（避开宿主左上角的画布切换器）。 */
+.sixi-host-back {
+	position: fixed;
+	z-index: 55;
+	top: 12px;
+	right: 16px;
+	display: inline-flex;
+	align-items: center;
+	height: 32px;
+	padding: 0 14px;
+	border: 1px solid var(--sixi-border, #ececea);
+	border-radius: 999px;
+	background: var(--sixi-panel, #fff);
+	color: var(--sixi-text, #1a1a1a);
+	font-size: 13px;
+	cursor: pointer;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/*
+ * 四喜界面存在期间（<html data-sixi-shell>）把宿主画布层藏起来。
+ *
+ * 为什么不是背景色 / portal：
+ * - 背景色：外壳与画布同处宿主画布的层叠上下文，画布节点按 DOM 顺序在外壳之上，铺底挡不住；
+ * - portal 到 body：宿主给贡献套错误边界，渲染期一出问题整块隐藏（实测整块消失）。
+ * visibility 只切换可见性，不卸载、不改尺寸，画布在下面继续存活，切回「创作」不会重载。
+ */
+html[data-sixi-shell] .app {
+	visibility: hidden;
+}
+
+/*
+ * 外壳自己是 `.app` 的后代：`visibility: hidden` 会被继承，所以必须显式打回来。
+ * 这正是选 visibility 而不是 display/opacity 的原因之一——子元素可以重新可见。
+ */
+html[data-sixi-shell] .sixi-host-root,
+html[data-sixi-shell] .sixi-host-back {
+	visibility: visible;
+}

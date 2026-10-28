@@ -1,0 +1,35 @@
+{
+  "name": "@woohaa3/extension-sixi-spike",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "四喜前端迁移 spike：把四喜真实前端作为 Woohaa 扩展运行。不入库、非正式扩展。",
+  "scripts": {
+    "build:browser": "node ../../scripts/build-extension-browser.mjs"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/frontend": "workspace:*"
+  },
+  "woohaa": {
+    "build": {
+      "nodePaths": ["../../../../../node_modules"],
+      "define": {
+        "import.meta.env.DEV": "false",
+        "import.meta.env.MODE": "\"production\"",
+        "import.meta.env.PROD": "true",
+        "import.meta.env.VITE_API_MODE": "\"mock\"",
+        "import.meta.env.VITE_API_BASE_URL": "\"\"",
+        "import.meta.env.VITE_AGENT_MODE": "\"legacy\"",
+        "import.meta.env.VITE_AGENT_BASE_URL": "\"\"",
+        "import.meta.env.VITE_AGENT_MODEL": "\"demo\"",
+        "import.meta.env.VITE_AGENT_TEST_MODE": "\"live\"",
+        "import.meta.env.VITE_AGENT_TEST_HANDLER": "\"\"",
+        "import.meta.env.VITE_MODELING_BACKEND": "\"mock\"",
+        "import.meta.env.VITE_MODELING_TEST_URL": "\"\"",
+        "import.meta.env.VITE_TENANT_ID": "\"\""
+      },
+      "plugins": ["./build/sixi-plugins.mjs"]
+    }
+  }
+}
