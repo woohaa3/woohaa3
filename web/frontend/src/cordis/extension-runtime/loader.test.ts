@@ -165,6 +165,34 @@ describe("Extension artifact loader", () => {
     expect(attempt).toBe(2);
   });
 
+  /**
+   * 浏览器会把失败的 module fetch 按 URL 缓存在本 document 的 module map 里（Chromium 实测：
+   * 同一 URL 再 import 不再发请求）。宿主的资源处理器按 pathname 取 artifact，因此重试必须换
+   * URL 变体——否则「显式重试」在宿主短暂 5xx 之后永远恢复不了，只能刷新页面。
+   */
+  it("重试用 URL 变体真正重新请求（浏览器缓存失败导入）", async () => {
+    const urls: string[] = [];
+    const loader = createExtensionArtifactLoader({
+      runtimeProvider: makeProvider(),
+      importer: async (url: string) => {
+        urls.push(url);
+        if (urls.length === 1) throw new TypeError("Failed to fetch dynamically imported module");
+        return thinModule("demo");
+      },
+      prepareStyles: async () => undefined
+    });
+    await expect(loader.load(makeEntry())).rejects.toBeInstanceOf(ExtensionLoadError);
+    await expect(loader.load(makeEntry())).resolves.toMatchObject({ extensionId: "demo" });
+    expect(urls).toEqual([
+      "/extensions/demo/aaaaaaaa/entry.js",
+      "/extensions/demo/aaaaaaaa/entry.js?woohaa-retry=1"
+    ]);
+    // 缓存键仍是 canonical entry URL（成功之后复用，不再请求）。
+    expect(loader.cachedEntryURLs()).toEqual(["/extensions/demo/aaaaaaaa/entry.js"]);
+    await expect(loader.load(makeEntry())).resolves.toMatchObject({ extensionId: "demo" });
+    expect(urls).toHaveLength(2);
+  });
+
   it("CSS 失败归类为可重试 css 错误并移除缓存", async () => {
     let styles = 0;
     const loader = createExtensionArtifactLoader({

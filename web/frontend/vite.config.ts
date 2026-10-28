@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { extname, join, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import { resolveReleasePointer } from "../../scripts/lib/extension-release-pointer.mjs";
 
 /** 静态资源 MIME（与 `scripts/lib/static-server.mjs` 的发布资源子集一致）。 */
 const MIME_TYPES: Record<string, string> = {
@@ -183,6 +184,14 @@ export const extensionReleaseStatic = (
 ): Plugin => {
   let dist = join(root, "dist");
   let building = false;
+  let warn = (_message: string): void => undefined;
+  /**
+   * 最近一次成功读到的发布目录（宿主重启窗口的兜底来源）。
+   *
+   * 只有确认该目录在宿主上仍可读时才会被注入（见 `resolveReleasePointer`）：注入一个 404 的
+   * 指针会让页面启动直接失败，比「这次没有扩展」更糟。
+   */
+  let lastGoodHref: string | null = null;
   const prefixes = ["/extensions/", "/extension-releases/"];
   const serveFromDist = (req: IncomingMessage, res: ServerResponse, next: () => void): void => {
     const rawPathname = (req.url ?? "").split("?")[0];
@@ -210,6 +219,7 @@ export const extensionReleaseStatic = (
     configResolved(config) {
       dist = resolve(config.root, config.build.outDir);
       building = config.command === "build";
+      warn = (message) => config.logger.warn(message, { timestamp: true });
     },
     buildStart() {
       if (!building || !existsSync(dist)) return;
@@ -231,17 +241,25 @@ export const extensionReleaseStatic = (
       async handler(html: string) {
         // 开发期的发布目录由运行中的扩展宿主生成，不依赖旧 dist/index.html。
         if (backend && !building) {
-          const response = await fetch(`${backend.replace(/\/$/, "")}${basePath}extension-releases/current.json`,
-            { signal: AbortSignal.timeout(3000) }).catch(() => null);
-          if (response?.ok) {
-            const pointer = await response.json() as { href?: unknown };
-            if (typeof pointer.href !== "string" || !/^\/extension-releases\/[a-f0-9]{64}\.json$/.test(pointer.href)) {
-              throw new Error("后端扩展发布目录地址无效");
-            }
-            html = html.replace(/\s*<link\s+rel="woohaa-extension-release"[^>]*>/g, "");
-            return html.replace("</head>", `<link rel="woohaa-extension-release" href="${pointer.href}" /></head>`);
+          // 宿主与 Vite 是两个进程：宿主重启窗口里拿不到指针时，先重试、再回落到上次发布。
+          // 旧实现在这里直接让 HTML 不带 link，前端据此判定「无扩展能力」——整页一个扩展都不装配，
+          // 而且不报错，只有刷新才好（2026-10-28 现场：宿主重启后 remote-server 不加载）。
+          const pointer = await resolveReleasePointer({
+            backendUrl: backend,
+            basePath,
+            lastGoodHref,
+            log: (event: Record<string, unknown>) => warn(`[extension-release] ${JSON.stringify(event)}`)
+          });
+          const withoutLink = html.replace(/\s*<link\s+rel="woohaa-extension-release"[^>]*>/g, "");
+          if (!pointer.href) {
+            warn("[extension-release] 宿主发布目录不可用：本次 HTML 不含扩展发布 link，整页不会加载任何扩展（宿主重启中？再刷新一次即可）");
+            return withoutLink;
           }
-          return html;
+          if (pointer.source === "last-good") {
+            warn(`[extension-release] 宿主暂时不可用，本次沿用上次发布 ${pointer.href}`);
+          }
+          lastGoodHref = pointer.href;
+          return withoutLink.replace("</head>", `<link rel="woohaa-extension-release" href="${pointer.href}" /></head>`);
         }
         const indexPath = join(dist, "index.html");
         if (!existsSync(indexPath)) return html;
