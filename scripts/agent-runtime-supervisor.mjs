@@ -66,6 +66,23 @@ let orphanTimer = null;
 const safeKey = value => crypto.createHash("sha256").update(value).digest("hex").slice(0, 40);
 const keyFor = input => `${input.adapterId}\u0000${input.owner}\u0000${input.connectionId}`;
 
+/**
+ * stdio 通道的端点。Windows 没有 Unix domain socket 的文件语义 —— `server.listen(<文件路径>)`
+ * 直接 EACCES、回调永不触发，所以那边改用命名管道（与 dev 的 supervisor socket 同一处理）。
+ * 端点字符串原样交给客户端 `connect()`，两种形态它都支持。
+ */
+const stdioEndpoint = key =>
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\woohaa-agent-stdio-${safeKey(key)}`
+    : path.join(stdioDir, `${safeKey(key)}.sock`);
+
+/**
+ * Windows 上 npm/pnpm 装的 CLI 是 `.cmd` 垫片，`spawn()` 直接执行会抛 EINVAL。
+ * 与 `web/extensions/local-agent/src/backend/process-supervisor.ts` 同一处理：
+ * 引号包住命令并交给 shell。
+ */
+const isBatchCommand = command => process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+
 function killTree(child, signal = "SIGTERM") {
   if (!child?.pid) return;
   try {
@@ -153,16 +170,19 @@ async function ensure(input) {
     childArgs.push("--port", String(port));
     loopbackUrl = `http://127.0.0.1:${port}`;
   }
-  const stdioPath = input.kind === "stdio" ? path.join(stdioDir, `${safeKey(key)}.sock`) : null;
+  const stdioPath = input.kind === "stdio" ? stdioEndpoint(key) : null;
   if (stdioPath) {
     try { fs.unlinkSync(stdioPath); } catch (error) { if (error.code !== "ENOENT") throw error; }
     try { fs.unlinkSync(journalPath(key)); } catch (error) { if (error.code !== "ENOENT") throw error; }
   }
-  const child = spawn(command, childArgs, {
+  const batch = isBatchCommand(command);
+  const child = spawn(batch ? `"${command}"` : command, batch ? childArgs.map(arg => (arg === "" ? '""' : arg)) : childArgs, {
     cwd: input.cwd,
     env: childEnv,
     windowsHide: true,
     detached: process.platform !== "win32",
+    // `.cmd` 垫片只能经 cmd.exe 执行；shell 模式下参数按空格拼接，空参数要显式写成 ""
+    ...(batch ? { shell: true } : {}),
     stdio: input.kind === "stdio" ? ["pipe", "pipe", "pipe"] : ["ignore", "ignore", "ignore"]
   });
   await new Promise((resolve, reject) => {
