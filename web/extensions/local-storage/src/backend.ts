@@ -21,7 +21,7 @@ import path from "node:path";
 import {
   defineConfigSchema,
   StorageObjectNotFoundError,
-  type HostExtensionPlugin,
+  type ExtensionPlugin,
   type StorageBackend,
   type StorageObject,
   type StorageObjectStat
@@ -187,7 +187,7 @@ export function createLocalBackend(config: LocalStorageConfig = {}): StorageBack
   };
 }
 
-export function createLocalStoragePlugin(): HostExtensionPlugin<typeof LOCAL_STORAGE_CONFIG.fields> {
+export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE_CONFIG.fields> {
   return {
     name: LOCAL_STORAGE_PLUGIN_ID,
     label: LOCAL_STORAGE_LABEL,

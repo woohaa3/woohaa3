@@ -194,7 +194,7 @@ describe("两类 3D 节点数据（任务 1.1/1.3）", () => {
     expect(decoded.value.filmSetAnimations!.clips[0]!.bindings[0]!.itemId).toBe(ITEM_ID);
   });
 
-  it("片场编辑 canonical 重写保留自身 groupAppearance", () => {
+  it("片场编辑 canonical 重写原样保留旧 groupAppearance", () => {
     const appearance = defaultGroupAppearance();
     const fields = filmSetNodeData({ groupAppearance: appearance });
     const decoded = decodeFilmSetNodeData(fields);

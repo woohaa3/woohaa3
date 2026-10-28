@@ -17,13 +17,12 @@
  */
 import type {
   ApplicationBackendDiagnosticEntry,
-  ApplicationBackendExtensionDefinition,
   ApplicationExtensionRequestContext,
   CanvasAccess,
   CanvasUpstreamLink,
   CanvasUpstreamProvider
 } from "@woohaa3/contracts";
-import { canvasUpstreamCapabilityId, isBoundedId } from "@woohaa3/contracts";
+import { canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type ExtensionPlugin } from "@woohaa3/contracts";
 import {
   CANVAS_SERVICE,
   IDENTITY_SERVICE,
@@ -45,7 +44,6 @@ import {
   REMOTE_SERVER_GENERATION_REFRESH_ROUTE,
   REMOTE_SERVER_LOGIN_ROUTE,
   REMOTE_SERVER_LOGOUT_ROUTE,
-  REMOTE_SERVER_METADATA,
   REMOTE_SERVER_OAUTH_CALLBACK_ROUTE,
   REMOTE_SERVER_OAUTH_DONE_ROUTE,
   REMOTE_SERVER_OAUTH_POLL_ROUTE,
@@ -69,6 +67,8 @@ import {
   parseCanvasShareUpdate,
   parseServerUrl,
   pickLoginAssertionHeaders,
+  REMOTE_SERVER_DEVICE_TOKEN_ENV,
+  REMOTE_SERVER_URL_ENV,
   resolveRemoteEndpoints,
   type RemoteAuthMethod,
   type RemoteCanvasInvite,
@@ -434,7 +434,7 @@ function splitDiagnosticBatches(
 }
 
 /**
- * 一条诊断日志事件（写进 `host.logger` 的形状）。
+ * 一条诊断日志事件（写进 `ctx.log` 的形状）。
  *
  * 字段刻意收得很窄：这里**没有**能装令牌、设备码、请求体或完整 URL 的位置。远端地址只以
  * `serverUrl` 传入，由 `log()` 折成 `serverHost`；宿主再按白名单投影进诊断缓冲。
@@ -453,6 +453,14 @@ type RemoteLogInput = {
   method?: string;
   /** 远端基址；**只用于折出 `serverHost`**，不会原样进日志。 */
   serverUrl?: string | null;
+  /** 地址来源：`deployment`（部署配置）或 `session`（已登录会话）。固定枚举，不是自由文本。 */
+  source?: "deployment" | "session";
+  /** 存储后端 id（常量，非秘密）；排障时用来确认注册的是哪一份实现。 */
+  backendId?: string;
+  /** 远端主机（`host[:port]`，不含路径/凭据）；由 `log()` 从 serverUrl 折出。 */
+  serverHost?: string;
+  /** 凭证形态的稳定枚举（`gateway` / `token` / `none`），不是凭证本身。 */
+  credential?: string;
   status?: number;
   /** 上报被服务端接受的条数（非秘密，便于落盘日志核对）。 */
   acceptedCount?: number;
@@ -507,15 +515,64 @@ function accessFromCanvas(canvas: Record<string, unknown>): CanvasAccess | undef
 }
 
 
-export function createRemoteServerExtension(options: RemoteServerExtensionOptions = {}): ApplicationBackendExtensionDefinition {
+/**
+ * 配置段：`extensions.remote-server.*`（框架统一落盘、校验与热重载）。
+ *
+ * 只有**非秘密**项；`deviceToken` 声明为 `secret`，写本机密钥文件而不是普通配置。
+ */
+export const REMOTE_SERVER_CONFIG = defineConfigSchema({
+  serverUrl: {
+    kind: "url",
+    protocols: ["https:", "http:", "ws:", "wss:"],
+    reload: "hot",
+    legacyEnv: REMOTE_SERVER_URL_ENV,
+    label: "服务端地址",
+    description: "远端 woohaa-server 的基址；留空表示纯本地运行"
+  },
+  deviceToken: {
+    kind: "string",
+    secret: true,
+    reload: "hot",
+    legacyEnv: REMOTE_SERVER_DEVICE_TOKEN_ENV,
+    label: "设备令牌",
+    description: "部署发放的设备凭证；写本机密钥文件，不进普通配置"
+  },
+  keyPrefix: {
+    kind: "string",
+    reload: "hot",
+    label: "对象键前缀",
+    description: "服务端托管存储的同桶多部署隔离前缀；留空不额外加前缀"
+  }
+});
+
+/** 配置段前缀：`extensions.<extensionId>`（与所有扩展同一套键空间）。 */
+export const REMOTE_SERVER_CONFIG_PREFIX = `extensions.${REMOTE_SERVER_EXTENSION_ID}`;
+
+/**
+ * remote-server 作为一个**统一形态**的 extension plugin：`apply(ctx, config)`。
+ *
+ * 与 provider 类插件同一套装配语义——不再有独立的「backend 宿主」：
+ * - 配置来自 `config`（框架按 `Config` schema 从宿主配置文件读好、校验好再传进来）；
+ * - HTTP 路由走 `ctx.webServer`；
+ * - 能力/生成/存储/遥测/服务 facade 都从 `ctx` 取。
+ *
+ * `options` 仍保留：它是**测试注入点**（fake fetch、内存会话存储等），不是配置来源。
+ */
+export function createRemoteServerPlugin(options: RemoteServerExtensionOptions = {}): ExtensionPlugin<typeof REMOTE_SERVER_CONFIG.fields> {
   return {
-    extensionId: REMOTE_SERVER_EXTENSION_ID,
-    capabilities: REMOTE_SERVER_METADATA.capabilities,
-    async activate(host) {
-      // 部署配置每次现读：`config.local.json` 与设置面的非秘密项都可能被改，
-      // 而地址是热重载的语义（与 canvas.syncUpstream.url 一致），不该锁在启动值上。
+    name: REMOTE_SERVER_EXTENSION_ID,
+    label: "服务端接入",
+    configPrefix: REMOTE_SERVER_CONFIG_PREFIX,
+    // 与 `HostExtensionContext` 的必需项一一对应；其余能力（webServer / capabilities / services /
+    // diagnostics）是可选服务，由装载器按扩展 provide，缺席时插件按能力分支（例如没有 raw HTTP
+    // 接缝就回退短码登录），因此不进 inject。
+    inject: ["log", "generation", "storage", "marketplace", "telemetry"],
+    Config: REMOTE_SERVER_CONFIG,
+    async apply(ctx, config) {
+      // 部署配置：框架已把配置文件里的值校验好传进来；`config.local.json` 与 env 仍作为
+      // 过渡兼容来源（`legacyEnv` 在 schema 里声明，宿主会标注来源）。
       const readDeployment =
-        options.deployment ?? (() => readRemoteServerDeployment({ values: host.config.values() }));
+        options.deployment ?? (() => readRemoteServerDeployment({ values: config as Record<string, unknown> }));
       /**
        * 进行中的设备码登录。**设备码只存在于本进程**：它是能换会话的凭据，等价于口令，
        * 因此不进浏览器、不写日志、不落盘。
@@ -543,7 +600,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       /**
        * 记录一条**接入过程**诊断事件。
        *
-       * 为什么集中在这一层而不是各处直接调 `host.logger`：
+       * 为什么集中在这一层而不是各处直接调 `ctx.log`：
        * 1. 事件名与字段形状只有一处，避免某处「顺手」把令牌/设备码/短码/URL query 写进日志；
        * 2. 远端地址一律折成 `serverHost`（`host[:port]`，同源挂载只留路径）——诊断要回答
        *    「连的是哪台」，不需要完整地址（它可能带部署路径甚至临时参数）；
@@ -552,10 +609,12 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        *
        * **本函数不接受、也不该接受任何凭据字段**：调用方一旦拿不到能装秘密的键，就不会写错。
        */
+      // 宿主日志出口：带 module 字段的结构化作用域（诊断缓冲按它投影）。
+      const hostLog = ctx.log.scope(REMOTE_SERVER_EXTENSION_ID);
       const log = (input: RemoteLogInput): void => {
         const { serverUrl, ...rest } = input;
         const serverHost = typeof serverUrl === "string" && serverUrl !== "" ? serverHostOf(serverUrl) : "";
-        host.logger({
+        hostLog({
           level: "info",
           ...rest,
           ...(serverHost === "" ? {} : { serverHost })
@@ -563,7 +622,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       };
       // 会话优先落宿主的 owner-scoped 文档存储（跨重启保留）；没有该能力时退化为内存，
       // 而不是伪造一个「看起来持久」的实现。
-      const documents = host.services.documents;
+      const documents = ctx.services!.documents;
       const store = options.store ?? (documents ? createDocumentSessionStore(documents) : createMemorySessionStore());
       /**
        * 「显式启用同步」的待同步集合：与**会话**同一入口（宿主 owner-scoped 文档存储），
@@ -625,7 +684,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
          * 宿主没提供该能力（纯本地宿主/旧版本）时静默跳过，不影响登录本身。
          */
         onSessionChanged: () => {
-          void host.services.canvas.refreshSyncUpstream?.().catch(() => undefined);
+          void ctx.services!.canvas.refreshSyncUpstream?.().catch(() => undefined);
           // 服务端托管生成的目录随会话变化收敛（登录后拉目录、登出/切服清空）。
           // 刷新自身绝不抛错；这里再兜一层，避免未处理的 rejection。
           void generationBridge.refresh().catch(() => undefined);
@@ -664,7 +723,8 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         | null = null;
 
       const generationBridge = createRemoteGenerationBridge({
-        ...(host.registerGeneration ? { registerGeneration: host.registerGeneration } : {}),
+        // 宿主没有生成扩展点时省略：bridge 会安静跳过（旧宿主/纯本地宿主）。
+        ...(ctx.generation ? { registerGeneration: (provider: import("@woohaa3/contracts").GenerationProvider) => { ctx.generation!.register(provider); } } : {}),
         session: () => sessionSource.current(),
         fetchImpl,
         log,
@@ -681,13 +741,16 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       // 与存储后端同形：谁注册谁收回。宿主没有遥测能力时（纯本地宿主/旧版本）静默跳过，
       // 不把它当成激活失败——上报本来就只是 best-effort。
       // 开关在宿主设置 `telemetry.export.enabled`（core 只管发不发），目的地就是这里的部署地址。
-      host.registerTelemetryExport?.(
+      // `ctx.telemetry.registerExport` 是核心服务（与 generation 的 fan-in 同形），
+      // 注销随 fiber 走：谁注册谁收回。
+      const undoTelemetryExport = ctx.telemetry.registerExport(
         createRemoteTelemetryExport({
           sessionSource,
           fetchImpl,
           log
         })
       );
+      ctx.effect(() => undoTelemetryExport);
 
       /** 当前会话的同步范围：远端地址 + 主体。待同步集合与远端目录缓存都按它隔离。 */
       const syncScopeOf = (session: RemoteSession): RemoteSyncScope => ({
@@ -1019,10 +1082,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           };
         }
       };
-      host.registerCapability({
-        id: canvasUpstreamCapabilityId(REMOTE_SERVER_EXTENSION_ID),
-        value: upstreamProvider
-      });
+      { const undo = ctx.capabilities!.register(canvasUpstreamCapabilityId(REMOTE_SERVER_EXTENSION_ID), upstreamProvider); ctx.effect(() => undo); }
 
       /**
        * 把「本部署市场」作为一个市场来源交给宿主（`ctx.marketplace` 扩展点）。
@@ -1032,9 +1092,14 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * - 宿主判定本扩展不在内置根（市场装市场的场景）→ 记日志跳过，其余能力照常；
        * - sourceId 已被占用（热重载残留）→ 同上。
        */
-      registerServerMarketplaceSource(host, marketplaceSource, log as RemoteLogSink);
+      // `ctx.marketplace.register` 是统一后的注册面；helper 要的是 `registerMarketplaceSource` 形状。
+      registerServerMarketplaceSource(
+        { registerMarketplaceSource: (source) => { ctx.marketplace.register(source); } },
+        marketplaceSource,
+        log as RemoteLogSink
+      );
 
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_SESSION_ROUTE,
         auth: "authenticated",
         purpose: "read",
@@ -1051,7 +1116,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         }
       });
 
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_PROBE_ROUTE,
         auth: "authenticated",
         purpose: "read",
@@ -1182,7 +1247,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 只有原始 handler 能读到请求头（DTO handler 的 context 不带 headers），而网关断言就在头里。
        * 浏览器不需要任何输入，宿主把它已有的断言转发给远端即可。
        */
-      host.registerRawHttpHandler?.({
+      ctx.webServer?.registerRawHttp?.({
         route: REMOTE_SERVER_LOGIN_ROUTE,
         method: "POST",
         auth: "authenticated",
@@ -1209,7 +1274,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       });
 
       // DTO 入口保留：没有网关的环境（本机自测、自动化）用请求体令牌登录。
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_LOGIN_ROUTE,
         auth: "authenticated",
         purpose: "new-work",
@@ -1235,7 +1300,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        *
        * 令牌全程只在本机宿主与服务端之间；浏览器只会看到短码与批准页地址。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_DEVICE_START_ROUTE,
         auth: "authenticated",
         purpose: "new-work",
@@ -1319,7 +1384,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 已批准时服务端**恰好交付一次**会话：这里立刻落库并把状态收敛成 `connected`，
        * 之后同一份设备码再也取不到令牌（远端会回 `expired`）。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_DEVICE_POLL_ROUTE,
         auth: "authenticated",
         purpose: "read",
@@ -1437,19 +1502,21 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         configuredServerUrl: effectiveServerUrl,
         sessionSource,
         snapshotOf: (session) => snapshotOf(session),
-        basePath: () => host.deployment?.basePath ?? "",
-        rawHttpAvailable: typeof host.registerRawHttpHandler === "function",
+        basePath: () => ctx.deployment?.basePath ?? "",
+        // 判断的是**原始 HTTP 接缝**是否存在，而不是 webServer 本身：
+        // 有的宿主只提供结构化 handler，浏览器授权码回调要据此回退到短码登录。
+        rawHttpAvailable: typeof ctx.webServer?.registerRawHttp === "function",
         log
       });
 
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_OAUTH_START_ROUTE,
         auth: "authenticated",
         purpose: "new-work",
         handle: async (input) => oauthLogin.start(input.body)
       });
 
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_OAUTH_POLL_ROUTE,
         auth: "authenticated",
         purpose: "read",
@@ -1462,14 +1529,14 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * auth 必须是 public：浏览器被服务端 302 过来时是顶层导航，不带宿主的会话凭据。
        * 这条路由的安全性来自 state（一次性、进程内）与 PKCE，而不是宿主会话。
        */
-      host.registerRawHttpHandler?.({
+      ctx.webServer?.registerRawHttp?.({
         route: REMOTE_SERVER_OAUTH_CALLBACK_ROUTE,
         method: "GET",
         auth: "public",
         purpose: "read",
         handle: (req, res) => oauthLogin.handleCallback(req, res)
       });
-      host.registerRawHttpHandler?.({
+      ctx.webServer?.registerRawHttp?.({
         route: REMOTE_SERVER_OAUTH_DONE_ROUTE,
         method: "GET",
         auth: "public",
@@ -1477,7 +1544,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         handle: (req, res) => oauthLogin.handleDone(req, res)
       });
 
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_LOGOUT_ROUTE,
         auth: "authenticated",
         purpose: "work-control",
@@ -1521,7 +1588,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 集合按会话（serverUrl + subject）隔离并持久化：登出**不删除**（同一账号重连后还要
        * 继续完成首次同步），换账号/换地址则不串用。文档里只有画布 id，没有凭据。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_SYNC_ENABLE_ROUTE,
         auth: "authenticated",
         purpose: "new-work",
@@ -1565,14 +1632,14 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           // 立刻让宿主重新解析：点了「同步远端」就必须真的切过去，不能等下次登录/重启。
           // 宿主没提供该能力时静默跳过；刷新失败也不回滚启用意图（它已持久化，下次解析会补上）。
           try {
-            await host.services.canvas.refreshSyncUpstream?.();
+            await ctx.services!.canvas.refreshSyncUpstream?.();
           } catch {
             // 刷新失败只影响这一次生效时机，不影响「已启用」这个事实。
           }
           // 文档链路建立后显式对账一次媒体字节：这是「同步远端」这个动作的另一半。
           // 进度由目录徽标（syncing → synced/failed）表达，接口本身不阻塞等资产传完。
           try {
-            host.services.canvas.syncCanvasMedia?.(canvasId);
+            ctx.services!.canvas.syncCanvasMedia?.(canvasId);
           } catch {
             // 媒体补传失败不影响「已启用同步」；状态与重试由宿主侧负责。
           }
@@ -1627,7 +1694,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         };
       };
 
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_CANVAS_MEMBERS_ROUTE,
         auth: "authenticated",
         purpose: "read",
@@ -1667,7 +1734,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         }
       });
 
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_CANVAS_MEMBER_UPSERT_ROUTE,
         auth: "authenticated",
         purpose: "work-control",
@@ -1697,7 +1764,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         }
       });
 
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_CANVAS_MEMBER_REMOVE_ROUTE,
         auth: "authenticated",
         purpose: "work-control",
@@ -1737,7 +1804,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 默认分享（restricted / revision 0）在 proto3 JSON 里会被省略，按协议语义补缺省，
        * 而不是把缺字段当成响应损坏。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_CANVAS_SHARE_ROUTE,
         auth: "authenticated",
         purpose: "read",
@@ -1787,7 +1854,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * expectedRevision 原样带上（int64 字符串）：服务端用它做乐观并发校验，不一致回
        * ABORTED——这不是故障，而是「别人先改了」，界面应提示重读后再试。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_CANVAS_SHARE_UPDATE_ROUTE,
         auth: "authenticated",
         purpose: "work-control",
@@ -1841,7 +1908,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 读不到时只需给一句可读原因。列表里**没有链接**（token 只在创建时返回一次），需要
        * 再分享就重新创建一条。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_CANVAS_INVITES_ROUTE,
         auth: "authenticated",
         purpose: "read",
@@ -1882,7 +1949,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 空串表示部署没配对外地址——照样返回 ok（邀请可能已签发），由界面提示「无法生成链接」，
        * 而不是在这里假装失败或编一个地址。链接里带 token，**不进日志**。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_CANVAS_INVITE_CREATE_ROUTE,
         auth: "authenticated",
         purpose: "work-control",
@@ -1941,7 +2008,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       });
 
       /** 撤销一条协作邀请（作者/部署管理员）。撤销不删除已接受的人：那只影响后续接受。 */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_CANVAS_INVITE_REVOKE_ROUTE,
         auth: "authenticated",
         purpose: "work-control",
@@ -1979,7 +2046,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 返回受控状态快照：可用性、模型数量与目录修订号。浏览器只读这几个数，不接触模型细节
        * 与任何凭据；刷新不要求整页重载（change: 2026-10-20-reserve-remote-generation-provider）。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_GENERATION_REFRESH_ROUTE,
         auth: "authenticated",
         purpose: "read",
@@ -2004,13 +2071,13 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 宿主没有该能力（纯本地宿主/旧版本）时**必须**明说 unavailable，而不是给一份空列表
        * 让人误以为「最近确实什么都没发生」。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_DIAGNOSTICS_ROUTE,
         auth: "authenticated",
         purpose: "read",
         handle: async () => {
           const capturedAt = now();
-          const diagnostics = host.diagnostics;
+          const diagnostics = ctx.diagnostics;
           const snapshot: RemoteDiagnosticsSnapshot = diagnostics
             ? {
                 entries: diagnostics.snapshot({ limit: DIAGNOSTIC_WINDOW_LIMIT }),
@@ -2041,7 +2108,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
        * 浏览器自报的 `frontendVersion` 由请求体带进来，这里只做形状校验再原样转给服务端：
        * 版本属于**浏览器那份 bundle**，宿主没有别的来源可以知道它（见 `normalizeFrontendVersion`）。
        */
-      host.registerHandler({
+      ctx.webServer!.register({
         route: REMOTE_SERVER_DIAGNOSTICS_REPORT_ROUTE,
         auth: "authenticated",
         purpose: "new-work",
@@ -2061,7 +2128,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
             return { status: 200, body: { ok: false, error: "未连接服务端" } satisfies RemoteDiagnosticsReportResult };
           }
 
-          const diagnostics = host.diagnostics;
+          const diagnostics = ctx.diagnostics;
           if (!diagnostics) {
             log({
               event: "remote-diagnostics-report-failed",
@@ -2187,22 +2254,22 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
         const resolved = resolveServerStorageConfig(deployment, serverUrl);
         if (!resolved.ok) {
           if (registeredStorageBackend !== null) {
-            host.unregisterStorage?.(registeredStorageBackend.backendId);
+            ctx.storage.unregister(registeredStorageBackend.backendId);
             registeredStorageBackend = null;
             storageBackendConfig.serverUrl = "";
-            host.logger({ event: "server-storage-released", reason: "地址已不可用（登出且部署未配地址）" });
+            hostLog({ event: "server-storage-released", reason: "地址已不可用（登出且部署未配地址）" });
             return;
           }
           // 日志只写缺哪个字段，绝不写值（deviceToken 是凭据）。
-          host.logger({
+          hostLog({
             event: "server-storage-unconfigured",
             ...(resolved.missing.length > 0 ? { missing: [...resolved.missing] } : {}),
             ...(resolved.invalid ? { invalid: resolved.invalid } : {})
           });
           return;
         }
-        if (!host.registerStorage) {
-          host.logger({ event: "server-storage-unavailable", reason: "宿主没有提供存储扩展点" });
+        if (!ctx.storage) {
+          hostLog({ event: "server-storage-unavailable", reason: "宿主没有提供存储扩展点" });
           return;
         }
         const source = deployment.serverUrl === null ? "session" : "deployment";
@@ -2210,7 +2277,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           if (storageBackendConfig.serverUrl === resolved.config.serverUrl) return;
           storageBackendConfig.serverUrl = resolved.config.serverUrl;
           storageBackendConfig.keyPrefix = resolved.config.keyPrefix;
-          host.logger({ event: "server-storage-retargeted", source, serverHost: serverHostOf(resolved.config.serverUrl) });
+          hostLog({ event: "server-storage-retargeted", source, serverHost: serverHostOf(resolved.config.serverUrl) });
           return;
         }
         storageBackendConfig.serverUrl = resolved.config.serverUrl;
@@ -2227,7 +2294,9 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           ...(transport.timeoutMs ? { timeoutMs: transport.timeoutMs } : {}),
           ...(transport.transferTimeoutMs ? { transferTimeoutMs: transport.transferTimeoutMs } : {})
         });
-        host.registerStorage(backend);
+        // 由 Cordis 托管注销：插件卸载时自动撤掉后端，不需要手工成对调用。
+        const undoRegister = ctx.storage.register(backend);
+        ctx.effect(() => undoRegister);
         registeredStorageBackend = backend;
         referenceUploader = async ({ bytes, contentType, storageKey }) => {
           // 参考输入是**这次任务的输入**，归调用主体：写主体命名空间，与服务端的
@@ -2244,7 +2313,7 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
           await backend.put(key, bytes, contentType, undefined);
           return backend.locatorOf ? await backend.locatorOf(key, undefined) : undefined;
         };
-        host.logger({
+        hostLog({
           event: "server-storage-activated",
           backendId: backend.backendId,
           // 地址来自部署配置还是已登录会话：排障时这是「配置有没有生效」的第一问。
@@ -2267,18 +2336,15 @@ export function createRemoteServerExtension(options: RemoteServerExtensionOption
       const diagnosticRoot = desktopDiagnosticUploadRoot();
       if (diagnosticRoot) {
         const uploader = createDiagnosticUploader({ root: diagnosticRoot, session: () => sessionSource.current(), fetchImpl, now });
-        let timer: ReturnType<typeof setInterval> | undefined;
-        host.registerResource({
-          id: "remote-server.desktop-diagnostic-upload",
-          start() {
-            void uploader.tick();
-            timer = setInterval(() => { void uploader.refreshDestination(); void uploader.tick(); }, 5000);
-            timer.unref?.();
-          },
-          async stop() {
-            if (timer) clearInterval(timer);
-            await uploader.stop();
-          }
+        // 启动即开跑、卸载即停：Cordis 的 `ctx.effect` 就是这套语义，不需要单独的 resource 概念。
+        ctx.effect(() => {
+          void uploader.tick();
+          const timer = setInterval(() => { void uploader.refreshDestination(); void uploader.tick(); }, 5000);
+          timer.unref?.();
+          return () => {
+            clearInterval(timer);
+            void uploader.stop();
+          };
         });
       }
 

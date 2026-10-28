@@ -166,6 +166,7 @@ export function addNode(
   if (command.nodeData?.retainWhenEmpty !== undefined && (node.type !== "group" || typeof command.nodeData.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
   if (command.nodeData?.groupCollapsed !== undefined && (node.type !== "group" || typeof command.nodeData.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
   if (command.nodeData?.groupBadgeScale !== undefined && (node.type !== "group" || !isGroupBadgeScale(command.nodeData.groupBadgeScale))) return reject("invalid-group-config", "groupBadgeScale 只允许 group 的 0.5 至 2.5 倍率");
+  if (command.nodeData?.groupAppearance !== undefined && node.type !== "group") return reject("invalid-group-appearance", "groupAppearance 只属于普通组节点");
   // 预览节点只能由源镜头生命周期派生（D3）：普通新建路径禁止预览类型；恢复路径（撤销删除
   // 镜头）允许重建，但必须携带合法归属、派生 ID 与存在的源片场，最终不变式仍会复核。
   if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || hasShotPreviewOwnership(command.nodeData)) {

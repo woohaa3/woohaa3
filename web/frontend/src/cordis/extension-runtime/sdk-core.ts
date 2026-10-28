@@ -7,7 +7,7 @@
  * barrel 取具名导出，禁止对整个 barrel 做 namespace 展开（design D2）。
  */
 import { defineExtensionFrontend, defineExtensionPlugin } from "../../extension-api/entry.js";
-import { PROMPT_SNIPPET_SOURCE } from "../../extension-api/capability-keys.js";
+import { PROMPT_SNIPPET_SOURCE, IMAGE_EDIT_SERVICE } from "../../extension-api/capability-keys.js";
 import { desktopBootstrap, isDesktopHost } from "../../extension-api/host-platform.js";
 import {
   resolvePublicUrl,
@@ -24,6 +24,9 @@ export const namedExports = {
   defineExtensionFrontend,
   defineExtensionPlugin,
   PROMPT_SNIPPET_SOURCE,
+  // change: 2026-10-27-add-image-history-to-photocraft-focus，design D4：图片编辑扩展实现宿主
+  // 节点历史消费的 imageEdit capability，双方共享同一 key。
+  IMAGE_EDIT_SERVICE,
   // change: 2026-10-15-support-configurable-app-base-path，design D6：通用公开 URL 能力。
   resolvePublicUrl,
   toLogicalAppPath,

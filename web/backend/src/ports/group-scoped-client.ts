@@ -1,5 +1,5 @@
-import { canvasGroupMembers, canvasGroupAssetIds, hasExternalCanvasReference } from "@woohaa3/contracts";
-import { currentCanvasGroupScope, type CanvasService } from "@woohaa3/canvas-service";
+import { canvasGroupMembers, canvasGroupAssetIds, hasExternalCanvasReference, isFilmSetNode } from "@woohaa3/contracts";
+import { currentCanvasGroupScope, normalizeGroupScopeCommands, type CanvasService } from "@woohaa3/canvas-service";
 
 /** Covers reads and run submission as well as the room's independent write membrane. */
 export function groupScopedClient<T extends object>(client: T, canvas: CanvasService): T {
@@ -18,6 +18,10 @@ export function groupScopedClient<T extends object>(client: T, canvas: CanvasSer
       try { members = canvasGroupMembers(snapshot.canvas, scope.rootGroupId); } catch { return { ok: false, code: "group-target-missing", message: "根组已删除" }; }
       const nodeIds = [input.nodeId, input.aroundNodeId, ...(Array.isArray(input.nodeIds) ? input.nodeIds : []), ...(Array.isArray(input.items) ? input.items.map(i => (i as { nodeId?: string }).nodeId) : [])].filter((id): id is string => typeof id === "string");
       if (nodeIds.some(id => !members.has(id))) return { ok: false, code: "group-scope-forbidden", message: "目标不在当前根组内" };
+      if (["getModelCameras", "setModelCamera", "createModelCamera", "updateModelCamera", "deleteModelCamera", "renameModelCamera", "resetModelCamera"].includes(String(property))) {
+        const node = input.nodeId ? snapshot.canvas.document.nodes.find(entry => entry.id === input.nodeId) : undefined;
+        if (!node || !isFilmSetNode(node.type, snapshot.canvas.nodeData[node.id])) return { ok: false, code: "group-camera-forbidden", message: "普通模型节点不支持片场镜头操作" };
+      }
       if (["getRun", "cancelRun", "getOutput"].includes(String(property))) {
         if (!snapshot.canvas.jobs.some(job => job.nodeId === input.nodeId && job.runId === input.runId)) return { ok: false, code: "group-run-forbidden", message: "运行不属于当前组内节点" };
       }
@@ -25,7 +29,10 @@ export function groupScopedClient<T extends object>(client: T, canvas: CanvasSer
       // Existing upstream references are not implicitly made available to this turn.
       if (input.resource !== "group-appearance" && ["getModelNode", "getModelStatistics", "runNode"].includes(String(property)) && snapshot.canvas.document.edges.some(e => nodeIds.includes(e.target) && !members.has(e.source))) return { ok: false, code: "group-external-input", message: "目标有组外输入，请先明确处理跨组连接" };
       if (input.resource !== "group-appearance" && ["getModelNode", "getModelStatistics", "runNode"].includes(String(property)) && nodeIds.some(id => hasExternalCanvasReference(snapshot.canvas.nodeData[id], members, canvasGroupAssetIds(snapshot.canvas, members)))) return { ok: false, code: "group-external-input", message: "目标引用了组外输入" };
-      const result = await method.call(target, { ...input, canvasId: scope.canvasId });
+      const scopedInput = property === "applyPlan" && Array.isArray(input.commands)
+        ? { ...input, commands: normalizeGroupScopeCommands(input.commands as never[], scope.rootGroupId) }
+        : input;
+      const result = await method.call(target, { ...scopedInput, canvasId: scope.canvasId });
       if (property === "runNode" && result?.ok) scope.onAction?.({ canvasId: scope.canvasId, nodeId: result.nodeId, runId: result.runId, jobId: result.jobId });
       return result;
     };

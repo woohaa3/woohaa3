@@ -70,7 +70,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (!liveIds.length) return buildClipboardText();
     if (!options.mediaContent) throw Error("媒体内容 provider 未就绪，无法复制");
     const frozen = await options.mediaContent.freeze(copyable.canvasState, liveIds, crypto.randomUUID());
-    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others, { snapshotNodeIds: liveIds });
+    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others);
     if (!frozenPayload) return null;
     const text = serializeCanvasCopyPayload(frozenPayload);
     (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;

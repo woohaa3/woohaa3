@@ -13,7 +13,7 @@ export function registerAnimationTools(reg: ToolRegistration, options: ModelMcpH
 
   registerToolWithGrant("submit_film_set", {
     title: "保存片场内容",
-    description: "在已有片场中生成或编辑对象，原子保存完整 items-only 片场。先 get_model_node 获取 animation 与 snapshotHash；复制未修改的对象、片段、运动、镜头和摆放，新增主要对象分别作为 model item。片场只有地面或为空也可提交，不需要已有模型，不创建替代节点。model item 格式：{id,kind:'model',name,localTransform:{offset:{x,y,z},scale:1,yaw:0},model:{modelScript:<完整脚本>,modelScriptLanguage:'javascript',modelScriptVersion:'woohaa-model-js-v2'}}；模型 contentVersion/哈希由宿主派生，不要编造。禁止顶层 modelScript。只修改单个已有对象脚本用 import_model_snapshot；只修改片段动作用 mutate_film_set_clip。此工具只允许整个片场目标，不用于受限对象/片段/镜头目标。",
+    description: "在已有片场中生成或编辑对象，原子保存完整 items-only 片场。所有动画字段（title/sceneCamera/scenePlacement/filmSetContent/filmSetAnimations）都必须放在 animation 对象内。先 get_model_node 获取 animation 与 snapshotHash；复制未修改的对象、片段、运动、镜头和摆放，新增主要对象分别作为 model item。片场只有地面或为空也可提交，不需要已有模型，不创建替代节点。model item 格式：{id,kind:'model',name,localTransform:{offset:{x,y,z},scale:1,yaw:0},model:{modelScript:<完整脚本>,modelScriptLanguage:'javascript',modelScriptVersion:'woohaa-model-js-v2'}}；模型 contentVersion/哈希由宿主派生，不要编造。禁止顶层 modelScript。sceneCamera 只是无拍摄镜头时的回退构图，不是镜头，提交也不会自动创建镜头；用户要求镜头/机位/拍摄时，必须通过 filmSetAnimations.clips 或随后用 mutate_film_set_clip 创建至少一个镜头（静态构图也要 static），不能只设置 sceneCamera。只修改单个已有对象脚本用 import_model_snapshot；只修改片段动作用 mutate_film_set_clip。此工具只允许整个片场目标，不用于受限对象/片段/镜头目标。",
     inputSchema: z.object({
       canvasId: z.string().min(1), nodeId: z.string().min(1), requestId: z.string().min(1),
       expectedSnapshotHash: z.string().min(1).describe("get_model_node 返回的 snapshotHash；并发变更时拒绝，请重新读取后合并"),
@@ -32,7 +32,15 @@ export function registerAnimationTools(reg: ToolRegistration, options: ModelMcpH
   }, async (input) => {
     if (!options.service?.commitAnimation) return toolError("片场能力当前不可用");
     const outcome = await options.service.commitAnimation(input);
-    return outcome.ok ? jsonResult(outcome) : toolError(outcome.message, outcome.code);
+    if (!outcome.ok) return toolError(outcome.message, outcome.code);
+    const clips = (outcome as {
+      animation?: { filmSetAnimations?: { clips?: unknown[] } };
+    }).animation?.filmSetAnimations?.clips;
+    return jsonResult(clips?.length === 0 ? {
+      ...outcome,
+      clipCount: 0,
+      hint: "当前片场还没有拍摄镜头；sceneCamera 只是回退构图。若用户要求镜头/机位/拍摄，请用 get_film_set_clips 的 missingClipHash 调 mutate_film_set_clip(op.kind:'create') 创建至少一个镜头（静态构图也用 static）。"
+    } : outcome);
   });
 
   registerToolWithGrant(

@@ -1,4 +1,5 @@
 import type { ServerCanvas } from "./domain/index.js";
+import { effectiveCanvasNodeSize } from "./node-dimensions.js";
 import { decodeGroupAppearance } from "./group-appearance.js";
 import { stableStringify } from "./canvas-script/planner/hash.js";
 
@@ -31,13 +32,36 @@ export function validateCanvasGroupChange(before: ServerCanvas, after: ServerCan
   try { ids = canvasGroupMembers(before, rootGroupId); nextIds = canvasGroupMembers(after, rootGroupId); } catch { return "不能删除或解散创作根组"; }
   const root = before.document.nodes.find(n => n.id === rootGroupId)!;
   const nextRoot = after.document.nodes.find(n => n.id === rootGroupId)!;
-  const { width: _width, height: _height, ...rootIdentity } = root;
-  const { width: _nextWidth, height: _nextHeight, ...nextIdentity } = nextRoot;
-  if (!same(rootIdentity, nextIdentity)) return "不能移动、重挂或修改根组结构";
+  const { width: _width, height: _height, position: _position, ...rootIdentity } = root;
+  const { width: _nextWidth, height: _nextHeight, position: _nextPosition, ...nextIdentity } = nextRoot;
+  if (!same(rootIdentity, nextIdentity)) return "不能重挂或修改根组结构";
   const { groupAppearance: oldAppearance, ...oldRootData } = before.nodeData[rootGroupId] ?? {};
   const { groupAppearance: nextAppearance, ...nextRootData } = after.nodeData[rootGroupId] ?? {};
   if (!same(oldAppearance, nextAppearance) && !decodeGroupAppearance(nextAppearance).ok) return "根组形象必须是合法本地静态模型";
-  if (root.parentId !== nextRoot.parentId || root.position.x !== nextRoot.position.x || root.position.y !== nextRoot.position.y || (nextRoot.width ?? 0) < (root.width ?? 0) || (nextRoot.height ?? 0) < (root.height ?? 0) || !same(oldRootData, nextRootData)) return "根组只允许随内容扩展边界";
+  if (!same(oldRootData, nextRootData)) return "根组只允许随内容扩展边界";
+  // 组范围由成员内容驱动：允许根组向上/向左移动并扩大，但不允许缩小或向右下平移。
+  // 缩小/平移仍会破坏组边界与既有内容；扩大由 reducer 的 refit 在需要时执行。
+  const oldRight = root.position.x + effectiveCanvasNodeSize(root).width, oldBottom = root.position.y + effectiveCanvasNodeSize(root).height;
+  const nextRight = nextRoot.position.x + effectiveCanvasNodeSize(nextRoot).width, nextBottom = nextRoot.position.y + effectiveCanvasNodeSize(nextRoot).height;
+  if (![root.position.x, root.position.y, nextRoot.position.x, nextRoot.position.y, effectiveCanvasNodeSize(nextRoot).width, effectiveCanvasNodeSize(nextRoot).height].every(Number.isFinite)
+    || nextRoot.position.x > root.position.x || nextRoot.position.y > root.position.y
+    || nextRight < oldRight || nextBottom < oldBottom) return "根组只允许向外扩展边界";
+  if (root.position.x !== nextRoot.position.x || root.position.y !== nextRoot.position.y) {
+    // 根组帧只能因成员内容扩张而移动：既有直属成员必须通过局部坐标补偿保持世界位置。
+    // 直接平移根组（成员局部坐标不变、世界坐标整体漂移）仍然拒绝。
+    const beforeById = new Map(before.document.nodes.map(n => [n.id, n]));
+    const afterById = new Map(after.document.nodes.map(n => [n.id, n]));
+    for (const child of before.document.nodes) {
+      if (child.parentId !== rootGroupId) continue;
+      const nextChild = afterById.get(child.id);
+      if (!nextChild || nextChild.parentId !== rootGroupId) continue;
+      const localMoved = child.position.x !== nextChild.position.x || child.position.y !== nextChild.position.y;
+      if (localMoved) continue;
+      const beforeAbs = absolutePosition(child, beforeById);
+      const afterAbs = absolutePosition(nextChild, afterById);
+      if (beforeAbs.x !== afterAbs.x || beforeAbs.y !== afterAbs.y) return "根组只能随内容扩展，不能主动移动";
+    }
+  }
   const nextNodes = new Map(after.document.nodes.map(n => [n.id, n]));
   const originalNodes = new Map(before.document.nodes.map(n => [n.id, n]));
   for (const n of after.document.nodes) if (nextIds.has(n.id) && n.id !== rootGroupId && !same(n, originalNodes.get(n.id))) {
@@ -84,3 +108,20 @@ export function hasExternalCanvasReference(value: unknown, ids: Set<string>, ass
   });
 }
 function same(a: unknown, b: unknown) { return stableStringify(a) === stableStringify(b); }
+
+type PositionedNode = { position: { x: number; y: number }; parentId?: string };
+
+/** Serialized nodes carry no `data`; only position/parentId are needed for world coordinates. */
+function absolutePosition(node: PositionedNode, nodes: ReadonlyMap<string, PositionedNode>) {
+  let x = node.position.x, y = node.position.y, parentId = node.parentId;
+  const guard = new Set<string>();
+  while (parentId && !guard.has(parentId)) {
+    guard.add(parentId);
+    const parent = nodes.get(parentId);
+    if (!parent) break;
+    x += parent.position.x;
+    y += parent.position.y;
+    parentId = parent.parentId;
+  }
+  return { x, y };
+}

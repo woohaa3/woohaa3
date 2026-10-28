@@ -1,5 +1,5 @@
 import { filmSetMediaSources } from "./media-sources.js";
-import { createFilmSetObjectResolver, decodeFilmSetNodeData, resolveFilmSetObject, filmSetObjectOwnershipOf, shotReferenceOwnershipOf, shotPreviewNodeId, filmSetAnimationsOf, isFilmSetNode, DEFAULT_FILM_SET_LOCAL_TRANSFORM, executeModelScriptVersioned, readGroupAppearanceForNode, type ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
+import { createFilmSetObjectResolver, decodeFilmSetNodeData, resolveFilmSetObject, filmSetObjectOwnershipOf, shotReferenceOwnershipOf, shotPreviewNodeId, filmSetAnimationsOf, isFilmSetNode, DEFAULT_FILM_SET_LOCAL_TRANSFORM, type ServerCanvas, type CanvasNodeData } from "@woohaa3/contracts";
 import type { CompositeAssetAdapter, CompositeChildPresentation } from "@woohaa3/frontend/extension-api";
 import { buildFilmSetComposition } from "../shared/composition.js";
 import { HistoryFilmSetSnapshots } from "./history-preview.js";
@@ -7,33 +7,22 @@ import { FILM_SET_EXTENSION_ID } from "../../state/shared/identity.js";
 import { projectManagedShotMediaCanvas } from "./managed-shot-media-projection.js";
 import { filmSetManagedLifecycle } from "../../state/shared/managed-shot-media-lifecycle.js";
 
-/** Geometry identity excludes local transforms and animation clocks, which use frame projections. */
+/**
+ * Geometry identity excludes local transforms and animation clocks, which use frame projections.
+ *
+ * The film set's own model is its `filmSetContent.items` composition: `groupAppearance` belongs to
+ * ordinary groups and is neither read nor hashed here.
+ */
 export function filmSetExecutionKey(data: CanvasNodeData): string {
   const decoded = decodeFilmSetNodeData(data);
   if (!decoded.ok) return "film-set:invalid";
-  const appearance = readGroupAppearanceForNode(data);
   return JSON.stringify([decoded.value.scenePlacement, decoded.value.filmSetContent.items.map(item => {
     switch (item.kind) {
       case "model": return [item.id, item.kind, item.model.contentVersion.contentHash, item.model.placement];
       case "ground": return [item.id, item.kind, item.size, item.color];
       default: return [item.id, item.kind, item.assetId, item.aspectRatio];
     }
-  }), appearance.source, appearance.value.model.contentVersion.contentHash]);
-}
-
-function filmSetAppearance(data: CanvasNodeData): { ops: readonly import("@woohaa3/contracts").SceneV2Op[]; placement: import("@woohaa3/contracts").ModelPlacement } | undefined {
-  // 空片场仍由 `emptyPlaceholder` 声明品牌地台，不注入默认外观几何；有内容时才与普通组共用
-  // 同一套托盘展示模型（change: 2026-10-24-unify-group-and-film-set-authoring）。
-  const decoded = decodeFilmSetNodeData(data);
-  if (decoded.ok && decoded.value.filmSetContent.items.length === 0) return undefined;
-  const appearance = readGroupAppearanceForNode(data);
-  const execution = executeModelScriptVersioned(
-    appearance.value.model.modelScript,
-    appearance.value.model.modelScriptVersion,
-  );
-  return execution.ok
-    ? { ops: execution.scene.ops, placement: appearance.value.model.placement }
-    : undefined;
+  })]);
 }
 export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(), canvas: () => ServerCanvas | null = () => null, feedback: (nodeId: string) => string | undefined = () => undefined): CompositeAssetAdapter {
   const object = (id: string) => { const current = canvas(); return current ? resolveFilmSetObject(current, id) : null; };
@@ -90,7 +79,7 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
       }
       const decoded = decodeFilmSetNodeData(data);
       if (!decoded.ok) return null;
-      const result = buildFilmSetComposition({ nodeId, animation: decoded.value, appearance: filmSetAppearance(data) });
+      const result = buildFilmSetComposition({ nodeId, animation: decoded.value });
       return { resource: result.resource, composition: { itemRoots: result.itemRoots, failures: result.failures },
         ...(result.failures.length ? { diagnostic: result.failures.map(entry => `${entry.itemId}=${entry.diagnostic}`).join(",") } : {}) };
     }

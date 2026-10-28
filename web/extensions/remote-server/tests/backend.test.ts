@@ -12,7 +12,7 @@ import type {
   ApplicationBackendDiagnostics,
   CanvasUpstreamProvider
 } from "@woohaa3/contracts";
-import { createRemoteServerExtension, createMemorySessionStore, type RemoteSessionStore } from "../src/backend/index.js";
+import { createRemoteServerPlugin, createMemorySessionStore, type RemoteSessionStore } from "../src/backend/index.js";
 import { createDocumentSessionStore } from "../src/backend/session-store.js";
 import {
   parseServerUrl,
@@ -46,7 +46,7 @@ function createHost(
   diagnostics?: ApplicationBackendDiagnostics
 ) {
   const handlers = new Map<string, (input: { body: unknown; context: unknown }) => Promise<HandlerResult> | HandlerResult>();
-  const capabilities = new Map<string, unknown>();
+  const capabilityRegistry = new Map<string, unknown>();
   const rawHandlers = new Map<string, (req: unknown, res: unknown) => Promise<void>>();
   /** 捕获宿主日志：断言「接入过程记了什么、没记什么」比断言界面文案更接近真实泄漏面。 */
   const logEvents: Array<Record<string, unknown>> = [];
@@ -55,25 +55,50 @@ function createHost(
     requestNodeRun: async () => ({ ok: false as const, code: "unavailable", message: "test" }),
     requestNodeCancel: async () => ({ ok: false as const, code: "unavailable", message: "test" })
   };
-  return {
+  const effects: Array<() => void> = [];
+  /** 统一形态的 ctx 替身：HTTP 走 webServer、日志走 log.scope、能力走 capabilities。 */
+  const ctx = {
     handlers,
-    capabilities,
+    capabilityRegistry,
     rawHandlers,
     logEvents,
+    effects,
     ...(diagnostics ? { diagnostics } : {}),
-    registerCapability: (registration: { id: string; value: unknown }) => {
-      capabilities.set(registration.id, registration.value);
+    log: {
+      scope: () => (event: Record<string, unknown>) => {
+        logEvents.push(event);
+      }
     },
-    config: { values: () => ({}), configVersion: () => 1, secretRefs: () => [], desiredEnabled: () => true },
-    logger: (event: Record<string, unknown>) => {
-      logEvents.push(event);
+    capabilities: {
+      register: (id: string, value: unknown) => {
+        capabilityRegistry.set(id, value);
+        return () => capabilityRegistry.delete(id);
+      }
     },
     services: { ...services, canvas },
-    registerHandler: (registration: { route: string; handle: (input: { body: unknown; context: unknown }) => Promise<HandlerResult> | HandlerResult }) => {
-      handlers.set(registration.route, registration.handle);
+    generation: {
+      register: () => () => undefined,
+      unregister: () => undefined,
+      list: () => [],
+      resolve: () => undefined,
+      conversions: () => [],
+      registerConversion: () => () => undefined
     },
-    registerRawHttpHandler: (registration: { route: string; handle: (req: unknown, res: unknown) => Promise<void> }) => {
-      rawHandlers.set(registration.route, registration.handle);
+    storage: { register: () => () => undefined, unregister: () => undefined },
+    telemetry: { registerExport: () => () => undefined, emit: () => undefined, query: async () => ({ events: [], nextCursor: null }), unregisterExport: () => undefined },
+    marketplace: { register: () => () => undefined, unregister: () => undefined, list: () => [], resolve: () => undefined },
+    effect: (run: () => (() => void) | void) => {
+      const undo = run();
+      if (typeof undo === "function") effects.push(undo);
+    },
+    webServer: {
+      register: (registration: { route: string; handle: (input: { body: unknown; context: unknown }) => Promise<HandlerResult> | HandlerResult }) => {
+        handlers.set(registration.route, registration.handle);
+      },
+      registerHttp: () => undefined,
+      registerRawHttp: (registration: { route: string; handle: (req: unknown, res: unknown) => Promise<void> }) => {
+        rawHandlers.set(registration.route, registration.handle);
+      }
     },
     call: async (route: string, body: unknown = {}) => {
       const handler = handlers.get(route);
@@ -81,9 +106,10 @@ function createHost(
       return handler({ body, context: {} });
     }
   };
+  return ctx;
 }
 
-function activate(options: {
+async function activate(options: {
   deployment: { serverUrl: string | null; deviceToken: string | null; keyPrefix: string };
   fetchImpl: typeof globalThis.fetch;
   now?: () => number;
@@ -98,21 +124,21 @@ function activate(options: {
     ...(options.canvas ? { canvas: options.canvas } : {})
   };
   const host = createHost(services, options.diagnostics);
-  const definition = createRemoteServerExtension({
+  const plugin = createRemoteServerPlugin({
     deployment: () => options.deployment,
     fetchImpl: options.fetchImpl,
     loginAssertionHeaders: options.loginAssertionHeaders,
     ...(options.now ? { now: options.now } : {}),
     ...(options.store ? { store: options.store } : {})
   });
-  definition.activate(host as never);
+  await plugin.apply(host as never, {} as never);
   return host;
 }
 
 describe("remote-server 后端", () => {
   it("未配置远端时是 local，不是 error", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
     const result = await host.call(REMOTE_SERVER_SESSION_ROUTE);
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ phase: "local", serverUrl: null, subject: null });
@@ -130,7 +156,7 @@ describe("remote-server 后端", () => {
     });
     // 记录出站地址：要证明的是「打到会话里那个服务端」，而不是「恰好登录成功了」。
     const outbound: string[] = [];
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" },
       fetchImpl: ((input: RequestInfo | URL, init?: RequestInit) => {
         outbound.push(String(input));
@@ -149,7 +175,7 @@ describe("remote-server 后端", () => {
 
   it("一键登录：用部署凭证换会话，并把主体收敛到 WhoAmI 的答案", async () => {
     const fake = createFakeServer({ identities: { "device-token": "channel-alice" }, whoAmIOverride: "alice@example.com" });
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
 
     const login = await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     expect(login.status).toBe(200);
@@ -169,7 +195,7 @@ describe("remote-server 后端", () => {
 
   it("令牌只走 Authorization 头，从不进 URL", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     // 每个调用路径都必须是纯过程名，不带查询串。
@@ -186,7 +212,7 @@ describe("remote-server 后端", () => {
 
   it("坏凭证返回稳定错误短语，不泄漏远端正文", async () => {
     const fake = createFakeServer({ rejectLogin: true });
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     const login = await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const body = login.body as { ok: boolean; error: string };
     expect(body.ok).toBe(false);
@@ -196,7 +222,7 @@ describe("remote-server 后端", () => {
 
   it("既无本机网关身份也无部署凭证时明确报错，不发一个空登录", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: { serverUrl: fake.serverUrl, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: { serverUrl: fake.serverUrl, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
     // DTO 入口拿不到 headers，等价于「本机不在网关后面」。
     const login = await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     expect((login.body as { ok: boolean }).ok).toBe(false);
@@ -206,7 +232,7 @@ describe("remote-server 后端", () => {
 
   it("请求里的一次性令牌优先于部署凭证", async () => {
     const fake = createFakeServer({ identities: { "one-shot": "bob" } });
-    const host = activate({ deployment: { serverUrl: fake.serverUrl, deviceToken: "device-token", keyPrefix: "" }, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: { serverUrl: fake.serverUrl, deviceToken: "device-token", keyPrefix: "" }, fetchImpl: fake.fetch });
     const login = await host.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "one-shot" });
     expect((login.body as { ok: boolean }).ok).toBe(true);
     expect((login.body as { snapshot: { subject: string } }).snapshot.subject).toBe("bob");
@@ -216,7 +242,7 @@ describe("remote-server 后端", () => {
     const fake = createFakeServer();
     let now = Date.now();
     // 提前失效余量是 30s：让会话在 10s 内到期即视为不可用。
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, now: () => now, store: createMemorySessionStore() });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, now: () => now, store: createMemorySessionStore() });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     now += 60 * 60 * 1000;
@@ -228,11 +254,11 @@ describe("remote-server 后端", () => {
     const fake = createFakeServer();
     let serverUrl: string | null = fake.serverUrl;
     const host = createHost();
-    const definition = createRemoteServerExtension({
+    const plugin = createRemoteServerPlugin({
       deployment: () => ({ serverUrl, deviceToken: "device-token", keyPrefix: "" }),
       fetchImpl: fake.fetch
     });
-    definition.activate(host as never);
+    void plugin.apply(host as never, {} as never);
 
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     serverUrl = "https://other.example.com";
@@ -242,7 +268,7 @@ describe("remote-server 后端", () => {
 
   it("登出撤销远端会话并清本地；重复登出仍然成功", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     expect(fake.sessions.size).toBe(1);
 
@@ -264,7 +290,7 @@ describe("remote-server 后端", () => {
       if (!reachable) throw new TypeError("fetch failed");
       return fake.fetch(input, init);
     };
-    const host = activate({ deployment: fake.deployment, fetchImpl: flaky });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: flaky });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     reachable = false;
@@ -278,7 +304,7 @@ describe("remote-server 后端", () => {
 
   it("探测返回可达性、版本与登录方式，且不改变登录态", async () => {
     const fake = createFakeServer({ gatewayAmbient: true });
-    const host = activate({ deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
     const probe = await host.call(REMOTE_SERVER_PROBE_ROUTE, { serverUrl: fake.serverUrl });
     const body = probe.body as { ok: boolean; methods: Array<{ kind: string; ambient?: boolean }>; commit: string };
     expect(body.ok).toBe(true);
@@ -294,14 +320,14 @@ describe("remote-server 后端", () => {
 
   it("远端不可达时探测给出可读原因", async () => {
     const fake = createFakeServer({ down: true });
-    const host = activate({ deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
     const probe = await host.call(REMOTE_SERVER_PROBE_ROUTE, { serverUrl: fake.serverUrl });
     expect(probe.body).toMatchObject({ ok: false, error: "无法连接远端服务端" });
   });
 
   it("地址非法时拒绝探测与登录，不发任何请求", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: { serverUrl: null, deviceToken: "device-token", keyPrefix: "" }, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: { serverUrl: null, deviceToken: "device-token", keyPrefix: "" }, fetchImpl: fake.fetch });
     const probe = await host.call(REMOTE_SERVER_PROBE_ROUTE, { serverUrl: "ftp://nope" });
     expect(probe.status).toBe(400);
     const login = await host.call(REMOTE_SERVER_LOGIN_ROUTE, { serverUrl: "//evil.example" });
@@ -312,11 +338,11 @@ describe("remote-server 后端", () => {
   it("宿主的文档存储可用时会话跨实例保留", async () => {
     const fake = createFakeServer();
     const store = createDocumentSessionStore(createFakeDocuments());
-    const first = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+    const first = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
     await first.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     // 第二个实例（模拟进程重启）读同一份存储。
-    const second = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+    const second = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
     const session = await second.call(REMOTE_SERVER_SESSION_ROUTE);
     expect(session.body).toMatchObject({ phase: "connected" });
   });
@@ -325,7 +351,7 @@ describe("remote-server 后端", () => {
     const docs = createFakeDocuments();
     await docs.batch([{ op: "set", key: "session/current", value: { serverUrl: 1 } }]);
     const fake = createFakeServer();
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       store: createDocumentSessionStore(docs)
@@ -337,7 +363,7 @@ describe("remote-server 后端", () => {
   it("登录/登出都会通知宿主重新解析同步上游（否则界面显示已连接、画布仍不同步）", async () => {
     const fake = createFakeServer();
     const refresh = { count: 0 };
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       canvas: {
@@ -360,7 +386,7 @@ describe("remote-server 后端", () => {
   it("登录失败不通知（不给宿主一个空转的重新解析）", async () => {
     const fake = createFakeServer();
     const refresh = { count: 0 };
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken: "bad-token", keyPrefix: "" },
       fetchImpl: fake.fetch,
       canvas: {
@@ -406,7 +432,7 @@ describe("接入端身份（网关断言）", () => {
 
   it("只带网关断言、不填任何令牌也能登录（这就是一键接入）", async () => {
     const fake = createFakeServer({ gatewaySubject: "alice-from-gateway" });
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, loginAssertionHeaders: ["x-example-assertion"] });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, loginAssertionHeaders: ["x-example-assertion"] });
 
     const result = await callRaw(host, REMOTE_SERVER_LOGIN_ROUTE, {
       headers: { "x-example-assertion": "jwe-assertion", "x-example-mode": "1", "x-example-request": "rio-1", timestamp: "1700000000", signature: "abc" }
@@ -425,7 +451,7 @@ describe("接入端身份（网关断言）", () => {
   it("断言不成立时回落到配置的设备凭证（与远端语义一致）", async () => {
     // gatewaySubject 未设 → fake 不认断言，只会按令牌登录。
     const fake = createFakeServer({ identities: { "device-token": "device-alice" } });
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, loginAssertionHeaders: ["x-example-assertion"] });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, loginAssertionHeaders: ["x-example-assertion"] });
 
     const result = await callRaw(host, REMOTE_SERVER_LOGIN_ROUTE, {
       headers: { "x-example-assertion": "stale-assertion" }
@@ -436,7 +462,7 @@ describe("接入端身份（网关断言）", () => {
 
   it("既无断言也无凭证时给出可读原因，不假装登录成功", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: { serverUrl: fake.serverUrl, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: { serverUrl: fake.serverUrl, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
     const result = await callRaw(host, REMOTE_SERVER_LOGIN_ROUTE, { headers: {} });
     expect(result.body.ok).toBe(false);
     expect(String(result.body.error)).toContain("企业身份网关");
@@ -444,7 +470,7 @@ describe("接入端身份（网关断言）", () => {
 
   it("缺省不转发浏览器断言，必须显式安装登录适配器", async () => {
     const fake = createFakeServer({ gatewaySubject: "alice-from-gateway" });
-    const host = activate({ deployment: { serverUrl: fake.serverUrl, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: { serverUrl: fake.serverUrl, deviceToken: null, keyPrefix: "" }, fetchImpl: fake.fetch });
     const result = await callRaw(host, REMOTE_SERVER_LOGIN_ROUTE, { headers: { "x-example-assertion": "untrusted" } });
     expect(result.body.ok).toBe(false);
     expect(fake.calls.some(call => call.path.endsWith("/Login"))).toBe(false);
@@ -544,12 +570,12 @@ describe("remote-server 目录能力", () => {
    */
   it("登录后暴露远端画布，供宿主合并进本机目录", async () => {
     const fake = createFakeServer();
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: "https://remote.example", deviceToken: "device-token", keyPrefix: "" },
       fetchImpl: fake.fetch
     });
     // 先登录拿到会话：没有会话时来源必须是空（不能拿匿名请求去猜目录）。
-    const capability = [...host.capabilities.values()].find(
+    const capability = [...host.capabilityRegistry.values()].find(
       (value): value is { resolve: () => Promise<unknown>; listCanvases?: () => Promise<unknown[]> } =>
         typeof (value as { resolve?: unknown })?.resolve === "function"
     );
@@ -565,11 +591,11 @@ describe("remote-server 目录能力", () => {
 
   it("远端不可达时目录返回空而不是抛错", async () => {
     const fake = createFakeServer({ down: true });
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: "https://remote.example", deviceToken: "device-token", keyPrefix: "" },
       fetchImpl: fake.fetch
     });
-    const capability = [...host.capabilities.values()].find(
+    const capability = [...host.capabilityRegistry.values()].find(
       (value): value is { listCanvases?: () => Promise<unknown[]> } =>
         typeof (value as { listCanvases?: unknown })?.listCanvases === "function"
     );
@@ -656,7 +682,7 @@ describe("服务端接入诊断", () => {
 
   it("宿主没有诊断能力时明说不可用，而不是返回一份空列表", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     const result = await host.call(REMOTE_SERVER_DIAGNOSTICS_ROUTE);
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ entries: [], capacity: 0, available: false });
@@ -666,7 +692,7 @@ describe("服务端接入诊断", () => {
   it("有诊断缓冲时原样返回已脱敏条目，并按 200 条上限读取", async () => {
     const fake = createFakeServer();
     const stub = diagnosticsStub(sampleEntries);
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, diagnostics: stub.value });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, diagnostics: stub.value });
 
     const result = await host.call(REMOTE_SERVER_DIAGNOSTICS_ROUTE);
     expect(result.body).toEqual({
@@ -680,7 +706,7 @@ describe("服务端接入诊断", () => {
 
   it("没有会话时上报返回稳定错误，且一个请求都不发", async () => {
     const fake = createFakeServer();
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken: null, keyPrefix: "" },
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(sampleEntries).value
@@ -693,7 +719,7 @@ describe("服务端接入诊断", () => {
 
   it("有会话但没有诊断缓冲时给出稳定原因，不去编造一次空上报", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const result = await host.call(REMOTE_SERVER_DIAGNOSTICS_REPORT_ROUTE);
@@ -703,7 +729,7 @@ describe("服务端接入诊断", () => {
 
   it("上报成功：宿主代发 POST 并带 Bearer，只把 acceptedCount 带回浏览器", async () => {
     const fake = createFakeServer();
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(sampleEntries).value
@@ -752,7 +778,7 @@ describe("服务端接入诊断", () => {
     // 版本属于浏览器那份 bundle：宿主只做形状校验再转发，不能自己编，也不该因为一个辅助字段
     // 把整批诊断弄失败（服务端同样只做形状清洗）。
     const accepted = createFakeServer();
-    const acceptedHost = activate({
+    const acceptedHost = await activate({
       deployment: accepted.deployment,
       fetchImpl: accepted.fetch,
       diagnostics: diagnosticsStub(sampleEntries).value
@@ -762,7 +788,7 @@ describe("服务端接入诊断", () => {
     expect(reportCalls(accepted)[0]?.body).toMatchObject({ frontendVersion: "abc1234-dirty" });
 
     const rejected = createFakeServer();
-    const rejectedHost = activate({
+    const rejectedHost = await activate({
       deployment: rejected.deployment,
       fetchImpl: rejected.fetch,
       diagnostics: diagnosticsStub(sampleEntries).value
@@ -807,7 +833,7 @@ describe("服务端接入诊断", () => {
         event: "remote-probe-ok"
       }
     ];
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -828,7 +854,7 @@ describe("服务端接入诊断", () => {
     // 问题现场：200 条带短说明实测就有 36–39 KB，只按条数发会被 32 KiB 解码上限拒掉。
     // 这里用 480 字符说明把窗口撑到约 128 KB，确保必然拆成多批。
     const entries = sizedEntries(200, 480);
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -867,7 +893,7 @@ describe("服务端接入诊断", () => {
 
   it("同一快照连续上报两次：第二次不发请求，acceptedCount 为 0", async () => {
     const fake = createFakeServer();
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(sampleEntries).value
@@ -890,7 +916,7 @@ describe("服务端接入诊断", () => {
     // 再上报一次。两次载荷的 entryId 必须逐条相同，服务端才会把重发认成同一批条目。
     const entries = sampleEntries;
     const firstFake = createFakeServer();
-    const firstHost = activate({
+    const firstHost = await activate({
       deployment: firstFake.deployment,
       fetchImpl: firstFake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -902,7 +928,7 @@ describe("服务端接入诊断", () => {
     expect(firstIds).toEqual([entryId(1), entryId(2)]);
 
     const secondFake = createFakeServer();
-    const secondHost = activate({
+    const secondHost = await activate({
       deployment: secondFake.deployment,
       fetchImpl: secondFake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -930,7 +956,7 @@ describe("服务端接入诊断", () => {
       }
     ];
     const fake = createFakeServer();
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -960,7 +986,7 @@ describe("服务端接入诊断", () => {
   it("某批失败时水位只推进到最后一个成功批：重试只补后续条目", async () => {
     const fake = createFakeServer({ diagnosticsFailOnCall: 2 });
     const entries = sizedEntries(120, 480);
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -991,7 +1017,7 @@ describe("服务端接入诊断", () => {
     // 服务端每批只报 7 条，与客户端发出的条数无关：累加必须按返回值算。
     const fake = createFakeServer({ diagnosticsAcceptedCount: 7 });
     const entries = sizedEntries(120, 480);
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -1008,7 +1034,7 @@ describe("服务端接入诊断", () => {
     // proto3 的 JSON 编码省略零值：幂等键命中、一条都没新增时服务端回的就是 `{}`。
     // 若把「缺失」退化成本批条数，扩展重载后重发整窗（实际新增 0）会显示成「已上报 2 条」。
     const fake = createFakeServer({ diagnosticsOmitAcceptedCount: true });
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(sampleEntries).value
@@ -1039,7 +1065,7 @@ describe("服务端接入诊断", () => {
       },
       { id: entryId(3), seq: 3, time: 1_700_000_002_000, level: "info", category: "application", event: "remote-probe-ok" }
     ];
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -1074,7 +1100,7 @@ describe("服务端接入诊断", () => {
       category: "a",
       event: "a"
     }));
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(entries).value
@@ -1088,7 +1114,7 @@ describe("服务端接入诊断", () => {
 
   it("服务端未实现上报时给可行动文案，且不透传远端正文", async () => {
     const fake = createFakeServer({ diagnosticsUnimplemented: true });
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       diagnostics: diagnosticsStub(sampleEntries).value
@@ -1104,7 +1130,7 @@ describe("服务端接入诊断", () => {
 
   it("接入日志只含稳定字段：没有令牌、会话令牌、设备码与短码", async () => {
     const fake = createFakeServer({ identities: { "one-shot": "bob" } });
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
 
     await host.call(REMOTE_SERVER_PROBE_ROUTE, { serverUrl: fake.serverUrl });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "one-shot" });
@@ -1148,7 +1174,7 @@ describe("服务端接入诊断", () => {
 
 /** 取注册的同步上游 provider：按能力形状找，不依赖具体扩展 id。 */
 function upstreamProviderOf(host: ReturnType<typeof createHost>): CanvasUpstreamProvider {
-  const provider = [...host.capabilities.values()].find(
+  const provider = [...host.capabilityRegistry.values()].find(
     (value): value is CanvasUpstreamProvider => typeof (value as { resolve?: unknown })?.resolve === "function"
   );
   if (!provider) throw new Error("未注册同步上游 capability");
@@ -1169,7 +1195,7 @@ function listMyCanvasesCalls(fake: ReturnType<typeof createFakeServer>) {
 describe("按画布门控同步（登录 ≠ 上传）", () => {
   it("登录后未启用的本地画布不拿到链路；远端已有的画布无需启用就自动同步", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const provider = upstreamProviderOf(host);
 
@@ -1193,7 +1219,7 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
     const documents = createFakeDocuments();
     const refresh = { count: 0 };
     const mediaSync: string[] = [];
-    const host = activate({
+    const host = await activate({
       deployment: fake.deployment,
       fetchImpl: fake.fetch,
       documents,
@@ -1233,7 +1259,7 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
   it("首次推送完成、远端目录出现该 id 后清掉待同步标记，之后按普通远端画布同步", async () => {
     const fake = createFakeServer();
     const documents = createFakeDocuments();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     await host.call(REMOTE_SERVER_SYNC_ENABLE_ROUTE, { canvasId: "canvas-local-1" });
     expect(JSON.stringify(await pendingDocument(documents))).toContain("canvas-local-1");
@@ -1247,7 +1273,7 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
     expect(JSON.stringify(await pendingDocument(documents))).not.toContain("canvas-local-1");
 
     // 用新实例（模拟重启、待同步集合不再有该 id）重连：仍按远端画布拿到链路。
-    const restarted = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const restarted = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await restarted.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     expect(await upstreamProviderOf(restarted).resolve("canvas-local-1")).toMatchObject({
       url: "wss://canvas.example.com"
@@ -1256,7 +1282,7 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
 
   it("没有会话或已登出时 resolve 返回 null", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     const provider = upstreamProviderOf(host);
 
     // 未登录：纯本地形态，不是错误。
@@ -1270,7 +1296,7 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
   it("非法 canvasId 被拒、不写存储也不发远端请求；无会话时给可读错误而非 5xx", async () => {
     const fake = createFakeServer();
     const documents = createFakeDocuments();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const callsBefore = fake.calls.length;
 
@@ -1285,7 +1311,7 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
     // 没有会话：可读错误（不是 5xx），也不该悄悄写一份「待同步」状态。
     // 用一份**空**文档存储，避免继承上面已登录的会话。
     const anonymousDocuments = createFakeDocuments();
-    const anonymous = activate({
+    const anonymous = await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken: null, keyPrefix: "" },
       fetchImpl: fake.fetch,
       documents: anonymousDocuments
@@ -1300,19 +1326,19 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
     const fake = createFakeServer({ identities: { "device-token": "device-alice", "device-bob": "device-bob" } });
     const documents = createFakeDocuments();
 
-    const alice = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const alice = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await alice.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     await alice.call(REMOTE_SERVER_SYNC_ENABLE_ROUTE, { canvasId: "canvas-local-1" });
     await alice.call(REMOTE_SERVER_LOGOUT_ROUTE);
     // 登出不删除：同一账号重连后还要继续完成首次同步。
     expect(JSON.stringify(await pendingDocument(documents))).toContain("canvas-local-1");
 
-    const aliceAgain = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const aliceAgain = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await aliceAgain.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     expect(await upstreamProviderOf(aliceAgain).resolve("canvas-local-1")).not.toBeNull();
 
     // 换账号：另一个主体的待同步集合是空的，不能继承 alice 的启用决定。
-    const bob = activate({
+    const bob = await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken: "device-bob", keyPrefix: "" },
       fetchImpl: fake.fetch,
       documents
@@ -1321,7 +1347,7 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
     expect(await upstreamProviderOf(bob).resolve("canvas-local-1")).toBeNull();
 
     // 换地址同理：同一主体、不同远端部署不是同一个集合。
-    const otherServer = activate({
+    const otherServer = await activate({
       deployment: { serverUrl: "https://other.example.com", deviceToken: "device-token", keyPrefix: "" },
       fetchImpl: fake.fetch,
       documents
@@ -1343,7 +1369,7 @@ describe("按画布门控同步（登录 ≠ 上传）", () => {
       if (!reachable) throw new TypeError("fetch failed");
       return fake.fetch(input, init);
     };
-    const host = activate({ deployment: fake.deployment, fetchImpl: flaky });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: flaky });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const provider = upstreamProviderOf(host);
     await provider.listCanvases!(); // 成功列一次，填充缓存
@@ -1385,8 +1411,8 @@ describe("remote-server 后端 · 画布协作者", () => {
     });
   }
 
-  function signedIn(fake: ReturnType<typeof aclFake>, deviceToken: string) {
-    return activate({
+  async function signedIn(fake: ReturnType<typeof aclFake>, deviceToken: string) {
+    return await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken, keyPrefix: "" },
       fetchImpl: fake.fetch
     });
@@ -1394,7 +1420,7 @@ describe("remote-server 后端 · 画布协作者", () => {
 
   it("作者看到完整名单，并能新增/移除协作者", async () => {
     const fake = aclFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const view = await host.call(REMOTE_SERVER_CANVAS_MEMBERS_ROUTE, { canvasId: "canvas-remote-1" });
@@ -1431,7 +1457,7 @@ describe("remote-server 后端 · 画布协作者", () => {
 
   it("部署管理员（非作者）也能代管：canManage 来自管理端通道，而不是伪装成作者", async () => {
     const fake = aclFake();
-    const host = signedIn(fake, "admin-token");
+    const host = await signedIn(fake, "admin-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const view = await host.call(REMOTE_SERVER_CANVAS_MEMBERS_ROUTE, { canvasId: "canvas-remote-1" });
@@ -1453,7 +1479,7 @@ describe("remote-server 后端 · 画布协作者", () => {
 
   it("普通协作者只看到自己，写操作得到稳定短语", async () => {
     const fake = aclFake();
-    const host = signedIn(fake, "viewer-token");
+    const host = await signedIn(fake, "viewer-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const view = await host.call(REMOTE_SERVER_CANVAS_MEMBERS_ROUTE, { canvasId: "canvas-remote-1" });
@@ -1473,7 +1499,7 @@ describe("remote-server 后端 · 画布协作者", () => {
 
   it("未连接服务端时明确拒绝，且不发任何画布调用", async () => {
     const fake = aclFake();
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken: "author-token", keyPrefix: "" },
       fetchImpl: fake.fetch
     });
@@ -1485,7 +1511,7 @@ describe("remote-server 后端 · 画布协作者", () => {
 
   it("浏览器可控输入在宿主就拒绝，不把非法 id/角色带到远端", async () => {
     const fake = aclFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const blankActor = await host.call(REMOTE_SERVER_CANVAS_MEMBER_UPSERT_ROUTE, {
@@ -1520,7 +1546,7 @@ describe("remote-server 后端 · 画布协作者", () => {
 
   it("响应体不含会话令牌", async () => {
     const fake = aclFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const view = await host.call(REMOTE_SERVER_CANVAS_MEMBERS_ROUTE, { canvasId: "canvas-remote-1" });
     expect(JSON.stringify(view.body)).not.toContain("session-");
@@ -1551,7 +1577,7 @@ describe("remote-server 后端 · 链接打开（按 id 取远端画布）", () 
 
   it("没有会话时按 id 取不到画布，也不发远端调用", async () => {
     const fake = linkFake();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     const provider = upstreamProviderOf(host);
     expect(await provider.getCanvas?.("canvas-linked")).toBeNull();
     expect(fake.calls.filter((call) => call.path.endsWith("/GetCanvas"))).toHaveLength(0);
@@ -1560,7 +1586,7 @@ describe("remote-server 后端 · 链接打开（按 id 取远端画布）", () 
   it("链接不在目录里：按 id 取到摘要，并把这张画布纳入上游同步", async () => {
     const fake = linkFake();
     const documents = createFakeDocuments();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "author-token" });
     const provider = upstreamProviderOf(host);
 
@@ -1584,7 +1610,7 @@ describe("remote-server 后端 · 链接打开（按 id 取远端画布）", () 
 
   it("远端取不到（不可见 / 不可达）时返回 null，不留下同步标记", async () => {
     const fake = linkFake();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "stranger-token" });
     const provider = upstreamProviderOf(host);
 
@@ -1597,7 +1623,7 @@ describe("remote-server 后端 · 链接打开（按 id 取远端画布）", () 
       if (!reachable) throw new TypeError("fetch failed");
       return fake.fetch(input, init);
     };
-    const flakyHost = activate({ deployment: fake.deployment, fetchImpl: flaky });
+    const flakyHost = await activate({ deployment: fake.deployment, fetchImpl: flaky });
     await flakyHost.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "author-token" });
     reachable = false;
     expect(await upstreamProviderOf(flakyHost).getCanvas?.("canvas-linked")).toBeNull();
@@ -1606,17 +1632,17 @@ describe("remote-server 后端 · 链接打开（按 id 取远端画布）", () 
   it("按 id 打开后重启仍然放行（持久化），换账号不再放行", async () => {
     const fake = linkFake();
     const documents = createFakeDocuments();
-    const first = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const first = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await first.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "author-token" });
     await upstreamProviderOf(first).getCanvas?.("canvas-linked");
 
     // 新实例（模拟重启）：不必再打开一次，resolve 仍然为这张画布返回链路。
-    const restarted = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const restarted = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await restarted.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "author-token" });
     expect(await upstreamProviderOf(restarted).resolve("canvas-linked")).not.toBeNull();
 
     // 换账号：待同步集合按会话（serverUrl + subject）隔离，别的账号不继承这份打开结论。
-    const bob = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
+    const bob = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents });
     await bob.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "viewer-token" });
     expect(await upstreamProviderOf(bob).resolve("canvas-linked")).toBeNull();
   });
@@ -1632,7 +1658,7 @@ describe("remote-server 后端 · 链接打开（按 id 取远端画布）", () 
           ? Promise.reject(new Error("disk full"))
           : documents.batch(operations)
     };
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents: flakyDocuments });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, documents: flakyDocuments });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, { token: "author-token" });
     const provider = upstreamProviderOf(host);
 
@@ -1670,8 +1696,8 @@ describe("remote-server 后端 · 链接分享设置", () => {
     });
   }
 
-  function signedIn(fake: ReturnType<typeof shareFake>, deviceToken: string) {
-    return activate({
+  async function signedIn(fake: ReturnType<typeof shareFake>, deviceToken: string) {
+    return await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken, keyPrefix: "" },
       fetchImpl: fake.fetch
     });
@@ -1679,7 +1705,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("作者读到模式与 revision，并知道自己是可管理的", async () => {
     const fake = shareFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const read = await host.call(REMOTE_SERVER_CANVAS_SHARE_ROUTE, { canvasId: "canvas-remote-1" });
     // revision 是 ProtoJSON 的 int64 字符串：原样传，不折成 number。
@@ -1688,7 +1714,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("普通协作者能读，但不可管理（canManage 来自服务端 allowed_actions）", async () => {
     const fake = shareFake();
-    const host = signedIn(fake, "viewer-token");
+    const host = await signedIn(fake, "viewer-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const read = await host.call(REMOTE_SERVER_CANVAS_SHARE_ROUTE, { canvasId: "canvas-remote-1" });
     expect(read.body).toEqual({ ok: true, mode: "restricted", revision: "2", canManage: false });
@@ -1696,7 +1722,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("部署管理员能读，但改不了分享：canManage 只认作者", async () => {
     const fake = shareFake();
-    const host = signedIn(fake, "admin-token");
+    const host = await signedIn(fake, "admin-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     // 管理员有 canvas.manage（能代管成员），但没有 canvas.share：分享设置仍只属于作者。
     const read = await host.call(REMOTE_SERVER_CANVAS_SHARE_ROUTE, { canvasId: "canvas-remote-1" });
@@ -1712,7 +1738,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("未连接服务端时明确拒绝，且不发任何画布调用", async () => {
     const fake = shareFake();
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken: "author-token", keyPrefix: "" },
       fetchImpl: fake.fetch
     });
@@ -1729,7 +1755,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("作者改分享：带当前 revision 成功，revision 递增并真正落库", async () => {
     const fake = shareFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const updated = await host.call(REMOTE_SERVER_CANVAS_SHARE_UPDATE_ROUTE, {
@@ -1747,7 +1773,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("期望 revision 过期时得到「请重读后重试」，且不覆盖别人的修改", async () => {
     const fake = shareFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const conflicted = await host.call(REMOTE_SERVER_CANVAS_SHARE_UPDATE_ROUTE, {
       canvasId: "canvas-remote-1",
@@ -1760,7 +1786,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("普通协作者不能改分享：得到稳定短语，远端状态不变", async () => {
     const fake = shareFake();
-    const host = signedIn(fake, "editor-token");
+    const host = await signedIn(fake, "editor-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const updated = await host.call(REMOTE_SERVER_CANVAS_SHARE_UPDATE_ROUTE, {
       canvasId: "canvas-remote-1",
@@ -1773,7 +1799,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("浏览器可控输入在宿主就拒绝，不把非法值带到远端", async () => {
     const fake = shareFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const callsBefore = fake.calls.filter((call) => call.path.endsWith("/UpdateCanvasShare")).length;
 
@@ -1805,7 +1831,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
       }
       return fake.fetch(input, init);
     };
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken: "author-token", keyPrefix: "" },
       fetchImpl: strictFetch
     });
@@ -1825,7 +1851,7 @@ describe("remote-server 后端 · 链接分享设置", () => {
 
   it("分享响应不含会话令牌", async () => {
     const fake = shareFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const read = await host.call(REMOTE_SERVER_CANVAS_SHARE_ROUTE, { canvasId: "canvas-remote-1" });
     const updated = await host.call(REMOTE_SERVER_CANVAS_SHARE_UPDATE_ROUTE, {
@@ -1870,8 +1896,8 @@ describe("remote-server 后端 · 协作邀请", () => {
     });
   }
 
-  function signedIn(fake: ReturnType<typeof inviteFake>, deviceToken: string) {
-    return activate({
+  async function signedIn(fake: ReturnType<typeof inviteFake>, deviceToken: string) {
+    return await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken, keyPrefix: "" },
       fetchImpl: fake.fetch
     });
@@ -1879,7 +1905,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("作者创建邀请：body 是 ProtoJSON（int64 字符串），url 原样透传且 token 不进日志", async () => {
     const fake = inviteFake({ inviteUrl: "https://canvas.example.com/invite/tok-secret" });
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const created = await host.call(REMOTE_SERVER_CANVAS_INVITE_CREATE_ROUTE, {
@@ -1912,7 +1938,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("缺省有效期按 7 天发给服务端", async () => {
     const fake = inviteFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     await host.call(REMOTE_SERVER_CANVAS_INVITE_CREATE_ROUTE, { canvasId: "canvas-remote-1", role: "viewer" });
     const call = fake.calls.find((entry) => entry.path.endsWith("/CreateCanvasInvite"));
@@ -1937,7 +1963,7 @@ describe("remote-server 后端 · 协作邀请", () => {
         ]
       }
     });
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const listed = await host.call(REMOTE_SERVER_CANVAS_INVITES_ROUTE, { canvasId: "canvas-remote-1" });
@@ -1971,7 +1997,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("撤销邀请：远端标记 revoked，再列出时状态一致", async () => {
     const fake = inviteFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const created = await host.call(REMOTE_SERVER_CANVAS_INVITE_CREATE_ROUTE, {
       canvasId: "canvas-remote-1",
@@ -1993,7 +2019,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("部署管理员也能管理邀请（服务端的 canManage 结论，不是宿主自证）", async () => {
     const fake = inviteFake();
-    const host = signedIn(fake, "admin-token");
+    const host = await signedIn(fake, "admin-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const created = await host.call(REMOTE_SERVER_CANVAS_INVITE_CREATE_ROUTE, {
       canvasId: "canvas-remote-1",
@@ -2006,7 +2032,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("普通协作者管理邀请得到稳定短语，且远端状态不变", async () => {
     const fake = inviteFake();
-    const host = signedIn(fake, "viewer-token");
+    const host = await signedIn(fake, "viewer-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const created = await host.call(REMOTE_SERVER_CANVAS_INVITE_CREATE_ROUTE, {
@@ -2026,7 +2052,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("撤销不存在的邀请得到可读短语", async () => {
     const fake = inviteFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const revoked = await host.call(REMOTE_SERVER_CANVAS_INVITE_REVOKE_ROUTE, {
       canvasId: "canvas-remote-1",
@@ -2037,7 +2063,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("服务端未配置对外地址：failed_precondition 翻成可读短语，客户端不自己拼链接", async () => {
     const fake = inviteFake({ inviteUrlUnconfigured: true });
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
 
     const created = await host.call(REMOTE_SERVER_CANVAS_INVITE_CREATE_ROUTE, {
@@ -2051,7 +2077,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("未连接服务端时明确拒绝，且不发任何画布调用", async () => {
     const fake = inviteFake();
-    const host = activate({
+    const host = await activate({
       deployment: { serverUrl: fake.serverUrl, deviceToken: "author-token", keyPrefix: "" },
       fetchImpl: fake.fetch
     });
@@ -2072,7 +2098,7 @@ describe("remote-server 后端 · 协作邀请", () => {
 
   it("浏览器可控输入在宿主就拒绝，不把非法值带到远端", async () => {
     const fake = inviteFake();
-    const host = signedIn(fake, "author-token");
+    const host = await signedIn(fake, "author-token");
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const callsBefore = fake.calls.filter((call) => call.path.includes("Invite")).length;
 
@@ -2110,7 +2136,7 @@ describe("access()：进入画布时回答的内容权限", () => {
         "canvas-viewer": { owner: "someone-else", members: { "device-alice": "viewer" } }
       }
     });
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
     const provider = upstreamProviderOf(host);
     // 服务端回填 allowed_actions；这里只做映射，不自己推判定。
@@ -2122,7 +2148,7 @@ describe("access()：进入画布时回答的内容权限", () => {
 
   it("没有会话时返回 null：未知不等于只读", async () => {
     const fake = createFakeServer();
-    const host = activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
+    const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch });
     expect(await upstreamProviderOf(host).access!("canvas-remote-1")).toBeNull();
   });
 });

@@ -23,7 +23,7 @@ import type { MediaStorageScope } from "../media/storage.js";
 /** Canvas -> Task 进程内契约（替代 CanvasTaskClient 的网络实现）。 */
 export type BackendTaskPort = {
   /** 按可信扩展及不可变配置版本裁剪的非画布任务端口。 */
-  extensionTasks?: (extensionId: string, configVersion: number) => import("../extension/runtime.js").ApplicationExtensionTaskFacade;
+  extensionTasks?: (extensionId: string, configVersion: number) => import("../extension/services/host/facades.js").ApplicationExtensionTaskFacade;
   submit(request: TaskSubmitRequest): Promise<TaskSubmitResponse>;
   cancel(workerTaskKey: string): Promise<void>;
   status(workerTaskKey: string): Promise<TaskExecutionDetail | null>;
@@ -36,7 +36,7 @@ export type BackendTaskPort = {
 /** Canvas/Task -> Media 进程内契约（替代 Media client 的网络实现）。 */
 export type BackendMediaPort = {
   /** 有界、内容寻址的进程内资源读写；不暴露存储驱动。 */
-  resources?: import("../extension/services.js").ApplicationExtensionMediaResourcesFacade;
+  resources?: import("../extension/services/host/facades.js").ApplicationExtensionMediaResourcesFacade;
   /**
    * 核验稳定对象是否存在且 metadata 一致。
    *

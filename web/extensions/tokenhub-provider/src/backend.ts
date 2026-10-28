@@ -8,7 +8,7 @@ import {
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
-  type HostExtensionPlugin,
+  type ExtensionPlugin,
 } from "@woohaa3/contracts";
 import { discoverTokenHubModels, tokenHubModelDefinitions, type DiscoveredModel } from "./discovery.js";
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
@@ -97,7 +97,7 @@ export function createTokenHubRegistration(input: TokenHubRegistrationInput): { 
   };
 }
 
-export function createTokenHubProviderPlugin(deps: TokenHubPluginDependencies = {}): HostExtensionPlugin<typeof TOKENHUB_CONFIG.fields> {
+export function createTokenHubProviderPlugin(deps: TokenHubPluginDependencies = {}): ExtensionPlugin<typeof TOKENHUB_CONFIG.fields> {
   return {
     name: TOKENHUB_PLUGIN_ID,
     label: "TokenHub",

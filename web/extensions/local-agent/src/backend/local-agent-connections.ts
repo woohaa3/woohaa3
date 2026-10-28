@@ -94,7 +94,7 @@ async function issueToolGrant(
   }
 }
 
-const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "film-set", "camera"], tools: true, models: "remote" };
+const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "film-set"], tools: true, models: "remote" };
 
 export function createLocalAgentDescriptors(): Record<string, ConnectionDescriptor> {
   const descriptors: Record<string, ConnectionDescriptor> = {};
@@ -111,7 +111,8 @@ export function createLocalAgentDescriptors(): Record<string, ConnectionDescript
             : [],
         // 本机来源的 credential 证据来自**真实探测/登录状态**（local-login），不来自 secrets；
         // 不在这里写死 status（否则会覆盖 record.lastStatus）。未探测登录前给出可读原因。
-        required: ["transport", "credential"],
+        // 本地连接只表示用户选择了该工具；真正的进程、登录和模型检查在首次使用时完成。
+        required: [],
         ...(record.lastStatus?.credential.state === "ready" ? {} : { reason: "尚未确认本机工具配置或账号；执行时会启动专用进程并核对" })
       })
     };
@@ -248,6 +249,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         adapterId: adapter.adapterId,
         owner: input.owner,
         connectionId: resourceKey,
+        requestId: input.requestId,
         args: options.argsFor(adapter.adapterId),
         kind: adapter.transport === "stdio-jsonrpc" ? "stdio" : "http"
       });

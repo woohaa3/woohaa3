@@ -68,7 +68,7 @@ export async function loadRuntimePlugin({ dir, extensionId, version }) {
 /**
  * 受管根 / 可写根的信任边界（change: 2026-10-21-add-extension-marketplace-point，任务 2.2 / design D3、D4）。
  *
- * - 市场来源（`hostPlugin.kind = "marketplace-source"`）只能来自内置根：来源决定能拿到什么代码，
+ * - 市场来源（`hostPlugin.features 含 "marketplace-source"`）只能来自内置根：来源决定能拿到什么代码，
  *   市场装来的扩展若能再注册来源，信任链就会被被信任方自己延长。
  * - 受管扩展不得提供 `bootstrap` 槽位实现与 `canvasContent` 端口（与可写根拒绝 bootstrap 同一位置）。
  *
@@ -80,10 +80,10 @@ export function untrustedRootViolation(extension, descriptor) {
   const writable = extension.rootWritable === true;
   if (!descriptor || (!managed && !writable)) return null;
   const where = managed ? "受管扩展根（市场安装）" : "可写扩展根";
-  if (descriptor.hostPlugin?.kind === "marketplace-source") {
+  if ((descriptor.hostPlugin?.features ?? []).includes("marketplace-source")) {
     return {
       code: "EXTENSION_MARKETPLACE_SOURCE_UNTRUSTED_ROOT",
-      field: "hostPlugin.kind",
+      field: "hostPlugin.features",
       message: `${where}里的扩展不得提供市场来源：${extension.extensionId}（${extension.dir}）→ 市场来源只能放在内建根`
     };
   }
@@ -94,11 +94,11 @@ export function untrustedRootViolation(extension, descriptor) {
       message: `受管扩展不得声明槽位实现（bootstrap）：${extension.extensionId}（${extension.dir}）`
     };
   }
-  if (managed && descriptor.hostPlugin?.kind === "storage") {
+  if (managed && (descriptor.hostPlugin?.features ?? []).includes("storage")) {
     return {
       code: "EXTENSION_MANAGED_FORBIDDEN_DECLARATION",
-      field: "hostPlugin.kind",
-      message: `受管扩展不得提供存储后端（hostPlugin.kind = storage）：${extension.extensionId}（${extension.dir}）→ 存储属基础能力，必须进程内且来自内建根`
+      field: "hostPlugin.features",
+      message: `受管扩展不得提供存储后端（hostPlugin.features 含 "storage"）：${extension.extensionId}（${extension.dir}）→ 存储属基础能力，必须进程内且来自内建根`
     };
   }
   if (managed && descriptor.canvasContent) {
@@ -106,6 +106,13 @@ export function untrustedRootViolation(extension, descriptor) {
       code: "EXTENSION_MANAGED_FORBIDDEN_DECLARATION",
       field: "canvasContent",
       message: `受管扩展不得声明画布内容端口（canvasContent）：${extension.extensionId}（${extension.dir}）`
+    };
+  }
+  if (managed && descriptor.content) {
+    return {
+      code: "EXTENSION_MANAGED_FORBIDDEN_DECLARATION",
+      field: "content",
+      message: `受管扩展不得声明内容贡献（content）：${extension.extensionId}（${extension.dir}）`
     };
   }
   return null;
@@ -167,6 +174,17 @@ export function screenExtension({ extension, repoRoot, isolate, rejected, logger
     rejected.push({ extensionId: extension.extensionId, directory: extension.dir, code: error?.code ?? "EXTENSION_DESCRIPTOR_INVALID", message: error?.message ?? String(error) });
     logger({ event: "extension-managed-rejected", extensionId: extension.extensionId, directory: extension.dir, code: error?.code, message: error?.message });
     return null;
+  }
+  // deprecated-declaration：用了废弃字段就告警，不阻断装载（归一已在校验里完成）。
+  for (const deprecation of descriptor?.deprecations ?? []) {
+    logger({
+      event: "extension-declaration-deprecated",
+      extensionId: extension.extensionId,
+      directory: extension.dir,
+      field: deprecation.field,
+      replacement: deprecation.replacement,
+      message: `${deprecation.field} 已废弃，请改用 ${deprecation.replacement}`
+    });
   }
   const violation = untrustedRootViolation(extension, descriptor);
   if (violation) {

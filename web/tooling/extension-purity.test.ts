@@ -22,9 +22,12 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error -- plain JS module without type declarations (shared with the startup host).
 import { scanExtensions } from "../../scripts/lib/extension-scan.mjs";
 import {
+  CONTENT_FIELD_DEBT,
   EXTENSION_IMPORT_DEBT,
   PLUGIN_REGISTRATION_DEBT
 } from "./extension-purity-allowlist.js";
+// @ts-expect-error -- plain JS module without type declarations.
+import { declaredContentLiterals, diffContentCoupling, findContentLiterals, listContentScanFiles, readContentDeclarations, scanContentSources } from "./extension-purity-content.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");
@@ -54,7 +57,7 @@ const REGISTRATION_SURFACES = [
   "web/package.json",
   "web/backend/package.json",
   "web/backend/src/extensions/manifest.ts",
-  "web/contracts/src/extension/trusted-manifest.ts",
+  "web/contracts/src/extension/host/trusted-manifest.ts",
   "web/services/application-service/src/extensions/manifest.ts"
 ];
 
@@ -223,5 +226,32 @@ describe("扩展纯粹性：框架不登记具体插件", () => {
       hardcodedIcons,
       "扩展源码不得写死宿主静态目录里的品牌图形路径：把图形放进扩展包 assets/，在 extension.json 里声明 icon.asset，路径由宿主按约定注入。"
     ).toEqual([]);
+  });
+});
+
+describe("字段级扩展纯粹性", () => {
+  const literals = ["filmSetContent", "film-set"];
+
+  it("新增耦合失败，注释和更长标识符不算", () => {
+    expect(findContentLiterals(`const field = "filmSetContent";`, literals)).toEqual(["filmSetContent"]);
+    expect(findContentLiterals(`// "filmSetContent"\nconst id = "film-set-shot";`, literals)).toEqual([]);
+    expect(diffContentCoupling([{ file: "web/contracts/src/new.ts", literals: ["filmSetContent"] }], []).unexpected).toEqual([
+      "web/contracts/src/new.ts → filmSetContent"
+    ]);
+  });
+
+  it("清理后残留的 allowlist 条目失败", () => {
+    expect(diffContentCoupling([], [{ file: "web/contracts/src/gone.ts", literals: ["filmSetContent"], stage: "node-data", reason: "已清理" }]).stale).toEqual([
+      "web/contracts/src/gone.ts 已不再出现 filmSetContent"
+    ]);
+  });
+
+  it("现有内核在字段债清单下通过", () => {
+    const declarations = readContentDeclarations(scanExtensions({ repoRoot: REPO_ROOT, env: {} }).extensions);
+    const declared = declaredContentLiterals(declarations);
+    const found = scanContentSources(listContentScanFiles(REPO_ROOT), (file: string) => read(file), declared);
+    const diff = diffContentCoupling(found, CONTENT_FIELD_DEBT);
+    expect(diff.unexpected, "新增字段、身份、路由或 wire 字面量要改为内容声明，或登记历史债并写明阶段。").toEqual([]);
+    expect(diff.stale, "字段债清单里的字面量已经不存在，请删除对应条目。").toEqual([]);
   });
 });

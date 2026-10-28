@@ -13,7 +13,7 @@
  * - 配置 `crashOnActivate`（缺省 false）为 true 时在 apply 里直接退出：用于熔断（5 分钟 3 次）用例。
  */
 import { createPptaskProvider } from "@sdppp/pptask";
-import { defineConfigSchema, type GenerationProvider, type HostExtensionPlugin } from "@woohaa3/contracts";
+import { defineConfigSchema, type GenerationProvider, type ExtensionPlugin } from "@woohaa3/contracts";
 
 const ID = "fixture-crashy";
 const PROVIDER_ID = "fixture-crashy";
@@ -69,7 +69,7 @@ function createCrashyProvider() {
   });
 }
 
-export function createFixtureCrashyPlugin(): HostExtensionPlugin<typeof FIXTURE_CRASHY_CONFIG.fields> {
+export function createFixtureCrashyPlugin(): ExtensionPlugin<typeof FIXTURE_CRASHY_CONFIG.fields> {
   return {
     name: ID,
     label: "市场测试：故障",

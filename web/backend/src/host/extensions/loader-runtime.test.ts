@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
-import { defineConfigSchema, type HostExtensionPlugin } from "@woohaa3/contracts";
+import { defineConfigSchema, type ExtensionPlugin } from "@woohaa3/contracts";
 import { createSettingsService } from "../../settings/settings-service.js";
 import { loadBaseLayer } from "../base/index.js";
 import type { HostContext } from "../context.js";
@@ -19,7 +19,7 @@ const CONFIG = defineConfigSchema({
   greeting: { kind: "string", label: "问候", description: "d", reload: "hot", default: "hi" }
 });
 
-function plugin(name: string, events: string[]): HostExtensionPlugin<typeof CONFIG.fields> {
+function plugin(name: string, events: string[]): ExtensionPlugin<typeof CONFIG.fields> {
   return {
     name,
     label: name,

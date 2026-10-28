@@ -85,7 +85,7 @@ function makeHarness(options: { serviceToken?: string; auth?: "authenticated" | 
           }
           if (options.withHttp && h.registerHttpHandler) {
             h.registerHttpHandler({
-              route: "chatgpt/oauth",
+              route: "oauth",
               method: "GET",
               auth: "public",
               purpose: "auth-transaction",
@@ -97,7 +97,7 @@ function makeHarness(options: { serviceToken?: string; auth?: "authenticated" | 
               }
             });
             h.registerHttpHandler({
-              route: "chatgpt/events",
+              route: "events",
               method: "POST",
               auth: "public",
               purpose: "new-work",
@@ -110,7 +110,7 @@ function makeHarness(options: { serviceToken?: string; auth?: "authenticated" | 
               }
             });
             h.registerHttpHandler({
-              route: "chatgpt/receipt",
+              route: "receipt",
               method: "GET",
               auth: "public",
               purpose: "work-control",
@@ -456,7 +456,7 @@ describe("受控原始 HTTP handler 分派（design D4）", () => {
           extensionId: "raw-plugin",
           activate: (h) => {
             h.registerRawHttpHandler?.({
-              route: "raw/*",
+              route: "*",
               method: "GET",
               auth: "public",
               purpose: "read",
@@ -501,7 +501,7 @@ describe("受控原始 HTTP handler 分派（design D4）", () => {
     resources.push(store, work);
     const registration = (h: ApplicationBackendHost) => {
       h.registerRawHttpHandler?.({
-        route: "sse/*",
+        route: "*",
         method: "GET",
         auth: "public",
         purpose: "read",

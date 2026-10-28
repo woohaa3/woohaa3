@@ -50,7 +50,9 @@ import {
 } from "../../navigation/contracts.js";
 import type { AgentConversationServiceHandle } from "../../services/agent-conversation-service.js";
 import { AgentConversationPanel } from "./execution-panel/agent-conversation-panel.js";
-const TextExecutionHost = lazy(() => import("./text-execution-host.js").then(module => ({ default: module.TextExecutionHost })));
+// 文本宿主随执行面板定义装配：它只做一次节点类型判定并转交 composer，
+// 单独成 chunk 只会让打开文本面板多一次必然请求（change: 2026-10-27-merge-nonessential-panel-chunks）。
+import { TextExecutionHost } from "./text-execution-host.js";
 const ModelExecutionHost = lazy(() => import("./model-execution-host.js").then((module) => ({ default: module.ModelExecutionHost })));
 const ModelParameterPanel = lazy(() => import("./model-parameter-panel.js").then((module) => ({ default: module.ModelParameterPanel })));
 const GroupRunSummaryOverlay = lazy(() => import("./group-run-summary-overlay.js").then(module => ({ default: module.GroupRunSummaryOverlay })));
@@ -182,7 +184,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
         validate: (route) => isExecutionPanelRoute(route),
         render: ({ route, writable }) => {
           if (route.type !== NODE_EXECUTION_PANEL_TYPE) return null;
-          void loadLaunch().catch(() => {});
           const snippetSource = ctx.get(PROMPT_SNIPPET_SOURCE) as PromptSnippetSource | undefined;
           const runtime = ctx.canvasRuntime;
           const presentation = route.presentation ?? "compact";
@@ -196,9 +197,11 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           };
           // 呈现表面与骨架、宿主共用同一判断（音频没有 expanded 面）。
           const surface = resolveExecutionPanelSurface(presentation, resolvePanelNodeType(route.nodeId));
-          if (resolvePanelNodeType(route.nodeId) === "text") return <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}>
+          // 文本宿主已静态装配；composer 的懒加载骨架由 `AuthoringGenerateHost` 内部提供，
+          // 这里不再包一层不会触发的 `Suspense`。
+          if (resolvePanelNodeType(route.nodeId) === "text") return (
             <TextExecutionHost canvasId={canvasId} nodeId={route.nodeId} writable={writable} runtime={runtime} presentation={surface} onPresentationIntent={submitPresentationIntent} />
-          </Suspense>;
+          );
           return (
             <Suspense fallback={<ExecutionPanelPending nodeId={route.nodeId} presentation={surface} runtime={runtime} />}><ModelExecutionHost
               submitCoordinator={coordinator}
@@ -245,6 +248,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           if (route.type !== MODEL_NODE_EDITOR_PANEL_TYPE) return null;
           // 交付完成后重新解析片段与写权限，避免沿用占位节点时期的空 clipId。
           useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
+          if (!resolveSelectionContext(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), route.nodeId)) return null;
           return (
             <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
               <Suspense fallback={<ExecutionPanelSkeleton />}><ModelParameterPanel

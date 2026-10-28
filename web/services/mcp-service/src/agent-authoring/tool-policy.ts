@@ -16,6 +16,8 @@ export type AgentAuthoringToolDeps = {
   );
   /** Canvas script 能力可用性（由 `get_canvas_capabilities` 探测后注入；缺省视为未接入）。 */
   scriptAvailability?: { available: boolean; reason?: string };
+  /** 任务模型能力（媒体节点预检）；由同一能力探测注入。 */
+  modelsAvailability?: { available: boolean; reason?: string; items: unknown[] };
   now?: () => number;
   audit?: (event: AgentAuditEvent) => void;
   auditTool?: string;

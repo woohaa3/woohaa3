@@ -158,7 +158,7 @@ describe("复制载荷", () => {
     expect(applied.canvas.assets.some((asset) => asset.id === "asset-upload-photo" && asset.status === "ready")).toBe(true);
   });
 
-  it("生成结果指针仍被剪除：粘贴后是无运行态的可编辑节点", () => {
+  it("生成结果资产是稳定内容引用：复制保留 outputAssetId 并携带资产，粘贴后无 active run", () => {
     const base = createEmptyWoohaa3ServerCanvas("canvas-1", NOW);
     const generated: ServerCanvas = {
       ...base,
@@ -178,9 +178,40 @@ describe("复制载荷", () => {
       }
     } as unknown as ServerCanvas;
     const payload = buildCanvasCopyPayload(generated, ["gen-img"])!;
+    // 已结算的生成结果资产是节点的稳定内容引用：粘贴必须能显示同一张图（不再是任务结果指针）。
+    expect(payload.nodeData["gen-img"]).toMatchObject({
+      prompt: "画一只猫",
+      outputAssetId: "asset-generated-out",
+      taskStatus: "successed",
+      resourceKind: "image"
+    });
+    // 结果资产随载荷一起走，粘贴到别的画布仍能解析该引用。
+    expect(payload.assets?.map((asset) => asset.id)).toEqual(["asset-generated-out"]);
+    // 粘贴后仍是无 active run 的可编辑节点，可继续生成；运行态与 provider 痕迹被剪除。
+    expect(payload.nodeData["gen-img"]).not.toHaveProperty("activeRunId");
+    expect(payload.nodeData["gen-img"]).not.toHaveProperty("providerTaskId");
+  });
+
+  it("运行中的任务结果指针仍被剪除：无 ready 资产可恢复时不保留过期引用", () => {
+    const base = createEmptyWoohaa3ServerCanvas("canvas-1", NOW);
+    const running: ServerCanvas = {
+      ...base,
+      document: toWoohaa3CanvasDocument(
+        { nodes: [{ ...createWoohaa3CanvasNode("image", { x: 0, y: 0 }, "gen-img"), width: 100, height: 50 }], edges: [] },
+        NOW
+      ),
+      assets: [],
+      nodeData: {
+        "gen-img": {
+          prompt: "画一只猫",
+          outputAssetId: "asset-not-in-canvas",
+          taskStatus: "processing"
+        }
+      }
+    } as unknown as ServerCanvas;
+    const payload = buildCanvasCopyPayload(running, ["gen-img"])!;
     expect(payload.nodeData["gen-img"]).toMatchObject({ prompt: "画一只猫" });
     expect(payload.nodeData["gen-img"]).not.toHaveProperty("outputAssetId");
-    // 结果资产不随载荷走（nodeData 已不引用它）。
     expect(payload.assets ?? []).toHaveLength(0);
   });
 });
@@ -384,30 +415,69 @@ describe("粘贴规划", () => {
       document: {
         ...base.document,
         nodes: [
-          { id: "g", type: "group", position: { x: 100, y: 100 }, width: 400, height: 300 },
-          { id: "child", type: "image", parentId: "g", position: { x: 20, y: 30 }, width: 200, height: 100 }
+          // 组离画布原点很远：包围盒若混用局部坐标，粘贴会偏离鼠标同样的距离。
+          { id: "g", type: "group", position: { x: 2000, y: 1500 }, width: 400, height: 300 },
+          { id: "child", type: "image", parentId: "g", position: { x: 20, y: 30 }, width: 200, height: 100 },
+          { id: "inner", type: "group", parentId: "g", position: { x: 40, y: 60 }, width: 300, height: 200 },
+          { id: "grandchild", type: "text", parentId: "inner", position: { x: 10, y: 20 }, width: 120, height: 60 }
         ],
         edges: []
       }
     };
     const payload = buildCanvasCopyPayload(canvas, ["g"])!;
+    const anchor = { x: 500, y: 500 };
     const plan = planCanvasPaste({
       viewport: { x: 0, y: 0, zoom: 1 },
       canvas,
       payload,
-      anchor: { kind: "point", position: { x: 500, y: 500 } },
+      anchor: { kind: "point", position: anchor },
       createId: (prefix, index) => `${prefix}-${index}`
     })!;
-    const groupAdd = plan.commands.find(
-      (command) => command.type === "node.add" && (command as { node: { type: string } }).node.type === "group"
-    ) as { node: { position: { x: number; y: number } } };
-    const childAdd = plan.commands.find(
-      (command) => command.type === "node.add" && (command as { node: { type: string } }).node.type === "image"
-    ) as { node: { position: { x: number; y: number }; parentId?: string } };
-    // 顶层 group 被平移到锚点；成员仍是相对坐标（未被二次偏移）。
-    expect(groupAdd.node.position).not.toEqual({ x: 100, y: 100 });
+    const adds = plan.commands.filter((command) => command.type === "node.add") as Array<{
+      node: { id: string; type: string; position: { x: number; y: number }; width?: number; height?: number; parentId?: string };
+    }>;
+    const groupAdd = adds.find((command) => command.node.type === "group" && command.node.parentId === undefined)!;
+    const innerAdd = adds.find((command) => command.node.type === "group" && command.node.parentId !== undefined)!;
+    const childAdd = adds.find((command) => command.node.type === "image")!;
+    const grandchildAdd = adds.find((command) => command.node.type === "text")!;
+    // 顶层 group 的中心落在锚点上（原 group 中心 (2200,1650)，尺寸 400×300）。
+    expect(groupAdd.node.position).toEqual({ x: anchor.x - 200, y: anchor.y - 150 });
+    // 成员保持相对坐标（未被二次偏移），嵌套 group 的局部坐标同样不变。
     expect(childAdd.node.position).toEqual({ x: 20, y: 30 });
+    expect(innerAdd.node.position).toEqual({ x: 40, y: 60 });
+    expect(grandchildAdd.node.position).toEqual({ x: 10, y: 20 });
     expect(childAdd.node.parentId).toBeDefined();
+    expect(grandchildAdd.node.parentId).toBeDefined();
+  });
+
+  it("单独复制组内成员：以鼠标为中心，且丢弃已不存在的父级", () => {
+    const base = createEmptyWoohaa3ServerCanvas("canvas-member", NOW);
+    const canvas: ServerCanvas = {
+      ...base,
+      document: {
+        ...base.document,
+        nodes: [
+          { id: "g", type: "group", position: { x: 2000, y: 1500 }, width: 400, height: 300 },
+          { id: "child", type: "image", parentId: "g", position: { x: 20, y: 30 }, width: 200, height: 100 }
+        ],
+        edges: []
+      }
+    };
+    const payload = buildCanvasCopyPayload(canvas, ["child"])!;
+    const anchor = { x: 800, y: 600 };
+    const plan = planCanvasPaste({
+      viewport: { x: 0, y: 0, zoom: 1 },
+      canvas,
+      payload,
+      anchor: { kind: "point", position: anchor },
+      createId: (prefix, index) => `${prefix}-${index}`
+    })!;
+    const add = plan.commands.find((command) => command.type === "node.add") as {
+      node: { position: { x: number; y: number }; parentId?: string };
+    };
+    // 成员矩形中心对齐锚点；父级不在载荷内，parentId 不再写入。
+    expect(add.node.position).toEqual({ x: anchor.x - 100, y: anchor.y - 50 });
+    expect(add.node.parentId).toBeUndefined();
   });
 });
 

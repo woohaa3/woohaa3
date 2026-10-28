@@ -34,12 +34,56 @@ pub(crate) const NODE_HISTORY_STRIP_RADIUS: f32 = 6.0;
 /// （change: add-edge-hover-delete；由 `render-scene.test.ts` 断言两边相同）。
 pub(crate) const EDGE_DELETE_BUTTON_SIZE: f32 = 18.0;
 
-/// 连线标签胶囊宽度，必须与 contracts 的 `EDGE_LABEL_WIDTH` 一致。
-pub(crate) const EDGE_LABEL_WIDTH: f32 = 104.0;
+/// 连线标签胶囊**最大**宽度，必须与 contracts 的 `EDGE_LABEL_MAX_WIDTH` 一致。
+///
+/// 实际宽度按文本内容收缩（`edge_label_width`）：固定 104px 会把两个字的标签画成八个字宽，
+/// 并把删除按钮推到离曲线很远的位置（修复：标签过宽导致删除按钮点不到）。
+pub(crate) const EDGE_LABEL_MAX_WIDTH: f32 = 104.0;
 /// 连线标签胶囊高度，必须与 contracts 的 `EDGE_LABEL_HEIGHT` 一致。
 pub(crate) const EDGE_LABEL_HEIGHT: f32 = 24.0;
+/// 连线标签字号（世界单位），必须与 contracts 的 `EDGE_LABEL_FONT` 一致。
+pub(crate) const EDGE_LABEL_FONT: f32 = 11.0;
+/// 连线标签胶囊左右内边距（世界单位），必须与 contracts 的 `EDGE_LABEL_PADDING` 一致。
+pub(crate) const EDGE_LABEL_PADDING: f32 = 8.0;
 /// 标签与删除按钮之间的间隙，必须与 contracts 的 `EDGE_DELETE_BUTTON_GAP` 一致。
 pub(crate) const EDGE_DELETE_BUTTON_GAP: f32 = 4.0;
+/// 删除按钮的命中外扩，必须与 contracts 的 `EDGE_DELETE_HIT_PADDING` 一致
+/// （修复：删除按钮悬停丢失）。
+pub(crate) const EDGE_DELETE_HIT_PADDING: f32 = 4.0;
+/// 悬停连线时「线体 → 标签 → 删除按钮」连续命中区的外扩，必须与 contracts 的
+/// `EDGE_HOVER_BRIDGE_PADDING` 一致（修复：删除按钮悬停丢失）。
+pub(crate) const EDGE_HOVER_BRIDGE_PADDING: f32 = 8.0;
+
+/// 连线标签胶囊宽度：按文本内容收缩，超长文本封顶到 `EDGE_LABEL_MAX_WIDTH`。
+///
+/// 与 contracts `edgeLabelWidth` 同一启发式；空标签返回 0（不占位、按钮居中于中点）。
+pub(crate) fn edge_label_width(label: &str) -> f32 {
+    if label.is_empty() {
+        return 0.0;
+    }
+    (estimated_text_width(label, EDGE_LABEL_FONT) + EDGE_LABEL_PADDING * 2.0)
+        .min(EDGE_LABEL_MAX_WIDTH)
+}
+
+/// 连线标签的绘制文本：内容宽度未超过上限时原样保留，超长时才按最大文本宽度截断。
+///
+/// 不能直接把 `edge_label_width - padding` 交给 [`shortened`]：后者会固定预留一个省略号的
+/// 宽度，即使文本本来放得下也会把最后一个字换成「…」（两个字变「图…」）。
+pub(crate) fn edge_label_text(label: &str) -> String {
+    let text_width = estimated_text_width(label, EDGE_LABEL_FONT);
+    if text_width + EDGE_LABEL_PADDING * 2.0 <= EDGE_LABEL_MAX_WIDTH {
+        label
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect()
+    } else {
+        shortened(
+            label,
+            EDGE_LABEL_MAX_WIDTH - EDGE_LABEL_PADDING * 2.0,
+            EDGE_LABEL_FONT,
+        )
+    }
+}
 
 /// `0xRRGGBB` → sRGB 颜色。
 pub(crate) fn hex(value: u32) -> Color {
@@ -192,12 +236,13 @@ pub(crate) fn resize_rect(x: f32, y: f32, width: f32, height: f32) -> (f32, f32,
 }
 
 /// 连线删除按钮的**中心**：无标签时居中于两端口中点，有标签时排在标签胶囊右侧
-/// （与 contracts `bevyEdgeDeleteRect` 同一公式）。
-pub(crate) fn edge_delete_center(source: Vec2, target: Vec2, has_label: bool) -> Vec2 {
+/// （与 contracts `bevyEdgeDeleteRect` 同一公式）。`label_width` 由 `edge_label_width` 给出，
+/// 因此窄标签不会把按钮推远。
+pub(crate) fn edge_delete_center(source: Vec2, target: Vec2, label_width: f32) -> Vec2 {
     let mid = (source + target) / 2.0;
-    if has_label {
+    if label_width > 0.0 {
         Vec2::new(
-            mid.x + EDGE_LABEL_WIDTH / 2.0 + EDGE_DELETE_BUTTON_GAP + EDGE_DELETE_BUTTON_SIZE / 2.0,
+            mid.x + label_width / 2.0 + EDGE_DELETE_BUTTON_GAP + EDGE_DELETE_BUTTON_SIZE / 2.0,
             mid.y,
         )
     } else {
@@ -212,6 +257,72 @@ pub(crate) fn edge_delete_rect(center: Vec2) -> (f32, f32, f32, f32) {
         center.y - EDGE_DELETE_BUTTON_SIZE / 2.0,
         EDGE_DELETE_BUTTON_SIZE,
         EDGE_DELETE_BUTTON_SIZE,
+    )
+}
+
+/// 连线删除按钮的**命中**矩形：视觉矩形外扩 `EDGE_DELETE_HIT_PADDING`。
+///
+/// 补上按钮与标签胶囊之间的间隙，并给 18px 的按钮留出点击余量
+/// （修复：删除按钮悬停丢失）。
+pub(crate) fn edge_delete_hit_rect(center: Vec2) -> (f32, f32, f32, f32) {
+    let (x, y, width, height) = edge_delete_rect(center);
+    (
+        x - EDGE_DELETE_HIT_PADDING,
+        y - EDGE_DELETE_HIT_PADDING,
+        width + EDGE_DELETE_HIT_PADDING * 2.0,
+        height + EDGE_DELETE_HIT_PADDING * 2.0,
+    )
+}
+
+/// 连线标签胶囊矩形 `(x, y, width, height)`，与 Bevy 绘制标签背景共用同一中点与尺寸。
+pub(crate) fn edge_label_rect(
+    source: Vec2,
+    target: Vec2,
+    label_width: f32,
+) -> (f32, f32, f32, f32) {
+    let mid = (source + target) / 2.0;
+    (
+        mid.x - label_width / 2.0,
+        mid.y - EDGE_LABEL_HEIGHT / 2.0,
+        label_width,
+        EDGE_LABEL_HEIGHT,
+    )
+}
+
+/// 悬停连线时维持悬停的连续命中区 `(x, y, width, height)`。
+///
+/// 覆盖标签胶囊与删除按钮命中区（含外扩）：指针从线体经标签走到按钮时不再落进死区。
+/// 该区域只维持悬停，不触发删除（修复：删除按钮悬停丢失）。
+pub(crate) fn edge_hover_bridge_rect(
+    source: Vec2,
+    target: Vec2,
+    label_width: f32,
+) -> (f32, f32, f32, f32) {
+    let center = edge_delete_center(source, target, label_width);
+    let button = edge_delete_hit_rect(center);
+    if label_width <= 0.0 {
+        return button;
+    }
+    let label = edge_label_rect(source, target, label_width);
+    expand(union(label, button), EDGE_HOVER_BRIDGE_PADDING)
+}
+
+/// 合并两个矩形 `(x, y, width, height)`。
+fn union(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> (f32, f32, f32, f32) {
+    let left = a.0.min(b.0);
+    let top = a.1.min(b.1);
+    let right = (a.0 + a.2).max(b.0 + b.2);
+    let bottom = (a.1 + a.3).max(b.1 + b.3);
+    (left, top, right - left, bottom - top)
+}
+
+/// 四周外扩矩形。
+fn expand(rect: (f32, f32, f32, f32), padding: f32) -> (f32, f32, f32, f32) {
+    (
+        rect.0 - padding,
+        rect.1 - padding,
+        rect.2 + padding * 2.0,
+        rect.3 + padding * 2.0,
     )
 }
 
@@ -561,6 +672,24 @@ mod tests {
     fn port_sides() {
         assert_eq!(port(&node(224.0, 100.0), false), Vec2::new(10.0, 70.0));
         assert_eq!(port(&node(224.0, 100.0), true), Vec2::new(234.0, 70.0));
+    }
+
+    #[test]
+    fn edge_label_width_shrinks_to_content() {
+        // 两个字的中文标签只占 38px，而不是固定 104px（修复：标签过宽导致删除按钮点不到）。
+        assert_eq!(edge_label_width("图片"), 38.0);
+        assert_eq!(edge_label_width(""), 0.0);
+        // 超长标签封顶到最大宽度。
+        assert_eq!(edge_label_width(&"宽".repeat(40)), EDGE_LABEL_MAX_WIDTH);
+    }
+
+    #[test]
+    fn edge_label_text_keeps_short_labels_without_ellipsis() {
+        // 短标签必须原样绘制，不能被 shortened 预留省略号宽度而吞掉最后一个字。
+        assert_eq!(edge_label_text("图片"), "图片");
+        assert_eq!(edge_label_text("图\u{0007}片"), "图 片");
+        // 只有超过最大胶囊的内容宽度才截断。
+        assert!(edge_label_text(&"宽".repeat(40)).ends_with('…'));
     }
 
     #[test]

@@ -43,9 +43,9 @@ const api = { connectionId: "c1", extensionId: "sdk-agent", name: "我的 API", 
 const local = { ...api, connectionId: "local", extensionId: "local-agent", authMode: "local-login", name: "本地 Codex" } as AgentConnectionView;
 const oauth = { ...api, connectionId: "oauth", extensionId: "oauth-agent", authMode: "oauth", name: "me@example.com" } as AgentConnectionView;
 
-it("按 demo 显示能力总览和六项侧栏，MCP 与模型提供商独立", async () => {
+it("按 demo 显示能力总览和五项侧栏，MCP 与模型提供商独立", async () => {
   const f = await render();
-  expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "MCP 服务", "模型提供商", "生成历史", "连接诊断"]);
+  expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "MCP 服务", "模型提供商", "生成历史"]);
   expect(f.el.querySelector('.agent-assistant__sidebar [data-state="active"]')?.getAttribute("data-page")).toBe("overview");
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("模型提供商");
   expect(f.el.textContent).not.toContain("添加本地助手");
@@ -149,8 +149,8 @@ it("不可用连接仍可管理，不能因保存成功自动用于作品", asyn
   const f = await render([{ ...api, ready: false }], true, undefined, { kind: "generation", canvasId: "canvas", nodeId: "node" });
   expect([...f.el.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "使用")?.disabled).toBe(true);
   await f.click("配置");
-  expect(f.el.querySelector<HTMLDetailsElement>(".agent-assistant__diagnostics")!.open).toBe(false);
-  expect(f.el.textContent).toContain("已保存（模型权限待验证）");
+  expect(f.el.querySelector(".agent-assistant__diagnostics")).toBeNull();
+  expect(f.el.textContent).not.toContain("待验证");
   await f.click("关闭详情");
   expect(f.close).not.toHaveBeenCalled();
 });
@@ -444,32 +444,14 @@ it("添加入口按模型目录标注类型并随目录更新，不混入历史�
   expect(f.el.querySelectorAll('.agent-assistant__method')).toHaveLength(6);
 });
 
-it("诊断只展示实际状态与画布历史，未知证据不会变成检查通过", async () => {
-  const listConversations = vi.fn(async () => ({ ok: true as const, value: [{ conversationId: "conv", canvasId: "canvas", adapterId: "demo", title: "真实会话标题", status: "failed" as const, turnCount: 2, createdAt: "2026-10-25T00:00:00Z", updatedAt: "2026-10-25T01:00:00Z" }] }));
-  const submitTurn = vi.fn();
-  const f = await render([api, local], true, undefined, { canvasId: "canvas" }, { listConversations, submitTurn });
-  expect(listConversations).not.toHaveBeenCalled();
+it("总览不展示诊断状态或会话历史入口", async () => {
+  const listConversations = vi.fn(async () => ({ ok: true as const, value: [] }));
+  const f = await render([api, local], true, undefined, { canvasId: "canvas" }, { listConversations });
+  expect(f.el.textContent).not.toContain("诊断与历史");
+  expect(f.el.textContent).not.toContain("待验证");
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个可用");
   expect(f.el.querySelector('[data-ai-page="overview"]')?.textContent).toContain("1 个提供商");
-  await f.click("连接诊断");
-  const page = f.el.querySelector('[data-ai-page="diagnostics"]')!;
   expect(listConversations).not.toHaveBeenCalled();
-  expect(page.textContent).not.toContain("真实会话标题");
-  await f.click("刷新状态");
-  expect(listConversations).not.toHaveBeenCalled();
-  expect(page.querySelector('[data-state="unknown"]')?.textContent).toBe("待验证");
-  expect(page.textContent).not.toContain("运行完整诊断");
-  expect(submitTurn).not.toHaveBeenCalled();
-});
-
-it("切换画布及缺少画布时诊断均不查询会话", async () => {
-  const listConversations = vi.fn();
-  const f = await render([], false, undefined, { canvasId: "old" }, { listConversations });
-  await f.click("连接诊断");
-  await f.updatePayload({ canvasId: "new" });
-  await f.updatePayload({});
-  expect(listConversations).not.toHaveBeenCalled();
-  expect(f.el.textContent).not.toContain("会话历史");
 });
 
 it("服务目录失败时总览报告失败，服务页提供重试而不假称空目录", async () => {

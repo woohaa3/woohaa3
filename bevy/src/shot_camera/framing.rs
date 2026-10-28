@@ -7,13 +7,13 @@
 //! 只做数值派生；Rust 与 TypeScript 通过同一 fixture 与容差测试保持一致。
 //!
 //! 持久化的只有 `azimuth` / `elevation` / `distance` / `aspect` / `focusOffset`；position、
-//! focus、projection、fit distance、ortho size 全部由当前目标 AABB 派生。仰角默认 45°，
+//! focus、projection、fit distance、ortho size 全部由当前目标 AABB 派生。仰角默认跟随画布全局 pitch，
 //! 可在竖直半圆 `[-90°, +90°]` 内变化，派生姿态钳入奇点容差。
 
 use bevy::math::Vec3;
 
-/// 固定仰角（45°）——作为缺省与兼容默认，不再强制（design D3；change: add-shot-camera-elevation-control）。
-pub const SHOT_CAMERA_ELEVATION: f32 = std::f32::consts::FRAC_PI_4;
+/// 默认仰角与普通画布镜头共用全局 pitch（design D3；change: add-shot-camera-elevation-control）。
+pub const SHOT_CAMERA_ELEVATION: f32 = crate::isometric_grid::CANVAS_CAMERA_PITCH;
 /// 仰角规范半圆范围（正下方到正上方）。
 pub const SHOT_CAMERA_MIN_ELEVATION: f32 = -std::f32::consts::FRAC_PI_2;
 pub const SHOT_CAMERA_MAX_ELEVATION: f32 = std::f32::consts::FRAC_PI_2;
@@ -117,7 +117,7 @@ pub fn clamp_shot_distance(distance: f32, fit_distance: f32) -> f32 {
 /// 由方位角、仰角与距离求镜头相机位置：绕世界 Y 轴按 azimuth 环绕、沿竖直半圆按 elevation 抬升。
 ///
 /// `position = focus + (sin(az)*cos(el), sin(el), cos(az)*cos(el)) * distance`。
-/// `elevation` 缺省 45° 并钳入奇点容差。
+/// `elevation` 缺省为全局默认值并钳入奇点容差。
 pub fn shot_camera_position(focus: Vec3, azimuth: f32, distance: f32, elevation: f32) -> Vec3 {
     let el = clamp_shot_elevation(elevation);
     let cos_el = el.cos();
@@ -125,7 +125,7 @@ pub fn shot_camera_position(focus: Vec3, azimuth: f32, distance: f32, elevation:
     focus + dir * distance
 }
 
-/// 把仰角钳制到奇点容差以内；非有限值回退默认 45°。
+/// 把仰角钳制到奇点容差以内；非有限值回退全局默认值。
 pub fn clamp_shot_elevation(elevation: f32) -> f32 {
     if !elevation.is_finite() {
         return SHOT_CAMERA_ELEVATION;

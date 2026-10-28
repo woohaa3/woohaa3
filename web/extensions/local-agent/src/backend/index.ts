@@ -86,19 +86,6 @@ export function createLocalAgentExtension(
 ): ApplicationBackendExtensionDefinition {
   return {
     extensionId: LOCAL_AGENT_PLUGIN_ID,
-    capabilities: [
-      {
-        id: agentConnectionProviderCapabilityId(LOCAL_AGENT_PLUGIN_ID),
-        kind: "capability",
-        description: "本机 Agent 来源连接发现",
-      },
-      ...LOCAL_AGENT_ADAPTERS.map(adapter => ({ id: filmSetConversionCapabilityId(adapter.adapterId), kind: "capability" as const, description: `${adapter.label} film-set candidate generation` })),
-      ...LOCAL_AGENT_ADAPTERS.map((adapter) => ({
-        id: agentConversationAdapterCapabilityId(adapter.adapterId),
-        kind: "capability" as const,
-        description: `${adapter.label} 会话适配器`,
-      })),
-    ],
     activate: (host) => {
       const env = options.env ?? (process.env as Record<string, string | undefined>);
       const deployment: LocalAgentDeployment = {
@@ -151,6 +138,14 @@ export function createLocalAgentExtension(
           deployment.workDir ?? path.join(os.tmpdir(), "woohaa3-local-agent"),
         portRange: deployment.portRange,
         executableFor,
+        ...((env.WOOHAA3_AGENT_RUNTIME_SOCKET && env.WOOHAA3_AGENT_RUNTIME_TOKEN && env.WOOHAA3_AGENT_WORKSPACE_KEY)
+          ? { supervisor: {
+            socketPath: env.WOOHAA3_AGENT_RUNTIME_SOCKET,
+            token: env.WOOHAA3_AGENT_RUNTIME_TOKEN,
+            workspaceKey: env.WOOHAA3_AGENT_WORKSPACE_KEY,
+            portRange: deployment.portRange,
+          } }
+          : {}),
         prepareConfigDir: ({ adapterId, configDir }) => {
           if (adapterId !== "codex-appserver" || !sourceCodexHome) return;
           const prepared = prepareCodexConfigDir(configDir, sourceCodexHome);
@@ -260,9 +255,10 @@ export function createLocalAgentExtension(
 
       return {
         dispose: async () => {
-          // 停用只回收**自有**专用进程；保留凭据、历史与画布结果（design D9）。
+          // Supervisor 模式下 backend reload 只断开 client，CLI 进程由稳定宿主持有；
+          // 没有 Supervisor 时保留旧的进程内回收语义。
           admitted = false;
-          await processManager.stopAll();
+          if (!env.WOOHAA3_AGENT_RUNTIME_SOCKET) await processManager.stopAll();
           host.logger({ event: "local-agent-disposed" });
         },
       };

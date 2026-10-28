@@ -206,7 +206,7 @@ export function hostSummary(host) {
       directory: path.relative(host.repoRoot, registration.directory) || registration.directory,
       modules: registration.modules.map((module) => path.relative(registration.directory, module)),
       backend: registration.backend !== null,
-      hostPlugin: registration.hostPlugin ? { kind: registration.hostPlugin.kind, factory: registration.hostPlugin.factory } : null,
+      hostPlugin: registration.hostPlugin ? { roles: registration.hostPlugin.features, factory: registration.hostPlugin.factory } : null,
       canvasContent: registration.canvasContent ? { factory: registration.canvasContent.factory } : null,
       site: registration.site,
       metadata: registration.metadataExport,
@@ -362,7 +362,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       ? {
           module: resolveModuleFile(extension.dir, descriptor.hostPlugin.module ?? "./backend", context),
           factory: descriptor.hostPlugin.factory,
-          kind: descriptor.hostPlugin.kind,
+          roles: descriptor.hostPlugin.features ?? [],
           optional: descriptor.hostPlugin.optional === true
           // 只解析出入口路径；真正的 import 由扩展层装载器完成。
         }
@@ -638,7 +638,9 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
    * 每个插件的 `name` 必须等于扩展 identity：装配日志、配置归属与站点状态都以它为键。
    */
   const createHostPlugins = async (optionsByExtensionId = {}) => {
-    const byKind = { provider: [], storage: [], "marketplace-source": [] };
+    /** 所有扩展层插件，以及其中真正参与存储就绪的那部分。 */
+    const plugins = [];
+    const storage = [];
     const moduleCache = new Map();
     const ordered = registrations
       .filter((registration) => registration.hostPlugin)
@@ -689,9 +691,12 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       // 品牌图形由声明注入（扩展源码不写死宿主目录里的路径）；未声明的插件保持自己的语义图标名。
       // `origin`：插件来自哪类根，供宿主做运行期来源断言（见 extension-host-managed.mjs）。
       const origin = hostPluginOrigin(registration);
-      byKind[declared.kind].push({ ...plugin, origin, directory: registration.directory, ...(registration.iconPath ? { icon: registration.iconPath } : {}) });
+      const entry = { ...plugin, origin, directory: registration.directory, ...(registration.iconPath ? { icon: registration.iconPath } : {}) };
+      plugins.push(entry);
+      // 角色可多选；这里只有 `storage` 有装载语义（谁是主存储就得先就绪）。
+      if ((declared.features ?? []).includes("storage")) storage.push(entry);
     }
-    return byKind;
+    return { plugins, storage };
   };
 
   /**

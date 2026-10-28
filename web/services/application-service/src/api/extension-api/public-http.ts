@@ -52,7 +52,16 @@ export async function handlePublicHttp(
   const url = safeUrl(req.url)!;
   const base = mapping.publicPath.replace(/\/$/, "");
   const subPath = url.pathname.slice(base.length).replace(/^\/+/, "");
+  /**
+   * 两个 route 用途不同，不能混：
+   * - `route`：带映射前缀的全路径（`remote-server/session`），用于 action / 流预算等**策略匹配**；
+   * - `handlerRoute`：**相对 route**（`session`），用于查 handler 注册表——注册键是
+   *   `<extensionId>/<相对 route>`，前缀由宿主加，不来自 publicRoutes 映射。
+   *
+   * 混用会让 `/api/remote-server/session` 被拼成 `remote-server/remote-server/session`。
+   */
   const route = subPath === "" ? mapping.route : `${mapping.route}/${subPath}`;
+  const handlerRoute = subPath;
 
   const status = deps.controlPlane.status(mapping.extensionId);
   const auth = await resolveAuth(req, deps, "http");
@@ -68,14 +77,14 @@ export async function handlePublicHttp(
   const onClose = () => controller.abort();
   req.on("close", onClose);
   try {
-    const owned = host?.resolvePublicRoute(mapping.extensionId, route, method).owned ?? false;
+    const owned = host?.resolvePublicRoute(mapping.extensionId, handlerRoute, method).owned ?? false;
     if (!host || !owned) {
       sendError(res, 404, "extension-not-found", "插件未激活");
       return true;
     }
     // 具名 action 在进入插件逻辑前校验（change: 2026-10-13-...，任务 1.4/3.3）。
-    await assertActions(deps, auth.principal, publicRouteActions(deps, mapping.extensionId, route, method));
-    const budget = { ...DEFAULT_PLUGIN_STREAM_BUDGET, ...resolveStreamBudget(deps, mapping.extensionId, route, method) };
+    await assertActions(deps, auth.principal, publicRouteActions(deps, mapping.extensionId, handlerRoute, method));
+    const budget = { ...DEFAULT_PLUGIN_STREAM_BUDGET, ...resolveStreamBudget(deps, mapping.extensionId, handlerRoute, method) };
     const deadlineTimer = budget.deadlineMs > 0 ? setTimeout(() => {
       controller.abort();
       if (!res.writableEnded) {
@@ -87,13 +96,15 @@ export async function handlePublicHttp(
       }
     }, budget.deadlineMs) : undefined;
     deadlineTimer?.unref?.();
-    const stopHeartbeat = isStreamRoute(deps, mapping.extensionId, route, method) ? startHeartbeat(res, budget, controller) : (() => undefined);
+    const stopHeartbeat = isStreamRoute(deps, mapping.extensionId, handlerRoute, method) ? startHeartbeat(res, budget, controller) : (() => undefined);
     const dispatchContext = { ...buildDispatchContext(req, auth), signal: controller.signal };
     try {
       const rawDispatched = await withTimeout(
         host.dispatchRawHttp({
+          // 注册键是 `<extensionId>/<相对 route>`：扩展 identity 与相对 route 一起查表。
+          extensionId: mapping.extensionId,
           method,
-          route,
+          route: handlerRoute,
           req: req as unknown as ApplicationExtensionRawRequest,
           res: res as unknown as ApplicationExtensionRawResponse,
           context: dispatchContext
@@ -104,8 +115,9 @@ export async function handlePublicHttp(
       if (!rawDispatched) {
         await withTimeout(
           host.dispatchHttp({
+            extensionId: mapping.extensionId,
             method,
-            route,
+            route: handlerRoute,
             req: buildHttpRequest(req, url, auth, controller.signal),
             res: buildHttpResponse(res, controller.signal),
             context: dispatchContext
@@ -159,7 +171,7 @@ function publicRouteActions(
     if (entry.extensionId !== extensionId) continue;
     for (const http of entry.httpHandlers) {
       if (http.method !== method) continue;
-      if (http.route === route || http.route.endsWith("/*")) return http.requiredActions;
+      if (matchesDeclaredRoute(http.route, route)) return http.requiredActions;
     }
   }
   return undefined;
@@ -176,12 +188,28 @@ function resolveStreamBudget(
   for (const entry of snapshot) {
     if (entry.extensionId !== extensionId) continue;
     for (const http of entry.httpHandlers) {
-      if (http.method === method && (http.route === route || http.route.endsWith("/*")) && http.streamBudget) {
+      if (http.method === method && matchesDeclaredRoute(http.route, route) && http.streamBudget) {
         return http.streamBudget;
       }
     }
   }
   return {};
+}
+
+/**
+ * 判断某条已注册的 handler 是否命中「相对 route」。
+ *
+ * `"*"` 命中该扩展下任意相对 route；`"prefix/*"` 命中自身或前缀；其余按精确比较。
+ * 快照里存的是**扩展声明的相对 route**（不含 extensionId 前缀），因此这里直接比对。
+ */
+function matchesDeclaredRoute(declared: string, route: string): boolean {
+  if (declared === "*") return route !== "";
+  if (declared.endsWith("/*")) {
+    const bare = declared.slice(0, -2);
+    // 同时接受 `prefix`（无尾段）与 `prefix/...`；空 route 只匹配 `*`。
+    return route === bare || route.startsWith(`${bare}/`);
+  }
+  return declared === route;
 }
 
 /** 是否声明为流式（SSE）路由（任务 2.5）。 */
@@ -195,7 +223,7 @@ function isStreamRoute(
   for (const entry of snapshot) {
     if (entry.extensionId !== extensionId) continue;
     for (const http of entry.httpHandlers) {
-      if (http.method === method && (http.route === route || http.route.endsWith("/*"))) return http.stream === true;
+      if (http.method === method && matchesDeclaredRoute(http.route, route)) return http.stream === true;
     }
   }
   return false;

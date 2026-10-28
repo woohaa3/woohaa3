@@ -16,6 +16,13 @@ export type SiteGateHandle = {
   acquire(): Promise<void>;
   release(): Promise<void>;
   /**
+   * 该扩展的受控 HTTP 路由注册面（`ctx.webServer`）。
+   *
+   * 装载器把它注入到扩展的 Cordis Context：路由按 extensionId 命名空间隔离，前缀由宿主添加。
+   * 没有 gateway 的最小装配里为 undefined，插件据此判断能力是否可用。
+   */
+  webServer?: import("@woohaa3/contracts").HostWebServerService;
+  /**
    * 插件自报健康（缺省表示健康）。装载器在 fiber 运行期间用**当前**配置求值；未装载时返回 undefined。
    * 控制面在状态查询里同步调用，所以补上凭据后不用重启插件，状态就回到 active。
    */
@@ -24,6 +31,8 @@ export type SiteGateHandle = {
 
 export type SiteGate = {
   managed(extensionId: string): boolean;
+  /** 已 attach 的 handle（未 attach 返回 undefined）；装载器用它取 `webServer` 等扩展专属能力。 */
+  handle(extensionId: string): SiteGateHandle | undefined;
   /** 装载器登记扩展；控制面的激活会等到登记后才执行。 */
   attach(extensionId: string, handle: SiteGateHandle): void;
   /** 启动期定义（构造时的扩展集合）。运行期 add 的定义不在这里，由 `add` 返回。 */
@@ -88,6 +97,7 @@ export function createSiteGate(extensionIds: Iterable<string>): SiteGate {
   for (const id of extensionIds) handles.set(id, createEntry(id));
   return {
     managed: (extensionId) => handles.has(extensionId),
+    handle: (extensionId) => handles.get(extensionId)?.current,
     attach(extensionId, handle) {
       const entry = handles.get(extensionId);
       if (!entry) return;

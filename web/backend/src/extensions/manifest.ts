@@ -1,6 +1,6 @@
 /** 扩展定义、元数据和公开路由来自启动期目录扫描；宿主不静态装配业务扩展。 */
 import type {
-  AnyHostExtensionPlugin,
+  AnyExtensionPlugin,
   ApplicationBackendExtensionDefinition,
   ApplicationExtensionMetadata,
   ApplicationExtensionPublicRouteMapping,
@@ -69,8 +69,10 @@ export type LoadedExtensionHost = {
    * 驱动，宿主只负责按声明加载。宿主不再维护逐插件的手写注册表。
    */
   createHostPlugins?: (optionsByExtensionId?: Record<string, unknown>) => Promise<{
-    provider: readonly AnyHostExtensionPlugin[];
-    storage: readonly AnyHostExtensionPlugin[];
+    /** 全部扩展层插件（角色可多选：provider / storage / marketplace-source）。 */
+    plugins: readonly AnyExtensionPlugin[];
+    /** 其中声明了 `storage` 角色的子集：主存储必须先就绪。 */
+    storage: readonly AnyExtensionPlugin[];
   }>;
   /** 站点控制面 scope 的 extensionId（runtime 只装配非站点入口）。 */
   siteExtensionIds: readonly string[];

@@ -64,7 +64,8 @@ pub(super) struct SnapshotEdge {
     pub(super) target: usize,
     pub(super) source_port: Vec2,
     pub(super) target_port: Vec2,
-    pub(super) has_label: bool,
+    /// 标签胶囊宽度（世界坐标）；0 表示无标签。
+    pub(super) label_width: f32,
     pub(super) points: Vec<Vec2>,
     pub(super) aabb: ([f32; 2], [f32; 2]),
 }
@@ -199,7 +200,7 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
                 edge.id.clone(),
                 node_index[&edge.source],
                 node_index[&edge.target],
-                !edge.label.is_empty(),
+                layout::edge_label_width(&edge.label),
                 a,
                 b,
             ))
@@ -486,7 +487,7 @@ impl InteractionSnapshot {
         candidates
     }
 
-    /// 点命中：悬停边删除按钮 → 节点端口/关闭/历史/抓手 → 节点本体 → 边。
+    /// 点命中：悬停边删除按钮 → 节点端口/关闭/历史/抓手 → 节点本体 → 悬停保持区 → 边。
     pub(crate) fn point_hit(
         &self,
         world: Vec2,
@@ -516,12 +517,14 @@ impl InteractionSnapshot {
             }
         }
         // 悬停连线的删除按钮优先：先于节点判定，避免节点压住连线中点被误判。
+        // 命中区在视觉按钮外扩 `EDGE_DELETE_HIT_PADDING`，补上标签与按钮之间的间隙
+        // （修复：删除按钮悬停丢失）。
         if let Some(edge_id) = hovered_edge
             && let Some(edge) = self.edges.iter().find(|edge| edge.id == edge_id)
         {
             let center =
-                layout::edge_delete_center(edge.source_port, edge.target_port, edge.has_label);
-            if layout::in_rect(world, layout::edge_delete_rect(center)) {
+                layout::edge_delete_center(edge.source_port, edge.target_port, edge.label_width);
+            if layout::in_rect(world, layout::edge_delete_hit_rect(center)) {
                 return Some(PointHit::EdgeDelete {
                     edge_id: edge_id.to_owned(),
                 });
@@ -666,6 +669,25 @@ impl InteractionSnapshot {
                     node_id: node.id.clone(),
                 });
             }
+        }
+        // 悬停保持区：有标签时删除按钮排在标签右侧，曲线只从标签中间穿过。指针从线体经
+        // 标签走到按钮时，这一段既不在曲线命中带、也还没进按钮；把它判为该边可以让悬停
+        // 连续，按钮不会在途中消失（修复：删除按钮悬停丢失）。只维持悬停，
+        // 点击此处仍是连线本体（无操作），删除只由上面的按钮命中区触发。
+        if let Some(edge_id) = hovered_edge
+            && let Some(edge) = self.edges.iter().find(|edge| edge.id == edge_id)
+            && layout::in_rect(
+                world,
+                layout::edge_hover_bridge_rect(
+                    edge.source_port,
+                    edge.target_port,
+                    edge.label_width,
+                ),
+            )
+        {
+            return Some(PointHit::Edge {
+                edge_id: edge_id.to_owned(),
+            });
         }
         // 边：倒序（后绘制优先），先用边网格缩小范围，再做 broad phase 与逐段距离。
         let distance = layout::edge_hit_distance(zoom);

@@ -11,7 +11,11 @@
  */
 import {
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
+  isMergeEligibleNode,
+  readNodeHeight,
+  readNodeWidth,
   resolveDraggedNodeDropTargets,
+  resolveMergeTarget,
   settleDraggedGroups,
   settleDraggedNodeBoundaries,
   type CanvasCommand,
@@ -31,6 +35,7 @@ import { isShotPreviewOnlySelection } from "./shot-preview-protection.js";
 import type { InteractionCore } from "./interaction-core.js";
 import type { Gesture } from "./interaction-types.js";
 import {nodeDrop} from '../../services/node-drop/index.js';
+import {nodeMerge, type NodeMergeDrag} from '../../services/node-merge/index.js';
 
 /** drag gesture 的提交/取消/粘连求值能力。 */
 export type DragGestureFamily = {
@@ -57,9 +62,11 @@ export type DragGestureFamily = {
 
 export function createDragGestureFamily(
   core: Pick<InteractionCore, "state" | "submit" | "buildScene" | "buildDragScene" | "schedule" | "clearHeldKeys"> &
-    Partial<Pick<InteractionCore, "options">>
+    Partial<Pick<InteractionCore, "options" | "writable">>
 ): DragGestureFamily {
   const { state, submit, buildScene, schedule } = core;
+  /** 只读会话不提示也不消费合并；缺省注入时按可写处理（独立单元/测试）。 */
+  const writable = (): boolean => core.writable?.() ?? true;
 
   /**
    * 被拖动的选择集是否**全部**是受保护的拍摄镜头预览。
@@ -82,6 +89,41 @@ export function createDragGestureFamily(
       nodes: canvasState.document.nodes.map((node) => ({ id: node.id, type: node.type })),
       nodeData: canvasState.nodeData
     });
+  };
+
+  /**
+   * 计算当前拖动唯一合并候选（change: 2026-10-27-merge-same-type-node-history，任务 2.2 / design D1、D3）。
+   *
+   * 只认单根节点拖动、可写会话、可参与合并的来源；目标从索引的同类型桶里取，pointermove 上
+   * 只扫同类小列表。DOM 高亮与确认框由 `node-merge` 插件负责，本族只决定是否显示提示与消费释放。
+   */
+  const resolveMergeCandidate = (gesture: Extract<Gesture, { kind: "drag" }>): NodeMergeDrag | null => {
+    if (!gesture.moved || gesture.origins.size !== 1) return null;
+    if (previewOnlyDrag(gesture.origins)) return null;
+    if (!writable()) return null;
+    const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+    const index = sharedCanvasNodeIndex(canvasState);
+    if (!canvasState || !index) return null;
+    const sourceNodeId = [...gesture.origins.keys()][0]!;
+    const sourceNode = index.byId.get(sourceNodeId);
+    if (!sourceNode) return null;
+    if (!isMergeEligibleNode({ node: sourceNode, data: canvasState.nodeData[sourceNodeId] })) return null;
+    const candidates = index.mergeRectsByType.get(sourceNode.type);
+    if (!candidates || candidates.length === 0) return null;
+    const position = state.localPositions.get(sourceNodeId) ?? index.absolutePosition(sourceNodeId);
+    if (!position) return null;
+    const center = {
+      x: position.x + readNodeWidth(sourceNode) / 2,
+      y: position.y + readNodeHeight(sourceNode) / 2
+    };
+    const resolved = resolveMergeTarget({
+      sourceType: sourceNode.type,
+      center,
+      candidates,
+      excludeNodeIds: new Set(gesture.origins.keys())
+    });
+    if (!resolved) return null;
+    return { sourceNodeIds: [sourceNodeId], targetNodeId: resolved.nodeId, point: center };
   };
 
   const dragDropCommands = (
@@ -149,8 +191,14 @@ export function createDragGestureFamily(
     const gesture = state.gesture;
     let dropChanged = false;
     if(gesture.kind==='drag' && gesture.moved){
-      // 片场复制导入。受保护预览的拖动只移动卡片，不做接收方预览（不显示导入提示）。
-      if (!previewOnlyDrag(gesture.origins)) {
+      // 合并候选优先于片场复制导入：命中时只显示「松手合并」，不点亮接收方
+      // （change: 2026-10-27-merge-same-type-node-history，任务 2.2 / design D3）。
+      const mergeCandidate = resolveMergeCandidate(gesture);
+      nodeMerge.preview(mergeCandidate);
+      if (mergeCandidate) {
+        nodeDrop.clear();
+      } else if (!previewOnlyDrag(gesture.origins)) {
+        // 片场复制导入。受保护预览的拖动只移动卡片，不做接收方预览（不显示导入提示）。
         nodeDrop.preview([...gesture.origins.keys()],state.lastPointerWorld);
       } else {
         nodeDrop.clear();
@@ -172,9 +220,12 @@ export function createDragGestureFamily(
         || targets.some((id, i) => id !== state.dropTargetGroupIds[i]);
       state.dropTargetGroupIds = targets;
       if (dropChanged) schedule("input");
-    } else if (state.dropTargetGroupIds.length > 0) {
-      state.dropTargetGroupIds = [];
-      schedule("input");
+    } else {
+      nodeMerge.clear();
+      if (state.dropTargetGroupIds.length > 0) {
+        state.dropTargetGroupIds = [];
+        schedule("input");
+      }
     }
     if (gesture.kind !== "drag" || !gesture.attach) return dropChanged;
     // Most drags have no held Q/E key: no contact geometry is needed.
@@ -193,6 +244,15 @@ export function createDragGestureFamily(
     gesture: Extract<Gesture, { kind: "drag" }>,
     previews: Map<string, { x: number; y: number }>
   ): void => {
+    // 合并先于片场 drop 裁决：`dropNodeDrop` 对复合资产目标在 onDrop 返回 false 时仍会消费释放，
+    // 顺序反了会把合并吞掉（design D3）。命中即消费释放，源节点不提交位置命令，等确认框结果。
+    const mergeCandidate = resolveMergeCandidate(gesture);
+    if (mergeCandidate && nodeMerge.drop(mergeCandidate)) {
+      nodeMerge.clear();
+      nodeDrop.clear();
+      return;
+    }
+    nodeMerge.clear();
     // 片场复制拖入在普通移动之前裁决：命中即消费释放，源节点回位、不提交源 move/parent/edge
     // （change: 2026-10-08-make-film-set-model-only，design D4）。受保护预览的拖动只移动卡片，
     // 不进 drop 分派（不显示导入提示，也不消费释放）。
@@ -220,6 +280,7 @@ export function createDragGestureFamily(
 
   const cancel = (): void => {
     nodeDrop.clear();
+    nodeMerge.clear();
     state.dropTargetGroupIds = [];
     state.gesture = { kind: "none" };
     state.draft = null;

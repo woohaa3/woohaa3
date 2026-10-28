@@ -153,8 +153,11 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   //    包围盒与偏移都必须在**绝对坐标**下计算：成员节点保存的是相对父级的局部坐标，
   //    直接对它们加偏移会把子树整体推走（change: add-canvas-node-grouping，design D6）。
   //    预览节点排在源节点之后：`node.add` 校验源片场已存在（design D2/D3）。
-  const absolute = toAbsoluteNodes(payload.nodes, payload.nodeData);
-  const bounds = boundingBox(absolute.map((entry) => entry.node));
+  const placed = toAbsoluteNodes(payload.nodes, payload.nodeData);
+  // 每个节点换算到**载荷根坐标系**再算包围盒：group 成员的 `position` 是相对父级的局部坐标，
+  // 与 group 自身的画布坐标混在一个包围盒里会把中心算到组外，粘贴落点随之偏离鼠标
+  // （change: add-canvas-node-grouping，design D6）。
+  const bounds = boundingBox(placed.map((entry) => ({ position: entry.absolute, width: entry.node.width, height: entry.node.height })));
   const anchor = resolveAnchorPosition(options.anchor, options.viewport);
   const dx = anchor.x - (bounds.minX + bounds.maxX) / 2;
   const dy = anchor.y - (bounds.minY + bounds.maxY) / 2;
@@ -170,7 +173,7 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   // 3. 节点：parent 重写为新 ID；只有**顶层节点**承载整体平移，成员保持相对坐标。
   //    父节点先于子节点输出（拓扑排序），保证服务端 applyCommand 时 parent 存在。
   //    扩展重映射的数据随 node.add 一起提交，可信生命周期复核完整闭包。
-  for (const { node, isTopLevel } of absolute) {
+  for (const { node, isTopLevel, absolute } of placed) {
     const newId = idMap.get(node.id);
     if (newId === undefined) continue;
     newNodeIds.push(newId);
@@ -181,7 +184,7 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
         id: newId,
         type: node.type,
         position: isTopLevel
-          ? { x: node.position.x + dx, y: node.position.y + dy }
+          ? { x: absolute.x + dx, y: absolute.y + dy }
           : { ...node.position },
         ...(node.width !== undefined ? { width: node.width } : {}),
         ...(node.height !== undefined ? { height: node.height } : {}),
@@ -272,7 +275,11 @@ function resolveAnchorPosition(
   };
 }
 
-function boundingBox(nodes: readonly CopyNode[]): {
+function boundingBox(nodes: readonly {
+  position: Woohaa3CanvasPosition;
+  width?: number;
+  height?: number;
+}[]): {
   minX: number;
   minY: number;
   maxX: number;
@@ -313,18 +320,43 @@ function orderParentsFirst(nodes: readonly CopyNode[], nodeData: CanvasCopyPaylo
 }
 
 /**
- * 把载荷节点按父级优先排序，并标注是否顶层（顶层才承载整体平移）
- * （change: add-canvas-node-grouping，design D6）。
+ * 把载荷节点按父级优先排序，标注是否顶层（顶层才承载整体平移），并给出
+ * **载荷根坐标系**下的位置（change: add-canvas-node-grouping，design D6）。
  *
  * 成员节点保存的是相对 parent 的局部坐标，平移必须只作用于顶层，
  * 否则嵌套子树会被偏移两次。父级先于子级输出，保证服务端 `node.add` 时 parent 已存在。
+ *
+ * `absolute` 只用于计算包围盒：它沿载荷内的 parent 链累加偏移。父级不在载荷内时
+ * （例如单独复制组内成员）保持该节点自身的局部坐标——那一帧里所有节点仍然一致，
+ * 对齐锚点后依然落在正确位置。
  */
-function toAbsoluteNodes(nodes: readonly CopyNode[], nodeData: CanvasCopyPayload["nodeData"]): Array<{ node: CopyNode; isTopLevel: boolean }> {
+function toAbsoluteNodes(nodes: readonly CopyNode[], nodeData: CanvasCopyPayload["nodeData"]): Array<{
+  node: CopyNode;
+  isTopLevel: boolean;
+  absolute: Woohaa3CanvasPosition;
+}> {
   const included = new Set(nodes.map((node) => node.id));
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const absolutePosition = (node: CopyNode): Woohaa3CanvasPosition => {
+    let x = node.position.x;
+    let y = node.position.y;
+    const guard = new Set<string>([node.id]);
+    let parentId = node.parentId;
+    while (parentId && !guard.has(parentId)) {
+      const parent = byId.get(parentId);
+      if (!parent) break;
+      guard.add(parentId);
+      x += parent.position.x;
+      y += parent.position.y;
+      parentId = parent.parentId;
+    }
+    return { x, y };
+  };
   return orderParentsFirst(nodes, nodeData).map((node) => ({
     node,
     // parent 不在载荷内（被过滤）时该节点退化为顶层，需要承载平移。
-    isTopLevel: node.parentId === undefined || !included.has(node.parentId)
+    isTopLevel: node.parentId === undefined || !included.has(node.parentId),
+    absolute: absolutePosition(node)
   }));
 }
 

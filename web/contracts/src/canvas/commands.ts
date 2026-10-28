@@ -63,6 +63,8 @@ export type CanvasCommand =
   | { type: "nodeData.patch"; nodeId: string; value: CanvasNodeData | null; expectedInputMapping?: CanvasNodeData["inputMapping"]; expectedNodeData?: Record<string, CanvasNodeData | null> }
   /** 片场对象级权威更新；`nodeId` 必须是 `animation3d`。 */
   | { type: "filmSet.itemPatch"; nodeId: string; itemId: string; op: FilmSetItemPatchOp }
+  /** 扩展内容命令。内核只校验信封，业务由 owner codec 解码和应用。 */
+  | { type: "extension.command"; extensionId: string; nodeId?: string; kind: string; payload: unknown }
   | { type: "filmSet.clipPatch"; nodeId: string; clipId: string; expectedHash: string; op: FilmSetClipPatchOp }
   | {
       type: "edge.add";
@@ -93,6 +95,7 @@ export const CANVAS_COMMAND_TYPES: readonly CanvasCommandType[] = [
   "nodeData.patch",
   "filmSet.itemPatch",
   "filmSet.clipPatch",
+  "extension.command",
   "edge.add",
   "edge.remove",
   "asset.upsert",
@@ -155,6 +158,11 @@ export function isCanvasCommand(value: unknown): value is CanvasCommand {
     case "filmSet.clipPatch":
       return isNonEmptyString(value.nodeId) && isNonEmptyString(value.clipId)
         && isNonEmptyString(value.expectedHash) && isFilmSetClipPatchOp(value.op);
+    case "extension.command":
+      return isNonEmptyString(value.extensionId)
+        && isNonEmptyString(value.kind)
+        && (value.nodeId === undefined || isNonEmptyString(value.nodeId))
+        && Object.prototype.hasOwnProperty.call(value, "payload");
     case "edge.add":
       return isRecord(value.edge)
         && isNonEmptyString(value.edge.source)

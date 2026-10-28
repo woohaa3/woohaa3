@@ -21,3 +21,22 @@ it("聚焦布局不为窗口横栏二次扣减高度（横栏在页面布局里�
   expect(layout.contentRect).toEqual({ x: 0, y: 56, width: 1440, height: 774 });
   expect("chrome" in layout).toBe(false);
 });
+it("缺省由宿主自绘 chrome：保留标题栏与底部基座占位", () => {
+  const layout = focusLayout({ width: 1440, height: 900 });
+  expect(layout).toMatchObject({ header: 56, footer: 44 });
+  expect(layout.contentRect).toEqual({ x: 0, y: 56, width: 1440, height: 800 });
+});
+it("自绘 chrome 的工作区拿到全高内容矩形，且不把标志写回 layout", () => {
+  const layout = focusLayout({ width: 1440, height: 900, chromeOwner: "workspace", panel: true });
+  expect(layout).toMatchObject({ header: 0, footer: 0, player: 0, panelWidth: 320 });
+  expect(layout.insets).toEqual({ left: 0, top: 0, right: 320, bottom: 0 });
+  expect(layout.contentRect).toEqual({ x: 0, y: 0, width: 1120, height: 900 });
+  expect("chromeOwner" in layout).toBe(false);
+});
+it("自绘 chrome 的窄屏仍由底部 sheet 占位，内容矩形相应收缩", () => {
+  const layout = focusLayout({ width: 700, height: 900, chromeOwner: "workspace", panel: true });
+  expect(layout.narrow).toBe(true);
+  expect(layout).toMatchObject({ header: 0, footer: 0, panelWidth: 0, panelHeight: 280 });
+  expect(layout.insets).toEqual({ left: 0, top: 0, right: 0, bottom: 280 });
+  expect(layout.contentRect).toEqual({ x: 0, y: 0, width: 700, height: 620 });
+});

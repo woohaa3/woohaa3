@@ -7,6 +7,7 @@
  */
 import { RESIZE_HANDLE_SIZE } from "../domain/index.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "../domain/core/composite-asset-identity.js";
+import { estimateNodeActionTextWidth } from "./node-action-toolbar.js";
 export { effectiveCanvasNodeSize, minimumNodeSizeFor } from "../node-dimensions.js";
 
 /** 参考实现的 palette kind（决定 Bevy 中的配色与图标）。 */
@@ -112,12 +113,48 @@ export const NODE_HISTORY_ACTION_SIZE = 28;
  */
 export const EDGE_DELETE_BUTTON_SIZE = 18;
 
-/** 连线标签胶囊宽度（世界坐标，与 Bevy 标签背景同宽）。 */
-export const EDGE_LABEL_WIDTH = 104;
+/**
+ * 连线标签胶囊**最大**宽度（世界坐标）。
+ *
+ * 实际宽度按文本内容收缩（`edgeLabelWidth`）。固定 104px 会把两个字的标签画成八个字宽，
+ * 并把删除按钮推到远离曲线的地方（修复：标签过宽导致删除按钮点不到）。
+ */
+export const EDGE_LABEL_MAX_WIDTH = 104;
 /** 连线标签胶囊高度（世界坐标，与 Bevy 标签背景同高）。 */
 export const EDGE_LABEL_HEIGHT = 24;
+/** 连线标签字号（世界坐标），与 Bevy `EDGE_LABEL_FONT` 一致。 */
+export const EDGE_LABEL_FONT = 11;
+/** 连线标签胶囊左右内边距（世界坐标），与 Bevy `EDGE_LABEL_PADDING` 一致。 */
+export const EDGE_LABEL_PADDING = 8;
 /** 标签与删除按钮之间的间隙（世界坐标）。 */
 export const EDGE_DELETE_BUTTON_GAP = 4;
+
+/**
+ * 连线标签胶囊宽度（世界坐标）：按文本内容收缩，超长文本封顶到 `EDGE_LABEL_MAX_WIDTH`。
+ *
+ * 与 Rust `edge_label_width` 同一启发式；空标签返回 0（按钮居中于连线中点）。
+ */
+export function edgeLabelWidth(label: string): number {
+  if (!label) return 0;
+  return Math.min(estimateNodeActionTextWidth(label, EDGE_LABEL_FONT) + EDGE_LABEL_PADDING * 2, EDGE_LABEL_MAX_WIDTH);
+}
+
+/**
+ * 删除按钮的命中外扩（世界坐标，修复：删除按钮悬停丢失）。
+ *
+ * 18px 的按钮本身偏小，且按钮与标签之间还有 `EDGE_DELETE_BUTTON_GAP` 的空隙；外扩后命中区
+ * 与标签右缘相接，指针从标签走到按钮时不会落进「既不在标签、也不在按钮」的死区。
+ */
+export const EDGE_DELETE_HIT_PADDING = 4;
+
+/**
+ * 悬停连线时「线体 → 标签 → 删除按钮」连续命中区的外扩（世界坐标，
+ * 修复：删除按钮悬停丢失）。
+ *
+ * 有标签时按钮排在标签胶囊右侧，而连线曲线只从标签中间穿过；只按曲线距离判定命中时，
+ * 指针离开线体、还没进入按钮的那段路（整个标签与间隙）会清空悬停，按钮随即消失。
+ */
+export const EDGE_HOVER_BRIDGE_PADDING = 8;
 
 /** 连线中点（两端口的算术中点，与 Bevy 现有边标签定位共用同一公式）。 */
 function edgeMidpoint(
@@ -135,16 +172,18 @@ function edgeMidpoint(
  * 与 Bevy 绘制共用 `EDGE_DELETE_BUTTON_SIZE` / `EDGE_LABEL_*` 常量，命中判定与绘制用同一
  * 函数，保证「画在哪、点在哪」一致。
  *
- * `hasLabel` 为 true 时按钮排在标签胶囊**右侧**（避免盖住标签）；否则居中于连线中点。
+ * `label` 非空时按钮排在**按内容收缩**的标签胶囊右侧（避免盖住标签，也避免固定宽度把
+ * 按钮推远）；否则居中于连线中点。
  */
 export function bevyEdgeDeleteRect(
   source: { x: number; y: number; width: number; height: number },
   target: { x: number; y: number; width: number; height: number },
-  hasLabel = false
+  label = ""
 ): { x: number; y: number; width: number; height: number } {
   const center = edgeMidpoint(source, target);
-  const centerX = hasLabel
-    ? center.x + EDGE_LABEL_WIDTH / 2 + EDGE_DELETE_BUTTON_GAP + EDGE_DELETE_BUTTON_SIZE / 2
+  const labelWidth = edgeLabelWidth(label);
+  const centerX = labelWidth > 0
+    ? center.x + labelWidth / 2 + EDGE_DELETE_BUTTON_GAP + EDGE_DELETE_BUTTON_SIZE / 2
     : center.x;
   return {
     x: centerX - EDGE_DELETE_BUTTON_SIZE / 2,
@@ -152,6 +191,63 @@ export function bevyEdgeDeleteRect(
     width: EDGE_DELETE_BUTTON_SIZE,
     height: EDGE_DELETE_BUTTON_SIZE
   };
+}
+
+/**
+ * 连线删除按钮的**命中**矩形（世界坐标，修复：删除按钮悬停丢失）。
+ *
+ * 视觉仍按 `bevyEdgeDeleteRect` 绘制 18px 圆钮，命中区外扩 `EDGE_DELETE_HIT_PADDING`，
+ * 在低缩放下也留出可点击余量，并补上按钮与标签胶囊之间的间隙。
+ */
+export function bevyEdgeDeleteHitRect(
+  source: { x: number; y: number; width: number; height: number },
+  target: { x: number; y: number; width: number; height: number },
+  label = ""
+): { x: number; y: number; width: number; height: number } {
+  const rect = bevyEdgeDeleteRect(source, target, label);
+  return {
+    x: rect.x - EDGE_DELETE_HIT_PADDING,
+    y: rect.y - EDGE_DELETE_HIT_PADDING,
+    width: rect.width + EDGE_DELETE_HIT_PADDING * 2,
+    height: rect.height + EDGE_DELETE_HIT_PADDING * 2
+  };
+}
+
+/** 连线标签胶囊矩形（世界坐标，与 Bevy 标签背景同几何；宽度按内容收缩）。 */
+export function bevyEdgeLabelRect(
+  source: { x: number; y: number; width: number; height: number },
+  target: { x: number; y: number; width: number; height: number },
+  label = ""
+): { x: number; y: number; width: number; height: number } {
+  const center = edgeMidpoint(source, target);
+  const width = edgeLabelWidth(label);
+  return {
+    x: center.x - width / 2,
+    y: center.y - EDGE_LABEL_HEIGHT / 2,
+    width,
+    height: EDGE_LABEL_HEIGHT
+  };
+}
+
+/**
+ * 悬停连线时维持悬停的连续命中区（世界坐标，修复：删除按钮悬停丢失）。
+ *
+ * 覆盖标签胶囊与删除按钮（含两者外扩），使指针从线体经标签走到按钮时悬停不丢失。
+ * 该区域只维持悬停，点击不删除；删除仍只由 `bevyEdgeDeleteHitRect` 触发。
+ */
+export function bevyEdgeHoverBridgeRect(
+  source: { x: number; y: number; width: number; height: number },
+  target: { x: number; y: number; width: number; height: number },
+  label = ""
+): { x: number; y: number; width: number; height: number } {
+  const button = bevyEdgeDeleteHitRect(source, target, label);
+  const labelRect = bevyEdgeLabelRect(source, target, label);
+  if (labelRect.width <= 0) return button;
+  const left = Math.min(labelRect.x, button.x) - EDGE_HOVER_BRIDGE_PADDING;
+  const top = Math.min(labelRect.y, button.y) - EDGE_HOVER_BRIDGE_PADDING;
+  const right = Math.max(labelRect.x + labelRect.width, button.x + button.width) + EDGE_HOVER_BRIDGE_PADDING;
+  const bottom = Math.max(labelRect.y + labelRect.height, button.y + button.height) + EDGE_HOVER_BRIDGE_PADDING;
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 /**

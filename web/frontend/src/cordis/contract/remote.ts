@@ -21,6 +21,7 @@ import type {
   FilmSetConversionReceipt,
   FilmSetConversionRequest,
   FilmSetConversionStatus,
+  MergeNodeHistoryReceipt,
   NodeGenerationHistoryDetail,
   NodeGenerationHistoryListPage,
   PromptSnippet,
@@ -114,6 +115,21 @@ export interface CanvasRemoteService {
    * 未结算编辑会话时以 `conflict` 拒绝。
    */
   clearNodeHistory(input: { canvasId: string; nodeId: string }): Promise<NodeHistoryResult<{ removed: number }>>;
+  /**
+   * 同类型节点合并到目标节点（不可撤销的原子写操作）
+   * （change: 2026-10-27-merge-same-type-node-history，任务 2.5 / design D4、D7）。
+   *
+   * `operationId` 由调用方在打开确认框时生成，确认与重试复用同一个；服务端据此幂等，
+   * 响应丢失后重试返回首次回执（`alreadyMerged: true`）。
+   */
+  mergeNodeHistory(input: {
+    canvasId: string;
+    targetNodeId: string;
+    sourceNodeId: string;
+    operationId: string;
+    expectedSourceCurrentIdentity?: string;
+    expectedTargetCurrentIdentity?: string;
+  }): Promise<NodeHistoryResult<MergeNodeHistoryReceipt>>;
   /** 受控预览 URL（模型缩略图 / 媒体预览 / 视频海报）；只返回同源受控地址。 */
   nodeHistoryPreviewUrl(input: { canvasId: string; nodeId: string; entryId: string; variant: "preview" | "poster" | "thumbnail" }): string;
   /**

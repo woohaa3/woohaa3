@@ -1,0 +1,31 @@
+/**
+ * 合并目标高亮样式（change: 2026-10-27-merge-same-type-node-history，任务 2.3 / design D2）。
+ *
+ * 只存在于浏览器 DOM：覆盖层不接收指针事件，颜色沿用画布交互强调色与状态令牌。
+ */
+.node-merge-overlays {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.node-merge-overlay {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 2px solid var(--app-interaction-accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-interaction-accent-soft) 82%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.node-merge-overlay-label {
+  color: var(--app-web-text-primary);
+  font: 600 14px / 1.5 var(--app-font);
+  text-align: center;
+}

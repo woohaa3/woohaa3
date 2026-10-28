@@ -170,4 +170,15 @@ describe("进程内 authoring 适配器", () => {
     for (let index = 0; index < 60; index += 1) expect(registry.authorize(call)).toEqual({ ok: true });
   });
 
+  it("camera 模式已停用，不再签发新的目标授权", async () => {
+    await expect(createInProcessAuthoringServices({ canvas: fakeCanvas() }).tools.issue({
+      delegation: DELEGATION,
+      workId: "camera-deprecated",
+      canvasId: "cv",
+      nodeId: "n",
+      mode: "camera",
+      tools: ["get_film_set_clips"]
+    })).rejects.toThrow("camera-mode-deprecated");
+  });
+
 });

@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, decideAppPathMount, type ServerCanvas } from "@woohaa3/contracts";
 import { InMemoryNodeHistoryRepository } from "../storage/core/in-memory-node-history-repository.js";
 import { NodeHistoryApplicationService } from "../storage/core/node-history-service.js";
-import { createNodeHistoryRequestHandler, DEFAULT_NODE_HISTORY_API_BASE_PATH } from "./node-history-api.js";
+import { createNodeHistoryRequestHandler, DEFAULT_NODE_HISTORY_API_BASE_PATH, type NodeHistoryRequestHandlerOptions } from "./node-history-api.js";
 import type { CanvasRoom } from "../sync/index.js";
 
 const NOW = "2026-09-27T00:00:00.000Z";
@@ -23,17 +23,56 @@ afterEach(async () => {
 
 function fakeRoom(canvas: ServerCanvas): CanvasRoom & { canvas: ServerCanvas } {
   let current = canvas;
+  // durable 回执（与真实 room 的幂等语义一致）：合并的重试依赖 submissionHash。
+  const records = new Map<string, { revision: number; modelBatch?: { submissionHash: string } }>();
+  type Applied = { ok: true; revision: number } | { ok: false; code: string; message: string };
+  const apply = async (
+    commandId: string,
+    commands: readonly unknown[],
+    modelBatch?: { submissionHash: string }
+  ): Promise<Applied> => {
+    const { applyCanvasCommands } = await import("@woohaa3/contracts");
+    const applied = applyCanvasCommands(current, commands as never, { now: NOW });
+    if (!applied.ok) return { ok: false, code: applied.rejection.code, message: applied.rejection.message };
+    current = { ...applied.canvas, revision: current.revision + 1 };
+    records.set(commandId, { revision: current.revision, ...(modelBatch ? { modelBatch } : {}) });
+    return { ok: true, revision: current.revision };
+  };
   return {
     get canvas() {
       return current;
     },
     exportCanvas: () => ({ ok: true as const, canvas: current }),
-    async submit(batch: { commands: readonly unknown[] }) {
-      const { applyCanvasCommands } = await import("@woohaa3/contracts");
-      const applied = applyCanvasCommands(current, batch.commands as never, { now: NOW });
-      if (!applied.ok) return { ok: false as const, status: "rejected" as const, commandId: "x", code: applied.rejection.code, message: applied.rejection.message };
-      current = { ...applied.canvas, revision: current.revision + 1 };
-      return { ok: true as const, status: "accepted" as const, commandId: "x", revision: current.revision, noop: false, update: null };
+    async lookupCommand(commandId: string) {
+      return records.get(commandId) ?? null;
+    },
+    async submitDerived(input: {
+      commandId: string;
+      expectedModelBatchHash?: string;
+      derive: (canvas: ServerCanvas) => Promise<unknown> | unknown;
+    }) {
+      const prior = records.get(input.commandId);
+      if (prior) {
+        if (input.expectedModelBatchHash !== undefined
+          && prior.modelBatch?.submissionHash !== input.expectedModelBatchHash) {
+          return { ok: false as const, code: "request-id-reused", message: "相同操作身份使用了不同参数" };
+        }
+        return { ok: true as const, status: "duplicate" as const, revision: prior.revision, noop: true };
+      }
+      const derived = (await input.derive(current)) as
+        | { ok: true; batch: { commands: readonly unknown[] }; modelBatch?: { submissionHash: string } }
+        | { ok: false; code: string; message: string };
+      if (!derived.ok) return derived;
+      const applied = await apply(input.commandId, derived.batch.commands, derived.modelBatch);
+      if (!applied.ok) return { ok: false as const, code: applied.code, message: applied.message };
+      return { ok: true as const, status: "accepted" as const, revision: applied.revision, noop: false };
+    },
+    async submit(batch: { commandId: string; commands: readonly unknown[] }) {
+      const prior = records.get(batch.commandId);
+      if (prior) return { ok: true as const, status: "duplicate" as const, commandId: batch.commandId, revision: prior.revision, noop: true, update: null };
+      const applied = await apply(batch.commandId, batch.commands);
+      if (!applied.ok) return { ok: false as const, status: "rejected" as const, commandId: batch.commandId, code: applied.code, message: applied.message };
+      return { ok: true as const, status: "accepted" as const, commandId: batch.commandId, revision: applied.revision, noop: false, update: null };
     }
   } as unknown as CanvasRoom & { canvas: ServerCanvas };
 }
@@ -48,7 +87,26 @@ function canvasWithNode(type: string, data: Record<string, unknown> = {}): Serve
   };
 }
 
-async function start(canvas: ServerCanvas): Promise<{
+function canvasWithTwoTextNodes(sourceType = "text", targetType = "text"): ServerCanvas {
+  const base = createEmptyWoohaa3ServerCanvas(CANVAS, NOW);
+  return {
+    ...base,
+    revision: 1,
+    document: {
+      ...base.document,
+      nodes: [
+        { id: "source", type: sourceType, position: { x: 0, y: 0 }, width: 196, height: 64 },
+        { id: "target", type: targetType, position: { x: 300, y: 0 }, width: 196, height: 64 }
+      ]
+    },
+    nodeData: {
+      source: { title: "来源", result: { kind: "text", text: "source-current" } },
+      target: { title: "目标", result: { kind: "text", text: "target-current" } }
+    }
+  } as ServerCanvas;
+}
+
+async function start(canvas: ServerCanvas, overrides: Partial<NodeHistoryRequestHandlerOptions> = {}): Promise<{
   base: string;
   service: NodeHistoryApplicationService;
   room: CanvasRoom & { canvas: ServerCanvas };
@@ -58,7 +116,8 @@ async function start(canvas: ServerCanvas): Promise<{
   const service = new NodeHistoryApplicationService({ repository, resolveRoom: async () => room });
   const handler = createNodeHistoryRequestHandler({
     service,
-    canvasExists: async (canvasId) => canvasId === CANVAS
+    canvasExists: async (canvasId) => canvasId === CANVAS,
+    ...overrides
   });
   const server = http.createServer((req, res) => {
     void handler(req, res).then((handled) => {
@@ -321,6 +380,126 @@ describe("节点历史 HTTP API", () => {
       expect(unknownCanvas.status).toBe(404);
       const unknownNode = await fetch(`${base}${DEFAULT_NODE_HISTORY_API_BASE_PATH}/${CANVAS}/missing/clear`, { method: "POST" });
       expect(unknownNode.status).toBe(404);
+    });
+  });
+
+  describe("同类型节点合并", () => {
+    const mergePath = `${DEFAULT_NODE_HISTORY_API_BASE_PATH}/${CANVAS}/target/merge`;
+
+    async function seedSource(service: NodeHistoryApplicationService) {
+      await service.registerTaskResult({
+        canvasId: CANVAS, nodeId: "source", runId: "run-s", kind: "text", createdAt: NOW,
+        output: { mediaKind: "text", text: "source-current" }
+      });
+    }
+
+    it("POST merge 复制来源历史、切换目标内容并删除来源节点", async () => {
+      const { base, service, room } = await start(canvasWithTwoTextNodes());
+      await seedSource(service);
+      const response = await fetch(`${base}${mergePath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceNodeId: "source", operationId: "op-route-1" })
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true, targetNodeId: "target", sourceNodeId: "source",
+        copied: 1, duplicates: 0, evicted: 0, alreadyMerged: false
+      });
+      // 画布：来源删除、目标承载来源当前版本。
+      expect(room.canvas.document.nodes.map((node) => node.id)).toEqual(["target"]);
+      expect((room.canvas.nodeData.target as { result: { text: string } }).result.text).toBe("source-current");
+      // 历史：来源清空，目标含来源条目。
+      const targetList = (await (await fetch(`${base}${DEFAULT_NODE_HISTORY_API_BASE_PATH}/${CANVAS}/target`)).json()) as {
+        items: Array<{ entryId: string }>;
+      };
+      expect(targetList.items.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("同一 operationId 重试返回首次回执", async () => {
+      const { base, service } = await start(canvasWithTwoTextNodes());
+      await seedSource(service);
+      const body = JSON.stringify({ sourceNodeId: "source", operationId: "op-route-retry" });
+      const first = await fetch(`${base}${mergePath}`, { method: "POST", body });
+      expect(first.status).toBe(200);
+      const retry = await fetch(`${base}${mergePath}`, { method: "POST", body });
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toMatchObject({ ok: true, alreadyMerged: true, copied: 0 });
+    });
+
+    it("写权限被拒绝时不读取或写入任何状态", async () => {
+      const { base, service, room } = await start(canvasWithTwoTextNodes(), {
+        authorizeWrite: async () => ({ ok: false, status: 403, code: "FORBIDDEN", message: "无权修改该画布" })
+      });
+      await seedSource(service);
+      const response = await fetch(`${base}${mergePath}`, {
+        method: "POST",
+        body: JSON.stringify({ sourceNodeId: "source", operationId: "op-route-denied" })
+      });
+      expect(response.status).toBe(403);
+      expect((await response.json()).code).toBe("FORBIDDEN");
+      expect(room.canvas.document.nodes.map((node) => node.id).sort()).toEqual(["source", "target"]);
+      expect((await service.list({ canvasId: CANVAS, nodeId: "source" })).items).toHaveLength(1);
+    });
+
+    it("类型不同返回 400", async () => {
+      const { base } = await start(canvasWithTwoTextNodes("image"));
+      const response = await fetch(`${base}${mergePath}`, {
+        method: "POST",
+        body: JSON.stringify({ sourceNodeId: "source", operationId: "op-route-type" })
+      });
+      expect(response.status).toBe(400);
+      expect((await response.json()).code).toBe("NODE_HISTORY_INVALID");
+    });
+
+    it("类型不匹配或并发修改返回 409", async () => {
+      const { base, service } = await start(canvasWithTwoTextNodes());
+      await seedSource(service);
+      const response = await fetch(`${base}${mergePath}`, {
+        method: "POST",
+        body: JSON.stringify({
+          sourceNodeId: "source", operationId: "op-route-conflict",
+          expectedSourceCurrentIdentity: "text:stale"
+        })
+      });
+      expect(response.status).toBe(409);
+      expect((await response.json()).code).toBe("NODE_HISTORY_CONFLICT");
+    });
+
+    it("来源没有当前版本时返回 409 且不复制历史", async () => {
+      const { base, service } = await start(canvasWithTwoTextNodes());
+      const response = await fetch(`${base}${mergePath}`, {
+        method: "POST",
+        body: JSON.stringify({ sourceNodeId: "source", operationId: "op-route-unrecoverable" })
+      });
+      expect(response.status).toBe(409);
+      expect((await response.json()).code).toBe("NODE_HISTORY_UNRECOVERABLE");
+      expect((await service.list({ canvasId: CANVAS, nodeId: "target" })).items).toHaveLength(0);
+    });
+
+    it("缺 body 或非法 JSON 返回 400 且不写历史", async () => {
+      const { base, service } = await start(canvasWithTwoTextNodes());
+      await seedSource(service);
+      const missing = await fetch(`${base}${mergePath}`, { method: "POST" });
+      expect(missing.status).toBe(400);
+      const malformed = await fetch(`${base}${mergePath}`, { method: "POST", body: "{not-json" });
+      expect(malformed.status).toBe(400);
+      expect((await service.list({ canvasId: CANVAS, nodeId: "target" })).items).toHaveLength(0);
+    });
+
+    it("非 POST 返回 405", async () => {
+      const { base } = await start(canvasWithTwoTextNodes());
+      expect((await fetch(`${base}${mergePath}`)).status).toBe(405);
+    });
+
+    it("未知画布返回稳定 not-found", async () => {
+      const { base } = await start(canvasWithTwoTextNodes());
+      const response = await fetch(`${base}${DEFAULT_NODE_HISTORY_API_BASE_PATH}/other/target/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceNodeId: "source", operationId: "op-route-other" })
+      });
+      expect(response.status).toBe(404);
+      expect((await response.json()).code).toBe("NODE_HISTORY_NOT_FOUND");
     });
   });
 });

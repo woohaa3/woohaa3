@@ -11,6 +11,7 @@ import {
   nodeHistoryEntryBytes,
   type NodeHistoryCanvasStats,
   type NodeHistoryIndexRow,
+  type NodeHistoryInsertManyResult,
   type NodeHistoryInsertResult,
   type NodeHistoryCanvasListInput,
   type NodeHistoryListInput,
@@ -29,6 +30,32 @@ export class InMemoryNodeHistoryRepository implements NodeHistoryRepository {
     byCanvas.set(entry.entryId, clone(entry));
     this.entries.set(entry.canvasId, byCanvas);
     return { status: "inserted", entry: clone(entry) };
+  }
+
+  /**
+   * 单事务批量幂等登记（内存实现与 SQLite 同一语义）。
+   *
+   * 先完成全部判定与克隆，再一次性提交；中途异常不会留下部分插入。
+   */
+  async insertMany(entries: readonly NodeGenerationHistoryEntry[]): Promise<NodeHistoryInsertManyResult> {
+    const insertedIds: string[] = [];
+    const duplicateIds: string[] = [];
+    const pending = new Map<string, Map<string, NodeGenerationHistoryEntry>>();
+    for (const entry of entries) {
+      const byCanvas = pending.get(entry.canvasId) ?? new Map(this.entries.get(entry.canvasId) ?? []);
+      if (byCanvas.has(entry.entryId)) {
+        duplicateIds.push(entry.entryId);
+        continue;
+      }
+      // 克隆在此抛错（不可序列化 payload）时整个批次不提交。
+      byCanvas.set(entry.entryId, clone(entry));
+      pending.set(entry.canvasId, byCanvas);
+      insertedIds.push(entry.entryId);
+    }
+    for (const [canvasId, byCanvas] of pending) {
+      this.entries.set(canvasId, byCanvas);
+    }
+    return { insertedIds, duplicateIds };
   }
 
   async get(canvasId: string, nodeId: string, entryId: string): Promise<NodeGenerationHistoryEntry | null> {

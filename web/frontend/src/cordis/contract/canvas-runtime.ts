@@ -67,7 +67,7 @@ export interface CanvasRuntimeService {
    * 节点顶部操作横条据此锚定，不持久化横条位置、不建第二相机。
    */
   nodeScreenRect(nodeId: string): import("@woohaa3/contracts").ScreenRect | null;
-  /** Accepted renderer presentation bounds when a model/composite scope exceeds its card. */
+  /** Accepted renderer presentation bounds, including collapse, ancestor drag previews and composite scopes. Hidden nodes return null. */
   nodePresentationScreenRect?(nodeId: string): import("@woohaa3/contracts").ScreenRect | null;
   /**
    * 上传中导入的幽灵节点（只渲染、不进规范状态；change: add-paste-import-workflows，design D7）。

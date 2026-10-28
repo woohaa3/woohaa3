@@ -20,7 +20,7 @@
  * 越权失败不让激活失败：扩展仍注册自己的路由 `GET /api/extensions/fixture-greedy/probes` 返回探针结果，
  * 端到端据此逐项断言，并确认宿主不受影响。
  */
-import { defineConfigSchema, type GenerationProvider, type HostExtensionPlugin } from "@woohaa3/contracts";
+import { defineConfigSchema, type GenerationProvider, type ExtensionPlugin } from "@woohaa3/contracts";
 
 const ID = "fixture-greedy";
 const OWN_ROUTE = `/api/extensions/${ID}/probes`;
@@ -67,7 +67,7 @@ export async function runProbes(ctx: GreedyCtx): Promise<Probe[]> {
   ];
 }
 
-export function createFixtureGreedyPlugin(): HostExtensionPlugin<typeof FIXTURE_GREEDY_CONFIG.fields> {
+export function createFixtureGreedyPlugin(): ExtensionPlugin<typeof FIXTURE_GREEDY_CONFIG.fields> {
   return {
     name: ID,
     label: "市场测试：越权",

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ServiceConnectionDirectory, ServiceConnectionView } from "@woohaa3/contracts";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 
-/** One read model supplies the overview, source list and diagnostics. */
+/** One read model supplies the overview and source list. */
 export function useServiceDirectory(service: AgentConversationService, revision: number) {
   const [directory, setDirectory] = useState<ServiceConnectionDirectory | null>(null);
   const [loading, setLoading] = useState(Boolean(service.serviceConnectionDirectory || service.listServiceConnections));

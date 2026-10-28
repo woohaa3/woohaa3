@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
-import { defineConfigSchema, type HostExtensionPlugin } from "@woohaa3/contracts";
+import { defineConfigSchema, type ExtensionPlugin } from "@woohaa3/contracts";
 import { createSettingsService, type SettingsService } from "../../settings/settings-service.js";
 import { loadBaseLayer } from "../base/index.js";
 import type { HostContext } from "../context.js";
@@ -18,7 +18,7 @@ const SAMPLE_CONFIG = defineConfigSchema({
 
 type Start = { baseUrl: string; apiKey: string | undefined };
 
-function samplePlugin(starts: Start[], name = "sample"): HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> {
+function samplePlugin(starts: Start[], name = "sample"): ExtensionPlugin<typeof SAMPLE_CONFIG.fields> {
   return {
     name,
     label: "样例",
@@ -54,7 +54,7 @@ async function setup(config = "") {
   cleanups.push(async () => {
     for (const fiber of base.reverse()) await fiber.dispose();
   });
-  const load = async (plugins: HostExtensionPlugin<typeof SAMPLE_CONFIG.fields>[]) => {
+  const load = async (plugins: ExtensionPlugin<typeof SAMPLE_CONFIG.fields>[]) => {
     const loaded: LoadedExtension[] = await loadExtensionLayer(ctx, plugins);
     cleanups.push(async () => {
       for (const extension of loaded.reverse()) await extension.dispose();
@@ -216,10 +216,45 @@ describe("扩展层装载器", () => {
     expect(siteGate.definitions[0]!.health?.()).toBeUndefined();
     await activation?.dispose?.();
   });
+
+  it("hostPlugin 通过 ctx.webServer 注册受控路由，路由按 extensionId 命名空间隔离", async () => {
+    // 概念对齐：web 路由是**公共基础设施**（与 ctx.generation / ctx.storage 同级），
+    // 不是 backend 类插件的专属特权。注册的 route 只写相对路径，前缀由宿主添加。
+    const { ctx, load } = await setup();
+    const siteGate = createSiteGate(["sample"]);
+    const registered: Array<{ kind: string; route: string }> = [];
+    const pluginContextFor = (extensionId: string) => ({
+      webServer: {
+        register: (registration: { route: string }) => registered.push({ kind: "json", route: `${extensionId}/${registration.route}` }),
+        registerHttp: (registration: { route: string }) => registered.push({ kind: "http", route: `${extensionId}/${registration.route}` }),
+        registerRawHttp: (registration: { route: string }) => registered.push({ kind: "raw", route: `${extensionId}/${registration.route}` })
+      },
+      release: () => undefined
+    });
+    ctx.provide("application", { siteGate, service: { host: () => ({ pluginContextFor }) } } as never);
+
+    const plugin: ExtensionPlugin<typeof SAMPLE_CONFIG.fields> = {
+      ...samplePlugin([]),
+      apply(pluginCtx) {
+        pluginCtx.webServer!.register({ route: "status", auth: "public", handle: () => ({ body: {} }) });
+        pluginCtx.webServer!.registerRawHttp({ route: "auth/callback", method: "GET", auth: "public", purpose: "read", handle: async () => undefined });
+      }
+    };
+    await load([plugin]);
+    const definition = siteGate.definitions[0]!;
+    const activation = await definition.activate({} as never);
+
+    expect(registered).toEqual([
+      { kind: "json", route: "sample/status" },
+      { kind: "raw", route: "sample/auth/callback" }
+    ]);
+    await activation?.dispose?.();
+  });
+
 });
 
 describe("扩展层装载时限与就绪（D4/D5）", () => {
-  const hangingPlugin = (name: string, gate: Promise<void>, applied: string[]): HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> => ({
+  const hangingPlugin = (name: string, gate: Promise<void>, applied: string[]): ExtensionPlugin<typeof SAMPLE_CONFIG.fields> => ({
     ...samplePlugin([], name),
     async apply() {
       await gate;
@@ -268,7 +303,7 @@ describe("扩展层装载时限与就绪（D4/D5）", () => {
     const { ctx, events, load } = await setup("extensions:\n  disposeTimeoutMs: 1000\n");
     const siteGate = createSiteGate(["stuck"]);
     ctx.provide("application", { siteGate } as never);
-    const plugin: HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> = {
+    const plugin: ExtensionPlugin<typeof SAMPLE_CONFIG.fields> = {
       ...samplePlugin([], "stuck"),
       apply(pluginCtx) {
         pluginCtx.effect(() => () => new Promise<void>(() => undefined));
@@ -295,7 +330,7 @@ describe("扩展层插件的 ctx.marketplace（change: 2026-10-21-add-extension-
     }
   });
 
-  async function withMarketplace(plugins: Array<HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> & { origin?: { managed: boolean; rootWritable: boolean } }>) {
+  async function withMarketplace(plugins: Array<ExtensionPlugin<typeof SAMPLE_CONFIG.fields> & { origin?: { managed: boolean; rootWritable: boolean } }>) {
     const { ctx } = await setup();
     const registry = createMarketplaceRegistry();
     ctx.provide("marketplace", registry);
@@ -314,7 +349,7 @@ describe("扩展层插件的 ctx.marketplace（change: 2026-10-21-add-extension-
     apply(ctx: { marketplace: { register(source: unknown): () => void }; effect(fn: () => () => void): void }) {
       ctx.effect(() => ctx.marketplace.register(sourceFor(name)));
     }
-  }) as unknown as HostExtensionPlugin<typeof SAMPLE_CONFIG.fields> & { origin?: { managed: boolean; rootWritable: boolean } };
+  }) as unknown as ExtensionPlugin<typeof SAMPLE_CONFIG.fields> & { origin?: { managed: boolean; rootWritable: boolean } };
 
   it("内置根插件能注册来源；受管根 / 缺少 origin 的插件注册被拒绝（插件启动失败，来源不出现）", async () => {
     const registry = await withMarketplace([

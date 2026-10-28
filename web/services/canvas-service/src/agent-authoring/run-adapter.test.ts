@@ -102,6 +102,43 @@ describe("run 执行与取消（任务 6.2 / 6.4）", () => {
     expect(await noModel.run({ canvasId: "c1", requestId: "req-1", nodeId: "img-1" })).toMatchObject({ ok: false, code: "model-required" });
   });
 
+  it("run 省略 modelKey 时使用任务目录默认媒体模型，目录不可用时如实失败", async () => {
+    const calls: unknown[] = [];
+    const adapter = new AgentRunAdapter({
+      resolveRoom: async () => roomFor(canvas()),
+      resolveCatalog: async () => ({
+        available: true,
+        defaultModels: { image: "p:img-default" },
+        models: [{
+          modelKey: "p:img-default",
+          providerId: "p",
+          providerModelId: "img-default",
+          modelType: "image",
+          title: "Image",
+          interaction: { id: "generic-model", version: 1 },
+          inputSchema: {},
+          defaultInput: {},
+          bindings: [],
+          taskTimeoutMs: 1000
+        }]
+      }),
+      runService: {
+        run: async (request) => { calls.push(request); return { ok: true, runId: request.runId, jobId: request.jobId, workerTaskKey: "k", state: "accepted" }; },
+        cancel: async () => ({ ok: false, code: "x", message: "x" })
+      }
+    });
+    expect(await adapter.run({ canvasId: "c1", requestId: "req-1", nodeId: "img-1" })).toMatchObject({ ok: true });
+    expect((calls[0] as { modelKey: string }).modelKey).toBe("p:img-default");
+
+    const noCatalog = new AgentRunAdapter({
+      resolveRoom: async () => roomFor(canvas()),
+      resolveCatalog: async () => ({ available: false, reason: "没有可用模型", models: [], defaultModels: {} }),
+      runService: { run: async () => ({ ok: true, runId: "r", jobId: "j", workerTaskKey: "k", state: "accepted" }), cancel: async () => ({ ok: false, code: "x", message: "x" }) }
+    });
+    expect(await noCatalog.run({ canvasId: "c1", requestId: "req-1", nodeId: "img-1" }))
+      .toMatchObject({ ok: false, code: "catalog-unavailable", retryable: true });
+  });
+
   it("cancel 对已终态 run 返回 already-terminal 且不调用 cancel", async () => {
     let cancelCalled = false;
     const adapter = new AgentRunAdapter({

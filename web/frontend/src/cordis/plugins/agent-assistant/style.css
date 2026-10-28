@@ -36,9 +36,6 @@
 .agent-assistant__state::before { content: ""; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
 .agent-assistant__state[data-tone="warning"] { color: var(--app-status-warning); }
 .agent-assistant__state[data-tone="success"] { color: var(--app-status-success); }
-.agent-assistant__attention { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 10px 16px; border: 1px solid var(--app-status-warning-soft); border-radius: 12px; background: var(--app-status-warning-background); color: var(--app-status-warning); font-size: 12px; }
-.agent-assistant__attention > strong { color: var(--app-web-text-primary); }
-.agent-assistant__attention > .ui-button { margin-left: auto; }
 .agent-assistant__empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
 .agent-assistant__empty--service { min-height: 280px; padding: 36px 28px; border: 1px dashed var(--app-web-border-strong); border-radius: 12px; background: var(--app-web-panel); text-align: center; }
 .agent-assistant__empty--service h3 { font-size: 17px; }
@@ -83,11 +80,8 @@
 .agent-assistant__source-summary dt { color: var(--assistant-secondary); font-size: 11px; }
 .agent-assistant__source-summary dd { margin: 3px 0 0; font-size: 12px; }
 .agent-assistant__source-summary > p { font-size: 12px; }
-.agent-assistant__diagnostics { margin-top: 24px; font-size: 12px; color: var(--assistant-secondary); }
 .agent-assistant summary { cursor: pointer; padding: 12px 0; }
 .agent-assistant code { display: block; overflow-wrap: anywhere; margin: 12px 0; padding: 12px; border-radius: 8px; background: var(--app-web-subtle); color: var(--assistant-secondary); font-size: 11px; }
-.agent-assistant__diagnostics dl { display: grid; gap: 12px; margin: 12px 0; }
-.agent-assistant__diagnostics dl > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 16px; }
 .agent-assistant dd { margin: 0; color: var(--app-web-text-primary); overflow-wrap: anywhere; }
 .agent-assistant__local-configuration .settings-section { margin: 0; padding: 0; border: 0; }
 .agent-assistant__local-configuration .settings-section__header { justify-content: flex-end; margin-bottom: 12px; }
@@ -102,16 +96,6 @@
 .agent-assistant td { padding: 12px 14px; border-top: 1px solid var(--app-web-border); font-size: 12px; }
 .agent-assistant td strong { font-size: 12px; font-weight: 600; }
 .agent-assistant td small { display: block; max-width: 280px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--assistant-secondary); font-size: 10px; }
-.agent-assistant__evidence { white-space: nowrap; font-size: 11px; color: var(--assistant-secondary); }
-.agent-assistant__evidence[data-state="ready"] { color: var(--app-status-success); }
-.agent-assistant__evidence[data-state="failed"], .agent-assistant__evidence[data-state="unavailable"] { color: var(--app-status-danger); }
-.agent-assistant__diagnostic-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 80px; align-items: center; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--app-web-border); font-size: 12px; }
-.agent-assistant__diagnostic-row:last-child { border-bottom: 0; }
-.agent-assistant__history-list { border: 1px solid var(--app-web-border); border-radius: 12px; background: var(--app-web-panel); overflow: hidden; }
-.agent-assistant__history-list > div { display: grid; grid-template-columns: minmax(0, 1fr) 68px 65px 100px; gap: 12px; align-items: center; padding: 14px; border-bottom: 1px solid var(--app-web-border); font-size: 11px; }
-.agent-assistant__history-list > div:last-child { border: 0; }
-.agent-assistant__history-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.agent-assistant__history-list time { color: var(--assistant-secondary); font-variant-numeric: tabular-nums; }
 .agent-assistant__mcp { display: flex; flex-direction: column; gap: 24px; }
 .agent-assistant__mcp h3 { margin-bottom: 8px; }
 .agent-assistant__mcp-field { min-width: 0; }

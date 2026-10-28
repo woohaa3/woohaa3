@@ -10,7 +10,7 @@ import type { FilmSetContent, FilmSetLocalTransform } from "../film-set-content.
 import { decodeFilmSetContent, FILM_SET_GROUND_DEFAULT_SIZE } from "../film-set-content.js";
 import { decodeFilmSetAnimations, emptyFilmSetAnimations, staticShotCameraMotion, type FilmSetAnimations } from "../film-set-animations.js";
 import { decodeInitialShotCamera, type InitialShotCamera } from "../canvas-node-model.js";
-import { SHOT_CAMERA_MAX_ELEVATION, SHOT_CAMERA_MIN_ELEVATION } from "../model-cameras.js";
+import { SHOT_CAMERA_DEFAULT_ELEVATION, SHOT_CAMERA_MAX_ELEVATION, SHOT_CAMERA_MIN_ELEVATION } from "../model-cameras.js";
 import { validateSelfContainedModel } from "../model-validity.js";
 import { isJsonObject, isFiniteNumber } from "../../validation.js";
 import type { ServerCanvas } from "../domain/types.js";
@@ -175,7 +175,7 @@ function cameraElevationIssue(camera: InitialShotCamera): string | undefined {
 function defaultConversionCamera(): InitialShotCamera {
   return {
     azimuth: 0,
-    elevation: Math.PI / 4,
+    elevation: SHOT_CAMERA_DEFAULT_ELEVATION,
     distance: 4,
     aspect: "16:9",
     focusOffset: { x: 0, y: 0, z: 0 }

@@ -8,7 +8,7 @@
  *
  * @vitest-environment node
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Context } from "@deepseek-ai/cordis";
 import type {
   CanvasGenerationHistoryListItem,
@@ -167,5 +167,57 @@ describe("history-adapters 预览引用挂载映射", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.items[0]?.preview).toEqual({ kind: "image", href: "data:image/png;base64,AAAA" });
+  });
+});
+
+describe("图片历史恢复门禁与 canonical 刷新接线", () => {
+  function applyCtx(state: "saved" | "unsaved" | "saving" | "error" | null, nodeId = "node-1") {
+    const applyNodeHistory = vi.fn(async () => ({ ok: true as const, value: { revision: 9 } }));
+    const refreshFromCanonical = vi.fn();
+    const setHistoryOverride = vi.fn();
+    const editor = state === null ? undefined : {
+      isActive: () => true,
+      nodeId: () => nodeId,
+      draftState: () => state,
+      setHistoryOverride,
+      refreshFromCanonical
+    };
+    const ctx = {
+      canvasSession: { isWritable: () => true },
+      get: (key: string) => key === "imageEdit" ? editor : undefined,
+      canvasRemote: { applyNodeHistory }
+    } as unknown as Context;
+    return { ctx, applyNodeHistory, refreshFromCanonical };
+  }
+
+  it("未保存草稿拒绝恢复且不提交 apply", async () => {
+    const { ctx, applyNodeHistory } = applyCtx("unsaved");
+    const result = await createRemoteClient(ctx).apply({ canvasId: "canvas-1", nodeId: "node-1", entryId: "entry-1" });
+    expect(result).toMatchObject({ ok: false, code: "unsaved-draft" });
+    expect(applyNodeHistory).not.toHaveBeenCalled();
+  });
+
+  it("无 provider 时按不可用降级：仍允许恢复，不等待扩展刷新", async () => {
+    const { ctx, applyNodeHistory, refreshFromCanonical } = applyCtx(null);
+    const result = await createRemoteClient(ctx).apply({ canvasId: "canvas-1", nodeId: "node-1", entryId: "entry-1" });
+    expect(result.ok).toBe(true);
+    expect(applyNodeHistory).toHaveBeenCalledOnce();
+    expect(refreshFromCanonical).not.toHaveBeenCalled();
+  });
+
+  it("保存后恢复成功把回执 revision 交给 imageEdit 刷新，且不重复 apply", async () => {
+    const { ctx, applyNodeHistory, refreshFromCanonical } = applyCtx("saved");
+    const result = await createRemoteClient(ctx).apply({ canvasId: "canvas-1", nodeId: "node-1", entryId: "entry-1" });
+    expect(result.ok).toBe(true);
+    expect(applyNodeHistory).toHaveBeenCalledOnce();
+    expect(refreshFromCanonical).toHaveBeenCalledWith(9);
+  });
+
+  it("活动文档属于另一节点时不套用该节点的草稿门禁，也不刷新另一节点", async () => {
+    const { ctx, applyNodeHistory, refreshFromCanonical } = applyCtx("unsaved", "other-node");
+    const result = await createRemoteClient(ctx).apply({ canvasId: "canvas-1", nodeId: "node-1", entryId: "entry-1" });
+    expect(result.ok).toBe(true);
+    expect(applyNodeHistory).toHaveBeenCalledOnce();
+    expect(refreshFromCanonical).not.toHaveBeenCalled();
   });
 });

@@ -211,6 +211,8 @@ export type ApplicationServiceOptions = {
    * （旧历史仍按 adapter 解析，可读）。
    */
   defaultConnectionFor?: (input: { owner: string; adapterId: string }) => Promise<import("@woohaa3/contracts").AgentConnectionView | null> | import("@woohaa3/contracts").AgentConnectionView | null;
+  /** 稳定 Agent Supervisor 存在时，backend 重启后的暂时未知回合保持可恢复。 */
+  preserveUnreconciledOnRestart?: boolean;
   now?: () => Date;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -416,6 +418,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     groupScopeEpoch: (canvasId, rootGroupId) => canvasCreationStore.epoch(canvasId, rootGroupId),
     registry: agentAdapterRegistry,
     connections: agentConnections,
+    ...(options.preserveUnreconciledOnRestart ? { preserveUnreconciledOnRestart: true } : {}),
     ...(options.defaultConnectionFor ? { defaultConnectionFor: options.defaultConnectionFor } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
     now: () => now().toISOString()

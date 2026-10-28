@@ -23,6 +23,7 @@ import {
   type CompositeAssetScopeGeometry,
   type CompositeAssetScopeShape
 } from "./render-scene.js";
+import { CANVAS_CAMERA_PITCH } from "./model-focus.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(
@@ -76,7 +77,7 @@ describe("canvas scope golden（change: 2026-10-12-align-film-set-scope-with-iso
     }
   });
 
-  it("地面投影轴与 Rust isometric_grid::plan 一致（AXIS_X/AXIS_Y = 0.70710678/0.35355339，s=0.5）", () => {
+  it("地面投影轴与 Rust isometric_grid::plan 一致并由全局 pitch 决定", () => {
     expect(COMPOSITE_ASSET_DIAMOND_EDGE_SLOPE).toBe(fixture.edgeSlope);
     expect(COMPOSITE_ASSET_SCOPE_AXIS_X).toBeCloseTo(fixture.axisX, 6);
     expect(COMPOSITE_ASSET_SCOPE_AXIS_Y).toBeCloseTo(fixture.axisY, 6);
@@ -84,11 +85,12 @@ describe("canvas scope golden（change: 2026-10-12-align-film-set-scope-with-iso
       resolve(here, "..", "..", "..", "..", "bevy", "src", "isometric_grid", "plan.rs"),
       "utf8"
     );
+    const pitchDegrees = Number(rust.match(/CANVAS_CAMERA_PITCH: f32 = ([\d.]+) \* PI \/ 180\.0;/)![1]!);
+    expect((pitchDegrees * Math.PI) / 180).toBeCloseTo(CANVAS_CAMERA_PITCH, 6);
     const axisX = Number(rust.match(/const AXIS_X: f32 = ([\d_.]+);/)![1]!.replace(/_/g, ""));
-    const axisY = Number(rust.match(/const AXIS_Y: f32 = ([\d_.]+);/)![1]!.replace(/_/g, ""));
     expect(axisX).toBeCloseTo(COMPOSITE_ASSET_SCOPE_AXIS_X, 6);
-    expect(axisY).toBeCloseTo(COMPOSITE_ASSET_SCOPE_AXIS_Y, 6);
-    expect(Math.abs(axisY / axisX)).toBeCloseTo(COMPOSITE_ASSET_DIAMOND_EDGE_SLOPE, 6);
+    expect(Math.sin(CANVAS_CAMERA_PITCH) * axisX).toBeCloseTo(COMPOSITE_ASSET_SCOPE_AXIS_Y, 6);
+    expect(Math.abs(COMPOSITE_ASSET_SCOPE_AXIS_Y / axisX)).toBeCloseTo(COMPOSITE_ASSET_DIAMOND_EDGE_SLOPE, 6);
   });
 
   for (const testCase of fixture.cases) {
@@ -122,7 +124,7 @@ describe("canvas scope golden（change: 2026-10-12-align-film-set-scope-with-iso
     });
   }
 
-  it("地面宽深相等时为菱形，四条边斜率恒为 ±0.5", () => {
+  it("地面宽深相等时为菱形，四条边斜率由全局 pitch 决定", () => {
     const geometry = compositeAssetScopeGeometry(
       { x: 0, y: 0, width: 260, height: 195 },
       "isometric-diamond",
@@ -130,19 +132,19 @@ describe("canvas scope golden（change: 2026-10-12-align-film-set-scope-with-iso
       { cx: 100, cy: 50, hx: 40, hz: 40 }
     );
     const edge = { x: geometry.vertices[1].x - geometry.vertices[0].x, y: geometry.vertices[1].y - geometry.vertices[0].y };
-    expect(edge.y / edge.x).toBeCloseTo(0.5, 6);
+    expect(edge.y / edge.x).toBeCloseTo(COMPOSITE_ASSET_DIAMOND_EDGE_SLOPE, 6);
     const edge2 = { x: geometry.vertices[3].x - geometry.vertices[0].x, y: geometry.vertices[3].y - geometry.vertices[0].y };
-    expect(edge2.y / edge2.x).toBeCloseTo(-0.5, 6);
+    expect(edge2.y / edge2.x).toBeCloseTo(-COMPOSITE_ASSET_DIAMOND_EDGE_SLOPE, 6);
   });
 
-  it("地面非正方时为平行四边形：边斜率仍为 ±0.5，AABB 宽高比恒为 2", () => {
+  it("地面非正方时为平行四边形：AABB 宽高比由全局 pitch 决定", () => {
     const geometry = compositeAssetScopeGeometry(
       { x: 0, y: 0, width: 200, height: 100 },
       "isometric-diamond",
       32,
       { cx: 0, cy: 0, hx: 60, hz: 30 }
     );
-    expect(geometry.aabb.width / geometry.aabb.height).toBeCloseTo(2, 6);
+    expect(geometry.aabb.width / geometry.aabb.height).toBeCloseTo(COMPOSITE_ASSET_SCOPE_AXIS_X / COMPOSITE_ASSET_SCOPE_AXIS_Y, 6);
     // 四顶点不共线于轴，仍是凸四边形。
     expect(points(geometry).length).toBe(4);
   });

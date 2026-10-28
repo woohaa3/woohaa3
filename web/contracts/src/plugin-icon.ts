@@ -2,7 +2,7 @@
  * 插件图标：语义图形名（白名单）或随应用发布的品牌图形路径（跨运行单元的纯词汇表）。
  *
  * 插件在图标的**声明面**只给一个字符串：宿主内置插件在 `host/inventory.ts` 的表里，扩展在
- * `HostExtensionPlugin.icon`、`ExtensionFrontendMetadata.icon` 或后端扩展的
+ * `ExtensionPlugin.icon`、`ExtensionFrontendMetadata.icon` 或后端扩展的
  * `extension.json` → `icon.glyph`。两种取值：
  *
  * - `PLUGIN_ICON_NAMES` 里的语义名（`provider` / `storage` / …），由前端

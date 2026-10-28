@@ -11,11 +11,12 @@ import {
 } from "./node-catalog.js";
 
 describe("node-catalog", () => {
-  it("统一目录仅新建 model3d/composite-asset 两类 3D 节点", () => {
+  it("统一目录包含片场语义节点与两类自包含 3D 节点", () => {
     expect(NODE_TEMPLATES.map((entry) => entry.id)).toEqual([
       "text",
       "image",
       "model3d",
+      "film-set",
       "video",
       "audio",
       "composite-asset"
@@ -24,12 +25,14 @@ describe("node-catalog", () => {
       "文本",
       "图片",
       "3D 模型",
+      "片场",
       "视频",
       "音频",
       "导演场"
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
+    expect(findNodeTemplate("film-set")?.nodeType).toBe("composite-asset");
     expect(findNodeTemplate("composite-asset")?.nodeType).toBe("composite-asset");
   });
 
@@ -39,6 +42,7 @@ describe("node-catalog", () => {
       "text",
       "image",
       "model3d",
+      "film-set",
       "video",
       "audio",
       "composite-asset"

@@ -43,5 +43,5 @@ export type OAuthAgentProvider = {
 
 /** 当前 provider：ChatGPT（后续 OAuth 厂商在此追加）。 */
 export const OAUTH_AGENT_PROVIDERS: readonly OAuthAgentProvider[] = [
-  { providerId: "chatgpt", label: "ChatGPT（OAuth）", routePrefix: "oauth-agent" }
+  { providerId: "chatgpt", label: "ChatGPT（OAuth）", routePrefix: "" }
 ];

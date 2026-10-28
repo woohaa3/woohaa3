@@ -15,6 +15,7 @@ import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, isShotPreviewNode } from "./core/shot-
 import { isSupportedShotReferenceEdgeData, resolveShotReferenceSource, shotReferenceRoleForKind, SHOT_IMAGE_REFERENCE_EDGE_KIND, SHOT_REFERENCE_EDGE_KIND } from "./core/shot-reference.js";
 import { shotReferenceDecision } from "./core/connection-rules.js";
 import { isCompositeAssetNodeType, isFilmSetNode, readCompositeAssetExtensionId } from "./core/composite-asset-identity.js";
+import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { DIRECTOR_STUDIO_DEFAULT_TITLE, LEGACY_ANIMATION_DEFAULT_TITLE } from "../director-studio-title.js";
 
 export type UploadFileDescriptor = {
@@ -35,6 +36,7 @@ export function uploadedMediaKind(file: UploadFileDescriptor): GenerationKind | 
 
 export type NormalizeCanvasOptions = {
   extraNodeTypes?: readonly string[];
+  content?: ContentContributionResolver;
 };
 
 /**
@@ -48,6 +50,7 @@ export type NormalizeCanvasOptions = {
 export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "model3d", "composite-asset", FILM_SET_SHOT_PREVIEW_NODE_TYPE] as const;
 
 export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOptions): ServerCanvas {
+  observeContentResolver(options?.content);
   const assets = Array.isArray(input.assets) ? input.assets.map(normalizeAsset) : [];
   const sanitizedNodeData = sanitizeWoohaa3CanvasNodeData(input.nodeData) as Woohaa3CanvasNodeDataMap<CanvasNodeData>;
   const document: Woohaa3CanvasDocument = {
@@ -116,7 +119,7 @@ export function normalizeCanvas(input: ServerCanvas, options?: NormalizeCanvasOp
   applyVideoEditIntentSanitizer(nodeData);
   // 片场内部内容收敛（change: 2026-10-08-make-film-set-model-only）：
   // 缺失字段保持缺失（旧片场为空集合，不在此补写）；非法集合按空集合丢弃，绝不写入部分内容。
-  applyFilmSetContentSanitizer(nodeData, nodeTypes);
+  applyFilmSetContentSanitizer(nodeData, nodeTypes, options?.content);
   // 导演场更名（change: 2026-10-10-add-game-furnace-extension，design D1）：
   // 只把「系统创建且未被用户改写」的旧默认标题幂等更新为新展示名；自定义标题原样保留。
   migrateDirectorStudioLegacyTitle(nodeData, nodeTypes);
@@ -176,13 +179,23 @@ function applyVideoEditIntentSanitizer(nodeData: Record<string, CanvasNodeData>)
  */
 function applyFilmSetContentSanitizer(
   nodeData: Record<string, CanvasNodeData>,
-  nodeTypes: Map<string, string>
+  nodeTypes: Map<string, string>,
+  content?: ContentContributionResolver
 ): void {
   for (const [nodeId, data] of Object.entries(nodeData)) {
     if (!data || data[FILM_SET_CONTENT_FIELD] === undefined) continue;
     const type = nodeTypes.get(nodeId);
     // 未知/不可用业务的合法原数据必须保留（不删引用、不改写）。
     if (isCompositeAssetNodeType(type) && readCompositeAssetExtensionId(data) === null) continue;
+    const extensionId = readCompositeAssetExtensionId(data);
+    const codec = extensionId ? content?.resolve(extensionId)?.nodeData : undefined;
+    if (codec) {
+      const normalized = codec.normalize(data);
+      if (typeof normalized === "object" && normalized !== null && !Array.isArray(normalized)) {
+        nodeData[nodeId] = normalized as CanvasNodeData;
+      }
+      continue;
+    }
     if (!isFilmSetNode(type, data)) {
       delete data[FILM_SET_CONTENT_FIELD];
       continue;

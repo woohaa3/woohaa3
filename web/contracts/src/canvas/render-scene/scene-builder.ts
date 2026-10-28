@@ -1,3 +1,4 @@
+import { observeContentResolver, type ContentContributionResolver } from "../content-contribution.js";
 import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
@@ -75,6 +76,8 @@ import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import type { FilmSetNodeData } from "../canvas-node-model.js";
 
 export type CanvasRenderSceneInput = {
+  /** 扩展内容贡献。缺省时空解析器，不改变现有场景。 */
+  content?: ContentContributionResolver;
   groupBadgeScaleOverrides?: ReadonlyMap<string, number>;
   /** Group ids carrying a render-only drop target highlight. */
   dropTargetGroupIds?: ReadonlySet<string> | readonly string[];
@@ -251,6 +254,7 @@ export function resolveSceneTheme(input: unknown): AppThemeSnapshot {
 
 /** 构建 Bevy 快照。 */
 export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRenderScene {
+  observeContentResolver(input.content);
   const { canvas } = input;
   const resolver = input.nodeCapabilities ?? builtinNodeCapabilityResolver;
   const capabilitiesOf = (node: ServerCanvas["document"]["nodes"][number]) => resolver.resolve({ canvas, node, data: canvas.nodeData[node.id] });

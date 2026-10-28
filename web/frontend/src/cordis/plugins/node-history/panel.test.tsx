@@ -33,7 +33,7 @@ const EMPTY_ITEM = {
   preview: { kind: "image" as const, href: "/api/canvas-node-history/c/n1/e2/preview" }
 };
 
-async function mount(options: { items?: unknown[]; onClose?: () => void } = {}) {
+async function mount(options: { items?: unknown[]; onClose?: () => void; onRefreshCurrent?: () => void } = {}) {
   const client: NodeHistoryClient = {
     list: async () => ({ ok: true, items: (options.items ?? [IMAGE_ITEM, EMPTY_ITEM]) as never, nextCursor: null }),
     detail: async () => ({ ok: false, code: "not-found", error: "no" }),
@@ -51,6 +51,7 @@ async function mount(options: { items?: unknown[]; onClose?: () => void } = {}) 
         controller={controller}
         writable
         {...(options.onClose ? { onClose: options.onClose } : {})}
+        {...(options.onRefreshCurrent ? { onRefreshCurrent: options.onRefreshCurrent } : {})}
       />
     );
   });
@@ -63,6 +64,20 @@ async function mount(options: { items?: unknown[]; onClose?: () => void } = {}) 
 }
 
 describe("节点历史抽屉", () => {
+  it("打开时立即刷新草稿状态，并短周期重读以覆盖并排编辑", async () => {
+    vi.useFakeTimers();
+    try {
+      const onRefreshCurrent = vi.fn();
+      const mounted = await mount({ onRefreshCurrent });
+      expect(onRefreshCurrent).toHaveBeenCalledTimes(1);
+      await act(async () => { vi.advanceTimersByTime(1000); });
+      expect(onRefreshCurrent.mock.calls.length).toBeGreaterThanOrEqual(2);
+      mounted.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("Esc 收起抽屉，且不把这次按键冒泡给画布（A10）", async () => {
     const onClose = vi.fn();
     const outer = vi.fn();

@@ -8,6 +8,7 @@
 import type {
   MediaStorageScope,
   ModelCamera,
+  ModelScriptBatchMeta,
   NodeGenerationKind,
   NodeHistoryAnimationPayload,
   NodeHistoryModelPlacement,
@@ -19,23 +20,69 @@ import type { CanvasCommand } from "@woohaa3/contracts";
 import type { NodeHistoryRepository } from "../node-history-contracts.js";
 
 /**
+ * 版本化命令批次的结构形状（与 wire 的 `CanvasCommandBatch` 同构）。
+ *
+ * core 不得 import `@woohaa3/contracts/canvas-yjs`（依赖边界只允许主入口）；room 端的
+ * 具体批次类型结构兼容，由 composition 适配。
+ */
+export type NodeHistoryCommandBatch = {
+  protocolVersion: number;
+  canvasId: string;
+  commandId: string;
+  baseRevision: number;
+  actorId: string;
+  commands: CanvasCommand[];
+};
+
+/**
+ * 派生提交结果（`submitDerived` 命中的既有回执或新提交结论）。
+ *
+ * 与 `CanvasRoom.submitDerived` 的返回保持结构兼容；历史模块只消费 revision/status。
+ */
+export type NodeHistoryDerivedResult =
+  | { ok: true; status: "accepted" | "duplicate"; revision: number; noop: boolean }
+  | { ok: false; code: string; message: string };
+
+/**
  * 只读/提交 room 的最小端口（避免 core 反向依赖 sync 模块）。
  * 由 composition 用真实 `CanvasRoom` 适配。
  */
 export type NodeHistoryRoomPort = {
-  lookupCommand?: (commandId: string) => Promise<{ revision: number } | null>;
+  lookupCommand?: (commandId: string) => Promise<{
+    revision: number;
+    /** 冻结的提交元数据；合并用它携带请求摘要做「同身份不同参数」判定。 */
+    modelBatch?: { submissionHash: string };
+  } | null>;
   exportCanvas(): { ok: true; canvas: ServerCanvas } | { ok: false; message: string };
-  submit(batch: {
-    protocolVersion: number;
-    canvasId: string;
-    commandId: string;
-    baseRevision: number;
-    actorId: string;
-    commands: readonly CanvasCommand[];
-  }): Promise<
+  submit(batch: NodeHistoryCommandBatch): Promise<
     | { ok: true; status: "accepted" | "duplicate"; revision: number; noop: boolean }
     | { ok: false; code: string; message: string }
   >;
+  /**
+   * 串行「读改写」提交（change: 2026-10-27-merge-same-type-node-history，design D5/D7）。
+   *
+   * 在 room 队列内先查 durable 回执（命中即幂等），否则按**最新权威画布**派生命令批次。
+   * 缺省时调用方回退到 `exportCanvas` + `submit`（测试/最小端口）。
+   */
+  submitDerived?: (input: {
+    commandId: string;
+    expectedModelBatchHash?: string;
+    derive: (canvas: ServerCanvas) =>
+      | {
+          ok: true;
+          batch: NodeHistoryCommandBatch;
+          modelBatch?: ModelScriptBatchMeta;
+        }
+      | { ok: false; code: string; message: string }
+      | Promise<
+          | {
+              ok: true;
+              batch: NodeHistoryCommandBatch;
+              modelBatch?: ModelScriptBatchMeta;
+            }
+          | { ok: false; code: string; message: string }
+        >;
+  }) => Promise<NodeHistoryDerivedResult>;
 };
 
 export type NodeHistoryRestoreOutcome =
@@ -153,4 +200,30 @@ export type ClearNodeHistoryInput = {
 
 export type NodeHistoryClearOutcome =
   | { ok: true; removed: number }
+  | { ok: false; code: string; message: string };
+
+/** 同类型节点合并输入（change: 2026-10-27-merge-same-type-node-history）。 */
+export type MergeNodeHistoryInput = {
+  canvasId: string;
+  targetNodeId: string;
+  sourceNodeId: string;
+  operationId: string;
+  /** 调用方看到的来源当前内容身份；不一致即 conflict。 */
+  expectedSourceCurrentIdentity?: string;
+  /** 调用方看到的目标当前内容身份；不一致即 conflict。 */
+  expectedTargetCurrentIdentity?: string;
+};
+
+/** 合并结果（成功携带稳定计数与修订）。 */
+export type MergeNodeHistoryOutcome =
+  | {
+      ok: true;
+      targetNodeId: string;
+      sourceNodeId: string;
+      revision: number;
+      copied: number;
+      duplicates: number;
+      evicted: number;
+      alreadyMerged: boolean;
+    }
   | { ok: false; code: string; message: string };

@@ -13,7 +13,7 @@ import type { ComponentType } from "react";
 import type { AgentConversationService } from "./agent-conversation.js";
 import type { PanelPresentationIntent } from "./model-interaction.js";
 
-/** 生成目标模式：模型、组、片场或镜头。 */
+/** 生成目标模式；`camera` 仅为旧入口兼容值，新的片场镜头统一使用 `film-set`。 */
 export type AuthoringGenerateMode =
   "model3d" | "canvas-group" | "film-set" | "camera" | "text";
 

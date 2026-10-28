@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "extensionId": "runninghub-provider",
   "metadata": { "module": "./shared", "export": "RUNNINGHUB_PLUGIN_METADATA", "order": 30 },
-  "hostPlugin": { "module": "./backend", "factory": "createRunningHubProviderPlugin", "kind": "provider", "order": 20 },
+  "hostPlugin": { "module": "./backend", "factory": "createRunningHubProviderPlugin", "features": ["provider"], "order": 20 },
   "icon": { "asset": "./assets/icon.png" }
 }

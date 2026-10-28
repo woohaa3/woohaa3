@@ -265,7 +265,7 @@ describe("重命名 / 重置 / focusOffset（change: 模型编辑 gizmo 焦点�
     expect(modelCameraFocusOffset(camera({ focusOffset: { x: 1, y: 2, z: 3 } }))).toEqual({ x: 1, y: 2, z: 3 });
   });
 
-  it("modelCameraElevation 缺省返回 45°，clampCameraElevation 钳制半圆并回退非法值", () => {
+  it("modelCameraElevation 缺省返回全局 pitch，clampCameraElevation 钳制半圆并回退非法值", () => {
     expect(modelCameraElevation(camera())).toBeCloseTo(SHOT_CAMERA_DEFAULT_ELEVATION, 9);
     expect(modelCameraElevation(camera({ elevation: 0.2 }))).toBeCloseTo(0.2, 9);
     expect(clampCameraElevation(9)).toBeCloseTo(SHOT_CAMERA_MAX_ELEVATION, 9);
@@ -285,7 +285,7 @@ describe("重命名 / 重置 / focusOffset（change: 模型编辑 gizmo 焦点�
     expect(setModelCameraElevation(base, "missing", 1)).toEqual(base);
   });
 
-  it("createDefaultModelCamera 承载仰角并默认 45°", () => {
+  it("createDefaultModelCamera 承载仰角并默认全局 pitch", () => {
     const created = createDefaultModelCamera({ existing: [], azimuth: 0, distance: 5, nodeId: "n1", seed: "s" });
     expect(created.elevation).toBeCloseTo(SHOT_CAMERA_DEFAULT_ELEVATION, 9);
     const custom = createDefaultModelCamera({ existing: [], azimuth: 0, distance: 5, elevation: 0.3, nodeId: "n1", seed: "s" });

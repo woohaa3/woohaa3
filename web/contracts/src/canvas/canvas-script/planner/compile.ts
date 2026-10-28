@@ -46,7 +46,7 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
     geometry.require(ref.nodeId);
     return ref.nodeId;
   };
-  const declare = (ref: string, id: string, type: string, edge = false) => {
+  const declare = (ref: string, id: string, type: string, edge = false, semanticKind?: import("../../agent-node-descriptors.js").AgentSemanticKind) => {
     planAssert(!declaredRefs.has(ref), "duplicate-ref", `ref ${ref} 重复`, "ref");
     planAssert(
       !geometry.originalIds.has(id) && !input.snapshot.edges.some((e) => e.id === id),
@@ -61,7 +61,7 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
     refs[ref] = id;
     entities.push({
       ref,
-      kind: edge ? null : (agentDescriptorForCanonicalType(type)?.kind ?? null),
+      kind: edge ? null : (semanticKind ?? agentDescriptorForCanonicalType(type)?.kind ?? null),
       canonicalType: type,
       ...(edge ? { edgeId: id } : { nodeId: id }),
     });
@@ -138,7 +138,7 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
               "title",
             );
           const id = deriveEntityId(descriptor.canonicalType, [...identity, operation.ref, "node"]);
-          declare(operation.ref, id, descriptor.canonicalType);
+          declare(operation.ref, id, descriptor.canonicalType, false, operation.kind);
           const position = place(operation.placement, descriptor.defaultSize);
           geometry.nodes.set(id, {
             id,
@@ -149,6 +149,7 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
             parentId: input.snapshot.rootGroupId,
           });
           geometry.touch(id);
+          if (input.snapshot.rootGroupId) geometry.refit([input.snapshot.rootGroupId]);
           commands.push({
             type: "node.add",
             node: { id, type: descriptor.canonicalType, position: input.snapshot.rootGroupId ? { x: position.x - geometry.require(input.snapshot.rootGroupId).position.x, y: position.y - geometry.require(input.snapshot.rootGroupId).position.y } : position, parentId: input.snapshot.rootGroupId, ...descriptor.defaultSize },
@@ -158,7 +159,6 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
               ...(operation.prompt !== undefined ? { prompt: operation.prompt } : {}),
             } as CanvasNodeData,
           });
-          if (input.snapshot.rootGroupId) geometry.refit([input.snapshot.rootGroupId]);
           normalized.push({ ...operation, resolvedId: id });
           break;
         }

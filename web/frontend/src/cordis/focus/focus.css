@@ -145,7 +145,7 @@
 	left: var(--focus-rail);
 	right: var(--focus-rail);
 	top: auto;
-	bottom: 44px;
+	bottom: var(--focus-footer);
 	width: auto;
 	height: var(--focus-panel-height);
 	border-top: 1px solid var(--mc-border);

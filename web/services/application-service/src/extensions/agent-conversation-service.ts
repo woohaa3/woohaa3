@@ -82,6 +82,8 @@ export type AgentConversationServiceOptions = {
   /** 稳定 id 生成器（按前缀）；测试可注入确定性实现。 */
   createId?: (prefix: string) => string;
   logger?: (event: Record<string, unknown>) => void;
+  /** Supervisor 模式下暂时没有回执时保留 unknown，等待重新 attach，而不是终结回合。 */
+  preserveUnreconciledOnRestart?: boolean;
 };
 
 export type AgentConversationServiceError = {
@@ -840,10 +842,17 @@ export function createAgentConversationService(options: AgentConversationService
         // 重启后无法核对（adapter 不可用/无 query 端口/查不到记录/结构化结果缺正文）时，
         // 以 failed 结算：unknown 在界面上没有继续/停止出口，留在 unknown 会让节点永久卡在
         // 执行中。组回合（canvas-group）另有回执与用户停止入口，不在此处改判。
-        const settleUnreconciled = () => finishTurn(turn, {
-          status: "failed",
-          error: { code: "turn-unreconciled", message: "本机宿主重启后未取得执行回执，结果无法确认；请核对后重试" }
-        });
+        const settleUnreconciled = () => {
+          if (options.preserveUnreconciledOnRestart) {
+            store.updateTurn(turn.turnId, { status: "unknown", stage: "unknown", errorCode: "runtime-reconnecting", errorMessage: "Agent 运行时正在重新连接，结果尚未确认" }, now());
+            appendEvent(turn.conversationId, turn.turnId, turn.requestId, "error", { status: "unknown", code: "runtime-reconnecting" });
+            return;
+          }
+          finishTurn(turn, {
+            status: "failed",
+            error: { code: "turn-unreconciled", message: "本机宿主重启后未取得执行回执，结果无法确认；请核对后重试" }
+          });
+        };
         if (!query) { settleUnreconciled(); continue; }
         owners.add(turn.turnId);
         try {

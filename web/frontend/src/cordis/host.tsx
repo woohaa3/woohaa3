@@ -31,7 +31,9 @@ import type {
 // 来源选择与页面 service 同寿命，返回生成面板时恢复；不持久化账号数据。
 
 // 生成面板仅在目标入口真正打开时加载，不进入画布启动闭包。
-const AuthoringModelGenerateHost = lazy(() => import("./plugins/task-execution/authoring-model-generate-host.js").then((module) => ({ default: module.AuthoringModelGenerateHost })));
+// model3d 用合并入口：包装（参考图 renderer）与 composer 在同一次激活内解析，避免第二层串行加载；
+// 文本继续只加载 composer（change: 2026-10-27-merge-nonessential-panel-chunks）。
+const AuthoringModelGeneratePanel = lazy(() => import("./plugins/task-execution/authoring-model-generate-panel.js").then((module) => ({ default: module.AuthoringModelGeneratePanel })));
 const AuthoringGeneratePanel = lazy(() => import("./plugins/task-execution/authoring-generate-panel.js").then((module) => ({ default: module.AuthoringGeneratePanel })));
 
 /** 首次加载延迟模块时保留面板轮廓，不闪现裸文字或提前加载执行模块。 */
@@ -346,7 +348,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   const data = (canvasState?.getWorkingCanvas() ?? canvasState?.getCanvas())?.nodeData[props.nodeId];
   const delivery = deliveries.map(contribution => contribution.resolve({ canvasId: props.canvasId, nodeId: props.nodeId, data })).find(Boolean);
   // 面板 UI 由宿主内置渲染；来源扩展只声明来源（design D10）。无来源时仍渲染面板并提示配置。
-  if (withConversation.mode === "model3d") return <Suspense fallback={<AuthoringGeneratePlaceholder />}><AuthoringModelGenerateHost key={generationKey} {...withConversation} render={AuthoringGeneratePanel} /></Suspense>;
+  if (withConversation.mode === "model3d") return <Suspense fallback={<AuthoringGeneratePlaceholder />}><AuthoringModelGeneratePanel key={generationKey} {...withConversation} /></Suspense>;
   return <Suspense fallback={<AuthoringGeneratePlaceholder />}><AuthoringGeneratePanel key={generationKey} {...withConversation} writable={canvasSession?.isWritable() ?? props.writable} deliveryHistory={delivery ?? undefined} /></Suspense>;
 }
 

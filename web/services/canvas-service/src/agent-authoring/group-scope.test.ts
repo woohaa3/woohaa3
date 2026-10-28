@@ -33,6 +33,51 @@ describe("group authority queue", () => {
     ]) expect((await submit(id!, source!)).ok).toBe(false);
     expect(room.currentRevision).toBe(revision);
   });
+  it("grows the root upward when a script places content above the group", async () => {
+    const { room, canvas } = await setup();
+    const service = new CanvasScriptService({ resolveRoom: async () => room, authorizer: { authorize: async () => ({ allowed: true }) } });
+    const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };
+    const result = await withCanvasGroupScope(scope, () => service.submit({
+      principalId: "u", canvasId: canvas.id, version: "woohaa-canvas-js-v1", requestId: "above-root",
+      source: 'canvas.node("text", {key:"above", placement:{mode:"absolute",position:{x:80,y:-200}}});'
+    }));
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true); if (!exported.ok) return;
+    const nodes = exported.canvas.document.nodes;
+    const root = nodes.find(n => n.id === "root")!;
+    const above = nodes.find(n => !["root", "a", "outside"].includes(n.id))!;
+    const original = nodes.find(n => n.id === "a")!;
+    expect(root.position.y).toBeLessThan(0);
+    expect(above.position.y).toBeGreaterThanOrEqual(0);
+    // 扩组不改变既有内容的世界坐标。
+    expect(original.position.y + root.position.y).toBe(40);
+  });
+  it("keeps a nested root group attached while creating content inside it", async () => {
+    const room = new CanvasRoom({ canvasId: "nested-scope", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
+    const canvas = createEmptyWoohaa3ServerCanvas("nested-scope", new Date().toISOString());
+    canvas.document.nodes = [
+      { id: "manager", type: "group", position: { x: 0, y: 0 }, width: 900, height: 700 },
+      { id: "root", type: "group", parentId: "manager", position: { x: 20, y: 20 }, width: 600, height: 400 },
+      { id: "a", type: "text", parentId: "root", position: { x: 40, y: 40 } },
+    ];
+    canvas.nodeData = { manager: { retainWhenEmpty: true }, root: { retainWhenEmpty: true }, a: { prompt: "old" } };
+    await room.initialize({ canvas, roomEpoch: "epoch" });
+    const service = new CanvasScriptService({ resolveRoom: async () => room, authorizer: { authorize: async () => ({ allowed: true }) } });
+    const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };
+    const input = { principalId: "u", canvasId: canvas.id, version: "woohaa-canvas-js-v1" as const };
+    const source = `const n=canvas.node("image",{key:"plane", placement:{mode:"absolute",position:{x:80,y:90}}}); canvas.reparent([n],canvas.existing("root"));`;
+    const validated = await withCanvasGroupScope(scope, () => service.validate({ ...input, requestId: "nested-validate", source }));
+    expect(validated.ok, JSON.stringify(validated)).toBe(true);
+    const submitted = await withCanvasGroupScope(scope, () => service.submit({ ...input, requestId: "nested-submit", source }));
+    expect(submitted.ok, JSON.stringify(submitted)).toBe(true);
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    expect(exported.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBe("manager");
+    expect(exported.canvas.document.nodes.find(n => n.id === "a")?.parentId).toBe("root");
+    expect(exported.canvas.document.nodes.some(n => n.type === "image" && n.parentId === "root")).toBe(true);
+  });
   it("rechecks membership after a queued user move, rejecting the whole batch", async () => {
     const { room, submit, canvas } = await setup();
     const scope = { owner: "u", canvasId: canvas.id, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvas.id, "root"), valid: () => true };

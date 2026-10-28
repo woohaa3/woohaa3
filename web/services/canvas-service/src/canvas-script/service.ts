@@ -1,4 +1,4 @@
-import { currentCanvasGroupScope } from "../agent-authoring/group-scope.js";
+import { currentCanvasGroupScope, normalizeGroupScopeCommands } from "../agent-authoring/group-scope.js";
 import { validateCanvasGroupChange } from "@woohaa3/contracts";
 /**
  * Canvas script service
@@ -189,8 +189,10 @@ export class CanvasScriptService {
       if (decoded.value.expectedRevision !== undefined && decoded.value.expectedRevision !== exported.canvas.revision) return { ok: false, error: canvasScriptError("revision-conflict", "precondition", "画布 revision 已变化") };
       const preconditionFailure = checkPreconditions(exported.canvas, compiled.preconditions);
       if (preconditionFailure) return { ok: false, error: canvasScriptError("precondition-failed", "precondition", preconditionFailure.message) };
-      const projected = applyCanvasCommands(exported.canvas, compiled.commands);
-      if (projected.ok && currentCanvasGroupScope()) { const reason = validateCanvasGroupChange(exported.canvas, projected.canvas, currentCanvasGroupScope()!.rootGroupId); if (reason) return { ok: false, error: canvasScriptError("forbidden", "authorize", reason) }; }
+      const scope = currentCanvasGroupScope();
+      const commands = scope ? normalizeGroupScopeCommands(compiled.commands, scope.rootGroupId) : compiled.commands;
+      const projected = applyCanvasCommands(exported.canvas, commands);
+      if (projected.ok && scope) { const reason = validateCanvasGroupChange(exported.canvas, projected.canvas, scope.rootGroupId); if (reason) return { ok: false, error: canvasScriptError("forbidden", "authorize", reason) }; }
       if (!projected.ok) return { ok: false, error: toScriptError(projected.rejection.code, projected.rejection.message) };
       if (this.deps.verifyScope) {
         const scope = await this.deps.verifyScope({
@@ -358,9 +360,11 @@ export class CanvasScriptService {
       if (!scope.ok) return { ok: false, code: scope.code, message: scope.message };
     }
 
-    const projected = applyCanvasCommands(input.canvas, compiled.commands);
+    const scope = currentCanvasGroupScope();
+    const commands = scope ? normalizeGroupScopeCommands(compiled.commands, scope.rootGroupId) : compiled.commands;
+    const projected = applyCanvasCommands(input.canvas, commands);
     if (!projected.ok) return { ok: false, code: projected.rejection.code, message: projected.rejection.message };
-    if (currentCanvasGroupScope()) { const reason = validateCanvasGroupChange(input.canvas, projected.canvas, currentCanvasGroupScope()!.rootGroupId); if (reason) return { ok: false, code: "group-scope-forbidden", message: reason }; }
+    if (scope) { const reason = validateCanvasGroupChange(input.canvas, projected.canvas, scope.rootGroupId); if (reason) return { ok: false, code: "group-scope-forbidden", message: reason }; }
     const affected = new Set(compiled.organization.affectedNodeIds);
     const script: CanvasScriptSubmissionMeta = {
       submissionHash: input.submissionHash,
@@ -383,7 +387,7 @@ export class CanvasScriptService {
         commandId: scriptCommandId(input.principalId, input.canvas.id, input.requestId),
         baseRevision: input.canvas.revision,
         actorId: "mcp-service",
-        commands: compiled.commands
+        commands
       }
     };
   }

@@ -3,13 +3,14 @@
  * （自 `mcp-http.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R11）。
  */
 import { z } from "zod";
-import { MODEL_CAMERA_ASPECTS, type McpCameraMutation } from "@woohaa3/contracts";
+import { MODEL_CAMERA_ASPECTS, SHOT_CAMERA_DEFAULT_ELEVATION, type McpCameraMutation } from "@woohaa3/contracts";
 import { createToolRegistrar } from "./guide.js";
 import { jsonResult, toolError } from "./tool-results.js";
 import type { ModelMcpHttpOptions, ToolRegistration } from "./http-types.js";
 
 export function registerCameraTools(reg: ToolRegistration, options: ModelMcpHttpOptions): void {
   const registerToolWithGrant = createToolRegistrar(reg);
+  const defaultElevationDegrees = Math.round((SHOT_CAMERA_DEFAULT_ELEVATION * 180) / Math.PI);
   const cameraCanvasId = z.string().min(1).describe("画布 ID");
   const cameraNodeId = z.string().min(1).describe("model3d / 片场（composite-asset）节点 ID");
 
@@ -33,7 +34,7 @@ export function registerCameraTools(reg: ToolRegistration, options: ModelMcpHttp
         azimuth: z.number().describe("绕世界 Y 轴方位角（弧度）"),
         distance: z.number().positive().describe("相机到 focus 的距离"),
         name: z.string().min(1).optional().describe("可选名称；省略时用默认名称"),
-        elevation: z.number().min(-Math.PI / 2).max(Math.PI / 2).optional().describe("仰角（弧度，[-90°, +90°]）；省略时默认 45°"),
+        elevation: z.number().min(-Math.PI / 2).max(Math.PI / 2).optional().describe(`仰角（弧度，[-90°, +90°]）；省略时默认画布 pitch（当前 ${defaultElevationDegrees}°）`),
         aspect: z.enum(MODEL_CAMERA_ASPECTS).optional().describe(`画幅；省略时默认 ${MODEL_CAMERA_ASPECTS[0]}`),
         focusOffset: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("注视点三分量偏移")
       })
@@ -126,7 +127,7 @@ export function registerCameraTools(reg: ToolRegistration, options: ModelMcpHttp
         cameraId: z.string().min(1).describe("要重置的镜头 id"),
         azimuth: z.number().describe("默认方位角（弧度）"),
         distance: z.number().positive().describe("默认距离"),
-        elevation: z.number().min(-Math.PI / 2).max(Math.PI / 2).optional().describe("默认仰角（弧度）；省略时 45°")
+        elevation: z.number().min(-Math.PI / 2).max(Math.PI / 2).optional().describe(`默认仰角（弧度）；省略时跟随画布 pitch（当前 ${defaultElevationDegrees}°）`)
       })
     },
     async ({ canvasId, nodeId, requestId, cameraId, azimuth, distance, elevation }) =>

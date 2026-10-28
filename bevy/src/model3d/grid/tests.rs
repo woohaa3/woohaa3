@@ -41,7 +41,7 @@ fn spacing_tiers_keep_screen_density_in_range() {
     for step in 0..60 {
         let zoom = 0.1 * 1.1_f32.powi(step);
         let spacing = spacing_for_zoom(zoom);
-        let screen = spacing * zoom * PROJECTION_SCALE;
+        let screen = spacing * zoom * projection_scale();
         assert!(
             screen >= GRID_MIN_SCREEN_SPACING - 1e-3,
             "zoom {zoom} spacing {spacing} screen {screen} too dense"

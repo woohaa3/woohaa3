@@ -15,6 +15,7 @@
  */
 import {
   decodeModelPlacement,
+  isMergeEligibleNode,
   type CanvasGenerationHistoryListPage,
   type NodeGenerationHistoryDetail,
   type NodeGenerationHistoryEntry,
@@ -51,8 +52,15 @@ import {
   snapshotCurrentModelEdit,
   type RestoreDependencies
 } from "./node-history-service/restore.js";
+import { ensureCurrentImageHistory } from "./node-history-service/backfill.js";
+import {
+  mergeNodeHistory as mergeNodeHistoryImpl,
+  type MergeDependencies
+} from "./node-history-service/merge.js";
 import type {
   ClearNodeHistoryInput,
+  MergeNodeHistoryInput,
+  MergeNodeHistoryOutcome,
   NodeHistoryApplicationServiceOptions,
   NodeHistoryClearOutcome,
   NodeHistoryRestoreOutcome,
@@ -70,6 +78,8 @@ export type {
   NodeHistoryServiceContext,
   NodeHistoryClearOutcome,
   ClearNodeHistoryInput,
+  MergeNodeHistoryInput,
+  MergeNodeHistoryOutcome,
   RegisterTaskHistoryInput,
   RegisterModelHistoryInput,
   RegisterModelEditInput,
@@ -94,6 +104,7 @@ export { buildRestoreCommands } from "./node-history-service/restore-commands.js
 export class NodeHistoryApplicationService {
   private readonly context: NodeHistoryServiceContext;
   private readonly restoreDeps: RestoreDependencies;
+  private readonly mergeDeps: MergeDependencies;
   /** 便于测试/诊断访问底层 repository（与 context 同一实例）。 */
   private readonly repository: NodeHistoryServiceContext["repository"];
   /** 未结算编辑会话探测；未注入时视为无会话。 */
@@ -113,6 +124,12 @@ export class NodeHistoryApplicationService {
       context: this.context,
       registerModelEdit: (input) => this.registerModelEdit(input),
       enforceCapacity: (canvasId, nodeId) => this.enforceCapacity(canvasId, nodeId)
+    };
+    this.mergeDeps = {
+      context: this.context,
+      registerModelEdit: (input) => this.registerModelEdit(input),
+      enforceCapacity: (canvasId, nodeId) => this.enforceCapacity(canvasId, nodeId),
+      ...(this.hasActiveEditSession ? { hasActiveEditSession: this.hasActiveEditSession } : {})
     };
   }
 
@@ -247,6 +264,51 @@ export class NodeHistoryApplicationService {
     return this.repository.listForNode(canvasId, nodeId);
   }
 
+  /**
+   * 为画布内所有“已经显示”的图片节点补登当前版本
+   * （修复导入/粘贴/画布脚本创建的图片没有 `current` 历史，合并时无法作为来源）。
+   *
+   * 只登记可合并的普通图片节点；托管/预览/组不处理。已有匹配成功条目的节点返回
+   * duplicate，不重复写入；没有 output 资产的占位节点跳过。补登不推进画布 revision。
+   */
+  async backfillCurrentImageHistory(canvasId: string): Promise<{
+    inserted: string[];
+    duplicates: string[];
+    skipped: Array<{ nodeId: string; reason: string }>;
+  }> {
+    const room = await this.context.resolveRoom(canvasId);
+    if (!room) return { inserted: [], duplicates: [], skipped: [] };
+    const exported = room.exportCanvas();
+    if (!exported.ok) return { inserted: [], duplicates: [], skipped: [] };
+    const canvas = exported.canvas;
+    const nodes = canvas.document.nodes.filter((node) =>
+      node.type === "image"
+      && isMergeEligibleNode({ node, data: canvas.nodeData[node.id] })
+    );
+    const inserted: string[] = [];
+    const duplicates: string[] = [];
+    const skipped: Array<{ nodeId: string; reason: string }> = [];
+    for (const node of nodes) {
+      const outcome = await ensureCurrentImageHistory(this.restoreDeps, canvas, node.id);
+      if (outcome.status === "inserted") {
+        inserted.push(node.id);
+        await this.enforceCapacity(canvasId, node.id);
+      } else if (outcome.status === "duplicate") {
+        duplicates.push(node.id);
+      } else {
+        skipped.push({ nodeId: node.id, reason: outcome.reason });
+      }
+    }
+    this.context.log({
+      event: "node-history-image-backfilled",
+      canvasId,
+      inserted: inserted.length,
+      duplicates: duplicates.length,
+      skipped: skipped.length
+    });
+    return { inserted, duplicates, skipped };
+  }
+
   // --- 查询 ---------------------------------------------------------------
 
   /** 画布授权的分页列表；调用方已校验画布读权限。 */
@@ -294,6 +356,16 @@ export class NodeHistoryApplicationService {
     expectedCurrentIdentity?: string;
   }): Promise<NodeHistoryRestoreOutcome> {
     return restoreNodeHistory(this.restoreDeps, input);
+  }
+
+  /**
+   * 同类型节点合并：来源历史并入目标，目标切换到来源当前版本，来源节点删除
+   * （change: 2026-10-27-merge-same-type-node-history，任务 3.3）。
+   *
+   * `operationId` 由调用方生成；同一身份重试返回首次回执，参数不同则拒绝。
+   */
+  async mergeNodeHistory(input: MergeNodeHistoryInput): Promise<MergeNodeHistoryOutcome> {
+    return mergeNodeHistoryImpl(this.mergeDeps, input);
   }
 
   /**

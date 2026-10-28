@@ -24,7 +24,9 @@ import {
   type ExtensionActivationResult,
   type ExtensionDispatchContext,
   type ExtensionRegistrationSummary,
-  type OwnerState
+  type OwnerState,
+  type PluginRegistrationSurface,
+  type ExtensionRecord
 } from "./host-types.js";
 import {
   dispatchHttp,
@@ -68,6 +70,8 @@ export type ApplicationExtensionHost = {
     input: { body: unknown; context: ExtensionDispatchContext; extensionId?: string }
   ) => Promise<import("./contract.js").ApplicationExtensionHandlerResult>;
   dispatchHttp: (input: {
+    /** 扩展 identity：注册键按 `<extensionId>/<route>` 命名空间隔离，分派须同源。 */
+    extensionId: string;
     method: import("./contract.js").ApplicationExtensionHttpMethod;
     route: string;
     req: import("./contract.js").ApplicationExtensionHttpRequest;
@@ -75,12 +79,18 @@ export type ApplicationExtensionHost = {
     context: ExtensionDispatchContext;
   }) => Promise<{ registration: import("./contract.js").ApplicationBackendHttpHandlerRegistration } | undefined>;
   dispatchRawHttp: (input: {
+    /** 扩展 identity：同上。 */
+    extensionId: string;
     method: import("./contract.js").ApplicationExtensionHttpMethod;
     route: string;
     req: import("./contract.js").ApplicationExtensionRawRequest;
     res: import("./contract.js").ApplicationExtensionRawResponse;
     context: ExtensionDispatchContext;
   }) => Promise<{ registration: import("./contract.js").ApplicationBackendRawHttpHandlerRegistration } | undefined>;
+  /** 按扩展 identity 取受控 HTTP 注册面（`ctx.webServer` 的宿主实现）。 */
+  pluginContextFor: (extensionId: string) => PluginRegistrationSurface;
+  /** 公开挂载路径（`deployment.basePath`）；装载器用它拼 `ctx.deployment`。 */
+  basePath: string;
   resolvePublicRoute: (
     extensionId: string,
     route: string,
@@ -93,9 +103,34 @@ export type ApplicationExtensionHost = {
   dispose: () => Promise<void>;
 };
 
+export type { PluginRegistrationSurface } from "./host-types.js";
+
 export function createApplicationExtensionHost(options: ApplicationExtensionHostOptions = {}): ApplicationExtensionHost {
   const log = options.logger ?? (() => undefined);
-  const owners = new Map<string, OwnerState>();
+  /**
+   * **唯一的注册表**。
+   *
+   * 键：非版本化装载是 `<extensionId>`，版本化实例是 `<extensionId>::<configVersion>`。
+   * backend 激活与 Cordis 装载写入同一张表——「怎么装起来的」不是记录的属性，
+   * 记录只回答「这个扩展注册了什么」。
+   */
+  const records = new Map<string, ExtensionRecord>();
+
+  /** 新建一条空记录：非版本化装载的生命周期字段全为空，语义是「没挂任何东西」。 */
+  const newRecord = (extensionId: string): ExtensionRecord => ({
+    extensionId,
+    handlers: new Map(),
+    httpHandlers: new Map(),
+    rawHttpHandlers: new Map(),
+    capabilities: new Map(),
+    resources: new Map(),
+    startedResources: [],
+    generationProviderIds: [],
+    storageBackendIds: [],
+    telemetryExportIds: [],
+    marketplaceSourceIds: [],
+    order: 0
+  });
   const globalCapabilities = new Map<string, string>();
   const globalHandlers = new Map<string, string>();
   const globalHttpHandlers = new Map<string, string>();
@@ -104,7 +139,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
   let disposed = false;
 
   const registry: HostRegistryContext = {
-    owners,
+    records,
     globalHandlers,
     globalHttpHandlers,
     globalRawHttpHandlers,
@@ -113,7 +148,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
 
   const keyFor = (extensionId: string, configVersion: number): string => `${extensionId}::${configVersion}`;
   const publicKeyFor = (extensionId: string): string | undefined => {
-    for (const [key, owner] of owners) {
+    for (const [key, owner] of records) {
       if (owner.extensionId === extensionId && owner.mode === "public") return key;
     }
     return undefined;
@@ -187,6 +222,56 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     return missing.length === 0 ? { ok: true } : { ok: false, missing };
   };
 
+    /**
+     * 按 owner 注册三类 handler。
+     *
+     * `activate` 与 `webServerFor` 共用同一份实现：通过 `ctx.webServer` 注册的路由
+     * 与插件在 `activate` 里注册的完全等价（同一张全局表、同一套冲突检查）。
+     */
+    const registerInto = (
+      target: ExtensionRecord,
+      handle: string,
+      /** 路由 → 全局键（按 extensionId 命名空间隔离；recovery 实例另加命名空间）。 */
+      keyOf: (route: string) => string
+    ): import("@woohaa3/contracts").HostWebServerService => ({
+      register(registration) {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "handler route 必须是非空相对路由");
+        }
+        const route = keyOf(registration.route);
+        if (globalHandlers.has(route)) {
+          throw new ExtensionHostError("duplicate-handler", `handler route 已注册：${registration.route}`);
+        }
+        globalHandlers.set(route, handle);
+        target.handlers.set(route, registration);
+      },
+      registerHttp(registration) {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "HTTP handler route 必须是非空相对路由");
+        }
+        const route = keyOf(registration.route);
+        const key = httpHandlerKey(registration.method, route);
+        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
+          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
+        }
+        globalHttpHandlers.set(key, handle);
+        target.httpHandlers.set(key, registration);
+      },
+      registerRawHttp(registration) {
+        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
+          throw new ExtensionHostError("duplicate-handler", "原始 HTTP handler route 必须是非空相对路由");
+        }
+        const route = keyOf(registration.route);
+        const key = httpHandlerKey(registration.method, route);
+        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
+          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
+        }
+        globalRawHttpHandlers.set(key, handle);
+        target.rawHttpHandlers.set(key, registration);
+      }
+    });
+
+
   const activateInternal = async (
     definition: ApplicationBackendExtensionDefinition,
     configVersion: number,
@@ -195,7 +280,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
   ): Promise<ExtensionActivationResult> => {
     if (disposed) return { ok: false, code: "activation-failed", message: "宿主已释放" };
     const key = keyFor(definition.extensionId, configVersion);
-    if (owners.has(key)) {
+    if (records.has(key)) {
       return { ok: false, code: "activation-failed", message: `插件 ${definition.extensionId}@${configVersion} 已激活` };
     }
     if (mode === "public") {
@@ -204,9 +289,9 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
         return { ok: false, code: "activation-failed", message: `插件 ${definition.extensionId} 已有活动的公共实例` };
       }
       if (existingPublic) {
-        const existingOwner = owners.get(existingPublic)!;
+        const existingOwner = records.get(existingPublic)!;
         await rollback(existingOwner, existingPublic);
-        owners.delete(existingPublic);
+        records.delete(existingPublic);
       }
     }
     const dependencies = resolveDependencies(definition);
@@ -236,15 +321,19 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       marketplaceSourceIds: [],
       order: ++orderCounter
     };
-    owners.set(key, owner);
+    records.set(key, owner);
     const handle = key;
 
     // recovery 实例贡献隔离到恢复命名空间：不能成为公共新工作入口（design D6）。
     const capabilityKey = (id: string) => (mode === "public" ? id : `_recovery/${definition.extensionId}/${configVersion}/${id}`);
-    const handlerKey = (route: string) => (mode === "public" ? route : `_recovery/${definition.extensionId}/${configVersion}/${route}`);
-    // 普通 JSON handler 全局键额外按 extensionId 命名空间隔离（change: 2026-10-13-...，任务 1.1）：
-    // 不同扩展可各自声明同名 route（如 `me`）。HTTP/raw HTTP handler 仍按公开路径匹配，不前缀。
-    const namedHandlerKey = (route: string) =>
+    /**
+     * 所有 handler 路由都按 extensionId 命名空间隔离（JSON / HTTP / raw HTTP 统一）。
+     *
+     * 公开 URL 形如 `/api/extensions/<extensionId>/handlers/<route>`（JSON）与
+     * `/api/extensions/<extensionId>/http/<route>`（HTTP/raw）；扩展只声明相对 route，
+     * 前缀由宿主添加，插件无法绕过——否则任意扩展都能占用根路径（如 `login`）。
+     */
+    const handlerKey = (route: string) =>
       mode === "public" ? `${definition.extensionId}/${route}` : `_recovery/${definition.extensionId}/${configVersion}/${route}`;
 
     const configFacade: ApplicationBackendConfigFacade = options.configFacadeFor?.(definition.extensionId) ?? EMPTY_CONFIG_FACADE;
@@ -254,7 +343,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
 
     const fail = async (error: ExtensionHostError): Promise<ExtensionActivationResult> => {
       await rollback(owner, handle);
-      owners.delete(key);
+      records.delete(key);
       log({ event: "extension-activation-rolled-back", extensionId: definition.extensionId, code: error.code });
       return { ok: false, code: error.code, message: error.message };
     };
@@ -279,42 +368,10 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
         globalCapabilities.set(id, handle);
         owner.capabilities.set(id, registration.value);
       },
-      registerHandler: (registration) => {
-        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
-          throw new ExtensionHostError("duplicate-handler", "handler route 必须是非空相对路由");
-        }
-        // 全局键按 `extensionId/route` 命名空间隔离：不同扩展可各自声明同名 route（如 `me`）。
-        const route = namedHandlerKey(registration.route);
-        if (globalHandlers.has(route)) {
-          throw new ExtensionHostError("duplicate-handler", `handler route 已注册：${registration.route}`);
-        }
-        globalHandlers.set(route, handle);
-        owner.handlers.set(route, registration);
-      },
-      registerHttpHandler: (registration) => {
-        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
-          throw new ExtensionHostError("duplicate-handler", "HTTP handler route 必须是非空相对路由");
-        }
-        const route = handlerKey(registration.route);
-        const key = httpHandlerKey(registration.method, route);
-        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
-          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
-        }
-        globalHttpHandlers.set(key, handle);
-        owner.httpHandlers.set(key, registration);
-      },
-      registerRawHttpHandler: (registration) => {
-        if (typeof registration.route !== "string" || registration.route === "" || registration.route.startsWith("/")) {
-          throw new ExtensionHostError("duplicate-handler", "原始 HTTP handler route 必须是非空相对路由");
-        }
-        const route = handlerKey(registration.route);
-        const key = httpHandlerKey(registration.method, route);
-        if (globalHttpHandlers.has(key) || globalRawHttpHandlers.has(key)) {
-          throw new ExtensionHostError("duplicate-handler", `HTTP handler 已注册：${registration.method} ${registration.route}`);
-        }
-        globalRawHttpHandlers.set(key, handle);
-        owner.rawHttpHandlers.set(key, registration);
-      },
+      // 三类 handler 的注册实现与 webServerFor 共用（见 registerInto）。
+      registerHandler: (registration) => registerInto(owner, handle, handlerKey).register(registration),
+      registerHttpHandler: (registration) => registerInto(owner, handle, handlerKey).registerHttp(registration),
+      registerRawHttpHandler: (registration) => registerInto(owner, handle, handlerKey).registerRawHttp(registration),
       registerResource: (resource) => {
         if (typeof resource.id !== "string" || resource.id === "") {
           throw new ExtensionHostError("duplicate-resource", "resource id 必须是非空字符串");
@@ -436,10 +493,10 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       extensionId: definition.extensionId,
       summary: () => toSummary(owner),
       dispose: async () => {
-        const current = owners.get(key);
+        const current = records.get(key);
         if (!current) return;
         await rollback(current, handle);
-        owners.delete(key);
+        records.delete(key);
         log({ event: "extension-disposed", extensionId: definition.extensionId, configVersion, mode });
       }
     };
@@ -462,53 +519,128 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
 
   const disposeVersion = async (extensionId: string, configVersion: number): Promise<void> => {
     const key = keyFor(extensionId, configVersion);
-    const owner = owners.get(key);
+    const owner = records.get(key);
     if (!owner) return;
     await rollback(owner, key);
-    owners.delete(key);
+    records.delete(key);
+  };
+
+  /**
+   * 按扩展 identity 绑定的受控 HTTP 注册面（`ctx.webServer` 的宿主实现）。
+   *
+   * 注册键仍是 `<extensionId>/<相对 route>`，与 `activate` 内部走同一张注册表——
+   * 所以通过 `ctx.webServer` 注册的路由与插件在 `activate` 里注册的完全等价。
+   * 扩展未激活/已释放时返回 undefined，调用方据此给出稳定错误。
+   */
+  /**
+   * 某个扩展的完整注册面：HTTP 路由、能力、领域服务与诊断缓冲。
+   *
+   * 有 backend 激活时用它的记账（回滚语义不变）；没有（走 Cordis 装载）时用独立记账，
+   * 由调用方在插件停用时 `release()`。这样「注册」不再隐含「发生过一次 backend 激活」。
+   */
+  const pluginContextFor = (extensionId: string): PluginRegistrationSurface => {
+    // 公共实例的路由键命名空间：`<extensionId>/<route>`。
+    const namespace = (route: string) => `${extensionId}/${route}`;
+    const found = [...records.entries()].find(([, entry]) => entry.extensionId === extensionId && entry.mode === "public");
+    let webServer: import("@woohaa3/contracts").HostWebServerService | undefined;
+    let release: () => void = () => undefined;
+    if (found) {
+      webServer = registerInto(found[1], found[0], namespace);
+      // 已有 owner：注销由 rollback 负责，这里不需要额外记账。
+    } else {
+      // 没有 backend 激活：用独立记账。先清掉上一次装载留下的路由，
+      // 否则反复启停会因为 `duplicate-handler` 直接失败。
+      releaseRegistrations(extensionId);
+      const scope = newRecord(extensionId);
+      records.set(extensionId, scope);
+      // handle 必须等于记录键：分派用 global 表里存的 handle 去 `records` 查记录。
+      webServer = registerInto(scope, extensionId, namespace);
+      release = () => releaseRegistrations(extensionId);
+    }
+    const services = options.servicesFor?.(extensionId, 0);
+    return {
+      ...(webServer ? { webServer } : {}),
+      capabilities: {
+        register: (id: string, value: unknown) => {
+          const handle = found ? found[0] : extensionId;
+          if (globalCapabilities.has(id)) {
+            throw new ExtensionHostError("duplicate-capability", `capability 已注册：${id}`);
+          }
+          globalCapabilities.set(id, handle);
+          found?.[1].capabilities.set(id, value);
+          return () => { if (globalCapabilities.get(id) === handle) globalCapabilities.delete(id); };
+        }
+      },
+      ...(services ? { services } : {}),
+
+      ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
+      release
+    };
+  };
+
+  /**
+   * 撤销某个 extensionId 的独立注册记账（幂等）。
+   *
+   * 装载器在插件停用时调用：路由与能力不能留在全局表里，否则停用的扩展还能被调。
+   */
+  const releaseRegistrations = (extensionId: string): void => {
+    const scope = records.get(extensionId);
+    if (!scope) return;
+    for (const route of scope.handlers.keys()) {
+      if (globalHandlers.get(route) === extensionId) globalHandlers.delete(route);
+    }
+    for (const key of scope.httpHandlers.keys()) {
+      if (globalHttpHandlers.get(key) === extensionId) globalHttpHandlers.delete(key);
+    }
+    for (const key of scope.rawHttpHandlers.keys()) {
+      if (globalRawHttpHandlers.get(key) === extensionId) globalRawHttpHandlers.delete(key);
+    }
+    records.delete(extensionId);
   };
 
   return {
     activate,
     activateVersioned,
     activateManifest,
-    resolveCapability: (id) => globalCapabilities.get(id) !== undefined ? owners.get(globalCapabilities.get(id)!)?.capabilities.get(id) : undefined,
+    pluginContextFor,
+    basePath: options.deployment?.basePath ?? "",
+    resolveCapability: (id) => globalCapabilities.get(id) !== undefined ? records.get(globalCapabilities.get(id)!)?.capabilities.get(id) : undefined,
     hasCapability: (id) => globalCapabilities.has(id),
     resolveCapabilityOwner: (id) => {
       const handle = globalCapabilities.get(id);
       if (handle === undefined) return null;
-      const owner = owners.get(handle);
+      const owner = records.get(handle);
       if (!owner) return null;
-      return { extensionId: owner.extensionId, configVersion: owner.configVersion, mode: owner.mode };
+      return { extensionId: owner.extensionId, configVersion: owner.configVersion ?? 0, mode: owner.mode ?? "public" };
     },
     dispatch: (route, input) => dispatchHandler(registry, route, input),
     dispatchHttp: (input) => dispatchHttp(registry, input),
     dispatchRawHttp: (input) => dispatchRawHttp(registry, input),
     resolvePublicRoute: (extensionId, route, method) => resolvePublicRoute(registry, extensionId, route, method),
     snapshot: () =>
-      [...owners.values()]
+      [...records.values()]
         .sort((a, b) => a.order - b.order)
         .map((owner) => ({ extensionId: owner.extensionId, ...toSummary(owner) })),
     disposeExtension: async (extensionId) => {
-      for (const [key, owner] of [...owners]) {
+      for (const [key, owner] of [...records]) {
         if (owner.extensionId === extensionId) {
           await rollback(owner, key);
-          owners.delete(key);
+          records.delete(key);
         }
       }
     },
     disposeVersion,
     activeVersions: (extensionId) =>
-      [...owners.values()]
+      [...records.values()]
         .filter((owner) => owner.extensionId === extensionId)
-        .map((owner) => owner.configVersion)
+        .map((owner) => owner.configVersion ?? 0)
         .sort((a, b) => a - b),
     dispose: async () => {
       if (disposed) return;
       disposed = true;
-      const all = [...owners.entries()].sort(([, a], [, b]) => b.order - a.order);
+      const all = [...records.entries()].sort(([, a], [, b]) => b.order - a.order);
       for (const [key, owner] of all) await rollback(owner, key);
-      owners.clear();
+      records.clear();
       globalCapabilities.clear();
       globalHandlers.clear();
       globalHttpHandlers.clear();

@@ -9,7 +9,7 @@
 import { fnv1a64Hex } from "../content-hash.js";
 import { readFilmSetConversionAssistant } from "./assistant.js";
 import { isBoundedId, isJsonObject } from "../../validation.js";
-import { isAgentReasoningEffort } from "../../extension/conversation.js";
+import { isAgentReasoningEffort } from "../../extension/assistant/conversation.js";
 import {
   FILM_SET_CONVERSION_SOURCE_KINDS,
   type FilmSetConversionRange,

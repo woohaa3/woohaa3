@@ -79,7 +79,12 @@ export function validateImageEditPatch(value: CanvasNodeData): CommandApplyResul
   return null;
 }
 
-/** 组/片场自身展示模型的严格边界；缺失字段不写回，非法字段整批拒绝。 */
+/**
+ * 普通组自身展示模型的严格边界；缺失字段不写回，非法字段整批拒绝。
+ *
+ * `groupAppearance` 只属于普通组。片场节点的自身模型是整场 items，不读取该字段；
+ * 旧文档中已存在的片场外观仅原样保留，不允许新增或修改。
+ */
 export function validateGroupAppearancePatch(
   work: WorkingState,
   nodeId: string,
@@ -88,11 +93,15 @@ export function validateGroupAppearancePatch(
   if (value.groupAppearance === undefined) return null;
   const node = work.nodes.find((entry) => entry.id === nodeId);
   const merged = { ...(work.nodeData[nodeId] ?? {}), ...value } as CanvasNodeData;
-  const allowed = node?.type === "group" || isFilmSetNode(node?.type, merged);
-  if (!allowed) return reject("invalid-group-appearance", "groupAppearance 只允许 group 或 film-set 节点");
+  if (node?.type !== "group") {
+    const preservedFilmSetAppearance = isFilmSetNode(node?.type, merged)
+      && JSON.stringify(value.groupAppearance) === JSON.stringify(work.nodeData[nodeId]?.groupAppearance);
+    if (preservedFilmSetAppearance) return null;
+    return reject("invalid-group-appearance", "groupAppearance 只属于普通组节点");
+  }
   const decoded = decodeGroupAppearance(value.groupAppearance);
   if (!decoded.ok) {
-    // A whole film-set rewrite must retain an unsupported saved appearance verbatim.
+    // A whole group rewrite must retain an unsupported saved appearance verbatim.
     if (JSON.stringify(value.groupAppearance) === JSON.stringify(work.nodeData[nodeId]?.groupAppearance)) return null;
     return reject("invalid-group-appearance", decoded.reason);
   }

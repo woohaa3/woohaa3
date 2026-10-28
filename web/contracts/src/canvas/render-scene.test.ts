@@ -10,7 +10,10 @@ import {
   bevyAggregateHandle,
   bevyDragAttachActionBarRect,
   bevyDragAttachProbe,
+  bevyEdgeDeleteHitRect,
   bevyEdgeDeleteRect,
+  bevyEdgeHoverBridgeRect,
+  bevyEdgeLabelRect,
   bevyKindForNodeType,
   bevyNodeSize,
   bevyNodeHistoryStripDot,
@@ -28,8 +31,13 @@ import {
   dragAttachProbeIntersects,
   EDGE_DELETE_BUTTON_GAP,
   EDGE_DELETE_BUTTON_SIZE,
+  edgeLabelWidth,
+  EDGE_DELETE_HIT_PADDING,
+  EDGE_HOVER_BRIDGE_PADDING,
+  EDGE_LABEL_FONT,
   EDGE_LABEL_HEIGHT,
-  EDGE_LABEL_WIDTH,
+  EDGE_LABEL_MAX_WIDTH,
+  EDGE_LABEL_PADDING,
   FOCUS_TRANSITION_VERSION,
   NODE_HISTORY_STRIP_DOT_RADIUS,
   NODE_HISTORY_STRIP_GAP,
@@ -1046,24 +1054,37 @@ describe("边删除按钮位置（change: add-edge-hover-delete）", () => {
     // 输出端口 (200,50)，输入端口 (400,250) → 中点 (300,150)。
     expect(bevyPort(source, "output")).toEqual({ x: 200, y: 50 });
     expect(bevyPort(target, "input")).toEqual({ x: 400, y: 250 });
-    const rect = bevyEdgeDeleteRect(source, target, false);
+    const rect = bevyEdgeDeleteRect(source, target);
     expect(rect.width).toBe(EDGE_DELETE_BUTTON_SIZE);
     expect(rect.height).toBe(EDGE_DELETE_BUTTON_SIZE);
     expect(rect.x + rect.width / 2).toBe(300);
     expect(rect.y + rect.height / 2).toBe(150);
   });
 
+  it("标签胶囊按内容收缩，两个字不再占八个字宽", () => {
+    // "图片" = 2 个汉字 → 22px 文本 + 16px 内边距 = 38px，而不是固定 104px。
+    const width = edgeLabelWidth("图片");
+    expect(width).toBe(EDGE_LABEL_FONT * 2 + EDGE_LABEL_PADDING * 2);
+    expect(width).toBeLessThan(EDGE_LABEL_MAX_WIDTH);
+    const label = bevyEdgeLabelRect({ x: 0, y: 0, width: 100, height: 50 }, { x: 100, y: 300, width: 100, height: 50 }, "图片");
+    expect(label.width).toBe(width);
+    expect(label.x + label.width / 2).toBe(100);
+  });
+
   it("有标签时按钮排在标签胶囊右侧，纵向仍对齐中点", () => {
     const source = { x: 0, y: 0, width: 200, height: 100 };
     const target = { x: 400, y: 200, width: 200, height: 100 };
-    const rect = bevyEdgeDeleteRect(source, target, true);
+    const labelWidth = edgeLabelWidth("图片");
+    const rect = bevyEdgeDeleteRect(source, target, "图片");
     const expectedCenterX =
-      300 + EDGE_LABEL_WIDTH / 2 + EDGE_DELETE_BUTTON_GAP + EDGE_DELETE_BUTTON_SIZE / 2;
+      300 + labelWidth / 2 + EDGE_DELETE_BUTTON_GAP + EDGE_DELETE_BUTTON_SIZE / 2;
     expect(rect.x + rect.width / 2).toBe(expectedCenterX);
     expect(rect.y + rect.height / 2).toBe(150);
     // 按钮左缘不早于标签胶囊右缘（不遮挡标签）。
-    const labelRight = 300 + EDGE_LABEL_WIDTH / 2;
+    const labelRight = 300 + labelWidth / 2;
     expect(rect.x).toBeGreaterThanOrEqual(labelRight + EDGE_DELETE_BUTTON_GAP);
+    // 窄标签把按钮留在曲线附近：两个字时中心仅离中点 32px，远小于旧固定宽度的一半。
+    expect(rect.x + rect.width / 2 - 300).toBeLessThan(EDGE_LABEL_MAX_WIDTH / 2);
   });
 
   it("Bevy 的 EDGE_DELETE_BUTTON_SIZE 与 contracts 保持一致", () => {
@@ -1078,14 +1099,52 @@ describe("边删除按钮位置（change: add-edge-hover-delete）", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const rust = readFileSync(resolve(here, "../../../../bevy/src/canvas_query/layout.rs"), "utf8");
     for (const [name, value] of [
-      ["EDGE_LABEL_WIDTH", EDGE_LABEL_WIDTH],
+      ["EDGE_LABEL_MAX_WIDTH", EDGE_LABEL_MAX_WIDTH],
       ["EDGE_LABEL_HEIGHT", EDGE_LABEL_HEIGHT],
-      ["EDGE_DELETE_BUTTON_GAP", EDGE_DELETE_BUTTON_GAP]
+      ["EDGE_LABEL_FONT", EDGE_LABEL_FONT],
+      ["EDGE_LABEL_PADDING", EDGE_LABEL_PADDING],
+      ["EDGE_DELETE_BUTTON_GAP", EDGE_DELETE_BUTTON_GAP],
+      ["EDGE_DELETE_HIT_PADDING", EDGE_DELETE_HIT_PADDING],
+      ["EDGE_HOVER_BRIDGE_PADDING", EDGE_HOVER_BRIDGE_PADDING]
     ] as const) {
       const match = rust.match(new RegExp(`const ${name}: f32 = ([\\d.]+);`));
       expect(match, `bevy 缺少 ${name}`).toBeTruthy();
       expect(Number(match![1])).toBe(value);
     }
+  });
+
+  it("删除按钮命中区外扩，并与标签胶囊相接（修复：删除按钮悬停丢失）", () => {
+    const source = { x: 0, y: 0, width: 100, height: 50 };
+    const target = { x: 100, y: 300, width: 100, height: 50 };
+    const visual = bevyEdgeDeleteRect(source, target, "图片");
+    const hit = bevyEdgeDeleteHitRect(source, target, "图片");
+    // 视觉仍是 18px，命中区四向外扩。
+    expect(hit.width).toBe(visual.width + EDGE_DELETE_HIT_PADDING * 2);
+    expect(hit.height).toBe(visual.height + EDGE_DELETE_HIT_PADDING * 2);
+    expect(hit.x).toBe(visual.x - EDGE_DELETE_HIT_PADDING);
+    expect(hit.y).toBe(visual.y - EDGE_DELETE_HIT_PADDING);
+    // 命中区左缘正好接上标签胶囊右缘，指针从标签走到按钮不会落进死区。
+    const label = bevyEdgeLabelRect(source, target, "图片");
+    expect(hit.x).toBe(label.x + label.width);
+  });
+
+  it("悬停保持区覆盖连线中点、标签与按钮（修复：删除按钮悬停丢失）", () => {
+    const source = { x: 0, y: 0, width: 100, height: 50 };
+    const target = { x: 100, y: 300, width: 100, height: 50 };
+    const bridge = bevyEdgeHoverBridgeRect(source, target, "图片");
+    const button = bevyEdgeDeleteHitRect(source, target, "图片");
+    // 中点 (100,175)：曲线在此穿过标签，保持区必须包含它，才能从线体接进标签。
+    expect(bridge.x).toBeLessThanOrEqual(100);
+    expect(100).toBeLessThanOrEqual(bridge.x + bridge.width);
+    expect(bridge.y).toBeLessThanOrEqual(175);
+    expect(175).toBeLessThanOrEqual(bridge.y + bridge.height);
+    // 按钮完全落在保持区内，标签右侧与间隙都被覆盖。
+    expect(bridge.x).toBeLessThanOrEqual(button.x);
+    expect(bridge.y).toBeLessThanOrEqual(button.y);
+    expect(button.x + button.width).toBeLessThanOrEqual(bridge.x + bridge.width);
+    expect(button.y + button.height).toBeLessThanOrEqual(bridge.y + bridge.height);
+    // 无标签时保持区就是按钮命中区。
+    expect(bevyEdgeHoverBridgeRect(source, target)).toEqual(bevyEdgeDeleteHitRect(source, target));
   });
 });
 

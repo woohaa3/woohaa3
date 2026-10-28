@@ -6,6 +6,7 @@
  * ```
  * GET  /api/canvas-node-history/:canvasId/:nodeId            列表（cursor 分页）
  * POST /api/canvas-node-history/:canvasId/:nodeId/clear      清空该节点历史（显式写操作）
+ * POST /api/canvas-node-history/:canvasId/:targetNodeId/merge  同类型节点合并（来源并入目标）
  * GET  /api/canvas-node-history/:canvasId/:nodeId/:entryId   详情（完整正文/脚本）
  * POST /api/canvas-node-history/:canvasId/:nodeId/:entryId/apply   原子恢复
  * GET  /api/canvas-node-history/:canvasId/:nodeId/:entryId/preview  受控媒体预览（同源重定向）
@@ -24,6 +25,9 @@ import { isNodeGenerationKind, type NodeHistoryMediaPayload } from "@woohaa3/con
 
 export const DEFAULT_NODE_HISTORY_API_BASE_PATH = "/api/canvas-node-history";
 
+/** 合并请求体上限（只含节点 id 与期望身份，无正文）。 */
+const MAX_MERGE_BODY_BYTES = 16 * 1024;
+
 /**
  * 清空某节点历史的动作段。
  *
@@ -31,6 +35,15 @@ export const DEFAULT_NODE_HISTORY_API_BASE_PATH = "/api/canvas-node-history";
  * `:entryId` 详情路由（两段/四段）冲突，也不需要额外的占位 entry。
  */
 export const CLEAR_ACTION = "clear";
+
+/**
+ * 同类型节点合并的动作段
+ * （change: 2026-10-27-merge-same-type-node-history，任务 3.4）。
+ *
+ * `POST /api/canvas-node-history/:canvasId/:targetNodeId/merge`，body 携带来源节点与
+ * 操作身份。与 `clear` 一样是**写操作**，先过 `authorizeWrite` 再读取任何状态。
+ */
+export const MERGE_ACTION = "merge";
 
 /** 同源受控媒体路径前缀（由 ingress 路由到 Media Service）。 */
 export const CANVAS_NODE_HISTORY_MEDIA_BASE = "/api/media";
@@ -164,6 +177,27 @@ export function createNodeHistoryRequestHandler(options: NodeHistoryRequestHandl
         return true;
       }
 
+      // 同类型节点合并（写操作）：与 clear 同一动作段位，先过写权限再读任何状态。
+      if (segments.length === 3 && entryId === MERGE_ACTION) {
+        if (req.method !== "POST") {
+          sendError(res, 405, "NODE_HISTORY_INVALID", "方法不允许");
+          return true;
+        }
+        if (options.authorizeWrite) {
+          const decision = await options.authorizeWrite({ canvasId, req });
+          if (!decision.ok) {
+            log({ event: "node-history-merge-denied", status: decision.status, code: decision.code });
+            sendError(res, decision.status, decision.code, decision.message);
+            return true;
+          }
+        }
+        if (options.canvasExists && !(await options.canvasExists(canvasId, req))) {
+          sendError(res, 404, "NODE_HISTORY_NOT_FOUND", "历史条目不存在");
+          return true;
+        }
+        return await handleMerge(res, options, canvasId, nodeId, req);
+      }
+
       // 归属校验前置：画布不存在或无权读取时立即返回稳定 not-found。
       if (options.canvasExists && !(await options.canvasExists(canvasId, req))) {
         sendError(res, 404, "NODE_HISTORY_NOT_FOUND", "历史条目不存在");
@@ -229,6 +263,114 @@ export function createNodeHistoryRequestHandler(options: NodeHistoryRequestHandl
       return true;
     }
   };
+}
+
+/**
+ * 合并请求处理：严格校验 body 形状，再交给应用服务。
+ *
+ * body 只允许 `sourceNodeId` / `operationId` / 可选期望身份；缺字段或非对象返回 400，
+ * 不执行任何历史或画布写入。
+ */
+async function handleMerge(
+  res: ServerResponse,
+  options: NodeHistoryRequestHandlerOptions,
+  canvasId: string,
+  targetNodeId: string,
+  req: IncomingMessage
+): Promise<boolean> {
+  let body: unknown;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    sendError(res, 400, "NODE_HISTORY_INVALID", error instanceof Error ? error.message : "请求体非法");
+    return true;
+  }
+  const input = decodeMergeBody(body);
+  if (!input.ok) {
+    sendError(res, 400, "NODE_HISTORY_INVALID", input.message);
+    return true;
+  }
+  const outcome = await options.service.mergeNodeHistory({
+    canvasId,
+    targetNodeId,
+    sourceNodeId: input.value.sourceNodeId,
+    operationId: input.value.operationId,
+    ...(input.value.expectedSourceCurrentIdentity !== undefined
+      ? { expectedSourceCurrentIdentity: input.value.expectedSourceCurrentIdentity }
+      : {}),
+    ...(input.value.expectedTargetCurrentIdentity !== undefined
+      ? { expectedTargetCurrentIdentity: input.value.expectedTargetCurrentIdentity }
+      : {})
+  });
+  if (!outcome.ok) {
+    const mapped = mergeErrorResponse(outcome.code);
+    sendError(res, mapped.status, mapped.code, outcome.message);
+    return true;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    targetNodeId: outcome.targetNodeId,
+    sourceNodeId: outcome.sourceNodeId,
+    revision: outcome.revision,
+    copied: outcome.copied,
+    duplicates: outcome.duplicates,
+    evicted: outcome.evicted,
+    alreadyMerged: outcome.alreadyMerged
+  });
+  return true;
+}
+
+function decodeMergeBody(body: unknown):
+  | { ok: true; value: { sourceNodeId: string; operationId: string; expectedSourceCurrentIdentity?: string; expectedTargetCurrentIdentity?: string } }
+  | { ok: false; message: string } {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, message: "请求体必须是对象" };
+  }
+  const record = body as Record<string, unknown>;
+  const sourceNodeId = typeof record.sourceNodeId === "string" ? record.sourceNodeId.trim() : "";
+  const operationId = typeof record.operationId === "string" ? record.operationId.trim() : "";
+  if (sourceNodeId === "") return { ok: false, message: "sourceNodeId 不能为空" };
+  if (operationId === "") return { ok: false, message: "operationId 不能为空" };
+  const expectedSourceCurrentIdentity = optionalString(record.expectedSourceCurrentIdentity);
+  const expectedTargetCurrentIdentity = optionalString(record.expectedTargetCurrentIdentity);
+  if (expectedSourceCurrentIdentity === false || expectedTargetCurrentIdentity === false) {
+    return { ok: false, message: "expectedCurrentIdentity 必须是非空字符串" };
+  }
+  return {
+    ok: true,
+    value: {
+      sourceNodeId,
+      operationId,
+      ...(expectedSourceCurrentIdentity !== undefined ? { expectedSourceCurrentIdentity } : {}),
+      ...(expectedTargetCurrentIdentity !== undefined ? { expectedTargetCurrentIdentity } : {})
+    }
+  };
+}
+
+/** `undefined` 表示未提供；`false` 表示提供了非法值。 */
+function optionalString(value: unknown): string | undefined | false {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || value.trim() === "") return false;
+  return value.trim();
+}
+
+/** 合并领域 code → 稳定 HTTP 状态与错误码（design D8）。 */
+function mergeErrorResponse(code: string): { status: number; code: string } {
+  switch (code) {
+    case "unknown-node":
+    case "canvas-not-found":
+      return { status: 404, code: "NODE_HISTORY_NOT_FOUND" };
+    case "invalid-node-type":
+    case "malformed-request":
+      return { status: 400, code: "NODE_HISTORY_INVALID" };
+    case "conflict":
+      return { status: 409, code: "NODE_HISTORY_CONFLICT" };
+    case "unrecoverable":
+    case "no-current-version":
+      return { status: 409, code: "NODE_HISTORY_UNRECOVERABLE" };
+    default:
+      return { status: 503, code: "NODE_HISTORY_MERGE_FAILED" };
+  }
 }
 
 async function handleApply(
@@ -358,6 +500,7 @@ function statusForCode(code: string): number {
     case "NODE_HISTORY_INVALID":
     case "LIMIT_EXCEEDED":
       return 400;
+    case "NODE_HISTORY_MERGE_FAILED":
     case "NOT_READY":
     case "SCHEMA_VERSION_UNSUPPORTED":
       return 503;
@@ -375,6 +518,23 @@ function clearErrorCode(code: string): string {
     case "invalid-node-type":
     case "malformed-request": return "NODE_HISTORY_INVALID";
     default: return "NODE_HISTORY_INVALID";
+  }
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.byteLength;
+    if (size > MAX_MERGE_BODY_BYTES) throw new Error("请求体过大");
+    chunks.push(buffer);
+  }
+  if (chunks.length === 0) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new Error("请求体不是合法 JSON");
   }
 }
 

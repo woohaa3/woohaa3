@@ -57,7 +57,8 @@ export function useFocusLayout(config: FocusLayoutConfig): void {
     config.toolbar,
     typeof config.player === "function" ? 0 : config.player,
     config.panelMaxWidth,
-    config.panelMaxHeight
+    config.panelMaxHeight,
+    config.chromeOwner
   ]);
   useLayoutEffect(() => {
     setConfig?.(snapshot);

@@ -94,20 +94,19 @@ describe("后台资源与认证边界（任务 2.3）", () => {
 });
 
 describe("dependency isolation（任务 2.1/2.3）", () => {
-  it("可选依赖缺失不阻塞 activation", async () => {
+  it("只有 requiredDependencies 参与准入，其余能力缺失不阻塞 activation", async () => {
     const host = createApplicationExtensionHost();
     // 先提供必需依赖 core。
     await host.activate({ extensionId: "core-owner", activate: (h) => { h.registerCapability({ id: "core", value: "core" }); } });
     const definition: ApplicationBackendExtensionDefinition = {
-      extensionId: "optional-dep",
-      optionalDependencies: ["not-there"],
+      extensionId: "required-only",
       requiredDependencies: ["core"],
       activate: (h) => {
-        h.registerCapability({ id: "optional-dep-cap", value: "v" });
+        h.registerCapability({ id: "required-only-cap", value: "v" });
       }
     };
     const result = await host.activate(definition);
     expect(result.ok).toBe(true);
-    expect(host.hasCapability("optional-dep-cap")).toBe(true);
+    expect(host.hasCapability("required-only-cap")).toBe(true);
   });
 });

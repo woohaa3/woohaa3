@@ -5,7 +5,7 @@
  * （`MODELS_MANAGE_ACTION`）、把 `refresh()` 的结果按 `{ modelCount }` / `{ message }` 回写。
  * 5 个 provider 的 `authorizeRefresh` 曾经**逐字节相同**，收敛到这里。
  *
- * 路由路径由插件自己声明（也用于 `HostExtensionPlugin.modelRefresh` 的设置面展示），
+ * 路由路径由插件自己声明（也用于 `ExtensionPlugin.modelRefresh` 的设置面展示），
  * 宿主只负责按声明渲染，不硬编码任何 Provider。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";

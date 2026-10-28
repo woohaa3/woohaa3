@@ -6,6 +6,7 @@
  * 前端静态资源由部署侧入口（`scripts/serve-web.mjs`）加载并把同源 API/WS 交给本进程。
  */
 import http from "node:http";
+import fs from "node:fs";
 import { HOST_RESTART_EXIT_CODE } from "./api/host-restart-api.js";
 import { createBackendService } from "./composition.js";
 import { beginBoot, bootFailureFromLog, formatBootFailure, markReady, recordBootFailure } from "./host/boot-state.js";
@@ -106,18 +107,37 @@ async function main(): Promise<void> {
   });
 
   let stopping = false;
+  let restartEntryTouched = false;
+  const exitProcess = (exitCode: number) => {
+    // Node's --watch supervisor treats exit code 75 as a failed child and waits for a
+    // file change instead of exiting. Touch the entry in dev mode so it relaunches the
+    // backend after a controlled restart (the production launcher is unaffected).
+    if (exitCode === HOST_RESTART_EXIT_CODE && process.env.WOOHAA3_DEV_WATCH === "1" && !restartEntryTouched) {
+      restartEntryTouched = true;
+      const entry = process.argv[1];
+      if (entry) {
+        try {
+          const now = new Date();
+          fs.utimesSync(entry, now, now);
+        } catch {
+          // Restart must still complete when the entry is read-only or unavailable.
+        }
+      }
+    }
+    process.exit(exitCode);
+  };
   // 受控重启与终止信号走同一条排空关闭，只是退出码不同（75 = 请求重启，
   // change: 2026-10-21-harden-extension-fault-isolation，D6）。
   const shutdown = (exitCode = 0) => {
     if (stopping) return;
     stopping = true;
     void service.close().finally(() => {
-      server.close(() => process.exit(exitCode));
+      server.close(() => exitProcess(exitCode));
       // 浏览器的 keep-alive 连接会让 close 回调一直不来：排空完成后不再接新请求，直接断开剩余连接。
       server.closeIdleConnections?.();
       setTimeout(() => {
         server.closeAllConnections?.();
-        process.exit(exitCode);
+        exitProcess(exitCode);
       }, 5000).unref();
     });
   };

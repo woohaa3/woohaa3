@@ -8,7 +8,7 @@
  * 3. loopback 之外的 origin、站内相对地址、没有公开回调的宿主一律 unsupported（回退短码）。
  */
 import { describe, expect, it } from "vitest";
-import { createMemorySessionStore, createRemoteServerExtension, type RemoteSessionStore } from "../src/backend/index.js";
+import { createMemorySessionStore, createRemoteServerPlugin, type RemoteSessionStore } from "../src/backend/index.js";
 import {
   REMOTE_SERVER_OAUTH_CALLBACK_ROUTE,
   REMOTE_SERVER_OAUTH_DONE_ROUTE,
@@ -37,23 +37,41 @@ function createHost(input: { basePath?: string; raw?: boolean; canvas?: Record<s
     requestNodeRun: async () => ({ ok: false as const, code: "unavailable", message: "test" }),
     requestNodeCancel: async () => ({ ok: false as const, code: "unavailable", message: "test" })
   };
+  const undos: Array<() => void> = [];
   const host: Record<string, unknown> = {
     deployment: { basePath: input.basePath ?? "" },
-    registerCapability: () => undefined,
-    config: { values: () => ({}), configVersion: () => 1, secretRefs: () => [], desiredEnabled: () => true },
-    logger: (event: Record<string, unknown>) => {
-      logEvents.push(event);
-    },
+    log: { scope: () => (event: Record<string, unknown>) => { logEvents.push(event); } },
+    capabilities: { register: () => () => undefined },
     services: { canvas },
-    registerHandler: (registration: { route: string; handle: (request: { body: unknown; context: unknown }) => Promise<HandlerResult> | HandlerResult }) => {
-      handlers.set(registration.route, registration.handle);
+    storage: { register: () => () => undefined, unregister: () => undefined },
+    telemetry: { registerExport: () => () => undefined, emit: () => undefined, query: async () => ({ events: [], nextCursor: null }), unregisterExport: () => undefined },
+    generation: {
+      register: () => () => undefined,
+      unregister: () => undefined,
+      list: () => [],
+      resolve: () => undefined,
+      conversions: () => [],
+      registerConversion: () => () => undefined
+    },
+    marketplace: { register: () => () => undefined, unregister: () => undefined, list: () => [], resolve: () => undefined },
+    effect: (run: () => (() => void) | void) => {
+      const undo = run();
+      if (typeof undo === "function") undos.push(undo);
+    },
+    webServer: {
+      register: (registration: { route: string; handle: (request: { body: unknown; context: unknown }) => Promise<HandlerResult> | HandlerResult }) => {
+        handlers.set(registration.route, registration.handle);
+      },
+      registerHttp: () => undefined,
+      ...(input.raw !== false
+        ? {
+            registerRawHttp: (registration: { route: string; handle: (req: unknown, res: unknown) => Promise<void> }) => {
+              rawHandlers.set(registration.route, registration.handle);
+            }
+          }
+        : {})
     }
   };
-  if (input.raw !== false) {
-    host.registerRawHttpHandler = (registration: { route: string; handle: (req: unknown, res: unknown) => Promise<void> }) => {
-      rawHandlers.set(registration.route, registration.handle);
-    };
-  }
   const call = async (route: string, body: unknown = {}): Promise<HandlerResult> => {
     const handler = handlers.get(route);
     if (!handler) throw new Error("未注册 handler：" + route);
@@ -101,13 +119,13 @@ function activate(options: {
     ...(options.raw !== undefined ? { raw: options.raw } : {}),
     ...(options.canvas !== undefined ? { canvas: options.canvas } : {})
   });
-  const definition = createRemoteServerExtension({
+  const definition = createRemoteServerPlugin({
     deployment: () => options.deployment,
     fetchImpl: options.fetchImpl,
     ...(options.now ? { now: options.now } : {}),
     ...(options.store ? { store: options.store } : {})
   });
-  definition.activate(fixture.host as never);
+  void definition.apply(fixture.host as never, {} as never);
   return fixture;
 }
 

@@ -39,7 +39,7 @@ function copyFixture(t, name) {
 
 test("rewriteDescriptorForPackage：后端模块改写到单文件产物，补齐 version / engines", () => {
   const next = rewriteDescriptorForPackage(
-    { schemaVersion: 1, extensionId: "x", hostPlugin: { module: "./backend", factory: "f", kind: "provider" }, metadata: { module: "./shared", export: "M" }, publicRoutes: [{ publicPathExport: "P", module: "./shared", route: "x", methods: ["GET"] }] },
+    { schemaVersion: 1, extensionId: "x", hostPlugin: { module: "./backend", factory: "f", features: ["provider"] }, metadata: { module: "./shared", export: "M" }, publicRoutes: [{ publicPathExport: "P", module: "./shared", route: "x", methods: ["GET"] }] },
     { version: "1.2.3", engines: { hostAbi: "^1.0.0", sdkAbi: "^1.0.0", protocolVersion: 1 }, hasBackend: true }
   );
   assert.equal(next.hostPlugin.module, "./backend-dist/entry");
@@ -87,8 +87,8 @@ test("打包含后端 fixture：签名包可解包、校验、通过受管预检
   assert.deepEqual(host.managedRejected, []);
   // C 方向：受管根与内置根一样被 import，第一个 provider 插件就是它本身。
   const plugins = await host.createHostPlugins({});
-  const plugin = plugins.provider.find((entry) => entry.name === "fixture-echo-provider");
-  assert.ok(plugin, "受管 Provider 应作为普通插件进入 provider 桶");
+  const plugin = plugins.plugins.find((entry) => entry.name === "fixture-echo-provider");
+  assert.ok(plugin, "受管 Provider 应作为普通插件进入扩展层");
   assert.deepEqual(plugin.origin, { managed: true, rootWritable: false });
   assert.equal(plugin.configPrefix, "providers.fixture-echo");
   assert.ok(host.metadata.some((entry) => entry.extensionId === "fixture-echo-provider"));

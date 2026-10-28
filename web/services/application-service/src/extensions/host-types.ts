@@ -17,6 +17,21 @@ import type {
 } from "./contract.js";
 import type { ApplicationExtensionAuthLevel, ApplicationExtensionHostIdentity } from "@woohaa3/contracts";
 
+/**
+ * 一个扩展可用的全部注册面。
+ *
+ * 装载器把它并进扩展的 Cordis Context：这样走 Cordis 装载的扩展与 backend 激活的扩展
+ * 拿到的是同一组能力，`backend` 这种形态才有条件被删掉。
+ */
+export type PluginRegistrationSurface = {
+  webServer?: import("@woohaa3/contracts").HostWebServerService;
+  capabilities?: import("@woohaa3/contracts").HostCapabilityService;
+  services?: ApplicationExtensionServices;
+  diagnostics?: import("@woohaa3/contracts").ApplicationBackendDiagnostics;
+  /** 撤销本次注册（幂等）；装载器在插件停用时调用。 */
+  release(): void;
+};
+
 export type ExtensionHostErrorCode =
   | "duplicate-capability"
   | "duplicate-handler"
@@ -143,16 +158,23 @@ export const REJECTING_SERVICES: ApplicationExtensionServices = {
   }
 };
 
-export type OwnerState = {
+/**
+ * 一个扩展的注册记录：路由、能力与生命周期。
+ *
+ * **只有一张表**，按记录键索引（`<extensionId>`，版本化实例为 `<extensionId>::<configVersion>`）。
+ * 是否「来自 backend 激活」不是一个类型差别：走 Cordis 装载的扩展同样有这条记录，
+ * 只是生命周期字段为空。分派只关心「谁注册了这条路由」。
+ */
+export type ExtensionRecord = {
   extensionId: string;
-  /** 版本化实例的不可变配置版本；非版本化 activation 为 0。 */
-  configVersion: number;
-  /** public 实例是当前新工作入口；recovery 实例只保留内部恢复贡献。 */
-  mode: "public" | "recovery";
-  capabilities: Map<string, unknown>;
+  /** 缺省视作 `public`。 */
+  mode?: "public" | "recovery";
+  /** 版本化实例的不可变配置版本；非版本化装载缺省。 */
+  configVersion?: number;
   handlers: Map<string, ApplicationBackendHandlerRegistration>;
   httpHandlers: Map<string, ApplicationBackendHttpHandlerRegistration>;
   rawHttpHandlers: Map<string, ApplicationBackendRawHttpHandlerRegistration>;
+  capabilities: Map<string, unknown>;
   resources: Map<string, ApplicationBackendResource>;
   startedResources: ApplicationBackendResource[];
   /** 本 activation 登记的生成 Provider（rollback 时释放）。 */
@@ -181,6 +203,9 @@ export type OwnerState = {
   activation?: ApplicationBackendActivation;
   order: number;
 };
+
+/** @deprecated 名字保留仅为减少改动面；语义已统一为 `ExtensionRecord`。 */
+export type OwnerState = ExtensionRecord;
 
 export const DEFAULT_HANDLER_STATUS = 200;
 

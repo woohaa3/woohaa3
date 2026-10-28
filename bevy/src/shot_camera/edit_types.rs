@@ -149,7 +149,7 @@ pub fn cancel_edit(session: &ShotEditSession) -> ShotEditEvent {
     }
 }
 
-/// reset：回到给定默认 pose（清空 focus offset，仰角回到默认 45°）。
+    /// reset：回到给定默认 pose（清空 focus offset，仰角回到全局默认值）。
 pub fn reset_pose(azimuth: f32, distance: f32) -> ShotCameraPose {
     ShotCameraPose::new(azimuth, distance)
 }

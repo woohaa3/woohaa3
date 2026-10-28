@@ -17,6 +17,7 @@ import path from "node:path";
 import { createServer } from "node:net";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { AGENT_PROCESS_SUPERVISOR } from "./process-supervisor.js";
+import { createSupervisorProcessManager } from "./supervisor-client.js";
 
 export type SpawnSpec = {
   command: string;
@@ -72,6 +73,8 @@ export type ProcessManagerOptions = {
   allocatePort?: (input: { min: number; max: number; used: ReadonlySet<number> }) => number | null | Promise<number | null>;
   now?: () => number;
   logger?: (event: Record<string, unknown>) => void;
+  /** Stable worktree Agent Supervisor; when present backend reloads detach instead of killing CLI processes. */
+  supervisor?: { socketPath: string; token: string; workspaceKey: string; portRange: { min: number; max: number } };
 };
 
 export type ProcessHandle = {
@@ -100,7 +103,7 @@ export type ProcessManager = {
   /** 运行依赖探测（缺 CLI/版本不支持准确报错；不启动进程）。 */
   probe: (adapterId: string, options?: { requiredVersion?: string }) => ProcessProbe | Promise<ProcessProbe>;
   /** 确保专用进程存在（幂等；已有句柄直接复用）。 */
-  ensure: (input: { adapterId: string; owner: string; connectionId: string; args: readonly string[]; kind: "stdio" | "http"; env?: Record<string, string> }) => Promise<ProcessHandle>;
+  ensure: (input: { adapterId: string; owner: string; connectionId: string; requestId?: string; args: readonly string[]; kind: "stdio" | "http"; env?: Record<string, string> }) => Promise<ProcessHandle>;
   /** 取得既有句柄（无则 null）。 */
   get: (input: { adapterId: string; owner: string; connectionId: string }) => ProcessHandle | null;
   /** 停止并回收指定句柄（幂等；只影响本扩展拥有的进程）。 */
@@ -150,6 +153,7 @@ export function createLineStreams(
 }
 
 export function createProcessManager(options: ProcessManagerOptions): ProcessManager {
+  if (options.supervisor) return createSupervisorProcessManager(options, options.supervisor);
   const log = options.logger ?? (() => undefined);
   const now = options.now ?? Date.now;
   const handles = new Map<string, { handle: ProcessHandle; process: SpawnedProcess | null }>();

@@ -30,7 +30,7 @@ import {
   parseSessionExpiry,
   type RemoteSessionSource
 } from "../src/backend/session.js";
-import { createRemoteServerExtension } from "../src/backend/index.js";
+import { createRemoteServerPlugin } from "../src/backend/index.js";
 
 const CONFIG: ServerStorageConfig = {
   serverUrl: "https://canvas.example.com",
@@ -346,20 +346,32 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
     const host = {
       extensionId: "remote-server",
       host: "application",
-      config: { values: () => ({}), configVersion: () => 1, secretRefs: () => [], desiredEnabled: () => true },
+      log: { scope: () => (event: Record<string, unknown>) => logs.push(event) },
+      capabilities: { register: () => () => undefined },
       services: {},
-      work: { admit: () => ({ ok: false, reason: "not-ready" }), resume: () => null, activeWorkCount: () => 0 },
-      logger: (event: Record<string, unknown>) => logs.push(event),
-      registerCapability: () => undefined,
-      registerHandler: () => undefined,
-      registerRawHttpHandler: () => undefined,
-      registerResource: () => undefined,
+      effect: () => undefined,
+      generation: {
+        register: () => () => undefined,
+        unregister: () => undefined,
+        list: () => [],
+        resolve: () => undefined,
+        conversions: () => [],
+        registerConversion: () => () => undefined
+      },
+      marketplace: { register: () => () => undefined, unregister: () => undefined, list: () => [], resolve: () => undefined },
+      telemetry: { registerExport: () => () => undefined, unregisterExport: () => undefined },
+      webServer: { register: () => undefined, registerHttp: () => undefined, registerRawHttp: () => undefined },
       ...(options.registerStorage === false
         ? {}
         : {
-            registerStorage: (backend: StorageBackend) => registered.push(backend),
-            unregisterStorage: (backendId: string) => {
-              unregistered.push(backendId);
+            storage: {
+              register: (backend: StorageBackend) => {
+                registered.push(backend);
+                return () => undefined;
+              },
+              unregister: (backendId: string) => {
+                unregistered.push(backendId);
+              }
             }
           })
     };
@@ -368,9 +380,9 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
 
   it("缺 serverUrl 时只记日志、不注册后端，且日志里没有凭证值", async () => {
     const fake = fakeHost({});
-    await createRemoteServerExtension({
+    await createRemoteServerPlugin({
       deployment: () => ({ serverUrl: null, deviceToken: null, keyPrefix: "" })
-    }).activate(fake.host);
+    }).apply(fake.host as never, {} as never);
     expect(fake.registered).toEqual([]);
     expect(fake.logs).toContainEqual({ event: "server-storage-unconfigured", missing: ["serverUrl"] });
     expect(JSON.stringify(fake.logs)).not.toContain("device-token-secret");
@@ -378,9 +390,9 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
 
   it("配置齐备时注册 backendId=server（带 presign，能当主存储或 expose）", async () => {
     const fake = fakeHost({});
-    await createRemoteServerExtension({
+    await createRemoteServerPlugin({
       deployment: () => ({ serverUrl: "https://canvas.example.com", deviceToken: "device-token-secret", keyPrefix: "tenant-a" })
-    }).activate(fake.host);
+    }).apply(fake.host as never, {} as never);
 
     expect(fake.registered.map((backend) => backend.backendId)).toEqual(["server"]);
     expect(fake.registered[0]?.label).toBe("服务端托管存储");
@@ -396,9 +408,9 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
 
   it("只配了 serverUrl（没有 deviceToken）时仍注册；日志只记 credential=none，不记值", async () => {
     const fake = fakeHost({});
-    await createRemoteServerExtension({
+    await createRemoteServerPlugin({
       deployment: () => ({ serverUrl: "https://canvas.example.com", deviceToken: null, keyPrefix: "" })
-    }).activate(fake.host);
+    }).apply(fake.host as never, {} as never);
 
     expect(fake.registered.map((backend) => backend.backendId)).toEqual(["server"]);
     expect(fake.logs).toContainEqual({
@@ -422,10 +434,10 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
       displayName: null,
       expiresAt: Date.now() + 3_600_000
     });
-    await createRemoteServerExtension({
+    await createRemoteServerPlugin({
       deployment: () => ({ serverUrl: null, deviceToken: null, keyPrefix: "tenant-a" }),
       store
-    }).activate(fake.host);
+    }).apply(fake.host as never, {} as never);
 
     expect(fake.registered.map((backend) => backend.backendId)).toEqual(["server"]);
     // 地址来自会话：排障时「配置没生效」与「靠会话顶上」必须能从日志分开。
@@ -448,10 +460,10 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
       displayName: null,
       expiresAt: Date.now() + 3_600_000
     });
-    await createRemoteServerExtension({
+    await createRemoteServerPlugin({
       deployment: () => ({ serverUrl: "https://canvas.example.com", deviceToken: null, keyPrefix: "" }),
       store
-    }).activate(fake.host);
+    }).apply(fake.host as never, {} as never);
 
     expect(fake.logs).toContainEqual({
       event: "server-storage-activated",
@@ -477,22 +489,28 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
       ...(fake.host as unknown as Record<string, unknown>),
       // 会话变化会顺带通知宿主重解析同步上游；测试宿主给一个空实现。
       services: { canvas: { refreshSyncUpstream: async () => undefined } },
-      logger: (event: Record<string, unknown>) => {
-        logs.push(event);
-        fake.logs.push(event);
+      log: {
+        scope: () => (event: Record<string, unknown>) => {
+          logs.push(event);
+          fake.logs.push(event);
+        }
       },
-      registerHandler: (registration: { route: string; handle: (input: unknown) => Promise<unknown> }) => {
-        // 只记登出 handler：它走 sessionSource.save(null)，会触发 onSessionChanged。
-        if (registration.route === REMOTE_SERVER_LOGOUT_ROUTE) handler.handle = registration.handle;
+      webServer: {
+        register: (registration: { route: string; handle: (input: unknown) => Promise<unknown> }) => {
+          // 只记登出 handler：它走 sessionSource.save(null)，会触发 onSessionChanged。
+          if (registration.route === REMOTE_SERVER_LOGOUT_ROUTE) handler.handle = registration.handle;
+        },
+        registerHttp: () => undefined,
+        registerRawHttp: () => undefined
       }
     };
-    const extension = createRemoteServerExtension({
+    const extension = createRemoteServerPlugin({
       deployment: () => ({ serverUrl: null, deviceToken: null, keyPrefix: "" }),
       store,
       // 登出不打远端：注入一个直接成功的 fake，只关心「会话清空 → 后端注销」。
       fetchImpl: (async () => new Response("{}", { status: 200 })) as typeof fetch
     });
-    await extension.activate(host as never);
+    await extension.apply(host as never, {} as never);
     expect(fake.registered).toHaveLength(1);
     expect(handler.handle).not.toBeNull();
 
@@ -507,9 +525,9 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
   it("宿主没有存储扩展点时记日志跳过，不抛错（纯本地宿主本来就没有这个后端）", async () => {
     const fake = fakeHost({ registerStorage: false });
     await expect(
-      createRemoteServerExtension({
+      createRemoteServerPlugin({
         deployment: () => ({ serverUrl: "https://canvas.example.com", deviceToken: "t", keyPrefix: "" })
-      }).activate(fake.host)
+      }).apply(fake.host as never, {} as never)
     ).resolves.toBeUndefined();
     expect(fake.registered).toEqual([]);
     expect(fake.logs).toContainEqual({ event: "server-storage-unavailable", reason: "宿主没有提供存储扩展点" });

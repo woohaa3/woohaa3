@@ -19,6 +19,7 @@ import {
   type AgentCanvasGraph
 } from "@woohaa3/contracts";
 import type { CanvasRoom } from "../sync/index.js";
+import type { CanvasTaskCatalog } from "@woohaa3/contracts";
 import type { AgentDeltaJournal } from "./delta-journal.js";
 import type { CanvasAuthorizer, CanvasDirectory } from "./authorization.js";
 import { AgentCanvasAuthoringService, type AgentApplyInput, type AgentApplyOutcome } from "./service.js";
@@ -33,6 +34,8 @@ export type AgentCanvasReadDependencies = {
   authoring: AgentCanvasAuthoringService;
   /** Canvas script 能力面；未装配时脚本路由返回明确 unavailable（fail-closed）。 */
   script?: CanvasScriptService;
+  /** 任务模型目录：能力响应向 Agent 暴露可执行的媒体模型与默认值（不含凭据）。 */
+  resolveCatalog?: () => Promise<CanvasTaskCatalog>;
   /** 旧客户端省略 canvasId 时的显式默认画布；仅 loopback 开发提供。 */
   defaultCanvasId?: string;
 };
@@ -137,22 +140,37 @@ export class AgentCanvasInternalService {
    * 不以普通 JS 执行或内存回执静默替代。
    */
   async scriptCapability(input: { principalId: string; canvasId?: string }): Promise<
-    | { ok: true; available: boolean; descriptor?: ReturnType<typeof canvasScriptApiDescriptor>; nodeKinds?: ReturnType<CanvasScriptService["availableNodeKinds"]>; reason?: string }
+    | { ok: true; available: boolean; descriptor?: ReturnType<typeof canvasScriptApiDescriptor>; nodeKinds?: ReturnType<CanvasScriptService["availableNodeKinds"]>; reason?: string; models?: { available: boolean; reason?: string; items: Array<{ modelKey: string; modelType: string; title: string; default: boolean }> } }
     | { ok: false; code: string; message: string }
   > {
     const resolved = this.resolveCanvasId(input.canvasId);
     if (!resolved.ok) return resolved;
     const authorized = await this.authorize(input.principalId, resolved.canvasId, "read");
     if (!authorized.ok) return authorized;
+    const models = this.deps.resolveCatalog
+      ? await this.deps.resolveCatalog().then((catalog) => ({
+          available: catalog.available && catalog.models.some((model) => model.modelType !== "language"),
+          ...(catalog.reason ? { reason: catalog.reason } : {}),
+          items: catalog.models
+            .filter((model) => model.modelType !== "language")
+            .map((model) => ({
+              modelKey: model.modelKey,
+              modelType: model.modelType,
+              title: model.title,
+              default: catalog.defaultModels[model.modelType as keyof typeof catalog.defaultModels] === model.modelKey
+            }))
+        })).catch(() => ({ available: false, reason: "任务模型目录读取失败", items: [] }))
+      : { available: false, reason: "任务模型目录未接入", items: [] };
     const script = this.deps.script;
-    if (!script) return { ok: true, available: false, reason: "Canvas script 能力未装配" };
+    if (!script) return { ok: true, available: false, reason: "Canvas script 能力未装配", models };
     const capability = script.capability();
-    if (!capability.available) return { ok: true, available: false, reason: capability.reason };
+    if (!capability.available) return { ok: true, available: false, reason: capability.reason, models };
     return {
       ok: true,
       available: true,
       descriptor: canvasScriptApiDescriptor(),
-      nodeKinds: script.availableNodeKinds()
+      nodeKinds: script.availableNodeKinds(),
+      models
     };
   }
 

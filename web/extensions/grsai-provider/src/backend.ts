@@ -8,7 +8,7 @@
 import {
   defineConfigSchema,
   type GenerationProvider,
-  type HostExtensionPlugin,
+  type ExtensionPlugin,
 } from "@woohaa3/contracts";
 import { discoverGrsaiModels, grsaiModelDefinitions, type GrsaiModel } from "./discovery.js";
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
@@ -108,7 +108,7 @@ export function createGrsaiRegistration(input: GrsaiRegistrationInput): { regist
   };
 }
 
-export function createGrsaiProviderPlugin(deps: GrsaiPluginDependencies = {}): HostExtensionPlugin<typeof GRSAI_CONFIG.fields> {
+export function createGrsaiProviderPlugin(deps: GrsaiPluginDependencies = {}): ExtensionPlugin<typeof GRSAI_CONFIG.fields> {
   return {
     name: GRSAI_PLUGIN_ID,
     label: "grsai",

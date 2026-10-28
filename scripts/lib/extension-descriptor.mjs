@@ -12,17 +12,42 @@ import path from "node:path";
 import { EXTENSION_DESCRIPTOR_NAME, ExtensionScanError } from "./extension-scan.mjs";
 
 export const EXTENSION_DESCRIPTOR_SCHEMA_VERSION = 1;
-export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "migrate", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "icon", "required"];
+export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "migrate", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "content", "icon", "required"];
 export const EXTENSION_CAPABILITY_KINDS = ["capability", "handler"];
 export const EXTENSION_CAPABILITY_AUTH = ["public", "authenticated"];
 export const EXTENSION_ROUTE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 /**
- * 扩展层 Cordis 插件的种类（`hostPlugin.kind`）。
+ * 扩展层 Cordis 插件提供的功能面（`hostPlugin.features`，**可多选**）。
  *
- * `provider` 注入 `ctx.generation`（模型 Provider），`storage` 注入 `ctx.storage`（存储后端）。
- * 两者都是宿主插件树扩展层的插件，由声明驱动装配——宿主不再维护逐插件的手写注册表。
+ * 一个插件同时提供 Provider、存储后端与市场来源是正常情况，所以这不是单值枚举：
+ * - `provider`：注入 `ctx.generation`（模型 Provider）；
+ * - `storage`：注入 `ctx.storage`（存储后端），**唯一有装载语义的一项**——
+ *   `storage.primary` 指向它时必须就绪，其余并发装载；
+ * - `marketplace-source`：向 `ctx.marketplace` 注册来源（合法性由运行期 origin 判定）。
+ *
+ * 三者互不排斥，也不决定「装了之后能干什么」——能干什么取决于插件实际调用了哪些服务。
+ * 这里只声明「提供哪类功能」，用于装载排序、就绪判定与受管根校验。
  */
-export const EXTENSION_HOST_PLUGIN_KINDS = ["provider", "storage", "marketplace-source"];
+export const EXTENSION_HOST_PLUGIN_FEATURES = ["provider", "storage", "marketplace-source"];
+
+/**
+ * 已废弃、但仍被接受并自动归一的声明字段。
+ *
+ * 保留它们只是为了给**已有扩展**一个过渡期（外部 / 市场扩展不在本仓，改不到）。
+ * 这里只放「读进来就归一」的字段，不复用旧语义：归一后下游只认新字段。
+ *
+ * **删除清单**（检索标记 `deprecated-declaration`）：
+ * 1. 本表里对应条目；
+ * 2. `validateExtensionDescriptor` 里 `hostPlugin.kind` 的归一分支；
+ * 3. `extension-descriptor.test.mjs` 里 `hostPlugin.kind` 的两条用例；
+ * 4. `docs/code-map/extensions.md` 中关于过渡期的说明。
+ *
+ * TODO(remove-after: 2026-12-31)
+ */
+export const EXTENSION_DEPRECATED_DECLARATIONS = Object.freeze({
+  // deprecated-declaration
+  "hostPlugin.kind": "hostPlugin.features"
+});
 
 /**
  * 宿主自身满足的运行环境（change: 2026-10-21-add-extension-marketplace-point，design D4）。
@@ -148,6 +173,10 @@ function validateEngines(engines, errors) {
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const KEBAB_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+const CONTENT_FIELD_NAME = /^[A-Za-z][A-Za-z0-9]*$/;
+const CONTENT_TOOL_NAME = /^[a-z][a-z0-9_]*$/;
+const CONTENT_ROUTE_PREFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
+const CONTENT_KEYS = ["ownedFields", "ownedWireFields", "routePrefix", "mcpTools", "targetModes", "eventOwners"];
 /** 只接受包内相对模块（`./backend` 这类子路径），拒绝 URL/绝对路径/脚本地址。 */
 const PACKAGE_SUBPATH = /^\.\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 /** 品牌图形允许的扩展名（与 contracts 的图标资产白名单一致）。 */
@@ -165,6 +194,45 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function validateContentNames(value, label, pattern, errors) {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== "string" || !pattern.test(item))) {
+    errors.push(`${label} 必须是非空且格式合法的字符串数组`);
+    return;
+  }
+  if (new Set(value).size !== value.length) errors.push(`${label} 不得重复`);
+}
+
+/** 跨扩展的内容声明必须唯一：字段、wire、路由前缀、工具、目标模式与事件归属。 */
+export function contentDeclarationCollisions(registrations) {
+  const owners = new Map();
+  const errors = [];
+  const claim = (kind, name, registration) => {
+    const key = `${kind}\0${name}`;
+    const previous = owners.get(key);
+    if (previous) {
+      errors.push({
+        extensionId: registration.extensionId,
+        directory: registration.directory ?? "",
+        message: `content.${kind}「${name}」与扩展 ${previous} 冲突`
+      });
+      return;
+    }
+    owners.set(key, registration.extensionId);
+  };
+  for (const registration of registrations ?? []) {
+    const content = registration.descriptor?.content;
+    if (!content || typeof content !== "object") continue;
+    for (const name of content.ownedFields ?? []) claim("ownedFields", name, registration);
+    for (const name of content.ownedWireFields ?? []) claim("ownedWireFields", name, registration);
+    if (typeof content.routePrefix === "string") claim("routePrefix", content.routePrefix, registration);
+    for (const name of content.mcpTools ?? []) claim("mcpTools", name, registration);
+    for (const name of content.targetModes ?? []) claim("targetModes", name, registration);
+    for (const name of content.eventOwners ?? []) claim("eventOwners", name, registration);
+  }
+  return errors;
+}
+
 /**
  * 校验一份声明。
  *
@@ -172,6 +240,8 @@ function isNonEmptyString(value) {
  */
 export function validateExtensionDescriptor(value) {
   const errors = [];
+  /** 本次声明里用到的废弃字段（`{ field, replacement }`）；调用方据此告警。 */
+  const deprecations = [];
   if (!isPlainObject(value)) return { ok: false, errors: ["声明必须是 JSON 对象"] };
 
   for (const key of unknownKeys(value, EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS)) {
@@ -274,17 +344,64 @@ export function validateExtensionDescriptor(value) {
     if (!isPlainObject(hostPlugin)) {
       errors.push("hostPlugin 必须是对象");
     } else {
-      for (const key of unknownKeys(hostPlugin, ["module", "factory", "kind", "order", "optional"])) errors.push(`hostPlugin 未知字段：${key}`);
+      for (const key of unknownKeys(hostPlugin, ["module", "factory", "features", "kind", "order", "optional"])) errors.push(`hostPlugin 未知字段：${key}`);
       const moduleValue = hostPlugin.module ?? "./backend";
       if (!isNonEmptyString(moduleValue) || !PACKAGE_SUBPATH.test(moduleValue)) {
         errors.push("hostPlugin.module 必须是包内相对子路径（如 ./backend）");
       }
       if (!isNonEmptyString(hostPlugin.factory) || !IDENTIFIER.test(hostPlugin.factory)) errors.push("hostPlugin.factory 必须是导出函数名");
-      if (!EXTENSION_HOST_PLUGIN_KINDS.includes(hostPlugin.kind)) {
-        errors.push(`hostPlugin.kind 必须是 ${EXTENSION_HOST_PLUGIN_KINDS.join(" / ")}`);
+      // ── deprecated-declaration：`hostPlugin.kind`（单值）已由 `hostPlugin.features` 取代 ──
+      // 删除步骤：删这段、`EXTENSION_DEPRECATED_DECLARATIONS` 里的条目、对应的两条测试。
+      if (hostPlugin.kind !== undefined) {
+        const replacement = EXTENSION_DEPRECATED_DECLARATIONS["hostPlugin.kind"];
+        if (hostPlugin.features !== undefined) {
+          errors.push(`hostPlugin.kind 已废弃，不能与 ${replacement} 同时声明`);
+        } else if (typeof hostPlugin.kind !== "string" || !EXTENSION_HOST_PLUGIN_FEATURES.includes(hostPlugin.kind)) {
+          errors.push(`hostPlugin.kind 取值必须是 ${EXTENSION_HOST_PLUGIN_FEATURES.join(" / ")}（已废弃，改用 ${replacement}）`);
+        } else {
+          // 归一成新字段：下游只认 `features`，不再读 `kind`。
+          value.hostPlugin = { ...hostPlugin, features: [hostPlugin.kind] };
+          delete value.hostPlugin.kind;
+          deprecations.push({ field: "hostPlugin.kind", replacement });
+        }
+      }
+      const declaredFeatures = value.hostPlugin?.features ?? hostPlugin.features;
+      // `features` 可省略（＝不提供具名功能面）或为数组；重复项视为声明错误。
+      if (declaredFeatures !== undefined) {
+        if (!Array.isArray(declaredFeatures)) {
+          errors.push("hostPlugin.features 必须是数组");
+        } else {
+          const seen = new Set();
+          for (const feature of declaredFeatures) {
+            if (!EXTENSION_HOST_PLUGIN_FEATURES.includes(feature)) {
+              errors.push(`hostPlugin.features 取值必须是 ${EXTENSION_HOST_PLUGIN_FEATURES.join(" / ")}`);
+              continue;
+            }
+            if (seen.has(feature)) errors.push(`hostPlugin.features 重复：${feature}`);
+            seen.add(feature);
+          }
+        }
       }
       if (hostPlugin.order !== undefined && !Number.isFinite(hostPlugin.order)) errors.push("hostPlugin.order 必须是数字");
       if (hostPlugin.optional !== undefined && typeof hostPlugin.optional !== "boolean") errors.push("hostPlugin.optional 必须是布尔值");
+    }
+  }
+
+  /** 内容贡献声明：字段、wire、路由前缀、工具名与目标身份，供预检做格式和唯一性校验。 */
+  const content = value.content;
+  if (content !== undefined) {
+    if (!isPlainObject(content)) {
+      errors.push("content 必须是对象");
+    } else {
+      for (const key of unknownKeys(content, CONTENT_KEYS)) errors.push(`content 未知字段：${key}`);
+      validateContentNames(content.ownedFields, "content.ownedFields", CONTENT_FIELD_NAME, errors);
+      validateContentNames(content.ownedWireFields, "content.ownedWireFields", CONTENT_FIELD_NAME, errors);
+      validateContentNames(content.mcpTools, "content.mcpTools", CONTENT_TOOL_NAME, errors);
+      validateContentNames(content.targetModes, "content.targetModes", KEBAB_ID, errors);
+      validateContentNames(content.eventOwners, "content.eventOwners", KEBAB_ID, errors);
+      if (content.routePrefix !== undefined && (typeof content.routePrefix !== "string" || !CONTENT_ROUTE_PREFIX.test(content.routePrefix))) {
+        errors.push("content.routePrefix 必须是相对 kebab 路径");
+      }
     }
   }
 
@@ -425,7 +542,7 @@ export function validateExtensionDescriptor(value) {
   }
 
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, value };
+  return { ok: true, value, deprecations };
 }
 
 /**
@@ -447,6 +564,11 @@ export function loadExtensionDescriptor(extension, { repoRoot } = {}) {
   const validated = validateExtensionDescriptor(parsed);
   if (!validated.ok) {
     throw new ExtensionScanError("EXTENSION_DESCRIPTOR_INVALID", `${relative} 声明无效：\n  ${validated.errors.join("\n  ")}`);
+  }
+  // 归一后的声明不该带 `deprecations` 一起流动（它会让 JSON 比较与快照变化）；
+  // 用不可枚举属性挂上去，装载器按需读取并告警。
+  if (validated.deprecations.length > 0) {
+    Object.defineProperty(validated.value, "deprecations", { value: validated.deprecations, enumerable: false });
   }
   if (validated.value.extensionId !== extension.extensionId) {
     throw new ExtensionScanError(

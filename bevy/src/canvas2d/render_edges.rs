@@ -16,13 +16,10 @@ use crate::theme::ThemeResource;
 use super::Visuals;
 use super::geometry::Geometry;
 use super::layout::{
-    EDGE_DELETE_BUTTON_GAP, EDGE_DELETE_BUTTON_SIZE, EDGE_LABEL_HEIGHT, EDGE_LABEL_WIDTH, hex,
-    port, shortened,
+    EDGE_DELETE_BUTTON_SIZE, EDGE_LABEL_FONT, EDGE_LABEL_HEIGHT, edge_delete_center,
+    edge_label_text, edge_label_width, hex, port,
 };
 use super::text_presentation::LogicalText;
-
-/// 连线标签的逻辑字号（世界单位）。
-const EDGE_LABEL_FONT: f32 = 11.0;
 
 /// 绘制全部边、边标签、悬停删除按钮与草稿线。
 ///
@@ -77,12 +74,13 @@ pub(super) fn draw_block(
                 },
                 false,
             );
-            if !edge.label.is_empty() {
-                let center = (port(source, true) + port(target, false)) / 2.;
+            let mid = (port(source, true) + port(target, false)) / 2.;
+            let label_width = edge_label_width(&edge.label);
+            if label_width > 0.0 {
                 geometry.rounded_rect(
-                    center.x - EDGE_LABEL_WIDTH / 2.0,
-                    center.y - EDGE_LABEL_HEIGHT / 2.0,
-                    EDGE_LABEL_WIDTH,
+                    mid.x - label_width / 2.0,
+                    mid.y - EDGE_LABEL_HEIGHT / 2.0,
+                    label_width,
                     EDGE_LABEL_HEIGHT,
                     4.,
                     2. + depth_offset,
@@ -90,14 +88,14 @@ pub(super) fn draw_block(
                 );
                 let entity = commands
                     .spawn((
-                        Text2d::new(shortened(&edge.label, 96., EDGE_LABEL_FONT)),
+                        Text2d::new(edge_label_text(&edge.label)),
                         TextFont {
                             font: font.clone().into(),
                             font_size: FontSize::Px(EDGE_LABEL_FONT),
                             ..default()
                         },
                         TextColor(hex(theme.token_u32("canvasEdgeLabelText"))),
-                        Transform::from_xyz(center.x, -center.y, 2.1 + depth_offset),
+                        Transform::from_xyz(mid.x, -mid.y, 2.1 + depth_offset),
                         // 连线标签随世界缩放：栅格表示由共享文字策略按相机/DPR 派生。
                         LogicalText::world(EDGE_LABEL_FONT, None),
                     ))
@@ -106,25 +104,16 @@ pub(super) fn draw_block(
             }
             // 悬停该连线时显示删除按钮（change: add-edge-hover-delete）。
             // 位置与 JS 命中测试共用 contracts.`bevyEdgeDeleteRect` 的同一公式与常量：
-            // 无标签时居中于连线中点，有标签时排在标签胶囊右侧，避免盖住标签。
+            // 无标签时居中于连线中点，有标签时排在**按内容收缩**的标签胶囊右侧，避免盖住标签，
+            // 也避免固定 104px 宽度把按钮推到远离曲线的地方（修复：标签过宽导致删除按钮点不到）。
             // 颜色取自既有主题 token（不新增 token、不升主题 schema）。
             if scene
                 .hover
                 .as_ref()
                 .is_some_and(|hover| hover.edge_id.as_deref() == Some(edge.id.as_str()))
             {
-                let mid = (port(source, true) + port(target, false)) / 2.;
-                let center = if edge.label.is_empty() {
-                    mid
-                } else {
-                    Vec2::new(
-                        mid.x
-                            + EDGE_LABEL_WIDTH / 2.0
-                            + EDGE_DELETE_BUTTON_GAP
-                            + EDGE_DELETE_BUTTON_SIZE / 2.0,
-                        mid.y,
-                    )
-                };
+                let center =
+                    edge_delete_center(port(source, true), port(target, false), label_width);
                 let radius = EDGE_DELETE_BUTTON_SIZE / 2.0;
                 let accent = theme.token_u32("canvasEdgeSelected");
                 // 圆面 + 描边环 + 叉号；z 高于所有卡片与标签，保证可点。

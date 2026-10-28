@@ -8,7 +8,7 @@ import {
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
-  type HostExtensionPlugin,
+  type ExtensionPlugin,
 } from "@woohaa3/contracts";
 import { discoverFalModels } from "./discovery.js";
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
@@ -108,7 +108,7 @@ export function createFalRegistration(input: FalRegistrationInput): { registrati
   };
 }
 
-export function createFalProviderPlugin(deps: FalPluginDependencies = {}): HostExtensionPlugin<typeof FAL_CONFIG.fields> {
+export function createFalProviderPlugin(deps: FalPluginDependencies = {}): ExtensionPlugin<typeof FAL_CONFIG.fields> {
   return {
     name: FAL_PLUGIN_ID,
     label: "fal.ai",

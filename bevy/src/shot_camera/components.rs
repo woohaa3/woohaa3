@@ -75,7 +75,7 @@ impl Default for ShotCameraPose {
 }
 
 impl ShotCameraPose {
-    /// 构造合法 pose；非有限值回退默认。仰角默认 45°。
+    /// 构造合法 pose；非有限值回退默认。仰角跟随画布全局 pitch。
     pub fn new(azimuth: f32, distance: f32) -> Self {
         Self {
             azimuth: if azimuth.is_finite() { azimuth } else { 0.0 },

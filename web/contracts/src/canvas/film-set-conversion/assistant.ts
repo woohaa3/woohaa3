@@ -1,4 +1,4 @@
-import { isAgentReasoningEffort, type AgentConnectionBinding, type AgentReasoningEffort } from "../../extension/conversation.js";
+import { isAgentReasoningEffort, type AgentConnectionBinding, type AgentReasoningEffort } from "../../extension/assistant/conversation.js";
 import { isBoundedId } from "../../validation.js";
 
 /** Frozen assistant selection travels with the conversion's existing idempotent model key. */

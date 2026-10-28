@@ -20,7 +20,7 @@ import { PassThrough, Readable } from "node:stream";
 import {
   defineConfigSchema,
   StorageObjectNotFoundError,
-  type HostExtensionPlugin,
+  type ExtensionPlugin,
   type StorageBackend,
   type StorageObject,
   type StorageObjectStat
@@ -265,7 +265,7 @@ export function createCosBackend(
   return backend;
 }
 
-export function createCosStoragePlugin(): HostExtensionPlugin<typeof COS_STORAGE_CONFIG.fields> {
+export function createCosStoragePlugin(): ExtensionPlugin<typeof COS_STORAGE_CONFIG.fields> {
   return {
     name: COS_STORAGE_PLUGIN_ID,
     label: COS_STORAGE_LABEL,

@@ -1,6 +1,7 @@
 import http from "node:http";
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, type CanvasGroupAction } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, filmSetNodeDataFields, type CanvasGroupAction } from "@woohaa3/contracts";
+import { filmSetMcpRuntime } from "../../../extensions/film-set/src/integration/backend/mcp-runtime.js";
 import { AgentCanvasAuthoringService, AgentCanvasInternalService, AgentDeltaJournal, CanvasRoom, InMemoryYjsDocumentRepository, ModelMcpService, canvasGroupEpoch, withCanvasGroupScope, type CanvasService } from "@woohaa3/canvas-service";
 import { createModelMcpHttpHandler } from "@woohaa3/mcp-service";
 import { agentCanvasServiceToClient, modelMcpServiceToClient } from "./mcp-adapters.js";
@@ -11,11 +12,12 @@ describe("real HTTP group MCP boundary", () => {
   it("carries trusted owner through HTTP, projects reads, confines simple plans and revokes calls", async () => {
     const canvas = createEmptyWoohaa3ServerCanvas("c", "now");
     canvas.document.nodes = [
-      { id: "root", type: "group", position: { x: 300, y: 200 }, width: 600, height: 400 },
+      { id: "manager", type: "group", position: { x: 0, y: 0 }, width: 1200, height: 900 },
+      { id: "root", type: "group", parentId: "manager", position: { x: 300, y: 200 }, width: 600, height: 400 },
       { id: "a", type: "text", parentId: "root", position: { x: 40, y: 50 } },
       { id: "outside", type: "text", position: { x: 2000, y: 0 } }
     ];
-    canvas.nodeData = { root: { retainWhenEmpty: true }, a: { prompt: "inside" }, outside: { prompt: "private-outside" } };
+    canvas.nodeData = { manager: { retainWhenEmpty: true }, root: { retainWhenEmpty: true }, a: { prompt: "inside" }, outside: { prompt: "private-outside" } };
     const room = new CanvasRoom({ canvasId: "c", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
     await room.initialize({ canvas, roomEpoch: "epoch" });
     const principals: string[] = [];
@@ -64,8 +66,12 @@ describe("real HTTP group MCP boundary", () => {
       expect(actions.some(action => action.commandId)).toBe(true);
       const created = await call("create_canvas_node", { canvasId: "c", requestId: "new", kind: "image", prompt: "scene" });
       expect(created.structuredContent?.ok, JSON.stringify(created)).toBe(true);
+      const filmSet = await call("create_canvas_node", { canvasId: "c", requestId: "film-set", kind: "film-set", title: "片场" });
+      expect(filmSet.structuredContent?.ok, JSON.stringify(filmSet)).toBe(true);
       const snapshot = room.exportCanvas();
-      expect(snapshot.ok && snapshot.canvas.document.nodes.filter(n => !["root", "outside", "a"].includes(n.id)).every(n => n.parentId === "root")).toBe(true);
+      expect(snapshot.ok && snapshot.canvas.document.nodes.filter(n => !["manager", "root", "outside", "a"].includes(n.id)).every(n => n.parentId === "root")).toBe(true);
+      expect(snapshot.ok && snapshot.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBe("manager");
+      expect(snapshot.ok && snapshot.canvas.document.nodes.some(n => n.type === "composite-asset" && n.parentId === "root" && snapshot.canvas.nodeData[n.id]?.extensionId === "film-set")).toBe(true);
       expect(principals.every(owner => owner === "owner")).toBe(true);
       grants.revoke("turn", "owner");
       const denied = await call("get_canvas_graph", { canvasId: "c" });
@@ -73,5 +79,56 @@ describe("real HTTP group MCP boundary", () => {
     } finally {
       await handler.close(); await new Promise<void>(resolve => server.close(() => resolve()));
     }
+  });
+
+  it("accepts reducer-derived film-set object containers above a film set near the group origin", async () => {
+    const canvasId = "c-film-items";
+    const snapshot = createFilmSetSnapshot({
+      title: "片场",
+      timeline: { duration: 0, loop: false },
+      initialCamera: { azimuth: 0, elevation: 0.5, distance: 3, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } },
+      filmSetContent: { schemaVersion: 4, items: [{ id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } }] }
+    });
+    const canvas = createEmptyWoohaa3ServerCanvas(canvasId, "now");
+    canvas.document.nodes = [
+      { id: "root", type: "group", position: { x: 300, y: 200 }, width: 600, height: 400 },
+      { id: "film", type: "composite-asset", parentId: "root", position: { x: 40, y: 40 } }
+    ];
+    canvas.nodeData = { root: { retainWhenEmpty: true }, film: filmSetNodeDataFields(snapshot) as never };
+    const room = new CanvasRoom({ canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
+    await room.initialize({ canvas, roomEpoch: "epoch" });
+    const filmSet = filmSetMcpRuntime.createNodeService({ resolveRoom: async () => room });
+    const withGroup = <T>(run: () => Promise<T>) => withCanvasGroupScope({
+      owner: "owner", canvasId, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvasId, "root"), valid: () => true
+    }, run);
+    const outcome = await withGroup(() => filmSet.commitAnimation({
+      canvasId,
+      nodeId: "film",
+      requestId: "film-items",
+      animation: {
+        ...snapshot,
+        filmSetContent: {
+          schemaVersion: 4,
+          items: [...snapshot.filmSetContent.items, {
+            id: "cube", kind: "model", name: "方块",
+            localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
+            model: { modelScript: "scene.box({id:'cube',size:[1,1,1]});", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2" }
+          }]
+        }
+      }
+    }));
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    const container = exported.canvas.document.nodes.find(node => node.id.startsWith("film-object:"));
+    expect(container?.parentId).toBe("root");
+    // 对象容器位于片场上方的展示区：reducer 应把根组向上扩到能容纳它，并同步保持成员世界坐标。
+    expect(container!.position.y).toBeGreaterThanOrEqual(0);
+    const root = exported.canvas.document.nodes.find(node => node.id === "root")!;
+    const film = exported.canvas.document.nodes.find(node => node.id === "film")!;
+    expect(root.position.y).toBeLessThan(200);
+    expect(root.height).toBeGreaterThan(400);
+    expect(film.position.y + root.position.y).toBe(240);
   });
 });

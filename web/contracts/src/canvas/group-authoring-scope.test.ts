@@ -3,12 +3,13 @@ import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 
 import { compileAgentPlan } from "./canvas-script/planner/compile.js";
+import { filmSetObjectContainerData, filmSetObjectContainerId } from "./film-set-object-container.js";
 import { canvasGroupMembers, projectCanvasGroup, validateCanvasGroupChange } from "./group-authoring-scope.js";
 import { collectWoohaa3CanvasRemovalIds } from "./domain/core/node-removal.js";
-import { decodeCanvasCreationRequest } from "../extension/canvas-creation.js";
+import { decodeCanvasCreationRequest } from "../extension/assistant/canvas-creation.js";
 import { sanitizeWoohaa3CanvasNodeData } from "./domain/core/document-schema.js";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "./yjs/mapping.js";
-import { decodeAcceptTurnRequest } from "../extension/conversation-codec.js";
+import { decodeAcceptTurnRequest } from "../extension/assistant/conversation-codec.js";
 
 function fixture() {
   const canvas = createEmptyWoohaa3ServerCanvas("c", "2026-10-20T00:00:00Z");
@@ -65,6 +66,37 @@ describe("canvas group scope", () => {
     const after = structuredClone(before); after.nodeData.a.prompt = "updated";
     expect(validateCanvasGroupChange(before, after, "root")).toBeNull();
   });
+  it("accepts a root grown up/left to contain derived film-set cards, but not unneeded growth or negative local coordinates", () => {
+    const before = fixture();
+    before.document.nodes.push({ id: "film", type: "composite-asset", parentId: "root", position: { x: 40, y: 40 } });
+    before.nodeData.film = { extensionId: "film-set" };
+    const containerId = filmSetObjectContainerId("film", "cube");
+    const after = structuredClone(before);
+    // reducer refit：根组向上扩 280，直属成员局部坐标同步下移，世界坐标保持不变。
+    const root = after.document.nodes.find(n => n.id === "root")!;
+    root.position.y = -80;
+    root.height = 880;
+    after.document.nodes.find(n => n.id === "a")!.position.y = 320;
+    after.document.nodes.find(n => n.id === "film")!.position.y = 320;
+    after.document.nodes.push({ id: containerId, type: "composite-asset", parentId: "root", position: { x: 40, y: 40 }, width: 248, height: 232 });
+    after.nodeData[containerId] = filmSetObjectContainerData("film", "cube");
+    expect(validateCanvasGroupChange(before, after, "root")).toBeNull();
+
+    // 不先扩组、直接把派生卡片写在负局部坐标上仍然拒绝。
+    const raw = structuredClone(before);
+    raw.document.nodes.push({ id: containerId, type: "composite-asset", parentId: "root", position: { x: 40, y: -240 }, width: 248, height: 232 });
+    raw.nodeData[containerId] = filmSetObjectContainerData("film", "cube");
+    expect(validateCanvasGroupChange(before, raw, "root")).toBeTruthy();
+
+    // 直接平移根组（成员局部坐标不变）仍然拒绝；扩组必须由成员世界位置驱动。
+    const moved = structuredClone(before);
+    moved.document.nodes.find(n => n.id === "root")!.position.y = 120;
+    moved.document.nodes.find(n => n.id === "root")!.height = 680;
+    expect(validateCanvasGroupChange(before, moved, "root")).toBeTruthy();
+
+    after.document.nodes.at(-1)!.position.y = Number.NaN;
+    expect(validateCanvasGroupChange(before, after, "root")).toBeTruthy();
+  });
   it("keeps retained empty ancestors while cleaning ordinary nested groups; explicit removal still cascades", () => {
     const canvas = fixture();
     canvas.document.nodes.push({ id: "nested", type: "group", parentId: "root", position: { x: 0, y: 0 } });
@@ -74,7 +106,7 @@ describe("canvas group scope", () => {
     const result = applyCanvasCommands(canvas, [{ type: "node.remove", nodeIds: ["a"] }]);
     expect(result.ok && result.canvas.document.nodes.map(n => n.id)).toEqual(["root", "outside"]);
   });
-  it("compiles local absolute/auto placement into root membership and expands only root dimensions", () => {
+  it("compiles local absolute/auto placement into root membership and expands the root for new content", () => {
     const before = fixture();
     const projection = projectCanvasGroup(before, "root");
     const plan = compileAgentPlan({ canvasId: "c", requestId: "r", scope: "submit_canvas_script", principalId: "u", snapshot: { canvasId: "c", revision: 0, rootGroupId: "root", nodes: projection.document.nodes.map(n => ({ ...n, retainWhenEmpty: projection.nodeData[n.id]?.retainWhenEmpty })), edges: [] }, operations: [
@@ -86,7 +118,12 @@ describe("canvas group scope", () => {
     const result = applyCanvasCommands(before, plan.commands);
     expect(result.ok).toBe(true); if (!result.ok) return;
     expect(validateCanvasGroupChange(before, result.canvas, "root")).toBeNull();
-    expect(result.canvas.document.nodes.find(n => n.id === "root")!.position).toEqual({ x: 500, y: 200 });
+    // 组内新增/嵌套内容可以向上/向左撑大根组，但不允许缩小既有边界。
+    const root = result.canvas.document.nodes.find(n => n.id === "root")!;
+    expect(root.position.x).toBeLessThanOrEqual(500);
+    expect(root.position.y).toBeLessThanOrEqual(200);
+    expect(root.position.x + (root.width ?? 0)).toBeGreaterThanOrEqual(1300);
+    expect(root.position.y + (root.height ?? 0)).toBeGreaterThanOrEqual(800);
     expect(canvasGroupMembers(result.canvas, "root").size).toBe(5);
   });
   it("rejects forged owner/scope and invalid retained group writes before mutation", () => {

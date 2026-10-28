@@ -6,6 +6,7 @@
  * resize groups and it never turns the result into canonical state by itself.
  */
 import type { Woohaa3CanvasNode } from "./canvas-runtime";
+import { groupPresentationRect } from "../../group-presentation.js";
 import {
   getGroupLayoutSizes,
   getWoohaa3CanvasNodeAbsolutePosition,
@@ -130,11 +131,27 @@ function buildGroups(
     // the occupied obstacle range only and must not turn into a drop target.
     const position = nodeAbsolutePosition(node, byId);
     const size = sizes.get(node.id) ?? { width: readNodeWidth(node), height: readNodeHeight(node) };
-    const compact = collapsed?.has(node.id);
-    const rect = compact
-      ? { x: position.x + (size.width - 196) / 2, y: position.y + size.height - 112, width: 196, height: 112 }
-      : { x: position.x, y: position.y, width: size.width, height: size.height };
+    const rect = groupFrameRect(node, position, size, collapsed?.has(node.id) === true);
     return [{ ...rect, id: node.id, depth: depthOf(node, byId), order }];
+  });
+}
+
+/**
+ * Structural frame of a group. Collapsed groups occupy the same compact presentation
+ * frame used by rendering, the minimap and locate; the expand direction lives in node
+ * data, so settlement assumes the default upward badge placement.
+ */
+function groupFrameRect(
+  node: Woohaa3CanvasNode,
+  position: DropPoint,
+  size: { width: number; height: number },
+  compact: boolean,
+): DropRect {
+  return groupPresentationRect({ type: node.type }, compact, {
+    x: position.x,
+    y: position.y,
+    width: size.width,
+    height: size.height,
   });
 }
 
@@ -286,10 +303,7 @@ export function settleDraggedNodeBoundaries(
 
 function groupRectAt(group: Woohaa3CanvasNode, absolute: DropPoint, sizes: ReadonlyMap<string, { width: number; height: number }>, collapsed?: ReadonlySet<string>): DropRect {
   const size = sizes.get(group.id) ?? { width: readNodeWidth(group), height: readNodeHeight(group) };
-  const compact = collapsed?.has(group.id);
-  const rect = compact
-    ? { x: absolute.x + (size.width - 196) / 2, y: absolute.y + size.height - 112, width: 196, height: 112 }
-    : { x: absolute.x, y: absolute.y, width: size.width, height: size.height };
+  const rect = groupFrameRect(group, absolute, size, collapsed?.has(group.id) === true);
   return { x: rect.x - groupBadgeOutset, y: rect.y - groupBadgeOutset, width: rect.width + groupBadgeOutset * 2, height: rect.height + groupBadgeOutset * 2 };
 }
 

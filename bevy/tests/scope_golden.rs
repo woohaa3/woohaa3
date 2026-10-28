@@ -81,7 +81,8 @@ fn approx(a: f32, b: f32) -> bool {
 #[test]
 fn scope_geometry_matches_contract_golden() {
     let golden = fixture();
-    assert!(approx(golden.edge_slope, 0.5), "edge slope must stay 0.5");
+    let expected_slope = woohaa_bevy_canvas::isometric_grid::CANVAS_CAMERA_PITCH.sin();
+    assert!(approx(golden.edge_slope, expected_slope), "edge slope must follow camera pitch");
     assert!((golden.axis_y / golden.axis_x - golden.edge_slope).abs() < 1e-4);
     for case in &golden.cases {
         let raw = scope_geometry_json(case.base.as_array(), &case.shape, case.ground, golden.min_half)

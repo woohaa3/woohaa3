@@ -17,7 +17,7 @@
  * 插件并发启动、不 await，宿主就绪不再等它们；`optional: false` 的插件仍按顺序等待。
  */
 import type { Fiber } from "@deepseek-ai/cordis";
-import type { AnyHostExtensionPlugin } from "@woohaa3/contracts";
+import type { AnyExtensionPlugin } from "@woohaa3/contracts";
 import type { HostContext, HostServices } from "../context.js";
 import type { SiteGate } from "../core/site-gate.js";
 import type { HostPluginOrigin } from "../core/marketplace.js";
@@ -47,12 +47,12 @@ export type LoadedExtension = {
 type LoaderServices = Pick<HostServices, "log" | "config"> & { siteGate?: SiteGate };
 
 /** 每个插件的装载声明：缺省可选（并发启动、不阻塞就绪）；`optional: false` 表示就绪必须等它。 */
-export type ExtensionLayerEntry = AnyHostExtensionPlugin | { plugin: AnyHostExtensionPlugin; optional: boolean };
+export type ExtensionLayerEntry = AnyExtensionPlugin | { plugin: AnyExtensionPlugin; optional: boolean };
 
-function entryOf(entry: ExtensionLayerEntry): { plugin: AnyHostExtensionPlugin; optional: boolean } {
+function entryOf(entry: ExtensionLayerEntry): { plugin: AnyExtensionPlugin; optional: boolean } {
   return "plugin" in entry && typeof (entry as { apply?: unknown }).apply !== "function"
-    ? (entry as { plugin: AnyHostExtensionPlugin; optional: boolean })
-    : { plugin: entry as AnyHostExtensionPlugin, optional: true };
+    ? (entry as { plugin: AnyExtensionPlugin; optional: boolean })
+    : { plugin: entry as AnyExtensionPlugin, optional: true };
 }
 
 function timeouts(config: LoaderServices["config"]) {
@@ -62,7 +62,7 @@ function timeouts(config: LoaderServices["config"]) {
   };
 }
 
-function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHostExtensionPlugin): LoadedExtension | null {
+function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyExtensionPlugin): LoadedExtension | null {
   const { config, siteGate } = services;
   const log = services.log.scope("extensions");
   const limits = timeouts(config);
@@ -105,8 +105,13 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHo
     }
   };
   const values = () => config.section(prefix);
+  // application 模块比扩展层晚装载，只能按调用现取。
+  // 最小装配（测试）里 `application` 可能只有 `siteGate`：拿不到宿主注册面时就不提供这些能力。
+  const applicationHost = () => ctx.get("application")?.service?.host?.();
 
   let fiber: (Fiber & PromiseLike<Fiber>) | null = null;
+  /** 本次装载拿到的注册面；停用时 release，避免路由/能力留在全局表里。 */
+  let surface: import("@woohaa3/application-service").PluginRegistrationSurface | null = null;
   let holders = 0;
   /** 单调递增：每次 start/stop 推进一次，超时后迟到的 fiber 凭它识别出「已过期」。 */
   let attempt = 0;
@@ -137,10 +142,23 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHo
     // 每个扩展层插件拿到带宿主 origin 盖章的 `ctx.marketplace`（change: 2026-10-21-add-extension-marketplace-point，D3）：
     // 受管根 / 可写根 / 缺少 origin 的插件注册市场来源会被拒绝。没有市场服务（测试最小装配）时原样装载。
     const marketplace = ctx.get("marketplace");
-    const host = marketplace
-      ? ctx.extend({ marketplace: marketplace.scoped((plugin as { origin?: HostPluginOrigin }).origin) } as never)
-      : ctx;
-    const started = host.plugin(plugin as never, values() as never) as Fiber & PromiseLike<Fiber>;
+    // `ctx.webServer`：受控 HTTP 路由注册面。由站点 gate 按 extensionId 绑定（路由自动带命名空间），
+    // 与 `ctx.generation` / `ctx.storage` 同级——它是公共基础设施，不是 backend 类插件的专属特权。
+    // 每次启动都现取一份注册面：它会把上一次装载留下的路由清掉，
+    // 否则反复启停会撞上 `duplicate-handler`。停用时由 `stop()` 调 `release()`。
+    surface = applicationHost()?.pluginContextFor?.(plugin.name) ?? null;
+    // 没有覆盖项时不要 extend：fork 出新的 isolate 会让父级服务（`log` 等）解析不到。
+    // 与 `marketplace.scoped()` 同一套机制：`extend` 传服务值，按扩展生效。
+    const services = {
+      ...(marketplace ? { marketplace: marketplace.scoped((plugin as { origin?: HostPluginOrigin }).origin) } : {}),
+      ...(surface?.webServer ? { webServer: surface.webServer } : {}),
+      ...(surface?.capabilities ? { capabilities: surface.capabilities } : {}),
+      ...(surface?.services ? { services: surface.services } : {}),
+      ...(surface?.diagnostics ? { diagnostics: surface.diagnostics } : {}),
+      deployment: { basePath: applicationHost()?.basePath ?? "" }
+    };
+    const host = Object.keys(services).length > 0 ? ctx.extend(services) : ctx;
+    const started = host.plugin(plugin, values()) as Fiber & PromiseLike<Fiber>;
     try {
       await withDeadline(started, limits.activation(), "activation-timeout");
     } catch (error) {
@@ -170,6 +188,9 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHo
     const current = fiber;
     fiber = null;
     if (current) await disposeBounded(current);
+    // 撤销本次装载注册的路由与能力：停用的扩展不该还能被调用。
+    surface?.release();
+    surface = null;
   };
 
   let started: Promise<void> = Promise.resolve();
@@ -197,7 +218,7 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyHo
       // 健康用**当前**配置求值：管理员补上 API Key 后，站点状态不必重启插件就回到 active。
       // 只在 fiber 运行期间报告；未装载时状态投影自己会给出 configuring/disabled。
       ...(plugin.health
-        ? { health: () => (fiber ? plugin.health!(values() as never) : undefined) }
+        ? { health: () => (fiber ? plugin.health!(values()) : undefined) }
         : {})
     });
   } else {
@@ -253,7 +274,7 @@ export type ExtensionLayer = LoadedExtension[] & {
    * 由控制面 acquire）、P0 激活 / 释放时限、serial 队列都不变。同名已装载时抛 `extension-exists`。
    * 返回装载记录；非 gated 插件的首次启动结果在 `started`。配置段非法时返回 null（与启动期一致）。
    */
-  add(plugin: AnyHostExtensionPlugin): LoadedExtension | null;
+  add(plugin: AnyExtensionPlugin): LoadedExtension | null;
   /** 卸载一个已装载（启动期或运行期追加）的插件：停 fiber、撤配置段与插件清单登记。未装载时为 no-op。 */
   remove(name: string): Promise<void>;
   /** 是否已装载。 */
@@ -295,7 +316,7 @@ export async function loadExtensionLayer(ctx: HostContext, entries: readonly Ext
   };
   const layer: ExtensionLayer = Object.assign(loaded, {
     settled: Promise.all(pending).then(() => undefined),
-    add(plugin: AnyHostExtensionPlugin) {
+    add(plugin: AnyExtensionPlugin) {
       if (byName().has(plugin.name)) {
         throw Object.assign(new Error(`扩展层已装载同名插件：${plugin.name}`), { code: "extension-exists" });
       }

@@ -1,5 +1,5 @@
 {
   "schemaVersion": 1,
   "extensionId": "local-storage",
-  "hostPlugin": { "module": "./backend", "factory": "createLocalStoragePlugin", "kind": "storage", "order": 5 }
+  "hostPlugin": { "module": "./backend", "factory": "createLocalStoragePlugin", "features": ["storage"], "order": 5 }
 }

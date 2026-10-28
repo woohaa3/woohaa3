@@ -18,6 +18,8 @@ pub const GRID_MAJOR_EVERY: i32 = 8;
 pub const GRID_LINE_WIDTH: f32 = 1.4;
 /// 网格相对相机的深度。远在 3D 模型之后，避免遮挡；正交投影下深度不影响外观。
 pub const GRID_DEPTH: f32 = -20000.0;
+/// 普通画布相机俯仰角（弧度）。修改此处即可统一调整画布等距视角。
+pub const CANVAS_CAMERA_PITCH: f32 = 37.0 * PI / 180.0;
 /// 正交 3D 相机的远裁剪面。必须覆盖 `GRID_DEPTH`，否则网格会被裁掉。
 pub const MODEL_CAMERA_FAR: f32 = 100_000.0;
 
@@ -42,22 +44,23 @@ pub fn canvas_camera_projection_for_view(view: &IsometricGridView) -> Orthograph
     projection
 }
 
-/// `cos(45°)`、`sin(45°)·sin(30°)`：等距投影把地面 `(x, z)` 映射到屏幕单位向量。
+/// `cos(45°)`、`sin(45°)·sin(CANVAS_CAMERA_PITCH)`：等距投影把地面 `(x, z)` 映射到屏幕单位向量。
 /// 保留字面量（而非 `FRAC_1_SQRT_2`）以与既有等距投影逐位一致。
 #[allow(clippy::approx_constant)]
 const AXIS_X: f32 = 0.707_106_78;
-const AXIS_Y: f32 = 0.353_553_39;
 /// 地面单位长度在屏幕上的长度 `hypot(AXIS_X, AXIS_Y)`。
-pub const PROJECTION_SCALE: f32 = 0.790_569_4;
+pub fn projection_scale() -> f32 {
+    AXIS_X.hypot(scope_axis_y())
+}
 
 /// 地面单位向量在画布世界的 x 分量 `AXIS_X`（`canvas_query::scope` 展开地面矩形顶点用）。
 pub const fn scope_axis_x() -> f32 {
     AXIS_X
 }
 
-/// 地面单位向量在画布世界的 y 分量 `AXIS_Y`（`canvas_query::scope` 展开地面矩形顶点用）。
-pub const fn scope_axis_y() -> f32 {
-    AXIS_Y
+/// 地面单位向量在画布世界的 y 分量，由全局画布相机俯仰角派生。
+pub fn scope_axis_y() -> f32 {
+    AXIS_X * CANVAS_CAMERA_PITCH.sin()
 }
 
 /// 与协议无关的视图平移/缩放（屏幕坐标）。
@@ -86,10 +89,10 @@ pub const CANVAS_CAMERA_Z: f32 = 300.0;
 /// 相机本身用它的逆作为朝向（`canvas_camera_rotation`），模型保持竖直。
 /// `view_rotation() * local_dir` 仍是该方向在屏幕上的投影，供朝向约定测试使用。
 pub fn view_rotation() -> Quat {
-    Quat::from_euler(EulerRot::XYZ, PI / 6.0, -PI / 4.0, 0.0)
+    Quat::from_euler(EulerRot::XYZ, CANVAS_CAMERA_PITCH, -PI / 4.0, 0.0)
 }
 
-/// 画布正交相机朝向。45° 等距倾斜在 lookat 上，不烘焙进模型。
+/// 画布正交相机朝向。俯仰角由 [`CANVAS_CAMERA_PITCH`] 控制，不烘焙进模型。
 pub fn canvas_camera_rotation() -> Quat {
     view_rotation().inverse()
 }
@@ -179,7 +182,7 @@ pub fn unproject_screen_point(screen: Vec2, depth: f32, view: &IsometricGridView
 fn ground_to_screen(view: &IsometricGridView, ground: Vec2) -> Vec2 {
     Vec2::new(
         view.x + view.zoom * AXIS_X * (ground.x - ground.y),
-        view.y + view.zoom * AXIS_Y * (ground.x + ground.y),
+        view.y + view.zoom * scope_axis_y() * (ground.x + ground.y),
     )
 }
 
@@ -193,8 +196,8 @@ pub fn screen_to_ground(view: &IsometricGridView, screen: Vec2) -> Vec2 {
     let dx = (screen.x - view.x) / zoom;
     let dy = (screen.y - view.y) / zoom;
     Vec2::new(
-        0.5 * (dx / AXIS_X + dy / AXIS_Y),
-        0.5 * (dy / AXIS_Y - dx / AXIS_X),
+        0.5 * (dx / AXIS_X + dy / scope_axis_y()),
+        0.5 * (dy / scope_axis_y() - dx / AXIS_X),
     )
 }
 
@@ -208,7 +211,7 @@ pub fn spacing_for_zoom(zoom: f32) -> f32 {
         1.0
     };
     let mut spacing = GRID_BASE_SPACING;
-    let mut screen = spacing * zoom * PROJECTION_SCALE;
+    let mut screen = spacing * zoom * projection_scale();
     let mut guard = 0;
     while screen < GRID_MIN_SCREEN_SPACING && guard < 32 {
         spacing *= 2.0;
@@ -300,7 +303,7 @@ mod tests {
         for step in 0..60 {
             let zoom = 0.1 * 1.1_f32.powi(step);
             let spacing = spacing_for_zoom(zoom);
-            let screen = spacing * zoom * PROJECTION_SCALE;
+            let screen = spacing * zoom * projection_scale();
             assert!(screen >= GRID_MIN_SCREEN_SPACING - 1e-3);
             assert!(screen < GRID_MIN_SCREEN_SPACING * 2.0 + 1e-3);
         }

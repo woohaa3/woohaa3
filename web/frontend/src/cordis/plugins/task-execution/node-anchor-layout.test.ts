@@ -21,6 +21,12 @@ describe("layoutNodePanel", () => {
       .toEqual({ left: 116, top: 292, width: 760, maxHeight: 458, placement: "below" });
   });
 
+  it("keeps group panels below the badge even when there is more room above", () => {
+    const badge = { left: 440, top: 540, width: 88, height: 64 };
+    expect(layoutNodePanel(badge, area, { width: 600, height: 300 }, "above", "below"))
+      .toMatchObject({ top: 616, maxHeight: 134, placement: "below" });
+  });
+
   it("flips above when the lower area is too short", () => {
     expect(layoutNodePanel({ left: 440, top: 540, width: 100, height: 80 }, area, { width: 600, height: 300 })?.placement).toBe("above");
   });

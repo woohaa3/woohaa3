@@ -1,6 +1,6 @@
 # Service connection authority
 
-`registry.ts` owns durable source metadata and consumer bindings. It is separate from Agent native sessions, Task execution and tool grants. The public contract is `contracts/src/extension/service-connection.ts`; read views contain neither secrets nor internal secret pointers. `isServiceConnectionSave` rejects caller-supplied owner, scope, capabilities and credential references. An actor is constructed by trusted host code, never from a request body.
+`registry.ts` owns durable source metadata and consumer bindings. It is separate from Agent native sessions, Task execution and tool grants. The public contract is `contracts/src/extension/host/service-connection.ts`; read views contain neither secrets nor internal secret pointers. `isServiceConnectionSave` rejects caller-supplied owner, scope, capabilities and credential references. An actor is constructed by trusted host code, never from a request body.
 
 A save reserves a persistent owner/scope/operation identity, stages an immutable encrypted secret version, then atomically publishes the source and operation result with document CAS. Pending operations remain retryable after a crash. Until publication the old source stays authoritative. Replaying a published operation returns the original result; reusing it for different content conflicts. Failed CAS does not clear or replace the old secret. Secret reclamation must only remove unreachable versions during maintenance; old versions must never become an implicit fallback.
 

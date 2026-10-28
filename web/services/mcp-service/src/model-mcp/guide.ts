@@ -78,6 +78,7 @@ ${methods}
 ${guide.example}
 
 片场拍摄镜头（共享模型只注册一次；机器协议沿用 clip 名）：
+- sceneCamera 只是无任何拍摄镜头时的回退构图，不是镜头，也不会出现在 clips 中。用户要求镜头/机位/拍摄时，必须创建至少一个 clip；静态构图也要创建 static 镜头。新片场 clips 为空，get_film_set_clips 会返回 clipTemplate：把 id/name/initialCamera 改为目标值，作为 mutate_film_set_clip({clipId:模板 id,expectedHash:missingClipHash,op:{kind:"create",clip:修改后的模板}}) 的 clip 创建第一个镜头，并确认 clips 非空后才能报告完成。
 - 先 get_film_set_clips，读取完整 clips、字段 expectedHash 和 items 的 adapterHash。
 - 修改动作必须 mutate_film_set_clip({canvasId,nodeId,clipId,requestId,expectedHash,op})。
 - 每个镜头有必需 kind（static 或 dynamic）：static 为零时长、非循环、无镜头/对象动作、无时序媒体；dynamic 为正时长（(0,3600] 秒）并承载动作，固定机位拍运动对象也是 dynamic。不要凭 cameraMotionScript 是否为空推断类型。

@@ -137,10 +137,10 @@ fn apply_camera(camera: &mut CameraState, property: CameraProperty, value: f32) 
     }
 }
 
-/// 仰角钳制到 `[-PI/2, PI/2]`；非有限值回退 45°（与 contracts 一致）。
+/// 仰角钳制到 `[-PI/2, PI/2]`；非有限值回退画布全局 pitch（与 contracts 一致）。
 pub fn clamp_elevation(elevation: f32) -> f32 {
     if !elevation.is_finite() {
-        return std::f32::consts::FRAC_PI_4;
+        return crate::isometric_grid::CANVAS_CAMERA_PITCH;
     }
     elevation.clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2)
 }

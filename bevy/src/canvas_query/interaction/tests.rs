@@ -311,6 +311,51 @@ fn edge_hit_uses_broad_phase() {
 }
 
 #[test]
+fn edge_delete_button_hover_bridge_covers_label_to_button() {
+    clear_snapshot();
+    // 有标签的纵向边：端口 (100,25) / (100,325) → 算术中点 (100,175)。
+    // 标签按内容收缩："图片" = 2 个汉字 → 宽 22 + 左右内边距 16 = 38，居中于中点；
+    // 按钮排在标签右侧，中心 (132,175)。
+    let s = scene(
+        vec![
+            node("a", 0.0, 0.0, 100.0, 50.0),
+            node("b", 100.0, 300.0, 100.0, 50.0),
+        ],
+        vec![Edge {
+            id: "e".into(),
+            source: "a".into(),
+            target: "b".into(),
+            label: "图片".into(),
+        }],
+    );
+    let g = accept_scene(&s);
+    let label_side = (112.0, 175.0);
+    let gap = (120.0, 175.0);
+    let button = (132.0, 175.0);
+    // 未悬停时既没有幽灵按钮，也没有标签保持区。
+    assert_eq!(point_query(g, button.0, button.1, 1.0, None).hit, None);
+    assert_eq!(
+        point_query(g, label_side.0, label_side.1, 1.0, None).hit,
+        None
+    );
+    // 悬停后：标签保持悬停（不删除），间隙与按钮命中删除按钮。
+    assert_eq!(
+        point_query(g, label_side.0, label_side.1, 1.0, Some("e")).hit,
+        Some(PointHit::Edge {
+            edge_id: "e".into()
+        })
+    );
+    for point in [gap, button] {
+        assert_eq!(
+            point_query(g, point.0, point.1, 1.0, Some("e")).hit,
+            Some(PointHit::EdgeDelete {
+                edge_id: "e".into()
+            })
+        );
+    }
+}
+
+#[test]
 fn marquee_intersects_but_skips_ghost() {
     clear_snapshot();
     let mut ghost = node("c", 50.0, 0.0, 100.0, 50.0);
@@ -438,7 +483,8 @@ fn scope_geometry_query_returns_parallelogram_vertices_and_base() {
     assert!((entry.vertices[1][0] - right_x).abs() < 1e-3);
     assert!((entry.vertices[1][1] - right_y).abs() < 1e-3);
     assert!((entry.aabb[0] - blank_x).abs() < 1e-3);
-    assert!((entry.aabb[3] / entry.aabb[2] - 0.5).abs() < 1e-3);
+    let axis_ratio = crate::isometric_grid::plan::scope_axis_x() / crate::isometric_grid::plan::scope_axis_y();
+    assert!((entry.aabb[2] / entry.aabb[3] - axis_ratio).abs() < 1e-3);
     // 基准矩形是内容 fit 矩形，不是 AABB。
     assert_eq!(entry.base, [0.0, 0.0, 260.0, 195.0]);
     // JSON 入口 round-trip（camelCase）。

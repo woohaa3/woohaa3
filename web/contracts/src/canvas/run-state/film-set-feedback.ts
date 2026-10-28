@@ -1,4 +1,4 @@
-import type { ConversationTurn } from "../../extension/conversation.js";
+import type { ConversationTurn } from "../../extension/assistant/conversation.js";
 import type { FilmSetConversionStatus } from "../film-set-conversion/types.js";
 import type { CanvasOperationRecord } from "./types.js";
 

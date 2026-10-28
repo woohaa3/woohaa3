@@ -40,7 +40,13 @@ export type CanvasCommandRejectionCode =
   | "edit-operation-invalid"
   /** 删除/恢复涉及排队或进行中任务，或恢复所需资产不可用。 */
   | "edit-active-run"
-  | "edit-asset-missing";
+  | "edit-asset-missing"
+  /** 内容命令的 extensionId 未注册，或 kind 不属于该 owner。 */
+  | "content-owner-unavailable"
+  /** owner 拒绝了命令内容。message 只放稳定码。 */
+  | "content-command-rejected"
+  /** owner codec 抛错。message 不包含异常文本。 */
+  | "content-codec-failed";
 
 export type CanvasCommandRejection = {
   code: CanvasCommandRejectionCode;

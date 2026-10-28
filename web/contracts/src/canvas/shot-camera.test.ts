@@ -2,7 +2,7 @@
  * 镜头取景数学测试
  * （change: add-model-editor-gizmo-shot-capture，任务 3.1 / design D3）。
  *
- * 覆盖：固定 45° 仰角、AABB 自动 fit、距离 clamp 边界、正交取景尺寸随距离缩放、
+ * 覆盖：全局默认仰角、AABB 自动 fit、距离 clamp 边界、正交取景尺寸随距离缩放、
  * 方位环/距离手柄拖动、退化回退。
  */
 import { describe, expect, it } from "vitest";
@@ -59,13 +59,13 @@ describe("shotFitDistance / distance clamp", () => {
 });
 
 describe("resolveShotCamera", () => {
-  it("focus 取 AABB 中心，仰角默认 45°", () => {
+  it("focus 取 AABB 中心，仰角默认跟随全局 pitch", () => {
     const camera = resolveShotCamera(BOX, { azimuth: 0, distance: 100 });
     expect(camera).not.toBeNull();
     if (!camera) return;
     expect(camera.focus).toEqual([0, 0, 0]);
     expect(camera.elevation).toBeCloseTo(SHOT_CAMERA_ELEVATION, 9);
-    // 相机在 focus 上方（固定 45°）。
+    // 相机在 focus 上方。
     expect(camera.position[1]).toBeGreaterThan(camera.focus[1]);
     // 距离被 clamp 进合法范围。
     const bounds = shotDistanceBounds(shotFitDistance(shotBoundingRadius(BOX)));
@@ -90,7 +90,7 @@ describe("resolveShotCamera", () => {
     expect(clampShotElevation(-9)).toBeCloseTo(-SHOT_CAMERA_ELEVATION_LIMIT, 9);
     const clamped = resolveShotCamera(BOX, { azimuth: 0, distance: 5, elevation: 9 })!;
     expect(clamped.elevation).toBeCloseTo(SHOT_CAMERA_ELEVATION_LIMIT, 9);
-    // 缺省仍为 45°。
+    // 缺省仍跟随全局 pitch。
     expect(resolveShotCamera(BOX, { azimuth: 0, distance: 5 })!.elevation).toBeCloseTo(SHOT_CAMERA_DEFAULT_ELEVATION, 9);
   });
 

@@ -7,8 +7,8 @@
 //! 公式。
 //!
 //! 地面矩形顶点 = `center ± (AXIS_X×hx, AXIS_Y×hx) ± (-AXIS_X×hz, AXIS_Y×hz)`，边与当前地面投影
-//! 轴平行（`s = |AXIS_Y / AXIS_X| = 0.5`，[`crate::isometric_grid::plan`]），外包矩形宽高比恒为
-//! `1/s = 2`。顶点顺序固定 top → right → bottom → left（y 向下坐标中为顺时针）。抓手 8 个：
+//! 轴平行（`s = |AXIS_Y / AXIS_X|` 由 [`crate::isometric_grid::CANVAS_CAMERA_PITCH`] 决定），外包矩形宽高比为
+//! `1/s`。顶点顺序固定 top → right → bottom → left（y 向下坐标中为顺时针）。抓手 8 个：
 //! 四顶点 `n/e/s/w` 与四边中点 `ne/se/sw/nw`。本模块是纯几何，不依赖 ECS / bridge / wasm。
 
 use bevy::prelude::Vec2;
@@ -497,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn grounded_square_is_rhombus_with_2to1_aabb() {
+    fn grounded_square_is_rhombus_with_sqrt2_aabb() {
         // hx == hz → 菱形；顶点在投影轴上。
         let g = geometry(
             base(0.0, 0.0, 260.0, 195.0),
@@ -510,7 +510,8 @@ mod tests {
         let ay = scope_axis_y();
         assert!((g.vertices[0] - Vec2::new(100.0, 50.0 - ay * 80.0)).length() < 1e-4);
         assert!((g.vertices[1] - Vec2::new(100.0 + ax * 80.0, 50.0)).length() < 1e-4);
-        assert!((g.aabb.width / g.aabb.height - 2.0).abs() < 1e-4);
+        let axis_ratio = scope_axis_x() / scope_axis_y();
+        assert!((g.aabb.width / g.aabb.height - axis_ratio).abs() < 1e-4);
         // 8 抓手：顶点与边中点。
         assert_eq!(g.handles.len(), 8);
         assert!((g.handles[2] - g.vertices[1]).length() < 1e-4);
@@ -524,11 +525,11 @@ mod tests {
             Some(ground(0.0, 0.0, 60.0, 30.0)),
             SCOPE_MIN_HALF,
         );
-        // 边斜率 ±0.5。
+        // 边斜率由画布相机俯仰角决定。
         let edge = g.vertices[1] - g.vertices[0];
-        assert!((edge.y / edge.x - 0.5).abs() < 1e-4);
+        assert!((edge.y / edge.x - scope_axis_y() / scope_axis_x()).abs() < 1e-4);
         let edge2 = g.vertices[3] - g.vertices[0];
-        assert!((edge2.y / edge2.x + 0.5).abs() < 1e-4);
+        assert!((edge2.y / edge2.x + scope_axis_y() / scope_axis_x()).abs() < 1e-4);
     }
 
     #[test]

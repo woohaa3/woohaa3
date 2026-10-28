@@ -39,6 +39,7 @@ import type {
   CanvasTaskActivitySnapshot,
   EditSessionBeginResponse,
   EditSessionCompletionReceipt,
+  MergeNodeHistoryReceipt,
   NodeGenerationHistoryDetail,
   NodeGenerationHistoryListPage,
   PromptSnippet,
@@ -343,6 +344,26 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
         `/${encodeURIComponent(input.canvasId)}/${encodeURIComponent(input.nodeId)}/clear`
       );
       return result.ok ? { ok: true, value: { removed: result.value.removed } } : result;
+    },
+
+    async mergeNodeHistory(input): Promise<NodeHistoryResult<MergeNodeHistoryReceipt>> {
+      const result = await nodeHistoryRequest<{ ok: true } & MergeNodeHistoryReceipt>(
+        "POST",
+        `/${encodeURIComponent(input.canvasId)}/${encodeURIComponent(input.targetNodeId)}/merge`,
+        {
+          sourceNodeId: input.sourceNodeId,
+          operationId: input.operationId,
+          ...(input.expectedSourceCurrentIdentity !== undefined
+            ? { expectedSourceCurrentIdentity: input.expectedSourceCurrentIdentity }
+            : {}),
+          ...(input.expectedTargetCurrentIdentity !== undefined
+            ? { expectedTargetCurrentIdentity: input.expectedTargetCurrentIdentity }
+            : {})
+        }
+      );
+      if (!result.ok) return result;
+      const { ok: _ok, ...receipt } = result.value;
+      return { ok: true, value: receipt };
     },
 
     nodeHistoryPreviewUrl(input): string {

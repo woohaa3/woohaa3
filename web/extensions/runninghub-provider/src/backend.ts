@@ -9,7 +9,7 @@
  *   对应媒体字段（`prepareInput`）；
  * - apiKey 是配置段里的 `secret` 字段（写进本地密钥文件）；baseURL 写死常量。
  */
-import { defineConfigSchema, type GenerationProvider, type HostExtensionPlugin } from "@woohaa3/contracts";
+import { defineConfigSchema, type GenerationProvider, type ExtensionPlugin } from "@woohaa3/contracts";
 import { createRunninghubProvider } from "./provider/index.js";
 import {
   DEFAULT_RUNNINGHUB_API_BASE,
@@ -101,7 +101,7 @@ export function createRunningHubRegistration(input: RunningHubRegistrationInput)
   };
 }
 
-export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencies = {}): HostExtensionPlugin<typeof RUNNINGHUB_CONFIG.fields> {
+export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencies = {}): ExtensionPlugin<typeof RUNNINGHUB_CONFIG.fields> {
   return {
     name: RUNNINGHUB_PLUGIN_ID,
     label: "RunningHub",

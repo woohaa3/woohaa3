@@ -1,17 +1,29 @@
 import { describe, expect, it } from "vitest";
+import { filmSetClipHash, staticShotCameraMotion, type FilmSetAnimationClip } from "@woohaa3/contracts";
 import { resolveFilmSetAssistantTarget } from "../src/authoring/browser/assistant-target.js";
 
 describe("film-set task target", () => {
-  const context: Parameters<typeof resolveFilmSetAssistantTarget>[0] = { tab: "camera", clip: undefined, selectedItemId: "object-a", selectedCameraId: "camera-a", cameras: [{ id: "camera-a", name: "Camera A", order: 0, azimuth: 0, elevation: 0, distance: 5, aspect: "16:9" }] };
-  it("captures camera identity even when the container is a film-set without a clip", () => {
-    expect(resolveFilmSetAssistantTarget({ ...context, tab: "camera" })).toMatchObject({ mode: "camera", selectedCameraId: "camera-a", itemId: null, blockedReason: null });
+  const clip: FilmSetAnimationClip = {
+    id: "clip-1",
+    name: "镜头一",
+    kind: "static",
+    timeline: { duration: 0, loop: false },
+    initialCamera: { azimuth: 0, elevation: 0.5, distance: 5, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } },
+    cameraMotion: staticShotCameraMotion(),
+    bindings: []
+  };
+  const context: Parameters<typeof resolveFilmSetAssistantTarget>[0] = { tab: "camera", clip, selectedItemId: "object-a", selectedCameraId: "camera-a", cameras: [{ id: "camera-a", name: "Camera A", order: 0, azimuth: 0, elevation: 0, distance: 5, aspect: "16:9" }] };
+  it("freezes the film-set clip instead of a separate camera target", () => {
+    const target = resolveFilmSetAssistantTarget({ ...context, tab: "camera" });
+    expect(target).toMatchObject({ mode: "film-set", clipId: "clip-1", selectedCameraId: null, itemId: null, blockedReason: null });
+    expect(target.expectedContentHash).toBe(filmSetClipHash(clip));
   });
   it("rejects missing or stale selections without picking a replacement", () => {
     expect(resolveFilmSetAssistantTarget({ ...context, tab: "camera", selectedCameraId: "deleted" }).blockedReason).toBeTruthy();
     expect(resolveFilmSetAssistantTarget({ ...context, tab: "camera", selectedCameraId: null }).blockedReason).toBeTruthy();
     expect(resolveFilmSetAssistantTarget({ ...context, tab: "object" }).blockedReason).toBeTruthy();
   });
-  it("permits the existing explicit camera creation intent only for an empty collection", () => {
-    expect(resolveFilmSetAssistantTarget({ ...context, tab: "camera", selectedCameraId: null, cameras: [] })).toMatchObject({ mode: "camera", selectedCameraId: null, blockedReason: null });
+  it("permits an empty camera collection without inventing a selection", () => {
+    expect(resolveFilmSetAssistantTarget({ ...context, tab: "camera", selectedCameraId: null, cameras: [] })).toMatchObject({ mode: "film-set", selectedCameraId: null, blockedReason: null });
   });
 });

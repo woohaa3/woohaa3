@@ -18,6 +18,7 @@ import { MODEL_API_AXIS_CONVENTIONS, modelApiGuide, modelPrimitiveConstraintsTex
 import { motionApiGuide } from "../model-api-descriptor-motion.js";
 import { deriveModelContentVersion, type ModelPlacement } from "../model-definition.js";
 import { MOTION_SCRIPT_LANGUAGE, MOTION_SCRIPT_VERSION, hashMotionScript } from "../motion-script.js";
+import { SHOT_CAMERA_DEFAULT_ELEVATION } from "../model-cameras.js";
 import type { FilmSetConversionRange, FilmSetConversionRepair, FilmSetConversionSourceKind } from "./types.js";
 import { FILM_SET_CONVERSION_INSTRUCTION_VERSION } from "./types.js";
 
@@ -458,5 +459,5 @@ function adapterAssociation(item: FilmSetItem | undefined): { revision: number; 
 }
 
 function defaultCamera(): Record<string, unknown> {
-  return { azimuth: 0, elevation: Math.PI / 4, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } };
+  return { azimuth: 0, elevation: SHOT_CAMERA_DEFAULT_ELEVATION, distance: 4, aspect: "16:9", focusOffset: { x: 0, y: 0, z: 0 } };
 }

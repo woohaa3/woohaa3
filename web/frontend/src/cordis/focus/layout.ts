@@ -31,6 +31,14 @@ export type FocusLayoutConfig = {
   panelMaxWidth?: number;
   /** 检查面板最大高度（窄屏）；缺省 280。 */
   panelMaxHeight?: number;
+  /**
+   * 顶部/底部 chrome 由谁自绘（change: 2026-10-27-add-image-history-to-photocraft-focus，design D1）。
+   *
+   * 缺省 `"host"`：公共布局预留标题栏与底部基座；`"workspace"`：工作区自己绘制顶部/底部
+   * chrome，公共布局不再预留，contentRect 只扣面板与工具占位。该字段只影响几何计算，不回写
+   * 到 layout 结果（避免与窗口 chrome 偏移混淆）。
+   */
+  chromeOwner?: "host" | "workspace";
 };
 /**
  * 插件提供给公共宿主的布局来源（design D3）：静态配置，或**可订阅布局快照**。
@@ -114,9 +122,12 @@ export function focusLayout(input: FocusLayoutInput): FocusLayout {
   const { width, height } = input;
   const narrow = !input.desktop && width < FOCUS_NARROW_BREAKPOINT;
   const rail = width < 480 ? FOCUS_RAIL_NARROW : FOCUS_RAIL_WIDE;
-  const header = narrow ? 100 : FOCUS_HEADER;
-  const player = resolvePlayer(input.player, width);
-  const footer = FOCUS_FOOTER_BASE + player + (input.animationPreview ? (narrow ? 160 : 100) : 0);
+  // 自绘 chrome 的工作区（如图片编辑器）自己占用顶部/底部：公共层留 0，播放器/预览占位也
+  // 不再由公共层扣减，否则会和工作区自绘的栏重复留白。
+  const workspaceChrome = input.chromeOwner === "workspace";
+  const header = workspaceChrome ? 0 : narrow ? 100 : FOCUS_HEADER;
+  const player = workspaceChrome ? 0 : resolvePlayer(input.player, width);
+  const footer = workspaceChrome ? 0 : FOCUS_FOOTER_BASE + player + (input.animationPreview ? (narrow ? 160 : 100) : 0);
   const tools = Math.max(0, input.toolColumn ?? 0);
   const toolbar = Math.max(0, input.toolbar ?? 0);
   const panelMaxWidth = Math.max(0, input.panelMaxWidth ?? 320);

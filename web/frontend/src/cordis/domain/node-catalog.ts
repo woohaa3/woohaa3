@@ -24,7 +24,7 @@ import {
 } from "@woohaa3/contracts";
 export { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
 
-/** 前端菜单项 id：五类共享语义 kind + 两类自包含 3D 节点（change: 2026-10-05）。 */
+/** 前端菜单项 id：共享语义 kind 加上扩展注册的自包含 3D 节点。 */
 export type CanvasNodeTemplateId = AgentSemanticKind | "model3d" | "composite-asset";
 
 export type CanvasNodeTemplate = {
@@ -54,7 +54,10 @@ export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
 
 /** model 语义别名与 model3d 菜单项返回同一份模板。 */
 export function findNodeTemplate(id: string): CanvasNodeTemplate | null {
-  const fixed = NODE_TEMPLATES.find((template) => template.id === id || template.nodeType === id);
+  // 优先稳定菜单 id；film-set 与扩展占位模板共用 composite-asset canonical type，不能让
+  // canonical 查询意外吞掉显式的 composite-asset 模板。
+  const fixed = NODE_TEMPLATES.find((template) => template.id === id)
+    ?? NODE_TEMPLATES.find((template) => template.nodeType === id);
   if (fixed) return fixed;
   const descriptor = findAgentNodeDescriptor(id);
   if (!descriptor) return null;

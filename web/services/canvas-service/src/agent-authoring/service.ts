@@ -132,7 +132,7 @@ export function summarizeAppliedEntities(
     const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
     if (!node) continue;
     const data = canvas.nodeData[nodeId] as CanvasNodeData | undefined;
-    const descriptor = agentDescriptorForCanonicalType(node.type);
+    const descriptor = agentDescriptorForCanonicalType(node.type, data);
     nodes.push({
       nodeId,
       canonicalType: node.type,

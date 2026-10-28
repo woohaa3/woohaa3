@@ -11,7 +11,7 @@
  *
  * 像素/视觉判定用容差；不依赖固定截图哈希。
  */
-import { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
+import { defaultSelfContained3DNodeData, SHOT_CAMERA_DEFAULT_ELEVATION } from "@woohaa3/contracts";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import {
@@ -161,7 +161,7 @@ test.describe("模型编辑 gizmo 与镜头工具栏", () => {
     const gizmo = await page.evaluate(() => (window as unknown as { __modelEditorGizmo?: () => { shot?: { fov?: number; elevation?: number } } | null }).__modelEditorGizmo?.() ?? null);
     expect(gizmo?.shot).toBeTruthy();
     expect(gizmo!.shot!.fov).toBeGreaterThan(0);
-    expect(gizmo!.shot!.elevation).toBeCloseTo(Math.PI / 4, 5);
+    expect(gizmo!.shot!.elevation).toBeCloseTo(SHOT_CAMERA_DEFAULT_ELEVATION, 5);
   });
 
   test("退出再进入恢复镜头列表", async ({ page }) => {

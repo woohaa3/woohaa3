@@ -17,6 +17,7 @@ import { agentAssistantExtension } from "./plugins/agent-assistant/plugin.js";
  * optional 追加进该集合（`CONFIGURABLE_OPTIONAL_PLUGIN_IDS` 只含宿主内置 node-history）。
  */
 import { nodeDropExtension, NODE_DROP_PLUGIN_ID } from "./plugins/node-drop/plugin.js";
+import { nodeMergeExtension, NODE_MERGE_PLUGIN_ID } from "./plugins/node-merge/plugin.js";
 import type { Plugin } from "@deepseek-ai/cordis";
 import type { FrontendExtensionDefinition } from "./kernel.js";
 import { canvasNavigationExtension, CANVAS_NAVIGATION_PLUGIN_ID } from "./plugins/canvas-navigation/plugin.js";
@@ -103,6 +104,14 @@ export function isConfigurableOptionalExtension(id: string): boolean {
 /** 宿主**内置** Canvas page scope 权威目录（稳定顺序）。 */
 export const CANVAS_PLUGIN_CATALOG: readonly CanvasExtensionCatalogEntry[] = [
   { id: NODE_DROP_PLUGIN_ID, name: "节点拖入", description: "将复制拖入交给目标节点所属扩展。", required: true, configurable: false, create: () => nodeDropExtension() },
+  {
+    id: NODE_MERGE_PLUGIN_ID,
+    name: "节点合并",
+    description: "把同类型节点拖到另一节点，确认后切换当前版本、合并历史并删除来源。",
+    required: true,
+    configurable: false,
+    create: () => nodeMergeExtension()
+  },
   {
     id: MEDIA_PREVIEW_PLUGIN_ID,
     name: "媒体预览",

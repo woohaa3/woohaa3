@@ -14,10 +14,14 @@ import {
   getGroupLayoutSizes,
   hiddenByCollapsedGroups,
   isCompositeAssetNodeType,
+  isMergeEligibleNode,
   readNodeHeight,
   readNodeWidth,
+  groupBadgeOutset,
+  groupPresentationRect,
   FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   shotPreviewOwnershipOf,
+  type MergeTargetCandidate,
   type ServerCanvas,
   type Woohaa3CanvasNode
 } from "@woohaa3/contracts";
@@ -43,6 +47,14 @@ export type CanvasNodeIndex = {
   readonly groupBounds: readonly { id: string; x: number; y: number; width: number; height: number }[];
   /** Complete working AABB facts, including off-screen nodes. */
   readonly workingBounds: readonly ({ id: string } & DropRect)[];
+  /**
+   * 同类型合并候选：按节点 `type` 分桶的可见 working 几何（文档顺序）。
+   *
+   * 只收 v1 范围内且可参与合并的节点（排除组、托管节点、拍摄镜头预览与片场对象容器），
+   * 已排除折叠组内隐藏的节点；拖动热路径用来源类型直接取桶，不扫描整画布
+   * （change: 2026-10-27-merge-same-type-node-history，任务 2.1 / design D1）。
+   */
+  readonly mergeRectsByType: ReadonlyMap<string, readonly MergeTargetCandidate[]>;
   /** Query cached working bounds; pan/zoom and pointermove never rebuild it. */
   readonly queryWorkingAabb: (rect: DropRect) => readonly ({ id: string } & DropRect)[];
   readonly children: ReadonlyMap<string, readonly string[]>;
@@ -133,10 +145,13 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     const size = node.type === "group"
       ? groupSizes.get(node.id) ?? { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) }
       : { width: readNodeWidth(runtimeNode), height: readNodeHeight(runtimeNode) };
-    // Include the small group badge lip in the conservative occupied range.
-    const outset = node.type === "group" ? 6 : 0;
-    return [{ id: node.id, x: position.x - outset, y: position.y - outset,
-      width: size.width + outset * 2, height: size.height + outset * 2 }];
+    const frame = node.type === "group"
+      ? groupPresentationRect(runtimeNode, collapsedGroupIds.has(node.id), { x: 0, y: 0, ...size })
+      : { x: 0, y: 0, ...size };
+    // Include the outsourced group badge in the conservative occupied range.
+    const outset = node.type === "group" ? groupBadgeOutset : 0;
+    return [{ id: node.id, x: position.x + frame.x - outset, y: position.y + frame.y - outset,
+      width: frame.width + outset * 2, height: frame.height + outset * 2 }];
   });
   // 拍摄镜头预览：从归属数据建立 owner（片场）→ 预览索引，供手势阶段按 owner 命中，
   // 不扫描整画布、不重建几何（change 2026-10-15 D4）。
@@ -148,6 +163,25 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     const list = shotPreviewsByOwner.get(ownership.filmSetNodeId) ?? [];
     list.push(node.id);
     shotPreviewsByOwner.set(ownership.filmSetNodeId, list);
+  }
+  // 合并候选按类型分桶：只收可见且可合并的节点，保持文档顺序（同距离时后者优先）。
+  const mergeRectsByType = new Map<string, MergeTargetCandidate[]>();
+  for (const node of nodes) {
+    if (hiddenNodeIds.has(node.id)) continue;
+    if (!isMergeEligibleNode({ node, data: canvas.nodeData[node.id] })) continue;
+    const position = absolutePosition(node.id);
+    if (!position) continue;
+    const runtimeNode = node as unknown as Woohaa3CanvasNode;
+    const bucket = mergeRectsByType.get(node.type) ?? [];
+    bucket.push({
+      nodeId: node.id,
+      type: node.type,
+      x: position.x,
+      y: position.y,
+      width: readNodeWidth(runtimeNode),
+      height: readNodeHeight(runtimeNode)
+    });
+    mergeRectsByType.set(node.type, bucket);
   }
   return {
     source: canvas,
@@ -164,6 +198,7 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     groups,
     groupBounds,
     workingBounds,
+    mergeRectsByType,
     queryWorkingAabb: (rect) => {
       if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) return [];
       return workingBounds.filter(entry => entry.x < rect.x + rect.width && entry.x + entry.width > rect.x

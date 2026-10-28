@@ -51,7 +51,7 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 | `required` | 发布装配的必需扩展：缺它的产物就在指针切换前失败（由装配器按扫描汇总，不再写死 id 清单） |
 | `icon` | 插件图标，二选一：品牌图形 `{ "asset": "./assets/icon.png" }`（包内相对路径，宿主按约定注入 `/plugin-icons/<extensionId><ext>`，生成物由 `pnpm -C web run icons:sync` 同步）；语义图形 `{ "glyph": "migration" }`（`PLUGIN_ICON_NAMES` 里的名字，给没有浏览器前端的后端扩展用） |
 
-Provider 插件用 `HostExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
+Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
 `ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
 
 ## 前端入口与 metadata

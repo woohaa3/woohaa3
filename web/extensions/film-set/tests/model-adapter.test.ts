@@ -6,12 +6,12 @@
  * （内容身份）；普通片场身份仍按严格 extensionId 解析。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, canonicalFilmSetFields, defaultGroupAppearance, deriveModelContentVersion, encodeFilmSetPartId, type CanvasNodeData } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, canonicalFilmSetFields, defaultGroupAppearance, encodeFilmSetPartId, type CanvasNodeData } from "@woohaa3/contracts";
 import { CompositeAssetRegistry } from "@woohaa3/frontend/extension-api";
 import { createFilmSetModelAdapter, filmSetExecutionKey } from "../src/preview/browser/model-adapter.js";
 
 describe("片场总览 LOD 策略声明（change: 2026-10-15-add-film-set-overview-lod）", () => {
-  it("自身默认 groupAppearance 与 items 模型同时保留，展示模型不冒充对象", async () => {
+  it("片场的自身模型就是整场 items，不注入默认组徽标", async () => {
     const data = canonicalFilmSetFields(createFilmSetSnapshot({
       title: "片场", timeline: { duration: 0, loop: false },
       model: { modelScript: "scene.box({id:'actor-body',size:[1,2,1]});", modelScriptVersion: "woohaa-model-js-v2" },
@@ -20,15 +20,15 @@ describe("片场总览 LOD 策略声明（change: 2026-10-15-add-film-set-overvi
     const original = structuredClone(data);
     const result = await createFilmSetModelAdapter().prepare("film", data);
     expect(result?.resource?.ops).toEqual(expect.arrayContaining([
-      expect.objectContaining({ t: "box", id: encodeFilmSetPartId("", "group-base") }),
       expect.objectContaining({ t: "box", id: encodeFilmSetPartId("actor", "actor-body") })
     ]));
+    expect(result?.resource?.ops.some(op => op.id === encodeFilmSetPartId("", "group-base"))).toBe(false);
     expect(result?.composition?.itemRoots.actor).toBe(encodeFilmSetPartId("actor", ""));
     expect(Object.keys(result!.composition!.itemRoots)).not.toContain("");
     expect(data).toEqual(original);
   });
 
-  it("替换自身 groupAppearance 只替换自身几何，items 模型继续保留", async () => {
+  it("片场忽略 groupAppearance：自定义外观不进入整场组合，执行身份也不变", async () => {
     const data = canonicalFilmSetFields(createFilmSetSnapshot({
       title: "片场", timeline: { duration: 0, loop: false },
       model: { modelScript: "scene.box({id:'actor-body',size:[1,2,1]});", modelScriptVersion: "woohaa-model-js-v2" },
@@ -38,15 +38,13 @@ describe("片场总览 LOD 策略声明（change: 2026-10-15-add-film-set-overvi
     const defaultKey = adapter.executionKey(data);
     const appearance = defaultGroupAppearance();
     appearance.model.modelScript = "scene.sphere({id:'custom',radius:1});";
-    appearance.model.contentVersion = deriveModelContentVersion({ ...appearance.model, revision: 2 });
     data.groupAppearance = appearance;
     const result = await adapter.prepare("film", data);
-    expect(adapter.executionKey(data)).not.toBe(defaultKey);
+    expect(adapter.executionKey(data)).toBe(defaultKey);
     expect(result?.resource?.ops).toEqual(expect.arrayContaining([
-      expect.objectContaining({ t: "sphere", id: encodeFilmSetPartId("", "custom") }),
       expect.objectContaining({ t: "box", id: encodeFilmSetPartId("actor", "actor-body") })
     ]));
-    expect(result?.resource?.ops.some(op => op.id === encodeFilmSetPartId("", "group-base"))).toBe(false);
+    expect(result?.resource?.ops.some(op => op.t === "sphere" || op.id === encodeFilmSetPartId("", "group-base"))).toBe(false);
   });
 
   it("片场 adapter 显式声明 overview-primitives-v1，宿主 registry 投影到该节点", () => {

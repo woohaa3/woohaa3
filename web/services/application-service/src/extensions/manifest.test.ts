@@ -13,7 +13,6 @@ import type { ApplicationBackendExtensionDefinition } from "./contract.js";
 const sample: ApplicationBackendExtensionDefinition = {
   extensionId: "sample-site-extension",
   requiredDependencies: ["task-runtime"],
-  capabilities: [{ id: "sample.action", kind: "handler", description: "样例", auth: "authenticated" }],
   activate: () => ({})
 };
 

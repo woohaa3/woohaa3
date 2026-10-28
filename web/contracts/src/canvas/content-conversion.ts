@@ -10,8 +10,8 @@
  * 这里上移为公共契约，供宿主与扩展共同依赖。
  */
 import type { CanvasAuthority } from "../backend/canvas-authority.js";
-import type { AssistantExecutionRef } from "../extension/assistant-execution.js";
-import type { AgentAdapterRunOutcome, AgentConversationAdapterEvent } from "../extension/conversation.js";
+import type { AssistantExecutionRef } from "../extension/assistant/assistant-execution.js";
+import type { AgentAdapterRunOutcome, AgentConversationAdapterEvent } from "../extension/assistant/conversation.js";
 import type { FilmSetConversionRecord } from "./film-set-conversion/registry.js";
 
 /** Trusted composition port, never selectable in a browser request. */
@@ -22,7 +22,7 @@ export type ContentConversionExecutionPort = {
     emit(event: AgentConversationAdapterEvent): void;
   }) => Promise<AgentAdapterRunOutcome>, accepted?: (execution: AssistantExecutionRef) => Promise<void>): Promise<void>;
   cancel?(record: FilmSetConversionRecord): void;
-  readStatus?(record: FilmSetConversionRecord): import("../extension/conversation.js").ConversationTurn["status"] | undefined;
+  readStatus?(record: FilmSetConversionRecord): import("../extension/assistant/conversation.js").ConversationTurn["status"] | undefined;
   reconcile?(record: FilmSetConversionRecord, outcome: AgentAdapterRunOutcome): void;
 };
 import type {

@@ -37,14 +37,18 @@ export function registerAgentGraphTools(server: McpServer, deps: AgentAuthoringT
       let scriptAvailability: { available: boolean; reason?: string } = {
         available: false, reason: "MCP 未接入 Canvas 脚本能力面"
       };
+      let modelsAvailability: { available: boolean; reason?: string; items: unknown[] } = {
+        available: false, reason: "MCP 未接入任务模型目录", items: []
+      };
       if (deps.client.scriptCapability) {
         const outcome = await deps.client.scriptCapability({ canvasId });
         if (!outcome.ok) return errorResult(agentCanvasError(outcome.code, outcome.message, { retryable: false }));
         scriptAvailability = outcome.available
           ? { available: true }
           : { available: false, reason: outcome.reason };
+        if (outcome.models) modelsAvailability = outcome.models;
       }
-      const capabilities = buildCapabilities({ ...deps, scriptAvailability });
+      const capabilities = buildCapabilities({ ...deps, scriptAvailability, modelsAvailability });
       return structured(capabilities, `Agent 画布能力：${capabilities.nodeKinds.map((n) => n.kind).join(", ")}`);
     }
   );
@@ -193,7 +197,7 @@ export const AGENT_CANVAS_GUIDE = `# Agent Canvas 指南
 
 - 写工具都要求显式 \`requestId\`；重试同一 requestId + 相同 payload 返回首次回执。
 - 先用 \`validate_canvas_plan\` 获得 \`validationToken\`，再提交；basis revision 变化会返回 \`plan-stale\`。
-- 节点只表达语义 kind（text/image/video/audio/model），不传 canonical type 或任意 nodeData。
+- 节点只表达语义 kind（text/image/video/audio/model/film-set），不传 canonical type 或任意 nodeData。
 - \`orchestrate_canvas\` 已 deprecated，请改用上面的类型化工具。
 `;
 
@@ -223,6 +227,8 @@ export function buildCapabilities(deps: AgentAuthoringToolDeps): AgentCanvasCapa
     // 批量写入统一走 Canvas Script；不可用时仅引导读取原因，不推荐 JSON 提交。
     recommendedFlow: [...baseFlow, ...scriptFlow, ...tail],
     run: { available: run.available, ...(run.reason !== undefined ? { reason: run.reason } : {}) },
+    // Agent 创建媒体节点前的真实模型可用性；不可用时不得创建伪造的图片/视频节点。
+    models: deps.modelsAvailability ?? { available: false, reason: "任务模型目录未接入", items: [] },
     script: {
       available: script.available,
       ...(script.available

@@ -73,11 +73,6 @@ export function resolveSdkAgentDeployment(env: Record<string, string | undefined
 export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}): ApplicationBackendExtensionDefinition {
   return {
     extensionId: SDK_AGENT_PLUGIN_ID,
-    capabilities: [
-      { id: agentConnectionProviderCapabilityId(SDK_AGENT_PLUGIN_ID), kind: "capability", description: "SDK Agent 来源连接发现" },
-      ...SDK_AGENT_ADAPTERS.map(adapter => ({ id: filmSetConversionCapabilityId(adapter.adapterId), kind: "capability" as const, description: `${adapter.label} film-set candidate generation` })),
-      ...SDK_AGENT_ADAPTERS.map((adapter) => ({ id: agentConversationAdapterCapabilityId(adapter.adapterId), kind: "capability" as const, description: `${adapter.label} 会话适配器` }))
-    ],
     activate: (host) => {
       const deployment = resolveSdkAgentDeployment(options.env ?? (process.env as Record<string, string | undefined>));
       const allowedHosts = options.allowedHosts !== undefined ? options.allowedHosts : deployment.allowedHosts;

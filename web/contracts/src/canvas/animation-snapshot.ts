@@ -37,7 +37,7 @@ import {
 } from "./canvas-node-model.js";
 import { filmSetAnimationsHash, emptyFilmSetAnimations, FILM_SET_ANIMATIONS_VERSION, staticShotCameraMotion, type FilmSetAnimations } from "./film-set-animations.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf } from "./film-set-clip-view.js";
-import { DEFAULT_MODEL_CAMERA_ASPECT } from "./model-cameras.js";
+import { DEFAULT_MODEL_CAMERA_ASPECT, SHOT_CAMERA_DEFAULT_ELEVATION } from "./model-cameras.js";
 import { shotFitDistance } from "./shot-camera.js";
 import { MODEL_SCRIPT_LANGUAGE, type SupportedModelScriptVersion } from "./model-script.js";
 import type { Aabb } from "./model-transform.js";
@@ -130,7 +130,7 @@ export function advanceMotionRevision(previous: MotionDefinition | null, nextSou
 }
 
 /**
- * 默认初始镜头：方位 0、仰角 45°、`16:9`、零注视点偏移。
+ * 默认初始镜头：方位 0、仰角跟随画布全局 pitch、`16:9`、零注视点偏移。
  *
  * `distance` 优先按模型包围球半径自动取景；无 AABB 时使用与内容无关的稳定回退（半径 1 的
  * fit distance），保证同一内容在不同视口下派生相同默认构图（design「保存镜头构图 SHALL 独立
@@ -140,7 +140,7 @@ export function defaultInitialShotCamera(aabb?: Aabb | null): InitialShotCamera 
   const radius = aabb ? boundingRadius(aabb) : 1;
   return {
     azimuth: 0,
-    elevation: Math.PI / 4,
+    elevation: SHOT_CAMERA_DEFAULT_ELEVATION,
     distance: shotFitDistance(radius),
     aspect: DEFAULT_MODEL_CAMERA_ASPECT,
     focusOffset: { x: 0, y: 0, z: 0 }

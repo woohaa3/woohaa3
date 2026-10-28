@@ -13,6 +13,7 @@ import path from "node:path";
 import {
   HOST_ENGINES,
   checkEnginesCompatible,
+  contentDeclarationCollisions,
   isSemver,
   satisfiesRange,
   validateExtensionDescriptor,
@@ -219,9 +220,51 @@ test("migrate 只做格式校验（是否允许由受管预检决定）", () => 
   assert.match(errorsOf({ ...MINIMAL, migrate: { module: "https://x", export: "m" } }), /migrate\.module 必须是包内相对子路径/);
 });
 
-test("hostPlugin.kind 接受 marketplace-source", () => {
-  assert.equal(validateExtensionDescriptor({ ...MINIMAL, hostPlugin: { module: "./backend", factory: "createSource", kind: "marketplace-source" } }).ok, true);
+test("hostPlugin.features 接受 marketplace-source", () => {
+  assert.equal(validateExtensionDescriptor({ ...MINIMAL, hostPlugin: { module: "./backend", factory: "createSource", features: ["marketplace-source"] } }).ok, true);
 });
+
+test("content 声明校验字段格式，并拒绝跨扩展重名", () => {
+  const content = {
+    ownedFields: ["filmSetContent"],
+    ownedWireFields: ["shotPreview"],
+    routePrefix: "import",
+    mcpTools: ["import_content"],
+    targetModes: ["film-set"],
+    eventOwners: ["film-set"]
+  };
+  assert.equal(validateExtensionDescriptor({ ...MINIMAL, content }).ok, true);
+  assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["film-set"] } }), /ownedFields/);
+  assert.match(errorsOf({ ...MINIMAL, content: { mcpTools: ["Import"] } }), /mcpTools/);
+  assert.match(errorsOf({ ...MINIMAL, content: { routePrefix: "/import" } }), /routePrefix/);
+  assert.match(errorsOf({ ...MINIMAL, content: { ownedFields: ["title", "title"] } }), /ownedFields 不得重复/);
+  assert.match(errorsOf({ ...MINIMAL, content: { extra: true } }), /content 未知字段：extra/);
+  const collisions = contentDeclarationCollisions([
+    { extensionId: "film-set", directory: "a", descriptor: { content } },
+    { extensionId: "game-furnace", directory: "b", descriptor: { content: { ownedFields: ["filmSetContent"], mcpTools: ["other_tool"] } } }
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.match(collisions[0].message, /ownedFields「filmSetContent」/);
+});
+
+// deprecated-declaration：`hostPlugin.kind` 过渡期用例。删除废弃别名时一并删掉这两条。
+test("hostPlugin.kind 仍被接受：归一成 features 并报告废弃", () => {
+  const validated = validateExtensionDescriptor({ ...MINIMAL, hostPlugin: { module: "./backend", factory: "createSource", kind: "provider" } });
+  assert.equal(validated.ok, true);
+  assert.deepEqual(validated.value.hostPlugin.features, ["provider"]);
+  assert.equal("kind" in validated.value.hostPlugin, false);
+  assert.deepEqual(validated.deprecations, [{ field: "hostPlugin.kind", replacement: "hostPlugin.features" }]);
+});
+
+test("hostPlugin.kind 与 features 同时声明：报错（不猜哪个优先）", () => {
+  const validated = validateExtensionDescriptor({
+    ...MINIMAL,
+    hostPlugin: { module: "./backend", factory: "createSource", kind: "provider", features: ["storage"] }
+  });
+  assert.equal(validated.ok, false);
+  assert.ok(validated.errors.some((error) => error.includes("不能与")), validated.errors.join(", "));
+});
+
 
 test("semver 工具：isSemver 与 range 子集", () => {
   assert.equal(isSemver("1.2.3"), true);

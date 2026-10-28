@@ -1,7 +1,7 @@
 import { compositeChildMovementContext, followCompositeChildOwner, createCompositeChildNode, removeCompositeChildNodes, planCompositeChildLayout } from "../composite-children.js";
 /** Maintain at most six external object containers and preserve explicit hide choices. */
 import { FILM_SET_MAX_VISIBLE_OBJECTS, filmSetVisibleObjectIds, FILM_SET_OBJECT_MODEL_PADDING, filmSetObjectOwnershipOf, filmSetObjectContainerId, filmSetObjectContainerData, filmSetObjectModelNodeId, filmSetObjectModelNodeData, createFilmSetObjectResolver } from "../film-set-object-container.js";
-import { getWoohaa3CanvasNodeAbsolutePosition, MIN_NODE_WIDTH, type CanvasNodeData, type ServerCanvas } from "../domain/index.js";
+import { getWoohaa3CanvasNodeAbsolutePosition, refitWoohaa3CanvasGroups, MIN_NODE_WIDTH, type CanvasNodeData, type ServerCanvas } from "../domain/index.js";
 import { effectiveCanvasNodeSize, MODEL_PREVIEW_MIN_HEIGHT } from "../node-dimensions.js";
 import { decodeFilmSetNodeData } from "../canvas-node-model.js";
 import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
@@ -101,5 +101,36 @@ export function reconcileFilmSetObjectContainers(work: WorkingState, before: Ser
       work.nodeData[modelId] = filmSetObjectModelNodeData(parent.id, item);
     }
   }
+  refitFilmSetAncestors(work);
   return OK;
+}
+
+/** Grow every group around a film set to include the reducer-derived object cards. */
+function refitFilmSetAncestors(work: WorkingState): void {
+  const groups = new Set<string>();
+  const byId = new Map(work.nodes.map(node => [node.id, node]));
+  for (const node of work.nodes) {
+    if (!isFilmSetNode(node.type, work.nodeData[node.id])) continue;
+    const decoded = decodeFilmSetNodeData(work.nodeData[node.id]);
+    if (!decoded.ok || decoded.value.filmSetContent.items.length === 0) continue;
+    let parentId = node.parentId;
+    while (parentId) {
+      const parent = byId.get(parentId);
+      if (parent?.type !== "group") break;
+      groups.add(parent.id);
+      parentId = parent.parentId;
+    }
+  }
+  if (groups.size === 0) return;
+  const depth = (id: string) => {
+    let current = work.nodes.find(node => node.id === id), value = 0;
+    while (current?.parentId) {
+      value++;
+      current = work.nodes.find(node => node.id === current!.parentId);
+    }
+    return value;
+  };
+  for (const groupId of [...groups].sort((a, b) => depth(a) - depth(b))) {
+    work.nodes = refitWoohaa3CanvasGroups(work.nodes, [groupId]).nodes;
+  }
 }

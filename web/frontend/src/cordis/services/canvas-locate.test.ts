@@ -42,7 +42,8 @@ describe("createCanvasLocateService", () => {
     const service = createCanvasLocateService({getCanvas:()=>source,getController:()=>ctrl as never});
     expect(service.locateNodes(["member"]).ok).toBe(true);
     expect(ctrl.selected).toEqual(["g"]);
-    expect(ctrl.viewports[0]).toEqual({x:100,y:-44,zoom:1});
+    // 紧凑组 196×48 固定底边中点：视口按 48 高矩形的中心定位。
+    expect(ctrl.viewports[0]).toEqual({x:100,y:-76,zoom:1});
     expect(service.locateNodes(["g"]).ok).toBe(true);
     expect(ctrl.viewports[1]).toEqual(ctrl.viewports[0]);
   });
