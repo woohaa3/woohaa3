@@ -28,6 +28,7 @@ import {
 } from "./canvas-api/types.js";
 import { checkServiceToken, decodeSegment, isLoopbackRequest, respondError, sendError, sendJson } from "./canvas-api/http-codec.js";
 import { handleCreate, handleDelete, handleGet, handleHealth, handleList, loadCanvasListPage } from "./canvas-api/lifecycle-routes.js";
+import { handleArchiveExport, handleArchiveImport } from "./canvas-api/archive-routes.js";
 import { handleCancel, handleFilmSetConversionCancel, handleFilmSetConversionModels, handleFilmSetConversionRetry, handleFilmSetConversionStatus, handleFilmSetConversionSubmit, handleFilmSetImport, handleRun } from "./canvas-api/run-routes.js";
 import {
   handleRecordingCancel,
@@ -135,6 +136,16 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         return true;
       }
 
+      /*
+       * 归档导入：`POST /api/canvases/archive`。
+       *
+       * 必须排在单段分支之前 —— 否则 `archive` 会被当成一个 canvasId 去查。
+       * 归档包是二进制体，不能走 `readJsonBody`，所以这条路由自己读 body。
+       */
+      if (segments.length === 1 && segments[0] === "archive" && req.method === "POST") {
+        return await handleArchiveImport(req, res, options, log);
+      }
+
       if (segments.length === 1) {
         const canvasId = segments[0];
         if (req.method === "GET") {
@@ -174,6 +185,13 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         }
         sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许");
         return true;
+      }
+
+      // 归档导出：`GET /api/canvases/:canvasId/archive`（只读，权限与 GET 画布一致）。
+      if (segments.length === 2 && segments[1] === "archive" && req.method === "GET") {
+        const decision = await authorizeImported(segments[0], "read");
+        if (decision === "deny") return denyImported("read");
+        return await handleArchiveExport(req, res, segments[0], options, log);
       }
 
       if (segments.length === 2 && segments[1] === "runs" && req.method === "POST") {

@@ -64,6 +64,20 @@ export type ComposedHandlerDeps = {
   preparationHandler?: ((req: IncomingMessage, res: ServerResponse) => Promise<boolean>) | null;
   /** 在线迁移访问门（GET/WS 未准备、DELETE tombstone）。 */
   importGuard?: import("../api/canvas-api/types.js").CanvasImportGuard;
+  /**
+   * 归档导出/导入。
+   *
+   * 必须是**真正对外服务**的这个 handler 才拿得到 —— `storage/composition.ts` 里那个
+   * `handler` 字段没有任何引用（死代码），装配在那儿等于没装，路由会一直回 503。
+   */
+  archive?: import("../api/canvas-api/types.js").CanvasRequestHandlerOptions["archive"];
+  /**
+   * 归档包的媒体读写。
+   *
+   * 刻意不复用 `createMediaVerifierStorage`：那个适配器的 `get`/`put` 直接抛错（画布不得
+   * 触碰媒体字节）。这里要的是**经 Media Service 内部通道**的读写适配器。
+   */
+  archiveMedia?: import("../api/canvas-api/types.js").CanvasRequestHandlerOptions["mediaStorage"];
   log: (event: Record<string, unknown>) => void;
 };
 

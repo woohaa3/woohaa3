@@ -3,7 +3,8 @@
  * （自 `canvas-api.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R23）。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { CanvasApplicationService, CanvasCatalogService } from "../../storage/core/index.js";
+import type { MediaStorage } from "@woohaa3/contracts";
+import type { CanvasApplicationService, CanvasArchiveService, CanvasCatalogService } from "../../storage/core/index.js";
 
 export const DEFAULT_CANVAS_API_BASE_PATH = "/api/canvases";
 export const DEFAULT_CANVAS_HEALTH_BASE_PATH = "/api/canvas-storage/health";
@@ -145,6 +146,18 @@ export type CanvasRequestHandlerOptions = {
    * 使撤权在生效后同步可见。缺省时不断开（独立 Canvas 服务无同步面）。
    */
   closeSessions?: (canvasId: string, reason: string) => void | Promise<void>;
+  /**
+   * 归档导出/导入（`.woohaa-archive`）。缺省时 `/archive` 路由回 503，不影响其它路由。
+   *
+   * 只暴露这三个方法：路由层不需要知道 `exportArchive` 之外的能力（列表、构造、依赖装配）。
+   */
+  archive?: Pick<CanvasArchiveService, "exportArchive" | "importArchive" | "verifyArchive">;
+  /**
+   * 归档包里带的媒体字节。导出时用来读取、导入时用来写回。
+   *
+   * 省略时导出仍可用，但包内不会有任何媒体 —— 恢复回来的画布图片全是断链。
+   */
+  mediaStorage?: MediaStorage;
 };
 
 export type CanvasLogger = CanvasRequestHandlerOptions["logger"];

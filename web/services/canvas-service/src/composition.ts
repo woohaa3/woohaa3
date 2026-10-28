@@ -25,6 +25,8 @@ import { CANVAS_STORAGE_BACKEND_ENV,
   type CanvasStorageComposition,
   type CanvasStorageConfigResult } from "./storage/composition.js";
 import { CanvasRunService } from "./task/run-service.js";
+import { CanvasArchiveService } from "./storage/core/index.js";
+import { createArchiveMediaStorage } from "./clients/archive-media-storage.js";
 import { createTaskResultConsumer, type TaskResultConsumer } from "./task/result-consumer.js";
 import { createCanvasTaskClient } from "./clients/task-client.js";
 import { createCanvasMediaClient } from "./clients/media-client.js";
@@ -179,21 +181,30 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   };
 
   let composition: CanvasStorageComposition | null = null;
+  /**
+   * 已发布的权威投影读取器。归档服务与目录同用它（Yjs 部署读投影而不是启动前的结构化快照），
+   * 所以提到这里：归档的构造在下面 `composedHandler` 之前，需要跨这个块。
+   */
+  let publishedReaderRef: ReturnType<typeof createPublishedReader> | undefined;
   let unavailableReason: string | null = null;
   // 同步链路在目录之后构造；目录的同步状态读取因此走这个延迟引用。
   let upstreamRef: () => SyncUpstream | undefined = () => undefined;
   if (canvasEnabled) {
     try {
       const mediaStorage = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
-      let publishedReader: ReturnType<typeof createPublishedReader> | undefined;
-      try {
-        publishedReader = createPublishedReader(await resolveYjsRepository());
-      } catch (error) {
-        log({
-          event: "canvas-catalog-unavailable",
-          message: error instanceof Error ? error.message : "unknown"
-        });
-      }
+      const publishedReader: ReturnType<typeof createPublishedReader> | undefined = await (async () => {
+        try {
+          return createPublishedReader(await resolveYjsRepository());
+        } catch (error) {
+          log({
+            event: "canvas-catalog-unavailable",
+            message: error instanceof Error ? error.message : "unknown"
+          });
+          return undefined;
+        }
+      })();
+      // 归档服务在 `composedHandler` 之前构造，读不到这个块级变量，所以外提一份。
+      publishedReaderRef = publishedReader;
       composition = await composeCanvasStorage({
         managedLifecycles,
         env,
@@ -752,6 +763,32 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     log({ event: "film-set-conversion-unavailable", message: "未装配内容扩展的转换端口；转片场功能不可用" });
   }
 
+  /**
+   * 归档能力（导出/校验/导入）。
+   *
+   * 读的是**已发布的权威投影**（Yjs 部署），与目录同一口径；没有 reader 时回退结构化仓库。
+   *
+   * 媒体读写走 `createArchiveMediaStorage`（Media Service 内部通道），**不是** verifier ——
+   * 后者明确拒绝 `get`/`put`（「画布不得触碰媒体字节」），接上去导出会一个字节都拿不到。
+   * 那条约束依然成立：字节只经内部 HTTP 过一遍，canvas 仍不持有存储 adapter。
+   */
+  const archiveMediaUrl = env[CANVAS_MEDIA_SERVICE_URL_ENV];
+  const archiveMediaStorage = mediaClient && archiveMediaUrl
+    ? createArchiveMediaStorage({
+        baseUrl: archiveMediaUrl,
+        ...(env[CANVAS_MEDIA_SERVICE_TOKEN_ENV] ?? env[CANVAS_STORAGE_SERVICE_TOKEN_ENV]
+          ? { serviceToken: env[CANVAS_MEDIA_SERVICE_TOKEN_ENV] ?? env[CANVAS_STORAGE_SERVICE_TOKEN_ENV] }
+          : {})
+      })
+    : undefined;
+  const archiveDeps = composition
+    ? new CanvasArchiveService({
+        repository: composition.repository,
+        ...(publishedReaderRef ? { publishedReader: publishedReaderRef } : {}),
+        ...(archiveMediaStorage ? { mediaStorage: archiveMediaStorage } : {})
+      })
+    : undefined;
+
   const composedHandler = composeRequestHandler({
     prepareCompositeHistory: async ({ canvasId, nodeId, payload }) => {
       if (payload.animation?.schemaVersion !== 3) throw new Error("历史复合资产定义非法");
@@ -806,6 +843,11 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           }
         }
       : {}),
+    // 归档导出/导入。必须挂在**这个** handler 上 —— `storage/composition.ts` 里那个
+    // `handler` 字段没有任何引用，装在那儿路由会一直回 503。
+    ...(archiveDeps ? { archive: archiveDeps } : {}),
+    // 归档包的媒体读写经 Media Service 内部通道，不用 verifier（它拒绝 get/put）。
+    ...(archiveMediaStorage ? { archiveMedia: archiveMediaStorage } : {}),
     log
   });
 
