@@ -55,3 +55,21 @@ Validate these behaviors on a Windows machine:
 Default data is under `%APPDATA%\com.woohaa.desktop`; host logs are in `logs\host.log` beneath the data directory. Use `WOOHAA_DESKTOP_DATA_DIR` for isolated checks. Workspace archives contain configuration and secrets and are unencrypted.
 
 Windows installation and updater behavior require Windows verification; macOS build results do not validate this lifecycle. See the [desktop overview](README.md) for codec licensing and application boundaries.
+
+## Offline large-canvas experience kit
+
+Build from a clean committed checkout so the installer and scenes have the same source revision. From the client root on Windows x64:
+
+```powershell
+git pull --ff-only
+pnpm desktop:bundle --build-frontend --bundles nsis --release-id windows-large-canvas --out artifacts/desktop/windows-large-canvas --copy
+node --experimental-strip-types scripts/canvas-benchmark/experience-kit.mjs artifacts/desktop/windows-large-canvas/manifest.json artifacts/desktop/windows-large-canvas/woohaa-windows-x64-experience.zip
+```
+
+The ZIP contains the unsigned NSIS `.exe`, `3000-text.woohaa-scene`, `3000-images.woohaa-scene`, `3000-models.woohaa-scene`, a Chinese guide and a SHA-256 manifest. Each scene has 3,000 nodes and 12,000 edges. The image scene embeds 400 unique 512×512 PNGs; the model scene embeds 400 self-contained scripts and retains the product's existing 16 preview-slot limit. The same ZIP is included in the Windows workflow artifact. No test data is committed to Git; the deterministic generator creates it during packaging.
+
+Install and open the app, choose “导入场景文件” in the canvas switcher, then select one scene. Import creates a new local canvas. Its receipt-backed toolbar offers 200/300-node views, a distant bookmark, restoration into another new canvas, and “导出本机报告”. The original edited canvas is preserved. Scene originals are retained locally for restoration under a 2 GiB cache quota; imports fail safely if protected originals exhaust the quota. Remote-access hosts do not expose this local import API.
+
+Reproduce a slowdown, then immediately export `woohaa-scene-report.json`: it contains the last 30 seconds of bounded frontend/runtime counters and optional feedback. It does not measure GPU presentation FPS. Export native diagnostics with “导出诊断日志…” as well; if the UI cannot respond, collect `%APPDATA%\com.woohaa.desktop\logs` (or the custom `WOOHAA_DESKTOP_DATA_DIR`). Include the scene/view, action, approximate time, whether resources had finished loading, and CPU/GPU/RAM/display refresh rate. Diagnostic logs can contain local paths or business content; inspect before sharing. Reports and logs are saved locally, without automatic upload by the scene experience feature.
+
+Windows installation, offline import, GPU rendering, drag/zoom/navigation, report download, persistence and exit cleanup remain real-device acceptance checks. A successful build or macOS regression run is not a Windows performance result.

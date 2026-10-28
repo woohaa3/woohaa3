@@ -644,6 +644,15 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     return remote !== null;
   };
 
+  // 本地包只发布到本机 SQLite；在线迁移的 ACL/receipt 不参与此路径。
+  const packageConfig = resolveStorageConfig();
+  let scenePackages: import("./storage/sqlite/scene-package.js").SqliteScenePackageStore | null = null;
+  if (composition && sync && packageConfig.ok && packageConfig.config.backend === "sqlite") {
+    const { SqliteScenePackageStore } = await import("./storage/sqlite/scene-package.js");
+    scenePackages = new SqliteScenePackageStore({path:packageConfig.config.sqlitePath!});
+    scenePackages.recover();
+  }
+
   // 在线迁移（change: 2026-10-12-add-extension-online-canvas-migration）：
   // 装配细节见 `composition/online-migration.ts`（仅在注入来源端口且目标为 SQLite 时挂载）。
   const { preparationHandler, importService, importStore, importGuard } = composeOnlineMigration({
@@ -801,6 +810,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   });
 
   return {
+    scenePackages,
     sync,
     runService,
     consumer,
@@ -862,6 +872,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       await snippets?.close().catch(() => undefined);
       await composition?.close();
       importStore?.close();
+      scenePackages?.close();
     }
   };
 }

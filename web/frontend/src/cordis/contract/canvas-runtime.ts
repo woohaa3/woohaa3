@@ -27,6 +27,7 @@ export interface CanvasRuntimeService {
   attach(canvas: HTMLCanvasElement): () => void;
   controller(): InteractionController | null;
   runtime(): BevyRuntime | null;
+  resourceResidencyDiagnostics?(): unknown;
   cancelTransientGesture(): void;
   /**
    * 最近一次有效画布指针的世界坐标（change: add-paste-import-workflows，design D6）。

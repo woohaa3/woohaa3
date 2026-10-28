@@ -570,6 +570,7 @@ export async function installCanvasPageServices(
   const canvasLocate = createCanvasLocateService({
     getCanvas: () => woohaa3CanvasStore.getState().canvas,
     getController: () => (ctx.get("canvasRuntime" as never) as { controller: () => never } | undefined)?.controller() ?? null,
+    renderBounds: () => (ctx.get("canvasRuntime" as never) as import("./contract/canvas-runtime.js").CanvasRuntimeService | undefined)?.runtime()?.acceptedScene?.()?.nodes ?? null,
     // 定位作品：保持当前缩放并平滑居中（尊重减少动态效果偏好）。
     panViewportTo: (viewport) => {
       const controller = (ctx.get("canvasRuntime" as never) as { controller: () => { panViewportTo?: (v: typeof viewport) => void } | null } | undefined)?.controller();

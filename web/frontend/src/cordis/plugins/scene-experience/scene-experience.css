@@ -1,0 +1,10 @@
+.scene-package-import { padding: 16px 0; border-top: 1px solid var(--app-web-border); }
+.scene-package-import__heading { font-size: 13px; font-weight: 600; color: var(--app-web-text-primary); }
+.scene-package-import__hint { margin: 8px 0; font-size: 12px; color: var(--app-web-text-muted); overflow-wrap: anywhere; }
+.scene-experience__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.scene-experience__actions input[type="file"] { max-width: 100%; font: inherit; color: var(--app-web-text-primary); }
+.scene-experience { position: absolute; z-index: 20; left: 16px; top: 64px; max-width: calc(100% - 32px); padding: 10px 12px; border: 1px solid var(--app-web-border); border-radius: 12px; background: var(--app-web-panel); color: var(--app-web-text-primary); }
+.scene-experience__summary { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; font-size: 12px; }
+.scene-experience__summary span { color: var(--app-web-text-muted); }
+.scene-experience__message { max-width: 640px; margin: 8px 0 0; font-size: 12px; color: var(--app-web-text-muted); }
+.scene-experience__feedback { display: block; margin-top: 8px; max-width: 100%; font: inherit; background: var(--app-web-panel); color: var(--app-web-text-primary); border: 1px solid var(--app-web-border); border-radius: 6px; padding: 6px 8px; }

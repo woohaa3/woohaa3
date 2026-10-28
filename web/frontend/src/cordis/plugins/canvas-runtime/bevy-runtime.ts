@@ -1,3 +1,4 @@
+import { readSceneWorkDiagnostics } from "./diagnostics-reader.js";
 /// <reference types="vite/client" />
 import { hoverNodeStore } from "../../services/hover-store.js";
 import { RuntimeIssues } from "./runtime-issues.js";
@@ -445,6 +446,10 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     generation: () => generation,
     interactionGeneration: () => interactionGeneration,
     baseSceneGeneration: () => baseSceneGeneration,
+    acceptedScene: () => lastScene,
+    readSceneDiagnostics: () => disposed ? Promise.resolve({value:null,reason:"disposed"}) : readSceneWorkDiagnostics(module),
+    rendererBackend: () => module.async_canvas_work_diagnostics ? "native" : "wasm",
+    runtimeHealthSnapshot: () => supervisor?.snapshot() ?? null,
     getWorkDiagnostics: () => !disposed && module.canvas_work_diagnostics ? JSON.parse(module.canvas_work_diagnostics()) as Record<string, unknown> : {},
     setPositions: (input) => {
       if (disposed) throw new Error("Bevy runtime disposed");
