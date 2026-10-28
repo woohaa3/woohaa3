@@ -36,6 +36,7 @@ import { ImageFocusStore } from "./image-focus-store.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
 import { installPerfFrameWindow } from "./perf-frame-window.js";
+import { groupBadgeScreenRect } from "@woohaa3/contracts";
 import {
   installOverviewLodTelemetry,
   type OverviewLodTelemetryHandle
