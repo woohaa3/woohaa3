@@ -200,6 +200,29 @@ describe("前端协议边界审计", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("独立遥测页面与插件适配层遵守分层（change: 2026-10-20-add-local-client-telemetry，任务 5.6）", () => {
+    // pages/telemetry 是纯展示 + 纯模型：不碰 Canvas 实现、不 import Cordis UI 或 Context。
+    const pageDir = path.join(SRC_ROOT, "pages", "telemetry");
+    const offenders: string[] = [];
+    for (const file of productionFiles(pageDir)) {
+      const relative = path.relative(SRC_ROOT, file).split(path.sep).join("/");
+      const source = stripComments(readFileSync(file, "utf8"));
+      if (/canvas-session|canvas-runtime|canvas-navigation|plugins\/canvas-/.test(source)) offenders.push(`${relative}: canvas impl`);
+      if (/from\s+["'][^"']*cordis\/ui/.test(source)) offenders.push(`${relative}: cordis ui`);
+      if (/from\s+["'][^"']*\/plugins\//.test(source)) offenders.push(`${relative}: imports plugin`);
+      if (/@deepseek-ai\/cordis/.test(source)) offenders.push(`${relative}: cordis context`);
+    }
+    // 页面插件文件被清单静态引入，只能做槽位注册：页面与取数层必须由 route.tsx 动态 import。
+    const thinFiles = ["plugin.tsx", "route.tsx"];
+    const pluginDir = path.join(CORDIS_DIR, "plugins", "telemetry");
+    const pluginFiles = productionFiles(pluginDir).map((file) => path.relative(SRC_ROOT, file).split(path.sep).join("/"));
+    expect(pluginFiles.sort()).toEqual(thinFiles.map((name) => `cordis/plugins/telemetry/${name}`).sort());
+    const pluginSource = stripComments(readFileSync(path.join(pluginDir, "plugin.tsx"), "utf8"));
+    if (/from\s+["'][^"']*pages\/telemetry\//.test(pluginSource)) offenders.push("plugins/telemetry/plugin.tsx: static page import");
+    if (/from\s+["'][^"']*\.\/route\.js["']/.test(pluginSource)) offenders.push("plugins/telemetry/plugin.tsx: static route import");
+    expect(offenders).toEqual([]);
+  });
+
   it("共享模块不依赖页面、Cordis 宿主或具体插件（change: 2026-10-10-extract-task-history-page）", () => {
     const SHARED_DIR = path.join(SRC_ROOT, "shared");
     const offenders: string[] = [];
