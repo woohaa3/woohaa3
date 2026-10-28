@@ -16,6 +16,7 @@ import { canBindPort, findPortOwners, freePort } from "./lib/dev-port-guard.mjs"
 import { startHostWatch } from "./lib/dev-host-watch.mjs";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
 import { decideBackendExit, RESTART_LOOP_LIMIT, RESTART_LOOP_WINDOW_MS } from "./lib/dev-restart-policy.mjs";
+import { findStaleArtifacts, formatStaleArtifacts } from "./lib/artifact-freshness.mjs";
 import { syncBevyAssets } from "./sync-bevy-assets.mjs";
 import { resolveDevEntryArgs, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
 
@@ -30,6 +31,7 @@ const usage = `启动 Vite 和统一后端：
   --backend-port <port>   后端端口（BACKEND_PORT / PORT，默认 5180）
   --native                桌面宿主模式：画布走 native Bevy；仍生成前端导入所需的 WASM 绑定
   --skip-build            使用已有模块/扩展产物；仍按所选 Bevy 模式检查 Rust 源码新鲜度
+  --allow-stale           配合 --skip-build：即使产物比源码旧也继续启动（默认直接报错退出）
   --free-port             启动前结束占用前后端端口的残留进程（SIGTERM，超时后 SIGKILL）
   --watch                 显式开启宿主源码 watch（默认开启）
   --no-watch              关闭宿主源码 watch
@@ -52,6 +54,8 @@ function parseOptions() {
     const [name, inline] = args[i].split("=", 2);
     if (name === "--skip-build" && inline === undefined) {
       options.skipBuild = true;
+    } else if (name === "--allow-stale" && inline === undefined) {
+      options.allowStale = true;
     } else if (name === "--native" && inline === undefined) {
       options.native = true;
     } else if (name === "--free-port" && inline === undefined) {
@@ -365,6 +369,21 @@ async function main() {
     }
   }
 
+  // --skip-build 的语义是「我保证产物是新的」：先在构建前验一遍，避免白等 WASM 构建。
+  // 改完源码忘了重建时，旧 bundle 会在插件初始化阶段报 `ReferenceError: X is not defined`，
+  // 报错完全看不出「dist 过期」（2026-10-28 现场）。
+  if (options.skipBuild && !options.allowStale) {
+    const stale = findStaleArtifacts(root);
+    if (stale.length > 0) {
+      console.error(`[dev] 构建产物比源码旧：${formatStaleArtifacts(stale)}`);
+      console.error(
+        "[dev] --skip-build 直接使用现有 dist；先跑 `pnpm -C web run build:units`，或去掉 --skip-build（--allow-stale 可强行继续）"
+      );
+      await stop(1);
+      return;
+    }
+  }
+
   syncBevyAssets();
   // Vite resolves both generated binding modules even when the native canvas is active.
   // Build helpers reuse their caches; --skip-build still ensures Rust freshness: the script
@@ -378,6 +397,15 @@ async function main() {
     await runManager(["-C", "web", "run", "build:units"]);
   }
   if (stopping) return;
+
+  // 构建后复核：构建自身失败（或 watch 并发写）也会留下半新半旧的 bundle，这里只告警不阻断。
+  if (!options.skipBuild) {
+    const staleAfterBuild = findStaleArtifacts(root);
+    if (staleAfterBuild.length > 0) {
+      console.warn(`[dev] 构建后仍有产物比源码旧：${formatStaleArtifacts(staleAfterBuild)}`);
+      console.warn("[dev] 可能加载旧代码；建议重新跑 `pnpm -C web run build:units`");
+    }
+  }
 
   // 独立 browser 产物（change: 2026-10-12-build-and-load-extensions-independently，任务 6.5）：
   // dev 启动前构建扩展 browser-dist 并装配发布目录，使 Vite dev 能像生产一样从
