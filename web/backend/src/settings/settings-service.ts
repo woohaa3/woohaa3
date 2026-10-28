@@ -113,6 +113,10 @@ export type SettingsService = SettingsReader & {
    * 这些键按扩展目录发现动态产生，不进静态定义表（静态表要求启动时穷举键），
    * 但和其他配置一样落在同一个配置文件、同样走注释保留写入与热重载。
    * 未出现的 ID 不在结果里（由消费方按 manifest 的 `defaultEnabled` 取默认值）。
+   *
+   * 只有**进入站点控制面**的扩展（有可激活后端入口）才真正消费这个键；Provider / 存储后端
+   * 这类只声明 `hostPlugin` 的插件随宿主装载，配置里给它们写 `enabled` 不产生任何效果
+   * （历史迁移可能留下这类键）。manifest 未声明 `defaultEnabled` 时按**停用**取默认。
    */
   extensionToggles(): Record<string, boolean>;
   /** 写一个扩展的启停状态；写入配置文件并触发同一次热重载。 */
@@ -289,10 +293,11 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     });
 
   /**
-   * 读取 `extensions.frontend.<id>.enabled`。
+   * 读取 `extensions.<id>.enabled`。
    *
    * 直接从**文件层原文**读：这段是动态键，不进定义表，因此不参与 `resolveSettings` 的
-   * 类型校验，也不出现在 `unknownKeys` 里。值不是布尔就当作没配置（回退默认启用）。
+   * 类型校验，也不出现在 `unknownKeys` 里。值不是布尔就当作没配置——由消费方按 manifest
+   * 的 `defaultEnabled` 取默认，**缺省为停用**（控制面的取值见 `control-plane.ts`）。
    */
   const extensionToggles = (): Record<string, boolean> => {
     const file = layers.file;

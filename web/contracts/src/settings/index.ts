@@ -519,7 +519,11 @@ export type SettingPluginView = {
  * 扩展启停状态：配置文件 `extensions.<extensionId>.enabled` 的投影。
  *
  * 事实来源是宿主配置文件，与扩展自己的参数配置同层同格式；消费方只投影它，不自带持久化。
- * 未出现的 ID 表示使用默认值（由 manifest 的 `defaultEnabled` 决定，缺省为启用）。
+ * 未出现的 ID 表示使用默认值：manifest 的 `defaultEnabled`；**未声明时按停用处理**。
+ *
+ * 缺省为**关**是有意的：站点/后端扩展（含市场安装的扩展）不会因为漏写 `defaultEnabled`
+ * 就自动拿到可激活实例，启用必须有人显式表达。只有 Provider / 存储后端这类不进控制面的
+ * `hostPlugin` 与本键无关，它们的键写了也不生效。
  */
 export type ExtensionToggles = Readonly<Record<string, boolean>>;
 

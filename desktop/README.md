@@ -25,6 +25,8 @@ pnpm desktop:bundle --build-frontend --bundles app # macOS application bundle
 pnpm desktop:bundle --dry-run
 ```
 
+`host-extensions.json` is the **code inventory** bundled with the host, not the enable state. `remote-server` is listed there on purpose (desktop users may connect to a self-hosted server) but ships with `site.defaultEnabled: false`, so it stays off until someone enables it in Settings and configures a server address; a fresh install never shows a dead "server access" entry.
+
 The standalone packaging paths support Apple Silicon macOS and Windows x64. They include a pinned Node runtime, local host, frontend, extensions and native tools, so installed users do not need Node or pnpm. Output manifests under `artifacts/desktop/` record hashes and sizes. An explicit `--ui-url` creates an external-host development configuration. Platform code signing and notarization require the publisher's own credentials; updater signatures are a separate requirement. See [Windows build and lifecycle checks](WINDOWS.md).
 
 Update builds require an explicit HTTPS `WOOHAA_DESKTOP_UPDATE_ENDPOINT`, matching `WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY` and updater signing key. `pnpm desktop:release --build-frontend` reads the private key from `WOOHAA_DESKTOP_SIGNING_KEY` or `~/.config/woohaa-release/updater.key`, with the public key in the adjacent `.pub` file. Supply an endpoint such as `https://updates.example.com/macos-arm64/latest.json`. Upload versioned artifacts first and the index last; keep signing keys outside the repository and upload directory.
