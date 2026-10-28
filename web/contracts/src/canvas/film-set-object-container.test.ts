@@ -81,6 +81,25 @@ describe("片场对象容器", () => {
     const data = { ...filmSetObjectContainerData("film", "model"), modelScript: "scene.box({});" };
     expect(applyCanvasCommands(fixture(), [{ type: "node.add", node: { id: containerId, type: "composite-asset", position: { x: 0, y: 0 } }, nodeData: data as never }]).ok).toBe(false);
   });
+  it("历史容器残留内容字段时就地收敛，不再让整张画布的所有命令失败", () => {
+    const canvas = entrance(fixture());
+    // 旧数据把片场/模型内容写在了容器上；严格拒绝会让与该容器无关的 node.add / edge.add 也全部失败
+    // （用户表现：新建节点、连线、从端口拉线全部无效）。
+    canvas.nodeData[containerId] = {
+      ...(canvas.nodeData[containerId] as Record<string, unknown>),
+      scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
+      sceneCamera: { azimuth: 0, elevation: 0.7853981633974483, distance: 4, aspect: "16:9" },
+      filmSetAnimations: { schemaVersion: 3, defaultClipId: null, clips: [] },
+      animationSnapshotHash: "legacy",
+      modelScriptStatus: "ok",
+      modelScriptError: null
+    } as never;
+    const next = apply(canvas, [{ type: "node.add", node: { id: "probe", type: "text", position: { x: 10, y: 10 } } }]);
+    expect(next.document.nodes.some(node => node.id === "probe")).toBe(true);
+    expect(Object.keys(next.nodeData[containerId] as object).sort()).toEqual(["compositeAssetRole", "extensionId", "filmSetObject"]);
+    // 不变式仍对新的写入生效：容器不能被普通 patch 改写。
+    expect(applyCanvasCommands(next, [{ type: "nodeData.patch", nodeId: containerId, value: { modelScriptStatus: "failed" } as never }]).ok).toBe(false);
+  });
   it("移动片场会带动容器，显式拖动容器不叠加位移", () => {
     const canvas = entrance(fixture());
     const moved = apply(canvas, [{ type: "node.update", nodeId: "film", position: { x: 100, y: 100 } }]);
