@@ -47,6 +47,7 @@
     "test:scripts": "node --test scripts/*.test.mjs scripts/lib/*.test.mjs",
     "build:wasm": "pnpm run build:bevy",
     "config:export": "node scripts/export-config.mjs",
+    "task:compact": "node scripts/task-compact.mjs",
     "desktop:runtimes": "node scripts/package-runtime-components.mjs"
   },
   "devDependencies": {
