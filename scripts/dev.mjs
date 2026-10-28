@@ -122,17 +122,30 @@ function supervisorRpc(config, method, params = {}) {
 async function ensureAgentSupervisor() {
   const runtimeDir = path.join(root, ".local", "agent-runtime");
   fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-  const socketPath = path.join(runtimeDir, "supervisor.sock");
   const tokenPath = path.join(runtimeDir, "token");
   const token = existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : crypto.randomBytes(32).toString("hex");
   if (!existsSync(tokenPath)) fs.writeFileSync(tokenPath, token, { mode: 0o600 });
   const workspaceKey = crypto.createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 40);
+  /*
+   * Windows 没有 Unix domain socket 的文件语义：`server.listen(<文件路径>)` 直接返回
+   * EACCES，回调永不触发，于是这里会干等满 5 秒再报「启动超时」。命名管道是那边的等价物。
+   * 管道名是全机器共享的命名空间（不像 `.local/` 下的文件天然按 checkout 隔离），
+   * 所以带上 workspaceKey —— 否则两个 checkout 同时跑 dev 会抢同一个名字。
+   */
+  const socketPath = process.platform === "win32"
+    ? `\\\\.\\pipe\\woohaa-agent-${workspaceKey}`
+    : path.join(runtimeDir, "supervisor.sock");
   const config = { socketPath, token, workspaceKey };
-  if (existsSync(socketPath)) {
-    try {
-      const state = await supervisorRpc(config, "ping");
-      if (state?.workspaceKey === workspaceKey) { agentSupervisor = config; return config; }
-    } catch { /* stale endpoint; start a replacement below */ }
+  /*
+   * 先探测再建，不套 `existsSync` 门控：管道名在 Windows 上恒为 false（存在的管道也是），
+   * 门控会把「复用已在跑的 supervisor」整段短路，每次起 dev 都多拉一个进程。
+   */
+  try {
+    const state = await supervisorRpc(config, "ping");
+    if (state?.workspaceKey === workspaceKey) { agentSupervisor = config; return config; }
+  } catch { /* 没有在跑的端点，下面新建一个 */ }
+  // 只有文件形式的端点需要手动清理；管道随进程退出由系统回收
+  if (process.platform !== "win32") {
     try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
   }
   const script = path.join(root, "scripts", "agent-runtime-supervisor.mjs");
