@@ -33,9 +33,37 @@ type TaskRow = {
   updated_at: number;
 };
 
+/**
+ * 落库前的负载快照（store 只传它，不传整条记录：变换方不需要也不该改调度字段）。
+ */
+export type TaskPayloadSnapshot = {
+  key: string;
+  params?: unknown;
+  context?: unknown;
+  state?: unknown;
+  result?: unknown;
+};
+
+/**
+ * 持久化前的负载变换：把重负载（provider 二进制字节）换成应用存储的引用。
+ *
+ * 契约（task-store/types.ts）：`result` 是 display-safe 结果，**重负载属于应用存储**。
+ * pptask 会把 provider 输出归一成 `Uint8Array`，裸 `JSON.stringify` 会写成
+ * `{"0":137,...}`（每字节约 13 个字符），而 worker 的恢复快照 `state.record.result`
+ * 还会再存一份 —— 单张 7MB 图片在库里占 187MB。变换方负责把字节转存成 `{ media }`，
+ * 抛错或缺省时按原值落库（宁可大，不可丢）。
+ *
+ * 必须返回 `state` / `result` 两个键：返回 `undefined` 视为不改。
+ */
+export type TaskPayloadTransform = (
+  payload: TaskPayloadSnapshot
+) => Promise<{ state?: unknown; result?: unknown } | undefined>;
+
 export type SqliteTaskStoreOptions = {
   path: string;
   now?: () => Date;
+  /** 落库前的负载变换（见 `TaskPayloadTransform`）；缺省时原样写入。 */
+  transformPayload?: TaskPayloadTransform;
 };
 
 const TERMINAL: readonly PptaskTaskStatus[] = ["completed", "failed", "cancelled"];
@@ -43,10 +71,12 @@ const TERMINAL: readonly PptaskTaskStatus[] = ["completed", "failed", "cancelled
 export class SqliteTaskStore implements PptaskTaskStore {
   private readonly db: DatabaseSync;
   private readonly listeners = new Set<(record: PptaskTaskRecord) => void>();
+  private readonly transformPayload?: TaskPayloadTransform;
 
   constructor(options: SqliteTaskStoreOptions) {
     const { DatabaseSync } = loadNodeSqlite();
     this.db = new DatabaseSync(options.path);
+    this.transformPayload = options.transformPayload;
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA synchronous = NORMAL;");
     this.db.exec("PRAGMA busy_timeout = 5000;");
@@ -88,6 +118,12 @@ export class SqliteTaskStore implements PptaskTaskStore {
     if (existing) return { record: existing, created: false };
     const now = input.now.getTime();
     const status: PptaskTaskStatus = input.state !== undefined ? "queued" : "submitting";
+    const payload = await this.preparePayload({
+      key: input.key,
+      params: input.params,
+      context: input.context,
+      state: input.state
+    });
     this.db
       .prepare(
         `INSERT INTO task_records
@@ -99,7 +135,7 @@ export class SqliteTaskStore implements PptaskTaskStore {
         input.providerId,
         json(input.params),
         json(input.context),
-        json(input.state),
+        json(payload.state),
         status,
         now,
         now,
@@ -190,20 +226,29 @@ export class SqliteTaskStore implements PptaskTaskStore {
     // 围栏：陈旧 claim 的写入被忽略。
     const current = this.read(record.key);
     if (current && (current.claimToken ?? "") !== (record.claimToken ?? "")) return;
-    this.db
+    // 归档是异步的（要先把字节写进 Media），写入前必须复查围栏：窗口内可能已被 cancel
+    // 或 lease takeover 换掉 claimToken。UPDATE 里带同一个条件让围栏原子化。
+    const payload = await this.preparePayload({
+      key: record.key,
+      params: record.params,
+      context: record.context,
+      state: record.state,
+      result: record.result
+    });
+    const result = this.db
       .prepare(
         `UPDATE task_records
             SET provider_id = ?, params_json = ?, context_json = ?, state_json = ?, result_json = ?,
                 status = ?, claim_token = ?, lease_until = ?, next_run_at = ?, attempt = ?,
                 consecutive_failures = ?, updated_at = ?
-          WHERE key = ?`
+          WHERE key = ? AND COALESCE(claim_token, '') = COALESCE(?, '')`
       )
       .run(
         record.providerId,
         json(record.params),
         json(record.context),
-        json(record.state),
-        json(record.result),
+        json(payload.state),
+        json(payload.result),
         record.status,
         record.claimToken ?? null,
         record.leaseUntil?.getTime() ?? null,
@@ -211,8 +256,10 @@ export class SqliteTaskStore implements PptaskTaskStore {
         record.attempt,
         record.consecutiveFailures,
         record.updatedAt.getTime(),
-        record.key
+        record.key,
+        record.claimToken ?? null
       );
+    if (result.changes === 0) return; // 围栏失配：另一个 writer 已经接管，别覆盖它的状态。
     const saved = this.read(record.key);
     if (saved) this.publish(saved);
   }
@@ -240,6 +287,27 @@ export class SqliteTaskStore implements PptaskTaskStore {
 
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * 落库前的负载变换（默认原样）。变换方自己的失败不阻断写入：宁可写回原始负载，
+   * 也不能因为「瘦身」把唯一一份 provider 结果丢掉。
+   */
+  private async preparePayload(
+    snapshot: TaskPayloadSnapshot
+  ): Promise<{ state: unknown; result: unknown }> {
+    const original = { state: snapshot.state, result: snapshot.result };
+    if (!this.transformPayload) return original;
+    try {
+      const next = await this.transformPayload(snapshot);
+      if (!next) return original;
+      return {
+        state: "state" in next ? next.state : original.state,
+        result: "result" in next ? next.result : original.result
+      };
+    } catch {
+      return original;
+    }
   }
 
   private read(key: string): PptaskTaskRecord | null {

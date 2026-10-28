@@ -270,7 +270,7 @@ async function importStoredBytesAfterUrlFailure(
   scope: { canvasId?: string },
   urlError: unknown
 ): Promise<boolean> {
-  const stored = await readRawBinaryBytes(options.taskStore, record.id, modelType).catch(() => undefined);
+  const stored = await readStoredBinarySource(options.taskStore, record.id, modelType).catch(() => undefined);
   if (!stored) {
     options.logger?.({
       event: "media-output-import-bytes-unavailable",
@@ -280,6 +280,12 @@ async function importStoredBytesAfterUrlFailure(
     return false;
   }
   try {
+    if (stored.kind === "media") {
+      // 落库前已归档（SqliteTaskStore 的负载变换）：按稳定引用 verify-and-adopt，不搬字节。
+      await materializeStableMediaResult(options, record, association, stored.media);
+      options.logger?.({ event: "media-output-adopted-from-store", taskKey: record.id });
+      return true;
+    }
     const metadata = await options.mediaClient!.importBytes({
       bytesBase64: stored.bytesBase64,
       contentType: stored.contentType,
@@ -313,33 +319,62 @@ export async function materializeBinaryBytesFromStore(
     projectExecutionRecord(options.history, record, association);
     return;
   }
-  const bytes = await readRawBinaryBytesWithRetry(options.taskStore, record.id, modelType);
-  if (!bytes) {
-    // 没有可转存的字节（文本任务，或结果始终未落盘）：按原样投影，不伪造结果。
+  const stored = await readStoredBinarySourceWithRetry(options.taskStore, record.id, modelType);
+  if (!stored) {
+    // 没有可转存的来源（文本任务，或结果始终未落盘）：按原样投影，不伪造结果。
     projectExecutionRecord(options.history, record, association);
+    return;
+  }
+  if (stored.kind === "media") {
+    // 记录里已是稳定媒体引用（落库前已归档，见 worker/result-archive.ts）：verify-and-adopt。
+    // 这条路径就是 2.2GB 那个缺陷的修复落点：字节不再从 SQLite 读回来再 base64 传一遍。
+    await materializeStableMediaResult(options, record, association, stored.media);
     return;
   }
   await materializeBinaryResult(options, record, association, {
     kind: "bytes",
-    bytesBase64: bytes.bytesBase64,
-    contentType: bytes.contentType,
+    bytesBase64: stored.bytesBase64,
+    contentType: stored.contentType,
     modelType
   });
 }
 
-/** 有界重试读取原始二进制字节：worker 的 `saveTask` 紧随 succeeded 广播之后。 */
-async function readRawBinaryBytesWithRetry(
+/** durable 记录里的二进制来源：真实字节，或已归档的稳定媒体引用。 */
+export type StoredBinarySource =
+  | { kind: "bytes"; bytesBase64: string; contentType: string; modelType: BinaryModelType }
+  | { kind: "media"; media: GenerationStableMediaResult["media"] };
+
+/** 有界重试读取来源：worker 的 `saveTask` 紧随 succeeded 广播之后。 */
+async function readStoredBinarySourceWithRetry(
   taskStore: PptaskTaskStore,
   taskKey: string,
   modelType: "image" | "audio" | "video"
-): Promise<{ kind: "bytes"; bytesBase64: string; contentType: string; modelType: "image" | "audio" | "video" } | undefined> {
+): Promise<StoredBinarySource | undefined> {
   const deadline = Date.now() + 5_000;
   for (;;) {
-    const bytes = await readRawBinaryBytes(taskStore, taskKey, modelType);
-    if (bytes) return bytes;
+    const stored = await readStoredBinarySource(taskStore, taskKey, modelType);
+    if (stored) return stored;
     if (Date.now() > deadline) return undefined;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+}
+
+/**
+ * 读 durable 记录里的二进制来源。
+ *
+ * 落地方式有两种：新记录在落库前已把字节归档成 `{ media }`（见 worker/result-archive.ts），
+ * 老记录仍可能带原始字节（JSON 往返后是 `{"0":n,...}`）。两条都要认，否则升级后旧任务
+ * 无法对账、新任务会走到「没有可转存来源」。
+ */
+export async function readStoredBinarySource(
+  taskStore: PptaskTaskStore,
+  taskKey: string,
+  modelType: BinaryModelType
+): Promise<StoredBinarySource | undefined> {
+  const raw = await taskStore.find(taskKey).catch(() => null);
+  const result = raw?.result;
+  if (isGenerationStableMediaResult(result)) return { kind: "media", media: result.media };
+  return bytesFromResult(result, modelType);
 }
 
 /** 从 durable task store 的原始 result 恢复首份二进制字节与类型（重启终态对账也用它）。 */
@@ -347,9 +382,13 @@ export async function readRawBinaryBytes(
   taskStore: PptaskTaskStore,
   taskKey: string,
   modelType: "image" | "audio" | "video"
-): Promise<{ kind: "bytes"; bytesBase64: string; contentType: string; modelType: "image" | "audio" | "video" } | undefined> {
-  const raw = await taskStore.find(taskKey).catch(() => null);
-  const container = isRecord(raw?.result) ? (raw.result as Record<string, unknown>) : undefined;
+): Promise<{ kind: "bytes"; bytesBase64: string; contentType: string; modelType: BinaryModelType } | undefined> {
+  const stored = await readStoredBinarySource(taskStore, taskKey, modelType);
+  return stored?.kind === "bytes" ? stored : undefined;
+}
+
+function bytesFromResult(result: unknown, modelType: BinaryModelType): StoredBinarySource | undefined {
+  const container = isRecord(result) ? (result as Record<string, unknown>) : undefined;
   if (!container) return undefined;
   const list = Array.isArray(container.videos)
     ? container.videos
@@ -365,7 +404,7 @@ export async function readRawBinaryBytes(
   return {
     kind: "bytes",
     bytesBase64: Buffer.from(bytes).toString("base64"),
-    contentType: readBinaryContentType(raw?.result, modelType),
+    contentType: readProviderContentType(result, modelType),
     modelType
   };
 }
@@ -382,8 +421,8 @@ function defaultContentTypeFor(modelType: BinaryModelType): string {
   return "image/png";
 }
 
-/** 从原始 provider result 的 providerMetadata 读取媒体类型。 */
-function readBinaryContentType(raw: unknown, modelType: BinaryModelType): string {
+/** 从原始 provider result 的 providerMetadata 读取媒体类型（归档时也要用它定 contentType）。 */
+export function readProviderContentType(raw: unknown, modelType: BinaryModelType): string {
   const metadata = isRecord(raw) ? (raw as { providerMetadata?: unknown }).providerMetadata : undefined;
   if (isRecord(metadata)) {
     for (const entry of Object.values(metadata)) {

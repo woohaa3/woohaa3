@@ -69,8 +69,8 @@ type ImportCall = { kind: "url" | "bytes"; input: Record<string, unknown> };
 function fakeMedia() {
   const imports: ImportCall[] = [];
   const client = {
-    async verify() {
-      return { exists: true, matches: true };
+    async verify(storageKey: string) {
+      return { exists: true, matches: true, metadata: metadataFor(storageKey, "image") };
     },
     async sign() {
       return "https://cos.example/signed";
@@ -159,6 +159,27 @@ describe("recoverTerminalHistory", () => {
     });
     // 时间线补一条可追溯的「重启后补记」。
     expect(h.events.map((event) => event.stage)).toEqual([TERMINAL_RECOVERY_EVENT_STAGE]);
+  });
+
+  it("completed 且记录已在落库前归档成稳定引用：verify-and-adopt，不再搬字节", async () => {
+    const h = harness({
+      candidates: [candidate()],
+      tasks: [
+        taskRecord({
+          result: {
+            media: { storageKey: IMAGE_KEY, contentType: "image/png", size: 3, checksum: "e".repeat(64) }
+          }
+        })
+      ]
+    });
+    const summary = await recoverTerminalHistory(h.options);
+
+    expect(summary).toMatchObject({ scanned: 1, recovered: 1 });
+    expect(h.imports).toHaveLength(0);
+    expect(h.histories[0]).toMatchObject({
+      state: "succeeded",
+      result: { mediaKind: "image", storageKey: IMAGE_KEY }
+    });
   });
 
   it("只有 provider 受控地址时回退 URL 转存", async () => {

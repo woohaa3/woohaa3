@@ -19,6 +19,7 @@ import {
 } from "./repository/history-repository.js";
 import { createSqliteSubmitKeyRepository, computeSubmitPayloadHash } from "./repository/submit-keys.js";
 import { createTaskRuntime, type TaskRuntime, type TaskAssociation } from "./worker/runtime.js";
+import { createResultArchiver } from "./worker/result-archive.js";
 import { recoverTerminalHistory } from "./worker/terminal-recovery.js";
 import { stripSecrets } from "./worker/normalize.js";
 import { createMediaClient, type MediaClient } from "./clients/media-client.js";
@@ -137,21 +138,8 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
   if (!configResult.ok) throw new Error(configResult.reason);
   const config = { ...configResult.config, ...(options.serviceToken ? { serviceToken: options.serviceToken } : {}) };
 
-  const taskStore = createSqliteTaskStore({ path: config.storePath });
-  const history = createSqliteTaskHistoryRepository({
-    path: config.storePath,
-    maxEventsPerRecord: config.historyMaxEventsPerRecord
-  });
-  const submitKeys = createSqliteSubmitKeyRepository({ path: config.storePath });
-  const jobRepository = options.jobRepository ?? createMemoryJobRepository();
-
-  const { registry, resolveCatalog, catalogRevision } = createCatalogRuntime({
-    ...(options.generationProviders ? { generationProviders: options.generationProviders } : {}),
-    modelsConfig: options.modelsConfig,
-    ...(options.resolveModelSelection ? { resolveModelSelection: options.resolveModelSelection } : {}),
-    ...(options.selectionStamp ? { selectionStamp: options.selectionStamp } : {})
-  });
-
+  // Media client 必须先于 task store 建：store 的「落库前归档」钩子要把 provider 字节
+  // 转存成稳定对象，记录里只留引用（见 worker/result-archive.ts）。
   const mediaClient =
     options.mediaClient ??
     (options.mediaServiceUrl ?? config.mediaServiceUrl
@@ -165,6 +153,24 @@ export function createTaskService(options: TaskServiceOptions): TaskService {
           logger: options.logger
         })
       : undefined);
+
+  const taskStore = createSqliteTaskStore({
+    path: config.storePath,
+    transformPayload: createResultArchiver({ mediaClient, logger: options.logger })
+  });
+  const history = createSqliteTaskHistoryRepository({
+    path: config.storePath,
+    maxEventsPerRecord: config.historyMaxEventsPerRecord
+  });
+  const submitKeys = createSqliteSubmitKeyRepository({ path: config.storePath });
+  const jobRepository = options.jobRepository ?? createMemoryJobRepository();
+
+  const { registry, resolveCatalog, catalogRevision } = createCatalogRuntime({
+    ...(options.generationProviders ? { generationProviders: options.generationProviders } : {}),
+    modelsConfig: options.modelsConfig,
+    ...(options.resolveModelSelection ? { resolveModelSelection: options.resolveModelSelection } : {}),
+    ...(options.selectionStamp ? { selectionStamp: options.selectionStamp } : {})
+  });
 
   const notifier = createInProcessDispatchNotifier();
 
