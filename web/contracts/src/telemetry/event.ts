@@ -58,6 +58,10 @@ export type TelemetrySurface = (typeof TELEMETRY_SURFACES)[number];
  */
 export const TELEMETRY_ATTRIBUTE_KEYS = [
   "canvas",
+  // 一次画布会话的标识（32 位小写十六进制，管理端只做聚合与关联）。
+  // 与 trace_id 的分工：trace 关联一次操作，session 关联“用户这次进入画布后的
+  // 全部动作”。没有它，管理端只能按 actor + 时间窗猜会话边界。
+  "session",
   "node",
   "provider",
   "model",

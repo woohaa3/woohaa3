@@ -610,6 +610,12 @@ describe("确认回流只发布一次规范/working 快照", () => {
       clock = 610;
       (order === "result-first" ? update : result)();
       expect(saves()).toEqual([expect.objectContaining({ result: "success", surface: "sync", durationMs: 600 })]);
+      // 每条画布动作都必须带同一组 canvas / session 属性：管理端的会话与画布聚合
+      // 完全依赖它们，漏一个动作就会让时间线缺一步。
+      expect(saves()[0]?.attributes).toMatchObject({
+        canvas: CANVAS,
+        session: expect.stringMatching(/^[0-9a-f]{32}$/)
+      });
       expect(session.getStatus().remote.pendingCount).toBe(0);
       if (submitted.ok) expect((await submitted.handle.settled).state).toBe("committed");
       synced(1); result();
