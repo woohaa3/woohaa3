@@ -243,10 +243,11 @@ export function createLocalAgentExtension(
           },
         });
       };
-      register("local-agent/connections", "GET", "read");
-      register("local-agent/connections", "POST", "auth-transaction");
-      register("local-agent/connections/*", "POST", "auth-transaction");
-      register("local-agent/check", "POST", "read");
+      // route 相对 publicPath：扩展名前缀由宿主按 extensionId 自动添加，插件不要再写一遍。
+      register("connections", "GET", "read");
+      register("connections", "POST", "auth-transaction");
+      register("connections/*", "POST", "auth-transaction");
+      register("check", "POST", "read");
 
       host.logger({
         event: "local-agent-activated",

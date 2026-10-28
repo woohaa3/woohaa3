@@ -110,6 +110,41 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     expect((await host.dispatch("a/handle", { body: null, context: { authLevel: "public" }, extensionId: "owner-c" })).body).toBe("c");
   });
 
+  it("公开映射的 HTTP/raw 路由自带扩展名前缀时只记诊断、不阻断激活", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const host = createApplicationExtensionHost({ logger: (event) => events.push(event) });
+    const result = await host.activate({
+      extensionId: "local-agent",
+      activate: (h) => {
+        // 这两类的查找键来自 publicPath 之后的相对子路径，自带前缀必然查不到（2026-10 回归）。
+        h.registerHttpHandler?.({ route: "local-agent/http", method: "GET", auth: "public", purpose: "read", handle: async () => undefined });
+        h.registerRawHttpHandler?.({ route: "local-agent/connections", method: "GET", auth: "public", purpose: "read", handle: async () => undefined });
+      }
+    });
+    expect(result.ok).toBe(true);
+    // 诊断可查，但扩展照常激活：硬门槛在 CI，运行期不为一条不可达路由否掉整个扩展。
+    expect(events.filter((event) => event.event === "extension-route-namespace-mismatch").map((event) => event.route)).toEqual([
+      "local-agent/http",
+      "local-agent/connections"
+    ]);
+    expect(host.snapshot()).toHaveLength(1);
+  });
+
+  it("JSON handler 的 route 自带扩展名前缀不告警：公开 URL 原样携带该 route", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const host = createApplicationExtensionHost({ logger: (event) => events.push(event) });
+    const result = await host.activate({
+      extensionId: "game-furnace",
+      activate: (h) => {
+        h.registerHandler({ route: "game-furnace/project-save", auth: "public", handle: () => ({ body: null }) });
+      }
+    });
+    expect(result.ok).toBe(true);
+    expect(events.some((event) => event.event === "extension-route-namespace-mismatch")).toBe(false);
+    // 分派用同一个 route 查表：前缀写不写都能命中自己，所以这类不属于缺陷。
+    expect((await host.dispatch("game-furnace/project-save", { body: null, context: { authLevel: "public" } })).body).toBeNull();
+  });
+
   it("activation 中途抛错回滚已产生的注册（资源未 start 则不遗留）", async () => {
     const host = createApplicationExtensionHost();
     const events: string[] = [];
