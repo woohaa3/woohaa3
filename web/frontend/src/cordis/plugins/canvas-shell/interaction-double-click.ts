@@ -6,7 +6,7 @@
  * - image：ready/受控同源 → media-preview；video：ready + 稳定 storageKey → 只发 nodeId 截帧；
  * - 3D 模型/片场：双击模型或卡片进入聚焦，普通模型在画布上保留内嵌预览。
  */
-import { screenToWorld } from "./hit-test.js";
+import { screenToWorld, type Point } from "./hit-test.js";
 import { modelBounds, type FocusHitResult } from "./model-focus-session.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -15,6 +15,16 @@ import { builtinNodeCapabilityResolver, shotPreviewOwnershipOf } from "@woohaa3/
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
+
+  /**
+   * 空白处双击与空白处右键是同一入口：同一份菜单、同一个位置（屏幕 + 世界）。
+   * 阻断条件与右键 fallback 一致——聚焦工作区（模型/视频）内空白双击不开画布菜单。
+   */
+  const openBlankContextMenu = (event: MouseEvent, world: Point) => {
+    if (model.active || core.modalActive() || options.isVideoFocused?.()) return;
+    event.preventDefault();
+    options.onContextMenu?.({ screen: { x: event.clientX, y: event.clientY }, world, node: null });
+  };
 
   const onDoubleClick = (event: MouseEvent) => {
     // 只有真正的 modal Dialog 阻断双击；非模态 editor/history panel 打开时仍允许双击
@@ -140,7 +150,13 @@ export function createDoubleClickHandler(core: InteractionCore) {
     }
 
     // 既有图片/视频双击分派需要命中卡片节点。
-    if (!cardEntry) return;
+    if (!cardEntry) {
+      // 画布空白处双击等价于空白处右键。命中查询不可用时保持无动作，
+      // 不把「查不到」误当成空白。
+      if (hitResult.ok && !hit) openBlankContextMenu(event, world);
+      return;
+    }
+
     const entry = cardEntry;
     const data = canvasState.nodeData?.[cardEntry.id] as { outputAssetId?: unknown; title?: unknown } | undefined;
     const outputId = typeof data?.outputAssetId === "string" ? data.outputAssetId : "";

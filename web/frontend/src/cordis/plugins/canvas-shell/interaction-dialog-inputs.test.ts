@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import { installInteractionController } from "./interaction-controller.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { hoverNodeStore } from "../../services/hover-store.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import {
   canvasWith, getSession, harness, installSharedSession, runtimeCapturing
@@ -248,6 +249,22 @@ describe("视频节点 hover 与双击截帧（change: enable-video-node-live-pr
       modal = true;
       dom.fire("pointermove", { clientX: 6, clientY: 6 });
       expect(hovered.at(-1)).toBeNull();
+      controller.dispose();
+    }
+  });
+
+  it("截图 capture owner 只冻结被捕捉内容，不暂停普通视频 hover 播放", () => {
+    // 真实缺陷：后台镜头参考录制每次取帧都会 acquire playback owner（成功前还按退避重试），
+    // 而 owner 曾参与视频 hover 的统一门禁，导致整张画布的视频 hover 预览长时间不播放。
+    const { dom, controller, videoSessions } = videoHarness(videoCanvasShell({}));
+    const release = hoverNodeStore.acquirePlaybackOwner();
+    try {
+      // 拍摄预览候选仍被撤销（owner 语义不变）。
+      expect(hoverNodeStore.getPlaybackSnapshot().blocked).toBe(true);
+      dom.fire("pointermove", { clientX: 5, clientY: 5 });
+      expect(videoSessions.playingNodeId()).toBe("vid1");
+    } finally {
+      release();
       controller.dispose();
     }
   });

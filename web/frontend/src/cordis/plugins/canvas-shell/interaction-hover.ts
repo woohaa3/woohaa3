@@ -19,6 +19,15 @@ export type HoverTrackerDeps = {
   state: InteractionState;
   videoSessions?: VideoFrameSessions | null;
   modalActive: () => boolean;
+  /**
+   * 视频 hover 播放门禁（缺省同 `modalActive`）。
+   *
+   * 与 `modalActive` 分开是因为它有更宽的成分：截图/录制拥有的 capture playback owner
+   * 只应冻结**被捕捉内容**的确定性（拍摄预览候选与场景动画），不能停掉无关视频卡片的
+   * 实时预览——否则后台镜头参考录制（成功前会按退避重试）期间，任何视频节点 hover 都
+   * 不播放（真实缺陷：hover 视频节点不再播放）。
+   */
+  videoPlaybackBlocked?: () => boolean;
   schedule: () => void;
   /**
    * 模型网格命中：卡片下方的模型 AABB picking（change: play-model-animations-on-hover）。
@@ -110,7 +119,9 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
   const updateHoveredVideo = (hit: HitTarget | null) => {
     const sessions = deps.videoSessions;
     if (!sessions) return;
-    if (deps.modalActive() || state.gesture.kind !== "none") {
+    // capture playback owner 不参与视频 hover 门禁（见 `videoPlaybackBlocked`）：它只为被捕捉
+    // 内容的确定性冻结拍摄预览/场景动画，与普通视频卡片的实时预览无关。
+    if ((deps.videoPlaybackBlocked ?? deps.modalActive)() || state.gesture.kind !== "none") {
       suspendVideo();
       return;
     }
