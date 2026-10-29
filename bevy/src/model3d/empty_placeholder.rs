@@ -3,9 +3,13 @@
 //! The empty-film-set placeholder is a themed plinth: a low platform derived from the accepted
 //! scope footprint, with the two camera-facing side faces carrying extruded 3D brand labels
 //! `WOOHAA3` and `片场` (change: 2026-10-25-empty-film-set-fence).
+//!
+//! Film sets are group containers now, so the same plinth also stands in for the empty scene
+//! inside the group's identity badge: the badge shows the brand model until the film set has a
+//! scene binding or an authored ground, then the real scene composition replaces it.
 use crate::{
     app::{CurrentScene, FocusRig},
-    canvas_query::scope,
+    canvas_query::{group_model, scope},
     isometric_grid::{canvas_camera_rotation, canvas_point_to_world, view_rotation},
     theme::ThemeResource,
 };
@@ -22,6 +26,10 @@ pub(crate) use super::FILM_SET_PLACEHOLDER_LAYER;
 
 /// Footprint inset from the accepted scope, leaving room for the vertical projection.
 const PLINTH_INSET: f32 = 0.65;
+/// Badge-fitting footprint fraction: larger than the scope inset so the compact badge still reads
+/// as a plinth, while the platform and its extruded letters stay inside the badge rectangle at
+/// every badge scale.
+const BADGE_PLINTH_INSET: f32 = 0.72;
 /// Platform side height as a fraction of the shorter footprint edge.
 const PLINTH_DEPTH_RATIO: f32 = 0.13;
 /// Letter height as a fraction of the shorter footprint edge (before face fitting).
@@ -120,7 +128,6 @@ pub(crate) fn overview_layers(overview: bool) -> RenderLayers {
 /// Project accepted scope vertices onto the ground along the overview camera rays, inset from the
 /// scope boundary, then extrude a themed plinth downward.
 fn plinth_layout(scope: &scope::ScopeGeometry) -> Layout {
-    let direction = canvas_camera_rotation() * Vec3::NEG_Z;
     // A diamond plinth keeps two vertical side faces visible to the fixed isometric camera. Both
     // scope shapes map to a diamond footprint: a diamond scope is inset around its center, while a
     // rect scope uses the inscribed diamond of its accepted bounds.
@@ -131,13 +138,35 @@ fn plinth_layout(scope: &scope::ScopeGeometry) -> Layout {
     } else {
         let rx = scope.aabb.width * 0.5 * PLINTH_INSET;
         let ry = scope.aabb.height * 0.5 * PLINTH_INSET;
-        [
-            Vec2::new(scope.center.x, scope.center.y - ry),
-            Vec2::new(scope.center.x + rx, scope.center.y),
-            Vec2::new(scope.center.x, scope.center.y + ry),
-            Vec2::new(scope.center.x - rx, scope.center.y),
-        ]
+        diamond(scope.center, rx, ry)
     };
+    plinth_layout_from_footprint(footprint)
+}
+
+/// Empty film-set group: the plinth occupies the identity badge instead of a scene scope, so the
+/// badge keeps a recognisable brand model until the first object or ground arrives.
+fn badge_plinth_layout(node: &crate::protocol::GraphNode) -> Layout {
+    let badge = group_model::badge_rect(node);
+    let center = Vec2::new(badge.x + badge.z * 0.5, badge.y + badge.w * 0.5);
+    plinth_layout_from_footprint(diamond(
+        center,
+        badge.z * 0.5 * BADGE_PLINTH_INSET,
+        badge.w * 0.5 * BADGE_PLINTH_INSET,
+    ))
+}
+
+/// Diamond footprint centred on `center` with the given half width/height, in canvas units.
+fn diamond(center: Vec2, rx: f32, ry: f32) -> [Vec2; 4] {
+    [
+        Vec2::new(center.x, center.y - ry),
+        Vec2::new(center.x + rx, center.y),
+        Vec2::new(center.x, center.y + ry),
+        Vec2::new(center.x - rx, center.y),
+    ]
+}
+
+fn plinth_layout_from_footprint(footprint: [Vec2; 4]) -> Layout {
+    let direction = canvas_camera_rotation() * Vec3::NEG_Z;
     let ground = footprint.map(|p| {
         let origin = canvas_point_to_world(p.x, p.y, 0.);
         origin + direction * (-origin.y / direction.y)
@@ -398,19 +427,42 @@ pub(crate) fn sync(
         return;
     }
     let hidden = !is_overview(&scene.0, rig.focus_node.is_some());
-    let targets: Vec<_> = scene
+    // Film-set groups have no assembled geometry while the scene has neither an active binding nor
+    // an authored ground. The host already publishes that fact as the accepted film-set group
+    // preparation, so this stays a presentation projection instead of guessing from business ids.
+    let empty_film_sets: HashSet<&str> = scene
         .0
-        .nodes
+        .film_set_groups
         .iter()
-        .filter(|node| {
-            !hidden
-                && node
+        .filter(|group| group.bindings.is_empty() && group.ground.is_none())
+        .map(|group| group.owner_id.as_str())
+        .collect();
+    let targets: Vec<(&crate::protocol::GraphNode, bool)> = if hidden {
+        Vec::new()
+    } else {
+        scene
+            .0
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                // Empty film sets show the brand plinth in the same identity badge that later
+                // carries the real scene composition. The badge wins over a generic composite
+                // declaration because the group's model lives inside it, not in the scope.
+                let empty_badge = node.group.is_some()
+                    && group_model::has_badge(node)
+                    && empty_film_sets.contains(node.id.as_str());
+                if empty_badge {
+                    return Some((node, true));
+                }
+                let declared = node
                     .composite_asset
                     .as_ref()
-                    .is_some_and(|asset| asset.empty_placeholder.is_some())
-        })
-        .collect();
-    let retained: HashSet<_> = targets.iter().map(|n| n.id.clone()).collect();
+                    .is_some_and(|asset| asset.empty_placeholder.is_some());
+                declared.then_some((node, false))
+            })
+            .collect()
+    };
+    let retained: HashSet<_> = targets.iter().map(|(node, _)| node.id.clone()).collect();
     state.entries.retain(|id, entry| {
         if retained.contains(id) {
             return true;
@@ -431,8 +483,12 @@ pub(crate) fn sync(
         &theme,
     );
     let shared = state.shared.as_ref().expect("shared assets").clone();
-    for node in targets {
-        let layout = plinth_layout(&scope::node_scope(node));
+    for (node, badge) in targets {
+        let layout = if badge {
+            badge_plinth_layout(node)
+        } else {
+            plinth_layout(&scope::node_scope(node))
+        };
         let unchanged = state
             .entries
             .get(&node.id)

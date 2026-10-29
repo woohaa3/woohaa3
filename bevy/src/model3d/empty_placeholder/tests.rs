@@ -36,6 +36,121 @@ fn app() -> App {
     app
 }
 
+/// Canonical film-set group: a group container whose own model is the composed scene.
+fn film_set_scene(with_content: bool, badge_scale: f32) -> Scene {
+    let node: GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"set",
+        "type":"group",
+        "x":100,"y":60,
+        "width":320,"height":240,
+        "group":{"title":"片场","memberCount":0,"badgeScale":badge_scale},
+        "model":{"resourceKey":"empty-film-set","signature":"empty"}
+    }))
+    .unwrap();
+    let group: crate::protocol::FilmSetGroupPreparation =
+        serde_json::from_value(serde_json::json!({
+            "schemaVersion":"woohaa-film-set-group-render-v1",
+            "ownerId":"set",
+            "badgeOrigin":{"x":260,"y":300},
+            "bindings":[],
+            "ground": if with_content { Some(serde_json::json!({"width":10.0,"depth":10.0})) } else { None }
+        }))
+        .unwrap();
+    Scene {
+        nodes: vec![node],
+        film_set_groups: vec![group],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn empty_film_set_group_shows_brand_plinth_inside_the_identity_badge() {
+    // MCP/menu-created sets default to scale 1, service-created sets use 3, and the contract
+    // floors the badge at 0.5. The plinth must stay inside the badge at all of them.
+    for scale in [0.5, 1., 3.] {
+        let mut app = app();
+        app.world_mut().resource_mut::<CurrentScene>().0 = film_set_scene(false, scale);
+        app.update();
+
+        let node = &app.world().resource::<CurrentScene>().0.nodes[0];
+        assert!(group_model::has_badge(node));
+        let badge = group_model::badge_rect(node);
+        let state = app.world().resource::<Placeholders>();
+        let entry = state
+            .entries
+            .get("set")
+            .expect("empty film set keeps a badge model");
+        let center = app
+            .world()
+            .get::<Transform>(entry.body)
+            .map(|transform| transform.translation)
+            .unwrap_or(Vec3::ZERO);
+        let view = IsometricGridView::default();
+        for i in 0..4 {
+            let a = entry.top_vertices[i];
+            let b = entry.top_vertices[(i + 1) % 4];
+            for point in [a, a - Vec3::Y * entry.depth, b - Vec3::Y * entry.depth, b] {
+                let canvas = screen_point_from_world(center + point, &view);
+                assert!(
+                    canvas.x >= badge.x - 0.01
+                        && canvas.x <= badge.x + badge.z + 0.01
+                        && canvas.y >= badge.y - 0.01
+                        && canvas.y <= badge.y + badge.w + 0.01,
+                    "scale {scale}: plinth vertex {canvas:?} outside badge {badge:?}"
+                );
+            }
+        }
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 4);
+        assert_eq!(entry.labels.iter().flatten().count(), 2);
+    }
+}
+
+#[test]
+fn first_ground_or_binding_replaces_the_badge_plinth() {
+    let mut app = app();
+    app.world_mut().resource_mut::<CurrentScene>().0 = film_set_scene(true, 3.);
+    app.update();
+    assert!(
+        app.world()
+            .resource::<Placeholders>()
+            .entries
+            .get("set")
+            .is_none(),
+        "authored ground is non-empty content"
+    );
+}
+
+#[test]
+fn ordinary_groups_and_badgeless_film_sets_never_show_the_plinth() {
+    let mut app = app();
+    // A plain group is not a film set even if nothing is assembled.
+    app.world_mut().resource_mut::<CurrentScene>().0 = film_set_scene(false, 3.);
+    app.world_mut()
+        .resource_mut::<CurrentScene>()
+        .0
+        .film_set_groups
+        .clear();
+    app.update();
+    assert!(
+        app.world()
+            .resource::<Placeholders>()
+            .entries
+            .get("set")
+            .is_none()
+    );
+    // A film set without a model reference has no badge, so there is nothing to fill.
+    app.world_mut().resource_mut::<CurrentScene>().0 = film_set_scene(false, 3.);
+    app.world_mut().resource_mut::<CurrentScene>().0.nodes[0].model = None;
+    app.update();
+    assert!(
+        app.world()
+            .resource::<Placeholders>()
+            .entries
+            .get("set")
+            .is_none()
+    );
+}
+
 #[test]
 fn plinth_vertices_and_label_corners_stay_inside_accepted_scope() {
     let view = IsometricGridView::default();
