@@ -12,7 +12,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
 import { deriveFocusConnections, type ConnectionDot } from "./derive.js";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
-import { ChevronRightIcon, ChevronDownIcon, FileTextIcon, ImageIcon, VideoIcon, MusicIcon, LayoutGridIcon, DiamondIcon } from "@woohaa3/ui/icons";
+import { ChevronRightIcon, ChevronDownIcon, TypeIcon, ImageIcon, FilmIcon, MusicIcon, LayoutGridIcon, BoxIcon, ClapperboardIcon } from "@woohaa3/ui/icons";
 import { Popover, Button } from "@woohaa3/ui";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 
@@ -88,7 +88,7 @@ function ConnectionDotContent({ type, asset, canvasId }: { type: string; asset: 
   if (type === "image" && url) {
     return <img className="focus-connections__thumb" src={url} alt="" />;
   }
-  const Icon = ({ image: ImageIcon, video: VideoIcon, audio: MusicIcon, text: FileTextIcon, model3d: DiamondIcon, "composite-asset": DiamondIcon } as Record<string, typeof ImageIcon>)[type] ?? LayoutGridIcon;
+  const Icon = ({ image: ImageIcon, video: FilmIcon, audio: MusicIcon, text: TypeIcon, model3d: BoxIcon, "composite-asset": ClapperboardIcon } as Record<string, typeof ImageIcon>)[type] ?? LayoutGridIcon;
   return <Icon className="focus-connections__glyph" size={16} strokeWidth={1.6} />;
 }
 

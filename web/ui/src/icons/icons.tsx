@@ -40,6 +40,7 @@ import {
   Unlink,
   Ban,
   Bot,
+  Box,
   Boxes,
   Check,
   ChevronDown,
@@ -103,6 +104,7 @@ import {
   Sun,
   Trash,
   Undo2,
+  Upload,
   Video,
   Volume2,
   VolumeX,
@@ -229,6 +231,9 @@ export const ImageIcon = withDefaults(Image);
 /** 下载（节点操作横条「下载」；change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.2）。 */
 export const DownloadIcon = withDefaults(Download);
 
+/** 上传（空白画布右键菜单「上传…」）。 */
+export const UploadIcon = withDefaults(Upload);
+
 /* ------------------------------------------------------------------ *
  * 插件图标（设置页「插件配置」按 `PLUGIN_ICON_NAMES` 白名单解析）
  * 名字进契约、图形留前端：映射写在 cordis/plugins/settings/plugin-icons.tsx。
@@ -250,6 +255,8 @@ export const StorageIcon = withDefaults(Database);
 export const CloudIcon = withDefaults(Cloud);
 /** 媒体与素材。 */
 export const MediaIcon = withDefaults(Images);
+/** 3D 模型/立方体。 */
+export const BoxIcon = withDefaults(Box);
 /** 生成 Provider。 */
 export const ProviderIcon = withDefaults(Boxes);
 /** 任务编排。 */

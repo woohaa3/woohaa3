@@ -46,11 +46,26 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
             for block in &world.resource::<crate::canvas2d::CardBlockCache>().blocks {
                 ids.extend(block.mesh.as_ref().map(Handle::id));
             }
-            ids.extend(world.resource::<crate::canvas2d::CardDecorationCache>().blocks.iter().filter_map(|block| block.handle()));
-            for block in &world.resource::<crate::canvas2d::ContainerBlockCache>().blocks {
+            ids.extend(
+                world
+                    .resource::<crate::canvas2d::CardDecorationCache>()
+                    .blocks
+                    .iter()
+                    .filter_map(|block| block.handle()),
+            );
+            for block in &world
+                .resource::<crate::canvas2d::ContainerBlockCache>()
+                .blocks
+            {
                 ids.extend(block.state().into_iter().flatten());
             }
-            ids.extend(world.resource::<crate::canvas2d::EdgeBlockCache>().blocks.iter().map(|block| block.state().0));
+            ids.extend(
+                world
+                    .resource::<crate::canvas2d::EdgeBlockCache>()
+                    .blocks
+                    .iter()
+                    .map(|block| block.state().0),
+            );
             ids
         };
         let mut ids = ids;
@@ -80,17 +95,30 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
         (
             nodes,
             labels,
-            world.resource::<crate::canvas2d::CardBlockCache>().blocks.len(),
-            world.resource::<crate::canvas2d::CardBlockCache>().blocks
+            world
+                .resource::<crate::canvas2d::CardBlockCache>()
+                .blocks
+                .len(),
+            world
+                .resource::<crate::canvas2d::CardBlockCache>()
+                .blocks
                 .iter()
                 .filter(|block| block.entity.is_some())
                 .count(),
-            world.resource::<crate::canvas2d::CardDecorationCache>().blocks
+            world
+                .resource::<crate::canvas2d::CardDecorationCache>()
+                .blocks
                 .iter()
                 .filter(|block| block.handle().is_some())
                 .count(),
-            world.resource::<crate::canvas2d::ContainerBlockCache>().blocks.len(),
-            world.resource::<crate::canvas2d::EdgeBlockCache>().blocks.len(),
+            world
+                .resource::<crate::canvas2d::ContainerBlockCache>()
+                .blocks
+                .len(),
+            world
+                .resource::<crate::canvas2d::EdgeBlockCache>()
+                .blocks
+                .len(),
             world.resource::<Assets<Mesh>>().len(),
             world.resource::<Assets<Image>>().len(),
         )
@@ -110,7 +138,7 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
         "投影/producer 的实体与资产基线漂移"
     );
     assert_eq!(
-        baseline_fingerprint, 0xbf4a_a329_bf88_2799,
+        baseline_fingerprint, 0x36fb_0735_14bf_2f89,
         "卡片/容器几何指纹不得漂移"
     );
 
@@ -152,6 +180,11 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
         0,
         "清空场景后标签实体必须全部回收"
     );
-    assert!(world.resource::<crate::canvas2d::CardBlockCache>().blocks.is_empty());
+    assert!(
+        world
+            .resource::<crate::canvas2d::CardBlockCache>()
+            .blocks
+            .is_empty()
+    );
     eprintln!("baseline counts: {baseline_counts:?}, fingerprint: {baseline_fingerprint:#x}");
 }

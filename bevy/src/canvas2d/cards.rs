@@ -83,7 +83,13 @@ pub(super) fn draw_static(
         theme.token_u32("canvasNodeSurface"),
     );
     geometry.rounded_rect(x + 14., y + 12., 28., 28., 6., z + 0.004, tint);
-    geometry.icon(&node.kind, Vec2::new(x + 28., y + 26.), z + 0.005, accent);
+    // 镜头预览节点底层是 image/video 媒体，但类型图标应读作「镜头」，与普通图片/视频区分。
+    let icon_kind = if node.shot_preview.is_some() {
+        "shot"
+    } else {
+        node.kind.as_str()
+    };
+    geometry.icon(icon_kind, Vec2::new(x + 28., y + 26.), z + 0.005, accent);
     // 卡片“×”删除入口已移除（change: 2026-10-09-improve-canvas-workflow，任务 1.7）：
     // 删除只经“删除作品”菜单与键盘 Delete/Backspace，避免误删与语义歧义。
     // 历史动作图标已移除（迁移到节点下方独立历史条，
@@ -158,7 +164,12 @@ pub(super) fn draw_static(
 
 /// Produce the card geometry input. Kept as a separate entry point so cache producers can
 /// invalidate mesh blocks independently from label requests.
-pub(super) fn geometry(geometry: &mut Geometry, theme: &ThemeResource, node: &GraphNode, index: usize) {
+pub(super) fn geometry(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    node: &GraphNode,
+    index: usize,
+) {
     let _ = draw_static(geometry, theme, node, index);
 }
 

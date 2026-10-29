@@ -365,23 +365,147 @@ impl Geometry {
         }
     }
 
+    /// 节点卡片左上角的类型图标：按节点种类绘制具象线稿（文本 / 图片 / 视频 / 3D / 镜头 /
+    /// 音频），未知种类沿用通用叠片图标。坐标以 `center` 为原点、画布 y 向下，控制在
+    /// 28×28 的图标格内。
     pub(crate) fn icon(&mut self, kind: &str, center: Vec2, z: f32, color: u32) {
-        let paths: Vec<Vec<(f32, f32)>> = match kind {
-            _ => vec![
-                vec![(-6., -5.), (4., -5.), (4., 5.), (-6., 5.), (-6., -5.)],
-                vec![(-2., -1.), (7., -1.), (7., 7.), (-2., 7.), (-2., -1.)],
-            ],
-        };
-        for path in paths {
-            for pair in path.windows(2) {
-                self.line(
-                    center + Vec2::from(pair[0]),
-                    center + Vec2::from(pair[1]),
-                    1.5,
+        match kind {
+            "text" => {
+                // 大写 T：横画 + 中竖 + 底部衬线，与右键菜单的类型图标一致。
+                self.icon_stroke(center, &[(-7., -6.), (7., -6.)], false, z, color);
+                self.icon_stroke(center, &[(0., -6.), (0., 7.)], false, z, color);
+                self.icon_stroke(center, &[(-3.5, 7.), (3.5, 7.)], false, z, color);
+            }
+            "image" => {
+                // 相框 + 太阳 + 山脊。
+                self.icon_stroke(
+                    center,
+                    &[(-8., -6.), (8., -6.), (8., 6.), (-8., 6.)],
+                    true,
+                    z,
+                    color,
+                );
+                self.ring(center + Vec2::new(-3.8, -2.4), 1.5, 1.3, z, color, 16);
+                self.icon_stroke(
+                    center,
+                    &[
+                        (-7.6, 4.9),
+                        (-2.4, -0.4),
+                        (1.6, 3.1),
+                        (4.4, 0.9),
+                        (7.8, 4.6),
+                    ],
+                    false,
                     z,
                     color,
                 );
             }
+            "video" => {
+                // 胶片框：外框 + 两道竖隔 + 三道横隔，与右键菜单的视频图标一致。
+                self.icon_stroke(
+                    center,
+                    &[(-8., -6.5), (8., -6.5), (8., 6.5), (-8., 6.5)],
+                    true,
+                    z,
+                    color,
+                );
+                self.icon_stroke(center, &[(-4., -6.5), (-4., 6.5)], false, z, color);
+                self.icon_stroke(center, &[(4., -6.5), (4., 6.5)], false, z, color);
+                self.icon_stroke(center, &[(-8., -3.25), (8., -3.25)], false, z, color);
+                self.icon_stroke(center, &[(-8., 0.), (8., 0.)], false, z, color);
+                self.icon_stroke(center, &[(-8., 3.25), (8., 3.25)], false, z, color);
+            }
+            "model" => {
+                // 等距立方体：顶面、三条竖棱、底面。
+                self.icon_stroke(
+                    center,
+                    &[(0., -7.), (7., -3.5), (0., 0.), (-7., -3.5)],
+                    true,
+                    z,
+                    color,
+                );
+                self.icon_stroke(center, &[(-7., -3.5), (-7., 3.5)], false, z, color);
+                self.icon_stroke(center, &[(0., 0.), (0., 7.)], false, z, color);
+                self.icon_stroke(center, &[(7., -3.5), (7., 3.5)], false, z, color);
+                self.icon_stroke(center, &[(-7., 3.5), (0., 7.), (7., 3.5)], false, z, color);
+            }
+            "shot" => {
+                // 相机：机身 + 顶部取景凸起 + 镜头环。
+                self.icon_stroke(
+                    center,
+                    &[(-8., -2.5), (8., -2.5), (8., 6.), (-8., 6.)],
+                    true,
+                    z,
+                    color,
+                );
+                self.icon_stroke(
+                    center,
+                    &[(-4.5, -2.5), (-3., -6.), (3., -6.), (4.5, -2.5)],
+                    false,
+                    z,
+                    color,
+                );
+                self.ring(center + Vec2::new(0., 1.75), 3.1, 1.4, z, color, 20);
+            }
+            "audio" => {
+                // 音符：双符头 + 符杆 + 符杠。
+                self.icon_stroke(center, &[(-3.5, 4.5), (-3.5, -5.)], false, z, color);
+                self.icon_stroke(center, &[(3.5, 3.), (3.5, -6.5)], false, z, color);
+                self.line(
+                    center + Vec2::new(-3.5, -5.),
+                    center + Vec2::new(3.5, -6.5),
+                    2.5,
+                    z,
+                    color,
+                );
+                self.circle(center + Vec2::new(-4.6, 4.6), 2., z, color, 14);
+                self.circle(center + Vec2::new(2.4, 3.1), 2., z, color, 14);
+            }
+            _ => {
+                self.icon_stroke(
+                    center,
+                    &[(-6., -5.), (4., -5.), (4., 5.), (-6., 5.)],
+                    true,
+                    z,
+                    color,
+                );
+                self.icon_stroke(
+                    center,
+                    &[(-2., -1.), (7., -1.), (7., 7.), (-2., 7.)],
+                    true,
+                    z,
+                    color,
+                );
+            }
+        }
+    }
+
+    /// 以折线描边图标路径；`closed` 时补一段回到起点。
+    fn icon_stroke(
+        &mut self,
+        center: Vec2,
+        points: &[(f32, f32)],
+        closed: bool,
+        z: f32,
+        color: u32,
+    ) {
+        let Some(first) = points.first() else {
+            return;
+        };
+        let mut previous = center + Vec2::new(first.0, first.1);
+        for point in &points[1..] {
+            let next = center + Vec2::new(point.0, point.1);
+            self.line(previous, next, 1.5, z, color);
+            previous = next;
+        }
+        if closed {
+            self.line(
+                previous,
+                center + Vec2::new(first.0, first.1),
+                1.5,
+                z,
+                color,
+            );
         }
     }
 
@@ -494,6 +618,30 @@ mod tests {
         geometry.line(Vec2::ZERO, Vec2::new(10.0, 0.0), 2.0, 0.0, 0xffffff);
         assert_eq!(geometry.positions.len(), 4);
         assert_eq!(geometry.indices.len(), 6);
+    }
+
+    /// 节点左上角图标按种类绘制具象线稿，且始终留在 28×28 图标格内。
+    #[test]
+    fn node_icon_kinds_draw_concrete_glyphs_inside_tile() {
+        for kind in ["text", "image", "video", "model", "shot", "audio"] {
+            let mut geometry = Geometry::default();
+            geometry.icon(kind, Vec2::ZERO, 0.0, 0xffffff);
+            assert!(
+                geometry.positions.len() >= 8,
+                "{kind} 图标应包含可辨识的笔画"
+            );
+            assert!(
+                geometry
+                    .positions
+                    .iter()
+                    .all(|position| position[0].abs() <= 14.0 && position[1].abs() <= 14.0),
+                "{kind} 图标不应越出 28×28 图标格"
+            );
+        }
+        // 未知种类仍回落到通用叠片图标，不留下空白格。
+        let mut fallback = Geometry::default();
+        fallback.icon("unknown", Vec2::ZERO, 0.0, 0xffffff);
+        assert!(!fallback.positions.is_empty());
     }
 
     /// 半透明几何（change: fix-group-and-marquee-preview）：alpha 必须写进顶点色，
