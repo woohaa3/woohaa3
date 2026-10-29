@@ -694,7 +694,8 @@ fn shot_preview_node(id: &str, x: f32, y: f32, width: f32, height: f32) -> Graph
 #[test]
 fn shot_preview_hits_content_region_only() {
     clear_snapshot();
-    // 卡片 (100,200,240,167)：内容区 (116,252,208,99)，与媒体卡片内边距一致。
+    // 卡片 (100,200,240,167)：上/左/右各 6px 内边距；这张卡没有版本历史，底部只留标题行
+    // （18px），所以内容区为 (106,206,228,143)，标题行在 352..364。
     let g = accept_scene(&scene(
         vec![shot_preview_node(
             "shot-preview:p",
@@ -707,23 +708,22 @@ fn shot_preview_hits_content_region_only() {
     ));
     // 内容区中心 → 拍摄播放入口。
     assert_eq!(
-        point_query(g, 220.0, 300.0, 1.0, None).hit,
+        point_query(g, 220.0, 277.0, 1.0, None).hit,
         Some(PointHit::ShotPreview {
             node_id: "shot-preview:p".into()
         })
     );
-    // 标题区（含名称与类型标记）不建立开播候选，回落普通 Node。
+    // 底部标题行（种类符号与名称）不建立开播候选，回落普通 Node。
     assert_eq!(
-        point_query(g, 220.0, 216.0, 1.0, None).hit,
+        point_query(g, 220.0, 356.0, 1.0, None).hit,
         Some(PointHit::Node {
             node_id: "shot-preview:p".into()
         })
     );
-    // 标题下半行、左右与底部留白都不能触发播放。
+    // 左右留白与标题行都不能触发播放。左右点取靠上的位置，避开左右中点的连接端口命中区。
     for (x, y) in [
-        (220.0, 240.0),
-        (108.0, 300.0),
-        (332.0, 300.0),
+        (102.0, 215.0),
+        (338.0, 215.0),
         (220.0, 358.0),
     ] {
         assert_eq!(

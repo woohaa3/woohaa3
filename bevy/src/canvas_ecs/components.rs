@@ -160,6 +160,9 @@ pub(crate) struct CanvasTextureSprite {
     pub(crate) node_id: String,
     /// 内容身份（后端下发时提供）；`None` 表示无共享内容键。
     pub(crate) content_id: Option<String>,
+    /// 贴图原始像素尺寸。Sprite 每帧跟随节点几何重算尺寸时需要它，
+    /// 而像素尺寸只在贴图批次里出现一次，所以随 Sprite 一起记住。
+    pub(crate) texture_px: [u32; 2],
 }
 
 /// group 3D 气泡尾巴/连续底面的 owner（节点实体）。

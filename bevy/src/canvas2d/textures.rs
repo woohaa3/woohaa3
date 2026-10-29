@@ -146,6 +146,7 @@ pub(crate) fn sync_textures(
                         owner,
                         node_id: id.clone(),
                         content_id: content.map(str::to_owned),
+                        texture_px: [width, height],
                     },
                     Name::new(format!("canvas-texture:{id}")),
                 ));
@@ -167,6 +168,34 @@ pub(crate) fn sync_textures(
         commands.entity(entity).despawn();
         for released in visuals.texture_store.release(&id) {
             images.remove(released.id());
+        }
+    }
+    // 跟随节点位置：贴图批次只在**贴图内容变化**时到达；拖动、缩放、布局重排都不产生新
+    // 批次。只靠批次写位置会让 Sprite 停在原地，直到下一次上传才「追上」——表现为拖动卡片
+    // 时图片滞后一拍。这里对每个仍存活的 Sprite 按当前帧的节点几何重算位置与尺寸：
+    // 无批次的一帧只读场景 + 写 Transform，不碰 GPU 资源。
+    let followed: Vec<(Entity, Vec2, Color, Vec2, f32)> = sprites
+        .iter()
+        .filter_map(|(entity, _, _, sprite)| {
+            let (node_index, node) = index.node(&scene.0, &sprite.node_id)?;
+            if !node.texture {
+                return None;
+            }
+            let display = crate::canvas_query::focus_context::node(&scene.0, node);
+            let render_index =
+                crate::canvas_query::focus_context::index(&scene.0, &node.id, node_index);
+            let overlay = crate::canvas_query::focus_context::overlay(&scene.0);
+            let texture_px = Vec2::new(sprite.texture_px[0] as f32, sprite.texture_px[1] as f32);
+            let (custom_size, center, color, z) =
+                super::image_focus::sprite_layout(&overlay, &display, texture_px, render_index);
+            Some((entity, custom_size, color, center, z))
+        })
+        .collect();
+    for (entity, size, color, center, z) in followed {
+        if let Ok((_, mut sprite, mut transform, _)) = sprites.get_mut(entity) {
+            sprite.custom_size = Some(size);
+            sprite.color = color;
+            transform.translation = Vec3::new(center.x, -center.y, z);
         }
     }
 }

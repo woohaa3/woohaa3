@@ -217,8 +217,19 @@ mod tests {
 
     #[test]
     fn content_rect_matches_media_card_insets() {
+        // 与普通卡片同一套边距：上/左/右小边距，底部留标题行与历史圆点。
         let rect = content_rect(10.0, 20.0, 240.0, 167.0);
-        assert_eq!(rect, (26.0, 72.0, 208.0, 99.0));
+        assert_eq!(
+            rect,
+            (
+                10.0 + crate::canvas_query::layout::CARD_CONTENT_PAD,
+                20.0 + crate::canvas_query::layout::CARD_CONTENT_PAD,
+                240.0 - crate::canvas_query::layout::CARD_CONTENT_PAD * 2.0,
+                167.0
+                    - crate::canvas_query::layout::CARD_CONTENT_PAD
+                    - crate::canvas_query::layout::CARD_FOOTER_HEIGHT,
+            )
+        );
         // 小尺寸沿用普通媒体内容框的下限。
         let degenerate = content_rect(0.0, 0.0, 240.0, 20.0);
         assert_eq!(degenerate.3, 24.0);
@@ -238,13 +249,16 @@ mod tests {
     #[test]
     fn texture_size_contains_without_cropping() {
         let card = node(0.0, 0.0, 240.0, 185.0);
-        // 比内容区更宽的纹理按宽度贴合，高度按比例缩小。
+        let (_, _, box_width, box_height) = content_rect_of(&card);
+        let fit = (box_width / 1920.0).min(box_height / 1080.0);
+        // 比内容区更宽的纹理按贴合边缩放，另一维按比例。
         let wide = texture_size(&card, Vec2::new(1920.0, 1080.0));
-        assert!((wide.x - 208.0).abs() < 0.01);
-        assert!((wide.y - 117.0).abs() < 0.5);
+        assert!((wide.x - 1920.0 * fit).abs() < 0.01);
+        assert!((wide.y - 1080.0 * fit).abs() < 0.01);
+        assert!(wide.x <= box_width + 1e-3 && wide.y <= box_height + 1e-3);
         // 竖纹理按高度贴合。
         let tall = texture_size(&card, Vec2::new(1080.0, 1920.0));
-        assert!((tall.y - 117.0).abs() < 0.01 && tall.x < 208.0);
+        assert!(tall.y <= box_height + 1e-3 && tall.x < box_width);
         // 非法纹理尺寸回退到镜头 aspect 的默认内容高度，不产生 NaN。
         let fallback = texture_size(&card, Vec2::new(0.0, f32::NAN));
         assert!(fallback.x.is_finite() && fallback.y.is_finite() && fallback.x > 0.0 && fallback.y > 0.0);

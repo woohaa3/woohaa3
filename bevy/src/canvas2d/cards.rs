@@ -7,6 +7,12 @@ use crate::{
 };
 use bevy::prelude::*;
 
+/// 标题行里种类符号的缩放（符号路径基准约 13×12）。
+const KIND_GLYPH_SCALE: f32 = 0.62;
+
+/// 种类符号与名称之间的水平间隙。
+const KIND_GLYPH_GAP: f32 = 5.0;
+
 /// 拍摄镜头预览卡片正文与装饰
 /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D8）。
 ///
@@ -58,7 +64,7 @@ pub(super) fn draw_static(
     if super::layout::compact_card(node) {
         return super::compact_card::draw(geometry, theme, node, index);
     }
-    let (accent, tint, category) = theme.node_palette(&node.kind);
+    let (_, _tint, category) = theme.node_palette(&node.kind);
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);
     let show_content = shows_content(node);
@@ -90,14 +96,6 @@ pub(super) fn draw_static(
         z + 0.003,
         theme.token_u32("canvasNodeSurface"),
     );
-    geometry.rounded_rect(x + 14., y + 12., 28., 28., 6., z + 0.004, tint);
-    geometry.icon(&node.kind, Vec2::new(x + 28., y + 26.), z + 0.005, accent);
-    // 卡片“×”删除入口已移除（change: 2026-10-09-improve-canvas-workflow，任务 1.7）：
-    // 删除只经“删除作品”菜单与键盘 Delete/Backspace，避免误删与语义歧义。
-    // 历史动作图标已移除（迁移到节点下方独立历史条，
-    // change: 2026-10-12-unify-generation-history-strip，design D4）；
-    // 下载入口也移出卡片（迁移到节点顶部 Bevy 横条，
-    // change: 2026-10-13-add-node-to-film-set-shortcut）。
     if show_content && !super::shot_preview::is_shot_preview_node(node) {
         let (cx, cy, cw, ch) = super::layout::content_rect(node);
         geometry.rounded_rect(
@@ -112,9 +110,10 @@ pub(super) fn draw_static(
         // 运行中节点的进度环由 `generation::sync_generation` 每帧绘制在内容面上；
         // 这里不再画底部状态行、进度条或静态进度环。
     }
-    // 主标题与类型小标记独立布局（change: 2026-10-09-improve-canvas-workflow，任务 2.2）：
-    // 作品名称优先、类型退居次要；先给历史/下载控件留空间再截断主标题。
-    // 顶部图标占 x+14..x+42，历史/下载控件占右侧约 62px，因此标题可用宽度 = width - 112。
+    // 底部标题行：预览在上、名称在下（参考四喜卡片的形态）。
+    // 种类用**符号标识**排在名称前方（不再写「图片」「视频」这类文字），
+    // 名称用正文色，种类符号用弱化色 —— 名称是主体，符号只是标记。
+    // 左上角的 28×28 图标也因此移除，不再占用标题可用宽度。
     let fallback_label = node
         .card_label
         .clone()
@@ -124,27 +123,41 @@ pub(super) fn draw_static(
     } else {
         node.title.clone()
     };
-    let title_width = (width - 112.).max(48.);
-    let mut labels = vec![(
-        shortened(&title_text, title_width, 12.),
-        Vec2::new(x + 50., y + 17.),
-        12.,
-        accent,
-    )];
-    // 类型小标记：主标题下方的次要信息，缺省（旧帧）时不绘制。
-    if !node.type_label.is_empty() {
-        labels.push((
-            shortened(&node.type_label, width - 112., 10.),
-            Vec2::new(x + 50., y + 34.),
-            10.,
+    let title_top = super::layout::card_title_row_top(y, height, super::layout::card_footer_height(node));
+    let text_left = x + super::layout::CARD_CONTENT_PAD;
+    let text_width = (width - super::layout::CARD_CONTENT_PAD * 2.).max(48.);
+    let has_kind_glyph = !node.type_label.is_empty();
+    // 符号路径的基准框约 13×12（见 `Geometry::kind_glyph`），按标题行高度缩放。
+    let glyph_scale = KIND_GLYPH_SCALE;
+    let glyph_advance = if has_kind_glyph {
+        let glyph_center = Vec2::new(
+            text_left + 6.5 * glyph_scale,
+            title_top + super::layout::CARD_TITLE_FONT / 2.0,
+        );
+        geometry.kind_glyph(
+            &node.kind,
+            glyph_center,
+            z + 0.005,
             theme.token_u32("canvasCloseIcon"),
-        ));
-    }
+            glyph_scale,
+        );
+        13.0 * glyph_scale + KIND_GLYPH_GAP
+    } else {
+        0.0
+    };
+    let mut labels = vec![(
+        shortened(&title_text, (text_width - glyph_advance).max(32.), super::layout::CARD_TITLE_FONT),
+        Vec2::new(text_left + glyph_advance, title_top),
+        super::layout::CARD_TITLE_FONT,
+        theme.token_u32("canvasBodyText"),
+    )];
     if super::shot_preview::is_shot_preview_node(node) {
         labels.extend(draw_shot_preview(geometry, theme, node, index));
         return labels;
     }
     let body_lines: Vec<&str> = node.body.lines().collect();
+    // 正文画在内容区内部（标题行已移到卡片底部，不再占用顶部）。
+    let (bcx, bcy, bcw, _bch) = super::layout::content_rect(node);
     for i in 0..6 {
         labels.push((
             if show_content
@@ -152,11 +165,11 @@ pub(super) fn draw_static(
                 && !node.busy
                 && !(node.model_preview.is_some() && node.model.is_some())
             {
-                shortened(body_lines.get(i).unwrap_or(&""), width - 48., 12.)
+                shortened(body_lines.get(i).unwrap_or(&""), (bcw - 16.).max(1.), 12.)
             } else {
                 String::new()
             },
-            Vec2::new(x + 24., y + 56. + i as f32 * 18.),
+            Vec2::new(bcx + 8., bcy + 4. + i as f32 * 18.),
             12.,
             theme.token_u32("canvasBodyText"),
         ));

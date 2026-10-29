@@ -313,6 +313,35 @@ impl Geometry {
         }
     }
 
+    /// 卡片标题行里的种类符号标识。
+    ///
+    /// 与旧的 `icon` 路径相同，但可缩放：卡片把种类从文字标签改成了符号，
+    /// 需要按标题行高度调整大小（`cards.rs`）。
+    pub(crate) fn kind_glyph(&mut self, kind: &str, center: Vec2, z: f32, color: u32, scale: f32) {
+        let paths: Vec<Vec<(f32, f32)>> = match kind {
+            _ => vec![
+                vec![(-6., -5.), (4., -5.), (4., 5.), (-6., 5.), (-6., -5.)],
+                vec![(-2., -1.), (7., -1.), (7., 7.), (-2., 7.), (-2., -1.)],
+            ],
+        };
+        for path in paths {
+            for pair in path.windows(2) {
+                self.line(
+                    center + Vec2::from(pair[0]) * scale,
+                    center + Vec2::from(pair[1]) * scale,
+                    1.5 * scale,
+                    z,
+                    color,
+                );
+            }
+        }
+    }
+
+    /// 卡片左上角的种类图标。
+    ///
+    /// 有意保留：卡片已改为「预览在上、名称在下」并用 [`Self::kind_glyph`] 在标题行里
+    /// 表达种类（见 `cards.rs`），当前没有绘制入口调用它。
+    #[allow(dead_code)]
     pub(crate) fn icon(&mut self, kind: &str, center: Vec2, z: f32, color: u32) {
         let paths: Vec<Vec<(f32, f32)>> = match kind {
             _ => vec![
