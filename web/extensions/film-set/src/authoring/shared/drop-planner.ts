@@ -8,7 +8,7 @@
  *
  * 由拖动族委托调用；渲染与命中复用 contracts 的同一投影逻辑。
  */
-import { createHighEntropyId, decodeFilmSetNodeData, scriptModel3DNodeData, isFilmSetNode, canonicalFilmSetFields, modelSourceHash, planFilmSetImportItems, appendFilmSetItems, type FilmSetNodeData, type FilmSetImportItemDraft, type ServerCanvas, type Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
+import { createHighEntropyId, scriptModel3DNodeData, isFilmSetGroupNode, modelSourceHash, planFilmSetImportItems, readFilmSetAnimationProjection, readFilmSetGroupMarker, createFilmSetGroupMarker, contentKeyForFilmSetGroupSource, type FilmSetGroupMarker, type CanvasCommand, type FilmSetImportItemDraft, type ServerCanvas, type Woohaa3CanvasSerializedNode } from "@woohaa3/contracts";
 
 /**
  * 片场拖入可接受的来源节点类型：**只有普通模型**。

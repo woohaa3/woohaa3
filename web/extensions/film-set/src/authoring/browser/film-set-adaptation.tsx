@@ -8,7 +8,7 @@
  */
 import { useState, useSyncExternalStore } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
-import { decodeFilmSetNodeData, filmSetAnimationsOf, filmSetClipPrecondition, filmSetItemAdapterHash, type FilmSetNodeData, type FilmSetAnimationClip, type FilmSetItem } from "@woohaa3/contracts";
+import { readFilmSetAnimationProjection, filmSetAnimationsOf, filmSetClipPrecondition, filmSetItemAdapterHash, type FilmSetNodeData, type FilmSetAnimationClip, type FilmSetItem } from "@woohaa3/contracts";
 import { Button } from "@woohaa3/ui/primitives";
 
 export type AdaptationState = {
