@@ -35,7 +35,7 @@ use serde::Deserialize;
 /// v29 unifies group and film-set authoring: group presentations carry a badge scale,
 /// model bounds and per-object ownership link item sources; media content keeps a
 /// provider identity and schema version.
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v30";
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v31";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 /// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。

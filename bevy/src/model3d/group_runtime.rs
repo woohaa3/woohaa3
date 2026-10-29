@@ -70,6 +70,8 @@ pub(super) fn sync(
     resource: &Arc<ModelSnapshot>,
     placement: &ModelPlacement,
     group: &crate::protocol::FilmSetGroupPreparation,
+    quality: Quality,
+    overview: bool,
 ) {
     models.preparation.cancel(&node.id);
     let previous = models.roots.remove(&node.id);
@@ -91,13 +93,27 @@ pub(super) fn sync(
             Vec3::ZERO,
             1.0,
             Quat::IDENTITY,
-            Quality::High,
+            quality,
             &mut models.shared,
             false,
             models.batching_strategy,
-            false,
+            overview,
         )
     });
+    // 根已存在时保留当前档位（由 `sync_quality` 推进）；声明变化才重置决策状态。
+    if owner.overview_lod != overview {
+        owner.overview_lod = overview;
+        owner.quality = quality;
+        owner.overview_desired = quality;
+        owner.overview_reason = "initial";
+        owner.quality_changed_at = None;
+        owner.overview_medium_since = None;
+        owner.projection = Default::default();
+        owner.quality_refresh_pending = false;
+        owner.representation_generation = owner.representation_generation.wrapping_add(1);
+    }
+    let child_quality = owner.quality;
+    let child_overview = owner.overview_lod;
     let ModelRootLayout::V2 { root: anchor } = owner.layout;
     if owner.content_signature != resource.signature || !Arc::ptr_eq(&owner.resource, resource) {
         let desired = split(resource);
@@ -133,11 +149,11 @@ pub(super) fn sync(
                 Vec3::ZERO,
                 1.0,
                 Quat::IDENTITY,
-                Quality::High,
+                child_quality,
                 &mut models.shared,
                 false,
                 models.batching_strategy,
-                false,
+                child_overview,
             );
             let ModelRootLayout::V2 { root } = child.layout;
             commands.entity(anchor).add_child(root);
@@ -256,6 +272,8 @@ mod tests {
                         &resource,
                         &ModelPlacement::default(),
                         &group,
+                        Quality::High,
+                        false,
                     );
                 }
                 queue.apply(world);

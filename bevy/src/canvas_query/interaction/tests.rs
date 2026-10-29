@@ -69,6 +69,7 @@ fn group(id: &str, x: f32, y: f32, w: f32, h: f32, leaves: u32) -> GraphNode {
             output_capable_leaf_count: leaves,
             model_bounds: None,
             run_status: None,
+            geometry_quality: None,
             drop_target: false,
         }),
         ..node(id, x, y, w, h)
@@ -811,17 +812,10 @@ fn group_resize_uses_accepted_capability_and_shared_rect_through_selection_and_p
     input.nodes[0].resizable = true;
     let mut snapshot = build_snapshot(&input, 2);
     apply_selection(&mut snapshot, &input.selection.nodes);
-    let rect = crate::canvas_query::layout::resize_rect(0., 0., 400., 300.);
+    let corners = crate::canvas_query::layout::resize_corner_rects(0., 0., 400., 300.);
     assert_eq!(
         snapshot.nodes[0].resize,
-        Some(crate::canvas_query::scope::ScopeGrip::Rect(
-            crate::canvas_query::scope::ScopeRect {
-                x: rect.0,
-                y: rect.1,
-                width: rect.2,
-                height: rect.3
-            }
-        ))
+        Some(crate::canvas_query::scope::corners_grip(corners))
     );
     let generation = accept_scene(&input);
     assert!(matches!(

@@ -15,6 +15,7 @@ describe("group adapter and canonical preparation", () => {
     const { legacy, canvas } = fixture();
     const registry = new CompositeAssetRegistry(); const adapter = createFilmSetModelAdapter();
     registry.register(adapter);
+    expect(adapter.geometryQuality).toBe("overview-primitives-v1");
     expect(registry.resolve(canvas, "film")).toBe(adapter);
     expect(registry.resolve(legacy, "film")).toBeNull();
     canvas.nodeData.film = {};

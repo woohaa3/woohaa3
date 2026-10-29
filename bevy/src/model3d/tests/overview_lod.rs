@@ -1182,3 +1182,70 @@ fn offscreen_time_does_not_count_towards_medium_dwell() {
         Quality::High
     );
 }
+
+/// 片场 group 的徽标场景：组合资源按 binding 前缀拆分，但总览 LOD 仍以 group owner 为根。
+fn group_film_set_fixture(declared: bool, zoom: f32) -> (Scene, ModelAssets) {
+    let mut ops = vec![serde_json::json!({"t":"group","id":"1:a"})];
+    for i in 0..3 {
+        ops.push(serde_json::json!({"t":"sphere","id":format!("1:a4:s{i}"),"parent":"1:a","radius":1,"color":"#ffffff"}));
+    }
+    let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
+        "sceneVersion": "woohaa-model-scene-ir-v2", "signature": "group-overview", "extent": 12, "ops": ops
+    }))
+    .unwrap();
+    let mut group = serde_json::json!({
+        "title": "", "memberCount": 1, "outputCapableLeafCount": 0, "badgeScale": 3
+    });
+    if declared {
+        group["geometryQuality"] = serde_json::json!("overview-primitives-v1");
+    }
+    let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+        "id": "film", "type": "group", "x": 0, "y": 0, "width": 400, "height": 300,
+        "group": group
+    }))
+    .unwrap();
+    node.model = Some(reference_for(&snapshot, ModelPlacement::default()));
+    let reference = node.model.as_ref().unwrap();
+    let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
+    let mut scene = scene_with(&node, node.model.clone());
+    scene.viewport.zoom = zoom;
+    scene.surface = Some(surface(1.0));
+    scene.film_set_groups = vec![serde_json::from_value(serde_json::json!({
+        "schemaVersion": "woohaa-film-set-group-render-v1",
+        "ownerId": "film",
+        "badgeOrigin": {"x": 200.0, "y": 300.0},
+        "bindings": [{
+            "bindingId": "a", "sourceNodeId": "source", "kind": "model3d", "contentKey": "model3d:v1",
+            "transform": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "scale": 1.0}, "visible": true
+        }]
+    }))
+    .unwrap()];
+    (scene, resources)
+}
+
+#[test]
+fn group_owned_film_set_badge_keeps_overview_lod() {
+    let (mut scene, resources) = group_film_set_fixture(true, 0.05);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    {
+        let root = &world.resource::<ModelVisuals>().roots["film"];
+        assert!(root.overview_lod);
+        assert_eq!(root.group_children.len(), 1);
+        assert!(root.group_children["a"].overview_lod);
+    }
+    let mut now = 1.0;
+    settle(&mut world, &scene, &mut now, Quality::Low);
+    scene.viewport.zoom = 8.0;
+    settle(&mut world, &scene, &mut now, Quality::High);
+}
+
+#[test]
+fn group_without_declaration_stays_high() {
+    let (scene, resources) = group_film_set_fixture(false, 0.05);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let root = &world.resource::<ModelVisuals>().roots["film"];
+    assert!(!root.overview_lod);
+    assert_eq!(root.quality, Quality::High);
+}

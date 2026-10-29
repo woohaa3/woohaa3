@@ -654,6 +654,12 @@ pub(crate) struct GroupPresentation {
     pub(crate) run_status: Option<GroupRunStatus>,
     #[serde(default)]
     pub(crate) model_bounds: Option<GroupModelBounds>,
+    /// 总览 primitive LOD 策略声明；缺失即 group 徽标保持 High。
+    ///
+    /// 片场迁移为 group 后，可信 adapter 的声明经 group 呈现进入运行时；Rust 只消费该声明，
+    /// 不按业务 extensionId、nodeData 形状或历史类型推断。
+    #[serde(default, rename = "geometryQuality")]
+    pub(crate) geometry_quality: Option<CompositeAssetGeometryQuality>,
     /// Render-only emphasis while a node is being released into this group.
     #[serde(default, rename = "dropTarget")]
     pub(crate) drop_target: bool,

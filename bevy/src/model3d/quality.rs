@@ -87,9 +87,16 @@ pub(super) fn purpose(
 
 /// 节点是否声明了总览 primitive LOD（严格按可信 adapter 的呈现声明，不推断内容形状）。
 pub(super) fn has_overview_lod_declaration(node: &GraphNode) -> bool {
-    node.composite_asset.as_ref().is_some_and(|asset| {
-        asset.geometry_quality == Some(CompositeAssetGeometryQuality::OverviewPrimitivesV1)
-    })
+    let declared = node
+        .group
+        .as_ref()
+        .and_then(|group| group.geometry_quality)
+        .or_else(|| {
+            node.composite_asset
+                .as_ref()
+                .and_then(|asset| asset.geometry_quality)
+        });
+    declared == Some(CompositeAssetGeometryQuality::OverviewPrimitivesV1)
 }
 
 /// Exact card visibility, without the demand/prewarm margin. Unknown surfaces

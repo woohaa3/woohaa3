@@ -47,8 +47,9 @@ export type CompositeAssetAdapter = {
    * （change: 2026-10-15-add-film-set-overview-lod，design D1）。
    *
    * 可信 adapter 按严格身份声明 `overview-primitives-v1`，宿主把结果投影为复合资产节点的
-   * `compositeAsset.geometryQuality`，运行时据此按实际世界投影尺寸选择整场图元细分。缺省即
-   * World 用途保持 High；未知值在 register 边界拒绝，不从 nodeData 标题/items/动画或历史类型推断。
+   * `compositeAsset.geometryQuality`，或 group 徽标场景的 `group.geometryQuality`，运行时据此按
+   * 实际世界投影尺寸选择整场图元细分。缺省即 World 用途保持 High；未知值在 register 边界拒绝，
+   * 不从 nodeData 标题/items/动画或历史类型推断。
    */
   geometryQuality?: CompositeAssetGeometryQuality;
   /** Hosts pass nodeId; optional for existing callers that only have node data. */

@@ -329,6 +329,7 @@ mod tests {
                 output_capable_leaf_count: 2,
                 model_bounds: None,
                 run_status: None,
+                geometry_quality: None,
                 drop_target: false,
             },
             false,
@@ -359,6 +360,7 @@ mod tests {
                 output_capable_leaf_count: 2,
                 model_bounds: None,
                 run_status: None,
+                geometry_quality: None,
                 drop_target: false,
             },
             false,
@@ -387,6 +389,7 @@ mod tests {
                 output_capable_leaf_count: 0,
                 model_bounds: None,
                 run_status: None,
+                geometry_quality: None,
                 drop_target: false,
             },
         );
@@ -410,6 +413,7 @@ mod tests {
                 output_capable_leaf_count: 0,
                 model_bounds: None,
                 run_status: None,
+                geometry_quality: None,
                 drop_target: false,
             },
             false,
@@ -442,6 +446,7 @@ mod tests {
                 output_capable_leaf_count: 0,
                 model_bounds: None,
                 run_status: None,
+                geometry_quality: None,
                 drop_target: false,
             },
             false,
@@ -468,6 +473,7 @@ mod tests {
                 output_capable_leaf_count: 0,
                 model_bounds: None,
                 run_status: None,
+                geometry_quality: None,
                 drop_target: false,
             },
         );
@@ -503,6 +509,7 @@ mod tests {
             output_capable_leaf_count: 0,
             model_bounds: None,
             run_status: None,
+            geometry_quality: None,
             drop_target,
         }
     }

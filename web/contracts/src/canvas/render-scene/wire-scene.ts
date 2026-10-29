@@ -72,7 +72,9 @@ export * from "./wire-shot-preview.js";
 // v28: optional trusted overview-only emptyPlaceholder; older renderers reject the whole frame.
 // v30: group-owned film-set bindings carry prepared source identities;
 //      media content keeps a provider identity and schema version.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v30" as const;
+// v31: group presentations may carry the trusted overview primitive LOD declaration;
+//      older renderers would silently keep every group badge at High, so reject mixed combinations.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v31" as const;
 
 /** Group-owned scene primitives. Kept separate from the legacy composite wire during migration. */
 export const FILM_SET_GROUP_RENDER_SCHEMA_VERSION = "woohaa-film-set-group-render-v1" as const;
@@ -387,6 +389,12 @@ export type BevyGroupPresentation = {
   outputCapableLeafCount: number;
   /** Prepared local bounds, without ops/mesh; shared model layout and perimeter input. */
   modelBounds?: { aabb: Aabb; extent: number };
+  /**
+   * Trusted adapter's overview primitive LOD declaration. Only group-owned scene
+   * compositions that opt in (currently film sets) get fraction-based tiers;
+   * missing keeps the existing High representation.
+   */
+  geometryQuality?: CompositeAssetGeometryQuality;
   /** Private run projection: group-header status button; no ledger identity crosses into renderer. */
   runStatus?: { label: string; state: string };
   /** Render-only target emphasis while a node is being released into this group. */

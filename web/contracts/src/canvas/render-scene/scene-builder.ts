@@ -75,7 +75,7 @@ import { shotPreviewCardPresentation, shotPreviewCardPresentationForFilmSetGroup
 import { managedShotPreviewOwnershipOf, shotPreviewOwnershipOf } from "../film-set-shot-preview.js";
 import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import type { FilmSetNodeData } from "../canvas-node-model.js";
-import { prepareFilmSetGroup, readFilmSetGroupMarker } from "../film-set-group.js";
+import { activeFilmSetSceneBindings, prepareFilmSetGroup, readFilmSetGroupMarker } from "../film-set-group.js";
 import { FILM_SET_GROUP_RENDER_SCHEMA_VERSION, type BevyFilmSetGroupPreparation, type BevyFilmSetGroupBinding } from "./wire-scene.js";
 
 export type CanvasRenderSceneInput = {
@@ -134,14 +134,16 @@ export type CanvasRenderSceneInput = {
   compositeAssetEmptyPlaceholders?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetEmptyPlaceholder>;
   compositeAssetScopeShapes?: ReadonlyMap<string, CompositeAssetScopeShape>;
   /**
-   * 每复合资产节点的总览 primitive LOD 策略声明
-   * （change: 2026-10-15-add-film-set-overview-lod，design D1）。
+   * 每节点的总览 primitive LOD 策略声明
+   * （change: 2026-10-15-add-film-set-overview-lod，design D1；
+   *  change: film-set group 迁移后同时覆盖 group 徽标场景）。
    *
-   * 由宿主按可信 adapter 严格身份解析后注入；存在即写入 `compositeAsset.geometryQuality`，运行时
-   * 据此按世界投影尺寸选择整场图元细分。缺省不写入即 World 用途保持 High。只承载派生呈现声明，
-   * 不进入 canonical 内容 hash、脚本执行 key 或持久 DTO。
+   * 由宿主按可信 adapter 严格身份解析后注入；存在即写入复合资产的
+   * `compositeAsset.geometryQuality` 或 group 的 `geometryQuality`，运行时据此按世界投影尺寸选择
+   * 整场图元细分。缺省不写入即 World 用途保持 High。只承载派生呈现声明，不进入 canonical 内容
+   * hash、脚本执行 key 或持久 DTO。
    */
-  compositeAssetGeometryQualities?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetGeometryQuality>;
+  geometryQualities?: ReadonlyMap<string, import("./wire-scene.js").CompositeAssetGeometryQuality>;
   /**
    * 每复合资产节点的**业务类型显示名**（如「片场」「游戏炼丹炉」）
    * （change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
@@ -419,7 +421,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
             // 总览 LOD 策略只由可信 adapter 声明；缺失即 World 用途保持 High
             // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
             emptyPlaceholder: input.compositeAssetEmptyPlaceholders?.get(node.id),
-            geometryQuality: input.compositeAssetGeometryQualities?.get(node.id),
+            geometryQuality: input.geometryQualities?.get(node.id),
             mediaPlanes: filmSetMediaPlanes,
             layoutAabb: filmSetLayoutAabb,
             rootPlacement: placement,
@@ -447,6 +449,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           collapsed,
           badgeScale: clampGroupBadgeScale(input.groupBadgeScaleOverrides?.get(node.id) ?? data?.groupBadgeScale ?? 1),
           badgeResizable: input.groupBadgeResizable === true && selectedIds.size === 1 && selectedIds.has(node.id),
+          // 可信 adapter 的声明同时覆盖 group 徽标的场景组合（片场迁移后不再有 compositeAsset）。
+          ...(input.geometryQualities?.get(node.id) ? { geometryQuality: input.geometryQualities.get(node.id) } : {}),
           ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {})
         } : {})
       };
@@ -621,8 +625,9 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     if (!prepared) continue;
     const diagnosticByBinding = new Map(prepared.diagnostics.map(diagnostic => [diagnostic.bindingId, diagnostic.message]));
     const objectIds = new Set((input.modelResources?.get(node.id)?.ops ?? input.modelScenesV2?.get(node.id) ?? []).map(op => op.id));
-    for (const binding of prepared.marker.sceneBindings) if (objectIds.has(encodeFilmSetPartId(binding.bindingId, "resource-unavailable"))) diagnosticByBinding.set(binding.bindingId, diagnosticByBinding.get(binding.bindingId) ?? "资源准备失败，请检查来源卡片后重试");
-    const bindings: BevyFilmSetGroupBinding[] = prepared.marker.sceneBindings.map(binding => {
+    const sceneBindings = activeFilmSetSceneBindings(prepared.marker);
+    for (const binding of sceneBindings) if (objectIds.has(encodeFilmSetPartId(binding.bindingId, "resource-unavailable"))) diagnosticByBinding.set(binding.bindingId, diagnosticByBinding.get(binding.bindingId) ?? "资源准备失败，请检查来源卡片后重试");
+    const bindings: BevyFilmSetGroupBinding[] = sceneBindings.map(binding => {
       const resolved = prepared.bindings.find(candidate => candidate.bindingId === binding.bindingId);
       const sourcePresentation = projectedNodes.find(candidate => candidate.id === binding.sourceNodeId);
       const sourceData = nodeData[binding.sourceNodeId];

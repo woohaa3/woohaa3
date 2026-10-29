@@ -14,6 +14,8 @@ export function createFilmSetModelAdapter(history = new HistoryFilmSetSnapshots(
   return {
     extensionId: FILM_SET_EXTENSION_ID, owner: FILM_SET_EXTENSION_ID,
     managedLifecycle: filmSetManagedLifecycle,
+    /** Group-owned badges use the same trusted overview primitive LOD declaration as the old composite node. */
+    geometryQuality: "overview-primitives-v1",
     matchesNode: (node, data) => isFilmSetGroupNode(node, data),
     children(current, ownerNodeId) {
       const owner = current.document.nodes.find(node => node.id === ownerNodeId);

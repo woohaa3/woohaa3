@@ -374,6 +374,20 @@ pub(crate) fn sync_models(
             .iter()
             .find(|group| group.owner_id == node.id)
         {
+            // 片场 group 的徽标场景沿用旧 composite 根的总览 primitive LOD：group owner 持有
+            // 所有绑定的聚合几何，后续 `sync_quality` 可整场原子切档。未声明时保持 High。
+            let overview = super::quality::has_overview_lod_declaration(node);
+            let quality = if overview {
+                super::quality::initial(
+                    node,
+                    scene,
+                    focus.node.as_deref(),
+                    models.high_demand.contains(&node.id),
+                    resource,
+                )
+            } else {
+                super::quality::Quality::High
+            };
             super::group_runtime::sync(
                 commands,
                 meshes,
@@ -383,6 +397,8 @@ pub(crate) fn sync_models(
                 resource,
                 &reference.placement,
                 group,
+                quality,
+                overview,
             );
             continue;
         }
