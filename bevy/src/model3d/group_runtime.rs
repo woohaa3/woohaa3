@@ -5,7 +5,10 @@ use super::{
 };
 use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelSnapshot};
 use bevy::prelude::*;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 fn object_id(op: &ModelOp) -> &str {
     match op {
@@ -60,6 +63,17 @@ fn split(resource: &ModelSnapshot) -> HashMap<String, Arc<ModelSnapshot>> {
         .collect()
 }
 
+/// 子根销毁前把 owner 上由它贡献的批次条目一并摘除。
+///
+/// 批次实体属于子根，但 `ModelRoot.batches`/`part_batches` 由 owner 统一持有（总览 LOD 的
+/// 原子发布与播放替换只读取 owner）；不摘除会留下已销毁实体。
+fn detach_batches(owner: &mut super::runtime::ModelRoot, entities: &[Entity]) {
+    owner.batches.retain(|batch| !entities.contains(&batch.entity));
+    owner
+        .part_batches
+        .retain(|_, entity| !entities.contains(entity));
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sync(
     commands: &mut Commands,
@@ -72,6 +86,7 @@ pub(super) fn sync(
     group: &crate::protocol::FilmSetGroupPreparation,
     quality: Quality,
     overview: bool,
+    batched: bool,
 ) {
     models.preparation.cancel(&node.id);
     let previous = models.roots.remove(&node.id);
@@ -84,6 +99,7 @@ pub(super) fn sync(
     } else {
         previous
     };
+    let created = previous.is_none();
     let mut owner = previous.unwrap_or_else(|| {
         super::spawn::spawn_v2(
             commands,
@@ -98,8 +114,22 @@ pub(super) fn sync(
             false,
             models.batching_strategy,
             overview,
+            &HashSet::new(),
         )
     });
+    // 合批开关变化（进入聚焦/对象编辑、截图 High 消费者等）需要重建子根：合批部件没有
+    // 独立实体，逐部件动画/拾取只在非合批表示上成立。
+    if owner.batched != batched {
+        let children: Vec<_> = owner.group_children.drain().map(|(_, child)| child).collect();
+        for child in children {
+            detach_batches(&mut owner, &child.entities);
+            owner.opacity.remove_entities(materials, &child.entities);
+            super::runtime::despawn_root(commands, materials, child);
+        }
+        owner.batched = batched;
+        owner.content_signature.clear();
+        owner.representation_generation = owner.representation_generation.wrapping_add(1);
+    }
     // 根已存在时保留当前档位（由 `sync_quality` 推进）；声明变化才重置决策状态。
     if owner.overview_lod != overview {
         owner.overview_lod = overview;
@@ -116,7 +146,25 @@ pub(super) fn sync(
     let child_overview = owner.overview_lod;
     let ModelRootLayout::V2 { root: anchor } = owner.layout;
     if owner.content_signature != resource.signature || !Arc::ptr_eq(&owner.resource, resource) {
+        // 播放替换会由 `playback_prepare` 直接往 owner 插入部件实体（不在任何子根的
+        // `entities` 里）。内容重建前先回收，否则旧快照的替换部件会作为孤儿留在场景里。
+        let live: HashSet<Entity> = owner
+            .group_children
+            .values()
+            .flat_map(|child| child.entities.iter().copied())
+            .collect();
+        for entity in owner.entities.iter().copied() {
+            if entity != anchor && !live.contains(&entity) {
+                commands.entity(entity).try_despawn();
+            }
+        }
         let desired = split(resource);
+        // 每个 binding 的根实体承载运行时的摆放/显隐；合批以它为屏障，批次仍挂在该实体下，
+        // 否则 `item_placement::sync` 写入的 transform 会与平铺后的几何脱节。
+        let barriers: HashSet<String> = desired
+            .keys()
+            .map(|id| format!("{}:{}", id.len(), id))
+            .collect();
         let stale: Vec<_> = owner
             .group_children
             .keys()
@@ -125,6 +173,7 @@ pub(super) fn sync(
             .collect();
         for id in stale {
             if let Some(child) = owner.group_children.remove(&id) {
+                detach_batches(&mut owner, &child.entities);
                 owner.opacity.remove_entities(materials, &child.entities);
                 super::runtime::despawn_root(commands, materials, child);
             }
@@ -138,6 +187,7 @@ pub(super) fn sync(
                 continue;
             }
             if let Some(child) = owner.group_children.remove(&id) {
+                detach_batches(&mut owner, &child.entities);
                 owner.opacity.remove_entities(materials, &child.entities);
                 super::runtime::despawn_root(commands, materials, child);
             }
@@ -151,58 +201,77 @@ pub(super) fn sync(
                 Quat::IDENTITY,
                 child_quality,
                 &mut models.shared,
-                false,
+                batched,
                 models.batching_strategy,
                 child_overview,
+                &barriers,
             );
             let ModelRootLayout::V2 { root } = child.layout;
             commands.entity(anchor).add_child(root);
             child.content_signature = snapshot.signature.clone();
             child.resource = snapshot;
+            // 批次与部件索引上收到 owner：总览 LOD 的整根原子发布、播放替换与诊断都从
+            // owner 读取。批次实体仍由子根持有并在其销毁时摘除（`detach_batches`）。
+            owner.batches.append(&mut child.batches);
+            owner.part_batches.extend(child.part_batches.drain());
             owner.group_children.insert(id, child);
         }
-        owner.entities = vec![anchor];
-        owner.part_entities.clear();
-        owner.part_bases.clear();
-        owner.part_materials.clear();
-        owner.animation_entities.clear();
-        owner.geometries.clear();
-        owner.mesh_handles.clear();
-        owner.active_mesh_handles.clear();
-        owner.material_handles.clear();
+        let mut entities = vec![anchor];
+        let mut part_entities = HashMap::new();
+        let mut part_bases = HashMap::new();
+        let mut part_materials = HashMap::new();
+        let mut animation_entities = Vec::new();
+        let mut geometries = Vec::new();
+        // 句柄集合与已发布档位有关：保留既有句柄再并入子根句柄，避免内容变化瞬间把仍在
+        // `Mesh3d` 上的高档句柄从保留集合里挤掉；随后强制一次重发布收敛到精确集合。
+        let mut mesh_handles = std::mem::take(&mut owner.mesh_handles);
+        let mut active_mesh_handles = std::mem::take(&mut owner.active_mesh_handles);
+        let mut material_handles = Vec::new();
         for child in owner.group_children.values() {
-            owner.entities.extend(child.entities.iter().copied());
-            owner.part_entities.extend(
+            entities.extend(child.entities.iter().copied());
+            part_entities.extend(
                 child
                     .part_entities
                     .iter()
                     .map(|(id, entity)| (id.clone(), *entity)),
             );
-            owner.part_bases.extend(
+            part_bases.extend(
                 child
                     .part_bases
                     .iter()
                     .map(|(id, transform)| (id.clone(), *transform)),
             );
-            owner.part_materials.extend(
+            part_materials.extend(
                 child
                     .part_materials
                     .iter()
                     .map(|(id, material)| (id.clone(), material.clone())),
             );
-            owner
-                .animation_entities
-                .extend(child.animation_entities.iter().copied());
-            owner.geometries.extend(child.geometries.iter().cloned());
-            owner
-                .mesh_handles
-                .extend(child.mesh_handles.iter().cloned());
-            owner
-                .active_mesh_handles
-                .extend(child.active_mesh_handles.iter().cloned());
-            owner
-                .material_handles
-                .extend(child.material_handles.iter().cloned());
+            animation_entities.extend(child.animation_entities.iter().copied());
+            geometries.extend(child.geometries.iter().cloned());
+            mesh_handles.extend(child.mesh_handles.iter().cloned());
+            active_mesh_handles.extend(child.active_mesh_handles.iter().cloned());
+            material_handles.extend(child.material_handles.iter().cloned());
+        }
+        mesh_handles.sort_by_key(|handle| handle.id());
+        mesh_handles.dedup_by_key(|handle| handle.id());
+        active_mesh_handles.sort_by_key(|handle| handle.id());
+        active_mesh_handles.dedup_by_key(|handle| handle.id());
+        material_handles.sort_by_key(|handle| handle.id());
+        material_handles.dedup_by_key(|handle| handle.id());
+        owner.entities = entities;
+        owner.part_entities = part_entities;
+        owner.part_bases = part_bases;
+        owner.part_materials = part_materials;
+        owner.animation_entities = animation_entities;
+        owner.geometries = geometries;
+        owner.mesh_handles = mesh_handles;
+        owner.active_mesh_handles = active_mesh_handles;
+        owner.material_handles = material_handles;
+        // 子根重建后主动重发布一次：把句柄集合与批次资产收敛到当前档位的精确结果。
+        // 首次创建时子根已按当前档位建好，且空根（无部件/批次）没有可发布内容。
+        if !created && (!owner.geometries.is_empty() || !owner.batches.is_empty()) {
+            owner.quality_refresh_pending = true;
         }
         owner.representation_generation = owner.representation_generation.wrapping_add(1);
     }
@@ -216,6 +285,7 @@ pub(super) fn sync(
             .entity(anchor)
             .insert(base.mul_transform(scene_transform(t)));
     }
+    owner.batched = batched;
     models.roots.insert(node.id.clone(), owner);
 }
 
@@ -273,6 +343,7 @@ mod tests {
                         &ModelPlacement::default(),
                         &group,
                         Quality::High,
+                        false,
                         false,
                     );
                 }

@@ -2,7 +2,7 @@
 //! （change: refactor-bevy-rust-file-size，任务 3.2 / design D2；
 //!  change: 2026-10-07-remove-residual-compatibility —— 删除 V1 平铺构建路径）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
@@ -51,6 +51,7 @@ pub(super) fn spawn_model(
         batched,
         strategy,
         overview,
+        &HashSet::new(),
     );
     root.content_signature = model.signature.clone();
     root
@@ -93,6 +94,7 @@ pub(crate) fn spawn_preview_root(
         false,
         super::batch_strategy::BatchStrategy::Spatial,
         false,
+        &HashSet::new(),
     );
     // 每个实体单独写入租用层：`RenderLayers` 不随层级继承，缺省层（0）会被主画布相机看到。
     let layers = RenderLayers::from_layers(&[layer]);
@@ -125,6 +127,7 @@ pub(super) fn spawn_v2(
     batched: bool,
     strategy: super::batch_strategy::BatchStrategy,
     overview: bool,
+    barriers: &HashSet<String>,
 ) -> ModelRoot {
     let root = commands
         .spawn((
@@ -163,7 +166,7 @@ pub(super) fn spawn_v2(
         .collect();
     // 总览片场把只做平移的父级分组平铺到根空间，按材质合并批次（draw call 优化）。
     let plans = if batched && strategy == super::batch_strategy::BatchStrategy::Spatial {
-        let planned = super::batching::plan(&specs, &opaque, &Default::default(), overview);
+        let planned = super::batching::plan(&specs, &opaque, &Default::default(), overview, barriers);
         super::batching::apply_flatten(&mut specs, &planned.flatten);
         planned.plans
     } else {

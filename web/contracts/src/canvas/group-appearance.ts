@@ -22,8 +22,7 @@ export const GROUP_APPEARANCE_SCHEMA_VERSION = 1 as const;
  * 默认组形象：一个打开的文件夹。
  *
  * 标签页与后板表达「容器」，略向前倾的前袋和夹在两层之间露出的浅色纸张表达「装着内容」。
- * 全部由 box 组成、固定配色、无动画。默认放置再绕 Y 轴转 30°，让文件夹正面基本朝向画布
- * 镜头；否则正面与等距相机成 45°，徽标里只剩斜板的侧影。
+ * 全部由 box 组成、固定配色、无动画。组形象不额外旋转：与等距网格共用世界轴。
  */
 export const DEFAULT_GROUP_APPEARANCE_SCRIPT = `scene.group({ id: "group-root" });
 scene.material({ id: "group-folder-shell", baseColor: "#65b7c6", roughness: 0.55, metallic: 0.08 });
@@ -34,13 +33,6 @@ scene.box({ id: "group-folder-tab", parent: "group-root", position: [-0.72, 1.28
 scene.box({ id: "group-folder-paper-back", parent: "group-root", position: [0.03, 0.55, 0.03], size: [1.9, 1.0, 0.06], material: "group-folder-paper" });
 scene.box({ id: "group-folder-paper-front", parent: "group-root", position: [-0.05, 0.47, 0.1], size: [1.72, 0.88, 0.06], material: "group-folder-paper" });
 scene.box({ id: "group-folder-pocket", parent: "group-root", position: [0, 0.35, 0.27], rotation: [-6, 0, 0], size: [2.52, 0.66, 0.16], material: "group-folder-shell" });`;
-
-/** 默认组形象的放置：只增加 30° 偏转，让文件夹正面基本朝向画布镜头。 */
-const DEFAULT_GROUP_APPEARANCE_PLACEMENT: ModelPlacement = {
-  ...DEFAULT_MODEL_PLACEMENT,
-  offset: { ...DEFAULT_MODEL_PLACEMENT.offset },
-  yaw: 30,
-};
 
 export type GroupAppearance = {
   schemaVersion: typeof GROUP_APPEARANCE_SCHEMA_VERSION;
@@ -62,7 +54,7 @@ function modelFromScript(modelScript: string, revision = 1): ModelDefinition {
     modelScript,
     modelScriptLanguage: "javascript",
     modelScriptVersion: MODEL_SCRIPT_V2_VERSION,
-    placement: DEFAULT_GROUP_APPEARANCE_PLACEMENT,
+    placement: DEFAULT_MODEL_PLACEMENT,
     revision,
   });
   return {
@@ -70,10 +62,7 @@ function modelFromScript(modelScript: string, revision = 1): ModelDefinition {
     modelScriptLanguage: "javascript",
     modelScriptVersion: MODEL_SCRIPT_V2_VERSION,
     contentVersion: normalized,
-    placement: {
-      ...DEFAULT_GROUP_APPEARANCE_PLACEMENT,
-      offset: { ...DEFAULT_GROUP_APPEARANCE_PLACEMENT.offset },
-    },
+    placement: { ...DEFAULT_MODEL_PLACEMENT, offset: { ...DEFAULT_MODEL_PLACEMENT.offset } },
   };
 }
 

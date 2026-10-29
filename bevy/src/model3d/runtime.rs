@@ -399,6 +399,7 @@ pub(crate) fn sync_models(
                 group,
                 quality,
                 overview,
+                batched,
             );
             continue;
         }

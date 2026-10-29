@@ -157,7 +157,13 @@ pub(super) fn prepare(
     // 1) 既有合批规划：与同步创建同一算法、同一输入。
     // 总览片场把只做平移的父级分组平铺到根空间，按材质合并批次（draw call 优化）。
     let plans = if batched && strategy == BatchStrategy::Spatial {
-        let planned = batching::plan(&specs, &opaque, &Default::default(), overview);
+        let planned = batching::plan(
+            &specs,
+            &opaque,
+            &Default::default(),
+            overview,
+            &std::collections::HashSet::new(),
+        );
         batching::apply_flatten(&mut specs, &planned.flatten);
         planned.plans
     } else {

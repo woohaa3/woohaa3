@@ -188,7 +188,26 @@ fn pure_preparation_matches_sync_spawn_for_every_spec_kind() {
         true,
     )
     .expect("prepared");
-    let specs = super::super::scene::build_entity_specs(&snapshot);
+    let mut specs = super::super::scene::build_entity_specs(&snapshot);
+    // 总览档把只做平移的父级平铺到根空间；准备好的部件 transform 必须与同一份平铺结果
+    // 一致（2026-10-28 draw call 优化引入的 flatten 语义）。
+    let material_specs = super::super::scene::collect_materials(&snapshot);
+    let opaque: std::collections::HashSet<String> = specs
+        .iter()
+        .filter(|spec| {
+            super::super::scene::standard_material_for(&spec.material_key, &material_specs).alpha_mode
+                == bevy::material::AlphaMode::Opaque
+        })
+        .map(|spec| spec.material_key.clone())
+        .collect();
+    let planned = super::super::batching::plan(
+        &specs,
+        &opaque,
+        &Default::default(),
+        true,
+        &std::collections::HashSet::new(),
+    );
+    super::super::batching::apply_flatten(&mut specs, &planned.flatten);
     // 部件范围：批次合并的 + 未合并的 = 原始 specs（无需构建的部件除外）。
     assert_eq!(
         prepared.parts.len() + prepared.batched_part_count,
