@@ -85,8 +85,8 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
       label: descriptor.label,
       enabled: descriptor.enabled,
       ...(descriptor.tone ? { tone: descriptor.tone } : {}),
-      ...(descriptor.icon === "download" ? { icon: descriptor.icon } : {}),
-      ...(descriptor.iconOnly && descriptor.icon === "download" ? { iconOnly: true } : {}),
+      ...(icon ? { icon } : {}),
+      ...(descriptor.iconOnly && icon ? { iconOnly: true } : {}),
       ...(menu ? { menu: true } : {})
     });
     owners.set(contribution.id, contribution);

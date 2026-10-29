@@ -12,7 +12,6 @@
  * 现在表面只在这里描述，加载骨架与真实面板共用同一份判断与同一套 DOM 结构。
  */
 import { useEffect, useRef, type ReactNode } from "react";
-import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
 import { layoutNodePanel, usableCanvasArea, type AnchoredPanel } from "./node-anchor-layout.js";
@@ -64,9 +63,13 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       const fixtureArea = dock?.closest<HTMLElement>("[data-node-anchor-area]") ?? null;
       const areaElement = fixtureArea ?? canvas;
       const state = woohaa3CanvasStore.getState();
-      const badge = workingCanvasOf(state)?.document.nodes.find(node => node.id === nodeId)?.type === "group"
-        ? runtime.nodePresentationScreenRect?.(nodeId) : null;
-      const node = badge ?? runtime.nodePresentationScreenRect?.(nodeId) ?? runtime.nodeScreenRect(nodeId);
+      const current = workingCanvasOf(state) ?? state.canvas;
+      const groupNode = current?.document.nodes.find(node => node.id === nodeId && node.type === "group");
+      // 组面板锚在外部 3D 徽标**下缘**：徽标矩形由运行时按渲染矩形（成员布局尺寸）与当前
+      // 视口倍率派生，与 Bevy 绘制同源。退回气泡主体会把面板压在徽标上。
+      const presentation = runtime.nodePresentationScreenRect?.(nodeId) ?? null;
+      const badge = groupNode ? presentation : null;
+      const node = presentation ?? runtime.nodeScreenRect(nodeId);
       if (!dock || !areaElement || !node) {
         if (dock) {
           dock.style.visibility = "hidden";
@@ -76,7 +79,7 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       }
       const bounds = areaElement.getBoundingClientRect();
       const area = usableCanvasArea({ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, fixtureArea ? [] : visibleOcclusions());
-      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, "auto");
+      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, badge ? "below" : "auto");
       if (!next) {
         dock.style.visibility = "hidden";
         dock.removeAttribute("data-placement");
