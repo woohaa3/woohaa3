@@ -111,9 +111,13 @@ export function installShotReferenceRecording(
         }
         // 即使被取消也交回真实结论：录制在取消信号到达前已发布资产时 `result.ok` 为真，
         // 此时静默丢弃会让活动投影把它算成「取消」，而画布上的参考视频其实已就绪。
-        activity?.finish(job, result);
+        // 页面已释放时不再发布活动（失活 context 不能再解析页面服务）。
+        if (!disposed) activity?.finish(job, result);
         return result;
       };
+
+  /** 页面释放标记：异步录制收尾晚于 scope 释放时，不得再解析页面服务。 */
+  let disposed = false;
 
   /** 把已 ready 的镜头版本冻结登记到权威画布（幂等）。 */
   let lastFreezeError = "";
@@ -158,6 +162,7 @@ export function installShotReferenceRecording(
     // 录制状态不属于画布内容，invalidate 会连带触发模型场景重算与画布投影更新，又回到
     // `canvasState.subscribe(reconcile)`，在任何失败录制存在时形成永不停止的重试环。
     onStateChange: () => {
+      if (disposed) return;
       applyFreeze();
       const snapshot = scheduler.snapshot();
       // 进行中的 job 不能因为「暂时不在 dirty」就被标成取消：录制成功后发布资产会先让 job
@@ -167,6 +172,7 @@ export function installShotReferenceRecording(
   });
 
   const reconcile = () => {
+    if (disposed) return;
     hydrateCache();
     scheduler.reconcile();
     applyFreeze();
@@ -184,13 +190,17 @@ export function installShotReferenceRecording(
   return {
     scheduler,
     cache,
-    requestRecord: (filmSetNodeId, clipId) => scheduler.requestRecord(filmSetNodeId, clipId),
+    requestRecord: (filmSetNodeId, clipId) => {
+      if (!disposed) scheduler.requestRecord(filmSetNodeId, clipId);
+    },
     readyAsset(filmSetNodeId, clipId, contentIdentity) {
       const canvasId = ctx.canvasState.getCanvas()?.id ?? "";
       if (!canvasId) return null;
       return cache.readyAsset({ canvasId, filmSetNodeId, clipId, contentIdentity, profileKey: SHOT_REFERENCE_PROFILE_KEY });
     },
     dispose() {
+      if (disposed) return;
+      disposed = true;
       document.removeEventListener("visibilitychange", onVisibility);
       unsubscribeCanvas();
       unsubscribeNavigation();

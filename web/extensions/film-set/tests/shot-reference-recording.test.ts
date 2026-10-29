@@ -435,4 +435,26 @@ describe("ShotReferenceRecordingScheduler 失败后的有界自动重试", () =>
     recording.scheduler.dispose();
     expect(recording.timers[0]!.canceled).toBe(true);
   });
+
+  it("录制进行中释放页面：迟到的收尾不再通知接线层", async () => {
+    // 切换画布时页面 scope 会先释放；录制仍可能在途。收尾通知会去解析已失活的
+    // `canvasSession`（cannot get required service ... in inactive context），因此
+    // dispose 之后的 notify 必须整体跳过。
+    let notifications = 0;
+    let finish!: (result: { ok: true }) => void;
+    const scheduler = new ShotReferenceRecordingScheduler({
+      canvasId: () => "c1",
+      canvas: () => filmSetCanvas() as never,
+      focusedFilmSetId: () => null,
+      recorder: () => new Promise((resolve) => { finish = resolve; }),
+      onStateChange: () => { notifications += 1; }
+    });
+    scheduler.reconcile();
+    await Promise.resolve();
+    const beforeDispose = notifications;
+    scheduler.dispose();
+    finish({ ok: true });
+    await settle();
+    expect(notifications).toBe(beforeDispose);
+  });
 });

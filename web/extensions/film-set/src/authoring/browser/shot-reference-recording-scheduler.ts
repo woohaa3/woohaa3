@@ -225,6 +225,9 @@ export class ShotReferenceRecordingScheduler {
   }
 
   private notify(): void {
+    // 录制是异步的：页面释放时 `pump` 的收尾仍会走到这里。释放后的通知没有消费者，
+    // 继续回调只会让接线层去解析已失活的页面服务（canvasSession 等）。
+    if (this.disposed) return;
     this.deps.onStateChange?.();
   }
 }
