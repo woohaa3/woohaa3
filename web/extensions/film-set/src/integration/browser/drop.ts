@@ -39,6 +39,9 @@ export function extendFilmSetDrop(ctx: FilmSetContext): () => void {
       const result = resolveFilmSetDrop(input.canvas, input.sourceNodeIds, input.targetNodeId);
       if (!result) { report("无法解析片场拖入目标"); return true; }
       if (!result.ok) { report(result.reason); return true; }
+      // 软摘除对象拖回：不导入副本，交回普通组移动；拖动规划器会在同一批次
+      // 清除 binding.detached，保留原动作脚本。
+      if ("reattach" in result) return false;
       if (!ctx.canvasSession.isWritable()) { report("当前会话不可写，无法导入片场"); return true; }
       const plan = planFilmSetImportCommand({ canvas: input.canvas, target: result.target, now: new Date().toISOString() });
       if (!plan.ok) { report(`无法导入片场：${plan.reason}`); return true; }

@@ -1,5 +1,5 @@
 /** Disposable geometry projection: sources own their scripts, bindings own placement. */
-import { contentKeyForFilmSetGroupSource, prepareFilmSetGroup, readFilmSetGroupMarker } from "./film-set-group.js";
+import { activeFilmSetSceneBindings, contentKeyForFilmSetGroupSource, prepareFilmSetGroup, readFilmSetGroupMarker } from "./film-set-group.js";
 import { composeFilmSetScene, type FilmSetCompositionModel } from "./film-set-composition.js";
 import { executeModelScriptVersioned } from "./model-executor-v2.js";
 import { decodeModelDefinition } from "./model-definition.js";
@@ -24,7 +24,7 @@ export const filmSetGroupModelPreparation: NodeModelPreparation = {
   executionKey: ({ canvas, data }) => {
     const marker = readFilmSetGroupMarker(data);
     if (!marker) return undefined;
-    return JSON.stringify([marker.ground, marker.sceneBindings.map(binding => {
+    return JSON.stringify([marker.ground, activeFilmSetSceneBindings(marker).map(binding => {
       const source = canvas.nodeData[binding.sourceNodeId];
       return [binding.bindingId, binding.sourceNodeId, binding.kind, binding.contentKey, contentKeyForFilmSetGroupSource(canvas, binding.sourceNodeId), source?.modelScript, source?.modelScriptVersion, source?.modelContentVersion, source?.modelPlacement];
     })]);
@@ -43,7 +43,7 @@ export const filmSetGroupModelPreparation: NodeModelPreparation = {
       models.push({ itemId: binding.bindingId, ops: execution.scene.ops, placement: model.value.placement, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } });
     }
     const ready = new Set(models.map(model => model.itemId));
-    for (const binding of prepared.marker.sceneBindings) {
+    for (const binding of activeFilmSetSceneBindings(prepared.marker)) {
       const failed = prepared.diagnostics.some(diagnostic => diagnostic.bindingId === binding.bindingId)
         || (binding.kind === "model3d" && !ready.has(binding.bindingId));
       if (!failed) continue;

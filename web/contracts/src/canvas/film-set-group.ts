@@ -43,6 +43,14 @@ export type FilmSetGroupSceneBinding = {
   kind: FilmSetGroupBindingKind;
   transform: FilmSetGroupTransform;
   visibility: boolean;
+  /**
+   * The source card was dragged out of this film set. The binding and its object
+   * animation stay here so dragging the card back restores the same object state,
+   * but detached bindings do not participate in rendering, shots, focus or
+   * residency. Only a binding that was already owned by this group can become
+   * detached; forged bindings to outside sources are still rejected.
+   */
+  detached?: boolean;
   /** Group-owned object animation; geometry remains on the source card. */
   animation?: { motion: MotionDefinition; playback: ModelMediaTimeMap };
   /** Strict identity of the source content at the last successful prepare. */
@@ -144,6 +152,7 @@ function decodeBinding(input: unknown): FilmSetGroupSceneBinding | null {
     if (!motion.ok || !finite(p.startTime) || p.startTime < 0 || !finite(p.duration) || p.duration <= 0 || !finite(p.timeScale) || p.timeScale <= 0 || typeof p.loop !== "boolean") return null;
     animation = { motion: motion.value, playback: { startTime: p.startTime, duration: p.duration, timeScale: p.timeScale, loop: p.loop } };
   }
+  if (input.detached !== undefined && typeof input.detached !== "boolean") return null;
   return {
     ...(animation ? { animation } : {}),
     bindingId: input.bindingId,
@@ -152,6 +161,7 @@ function decodeBinding(input: unknown): FilmSetGroupSceneBinding | null {
     kind: input.kind as FilmSetGroupBindingKind,
     transform,
     visibility: input.visibility,
+    ...(input.detached === true ? { detached: true } : {}),
     contentKey: input.contentKey
   };
 }
@@ -237,6 +247,15 @@ export function isFilmSetGroupNode(node: Pick<Woohaa3CanvasSerializedNode, "type
   return node?.type === "group" && decodeFilmSetGroupMarker(object(data) ? data[FILM_SET_GROUP_FIELD] : undefined).ok;
 }
 
+/** Binding participates in the scene; detached bindings keep dormant object state only. */
+export function isActiveFilmSetBinding(binding: Pick<FilmSetGroupSceneBinding, "detached">): boolean {
+  return binding.detached !== true;
+}
+
+export function activeFilmSetSceneBindings(marker: Pick<FilmSetGroupMarker, "sceneBindings">): FilmSetGroupSceneBinding[] {
+  return marker.sceneBindings.filter(isActiveFilmSetBinding);
+}
+
 export function readFilmSetGroupMarker(data: unknown): FilmSetGroupMarker | null {
   const decoded = decodeFilmSetGroupMarker(object(data) ? data[FILM_SET_GROUP_FIELD] : undefined);
   return decoded.ok ? decoded.value : null;
@@ -271,7 +290,7 @@ function isDescendantOf(canvas: ServerCanvas, sourceId: string, groupId: string)
   return false;
 }
 
-export function validateFilmSetGroupBindings(canvas: ServerCanvas, groupId: string, marker: FilmSetGroupMarker, missingSourceIds: ReadonlySet<string> = new Set()): string | null {
+export function validateFilmSetGroupBindings(canvas: ServerCanvas, groupId: string, marker: FilmSetGroupMarker, missingSourceIds: ReadonlySet<string> = new Set(), previouslyOwnedBindings?: readonly FilmSetGroupSceneBinding[]): string | null {
   const group = canvas.document.nodes.find(node => node.id === groupId);
   if (!group || group.type !== "group") return "片场 group 不存在或类型非法";
   const sources = new Map(canvas.document.nodes.map(node => [node.id, node]));
@@ -281,7 +300,15 @@ export function validateFilmSetGroupBindings(canvas: ServerCanvas, groupId: stri
       if (missingSourceIds.has(binding.sourceNodeId)) continue;
       return `binding ${binding.bindingId} 的 sourceNodeId 不存在`;
     }
-    if (!isDescendantOf(canvas, source.id, groupId)) return `binding ${binding.bindingId} 的来源必须属于片场 group`;
+    if (!isDescendantOf(canvas, source.id, groupId)) {
+      // Drag-out is a soft detach: the binding (and its object animation) stays
+      // owned by this film set while the source card lives outside the group.
+      // Only a binding that already belonged to this film set may take this
+      // state; a forged binding to an outside source is still rejected.
+      if (binding.detached === true && (previouslyOwnedBindings === undefined
+        || previouslyOwnedBindings.some(previous => previous.bindingId === binding.bindingId && previous.sourceNodeId === binding.sourceNodeId))) continue;
+      return `binding ${binding.bindingId} 的来源必须属于片场 group`;
+    }
     if (source.type !== binding.kind) return `binding ${binding.bindingId} 的 kind 与来源类型不匹配`;
   }
   return null;
@@ -320,7 +347,7 @@ export function prepareFilmSetGroup(canvas: ServerCanvas, groupId: string): Film
   const nodes = new Map(canvas.document.nodes.map(node => [node.id, node]));
   const bindings: FilmSetGroupPreparation["bindings"] = [];
   const diagnostics: FilmSetGroupDiagnostic[] = [];
-  for (const binding of marker.sceneBindings) {
+  for (const binding of activeFilmSetSceneBindings(marker)) {
     const source = nodes.get(binding.sourceNodeId);
     if (!source) {
       diagnostics.push({ bindingId: binding.bindingId, sourceNodeId: binding.sourceNodeId, code: "missing-source", message: "来源资源卡片不存在，绑定已保留" });

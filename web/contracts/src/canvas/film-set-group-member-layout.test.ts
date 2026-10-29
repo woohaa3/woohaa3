@@ -111,6 +111,26 @@ describe("ensureFilmSetGroupMemberLayout", () => {
     expect(ensureFilmSetGroupMemberLayout(value).changed).toEqual([]);
   });
 
+  it("成员坐标相对 group：group 在画布远处不影响气泡内判断", () => {
+    // 迁移出来的 group 常有很远的绝对坐标（例如 x=-407.5, y=10823），成员却是 40,40 的本地坐标。
+    const value = filmSet([member("a", { x: 40, y: 40 })], {
+      group: { position: { x: -407.5, y: 10823 }, width: 1000, height: 900 }
+    });
+    const result = ensureFilmSetGroupMemberLayout(value);
+    expect(result.changed).toEqual([]);
+    expect(result.canvas).toBe(value);
+  });
+
+  it("非零 group 位置下重排后仍然幂等", () => {
+    const first = ensureFilmSetGroupMemberLayout(filmSet([member("a", { x: -1660, y: -900 })], {
+      group: { position: { x: -1664.25, y: 2452.5 } }
+    }));
+    expect(first.changed).toEqual(["film"]);
+    const second = ensureFilmSetGroupMemberLayout(first.canvas);
+    expect(second.changed).toEqual([]);
+    expect(second.canvas).toBe(first.canvas);
+  });
+
   it("手搭的片场 group（没有迁移标记）完全不动", () => {
     const value = filmSet([member("a", { x: -1060, y: -917 })], { migrated: false });
     expect(ensureFilmSetGroupMemberLayout(value).changed).toEqual([]);

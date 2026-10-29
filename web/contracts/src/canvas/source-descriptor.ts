@@ -2,7 +2,7 @@ import type { ServerCanvas, StoredAsset } from "./domain/types.js";
 import { isFilmSetNode } from "./domain/core/composite-asset-identity.js";
 import { readFilmSetContent } from "./film-set-content.js";
 import { fnv1a64Hex } from "./content-hash.js";
-import { readFilmSetGroupMarker } from "./film-set-group.js";
+import { activeFilmSetSceneBindings, readFilmSetGroupMarker } from "./film-set-group.js";
 
 /** 只描述规范来源及显式稳定引用，不抓取 URL、不推断未知插件内部格式。 */
 export type CanvasSourceDescriptor = {
@@ -32,7 +32,7 @@ export function describeCanvasSource(canvas: ServerCanvas, nodeId: string): Canv
   }
   const groupMarker = readFilmSetGroupMarker(data);
   if (groupMarker) {
-    for (const binding of groupMarker.sceneBindings) {
+    for (const binding of activeFilmSetSceneBindings(groupMarker)) {
       const source = canvas.document.nodes.find(entry => entry.id === binding.sourceNodeId);
       if (!source) continue;
       const sourceData = canvas.nodeData[source.id] as Record<string, unknown> | undefined;

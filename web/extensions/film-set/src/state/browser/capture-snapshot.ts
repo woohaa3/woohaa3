@@ -1,4 +1,4 @@
-import { readFilmSetGroupMarker, shotPreviewOwnershipOf, type ServerCanvas } from "@woohaa3/contracts";
+import { activeFilmSetSceneBindings, readFilmSetGroupMarker, shotPreviewOwnershipOf, type ServerCanvas } from "@woohaa3/contracts";
 import type { FilmSetHostContext } from "./host-ports.js";
 
 type Snapshot = { canvas: ServerCanvas; ids: Set<string> };
@@ -29,7 +29,7 @@ export function pinFilmSetCapture(ctx: FilmSetHostContext, nodeId: string, sourc
   const marker = readFilmSetGroupMarker(projected.nodeData[nodeId]);
   if (!marker) throw new Error("片场分组不存在");
   if (captures.has(owner)) throw new Error("已有片场捕捉正在进行");
-  const ids = new Set([nodeId, ...marker.sceneBindings.map(binding => binding.sourceNodeId)]);
+  const ids = new Set([nodeId, ...activeFilmSetSceneBindings(marker).map(binding => binding.sourceNodeId)]);
   for (const node of projected.document.nodes) {
     if (shotPreviewOwnershipOf(projected.nodeData[node.id])?.filmSetNodeId === nodeId) ids.add(node.id);
   }

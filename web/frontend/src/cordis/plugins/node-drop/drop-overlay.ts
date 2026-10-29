@@ -4,9 +4,10 @@
  *  change: 2026-10-18-restrict-film-set-drop-to-models）。
  *
  * 拖动期间按 **accepted** 范围几何绘制提示：复合资产菱形用 SVG polygon 描边（四顶点经统一
- * `worldToClient` 转换），其它复合资产（含炉体）的平行四边形同样来自同一公式。目标 identity 由 accepted `queryDropTarget`
- * 固定；查询不可用时隐藏全部提示，**不**回退 TS 矩形几何或猜测目标。接收方声明
- * `acceptsSources` 且这批来源不被接收时，该目标不绘制提示（例如片场不再接收图片/视频）。
+ * `worldToClient` 转换），其它复合资产（含炉体）的平行四边形同样来自同一公式。展开 group 的
+ * 徽标也作为 accepted 范围条目；命中最上层成员卡片时点亮它的容器。目标 identity 由 accepted
+ * `queryDropTarget` 固定；查询不可用时隐藏全部提示，**不**回退 TS 矩形几何或猜测目标。接收方
+ * 声明 `acceptsSources` 且这批来源不被接收时，该目标不绘制提示（例如片场不再接收图片/视频）。
  *
  * 反馈状态（active/reject/unavailable）与文案保持既有语义；本模块不拦截指针输入。
  */
@@ -46,10 +47,14 @@ export function createNodeDropOverlay(deps: NodeDropOverlayDeps) {
       const targetResult = deps.queryDropTarget(drag.point, drag.sourceNodeIds);
       const activeId = targetResult.ok ? targetResult.value : null;
       const visible = new Set<string>();
+      const byId = new Map(canvas.document.nodes.map((entry) => [entry.id, entry]));
       for (const scope of scopesResult.value) {
         if (excluded.has(scope.nodeId)) continue;
-        const node = canvas.document.nodes.find((entry) => entry.id === scope.nodeId);
+        const node = byId.get(scope.nodeId);
         if (!node) continue;
+        // 来源全部已经在目标 group 里：松手是组内移动，不是拖入复制，不绘制接收提示。
+        if (node.type === "group" && drag.sourceNodeIds.length > 0
+          && drag.sourceNodeIds.every((id) => isDescendantOf(byId, id, scope.nodeId))) continue;
         let owners: NodeDropTarget[] = [];
         try {
           owners = targets.filter((target) => target.nodeType === node.type
@@ -92,7 +97,10 @@ export function createNodeDropOverlay(deps: NodeDropOverlayDeps) {
         for (const key of ["left", "top", "width", "height"] as const) {
           if (element.container.style[key] !== style[key]) element.container.style[key] = style[key];
         }
-        const active = activeId === scope.nodeId;
+        // 命中成员卡片时，接收方实际上是它的容器（如片场 group）：提示应点亮容器范围，
+        // 而不是因为最上层 identity 是成员就熄灭。
+        const active = activeId !== null && (activeId === scope.nodeId
+          || isDescendantOf(byId, activeId, scope.nodeId));
         const feedback = active
           ? previewNodeDrop(targets, canvas, drag.sourceNodeIds, { status: "target", nodeId: scope.nodeId })
           : null;
@@ -111,6 +119,22 @@ export function createNodeDropOverlay(deps: NodeDropOverlayDeps) {
       if (!elements.size) clear();
     },
   };
+}
+
+function isDescendantOf(
+  byId: ReadonlyMap<string, { parentId?: string }>,
+  nodeId: string,
+  ancestorId: string
+): boolean {
+  const seen = new Set<string>([nodeId]);
+  let current = byId.get(nodeId);
+  while (current?.parentId) {
+    if (current.parentId === ancestorId) return true;
+    if (seen.has(current.parentId)) return false;
+    seen.add(current.parentId);
+    current = byId.get(current.parentId);
+  }
+  return false;
 }
 
 function createElement(nodeId: string): OverlayElement {

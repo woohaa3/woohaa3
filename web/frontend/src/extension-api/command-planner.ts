@@ -10,6 +10,7 @@
  */
 import {
   bevyNodeSize,
+  createFilmSetGroupMarker,
   createHighEntropyId,
   createWoohaa3CanvasNodeId,
   COMPOSITE_ASSET_DEFAULT_SIZE,
@@ -18,11 +19,13 @@ import {
   groupWoohaa3CanvasNodes,
   isPureModelNodeType,
   isValidWoohaa3CanvasConnection,
+  readFilmSetGroupMarker,
   refitWoohaa3CanvasGroups,
   sortNodesParentsFirst,
   ungroupWoohaa3CanvasNodes,
   type CanvasCommand,
   type CanvasNodeData,
+  type ServerCanvas,
   type Woohaa3CanvasEdge,
   type Woohaa3CanvasJsonObject,
   type Woohaa3CanvasNode,
@@ -258,6 +261,64 @@ export function planGroupedNodeUpdate(
   next: readonly Woohaa3CanvasNode[]
 ): CanvasCommand[] {
   return planGroupStructureChange(nodes, next);
+}
+
+function isDescendantIn(nodes: ReadonlyMap<string, Woohaa3CanvasNode>, nodeId: string, ancestorId: string): boolean {
+  const seen = new Set<string>();
+  let current = nodes.get(nodeId);
+  while (current?.parentId) {
+    if (current.parentId === ancestorId) return true;
+    if (seen.has(current.parentId)) return false;
+    seen.add(current.parentId);
+    current = nodes.get(current.parentId);
+  }
+  return false;
+}
+
+/**
+ * 片场成员拖出/拖回 → binding 的软摘除状态补丁（change 见 film-set-group 的 detached 约定）。
+ *
+ * 拖出时只改变 `parentId`，不复制或删除卡片；这里在同一批次把片场 binding 标为
+ * `detached`，让对象与动作脚本留在片场但不参与渲染/镜头。拖回时清除标记，原动作恢复。
+ * 只有原本属于该片场的 binding 才会被切换，伪造的外部来源仍由 reducer 拒绝。
+ */
+export function planFilmSetMembershipCommands(
+  canvas: Pick<ServerCanvas, "document" | "nodeData">,
+  before: readonly Woohaa3CanvasNode[],
+  after: readonly Woohaa3CanvasNode[]
+): CanvasCommand[] {
+  const beforeById = new Map(before.map(node => [node.id, node]));
+  const afterById = new Map(after.map(node => [node.id, node]));
+  const commands: CanvasCommand[] = [];
+  for (const group of after) {
+    if (group.type !== "group") continue;
+    const marker = readFilmSetGroupMarker(canvas.nodeData[group.id]);
+    if (!marker) continue;
+    let changed = false;
+    const sceneBindings = marker.sceneBindings.map(binding => {
+      const source = afterById.get(binding.sourceNodeId) ?? beforeById.get(binding.sourceNodeId);
+      if (!source) return binding;
+      const wasInside = isDescendantIn(beforeById, source.id, group.id);
+      const isInside = isDescendantIn(afterById, source.id, group.id);
+      if (wasInside && !isInside && binding.detached !== true) {
+        changed = true;
+        return { ...binding, detached: true };
+      }
+      if (isInside && binding.detached === true) {
+        changed = true;
+        const { detached: _detached, ...active } = binding;
+        return active;
+      }
+      return binding;
+    });
+    if (!changed) continue;
+    commands.push({
+      type: "nodeData.patch",
+      nodeId: group.id,
+      value: { filmSetGroup: createFilmSetGroupMarker({ ...marker, sceneBindings }) }
+    });
+  }
+  return commands;
 }
 
 /** 让指定 group 贴合其直接成员 → 单批次结构更新。 */

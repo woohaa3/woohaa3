@@ -1,5 +1,6 @@
 import { planCanvasEdit } from "./edit-plan.js";
 import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
+import { readFilmSetContentForSession } from "./film-set-group-projection.js";
 import { filmSetClipPrecondition } from "./film-set-clip-ops.js";
 import { filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { staticShotCameraMotion } from "./film-set-animations.js";
@@ -62,6 +63,64 @@ describe("film-set group contract", () => {
     expect(before.nodeData.group.filmSetGroup?.sceneBindings[0]?.animation).toBeUndefined();
     const forged = applyCanvasCommands(before, [{ type: "nodeData.patch", nodeId: "group", value: { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "bad", sourceNodeId: "outside", kind: "model3d", transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 }, visibility: true, contentKey: "k" }] }) } }]);
     expect(forged.ok).toBe(false);
+    // 伪造 detached binding：来源真实存在且类型匹配，但从未属于该片场，仍拒绝。
+    before.document.nodes.push({ id: "outside", type: "model3d", position: { x: 700, y: 0 } });
+    before.nodeData.outside = { modelScript: "scene.box({ id: 'outside' });", modelContentVersion: { contentHash: "v-outside" } };
+    const forgedDetached = applyCanvasCommands(before, [{ type: "nodeData.patch", nodeId: "group", value: { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "bad", sourceNodeId: "outside", kind: "model3d", transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 }, visibility: true, contentKey: "k", detached: true }] }) } }]);
+    expect(forgedDetached.ok).toBe(false);
+    if (!forgedDetached.ok) expect(forgedDetached.rejection.message).toContain("来源必须属于片场 group");
+  });
+
+  it("soft-detaches an owned binding when its card leaves and restores it when the card returns", () => {
+    const value = canvas();
+    value.document.nodes.push(
+      { id: "group", type: "group", position: { x: 0, y: 0 }, width: 600, height: 400 },
+      { id: "model", type: "model3d", parentId: "group", position: { x: 20, y: 20 } },
+    );
+    const motion = {
+      motionScript: "motion.model.rotate('root', { speed: 1 });",
+      motionScriptLanguage: "javascript" as const,
+      motionScriptVersion: "woohaa-motion-js-v1" as const,
+      revision: 1,
+      sourceHash: "motion-v1",
+      basedOnModelVersion: { revision: 1, contentHash: "model-v1" }
+    };
+    const playback = { startTime: 0, duration: 2, timeScale: 1, loop: false };
+    const marker = createFilmSetGroupMarker({
+      sceneBindings: [{ bindingId: "binding", sourceNodeId: "model", kind: "model3d", transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 }, visibility: true, contentKey: "model3d:v1", animation: { motion, playback } }],
+      clips: [{ id: "shot", name: "镜头", duration: 2, cameraMotion: staticShotCameraMotion(), bindings: [{ itemId: "binding", motion, playback }] }]
+    });
+    value.nodeData.group = { filmSetGroup: marker };
+    value.nodeData.model = { title: "模型", modelScript: "scene.box({ id: 'root' });", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: "s1", contentHash: "model-v1" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
+
+    // 拖出不带 detached 补丁仍被拒绝。
+    expect(applyCanvasCommands(value, [{ type: "node.update", nodeId: "model", parentId: null }]).ok).toBe(false);
+
+    const detachedMarker = createFilmSetGroupMarker({ ...marker, sceneBindings: marker.sceneBindings.map(binding => ({ ...binding, detached: true })) });
+    const out = applyCanvasCommands(value, [
+      { type: "node.update", nodeId: "model", parentId: null, position: { x: 700, y: 500 } },
+      { type: "nodeData.patch", nodeId: "group", value: { filmSetGroup: detachedMarker } }
+    ]);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.canvas.document.nodes.find(node => node.id === "model")?.parentId).toBeUndefined();
+    expect(out.canvas.nodeData.group.filmSetGroup?.sceneBindings[0]?.detached).toBe(true);
+    expect(out.canvas.nodeData.group.filmSetGroup?.sceneBindings[0]?.animation?.motion.motionScript).toBe(motion.motionScript);
+    // 软摘除后内容、镜头与预览投影都不再包含该对象，但片场保存的动作仍在。
+    expect(readFilmSetContentForSession(out.canvas, "group").items).toHaveLength(0);
+    expect(readFilmSetAnimationProjection(out.canvas, "group")?.filmSetContent.items).toHaveLength(0);
+    expect(out.canvas.nodeData.group.filmSetGroup?.clips?.[0]?.bindings).toHaveLength(1);
+
+    const back = applyCanvasCommands(out.canvas, [
+      { type: "node.update", nodeId: "model", parentId: "group", position: { x: 20, y: 20 } },
+      { type: "nodeData.patch", nodeId: "group", value: { filmSetGroup: marker } }
+    ]);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.canvas.nodeData.group.filmSetGroup?.sceneBindings[0]?.detached).toBeUndefined();
+    expect(readFilmSetContentForSession(back.canvas, "group").items).toHaveLength(1);
+    const restored = readFilmSetAnimationProjection(back.canvas, "group");
+    expect(restored && filmSetAnimationsOf(restored).clips[0]?.bindings?.[0]?.motion?.motionScript).toBe(motion.motionScript);
   });
 
   it("validates group-owned animation without copying source geometry", () => {

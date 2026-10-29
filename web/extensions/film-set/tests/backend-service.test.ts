@@ -1,5 +1,5 @@
 import { checkAnimationMotion, readFilmSetAnimationProjection, prepareFilmSetGroup } from "@woohaa3/contracts";
-import { filmSetItemAdapterHash, resolveFilmSetClip } from "@woohaa3/contracts";
+import { createFilmSetGroupMarker, filmSetItemAdapterHash, readFilmSetGroupMarker, resolveFilmSetClip } from "@woohaa3/contracts";
 /**
  * 动画节点权威写入服务测试
  * （change: 2026-10-11-extract-film-set-extension，D7/D8/D9/D10 —— items-only）。
@@ -194,6 +194,33 @@ describe("FilmSetNodeService 导入与确认适配（任务 2.2 / 3.4 / D8/D10�
     expect(afterView.clip.bindings[0]?.motion?.basedOnModelVersion.contentHash).not.toBe(
       importedItem.model.contentVersion.contentHash
     );
+  });
+
+  it("保存片场时保留被拖出对象的 detached binding 与镜头动作", async () => {
+    const { room } = await createdAnimation();
+    const exported = room.exportCanvas();
+    if (!exported.ok) throw new Error(exported.message);
+    const marker = readFilmSetGroupMarker(exported.canvas.nodeData["anim-5"])!;
+    expect(marker.sceneBindings).toHaveLength(1);
+    const sourceNodeId = marker.sceneBindings[0]!.sourceNodeId;
+    const detachedMarker = createFilmSetGroupMarker({ ...marker, sceneBindings: marker.sceneBindings.map(binding => ({ ...binding, detached: true })) });
+    const detached = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas-import", actorId: "test", commandId: "detach", baseRevision: exported.canvas.revision, commands: [
+      { type: "node.update", nodeId: sourceNodeId, parentId: null, position: { x: 600, y: 400 } },
+      { type: "nodeData.patch", nodeId: "anim-5", value: { filmSetGroup: detachedMarker } }
+    ] });
+    expect(detached.ok, JSON.stringify(detached)).toBe(true);
+    const read = await serviceFor(room).readNodeFilmSet({ canvasId: "canvas-import", nodeId: "anim-5" });
+    if (!read.ok) throw new Error("read failed");
+    expect(read.animation.filmSetContent.items).toHaveLength(0);
+    const committed = await serviceFor(room).commitFilmSet({ canvasId: "canvas-import", requestId: "req-detached", nodeId: "anim-5", animation: read.animation });
+    expect(committed.ok, JSON.stringify(committed)).toBe(true);
+    if (!committed.ok) return;
+    const saved = room.exportCanvas();
+    if (!saved.ok) throw new Error(saved.message);
+    const savedMarker = readFilmSetGroupMarker(saved.canvas.nodeData["anim-5"])!;
+    expect(savedMarker.sceneBindings[0]?.detached).toBe(true);
+    expect(savedMarker.clips?.[0]?.bindings?.[0]?.itemId).toBe(savedMarker.sceneBindings[0]?.bindingId);
+    expect(savedMarker.clips?.[0]?.bindings?.[0]?.motion?.motionScript).toContain("motion.model");
   });
 
   it("stale source precondition 阻止覆盖并发修改", async () => {

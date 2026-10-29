@@ -1,6 +1,6 @@
 /** Film-set owns payload semantics and full clip production; the host sees only open content refs. */
 import {
-  filmSetAnimationsOf, readShotReferenceAssetLink,
+  activeFilmSetSceneBindings, filmSetAnimationsOf, readShotReferenceAssetLink,
   shotReferenceContentIdentity, shotImageReferenceIdentity, readyShotImageAsset,
   type MediaContentRef, type ServerCanvas, type StoredAsset,
 } from "@woohaa3/contracts";
@@ -28,7 +28,7 @@ export function shotMediaSource(canvas: ServerCanvas, ref: MediaContentRef, back
   if (!contentIdentity) throw Error("film-set.shot: 镜头内容不可用");
   return { mediaKind: clip.kind === "static" ? "image" as const : "video" as const,
     sourceIdentity: `${clip.kind}:${contentIdentity}:${still?.profileKey ?? SHOT_REFERENCE_PROFILE_KEY}`,
-    dependencyNodeIds: [filmSetNodeId, ...(canvas.nodeData[filmSetNodeId]?.filmSetGroup?.sceneBindings.map(binding => binding.sourceNodeId) ?? [])], filmSetNodeId, clipId, contentIdentity,
+    dependencyNodeIds: [filmSetNodeId, ...activeFilmSetSceneBindings(canvas.nodeData[filmSetNodeId]?.filmSetGroup ?? { sceneBindings: [] }).map(binding => binding.sourceNodeId)], filmSetNodeId, clipId, contentIdentity,
     profileKey: still?.profileKey ?? SHOT_REFERENCE_PROFILE_KEY, name: clip.name };
 }
 export function createShotMediaProvider(ctx: FilmSetHostContext, images: ShotImageReferences, recording: ShotReferenceRecordingController): MediaContentProvider {

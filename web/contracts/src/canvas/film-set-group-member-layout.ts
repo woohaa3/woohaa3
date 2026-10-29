@@ -65,6 +65,13 @@ export function planFilmSetMemberGrid(input: {
   };
 }
 
+/**
+ * 成员是否落在气泡外。
+ *
+ * `node.position` 是**相对 group** 的坐标（见 `getWoohaa3CanvasNodeAbsolutePosition`），
+ * 而 group 的 `position` 是画布绝对坐标。两者不能直接比较：气泡在成员坐标系里从原点开始，
+ * 否则 group 一旦不在画布原点，成员就永远被判成"在气泡外"，每次调用都重排一遍。
+ */
 function memberOutsideBubble(node: Woohaa3CanvasSerializedNode, bubble: { x: number; y: number; width: number; height: number }): boolean {
   const size = effectiveCanvasNodeSize(node);
   const tolerance = 0.5;
@@ -96,8 +103,9 @@ export function ensureFilmSetGroupMemberLayout(canvas: ServerCanvas): {
     const members = canvas.document.nodes.filter((node) => node.parentId === group.id);
     if (members.length === 0) continue;
     const bubble = {
-      x: group.position.x,
-      y: group.position.y,
+      // 成员坐标相对 group，气泡本地空间从原点开始（见 memberOutsideBubble）。
+      x: 0,
+      y: 0,
       width: group.width ?? 0,
       height: group.height ?? 0
     };

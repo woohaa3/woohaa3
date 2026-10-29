@@ -37,7 +37,7 @@ export function patchFilmSetGroupBinding(
   if (command.expectedContentKey !== undefined && binding.contentKey !== command.expectedContentKey) return reject("edit-precondition-failed", "片场资源版本已变化，请重新解析");
   const patched = patchFilmSetGroupBindingMarker(decoded.value, command.bindingId, command.patch);
   if (!patched.ok) return reject("invalid-film-set-group", patched.reason);
-  const validation = validateFilmSetGroupBindings(canvasFromWork(work), command.groupId, patched.value, new Set(decoded.value.sceneBindings.map(entry => entry.sourceNodeId)));
+  const validation = validateFilmSetGroupBindings(canvasFromWork(work), command.groupId, patched.value, new Set(decoded.value.sceneBindings.map(entry => entry.sourceNodeId)), decoded.value.sceneBindings);
   if (validation) return reject("invalid-film-set-group", validation);
   work.nodeData[command.groupId] = { ...(work.nodeData[command.groupId] ?? {}), [FILM_SET_GROUP_FIELD]: patched.value } as CanvasNodeData;
   return OK;
@@ -109,7 +109,7 @@ export function validateFilmSetGroupDataPatch(
   if (!work.nodes.some(entry => entry.id === nodeId)) return null;
   const previous = decodeFilmSetGroupMarker(work.nodeData[nodeId]?.filmSetGroup);
   const knownSources = new Set(previous.ok ? previous.value.sceneBindings.map(binding => binding.sourceNodeId) : []);
-  const validation = validateFilmSetGroupBindings(canvasFromWork(work), nodeId, decoded.value, knownSources);
+  const validation = validateFilmSetGroupBindings(canvasFromWork(work), nodeId, decoded.value, knownSources, previous.ok ? previous.value.sceneBindings : []);
   if (validation) return reject("invalid-film-set-group", validation);
   return null;
 }

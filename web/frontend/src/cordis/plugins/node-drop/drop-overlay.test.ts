@@ -107,6 +107,46 @@ it("skips destinations whose owner rejects the dragged sources (no receiving hin
   expect(film.dataset.active).toBe("true");
 });
 
+it("activates a container drop scope when the topmost identity is one of its members", () => {
+  const groupScope: CompositeAssetScopeGeometryEntry = {
+    nodeId: "group", shape: "rect",
+    vertices: [[100, 50], [400, 50], [400, 250], [100, 250]],
+    handles: [[250, 50], [400, 50], [400, 150], [400, 250], [250, 250], [100, 250], [100, 150], [100, 50]],
+    aabb: [100, 50, 300, 200], base: [100, 50, 300, 200],
+  };
+  const overlay = createNodeDropOverlay(deps({
+    queryCompositeAssetScopes: () => ({ ok: true as const, generation: 1, value: [groupScope] }),
+    queryDropTarget: () => ({ ok: true as const, generation: 1, value: "film" }),
+  }));
+  const groupTarget = {
+    nodeType: "group", dropLabel: "放到此处加入片场", onDrop: () => true,
+    matchesTarget: ({ targetNodeId }: { targetNodeId: string }) => targetNodeId === "group",
+  };
+  overlay.update(canvas, [groupTarget], { sourceNodeIds: ["source"], point: { x: 150, y: 100 } });
+  const group = document.querySelector<HTMLElement>('[data-node-id="group"]')!;
+  expect(group.dataset.active).toBe("true");
+  expect(group.textContent).toBe("放到此处加入片场");
+});
+
+it("does not advertise a container for sources already inside it", () => {
+  const groupScope: CompositeAssetScopeGeometryEntry = {
+    nodeId: "group", shape: "rect",
+    vertices: [[100, 50], [400, 50], [400, 250], [100, 250]],
+    handles: [[250, 50], [400, 50], [400, 150], [400, 250], [250, 250], [100, 250], [100, 150], [100, 50]],
+    aabb: [100, 50, 300, 200], base: [100, 50, 300, 200],
+  };
+  const overlay = createNodeDropOverlay(deps({
+    queryCompositeAssetScopes: () => ({ ok: true as const, generation: 1, value: [groupScope] }),
+    queryDropTarget: () => ({ ok: true as const, generation: 1, value: "film" }),
+  }));
+  const groupTarget = {
+    nodeType: "group", dropLabel: "放到此处加入片场", onDrop: () => true,
+    matchesTarget: ({ targetNodeId }: { targetNodeId: string }) => targetNodeId === "group",
+  };
+  overlay.update(canvas, [groupTarget], { sourceNodeIds: ["film"], point: { x: 150, y: 100 } });
+  expect(document.querySelector('[data-node-id="group"]')).toBeNull();
+});
+
 it("treats a throwing acceptsSources predicate as not accepting", () => {
   const overlay = createNodeDropOverlay(deps());
   overlay.update(canvas, [{

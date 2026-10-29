@@ -20,10 +20,14 @@ export function remapFilmSetManagedCopy({ nodes, nodeData, nodeIds, createId }: 
       const owner = nodeIds.get(node.id);
       if (!owner) throw Error("managed-copy-owner-missing");
       const remapBinding = (id: string) => bindingIds.get(node.id)?.get(id) ?? (() => { throw Error("managed-copy-binding-missing"); })();
-      const sceneBindings = group.sceneBindings.map(binding => ({ ...binding, bindingId: remapBinding(binding.bindingId),
+      // Detached bindings point at cards outside this copy closure; copying them
+      // would either steal a foreign source or reference a missing node. The
+      // copied film set starts from its active scene only.
+      const detachedIds = new Set(group.sceneBindings.filter(binding => binding.detached).map(binding => binding.bindingId));
+      const sceneBindings = group.sceneBindings.filter(binding => !binding.detached).map(binding => ({ ...binding, bindingId: remapBinding(binding.bindingId),
         sourceNodeId: nodeIds.get(binding.sourceNodeId) ?? (() => { throw Error("managed-copy-group-source-missing"); })() }));
       const clips = (group.clips ?? []).map(clip => ({ ...clip, id: clipIds.get(node.id)!.get(clip.id)!,
-        ...(clip.bindings ? { bindings: clip.bindings.map(binding => ({ ...binding, itemId: remapBinding(binding.itemId) })) } : {}) }));
+        ...(clip.bindings ? { bindings: clip.bindings.filter(binding => !detachedIds.has(binding.itemId)).map(binding => ({ ...binding, itemId: remapBinding(binding.itemId) })) } : {}) }));
       const activeClip = group.activeClip ? clipIds.get(node.id)!.get(group.activeClip) ?? null : group.activeClip;
       const { migration: _migration, ...orchestration } = group;
       entries.push({ sourceNodeId: node.id, nodeId: owner, data: { ...data, filmSetGroup: { ...orchestration, sceneBindings, clips,

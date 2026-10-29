@@ -78,7 +78,7 @@ export function applyCanvasCommands(
       .filter(binding => !work.nodes.some(source => source.id === binding.sourceNodeId)
         && marker.sceneBindings.some(current => current.bindingId === binding.bindingId && current.sourceNodeId === binding.sourceNodeId))
       .map(binding => binding.sourceNodeId));
-    const validation = validateFilmSetGroupBindings(snapshot(canvas, work), node.id, marker, missingSourceIds);
+    const validation = validateFilmSetGroupBindings(snapshot(canvas, work), node.id, marker, missingSourceIds, previous?.sceneBindings ?? []);
     if (validation) return reject("invalid-film-set-group", validation);
   }
 

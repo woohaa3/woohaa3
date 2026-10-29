@@ -12,6 +12,9 @@ export function readFilmSetContentForSession(canvas: FilmSetProjectionCanvas | n
     // edits are translated back to sceneBindings by the feature submitter.
     const items: FilmSetItem[] = [];
     for (const binding of marker.sceneBindings) {
+      // Soft-detached bindings keep their object animation in the group marker but
+      // stop participating in scene content until the source card is dragged back.
+      if (binding.detached) continue;
       const source = canvas.document.nodes.find(node => node.id === binding.sourceNodeId);
       const raw = canvas.nodeData[binding.sourceNodeId];
       const data = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as CanvasNodeData : undefined;

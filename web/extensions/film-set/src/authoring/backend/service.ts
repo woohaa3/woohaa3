@@ -339,8 +339,13 @@ export class FilmSetNodeService {
     const items = new Map(animation.filmSetContent.items.map(item => [item.id, item]));
     if (animation.filmSetContent.items.some(item => item.kind !== "ground" && !group.sceneBindings.some(binding => binding.bindingId === item.id))) return { ok: false, code: "source-required", message: "新对象必须从资源卡片导入" };
     const commands: CanvasCommand[] = [];
-    marker.sceneBindings = marker.sceneBindings.filter(binding => items.has(binding.bindingId)).map(binding => {
-      const item = items.get(binding.bindingId)!;
+    // Detached bindings are intentionally absent from the session content but
+    // still own their object animation; keep them dormant instead of dropping
+    // them when an unrelated film-set edit is saved.
+    const detachedBindingIds = new Set(group.sceneBindings.filter(binding => binding.detached === true).map(binding => binding.bindingId));
+    marker.sceneBindings = marker.sceneBindings.filter(binding => binding.detached === true || items.has(binding.bindingId)).map(binding => {
+      const item = items.get(binding.bindingId);
+      if (!item) return binding;
       const t = item.localTransform;
       if (item.kind === "model") {
         const previous = readFilmSetAnimationProjection(canvas, input.nodeId)?.filmSetContent.items.find(entry => entry.id === item.id);
@@ -355,7 +360,11 @@ export class FilmSetNodeService {
     marker.clips = filmSetAnimationsOf(animation).clips.map(clip => {
       const cameraId = `camera:${clip.id}`;
       marker.cameras!.push({ id: cameraId, name: clip.name, ...clip.initialCamera });
-      return { id: clip.id, name: clip.name, cameraId, duration: clip.timeline.duration, loop: clip.timeline.loop, cameraMotion: clip.cameraMotion, bindings: clip.bindings, ...(clip.backdrop ? { backdrop: clip.backdrop } : {}) };
+      // 会话投影已过滤掉 detached 对象的镜头动作；保存时把原 clip binding 补回，
+      // 与 binding.animation 一起保持完整，拖回卡片即可原样恢复。
+      const previousClip = group.clips?.find(entry => entry.id === clip.id);
+      const preserved = detachedBindingIds.size === 0 ? [] : (previousClip?.bindings ?? []).filter(binding => detachedBindingIds.has(binding.itemId));
+      return { id: clip.id, name: clip.name, cameraId, duration: clip.timeline.duration, loop: clip.timeline.loop, cameraMotion: clip.cameraMotion, bindings: preserved.length > 0 ? [...(clip.bindings ?? []), ...preserved] : clip.bindings, ...(clip.backdrop ? { backdrop: clip.backdrop } : {}) };
     });
     marker.activeClip = filmSetAnimationsOf(animation).defaultClipId;
     commands.push({ type: "nodeData.patch", nodeId: input.nodeId, value: { filmSetGroup: marker, ...(title === undefined ? {} : { title }) } as CanvasNodeData });
