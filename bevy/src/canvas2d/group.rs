@@ -43,16 +43,15 @@ pub(crate) fn is_running(node: &crate::protocol::GraphNode) -> bool {
 /// z=0; the caller puts the entity itself at the group's world z so Bevy's
 /// Transparent2d phase can sort each panel independently.
 ///
-/// 面板用 `canvasNodeSurface` + [`GROUP_FILL_ALPHA`]，这是所有组唯一的底色层；3D 相机只画
-/// 徽标后方的气泡尾巴，不再叠加徽标底座或半透明组底（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
+/// 组**不铺底色**：成员卡片直接浮在画布上，组的身份只由左上角那块独立标签卡表达
+/// （change: canvas-grouping-redesign，参考稿即如此）。这里只保留拖入时的强调层，
+/// 让「松手会落进这个组」看得见。
 pub(crate) fn draw_group_panel(
     theme: &ThemeResource,
     node: &crate::protocol::GraphNode,
     presentation: &GroupPresentation,
 ) -> Mesh {
     let mut geometry = Geometry::default();
-    let color = theme.token_u32("canvasGroupSurface");
-    panel(&mut geometry, node, 0., color, GROUP_FILL_ALPHA);
     if presentation.drop_target {
         panel(
             &mut geometry,
@@ -111,7 +110,7 @@ pub(crate) fn draw_group(
             2.,
             z + 0.001,
             super::group_motion::mix(
-                theme.token_u32("canvasGroupSurface"),
+                theme.token_u32("canvasNodeBorder"),
                 theme.token_u32("interactionAccent"),
                 0.55,
             ),
@@ -332,9 +331,11 @@ mod tests {
         );
         let mesh = geometry.build();
         let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
-        assert!(positions.len() > 40);
+        // 只剩左上角标签卡的胶囊底（虚线框已移除，change: canvas-grouping-redesign）。
+        assert!(positions.len() > 8);
         assert_eq!(label, "镜头发散 · 3 项");
-        assert_eq!(position, Vec2::new(12.0, 8.0));
+        // 胶囊内文字位置：距组左上各 10，再加 8 的左右内边距 / 垂直居中。
+        assert_eq!(position, Vec2::new(18.0, 16.0));
         assert_eq!(size, 12.0);
     }
 
@@ -369,9 +370,9 @@ mod tests {
         assert!(GROUP_Z < 10.0);
     }
 
-    /// 虚线框会产生多段几何（用 mesh 顶点数间接验证，而非内部字段）。
+    /// 组不再画外框（虚线已移除），只剩左上角标签卡：胶囊底 + 文字。
     #[test]
-    fn group_emits_dashed_geometry() {
+    fn group_emits_only_the_label_pill() {
         let theme = ThemeResource::default();
         let mut geometry = Geometry::default();
         draw_group(
@@ -393,41 +394,28 @@ mod tests {
             GROUP_Z,
         );
         let mesh = geometry.build();
-        let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
-        // 圆角矩形（36 点）+ 多段虚线与圆角短线，远超单个矩形。
-        assert!(positions.len() > 40);
+        let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
+            panic!("label pill must be drawn");
+        };
+        // 胶囊底的顶点都聚集在组左上角附近，不会铺满整个组。
+        assert!(points.iter().all(|point| point[0] < 200.0 && -point[1] < 100.0));
+        assert!(!points.is_empty());
     }
 
+    /// 普通组**不再**有背景面板：成员卡片直接浮在画布上
+    /// （change: canvas-grouping-redesign，参考稿即如此）。
     #[test]
-    fn ordinary_group_emits_depth_participating_body() {
+    fn ordinary_group_has_no_background_panel() {
         let theme = ThemeResource::default();
-        let mesh = draw_group_panel(
-            &theme,
-            &node(400.0, 300.0),
-            &GroupPresentation {
-                collapsed: false,
-                badge_scale: 1.,
-                badge_resizable: false,
-                title: String::new(),
-                member_count: 1,
-                output_capable_leaf_count: 0,
-                model_bounds: None,
-                run_status: None,
-                drop_target: false,
-            },
-        );
+        let mesh = draw_group_panel(&theme, &node(400.0, 300.0), &panel_presentation(false));
         let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
-            panic!("ordinary groups need a transparent background panel");
+            return;
         };
-        // 圆角矩形的顶点只落在四段圆角弧上，因此不能断言「中间有顶点」；要断言它铺满整个组矩形。
-        let min_x = points.iter().map(|point| point[0]).fold(f32::MAX, f32::min);
-        let max_x = points.iter().map(|point| point[0]).fold(f32::MIN, f32::max);
-        let min_y = points.iter().map(|point| point[1]).fold(f32::MAX, f32::min);
-        let max_y = points.iter().map(|point| point[1]).fold(f32::MIN, f32::max);
-        assert!((min_x - 0.).abs() < 0.01 && (max_x - 400.).abs() < 0.01, "panel must span the group width");
-        // 画布 y 轴向上、顶点写入时取反，因此组矩形映射为 [-height, 0]。
-        assert!((min_y + 300.).abs() < 0.01 && max_y.abs() < 0.01, "panel must span the group height");
-        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+        // 空几何被换成屏幕外兜底三角形；只要没有真实顶点就说明没铺底。
+        assert!(
+            points.iter().all(|point| point[0] < -1.0e5),
+            "普通组不应铺背景面板"
+        );
     }
 
     fn panel_presentation(drop_target: bool) -> GroupPresentation {
@@ -453,50 +441,69 @@ mod tests {
         .unwrap()
     }
 
-    /// 背板必须沿用 3D 组底的 `canvasNodeSurface` + 0.55，而不是更亮更实的
-    /// `canvasNodeContent` + 0.9：换成后者会让组底色明显变浅变实。
+    /// 组**不铺底色**：参考稿里成员卡片直接浮在画布上，组身份只由左上角标签卡表达
+    /// （change: canvas-grouping-redesign）。
     #[test]
-    fn group_panel_keeps_surface_token_and_fill_alpha() {
+    fn group_panel_has_no_fill_without_drop_target() {
         let mesh = draw_group_panel(
             &ThemeResource::default(),
             &node(400.0, 300.0),
             &panel_presentation(false),
         );
-        let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
-            panic!("panel must carry vertex colors");
+            return;
         };
-        assert!(colors.iter().all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6));
-        // canvasNodeSurface 是白色；canvasNodeContent 偏灰，会暴露成另一种背板色。
-        assert!(colors
-            .iter()
-            .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
+        // 空几何会被 `build_mesh` 换成屏幕外的兜底三角形（3 个 -1e6 顶点）。
+        assert!(
+            points.iter().all(|point| point[0] < -1.0e5),
+            "组不应铺底色，实际画了 {} 个真实顶点",
+            points.iter().filter(|point| point[0] > -1.0e5).count()
+        );
     }
 
-    /// 带模型组与无模型组的 2D 底色必须来自同一 token/alpha；3D 相机只画气泡尾巴，
-    /// 不再叠加徽标底座或 0.55 填充层（change: 2026-10-27-order-canvas-layers-by-ground-anchor，D4）。
+    /// 拖入态仍要画出强调层，否则用户看不出「松手会落进这个组」。
     #[test]
-    fn model_presence_does_not_change_group_underlay() {
+    fn group_panel_shows_accent_only_when_drop_target() {
         let theme = ThemeResource::default();
-        let plain = draw_group_panel(&theme, &node(400., 300.), &panel_presentation(false));
-        let modeled =
-            draw_group_panel(&theme, &model_group(400., 300.), &panel_presentation(false));
-        for mesh in [plain, modeled] {
-            let Some(VertexAttributeValues::Float32x4(colors)) =
-                mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        let mesh = draw_group_panel(&theme, &node(400., 300.), &panel_presentation(true));
+        let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("drop target panel must carry positions");
+        };
+        assert!(points.iter().any(|point| point[0] > -1.0e5), "拖入态必须画出强调层");
+        let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        else {
+            panic!("drop target panel must carry vertex colors");
+        };
+        // 强调层是半透明叠加，不是实色底。
+        assert!(colors.iter().all(|color| (color[3] - 0.22).abs() < 1e-6));
+    }
+
+    /// 带模型组与无模型组都不铺底，观感一致（3D 相机只画气泡尾巴）。
+    #[test]
+    fn model_presence_does_not_add_group_underlay() {
+        let theme = ThemeResource::default();
+        for mesh in [
+            draw_group_panel(&theme, &node(400., 300.), &panel_presentation(false)),
+            draw_group_panel(&theme, &model_group(400., 300.), &panel_presentation(false)),
+        ] {
+            let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
             else {
-                panic!("panel must carry vertex colors");
+                continue;
             };
-            assert!(colors.iter().all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6));
-            assert!(colors
-                .iter()
-                .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
+            assert!(
+                points.iter().all(|point| point[0] < -1.0e5),
+                "带不带模型都不应铺组底色"
+            );
         }
     }
 
-    /// 徽标固定在气泡主体外侧，所以组背板完整覆盖结构矩形，尾巴和模型在矩形外绘制。
+    /// 带模型的组同样不铺背景板（change: canvas-grouping-redesign）。
+    ///
+    /// 组的身份只由左上角标签卡表达，成员卡片直接浮在画布上。
     #[test]
-    fn model_group_panel_keeps_full_body_backplate() {
+    fn model_group_has_no_background_panel() {
         let node = model_group(500., 300.);
         let mesh = draw_group_panel(
             &ThemeResource::default(),
@@ -505,17 +512,12 @@ mod tests {
         );
         let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
-            panic!("panel needs positions");
+            return;
         };
-        let badge = crate::canvas_query::group_model::badge_rect(&node);
-        assert!(badge.y >= node.y + node.height + crate::canvas_query::group_model::BADGE_OUTSET);
-        assert!(points.iter().all(|point| {
-            let canvas_y = -point[1];
-            canvas_y >= node.y - 0.01 && canvas_y <= node.y + node.height + 0.01
-        }));
-        let min_x = points.iter().map(|point| point[0]).fold(f32::MAX, f32::min);
-        let max_x = points.iter().map(|point| point[0]).fold(f32::MIN, f32::max);
-        assert!((min_x - node.x).abs() < 0.01 && (max_x - (node.x + node.width)).abs() < 0.01);
+        assert!(
+            points.iter().all(|point| point[0] < -1.0e5),
+            "带模型的组也不应铺背景板"
+        );
     }
 
     #[test]
