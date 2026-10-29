@@ -80,7 +80,7 @@ pub(crate) fn sync_group_panels(
                 if panel.key == key {
                     continue;
                 }
-                let rebuilt = panel.key.rect[2..] != key.rect[2..]
+                let rebuilt = panel.key.rect != key.rect
                     || panel.key.drop_target != key.drop_target
                     || panel.key.theme != key.theme;
                 if rebuilt {
