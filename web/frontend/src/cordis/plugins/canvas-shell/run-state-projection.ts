@@ -6,7 +6,8 @@
  * 呈现。不读取完整历史、不写 canonical、不进入 Y.Doc。
  */
 import {
-  mergeNodeExecutionPresentation, nodeExecutionWindow, showNodeExecutionDots,
+  FILM_SET_RUN_LABELS, mergeNodeExecutionPresentation, nodeExecutionWindow, showNodeExecutionDots,
+  type FilmSetRunPhase,
   type NodeGenerationHistoryListItem,
   type BevyHistoryDotState,
   type BevyRenderNode,
@@ -26,11 +27,25 @@ export type NodeRunStateProjection = {
 };
 
 /**
+ * 片场反馈阶段 → group 运行状态。
+ *
+ * 迁移后的片场是带 `filmSetGroup` marker 的 group，运行中的气泡边缘动效与状态标识由
+ * `group.runStatus` 驱动。`submitting` 在 group 词汇里对应准备阶段，其余阶段同名复用。
+ */
+const FILM_SET_GROUP_STATE: Record<FilmSetRunPhase, string> = {
+  submitting: "preparing",
+  queued: "queued",
+  running: "running",
+  committing: "committing",
+  failed: "failed"
+};
+
+/**
  * 就地投影运行状态到 render scene。
  *
  * - 聚合节点：写 `aggregateRun.active`（运行遮罩），不加历史条。
  * - 普通节点：按 createdAt 升序生成有界圆点；当前生效版本用独立装饰（不挤占状态颜色）。
- * - group 与片场（聚合）不写历史条。
+ * - group 与片场不写历史条；片场执行反馈并入 `group.runStatus`，与普通组共用气泡边缘动效。
  */
 export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input: NodeRunStateProjection): void {
   const summaries = new Map(input.summaries.map((entry) => [entry.nodeId, entry]));
@@ -43,7 +58,9 @@ export function applyRunStateProjection(nodes: readonly BevyRenderNode[], input:
   for (const node of nodes) {
     const summary = summaries.get(node.id);
     if (node.group) {
-      const status = input.groupStatuses?.get(node.id);
+      const filmSet = summary?.filmSetFeedback;
+      const status = input.groupStatuses?.get(node.id)
+        ?? (filmSet ? { label: FILM_SET_RUN_LABELS[filmSet.labelCode], state: FILM_SET_GROUP_STATE[filmSet.phase] } : undefined);
       if (status) node.group.runStatus = status;
       else delete node.group.runStatus;
       continue;
