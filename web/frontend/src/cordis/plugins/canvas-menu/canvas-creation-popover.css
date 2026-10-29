@@ -1,5 +1,5 @@
 .canvas-create.ui-popover {
-  width: 380px;
+  width: 440px;
   max-width: calc(100vw - 32px);
   max-height: min(620px, calc(100vh - 24px));
   box-sizing: border-box;
@@ -57,7 +57,7 @@
 .canvas-create__materials { max-height: 240px; overflow: auto; padding: 2px 12px 10px; scrollbar-width: thin; scrollbar-color: var(--app-web-border-strong) transparent; }
 .canvas-create__materials section + section { margin-top: 10px; }
 .canvas-create h3 { margin: 0 0 6px; padding: 0 4px; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--app-web-text-muted); }
-.canvas-create__grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.canvas-create__grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
 .canvas-create__grid button {
   display: flex;
   flex-direction: column;
@@ -78,9 +78,17 @@
 .canvas-create__grid button:active:not(:disabled) { background: var(--app-interaction-accent-soft); }
 .canvas-create__grid button:disabled { opacity: .45; cursor: default; }
 .canvas-create__grid svg { width: 20px; height: 20px; flex: none; }
-.canvas-create [data-section="other"] .canvas-create__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.canvas-create [data-section="other"] button { flex-direction: row; justify-content: flex-start; min-height: 34px; gap: 8px; padding: 7px 10px; text-align: left; }
-.canvas-create [data-section="other"] svg { width: 18px; height: 18px; }
+.canvas-create__grid .canvas-create__grid-action { position: relative; }
+.canvas-create__grid .canvas-create__grid-action::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -2px;
+  width: 1px;
+  background: var(--app-web-border);
+  pointer-events: none;
+}
 
 .canvas-create__ai-entry {
   display: flex;

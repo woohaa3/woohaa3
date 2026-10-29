@@ -3,6 +3,7 @@ import { createShotMediaProvider } from "../../authoring/browser/shot-media-prov
 import "../../authoring/browser/styles.css";
 import { createElement } from "react";
 import { defineExtensionFrontend, defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
+import { ClapperboardIcon } from "@woohaa3/ui/icons";
 import { CANVAS_MENU_SECTION, FILM_SET_SHOT_PREVIEW_NODE_TYPE, MODEL_EDITOR_VERSION, readFilmSetGroupMarker, readFilmSetAnimationProjection, filmSetAnimationsOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
 import { installShotImageReferences } from "../../authoring/browser/shot-image-reference.js";
 import { FILM_SET_EXTENSION_ID, FILM_SET_LABEL } from "../../state/shared/identity.js";
@@ -23,6 +24,9 @@ import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser
 import { contributionLifetime } from "./contributions.js";
 import { createFilmSetNodeData } from "../../state/shared/node.js";
 import { gizmoParentBasis } from "../../authoring/browser/gizmo-constraint.js";
+
+/** 右键菜单文案：与「3D 模型」并列，避免和普通 group 混淆。 */
+const FILM_SET_MENU_LABEL = `3D ${FILM_SET_LABEL}`;
 
 export function filmSetExtension() {
   return defineExtensionPlugin<FilmSetContext>(ctx => {
@@ -114,7 +118,8 @@ export function filmSetExtension() {
       }));
       lifetime.own(ctx.slots.register("canvas.node-template", {
         id: "film-set-node", owner: FILM_SET_EXTENSION_ID, nodeType: "group",
-        label: FILM_SET_LABEL, section: CANVAS_MENU_SECTION.creationTools, order: 0,
+        label: FILM_SET_MENU_LABEL, section: CANVAS_MENU_SECTION.creationTools, order: 0,
+        icon: ClapperboardIcon,
         createNodeData: () => createFilmSetNodeData() as never
       }));
       lifetime.own(extendFilmSetDrop(ctx));

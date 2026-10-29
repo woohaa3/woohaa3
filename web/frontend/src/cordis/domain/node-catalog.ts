@@ -37,14 +37,22 @@ export type CanvasNodeTemplate = {
   taskKind: boolean;
 };
 
-/** 节点菜单目录；空白右键与拉线创建共用，顺序与旧 Godot 菜单一致。 */
+/**
+ * 节点菜单目录；空白右键与拉线创建共用，顺序与旧 Godot 菜单一致。
+ *
+ * 片场由 film-set 扩展经 `canvas.node-template` 贡献（携带扩展自己的默认镜头/片段），
+ * 宿主目录不再重复列出，避免右键菜单出现两个「片场」。共享描述符仍保留 film-set，
+ * 供 MCP 与默认 nodeData 复用。
+ */
 export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
-  ...AGENT_NODE_DESCRIPTORS.map((descriptor) => ({
-    id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
-    label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
-    nodeType: descriptor.canonicalType,
-    taskKind: descriptor.taskKind !== undefined
-  }))
+  ...AGENT_NODE_DESCRIPTORS
+    .filter((descriptor) => descriptor.kind !== "film-set")
+    .map((descriptor) => ({
+      id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
+      label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
+      nodeType: descriptor.canonicalType,
+      taskKind: descriptor.taskKind !== undefined
+    }))
 ];
 
 /** model 语义别名与 model3d 菜单项返回同一份模板。 */

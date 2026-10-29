@@ -11,12 +11,11 @@ import {
 } from "./node-catalog.js";
 
 describe("node-catalog", () => {
-  it("统一目录包含片场语义节点与两类自包含 3D 节点", () => {
+  it("统一目录只列宿主模板；片场由扩展模板贡献，不重复出现", () => {
     expect(NODE_TEMPLATES.map((entry) => entry.id)).toEqual([
       "text",
       "image",
       "model3d",
-      "film-set",
       "video",
       "audio"
     ]);
@@ -24,13 +23,13 @@ describe("node-catalog", () => {
       "文本",
       "图片",
       "3D 模型",
-      "片场",
       "视频",
       "音频"
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
-    expect(findNodeTemplate("film-set")?.nodeType).toBe("group");
+    // 片场由 film-set 扩展经 canvas.node-template 贡献默认镜头/片段。
+    expect(findNodeTemplate("film-set")).toBeNull();
     expect(findNodeTemplate("composite-asset")).toBeNull();
   });
 
@@ -40,7 +39,6 @@ describe("node-catalog", () => {
       "text",
       "image",
       "model3d",
-      "film-set",
       "video",
       "audio"
     ]);
