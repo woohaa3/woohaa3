@@ -86,6 +86,7 @@ export type {
   CanvasCatalogListResult,
   CanvasCatalogSummaryResult,
   CanvasCatalogCreateResult,
+  CanvasCatalogDeleteResult,
   CanvasSelectionService,
   CanvasRecoveryService,
   CanvasSummary,

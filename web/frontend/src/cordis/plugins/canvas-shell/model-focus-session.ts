@@ -33,6 +33,7 @@ import {
   modelAnchor,
   groupModelLayout,
   readFilmSetGroupMarker,
+  activeFilmSetSceneBindings,
   readFilmSetContentForSession,
   encodeFilmSetPartId,
   quatFromEulerYXZDegrees,
@@ -182,9 +183,10 @@ export function filmSetSceneBounds(input: FocusTargetInput): { aabb: Aabb; cente
 function groupSceneBounds(input: FocusTargetInput): Aabb | null {
   const marker = readFilmSetGroupMarker(input.canvas.nodeData[input.nodeId]);
   if (!marker) return null;
-  const visible = new Set(marker.sceneBindings.filter(binding => binding.visibility).map(binding => binding.bindingId));
+  const activeBindings = activeFilmSetSceneBindings(marker);
+  const visible = new Set(activeBindings.filter(binding => binding.visibility).map(binding => binding.bindingId));
   if (marker.ground) visible.add("film-set-ground");
-  const hiddenPrefixes = marker.sceneBindings.filter(binding => !binding.visibility).map(binding => encodeFilmSetPartId(binding.bindingId, ""));
+  const hiddenPrefixes = activeBindings.filter(binding => !binding.visibility).map(binding => encodeFilmSetPartId(binding.bindingId, ""));
   const transform = marker.sceneTransform;
   const ops = (input.ops as import("@woohaa3/contracts").SceneV2Op[]).filter(op => !hiddenPrefixes.some(prefix => op.id.startsWith(prefix))).map(op =>
     op.t === "group" && op.id === "\u0000scene" && transform
