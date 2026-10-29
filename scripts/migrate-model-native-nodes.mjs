@@ -46,7 +46,7 @@ function typedReferences(value, context, path = "$", writes = []) {
   for (const [key, child] of Object.entries(value)) {
     if (child === "animation3d" || child === "extension3d") {
       if (["nodeType", "sourceNodeType", "targetNodeType"].includes(key) || (key === "type" && value.position && value.id)) {
-        if (child === "extension3d" && value.extensionId !== "game-furnace") throw new Error(`Ambiguous extension identity at ${context}:${path}.${key}`);
+        if (child === "extension3d") throw new Error(`Unknown old extension owner at ${context}:${path}.${key}`);
         out[key] = "composite-asset";
         if (key === "nodeType" && child === "animation3d") out.extensionId = "film-set";
         if (key === "type" && value.nodeData) throw new Error(`Embedded old full node snapshot requires an explicit payload adapter at ${context}:${path}`);
@@ -153,25 +153,20 @@ async function main() {
   if (mode === "apply") requireQuiesced(profile);
   const db = new DatabaseSync(path.join(profile, filenames[0]), { readOnly: mode !== "apply" });
   let plan;
-  try { plan = converter.planMigration(db, { previousMappings: saved?.mappings, removeEdgeIds: repeated("--remove-edge"), furnaceOwners: repeated("--furnace-owner").length ? repeated("--furnace-owner") : saved?.furnaceOwners }); }
+  try { plan = converter.planMigration(db, { previousMappings: saved?.mappings, removeEdgeIds: repeated("--remove-edge") }); }
   catch (error) { db.close(); throw error; }
   const resources = inventoryResources(saved);
-  for (const furnace of plan.report.furnaceResources) {
-    const key = furnace.references.projectStorageKey;
-    if (key && !resources.some(resource => resource.storageKey === key)) { db.close(); throw new Error("Referenced furnace project requires --resource-file storageKey=/private/path for byte-preservation proof"); }
-  }
   const related = filenames.slice(1).map(name => ({ name, updates: planRelatedDatabase(path.join(profile, name)) }));
   const planHash = hash({ report: plan.report, resources, related: related.map(({ name, updates }) => ({ name, updates: updates.map(update => ({ table: update.table, column: update.column, identity: update.identity, before: hash(update.before), after: hash(update.after) })) })) });
   const publicReport = { ...plan.report, relatedDatabaseChanges: related.map(({ name, updates }) => ({ name, changedRows: updates.length })), planHash };
   if (mode === "dry-run") {
     db.close();
-    write(manifestFile, { version: "composite-asset-profile-cutover-v1", profile, state: "planned", furnaceOwners: repeated("--furnace-owner"), mappings: plan.mappings, resources, planHash, report: publicReport, plannedAt: new Date().toISOString() });
+    write(manifestFile, { version: "composite-asset-profile-cutover-v1", profile, state: "planned", mappings: plan.mappings, resources, planHash, report: publicReport, plannedAt: new Date().toISOString() });
     console.log(JSON.stringify({ mode, manifest: manifestFile, changed: plan.changed || related.some(item => item.updates.length), canvasCount: plan.documents.length, historyCount: plan.historyWrites.length })); return;
   }
   if (mode === "verify") {
     db.close();
     if (plan.changed || related.some(item => item.updates.length)) throw new Error("Verification found records still requiring migration");
-    if (saved?.state === "applied" && hash(saved.report.furnaceResources) !== hash(plan.report.furnaceResources)) throw new Error("Furnace geometry or project associations changed across cutover");
     write(manifestFile + ".verify.json", { verifiedAt: new Date().toISOString(), report: publicReport });
     console.log(JSON.stringify({ mode, verified: true, canvasCount: plan.documents.length, historyCount: plan.historyWrites.length })); return;
   }

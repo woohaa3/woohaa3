@@ -494,10 +494,11 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             {...(binding?.actions || panelActions ? { actions: { ...binding?.actions, ...panelActions } } : {})}
             renderers={{
               references: () => referencesSlot,
-              promptEditor: ({ value, onChange, disabled, placeholder }) => (
+              promptEditor: ({ value, onChange, disabled, placeholder, onSubmit }) => (
                 <MentionEditor
                   value={value}
                   onChange={onChange}
+                  onSubmit={onSubmit}
                   candidates={mentionCandidates}
                   disabled={disabled}
                   placeholder={placeholder}

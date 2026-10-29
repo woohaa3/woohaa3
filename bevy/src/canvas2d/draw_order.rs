@@ -74,6 +74,7 @@ mod tests {
                 collapsed: false,
                 badge_scale: 1.,
                 badge_resizable: false,
+                action_bar: false,
                 title: String::new(),
                 member_count: 1,
                 output_capable_leaf_count: 0,

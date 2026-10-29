@@ -121,7 +121,13 @@ pub(crate) fn node_action_toolbar_for_bounds(
             if action.icon_only {
                 return NODE_ACTION_TOOLBAR_ACTION_HEIGHT;
             }
+            let icon = if action.icon.is_some() {
+                NODE_ACTION_TOOLBAR_ICON_SIZE + NODE_ACTION_TOOLBAR_ICON_GAP
+            } else {
+                0.0
+            };
             (estimated_text_width(&action.label, NODE_ACTION_TOOLBAR_FONT)
+                + icon
                 + NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0)
                 .max(NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH)
                 .ceil()

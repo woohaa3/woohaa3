@@ -88,7 +88,8 @@ fn scene_with_actions_for(node_id: &str, nodes: Vec<GraphNode>) -> Scene {
 #[test]
 fn group_node_action_bar_is_drawn_and_hits_above_the_backdrop() {
     clear_snapshot();
-    let group = group("g", 500.0, 300.0, 420.0, 280.0, 2);
+    let mut group = group("g", 500.0, 300.0, 420.0, 280.0, 2);
+    group.group.as_mut().unwrap().action_bar = true;
     let scene = scene_with_actions_for("g", vec![group.clone()]);
     let generation = accept_scene(&scene);
     let layout = crate::canvas_query::layout::node_action_toolbar(
@@ -115,6 +116,45 @@ fn group_node_action_bar_is_drawn_and_hits_above_the_backdrop() {
             menu: false,
         })
     );
+}
+
+#[test]
+fn plain_group_action_bar_has_no_invisible_hit() {
+    clear_snapshot();
+    let group = group("g", 500.0, 300.0, 420.0, 280.0, 2);
+    let scene = scene_with_actions_for("g", vec![group.clone()]);
+    let generation = accept_scene(&scene);
+    let layout = crate::canvas_query::layout::node_action_toolbar(
+        &group,
+        scene.node_actions.get("g").unwrap(),
+        None,
+        None,
+    )
+    .expect("group toolbar layout");
+    let action = layout.slots[0].rect;
+    assert_eq!(
+        point_query(
+            generation,
+            action.0 + action.2 / 2.0,
+            action.1 + action.3 / 2.0,
+            1.0,
+            None,
+        )
+        .hit,
+        None,
+        "普通 group 不声明 actionBar 时不得保留不可见的横条热区"
+    );
+    assert!(!crate::canvas_query::action_bar_visible(&scene, &group));
+}
+
+#[test]
+fn group_toolbar_visibility_requires_action_bar_declaration() {
+    let mut group = group("g", 500.0, 300.0, 420.0, 280.0, 2);
+    let mut scene = scene_with_actions_for("g", vec![group.clone()]);
+    assert!(!crate::canvas_query::action_bar_visible(&scene, &group));
+    group.group.as_mut().unwrap().action_bar = true;
+    scene.nodes = vec![group.clone()];
+    assert!(crate::canvas_query::action_bar_visible(&scene, &group));
 }
 
 #[test]
@@ -396,6 +436,7 @@ fn collapsed_group_toolbar_tracks_badge_after_viewport_and_position_updates() {
     let mut group = group("g", 500., 300., 420., 280., 2);
     group.group.as_mut().unwrap().collapsed = true;
     group.group.as_mut().unwrap().badge_scale = 2.;
+    group.group.as_mut().unwrap().action_bar = true;
     let scene = scene_with_actions_for("g", vec![group.clone()]);
     let base = accept_scene(&scene);
     let assert_toolbar = |generation, group: &GraphNode, zoom| {

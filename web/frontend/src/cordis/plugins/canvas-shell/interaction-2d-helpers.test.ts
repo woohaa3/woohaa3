@@ -98,3 +98,34 @@ describe("组四角缩放（resizeTarget corner）", () => {
     expect(position.y + target!.height).toBe(350);
   });
 });
+
+describe("组四角缩放：成员保持画布绝对位置（贴边下限）", () => {
+  const previous = woohaa3CanvasStore.getState().canvas;
+  const canvas = createEmptyWoohaa3ServerCanvas("corner-resize-members");
+  // 组 800×700 @ (300,200)；成员贴右下：绝对 (900,600) 150×150。
+  canvas.document.nodes.push(
+    { id: "g", type: "group", position: { x: 300, y: 200 }, width: 800, height: 700 },
+    { id: "m", type: "image", parentId: "g", position: { x: 600, y: 400 }, width: 150, height: 150 }
+  );
+  beforeAll(() => { woohaa3CanvasStore.getState().applyRemoteCanvas(canvas); });
+  afterAll(() => { woohaa3CanvasStore.getState().applyRemoteCanvas(previous!); });
+
+  const base = { nodeId: "g", start: { x: 0, y: 0 }, originWidth: 800, originHeight: 700, origin: { x: 300, y: 200 } };
+
+  it("左上角向内不再被右下成员卡住：只受成员左/上边界限制", () => {
+    expect(resizeTarget({ ...base, start: { x: 300, y: 200 }, corner: "nw" }, { x: 600, y: 400 }))
+      .toEqual({ width: 500, height: 500, position: { x: 600, y: 400 } });
+  });
+
+  it("左上角继续向内停在成员边界，成员始终在框内", () => {
+    expect(resizeTarget({ ...base, start: { x: 300, y: 200 }, corner: "nw" }, { x: 5000, y: 5000 }))
+      .toEqual({ width: 200, height: 300, position: { x: 900, y: 600 } });
+  });
+
+  it("右下角向内停在成员右边/下边，左上角不动", () => {
+    // 图片的最小可见宽度 180：成员右边 = 900 + 180 = 1080，下限 1080 − 300 = 780。
+    // 高度保留底部页脚 80：成员下边 750 + 80 − 200 = 630。
+    expect(resizeTarget({ ...base, start: { x: 1100, y: 900 }, corner: "se" }, { x: -5000, y: -5000 }))
+      .toEqual({ width: 780, height: 630, position: { x: 300, y: 200 } });
+  });
+});

@@ -64,6 +64,7 @@ fn group(id: &str, x: f32, y: f32, w: f32, h: f32, leaves: u32) -> GraphNode {
             collapsed: false,
             badge_scale: 1.,
             badge_resizable: false,
+            action_bar: false,
             title: String::new(),
             member_count: 1,
             output_capable_leaf_count: leaves,

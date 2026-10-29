@@ -77,7 +77,11 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
     }
     if (!descriptor) continue;
     const menu = descriptor.menu === true;
-    const icon = descriptor.icon === "download" || descriptor.icon === "collapse-groups" || descriptor.icon === "expand-groups"
+    const icon = descriptor.icon === "download" || descriptor.icon === "edit"
+      || descriptor.icon === "arrange-horizontal" || descriptor.icon === "arrange-vertical"
+      || descriptor.icon === "arrange-grid" || descriptor.icon === "arrange-diagonal-up"
+      || descriptor.icon === "arrange-diagonal-down"
+      || descriptor.icon === "collapse-groups" || descriptor.icon === "expand-groups"
       ? descriptor.icon
       : undefined;
     actions.push({

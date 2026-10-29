@@ -345,41 +345,18 @@ describe("group parent 不变式（change: add-canvas-node-grouping，任务 1.2
   });
 });
 
-describe("通用复合资产节点（change: 2026-10-10-add-game-furnace-extension；2026-10-11 身份迁移）", () => {
-  function withExtension3d(): ServerCanvas {
+describe("通用复合资产节点（change: 2026-10-11 身份迁移）", () => {
+  function withComposite(): ServerCanvas {
     const canvas = base();
     canvas.document.nodes = [
       { id: "ext", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 }, width: 260, height: 195 }
     ];
-    canvas.nodeData = {
-      ext: {
-        extensionId: "game-furnace",
-        modelScript: "scene.box({ id: 'a', size: [1,1,1] });",
-        modelScriptLanguage: "javascript",
-        modelScriptVersion: "woohaa-model-js-v2",
-        modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "old-hash" },
-        modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
-      }
-    };
+    canvas.nodeData = { ext: { extensionId: "creature-video-assets" } };
     return canvas;
   }
 
-  it("普通模型脚本 patch 经 self-contained 归一化推进 contentHash", () => {
-    const canvas = withExtension3d();
-    const result = applyCanvasCommands(canvas, [
-      { type: "nodeData.patch", nodeId: "ext", value: { modelScript: "scene.box({ id: 'b', size: [2,2,2] });" } }
-    ], { now: NOW });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      const data = result.canvas.nodeData.ext as Record<string, unknown>;
-      const version = data.modelContentVersion as { contentHash: string };
-      // 只改源码的 patch 不能保留旧 contentHash（与 model3d 同规则）。
-      expect(version.contentHash).not.toBe("old-hash");
-    }
-  });
-
   it("不能作为 edge 端点（source 与 target）", () => {
-    const canvas = withExtension3d();
+    const canvas = withComposite();
     canvas.document.nodes.push({ id: "img", type: "image", position: { x: 400, y: 0 } });
     const asSource = applyCanvasCommands(canvas, [
       { type: "edge.add", edge: { id: "e1", source: "ext", target: "img" } }
@@ -634,7 +611,7 @@ describe("类别最小尺寸与历史记录", () => {
     expect(resized.ok).toBe(true);
     const normal = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "normal", type: "text", position: { x: 0, y: 0 }, width: 180, height: 64 } }], { now: NOW });
     expect(normal.ok).toBe(true);
-    const added = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "small", type: "composite-asset", position: { x: 0, y: 0 }, width: 180, height: 64 }, nodeData: { extensionId: "game-furnace" } }], { now: NOW });
+    const added = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "small", type: "composite-asset", position: { x: 0, y: 0 }, width: 180, height: 64 }, nodeData: { extensionId: "creature-video-assets", extensionContentRef: { schemaVersion: 1, instanceId: "instance-123456" } } }], { now: NOW });
     expect(added).toMatchObject({ ok: false, rejection: { code: "invalid-node-size" } });
   });
   it("历史小片场移动与标题修改批次需先迁移", () => {

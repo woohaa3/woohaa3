@@ -58,10 +58,8 @@ pub(crate) fn draw(
 
     let mut out = Vec::new();
     for (entity, node) in nodes {
-        // group 使用独立选区横条；复合资产可声明自己的操作（与命中快照同源）。
-        if node.group.is_some() {
-            continue;
-        }
+        // 容器（片场）与普通节点共用同一条动作横条；是否绘制由 `action_bar_visible` 决定
+        // （只有声明 `actionBar` 的容器才带 NodeActionBar 组件）。
         let Some(actions) = node_actions.get(&node.id) else {
             continue;
         };
@@ -108,14 +106,33 @@ pub(crate) fn draw(
                 };
                 geometry.rounded_rect(ax, ay, aw, ah, ACTION_RADIUS * scale, z + 0.002, fill);
             }
-            if matches!(
-                slot.icon.as_deref(),
-                Some("download" | "collapse-groups" | "expand-groups")
-            ) {
-                let center = Vec2::new(ax + aw / 2.0, ay + ah / 2.0);
+            if let Some(icon) = slot.icon.as_deref().filter(|icon| {
+                matches!(
+                    *icon,
+                    "download"
+                        | "edit"
+                        | "arrange-horizontal"
+                        | "arrange-vertical"
+                        | "arrange-grid"
+                        | "arrange-diagonal-up"
+                        | "arrange-diagonal-down"
+                        | "collapse-groups"
+                        | "expand-groups"
+                )
+            }) {
+                // 纯图标按钮居中；图标 + 文字时图标贴左，文字紧随其后（与 contracts 同一栅格）。
+                let center = if slot.icon_only {
+                    Vec2::new(ax + aw / 2.0, ay + ah / 2.0)
+                } else {
+                    Vec2::new(
+                        ax + (NODE_ACTION_TOOLBAR_ACTION_PAD + NODE_ACTION_TOOLBAR_ICON_SIZE / 2.0)
+                            * scale,
+                        ay + ah / 2.0,
+                    )
+                };
                 let point = |x: f32, y: f32| center + Vec2::new(x, y) * scale;
-                let segments: &[((f32, f32), (f32, f32))] = match slot.icon.as_deref() {
-                    Some("download") => &[
+                let segments: &[((f32, f32), (f32, f32))] = match icon {
+                    "download" => &[
                         ((0.0, -7.0), (0.0, 3.0)),
                         ((-4.0, -1.0), (0.0, 3.0)),
                         ((0.0, 3.0), (4.0, -1.0)),
@@ -123,14 +140,73 @@ pub(crate) fn draw(
                         ((-6.0, 7.0), (6.0, 7.0)),
                         ((6.0, 7.0), (6.0, 3.0)),
                     ],
-                    Some("expand-groups") => &[
+                    "edit" => &[
+                        ((-6.0, 6.0), (-2.5, 5.5)),
+                        ((-6.0, 6.0), (-5.5, 2.5)),
+                        ((-2.5, 5.5), (-5.5, 2.5)),
+                        ((-2.5, 5.5), (5.5, -2.5)),
+                        ((-5.5, 2.5), (2.5, -5.5)),
+                        ((5.5, -2.5), (2.5, -5.5)),
+                    ],
+                    // 横排：三个纵向条，表示并排的三张卡片。
+                    "arrange-horizontal" => &[
+                        ((-5.5, -6.0), (-5.5, 6.0)),
+                        ((0.0, -6.0), (0.0, 6.0)),
+                        ((5.5, -6.0), (5.5, 6.0)),
+                    ],
+                    // 竖排：三个横向条，表示自上而下的三张卡片。
+                    "arrange-vertical" => &[
+                        ((-6.0, -5.5), (6.0, -5.5)),
+                        ((-6.0, 0.0), (6.0, 0.0)),
+                        ((-6.0, 5.5), (6.0, 5.5)),
+                    ],
+                    // 宫格：2×2 分栏。
+                    "arrange-grid" => &[
+                        ((-6.0, -6.0), (6.0, -6.0)),
+                        ((6.0, -6.0), (6.0, 6.0)),
+                        ((6.0, 6.0), (-6.0, 6.0)),
+                        ((-6.0, 6.0), (-6.0, -6.0)),
+                        ((-6.0, 0.0), (6.0, 0.0)),
+                        ((0.0, -6.0), (0.0, 6.0)),
+                    ],
+                    // 斜排 ↘：三个小方块沿右下方向阶梯排列。
+                    "arrange-diagonal-down" => &[
+                        ((-7.0, -7.0), (-3.0, -7.0)),
+                        ((-3.0, -7.0), (-3.0, -3.0)),
+                        ((-3.0, -3.0), (-7.0, -3.0)),
+                        ((-7.0, -3.0), (-7.0, -7.0)),
+                        ((-2.0, -2.0), (2.0, -2.0)),
+                        ((2.0, -2.0), (2.0, 2.0)),
+                        ((2.0, 2.0), (-2.0, 2.0)),
+                        ((-2.0, 2.0), (-2.0, -2.0)),
+                        ((3.0, 3.0), (7.0, 3.0)),
+                        ((7.0, 3.0), (7.0, 7.0)),
+                        ((7.0, 7.0), (3.0, 7.0)),
+                        ((3.0, 7.0), (3.0, 3.0)),
+                    ],
+                    // 斜排 ↗：同一阶梯翻转，三个小方块沿右上方向排列。
+                    "arrange-diagonal-up" => &[
+                        ((-7.0, 3.0), (-3.0, 3.0)),
+                        ((-3.0, 3.0), (-3.0, 7.0)),
+                        ((-3.0, 7.0), (-7.0, 7.0)),
+                        ((-7.0, 7.0), (-7.0, 3.0)),
+                        ((-2.0, -2.0), (2.0, -2.0)),
+                        ((2.0, -2.0), (2.0, 2.0)),
+                        ((2.0, 2.0), (-2.0, 2.0)),
+                        ((-2.0, 2.0), (-2.0, -2.0)),
+                        ((3.0, -7.0), (7.0, -7.0)),
+                        ((7.0, -7.0), (7.0, -3.0)),
+                        ((7.0, -3.0), (3.0, -3.0)),
+                        ((3.0, -3.0), (3.0, -7.0)),
+                    ],
+                    "expand-groups" => &[
                         ((0.0, 6.0), (0.0, -2.0)),
                         ((-4.0, 2.0), (0.0, -2.0)),
                         ((4.0, 2.0), (0.0, -2.0)),
                         ((-6.0, -6.0), (-6.0, 6.0)),
                         ((6.0, -6.0), (6.0, 6.0)),
                     ],
-                    Some("collapse-groups") => &[
+                    "collapse-groups" => &[
                         ((0.0, -6.0), (0.0, 2.0)),
                         ((-4.0, -2.0), (0.0, 2.0)),
                         ((4.0, -2.0), (0.0, 2.0)),
@@ -150,6 +226,14 @@ pub(crate) fn draw(
                 }
             }
             if !slot.icon_only {
+                let label_x = ax
+                    + (if slot.icon.is_some() {
+                        NODE_ACTION_TOOLBAR_ACTION_PAD
+                            + NODE_ACTION_TOOLBAR_ICON_SIZE
+                            + NODE_ACTION_TOOLBAR_ICON_GAP
+                    } else {
+                        NODE_ACTION_TOOLBAR_ACTION_PAD
+                    }) * scale;
                 let text_y = ay + (ah - world_font) / 2.0 - scale;
                 labels.push((
                     slot.label.clone(),
@@ -376,6 +460,41 @@ mod tests {
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].0, owner);
         assert_eq!(labels[0].1.len(), 3);
+    }
+
+    /// 五种排列图标都是纯图标按钮：绘制线段，不产生文字标签。
+    #[test]
+    fn arrange_icons_draw_geometry_without_labels() {
+        let theme = ThemeResource::default();
+        for icon in [
+            "arrange-horizontal",
+            "arrange-vertical",
+            "arrange-grid",
+            "arrange-diagonal-down",
+            "arrange-diagonal-up",
+        ] {
+            let (_world, nodes) = projected(vec![node("a", 0.0, 200.0)]);
+            let mut map = HashMap::new();
+            map.insert(
+                "a".to_owned(),
+                NodeActions {
+                    actions: vec![NodeAction {
+                        id: icon.into(),
+                        label: icon.into(),
+                        enabled: true,
+                        icon: Some(icon.into()),
+                        icon_only: true,
+                        ..Default::default()
+                    }],
+                    summary: None,
+                },
+            );
+            let mut geometry = Geometry::default();
+            let labels = draw(&mut geometry, &theme, &nodes, &map, None, None, 100.0);
+            assert!(positions(geometry) > 0, "{icon} 应绘制图标线段");
+            assert_eq!(labels.len(), 1, "{icon} 仍应产出横条 owner");
+            assert!(labels[0].1.is_empty(), "{icon} 纯图标按钮不应产生文字标签");
+        }
     }
 
     #[test]

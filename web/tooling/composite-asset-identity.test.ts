@@ -98,7 +98,7 @@ describe("复合资产节点身份 no-compat 审计（任务 7.7）", () => {
     );
     expect(identity).toContain('COMPOSITE_ASSET_NODE_TYPE = "composite-asset"');
     expect(identity).toContain('FILM_SET_EXTENSION_ID = "film-set"');
-    expect(identity).toContain('GAME_FURNACE_EXTENSION_ID = "game-furnace"');
+    expect(identity).toContain('CREATURE_VIDEO_ASSETS_EXTENSION_ID = "creature-video-assets"');
   });
 
   it("MCP 片场节点创建工具已更名，不再暴露 create_animation_node", () => {

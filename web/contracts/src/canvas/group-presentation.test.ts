@@ -5,6 +5,7 @@ import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 
 import { buildCanvasRenderScene } from "./render-scene.js";
 import { hiddenByCollapsedGroups } from "./group-presentation.js";
+import { createFilmSetGroupMarker } from "./film-set-group.js";
 
 function fixture() {
   const canvas = createEmptyWoohaa3ServerCanvas("groups");
@@ -21,6 +22,17 @@ function fixture() {
   canvas.nodeData = { g: { title: "作品组" }, other: { title: "另一组" }, member: { prompt: "保留成员任务", taskStatus: "processing" } };
   return canvas;
 }
+
+describe("group action bar presentation", () => {
+  it("普通 group 与片场组都声明 actionBar", () => {
+    const canvas = fixture();
+    canvas.nodeData.g = { title: "片场", filmSetGroup: createFilmSetGroupMarker() } as never;
+    const scene = buildCanvasRenderScene({ canvas });
+    const groupOf = (id: string) => scene.nodes.find(node => node.id === id)!.group;
+    expect(groupOf("g")?.actionBar).toBe(true);
+    expect(groupOf("other")?.actionBar).toBe(true);
+  });
+});
 
 describe("group collapsed presentation", () => {
   it("折叠保留徽标底边中点、隐藏递归成员与相关边；展开恢复原有尺寸和成员位置", () => {

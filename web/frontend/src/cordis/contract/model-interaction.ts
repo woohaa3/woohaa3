@@ -112,6 +112,8 @@ export type ModelPanelRenderers = {
     onChange: (next: string) => void;
     disabled: boolean;
     placeholder: string;
+    /** Enter 生成：与面板主操作共用提交门禁。 */
+    onSubmit?: () => void;
   }) => import("react").ReactNode;
   /** 快捷改写（提示词工具）回调；可选，由 Host 注入。 */
   promptSkill?: (input: { id: string; label: string; prompt: string }) => void;

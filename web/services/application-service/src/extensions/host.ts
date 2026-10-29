@@ -228,7 +228,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
      *
      * 注册键由宿主拼 `<extensionId>/<route>`，而分派端拿的是 publicPath 之后的**相对**
      * 子路径；自带前缀的注册永远查不到，对外只剩 404（2026-10 回归：local-agent /
-     * sdk-agent；game-furnace 也有两处）。这里只记诊断、不拒绝：预构建或第三方扩展
+     * sdk-agent；另有扩展也有两处）。这里只记诊断、不拒绝：预构建或第三方扩展
      * 可能沿用旧写法，把「一条路由不可达」升级成「整个扩展起不来」不划算——硬门槛放在
      * CI（web/tooling/extension-route-namespace.test.ts）。
      *

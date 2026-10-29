@@ -18,22 +18,29 @@ import { MODEL_SCRIPT_V2_VERSION } from "./model-script.js";
 import { isJsonObject } from "../validation.js";
 
 export const GROUP_APPEARANCE_SCHEMA_VERSION = 1 as const;
+/**
+ * 默认组形象：一个打开的文件夹。
+ *
+ * 标签页与后板表达「容器」，略向前倾的前袋和夹在两层之间露出的浅色纸张表达「装着内容」。
+ * 全部由 box 组成、固定配色、无动画。默认放置再绕 Y 轴转 30°，让文件夹正面基本朝向画布
+ * 镜头；否则正面与等距相机成 45°，徽标里只剩斜板的侧影。
+ */
 export const DEFAULT_GROUP_APPEARANCE_SCRIPT = `scene.group({ id: "group-root" });
-scene.material({ id: "group-frame", baseColor: "#526b83", roughness: 0.6, metallic: 0.12 });
-scene.material({ id: "group-node", baseColor: "#a5bfd3", roughness: 0.5, metallic: 0.08 });
-scene.material({ id: "group-face", baseColor: "#e0edf5", roughness: 0.65 });
-scene.material({ id: "group-accent", baseColor: "#65b7c6", roughness: 0.55 });
-scene.box({ id: "group-base", parent: "group-root", position: [0, 0.08, 0], size: [2.3, 0.16, 0.9], material: "group-frame" });
-scene.box({ id: "group-rim-left", parent: "group-root", position: [-1.08, 0.24, 0], size: [0.14, 0.32, 0.9], material: "group-frame" });
-scene.box({ id: "group-rim-right", parent: "group-root", position: [1.08, 0.24, 0], size: [0.14, 0.32, 0.9], material: "group-frame" });
-scene.segment({ id: "group-link-left", parent: "group-root", from: [-0.66, 1.18, 0], to: [0, 0.55, 0.16], width: 0.11, depth: 0.11, shape: "box", material: "group-frame" });
-scene.segment({ id: "group-link-right", parent: "group-root", from: [0.66, 1.18, 0], to: [0, 0.55, 0.16], width: 0.11, depth: 0.11, shape: "box", material: "group-frame" });
-scene.box({ id: "group-node-left", parent: "group-root", position: [-0.66, 1.32, 0], size: [0.7, 0.54, 0.38], material: "group-node" });
-scene.box({ id: "group-node-right", parent: "group-root", position: [0.66, 1.32, 0], size: [0.7, 0.54, 0.38], material: "group-node" });
-scene.box({ id: "group-body", parent: "group-root", position: [0, 0.49, 0.16], size: [0.72, 0.54, 0.4], material: "group-accent" });
-scene.box({ id: "group-face-left", parent: "group-root", position: [-0.66, 1.32, 0.2], size: [0.48, 0.3, 0.035], material: "group-face" });
-scene.box({ id: "group-face-right", parent: "group-root", position: [0.66, 1.32, 0.2], size: [0.48, 0.3, 0.035], material: "group-face" });
-scene.box({ id: "group-face-center", parent: "group-root", position: [0, 0.49, 0.37], size: [0.48, 0.3, 0.035], material: "group-face" });`;
+scene.material({ id: "group-folder-shell", baseColor: "#65b7c6", roughness: 0.55, metallic: 0.08 });
+scene.material({ id: "group-folder-inner", baseColor: "#4f93a3", roughness: 0.62, metallic: 0.04 });
+scene.material({ id: "group-folder-paper", baseColor: "#e0edf5", roughness: 0.7 });
+scene.box({ id: "group-folder-back", parent: "group-root", position: [0, 0.58, -0.09], size: [2.4, 1.16, 0.18], material: "group-folder-inner" });
+scene.box({ id: "group-folder-tab", parent: "group-root", position: [-0.72, 1.28, -0.09], size: [0.96, 0.24, 0.18], material: "group-folder-inner" });
+scene.box({ id: "group-folder-paper-back", parent: "group-root", position: [0.03, 0.55, 0.03], size: [1.9, 1.0, 0.06], material: "group-folder-paper" });
+scene.box({ id: "group-folder-paper-front", parent: "group-root", position: [-0.05, 0.47, 0.1], size: [1.72, 0.88, 0.06], material: "group-folder-paper" });
+scene.box({ id: "group-folder-pocket", parent: "group-root", position: [0, 0.35, 0.27], rotation: [-6, 0, 0], size: [2.52, 0.66, 0.16], material: "group-folder-shell" });`;
+
+/** 默认组形象的放置：只增加 30° 偏转，让文件夹正面基本朝向画布镜头。 */
+const DEFAULT_GROUP_APPEARANCE_PLACEMENT: ModelPlacement = {
+  ...DEFAULT_MODEL_PLACEMENT,
+  offset: { ...DEFAULT_MODEL_PLACEMENT.offset },
+  yaw: 30,
+};
 
 export type GroupAppearance = {
   schemaVersion: typeof GROUP_APPEARANCE_SCHEMA_VERSION;
@@ -55,7 +62,7 @@ function modelFromScript(modelScript: string, revision = 1): ModelDefinition {
     modelScript,
     modelScriptLanguage: "javascript",
     modelScriptVersion: MODEL_SCRIPT_V2_VERSION,
-    placement: DEFAULT_MODEL_PLACEMENT,
+    placement: DEFAULT_GROUP_APPEARANCE_PLACEMENT,
     revision,
   });
   return {
@@ -63,7 +70,10 @@ function modelFromScript(modelScript: string, revision = 1): ModelDefinition {
     modelScriptLanguage: "javascript",
     modelScriptVersion: MODEL_SCRIPT_V2_VERSION,
     contentVersion: normalized,
-    placement: { ...DEFAULT_MODEL_PLACEMENT, offset: { ...DEFAULT_MODEL_PLACEMENT.offset } },
+    placement: {
+      ...DEFAULT_GROUP_APPEARANCE_PLACEMENT,
+      offset: { ...DEFAULT_GROUP_APPEARANCE_PLACEMENT.offset },
+    },
   };
 }
 

@@ -20,7 +20,7 @@ export type CompositeAssetAdapter = {
   owner: string;
   matchesNode?(node: ServerCanvas["document"]["nodes"][number], data: CanvasNodeData): boolean;
   /**
-   * 业务类型显示名（如「片场」「游戏炼丹炉」）。
+   * 业务类型显示名（如「片场」或第三方业务类型）。
    *
    * 由可信 adapter 按严格身份声明，宿主把结果作为复合资产节点的 `typeLabel` 下发，供渲染层在
    * 画布浮动名称面板中标注聚合节点的**业务类型**（change:
@@ -193,7 +193,7 @@ export class CompositeAssetRegistry {
     return qualities;
   }
   /**
-   * 按严格身份解析每个复合资产节点的**业务类型显示名**（如「片场」「游戏炼丹炉」）。
+   * 按严格身份解析每个复合资产节点的**业务类型显示名**（如「片场」或第三方业务类型）。
    *
    * 由可信 adapter 的 `label` 声明；宿主把它作为该节点的 `typeLabel` 注入 scene mapper，让画布
    * 浮动名称面板标注聚合节点的业务类型，而不是通用「复合资产」

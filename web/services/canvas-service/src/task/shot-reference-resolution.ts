@@ -14,6 +14,8 @@
  */
 import {
   decodeFilmSetNodeData,
+  FILM_SET_SHOT_PREVIEW_NODE_TYPE,
+  managedShotPreviewOwnershipOf,
   readFilmSetGroupMarker,
   filmSetAnimationsOf,
   readShotReferenceAssetLink,
@@ -24,6 +26,7 @@ import {
   type CanvasNodeInputMapping,
   type ServerCanvas,
   type ShotReferenceAssetLink,
+  type ShotPreviewOwnership,
   type StoredAsset
 } from "@woohaa3/contracts";
 
@@ -51,7 +54,27 @@ export const readShotReferenceLink = (asset: StoredAsset | undefined): ShotRefer
   readShotReferenceAssetLink(asset?.metadata);
 
 /**
- * 校验来源预览归属：预览节点必须属于一个**仍在本画布**的片场，且其镜头仍存在。
+ * 读取来源节点的镜头归属。
+ *
+ * 片场组迁移后，镜头卡片不再是 `film-set-shot-preview`，而是片场组拥有的 owner-managed
+ * image/video 媒体节点；归属由 `managedBy` 与 `mediaContent` 互相印证（`managedShotPreviewOwnershipOf`）。
+ * 旧画布仍保留 `shotPreview` 形态。两种形态之外的节点一律视为非镜头参考来源。
+ */
+function shotReferenceSourceOf(input: {
+  canvas: ServerCanvas;
+  nodeData: Record<string, CanvasNodeData | undefined>;
+  sourceNodeId: string;
+}): { ownership: ShotPreviewOwnership; managed: boolean; nodeType: string } | null {
+  const node = input.canvas.document.nodes.find((entry) => entry.id === input.sourceNodeId);
+  if (!node) return null;
+  const legacy = shotPreviewOwnershipOf(input.nodeData[input.sourceNodeId]);
+  if (legacy) return node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE ? { ownership: legacy, managed: false, nodeType: node.type } : null;
+  const managed = managedShotPreviewOwnershipOf(input.nodeData[input.sourceNodeId]);
+  return managed && (node.type === "image" || node.type === "video") ? { ownership: managed, managed: true, nodeType: node.type } : null;
+}
+
+/**
+ * 校验来源镜头归属：来源节点必须属于一个**仍在本画布**的片场，且其镜头仍存在。
  * 归属不成立时明确失败，绝不猜时长或改版本。
  */
 export function verifyShotReferenceOwnership(input: {
@@ -59,16 +82,21 @@ export function verifyShotReferenceOwnership(input: {
   nodeData: Record<string, CanvasNodeData | undefined>;
   sourceNodeId: string;
 }): { ok: true; filmSetNodeId: string; clipId: string } | { ok: false; reason: string } {
-  const ownership = shotPreviewOwnershipOf(input.nodeData[input.sourceNodeId]);
-  if (!ownership || !input.canvas.document.nodes.some(node => node.id === input.sourceNodeId && node.type === "film-set-shot-preview")) {
+  const source = shotReferenceSourceOf(input);
+  if (!source) {
     return { ok: false, reason: `镜头参考来源 ${input.sourceNodeId} 不是拍摄镜头预览节点` };
   }
+  const ownership = source.ownership;
   const filmSetNode = input.canvas.document.nodes.find((node) => node.id === ownership.filmSetNodeId);
   if (!filmSetNode) {
     return { ok: false, reason: `镜头参考所属片场 ${ownership.filmSetNodeId} 不在当前画布中` };
   }
-  if (!clipForOwner(input.nodeData[ownership.filmSetNodeId], ownership.clipId)) {
+  const clip = clipForOwner(input.nodeData[ownership.filmSetNodeId], ownership.clipId);
+  if (!clip) {
     return { ok: false, reason: `镜头参考的镜头 ${ownership.clipId} 已不存在` };
+  }
+  if (source.managed && source.nodeType !== (clip.kind === "dynamic" ? "video" : "image")) {
+    return { ok: false, reason: `镜头参考来源 ${input.sourceNodeId} 与镜头类型不一致` };
   }
   return { ok: true, filmSetNodeId: ownership.filmSetNodeId, clipId: ownership.clipId };
 }

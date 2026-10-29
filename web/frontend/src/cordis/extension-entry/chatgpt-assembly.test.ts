@@ -45,7 +45,6 @@ const RESIDENT_METADATA: ExtensionFrontendMetadata = {
 const BUSINESS_IDS = [
   "oauth-agent",
   "film-set",
-  "game-furnace",
   "runninghub-provider",
   "prompt-snippets",
   "task-activity"

@@ -191,7 +191,7 @@ export type BevyRenderNode = {
 export type BevyNodeAction = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download" | "arrange-horizontal" | "arrange-vertical" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
+  icon?: "download" | "edit" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 稳定动作 ID；Rust 命中后回传，贡献据此派发。 */
   id: string;
@@ -381,6 +381,13 @@ export type BevyGroupPresentation = {
   badgeScale?: number;
   /** 仅可写单选组显示徽标自己的缩放把手，含收起态。 */
   badgeResizable?: boolean;
+  /**
+   * 组容器是否绘制节点顶部操作横条。
+   *
+   * 普通 group 与片场组都声明该标志：展开/收起、排列、整理/解组等动作由
+   * `canvas.node-action` 贡献决定实际呈现；Rust 只消费该声明，不按业务 ID 推断。
+   */
+  actionBar?: boolean;
   /** 可编辑标题（nodeData.title）；缺省空串。 */
   title: string;
   /** 直接成员数。 */

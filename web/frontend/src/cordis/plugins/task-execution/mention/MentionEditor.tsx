@@ -189,7 +189,7 @@ function absoluteOffset(key: string, offset: number): number | null {
 /**
  * Enter 提交策略（change: 2026-10-09-improve-canvas-workflow，任务 3.2）。
  *
- * 与 textarea 共用 `resolvePromptSubmitKey`：Enter 默认换行，Ctrl/⌘+Enter 生成；
+ * 与 textarea 共用 `resolvePromptSubmitKey`：Enter 生成、Shift+Enter 换行；
  * 中文输入法组合与 `@`/`#` 候选菜单优先消费 Enter。
  */
 function SubmitPlugin({

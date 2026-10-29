@@ -7,10 +7,15 @@
 //! Film sets are group containers now, so the same plinth also stands in for the empty scene
 //! inside the group's identity badge: the badge shows the brand model until the film set has a
 //! scene binding or an authored ground, then the real scene composition replaces it.
+//!
+//! The plinth lies on the canvas floor: its footprint is derived in ground space so the screen
+//! silhouette turns with [`CANVAS_CAMERA_PITCH`] like every other model in the scene.
 use crate::{
     app::{CurrentScene, FocusRig},
     canvas_query::{group_model, scope},
-    isometric_grid::{canvas_camera_rotation, canvas_point_to_world, view_rotation},
+    isometric_grid::{
+        CANVAS_CAMERA_PITCH, canvas_camera_rotation, canvas_point_to_world, view_rotation,
+    },
     theme::ThemeResource,
 };
 use bevy::{
@@ -128,9 +133,9 @@ pub(crate) fn overview_layers(overview: bool) -> RenderLayers {
 /// Project accepted scope vertices onto the ground along the overview camera rays, inset from the
 /// scope boundary, then extrude a themed plinth downward.
 fn plinth_layout(scope: &scope::ScopeGeometry) -> Layout {
-    // A diamond plinth keeps two vertical side faces visible to the fixed isometric camera. Both
-    // scope shapes map to a diamond footprint: a diamond scope is inset around its center, while a
-    // rect scope uses the inscribed diamond of its accepted bounds.
+    // A diamond plinth keeps two vertical side faces visible to the isometric camera. Both scope
+    // shapes map to a diamond footprint: a diamond scope is inset around its center, while a rect
+    // scope uses an inscribed ground square (see [`ground_diamond`]).
     let footprint = if scope.ground.is_some() {
         scope
             .vertices
@@ -138,7 +143,7 @@ fn plinth_layout(scope: &scope::ScopeGeometry) -> Layout {
     } else {
         let rx = scope.aabb.width * 0.5 * PLINTH_INSET;
         let ry = scope.aabb.height * 0.5 * PLINTH_INSET;
-        diamond(scope.center, rx, ry)
+        ground_diamond(scope.center, rx, ry)
     };
     plinth_layout_from_footprint(footprint)
 }
@@ -148,7 +153,7 @@ fn plinth_layout(scope: &scope::ScopeGeometry) -> Layout {
 fn badge_plinth_layout(node: &crate::protocol::GraphNode) -> Layout {
     let badge = group_model::badge_rect(node);
     let center = Vec2::new(badge.x + badge.z * 0.5, badge.y + badge.w * 0.5);
-    plinth_layout_from_footprint(diamond(
+    plinth_layout_from_footprint(ground_diamond(
         center,
         badge.z * 0.5 * BADGE_PLINTH_INSET,
         badge.w * 0.5 * BADGE_PLINTH_INSET,
@@ -163,6 +168,23 @@ fn diamond(center: Vec2, rx: f32, ry: f32) -> [Vec2; 4] {
         Vec2::new(center.x, center.y + ry),
         Vec2::new(center.x - rx, center.y),
     ]
+}
+
+/// Ground-aligned diamond that fits inside the given canvas half extents.
+///
+/// A footprint authored purely in canvas space unprojects to the ground with the same camera and
+/// projects back to the very same silhouette at every pitch, so the placeholder would silently
+/// ignore `CANVAS_CAMERA_PITCH` while every real model turns with the camera. Laying the footprint
+/// on the canvas floor instead pins the screen edge slope to `sin(pitch)`: the plinth turns with
+/// the isometric grid and still fits the rect it fills.
+fn ground_diamond(center: Vec2, half_width: f32, half_height: f32) -> [Vec2; 4] {
+    let slope = CANVAS_CAMERA_PITCH.sin().clamp(0.0, 1.0);
+    let rx = if slope > f32::EPSILON {
+        half_width.min(half_height / slope)
+    } else {
+        half_width
+    };
+    diamond(center, rx, rx * slope)
 }
 
 fn plinth_layout_from_footprint(footprint: [Vec2; 4]) -> Layout {

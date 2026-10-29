@@ -115,7 +115,16 @@ export function modelBounds(input: FocusTargetInput): ModelBounds | null {
   const group = sceneInput(input).groupLayout;
   if (group) {
     const local = groupSceneBounds(input);
-    if (!local) return null;
+    if (!local) {
+      // 空片场（无可见绑定、也无地面）在组容器里同样要有可进入的聚焦工作区：以徽标锚点
+      // 和节点矩形派生的默认半径取景，与复合资产空片场一致，不退化成「目标不可用」。
+      const half = Math.max(1, Math.min(size.width, size.height) / 4);
+      const aabb: Aabb = {
+        min: [group.anchor[0] - half, group.anchor[1] - half, group.anchor[2] - half],
+        max: [group.anchor[0] + half, group.anchor[1] + half, group.anchor[2] + half]
+      };
+      return { aabb, center: group.anchor, radius: Math.sqrt(3) * half, anchor: group.anchor };
+    }
     const aabb = transformAabb({ translation: group.anchor, rotation: quatFromEulerYXZDegrees([0, input.placement?.yaw ?? 0, 0]), scale: [group.unit, group.unit, group.unit] }, local);
     const { center, radius } = aabbCenterRadius(aabb);
     return { aabb, center, radius, anchor: group.anchor };

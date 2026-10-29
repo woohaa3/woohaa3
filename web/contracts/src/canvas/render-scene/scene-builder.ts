@@ -449,6 +449,9 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           collapsed,
           badgeScale: clampGroupBadgeScale(input.groupBadgeScaleOverrides?.get(node.id) ?? data?.groupBadgeScale ?? 1),
           badgeResizable: input.groupBadgeResizable === true && selectedIds.size === 1 && selectedIds.has(node.id),
+          // 所有 group（普通组与片场组）都绘制节点顶部操作横条；具体动作仍由
+          // `canvas.node-action` 贡献按通用能力与节点身份决定。
+          actionBar: true,
           // 可信 adapter 的声明同时覆盖 group 徽标的场景组合（片场迁移后不再有 compositeAsset）。
           ...(input.geometryQualities?.get(node.id) ? { geometryQuality: input.geometryQualities.get(node.id) } : {}),
           ...(resource?.aabb ? { modelBounds: { aabb: resource.aabb, extent: resource.extent } } : {})

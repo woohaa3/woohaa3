@@ -21,6 +21,8 @@ const BLOCK_SIZE: usize = 16;
 struct PanelKey {
     rect: [f32; 4],
     drop_target: bool,
+    /// 收起态不绘制背板：必须进入缓存键，否则布局矩形不变时会留下旧背板颜色。
+    collapsed: bool,
     theme: u64,
     sort_z: f32,
 }
@@ -76,6 +78,7 @@ pub(crate) fn sync_group_panels(
         let key = PanelKey {
             rect: [layout.x, layout.y, layout.width, layout.height],
             drop_target: presentation.drop_target,
+            collapsed: presentation.collapsed,
             theme: theme_key,
             sort_z,
         };
@@ -89,6 +92,7 @@ pub(crate) fn sync_group_panels(
                 }
                 let rebuilt = panel.key.rect[2..] != key.rect[2..]
                     || panel.key.drop_target != key.drop_target
+                    || panel.key.collapsed != key.collapsed
                     || panel.key.theme != key.theme;
                 if rebuilt {
                     let group = node.group.as_ref().expect("group presentation");
@@ -280,5 +284,100 @@ mod tests {
         assert_eq!(panel_count(&mut world), 0);
         assert!(world.get_entity(panel_entity).is_err());
         assert_eq!(world.resource::<Assets<Mesh>>().len(), 0);
+    }
+
+    #[test]
+    fn collapsing_rebuilds_panel_to_an_empty_mesh() {
+        let mut world = world();
+        {
+            let scene = world.resource::<CurrentScene>().0.clone();
+            world.resource_mut::<NodeIndex>().rebuild(&scene);
+        }
+        let entity = world
+            .spawn((
+                CanvasNodeId("g".into()),
+                CanvasLayout {
+                    x: 10.,
+                    y: 20.,
+                    width: 300.,
+                    height: 200.,
+                },
+                CanvasDepth {
+                    index: 0,
+                    render: 0,
+                    z: 10.,
+                },
+                GroupPresentation {
+                    drop_target: false,
+                    collapsed: false,
+                    badge: false,
+                    badge_scale: 1.,
+                    member_count: 2,
+                    running: false,
+                    resizable: false,
+                },
+            ))
+            .id();
+        world.run_system_once(sync_group_panels).unwrap();
+        world.flush();
+        let expanded = world
+            .query::<&GroupPanel>()
+            .single(&world)
+            .unwrap()
+            .mesh
+            .clone();
+        assert!(
+            positions(world.resource::<Assets<Mesh>>().get(&expanded).unwrap()) > 0,
+            "展开态背板有几何"
+        );
+        // 收起不改变结构矩形（徽标位置稳定），面板仍必须重建为空，否则残留背板颜色。
+        set_collapsed(&mut world, entity, true);
+        world.run_system_once(sync_group_panels).unwrap();
+        world.flush();
+        let collapsed = world
+            .query::<&GroupPanel>()
+            .single(&world)
+            .unwrap()
+            .mesh
+            .clone();
+        assert_ne!(collapsed, expanded, "收起态必须重建面板");
+        // 空几何在 Bevy 里仍是退化兜底三角形（3 顶点、远离视锥），因此用顶点数表达「无背板」。
+        assert_eq!(
+            positions(world.resource::<Assets<Mesh>>().get(&collapsed).unwrap()),
+            3,
+            "收起态背板不绘制几何"
+        );
+        // 展开后恢复背板几何。
+        set_collapsed(&mut world, entity, false);
+        world.run_system_once(sync_group_panels).unwrap();
+        world.flush();
+        let restored = world
+            .query::<&GroupPanel>()
+            .single(&world)
+            .unwrap()
+            .mesh
+            .clone();
+        assert!(
+            positions(world.resource::<Assets<Mesh>>().get(&restored).unwrap()) > 0,
+            "重新展开恢复背板"
+        );
+    }
+
+    fn positions(mesh: &Mesh) -> usize {
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            .map_or(0, |attribute| attribute.len())
+    }
+
+    /// 收起态同时写在协议场景与 ECS 组件上：面板几何读协议，缓存键读组件。
+    fn set_collapsed(world: &mut World, entity: Entity, collapsed: bool) {
+        world
+            .resource_mut::<CurrentScene>()
+            .0
+            .nodes
+            .iter_mut()
+            .for_each(|node| node.group.as_mut().unwrap().collapsed = collapsed);
+        let mut presentation = world.get::<GroupPresentation>(entity).unwrap().clone();
+        presentation.collapsed = collapsed;
+        world.entity_mut(entity).insert(presentation);
     }
 }

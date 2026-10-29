@@ -401,4 +401,10 @@ describe("group footer layout projection", () => {
     expect(getGroupLayoutSizes(nodes, new Map([["g", {width: 280, height: 220}]])).get("g"))
       .toEqual({width: 280, height: 220});
   });
+  it("手工缩到成员边界后按存储尺寸渲染，不再被左右/上留白撑回", () => {
+    // 成员右边界贴住组框右边、底部留出 80 页脚：历史上宽度会被 +40 撑回 440。
+    const nodes = [node("g", {x: 0, y: 0}, {type: "group", width: 400, height: 400}),
+      node("m", {x: 200, y: 220}, {parentId: "g"})];
+    expect(getGroupLayoutSizes(nodes).get("g")).toEqual({width: 400, height: 400});
+  });
 });

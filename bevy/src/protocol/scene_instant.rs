@@ -215,7 +215,18 @@ impl NodeActions {
         for action in &self.actions {
             if !matches!(action.tone.as_str(), "" | "primary" | "neutral")
                 || action.icon.as_deref().is_some_and(|icon| {
-                    !matches!(icon, "download" | "collapse-groups" | "expand-groups")
+                    !matches!(
+                        icon,
+                        "download"
+                            | "edit"
+                            | "arrange-horizontal"
+                            | "arrange-vertical"
+                            | "arrange-grid"
+                            | "arrange-diagonal-up"
+                            | "arrange-diagonal-down"
+                            | "collapse-groups"
+                            | "expand-groups"
+                    )
                 })
                 || action.icon_only && action.icon.is_none()
             {

@@ -54,6 +54,8 @@ import {
   NODE_ACTION_TOOLBAR_CHEVRON_WIDTH,
   NODE_ACTION_TOOLBAR_FONT,
   NODE_ACTION_TOOLBAR_GAP,
+  NODE_ACTION_TOOLBAR_ICON_GAP,
+  NODE_ACTION_TOOLBAR_ICON_SIZE,
   NODE_ACTION_TOOLBAR_PAD,
   NODE_ACTION_TOOLBAR_SEPARATOR,
   NODE_ACTION_TOOLBAR_SUMMARY_GAP,
@@ -252,7 +254,7 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
     const scene = buildCanvasRenderScene({ canvas: groupCanvas(), theme: defaultAppTheme(), selection: { nodes: ["g"] } });
     const g = scene.nodes.find((node) => node.id === "g")!;
     expect(g.type).toBe("group");
-    expect(g.group).toEqual({ title: "", memberCount: 2, outputCapableLeafCount: 2, collapsed: false, badgeScale: 1, badgeResizable: false });
+    expect(g.group).toEqual({ title: "", memberCount: 2, outputCapableLeafCount: 2, collapsed: false, badgeScale: 1, badgeResizable: false, actionBar: true });
     // 单选 group 时仍应可 resize（group 支持缩放）。
     expect(g.resizable).toBe(true);
   });
@@ -561,10 +563,10 @@ describe("buildCanvasRenderScene", () => {
     ],edges:[],updatedAt:"2026-10-08T00:00:00Z"}});
     const scene = buildCanvasRenderScene({canvas:current});
     expect(scene.nodes[0]).toMatchObject({width:248,height:232,modelPreview:{targetOffset:[0,0,0]}});
-    // 默认视角正对模型正面（方位 0），保留 30° 俯视。
+    // 默认视角正对模型正面（方位 0），俯仰跟随画布镜头 pitch。
     expect(scene.nodes[0].modelPreview).toMatchObject({
       azimuth: DEFAULT_MODEL_PREVIEW.azimuth,
-      elevation: DEFAULT_MODEL_PREVIEW.elevation
+      elevation: CANVAS_CAMERA_PITCH
     });
     expect(DEFAULT_MODEL_PREVIEW.azimuth).toBe(0);
     // 旧小尺寸只在呈现中按类别下限 clamp，不回写文档。
@@ -1400,6 +1402,8 @@ describe("dragAttach 拖动粘连瞬时投影（change: add-drag-touch-connectio
       ["NODE_ACTION_TOOLBAR_PAD", NODE_ACTION_TOOLBAR_PAD],
       ["NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH", NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH],
       ["NODE_ACTION_TOOLBAR_ACTION_PAD", NODE_ACTION_TOOLBAR_ACTION_PAD],
+      ["NODE_ACTION_TOOLBAR_ICON_SIZE", NODE_ACTION_TOOLBAR_ICON_SIZE],
+      ["NODE_ACTION_TOOLBAR_ICON_GAP", NODE_ACTION_TOOLBAR_ICON_GAP],
       ["NODE_ACTION_TOOLBAR_CHEVRON_WIDTH", NODE_ACTION_TOOLBAR_CHEVRON_WIDTH],
       ["NODE_ACTION_TOOLBAR_SEPARATOR", NODE_ACTION_TOOLBAR_SEPARATOR],
       ["NODE_ACTION_TOOLBAR_FONT", NODE_ACTION_TOOLBAR_FONT],

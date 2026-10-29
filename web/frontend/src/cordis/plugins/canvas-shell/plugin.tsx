@@ -22,7 +22,7 @@ import { nodeSelectionStore } from "../../services/selection-store.js";
 import { definePlugin } from "../../plugin.js";
 import { NodeDownloadService } from "../../services/node-download.js";
 import { NodeDownloadStatus } from "./node-download-status.js";
-import { resolveNodeDownloadAvailability, resolveNodeActionToolbarView, resolveSelectionActionToolbarView } from "./node-action-toolbar-view.js";
+import { resolveNodeDownloadAvailability, resolveContainerFocusEdit, resolveNodeActionToolbarView, resolveSelectionActionToolbarView } from "./node-action-toolbar-view.js";
 import { describeNodeActions, describeSelectionActions, nodeActionSettingsStore, routeNodeActionHit, routeSelectionActionHit } from "./node-action-host.js";
 import { setNodeActionBridge } from "./node-action-bridge.js";
 import type { BevyNodeActionsPresentation } from "@woohaa3/contracts";
@@ -70,7 +70,8 @@ export function canvasShellExtension(): Plugin.Function<void> {
           const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
           const summary = canvas ? groupToolbarSummary(canvas, nodeId) : null;
           if (!canvas || nodeType !== "group" || canvas.nodeData[nodeId]?.groupCollapsed !== true || !summary) return null;
-          return { label: "展开", icon: "expand-groups" as const, iconOnly: true, enabled: writable, tone: "primary" as const,
+          // 图标 + 文字：与其它横条动作同一栅格，不占用主色调强调。
+          return { label: "展开", icon: "expand-groups" as const, enabled: writable,
             ...(writable ? {} : { reason: "当前画布只读" }), summary };
         },
         activate: ({ nodeId, nodeType, writable }) => {
@@ -95,7 +96,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
           const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
           const summary = canvas ? groupToolbarSummary(canvas, nodeId) : null;
           if (!canvas || nodeType !== "group" || canvas.nodeData[nodeId]?.groupCollapsed === true || !summary) return null;
-          return { label: "收起", icon: "collapse-groups" as const, iconOnly: true, enabled: writable, tone: "primary" as const,
+          return { label: "收起", icon: "collapse-groups" as const, enabled: writable,
             ...(writable ? {} : { reason: "当前画布只读" }), summary };
         },
         activate: ({ nodeId, nodeType, writable }) => {
@@ -105,6 +106,27 @@ export function canvasShellExtension(): Plugin.Function<void> {
           if (!canvas || data?.groupCollapsed === true) return;
           void ctx.canvasEdit.record([{ type: "nodeData.patch", nodeId,
             value: { groupCollapsed: true }, expectedNodeData: { [nodeId]: data ?? null } }], "收起组");
+        }
+      });
+      // 片场（自带模型聚焦工作区的容器）在画布横条上提供明确的「编辑」入口（图标 + 文字）；
+      // 它与徽标双击进入同一个聚焦工作区。普通 group 不出现该动作，宿主不按业务 ID 分支。
+      const containerFocusEdit = (nodeId: string) => resolveContainerFocusEdit({
+        canvas: workingCanvasOf(woohaa3CanvasStore.getState()) ?? null,
+        nodeId,
+        nodeCapabilities: ctx.nodeImplementations
+      });
+      const removeContainerFocusEditAction = ctx.slots.register("canvas.node-action", {
+        id: "container-focus-edit",
+        owner: CANVAS_SHELL_PLUGIN_ID,
+        order: -20,
+        available: ({ nodeId, nodeType }) => nodeType === "group" && containerFocusEdit(nodeId) !== null,
+        describe: ({ nodeId }) => containerFocusEdit(nodeId) === null
+          ? null
+          : { label: "编辑", icon: "edit" as const, enabled: true },
+        activate: ({ nodeId }) => {
+          const kind = containerFocusEdit(nodeId);
+          if (!kind) return;
+          void ctx.canvasNavigation.requestEnterNodeFocus({ nodeId, kind, owner: "direct" });
         }
       });
       // 节点顶部操作横条的**宿主下载贡献**（change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.2）。
@@ -227,7 +249,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
         render: () => <NodeDownloadStatus service={downloads} />
       });
       ctx.effect(() => () => {
-        offBridge(); offActionSlots(); offSelectionActionSlots(); offDownload(); removeDownloadAction(); removeCollapsedGroupAction(); removeExpandedGroupAction(); removeDownloadStatus();
+        offBridge(); offActionSlots(); offSelectionActionSlots(); offDownload(); removeDownloadAction(); removeContainerFocusEditAction(); removeCollapsedGroupAction(); removeExpandedGroupAction(); removeDownloadStatus();
         nodeActionSettingsStore.close();
         downloads.dispose();
       }, "canvas-shell-downloads");

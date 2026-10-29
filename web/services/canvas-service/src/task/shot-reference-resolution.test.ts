@@ -9,6 +9,7 @@ import {
   canonicalFilmSetFields,
   canonicalShotPreviewFields,
   createFilmSetSnapshot,
+  createFilmSetGroupMarker,
   createEmptyWoohaa3ServerCanvas,
   decodeFilmSetNodeData,
   filmSetAnimationsOf,
@@ -97,6 +98,21 @@ function fixture() {
   return { canvas, clipId, previewId, mapping, nodeData };
 }
 
+/** 片场组迁移后的镜头卡片：owner-managed 的 image/video 节点，不再写 `shotPreview`。 */
+function managedFixture(nodeType: "video" | "image" = "video") {
+  const owned = fixture();
+  const film = owned.canvas.document.nodes.find((entry) => entry.id === "film")!;
+  film.type = "group";
+  owned.nodeData.film = { filmSetGroup: createFilmSetGroupMarker({ clips: [{ id: owned.clipId, duration: 4 }] }) } as never;
+  const node = owned.canvas.document.nodes.find((entry) => entry.id === owned.previewId)!;
+  node.type = nodeType;
+  owned.nodeData[owned.previewId] = {
+    managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: "film", entityId: owned.clipId, lifecycle: "owner-managed" },
+    mediaContent: { providerId: "film-set.shot", schemaVersion: 1, payload: { filmSetNodeId: "film", clipId: owned.clipId } }
+  } as never;
+  return owned;
+}
+
 function videoAsset(id: string, link: { filmSetNodeId: string; clipId: string; contentIdentity: string; profileKey: string }): StoredAsset {
   return {
     id,
@@ -122,6 +138,23 @@ describe("verifyShotReferenceOwnership（归属校验）", () => {
     const missingFilmSet = JSON.parse(JSON.stringify(canvas)) as ServerCanvas;
     missingFilmSet.document.nodes = missingFilmSet.document.nodes.filter((node) => node.id !== "film");
     expect(verifyShotReferenceOwnership({ canvas: missingFilmSet, nodeData, sourceNodeId: previewId }).ok).toBe(false);
+  });
+
+  it("片场组浮出的 owner-managed 镜头节点同样通过归属校验", () => {
+    const { canvas, nodeData, previewId, clipId } = managedFixture();
+    expect(verifyShotReferenceOwnership({ canvas, nodeData, sourceNodeId: previewId }))
+      .toEqual({ ok: true, filmSetNodeId: "film", clipId });
+    expect(resolveShotReferenceAsset({ canvas, nodeData, mapping: { slotId: "slot-1", sourceNodeId: previewId, role: "shot_reference", sortKey: "0", sourceAssetIds: [] } }))
+      .toMatchObject({ ok: false, waiting: true });
+  });
+
+  it("托管节点类型与镜头 kind 不一致或缺少托管归属时明确失败", () => {
+    const wrongType = managedFixture("image");
+    expect(verifyShotReferenceOwnership({ canvas: wrongType.canvas, nodeData: wrongType.nodeData, sourceNodeId: wrongType.previewId }).ok).toBe(false);
+    // 普通 image 节点 + 伪造 managedBy（mediaContent 不是 film-set.shot）不是镜头来源。
+    const fake = managedFixture();
+    fake.nodeData[fake.previewId] = { managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: "film", entityId: fake.clipId, lifecycle: "owner-managed" } } as never;
+    expect(verifyShotReferenceOwnership({ canvas: fake.canvas, nodeData: fake.nodeData, sourceNodeId: fake.previewId }).ok).toBe(false);
   });
 });
 

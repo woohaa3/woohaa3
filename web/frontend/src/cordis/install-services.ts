@@ -556,7 +556,7 @@ export async function installCanvasPageServices(
   /**
    * 通用扩展画布命令能力（change: 2026-10-10-add-game-furnace-extension，design D4）。
    *
-   * 扩展（如 game-furnace 工作区）经此提交**通用语义画布命令**（`CanvasCommand[]`）；只暴露
+   * 扩展（如片场工作区）经此提交**通用语义画布命令**（`CanvasCommand[]`）；只暴露
    * `session` 根（canonical 权威）而非页面投影（working overlay，扩展不应写它）。经受保护
    * `session.submitCommands` 提交纯命令，扩展不得触碰 store/命令内部结构。宿主不出现任何
    * 业务插件分支。

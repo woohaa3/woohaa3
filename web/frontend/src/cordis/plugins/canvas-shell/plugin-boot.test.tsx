@@ -13,7 +13,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
-import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, createFilmSetGroupMarker } from "@woohaa3/contracts";
 import { CompositeAssetRegistry } from "../../../extension-api/composite-assets.js";
 import { createNodeImplementationRegistry } from "../../../extension-api/node-implementations.js";
 import { SlotRegistry } from "../../slots.js";
@@ -123,7 +123,7 @@ describe("canvas-shell 插件装配", () => {
 
     const presentation = readNodeActionToolbars().get("group");
     expect(presentation).toEqual({
-      actions: [{ id: "group-expand", label: "展开", enabled: false, tone: "primary", icon: "expand-groups", iconOnly: true }],
+      actions: [{ id: "group-expand", label: "展开", enabled: false, icon: "expand-groups" }],
       summary: "组 · 3 个节点 · 镜头组"
     });
   });
@@ -155,8 +155,50 @@ describe("canvas-shell 插件装配", () => {
     });
 
     expect(readNodeActionToolbars().get("group")).toEqual({
-      actions: [{ id: "group-collapse", label: "收起", enabled: true, tone: "primary", icon: "collapse-groups", iconOnly: true }],
+      actions: [{ id: "group-collapse", label: "收起", enabled: true, icon: "collapse-groups" }],
       summary: "组 · 3 个节点 · 镜头组"
     });
+  });
+
+  it("片场选中时横条提供图标加文字的非主色「编辑」，普通 group 不出现", async () => {
+    const base = createEmptyWoohaa3ServerCanvas("woohaa3-focus-edit-canvas", "2026-10-25T00:00:00.000Z");
+    const canvas = {
+      ...base,
+      revision: 1,
+      document: { ...base.document, nodes: [
+        { id: "film", type: "group", position: { x: 0, y: 0 }, width: 420, height: 280 },
+        { id: "plain", type: "group", position: { x: 600, y: 0 }, width: 420, height: 280 }
+      ] },
+      nodeData: { film: { filmSetGroup: createFilmSetGroupMarker() }, plain: {} }
+    };
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas as never);
+    const select = (nodeId: string) => nodeSelectionStore.setFromRuntime(
+      { nodeIds: [nodeId], primaryNodeId: nodeId, editingFocus: false }, new Set([nodeId])
+    );
+    runtime = await startFrontendScope(new Context(), {
+      install: (ctx) => {
+        ctx.provide("slots" as never, new SlotRegistry() as never);
+        const mediaContent = createMediaContentService({ canvas: () => canvas as never, subscribe: () => () => {}, writable: () => false, submit: async () => {} });
+        ctx.provide("mediaContent" as never, mediaContent as never);
+        ctx.effect(() => () => mediaContent.dispose(), "test-media-content");
+        const compositeAssets = new CompositeAssetRegistry();
+        ctx.provide("compositeAssets" as never, compositeAssets as never);
+        ctx.provide("nodeImplementations" as never, createNodeImplementationRegistry(compositeAssets) as never);
+        ctx.provide("canvasLocate" as never, {} as never);
+        ctx.provide("canvasEdit" as never, {} as never);
+        ctx.provide("canvasSession" as never, { isWritable: () => false } as never);
+        ctx.provide("canvasNavigation" as never, { getSnapshot: () => ({ mode: { type: "canvas" } }), requestEnterNodeFocus: async () => ({ ok: true }) } as never);
+        ctx.provide("canvasRuntime" as never, { controller: () => null } as never);
+      },
+      plugins: [{ id: CANVAS_SHELL_PLUGIN_ID, required: true, plugin: canvasShellExtension() }]
+    });
+
+    select("film");
+    const film = readNodeActionToolbars().get("film");
+    expect(film?.actions).toContainEqual({ id: "container-focus-edit", label: "编辑", icon: "edit", enabled: true });
+    expect(film?.actions.find(action => action.id === "container-focus-edit")?.tone).toBeUndefined();
+    select("plain");
+    expect(readNodeActionToolbars().get("plain")?.actions.map(action => action.id) ?? [])
+      .not.toContain("container-focus-edit");
   });
 });

@@ -43,7 +43,11 @@ export const filmSetGroupModelPreparation: NodeModelPreparation = {
       models.push({ itemId: binding.bindingId, ops: execution.scene.ops, placement: model.value.placement, localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } });
     }
     const ready = new Set(models.map(model => model.itemId));
+    // 来源卡片已被删除的 binding 只保留绑定与诊断，不再渲染占位几何：
+    // 删除卡片就是让该对象从片场里消失。
+    const missingSources = new Set(prepared.diagnostics.filter(diagnostic => diagnostic.code === "missing-source").map(diagnostic => diagnostic.bindingId));
     for (const binding of activeFilmSetSceneBindings(prepared.marker)) {
+      if (missingSources.has(binding.bindingId)) continue;
       const failed = prepared.diagnostics.some(diagnostic => diagnostic.bindingId === binding.bindingId)
         || (binding.kind === "model3d" && !ready.has(binding.bindingId));
       if (!failed) continue;

@@ -32,10 +32,11 @@ import {
   GROUP_STRUCTURE_ACTION_LABELS,
   describeGroupStructureAction,
   runGroupStructureAction,
+  type GroupStructureActionKind,
   type GroupStructureDeps
 } from "./group-structure-actions.js";
 import type { CanvasContextMenuItem } from "./canvas-context-menu.js";
-import type { SlotsService } from "../../contract/platform.js";
+import type { NodeActionDescriptor, SlotsService } from "../../contract/platform.js";
 import { reportContributionFault } from "../../contribution-guard.js";
 import type { ExtensionFaultService } from "../../extension-faults.js";
 
@@ -187,11 +188,18 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
     // 与右键共用同一 `structureDeps`（同一门禁、同一 planner，一次批次一次撤销）。宿主横条是唯一
     // 渲染者，这里只提供**纯数据描述**与命中派发。批量执行贡献由 task-execution 提供（order -20），
     // 这里排在它之后，形成「批量执行 · N」「整理」「解组」。
-    const groupStructureActions: Array<{ kind: "tidy" | "ungroup"; order: number }> = [
+    const groupStructureActions: Array<{ kind: GroupStructureActionKind; order: number; icon?: NodeActionDescriptor["icon"]; iconOnly?: boolean }> = [
+      // 排列是普通组的常用入口：紧跟展开/收起与批量执行，按「横、竖、宫格、↘、↗」排列；
+      // 只使用图标，避免五个长文案把横条撑到视口外。
+      { kind: "arrange-horizontal", order: -25, icon: "arrange-horizontal", iconOnly: true },
+      { kind: "arrange-vertical", order: -24, icon: "arrange-vertical", iconOnly: true },
+      { kind: "arrange-grid", order: -23, icon: "arrange-grid", iconOnly: true },
+      { kind: "arrange-diagonal-down", order: -22, icon: "arrange-diagonal-down", iconOnly: true },
+      { kind: "arrange-diagonal-up", order: -21, icon: "arrange-diagonal-up", iconOnly: true },
       { kind: "tidy", order: -19 },
       { kind: "ungroup", order: -18 }
     ];
-    const removeGroupStructureActions = groupStructureActions.map(({ kind, order }) =>
+    const removeGroupStructureActions = groupStructureActions.map(({ kind, order, icon, iconOnly }) =>
       ctx.slots.register("canvas.node-action", {
         id: GROUP_STRUCTURE_ACTION_IDS[kind],
         owner: CANVAS_MENU_PLUGIN_ID,
@@ -207,6 +215,8 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           return {
             label: GROUP_STRUCTURE_ACTION_LABELS[kind],
             tone: "neutral" as const,
+            ...(icon ? { icon } : {}),
+            ...(iconOnly ? { iconOnly: true } : {}),
             enabled: availability.available,
             ...(availability.available ? {} : { reason: availability.reason })
           };

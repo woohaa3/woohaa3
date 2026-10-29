@@ -15,12 +15,10 @@ const keyOf = legacyFilmSetIdentityKey;
 const fail = (message: string): never => { throw new Error(message); };
 const isFilm = (type: string, data: any) => type === "animation3d" || (type === "composite-asset" && data?.extensionId === "film-set");
 
-export type MigrationOptions = { previousMappings?: any[]; removeEdgeIds?: string[]; furnaceOwners?: string[] };
+export type MigrationOptions = { previousMappings?: any[]; removeEdgeIds?: string[] };
 
 /** Preserve every original row/receipt unless a known typed payload needs conversion. */
 export function planMigration(db: any, options: MigrationOptions = {}) {
-  const furnaceOwners = new Set(options.furnaceOwners ?? []);
-  const isFurnace = (type: string, data: any, canvasId: string, nodeId: string) => (type === "extension3d" || type === "composite-asset") && (data?.extensionId === "game-furnace" || (type === "extension3d" && data?.extensionId === undefined && typeof data?.projectStorageKey === "string" && furnaceOwners.has(`${canvasId}/${nodeId}`)));
   const sources = loadOfflineYjsCanvasSources(db);
   if (process.env.WOOHAA3_MIGRATION_DEBUG) console.error("migration: sources loaded");
   const owners = new Map<string, { title: string; types: Set<string> }>();
@@ -119,10 +117,6 @@ export function planMigration(db: any, options: MigrationOptions = {}) {
         for (const field of ["modelScript", "modelScriptLanguage", "modelScriptVersion", "modelContentVersion", "modelPlacement", "motionScript", "motionScriptLanguage", "motionScriptVersion", "motionRevision", "motionSourceHash", "motionBasedOnModelVersion", "initialCamera", "timeline", "animationSnapshotHash"]) delete preserved[field];
         canvas.nodeData[node.id] = { ...preserved, ...canonicalFilmSetFields(sceneSpace.value) } as any;
         node.type = "composite-asset";
-      } else if (isFurnace(node.type, data, canvas.id, node.id)) {
-        node.type = "composite-asset";
-        canvas.nodeData[node.id] = { ...data, extensionId: "game-furnace", scenePlacement: data.scenePlacement ?? { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } } as any;
-        // Furnace geometry and immutable project/build associations stay byte-equivalent.
       } else if (node.type === "extension3d") {
         fail(`Unknown old extension owner: ${canvas.id}/${node.id}`);
       }
@@ -158,13 +152,7 @@ export function planMigration(db: any, options: MigrationOptions = {}) {
   return { mappings, documents, historyWrites, completionWrites,
     changed: documents.some((document: any) => document.changed) || historyWrites.some(write => write.changed) || completionWrites.some(write => write.changed),
     report: { version: "composite-asset-migration-v1", mappings,
-      furnaceResources: sources.flatMap((source: any) => source.canvas.document.nodes.filter((node: any) => isFurnace(node.type, source.canvas.nodeData[node.id], source.canvas.id, node.id)).map((node: any) => {
-        const data = source.canvas.nodeData[node.id];
-        const next = documents.find((document: any) => document.canvas.id === source.canvas.id)!.canvas.nodeData[node.id];
-        const references = ["projectStorageKey", "inputHash", "activeBuildId", "projectId"].filter(field => data[field] !== undefined).map(field => [field, data[field]]);
-        for (const [field, value] of references) if (stable(next[field]) !== stable(value)) fail(`Furnace project association changed: ${source.canvas.id}/${node.id}/${field}`);
-        return { canvasId: source.canvas.id, nodeId: node.id, references: Object.fromEntries(references), geometryHash: digest([data.modelScript, data.modelScriptVersion, data.modelContentVersion, data.modelPlacement]) };
-      })), canvasCount: documents.length, historyCount: historyWrites.length, completionCount: completionWrites.length,
+      canvasCount: documents.length, historyCount: historyWrites.length, completionCount: completionWrites.length,
       preparedBeginCount: completions.filter(({ row }) => row.status === "prepared").length,
       canvases: documents.map(({ canvas, sourceReport, beforeHash, afterHash, changed, removedEdges }: any) => ({ canvasId: canvas.id, revision: canvas.revision, nodeCount: canvas.document.nodes.length, assetCount: canvas.assets.length, jobCount: canvas.jobs.length, restoredUpdates: sourceReport.restoredUpdates, beforeHash, afterHash, changed, removedEdges })) } };
 }

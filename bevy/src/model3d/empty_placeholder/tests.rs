@@ -106,6 +106,38 @@ fn empty_film_set_group_shows_brand_plinth_inside_the_identity_badge() {
 }
 
 #[test]
+fn badge_plinth_turns_with_the_canvas_camera_pitch() {
+    let mut app = app();
+    app.world_mut().resource_mut::<CurrentScene>().0 = film_set_scene(false, 1.);
+    app.update();
+
+    let state = app.world().resource::<Placeholders>();
+    let entry = state
+        .entries
+        .get("set")
+        .expect("empty film set keeps a badge model");
+    let center = app
+        .world()
+        .get::<Transform>(entry.body)
+        .map(|transform| transform.translation)
+        .unwrap_or(Vec3::ZERO);
+    let view = IsometricGridView::default();
+    let screen = entry
+        .top_vertices
+        .map(|vertex| screen_point_from_world(center + vertex, &view));
+    let expected = CANVAS_CAMERA_PITCH.sin();
+    for i in 0..4 {
+        let edge = screen[(i + 1) % 4] - screen[i];
+        assert!(edge.x.abs() > 1e-3, "edge {i} is vertical: {edge:?}");
+        let slope = edge.y.abs() / edge.x.abs();
+        assert!(
+            (slope - expected).abs() < 1e-3,
+            "edge {i} slope {slope} must follow sin(pitch) {expected}"
+        );
+    }
+}
+
+#[test]
 fn first_ground_or_binding_replaces_the_badge_plinth() {
     let mut app = app();
     app.world_mut().resource_mut::<CurrentScene>().0 = film_set_scene(true, 3.);

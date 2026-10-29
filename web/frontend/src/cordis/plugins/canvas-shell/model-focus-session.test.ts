@@ -110,6 +110,26 @@ describe("modelBounds 取景锚点（Rust 相机事实源）", () => {
     expect(nested.aabb.max[1] - nested.aabb.min[1]).toBeCloseTo(nested.aabb.max[2] - nested.aabb.min[2]);
   });
 
+  it("empty film set groups keep a finite editing workspace", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("empty-group");
+    canvas.document.nodes = [{ id: "film", type: "group", position: { x: 0, y: 0 }, width: 400, height: 300 }];
+    canvas.nodeData.film = { filmSetGroup: createFilmSetGroupMarker() };
+    // 空片场组只有场景根 op，没有任何可见绑定或地面。
+    const target: FocusTargetInput = {
+      ...targetFor(canvas, "film"),
+      ops: [{ t: "group", id: "\u0000scene", parent: null, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } as SceneV2Op],
+      aabb: null,
+      extent: 0
+    };
+    const bounds = modelBounds(target)!;
+    expect(bounds.radius).toBeGreaterThan(0);
+    expect(bounds.center.every(Number.isFinite)).toBe(true);
+    expect(bounds.aabb.min.every(Number.isFinite) && bounds.aabb.max.every(Number.isFinite)).toBe(true);
+    // 普通 group 与空模型卡片仍不可聚焦。
+    const plain = { ...target, canvas: { ...canvas, nodeData: { film: {} } } as ServerCanvas };
+    expect(modelBounds(plain)).toBeNull();
+  });
+
   it("frames live group binding and scene transforms without changing badge fit", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("live-group");
     canvas.document.nodes = [{ id: "film", type: "group", position: { x: 0, y: 0 }, width: 300, height: 200 }, { id: "source", type: "model3d", parentId: "film", position: { x: 10, y: 10 } }];

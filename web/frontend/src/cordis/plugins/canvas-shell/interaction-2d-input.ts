@@ -440,9 +440,18 @@ export function create2dInputFamily(core: InteractionCore) {
         state.gesture.moved = true;
         state.localSizes = new Map([[state.gesture.nodeId, { width: target.width, height: target.height }]]);
         // 地面范围左/上方向拖动同时改变中心：预览也提交 position，避免释放时跳变（design D6）。
-        state.localPositions = target.position
-          ? new Map([[state.gesture.nodeId, target.position]])
-          : new Map();
+        const positions = new Map<string, Point>();
+        if (target.position) positions.set(state.gesture.nodeId, target.position);
+        // 组四角缩放：成员留在画布原位，不跟着框原点移动。显式写成员绝对位置后，
+        // `expandPositionPreviews` 不再按父级位移平移它们。
+        if (state.gesture.corner) {
+          const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
+          for (const childId of index?.children.get(state.gesture.nodeId) ?? []) {
+            const at = index?.absolutePosition(childId);
+            if (at) positions.set(childId, at);
+          }
+        }
+        state.localPositions = positions;
       } else {
         state.localSizes = new Map();
         state.localPositions = new Map();
@@ -514,10 +523,26 @@ export function create2dInputFamily(core: InteractionCore) {
         // 地面范围对角锁定缩放可能同时改变中心（左/上方向），因此与尺寸一并提交 position（design D6）。
         // 预览是绝对画布坐标，提交前换算为持久化相对坐标（与 drag 提交同一换算）。
         const position = state.localPositions.get(nodeId);
-        const index = sharedCanvasNodeIndex(workingCanvasOf(woohaa3CanvasStore.getState()));
+        const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+        const index = sharedCanvasNodeIndex(canvasState);
         const parent = index?.parentAbsolutePosition(nodeId) ?? { x: 0, y: 0 };
         const relativePosition = position ? { x: position.x - parent.x, y: position.y - parent.y } : undefined;
-        submit(planResizeNode({ nodeId, width: size.width, height: size.height, ...(relativePosition ? { position: relativePosition } : {}) }));
+        const commands = planResizeNode({ nodeId, width: size.width, height: size.height, ...(relativePosition ? { position: relativePosition } : {}) });
+        // 组四角缩放：成员保持画布绝对位置。框原点移动了多少，成员的局部坐标就反向补多少，
+        // 同一批次原子提交（成员若越界会让整批被拒绝，因此跳过不可移动的片场对象模型）。
+        const origin = state.gesture.origin;
+        if (state.gesture.corner && position && origin && index) {
+          const dx = position.x - origin.x;
+          const dy = position.y - origin.y;
+          if (dx !== 0 || dy !== 0) {
+            for (const childId of index.children.get(nodeId) ?? []) {
+              const child = index.byId.get(childId);
+              if (!child || isFilmSetObjectModelNode(child, canvasState?.nodeData[childId])) continue;
+              commands.push({ type: "node.update", nodeId: childId, position: { x: child.position.x - dx, y: child.position.y - dy } });
+            }
+          }
+        }
+        submit(commands);
       }
       state.localSizes = new Map();
       state.localPositions = new Map();

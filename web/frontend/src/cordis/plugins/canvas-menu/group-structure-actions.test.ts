@@ -5,6 +5,7 @@
  * 非渲染回归：只测纯逻辑的可用性判定、规划器选择与「一次操作 = 一个批次」。
  */
 import { describe, expect, it } from "vitest";
+import type { CanvasCommand } from "@woohaa3/contracts";
 import {
   groupStructureIsActionable,
   planGroupStructureCommands,
@@ -14,14 +15,16 @@ import {
   type GroupStructureDeps
 } from "./group-structure-actions.js";
 
-const NODES = [
+type StructureTestNode = { id: string; type: string; position: { x: number; y: number }; width?: number; height?: number; parentId?: string };
+
+const NODES: StructureTestNode[] = [
   { id: "g", type: "group", position: { x: 0, y: 0 }, width: 300, height: 200 },
   { id: "a", type: "image", position: { x: 20, y: 20 }, width: 200, height: 100, parentId: "g" },
   { id: "b", type: "image", position: { x: 220, y: 20 }, width: 200, height: 100, parentId: "g" },
   { id: "outside", type: "image", position: { x: 800, y: 800 } }
 ];
 
-function canvas(nodes = NODES): GroupStructureCanvas {
+function canvas(nodes: readonly StructureTestNode[] = NODES): GroupStructureCanvas {
   return { document: { nodes, edges: [] } };
 }
 
@@ -37,13 +40,34 @@ function deps(overrides: Partial<GroupStructureDeps> = {}): GroupStructureDeps &
   };
 }
 
+/** 把规划出的 `node.update` 位置/尺寸写回节点，模拟提交后的画布。 */
+function applyUpdates(nodes: readonly StructureTestNode[], commands: readonly CanvasCommand[]): StructureTestNode[] {
+  return nodes.map((node) => {
+    const update = commands.find(
+      (command): command is Extract<CanvasCommand, { type: "node.update" }> =>
+        command.type === "node.update" && command.nodeId === node.id
+    );
+    if (!update) return node;
+    return {
+      ...node,
+      ...(update.position ? { position: update.position } : {}),
+      ...(update.width !== undefined ? { width: update.width } : {}),
+      ...(update.height !== undefined ? { height: update.height } : {})
+    };
+  });
+}
+
 describe("groupStructureIsActionable（任务 2.1）", () => {
   it("整理需要至少一个直接成员，解组只需 group 存在", () => {
     expect(groupStructureIsActionable(NODES, "tidy", "g")).toBe(true);
     expect(groupStructureIsActionable(NODES, "ungroup", "g")).toBe(true);
+    for (const kind of ["arrange-horizontal", "arrange-vertical", "arrange-grid", "arrange-diagonal-up", "arrange-diagonal-down"] as const) {
+      expect(groupStructureIsActionable(NODES, kind, "g")).toBe(true);
+    }
     const emptyGroup = [{ id: "g", type: "group", position: { x: 0, y: 0 } }];
     expect(groupStructureIsActionable(emptyGroup, "tidy", "g")).toBe(false);
     expect(groupStructureIsActionable(emptyGroup, "ungroup", "g")).toBe(true);
+    expect(groupStructureIsActionable(emptyGroup, "arrange-grid", "g")).toBe(false);
   });
 
   it("目标不存在或不是 group 时不可执行", () => {
@@ -90,6 +114,24 @@ describe("planGroupStructureCommands（任务 2.1）", () => {
     };
     expect(planGroupStructureCommands(empty, "tidy", "g")).toEqual([]);
   });
+
+  it("五种排列都走同一规划器并只改直接成员", () => {
+    for (const kind of ["arrange-horizontal", "arrange-vertical", "arrange-grid", "arrange-diagonal-up", "arrange-diagonal-down"] as const) {
+      const commands = planGroupStructureCommands(canvas(), kind, "g");
+      expect(commands.length).toBeGreaterThan(0);
+      expect(commands.some((command) => command.type !== "node.remove" && "nodeId" in command && command.nodeId === "outside")).toBe(false);
+      expect(commands.some((command) => command.type === "node.update" && command.nodeId !== "outside")).toBe(true);
+    }
+  });
+
+  it("同一排列重复执行时不再产生命令", () => {
+    for (const kind of ["arrange-horizontal", "arrange-vertical", "arrange-grid", "arrange-diagonal-up", "arrange-diagonal-down"] as const) {
+      const first = planGroupStructureCommands(canvas(), kind, "g");
+      expect(first.length).toBeGreaterThan(0);
+      const arranged = applyUpdates(NODES, first);
+      expect(planGroupStructureCommands(canvas(arranged), kind, "g")).toEqual([]);
+    }
+  });
 });
 
 describe("runGroupStructureAction（任务 2.1）", () => {
@@ -115,6 +157,13 @@ describe("runGroupStructureAction（任务 2.1）", () => {
   it("画布未加载时返回原因且不提交", () => {
     const d = deps({ getCanvas: () => null });
     expect(runGroupStructureAction(d, "tidy", "g")).toEqual({ ok: false, reason: "分组已不存在" });
+    expect(d.batches).toHaveLength(0);
+  });
+
+  it("排列成员已就位时返回已排列且不提交空批次", () => {
+    const arranged = applyUpdates(NODES, planGroupStructureCommands(canvas(), "arrange-grid", "g"));
+    const d = deps({ getCanvas: () => canvas(arranged) });
+    expect(runGroupStructureAction(d, "arrange-grid", "g")).toEqual({ ok: false, reason: "已按该方式排列" });
     expect(d.batches).toHaveLength(0);
   });
 });

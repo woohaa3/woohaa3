@@ -269,6 +269,11 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
         action_descriptors: scene
             .node_actions
             .iter()
+            .filter(|(id, _)| {
+                node_map
+                    .get(id.as_str())
+                    .is_some_and(|node| node.group.as_ref().is_none_or(|group| group.action_bar))
+            })
             .filter_map(|(id, actions)| {
                 let index = *node_index.get(id)?;
                 Some((index, actions.clone()))
@@ -350,15 +355,20 @@ fn snapshot_node(
         }
         None => (node.x, node.y, node.width, node.height),
     };
-    // 绘制、完整快照与视口增量共用徽标/背板锚点。
-    let node_actions = node_actions.get(&node.id).and_then(|actions| {
-        layout::node_action_toolbar(
-            node,
-            actions,
-            Some(viewport),
-            surface.map(|s| (s.width, s.height)),
-        )
-    });
+    // 绘制、完整快照与视口增量共用徽标/背板锚点。group 只有声明 `actionBar`（普通组与片场组
+    // 都由呈现层声明）时才暴露横条命中，避免旧场景出现「看不见但能点」的动作热区。
+    let actions_visible = !group || node.group.as_ref().is_some_and(|group| group.action_bar);
+    let node_actions = actions_visible
+        .then(|| node_actions.get(&node.id))
+        .flatten()
+        .and_then(|actions| {
+            layout::node_action_toolbar(
+                node,
+                actions,
+                Some(viewport),
+                surface.map(|s| (s.width, s.height)),
+            )
+        });
     SnapshotNode {
         initial_position: Vec2::new(node.x, node.y),
         layout_bounds: (node.x, node.y, node.width, node.height),

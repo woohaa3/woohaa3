@@ -21,6 +21,10 @@ export const NODE_ACTION_TOOLBAR_PAD = 4;
 export const NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH = 56;
 /** 动作标签与控件边缘的水平内边距（屏幕像素）。 */
 export const NODE_ACTION_TOOLBAR_ACTION_PAD = 8;
+/** 图标与文字同时呈现时的图标格尺寸（屏幕像素）。 */
+export const NODE_ACTION_TOOLBAR_ICON_SIZE = 16;
+/** 图标与文字之间的水平间距（屏幕像素）。 */
+export const NODE_ACTION_TOOLBAR_ICON_GAP = 6;
 /** 设置箭头独立宽度（屏幕像素）。 */
 export const NODE_ACTION_TOOLBAR_CHEVRON_WIDTH = 24;
 /** 动作分组之间的细分隔线占位宽度（屏幕像素）。 */
@@ -48,7 +52,7 @@ export type ScreenRect = { left: number; top: number; width: number; height: num
 export type NodeActionToolbarAction = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download" | "collapse-groups" | "expand-groups";
+  icon?: "download" | "edit" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 稳定动作 ID（命中回传，贡献据此派发）。 */
   id: string;
@@ -141,10 +145,13 @@ export function nodeActionToolbarLayout(
   const summaryText = input.summary?.trim() ? truncateNodeActionText(input.summary!.trim(), NODE_ACTION_TOOLBAR_FONT, NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH) : null;
   const summaryWidth = summaryText ? estimateNodeActionTextWidth(summaryText, NODE_ACTION_TOOLBAR_FONT) : 0;
 
-  // 每个动作宽度：至少最小宽度，并容纳文案。
-  const actionWidths = actions.map((action) =>
-    action.iconOnly ? NODE_ACTION_TOOLBAR_ACTION_HEIGHT : Math.max(NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH, Math.ceil(estimateNodeActionTextWidth(action.label, NODE_ACTION_TOOLBAR_FONT)) + NODE_ACTION_TOOLBAR_ACTION_PAD * 2)
-  );
+  // 每个动作宽度：图标按钮固定高度见方；图标 + 文字时同时容纳图标格与文案。
+  const actionWidths = actions.map((action) => {
+    if (action.iconOnly) return NODE_ACTION_TOOLBAR_ACTION_HEIGHT;
+    const text = Math.ceil(estimateNodeActionTextWidth(action.label, NODE_ACTION_TOOLBAR_FONT));
+    const icon = action.icon ? NODE_ACTION_TOOLBAR_ICON_SIZE + NODE_ACTION_TOOLBAR_ICON_GAP : 0;
+    return Math.max(NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH, text + icon + NODE_ACTION_TOOLBAR_ACTION_PAD * 2);
+  });
   const chevronCount = actions.filter((action) => action.menu).length;
   const separatorWidth = Math.max(0, actions.length - 1) * NODE_ACTION_TOOLBAR_SEPARATOR;
   const contentWidth =

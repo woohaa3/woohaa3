@@ -643,6 +643,9 @@ pub(crate) struct GroupPresentation {
     pub(crate) badge_scale: f32,
     #[serde(default)]
     pub(crate) badge_resizable: bool,
+    /// 组容器是否绘制节点顶部操作横条；普通组与片场组都声明，旧场景缺省保持无横条。
+    #[serde(default)]
+    pub(crate) action_bar: bool,
     #[serde(default)]
     pub(crate) title: String,
     #[serde(default)]

@@ -65,7 +65,7 @@ export function FilmSetConversionSettingsPanel(props: {
           disabled={props.busy} onChange={props.onDraftChange} onValidityChange={setValidAssistant} onManage={props.openConfigureModel}
           onRefresh={props.onRefreshModels} submit={submit} /> : <AssistantToolbar disabled={props.busy} onManage={props.openConfigureModel} onRefresh={props.onRefreshModels} submit={submit} notice={<p>助手会话服务尚未就绪</p>} />}
     </div>
-    <p className="film-set-conversion-settings__hint">Ctrl / ⌘ + Enter 创建</p>
+    <p className="film-set-conversion-settings__hint">Enter 创建，Shift+Enter 换行</p>
     {props.error ? <div className="film-set-conversion-settings__error" data-testid="film-set-conversion-settings-error">
       <span>{props.error}</span>{props.onRefreshModels ? <Button size="sm" tone="neutral" disabled={props.busy} onClick={props.onRefreshModels}>重新加载模型</Button> : null}
     </div> : null}

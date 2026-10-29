@@ -108,7 +108,7 @@ export function compositeAssetScopeBaseGround(x: number, y: number, width: numbe
  * 派生片场的范围几何（change: 2026-10-08-make-film-set-model-only 修订；
  *  change: 2026-10-12-align-film-set-scope-with-isometric-grid）。
  *
- * 复合资产（片场、炼丹炉等）没有卡片：模型被居中并等比适配到节点矩形内。`x/y/width/height` 是
+ * 复合资产（片场等）没有卡片：模型被居中并等比适配到节点矩形内。`x/y/width/height` 是
  * **内容适配基准矩形**；`scopeShape` 缺省即 `isometric-diamond`（复合资产类别默认），由
  * `scopeGround`（模型地面占地等比外扩固定边距）派生与地面网格平行的平行四边形（地面宽深相等
  * 时为菱形）作为可见与命中范围；仅当可信 adapter 覆盖为 `rect` 时该基准矩形才是可见范围

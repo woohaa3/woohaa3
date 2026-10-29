@@ -207,8 +207,17 @@ pub(crate) fn draw_group_selection(
     z: f32,
 ) {
     let color = theme.token_u32("canvasNodeBorderSelected");
-    let path = super::group_outline::path(node);
-    if is_running(node) {
+    if node.group.as_ref().is_some_and(|group| group.collapsed) {
+        // 收起组只呈现徽标：选中描边贴在徽标范围上，不再沿结构矩形的气泡轮廓与尾巴走线。
+        dashed_polyline(
+            geometry,
+            &crate::canvas_query::group_model::badge_path(node),
+            GROUP_BORDER,
+            z + 0.001,
+            color,
+        );
+    } else if is_running(node) {
+        let path = super::group_outline::path(node);
         super::group_outline::stroke(
             geometry,
             &path,
@@ -375,6 +384,7 @@ mod tests {
                 collapsed: false,
                 badge_scale: 1.,
                 badge_resizable: false,
+                action_bar: false,
                 title: "镜头发散".into(),
                 member_count: 3,
                 output_capable_leaf_count: 2,
@@ -406,6 +416,7 @@ mod tests {
                 collapsed: true,
                 badge_scale: 1.,
                 badge_resizable: false,
+                action_bar: false,
                 title: "镜头发散".into(),
                 member_count: 3,
                 output_capable_leaf_count: 2,
@@ -435,6 +446,7 @@ mod tests {
                 collapsed: true,
                 badge_scale: 1.,
                 badge_resizable: false,
+                action_bar: false,
                 title: String::new(),
                 member_count: 3,
                 output_capable_leaf_count: 0,
@@ -445,6 +457,58 @@ mod tests {
             },
         );
         assert_eq!(panel.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len(), 3);
+    }
+
+    /// 收起后选中不能沿结构矩形的气泡轮廓描边：描边必须收到徽标范围内，
+    /// 否则会留下「属于气泡位置的虚线框」（现场反馈）。
+    #[test]
+    fn collapsed_group_selection_outline_stays_on_the_badge() {
+        let mut node = model_group(500., 300.);
+        node.group.as_mut().unwrap().collapsed = true;
+        let mut geometry = Geometry::default();
+        draw_group_selection(&mut geometry, &ThemeResource::default(), &node, GROUP_Z);
+        let mesh = geometry.build();
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("selection outline needs positions");
+        };
+        assert!(!points.is_empty());
+        let badge = crate::canvas_query::group_model::badge_rect(&node);
+        let bottom = node.y + node.height;
+        for point in points {
+            let canvas = Vec2::new(point[0], -point[1]);
+            assert!(
+                canvas.y >= bottom - 0.01,
+                "收起选中描边不得回到气泡位置：{canvas:?}"
+            );
+            assert!(
+                canvas.x >= badge.x - 2.
+                    && canvas.x <= badge.x + badge.z + 2.
+                    && canvas.y <= badge.y + badge.w + 2.,
+                "收起选中描边必须落在徽标范围内：{canvas:?} vs {badge:?}"
+            );
+        }
+    }
+
+    /// 展开态保持原有气泡描边（含尾巴），确认收起分支没有影响正常组。
+    #[test]
+    fn expanded_group_selection_outline_follows_the_bubble() {
+        let node = model_group(500., 300.);
+        let mut geometry = Geometry::default();
+        draw_group_selection(&mut geometry, &ThemeResource::default(), &node, GROUP_Z);
+        let mesh = geometry.build();
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("selection outline needs positions");
+        };
+        assert!(
+            points
+                .iter()
+                .any(|point| -point[1] <= node.y + node.height + 0.01),
+            "展开态选中描边应覆盖气泡轮廓"
+        );
     }
 
     #[test]
@@ -459,6 +523,7 @@ mod tests {
                 collapsed: false,
                 badge_scale: 1.,
                 badge_resizable: false,
+                action_bar: false,
                 title: "   ".into(),
                 member_count: 1,
                 output_capable_leaf_count: 0,
@@ -492,6 +557,7 @@ mod tests {
                 collapsed: false,
                 badge_scale: 1.,
                 badge_resizable: false,
+                action_bar: false,
                 title: String::new(),
                 member_count: 1,
                 output_capable_leaf_count: 0,
@@ -519,6 +585,7 @@ mod tests {
                 collapsed: false,
                 badge_scale: 1.,
                 badge_resizable: false,
+                action_bar: false,
                 title: String::new(),
                 member_count: 1,
                 output_capable_leaf_count: 0,
@@ -555,6 +622,7 @@ mod tests {
             collapsed: false,
             badge_scale: 1.,
             badge_resizable: false,
+            action_bar: false,
             title: String::new(),
             member_count: 1,
             output_capable_leaf_count: 0,

@@ -450,7 +450,7 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
     expect(srcAfter).not.toEqual(srcBefore);
   });
 
-  test("上层普通卡片先于业务过滤；所有 composite-asset（含炉体）默认等距范围", async ({ page }, info) => {
+  test("上层普通卡片先于业务过滤；片场默认等距范围", async ({ page }, info) => {
     test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await installPageHelpers(page);
@@ -480,34 +480,13 @@ test.describe("片场地面范围（change: 2026-10-12）", () => {
     }, cardCenter);
     expect(dropAtCard).toBe("card");
 
-    // 片场 + 炉体对照：所有 composite-asset 默认使用等距地面范围，不按业务显式声明。
-    const furnace = model3DNodeDataFields(createModel3DNodeData({
-      title: "游戏炼丹炉",
-      model: { modelScript: "scene.box({id:'body',size:[1,1,1],color:'#aa7733'});", modelScriptVersion: "woohaa-model-js-v2" }
-    }));
-    expect((await sendCommands(page, [
-      { type: "node.add", node: { id: "furnace", type: "composite-asset", position: { x: 1000, y: 640 }, width: 260, height: 195 }, nodeData: { extensionId: "game-furnace", ...furnace } as never }
-    ], "ground-furnace")).ok).toBe(true);
-    await waitForCommandsSettled(page);
-
-    await expect.poll(async () => {
-      const s = await scene(page);
-      const node = s?.nodes.find((n) => n.id === "furnace");
-      return node?.compositeAsset?.scopeShape ?? null;
-    }).toBe("isometric-diamond");
-    // 炉体也派生地面矩形，AABB 宽高比由同一 pitch 决定。
-    expect((await scopeGroundOf(page, "furnace"))).not.toBeNull();
-    const furnaceScope = (await acceptedScope(page, "furnace"))!;
-    expect(furnaceScope.aabb[2] / furnaceScope.aabb[3]).toBeCloseTo(1 / S, 3);
-
     const scopes = await page.evaluate(() => {
       const r = (window as any).__bevyRuntime?.queryCompositeAssetScopes?.();
       return r?.ok ? r.value.map((e: any) => ({ nodeId: e.nodeId, shape: e.shape })) : null;
     });
     expect(scopes).toContainEqual({ nodeId: "film", shape: "isometric-diamond" });
-    expect(scopes).toContainEqual({ nodeId: "furnace", shape: "isometric-diamond" });
 
-    await page.screenshot({ path: info.outputPath("film-ground-vs-furnace.png") });
+    await page.screenshot({ path: info.outputPath("film-ground-scope.png") });
   });
 
   test("抓手对角锁定等比 resize，pointerup 提交规范 width/height", async ({ page }, info) => {

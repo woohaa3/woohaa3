@@ -387,6 +387,10 @@ pub(crate) const NODE_ACTION_TOOLBAR_PAD: f32 = 4.0;
 pub(crate) const NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH: f32 = 56.0;
 /// 动作标签与控件边缘的水平内边距（世界单位）。
 pub(crate) const NODE_ACTION_TOOLBAR_ACTION_PAD: f32 = 8.0;
+/// 图标与文字同时呈现时的图标格尺寸（与 contracts 同步）。
+pub(crate) const NODE_ACTION_TOOLBAR_ICON_SIZE: f32 = 16.0;
+/// 图标与文字之间的水平间距（与 contracts 同步）。
+pub(crate) const NODE_ACTION_TOOLBAR_ICON_GAP: f32 = 6.0;
 /// 设置箭头独立宽度（世界单位）。
 pub(crate) const NODE_ACTION_TOOLBAR_CHEVRON_WIDTH: f32 = 24.0;
 /// 动作分组之间的细分隔线占位宽度（世界单位）。
@@ -663,6 +667,7 @@ mod tests {
             collapsed: false,
             badge_scale: 1.,
             badge_resizable: false,
+            action_bar: false,
             title: String::new(),
             member_count: 1,
             output_capable_leaf_count: 1,
@@ -862,6 +867,36 @@ mod tests {
         .expect("layout");
         assert!(layout.below);
         assert!((layout.bar.1 - (node.y + node.height + NODE_ACTION_TOOLBAR_GAP)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn node_action_toolbar_reserves_icon_cell_for_icon_and_text() {
+        let node = action_node(500.0, 300.0);
+        let action = |icon_only| crate::protocol::NodeActions {
+            actions: vec![crate::protocol::NodeAction {
+                id: "edit".into(),
+                label: "编辑".into(),
+                icon: Some("edit".into()),
+                icon_only,
+                enabled: true,
+                menu: false,
+                tone: String::new(),
+            }],
+            summary: None,
+        };
+        let compact =
+            node_action_toolbar(&node, &action(true), None, None).expect("icon-only layout");
+        let labelled =
+            node_action_toolbar(&node, &action(false), None, None).expect("icon+text layout");
+        assert!((compact.slots[0].rect.2 - NODE_ACTION_TOOLBAR_ACTION_HEIGHT).abs() < 1e-3);
+        let text = estimated_text_width("编辑", NODE_ACTION_TOOLBAR_FONT);
+        assert!(
+            labelled.slots[0].rect.2
+                >= NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0
+                    + NODE_ACTION_TOOLBAR_ICON_SIZE
+                    + NODE_ACTION_TOOLBAR_ICON_GAP
+                    + text
+        );
     }
 
     #[test]

@@ -28,7 +28,9 @@ export function createDoubleClickHandler(core: InteractionCore) {
     // 命中由 Rust interaction snapshot 计算；不可用时不派发卡片命中（design D3）。
     const hitResult = core.queryPoint(world, activeViewport().zoom);
     const hit = hitResult.ok ? hitResult.value : null;
-    if (hit?.kind === "node-action" && (hit.actionId === "group-badge-select" || hit.actionId === "group-resize-badge")) { event.preventDefault(); return; }
+    // 徽标缩放把手不是聚焦入口；徽标本体（group-badge-select）双击进入容器聚焦。
+    if (hit?.kind === "node-action" && hit.actionId === "group-resize-badge") { event.preventDefault(); return; }
+    const badgeNodeId = hit?.kind === "node-action" && hit.actionId === "group-badge-select" ? hit.nodeId : null;
     const cardNodeId = hit && (hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope") ? hit.nodeId : null;
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState) return;
@@ -43,6 +45,20 @@ export function createDoubleClickHandler(core: InteractionCore) {
     const focusKind = (id: string) => {
       const context = contextOf(id); return context ? resolver.resolve(context).focus?.kind(context) : null;
     };
+    // 模型徽标：双击直接进入容器聚焦（与画布横条「编辑」按钮同一入口）。只对有自己模型
+    // 聚焦工作区的容器生效（片场）；普通 group 的徽标仍只负责选择/拖动与展开/收起。
+    if (badgeNodeId) {
+      event.preventDefault();
+      const kind = focusKind(badgeNodeId);
+      if (contextOf(badgeNodeId)?.node.type !== "group" || kind !== "model") return;
+      setSelection([badgeNodeId]);
+      if (options.onModelFocusIntent) {
+        options.onModelFocusIntent({ type: "enter", nodeId: badgeNodeId, kind });
+        return;
+      }
+      model.enterModelFocusForNode?.(badgeNodeId);
+      return;
+    }
     const cardEntry = cardNodeId
       ? canvasState.document.nodes.find((candidate) => candidate.id === cardNodeId)
       : undefined;

@@ -15,6 +15,7 @@ import {
   planNodeDataPatch,
   planRefitGroups,
   planResizeNode,
+  planArrangeGroupChildren,
   planTidyGroup,
   planUngroupNodes,
   aggregateOutputLeaves,
@@ -192,6 +193,58 @@ describe("group 结构命令规划（change: add-canvas-node-grouping，任务 1
   it("planTidyGroup 对非 group id 返回空批次", () => {
     const nodes: Woohaa3CanvasNode[] = [{ id: "a", type: "image", position: { x: 0, y: 0 }, data: {} }];
     expect(planTidyGroup(nodes, [], "a")).toEqual([]);
+  });
+
+  describe("planArrangeGroupChildren", () => {
+    const nodes: Woohaa3CanvasNode[] = [
+      { id: "g", type: "group", position: { x: 0, y: 0 }, width: 900, height: 700, data: {} },
+      { id: "a", type: "image", parentId: "g", position: { x: 500, y: 500 }, width: 200, height: 100, data: {} },
+      { id: "b", type: "image", parentId: "g", position: { x: 10, y: 10 }, width: 200, height: 100, data: {} },
+      { id: "outside", type: "image", position: { x: 800, y: 800 }, width: 200, height: 100, data: {} }
+    ];
+    const positions = (kind: Parameters<typeof planArrangeGroupChildren>[2]) => {
+      const updates = planArrangeGroupChildren(nodes, "g", kind)
+        .filter((command) => command.type === "node.update") as Array<{ nodeId: string; position?: { x: number; y: number } }>;
+      return {
+        a: updates.find((update) => update.nodeId === "a")?.position,
+        b: updates.find((update) => update.nodeId === "b")?.position
+      };
+    };
+
+    it("横排与竖排分别按单行、单列布局直接成员", () => {
+      const horizontal = positions("arrange-horizontal");
+      expect(horizontal.b!.y).toBe(horizontal.a!.y);
+      expect(horizontal.b!.x).toBeLessThan(horizontal.a!.x);
+
+      const vertical = positions("arrange-vertical");
+      expect(vertical.b!.x).toBe(vertical.a!.x);
+      expect(vertical.b!.y).toBeLessThan(vertical.a!.y);
+      // 组外节点不进入批次。
+      expect(planArrangeGroupChildren(nodes, "g", "arrange-horizontal").some((command) =>
+        (command.type === "node.update" && command.nodeId === "outside") || command.type === "node.add" || command.type === "node.remove"
+      )).toBe(false);
+    });
+
+    it("宫格按行优先排列", () => {
+      const grid = positions("arrange-grid");
+      expect(grid.b!.y).toBe(grid.a!.y);
+      expect(grid.b!.x).toBeLessThan(grid.a!.x);
+    });
+
+    it("两种斜排方向相反", () => {
+      const down = positions("arrange-diagonal-down");
+      expect(down.a!.y).toBeGreaterThan(down.b!.y);
+      expect(down.a!.x).toBeGreaterThan(down.b!.x);
+
+      const up = positions("arrange-diagonal-up");
+      expect(up.a!.y).toBeLessThan(up.b!.y);
+      expect(up.a!.x).toBeGreaterThan(up.b!.x);
+    });
+
+    it("无成员或目标不是 group 时返回空批次", () => {
+      expect(planArrangeGroupChildren([{ id: "g", type: "group", position: { x: 0, y: 0 }, data: {} }], "g", "arrange-grid")).toEqual([]);
+      expect(planArrangeGroupChildren([{ id: "a", type: "image", position: { x: 0, y: 0 }, data: {} }], "a", "arrange-grid")).toEqual([]);
+    });
   });
 
   it("aggregateOutputLeaves 递归展开叶子且顺序稳定", () => {

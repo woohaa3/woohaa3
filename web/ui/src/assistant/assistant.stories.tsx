@@ -12,7 +12,7 @@ export function ComposerAndSelectors() {
   return <ComponentStage>{record => <>
     <label>禁用 <Switch checked={disabled} onCheckedChange={disable} /></label>
     <label>加载 <Switch checked={loading} onCheckedChange={load} /></label>
-    <AssistantComposer value={text} onChange={change} onSubmit={() => record("Ctrl/Cmd+Enter 提交")} disabled={disabled} placeholder="普通 Enter 换行，Ctrl/Cmd+Enter 提交" />
+    <AssistantComposer value={text} onChange={change} onSubmit={() => record("Enter 提交")} disabled={disabled} placeholder="Enter 提交，Shift+Enter 换行" />
     <AssistantToolbar disabled={disabled} refreshing={loading} onRefresh={() => { load(!loading); record("刷新"); }} onManage={() => record("管理")}
       assistant={<AssistantConnectionSelector empty={false} loading={loading} options={options} model={model} disabled={disabled} open={connectionOpen} onOpenChange={openConnection} onChange={v => { select(v); record(v); }} />}
       parameters={<AssistantModelSelector model={model} options={options} open={modelOpen} onOpenChange={openModel} disabled={disabled}
@@ -24,13 +24,13 @@ export function ComposerAndSelectors() {
   </>}</ComponentStage>;
 }
 
-/** 输入框：空值、长文本、禁用；Enter 换行，Ctrl/Cmd+Enter 提交（输入法组合期间不提交）。 */
+/** 输入框：空值、长文本、禁用；Enter 提交，Shift+Enter 换行（输入法组合期间不提交）。 */
 export function ComposerStates() {
   const [text, change] = useState("");
   const [disabled, disable] = useState(false);
   return <ComponentStage>{record => <>
     <label className="showcase__row"><Switch checked={disabled} onCheckedChange={value => { disable(value); record(value ? "禁用" : "启用"); }} /> 禁用输入</label>
-    <AssistantComposer value={text} onChange={change} onSubmit={() => record("Ctrl/Cmd+Enter 提交")} disabled={disabled} placeholder="Enter 换行；Ctrl/Cmd+Enter 提交；组合输入期间不提交" />
+    <AssistantComposer value={text} onChange={change} onSubmit={() => record("Enter 提交")} disabled={disabled} placeholder="Enter 提交；Shift+Enter 换行；组合输入期间不提交" />
     <Button size="sm" onClick={() => change("已填充的长文本。".repeat(60))}>填入长文本</Button>
     <Button size="sm" onClick={() => change("")}>清空</Button>
     <output>字符数：{text.length}</output>

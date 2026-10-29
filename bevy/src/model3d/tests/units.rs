@@ -305,6 +305,7 @@ fn group_anchor_centers_model_inside_bottom_footer() {
             collapsed: false,
             badge_scale: 1.,
             badge_resizable: false,
+            action_bar: false,
             title: String::new(),
             member_count: 0,
             output_capable_leaf_count: 0,

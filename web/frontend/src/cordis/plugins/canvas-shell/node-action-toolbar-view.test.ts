@@ -6,8 +6,8 @@
  * 画布写权限。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
-import { resolveNodeActionToolbarView, resolveNodeDownloadAvailability } from "./node-action-toolbar-view.js";
+import { builtinNodeCapabilityResolver, createEmptyWoohaa3ServerCanvas, createFilmSetGroupMarker, type ServerCanvas } from "@woohaa3/contracts";
+import { resolveContainerFocusEdit, resolveNodeActionToolbarView, resolveNodeDownloadAvailability } from "./node-action-toolbar-view.js";
 
 const NODES = [
   { id: "img", type: "image" },
@@ -20,6 +20,24 @@ const NODES = [
 function canvasWith(overrides: Partial<ServerCanvas> = {}): ServerCanvas {
   return { ...createEmptyWoohaa3ServerCanvas("c1"), ...overrides };
 }
+
+describe("容器编辑入口（片场）", () => {
+  it("只有自带模型聚焦工作区的 group 返回可进入的 kind", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("focus-edit");
+    canvas.document.nodes = [
+      { id: "film", type: "group", position: { x: 0, y: 0 }, width: 400, height: 300 },
+      { id: "plain", type: "group", position: { x: 600, y: 0 }, width: 400, height: 300 },
+      { id: "model", type: "model3d", position: { x: 0, y: 400 } }
+    ];
+    canvas.nodeData.film = { filmSetGroup: createFilmSetGroupMarker() } as never;
+    canvas.nodeData.plain = {};
+    const edit = (nodeId: string) => resolveContainerFocusEdit({ canvas, nodeId, nodeCapabilities: builtinNodeCapabilityResolver });
+    expect(edit("film")).toBe("model");
+    expect(edit("plain")).toBeNull();
+    expect(edit("model")).toBeNull();
+    expect(edit("missing")).toBeNull();
+  });
+});
 
 describe("节点顶部横条显隐（任务 3.1/3.9）", () => {
   it("单选适用类型节点时显示并固定来源", () => {

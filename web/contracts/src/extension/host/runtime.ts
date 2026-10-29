@@ -128,7 +128,7 @@ export type ApplicationBackendHost = {
   host: ApplicationExtensionHostIdentity;
   /**
    * 只读部署上下文（change: 2026-10-15-support-configurable-app-base-path，design D6）。
-   * 插件据此把应用逻辑路径解析为公开 URL（如 game-furnace 入口/CSP 作用域），
+   * 插件据此把应用逻辑路径解析为公开 URL（如第三方扩展入口/CSP 作用域），
    * 不在插件内自持可变的部署配置。
    */
   deployment?: { basePath: string };
