@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
     "composite": false,
-    "baseUrl": ".",
     "rootDir": ".",
     "outDir": "dist",
     "module": "ESNext",
