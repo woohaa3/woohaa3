@@ -56,7 +56,9 @@ const TOKEN_GROUPS = {
   ],
   canvas: [
     "canvasNodeSurface", "canvasNodeContent", "canvasNodeBorder", "canvasNodeBorderSelected",
-    "canvasNodeShadow", "canvasNodeSelectedHalo", "canvasEdgeDefault", "canvasEdgeSelected",
+    "canvasNodeShadow", "canvasNodeSelectedHalo",
+    "canvasGroupSurface", "canvasGroupLabel", "canvasGroupLabelText",
+    "canvasEdgeDefault", "canvasEdgeSelected",
     "canvasEdgeDraft", "canvasEdgeLabelBackground", "canvasEdgeLabelText", "canvasPortDefault",
     "canvasPortFill", "canvasResizeHandle", "canvasResizeHandleStripe", "canvasProgressTrack",
     "canvasProgressFill", "canvasCloseIcon", "canvasBodyText"

@@ -221,7 +221,7 @@ describe("canonical 生成物一致性（任务 1.4）", () => {
   });
 
   it("CSS 生成物为每个 token 暴露 --app-* variable，并含暗色首帧块", () => {
-    const css = readFileSync(resolve(here, "../../../frontend/src/cordis/ui/generated-theme.css"), "utf8");
+    const css = readFileSync(resolve(here, "../../../ui/src/styles/generated-theme.css"), "utf8");
     for (const name of APP_THEME_TOKEN_NAMES) {
       const kebab = name.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`);
       expect(css, name).toContain(`--app-${kebab}:`);

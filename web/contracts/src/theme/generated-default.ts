@@ -49,6 +49,9 @@ export const APP_THEME_DEFAULT_TOKENS = {
   canvasNodeBorderSelected: "#16846c",
   canvasNodeShadow: "#e4e9e6",
   canvasNodeSelectedHalo: "#d6ece2",
+  canvasGroupSurface: "#eeeeee",
+  canvasGroupLabel: "#dedede",
+  canvasGroupLabelText: "#1f1f1f",
   canvasEdgeDefault: "#9aaea4",
   canvasEdgeSelected: "#16846c",
   canvasEdgeDraft: "#16846c",
@@ -94,7 +97,7 @@ export const APP_THEME_DEFAULT_TOKENS = {
 } as const satisfies AppThemeTokens;
 
 export const APP_THEME_DEFAULT_ID = "default";
-export const APP_THEME_DEFAULT_FINGERPRINT = "067deae4f2041f31";
+export const APP_THEME_DEFAULT_FINGERPRINT = "3253bfff9ca766a2";
 
 /** 默认 preset（生成物）；结构与 `app-theme.default.json` 一致。 */
 export const APP_THEME_DEFAULT_PRESET = {
@@ -146,6 +149,9 @@ export const APP_THEME_CSS_VARIABLES: Record<AppThemeTokenName, string> = {
   canvasNodeBorderSelected: "--app-canvas-node-border-selected",
   canvasNodeShadow: "--app-canvas-node-shadow",
   canvasNodeSelectedHalo: "--app-canvas-node-selected-halo",
+  canvasGroupSurface: "--app-canvas-group-surface",
+  canvasGroupLabel: "--app-canvas-group-label",
+  canvasGroupLabelText: "--app-canvas-group-label-text",
   canvasEdgeDefault: "--app-canvas-edge-default",
   canvasEdgeSelected: "--app-canvas-edge-selected",
   canvasEdgeDraft: "--app-canvas-edge-draft",

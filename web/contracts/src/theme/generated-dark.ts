@@ -49,6 +49,9 @@ export const APP_THEME_DARK_TOKENS = {
   canvasNodeBorderSelected: "#2fb99b",
   canvasNodeShadow: "#00000055",
   canvasNodeSelectedHalo: "#1d4a3e",
+  canvasGroupSurface: "#1f2925",
+  canvasGroupLabel: "#2c3b35",
+  canvasGroupLabelText: "#e8f0ec",
   canvasEdgeDefault: "#546b60",
   canvasEdgeSelected: "#2fb99b",
   canvasEdgeDraft: "#2fb99b",
@@ -94,7 +97,7 @@ export const APP_THEME_DARK_TOKENS = {
 } as const satisfies AppThemeTokens;
 
 export const APP_THEME_DARK_ID = "dark";
-export const APP_THEME_DARK_FINGERPRINT = "be88bc7e5733b27c";
+export const APP_THEME_DARK_FINGERPRINT = "aefa774c482fd851";
 
 /** 暗色 preset（生成物）；结构与 `app-theme.dark.json` 一致。 */
 export const APP_THEME_DARK_PRESET = {

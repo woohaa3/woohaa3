@@ -49,6 +49,9 @@
   --app-canvas-node-border-selected: #16846c;
   --app-canvas-node-shadow: #e4e9e6;
   --app-canvas-node-selected-halo: #d6ece2;
+  --app-canvas-group-surface: #eeeeee;
+  --app-canvas-group-label: #dedede;
+  --app-canvas-group-label-text: #1f1f1f;
   --app-canvas-edge-default: #9aaea4;
   --app-canvas-edge-selected: #16846c;
   --app-canvas-edge-draft: #16846c;
@@ -140,6 +143,9 @@
   --app-canvas-node-border-selected: #2fb99b;
   --app-canvas-node-shadow: #00000055;
   --app-canvas-node-selected-halo: #1d4a3e;
+  --app-canvas-group-surface: #1f2925;
+  --app-canvas-group-label: #2c3b35;
+  --app-canvas-group-label-text: #e8f0ec;
   --app-canvas-edge-default: #546b60;
   --app-canvas-edge-selected: #2fb99b;
   --app-canvas-edge-draft: #2fb99b;

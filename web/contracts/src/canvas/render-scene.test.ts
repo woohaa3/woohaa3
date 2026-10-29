@@ -264,32 +264,24 @@ describe("group 投影（change: add-canvas-node-grouping，任务 2.1）", () =
     expect(scene.nodes.find((node) => node.id === "g")!.group!.title).toBe("镜头发散");
   });
 
-  it("group 复用 prepared resource 时同时下发 3D 模型引用", () => {
+  it("group 不携带 3D 模型引用（change: canvas-grouping-redesign）", () => {
     const resource = prepareModelResource({
       sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION,
       ops: [{ t: "box", id: "body", parent: null, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], size: [1, 1, 1], material: null, color: "#fff" }]
     });
     const scene = buildCanvasRenderScene({ canvas: groupCanvas(), modelResources: new Map([["g", resource]]) });
-    expect(scene.nodes.find((node) => node.id === "g")!.model).toMatchObject({ resourceKey: resource.resourceKey, signature: resource.signature });
-    expect(scene.nodes.find(node => node.id === "g")!.group!.modelBounds).toEqual({ aabb: resource.aabb, extent: resource.extent });
-    const changed = structuredClone(scene);
-    changed.nodes.find(node => node.id === "g")!.group!.modelBounds!.aabb.max[0] += 1;
-    expect(renderSceneFingerprint(changed)).not.toBe(renderSceneFingerprint(scene));
-    expect(renderSceneEquals(changed, scene)).toBe(false);
+    expect(scene.nodes.find((node) => node.id === "g")!.model).toBeUndefined();
+    expect(scene.nodes.find(node => node.id === "g")!.group!.modelBounds).toBeUndefined();
   });
 
-  it("group 读取自身 groupAppearance 摆放，瞬时编辑优先", () => {
+  it("group 不读取 groupAppearance 摆放（change: canvas-grouping-redesign）", () => {
     const current = groupCanvas();
     const appearance = defaultGroupAppearance();
     appearance.model.placement = { offset: { x: 1, y: 2, z: 3 }, scale: 0.5, yaw: 45 };
     current.nodeData.g = { groupAppearance: appearance };
     const resource = prepareModelResource({ sceneVersion: MODEL_SCRIPT_SCENE_IR_V2_VERSION, ops: [] });
     const input = { canvas: current, modelResources: new Map([["g", resource]]) };
-    expect(buildCanvasRenderScene(input).nodes.find(node => node.id === "g")!.model!.placement)
-      .toEqual(appearance.model.placement);
-    const override = { offset: { x: 0, y: 0, z: 0 }, scale: 0.75, yaw: 90 };
-    expect(buildCanvasRenderScene({ ...input, modelPlacements: new Map([["g", override]]) })
-      .nodes.find(node => node.id === "g")!.model!.placement).toEqual(override);
+    expect(buildCanvasRenderScene(input).nodes.find(node => node.id === "g")!.model).toBeUndefined();
   });
 
   it("嵌套 group 的叶子计数是递归的", () => {

@@ -22,19 +22,11 @@ use super::layout::{hex, shortened};
 /// 不携带节点层级的聚合选择带和几何测试。
 pub(crate) const GROUP_Z: f32 = 1.0;
 
-/// 圆角半径与描边宽度。
-const GROUP_BORDER: f32 = 1.5;
+/// group 容器底实色（change: canvas-grouping-redesign）。
+pub(super) const GROUP_FILL_ALPHA: f32 = 1.0;
 
-/// group 容器底的 alpha（change: fix-group-and-marquee-preview；
-/// change: 2026-10-27-order-canvas-layers-by-ground-anchor 收敛为 2D 唯一组底色）。
-///
-/// 0.55 与参考实现 `rgba(42,42,48,.55)` 同量级：只暗示容器范围，不遮挡成员卡片边框。
-/// 2D 面板是**所有**组（带模型或不带模型）的唯一底色来源；3D 相机只画徽标后方的气泡
-/// 尾巴，不再叠加徽标底座或同透明度的填充面，因此两组观感一致。
-pub(super) const GROUP_FILL_ALPHA: f32 = 0.55;
-
-/// 组面板圆角，与组外框的 12 单位语言一致。
-const GROUP_PANEL_RADIUS: f32 = 12.;
+/// 组面板圆角（change: canvas-grouping-redesign）。
+const GROUP_PANEL_RADIUS: f32 = 16.;
 
 pub(crate) fn is_running(node: &crate::protocol::GraphNode) -> bool {
     node.group
@@ -60,7 +52,7 @@ pub(crate) fn draw_group_panel(
     presentation: &GroupPresentation,
 ) -> Mesh {
     let mut geometry = Geometry::default();
-    let color = theme.token_u32("canvasNodeSurface");
+    let color = theme.token_u32("canvasGroupSurface");
     panel(&mut geometry, node, 0., color, GROUP_FILL_ALPHA);
     if presentation.drop_target {
         panel(
@@ -109,37 +101,34 @@ pub(crate) fn draw_group(
 ) -> (String, Vec2, f32, u32) {
     let (x, y, width, _height) = (node.x, node.y, node.width, node.height);
     if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, z + 0.03); }
-    // 选中态用更强的虚线框颜色表达，而不是铺一层不透明选中底：容器铺底会盖住成员
-    // （change: fix-group-and-marquee-preview）。
-    // Continuous group surfaces are drawn by the per-group transparent panel
-    // entity; this shared mesh owns only the perimeter, text and controls.
-    // 选中态边框由 `draw_group_selection` 独立生产：这里跳过，避免同一位置重复几何。
-    if !selected {
-        let border = if presentation.drop_target {
-            theme.token_u32("interactionAccent")
-        } else {
-            theme.token_u32("canvasNodeBorder")
-        };
+    // 运行中时画动态描边；选中态描边由 draw_group_selection 独立生产。
+    if !selected && is_running(node) {
         let path = super::group_outline::path(node);
-        if is_running(node) {
-            super::group_outline::stroke(
-                geometry,
-                &path,
-                0.,
-                super::group_outline::length(&path),
-                2.,
-                z + 0.001,
-                super::group_motion::mix(border, theme.token_u32("interactionAccent"), 0.55),
-            );
-        } else {
-            dashed_polyline(
-                geometry,
-                &crate::canvas_query::group_model::frame_path(node),
-                GROUP_BORDER,
-                z + 0.001,
-                border,
-            );
-        }
+        super::group_outline::stroke(
+            geometry,
+            &path,
+            0.,
+            super::group_outline::length(&path),
+            2.,
+            z + 0.001,
+            super::group_motion::mix(
+                theme.token_u32("canvasGroupSurface"),
+                theme.token_u32("interactionAccent"),
+                0.55,
+            ),
+        );
+    }
+    if !selected && presentation.drop_target {
+        let path = super::group_outline::path(node);
+        super::group_outline::stroke(
+            geometry,
+            &path,
+            0.,
+            super::group_outline::length(&path),
+            2.,
+            z + 0.001,
+            theme.token_u32("interactionAccent"),
+        );
     }
     if let Some(corner) = crate::canvas_query::group_model::resize_center(node) {
         let color = theme.token_u32("canvasResizeHandle");
@@ -154,7 +143,7 @@ pub(crate) fn draw_group(
         }
     }
 
-    // 左上角标题：`标题 · N 项`；无标题时只显示计数。
+    // 左上角胶囊标签：`标题 · N 项`（change: canvas-grouping-redesign）。
     let title = if presentation.title.trim().is_empty() {
         String::new()
     } else {
@@ -165,19 +154,32 @@ pub(crate) fn draw_group(
     } else {
         format!("{} · {} 项", title, presentation.member_count)
     };
+    const PILL_FONT: f32 = 12.;
+    const PILL_PAD_X: f32 = 8.;
+    const PILL_HEIGHT: f32 = 24.;
+    const PILL_RADIUS: f32 = 8.;
+    const PILL_INSET: f32 = 10.;
+    let max_label_width = (width - PILL_INSET * 2. - PILL_PAD_X * 2. - 24.).max(24.);
+    let short_label = shortened(&label, max_label_width, PILL_FONT);
+    let text_width = crate::canvas_query::layout::estimated_text_width(&short_label, PILL_FONT);
+    let pill_width = (text_width + PILL_PAD_X * 2.).max(PILL_HEIGHT);
+    geometry.rounded_rect(
+        x + PILL_INSET,
+        y + PILL_INSET,
+        pill_width,
+        PILL_HEIGHT,
+        PILL_RADIUS,
+        z + 0.002,
+        theme.token_u32("canvasGroupLabel"),
+    );
     (
-        shortened(
-            &label,
-            (width
-                - 24.
-                - crate::canvas_query::layout::group_run_status_rect(node)
-                    .map_or(0., |r| r.2 + 12.))
-            .max(24.),
-            12.,
+        short_label,
+        Vec2::new(
+            x + PILL_INSET + PILL_PAD_X,
+            y + PILL_INSET + (PILL_HEIGHT - PILL_FONT) / 2.,
         ),
-        Vec2::new(x + 12., y + 8.),
-        12.,
-        theme.token_u32("canvasBodyText"),
+        PILL_FONT,
+        theme.token_u32("canvasGroupLabelText"),
     )
 }
 
@@ -203,10 +205,12 @@ pub(crate) fn draw_group_selection(
             color,
         );
     } else {
-        dashed_polyline(
+        super::group_outline::stroke(
             geometry,
-            &crate::canvas_query::group_model::frame_path(node),
-            GROUP_BORDER,
+            &path,
+            0.,
+            super::group_outline::length(&path),
+            2.,
             z + 0.001,
             color,
         );

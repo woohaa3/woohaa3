@@ -39,7 +39,7 @@ describe("跨运行时 token fixture（任务 5.5）", () => {
 
   it("CSS generated artifact 每个 token 与 canonical preset 完全一致", () => {
     const css = readFileSync(
-      resolve(REPO_ROOT, "web/frontend/src/cordis/ui/generated-theme.css"),
+      resolve(REPO_ROOT, "web/ui/src/styles/generated-theme.css"),
       "utf8"
     );
     const theme = defaultAppTheme();
