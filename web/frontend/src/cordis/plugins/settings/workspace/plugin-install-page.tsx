@@ -8,8 +8,8 @@
  * 页面只组装既有面板（市场列表 / 详情 / 文件安装），不持有第二份状态。
  */
 import { useSyncExternalStore } from "react";
-import { FileTextIcon, PlusIcon } from "../../../../shared/ui/icons.js";
-import { SegmentedControl } from "../../../../shared/ui/SegmentedControl.js";
+import { FileTextIcon, PlusIcon } from "@woohaa3/ui/icons";
+import { SegmentedControl } from "@woohaa3/ui/primitives";
 import type { MarketplaceInstallState } from "../marketplace-install.js";
 import type { SettingsSnapshot } from "@woohaa3/contracts";
 import type { ManagedExtensionsSource } from "../plugin-settings-section.js";

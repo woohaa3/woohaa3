@@ -19,7 +19,7 @@
     "test:units": "pnpm -r --filter \"./ui\" --filter \"./contracts\" --filter \"./provider-sdk\" --filter \"./services/*\" --filter \"./backend\" --filter \"./extensions/*\" --filter \"../extensions/*\" --filter \"./frontend\" run test",
     "prepare": "node ../scripts/sync-bevy-assets.mjs && pnpm run build:contracts",
     "build:frontend": "pnpm --filter @woohaa3/frontend run build",
-    "build:showcase": "pnpm -C showcase run build",
+    "build:showcase": "pnpm -C ui/showcase run build",
     "report:line-counts": "node scripts/report-business-line-counts.mjs",
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium",

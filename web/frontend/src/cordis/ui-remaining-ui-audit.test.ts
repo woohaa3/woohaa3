@@ -84,6 +84,8 @@ const LISTENER_EXCEPTIONS = new Set<string>([
   "cordis/plugins/video-capture/video-edit-overlay.ts",
   // 视频编辑 dialog 的 Escape 分层（先关标注/再关）由 dialog 拥有。
   "cordis/plugins/video-capture/video-edit-dialog.tsx",
+  // 场景体验条监听画布上的任意输入/Escape 以取消取景导航，不是浮层 dismiss。
+  "cordis/plugins/scene-experience/experience-bar.tsx",
 ]);
 
 describe("剩余 Canvas UI 迁移审计（任务 8.2）", () => {
@@ -141,7 +143,10 @@ describe("剩余 Canvas UI 迁移审计（任务 8.2）", () => {
       // 核心服务配置的横向标签切换：带计数徽标与稳定 data-testid 契约，
       // Tabs/SegmentedControl 无法透传逐项 testid 与徽标组合
       // （change: 2026-10-21-unify-assistant-execution 引入）。
-      "cordis/plugins/settings/backend-settings-section.tsx"
+      "cordis/plugins/settings/backend-settings-section.tsx",
+      // 市场来源切换：逐项带「不可用」徽标与来源专属样式，SegmentedControl 无法承载
+      // 逐项内容（2026-10-28 扩展层级导航引入）。
+      "cordis/plugins/settings/marketplace-install-ui.tsx"
     ]);
     const offenders: string[] = [];
     for (const file of productionFiles(PLUGINS_DIR)) {

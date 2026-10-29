@@ -23,7 +23,7 @@ import {
   SearchIcon,
   SparklesIcon,
   ToolsIcon
-} from "../../../../shared/ui/icons.js";
+} from "@woohaa3/ui/icons";
 
 export type SettingsSectionNavEntry = { id: string; label: string; icon: ReactNode };
 

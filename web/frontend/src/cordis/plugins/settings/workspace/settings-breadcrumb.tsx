@@ -4,7 +4,7 @@
  * 层级导航（2026-10-28）：左栏是右栏的父级，点击面包屑可以直接跨级回跳（没有中间帧）；
  * 最后一段是当前页，不可点。一级分区不显示面包屑——那里已经有页面标题。
  */
-import { ChevronRightIcon } from "../../../../shared/ui/icons.js";
+import { ChevronRightIcon } from "@woohaa3/ui/icons";
 
 export type SettingsCrumb = {
   label: string;

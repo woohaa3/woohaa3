@@ -9,6 +9,7 @@
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { compareSemver, type MarketplaceSigningKey, type MarketplaceVersionInfo, type SettingsSnapshot } from "@woohaa3/contracts";
+import { RefreshIcon, SearchIcon } from "@woohaa3/ui/icons";
 import { Button } from "@woohaa3/ui/primitives";
 import { TextInput } from "@woohaa3/ui/forms";
 import { appPublicUrl } from "../../services/app-base-path.js";
@@ -449,13 +450,13 @@ export function MarketplaceInstallPanel({
                     }}
                   >
                     <span className="marketplace-search__icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                      <SearchIcon size={14} />
                     </span>
                     <TextInput value={text} placeholder="搜索扩展名称、ID 或描述" onChange={(event) => setText(event.currentTarget.value)} data-testid="marketplace-search-input" />
                     <Button size="sm" type="submit" disabled={state.searching}>搜索</Button>
                   </form>
                   <Button size="sm" tone="ghost" onClick={() => void controller.refresh()} title="刷新" className="marketplace-refresh">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={state.refreshing ? "is-spinning" : undefined}><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" /></svg>
+                    <RefreshIcon size={14} className={state.refreshing ? "is-spinning" : undefined} />
                   </Button>
                 </div>
               ) : null}
