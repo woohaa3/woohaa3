@@ -223,14 +223,49 @@ pub(super) fn targets_with_preparation(
             bounds,
             aspect: card_geometry::shot_preview_aspect(node),
             content: format!(
-                "{}:background={backdrop}",
+                "{}:group={}:background={backdrop}",
                 content_identity(
                     owner,
                     owner.composite_asset.as_ref(),
                     owner.model.as_ref(),
                     preview,
                     &quality_of(&owner.id),
-                )
+                ),
+                // 片场 group 的绑定/sceneTransform 就是实时组合内容，任何一项变化都必须让
+                // 卡片重新采样（change: 2026-10-28-migrate-film-set-to-groups）。
+                scene
+                    .film_set_groups
+                    .iter()
+                    .find(|group| group.owner_id == owner.id)
+                    .map(|group| {
+                        let transform = group
+                            .scene_transform
+                            .as_ref()
+                            .map(|t| format!("{}:{}:{}:{}:{}", t.x, t.y, t.z, t.yaw, t.scale))
+                            .unwrap_or_default();
+                        let bindings = group
+                            .bindings
+                            .iter()
+                            .map(|binding| {
+                                format!(
+                                    "{}:{}:{}:{}:{}:{}:{}:{}:{}:{:?}",
+                                    binding.binding_id,
+                                    binding.content_key,
+                                    binding.transform.x,
+                                    binding.transform.y,
+                                    binding.transform.z,
+                                    binding.transform.yaw,
+                                    binding.transform.scale,
+                                    binding.visible,
+                                    binding.aspect_ratio,
+                                    binding.diagnostic
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("|");
+                        format!("{transform}:{bindings}")
+                    })
+                    .unwrap_or_default()
             ),
             time: if is_live {
                 live.map(|sampling| sampling.playback.time.to_bits())
