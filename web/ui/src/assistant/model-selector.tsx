@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 import {
 	DropdownMenu,
 	DropdownMenuItem,
@@ -8,9 +8,13 @@ import {
 	Popover,
 } from "../primitives/index.js";
 import { Button } from "../primitives/Button.js";
+import { SearchIcon } from "../icons/index.js";
 
 export const ASSISTANT_SETUP_HINT = "尚未配置助手。连接一个助手即可开始，创作描述会保留在这里。";
 export const ASSISTANT_SETUP_TOOLTIP = "尚未配置助手，点击这里配置。";
+
+/** 目录较长时才占用一行放搜索框；短列表直接给选项，少一次点击。 */
+const MODEL_SEARCH_THRESHOLD = 8;
 
 type SelectorOption = { value: string; label: string; detail?: string; provider?: string; disabled?: boolean };
 type SelectorVariant = {
@@ -159,6 +163,15 @@ export function AssistantModelSelector({
 	const variantLabel = variant?.options.find(option => option.value === variant.value)?.label;
 	const summary = [selected?.label || model || placeholder || label, variantLabel].filter(Boolean).join(" · ");
 	const expanded = open && !disabled;
+	// 目录可能是上百个模型（本机工具会合并多个 provider），只按 label 逐项扫视不可用；
+	// 超过阈值时提供即时过滤，匹配模型名、来源说明与 provider 名。
+	const searchable = options.length > MODEL_SEARCH_THRESHOLD;
+	const [query, setQuery] = useState("");
+	useEffect(() => { if (!expanded) setQuery(""); }, [expanded]);
+	const needle = query.trim().toLocaleLowerCase();
+	const visibleOptions = needle
+		? options.filter(option => [option.label, option.detail, option.provider].filter(Boolean).join(" ").toLocaleLowerCase().includes(needle))
+		: options;
 	return (
 		<div className="mc-panel__model assistant-model-selector">
 			<Popover
@@ -194,12 +207,28 @@ export function AssistantModelSelector({
 					</button>
 				}
 			>
+				{searchable ? (
+					<div className="assistant-model-panel__searchbar">
+						<label className="assistant-model-panel__search">
+							<SearchIcon className="assistant-model-panel__search-icon" />
+							<input
+								type="search"
+								value={query}
+								placeholder="搜索模型或 provider"
+								aria-label="搜索模型"
+								autoComplete="off"
+								onChange={event => setQuery(event.target.value)}
+							/>
+						</label>
+					</div>
+				) : null}
 				<OptionChips
 					label="模型"
 					groupLabel={label}
 					value={model}
 					disabled={disabled}
-					options={options.map(option => ({
+					empty={needle ? "没有匹配的模型" : undefined}
+					options={visibleOptions.map(option => ({
 						value: option.value,
 						label: option.label,
 						note: option.detail ?? (option.provider ? `提供方 ${option.provider}` : undefined),
@@ -245,19 +274,22 @@ export function AssistantModelSelector({
  * 用普通按钮而不是单选分段控件，因为 Variant 的真实取值可以是空串（「默认 Variant」），
  * 而 `SegmentedControl` 的单选模式会忽略空值、无法表达该选项。
  */
-function OptionChips({ label, groupLabel, value, disabled, options, onSelect }: {
+function OptionChips({ label, groupLabel, value, disabled, options, empty, onSelect }: {
 	label: string;
 	/** 与面板触发器同名时作为组名，读屏与测试可定位。 */
 	groupLabel?: string;
 	value: string;
 	disabled: boolean;
 	options: ReadonlyArray<{ value: string; label: string; note?: string; disabled?: boolean }>;
+	/** 过滤后没有任何选项时的提示。 */
+	empty?: string;
 	onSelect: (value: string) => void;
 }) {
 	return (
 		<div className="assistant-model-panel__group">
 			<span className="assistant-model-panel__label">{label}</span>
 			<div className="assistant-model-panel__options" role="group" aria-label={groupLabel ?? label}>
+				{options.length === 0 && empty ? <span className="assistant-model-panel__empty">{empty}</span> : null}
 				{options.map(option => (
 					<button
 						key={option.value}

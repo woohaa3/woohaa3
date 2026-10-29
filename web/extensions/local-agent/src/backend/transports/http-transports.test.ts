@@ -98,15 +98,16 @@ describe("CodeBuddy 2.x HTTP ACP", () => {
   });
 });
 
-function openCodeMock(mcpStatus = "connected") {
-  const requests: Array<{ path: string; method: string; body?: any; authorization: string | null }> = [];
+function openCodeMock(mcpStatus = "connected", catalog: unknown[] = []) {
+  const requests: Array<{ path: string; search: string; method: string; body?: any; authorization: string | null }> = [];
   let session = 0;
   const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
     const parsed = new URL(String(url));
     const path = parsed.pathname;
     const method = init?.method ?? "GET";
-    requests.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined, authorization: new Headers(init?.headers).get("Authorization") });
+    requests.push({ path, search: parsed.search, method, body: init?.body ? JSON.parse(String(init.body)) : undefined, authorization: new Headers(init?.headers).get("Authorization") });
     if (path === "/api/info") return json({ version: "2.0.32" });
+    if (path === "/api/model") return json({ data: catalog });
     if (path.startsWith("/api/experimental/mcp/")) return new Response(null, { status: 204 });
     if (path === "/api/mcp") return json({ data: [{ name: "woohaa", status: { status: mcpStatus } }] });
     if (path === "/api/session" && method === "POST") return json({ data: { id: `session-${++session}` } });
@@ -118,6 +119,58 @@ function openCodeMock(mcpStatus = "connected") {
   });
   return { fetchImpl, requests };
 }
+
+describe("OpenCode v2 model catalog", () => {
+  const catalog = [
+    { id: "gpt-6", modelID: "gpt-6", providerID: "openai", name: "GPT-6", enabled: true, variants: [{ id: "low" }, { id: "high" }, { id: "fast" }] },
+    { id: "gpt-6", modelID: "gpt-6", providerID: "custom", name: "GPT-6", enabled: true },
+    { id: "solo", modelID: "solo", providerID: "solo-provider", name: "Solo", enabled: true },
+    { id: "legacy", modelID: "legacy", providerID: "openai", name: "Legacy", enabled: false }
+  ];
+  const directory = { configDir: "/config", workDir: "/work", loopbackUrl: "http://127.0.0.1:42000", httpHeaders: { Authorization: "Basic process-auth" }, stdio: null };
+
+  it("按 location 读取真实目录，身份用 providerID/modelID，Variant 只保留宿主认识的取值", async () => {
+    const mock = openCodeMock("connected", catalog);
+    const result = await createOpenCodeTransport(mock).models!(directory);
+    expect(result).toEqual({ models: [
+      { id: "openai/gpt-6", label: "GPT-6 (openai)", reasoningEfforts: ["low", "high"] },
+      { id: "custom/gpt-6", label: "GPT-6 (custom)" },
+      { id: "solo-provider/solo", label: "Solo (solo-provider)" }
+    ] });
+    const request = mock.requests.find(entry => entry.path === "/api/model")!;
+    expect(request.search).toBe("?location%5Bdirectory%5D=%2Fwork");
+    expect(request.authorization).toBe("Basic process-auth");
+  });
+  it("空目录给出登录/配置提示，不静默返回空下拉", async () => {
+    const mock = openCodeMock("connected");
+    const result = await createOpenCodeTransport({ ...mock, modelCatalogRetryMs: 0 }).models!(directory);
+    expect(result).toEqual({ models: [], error: expect.stringContaining("未返回可用模型") });
+    // 进程刚启动或回合进行中目录可能短暂为空：读取按间隔重试整个窗口，而不是第一次空响应就放弃。
+    expect(mock.requests.filter(entry => entry.path === "/api/model")).toHaveLength(8);
+  });
+  it("首次空响应后重试拿到真实目录", async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn<typeof fetch>(async url => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/api/info") return json({ version: "2.0.20" });
+      if (path === "/api/model") return json({ data: calls++ === 0 ? [] : [{ modelID: "m", providerID: "p", name: "M" }] });
+      throw new Error(`Unexpected route ${path}`);
+    });
+    expect(await createOpenCodeTransport({ fetchImpl, modelCatalogRetryMs: 0 }).models!(directory)).toEqual({ models: [{ id: "p/m", label: "M (p)" }] });
+    expect(calls).toBe(2);
+  });
+  it("目录读取失败如实返回原因，且 4xx 不重试", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => json({}, 403));
+    const result = await createOpenCodeTransport({ fetchImpl, modelCatalogRetryMs: 0 }).models!(directory);
+    expect(result).toEqual({ models: [], error: expect.stringContaining("HTTP 403") });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it("缺少专用进程时不发起请求", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    expect(await createOpenCodeTransport({ fetchImpl }).models!({ ...directory, loopbackUrl: null })).toEqual({ models: [], error: "OpenCode 专用进程未启动" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
 
 describe("OpenCode v2 remote MCP", () => {
   it("讨论通过原生 files 输入图片，工具面保持为空", async () => {

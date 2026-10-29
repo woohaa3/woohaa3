@@ -1066,3 +1066,30 @@ it("text keeps drafts on target switches and disables submission in read-only se
   expect(generate().disabled).toBe(true);
   expect(service.submitTurn).not.toHaveBeenCalled();
 });
+
+it("刷新按钮同时重读模型目录，而不只刷新连接列表", async () => {
+  const { props, service } = fixture();
+  props.sourceSelection!.onRefresh = vi.fn();
+  props.sourceSelection!.connections = [
+    { connectionId: "c1", label: "本地 OpenCode", ready: true, models: [] },
+  ];
+  vi.mocked(service.catalog).mockResolvedValue(
+    ok({ models: [{ id: "p/m", label: "M (p)" }] }) as never,
+  );
+  await render(props);
+  await act(async () => undefined);
+  expect(service.catalog).toHaveBeenCalledTimes(1);
+  const refresh = el.querySelector<HTMLButtonElement>(
+    'button[aria-label="刷新助手"]',
+  )!;
+  await act(async () => {
+    refresh.click();
+  });
+  await act(async () => undefined);
+  expect(props.sourceSelection!.onRefresh).toHaveBeenCalledOnce();
+  expect(service.catalog).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.click();
+  });
+  expect(document.body.textContent).toContain("M (p)");
+});

@@ -115,3 +115,22 @@ it("waits for a ready canvas and known identity, warms once, and unsubscribes on
   stop();
   expect(userListeners.size + sessionListeners.size).toBe(0);
 });
+
+it("keeps the previously loaded models when a refresh fails or returns an empty catalog", async () => {
+  const withModels = { models: [{ id: "p/m", label: "M (p)" }], capabilities: { targets: [], tools: true } } as unknown as AgentCatalogResponse;
+  const listConnections = vi.fn(async () => ({ ok: true as const, value: [connection] }));
+  const catalog = vi.fn()
+    .mockResolvedValueOnce({ ok: true as const, value: withModels })
+    .mockResolvedValueOnce({ ok: false as const, error: "目录暂时不可用" })
+    .mockResolvedValue({ ok: true as const, value: { ...withModels, models: [] } });
+  const service = cacheAgentDirectoryReads({ listConnections, catalog }, () => "space");
+  const store = agentDirectory(service, "space");
+  await store.load();
+  expect(store.getSnapshot().catalogs.adapter?.models.map(model => model.id)).toEqual(["p/m"]);
+  await store.load(true);
+  expect(store.getSnapshot().catalogs.adapter?.models.map(model => model.id)).toEqual(["p/m"]);
+  expect(store.getSnapshot().error).toContain("目录暂时不可用");
+  await store.load(true);
+  expect(store.getSnapshot().catalogs.adapter?.models.map(model => model.id)).toEqual(["p/m"]);
+  expect(store.getSnapshot().error).toBe("");
+});

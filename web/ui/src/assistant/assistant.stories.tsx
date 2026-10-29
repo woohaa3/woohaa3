@@ -58,6 +58,21 @@ export function SelectorStates() {
   </>}</ComponentStage>;
 }
 
+/** 长模型目录：超过 8 个模型时出现即时搜索，按模型名或 provider 过滤。 */
+export function LongModelCatalog() {
+  const [model, select] = useState("opencode/模型 1");
+  const [open, setOpen] = useState(false);
+  const providers = ["opencode", "aihubmix", "openrouter"];
+  const options = Array.from({ length: 24 }, (_, index) => ({
+    value: `${providers[index % providers.length]}/模型 ${index + 1}`,
+    label: `模型 ${index + 1} (${providers[index % providers.length]})`,
+  }));
+  return <ComponentStage>{record => <>
+    <AssistantModelSelector label="选择助手模型" model={model} options={options} open={open} onOpenChange={setOpen} onChange={value => { select(value); record(value); }} />
+    <output>模型：{model}</output>
+  </>}</ComponentStage>;
+}
+
 /** 工具栏：完整插槽、全缺省占位、disabled 与 refreshing。 */
 export function ToolbarStates() {
   const [refreshing, refresh] = useState(false);

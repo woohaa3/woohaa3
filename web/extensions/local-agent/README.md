@@ -9,7 +9,7 @@
 | adapterId | 传输 | 账号 | 说明 |
 | --- | --- | --- | --- |
 | `codex-appserver` | stdio JSON-RPC | 复用后端现有 Codex 配置/登录（含自定义 provider） | 专用进程；initialize → account → thread/turn |
-| `opencode-server` | HTTP `/api/*` | 工具自身 provider 授权 | v2 运行期 MCP、原生 idle 等待与持久消息投影 |
+| `opencode-server` | HTTP `/api/*` | 工具自身 provider 授权 | v2 运行期 MCP、原生 idle 等待与持久消息投影；模型目录读 `GET /api/model`（`providerID/modelID`） |
 | `codebuddy-server` | HTTP + ACP | 工具自身登录 | `/api/v1/acp` JSON-RPC、连接流与逐请求 SSE |
 
 ## 安装与启用
