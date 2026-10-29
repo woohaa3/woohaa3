@@ -59,7 +59,6 @@ pub(crate) fn setup(
         attach_probe_mesh,
         attach_probe_entity: None,
         attach_probe_active: false,
-        media_alpha_checker: None,
         running_mesh,
         running_mesh_entity: None,
         running_active: false,
