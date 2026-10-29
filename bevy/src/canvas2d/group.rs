@@ -110,7 +110,17 @@ pub(crate) fn draw_group(
     selected: bool,
     z: f32,
 ) -> (String, Vec2, f32, u32) {
-    let (x, y, width, _height) = (node.x, node.y, node.width, node.height);
+    let (x, y, width, height) = (node.x, node.y, node.width, node.height);
+    // 收起组只保留徽标卡片（由卡片通路绘制），气泡背板/尾巴一律不画
+    // （change: 2026-10-28-migrate-film-set-to-groups）。
+    if presentation.collapsed {
+        return (
+            String::new(),
+            Vec2::ZERO,
+            0.,
+            theme.token_u32("canvasBodyText"),
+        );
+    }
     if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, z + 0.03); }
     // 选中态用更强的虚线框颜色表达，而不是铺一层不透明选中底：容器铺底会盖住成员
     // （change: fix-group-and-marquee-preview）。

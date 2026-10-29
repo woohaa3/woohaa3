@@ -144,10 +144,10 @@ pub(super) fn draw_draft(
 ///
 /// 起点由映射层投影给出（`ShotPreviewLink.start`），终点复用卡片左侧中点
 /// （`canvas_query::shot_preview::card_attachment_of`，与卡片命中几何一致）。使用共享边曲线
-/// 规则，并与普通边一致画**实线**（`dashed = false`、同宽度 2.0），只表达稳定的永久归属而非
-/// 临时/草稿关系；不参与普通边拓扑，因此没有端口、删除按钮、断开或重连命中。目标节点缺失时
-/// 跳过该线，绝不伪造终点。`overlay_z` 使线画在普通卡片之上，便于始终看清归属；
-/// 线型为虚线（change: 2026-10-28-migrate-film-set-to-groups，D5 修订）。
+/// 规则，但画**虚线**（`dashed = true`、与普通边同宽 2.0）：只表达稳定的永久归属而非临时/
+/// 草稿关系，虚线也让它与普通边一眼可分（change: 2026-10-28-migrate-film-set-to-groups，
+/// 用户要求恢复虚线）。不参与普通边拓扑，因此没有端口、删除按钮、断开或重连命中。目标节点
+/// 缺失时跳过该线，绝不伪造终点。`overlay_z` 使线画在普通卡片之上，便于始终看清归属。
 pub(super) fn draw_shot_preview_links(
     geometry: &mut Geometry,
     scene: &Scene,
@@ -170,7 +170,7 @@ pub(super) fn draw_shot_preview_links(
             target.width,
             target.height,
         );
-        geometry.curve(start, end, 2.0, overlay_z, color, false);
+        geometry.curve(start, end, 2.0, overlay_z, color, true);
     }
 }
 
