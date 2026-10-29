@@ -58,4 +58,23 @@ describe("Agent Supervisor 客户端", () => {
     expect(existsSync(handle.configDir)).toBe(true);
     expect(requests.find(request => request.method === "ensure")?.params).toMatchObject({ cwd: handle.workDir });
   });
+
+  it("Supervisor 不在时给出可执行的错误，而不是裸 connect ENOENT", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "woohaa3-supervisor-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const socketPath = path.join(root, "missing.sock");
+    const manager = createSupervisorProcessManager(
+      {
+        workDirRoot: path.join(root, "agents"),
+        portRange: { min: 42000, max: 42010 },
+        executableFor: () => "/definitely/installed/opencode"
+      },
+      { socketPath, token: "test-token", workspaceKey: "test-workspace", portRange: { min: 42000, max: 42010 } }
+    );
+
+    // dev 启动器会在 2 秒内自动重启 Supervisor，客户端重试后仍失败才报错；
+    // 错误必须说明是哪个通道、端点和该怎么恢复，不能只留下 `connect ENOENT`。
+    await expect(manager.ensure({ adapterId: "opencode-server", owner: "owner", connectionId: "conn", args: ["serve"], kind: "http" }))
+      .rejects.toThrow(/Agent Supervisor 控制通道不可用（ENOENT .*missing\.sock）/);
+  });
 });

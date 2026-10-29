@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import fs, { existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import http from "node:http";
-import net from "node:net";
-import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import path from "node:path";
@@ -19,7 +17,7 @@ import { decideBackendExit, RESTART_LOOP_LIMIT, RESTART_LOOP_WINDOW_MS } from ".
 import { findStaleArtifacts, formatStaleArtifacts } from "./lib/artifact-freshness.mjs";
 import { syncBevyAssets } from "./sync-bevy-assets.mjs";
 import { resolveDevEntryArgs, DEV_MODE_ENV } from "./lib/bevy-build-mode.mjs";
-import { supervisorEndpoint } from "./lib/agent-runtime-endpoints.mjs";
+import { createAgentSupervisorHost } from "./lib/agent-runtime-supervisor-host.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2).filter((value) => value !== "--");
@@ -103,31 +101,13 @@ function signalChild(child, signal) {
   }
 }
 
-function supervisorRpc(config, method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection(config.socketPath);
-    let buffer = "";
-    const id = Date.now();
-    const timer = setTimeout(() => { socket.destroy(); reject(new Error("Agent Supervisor 连接超时")); }, 3000);
-    const finish = (error, value) => { clearTimeout(timer); socket.destroy(); error ? reject(error) : resolve(value); };
-    socket.setEncoding("utf8");
-    socket.on("data", chunk => {
-      buffer += String(chunk);
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line) continue;
-        try {
-          const response = JSON.parse(line);
-          if (response.id !== id) continue;
-          if (response.ok) finish(null, response.result);
-          else finish(new Error(response.error || "Agent Supervisor 请求失败"));
-        } catch { /* 等待完整 JSON 行 */ }
-      }
-    });
-    socket.once("error", error => finish(error));
-    socket.once("connect", () => socket.write(JSON.stringify({ id, token: config.token, workspaceKey: config.workspaceKey, method, params }) + "\n"));
+function agentSupervisorHost() {
+  agentSupervisor ??= createAgentSupervisorHost({
+    root,
+    runtimeDir: path.join(root, ".local", "agent-runtime"),
+    log: message => console.warn(`[dev] ${message}`)
   });
+  return agentSupervisor;
 }
 
 /**
@@ -158,54 +138,30 @@ function watchBackendReady(url) {
   setTimeout(retry, 300);
 }
 
+/**
+ * Supervisor 是独立进程，可能在开发期间被外部清理；后端持有的 socket/token 不变，
+ * 因此由启动器定时探活并原地重启（见 lib/agent-runtime-supervisor-host.mjs）。
+ */
 async function ensureAgentSupervisor() {
-  const runtimeDir = path.join(root, ".local", "agent-runtime");
-  fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-  // Windows 没有 Unix domain socket 的文件语义：net.Server#listen(<文件路径>) 恒返回 EACCES
-  // 且不触发监听回调，dev 会卡在「Agent Supervisor 启动超时」。这里改用命名管道，并带上
-  // workspaceKey——管道名是全机器共享的命名空间，不像 .local/ 下的文件那样按 checkout 隔离。
-  const workspaceKey = crypto.createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 40);
-  const socketPath = supervisorEndpoint({ workspaceKey, runtimeDir });
-  const tokenPath = path.join(runtimeDir, "token");
-  const token = existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : crypto.randomBytes(32).toString("hex");
-  if (!existsSync(tokenPath)) fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-  const config = { socketPath, token, workspaceKey };
-  if (existsSync(socketPath)) {
-    try {
-      const state = await supervisorRpc(config, "ping");
-      if (state?.workspaceKey === workspaceKey) { agentSupervisor = config; return config; }
-    } catch { /* stale endpoint; start a replacement below */ }
-    // 命名管道没有 unlink 语义：随最后一个句柄关闭由系统回收，跳过清理。
-    if (process.platform !== "win32") {
-      try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
-    }
-  }
-  const script = path.join(root, "scripts", "agent-runtime-supervisor.mjs");
-  const child = spawn(process.execPath, [script, "--socket", socketPath, "--state", runtimeDir, "--token", token, "--workspace", workspaceKey, "--owner-pid", String(process.pid)], {
-    cwd: root, detached: true, stdio: "ignore", windowsHide: true
-  });
-  child.unref();
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    try {
-      const state = await supervisorRpc(config, "ping");
-      if (state?.workspaceKey === workspaceKey) { agentSupervisor = config; return config; }
-    } catch { await new Promise(resolve => setTimeout(resolve, 100)); }
-  }
-  throw new Error("Agent Supervisor 启动超时");
+  const host = agentSupervisorHost();
+  const config = await host.ensure();
+  host.startWatch();
+  return config;
 }
 
 async function shutdownAgentSupervisor() {
   if (!agentSupervisor) return;
-  const current = agentSupervisor;
+  const host = agentSupervisor;
   agentSupervisor = null;
-  try { await supervisorRpc(current, "shutdown"); } catch { /* supervisor may already be gone */ }
+  await host.stop();
 }
 
 function stop(code) {
   if (stopPromise) return stopPromise;
   stopping = true;
   process.exitCode = code;
+  // 先停探活：收子进程可能等 5 秒，这期间不应再把 Supervisor 拉起来。
+  agentSupervisor?.stopWatch();
   // 监听句柄会保持事件循环存活：先关监听，再收子进程。
   hostWatch?.close();
   hostWatch = null;
