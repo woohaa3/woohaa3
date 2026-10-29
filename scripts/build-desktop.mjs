@@ -240,7 +240,17 @@ async function runBuild(options) {
   const targetError = nativeTargetError({ platform, arch, target: options.target });
   if (targetError) throw new Error(targetError);
   assertPlatformAndIcons({ platform });
-  if (options.buildFrontend && !options.dryRun) buildFrontend(!options.uiUrl);
+  if (options.buildFrontend && !options.dryRun) {
+    // 发布产物自报发布版本：桌面端没有部署脚本，按 git 现场取值只能得到 `<sha>-dirty`
+    // （构建过程会写入生成资源，工作区必然是脏的），管理端「上报端版本」因此看不出是哪个版本。
+    // 显式注入后，诊断/遥测上报的就是 desktop/tauri.conf.json 的发布版本。
+    const frontendVersion = options.version ?? config.version;
+    if (frontendVersion) {
+      process.env.WOOHAA_FRONTEND_BUILD_VERSION = frontendVersion;
+      process.env.WOOHAA_FRONTEND_BUILD_COMMIT = "";
+    }
+    buildFrontend(!options.uiUrl);
+  }
   if (!options.dryRun) assertFrontend(frontendDist);
 
   const override = tauriConfigOverride({
