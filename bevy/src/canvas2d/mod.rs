@@ -20,37 +20,37 @@ mod camera;
 mod card_cache;
 mod cards;
 mod compact_card;
+mod focus_reference;
 mod container_cache;
 mod dash;
 mod decoration_cache;
 pub(crate) mod draw_order;
 mod edge_cache;
 mod film_set;
-mod focus_reference;
 #[cfg(test)]
 pub(crate) use film_set::draw_film_set_run_mask;
 mod focus_backdrop;
-pub(crate) mod focus_details;
 mod generation;
 pub(crate) mod group;
 mod group_motion;
 mod group_outline;
 mod group_surface;
-pub(crate) mod history_pulse;
 mod history_strip;
+pub(crate) mod history_pulse;
 pub(crate) mod image_focus;
+pub(crate) mod focus_details;
 mod init;
 mod labels;
 mod marquee;
 mod node_action;
-mod ownership_links;
 mod render;
 mod render_edges;
-pub(crate) mod scope_panel;
+mod ownership_links;
 mod shared_key;
+pub(crate) mod scope_panel;
 pub(crate) mod text_presentation;
-mod texture_store;
 mod textures;
+mod texture_store;
 
 /// 共享纯布局函数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）：渲染与查询复用
 /// `canvas_query::layout` 的同一实现，保持既有 `super::layout` 路径与常量。
@@ -78,7 +78,24 @@ pub(crate) mod shot_preview {
 
 use bevy::prelude::*;
 
-pub(crate) use alpha_checker::sync as sync_alpha_checker;
+/// Shared GPU material/font handles. Entity and layer ownership stays in components/queries;
+/// this resource only contains handles safe to share across producers.
+#[derive(Resource, Clone)]
+pub(crate) struct CanvasMaterials {
+    pub(crate) solid: Handle<ColorMaterial>,
+    pub(crate) blend: Handle<ColorMaterial>,
+    pub(crate) font: Handle<Font>,
+}
+
+/// Cache resource aliases used by producers while the cache fields are migrated independently.
+/// They keep system signatures explicit at the module boundary and preserve one ECS resource
+/// registration during the staged migration.
+pub(crate) use card_cache::CardBlockCache;
+pub(crate) use decoration_cache::CardDecorationCache;
+pub(crate) use container_cache::ContainerBlockCache;
+pub(crate) use edge_cache::EdgeBlockCache;
+pub(crate) use texture_store::TextureStore;
+
 pub(crate) use attach::sync_attach_probe;
 pub(crate) use camera::sync_camera;
 pub(crate) use focus_backdrop::sync as sync_focus_backdrop;
@@ -118,23 +135,6 @@ pub(crate) struct CanvasOverlayCache {
     blend_mesh_entity: Option<Entity>,
     font: Handle<Font>,
     shared_key: Option<shared_key::SharedKey>,
-    /// 拖动粘连触须的逐帧动画覆盖层（独立于主 card mesh，避免每帧重建整场几何）。
-    attach_probe_mesh: Handle<Mesh>,
-    attach_probe_entity: Option<Entity>,
-    /// 触须覆盖层当前是否含非空几何（用于从「有触须」到「无」时清空一次）。
-    attach_probe_active: bool,
-    /// 运行中节点的逐帧进度覆盖层（change: add-node-running-progress）：
-    /// 独立于主 card mesh，避免逐帧重建时影响边标签。
-    running_mesh: Handle<Mesh>,
-    running_mesh_entity: Option<Entity>,
-    /// 覆盖层当前是否含非空几何（用于从「有运行节点」到「无」时清空一次）。
-    running_active: bool,
-    /// 节点顶部操作横条覆盖层（change: 2026-10-13-add-node-to-film-set-shortcut）：
-    /// 逐帧重建，锚定节点上方并随位置/视口顶部碰撞变化，独立于主 card mesh 与标签池。
-    node_action_mesh: Handle<Mesh>,
-    node_action_entity: Option<Entity>,
-    /// 横条覆盖层当前是否含非空几何（用于从「有横条」到「无」时清空一次）。
-    node_action_active: bool,
 }
 
 impl CanvasOverlayCache {
@@ -150,15 +150,6 @@ impl CanvasOverlayCache {
             blend_mesh_entity: None,
             font: default(),
             shared_key: None,
-            attach_probe_mesh: default(),
-            attach_probe_entity: None,
-            attach_probe_active: false,
-            running_mesh: default(),
-            running_mesh_entity: None,
-            running_active: false,
-            node_action_mesh: default(),
-            node_action_entity: None,
-            node_action_active: false,
         }
     }
 

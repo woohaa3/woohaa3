@@ -120,7 +120,13 @@ impl ContainerVisual {
         let composite = node.composite_asset.as_ref();
         if group.is_none() && composite.is_none() { return None; }
         let (collapsed, running, member_count) = if let Some(group) = group {
-            (group.collapsed, crate::canvas2d::group_is_running(node), group.member_count.max(0) as u32)
+            // 运行态来自画布运行时（`canvas2d::group`）；无画布构建（原生模型渲染/录制）
+            // 没有运行态来源，按未运行处理，保持 `native-renderer` 单独可编译。
+            #[cfg(feature = "canvas-core")]
+            let running = crate::canvas2d::group_is_running(node);
+            #[cfg(not(feature = "canvas-core"))]
+            let running = false;
+            (group.collapsed, running, group.member_count.max(0) as u32)
         } else {
             (false, false, composite.and_then(|asset| asset.panel.as_ref()).map_or(0, |_| 0))
         };

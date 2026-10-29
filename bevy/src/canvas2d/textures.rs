@@ -19,7 +19,7 @@ use bevy::{
 use crate::app::TextureBatch;
 use crate::canvas_ecs::components::{CanvasNodeId, CanvasTextureSprite};
 
-use super::Visuals;
+use super::TextureStore;
 use super::texture_store::TextureAction;
 
 /// 消费本帧 keyed 纹理批次并回收不再挂载的 Sprite。

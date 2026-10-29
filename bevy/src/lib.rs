@@ -24,9 +24,6 @@ mod theme_generated;
 pub mod animation_session;
 /// 通用相机过渡状态机（change: refactor-bevy-reusable-components）。
 pub mod camera_transition;
-/// 2D 共享纯几何与 interaction 查询（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
-/// 不依赖 Bevy/ECS/wasm，可在 native 下单独测试；`canvas2d` 渲染复用其布局与曲线函数。
-mod canvas_query;
 /// 画布节点 ECS 投影层与公共组件（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs）。
 /// 组件在全部 feature 下编译（3D 模块复用 owner/part marker）；投影与批处理只在 `canvas-core`。
 /// 实体只活在当前 renderer 实例内：结构变化由唯一投影点处理，位置增量只更新组件，

@@ -157,7 +157,7 @@ pub(crate) fn badge_path(node: &GraphNode) -> Vec<Vec2> {
 /// pointed tail. Only a body narrower than the tail itself clips it, so a degenerate group can
 /// never produce an inverted perimeter.
 pub(crate) fn tail_path(node: &GraphNode) -> Vec<Vec2> {
-    if !has_badge(node) || node.group.as_ref().is_some_and(|group| group.collapsed) {
+    if !has_badge(node) {
         return Vec::new();
     }
     let badge = badge_rect(node);

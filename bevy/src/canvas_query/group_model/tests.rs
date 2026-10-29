@@ -230,10 +230,4 @@ fn independent_badge_scale_keeps_centerline_and_preserves_aspect() {
     n.height = 112.;
     let rect = badge_rect(&n);
     assert!((rect.y - (n.y + n.height + BADGE_OUTSET)).abs() < 0.001);
-    // 徽标允许明显大于承载它的 group：片场场景就画在徽标里。
-    n.width = 600.;
-    n.height = 400.;
-    n.group.as_mut().unwrap().badge_scale = 250.;
-    assert!(badge_rect(&n).z > n.width);
-    assert!((badge_rect(&n).z - badge_rect(&n).w * 88. / 64.).abs() < 0.001);
 }

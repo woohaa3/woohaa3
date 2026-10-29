@@ -51,15 +51,6 @@ fn world() -> World {
         blend_mesh_entity: None,
         font: default(),
         shared_key: None,
-        attach_probe_mesh: default(),
-        attach_probe_entity: None,
-        attach_probe_active: false,
-        node_action_mesh: default(),
-        node_action_entity: None,
-        node_action_active: false,
-        running_mesh: default(),
-        running_mesh_entity: None,
-        running_active: false,
     });
     let nodes = (0..33)
         .map(|index| {

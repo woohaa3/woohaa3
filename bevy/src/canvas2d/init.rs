@@ -54,15 +54,6 @@ pub(crate) fn setup(
         blend_mesh_entity: None,
         font,
         shared_key: None,
-        attach_probe_mesh,
-        attach_probe_entity: None,
-        attach_probe_active: false,
-        running_mesh,
-        running_mesh_entity: None,
-        running_active: false,
-        node_action_mesh,
-        node_action_entity: None,
-        node_action_active: false,
     });
     commands.insert_resource(super::TextureStore::default());
     commands.insert_resource(super::CardDecorationCache::default());

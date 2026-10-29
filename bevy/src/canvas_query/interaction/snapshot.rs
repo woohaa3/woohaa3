@@ -194,7 +194,7 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
     let nodes: Vec<SnapshotNode> = scene
         .nodes
         .iter()
-        .map(|node| snapshot_node(scene, node, &scene.node_actions, viewport, scene.surface.as_ref()))
+        .map(|node| snapshot_node(node, &scene.node_actions, viewport, scene.surface.as_ref()))
         .collect();
     let edges: Vec<SnapshotEdge> = scene
         .edges
@@ -303,7 +303,6 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
 }
 
 fn snapshot_node(
-    scene: &Scene,
     node: &GraphNode,
     node_actions: &std::collections::HashMap<String, crate::protocol::NodeActions>,
     viewport: (f32, f32, f32),
