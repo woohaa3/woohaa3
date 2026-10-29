@@ -525,3 +525,54 @@ it("sends real image bytes and candidate schema through native turn/start", asyn
     signal: new AbortController().signal, onEvent: () => undefined })).toMatchObject({ ok: true });
   expect(fake.requests.find(request => request.method === "turn/start")!.params).toMatchObject({ summary: "concise", input: [{ type: "text", text: "scene" }, { type: "image", url: "data:image/jpeg;base64,AQID" }], outputSchema: { type: "object" } });
 });
+
+describe("connection reuse across a host restart", () => {
+  /**
+   * 复现「本地 ChatGPT 报 Already initialized」。
+   *
+   * 后端重启后，`initializedConnections`（WeakMap，只活在进程内存里）清空，但 supervisor
+   * 托管的 Codex 子进程**没有死**，被原样复用。新后端对这条老连接再发一次 `initialize`，
+   * 子进程回 JSON-RPC 错误 `Already initialized`。
+   *
+   * 对端说的是「这条连接已经握过手了」—— 对我们要的结果（连接可用）而言这就是成功，
+   * 不该把它当失败抛给用户。
+   */
+  it("treats an Already initialized reply as a ready connection", async () => {
+    const fake = concurrentStdio();
+    const original = fake.connection.send.bind(fake.connection);
+    fake.connection.send = (line) => {
+      const req = JSON.parse(line) as Request;
+      if (req.method !== "initialize") return original(line);
+      fake.requests.push(req);
+      queueMicrotask(() => fake.emit({ id: req.id, error: { code: -32600, message: "Already initialized" } }));
+    };
+
+    const result = await createCodexAppServerTransport({ protocolVersion: "2025-06-18", clientVersion: "test" })
+      .models!(fake.input("catalog"));
+
+    // 不再把「已初始化」当成失败暴露出来。
+    expect(result.error ?? "").not.toMatch(/already\s+initialized/i);
+    // 继续走到了 model/list：说明 initialize 之后的流程没有被那条错误截断。
+    // （假 stdio 对 model/list 回空对象，所以 `error` 里会有「未返回模型目录」——那是另一回事，
+    // 与本用例要证明的无关，故不断言 `error` 为空。）
+    expect(fake.requests.map((request) => request.method)).toContain("model/list");
+  });
+
+  it("still surfaces an unrelated initialize failure", async () => {
+    const fake = concurrentStdio();
+    const original = fake.connection.send.bind(fake.connection);
+    fake.connection.send = (line) => {
+      const req = JSON.parse(line) as Request;
+      if (req.method !== "initialize") return original(line);
+      fake.requests.push(req);
+      queueMicrotask(() => fake.emit({ id: req.id, error: { code: -32603, message: "internal error" } }));
+    };
+
+    const result = await createCodexAppServerTransport({ protocolVersion: "2025-06-18", clientVersion: "test" })
+      .models!(fake.input("catalog"));
+
+    // 只豁免「已初始化」这一种；别的失败仍然要让用户看到。
+    expect(result.error).toBeTruthy();
+    expect(fake.requests.map((request) => request.method)).not.toContain("model/list");
+  });
+});
