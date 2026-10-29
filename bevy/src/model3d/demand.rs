@@ -3,6 +3,28 @@ use super::ModelVisuals;
 use crate::protocol::Scene;
 use std::collections::HashSet;
 
+/// 卡片目录已就绪时源片场不再为它保留驻留。
+///
+/// 卡片采样只在 `canvas-core`（画布运行时）里存在；原生录制/模型渲染等不带画布的构建里
+/// 没有卡片可结算，按「未结算」处理，保持 `native-renderer` 单独可编译。
+#[cfg(feature = "canvas-core")]
+fn settled_shot_card(
+    preview: &crate::protocol::ShotPreviewPresentation,
+    node_id: &str,
+    scene: &Scene,
+) -> bool {
+    crate::shot_node_preview::settled_card(preview, node_id, scene)
+}
+
+#[cfg(not(feature = "canvas-core"))]
+fn settled_shot_card(
+    _preview: &crate::protocol::ShotPreviewPresentation,
+    _node_id: &str,
+    _scene: &Scene,
+) -> bool {
+    false
+}
+
 const WARM_PREVIEW_SOURCES: usize = 8;
 const WARM_PREVIEW_SECONDS: f64 = 10.0;
 const OFFSCREEN_SECONDS: f64 = 1.0;
@@ -41,7 +63,7 @@ pub(crate) fn update(
             // 参考已就绪的卡片显示录制内容，不再需要源片场为它保留驻留
             // （2026-10-28 总览 draw call 优化）；正在播放的活动镜头仍然要。
             !node.shot_preview.as_ref().is_some_and(|preview| {
-                crate::shot_node_preview::settled_card(preview, &node.id, scene)
+                settled_shot_card(preview, &node.id, scene)
             }) && !crate::canvas_query::shot_preview::focuses_isolate(scene)
                 && !crate::canvas_query::shot_preview::hidden(node)
                 && near_viewport(node, scene, focus)

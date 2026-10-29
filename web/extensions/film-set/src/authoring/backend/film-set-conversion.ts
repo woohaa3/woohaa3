@@ -22,6 +22,7 @@ import { ownsShotMedia } from "../../state/shared/managed-shot-media.js";
 import type { CanvasAuthority } from "@woohaa3/contracts";
 import type { CanvasCommand, CanvasNodeData, ModelContentVersion, ModelDefinition, ServerCanvas, StoredAsset } from "@woohaa3/contracts";
 import {
+  createFilmSetSnapshot,
   createMotionSnapshot,
   scriptModel3DNodeData,
   filmSetConversionCapabilityRejectionCode,

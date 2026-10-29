@@ -2,7 +2,7 @@ import { readFilmSetGroupMarker, createFilmSetGroupMarker, migrateLegacyFilmSetT
 import { canonicalFilmSetFields, filmSetAnimationsOf, filmSetClipHash, filmSetClipPrecondition } from "@woohaa3/contracts";
 import type { CanvasAuthority } from "@woohaa3/contracts";
 import type { CanvasCommand, CanvasNodeData, ServerCanvas } from "@woohaa3/contracts";
-import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, scriptModel3DNodeData, defaultInitialShotCamera, importModelSnapshot, isFilmSetNode, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
+import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, scriptModel3DNodeData, defaultInitialShotCamera, importModelSnapshot, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 import type { FilmSetNodeOutcome, ReadFilmSetOutcome } from "@woohaa3/contracts";
 

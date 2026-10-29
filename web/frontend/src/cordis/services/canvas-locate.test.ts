@@ -42,8 +42,8 @@ describe("createCanvasLocateService", () => {
     const service = createCanvasLocateService({getCanvas:()=>source,getController:()=>ctrl as never});
     expect(service.locateNodes(["member"]).ok).toBe(true);
     expect(ctrl.selected).toEqual(["g"]);
-    // 紧凑组 196×112 固定底边中点：视口按 112 高矩形的中心定位。
-    expect(ctrl.viewports[0]).toEqual({x:100,y:-44,zoom:1});
+    // 徽标顶在布局底边下 6，中心再下移 32。
+    expect(ctrl.viewports[0]).toEqual({x:100,y:-138,zoom:1});
     expect(service.locateNodes(["g"]).ok).toBe(true);
     expect(ctrl.viewports[1]).toEqual(ctrl.viewports[0]);
   });
