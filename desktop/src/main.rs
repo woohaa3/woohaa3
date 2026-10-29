@@ -148,5 +148,4 @@ fn main() {
     if let Err(error) = woohaa_desktop_host::run_host() {
         fatal(&format!("桌面宿主启动失败：{error}"), 1);
     }
-    woohaa_desktop_host::diagnostics::finish(true);
 }

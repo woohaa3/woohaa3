@@ -342,15 +342,18 @@ function resolveFrontendBuild(
   env: Record<string, string | undefined>,
   root: string
 ): { version: string; commit: string } {
+  // 显式注入优先，包括显式空串：桌面发布构建要自报发布版本而不是 sha-dirty 串，
+  // 做法是把 commit 显式置空、version 显式给发布版本；完全未注入才按 git 现场取值。
+  const versionProvided = env.WOOHAA_FRONTEND_BUILD_VERSION !== undefined;
+  const commitProvided = env.WOOHAA_FRONTEND_BUILD_COMMIT !== undefined;
   const versionOverride = (env.WOOHAA_FRONTEND_BUILD_VERSION ?? "").trim();
   const commitOverride = (env.WOOHAA_FRONTEND_BUILD_COMMIT ?? "").trim();
   const described = gitOutput(root, ["describe", "--tags", "--always", "--dirty"]);
   const revision = gitOutput(root, ["rev-parse", "--short", "HEAD"]);
   return {
-    version: versionOverride !== "" ? versionOverride : described,
+    version: versionProvided ? versionOverride : described,
     // 显式传入的提交号原样使用（调用方自己决定要不要带 `-dirty`）。
-    commit:
-      commitOverride !== "" ? commitOverride : revision !== "" && described.endsWith("-dirty") ? `${revision}-dirty` : revision
+    commit: commitProvided ? commitOverride : revision !== "" && described.endsWith("-dirty") ? `${revision}-dirty` : revision
   };
 }
 
