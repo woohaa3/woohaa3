@@ -32,6 +32,7 @@ import {
   resolveBundleKinds,
   tauriBuildArgs,
   tauriConfigOverride,
+  tauriFrontendDist,
   validateIconSource
 } from "./lib/desktop-release.mjs";
 
@@ -298,4 +299,16 @@ test('Windows NSIS collector includes actual executable and signature', t => {
 
 test('pnpm argument separator is accepted before desktop build flags', () => {
   assert.equal(parseDesktopArgs(['--', '--build-frontend']).buildFrontend, true);
+});
+
+test("frontendDist keeps Windows startup assets as a directory rather than a drive-letter URL", () => {
+  const desktop = String.raw`E:\data\landun\workspace\src\woohaa3\desktop`;
+  const startup = path.win32.join(desktop, "build", "packaging-signed-win32-x64", "startup-frontend");
+  const relative = tauriFrontendDist(startup, desktop, path.win32);
+  assert.equal(relative, "./build/packaging-signed-win32-x64/startup-frontend");
+  assert.equal(URL.canParse(relative), false);
+  assert.equal(path.win32.resolve(desktop, relative), startup);
+  assert.equal(tauriFrontendDist(path.win32.join(desktop, "..", "web", "frontend", "dist"), desktop, path.win32), "./../web/frontend/dist");
+  assert.throws(() => tauriFrontendDist(String.raw`F:\startup`, desktop, path.win32), /同一盘符/);
+  assert.equal(tauriFrontendDist("/tmp/desktop/build/startup", "/tmp/desktop", path.posix), "./build/startup");
 });
