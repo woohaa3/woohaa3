@@ -440,6 +440,12 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         agentDeltaJournal.record(input.canvasId, input.before, input.after);
       },
       taskClient: () => taskClient,
+      // 单实例写入门禁：未持有部署级 writer lock 的宿主不得接受 room 连接。第二个宿主
+      // 静默写同一份协作存储会把另一个实例的 storageSeq 撞成永久过期（见 gate 的说明）。
+      gate: () =>
+        releaseWriterLock
+          ? { ok: true as const }
+          : { ok: false as const, status: 503, code: "writer-lock-unavailable" },
       // 在线迁移准入：preparing/deleted 的旧 ID 不进入 CanvasRoom（不触发读旧来源）。
       ...(importAdmissionRef ? { admit: (canvasId: string) => importAdmissionRef!(canvasId) } : {}),
       // 访问边界：WS 在 room acquire 前按可信 principal 判定 read（任务 6.2）；未注入认证时

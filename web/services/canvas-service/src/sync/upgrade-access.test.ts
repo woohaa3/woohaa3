@@ -28,6 +28,7 @@ async function start(input: {
   authenticate?: CanvasRequestAuthenticator;
   access?: CanvasAccessPort;
   allowedOrigins?: readonly string[];
+  gate?: () => { ok: true } | { ok: false; status: number; code: string };
 }): Promise<{ url: string; handler: SyncUpgradeHandler }> {
   const repository = new InMemoryYjsDocumentRepository();
   const Y = await import("yjs");
@@ -47,7 +48,8 @@ async function start(input: {
     accessRuntime: Object.freeze({ enabled: true as const }),
     ...(input.authenticate ? { authenticate: input.authenticate } : {}),
     ...(input.access ? { access: input.access } : {}),
-    ...(input.allowedOrigins ? { allowedOrigins: input.allowedOrigins } : {})
+    ...(input.allowedOrigins ? { allowedOrigins: input.allowedOrigins } : {}),
+    ...(input.gate ? { gate: input.gate } : {})
   });
   const server = http.createServer((_req, res) => {
     res.statusCode = 404;
@@ -145,5 +147,32 @@ describe("WS 升级授权（任务 6.2/6.3）", () => {
     expect(allowed.status).toBeNull();
     expect(handler.connectionCount()).toBe(1);
     allowed.ws?.close();
+  });
+});
+
+/**
+ * 单实例门禁（change: 2026-10-29-recover-storage-seq-conflict）。
+ *
+ * spec「首版 room 服务采用单应用实例」要求同一时刻只有一个实例接受 room 连接与命令。
+ * readiness 过去只体现在 /readyz 上，写路径不消费它：第二个本机宿主于是能悄悄写同一份协作
+ * 存储，把第一个实例 room 的内存 storageSeq 撞成永久过期（客户端卡在「请重试」）。
+ */
+describe("WS 升级 writer lock 门禁", () => {
+  it("未持有 writer lock → 503 拒绝，且不进入 room", async () => {
+    const { url, handler } = await start({
+      gate: () => ({ ok: false, status: 503, code: "writer-lock-unavailable" })
+    });
+    const result = await upgrade(url);
+    expect(result.status).toBe(503);
+    expect(handler.connectionCount()).toBe(0);
+    result.ws?.close();
+  });
+
+  it("持有 writer lock → 正常升级", async () => {
+    const { url, handler } = await start({ gate: () => ({ ok: true }) });
+    const result = await upgrade(url);
+    expect(result.status).toBeNull();
+    expect(handler.connectionCount()).toBe(1);
+    result.ws?.close();
   });
 });

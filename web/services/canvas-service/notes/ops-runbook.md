@@ -108,7 +108,8 @@ Yjs 段包含：checkpoint（base64 + SHA-256）、format、roomEpoch、ordered 
 | 症状 | 可能原因 | 处置 |
 | --- | --- | --- |
 | room 进入 `quarantined` | checkpoint/update 损坏、checksum 不匹配、seq 非单调 | **不要**清空重建；用归档恢复或人工导出。room 已自动拒绝写入 |
-| 命令返回 `storage-seq-conflict` | 存储 sequence 被并发 writer 改变 | 检查是否有第二个实例；重试同一 `commandId` |
+| 命令返回 `storage-seq-conflict` | 存储 sequence 被并发 writer 改变（room 已自动重载并重试两次，客户端再重发一次） | 仍失败说明确实有第二个实例在写同一份存储：停掉多余实例；日志 `storage-seq-recovered` 记录每次重载是否成功 |
+| Canvas Session 升级被 503 `writer-lock-unavailable` 拒绝 | 本宿主没有部署级 writer lock（另一个实例持有） | 正常门禁：同一份协作存储只允许一个宿主接受 room 连接；停掉多余实例后断线重连即可 |
 | 命令返回 `command-id-reused` | 同 ID 不同 payload | 客户端 bug；检查 commandId 生成逻辑 |
 | 客户端一直 `offline-readonly` | 连接断开或 room 隔离 | 查 readiness 与日志（`room-quarantined` 事件） |
 | 任务结果未进画布 | projector 失败（未标 receipt） | 观察 `projection-failed` 事件；**不会**重跑 provider，补偿扫描重试同一 projectionId |

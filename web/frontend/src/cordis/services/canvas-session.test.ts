@@ -19,6 +19,7 @@ import { MESSAGE_TYPE,
   YJS_CANVAS_FORMAT_VERSION,
   YJS_SYNC_PROTOCOL_VERSION,
   decodeMessage,
+  encodeCommandResultMessage,
   encodeStatusMessage,
   encodeSyncMessage,
   serverCanvasToYDoc,
@@ -672,6 +673,126 @@ describe("宿主重连门禁（change: 2026-10-21-harden-extension-fault-isolati
     } finally {
       session.shutdown();
       delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+    }
+  });
+});
+
+/**
+ * 存储 sequence 冲突的客户端自动重发
+ * （change: 2026-10-29-recover-storage-seq-conflict）。
+ *
+ * 服务端在冲突后会先自行重载 room 并重试；客户端这一层只兜住「重载后又被另一个 writer
+ * 抢先」的残余竞争：用同一 commandId 重发一次，不把这一轮可恢复的失败暴露成编辑失败。
+ */
+describe("存储 sequence 冲突自动重发", () => {
+  const CONFLICT_CANVAS = "canvas-seq-conflict";
+
+  function recordingSocket() {
+    let messageHandler: ((data: Uint8Array) => void) | null = null;
+    let closeHandler: (() => void) | null = null;
+    const commandIds: string[] = [];
+    const socket = {
+      send(data: Uint8Array) {
+        const decoded = decodeMessage(data);
+        if (decoded.type === MESSAGE_TYPE.COMMAND) commandIds.push((decoded.batch as { commandId: string }).commandId);
+      },
+      close() {
+        closeHandler?.();
+      },
+      onMessage(handler: (data: Uint8Array) => void) {
+        messageHandler = handler;
+        return () => {
+          messageHandler = null;
+        };
+      },
+      onClose(handler: () => void) {
+        closeHandler = handler;
+        return () => {
+          closeHandler = null;
+        };
+      }
+    };
+    return {
+      socket: socket as unknown as SyncSocket,
+      commandIds,
+      receive: (data: Uint8Array) => messageHandler?.(data)
+    };
+  }
+
+  async function readySession() {
+    const entry = recordingSocket();
+    const remote = {
+      openCanvasSession: () => entry.socket,
+      closeCanvasSession: () => undefined,
+      reconnectCanvasSession: () => undefined
+    } as unknown as CanvasRemoteService;
+    const session = await createCanvasSession({
+      canvasId: CONFLICT_CANVAS,
+      remote,
+      database: new CanvasDatabase({ indexedDb: new IDBFactory() })
+    });
+    const serverCanvas = createEmptyWoohaa3ServerCanvas(CONFLICT_CANVAS, NOW);
+    serverCanvas.revision = 1;
+    const serverDoc = serverCanvasToYDoc(serverCanvas);
+    entry.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.STEP1, Y.encodeStateVector(serverDoc)));
+    entry.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, Y.encodeStateAsUpdate(serverDoc)));
+    entry.receive(
+      encodeStatusMessage({ status: "synced", protocolVersion: YJS_SYNC_PROTOCOL_VERSION, roomEpoch: "epoch-1", revision: 1 })
+    );
+    expect(session.getStatus().phase).toBe("ready");
+    return { session, entry };
+  }
+
+  const commands = [{ type: "node.add" as const, node: { id: "n1", type: "image" as const, position: { x: 0, y: 0 } } }];
+  const conflict = (commandId: string) =>
+    encodeCommandResultMessage({
+      commandId,
+      status: "failed",
+      code: "storage-seq-conflict",
+      error: "存储 sequence 已变化，请重试"
+    });
+
+  it("用同一 commandId 重发一次，最终 accepted 才结算", async () => {
+    const { session, entry } = await readySession();
+    try {
+      const submitted = session.submitCommands(commands, "cmd-conflict");
+      expect(submitted.ok).toBe(true);
+      if (!submitted.ok) return;
+      expect(entry.commandIds).toEqual(["cmd-conflict"]);
+
+      // 第一轮冲突：这一轮回执被吞掉，批次仍 pending，调用方不该看到失败。
+      entry.receive(conflict("cmd-conflict"));
+      expect(entry.commandIds).toEqual(["cmd-conflict", "cmd-conflict"]);
+      expect(session.getStatus().remote.pendingCount).toBe(1);
+      expect(session.getStatus().error).toBeNull();
+
+      // 服务端重载后重发成功。
+      entry.receive(encodeCommandResultMessage({ commandId: "cmd-conflict", status: "accepted", revision: 1 }));
+      const settled = await submitted.handle.settled;
+      expect(settled.state).toBe("committed");
+    } finally {
+      session.shutdown();
+    }
+  });
+
+  it("重发只做一次：再次冲突按失败结算", async () => {
+    const { session, entry } = await readySession();
+    try {
+      const submitted = session.submitCommands(commands, "cmd-still-conflict");
+      expect(submitted.ok).toBe(true);
+      if (!submitted.ok) return;
+
+      entry.receive(conflict("cmd-still-conflict"));
+      expect(entry.commandIds).toHaveLength(2);
+
+      entry.receive(conflict("cmd-still-conflict"));
+      // 不再重发，把真实失败交给调用方。
+      expect(entry.commandIds).toHaveLength(2);
+      const settled = await submitted.handle.settled;
+      expect(settled.state).toBe("rejected");
+      expect(settled.error).toContain("存储 sequence");
+    } finally {
+      session.shutdown();
     }
   });
 });

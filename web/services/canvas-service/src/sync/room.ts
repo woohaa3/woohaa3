@@ -39,6 +39,15 @@ export type {
 /** 上游合入的 update 写入幂等记录时使用的 actor；commandId 为 `upstream:<sha256>`。 */
 export const UPSTREAM_ACTOR_ID = "sync-upstream";
 
+/**
+ * 存储 sequence 冲突后自动重载 room 的次数上限。
+ *
+ * 冲突只说明「持久层被别的 writer 推进了」，本 room 的 published 可能落后。重载后重新执行
+ * 同一批次是安全的（命令/update 都幂等），但持续竞争时不能无限重试：超过上限就把冲突
+ * 如实返回，由客户端决定是否再试。
+ */
+const MAX_STORAGE_SEQ_RECOVERIES = 2;
+
 export class CanvasRoom {
   readonly canvasId: string;
   private readonly repository: YjsDocumentRepository;
@@ -46,6 +55,7 @@ export class CanvasRoom {
   private readonly now: () => string;
   private readonly onCommitted?: (input: { canvas: ServerCanvas; commands: readonly unknown[] }) => void;
   private readonly onDelta?: (input: { before: ServerCanvas; after: ServerCanvas }) => void;
+  private readonly onStorageSeqRecovered?: CanvasRoomOptions["onStorageSeqRecovered"];
   private readonly broadcast: CanvasRoomOptions["broadcast"];
   private readonly verifyAssets: boolean;
   private readonly bootstrap: (() => Promise<ServerCanvas | null>) | undefined;
@@ -79,6 +89,7 @@ export class CanvasRoom {
     this.generateRoomEpoch = options.generateRoomEpoch ?? (() => createRoomEpoch());
     this.onCommitted = options.onCommitted;
     this.onDelta = options.onDelta;
+    this.onStorageSeqRecovered = options.onStorageSeqRecovered;
     this.published = new Y.Doc();
   }
 
@@ -247,8 +258,8 @@ export class CanvasRoom {
    */
   submit(batch: CanvasCommandBatch, options?: RoomSubmitOptions): Promise<RoomCommandResult> {
     const run = this.queue.then(
-      () => executeCommand(this.executionHost(), batch, options),
-      () => executeCommand(this.executionHost(), batch, options)
+      () => this.withStorageSeqRecovery(() => executeCommand(this.executionHost(), batch, options)),
+      () => this.withStorageSeqRecovery(() => executeCommand(this.executionHost(), batch, options))
     );
     // 错误不应阻断队列：捕获后继续。
     this.queue = run.catch(() => undefined);
@@ -287,8 +298,8 @@ export class CanvasRoom {
         >;
   }, options?: RoomSubmitOptions): Promise<RoomCommandResult> {
     const run = this.queue.then(
-      () => executeDerived(this.executionHost(), input, options),
-      () => executeDerived(this.executionHost(), input, options)
+      () => this.withStorageSeqRecovery(() => executeDerived(this.executionHost(), input, options)),
+      () => this.withStorageSeqRecovery(() => executeDerived(this.executionHost(), input, options))
     );
     this.queue = run.catch(() => undefined);
     return run;
@@ -302,8 +313,8 @@ export class CanvasRoom {
    */
   applyExternalUpdate(update: Uint8Array): Promise<ExternalUpdateResult> {
     const run = this.queue.then(
-      () => this.mergeExternal(update),
-      () => this.mergeExternal(update)
+      () => this.withStorageSeqRecovery(() => this.mergeExternal(update)),
+      () => this.withStorageSeqRecovery(() => this.mergeExternal(update))
     );
     this.queue = run.catch(() => undefined);
     return run;
@@ -399,6 +410,75 @@ export class CanvasRoom {
       if (this.onDelta && before?.ok) this.onDelta({ before: before.canvas, after: input.canvas });
       this.broadcast?.({ room: this, update: input.update, revision: input.revision, origin: "command" });
     }
+  }
+
+  /**
+   * 存储 sequence 冲突的自动恢复（change: 2026-10-29-recover-storage-seq-conflict）。
+   *
+   * 冲突的语义是「持久层已经被别的 writer（另一个宿主 / 另一个 room / 运维写入）推进」，
+   * 本 room 内存里的 published 与 storageSeq 都可能落后。以前这里只把冲突返回给调用方，
+   * 而 `storageSeq` 只有**提交成功**才会前进，于是同一个 room 之后每条命令都拿过期 seq
+   * 去 CAS，客户端看到的「请重试」永远不可能成功。
+   *
+   * 现在的处理：从仓储重新恢复文档（拿到对方的内容与最新 seq），把本 room 缺失的部分广播给
+   * 已连接客户端（origin=`upstream`，不回推中继），再用**同一批次**重试。批次命令与 update
+   * 都幂等，因此重试不会重复应用；重试次数有上限，持续竞争时如实返回冲突。
+   */
+  private async withStorageSeqRecovery<T extends { ok: true } | { ok: false; code: string }>(
+    run: () => Promise<T>
+  ): Promise<T> {
+    let result = await run();
+    for (let attempt = 1; attempt <= MAX_STORAGE_SEQ_RECOVERIES; attempt += 1) {
+      if (result.ok || result.code !== "storage-seq-conflict") return result;
+      const recovered = await this.reloadFromStorage();
+      this.onStorageSeqRecovered?.({ canvasId: this.canvasId, attempt, recovered });
+      if (!recovered) return result;
+      result = await run();
+    }
+    return result;
+  }
+
+  /**
+   * 从存储重新恢复 published（冲突恢复用）。
+   *
+   * 与 `load()` 的区别：只接受「文档存在且校验通过」这一条路径——冲突时文档一定存在，
+   * 走到 not-found 说明画布已被删除，不能再用 bootstrap/seed 重建；恢复失败即隔离 room。
+   * 成功时把相对旧 published 的缺失内容广播出去（客户端可能也错过了对方那一版）。
+   */
+  private async reloadFromStorage(): Promise<boolean> {
+    let recovered: Awaited<ReturnType<typeof recoverYjsDocument>>;
+    try {
+      recovered = await recoverYjsDocument({
+        repository: this.repository,
+        canvasId: this.canvasId,
+        now: this.now()
+      });
+    } catch {
+      // 存储暂时不可用：保留当前 published，把冲突如实返回。
+      return false;
+    }
+    if (!recovered.ok) {
+      this.state = "quarantined";
+      this.quarantineCode = recovered.code;
+      this.quarantineReason = `${recovered.code}: ${recovered.message}`;
+      return false;
+    }
+
+    const known = Y.encodeStateVector(this.published);
+    // 旧 published 已知的部分不重发；客户端已经收到过本 room 自己的 update。
+    const missing = Y.encodeStateAsUpdate(recovered.doc, known);
+    this.published = recovered.doc;
+    this.storageSeq = recovered.state.storageSeq;
+    this.revision = recovered.revision;
+    this.epoch = recovered.state.roomEpoch;
+    this.state = "ready";
+    this.quarantineCode = null;
+    this.quarantineReason = null;
+    // 空 update 的编码是 2 字节（`[0, 0]`），不要为没有内容差别的情况制造广播。
+    if (missing.byteLength > 2) {
+      this.broadcast?.({ room: this, update: missing, revision: this.revision, origin: "upstream" });
+    }
+    return true;
   }
 
   /** 用上游完整状态建立本地首个 Y.Doc；上游为空、不可达或状态非法时返回 false。 */

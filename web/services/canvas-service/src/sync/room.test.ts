@@ -8,8 +8,9 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
-import { serverCanvasToYDoc } from "@woohaa3/contracts/canvas-yjs";
+import { serverCanvasToYDoc, yDocToServerCanvas } from "@woohaa3/contracts/canvas-yjs";
 import { InMemoryYjsDocumentRepository } from "./in-memory-yjs-repository.js";
+import { recoverYjsDocument } from "./recovery.js";
 import { CanvasRoom } from "./room.js";
 import { CanvasRoomRegistry } from "./room-registry.js";
 import type { CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
@@ -583,5 +584,136 @@ describe("room：从上游 seed 时补结构化目录行", () => {
     expect(rows).toEqual([{ id: CANVAS, revision: 40 }]);
     // 内容也确实落到了 Yjs 那一侧。
     expect(await base.loadYjsState(CANVAS)).not.toBeNull();
+  });
+});
+
+describe("存储 sequence 冲突自动恢复（change: 2026-10-29-recover-storage-seq-conflict）", () => {
+  /**
+   * 复现真实故障形状：两个 room（两个宿主 / 两个 worker）从**同一份存储**各自 load，
+   * 一个先提交把持久层 seq 推进，另一个还拿着旧 storageSeq 去 CAS。
+   *
+   * 修复前：第二个 room 永远返回 `storage-seq-conflict`（storageSeq 只在提交成功时前进），
+   * 客户端只能不停「重试」并继续失败。修复后：room 从存储重新恢复、广播缺失内容、再重试同一批次。
+   */
+  async function twoRoomsSharingStorage(options: {
+    broadcast?: ConstructorParameters<typeof CanvasRoom>[0]["broadcast"];
+    onStorageSeqRecovered?: ConstructorParameters<typeof CanvasRoom>[0]["onStorageSeqRecovered"];
+  } = {}) {
+    // 先由一个 room 建出存储里的首个 Y.Doc，另外两个 room 只 load，保证三者共享同一份 struct。
+    const { repository } = await readyRoom();
+    const first = new CanvasRoom({ canvasId: CANVAS, repository, now: () => NOW });
+    const second = new CanvasRoom({
+      canvasId: CANVAS,
+      repository,
+      now: () => NOW,
+      broadcast: options.broadcast,
+      ...(options.onStorageSeqRecovered ? { onStorageSeqRecovered: options.onStorageSeqRecovered } : {})
+    });
+    expect((await first.load()).ok).toBe(true);
+    expect((await second.load()).ok).toBe(true);
+    return { repository, first, second };
+  }
+
+  it("对端推进 seq 后自动重载并重试成功，双方内容都保留", async () => {
+    const { repository, first, second } = await twoRoomsSharingStorage();
+    const added = await first.submit(
+      batch({ commandId: "other-writer", commands: [{ type: "node.add", node: { id: "a", type: "image", position: { x: 0, y: 0 } } }] })
+    );
+    expect(added.ok).toBe(true);
+
+    // 第二个 room 的 storageSeq 仍停在 0：修复前这一步必然冲突。
+    const submitted = await second.submit(
+      batch({ commandId: "stale-writer", commands: [{ type: "node.add", node: { id: "b", type: "image", position: { x: 20, y: 0 } } }] })
+    );
+    expect(submitted.ok).toBe(true);
+
+    const exported = second.exportCanvas();
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    // 对端内容没有被覆盖，本地命令也落上了。
+    expect(exported.canvas.document.nodes.map((node) => node.id).sort()).toEqual(["a", "b"]);
+
+    // 存储里同样是两者的并集（重试没有丢掉对端那一版）。
+    const recovered = await recoverYjsDocument({ repository, canvasId: CANVAS, now: NOW });
+    expect(recovered.ok).toBe(true);
+    if (!recovered.ok) return;
+    const durable = yDocToServerCanvas(recovered.doc);
+    expect(durable.ok).toBe(true);
+    if (!durable.ok) return;
+    expect(durable.canvas.document.nodes.map((node) => node.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("恢复时把对端内容按 upstream origin 广播给已连接客户端", async () => {
+    const origins: string[] = [];
+    let upstreamBytes = 0;
+    const { first, second } = await twoRoomsSharingStorage({
+      broadcast: (input) => {
+        origins.push(input.origin);
+        if (input.origin === "upstream") upstreamBytes = input.update.byteLength;
+      }
+    });
+    expect(
+      (
+        await first.submit(
+          batch({ commandId: "other-writer", commands: [{ type: "node.add", node: { id: "a", type: "image", position: { x: 0, y: 0 } } }] })
+        )
+      ).ok
+    ).toBe(true);
+    expect(
+      (
+        await second.submit(
+          batch({ commandId: "stale-writer", commands: [{ type: "node.add", node: { id: "b", type: "image", position: { x: 20, y: 0 } } }] })
+        )
+      ).ok
+    ).toBe(true);
+    // 恢复广播在前、本 room 自己的提交广播在后。
+    expect(origins).toContain("upstream");
+    expect(upstreamBytes).toBeGreaterThan(2);
+  });
+
+  it("持续冲突时重载次数有上限，并把可重试冲突如实返回", async () => {
+    let commits = 0;
+    let loads = 0;
+    class AlwaysConflictingRepository extends InMemoryYjsDocumentRepository {
+      override async commitYjsCommand(): Promise<{ ok: false; code: "storage-seq-conflict"; currentSeq: number }> {
+        commits += 1;
+        return { ok: false, code: "storage-seq-conflict", currentSeq: 99 };
+      }
+      override async loadYjsState(canvasId: string) {
+        loads += 1;
+        return super.loadYjsState(canvasId);
+      }
+    }
+    const repository = new AlwaysConflictingRepository();
+    const { room } = await readyRoom({ repository });
+    const result = await room.submit(batch());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("storage-seq-conflict");
+    expect(result.retryable).toBe(true);
+    // 首次提交 + 2 次重载重试；重载各自读一次存储。
+    expect(commits).toBe(3);
+    expect(loads).toBe(2);
+  });
+
+  it("恢复发现文档已不可用时隔离 room，不返回可重试冲突", async () => {
+    let commits = 0;
+    class DeletedRepository extends InMemoryYjsDocumentRepository {
+      override async commitYjsCommand(): Promise<{ ok: false; code: "storage-seq-conflict"; currentSeq: number }> {
+        commits += 1;
+        await this.deleteYjsDocument(CANVAS);
+        return { ok: false, code: "storage-seq-conflict", currentSeq: 99 };
+      }
+    }
+    const repository = new DeletedRepository();
+    const { room } = await readyRoom({ repository });
+    const result = await room.submit(batch());
+    expect(result.ok).toBe(false);
+    // 文档没了：只能尝试一次，不再重试不存在的批次；room 进入隔离而不是继续服务。
+    expect(commits).toBe(1);
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(false);
+    if (!exported.ok) expect(exported.code).toBe("not-found");
+    expect(room.diagnostics).toContain("not-found");
   });
 });

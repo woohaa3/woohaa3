@@ -318,12 +318,15 @@ function commitFailure(
   commandId: string
 ): RoomCommandResult {
   if (commit.code === "storage-seq-conflict") {
+    // room 已在本层之上自动重载并重试（见 `CanvasRoom.withStorageSeqRecovery`）；走到这里
+    // 说明重试上限用尽（仍在与别的 writer 竞争），因此这里的失败确实可以再试一次。
     return {
       ok: false,
       status: "failed",
       commandId,
       code: "storage-seq-conflict",
-      message: "存储 sequence 已变化，请重试"
+      message: "存储 sequence 已变化，请重试",
+      retryable: true
     };
   }
   if (commit.code === "command-id-reused") {

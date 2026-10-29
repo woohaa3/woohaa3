@@ -74,6 +74,14 @@ export type SyncUpgradeOptions = {
    */
   taskClient?: () => CanvasTaskClient | undefined | null;
   /**
+   * 写入口门禁（spec「首版 room 服务采用单应用实例」/ writer lock）。
+   *
+   * 在建立 Canvas Session 之前**同步**判定：宿主未持有部署级 writer lock 时拒绝连接。
+   * readiness 早已反映这一点，但写路径过去从不消费它——第二个本机宿主因此能悄悄写同一份
+   * 协作存储，把第一个实例 room 的内存 storageSeq 撞成永久过期（客户端卡在「请重试」）。
+   */
+  gate?: () => { ok: true } | { ok: false; status: number; code: string };
+  /**
    * 在线迁移准入（change: 2026-10-12-add-extension-online-canvas-migration，任务 5.3）。
    *
    * 在建立 WS 之前同步判定：未准备 / 已删除的迁移目标在这里以 `PREPARATION_REQUIRED` /
@@ -167,7 +175,10 @@ export function createSyncUpgradeHandler(options: SyncUpgradeOptions): SyncUpgra
     ...(options.bootstrap ? { bootstrap: options.bootstrap } : {}),
     ...(options.generateRoomEpoch ? { generateRoomEpoch: options.generateRoomEpoch } : {}),
     ...(options.onCommitted ? { onCommitted: options.onCommitted } : {}),
-    ...(options.onDelta ? { onDelta: options.onDelta } : {})
+    ...(options.onDelta ? { onDelta: options.onDelta } : {}),
+    // 冲突自动恢复只记诊断；恢复本身在 room 内完成，不依赖日志成功。
+    onStorageSeqRecovered: (input) =>
+      log({ event: "storage-seq-recovered", status: input.recovered ? 200 : 500, canvasId: input.canvasId })
   });
 
   const resolveTaskClient = options.taskClient ?? (() => undefined);
@@ -291,6 +302,16 @@ export function createSyncUpgradeHandler(options: SyncUpgradeOptions): SyncUpgra
         log({ event: "session-version-missing", status: 426, canvasId });
         rejectUpgrade(socket, 426, "Upgrade Required");
         return true;
+      }
+
+      // --- 单实例门禁（writer lock；不进入 registry，不读文档）---
+      if (options.gate) {
+        const gated = options.gate();
+        if (!gated.ok) {
+          log({ event: "sync-not-ready", status: gated.status, code: gated.code, canvasId });
+          rejectUpgrade(socket, gated.status, gated.code);
+          return true;
+        }
       }
 
       // --- 访问边界（与 HTTP 画布 API 语义一致）---
