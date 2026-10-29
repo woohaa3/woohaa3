@@ -22,6 +22,8 @@ import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
 import { derivePanelDraft, derivePanelTaskState } from "./panel-state.js";
 import { ModelParameterPanel } from "./model-parameter-panel.js";
+import { ShotMediaParametersPanel } from "./shot-media-parameters-panel.js";
+import { readShotMediaParameters } from "./shot-media-parameters.js";
 import {
   EMPTY_UPSTREAM_TEXT_MESSAGE,
   upstreamTextIsEmpty
@@ -138,6 +140,12 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const pendingSelection = Boolean(context && !canonicalNodeIds.has(context.nodeId));
 
   const panelKind = context?.panelKind ?? null;
+  // 片场组外显的镜头节点是 owner-managed 的标准 image/video：没有可提交的生成配置，
+  // 选中时只展示镜头输出参数，不沿用图片/视频生成面板。
+  const shotMediaParameters = useMemo(
+    () => readShotMediaParameters(workingCanvas, context?.nodeId ?? null),
+    [workingCanvas, context]
+  );
   const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
   const typedModels = useMemo(
     () => (catalog && panelKind ? allModelsForPanel(catalog, panelKind) : []),
@@ -387,6 +395,19 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   });
 
   if (!context) return null;
+
+  if (shotMediaParameters) {
+    const shotExpanded = resolveExecutionPanelSurface(presentation, context.nodeType) === "expanded";
+    return (
+      <ExecutionPanelSurface nodeId={context.nodeId} presentation={shotExpanded ? "expanded" : "compact"} runtime={runtime}>
+        <ShotMediaParametersPanel
+          nodeId={context.nodeId}
+          parameters={shotMediaParameters}
+          onClose={() => submitIntent({ kind: "close" })}
+        />
+      </ExecutionPanelSurface>
+    );
+  }
 
   if (!panelKind) {
     return (

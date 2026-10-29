@@ -25,6 +25,7 @@ import { DialogService } from "../../services/dialogs/service.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { CatalogState, TaskCatalogService } from "../../contracts.js";
 import type { CanvasTaskCatalog } from "@woohaa3/contracts";
+import { createFilmSetGroupMarker, filmSetGroupData, shotPreviewNodeId } from "@woohaa3/contracts";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -279,5 +280,54 @@ describe("ModelExecutionHost 选中节点被删除", () => {
       woohaa3CanvasStore.getState().hydrate(canvasWithVideoNode());
     });
     expect(container.querySelector('[data-testid="video-panel"]')).not.toBeNull();
+  });
+});
+
+describe("ModelExecutionHost 片场外显镜头", () => {
+  it("展示镜头参数而不是图片/视频生成面板", async () => {
+    const groupId = "film";
+    const clipId = "clip-1";
+    const shotId = shotPreviewNodeId(groupId, clipId);
+    await act(async () => {
+      woohaa3CanvasStore.getState().hydrate(canvasFixture({
+        nodes: [
+          {
+            id: groupId,
+            type: "group",
+            data: filmSetGroupData(createFilmSetGroupMarker({
+              cameras: [{ id: "camera-1", azimuth: 0, elevation: 0.35, distance: 4, focusOffset: { x: 0, y: 0, z: 0 }, aspect: "16:9" }],
+              clips: [{ id: clipId, name: "推镜", cameraId: "camera-1", duration: 2.5, loop: false }],
+              activeClip: clipId
+            }))
+          },
+          {
+            id: shotId,
+            type: "video",
+            data: {
+              managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: groupId, entityId: clipId, lifecycle: "owner-managed" },
+              mediaContent: { providerId: "film-set.shot", schemaVersion: 1, payload: { filmSetNodeId: groupId, clipId } }
+            }
+          }
+        ]
+      }));
+    });
+    const container = await mount(
+      <ModelExecutionHost
+        canvasId="canvas-1"
+        selectedNodeId={shotId}
+        session={{} as never}
+        runClient={{} as never}
+        writable
+        dialogs={new DialogService()}
+        catalog={new StubCatalogService(CATALOG)}
+        registry={registryWithPanel()}
+        draftStore={createModelDraftStore()}
+      />
+    );
+    expect(container.querySelector('[aria-label="镜头视频参数"]')).not.toBeNull();
+    expect(container.textContent).toContain("推镜");
+    expect(container.textContent).toContain("1280 × 720");
+    expect(container.textContent).toContain("2.5 秒");
+    expect(container.querySelector('[data-testid="video-panel"]')).toBeNull();
   });
 });
