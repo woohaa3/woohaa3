@@ -14,11 +14,16 @@ pub(crate) fn update(
     scene: &Scene,
     focus: Option<&str>,
     pins: &HashSet<String>,
+    // 真正需要 High 的根（截图/导出请求）；与 `pins`（驻留）分开，见 `sync_quality_with_demand`。
+    high_demand: &HashSet<String>,
     now: f64,
 ) -> bool {
-    let pins_changed = models.capture_pins != *pins;
-    if pins_changed {
+    let pins_changed = models.capture_pins != *pins || models.high_demand != *high_demand;
+    if models.capture_pins != *pins {
         models.capture_pins.clone_from(pins);
+    }
+    if models.high_demand != *high_demand {
+        models.high_demand.clone_from(high_demand);
     }
     let preview_sources: HashSet<&str> = scene
         .nodes
@@ -33,7 +38,11 @@ pub(crate) fn update(
         .nodes
         .iter()
         .filter(|node| {
-            !crate::canvas_query::shot_preview::focuses_isolate(scene)
+            // 参考已就绪的卡片显示录制内容，不再需要源片场为它保留驻留
+            // （2026-10-28 总览 draw call 优化）；正在播放的活动镜头仍然要。
+            !node.shot_preview.as_ref().is_some_and(|preview| {
+                crate::shot_node_preview::settled_card(preview, &node.id, scene)
+            }) && !crate::canvas_query::shot_preview::focuses_isolate(scene)
                 && !crate::canvas_query::shot_preview::hidden(node)
                 && near_viewport(node, scene, focus)
         })
@@ -192,15 +201,36 @@ mod group_model_tests {
         assert!((scene.nodes[0].y + scene.nodes[0].height) * 12. > -600.);
         assert!(near_viewport(&scene.nodes[0], &scene, None));
         let mut models = ModelVisuals::default();
-        update(&mut models, &scene, None, &HashSet::new(), 0.);
+        update(
+            &mut models,
+            &scene,
+            None,
+            &HashSet::new(),
+            &HashSet::new(),
+            0.,
+        );
         assert!(models.demand.as_ref().unwrap().contains("g"));
         models.offscreen_since.insert("g".into(), 0.);
-        update(&mut models, &scene, None, &HashSet::new(), 2.);
+        update(
+            &mut models,
+            &scene,
+            None,
+            &HashSet::new(),
+            &HashSet::new(),
+            2.,
+        );
         assert!(models.demand.as_ref().unwrap().contains("g"));
         assert!(!models.offscreen_since.contains_key("g"));
         assert!(payload_lease_keys(&scene, &models).contains("test:box"));
         scene.nodes[0].y = -1000.;
-        update(&mut models, &scene, None, &HashSet::new(), 3.);
+        update(
+            &mut models,
+            &scene,
+            None,
+            &HashSet::new(),
+            &HashSet::new(),
+            3.,
+        );
         assert!(!models.demand.as_ref().unwrap().contains("g"));
     }
 }

@@ -5,8 +5,11 @@
 mod animation_preview;
 mod editor_overlay;
 mod focus;
-#[cfg(feature = "wasm")]
 mod frame_pacing;
+
+/// JS→WASM 提交后立即唤醒停帧的渲染循环（仅 WASM 有事件循环代理）。
+#[cfg(feature = "wasm")]
+pub(crate) use frame_pacing::{set_enabled as set_idle_frame_pacing, wake};
 mod helpers;
 mod input;
 mod positions;
@@ -73,6 +76,10 @@ pub(crate) fn start() {
             }),
     );
     configure_canvas(&mut app);
+    // 静止降频（change: 2026-10-28 draw call 优化）：静态画布不再按 120 FPS 重画同一张画面。
+    app.init_resource::<frame_pacing::PacingState>()
+        .add_systems(Startup, frame_pacing::install_wake)
+        .add_systems(Last, frame_pacing::sync_pacing);
     app.run();
 }
 

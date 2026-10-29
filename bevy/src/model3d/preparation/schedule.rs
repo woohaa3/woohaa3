@@ -22,7 +22,7 @@ use crate::protocol::ModelSnapshot;
 
 use super::super::batch_strategy::BatchStrategy;
 use super::super::quality::Quality;
-use super::prepared::{self, PreparedModel, PrepareFailure};
+use super::prepared::{self, PrepareFailure, PreparedModel};
 
 /// 同时运行的后台准备任务上限（design D4 初值）。
 pub const MAX_RUNNING: usize = 2;
@@ -313,7 +313,11 @@ impl Default for Scheduler {
     fn default() -> Self {
         Self {
             // 单元测试默认不依赖真实线程池；需要线程边界时显式切回 `Async`。
-            mode: if cfg!(test) { Mode::Inline } else { Mode::Async },
+            mode: if cfg!(test) {
+                Mode::Inline
+            } else {
+                Mode::Async
+            },
             demands: BTreeMap::new(),
             queued: Vec::new(),
             running: Vec::new(),
@@ -451,6 +455,11 @@ impl Scheduler {
         self.work.running = self.running.len();
     }
 
+    /// 是否仍有排队/运行中/待装配的任务（静止降频据此判定需要连续帧）。
+    pub(crate) fn has_in_flight(&self) -> bool {
+        !self.queued.is_empty() || !self.running.is_empty() || !self.ready.is_empty()
+    }
+
     /// 是否既无需求也无在途工作（测试等待静止用）。
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
@@ -491,8 +500,11 @@ impl Scheduler {
 
     /// 回收不再被任何实例需求或 staging 引用的完成产物。
     pub(super) fn gc(&mut self, assembling: impl Fn(&PrepareKey) -> bool) {
-        let demanded: HashSet<PrepareKey> =
-            self.demands.values().map(|demand| demand.key.clone()).collect();
+        let demanded: HashSet<PrepareKey> = self
+            .demands
+            .values()
+            .map(|demand| demand.key.clone())
+            .collect();
         let mut released = 0usize;
         let mut dropped = 0u64;
         self.ready.retain(|ready| {
@@ -595,8 +607,11 @@ impl Scheduler {
 
     /// 把合并后的需求加入排队（去重、额度预留、超限撤下预热）。
     fn enqueue(&mut self) {
-        let active: HashSet<PrepareKey> =
-            self.demands.values().map(|demand| demand.key.clone()).collect();
+        let active: HashSet<PrepareKey> = self
+            .demands
+            .values()
+            .map(|demand| demand.key.clone())
+            .collect();
         let mut released = 0usize;
         let mut dropped = 0u64;
         self.queued.retain(|job| {
@@ -725,7 +740,11 @@ impl Scheduler {
                             .build()
                     });
                     let task = pool.spawn(async move { finish(job) });
-                    self.running.push(Running { key, reserved, task });
+                    self.running.push(Running {
+                        key,
+                        reserved,
+                        task,
+                    });
                 }
                 Mode::Inline => {
                     // 无后台执行器：立即在同一线程完成（确定性回归）。

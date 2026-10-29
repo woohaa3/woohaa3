@@ -32,9 +32,9 @@ use crate::{
 
 use super::plan::LiveSampling;
 use super::state::{
-    acquire_layer, apply_light_layers, apply_owner_layers, card_camera_layers, identity_of,
-    remove_card, rig_state_of, take_generation, target_component_of, Card, ShotPreviewCards,
-    ShotPreviewRig, SpriteState,
+    Card, ShotPreviewCards, ShotPreviewRig, SpriteState, acquire_layer, apply_light_layers,
+    apply_owner_layers, card_camera_layers, identity_of, remove_card, rig_state_of,
+    take_generation, target_component_of,
 };
 use super::{plan, policy};
 
@@ -73,9 +73,8 @@ pub(crate) fn sync(
         model3d::shot_adapter::model_bounds_for_node(&scene.0, &models, &resources.0, node_id)
     };
     let quality_of = |node_id: &str| models.quality_identity(node_id);
-    let preparing_of = |node_id: &str| {
-        models.preparation_state(node_id) == model3d::RootState::Pending
-    };
+    let preparing_of =
+        |node_id: &str| models.preparation_state(node_id) == model3d::RootState::Pending;
     let display_of = |node_id: &str| {
         model3d::shot_adapter::display_unit_for_node(&scene.0, &resources.0, node_id)
     };
@@ -95,11 +94,24 @@ pub(crate) fn sync(
         .map_or(1.0, |surface| surface.pixel_ratio);
 
     // 1. 清理不在目标集合里的卡片（源镜头删除/归属失效/被移除）。
-    let alive: HashSet<&str> = targets.iter().filter(|target| {
-        let presentation_hidden = scene.0.model_focus.is_some() || index.node(&scene.0, &target.node_id)
-            .is_some_and(|(_, node)| crate::canvas_query::shot_preview::hidden(node));
-        !presentation_hidden || policy::needs_rig(target.visible, target.live, capture_pins.contains(&target.node_id))
-    }).map(|target| target.node_id.as_str()).collect();
+    let alive: HashSet<&str> = targets
+        .iter()
+        .filter(|target| {
+            let presentation_hidden = scene.0.model_focus.is_some()
+                || index
+                    .node(&scene.0, &target.node_id)
+                    .is_some_and(|(_, node)| crate::canvas_query::shot_preview::hidden(node));
+            // 参考已就绪的卡片不再保留 rig：显示录制内容（状态回到待更新/播放时重建）。
+            (!presentation_hidden && !target.settled)
+                || policy::needs_rig(
+                    target.visible,
+                    target.live,
+                    capture_pins.contains(&target.node_id),
+                    target.settled,
+                )
+        })
+        .map(|target| target.node_id.as_str())
+        .collect();
     let stale: Vec<String> = cards
         .cards
         .keys()
@@ -127,17 +139,15 @@ pub(crate) fn sync(
         let fitted_height = fitted_width / target.aspect;
         let requested = policy::target_size(fitted_width, fitted_height, context_zoom, pixel_ratio);
         // 已保留像素只统计其它卡片（本卡片换档时旧纹理会被释放，不重复计入）。
-        let retained = cards
-            .retained_pixels()
-            .saturating_sub(
-                cards
-                    .cards
-                    .get(&target.node_id)
-                    .map_or(0, |card| card.size.x as u64 * card.size.y as u64),
-            );
+        let retained = cards.retained_pixels().saturating_sub(
+            cards
+                .cards
+                .get(&target.node_id)
+                .map_or(0, |card| card.size.x as u64 * card.size.y as u64),
+        );
         let available = policy::MAX_PIXELS.saturating_sub(retained).max(1);
-        let requested = policy::fit_pixels(requested, available)
-            .unwrap_or(UVec2::splat(policy::BUCKET as u32));
+        let requested =
+            policy::fit_pixels(requested, available).unwrap_or(UVec2::splat(policy::BUCKET as u32));
         let size = if let Some(card) = cards.cards.get_mut(&target.node_id) {
             let settled = card.resize.update(
                 [width, height, context_zoom, pixel_ratio], requested, card.size, now,
@@ -156,7 +166,13 @@ pub(crate) fn sync(
     let mut owner_layers: HashMap<String, Vec<usize>> = HashMap::new();
     for (index, target) in targets.iter().enumerate() {
         if !cards.cards.contains_key(&target.node_id)
-            && !policy::needs_rig(target.visible, target.live, capture_pins.contains(&target.node_id)) {
+            && !policy::needs_rig(
+                target.visible,
+                target.live,
+                capture_pins.contains(&target.node_id),
+                target.settled,
+            )
+        {
             cards.pending_layers.remove(&target.node_id);
             continue;
         }
@@ -166,11 +182,19 @@ pub(crate) fn sync(
             continue;
         };
         cards.pending_layers.remove(&target.node_id);
-        owner_layers.entry(target.owner.clone()).or_default().push(layer);
+        owner_layers
+            .entry(target.owner.clone())
+            .or_default()
+            .push(layer);
         let size = sizes[index];
         let rig_state = rig_state_of(target, size);
         if !cards.cards.contains_key(&target.node_id) {
-            if !policy::needs_rig(target.visible, target.live, capture_pins.contains(&target.node_id)) {
+            if !policy::needs_rig(
+                target.visible,
+                target.live,
+                capture_pins.contains(&target.node_id),
+                target.settled,
+            ) {
                 continue; // 仅屏外闲置卡片不创建；播放与捕捉不依赖视区。
             }
             // 归属片场仍在准备：先等待，不建立「空场」采样（发布后表示身份变化会重新武装）。
@@ -273,7 +297,13 @@ pub(crate) fn sync(
     }
 
     // 4. owner 层并集只在变化时写回模型根与媒体平面；卡片层同时并入场景方向光。
-    apply_owner_layers(&mut commands, &mut cards, &models, &mut media, &owner_layers);
+    apply_owner_layers(
+        &mut commands,
+        &mut cards,
+        &models,
+        &mut media,
+        &owner_layers,
+    );
     apply_light_layers(&mut commands, &mut cards);
 
     // 5. 确认上一帧下发的采样代数（渲染侧真实稳定后才算发布）。
@@ -286,7 +316,9 @@ pub(crate) fn sync(
         }
         // 已确认的同一代不因相机本帧未参与采样而退回准备态。
         card.confirmed |= ready.matches(card.rig, card.generation)
-            && outputs.get(card.rig).is_ok_and(|output| output.size == card.size);
+            && outputs
+                .get(card.rig)
+                .is_ok_and(|output| output.size == card.size);
         if card.confirmed {
             if let Ok(output) = outputs.get(card.rig) {
                 card.published = Some((output.image.clone(), output.size));
@@ -318,7 +350,13 @@ pub(crate) fn sync(
         let needs = card.live
             || !card.confirmed
             || card.dispatched.as_ref() != Some(&identity_of(target, card.size));
-        if policy::needs_rig(target.visible, target.live, capture_pins.contains(&target.node_id)) && needs {
+        if policy::needs_rig(
+            target.visible,
+            target.live,
+            capture_pins.contains(&target.node_id),
+            target.settled,
+        ) && needs
+        {
             candidates.push(policy::Candidate {
                 id: target.node_id.clone(),
                 live: target.live || capture_pins.contains(&target.node_id),
@@ -388,8 +426,12 @@ pub(crate) fn sync(
             continue;
         };
         let (sprite, visible, size, image) = {
-            let (image, size) = card.published.as_ref()
-                .map_or((None, card.size), |(image, size)| (Some(image.clone()), *size));
+            let (image, size) = card
+                .published
+                .as_ref()
+                .map_or((None, card.size), |(image, size)| {
+                    (Some(image.clone()), *size)
+                });
             (card.sprite, card.visible, size, image)
         };
         let Some((node_index, node)) = index.node(&scene.0, &target.node_id) else {
@@ -407,7 +449,9 @@ pub(crate) fn sync(
         let state = SpriteState {
             transform: Transform::from_xyz(x + width / 2.0, -(y + height / 2.0), z),
             size: content,
-            image: image.as_ref().map_or(bevy::asset::AssetId::default(), |handle| handle.id()),
+            image: image
+                .as_ref()
+                .map_or(bevy::asset::AssetId::default(), |handle| handle.id()),
             visible,
         };
         let card = cards.cards.get_mut(&target.node_id).unwrap();
@@ -455,9 +499,16 @@ pub(crate) fn sync(
         })
         .collect();
     // 过渡期间旧贴图也占用缓存名额和像素预算。
-    let retained_images = cards.cards.values()
-        .filter(|card| card.published.is_some() && !card.published_current).count();
-    for id in policy::evictions(&entries, policy::MAX_IMAGES.saturating_sub(retained_images), policy::MAX_PIXELS) {
+    let retained_images = cards
+        .cards
+        .values()
+        .filter(|card| card.published.is_some() && !card.published_current)
+        .count();
+    for id in policy::evictions(
+        &entries,
+        policy::MAX_IMAGES.saturating_sub(retained_images),
+        policy::MAX_PIXELS,
+    ) {
         remove_card(&mut commands, &mut cards, &mut layers, &ready, &id);
         cards.work.evictions += 1;
     }

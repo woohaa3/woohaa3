@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// 每帧最多准备的 source specs（每批按其 specs 数计入；缓存命中同样计数）。
-const OVERVIEW_SPEC_BUDGET: usize = 64;
+/// 每帧准备预算（source specs 数）。一个批次是单次构建单元，不能拆到多帧，因此上限与
+/// `batching::MAX_PARTS` 对齐：一帧最多构建一个满批次，或 256 个独立部件。
+const OVERVIEW_SPEC_BUDGET: usize = 256;
 /// 普通升降档的最小发布间隔（秒）；High 消费者提升绕过。
 const QUALITY_HOLD_SECONDS: f64 = 0.25;
 
@@ -49,11 +51,7 @@ impl PendingPublish {
         self.node == node
     }
 
-    fn new(
-        node: &str,
-        target: super::super::quality::Quality,
-        root: &super::ModelRoot,
-    ) -> Self {
+    fn new(node: &str, target: super::super::quality::Quality, root: &super::ModelRoot) -> Self {
         let work = (0..root.geometries.len())
             .map(WorkItem::Part)
             .chain((0..root.batches.len()).map(WorkItem::Batch))
@@ -102,6 +100,22 @@ impl PendingPublish {
     }
 }
 
+/// 高优先消费者细分（诊断用）：把笼统的 `high-owner` 拆成具体来源。
+///
+/// 只影响 `overview_reason` 标签，不参与档位决策；未识别用途仍归 `high-owner`。
+fn high_owner_reason(purpose: super::super::quality::ViewPurpose) -> &'static str {
+    use super::super::quality::ViewPurpose;
+    match purpose {
+        ViewPurpose::Selected => "high-selected",
+        ViewPurpose::Focus => "high-focus",
+        ViewPurpose::Edit => "high-edit",
+        ViewPurpose::Capture => "high-capture",
+        ViewPurpose::Export => "high-export",
+        ViewPurpose::World => "high-world",
+        _ => "high-owner",
+    }
+}
+
 /// 每个总览根的期望决策（phase A 收集，phase B 消费）。
 struct Decision {
     next: super::super::quality::Quality,
@@ -110,6 +124,7 @@ struct Decision {
     reason: &'static str,
 }
 
+/// 同步档位：`pins` 同时当作高优先需求，等价于 [`sync_quality_with_demand`] 传同一集合。
 pub(crate) fn sync_quality(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -119,10 +134,29 @@ pub(crate) fn sync_quality(
     now: f64,
     pins: &std::collections::HashSet<String>,
 ) -> bool {
+    sync_quality_with_demand(commands, meshes, models, scene, focus, now, pins, pins)
+}
+
+/// 同步档位，并把「需要 High 的根」与「需要保持驻留的根」分开。
+///
+/// `pins` 是驻留集合（截图请求 + 可见镜头卡片让源片场不被回收）；`high_demand` 只含真正
+/// 需要 High 表示的根（截图/导出请求）。可见镜头卡片的参考内容一旦就绪就已固化，卡片在
+/// 总览尺寸下不构成高优先消费者——否则缩到总览时整场仍按全细分加载并绘制。
+pub(crate) fn sync_quality_with_demand(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    models: &mut ModelVisuals,
+    scene: &Scene,
+    focus: Option<&str>,
+    now: f64,
+    pins: &std::collections::HashSet<String>,
+    high_demand: &std::collections::HashSet<String>,
+) -> bool {
     let ModelVisuals {
         roots,
         shared,
         capture_pins,
+        high_demand: stored_high_demand,
         overview_work,
         pending,
         motion_plan,
@@ -131,12 +165,20 @@ pub(crate) fn sync_quality(
     if *capture_pins != *pins {
         capture_pins.clone_from(pins);
     }
+    if *stored_high_demand != *high_demand {
+        stored_high_demand.clone_from(high_demand);
+    }
+
     let completed = shared.poll_jobs(meshes);
     let mut changed = completed.is_some();
     if let Some((geometry, quality, true)) = completed.as_ref() {
         for root in roots.values_mut() {
-            if *quality == root.quality && root.geometries.iter()
-                .any(|(_, _, bound)| std::sync::Arc::ptr_eq(geometry, bound)) {
+            if *quality == root.quality
+                && root
+                    .geometries
+                    .iter()
+                    .any(|(_, _, bound)| std::sync::Arc::ptr_eq(geometry, bound))
+            {
                 root.quality_refresh_pending = true;
             }
         }
@@ -151,8 +193,10 @@ pub(crate) fn sync_quality(
         let Some(root) = roots.get_mut(&node.id) else {
             continue;
         };
-        let purpose = super::super::quality::purpose(node, scene, focus, capture_pins.contains(&node.id));
+        let purpose =
+            super::super::quality::purpose(node, scene, focus, high_demand.contains(&node.id));
         let high_owner = purpose.requires_high();
+        let high_reason = high_owner_reason(purpose);
         // Demand retains/prewarms nearby roots; ordinary invisible cards must
         // not compete with visible work when wheel/pinch changes their LOD.
         let visible = super::super::quality::card_visible(node, scene, focus);
@@ -171,9 +215,7 @@ pub(crate) fn sync_quality(
             let resource = root.resource.clone();
             // 已有动作采样放大几何：规范 bounds 不再保守，保守提升 High，不另跑动作求值
             // （change: 2026-10-15-add-film-set-overview-lod，design D2）。
-            let scales_bounds = motion_plan
-                .as_ref()
-                .is_some_and(|plan| plan.scales_bounds)
+            let scales_bounds = motion_plan.as_ref().is_some_and(|plan| plan.scales_bounds)
                 && scene
                     .animation_playback
                     .as_ref()
@@ -204,9 +246,8 @@ pub(crate) fn sync_quality(
                     root.overview_reason = "degenerate";
                 }
             }
-            let resolved = next.after_overview_dwell(
-                root.quality, &mut root.overview_medium_since, now,
-            );
+            let resolved =
+                next.after_overview_dwell(root.quality, &mut root.overview_medium_since, now);
             if resolved != next {
                 root.overview_reason = "medium-dwell";
             }
@@ -216,12 +257,12 @@ pub(crate) fn sync_quality(
         };
         if root.overview_lod {
             if high_owner {
-                root.overview_reason = "high-owner";
+                root.overview_reason = high_reason;
             }
             root.overview_desired = next;
             // 发布后保留的原因标签；准备中/保持等临时原因在 publish_overview 内覆盖。
             let reason = if high_owner {
-                "high-owner"
+                high_reason
             } else if matches!(root.overview_reason, "motion-bounds" | "medium-dwell") {
                 root.overview_reason
             } else {
@@ -242,7 +283,9 @@ pub(crate) fn sync_quality(
         if (next == root.quality && !generated)
             || (next != root.quality
                 && !high_owner
-                && root.quality_changed_at.is_some_and(|t| now - t < QUALITY_HOLD_SECONDS))
+                && root
+                    .quality_changed_at
+                    .is_some_and(|t| now - t < QUALITY_HOLD_SECONDS))
         {
             continue;
         }
@@ -269,7 +312,9 @@ pub(crate) fn sync_quality(
                 .specs
                 .iter()
                 .filter_map(|spec| spec.geometry.as_ref())
-                .map(|geometry| super::super::mesh::effective_quality(geometry, next, root.overview_lod))
+                .map(|geometry| {
+                    super::super::mesh::effective_quality(geometry, next, root.overview_lod)
+                })
                 .min()
                 .unwrap_or(next);
             let Some(asset) = shared.batches.get(meshes, &batch.source, batch_quality) else {
@@ -280,7 +325,10 @@ pub(crate) fn sync_quality(
         }
         for (entity, handle) in prepared_parts {
             // Bevy recalculates bounds from the replacement mesh before visibility.
-            commands.entity(entity).remove::<bevy::camera::primitives::Aabb>().insert(Mesh3d(handle));
+            commands
+                .entity(entity)
+                .remove::<bevy::camera::primitives::Aabb>()
+                .insert(Mesh3d(handle));
         }
         for (batch, asset) in root.batches.iter_mut().zip(prepared_batches) {
             commands.entity(batch.entity).insert((
@@ -330,9 +378,11 @@ fn publish_overview(
 ) -> bool {
     let candidate = decisions
         .keys()
-        .filter(|id| roots.get(*id).is_some_and(|root| {
-            decisions[*id].next != root.quality || root.quality_refresh_pending
-        }))
+        .filter(|id| {
+            roots.get(*id).is_some_and(|root| {
+                decisions[*id].next != root.quality || root.quality_refresh_pending
+            })
+        })
         .max_by_key(|id| u8::from(decisions[*id].high_owner))
         .cloned();
 
@@ -390,8 +440,11 @@ fn publish_overview(
         let prepared = match &state.work[index] {
             WorkItem::Part(part) => {
                 let (entity, base, geometry) = &root.geometries[*part];
-                let effective =
-                    super::super::mesh::effective_quality(geometry, state.target, root.overview_lod);
+                let effective = super::super::mesh::effective_quality(
+                    geometry,
+                    state.target,
+                    root.overview_lod,
+                );
                 shared
                     .mesh(meshes, base, geometry, effective)
                     .map(|(handle, _)| PublishPrepared::Part(*entity, handle))
@@ -596,12 +649,16 @@ impl ModelVisuals {
         self.mesh_references.clear();
         self.material_references.clear();
         for root in self.roots.values() {
-            self.mesh_references.add_consumer(root.mesh_handles.iter().map(|h| h.id()));
-            self.material_references.add_consumer(root.material_handles.iter().map(|h| h.id()));
+            self.mesh_references
+                .add_consumer(root.mesh_handles.iter().map(|h| h.id()));
+            self.material_references
+                .add_consumer(root.material_handles.iter().map(|h| h.id()));
         }
         for retained in self.capture_retention.values() {
-            self.mesh_references.add_consumer(retained.meshes.iter().map(|h| h.id()));
-            self.material_references.add_consumer(retained.materials.iter().map(|h| h.id()));
+            self.mesh_references
+                .add_consumer(retained.meshes.iter().map(|h| h.id()));
+            self.material_references
+                .add_consumer(retained.materials.iter().map(|h| h.id()));
         }
         // 在途总览准备的暂存 replacement 同样是显式消费方：最后消费者前不释放，取消/发布后
         // 回收（change: 2026-10-15-add-film-set-overview-lod，design D4）。

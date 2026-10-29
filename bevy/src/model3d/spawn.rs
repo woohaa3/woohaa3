@@ -102,7 +102,11 @@ pub(crate) fn spawn_preview_root(
     PreviewRoot {
         entities: root.entities,
         meshes: root.mesh_handles.iter().map(|handle| handle.id()).collect(),
-        materials: root.material_handles.iter().map(|handle| handle.id()).collect(),
+        materials: root
+            .material_handles
+            .iter()
+            .map(|handle| handle.id())
+            .collect(),
     }
 }
 
@@ -138,7 +142,7 @@ fn spawn_v2(
     // 不必把所有实体句柄留在 `ModelRoot` 里（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，5.1）。
     commands.entity(root).insert(ModelOwner { root });
 
-    let specs = scene::build_entity_specs(model);
+    let mut specs = scene::build_entity_specs(model);
     let material_specs = collect_materials(model);
     let mut mesh_cache: HashMap<String, Handle<Mesh>> = HashMap::new();
     let mut material_cache: HashMap<String, Handle<StandardMaterial>> = HashMap::new();
@@ -157,8 +161,11 @@ fn spawn_v2(
         })
         .map(|spec| spec.material_key.clone())
         .collect();
+    // 总览片场把只做平移的父级分组平铺到根空间，按材质合并批次（draw call 优化）。
     let plans = if batched && strategy == super::batch_strategy::BatchStrategy::Spatial {
-        super::batching::plan(&specs, &opaque, &Default::default())
+        let planned = super::batching::plan(&specs, &opaque, &Default::default(), overview);
+        super::batching::apply_flatten(&mut specs, &planned.flatten);
+        planned.plans
     } else {
         Vec::new()
     };
@@ -169,13 +176,24 @@ fn spawn_v2(
     let mut instance_parts = HashMap::new();
     #[cfg(feature = "explicit-instancing")]
     if batched && strategy == super::batch_strategy::BatchStrategy::Explicit {
-        for group in super::instancing::spawn_groups(commands, meshes, materials, shared,
-            &specs, &opaque, &material_specs, quality) {
+        for group in super::instancing::spawn_groups(
+            commands,
+            meshes,
+            materials,
+            shared,
+            &specs,
+            &opaque,
+            &material_specs,
+            quality,
+        ) {
             batched_parts.extend(group.indices);
             let batch_id = format!("instance:{:?}", group.entity);
             commands.entity(group.entity).insert((
                 ModelOwner { root },
-                ModelBatch { owner: root, batch_id: batch_id.clone() },
+                ModelBatch {
+                    owner: root,
+                    batch_id: batch_id.clone(),
+                },
             ));
             mesh_cache.insert(batch_id.clone(), group.mesh);
             material_cache.insert(batch_id, group.material);
@@ -222,7 +240,10 @@ fn spawn_v2(
         let batch_id = format!("batch:{}", batches.len());
         commands.entity(entity).insert((
             ModelOwner { root },
-            ModelBatch { owner: root, batch_id: batch_id.clone() },
+            ModelBatch {
+                owner: root,
+                batch_id: batch_id.clone(),
+            },
         ));
         for &index in &plan.parts {
             if let Some(spec) = specs.get(index) {
@@ -332,7 +353,15 @@ fn spawn_v2(
     let animation_entities = attach_animations(commands, &model.ops, &entities, &base_transforms);
 
     #[allow(unused_mut)]
-    let mut part_batches: HashMap<String, Entity> = batches.iter().flat_map(|batch| batch.ranges.iter().map(move |range| (range.id.clone(), batch.entity))).collect();
+    let mut part_batches: HashMap<String, Entity> = batches
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .ranges
+                .iter()
+                .map(move |range| (range.id.clone(), batch.entity))
+        })
+        .collect();
     #[cfg(feature = "explicit-instancing")]
     for (entity, ids) in &instance_parts { for id in ids.iter() { part_batches.insert(id.clone(), *entity); } }
     ModelRoot {

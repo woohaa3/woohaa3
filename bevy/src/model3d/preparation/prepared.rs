@@ -142,7 +142,7 @@ pub(super) fn prepare(
     strategy: BatchStrategy,
     overview: bool,
 ) -> Result<PreparedModel, PrepareFailure> {
-    let specs = scene::build_entity_specs(model);
+    let mut specs = scene::build_entity_specs(model);
     let material_specs = scene::collect_materials(model);
     let opaque: HashSet<String> = specs
         .iter()
@@ -155,8 +155,11 @@ pub(super) fn prepare(
 
     let parts_started = Instant::now();
     // 1) 既有合批规划：与同步创建同一算法、同一输入。
+    // 总览片场把只做平移的父级分组平铺到根空间，按材质合并批次（draw call 优化）。
     let plans = if batched && strategy == BatchStrategy::Spatial {
-        batching::plan(&specs, &opaque, &Default::default())
+        let planned = batching::plan(&specs, &opaque, &Default::default(), overview);
+        batching::apply_flatten(&mut specs, &planned.flatten);
+        planned.plans
     } else {
         Vec::new()
     };
@@ -316,11 +319,7 @@ fn animation_kind(spec: &scene::ModelAnimationSpec) -> TransformAnimationKind {
             axis: *axis,
             speed: *speed,
         },
-        Spec::Move {
-            axis,
-            speed,
-            range,
-        } => TransformAnimationKind::LoopMove {
+        Spec::Move { axis, speed, range } => TransformAnimationKind::LoopMove {
             axis: *axis,
             speed: *speed,
             range: *range,

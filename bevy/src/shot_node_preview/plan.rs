@@ -11,7 +11,9 @@ use bevy::prelude::*;
 
 use crate::{
     model3d::shot_adapter::ModelBounds,
-    protocol::{CompositeAssetPresentation, GraphNode, ModelReference, Scene, ShotPreviewPresentation},
+    protocol::{
+        CompositeAssetPresentation, GraphNode, ModelReference, Scene, ShotPreviewPresentation,
+    },
     shot_camera::ShotCameraPose,
 };
 
@@ -51,6 +53,11 @@ pub(super) struct Target {
     /// 播放会话代数（活动卡片取自播放投影；封面恒为 0）。
     pub(super) generation: u32,
     pub(super) visible: bool,
+    /// 卡片参考内容已就绪（录制完成）且不是活动播放目标：内容已固化，**不建实时 rig**。
+    ///
+    /// 这种卡片显示的是已录制的媒体（画布纹理），实时渲染一份同样的画面既不改结果，
+    /// 又白占一路离屏相机与整场几何（2026-10-28 总览 draw call 优化）。
+    pub(super) settled: bool,
     pub(super) backdrop: Option<Color>,
     /// 归属片场仍在 native 后台准备中（未发布完整表示）。
     ///
@@ -68,7 +75,9 @@ pub(super) struct LiveSampling<'a> {
 
 /// 捕捉预览卡片时同时保留归属片场，覆盖首次请求尚未路由的窗口。
 pub(crate) fn pin_capture_owners(scene: &Scene, pins: &mut std::collections::HashSet<String>) {
-    let owners: Vec<String> = scene.nodes.iter()
+    let owners: Vec<String> = scene
+        .nodes
+        .iter()
         .filter(|node| pins.contains(&node.id))
         .filter_map(|node| node.shot_preview.as_ref())
         .map(|preview| preview.film_set_node_id.clone())
@@ -76,20 +85,44 @@ pub(crate) fn pin_capture_owners(scene: &Scene, pins: &mut std::collections::Has
     pins.extend(owners);
 }
 
-/// A visible shot is a composition consumer, just like a focused view/capture.
-/// Its source must not silently switch to overview geometry or disappear offscreen.
+/// 可见镜头卡片让源片场保持**驻留**（不被当作屏外闲置回收），但这**不**把它提升为
+/// 高优先消费者：卡片参考内容就绪后已经固化，在总览尺寸下按源片场自身的总览档位渲染即可。
+/// 真正需要 High 的只有进行中的截图/导出请求（`ShotCaptureRouting::pins`）。
 pub(crate) fn pin_visible_owners(scene: &Scene, pins: &mut std::collections::HashSet<String>) {
     if card_geometry::focuses_isolate(scene) { return; }
     let viewport = [scene.viewport.x, scene.viewport.y, scene.viewport.zoom];
-    let surface = scene.surface.as_ref()
-        .map(|surface| Vec2::new(surface.width, surface.height)).unwrap_or(Vec2::ZERO);
+    let surface = scene
+        .surface
+        .as_ref()
+        .map(|surface| Vec2::new(surface.width, surface.height))
+        .unwrap_or(Vec2::ZERO);
     for node in &scene.nodes {
         if let Some(preview) = node.shot_preview.as_ref() {
+            // 参考已就绪的卡片显示录制内容，源片场不必为它保留（除非正在播放该镜头）。
+            if settled_card(preview, &node.id, scene) {
+                continue;
+            }
             if !preview.hidden && card_geometry::visible_on_surface(node, viewport, surface) {
                 pins.insert(preview.film_set_node_id.clone());
             }
         }
     }
+}
+
+/// 卡片参考已就绪（录制完成）且不是当前活动播放目标。
+///
+/// `state` 来自渲染场景里该预览节点的状态投影：`ready` 表示参考媒体已经存在，卡片按录制
+/// 内容显示；`preparing`/`stale`/`error` 仍需实时取景兜底。
+pub(crate) fn settled_card(
+    preview: &crate::protocol::ShotPreviewPresentation,
+    node_id: &str,
+    scene: &Scene,
+) -> bool {
+    preview.state == "ready"
+        && !scene.animation_playback.as_ref().is_some_and(|playback| {
+            playback.view_mode == "shot-node-preview"
+                && playback.target_preview_node_id.as_deref() == Some(node_id)
+        })
 }
 
 /// 由场景派生全部卡片预览目标；只取同时具备合格源片场包围球的预览节点。
@@ -156,7 +189,10 @@ pub(super) fn targets_with_preparation(
                 focus_offset: Vec3::from_array(preview.cover_camera.focus_offset),
             }
         };
-        let backdrop = preview.backdrop.as_deref().unwrap_or(scene.theme.token("webSubtle"));
+        let backdrop = preview
+            .backdrop
+            .as_deref()
+            .unwrap_or(scene.theme.token("webSubtle"));
         // 场景单位镜头必须与内容共用同一显示变换（change: 2026-10-23-isolate-film-set-camera-space，D2）。
         let display = display_of(&owner.id);
         let Some(mapped) = crate::model3d::shot_adapter::display_camera_state(display, &scene_camera) else {
@@ -177,24 +213,36 @@ pub(super) fn targets_with_preparation(
             pose,
             bounds,
             aspect: card_geometry::shot_preview_aspect(node),
-            content: format!("{}:background={backdrop}", content_identity(
-                owner,
-                owner.composite_asset.as_ref(),
-                owner.model.as_ref(),
-                preview,
-                &quality_of(&owner.id),
-            )),
+            content: format!(
+                "{}:background={backdrop}",
+                content_identity(
+                    owner,
+                    owner.composite_asset.as_ref(),
+                    owner.model.as_ref(),
+                    preview,
+                    &quality_of(&owner.id),
+                )
+            ),
             time: if is_live {
-                live.map(|sampling| sampling.playback.time.to_bits()).unwrap_or(0)
+                live.map(|sampling| sampling.playback.time.to_bits())
+                    .unwrap_or(0)
             } else {
                 0
             },
             generation: if is_live {
-                live.map(|sampling| sampling.playback.generation).unwrap_or(0)
+                live.map(|sampling| sampling.playback.generation)
+                    .unwrap_or(0)
             } else {
                 0
             },
-            visible: !preview.hidden && !hidden && card_geometry::visible_on_surface(&crate::canvas_query::focus_context::node(scene, node), viewport, surface),
+            visible: !preview.hidden
+                && !hidden
+                && card_geometry::visible_on_surface(
+                    &crate::canvas_query::focus_context::node(scene, node),
+                    viewport,
+                    surface,
+                ),
+            settled: !is_live && preview.state == "ready",
             awaiting_root: preparing_of(&owner.id),
             backdrop: Some(crate::model3d::scene::parse_hex(backdrop)),
         });
@@ -262,10 +310,14 @@ mod tests {
     use super::*;
 
     fn preview_node(id: &str, x: f32) -> GraphNode {
+        preview_node_with_state(id, x, "ready")
+    }
+
+    fn preview_node_with_state(id: &str, x: f32, state: &str) -> GraphNode {
         serde_json::from_str(&format!(
             r#"{{"id":"{id}","type":"film-set-shot-preview","x":{x},"y":0,"width":240,"height":167,
                 "shotPreview":{{"filmSetNodeId":"film","clipId":"clip-1","kind":"dynamic","name":"镜头",
-                "aspect":1.7777778,"duration":5,"state":"ready",
+                "aspect":1.7777778,"duration":5,"state":"{state}",
                 "coverCamera":{{"azimuth":0.5,"elevation":0.7,"distance":8,"focusOffset":[0,1,0]}}}}}}"#
         ))
         .unwrap()
@@ -303,7 +355,10 @@ mod tests {
     #[test]
     fn hidden_shot_keeps_capture_target_and_identity_without_visible_demand() {
         let mut scene = scene_of(owner_node(0., 1.6), preview_node("shot-preview:x", 100.));
-        scene.surface = Some(serde_json::from_value(serde_json::json!({"width":1200,"height":800,"pixelRatio":1})).unwrap());
+        scene.surface = Some(
+            serde_json::from_value(serde_json::json!({"width":1200,"height":800,"pixelRatio":1}))
+                .unwrap(),
+        );
         let before = identity(&scene, "high");
         scene.nodes[1].shot_preview.as_mut().unwrap().hidden = true;
         assert_eq!(identity(&scene, "high"), before);
@@ -316,12 +371,20 @@ mod tests {
         pins.insert("shot-preview:x".into());
         pin_capture_owners(&scene, &mut pins);
         assert!(pins.contains("film"));
-        assert!(crate::canvas_query::focus_context::overlay(&scene).nodes.iter().all(|node| node.id != "shot-preview:x"));
+        assert!(
+            crate::canvas_query::focus_context::overlay(&scene)
+                .nodes
+                .iter()
+                .all(|node| node.id != "shot-preview:x")
+        );
     }
 
     #[test]
     fn queued_offscreen_capture_pins_owner_before_routing() {
-        let scene = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 100000.0));
+        let scene = scene_of(
+            owner_node(0.0, 1.6),
+            preview_node("shot-preview:x", 100000.0),
+        );
         let mut pins = std::collections::HashSet::from(["shot-preview:x".to_string()]);
         pin_capture_owners(&scene, &mut pins);
         assert!(pins.contains("film"));
@@ -333,8 +396,15 @@ mod tests {
 
     #[test]
     fn only_visible_shots_pin_their_source_for_composition_quality() {
-        let mut scene = scene_of(owner_node(0.0, 1.6), preview_node("shot", 0.0));
-        scene.surface = Some(serde_json::from_value(serde_json::json!({"width":1024,"height":768,"pixelRatio":1})).unwrap());
+        // 参考尚未就绪（录制中/待更新）：卡片仍要实时取景，因此需要源片场驻留。
+        let mut scene = scene_of(
+            owner_node(0.0, 1.6),
+            preview_node_with_state("shot", 0.0, "preparing"),
+        );
+        scene.surface = Some(
+            serde_json::from_value(serde_json::json!({"width":1024,"height":768,"pixelRatio":1}))
+                .unwrap(),
+        );
         let mut pins = std::collections::HashSet::new();
         pin_visible_owners(&scene, &mut pins);
         assert!(pins.contains("film"));
@@ -345,17 +415,51 @@ mod tests {
     }
 
     #[test]
+    fn ready_cards_are_settled_and_need_no_rig_or_source_pin() {
+        // 参考已录制完成：卡片显示录制内容，不再为它建实时 rig，也不为它保留源片场。
+        let mut scene = scene_of(owner_node(0.0, 1.6), preview_node("shot", 0.0));
+        scene.surface = Some(
+            serde_json::from_value(serde_json::json!({"width":1024,"height":768,"pixelRatio":1}))
+                .unwrap(),
+        );
+        let target = targets(&scene, &|_| None, &|_| "high".into(), None).remove(0);
+        assert!(target.settled);
+        assert!(target.visible);
+        let mut pins = std::collections::HashSet::new();
+        pin_visible_owners(&scene, &mut pins);
+        assert!(pins.is_empty());
+
+        // 待更新/录制中仍然实时取景。
+        let mut live_scene = scene_of(
+            owner_node(0.0, 1.6),
+            preview_node_with_state("shot", 0.0, "stale"),
+        );
+        live_scene.surface = scene.surface.clone();
+        let target = targets(&live_scene, &|_| None, &|_| "high".into(), None).remove(0);
+        assert!(!target.settled);
+        let mut pins = std::collections::HashSet::new();
+        pin_visible_owners(&live_scene, &mut pins);
+        assert!(pins.contains("film"));
+    }
+
+    #[test]
     fn theme_background_invalidates_card_without_affecting_custom_background() {
         let mut scene = scene_of(owner_node(0.0, 1.6), preview_node("shot", 0.0));
         let project = |scene: &Scene| targets(scene, &|_| None, &|_| "high".into(), None);
         let first = project(&scene).remove(0);
-        scene.theme.tokens.insert("webSubtle".into(), "#123456".into());
+        scene
+            .theme
+            .tokens
+            .insert("webSubtle".into(), "#123456".into());
         let themed = project(&scene).remove(0);
         assert_ne!(first.content, themed.content);
         assert_ne!(first.backdrop, themed.backdrop);
         scene.nodes[1].shot_preview.as_mut().unwrap().backdrop = Some("#abcdef".into());
         let custom = project(&scene).remove(0);
-        scene.theme.tokens.insert("webSubtle".into(), "#654321".into());
+        scene
+            .theme
+            .tokens
+            .insert("webSubtle".into(), "#654321".into());
         let changed = project(&scene).remove(0);
         assert_eq!(custom.content, changed.content);
         assert_eq!(custom.backdrop, changed.backdrop);
@@ -364,7 +468,10 @@ mod tests {
     #[test]
     fn card_name_and_position_do_not_change_content_identity() {
         let base = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
-        let moved = scene_of(owner_node(800.0, 1.6), preview_node("shot-preview:x", 500.0));
+        let moved = scene_of(
+            owner_node(800.0, 1.6),
+            preview_node("shot-preview:x", 500.0),
+        );
         assert_eq!(identity(&base, "high:1"), identity(&moved, "high:1"));
         // 画布平移不进入身份。
         let mut panned = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
@@ -384,7 +491,12 @@ mod tests {
         assert_ne!(identity(&base, "high:1"), identity(&base, "overview:1"));
         // 镜头构图变化（封面相机）必须重采。
         let mut turned = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
-        turned.nodes[1].shot_preview.as_mut().unwrap().cover_camera.azimuth = 1.2;
+        turned.nodes[1]
+            .shot_preview
+            .as_mut()
+            .unwrap()
+            .cover_camera
+            .azimuth = 1.2;
         assert_ne!(identity(&base, "high:1"), identity(&turned, "high:1"));
         // 共享 item 摆放变化必须重采。
         let mut moved_item = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
@@ -404,7 +516,11 @@ mod tests {
         // 归属源不同（同内容不同片场）不得互相复用。
         let mut other_owner = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
         other_owner.nodes[0].id = "film-2".to_owned();
-        other_owner.nodes[1].shot_preview.as_mut().unwrap().film_set_node_id = "film-2".to_owned();
+        other_owner.nodes[1]
+            .shot_preview
+            .as_mut()
+            .unwrap()
+            .film_set_node_id = "film-2".to_owned();
         assert_ne!(identity(&base, "high:1"), identity(&other_owner, "high:1"));
     }
 
@@ -511,18 +627,27 @@ mod tests {
         scene.nodes[1].x = -100_000.0;
         assert!(!targets(&scene, &bounds, &quality, None)[0].visible);
         scene.nodes[1].x = 0.0;
-        scene.model_focus = Some(serde_json::from_str(
-            r#"{"nodeId":"film","target":[0,0,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}"#,
-        )
-        .unwrap());
+        scene.model_focus = Some(
+            serde_json::from_str(
+                r#"{"nodeId":"film","target":[0,0,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}"#,
+            )
+            .unwrap(),
+        );
         assert!(!targets(&scene, &bounds, &quality, None)[0].visible);
         let original = targets(&scene, &bounds, &quality, None);
         scene.model_focus_context = serde_json::from_value(serde_json::json!([
             {"nodeId":"shot-preview:x","x":800,"y":20,"width":160,"height":120}
-        ])).unwrap();
+        ]))
+        .unwrap();
         let context = targets(&scene, &bounds, &quality, None);
-        assert!(!context[0].visible, "focus tags never display a shot thumbnail");
-        assert_eq!(context[0].content, original[0].content, "workspace projection must not change source framing");
+        assert!(
+            !context[0].visible,
+            "focus tags never display a shot thumbnail"
+        );
+        assert_eq!(
+            context[0].content, original[0].content,
+            "workspace projection must not change source framing"
+        );
         scene.model_focus_context.clear();
         assert!(!targets(&scene, &bounds, &quality, None)[0].visible);
     }

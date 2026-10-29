@@ -12,6 +12,9 @@
 import { createPerfFrameWindow, type PerfFrameCounters, type PerfFrameWindow } from "../../services/telemetry-performance.js";
 import { sceneDiagnostics } from "./scene-diagnostics.js";
 
+/** 运行时渲染计数（累计）；只有 dev 构建的 `getFrameCounters` 提供，读不到就不写 drawCalls。 */
+type RenderCounters = { readonly renders?: number; readonly drawCalls3d?: number };
+
 /** 计数快照：字段名与 `scene-diagnostics` 一致，避免两套口径各自解释同一个数字。 */
 function readFrameCounters(): PerfFrameCounters {
   return {
@@ -34,13 +37,29 @@ function readFrameCounters(): PerfFrameCounters {
  * 返回的 `dispose` 关闭窗口、计时器与监听；不写最后一段半窗（页面离开时的半窗与切后台
  * 同义，spec: 隐藏时丢弃半窗）。
  */
-export function installPerfFrameWindow(): PerfFrameWindow {
+export function installPerfFrameWindow(
+  readRenderCounters?: () => RenderCounters | null | undefined
+): PerfFrameWindow {
   const doc = globalThis.document as (Document & {
     addEventListener?: (type: string, handler: () => void) => void;
     removeEventListener?: (type: string, handler: () => void) => void;
   }) | undefined;
   const isHidden = (): boolean => doc?.hidden === true || doc?.visibilityState === "hidden";
-  const window = createPerfFrameWindow({ read: readFrameCounters, isHidden });
+  // draw call 只有渲染器计数能给：窗口关闭时用同一窗口的渲染帧数求每帧均值，
+  // 这样"缩到总览后还在 999+"能被遥测直接回答（2026-10-28）。
+  const read = (): PerfFrameCounters => {
+    const counters = readFrameCounters();
+    let render: RenderCounters | null | undefined;
+    try {
+      render = readRenderCounters?.();
+    } catch {
+      render = undefined;
+    }
+    return typeof render?.renders === "number" && typeof render?.drawCalls3d === "number"
+      ? { ...counters, renderFrames: render.renders, drawCalls: render.drawCalls3d }
+      : counters;
+  };
+  const window = createPerfFrameWindow({ read, isHidden });
   const onVisibilityChange = (): void => window.visibilityChanged(isHidden());
   try {
     doc?.addEventListener?.("visibilitychange", onVisibilityChange);

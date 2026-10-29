@@ -7,7 +7,7 @@ use std::{collections::{HashMap, HashSet}, sync::Arc};
 /// then split by exact geometry. Hashes alone never authorize sharing.
 pub(super) fn plans(specs: &[ModelEntitySpec], opaque: &HashSet<String>) -> Vec<batching::BatchPlan> {
     let mut result = Vec::new();
-    for plan in batching::plan(specs, opaque, &HashSet::new()) {
+    for plan in batching::plan(specs, opaque, &HashSet::new(), false).plans {
         let mut groups: HashMap<String, Vec<Vec<usize>>> = HashMap::new();
         for index in plan.parts {
             let geometry = specs[index].geometry.as_ref().unwrap();

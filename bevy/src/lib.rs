@@ -259,6 +259,14 @@ impl std::fmt::Display for BoundaryError {
     }
 }
 
+/// 唤醒停帧的渲染循环：JS→WASM 的提交即使落在静止心跳（250 ms）间隙也必须立刻被处理。
+#[cfg(feature = "canvas-core")]
+#[inline]
+fn wake_canvas() {
+    #[cfg(feature = "wasm")]
+    crate::app::wake();
+}
+
 #[cfg(feature = "canvas-core")]
 mod texture_upload;
 #[cfg(feature = "canvas-core")]
@@ -277,6 +285,7 @@ pub use texture_upload::{set_model_media_texture_owned, set_texture_owned};
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
     if json.len() > protocol::MAX_SCENE_BYTES {
         return Err(BoundaryError::from_str("Scene payload too large"));
     }
@@ -323,6 +332,7 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_viewport(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
     let request: protocol::ViewportUpdateRequest =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
     request.validate().map_err(BoundaryError::from_str)?;
@@ -351,6 +361,7 @@ pub fn set_viewport(json: &str) -> Result<u32, BoundaryError> {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_observer(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
     let request: protocol::ObserverUpdateRequest =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
     request.validate().map_err(BoundaryError::from_str)?;
@@ -374,6 +385,7 @@ pub fn observer_capability() -> String {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_positions(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
     if json.len() > protocol::MAX_POSITION_UPDATE_BYTES {
         return Err(BoundaryError::from_str("Position payload too large"));
     }
@@ -478,6 +490,7 @@ pub fn query_gizmo_hit(json: &str) -> String {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn prepare_and_register_model_resource(json: &str) -> Result<String, BoundaryError> {
+    wake_canvas();
     if json.len() > protocol::MAX_SCENE_BYTES {
         return Err(BoundaryError::from_str("Model resource payload too large"));
     }
@@ -571,6 +584,7 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn declare_model_resource(json: &str) -> Result<String, BoundaryError> {
+    wake_canvas();
     if json.len() > 64 * 1024 {
         return Err(BoundaryError::from_str("Model descriptor payload too large"));
     }
@@ -609,6 +623,7 @@ struct DeclaredModelDescriptor {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_model_payload_leases(json: &str) -> Result<String, BoundaryError> {
+    wake_canvas();
     if json.len() > 4 * 1024 * 1024 {
         return Err(BoundaryError::from_str("Model lease payload too large"));
     }
@@ -716,6 +731,7 @@ pub fn shot_diagnostics() -> String {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn request_shot_capture(json: &str) -> Result<(), BoundaryError> {
+    wake_canvas();
     shot_capture_wire::request(json)
 }
 
@@ -739,6 +755,7 @@ pub fn poll_shot_capture(request_id: f64, generation: f64) -> Vec<u8> {
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn request_history_thumbnail(json: &str) -> Result<(), BoundaryError> {
+    wake_canvas();
     history_preview::wire::request(json)
 }
 
@@ -756,6 +773,15 @@ pub fn poll_history_thumbnail(request_id: f64, generation: f64) -> Vec<u8> {
 /// 浏览器入口：初始化并进入 winit 事件循环。
 ///
 /// 原生宿主**不**调用它——它有自己的 OS loop，只使用 `build_native_canvas_app` + 显式 tick。
+/// 开关静止降频（默认开启）：关闭后画布恢复 120 FPS 连续更新。
+///
+/// 策略按「是否需要连续帧」在 120 FPS 与静止心跳之间切换，MUST 可关闭以便对照排查。
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn set_idle_frame_pacing(enabled: bool) {
+    crate::app::set_idle_frame_pacing(enabled);
+}
+
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn start() {

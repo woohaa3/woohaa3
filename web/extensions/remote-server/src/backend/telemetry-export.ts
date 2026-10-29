@@ -56,6 +56,7 @@ const ACTION_BY_NAME: Readonly<Record<TelemetryEventName, string | null>> = {
   "perf.interaction": null,
   "perf.segment": null,
   "perf.frame": null,
+  "perf.lod": null,
   "task.terminal": null,
   /** 本地故障复盘事实；proto 无对应 Action，不导出。 */
   "extension.render-failed": null
@@ -102,6 +103,7 @@ const SURFACE_BY_NAME: Readonly<Record<TelemetryEventName, string | null>> = {
   "perf.interaction": null,
   "perf.segment": null,
   "perf.frame": null,
+  "perf.lod": null,
   "task.terminal": null,
   "extension.render-failed": null
 };

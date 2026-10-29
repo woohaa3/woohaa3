@@ -7,7 +7,7 @@
 //! `overview_work` 计数与 `budget_json` 断言；每几何有效档位（球体 Low / 盒体与自定义 Mesh
 //! High）用 Automatic 策略逐实体核对，并单独单测 `mesh::effective_quality`。
 use super::super::quality::Quality;
-use super::super::runtime::{ModelVisuals, sync_quality};
+use super::super::runtime::{ModelVisuals, sync_quality, sync_quality_with_demand};
 use super::*;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -61,10 +61,27 @@ fn fixture(snapshot: ModelSnapshot, zoom: f32, pixel_ratio: f32) -> (Scene, Mode
     (scene, resources)
 }
 
-fn quality(world: &mut World, scene: &Scene, focus: Option<&str>, now: f64, pins: &HashSet<String>) {
+fn quality(
+    world: &mut World,
+    scene: &Scene,
+    focus: Option<&str>,
+    now: f64,
+    pins: &HashSet<String>,
+) {
+    quality_with_demand(world, scene, focus, now, pins, pins);
+}
+
+fn quality_with_demand(
+    world: &mut World,
+    scene: &Scene,
+    focus: Option<&str>,
+    now: f64,
+    pins: &HashSet<String>,
+    high_demand: &HashSet<String>,
+) {
     let mut models = world.remove_resource::<ModelVisuals>().unwrap();
     let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
-    sync_quality(
+    sync_quality_with_demand(
         &mut world.commands(),
         &mut meshes,
         &mut models,
@@ -72,6 +89,7 @@ fn quality(world: &mut World, scene: &Scene, focus: Option<&str>, now: f64, pins
         focus,
         now,
         pins,
+        high_demand,
     );
     world.flush();
     world.insert_resource(meshes);
@@ -98,14 +116,17 @@ fn settle(world: &mut World, scene: &Scene, now: &mut f64, expected: Quality) {
 
 #[test]
 #[cfg(feature = "canvas-core")]
-fn visible_shot_card_promotes_overview_source_to_capture_quality() {
+fn visible_shot_card_keeps_source_resident_without_forcing_high() {
     let (mut scene, resources) = fixture(mixed_snapshot("shot-source", 3, 3), 0.05, 1.0);
-    scene.nodes.push(serde_json::from_value(serde_json::json!({
-        "id":"shot","type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":167,
-        "shotPreview":{"filmSetNodeId":"film","clipId":"clip","kind":"static","name":"shot",
-            "aspect":1.7777778,"duration":0,"state":"ready",
-            "coverCamera":{"azimuth":0,"elevation":0.5,"distance":200,"focusOffset":[0,0,0]}}
-    })).unwrap());
+    scene.nodes.push(
+        serde_json::from_value(serde_json::json!({
+            "id":"shot","type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":167,
+            "shotPreview":{"filmSetNodeId":"film","clipId":"clip","kind":"static","name":"shot",
+                "aspect":1.7777778,"duration":0,"state":"preparing",
+                "coverCamera":{"azimuth":0,"elevation":0.5,"distance":200,"focusOffset":[0,0,0]}}
+        }))
+        .unwrap(),
+    );
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -113,12 +134,28 @@ fn visible_shot_card_promotes_overview_source_to_capture_quality() {
     let mut pins = HashSet::new();
     crate::shot_node_preview::pin_visible_owners(&scene, &mut pins);
     assert!(pins.contains("film"));
+    // 可见卡片只让源片场保持驻留：参考内容已固化，缩到总览时不升 High
+    // （2026-10-28）。
+    for _ in 0..16 {
+        now += 0.1;
+        quality_with_demand(&mut world, &scene, None, now, &pins, &HashSet::new());
+    }
+    assert_eq!(
+        world.resource::<ModelVisuals>().quality("film").tier(),
+        Quality::Low
+    );
+    // 进行中的截图/导出请求仍然把源片场升到 High。
     for _ in 0..64 {
         now += 0.1;
-        quality(&mut world, &scene, None, now, &pins);
-        if world.resource::<ModelVisuals>().quality("film") == Quality::High { break; }
+        quality_with_demand(&mut world, &scene, None, now, &pins, &pins);
+        if world.resource::<ModelVisuals>().quality("film") == Quality::High {
+            break;
+        }
     }
-    assert_eq!(world.resource::<ModelVisuals>().quality("film"), Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().quality("film"),
+        Quality::High
+    );
 }
 
 #[test]
@@ -185,15 +222,27 @@ fn viewport_fraction_scales_with_height_and_ignores_dpr() {
 fn overview_fraction_thresholds_and_hysteresis() {
     // 原 Medium 区域全部归 Low；原 High 区域先使用 Medium。
     for fraction in [0.1, 0.4, 0.5, 0.7, 0.8] {
-        assert_eq!(Quality::for_overview_fraction(fraction, Quality::Low), Quality::Low);
+        assert_eq!(
+            Quality::for_overview_fraction(fraction, Quality::Low),
+            Quality::Low
+        );
     }
-    assert_eq!(Quality::for_overview_fraction(0.81, Quality::Low), Quality::Medium);
+    assert_eq!(
+        Quality::for_overview_fraction(0.81, Quality::Low),
+        Quality::Medium
+    );
     for current in [Quality::Medium, Quality::High] {
-        assert_eq!(Quality::for_overview_fraction(0.66, current), Quality::Medium);
+        assert_eq!(
+            Quality::for_overview_fraction(0.66, current),
+            Quality::Medium
+        );
         assert_eq!(Quality::for_overview_fraction(0.65, current), Quality::Low);
     }
     for invalid in [f32::NAN, f32::INFINITY, 0.0, -1.0] {
-        assert_eq!(Quality::for_overview_fraction(invalid, Quality::Low), Quality::High);
+        assert_eq!(
+            Quality::for_overview_fraction(invalid, Quality::Low),
+            Quality::High
+        );
     }
 }
 
@@ -201,7 +250,11 @@ fn overview_fraction_thresholds_and_hysteresis() {
 fn no_declaration_keeps_world_high() {
     // 未声明策略的 World 内容保持 High（炉体/第三方不被默认降档）。
     let (mut scene, resources) = fixture(mixed_snapshot("plain", 3, 3), 0.05, 1.0);
-    scene.nodes[0].composite_asset.as_mut().unwrap().geometry_quality = None;
+    scene.nodes[0]
+        .composite_asset
+        .as_mut()
+        .unwrap()
+        .geometry_quality = None;
     scene.nodes[0].model_preview = None;
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
@@ -223,12 +276,21 @@ fn declaration_withdrawal_restores_high() {
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
     settle(&mut world, &scene, &mut now, Quality::Low);
-    scene.nodes[0].composite_asset.as_mut().unwrap().geometry_quality = None;
+    scene.nodes[0]
+        .composite_asset
+        .as_mut()
+        .unwrap()
+        .geometry_quality = None;
     for _ in 0..4 {
         quality(&mut world, &scene, None, now, &HashSet::new());
         now += 0.5;
     }
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality.tier(), Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier(),
+        Quality::High
+    );
 }
 
 #[test]
@@ -236,7 +298,10 @@ fn invalid_bounds_falls_back_to_high_with_degenerate_reason() {
     // 非有限规范 bounds → world_projection 返回 None → 保守 High 并报告 degenerate。
     let (mut scene, resources) = fixture(mixed_snapshot("degenerate", 3, 3), 0.05, 1.0);
     scene.nodes[0].composite_asset.as_mut().unwrap().layout_aabb =
-        Some(crate::protocol::ModelAabbDto { min: [f32::NAN; 3], max: [f32::NAN; 3] });
+        Some(crate::protocol::ModelAabbDto {
+            min: [f32::NAN; 3],
+            max: [f32::NAN; 3],
+        });
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -275,7 +340,10 @@ fn panning_does_not_recompute_and_zoom_does() {
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
     settle(&mut world, &scene, &mut now, Quality::Low);
-    let baseline = world.resource::<ModelVisuals>().overview_work.bounds_rebuilds;
+    let baseline = world
+        .resource::<ModelVisuals>()
+        .overview_work
+        .bounds_rebuilds;
     // 平移到仍可见的小偏移（保持节点在视口内），key 不含平移，不重算 bounds。
     scene.viewport.x = -6.0;
     scene.viewport.y = -5.0;
@@ -288,14 +356,20 @@ fn panning_does_not_recompute_and_zoom_does() {
         now += 0.5;
     }
     assert_eq!(
-        world.resource::<ModelVisuals>().overview_work.bounds_rebuilds,
+        world
+            .resource::<ModelVisuals>()
+            .overview_work
+            .bounds_rebuilds,
         baseline,
         "平移不得重算投影 bounds"
     );
     scene.viewport.zoom = 0.5;
     quality(&mut world, &scene, None, now, &HashSet::new());
     assert_eq!(
-        world.resource::<ModelVisuals>().overview_work.bounds_rebuilds,
+        world
+            .resource::<ModelVisuals>()
+            .overview_work
+            .bounds_rebuilds,
         baseline + 1,
         "zoom 变化应重算投影 bounds 一次"
     );
@@ -309,21 +383,34 @@ fn placement_change_recomputes_and_repeats_are_cache_hits() {
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
     settle(&mut world, &scene, &mut now, Quality::Low);
-    let baseline = world.resource::<ModelVisuals>().overview_work.bounds_rebuilds;
+    let baseline = world
+        .resource::<ModelVisuals>()
+        .overview_work
+        .bounds_rebuilds;
     scene.nodes[0].model.as_mut().unwrap().placement.yaw = 33.0;
     quality(&mut world, &scene, None, now, &HashSet::new());
     now += 0.5;
     assert!(
-        world.resource::<ModelVisuals>().overview_work.bounds_rebuilds > baseline,
+        world
+            .resource::<ModelVisuals>()
+            .overview_work
+            .bounds_rebuilds
+            > baseline,
         "placement 变化必须重算"
     );
-    let baseline = world.resource::<ModelVisuals>().overview_work.bounds_rebuilds;
+    let baseline = world
+        .resource::<ModelVisuals>()
+        .overview_work
+        .bounds_rebuilds;
     for _ in 0..3 {
         quality(&mut world, &scene, None, now, &HashSet::new());
         now += 0.5;
     }
     assert_eq!(
-        world.resource::<ModelVisuals>().overview_work.bounds_rebuilds,
+        world
+            .resource::<ModelVisuals>()
+            .overview_work
+            .bounds_rebuilds,
         baseline,
         "相同输入重复提交不得重算"
     );
@@ -378,12 +465,21 @@ fn high_owner_bypasses_offscreen_gate_and_hold_time() {
     let mut now = 1.0;
     quality(&mut world, &scene, None, now, &HashSet::new());
     now += 0.5;
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality.tier(), Quality::Low);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier(),
+        Quality::Low
+    );
     // 同一保持窗口内（now 未推进超过 250ms）请求 capture pin。
     let pins: HashSet<String> = HashSet::from(["film".into()]);
     quality(&mut world, &scene, None, now, &pins);
     let root = &world.resource::<ModelVisuals>().roots["film"];
-    assert_eq!(root.quality.tier(), Quality::High, "capture pin 必须立即提升");
+    assert_eq!(
+        root.quality.tier(),
+        Quality::High,
+        "capture pin 必须立即提升"
+    );
     assert_eq!(root.overview_desired, Quality::High);
 }
 
@@ -402,7 +498,12 @@ fn focus_owner_restores_high_for_overview_root() {
     .unwrap();
     quality(&mut world, &scene, Some("film"), now, &HashSet::new());
     now += 0.5;
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality.tier(), Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier(),
+        Quality::High
+    );
     scene.model_focus = None;
     settle(&mut world, &scene, &mut now, Quality::Low);
 }
@@ -484,7 +585,10 @@ fn shared_custom_mesh_stays_high_for_overview_while_card_uses_low() {
     for _ in 0..24 {
         quality(&mut world, &scene, None, now, &HashSet::new());
         now += 0.5;
-        if world.resource::<ModelVisuals>().roots["film"].quality.tier() == Quality::Low
+        if world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier()
+            == Quality::Low
             && world.resource::<ModelVisuals>().pending.is_none()
         {
             break;
@@ -522,8 +626,8 @@ fn shared_custom_mesh_stays_high_for_overview_while_card_uses_low() {
 
 #[test]
 fn frame_budget_limits_specs_and_merges_latest_target() {
-    // 重片场跨帧准备；每帧至多 64 source specs；High 优先合并最新目标。
-    let (mut scene, resources) = fixture(mixed_snapshot("heavy", 200, 0), 4.0, 1.0);
+    // 重片场跨帧准备；每帧至多一个满批次（256 source specs）；High 优先合并最新目标。
+    let (mut scene, resources) = fixture(mixed_snapshot("heavy", 600, 0), 4.0, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -531,18 +635,34 @@ fn frame_budget_limits_specs_and_merges_latest_target() {
     // Medium 停留后已升 High。
     quality(&mut world, &scene, None, now, &HashSet::new());
     now += 0.5;
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality.tier(), Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier(),
+        Quality::High
+    );
     // 缩小触发 Low：首帧预算只推进部分 specs。
-    let prepared_before = world.resource::<ModelVisuals>().overview_work.specs_prepared;
+    let prepared_before = world
+        .resource::<ModelVisuals>()
+        .overview_work
+        .specs_prepared;
     scene.viewport.zoom = 0.05;
     quality(&mut world, &scene, None, now, &HashSet::new());
     now += 0.5;
     let work = &world.resource::<ModelVisuals>().overview_work;
-    assert!(work.specs_prepared - prepared_before <= 64, "每帧至多 64 source specs");
+    assert!(
+        work.specs_prepared - prepared_before <= 256,
+        "每帧至多 256 source specs（一个满批次）"
+    );
     assert!(work.specs_prepared - prepared_before >= 1);
     assert!(work.prepare_calls >= 1);
     // 完整就绪前保留旧 High 表示。
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality.tier(), Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier(),
+        Quality::High
+    );
     settle(&mut world, &scene, &mut now, Quality::Low);
     // 连续跨档：立即请求 High owner，合并到最新目标。
     let pins: HashSet<String> = HashSet::from(["film".into()]);
@@ -563,11 +683,21 @@ fn failed_preparation_keeps_old_representation_and_reports_reason() {
     settle(&mut world, &scene, &mut now, Quality::High);
     quality(&mut world, &scene, None, now, &HashSet::new());
     now += 0.5;
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality.tier(), Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier(),
+        Quality::High
+    );
     let generation = world.resource::<ModelVisuals>().roots["film"].representation_generation;
     // 注入一个非法几何部件（球半径 0 无法建网格）。
-    world.resource_mut::<ModelVisuals>().roots.get_mut("film").unwrap()
-        .geometries.push((
+    world
+        .resource_mut::<ModelVisuals>()
+        .roots
+        .get_mut("film")
+        .unwrap()
+        .geometries
+        .push((
             Entity::PLACEHOLDER,
             "invalid".into(),
             Arc::new(crate::model3d::scene::ModelGeometry::Sphere { radius: 0.0 }),
@@ -575,7 +705,11 @@ fn failed_preparation_keeps_old_representation_and_reports_reason() {
     scene.viewport.zoom = 0.05;
     quality(&mut world, &scene, None, now, &HashSet::new());
     let models = world.resource::<ModelVisuals>();
-    assert_eq!(models.roots["film"].quality.tier(), Quality::High, "失败不得部分切档");
+    assert_eq!(
+        models.roots["film"].quality.tier(),
+        Quality::High,
+        "失败不得部分切档"
+    );
     assert_eq!(models.roots["film"].representation_generation, generation);
     assert!(models.overview_work.prepare_failures >= 1);
     assert_eq!(models.roots["film"].overview_reason, "prepare-failed");
@@ -584,7 +718,7 @@ fn failed_preparation_keeps_old_representation_and_reports_reason() {
 #[test]
 fn content_replacement_cancels_in_flight_preparation() {
     // 内容替换使在途旧准备失效，不发布旧布局。
-    let (mut scene, resources) = fixture(mixed_snapshot("a", 200, 0), 4.0, 1.0);
+    let (mut scene, resources) = fixture(mixed_snapshot("a", 600, 0), 4.0, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -593,9 +727,12 @@ fn content_replacement_cancels_in_flight_preparation() {
     scene.viewport.zoom = 0.05;
     quality(&mut world, &scene, None, now, &HashSet::new());
     now += 0.5;
-    assert!(world.resource::<ModelVisuals>().pending.is_some(), "重片场应分帧准备");
+    assert!(
+        world.resource::<ModelVisuals>().pending.is_some(),
+        "重片场应分帧准备"
+    );
     let mut resources = resources;
-    let mut replacement = mixed_snapshot("b", 200, 0);
+    let mut replacement = mixed_snapshot("b", 600, 0);
     replacement.signature = "b".into();
     let reference = scene.nodes[0].model.as_mut().unwrap();
     *reference = reference_for(&replacement, ModelPlacement::default());
@@ -619,7 +756,12 @@ fn diagnostics_are_bounded_and_report_actual_work() {
     settle(&mut world, &scene, &mut now, Quality::High);
     quality(&mut world, &scene, None, now, &HashSet::new());
     now += 0.5;
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality.tier(), Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier(),
+        Quality::High
+    );
     scene.viewport.zoom = 0.05;
     settle(&mut world, &scene, &mut now, Quality::Low);
     let meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
@@ -653,7 +795,7 @@ fn diagnostics_are_bounded_and_report_actual_work() {
 fn unpublished_low_reports_published_high_and_high_handles() {
     // 目标 Low 尚未准备完成：诊断同时报告 desired Low、published High 与准备状态；
     // 活动面数按 High handle 统计，不提前宣称减量。
-    let (mut scene, resources) = fixture(mixed_snapshot("pending", 200, 0), 4.0, 1.0);
+    let (mut scene, resources) = fixture(mixed_snapshot("pending", 600, 0), 4.0, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
@@ -717,9 +859,16 @@ fn motion_scale_promotes_conservatively_without_reevaluating() {
     run_sync(&mut world, &scene, &resources);
     // 动作计划解析后，总览根保守提升 High。
     settle(&mut world, &scene, &mut now, Quality::High);
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].overview_reason, "motion-bounds");
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].overview_reason,
+        "motion-bounds"
+    );
     // 动作计划身份与分辨率：重复同输入不重复解析。
-    let plan = world.resource::<ModelVisuals>().motion_plan.clone().unwrap();
+    let plan = world
+        .resource::<ModelVisuals>()
+        .motion_plan
+        .clone()
+        .unwrap();
     for generation in 2..5 {
         let playback = scene.animation_playback.as_mut().unwrap();
         playback.generation = generation;
@@ -727,7 +876,11 @@ fn motion_scale_promotes_conservatively_without_reevaluating() {
         run_sync(&mut world, &scene, &resources);
         assert!(Arc::ptr_eq(
             &plan,
-            world.resource::<ModelVisuals>().motion_plan.as_ref().unwrap()
+            world
+                .resource::<ModelVisuals>()
+                .motion_plan
+                .as_ref()
+                .unwrap()
         ));
     }
 }
@@ -740,15 +893,16 @@ fn ordinary_playing_does_not_force_high_without_scale_motion() {
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
     settle(&mut world, &scene, &mut now, Quality::Low);
-    scene.animation_playback =
-        Some(serde_json::from_value(serde_json::json!({
+    scene.animation_playback = Some(
+        serde_json::from_value(serde_json::json!({
             "nodeId":"film","clipId":"a","sourceIdentity":"content-a","generation":1,
             "version":"woohaa-motion-ir-v1","time":1,"duration":4,"playing":true,
             "initialCamera":{"distance":8},
             "modelMotion":[{"targetId":"s0","startTime":0,"endTime":4,
                 "motion":{"kind":"move","axis":"x","speed":2,"range":[0,8]}}]
         }))
-        .unwrap());
+        .unwrap(),
+    );
     for generation in 1..5 {
         let playback = scene.animation_playback.as_mut().unwrap();
         playback.generation = generation;
@@ -758,7 +912,9 @@ fn ordinary_playing_does_not_force_high_without_scale_motion() {
         now += 0.5;
     }
     assert_eq!(
-        world.resource::<ModelVisuals>().roots["film"].quality.tier(),
+        world.resource::<ModelVisuals>().roots["film"]
+            .quality
+            .tier(),
         Quality::Low,
         "普通播放不得强制 High"
     );
@@ -774,14 +930,25 @@ fn stable_tiers_do_not_regenerate_or_republish() {
     settle(&mut world, &scene, &mut now, Quality::Low);
     let publishes = world.resource::<ModelVisuals>().overview_work.publishes;
     let builds = world.resource::<ModelVisuals>().shared.work.built_meshes;
-    let batch_builds = world.resource::<ModelVisuals>().shared.batches.work.build_attempts;
+    let batch_builds = world
+        .resource::<ModelVisuals>()
+        .shared
+        .batches
+        .work
+        .build_attempts;
     for _ in 0..10 {
         quality(&mut world, &scene, None, now, &HashSet::new());
         now += 0.25;
     }
     let models = world.resource::<ModelVisuals>();
-    assert_eq!(models.overview_work.publishes, publishes, "稳定档位不得反复发布");
-    assert_eq!(models.shared.work.built_meshes, builds, "稳定档位不得反复生成网格");
+    assert_eq!(
+        models.overview_work.publishes, publishes,
+        "稳定档位不得反复发布"
+    );
+    assert_eq!(
+        models.shared.work.built_meshes, builds,
+        "稳定档位不得反复生成网格"
+    );
     assert_eq!(
         models.shared.batches.work.build_attempts, batch_builds,
         "稳定档位不得反复构建批次"
@@ -795,10 +962,27 @@ fn stable_tiers_do_not_regenerate_or_republish() {
 fn bevy_overview_tier_triangles_match_tool_table() {
     use crate::model3d::scene::ModelGeometry;
     let table = [
-        (ModelGeometry::Box { size: [1.0, 1.0, 1.0] }, [12, 12, 12]),
+        (
+            ModelGeometry::Box {
+                size: [1.0, 1.0, 1.0],
+            },
+            [12, 12, 12],
+        ),
         (ModelGeometry::Sphere { radius: 1.0 }, [528, 120, 24]),
-        (ModelGeometry::Cylinder { radius: 1.0, height: 2.0 }, [92, 44, 20]),
-        (ModelGeometry::Capsule { radius: 1.0, height: 3.0 }, [288, 96, 48]),
+        (
+            ModelGeometry::Cylinder {
+                radius: 1.0,
+                height: 2.0,
+            },
+            [92, 44, 20],
+        ),
+        (
+            ModelGeometry::Capsule {
+                radius: 1.0,
+                height: 3.0,
+            },
+            [288, 96, 48],
+        ),
     ];
     for (geometry, expected) in table {
         let actual = [Quality::High, Quality::OverviewMedium, Quality::OverviewLow].map(|quality| {
@@ -818,7 +1002,13 @@ fn custom_mesh_retains_authored_faces_at_every_tier() {
         panic!()
     };
     let authored = faces.len();
-    let geometry = ModelGeometry::Mesh { vertices, faces, normals: None, uvs: None, colors: None };
+    let geometry = ModelGeometry::Mesh {
+        vertices,
+        faces,
+        normals: None,
+        uvs: None,
+        colors: None,
+    };
     for quality in [Quality::High, Quality::Medium, Quality::Low] {
         let mesh = super::super::mesh::build_mesh_quality(&geometry, quality).unwrap();
         assert_eq!(
@@ -833,7 +1023,9 @@ fn custom_mesh_retains_authored_faces_at_every_tier() {
 #[test]
 fn effective_quality_only_lowers_supported_primitives() {
     use crate::model3d::{mesh::effective_quality, scene::ModelGeometry};
-    let box_geometry = ModelGeometry::Box { size: [1.0, 1.0, 1.0] };
+    let box_geometry = ModelGeometry::Box {
+        size: [1.0, 1.0, 1.0],
+    };
     let sphere_geometry = ModelGeometry::Sphere { radius: 1.0 };
     let custom = ModelGeometry::Mesh {
         vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
@@ -842,12 +1034,27 @@ fn effective_quality_only_lowers_supported_primitives() {
         uvs: None,
         colors: None,
     };
-    assert_eq!(effective_quality(&box_geometry, Quality::Low, true), Quality::High);
-    assert_eq!(effective_quality(&sphere_geometry, Quality::Low, true), Quality::Low);
-    assert_eq!(effective_quality(&custom, Quality::Low, true), Quality::High);
+    assert_eq!(
+        effective_quality(&box_geometry, Quality::Low, true),
+        Quality::High
+    );
+    assert_eq!(
+        effective_quality(&sphere_geometry, Quality::Low, true),
+        Quality::Low
+    );
+    assert_eq!(
+        effective_quality(&custom, Quality::Low, true),
+        Quality::High
+    );
     // 普通卡片（overview=false）沿用既有简化行为：自定义 Mesh 用请求档位。
-    assert_eq!(effective_quality(&custom, Quality::Low, false), Quality::Low);
-    assert_eq!(effective_quality(&sphere_geometry, Quality::Medium, false), Quality::Medium);
+    assert_eq!(
+        effective_quality(&custom, Quality::Low, false),
+        Quality::Low
+    );
+    assert_eq!(
+        effective_quality(&sphere_geometry, Quality::Medium, false),
+        Quality::Medium
+    );
 }
 
 
@@ -879,24 +1086,48 @@ fn medium_dwell_promotes_only_after_ten_seconds_and_resets() {
     let (mut scene, resources) = fixture(mixed_snapshot("dwell", 3, 3), 8.0, 1.0);
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::OverviewMedium);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::OverviewMedium
+    );
     quality(&mut world, &scene, None, 10.0, &HashSet::new());
     quality(&mut world, &scene, None, 19.99, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::OverviewMedium);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::OverviewMedium
+    );
     quality(&mut world, &scene, None, 20.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::High
+    );
     quality(&mut world, &scene, None, 25.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::High
+    );
     scene.viewport.zoom = 0.05;
     quality(&mut world, &scene, None, 26.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::OverviewLow);
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].overview_medium_since, None);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::OverviewLow
+    );
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].overview_medium_since,
+        None
+    );
     scene.viewport.zoom = 8.0;
     quality(&mut world, &scene, None, 27.0, &HashSet::new());
     quality(&mut world, &scene, None, 36.99, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::OverviewMedium);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::OverviewMedium
+    );
     quality(&mut world, &scene, None, 37.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::High
+    );
 }
 
 #[test]
@@ -907,15 +1138,24 @@ fn selection_promotes_immediately_and_deselection_restores_overview() {
     quality(&mut world, &scene, None, 1.0, &HashSet::new());
     scene.selection.nodes.push("film".into());
     quality(&mut world, &scene, None, 1.01, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::High
+    );
     scene.selection.nodes.clear();
     quality(&mut world, &scene, None, 2.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::OverviewLow);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::OverviewLow
+    );
     // 已选中的片场首次创建直接使用 High。
     scene.selection.nodes.push("film".into());
     let mut selected_world = world_with_resources();
     run_sync(&mut selected_world, &scene, &resources);
-    assert_eq!(selected_world.resource::<ModelVisuals>().roots["film"].quality, Quality::High);
+    assert_eq!(
+        selected_world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::High
+    );
 }
 
 #[test]
@@ -929,7 +1169,13 @@ fn offscreen_time_does_not_count_towards_medium_dwell() {
     scene.viewport.x = 0.0;
     quality(&mut world, &scene, None, 20.0, &HashSet::new());
     quality(&mut world, &scene, None, 29.99, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::OverviewMedium);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::OverviewMedium
+    );
     quality(&mut world, &scene, None, 30.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["film"].quality, Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film"].quality,
+        Quality::High
+    );
 }

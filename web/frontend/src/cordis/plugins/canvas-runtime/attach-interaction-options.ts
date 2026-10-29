@@ -46,7 +46,7 @@ export type AttachAssemblyDeps = {
   runState: () => import("../canvas-shell/interaction-types.js").RunStateProjectionInput | null;
   gestures: ModelEditorGestureRefs;
   onModelFocusChange: NonNullable<InteractionControllerOptions["onModelFocusChange"]>;
-  onViewportChange: () => void;
+  onViewportChange: (viewport: { x: number; y: number; zoom: number }) => void;
   onFrame?: () => void;
   projectResidency?: NonNullable<InteractionControllerOptions["projectResidency"]>;
   onSurface?: NonNullable<InteractionControllerOptions["onSurface"]>;

@@ -67,7 +67,8 @@ const GLUE_POSTPROCESS_VERSION = "3";
 // query_composite_asset_scopes 导出，模板版本提升使缓存失效。
 // change: 2026-10-12-optimize-canvas-model-lod-and-interactions —— 新增 set_positions /
 // position_capability 导出，模板版本提升使缓存失效。
-const DTS_TEMPLATE_VERSION = "13";
+// change: 2026-10-28-fix-stuck-shot-capture-pin —— 新增 cancel_shot_capture 导出，模板版本提升。
+const DTS_TEMPLATE_VERSION = "14";
 
 const OUT_NAME = "woohaa_bevy_canvas";
 const glueName = `${OUT_NAME}.js`;
@@ -97,6 +98,7 @@ export function set_image_focus_details(manifest:string,pixels:Uint8Array):void;
 export function set_model_media_texture(id: string, width: number, height: number, rgba: Uint8Array): void;
 export function request_shot_capture(json: string): void;
 export function poll_shot_capture(requestId: number, generation: number): Uint8Array;
+export function cancel_shot_capture(requestId: number): void;
 export function request_history_thumbnail(json: string): void;
 export function poll_history_thumbnail(requestId: number, generation: number): Uint8Array;
 export function shot_diagnostics(): string;
