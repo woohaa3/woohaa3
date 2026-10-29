@@ -243,6 +243,20 @@ describe("实例级重装（change: 2026-10-27-add-extension-dev-reload）", () 
     await runtime.dispose();
   });
 
+  it("scope 自己的 fiber 提供 extensionReload，并在 dispose 后移除", async () => {
+    const first = await startFrontendScope(new Context(), { install: installFakePlatform, plugins: [] });
+    const second = await startFrontendScope(new Context(), { install: installFakePlatform, plugins: [] });
+    // 两个 scope 的入口按 scope 隔离，并存不冲突（快速切换时可能同时启动）。
+    expect(first.ctx.get("extensionReload" as never)).toBe(first.reloadExtension);
+    expect(second.ctx.get("extensionReload" as never)).toBe(second.reloadExtension);
+
+    await first.dispose();
+    expect(first.ctx.get("extensionReload" as never)).toBeUndefined();
+    expect(second.ctx.get("extensionReload" as never)).toBe(second.reloadExtension);
+    await second.dispose();
+    expect(second.ctx.get("extensionReload" as never)).toBeUndefined();
+  });
+
   it("未装配的 id 返回 not-mounted，且不因此装配", async () => {
     const applied: string[] = [];
     const runtime = await startFrontendScope(new Context(), {

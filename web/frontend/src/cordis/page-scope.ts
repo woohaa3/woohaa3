@@ -410,9 +410,6 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     });
     // 面板从此刻起读实时装配状态（见上面的 assembledNow）。
     liveRuntime = runtime;
-    // 实例级重装入口（change: 2026-10-27-add-extension-dev-reload）：reconciler 在 scope 启动早期
-    // 建好，只能惰性取；这里把入口挂回 scope ctx，让「发布指针变化 → 原地重装」这条链闭合。
-    if (runtime.reloadExtension) runtime.ctx.provide("extensionReload" as never, runtime.reloadExtension as never);
     // 配置热生效：宿主配置文件里 `extensions.<id>.enabled` 变了，就装回或卸下对应 fiber，
     // 不重建页面 scope（旧行为是「下次启动生效」）。
     // 可换表覆盖**全部** configurable optional：包含宿主内置（如 node-history）与发布目录扩展。

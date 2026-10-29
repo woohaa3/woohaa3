@@ -8,7 +8,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it } from "vitest";
 import { startApp, type AppRuntime } from "./page-scope.js";
 import { resolvePageLocation, locationToPath } from "./navigation/app-router-store.js";
-import { createFakeCanvasCatalogRemote } from "./test-support/canvas-catalog.js";
+import { createFakeCanvasCatalogRemote, makeSummary } from "./test-support/canvas-catalog.js";
 import { createSourceExtensionRuntimeService } from "./test-support/source-extensions.js";
 import { routeNodeActionHit } from "./plugins/canvas-shell/node-action-host.js";
 import type { TaskActivityStore } from "@woohaa3/extension-task-activity/frontend";
@@ -262,6 +262,28 @@ describe("Page scope 生命周期", () => {
     expect(rebuilt).not.toBeNull();
     expect(rebuilt!.ctx.canvasSession).toBeDefined();
     expect(rebuilt!.ctx.canvasNavigation.resolvePanel("node-execution")).not.toBeNull();
+  });
+
+  it("连续切换画布：重装入口随旧 scope 释放，新 scope 仍能就绪", async () => {
+    installGlobals();
+    const remote = createFakeCanvasCatalogRemote([makeSummary("canvas-a", "画布甲"), makeSummary("canvas-b", "画布乙")]);
+    app = await startApp({
+      extensionRuntime: createSourceExtensionRuntimeService(),
+      canvasCatalogRemote: remote,
+      initialPathname: "/",
+      initialSearch: "?canvasId=canvas-a"
+    });
+    expect(app.currentPage()).not.toBeNull();
+
+    const errors: string[] = [];
+    app.router.subscribeScope((status) => {
+      if (status.phase === "error") errors.push(status.error ?? "");
+    });
+    // 第二次进入画布曾因 extensionReload 重复注册到 root fiber 而失败（整页白屏）。
+    await app.applyLocation({ page: "canvas", canvasId: "canvas-b" });
+    expect(errors).toEqual([]);
+    expect(app.currentPage()).not.toBeNull();
+    expect(app.router.getLocation().canvasId).toBe("canvas-b");
   });
 
   it("跨页面切换按浏览器本地偏好重建装配", async () => {
