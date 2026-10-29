@@ -143,6 +143,34 @@ export async function resetAllCanvases(page: Page): Promise<void> {
 	await page.request.post("/__e2e_reset_canvases__");
 }
 
+/**
+ * 在页面内为 `/api/settings` 快照覆盖 browser-local 扩展的启停。
+ *
+ * 依赖 browser-local optional UI 的用例必须在首次导航前显式启用，不能依赖
+ * 「配置缺失 = 全部启用」的旧默认。走路由替身而不是写真实宿主配置文件：串行用例共享
+ * 同一个 E2E 服务，写盘会污染其它文件的默认值，也会改动本机配置。
+ */
+export async function stubFrontendExtensionToggles(
+	page: Page,
+	toggles: Readonly<Record<string, boolean>>
+): Promise<void> {
+	await page.route("**/api/settings", async (route) => {
+		if (route.request().method() !== "GET") {
+			await route.fallback();
+			return;
+		}
+		const response = await route.fetch();
+		const body = (await response.json()) as { extensionToggles?: Record<string, boolean> };
+		await route.fulfill({
+			response,
+			json: {
+				...body,
+				extensionToggles: { ...(body.extensionToggles ?? {}), ...toggles }
+			}
+		});
+	});
+}
+
 /** 通过 E2E server 为指定 canvasId 建立（或重建）权威 Yjs 文档。 */
 export async function seedYjsCanvas(
 	page: Page,

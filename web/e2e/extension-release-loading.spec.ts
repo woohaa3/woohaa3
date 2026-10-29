@@ -11,8 +11,7 @@
  * 只等应用 shell 就绪（`.canvas-control-panel`），不依赖 Bevy 渲染或 GPU。
  */
 import { expect, test, type Page } from "@playwright/test";
-
-const PREF_KEY = "woohaa:frontend-extensions:v1";
+import { stubFrontendExtensionToggles } from "./helpers.js";
 
 /** 记录页面上对扩展发布资源的请求 URL（去重）。 */
 function trackExtensionRequests(page: Page): Set<string> {
@@ -33,6 +32,7 @@ test.describe("独立扩展发布加载", () => {
     const extensionRequests = trackExtensionRequests(page);
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
+    await stubFrontendExtensionToggles(page, { "task-activity": true });
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await waitForShell(page);
@@ -50,9 +50,9 @@ test.describe("独立扩展发布加载", () => {
     expect(catalogRequests).toHaveLength(1);
     expect(new URL(catalogRequests[0]).pathname).toBe(releaseHref);
 
-    // always（ChatGPT、片场）与默认启用的 browser-local（prompt-snippets、task-activity）
-    // 的 artifact 入口被请求；server-active 的 RunningHub 未激活则不请求。
-    for (const id of ["oauth-agent", "film-set", "prompt-snippets", "task-activity"]) {
+    // always（ChatGPT、片场）与默认启用的 browser-local（task-activity）artifact 入口被请求；
+    // server-active 的 RunningHub 未激活也不请求。
+    for (const id of ["oauth-agent", "film-set", "task-activity"]) {
       expect(
         requests.some((url) => url.includes(`/extensions/${id}/`)),
         `${id} 应被加载`
@@ -65,23 +65,13 @@ test.describe("独立扩展发布加载", () => {
 
   test("禁用 browser-local optional 后零 JS/CSS 请求", async ({ page }) => {
     const extensionRequests = trackExtensionRequests(page);
-    await page.addInitScript(
-      ([key]) => {
-        window.localStorage.setItem(
-          key,
-          JSON.stringify({ "prompt-snippets": false, "task-activity": false })
-        );
-      },
-      [PREF_KEY]
-    );
+    await stubFrontendExtensionToggles(page, { "task-activity": false });
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await waitForShell(page);
     await page.waitForTimeout(2000);
 
-    const disabled = [...extensionRequests].filter(
-      (url) => url.includes("/extensions/prompt-snippets/") || url.includes("/extensions/task-activity/")
-    );
+    const disabled = [...extensionRequests].filter((url) => url.includes("/extensions/task-activity/"));
     expect(disabled).toEqual([]);
     // 目录与 always 入口仍应加载。
     expect([...extensionRequests].some((url) => url.includes("/extension-releases/"))).toBe(true);

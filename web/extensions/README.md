@@ -65,9 +65,13 @@ Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情
 
 - **唯一身份来源**是 `src/frontend/metadata.ts`：只导出 JSON 可序列化的
   `ExtensionFrontendMetadata`（`extensionId`、`version`、`label`、`description`、`activation`、
-  `configScope`、`required`、`sdkAbi`；可选 `settingsPanel`、`icon`）。`icon` 是
+  `configScope`、`required`、`sdkAbi`；可选 `settingsPanel`、`icon`、`defaultEnabled`）。`icon` 是
   `PLUGIN_ICON_NAMES` 里的语义名，浏览器侧的插件清单与设置卡片用它；品牌图形由 `extension.json`
   的 `icon.asset` 在构建时注入，不要在 metadata 里写死路径。它 MUST NOT 引用 plugin/UI/CSS/业务 store 或后端代码。
+- `defaultEnabled` 只对 `configScope: "browser-local"` 的 optional 入口有意义：宿主配置里还没有显式
+  选择时用它决定开箱启停，缺省视为启用；用户已保存的选择始终优先。站点入口改用 `extension.json`
+  的 `site.defaultEnabled`，在 metadata 里声明会被目录校验拒绝。`dev-performance` 等未声明的
+  browser-local optional 保持启用；私有扩展根里的包可自行声明默认关闭。
 - `src/frontend/index.ts` 导出 `descriptor`（`ExtensionFrontendDescriptor`），其身份字段**复用**
   metadata（`{ ...METADATA, plugin: () => ... }`），避免重复维护 activation/required。
 - `descriptor.plugin()` 是**无副作用工厂**，只有宿主请求装配时才构造完整 Cordis plugin。
@@ -104,7 +108,7 @@ export const descriptor: ExtensionFrontendDescriptor = {
 | --- | --- | --- | --- |
 | `always` | `site` | Canvas 启动时与 required 一起**同步准备**（ChatGPT、片场） | required 失败 → 页面进入稳定错误，不挂载半可用画布 |
 | `server-active` | `site` | 只登记 metadata；由服务端权威 active 状态驱动 reconciler 装配/释放（game-furnace、runninghub-provider） | 隔离失败、可重试；不影响核心画布 |
-| `browser-local` | `browser-local` | 由当前 origin 的本地偏好决定是否加入启动清单（prompt-snippets、task-activity） | optional 失败隔离，不影响 required |
+| `browser-local` | `browser-local` | 由当前 origin 的本地偏好决定是否加入启动清单（如 task-activity） | optional 失败隔离，不影响 required |
 | `browser-local` + `required` | — | **非法组合**，装配前报错 | — |
 
 **故障隔离**（change: 2026-10-21-harden-extension-fault-isolation）：宿主给扩展注入盖章的 `ctx.slots` / `ctx.dialogs`，扩展只能经它们注册；每个贡献单独包错误边界，同步回调抛错会被跳过并回落宿主默认行为。同一扩展 60 秒内 3 次故障即本会话停用（required 除外），设置卡片可重新加载。后端激活默认 30 秒、释放 10 秒时限，超时即 `failed`。宿主连续 3 次未就绪会以**安全模式**启动：只装 bootstrap 槽位与 required 扩展，其余显示 `suspended`。扩展 MUST NOT 绕过注入的 ctx 取宿主 registry 单例，也 MUST NOT 依赖装配顺序（可选 hostPlugin 并发激活）。

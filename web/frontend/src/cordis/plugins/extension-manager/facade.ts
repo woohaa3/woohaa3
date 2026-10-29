@@ -63,10 +63,16 @@ export function createExtensionManagerFacade(options: ExtensionManagerFacadeOpti
     typeof options.assembled === "function" ? options.assembled() : options.assembled;
   const failed = options.failed ?? new Set<string>();
   const ownedStore = options.preferenceStore === undefined;
+  /** 自建 store 时从目录补上每个 optional 的开箱默认值（注入 store 的默认值由 owner 提供）。 */
+  const defaultsFromCatalog: Record<string, boolean> = {};
+  for (const entry of catalog) {
+    if (entry.configurable) defaultsFromCatalog[entry.id] = entry.defaultEnabled ?? true;
+  }
   const store =
     options.preferenceStore ??
     new ExtensionPreferenceStore({
       ids,
+      defaults: defaultsFromCatalog,
       ...(options.persist ? { persist: options.persist } : {})
     });
 

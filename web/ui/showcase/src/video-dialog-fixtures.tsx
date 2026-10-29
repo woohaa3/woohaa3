@@ -17,7 +17,7 @@ import {
 	type VideoEditStorySeed,
 } from "../../../frontend/src/cordis/ui/index";
 import type { VideoEditAnnotationShape, VideoEditIntent } from "@woohaa3/contracts";
-import { DialogStage } from "./snippet-fixtures.js";
+import { DialogStage } from "./dialog-stage.js";
 
 /**
  * 视频 dialogs 的查看页夹具

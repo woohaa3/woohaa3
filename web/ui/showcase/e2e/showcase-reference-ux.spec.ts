@@ -103,23 +103,3 @@ test.describe("Dock", () => {
     await page.screenshot({ path: "test-results/dock-narrow.png", fullPage: true });
   });
 });
-
-test.describe("提示词片段库", () => {
-	test("桌面片段库显示完整信息架构，无横向滚动", async ({ page }) => {
-		await gotoStory(page, "画布组件--弹窗--提示词片段--片段库", DESKTOP);
-		await expect(page.locator(".snippet-library__sidebar")).toBeVisible();
-		await expect(page.locator('[data-testid="library-results-meta"]')).toBeVisible();
-		await expect(page.locator(".snippet-library__footer")).toBeVisible();
-		await expectNoHorizontalOverflow(page);
-		await page.screenshot({ path: "test-results/snippets-desktop.png", fullPage: true });
-	});
-
-	test("390×844 窄屏片段库无横向溢出", async ({ page }) => {
-		await page.setViewportSize(NARROW);
-		await page.goto(storyUrl("画布组件--弹窗--提示词片段--连续-flow-窄屏"));
-		await page.waitForSelector('[data-testid="snippet-flow-viewport"]', { timeout: 30_000 });
-		await expect(page.locator('[data-testid="snippet-flow-viewport"] .dlg__body')).toBeVisible();
-		await expectNoHorizontalOverflow(page);
-		await page.screenshot({ path: "test-results/snippets-narrow.png", fullPage: true });
-	});
-});

@@ -17,7 +17,7 @@ export type FrontendPreferencesResult =
   | { ok: true; preferences: FrontendExtensionPreferences }
   | { ok: false; error: string };
 
-/** 从宿主设置快照读取 buser-local 启停目标状态；宿主未提供时返回空映射（= 全部启用）。 */
+/** 从宿主设置快照读取 browser-local 启停目标状态；宿主未提供时返回空映射（= 取各插件开箱默认）。 */
 export async function readFrontendExtensionPreferences(remote: SettingsRemote): Promise<FrontendPreferencesResult> {
   const result = await remote.fetchSnapshot();
   if (!result.ok) return { ok: false, error: result.error };

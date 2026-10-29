@@ -50,7 +50,7 @@ export const EXTENSION_IMPORT_DEBT: readonly ExtensionImportDebt[] = [
   },
   {
     file: "web/frontend/src/cordis/test-support/source-extensions.ts",
-    packages: ["@woohaa3/extension-prompt-snippets", "@woohaa3/extension-task-activity"],
+    packages: ["@woohaa3/extension-task-activity"],
     reason: "测试支持：前端集成测试用源码扩展入口构造 fixture，不是生产装配路径。"
   },
   {
@@ -71,8 +71,8 @@ export type RegistrationSurfaceDebt = {
 export const PLUGIN_REGISTRATION_DEBT: readonly RegistrationSurfaceDebt[] = [
   {
     file: "scripts/lib/ingress.mjs",
-    literals: ["prompt-snippets", "oauth-agent", "sdk-agent", "local-agent", "remote-server"],
-    reason: "宿主已有公开 API 路由前缀（片段库及 OAuth/SDK/本机 Agent 来源）；Windows 路径归一化后同步现有清单，不新增业务装配。"
+    literals: ["oauth-agent", "sdk-agent", "local-agent", "remote-server"],
+    reason: "宿主已有公开 API 路由前缀（OAuth/SDK/本机 Agent 来源）；Windows 路径归一化后同步现有清单，不新增业务装配。"
   }
 ];
 

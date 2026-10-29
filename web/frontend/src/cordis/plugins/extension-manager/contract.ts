@@ -17,6 +17,8 @@ export type CanvasExtensionMetadata = {
   required: boolean;
   /** 是否为用户可配置的 optional Plugin。 */
   configurable: boolean;
+  /** optional 的开箱默认启停；缺省视为启用（与 extension metadata 的 `defaultEnabled` 同一含义）。 */
+  defaultEnabled?: boolean;
   /** 插件声明的图标：语义图形名或品牌图形路径；未声明时设置页回退通用插件图标。 */
   icon?: PluginIcon;
 };

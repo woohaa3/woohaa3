@@ -26,7 +26,6 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "@woohaa3/contracts": "workspace:*",
-    "@woohaa3/extension-prompt-snippets": "workspace:*",
     "@woohaa3/extension-task-activity": "workspace:*",
     "jsdom": "^30.1.1",
     "typescript": "^7.0.2",

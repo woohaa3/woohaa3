@@ -14,7 +14,7 @@ import type { ExtensionFrontendMetadata } from "@woohaa3/contracts";
 
 export type ExtensionSelectionInput = {
   metadata: readonly ExtensionFrontendMetadata[];
-  /** 用户可配置的 browser-local optional 目标状态；缺省启用。 */
+  /** 用户可配置的 browser-local optional 目标状态；缺省取 metadata 的 `defaultEnabled`（再缺省启用）。 */
   desired: Readonly<Record<string, boolean>>;
 };
 
@@ -64,8 +64,8 @@ export function resolveExtensionStartupSelection(input: ExtensionSelectionInput)
       if (entry.required) requiredIds.push(entry.extensionId);
       continue;
     }
-    // browser-local optional（configScope === "browser-local"）。
-    const enabled = input.desired[entry.extensionId] ?? true;
+    // browser-local optional（configScope === "browser-local"）：显式偏好 > metadata 开箱默认 > 启用。
+    const enabled = input.desired[entry.extensionId] ?? entry.defaultEnabled ?? true;
     assembled[entry.extensionId] = enabled;
     if (enabled) load.push(entry);
     else disabledIds.push(entry.extensionId);
@@ -86,4 +86,16 @@ export function configurableBrowserLocalIds(metadata: readonly ExtensionFrontend
     .filter((entry) => entry.configScope === "browser-local" && entry.activation === "browser-local" && !entry.required)
     .map((entry) => entry.extensionId)
     .sort();
+}
+
+/** 可配置 optional 的开箱默认值（显式宿主配置缺席时的目标状态）。 */
+export function extensionDefaultPreferences(
+  metadata: readonly ExtensionFrontendMetadata[]
+): Readonly<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  for (const entry of metadata) {
+    if (entry.configScope !== "browser-local" || entry.activation !== "browser-local" || entry.required) continue;
+    out[entry.extensionId] = entry.defaultEnabled ?? true;
+  }
+  return out;
 }

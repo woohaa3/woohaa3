@@ -135,13 +135,15 @@ describe("Page scope 生命周期", () => {
     expect(page!.ctx.canvasNavigation.resolvePanel("node-execution")).not.toBeNull();
   });
 
-  it("默认全启用：optional Plugin 和常驻活动面板都进入启动清单", async () => {
+  it("默认启用 optional 与常驻活动面板，公开仓不装配父仓私有片段扩展", async () => {
     installGlobals();
     app = await startTestApp({ initialPathname: "/" });
     const page = app.currentPage()!;
     const actions = page.ctx.slots.list("canvas.toolbar-action").map((entry) => entry.id);
-    // node-history 通过 slot 可观察；disabled 诊断不应存在。
-    expect(page.diagnostics.getStatus().plugins.find((plugin) => plugin.status === "disabled")).toBeUndefined();
+    // 公开 client 只带 task-activity 与内置 node-history；prompt-snippets 在父仓扩展根。
+    expect(page.diagnostics.getStatus().plugins.find((plugin) => plugin.id === "node-history")?.status).toBe("active");
+    expect(page.ctx.get("promptSnippetSource" as never)).toBeUndefined();
+    expect(page.ctx.slots.list("canvas.context-menu").map((entry) => entry.id)).toEqual(["canvas-menu", "generation-trace"]);
     expect(actions).not.toContain("node-history-all");
     expect(page.ctx.slots.list("ai-center.generation-history")).toHaveLength(1);
   });
@@ -149,14 +151,12 @@ describe("Page scope 生命周期", () => {
   it("浏览器本地禁用记录决定启动装配：禁用的 browser-local 插件不装配，required 不受影响", async () => {
     installGlobals();
     app = await startWithFrontendConfig({
-      preferences: { "task-activity": false, "prompt-snippets": false, "node-history": false }
+      preferences: { "task-activity": false, "node-history": false }
     });
     const page = app.currentPage()!;
     const diagnostics = page.diagnostics.getStatus();
-    for (const id of ["prompt-snippets", "node-history"]) {
-      // 用户关掉的 browser-local optional 不装配，诊断里是合成 disabled 行（不是启动失败）。
-      expect(diagnostics.plugins.find((plugin) => plugin.id === id)?.status).toBe("disabled");
-    }
+    // 用户关掉的 browser-local optional 不装配，诊断里是合成 disabled 行（不是启动失败）。
+    expect(diagnostics.plugins.find((plugin) => plugin.id === "node-history")?.status).toBe("disabled");
     // disabled 不算启动失败，required paste-import/model-editor 仍装配；node-history 的工具栏入口随之消失。
     expect(diagnostics.plugins.find((plugin) => plugin.id === "paste-import")?.status).toBe("active");
     expect(diagnostics.plugins.find((plugin) => plugin.id === "model-editor")?.status).toBe("active");
@@ -175,12 +175,45 @@ describe("Page scope 生命周期", () => {
 
   it("optional 入口加载失败被隔离：页面仍启动，失败行标为失败", async () => {
     installGlobals();
+    const FIXTURE_ID = "fixture-optional";
+    const fixtureMetadata = {
+      extensionId: FIXTURE_ID,
+      version: "0.1.0",
+      label: "测试可选扩展",
+      description: "page scope 失败隔离夹具",
+      activation: "browser-local" as const,
+      configScope: "browser-local" as const,
+      required: false as const,
+      sdkAbi: 1
+    };
     const base = createSourceExtensionRuntimeService();
     const runtime = createSourceExtensionRuntimeService({
+      async ensureCatalog() {
+        const release = await base.ensureCatalog();
+        if (!release) return null;
+        const template = release.entries[0]!;
+        const entry = {
+          ...template,
+          metadata: fixtureMetadata,
+          artifactId: "source-fixture-optional",
+          releaseEntry: { ...template.releaseEntry, metadata: fixtureMetadata, artifactId: "source-fixture-optional" },
+          loadDescriptor: async () => ({
+            extensionId: FIXTURE_ID,
+            configScope: "browser-local" as const,
+            activation: "browser-local" as const,
+            plugin: (() => undefined) as never
+          }),
+        };
+        return {
+          ...release,
+          entries: [...release.entries, entry],
+          byId: (extensionId: string) => (extensionId === FIXTURE_ID ? entry : release.byId(extensionId)),
+          browserLocalIds: () => [...release.browserLocalIds(), FIXTURE_ID].sort()
+        };
+      },
+      metadata: () => [...base.metadata(), fixtureMetadata],
       loadDescriptor: (extensionId) => {
-        if (extensionId === "prompt-snippets") {
-          return Promise.reject(new Error("network down"));
-        }
+        if (extensionId === FIXTURE_ID) return Promise.reject(new Error("network down"));
         return base.loadDescriptor(extensionId);
       }
     });
@@ -188,11 +221,11 @@ describe("Page scope 生命周期", () => {
     const page = app.currentPage()!;
     // 页面没有因为 optional 失败而失败：required 插件仍 active。
     expect(page.diagnostics.getStatus().plugins.find((plugin) => plugin.id === "paste-import")?.status).toBe("active");
-    // 可选片段入口失败不影响画布菜单与任务执行的生成溯源入口。
+    // 可选片段入口缺席不影响画布菜单与任务执行的生成溯源入口。
     expect(page.ctx.slots.list("canvas.context-menu").map(entry => entry.id)).toEqual(["canvas-menu", "generation-trace"]);
     expect(page.ctx.slots.list("canvas.overlay").some(entry => entry.id === "task-activity-feed")).toBe(true);
     // 失败的可选入口在运行时服务中记录为 load-failed（供 Plugin Manager 显示「启动失败」）。
-    const failed = runtime.diagnostics().find((row) => row.extensionId === "prompt-snippets");
+    const failed = runtime.diagnostics().find((row) => row.extensionId === FIXTURE_ID);
     expect(failed?.status).toBe("load-failed");
   });
 

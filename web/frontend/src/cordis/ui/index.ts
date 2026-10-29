@@ -69,10 +69,11 @@ export { ALERT_DIALOG_ID, alertDefinition, registerAlertAction } from "../servic
 export type { AlertPayload, AlertAction } from "../services/dialogs/alert-dialog.js";
 export * from "../services/dialogs/stack.js";
 
-// 提示词片段（change: add-prompt-snippet-library）与任务活动（change: 2026-10-09）：
+// 任务活动（change: 2026-10-09）：
 // 业务实现已迁至独立 browser-local extension 包（change: 2026-10-10-extract-optional-feature-extensions）。
+// 提示词片段已移至父仓私有扩展根，公开 client 不再依赖它的实现。
 // 宿主 UI façade 不再转出这些业务类型/实现；消费方改用
-// `@woohaa3/extension-prompt-snippets/frontend` 与 `@woohaa3/extension-task-activity/frontend`。
+// `@woohaa3/extension-task-activity/frontend`。
 
 // 单图替换确认 dialog（change: add-paste-import-workflows）
 export {

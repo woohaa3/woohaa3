@@ -23,7 +23,7 @@ import { isAssembledAtStartup } from "./services/extension-preferences/selector.
 import { ExtensionPreferenceStore } from "./services/extension-preferences/store.js";
 import type { FrontendExtensionPreferences, PreferenceStorage } from "./services/extension-preferences/codec.js";
 import type { ExtensionRuntimeService } from "./extension-runtime/service.js";
-import { resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
+import { extensionDefaultPreferences, resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
 import type { CanvasExtensionMetadata } from "./plugins/extension-manager/contract.js";
 import { createCanvasSettingsAssembly } from "./plugins/settings/extension-settings-assembly.js";
 import { settingsPlugin, SETTINGS_PLUGIN_ID } from "./plugins/settings/plugin.js";
@@ -37,7 +37,8 @@ export function extensionCatalogMetadata(metadata: readonly ExtensionFrontendMet
     description: entry.description,
     directory: entry.directory,
     required: entry.required,
-    configurable: entry.configScope === "browser-local" && !entry.required
+    configurable: entry.configScope === "browser-local" && !entry.required,
+    ...(entry.defaultEnabled !== undefined ? { defaultEnabled: entry.defaultEnabled } : {})
   }));
 }
 
@@ -49,7 +50,7 @@ export type CanvasPageScopeStarterInput = {
   preferenceStorage?: PreferenceStorage | null | undefined;
   /**
    * 当前生效的 browser-local 启停目标状态（来自宿主配置文件 `extensions.frontend.*`）。
-   * 缺省表示宿主未提供：全部启用，兼容旧宿主。
+   * 缺省表示宿主未提供：按各插件 metadata 的 `defaultEnabled`（再缺省启用），兼容旧宿主。
    */
   frontendExtensions?: FrontendExtensionPreferences | undefined;
   /**
@@ -80,6 +81,7 @@ export function createCanvasPageScopeStarter(
     //    旧版本遗留在浏览器里的显式选择只做一次性迁移：写回宿主配置后不再读取。
     const preferenceStore = new ExtensionPreferenceStore({
       ids: configurableIds,
+      defaults: extensionDefaultPreferences(metadata),
       ...(input.frontendExtensions !== undefined ? { desired: input.frontendExtensions } : {}),
       ...(input.persistFrontendExtension !== undefined ? { persist: input.persistFrontendExtension } : {})
     });
@@ -89,7 +91,7 @@ export function createCanvasPageScopeStarter(
     const builtinAssembled: Record<string, boolean> = {};
     for (const entry of catalogMetadata) {
       if (!entry.configurable) continue;
-      builtinAssembled[entry.id] = desired[entry.id] ?? true;
+      builtinAssembled[entry.id] = desired[entry.id] ?? entry.defaultEnabled ?? true;
     }
 
     // 3. 只加载 always + 已启用 browser-local optional；required 失败即 page 失败，optional 失败隔离。
@@ -176,7 +178,7 @@ export function createCanvasPageScopeStarter(
     const plugins = manifest.filter((definition) => isAssembledAtStartup(definition, assembled));
     const disabled = Object.entries(assembled)
       .filter(([, enabled]) => !enabled)
-      .map(([id]) => ({ id, reason: "用户已禁用该可选插件" }));
+      .map(([id]) => ({ id, reason: "未启用该可选插件" }));
 
     const runtime = await startFrontendScope(appCtx, {
       install: async (ctx) => {

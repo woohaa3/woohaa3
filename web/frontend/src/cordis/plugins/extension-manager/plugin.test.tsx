@@ -12,11 +12,23 @@ import { extensionManagerPlugin, EXTENSION_MANAGER_ID } from "./plugin.js";
 import { SlotRegistry } from "../../slots.js";
 import { DialogService } from "../../services/dialogs/service.js";
 import { CanvasNavigationStore } from "../../navigation/store.js";
+import type { CanvasExtensionMetadata } from "./contract.js";
 import { sourceCanvasCatalogMetadata } from "../../test-support/source-extensions.js";
 
 let runtime: FrontendRuntime | null = null;
 
-const CATALOG = sourceCanvasCatalogMetadata();
+/** 源码型目录 + 一个声明默认关闭的 browser-local optional（片段库已迁至父仓私有扩展根）。 */
+const CATALOG: CanvasExtensionMetadata[] = [
+  ...sourceCanvasCatalogMetadata(),
+  {
+    id: "prompt-snippets",
+    name: "提示词片段库",
+    description: "测试用 optional，声明默认关闭。",
+    required: false,
+    configurable: true,
+    defaultEnabled: false
+  }
+];
 const IDS = CATALOG.filter((entry) => entry.configurable).map((entry) => entry.id);
 
 async function makeHarness(options: {
@@ -98,14 +110,23 @@ describe("Plugin Manager Plugin", () => {
     expect(view.rows.some((row) => row.id === "paste-import" || row.id === "model-editor")).toBe(false);
   });
 
-  it("启动加载失败的可选入口显示「启动失败」而非「已启用」（任务 5.7）", async () => {
-    const harness = await makeHarness({ failed: new Set(["prompt-snippets"]) });
+  it("默认关闭的行显示「已停用」且没有待生效提示", async () => {
+    const harness = await makeHarness();
     runtime = harness.runtime;
     const view = harness.facade.getSnapshot();
-    const failed = view.rows.find((row) => row.id === "prompt-snippets");
-    expect(failed?.status).toBe("failed");
-    // 未失败的其它行仍为 active。
+    expect(view.rows.find((row) => row.id === "prompt-snippets")?.status).toBe("disabled");
     expect(view.rows.find((row) => row.id === "node-history")?.status).toBe("active");
+    expect(view.pending).toBe(false);
+  });
+
+  it("启动加载失败的可选入口显示「启动失败」而非「已启用」（任务 5.7）", async () => {
+    const harness = await makeHarness({ failed: new Set(["node-history"]) });
+    runtime = harness.runtime;
+    const view = harness.facade.getSnapshot();
+    const failed = view.rows.find((row) => row.id === "node-history");
+    expect(failed?.status).toBe("failed");
+    // 默认关闭的行保持已停用。
+    expect(view.rows.find((row) => row.id === "prompt-snippets")?.status).toBe("disabled");
   });
 
   it("浏览器本地开关写宿主配置，站点开关提交服务端配置", async () => {
@@ -117,11 +138,11 @@ describe("Plugin Manager Plugin", () => {
     const writeConfig = vi.fn(async (_input: { extensionId: string; enabled: boolean }) => ({ ok: true as const, revision: 1, status: { extensionId: "game-furnace" } }));
     const harness = await makeHarness({ persist, statusService: { writeConfig, getSnapshot: () => ({ revision: 1, catalog: [], plugins: [], error: null, loading: false }), subscribe: () => () => undefined, refresh: async () => undefined } });
     runtime = harness.runtime;
-    harness.facade.setEnabled("prompt-snippets", false);
+    harness.facade.setEnabled("node-history", false);
     // 写入转发给宿主配置；配置随后热生效，装配态与目标态之间的差异先体现为「待停用」。
-    await vi.waitFor(() => expect(persisted).toEqual([["prompt-snippets", false]]));
+    await vi.waitFor(() => expect(persisted).toEqual([["node-history", false]]));
     expect(harness.facade.getSnapshot().error).toBeNull();
-    expect(harness.facade.getSnapshot().rows.find(row => row.id === "prompt-snippets")?.status).toBe("pending-disable");
+    expect(harness.facade.getSnapshot().rows.find(row => row.id === "node-history")?.status).toBe("pending-disable");
     expect(harness.facade.getSnapshot().pending).toBe(true);
 
     harness.facade.setSiteEnabled("game-furnace", false);

@@ -32,8 +32,9 @@ export function hasPendingExtensionChanges(
 ): boolean {
   return catalog.some((entry) => {
     if (!entry.configurable) return false;
-    const actual = input.assembled[entry.id] ?? true;
-    const desired = input.desired[entry.id] ?? true;
+    const fallback = entry.defaultEnabled ?? true;
+    const actual = input.assembled[entry.id] ?? fallback;
+    const desired = input.desired[entry.id] ?? fallback;
     return actual !== desired;
   });
 }
@@ -59,8 +60,9 @@ export function projectExtensionManagerRows(
         configurable: entry.configurable,
         ...(entry.icon ? { icon: entry.icon } : {})
       };
-      const actual = input.assembled[entry.id] ?? true;
-      const desired = input.desired[entry.id] ?? true;
+      const fallback = entry.defaultEnabled ?? true;
+      const actual = input.assembled[entry.id] ?? fallback;
+      const desired = input.desired[entry.id] ?? fallback;
       let status: ExtensionManagerRowStatus;
       if (actual === desired) {
         if (actual) status = input.failed?.has(entry.id) ? "failed" : "active";

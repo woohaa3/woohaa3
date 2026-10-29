@@ -9,7 +9,11 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ExtensionFrontendMetadata } from "@woohaa3/contracts";
-import { resolveExtensionStartupSelection, configurableBrowserLocalIds } from "./selection.js";
+import {
+  configurableBrowserLocalIds,
+  extensionDefaultPreferences,
+  resolveExtensionStartupSelection
+} from "./selection.js";
 
 function metadata(overrides: Partial<ExtensionFrontendMetadata> & Pick<ExtensionFrontendMetadata, "extensionId">): ExtensionFrontendMetadata {
   return {
@@ -56,6 +60,21 @@ describe("resolveExtensionStartupSelection", () => {
     expect(result.load.map((entry) => entry.extensionId)).toEqual(["prompt-snippets"]);
   });
 
+  it("metadata 声明 defaultEnabled=false：缺失偏好时不加载，显式 true 仍可启用", () => {
+    const offByDefault = { ...LOCAL, defaultEnabled: false };
+    const missing = resolveExtensionStartupSelection({ metadata: [offByDefault], desired: {} });
+    expect(missing.load).toEqual([]);
+    expect(missing.disabledIds).toEqual(["prompt-snippets"]);
+    expect(missing.assembled).toEqual({ "prompt-snippets": false });
+
+    const explicit = resolveExtensionStartupSelection({
+      metadata: [offByDefault],
+      desired: { "prompt-snippets": true }
+    });
+    expect(explicit.load.map((entry) => entry.extensionId)).toEqual(["prompt-snippets"]);
+    expect(explicit.assembled).toEqual({ "prompt-snippets": true });
+  });
+
   it("本地偏置不能禁用 required/always", () => {
     const result = resolveExtensionStartupSelection({
       metadata: [ALWAYS],
@@ -67,5 +86,13 @@ describe("resolveExtensionStartupSelection", () => {
 
   it("configurableBrowserLocalIds 只取 browser-local 且非 required", () => {
     expect(configurableBrowserLocalIds([ALWAYS, SERVER, LOCAL])).toEqual(["prompt-snippets"]);
+  });
+
+  it("extensionDefaultPreferences 读取 metadata 的 defaultEnabled（缺省启用）", () => {
+    expect(extensionDefaultPreferences([ALWAYS, SERVER, LOCAL, { ...LOCAL, extensionId: "dev-performance" }])).toEqual({
+      "prompt-snippets": true,
+      "dev-performance": true
+    });
+    expect(extensionDefaultPreferences([{ ...LOCAL, defaultEnabled: false }])).toEqual({ "prompt-snippets": false });
   });
 });

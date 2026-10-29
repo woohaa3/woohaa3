@@ -134,6 +134,26 @@ describe("artifact manifest 严格解码（任务 1.1/3.5）", () => {
     const invalid = validManifest({ metadata: { ...METADATA, settingsPanel: "yes" as never } });
     expect(decodeExtensionBrowserArtifactManifest(invalid).ok).toBe(false);
   });
+
+  it("defaultEnabled 是可选的布尔默认启停，其它类型与站点入口声明拒绝", () => {
+    const browserLocal = { configScope: "browser-local", activation: "browser-local", required: false } as const;
+    const declared = decodeExtensionBrowserArtifactManifest(
+      validManifest({ metadata: { ...METADATA, ...browserLocal, defaultEnabled: false } })
+    );
+    expect(declared.ok).toBe(true);
+    if (declared.ok) expect(declared.value.metadata.defaultEnabled).toBe(false);
+
+    const undeclared = decodeExtensionBrowserArtifactManifest(validManifest());
+    expect(undeclared.ok).toBe(true);
+    if (undeclared.ok) expect("defaultEnabled" in undeclared.value.metadata).toBe(false);
+
+    const invalid = validManifest({ metadata: { ...METADATA, defaultEnabled: "no" as never } });
+    expect(decodeExtensionBrowserArtifactManifest(invalid).ok).toBe(false);
+
+    // 站点入口首次默认值归 extension.json 的 site.defaultEnabled。
+    const site = validManifest({ metadata: { ...METADATA, defaultEnabled: false } });
+    expect(decodeExtensionBrowserArtifactManifest(site).ok).toBe(false);
+  });
 });
 
 describe("发布目录严格解码（任务 1.1/4.1）", () => {

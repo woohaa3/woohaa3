@@ -2,13 +2,6 @@ import type { Story, StoryDefault } from "@ladle/react";
 import { AlertDialog, Dialog, DialogBody, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
 import { MediaDialog } from "@woohaa3/ui/media";
 import { DialogViewport } from "../dialog-viewport.js";
-import { DialogHostStage } from "../dialog-fixtures.js";
-import {
-	createLibraryRenderer,
-	SNIPPET_LIBRARY_DIALOG_ID,
-	snippetLibraryDefinition,
-	useShowcaseCatalog,
-} from "../snippet-fixtures.js";
 
 export default {
 	title: "画布组件/弹窗/基础",
@@ -115,29 +108,6 @@ export const AlertBusy: Story = () => (
 	</DialogViewport>
 );
 AlertBusy.storyName = "确认 进行中";
-
-/** 焦点恢复：用生产 DialogHost + 生产片段库弹窗验证打开/关闭后的焦点归属（任务 1.2）。 */
-export const FocusRestore: Story = () => {
-	const catalog = useShowcaseCatalog();
-	const renderer = createLibraryRenderer(catalog, {
-		openEditor: () => undefined,
-		requestDelete: () => undefined,
-		requestDeleteTag: () => undefined,
-	});
-	return (
-		<DialogHostStage
-			registrations={[
-				{ dialogId: SNIPPET_LIBRARY_DIALOG_ID, definition: snippetLibraryDefinition, renderer },
-			]}
-			dialogId={SNIPPET_LIBRARY_DIALOG_ID}
-			payload={{}}
-			triggerLabel="打开片段库"
-			caption="焦点恢复 · 生产 DialogHost"
-			hint="点击触发按钮打开弹窗，关闭后焦点回到触发按钮。"
-		/>
-	);
-};
-FocusRestore.storyName = "焦点恢复";
 
 export const MediaImage: Story = () => (
 	<DialogViewport>
