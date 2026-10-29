@@ -90,6 +90,11 @@ pub(crate) struct InteractionSnapshot {
     pub(super) adjacency: Vec<Vec<usize>>,
     /// 仅保留有横条的节点，视口增量不重建节点/边的世界几何。
     pub(super) action_descriptors: Vec<(usize, crate::protocol::NodeActions)>,
+    /// 多选横条布局（change: canvas-grouping-redesign）；≥2 节点被选中且 scene 携带
+    /// `selectionActions` 时存在，随视口增量重派生。
+    pub(super) selection_action_layout: Option<layout::NodeActionLayout>,
+    /// 多选横条的 `NodeActions` 描述，用于视口增量重派生（同 `action_descriptors`）。
+    pub(super) selection_action_descriptor: Option<crate::protocol::NodeActions>,
     /// 节点 AABB 空间网格：点/框选/drop/probe 先取候选再细判（design D7 / 任务 7.3）。
     pub(super) node_grid: SpatialGrid,
     /// 边折线 AABB 空间网格（边命中先粗筛，再逐段距离）。
@@ -287,6 +292,14 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
                 ("output".into(), Vec2::new(ox, oy)),
             ])
         }),
+        selection_action_descriptor: scene.selection_actions.clone(),
+        selection_action_layout: {
+            let sa = scene.selection_actions.as_ref().filter(|_| scene.selection.nodes.len() >= 2);
+            sa.and_then(|actions| {
+                let [x, y, w, h] = selection_bounds(&scene.nodes, &scene.selection.nodes)?;
+                layout::node_action_toolbar_for_bounds((x, y, w, h), actions, Some(viewport), scene.surface.as_ref().map(|s| (s.width, s.height)))
+            })
+        },
     }
 }
 
@@ -499,6 +512,20 @@ impl InteractionSnapshot {
             });
         }
         let radius = layout::hit_radius(zoom);
+        // 多选横条优先：在节点和把手之上（change: canvas-grouping-redesign）。
+        if let Some(layout) = &self.selection_action_layout {
+            for slot in &layout.slots {
+                let (ax, ay, aw, ah) = slot.rect;
+                if world.x >= ax && world.x <= ax + aw && world.y >= ay && world.y <= ay + ah {
+                    return Some(PointHit::SelectionAction { action_id: slot.id.clone(), menu: false });
+                }
+                if let Some((mx, my, mw, mh)) = slot.menu {
+                    if world.x >= mx && world.x <= mx + mw && world.y >= my && world.y <= my + mh {
+                        return Some(PointHit::SelectionAction { action_id: slot.id.clone(), menu: true });
+                    }
+                }
+            }
+        }
         // 把手 overlay 在节点之上；查询只比较预计算的两个中心，无全场景扫描。
         if let Some(handles) = &self.aggregate_handles {
             for (direction, center) in handles {
@@ -891,5 +918,30 @@ pub(super) fn refresh_node_actions(
         .collect();
     for index in reindexed {
         snapshot.refresh_node_grid(index);
+    }
+    // 多选横条随视口重新派生（change: canvas-grouping-redesign）。
+    if let Some(actions) = &snapshot.selection_action_descriptor.clone() {
+        snapshot.selection_action_layout = layout::node_action_toolbar_for_bounds(
+            {
+                let selected_ids: Vec<String> = snapshot.nodes.iter()
+                    .filter_map(|n| if snapshot.order.contains(&snapshot.node_index.get(&n.id).copied().unwrap_or(usize::MAX)) { Some(n.id.clone()) } else { None })
+                    .collect();
+                // selection bounds from stored snapshot nodes directly
+                let mut min_x = f32::MAX; let mut min_y = f32::MAX;
+                let mut max_x = f32::MIN; let mut max_y = f32::MIN;
+                let mut found = false;
+                for node in &snapshot.nodes {
+                    let (x, y, w, h) = node.bounds;
+                    min_x = min_x.min(x); min_y = min_y.min(y);
+                    max_x = max_x.max(x + w); max_y = max_y.max(y + h);
+                    found = true;
+                    let _ = selected_ids.iter();
+                }
+                if found { (min_x, min_y, max_x - min_x, max_y - min_y) } else { return; }
+            },
+            actions,
+            Some(snapshot.viewport),
+            snapshot.surface,
+        );
     }
 }

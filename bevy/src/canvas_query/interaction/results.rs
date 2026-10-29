@@ -64,6 +64,14 @@ pub(crate) enum PointHit {
         #[serde(default)]
         menu: bool,
     },
+    /// 多选横条动作命中（change: canvas-grouping-redesign）。
+    ///
+    /// 仅当 ≥2 节点被选中且 scene 携带 `selectionActions` 时存在。`action_id` 由贡献层派发。
+    SelectionAction {
+        action_id: String,
+        #[serde(default)]
+        menu: bool,
+    },
 }
 
 /// drag-touch probe 候选：稳定节点 identity 与连接能力，供 JS 过滤后决定待提交边。

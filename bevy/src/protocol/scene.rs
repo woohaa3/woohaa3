@@ -740,6 +740,12 @@ pub(crate) struct Scene {
     /// 横条；动作世界矩形由 `canvas_query::layout::node_action_toolbar` 与 contracts 同一公式派生。
     #[serde(default, rename = "nodeActions")]
     pub(crate) node_actions: std::collections::HashMap<String, NodeActions>,
+    /// 多选横条描述（change: canvas-grouping-redesign）。
+    ///
+    /// ≥2 个节点被选中时由 TS 下发；Bevy 在选区包围框上方绘制、Rust 命中后回传动作 id。
+    /// 缺失时不绘制。
+    #[serde(default, rename = "selectionActions")]
+    pub(crate) selection_actions: Option<NodeActions>,
 }
 
 #[derive(Clone, Deserialize)]

@@ -121,6 +121,57 @@ pub(crate) fn draw(
     out
 }
 
+/// 绘制多选横条（change: canvas-grouping-redesign）。
+///
+/// 与 `draw` 用相同色彩体系；锚定在选区包围框上方。返回标签集合（无所属节点实体，交给调用方挂全局实体）。
+pub(crate) fn draw_selection_toolbar(
+    geometry: &mut Geometry,
+    theme: &ThemeResource,
+    actions: &crate::protocol::NodeActions,
+    nodes: &[GraphNode],
+    selected: &[String],
+    viewport: Option<(f32, f32, f32)>,
+    surface_size: Option<(f32, f32)>,
+    z: f32,
+) -> Vec<Label> {
+    use crate::canvas_query::aggregate::selection_bounds;
+    use super::layout::node_action_toolbar_for_bounds;
+    let Some([bx_raw, by_raw, bw_raw, bh_raw]) = selection_bounds(nodes, selected) else { return Vec::new(); };
+    let Some(layout) = node_action_toolbar_for_bounds((bx_raw, by_raw, bw_raw, bh_raw), actions, viewport, surface_size) else { return Vec::new(); };
+
+    let border = theme.token_u32("canvasNodeBorder");
+    let surface = theme.token_u32("canvasNodeSurface");
+    let accent = theme.token_u32("interactionAccent");
+    let body_text = theme.token_u32("canvasBodyText");
+
+    let scale = layout.bar.3 / (NODE_ACTION_TOOLBAR_ACTION_HEIGHT + NODE_ACTION_TOOLBAR_PAD * 2.0);
+    let (bx, by, bw, bh) = layout.bar;
+    geometry.rounded_rect(bx, by, bw, bh, BAR_RADIUS * scale, z, border);
+    geometry.rounded_rect(bx + scale, by + scale, (bw - 2.0 * scale).max(scale), (bh - 2.0 * scale).max(scale), (BAR_RADIUS - 1.0) * scale, z + 0.001, surface);
+
+    let world_font = NODE_ACTION_TOOLBAR_FONT * scale;
+    let screen_font = NODE_ACTION_TOOLBAR_FONT;
+    let mut labels: Vec<Label> = Vec::new();
+    for slot in &layout.slots {
+        let (ax, ay, aw, ah) = slot.rect;
+        let primary = slot.tone == "primary";
+        let tint = if !slot.enabled { body_text } else if primary { theme.token_u32("interactionOnAccent") } else { body_text };
+        if primary {
+            let fill = if slot.enabled { accent } else { theme.token_u32("interactionDisabled") };
+            geometry.rounded_rect(ax, ay, aw, ah, ACTION_RADIUS * scale, z + 0.002, fill);
+        }
+        if !slot.icon_only {
+            let text_y = ay + (ah - world_font) / 2.0 - scale;
+            labels.push((slot.label.clone(), Vec2::new(ax + 8.0 * scale, text_y), screen_font, tint));
+        }
+        if let Some((mx, my, mw, mh)) = slot.menu {
+            let center = Vec2::new(mx + mw / 2.0, my + mh / 2.0);
+            geometry.polygon(&[center + Vec2::new(-4.0, -1.5) * scale, center + Vec2::new(4.0, -1.5) * scale, center + Vec2::new(0.0, 3.0) * scale], z + 0.004, body_text);
+        }
+    }
+    labels
+}
+
 /// 逐帧同步横条 overlay 几何与标签（change: 2026-10-13-add-node-to-film-set-shortcut）。
 ///
 /// 不受 `FrameFlags.changed` 门禁：横条随节点世界位置与视口顶部碰撞变化，必须逐帧更新。无横条
@@ -169,7 +220,23 @@ pub(crate) fn sync_node_action_bars(
         Some(surface_size),
         z,
     );
-    if drawn.is_empty() {
+    // 多选横条（change: canvas-grouping-redesign）：≥2 节点选中时在选区包围框上方绘制。
+    let projected_nodes: Vec<GraphNode> = projected.iter().map(|(_, n)| n.clone()).collect();
+    let selection_labels = if let Some(sa) = scene.0.selection_actions.as_ref().filter(|_| scene.0.selection.nodes.len() >= 2) {
+        draw_selection_toolbar(
+            &mut geometry,
+            &theme,
+            sa,
+            &projected_nodes,
+            &scene.0.selection.nodes,
+            Some(viewport),
+            Some(surface_size),
+            z,
+        )
+    } else {
+        Vec::new()
+    };
+    if drawn.is_empty() && selection_labels.is_empty() {
         clear_mesh(&mut commands, &mut visuals, &mut meshes);
         return;
     }
@@ -182,6 +249,18 @@ pub(crate) fn sync_node_action_bars(
             z + 0.006,
             LabelStyle::NodeAction,
         );
+    }
+    // 多选横条标签挂到画布根实体（无节点 owner）。
+    if !selection_labels.is_empty() {
+        if let Ok((root_entity, _)) = nodes.iter().next().ok_or(()) {
+            requests.push(
+                CanvasLabelRole::NodeAction,
+                root_entity,
+                selection_labels,
+                z + 0.006,
+                LabelStyle::NodeAction,
+            );
+        }
     }
 }
 
