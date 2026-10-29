@@ -19,10 +19,10 @@ describe("生成模型参数预设", () => {
   });
 
   it("Seedream 版本按优先级匹配，Lite 不会被 5.0 通用前缀吞掉", () => {
-    expect(imageModelPresetFor("doubao-seedream-5-0-260128")?.id).toBe("seedream-5-lite");
-    expect(imageModelPresetFor("doubao-seedream-5-0-pro-260628")?.id).toBe("seedream-5-pro");
+    expect(imageModelPresetFor("doubao-seedream-5-0-260128")?.id).toBe("seedream-5.0-lite");
+    expect(imageModelPresetFor("doubao-seedream-5-0-pro-260628")?.id).toBe("seedream-5.0-pro");
     expect(imageModelPresetFor("seedream-5-pro")?.resolutions).toEqual(["1K", "1.5K", "2K"]);
-    expect(imageModelPresetFor("doubao-seedream-5-0-flash-260915")?.id).toBe("seedream-5-flash");
+    expect(imageModelPresetFor("doubao-seedream-5-0-flash-260915")?.id).toBe("seedream-5.0-flash");
     expect(imageModelPresetFor("doubao-seedream-4-5-251128")?.resolutions).toEqual(["2K", "4K"]);
     expect(imageModelPresetFor("doubao-seedream-4-0-250828")?.resolutions).toEqual(["1K", "2K", "4K"]);
   });

@@ -10,9 +10,10 @@
  * 3. **模型卡片**（`cards/`）：在类型预设上剪枝、收窄、声明约束。**目录结构即分类**：
  *    `cards/<image|video>/<vendor>/<model>.ts`。
  *
- * 值域（档位、步长、枚举）不在卡片里：它们来自家族表（`../image-parameters`、
- * `../video-parameters`），按 `providerModelId` 匹配。这样「换一个别名」只加一张卡片，
- * 参数真相不会抄第二份。
+ * 值域：通用部分（档位、步长、枚举）来自家族表（`../image-parameters`、
+ * `../video-parameters`），按 `providerModelId` 匹配；**随版本变化的厂商数字写在卡片的
+ * 厂商块里**（如 `seedream`），家族与各 Provider 都从卡片读。这样「换一个别名」只加一张
+ * 卡片，「换一个版本」也只改它自己的卡片，参数真相不会抄第二份。
  *
  * 约束（`limits.ts`）单独挂在卡片上，因为其中大部分 `inputSchema` 表达不了：
  * 「参考图至少 1 张」「图和视频合计不超过 30」「单个素材 ≤ 10MB」都是跨字段或跨数组的
@@ -48,4 +49,29 @@ export {
   VIDEO_CARDS
 } from "./cards/index.js";
 export { composePresetCard, type ComposedPresetCard } from "./compose.js";
-export { presetCardsOf, presetLimitsOf, referenceBindingsOf } from "./helpers.js";
+// 即梦的版本语义住在卡片目录里（`cards/image/ark`）：家族与各 Provider 都按 id 读卡片。
+export {
+  SEEDREAM_ASPECT_RATIOS,
+  SEEDREAM_CARDS,
+  SEEDREAM_SIZE_PRESETS,
+  SEEDREAM_UNKNOWN_VERSION,
+  seedreamBackgroundField,
+  seedreamFamilySchema,
+  seedreamGatewayResolutions,
+  seedreamPixelSize,
+  seedreamRequestFields,
+  seedreamSizePresetFor,
+  seedreamSizeTable,
+  seedreamSpecOfCard,
+  seedreamSupportsAspectRatio,
+  seedreamSupportsTransparentBackground,
+  type SeedreamResolutionTier,
+  type SeedreamSizePreset
+} from "./cards/image/ark/index.js";
+export {
+  cardEnumValues,
+  cardImageReferenceLimit,
+  presetCardsOf,
+  presetLimitsOf,
+  referenceBindingsOf
+} from "./helpers.js";

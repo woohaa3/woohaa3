@@ -6,11 +6,15 @@
  * 2. 值域比类型预设更窄多少（`narrow`）；
  * 3. 有哪些 `inputSchema` 表达不了的边界（`limits`）。
  *
- * 厂商细节（分辨率档位、时长步长、质量枚举）**不写在这里**：它们由家族表
- * （`families/image` 与 `families/video`）按 `providerModelId` 给出。卡片只声明
- * 「这家接不接这个键」，因此新增一个同家族的新版本 = 复制一份卡片、改 id 与约束。
+ * **卡片是模型能力的唯一来源**：厂商参数族的具体数字（分辨率档位、官方像素表、是否支持
+ * 透明背景、网关是否收窄）也挂在卡片上，放在厂商专属的可选块里（目前是 `seedream`）。
+ * 家族（`../image-parameters`）与各 Provider（Ark 原生、TokenHub、LiteLLM 网关）都通过
+ * 这些块读取值域，不再各自维护一份「哪个版本有什么」的表。
+ *
+ * 因此新增一个同家族的新版本 = 加一份卡片、写清它的数字，不用改 Provider。
  */
 import type { GenerationModelLimits } from "../model-capabilities.js";
+import type { SeedreamSizePreset } from "./cards/image/ark/seedream-spec.js";
 
 /**
  * 上游厂商。与 `cards/<类型>/<厂商>/` 的目录名一一对应。
@@ -39,7 +43,7 @@ export type PresetCard = {
    * 官方文档地址（模型页 / API 页）。
    *
    * **必填**：卡片里的档位与边界都是从这页抄下来的，没有链接就无法判断「这条数字过期了没有」。
-   * 值域由家族表按 id 给出，家族表里的数字同样以这里为准。
+   * 通用值域由家族表按 id 给出；厂商专属块（如 `seedream`）里的数字以这页为准。
    */
   docs: string;
   modelType: "image" | "video";
@@ -49,6 +53,13 @@ export type PresetCard = {
   keeps: readonly string[];
   /** 在类型预设之上收窄的值域 / 默认值 / 联动隐藏。 */
   narrow?: Readonly<Record<string, Record<string, unknown>>>;
+  /**
+   * 即梦（Seedream）版本语义：官方 `size` 档位、像素表引用、默认档、网关收窄、透明背景。
+   *
+   * `id` 与参考图上限不在这里——它们分别由卡片的 `id` 与 `limits` 给出，避免同一份
+   * 数字写两遍。家族与三家 Provider 通过 `seedreamSizePresetFor` 读这里。
+   */
+  seedream?: Omit<SeedreamSizePreset, "id" | "maxReferenceImages">;
   /** 追加类型预设里没有的键（用于复刻服务端按类型写死的遗留形状）。 */
   adds?: readonly string[];
   /** 约束；缺省表示这张卡片不声明，前端不展示任何提示。 */

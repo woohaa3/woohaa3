@@ -1,13 +1,60 @@
 import type { PptaskDescription } from '@sdppp/pptask';
 import {
+  BUILTIN_PRESET_CARDS,
   aspectRatioField,
+  cardEnumValues,
+  cardImageReferenceLimit,
   imageModelPresetFor,
   resolutionField,
   seedreamPixelSize,
+  seedreamBackgroundField,
   seedreamSizePresetFor,
   seedreamSupportsAspectRatio,
+  seedreamSupportsTransparentBackground,
+  type PresetCard,
+  type SeedreamSizePreset,
 } from '@woohaa3/contracts';
-import { ARK_PROVIDER_ID, assertArkModel, type ArkCatalogModel, type ArkImageSpec } from './catalog.js';
+import {
+  ARK_PROVIDER_ID,
+  assertArkModel,
+  type ArkCatalogModel,
+  type ArkImageFamily,
+  type ArkImageSpec,
+} from './catalog.js';
+
+/**
+ * 图片模型的卡片：Ark 目录只声明端点形状，**能力数字全部来自卡片**。
+ *
+ * 档位、官方像素表、参考图上限、输出格式、透明背景都在
+ * `@woohaa3/contracts` 的 `cards/image/ark/seedream-*.ts`——这里读，不另存一份。
+ */
+function arkImageCard(modelId: string): PresetCard | undefined {
+  return BUILTIN_PRESET_CARDS.find(
+    (card) => card.modelType === 'image' && card.providerModelId === modelId,
+  );
+}
+
+/** 目录里的图片模型必须有卡片：没有卡片就说明能力无从得知，直接报不可用而不是猜。 */
+function requireArkImageCard(modelId: string): PresetCard {
+  const card = arkImageCard(modelId);
+  if (card === undefined) {
+    throw new Error(`Unsupported Ark model: ${modelId} (missing preset card)`);
+  }
+  return card;
+}
+
+function referenceLimit(card: PresetCard): number {
+  return cardImageReferenceLimit(card) ?? 14;
+}
+
+const DEFAULT_OUTPUT_FORMATS: readonly ('jpeg' | 'png')[] = ['jpeg'];
+
+function outputFormats(card: PresetCard): readonly ('jpeg' | 'png')[] {
+  const declared = (cardEnumValues(card, 'outputFormat') ?? DEFAULT_OUTPUT_FORMATS).filter(
+    (value): value is 'jpeg' | 'png' => value === 'jpeg' || value === 'png',
+  );
+  return declared.length > 0 ? declared : DEFAULT_OUTPUT_FORMATS;
+}
 
 /**
  * Seedream（即梦）生图请求体。
@@ -16,8 +63,8 @@ import { ARK_PROVIDER_ID, assertArkModel, type ArkCatalogModel, type ArkImageSpe
  * （`sequential_image_generation=auto`），参考图加成图不超过 15 张。
  *
  * 即梦官方接口没有 `aspect_ratio`：宽高比只能写进 `size`。面板因此给「图片比例 +
- * 图片分辨率」两个控件，这里按 contracts 的官方像素表（`seedream-presets`）把比例
- * 翻成 `WIDTHxHEIGHT`；比例选「自适应」时只发分辨率档位，由模型结合 prompt 决定宽高。
+ * 图片分辨率」两个控件，这里按卡片的官方像素表把比例翻成 `WIDTHxHEIGHT`；
+ * 比例选「自适应」时只发分辨率档位，由模型结合 prompt 决定宽高。
  */
 export function buildArkSeedreamRequestBody(
   model: string,
@@ -25,6 +72,8 @@ export function buildArkSeedreamRequestBody(
 ): Record<string, unknown> {
   const spec = assertArkModel(model, 'image').image;
   if (!spec) throw new Error(`Unsupported Ark model: ${model}`);
+  const card = requireArkImageCard(model);
+  const maxImages = referenceLimit(card);
   const layerDecomposition = Boolean(input.layer_decomposition ?? input.layerDecomposition);
   const images = normalizeImages(input.image ?? input.images ?? input.urls);
   const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
@@ -46,16 +95,16 @@ export function buildArkSeedreamRequestBody(
   } else if (!prompt) {
     throw new Error('ark Seedream image generation requires a non-empty prompt');
   }
-  if (images.length > spec.maxImages) {
+  if (images.length > maxImages) {
     throw new Error(spec.layerDecomposition
-      ? 'ark Seedream 5.0 Pro supports at most 10 reference images'
-      : `ark Seedream supports at most ${spec.maxImages} reference images`);
+      ? `ark Seedream 5.0 Pro supports at most ${maxImages} reference images`
+      : `ark Seedream supports at most ${maxImages} reference images`);
   }
 
-  const size = resolveSeedreamSize(model, input, spec, layerDecomposition);
+  const size = resolveSeedreamSize(model, input, spec.family, layerDecomposition);
   const outputFormat = normalizeEnum(
     input.output_format ?? input.outputFormat ?? 'jpeg',
-    spec.outputFormats,
+    outputFormats(card),
     'output_format',
   );
   const responseFormat = normalizeEnum(
@@ -73,19 +122,23 @@ export function buildArkSeedreamRequestBody(
   if (prompt) body.prompt = prompt;
   if (images.length) body.image = images.length === 1 ? images[0] : images;
 
-  if (spec.layerDecomposition) {
-    body.layer_decomposition = layerDecomposition;
+  if (spec.layerDecomposition) body.layer_decomposition = layerDecomposition;
+  // 透明背景的版本判定只有一份：卡片 `seedream` 块的 `transparentBackground`。
+  // Ark 目录的 `layerDecomposition` 只是「pro 家族」分组，不表达透明能力（两者今天恰好
+  // 覆盖同一批模型，但不能用它代指）。
+  if (supportsTransparentBackground(model)) {
     const background = normalizeEnum(
       input.background ?? 'opaque',
       ['transparent', 'opaque'] as const,
       'background',
     );
     if (background === 'transparent') {
+      // 官方：透明只在图生图、且只输入 1 张带透明通道的图片时生效，输出必须是 PNG。
       if (images.length !== 1 || layerDecomposition) {
-        throw new Error('ark Seedream 5.0 Pro transparent background requires single-image editing mode');
+        throw new Error('ark Seedream transparent background requires single-image editing mode');
       }
       if (outputFormat !== 'png') {
-        throw new Error('ark Seedream 5.0 Pro transparent background requires output_format=png');
+        throw new Error('ark Seedream transparent background requires output_format=png');
       }
     }
     if (!layerDecomposition) body.background = background;
@@ -107,11 +160,12 @@ export function buildArkSeedreamRequestBody(
 export function describeArkImage(modelId: string, model: ArkCatalogModel): PptaskDescription {
   const spec = model.image;
   if (!spec) throw new Error(`Unsupported Ark model: ${modelId}`);
+  const card = requireArkImageCard(modelId);
   // 与其它 Provider 共用模型级预设（Seedream 5 pro/lite、4.5、4.0 的档位一致）。
   const preset = imageModelPresetFor(modelId);
-  // 即梦官方的 size / 比例语义在 contracts，Ark 只负责翻译成请求字段。
+  // 即梦官方的 size / 比例语义在卡片里，Ark 只负责翻译成请求字段。
   const seedream = seedreamSizePresetFor(modelId);
-  const imageSizes = seedream?.resolutions ?? preset?.resolutions ?? spec.sizes;
+  const imageSizes = seedream?.resolutions ?? preset?.resolutions ?? [];
   const defaultImageSize = seedream?.defaultResolution ?? preset?.defaultResolution ?? '2K';
   const supportsRatio = seedream ? seedreamSupportsAspectRatio(seedream) : false;
   const properties: Record<string, unknown> = {
@@ -119,7 +173,7 @@ export function describeArkImage(modelId: string, model: ArkCatalogModel): Pptas
     urls: {
       type: 'array',
       title: '参考图',
-      maxItems: spec.maxImages,
+      maxItems: referenceLimit(card),
       'x-pptask-semantic': 'reference-image',
       'x-component': 'Upload',
     },
@@ -137,12 +191,15 @@ export function describeArkImage(modelId: string, model: ArkCatalogModel): Pptas
         }
       : {}),
     size: resolutionField({ tiers: imageSizes, fallback: defaultImageSize, title: '图片分辨率' }),
-    outputFormat: selectSchema('输出格式', spec.outputFormats, 'jpeg'),
+    outputFormat: selectSchema('输出格式', outputFormats(card), 'jpeg'),
     watermark: { type: 'boolean', title: '水印', default: true, 'x-component': 'Switch' },
   };
   if (spec.layerDecomposition) {
     properties.layerDecomposition = { type: 'boolean', title: '图层拆分', default: false, 'x-component': 'Switch' };
-    properties.background = selectSchema('背景', ['opaque', 'transparent'], 'opaque');
+  }
+  if (supportsTransparentBackground(modelId)) {
+    // 与网关链路共用卡片目录的投影：透明选项自带「输出必须是 PNG」的联动。
+    properties.background = seedreamBackgroundField();
   }
   if (spec.family === 'sequential') {
     properties.sequentialImageGeneration = selectSchema('组图', ['disabled', 'auto'], 'disabled');
@@ -173,7 +230,8 @@ export function describeArkImage(modelId: string, model: ArkCatalogModel): Pptas
       size: defaultImageSize,
       outputFormat: 'jpeg',
       watermark: true,
-      ...(spec.layerDecomposition ? { layerDecomposition: false, background: 'opaque' } : {}),
+      ...(spec.layerDecomposition ? { layerDecomposition: false } : {}),
+      ...(supportsTransparentBackground(modelId) ? { background: 'opaque' } : {}),
       ...(spec.family === 'sequential' ? { sequentialImageGeneration: 'disabled', sequentialMaxImages: 4 } : {}),
     },
     capabilities: {
@@ -181,9 +239,15 @@ export function describeArkImage(modelId: string, model: ArkCatalogModel): Pptas
       operations: ['text-to-image', 'image-to-image'],
       cancel: false,
       ...(spec.layerDecomposition ? { layerDecomposition: true } : {}),
-      maxReferenceImages: spec.maxImages,
+      maxReferenceImages: referenceLimit(card),
     },
   };
+}
+
+/** 该 Ark 模型是否支持透明背景——真值在契约的版本表里，不在 Ark 目录。 */
+function supportsTransparentBackground(model: string): boolean {
+  const preset = seedreamSizePresetFor(model);
+  return preset !== undefined && seedreamSupportsTransparentBackground(preset);
 }
 
 function applySequential(body: Record<string, unknown>, input: Record<string, unknown>, imageCount: number): void {
@@ -237,11 +301,14 @@ function normalizeImages(value: unknown): string[] {
 function resolveSeedreamSize(
   model: string,
   input: Record<string, unknown>,
-  arkSpec: ArkImageSpec,
+  family: ArkImageFamily,
   layerDecomposition: boolean,
 ): string {
   const preset = seedreamSizePresetFor(model);
-  const tiers = preset?.resolutions ?? arkSpec.sizes;
+  if (preset === undefined) {
+    throw new Error(`Unsupported Ark model: ${model} (missing preset card)`);
+  }
+  const tiers = preset.resolutions;
   const requested = typeof input.size === 'string' ? input.size.trim() : '';
   const ratio = typeof input.aspectRatio === 'string'
     ? input.aspectRatio.trim()
@@ -254,44 +321,57 @@ function resolveSeedreamSize(
   if (requested !== '' && !tiers.includes(requested) && !/^\d+x\d+$/i.test(requested)) {
     throw new Error(`ark Seedream ${model} does not support size: ${requested}`);
   }
-  const tier = tiers.includes(requested) ? requested : preset?.defaultResolution ?? '2K';
+  const tier = tiers.includes(requested) ? requested : preset.defaultResolution;
 
   if (fixedRatio && !layerDecomposition) {
-    if (!preset || !seedreamSupportsAspectRatio(preset)) {
+    if (!seedreamSupportsAspectRatio(preset)) {
       throw new Error(`ark Seedream ${model} has no official size table for aspect ratios`);
     }
     const pixel = seedreamPixelSize(preset, ratio, tier);
     if (!pixel) throw new Error(`ark Seedream ${model} does not support ${ratio} at ${tier}`);
     return pixel;
   }
-  if (arkSpec.family === 'pro') return normalizeProSize(input.size, layerDecomposition);
-  return normalizePresetSize(input.size, arkSpec.sizes);
+  if (family === 'pro') return normalizeProSize(input.size, layerDecomposition, preset);
+  return normalizePresetSize(input.size, preset);
 }
 
-function normalizeProSize(value: unknown, layerDecomposition: boolean): string {
-  const size = String(value || (layerDecomposition ? 'auto' : '2K')).trim();
-  const preset = size.toUpperCase();
-  if (['1K', '1.5K', '2K'].includes(preset)) return preset;
+function normalizeProSize(
+  value: unknown,
+  layerDecomposition: boolean,
+  preset: SeedreamSizePreset,
+): string {
+  const size = String(value || (layerDecomposition ? 'auto' : preset.defaultResolution)).trim();
+  const tier = size.toUpperCase();
+  if (preset.resolutions.includes(tier)) return tier;
   if (layerDecomposition) {
     if (size.toLowerCase() === 'auto') return 'auto';
-    throw new Error('ark Seedream 5.0 Pro layer decomposition size must be one of: auto, 1K, 1.5K, 2K');
+    throw new Error(`ark Seedream 5.0 Pro layer decomposition size must be one of: auto, ${preset.resolutions.join(', ')}`);
   }
   const match = /^(\d+)x(\d+)$/i.exec(size);
-  if (!match) throw new Error('ark Seedream 5.0 Pro generation size must be 1K, 1.5K, 2K, or WIDTHxHEIGHT');
+  if (!match) {
+    throw new Error(`ark Seedream 5.0 Pro generation size must be ${preset.resolutions.join(', ')}, or WIDTHxHEIGHT`);
+  }
   const width = Number(match[1]);
   const height = Number(match[2]);
   const pixels = width * height;
   const ratio = width / height;
-  if (pixels < 921600 || pixels > 4624220 || ratio < 1 / 16 || ratio > 16) {
-    throw new Error('ark Seedream 5.0 Pro custom size must have 921600-4624220 pixels and an aspect ratio between 1:16 and 16:1');
+  // 总像素窗口与宽高比范围是卡片的官方数据（`pixelWindow`）。
+  const { minTotalPixels, maxTotalPixels, minAspectRatio, maxAspectRatio } = preset.pixelWindow;
+  if (pixels < minTotalPixels || pixels > maxTotalPixels || ratio < minAspectRatio || ratio > maxAspectRatio) {
+    throw new Error(`ark Seedream 5.0 Pro custom size must have ${minTotalPixels}-${maxTotalPixels} pixels and an aspect ratio between ${formatRatio(minAspectRatio)} and ${formatRatio(maxAspectRatio)}`);
   }
   return `${width}x${height}`;
 }
 
-function normalizePresetSize(value: unknown, presets: readonly string[]): string {
-  const size = String(value || '2K').trim().toUpperCase();
-  if ((presets as readonly string[]).includes(size)) return size;
-  throw new Error(`ark Seedream size must be one of: ${presets.join(', ')}`);
+/** `1/16` → `1:16`，`16` → `16:1`（只用于错误文案）。 */
+function formatRatio(value: number): string {
+  return value >= 1 ? `${value}:1` : `1:${Math.round(1 / value)}`;
+}
+
+function normalizePresetSize(value: unknown, preset: SeedreamSizePreset): string {
+  const size = String(value || preset.defaultResolution).trim().toUpperCase();
+  if (preset.resolutions.includes(size)) return size;
+  throw new Error(`ark Seedream size must be one of: ${preset.resolutions.join(', ')}`);
 }
 
 function normalizeEnum<T extends string>(value: unknown, allowed: readonly T[], field: string): T {
