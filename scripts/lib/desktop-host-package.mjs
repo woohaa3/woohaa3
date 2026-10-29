@@ -58,10 +58,13 @@ export function attachRuntimePackage(source,target,bundleRoot,state){const colle
 export function assertPortableTree(root){root=fs.realpathSync(root);const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
  const file=path.join(dir,entry.name);if(entry.isSymbolicLink()){const real=fs.realpathSync(file);if(!real.startsWith(root+path.sep)&&real!==root)throw new Error(`产物链接指向外部：${file}`);}else if(entry.isDirectory())walk(file);
  }};walk(root);}
-export function standaloneBundleConfig({resourceRoot,node,endpoint=null,publicKey=null,platform=process.platform}) {
- if(Boolean(endpoint)!==Boolean(publicKey))throw new Error('更新 CDN endpoint 与公钥必须一起配置');
+export function standaloneBundleConfig({resourceRoot,node,endpoint=null,publicKey=null,github=null,platform=process.platform}) {
+ if(endpoint&&github)throw new Error('更新通道只能二选一：endpoint 或 GitHub Release');
+ const updater=Boolean(endpoint||github);
+ if(updater!==Boolean(publicKey))throw new Error('更新通道（endpoint 或 GitHub Release）与公钥必须一起配置');
  if(endpoint&&new URL(endpoint).protocol!=='https:')throw new Error('更新 CDN 必须为 HTTPS');
- return {plugins:{updater:{pubkey:publicKey??''}},bundle:{externalBin:[node.replace(/-(?:aarch64-apple-darwin|x86_64-pc-windows-msvc)(?:\.exe)?$/,'')],resources:{},createUpdaterArtifacts:Boolean(endpoint),...(platform==='win32'?{icon:['icons/icon.ico'],windows:{nsis:{installMode:'currentUser'},webviewInstallMode:{type:'downloadBootstrapper',silent:true}}}:{})}};
+ if(github&&!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(github.repo??'')))throw new Error('GitHub 更新通道必须提供 owner/name 仓库');
+ return {plugins:{updater:{pubkey:publicKey??''}},bundle:{externalBin:[node.replace(/-(?:aarch64-apple-darwin|x86_64-pc-windows-msvc)(?:\.exe)?$/,'')],resources:{},createUpdaterArtifacts:updater,...(platform==='win32'?{icon:['icons/icon.ico'],windows:{nsis:{installMode:'currentUser'},webviewInstallMode:{type:'downloadBootstrapper',silent:true}}}:{})}};
 }
 
 const TAR_BLOCK=512;

@@ -17,6 +17,7 @@
 import { readSourceIdentity } from "./lib/source-identity.mjs";
 import { prepareDesktopHost } from "./prepare-desktop-host.mjs";
 import { standaloneBundleConfig, createHostArchive, nodeArtifact, prepareStartupFrontend } from "./lib/desktop-host-package.mjs";
+import { updateChannelFromEnv } from "./lib/desktop-release-index.mjs";
 import { spawnSync } from "node:child_process";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
 import { createRequire } from "node:module";
@@ -75,6 +76,13 @@ const usage = `Tauri 桌面发行打包（未签名）
   --release-id <id>    覆盖 release 标识
   --dry-run            只打印将执行的步骤与配置，不写盘、不编译
   --help               显示帮助
+
+环境变量（可选，决定 App 是否自动更新）：
+  WOOHAA_DESKTOP_UPDATE_ENDPOINT     自托管 HTTPS 更新索引地址
+  WOOHAA_DESKTOP_UPDATE_GITHUB_REPO  改用 GitHub Release（owner/name），与上一项二选一
+  WOOHAA_DESKTOP_UPDATE_GITHUB_RELEASE  指定 tag（预发布通道），缺省 latest
+  WOOHAA_DESKTOP_UPDATE_GITHUB_ASSET    覆盖索引资产名，缺省 latest-<平台键>.json
+  WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY   更新签名公钥；配置通道时必须一起给
 `;
 
 function fail(message) {
@@ -253,17 +261,20 @@ async function runBuild(options) {
   if (!options.dryRun && !options.uiUrl) {
     buildNativeTools();
     const prepared = await prepareDesktopHost({ frontend: frontendDist, build: resolvedReleaseId, runtimeReleaseVersion: options.debug ? undefined : (options.version ?? config.version), ...(process.env.WOOHAA_DESKTOP_HOST_STAGING ? { output: path.resolve(process.env.WOOHAA_DESKTOP_HOST_STAGING) } : {}) });
-    const endpoint = process.env.WOOHAA_DESKTOP_UPDATE_ENDPOINT ?? null;
-    const publicKey = process.env.WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY ?? null;
-    const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey });
+    // 更新通道：自托管 CDN endpoint 或 GitHub Release 二选一（环境变量解析在纯函数里完成）。
+    const channel = updateChannelFromEnv(process.env, { platform, arch });
+    const endpoint = channel?.channel.kind === "endpoint" ? channel.channel.endpoint : null;
+    const github = channel?.channel.kind === "github" ? { repo: channel.channel.repo, asset: channel.channel.assetName, release: channel.channel.release } : null;
+    const publicKey = channel?.updater.publicKey ?? null;
+    const standalone = standaloneBundleConfig({ ...prepared, endpoint, publicKey, github });
     override.build={...override.build,frontendDist:prepareStartupFrontend(frontendDist,path.join(path.dirname(defaultsPath),"startup-frontend"))};
     override.plugins = standalone.plugins;
     const hostArchive = createHostArchive(prepared.resourceRoot, path.join(path.dirname(defaultsPath), "desktop-host.tar.gz"));
     const runtimeFile = path.join(path.dirname(defaultsPath), "desktop-runtime.json");
     fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
-    fs.writeFileSync(runtimeFile, JSON.stringify({ hostArchiveSha256: hostArchive.sha256, nodeVersion: prepared.nodeVersion, ...(endpoint ? { updater: { endpoint, publicKey } } : {}) }));
+    fs.writeFileSync(runtimeFile, JSON.stringify({ hostArchiveSha256: hostArchive.sha256, nodeVersion: prepared.nodeVersion, ...(channel ? { updater: channel.updater } : {}) }));
     override.bundle = { ...override.bundle, ...standalone.bundle, resources: { ...override.bundle?.resources, ...standalone.bundle.resources, [runtimeFile]: "desktop-runtime.json", [hostArchive.path]: "desktop-host.tar.gz", [path.join(root, "bevy/assets/")]: "native-assets/" } };
-    hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: endpoint ? "configured" : "unconfigured" };
+    hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: channel ? (channel.channel.kind === "github" ? "github" : "configured") : "unconfigured" };
   }
   const args = tauriBuildArgs({ options, kinds: kindList, config: override });
 
@@ -275,6 +286,8 @@ async function runBuild(options) {
     console.log(`  前端 dist：${relative(frontendDist)}`);
     console.log(`  bundle 种类：${kindList.length > 0 ? kindList.join(", ") : "（--no-bundle）"}`);
     console.log(`  默认值资源：${relative(defaultsPath)}`);
+    const dryChannel = updateChannelFromEnv(process.env, { platform, arch });
+    console.log(`  更新通道：${dryChannel ? `${dryChannel.channel.kind} → ${dryChannel.channel.endpoint}` : "未配置（构建出的 App 不会自动更新）"}`);
     console.log(`  ${JSON.stringify(buildDefaultsDocument({ uiUrl: options.uiUrl }), null, 2).split("\n").join("\n  ")}`);
     console.log(`  manifest：${relative(outDirPath(resolved))}/manifest.json`);
     console.log(`  $ ${formatCommand(process.execPath, [cli.entry, ...args])}   (cwd=${relative(desktopDir)})`);

@@ -52,6 +52,7 @@ pub const fn supports_desktop_host() -> bool {
 
 pub mod desktop_updates;
 pub mod local_host;
+pub mod update_channel;
 
 pub mod diagnostic_watchdog;
 pub mod diagnostics;

@@ -54,3 +54,13 @@ test('standalone Tauri frontend embeds only self-contained startup HTML',()=>{
  fs.writeFileSync(path.join(source,'desktop-startup.html'),'<script src="bundle.js"></script>');assert.throws(()=>prepareStartupFrontend(source,path.join(root,'other')),/自包含/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('GitHub Release 更新通道同样只要求公钥与通道成对配置',()=>{
+ const base={resourceRoot:'/build/host',node:'/build/woohaa-node-aarch64-apple-darwin'};
+ assert.throws(()=>standaloneBundleConfig({...base,github:{repo:'acme/woohaa'}}),/公钥/);
+ assert.throws(()=>standaloneBundleConfig({...base,endpoint:'https://cdn.example/latest.json',github:{repo:'acme/woohaa'},publicKey:'key'}),/二选一/);
+ assert.throws(()=>standaloneBundleConfig({...base,github:{repo:'acme'},publicKey:'key'}),/owner\/name/);
+ const config=standaloneBundleConfig({...base,github:{repo:'acme/woohaa'},publicKey:'key'});
+ assert.equal(config.bundle.createUpdaterArtifacts,true);
+ assert.equal(config.plugins.updater.pubkey,'key');
+});
