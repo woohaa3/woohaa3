@@ -9,7 +9,7 @@ import { createFilmSetGroupMarker } from "@woohaa3/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { defaultFilmSetConversionPrompt } from "@woohaa3/contracts";
 import { createEmptyWoohaa3ServerCanvas, createModel3DNodeData, filmSetConversionNodeTaskStatus, model3DNodeDataFields, readFilmSetConversionNodeStatus, type FilmSetConversionModelCandidate, type ServerCanvas } from "@woohaa3/contracts";
-import { resolveFilmSetConversionAvailability, filmSetConversionNeedsSettings } from "../src/authoring/browser/film-set-conversion/view.js";
+import { resolveFilmSetConversionAvailability, filmSetConversionNeedsSettings, filmSetConversionSourceInGroup } from "../src/authoring/browser/film-set-conversion/view.js";
 import { resolveConversionNodeStatuses } from "../src/authoring/browser/film-set-conversion/presentation.js";
 import {
   describeFilmSetConversionFailure,
@@ -73,7 +73,18 @@ describe("转换可用性门禁（任务 3.4/3.9）", () => {
     expect(resolveFilmSetConversionAvailability({ canvas, nodeId: "m", nodeType: "model3d", writable: true })).toEqual({ available: true });
   });
 
-  it("图片/视频使用创建弹窗，3D 直接复制", () => {
+  it("已在任意组内的节点不可转换（三个入口都隐藏，不支持嵌套 group）", () => {
+    const canvas = canvasWith(
+      [{ id: "g", type: "group", position: { x: 0, y: 0 } }, { id: "img", type: "image", parentId: "g", position: { x: 40, y: 40 } }],
+      { img: { outputAssetId: "asset-image" } },
+      [imageAsset]
+    );
+    expect(resolveFilmSetConversionAvailability({ canvas, nodeId: "img", nodeType: "image", writable: true })).toEqual({ available: false, reason: "已在组内的节点不能创建片场" });
+    expect(filmSetConversionSourceInGroup(canvas, "img")).toBe(true);
+    expect(filmSetConversionSourceInGroup(canvas, "g")).toBe(false);
+  });
+
+  it("图片/视频使用创建弹窗，3D 直接包组", () => {
     expect(filmSetConversionNeedsSettings("image")).toBe(true);
     expect(filmSetConversionNeedsSettings("video")).toBe(true);
     expect(filmSetConversionNeedsSettings("model3d")).toBe(false);

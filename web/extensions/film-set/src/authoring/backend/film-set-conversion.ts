@@ -4,8 +4,8 @@ import { ownsShotMedia } from "../../state/shared/managed-shot-media.js";
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 1.1–1.4 / design D3/D4/D5）。
  *
  * 统一处理三类来源：
- * - **model3d**：服务端权威复制为自包含片场（保留内部 part ID、placement 与镜头映射），
- *   不调用任何 LLM，也不要求账号/模型配置；
+ * - **model3d**：服务端权威地把来源卡片**原地包进**自包含片场 group（保留内部 part ID、
+ *   placement 与镜头映射），不复制卡片，也不调用任何 LLM，不要求账号/模型配置；
  * - **image/video**：把冻结来源交给可选生成端口（Section 2 的 adapter）产生候选，经完整校验后
  *   同一权威事务一次创建；失败绝不遗留空片场或中间节点。
  *
@@ -32,6 +32,7 @@ import {
   FILM_SET_CONVERSION_INSTRUCTION_VERSION,
   FILM_SET_CONVERSION_NODE_STATUS_FIELD,
   planFilmSetConversionPlacement,
+  planFilmSetConversionWrap,
   readFilmSetConversionSource,
   readFilmSetConversionNodeStatus,
   readModelCameras,
@@ -443,20 +444,20 @@ export class FilmSetConversionService {
     return { ok: false, code: "unknown-result", message: "转换结果无法确认，请核对原请求后重试" };
   }
 
-  /** model3d 权威复制：保留 part ID/placement，映射持久镜头，原子创建独立片场。 */
+  /** model3d：把来源卡片原地包进片场 group（保留 part ID/placement，映射持久镜头），原子完成。 */
   private async runModelCopy(
     record: FilmSetConversionRecord,
     room: CanvasAuthority,
     canvas: ServerCanvas
   ): Promise<void> {
     await this.updateRunning(record, { step: "prepare-source" });
-    // design D4：3D 在「开始复制」时先创建占位片场节点，随后原地填入（成功即已交付）。
+    // design D4：3D 在开始时先创建占位片场 group（包住来源卡片），随后原地填入内容。
     if (!(await this.ensurePlaceholder(record, room))) return;
     const node = canvas.document.nodes.find((entry) => entry.id === record.sourceNodeId);
     const data = canvas.nodeData[record.sourceNodeId] as CanvasNodeData | undefined;
     const decoded = scriptModel3DNodeData(data);
     if (!node || !decoded) {
-      await this.fail(record, "unsupported-source", "文件模型无法复制为片场", false);
+      await this.fail(record, "unsupported-source", "文件模型无法转为片场，请使用脚本模型", false);
       return;
     }
     await this.updateRunning(record, { step: "analyze-content" });
@@ -688,9 +689,11 @@ export class FilmSetConversionService {
   /**
    * 提交/复制开始时创建占位片场节点（design D4）。
    *
-   * 在同一权威事务里于源节点旁的空位创建 `group + filmSetGroup` 目标节点，
-   * 初始为空内容并携带 running 状态（`prepare-source`）。命令 id 与「原地填入」分离：重复提交
-   * 命中 durable 回执不会误跳过填入。
+   * 在同一权威事务里创建 `group + filmSetGroup` 目标节点，初始为空内容并携带 running 状态
+   * （`prepare-source`）。命令 id 与「原地填入」分离：重复提交命中 durable 回执不会误跳过填入。
+   *
+   * - **3D**：group 直接**包住来源卡片**（`node.update` 改父级与局部坐标），不复制节点；
+   * - **图片/视频**：group 落在源节点旁的空位，来源内容复制为成员卡片。
    *
    * 来源节点在权威提交前已删除（删除/提交竞态）时返回 `false`（不创建占位）；占位节点已存在但
    * 来源已删除时移除占位并失败（不保留占位）。
@@ -731,14 +734,16 @@ export class FilmSetConversionService {
         if (ownsShotMedia(live, record.sourceNodeId)) return { ok: false, code: "unsupported-source", message: "片场镜头媒体不能再次创建片场" };
         const source = readFilmSetConversionSource({ canvas: live, sourceNodeId: record.sourceNodeId });
         if (!source.ok) return { ok: false, code: source.code, message: source.message };
-        const position = planFilmSetConversionPlacement(live, record.sourceNodeId);
+        // 3D 原地包组：group 贴合来源卡片，来源成为成员（不复制）。图片/视频仍取旁边空位。
+        const wrap = record.sourceKind === "model3d" ? planFilmSetConversionWrap(live, record.sourceNodeId) : null;
+        const position = wrap?.group ?? planFilmSetConversionPlacement(live, record.sourceNodeId);
         if (!position) return { ok: false, code: "source-not-found", message: "来源节点已删除，无法放置片场" };
-        const sourceNodeId = `${record.targetNodeId}-source`;
+        const memberNodeId = wrap ? record.sourceNodeId : `${record.targetNodeId}-source`;
         const sourceKey = sourceContentKey(live, record.sourceNodeId)
           ?? `source:${record.sourceNodeId}`;
         const marker = makeFilmSetGroupMarker({ sceneBindings: [{
           bindingId: `source-${record.sourceNodeId}`,
-          sourceNodeId,
+          sourceNodeId: memberNodeId,
           kind: record.sourceKind,
           transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 },
           visibility: true,
@@ -748,7 +753,12 @@ export class FilmSetConversionService {
           ok: true,
           batch: buildBatch(record.canvasId, commandId, this.actorId, live.revision, [{
             type: "node.add",
-            node: { id: record.targetNodeId, type: "group", position },
+            node: {
+              id: record.targetNodeId,
+              type: "group",
+              position,
+              ...(wrap ? { width: wrap.width, height: wrap.height } : {})
+            },
             nodeData: {
               title: filmSetConversionTitle(record.title),
               filmSetGroup: marker,
@@ -758,11 +768,16 @@ export class FilmSetConversionService {
               },
               ...nodeStatusFields(status)
               } as CanvasNodeData
-          }, {
+          }, ...(wrap ? [{
+            type: "node.update",
+            nodeId: record.sourceNodeId,
+            parentId: record.targetNodeId,
+            position: wrap.member
+          } as CanvasCommand] : [{
             type: "node.add",
-            node: { id: sourceNodeId, type: record.sourceKind, parentId: record.targetNodeId, position: { x: 0, y: 0 } },
+            node: { id: memberNodeId, type: record.sourceKind, parentId: record.targetNodeId, position: { x: 0, y: 0 } },
             nodeData: structuredClone(live.nodeData[record.sourceNodeId] ?? {}) as CanvasNodeData
-          }])
+          } as CanvasCommand])])
         };
       }
     });
@@ -1035,7 +1050,7 @@ export function conversionCommandId(canvasId: string, requestId: string): string
 /**
  * 占位片场节点创建命令 id（design D4）。
  *
- * 与「原地填入内容」的 {@link conversionCommandId} **分离**：占位创建在提交/开始复制时先行完成，
+ * 与「原地填入内容」的 {@link conversionCommandId} **分离**：占位创建在提交/开始包组时先行完成，
  * 成功时再用另一命令在**同一节点身份**上 patch 完整内容，避免 durable 回执把「创建」误当成
  * 「已填入」而跳过写入。
  */
@@ -1215,11 +1230,13 @@ function toStatusWithoutExecution(record: FilmSetConversionRecord): FilmSetConve
 }
 
 /**
- * model3d 复制候选（design D3）。
+ * model3d 片场候选（design D3）。
  *
- * 一个 model item 保留源模型完整定义（内部 part ID、placement 由快照携带）；持久镜头映射为
+ * 一个 model item 保留来源模型完整定义（内部 part ID、placement 由快照携带）；持久镜头映射为
  * 片场片段镜头能力（每个镜头一个静态片段，默认片段为第一个），首个镜头同时作为 `sceneCamera`。
  * 无持久镜头时使用片场默认构图。无法映射的镜头记入来源 metadata 并明确说明。
+ *
+ * 候选只描述片场场景内容；来源卡片本身不复制——调用方把它原地包进 group 并作为唯一模型绑定。
  */
 export function buildModelCopyCandidate(input: {
   title: string;

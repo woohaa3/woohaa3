@@ -256,7 +256,7 @@ export function createFilmSetConversionController(options: FilmSetConversionCont
       return snapshot;
     },
     /**
-     * 主按钮：图片/视频每次先打开创建弹窗；3D 保持直接复制。
+     * 主按钮：图片/视频每次先打开创建弹窗；3D 直接原地包组（无弹窗）。
      *
      * `requestSettings` 由宿主在命中主按钮时注入（横条模式下宿主持有设置弹窗的唯一渲染器）；
      * 聚焦标题栏等自渲染入口缺省时退回本控制器自己的 `settingsOpen` 瞬态。
@@ -268,7 +268,7 @@ export function createFilmSetConversionController(options: FilmSetConversionCont
       if (!filmSetConversionNeedsSettings(input.nodeType)) {
         const accepted = await submit(entryFor(input.nodeId, input.nodeType), {}, entry.identity ? "new" : "reuse");
         const status = entries.get(input.nodeId)?.status;
-        // 3D 复制在本次点击内完成；立即定位结果，避免结果在视野外或重叠时看起来毫无响应。
+        // 3D 包组在本次点击内完成；立即定位结果，避免结果在视野外或重叠时看起来毫无响应。
         // 图片/视频的后台生成仍不抢焦点；旧 owner 的迟到回执由 submit 拒绝。
         if (accepted && status?.status === "completed") options.openFilmSet?.(status.targetNodeId);
         return;

@@ -27,7 +27,9 @@ export function FilmSetConversionAction({ nodeId, nodeType, writable, deps }: Fi
   const availability = resolveFilmSetConversionAvailability({ canvas, nodeId, nodeType, writable });
   return <Button size="sm" tone="primary" icon={<FilmIcon />}
     disabled={!availability.available}
-    title={availability.available ? "保留原素材，创建独立片场" : availability.reason}
+    title={availability.available
+      ? nodeType === "model3d" ? "把当前模型原地包进片场组，不复制节点" : "保留原素材，创建独立片场"
+      : availability.reason}
     data-testid={`film-set-conversion-start:${nodeId}`}
     onClick={() => { void deps.controller.activate({ nodeId, nodeType, writable }); }}>创建片场</Button>;
 }

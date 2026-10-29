@@ -200,8 +200,8 @@ function validCandidate(title: string) {
   };
 }
 
-describe("FilmSetConversionService：3D 直接复制（任务 1.4 / D3）", () => {
-  it("复制为自包含片场，保留 model item 与内部 part ID，且不调用任何生成端口", async () => {
+describe("FilmSetConversionService：3D 原地包组（任务 1.4 / D3）", () => {
+  it("把来源卡片原地包进片场 group，不复制节点，且不调用任何生成端口", async () => {
     const room = await readyRoom("c-3d", [{ id: "model-src", type: "model3d", data: model3dData() }]);
     let generatorCalls = 0;
     const service = serviceFor(room, {
@@ -219,14 +219,46 @@ describe("FilmSetConversionService：3D 直接复制（任务 1.4 / D3）", () =
     const marker = readFilmSetGroupMarker(target!.data);
     expect(marker).not.toBeNull();
     const binding = marker!.sceneBindings.find(entry => entry.kind === "model3d")!;
+    // 不复制：绑定直接引用原卡片，画布里也没有额外的副本节点。
+    expect(binding.sourceNodeId).toBe("model-src");
+    expect(filmSetNode(room, "film-target-source")).toBeNull();
     const source = decodeModelDefinition(target!.canvas.nodeData[binding.sourceNodeId]);
     expect(source.ok).toBe(true);
     if (!source.ok) throw new Error(source.reason);
     expect(source.value.modelScript).toBe(SCRIPT);
     expect(source.value.placement).toEqual({ offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 });
     expect(target!.data?.filmSetContent).toBeUndefined();
-    expect(filmSetNode(room, "model-src")!.node.type).toBe("model3d");
+    const sourceNode = filmSetNode(room, "model-src")!;
+    expect(sourceNode.node.type).toBe("model3d");
+    // 来源成为片场 group 的成员，且 group 贴合来源卡片的原位置。
+    expect(sourceNode.node.parentId).toBe("film-target");
+    expect(sourceNode.node.position).toEqual({ x: 40, y: 40 });
+    expect(target!.node.position).toEqual({ x: -40, y: -40 });
+    expect(target!.node.width).toBeGreaterThan(sourceNode.node.width ?? 0);
+    expect(target!.node.height).toBeGreaterThan(sourceNode.node.height ?? 0);
     expect(target!.data?.origin).toMatchObject({ conversion: { requestId: "req-1", sourceKind: "model3d" } });
+  });
+
+  it("已在任意组内的节点拒绝创建片场（不支持嵌套 group）", async () => {
+    const room = await readyRoom("c-3d-grouped", [{ id: "model-src", type: "model3d", data: model3dData() }]);
+    const exported = room.exportCanvas();
+    if (!exported.ok) throw new Error("export");
+    const grouped = await room.submit({
+      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+      canvasId: "c-3d-grouped",
+      actorId: "test",
+      commandId: "group-src",
+      baseRevision: exported.canvas.revision,
+      commands: [
+        { type: "node.add", node: { id: "outer", type: "group", position: { x: -40, y: -40 } } },
+        { type: "node.update", nodeId: "model-src", parentId: "outer", position: { x: 40, y: 40 } }
+      ]
+    } as never);
+    expect(grouped.ok).toBe(true);
+    const before = room.exportCanvas();
+    const outcome = await serviceFor(room).submit(request("c-3d-grouped"));
+    expect(outcome).toMatchObject({ ok: false, code: "unsupported-source" });
+    expect(room.exportCanvas()).toEqual(before);
   });
 
   it("持久镜头映射为片场片段镜头；无法映射的附加镜头在来源记录说明", async () => {
@@ -250,7 +282,7 @@ describe("FilmSetConversionService：3D 直接复制（任务 1.4 / D3）", () =
     expect(target.data?.origin).toMatchObject({ conversion: {} });
   });
 
-  it("复制后编辑/删除源模型不影响目标；目标编辑不回写源", async () => {
+  it("删除来源卡片后片场 group 与其既有内容保留（绑定缺失不丢内容）", async () => {
     const room = await readyRoom("c-3d-indep", [{ id: "model-src", type: "model3d", data: model3dData() }]);
     await serviceFor(room).submit(request("c-3d-indep"));
     const before = filmSetNode(room, "film-target")!;
