@@ -12,11 +12,11 @@ import { effectiveCanvasNodeSize } from "./node-dimensions.js";
 import { NODE_TYPE_TO_TASK_KIND, type CanvasTaskKind } from "../task/dto.js";
 import type { CanvasNodeData } from "./domain/types.js";
 import type { CanvasNodeTaskStatus } from "../task/dto.js";
-import { canonicalFilmSetFields } from "./film-set-clip-view.js";
-import { createFilmSetSnapshot, createModel3DNodeData, model3DNodeDataFields } from "./animation-snapshot.js";
+import { createFilmSetGroupMarker, isFilmSetGroupNode } from "./film-set-group.js";
+import { createModel3DNodeData, model3DNodeDataFields, defaultInitialShotCamera } from "./animation-snapshot.js";
 import { MODEL_SCRIPT_V2_VERSION } from "./model-script.js";
 import { isModelAuthoringNodeType } from "./domain/core/input-role.js";
-import { COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, isFilmSetNode } from "./domain/core/composite-asset-identity.js";
+import { COMPOSITE_ASSET_NODE_TYPE, isFilmSetNode } from "./domain/core/composite-asset-identity.js";
 
 /**
  * 片场（复合资产 + `extensionId="film-set"`）展示名事实源
@@ -70,7 +70,7 @@ export const AGENT_NODE_DESCRIPTORS: readonly AgentNodeDescriptor[] = [
   descriptor("text", "text", "文本", { task: true, prompt: true, executable: true, sourceLabel: "文本" }),
   descriptor("image", "image", "图片", { task: true, prompt: true, executable: true, sourceLabel: "图片" }),
   descriptor("model", "model3d", "模型", { prompt: true, executable: false, sourceLabel: "模型" }),
-  descriptor("film-set", COMPOSITE_ASSET_NODE_TYPE, "片场", { prompt: false, executable: false, sourceLabel: "片场" }),
+  descriptor("film-set", "group", "片场", { prompt: false, executable: false, sourceLabel: "片场" }),
   descriptor("video", "video", "视频", { task: true, prompt: true, executable: true, sourceLabel: "" }),
   descriptor("audio", "audio", "音频", { task: true, prompt: true, executable: true, sourceLabel: "" })
 ];
@@ -105,6 +105,7 @@ export function findAgentNodeDescriptor(kind: string): AgentNodeDescriptor | nul
 }
 
 export function agentDescriptorForCanonicalType(canonicalType: string, nodeData?: unknown): AgentNodeDescriptor | null {
+  if (canonicalType === "group") return isFilmSetGroupNode({ type: canonicalType }, nodeData) ? findAgentNodeDescriptor("film-set") : null;
   // composite-asset 还承载其它扩展；只有明确的 film-set 身份才投影为片场语义，未知/其它业务保持模型兼容。
   if (canonicalType === COMPOSITE_ASSET_NODE_TYPE) {
     return isFilmSetNode(canonicalType, nodeData) ? findAgentNodeDescriptor("film-set") : findAgentNodeDescriptor("model");
@@ -120,6 +121,7 @@ export function agentDescriptorForCanonicalType(canonicalType: string, nodeData?
  * （canonical model3d）携带合法占位模型，不预填任务字段。
  */
 export function defaultAgentNodeData(kind: string): CanvasNodeData | undefined {
+  if (kind === "film-set") return { title: DIRECTOR_STUDIO_DEFAULT_TITLE, filmSetGroup: createFilmSetGroupMarker({ cameras: [{ id: "scene-camera", ...defaultInitialShotCamera() }] }) };
   const descriptor = findAgentNodeDescriptor(kind);
   if (descriptor?.canonicalType === "model3d" || descriptor?.canonicalType === COMPOSITE_ASSET_NODE_TYPE) {
     return defaultSelfContained3DNodeData(descriptor.canonicalType);
@@ -133,13 +135,6 @@ export function defaultSelfContained3DNodeData(nodeType: string): CanvasNodeData
   const model = { modelScript: "", modelScriptVersion: MODEL_SCRIPT_V2_VERSION };
   if (nodeType === "model3d") {
     return model3DNodeDataFields(createModel3DNodeData({ title: "3D 模型", model })) as CanvasNodeData;
-  }
-  // 复合资产类别默认落到片场业务（extensionId="film-set"）；炉体有自己的工厂，不经此路径。
-  // D8：新建片场保持空内容，不注入默认几何。
-  if (nodeType === COMPOSITE_ASSET_NODE_TYPE) {
-    return { extensionId: FILM_SET_EXTENSION_ID, ...canonicalFilmSetFields(createFilmSetSnapshot({
-      title: DIRECTOR_STUDIO_DEFAULT_TITLE, timeline: { duration: 0, loop: false }
-    })) } as CanvasNodeData;
   }
   return undefined;
 }

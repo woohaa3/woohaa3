@@ -50,6 +50,8 @@ function isPlannable(command: CanvasCommand): boolean {
     case "canvas.setTitle":
     case "filmSet.itemPatch":
     case "filmSet.clipPatch":
+    case "filmSetGroup.bindingPatch":
+    case "filmSetGroup.ungroup":
       return true;
     default:
       return false;

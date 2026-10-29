@@ -59,7 +59,7 @@ export class NodeHistoryThumbnailJob {
     if (entry.kind !== "model") return { ok: false, code: "not-a-model-entry", message: "历史条目不是模型版本" };
     const payload = entry.payload as NodeHistoryModelPayload;
     if (payload.animation) {
-      if (payload.animation.schemaVersion !== 3) return { ok: false, code: "invalid-history-definition", message: "历史片场尚未完成迁移" };
+      if (payload.animation.schemaVersion !== 3 && payload.animation.schemaVersion !== 4) return { ok: false, code: "invalid-history-definition", message: "历史片场尚未完成迁移" };
       if (!this.prepareCompositeHistory) return { ok: false, code: "composite-history-unavailable", message: "复合资产历史渲染不可用" };
       try {
         const prepared = await this.prepareCompositeHistory({ canvasId: input.canvasId, nodeId: input.nodeId, payload });

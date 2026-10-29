@@ -44,21 +44,31 @@ fn request(base: u32, rows: &[(&str, f32, f32)]) -> PositionUpdateRequest {
 #[test]
 fn repeated_diamond_positions_match_full_scope_without_accumulating_delta() {
     let mut scene = scene();
-    scene.nodes[5].composite_asset = Some(serde_json::from_value(serde_json::json!({
-        "x":1010,"y":15,"width":280,"height":170,"scopeShape":"isometric-diamond",
-        "scopeGround":{"cx":1150,"cy":120,"hx":100,"hz":100}
-    })).unwrap());
+    scene.nodes[5].composite_asset = Some(
+        serde_json::from_value(serde_json::json!({
+            "x":1010,"y":15,"width":280,"height":170,"scopeShape":"isometric-diamond",
+            "scopeGround":{"cx":1150,"cy":120,"hx":100,"hz":100}
+        }))
+        .unwrap(),
+    );
     let mut snapshot = build_snapshot(&scene, 1);
     for i in [1, 2, 3, 4, 5, 4, 3, 2, 1, 0] {
-        let p = NodePosition { id: "film".into(), x: 1000. + i as f32 * 8., y: i as f32 * 6. };
+        let p = NodePosition {
+            id: "film".into(),
+            x: 1000. + i as f32 * 8.,
+            y: i as f32 * 6.,
+        };
         apply(&mut snapshot, &[p.clone()]).unwrap();
         let node = &mut scene.nodes[5];
         let (dx, dy) = (p.x - node.x, p.y - node.y);
         let scope = node.composite_asset.as_mut().unwrap();
-        scope.x += dx; scope.y += dy;
+        scope.x += dx;
+        scope.y += dy;
         let ground = scope.scope_ground.as_mut().unwrap();
-        ground.cx += dx; ground.cy += dy;
-        node.x = p.x; node.y = p.y;
+        ground.cx += dx;
+        ground.cy += dy;
+        node.x = p.x;
+        node.y = p.y;
         let expected = build_snapshot(&scene, 1);
         assert_eq!(snapshot.nodes[5].bounds, expected.nodes[5].bounds);
         assert_eq!(snapshot.nodes[5].scope, expected.nodes[5].scope);

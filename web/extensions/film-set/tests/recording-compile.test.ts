@@ -574,3 +574,29 @@ describe("导出 profile 与镜头背景（D6/D7）", () => {
 
 void (null as unknown as typeof recordingVideoSize);
 void (null as unknown as CanvasNodeData);
+
+import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { createFilmSetRecordingRuntime } from "../src/integration/backend/recording-runtime.js";
+
+it("native group recording freezes live cards once and the next capture reads their new version", async () => {
+  const fixture = makeAnimation();
+  const legacy = createEmptyWoohaa3ServerCanvas("c1");
+  legacy.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 }, width: 320, height: 240 });
+  legacy.nodeData.film = fixture.nodeData;
+  const canvas = migrateFilmSetFixture(legacy, "film");
+  const runtime = createFilmSetRecordingRuntime();
+  const { request } = requestFor(fixture);
+  const input = { ...request, sourceIncarnation: "group-1", canvas: { revision: 7, sourceCanvas: canvas, nodeData: canvas.nodeData.film, assets: [], node: { width: 320, height: 240 } } };
+  expect(runtime.matches("group", canvas.nodeData.film)).toBe(true);
+  const first = await runtime.freeze(input);
+  expect(first.ok).toBe(true); if (!first.ok) throw Error(first.message);
+  const frozen = structuredClone(first.snapshot);
+  const source = canvas.nodeData.film.filmSetGroup!.sceneBindings[0]!.sourceNodeId;
+  canvas.nodeData[source].modelScript = "scene.box({id:'body',size:[3,2,1]});";
+  expect(first.snapshot).toEqual(frozen);
+  const second = await runtime.freeze({ ...input, requestId: "req-2" });
+  expect(second.ok).toBe(true); if (!second.ok) throw Error(second.message);
+  expect(second.snapshot.sceneIrJson).not.toBe(first.snapshot.sceneIrJson);
+  expect(recordingSnapshotHash(second.snapshot)).not.toBe(recordingSnapshotHash(first.snapshot));
+});

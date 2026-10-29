@@ -6,7 +6,10 @@
 //! - 退出后移动对象再重新聚焦，从最新接受场景重建最新坐标（不复活旧基线）；
 //! - 跨目标读取不返回旧目标数据（design D2）。
 
-use super::{FilmSetItemCandidate, accept_items, clear_items, current_candidates, item_bounds_query_json, work};
+use super::{
+    FilmSetItemCandidate, accept_items, clear_items, current_candidates, item_bounds_query_json,
+    work,
+};
 use crate::canvas_query::interaction::{accept_positions, accept_scene, point_query};
 use crate::protocol::{CANVAS_POSITION_UPDATE_VERSION, NodePosition, PositionUpdateRequest, Scene};
 
@@ -72,7 +75,11 @@ fn refocusing_after_overview_move_rebuilds_latest_coordinates() {
     clear_items();
     let base = accept_scene(&film_set_scene("film"));
     crate::canvas_query::model_pick::accept_models(Vec::new(), base, Default::default());
-    accept_items(Some("film".into()), vec![candidate("film", "obj", [-10.; 3], [10.; 3])], 0);
+    accept_items(
+        Some("film".into()),
+        vec![candidate("film", "obj", [-10.; 3], [10.; 3])],
+        0,
+    );
 
     // 退出到总览：关闭状态，旧候选清除。
     accept_items(None, Vec::new(), 0);
@@ -95,10 +102,18 @@ fn refocusing_after_overview_move_rebuilds_latest_coordinates() {
 #[test]
 fn cross_target_reads_never_return_other_or_stale_items() {
     clear_items();
-    accept_items(Some("a".into()), vec![candidate("a", "a-obj", [-1.; 3], [1.; 3])], 0);
+    accept_items(
+        Some("a".into()),
+        vec![candidate("a", "a-obj", [-1.; 3], [1.; 3])],
+        0,
+    );
     assert!(item_bounds_query_json("{\"nodeId\":\"a\"}").contains("\"itemId\":\"a-obj\""));
     assert!(item_bounds_query_json("{\"nodeId\":\"b\"}").contains("\"available\":false"));
-    accept_items(Some("b".into()), vec![candidate("b", "b-obj", [-2.; 3], [2.; 3])], 0);
+    accept_items(
+        Some("b".into()),
+        vec![candidate("b", "b-obj", [-2.; 3], [2.; 3])],
+        0,
+    );
     assert!(item_bounds_query_json("{\"nodeId\":\"a\"}").contains("\"available\":false"));
     let b = item_bounds_query_json("{\"nodeId\":\"b\"}");
     assert!(b.contains("\"itemId\":\"b-obj\""), "{b}");

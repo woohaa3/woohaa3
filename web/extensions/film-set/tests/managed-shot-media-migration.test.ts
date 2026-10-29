@@ -25,7 +25,9 @@ describe("extension-owned explicit managed media migration", () => {
     const migrated = filmSetManagedMediaMigration.migrate(canvas);
     expect(migrated.changed).toBe(true);
     expect(canvas).toEqual(original);
-    expect(migrated.canvas.document.nodes.find(n => n.id === id)).toEqual({ ...original.document.nodes.find(n => n.id === id), type: "video" });
+    // 旧片场嵌套在普通 group 里时，转换后它是顶层 group（规范文档禁止嵌套 group），受管的
+    // 镜头预览必须跟着提升到顶层并烘焙世界坐标，才能继续与 owner 保持同级。
+    expect(migrated.canvas.document.nodes.find(n => n.id === id)).toEqual({ ...original.document.nodes.find(n => n.id === id), type: "video", parentId: undefined, position: { x: 580, y: 260 } });
     expect(migrated.canvas.document.edges).toEqual(original.document.edges);
     expect(migrated.canvas.nodeData.target).toEqual(original.nodeData.target);
     expect(migrated.canvas.nodeData.independent).toEqual(original.nodeData.independent);

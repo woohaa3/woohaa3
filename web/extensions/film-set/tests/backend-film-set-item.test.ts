@@ -1,3 +1,4 @@
+import { migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection } from "@woohaa3/contracts";
 /**
  * 片场对象级权威写入服务测试
  * （change: 2026-10-09-add-film-set-object-motion-and-editing，任务 2.3/7.1）。
@@ -10,8 +11,7 @@ import {
   createModel3DNodeData,
   filmSetItemById,
   type CanvasNodeData,
-  type ServerCanvas,
-  type FilmSetContent
+  type ServerCanvas
 } from "@woohaa3/contracts";
 import { InMemoryYjsDocumentRepository } from "../../../services/canvas-service/src/sync/index.js";
 import { CanvasRoom } from "../../../services/canvas-service/src/sync/room.js";
@@ -56,7 +56,9 @@ async function readyRoom(withItem = true): Promise<CanvasRoom> {
     nodeData: { film: filmSetNodeDataFields(snapshot) as CanvasNodeData },
     assets: []
   };
-  await room.initialize({ canvas, roomEpoch: "epoch-1", createdAt: NOW });
+  const migrated = migrateLegacyFilmSetToGroup(canvas, "film", { commandId: "fixture", groupId: "film" });
+  if (!migrated.ok) throw new Error(migrated.reason);
+  await room.initialize({ canvas: migrated.canvas, roomEpoch: "epoch-1", createdAt: NOW });
   return room;
 }
 
@@ -87,7 +89,7 @@ describe("FilmSetItemService（任务 2.3）", () => {
     expect(retry.ok && retry.itemCount).toBe(first.itemCount);
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export");
-    const content = exported.canvas.nodeData.film.filmSetContent as FilmSetContent;
+    const content = readFilmSetAnimationProjection(exported.canvas, "film")!.filmSetContent;
     expect(filmSetItemById(content, "obj-a")?.localTransform.offset.x).toBe(2);
   });
 
@@ -135,7 +137,7 @@ describe("FilmSetItemService（任务 2.3）", () => {
     expect(second.ok).toBe(true);
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export");
-    const content = exported.canvas.nodeData.film.filmSetContent as FilmSetContent;
+    const content = readFilmSetAnimationProjection(exported.canvas, "film")!.filmSetContent;
     const item = filmSetItemById(content, "obj-a");
     expect(item?.localTransform.offset.x).toBe(2);
     // items-only：静态内容不携带任何对象级 motion/playback（动作只在片段 binding）。

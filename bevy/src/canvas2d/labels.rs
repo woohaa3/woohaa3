@@ -10,7 +10,11 @@
 //!
 //! 生命周期仍必须闭合支持 `0 → 1 → 0 → 1`：集合为空时回收全部槽位，下一次非空重新补建。
 
-use bevy::{prelude::*, sprite::Anchor, text::{LineBreak, TextBounds}};
+use bevy::{
+    prelude::*,
+    sprite::Anchor,
+    text::{LineBreak, TextBounds},
+};
 
 use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
 use crate::canvas2d::Visuals;

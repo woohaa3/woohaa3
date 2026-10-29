@@ -1,3 +1,4 @@
+import { groupBadgeRect } from "./group-badge.js";
 import type { ServerCanvas, Woohaa3CanvasSerializedNode } from "./domain/index.js";
 
 /** 展示状态只折叠后代；结构、成员局部位置及用户设置的展开尺寸始终保留。 */
@@ -23,13 +24,14 @@ export function hiddenByCollapsedGroups(canvas: ServerCanvas): Set<string> {
   return hidden;
 }
 
-/** 固定底边中点，让折叠前后的徽标停在同一位置，方便连续点击。 */
+/** 收起后只占用徽标范围；展开结构矩形保留，用于恢复布局及稳定徽标位置。 */
 export function groupPresentationRect(
   node: Pick<Woohaa3CanvasSerializedNode, "type">,
   collapsed: boolean,
   rect: { x: number; y: number; width: number; height: number },
+  badgeScale = 1,
 ): { x: number; y: number; width: number; height: number } {
   if (node.type !== "group" || !collapsed) return rect;
-  const width = 196, height = 112;
-  return { x: rect.x + (rect.width - width) / 2, y: rect.y + rect.height - height, width, height };
+  const { x, y, width, height } = groupBadgeRect(rect, badgeScale);
+  return { x, y, width, height };
 }

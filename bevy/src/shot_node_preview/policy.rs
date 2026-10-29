@@ -43,15 +43,18 @@ pub(super) struct ResizeDebounce {
 impl ResizeDebounce {
     /// 输入包含内容框宽高、zoom、DPR；同档内的连续滚轮也会延后重建。
     pub(super) fn update(
-        &mut self, input: [f32; 4], requested: UVec2, current: UVec2, now: f64,
+        &mut self,
+        input: [f32; 4],
+        requested: UVec2,
+        current: UVec2,
+        now: f64,
     ) -> UVec2 {
         let input = input.map(f32::to_bits);
         if self.input != Some(input) {
             self.input = Some(input);
             self.changed_at = now;
         }
-        self.pending = requested != current
-            && now - self.changed_at + 1e-9 < RESIZE_SETTLE_SECONDS;
+        self.pending = requested != current && now - self.changed_at + 1e-9 < RESIZE_SETTLE_SECONDS;
         if self.pending { current } else { requested }
     }
 }
@@ -319,7 +322,6 @@ mod tests {
         assert!(!evicted.contains(&"c0".to_owned()));
     }
 }
-
 
 #[cfg(test)]
 mod capture_demand_tests {

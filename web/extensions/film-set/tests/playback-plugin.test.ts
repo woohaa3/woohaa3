@@ -1,3 +1,5 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 /**
  * 动画播放 Plugin 拍摄预览卡片 hover 驱动测试
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 6.1–6.4）。
@@ -83,13 +85,11 @@ function previewNode(filmSetNodeId: string, clipId: string) {
 /** 把内存画布写入 woohaa3CanvasStore（仅提供 plugin 读取所需字段）。 */
 function setCanvas(nodes: Array<{ id: string; type: string; data: CanvasNodeData }>): void {
   const state = woohaa3CanvasStore.getState();
-  woohaa3CanvasStore.setState({
-    ...state,
-    canvas: {
-      document: { nodes: nodes.map((node) => ({ id: node.id, type: node.type })) },
-      nodeData: Object.fromEntries(nodes.map((node) => [node.id, node.data]))
-    } as never
-  });
+  let canvas = createEmptyWoohaa3ServerCanvas("playback");
+  canvas.document.nodes = nodes.map(node => ({ id: node.id, type: node.type, position: { x: 0, y: 0 } }));
+  canvas.nodeData = Object.fromEntries(nodes.map(node => [node.id, node.data]));
+  for (const node of nodes) if (node.type === "composite-asset") canvas = migrateFilmSetFixture(canvas, node.id);
+  woohaa3CanvasStore.setState({ ...state, canvas } as never);
 }
 
 function canvasWith(animation: FilmSetNodeData, clipIds: string[]): void {
@@ -223,8 +223,7 @@ describe("animationPlaybackExtension（拍摄预览卡片 hover 驱动）", () =
     expect(latest()!.time).toBeGreaterThan(0);
     // canonical 未被改写：保存的镜头时间线仍是非循环。
     const canvas = woohaa3CanvasStore.facade.getCanvas()!;
-    const clips = (canvas.nodeData[FILM_SET] as never as { filmSetAnimations: { clips: Array<{ timeline: { loop: boolean } }> } }).filmSetAnimations;
-    expect(clips.clips[0]!.timeline.loop).toBe(false);
+    expect(canvas.nodeData[FILM_SET].filmSetGroup!.clips![0]!.loop).toBe(false);
   });
 
   it("非默认镜头按目标显式 clipId 播放", () => {

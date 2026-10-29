@@ -16,9 +16,7 @@ use bevy::prelude::*;
 
 use crate::{
     model3d,
-    shot_camera::{
-        preview_readiness::ShotPreviewReady, ShotCameraTarget, ShotCameraViewMask,
-    },
+    shot_camera::{ShotCameraTarget, ShotCameraViewMask, preview_readiness::ShotPreviewReady},
 };
 
 use super::plan::{SampleIdentity, Target};
@@ -75,7 +73,10 @@ pub(crate) struct Card {
 impl Card {
     pub(super) fn retained_pixels(&self) -> u64 {
         self.size.x as u64 * self.size.y as u64
-            + self.published.as_ref().filter(|_| !self.published_current)
+            + self
+                .published
+                .as_ref()
+                .filter(|_| !self.published_current)
                 .map_or(0, |(_, size)| size.x as u64 * size.y as u64)
     }
 }
@@ -156,8 +157,12 @@ impl ShotPreviewCards {
 
     /// 当前目标与过渡旧图的 Image 数（不重复计算同一张图）。
     pub(crate) fn image_count(&self) -> usize {
-        self.cards.len() + self.cards.values()
-            .filter(|card| card.published.is_some() && !card.published_current).count()
+        self.cards.len()
+            + self
+                .cards
+                .values()
+                .filter(|card| card.published.is_some() && !card.published_current)
+                .count()
     }
 
     /// 实际工作计数快照（诊断；不代表 GPU 时间）。
@@ -167,10 +172,7 @@ impl ShotPreviewCards {
 
     /// 已保留的总像素（诊断与预算）。
     pub(crate) fn retained_pixels(&self) -> u64 {
-        self.cards
-            .values()
-            .map(Card::retained_pixels)
-            .sum()
+        self.cards.values().map(Card::retained_pixels).sum()
     }
 
     /// 已确认稳定的卡片数（诊断）。
@@ -191,10 +193,7 @@ impl Plugin for ShotNodePreviewPlugin {
 /// 卡片渲染层：由共享层池租出（模型卡片与镜头卡片不会拿到同一层）。
 ///
 /// 返回 `None` 表示层池已满：调用方必须让该卡片排队，不能无界增长层号或与其它 owner 共用。
-pub(crate) fn acquire_layer(
-    pool: &mut crate::app::PreviewLayerPool,
-    owner: &str,
-) -> Option<usize> {
+pub(crate) fn acquire_layer(pool: &mut crate::app::PreviewLayerPool, owner: &str) -> Option<usize> {
     let slot = pool.0.acquire(owner);
     if slot.is_none() {
         pool.0.note_exhausted();
@@ -207,7 +206,9 @@ pub(crate) fn acquire_layer(
 /// 模型根与媒体平面会被追加该层，因此卡片能看见所属片场的内容；网格（层 0）、gizmo 与片场
 /// 小相机（层 1/2/7）都不进入卡片画面。
 pub(crate) fn card_camera_layers(layer: usize) -> ShotCameraViewMask {
-    ShotCameraViewMask(bevy::camera::visibility::RenderLayers::from_layers(&[layer]))
+    ShotCameraViewMask(bevy::camera::visibility::RenderLayers::from_layers(&[
+        layer,
+    ]))
 }
 
 /// 卡片预览采样身份：源内容 + 尺寸档 + 播放会话。
@@ -290,8 +291,13 @@ pub(crate) fn apply_light_layers(commands: &mut Commands, cards: &mut ShotPrevie
         let mut query = world.query_filtered::<Entity, With<DirectionalLight>>();
         let entities: Vec<Entity> = query.iter(world).collect();
         for entity in entities {
-            let existing = world.get::<RenderLayers>(entity).cloned().unwrap_or_default();
-            let merged = layers.iter().fold(existing, |merged, layer| merged.with(*layer));
+            let existing = world
+                .get::<RenderLayers>(entity)
+                .cloned()
+                .unwrap_or_default();
+            let merged = layers
+                .iter()
+                .fold(existing, |merged, layer| merged.with(*layer));
             world.entity_mut(entity).insert(merged);
         }
     });
@@ -332,7 +338,8 @@ mod tests {
         let mut pool = crate::app::PreviewLayerPool::default();
         let mut seen = HashSet::new();
         for index in 0..MAX_PREVIEW_LAYERS {
-            let layer = acquire_layer(&mut pool, &format!("card-{index}")).expect("容量内必须能租到层");
+            let layer =
+                acquire_layer(&mut pool, &format!("card-{index}")).expect("容量内必须能租到层");
             assert!(!crate::preview_layers::PreviewLayers::is_reserved(layer));
             seen.insert(layer);
         }

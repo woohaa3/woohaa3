@@ -6,6 +6,7 @@
  * 布局/缩放/hover 不触发、静态/非法镜头不排、串行执行与失败可重试。
  */
 import { describe, expect, it } from "vitest";
+import type { BackgroundActivityJob } from "@woohaa3/contracts";
 import {
   canonicalFilmSetFields,
   createFilmSetSnapshot,
@@ -13,6 +14,7 @@ import {
   filmSetAnimationsOf,
   type ServerCanvas
 } from "@woohaa3/contracts";
+import { ShotReferenceActivity } from "../src/authoring/browser/shot-reference-activity.js";
 import { ShotReferenceRecordingQueue } from "../src/authoring/browser/shot-reference-recording-queue.js";
 import { observeFilmSets, shotReferenceJobForClip } from "../src/authoring/browser/shot-reference-observation.js";
 import { ShotReferenceRecordingScheduler } from "../src/authoring/browser/shot-reference-recording-scheduler.js";
@@ -116,6 +118,19 @@ describe("ShotReferenceRecordingQueue（dirty 集与触发边界，任务 8.3）
     queue.observe("c1", [{ filmSetNodeId: "film", focused: false, clips: [{ clipId: "static-1", contentIdentity: null, profileKey: "p" }] }]);
     expect(queue.snapshot().dirty).toHaveLength(0);
     expect(queue.nextJob()).toBeNull();
+  });
+
+  it("录制期间缓存回填不结算 in-flight，成功由 complete 收尾", () => {
+    const queue = new ShotReferenceRecordingQueue();
+    const job = { canvasId: "c1", filmSetNodeId: "film", clipId: "clip-1", contentIdentity: "id-a", profileKey: "p" };
+    queue.observe("c1", [{ filmSetNodeId: "film", focused: false, clips: [{ clipId: "clip-1", contentIdentity: "id-a", profileKey: "p" }] }]);
+    const taken = queue.nextJob()!;
+    // 录制成功先发布资产 → 画布回填缓存时该 key 仍在录制中：不能当成「已不在录」。
+    queue.markRecorded(job);
+    expect(queue.snapshot().inflight).toHaveLength(1);
+    expect(queue.snapshot().dirty).toHaveLength(0);
+    queue.complete(taken);
+    expect(queue.snapshot().inflight).toHaveLength(0);
   });
 
   it("isRecorded 只对已 ready 且不在 dirty/in-flight 的同版本为真", () => {
@@ -281,6 +296,40 @@ describe("ShotReferenceRecordingScheduler（串行执行与触发，任务 8.3�
     expect(scheduler.snapshot().dirty).toEqual([]);
     scheduler.requestRecord("film", "static-1"); expect(recorded).toEqual(["clip-1"]);
     scheduler.dispose();
+  });
+
+  it("录制中发布资产回填缓存：活动投影结算为成功，不投影成取消", async () => {
+    const canvas = filmSetCanvas();
+    const emitted: BackgroundActivityJob[] = [];
+    const activity = new ShotReferenceActivity(
+      { titleOf: () => "片场 · 镜头 1", emit: (record) => emitted.push(record) }
+    );
+    let cached = false;
+    let scheduler!: ShotReferenceRecordingScheduler;
+    scheduler = new ShotReferenceRecordingScheduler({
+      canvasId: () => "c1",
+      canvas: () => canvas as never,
+      focusedFilmSetId: () => null,
+      // 录制结束前先发布资产：控制器 reconcile 会回填缓存，把 job 移出 dirty 集。
+      isCachedReady: () => cached,
+      recorder: async (job) => {
+        activity.start(job);
+        cached = true;
+        scheduler.reconcile();
+        const result = { ok: true as const };
+        activity.finish(job, result);
+        return result;
+      },
+      onStateChange: () => {
+        const snapshot = scheduler.snapshot();
+        activity.syncQueued(snapshot.dirty, snapshot.inflight);
+      }
+    });
+    scheduler.reconcile();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(emitted.some((record) => record.status === "cancelled")).toBe(false);
+    expect(activity.records().map((record) => record.status)).toEqual(["succeeded"]);
   });
 
   it("无画布时不排任何任务", async () => {

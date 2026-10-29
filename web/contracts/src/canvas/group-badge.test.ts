@@ -1,6 +1,6 @@
 import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 import { describe, expect, it } from "vitest";
-import { groupBadgeRect, groupBadgeScreenRect } from "./group-badge.js";
+import { clampGroupBadgeScale, groupBadgeRect, groupBadgeScreenRect, isGroupBadgeScale } from "./group-badge.js";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 
 
@@ -10,7 +10,7 @@ describe("independent group badge scale", () => {
   it("固定在气泡外侧并向下等比伸缩，不改变结构矩形", () => {
     const node = {x:100,y:200,width:600,height:400};
     const original = structuredClone(node);
-    for (const scale of [0.5,1,2,2.5]) {
+    for (const scale of [0.5,1,2,2.5,6,12,1000]) {
       const badge = groupBadgeRect(node, scale);
       expect(badge.y).toBe(606);
       expect(badge.center).toEqual({x:400,y:606 + badge.height / 2});
@@ -22,6 +22,15 @@ describe("independent group badge scale", () => {
     const compact = groupBadgeRect({x:0,y:0,width:196,height:112},2.5);
     expect(compact.y).toBe(118);
     expect(compact.width/compact.height).toBe(88/64);
+    // 片场徽标就是场景显示区：允许明显大于承载它的 group 矩形。
+    const large = groupBadgeRect({x:0,y:0,width:600,height:400},12);
+    expect(large.width).toBe(88*12);
+    expect(large.width).toBeGreaterThan(600);
+    // 不设上限：任意有限的放大倍率都照实应用。
+    expect(large.maxScale).toBe(Number.POSITIVE_INFINITY);
+    expect(groupBadgeRect({x:0,y:0,width:600,height:400},1e6).width).toBe(88e6);
+    expect(isGroupBadgeScale(1e9)).toBe(true);
+    expect(clampGroupBadgeScale(1e9)).toBe(1e9);
   });
 
   it("屏幕投影把徽标放在 group 矩形下方，缩放仍保持外部锚点", () => {
@@ -48,9 +57,13 @@ describe("independent group badge scale", () => {
     }
     const scene = buildCanvasRenderScene({canvas,selection:{nodes:["g"]},groupBadgeResizable:true});
     expect(scene.nodes[0]!.group).toMatchObject({badgeScale:2,badgeResizable:true});
-    for (const value of [0,0.49,2.51,Infinity,NaN,"2"]) {
+    for (const value of [0,0.49,-1,Infinity,NaN,"2"]) {
       expect(applyCanvasCommands(canvas,[{type:"nodeData.patch",nodeId:"g",value:{groupBadgeScale:value as number}}]).ok).toBe(false);
     }
+    const huge = applyCanvasCommands(canvas,[{type:"nodeData.patch",nodeId:"g",value:{groupBadgeScale:250}}]);
+    if (!huge.ok) throw Error(huge.rejection.message);
+    expect(huge.canvas.nodeData.g?.groupBadgeScale).toBe(250);
+    expect(buildCanvasRenderScene({canvas:huge.canvas}).nodes[0]!.group?.badgeScale).toBe(250);
     expect(applyCanvasCommands(canvas,[{type:"nodeData.patch",nodeId:"m",value:{groupBadgeScale:1.5}}]).ok).toBe(false);
     expect(applyCanvasCommands(canvas,[{type:"node.add",node:{id:"bad",type:"image",position:{x:0,y:0}},nodeData:{groupBadgeScale:1.5}}]).ok).toBe(false);
   });

@@ -32,9 +32,10 @@ describe("Agent 节点描述符（任务 1.2）", () => {
     expect(agentDescriptorForCanonicalType(COMPOSITE_ASSET_NODE_TYPE)?.kind).toBe("model");
     expect(agentDescriptorForCanonicalType("generate")).toBeNull();
     expect(canonicalTypeFor("model")).toBe("model3d");
-    expect(canonicalTypeFor("film-set")).toBe(COMPOSITE_ASSET_NODE_TYPE);
-    expect(defaultAgentNodeData("film-set")).toMatchObject({ extensionId: "film-set", filmSetContent: { items: [] } });
-    expect(agentDescriptorForCanonicalType(COMPOSITE_ASSET_NODE_TYPE, defaultAgentNodeData("film-set"))?.kind).toBe("film-set");
+    expect(canonicalTypeFor("film-set")).toBe("group");
+    expect(defaultAgentNodeData("film-set")).toMatchObject({ filmSetGroup: { sceneBindings: [] } });
+    expect(agentDescriptorForCanonicalType("group", defaultAgentNodeData("film-set"))?.kind).toBe("film-set");
+    expect(agentDescriptorForCanonicalType("group", {})).toBeNull();
   });
 
   it("任务节点默认 nodeData 带 taskKind/taskStatus: idle", () => {

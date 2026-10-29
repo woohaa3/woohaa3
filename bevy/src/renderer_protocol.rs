@@ -81,7 +81,8 @@ pub struct InitialCameraRequest {
     #[serde(default)]
     pub(crate) focus_offset: [f32; 3],
     #[serde(default = "default_aspect")]
-    #[allow(dead_code)] // 线格式字段：随请求下发；画幅由调用方按 `aspect` 字符串解析，结构内暂不读取。
+    #[allow(dead_code)]
+    // 线格式字段：随请求下发；画幅由调用方按 `aspect` 字符串解析，结构内暂不读取。
     pub(crate) aspect: String,
 }
 
@@ -226,10 +227,15 @@ impl RenderRequest {
         let existing = self.composite_asset_frame.take();
         self.composite_asset_frame = Some(CompositeAssetFrameRequest {
             media,
-            layout_aabb: existing.as_ref().and_then(|frame| frame.layout_aabb.clone()),
+            layout_aabb: existing
+                .as_ref()
+                .and_then(|frame| frame.layout_aabb.clone()),
             width: existing.as_ref().map(|frame| frame.width).unwrap_or(1.0),
             height: existing.as_ref().map(|frame| frame.height).unwrap_or(1.0),
-            resource_extent: existing.as_ref().map(|frame| frame.resource_extent).unwrap_or(1.0),
+            resource_extent: existing
+                .as_ref()
+                .map(|frame| frame.resource_extent)
+                .unwrap_or(1.0),
         });
     }
 
@@ -341,7 +347,11 @@ pub struct RenderResponse {
 
 impl RenderResponse {
     #[allow(dead_code)]
-    pub(crate) fn error(request_id: &str, code: RenderErrorCode, message: impl Into<String>) -> Self {
+    pub(crate) fn error(
+        request_id: &str,
+        code: RenderErrorCode,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             request_id: request_id.to_owned(),
             ok: false,
@@ -370,7 +380,10 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
         ));
     }
     if request.request_id.trim().is_empty() {
-        return Err((RenderErrorCode::MalformedRequest, "缺少 requestId".to_owned()));
+        return Err((
+            RenderErrorCode::MalformedRequest,
+            "缺少 requestId".to_owned(),
+        ));
     }
     if !request.extent.is_finite() || request.extent <= 0.0 {
         return Err((RenderErrorCode::InvalidScene, "extent 非法".to_owned()));
@@ -387,7 +400,10 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
         return Err((RenderErrorCode::MalformedRequest, "预览尺寸越界".to_owned()));
     }
     if !CAMERA_PRESETS.contains(&capture.camera_preset.as_str()) {
-        return Err((RenderErrorCode::MalformedRequest, "未知 camera preset".to_owned()));
+        return Err((
+            RenderErrorCode::MalformedRequest,
+            "未知 camera preset".to_owned(),
+        ));
     }
     if capture.background != "transparent" && !is_hex_color(&capture.background) {
         return Err((RenderErrorCode::MalformedRequest, "背景非法".to_owned()));
@@ -397,28 +413,62 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
         for media in &frame.media {
             let expected = media.width as usize * media.height as usize * 4;
             bytes += expected;
-            if media.width == 0 || media.height == 0 || media.width > 512 || media.height > 512 || media.rgba.len() != expected || bytes > 2 * 1024 * 1024
-                || ![media.plane.x, media.plane.y, media.plane.z, media.plane.width, media.plane.height, media.plane.yaw].iter().all(|value| value.is_finite())
-                || media.plane.width <= 0.0 || media.plane.height <= 0.0 {
-                return Err((RenderErrorCode::MalformedRequest, "native media frame 非法".to_owned()));
+            if media.width == 0
+                || media.height == 0
+                || media.width > 512
+                || media.height > 512
+                || media.rgba.len() != expected
+                || bytes > 2 * 1024 * 1024
+                || ![
+                    media.plane.x,
+                    media.plane.y,
+                    media.plane.z,
+                    media.plane.width,
+                    media.plane.height,
+                    media.plane.yaw,
+                ]
+                .iter()
+                .all(|value| value.is_finite())
+                || media.plane.width <= 0.0
+                || media.plane.height <= 0.0
+            {
+                return Err((
+                    RenderErrorCode::MalformedRequest,
+                    "native media frame 非法".to_owned(),
+                ));
             }
         }
-        if ![frame.width, frame.height, frame.resource_extent].iter().all(|value| value.is_finite() && *value > 0.0) {
-            return Err((RenderErrorCode::MalformedRequest, "compositeAssetFrame 非法".to_owned()));
+        if ![frame.width, frame.height, frame.resource_extent]
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0)
+        {
+            return Err((
+                RenderErrorCode::MalformedRequest,
+                "compositeAssetFrame 非法".to_owned(),
+            ));
         }
     }
     if let Some(motion) = &request.motion {
         if !motion.duration.is_finite() || motion.duration < 0.0 {
-            return Err((RenderErrorCode::MalformedRequest, "motion duration 非法".to_owned()));
+            return Err((
+                RenderErrorCode::MalformedRequest,
+                "motion duration 非法".to_owned(),
+            ));
         }
         if !motion.time_seconds.is_finite()
             || motion.time_seconds < 0.0
             || motion.time_seconds > motion.duration + 1e-9
         {
-            return Err((RenderErrorCode::MalformedRequest, "timeSeconds 非法".to_owned()));
+            return Err((
+                RenderErrorCode::MalformedRequest,
+                "timeSeconds 非法".to_owned(),
+            ));
         }
         if !motion.initial_camera.distance.is_finite() || motion.initial_camera.distance <= 0.0 {
-            return Err((RenderErrorCode::MalformedRequest, "initialCamera 非法".to_owned()));
+            return Err((
+                RenderErrorCode::MalformedRequest,
+                "initialCamera 非法".to_owned(),
+            ));
         }
     }
     if request.capture.camera_preset == "initial" && request.motion.is_none() {

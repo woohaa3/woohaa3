@@ -7,12 +7,9 @@
 
 use bevy::{
     asset::RenderAssetUsages,
-    prelude::*,
-    render::{
-        mesh::Indices,
-        render_resource::PrimitiveTopology,
-    },
     camera::visibility::{NoFrustumCulling, RenderLayers},
+    prelude::*,
+    render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
 
 use super::plan::{GRID_DEPTH, GRID_LINE_WIDTH, IsometricGridView, plan_grid};
@@ -217,16 +214,19 @@ pub(crate) fn sync_grid_view(
 /// 线段已含 viewport（planner 输出 `screen = canvas × zoom + pan`），这里用**同一** view 的相机
 /// 逆投影成世界顶点，viewport 只作用一次（change: make-shot-framing-zoom-invariant，design D6）。
 /// 线宽为固定 CSS 像素，屏幕空间的法线经同一逆投影自动得到 `width/zoom` 世界宽度。
-fn build_lines_mesh(lines: &[(Vec2, Vec2)], width: f32, view: &IsometricGridView, depth: f32) -> Mesh {
+fn build_lines_mesh(
+    lines: &[(Vec2, Vec2)],
+    width: f32,
+    view: &IsometricGridView,
+    depth: f32,
+) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(lines.len() * 4);
     let mut indices: Vec<u32> = Vec::with_capacity(lines.len() * 6);
     for (a, b) in lines {
         let normal = (b - a).normalize_or_zero().perp() * width * 0.5;
         let base = positions.len() as u32;
         for point in [*a + normal, *a - normal, *b - normal, *b + normal] {
-            positions.push(
-                super::plan::screen_point_to_world(point, depth, view).to_array(),
-            );
+            positions.push(super::plan::screen_point_to_world(point, depth, view).to_array());
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }

@@ -8,20 +8,34 @@ use super::*;
 fn group_run_status_opens_activity_and_tracks_repeated_moves() {
     let mut group = group("g", 100., 200., 400., 300., 0);
     group.group.as_mut().unwrap().run_status = Some(crate::protocol::GroupRunStatus {
-        label: "创作中".into(), state: "running".into(),
+        label: "创作中".into(),
+        state: "running".into(),
     });
     let base = accept_scene(&scene(vec![group.clone()], vec![]));
-    let expected = Some(results::PointHit::NodeAction { node_id: "g".into(), action_id: "group-run-status".into(), menu: false });
+    let expected = Some(results::PointHit::NodeAction {
+        node_id: "g".into(),
+        action_id: "group-run-status".into(),
+        menu: false,
+    });
     let assert_chip = |generation, group: &GraphNode| {
         let (x, y, w, h) = crate::canvas_query::layout::group_run_status_rect(group).unwrap();
-        assert_eq!(point_query(generation, x + w / 2., y + h / 2., 1., None).hit, expected);
+        assert_eq!(
+            point_query(generation, x + w / 2., y + h / 2., 1., None).hit,
+            expected
+        );
     };
     assert_chip(base, &group);
     for x in [250., 600.] {
         group.x = x;
         let request = crate::protocol::PositionUpdateRequest {
-            version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.to_owned(), base_scene_generation: base,
-            positions: vec![crate::protocol::NodePosition { id: "g".into(), x, y: group.y }], viewport: None,
+            version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.to_owned(),
+            base_scene_generation: base,
+            positions: vec![crate::protocol::NodePosition {
+                id: "g".into(),
+                x,
+                y: group.y,
+            }],
+            viewport: None,
         };
         let generation = accept_positions(&request).unwrap().0;
         assert_chip(generation, &group);
@@ -29,15 +43,22 @@ fn group_run_status_opens_activity_and_tracks_repeated_moves() {
     group.ghost = true;
     let generation = accept_scene(&scene(vec![group.clone()], vec![]));
     let (x, y, w, h) = crate::canvas_query::layout::group_run_status_rect(&group).unwrap();
-    assert_eq!(point_query(generation, x + w / 2., y + h / 2., 1., None).hit, None);
+    assert_eq!(
+        point_query(generation, x + w / 2., y + h / 2., 1., None).hit,
+        None
+    );
 }
 
 /// 带顶部操作横条的场景：`nodeActions` 按节点 id 下发，命中由 Rust 快照判定。
 fn scene_with_actions(nodes: Vec<GraphNode>) -> Scene {
+    scene_with_actions_for("n1", nodes)
+}
+
+fn scene_with_actions_for(node_id: &str, nodes: Vec<GraphNode>) -> Scene {
     use crate::protocol::{NodeAction, NodeActions};
     let mut node_actions = std::collections::HashMap::new();
     node_actions.insert(
-        "n1".to_owned(),
+        node_id.to_owned(),
         NodeActions {
             actions: vec![
                 NodeAction {
@@ -62,6 +83,38 @@ fn scene_with_actions(nodes: Vec<GraphNode>) -> Scene {
         node_actions,
         ..scene(nodes, vec![])
     }
+}
+
+#[test]
+fn group_node_action_bar_is_drawn_and_hits_above_the_backdrop() {
+    clear_snapshot();
+    let group = group("g", 500.0, 300.0, 420.0, 280.0, 2);
+    let scene = scene_with_actions_for("g", vec![group.clone()]);
+    let generation = accept_scene(&scene);
+    let layout = crate::canvas_query::layout::node_action_toolbar(
+        &group,
+        scene.node_actions.get("g").unwrap(),
+        None,
+        None,
+    )
+    .expect("group toolbar layout");
+    let action = layout.slots[0].rect;
+    let hit = point_query(
+        generation,
+        action.0 + action.2 / 2.0,
+        action.1 + action.3 / 2.0,
+        1.0,
+        None,
+    )
+    .hit;
+    assert_eq!(
+        hit,
+        Some(results::PointHit::NodeAction {
+            node_id: "g".into(),
+            action_id: "download".into(),
+            menu: false,
+        })
+    );
 }
 
 #[test]
@@ -104,7 +157,9 @@ fn node_action_bar_hits_action_and_menu_rects_only() {
     let hit = point_query(generation, body_center.x, body_center.y, 1.0, None).hit;
     assert_eq!(
         hit,
-        Some(results::PointHit::Node { node_id: "n1".into() })
+        Some(results::PointHit::Node {
+            node_id: "n1".into()
+        })
     );
 }
 
@@ -163,25 +218,59 @@ fn node_action_bar_follows_node_position_preview() {
 fn node_action_hits_match_layout_after_viewport_and_edge_drag() {
     let mut scene = scene_with_actions(vec![node("n1", 500.0, 300.0, 200.0, 120.0)]);
     scene.surface = Some(crate::protocol::SurfaceSize {
-        width: 1000.0, height: 800.0, pixel_ratio: 1.0, content_right: 0.0, content_rect: None,
-        origin_x: 0.0, origin_y: 0.0,
+        width: 1000.0,
+        height: 800.0,
+        pixel_ratio: 1.0,
+        content_right: 0.0,
+        content_rect: None,
+        origin_x: 0.0,
+        origin_y: 0.0,
     });
     let base = accept_scene(&scene);
-    let viewport = crate::protocol::Viewport { x: 75.0, y: 10.0, zoom: 0.5 };
+    let viewport = crate::protocol::Viewport {
+        x: 75.0,
+        y: 10.0,
+        zoom: 0.5,
+    };
     let zoomed = accept_viewport(base, viewport.clone()).unwrap();
     let assert_hit = |generation, node: &GraphNode, viewport: &crate::protocol::Viewport| {
-        let layout = crate::canvas_query::layout::node_action_toolbar(node, &scene.node_actions["n1"], Some((viewport.x, viewport.y, viewport.zoom)), Some((1000.0, 800.0))).unwrap();
+        let layout = crate::canvas_query::layout::node_action_toolbar(
+            node,
+            &scene.node_actions["n1"],
+            Some((viewport.x, viewport.y, viewport.zoom)),
+            Some((1000.0, 800.0)),
+        )
+        .unwrap();
         let rect = layout.slots[0].rect;
         assert!((rect.3 * viewport.zoom - 32.0).abs() < 0.001);
-        assert_eq!(point_query(generation, rect.0 + rect.2 / 2.0, rect.1 + rect.3 / 2.0, viewport.zoom, None).hit,
-            Some(results::PointHit::NodeAction { node_id: "n1".into(), action_id: "download".into(), menu: false }));
+        assert_eq!(
+            point_query(
+                generation,
+                rect.0 + rect.2 / 2.0,
+                rect.1 + rect.3 / 2.0,
+                viewport.zoom,
+                None
+            )
+            .hit,
+            Some(results::PointHit::NodeAction {
+                node_id: "n1".into(),
+                action_id: "download".into(),
+                menu: false
+            })
+        );
     };
     assert_hit(zoomed, &scene.nodes[0], &viewport);
     // 同一 base 上连续拖动到顶部/左边：不可以简单平移原来的 above 矩形。
     for (x, y) in [(-100.0, -20.0), (1800.0, 1450.0), (600.0, 350.0)] {
         let request = crate::protocol::PositionUpdateRequest {
-            version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(), base_scene_generation: base,
-            positions: vec![crate::protocol::NodePosition { id: "n1".into(), x, y }], viewport: Some(viewport.clone()),
+            version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(),
+            base_scene_generation: base,
+            positions: vec![crate::protocol::NodePosition {
+                id: "n1".into(),
+                x,
+                y,
+            }],
+            viewport: Some(viewport.clone()),
         };
         let (generation, _) = accept_positions(&request).unwrap();
         assert_hit(generation, &node("n1", x, y, 200.0, 120.0), &viewport);
@@ -194,48 +283,105 @@ fn composite_node_action_bar_uses_scope_and_tracks_viewport_and_moves() {
     let scene = scene_with_actions(vec![original.clone()]);
     let base = accept_scene(&scene);
     let assert_hit = |generation, node: &GraphNode, viewport: &crate::protocol::Viewport| {
-        let bar = crate::canvas_query::layout::node_action_toolbar(node, &scene.node_actions["n1"], Some((viewport.x, viewport.y, viewport.zoom)), None).unwrap();
+        let bar = crate::canvas_query::layout::node_action_toolbar(
+            node,
+            &scene.node_actions["n1"],
+            Some((viewport.x, viewport.y, viewport.zoom)),
+            None,
+        )
+        .unwrap();
         let rect = bar.slots[1].menu.unwrap();
-        assert_eq!(point_query(generation, rect.0 + rect.2 / 2., rect.1 + rect.3 / 2., viewport.zoom, None).hit,
-            Some(results::PointHit::NodeAction { node_id: "n1".into(), action_id: "convert".into(), menu: true }));
+        assert_eq!(
+            point_query(
+                generation,
+                rect.0 + rect.2 / 2.,
+                rect.1 + rect.3 / 2.,
+                viewport.zoom,
+                None
+            )
+            .hit,
+            Some(results::PointHit::NodeAction {
+                node_id: "n1".into(),
+                action_id: "convert".into(),
+                menu: true
+            })
+        );
     };
-    let viewport = crate::protocol::Viewport { x: 0., y: 0., zoom: 1. };
+    let viewport = crate::protocol::Viewport {
+        x: 0.,
+        y: 0.,
+        zoom: 1.,
+    };
     assert_hit(base, &original, &viewport);
-    let zoom = crate::protocol::Viewport { x: 50., y: 70., zoom: 0.6 };
+    let zoom = crate::protocol::Viewport {
+        x: 50.,
+        y: 70.,
+        zoom: 0.6,
+    };
     let zoomed = accept_viewport(base, zoom.clone()).unwrap();
     assert_hit(zoomed, &original, &zoom);
     let request = crate::protocol::PositionUpdateRequest {
-        version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(), base_scene_generation: base,
-        positions: vec![crate::protocol::NodePosition { id: "n1".into(), x: 600., y: 400. }], viewport: Some(zoom.clone()),
+        version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(),
+        base_scene_generation: base,
+        positions: vec![crate::protocol::NodePosition {
+            id: "n1".into(),
+            x: 600.,
+            y: 400.,
+        }],
+        viewport: Some(zoom.clone()),
     };
     let (moved, _) = accept_positions(&request).unwrap();
     let mut shifted = original;
-    shifted.x += 100.; shifted.y += 100.;
+    shifted.x += 100.;
+    shifted.y += 100.;
     let asset = shifted.composite_asset.as_mut().unwrap();
-    asset.x += 100.; asset.y += 100.;
-    if let Some(ground) = asset.scope_ground.as_mut() { ground.cx += 100.; ground.cy += 100.; }
+    asset.x += 100.;
+    asset.y += 100.;
+    if let Some(ground) = asset.scope_ground.as_mut() {
+        ground.cx += 100.;
+        ground.cy += 100.;
+    }
     assert_hit(moved, &shifted, &zoom);
 }
-
 
 #[test]
 fn focused_references_only_expose_enabled_close_hits_in_css_coordinates() {
     use crate::canvas_query::focus_context;
-    let mut source = scene_with_actions(vec![node("n1", 900., 700., 200., 120.), node("owner", 0., 0., 400., 300.)]);
+    let mut source = scene_with_actions(vec![
+        node("n1", 900., 700., 200., 120.),
+        node("owner", 0., 0., 400., 300.),
+    ]);
     source.model_focus = Some(serde_json::from_value(serde_json::json!({"version":"woohaa-model-focus-v1","nodeId":"owner","target":[0,0,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87})).unwrap());
-    source.model_focus_context = serde_json::from_value(serde_json::json!([{"nodeId":"n1","x":20,"y":20,"width":184,"height":36}])).unwrap();
-    source.node_actions.get_mut("n1").unwrap().actions = vec![crate::protocol::NodeAction { id: focus_context::CLOSE_ACTION.into(), label: "关闭容器".into(), enabled: true, ..default() }];
+    source.model_focus_context = serde_json::from_value(
+        serde_json::json!([{"nodeId":"n1","x":20,"y":20,"width":184,"height":36}]),
+    )
+    .unwrap();
+    source.node_actions.get_mut("n1").unwrap().actions = vec![crate::protocol::NodeAction {
+        id: focus_context::CLOSE_ACTION.into(),
+        label: "关闭容器".into(),
+        enabled: true,
+        ..default()
+    }];
     let generation = accept_scene(&source);
     let display = focus_context::node(&source, &source.nodes[0]);
-    let (x,y,w,h) = focus_context::close_rect(&display);
-    assert_eq!(point_query(generation, x+w/2., y+h/2., 1., None).hit, Some(results::PointHit::NodeAction { node_id:"n1".into(), action_id:focus_context::CLOSE_ACTION.into(), menu:false }));
+    let (x, y, w, h) = focus_context::close_rect(&display);
+    assert_eq!(
+        point_query(generation, x + w / 2., y + h / 2., 1., None).hit,
+        Some(results::PointHit::NodeAction {
+            node_id: "n1".into(),
+            action_id: focus_context::CLOSE_ACTION.into(),
+            menu: false
+        })
+    );
     assert_eq!(point_query(generation, 40., 38., 1., None).hit, None);
     assert_eq!(point_query(generation, 950., 750., 1., None).hit, None);
     source.node_actions.get_mut("n1").unwrap().actions[0].enabled = false;
     let generation = accept_scene(&source);
-    assert_eq!(point_query(generation, x+w/2., y+h/2., 1., None).hit, None);
+    assert_eq!(
+        point_query(generation, x + w / 2., y + h / 2., 1., None).hit,
+        None
+    );
 }
-
 
 #[test]
 fn hidden_shot_has_no_canvas_hit() {
@@ -243,4 +389,65 @@ fn hidden_shot_has_no_canvas_hit() {
     shot.shot_preview = Some(serde_json::from_value(serde_json::json!({"filmSetNodeId":"owner","clipId":"clip","kind":"static","name":"镜头","hidden":true,"aspect":1.7778,"duration":0,"state":"ready","coverCamera":{"azimuth":0,"elevation":0.4,"distance":4,"focusOffset":[0,0,0]}})).unwrap());
     let generation = accept_scene(&scene(vec![shot], vec![]));
     assert_eq!(point_query(generation, 200., 180., 1., None).hit, None);
+}
+
+#[test]
+fn collapsed_group_toolbar_tracks_badge_after_viewport_and_position_updates() {
+    let mut group = group("g", 500., 300., 420., 280., 2);
+    group.group.as_mut().unwrap().collapsed = true;
+    group.group.as_mut().unwrap().badge_scale = 2.;
+    let scene = scene_with_actions_for("g", vec![group.clone()]);
+    let base = accept_scene(&scene);
+    let assert_toolbar = |generation, group: &GraphNode, zoom| {
+        let badge = crate::canvas_query::group_model::badge_rect(group);
+        let layout = crate::canvas_query::layout::node_action_toolbar(
+            group,
+            &scene.node_actions["g"],
+            Some((0., 0., zoom)),
+            None,
+        )
+        .unwrap();
+        assert!(
+            (layout.bar.1
+                + layout.bar.3
+                + crate::canvas_query::layout::NODE_ACTION_TOOLBAR_GAP / zoom
+                - badge.y)
+                .abs()
+                < 0.001
+        );
+        let r = layout.slots[0].rect;
+        assert_eq!(
+            point_query(generation, r.0 + r.2 / 2., r.1 + r.3 / 2., zoom, None).hit,
+            Some(PointHit::NodeAction {
+                node_id: "g".into(),
+                action_id: "download".into(),
+                menu: false
+            })
+        );
+    };
+    assert_toolbar(base, &group, 1.);
+    let zoomed = accept_viewport(
+        base,
+        crate::protocol::Viewport {
+            x: 0.,
+            y: 0.,
+            zoom: 0.5,
+        },
+    )
+    .unwrap();
+    assert_toolbar(zoomed, &group, 0.5);
+    let (moved, _) = accept_positions(&crate::protocol::PositionUpdateRequest {
+        version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(),
+        base_scene_generation: base,
+        viewport: None,
+        positions: vec![crate::protocol::NodePosition {
+            id: "g".into(),
+            x: 900.,
+            y: 600.,
+        }],
+    })
+    .unwrap();
+    group.x = 900.;
+    group.y = 600.;
+    assert_toolbar(moved, &group, 0.5);
 }

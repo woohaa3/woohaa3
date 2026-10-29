@@ -40,7 +40,7 @@ export type EditNodeField = (typeof EDIT_NODE_FIELDS)[number];
  * 仅允许名称、稳定项目关联和片场对象容器显示设置，精确恢复字段缺失；不拥有任务进度或其它业务数据。
  * 结构化字段（prompt/parameters/taskStatus 等）由各自权威路径管理，撤销不得回退。
  */
-export const EDIT_NODE_DATA_FIELDS = ["title", "projectStorageKey", "inputHash", "activeBuildId", "filmSetObjectContainersHidden", "groupAppearance", "groupCollapsed", "groupBadgeScale"] as const;
+export const EDIT_NODE_DATA_FIELDS = ["title", "projectStorageKey", "inputHash", "activeBuildId", "filmSetObjectContainersHidden", "groupAppearance", "groupCollapsed", "groupBadgeScale", "filmSetGroup"] as const;
 export type EditNodeDataField = (typeof EDIT_NODE_DATA_FIELDS)[number];
 
 /** 字段快照：明确区分「不存在」与「null」。 */

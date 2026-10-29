@@ -10,7 +10,7 @@
 
 use bevy::prelude::*;
 
-use crate::motion::{evaluate, InitialCameraState, ModelDelta, MotionIr};
+use crate::motion::{InitialCameraState, ModelDelta, MotionIr, evaluate};
 
 /// 单个动画节点的播放状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,9 +45,18 @@ pub struct AnimationPose {
 
 impl AnimationSession {
     /// 由受控运动 IR 建立会话，停在第 0 秒。
-    pub fn new(duration: f32, looped: bool, initial_camera: InitialCameraState, motion: MotionIr) -> Self {
+    pub fn new(
+        duration: f32,
+        looped: bool,
+        initial_camera: InitialCameraState,
+        motion: MotionIr,
+    ) -> Self {
         Self {
-            duration: if duration.is_finite() { duration.max(0.0) } else { 0.0 },
+            duration: if duration.is_finite() {
+                duration.max(0.0)
+            } else {
+                0.0
+            },
             looped,
             time: 0.0,
             state: PlaybackState::Stopped,
@@ -103,7 +112,11 @@ impl AnimationSession {
 
     /// 在指定时间求值（不改变会话时钟）。
     pub fn pose_at(&self, time: f32) -> AnimationPose {
-        let (camera, model) = evaluate(&self.motion, clamp_time(time, self.duration), self.initial_camera);
+        let (camera, model) = evaluate(
+            &self.motion,
+            clamp_time(time, self.duration),
+            self.initial_camera,
+        );
         AnimationPose { camera, model }
     }
 
@@ -168,7 +181,12 @@ impl AnimationSessionHolder {
         self.install(identity, session, true)
     }
 
-    fn install(&mut self, identity: SessionIdentity, session: AnimationSession, cancel: bool) -> u32 {
+    fn install(
+        &mut self,
+        identity: SessionIdentity,
+        session: AnimationSession,
+        cancel: bool,
+    ) -> u32 {
         if cancel {
             self.generation = self.generation.wrapping_add(1);
         }
@@ -192,4 +210,3 @@ impl AnimationSessionHolder {
         self.session.as_mut()
     }
 }
-

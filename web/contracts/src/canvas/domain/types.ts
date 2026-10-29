@@ -5,6 +5,7 @@ import type { VideoEditIntent } from "../../video/video-edit.js";
 import type { ModelCamera } from "../model-cameras.js";
 import type { ImageEditDocument } from "../image-edit.js";
 import type { GroupAppearance } from "../group-appearance.js";
+import type { FilmSetGroupMarker } from "../film-set-group.js";
 
 export type GenerationKind = "text" | "image" | "video" | "audio";
 export type GenerationStatus = "idle" | "queued" | "running" | "success" | "failed" | "draft" | "ready" | "archived";
@@ -27,6 +28,8 @@ export type CanvasNodeInputMapping = {
 };
 
 export type CanvasNodeData = Woohaa3CanvasJsonObject & {
+  /** Canonical film-set group orchestration state. Ordinary groups omit it. */
+  filmSetGroup?: FilmSetGroupMarker;
   /** Neutral extension-owned lifecycle relation. Business payload stays opaque. */
   managedBy?: import("../managed-node.js").ManagedNodeRelation;
   /** 普通组自身的版本化展示模型；片场不使用该字段。缺失时读取层使用默认值，不回写文档。 */

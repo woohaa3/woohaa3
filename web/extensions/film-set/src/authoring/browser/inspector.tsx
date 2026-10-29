@@ -1,3 +1,4 @@
+import { prepareFilmSetGroup } from "@woohaa3/contracts";
 /**
  * 片场聚焦检查器（change: 2026-10-08-add-image-focus-editing-and-unified-node-history，
  * 任务 4.1/6.4 / design D3；change: 2026-10-10-improve-film-set-editing-and-inspector）。
@@ -8,12 +9,11 @@
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
-import { decodeFilmSetNodeData, filmSetAnimationsOf, filmSetClipHash, resolveNodeDisplayName, COMPOSITE_ASSET_NODE_TYPE, isFilmSetNode } from "@woohaa3/contracts";
+import { readFilmSetAnimationProjection, isFilmSetGroupNode, filmSetAnimationsOf, filmSetClipHash, resolveNodeDisplayName, COMPOSITE_ASSET_NODE_TYPE, isFilmSetNode } from "@woohaa3/contracts";
 import type { ModelEditorSession, ModelCaptureSession as ModelShotCaptureSession, AuthoringGenerationProps } from "@woohaa3/frontend/extension-api";
 import type { FilmSetObjectSession } from "./object-session.js";
 import type { FilmSetObjectAction } from "./object-action.js";
 import { GizmoReadout } from "./gizmo-readout.js";
-import { setFilmSetObjectContainerVisible } from "./object-container-commands.js";
 import { FilmSetObjectToolbar } from "./film-set-object-toolbar.js";
 import { IconButton } from "@woohaa3/ui/primitives";
 import { CloseIcon } from "@woohaa3/ui/icons";
@@ -28,7 +28,7 @@ import type { ShotImageReferences } from "./shot-image-reference.js";
 function focusedIsFilmSet(ctx: Context, nodeId: string): boolean {
   const canvas = ctx.compositeAssets.projectCanvas(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas());
   const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-  return isFilmSetNode(node?.type, canvas?.nodeData?.[nodeId]);
+  return isFilmSetGroupNode(node, canvas?.nodeData?.[nodeId]) || isFilmSetNode(node?.type, canvas?.nodeData?.[nodeId]);
 }
 
 /** 真实片场名称（共享解析规则；不读未提交草稿）。 */
@@ -73,8 +73,6 @@ export function FilmSetInspector({
   const [wholeShotForSelection, setWholeShotForSelection] = useState<string | null>(null);
   const [aiCollapsed, setAiCollapsed] = useState(false);
   const [compositionOpen, setCompositionOpen] = useState(false);
-  const [containerPending, setContainerPending] = useState(false);
-  const [containerError, setContainerError] = useState<string | null>(null);
   const selectionKey = `${nodeId}:${selectedItemId}`;
   useEffect(() => setWholeShotForSelection(null), [nodeId, selectedItemId]);
   useEffect(() => {
@@ -97,8 +95,8 @@ export function FilmSetInspector({
   const objectsReady = objectState.nodeId === nodeId;
   const rendererReady = ctx.canvasRuntime.runtime()?.isReady() ?? false;
   const currentCanvas = ctx.compositeAssets.projectCanvas(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas());
-  const currentAnimation = decodeFilmSetNodeData(currentCanvas?.nodeData[nodeId]);
-  const collection = currentAnimation.ok ? filmSetAnimationsOf(currentAnimation.value) : null;
+  const currentAnimation = readFilmSetAnimationProjection(currentCanvas, nodeId);
+  const collection = currentAnimation ? filmSetAnimationsOf(currentAnimation) : null;
   const activeClip = collection?.clips.find(clip => clip.id === (playback.nodeId === nodeId ? playback.clipId : collection.defaultClipId))
     ?? collection?.clips.find(clip => clip.id === collection.defaultClipId)
     ?? collection?.clips[0];
@@ -159,18 +157,10 @@ export function FilmSetInspector({
     <div className="model-editor-dock" data-inspector="true" data-history-open={historyOpen ? "true" : undefined} data-film-set="true">
       {header}
       <div className="model-inspector-scroll">
+      {currentCanvas ? prepareFilmSetGroup(currentCanvas, nodeId)?.diagnostics.map(diagnostic => <p key={diagnostic.bindingId} className="film-set-object-feedback">{diagnostic.bindingId}：{diagnostic.message}</p>) : null}
       <FilmSetObjectToolbar
         session={objectSession} writable={writable && rendererReady} readOnly={readOnly}
         nodeId={nodeId} onDelete={() => objectSession.deleteSelected()} action={objectAction}
-        hiddenContainerIds={(currentCanvas?.nodeData[nodeId]?.filmSetObjectContainersHidden as string[] | undefined) ?? []}
-        containerVisibilityWritable={writable && !containerPending}
-        onContainerVisibilityChange={(itemId, visible) => {
-          setContainerPending(true); setContainerError(null);
-          void setFilmSetObjectContainerVisible(ctx, nodeId, itemId, visible)
-            .then(result => { if (!result.ok) setContainerError(result.reason); })
-            .catch(() => setContainerError("容器显示修改失败，请重试"))
-            .finally(() => setContainerPending(false));
-        }}
         onExit={() => void ctx.canvasNavigation.requestExitNodeFocus()}
       >
       {selectedItem && activeClip ? <>
@@ -178,7 +168,6 @@ export function FilmSetInspector({
         <FilmSetAdaptationConfirm ctx={ctx} nodeId={nodeId} itemId={selectedItem.id} clipId={activeClip.id} writable={writable && !readOnly} />
       </> : null}
       </FilmSetObjectToolbar>
-      {containerError ? <p className="film-set-object-error">{containerError}</p> : null}
       <FilmSetAnimationControls key={nodeId} ctx={ctx} nodeId={nodeId} writable={writable && !readOnly} composition={cameraPanel}
         images={images} compositionOpen={compositionOpen} onCompositionOpenChange={changeComposition} />
       </div>

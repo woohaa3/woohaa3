@@ -189,7 +189,7 @@ export class NodeHistoryApplicationService {
     if (!exported.ok) return null;
     const node = exported.canvas.document.nodes.find((candidate) => candidate.id === nodeId);
     if (!node) return null;
-    const kind = historyKindForNodeType(node.type);
+    const kind = historyKindForNodeType(node.type, exported.canvas.nodeData[nodeId]);
     if (!kind) return null;
     const identity = currentIdentityOf(exported.canvas, nodeId, kind);
     const data = exported.canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
@@ -406,7 +406,7 @@ export class NodeHistoryApplicationService {
     if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
     const node = exported.canvas.document.nodes.find((candidate) => candidate.id === nodeId);
     if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
-    if (!historyKindForNodeType(node.type)) {
+    if (!historyKindForNodeType(node.type, exported.canvas.nodeData[nodeId])) {
       return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不提供历史版本` };
     }
     const data = exported.canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
@@ -481,7 +481,7 @@ export class NodeHistoryApplicationService {
     if (!exported.ok) return null;
     const node = exported.canvas.document.nodes.find((candidate) => candidate.id === nodeId);
     if (!node) return null;
-    const kind = historyKindForNodeType(node.type);
+    const kind = historyKindForNodeType(node.type, exported.canvas.nodeData[nodeId]);
     if (!kind) return null;
     const data = exported.canvas.nodeData[nodeId] as Record<string, unknown> | undefined;
     const rawPlacement = data?.modelPlacement;

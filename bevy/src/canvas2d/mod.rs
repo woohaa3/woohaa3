@@ -20,37 +20,37 @@ mod camera;
 mod card_cache;
 mod cards;
 mod compact_card;
-mod focus_reference;
 mod container_cache;
 mod dash;
 mod decoration_cache;
 pub(crate) mod draw_order;
 mod edge_cache;
 mod film_set;
+mod focus_reference;
 #[cfg(test)]
 pub(crate) use film_set::draw_film_set_run_mask;
 mod focus_backdrop;
+pub(crate) mod focus_details;
 mod generation;
 pub(crate) mod group;
 mod group_motion;
 mod group_outline;
 mod group_surface;
-mod history_strip;
 pub(crate) mod history_pulse;
+mod history_strip;
 pub(crate) mod image_focus;
-pub(crate) mod focus_details;
 mod init;
 mod labels;
 mod marquee;
 mod node_action;
+mod ownership_links;
 mod render;
 mod render_edges;
-mod ownership_links;
-mod shared_key;
 pub(crate) mod scope_panel;
+mod shared_key;
 pub(crate) mod text_presentation;
-mod textures;
 mod texture_store;
+mod textures;
 
 /// 共享纯布局函数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）：渲染与查询复用
 /// `canvas_query::layout` 的同一实现，保持既有 `super::layout` 路径与常量。
@@ -78,6 +78,7 @@ pub(crate) mod shot_preview {
 
 use bevy::prelude::*;
 
+pub(crate) use alpha_checker::sync as sync_alpha_checker;
 pub(crate) use attach::sync_attach_probe;
 pub(crate) use camera::sync_camera;
 pub(crate) use focus_backdrop::sync as sync_focus_backdrop;

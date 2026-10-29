@@ -12,9 +12,13 @@ pub(crate) struct Trace {
     rows: Vec<Value>,
 }
 impl Trace {
-    pub fn collecting(&self) -> bool { self.key.is_some() && !self.complete }
+    pub fn collecting(&self) -> bool {
+        self.key.is_some() && !self.complete
+    }
     pub fn arm(&mut self, key: Option<Key>, now_ms: f64) -> Option<Value> {
-        if self.key == key { return None; }
+        if self.key == key {
+            return None;
+        }
         let old = self.finish(now_ms, "session-ended-or-replaced");
         self.key = key;
         self.began_ms = now_ms;
@@ -23,16 +27,24 @@ impl Trace {
         old
     }
     pub fn push(&mut self, now_ms: f64, mut row: Value) -> Option<Value> {
-        if !self.collecting() { return None; }
+        if !self.collecting() {
+            return None;
+        }
         row["frame"] = json!(self.rows.len() + 1);
         row["sinceStartMs"] = json!((now_ms - self.began_ms).max(0.0));
         self.rows.push(row);
-        if self.rows.len() == MAX_FRAMES { self.finish(now_ms, "frame-limit") }
-        else if now_ms - self.began_ms >= WINDOW_MS { self.finish(now_ms, "window-complete") }
-        else { None }
+        if self.rows.len() == MAX_FRAMES {
+            self.finish(now_ms, "frame-limit")
+        } else if now_ms - self.began_ms >= WINDOW_MS {
+            self.finish(now_ms, "window-complete")
+        } else {
+            None
+        }
     }
     fn finish(&mut self, now_ms: f64, reason: &str) -> Option<Value> {
-        if !self.collecting() { return None; }
+        if !self.collecting() {
+            return None;
+        }
         self.complete = true;
         let (node, clip, generation) = self.key.as_ref()?;
         Some(json!({"nodeId":node,"clipId":clip,"generation":generation,
@@ -42,20 +54,30 @@ impl Trace {
 }
 // 每行只携带一个样本，保留会话信息和分段总数，避免采集端截断长行。
 pub(crate) fn parts(mut report: Value) -> Vec<Value> {
-    let frames = report["frames"].take().as_array().cloned().unwrap_or_default();
+    let frames = report["frames"]
+        .take()
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let count = frames.len();
-    frames.into_iter().enumerate().map(|(index, frame)| {
-        let mut part = report.clone();
-        part["part"] = json!(index + 1);
-        part["parts"] = json!(count);
-        part["frames"] = json!([frame]);
-        part
-    }).collect()
+    frames
+        .into_iter()
+        .enumerate()
+        .map(|(index, frame)| {
+            let mut part = report.clone();
+            part["part"] = json!(index + 1);
+            part["parts"] = json!(count);
+            part["frames"] = json!([frame]);
+            part
+        })
+        .collect()
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn key(generation: u32) -> Option<Key> { Some(("node".into(), "clip".into(), generation)) }
+    fn key(generation: u32) -> Option<Key> {
+        Some(("node".into(), "clip".into(), generation))
+    }
     #[test]
     fn captures_start_and_later_frames_without_rearming_the_same_session() {
         let mut trace = Trace::default();
@@ -101,7 +123,9 @@ mod tests {
     fn caps_high_frequency_capture_and_emits_only_once() {
         let mut trace = Trace::default();
         trace.arm(key(1), 0.0);
-        for i in 0..MAX_FRAMES-1 { assert!(trace.push(i as f64, json!({})).is_none()); }
+        for i in 0..MAX_FRAMES - 1 {
+            assert!(trace.push(i as f64, json!({})).is_none());
+        }
         let report = trace.push(120.0, json!({})).unwrap();
         assert_eq!(report["reason"], "frame-limit");
         assert_eq!(report["frames"].as_array().unwrap().len(), MAX_FRAMES);

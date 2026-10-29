@@ -84,7 +84,8 @@ fn serve_control_loop() {
             break;
         }
         let length = u32::from_be_bytes(header) as usize;
-        if length == 0 || length > woohaa_bevy_canvas::recording_protocol::MAX_CONTROL_MESSAGE_BYTES {
+        if length == 0 || length > woohaa_bevy_canvas::recording_protocol::MAX_CONTROL_MESSAGE_BYTES
+        {
             eprintln!("shot-recorder: 非法控制帧长度 {length}");
             std::process::exit(64);
         }
@@ -95,7 +96,10 @@ fn serve_control_loop() {
         let text = String::from_utf8_lossy(&body);
         match woohaa_bevy_canvas::recording_protocol::parse_control_message(&text) {
             Ok(envelope) => {
-                let name = envelope.payload_value().map(|(name, _)| name).unwrap_or("<none>");
+                let name = envelope
+                    .payload_value()
+                    .map(|(name, _)| name)
+                    .unwrap_or("<none>");
                 let sequence = envelope.sequence;
                 match name {
                     "submitJob" => {

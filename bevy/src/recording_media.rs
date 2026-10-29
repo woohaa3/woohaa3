@@ -64,7 +64,11 @@ impl DecodeStage {
 
 impl DecodeFailure {
     pub fn new(stage: DecodeStage, code: &'static str, message: impl Into<String>) -> Self {
-        Self { stage, code, message: message.into() }
+        Self {
+            stage,
+            code,
+            message: message.into(),
+        }
     }
 }
 
@@ -82,7 +86,13 @@ pub struct PlaybackMap {
 
 impl Default for PlaybackMap {
     fn default() -> Self {
-        Self { start_time: 0.0, duration: 0.0, time_scale: 1.0, looped: false, media_duration: 0.0 }
+        Self {
+            start_time: 0.0,
+            duration: 0.0,
+            time_scale: 1.0,
+            looped: false,
+            media_duration: 0.0,
+        }
     }
 }
 
@@ -102,7 +112,11 @@ impl PlaybackMap {
     ///
     /// 与 `mediaTimelineLocalTime` 逐位同语义（含负帧/非有限值处理）。
     pub fn local_time(&self, timeline_seconds: f64) -> Option<f64> {
-        let time = if timeline_seconds.is_finite() { timeline_seconds.max(0.0) } else { 0.0 };
+        let time = if timeline_seconds.is_finite() {
+            timeline_seconds.max(0.0)
+        } else {
+            0.0
+        };
         if time < self.start_time {
             return None;
         }
@@ -138,7 +152,11 @@ pub struct DecodeBudget {
 
 impl Default for DecodeBudget {
     fn default() -> Self {
-        Self { max_frame_pixels: 4096 * 4096, max_edge: 4096, max_seek_seconds: 60.0 }
+        Self {
+            max_frame_pixels: 4096 * 4096,
+            max_edge: 4096,
+            max_seek_seconds: 60.0,
+        }
     }
 }
 
@@ -146,7 +164,11 @@ impl DecodeBudget {
     /// 校验尺寸；超限返回 Budget 阶段失败。
     pub fn check_size(&self, width: u32, height: u32) -> Result<(), DecodeFailure> {
         if width == 0 || height == 0 {
-            return Err(DecodeFailure::new(DecodeStage::Format, "recording-media-invalid-size", "媒体尺寸为 0"));
+            return Err(DecodeFailure::new(
+                DecodeStage::Format,
+                "recording-media-invalid-size",
+                "媒体尺寸为 0",
+            ));
         }
         if width > self.max_edge || height > self.max_edge {
             return Err(DecodeFailure::new(
@@ -179,7 +201,11 @@ pub trait MediaDecoder {
     /// 媒体自身时长（秒）；图片为 0。
     fn duration_seconds(&self, source: &MediaSource) -> Result<f64, DecodeFailure>;
     /// 取覆盖 `local_seconds` 的那一帧（图片忽略时间，返回自身像素）。
-    fn frame_at(&mut self, source: &MediaSource, local_seconds: f64) -> Result<DecodedFrame, DecodeFailure>;
+    fn frame_at(
+        &mut self,
+        source: &MediaSource,
+        local_seconds: f64,
+    ) -> Result<DecodedFrame, DecodeFailure>;
     /// 释放一个源的解码资源。
     fn release(&mut self, resource_id: &str);
 }
@@ -193,12 +219,18 @@ pub struct FrameCache {
 
 impl FrameCache {
     pub fn new(max_entries: usize) -> Self {
-        Self { entries: BTreeMap::new(), max_entries: max_entries.max(1) }
+        Self {
+            entries: BTreeMap::new(),
+            max_entries: max_entries.max(1),
+        }
     }
 
     /// 时间量化到毫秒（避免浮点噪声造成缓存永不命中）。
     fn key(source: &str, seconds: f64) -> (String, i64) {
-        (source.to_owned(), (seconds.max(0.0) * 1000.0).round() as i64)
+        (
+            source.to_owned(),
+            (seconds.max(0.0) * 1000.0).round() as i64,
+        )
     }
 
     pub fn get(&self, source: &str, seconds: f64) -> Option<&DecodedFrame> {
@@ -256,7 +288,10 @@ pub fn with_media_duration(
     playback: PlaybackMap,
 ) -> Result<PlaybackMap, DecodeFailure> {
     let duration = decoder.duration_seconds(source)?;
-    Ok(PlaybackMap { media_duration: duration, ..playback })
+    Ok(PlaybackMap {
+        media_duration: duration,
+        ..playback
+    })
 }
 
 /// 只有图片（无时间维度）的类型。
@@ -326,7 +361,11 @@ mod tests {
             Ok(3.5)
         }
 
-        fn frame_at(&mut self, source: &MediaSource, local_seconds: f64) -> Result<DecodedFrame, DecodeFailure> {
+        fn frame_at(
+            &mut self,
+            source: &MediaSource,
+            local_seconds: f64,
+        ) -> Result<DecodedFrame, DecodeFailure> {
             self.frames_requested.push(local_seconds);
             let marker = ((local_seconds * 1000.0).round() as i64).rem_euclid(256) as u8;
             Ok(DecodedFrame {
@@ -343,17 +382,35 @@ mod tests {
     #[test]
     fn local_time_matches_the_contract_formula() {
         // 与 contracts `mediaTimelineLocalTime` 同一组用例。
-        let map = PlaybackMap { start_time: 2.0, duration: 3.0, time_scale: 1.0, looped: false, media_duration: 10.0 };
+        let map = PlaybackMap {
+            start_time: 2.0,
+            duration: 3.0,
+            time_scale: 1.0,
+            looped: false,
+            media_duration: 10.0,
+        };
         assert_eq!(map.local_time(1.0), None);
         assert_eq!(map.local_time(2.0), Some(0.0));
         assert_eq!(map.local_time(5.0), Some(3.0));
         assert_eq!(map.local_time(100.0), Some(3.0));
 
-        let scaled = PlaybackMap { start_time: 2.0, duration: 3.0, time_scale: 2.0, looped: false, media_duration: 10.0 };
+        let scaled = PlaybackMap {
+            start_time: 2.0,
+            duration: 3.0,
+            time_scale: 2.0,
+            looped: false,
+            media_duration: 10.0,
+        };
         assert_eq!(scaled.local_time(3.0), Some(2.0));
         assert_eq!(scaled.local_time(3.5), Some(3.0));
 
-        let looped = PlaybackMap { start_time: 0.0, duration: 3.0, time_scale: 1.0, looped: true, media_duration: 3.0 };
+        let looped = PlaybackMap {
+            start_time: 0.0,
+            duration: 3.0,
+            time_scale: 1.0,
+            looped: true,
+            media_duration: 3.0,
+        };
         assert!((looped.local_time(7.0).unwrap() - 1.0).abs() < 1e-9);
         assert!((looped.local_time(6.0).unwrap()).abs() < 1e-9);
     }
@@ -362,53 +419,95 @@ mod tests {
     fn zero_duration_plays_the_first_frame() {
         let map = PlaybackMap::default();
         assert_eq!(map.local_time(5.0), Some(0.0));
-        let media_only = PlaybackMap { media_duration: 4.0, ..PlaybackMap::default() };
+        let media_only = PlaybackMap {
+            media_duration: 4.0,
+            ..PlaybackMap::default()
+        };
         assert_eq!(media_only.local_time(2.0), Some(2.0));
         assert_eq!(media_only.local_time(9.0), Some(4.0));
     }
 
     #[test]
     fn invalid_inputs_are_clamped_not_propagated() {
-        let map = PlaybackMap { start_time: 0.0, duration: 2.0, time_scale: f64::NAN, looped: false, media_duration: 2.0 };
+        let map = PlaybackMap {
+            start_time: 0.0,
+            duration: 2.0,
+            time_scale: f64::NAN,
+            looped: false,
+            media_duration: 2.0,
+        };
         // 非法 timeScale 退化为 1，而不是产出 NaN 时间。
         assert_eq!(map.local_time(1.0), Some(1.0));
-        let map = PlaybackMap { start_time: 0.0, duration: 2.0, time_scale: 1.0, looped: false, media_duration: 2.0 };
+        let map = PlaybackMap {
+            start_time: 0.0,
+            duration: 2.0,
+            time_scale: 1.0,
+            looped: false,
+            media_duration: 2.0,
+        };
         assert_eq!(map.local_time(f64::NAN), Some(0.0));
         assert_eq!(map.local_time(-5.0), Some(0.0));
     }
 
     #[test]
     fn sampling_selects_the_frame_covering_the_target_time() {
-        let mut decoder = FakeDecoder { frames_requested: Vec::new() };
+        let mut decoder = FakeDecoder {
+            frames_requested: Vec::new(),
+        };
         let mut cache = FrameCache::new(8);
         let source = source("a", "video/mp4");
-        let playback = PlaybackMap { start_time: 0.0, duration: 3.0, time_scale: 1.0, looped: false, media_duration: 3.0 };
+        let playback = PlaybackMap {
+            start_time: 0.0,
+            duration: 3.0,
+            time_scale: 1.0,
+            looped: false,
+            media_duration: 3.0,
+        };
 
-        let first = sample_media(&mut decoder, &mut cache, &source, &playback, 1.25).expect("frame");
+        let first =
+            sample_media(&mut decoder, &mut cache, &source, &playback, 1.25).expect("frame");
         assert!((first.pts_seconds - 1.25).abs() < 1e-9);
         // 同一时刻命中缓存，不重复解码。
-        let again = sample_media(&mut decoder, &mut cache, &source, &playback, 1.25).expect("cached");
+        let again =
+            sample_media(&mut decoder, &mut cache, &source, &playback, 1.25).expect("cached");
         assert_eq!(again.rgba, first.rgba);
         assert_eq!(decoder.frames_requested, vec![1.25]);
     }
 
     #[test]
     fn sampling_holds_the_last_frame_past_the_end() {
-        let mut decoder = FakeDecoder { frames_requested: Vec::new() };
+        let mut decoder = FakeDecoder {
+            frames_requested: Vec::new(),
+        };
         let mut cache = FrameCache::new(8);
         let source = source("a", "video/mp4");
-        let playback = PlaybackMap { start_time: 0.0, duration: 2.0, time_scale: 1.0, looped: false, media_duration: 2.0 };
-        let frame = sample_media(&mut decoder, &mut cache, &source, &playback, 10.0).expect("frame");
+        let playback = PlaybackMap {
+            start_time: 0.0,
+            duration: 2.0,
+            time_scale: 1.0,
+            looped: false,
+            media_duration: 2.0,
+        };
+        let frame =
+            sample_media(&mut decoder, &mut cache, &source, &playback, 10.0).expect("frame");
         // 尾帧保持在 duration，而不是「第一个解码帧」。
         assert!((frame.pts_seconds - 2.0).abs() < 1e-9);
     }
 
     #[test]
     fn before_start_time_uses_the_first_frame() {
-        let mut decoder = FakeDecoder { frames_requested: Vec::new() };
+        let mut decoder = FakeDecoder {
+            frames_requested: Vec::new(),
+        };
         let mut cache = FrameCache::new(8);
         let source = source("a", "video/mp4");
-        let playback = PlaybackMap { start_time: 2.0, duration: 3.0, time_scale: 1.0, looped: false, media_duration: 5.0 };
+        let playback = PlaybackMap {
+            start_time: 2.0,
+            duration: 3.0,
+            time_scale: 1.0,
+            looped: false,
+            media_duration: 5.0,
+        };
         let frame = sample_media(&mut decoder, &mut cache, &source, &playback, 0.5).expect("frame");
         assert!((frame.pts_seconds - 0.0).abs() < 1e-9);
     }
@@ -417,12 +516,16 @@ mod tests {
     fn cache_is_bounded() {
         let mut cache = FrameCache::new(2);
         for index in 0..5 {
-            cache.insert("a", index as f64, DecodedFrame {
-                width: 1,
-                height: 1,
-                rgba: vec![index as u8; 4],
-                pts_seconds: index as f64,
-            });
+            cache.insert(
+                "a",
+                index as f64,
+                DecodedFrame {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![index as u8; 4],
+                    pts_seconds: index as f64,
+                },
+            );
         }
         assert_eq!(cache.len(), 2);
         // 最新的一项一定在。
@@ -433,12 +536,18 @@ mod tests {
     fn budget_rejects_oversized_media() {
         let budget = DecodeBudget::default();
         assert!(budget.check_size(1280, 720).is_ok());
-        assert_eq!(budget.check_size(0, 720).expect_err("zero").code, "recording-media-invalid-size");
+        assert_eq!(
+            budget.check_size(0, 720).expect_err("zero").code,
+            "recording-media-invalid-size"
+        );
         let error = budget.check_size(5000, 100).expect_err("edge");
         assert_eq!(error.code, "recording-media-too-large");
         assert_eq!(error.stage, DecodeStage::Budget);
         // 像素预算单独生效：把上限压低后，边长合规但像素超限也要拒绝。
-        let tight = DecodeBudget { max_frame_pixels: 1_000_000, ..DecodeBudget::default() };
+        let tight = DecodeBudget {
+            max_frame_pixels: 1_000_000,
+            ..DecodeBudget::default()
+        };
         let error = tight.check_size(2000, 2000).expect_err("pixels");
         assert_eq!(error.code, "recording-media-too-large");
         assert_eq!(error.stage, DecodeStage::Budget);
@@ -453,7 +562,9 @@ mod tests {
             "recording-media-unsupported"
         );
         assert_eq!(
-            validate_source_type("application/octet-stream").expect_err("other").code,
+            validate_source_type("application/octet-stream")
+                .expect_err("other")
+                .code,
             "recording-media-unsupported"
         );
     }
@@ -463,7 +574,9 @@ mod tests {
         let root = std::path::Path::new("/tmp/work/attempt-1");
         assert!(ensure_inside(root, &root.join("resource-0.bin")).is_ok());
         assert_eq!(
-            ensure_inside(root, std::path::Path::new("/etc/passwd")).expect_err("outside").code,
+            ensure_inside(root, std::path::Path::new("/etc/passwd"))
+                .expect_err("outside")
+                .code,
             "recording-media-path-rejected"
         );
         assert!(ensure_inside(root, std::path::Path::new("/tmp/work/attempt-10/x")).is_err());
@@ -471,8 +584,15 @@ mod tests {
 
     #[test]
     fn media_duration_is_filled_from_the_decoder() {
-        let mut decoder = FakeDecoder { frames_requested: Vec::new() };
-        let filled = with_media_duration(&mut decoder, &source("a", "video/mp4"), PlaybackMap::default()).expect("duration");
+        let mut decoder = FakeDecoder {
+            frames_requested: Vec::new(),
+        };
+        let filled = with_media_duration(
+            &mut decoder,
+            &source("a", "video/mp4"),
+            PlaybackMap::default(),
+        )
+        .expect("duration");
         assert_eq!(filled.media_duration, 3.5);
         // 只补时长，不改其它字段。
         assert_eq!(filled.start_time, 0.0);

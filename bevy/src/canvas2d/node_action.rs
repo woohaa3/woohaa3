@@ -24,7 +24,7 @@ use super::Visuals;
 use super::geometry::Geometry;
 use super::labels::{Label, LabelRequests, LabelStyle};
 use super::layout::{
-    NODE_ACTION_TOOLBAR_FONT, NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_PAD,
+    NODE_ACTION_TOOLBAR_ACTION_HEIGHT, NODE_ACTION_TOOLBAR_FONT, NODE_ACTION_TOOLBAR_PAD,
     node_action_toolbar,
 };
 
@@ -70,10 +70,19 @@ pub(crate) fn draw(
             continue;
         };
 
-        let scale = layout.bar.3 / (NODE_ACTION_TOOLBAR_ACTION_HEIGHT + NODE_ACTION_TOOLBAR_PAD * 2.0);
+        let scale =
+            layout.bar.3 / (NODE_ACTION_TOOLBAR_ACTION_HEIGHT + NODE_ACTION_TOOLBAR_PAD * 2.0);
         let (bx, by, bw, bh) = layout.bar;
         geometry.rounded_rect(bx, by, bw, bh, BAR_RADIUS * scale, z, border);
-        geometry.rounded_rect(bx + scale, by + scale, (bw - 2.0 * scale).max(scale), (bh - 2.0 * scale).max(scale), (BAR_RADIUS - 1.0) * scale, z + 0.001, surface);
+        geometry.rounded_rect(
+            bx + scale,
+            by + scale,
+            (bw - 2.0 * scale).max(scale),
+            (bh - 2.0 * scale).max(scale),
+            (BAR_RADIUS - 1.0) * scale,
+            z + 0.001,
+            surface,
+        );
         // 横条文字是**固定屏幕字号**：`layout` 已是世界矩形（屏幕像素 ÷ zoom），因此文字在
         // 世界空间里的高度是 `NODE_ACTION_TOOLBAR_FONT / zoom`（下面的 `world_font` 只用于
         // 垂直居中），而 `Label.size` 传**屏幕逻辑字号**，由共享文字策略用实体尺度抵消相机
@@ -85,36 +94,88 @@ pub(crate) fn draw(
         for slot in &layout.slots {
             let (ax, ay, aw, ah) = slot.rect;
             let primary = slot.tone == "primary";
-            let tint = if !slot.enabled { body_text } else if primary { theme.token_u32("interactionOnAccent") } else { body_text };
+            let tint = if !slot.enabled {
+                body_text
+            } else if primary {
+                theme.token_u32("interactionOnAccent")
+            } else {
+                body_text
+            };
             if primary {
-                let fill = if slot.enabled { accent } else { theme.token_u32("interactionDisabled") };
+                let fill = if slot.enabled {
+                    accent
+                } else {
+                    theme.token_u32("interactionDisabled")
+                };
                 geometry.rounded_rect(ax, ay, aw, ah, ACTION_RADIUS * scale, z + 0.002, fill);
             }
-            if slot.icon.as_deref() == Some("download") {
+            if matches!(
+                slot.icon.as_deref(),
+                Some("download" | "collapse-groups" | "expand-groups")
+            ) {
                 let center = Vec2::new(ax + aw / 2.0, ay + ah / 2.0);
                 let point = |x: f32, y: f32| center + Vec2::new(x, y) * scale;
-                for (from, to) in [((0.0, -7.0), (0.0, 3.0)), ((-4.0, -1.0), (0.0, 3.0)), ((0.0, 3.0), (4.0, -1.0)), ((-6.0, 3.0), (-6.0, 7.0)), ((-6.0, 7.0), (6.0, 7.0)), ((6.0, 7.0), (6.0, 3.0))] {
-                    geometry.line(point(from.0, from.1), point(to.0, to.1), 1.5 * scale, z + 0.004, tint);
+                let segments: &[((f32, f32), (f32, f32))] = match slot.icon.as_deref() {
+                    Some("download") => &[
+                        ((0.0, -7.0), (0.0, 3.0)),
+                        ((-4.0, -1.0), (0.0, 3.0)),
+                        ((0.0, 3.0), (4.0, -1.0)),
+                        ((-6.0, 3.0), (-6.0, 7.0)),
+                        ((-6.0, 7.0), (6.0, 7.0)),
+                        ((6.0, 7.0), (6.0, 3.0)),
+                    ],
+                    Some("expand-groups") => &[
+                        ((0.0, 6.0), (0.0, -2.0)),
+                        ((-4.0, 2.0), (0.0, -2.0)),
+                        ((4.0, 2.0), (0.0, -2.0)),
+                        ((-6.0, -6.0), (-6.0, 6.0)),
+                        ((6.0, -6.0), (6.0, 6.0)),
+                    ],
+                    Some("collapse-groups") => &[
+                        ((0.0, -6.0), (0.0, 2.0)),
+                        ((-4.0, -2.0), (0.0, 2.0)),
+                        ((4.0, -2.0), (0.0, 2.0)),
+                        ((-6.0, -6.0), (-6.0, 6.0)),
+                        ((6.0, -6.0), (6.0, 6.0)),
+                    ],
+                    _ => &[],
+                };
+                for (from, to) in segments {
+                    geometry.line(
+                        point(from.0, from.1),
+                        point(to.0, to.1),
+                        1.5 * scale,
+                        z + 0.004,
+                        tint,
+                    );
                 }
             }
             if !slot.icon_only {
                 let text_y = ay + (ah - world_font) / 2.0 - scale;
-                labels.push((slot.label.clone(), Vec2::new(ax + 8.0 * scale, text_y), screen_font, tint));
+                labels.push((
+                    slot.label.clone(),
+                    Vec2::new(ax + 8.0 * scale, text_y),
+                    screen_font,
+                    tint,
+                ));
             }
             if let Some((mx, my, mw, mh)) = slot.menu {
                 let center = Vec2::new(mx + mw / 2.0, my + mh / 2.0);
-                geometry.polygon(&[center + Vec2::new(-4.0, -1.5) * scale, center + Vec2::new(4.0, -1.5) * scale, center + Vec2::new(0.0, 3.0) * scale], z + 0.004, body_text);
+                geometry.polygon(
+                    &[
+                        center + Vec2::new(-4.0, -1.5) * scale,
+                        center + Vec2::new(4.0, -1.5) * scale,
+                        center + Vec2::new(0.0, 3.0) * scale,
+                    ],
+                    z + 0.004,
+                    body_text,
+                );
             }
         }
-        // 模型名摘要：最右侧弱化文本。
+        // 节点摘要：最左侧弱化文本。
         if let Some((text, (sx, sy, _sw, sh))) = &layout.summary {
             let text_y = sy + (sh - world_font) / 2.0 - scale;
-            labels.push((
-                text.clone(),
-                Vec2::new(*sx, text_y),
-                screen_font,
-                body_text,
-            ));
+            labels.push((text.clone(), Vec2::new(*sx, text_y), screen_font, body_text));
         }
         out.push((*entity, labels));
     }
@@ -139,7 +200,8 @@ pub(crate) fn sync_node_action_bars(
 ) {
     requests.begin(CanvasLabelRole::NodeAction);
     // 图片/视频聚焦期间不绘制画布横条（横条只属于普通画布）。
-    let focused = super::image_focus::has_presented_media_focus(&scene.0) || scene.0.model_focus.is_some();
+    let focused =
+        super::image_focus::has_presented_media_focus(&scene.0) || scene.0.model_focus.is_some();
     let viewport = (
         scene.0.viewport.x,
         scene.0.viewport.y,
@@ -364,7 +426,10 @@ mod tests {
                 (target.font_size * target.scale - NODE_ACTION_TOOLBAR_FONT / zoom).abs() <= 1.0e-3
             );
         }
-        assert!(keys.iter().all(|key| *key == keys[0]), "连续缩放不得产生新字号键：{keys:?}");
+        assert!(
+            keys.iter().all(|key| *key == keys[0]),
+            "连续缩放不得产生新字号键：{keys:?}"
+        );
     }
 
     #[test]
@@ -398,9 +463,14 @@ mod tests {
         let mesh = geometry.build();
         let positions = mesh
             .attribute(bevy::render::mesh::Mesh::ATTRIBUTE_POSITION)
-            .expect("positions").as_float3().expect("float3 positions");
+            .expect("positions")
+            .as_float3()
+            .expect("float3 positions");
         let min_y = positions.iter().map(|p| p[1]).fold(f32::MAX, f32::min);
         let max_y = positions.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
-        assert!(min_y >= -193.0 && max_y <= -151.0, "min={min_y} max={max_y}");
+        assert!(
+            min_y >= -193.0 && max_y <= -151.0,
+            "min={min_y} max={max_y}"
+        );
     }
 }

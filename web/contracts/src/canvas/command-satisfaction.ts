@@ -17,6 +17,7 @@ import { snapGraphPosition } from "./domain/core/serialization.js";
 import { decodeFilmSetNodeData } from "./canvas-node-model.js";
 import { filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { readFilmSetContent } from "./film-set-content.js";
+import { readFilmSetGroupMarker } from "./film-set-group.js";
 
 /** 读取节点（缺失返回 undefined）。 */
 function findNode(canvas: ServerCanvas, nodeId: string) {
@@ -111,6 +112,18 @@ export function isCanvasCommandSatisfied(canvas: ServerCanvas, command: CanvasCo
       // 对象级操作的后置条件：按稳定 itemId 观察结果，不做数组序号比较。
       // 具体内容由服务端 reducer 派生，这里只要求目标 item 的期望状态成立。
       return filmSetItemSatisfied(canvas, command);
+    case "filmSetGroup.bindingPatch": {
+      const marker = readFilmSetGroupMarker(canvas.nodeData[command.groupId]);
+      const binding = marker?.sceneBindings.find(entry => entry.bindingId === command.bindingId);
+      if (!binding) return false;
+      if (command.patch.animation !== undefined && JSON.stringify(binding.animation) !== JSON.stringify(command.patch.animation)) return false;
+      if (command.patch.contentKey !== undefined && binding.contentKey !== command.patch.contentKey) return false;
+      if (command.patch.visibility !== undefined && binding.visibility !== command.patch.visibility) return false;
+      if (command.patch.transform !== undefined && !shallowEqual(binding.transform, command.patch.transform)) return false;
+      return true;
+    }
+    case "filmSetGroup.ungroup":
+      return !findNode(canvas, command.groupId) && !readFilmSetGroupMarker(canvas.nodeData[command.groupId]);
     case "extension.command": {
       const owner = content?.resolve(command.extensionId)?.commands;
       if (!owner || !owner.kinds.includes(command.kind)) return false;

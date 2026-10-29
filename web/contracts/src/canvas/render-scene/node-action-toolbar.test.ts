@@ -66,7 +66,7 @@ describe("nodeActionToolbarLayout（任务 3.1）", () => {
     expect(chevron.width).toBeGreaterThan(0);
   });
 
-  it("模型名摘要在最右且在横条内；超长截断", () => {
+  it("节点摘要在最左且在横条内；超长截断", () => {
     const layout = nodeActionToolbarLayout({
       node: NODE,
       actions: actions("下载", "转为片场"),
@@ -78,7 +78,8 @@ describe("nodeActionToolbarLayout（任务 3.1）", () => {
     const summary = layout.summary!;
     expect(summary.text.endsWith("…")).toBe(true);
     expect(estimateNodeActionTextWidth(summary.text, 13)).toBeLessThanOrEqual(NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH + 0.001);
-    expect(summary.rect.x).toBeGreaterThanOrEqual(layout.actions[1]!.x + layout.actions[1]!.width);
+    expect(summary.rect.x).toBeGreaterThanOrEqual(layout.bar.x);
+    expect(layout.actions[0]!.x).toBeGreaterThanOrEqual(summary.rect.x + summary.rect.width);
     expect(summary.rect.x + summary.rect.width).toBeLessThanOrEqual(layout.bar.x + layout.bar.width + 0.001);
   });
 

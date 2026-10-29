@@ -4,7 +4,10 @@
 use bevy::prelude::*;
 
 use super::components::PreviewUpdatePolicy;
-use super::constants::{DEFAULT_MAX_PREVIEW_PIXELS_PER_FRAME, DEFAULT_MAX_PREVIEW_UPDATES_PER_FRAME, MAX_PREVIEW_DIMENSION};
+use super::constants::{
+    DEFAULT_MAX_PREVIEW_PIXELS_PER_FRAME, DEFAULT_MAX_PREVIEW_UPDATES_PER_FRAME,
+    MAX_PREVIEW_DIMENSION,
+};
 
 /// preview 输出目标。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -86,8 +89,16 @@ pub fn preview_viewport_rect(surface: Vec2, aspect: f32) -> bevy::math::Vec4 {
         height = max_height;
         width = height * aspect;
     }
-    let x = if compact { (surface.x - width) / 2.0 } else { 28.0 };
-    let y = if compact { 82.0 } else { surface.y - height - 28.0 };
+    let x = if compact {
+        (surface.x - width) / 2.0
+    } else {
+        28.0
+    };
+    let y = if compact {
+        82.0
+    } else {
+        surface.y - height - 28.0
+    };
     Vec4::new(x, y, width, height)
 }
 

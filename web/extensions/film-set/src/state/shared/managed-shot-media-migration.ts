@@ -1,12 +1,23 @@
 /** Old shot codecs are interpreted only at this explicit offline boundary. */
-import { decodeFilmSetNodeData, decodeShotPreviewData, filmSetAnimationsOf, isFilmSetNode, managedNodeRelationOf, ManagedNodeLifecycleRegistry, planManagedNodeLifecycles, type ManagedNodeMigrationAdapter } from "@woohaa3/contracts";
+import { ensureFilmSetGroupBadgeScale, ensureFilmSetGroupMemberLayout, migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection, isFilmSetGroupNode, decodeShotPreviewData, filmSetAnimationsOf, isFilmSetNode, managedNodeRelationOf, ManagedNodeLifecycleRegistry, planManagedNodeLifecycles, type ManagedNodeMigrationAdapter } from "@woohaa3/contracts";
 import { managedShotMediaData, managedShotMediaNodeId, managedShotMediaType } from "./managed-shot-media.js";
 import { filmSetManagedLifecycle } from "./managed-shot-media-lifecycle.js";
 
 export const filmSetManagedMediaMigration: ManagedNodeMigrationAdapter = {
   extensionId: "film-set", schemaVersion: 1,
   migrate(input) {
-    const canvas = structuredClone(input), entities = new Set<string>();
+    let canvas = structuredClone(input);
+    const entities = new Set<string>();
+    for (const node of [...canvas.document.nodes]) {
+      if (node.type !== "composite-asset" || !isFilmSetNode(node.type, canvas.nodeData[node.id]) || canvas.nodeData[node.id]?.filmSetObject !== undefined) continue;
+      const migrated = migrateLegacyFilmSetToGroup(canvas, node.id, { commandId: "film-set-group-migration-v1", groupId: node.id });
+      if (!migrated.ok) throw Error(`film-set-group-migration-failed: ${canvas.id}/${node.id}: ${migrated.reason}`);
+      canvas = migrated.canvas;
+    }
+    // 片场场景画在 3D 徽标里：已经迁移过、还没有显式倍率的画布补一次默认值（幂等）。
+    canvas = ensureFilmSetGroupBadgeScale(canvas).canvas;
+    // 成员若散在气泡外（迁移沿用片场坐标系的原始摆放），补一次网格重排；幂等。
+    canvas = ensureFilmSetGroupMemberLayout(canvas).canvas;
     for (const node of canvas.document.nodes) {
       const data = canvas.nodeData[node.id];
       const relation = managedNodeRelationOf(data);
@@ -19,9 +30,9 @@ export const filmSetManagedMediaMigration: ManagedNodeMigrationAdapter = {
       const ownerId = relation?.ownerNodeId ?? (decoded?.ok ? decoded.value.shotPreview.filmSetNodeId : "");
       const clipId = relation?.entityId ?? (decoded?.ok ? decoded.value.shotPreview.clipId : "");
       const owner = canvas.document.nodes.find(n => n.id === ownerId);
-      if (!owner || !isFilmSetNode(owner.type, canvas.nodeData[ownerId])) throw Error(`managed-media-migration-source-missing: ${canvas.id}/${node.id}`);
-      const source = decodeFilmSetNodeData(canvas.nodeData[ownerId]);
-      const clip = source.ok ? filmSetAnimationsOf(source.value).clips.find(c => c.id === clipId) : null;
+      if (!owner || !isFilmSetGroupNode(owner, canvas.nodeData[ownerId])) throw Error(`managed-media-migration-source-missing: ${canvas.id}/${node.id}`);
+      const source = readFilmSetAnimationProjection(canvas, ownerId);
+      const clip = source ? filmSetAnimationsOf(source).clips.find(c => c.id === clipId) : null;
       if (!clip || node.id !== managedShotMediaNodeId(ownerId, clipId) || (node.parentId ?? null) !== (owner.parentId ?? null)) throw Error(`managed-media-migration-conflict: ${canvas.id}/${node.id}`);
       const key = JSON.stringify([ownerId, clipId]);
       if (entities.has(key)) throw Error(`managed-media-migration-duplicate: ${canvas.id}/${node.id}`);

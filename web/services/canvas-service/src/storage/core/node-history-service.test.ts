@@ -463,12 +463,11 @@ describe("节点历史 repository / 应用服务", () => {
     const detail = await service.getDetail({ canvasId: CANVAS, nodeId: "node-1", entryId });
     expect(detail.kind).toBe("model");
     if (detail.kind === "model") {
-      expect(detail.animation?.filmSetContent).toEqual(filmSet);
+      expect(detail.animation?.schemaVersion === 3 ? detail.animation.filmSetContent : undefined).toEqual(filmSet);
     }
     const outcome = await service.restore({ canvasId: CANVAS, nodeId: "node-1", entryId });
-    expect(outcome.ok).toBe(true);
-    const restored = room.canvas.nodeData["node-1"] as { filmSetContent?: unknown };
-    expect(restored.filmSetContent).toEqual(filmSet);
+    expect(outcome.ok).toBe(false);
+    expect(room.canvas.nodeData["node-1"]?.filmSetContent).toEqual(filmSet);
   });
 
   it("恢复旧片场历史 payload（schema 1/2）明确拒绝且不改当前内容", async () => {

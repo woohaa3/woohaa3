@@ -85,10 +85,18 @@ mod tests {
 
     #[test]
     fn rejects_unknown_version_and_out_of_range_and_nan() {
-        assert!(progress("woohaa-focus-transition-v2", 0.5).validate().is_err());
+        assert!(
+            progress("woohaa-focus-transition-v2", 0.5)
+                .validate()
+                .is_err()
+        );
         assert!(progress(FOCUS_TRANSITION_VERSION, 1.5).validate().is_err());
         assert!(progress(FOCUS_TRANSITION_VERSION, -0.1).validate().is_err());
-        assert!(progress(FOCUS_TRANSITION_VERSION, f32::NAN).validate().is_err());
+        assert!(
+            progress(FOCUS_TRANSITION_VERSION, f32::NAN)
+                .validate()
+                .is_err()
+        );
     }
 
     #[test]

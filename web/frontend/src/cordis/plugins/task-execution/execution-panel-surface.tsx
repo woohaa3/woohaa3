@@ -17,6 +17,7 @@ import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
 import { layoutNodePanel, usableCanvasArea, type AnchoredPanel } from "./node-anchor-layout.js";
 import { FullscreenPanelHost } from "./execution-panel/fullscreen-panel-host.js";
+import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { panelKindForNodeType } from "./node-panel-registry.js";
 import type { ExecutionPanelPresentation } from "../../navigation/contracts.js";
 

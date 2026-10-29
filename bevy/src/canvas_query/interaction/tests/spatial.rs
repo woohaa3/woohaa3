@@ -24,7 +24,10 @@ fn grid_scene(count: usize) -> Scene {
 }
 
 /// 与索引无关的暴力点命中：只按节点本体判定（用于对照）。
-fn brute_force_node_hit(snapshot: &crate::canvas_query::interaction::snapshot::InteractionSnapshot, world: Vec2) -> Option<String> {
+fn brute_force_node_hit(
+    snapshot: &crate::canvas_query::interaction::snapshot::InteractionSnapshot,
+    world: Vec2,
+) -> Option<String> {
     snapshot
         .order
         .iter()
@@ -38,7 +41,13 @@ fn brute_force_node_hit(snapshot: &crate::canvas_query::interaction::snapshot::I
 fn point_hits_on_a_thousand_nodes_match_brute_force() {
     clear_snapshot();
     let generation = accept_scene(&grid_scene(1000));
-    for (x, y) in [(0.0, 0.0), (123.0, 77.0), (5_000.0, 3_500.0), (10_000.0, 8_000.0), (-40.0, -40.0)] {
+    for (x, y) in [
+        (0.0, 0.0),
+        (123.0, 77.0),
+        (5_000.0, 3_500.0),
+        (10_000.0, 8_000.0),
+        (-40.0, -40.0),
+    ] {
         let hit = point_query(generation, x, y, 1.0, None).hit;
         let node_hit = match hit {
             Some(PointHit::Node { node_id }) => Some(node_id),
@@ -46,8 +55,10 @@ fn point_hits_on_a_thousand_nodes_match_brute_force() {
             None => None,
         };
         // 对照：用同一快照的全量顺序重新判定节点本体命中。
-        let expected = with_snapshot(generation, |snapshot| brute_force_node_hit(snapshot, Vec2::new(x, y)))
-            .expect("snapshot");
+        let expected = with_snapshot(generation, |snapshot| {
+            brute_force_node_hit(snapshot, Vec2::new(x, y))
+        })
+        .expect("snapshot");
         assert_eq!(node_hit, expected, "point ({x}, {y}) 必须与全量扫描一致");
     }
 }
@@ -66,7 +77,9 @@ fn overlapping_cards_keep_topmost_hit_with_spatial_candidates() {
     ));
     assert_eq!(
         point_query(generation, 200.0, 175.0, 1.0, None).hit,
-        Some(PointHit::Node { node_id: "c".into() })
+        Some(PointHit::Node {
+            node_id: "c".into()
+        })
     );
 }
 
@@ -88,7 +101,12 @@ fn marquee_on_a_thousand_nodes_matches_document_order_scan() {
             .filter(|node| match &node.scope {
                 Some(scope) => crate::canvas_query::scope::intersects_rect(
                     scope,
-                    crate::canvas_query::scope::ScopeRect { x: left, y: top, width: right - left, height: bottom - top },
+                    crate::canvas_query::scope::ScopeRect {
+                        x: left,
+                        y: top,
+                        width: right - left,
+                        height: bottom - top,
+                    },
                 ),
                 None => {
                     let (nx, ny, nw, nh) = node.bounds;
@@ -115,7 +133,11 @@ fn probe_candidates_match_full_scan_on_one_side_only() {
     let next = probe_query(generation, "n21", "next").candidates;
     let prev = probe_query(generation, "n21", "prev").candidates;
     let expected = with_snapshot(generation, |snapshot| {
-        let source = snapshot.nodes.iter().find(|node| node.id == "n21").expect("source");
+        let source = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == "n21")
+            .expect("source");
         let next = snapshot
             .nodes
             .iter()
@@ -131,8 +153,18 @@ fn probe_candidates_match_full_scan_on_one_side_only() {
         (next, prev)
     })
     .expect("snapshot");
-    assert_eq!(next.iter().map(|candidate| candidate.node_id.clone()).collect::<Vec<String>>(), expected.0);
-    assert_eq!(prev.iter().map(|candidate| candidate.node_id.clone()).collect::<Vec<String>>(), expected.1);
+    assert_eq!(
+        next.iter()
+            .map(|candidate| candidate.node_id.clone())
+            .collect::<Vec<String>>(),
+        expected.0
+    );
+    assert_eq!(
+        prev.iter()
+            .map(|candidate| candidate.node_id.clone())
+            .collect::<Vec<String>>(),
+        expected.1
+    );
     assert!(!next.is_empty());
 }
 
@@ -144,8 +176,16 @@ fn position_increments_relocate_spatial_candidates_without_full_rebuild() {
         version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.to_owned(),
         base_scene_generation: base,
         positions: vec![
-            crate::protocol::NodePosition { id: "n0".into(), x: 9_000.0, y: 9_000.0 },
-            crate::protocol::NodePosition { id: "n1".into(), x: -9_000.0, y: -9_000.0 },
+            crate::protocol::NodePosition {
+                id: "n0".into(),
+                x: 9_000.0,
+                y: 9_000.0,
+            },
+            crate::protocol::NodePosition {
+                id: "n1".into(),
+                x: -9_000.0,
+                y: -9_000.0,
+            },
         ],
         viewport: None,
     };
@@ -154,16 +194,22 @@ fn position_increments_relocate_spatial_candidates_without_full_rebuild() {
     assert_eq!(point_query(generation, 20.0, 20.0, 1.0, None).hit, None);
     assert_eq!(
         point_query(generation, 9_100.0, 9_100.0, 1.0, None).hit,
-        Some(PointHit::Node { node_id: "n0".into() })
+        Some(PointHit::Node {
+            node_id: "n0".into()
+        })
     );
     assert_eq!(
         point_query(generation, -8_950.0, -8_950.0, 1.0, None).hit,
-        Some(PointHit::Node { node_id: "n1".into() })
+        Some(PointHit::Node {
+            node_id: "n1".into()
+        })
     );
     // 未移动的邻近节点仍然命中。
     assert_eq!(
         point_query(generation, 620.0, 20.0, 1.0, None).hit,
-        Some(PointHit::Node { node_id: "n2".into() })
+        Some(PointHit::Node {
+            node_id: "n2".into()
+        })
     );
 }
 
@@ -187,7 +233,10 @@ fn point_candidates_are_local_instead_of_document_wide() {
 fn selection_resize_handles_still_hit_after_indexing() {
     clear_snapshot();
     let mut scene = grid_scene(5);
-    scene.selection = crate::protocol::Selection { nodes: vec!["n0".into()], edge: None };
+    scene.selection = crate::protocol::Selection {
+        nodes: vec!["n0".into()],
+        edge: None,
+    };
     scene.nodes[0].resizable = true;
     let snapshot = build_snapshot(&scene, 1);
     let mut snapshot = snapshot;

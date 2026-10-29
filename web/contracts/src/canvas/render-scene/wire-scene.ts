@@ -70,9 +70,34 @@ export * from "./wire-shot-preview.js";
  */
 // v27: node capability-driven rendering paths.
 // v28: optional trusted overview-only emptyPlaceholder; older renderers reject the whole frame.
-// v29: group presentation carries badge scale/resize, model bounds and collapsible members;
+// v30: group-owned film-set bindings carry prepared source identities;
 //      media content keeps a provider identity and schema version.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v29" as const;
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v30" as const;
+
+/** Group-owned scene primitives. Kept separate from the legacy composite wire during migration. */
+export const FILM_SET_GROUP_RENDER_SCHEMA_VERSION = "woohaa-film-set-group-render-v1" as const;
+export type BevyFilmSetGroupBinding = {
+  bindingId: string;
+  sourceNodeId: string;
+  kind: "model3d" | "image" | "video";
+  contentKey: string;
+  /** Prepared source-card resource identity; group renderers use this instead of a snapshot. */
+  resourceKey?: string;
+  signature?: string;
+  transform: { x: number; y: number; z: number; yaw: number; scale: number };
+  visible: boolean;
+  diagnostic?: string;
+  aspectRatio?: number;
+};
+export type BevyFilmSetGroupPreparation = {
+  schemaVersion: typeof FILM_SET_GROUP_RENDER_SCHEMA_VERSION;
+  ownerId: string;
+  badgeOrigin: { x: number; y: number };
+  bindings: BevyFilmSetGroupBinding[];
+  ground?: { width: number; depth: number; color?: string };
+  sceneTransform?: { x: number; y: number; z: number; yaw: number; scale: number };
+  activeClip?: string | null;
+};
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
@@ -180,7 +205,7 @@ export type BevyNodeAction = {
 export type BevyNodeActionsPresentation = {
   /** 从左到右排列的动作。 */
   actions: BevyNodeAction[];
-  /** 模型名摘要（可选，显示在动作右侧）。 */
+  /** 节点摘要（可选，显示在动作左侧）。 */
   summary?: string;
 };
 
@@ -432,6 +457,8 @@ export type CanvasRenderScene = {
   revision: number;
   nodes: BevyRenderNode[];
   edges: BevyRenderEdge[];
+  /** Film-set group preparation primitives. Legacy composite fields are never emitted here. */
+  filmSetGroups?: BevyFilmSetGroupPreparation[];
   /**
    * 派生拍摄镜头归属线集合
    * （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。

@@ -3,8 +3,16 @@ use super::*;
 #[test]
 fn ordinary_preview_refresh_preserves_shot_camera_illumination() {
     let mut world = World::new();
-    let light = world.spawn((DirectionalLight::default(), RenderLayers::from_layers(&[0, 7, 40, 41]))).id();
-    for layers in [RenderLayers::from_layers(&[0, 7, 8]), RenderLayers::from_layers(&[0, 7, 9])] {
+    let light = world
+        .spawn((
+            DirectionalLight::default(),
+            RenderLayers::from_layers(&[0, 7, 40, 41]),
+        ))
+        .id();
+    for layers in [
+        RenderLayers::from_layers(&[0, 7, 8]),
+        RenderLayers::from_layers(&[0, 7, 9]),
+    ] {
         merge_scene_light_layers(&mut world, &layers);
         let actual = world.get::<RenderLayers>(light).unwrap();
         for layer in [0, 7, 40, 41] {
@@ -64,7 +72,10 @@ fn model_card_app() -> App {
 fn spawn_model_roots(app: &mut App) {
     let resources = app.world().resource::<ModelAssetTable>().0.clone();
     let scene = app.world().resource::<CurrentScene>().0.clone();
-    let mut models = app.world_mut().remove_resource::<model3d::ModelVisuals>().unwrap();
+    let mut models = app
+        .world_mut()
+        .remove_resource::<model3d::ModelVisuals>()
+        .unwrap();
     let mut focus = app
         .world_mut()
         .remove_resource::<model3d::FocusVisuals>()
@@ -127,15 +138,31 @@ fn many_model_cards_keep_bounded_unique_layers_without_panicking() {
     // Shared residency now caps active views; excess cards must wait instead of
     // allocating ever-higher render layers as the older implementation did.
     assert_eq!(previews.cards.len(), crate::preview_layers::CAPACITY);
-    assert_eq!(app.world().resource::<crate::app::PreviewLayerPool>().0.active(), previews.cards.len());
+    assert_eq!(
+        app.world()
+            .resource::<crate::app::PreviewLayerPool>()
+            .0
+            .active(),
+        previews.cards.len()
+    );
     let mut layers = std::collections::HashSet::new();
     for (id, card) in &previews.cards {
-        assert!(layers.insert(card.layer), "preview layers must remain unique");
-        assert!(!crate::preview_layers::PreviewLayers::is_reserved(card.layer));
+        assert!(
+            layers.insert(card.layer),
+            "preview layers must remain unique"
+        );
+        assert!(!crate::preview_layers::PreviewLayers::is_reserved(
+            card.layer
+        ));
         let expected = RenderLayers::from_layers(&[card.layer]);
-        assert_eq!(app.world().get::<RenderLayers>(card.camera), Some(&expected));
         assert_eq!(
-            app.world().resource::<model3d::ModelVisuals>().preview_layers(id, card.layer, false),
+            app.world().get::<RenderLayers>(card.camera),
+            Some(&expected)
+        );
+        assert_eq!(
+            app.world()
+                .resource::<model3d::ModelVisuals>()
+                .preview_layers(id, card.layer, false),
             Some(expected),
         );
     }
@@ -168,14 +195,16 @@ fn card_camera_is_perspective_matching_focus_lens() {
     let pose = *app.world().get::<Transform>(camera).unwrap();
     let pivot = app.world().resource::<Previews>().pivot("m").unwrap();
     let distance = (pivot - pose.translation).length();
-    let expected =
-        crate::orbit_camera::orthographic_viewport_height(distance, perspective.fov);
+    let expected = crate::orbit_camera::orthographic_viewport_height(distance, perspective.fov);
     assert!(expected.is_finite() && expected > 0.0);
 }
 
 #[test]
 fn preview_shrinks_to_displayed_physical_pixels_when_zoomed_out() {
-    assert_eq!(preview_target_size(240.0, 180.0, 0.25, 2.0), UVec2::new(128, 96));
+    assert_eq!(
+        preview_target_size(240.0, 180.0, 0.25, 2.0),
+        UVec2::new(128, 96)
+    );
 }
 
 #[test]
@@ -280,7 +309,9 @@ fn translation_reuses_cached_preview_and_zoom_refreshes_without_changing_framing
         scene.0.nodes[0].x = 41.125;
         scene.0.nodes[0].y = 23.75;
     }
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = true;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = true;
     app.update();
     let card = &app.world().resource::<Previews>().cards["m"];
     assert_eq!(card.generation, generation);
@@ -290,13 +321,19 @@ fn translation_reuses_cached_preview_and_zoom_refreshes_without_changing_framing
     let moved_pose = *app.world().get::<Transform>(camera).unwrap();
     assert_ne!(moved_pose.translation, old_pose.translation);
     assert_eq!(moved_pose.rotation, old_pose.rotation);
-    assert_eq!(format!("{:?}", app.world().get::<Projection>(camera).unwrap()), projection);
+    assert_eq!(
+        format!("{:?}", app.world().get::<Projection>(camera).unwrap()),
+        projection
+    );
     // Reactivated live rendering follows the moved subject without a texture generation.
-    app.world_mut().resource_mut::<CurrentScene>().0.hover = Some(
-        serde_json::from_value(serde_json::json!({"nodeId":"m"})).unwrap());
+    app.world_mut().resource_mut::<CurrentScene>().0.hover =
+        Some(serde_json::from_value(serde_json::json!({"nodeId":"m"})).unwrap());
     app.update();
     assert!(app.world().get::<Camera>(camera).unwrap().is_active);
-    assert_eq!(app.world().resource::<Previews>().cards["m"].generation, generation);
+    assert_eq!(
+        app.world().resource::<Previews>().cards["m"].generation,
+        generation
+    );
     app.world_mut().resource_mut::<CurrentScene>().0.hover = None;
 
     app.world_mut()
@@ -329,19 +366,33 @@ fn translation_reuses_cached_preview_and_zoom_refreshes_without_changing_framing
     app.update();
     assert!(!app.world().get::<Camera>(camera).unwrap().is_active);
     assert_eq!(app.world().resource::<Assets<Image>>().len(), 2);
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = false;
-    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(2));
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = false;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs(2));
     app.update();
     assert!(app.world().resource::<Previews>().cards.is_empty());
     assert_eq!(app.world().resource::<Assets<Image>>().len(), 0);
     assert!(app.world().get_entity(camera).is_err());
     assert!(app.world().get_entity(sprite).is_err());
     assert!(app.world().resource::<Ready>().0.lock().unwrap().is_empty());
-    app.world().resource::<Ready>().0.lock().unwrap().insert(camera, generation);
+    app.world()
+        .resource::<Ready>()
+        .0
+        .lock()
+        .unwrap()
+        .insert(camera, generation);
     app.update();
-    assert!(app.world().resource::<Ready>().0.lock().unwrap().is_empty(), "late GPU readiness must not retain deleted cameras");
+    assert!(
+        app.world().resource::<Ready>().0.lock().unwrap().is_empty(),
+        "late GPU readiness must not retain deleted cameras"
+    );
     app.world_mut().resource_mut::<CurrentScene>().0.viewport.x = 0.;
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = true;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = true;
     app.update();
     let card = &app.world().resource::<Previews>().cards["m"];
     assert_ne!(card.camera, camera);
@@ -363,18 +414,24 @@ fn late_model_root_rearms_card_generation_and_layers() {
     let (camera, generation) = (card.camera, card.generation);
     assert!(generation > 0, "卡片视图先建立");
     assert_eq!(
-        app.world().resource::<model3d::ModelVisuals>().quality_identity("m"),
+        app.world()
+            .resource::<model3d::ModelVisuals>()
+            .quality_identity("m"),
         "absent",
         "根尚未 spawn"
     );
     assert!(
-        app.world().get::<bevy::render::view::NoIndirectDrawing>(camera).is_some(),
+        app.world()
+            .get::<bevy::render::view::NoIndirectDrawing>(camera)
+            .is_some(),
         "参与就绪门禁的卡片相机必须直接绘制"
     );
 
     // 模型根就位后的下一帧：身份变化必须被签名与质量门禁感知。
     spawn_model_roots(&mut app);
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = false;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = false;
     app.update();
 
     let identity = app
@@ -409,11 +466,12 @@ fn missing_root_drops_layer_dedup_so_respawned_root_is_rewritten() {
     spawn_model_roots(&mut app);
     app.update();
     let layer = app.world().resource::<Previews>().cards["m"].layer;
-    assert!(app
-        .world()
-        .resource::<Previews>()
-        .applied_layers
-        .contains_key("m"));
+    assert!(
+        app.world()
+            .resource::<Previews>()
+            .applied_layers
+            .contains_key("m")
+    );
 
     // 需求收缩：根被回收，但卡片（场景节点）仍在。
     let scene = app.world().resource::<CurrentScene>().0.clone();
@@ -427,7 +485,9 @@ fn missing_root_drops_layer_dedup_so_respawned_root_is_rewritten() {
         "absent",
         "根已回收"
     );
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = false;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = false;
     app.update();
     assert!(
         app.world()
@@ -448,7 +508,9 @@ fn missing_root_drops_layer_dedup_so_respawned_root_is_rewritten() {
         "absent",
         "根已重建"
     );
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = false;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = false;
     app.update();
     let applied = app
         .world()
@@ -474,7 +536,9 @@ fn focused_card_survives_offscreen_expiry() {
     let mut app = model_card_app();
     app.update();
     let camera = app.world().resource::<Previews>().cards["m"].camera;
-    app.world_mut().resource_mut::<crate::app::FocusRig>().focus_node = Some("m".into());
+    app.world_mut()
+        .resource_mut::<crate::app::FocusRig>()
+        .focus_node = Some("m".into());
     app.world_mut()
         .resource_mut::<crate::app::FrameFlags>()
         .changed = false;
@@ -494,11 +558,7 @@ fn focused_card_survives_offscreen_expiry() {
     {
         let state = app.world().resource::<Previews>();
         let card = state.cards.get("m").expect("聚焦中的卡片不得被离屏回收");
-        assert_eq!(
-            state.pivot("m"),
-            Some(card.pivot),
-            "退出聚焦需要卡片注视点"
-        );
+        assert_eq!(state.pivot("m"), Some(card.pivot), "退出聚焦需要卡片注视点");
     }
     assert!(
         app.world().get_entity(camera).is_ok(),
@@ -506,7 +566,9 @@ fn focused_card_survives_offscreen_expiry() {
     );
 
     // 退出聚焦后（不再 occupied）才允许按离屏规则回收：旧相机被删除，卡片按需重建。
-    app.world_mut().resource_mut::<crate::app::FocusRig>().focus_node = None;
+    app.world_mut()
+        .resource_mut::<crate::app::FocusRig>()
+        .focus_node = None;
     app.world_mut()
         .resource_mut::<Time>()
         .advance_by(std::time::Duration::from_secs(3));
@@ -523,13 +585,15 @@ fn card_without_root_releases_its_scheduling_slot_after_a_bounded_wait() {
     let mut app = model_card_app();
     app.update();
     let camera = app.world().resource::<Previews>().cards["m"].camera;
-    assert!(app.world().get::<Camera>(camera).unwrap().is_active, "无根期间保持活跃等待");
-    assert!(app
-        .world()
-        .resource::<Previews>()
-        .cards["m"]
-        .awaiting_root_since
-        .is_some());
+    assert!(
+        app.world().get::<Camera>(camera).unwrap().is_active,
+        "无根期间保持活跃等待"
+    );
+    assert!(
+        app.world().resource::<Previews>().cards["m"]
+            .awaiting_root_since
+            .is_some()
+    );
 
     // 推进超过等待窗口：卡片让出槽位，相机停用（不再反复重画空画面）。
     let waited = super::policy::AWAITING_ROOT_FRAMES + 1;
@@ -620,7 +684,9 @@ fn busy_card_sprite_yields_to_generation_ring() {
     let mut app = model_card_app();
     app.update();
     spawn_model_roots(&mut app);
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = false;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = false;
     app.update();
     assert!(
         app.world()
@@ -630,7 +696,9 @@ fn busy_card_sprite_yields_to_generation_ring() {
     );
 
     app.world_mut().resource_mut::<CurrentScene>().0.nodes[0].busy = true;
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = true;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = true;
     app.update();
     let visibility = *app
         .world()
@@ -641,11 +709,15 @@ fn busy_card_sprite_yields_to_generation_ring() {
     // 回合结束后恢复可见，不需要重建卡片。
     let sprite = app.world().resource::<Previews>().cards["m"].sprite;
     app.world_mut().resource_mut::<CurrentScene>().0.nodes[0].busy = false;
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = true;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = true;
     app.update();
     assert_eq!(app.world().resource::<Previews>().cards["m"].sprite, sprite);
     assert_eq!(
-        *app.world().get::<Visibility>(sprite).expect("恢复时写可见性"),
+        *app.world()
+            .get::<Visibility>(sprite)
+            .expect("恢复时写可见性"),
         Visibility::Inherited
     );
 }
@@ -662,21 +734,34 @@ fn card_layers_come_from_shared_pool_and_return_on_removal() {
         "卡片层不得落在保留层"
     );
     assert_eq!(
-        app.world().resource::<crate::app::PreviewLayerPool>().0.slot_of("m").map(|slot| slot.layer),
+        app.world()
+            .resource::<crate::app::PreviewLayerPool>()
+            .0
+            .slot_of("m")
+            .map(|slot| slot.layer),
         Some(layer),
         "层池必须记录该卡片租约"
     );
 
     // 离屏超过宽限后卡片被回收，层归还（供下一张卡片复用）。
     app.world_mut().resource_mut::<CurrentScene>().0.viewport.x = -10_000.;
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = true;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = true;
     app.update();
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = false;
-    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(2));
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = false;
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs(2));
     app.update();
     assert!(app.world().resource::<Previews>().cards.is_empty());
     assert_eq!(
-        app.world().resource::<crate::app::PreviewLayerPool>().0.active(),
+        app.world()
+            .resource::<crate::app::PreviewLayerPool>()
+            .0
+            .active(),
         0,
         "移除卡片必须归还层"
     );
@@ -700,9 +785,15 @@ fn offscreen_model_count_does_not_shrink_visible_preview() {
             scene.0.nodes.push(node);
         }
     }
-    app.world_mut().resource_mut::<crate::app::FrameFlags>().changed = true;
+    app.world_mut()
+        .resource_mut::<crate::app::FrameFlags>()
+        .changed = true;
     app.update();
     let after = app.world().resource::<Previews>().cards["m"].size;
     assert_eq!(after, before, "离屏模型不参与预览像素预算分摊");
-    assert_eq!(app.world().resource::<Previews>().cards.len(), 1, "只驻留可见卡片");
+    assert_eq!(
+        app.world().resource::<Previews>().cards.len(),
+        1,
+        "只驻留可见卡片"
+    );
 }

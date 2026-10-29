@@ -1,3 +1,4 @@
+import { COMPOSITE_ASSET_SCOPE_AXIS_Y } from "./render-scene/composite-asset-scope.js";
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 import { normalizeCanvas } from "./domain/normalization.js";
@@ -64,14 +65,14 @@ describe("canvas ground anchor", () => {
   });
 
   it("uses the visible ground diamond bottom for composite assets, not the content rect", () => {
-    // 地面菱形外包框半高 = AXIS_Y × (hx + hz) = 0.35355339 × 200。
+    // 地面菱形外包框半高使用当前相机 pitch 的投影轴。
     expect(
       canvasGroundAnchor({
         y: 0,
         height: 300,
         compositeAsset: { scopeGround: { cx: 0, cy: 250, hx: 100, hz: 100 } },
       }),
-    ).toBeCloseTo(250 + 0.35355339 * 200, 5);
+    ).toBeCloseTo(250 + COMPOSITE_ASSET_SCOPE_AXIS_Y * 200, 5);
     // rect 形状（无 scopeGround）仍用矩形底边。
     expect(
       canvasGroundAnchor({ y: 0, height: 300, compositeAsset: {} }),
@@ -147,7 +148,7 @@ describe("2D container emission order", () => {
       },
     ]);
     expect(2286.25 + 941).toBeGreaterThan(2915.75 + 195);
-    expect(ids).toEqual(["stage", "prop"]);
+    expect(ids).toEqual(["prop", "stage"]);
   });
 
   it("keeps the container order stable when a group is collapsed", () => {

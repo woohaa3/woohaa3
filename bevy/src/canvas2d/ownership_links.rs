@@ -109,7 +109,9 @@ pub(super) fn segments(scene: &Scene, resources: &ModelAssets) -> Vec<([f32; 2],
             let Some(target) = nodes.get(id.as_str()) else {
                 continue;
             };
-            if crate::canvas_query::shot_preview::hidden(target) { continue; }
+            if crate::canvas_query::shot_preview::hidden(target) {
+                continue;
+            }
             if scene.model_focus.is_some()
                 && !crate::canvas_query::focus_context::contains(scene, id)
             {
@@ -122,14 +124,36 @@ pub(super) fn segments(scene: &Scene, resources: &ModelAssets) -> Vec<([f32; 2],
                     };
                     *anchor
                 } else if let Some(shot) = &target.shot_preview {
-                    if shot.film_set_node_id != node.id { continue; }
-                    let Some(aabb) = node.composite_asset.as_ref().and_then(|asset| asset.layout_aabb) else { continue; };
-                    let bounds = crate::model3d::scene::ModelAabb::new(aabb.min, aabb.max).transformed(&root);
-                    let bounds = crate::model3d::shot_adapter::ModelBounds { center: bounds.center(), radius: bounds.radius() };
-                    let camera = crate::motion::CameraState { azimuth: shot.cover_camera.azimuth, elevation: shot.cover_camera.elevation,
-                        distance: shot.cover_camera.distance, focus_offset: Vec3::from_array(shot.cover_camera.focus_offset) };
-                    let display = crate::model3d::shot_adapter::display_unit_for_node(scene, resources, &node.id);
-                    let Some((_, camera)) = crate::model3d::shot_adapter::sampled_camera_pose(bounds, display, &camera) else { continue; };
+                    if shot.film_set_node_id != node.id {
+                        continue;
+                    }
+                    let Some(aabb) = node
+                        .composite_asset
+                        .as_ref()
+                        .and_then(|asset| asset.layout_aabb)
+                    else {
+                        continue;
+                    };
+                    let bounds = crate::model3d::scene::ModelAabb::new(aabb.min, aabb.max)
+                        .transformed(&root);
+                    let bounds = crate::model3d::shot_adapter::ModelBounds {
+                        center: bounds.center(),
+                        radius: bounds.radius(),
+                    };
+                    let camera = crate::motion::CameraState {
+                        azimuth: shot.cover_camera.azimuth,
+                        elevation: shot.cover_camera.elevation,
+                        distance: shot.cover_camera.distance,
+                        focus_offset: Vec3::from_array(shot.cover_camera.focus_offset),
+                    };
+                    let display = crate::model3d::shot_adapter::display_unit_for_node(
+                        scene, resources, &node.id,
+                    );
+                    let Some((_, camera)) =
+                        crate::model3d::shot_adapter::sampled_camera_pose(bounds, display, &camera)
+                    else {
+                        continue;
+                    };
                     camera
                 } else {
                     world
@@ -215,12 +239,16 @@ mod tests {
     #[test]
     fn focused_shot_links_start_at_each_camera_and_use_the_tag_bottom() {
         let (mut scene, resources) = fixture();
-        scene.surface = Some(serde_json::from_value(serde_json::json!({"width":1200,"height":800,"pixelRatio":1})).unwrap());
+        scene.surface = Some(
+            serde_json::from_value(serde_json::json!({"width":1200,"height":800,"pixelRatio":1}))
+                .unwrap(),
+        );
         scene.model_focus = Some(serde_json::from_value(serde_json::json!({"version":"woohaa-model-focus-v1","nodeId":"owner","target":[0,0,0],"yaw":0.4,"pitch":-0.5,"distance":1000,"fov":0.87})).unwrap());
         scene.model_focus_context = serde_json::from_value(serde_json::json!([
             {"nodeId":"card","x":20,"y":20,"width":184,"height":36},
             {"nodeId":"reference","x":212,"y":20,"width":184,"height":36}
-        ])).unwrap();
+        ]))
+        .unwrap();
         for index in [1, 2] {
             scene.nodes[index].shot_preview = Some(serde_json::from_value(serde_json::json!({"filmSetNodeId":"owner","clipId":format!("shot-{index}"),"kind":if index == 1 {"static"} else {"dynamic"},"name":"镜头","aspect":1.7778,"duration":0,"state":"ready","coverCamera":{"azimuth":index as f32,"elevation":0.4,"distance":4,"focusOffset":[0,0,0]}})).unwrap());
         }
@@ -229,7 +257,12 @@ mod tests {
         assert_ne!(original[0].0, original[1].0);
         assert_eq!(original[0].1, [112., 56.]);
         assert_eq!(original[1].1, [304., 56.]);
-        scene.nodes[1].shot_preview.as_mut().unwrap().cover_camera.azimuth += 0.5;
+        scene.nodes[1]
+            .shot_preview
+            .as_mut()
+            .unwrap()
+            .cover_camera
+            .azimuth += 0.5;
         let moved = segments(&scene, &resources);
         assert_ne!(moved[0].0, original[0].0);
         assert_eq!(moved[1], original[1]);

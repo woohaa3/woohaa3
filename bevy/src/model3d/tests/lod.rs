@@ -51,9 +51,12 @@ fn invisible_prewarm_stays_low_until_visible_but_capture_pins_high() {
         scene.viewport.y = -52.0 * zoom;
     };
     let (mut scene, resources) = scene();
-    scene.surface = Some(serde_json::from_value(serde_json::json!({
-        "width":400,"height":300,"pixelRatio":1
-    })).unwrap());
+    scene.surface = Some(
+        serde_json::from_value(serde_json::json!({
+            "width":400,"height":300,"pixelRatio":1
+        }))
+        .unwrap(),
+    );
     set_zoom(&mut scene, 32.0);
     scene.nodes[1].x = 25.0; // Offscreen content, still inside the demand/prewarm margin.
     let mut world = world_with_resources();
@@ -65,13 +68,24 @@ fn invisible_prewarm_stays_low_until_visible_but_capture_pins_high() {
     let original = world.get::<Mesh3d>(entity).unwrap().0.clone();
     let generation = models.roots["b"].representation_generation;
     quality(&mut world, &scene, None, 1.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["b"].quality, Quality::Low);
-    assert_eq!(world.resource::<ModelVisuals>().roots["b"].representation_generation, generation);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["b"].quality,
+        Quality::Low
+    );
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["b"].representation_generation,
+        generation
+    );
     assert_eq!(world.get::<Mesh3d>(entity).unwrap().0, original);
 
     // A completion recorded while invisible must be applied on re-entry even
     // if the desired quality stays Low (no threshold transition to wake it).
-    world.resource_mut::<ModelVisuals>().roots.get_mut("b").unwrap().quality_refresh_pending = true;
+    world
+        .resource_mut::<ModelVisuals>()
+        .roots
+        .get_mut("b")
+        .unwrap()
+        .quality_refresh_pending = true;
     quality(&mut world, &scene, None, 1.1, &HashSet::new());
     assert!(world.resource::<ModelVisuals>().roots["b"].quality_refresh_pending);
     set_zoom(&mut scene, 1.0);
@@ -84,14 +98,23 @@ fn invisible_prewarm_stays_low_until_visible_but_capture_pins_high() {
     set_zoom(&mut scene, 32.0);
     scene.nodes[1].x = 10.0;
     quality(&mut world, &scene, None, 3.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["b"].quality, Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["b"].quality,
+        Quality::High
+    );
     scene.nodes[1].x = 25.0;
     set_zoom(&mut scene, 1.0);
     quality(&mut world, &scene, None, 4.0, &HashSet::new());
-    assert_eq!(world.resource::<ModelVisuals>().roots["b"].quality, Quality::Low);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["b"].quality,
+        Quality::Low
+    );
     set_zoom(&mut scene, 32.0);
     quality(&mut world, &scene, None, 5.0, &HashSet::from(["b".into()]));
-    assert_eq!(world.resource::<ModelVisuals>().roots["b"].quality, Quality::High);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["b"].quality,
+        Quality::High
+    );
 }
 
 #[test]
@@ -101,9 +124,12 @@ fn asynchronous_custom_lod_rebinds_shared_roots_without_changing_ids_or_capture_
         panic!()
     };
     let (mut scene, mut resources) = scene();
-    scene.surface = Some(serde_json::from_value(serde_json::json!({
-        "width":400,"height":300,"pixelRatio":1
-    })).unwrap());
+    scene.surface = Some(
+        serde_json::from_value(serde_json::json!({
+            "width":400,"height":300,"pixelRatio":1
+        }))
+        .unwrap(),
+    );
     let mut snapshot = (*resources["s"]).clone();
     snapshot.ops = serde_json::from_value(serde_json::json!([{
         "t":"mesh", "id":"body", "vertices":vertices, "faces":faces,

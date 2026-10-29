@@ -26,17 +26,21 @@ pub(crate) fn draw_history_strip(
     node: &GraphNode,
     z: f32,
 ) {
-    let Some(strip) = node
-        .history_strip
-        .as_ref()
-        .filter(|strip| strip.dots.len() > 1 || strip.dots.iter().any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false)))
-    else {
+    let Some(strip) = node.history_strip.as_ref().filter(|strip| {
+        strip.dots.len() > 1
+            || strip
+                .dots
+                .iter()
+                .any(|dot| dot.state != "succeeded" || dot.recoverable == Some(false))
+    }) else {
         return;
     };
     let count = strip.dots.len();
     for (index, dot) in strip.dots.iter().enumerate() {
         // New scenes delegate dots and their interaction rings to the small dynamic layer.
-        if dot.selected.is_some() { continue; }
+        if dot.selected.is_some() {
+            continue;
+        }
         let center = history_strip_dot(node.x, node.y, node.width, node.height, index, count);
         let color = dot_color(theme, &dot.state);
         // 当前版本装饰：外圈（不改变圆点状态颜色）。
@@ -106,7 +110,10 @@ mod tests {
     fn single_failure_is_visible_and_uses_danger() {
         let theme = ThemeResource::default();
         assert_eq!(dot_color(&theme, "failed"), theme.token_u32("statusDanger"));
-        assert_eq!(dot_color(&theme, "running"), theme.token_u32("statusWarningSoft"));
+        assert_eq!(
+            dot_color(&theme, "running"),
+            theme.token_u32("statusWarningSoft")
+        );
         let strip: HistoryStripPresentation = serde_json::from_str(r#"{"dots":[{"state":"failed","current":false,"presentationId":"operation:run","operationId":"run","recoverable":false}],"truncated":0}"#).unwrap();
         let node = node(Some(strip));
         assert!(super::super::layout::has_history_strip(&node));
@@ -148,8 +155,11 @@ mod tests {
         let mesh = geometry.build();
         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
             .expect("positions")
-            .as_float3().expect("float3 positions")
-            .iter().filter(|p| p[0] > -1.0e5).count()
+            .as_float3()
+            .expect("float3 positions")
+            .iter()
+            .filter(|p| p[0] > -1.0e5)
+            .count()
     }
 
     #[test]
@@ -179,13 +189,25 @@ mod tests {
         let with_dots = node(Some(HistoryStripPresentation {
             dots: vec![
                 HistoryStripDot {
-                    selected: None, hovered: false, pressed: false, presentation_id: None, entry_id: None, operation_id: None, recoverable: None,
-state: "succeeded".into(),
+                    selected: None,
+                    hovered: false,
+                    pressed: false,
+                    presentation_id: None,
+                    entry_id: None,
+                    operation_id: None,
+                    recoverable: None,
+                    state: "succeeded".into(),
                     current: false,
                 },
                 HistoryStripDot {
-                    selected: None, hovered: false, pressed: false, presentation_id: None, entry_id: None, operation_id: None, recoverable: None,
-state: "running".into(),
+                    selected: None,
+                    hovered: false,
+                    pressed: false,
+                    presentation_id: None,
+                    entry_id: None,
+                    operation_id: None,
+                    recoverable: None,
+                    state: "running".into(),
                     current: false,
                 },
             ],
@@ -204,18 +226,36 @@ state: "running".into(),
         let strip = HistoryStripPresentation {
             dots: vec![
                 HistoryStripDot {
-                    selected: None, hovered: false, pressed: false, presentation_id: None, entry_id: None, operation_id: None, recoverable: None,
-state: "succeeded".into(),
+                    selected: None,
+                    hovered: false,
+                    pressed: false,
+                    presentation_id: None,
+                    entry_id: None,
+                    operation_id: None,
+                    recoverable: None,
+                    state: "succeeded".into(),
                     current: false,
                 },
                 HistoryStripDot {
-                    selected: None, hovered: false, pressed: false, presentation_id: None, entry_id: None, operation_id: None, recoverable: None,
-state: "failed".into(),
+                    selected: None,
+                    hovered: false,
+                    pressed: false,
+                    presentation_id: None,
+                    entry_id: None,
+                    operation_id: None,
+                    recoverable: None,
+                    state: "failed".into(),
                     current: true,
                 },
                 HistoryStripDot {
-                    selected: None, hovered: false, pressed: false, presentation_id: None, entry_id: None, operation_id: None, recoverable: None,
-state: "running".into(),
+                    selected: None,
+                    hovered: false,
+                    pressed: false,
+                    presentation_id: None,
+                    entry_id: None,
+                    operation_id: None,
+                    recoverable: None,
+                    state: "running".into(),
                     current: false,
                 },
             ],
@@ -236,8 +276,14 @@ state: "running".into(),
             &theme,
             &node(Some(HistoryStripPresentation {
                 dots: vec![HistoryStripDot {
-                    selected: None, hovered: false, pressed: false, presentation_id: None, entry_id: None, operation_id: None, recoverable: None,
-state: "succeeded".into(),
+                    selected: None,
+                    hovered: false,
+                    pressed: false,
+                    presentation_id: None,
+                    entry_id: None,
+                    operation_id: None,
+                    recoverable: None,
+                    state: "succeeded".into(),
                     current: true,
                 }],
                 truncated: 0,

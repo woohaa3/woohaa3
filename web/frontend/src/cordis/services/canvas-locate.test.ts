@@ -30,7 +30,7 @@ function controller() {
 }
 
 describe("createCanvasLocateService", () => {
-  it("定位收起组或隐藏后代时，使用可见紧凑组的中心", () => {
+  it("定位收起组或隐藏后代时，使用徽标中心", () => {
     const source = canvas();
     source.document.nodes = [
       {id:"g",type:"group",position:{x:100,y:100},width:600,height:400},

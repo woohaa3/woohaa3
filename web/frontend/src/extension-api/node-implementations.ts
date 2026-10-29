@@ -94,6 +94,7 @@ export function createNodeImplementationRegistry(
     },
     prepare: async context => {
       const adapter = composites.resolve(context.canvas, context.node.id);
+      if (isFilmSetNode(context.node.type, context.data)) return { status: 'fail:compile:legacy-film-set-read-only' };
       const projection = adapter && context.data ? adapter.prepare(context.node.id, context.data) : null;
       if (!projection) return !adapter && context.data?.modelScript
         ? savedCompositePreparation.prepare(context)

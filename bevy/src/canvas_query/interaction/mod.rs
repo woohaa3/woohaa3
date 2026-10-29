@@ -22,11 +22,12 @@ use bevy::prelude::*;
 
 use crate::protocol::Scene;
 
+pub(crate) use observer::accept_observer;
 #[cfg(test)]
 pub(crate) use results::PointHit;
-pub(crate) use observer::accept_observer;
 pub(crate) use results::{
-    DropTargetQueryResult, MarqueeQueryResult, PointQueryResult, ProbeQueryResult, ScopeGeometryQueryResult,
+    DropTargetQueryResult, MarqueeQueryResult, PointQueryResult, ProbeQueryResult,
+    ScopeGeometryQueryResult,
 };
 use snapshot::InteractionSnapshot;
 
@@ -42,7 +43,9 @@ thread_local! {
 
 /// Seed only a fresh realm, so old query generations cannot match a replacement.
 pub(crate) fn seed_generation(previous: u32) {
-    if current_generation() == 0 { GENERATION.with(|cell| cell.set(previous)); }
+    if current_generation() == 0 {
+        GENERATION.with(|cell| cell.set(previous));
+    }
 }
 
 /// 接受一份合法场景：原子替换 snapshot 并返回新的 interaction generation。
@@ -105,7 +108,9 @@ pub(crate) fn accept_positions(
         });
         snapshot.generation = generation;
         let deltas = positions::commit(snapshot, plan);
-        if request.viewport.is_some() { snapshot::refresh_node_actions(snapshot, request.viewport.as_ref()); }
+        if request.viewport.is_some() {
+            snapshot::refresh_node_actions(snapshot, request.viewport.as_ref());
+        }
         super::model_pick::commit_positions(models, generation, request.viewport.as_ref());
         Ok((generation, deltas))
     })
@@ -390,7 +395,9 @@ pub(crate) fn probe_query_json(json: &str) -> String {
 /// JSON 入口：通用 drop target 查询；解析失败返回稳定 unavailable 结果。
 pub(crate) fn drop_target_query_json(json: &str) -> String {
     let result = match serde_json::from_str::<DropTargetRequest>(json) {
-        Ok(request) => drop_target_query(request.generation, request.x, request.y, &request.excluded),
+        Ok(request) => {
+            drop_target_query(request.generation, request.x, request.y, &request.excluded)
+        }
         Err(_) => DropTargetQueryResult {
             available: false,
             reason: Some("unavailable".to_owned()),

@@ -121,7 +121,7 @@ describe("自包含节点内容身份归一化（change: 2026-10-06，任务 1.2
     ], { now: NOW });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.rejection.code).toBe("invalid-group-appearance");
+    expect(result.rejection.code).toBe("invalid-self-contained-node");
     expect(canvas.nodeData.anim.groupAppearance).toBeUndefined();
     expect(canvas.nodeData.anim.filmSetContent).toBeDefined();
   });
@@ -133,7 +133,7 @@ describe("自包含节点内容身份归一化（change: 2026-10-06，任务 1.2
     const preserved = applyCanvasCommands(canvas, [
       { type: "nodeData.patch", nodeId: "anim", value: { groupAppearance: appearance } }
     ], { now: NOW });
-    expect(preserved.ok).toBe(true);
+    expect(preserved.ok).toBe(false);
     const changed = applyCanvasCommands(canvas, [
       { type: "nodeData.patch", nodeId: "anim", value: { groupAppearance: { ...appearance, model: { ...appearance.model, modelScript: "scene.sphere({ id: 'x' });" } } } }
     ], { now: NOW });
@@ -428,7 +428,7 @@ describe("片场无连线与内容引用（change: 2026-10-08-make-film-set-mode
     expect(result.canvas.nodeData.img.inputMapping).toBeUndefined();
   });
 
-  it("媒体导入必须引用已保存 ready 且类型匹配的资产", () => {
+  it("旧快照媒体写入即使资产就绪也拒绝", () => {
     const canvas = withFilmSet();
     const content = { schemaVersion: 4, items: [
       { id: "ground", kind: "ground", name: "地面", localTransform: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }, size: { width: 8, depth: 8 } },
@@ -443,10 +443,7 @@ describe("片场无连线与内容引用（change: 2026-10-08-make-film-set-mode
     const ok = applyCanvasCommands(canvas, [
       { type: "nodeData.patch", nodeId: "anim", value: { filmSetContent: content } }
     ], { now: NOW });
-    expect(ok.ok).toBe(true);
-    if (!ok.ok) return;
-    const version = ok.canvas.nodeData.anim.animationSnapshotHash;
-    expect(typeof version).toBe("string");
+    expect(ok.ok).toBe(false);
   });
 
   it("删除被片场引用的资产被拒绝", () => {
@@ -637,15 +634,15 @@ describe("类别最小尺寸与历史记录", () => {
     expect(resized.ok).toBe(true);
     const normal = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "normal", type: "text", position: { x: 0, y: 0 }, width: 180, height: 64 } }], { now: NOW });
     expect(normal.ok).toBe(true);
-    const added = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "small", type: "composite-asset", position: { x: 0, y: 0 }, width: 180, height: 64 }, nodeData: canvas.nodeData.anim }], { now: NOW });
+    const added = applyCanvasCommands(base(), [{ type: "node.add", node: { id: "small", type: "composite-asset", position: { x: 0, y: 0 }, width: 180, height: 64 }, nodeData: { extensionId: "game-furnace" } }], { now: NOW });
     expect(added).toMatchObject({ ok: false, rejection: { code: "invalid-node-size" } });
   });
-  it("历史小片场可移动和改标题，不回写尺寸", () => {
+  it("历史小片场移动与标题修改批次需先迁移", () => {
     const result = applyCanvasCommands(withFilmSet(), [
       { type: "node.update", nodeId: "anim", position: { x: 40, y: 50 } },
       { type: "nodeData.patch", nodeId: "anim", value: { title: "空场" } },
     ], { now: NOW });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.canvas.document.nodes[0]).toMatchObject({ width: 196, height: 64, position: { x: 40, y: 50 } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("invalid-self-contained-node");
   });
 });

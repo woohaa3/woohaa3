@@ -20,10 +20,8 @@ import { ownsShotMedia } from "../../state/shared/managed-shot-media.js";
  * 只复用既有 `CanvasCommand`（`node.add`）与 `CanvasAuthority.submitDerived`，不新增第二套命令。
  */
 import type { CanvasAuthority } from "@woohaa3/contracts";
-import type { CanvasCommand, CanvasNodeData, ModelContentVersion, ModelDefinition, ModelImportOrigin, ServerCanvas, StoredAsset } from "@woohaa3/contracts";
+import type { CanvasCommand, CanvasNodeData, ModelContentVersion, ModelDefinition, ServerCanvas, StoredAsset } from "@woohaa3/contracts";
 import {
-  canonicalFilmSetFields,
-  createFilmSetSnapshot,
   createMotionSnapshot,
   scriptModel3DNodeData,
   filmSetConversionCapabilityRejectionCode,
@@ -32,8 +30,6 @@ import {
   filmSetConversionTitle,
   FILM_SET_CONVERSION_INSTRUCTION_VERSION,
   FILM_SET_CONVERSION_NODE_STATUS_FIELD,
-  FILM_SET_NODE_TYPE,
-  COMPOSITE_ASSET_NODE_TYPE,
   planFilmSetConversionPlacement,
   readFilmSetConversionSource,
   readFilmSetConversionNodeStatus,
@@ -691,7 +687,7 @@ export class FilmSetConversionService {
   /**
    * 提交/复制开始时创建占位片场节点（design D4）。
    *
-   * 在同一权威事务里于源节点旁的空位创建 `composite-asset + extensionId=film-set` 目标节点，
+   * 在同一权威事务里于源节点旁的空位创建 `group + filmSetGroup` 目标节点，
    * 初始为空内容并携带 running 状态（`prepare-source`）。命令 id 与「原地填入」分离：重复提交
    * 命中 durable 回执不会误跳过填入。
    *
@@ -736,19 +732,35 @@ export class FilmSetConversionService {
         if (!source.ok) return { ok: false, code: source.code, message: source.message };
         const position = planFilmSetConversionPlacement(live, record.sourceNodeId);
         if (!position) return { ok: false, code: "source-not-found", message: "来源节点已删除，无法放置片场" };
+        const sourceNodeId = `${record.targetNodeId}-source`;
+        const sourceKey = sourceContentKey(live, record.sourceNodeId)
+          ?? `source:${record.sourceNodeId}`;
+        const marker = makeFilmSetGroupMarker({ sceneBindings: [{
+          bindingId: `source-${record.sourceNodeId}`,
+          sourceNodeId,
+          kind: record.sourceKind,
+          transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 },
+          visibility: true,
+          contentKey: sourceKey
+        }] });
         return {
           ok: true,
           batch: buildBatch(record.canvasId, commandId, this.actorId, live.revision, [{
             type: "node.add",
-            node: { id: record.targetNodeId, type: COMPOSITE_ASSET_NODE_TYPE, position },
+            node: { id: record.targetNodeId, type: "group", position },
             nodeData: {
-              ...canonicalFilmSetFields(placeholderFilmSetData(filmSetConversionTitle(record.title))),
+              title: filmSetConversionTitle(record.title),
+              filmSetGroup: marker,
               filmSetConversionRequest: {
                 canvasId: record.canvasId, requestId: record.requestId, sourceNodeId: record.sourceNodeId,
                 targetNodeId: record.targetNodeId, sourceKind: record.sourceKind, settings: record.settings
               },
               ...nodeStatusFields(status)
-            } as CanvasNodeData
+              } as CanvasNodeData
+          }, {
+            type: "node.add",
+            node: { id: sourceNodeId, type: record.sourceKind, parentId: record.targetNodeId, position: { x: 0, y: 0 } },
+            nodeData: structuredClone(live.nodeData[record.sourceNodeId] ?? {}) as CanvasNodeData
           }])
         };
       }
@@ -834,10 +846,6 @@ export class FilmSetConversionService {
       await this.fail(record, "unauthorized", "画布写权限已失效，结果未保存", false); return;
     }
     const title = filmSetConversionTitle(record.title);
-    const animation: FilmSetNodeData = {
-      ...filmSetDataFromCandidate(candidate, title),
-      origin: provenanceOrigin(record, provenance)
-    };
     const status: FilmSetConversionStatus = {
       status: "completed",
       requestId: record.requestId,
@@ -860,16 +868,13 @@ export class FilmSetConversionService {
         if (!live.document.nodes.some((entry) => entry.id === record.sourceNodeId)) {
           return { ok: false, code: "source-not-found", message: "来源节点已删除，无法填入内容" };
         }
+        const materialized = materializeCandidateGroup({ record, candidate, live, title, provenance });
         return {
           ok: true,
-          batch: buildBatch(record.canvasId, commandId, this.actorId, live.revision, [{
-            type: "nodeData.patch",
-            nodeId: record.targetNodeId,
-            value: {
-              ...canonicalFilmSetFields(animation),
-              ...nodeStatusFields(status)
-            } as CanvasNodeData
-          }])
+          batch: buildBatch(record.canvasId, commandId, this.actorId, live.revision, [
+            ...materialized.commands,
+            { type: "nodeData.patch", nodeId: record.targetNodeId, value: { title, filmSetGroup: materialized.marker, origin: { conversion: { ...provenance, requestId: record.requestId } }, ...nodeStatusFields(status) } as CanvasNodeData }
+          ])
         };
       }
     });
@@ -1089,31 +1094,70 @@ function guardRequest(
 }
 
 /** 由已校验候选构造完整片场 nodeData（items-only；origin 由提交阶段附加）。 */
-function filmSetDataFromCandidate(
-  candidate: ValidatedFilmSetConversionCandidate,
-  title: string
-): FilmSetNodeData {
-  const collection = candidate.filmSetAnimations;
-  const clip = collection.clips.find((entry) => entry.id === collection.defaultClipId);
-  return {
-    kind: FILM_SET_NODE_TYPE,
-    title,
-    scenePlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
-    sceneCamera: candidate.sceneCamera,
-    camera: clip?.initialCamera ?? candidate.sceneCamera,
-    timeline: clip?.timeline ?? { duration: 0, loop: false },
-    filmSetContent: candidate.filmSetContent,
-    filmSetAnimations: collection
-  };
+function materializeCandidateGroup(input: {
+  record: FilmSetConversionRecord;
+  candidate: ValidatedFilmSetConversionCandidate;
+  live: ServerCanvas;
+  title: string;
+  provenance?: FilmSetConversionOriginRecord;
+}): { marker: import("@woohaa3/contracts").FilmSetGroupMarker; commands: CanvasCommand[] } {
+  const { record, candidate, live } = input;
+  const bindings: import("@woohaa3/contracts").FilmSetGroupSceneBinding[] = [];
+  const commands: CanvasCommand[] = [];
+  const source = live.document.nodes.find(node => node.id === `${record.targetNodeId}-source`)
+    ?? live.document.nodes.find(node => node.id === record.sourceNodeId && node.parentId === record.targetNodeId);
+  if (source && (source.type === "model3d" || source.type === "image" || source.type === "video")) {
+    bindings.push({ bindingId: `source-${source.id}`, sourceNodeId: source.id, kind: source.type, transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 }, visibility: true, contentKey: sourceContentKey(live, source.id) ?? `source:${source.id}` });
+  }
+  let ground: { width: number; depth: number; color?: string } | undefined;
+  for (const item of candidate.filmSetContent.items) {
+    if (item.kind === "ground") {
+      ground = { width: item.size.width, depth: item.size.depth, ...(item.color ? { color: item.color } : {}) };
+      continue;
+    }
+    // A model conversion already has an authoritative source card; keep it as
+    // the sole model binding. Media conversions materialize each generated card
+    // so the group remains resource backed after the old snapshot is removed.
+    if (item.kind === "model" && source?.type === "model3d") continue;
+    const childId = `${record.targetNodeId}-resource-${item.id}`;
+    if (!live.document.nodes.some(node => node.id === childId)) {
+      const nodeType = item.kind === "model" ? "model3d" : item.kind;
+      const nodeData: CanvasNodeData = item.kind === "model"
+        ? { title: item.name, modelScript: item.model.modelScript, modelScriptLanguage: item.model.modelScriptLanguage, modelScriptVersion: item.model.modelScriptVersion, modelContentVersion: item.model.contentVersion, modelPlacement: item.model.placement }
+        : { title: item.name, outputAssetId: item.assetId };
+      commands.push({ type: "node.add", node: { id: childId, type: nodeType, parentId: record.targetNodeId, position: { x: item.localTransform.offset.x * 32, y: item.localTransform.offset.z * 32 } }, nodeData });
+    }
+    const kind = item.kind === "model" ? "model3d" : item.kind;
+    const contentKey = item.kind === "model" ? `model3d:${item.model.contentVersion.contentHash}` : `${kind}:${item.assetId}`;
+    bindings.push({ bindingId: item.id, sourceNodeId: childId, kind, transform: { x: item.localTransform.offset.x, y: item.localTransform.offset.y, z: item.localTransform.offset.z, yaw: item.localTransform.yaw, scale: item.localTransform.scale }, visibility: true, contentKey });
+  }
+  const cameras = candidate.filmSetAnimations.clips.map(clip => ({ id: `camera:${clip.id}`, name: clip.name, azimuth: clip.initialCamera.azimuth, elevation: clip.initialCamera.elevation, distance: clip.initialCamera.distance, focusOffset: { ...clip.initialCamera.focusOffset }, aspect: clip.initialCamera.aspect }));
+  const clips = candidate.filmSetAnimations.clips.map(clip => ({ id: clip.id, name: clip.name, cameraId: `camera:${clip.id}`, duration: clip.timeline.duration }));
+  return { marker: makeFilmSetGroupMarker({ sceneBindings: bindings, cameras, clips, activeClip: candidate.filmSetAnimations.defaultClipId ?? undefined, ground, migration: { version: 1, commandId: `film-set-conversion:${record.canvasId}:${record.requestId}`, sourceNodeId: record.sourceNodeId } }), commands };
 }
 
-/**
- * 占位片场节点的初始定义：空内容（无默认几何）、空片段集合、默认镜头（design D4）。
- *
- * `origin` 留待成功填入时写入（占位本身不声称已交付来源内容）；通过既有片场 decoder 校验。
- */
-function placeholderFilmSetData(title: string): FilmSetNodeData {
-  return createFilmSetSnapshot({ title, timeline: { duration: 0, loop: false } });
+function sourceContentKey(canvas: ServerCanvas, nodeId: string): string | null {
+  const node = canvas.document.nodes.find(entry => entry.id === nodeId);
+  const data = node ? canvas.nodeData[nodeId] as Record<string, unknown> | undefined : undefined;
+  if (!node || !data) return null;
+  if (node.type === "model3d") {
+    const version = data.modelContentVersion;
+    if (version && typeof version === "object" && typeof (version as { contentHash?: unknown }).contentHash === "string") return `model3d:${(version as { contentHash: string }).contentHash}`;
+    return typeof data.modelScript === "string" ? `model3d:${data.modelScript}` : null;
+  }
+  if (node.type === "image" || node.type === "video") return typeof data.outputAssetId === "string" ? `${node.type}:${data.outputAssetId}` : null;
+  return null;
+}
+
+function makeFilmSetGroupMarker(input: {
+  sceneBindings: import("@woohaa3/contracts").FilmSetGroupSceneBinding[];
+  cameras?: Array<{ id: string; name?: string; azimuth: number; elevation: number; distance: number; focusOffset: { x: number; y: number; z: number }; aspect?: string }>;
+  clips?: Array<{ id: string; name?: string; duration?: number }>;
+  activeClip?: string;
+  ground?: { width: number; depth: number; color?: string };
+  migration?: { version: 1; commandId: string; sourceNodeId: string };
+}): import("@woohaa3/contracts").FilmSetGroupMarker {
+  return { schemaVersion: 1, sceneBindings: input.sceneBindings.map(binding => ({ ...binding, transform: { ...binding.transform } })), ...(input.cameras ? { cameras: input.cameras } : {}), ...(input.clips ? { clips: input.clips } : {}), ...(input.activeClip ? { activeClip: input.activeClip } : {}), ...(input.ground ? { ground: input.ground } : {}), ...(input.migration ? { migration: input.migration } : {}) };
 }
 
 /** 把转换状态映射到占位节点的持久化字段（`filmSetConversion` + 通用 `taskStatus`/`progress`）。 */
@@ -1122,17 +1166,6 @@ function nodeStatusFields(status: FilmSetConversionStatus): CanvasNodeData {
     [FILM_SET_CONVERSION_NODE_STATUS_FIELD]: status,
     taskStatus: filmSetConversionNodeTaskStatus(status)
   } as CanvasNodeData;
-}
-
-function provenanceOrigin(
-  record: FilmSetConversionRecord,
-  provenance: FilmSetConversionOriginRecord
-): ModelImportOrigin {  return {
-    sourceNodeId: record.sourceNodeId,
-    importedModelContentHash: record.frozenSource.contentHash,
-    importedAt: record.updatedAt,
-    conversion: { ...provenance, requestId: record.requestId }
-  };
 }
 
 function receiptOf(

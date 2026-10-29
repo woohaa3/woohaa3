@@ -7,6 +7,7 @@
  */
 import type { CanvasNodeData } from "@woohaa3/contracts";
 import {
+  readFilmSetGroupMarker,
   applyModelCameraMutationBatch,
   applyModelCameraMutationCommand,
   isModelAuthoringNodeType,
@@ -44,12 +45,13 @@ export async function mutateCameras(
     derive: (canvas) => {
       const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
       if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
-      if (!isModelAuthoringNodeType(node.type)) return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点` };
+      if (!isModelAuthoringNodeType(node.type) && !(node.type === "group" && readFilmSetGroupMarker(canvas.nodeData[nodeId]))) return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点` };
       const data = canvas.nodeData[nodeId] as CanvasNodeData | undefined;
       const scene = node.type === "composite-asset" ? decodeFilmSetNodeData(data) : null;
       const sceneOnly = scene?.ok && [input.mutation].some(m => m.kind !== "create" && m.id === "scene-camera");
       if (sceneOnly && [input.mutation].some(m => m.kind === "create" || m.id !== "scene-camera" || !["update", "reset"].includes(m.kind))) return { ok: false, code: "unknown-camera", message: "Only the selected scene camera may be updated" };
-      const current = sceneOnly && scene?.ok ? [{ ...scene.value.sceneCamera, id: "scene-camera", name: "Scene camera", order: 0, elevation: scene.value.sceneCamera.elevation ?? 0, aspect: scene.value.sceneCamera.aspect ?? "16:9" }] : readModelCameras(data);
+      const marker = node.type === "group" ? readFilmSetGroupMarker(data) : null;
+      const current = marker ? readAuthoringCameras(data, node.type) : sceneOnly && scene?.ok ? [{ ...scene.value.sceneCamera, id: "scene-camera", name: "Scene camera", order: 0, elevation: scene.value.sceneCamera.elevation ?? 0, aspect: scene.value.sceneCamera.aspect ?? "16:9" }] : readModelCameras(data);
       const applied = applyModelCameraMutationCommand(current, input.mutation, {
         nodeId,
         seed: `${nodeId}:${requestId}`
@@ -61,7 +63,7 @@ export async function mutateCameras(
         commandId,
         baseRevision: canvas.revision,
         actorId,
-        commands: [{ type: "nodeData.patch", nodeId, value: (sceneOnly ? { sceneCamera: { azimuth: applied.cameras[0]!.azimuth, elevation: applied.cameras[0]!.elevation, distance: applied.cameras[0]!.distance, aspect: applied.cameras[0]!.aspect, ...(applied.cameras[0]!.focusOffset ? { focusOffset: applied.cameras[0]!.focusOffset } : {}) } } : { modelCameras: applied.cameras }) as CanvasNodeData }]
+        commands: [{ type: "nodeData.patch", nodeId, value: (marker ? { filmSetGroup: { ...marker, cameras: applied.cameras.map(({ order: _order, ...camera }) => ({ ...camera, focusOffset: camera.focusOffset ?? { x: 0, y: 0, z: 0 } })) } } : sceneOnly ? { sceneCamera: { azimuth: applied.cameras[0]!.azimuth, elevation: applied.cameras[0]!.elevation, distance: applied.cameras[0]!.distance, aspect: applied.cameras[0]!.aspect, ...(applied.cameras[0]!.focusOffset ? { focusOffset: applied.cameras[0]!.focusOffset } : {}) } } : { modelCameras: applied.cameras }) as CanvasNodeData }]
       };
       return { ok: true, batch };
     }
@@ -70,7 +72,9 @@ export async function mutateCameras(
 
   const latest = room.exportCanvas();
   const cameras = latest.ok
-    ? input.mutation.kind !== "create" && input.mutation.id === "scene-camera"
+    ? latest.canvas.document.nodes.find(node => node.id === nodeId)?.type === "group"
+      ? readAuthoringCameras(latest.canvas.nodeData[nodeId], "group")
+      : input.mutation.kind !== "create" && input.mutation.id === "scene-camera"
       ? readAuthoringCameras(latest.canvas.nodeData[nodeId] as CanvasNodeData | undefined, "composite-asset")
       : readModelCameras(latest.canvas.nodeData[nodeId] as CanvasNodeData | undefined)
     : [];
@@ -110,12 +114,13 @@ export async function mutateCamerasBatch(
     derive: (canvas) => {
       const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
       if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
-      if (!isModelAuthoringNodeType(node.type)) return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点` };
+      if (!isModelAuthoringNodeType(node.type) && !(node.type === "group" && readFilmSetGroupMarker(canvas.nodeData[nodeId]))) return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点` };
       const data = canvas.nodeData[nodeId] as CanvasNodeData | undefined;
       const scene = node.type === "composite-asset" ? decodeFilmSetNodeData(data) : null;
       const sceneOnly = scene?.ok && input.mutations.some(m => m.kind !== "create" && m.id === "scene-camera");
       if (sceneOnly && input.mutations.some(m => m.kind === "create" || m.id !== "scene-camera" || !["update", "reset"].includes(m.kind))) return { ok: false, code: "unknown-camera", message: "Only the selected scene camera may be updated" };
-      const current = sceneOnly && scene?.ok ? [{ ...scene.value.sceneCamera, id: "scene-camera", name: "Scene camera", order: 0, elevation: scene.value.sceneCamera.elevation ?? 0, aspect: scene.value.sceneCamera.aspect ?? "16:9" }] : readModelCameras(data);
+      const marker = node.type === "group" ? readFilmSetGroupMarker(data) : null;
+      const current = marker ? readAuthoringCameras(data, node.type) : sceneOnly && scene?.ok ? [{ ...scene.value.sceneCamera, id: "scene-camera", name: "Scene camera", order: 0, elevation: scene.value.sceneCamera.elevation ?? 0, aspect: scene.value.sceneCamera.aspect ?? "16:9" }] : readModelCameras(data);
       const applied = applyModelCameraMutationBatch(current, input.mutations, {
         nodeId,
         seed: `${nodeId}:${requestId}`
@@ -133,7 +138,7 @@ export async function mutateCamerasBatch(
         commandId,
         baseRevision: canvas.revision,
         actorId,
-        commands: [{ type: "nodeData.patch", nodeId, value: (sceneOnly ? { sceneCamera: { azimuth: applied.cameras[0]!.azimuth, elevation: applied.cameras[0]!.elevation, distance: applied.cameras[0]!.distance, aspect: applied.cameras[0]!.aspect, ...(applied.cameras[0]!.focusOffset ? { focusOffset: applied.cameras[0]!.focusOffset } : {}) } } : { modelCameras: applied.cameras }) as CanvasNodeData }]
+        commands: [{ type: "nodeData.patch", nodeId, value: (marker ? { filmSetGroup: { ...marker, cameras: applied.cameras.map(({ order: _order, ...camera }) => ({ ...camera, focusOffset: camera.focusOffset ?? { x: 0, y: 0, z: 0 } })) } } : sceneOnly ? { sceneCamera: { azimuth: applied.cameras[0]!.azimuth, elevation: applied.cameras[0]!.elevation, distance: applied.cameras[0]!.distance, aspect: applied.cameras[0]!.aspect, ...(applied.cameras[0]!.focusOffset ? { focusOffset: applied.cameras[0]!.focusOffset } : {}) } } : { modelCameras: applied.cameras }) as CanvasNodeData }]
       };
       return { ok: true, batch };
     }
@@ -142,7 +147,9 @@ export async function mutateCamerasBatch(
 
   const latest = room.exportCanvas();
   const cameras = latest.ok
-    ? input.mutations.some(mutation => mutation.kind !== "create" && mutation.id === "scene-camera")
+    ? latest.canvas.document.nodes.find(node => node.id === nodeId)?.type === "group"
+      ? readAuthoringCameras(latest.canvas.nodeData[nodeId], "group")
+      : input.mutations.some(mutation => mutation.kind !== "create" && mutation.id === "scene-camera")
       ? readAuthoringCameras(latest.canvas.nodeData[nodeId] as CanvasNodeData | undefined, "composite-asset")
       : readModelCameras(latest.canvas.nodeData[nodeId] as CanvasNodeData | undefined)
     : [];

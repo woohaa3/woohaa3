@@ -1,3 +1,4 @@
+import { readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { filmSetTestMigrations } from "../../../../../test-support/managed-shot-commands.js";
 const migrateSqliteCanvasBeforeStartup = (filename: string) => migrateBeforeStartup(filename, { managedMigrations: filmSetTestMigrations });
 import { afterEach, describe, expect, it } from "vitest";
@@ -176,11 +177,12 @@ describe("片场坐标契约迁移（启动前）", () => {
       expect(result.changed).toBe(true);
       const row = db.prepare("SELECT * FROM canvas_yjs_documents").get()!;
       const migrated = JSON.parse(String(row.projection_json));
-      expect(migrated.nodeData.film.filmSetContent.schemaVersion).toBe(FILM_SET_CONTENT_VERSION);
-      expect(migrated.nodeData.film.sceneCamera.distance).not.toBe(2.65);
-      expect(migrated.nodeData.film.filmSetAnimations.clips[0].cameraMotion.motionScript).toContain("motion.camera.tween");
+      expect(readFilmSetAnimationProjection(migrated, "film")!.filmSetContent.schemaVersion).toBe(FILM_SET_CONTENT_VERSION);
+      expect(readFilmSetAnimationProjection(migrated, "film")!.sceneCamera.distance).not.toBe(2.65);
+      expect(readFilmSetAnimationProjection(migrated, "film")!.filmSetAnimations!.clips[0]!.cameraMotion.motionScript).toContain("motion.camera.tween");
       // 迁移产物必须是生产严格解码可接受的 schema 4。
-      expect(decodeFilmSetNodeData(migrated.nodeData.film).ok).toBe(true);
+      expect(readFilmSetAnimationProjection(migrated, "film")).not.toBeNull();
+      expect(migrated.nodeData.film.filmSetContent).toBeUndefined();
       expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
     } finally {
       db.close();
@@ -199,8 +201,9 @@ describe("片场坐标契约迁移（启动前）", () => {
       expect(result.changed).toBe(true);
       const row = db.prepare("SELECT * FROM canvas_yjs_documents").get()!;
       const migrated = JSON.parse(String(row.projection_json));
-      expect(migrated.nodeData.film.filmSetContent.schemaVersion).toBe(FILM_SET_CONTENT_VERSION);
-      expect(decodeFilmSetNodeData(migrated.nodeData.film).ok).toBe(true);
+      expect(readFilmSetAnimationProjection(migrated, "film")!.filmSetContent.schemaVersion).toBe(FILM_SET_CONTENT_VERSION);
+      expect(readFilmSetAnimationProjection(migrated, "film")).not.toBeNull();
+      expect(migrated.nodeData.film.filmSetContent).toBeUndefined();
       // 迁移后 raw 与 projection 一致，重启无净变化。
       expect(migrateSqliteCanvasBeforeStartup(filename)).toEqual({ changed: false });
     } finally {

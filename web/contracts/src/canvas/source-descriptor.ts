@@ -2,6 +2,7 @@ import type { ServerCanvas, StoredAsset } from "./domain/types.js";
 import { isFilmSetNode } from "./domain/core/composite-asset-identity.js";
 import { readFilmSetContent } from "./film-set-content.js";
 import { fnv1a64Hex } from "./content-hash.js";
+import { readFilmSetGroupMarker } from "./film-set-group.js";
 
 /** 只描述规范来源及显式稳定引用，不抓取 URL、不推断未知插件内部格式。 */
 export type CanvasSourceDescriptor = {
@@ -27,6 +28,15 @@ export function describeCanvasSource(canvas: ServerCanvas, nodeId: string): Canv
   if (isFilmSetNode(node.type, data)) {
     for (const item of readFilmSetContent(data).items) {
       if ((item.kind === "image" || item.kind === "video") && item.assetId) ids.add(item.assetId);
+    }
+  }
+  const groupMarker = readFilmSetGroupMarker(data);
+  if (groupMarker) {
+    for (const binding of groupMarker.sceneBindings) {
+      const source = canvas.document.nodes.find(entry => entry.id === binding.sourceNodeId);
+      if (!source) continue;
+      const sourceData = canvas.nodeData[source.id] as Record<string, unknown> | undefined;
+      if (typeof sourceData?.outputAssetId === "string" && sourceData.outputAssetId) ids.add(sourceData.outputAssetId);
     }
   }
   const assets: StoredAsset[] = [];

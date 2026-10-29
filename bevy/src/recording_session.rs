@@ -42,7 +42,11 @@ impl std::fmt::Debug for PreparedSubmit {
 }
 
 fn fail(code: &'static str, message: impl Into<String>) -> ProbeFailure {
-    ProbeFailure { stage: "RECORDING_ERROR_STAGE_COMPILE", code, message: message.into() }
+    ProbeFailure {
+        stage: "RECORDING_ERROR_STAGE_COMPILE",
+        code,
+        message: message.into(),
+    }
 }
 
 /// `#rrggbb` 背景校验（与渲染侧 `parse_hex` 接受的形式一致）。
@@ -54,35 +58,56 @@ fn is_hex_color(value: &str) -> bool {
 fn required_u64(payload: &Value, path: &[&str]) -> Result<u64, ProbeFailure> {
     let mut cursor = payload;
     for segment in path {
-        cursor = cursor
-            .get(*segment)
-            .ok_or_else(|| fail("recording-snapshot-invalid", format!("缺少字段 {}", path.join("."))))?;
+        cursor = cursor.get(*segment).ok_or_else(|| {
+            fail(
+                "recording-snapshot-invalid",
+                format!("缺少字段 {}", path.join(".")),
+            )
+        })?;
     }
     match cursor {
-        Value::String(text) => text
-            .parse::<u64>()
-            .map_err(|_| fail("recording-snapshot-invalid", format!("{} 不是合法整数", path.join(".")))),
-        Value::Number(number) => number
-            .as_u64()
-            .ok_or_else(|| fail("recording-snapshot-invalid", format!("{} 不是合法整数", path.join(".")))),
-        _ => Err(fail("recording-snapshot-invalid", format!("{} 类型非法", path.join(".")))),
+        Value::String(text) => text.parse::<u64>().map_err(|_| {
+            fail(
+                "recording-snapshot-invalid",
+                format!("{} 不是合法整数", path.join(".")),
+            )
+        }),
+        Value::Number(number) => number.as_u64().ok_or_else(|| {
+            fail(
+                "recording-snapshot-invalid",
+                format!("{} 不是合法整数", path.join(".")),
+            )
+        }),
+        _ => Err(fail(
+            "recording-snapshot-invalid",
+            format!("{} 类型非法", path.join(".")),
+        )),
     }
 }
 
 fn required_str<'a>(payload: &'a Value, path: &[&str]) -> Result<&'a str, ProbeFailure> {
     let mut cursor = payload;
     for segment in path {
-        cursor = cursor
-            .get(*segment)
-            .ok_or_else(|| fail("recording-snapshot-invalid", format!("缺少字段 {}", path.join("."))))?;
+        cursor = cursor.get(*segment).ok_or_else(|| {
+            fail(
+                "recording-snapshot-invalid",
+                format!("缺少字段 {}", path.join(".")),
+            )
+        })?;
     }
-    cursor
-        .as_str()
-        .ok_or_else(|| fail("recording-snapshot-invalid", format!("{} 类型非法", path.join("."))))
+    cursor.as_str().ok_or_else(|| {
+        fail(
+            "recording-snapshot-invalid",
+            format!("{} 类型非法", path.join(".")),
+        )
+    })
 }
 
 /// 解析 `submitJob` payload 为可执行任务。
-pub fn prepare_submit(payload: &Value, work_dir: Option<&Path>) -> Result<PreparedSubmit, ProbeFailure> {
+pub fn prepare_submit(
+    payload: &Value,
+    work_dir: Option<&Path>,
+) -> Result<PreparedSubmit, ProbeFailure> {
     let schema = required_str(payload, &["snapshot", "schemaVersion"])?;
     if schema != RECORDING_SNAPSHOT_SCHEMA_VERSION {
         return Err(ProbeFailure {
@@ -96,12 +121,20 @@ pub fn prepare_submit(payload: &Value, work_dir: Option<&Path>) -> Result<Prepar
         .map_err(|_| fail("recording-snapshot-invalid", "宽度超出范围"))?;
     let height = u32::try_from(required_u64(payload, &["snapshot", "profile", "height"])?)
         .map_err(|_| fail("recording-snapshot-invalid", "高度超出范围"))?;
-    let bitrate = u32::try_from(required_u64(payload, &["snapshot", "profile", "bitrate"]).unwrap_or(4_000_000))
-        .unwrap_or(4_000_000);
-    let fps_numer = u32::try_from(required_u64(payload, &["snapshot", "timing", "frameRateNumer"])?)
-        .map_err(|_| fail("recording-snapshot-invalid", "帧率分子超出范围"))?;
-    let fps_denom = u32::try_from(required_u64(payload, &["snapshot", "timing", "frameRateDenom"])?)
-        .map_err(|_| fail("recording-snapshot-invalid", "帧率分母超出范围"))?;
+    let bitrate = u32::try_from(
+        required_u64(payload, &["snapshot", "profile", "bitrate"]).unwrap_or(4_000_000),
+    )
+    .unwrap_or(4_000_000);
+    let fps_numer = u32::try_from(required_u64(
+        payload,
+        &["snapshot", "timing", "frameRateNumer"],
+    )?)
+    .map_err(|_| fail("recording-snapshot-invalid", "帧率分子超出范围"))?;
+    let fps_denom = u32::try_from(required_u64(
+        payload,
+        &["snapshot", "timing", "frameRateDenom"],
+    )?)
+    .map_err(|_| fail("recording-snapshot-invalid", "帧率分母超出范围"))?;
     if fps_denom == 0 {
         return Err(fail("recording-snapshot-invalid", "帧率分母不能为 0"));
     }
@@ -113,9 +146,12 @@ pub fn prepare_submit(payload: &Value, work_dir: Option<&Path>) -> Result<Prepar
 
     let decode_json = |text: &str| -> Result<String, ProbeFailure> {
         // ProtoJSON bytes use base64. Raw JSON remains accepted by in-process tests.
-        if text.trim_start().starts_with('{') { return Ok(text.to_owned()); }
+        if text.trim_start().starts_with('{') {
+            return Ok(text.to_owned());
+        }
         use base64::Engine;
-        let bytes = base64::engine::general_purpose::STANDARD.decode(text)
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(text)
             .map_err(|_| fail("recording-snapshot-invalid", "快照 JSON 编码非法"))?;
         String::from_utf8(bytes).map_err(|_| fail("recording-snapshot-invalid", "快照不是 UTF-8"))
     };
@@ -151,17 +187,31 @@ pub fn prepare_submit(payload: &Value, work_dir: Option<&Path>) -> Result<Prepar
         if resource_id.is_empty() {
             continue;
         }
-        let number = |key: &str| resource.get(key).and_then(|value| value.as_f64()).unwrap_or(0.0);
-        plan.media_playback.push(crate::recording_probe_gpu::RecordingMediaPlayback {
-            resource_id: resource_id.clone(),
-            start_time: number("startTime"),
-            time_scale: if number("timeScale") > 0.0 { number("timeScale") } else { 1.0 },
-            looped: resource.get("looped").and_then(|value| value.as_bool()).unwrap_or(false),
-            end_time: number("endTime"),
-            media_duration: number("mediaDuration"),
-        });
+        let number = |key: &str| {
+            resource
+                .get(key)
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+        };
+        plan.media_playback
+            .push(crate::recording_probe_gpu::RecordingMediaPlayback {
+                resource_id: resource_id.clone(),
+                start_time: number("startTime"),
+                time_scale: if number("timeScale") > 0.0 {
+                    number("timeScale")
+                } else {
+                    1.0
+                },
+                looped: resource
+                    .get("looped")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+                end_time: number("endTime"),
+                media_duration: number("mediaDuration"),
+            });
         if let Some(content_type) = resource.get("contentType").and_then(|value| value.as_str()) {
-            plan.media_content_types.insert(resource_id, content_type.to_owned());
+            plan.media_content_types
+                .insert(resource_id, content_type.to_owned());
         }
     }
 
@@ -169,7 +219,10 @@ pub fn prepare_submit(payload: &Value, work_dir: Option<&Path>) -> Result<Prepar
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::temp_dir().join("wo-recording-work"));
     std::fs::create_dir_all(&directory).map_err(|error| {
-        fail("recording-workdir-failed", format!("无法创建任务目录：{error}"))
+        fail(
+            "recording-workdir-failed",
+            format!("无法创建任务目录：{error}"),
+        )
     })?;
     let output_name = format!("artifact-{}", sanitize(&identity.attempt_id));
 
@@ -187,14 +240,24 @@ pub fn prepare_submit(payload: &Value, work_dir: Option<&Path>) -> Result<Prepar
         directory: directory.clone(),
         output_name: output_name.clone(),
     };
-    let profile = EncoderProfile { width, height, bitrate, fps_numer, fps_denom };
+    let profile = EncoderProfile {
+        width,
+        height,
+        bitrate,
+        fps_numer,
+        fps_denom,
+    };
     let encoder_options = OpenH264EncoderOptions {
         output: directory.join(format!("{output_name}.mp4")),
         spool: directory.join(format!("{output_name}.spool")),
         profile,
         keyframe_interval_frames: None,
     };
-    Ok(PreparedSubmit { job, plan, encoder_options })
+    Ok(PreparedSubmit {
+        job,
+        plan,
+        encoder_options,
+    })
 }
 
 /// 把快照里的 `resources` 转成接收器声明。
@@ -223,7 +286,12 @@ fn resource_declarations(
             .ok_or_else(|| fail("recording-snapshot-invalid", "素材缺少 contentType"))?;
         let size_bytes = resource
             .get("sizeBytes")
-            .and_then(|value| value.as_str().and_then(|text| text.parse::<u64>().ok()).or_else(|| value.as_u64()))
+            .and_then(|value| {
+                value
+                    .as_str()
+                    .and_then(|text| text.parse::<u64>().ok())
+                    .or_else(|| value.as_u64())
+            })
             .unwrap_or(0);
         if size_bytes == 0 || size_bytes > MAX_RESOURCE_BYTES {
             return Err(fail("recording-resource-too-large", "素材大小超出预算"));
@@ -320,10 +388,19 @@ mod tests {
         assert_eq!(prepared.job.width, 320);
         assert_eq!(prepared.job.height, 180);
         assert_eq!(prepared.job.fps_numer, 30);
-        assert_eq!((prepared.job.duration_numer, prepared.job.duration_denom), (12, 30));
+        assert_eq!(
+            (prepared.job.duration_numer, prepared.job.duration_denom),
+            (12, 30)
+        );
         assert_eq!(prepared.job.identity.attempt_id, "attempt-1");
         assert_eq!(prepared.encoder_options.profile.width, 320);
-        assert!(prepared.encoder_options.output.to_string_lossy().ends_with("artifact-attempt-1.mp4"));
+        assert!(
+            prepared
+                .encoder_options
+                .output
+                .to_string_lossy()
+                .ends_with("artifact-attempt-1.mp4")
+        );
         assert_eq!(prepared.plan.capture.width, 320);
     }
 
@@ -349,7 +426,9 @@ mod tests {
         let mut zero_duration = payload();
         zero_duration["snapshot"]["timing"]["durationNumer"] = json!("0");
         assert_eq!(
-            prepare_submit(&zero_duration, None).expect_err("duration").code,
+            prepare_submit(&zero_duration, None)
+                .expect_err("duration")
+                .code,
             "recording-invalid-duration"
         );
 
@@ -366,7 +445,11 @@ mod tests {
         let mut value = payload();
         value["job"]["attemptId"] = json!("../../escape");
         let prepared = prepare_submit(&value, None).expect("prepare");
-        let path = prepared.encoder_options.output.to_string_lossy().into_owned();
+        let path = prepared
+            .encoder_options
+            .output
+            .to_string_lossy()
+            .into_owned();
         assert!(!path.contains(".."), "输出路径不得包含上级跳转：{path}");
         assert_eq!(
             output_path_for(Path::new("/tmp/x"), "../../escape"),
@@ -400,9 +483,8 @@ mod tests {
         let mut bad_scene = payload();
         // Valid ProtoJSON bytes containing invalid Scene IR must reach the IR validator.
         use base64::Engine;
-        bad_scene["snapshot"]["sceneIrJson"] = json!(
-            base64::engine::general_purpose::STANDARD.encode(b"not json")
-        );
+        bad_scene["snapshot"]["sceneIrJson"] =
+            json!(base64::engine::general_purpose::STANDARD.encode(b"not json"));
         assert_eq!(
             prepare_submit(&bad_scene, None).expect_err("scene").code,
             "recording-scene-ir-invalid"

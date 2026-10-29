@@ -67,7 +67,15 @@ pub(crate) fn node_action_toolbar(
 ) -> Option<NodeActionLayout> {
     let bounds = if node.composite_asset.is_some() {
         let scope = crate::canvas_query::scope::node_scope(node);
-        (scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height)
+        (
+            scope.aabb.x,
+            scope.aabb.y,
+            scope.aabb.width,
+            scope.aabb.height,
+        )
+    } else if node.group.as_ref().is_some_and(|group| group.collapsed) {
+        let badge = crate::canvas_query::group_model::badge_rect(node);
+        (badge.x, badge.y, badge.z, badge.w)
     } else {
         (node.x, node.y, node.width, node.height)
     };
@@ -83,7 +91,10 @@ pub(crate) fn node_action_toolbar_for_bounds(
     if actions.actions.is_empty() {
         return None;
     }
-    let zoom = viewport.map(|(_, _, zoom)| zoom).filter(|zoom| zoom.is_finite() && *zoom > 0.0).unwrap_or(1.0);
+    let zoom = viewport
+        .map(|(_, _, zoom)| zoom)
+        .filter(|zoom| zoom.is_finite() && *zoom > 0.0)
+        .unwrap_or(1.0);
     let height = NODE_ACTION_TOOLBAR_ACTION_HEIGHT;
 
     let summary_text = actions
@@ -91,7 +102,13 @@ pub(crate) fn node_action_toolbar_for_bounds(
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .map(|text| truncate_node_action_text(text, NODE_ACTION_TOOLBAR_FONT, NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH));
+        .map(|text| {
+            truncate_node_action_text(
+                text,
+                NODE_ACTION_TOOLBAR_FONT,
+                NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH,
+            )
+        });
     let summary_width = summary_text
         .as_deref()
         .map(|text| estimated_text_width(text, NODE_ACTION_TOOLBAR_FONT))
@@ -101,7 +118,9 @@ pub(crate) fn node_action_toolbar_for_bounds(
         .actions
         .iter()
         .map(|action| {
-            if action.icon_only { return NODE_ACTION_TOOLBAR_ACTION_HEIGHT; }
+            if action.icon_only {
+                return NODE_ACTION_TOOLBAR_ACTION_HEIGHT;
+            }
             (estimated_text_width(&action.label, NODE_ACTION_TOOLBAR_FONT)
                 + NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0)
                 .max(NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH)
@@ -109,7 +128,8 @@ pub(crate) fn node_action_toolbar_for_bounds(
         })
         .collect();
     let chevron_count = actions.actions.iter().filter(|action| action.menu).count() as f32;
-    let separator_width = (actions.actions.len().saturating_sub(1)) as f32 * NODE_ACTION_TOOLBAR_SEPARATOR;
+    let separator_width =
+        (actions.actions.len().saturating_sub(1)) as f32 * NODE_ACTION_TOOLBAR_SEPARATOR;
     let content_width = action_widths.iter().sum::<f32>()
         + chevron_count * NODE_ACTION_TOOLBAR_CHEVRON_WIDTH
         + separator_width
@@ -142,6 +162,16 @@ pub(crate) fn node_action_toolbar_for_bounds(
     let bar = (bar_x, bar_y, bar_width, bar_height);
 
     let mut cursor = bar.0 + NODE_ACTION_TOOLBAR_PAD;
+    let summary = summary_text.map(|text| {
+        let rect = (
+            cursor,
+            bar.1 + NODE_ACTION_TOOLBAR_PAD,
+            summary_width,
+            height,
+        );
+        cursor += summary_width + NODE_ACTION_TOOLBAR_SUMMARY_GAP;
+        (text, rect)
+    });
     let mut slots = Vec::with_capacity(actions.actions.len());
     for (index, action) in actions.actions.iter().enumerate() {
         let width = action_widths[index];
@@ -174,13 +204,12 @@ pub(crate) fn node_action_toolbar_for_bounds(
         });
     }
 
-    let summary = summary_text.map(|text| {
-        let x = cursor + NODE_ACTION_TOOLBAR_SUMMARY_GAP;
-        (text, (x, bar.1 + NODE_ACTION_TOOLBAR_PAD, summary_width, height))
-    });
-
-    let world = |rect: (f32, f32, f32, f32)| (rect.0 / zoom, rect.1 / zoom, rect.2 / zoom, rect.3 / zoom);
-    for slot in &mut slots { slot.rect = world(slot.rect); slot.menu = slot.menu.map(world); }
+    let world =
+        |rect: (f32, f32, f32, f32)| (rect.0 / zoom, rect.1 / zoom, rect.2 / zoom, rect.3 / zoom);
+    for slot in &mut slots {
+        slot.rect = world(slot.rect);
+        slot.menu = slot.menu.map(world);
+    }
     Some(NodeActionLayout {
         bar: world(bar),
         slots,
@@ -203,9 +232,16 @@ impl NodeActionLayout {
             rects.push(*rect);
         }
         rects.iter().all(|rect| {
-            [rect.0, rect.1, rect.2, rect.3, rect.0 + rect.2, rect.1 + rect.3]
-                .iter()
-                .all(|value| value.is_finite())
+            [
+                rect.0,
+                rect.1,
+                rect.2,
+                rect.3,
+                rect.0 + rect.2,
+                rect.1 + rect.3,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
         })
     }
 }

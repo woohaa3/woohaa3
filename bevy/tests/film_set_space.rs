@@ -9,7 +9,7 @@ use std::path::Path;
 
 use bevy::prelude::Vec3;
 use serde::Deserialize;
-use woohaa_bevy_canvas::film_set_space::{display_camera, DisplayUnit, SceneCamera};
+use woohaa_bevy_canvas::film_set_space::{DisplayUnit, SceneCamera, display_camera};
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -142,4 +142,3 @@ fn display_mapping_is_reversible_for_hand_gestures() {
     let back = unit.unvector(unit.vector(scene));
     assert!((back - scene).length() < 1e-5, "逆映射必须回到场景值");
 }
-

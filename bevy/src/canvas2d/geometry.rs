@@ -133,8 +133,18 @@ impl Geometry {
         // 与 `rounded_rect_alpha` 相同的右下 → 左下 → 左上 → 右上弧段顺序，四角同半径时
         // 顶点序列与历史输出逐字节一致。
         for (cx, cy, start, radius) in [
-            (x + width - bottom_right, y + height - bottom_right, 0.0, bottom_right),
-            (x + bottom_left, y + height - bottom_left, PI / 2.0, bottom_left),
+            (
+                x + width - bottom_right,
+                y + height - bottom_right,
+                0.0,
+                bottom_right,
+            ),
+            (
+                x + bottom_left,
+                y + height - bottom_left,
+                PI / 2.0,
+                bottom_left,
+            ),
             (x + top_left, y + top_left, PI, top_left),
             (x + width - top_right, y + top_right, PI * 1.5, top_right),
         ] {
@@ -174,9 +184,22 @@ impl Geometry {
         self.line_alpha(a, b, width, z, color, 1.);
     }
 
-    pub(crate) fn line_alpha(&mut self, a: Vec2, b: Vec2, width: f32, z: f32, color: u32, alpha: f32) {
+    pub(crate) fn line_alpha(
+        &mut self,
+        a: Vec2,
+        b: Vec2,
+        width: f32,
+        z: f32,
+        color: u32,
+        alpha: f32,
+    ) {
         let normal = (b - a).normalize_or_zero().perp() * width / 2.0;
-        self.polygon_alpha(&[a + normal, a - normal, b - normal, b + normal], z, color, alpha);
+        self.polygon_alpha(
+            &[a + normal, a - normal, b - normal, b + normal],
+            z,
+            color,
+            alpha,
+        );
     }
 
     /// 圆环（端点圆钮的描边环）：以扇形细分画一圈带线宽的环。
@@ -291,16 +314,45 @@ impl Geometry {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn curve_with_controls(&mut self, a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, width: f32, z: f32, color: u32, dashed: bool) {
+    pub(crate) fn curve_with_controls(
+        &mut self,
+        a: Vec2,
+        c1: Vec2,
+        c2: Vec2,
+        b: Vec2,
+        width: f32,
+        z: f32,
+        color: u32,
+        dashed: bool,
+    ) {
         self.curve_with_controls_alpha(a, c1, c2, b, width, z, color, dashed, 1.);
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn curve_with_controls_alpha(&mut self, a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, width: f32, z: f32, color: u32, dashed: bool, alpha: f32) {
+    pub(crate) fn curve_with_controls_alpha(
+        &mut self,
+        a: Vec2,
+        c1: Vec2,
+        c2: Vec2,
+        b: Vec2,
+        width: f32,
+        z: f32,
+        color: u32,
+        dashed: bool,
+        alpha: f32,
+    ) {
         if dashed {
-            let points: Vec<_> = (0..=super::curve::EDGE_CURVE_SEGMENTS).map(|i| {
-                super::curve::cubic_point(a, c1, c2, b, i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32)
-            }).collect();
+            let points: Vec<_> = (0..=super::curve::EDGE_CURVE_SEGMENTS)
+                .map(|i| {
+                    super::curve::cubic_point(
+                        a,
+                        c1,
+                        c2,
+                        b,
+                        i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32,
+                    )
+                })
+                .collect();
             super::dash::dashed_polyline_alpha(self, &points, width, z, color, alpha);
             return;
         }
@@ -409,11 +461,16 @@ mod tests {
             bevy::render::mesh::VertexAttributeValues::Float32x3(values) => values,
             other => panic!("意外的位置属性类型：{other:?}"),
         };
-        assert!(positions.iter().all(|position| position[0] <= -1.0e5 && position[1] <= -1.0e5));
+        assert!(
+            positions
+                .iter()
+                .all(|position| position[0] <= -1.0e5 && position[1] <= -1.0e5)
+        );
     }
 
     #[test]
-    fn polygon_builds_fan_indices_in_range() {        let mut geometry = Geometry::default();
+    fn polygon_builds_fan_indices_in_range() {
+        let mut geometry = Geometry::default();
         geometry.polygon(
             &[
                 Vec2::new(0.0, 0.0),
@@ -463,7 +520,16 @@ mod tests {
     #[test]
     fn rounded_rect_radii_keeps_square_corners_as_single_vertices() {
         let mut geometry = Geometry::default();
-        geometry.rounded_rect_radii_alpha(0.0, 0.0, 100.0, 40.0, [0., 0., 0., 12.], 0.0, 0xffffff, 0.5);
+        geometry.rounded_rect_radii_alpha(
+            0.0,
+            0.0,
+            100.0,
+            40.0,
+            [0., 0., 0., 12.],
+            0.0,
+            0xffffff,
+            0.5,
+        );
         let (_, blend) = geometry.into_layers();
         let positions = match blend.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
             bevy::render::mesh::VertexAttributeValues::Float32x3(values) => values.clone(),
@@ -471,9 +537,11 @@ mod tests {
         };
         assert_eq!(positions.len(), 3 + 9);
         // 左下圆角的最低点仍在矩形底边上。
-        assert!(positions
-            .iter()
-            .any(|p| (p[0] - 12.).abs() < 1e-4 && (p[1] + 40.).abs() < 1e-4));
+        assert!(
+            positions
+                .iter()
+                .any(|p| (p[0] - 12.).abs() < 1e-4 && (p[1] + 40.).abs() < 1e-4)
+        );
     }
 
     #[test]

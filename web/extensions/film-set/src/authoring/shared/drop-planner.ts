@@ -55,7 +55,7 @@ export function resolveFilmSetDrop(
   const excluded = new Set(sourceNodeIds);
   if (excluded.has(targetNodeId)) return null;
   const hit = canvas.document.nodes.find(
-    (node) => node.id === targetNodeId && isFilmSetNode(node.type, canvas.nodeData?.[node.id])
+    (node) => node.id === targetNodeId && isFilmSetGroupNode(node, canvas.nodeData?.[node.id])
   );
   if (!hit) return null;
 
@@ -87,7 +87,7 @@ export function filmSetAcceptsSources(
   const excluded = new Set(sourceNodeIds);
   if (excluded.has(targetNodeId) || sourceNodeIds.length === 0) return false;
   const hit = canvas.document.nodes.find(
-    (node) => node.id === targetNodeId && isFilmSetNode(node.type, canvas.nodeData?.[node.id])
+    (node) => node.id === targetNodeId && isFilmSetGroupNode(node, canvas.nodeData?.[node.id])
   );
   if (!hit) return false;
   return sourceNodeIds.every((sourceNodeId) => {
@@ -130,9 +130,10 @@ export function planFilmSetImportCommand(input: {
   canvas: ServerCanvas;
   target: FilmSetDropTarget;
   now: string;
-}): { ok: true; value: FilmSetNodeData } | { ok: false; reason: string } {
-  const animation = decodeFilmSetNodeData(input.canvas.nodeData[input.target.nodeId]);
-  if (!animation.ok) return { ok: false, reason: animation.reason };
+}): { ok: true; value: FilmSetGroupMarker; commands: CanvasCommand[] } | { ok: false; reason: string } {
+  const marker = readFilmSetGroupMarker(input.canvas.nodeData[input.target.nodeId]);
+  const animation = readFilmSetAnimationProjection(input.canvas, input.target.nodeId);
+  if (!marker || !animation) return { ok: false, reason: "片场群组无法解析" };
   const drafts: FilmSetImportItemDraft[] = [];
   for (const source of input.target.sources) {
     const resolved = resolveDraft(input.canvas, source);
@@ -140,16 +141,23 @@ export function planFilmSetImportCommand(input: {
     drafts.push(resolved.value);
   }
   const planned = planFilmSetImportItems({
-    existingItems: animation.value.filmSetContent.items,
+    existingItems: animation.filmSetContent.items,
     drafts,
     importedAt: input.now
   });
   if (!planned.ok) return { ok: false, reason: planned.reason };
-  // 模型导入不改时间线、不改片段绑定：只有媒体来源会扩展时长或产生播放配置。
-  return {
-    ok: true,
-    value: { ...animation.value, filmSetContent: appendFilmSetItems(animation.value.filmSetContent, planned.items) }
-  };
+  const value = createFilmSetGroupMarker(marker);
+  const commands: CanvasCommand[] = [];
+  for (const item of planned.items) {
+    const source = input.target.sources.find(source => source.itemId === item.id)!;
+    const contentKey = contentKeyForFilmSetGroupSource(input.canvas, source.sourceNodeId);
+    if (!contentKey) return { ok: false, reason: "来源内容身份不可用" };
+    const t = item.localTransform;
+    value.sceneBindings.push({ bindingId: item.id, sourceNodeId: source.sourceNodeId, kind: "model3d", name: item.name, contentKey, visibility: true, transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } });
+    commands.push({ type: "node.update", nodeId: source.sourceNodeId, parentId: input.target.nodeId });
+  }
+  commands.push({ type: "nodeData.patch", nodeId: input.target.nodeId, expectedNodeData: Object.fromEntries([input.target.nodeId, ...input.target.sources.map(source => source.sourceNodeId)].map(id => [id, input.canvas.nodeData[id] ?? null])), value: { filmSetGroup: value } as import("@woohaa3/contracts").CanvasNodeData });
+  return { ok: true, value, commands };
 }
 
 function resolveDraft(
@@ -175,6 +183,6 @@ function resolveDraft(
 }
 
 /** 构造导入后的 `nodeData.patch` 命令值。 */
-export function filmSetImportPatchValue(animation: FilmSetNodeData): Record<string, unknown> {
-  return canonicalFilmSetFields(animation);
+export function filmSetImportPatchValue(marker: FilmSetGroupMarker): Record<string, unknown> {
+  return { filmSetGroup: marker };
 }

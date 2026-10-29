@@ -1,3 +1,4 @@
+import { isFilmSetGroupNode } from "@woohaa3/contracts";
 /**
  * 统一生成运行状态 store
  * （change: 2026-10-12-unify-generation-history-strip，design D1/D2）。
@@ -388,7 +389,8 @@ export class RunStateStore {
     }
     for (const node of this.filmCanvas?.document.nodes ?? []) {
       const data = this.filmCanvas!.nodeData[node.id];
-      if (!isFilmSetNode(this.nodeTypeOf(node.id), data)) continue;
+      const type = this.nodeTypeOf(node.id);
+      if (!isFilmSetNode(type, data) && !isFilmSetGroupNode(type ? { type } : undefined, data)) continue;
       let conversion = readFilmSetConversionNodeStatus(data);
       const old = this.filmConversions.get(node.id);
       const sameSettledConversion = old && conversion && conversion.requestId === old.requestId && old.execution?.attemptId === conversion.execution?.attemptId

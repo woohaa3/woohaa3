@@ -46,9 +46,16 @@ impl ObserverUpdateRequest {
         if !(0.001..=1e9).contains(&self.preview.distance_scale) {
             return Err("Invalid observer distance scale");
         }
-        if ![self.yaw, self.pitch, self.distance, self.target[0], self.target[1], self.target[2]]
-            .iter()
-            .all(|value| value.is_finite())
+        if ![
+            self.yaw,
+            self.pitch,
+            self.distance,
+            self.target[0],
+            self.target[1],
+            self.target[2],
+        ]
+        .iter()
+        .all(|value| value.is_finite())
         {
             return Err("Invalid observer camera");
         }
@@ -68,7 +75,11 @@ pub(crate) fn apply_observer(scene: &mut Scene, request: &ObserverUpdateRequest)
             focus.target = request.target;
         }
     }
-    if let Some(node) = scene.nodes.iter_mut().find(|node| node.id == request.node_id) {
+    if let Some(node) = scene
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == request.node_id)
+    {
         node.model_preview = Some(request.preview.clone());
     }
 }

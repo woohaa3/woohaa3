@@ -18,8 +18,7 @@ describe("node-catalog", () => {
       "model3d",
       "film-set",
       "video",
-      "audio",
-      "composite-asset"
+      "audio"
     ]);
     expect(NODE_TEMPLATES.map((entry) => entry.label)).toEqual([
       "文本",
@@ -27,13 +26,12 @@ describe("node-catalog", () => {
       "3D 模型",
       "片场",
       "视频",
-      "音频",
-      "导演场"
+      "音频"
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
-    expect(findNodeTemplate("film-set")?.nodeType).toBe("composite-asset");
-    expect(findNodeTemplate("composite-asset")?.nodeType).toBe("composite-asset");
+    expect(findNodeTemplate("film-set")?.nodeType).toBe("group");
+    expect(findNodeTemplate("composite-asset")).toBeNull();
   });
 
   it("菜单只有一份目录，不再有拉线专用的额外项", () => {
@@ -44,8 +42,7 @@ describe("node-catalog", () => {
       "model3d",
       "film-set",
       "video",
-      "audio",
-      "composite-asset"
+      "audio"
     ]);
     expect(findNodeTemplate("shot")).toBeNull();
     expect(findNodeTemplate("generate")).toBeNull();
@@ -70,8 +67,8 @@ describe("node-catalog", () => {
     // 模型节点不承载任务字段/输入映射（旧 generate 类型已下线）。
     expect(connectNodeDataFor({ id: "n1", type: "image" }, "generate")).toBeUndefined();
     // 自包含 3D 节点拉线创建只作来源说明：不注入任务 inputMapping。
-    const fromImage = connectNodeDataFor({ id: "n1", type: "image" }, "composite-asset");
-    expect((fromImage?.filmSetContent as { items?: unknown[] } | undefined)?.items).toEqual([]);
+    const fromImage = connectNodeDataFor({ id: "n1", type: "image" }, "film-set");
+    expect(fromImage?.filmSetGroup?.sceneBindings).toEqual([]);
     expect(fromImage?.inputMapping).toBeUndefined();
   });
 
@@ -89,16 +86,13 @@ describe("node-catalog", () => {
     expect(model?.modelScriptVersion).toBe("woohaa-model-js-v2");
     expect(model?.modelContentVersion).toBeTruthy();
 
-    // items-only 片场：没有顶层模型；默认空 items、无 clips（D8）。
-    const animation = defaultNodeDataForType("composite-asset");
+    const animation = defaultNodeDataForType("film-set");
+    expect(animation?.filmSetGroup?.sceneBindings).toEqual([]);
+    expect(animation?.filmSetGroup?.clips ?? []).toEqual([]);
+    expect(animation?.filmSetContent).toBeUndefined();
     expect(animation?.modelScript).toBeUndefined();
-    expect(animation?.extensionId).toBe("film-set");
-    expect(animation?.motionScript).toBeUndefined();
-    expect(animation?.timeline).toBeUndefined();
-    const content = animation?.filmSetContent as { schemaVersion: number; items: Array<{ kind: string }> };
-    expect(content.schemaVersion).toBe(4);
-    expect(content.items).toEqual([]);
-    expect((animation?.filmSetAnimations as { clips: unknown[] }).clips).toEqual([]);
+    expect(defaultNodeDataForType("group")).toBeUndefined();
+
   });
 });
 

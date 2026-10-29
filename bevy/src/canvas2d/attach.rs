@@ -81,7 +81,15 @@ pub(crate) fn draw_drag_attach(
     let bar_x = owner.x;
     let bar_y = owner.y + owner.height + DRAG_ATTACH_ACTION_BAR_GAP;
     let bar_width = owner.width;
-    geometry.rounded_rect(bar_x, bar_y, bar_width, DRAG_ATTACH_ACTION_BAR_HEIGHT, BAR_RADIUS, base_z, border);
+    geometry.rounded_rect(
+        bar_x,
+        bar_y,
+        bar_width,
+        DRAG_ATTACH_ACTION_BAR_HEIGHT,
+        BAR_RADIUS,
+        base_z,
+        border,
+    );
     geometry.rounded_rect(
         bar_x + 1.0,
         bar_y + 1.0,
@@ -114,8 +122,16 @@ pub(crate) fn draw_drag_attach(
     let left_text = "（Q）粘连前序";
     let right_text = "（E）粘连后序";
     let label_size = 11.0;
-    let left_color = if mode == Some("predecessor") { accent } else { body_text };
-    let right_color = if mode == Some("successor") { accent } else { body_text };
+    let left_color = if mode == Some("predecessor") {
+        accent
+    } else {
+        body_text
+    };
+    let right_color = if mode == Some("successor") {
+        accent
+    } else {
+        body_text
+    };
     let left_width = estimated_width(left_text, label_size);
     let right_width = estimated_width(right_text, label_size);
     let text_y = bar_y + (DRAG_ATTACH_ACTION_BAR_HEIGHT - label_size) / 2.0 - 1.0;
@@ -131,7 +147,8 @@ pub(crate) fn draw_drag_attach(
             key: "successor".to_owned(),
             text: right_text.to_owned(),
             position: Vec2::new(
-                (bar_x + bar_width - LABEL_PADDING - right_width).max(bar_x + left_width + LABEL_PADDING),
+                (bar_x + bar_width - LABEL_PADDING - right_width)
+                    .max(bar_x + left_width + LABEL_PADDING),
                 text_y,
             ),
             size: label_size,
@@ -191,8 +208,12 @@ pub(crate) fn draw_drag_attach_probe(
     };
     // 扭动：沿探针方向叠加横向正弦波；接触目标时振幅更大（吸附感）。
     // 振幅按探针长度比例缩放（约 14%/24%），使短触须也能明显摆动。
-    let amplitude =
-        DRAG_ATTACH_PROBE_LENGTH * if contact.is_some() { PROBE_WOBBLE_CONTACT_RATIO } else { PROBE_WOBBLE_REST_RATIO };
+    let amplitude = DRAG_ATTACH_PROBE_LENGTH
+        * if contact.is_some() {
+            PROBE_WOBBLE_CONTACT_RATIO
+        } else {
+            PROBE_WOBBLE_REST_RATIO
+        };
     let segments = 16;
     let mut previous = start;
     for i in 1..=segments {
@@ -378,8 +399,11 @@ mod tests {
         let mesh = geometry.build();
         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
             .expect("positions")
-            .as_float3().expect("float3 positions")
-            .iter().filter(|p| p[0] > -1.0e5).count()
+            .as_float3()
+            .expect("float3 positions")
+            .iter()
+            .filter(|p| p[0] > -1.0e5)
+            .count()
     }
 
     #[test]
@@ -416,7 +440,10 @@ mod tests {
     #[test]
     fn probe_animation_only_when_mode_active() {
         let theme = ThemeResource::default();
-        let nodes = vec![node("a", 0.0, 0.0, 200.0, 80.0), node("b", 260.0, 0.0, 200.0, 80.0)];
+        let nodes = vec![
+            node("a", 0.0, 0.0, 200.0, 80.0),
+            node("b", 260.0, 0.0, 200.0, 80.0),
+        ];
         // 无 mode：不绘制触须。
         let mut idle = Geometry::default();
         assert!(!draw_drag_attach_probe(
@@ -470,7 +497,10 @@ mod tests {
         // 不同时间采样得到不同触须几何（扭动动画）。
         let first = first.build();
         let later = later.build();
-        assert_ne!(first.attribute(Mesh::ATTRIBUTE_POSITION), later.attribute(Mesh::ATTRIBUTE_POSITION));
+        assert_ne!(
+            first.attribute(Mesh::ATTRIBUTE_POSITION),
+            later.attribute(Mesh::ATTRIBUTE_POSITION)
+        );
     }
 
     #[test]

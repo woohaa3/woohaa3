@@ -32,7 +32,9 @@ fn spawn_orbit_rig_creates_derived_camera() {
     assert!(derived.position.is_finite());
     assert!(derived.position.z > 0.0, "默认在 +Z 方向");
     // 实际 Camera3d 子实体存在，且标记为 orbit rig。
-    let mut q = app.world_mut().query::<&woohaa_bevy_canvas::orbit_camera::OrbitCameraLink>();
+    let mut q = app
+        .world_mut()
+        .query::<&woohaa_bevy_canvas::orbit_camera::OrbitCameraLink>();
     assert_eq!(q.iter(app.world()).count(), 1);
     assert!(app.world().get::<OrbitCameraRig>(rig).is_some());
 }
@@ -59,11 +61,18 @@ fn orbit_command_updates_pose_and_clamps() {
         .push(rig, OrbitCameraCommand::Zoom { factor: 100.0 });
     app.update();
     let pose = app.world().get::<OrbitCameraPose>(rig).unwrap();
-    assert!((pose.distance - 20.0).abs() < 1e-4, "distance 应被 clamp 到上限");
+    assert!(
+        (pose.distance - 20.0).abs() < 1e-4,
+        "distance 应被 clamp 到上限"
+    );
 
-    app.world_mut()
-        .resource_mut::<OrbitCameraCommands>()
-        .push(rig, OrbitCameraCommand::Orbit { delta_yaw: 1.0, delta_pitch: 100.0 });
+    app.world_mut().resource_mut::<OrbitCameraCommands>().push(
+        rig,
+        OrbitCameraCommand::Orbit {
+            delta_yaw: 1.0,
+            delta_pitch: 100.0,
+        },
+    );
     app.update();
     let pose = app.world().get::<OrbitCameraPose>(rig).unwrap();
     assert!(pose.yaw.is_finite() && pose.pitch.is_finite());

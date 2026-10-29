@@ -37,6 +37,34 @@ describe("describeNodeActions（任务 3.1/3.2）", () => {
     expect(result!.owners.has("convert")).toBe(true);
   });
 
+  it("保留组展开/收起图标并允许纯图标动作", () => {
+    const result = describeNodeActions({
+      contributions: [contribution({
+        id: "group-expand",
+        describe: () => ({ label: "展开", enabled: true, icon: "expand-groups", iconOnly: true })
+      })],
+      context: { nodeId: "group", nodeType: "group", writable: true }
+    });
+    expect(result!.presentation.actions).toEqual([{
+      id: "group-expand",
+      label: "展开",
+      enabled: true,
+      icon: "expand-groups",
+      iconOnly: true
+    }]);
+  });
+
+  it("摘要只由排序最前的身份贡献提供，动作状态不会覆盖组名", () => {
+    const result = describeNodeActions({
+      contributions: [
+        contribution({ id: "group-collapse", order: -30, describe: () => ({ label: "收起", enabled: true, summary: "组 · 3 个节点 · 镜头组" }) }),
+        contribution({ id: "group-bulk-run", order: -20, describe: () => ({ label: "批量执行", enabled: false, summary: "没有可执行任务" }) })
+      ],
+      context: { nodeId: "group", nodeType: "group", writable: true }
+    });
+    expect(result!.presentation.summary).toBe("组 · 3 个节点 · 镜头组");
+  });
+
   it("available=false 或 describe 返回 null 的贡献不参与", () => {
     const result = describeNodeActions({
       contributions: [

@@ -103,14 +103,19 @@ fn settle(world: &mut World, scene: &Scene, now: &mut f64, expected: Quality) {
         *now += 0.5;
         let models = world.resource::<ModelVisuals>();
         let root = &models.roots["film"];
-        if root.quality.tier() == expected && root.quality == root.overview_desired && models.pending.is_none() {
+        if root.quality.tier() == expected
+            && root.quality == root.overview_desired
+            && models.pending.is_none()
+        {
             return;
         }
     }
     let root = &world.resource::<ModelVisuals>().roots["film"];
     panic!(
         "总览档位未稳定为 {expected:?}（当前 {:?}/desired {:?} reason {}）",
-        root.quality.tier(), root.overview_desired, root.overview_reason
+        root.quality.tier(),
+        root.overview_desired,
+        root.overview_reason
     );
 }
 
@@ -442,8 +447,7 @@ fn offscreen_root_stays_low_without_chasing_zoom_and_updates_on_return() {
     {
         let models = world.resource::<ModelVisuals>();
         assert_eq!(
-            models.roots["film"].representation_generation,
-            generation,
+            models.roots["film"].representation_generation, generation,
             "屏外根不得随缩放反复准备"
         );
         assert_eq!(models.overview_work.publishes, publishes);
@@ -516,14 +520,15 @@ fn local_motion_split_keeps_low_and_pose() {
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;
     settle(&mut world, &scene, &mut now, Quality::Low);
-    let mut playback: crate::protocol::AnimationPlayback = serde_json::from_value(serde_json::json!({
-        "nodeId":"film","clipId":"a","sourceIdentity":"content-a","generation":1,
-        "version":"woohaa-motion-ir-v1","time":1,"duration":4,"playing":true,
-        "initialCamera":{"distance":8},
-        "modelMotion":[{"targetId":"s0","startTime":0,"endTime":4,
-            "motion":{"kind":"move","axis":"x","speed":2,"range":[0,8]}}]
-    }))
-    .unwrap();
+    let mut playback: crate::protocol::AnimationPlayback =
+        serde_json::from_value(serde_json::json!({
+            "nodeId":"film","clipId":"a","sourceIdentity":"content-a","generation":1,
+            "version":"woohaa-motion-ir-v1","time":1,"duration":4,"playing":true,
+            "initialCamera":{"distance":8},
+            "modelMotion":[{"targetId":"s0","startTime":0,"endTime":4,
+                "motion":{"kind":"move","axis":"x","speed":2,"range":[0,8]}}]
+        }))
+        .unwrap();
     for generation in 1..5 {
         playback.generation = generation;
         playback.time = generation as f32;
@@ -776,7 +781,8 @@ fn diagnostics_are_bounded_and_report_actual_work() {
     assert_eq!(overview["roots"][0]["published"], "Low");
     assert_eq!(overview["roots"][0]["desired"], "Low");
     assert!(
-        overview["roots"][0]["viewportFraction"].as_f64().unwrap() < Quality::OVERVIEW_MEDIUM_ENTER as f64
+        overview["roots"][0]["viewportFraction"].as_f64().unwrap()
+            < Quality::OVERVIEW_MEDIUM_ENTER as f64
     );
     assert!(overview["roots"][0]["activeMeshes"].as_u64().unwrap() > 0);
     assert!(overview["work"]["publishes"].as_u64().unwrap() >= 1);
@@ -955,7 +961,6 @@ fn stable_tiers_do_not_regenerate_or_republish() {
     );
 }
 
-
 /// 任务 5.3：用实际 Bevy Mesh 核对 `notes/geometry-budget.json` 的图元档位三角面表，
 /// 防止工具表与运行时细分漂移（工具脚本的 `TIER_TRIANGLES` 必须与此一致）。
 #[test]
@@ -985,11 +990,12 @@ fn bevy_overview_tier_triangles_match_tool_table() {
         ),
     ];
     for (geometry, expected) in table {
-        let actual = [Quality::High, Quality::OverviewMedium, Quality::OverviewLow].map(|quality| {
-            let mesh = super::super::mesh::build_mesh_quality(&geometry, quality)
-                .expect("legal primitive");
-            mesh.indices().expect("indexed").len() / 3
-        });
+        let actual =
+            [Quality::High, Quality::OverviewMedium, Quality::OverviewLow].map(|quality| {
+                let mesh = super::super::mesh::build_mesh_quality(&geometry, quality)
+                    .expect("legal primitive");
+                mesh.indices().expect("indexed").len() / 3
+            });
         assert_eq!(actual, expected, "{geometry:?} 档位三角面必须与工具表一致");
     }
 }
@@ -1057,8 +1063,6 @@ fn effective_quality_only_lowers_supported_primitives() {
     );
 }
 
-
-
 #[test]
 fn zoom_within_low_preserves_meshes_and_batches() {
     let (mut scene, resources) = fixture(mixed_snapshot("fixed-subdivisions", 8, 0), 0.05, 1.0);
@@ -1079,7 +1083,6 @@ fn zoom_within_low_preserves_meshes_and_batches() {
         assert_eq!(models.shared.batches.work.build_attempts, builds);
     }
 }
-
 
 #[test]
 fn medium_dwell_promotes_only_after_ten_seconds_and_resets() {

@@ -1,3 +1,4 @@
+import { migrateFilmSetCanvasFixture } from "../../../../test-support/film-set-groups.js";
 /**
  * ModelMcpService 权威提交测试
  * （change: integrate-origin-master-after-web-split；
@@ -11,7 +12,7 @@
  * - 非法脚本（空/超长/非模型节点/不可执行）在写入前失败且不改节点状态。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, modelSourceHash, filmSetNodeDataFields, createFilmSetSnapshot, type CanvasNodeData } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, modelSourceHash, filmSetNodeDataFields, createFilmSetSnapshot, type CanvasNodeData, type FilmSetGroupMarker } from "@woohaa3/contracts";
 import { InMemoryYjsDocumentRepository } from "../sync/index.js";
 import { CanvasRoom } from "../sync/room.js";
 import { filmSetFrameRuntime } from "@woohaa3/extension-film-set/backend";
@@ -40,7 +41,7 @@ async function readyRoom(canvasId: string, nodeData: Record<string, CanvasNodeDa
   const repository = new InMemoryYjsDocumentRepository();
   const room = new CanvasRoom({ canvasId, repository, now: () => NOW });
   const base = createEmptyWoohaa3ServerCanvas(canvasId, NOW);
-  await room.initialize({
+  await initializeFixture(room, {
     canvas: {
       ...base,
       document: {
@@ -106,7 +107,7 @@ async function readyRoomWithReferences(canvasId: string, storageKey: string): Pr
       }
     ]
   };
-  await room.initialize({ canvas, roomEpoch: "epoch-1", createdAt: NOW });
+  await initializeFixture(room, { canvas, roomEpoch: "epoch-1", createdAt: NOW });
   return { room };
 }
 
@@ -216,7 +217,7 @@ describe("ModelMcpService.submitScript", () => {
     const repository = new InMemoryYjsDocumentRepository();
     const room = new CanvasRoom({ canvasId: "canvas-model3d", repository, now: () => NOW });
     const base = createEmptyWoohaa3ServerCanvas("canvas-model3d", NOW);
-    await room.initialize({
+    await initializeFixture(room, {
       canvas: {
         ...base,
         document: { ...base.document, nodes: [{ id: "m3d-1", type: "model3d", position: { x: 0, y: 0 } }] },
@@ -420,7 +421,7 @@ describe("ModelMcpService.submitScript", () => {
     const repository = new InMemoryYjsDocumentRepository();
     const room = new CanvasRoom({ canvasId: "canvas-anim-read", repository, now: () => NOW });
     const base = createEmptyWoohaa3ServerCanvas("canvas-anim-read", NOW);
-    await room.initialize({
+    await initializeFixture(room, {
       canvas: {
         ...base,
         document: { ...base.document, nodes: [
@@ -436,7 +437,7 @@ describe("ModelMcpService.submitScript", () => {
     const outcome = await service.getModelNode({ canvasId: "canvas-anim-read", nodeId: "anim-1" });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.nodeType).toBe("composite-asset");
+    expect(outcome.nodeType).toBe("group");
     expect(outcome.animation?.filmSetContent.items.some(item => item.id === "actor" && item.kind === "model")).toBe(true);
     expect(outcome.animation?.filmSetAnimations.defaultClipId).toBe("clip-1");
     expect(outcome.animation?.timeline).toEqual({ duration: 4, loop: true });
@@ -632,7 +633,7 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
     const repository = new InMemoryYjsDocumentRepository();
     const room = new CanvasRoom({ canvasId: "canvas-anim-preview", repository, now: () => NOW });
     const base = createEmptyWoohaa3ServerCanvas("canvas-anim-preview", NOW);
-    await room.initialize({
+    await initializeFixture(room, {
       canvas: {
         ...base,
         document: { ...base.document, nodes: [{ id: "anim-1", type: "composite-asset", position: { x: 0, y: 0 } }] },
@@ -679,7 +680,7 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
     const repository = new InMemoryYjsDocumentRepository();
     const room = new CanvasRoom({ canvasId: "canvas-film-preview", repository, now: () => NOW });
     const base = createEmptyWoohaa3ServerCanvas("canvas-film-preview", NOW);
-    await room.initialize({
+    await initializeFixture(room, {
       canvas: {
         ...base,
         document: { ...base.document, nodes: [{ id: "film-1", type: "composite-asset", position: { x: 0, y: 0 } }] },
@@ -708,7 +709,7 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
     }));
     const room2 = new CanvasRoom({ canvasId: "canvas-film-media", repository: new InMemoryYjsDocumentRepository(), now: () => NOW });
     const base2 = createEmptyWoohaa3ServerCanvas("canvas-film-media", NOW);
-    await room2.initialize({
+    await initializeFixture(room2, {
       canvas: { ...base2, document: { ...base2.document, nodes: [{ id: "film-m", type: "composite-asset", position: { x: 0, y: 0 } }] }, nodeData: { "film-m": mediaData as unknown as CanvasNodeData } },
       roomEpoch: "epoch-1",
       createdAt: NOW
@@ -722,7 +723,7 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
     const data = filmSetNodeDataFields(createFilmSetSnapshot({ title: "片场", timeline: { duration: 4, loop: false } }));
     const room = new CanvasRoom({ canvasId: "canvas-no-content-runtime", repository: new InMemoryYjsDocumentRepository(), now: () => NOW });
     const base = createEmptyWoohaa3ServerCanvas("canvas-no-content-runtime", NOW);
-    await room.initialize({
+    await initializeFixture(room, {
       canvas: {
         ...base,
         document: { ...base.document, nodes: [{ id: "film-x", type: "composite-asset", position: { x: 0, y: 0 } }] },
@@ -806,7 +807,7 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
     const repository = new InMemoryYjsDocumentRepository();
     const room = new CanvasRoom({ canvasId, repository, now: () => NOW });
     const empty = createEmptyWoohaa3ServerCanvas(canvasId, NOW);
-    await room.initialize({
+    await initializeFixture(room, {
       canvas: {
         ...empty,
         document: { ...empty.document, nodes: [{ id: "anim-1", type: "composite-asset", position: { x: 0, y: 0 } }] },
@@ -828,7 +829,11 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
           commandId: `concurrent-${calls.length}`,
           baseRevision: room.currentRevision,
           actorId: "concurrent-test",
-          commands: [{ type: "nodeData.patch", nodeId: "anim-1", value: mutate(structuredClone(base)) as never }]
+          commands: (() => {
+            const current = room.exportCanvas(); if (!current.ok) throw Error(current.message);
+            const value = mutate(structuredClone(current.canvas.nodeData["anim-1"]));
+            return value ? [{ type: "nodeData.patch", nodeId: "anim-1", value }] : [{ type: "node.remove", nodeIds: ["anim-1"] }];
+          })()
         } as never);
         return { ok: true as const, png: PNG, renderVersion: "woohaa-model-render-v1" };
       }
@@ -840,37 +845,36 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
 
   it("motion-only 并发修改 → stale-source", async () => {
     const { outcome } = await previewWithConcurrentMutation("canvas-stale-motion", (base) => {
-      const animations = structuredClone(base.filmSetAnimations) as { clips: Array<{ bindings: Array<{ motion?: { sourceHash: string } }> }> };
-      animations.clips[0]!.bindings[0]!.motion!.sourceHash = "m2";
-      return { ...base, filmSetAnimations: animations };
+      const group = structuredClone(base.filmSetGroup) as FilmSetGroupMarker;
+      group.clips![0]!.bindings![0]!.motion!.sourceHash = "m2";
+      return { filmSetGroup: group };
     });
     expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
   });
 
   it("camera-only 并发修改 → stale-source", async () => {
     const { outcome } = await previewWithConcurrentMutation("canvas-stale-camera", (base) => {
-      const animations = structuredClone(base.filmSetAnimations) as { clips: Array<{ initialCamera: { azimuth: number } }> };
-      animations.clips[0]!.initialCamera.azimuth = 1;
-      return { ...base, filmSetAnimations: animations };
+      const group = structuredClone(base.filmSetGroup) as FilmSetGroupMarker;
+      group.cameras!.find(camera => camera.id === group.clips![0]!.cameraId)!.azimuth = 1;
+      return { filmSetGroup: group };
     });
     expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
   });
 
   it("placement-only 并发修改 → stale-source", async () => {
     const { outcome } = await previewWithConcurrentMutation("canvas-stale-placement", (base) => {
-      const content = structuredClone(base.filmSetContent) as { items: Array<{ kind: string; model?: { placement: { offset: { x: number } } } }> };
-      const model = content.items.find(item => item.kind === "model")!;
-      model.model!.placement.offset.x = 1;
-      return { ...base, filmSetContent: content };
+      const group = structuredClone(base.filmSetGroup) as FilmSetGroupMarker;
+      group.sceneBindings[0]!.transform.x = 1;
+      return { filmSetGroup: group };
     });
     expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
   });
 
   it("timeline-only 并发修改 → stale-source", async () => {
     const { outcome } = await previewWithConcurrentMutation("canvas-stale-timeline", (base) => {
-      const animations = structuredClone(base.filmSetAnimations) as { clips: Array<{ timeline: { duration: number; loop: boolean } }> };
-      animations.clips[0]!.timeline = { duration: 8, loop: true };
-      return { ...base, filmSetAnimations: animations };
+      const group = structuredClone(base.filmSetGroup) as FilmSetGroupMarker;
+      group.clips![0]!.duration = 8; group.clips![0]!.loop = true;
+      return { filmSetGroup: group };
     });
     expect(outcome).toMatchObject({ ok: false, code: "stale-source" });
   });
@@ -1224,3 +1228,7 @@ describe("模型规模统计（change: 2026-10-18-align-model-statistics-with-ag
     expect(image).toMatchObject({ ok: false, code: "invalid-node-type" });
   });
 });
+
+function initializeFixture(room: CanvasRoom, input: Parameters<CanvasRoom["initialize"]>[0]) {
+  return room.initialize({ ...input, canvas: migrateFilmSetCanvasFixture(input.canvas) });
+}

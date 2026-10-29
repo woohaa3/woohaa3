@@ -7,13 +7,10 @@
 //!
 //! 本模块不依赖 canvas protocol、wasm bridge、DOM、Y.Doc 或 CanvasCommand。
 
-use bevy::{
-    prelude::*,
-    camera::visibility::RenderLayers,
-};
+use bevy::{camera::visibility::RenderLayers, prelude::*};
 
-use super::framing::{Aabb, FramedShotCamera};
 use super::constants::MAX_PREVIEW_DIMENSION;
+use super::framing::{Aabb, FramedShotCamera};
 use super::preview_types::ShotCameraPreview;
 
 /// 默认透视相机 near（极小，见 change: switch-shot-camera-to-perspective）。
@@ -387,9 +384,9 @@ pub fn resolve_derived(
             pose.focus_offset,
         ));
     }
-    let bounds = target.bounds.or_else(|| {
-        fallback_translation.map(|translation| Aabb::new(translation, translation))
-    })?;
+    let bounds = target
+        .bounds
+        .or_else(|| fallback_translation.map(|translation| Aabb::new(translation, translation)))?;
     super::framing::resolve_shot_camera(
         &bounds,
         pose.azimuth,
@@ -433,4 +430,3 @@ impl ShotCameraCommands for Commands<'_, '_> {
         entity
     }
 }
-

@@ -35,10 +35,17 @@ describe("group collapsed presentation", () => {
     expect(collapsed.edges).toEqual([]);
     expect(collapsed.selection.nodes).toEqual(["g"]);
     const ofGroup = (nodes: typeof expanded.nodes) => nodes.find(node => node.id === "g")!;
-    const original = ofGroup(expanded.nodes), compact = ofGroup(collapsed.nodes);
-    expect(compact.x + compact.width / 2).toBe(original.x + original.width / 2);
-    expect(compact.y + compact.height).toBe(original.y + original.height);
-    expect(compact).toMatchObject({ width: 196, height: 112, resizable: false, group: { memberCount: 1, collapsed: true } });
+    const original = ofGroup(expanded.nodes), collapsedGroup = ofGroup(collapsed.nodes);
+    // The canonical frame remains the badge/model anchor, while the collapsed
+    // group has no rendered or interactive backplate of its own.
+    expect(collapsedGroup).toMatchObject({
+      x: original.x,
+      y: original.y,
+      width: original.width,
+      height: original.height,
+      resizable: false,
+      group: { memberCount: 1, collapsed: true }
+    });
     expect(applied.canvas.document.nodes).toEqual(canvas.document.nodes);
     expect(applied.canvas.document.edges).toEqual(canvas.document.edges);
     expect(applied.canvas.nodeData.member).toEqual(canvas.nodeData.member);

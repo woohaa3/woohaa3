@@ -3,10 +3,10 @@
 //! including waits incurred inside that stage; it does not isolate GPU execution.
 //! This is not GPU time, per-preview cost, or a sum of individual system CPU times.
 use bevy::{
+    ecs::schedule::ScheduleLabel,
     platform::time::Instant,
     prelude::*,
     render::{Render, RenderSystems},
-    ecs::schedule::ScheduleLabel,
 };
 use std::sync::{Arc, Mutex};
 
@@ -28,8 +28,11 @@ struct Stats {
     render_max_ms: f64,
 }
 #[derive(Resource, Clone, Default)]
-pub(crate) struct RenderWork(Arc<Mutex<Stats>>, super::render_draw_work::DrawWork,
-    #[cfg(feature = "explicit-instancing")] crate::model3d::instancing::InstanceWork);
+pub(crate) struct RenderWork(
+    Arc<Mutex<Stats>>,
+    super::render_draw_work::DrawWork,
+    #[cfg(feature = "explicit-instancing")] crate::model3d::instancing::InstanceWork,
+);
 #[derive(Clone, Default)]
 struct Pending {
     model_ms: f64,
@@ -44,9 +47,20 @@ struct Pending {
     extract_ms: Option<f64>,
     extract_finished: Option<Instant>,
 }
-const STAGE_NAMES: [&str; 12] = ["extractCommandsMs", "prepareAssetsMs", "prepareMeshesMs",
-    "createViewsMs", "specializeMs", "prepareViewsMs", "queueMs", "phaseSortMs",
-    "prepareMs", "renderWallMs", "cleanupMs", "postCleanupMs"];
+const STAGE_NAMES: [&str; 12] = [
+    "extractCommandsMs",
+    "prepareAssetsMs",
+    "prepareMeshesMs",
+    "createViewsMs",
+    "specializeMs",
+    "prepareViewsMs",
+    "queueMs",
+    "phaseSortMs",
+    "prepareMs",
+    "renderWallMs",
+    "cleanupMs",
+    "postCleanupMs",
+];
 #[derive(Resource, Default)]
 struct Clock {
     queue: Option<Instant>,
@@ -71,9 +85,15 @@ impl RenderWork {
         self.1.recording_calls()
     }
 
-    pub(crate) fn startup_models(&self, playback: Option<&crate::protocol::AnimationPlayback>, cpu_ms: f64) {
+    pub(crate) fn startup_models(
+        &self,
+        playback: Option<&crate::protocol::AnimationPlayback>,
+        cpu_ms: f64,
+    ) {
         let mut stats = self.0.lock().unwrap();
-        let key = playback.filter(|p| p.playing).map(|p| (p.node_id.clone(), p.clip_id.clone(), p.generation));
+        let key = playback
+            .filter(|p| p.playing)
+            .map(|p| (p.node_id.clone(), p.clip_id.clone(), p.generation));
         let report = stats.startup.arm(key, now_ms());
         stats.pending.model_ms = cpu_ms;
         drop(stats);
@@ -88,10 +108,12 @@ impl RenderWork {
         stats.pending.main_begin_ms = Some(end_ms - cpu_ms);
         stats.pending.main_end_ms = Some(end_ms);
     }
-    fn finish_frame(&self, total_ms: f64, post_extract_ms: Option<f64>, stages: [Option<f64>;12]) {
+    fn finish_frame(&self, total_ms: f64, post_extract_ms: Option<f64>, stages: [Option<f64>; 12]) {
         let render_end_ms = now_ms();
         let mut stats = self.0.lock().unwrap();
-        if !stats.startup.collecting() { return; }
+        if !stats.startup.collecting() {
+            return;
+        }
         let p = &stats.pending;
         let mut row = serde_json::json!({"mainWorldMs":p.main_ms,"frameGapMs":p.main_gap_ms,
             "mainBeginMs":p.main_begin_ms,"mainEndMs":p.main_end_ms,
@@ -101,7 +123,9 @@ impl RenderWork {
             "modelMs":p.model_ms,"mainToExtractMs":p.main_to_extract_ms,"extractMs":p.extract_ms,
             "extractToRenderMs":post_extract_ms,"renderUpdateMs":total_ms,
             "renderUnattributedMs":(total_ms-stages.iter().flatten().sum::<f64>()).max(0.0)});
-        for (name, ms) in STAGE_NAMES.iter().zip(stages) { row[*name] = serde_json::json!(ms); }
+        for (name, ms) in STAGE_NAMES.iter().zip(stages) {
+            row[*name] = serde_json::json!(ms);
+        }
         let report = stats.startup.push(now_ms(), row);
         drop(stats);
         emit(report);
@@ -113,7 +137,11 @@ impl RenderWork {
             "work": &*stats, "draws": self.1.snapshot(),
             "gpuTime":"unavailable", "perPreviewPrepare":"unavailable"});
         #[cfg(feature = "explicit-instancing")]
-        let value = { let mut value = value; value["explicitInstances"] = self.2.snapshot(); value };
+        let value = {
+            let mut value = value;
+            value["explicitInstances"] = self.2.snapshot();
+            value
+        };
         value.to_string()
     }
     #[cfg(feature = "explicit-instancing")]
@@ -129,9 +157,15 @@ pub(super) fn install(render: &mut SubApp, work: RenderWork) {
         render.set_extract(move |main, world| {
             let started = Instant::now();
             let extract_begin_ms = now_ms();
-            let gap = shared.0.lock().unwrap().pending.main_finished.map(|end| end.elapsed().as_secs_f64()*1000.0);
+            let gap = shared
+                .0
+                .lock()
+                .unwrap()
+                .pending
+                .main_finished
+                .map(|end| end.elapsed().as_secs_f64() * 1000.0);
             extract(main, world);
-            let ms = started.elapsed().as_secs_f64()*1000.0;
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
             let mut stats = shared.0.lock().unwrap();
             stats.pending.main_to_extract_ms = gap;
             stats.pending.extract_ms = Some(ms);
@@ -143,27 +177,133 @@ pub(super) fn install(render: &mut SubApp, work: RenderWork) {
     if let Some(original) = render.update_schedule {
         let shared = work.clone();
         render.add_systems(StartupRenderUpdate, move |world: &mut World| {
-            world.resource_mut::<Clock>().stage_ms = [None;12];
-            let gap = shared.0.lock().unwrap().pending.extract_finished.map(|end| end.elapsed().as_secs_f64()*1000.0);
+            world.resource_mut::<Clock>().stage_ms = [None; 12];
+            let gap = shared
+                .0
+                .lock()
+                .unwrap()
+                .pending
+                .extract_finished
+                .map(|end| end.elapsed().as_secs_f64() * 1000.0);
             let started = Instant::now();
             world.run_schedule(original);
-            shared.finish_frame(started.elapsed().as_secs_f64()*1000.0, gap, world.resource::<Clock>().stage_ms);
+            shared.finish_frame(
+                started.elapsed().as_secs_f64() * 1000.0,
+                gap,
+                world.resource::<Clock>().stage_ms,
+            );
         });
         render.update_schedule = Some(StartupRenderUpdate.intern());
     }
-    let sets = [RenderSystems::ExtractCommands, RenderSystems::PrepareAssets, RenderSystems::PrepareMeshes,
-        RenderSystems::CreateViews, RenderSystems::Specialize, RenderSystems::PrepareViews,
-        RenderSystems::Queue, RenderSystems::PhaseSort, RenderSystems::Prepare, RenderSystems::Render,
-        RenderSystems::Cleanup, RenderSystems::PostCleanup];
-    render.add_systems(Render, (begin_stage::<0>.before_weak(sets[0].clone()), end_stage::<0>.after_weak(sets[0].clone()).before_weak(sets[1].clone())));
-    render.add_systems(Render, (begin_stage::<1>.before_weak(sets[1].clone()).after_weak(sets[0].clone()), end_stage::<1>.after_weak(sets[1].clone()).before_weak(sets[2].clone())));
-    render.add_systems(Render, (begin_stage::<2>.before_weak(sets[2].clone()).after_weak(sets[1].clone()), end_stage::<2>.after_weak(sets[2].clone()).before_weak(sets[3].clone())));
-    render.add_systems(Render, (begin_stage::<3>.before_weak(sets[3].clone()).after_weak(sets[2].clone()), end_stage::<3>.after_weak(sets[3].clone()).before_weak(sets[4].clone())));
-    render.add_systems(Render, (begin_stage::<4>.before_weak(sets[4].clone()).after_weak(sets[3].clone()), end_stage::<4>.after_weak(sets[4].clone()).before_weak(sets[5].clone())));
-    render.add_systems(Render, (begin_stage::<5>.before_weak(sets[5].clone()).after_weak(sets[4].clone()), end_stage::<5>.after_weak(sets[5].clone()).before_weak(sets[6].clone())));
-    render.add_systems(Render, (begin_stage::<7>.before_weak(sets[7].clone()).after_weak(sets[6].clone()), end_stage::<7>.after_weak(sets[7].clone()).before_weak(sets[8].clone())));
-    render.add_systems(Render, (begin_stage::<10>.before_weak(sets[10].clone()).after_weak(sets[9].clone()), end_stage::<10>.after_weak(sets[10].clone()).before_weak(sets[11].clone())));
-    render.add_systems(Render, (begin_stage::<11>.before_weak(sets[11].clone()).after_weak(sets[10].clone()), end_stage::<11>.after_weak(sets[11].clone())));
+    let sets = [
+        RenderSystems::ExtractCommands,
+        RenderSystems::PrepareAssets,
+        RenderSystems::PrepareMeshes,
+        RenderSystems::CreateViews,
+        RenderSystems::Specialize,
+        RenderSystems::PrepareViews,
+        RenderSystems::Queue,
+        RenderSystems::PhaseSort,
+        RenderSystems::Prepare,
+        RenderSystems::Render,
+        RenderSystems::Cleanup,
+        RenderSystems::PostCleanup,
+    ];
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<0>.before_weak(sets[0].clone()),
+            end_stage::<0>
+                .after_weak(sets[0].clone())
+                .before_weak(sets[1].clone()),
+        ),
+    );
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<1>
+                .before_weak(sets[1].clone())
+                .after_weak(sets[0].clone()),
+            end_stage::<1>
+                .after_weak(sets[1].clone())
+                .before_weak(sets[2].clone()),
+        ),
+    );
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<2>
+                .before_weak(sets[2].clone())
+                .after_weak(sets[1].clone()),
+            end_stage::<2>
+                .after_weak(sets[2].clone())
+                .before_weak(sets[3].clone()),
+        ),
+    );
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<3>
+                .before_weak(sets[3].clone())
+                .after_weak(sets[2].clone()),
+            end_stage::<3>
+                .after_weak(sets[3].clone())
+                .before_weak(sets[4].clone()),
+        ),
+    );
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<4>
+                .before_weak(sets[4].clone())
+                .after_weak(sets[3].clone()),
+            end_stage::<4>
+                .after_weak(sets[4].clone())
+                .before_weak(sets[5].clone()),
+        ),
+    );
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<5>
+                .before_weak(sets[5].clone())
+                .after_weak(sets[4].clone()),
+            end_stage::<5>
+                .after_weak(sets[5].clone())
+                .before_weak(sets[6].clone()),
+        ),
+    );
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<7>
+                .before_weak(sets[7].clone())
+                .after_weak(sets[6].clone()),
+            end_stage::<7>
+                .after_weak(sets[7].clone())
+                .before_weak(sets[8].clone()),
+        ),
+    );
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<10>
+                .before_weak(sets[10].clone())
+                .after_weak(sets[9].clone()),
+            end_stage::<10>
+                .after_weak(sets[10].clone())
+                .before_weak(sets[11].clone()),
+        ),
+    );
+    render.add_systems(
+        Render,
+        (
+            begin_stage::<11>
+                .before_weak(sets[11].clone())
+                .after_weak(sets[10].clone()),
+            end_stage::<11>.after_weak(sets[11].clone()),
+        ),
+    );
     render
         .insert_resource(work)
         .init_resource::<Clock>()
@@ -182,16 +322,24 @@ pub(super) fn install(render: &mut SubApp, work: RenderWork) {
                 end_prepare
                     .after(RenderSystems::Prepare)
                     .before(RenderSystems::Render),
-                begin_render.after(end_prepare).before(RenderSystems::Render),
-                end_render.after(RenderSystems::Render).before(RenderSystems::Cleanup),
+                begin_render
+                    .after(end_prepare)
+                    .before(RenderSystems::Render),
+                end_render
+                    .after(RenderSystems::Render)
+                    .before(RenderSystems::Cleanup),
             ),
         );
 }
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct StartupRenderUpdate;
-fn begin_stage<const N: usize>(mut clock: ResMut<Clock>) { clock.starts[N] = Some(Instant::now()); }
+fn begin_stage<const N: usize>(mut clock: ResMut<Clock>) {
+    clock.starts[N] = Some(Instant::now());
+}
 fn end_stage<const N: usize>(mut clock: ResMut<Clock>) {
-    if let Some(start) = clock.starts[N].take() { clock.stage_ms[N] = Some(start.elapsed().as_secs_f64()*1000.0); }
+    if let Some(start) = clock.starts[N].take() {
+        clock.stage_ms[N] = Some(start.elapsed().as_secs_f64() * 1000.0);
+    }
 }
 fn begin_queue(mut clock: ResMut<Clock>) {
     clock.queue = Some(Instant::now());
@@ -267,7 +415,8 @@ mod tests {
                     while started.elapsed().as_secs_f64() < 0.002 {
                         std::hint::spin_loop();
                     }
-                }).in_set(RenderSystems::Render),
+                })
+                .in_set(RenderSystems::Render),
                 (|clock: Res<Clock>| assert!(clock.render.is_none()))
                     .in_set(RenderSystems::Cleanup),
             ),

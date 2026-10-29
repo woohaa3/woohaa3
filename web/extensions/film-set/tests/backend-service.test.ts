@@ -1,3 +1,4 @@
+import { checkAnimationMotion, readFilmSetAnimationProjection, prepareFilmSetGroup } from "@woohaa3/contracts";
 import { filmSetItemAdapterHash, resolveFilmSetClip } from "@woohaa3/contracts";
 /**
  * 动画节点权威写入服务测试
@@ -8,9 +9,7 @@ import { filmSetItemAdapterHash, resolveFilmSetClip } from "@woohaa3/contracts";
  */
 import { describe, expect, it } from "vitest";
 import {
-  checkAnimationMotion,
   createEmptyWoohaa3ServerCanvas,
-  decodeFilmSetNodeData,
   type CanvasNodeData
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
@@ -78,7 +77,7 @@ describe("FilmSetNodeService.createFilmSet（任务 2.1 / D8）", () => {
       motionScript: `motion.model.rotate("torso", { speed: 0.5 });`,
       timeline: { duration: 4, loop: false }
     });
-    expect(outcome.ok).toBe(true);
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
     if (!outcome.ok) return;
     // 不写顶层模型；几何只在 model item。
     expect(outcome.animation.filmSetContent.items.find(item => item.id === MODEL_ITEM_ID)?.kind).toBe("model");
@@ -89,7 +88,7 @@ describe("FilmSetNodeService.createFilmSet（任务 2.1 / D8）", () => {
     expect(view?.clip.bindings[0]?.motion?.basedOnModelVersion.contentHash).toBe(item.model.contentVersion.contentHash);
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export");
-    expect(exported.canvas.document.nodes.find((node) => node.id === "anim-1")?.type).toBe("composite-asset");
+    expect(exported.canvas.document.nodes.find((node) => node.id === "anim-1")?.type).toBe("group");
   });
 
   it("相同 requestId 重试幂等，不重复创建节点", async () => {
@@ -113,7 +112,7 @@ describe("FilmSetNodeService.createFilmSet（任务 2.1 / D8）", () => {
     expect(exported.canvas.revision).toBe(1);
   });
 
-  it("从模型节点创建时复制快照为 item，来源说明可选；删除来源不影响片场", async () => {
+  it("从模型节点创建时绑定当前来源，提交不持久化模型快照", async () => {
     const { room } = await readyRoom("canvas-from-model", [{ id: "model-1", type: "model3d" }]);
     const outcome = await serviceFor(room).createFilmSetFromNode({
       canvasId: "canvas-from-model",
@@ -123,12 +122,13 @@ describe("FilmSetNodeService.createFilmSet（任务 2.1 / D8）", () => {
       sourceNodeId: "model-1",
       timeline: { duration: 0, loop: false }
     });
-    expect(outcome.ok).toBe(true);
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.animation.origin?.sourceNodeId).toBe("model-1");
+
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error("export");
-    // 删除来源节点后片场仍能用自己的数据读出并整份提交。
+    expect(exported.canvas.nodeData["anim-3"].filmSetGroup?.sceneBindings[0]?.sourceNodeId).toBe("model-1");
+    expect(exported.canvas.nodeData["anim-3"].filmSetContent).toBeUndefined();
     const remaining = await serviceFor(room).commitFilmSet({
       canvasId: "canvas-from-model",
       requestId: "req-3b",
@@ -347,82 +347,28 @@ describe("FilmSetNodeService.readFilmSet", () => {
   });
 });
 
-describe("自包含片场节点端到端验收（任务 6.4 / D8/D10）", () => {
-  it("创建后删除来源、独立导出/导入后仍能运行且版本提示可独立重现", async () => {
+describe("group source lifecycle", () => {
+  it("reads source changes live, preserves missing binding on deletion and never stores snapshots", async () => {
     const { room } = await readyRoom("canvas-e2e", [{ id: "model-src", type: "model3d" }]);
     const service = serviceFor(room);
-    const created = await service.createFilmSetFromNode({
-      canvasId: "canvas-e2e",
-      requestId: "e2e-1",
-      nodeId: "anim-e2e",
-      position: { x: 40, y: 0 },
-      sourceNodeId: "model-src",
-      motionScript: `motion.model.rotate("torso", { speed: 1 });`,
-      timeline: { duration: 4, loop: false }
-    });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-
-    // 独立序列化：只用本节点 flat 字段（模拟单独导出），再从字符串导入读回。
-    const exportedFields = JSON.stringify(await readAnimationFields(room, "anim-e2e"));
-    const imported = decodeFilmSetNodeData(JSON.parse(exportedFields));
-    expect(imported.ok).toBe(true);
-    if (!imported.ok) return;
-    const importedItem = imported.value.filmSetContent.items.find(entry => entry.id === MODEL_ITEM_ID)!;
-    if (importedItem.kind !== "model") throw new Error("expected model item");
-    expect(importedItem.model.modelScript).toBe(SCRIPT);
-    const importedView = resolveFilmSetClip(imported.value, defaultClipId(imported.value))!;
-    expect(importedView.clip.bindings[0]?.motion?.motionScript).toContain("rotate");
-
-    // 删除来源节点：片场仍可读、可用，且不因来源消失改变状态。
-    const beforeSourceDelete = importedView.clip.bindings[0]!.motion!.basedOnModelVersion.contentHash;
+    const created = await service.createFilmSetFromNode({ canvasId: "canvas-e2e", requestId: "create", nodeId: "film", position: { x: 0, y: 0 }, sourceNodeId: "model-src", timeline: { duration: 0, loop: false } });
+    expect(created.ok, JSON.stringify(created)).toBe(true);
     const exported = room.exportCanvas();
     if (!exported.ok) throw new Error(exported.message);
-    const deleted = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas-e2e", actorId: "test", commandId: "delete-source", baseRevision: exported.canvas.revision, commands: [{ type: "node.remove", nodeIds: ["model-src"] }] });
-    expect(deleted.ok).toBe(true);
-    const after = await readAnimationFields(room, "anim-e2e");
-    const afterDecoded = decodeFilmSetNodeData(after);
-    if (!afterDecoded.ok) throw new Error(afterDecoded.reason);
-    const afterView = resolveFilmSetClip(afterDecoded.value, defaultClipId(afterDecoded.value))!;
-    expect(afterView.clip.bindings[0]!.motion!.basedOnModelVersion.contentHash).toBe(beforeSourceDelete);
-
-    // 本地模型替换产生可独立重现的版本提示（内容变化），确认适配后回到一致。
-    const changed = await service.importModel({
-      canvasId: "canvas-e2e",
-      requestId: "e2e-2",
-      nodeId: "anim-e2e",
-      itemId: MODEL_ITEM_ID,
-      modelScript: "scene.box({ id: 'torso', size: [2, 2, 0.5] });",
-      modelScriptVersion: "woohaa-model-js-v2"
-    });
+    const original = structuredClone(exported.canvas);
+    const replacement = "scene.box({ id: 'torso', size: [3,2,1] });";
+    const changed = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas-e2e", actorId: "test", commandId: "replace", baseRevision: exported.canvas.revision, commands: [{ type: "nodeData.patch", nodeId: "model-src", value: { modelScript: replacement } }] });
     expect(changed.ok).toBe(true);
-    // 独立重放：用本节点字段派生版本状态，结果不依赖来源节点。
-    const stored = await readAnimationFields(room, "anim-e2e");
-    const decoded = decodeFilmSetNodeData(stored);
-    expect(decoded.ok).toBe(true);
-    if (!decoded.ok) return;
-    const changedView = resolveFilmSetClip(decoded.value, defaultClipId(decoded.value))!;
-    expect(checkAnimationMotion(changedView).versionMatch).toBe("changed");
-
-    const changedItem = decoded.value.filmSetContent.items.find(entry => entry.id === MODEL_ITEM_ID)!;
-    if (changedItem.kind !== "model") throw new Error("expected model item");
-    const confirmed = await service.confirmAdaptation({
-      canvasId: "canvas-e2e",
-      requestId: "e2e-3",
-      nodeId: "anim-e2e",
-      clipId: defaultClipId(decoded.value),
-      itemId: MODEL_ITEM_ID,
-      expectedAdapterHash: filmSetItemAdapterHash(changedItem)
-    });
-    expect(confirmed.ok).toBe(true);
-    if (!confirmed.ok) return;
-    const adaptedView = resolveFilmSetClip(confirmed.animation, defaultClipId(confirmed.animation))!;
-    expect(checkAnimationMotion(adaptedView).versionMatch).toBe("matched");
+    const latest = room.exportCanvas();
+    if (!latest.ok) throw new Error(latest.message);
+    expect(readFilmSetAnimationProjection(latest.canvas, "film")?.filmSetContent.items[0]).toMatchObject({ kind: "model", model: { modelScript: replacement } });
+    expect(readFilmSetAnimationProjection(original, "film")?.filmSetContent.items[0]).toMatchObject({ model: { modelScript: SCRIPT } });
+    expect(latest.canvas.nodeData.film.filmSetContent).toBeUndefined();
+    const deleted = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: "canvas-e2e", actorId: "test", commandId: "delete", baseRevision: latest.canvas.revision, commands: [{ type: "node.remove", nodeIds: ["model-src"] }] });
+    expect(deleted.ok).toBe(true);
+    const missing = room.exportCanvas();
+    if (!missing.ok) throw new Error(missing.message);
+    expect(prepareFilmSetGroup(missing.canvas, "film")?.diagnostics[0]?.code).toBe("missing-source");
+    expect(missing.canvas.nodeData.film.filmSetGroup?.sceneBindings[0]?.sourceNodeId).toBe("model-src");
   });
 });
-
-async function readAnimationFields(room: CanvasRoom, nodeId: string): Promise<Record<string, unknown>> {
-  const exported = room.exportCanvas();
-  if (!exported.ok) throw new Error("export");
-  return exported.canvas.nodeData[nodeId] as Record<string, unknown>;
-}

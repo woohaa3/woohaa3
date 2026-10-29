@@ -92,7 +92,11 @@ pub(crate) fn focus_enter_start(focus: &ModelFocus, surface_height: f32, zoom: f
     } else {
         1.0
     };
-    let zoom = if zoom.is_finite() && zoom > 0.0 { zoom } else { 1.0 };
+    let zoom = if zoom.is_finite() && zoom > 0.0 {
+        zoom
+    } else {
+        1.0
+    };
     let home_distance = (height / (2.0 * zoom * half)).max(focus.distance);
     // 视线方向：从目标指向相机的单位向量（聚焦姿态已含朝向）。
     let dir = (target.translation - Vec3::from_array(focus.target)).normalize_or_zero();
@@ -214,7 +218,6 @@ mod tests {
         assert!(transform.rotation.is_finite());
     }
 
-    
     #[test]
     fn focus_enter_start_keeps_focus_rotation_and_dollies_in() {
         // 进入起点：与聚焦目标同朝向（避免旋转摆动），但距离更远（先看到更大范围）。
@@ -252,13 +255,13 @@ mod tests {
         assert!(dist >= f.distance - 1e-4);
     }
 
-    
     #[test]
     fn home_camera_transform_centers_on_surface() {
         let origin = crate::isometric_grid::IsometricGridView::default();
         let home = home_camera_transform(Some((1000.0, 800.0)), &origin);
         // 画布中心世界点应投影回画布中心（500, 400）。
-        let screen = crate::isometric_grid::screen_point_from_world(home_center_world(&home), &origin);
+        let screen =
+            crate::isometric_grid::screen_point_from_world(home_center_world(&home), &origin);
         assert!((screen.x - 500.0).abs() < 1e-3);
         assert!((screen.y - 400.0).abs() < 1e-3);
         // 无 surface：中心为固定观察深度下的原点。
@@ -296,7 +299,11 @@ mod tests {
     #[test]
     fn focus_to_orbit_is_bit_equivalent_to_focus_transform() {
         // 聚焦相机与 orbit rig 仅在 pitch 符号上不同；转换后应逐位等价。
-        for f in [focus(0.0, 0.0, 10.0), focus(0.7, -0.35, 8.0), focus(-1.2, 0.9, 42.0)] {
+        for f in [
+            focus(0.0, 0.0, 10.0),
+            focus(0.7, -0.35, 8.0),
+            focus(-1.2, 0.9, 42.0),
+        ] {
             let expected = focus_camera_transform(&f);
             let (target, pose, _lens) = focus_to_orbit(&f);
             let (position, rotation) = crate::orbit_camera::derive_orbit_transform(&target, &pose);

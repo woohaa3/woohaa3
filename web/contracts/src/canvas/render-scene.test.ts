@@ -1,3 +1,4 @@
+import { CANVAS_CAMERA_PITCH } from "./model-focus/canvas-projection.js";
 import { filmSetMediaPlanesForNode } from "./render-scene.js";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -63,6 +64,7 @@ import {
   shotPreviewContentRect
 } from "./render-scene/shot-preview-projection.js";
 import { SHOT_PREVIEW_HEADER_HEIGHT, shotPreviewNodeId } from "./film-set-shot-preview.js";
+import { createFilmSetGroupMarker } from "./film-set-group.js";
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 import { staticShotCameraMotion } from "./film-set-animations.js";
@@ -615,14 +617,14 @@ describe("buildCanvasRenderScene", () => {
     // 基准矩形仍是 260×195（不是范围 AABB）；只附加形状与地面矩形声明。
     const diamondAsset = diamondScene.nodes[0]!.compositeAsset!;
     expect(diamondAsset.scopeGround).toBeDefined();
-    // 地面范围永远平行网格：AABB 宽高比恒为 2。
+    // 地面范围永远平行网格，宽高比由当前相机俯仰角决定。
     const range = compositeAssetScopeGeometry(
       { x: diamondAsset.x, y: diamondAsset.y, width: diamondAsset.width, height: diamondAsset.height },
       "isometric-diamond",
       32,
       diamondAsset.scopeGround
     );
-    expect(range.aabb.width / range.aabb.height).toBeCloseTo(2, 6);
+    expect(range.aabb.width / range.aabb.height).toBeCloseTo(1 / Math.sin(CANVAS_CAMERA_PITCH), 6);
     // 可信 adapter 覆盖为 rect：范围框即基准矩形，不写 scopeShape/scopeGround。
     const rectScene = buildCanvasRenderScene({
       canvas: current,
@@ -656,7 +658,7 @@ describe("buildCanvasRenderScene", () => {
     // change: 2026-10-15-add-film-set-overview-lod，design D1：只由可信 adapter 声明注入。
     const current = canvas({document:{schemaVersion:"asset-canvas-v1",nodes:[
       {id:"asset",type:COMPOSITE_ASSET_NODE_TYPE,position:{x:0,y:0},width:260,height:195}
-    ],edges:[],updatedAt:"2026-10-12T00:00:00Z"},nodeData:{asset:{extensionId:"film-set"}}});
+    ],edges:[],updatedAt:"2026-10-12T00:00:00Z"},nodeData:{asset:{extensionId:"game-furnace"}}});
     // 缺省（普通卡片/炉体/第三方）：不写入，World 用途保持 High。
     const fallback = buildCanvasRenderScene({ canvas: current });
     expect(fallback.nodes[0]!.compositeAsset).not.toHaveProperty("geometryQuality");
@@ -961,7 +963,7 @@ describe("theme snapshot（change: unify-application-theme-tokens，任务 3.1 /
   });
 
   it("scene 使用 v20 协议并包含预览卡片、归属线与横条动作声明，且与 Rust 常量一致", () => {
-    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v29");
+    expect(CANVAS_RENDER_SCENE_VERSION).toBe("woohaa-canvas-render-scene-v30");
     // 跨语言版本必须同步：Rust `Scene::validate` 按版本拒绝整帧，任一侧漏改会让画布静止
     // （change: 2026-10-12-unify-generation-history-strip）。
     const here = dirname(fileURLToPath(import.meta.url));
@@ -1750,6 +1752,43 @@ describe("拍摄镜头预览卡片与归属线（change: 2026-10-15-add-film-set
     expect(node.typeLabel).toBe("动态镜头");
     // 预览节点不合成为普通内容节点：无 outputAssetId/媒体引用等字段。
     expect(node).not.toHaveProperty("outputAssetId");
+  });
+
+  it("迁移后的 owner-managed 预览节点仍投影镜头卡片与归属线", () => {
+    const groupId = "film-group";
+    const clipId = "clip-1";
+    const previewId = shotPreviewNodeId(groupId, clipId);
+    const marker = createFilmSetGroupMarker({
+      sceneBindings: [],
+      cameras: [{ id: `camera:${clipId}`, name: "运镜", azimuth: 0, elevation: 0.35, distance: 4, focusOffset: { x: 0, y: 0, z: 0 }, aspect: "16:9" }],
+      clips: [{ id: clipId, name: "运镜", cameraId: `camera:${clipId}`, duration: 4, loop: false, cameraMotion: staticShotCameraMotion(), bindings: [] }],
+      activeClip: clipId
+    });
+    const source = canvas({
+      document: {
+        schemaVersion: "asset-canvas-v1",
+        nodes: [
+          { id: groupId, type: "group", position: { x: 100, y: 60 }, width: 320, height: 240 },
+          { id: previewId, type: "video", position: { x: 560, y: 60 }, width: 240, height: 167 }
+        ],
+        edges: [],
+        updatedAt: "2026-10-15T00:00:00.000Z"
+      },
+      nodeData: {
+        [groupId]: { filmSetGroup: marker } as never,
+        [previewId]: {
+          managedBy: { schemaVersion: 1, extensionId: "film-set", ownerNodeId: groupId, entityId: clipId, lifecycle: "owner-managed" },
+          mediaContent: { providerId: "film-set.shot", schemaVersion: 1, payload: { filmSetNodeId: groupId, clipId } }
+        } as never
+      }
+    });
+    const scene = buildCanvasRenderScene({ canvas: source, theme: defaultAppTheme(), shotPreviewCameraProjection: () => ({ x: 10, y: 10 }) });
+    const node = scene.nodes.find((entry) => entry.id === previewId)!;
+    expect(node.shotPreview).toMatchObject({ filmSetNodeId: groupId, clipId, kind: "dynamic", name: "运镜", duration: 4 });
+    expect(node.title).toBe("运镜");
+    expect(node.typeLabel).toBe("动态镜头");
+    expect(scene.shotPreviewLinks).toHaveLength(1);
+    expect(scene.shotPreviewLinks![0]).toMatchObject({ ownerNodeId: groupId, previewNodeId: previewId, clipId });
   });
 
   it("镜头始终外显，旧隐藏设置不影响卡片、连线或规范布局", () => {

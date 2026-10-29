@@ -47,7 +47,11 @@ pub(super) fn edge_geometry(
 }
 
 fn port(node: &SnapshotNode, output: bool) -> Vec2 {
-    let (x, y, w, h) = node.layout_bounds;
+    let (x, y, w, h) = if node.group_collapsed {
+        node.bounds
+    } else {
+        node.layout_bounds
+    };
     layout::port_for_bounds(x, y, w, h, output)
 }
 fn rect_finite(rect: (f32, f32, f32, f32)) -> bool {
@@ -67,38 +71,63 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
     let (_, _, w, h) = node.layout_bounds;
     next.layout_bounds = (p.x, p.y, w, h);
     let delta = Vec2::new(p.x - node.layout_bounds.0, p.y - node.layout_bounds.1);
-    for point in &mut next.group_outline { *point += delta; }
-    for point in &mut next.group_badge { *point += delta; }
+    for point in &mut next.group_outline {
+        *point += delta;
+    }
+    for point in &mut next.group_badge {
+        *point += delta;
+    }
     next.group_badge_resize = node.group_badge_resize.map(|p| p + delta);
     // 复合资产范围几何是基准矩形/形状/地面的仿射派生，对平移封闭：整体位移即可与
     // 全量 `build_snapshot` 一致（无需重跑 `node_scope`）。
-    next.scope = node
-        .scope
-        .map(|scope| scope::translate(&scope, Vec2::new(p.x - node.layout_bounds.0, p.y - node.layout_bounds.1)));
+    next.scope = node.scope.map(|scope| {
+        scope::translate(
+            &scope,
+            Vec2::new(p.x - node.layout_bounds.0, p.y - node.layout_bounds.1),
+        )
+    });
     next.bounds = match &next.scope {
-        Some(scope) => (scope.aabb.x, scope.aabb.y, scope.aabb.width, scope.aabb.height),
-        None => next.layout_bounds,
+        Some(scope) => (
+            scope.aabb.x,
+            scope.aabb.y,
+            scope.aabb.width,
+            scope.aabb.height,
+        ),
+        None => (
+            node.bounds.0 + delta.x,
+            node.bounds.1 + delta.y,
+            node.bounds.2,
+            node.bounds.3,
+        ),
     };
-    next.center = Vec2::new(p.x + w / 2., p.y + h / 2.);
+    next.center = node.center + delta;
     next.input_port = node.input_port.map(|_| port(&next, false));
     next.output_port = node.output_port.map(|_| port(&next, true));
-    next.history_strip = node.history_strip.map(|_| layout::history_strip_rect(p.x, p.y, w, h));
-    next.group_status = node.group_status.map(|r| (r.0 + p.x - node.layout_bounds.0, r.1 + p.y - node.layout_bounds.1, r.2, r.3));
+    next.history_strip = node
+        .history_strip
+        .map(|_| layout::history_strip_rect(p.x, p.y, w, h));
+    next.group_status = node.group_status.map(|r| {
+        (
+            r.0 + p.x - node.layout_bounds.0,
+            r.1 + p.y - node.layout_bounds.1,
+            r.2,
+            r.3,
+        )
+    });
     // 横条不对平移封闭（边缘避让、上下回退）；commit 后按当前视口重算。
     next.node_actions = None;
     next.preview = node
         .preview
         .map(|_| layout::content_rect_for_bounds(p.x, p.y, w, h));
     next.resize = node.resize.and_then(|_| {
-        next.scope
-            .as_ref()
-            .map(scope::grip)
-            .or_else(|| Some(ScopeGrip::Rect(ScopeRect {
+        next.scope.as_ref().map(scope::grip).or_else(|| {
+            Some(ScopeGrip::Rect(ScopeRect {
                 x: next.bounds.0 + next.bounds.2 - layout::RESIZE_HANDLE_SIZE,
                 y: next.bounds.1 + next.bounds.3 - layout::RESIZE_HANDLE_SIZE,
                 width: layout::RESIZE_HANDLE_SIZE,
                 height: layout::RESIZE_HANDLE_SIZE,
-            })))
+            }))
+        })
     });
     if !rect_finite(next.layout_bounds)
         || !rect_finite(next.bounds)
@@ -115,7 +144,10 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
             .into_iter()
             .flatten()
             .any(|p| !p.is_finite())
-        || next.node_actions.as_ref().is_some_and(|toolbar| !toolbar.rects_finite())
+        || next
+            .node_actions
+            .as_ref()
+            .is_some_and(|toolbar| !toolbar.rects_finite())
     {
         return Err("Invalid derived position geometry");
     }
@@ -186,7 +218,12 @@ pub(super) fn plan(
         let mut lo = Vec2::splat(f32::INFINITY);
         let mut hi = Vec2::splat(f32::NEG_INFINITY);
         for &index in &snapshot.aggregate_selection {
-            let (x, y, w, h) = node_at(index).layout_bounds;
+            let node = node_at(index);
+            let (x, y, w, h) = if node.group_collapsed {
+                node.bounds
+            } else {
+                node.layout_bounds
+            };
             lo = lo.min(Vec2::new(x, y));
             hi = hi.max(Vec2::new(x + w, y + h));
         }
@@ -228,7 +265,9 @@ pub(super) fn commit(snapshot: &mut InteractionSnapshot, plan: PositionPlan) -> 
         snapshot.refresh_node_grid(index);
     }
     for (index, edge) in plan.edges {
-        snapshot.edge_grid.relocate(index, super::snapshot::edge_bounds(&edge));
+        snapshot
+            .edge_grid
+            .relocate(index, super::snapshot::edge_bounds(&edge));
         snapshot.edges[index] = edge;
     }
     snapshot.aggregate_handles = plan.handles;

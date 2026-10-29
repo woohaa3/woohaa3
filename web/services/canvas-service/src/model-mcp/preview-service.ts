@@ -1,3 +1,4 @@
+import { isFilmSetGroupNode } from "@woohaa3/contracts";
 /** Authority lookup and generic native rendering orchestration. 内容扩展的规则经端口注入，宿主不 import 其实现。 */
 import { compositeAssetSceneOps, v2SceneExtent, decodeModelPlacement, hashModelScript, isFilmSetNode, isModelAuthoringNodeType, type CanvasNodeData } from "@woohaa3/contracts";
 import { modelPreviewIdentityMatches } from "./content-identity.js";
@@ -20,7 +21,8 @@ export async function renderPreview(
   if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
   const node = exported.canvas.document.nodes.find(entry => entry.id === nodeId);
   if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
-  if (!isModelAuthoringNodeType(node.type)) return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是可预览的模型节点` };
+  if (isFilmSetGroupNode(node, exported.canvas.nodeData[nodeId]) && !deps.contentFrames?.matches(node.type, exported.canvas.nodeData[nodeId])) return { ok: false, code: "content-runtime-unavailable", message: "片场内容预览能力未装配" };
+  if (!isModelAuthoringNodeType(node.type) && !deps.contentFrames?.matches(node.type, exported.canvas.nodeData[nodeId])) return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是可预览的模型节点` };
   const data = exported.canvas.nodeData[nodeId] as CanvasNodeData | undefined;
   const timeSeconds = input.timeSeconds ?? 0;
   if (!Number.isFinite(timeSeconds) || timeSeconds < 0) return { ok: false, code: "malformed-request", message: "timeSeconds 必须是非负有限数值" };
@@ -37,7 +39,7 @@ export async function renderPreview(
     // 把本次预览的画布 id 绑定进读取端口：素材读取必须落在该画布的存储作用域，否则远端画布
     // 的素材会去主存储找而不存在（内容扩展只按 storageKey 调 `read`）。
     const readMedia = deps.readMedia;
-    const prepared = await contentAdapter.preparePreviewFrame({ nodeId, node, data, assets: exported.canvas.assets, ...(input.clipId !== undefined ? { clipId: input.clipId } : {}), timeSeconds, ...(readMedia ? { read: (storageKey: string) => readMedia(storageKey, canvasId) } : {}) });
+    const prepared = await contentAdapter.preparePreviewFrame({ nodeId, node, data, canvas: exported.canvas, assets: exported.canvas.assets, ...(input.clipId !== undefined ? { clipId: input.clipId } : {}), timeSeconds, ...(readMedia ? { read: (storageKey: string) => readMedia(storageKey, canvasId) } : {}) });
     if (!prepared.ok) return prepared;
     sourceHash = prepared.sourceHash; cacheSourceHash = sourceHash; animationIdentity = prepared.animationIdentity; actualClipId = prepared.clipId;
     animationMetadata = prepared.metadata; scene = prepared.scene;
@@ -66,7 +68,7 @@ export async function renderPreview(
   const latest = room.exportCanvas();
   const latestNode = latest.ok ? latest.canvas.document.nodes.find(entry => entry.id === nodeId) : undefined;
   const latestData = latest.ok ? (latest.canvas.nodeData[nodeId] as CanvasNodeData | undefined) : undefined;
-  const identityMatches = contentAdapter ? contentAdapter.identityMatches(data, latestData, actualClipId) : modelPreviewIdentityMatches(data, latestData);
+  const identityMatches = contentAdapter ? contentAdapter.identityMatches(data, latestData, actualClipId, exported.canvas, latest.ok ? latest.canvas : undefined) : modelPreviewIdentityMatches(data, latestData);
   if (!latest.ok || latestNode?.type !== node.type || !identityMatches) return { ok: false, code: "stale-source", message: "渲染期间权威定义已变化，请重新请求预览" };
   renderCache.set(cacheKey, { png: rendered.png, width: capture.width, height: capture.height, sceneSignature: scene.signature, renderVersion: rendered.renderVersion });
   return { ok: true, cached: false, pngBase64: rendered.png.toString("base64"), metadata: metadata(rendered.renderVersion, capture.width, capture.height, scene.signature) };

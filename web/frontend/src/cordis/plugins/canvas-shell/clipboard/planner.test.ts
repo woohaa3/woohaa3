@@ -1,3 +1,5 @@
+import { migrateFilmSetFixture } from "../../../../../../test-support/film-set-groups.js";
+import { readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 import { testManagedLifecycle, testManagedOwner } from "../../../../../../test-support/managed-test-extension.js";
 import { applyCanvasCommands } from "../../../../../../test-support/managed-shot-commands.js";
@@ -9,8 +11,8 @@ import {
   createEmptyWoohaa3ServerCanvas,
   createWoohaa3CanvasNode,
   toWoohaa3CanvasDocument,
-  createFilmSetSnapshot, canonicalFilmSetFields, filmSetAnimationsOf, decodeFilmSetNodeData,
-  filmSetObjectContainerId, filmSetObjectContainerData, resolveFilmSetObject,
+  createFilmSetSnapshot, canonicalFilmSetFields, filmSetAnimationsOf,
+  filmSetObjectContainerId, filmSetObjectContainerData,
   managedNodeRelationOf, shotReferenceOwnershipOf, SHOT_REFERENCE_ROLE,
   type FilmSetModelItem, type FilmSetMediaItem,
   type ServerCanvas,
@@ -233,14 +235,15 @@ describe("粘贴规划", () => {
     const fields = canonicalFilmSetFields({ ...snapshot, filmSetAnimations: collection });
     canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
     canvas.nodeData.film = { ...fields, filmSetShotPreviewsHidden: [collection.clips[1].id] } as never;
+    canvas.assets.push({ id: "asset-video", title: "video", mediaKind: "video", status: "ready", source: "uploaded", createdAt: NOW });
+    Object.assign(canvas, migrateFilmSetFixture(canvas, "film"));
     const payload = buildCanvasCopyPayload(canvas, ["film"])!;
     const plan = planCanvasPaste({ viewport: { x: 0, y: 0, zoom: 1 }, canvas, payload, anchor: { kind: "point", position: { x: 0, y: 0 } } })!;
     const added = plan.commands.find(command => command.type === "node.add");
     if (!added || added.type !== "node.add" || !added.nodeData) throw new Error("missing pasted node data");
-    const decoded = decodeFilmSetNodeData(added.nodeData);
-    if (!decoded.ok) throw new Error(decoded.reason);
-    expect(added.nodeData?.filmSetShotPreviewsHidden).toBeUndefined();
-    const data = decoded.value;
+    const applied = applyCanvasCommands(canvas, plan.commands);
+    if (!applied.ok) throw Error(applied.rejection.message);
+    const data = readFilmSetAnimationProjection(applied.canvas, added.node.id)!;
     const pastedClips = filmSetAnimationsOf(data);
     const modelItem = data.filmSetContent.items.find((item): item is FilmSetModelItem => item.kind === "model")!;
     const actorItem = snapshot.filmSetContent.items.find((item): item is FilmSetModelItem => item.id === "actor")!;
@@ -265,7 +268,7 @@ describe("粘贴规划", () => {
     canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
     canvas.nodeData.film = fields as never;
     // 先让共享 reducer 补齐源片场的预览闭包（与真实画布状态一致）。
-    const materialized = applyCanvasCommands(canvas, [], { now: NOW });
+    const materialized = applyCanvasCommands(migrateFilmSetFixture(canvas, "film"), [], { now: NOW });
     if (!materialized.ok) throw new Error(materialized.rejection.message);
     const withPreview = materialized.canvas;
     const sourcePreview = withPreview.document.nodes.find((node) => managedNodeRelationOf(withPreview.nodeData[node.id])?.extensionId === "film-set");
@@ -309,7 +312,7 @@ describe("粘贴规划", () => {
       clip.cameraMotion = { ...clip.cameraMotion, motionScript: "" };
     }
     canvas.nodeData.film = canonicalFilmSetFields(snapshot) as never;
-    const materialized = applyCanvasCommands(canvas, [], { now: NOW });
+    const materialized = applyCanvasCommands(migrateFilmSetFixture(canvas, "film"), [], { now: NOW });
     if (!materialized.ok) throw new Error(materialized.rejection.message);
     const source = materialized.canvas;
     const preview = source.document.nodes.find((node) => managedNodeRelationOf(source.nodeData[node.id])?.extensionId === "film-set")!;
@@ -656,7 +659,7 @@ describe("图片工程复制与跨画布引用（任务 2.4）", () => {
 
 
 describe("片场对象容器复制", () => {
-  it("随片场复制并重映射对象身份；单独复制容器物化为独立 model3d", () => {
+  it("旧对象容器仅用于迁移读取，不能复制或物化", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("object-copy", NOW);
     canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 0, y: 0 }, "film"));
     canvas.nodeData.film = canonicalFilmSetFields(createFilmSetSnapshot({ title: "片场", modelItemId: "actor",
@@ -669,33 +672,8 @@ describe("片场对象容器复制", () => {
     const id = filmSetObjectContainerId("film", "actor");
     canvas.document.nodes.push(createWoohaa3CanvasNode("composite-asset", { x: 400, y: 0 }, id));
     canvas.nodeData[id] = filmSetObjectContainerData("film", "actor");
-    const standalone = buildCanvasCopyPayload(canvas, [id]);
-    expect(standalone).not.toBeNull();
-    expect(standalone!.nodes).toEqual([expect.objectContaining({ id, type: "model3d" })]);
-    expect(standalone!.nodeData[id]).toEqual(expect.objectContaining({
-      modelScript: "scene.box({id:'body',size:[1,1,1]});"
-    }));
-    const standalonePlan = planCanvasPaste({ canvas: createEmptyWoohaa3ServerCanvas("standalone-destination", NOW), payload: standalone!, anchor: null, viewport: { x: 0, y: 0, zoom: 1 } })!;
-    expect(standalonePlan.commands.some(command => command.type === "node.add" && command.node.type === "model3d")).toBe(true);
-    expect(standalonePlan.commands.some(command => command.type === "nodeData.patch" && command.value?.modelScript === "scene.box({id:'body',size:[1,1,1]});")).toBe(true);
-    const payload = buildCanvasCopyPayload(canvas, ["film"])!;
-    expect(payload.nodes.map(node => node.id)).toContain(id);
-    const target = createEmptyWoohaa3ServerCanvas("destination", NOW);
-    const plan = planCanvasPaste({ canvas: target, payload, anchor: null, viewport: { x: 0, y: 0, zoom: 1 } })!;
-    const result = applyCanvasCommands(target, plan.commands, { now: NOW });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const newId = plan.newNodeIds.find(candidate => candidate.startsWith("film-object:"))!;
-    const object = resolveFilmSetObject(result.canvas, newId)!;
-    expect(object).not.toBeNull();
-    expect(object.owner.filmSetNodeId).not.toBe("film");
-    expect(object.item.id).not.toBe("actor");
-    expect(newId).toBe(filmSetObjectContainerId(object.owner.filmSetNodeId, object.item.id));
-    const ownerData = result.canvas.nodeData[object.owner.filmSetNodeId];
-    const hiddenId = (ownerData.filmSetObjectContainersHidden as string[])[0];
-    expect(hiddenId).not.toBe("hidden-actor");
-    expect((ownerData.filmSetContent as any).items.some((item: any) => item.id === hiddenId)).toBe(true);
-    expect(result.canvas.document.nodes.some(node => node.id === filmSetObjectContainerId(object.owner.filmSetNodeId, hiddenId))).toBe(false);
+    expect(buildCanvasCopyPayload(canvas, [id])).toBeNull();
+    expect(buildCanvasCopyPayload(canvas, ["film"])).toBeNull();
   });
 });
 

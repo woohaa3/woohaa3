@@ -1,3 +1,4 @@
+import { isFilmSetGroupNode } from "@woohaa3/contracts";
 /**
  * 聚焦节点的 3D 业务类别
  * （change: 2026-10-18-simplify-model-focus-panel）。
@@ -9,7 +10,6 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Context } from "@deepseek-ai/cordis";
-import { isFilmSetNode } from "@woohaa3/contracts";
 
 export type ModelFocusKind = "model3d" | "film-set" | null;
 
@@ -19,7 +19,7 @@ export function focusedModelKind(ctx: Context, nodeId: string | null): ModelFocu
   const canvas = ctx.compositeAssets.projectCanvas(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas());
   const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
   if (node?.type === "model3d") return "model3d";
-  if (isFilmSetNode(node?.type, canvas?.nodeData?.[nodeId])) return "film-set";
+  if (isFilmSetGroupNode(node, canvas?.nodeData?.[nodeId])) return "film-set";
   return null;
 }
 

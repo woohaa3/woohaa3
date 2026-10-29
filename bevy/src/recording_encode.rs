@@ -33,7 +33,11 @@ impl EncoderProfile {
     /// 宽高必须是偶数：YUV420 色度下采样要求，奇数尺寸会被拒绝而不是悄悄裁掉一像素。
     pub fn validate(&self) -> Result<(), EncodeFailure> {
         if self.width == 0 || self.height == 0 {
-            return Err(EncodeFailure::new(EncodeStage::Encode, "recording-invalid-size", "输出尺寸必须为正"));
+            return Err(EncodeFailure::new(
+                EncodeStage::Encode,
+                "recording-invalid-size",
+                "输出尺寸必须为正",
+            ));
         }
         if self.width % 2 != 0 || self.height % 2 != 0 {
             return Err(EncodeFailure::new(
@@ -50,7 +54,11 @@ impl EncoderProfile {
             ));
         }
         if self.fps_numer == 0 || self.fps_denom == 0 {
-            return Err(EncodeFailure::new(EncodeStage::Encode, "recording-invalid-frame-rate", "帧率必须为正"));
+            return Err(EncodeFailure::new(
+                EncodeStage::Encode,
+                "recording-invalid-frame-rate",
+                "帧率必须为正",
+            ));
         }
         Ok(())
     }
@@ -84,7 +92,12 @@ pub struct EncodeFailure {
 
 impl EncodeFailure {
     pub fn new(stage: EncodeStage, code: &'static str, message: impl Into<String>) -> Self {
-        Self { stage, code, message: message.into(), transient: false }
+        Self {
+            stage,
+            code,
+            message: message.into(),
+            transient: false,
+        }
     }
 
     pub fn transient(mut self) -> Self {
@@ -153,17 +166,20 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// 最小 SHA-256 实现（避免为一次摘要引入依赖爆炸；正确性由测试向量覆盖）。
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
     let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
     let bit_len = (bytes.len() as u64) * 8;
     let mut padded = Vec::with_capacity(bytes.len() + 72);
@@ -181,14 +197,21 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
             let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
         }
         let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
             (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
         for i in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ ((!e) & g);
-            let temp1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let temp1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
             let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
             let maj = (a & b) ^ (a & c) ^ (b & c);
             let temp2 = s0.wrapping_add(maj);
@@ -254,7 +277,13 @@ pub fn rgba_to_yuv420(rgba: &[u8], width: u32, height: u32) -> Option<Yuv420Fram
             }
         }
     }
-    Some(Yuv420Frame { width, height, y, u, v })
+    Some(Yuv420Frame {
+        width,
+        height,
+        y,
+        u,
+        v,
+    })
 }
 
 /// YUV420 帧（三个平面分开，便于按 stride 拷贝给编码器）。
@@ -272,8 +301,13 @@ pub struct Yuv420Frame {
 /// 只读实际文件：检查 `ftyp`、`moov` 在 `mdat` 之前（Fast Start）、存在 `avc1`/`avcC`
 /// 样本描述、以及文件长度与声明大小一致。任何不符都按 `EncodeStage::Mux` 拒绝。
 pub fn verify_mp4(path: &Path, expected_size: u64) -> Result<Mp4Facts, EncodeFailure> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-unreadable", error.to_string()))?;
+    let bytes = std::fs::read(path).map_err(|error| {
+        EncodeFailure::new(
+            EncodeStage::Mux,
+            "recording-artifact-unreadable",
+            error.to_string(),
+        )
+    })?;
     if bytes.len() as u64 != expected_size {
         return Err(EncodeFailure::new(
             EncodeStage::Mux,
@@ -288,9 +322,17 @@ pub fn verify_mp4(path: &Path, expected_size: u64) -> Result<Mp4Facts, EncodeFai
             format!("成片超过 {MAX_ARTIFACT_BYTES} 字节上限"),
         ));
     }
-    let find = |needle: &[u8]| bytes.windows(needle.len()).position(|window| window == needle);
+    let find = |needle: &[u8]| {
+        bytes
+            .windows(needle.len())
+            .position(|window| window == needle)
+    };
     let ftyp = find(b"ftyp").ok_or_else(|| {
-        EncodeFailure::new(EncodeStage::Mux, "recording-artifact-not-mp4", "缺少 MP4 ftyp box")
+        EncodeFailure::new(
+            EncodeStage::Mux,
+            "recording-artifact-not-mp4",
+            "缺少 MP4 ftyp box",
+        )
     })?;
     if ftyp > 32 {
         return Err(EncodeFailure::new(
@@ -308,7 +350,7 @@ pub fn verify_mp4(path: &Path, expected_size: u64) -> Result<Mp4Facts, EncodeFai
                 EncodeStage::Mux,
                 "recording-artifact-incomplete",
                 "缺少 moov 或 mdat box",
-            ))
+            ));
         }
     };
     if moov > mdat {
@@ -351,11 +393,19 @@ impl ArtifactFile {
     /// 在给定目录创建 `<name>.mp4` 临时文件。
     pub fn create(directory: &Path, name: &str) -> Result<Self, EncodeFailure> {
         std::fs::create_dir_all(directory).map_err(|error| {
-            EncodeFailure::new(EncodeStage::Mux, "recording-artifact-directory-failed", error.to_string())
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-directory-failed",
+                error.to_string(),
+            )
         })?;
         let path = directory.join(format!("{name}.mp4"));
         File::create(&path).map_err(|error| {
-            EncodeFailure::new(EncodeStage::Mux, "recording-artifact-create-failed", error.to_string())
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-create-failed",
+                error.to_string(),
+            )
         })?;
         Ok(Self { path })
     }
@@ -390,9 +440,17 @@ pub struct BoundedWriter {
 impl BoundedWriter {
     pub fn create(path: &Path, limit: u64) -> Result<Self, EncodeFailure> {
         let file = File::create(path).map_err(|error| {
-            EncodeFailure::new(EncodeStage::Mux, "recording-artifact-create-failed", error.to_string())
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-create-failed",
+                error.to_string(),
+            )
         })?;
-        Ok(Self { inner: BufWriter::new(file), written: 0, limit })
+        Ok(Self {
+            inner: BufWriter::new(file),
+            written: 0,
+            limit,
+        })
     }
 
     pub fn write_all(&mut self, bytes: &[u8]) -> Result<(), EncodeFailure> {
@@ -404,21 +462,35 @@ impl BoundedWriter {
                 format!("成片超过 {0} 字节上限", self.limit),
             ));
         }
-        self.inner
-            .write_all(bytes)
-            .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+        self.inner.write_all(bytes).map_err(|error| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-write-failed",
+                error.to_string(),
+            )
+        })?;
         self.written = next;
         Ok(())
     }
 
     pub fn rewrite_at(&mut self, offset: u64, bytes: &[u8]) -> Result<(), EncodeFailure> {
-        self.inner
-            .flush()
-            .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+        self.inner.flush().map_err(|error| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-write-failed",
+                error.to_string(),
+            )
+        })?;
         let file = self.inner.get_mut();
         file.seek(std::io::SeekFrom::Start(offset))
             .and_then(|_| file.write_all(bytes))
-            .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+            .map_err(|error| {
+                EncodeFailure::new(
+                    EncodeStage::Mux,
+                    "recording-artifact-write-failed",
+                    error.to_string(),
+                )
+            })?;
         Ok(())
     }
 
@@ -427,9 +499,13 @@ impl BoundedWriter {
     }
 
     pub fn finish(mut self) -> Result<u64, EncodeFailure> {
-        self.inner
-            .flush()
-            .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+        self.inner.flush().map_err(|error| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-write-failed",
+                error.to_string(),
+            )
+        })?;
         Ok(self.written)
     }
 }
@@ -452,22 +528,49 @@ mod tests {
 
     #[test]
     fn profile_rejects_odd_and_oversized_dimensions() {
-        let base = EncoderProfile { width: 1280, height: 720, bitrate: 4_000_000, fps_numer: 30, fps_denom: 1 };
+        let base = EncoderProfile {
+            width: 1280,
+            height: 720,
+            bitrate: 4_000_000,
+            fps_numer: 30,
+            fps_denom: 1,
+        };
         assert!(base.validate().is_ok());
         assert_eq!(
-            EncoderProfile { width: 1281, ..base }.validate().unwrap_err().code,
+            EncoderProfile {
+                width: 1281,
+                ..base
+            }
+            .validate()
+            .unwrap_err()
+            .code,
             "recording-invalid-size"
         );
         assert_eq!(
-            EncoderProfile { width: 0, ..base }.validate().unwrap_err().code,
+            EncoderProfile { width: 0, ..base }
+                .validate()
+                .unwrap_err()
+                .code,
             "recording-invalid-size"
         );
         assert_eq!(
-            EncoderProfile { width: 5000, ..base }.validate().unwrap_err().code,
+            EncoderProfile {
+                width: 5000,
+                ..base
+            }
+            .validate()
+            .unwrap_err()
+            .code,
             "recording-invalid-size"
         );
         assert_eq!(
-            EncoderProfile { fps_numer: 0, ..base }.validate().unwrap_err().code,
+            EncoderProfile {
+                fps_numer: 0,
+                ..base
+            }
+            .validate()
+            .unwrap_err()
+            .code,
             "recording-invalid-frame-rate"
         );
     }
@@ -480,7 +583,10 @@ mod tests {
         assert_eq!(frame.y.len(), 4);
         assert_eq!(frame.u.len(), 1);
         assert_eq!(frame.v.len(), 1);
-        assert!(frame.y.iter().all(|value| *value >= 235), "白色 Y 应接近 235");
+        assert!(
+            frame.y.iter().all(|value| *value >= 235),
+            "白色 Y 应接近 235"
+        );
         assert_eq!(frame.u[0], 128);
         assert_eq!(frame.v[0], 128);
 

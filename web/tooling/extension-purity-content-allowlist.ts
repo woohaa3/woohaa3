@@ -25,13 +25,7 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/contracts/src/canvas/command-reducer/film-set-item-commands.ts",
-    literals: ["film-set","filmSetAnimations","filmSetContent"],
-    stage: "command",
-    reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
-  },
-  {
-    file: "web/contracts/src/canvas/command-reducer/film-set-object-containers.ts",
-    literals: ["film-set","filmSetContent","filmSetNodeId","filmSetObjectContainersHidden"],
+    literals: ["film-set"],
     stage: "command",
     reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
   },
@@ -43,13 +37,13 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   },
   {
     file: "web/contracts/src/canvas/command-reducer/node-commands.ts",
-    literals: ["filmSetNodeId"],
+    literals: ["film-set","filmSetNodeId"],
     stage: "command",
     reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
   },
   {
     file: "web/contracts/src/canvas/command-reducer/node-data-validation.ts",
-    literals: ["film-set","filmSetAnimations","filmSetContent","scenePlacement"],
+    literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
     stage: "command",
     reason: "历史债：内核仍含扩展命令或编辑分支。去向：第 3 组改为 extension.command。"
   },
@@ -164,12 +158,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   {
     file: "web/frontend/src/cordis/plugins/canvas-shell/canvas-node-index.ts",
     literals: ["filmSetNodeId"],
-    stage: "interaction",
-    reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
-  },
-  {
-    file: "web/frontend/src/cordis/plugins/canvas-shell/clipboard/payload.ts",
-    literals: ["filmSetContent","filmSetNodeId"],
     stage: "interaction",
     reason: "历史债：前端仍按扩展身份或字段分支。去向：第 5 组改为交互策略。"
   },
@@ -374,12 +362,6 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
   {
     file: "web/contracts/src/canvas/film-set-composition.ts",
     literals: ["filmSetContent","scenePlacement"],
-    stage: "node-data",
-    reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
-  },
-  {
-    file: "web/contracts/src/canvas/film-set-content.ts",
-    literals: ["film-set"],
     stage: "node-data",
     reason: "历史债：内核仍读取扩展 nodeData 字段。去向：第 2 组改为 owner codec。"
   },
@@ -706,5 +688,71 @@ export const CONTENT_FIELD_DEBT: readonly ContentFieldDebt[] = [
     literals: ["filmSetAnimations","filmSetContent"],
     stage: "route",
     reason: "历史债：内核仍写死扩展路由、工具或媒体作用域。去向：第 4 组改为内容路由。"
+  },
+  {
+    file: "web/contracts/src/canvas/agent-node-descriptors.ts",
+    literals: ["film-set"],
+    stage: "node-data",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/contracts/src/canvas/canvas-script/api-guide.ts",
+    literals: ["film-set"],
+    stage: "node-data",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/contracts/src/canvas/film-set-animation-projection.ts",
+    literals: ["filmSetAnimations","filmSetContent","scenePlacement"],
+    stage: "render",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/contracts/src/canvas/film-set-content/codec.ts",
+    literals: ["filmSetContent"],
+    stage: "node-data",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/contracts/src/canvas/film-set-content/contribution.ts",
+    literals: ["film-set"],
+    stage: "node-data",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/contracts/src/canvas/film-set-content/types.ts",
+    literals: ["filmSetContent"],
+    stage: "node-data",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/contracts/src/canvas/film-set-group-migration.ts",
+    literals: ["filmSetAnimations","filmSetContent","filmSetNodeId","filmSetObjectContainersHidden","scenePlacement","shotPreview"],
+    stage: "command",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/contracts/src/canvas/film-set-group-projection.ts",
+    literals: ["filmSetContent"],
+    stage: "render",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/frontend/src/cordis/domain/node-catalog.ts",
+    literals: ["film-set"],
+    stage: "node-data",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/services/mcp-service/src/agent-authoring/graph-tools.ts",
+    literals: ["film-set"],
+    stage: "node-data",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
+  },
+  {
+    file: "web/services/mcp-service/src/agent-authoring/tool-schemas.ts",
+    literals: ["film-set"],
+    stage: "node-data",
+    reason: "片场 group 迁移保留的共享契约／只读投影与离线 codec；继承原片场字段边界。后续由 abstract-extension-content-fields 的 owner codec／语义目录阶段统一抽取，不增加快照写入口。"
   }
 ];

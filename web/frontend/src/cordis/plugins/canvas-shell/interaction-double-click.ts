@@ -28,7 +28,7 @@ export function createDoubleClickHandler(core: InteractionCore) {
     // 命中由 Rust interaction snapshot 计算；不可用时不派发卡片命中（design D3）。
     const hitResult = core.queryPoint(world, activeViewport().zoom);
     const hit = hitResult.ok ? hitResult.value : null;
-    if (hit?.kind === "node-action" && (hit.actionId === "group-toggle-collapse" || hit.actionId === "group-resize-badge")) { event.preventDefault(); return; }
+    if (hit?.kind === "node-action" && (hit.actionId === "group-badge-select" || hit.actionId === "group-resize-badge")) { event.preventDefault(); return; }
     const cardNodeId = hit && (hit.kind === "node" || hit.kind === "model-preview" || hit.kind === "film-scope") ? hit.nodeId : null;
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState) return;

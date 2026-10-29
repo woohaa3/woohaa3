@@ -74,3 +74,20 @@ describe("group badge independent resize",()=>{
     expect(submitted).toHaveLength(0);expect(f.current().nodeData.g.groupBadgeScale).toBe(1.5);f.controller.dispose();
   });
 });
+
+describe("group badge resize survives unrelated node data churn", () => {
+  it("成员重排改变 group 矩形、其它字段被同步时，松手仍提交倍率", () => {
+    const f = setup();
+    f.pointer("pointerdown");
+    f.pointer("pointermove", 44, 32); f.controller.flush();
+    const churned = structuredClone(f.current());
+    churned.document.nodes = churned.document.nodes.map(node => node.id === "m" ? { ...node, width: 260, height: 130 } : node);
+    (churned.nodeData as Record<string, unknown>).g = { ...churned.nodeData.g, title: "组（已同步）" };
+    woohaa3CanvasStore.getState().applyRemoteCanvas(churned);
+    f.pointer("pointerup", 44, 32);
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]).toMatchObject({ type: "nodeData.patch", nodeId: "g", value: { groupBadgeScale: 2 } });
+    expect((submitted[0] as { expectedNodeData?: Record<string, { title?: string }> }).expectedNodeData?.g?.title).toBe("组（已同步）");
+    f.controller.dispose();
+  });
+});

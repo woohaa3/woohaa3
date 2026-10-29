@@ -3,8 +3,8 @@
 //! 三维属性（position/rotation/scale）使用 `[f32;3]`；opacity 是 0..=1 的标量
 //! （change: 2026-10-19-extend-film-set-for-motion-graphics，D1）。
 use super::{
-    MOTION_COORD_LIMIT, ModelDelta, ModelKeyframe, ModelTrackProperty, MotionEasing,
-    MotionIrError, easing_progress, fail,
+    MOTION_COORD_LIMIT, ModelDelta, ModelKeyframe, ModelTrackProperty, MotionEasing, MotionIrError,
+    easing_progress, fail,
 };
 use bevy::prelude::*;
 
@@ -73,7 +73,10 @@ pub(super) fn parse_frames(
                 .or_else(|| point.value.as_ref().and_then(RawKeyframeValue::scalar))
                 .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
                 .ok_or_else(|| {
-                    fail("invalid-motion", "opacity 关键帧 value 必须是 0–1 的数字".into())
+                    fail(
+                        "invalid-motion",
+                        "opacity 关键帧 value 必须是 0–1 的数字".into(),
+                    )
                 })?;
             (Vec3::ZERO, opacity)
         } else {

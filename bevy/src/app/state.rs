@@ -39,9 +39,17 @@ impl NodeIndex {
     }
 
     /// 节点引用；索引缺失或场景已换时返回 `None`（调用方回退到保守路径）。
-    pub(crate) fn node<'a>(&self, scene: &'a Scene, id: &str) -> Option<(usize, &'a crate::protocol::GraphNode)> {
+    pub(crate) fn node<'a>(
+        &self,
+        scene: &'a Scene,
+        id: &str,
+    ) -> Option<(usize, &'a crate::protocol::GraphNode)> {
         let index = self.position(id)?;
-        scene.nodes.get(index).filter(|node| node.id == id).map(|node| (index, node))
+        scene
+            .nodes
+            .get(index)
+            .filter(|node| node.id == id)
+            .map(|node| (index, node))
     }
 }
 
@@ -248,7 +256,11 @@ mod tests {
         assert_eq!(rig.focus_node.as_deref(), Some("model-b"));
     }
 
-    fn progress(generation: u32, kind: &str, value: f32) -> crate::protocol::FocusTransitionProgress {
+    fn progress(
+        generation: u32,
+        kind: &str,
+        value: f32,
+    ) -> crate::protocol::FocusTransitionProgress {
         crate::protocol::FocusTransitionProgress {
             version: crate::protocol::FOCUS_TRANSITION_VERSION.to_string(),
             node_id: "m1".to_string(),

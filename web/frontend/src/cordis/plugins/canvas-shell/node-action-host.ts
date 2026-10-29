@@ -77,6 +77,9 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
     }
     if (!descriptor) continue;
     const menu = descriptor.menu === true;
+    const icon = descriptor.icon === "download" || descriptor.icon === "collapse-groups" || descriptor.icon === "expand-groups"
+      ? descriptor.icon
+      : undefined;
     actions.push({
       id: contribution.id,
       label: descriptor.label,
@@ -87,7 +90,9 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
       ...(menu ? { menu: true } : {})
     });
     owners.set(contribution.id, contribution);
-    if (descriptor.summary) summary = descriptor.summary;
+    // 摘要是目标身份（组名/节点数），由排序最靠前的贡献拥有；后续动作的状态原因
+    // 仍保留在 descriptor.reason 中，不能覆盖左侧身份摘要。
+    if (descriptor.summary && !summary) summary = descriptor.summary;
   }
   if (actions.length === 0) return null;
   return { presentation: { actions, ...(summary ? { summary } : {}) }, owners };

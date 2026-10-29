@@ -1,3 +1,5 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
 import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 /**
  * 拍摄镜头受保护编辑（源镜头定义 + 预览布局闭包）测试
@@ -42,7 +44,7 @@ function withFilmSet(): ServerCanvas {
     timeline: { duration: 5, loop: true }
   });
   canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
-  return materialize(canvas);
+  return materialize(migrateFilmSetFixture(canvas, "film"));
 }
 
 /** 触发一次同批 reconciliation 让预览节点就位（空批次也会收敛派生闭包）。 */
@@ -60,7 +62,7 @@ function expectOk(result: ReturnType<typeof applyCanvasCommands>): ServerCanvas 
 }
 
 function animation(canvas: ServerCanvas): FilmSetNodeData {
-  const decoded = decodeFilmSetNodeData(canvas.nodeData.film);
+  const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
   if (!decoded.ok) throw new Error(decoded.reason);
   return decoded.value;
 }

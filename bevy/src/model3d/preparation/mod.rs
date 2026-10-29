@@ -16,8 +16,8 @@ mod schedule;
 #[cfg(test)]
 mod tests;
 
-pub use assembly::{MAX_NEW_MESH_BYTES, MAX_UNITS_PER_FRAME, SOFT_STOP_MS};
 pub use assembly::Staging;
+pub use assembly::{MAX_NEW_MESH_BYTES, MAX_UNITS_PER_FRAME, SOFT_STOP_MS};
 pub use schedule::{PrepareKey, Priority, Scheduler};
 
 #[cfg(test)]
@@ -96,9 +96,12 @@ pub(super) fn request(
     // （`enqueue` 会跳过已发布/已待领的 key），因此保留需求不会造成重复准备，却能让
     // 同内容的新实例共享同一份已完成产物与已登记资产（design D3）。
     let key_for_demand = key.clone();
-    models
-        .preparation
-        .demand(&node.id, key_for_demand, resource.clone(), priority.priority());
+    models.preparation.demand(
+        &node.id,
+        key_for_demand,
+        resource.clone(),
+        priority.priority(),
+    );
     match models.roots.get(&node.id) {
         Some(root)
             if root.content_signature == resource.signature
@@ -132,20 +135,12 @@ pub(crate) fn is_pending(models: &ModelVisuals, node: &str) -> bool {
 
 /// 测试辅助：直接推进一帧（与生产 `advance` 同一实现）。
 #[cfg(test)]
-pub(crate) fn advance_for_test(
-    world: &mut World,
-    scene: &Scene,
-    resources: &ModelAssets,
-) -> bool {
+pub(crate) fn advance_for_test(world: &mut World, scene: &Scene, resources: &ModelAssets) -> bool {
     advance(world, scene, resources)
 }
 
 /// 后台 poll + 预算化装配（每帧一次，独占宿主线程）。
-pub(crate) fn advance(
-    world: &mut World,
-    scene: &Scene,
-    resources: &ModelAssets,
-) -> bool {
+pub(crate) fn advance(world: &mut World, scene: &Scene, resources: &ModelAssets) -> bool {
     if !enabled() {
         return false;
     }

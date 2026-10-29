@@ -11,8 +11,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::protocol::ModelMediaPlane;
 use super::media_geometry::plane_transform;
+use crate::protocol::ModelMediaPlane;
 
 /// 片场媒体平面资源表：平面 id → entity + 材质句柄。
 #[derive(Resource, Default)]
@@ -55,10 +55,13 @@ pub(crate) fn sync_film_set_textures(
         );
         // Retain texture identity across video frames, avoiding image allocation
         // and material rebinding for each seek or playback tick.
-        let existing = materials.get(&entry.material)
+        let existing = materials
+            .get(&entry.material)
             .and_then(|material| material.base_color_texture.clone());
         if let Some(handle) = existing.filter(|handle| images.contains(handle.id())) {
-            if let Some(mut current) = images.get_mut(&handle) { *current = image; }
+            if let Some(mut current) = images.get_mut(&handle) {
+                *current = image;
+            }
         } else {
             let handle = images.add(image);
             apply_texture(&mut materials, &entry.material, handle);
@@ -81,13 +84,16 @@ pub(crate) fn sync_film_set_planes(
     }
     // 收集 (平面, 共同根 transform)：媒体与模型/地面共用同一条根链（D4/D7）；尺寸/偏移已是
     // 内容局部量，由共同根统一应用。
-    let desired: Vec<(ModelMediaPlane, Transform)> = scene
+    let mut desired: Vec<(ModelMediaPlane, Transform)> = scene
         .0
         .nodes
         .iter()
         .filter_map(|node| {
             let film_set = node.composite_asset.as_ref()?;
-            let model = node.model.as_ref().and_then(|reference| resources.0.get(&reference.resource_key));
+            let model = node
+                .model
+                .as_ref()
+                .and_then(|reference| resources.0.get(&reference.resource_key));
             let root = super::media_geometry::film_set_root(node, model.map(|arc| arc.as_ref()));
             Some(
                 film_set
@@ -99,6 +105,46 @@ pub(crate) fn sync_film_set_planes(
         })
         .flatten()
         .collect();
+    // Canonical film-set groups carry media bindings directly.  Keep a small
+    // renderer-owned plane for each visible image/video binding so texture
+    // replacement and lifecycle use the same residency path as legacy media.
+    for group in &scene.0.film_set_groups {
+        let Some(owner) = scene.0.nodes.iter().find(|node| node.id == group.owner_id) else {
+            continue;
+        };
+        let model = owner
+            .model
+            .as_ref()
+            .and_then(|reference| resources.0.get(&reference.resource_key))
+            .map(|model| model.as_ref());
+        let group_root = super::media_geometry::film_set_root(owner, model);
+        let group_root = group
+            .scene_transform
+            .as_ref()
+            .map(|t| group_root.mul_transform(super::group_runtime::scene_transform(t)))
+            .unwrap_or(group_root);
+        for binding in &group.bindings {
+            if !binding.visible
+                || binding.diagnostic.is_some()
+                || !matches!(binding.kind.as_str(), "image" | "video")
+            {
+                continue;
+            }
+            let root = group_root.mul_transform(Transform {
+                translation: Vec3::new(
+                    binding.transform.x,
+                    binding.transform.y,
+                    binding.transform.z,
+                ),
+                rotation: Quat::from_rotation_y(binding.transform.yaw),
+                scale: Vec3::splat(binding.transform.scale),
+            });
+            desired.push((
+                super::media_geometry::group_media_plane(&group.owner_id, binding, model),
+                root,
+            ));
+        }
+    }
     // 释放不再需要的平面。
     let alive: std::collections::HashSet<&str> =
         desired.iter().map(|(plane, _)| plane.id.as_str()).collect();
@@ -140,10 +186,9 @@ pub(crate) fn sync_film_set_planes(
                     // world transform includes root and animated media placement.
                 ))
                 .id();
-            visuals.planes.insert(
-                plane.id.clone(),
-                MediaPlane { entity, material },
-            );
+            visuals
+                .planes
+                .insert(plane.id.clone(), MediaPlane { entity, material });
         }
     }
 }
@@ -183,7 +228,8 @@ impl FilmSetMediaVisuals {
         owner_id: &str,
         layers: &[usize],
     ) -> u64 {
-        self.preview_layers.insert(owner_id.to_owned(), layers.to_vec());
+        self.preview_layers
+            .insert(owner_id.to_owned(), layers.to_vec());
         let mut written = 0;
         for (id, entry) in &self.planes {
             let owner = id.split_once("::").map(|(owner, _)| owner).unwrap_or(id);
@@ -235,7 +281,13 @@ mod tests {
         let material = materials.add(StandardMaterial::default());
         let entity = world.spawn_empty().id();
         let mut visuals = FilmSetMediaVisuals::default();
-        visuals.planes.insert("video".into(), MediaPlane { entity, material: material.clone() });
+        visuals.planes.insert(
+            "video".into(),
+            MediaPlane {
+                entity,
+                material: material.clone(),
+            },
+        );
         world.insert_resource(visuals);
         world.insert_resource(materials);
         world.insert_resource(Assets::<Image>::default());
@@ -244,12 +296,32 @@ mod tests {
         schedule.add_systems(sync_film_set_textures);
         let mut first = None;
         for pixel in [vec![0, 0, 255, 255], vec![255, 0, 0, 255]] {
-            world.resource_mut::<crate::app::FilmSetTextureBatch>().0.insert("video".into(), (1, 1, pixel.clone()));
+            world
+                .resource_mut::<crate::app::FilmSetTextureBatch>()
+                .0
+                .insert("video".into(), (1, 1, pixel.clone()));
             schedule.run(&mut world);
-            let handle = world.resource::<Assets<StandardMaterial>>().get(&material).unwrap().base_color_texture.clone().unwrap();
-            if let Some(previous) = first.as_ref() { assert_eq!(&handle, previous); }
+            let handle = world
+                .resource::<Assets<StandardMaterial>>()
+                .get(&material)
+                .unwrap()
+                .base_color_texture
+                .clone()
+                .unwrap();
+            if let Some(previous) = first.as_ref() {
+                assert_eq!(&handle, previous);
+            }
             first = Some(handle.clone());
-            assert_eq!(world.resource::<Assets<Image>>().get(&handle).unwrap().data.as_ref().unwrap(), &pixel);
+            assert_eq!(
+                world
+                    .resource::<Assets<Image>>()
+                    .get(&handle)
+                    .unwrap()
+                    .data
+                    .as_ref()
+                    .unwrap(),
+                &pixel
+            );
             assert_eq!(world.resource::<Assets<Image>>().len(), 1);
         }
     }

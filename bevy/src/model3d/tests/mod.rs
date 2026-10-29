@@ -4,19 +4,17 @@
 //! 子模块通过 `super::super::{...}` 访问 model3d 的实现细节、通过 `super::*` 使用本模块的
 //! world/场景 helper。
 
-mod lifecycle;
-mod lod;
-mod overview_lod;
 mod batching;
 mod ownership;
 #[cfg(feature = "explicit-instancing")]
 mod instancing;
-mod playback;
+mod lifecycle;
+mod lod;
 mod motion_playback;
+mod overview_lod;
+mod playback;
 mod playback_representation;
-mod filmset_camera;
 mod units;
-mod film_set_layout;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,9 +67,7 @@ pub(super) fn run_sync(world: &mut World, scene: &Scene, resources: &ModelAssets
     let mut visuals = world.remove_resource::<ModelVisuals>().unwrap();
     let mut focus = world.remove_resource::<FocusVisuals>().unwrap_or_default();
     let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
-    let mut materials = world
-        .remove_resource::<Assets<StandardMaterial>>()
-        .unwrap();
+    let mut materials = world.remove_resource::<Assets<StandardMaterial>>().unwrap();
     let mut commands = world.commands();
     sync_models(
         &mut commands,

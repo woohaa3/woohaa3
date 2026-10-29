@@ -26,17 +26,87 @@ import { resolveNodeDownloadAvailability, resolveNodeActionToolbarView, resolveS
 import { describeNodeActions, describeSelectionActions, nodeActionSettingsStore, routeNodeActionHit, routeSelectionActionHit } from "./node-action-host.js";
 import { setNodeActionBridge } from "./node-action-bridge.js";
 import type { BevyNodeActionsPresentation } from "@woohaa3/contracts";
+import { isFilmSetGroupNode } from "@woohaa3/contracts";
 import type { NodeActionContribution, NodeActionContext, SelectionActionContribution, SelectionActionContext } from "../../contract/platform.js";
 import { guardContributionMethods } from "../../contribution-guard.js";
 import type { ExtensionFaultService } from "../../extension-faults.js";
 
 export const CANVAS_SHELL_PLUGIN_ID = "canvas-shell";
 
+function groupToolbarSummary(canvas: NonNullable<ReturnType<typeof workingCanvasOf>>, nodeId: string): string | null {
+  const node = canvas.document.nodes.find(entry => entry.id === nodeId);
+  if (!node || node.type !== "group") return null;
+  const descendants = new Set<string>();
+  const visit = (parentId: string) => {
+    for (const child of canvas.document.nodes) if (child.parentId === parentId && !descendants.has(child.id)) {
+      descendants.add(child.id);
+      if (child.type === "group") visit(child.id);
+    }
+  };
+  visit(nodeId);
+  const data = canvas.nodeData[nodeId];
+  const title = typeof data?.title === "string" && data.title.trim() ? data.title.trim() : "未命名组";
+  const kind = isFilmSetGroupNode(node, data) ? "片场" : "组";
+  return `${kind} · ${descendants.size} 个节点 · ${title}`;
+}
+
 export function canvasShellExtension(): Plugin.Function<void> {
   return definePlugin(
     (ctx: Context) => {
       const downloads = new NodeDownloadService({ getCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState()), mediaContent: ctx.mediaContent });
       const offDownload = ctx.on("ui.node-download.save-requested", ({ nodeId }) => { void downloads.download(nodeId); });
+      // 组徽标只负责选中/拖动；展开与收起都是选中后出现在组背板上方的明确动作。
+      // 两个动作按 group 能力工作，片场 marker 只改变摘要文案，不改变宿主分支。
+      const removeCollapsedGroupAction = ctx.slots.register("canvas.node-action", {
+        id: "group-expand",
+        owner: CANVAS_SHELL_PLUGIN_ID,
+        order: -30,
+        available: ({ nodeId, nodeType }) => {
+          if (nodeType !== "group") return false;
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          return canvas?.nodeData[nodeId]?.groupCollapsed === true;
+        },
+        describe: ({ nodeId, nodeType, writable }) => {
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const summary = canvas ? groupToolbarSummary(canvas, nodeId) : null;
+          if (!canvas || nodeType !== "group" || canvas.nodeData[nodeId]?.groupCollapsed !== true || !summary) return null;
+          return { label: "展开", icon: "expand-groups" as const, iconOnly: true, enabled: writable, tone: "primary" as const,
+            ...(writable ? {} : { reason: "当前画布只读" }), summary };
+        },
+        activate: ({ nodeId, nodeType, writable }) => {
+          if (!writable || nodeType !== "group") return;
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const data = canvas?.nodeData[nodeId];
+          if (!canvas || data?.groupCollapsed !== true) return;
+          void ctx.canvasEdit.record([{ type: "nodeData.patch", nodeId,
+            value: { groupCollapsed: false }, expectedNodeData: { [nodeId]: data ?? null } }], "展开组");
+        }
+      });
+      const removeExpandedGroupAction = ctx.slots.register("canvas.node-action", {
+        id: "group-collapse",
+        owner: CANVAS_SHELL_PLUGIN_ID,
+        order: -30,
+        available: ({ nodeId, nodeType }) => {
+          if (nodeType !== "group") return false;
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          return canvas?.nodeData[nodeId]?.groupCollapsed !== true;
+        },
+        describe: ({ nodeId, nodeType, writable }) => {
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const summary = canvas ? groupToolbarSummary(canvas, nodeId) : null;
+          if (!canvas || nodeType !== "group" || canvas.nodeData[nodeId]?.groupCollapsed === true || !summary) return null;
+          return { label: "收起", icon: "collapse-groups" as const, iconOnly: true, enabled: writable, tone: "primary" as const,
+            ...(writable ? {} : { reason: "当前画布只读" }), summary };
+        },
+        activate: ({ nodeId, nodeType, writable }) => {
+          if (!writable || nodeType !== "group") return;
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const data = canvas?.nodeData[nodeId];
+          if (!canvas || data?.groupCollapsed === true) return;
+          void ctx.canvasEdit.record([{ type: "nodeData.patch", nodeId,
+            value: { groupCollapsed: true }, expectedNodeData: { [nodeId]: data ?? null } }], "收起组");
+        }
+      });
       // 节点顶部操作横条的**宿主下载贡献**（change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.2）。
       // 横条由 Bevy 绘制、Rust 命中：本贡献只提供**纯数据描述**与命中派发，复用同一
       // `NodeDownloadService` 与同一事件总线（发出 `save-requested`）；不依赖画布写权限，
@@ -157,7 +227,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
         render: () => <NodeDownloadStatus service={downloads} />
       });
       ctx.effect(() => () => {
-        offBridge(); offActionSlots(); offSelectionActionSlots(); offDownload(); removeDownloadAction(); removeDownloadStatus();
+        offBridge(); offActionSlots(); offSelectionActionSlots(); offDownload(); removeDownloadAction(); removeCollapsedGroupAction(); removeExpandedGroupAction(); removeDownloadStatus();
         nodeActionSettingsStore.close();
         downloads.dispose();
       }, "canvas-shell-downloads");

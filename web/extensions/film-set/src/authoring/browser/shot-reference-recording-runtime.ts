@@ -1,3 +1,5 @@
+import { pinFilmSetCapture } from "../../state/browser/capture-snapshot.js";
+import { readAnimation } from "../../state/browser/animation-projection.js";
 /**
  * 独立镜头录制的生产接线（任务 8.4 / design D9）
  * （change: 2026-10-15-add-film-set-shooting-shot-previews）。
@@ -19,7 +21,7 @@
  * `cannot get property "filmSetPlayback" without inject`（2026-10-17 缺陷修复）。
  */
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
-import { decodeFilmSetNodeData, DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, filmSetAnimationsOf, shotPreviewNodeId, shotReferenceContentIdentity, shotReferenceProfileKey } from "@woohaa3/contracts";
+import { DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, filmSetAnimationsOf, shotPreviewNodeId, shotReferenceContentIdentity, shotReferenceProfileKey } from "@woohaa3/contracts";
 import { persistShotReferenceRecording } from "./shot-reference-recording-persistence.js";
 import { createFilmSetVideoEncoder } from "./film-set-video-encoder.js";
 import { videoSize } from "./film-set-video-export.js";
@@ -50,18 +52,17 @@ export type ShotReferencePlaybackPort = {
 function contentIdentityNow(ctx: Context, filmSetNodeId: string, clipId: string): string | null {
   const canvas = canvasNow(ctx);
   if (!canvas) return null;
-  const decoded = decodeFilmSetNodeData(canvas.nodeData[filmSetNodeId]);
-  if (!decoded.ok) return null;
-  return shotReferenceContentIdentity({ animation: decoded.value, clipId });
+  const animation = readAnimation(canvas, filmSetNodeId);
+  return animation ? shotReferenceContentIdentity({ animation, clipId, assets: canvas.assets }) : null;
 }
 
 /** 目标：与播放状态无关的固定录制身份。 */
 export function shotReferenceTargetFor(ctx: Context, job: ShotReferenceRecordingJob): ShotReferenceRecordTarget | null {
   const canvas = canvasNow(ctx);
   if (!canvas || canvas.id !== job.canvasId) return null;
-  const decoded = decodeFilmSetNodeData(canvas.nodeData[job.filmSetNodeId]);
-  if (!decoded.ok) return null;
-  const clip = filmSetAnimationsOf(decoded.value).clips.find((entry) => entry.id === job.clipId);
+  const animation = readAnimation(canvas, job.filmSetNodeId);
+  if (!animation) return null;
+  const clip = filmSetAnimationsOf(animation).clips.find((entry) => entry.id === job.clipId);
   if (!clip || clip.kind !== "dynamic") return null;
   const size = videoSize(clip.initialCamera.aspect);
   return {
@@ -75,7 +76,7 @@ export function shotReferenceTargetFor(ctx: Context, job: ShotReferenceRecording
     profileKey: job.profileKey,
     duration: clip.timeline.duration,
     aspect: clip.initialCamera.aspect,
-    title: `${decoded.value.title || "片场"} · ${clip.name}`,
+    title: `${animation.title || "片场"} · ${clip.name}`,
     width: size.width,
     height: size.height
   };
@@ -121,7 +122,7 @@ export function createShotReferenceRecorder(
     });
     const outcome = await recordShotReference(deps, target, signal ?? new AbortController().signal);
     reportShotReferenceTiming(target, timing, outcome, clock() - startedAt);
-    if (outcome.ok && !signal?.aborted && shotReferenceTargetFor(ctx, job) && contentIdentityNow(ctx, job.filmSetNodeId, job.clipId) === job.contentIdentity) {
+    if (outcome.ok && !signal?.aborted && canvasNow(ctx)?.id === job.canvasId) {
       // 上传只保存了字节；必须独立登记版本映射，未被下游引用的镜头也能在刷新后恢复。
       const persisted = await persistShotReferenceRecording(ctx, target, outcome.asset, `${target.title} · 镜头参考`);
       if (!persisted.ok) {
@@ -167,9 +168,11 @@ export function createShotReferenceRecordDeps(input: {
     clipId: target.clipId,
     previewNodeId: target.previewNodeId
   });
+  let frozen = false;
   return {
-    isCurrent: (candidate: ShotReferenceRecordTarget) =>
-      contentIdentityNow(ctx, candidate.filmSetNodeId, candidate.clipId) === candidate.contentIdentity,
+    isCurrent: (candidate: ShotReferenceRecordTarget) => frozen
+      ? canvasNow(ctx)?.id === candidate.canvasId && ctx.canvasSession.isWritable()
+      : contentIdentityNow(ctx, candidate.filmSetNodeId, candidate.clipId) === candidate.contentIdentity,
     capture: async (candidate: ShotReferenceRecordTarget, time: number, signal: AbortSignal) => {
       const startedAt = timing ? clock() : 0;
       playback.seek(time);
@@ -235,7 +238,15 @@ export function createShotReferenceRecordDeps(input: {
         cancel: () => encoder.cancel()
       };
     },
-    acquire: () => ctx.modelWorkspace.acquireCapture(),
+    acquire: async () => {
+      const release = await ctx.modelWorkspace.acquireCapture();
+      try {
+        if (contentIdentityNow(ctx, target.filmSetNodeId, target.clipId) !== target.contentIdentity) throw new Error("镜头版本在捕捉开始前已变化");
+        const unpin = pinFilmSetCapture(ctx, target.filmSetNodeId, canvasNow(ctx));
+        frozen = true;
+        return () => { unpin(); release(); };
+      } catch (error) { release(); throw error; }
+    },
     upload: async (file: File, signal: AbortSignal) => {
       const startedAt = timing ? clock() : 0;
       const result = await ctx.mediaRemote.upload({ file, signal, canvasId: ctx.canvasScope.canvasId() });

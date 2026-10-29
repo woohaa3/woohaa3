@@ -26,7 +26,7 @@ use crate::recording_protocol::{JobIdentity, RECORDING_SNAPSHOT_SCHEMA_VERSION};
 use crate::recording_resources::{
     ResourceDeclaration, ResourceFailure, ResourceReceiver, WrittenResource,
 };
-use crate::recording_timeline::{build_timeline, FrameSlot, Rational, TimelineError};
+use crate::recording_timeline::{FrameSlot, Rational, TimelineError, build_timeline};
 
 /// 冻结快照的 worker 侧投影（只保留渲染/编码需要的字段）。
 #[derive(Clone, Debug)]
@@ -140,10 +140,13 @@ pub fn run_job(
                 message: "任务时长非法".into(),
                 frame_index: None,
                 sample_time: None,
-            }
+            };
         }
     };
-    let fps = match Rational::new(u64::from(input.fps_numer), u64::from(input.fps_denom.max(1))) {
+    let fps = match Rational::new(
+        u64::from(input.fps_numer),
+        u64::from(input.fps_denom.max(1)),
+    ) {
         Some(value) if value.numer > 0 => value,
         _ => {
             return JobOutcome::Failed {
@@ -152,7 +155,7 @@ pub fn run_job(
                 message: "任务帧率非法".into(),
                 frame_index: None,
                 sample_time: None,
-            }
+            };
         }
     };
     let timeline = match build_timeline(duration, fps) {
@@ -208,7 +211,9 @@ pub fn run_job(
 
     for slot in &timeline {
         if cancelled() {
-            return JobOutcome::Cancelled { frame_index: Some(slot.index) };
+            return JobOutcome::Cancelled {
+                frame_index: Some(slot.index),
+            };
         }
         let identity = frame_identity(input, slot, fps);
         let mut barrier = FrameBarrier::begin(identity.clone(), budget);
@@ -223,7 +228,11 @@ pub fn run_job(
         match probe.sample(&request, &mut barrier) {
             FrameOutcome::Frame(frame) => {
                 if let Err(error) = encoder.push(frame) {
-                    return encode_failure(&error, Some(slot.index), Some(slot.sample.as_seconds()));
+                    return encode_failure(
+                        &error,
+                        Some(slot.index),
+                        Some(slot.sample.as_seconds()),
+                    );
                 }
             }
             FrameOutcome::NotReady(failure) => {
@@ -239,7 +248,9 @@ pub fn run_job(
                 };
             }
             FrameOutcome::Cancelled => {
-                return JobOutcome::Cancelled { frame_index: Some(slot.index) };
+                return JobOutcome::Cancelled {
+                    frame_index: Some(slot.index),
+                };
             }
         }
     }
@@ -307,7 +318,9 @@ fn barrier_outcome(failure: &BarrierFailure, slot: &FrameSlot) -> JobOutcome {
         stage: match failure.stage() {
             BarrierStage::Applied => "RECORDING_ERROR_STAGE_FRAME_READY",
             BarrierStage::MediaReady => "RECORDING_ERROR_STAGE_DECODE",
-            BarrierStage::PipelineReady | BarrierStage::Rendered => "RECORDING_ERROR_STAGE_FRAME_READY",
+            BarrierStage::PipelineReady | BarrierStage::Rendered => {
+                "RECORDING_ERROR_STAGE_FRAME_READY"
+            }
             BarrierStage::Readback => "RECORDING_ERROR_STAGE_READBACK",
         },
         code: failure.code(),
@@ -316,7 +329,9 @@ fn barrier_outcome(failure: &BarrierFailure, slot: &FrameSlot) -> JobOutcome {
                 format!("{} 超时（{waited_ms}ms）", stage.code())
             }
             BarrierFailure::StaleAck { reason, .. } => reason.clone(),
-            BarrierFailure::MissingMedia { missing } => format!("缺少媒体帧：{}", missing.join(", ")),
+            BarrierFailure::MissingMedia { missing } => {
+                format!("缺少媒体帧：{}", missing.join(", "))
+            }
             BarrierFailure::DeviceLost { .. } => "GPU 设备丢失".into(),
             BarrierFailure::Cancelled { .. } => "已取消".into(),
         },
@@ -325,7 +340,11 @@ fn barrier_outcome(failure: &BarrierFailure, slot: &FrameSlot) -> JobOutcome {
     }
 }
 
-fn encode_failure(error: &EncodeFailure, frame_index: Option<u32>, sample_time: Option<f64>) -> JobOutcome {
+fn encode_failure(
+    error: &EncodeFailure,
+    frame_index: Option<u32>,
+    sample_time: Option<f64>,
+) -> JobOutcome {
     JobOutcome::Failed {
         stage: match error.stage {
             EncodeStage::Encode => "RECORDING_ERROR_STAGE_ENCODE",
@@ -461,13 +480,30 @@ mod tests {
     #[test]
     fn runs_every_frame_in_the_timeline_and_reports_total_duration() {
         let job = input(1, 1);
-        let mut probe = NullProbe { prepared: false, seen: 0 };
-        let mut encoder = CountingEncoder { frames: Vec::new(), finish_error: None };
-        let outcome = run_job(&job, &mut probe, &mut encoder, &|| false, BarrierBudget::default());
+        let mut probe = NullProbe {
+            prepared: false,
+            seen: 0,
+        };
+        let mut encoder = CountingEncoder {
+            frames: Vec::new(),
+            finish_error: None,
+        };
+        let outcome = run_job(
+            &job,
+            &mut probe,
+            &mut encoder,
+            &|| false,
+            BarrierBudget::default(),
+        );
         assert!(probe.prepared);
         assert_eq!(probe.seen, 30);
         match outcome {
-            JobOutcome::Completed { frame_count, duration_numer, duration_denom, .. } => {
+            JobOutcome::Completed {
+                frame_count,
+                duration_numer,
+                duration_denom,
+                ..
+            } => {
                 assert_eq!(frame_count, 30);
                 assert_eq!((duration_numer, duration_denom), (1, 1));
             }
@@ -479,17 +515,35 @@ mod tests {
     fn non_integer_duration_produces_the_ceil_frame_count() {
         // 1.05s @30fps → 32 帧。
         let job = input(105, 100);
-        let mut probe = NullProbe { prepared: false, seen: 0 };
-        let mut encoder = CountingEncoder { frames: Vec::new(), finish_error: None };
-        run_job(&job, &mut probe, &mut encoder, &|| false, BarrierBudget::default());
+        let mut probe = NullProbe {
+            prepared: false,
+            seen: 0,
+        };
+        let mut encoder = CountingEncoder {
+            frames: Vec::new(),
+            finish_error: None,
+        };
+        run_job(
+            &job,
+            &mut probe,
+            &mut encoder,
+            &|| false,
+            BarrierBudget::default(),
+        );
         assert_eq!(probe.seen, 32);
     }
 
     #[test]
     fn cancellation_is_honored_at_the_frame_boundary() {
         let job = input(1, 1);
-        let mut probe = NullProbe { prepared: false, seen: 0 };
-        let mut encoder = CountingEncoder { frames: Vec::new(), finish_error: None };
+        let mut probe = NullProbe {
+            prepared: false,
+            seen: 0,
+        };
+        let mut encoder = CountingEncoder {
+            frames: Vec::new(),
+            finish_error: None,
+        };
         let calls = std::cell::Cell::new(0u32);
         let outcome = run_job(
             &job,
@@ -501,7 +555,7 @@ mod tests {
                 calls.set(next);
                 next > 3
             },
-            BarrierBudget::default()
+            BarrierBudget::default(),
         );
         assert!(matches!(outcome, JobOutcome::Cancelled { .. }));
     }
@@ -509,10 +563,25 @@ mod tests {
     #[test]
     fn readiness_failure_reports_the_real_stage_and_frame() {
         let job = input(1, 1);
-        let mut encoder = CountingEncoder { frames: Vec::new(), finish_error: None };
-        let outcome = run_job(&job, &mut NotReadyProbe, &mut encoder, &|| false, BarrierBudget::default());
+        let mut encoder = CountingEncoder {
+            frames: Vec::new(),
+            finish_error: None,
+        };
+        let outcome = run_job(
+            &job,
+            &mut NotReadyProbe,
+            &mut encoder,
+            &|| false,
+            BarrierBudget::default(),
+        );
         match outcome {
-            JobOutcome::Failed { stage, code, frame_index, sample_time, .. } => {
+            JobOutcome::Failed {
+                stage,
+                code,
+                frame_index,
+                sample_time,
+                ..
+            } => {
                 assert_eq!(stage, "RECORDING_ERROR_STAGE_FRAME_READY");
                 assert_eq!(code, "capture-readiness-timeout");
                 assert_eq!(frame_index, Some(0));
@@ -525,8 +594,17 @@ mod tests {
     #[test]
     fn decode_prepare_failure_has_the_decode_stage() {
         let job = input(1, 1);
-        let mut encoder = CountingEncoder { frames: Vec::new(), finish_error: None };
-        let outcome = run_job(&job, &mut FailingPrepare, &mut encoder, &|| false, BarrierBudget::default());
+        let mut encoder = CountingEncoder {
+            frames: Vec::new(),
+            finish_error: None,
+        };
+        let outcome = run_job(
+            &job,
+            &mut FailingPrepare,
+            &mut encoder,
+            &|| false,
+            BarrierBudget::default(),
+        );
         match outcome {
             JobOutcome::Failed { stage, code, .. } => {
                 assert_eq!(stage, "RECORDING_ERROR_STAGE_DECODE");
@@ -538,41 +616,74 @@ mod tests {
 
     #[test]
     fn rejects_invalid_duration_and_frame_rate_before_rendering() {
-        let mut encoder = CountingEncoder { frames: Vec::new(), finish_error: None };
+        let mut encoder = CountingEncoder {
+            frames: Vec::new(),
+            finish_error: None,
+        };
         let zero = run_job(
             &input(0, 1),
-            &mut NullProbe { prepared: false, seen: 0 },
+            &mut NullProbe {
+                prepared: false,
+                seen: 0,
+            },
             &mut encoder,
             &|| false,
-            BarrierBudget::default()
+            BarrierBudget::default(),
         );
-        assert!(matches!(zero, JobOutcome::Failed { code: "recording-invalid-duration", .. }));
+        assert!(matches!(
+            zero,
+            JobOutcome::Failed {
+                code: "recording-invalid-duration",
+                ..
+            }
+        ));
 
         let mut bad_fps = input(1, 1);
         bad_fps.fps_numer = 0;
         let outcome = run_job(
             &bad_fps,
-            &mut NullProbe { prepared: false, seen: 0 },
+            &mut NullProbe {
+                prepared: false,
+                seen: 0,
+            },
             &mut encoder,
             &|| false,
-            BarrierBudget::default()
+            BarrierBudget::default(),
         );
-        assert!(matches!(outcome, JobOutcome::Failed { code: "recording-invalid-frame-rate", .. }));
+        assert!(matches!(
+            outcome,
+            JobOutcome::Failed {
+                code: "recording-invalid-frame-rate",
+                ..
+            }
+        ));
     }
 
     #[test]
     fn rejects_empty_identity_at_the_worker_boundary() {
         let mut job = input(1, 1);
         job.identity.snapshot_hash = String::new();
-        let mut encoder = CountingEncoder { frames: Vec::new(), finish_error: None };
+        let mut encoder = CountingEncoder {
+            frames: Vec::new(),
+            finish_error: None,
+        };
         let outcome = run_job(
             &job,
-            &mut NullProbe { prepared: false, seen: 0 },
+            &mut NullProbe {
+                prepared: false,
+                seen: 0,
+            },
             &mut encoder,
             &|| false,
-            BarrierBudget::default()
+            BarrierBudget::default(),
         );
-        assert!(matches!(outcome, JobOutcome::Failed { code: "recording-identity-incomplete", .. }));
+        assert!(matches!(
+            outcome,
+            JobOutcome::Failed {
+                code: "recording-identity-incomplete",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -580,14 +691,21 @@ mod tests {
         let job = input(1, 30);
         let mut encoder = CountingEncoder {
             frames: Vec::new(),
-            finish_error: Some(EncodeFailure::new(EncodeStage::Mux, "recording-artifact-too-large", "too big"))
+            finish_error: Some(EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-too-large",
+                "too big",
+            )),
         };
         let outcome = run_job(
             &job,
-            &mut NullProbe { prepared: false, seen: 0 },
+            &mut NullProbe {
+                prepared: false,
+                seen: 0,
+            },
             &mut encoder,
             &|| false,
-            BarrierBudget::default()
+            BarrierBudget::default(),
         );
         match outcome {
             JobOutcome::Failed { stage, code, .. } => {
@@ -607,9 +725,21 @@ mod tests {
             content_type: "video/mp4".into(),
             size_bytes: 16,
         }];
-        let mut probe = NullProbe { prepared: false, seen: 0 };
-        let mut encoder = CountingEncoder { frames: Vec::new(), finish_error: None };
-        let outcome = run_job(&job, &mut probe, &mut encoder, &|| false, BarrierBudget::default());
+        let mut probe = NullProbe {
+            prepared: false,
+            seen: 0,
+        };
+        let mut encoder = CountingEncoder {
+            frames: Vec::new(),
+            finish_error: None,
+        };
+        let outcome = run_job(
+            &job,
+            &mut probe,
+            &mut encoder,
+            &|| false,
+            BarrierBudget::default(),
+        );
         match outcome {
             JobOutcome::Failed { stage, code, .. } => {
                 assert_eq!(stage, "RECORDING_ERROR_STAGE_RESOURCE_FETCH");

@@ -53,11 +53,17 @@ mod tests {
         let body = encode_part_id("hero", "body");
         assert_eq!(
             decode_part_id(&root),
-            Some(DecodedPartId { item_id: "hero", part_id: "" })
+            Some(DecodedPartId {
+                item_id: "hero",
+                part_id: ""
+            })
         );
         assert_eq!(
             decode_part_id(&body),
-            Some(DecodedPartId { item_id: "hero", part_id: "body" })
+            Some(DecodedPartId {
+                item_id: "hero",
+                part_id: "body"
+            })
         );
         assert_eq!(item_root_of(&body).as_deref(), Some(root.as_str()));
         assert!(belongs_to_item(&body, "hero"));
@@ -70,7 +76,10 @@ mod tests {
         let value = encode_part_id("a:b", "c:d");
         assert_eq!(
             decode_part_id(&value),
-            Some(DecodedPartId { item_id: "a:b", part_id: "c:d" })
+            Some(DecodedPartId {
+                item_id: "a:b",
+                part_id: "c:d"
+            })
         );
     }
 
@@ -82,7 +91,10 @@ mod tests {
         }
         assert_eq!(
             decode_part_id("4:hero"),
-            Some(DecodedPartId { item_id: "hero", part_id: "" })
+            Some(DecodedPartId {
+                item_id: "hero",
+                part_id: ""
+            })
         );
     }
 }

@@ -1,4 +1,3 @@
-import { decodeFilmSetNodeData, canonicalFilmSetFields } from "@woohaa3/contracts";
 /**
  * 节点生成历史服务：恢复命令构造
  * （自 `node-history-service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R02）。
@@ -26,12 +25,11 @@ export function buildRestoreCommands(
   if (entry.kind === "model") {
     const payload = entry.payload as NodeHistoryModelPayload;
     // 片场 items-only 历史版本：完整恢复独立根 + 共享 items + 全部 clips；不写顶层模型字段。
+    if (payload.animation?.schemaVersion === 4) {
+      return { ok: true, commands: [{ type: "nodeData.patch", nodeId, value: { filmSetGroup: payload.animation.filmSetGroup } as import("@woohaa3/contracts").CanvasNodeData }] };
+    }
     if (payload.animation?.schemaVersion === 3) {
-      const decoded = decodeFilmSetNodeData({ ...payload.animation });
-      if (!decoded.ok) return { ok: false, code: "unrecoverable", message: decoded.reason };
-      // 节点标题属用户当前内容，历史不快照标题；恢复保留当前标题。
-      const { title: _title, ...fields } = canonicalFilmSetFields(decoded.value);
-      return { ok: true, commands: [{ type: "nodeData.patch", nodeId, value: fields as never }] };
+      return { ok: false, code: "unrecoverable", message: "旧片场历史须先完成离线迁移" };
     }
     if (payload.modelScript.trim() === "") return { ok: false, code: "unrecoverable", message: "历史模型脚本为空" };
     // 普通模型节点版本：写回模型脚本/摆放/镜头。

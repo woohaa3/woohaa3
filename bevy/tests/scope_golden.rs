@@ -82,33 +82,77 @@ fn approx(a: f32, b: f32) -> bool {
 fn scope_geometry_matches_contract_golden() {
     let golden = fixture();
     let expected_slope = woohaa_bevy_canvas::isometric_grid::CANVAS_CAMERA_PITCH.sin();
-    assert!(approx(golden.edge_slope, expected_slope), "edge slope must follow camera pitch");
+    assert!(
+        approx(golden.edge_slope, expected_slope),
+        "edge slope must follow camera pitch"
+    );
     assert!((golden.axis_y / golden.axis_x - golden.edge_slope).abs() < 1e-4);
     for case in &golden.cases {
-        let raw = scope_geometry_json(case.base.as_array(), &case.shape, case.ground, golden.min_half)
-            .unwrap_or_else(|error| panic!("{}: {error}", case.name));
+        let raw = scope_geometry_json(
+            case.base.as_array(),
+            &case.shape,
+            case.ground,
+            golden.min_half,
+        )
+        .unwrap_or_else(|error| panic!("{}: {error}", case.name));
         let value: serde_json::Value = serde_json::from_str(&raw).expect("geometry json");
         let center = value["center"].as_array().unwrap();
-        assert!(approx(center[0].as_f64().unwrap() as f32, case.center[0]), "{} center.x", case.name);
-        assert!(approx(center[1].as_f64().unwrap() as f32, case.center[1]), "{} center.y", case.name);
+        assert!(
+            approx(center[0].as_f64().unwrap() as f32, case.center[0]),
+            "{} center.x",
+            case.name
+        );
+        assert!(
+            approx(center[1].as_f64().unwrap() as f32, case.center[1]),
+            "{} center.y",
+            case.name
+        );
         let radius = value["radius"].as_array().unwrap();
-        assert!(approx(radius[0].as_f64().unwrap() as f32, case.radius[0]), "{} radius.x", case.name);
-        assert!(approx(radius[1].as_f64().unwrap() as f32, case.radius[1]), "{} radius.y", case.name);
+        assert!(
+            approx(radius[0].as_f64().unwrap() as f32, case.radius[0]),
+            "{} radius.x",
+            case.name
+        );
+        assert!(
+            approx(radius[1].as_f64().unwrap() as f32, case.radius[1]),
+            "{} radius.y",
+            case.name
+        );
         let aabb = value["aabb"].as_array().unwrap();
         for axis in 0..4 {
-            assert!(approx(aabb[axis].as_f64().unwrap() as f32, case.aabb[axis]), "{} aabb[{axis}]", case.name);
+            assert!(
+                approx(aabb[axis].as_f64().unwrap() as f32, case.aabb[axis]),
+                "{} aabb[{axis}]",
+                case.name
+            );
         }
         let vertices = value["vertices"].as_array().unwrap();
         for index in 0..4 {
             let vertex = vertices[index].as_array().unwrap();
-            assert!(approx(vertex[0].as_f64().unwrap() as f32, case.vertices[index][0]), "{} v{index}.x", case.name);
-            assert!(approx(vertex[1].as_f64().unwrap() as f32, case.vertices[index][1]), "{} v{index}.y", case.name);
+            assert!(
+                approx(vertex[0].as_f64().unwrap() as f32, case.vertices[index][0]),
+                "{} v{index}.x",
+                case.name
+            );
+            assert!(
+                approx(vertex[1].as_f64().unwrap() as f32, case.vertices[index][1]),
+                "{} v{index}.y",
+                case.name
+            );
         }
         let handles = value["handles"].as_array().unwrap();
         for index in 0..8 {
             let handle = handles[index].as_array().unwrap();
-            assert!(approx(handle[0].as_f64().unwrap() as f32, case.handles[index][0]), "{} h{index}.x", case.name);
-            assert!(approx(handle[1].as_f64().unwrap() as f32, case.handles[index][1]), "{} h{index}.y", case.name);
+            assert!(
+                approx(handle[0].as_f64().unwrap() as f32, case.handles[index][0]),
+                "{} h{index}.x",
+                case.name
+            );
+            assert!(
+                approx(handle[1].as_f64().unwrap() as f32, case.handles[index][1]),
+                "{} h{index}.y",
+                case.name
+            );
         }
     }
 }
@@ -127,7 +171,11 @@ fn scope_contains_matches_contract_golden() {
                 probe.point[1],
             )
             .unwrap_or_else(|error| panic!("{}: {error}", case.name));
-            assert_eq!(actual, probe.expect, "{} contains {:?}", case.name, probe.point);
+            assert_eq!(
+                actual, probe.expect,
+                "{} contains {:?}",
+                case.name, probe.point
+            );
         }
     }
 }
@@ -137,9 +185,19 @@ fn scope_intersect_matches_contract_golden() {
     let golden = fixture();
     for case in &golden.cases {
         for probe in &case.intersect {
-            let actual = scope_intersects_rect(case.base.as_array(), &case.shape, case.ground, golden.min_half, probe.rect)
-                .unwrap_or_else(|error| panic!("{}: {error}", case.name));
-            assert_eq!(actual, probe.expect, "{} intersect {:?}", case.name, probe.rect);
+            let actual = scope_intersects_rect(
+                case.base.as_array(),
+                &case.shape,
+                case.ground,
+                golden.min_half,
+                probe.rect,
+            )
+            .unwrap_or_else(|error| panic!("{}: {error}", case.name));
+            assert_eq!(
+                actual, probe.expect,
+                "{} intersect {:?}",
+                case.name, probe.rect
+            );
         }
     }
 }

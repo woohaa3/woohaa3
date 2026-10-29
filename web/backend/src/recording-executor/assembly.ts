@@ -151,6 +151,7 @@ export function createCanvasReader(canvas: CanvasService): import("./host-servic
         revision: snapshot.revision ?? 0,
         assets: snapshot.assets,
         nodeData,
+        sourceCanvas: snapshot,
         node: { ...(bounds.width !== undefined ? { width: bounds.width } : {}), ...(bounds.height !== undefined ? { height: bounds.height } : {}) },
         // 来源 incarnation 只含身份，不含 revision：移动/改布局不应让运行中的任务失效。
         sourceIncarnation: `${canvasId}:${nodeId}`,

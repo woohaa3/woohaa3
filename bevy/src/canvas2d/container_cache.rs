@@ -218,7 +218,9 @@ pub(super) fn sync(
                 )
                 .unwrap_or_default()
             };
-            if let Some(label) = super::group::draw_run_status(&mut geometry, theme, node, z) {
+            if !node.group.as_ref().is_some_and(|group| group.collapsed)
+                && let Some(label) = super::group::draw_run_status(&mut geometry, theme, node, z)
+            {
                 labels.push(label);
             }
             // 聚合节点运行遮罩：覆盖整个范围（change: 2026-10-12-unify-generation-history-strip，

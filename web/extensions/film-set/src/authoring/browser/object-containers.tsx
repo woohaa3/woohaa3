@@ -3,7 +3,6 @@ import {
   modelSourceHash, replaceFilmSetObjectModel, resolveFilmSetObject
 } from "@woohaa3/contracts";
 import type { FilmSetHostContext as FilmSetContext } from "../../state/browser/host-ports.js";
-import { installDefaultFilmSetObjectContainers } from "./object-container-commands.js";
 
 /** Film-set owns snapshot replacement; the shared composite child panel owns its presentation. */
 export function installFilmSetObjectContainers(ctx: FilmSetContext, feedback = new Map<string, string>()): () => void {

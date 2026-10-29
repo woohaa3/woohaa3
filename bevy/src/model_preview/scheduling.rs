@@ -36,9 +36,9 @@ pub(super) fn schedule(
         if card.visible && (!rendered || card.live) {
             // 长期没有模型根的卡片画不出内容；给它一个有界等待窗口后让出槽位，避免其它卡片
             // 被饿死。根出现会改变表示身份、推进代数，从而重新武装这张卡片。
-            let starved_root = card
-                .awaiting_root_since
-                .is_some_and(|since| state.tick.saturating_sub(since) >= policy::AWAITING_ROOT_FRAMES);
+            let starved_root = card.awaiting_root_since.is_some_and(|since| {
+                state.tick.saturating_sub(since) >= policy::AWAITING_ROOT_FRAMES
+            });
             if !starved_root {
                 pending.push((id.clone(), !card.live, card.waiting_since));
             }
@@ -75,9 +75,16 @@ pub(super) fn schedule(
             .count() as u64,
     ]);
     if crate::runtime_health::benchmark_enabled() {
-        crate::runtime_health::benchmark_models_ready(state.cards.iter()
-            .filter(|(_, card)| card.visible && ready.get(&card.camera).copied() == Some(card.generation))
-            .map(|(id, _)| id.clone()).collect());
+        crate::runtime_health::benchmark_models_ready(
+            state
+                .cards
+                .iter()
+                .filter(|(_, card)| {
+                    card.visible && ready.get(&card.camera).copied() == Some(card.generation)
+                })
+                .map(|(id, _)| id.clone())
+                .collect(),
+        );
     }
     if let Some(snapshot) = state.latency.snapshot_if_changed() {
         crate::bridge::set_preview_latency_diagnostics(snapshot);

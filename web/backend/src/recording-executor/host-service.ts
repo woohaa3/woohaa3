@@ -71,6 +71,7 @@ export type RecordingCanvasReader = {
         revision: number;
         assets: readonly { id: string; storageKey?: string; checksum?: string; contentType?: string; size?: number; metadata?: unknown }[];
         nodeData: unknown;
+        sourceCanvas?: import("@woohaa3/contracts").ServerCanvas;
         node?: { width?: number; height?: number };
         /** 来源 incarnation：删除后重建同 id 必须不同。 */
         sourceIncarnation: string;
@@ -355,7 +356,7 @@ export class HostRecordingService implements CanvasRecordingPort {
     if (!canvas.writable) {
       return { ok: false, code: "recording-source-invalid", message: "画布不可写，无法录制" };
     }
-    const described = runtime.describe({ nodeData: canvas.nodeData, clipId: body.clipId });
+    const described = runtime.describe({ nodeData: canvas.nodeData, clipId: body.clipId, nodeId: body.nodeId, ...(canvas.sourceCanvas ? { sourceCanvas: canvas.sourceCanvas } : {}) });
     const profileKey = body.profileKey ?? "";
     const themeBackdrop = body.themeBackdrop;
     const frozen = await runtime.freeze({
@@ -373,6 +374,7 @@ export class HostRecordingService implements CanvasRecordingPort {
         revision: canvas.revision,
         assets: canvas.assets,
         nodeData: canvas.nodeData,
+        ...(canvas.sourceCanvas ? { sourceCanvas: canvas.sourceCanvas } : {}),
         ...(canvas.node ? { node: canvas.node } : {}),
         ...(themeBackdrop === undefined ? {} : { themeBackdrop }),
         // 素材读取必须带上本次积木所属画布：远端画布的素材只在托管存储里，绑错作用域会 404。

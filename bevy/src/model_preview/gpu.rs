@@ -59,7 +59,7 @@ const STABLE_FRAMES: u8 = 2;
 
 #[cfg(test)]
 mod tests {
-    use super::{evidence, Evidence::*};
+    use super::{Evidence::*, evidence};
 
     #[test]
     fn a_missing_root_never_counts_as_drawn_content() {

@@ -273,13 +273,21 @@ impl FrameBarrier {
     ) -> Result<(), BarrierFailure> {
         // 只校验身份与阶段，不在这里推进：媒体可能分多次到达。
         self.validate(identity, BarrierStage::MediaReady)?;
-        if !self.required_media.iter().any(|required| required == media_identity) {
+        if !self
+            .required_media
+            .iter()
+            .any(|required| required == media_identity)
+        {
             return Err(BarrierFailure::StaleAck {
                 stage: BarrierStage::MediaReady,
                 reason: format!("确认了快照未声明的媒体：{media_identity}"),
             });
         }
-        if !self.acknowledged_media.iter().any(|seen| seen == media_identity) {
+        if !self
+            .acknowledged_media
+            .iter()
+            .any(|seen| seen == media_identity)
+        {
             self.acknowledged_media.push(media_identity.to_owned());
         }
         let missing: Vec<String> = self
@@ -328,13 +336,21 @@ impl FrameBarrier {
         BarrierFailure::Cancelled { stage: self.stage }
     }
 
-    fn acknowledge(&mut self, identity: &FrameIdentity, stage: BarrierStage) -> Result<(), BarrierFailure> {
+    fn acknowledge(
+        &mut self,
+        identity: &FrameIdentity,
+        stage: BarrierStage,
+    ) -> Result<(), BarrierFailure> {
         self.validate(identity, stage)?;
         self.advance()
     }
 
     /// 身份与阶段校验；不推进。媒体确认可能分多次到达，需要单独校验后自行推进。
-    fn validate(&self, identity: &FrameIdentity, stage: BarrierStage) -> Result<(), BarrierFailure> {
+    fn validate(
+        &self,
+        identity: &FrameIdentity,
+        stage: BarrierStage,
+    ) -> Result<(), BarrierFailure> {
         if self.finished {
             return Err(BarrierFailure::StaleAck {
                 stage: self.stage,
@@ -346,14 +362,21 @@ impl FrameBarrier {
                 stage: self.stage,
                 reason: format!(
                     "帧身份不匹配：当前 {}#{}，确认 {}#{}",
-                    self.identity.attempt_id, self.identity.frame_index, identity.attempt_id, identity.frame_index
+                    self.identity.attempt_id,
+                    self.identity.frame_index,
+                    identity.attempt_id,
+                    identity.frame_index
                 ),
             });
         }
         if stage != self.stage {
             return Err(BarrierFailure::StaleAck {
                 stage: self.stage,
-                reason: format!("确认阶段 {} 早于/晚于当前阶段 {}", stage.code(), self.stage.code()),
+                reason: format!(
+                    "确认阶段 {} 早于/晚于当前阶段 {}",
+                    stage.code(),
+                    self.stage.code()
+                ),
             });
         }
         Ok(())
@@ -437,7 +460,9 @@ mod tests {
             .expect_err("still missing asset-b");
         assert_eq!(
             first,
-            BarrierFailure::MissingMedia { missing: vec!["asset-b@0.5".into()] }
+            BarrierFailure::MissingMedia {
+                missing: vec!["asset-b@0.5".into()]
+            }
         );
         assert_eq!(first.code(), "recording-media-missing");
         assert_eq!(barrier.stage(), BarrierStage::MediaReady);
@@ -446,7 +471,9 @@ mod tests {
             barrier.acknowledge_media(&id, "asset-a@0.5"),
             Err(BarrierFailure::MissingMedia { .. })
         ));
-        barrier.acknowledge_media(&id, "asset-b@0.5").expect("second media");
+        barrier
+            .acknowledge_media(&id, "asset-b@0.5")
+            .expect("second media");
         assert_eq!(barrier.stage(), BarrierStage::PipelineReady);
     }
 
@@ -467,7 +494,9 @@ mod tests {
         let mut barrier = FrameBarrier::begin(identity(3), BarrierBudget::default());
         let mut stale = barrier.identity().clone();
         stale.attempt_id = "attempt-0".into();
-        let error = barrier.acknowledge_applied(&stale).expect_err("stale attempt");
+        let error = barrier
+            .acknowledge_applied(&stale)
+            .expect_err("stale attempt");
         assert_eq!(error.code(), "recording-stale-frame-ack");
         assert_eq!(barrier.stage(), BarrierStage::Applied);
 
@@ -506,7 +535,10 @@ mod tests {
         let error = barrier.tick(2).expect("applied timeout");
         assert_eq!(
             error,
-            BarrierFailure::Timeout { stage: BarrierStage::Applied, waited_ms: 101 }
+            BarrierFailure::Timeout {
+                stage: BarrierStage::Applied,
+                waited_ms: 101
+            }
         );
         assert_eq!(error.code(), "recording-scene-not-applied");
         assert!(error.transient());
@@ -571,7 +603,10 @@ mod tests {
     fn stage_codes_are_stable() {
         assert_eq!(BarrierStage::Applied.code(), "scene-applied");
         assert_eq!(BarrierStage::PipelineReady.code(), "pipeline-ready");
-        assert_eq!(BarrierStage::Rendered.timeout_code(), "capture-readiness-timeout");
+        assert_eq!(
+            BarrierStage::Rendered.timeout_code(),
+            "capture-readiness-timeout"
+        );
         assert_eq!(BarrierStage::Readback.next(), None);
     }
 }

@@ -87,20 +87,27 @@ pub(super) fn purpose(
 
 /// 节点是否声明了总览 primitive LOD（严格按可信 adapter 的呈现声明，不推断内容形状）。
 pub(super) fn has_overview_lod_declaration(node: &GraphNode) -> bool {
-    node.composite_asset
-        .as_ref()
-        .is_some_and(|asset| asset.geometry_quality == Some(CompositeAssetGeometryQuality::OverviewPrimitivesV1))
+    node.composite_asset.as_ref().is_some_and(|asset| {
+        asset.geometry_quality == Some(CompositeAssetGeometryQuality::OverviewPrimitivesV1)
+    })
 }
 
 /// Exact card visibility, without the demand/prewarm margin. Unknown surfaces
 /// stay conservative for native callers. Focus/edit/capture bypass this gate.
 pub(super) fn card_visible(node: &GraphNode, scene: &Scene, focus: Option<&str>) -> bool {
-    if (focus.is_some() || scene.model_focus.is_some()) && !crate::canvas_query::focus_context::contains(scene, &node.id) {
+    if (focus.is_some() || scene.model_focus.is_some())
+        && !crate::canvas_query::focus_context::contains(scene, &node.id)
+    {
         return false;
     }
-    let Some(surface) = scene.surface.as_ref() else { return true; };
-    if !surface.width.is_finite() || !surface.height.is_finite()
-        || surface.width <= 0.0 || surface.height <= 0.0 {
+    let Some(surface) = scene.surface.as_ref() else {
+        return true;
+    };
+    if !surface.width.is_finite()
+        || !surface.height.is_finite()
+        || surface.width <= 0.0
+        || surface.height <= 0.0
+    {
         return true;
     }
     let display = crate::canvas_query::focus_context::node(scene, node);
@@ -176,7 +183,9 @@ pub(super) fn projection_key(
     let placement = node
         .model
         .as_ref()
-        .map_or(ModelPlacement::default(), |reference| reference.placement.clone());
+        .map_or(ModelPlacement::default(), |reference| {
+            reference.placement.clone()
+        });
     let mut hasher = DefaultHasher::new();
     if let Some(asset) = node.composite_asset.as_ref() {
         if let Some(bounds) = &asset.layout_aabb {
@@ -251,15 +260,26 @@ pub(super) fn world_projection(
 }
 
 pub(super) fn initial(
-    node: &GraphNode, scene: &Scene, focus: Option<&str>, capture: bool,
+    node: &GraphNode,
+    scene: &Scene,
+    focus: Option<&str>,
+    capture: bool,
     resource: &ModelSnapshot,
 ) -> Quality {
     if purpose(node, scene, focus, capture).requires_high() {
         Quality::High
     } else if !card_visible(node, scene, focus) {
-        if has_overview_lod_declaration(node) { Quality::OverviewLow } else { Quality::Low }
+        if has_overview_lod_declaration(node) {
+            Quality::OverviewLow
+        } else {
+            Quality::Low
+        }
     } else {
-        let current = if has_overview_lod_declaration(node) { Quality::Low } else { Quality::Medium };
+        let current = if has_overview_lod_declaration(node) {
+            Quality::Low
+        } else {
+            Quality::Medium
+        };
         desired(node, scene, focus, current, resource)
     }
 }
@@ -337,7 +357,10 @@ impl Quality {
 
     /// 从实际发布 Medium 开始计时；自动升 High 后保持，直到投影回到 Low 或离屏。
     pub(super) fn after_overview_dwell(
-        self, current: Self, since: &mut Option<f64>, now: f64,
+        self,
+        current: Self,
+        since: &mut Option<f64>,
+        now: f64,
     ) -> Self {
         if self != Self::OverviewMedium {
             *since = None;
@@ -357,7 +380,6 @@ impl Quality {
             self
         }
     }
-
 }
 
 /// Shared entities use the highest consumer requirement. Focus/edit/capture use
@@ -374,8 +396,9 @@ pub(super) fn desired(
         return Quality::High;
     }
     if purpose == ViewPurpose::WorldOverview {
-        return world_projection(node, scene, resource)
-            .map_or(Quality::High, |projection| Quality::for_projection(projection, current));
+        return world_projection(node, scene, resource).map_or(Quality::High, |projection| {
+            Quality::for_projection(projection, current)
+        });
     }
     let dpr = scene.surface.as_ref().map_or(1.0, |s| s.pixel_ratio);
     let display = crate::canvas_query::focus_context::node(scene, node);
@@ -395,8 +418,18 @@ pub(super) fn desired(
     let Some(radius) = radius.filter(|radius| radius.is_finite()) else {
         return Quality::High;
     };
-    let distance_scale = node.model_preview.as_ref().map_or(1.0, |view| view.distance_scale);
-    let metric = projected_card_pixels(width, height, crate::canvas_query::focus_context::viewport(scene)[2], dpr, distance_scale, radius);
+    let distance_scale = node
+        .model_preview
+        .as_ref()
+        .map_or(1.0, |view| view.distance_scale);
+    let metric = projected_card_pixels(
+        width,
+        height,
+        crate::canvas_query::focus_context::viewport(scene)[2],
+        dpr,
+        distance_scale,
+        radius,
+    );
     purpose.select(metric, current)
 }
 

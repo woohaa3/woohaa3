@@ -5,10 +5,7 @@
 //! 为启用 preview 的 rig 维护持久 render-target `Image`。子资源创建/释放与就绪转发在
 //! [`super::lifecycle`]。静止帧不重复遍历 mesh 顶点、不重建相机、不重新分配 Image。
 
-use bevy::{
-    prelude::*,
-    camera::RenderTarget,
-};
+use bevy::{camera::RenderTarget, prelude::*};
 
 use super::components::{
     PreviewUpdatePolicy, ShotCameraDerived, ShotCameraEditable, ShotCameraId, ShotCameraLens,
@@ -187,7 +184,12 @@ fn pose_signature(
     lens.aspect.to_bits().hash(&mut hasher);
     match &target.bounds {
         Some(bounds) => {
-            for value in bounds.min.to_array().into_iter().chain(bounds.max.to_array()) {
+            for value in bounds
+                .min
+                .to_array()
+                .into_iter()
+                .chain(bounds.max.to_array())
+            {
                 value.to_bits().hash(&mut hasher);
             }
         }
@@ -310,14 +312,17 @@ pub(crate) fn sync_preview_targets(
                 .spawn((
                     Camera3d::default(),
                     Camera {
-                        clear_color: ClearColorConfig::Custom(preview.clear_color.unwrap_or(clear.0)),
+                        clear_color: ClearColorConfig::Custom(
+                            preview.clear_color.unwrap_or(clear.0),
+                        ),
                         order: 5,
                         is_active: false,
                         ..default()
                     },
                     target,
                     mask.0.clone().without(super::SHOT_GIZMO_LAYER),
-                    Transform::from_translation(derived.position).looking_at(derived.focus, Vec3::Y),
+                    Transform::from_translation(derived.position)
+                        .looking_at(derived.focus, Vec3::Y),
                     lens.projection(),
                     bevy::render::view::Tonemapping::None,
                     bevy::render::view::DebandDither::Disabled,
@@ -348,7 +353,8 @@ pub(crate) fn sync_preview_targets(
         // 否则会重置 clear_color、order 与 target，导致窗口 viewfinder 变透明或被主相机覆盖。
         if let Ok((mut camera_component, mut layers)) = camera_query.get_mut(camera) {
             camera_component.is_active = should_render && !suspended;
-            camera_component.clear_color = ClearColorConfig::Custom(preview.clear_color.unwrap_or(clear.0));
+            camera_component.clear_color =
+                ClearColorConfig::Custom(preview.clear_color.unwrap_or(clear.0));
             // Existing offscreen rigs can move to another card layer without reallocating Image.
             *layers = mask.0.clone().without(super::SHOT_GIZMO_LAYER);
             if !offscreen {

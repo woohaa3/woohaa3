@@ -53,9 +53,8 @@ export function FilmSetAdaptationConfirm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const canvas = ctx.compositeAssets.projectCanvas(canvasState);
-  const decoded = decodeFilmSetNodeData(canvas?.nodeData[nodeId]);
-  if (!decoded.ok) return null;
-  const animation = decoded.value;
+  const animation = readFilmSetAnimationProjection(canvas, nodeId);
+  if (!animation) return null;
   const clips = filmSetAnimationsOf(animation);
   const clip = clips.clips.find((entry) => entry.id === clipId);
   const item = itemId ? animation.filmSetContent.items.find((entry) => entry.id === itemId) : undefined;

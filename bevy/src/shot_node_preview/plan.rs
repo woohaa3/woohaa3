@@ -89,7 +89,9 @@ pub(crate) fn pin_capture_owners(scene: &Scene, pins: &mut std::collections::Has
 /// 高优先消费者：卡片参考内容就绪后已经固化，在总览尺寸下按源片场自身的总览档位渲染即可。
 /// 真正需要 High 的只有进行中的截图/导出请求（`ShotCaptureRouting::pins`）。
 pub(crate) fn pin_visible_owners(scene: &Scene, pins: &mut std::collections::HashSet<String>) {
-    if card_geometry::focuses_isolate(scene) { return; }
+    if card_geometry::focuses_isolate(scene) {
+        return;
+    }
     let viewport = [scene.viewport.x, scene.viewport.y, scene.viewport.zoom];
     let surface = scene
         .surface
@@ -163,7 +165,12 @@ pub(super) fn targets_with_preparation(
             continue;
         };
         let Some(owner) = scene.nodes.iter().find(|candidate| {
-            candidate.id == preview.film_set_node_id && candidate.composite_asset.is_some()
+            candidate.id == preview.film_set_node_id
+                && (candidate.composite_asset.is_some()
+                    || scene
+                        .film_set_groups
+                        .iter()
+                        .any(|group| group.owner_id == candidate.id))
         }) else {
             continue;
         };
@@ -195,7 +202,9 @@ pub(super) fn targets_with_preparation(
             .unwrap_or(scene.theme.token("webSubtle"));
         // 场景单位镜头必须与内容共用同一显示变换（change: 2026-10-23-isolate-film-set-camera-space，D2）。
         let display = display_of(&owner.id);
-        let Some(mapped) = crate::model3d::shot_adapter::display_camera_state(display, &scene_camera) else {
+        let Some(mapped) =
+            crate::model3d::shot_adapter::display_camera_state(display, &scene_camera)
+        else {
             // 非法显示变换/相机：不发布猜测取景（卡片等待下一帧合法输入）。
             continue;
         };
@@ -350,6 +359,29 @@ mod tests {
             preview,
             quality,
         )
+    }
+
+    #[test]
+    fn group_owner_supports_capture_and_binding_edits_invalidate_sampling() {
+        let mut owner = owner_node(0.0, 1.6);
+        owner.composite_asset = None;
+        let mut scene = scene_of(owner, preview_node("shot-preview:x", 100.0));
+        scene.film_set_groups = serde_json::from_value(serde_json::json!([{
+            "schemaVersion":"woohaa-film-set-group-render-v1", "ownerId":"film", "badgeOrigin":{"x":0,"y":0},
+            "bindings":[{"bindingId":"actor","sourceNodeId":"source","kind":"model3d","contentKey":"v1","transform":{"x":0,"y":0,"z":0,"yaw":0,"scale":1},"visible":true}]
+        }])).unwrap();
+        let before = targets(&scene, &|_| None, &|_| "high".into(), None);
+        assert_eq!(before.len(), 1);
+        scene.film_set_groups[0].bindings[0].transform.x = 3.0;
+        let after = targets(&scene, &|_| None, &|_| "high".into(), None);
+        assert_eq!(after.len(), 1);
+        assert_ne!(before[0].content, after[0].content);
+        scene.film_set_groups[0].scene_transform = Some(
+            serde_json::from_value(serde_json::json!({"x":1,"y":0,"z":0,"yaw":0,"scale":1}))
+                .unwrap(),
+        );
+        let moved = targets(&scene, &|_| None, &|_| "high".into(), None);
+        assert_ne!(after[0].content, moved[0].content);
     }
 
     #[test]
@@ -621,7 +653,8 @@ mod tests {
         let bounds = |_: &str| None;
         let quality = |_: &str| String::new();
         let mut scene = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
-        scene.surface = Some(serde_json::from_str(r#"{"width":1000,"height":700,"pixelRatio":1}"#).unwrap());
+        scene.surface =
+            Some(serde_json::from_str(r#"{"width":1000,"height":700,"pixelRatio":1}"#).unwrap());
         assert!(targets(&scene, &bounds, &quality, None)[0].visible);
         // 屏外卡片不排连续帧（调用方据此不新建 render target）。
         scene.nodes[1].x = -100_000.0;
@@ -664,13 +697,15 @@ mod tests {
         let scene = scene_of(owner_node(0.0, 1.6), preview_node("shot-preview:x", 0.0));
         let idle = targets(&scene, &bounds, &quality, None);
         assert!(!idle[0].awaiting_root);
-        let preparing = targets_with_preparation(&scene, &bounds, &quality, None, &|_| true, &|_| None);
+        let preparing =
+            targets_with_preparation(&scene, &bounds, &quality, None, &|_| true, &|_| None);
         assert!(
             preparing[0].awaiting_root,
             "归属片场准备中时卡片必须等待，而不是采样空场"
         );
         // 准备完成后恢复可采样。
-        let ready = targets_with_preparation(&scene, &bounds, &quality, None, &|_| false, &|_| None);
+        let ready =
+            targets_with_preparation(&scene, &bounds, &quality, None, &|_| false, &|_| None);
         assert!(!ready[0].awaiting_root);
     }
 

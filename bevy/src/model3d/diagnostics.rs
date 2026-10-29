@@ -71,7 +71,8 @@ impl ModelVisuals {
                     .map_or(count, |ids| ids.len());
                 // 每几何有效档位：总览根的自定义 Mesh / Box 恒 High，按实际 handle 计数，
                 // 不按根 desired 枚举漏计（change: 2026-10-15-add-film-set-overview-lod，design D3/D6）。
-                let effective = super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
+                let effective =
+                    super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
                 if let Some(handle) = self.shared.lookup(base, geometry, effective) {
                     unique.insert(handle.id());
                     if let Some(mesh) = meshes.get(handle) {
@@ -251,7 +252,9 @@ impl ModelVisuals {
                 .map(|ids| ids.len())
                 .sum();
             value["explicitInstances"] = serde_json::json!({"groups": groups, "parts": parts,
-                "cpuTransformBytes": parts * super::instancing::INSTANCE_STRIDE}); value };
+                "cpuTransformBytes": parts * super::instancing::INSTANCE_STRIDE});
+            value
+        };
         value.to_string()
     }
 }

@@ -112,7 +112,7 @@ pub(crate) fn spawn_preview_root(
 
 /// V2：建立真实 entity hierarchy；根 entity 承载 placement yaw 与单位缩放。
 #[allow(clippy::too_many_arguments)]
-fn spawn_v2(
+pub(super) fn spawn_v2(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -310,7 +310,6 @@ fn spawn_v2(
                         MeshMaterial3d(material.clone()),
                         transform,
                         super::model_render_layers(),
-
                     ))
                     .id();
                 part_materials.insert(spec.id.clone(), material);
@@ -363,8 +362,13 @@ fn spawn_v2(
         })
         .collect();
     #[cfg(feature = "explicit-instancing")]
-    for (entity, ids) in &instance_parts { for id in ids.iter() { part_batches.insert(id.clone(), *entity); } }
+    for (entity, ids) in &instance_parts {
+        for id in ids.iter() {
+            part_batches.insert(id.clone(), *entity);
+        }
+    }
     ModelRoot {
+        group_children: Default::default(),
         entities: spawned,
         content_signature: String::new(),
         texture_revision: crate::model3d::model_textures::revision(),

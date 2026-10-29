@@ -140,10 +140,10 @@ export async function recordShotReference(
       deps.onProgress?.({ completed: index + 1, total: timestamps.length });
     }
     const blob = await encoder.finish();
-    release();
-    release = undefined;
     deps.restore(target);
     restored = true;
+    release();
+    release = undefined;
     if (!blob.size) throw new ShotReferenceRecordError("failed", "视频编码没有生成有效文件");
     // 发布前再复核一次：上传期间内容变化则作废，绝不冒充新版本。
     check();
@@ -161,8 +161,8 @@ export async function recordShotReference(
     } catch {
       /* 释放失败不能把录制方卡在占用状态。 */
     }
-    release?.();
     if (!restored) deps.restore(target);
+    release?.();
   }
 }
 

@@ -105,7 +105,10 @@ mod tests {
         let mid = transition.step(0.2);
         assert!((mid.translation.x - 50.0).abs() < 1e-3);
         let end = transition.step(10.0);
-        assert!(end.translation.abs_diff_eq(Vec3::new(100.0, 50.0, 20.0), 1e-5));
+        assert!(
+            end.translation
+                .abs_diff_eq(Vec3::new(100.0, 50.0, 20.0), 1e-5)
+        );
         assert!(!transition.animating());
     }
 

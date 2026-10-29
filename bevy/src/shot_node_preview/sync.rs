@@ -130,7 +130,8 @@ pub(crate) fn sync(
             .node(&scene.0, &target.node_id)
             .map(|(_, node)| {
                 // Capture/preview resolution always follows the real card, never a focus tag.
-                let (_, _, width, height) = crate::canvas_query::shot_preview::content_rect_of(node);
+                let (_, _, width, height) =
+                    crate::canvas_query::shot_preview::content_rect_of(node);
                 (width, height)
             })
             .unwrap_or((240.0, 135.0));
@@ -150,10 +151,17 @@ pub(crate) fn sync(
             policy::fit_pixels(requested, available).unwrap_or(UVec2::splat(policy::BUCKET as u32));
         let size = if let Some(card) = cards.cards.get_mut(&target.node_id) {
             let settled = card.resize.update(
-                [width, height, context_zoom, pixel_ratio], requested, card.size, now,
+                [width, height, context_zoom, pixel_ratio],
+                requested,
+                card.size,
+                now,
             );
             // 一次换档先完成发布，避免保留旧图的预算让待确认尺寸反复收缩。
-            if card.published.is_some() && !card.published_current { card.size } else { settled }
+            if card.published.is_some() && !card.published_current {
+                card.size
+            } else {
+                settled
+            }
         } else {
             requested // 首次画面立即创建，不等待缩放防抖。
         };
@@ -287,7 +295,7 @@ pub(crate) fn sync(
                 ShotCameraPreview::new(size.x, size.y)
                     .with_target(PreviewTarget::Offscreen)
                     .with_policy(PreviewUpdatePolicy::Manual)
-                        .with_clear_color(target.backdrop),
+                    .with_clear_color(target.backdrop),
                 ShotCameraEditable { enabled: false },
             ));
             card.applied_rig = Some(rig_state);

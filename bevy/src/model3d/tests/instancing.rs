@@ -17,7 +17,9 @@ fn explicit_roots_share_mesh_preserve_parts_and_restore_for_high_consumers() {
     let reference = reference_for(&snapshot, ModelPlacement::default());
     let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
     let mut scene = scene_with(&node, Some(reference));
-    let mut second = scene.nodes[0].clone(); second.id = "b".into(); scene.nodes.push(second);
+    let mut second = scene.nodes[0].clone();
+    second.id = "b".into();
+    scene.nodes.push(second);
     let mut world = world_with_resources();
     world.resource_mut::<ModelVisuals>().batching_strategy = BatchStrategy::Explicit;
     run_sync(&mut world, &scene, &resources);
@@ -119,7 +121,9 @@ fn local_playback_replaces_only_one_instance_block_and_restores_standard_materia
     assert_eq!(root.entities[0], anchor);
     assert!(root.part_entities.contains_key("p0"));
     assert_eq!(root.batches.len(), 1);
-    for entity in unaffected { assert!(root.instance_parts.contains_key(&entity)); }
+    for entity in unaffected {
+        assert!(root.instance_parts.contains_key(&entity));
+    }
     assert!(!world.entity(affected).contains::<Instances>());
     assert!(
         !world
@@ -132,9 +136,12 @@ fn local_playback_replaces_only_one_instance_block_and_restores_standard_materia
             .contains::<MeshMaterial3d<StandardMaterial>>()
     );
     let count = world.entities().len();
-    scene.animation_playback = None; run_sync(&mut world, &scene, &resources);
-    scene.animation_playback = Some(playback(Some("p0"))); run_sync(&mut world, &scene, &resources);
+    scene.animation_playback = None;
+    run_sync(&mut world, &scene, &resources);
+    scene.animation_playback = Some(playback(Some("p0")));
+    run_sync(&mut world, &scene, &resources);
     assert_eq!(world.entities().len(), count);
-    scene.nodes.clear(); run_sync(&mut world, &scene, &resources);
+    scene.nodes.clear();
+    run_sync(&mut world, &scene, &resources);
     assert!(world.resource::<Assets<Mesh>>().is_empty());
 }

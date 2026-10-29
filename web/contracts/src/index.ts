@@ -94,6 +94,8 @@ export * from "./canvas/gizmo.js";
 export * from "./canvas/canvas-node-model.js";
 export * from "./canvas/animation-snapshot.js";
 export * from "./canvas/film-set-content.js";
+export * from "./canvas/film-set-group.js";
+export * from "./canvas/film-set-group-member-layout.js";
 export * from "./canvas/film-set-animations.js";
 export * from "./canvas/film-set-clip-view.js";
 export * from "./canvas/film-set-clip-ops.js";

@@ -82,7 +82,7 @@ describe("projectMinimap", () => {
     expect(projection.bounds).toEqual({ x: 0, y: 0, width: 568, height: 532 });
   });
 
-  it("收起分组隐藏后代，分组自身用紧凑展示矩形", () => {
+  it("收起分组隐藏后代，只保留徽标范围", () => {
     const state = canvas(
       [
         { id: "group", type: "group", x: 100, y: 100, width: 520, height: 380 },
@@ -95,13 +95,13 @@ describe("projectMinimap", () => {
     const projection = projectMinimap(state);
     expect(projection.nodes.map((node) => node.id)).toEqual(["group"]);
     expect(projection.nodes[0]!.group).toBe(true);
-    // 紧凑矩形 196×48，固定底边中点；组自身布局尺寸仍按成员派生。
+    // 收起后只占用布局下缘之外的徽标范围。
     const byId = new Map(state.document.nodes.map((node) => [node.id, node]));
     const layout = nodeWorldRect(state.document.nodes[0]!, byId);
     const rect = projection.nodes[0]!.rect;
-    expect(rect.width).toBe(196);
-    expect(rect.height).toBe(48);
-    expect(rect.y + rect.height).toBe(layout.y + layout.height);
+    expect(rect.width).toBe(88);
+    expect(rect.height).toBe(64);
+    expect(rect.y).toBe(layout.y + layout.height + 6);
     expect(rect.x + rect.width / 2).toBe(layout.x + layout.width / 2);
   });
 

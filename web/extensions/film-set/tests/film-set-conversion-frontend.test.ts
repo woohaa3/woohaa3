@@ -1,3 +1,4 @@
+import { createFilmSetGroupMarker } from "@woohaa3/contracts";
 /**
  * 「转为片场」前端纯逻辑 + 控制器回归
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.4–3.9）。
@@ -534,8 +535,8 @@ describe("控制器：共享动作与请求身份（任务 3.5/3.6/3.7/3.8）", 
 describe("占位节点状态读取与呈现（任务 3.8 / D4）", () => {
   function canvasWithStatus(nodeId: string, status: unknown): ServerCanvas {
     return canvasWith(
-      [{ id: nodeId, type: "composite-asset", position: { x: 0, y: 0 } }],
-      { [nodeId]: { extensionId: "film-set", filmSetConversion: status } as never },
+      [{ id: nodeId, type: "group", position: { x: 0, y: 0 } }],
+      { [nodeId]: { filmSetGroup: createFilmSetGroupMarker(), filmSetConversion: status } as never },
       []
     );
   }

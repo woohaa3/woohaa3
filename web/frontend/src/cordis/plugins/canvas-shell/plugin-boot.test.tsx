@@ -42,6 +42,24 @@ function canvasWithNode() {
   };
 }
 
+function canvasWithCollapsedGroup() {
+  const base = createEmptyWoohaa3ServerCanvas("woohaa3-group-canvas", "2026-10-25T00:00:00.000Z");
+  return {
+    ...base,
+    revision: 1,
+    document: {
+      ...base.document,
+      nodes: [
+        { id: "group", type: "group", position: { x: 0, y: 0 }, width: 420, height: 280 },
+        { id: "image", type: "image", parentId: "group", position: { x: 40, y: 40 } },
+        { id: "nested", type: "group", parentId: "group", position: { x: 100, y: 100 }, width: 180, height: 140 },
+        { id: "nested-image", type: "image", parentId: "nested", position: { x: 20, y: 20 } }
+      ]
+    },
+    nodeData: { group: { title: "镜头组", groupCollapsed: true }, image: {}, nested: {}, "nested-image": {} }
+  };
+}
+
 describe("canvas-shell 插件装配", () => {
   it("横条目标解析可以读取 scope 提供的 compositeAssets（不需要 inject 报错）", async () => {
     const canvas = canvasWithNode();
@@ -76,5 +94,69 @@ describe("canvas-shell 插件装配", () => {
 
     expect(() => readNodeActionToolbars()).not.toThrow();
     expect(readNodeActionToolbars()).toBeInstanceOf(Map);
+  });
+
+  it("收起组选中后显示展开动作、递归节点数与标题；只读时动作禁用", async () => {
+    const canvas = canvasWithCollapsedGroup();
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas as never);
+    nodeSelectionStore.setFromRuntime(
+      { nodeIds: ["group"], primaryNodeId: "group", editingFocus: false },
+      new Set(["group"])
+    );
+    runtime = await startFrontendScope(new Context(), {
+      install: (ctx) => {
+        ctx.provide("slots" as never, new SlotRegistry() as never);
+        const mediaContent = createMediaContentService({ canvas: () => canvas, subscribe: () => () => {}, writable: () => false, submit: async () => {} });
+        ctx.provide("mediaContent" as never, mediaContent as never);
+        ctx.effect(() => () => mediaContent.dispose(), "test-media-content");
+        const compositeAssets = new CompositeAssetRegistry();
+        ctx.provide("compositeAssets" as never, compositeAssets as never);
+        ctx.provide("nodeImplementations" as never, createNodeImplementationRegistry(compositeAssets) as never);
+        ctx.provide("canvasLocate" as never, {} as never);
+        ctx.provide("canvasEdit" as never, {} as never);
+        ctx.provide("canvasSession" as never, { isWritable: () => false } as never);
+        ctx.provide("canvasNavigation" as never, { getSnapshot: () => ({ mode: { type: "canvas" } }) } as never);
+        ctx.provide("canvasRuntime" as never, { controller: () => null } as never);
+      },
+      plugins: [{ id: CANVAS_SHELL_PLUGIN_ID, required: true, plugin: canvasShellExtension() }]
+    });
+
+    const presentation = readNodeActionToolbars().get("group");
+    expect(presentation).toEqual({
+      actions: [{ id: "group-expand", label: "展开", enabled: false, tone: "primary", icon: "expand-groups", iconOnly: true }],
+      summary: "组 · 3 个节点 · 镜头组"
+    });
+  });
+
+  it("展开组选中后仍显示同一摘要，并提供收起动作", async () => {
+    const canvas = canvasWithCollapsedGroup();
+    canvas.nodeData.group.groupCollapsed = false;
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvas as never);
+    nodeSelectionStore.setFromRuntime(
+      { nodeIds: ["group"], primaryNodeId: "group", editingFocus: false },
+      new Set(["group"])
+    );
+    runtime = await startFrontendScope(new Context(), {
+      install: (ctx) => {
+        ctx.provide("slots" as never, new SlotRegistry() as never);
+        const mediaContent = createMediaContentService({ canvas: () => canvas, subscribe: () => () => {}, writable: () => true, submit: async () => {} });
+        ctx.provide("mediaContent" as never, mediaContent as never);
+        ctx.effect(() => () => mediaContent.dispose(), "test-media-content");
+        const compositeAssets = new CompositeAssetRegistry();
+        ctx.provide("compositeAssets" as never, compositeAssets as never);
+        ctx.provide("nodeImplementations" as never, createNodeImplementationRegistry(compositeAssets) as never);
+        ctx.provide("canvasLocate" as never, {} as never);
+        ctx.provide("canvasEdit" as never, {} as never);
+        ctx.provide("canvasSession" as never, { isWritable: () => true } as never);
+        ctx.provide("canvasNavigation" as never, { getSnapshot: () => ({ mode: { type: "canvas" } }) } as never);
+        ctx.provide("canvasRuntime" as never, { controller: () => null } as never);
+      },
+      plugins: [{ id: CANVAS_SHELL_PLUGIN_ID, required: true, plugin: canvasShellExtension() }]
+    });
+
+    expect(readNodeActionToolbars().get("group")).toEqual({
+      actions: [{ id: "group-collapse", label: "收起", enabled: true, tone: "primary", icon: "collapse-groups", iconOnly: true }],
+      summary: "组 · 3 个节点 · 镜头组"
+    });
   });
 });

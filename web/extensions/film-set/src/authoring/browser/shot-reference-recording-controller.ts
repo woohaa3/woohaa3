@@ -10,7 +10,7 @@
  * 不可用时不空转：调度器保留 dirty 集，状态仍可观察。
  */
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
-import { isFilmSetNode } from "@woohaa3/contracts";
+import { isFilmSetNode, isFilmSetGroupNode } from "@woohaa3/contracts";
 import { ShotReferenceRecordingScheduler, type ShotReferenceRecordResult, type ShotReferenceRecorder } from "./shot-reference-recording-scheduler.js";
 import { ShotReferenceActivity } from "./shot-reference-activity.js";
 import { ShotReferenceVersionCache, createMemoryShotReferenceCacheStore, hydrateShotReferenceCacheFromCanvas, type ShotReferenceVersionAsset } from "./shot-reference-version-cache.js";
@@ -109,7 +109,9 @@ export function installShotReferenceRecording(
         } catch (cause) {
           result = { ok: false, error: cause instanceof Error ? cause.message : "镜头录制失败" };
         }
-        if (!signal?.aborted) activity?.finish(job, result);
+        // 即使被取消也交回真实结论：录制在取消信号到达前已发布资产时 `result.ok` 为真，
+        // 此时静默丢弃会让活动投影把它算成「取消」，而画布上的参考视频其实已就绪。
+        activity?.finish(job, result);
         return result;
       };
 
@@ -157,7 +159,10 @@ export function installShotReferenceRecording(
     // `canvasState.subscribe(reconcile)`，在任何失败录制存在时形成永不停止的重试环。
     onStateChange: () => {
       applyFreeze();
-      activity?.syncQueued(scheduler.snapshot().dirty);
+      const snapshot = scheduler.snapshot();
+      // 进行中的 job 不能因为「暂时不在 dirty」就被标成取消：录制成功后发布资产会先让 job
+      // 离开 dirty 集，`finish` 随后才把它结算为成功（2026-10-29 活动面板误显示「取消」）。
+      activity?.syncQueued(snapshot.dirty, snapshot.inflight);
     }
   });
 
@@ -233,9 +238,9 @@ function requiredPlayback(playback: ShotReferencePlaybackPort | undefined): Shot
  */
 function focusedFilmSetId(ctx: Context): string | null {
   const mode = ctx.canvasNavigation.getSnapshot().mode;
-  if (mode.type !== "node-focus" || mode.kind !== "extension") return null;
+  if (mode.type !== "node-focus") return null;
   const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
   const node = canvas?.document.nodes.find((entry) => entry.id === mode.nodeId);
-  if (!node || !isFilmSetNode(node.type, canvas?.nodeData[node.id])) return null;
+  if (!node || (!isFilmSetNode(node.type, canvas?.nodeData[node.id]) && !isFilmSetGroupNode(node, canvas?.nodeData[node.id]))) return null;
   return mode.nodeId;
 }

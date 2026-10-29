@@ -1,6 +1,10 @@
-import { canonicalFilmSetFields, createFilmSetSnapshot } from "@woohaa3/contracts";
+import { createFilmSetGroupMarker, defaultInitialShotCamera } from "@woohaa3/contracts";
 import { FILM_SET_LABEL } from "./identity.js";
 
 export function createFilmSetNodeData() {
-  return canonicalFilmSetFields(createFilmSetSnapshot({ title: FILM_SET_LABEL, timeline: { duration: 0, loop: false } }));
+  return { title: FILM_SET_LABEL, filmSetGroup: createFilmSetGroupMarker({
+    cameras: [{ id: "camera-default", ...defaultInitialShotCamera(null) }],
+    clips: [{ id: "shot-default", name: "拍摄镜头", cameraId: "camera-default", duration: 0 }],
+    activeClip: "shot-default"
+  }) };
 }

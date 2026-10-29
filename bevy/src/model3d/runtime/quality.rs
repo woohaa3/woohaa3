@@ -297,7 +297,8 @@ pub(crate) fn sync_quality_with_demand(
         for (entity, base, geometry) in &root.geometries {
             // 每几何有效档位：Box/自定义 Mesh 恒 High，其余用根目标档位
             // （change: 2026-10-15-add-film-set-overview-lod，design D3）。
-            let effective = super::super::mesh::effective_quality(geometry, next, root.overview_lod);
+            let effective =
+                super::super::mesh::effective_quality(geometry, next, root.overview_lod);
             let key = super::super::mesh::quality_key(base, geometry, effective);
             let Some((handle, _)) = shared.mesh(meshes, base, geometry, effective) else {
                 continue 'roots;
@@ -525,7 +526,8 @@ fn publish_overview(
         root.batches[index].set_asset(asset);
     }
     for (_, _, geometry) in &root.geometries {
-        let effective = super::super::mesh::effective_quality(geometry, state.target, root.overview_lod);
+        let effective =
+            super::super::mesh::effective_quality(geometry, state.target, root.overview_lod);
         if let Some(base) = root
             .geometries
             .iter()

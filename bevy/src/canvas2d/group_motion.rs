@@ -32,6 +32,9 @@ pub(super) fn draw(
     zoom: f32,
     z: f32,
 ) {
+    if node.group.as_ref().is_some_and(|group| group.collapsed) {
+        return;
+    }
     let path = group_outline::path(node);
     let perimeter = group_outline::length(&path);
     let zoom = zoom.max(0.1);

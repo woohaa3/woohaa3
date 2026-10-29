@@ -98,7 +98,10 @@ pub struct GpuFrameProbe {
     requested_size: (u32, u32),
     /// 已注册的媒体源（由 `prepare` 填充）；采样时按冻结 playback 映射取帧。
     #[cfg(feature = "recording-media")]
-    media: Vec<(crate::recording_media::MediaSource, crate::recording_media::PlaybackMap)>,
+    media: Vec<(
+        crate::recording_media::MediaSource,
+        crate::recording_media::PlaybackMap,
+    )>,
     #[cfg(feature = "recording-media")]
     decoder: Option<crate::recording_media_native::NativeMediaDecoder>,
     #[cfg(feature = "recording-media")]
@@ -147,11 +150,22 @@ impl FrameProbe for GpuFrameProbe {
         #[cfg(feature = "recording-media")]
         {
             use crate::recording_media::{DecodeBudget, MediaSource};
-            let mut decoder = crate::recording_media_native::NativeMediaDecoder::new(DecodeBudget::default());
+            let mut decoder =
+                crate::recording_media_native::NativeMediaDecoder::new(DecodeBudget::default());
             let mut media = Vec::with_capacity(resources.len());
             for resource in resources {
-                if self.plan.composite_asset_frame.is_none() || !self.plan.media_planes.iter().any(|plane| plane.resource_id == resource.resource_id) {
-                    return Err(ProbeFailure { stage: "RECORDING_ERROR_STAGE_COMPILE", code: "recording-media-plane-missing", message: format!("素材 {} 缺少冻结平面", resource.resource_id) });
+                if self.plan.composite_asset_frame.is_none()
+                    || !self
+                        .plan
+                        .media_planes
+                        .iter()
+                        .any(|plane| plane.resource_id == resource.resource_id)
+                {
+                    return Err(ProbeFailure {
+                        stage: "RECORDING_ERROR_STAGE_COMPILE",
+                        code: "recording-media-plane-missing",
+                        message: format!("素材 {} 缺少冻结平面", resource.resource_id),
+                    });
                 }
                 // 快照里的 playback 由 `recording_session` 写入 plan；缺声明时用默认（首帧）。
                 let playback = self
@@ -178,12 +192,13 @@ impl FrameProbe for GpuFrameProbe {
                         .unwrap_or_else(|| "video/mp4".into()),
                 };
                 // 提交后用真实媒体时长补全映射（配置 duration 为 0 时据此取尾帧）。
-                let playback = crate::recording_media::with_media_duration(&mut decoder, &source, playback)
-                    .map_err(|failure| ProbeFailure {
-                        stage: failure.stage.proto_symbol(),
-                        code: failure.code,
-                        message: failure.message,
-                    })?;
+                let playback =
+                    crate::recording_media::with_media_duration(&mut decoder, &source, playback)
+                        .map_err(|failure| ProbeFailure {
+                            stage: failure.stage.proto_symbol(),
+                            code: failure.code,
+                            message: failure.message,
+                        })?;
                 media.push((source, playback));
             }
             self.decoder = Some(decoder);
@@ -192,37 +207,48 @@ impl FrameProbe for GpuFrameProbe {
         Ok(())
     }
 
-    fn sample(&mut self, request: &FrameRequest, _barrier: &mut crate::recording_barrier::FrameBarrier) -> FrameOutcome {
+    fn sample(
+        &mut self,
+        request: &FrameRequest,
+        _barrier: &mut crate::recording_barrier::FrameBarrier,
+    ) -> FrameOutcome {
         let seconds = request.sample_seconds_micros as f64 / 1_000_000.0;
-        let render_request = self.plan.request_at(seconds as f32, &format!(
-            "{}:{}",
-            request.frame.attempt_id, request.frame.frame_index
-        ));
+        let render_request = self.plan.request_at(
+            seconds as f32,
+            &format!("{}:{}", request.frame.attempt_id, request.frame.frame_index),
+        );
         // 目标时刻的媒体帧：缺失/解码失败都明确失败，不用上一帧冒充。
         #[cfg(feature = "recording-media")]
         let media_frame = match self.sample_media(seconds) {
             Ok(frame) => frame,
             Err(failure) => {
-                return FrameOutcome::NotReady(crate::recording_barrier::BarrierFailure::StaleAck {
-                    stage: crate::recording_barrier::BarrierStage::MediaReady,
-                    reason: format!("{}: {}", failure.code, failure.message),
-                });
+                return FrameOutcome::NotReady(
+                    crate::recording_barrier::BarrierFailure::StaleAck {
+                        stage: crate::recording_barrier::BarrierStage::MediaReady,
+                        reason: format!("{}: {}", failure.code, failure.message),
+                    },
+                );
             }
         };
         #[cfg(feature = "recording-media")]
         let render_request = {
             let mut request = render_request;
-            if let Some(frame) = request.composite_asset_frame.as_mut() { frame.media = media_frame; }
+            if let Some(frame) = request.composite_asset_frame.as_mut() {
+                frame.media = media_frame;
+            }
             request
         };
         match crate::model3d::preview::render_rgba(&render_request, &self.plan.capture) {
             Ok(rgba) => {
-                let expected = (self.plan.capture.width as usize) * (self.plan.capture.height as usize) * 4;
+                let expected =
+                    (self.plan.capture.width as usize) * (self.plan.capture.height as usize) * 4;
                 if rgba.len() != expected {
-                    return FrameOutcome::NotReady(crate::recording_barrier::BarrierFailure::StaleAck {
-                        stage: crate::recording_barrier::BarrierStage::Readback,
-                        reason: format!("回读像素 {} 字节与期望 {expected} 不符", rgba.len()),
-                    });
+                    return FrameOutcome::NotReady(
+                        crate::recording_barrier::BarrierFailure::StaleAck {
+                            stage: crate::recording_barrier::BarrierStage::Readback,
+                            reason: format!("回读像素 {} 字节与期望 {expected} 不符", rgba.len()),
+                        },
+                    );
                 }
                 FrameOutcome::Frame(EncoderFrame {
                     rgba,
@@ -230,16 +256,19 @@ impl FrameProbe for GpuFrameProbe {
                     height: self.plan.capture.height,
                     pts_seconds: seconds,
                     // 帧时长只来自时间表（含末帧短于一帧的情况），探针不自行假设 1/F。
-                    duration_seconds: request.duration_numer as f64 / request.duration_denom.max(1) as f64,
+                    duration_seconds: request.duration_numer as f64
+                        / request.duration_denom.max(1) as f64,
                 })
             }
             Err(message) => {
                 // 渲染器把「没有可用 GPU 适配器」也归为 RenderFailed；据此给出能力阶段，
                 // 让宿主能区分「设备不可用」与「画面没画出来」。
                 if message.contains("No suitable GPU adapters") || message.contains("adapter") {
-                    return FrameOutcome::NotReady(crate::recording_barrier::BarrierFailure::DeviceLost {
-                        stage: crate::recording_barrier::BarrierStage::Rendered,
-                    });
+                    return FrameOutcome::NotReady(
+                        crate::recording_barrier::BarrierFailure::DeviceLost {
+                            stage: crate::recording_barrier::BarrierStage::Rendered,
+                        },
+                    );
                 }
                 FrameOutcome::NotReady(crate::recording_barrier::BarrierFailure::Timeout {
                     stage: crate::recording_barrier::BarrierStage::Rendered,
@@ -256,8 +285,13 @@ impl GpuFrameProbe {
     fn sample_media(
         &mut self,
         timeline_seconds: f64,
-    ) -> Result<Vec<crate::renderer_protocol::NativeMediaFrame>, crate::recording_media::DecodeFailure> {
-        let Some(decoder) = self.decoder.as_mut() else { return Ok(Vec::new()) };
+    ) -> Result<
+        Vec<crate::renderer_protocol::NativeMediaFrame>,
+        crate::recording_media::DecodeFailure,
+    > {
+        let Some(decoder) = self.decoder.as_mut() else {
+            return Ok(Vec::new());
+        };
         let mut selected = Vec::new();
         for (source, playback) in self.media.clone() {
             let frame = crate::recording_media::sample_media(
@@ -267,10 +301,17 @@ impl GpuFrameProbe {
                 &playback,
                 timeline_seconds,
             )?;
-            let plane = self.plan.media_planes.iter().find(|plane| plane.resource_id == source.resource_id)
+            let plane = self
+                .plan
+                .media_planes
+                .iter()
+                .find(|plane| plane.resource_id == source.resource_id)
                 .expect("media plane validated during prepare");
             selected.push(crate::renderer_protocol::NativeMediaFrame {
-                plane: plane.plane.clone(), width: frame.width, height: frame.height, rgba: frame.rgba,
+                plane: plane.plane.clone(),
+                width: frame.width,
+                height: frame.height,
+                rgba: frame.rgba,
             });
         }
         Ok(selected)
@@ -310,9 +351,18 @@ mod tests {
 
     #[test]
     fn rejects_odd_and_zero_sizes_before_touching_the_gpu() {
-        assert_eq!(error_code(GpuFrameProbe::new(plan(0, 720))), "recording-invalid-size");
-        assert_eq!(error_code(GpuFrameProbe::new(plan(1281, 720))), "recording-invalid-size");
-        assert_eq!(error_code(GpuFrameProbe::new(plan(1280, 721))), "recording-invalid-size");
+        assert_eq!(
+            error_code(GpuFrameProbe::new(plan(0, 720))),
+            "recording-invalid-size"
+        );
+        assert_eq!(
+            error_code(GpuFrameProbe::new(plan(1281, 720))),
+            "recording-invalid-size"
+        );
+        assert_eq!(
+            error_code(GpuFrameProbe::new(plan(1280, 721))),
+            "recording-invalid-size"
+        );
         assert_eq!(error_code(GpuFrameProbe::new(plan(1280, 720))), "ok");
     }
 

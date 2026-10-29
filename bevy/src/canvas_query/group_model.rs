@@ -85,18 +85,11 @@ fn base_badge_rect(node: &GraphNode) -> Vec4 {
     )
 }
 
-/// Independent presentation scale, bounded by the group header and side margins.
+/// Independent presentation scale. 与 `contracts` 的 `clampGroupBadgeScale` 一致：只保底
+/// 0.5 倍、不设上限。片场把徽标当作场景显示入口，徽标允许远大于承载它的 group
+/// （普通 group 同理，且只有显式设置才会放大）。
 pub(crate) fn badge_scale(node: &GraphNode) -> f32 {
-    let base = base_badge_rect(node);
-    let center_y = base.y + base.w / 2.;
-    let limit = ((node.width - 32.) / base.z)
-        .min(2. * (center_y - node.y - HEADER_CLEARANCE) / base.w)
-        .clamp(1., 2.5);
-    node.group
-        .as_ref()
-        .map_or(1., |g| g.badge_scale)
-        .clamp(0.5, 2.5)
-        .min(limit)
+    node.group.as_ref().map_or(1., |g| g.badge_scale).max(0.5)
 }
 
 pub(crate) fn badge_rect(node: &GraphNode) -> Vec4 {
@@ -140,7 +133,7 @@ pub(crate) fn badge_path(node: &GraphNode) -> Vec<Vec2> {
 /// The tail tip meets the badge's top edge outside the group body, without adding a plate or
 /// changing the group's structural layout bounds.
 pub(crate) fn tail_path(node: &GraphNode) -> Vec<Vec2> {
-    if !has_badge(node) {
+    if !has_badge(node) || node.group.as_ref().is_some_and(|group| group.collapsed) {
         return Vec::new();
     }
     let badge = badge_rect(node);
@@ -181,6 +174,9 @@ fn rectangle(node: &GraphNode) -> Vec<Vec2> {
 
 /// Group perimeter follows a speech-bubble tail, with no straight edge through the badge interior.
 pub(crate) fn outline(node: &GraphNode) -> Vec<Vec2> {
+    if node.group.as_ref().is_some_and(|group| group.collapsed) {
+        return Vec::new();
+    }
     let rect = rectangle(node);
     let tail = tail_path(node);
     if tail.is_empty() {

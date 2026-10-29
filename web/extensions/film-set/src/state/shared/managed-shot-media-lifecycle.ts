@@ -24,14 +24,13 @@ import {
   type ShotPreviewBounds,
   type ShotPreviewTarget
 } from "@woohaa3/contracts";
-import { isFilmSetNode } from "@woohaa3/contracts";
+import { readFilmSetAnimationProjection, isFilmSetNode, readFilmSetGroupMarker } from "@woohaa3/contracts";
 import {
   getWoohaa3CanvasNodeAbsolutePosition,
   readNodeHeight,
   readNodeWidth
 } from "@woohaa3/contracts";
 import type { CanvasNodeData, Woohaa3CanvasNode } from "@woohaa3/contracts";
-import { decodeFilmSetNodeData } from "@woohaa3/contracts";
 import type { ServerCanvas, ManagedNodeLifecycleAdapter, CanvasCommandRejection } from "@woohaa3/contracts";
 type WorkingState = { nodes: Woohaa3CanvasNode[]; edges: ServerCanvas["document"]["edges"]; nodeData: ServerCanvas["nodeData"] };
 type CommandApplyResult = { ok: true } | { ok: false; rejection: CanvasCommandRejection };
@@ -184,7 +183,7 @@ export function validateShotPreviewInvariants(work: WorkingState): CommandApplyR
     const ownership = relation ? { filmSetNodeId: relation.ownerNodeId, clipId: relation.entityId } : decoded.ok ? decoded.value.shotPreview : null;
     if (!ownership) return reject("invalid-shot-preview", `预览节点 ${node.id} 的归属非法`);
     const source = work.nodes.find((entry) => entry.id === ownership.filmSetNodeId);
-    if (!source || !isFilmSetNode(source.type, work.nodeData[source.id])) {
+    if (!source || (!isFilmSetNode(source.type, work.nodeData[source.id]) && !(source.type === "group" && readFilmSetGroupMarker(work.nodeData[source.id])))) {
       return reject("invalid-shot-preview", `预览节点 ${node.id} 的源片场 ${ownership.filmSetNodeId} 不存在`);
     }
     if (node.id !== shotPreviewNodeId(source.id, ownership.clipId)) {
@@ -201,10 +200,10 @@ export function validateShotPreviewInvariants(work: WorkingState): CommandApplyR
 export function desiredShotPreviewTargets(work: WorkingState): ShotPreviewTarget[] {
   const targets: ShotPreviewTarget[] = [];
   for (const node of work.nodes) {
-    if (!isFilmSetNode(node.type, work.nodeData[node.id])) continue;
-    const decoded = decodeFilmSetNodeData(work.nodeData[node.id]);
-    if (!decoded.ok) throw Error(`managed-lifecycle-invalid-source: ${node.id}: ${decoded.reason}`);
-    targets.push(...shotPreviewTargetsOf(node.id, decoded.value));
+    if (!isFilmSetNode(node.type, work.nodeData[node.id]) && !(node.type === "group" && readFilmSetGroupMarker(work.nodeData[node.id]))) continue;
+    const animation = readFilmSetAnimationProjection({ document: { nodes: work.nodes }, nodeData: work.nodeData }, node.id);
+    if (!animation) throw Error(`managed-lifecycle-invalid-source: ${node.id}`);
+    targets.push(...shotPreviewTargetsOf(node.id, animation));
   }
   return targets;
 }
@@ -250,11 +249,10 @@ function applyShotPreviewMoveClosure(
 ): CommandApplyResult | null {
   const movement = compositeChildMovementContext(context.beforeNodes, work.nodes);
   for (const node of work.nodes) {
-    if (!isFilmSetNode(node.type, work.nodeData[node.id])) continue;
-    const decoded = decodeFilmSetNodeData(work.nodeData[node.id]);
-    if (!decoded.ok) continue;
+    const targets = desiredShotPreviewTargets(work).filter(target => target.filmSetNodeId === node.id);
+    if (targets.length === 0) continue;
     const oldOwner = movement.before.get(node.id);
-    for (const target of shotPreviewTargetsOf(node.id, decoded.value)) {
+    for (const target of targets) {
       const child = movement.current.get(target.nodeId);
       if (!child) continue;
       const oldChild = movement.before.get(child.id);

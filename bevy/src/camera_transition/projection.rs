@@ -3,9 +3,9 @@
 //!
 //! 过渡混合仅在 wasm 画布运行时消费；native-renderer 不启用聚焦过渡。
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code))]
-use bevy::prelude::*;
-use bevy::math::Vec3A;
 use bevy::camera::{CameraProjection, SubCameraView};
+use bevy::math::Vec3A;
+use bevy::prelude::*;
 
 /// 进入/退出聚焦的连续投影与姿态过渡。
 ///
@@ -38,8 +38,13 @@ pub(crate) struct FocusProjectionBlend {
 impl FocusProjectionBlend {
     pub(crate) fn normalization(projection: &Projection, pose: &Transform, pivot: Vec3) -> f32 {
         if matches!(projection, Projection::Perspective(_)) {
-            (pose.rotation.inverse() * (pivot - pose.translation)).z.abs().max(0.001)
-        } else { 1.0 }
+            (pose.rotation.inverse() * (pivot - pose.translation))
+                .z
+                .abs()
+                .max(0.001)
+        } else {
+            1.0
+        }
     }
 
     /// 从两端投影/姿态与锚点建立一次过渡；预计算屏幕直线约束所需的端点数据。
@@ -89,7 +94,11 @@ impl FocusProjectionBlend {
             return self.to_pose;
         }
         let rotation = self.from_pose.rotation.slerp(self.to_pose.rotation, t);
-        let m = self.blend(self.from.get_clip_from_view(), self.to.get_clip_from_view(), t);
+        let m = self.blend(
+            self.from.get_clip_from_view(),
+            self.to.get_clip_from_view(),
+            t,
+        );
         let ndc = self.from_ndc.lerp(self.to_ndc, t);
         let lz = self.from_depth + (self.to_depth - self.from_depth) * t;
         let lateral = solve_view_lateral(m, lz, ndc);
@@ -103,7 +112,12 @@ impl FocusProjectionBlend {
 }
 
 /// 锚点在给定投影/姿态/归一化下的屏幕 NDC（xy）。
-fn project_pivot_ndc(projection: &Projection, pose: &Transform, pivot: Vec3, normalization: f32) -> Vec2 {
+fn project_pivot_ndc(
+    projection: &Projection,
+    pose: &Transform,
+    pivot: Vec3,
+    normalization: f32,
+) -> Vec2 {
     let clip = projection.get_clip_from_view() / normalization;
     let view = pose.to_matrix().inverse();
     let p = clip * view * pivot.extend(1.0);
@@ -143,7 +157,11 @@ fn solve_view_lateral(m: Mat4, lz: f32, ndc: Vec2) -> Vec2 {
 
 impl CameraProjection for FocusProjectionBlend {
     fn get_clip_from_view(&self) -> Mat4 {
-        self.blend(self.from.get_clip_from_view(), self.to.get_clip_from_view(), self.progress)
+        self.blend(
+            self.from.get_clip_from_view(),
+            self.to.get_clip_from_view(),
+            self.progress,
+        )
     }
     fn get_clip_from_view_for_sub(&self, view: &SubCameraView) -> Mat4 {
         self.blend(
@@ -156,19 +174,30 @@ impl CameraProjection for FocusProjectionBlend {
         self.from.update(width, height);
         self.to.update(width, height);
     }
-    fn far(&self) -> f32 { self.from.far().max(self.to.far()) }
+    fn far(&self) -> f32 {
+        self.from.far().max(self.to.far())
+    }
     fn get_frustum_corners(&self, z_near: f32, z_far: f32) -> [Vec3A; 8] {
         let m = self.get_clip_from_view();
         let corner = |x: f32, y: f32, z: f32| {
             let z = -z;
             let w = m.z_axis.w * z + m.w_axis.w;
-            Vec3A::new((x * w - m.z_axis.x * z - m.w_axis.x) / m.x_axis.x,
-                       (y * w - m.z_axis.y * z - m.w_axis.y) / m.y_axis.y, z)
+            Vec3A::new(
+                (x * w - m.z_axis.x * z - m.w_axis.x) / m.x_axis.x,
+                (y * w - m.z_axis.y * z - m.w_axis.y) / m.y_axis.y,
+                z,
+            )
         };
-        [corner(1.0, -1.0, z_near), corner(1.0, 1.0, z_near),
-         corner(-1.0, 1.0, z_near), corner(-1.0, -1.0, z_near),
-         corner(1.0, -1.0, z_far), corner(1.0, 1.0, z_far),
-         corner(-1.0, 1.0, z_far), corner(-1.0, -1.0, z_far)]
+        [
+            corner(1.0, -1.0, z_near),
+            corner(1.0, 1.0, z_near),
+            corner(-1.0, 1.0, z_near),
+            corner(-1.0, -1.0, z_near),
+            corner(1.0, -1.0, z_far),
+            corner(1.0, 1.0, z_far),
+            corner(-1.0, 1.0, z_far),
+            corner(-1.0, -1.0, z_far),
+        ]
     }
 }
 
@@ -180,15 +209,33 @@ mod tests {
     /// 真实“模型聚焦进入”端点（drawing 采集自 dev 画布），已验证旧实现中途 NDC 鼓包。
     fn entered_focus_blend() -> FocusProjectionBlend {
         let rotation = Quat::from_xyzw(-0.239118, 0.369644, 0.099046, 0.892399);
-        let from_pose = Transform { translation: Vec3::new(839.8231, -477.9171, 22.0724), rotation, scale: Vec3::ONE };
-        let to_pose = Transform { translation: Vec3::new(1110.3652, -364.6503, -340.9514), rotation, scale: Vec3::ONE };
+        let from_pose = Transform {
+            translation: Vec3::new(839.8231, -477.9171, 22.0724),
+            rotation,
+            scale: Vec3::ONE,
+        };
+        let to_pose = Transform {
+            translation: Vec3::new(1110.3652, -364.6503, -340.9514),
+            rotation,
+            scale: Vec3::ONE,
+        };
         let pivot = Vec3::new(943.3801, -500.993, -507.9365);
         let mut from = Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::Fixed { width: 2232.9724, height: 1395.6078 },
-            near: 0.0, far: 200000.0, ..OrthographicProjection::default_3d()
+            scaling_mode: ScalingMode::Fixed {
+                width: 2232.9724,
+                height: 1395.6078,
+            },
+            near: 0.0,
+            far: 200000.0,
+            ..OrthographicProjection::default_3d()
         });
         from.update(1440.0, 900.0);
-        let mut to = Projection::Perspective(PerspectiveProjection { fov: 0.8726646, near: 0.05, far: 200000.0, ..default() });
+        let mut to = Projection::Perspective(PerspectiveProjection {
+            fov: 0.8726646,
+            near: 0.05,
+            far: 200000.0,
+            ..default()
+        });
         to.update(1440.0, 900.0);
         FocusProjectionBlend::new(from, to, from_pose, to_pose, pivot)
     }
@@ -204,9 +251,19 @@ mod tests {
         let blend = entered_focus_blend();
         let start = blend.pose_at(0.0);
         let end = blend.pose_at(1.0);
-        assert!(start.translation.abs_diff_eq(blend.from_pose.translation, 1e-3), "{:?}", start.translation);
+        assert!(
+            start
+                .translation
+                .abs_diff_eq(blend.from_pose.translation, 1e-3),
+            "{:?}",
+            start.translation
+        );
         assert!(start.rotation.abs_diff_eq(blend.from_pose.rotation, 1e-5));
-        assert!(end.translation.abs_diff_eq(blend.to_pose.translation, 1e-3), "{:?}", end.translation);
+        assert!(
+            end.translation.abs_diff_eq(blend.to_pose.translation, 1e-3),
+            "{:?}",
+            end.translation
+        );
         assert!(end.rotation.abs_diff_eq(blend.to_pose.rotation, 1e-5));
     }
 
@@ -221,8 +278,17 @@ mod tests {
             frame.progress = step as f32 / 20.0;
             let ndc = ndc_of(&frame, &frame.pose_at(frame.progress));
             // 单调下降（from_ndc.x > to_ndc.x），且不越界到 from 之外。
-            assert!(ndc.x <= previous + 1e-4, "step {step}: {} > {previous}（鼓包）", ndc.x);
-            assert!(ndc.x <= from_x + 1e-4, "step {step}: {} 越过起点 {}（向外鼓出）", ndc.x, from_x);
+            assert!(
+                ndc.x <= previous + 1e-4,
+                "step {step}: {} > {previous}（鼓包）",
+                ndc.x
+            );
+            assert!(
+                ndc.x <= from_x + 1e-4,
+                "step {step}: {} 越过起点 {}（向外鼓出）",
+                ndc.x,
+                from_x
+            );
             previous = ndc.x;
         }
     }
@@ -251,7 +317,10 @@ mod tests {
         let mut previous = start;
         for step in 1..=20 {
             let current = scale(step as f32 / 20.0);
-            assert!(current >= previous - 1e-6, "step {step}: 缩放回退 {current} < {previous}");
+            assert!(
+                current >= previous - 1e-6,
+                "step {step}: 缩放回退 {current} < {previous}"
+            );
             previous = current;
         }
     }
@@ -271,14 +340,26 @@ mod tests {
     fn endpoints_preserve_screen_coordinates_and_midpoint_is_finite() {
         let mut from = Projection::Orthographic(OrthographicProjection::default_3d());
         let mut to = Projection::Perspective(PerspectiveProjection::default());
-        from.update(1200.0, 800.0); to.update(1200.0, 800.0);
+        from.update(1200.0, 800.0);
+        to.update(1200.0, 800.0);
         let pose = Transform::IDENTITY;
-        let mut blend = FocusProjectionBlend::new(from, to, pose, pose, Vec3::new(40.0, 25.0, -500.0));
+        let mut blend =
+            FocusProjectionBlend::new(from, to, pose, pose, Vec3::new(40.0, 25.0, -500.0));
         let point = Vec3::new(40.0, 25.0, -500.0);
         blend.progress = 0.0;
-        assert!(blend.get_clip_from_view().project_point3(point).abs_diff_eq(blend.from.get_clip_from_view().project_point3(point), 1e-5));
+        assert!(
+            blend
+                .get_clip_from_view()
+                .project_point3(point)
+                .abs_diff_eq(blend.from.get_clip_from_view().project_point3(point), 1e-5)
+        );
         blend.progress = 1.0;
-        assert!(blend.get_clip_from_view().project_point3(point).abs_diff_eq(blend.to.get_clip_from_view().project_point3(point), 1e-5));
+        assert!(
+            blend
+                .get_clip_from_view()
+                .project_point3(point)
+                .abs_diff_eq(blend.to.get_clip_from_view().project_point3(point), 1e-5)
+        );
         blend.progress = 0.5;
         assert!(blend.get_clip_from_view().project_point3(point).is_finite());
     }

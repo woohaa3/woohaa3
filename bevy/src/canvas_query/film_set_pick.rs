@@ -329,7 +329,12 @@ mod position_tests;
 mod tests {
     use super::*;
 
-    fn candidate(node_id: &str, item_id: &str, min: [f32; 3], max: [f32; 3]) -> FilmSetItemCandidate {
+    fn candidate(
+        node_id: &str,
+        item_id: &str,
+        min: [f32; 3],
+        max: [f32; 3],
+    ) -> FilmSetItemCandidate {
         FilmSetItemCandidate {
             node_id: node_id.into(),
             item_id: item_id.into(),
@@ -387,7 +392,10 @@ mod tests {
         let b = ([4.0, -1.0, -1.0], [6.0, 1.0, 1.0]);
         accept_items(
             Some("anim".into()),
-            vec![candidate("anim", "a", a.0, a.1), candidate("anim", "b", b.0, b.1)],
+            vec![
+                candidate("anim", "a", a.0, a.1),
+                candidate("anim", "b", b.0, b.1),
+            ],
             0,
         );
         // 指针在 surface 中心 → 命中原点附近的对象 a（屏幕包围盒包含中心）。
@@ -428,7 +436,11 @@ mod tests {
         .contains("\"available\":false"));
 
         // 已接受场景但无 modelFocus 片场目标 → 关闭；旧候选被清除。
-        accept_items(Some("film".into()), vec![candidate("film", "obj", [-1.0; 3], [1.0; 3])], 3);
+        accept_items(
+            Some("film".into()),
+            vec![candidate("film", "obj", [-1.0; 3], [1.0; 3])],
+            3,
+        );
         assert!(item_bounds_query_json("{\"nodeId\":\"film\"}").contains("\"available\":true"));
         accept_items(None, Vec::new(), 0);
         assert!(item_bounds_query_json("{\"nodeId\":\"film\"}").contains("\"available\":false"));
@@ -462,12 +474,20 @@ mod tests {
         // 聚焦一个片场：一次构建、一个目标、两个候选、三次部件求值。
         accept_items(
             Some("film".into()),
-            vec![candidate("film", "a", [-1.0; 3], [1.0; 3]), candidate("film", "b", [2.0; 3], [3.0; 3])],
+            vec![
+                candidate("film", "a", [-1.0; 3], [1.0; 3]),
+                candidate("film", "b", [2.0; 3], [3.0; 3]),
+            ],
             3,
         );
         assert_eq!(
             work(),
-            FilmSetItemWork { builds: 1, targets: 1, candidates: 2, part_bounds: 3 }
+            FilmSetItemWork {
+                builds: 1,
+                targets: 1,
+                candidates: 2,
+                part_bounds: 3
+            }
         );
         let snapshot = diagnostics_json();
         assert!(snapshot.contains("\"owner\":\"film\""), "{snapshot}");

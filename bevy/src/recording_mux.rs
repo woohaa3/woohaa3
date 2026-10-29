@@ -14,7 +14,7 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 
-use crate::recording_encode::{sha256_hex, EncodeFailure, EncodeStage};
+use crate::recording_encode::{EncodeFailure, EncodeStage, sha256_hex};
 
 /// 一个已编码样本（AVCC 格式，长度前缀）。
 #[derive(Clone, Debug)]
@@ -67,7 +67,13 @@ fn write_box(out: &mut Vec<u8>, kind: &[u8; 4], payload: &[u8]) -> u32 {
     size
 }
 
-fn write_full_box(out: &mut Vec<u8>, kind: &[u8; 4], version: u8, flags: u32, payload: &[u8]) -> u32 {
+fn write_full_box(
+    out: &mut Vec<u8>,
+    kind: &[u8; 4],
+    version: u8,
+    flags: u32,
+    payload: &[u8],
+) -> u32 {
     let mut body = Vec::with_capacity(4 + payload.len());
     body.push(version);
     body.extend_from_slice(&flags.to_be_bytes()[1..]);
@@ -374,7 +380,11 @@ pub fn write_mp4(
     samples: &[EncodedSample],
 ) -> Result<MuxResult, EncodeFailure> {
     if samples.is_empty() {
-        return Err(EncodeFailure::new(EncodeStage::Mux, "recording-artifact-empty", "没有可封装的帧"));
+        return Err(EncodeFailure::new(
+            EncodeStage::Mux,
+            "recording-artifact-empty",
+            "没有可封装的帧",
+        ));
     }
     let duration: u64 = samples.iter().map(|sample| sample.duration).sum();
     let mut moov_bytes = moov(options, samples, duration);
@@ -384,20 +394,34 @@ pub fn write_mp4(
     let mut running = header_len;
     for sample in samples {
         offsets.push(u32::try_from(running).map_err(|_| {
-            EncodeFailure::new(EncodeStage::Mux, "recording-artifact-too-large", "成片超过 4 GiB 寻址范围")
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-too-large",
+                "成片超过 4 GiB 寻址范围",
+            )
         })?);
         running += sample.size as u64;
     }
     patch_stco(&mut moov_bytes, &offsets);
 
     let file = File::create(output).map_err(|error| {
-        EncodeFailure::new(EncodeStage::Mux, "recording-artifact-create-failed", error.to_string())
+        EncodeFailure::new(
+            EncodeStage::Mux,
+            "recording-artifact-create-failed",
+            error.to_string(),
+        )
     })?;
     let mut writer = BufWriter::new(file);
     writer
         .write_all(&ftyp())
         .and_then(|_| writer.write_all(&moov_bytes))
-        .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+        .map_err(|error| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-write-failed",
+                error.to_string(),
+            )
+        })?;
 
     // mdat box 头：大尺寸时用 64 位 largesize。
     let payload_len: u64 = samples.iter().map(|sample| sample.size as u64).sum();
@@ -407,40 +431,70 @@ pub fn write_mp4(
         write_u32(&mut header, 1);
         header.extend_from_slice(b"mdat");
         header.extend_from_slice(&mdat_len.to_be_bytes());
-        writer
-            .write_all(&header)
-            .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+        writer.write_all(&header).map_err(|error| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-write-failed",
+                error.to_string(),
+            )
+        })?;
     } else {
         let mut header = Vec::new();
         write_u32(&mut header, mdat_len as u32);
         header.extend_from_slice(b"mdat");
-        writer
-            .write_all(&header)
-            .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+        writer.write_all(&header).map_err(|error| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-write-failed",
+                error.to_string(),
+            )
+        })?;
     }
 
     let mut spool_file = File::open(spool).map_err(|error| {
-        EncodeFailure::new(EncodeStage::Mux, "recording-artifact-unreadable", error.to_string())
+        EncodeFailure::new(
+            EncodeStage::Mux,
+            "recording-artifact-unreadable",
+            error.to_string(),
+        )
     })?;
     let mut buffer = vec![0u8; 64 * 1024];
     loop {
         let read = spool_file.read(&mut buffer).map_err(|error| {
-            EncodeFailure::new(EncodeStage::Mux, "recording-artifact-unreadable", error.to_string())
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-unreadable",
+                error.to_string(),
+            )
         })?;
         if read == 0 {
             break;
         }
         writer.write_all(&buffer[..read]).map_err(|error| {
-            EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string())
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-write-failed",
+                error.to_string(),
+            )
         })?;
     }
-    writer
-        .flush()
-        .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+    writer.flush().map_err(|error| {
+        EncodeFailure::new(
+            EncodeStage::Mux,
+            "recording-artifact-write-failed",
+            error.to_string(),
+        )
+    })?;
     drop(writer);
 
     let size_bytes = std::fs::metadata(output)
-        .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-unreadable", error.to_string()))?
+        .map_err(|error| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-unreadable",
+                error.to_string(),
+            )
+        })?
         .len();
     Ok(MuxResult {
         size_bytes,
@@ -454,12 +508,22 @@ pub fn append_sample(spool: &mut impl Write, nals: &[Vec<u8>]) -> Result<u32, En
     let mut written = 0u32;
     for nal in nals {
         let len = u32::try_from(nal.len()).map_err(|_| {
-            EncodeFailure::new(EncodeStage::Encode, "recording-nal-too-large", "NAL 超过 4 GiB")
+            EncodeFailure::new(
+                EncodeStage::Encode,
+                "recording-nal-too-large",
+                "NAL 超过 4 GiB",
+            )
         })?;
         spool
             .write_all(&len.to_be_bytes())
             .and_then(|_| spool.write_all(nal))
-            .map_err(|error| EncodeFailure::new(EncodeStage::Encode, "recording-artifact-write-failed", error.to_string()))?;
+            .map_err(|error| {
+                EncodeFailure::new(
+                    EncodeStage::Encode,
+                    "recording-artifact-write-failed",
+                    error.to_string(),
+                )
+            })?;
         written += 4 + len;
     }
     Ok(written)
@@ -467,8 +531,13 @@ pub fn append_sample(spool: &mut impl Write, nals: &[Vec<u8>]) -> Result<u32, En
 
 /// 便捷入口：给定 spool 路径计算摘要（供成片自查与宿主复核对比）。
 pub fn spool_digest(path: &Path) -> Result<String, EncodeFailure> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-unreadable", error.to_string()))?;
+    let bytes = std::fs::read(path).map_err(|error| {
+        EncodeFailure::new(
+            EncodeStage::Mux,
+            "recording-artifact-unreadable",
+            error.to_string(),
+        )
+    })?;
     Ok(sha256_hex(&bytes))
 }
 
@@ -482,13 +551,20 @@ mod tests {
             height: 48,
             timescale: 30,
             // 最小可用的 SPS/PPS 形状（只用于结构校验，不用于解码）。
-            sps: vec![0x67, 0x42, 0xc0, 0x1e, 0xda, 0x02, 0x80, 0xb7, 0xfe, 0x5c, 0x05, 0x05, 0x05, 0x02],
+            sps: vec![
+                0x67, 0x42, 0xc0, 0x1e, 0xda, 0x02, 0x80, 0xb7, 0xfe, 0x5c, 0x05, 0x05, 0x05, 0x02,
+            ],
             pps: vec![0x68, 0xce, 0x3c, 0x80],
         }
     }
 
     fn sample(pts: u64, duration: u64, keyframe: bool, size: u32) -> EncodedSample {
-        EncodedSample { pts, duration, keyframe, size }
+        EncodedSample {
+            pts,
+            duration,
+            keyframe,
+            size,
+        }
     }
 
     #[test]
@@ -519,7 +595,11 @@ mod tests {
         let entries = stco + 4 + 8;
         let first = u32::from_be_bytes(bytes[entries..entries + 4].try_into().unwrap());
         // `position` 命中的是 box 的 type 字段（box 起始 +4），数据区在 type 之后 +4。
-        assert_eq!(first as usize, mdat + 4, "第一个样本偏移应等于 mdat 数据区起点");
+        assert_eq!(
+            first as usize,
+            mdat + 4,
+            "第一个样本偏移应等于 mdat 数据区起点"
+        );
         assert_eq!(result.size_bytes, bytes.len() as u64);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -558,7 +638,11 @@ mod tests {
         let spool = dir.join("spool.bin");
         std::fs::write(&spool, vec![0u8; 12]).expect("write");
         // 30fps 下 1 秒 = 30 个 unit；末帧可短于 1 个 unit 表达为 timescale 精度内的整数。
-        let samples = vec![sample(0, 1, true, 4), sample(1, 1, false, 4), sample(2, 1, false, 4)];
+        let samples = vec![
+            sample(0, 1, true, 4),
+            sample(1, 1, false, 4),
+            sample(2, 1, false, 4),
+        ];
         let result = write_mp4(&dir.join("out.mp4"), &spool, &options(), &samples).expect("mux");
         assert_eq!(result.duration_units, 3);
         std::fs::remove_dir_all(&dir).ok();

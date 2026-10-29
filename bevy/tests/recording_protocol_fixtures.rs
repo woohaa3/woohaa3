@@ -10,10 +10,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 use woohaa_bevy_canvas::recording_protocol::{
-    ERROR_IDENTITY_INCOMPLETE, ERROR_UNKNOWN_ENUM, ERROR_UNKNOWN_PAYLOAD,
-    ERROR_PROTOCOL_VERSION_MISMATCH, JobIdentity, MAX_RESOURCE_CHUNK_BYTES, JobState,
-    RECORDING_PROTOCOL_VERSION, SequenceGuard, accepts_result,
-    parse_control_message, validate_chunk,
+    ERROR_IDENTITY_INCOMPLETE, ERROR_PROTOCOL_VERSION_MISMATCH, ERROR_UNKNOWN_ENUM,
+    ERROR_UNKNOWN_PAYLOAD, JobIdentity, JobState, MAX_RESOURCE_CHUNK_BYTES,
+    RECORDING_PROTOCOL_VERSION, SequenceGuard, accepts_result, parse_control_message,
+    validate_chunk,
 };
 
 #[derive(Deserialize)]
@@ -174,7 +174,8 @@ fn terminal_state_helpers_are_stable() {
 #[test]
 fn executor_lease_can_renew_without_a_job_but_not_without_identity() {
     for payload in ["leaseHeartbeat", "leaseRenewal"] {
-        let mut value = serde_json::json!({"protocolVersion": RECORDING_PROTOCOL_VERSION, "sequence": "1"});
+        let mut value =
+            serde_json::json!({"protocolVersion": RECORDING_PROTOCOL_VERSION, "sequence": "1"});
         value[payload] = serde_json::json!({"executorInstanceId":"desktop-1"});
         assert!(parse_control_message(&value.to_string()).is_ok());
         value[payload] = serde_json::json!({});
