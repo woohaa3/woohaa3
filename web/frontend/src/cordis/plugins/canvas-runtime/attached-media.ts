@@ -4,6 +4,7 @@ import type { BevyRuntime } from "./bevy-runtime.js";
 import type { CanvasRuntimeOptions } from "./canvas-runtime-options.js";
 import type { AnimationPlaybackStore } from "./animation-playback-store.js";
 import { createTextureSync } from "./texture-sync.js";
+import { planImageCardFit } from "./media-card-fit.js";
 import { createVideoFrameSessions } from "./video-frame-session.js";
 import { createCompositeAssetMediaSessions } from "./composite-asset-media-session.js";
 import { isDevVideoDisabled, hasMismatchedFlag, withoutVideoMediaSources, withoutVideoNodes } from "./dev-media-switches.js";
@@ -128,6 +129,18 @@ export function createAttachedMedia(input: {
     return { admitted: true as const, purpose, tier };
   };
 
+  // 图片卡片按图片比例定尺寸：每个节点每次挂载只尝试一次；已调过尺寸的卡片由 planImageCardFit 跳过。
+  const fittedNodes = new Set<string>();
+  const fitImageCard = (nodeId: string, size: { width: number; height: number }) => {
+    if (fittedNodes.has(nodeId)) return;
+    const session = options.getSession();
+    if (!session?.isWritable()) return;
+    const command = planImageCardFit(woohaa3CanvasStore.getState().canvas, nodeId, size);
+    if (!command) return;
+    fittedNodes.add(nodeId);
+    session.submitCommands([command], `web-image-card-fit-${nodeId}-${Date.now().toString(36)}`);
+  };
+
   const textureSync = createTextureSync({
     runtime,
     getCanvas: () => projectCanvas(woohaa3CanvasStore.getState().canvas),
@@ -137,7 +150,8 @@ export function createAttachedMedia(input: {
     getFocusDetails:input.getFocusDetails,
     residency,
     admissionOf,
-    onChange: () => input.invalidate("image-resources")
+    onChange: () => input.invalidate("image-resources"),
+    onImageSize: fitImageCard
   });
   const videoSessions = options.createVideoSessions?.(runtime) ?? createVideoFrameSessions({
     runtime, getCanvas: getVideoCanvas,

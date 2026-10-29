@@ -111,8 +111,10 @@ pub(crate) fn shows_content(node: &GraphNode) -> bool {
 /// 底部另由 [`CARD_FOOTER_HEIGHT`] 留出标题行与历史圆点的位置。
 pub(crate) const CARD_CONTENT_PAD: f32 = 6.0;
 
-/// 卡片底部标题行的高度（标题 + 种类图标共用一行）。
-pub(crate) const CARD_TITLE_ROW_HEIGHT: f32 = 18.0;
+/// 卡片底部标题行的高度。
+///
+/// 12px 的字在这一行里上下居中，文字与卡片下边框之间留 (行高 - 字号) / 2 的距离。
+pub(crate) const CARD_TITLE_ROW_HEIGHT: f32 = 28.0;
 
 /// 标题行与历史圆点之间的竖直间隙。
 pub(crate) const CARD_TITLE_GAP: f32 = 0.0;

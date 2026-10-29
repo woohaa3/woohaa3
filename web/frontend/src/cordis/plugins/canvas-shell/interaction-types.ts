@@ -99,6 +99,12 @@ export type InteractionControllerOptions = {
   /** 双击文本节点时请求宿主按当前 canonical 内容打开 Markdown 预览。 */
   onTextPreviewIntent?: (request: { nodeId: string }) => void;
   /**
+   * 双击卡片底部标题行时请求重命名该节点。
+   *
+   * 只传 canonical nodeId；输入框、校验与提交由 canvas-menu 的重命名流程负责。
+   */
+  onNodeRenameIntent?: (request: { nodeId: string }) => void;
+  /**
    * 双击命中 canonical ready 图片节点时请求进入**图片聚焦工作区**
    * （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，design D1/D2）。
    *

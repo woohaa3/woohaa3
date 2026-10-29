@@ -118,6 +118,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     ...(deps.onViewportForResidency ? { onViewportForResidency: deps.onViewportForResidency } : {}),
     onImagePreview: (request) => options.emit("ui.media-preview.open-requested", request as never),
     onTextPreviewIntent: (request) => options.emit("ui.text-preview.open-requested", request),
+    onNodeRenameIntent: (request) => options.emit("ui.node-rename.open-requested", request),
     ...(options.onImageFocusIntent ? { onImageFocusIntent: options.onImageFocusIntent } : {}),
     ...(options.onVideoFocusIntent ? { onVideoFocusIntent: options.onVideoFocusIntent } : {}),
     onVideoFrameCapture: (request) => options.emit("ui.video-frame-capture.open-requested", request as never),

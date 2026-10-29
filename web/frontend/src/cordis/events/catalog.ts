@@ -23,6 +23,8 @@ export type FrontendEventPayloads = {
   "ui.task-activity.open-requested": { nodeId: string };
   "ui.media-preview.open-requested": { assetId: string; nodeId: string; title: string };
   "ui.text-preview.open-requested": { nodeId: string };
+  /** 双击卡片底部标题行 → 请求重命名该节点（由 canvas-menu 的重命名浮层消费）。 */
+  "ui.node-rename.open-requested": { nodeId: string };
   "ui.video-frame-capture.open-requested": { nodeId: string };
   "ui.node-history.open-requested": { nodeId: string };
   "ui.node-history.switch-requested": { nodeId: string; index?: number; step?: number; presentationId?: string; entryId?: string; operationId?: string; viewOnly?: boolean };
@@ -87,6 +89,9 @@ export const frontendEventCatalog = {
   },
   "ui.text-preview.open-requested": {
     scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["media-preview"]
+  },
+  "ui.node-rename.open-requested": {
+    scope: "canvas", kind: "request", producers: ["canvas-runtime"], consumers: ["canvas-menu"]
   },
   "ui.video-frame-capture.open-requested": {
     scope: "canvas",

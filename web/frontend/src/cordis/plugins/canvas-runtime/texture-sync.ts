@@ -66,6 +66,8 @@ export type TextureSyncOptions = {
   createCanvas?: RasterCanvasFactory;
   /** 变化后的回调（触发一次 scene flush）。 */
   onChange?: () => void;
+  /** 图片解码完成：给出原图像素尺寸（卡片按图片比例定尺寸用）。 */
+  onImageSize?: (nodeId: string, size: { width: number; height: number }) => void;
   /**
    * 页面级资源需求与预算 owner（change: 2026-10-23，design D1）。
    *
@@ -259,7 +261,10 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       target.ready = true;
       target.failed = false;
       target.retryAttempts = 0;
-      for (const nodeId of target.nodes) options.runtime.clearRuntimeIssue?.(`decode:image:${nodeId}`);
+      for (const nodeId of target.nodes) {
+        options.runtime.clearRuntimeIssue?.(`decode:image:${nodeId}`);
+        options.onImageSize?.(nodeId, { width: image.width, height: image.height });
+      }
     };
     const run = residency
       ? residency.admit<void>({
@@ -327,6 +332,10 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     if (content) {
       content.nodes.add(nodeId);
       entries.set(nodeId, { url, contentKey: key, tier, load: previous?.load ?? loading.track(nodeId, url), sent: previous?.sent ?? false });
+      // 同一张图已解码过（例如重复导入）：新卡片同样按比例定尺寸。
+      if (content.ready && content.width && content.height) {
+        options.onImageSize?.(nodeId, { width: content.width, height: content.height });
+      }
       return;
     }
     const entry: NodeEntry = {

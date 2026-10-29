@@ -168,6 +168,9 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
               case "ui.text-preview.open-requested":
                 ctx.emit("ui.text-preview.open-requested", payload as never);
                 return;
+              case "ui.node-rename.open-requested":
+                ctx.emit("ui.node-rename.open-requested", payload as never);
+                return;
               case "ui.video-frame-capture.open-requested":
                 ctx.emit("ui.video-frame-capture.open-requested", payload as never);
                 return;

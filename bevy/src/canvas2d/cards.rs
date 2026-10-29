@@ -7,12 +7,6 @@ use crate::{
 };
 use bevy::prelude::*;
 
-/// 标题行里种类符号的缩放（符号路径基准约 13×12）。
-const KIND_GLYPH_SCALE: f32 = 0.62;
-
-/// 种类符号与名称之间的水平间隙。
-const KIND_GLYPH_GAP: f32 = 5.0;
-
 /// 拍摄镜头预览卡片正文与装饰
 /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D8）。
 ///
@@ -126,28 +120,9 @@ pub(super) fn draw_static(
     let title_top = super::layout::card_title_row_top(y, height, super::layout::card_footer_height(node));
     let text_left = x + super::layout::CARD_CONTENT_PAD;
     let text_width = (width - super::layout::CARD_CONTENT_PAD * 2.).max(48.);
-    let has_kind_glyph = !node.type_label.is_empty();
-    // 符号路径的基准框约 13×12（见 `Geometry::kind_glyph`），按标题行高度缩放。
-    let glyph_scale = KIND_GLYPH_SCALE;
-    let glyph_advance = if has_kind_glyph {
-        let glyph_center = Vec2::new(
-            text_left + 6.5 * glyph_scale,
-            title_top + super::layout::CARD_TITLE_FONT / 2.0,
-        );
-        geometry.kind_glyph(
-            &node.kind,
-            glyph_center,
-            z + 0.005,
-            theme.token_u32("canvasCloseIcon"),
-            glyph_scale,
-        );
-        13.0 * glyph_scale + KIND_GLYPH_GAP
-    } else {
-        0.0
-    };
     let mut labels = vec![(
-        shortened(&title_text, (text_width - glyph_advance).max(32.), super::layout::CARD_TITLE_FONT),
-        Vec2::new(text_left + glyph_advance, title_top),
+        shortened(&title_text, text_width.max(32.), super::layout::CARD_TITLE_FONT),
+        Vec2::new(text_left, title_top),
         super::layout::CARD_TITLE_FONT,
         theme.token_u32("canvasBodyText"),
     )];

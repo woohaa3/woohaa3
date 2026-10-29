@@ -363,6 +363,12 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
       nodeRenameStore.close();
     }, "canvas-menu-rename-overlay");
 
+    // 双击卡片底部标题行 → 打开同一个重命名浮层（事件由 canvas-runtime 转发）。
+    const offRenameRequest = ctx.on("ui.node-rename.open-requested", ({ nodeId }) => {
+      openRename(nodeId);
+    });
+    ctx.effect(() => () => offRenameRequest(), "canvas-menu-rename-request");
+
     ctx.effect(() => () => {
       for (const remove of removeGroupStructureActions) remove();
     }, "canvas-menu-group-structure-actions");

@@ -101,6 +101,7 @@ export type CanvasRuntimeOptions = {
     name:
       | "ui.media-preview.open-requested"
       | "ui.text-preview.open-requested"
+      | "ui.node-rename.open-requested"
       | "ui.video-frame-capture.open-requested"
       | "ui.node-history.open-requested"
       | "ui.node-history.switch-requested"

@@ -11,7 +11,8 @@ import { modelBounds, type FocusHitResult } from "./model-focus-session.js";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import type { InteractionCore } from "./interaction-core.js";
-import { builtinNodeCapabilityResolver, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver, nodeWorldRect, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { hitsCardTitleRow } from "./card-title-hit.js";
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
@@ -70,6 +71,16 @@ export function createDoubleClickHandler(core: InteractionCore) {
       options.onModelFocusIntent?.({ type: "enter", nodeId: child.ownerNodeId,
         kind: focusKind(child.ownerNodeId)! });
       return;
+    }
+
+    // 双击卡片底部标题行 → 重命名（不进入聚焦/预览）。
+    if (cardEntry && hit?.kind === "node") {
+      const byId = new Map(canvasState.document.nodes.map(node => [node.id, node]));
+      if (hitsCardTitleRow(world, cardEntry, nodeWorldRect(cardEntry, byId))) {
+        event.preventDefault();
+        options.onNodeRenameIntent?.({ nodeId: cardEntry.id });
+        return;
+      }
     }
 
     // 片场支持模型 picking；普通模型按内嵌预览卡片命中进入聚焦。

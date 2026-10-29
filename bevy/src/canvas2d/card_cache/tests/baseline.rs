@@ -112,7 +112,7 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
     // fingerprint 覆盖所有块引用的顶点位置与颜色。
     //
     // 2026-10-29 更新指纹：卡片改成「预览在上、名称在下」，上/左/右内边距 16 → 6，
-    // 底部由 16 改为标题行 18（无历史圆点时不预留圆点带），种类图标改为标题行里的符号。
+    // 底部由 16 改为标题行 28（文字与下边框留出间距，无历史圆点时不预留圆点带），标题前不再画种类图标。
     // 这些都会改变卡片几何，指纹变化是预期的；实体与资产计数未变。
     assert_eq!(
         baseline_counts,
@@ -120,7 +120,7 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
         "投影/producer 的实体与资产基线漂移"
     );
     assert_eq!(
-        baseline_fingerprint, 0x0c87_9635_b3d1_fa3c,
+        baseline_fingerprint, 0x08e8_5778_8415_fa3c,
         "卡片/容器几何指纹不得漂移"
     );
 
