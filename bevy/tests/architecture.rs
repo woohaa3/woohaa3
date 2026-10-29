@@ -264,6 +264,38 @@ fn bridge_does_not_depend_on_render_modules() {
     assert_absent_dir("bridge", &["bevy", "canvas2d", "model3d", "wasm_bindgen"]);
 }
 
+/// WASM 没有系统时钟：`std::time::Instant::now()` / `SystemTime::now()` 在
+/// `wasm32-unknown-unknown` 上会 panic（time not implemented on this platform），
+/// WASM 实例随即被 poison，画布表现为 `RuntimeError: unreachable`。
+/// 计时统一走 `crate::clock::Instant`（wasm 下是 `performance.now()`）。
+#[test]
+fn wasm_paths_never_use_std_clock() {
+    let mut files = Vec::new();
+    collect_rs(&src_dir(), &mut files);
+    for file in files {
+        let path = Path::new(&file);
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        // 原生可执行入口（`src/bin`）与测试模块不参与 wasm 构建。
+        let skipped = path.components().any(|part| {
+            let part = part.as_os_str();
+            part == "bin" || part == "tests"
+        });
+        if skipped || name.contains("test") {
+            continue;
+        }
+        let source = strip_comments(&fs::read_to_string(&file).expect("read scoped file"));
+        for needle in ["std::time::Instant", "std::time::SystemTime"] {
+            assert!(
+                !source.contains(needle),
+                "{file} 不应包含 {needle}：wasm 没有系统时钟，改用 crate::clock::Instant"
+            );
+        }
+    }
+}
+
 #[test]
 fn canvas2d_does_not_import_bridge_or_model3d() {
     // change: refactor-bevy-rust-file-size —— canvas2d 拆分为多个文件，逐文件守卫。
