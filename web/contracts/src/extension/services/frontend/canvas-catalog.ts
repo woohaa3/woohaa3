@@ -31,11 +31,23 @@ export type CanvasCatalogCreateResult =
   | { ok: true; canvasId: string; revision: number; title: string }
   | { ok: false; code: string; error: string };
 
+/**
+ * 删除画布结果。
+ *
+ * 删除是破坏性动作：调用方必须先让用户确认。`expectedRevision` 是本地权威内容的 CAS 版本，
+ * 与创建/重命名不同，删除没有可回显的对象，因此只有成功/失败两态。
+ */
+export type CanvasCatalogDeleteResult =
+  | { ok: true }
+  | { ok: false; code: string; error: string };
+
 /** Catalog 远端 adapter：所有目录 HTTP 协议的唯一浏览器出口。 */
 export interface CanvasCatalogRemote {
   list(input: { offset: number; limit: number }): Promise<CanvasCatalogListResult>;
   get(canvasId: string): Promise<CanvasCatalogSummaryResult>;
   create(input: { canvasId?: string; title?: string }): Promise<CanvasCatalogCreateResult>;
+  /** 删除画布（`DELETE /api/canvases/:id?expectedRevision=N`）。 */
+  delete(canvasId: string, expectedRevision: number): Promise<CanvasCatalogDeleteResult>;
 }
 
 export interface CanvasCatalogService {
@@ -47,6 +59,12 @@ export interface CanvasCatalogService {
   loadMore(): Promise<void>;
   /** 创建画布，成功后失效并刷新目录。 */
   create(input?: { title?: string }): Promise<CanvasCatalogCreateResult>;
+  /**
+   * 删除画布，成功后失效并刷新目录。
+   *
+   * 版本号缺省取当前目录条目的 `revision`；条目不在当前页时必须显式给出。
+   */
+  delete(canvasId: string, expectedRevision?: number): Promise<CanvasCatalogDeleteResult>;
   /** 按 ID 读取摘要（用于校验显式 canvasId 是否存在/展示当前标题）。 */
   get(canvasId: string): Promise<CanvasCatalogSummaryResult>;
   /** 失效缓存，使下一次 `load()` 重新请求。 */

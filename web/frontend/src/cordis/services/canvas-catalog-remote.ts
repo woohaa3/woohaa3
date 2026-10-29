@@ -3,8 +3,8 @@
  * （change: 2026-09-29-add-multi-canvas-workspace，任务 2.2）。
  *
  * 唯一浏览器目录 HTTP 出口：`GET /api/canvases`（分页）、`GET /api/canvases/:id`（摘要）、
- * `POST /api/canvases`（创建）。所有响应经共享 decoder 校验；失败携带稳定 code，绝不回显
- * 服务端内部信息。
+ * `POST /api/canvases`（创建）、`DELETE /api/canvases/:id`（删除）。所有响应经共享 decoder
+ * 校验；失败携带稳定 code，绝不回显服务端内部信息。
  *
  * 三个路由由画布服务的统一入口把关：本地单实例不启用访问控制，受控部署由同源会话身份与
  * 资源策略判定。
@@ -18,6 +18,7 @@ import { getAppPublicFetch } from "./app-base-path.js";
 import { CANVAS_API_BASE_PATH } from "./paths.js";
 import type {
   CanvasCatalogCreateResult,
+  CanvasCatalogDeleteResult,
   CanvasCatalogListResult,
   CanvasCatalogRemote,
   CanvasCatalogSummaryResult
@@ -110,6 +111,20 @@ export function createCanvasCatalogRemote(options: CanvasCatalogRemoteOptions = 
       const decoded = decodeCanvasCreateResult(result.json);
       if (!decoded.ok) return { ok: false, code: "malformed-response", error: decoded.error };
       return { ok: true, ...decoded.result };
+    },
+
+    /**
+     * 删除画布。删除是破坏性动作，客户端不重试（`request` 只对 GET 退避重试）：
+     * 一次网络失败宁可让用户再点一次，也不能在"其实已经删了"之后再发一遍。
+     */
+    async delete(canvasId, expectedRevision): Promise<CanvasCatalogDeleteResult> {
+      const result = await request(
+        "DELETE",
+        `/${encodeURIComponent(canvasId)}?expectedRevision=${encodeURIComponent(String(expectedRevision))}`
+      );
+      if (!result.ok) return result;
+      // 成功是 204（无响应体）；宿主不会用 200 + 对象表示删除结果。
+      return { ok: true };
     }
   };
 }

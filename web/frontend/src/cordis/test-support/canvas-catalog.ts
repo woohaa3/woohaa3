@@ -7,6 +7,7 @@
 import type { CanvasSummary } from "@woohaa3/contracts";
 import type {
   CanvasCatalogCreateResult,
+  CanvasCatalogDeleteResult,
   CanvasCatalogListResult,
   CanvasCatalogRemote,
   CanvasCatalogSummaryResult
@@ -51,6 +52,15 @@ export function createFakeCanvasCatalogRemote(
       entries.set(canvasId, entry);
       created.push(canvasId);
       return { ok: true, canvasId, revision: 1, title: entry.title };
+    },
+    async delete(canvasId, expectedRevision): Promise<CanvasCatalogDeleteResult> {
+      const entry = entries.get(canvasId);
+      if (!entry) return { ok: false, code: "CANVAS_NOT_FOUND", error: `画布 ${canvasId} 不存在` };
+      if (entry.revision !== expectedRevision) {
+        return { ok: false, code: "REVISION_CONFLICT", error: "画布 revision 已变化" };
+      }
+      entries.delete(canvasId);
+      return { ok: true };
     }
   };
   return remote;

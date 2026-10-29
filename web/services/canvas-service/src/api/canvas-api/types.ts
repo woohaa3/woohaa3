@@ -145,6 +145,14 @@ export type CanvasRequestHandlerOptions = {
    * 使撤权在生效后同步可见。缺省时不断开（独立 Canvas 服务无同步面）。
    */
   closeSessions?: (canvasId: string, reason: string) => void | Promise<void>;
+  /**
+   * 远端删除端口（可选）：属于远端来源的画布必须先在远端删掉，否则本机删完，
+   * 下一次列目录又会把它拉回来。实现自己判定归属，不属于远端时返回 `skipped`。
+   *
+   * 删除顺序是**远端在前、本机在后**：远端失败就中止（本机仍完整，可重试），
+   * 反序会留下"本机删了、远端还在"的半删状态。
+   */
+  deleteRemote?: (canvasId: string) => Promise<import("@woohaa3/contracts").CanvasUpstreamDeleteResult>;
 };
 
 export type CanvasLogger = CanvasRequestHandlerOptions["logger"];

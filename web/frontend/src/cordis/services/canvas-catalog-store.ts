@@ -7,6 +7,7 @@
  */
 import type {
   CanvasCatalogCreateResult,
+  CanvasCatalogDeleteResult,
   CanvasCatalogListResult,
   CanvasCatalogRemote,
   CanvasCatalogService,
@@ -110,6 +111,24 @@ export class CanvasCatalogStore implements CanvasCatalogService {
     this.invalidate();
     await this.load(true);
     return result;
+  }
+
+  /**
+   * 删除画布：成功后才失效并刷新目录。
+   *
+   * 失败**不**清空列表（画布仍然存在），错误原样交给调用方展示。版本号缺省取当前快照里的
+   * 条目：删除入口长在目录行上，调用方自然知道是哪一条；条目不在当前页时必须显式给出。
+   */
+  async delete(canvasId: string, expectedRevision?: number): Promise<CanvasCatalogDeleteResult> {
+    const revision = expectedRevision ?? this.state.entries.find((entry) => entry.id === canvasId)?.revision;
+    if (revision === undefined) {
+      return { ok: false, code: "CANVAS_NOT_FOUND", error: "画布不在当前目录里，无法删除" };
+    }
+    const result = await this.remote.delete(canvasId, revision);
+    if (!result.ok) return result;
+    this.invalidate();
+    await this.load(true);
+    return { ok: true };
   }
 
   async get(canvasId: string): Promise<CanvasCatalogSummaryResult> {

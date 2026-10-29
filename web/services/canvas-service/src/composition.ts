@@ -801,6 +801,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     lifecycle,
     // 任务 5.5：列表按可信主体的可发现集合在分页前过滤（与「我的目录」同一发现规则）。
     discoverableCanvasIds,
+    ...(options.deleteRemote ? { deleteRemote: options.deleteRemote } : {}),
     // 任务 5.2：原生删除后断开该画布的全部实时会话（sync hub）。
     ...(sync
       ? {

@@ -5,9 +5,9 @@ import { ScenePackageImport } from "../scene-experience/import-controls.js";
  *  change: adopt-radix-lucide-canvas-ui 任务 4.2：迁移到生产 Button/IconButton/Tooltip/
  *  ScrollArea 与 Lucide icon facade）。
  *
- * 紧凑的画布 chrome：触发器显示当前标题；Dialog 提供分页列表、新建与当前画布重命名。
- * 保留 Canvas Catalog、create/switch/delete 与 Dialog Service ownership；模型聚焦时触发器
- * 让位左上角的聚焦返回按钮。
+ * 紧凑的画布 chrome：触发器显示当前标题；Dialog 提供分页列表、新建、当前画布重命名
+ * 与逐条删除（行内确认）。保留 Canvas Catalog、create/switch/delete 与 Dialog Service
+ * ownership；模型聚焦时触发器让位左上角的聚焦返回按钮。
  *
  * 目录条目右侧渲染 `canvas.catalog-item-action` slot 的贡献（change: canvas 同步显式化）：
  * 宿主只做通用布局与上下文注入，不认识任何具体扩展，也不按扩展 ID 分支。
@@ -18,6 +18,7 @@ import { Button } from "@woohaa3/ui/primitives";
 import { ScrollArea } from "@woohaa3/ui/primitives";
 import { Tooltip } from "@woohaa3/ui/primitives";
 import { CanvasSwitcherIcon, ChevronDownIcon, CloseIcon, SearchIcon } from "@woohaa3/ui/icons";
+import { CanvasDeleteButton, CanvasDeleteConfirm } from "./delete-control.js";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
 import type { DialogRenderer, DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
 import type { CanvasCatalogService, CanvasSelectionService, CanvasSummary } from "../../contract/canvas-catalog.js";
@@ -195,6 +196,13 @@ export type CanvasSwitcherDeps = {
   create: (options?: readonly CanvasCreateOptionContribution[]) => Promise<{ ok: boolean; error?: string; canvasId?: string }>;
   rename: (title: string) => Promise<{ ok: boolean; error?: string }>;
   /**
+   * 删除画布（`DELETE /api/canvases/:id`）。
+   *
+   * 宿主持有路由与导航：删掉当前画布后由它决定去哪张，宿主组件只负责确认与错误展示。
+   * 未注入时不渲染删除入口（没有删除能力的宿主不必假装能删）。
+   */
+  remove?: (canvasId: string, expectedRevision?: number) => Promise<{ ok: boolean; error?: string }>;
+  /**
    * Slot registry：条目右侧的扩展动作（`canvas.catalog-item-action`）从这里读取
    * （change: canvas 同步显式化）。宿主不做任何具体扩展判断。
    */
@@ -262,6 +270,8 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
     /** 重命名只在当前画布行内展开，不再常驻一个输入框占掉列表空间。 */
     const [renaming, setRenaming] = useState(false);
     const [renameValue, setRenameValue] = useState(currentEntry?.title ?? "");
+    /** 待确认删除的条目：删除不可撤销，先在该行内换成确认行，不弹第二层 Dialog。 */
+    const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
     const [busy, setLocalBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     // —— 目录刷新状态（概览行的手动「刷新」+ Dialog 打开期间的自动刷新）——
@@ -371,7 +381,7 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
       if (entry) setRenameValue(entry.title);
     }, [catalogState.entries.length, renaming]);
 
-    const run = async <T,>(action: () => Promise<T & { ok: boolean; error?: string }>): Promise<T | null> => {
+    const run = async <T extends { ok: boolean; error?: string }>(action: () => Promise<T>): Promise<T | null> => {
       setLocalBusy(true);
       setBusy(true);
       setError(null);
@@ -405,6 +415,25 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
         const result = await deps.rename(renameValue);
         if (result.ok) setRenaming(false);
         return result;
+      });
+    };
+
+    /**
+     * 删除画布。
+     *
+     * 确认行在**这一行**里展开（与重命名同一套模式）：删除是不可撤销动作，需要一次明确
+     * 确认，但不值得再叠一层 Dialog。失败保留确认行与错误提示，用户可重试或取消。
+     */
+    const onDelete = (entry: CanvasSummary) => {
+      const remove = deps.remove;
+      if (!remove) return;
+      void run(async () => {
+        const result = await remove(entry.id, entry.revision);
+        if (result.ok) setDeleteTarget(null);
+        return result;
+      }).then((result) => {
+        // 删除当前画布：宿主导航到另一张或新建；弹窗随页面 scope 一起收尾。
+        if (result?.ok && entry.id === deps.currentCanvasId()) requestClose();
       });
     };
 
@@ -631,6 +660,13 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
                             取消
                           </Button>
                         </div>
+                      ) : deleteTarget === entry.id ? (
+                        <CanvasDeleteConfirm
+                          entry={entry}
+                          busy={busy}
+                          onConfirm={() => onDelete(entry)}
+                          onCancel={() => setDeleteTarget(null)}
+                        />
                       ) : (
                       <div className="canvas-switcher__item-row">
                         <button
@@ -688,6 +724,12 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
                               );
                             })}
                           </div>
+                        ) : null}
+                        {/* 删除是作者动作：明确没有删除权（共享画布的可写协作者）时不渲染，
+                            避免提供注定被服务端拒绝的入口；未知时照常提供，由服务端判定。
+                            宿主没注入删除端口时也不渲染。 */}
+                        {deps.remove !== undefined && entry.access?.canDelete !== false ? (
+                          <CanvasDeleteButton disabled={busy} onClick={() => setDeleteTarget(entry.id)} />
                         ) : null}
                       </div>
                       )}

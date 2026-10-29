@@ -106,7 +106,21 @@ export type CanvasUpstreamProvider = {
    * 服务端写入（生成/存储）被拒绝才暴露。
    */
   access?(canvasId: string): Promise<CanvasAccess | null>;
+  /**
+   * 在远端删除这张画布（可选）。
+   *
+   * 宿主删除画布时先问它：**属于这个来源**的画布必须先在远端删掉，否则本机删完，
+   * 下一次列目录又会把它拉回来。实现自己判定归属：不在远端目录 / 没登录 / 纯本地时
+   * 返回 `skipped`，宿主继续走本机删除。
+   *
+   * 不得抛错代替结果：远端故障返回 `unavailable`（宿主据此中止删除并报错，
+   * 不留下"本机删了、远端还在"的半删状态）。
+   */
+  deleteCanvas?(canvasId: string): Promise<CanvasUpstreamDeleteResult>;
 };
+
+/** 远端删除结果（宿主只据此决定继续、中止或幂等成功）。 */
+export type CanvasUpstreamDeleteResult = "deleted" | "skipped" | "not-found" | "forbidden" | "unavailable";
 
 /** 远端来源能提供的画布摘要（字段最小化；缺的由宿主补默认值）。 */
 export type CanvasRemoteSummary = {
@@ -130,7 +144,9 @@ export function isCanvasUpstreamProviderShape(value: unknown): value is CanvasUp
     typeof record.resolve === "function" &&
     (record.describe === undefined || typeof record.describe === "function") &&
     (record.listCanvases === undefined || typeof record.listCanvases === "function") &&
-    (record.getCanvas === undefined || typeof record.getCanvas === "function")
+    (record.getCanvas === undefined || typeof record.getCanvas === "function") &&
+    (record.access === undefined || typeof record.access === "function") &&
+    (record.deleteCanvas === undefined || typeof record.deleteCanvas === "function")
   );
 }
 

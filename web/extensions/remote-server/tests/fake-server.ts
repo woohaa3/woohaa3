@@ -429,6 +429,24 @@ export function createFakeServer(options: FakeServerOptions = {}): FakeServer {
     }
 
     // ---- 画布协作者（CanvasService 成员接口） ----
+    if (method === "DeleteCanvas") {
+      const subject = bearerSubject(authorization);
+      if (subject === null) return json({ code: "unauthenticated", message: "未认证" }, 401);
+      const canvasId = (body as { canvasId?: unknown } | null)?.canvasId;
+      if (typeof canvasId !== "string" || canvasId === "") {
+        return json({ code: "invalid_argument", message: "缺少画布 id" }, 400);
+      }
+      const acl = aclOf(canvasId);
+      if (acl === null) return json({ code: "not_found", message: "画布不存在" }, 404);
+      // 删除是作者动作：可写协作者（editor）不蕴含删除（与 server 的 authorize 一致）。
+      if (!decisionFor(canvasId, acl, subject).allowed.includes("canvas.share")) {
+        return json({ code: "permission_denied", message: "只有画布作者能删除" }, 403);
+      }
+      const index = remoteCanvasIds.indexOf(canvasId);
+      if (index >= 0) remoteCanvasIds.splice(index, 1);
+      return json({});
+    }
+
     if (method === "GetCanvas") {
       const subject = bearerSubject(authorization);
       if (subject === null) return json({ code: "unauthenticated", message: "未认证" }, 401);

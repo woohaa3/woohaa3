@@ -166,6 +166,24 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
         return { ok: true };
       };
 
+      /**
+       * 删除画布。
+       *
+       * 删除入口长在目录行上，宿主在这里只做收尾：目录 store 已刷新；删掉的是当前画布时
+       * 清掉「最近画布」并回到缺省解析，让路由器落到下一张或幂等新建，而不是停在一个已删
+       * 的 id 上（那会变成恢复页）。不经过 `pageLeave.settle`：画布已被删除，没有可保存的目标。
+       */
+      const remove = async (targetCanvasId: string, expectedRevision?: number) => {
+        const result = await catalog.delete(targetCanvasId, expectedRevision);
+        if (!result.ok) return { ok: false, error: result.error };
+        if (targetCanvasId === canvasId) {
+          selection.setRecentCanvasId(null);
+          ctx.appRouter.navigate({ page: "canvas" });
+        }
+        refreshTitle();
+        return { ok: true };
+      };
+
       const disposeDialog = ctx.dialogs.registerDialog(CANVAS_SWITCHER_DIALOG_ID, {
         definition: canvasSwitcherDefinition,
         renderer: createCanvasSwitcherRenderer({
@@ -179,6 +197,7 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
           switchTo,
           create,
           rename,
+          remove,
           sources
         })
       });

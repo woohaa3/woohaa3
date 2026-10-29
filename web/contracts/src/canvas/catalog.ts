@@ -48,6 +48,13 @@ export type CanvasAccess = {
   canRead: boolean;
   /** 能否写入这张画布；`false` 表示只读。 */
   canWrite: boolean;
+  /**
+   * 能否删除这张画布（可选；省略表示未知，按可删处理）。
+   *
+   * 删除是**作者动作**：服务端 `DeleteCanvas` 按 `canvas.share` 判定，可写协作者（editor）
+   * 能改内容但不蕴含删除。界面据此隐藏注定被拒的删除入口，只在明确 `false` 时隐藏。
+   */
+  canDelete?: boolean;
 };
 
 /** 画布列表条目的摘要；不含完整 document，避免分页响应过大。 */
@@ -133,7 +140,8 @@ function isOptionalSync(value: unknown): boolean {
 function isOptionalAccess(value: unknown): boolean {
   if (value === undefined) return true;
   if (!isJsonObject(value)) return false;
-  return typeof value.canRead === "boolean" && typeof value.canWrite === "boolean";
+  if (typeof value.canRead !== "boolean" || typeof value.canWrite !== "boolean") return false;
+  return value.canDelete === undefined || typeof value.canDelete === "boolean";
 }
 
 export function isCanvasAccess(value: unknown): value is CanvasAccess {

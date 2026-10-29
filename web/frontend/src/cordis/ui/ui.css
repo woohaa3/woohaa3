@@ -2460,6 +2460,53 @@
 	cursor: not-allowed;
 }
 
+/* 删除入口：与重命名同为文本动作，但危险色只在悬停时出现，避免整列泛红。 */
+.canvas-switcher__item-delete {
+	flex: none;
+	padding: 5px 8px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--app-web-text-muted);
+	font-size: 12px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.canvas-switcher__item-delete:hover:not(:disabled) {
+	border-color: var(--app-status-danger, var(--app-web-border));
+	background: var(--app-web-surface);
+	color: var(--app-status-danger, var(--app-web-text-primary));
+}
+
+.canvas-switcher__item-delete:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* 行内删除确认：替换整行内容，问题文案占满剩余宽度，动作靠右与重命名行同构。 */
+.canvas-switcher__delete-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 4px;
+}
+
+.canvas-switcher__delete-question {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: 12px;
+	color: var(--app-web-text-muted);
+}
+
+/* 当前画布的删除确认沿用整行高亮，否则确认时高亮框会突然消失。 */
+.canvas-switcher__item[data-current="true"] .canvas-switcher__delete-row {
+	border: 1px solid var(--app-interaction-accent);
+	border-radius: 10px;
+	background: var(--app-interaction-accent-soft);
+	padding-right: 6px;
+}
+
 .canvas-switcher__rename-row--inline {
 	padding: 6px 4px;
 }
