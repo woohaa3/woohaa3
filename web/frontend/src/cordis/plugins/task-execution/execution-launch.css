@@ -2,12 +2,12 @@
   position: fixed;
   left: 0;
   top: 0;
-  width: 6px;
-  height: 6px;
-  margin: -3px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  background: var(--app-status-warning-soft);
-  box-shadow: 0 3px 10px color-mix(in srgb, var(--app-status-warning-soft) 60%, transparent);
+  --execution-launch-fill: color-mix(in srgb, var(--execution-launch-source, var(--app-status-warning-soft)), var(--app-status-warning-soft) var(--execution-launch-yellow, 100%));
+  background: var(--execution-launch-fill);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--execution-launch-fill) 40%, transparent);
   pointer-events: none;
   z-index: 1000;
 }

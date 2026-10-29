@@ -1,10 +1,12 @@
 /** Page-owned transient feedback. No state here determines acceptance, success or recovery. */
 import "./execution-launch.css";
-export const EXECUTION_LAUNCH = { riseMs: 90, flyMs: 300, settleMs: 100, waitMs: 1500, risePx: 44, arcPx: 80, spreadPx: 7, particles: 8, flights: 4, maxParticles: 40 } as const;
-export type ExecutionOrigin = { x: number; y: number; token: string };
+export const EXECUTION_LAUNCH = { riseMs: 60, minFlyMs: 120, flyMs: 300, settleMs: 100, waitMs: 1500, risePx: 0, arcPx: 24, spreadPx: 0, particles: 1, flights: 4, maxParticles: 40 } as const;
+export type ExecutionOrigin = { x: number; y: number; token: string;
+  surface?: { width: number; height: number; radius: number; color: string } };
 export type ExecutionLaunchEvent = { nodeId: string; operationId: string; origin: ExecutionOrigin; phase: "started" | "accepted" | "rejected" };
 type Flight = { event: ExecutionLaunchEvent; started: number; accepted: number | null; particles: HTMLElement[]; generation?: number;
-  localOnly: boolean; flash?: boolean; rejectedAt?: number; flyStarted?: number; center?: { x: number; y: number }; progress: number };
+  localOnly: boolean; flash?: boolean; rejectedAt?: number; flyStarted?: number; center?: { x: number; y: number };
+  path?: { durationMs: number; arcPx: number; spreadPx: number }; progress: number };
 
 export class ExecutionLaunchFeedback {
   private flights = new Map<string, Flight>();
@@ -55,6 +57,17 @@ export class ExecutionLaunchFeedback {
     const particles = Array.from({ length: count }, () => {
       const element = this.target.document.createElement("span");
       element.className = "execution-launch-particle";
+      element.style.transform = `translate3d(${event.origin.x}px, ${event.origin.y}px, 0)`;
+      const surface = event.origin.surface;
+      if (surface) {
+        element.style.width = `${surface.width}px`;
+        element.style.height = `${surface.height}px`;
+        element.style.borderRadius = `${surface.radius}px`;
+        element.style.setProperty("--execution-launch-source", surface.color);
+        element.style.setProperty("--execution-launch-yellow", "0%");
+      }
+      element.style.transform += " translate(-50%, -50%)";
+      element.style.opacity = "0.65";
       this.target.document.body.append(element);
       return element;
     });
@@ -70,7 +83,7 @@ export class ExecutionLaunchFeedback {
         if (!point || point.generation !== flight.generation || age >= EXECUTION_LAUNCH.settleMs
           || this.target.document.elementFromPoint(point.x, point.y)?.tagName !== "CANVAS") { this.remove(key); continue; }
         const particle = flight.particles[0]!;
-        particle.style.transform = `translate3d(${point.x}px, ${point.y}px, 0) scale(${3 - 2 * age / EXECUTION_LAUNCH.settleMs})`;
+        particle.style.transform = `translate3d(${point.x}px, ${point.y}px, 0) translate(-50%, -50%) scale(${1.4 - 0.4 * age / EXECUTION_LAUNCH.settleMs})`;
         particle.style.opacity = String(1 - age / EXECUTION_LAUNCH.settleMs);
         continue;
       }
@@ -85,31 +98,52 @@ export class ExecutionLaunchFeedback {
       const visible = destination && top?.tagName === "CANVAS" && age >= EXECUTION_LAUNCH.riseMs;
       // Acceptance can precede the first accepted scene containing this operation's dot.
       // Start the flight clock only when its real, unobscured anchor is available.
-      if (visible) flight.flyStarted ??= now;
+      if (visible && flight.flyStarted === undefined) {
+        flight.flyStarted = now;
+        flight.center = { x: flight.event.origin.x, y: flight.event.origin.y - EXECUTION_LAUNCH.risePx };
+        const distance = Math.hypot(destination.x - flight.center.x, destination.y - flight.center.y);
+        flight.path = {
+          durationMs: Math.min(EXECUTION_LAUNCH.flyMs, Math.max(EXECUTION_LAUNCH.minFlyMs, distance * 0.65)),
+          arcPx: Math.min(EXECUTION_LAUNCH.arcPx, distance * 0.12),
+          spreadPx: Math.min(EXECUTION_LAUNCH.spreadPx, distance * 0.025)
+        };
+      }
       const flyAge = flight.flyStarted === undefined ? 0 : now - flight.flyStarted;
-      const progress = Math.min(1, flyAge / EXECUTION_LAUNCH.flyMs);
-      if (flight.accepted !== null && (flyAge >= EXECUTION_LAUNCH.flyMs + EXECUTION_LAUNCH.settleMs || (destination && !visible && age > EXECUTION_LAUNCH.riseMs + EXECUTION_LAUNCH.settleMs))) { this.remove(key); continue; }
+      const flyMs = flight.path?.durationMs ?? EXECUTION_LAUNCH.flyMs;
+      const progress = 1 - (1 - Math.min(1, flyAge / flyMs)) ** 3;
+      if (flight.accepted !== null && (flyAge >= flyMs + EXECUTION_LAUNCH.settleMs || (destination && !visible && age > EXECUTION_LAUNCH.riseMs + EXECUTION_LAUNCH.settleMs))) { this.remove(key); continue; }
       if (visible) {
-        flight.center ??= { x: flight.event.origin.x, y: flight.event.origin.y - EXECUTION_LAUNCH.risePx };
         // Retarget the remaining path from its last position, so moving a node cannot teleport particles.
         const step = flight.progress >= 1 ? 1 : (progress - flight.progress) / (1 - flight.progress);
-        flight.center.x += (destination.x - flight.center.x) * step;
-        flight.center.y += (destination.y - flight.center.y) * step;
+        flight.center!.x += (destination.x - flight.center!.x) * step;
+        flight.center!.y += (destination.y - flight.center!.y) * step;
         flight.progress = progress;
       }
       for (let index = 0; index < flight.particles.length; index++) {
-        const spread = (index - (flight.particles.length - 1) / 2) * EXECUTION_LAUNCH.spreadPx;
+        const spread = (index - (flight.particles.length - 1) / 2) * (flight.path?.spreadPx ?? EXECUTION_LAUNCH.spreadPx);
         const origin = flight.event.origin;
         const rise = Math.min(1, age / EXECUTION_LAUNCH.riseMs);
         const x = visible ? flight.center!.x + spread * (1 - progress) : origin.x + spread;
-        const y = visible ? flight.center!.y - Math.sin(progress * Math.PI) * (EXECUTION_LAUNCH.arcPx + index * 4) : origin.y - EXECUTION_LAUNCH.risePx * (1 - (1 - rise) ** 3);
+        const y = visible ? flight.center!.y - Math.sin(progress * Math.PI) * flight.path!.arcPx : origin.y - EXECUTION_LAUNCH.risePx * (1 - (1 - rise) ** 3);
         const opacity = rejecting !== null ? 1 - rejecting / EXECUTION_LAUNCH.settleMs
           : flight.localOnly ? 1 - Math.max(0, age - EXECUTION_LAUNCH.riseMs) / EXECUTION_LAUNCH.settleMs
-          : flight.accepted === null ? Math.max(0, 1 - Math.max(0, age - EXECUTION_LAUNCH.riseMs) / (EXECUTION_LAUNCH.waitMs - EXECUTION_LAUNCH.riseMs)) : 1 - Math.max(0, flyAge - EXECUTION_LAUNCH.flyMs) / EXECUTION_LAUNCH.settleMs;
-        const settle = Math.min(1, Math.max(0, flyAge - EXECUTION_LAUNCH.flyMs) / EXECUTION_LAUNCH.settleMs);
-        const scale = visible && progress === 1 ? 1 + Math.sin(settle * Math.PI) * 1.8 : 1.4 - 0.5 * progress;
-        flight.particles[index]!.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
-        flight.particles[index]!.style.opacity = String(opacity);
+          : flight.accepted === null ? Math.max(0, 1 - Math.max(0, age - EXECUTION_LAUNCH.riseMs) / (EXECUTION_LAUNCH.waitMs - EXECUTION_LAUNCH.riseMs)) : 1 - Math.max(0, flyAge - flyMs) / EXECUTION_LAUNCH.settleMs;
+        const settle = Math.min(1, Math.max(0, flyAge - flyMs) / EXECUTION_LAUNCH.settleMs);
+        const scale = visible && progress === 1 ? 1 + Math.sin(settle * Math.PI) * 0.4 : 1.2 - 0.2 * progress;
+        const particle = flight.particles[index]!;
+        const surface = origin.surface;
+        // Keep the button-sized light intact until its real destination is ready,
+        // then shrink both axes into one round yellow dot during the handoff.
+        const scaleX = surface ? 1 + (4 / surface.width - 1) * progress : scale;
+        const scaleY = surface ? 1 + (4 / surface.height - 1) * progress : scale;
+        if (surface) {
+          const radiusX = surface.radius + (surface.width / 2 - surface.radius) * progress;
+          const radiusY = surface.radius + (surface.height / 2 - surface.radius) * progress;
+          particle.style.borderRadius = `${radiusX}px / ${radiusY}px`;
+          particle.style.setProperty("--execution-launch-yellow", `${(0.25 * rise + 0.75 * progress) * 100}%`);
+        }
+        particle.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%) scale(${scaleX}, ${scaleY})`;
+        particle.style.opacity = String(opacity * (surface ? 0.65 + 0.35 * progress : 1));
       }
     }
     if (this.flights.size) this.frame = this.target.requestAnimationFrame(this.tick);

@@ -144,23 +144,32 @@ describe("ModelExecutionHost 提示词归属", () => {
     expect(container.querySelector("button")!.disabled).toBe(false);
     await act(async()=>{pending.forEach(release=>release());});
   });
-  it("自定义面板的按钮和键盘提交各发一次，使用同一宿主实际起点且不在重挂载时重放", async () => {
+  it("按钮和输入框回车均从当前执行按钮的真实矩形发光，重挂载不重放", async () => {
     const launch = vi.fn(), run = vi.fn(async (input: {runId:string;jobId:string}) => ({ok:true as const,runId:input.runId,jobId:input.jobId}));
     const registry = new ModelInteractionService();
-    registry.register({id:"test-panel",version:1,owner:"test",Panel:props=><button type="button" onClick={()=>void props.submit({prompt:"p",parameters:{}})} onKeyDown={event=>{if(event.key==="Enter")void props.submit({prompt:"p",parameters:{}});}}>提交</button>});
+    registry.register({id:"test-panel",version:1,owner:"test",Panel:props=><>
+      <input onKeyDown={event=>{if(event.key==="Enter")void props.submit({prompt:"p",parameters:{}});}}/>
+      <button type="button" data-execution-launch="" onClick={()=>void props.submit({prompt:"p",parameters:{}})}><span>提交</span></button>
+    </>});
     const props={canvasId:"canvas-1",selectedNodeId:NODE_ID,session:{} as never,runClient:{run,cancel:vi.fn()} as never,writable:true,
       dialogs:new DialogService(),catalog:new StubCatalogService(CATALOG),registry,draftStore:createModelDraftStore(),activity:{launch,started:vi.fn(),localRejected:vi.fn()}};
     const container=await mount(<ModelExecutionHost {...props}/>);
     const surface=container.querySelector<HTMLElement>(".node-execution-dock__expanded-body")!;
     surface.getBoundingClientRect=()=>({left:100,top:200,width:300,height:120}) as DOMRect;
     const button=container.querySelector("button")!;
-    await act(async()=>{button.click();});
+    button.getBoundingClientRect=()=>({left:320,top:280,width:112,height:36}) as DOMRect;
+    button.style.backgroundColor="rgb(22, 132, 108)";
+    button.style.borderTopLeftRadius="8px";
+    await act(async()=>{button.querySelector("span")!.click();});
     expect(run).toHaveBeenCalledTimes(1);
-    expect(launch.mock.calls[0]?.[0]).toMatchObject({phase:"started",nodeId:NODE_ID,origin:{x:250,y:200}});
-    await act(async()=>{button.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));});
+    expect(launch.mock.calls[0]?.[0]).toMatchObject({phase:"started",nodeId:NODE_ID,
+      origin:{x:376,y:298,surface:{width:112,height:36,radius:8,color:"rgb(22, 132, 108)"}}});
+    button.getBoundingClientRect=()=>({left:360,top:300,width:140,height:40}) as DOMRect;
+    await act(async()=>{container.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));});
     expect(run).toHaveBeenCalledTimes(2);
     const started=launch.mock.calls.map(([event])=>event).filter(event=>event.phase==="started");
     expect(started).toHaveLength(2);
+    expect(started[1].origin).toMatchObject({x:430,y:320,surface:{width:140,height:40}});
     expect(started[0].origin.token).not.toBe(started[1].origin.token);
     await act(async()=>{root!.render(null);});
     await act(async()=>{root!.render(<ModelExecutionHost {...props}/>);});

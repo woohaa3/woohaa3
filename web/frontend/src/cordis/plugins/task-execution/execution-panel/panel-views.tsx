@@ -372,6 +372,7 @@ export function RunActions({
 				<button
 					type="button"
 					className={`mc-panel__send${busy ? " is-processing" : ""}`}
+					data-execution-launch=""
 						data-tooltip={busy ? pendingLabel : !canRun && disabledHint ? disabledHint : `${runLabel ?? "执行生成"} · ${promptSubmitHint()}`}
 						title={busy ? pendingLabel : !canRun && disabledHint ? disabledHint : promptSubmitHint()}
 					aria-label={busy ? pendingLabel : (runLabel ?? "执行生成")}
