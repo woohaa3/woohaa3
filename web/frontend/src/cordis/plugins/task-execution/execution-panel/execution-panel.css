@@ -559,6 +559,20 @@
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 500;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* 联动锁定的解释：让「为什么这一项不能改」就地可读，而不是灰一个控件让人猜。 */
+.mc-panel__settings-lock {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.mc-panel__settings-group[data-locked-by] .ui-segmented {
+  opacity: 0.6;
 }
 
 .mc-panel__settings-row {

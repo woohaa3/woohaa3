@@ -15,10 +15,13 @@ export function ParameterField({
 	field,
 	value,
 	onChange,
+	lockedBy,
 }: {
 	field: ExecutionPanelParameterField;
 	value: unknown;
 	onChange: (value: unknown) => void;
+	/** 该字段被别的字段锁定时，给出锁定者的标题（用于解释「为什么不能改」）。 */
+	lockedBy?: string;
 }) {
 	const resolved = value ?? field.defaultValue ?? "";
 
@@ -96,8 +99,13 @@ export function ParameterField({
 				? "mc-panel__settings-row mc-panel__resolution-options"
 				: "mc-panel__settings-row mc-panel__settings-row--wrap";
 		return (
-			<div className="mc-panel__settings-group">
-				<span className="mc-panel__settings-label">{field.label}</span>
+			<div className="mc-panel__settings-group" data-locked-by={lockedBy}>
+				<span className="mc-panel__settings-label">
+					{field.label}
+					{lockedBy !== undefined ? (
+						<span className="mc-panel__settings-lock">由「{lockedBy}」决定</span>
+					) : null}
+				</span>
 				<SegmentedControl
 					className={segmentedClassName}
 					optionClassName="mc-panel__settings-option"
@@ -107,7 +115,9 @@ export function ParameterField({
 					options={(field.options ?? []).map((option) => ({
 						value: option.value,
 						label: option.label,
-						ariaLabel: option.label
+						ariaLabel: option.label,
+						// 被联动锁定时整个组不可点：改回来只会产生「选了又被覆盖」的抖动。
+						...(lockedBy !== undefined ? { disabled: true } : {})
 					}))}
 				/>
 			</div>

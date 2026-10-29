@@ -28,7 +28,7 @@ import {
   type GenerationAdmission
 } from "./protocol.js";
 import { RemoteGenerationError, createRemoteGenerationProvider, prepareRemoteGenerationInput } from "./provider.js";
-import { withImageParameterFamily } from "./image-models.js";
+import { withModelFamily } from "./model-families.js";
 
 /** 刷新结果（受控 handler 直接返回它；不含远端正文与任何凭据）。 */
 export type RemoteGenerationStatus = {
@@ -260,9 +260,9 @@ export function createRemoteGenerationBridge(options: RemoteGenerationBridgeOpti
     }
 
     // 原地替换：注册对象与 models 数组的引用都不变，catalog 与设置视图按请求现读即可生效。
-    // 图像模型在这里套上 Provider 侧的家族 schema（见 image-models.ts）：服务端给的通用
-    // `size` 形状不足以表达即梦/Gemini/gpt-image 的参数差异。
-    models.splice(0, models.length, ...decodedCatalog.models.map(withImageParameterFamily));
+    // 图像与视频模型在这里套上 Provider 侧的家族 schema 与卡片约束（见 model-families.ts）：
+    // 服务端给的「按类型一份」的通用形状不足以表达各家在时长档位 / 分辨率 / 参考数量上的差异。
+    models.splice(0, models.length, ...decodedCatalog.models.map(withModelFamily));
     admission = decodedCatalog.admission;
     registration.available = true;
     const revision = bumpCatalogRevision();

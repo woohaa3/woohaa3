@@ -20,7 +20,9 @@
 mod plan;
 mod policy;
 #[cfg(feature = "canvas-core")]
-pub(crate) use plan::{pin_capture_owners, pin_visible_owners, settled_card};
+pub(crate) use plan::{pin_capture_owners, pin_visible_owners};
+/// 卡片已就绪判定：纯判定，model3d 的驻留需求在无 canvas-core 时同样要用。
+pub(crate) use plan::settled_card;
 #[cfg(feature = "canvas-core")]
 mod state;
 #[cfg(feature = "canvas-core")]

@@ -7,7 +7,8 @@
  *
  * 为什么版本从本包的 `package.json` 取而不是从宿主传：同步链路属于本包（`ws` 客户端
  * 只在这里创建），版本跟着代码走才不会出现"宿主改了版本、同步客户端还报旧值"。发布
- * 构建可以用 `WOOHAA3_APP_VERSION` 覆盖成真实发布版本号。
+ * 本机宿主打包时把 `desktop/tauri.conf.json` 的发布版本写进 `host-manifest.json`，
+ * 启动时注入 `WOOHAA3_APP_VERSION`，因此打包产物上报的是真实发布版本。
  */
 import pkg from "../../../package.json";
 

@@ -22,6 +22,8 @@ export * from "./task/parameter-schema.js";
 export * from "./task/image-parameters.js";
 export * from "./task/model-presets.js";
 export * from "./task/seedream-presets.js";
+export * from "./task/generation-parameters/index.js";
+export * from "./task/video-parameters.js";
 export * from "./media/keys.js";
 export * from "./media/protocol.js";
 export * from "./media/storage.js";

@@ -46,6 +46,7 @@ async function main(){
  process.chdir(dataDir);
  const env=desktopEnvironment({dataDir,resourceRoot,baseEnv:process.env,development:Boolean(manifest.developmentRoot)});
  if(process.env.WOOHAA_DESKTOP_RUN_DIR)env.WOOHAA3_LOG_DIR=process.env.WOOHAA_DESKTOP_RUN_DIR;
+ if(manifest.version)env.WOOHAA3_APP_VERSION=manifest.version;
  if(arg('dev-origin'))env.WOOHAA3_ALLOWED_ORIGINS=new URL(arg('dev-origin')).origin;
  if(manifest.developmentRoot&&inheritedIngress)env.WOOHAA3_TRUSTED_INGRESS_SECRET=inheritedIngress;
  Object.assign(process.env,env);

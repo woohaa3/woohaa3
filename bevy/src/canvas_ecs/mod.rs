@@ -26,6 +26,7 @@ pub(crate) use batch::{
 };
 #[cfg(feature = "canvas-core")]
 pub(crate) use presentation::sync_group_panels;
+#[cfg(feature = "canvas-core")]
 pub(crate) use projection::{
     CanvasProjectionState, node_for_draw, project_canvas_nodes, projection_requested,
 };

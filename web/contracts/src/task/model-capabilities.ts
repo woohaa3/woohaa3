@@ -18,8 +18,49 @@ export type GenerationModelReasoningCapability = {
   efforts?: readonly string[];
 };
 
+/**
+ * 单个素材种类的数量与体积约束。
+ *
+ * 放在能力事实里而不是 `inputSchema`：`maxItems` 只表达「最多几条」，表达不了
+ * 「至少几条」「单个多大」，而这两条恰恰是用户最常在提交后才知道的。
+ */
+export type GenerationModelReferenceLimit = {
+  min: number;
+  max: number;
+  /** 单个素材的字节上限。 */
+  maxBytesPerItem: number;
+};
+
+/** `inputSchema` 表达不了的跨类合计（例如「图和视频加起来不超过 30」）。 */
+export type GenerationModelCombinedReferenceLimit = {
+  kinds: readonly CanvasReferenceMediaKind[];
+  max: number;
+  /** 人读标签，用于提示文案。 */
+  label: string;
+};
+
+/**
+ * 模型卡片声明的能力边界。字段缺省 = 未声明 = 前端不展示、不做本地拦截。
+ *
+ * 数量上限本身仍由 `bindings[].maxItems` 承载；这里出现同名字段时必须与之一致——
+ * `maxItems` 是提交契约，`limits.references.max` 是展示与本地校验用的同一事实。
+ * 生效值一律取 `min(部署级, 模型级)`。
+ */
+export type GenerationModelLimits = {
+  promptMaxChars?: number;
+  references?: Partial<Record<CanvasReferenceMediaKind, GenerationModelReferenceLimit>>;
+  total?: { min?: number; max: number };
+  combined?: readonly GenerationModelCombinedReferenceLimit[];
+};
+
 export type GenerationModelCapabilityFacts = {
   reasoning?: GenerationModelReasoningCapability;
+  /**
+   * 模型级能力边界。
+   *
+   * 只放 `inputSchema` / `bindings` 表达不了的：跨字段的总量与下限。
+   */
+  limits?: GenerationModelLimits;
 };
 
 /** catalog 归一后的能力读取结果（消费方唯一入口）。 */
@@ -27,6 +68,8 @@ export type CanvasModelCapabilities = {
   /** 参考媒体输入能力：由 bindings 派生（不是另一份声明）。 */
   inputs: Record<CanvasReferenceMediaKind, boolean>;
   reasoning?: GenerationModelReasoningCapability;
+  /** 模型级能力边界；未声明时缺省（前端不展示任何提示）。 */
+  limits?: GenerationModelLimits;
 };
 
 /**
@@ -64,14 +107,90 @@ export function canvasModelCapabilities(
     for (const kind of binding.mediaKinds) inputs[kind] = true;
   }
   const facts = isGenerationModelCapabilityFacts(model.capabilityFacts) ? model.capabilityFacts : undefined;
+  const limits = normalizeLimits(facts?.limits);
   const declared = facts?.reasoning;
-  if (!declared) return { inputs };
+  const withLimits = limits === undefined ? {} : { limits };
+  if (!declared) return { inputs, ...withLimits };
   const efforts = Array.isArray(declared.efforts) ? [...declared.efforts] : undefined;
   return {
     inputs,
     reasoning: {
       supported: declared.supported,
       ...(efforts && efforts.length > 0 ? { efforts } : {})
-    }
+    },
+    ...withLimits
   };
+}
+
+/**
+ * 归一模型级约束：负数与非有限值丢弃该字段，不猜默认值；形状非法时整块丢弃。
+ *
+ * 与 `capabilityFacts` 现有处理一致：宁可让前端少显示一条提示，也不要按错误的数字
+ * 禁用主操作。
+ */
+function normalizeLimits(value: unknown): GenerationModelLimits | undefined {
+  const record = readObject(value);
+  if (record === null) return undefined;
+  const out: GenerationModelLimits = {};
+
+  const promptMaxChars = readCount(record.promptMaxChars);
+  if (promptMaxChars !== undefined) out.promptMaxChars = promptMaxChars;
+
+  const references = readObject(record.references);
+  if (references !== null) {
+    const refs: Partial<Record<CanvasReferenceMediaKind, GenerationModelReferenceLimit>> = {};
+    for (const kind of ["image", "video", "audio"] as const) {
+      const entry = readObject(references[kind]);
+      if (entry === null) continue;
+      const min = readCount(entry.min);
+      const max = readCount(entry.max);
+      const maxBytesPerItem = readCount(entry.maxBytesPerItem);
+      if (min === undefined || max === undefined || maxBytesPerItem === undefined) continue;
+      if (min > max) continue;
+      refs[kind] = { min, max, maxBytesPerItem };
+    }
+    if (Object.keys(refs).length > 0) out.references = refs;
+  }
+
+  const total = readObject(record.total);
+  if (total !== null) {
+    const max = readCount(total.max);
+    if (max !== undefined) {
+      const min = readCount(total.min);
+      out.total = min === undefined ? { max } : { min, max };
+    }
+  }
+
+  if (Array.isArray(record.combined)) {
+    const combined: GenerationModelCombinedReferenceLimit[] = [];
+    for (const entry of record.combined) {
+      const item = readObject(entry);
+      if (item === null) continue;
+      const max = readCount(item.max);
+      const label = typeof item.label === "string" && item.label !== "" ? item.label : undefined;
+      const kinds = Array.isArray(item.kinds)
+        ? item.kinds.filter(
+            (kind): kind is CanvasReferenceMediaKind =>
+              kind === "image" || kind === "video" || kind === "audio"
+          )
+        : [];
+      if (max === undefined || label === undefined || kinds.length === 0) continue;
+      combined.push({ kinds, max, label });
+    }
+    if (combined.length > 0) out.combined = combined;
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function readObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
 }

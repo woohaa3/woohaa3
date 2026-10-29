@@ -1,6 +1,6 @@
 //! 媒体聚焦背景遮罩：保留原画布，当前素材在遮罩之上。
 use crate::app::{CurrentScene, FrameFlags};
-use crate::canvas_query::media_focus::{backdrop_rect, foreground_z};
+use crate::canvas_query::media_focus::{backdrop_rect, backdrop_z};
 use crate::theme::ThemeResource;
 use bevy::prelude::*;
 
@@ -30,7 +30,7 @@ pub(crate) fn sync(
     let transform = Transform::from_xyz(
         x + width / 2.0,
         -(y + height / 2.0),
-        foreground_z(&scene.0) - 0.1,
+        backdrop_z(&scene.0),
     );
     if let Some(previous) = *entity {
         if let Ok((mut sprite, mut current_transform)) = sprites.get_mut(previous) {
