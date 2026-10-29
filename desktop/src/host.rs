@@ -476,7 +476,7 @@ mod platform {
 
         app.run(move |app_handle, event| {
             if crate::local_host::handle_exit(app_handle, &event) { return; }
-            match event {
+            match &event {
             RunEvent::WindowEvent {
                 event:
                     tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. },
@@ -499,7 +499,9 @@ mod platform {
                 crate::macos_view::detach();
             }
             _ => {}
-        }});
+        }
+        crate::diagnostics::handle_run_event(&event);
+        });
 
         FACTS.with(|slot| {
             if let Some(facts) = slot.borrow().as_ref() {

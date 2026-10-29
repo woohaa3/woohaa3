@@ -137,4 +137,20 @@ describe("desktop diagnostic upload spool", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
+  it("plugin disposal aborts in-flight uploads, removes destination and never resumes old worker", async () => {
+    const { root, dir } = await fixture();
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ key: "key", url: "https://objects.example/private", expiresAt: Math.floor(Date.now()/1000)+900, maxBytes: 33554432, contentType: "application/octet-stream" }))
+      .mockImplementationOnce(async (_url, init) => new Promise<Response>((_resolve, reject) => {
+        init!.signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      }));
+    const uploader = createDiagnosticUploader({ root, session: async () => session, fetchImpl });
+    const upload = uploader.tick();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+    await uploader.stop(); await upload;
+    await uploader.tick(); await uploader.refreshDestination();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    await expect(readFile(path.join(root, "destination.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(JSON.parse(await readFile(path.join(dir, "state.json"), "utf8")).status).toBe("pending");
+  });
+
 });

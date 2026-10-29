@@ -278,9 +278,9 @@ fn report(app: &tauri::AppHandle, current: &Path, prompt: Option<Prompt>) {
             p.trigger,
             vec![p.run.clone()],
             if p.trigger == "abnormal_exit" {
-                "检测到上一次运行异常退出。"
+                "检测到上次运行未正常结束，可能是强制关闭或异常退出；不代表已确认发生崩溃。"
             } else {
-                "检测到应用曾无响应，目前已恢复。"
+                "检测到一段时间未收到界面心跳，目前已恢复。"
             },
         )
     } else {
@@ -344,9 +344,16 @@ pub fn handle_menu(app: &tauri::AppHandle, event: &MenuEvent) {
         report(&app, &current, None);
     });
 }
-fn result_prompt(app: &tauri::AppHandle, spool: &Path) {
+fn next_result(spool: &Path, now: u64) -> Option<(PathBuf, &'static str)> {
+    // The descriptor is owned by the active remote-server plugin and requires a session.
+    let target = destination(spool, now)?;
     for job in directories(spool) {
         if !job.join("job.json").is_file() || job.join("result-notified.json").exists() {
+            continue;
+        }
+        let metadata = read(&job.join("job.json"));
+        if metadata["serverUrl"] != target.server_url || metadata["actorHash"] != target.actor_hash
+        {
             continue;
         }
         let state = read(&job.join("state.json"));
@@ -357,6 +364,12 @@ fn result_prompt(app: &tauri::AppHandle, spool: &Path) {
             }
             _ => continue,
         };
+        return Some((job, message));
+    }
+    None
+}
+fn result_prompt(app: &tauri::AppHandle, spool: &Path) {
+    if let Some((job, message)) = next_result(spool, crate::diagnostics::now()) {
         if private_write(
             &job.join("result-notified.json"),
             &json!({"time":crate::diagnostics::now()}),
@@ -368,7 +381,13 @@ fn result_prompt(app: &tauri::AppHandle, spool: &Path) {
                 .title("诊断日志上报结果")
                 .blocking_show();
         }
-        break;
+    }
+}
+fn reset_destination(current: &Path) {
+    if let Some(logs) = current.parent().and_then(Path::parent) {
+        // A recent descriptor can survive a killed process. This launch must wait for
+        // its own remote-server activation, not inherit the previous launch's readiness.
+        let _ = fs::remove_file(logs.join("upload-queue/destination.json"));
     }
 }
 pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -390,6 +409,7 @@ pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
     let Some(current) = crate::diagnostics::run_dir().map(Path::to_path_buf) else {
         return Ok(());
     };
+    reset_destination(&current);
     let app = app.clone();
     std::thread::spawn(move || {
         loop {
@@ -405,10 +425,10 @@ pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
                 continue;
             };
             cleanup(&spool, crate::diagnostics::now());
-            result_prompt(&app, &spool);
             if destination(&spool, crate::diagnostics::now()).is_none() {
                 continue;
             }
+            result_prompt(&app, &spool);
             if let Some(prompt) = next_prompt(&current, &spool) {
                 report(&app, &current, Some(prompt));
             }
@@ -427,6 +447,43 @@ mod tests {
     }
     fn target(now: u64) -> Value {
         json!({"serverUrl":"https://example.test/base","actorHash":"a".repeat(64),"updatedAt":now})
+    }
+    #[test]
+    fn new_launch_waits_for_its_own_remote_server_activation() {
+        let root = fixture();
+        let current = root.join("logs/runs/current");
+        let spool = root.join("logs/upload-queue");
+        fs::create_dir_all(&current).unwrap();
+        fs::create_dir_all(&spool).unwrap();
+        fs::write(spool.join("destination.json"), target(100_000).to_string()).unwrap();
+        assert!(destination(&spool, 100_000).is_some());
+        reset_destination(&current);
+        assert!(destination(&spool, 100_000).is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn upload_results_require_an_active_matching_destination() {
+        let spool = fixture();
+        let job = spool.join("job");
+        fs::create_dir(&job).unwrap();
+        fs::write(
+            job.join("job.json"),
+            json!({"serverUrl":"https://example.test/base","actorHash":"a".repeat(64)}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            job.join("state.json"),
+            json!({"status":"complete"}).to_string(),
+        )
+        .unwrap();
+        assert!(next_result(&spool, 100_000).is_none());
+        fs::write(spool.join("destination.json"), target(100_000).to_string()).unwrap();
+        assert!(next_result(&spool, 100_000).is_some());
+        let mut other = target(100_000);
+        other["actorHash"] = json!("b".repeat(64));
+        fs::write(spool.join("destination.json"), other.to_string()).unwrap();
+        assert!(next_result(&spool, 100_000).is_none());
+        fs::remove_dir_all(spool).unwrap();
     }
     #[test]
     fn destination_must_be_fresh_and_without_credentials() {

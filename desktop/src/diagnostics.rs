@@ -307,13 +307,29 @@ pub fn flush() {
         }
     }
 }
+fn finish_at(dir: &Path, clean: bool) {
+    let _ = atomic_json(
+        &dir.join("finished.json"),
+        &json!({"time":now(),"status":if clean {"clean_exit"}else{"failed_exit"}}),
+    );
+}
 pub fn finish(clean: bool) {
     flush();
     if let Some(dir) = run_dir() {
-        let _ = atomic_json(
-            &dir.join("finished.json"),
-            &json!({"time":now(),"status":if clean {"clean_exit"}else{"failed_exit"}}),
-        );
+        finish_at(dir, clean);
+    }
+}
+fn finish_for_event(dir: &Path, event: &tauri::RunEvent) {
+    // ExitRequested can be prevented (cancelled confirmation or failed host shutdown).
+    // Only Exit is final. App::run exits the process directly, so code after it cannot journal.
+    if matches!(event, tauri::RunEvent::Exit) {
+        flush();
+        finish_at(dir, true);
+    }
+}
+pub fn handle_run_event(event: &tauri::RunEvent) {
+    if let Some(dir) = run_dir() {
+        finish_for_event(dir, event);
     }
 }
 pub fn ingest(body: &[u8]) -> Result<(), String> {
@@ -407,6 +423,20 @@ pub fn start_heartbeat(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_completed_app_exit_marks_the_journal_clean() {
+        let dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir(&dir).unwrap();
+        for event in [tauri::RunEvent::Ready, tauri::RunEvent::Resumed] {
+            finish_for_event(&dir, &event);
+            assert!(!dir.join("finished.json").exists());
+        }
+        finish_for_event(&dir, &tauri::RunEvent::Exit);
+        let value: Value =
+            serde_json::from_slice(&fs::read(dir.join("finished.json")).unwrap()).unwrap();
+        assert_eq!(value["status"], "clean_exit");
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn diagnostic_protocol_rejects_unbounded_and_unknown_input() {
         assert!(ingest(&vec![b' '; 65537]).is_err());
