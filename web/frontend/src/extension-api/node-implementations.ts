@@ -1,11 +1,11 @@
 /** Trusted implementation bindings owned by a single page scope. */
 import {
-  builtinNodeImplementations, savedCompositePreparation,
-  isFilmSetNode,
+  builtinNodeImplementations, savedCompositePreparation, scriptModelPreparation, isFilmSetNode,
   type NodeCapabilities, type NodeCapabilityContext, type NodeCapabilityResolver,
   type ResolvedNodeCapabilities,
 } from '@woohaa3/contracts';
 import type { CompositeAssetRegistry } from './composite-assets.js';
+import type { FileModelPreparation } from '../cordis/services/file-model-preparation.js';
 
 export type NodeImplementation = { type: string; capabilities: NodeCapabilities };
 const keys = new Set(['appearance', 'modelPreparation', 'modelPreview', 'scope', 'container', 'connections', 'resources', 'focus', 'resize', 'actions']);
@@ -64,9 +64,26 @@ export class NodeImplementationRegistry implements NodeCapabilityResolver {
 }
 const EMPTY = Object.freeze({ generation: 0 });
 
-/** Bind existing adapter execution without exposing business interpretation to consumers. */
-export function createNodeImplementationRegistry(composites: CompositeAssetRegistry): NodeImplementationRegistry {
+/**
+ * Bind existing adapter execution without exposing business interpretation to consumers.
+ *
+ * `fileModel` 是页面注入的 GLB 渲染准备端口（change: 2026-10-28-support-glb-model-nodes）：
+ * 普通 `model3d` 按节点数据的权威来源在脚本执行与文件解析之间分流，两者不共存。
+ */
+export function createNodeImplementationRegistry(
+  composites: CompositeAssetRegistry,
+  fileModel?: FileModelPreparation
+): NodeImplementationRegistry {
   const builtins = new Map(builtinNodeImplementations());
+  if (fileModel) {
+    const model = builtins.get('model3d')!;
+    builtins.set('model3d', { ...model, modelPreparation: {
+      executionKey: context => fileModel.executionKey(context) ?? scriptModelPreparation.executionKey(context),
+      prepare: context => fileModel.executionKey(context) !== undefined
+        ? fileModel.prepare(context)
+        : scriptModelPreparation.prepare(context)
+    } });
+  }
   const composite = builtins.get('composite-asset')!;
   builtins.set('composite-asset', { ...composite, modelPreparation: {
     executionKey: context => {
