@@ -12,7 +12,6 @@ use bevy::prelude::*;
 use crate::protocol::GroupPresentation;
 use crate::theme::ThemeResource;
 
-use super::dash::dashed_polyline;
 use super::geometry::Geometry;
 use super::layout::{hex, shortened};
 
