@@ -19,6 +19,9 @@ import {
   isImageProjectDocument,
   readFilmSetContent,
   sanitizeNodeDataForClipboard,
+  readCompositeAssetExtensionId,
+  decideContentAction,
+  type ContentContributionResolver,
   type ImageEditProjectObjectRef,
   type StoredAsset
 } from "@woohaa3/contracts";
@@ -83,7 +86,8 @@ export type CanvasCopyPayload = {
  */
 export function buildCanvasCopyPayload(
   canvas: ServerCanvas,
-  selectedNodeIds: readonly string[]
+  selectedNodeIds: readonly string[],
+  content?: ContentContributionResolver
 ): CanvasCopyPayload | null {
   const nodes = canvas.document.nodes;
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -105,6 +109,11 @@ export function buildCanvasCopyPayload(
 
   // Legacy object shells are read-only migration inputs, never clipboard resources.
   for (const id of included) if (filmSetObjectOwnershipOf(canvas.nodeData[id]) || isFilmSetNode(byId.get(id)?.type, canvas.nodeData[id])) return null;
+  // owner 交互策略可以禁止复制（受保护节点）；直接命令与菜单路径都必须经过这里。
+  for (const id of included) {
+    const node = byId.get(id)!;
+    if (!decideContentAction(content, "copy", node.type, canvas.nodeData[id]).allowed) return null;
+  }
   const previewOwnerByNode = new Map<string, string>();
   for (const node of nodes) {
     const managed = managedNodeRelationOf(canvas.nodeData[node.id]);
@@ -139,23 +148,48 @@ export function buildCanvasCopyPayload(
   const nodeData: Record<string, Woohaa3CanvasJsonObject> = {};
   const assetsById = new Map(canvas.assets.map((asset) => [asset.id, asset]));
   const nodeTypeById = new Map(nodes.map((node) => [node.id, node.type]));
+  const ownerAssetRefs = new Set<string>();
+  // 复制时的 owner 视图：源节点 id 保持原样，由粘贴阶段用真实新 id 再调用一次 `copy`。
+  const copyNodeIds = new Map([...included].map((id) => [id, id] as const));
   for (const id of [...included].sort()) {
     const raw = rawNodeData[id];
+    const nodeType = nodeTypeById.get(id);
+    if (nodeType === "composite-asset") {
+      const extensionId = readCompositeAssetExtensionId(raw);
+      const codec = extensionId ? content?.resolve(extensionId)?.nodeData : null;
+      // 未知 owner 的复合节点不允许“复制为可编辑副本”：拒绝整次复制，保留原选择/剪贴板。
+      if (!codec) return null;
+      let copied: { data: unknown; assetRefs: readonly string[] };
+      try {
+        copied = codec.copy(raw ?? {}, {
+          nodeIds: copyNodeIds,
+          createId: (prefix, index) => `${prefix}-copy-${index}`
+        });
+      } catch {
+        return null;
+      }
+      if (typeof copied.data !== "object" || copied.data === null || Array.isArray(copied.data)) return null;
+      for (const ref of copied.assetRefs) ownerAssetRefs.add(ref);
+      const data = copied.data as Woohaa3CanvasJsonObject;
+      if (Object.keys(data).length > 0) nodeData[id] = data;
+      continue;
+    }
     const cleaned = sanitizeNodeDataForClipboard(raw ?? {});
     // A standalone provider-backed media copy is a frozen ordinary node. Keep
     // the source reference for the async snapshot path, but never paste the
     // extension lifecycle lock into another canvas.
     const relation = managedNodeRelationOf(cleaned);
     if (cleaned.mediaContent && relation && !included.has(relation.ownerNodeId)) delete cleaned.managedBy;
-    restoreContentReferences(raw, cleaned, nodeTypeById.get(id), assetsById);
+    restoreContentReferences(raw, cleaned, nodeType, assetsById);
     if (Object.keys(cleaned).length > 0) nodeData[id] = cleaned;
   }
 
-  // 引用收集：片场内部对象引用（既有）之外，媒体节点的稳定内容引用也必须一并携带。
+  // 引用收集：owner codec 的 assetRefs、片场内部对象引用（既有）与媒体节点的稳定内容引用
+  // 都必须一并携带，否则跨画布粘贴会得到有引用、没有内容的节点。
   // 上传的图片/视频/音频节点把内容存在 `outputAssetId`（清理器已按内容语义保留），
   // 若只把指针留在 nodeData 而不带资产，粘贴到别的画布就会得到「有引用、没有图」的节点
   // （change: fix-copy-keeps-node-media）。
-  const referencedAssetIds = new Set<string>(filmSetReferenceIdsOf(nodeData));
+  const referencedAssetIds = new Set<string>([...ownerAssetRefs, ...filmSetReferenceIdsOf(nodeData)]);
   const projectObjects = new Map<string, ImageEditProjectObjectRef>();
   for (const node of copyNodes) {
     const data = nodeData[node.id];

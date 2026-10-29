@@ -131,14 +131,9 @@ pub(crate) fn route_capture_request(
     // 调用 `cancel_shot_capture` —— 否则这一帧窗口（以及下面两处早退）会把归属片场
     // 一直 pin 在 High。**不在**同步请求内强制创建或阻塞等后台任务。
     if let Some(node) = bridge::queued_shot_capture_node() {
-        let owner = scene
-            .0
-            .nodes
-            .iter()
-            .find(|entry| entry.id == node)
-            .and_then(|entry| entry.shot_preview.as_ref())
-            .map(|preview| preview.film_set_node_id.as_str())
-            .unwrap_or(&node);
+        let owner = scene.0.nodes.iter().find(|entry| entry.id == node)
+            .and_then(|entry| entry.preview_card.as_ref())
+            .map(|preview| preview.owner_node_id.as_str()).unwrap_or(&node);
         if capture_must_wait(&models, owner) {
             return;
         }

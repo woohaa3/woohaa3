@@ -33,7 +33,7 @@ struct DrawKey {
     hide_history: bool,
     /// 拍摄镜头预览卡片呈现（change: 2026-10-15-add-film-set-shooting-shot-previews）：
     /// 状态/类型/播放进度变化即时重建内容面与进度条（只读投影，不进入 canonical）。
-    shot_preview: Option<crate::protocol::ShotPreviewPresentation>,
+    preview_card: Option<crate::protocol::PreviewCard>,
 }
 impl DrawKey {
     fn history(node: &GraphNode) -> Option<HistoryKey> {
@@ -60,8 +60,21 @@ impl DrawKey {
             visual: CardVisual::from_node(node).geometry,
             history: Self::history(node),
             hide_history: attach_owner == Some(node.id.as_str()),
-            shot_preview: node.shot_preview.clone(),
+            preview_card: node.preview_card.clone(),
         }
+    }
+    fn matches(&self, node: &GraphNode, attach_owner: Option<&str>) -> bool {
+        self.id == node.id
+            && self.kind == node.kind
+            && self.rect == [node.x, node.y, node.width, node.height]
+            && self.title == node.title
+            && self.type_label == node.type_label
+            && self.body == node.body
+            && self.card_label == node.card_label
+            && self.flags == Self::flags(node)
+            && self.history == Self::history(node)
+            && self.hide_history == (attach_owner == Some(node.id.as_str()))
+            && self.preview_card == node.preview_card
     }
 }
 

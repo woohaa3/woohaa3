@@ -13,7 +13,8 @@ import { fnv1a64Hex } from "./content-hash.js";
 import { decodeModelDefinition, modelContentHash } from "./model-definition.js";
 import { decodeMotionDefinition, type MotionDefinition } from "./motion-script.js";
 import { decodeFilmSetMotion, decodeFilmSetPlayback } from "./film-set-content.js";
-import { readFilmSetBackdrop, type FilmSetAnimationBinding } from "./film-set-animations.js";
+import { readFilmSetBackdrop } from "./film-set-backdrop.js";
+import type { FilmSetAnimationBinding } from "./film-set-animations.js";
 import type { ModelMediaTimeMap } from "./media-time.js";
 
 export const FILM_SET_GROUP_FIELD = "filmSetGroup" as const;
@@ -358,7 +359,6 @@ export type FilmSetGroupMigrationOptions = {
   idFactory?: (kind: string, sourceId: string, index: number) => string;
 };
 
-export { ensureFilmSetGroupBadgeScale, migrateLegacyFilmSetToGroup } from "./film-set-group-migration.js";
 
 /** Small async cache used by the browser runtime.  A stale prepare is ignored. */
 export class FilmSetGroupPreparationCache<T> {

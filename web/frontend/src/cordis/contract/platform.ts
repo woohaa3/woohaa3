@@ -4,7 +4,7 @@
  * 从 `contracts.ts` façade 拆分（change: 2026-09-28-split-frontend-god-plugins，task 1.5）。
  */
 import type { ComponentType, ReactNode } from "react";
-import type { AppThemeSnapshot, CanvasSummary, CanvasTaskCatalog, ServerCanvas } from "@woohaa3/contracts";
+import type { AppThemeSnapshot, CanvasSummary, CanvasTaskCatalog, ContentAction, ContentContributionResolver, ServerCanvas } from "@woohaa3/contracts";
 import type { CanvasSyncStatus } from "../services/canvas-state/index.js";
 import type { CanvasContextMenuItem } from "../plugins/canvas-menu/canvas-context-menu.js";
 import type {
@@ -230,6 +230,9 @@ export type NodeActionContext = {
   nodeType: string;
   /** 单选节点当前是否可写（来自会话权限）。 */
   writable: boolean;
+  /** 内容 owner 注册表；贡献声明 `contentAction` 时由宿主统一复核。 */
+  content?: ContentContributionResolver;
+  nodeData?: unknown;
 };
 
 /**
@@ -271,6 +274,8 @@ export type NodeActionContribution = {
   owner: string;
   /** 从左到右顺序。 */
   order: number;
+  /** 该动作在 owner interaction 中的动作名；缺省不参与内容策略分派。 */
+  contentAction?: ContentAction;
   /** 贡献是否在本节点可用；false 时不呈现。 */
   available?: (context: NodeActionContext) => boolean;
   /** 纯数据动作描述；返回 null 表示本节点不呈现。 */
@@ -301,6 +306,10 @@ export type SelectionActionContext = {
   selectedNodeIds: readonly string[];
   /** 当前会话是否可写。 */
   writable: boolean;
+  /** 内容 owner 注册表与当前选区事实；用于统一 interaction 门禁。 */
+  content?: ContentContributionResolver;
+  nodeData?: Readonly<Record<string, unknown>>;
+  nodes?: readonly { id: string; type: string }[];
 };
 
 /** 多选横条命中上下文（`menu` 为独立设置箭头，当前无贡献使用）。 */
@@ -322,6 +331,8 @@ export type SelectionActionContribution = {
   owner: string;
   /** 从左到右顺序。 */
   order: number;
+  /** 该动作在 owner interaction 中的动作名；缺省不参与内容策略分派。 */
+  contentAction?: ContentAction;
   /** 贡献当前选区是否可用；false 时不呈现。 */
   available?: (context: SelectionActionContext) => boolean;
   /** 纯数据动作描述；返回 null 表示当前不呈现。 */

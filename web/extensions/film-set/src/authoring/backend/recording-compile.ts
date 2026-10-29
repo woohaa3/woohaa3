@@ -326,7 +326,7 @@ export function freezeFilmSetRecording(input: {
       looped: Boolean(clip.timeline.loop),
       cameraMotion: cameraTracks.ir.cameraMotion,
       modelMotion: [],
-      objects: objectMotions.motions,
+      managedItemMotion: objectMotions.motions,
       initialCamera: {
         azimuth: clip.initialCamera.azimuth,
         elevation: clip.initialCamera.elevation,

@@ -382,6 +382,20 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       : null;
 
     /**
+     * 共享内容 codec（change: 2026-10-28-generic-extension-content-ownership，任务 1.3）。
+     *
+     * 与 canvasContent 不同，codec 是浏览器与服务端共同加载的普通工厂；宿主只解析模块位置，
+     * 真正的 `ContentContribution` 由工厂返回，并在 `createCanvasContent` 里做形状校验。
+     */
+    const contentCodec = descriptor.content?.codec
+      ? {
+          module: resolveModuleFile(extension.dir, descriptor.content.codec.module, context),
+          factory: descriptor.content.codec.factory,
+          order: descriptor.content.codec.order ?? FALLBACK_ORDER
+        }
+      : null;
+
+    /**
      * 槽位实现声明（change: 2026-10-15-scan-bootstrap-slots-as-extension-directories，任务 2.2 / design D2、D5）。
      *
      * 只解析模块位置与导出名，工厂在 `createSlotDeclarations` 里调用（需要核心注入的部署选项）。
@@ -422,6 +436,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     if (backend) modules.add(backend.module);
     if (hostPlugin) modules.add(hostPlugin.module);
     if (canvasContent) modules.add(canvasContent.module);
+    if (contentCodec) modules.add(contentCodec.module);
     if (metadata) modules.add(metadata.module);
     if (bootstrap) modules.add(bootstrap.module);
     for (const route of publicRoutes) if (route.module) modules.add(route.module);
@@ -436,9 +451,11 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       siteOrder: descriptor.site?.order ?? FALLBACK_ORDER,
       hostPluginOrder: descriptor.hostPlugin?.order ?? FALLBACK_ORDER,
       canvasContentOrder: descriptor.canvasContent?.order ?? FALLBACK_ORDER,
+      contentCodecOrder: descriptor.content?.codec?.order ?? FALLBACK_ORDER,
       backend,
       hostPlugin,
       canvasContent,
+      contentCodec,
       iconPath,
       metadataExport: metadata ? metadata.exportName : null,
       metadataModule: metadata ? metadata.module : null,
@@ -710,31 +727,78 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     const entries = [];
     const moduleCache = new Map();
     const ordered = registrations
-      .filter((registration) => registration.canvasContent)
+      .filter((registration) => registration.canvasContent || registration.contentCodec)
       .slice()
-      .sort(compareByOrder((registration) => registration.canvasContentOrder, (registration) => registration.extensionId));
+      .sort(compareByOrder(
+        (registration) => registration.canvasContentOrder ?? registration.contentCodecOrder ?? FALLBACK_ORDER,
+        (registration) => registration.extensionId
+      ));
     for (const registration of ordered) {
       const declared = registration.canvasContent;
-      if (!moduleCache.has(declared.module)) {
-        moduleCache.set(
-          declared.module,
-          await importModule(declared.module, {
-            extensionId: registration.extensionId,
-            directory: registration.directory,
-            subpath: declared.factory,
-            descriptorPath: registration.descriptorPath
-          })
-        );
+      const codecDeclared = registration.contentCodec;
+      let runtime = {};
+      if (declared) {
+        if (!moduleCache.has(declared.module)) {
+          moduleCache.set(
+            declared.module,
+            await importModule(declared.module, {
+              extensionId: registration.extensionId,
+              directory: registration.directory,
+              subpath: declared.factory,
+              descriptorPath: registration.descriptorPath
+            })
+          );
+        }
+        const factory = moduleCache.get(declared.module)[declared.factory];
+        if (typeof factory !== "function") {
+          throw new ExtensionLoadError(
+            "EXTENSION_EXPORT_INVALID",
+            `扩展 ${registration.extensionId} 的 canvasContent 工厂导出不是函数：${declared.factory}（目录 ${registration.directory}）`,
+            { extensionId: registration.extensionId, directory: registration.directory, export: declared.factory }
+          );
+        }
+        runtime = await factory(optionsByExtensionId[registration.extensionId] ?? {});
       }
-      const factory = moduleCache.get(declared.module)[declared.factory];
-      if (typeof factory !== "function") {
-        throw new ExtensionLoadError(
-          "EXTENSION_EXPORT_INVALID",
-          `扩展 ${registration.extensionId} 的 canvasContent 工厂导出不是函数：${declared.factory}（目录 ${registration.directory}）`,
-          { extensionId: registration.extensionId, directory: registration.directory, export: declared.factory }
-        );
+      if (codecDeclared) {
+        if (!moduleCache.has(codecDeclared.module)) {
+          moduleCache.set(
+            codecDeclared.module,
+            await importModule(codecDeclared.module, {
+              extensionId: registration.extensionId,
+              directory: registration.directory,
+              subpath: codecDeclared.factory,
+              descriptorPath: registration.descriptorPath
+            })
+          );
+        }
+        const codecFactory = moduleCache.get(codecDeclared.module)[codecDeclared.factory];
+        if (typeof codecFactory !== "function") {
+          throw new ExtensionLoadError(
+            "EXTENSION_EXPORT_INVALID",
+            `扩展 ${registration.extensionId} 的 content codec 工厂导出不是函数：${codecDeclared.factory}（目录 ${registration.directory}）`,
+            { extensionId: registration.extensionId, directory: registration.directory, export: codecDeclared.factory }
+          );
+        }
+        const produced = await codecFactory(optionsByExtensionId[registration.extensionId] ?? {});
+        const contributions = Array.isArray(produced) ? produced : [produced];
+        if (contributions.length === 0 || contributions.some((item) =>
+          !item || typeof item !== "object" || item.extensionId !== registration.extensionId
+        )) {
+          throw new ExtensionLoadError(
+            "EXTENSION_EXPORT_INVALID",
+            `扩展 ${registration.extensionId} 的 content codec 必须返回 extensionId 一致的 ContentContribution（目录 ${registration.directory}）`,
+            { extensionId: registration.extensionId, directory: registration.directory }
+          );
+        }
+        const declared = descriptor.content ?? {};
+        const withDeclarations = contributions.map((item) => ({
+          ...item,
+          ...(declared.targetModes ? { targetModes: [...declared.targetModes] } : {}),
+          ...(declared.eventOwners ? { eventOwners: [...declared.eventOwners] } : {})
+        }));
+        runtime = { ...(runtime ?? {}), content: [...(runtime?.content ?? []), ...withDeclarations] };
       }
-      const runtime = await factory(optionsByExtensionId[registration.extensionId] ?? {});
+      const hasContent = Array.isArray(runtime?.content) && runtime.content.length > 0;
       const hasFrames = runtime?.frames !== undefined;
       const hasConversion = runtime?.conversion !== undefined;
       const hasMcp = runtime?.mcp !== undefined;
@@ -768,7 +832,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       const shapeOk =
         runtime &&
         typeof runtime === "object" &&
-        (hasFrames || hasConversion || hasMcp || hasRecording) &&
+        (hasContent || hasFrames || hasConversion || hasMcp || hasRecording) &&
         framesOk &&
         conversionOk &&
         mcpOk &&
@@ -776,7 +840,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       if (!shapeOk) {
         throw new ExtensionLoadError(
           "EXTENSION_EXPORT_INVALID",
-          `扩展 ${registration.extensionId} 的 canvasContent 工厂返回值不是画布内容运行时（需要 frames / conversion / mcp / recording 至少一组，且组内方法齐全）：${declared.factory}`,
+          `扩展 ${registration.extensionId} 的 canvasContent/content codec 返回值不是画布内容运行时（需要 content / frames / conversion / mcp / recording 至少一组，且组内方法齐全）：${declared?.factory ?? codecDeclared?.factory}`,
           { extensionId: registration.extensionId, directory: registration.directory }
         );
       }

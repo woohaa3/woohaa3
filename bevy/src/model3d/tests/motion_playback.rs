@@ -83,7 +83,7 @@ fn base_scene() -> Scene {
             focus_offset: [0.0; 3],
         },
         camera_motion: vec![],
-        objects: vec![],
+        managed_item_motion: vec![],
         model_motion: vec![crate::motion::RawModelTrack {
             target_id: "body".into(),
             start_time: Some(0.0),
@@ -250,7 +250,7 @@ fn object_root_tracks_map_to_one_entity_and_preserve_geometry_on_seek() {
     playback.model_motion.clear();
     playback.duration = 12.0;
     playback.time = 8.0;
-    playback.objects = vec![
+    playback.managed_item_motion = vec![
         serde_json::from_value(serde_json::json!({
             "itemId":"hero", "playback":{"startTime":0,"duration":8,"timeScale":1,"loop":false},
             "partIds":{"root":"body"}, "modelMotion":ir["modelMotion"]
@@ -502,7 +502,7 @@ fn object_root_opacity_applies_to_every_part_without_touching_meshes() {
     playback.duration = 4.0;
     playback.time = 2.0;
     // `partIds` 把对象根映射到本夹具的 `body` 实体；两个部件共用同一对象根编码。
-    playback.objects = vec![serde_json::from_value(serde_json::json!({
+    playback.managed_item_motion = vec![serde_json::from_value(serde_json::json!({
         "itemId":"hero",
         "playback":{"startTime":0,"duration":4,"timeScale":1,"loop":false},
         "partIds":{"root":"hero-root","body":"hero-body","hand":"hero-hand"},
@@ -515,12 +515,8 @@ fn object_root_opacity_applies_to_every_part_without_touching_meshes() {
     }))
     .unwrap()];
     // 夹具里对象根与部件共用同一 itemId：让组合作用域编码与实体 id 对齐。
-    for (runtime, entity_id) in [
-        ("hero-root", "body"),
-        ("hero-body", "body"),
-        ("hero-hand", "hand"),
-    ] {
-        let objects = &mut scene.animation_playback.as_mut().unwrap().objects;
+    for (runtime, entity_id) in [("hero-root", "body"), ("hero-body", "body"), ("hero-hand", "hand")] {
+        let objects = &mut scene.animation_playback.as_mut().unwrap().managed_item_motion;
         if let Some(object) = objects.first_mut() {
             object
                 .part_ids

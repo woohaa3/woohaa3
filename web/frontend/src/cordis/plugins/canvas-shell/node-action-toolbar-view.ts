@@ -58,6 +58,8 @@ export function resolveNodeActionToolbarView(input: {
   return { nodeId: target.nodeId, nodeType: target.nodeType, writable: input.writable };
 }
 
+import { decideContentAction } from "@woohaa3/contracts";
+
 /**
  * 依来源节点与**当前画布**判定「下载」是否可用；不可用时给出可读原因。
  *
@@ -69,10 +71,15 @@ export function resolveNodeDownloadAvailability(input: {
   nodeId: string;
   nodeType: string;
   mediaContent?: Pick<import("../../../extension-api/media-content.js").MediaContentService, "state" | "describe">;
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
 }): { available: true } | { available: false; reason: string } {
   const { canvas, nodeId, nodeType } = input;
   if (!canvas) return { available: false, reason: "作品尚未加载，暂时无法下载" };
   const data = canvas.nodeData[nodeId];
+  if (input.content) {
+    const decision = decideContentAction(input.content, "download", nodeType, data);
+    if (!decision.allowed) return { available: false, reason: decision.reason };
+  }
   if (nodeType === "model3d") {
     if (isGlbModelNodeData(data)) {
       const assetId = readGlbModelAssetId(data);

@@ -51,7 +51,7 @@ pub(super) fn draw(
         13.,
         theme.token_u32("canvasBodyText"),
     )];
-    if node.shot_preview.is_some() {
+    if node.preview_card.is_some() {
         labels.extend(super::cards::draw_shot_preview(
             geometry, theme, node, index,
         ));

@@ -61,16 +61,7 @@ fn split(resource: &ModelSnapshot) -> HashMap<String, Arc<ModelSnapshot>> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn sync(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    models: &mut ModelVisuals,
-    node: &GraphNode,
-    resource: &Arc<ModelSnapshot>,
-    placement: &ModelPlacement,
-    group: &crate::protocol::FilmSetGroupPreparation,
-) {
+pub(super) fn sync(commands: &mut Commands, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>, models: &mut ModelVisuals, node: &GraphNode, resource: &Arc<ModelSnapshot>, placement: &ModelPlacement, group: &crate::protocol::ManagedItemGroup) {
     models.preparation.cancel(&node.id);
     let previous = models.roots.remove(&node.id);
     let previous = if previous
@@ -194,7 +185,7 @@ pub(super) fn sync(
     owner.resource = resource.clone();
     owner.placement = placement.clone();
     super::runtime::apply_root_transform(commands, &owner.layout, node, resource, placement);
-    if let Some(t) = &group.scene_transform {
+    if let Some(t) = &group.owner_transform {
         let base = super::layout::film_set_root_transform(node, resource, placement);
         commands
             .entity(anchor)
@@ -203,12 +194,8 @@ pub(super) fn sync(
     models.roots.insert(node.id.clone(), owner);
 }
 
-pub(super) fn scene_transform(t: &crate::protocol::FilmSetGroupTransform) -> Transform {
-    Transform {
-        translation: Vec3::new(t.x, t.y, t.z),
-        rotation: Quat::from_rotation_y(t.yaw),
-        scale: Vec3::splat(t.scale),
-    }
+pub(super) fn scene_transform(t: &crate::protocol::ManagedItemTransform) -> Transform {
+    Transform { translation: Vec3::new(t.x, t.y, t.z), rotation: Quat::from_rotation_y(t.yaw), scale: Vec3::splat(t.scale) }
 }
 
 #[cfg(test)]
@@ -233,11 +220,8 @@ mod tests {
 
     #[test]
     fn source_replacement_retains_other_binding_entities_and_reclaims_removed_subtrees() {
-        let node: GraphNode = serde_json::from_value(
-            json!({"id":"film","type":"group","x":0,"y":0,"width":400,"height":300}),
-        )
-        .unwrap();
-        let group = serde_json::from_value(json!({"schemaVersion":"woohaa-film-set-group-render-v1","ownerId":"film","badgeOrigin":{"x":0,"y":0},"bindings":[]})).unwrap();
+        let node: GraphNode = serde_json::from_value(json!({"id":"film","type":"group","x":0,"y":0,"width":400,"height":300})).unwrap();
+        let group = serde_json::from_value(json!({"schemaVersion":"woohaa-managed-item-group-v1","ownerNodeId":"film","origin":{"x":0,"y":0},"items":[]})).unwrap();
         let mut world = World::new();
         let mut models = ModelVisuals::default();
         let mut meshes = Assets::<Mesh>::default();

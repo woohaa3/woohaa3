@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use crate::protocol::MediaPlane;
 use super::media_geometry::plane_transform;
 use crate::protocol::ModelMediaPlane;
 
@@ -84,7 +85,7 @@ pub(crate) fn sync_film_set_planes(
     }
     // 收集 (平面, 共同根 transform)：媒体与模型/地面共用同一条根链（D4/D7）；尺寸/偏移已是
     // 内容局部量，由共同根统一应用。
-    let mut desired: Vec<(ModelMediaPlane, Transform)> = scene
+    let mut desired: Vec<(MediaPlane, Transform)> = scene
         .0
         .nodes
         .iter()
@@ -97,7 +98,7 @@ pub(crate) fn sync_film_set_planes(
             let root = super::media_geometry::film_set_root(node, model.map(|arc| arc.as_ref()));
             Some(
                 film_set
-                    .media
+                    .media_planes
                     .iter()
                     .cloned()
                     .map(move |plane| (plane, root)),
@@ -108,28 +109,13 @@ pub(crate) fn sync_film_set_planes(
     // Canonical film-set groups carry media bindings directly.  Keep a small
     // renderer-owned plane for each visible image/video binding so texture
     // replacement and lifecycle use the same residency path as legacy media.
-    for group in &scene.0.film_set_groups {
-        let Some(owner) = scene.0.nodes.iter().find(|node| node.id == group.owner_id) else {
-            continue;
-        };
-        let model = owner
-            .model
-            .as_ref()
-            .and_then(|reference| resources.0.get(&reference.resource_key))
-            .map(|model| model.as_ref());
+    for group in &scene.0.managed_item_groups {
+        let Some(owner) = scene.0.nodes.iter().find(|node| node.id == group.owner_node_id) else { continue; };
+        let model = owner.model.as_ref().and_then(|reference| resources.0.get(&reference.resource_key)).map(|model| model.as_ref());
         let group_root = super::media_geometry::film_set_root(owner, model);
-        let group_root = group
-            .scene_transform
-            .as_ref()
-            .map(|t| group_root.mul_transform(super::group_runtime::scene_transform(t)))
-            .unwrap_or(group_root);
-        for binding in &group.bindings {
-            if !binding.visible
-                || binding.diagnostic.is_some()
-                || !matches!(binding.kind.as_str(), "image" | "video")
-            {
-                continue;
-            }
+        let group_root = group.owner_transform.as_ref().map(|t| group_root.mul_transform(super::group_runtime::scene_transform(t))).unwrap_or(group_root);
+        for binding in &group.items {
+            if !binding.visible || binding.diagnostic.is_some() || !matches!(binding.kind.as_str(), "image" | "video") { continue; }
             let root = group_root.mul_transform(Transform {
                 translation: Vec3::new(
                     binding.transform.x,
@@ -139,10 +125,7 @@ pub(crate) fn sync_film_set_planes(
                 rotation: Quat::from_rotation_y(binding.transform.yaw),
                 scale: Vec3::splat(binding.transform.scale),
             });
-            desired.push((
-                super::media_geometry::group_media_plane(&group.owner_id, binding, model),
-                root,
-            ));
+            desired.push((super::media_geometry::group_media_plane(&group.owner_node_id, binding, model), root));
         }
     }
     // 释放不再需要的平面。

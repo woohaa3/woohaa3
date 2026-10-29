@@ -76,7 +76,7 @@ fn camera_and_object_group_keep_every_static_entity_and_handle() {
         );
     }
     let mut p = playback(None);
-    p.objects = vec![serde_json::from_value(serde_json::json!({"itemId":"actor","playback":{"duration":4},"partIds":{"root":"actor"},"modelMotion":playback(Some("root")).model_motion.iter().map(|_| serde_json::json!({"targetId":"root","motion":{"kind":"rotate","axis":"y","speed":1}})).collect::<Vec<_>>()})).unwrap()];
+    p.managed_item_motion = vec![serde_json::from_value(serde_json::json!({"itemId":"actor","playback":{"duration":4},"partIds":{"root":"actor"},"modelMotion":playback(Some("root")).model_motion.iter().map(|_| serde_json::json!({"targetId":"root","motion":{"kind":"rotate","axis":"y","speed":1}})).collect::<Vec<_>>()})).unwrap()];
     scene.animation_playback = Some(p);
     run_sync(&mut world, &scene, &resources);
     apply(&mut world, &scene);
@@ -233,7 +233,7 @@ fn object_mapping_cannot_animate_another_objects_unmapped_runtime_id() {
     run_sync(&mut world, &scene, &resources);
     let before = bindings(&world);
     let mut p = playback(None);
-    p.objects = vec![serde_json::from_value(serde_json::json!({"itemId":"actor","playback":{"duration":4},"partIds":{"root":"actor"},"modelMotion":[{"targetId":"p0","motion":{"kind":"rotate","axis":"y","speed":1}}]})).unwrap()];
+    p.managed_item_motion = vec![serde_json::from_value(serde_json::json!({"itemId":"actor","playback":{"duration":4},"partIds":{"root":"actor"},"modelMotion":[{"targetId":"p0","motion":{"kind":"rotate","axis":"y","speed":1}}]})).unwrap()];
     scene.animation_playback = Some(p);
     run_sync(&mut world, &scene, &resources);
     apply(&mut world, &scene);
@@ -349,15 +349,14 @@ fn shot_source_keeps_prepared_motion_parts_across_short_viewport_exit() {
             .unwrap(),
     );
     scene.viewport.zoom = 1.;
-    scene.nodes.push(
-        serde_json::from_value(serde_json::json!({
-            "id":"preview","type":"film-set-shot-preview","x":300,"y":0,"width":240,"height":185,
-            "shotPreview":{"filmSetNodeId":"film","clipId":"a","kind":"dynamic","name":"镜头",
-                "aspect":1.7777778,"duration":4,"state":"ready",
-                "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}
-        }))
-        .unwrap(),
-    );
+    let preview: GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"preview","type":"slot","x":300,"y":0,"width":240,"height":185
+    })).unwrap();
+    scene.nodes.push(with_preview_card(preview, serde_json::json!({
+        "nodeId":"preview","ownerNodeId":"film","entityId":"a","animated":true,"title":"镜头",
+        "aspect":1.7777778,"duration":4,"state":"ready",
+        "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}
+    })));
     let mut world = world_with_resources();
     scene.animation_playback = Some(playback(Some("p0")));
     super::super::demand::update(

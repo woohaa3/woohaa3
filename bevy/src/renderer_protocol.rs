@@ -38,7 +38,7 @@ pub struct MotionRequest {
     pub(crate) camera_motion: Vec<crate::motion::RawCameraTrack>,
     pub(crate) model_motion: Vec<crate::motion::RawModelTrack>,
     #[serde(default)]
-    pub(crate) objects: Vec<crate::protocol::FilmSetObjectMotion>,
+    pub(crate) managed_item_motion: Vec<crate::protocol::ManagedItemMotion>,
     /// 初始镜头（第 0 秒）。
     pub(crate) initial_camera: InitialCameraRequest,
     /// 采样时刻（秒）。
@@ -55,7 +55,7 @@ impl MotionRequest {
             looped: false,
             camera_motion: Vec::new(),
             model_motion: Vec::new(),
-            objects: Vec::new(),
+            managed_item_motion: Vec::new(),
             initial_camera: InitialCameraRequest {
                 azimuth: 0.0,
                 elevation: default_elevation(),
@@ -157,7 +157,7 @@ impl Default for CaptureOptions {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeMediaFrame {
-    pub(crate) plane: crate::protocol::ModelMediaPlane,
+    pub(crate) plane: crate::protocol::MediaPlane,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) rgba: Vec<u8>,
@@ -207,7 +207,7 @@ impl RenderRequest {
         let mut media = Vec::new();
         // 单平面：片场里同一时刻通常一块媒体承载整幅画面；多平面时由调用方按需扩展。
         media.push(NativeMediaFrame {
-            plane: crate::protocol::ModelMediaPlane {
+            plane: crate::protocol::MediaPlane {
                 item_id: String::new(),
                 unit: 1.0,
                 id: "recording-media".to_owned(),

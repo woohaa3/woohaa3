@@ -3,7 +3,7 @@ import { createShotMediaProvider } from "../../authoring/browser/shot-media-prov
 import "../../authoring/browser/styles.css";
 import { createElement } from "react";
 import { defineExtensionFrontend, defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
-import { CANVAS_MENU_SECTION, FILM_SET_SHOT_PREVIEW_NODE_TYPE, MODEL_EDITOR_VERSION, readFilmSetGroupMarker, readFilmSetAnimationProjection, filmSetAnimationsOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, FILM_SET_SHOT_PREVIEW_NODE_TYPE, MODEL_EDITOR_VERSION, filmSetContentContribution, readFilmSetGroupMarker, readFilmSetAnimationProjection, filmSetAnimationsOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
 import { installShotImageReferences } from "../../authoring/browser/shot-image-reference.js";
 import { FILM_SET_EXTENSION_ID, FILM_SET_LABEL } from "../../state/shared/identity.js";
 import { FILM_SET_FRONTEND_METADATA } from "./metadata.js";
@@ -23,12 +23,19 @@ import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser
 import { contributionLifetime } from "./contributions.js";
 import { createFilmSetNodeData } from "../../state/shared/node.js";
 import { gizmoParentBasis } from "../../authoring/browser/gizmo-constraint.js";
+import { filmSetInteractionPolicy } from "../../state/shared/content/interaction.js";
+import { filmSetPresentation } from "../../state/shared/content/presentation.js";
 
 export function filmSetExtension() {
   return defineExtensionPlugin<FilmSetContext>(ctx => {
     const lifetime = contributionLifetime();
     ctx.effect(() => () => lifetime.dispose(), "film-set-contributions");
     try {
+      lifetime.own(ctx.compositeAssets.contentContributions.register({
+        ...filmSetContentContribution,
+        presentation: filmSetPresentation,
+        interaction: filmSetInteractionPolicy
+      }));
       const history = new HistoryFilmSetSnapshots();
       const preview = new Map<string, { itemId: string; transform: import("@woohaa3/contracts").FilmSetLocalTransform }>();
       const playback = new FilmSetPlaybackService();

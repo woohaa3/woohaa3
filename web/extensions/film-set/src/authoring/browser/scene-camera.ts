@@ -1,6 +1,6 @@
 import type { CompositeAssetAdapter } from "@woohaa3/frontend/extension-api";
 import type { FilmSetHostContext } from "../../state/browser/host-ports.js";
-import { MODEL_CAMERA_ASPECTS, type ModelCameraAspect, readFilmSetGroupMarker, decodeFilmSetNodeData, type FilmSetNodeData, filmSetAnimationsOf, filmSetClipPrecondition } from "@woohaa3/contracts";
+import { MODEL_CAMERA_ASPECTS, type ModelCameraAspect, readFilmSetGroupMarker, decodeFilmSetNodeData, type FilmSetNodeData, filmSetAnimationsOf, filmSetClipPatchCommand, filmSetClipPrecondition } from "@woohaa3/contracts";
 
 /** The selected shot is the camera source for both the editor and its canvas card. */
 export function filmSetEditorCameras(data: unknown, selectedClipId: string | null) {
@@ -47,9 +47,9 @@ export function sceneCameraWriter(
     const initialCamera = { azimuth, elevation, distance, aspect, focusOffset: camera.focusOffset ?? { x: 0, y: 0, z: 0 } };
     return submit([
       ...(!readFilmSetGroupMarker(readData(nodeId)) ? [{ type: "nodeData.patch" as const, nodeId, value: { sceneCamera: initialCamera } as never }] : []),
-      ...(clip ? [{ type: "filmSet.clipPatch" as const, nodeId, clipId: clip.id,
+      ...(clip ? [filmSetClipPatchCommand({ nodeId, clipId: clip.id,
         op: { kind: "camera" as const, initialCamera },
-        expectedHash: filmSetClipPrecondition(collection, clip.id, { kind: "camera", initialCamera }) }] : [])
+        expectedHash: filmSetClipPrecondition(collection, clip.id, { kind: "camera", initialCamera }) })] : [])
     ], `film-set-camera-${crypto.randomUUID()}`).ok;
   };
 }

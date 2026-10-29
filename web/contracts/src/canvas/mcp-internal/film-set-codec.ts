@@ -108,7 +108,7 @@ export function decodeMcpMutateFilmSetItemRequest(body: unknown): McpDecodeResul
 
 export function decodeFilmSetItemPatchOp(
   input: unknown
-): McpDecodeResult<import("../commands.js").FilmSetItemPatchOp> {
+): McpDecodeResult<import("../film-set-content/command-types.js").FilmSetItemPatchOp> {
   if (!isJsonObject(input)) return fail("malformed-request", "op 必须是对象");
   const kind = input.kind;
   if (kind === "delete") return ok({ kind: "delete" });

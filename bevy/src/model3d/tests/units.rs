@@ -43,7 +43,8 @@ fn transform_signature_tracks_position_and_placement() {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     };
     let a = model_transform_signature(&model, &ModelPlacement::default(), &node);
     let placed = ModelPlacement {
@@ -119,7 +120,8 @@ fn content_and_transform_identity_are_independent() {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     };
     let v2_before = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
@@ -189,7 +191,8 @@ fn model_anchor_keeps_card_above_model_top() {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     };
     // 高模型：0..4 单位的 box（unit 缩放到世界）。
     let model = ModelSnapshot {
@@ -262,7 +265,8 @@ fn model_anchor_falls_back_for_empty_model() {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     };
     let model = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
@@ -316,7 +320,8 @@ fn group_anchor_centers_model_inside_bottom_footer() {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     };
     let model = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
@@ -345,7 +350,9 @@ fn group_anchor_centers_model_inside_bottom_footer() {
     let local = scene::model_world_aabb(&model, rotation, unit).expect("group model bounds");
     let center_y = -(anchor_canvas.y + (local.min[1] + local.max[1]) / 2.);
     let center_x = anchor_canvas.x + (local.min[0] + local.max[0]) / 2.0;
-    assert!((center_y - (node.y + node.height - 26.)).abs() < 0.5);
+    // 组徽标位于气泡结构矩形下方的独立徽标区域；模型光学中心跟随徽标中心。
+    let badge = crate::canvas_query::group_model::badge_rect(&node);
+    assert!((center_y - (badge.y + badge.w / 2.)).abs() < 0.5);
     assert!((center_x - (node.x + node.width / 2.0)).abs() < 0.5);
     assert!(local.max[0] - local.min[0] <= node.width);
     assert!(local.max[1] - local.min[1] <= node.height);
@@ -383,7 +390,6 @@ fn film_set_anchor_centers_model_within_node() {
         model: None,
         composite_asset: Some(crate::protocol::CompositeAssetPresentation {
             panel: None,
-            ownership_links: None,
             root_placement: None,
             content_extent: None,
             layout_aabb: None,
@@ -395,13 +401,14 @@ fn film_set_anchor_centers_model_within_node() {
             y: 200.0,
             width: 260.0,
             height: 195.0,
-            media: Vec::new(),
+            media_planes: Vec::new(),
             item_roots: std::collections::HashMap::new(),
             item_placements: std::collections::HashMap::new(),
         }),
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     };
     // 高模型：0..4 单位的 box（unit 缩放到世界）。
     let model = ModelSnapshot {
@@ -476,7 +483,8 @@ fn model_world_is_stable_and_scale_sensitive() {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     };
     let model = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),

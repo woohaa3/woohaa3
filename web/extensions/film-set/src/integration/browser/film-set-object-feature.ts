@@ -10,7 +10,7 @@ import { FilmSetObjectSession } from "../../authoring/browser/object-session.js"
 import { readFilmSetContentForSession } from "../../state/browser/object-state.js";
 import { createFilmSetObjectGesture } from "../../authoring/browser/film-set-object-gesture.js";
 import type { FilmSetItemPatchOp } from "@woohaa3/contracts";
-import { isFilmSetGroupNode, readFilmSetGroupMarker } from "@woohaa3/contracts";
+import { filmSetGroupBindingPatchCommand, isFilmSetGroupNode, readFilmSetGroupMarker } from "@woohaa3/contracts";
 import type { FilmSetObjectAction } from "../../authoring/browser/object-action.js";
 
 /** 片场对象局部键盘 action（与按钮共用；UI 只调用它，不直接操作手势）。 */
@@ -235,7 +235,7 @@ function submitProtectedItemOp(
     if (op.kind !== "transform") return { ok: false, reason: "请直接编辑来源资源卡片以替换内容" };
     const transform = op.localTransform;
     const patch = { transform: { x: transform.offset.x, y: transform.offset.y, z: transform.offset.z, yaw: transform.yaw, scale: transform.scale } };
-    const settled = ctx.canvasEdit.record([{ type: "filmSetGroup.bindingPatch", groupId: nodeId, bindingId: itemId, expectedContentKey: binding.contentKey, patch } as never], label)
+    const settled = ctx.canvasEdit.record([filmSetGroupBindingPatchCommand({ groupId: nodeId, bindingId: itemId, expectedContentKey: binding.contentKey, patch })], label)
       .then(result => result.ok ? { state: "committed", error: null } : { state: "rejected", error: result.reason });
     return { ok: true, handle: { settled } };
   }

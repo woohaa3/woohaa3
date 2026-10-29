@@ -157,10 +157,10 @@ pub(crate) fn sync(
             .nodes
             .iter()
             .filter(|n| {
-                n.aggregate_run
-                    .as_ref()
-                    .and_then(|r| r.film_set.as_ref())
-                    .is_some()
+                n.aggregate_run.is_some()
+                    && n.run_feedback
+                        .as_ref()
+                        .is_some_and(|feedback| feedback.active)
             })
             .collect();
         let view = &scene.0.viewport;
@@ -187,7 +187,7 @@ pub(crate) fn sync(
         let live: HashSet<_> = targets.iter().map(|n| n.id.clone()).collect();
         for node in targets {
             let run = node.aggregate_run.as_ref().unwrap();
-            let feedback = run.film_set.as_ref().unwrap();
+            let feedback = node.run_feedback.as_ref().unwrap();
             let scope = crate::canvas_query::scope::node_scope(node);
             let reference = node.model.as_ref();
             let model = reference.and_then(|r| resources.0.get(&r.resource_key));
@@ -235,8 +235,8 @@ pub(crate) fn sync(
                 .and_then(|e| e.key.as_ref())
                 .map(|k| k.size_lod)
                 .filter(|lod| *lod != Lod::Hidden);
-            let moving =
-                matches!(feedback.phase.as_str(), "running" | "committing") && !run.reduce_motion;
+            let moving = matches!(feedback.phase.as_str(), "running" | "committing")
+                && !(run.reduce_motion || feedback.reduce_motion);
             let desired = if hidden
                 || offscreen
                 || rig.focus_node.as_ref().is_some_and(|id| id != &node.id)
@@ -335,13 +335,18 @@ pub(crate) fn sync(
                 size_lod: desired,
                 camera,
             };
+            let operation = feedback
+                .operation_key
+                .clone()
+                .or_else(|| feedback.source.clone())
+                .unwrap_or_default();
             let entry = effects
                 .entries
                 .entry(node.id.clone())
-                .or_insert_with(|| Entry::new(feedback.operation_key.clone(), now));
-            if entry.operation != feedback.operation_key {
+                .or_insert_with(|| Entry::new(operation.clone(), now));
+            if entry.operation != operation {
                 entry.clear(&mut commands, &mut meshes, &mut base, &mut scan);
-                *entry = Entry::new(feedback.operation_key.clone(), now);
+                *entry = Entry::new(operation, now);
             }
             if entry.key.as_ref() == Some(&key) {
                 continue;

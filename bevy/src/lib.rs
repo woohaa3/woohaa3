@@ -289,9 +289,12 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
     if json.len() > protocol::MAX_SCENE_BYTES {
         return Err(BoundaryError::from_str("Scene payload too large"));
     }
-    let scene: protocol::Scene =
+    let mut scene: protocol::Scene =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
     scene.validate().map_err(BoundaryError::from_str)?;
+    // 接受点把场景级通用原语（previewCards / runFeedback）按 nodeId 索引到节点派生字段，
+    // 后续绘制、命中与查询只读节点即可取得同一份事实（任务 4.3）。
+    scene.index_primitives();
     if let Some(missing) = bridge::missing_model_descriptor(&scene) {
         return Err(BoundaryError::from_str(&format!(
             "Unknown model resource {missing}"

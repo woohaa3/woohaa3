@@ -10,6 +10,9 @@ import type { MotionIr } from "../motion-ir.js";
 import type { ModelCameraAspect } from "../model-cameras.js";
 import type { AppThemeSnapshot } from "../../theme/index.js";
 import type { AggregateConnectDirection, DragAttachMode } from "./node-geometry.js";
+import type { BevyManagedItemMotion } from "./wire-primitives.js";
+
+export type { BevyManagedItemMotion } from "./wire-primitives.js";
 
 /**
  * 节点端点悬停瞬时态（change: add-node-endpoint-hover）。
@@ -332,28 +335,18 @@ export type BevyAnimationPlayback = {
   /** 已校验的模型轨道（默认值已补齐）。 */
   modelMotion: MotionIr["modelMotion"];
   /**
-   * 片场内部对象的 child 运动（change: 2026-10-09-add-film-set-object-motion-and-editing，
-   * design D4）。按片场统一播放头 T 在 Rust 侧映射对象局部时间后求值；目标 id 为组合作用域
-   * 编码（`itemId:partId`），对象根 group 以空 partId 表示。缺省即无对象动作。
+   * 受管条目运动原语（任务 4.3，原 `objects`）：按 owner 统一播放头 T 在 Rust 侧映射条目局部
+   * 时间后求值；目标 id 为组合作用域编码（`itemId:partId`），条目根 group 以空 partId 表示。
+   * 缺省即无条目动作。
    */
-  objects?: BevyFilmSetObjectMotion[];
+  managedItemMotion?: BevyManagedItemMotion[];
 };
 
 /**
- * 单个片场对象的运行时 child 运动投影（design D2/D4）。
- *
- * `itemId` 为稳定对象 id；`playback` 决定局部时间映射；`modelMotion` 为已校验的对象动作轨道
- * （目标为对象内作者语义 partId，空串/`root` 即对象根）；`partIds` 为作者语义 partId → 组合
- * 作用域编码 id，供 Rust 直接定位实体。对象基础局部变换已烘焙进组合 group，不在此重复。
+ * 兼容别名：受管条目运动原语（原 `BevyFilmSetObjectMotion`）。
+ * 新调用方应直接用 wire-primitives 的 `BevyManagedItemMotion`。
  */
-export type BevyFilmSetObjectMotion = {
-  itemId: string;
-  playback: { startTime: number; duration: number; timeScale: number; loop: boolean };
-  /** 已校验的对象动作轨道（目标为对象内 partId）。 */
-  modelMotion: MotionIr["modelMotion"];
-  /** 作者语义 partId → 组合作用域编码 id。 */
-  partIds: Record<string, string>;
-};
+export type BevyFilmSetObjectMotion = BevyManagedItemMotion;
 
 /** 序列化给 Rust 的 theme 形状（与 `AppThemeSnapshot` 同构，显式声明以防漂移）。 */
 export type CanvasRenderSceneTheme = AppThemeSnapshot;

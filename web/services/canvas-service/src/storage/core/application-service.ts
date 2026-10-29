@@ -10,6 +10,7 @@
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
 import type { MediaStorage } from "@woohaa3/contracts";
 import { applyCanvasCommands, assertCanvasCommandBatch, type CanvasCommandRejection } from "./command-applier.js";
+import { migrateCanvasContent } from "@woohaa3/contracts";
 import type { CanvasCommandBatch } from "@woohaa3/contracts";
 import { normalizeCanvasListQuery,
   type CanvasCommandCommitResult,
@@ -43,6 +44,8 @@ export const DEFAULT_CANVAS_STORAGE_LIMITS: CanvasStorageLimits = {
 
 export type CanvasApplicationServiceOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  /** 内容 owner 注册表（change: 2026-10-28-generic-extension-content-ownership）。 */
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   repository: CanvasRepository;
   /** 中立媒体存储；提供时校验资产引用的远端存在性与 metadata 一致性。 */
   mediaStorage?: MediaStorage;
@@ -61,6 +64,7 @@ export type CreateCanvasRequest = {
 
 export class CanvasApplicationService {
   private readonly lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  private readonly content?: import("@woohaa3/contracts").ContentContributionResolver;
   private readonly repository: CanvasRepository;
   private readonly mediaStorage?: MediaStorage;
   private readonly limits: CanvasStorageLimits;
@@ -69,6 +73,7 @@ export class CanvasApplicationService {
 
   constructor(options: CanvasApplicationServiceOptions) {
     this.lifecycle = options.lifecycle;
+    this.content = options.content;
     this.repository = options.repository;
     this.mediaStorage = options.mediaStorage;
     this.limits = { ...DEFAULT_CANVAS_STORAGE_LIMITS, ...options.limits };
@@ -146,7 +151,14 @@ export class CanvasApplicationService {
       throw revisionConflict(current);
     }
 
-    const applied = applyCanvasCommands(current, decoded.commands, { now: this.now(), lifecycle: this.lifecycle });
+    const migration = migrateCanvasContent(current, this.content);
+    if (migration.readonlyNodeIds.size > 0 && decoded.commands.some((command) =>
+      ("nodeId" in command && typeof command.nodeId === "string" && migration.readonlyNodeIds.has(command.nodeId))
+      || (command.type === "node.remove" && command.nodeIds.some((id) => migration.readonlyNodeIds.has(id)))
+    )) {
+      throw new CanvasStorageError("INVALID_COMMAND_BATCH", "内容版本高于当前扩展支持版本，节点只读");
+    }
+    const applied = applyCanvasCommands(migration.canvas, decoded.commands, { now: this.now(), lifecycle: this.lifecycle, ...(this.content ? { content: this.content } : {}) });
     if (!applied.ok) throw commandRejected(applied.rejection);
 
     // 只校验新增/变更的资产引用，避免每次提交都访问全部历史 COS 对象。
@@ -166,8 +178,8 @@ export class CanvasApplicationService {
 
     // 目标 revision 由应用服务显式写入：有净变化递增 1，无净变化保持不变。
     // 仓库只按 `canvas.revision` 持久化，`expectedRevision` 仅用于 CAS，两个 adapter 语义一致。
-    const targetCanvas: ServerCanvas = applied.changed
-      ? { ...applied.canvas, revision: current.revision + 1 }
+    const targetCanvas: ServerCanvas = (applied.changed || migration.changed)
+      ? { ...applied.canvas, updatedAt: migration.changed && !applied.changed ? this.now() : applied.canvas.updatedAt, revision: current.revision + 1 }
       : current;
 
     return this.repository.commitCanvas({

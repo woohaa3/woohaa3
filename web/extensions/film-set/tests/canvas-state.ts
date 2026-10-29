@@ -19,8 +19,8 @@ export function createTestCanvasState() {
 /**
  * hover 存储 fixture（change: 2026-10-15-add-film-set-shooting-shot-previews，任务 6.1/6.2）。
  *
- * 与生产同类：只承载 typed 拍摄播放目标（`{ kind:"shot-preview", previewNodeId, filmSetNodeId,
- * clipId }`）；同目标重复发布不通知（不重置 hover 截止点），`blocked` 变化照常发布。
+ * 与生产同类：只承载 typed 拍摄播放目标（`{ kind:"shot-preview", previewNodeId, ownerNodeId,
+ * entityId }`）；同目标重复发布不通知（不重置 hover 截止点），`blocked` 变化照常发布。
  */
 export function createTestHoverState() {
   let nodeId: string | null = null;
@@ -30,8 +30,8 @@ export function createTestHoverState() {
   const sameTarget = (a: HoverPlaybackTarget, b: HoverPlaybackTarget) =>
     a === b || (a !== null && b !== null
       && a.previewNodeId === b.previewNodeId
-      && a.filmSetNodeId === b.filmSetNodeId
-      && a.clipId === b.clipId);
+      && a.ownerNodeId === b.ownerNodeId
+      && a.entityId === b.entityId);
   const setNodeId = (next: string | null) => { nodeId = next; playback = { ...playback, target: null }; notify(); };
   const setPlaybackTarget = (target: HoverPlaybackTarget, blocked = false) => {
     const next = blocked ? null : target;

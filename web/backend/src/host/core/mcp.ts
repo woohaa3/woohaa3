@@ -12,6 +12,7 @@ import type { HostPlugin } from "../context.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
 import { catalogToolsForGrant, createToolGrantRegistry } from "../../ports/authoring-adapters.js";
 import { createExtensionMcpBridge } from "../../ports/extension-mcp.js";
+import { createContentMcpBridge } from "../../ports/content-mcp.js";
 import { agentCanvasServiceToClient, modelMcpServiceToClient } from "../../ports/mcp-adapters.js";
 
 export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
@@ -99,17 +100,49 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
         return result.ok ? { ok: true, value: result.page } : { ok: false, code: result.code, message: result.message };
       }
     };
+    const extensionBridge = createExtensionMcpBridge({
+      definitions: () => ctx.get("application")?.definitions ?? [],
+      application,
+      grants: toolGrants,
+      developmentPrincipal: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL,
+      loopbackDevelopment: ["1", "true"].includes(env.WOOHAA3_AGENT_LOOPBACK_MODE ?? "")
+    });
+    const contentBridge = createContentMcpBridge({
+      content: () => ctx.canvas.content,
+      grants: toolGrants,
+      developmentPrincipal: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL,
+      loopbackDevelopment: ["1", "true"].includes(env.WOOHAA3_AGENT_LOOPBACK_MODE ?? ""),
+      authorizeCanvas: async ({ subject, canvasId, permission }) => {
+        const agent = ctx.canvas.mcpServices().agent;
+        if (!agent) return false;
+        return (await agent.authorizeCanvas({ principalId: subject, canvasId, permission }))?.ok === true;
+      }
+    });
     const mcp = createMcpService({
       env,
       skillClient,
       skillAvailability: { available: true },
-      extensionTools: createExtensionMcpBridge({
-        definitions: () => ctx.get("application")?.definitions ?? [],
-        application,
-        grants: toolGrants,
-        developmentPrincipal: env.WOOHAA3_MCP_DEVELOPMENT_PRINCIPAL,
-        loopbackDevelopment: ["1", "true"].includes(env.WOOHAA3_AGENT_LOOPBACK_MODE ?? "")
-      }),
+      extensionTools: {
+        list: () => {
+          const seen = new Set<string>();
+          const merged: import("@woohaa3/contracts").ApplicationExtensionMcpTool[] = [];
+          for (const tool of [...extensionBridge.list(), ...contentBridge.list()]) {
+            if (seen.has(tool.name)) {
+              ctx.log.scope("mcp")({ event: "mcp-tool-name-conflict", level: "warn", tool: tool.name });
+              continue;
+            }
+            seen.add(tool.name);
+            merged.push(tool);
+          }
+          return merged;
+        },
+        async call(input) {
+          const names = new Set(extensionBridge.list().map((tool) => tool.name));
+          return names.has(input.name)
+            ? extensionBridge.call(input)
+            : contentBridge.call(input);
+        }
+      },
       canvasClient: groupScopedClient(modelMcpServiceToClient(services.modelMcp, {
         ...(services.createFilmSetNode ? { createFilmSetNode: services.createFilmSetNode } : {}),
         ...(services.importModelSnapshot ? { importModelSnapshot: services.importModelSnapshot } : {}),

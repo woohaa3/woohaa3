@@ -5,24 +5,17 @@
 //! （`x`/`y`/`z`/`width`/`height`/`yaw`），本模块按节点模型资源派生的根 transform 放置平面；
 //! 不再另走 `canvas_point_to_world(center + x, center + z, y)` 的画布中心嵌入，避免共同根
 //! 平移/旋转/缩放改变模型与媒体的相对位置。
-use crate::protocol::{GraphNode, ModelMediaPlane, ModelSnapshot};
+use crate::protocol::{MediaPlane, GraphNode, ModelSnapshot};
 use bevy::prelude::*;
 
 /// Match the scene-unit plane size used by the recording compiler.
-pub(super) fn group_media_plane(
-    owner: &str,
-    binding: &crate::protocol::FilmSetGroupBinding,
-    model: Option<&ModelSnapshot>,
-) -> ModelMediaPlane {
-    let extent = model
-        .map(|model| model.extent)
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(2.0);
+pub(super) fn group_media_plane(owner: &str, binding: &crate::protocol::ManagedItemGroupItem, model: Option<&ModelSnapshot>) -> MediaPlane {
+    let extent = model.map(|model| model.extent).filter(|value| value.is_finite() && *value > 0.0).unwrap_or(2.0);
     let height = extent / 4.0;
-    ModelMediaPlane {
-        item_id: binding.binding_id.clone(),
+    MediaPlane {
+        item_id: binding.item_id.clone(),
         unit: 1.0,
-        id: format!("{}::{}", owner, binding.binding_id),
+        id: format!("{}::{}", owner, binding.item_id),
         kind: binding.kind.clone(),
         x: 0.0,
         y: height / 2.0,
@@ -38,7 +31,7 @@ pub(super) fn group_media_plane(
 ///
 /// 平面竖直站立（Plane3d 默认法线 +Y，绕 X 轴 +90° 使其竖直），再绕世界 Y 轴 `yaw`；尺寸先乘
 /// item 局部 scale（已在 Web 折算为内容单位），再乘共同根 `unit`。
-pub(crate) fn plane_transform(plane: &ModelMediaPlane, root: &Transform) -> Transform {
+pub(crate) fn plane_transform(plane: &MediaPlane, root: &Transform) -> Transform {
     let world = root.transform_point(Vec3::new(plane.x, plane.y, plane.z));
     Transform {
         translation: world,
@@ -92,7 +85,7 @@ pub(crate) fn film_set_root(node: &GraphNode, model: Option<&ModelSnapshot>) -> 
 pub(crate) fn item_candidate(
     node: &GraphNode,
     model: Option<&ModelSnapshot>,
-    plane: &ModelMediaPlane,
+    plane: &MediaPlane,
 ) -> crate::canvas_query::film_set_pick::FilmSetItemCandidate {
     let root = film_set_root(node, model);
     let transform = plane_transform(plane, &root);
@@ -149,7 +142,7 @@ mod tests {
     /// 单位根下尺寸/高度跟随内容局部量；共同根缩放/平移各应用一次。
     #[test]
     fn dimensions_follow_content_local_geometry_and_root_scale() {
-        let mut plane: ModelMediaPlane = serde_json::from_str(r#"{"id":"film::photo","kind":"image","x":3,"y":26,"z":4,"width":64,"height":48,"yaw":0.3}"#).unwrap();
+        let mut plane: MediaPlane = serde_json::from_str(r#"{"id":"film::photo","kind":"image","x":3,"y":26,"z":4,"width":64,"height":48,"yaw":0.3}"#).unwrap();
         let root = Transform::IDENTITY;
         let first = plane_transform(&plane, &root);
         assert!((first.translation - Vec3::new(3.0, 26.0, 4.0)).length() < 1e-4);
@@ -203,11 +196,11 @@ mod candidate_tests {
     /// 媒体候选的逆变换与共同根同链：世界 delta → 内容局部 offset。
     #[test]
     fn media_only_film_set_has_bounds_and_inverse_placement_basis() {
-        let node: protocol::GraphNode = serde_json::from_str(r#"{"id":"film","type":"model","x":200,"y":120,"width":260,"height":195,"compositeAsset":{"x":200,"y":120,"width":260,"height":195,"media":[{"id":"film::photo","itemId":"photo","unit":2,"kind":"image","x":6,"y":56,"z":10,"width":128,"height":96,"yaw":0.2}]}}"#).unwrap();
+        let node: protocol::GraphNode = serde_json::from_str(r#"{"id":"film","type":"model","x":200,"y":120,"width":260,"height":195,"compositeAsset":{"x":200,"y":120,"width":260,"height":195,"mediaPlanes":[{"id":"film::photo","itemId":"photo","unit":2,"kind":"image","x":6,"y":56,"z":10,"width":128,"height":96,"yaw":0.2}]}}"#).unwrap();
         let items = vec![item_candidate(
             &node,
             None,
-            &node.composite_asset.as_ref().unwrap().media[0],
+            &node.composite_asset.as_ref().unwrap().media_planes[0],
         )];
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].item_id, "photo");

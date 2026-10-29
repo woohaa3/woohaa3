@@ -22,12 +22,12 @@ pub(crate) const SHOT_PREVIEW_CONTENT_MAX_HEIGHT: f32 = 320.0;
 
 /// 是否为拍摄镜头预览节点（由呈现声明判定，不按 id 形态猜测）。
 pub(crate) fn is_shot_preview_node(node: &GraphNode) -> bool {
-    node.shot_preview.is_some()
+    node.preview_card.is_some()
 }
 
 /// 源镜头画幅（宽/高）；非法值回退 16:9，与本模块其余派生一致。
 pub(crate) fn shot_preview_aspect(node: &GraphNode) -> f32 {
-    node.shot_preview
+    node.preview_card
         .as_ref()
         .map(|preview| preview.aspect)
         .filter(|aspect| aspect.is_finite() && *aspect > 0.0)
@@ -145,7 +145,7 @@ pub(crate) fn status_label(state: &str) -> Option<&'static str> {
 
 /// 卡片正文：优先诊断文案，其次状态标签；`ready` 返回空串（沿用普通卡片正文行为）。
 pub(crate) fn status_text(node: &GraphNode, shorten: &dyn Fn(&str, f32, f32) -> String) -> String {
-    let Some(preview) = node.shot_preview.as_ref() else {
+    let Some(preview) = node.preview_card.as_ref() else {
         return String::new();
     };
     let raw = preview
@@ -163,16 +163,16 @@ pub(crate) fn status_text(node: &GraphNode, shorten: &dyn Fn(&str, f32, f32) -> 
 
 /// 动态卡片是否显示播放标记（仅动态且正在播放时）。
 pub(crate) fn shows_playback_badge(node: &GraphNode) -> bool {
-    node.shot_preview
+    node.preview_card
         .as_ref()
-        .is_some_and(|preview| preview.kind == "dynamic" && preview.playing == Some(true))
+        .is_some_and(|preview| preview.animated && preview.playing == Some(true))
 }
 
 /// 动态卡片本地播放进度（0..1）；静态或缺失返回 `None`。
 pub(crate) fn playback_progress(node: &GraphNode) -> Option<f32> {
-    node.shot_preview
+    node.preview_card
         .as_ref()
-        .filter(|preview| preview.kind == "dynamic")
+        .filter(|preview| preview.animated)
         .and_then(|preview| preview.progress)
         .filter(|progress| progress.is_finite() && (0.0..=1.0).contains(progress))
 }
@@ -215,18 +215,52 @@ pub(crate) fn playback_progress_bar(
 mod tests {
     use super::*;
 
-    fn preview_node(data: &str) -> GraphNode {
-        serde_json::from_str(data).expect("shot preview node")
+    fn card(
+        state: &str,
+        animated: bool,
+        playing: Option<bool>,
+        diagnostic: Option<&str>,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "nodeId": "preview",
+            "ownerNodeId": "film",
+            "entityId": "clip-1",
+            "animated": animated,
+            "title": "镜头",
+            "aspect": 1.7777778,
+            "duration": if animated { 5.0 } else { 0.0 },
+            "coverCamera": {"azimuth": 0, "elevation": 0.7, "distance": 8, "focusOffset": [0, 0, 0]},
+            "state": state,
+            "playing": playing,
+            "diagnostic": diagnostic,
+        })
+    }
+
+    fn preview_node(card: serde_json::Value, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
+        let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+            "id": "preview",
+            "type": "slot",
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+        }))
+        .expect("preview node");
+        node.preview_card = Some(serde_json::from_value(card).expect("preview card"));
+        node
     }
 
     fn node(x: f32, y: f32, width: f32, height: f32) -> GraphNode {
-        preview_node(&format!(
-            r#"{{"id":"shot-preview:x","type":"film-set-shot-preview","x":{x},"y":{y},
-                "width":{width},"height":{height},
-                "shotPreview":{{"filmSetNodeId":"film","clipId":"clip-1","kind":"dynamic",
-                "name":"镜头","aspect":1.7777778,"duration":5,"state":"ready",
-                "coverCamera":{{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}}}}}"#
-        ))
+        preview_node(card("ready", true, None, None), x, y, width, height)
+    }
+
+    fn state_node(
+        state: &str,
+        animated: bool,
+        playing: Option<bool>,
+        diagnostic: Option<&str>,
+    ) -> GraphNode {
+        preview_node(card(state, animated, playing, diagnostic), 0.0, 0.0, 240.0, 167.0)
     }
 
     #[test]
@@ -309,26 +343,6 @@ mod tests {
         assert!((shot_preview_aspect(&node(0.0, 0.0, 240.0, 167.0)) - 16.0 / 9.0).abs() < 0.001);
     }
 
-    fn state_node(
-        state: &str,
-        kind: &str,
-        playing: Option<bool>,
-        diagnostic: Option<&str>,
-    ) -> GraphNode {
-        let playing = playing
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "null".to_owned());
-        let diagnostic = diagnostic
-            .map(|text| format!("\"{text}\""))
-            .unwrap_or_else(|| "null".to_owned());
-        preview_node(&format!(
-            r#"{{"id":"shot-preview:x","type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":167,
-                "shotPreview":{{"filmSetNodeId":"film","clipId":"c1","kind":"{kind}","name":"镜头",
-                "aspect":1.7777778,"duration":5,"state":"{state}","playing":{playing},"diagnostic":{diagnostic},
-                "coverCamera":{{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}}}}}"#
-        ))
-    }
-
     #[test]
     fn status_labels_are_recognizable_and_ready_is_silent() {
         assert_eq!(status_label("preparing"), Some("预览准备中"));
@@ -336,59 +350,37 @@ mod tests {
         assert_eq!(status_label("error"), Some("预览失败"));
         assert_eq!(status_label("ready"), None);
         let shorten = |text: &str, _w: f32, _s: f32| text.to_owned();
+        assert_eq!(status_text(&state_node("ready", false, None, None), &shorten), "");
         assert_eq!(
-            status_text(&state_node("ready", "static", None, None), &shorten),
-            ""
-        );
-        assert_eq!(
-            status_text(&state_node("preparing", "static", None, None), &shorten),
+            status_text(&state_node("preparing", false, None, None), &shorten),
             "预览准备中"
         );
         // 诊断文案优先于通用状态标签。
         assert_eq!(
-            status_text(
-                &state_node("error", "static", None, Some("镜头动作无效")),
-                &shorten
-            ),
+            status_text(&state_node("error", false, None, Some("镜头动作无效")), &shorten),
             "镜头动作无效"
         );
-        // 普通节点（无 shotPreview）不产生任何预览文案。
-        let plain: GraphNode =
-            serde_json::from_str(r#"{"id":"n","type":"image","x":0,"y":0}"#).unwrap();
+        // 普通节点（无 previewCard）不产生任何预览文案。
+        let plain: GraphNode = serde_json::from_str(r#"{"id":"n","type":"image","x":0,"y":0}"#).unwrap();
         assert!(status_text(&plain, &shorten).is_empty());
     }
 
     #[test]
     fn playback_badge_and_progress_are_dynamic_only_and_bounded() {
-        assert!(shows_playback_badge(&state_node(
-            "ready",
-            "dynamic",
-            Some(true),
-            None
-        )));
-        assert!(!shows_playback_badge(&state_node(
-            "ready",
-            "dynamic",
-            Some(false),
-            None
-        )));
-        assert!(!shows_playback_badge(&state_node(
-            "ready",
-            "static",
-            Some(true),
-            None
-        )));
+        assert!(shows_playback_badge(&state_node("ready", true, Some(true), None)));
+        assert!(!shows_playback_badge(&state_node("ready", true, Some(false), None)));
+        assert!(!shows_playback_badge(&state_node("ready", false, Some(true), None)));
 
-        let mut dynamic = state_node("ready", "dynamic", Some(true), None);
-        dynamic.shot_preview.as_mut().unwrap().progress = Some(0.5);
+        let mut dynamic = state_node("ready", true, Some(true), None);
+        dynamic.preview_card.as_mut().unwrap().progress = Some(0.5);
         assert_eq!(playback_progress(&dynamic), Some(0.5));
         let (track, done) = playback_progress_bar(&dynamic).unwrap();
         assert!((track.3 - 3.0).abs() < 0.001, "进度条高 3");
         assert!((done.2 - track.2 * 0.5).abs() < 0.001, "已完成宽度按进度");
-        dynamic.shot_preview.as_mut().unwrap().progress = Some(1.5);
+        dynamic.preview_card.as_mut().unwrap().progress = Some(1.5);
         assert_eq!(playback_progress(&dynamic), None, "越界进度不绘制");
         assert!(playback_progress_bar(&dynamic).is_none());
-        let static_card = state_node("ready", "static", None, None);
+        let static_card = state_node("ready", false, None, None);
         assert_eq!(playback_progress(&static_card), None, "静态卡片无进度");
         assert!(playback_progress_bar(&static_card).is_none());
     }
@@ -409,7 +401,5 @@ mod tests {
 
 /// Presentation visibility does not remove the shot or its offscreen capture target.
 pub(crate) fn hidden(node: &crate::protocol::GraphNode) -> bool {
-    node.shot_preview
-        .as_ref()
-        .is_some_and(|preview| preview.hidden)
+    node.preview_card.as_ref().is_some_and(|preview| preview.hidden)
 }

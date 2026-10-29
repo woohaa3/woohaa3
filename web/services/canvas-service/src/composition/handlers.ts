@@ -20,6 +20,7 @@ import type { CanvasTaskClient } from "../clients/task-client.js";
 import { createThumbnailPort } from "./history-observers.js";
 import { isCanvasPath, safePathname, sendJson } from "./deployment.js";
 import { authorizeCanvasRequest, httpStatusForCanvasAccess } from "../access/resolve-access.js";
+import { createContentRouteHandler } from "./content-routes.js";
 
 export type ComposedHandlerDeps = {
   recording?: import("@woohaa3/contracts").CanvasRecordingPort;
@@ -45,6 +46,8 @@ export type ComposedHandlerDeps = {
   modelMcpInternalHandler: ((req: unknown, res: ServerResponse) => Promise<boolean>) | null;
   agentInternalHandler: ((req: unknown, res: ServerResponse) => Promise<boolean>) | null;
   taskClient: CanvasTaskClient | undefined;
+  /** 内容 owner 注册表（/content 路由与内容 MCP 目录共用）。 */
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   storageServiceToken: string | undefined;
   /** 画布存在性 + ACL 钩子（含 Yjs-only room 回退），由 composition 提供。 */
   canvasExists: (canvasId: string, req?: IncomingMessage) => Promise<boolean>;
@@ -181,7 +184,17 @@ export function composeRequestHandler(deps: ComposedHandlerDeps): (req: Incoming
     logger: tokenLogger
   });
 
+  const contentHandler = deps.content
+    ? createContentRouteHandler({
+        content: deps.content,
+        ...(deps.authenticate ? { authenticate: deps.authenticate } : {}),
+        ...(deps.access ? { access: deps.access } : {}),
+        log: tokenLogger
+      })
+    : null;
+
   return async (req, res) => {
+    if (contentHandler && (await contentHandler(req, res))) return true;
     if (deps.preparationHandler && (await deps.preparationHandler(req, res))) return true;
     if (await handler(req, res)) return true;
     if (snippetHandler && (await snippetHandler(req, res))) return true;

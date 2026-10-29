@@ -154,7 +154,7 @@ describe("旧对象命令不再写入快照", () => {
     base.document.nodes.push({ id: "anim", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 } });
     base.nodeData.anim = data as never;
     const before = structuredClone(base);
-    expect(applyCanvasCommands(base, [{ type: "filmSet.itemPatch", nodeId: "anim", itemId: "a", op: { kind: "delete" } }]).ok).toBe(false);
+    expect(applyCanvasCommands(base, [{ type: "filmSet.itemPatch", nodeId: "anim", itemId: "a", op: { kind: "delete" } } as never]).ok).toBe(false);
     expect(base).toEqual(before);
   });
 });

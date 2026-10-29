@@ -92,12 +92,12 @@ pub(crate) fn marker_targets(
         .filter(|playback| playback.view_mode == "shot-node-preview");
     let mut targets = Vec::new();
     for node in &scene.nodes {
-        let Some(preview) = node.shot_preview.as_ref() else {
+        let Some(preview) = node.preview_card.as_ref() else {
             continue;
         };
-        let is_live = preview.kind == "dynamic"
+        let is_live = preview.animated
             && playback.is_some_and(|playback| {
-                playback.node_id == preview.film_set_node_id
+                playback.node_id == preview.owner_node_id
                     && playback.target_preview_node_id.as_deref() == Some(node.id.as_str())
             });
         let camera = if is_live {
@@ -115,7 +115,7 @@ pub(crate) fn marker_targets(
         };
         targets.push(MarkerTarget {
             preview_node_id: node.id.clone(),
-            owner_node_id: preview.film_set_node_id.clone(),
+            owner_node_id: preview.owner_node_id.clone(),
             live: is_live,
             camera,
         });
@@ -300,13 +300,18 @@ mod tests {
     use crate::protocol::GraphNode;
 
     fn preview_node(id: &str, kind: &str) -> GraphNode {
-        serde_json::from_str(&format!(
-            r#"{{"id":"{id}","type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":167,
-                "shotPreview":{{"filmSetNodeId":"film","clipId":"clip-1","kind":"{kind}","name":"镜头",
-                "aspect":1.7777778,"duration":5,"state":"ready",
-                "coverCamera":{{"azimuth":0.5,"elevation":0.7,"distance":8,"focusOffset":[0,1,0]}}}}}}"#
-        ))
-        .unwrap()
+        let mut node: GraphNode = serde_json::from_value(serde_json::json!({
+            "id": id, "type": "slot", "x": 0, "y": 0, "width": 240, "height": 167,
+        }))
+        .unwrap();
+        node.preview_card = Some(serde_json::from_value(serde_json::json!({
+            "nodeId": id, "ownerNodeId": "film", "entityId": "clip-1", "animated": kind == "dynamic",
+            "title": "镜头", "typeLabel": if kind == "dynamic" { "动态镜头" } else { "静态镜头" },
+            "aspect": 1.7777778, "duration": 5, "state": "ready",
+            "coverCamera": {"azimuth": 0.5, "elevation": 0.7, "distance": 8, "focusOffset": [0, 1, 0]},
+        }))
+        .unwrap());
+        node
     }
 
     fn film_set_node() -> GraphNode {

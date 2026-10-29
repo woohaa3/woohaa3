@@ -12,7 +12,8 @@ import {
   DIRECTOR_STUDIO_DEFAULT_TITLE,
   LEGACY_ANIMATION_DEFAULT_TITLE
 } from "./director-studio-title.js";
-import { COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID } from "./domain/core/composite-asset-identity.js";
+import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
+import { FILM_SET_EXTENSION_ID } from "./film-set-legacy-identity.js";
 
 function canvas(nodeData: Record<string, unknown>, type: string = COMPOSITE_ASSET_NODE_TYPE): ServerCanvas {
   return {

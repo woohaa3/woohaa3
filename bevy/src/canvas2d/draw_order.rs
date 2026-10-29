@@ -48,7 +48,8 @@ mod tests {
     fn graph_node(id: &str, group: bool) -> GraphNode {
         GraphNode {
             model_preview: None,
-            shot_preview: None,
+            preview_card: None,
+            run_feedback: None,
 
             id: id.into(),
             kind: if group {

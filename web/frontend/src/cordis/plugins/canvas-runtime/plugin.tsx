@@ -213,7 +213,7 @@ export function canvasRuntimeExtension(options: CanvasRuntimeExtensionOptions = 
             // 归属由输入层严格解码，这里只经 Navigation 进入片场 focus；具体选择哪一路镜头由
             // 片场扩展消费 `ui.shot-preview.enter-requested` 时决定（宿主不猜默认镜头）。
             void ctx.canvasNavigation
-              .requestEnterNodeFocus({ nodeId: request.filmSetNodeId, kind: "model", owner: "direct" })
+              .requestEnterNodeFocus({ nodeId: request.ownerNodeId, kind: "model", owner: "direct" })
               .then(result => {
                 if (result.ok) ctx.emit("ui.shot-preview.enter-requested", request as never);
               });

@@ -1,4 +1,4 @@
-import { migrateLegacyFilmSetToGroup } from "../contracts/src/canvas/film-set-group.js";
+import { migrateLegacyFilmSetToGroup } from "../contracts/src/canvas/film-set-group-migration.js";
 import type { ServerCanvas } from "../contracts/src/canvas/domain/index.js";
 /** Explicit legacy fixture boundary; production commands never accept the old writes. */
 export function migrateFilmSetFixture(canvas: ServerCanvas, nodeId: string): ServerCanvas {

@@ -268,7 +268,8 @@ mod tests {
             model_preview: None,
             aggregate_run: None,
             history_strip: None,
-            shot_preview: None,
+            preview_card: None,
+            run_feedback: None,
 
             id: id.into(),
             kind: "image".into(),

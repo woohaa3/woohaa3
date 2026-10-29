@@ -9,7 +9,9 @@ import { filmSetItemAdapterHash, resolveFilmSetClip } from "@woohaa3/contracts";
  */
 import { describe, expect, it } from "vitest";
 import {
+  ContentContributionRegistry,
   createEmptyWoohaa3ServerCanvas,
+  filmSetContentContribution,
   type CanvasNodeData
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
@@ -23,7 +25,9 @@ const MODEL_ITEM_ID = "model";
 
 async function readyRoom(canvasId: string, nodes: Array<{ id: string; type: string }> = []): Promise<{ room: CanvasRoom }> {
   const repository = new InMemoryYjsDocumentRepository();
-  const room = new CanvasRoom({ canvasId, repository, now: () => NOW });
+  const content = new ContentContributionRegistry();
+  content.register(filmSetContentContribution);
+  const room = new CanvasRoom({ canvasId, repository, now: () => NOW, content });
   const base = createEmptyWoohaa3ServerCanvas(canvasId, NOW);
   await room.initialize({
     canvas: {
@@ -234,7 +238,7 @@ describe("FilmSetNodeService 导入与确认适配（任务 2.2 / 3.4 / D8/D10�
       itemId: MODEL_ITEM_ID,
       expectedAdapterHash: filmSetItemAdapterHash(item)
     });
-    expect(confirmed.ok).toBe(true);
+    expect(confirmed.ok, JSON.stringify(confirmed)).toBe(true);
     if (!confirmed.ok) return;
     const view = resolveFilmSetClip(confirmed.animation, defaultClipId(confirmed.animation))!;
     const confirmedItem = confirmed.animation.filmSetContent.items.find(entry => entry.id === MODEL_ITEM_ID)!;

@@ -31,7 +31,7 @@ struct Key {
     /// 聚合节点运行遮罩（change: 2026-10-12-unify-generation-history-strip，design D5）：
     /// 仅聚合节点（复合资产）出现，运行中时绘制半透明遮罩 + 「运行中」。
     aggregate_run: bool,
-    film_run: Option<crate::protocol::FilmSetRunFeedback>,
+    film_run: Option<crate::protocol::RunFeedback>,
 }
 impl Key {
     fn new(n: &GraphNode, index: usize, render: usize, scene: &Scene) -> Self {
@@ -64,11 +64,12 @@ impl Key {
             aggregate_run: n
                 .aggregate_run
                 .as_ref()
-                .is_some_and(|run| run.active && run.film_set.is_none()),
+                .is_some_and(|run| run.active && n.run_feedback.is_none()),
             film_run: n
-                .aggregate_run
+                .run_feedback
                 .as_ref()
-                .and_then(|run| run.film_set.clone()),
+                .filter(|feedback| feedback.active)
+                .cloned(),
         }
     }
 }

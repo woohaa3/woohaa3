@@ -1,21 +1,24 @@
 import http from "node:http";
 import { expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, modelSourceHash } from "@woohaa3/contracts";
+import { ContentContributionRegistry, createEmptyWoohaa3ServerCanvas, filmSetContentContribution, modelSourceHash } from "@woohaa3/contracts";
 import { CanvasRoom, InMemoryYjsDocumentRepository, ModelMcpService } from "@woohaa3/canvas-service";
 import { createModelMcpHttpHandler } from "@woohaa3/mcp-service";
 import { modelMcpServiceToClient } from "./mcp-adapters.js";
 import { createFilmSetSnapshot, filmSetNodeDataFields } from "@woohaa3/contracts";
 import { filmSetMcpRuntime } from "../../../extensions/film-set/src/integration/backend/mcp-runtime.js";
 import { createToolGrantRegistry } from "./authoring-adapters.js";
+import { migrateFilmSetCanvasFixture } from "../../../test-support/film-set-groups.js";
 
-it("真实 MCP 在只有地面的片场生成独立模型；原子拒绝非法脚本、旧快照和局部授权", async () => {
+it("旧 composite 片场在迁移后只读；局部授权仍被拒绝", async () => {
   const canvasId = "film-set-direct-generation";
   const canvas = createEmptyWoohaa3ServerCanvas(canvasId, "now");
   canvas.document.nodes = [{ id: "scene", type: "composite-asset", position: { x: 0, y: 0 } }];
   const initial = createFilmSetSnapshot({ title: "测试场景", timeline: { duration: 0, loop: false }, initialCamera: { azimuth: 0.3, elevation: 0.5, distance: 7, aspect: "4:3", focusOffset: { x: 1, y: 0, z: 0 } }, filmSetContent: explicitGroundContent() });
   canvas.nodeData.scene = filmSetNodeDataFields(initial) as never;
-  const room = new CanvasRoom({ canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
-  await room.initialize({ canvas, roomEpoch: "epoch" });
+  const content = new ContentContributionRegistry();
+  content.register(filmSetContentContribution);
+  const room = new CanvasRoom({ canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false, content });
+  await room.initialize({ canvas: migrateFilmSetCanvasFixture(canvas), roomEpoch: "epoch" });
   const model = new ModelMcpService({ resolveRoom: async () => room });
   const filmSet = filmSetMcpRuntime.createNodeService({ resolveRoom: async () => room });
   const grants = createToolGrantRegistry();
@@ -36,21 +39,15 @@ it("真实 MCP 在只有地面的片场生成独立模型；原子拒绝非法�
     const { camera: _camera, timeline: _timeline, kind: _kind, ...animation } = read.animation;
     animation.filmSetContent.items.push(...["table", "chair"].map(id => ({ id, name: id, kind: "model", localTransform: { offset: { x: id === "table" ? 0 : 2, y: 0, z: 0 }, scale: 1, yaw: 0 }, model: { modelScript: `scene.box({id:'${id}',size:[1,1,1]});`, modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2" } })));
     const input = { requestId: "generate", expectedSnapshotHash: read.snapshotHash, animation };
-    for (const token of ["item", "clip", "camera"]) expect((await call("submit_film_set", input, token)).isError).toBe(true);
-    expect((await call("submit_film_set", input)).isError).not.toBe(true);
-    const saved = room.exportCanvas();
-    expect(saved.ok && (saved.canvas.nodeData.scene?.filmSetContent as any).items.map((i: any) => i.id)).toEqual(["ground", "table", "chair"]);
-    expect(saved.ok && saved.canvas.nodeData.scene?.modelScript).toBeUndefined();
-    expect(saved.ok && saved.canvas.nodeData.scene?.sceneCamera).toEqual(initial.sceneCamera);
-    expect(saved.ok && saved.canvas.nodeData.scene?.title).toBe("测试场景");
-    expect((await call("submit_film_set", input)).structuredContent.duplicate).toBe(true);
-    const stale = await call("submit_film_set", { ...input, requestId: "stale" });
-    expect(stale.isError).toBe(true); expect(stale.content[0].text).toContain("并发");
-    const latest = (await call("get_model_node", {})).structuredContent;
-    animation.filmSetContent.items[1].model.modelScript = "scene.box(";
-    expect((await call("submit_film_set", { ...input, requestId: "bad-script", expectedSnapshotHash: latest.snapshotHash })).isError).toBe(true);
-    expect((await call("submit_film_set", { ...input, requestId: "bad-content", expectedSnapshotHash: latest.snapshotHash, animation: { ...animation, filmSetAnimations: { schemaVersion: 999 } } })).isError).toBe(true);
-    expect(room.exportCanvas()).toEqual(saved);
+    for (const token of ["item", "clip", "camera"]) {
+      expect((await call("submit_film_set", input, token)).isError).toBe(true);
+    }
+    const before = room.exportCanvas();
+    const legacy = await call("submit_film_set", { requestId: "legacy", expectedSnapshotHash: read.snapshotHash, animation: read.animation });
+    expect(legacy.isError).toBe(true);
+    expect(legacy.content[0].text).toMatch(/只允许迁移读取|资源卡片/);
+    // 拒绝发生在副作用前：迁移后的 group、来源卡片和其它数据都保持不变。
+    expect(room.exportCanvas()).toEqual(before);
   } finally { await handler.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
@@ -61,7 +58,7 @@ it("real model MCP commits valid scripts and returns valid text for rejected scr
   canvas.document.nodes = [{ id: "model", type: "model3d", position: { x: 0, y: 0 } }];
   canvas.nodeData.model = { title: "model", modelScript: source, modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", modelContentVersion: { revision: 1, sourceHash: modelSourceHash(source), contentHash: "initial" }, modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 } };
   const room = new CanvasRoom({ canvasId: canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
-  await room.initialize({ canvas, roomEpoch: "epoch" });
+  await room.initialize({ canvas: migrateFilmSetCanvasFixture(canvas), roomEpoch: "epoch" });
   const model = new ModelMcpService({ resolveRoom: async () => room });
   const handler = createModelMcpHttpHandler({ service: modelMcpServiceToClient(model, {}) });
   const server = http.createServer((req, res) => { void handler.handle(req, res); });

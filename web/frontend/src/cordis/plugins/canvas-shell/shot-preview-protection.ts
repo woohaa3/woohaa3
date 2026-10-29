@@ -8,7 +8,7 @@
  *
  * 这些是纯函数：只读节点结构身份与 `shotPreview` 归属，不写画布、不发命令，便于非渲染回归。
  */
-import { FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewOwnershipOf, type Woohaa3CanvasJsonObject } from "@woohaa3/contracts";
+import { decideContentAction, FILM_SET_SHOT_PREVIEW_NODE_TYPE, shotPreviewOwnershipOf, type ContentContributionResolver, type Woohaa3CanvasJsonObject } from "@woohaa3/contracts";
 
 export type SelectableNode = { id: string; type: string };
 
@@ -16,8 +16,12 @@ export type SelectableNode = { id: string; type: string };
 export function isProtectedShotPreviewNode(input: {
   node: SelectableNode | undefined;
   nodeData: Readonly<Record<string, Woohaa3CanvasJsonObject | undefined>>;
+  content?: ContentContributionResolver;
 }): boolean {
   if (!input.node) return false;
+  if (input.content) {
+    return !decideContentAction(input.content, "delete", input.node.type, input.nodeData[input.node.id]).allowed;
+  }
   if (input.node.type !== FILM_SET_SHOT_PREVIEW_NODE_TYPE) return false;
   return shotPreviewOwnershipOf(input.nodeData[input.node.id]) !== null;
 }
@@ -32,12 +36,13 @@ export function partitionShotPreviewSelection(input: {
   selectedNodeIds: readonly string[];
   nodes: readonly SelectableNode[];
   nodeData: Readonly<Record<string, Woohaa3CanvasJsonObject | undefined>>;
+  content?: ContentContributionResolver;
 }): { previewIds: string[]; others: string[] } {
   const byId = new Map(input.nodes.map((node) => [node.id, node]));
   const previewIds: string[] = [];
   const others: string[] = [];
   for (const id of input.selectedNodeIds) {
-    if (isProtectedShotPreviewNode({ node: byId.get(id), nodeData: input.nodeData })) previewIds.push(id);
+    if (isProtectedShotPreviewNode({ node: byId.get(id), nodeData: input.nodeData, content: input.content })) previewIds.push(id);
     else others.push(id);
   }
   return { previewIds, others };
@@ -48,6 +53,7 @@ export function isShotPreviewOnlySelection(input: {
   selectedNodeIds: readonly string[];
   nodes: readonly SelectableNode[];
   nodeData: Readonly<Record<string, Woohaa3CanvasJsonObject | undefined>>;
+  content?: ContentContributionResolver;
 }): boolean {
   if (input.selectedNodeIds.length === 0) return false;
   const { previewIds, others } = partitionShotPreviewSelection(input);

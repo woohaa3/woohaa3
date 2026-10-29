@@ -17,7 +17,7 @@ describe("旧对象容器的只读边界", () => {
     const before = structuredClone(canvas);
     const commands: CanvasCommand[] = [
       { type: "nodeData.patch", nodeId: "film", value: { title: "修改" } },
-      { type: "filmSet.itemPatch", nodeId: "film", itemId: "model", op: { kind: "delete" } },
+      { type: "filmSet.itemPatch", nodeId: "film", itemId: "model", op: { kind: "delete" } } as never,
       { type: "node.add", node: { id: filmSetObjectContainerId("film", "model"), type: "composite-asset", position: { x: 0, y: 0 } }, nodeData: filmSetObjectContainerData("film", "model") }
     ];
     for (const command of commands) {

@@ -24,7 +24,7 @@ it("selects each new task, keeps every active dot, and returns to the old image 
   selection.observe(records);
   expect(selection.selected.get("n")).toBe("operation:b");
   const node = { id: "n", busy: true, progress: 70 } as never;
-  const project = () => applyRunStateProjection([node], { records, summaries: [], versionsByNode: history, selectedByNode: selection.selected });
+  const project = () => applyRunStateProjection({ nodes: [node] } as never, { records, summaries: [], versionsByNode: history, selectedByNode: selection.selected });
   project();
   expect(node).toMatchObject({ busy: true, historyStrip: { dots: [{selected:false}, {selected:true}, {selected:false}] } });
   selection.select("n", "operation:old");

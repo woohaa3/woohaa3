@@ -100,12 +100,22 @@ export function isAgentEntryAction(value: unknown): value is AgentEntryAction {
   return typeof value === "string" && (AGENT_ENTRY_ACTIONS as readonly string[]).includes(value);
 }
 
-/** 目标创作模式；`camera` 仅为旧会话兼容值，新的片场镜头统一使用 `film-set`。 */
-export const AGENT_TARGET_MODES = ["model3d", "film-set", "camera", "canvas-group", "text"] as const;
-export type AgentTargetMode = (typeof AGENT_TARGET_MODES)[number];
+/** 内建通用目标 mode；业务目标由扩展 `content.targetModes` 声明并随能力目录下发。 */
+export const AGENT_TARGET_MODES = ["model3d", "camera", "canvas-group", "text"] as const;
+export type AgentTargetMode = string;
 
-export function isAgentTargetMode(value: unknown): value is AgentTargetMode {
-  return typeof value === "string" && (AGENT_TARGET_MODES as readonly string[]).includes(value);
+export function agentTargetModesWith(declared: readonly string[] = []): readonly string[] {
+  return [...new Set([...AGENT_TARGET_MODES, ...declared])];
+}
+
+const AGENT_TARGET_MODE_SYNTAX = /^[a-z][a-z0-9-]{0,63}$/;
+
+/**
+ * 协议层只校验稳定 kebab 语法；具体目标是否可用由 adapter capabilities 与 owner 目录决定，
+ * 避免内核维护业务白名单。
+ */
+export function isAgentTargetMode(value: unknown, _declared: readonly string[] = []): value is AgentTargetMode {
+  return typeof value === "string" && AGENT_TARGET_MODE_SYNTAX.test(value);
 }
 
 /** 引用输入：稳定 storageKey 或上游节点身份；不携带 URL/凭据。 */
@@ -520,7 +530,7 @@ export function isAgentAdapterCapabilities(value: unknown): value is AgentAdapte
     const candidate = value.candidateGeneration;
     if (!isJsonObject(candidate) || !isBoolean(candidate.imageInput) || !Number.isSafeInteger(candidate.maxImages) || (candidate.maxImages as number) < 1) return false;
   }
-  return value.targets.every(isAgentTargetMode);
+  return value.targets.every((target) => isAgentTargetMode(target));
 }
 
 /** 解码结果：成功携带值；失败携带稳定错误码与可读原因。 */

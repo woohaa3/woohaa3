@@ -12,7 +12,7 @@
  * - 目标执行复用既有 generation/commit（expectedContentHash/稳定 requestId/权威回执）；
  * - token 绝不进入宿主 DTO、事件、日志或浏览器；断开回收本 owner 在途工作。
  */
-import { CHATGPT_REASONING_EFFORTS, isChatGptReasoningEffort } from "@woohaa3/contracts";
+import { CHATGPT_REASONING_EFFORTS, isChatGptGenerationMode, isChatGptReasoningEffort } from "@woohaa3/contracts";
 import type {
   AgentAdapterAuthState,
   AgentAdapterCapabilities,
@@ -144,8 +144,10 @@ export function createChatGptConversationAdapter(
       return { status: "failed", error: { code: "capability-unsupported", message: "ChatGPT 生成未启用" } };
     }
     if (input.intent.mode === "canvas-group" || input.intent.mode === "text") return { status: "failed", error: { code: "capability-unsupported", message: "此连接尚不支持受控组创作" } };
-    const mode: ChatGptGenerationMode | null = input.intent.mode ?? (input.intent.nodeId ? "model3d" : null);
-    if (!mode) return { status: "failed", error: { code: "malformed-request", message: "缺少目标模式" } };
+    const requestedMode = input.intent.mode ?? (input.intent.nodeId ? "model3d" : null);
+    if (!requestedMode) return { status: "failed", error: { code: "malformed-request", message: "缺少目标模式" } };
+    if (!isChatGptGenerationMode(requestedMode)) return { status: "failed", error: { code: "capability-unsupported", message: "此连接不支持该目标模式" } };
+    const mode: ChatGptGenerationMode = requestedMode;
     if (!input.intent.nodeId) return { status: "failed", error: { code: "malformed-request", message: "目标动作必须带 nodeId" } };
     if (!input.intent.model) return { status: "failed", error: { code: "malformed-request", message: "缺少账户模型，无法生成" } };
 

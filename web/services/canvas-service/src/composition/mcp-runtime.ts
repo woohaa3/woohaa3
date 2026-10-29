@@ -5,7 +5,7 @@
  * 只装配既有 service 端口；保持单实例 writer 与唯一 authority。
  */
 import type { ServerResponse } from "node:http";
-import { MCP_INTERNAL_ACTOR_ID } from "@woohaa3/contracts";
+import { ContentContributionRegistry, MCP_INTERNAL_ACTOR_ID } from "@woohaa3/contracts";
 import {
   createModelMcpHandler,
   createModelMcpInternalHandler,
@@ -104,10 +104,20 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
   const tokenLogger = (event: { event: string; status: number; code?: string }) =>
     log({ event: event.event, status: event.status, ...(event.code ? { code: event.code } : {}) });
 
+  // MCP 与脚本路径与服务端命令事务共用同一份 owner 语义；注册表已由 composition 校验过
+  // 重复/非法贡献，这里重建一个只读解析器，避免把可变注册表暴露给 MCP 层。
+  const contentResolver = (() => {
+    const contributions = deps.contentRuntime?.content ?? [];
+    if (contributions.length === 0) return undefined;
+    const registry = new ContentContributionRegistry();
+    for (const contribution of contributions) registry.register(contribution);
+    return registry;
+  })();
   const buildModelMcpService = (actorId: string): ModelMcpService =>
     new ModelMcpService({
+      ...(contentResolver ? { content: contentResolver } : {}),
       // 预览/历史帧在拿到画布 id 时由调用方传入（见 preview-service）：远端画布素材只在托管存储。
-      ...(deps.mediaClient?.read ? { readMedia: (storageKey: string, canvasId?: string) => deps.mediaClient!.read!(storageKey, canvasId) } : {}),
+      ...(deps.mediaClient?.read ? { readMedia: (storageKey: string, canvasId?: string, extensionId?: string) => deps.mediaClient!.read!(storageKey, canvasId, extensionId) } : {}),
       resolveRoom: roomResolver,
       actorId,
       ...(deps.contentFrames ? { contentFrames: deps.contentFrames } : {}),
@@ -173,7 +183,7 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
         journal: deps.agentDeltaJournal,
         authoring: new AgentCanvasAuthoringService({ resolveRoom: roomResolver, now: deps.now }),
         // Canvas script 能力面（任务 3.1/4.1）：授权与 token 密钥缺失时 capability fail-closed。
-        script: buildCanvasScriptService(deps, roomResolver, agentAuthorizer),
+        script: buildCanvasScriptService(deps, roomResolver, agentAuthorizer, contentResolver),
         ...(deps.resolveCatalog ? { resolveCatalog: deps.resolveCatalog } : {})
       })
     : undefined;
@@ -225,12 +235,14 @@ export function buildMcpRuntime(deps: McpRuntimeDeps): McpRuntime {
 function buildCanvasScriptService(
   deps: McpRuntimeDeps,
   roomResolver: (canvasId: string) => Promise<CanvasRoom | null>,
-  authorizer: CanvasAuthorizer
+  authorizer: CanvasAuthorizer,
+  content?: import("@woohaa3/contracts").ContentContributionResolver
 ): CanvasScriptService {
   const env = deps.env ?? (process.env as Record<string, string | undefined>);
   const engineEnv = env[CANVAS_SCRIPT_ENGINE_ENV];
   const engineDisabled = engineEnv === "0" || engineEnv === "false";
   return new CanvasScriptService({
+    ...(content ? { content } : {}),
     resolveRoom: roomResolver,
     authorizer,
     ...(engineDisabled ? { engine: { available: false, reason: "脚本隔离执行器已被部署配置禁用" } } : {}),

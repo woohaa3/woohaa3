@@ -2,29 +2,51 @@
  * 扩展内容贡献（change: 2026-10-26-abstract-extension-content-fields）。
  *
  * 注册表实例就是页面或站点作用域，不使用模块级单例。内核函数只接收只读 resolver；
- * 本阶段不按 owner 分派，缺省空解析器不改变既有结果。
+ * 写入、命令、编辑、复制、迁移、交互与路由都按 owner 分派，缺省空解析器保持既有只读行为。
  */
 import type { ServerCanvas } from "./domain/index.js";
+import type { EditOperation, EditPrecondition } from "./edit-command.js";
 
 const EXTENSION_ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
 
 export type ContentDiagnostic = { readonly code: string; readonly reason: string };
+
+/** 通用内容 owner id（稳定的扩展 id 语法，不绑定具体业务）。 */
+export type ContentOwnerId = string;
+
+/** 通用局部变换：位置/旋转/缩放由 owner 解释，宿主只做结构传递。 */
+export type ContentLocalTransform = {
+  readonly offset: { readonly x: number; readonly y: number; readonly z: number };
+  readonly scale: number;
+  readonly yaw: number;
+};
 
 export type ContentCopyContext = {
   readonly nodeIds: ReadonlyMap<string, string>;
   createId(prefix: string, index: number): string;
 };
 
+/**
+ * 代码在宿主里的调用位置。owner codec 可据此做比「字段形状」更严的前置条件校验
+ * （例如检查引用的资产仍存在、来源节点未被并发改写），而内核不需要知道业务字段名。
+ */
+export type ContentNodeContext = {
+  readonly nodeId?: string;
+  readonly nodeType?: string;
+  /** 当前权威画布（只读）；跨画布粘贴时为目标画布。 */
+  readonly canvas?: ServerCanvas;
+};
+
 export type ContentNodeDataCodec = {
-  decode(data: unknown): { ok: true; value: unknown } | { ok: false; code: string; reason: string };
-  validatePatch(previous: unknown, patch: unknown): ContentDiagnostic | null;
-  normalize(data: unknown): unknown;
-  sanitizeRuntime(data: unknown): unknown;
+  decode(data: unknown, context?: ContentNodeContext): { ok: true; value: unknown } | { ok: false; code: string; reason: string };
+  validatePatch(previous: unknown, patch: unknown, context?: ContentNodeContext): ContentDiagnostic | null;
+  normalize(data: unknown, context?: ContentNodeContext): unknown;
+  sanitizeRuntime(data: unknown, context?: ContentNodeContext): unknown;
   copy(nodeData: unknown, context: ContentCopyContext): { data: unknown; assetRefs: readonly string[]; remap: Readonly<Record<string, string>> };
   diff(before: unknown, after: unknown, context: ContentCopyContext):
     | { ok: true; forward: unknown; inverse: unknown }
     | { ok: false; code: string; reason: string };
-  inspect?(data: unknown): { ok: true; report: unknown } | { ok: false; code: string; reason: string };
+  inspect?(data: unknown, context?: ContentNodeContext): { ok: true; report: unknown } | { ok: false; code: string; reason: string };
 };
 
 export type ContentCommandEnvelope = {
@@ -43,14 +65,76 @@ export type ContentCommandCodec = {
   satisfied(value: unknown, canvas: ServerCanvas): boolean;
 };
 
-export type ContentEditPlanner = {
-  plan(before: ServerCanvas, after: ServerCanvas):
-    | { ok: true; forward: unknown; inverse: unknown; preconditions: readonly unknown[] }
-    | { ok: false; code: string; reason: string };
+export type ContentEditApplication = {
+  readonly direction: "forward" | "inverse";
+  readonly edit: unknown;
+  readonly preconditions: readonly unknown[];
+  readonly canvas: ServerCanvas;
 };
 
+/** owner 专属编辑段：载荷与条件对内核不透明，经 canonical `extension.edit` 原子应用。 */
+export type ContentEditOwnerSegment = {
+  readonly extensionId: string;
+  readonly direction: "forward" | "inverse";
+  readonly edit: unknown;
+  readonly preconditions: readonly unknown[];
+};
+
+/**
+ * 规划出的一步编辑：先执行内核通用前置条件与结构操作，再应用 owner 段。
+ * 整步在同一命令批次内结算，任一步失败都不得留下半提交。
+ */
+export type ContentEditStep = {
+  readonly preconditions: readonly EditPrecondition[];
+  readonly operations: readonly EditOperation[];
+  readonly extensions?: readonly ContentEditOwnerSegment[];
+};
+
+export type ContentEditPlan = {
+  readonly forward: ContentEditStep;
+  readonly inverse: ContentEditStep;
+};
+
+export type ContentEditPlanner = {
+  /**
+   * 认领节点（节点类型 + nodeData）。缺省只认 `composite-asset` 且 `extensionId` 等于本 owner。
+   * owner 据此把业务字段净差异从内核通用规划中移出。
+   */
+  matchesNode?(type: string, data: unknown): boolean;
+  /** owner 规划前向/逆向差异；可同时产出通用结构操作与 owner 专属段。 */
+  plan(before: ServerCanvas, after: ServerCanvas):
+    | { ok: true; plan: ContentEditPlan }
+    | { ok: false; code: string; reason: string };
+  /** 内核执行 owner 提供的前向/逆向编辑；必须整次成功或整次失败。 */
+  apply(input: ContentEditApplication): { ok: true; canvas: ServerCanvas } | { ok: false; code: string; reason: string };
+  /** 命令 satisfied 判定；省略时视为已满足（无法复核）。 */
+  satisfied?(input: ContentEditApplication): boolean;
+};
+
+/**
+ * 扩展呈现适配器（change: 2026-10-28-generic-extension-content-ownership，任务 4.3）。
+ *
+ * owner 把业务载荷投影为 render-scene 的通用原语（预览卡片/归属线/运行反馈/受管条目/媒体
+ * 平面）。宿主只合并、校验与去重；Rust 不感知扩展 id 或业务字段名。未知原语/版本被丢弃，
+ * 不影响同帧其它节点。
+ */
 export type ContentPresentationAdapter = {
-  presentPrimitives(input: { readonly nodeId: string; readonly data: unknown }): unknown;
+  /**
+   * 为整张画布派生通用原语；不适用时返回 null。
+   *
+   * `localStates` 是宿主已校验的本地呈现态（键为卡片节点 id），只承载本地播放/准备状态；
+   * `projectEntityAnchor` 把 owner 内条目的相机姿态投影为画布 2D 点（缺失即不派生归属线）。
+   */
+  presentPrimitives(input: ContentPresentationContext): import("./render-scene/wire-primitives.js").ContentPresentationPrimitives | null;
+};
+
+/** 呈现适配器输入：只读画布 + 宿主已解析的本地输入。 */
+export type ContentPresentationContext = {
+  readonly canvas: ServerCanvas;
+  /** 卡片节点 id → 本地呈现态（`state`/`progress`/`playing`/`diagnostic`）。 */
+  readonly localStates?: Readonly<Record<string, unknown>>;
+  /** owner + 实体 → 画布 2D 锚点；缺失即不派生归属线起点。 */
+  readonly projectEntityAnchor?: (ownerNodeId: string, entityId: string) => { readonly x: number; readonly y: number } | null;
 };
 
 export type ContentInteractionPolicy = {
@@ -80,18 +164,37 @@ export type ContentMcpTool = {
   readonly title: string;
   readonly description: string;
   readonly inputSchema: unknown;
+  /** 工具是否改变画布；缺省按写工具处理。 */
+  readonly permission?: "read" | "write";
+  /** MCP 目录参数形状；与 `inputSchema` 二选一，供宿主生成 zod schema。 */
+  readonly parameters?: Readonly<Record<string, { readonly type: "string" | "strings" | "object"; readonly optional?: boolean; readonly maxLength?: number; readonly description?: string }>>;
+  /** 可选：转发到 owner 内容路由而不是直接调用 `handle`。 */
+  readonly route?: { readonly method: string; readonly path: readonly string[] };
   authorize?(input: unknown): ContentDiagnostic | null;
   handle(input: unknown): { ok: boolean; text?: string; structured?: unknown } | Promise<{ ok: boolean; text?: string; structured?: unknown }>;
 };
 
+export type ContentVersionAccessor = {
+  /** 读取 owner 自己的版本字段；缺失/不支持时返回 null。 */
+  read(data: unknown): number | null;
+  /** 写入迁移后的版本；返回新的规范 nodeData。 */
+  write(data: unknown, version: number): unknown;
+};
+
 export type ContentContribution = {
   readonly extensionId: string;
+  /** 扩展声明、由宿主校验唯一性的 Agent 目标 mode（业务白名单不进入内核）。 */
+  readonly targetModes?: readonly string[];
+  /** 扩展声明、由宿主校验唯一性的领域事件 owner id。 */
+  readonly eventOwners?: readonly string[];
   readonly nodeData?: ContentNodeDataCodec;
   readonly commands?: ContentCommandCodec;
   readonly edit?: ContentEditPlanner;
   readonly presentation?: ContentPresentationAdapter;
   readonly interaction?: ContentInteractionPolicy;
   readonly migrations?: readonly ContentMigration[];
+  /** owner 版本字段访问器；声明 migrations 时必需。 */
+  readonly version?: ContentVersionAccessor;
   readonly routes?: readonly ContentRoute[];
   readonly mcpTools?: readonly ContentMcpTool[];
 };
@@ -122,17 +225,40 @@ export function decideContentWrite(
   extensionId: string,
   previous: unknown,
   patch: unknown,
-  content: ContentContributionResolver
+  content: ContentContributionResolver,
+  context?: ContentNodeContext
 ): ContentWriteDecision {
   const codec = content.resolve(extensionId)?.nodeData;
   if (!codec) return { ok: false, extensionId, code: "content-owner-unavailable" };
   try {
-    const diagnostic = codec.validatePatch(previous, patch);
+    const diagnostic = codec.validatePatch(previous, patch, context);
     if (diagnostic) return { ok: false, extensionId, code: diagnostic.code };
     return { ok: true, extensionId };
   } catch {
     return { ok: false, extensionId, code: "content-codec-failed" };
   }
+}
+
+/** 过渡期：找到认领旧命令 type 的 owner；找不到时由内核兼容路径处理。 */
+export function findContentCommandOwnerForLegacyType(
+  content: ContentContributionResolver | undefined,
+  type: string
+): ContentContribution | null {
+  if (!content) return null;
+  for (const contribution of content.implementations()) {
+    if (contribution.commands?.legacyTypes?.includes(type)) return contribution;
+  }
+  return null;
+}
+
+/** 只读解析 owner 的 nodeData codec；未注册或该 owner 没声明 codec 时返回 null。 */
+export function resolveContentNodeCodec(
+  content: ContentContributionResolver | undefined,
+  extensionId: string | null | undefined
+): ContentNodeDataCodec | null {
+  if (!content || !extensionId) return null;
+  const owner = content.resolve(extensionId);
+  return owner?.nodeData ?? null;
 }
 
 function fail(code: string): Error {
@@ -150,6 +276,9 @@ function assertContribution(contribution: ContentContribution): void {
       if (typeof contribution.nodeData[name] !== "function") throw fail("content-registration-invalid");
     }
   }
+  if (contribution.edit) {
+    if (typeof contribution.edit.plan !== "function" || typeof contribution.edit.apply !== "function") throw fail("content-registration-invalid");
+  }
   if (contribution.commands) {
     const kinds = contribution.commands.kinds;
     if (!Array.isArray(kinds) || kinds.length === 0 || new Set(kinds).size !== kinds.length || kinds.some((kind) => typeof kind !== "string" || kind.length === 0)) {
@@ -157,6 +286,16 @@ function assertContribution(contribution: ContentContribution): void {
     }
     for (const name of ["decode", "apply", "satisfied"] as const) {
       if (typeof contribution.commands[name] !== "function") throw fail("content-registration-invalid");
+    }
+  }
+  if (contribution.migrations && contribution.migrations.length > 0) {
+    if (!contribution.version || typeof contribution.version.read !== "function" || typeof contribution.version.write !== "function") {
+      throw fail("content-registration-invalid");
+    }
+    for (const migration of contribution.migrations) {
+      if (!Number.isInteger(migration.from) || !Number.isInteger(migration.to) || migration.to <= migration.from || typeof migration.migrate !== "function") {
+        throw fail("content-registration-invalid");
+      }
     }
   }
   const toolNames = new Set<string>();
@@ -225,6 +364,27 @@ export class ContentContributionRegistry implements ContentContributionResolver 
       released = true;
       for (let index = releases.length - 1; index >= 0; index -= 1) releases[index]!();
     };
+  }
+
+  /** 按扩展与 `METHOD path` 查内容路由；未注册返回 null。 */
+  route(extensionId: string, method: string, path: readonly string[]): ContentRoute | null {
+    const owner = this.entries.get(extensionId);
+    if (!owner) return null;
+    const key = `${method.toUpperCase()} ${path.join("/")}`;
+    return owner.routes?.find((route) => routeKey(route) === key) ?? null;
+  }
+
+  /** 内容 MCP 工具目录（按名称唯一，停用后自动消失）。 */
+  mcpTool(name: string): { contribution: ContentContribution; tool: ContentMcpTool } | null {
+    const extensionId = this.tools.get(name);
+    if (!extensionId) return null;
+    const contribution = this.entries.get(extensionId);
+    const tool = contribution?.mcpTools?.find((entry) => entry.name === name);
+    return contribution && tool ? { contribution, tool } : null;
+  }
+
+  mcpCatalog(): readonly ContentMcpTool[] {
+    return this.implementations().flatMap((contribution) => contribution.mcpTools ?? []);
   }
 
   resolve(extensionId: string): ContentContribution | null {

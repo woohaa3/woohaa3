@@ -18,7 +18,7 @@ import {
   findNodeTemplate
 } from "../../domain/node-catalog.js";
 import { planGroupNodes, planInsertNode, planUngroupNodes } from "../../../extension-api/command-planner.js";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, isFilmSetGroupNode, partitionManagedNodeDeletion, resolveShotReferenceSource } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, decideContentAction, isFilmSetGroupNode, partitionManagedNodeDeletion, resolveShotReferenceSource, type ContentContributionResolver } from "@woohaa3/contracts";
 import { shotReferenceTemplateItems } from "./shot-reference-menu.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
@@ -74,8 +74,11 @@ export function selectionActionDescriptor(input: {
   selectedNodeIds: readonly string[];
   writable: boolean;
   kind: "group" | "ungroup";
+  content?: ContentContributionResolver;
+  nodeData?: Readonly<Record<string, unknown>>;
 }): { label: string; enabled: boolean; reason?: string } | null {
   const { nodes, selectedNodeIds, writable, kind } = input;
+  const denied = contentActionDenial({ content: input.content, nodeData: input.nodeData }, "group", selectedNodeIds, nodes);
   const applicable = kind === "group"
     ? selectedNodeIds.filter((id) => nodes.find((node) => node.id === id)?.type !== "group").length >= 2
     : selectedNodeIds.some((id) => {
@@ -83,6 +86,7 @@ export function selectionActionDescriptor(input: {
         return node?.type === "group" || (!!node?.parentId && node.type !== "group");
       });
   if (!applicable) return null;
+  if (denied) return { label: SELECTION_ACTION_LABELS[kind], enabled: false, reason: denied };
   return {
     label: SELECTION_ACTION_LABELS[kind],
     enabled: writable,
@@ -98,6 +102,8 @@ export function selectionActionDescriptor(input: {
  */
 export type NodeContextMenuFacts = {
   nodeData?: Readonly<Record<string, unknown>>;
+  /** 内容 owner 注册表；复合内容受保护时菜单项直接禁用并给出原因。 */
+  content?: ContentContributionResolver;
   /** 该分组是否仍在编排一批提交；true 时分组三个动作都禁用（不能绕过提交门禁）。 */
   groupSubmitting?: (groupId: string) => boolean;
   /** 该分组的只读预览（N 与是否可用）；缺省时不显示数量。 */
@@ -108,6 +114,22 @@ export type NodeContextMenuFacts = {
    */
   activeNodeId?: string | null;
 };
+
+function contentActionDenial(
+  facts: NodeContextMenuFacts,
+  action: "delete" | "rename" | "group" | "copy" | "cut" | "download" | "convert",
+  nodeIds: readonly string[],
+  nodes: readonly CanvasMenuNode[]
+): string | null {
+  if (!facts.content) return null;
+  for (const id of nodeIds) {
+    const node = nodes.find((entry) => entry.id === id);
+    if (!node) continue;
+    const decision = decideContentAction(facts.content, action, node.type, facts.nodeData?.[id]);
+    if (!decision.allowed) return decision.reason;
+  }
+  return null;
+}
 
 /** 节点右键菜单项：打组（≥2 个非 group 选中）、解组（选中 group 或其成员）、
  * 整理（单选 group）、批量执行（单选 group）、删除。 */
@@ -120,12 +142,15 @@ export function nodeContextMenuItems(
   const activeNodeId = facts.activeNodeId;
   const selected = [...selectedNodeIds];
   const deletion = partitionManagedNodeDeletion(nodes, facts.nodeData ?? {}, activeNodeId ? [activeNodeId] : selected);
-  const canDelete = deletion.allowed.length > 0;
-  const canGroup = selected.filter((id) => nodes.find((node) => node.id === id)?.type !== "group").length >= 2;
+  const deleteDenied = contentActionDenial(facts, "delete", activeNodeId ? [activeNodeId] : selected, nodes);
+  const canDelete = deletion.allowed.length > 0 && deleteDenied === null;
+  const groupDenied = contentActionDenial(facts, "group", selected, nodes);
+  const renameDenied = contentActionDenial(facts, "rename", selected, nodes);
+  const canGroup = selected.filter((id) => nodes.find((node) => node.id === id)?.type !== "group").length >= 2 && groupDenied === null;
   const canUngroup = selected.some((id) => {
     const node = nodes.find((candidate) => candidate.id === id);
     return node?.type === "group" || (!!node?.parentId && node.type !== "group");
-  });
+  }) && groupDenied === null;
   const selectedNode = selected.length === 1 ? nodes.find((node) => node.id === selected[0]) : undefined;
   const selectedFilmSetGroup = !!selectedNode && isFilmSetGroupNode(selectedNode, facts.nodeData?.[selectedNode.id]);
   const soloGroup = selected.length === 1 && selectedNode?.type === "group" && !selectedFilmSetGroup
@@ -144,7 +169,7 @@ export function nodeContextMenuItems(
   // 两者共用同一 planner（`planUngroupNodes`）与同一门禁，行为一致。
   const canUngroupSelection = canUngroup && !selectedFilmSetGroup;
   return [
-    ...(canGroup ? [{ id: SELECTION_ACTION_IDS.group, label: SELECTION_ACTION_LABELS.group, disabled: !writable, ...(writable ? {} : { reason: READONLY_REASON }) }] : []),
+    ...(canGroup ? [{ id: SELECTION_ACTION_IDS.group, label: SELECTION_ACTION_LABELS.group, disabled: !writable, ...(writable ? {} : { reason: READONLY_REASON }) }] : groupDenied && selected.length >= 2 ? [{ id: SELECTION_ACTION_IDS.group, label: SELECTION_ACTION_LABELS.group, disabled: true, reason: groupDenied }] : []),
     ...(canUngroupSelection ? [{ id: SELECTION_ACTION_IDS.ungroup, label: SELECTION_ACTION_LABELS.ungroup, disabled: !writable, ...(writable ? {} : { reason: READONLY_REASON }) }] : []),
     ...(soloGroup ? [{ id: "tidy-group", label: GROUP_STRUCTURE_ACTION_LABELS.tidy, disabled: groupGate, ...(groupGateReason ? { reason: groupGateReason } : {}) }] : []),
     // 批量执行：右键与横条共用同一预览；有预览时给出 N（`批量执行 · N`），
@@ -159,8 +184,12 @@ export function nodeContextMenuItems(
       : []),
     ...(soloGroup ? [{ id: "ungroup-group", label: GROUP_STRUCTURE_ACTION_LABELS.ungroup, disabled: groupGate, ...(groupGateReason ? { reason: groupGateReason } : {}) }] : []),
     // 重命名（change: 2026-10-09-improve-canvas-workflow，任务 2.3）：单个作品可重命名；
-    ...(selected.length === 1 ? [{ id: "rename-node", label: "重命名作品", disabled: !writable }] : []),
-    ...(canDelete ? [{ id: "delete-node", label: "删除作品", danger: true, disabled: !writable }] : [])
+    ...(selected.length === 1 ? [{ id: "rename-node", label: "重命名作品", disabled: !writable || renameDenied !== null, ...(renameDenied ? { reason: renameDenied } : {}) }] : []),
+    ...(canDelete
+      ? [{ id: "delete-node", label: "删除作品", danger: true, disabled: !writable }]
+      : deleteDenied
+        ? [{ id: "delete-node", label: "删除作品", danger: true, disabled: true, reason: deleteDenied }]
+        : [])
   ];
 }
 
@@ -229,10 +258,11 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
         id: SELECTION_ACTION_IDS[kind],
         owner: CANVAS_MENU_PLUGIN_ID,
         order,
+        contentAction: "group",
         describe: ({ selectedNodeIds, writable }) => {
           const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
           const nodes = canvas?.document.nodes ?? [];
-          const descriptor = selectionActionDescriptor({ nodes, selectedNodeIds, writable, kind });
+          const descriptor = selectionActionDescriptor({ nodes, selectedNodeIds, writable, kind, content: ctx.compositeAssets.contentContributions, nodeData: canvas?.nodeData });
           if (!descriptor) return null;
           return {
             label: descriptor.label,
@@ -274,6 +304,7 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           return nodeContextMenuItems(nodes, selectedNodeIds ?? [], writable, {
             activeNodeId: nodeId,
             nodeData: canvas?.nodeData,
+            content: ctx.compositeAssets.contentContributions,
             ...(service ? { groupSubmitting: (groupId: string) => service.isSubmitting(groupId) } : {}),
             ...(service ? { groupPreview: (groupId: string) => service.preview(groupId) } : {})
           });
@@ -384,13 +415,28 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
       nodeRenameStore.open(nodeId, typeof data?.title === "string" ? data.title : "");
     }
   },
-  { name: CANVAS_MENU_PLUGIN_ID, inject: ["slots", "canvasSession", "canvasNavigation", "canvasEdit", "canvasRuntime"] }
+  { name: CANVAS_MENU_PLUGIN_ID, inject: ["slots", "canvasSession", "canvasNavigation", "canvasEdit", "canvasRuntime", "compositeAssets"] }
 );
+
+function selectedContentAllowed(
+  ctx: Context,
+  canvas: { document: { nodes: readonly { id: string; type: string }[] }; nodeData: Readonly<Record<string, unknown>> },
+  action: "group" | "delete",
+  nodeIds: readonly string[]
+): boolean {
+  for (const id of nodeIds) {
+    const node = canvas.document.nodes.find((entry) => entry.id === id);
+    if (node && !decideContentAction(ctx.compositeAssets.contentContributions, action, node.type, canvas.nodeData[id]).allowed) return false;
+  }
+  return true;
+}
 
 function submitDelete(ctx: Context, nodeId: string): void {
   if (!ctx.canvasSession.isWritable()) return;
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-  if (!canvas || !partitionManagedNodeDeletion(canvas.document.nodes, canvas.nodeData, [nodeId]).allowed.length) return;
+  const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
+  if (!canvas || !node || !partitionManagedNodeDeletion(canvas.document.nodes, canvas.nodeData, [nodeId]).allowed.length) return;
+  if (!decideContentAction(ctx.compositeAssets.contentContributions, "delete", node.type, canvas.nodeData[nodeId]).allowed) return;
   void ctx.canvasEdit.record([{ type: "node.remove", nodeIds: [nodeId] }], "删除作品");
 }
 
@@ -400,6 +446,7 @@ function submitGroupSelection(ctx: Context, context: ContextMenuContext): void {
   if (!ctx.canvasSession.isWritable()) return;
   const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
   if (!canvasState) return;
+  if (!selectedContentAllowed(ctx, canvasState, "group", context.selectedNodeIds ?? [])) return;
   const commands = planGroupNodes(plannerNodes(canvasState), context.selectedNodeIds ?? []);
   if (commands.length === 0) return;
   void ctx.canvasEdit.record(commands, "打组");
@@ -410,6 +457,7 @@ function submitUngroupSelection(ctx: Context, context: ContextMenuContext): void
   if (!ctx.canvasSession.isWritable()) return;
   const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
   if (!canvasState) return;
+  if (!selectedContentAllowed(ctx, canvasState, "group", context.selectedNodeIds ?? [])) return;
   const commands = planUngroupNodes(plannerNodes(canvasState), context.selectedNodeIds ?? []);
   if (commands.length === 0) return;
   void ctx.canvasEdit.record(commands, "解组");
@@ -425,6 +473,7 @@ function submitSelectionStructure(ctx: Context, kind: "group" | "ungroup", selec
   if (!ctx.canvasSession.isWritable()) return;
   const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
   if (!canvasState) return;
+  if (!selectedContentAllowed(ctx, canvasState, "group", selectedNodeIds)) return;
   const nodes = plannerNodes(canvasState);
   const commands = kind === "group"
     ? planGroupNodes(nodes, selectedNodeIds)

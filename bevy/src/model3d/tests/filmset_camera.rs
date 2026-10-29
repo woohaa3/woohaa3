@@ -5,7 +5,7 @@
 //! 无 RenderPlugin：直接驱动 `filmset_camera::sync`，断言稳定多标记、无旧姿态、失效回收与
 //! 网格/材质资源有界复用，不创建真实相机或 render pass。
 
-use super::{reference_for, resource_table, run_sync, scene_with, world_with_resources};
+use super::{reference_for, resource_table, run_sync, scene_with, with_preview_card, world_with_resources};
 use crate::canvas_ecs::components::FilmSetCameraMarker;
 use crate::model3d::filmset_camera::{
     FilmSetCameraAssets, FilmSetCameraRoot, sync,
@@ -26,16 +26,17 @@ fn film_node(id: &str) -> GraphNode {
 }
 
 fn preview_node(id: &str, kind: &str) -> GraphNode {
-    serde_json::from_value(serde_json::json!({
-        "id": id, "type": "film-set-shot-preview", "x": 320, "y": 0, "width": 240, "height": 167,
-        "shotPreview": {
-            "filmSetNodeId": "film", "clipId": "clip-1", "kind": kind, "name": "镜头",
-            "aspect": 1.7777778, "duration": if kind == "dynamic" { 5.0 } else { 0.0 },
-            "state": "ready",
-            "coverCamera": { "azimuth": 0.0, "elevation": std::f32::consts::FRAC_PI_4, "distance": 8.0, "focusOffset": [0.0, 0.0, 0.0] }
-        }
+    let node = serde_json::from_value(serde_json::json!({
+        "id": id, "type": "slot", "x": 320, "y": 0, "width": 240, "height": 167,
     }))
-    .unwrap()
+    .unwrap();
+    with_preview_card(node, serde_json::json!({
+        "nodeId": id, "ownerNodeId": "film", "entityId": "clip-1", "animated": kind == "dynamic",
+        "title": "镜头", "typeLabel": if kind == "dynamic" { "动态镜头" } else { "静态镜头" },
+        "aspect": 1.7777778, "duration": if kind == "dynamic" { 5.0 } else { 0.0 },
+        "state": "ready",
+        "coverCamera": { "azimuth": 0.0, "elevation": std::f32::consts::FRAC_PI_4, "distance": 8.0, "focusOffset": [0.0, 0.0, 0.0] }
+    }))
 }
 
 fn box_snapshot() -> ModelSnapshot {
@@ -83,7 +84,7 @@ fn playback(node_id: &str, view_mode: &str, target: Option<&str>) -> AnimationPl
         },
         camera_motion: Vec::new(),
         model_motion: Vec::new(),
-        objects: Vec::new(),
+        managed_item_motion: Vec::new(),
     }
 }
 

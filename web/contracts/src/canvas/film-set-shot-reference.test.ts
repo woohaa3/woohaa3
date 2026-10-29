@@ -18,6 +18,7 @@ import { normalizeCanvas } from "./domain/normalization.js";
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { filmSetClipPrecondition, type FilmSetClipPatchOp } from "./film-set-clip-ops.js";
+import { filmSetClipPatchCommand } from "./film-set-content.js";
 import { decodeFilmSetNodeData } from "./canvas-node-model.js";
 import { isValidWoohaa3CanvasConnection, explainWoohaa3CanvasConnectionBlock } from "./domain/core/connection-rules.js";
 import { SHOT_REFERENCE_ROLE, SHOT_REFERENCE_EDGE_KIND, SHOT_REFERENCE_SCHEMA_VERSION, isShotReferenceRole, isSupportedShotReferenceEdgeData } from "./domain/core/shot-reference.js";
@@ -77,13 +78,12 @@ function materialize(canvas: ServerCanvas): ServerCanvas {
 function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = "clip-1") {
   const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
   if (!decoded.ok) throw new Error(decoded.reason);
-  return {
-    type: "filmSet.clipPatch",
+  return filmSetClipPatchCommand({
     nodeId: "film",
     clipId,
     expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(decoded.value), clipId, op),
     op
-  };
+  });
 }
 
 /** 追加一个静态镜头（clip-s）并返回新画布。 */

@@ -126,7 +126,8 @@ mod tests {
         GraphNode {
             model_preview: None,
             media_loading: false,
-            shot_preview: None,
+            preview_card: None,
+            run_feedback: None,
 
             id: "n".into(),
             kind: "image".into(),

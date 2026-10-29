@@ -10,7 +10,6 @@
  * before/after 再判无结构变化；有重父化时以共享索引避免 parent find 的平方级扫描。
  */
 import {
-  FILM_SET_SHOT_PREVIEW_NODE_TYPE,
   isMergeEligibleNode,
   readNodeHeight,
   readNodeWidth,
@@ -78,16 +77,11 @@ export function createDragGestureFamily(
   const previewOnlyDrag = (origins: Map<string, { x: number; y: number }>): boolean => {
     const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
     if (!canvasState || origins.size === 0) return false;
-    // 便宜预筛：只要有一个被拖动节点不是预览类型就不必做归属解析（拖动每次 pointermove 都会到这里）。
-    let previewShaped = 0;
-    for (const node of canvasState.document.nodes) {
-      if (origins.has(node.id) && node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE) previewShaped += 1;
-    }
-    if (previewShaped !== origins.size) return false;
     return isShotPreviewOnlySelection({
       selectedNodeIds: [...origins.keys()],
       nodes: canvasState.document.nodes.map((node) => ({ id: node.id, type: node.type })),
-      nodeData: canvasState.nodeData
+      nodeData: canvasState.nodeData,
+      content: core.options?.compositeAssets?.contentContributions
     });
   };
 

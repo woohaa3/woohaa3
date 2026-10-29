@@ -48,7 +48,7 @@ describe("镜头相机自动保存", () => {
     const camera = { azimuth: 0.8, elevation: 0.6, distance: 20, aspect: "16:9", focusOffset: { x: 2, y: 3, z: 4 } };
     expect(h.submit).toHaveBeenCalledTimes(1);
     expect(h.submit.mock.calls[0]![0]).toEqual([
-      expect.objectContaining({ type: "filmSet.clipPatch", nodeId: "film", clipId: "b", expectedHash: expect.any(String), op: { kind: "camera", initialCamera: camera } })
+      expect.objectContaining({ type: "extension.command", extensionId: "film-set", kind: "clip.patch", nodeId: "film", payload: { clipId: "b", expectedHash: expect.any(String), op: { kind: "camera", initialCamera: camera } } })
     ]);
     expect(h.clips[0]!.initialCamera.distance).toBe(6);
   });
@@ -60,7 +60,7 @@ describe("镜头相机自动保存", () => {
     h.session.updateFocus({ x: 8, y: 9, z: 10 });
     h.session.endFocus();
     expect(h.submit).toHaveBeenCalledTimes(2);
-    expect(h.submit.mock.calls[1]![0]).toContainEqual(expect.objectContaining({ clipId: "a", op: { kind: "camera", initialCamera: expect.objectContaining({ aspect: "1:1", focusOffset: { x: 8, y: 9, z: 10 } }) } }));
+    expect(h.submit.mock.calls[1]![0]).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ clipId: "a", op: { kind: "camera", initialCamera: expect.objectContaining({ aspect: "1:1", focusOffset: { x: 8, y: 9, z: 10 } }) } }) }));
   });
 
   it("被删除镜头的迟到写入不会改到其他镜头，且只读编辑不提交", () => {

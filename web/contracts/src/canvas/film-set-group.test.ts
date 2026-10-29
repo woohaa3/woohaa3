@@ -1,22 +1,21 @@
-import { planCanvasEdit } from "./edit-plan.js";
+import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
 import { filmSetClipPrecondition } from "./film-set-clip-ops.js";
+import { filmSetClipPatchCommand, filmSetGroupBindingPatchCommand, filmSetGroupUngroupCommand } from "./film-set-content.js";
 import { filmSetAnimationsOf } from "./film-set-clip-view.js";
 import { staticShotCameraMotion } from "./film-set-animations.js";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { applyCanvasCommands } from "./command-reducer.js";
 import { createEmptyWoohaa3CanvasDocument } from "./domain/core/document-schema.js";
 import type { ServerCanvas } from "./domain/types.js";
 import {
   createFilmSetGroupMarker,
   decodeFilmSetGroupMarker,
-  ensureFilmSetGroupBadgeScale,
-  migrateLegacyFilmSetToGroup,
   prepareFilmSetGroup,
   FilmSetGroupPreparationCache,
   validateFilmSetGroupBindings,
 } from "./film-set-group.js";
+import { ensureFilmSetGroupBadgeScale, migrateLegacyFilmSetToGroup } from "./film-set-group-migration.js";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "./yjs/mapping.js";
 
 function canvas(): ServerCanvas {
@@ -47,17 +46,17 @@ describe("film-set group contract", () => {
     );
     before.nodeData.group = { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "binding", sourceNodeId: "model", kind: "model3d", transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 }, visibility: true, contentKey: "model3d:v1" }] }) };
     before.nodeData.model = { modelScript: "scene.box({ id: 'x', size: [1, 1, 1] });", modelContentVersion: { contentHash: "v1" } };
-    const result = applyCanvasCommands(before, [{ type: "filmSetGroup.bindingPatch", groupId: "group", bindingId: "binding", expectedContentKey: "model3d:v1", patch: { transform: { x: 2, y: 0, z: 0, yaw: 0, scale: 1 } } }]);
+    const result = applyCanvasCommands(before, [filmSetGroupBindingPatchCommand({ groupId: "group", bindingId: "binding", expectedContentKey: "model3d:v1", patch: { transform: { x: 2, y: 0, z: 0, yaw: 0, scale: 1 } } })]);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.canvas.nodeData.group.filmSetGroup?.sceneBindings[0]?.transform.x).toBe(2);
     const animation = { motion: { motionScript: "", motionScriptLanguage: "javascript" as const, motionScriptVersion: "woohaa-motion-js-v1" as const, revision: 1, sourceHash: "motion-v1", basedOnModelVersion: { revision: 1, contentHash: "v1" } }, playback: { startTime: 0, duration: 2, timeScale: 1, loop: false } };
-    const animated = applyCanvasCommands(before, [{ type: "filmSetGroup.bindingPatch", groupId: "group", bindingId: "binding", expectedContentKey: "model3d:v1", patch: { animation } }]);
+    const animated = applyCanvasCommands(before, [filmSetGroupBindingPatchCommand({ groupId: "group", bindingId: "binding", expectedContentKey: "model3d:v1", patch: { animation } })]);
     expect(animated.ok).toBe(true);
     if (animated.ok) {
       expect(animated.canvas.nodeData.group.filmSetGroup?.sceneBindings[0]?.animation).toEqual(animation);
       expect(animated.canvas.nodeData.model).toEqual(before.nodeData.model);
     }
-    const invalidAnimation = applyCanvasCommands(before, [{ type: "filmSetGroup.bindingPatch", groupId: "group", bindingId: "binding", patch: { animation: { ...animation, playback: { ...animation.playback, duration: -1 } } } }]);
+    const invalidAnimation = applyCanvasCommands(before, [filmSetGroupBindingPatchCommand({ groupId: "group", bindingId: "binding", patch: { animation: { ...animation, playback: { ...animation.playback, duration: -1 } } } })]);
     expect(invalidAnimation.ok).toBe(false);
     expect(before.nodeData.group.filmSetGroup?.sceneBindings[0]?.animation).toBeUndefined();
     const forged = applyCanvasCommands(before, [{ type: "nodeData.patch", nodeId: "group", value: { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "bad", sourceNodeId: "outside", kind: "model3d", transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 }, visibility: true, contentKey: "k" }] }) } }]);
@@ -84,7 +83,7 @@ describe("film-set group contract", () => {
     expect(deleted.ok).toBe(true);
     if (!deleted.ok) return;
     expect(prepareFilmSetGroup(deleted.canvas, "group")?.diagnostics[0]?.code).toBe("missing-source");
-    const later = applyCanvasCommands(deleted.canvas, [{ type: "canvas.setTitle", title: "after deletion" }, { type: "filmSetGroup.bindingPatch", groupId: "group", bindingId: "b", patch: { visibility: false } }]);
+    const later = applyCanvasCommands(deleted.canvas, [{ type: "canvas.setTitle", title: "after deletion" }, filmSetGroupBindingPatchCommand({ groupId: "group", bindingId: "b", patch: { visibility: false } })]);
     expect(later.ok).toBe(true);
     if (later.ok) expect(later.canvas.nodeData.group.filmSetGroup?.sceneBindings[0]?.sourceNodeId).toBe("source");
   });
@@ -97,7 +96,7 @@ describe("film-set group contract", () => {
     value.nodeData.film = legacy;
     const before = JSON.stringify(value);
     expect(applyCanvasCommands(value, [{ type: "nodeData.patch", nodeId: "film", value: { title: "changed" } }]).ok).toBe(false);
-    expect(applyCanvasCommands(value, [{ type: "filmSet.itemPatch", nodeId: "film", itemId: "actor", op: { kind: "delete" } }]).ok).toBe(false);
+    expect(applyCanvasCommands(value, [{ type: "filmSet.itemPatch", nodeId: "film", itemId: "actor", op: { kind: "delete" } } as never]).ok).toBe(false);
     const metadata = applyCanvasCommands(value, [{ type: "canvas.setTitle", title: "Canvas title" }]);
     expect(metadata.ok).toBe(true);
     if (metadata.ok) expect(metadata.canvas.document.nodes).toHaveLength(1);
@@ -117,7 +116,7 @@ describe("film-set group contract", () => {
       expect(deleted.canvas.document.nodes.some(node => node.id === "group")).toBe(false);
       expect(deleted.canvas.document.nodes.find(node => node.id === "model")?.parentId).toBeUndefined();
     }
-    const ungrouped = applyCanvasCommands(before, [{ type: "filmSetGroup.ungroup", groupId: "group" }]);
+    const ungrouped = applyCanvasCommands(before, [filmSetGroupUngroupCommand({ groupId: "group" })]);
     expect(ungrouped.ok).toBe(true);
     if (ungrouped.ok) expect(ungrouped.canvas.document.nodes.find(node => node.id === "model")?.parentId).toBeUndefined();
   });
@@ -155,14 +154,14 @@ describe("film-set group contract", () => {
     const value = canvas();
     value.document.nodes.push({ id: "film", type: "group", position: { x: 0, y: 0 } });
     value.nodeData.film = { filmSetGroup: createFilmSetGroupMarker({ activeClip: "shot", clips: [{ id: "shot", name: "原名", duration: 0 }], sceneBindings: [] }) };
-    const renamed = applyCanvasCommands(value, [{ type: "filmSet.clipPatch", nodeId: "film", clipId: "shot", expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(readFilmSetAnimationProjection(value, "film")!), "shot", { kind: "rename", name: "新名" }), op: { kind: "rename", name: "新名" } }]);
+    const renamed = applyCanvasCommands(value, [filmSetClipPatchCommand({ nodeId: "film", clipId: "shot", expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(readFilmSetAnimationProjection(value, "film")!), "shot", { kind: "rename", name: "新名" }), op: { kind: "rename", name: "新名" } })]);
     expect(renamed, JSON.stringify(renamed)).toMatchObject({ ok: true });
     if (!renamed.ok) return;
     expect(renamed.canvas.nodeData.film.filmSetGroup?.clips?.[0]?.name).toBe("新名");
     expect(renamed.canvas.nodeData.film.filmSetAnimations).toBeUndefined();
     expect(renamed.canvas.nodeData.film.filmSetContent).toBeUndefined();
     expect(value.nodeData.film.filmSetGroup?.clips?.[0]?.name).toBe("原名");
-    const changed = applyCanvasCommands(renamed.canvas, [{ type: "filmSet.clipPatch", nodeId: "film", clipId: "shot", expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(readFilmSetAnimationProjection(renamed.canvas, "film")!), "shot", { kind: "camera", initialCamera: { azimuth: 1, elevation: 0.3, distance: 8, aspect: "1:1", focusOffset: { x: 2, y: 0, z: 0 } } }), op: { kind: "camera", initialCamera: { azimuth: 1, elevation: 0.3, distance: 8, aspect: "1:1", focusOffset: { x: 2, y: 0, z: 0 } } } }]);
+    const changed = applyCanvasCommands(renamed.canvas, [filmSetClipPatchCommand({ nodeId: "film", clipId: "shot", expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(readFilmSetAnimationProjection(renamed.canvas, "film")!), "shot", { kind: "camera", initialCamera: { azimuth: 1, elevation: 0.3, distance: 8, aspect: "1:1", focusOffset: { x: 2, y: 0, z: 0 } } }), op: { kind: "camera", initialCamera: { azimuth: 1, elevation: 0.3, distance: 8, aspect: "1:1", focusOffset: { x: 2, y: 0, z: 0 } } } })]);
     expect(changed.ok).toBe(true);
     if (changed.ok) expect(changed.canvas.nodeData.film.filmSetGroup?.cameras?.[0]).toMatchObject({ azimuth: 1, distance: 8, aspect: "1:1" });
   });
@@ -172,7 +171,7 @@ describe("film-set group contract", () => {
     value.document.nodes.push({ id: "film", type: "group", position: { x: 0, y: 0 } }, { id: "source", type: "image", parentId: "film", position: { x: 0, y: 0 } });
     value.nodeData.source = { outputAssetId: "asset" };
     value.nodeData.film = { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "actor", sourceNodeId: "source", kind: "image", contentKey: "image:asset", visibility: true, transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 } }] }) };
-    const plan = planCanvasEdit(value, [{ type: "filmSetGroup.bindingPatch", groupId: "film", bindingId: "actor", patch: { transform: { x: 3, y: 2, z: 1, yaw: 0.4, scale: 2 } } }]);
+    const plan = planCanvasEdit(value, [filmSetGroupBindingPatchCommand({ groupId: "film", bindingId: "actor", patch: { transform: { x: 3, y: 2, z: 1, yaw: 0.4, scale: 2 } } })]);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     const moved = applyCanvasCommands(value, [{ type: "edit.apply", ...plan.forward }]);
@@ -348,7 +347,7 @@ describe("film-set group contract", () => {
     const restored = yDocToServerCanvas(doc, { now: value.updatedAt });
     expect(restored.ok).toBe(true);
     if (restored.ok) expect(restored.canvas.nodeData.group?.filmSetGroup?.sceneBindings[0]?.contentKey).toBe("model3d:v1");
-    const edited = applyCanvasCommands(value, [{ type: "filmSetGroup.bindingPatch", groupId: "group", bindingId: "b", patch: { visibility: false } }]);
+    const edited = applyCanvasCommands(value, [filmSetGroupBindingPatchCommand({ groupId: "group", bindingId: "b", patch: { visibility: false } })]);
     expect(edited.ok).toBe(true);
     if (edited.ok) {
       const history = serverCanvasToYDoc(edited.canvas);

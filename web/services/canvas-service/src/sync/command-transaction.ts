@@ -18,6 +18,7 @@ import * as Y from "yjs";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import type { MediaStorage } from "@woohaa3/contracts";
 import { applyCanvasCommands, collectMutatedAssets, validateAssetReferences } from "../storage/core/index.js";
+import { migrateCanvasContent } from "@woohaa3/contracts";
 import { applyCanvasDiffToYDoc, writeRevisionMeta } from "@woohaa3/contracts/canvas-yjs";
 import { yDocToServerCanvas } from "@woohaa3/contracts/canvas-yjs";
 import type { CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
@@ -44,6 +45,7 @@ export type CommandTransactionOutcome =
 
 export type ApplyCommandTransactionOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   /** 权威 authoring Y.Doc（应为 published 的可写副本）。 */
   doc: Y.Doc;
   batch: CanvasCommandBatch;
@@ -74,8 +76,13 @@ export async function applyCommandTransaction(
   }
   const current = exported.canvas;
 
+  // 1.5) owner 版本化迁移先于命令执行；失败/链断裂的节点保持原样，版本过新的节点只读。
+  const migration = migrateCanvasContent(current, options.content);
+  const readonlyRejection = rejectReadonlyContentWrite(batch.commands, migration.readonlyNodeIds);
+  if (readonlyRejection) return { ok: false, code: readonlyRejection.code, message: readonlyRejection.message };
+
   // 2) 复用前置 change 的纯 reducer：Yjs 路径与 remote-CAS 路径共享同一命令语义。
-  const applied = applyCanvasCommands(current, batch.commands, { now, lifecycle: options.lifecycle });
+  const applied = applyCanvasCommands(migration.canvas, batch.commands, { now, lifecycle: options.lifecycle, ...(options.content ? { content: options.content } : {}) });
   if (!applied.ok) {
     return {
       ok: false,
@@ -85,7 +92,7 @@ export async function applyCommandTransaction(
   }
 
   // 无净变化：记录可幂等返回的结果，但不写 update、不推进 revision。
-  if (!applied.changed) {
+  if (!applied.changed && !migration.changed) {
     return {
       ok: true,
       changed: false,
@@ -117,10 +124,11 @@ export async function applyCommandTransaction(
 
   // 4) 在单 transaction 内写净差异 + revision，并捕获产生的 update。
   const nextRevision = current.revision + 1;
+  const nextCanvas = migration.changed && !applied.changed ? { ...applied.canvas, updatedAt: now } : applied.canvas;
   const before = Y.encodeStateVector(doc);
   doc.transact(() => {
-    applyCanvasDiffToYDoc(doc, current, applied.canvas);
-    writeRevisionMeta(doc, nextRevision, applied.canvas.updatedAt);
+    applyCanvasDiffToYDoc(doc, current, nextCanvas);
+    writeRevisionMeta(doc, nextRevision, nextCanvas.updatedAt);
   });
   const update = Y.encodeStateAsUpdate(doc, before);
 
@@ -128,9 +136,9 @@ export async function applyCommandTransaction(
     ok: true,
     changed: true,
     revision: nextRevision,
-    updatedAt: applied.canvas.updatedAt,
+    updatedAt: nextCanvas.updatedAt,
     update,
-    canvas: { ...applied.canvas, revision: nextRevision }
+    canvas: { ...nextCanvas, revision: nextRevision }
   };
 }
 
@@ -183,4 +191,23 @@ export class CommandReceiptRegistry {
   get size(): number {
     return this.receipts.size;
   }
+}
+
+
+/** 版本过新的 owner 节点只读；任何指向它的业务写入在副作用前拒绝。 */
+function rejectReadonlyContentWrite(
+  commands: CanvasCommandBatch["commands"],
+  readonlyNodeIds: ReadonlySet<string>
+): { code: "content-migration-too-new"; message: string } | null {
+  if (readonlyNodeIds.size === 0) return null;
+  for (const command of commands) {
+    const targets: string[] = [];
+    if ("nodeId" in command && typeof command.nodeId === "string") targets.push(command.nodeId);
+    if (command.type === "node.remove") targets.push(...command.nodeIds);
+    if (command.type === "node.add" && command.nodeData && typeof command.nodeData.extensionId === "string") targets.push(command.node.id);
+    if (targets.some((id) => readonlyNodeIds.has(id))) {
+      return { code: "content-migration-too-new", message: "内容版本高于当前扩展支持版本，节点只读" };
+    }
+  }
+  return null;
 }

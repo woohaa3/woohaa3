@@ -369,21 +369,8 @@ pub(crate) fn sync_models(
                 .model_focus
                 .as_ref()
                 .is_some_and(|e| e.node_id == node.id);
-        if let Some(group) = scene
-            .film_set_groups
-            .iter()
-            .find(|group| group.owner_id == node.id)
-        {
-            super::group_runtime::sync(
-                commands,
-                meshes,
-                materials,
-                models,
-                node,
-                resource,
-                &reference.placement,
-                group,
-            );
+        if let Some(group) = scene.managed_item_groups.iter().find(|group| group.owner_node_id == node.id) {
+            super::group_runtime::sync(commands, meshes, materials, models, node, resource, &reference.placement, group);
             continue;
         }
         // Native 后台准备分流（change: 2026-10-18-prepare-native-film-sets-in-background，

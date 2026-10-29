@@ -157,7 +157,7 @@ mod tests {
 
     const GOOD_MOTION: &str = r#"{
       "duration": 2.0, "looped": false, "cameraMotion": [], "modelMotion": [],
-      "objects": [],
+      "managedItemMotion": [],
       "initialCamera": {"azimuth":0.5,"elevation":0.5,"distance":4,"focusOffset":[0,0,0],"aspect":"16:9"},
       "timeSeconds": 0
     }"#;

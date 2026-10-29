@@ -1,6 +1,6 @@
 /** Trusted, scope-owned composite asset adapters. Business identity is never inferred from content. */
-import type { CanvasNodeData, FilmSetLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene, ManagedNodeLifecycleAdapter } from "@woohaa3/contracts";
-import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
+import type { CanvasNodeData, ContentLocalTransform, NodeGenerationHistoryDetail, PreparedModelResource, ServerCanvas, BevyModelEditor, ModelCamera, BevyCompositeAssetCompositionInfo, BevyRenderNode, BevyAnimationPlayback, ModelMediaTimeMap, CompositeAssetGeometryQuality, CompositeAssetScopeShape, CompositeChildRelation, CompositeContainerPanel, CanvasRenderScene, ManagedNodeLifecycleAdapter } from "@woohaa3/contracts";
+import { ContentContributionRegistry, ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 export type CompositeAssetMediaSource = { planeId: string; nodeId: string; assetId: string; kind: "image" | "video"; playback?: ModelMediaTimeMap; sourceIdentity: string };
 /** A valid content projection may have no 3D resource; null prepare means unavailable. */
 export type CompositeAssetProjection = { resource?: PreparedModelResource; composition?: BevyCompositeAssetCompositionInfo; diagnostic?: string };
@@ -61,7 +61,7 @@ export type CompositeAssetAdapter = {
   history?(nodeId: string, detail: NodeGenerationHistoryDetail | null): boolean;
   historyProjection?(nodeId: string): CompositeAssetProjection | null;
   projectPresentation?(node: BevyRenderNode, data: CanvasNodeData, resource?: PreparedModelResource): void;
-  objectPreview?(nodeId: string): { itemId: string; transform: FilmSetLocalTransform } | null;
+  objectPreview?(nodeId: string): { itemId: string; transform: ContentLocalTransform } | null;
   gizmo?(nodeId: string): BevyModelEditor | null;
   readCameras?(nodeId: string, data: CanvasNodeData): ModelCamera[];
   writeCameras?(nodeId: string, cameras: readonly ModelCamera[]): boolean;
@@ -78,6 +78,13 @@ export type CompositeAssetAdapter = {
 };
 export class CompositeAssetRegistry {
   readonly managedLifecycles = new ManagedNodeLifecycleRegistry();
+  /**
+   * 页面 scope 的内容 owner 注册表（change: 2026-10-28-generic-extension-content-ownership）。
+   *
+   * 扩展在激活时注册自己的共享 nodeData codec；页面 reducer、编辑规划与复制都从这里解析。
+   * 停用/重载时通过 `register` 返回的 disposer 释放，旧缓存随之失效。
+   */
+  readonly contentContributions = new ContentContributionRegistry();
   private revision = 0;
   getRevision = (): number => this.revision;
   private generations = new Map<string, number>();
@@ -263,7 +270,7 @@ export class CompositeAssetRegistry {
     const targets = new Map<string, string[]>();
     for (const child of children.values()) {
       const node = nodes.get(child.nodeId), owner = nodes.get(child.ownerNodeId);
-      if (!node || !owner?.compositeAsset) continue;
+      if (!node || !owner) continue;
       const ids = targets.get(child.ownerNodeId) ?? []; ids.push(child.nodeId); targets.set(child.ownerNodeId, ids);
       if (child.kind === "container" && node.compositeAsset) {
         node.compositeAsset.scopeShape = "rect";
@@ -272,14 +279,19 @@ export class CompositeAssetRegistry {
       }
     }
     for (const [ownerId, targetNodeIds] of targets) {
-      const owner = nodes.get(ownerId)!;
       const targetItemIds = Object.fromEntries(targetNodeIds.flatMap(id => {
         const itemId = children.get(id)?.sourceItemId;
         return itemId ? [[id, itemId]] : [];
       }));
       const sourceOwner = sourceNodes.get(ownerId);
-      owner.compositeAsset!.ownershipLinks = { anchor: (sourceOwner && this.resolveNode(canvas, sourceOwner)?.childLinkAnchor) ?? [0, 0, 0], targetNodeIds,
-        ...(Object.keys(targetItemIds).length ? { targetItemIds } : {}) };
+      // 通用归属线原语（任务 4.3）：复合资产的子节点归属与预览卡片共用同一场景级集合。
+      (scene.ownershipLinks ??= []).push({
+        id: `ownership-link:${ownerId}`,
+        ownerNodeId: ownerId,
+        anchor: (sourceOwner && this.resolveNode(canvas, sourceOwner)?.childLinkAnchor) ?? [0, 0, 0],
+        targetNodeIds,
+        ...(Object.keys(targetItemIds).length ? { targetItemIds } : {})
+      });
     }
     // Managed entities share the same ownership links as containers. Their media/shot renderer stays intact.
     //
@@ -288,7 +300,7 @@ export class CompositeAssetRegistry {
     // 由 group 托管（出现在 `children()` 里），但它浮在画布上、与徽标相隔很远，归属线是唯一
     // 的关联呈现——按子节点一律过滤会把 group 片场的归属线全部抹掉。
     const compositeOwnerIds = new Set([...nodes.values()].filter(node => node.compositeAsset).map(node => node.id));
-    scene.shotPreviewLinks = scene.shotPreviewLinks?.filter(link => !(children.has(link.previewNodeId) && compositeOwnerIds.has(link.ownerNodeId))) ?? [];
+    scene.ownershipLinks = scene.ownershipLinks?.filter(link => !(compositeOwnerIds.has(link.ownerNodeId) && link.targetNodeIds.length > 0 && link.targetNodeIds.every(id => children.get(id)?.kind === "entity"))) ?? [];
   }
   blocksFocusInput(): boolean { return [...this.adapters.values()].some(adapter => adapter.blocksFocusInput?.()); }
   keydown(event: KeyboardEvent, canvas: ServerCanvas | null, nodeId: string | null): boolean { return nodeId ? this.resolve(canvas, nodeId)?.keydown?.(event, nodeId) ?? false : false; }

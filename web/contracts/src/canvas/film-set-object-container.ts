@@ -2,7 +2,7 @@
 import { isBoundedId, isJsonObject } from "../validation.js";
 import { base64UrlEncodeBytes, sha256Bytes, utf8Encode } from "./film-set-shot-preview.js";
 import { decodeFilmSetNodeData } from "./canvas-node-model.js";
-import { isFilmSetNode } from "./domain/core/composite-asset-identity.js";
+import { isFilmSetNode } from "./film-set-legacy-identity.js";
 import { model3DNodeDataFields } from "./animation-snapshot.js";
 import type { FilmSetModelItem } from "./film-set-content.js";
 import type { CanvasNodeData, ServerCanvas, Woohaa3CanvasNode } from "./domain/index.js";

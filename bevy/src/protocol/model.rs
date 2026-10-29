@@ -35,7 +35,10 @@ use serde::Deserialize;
 /// v29 unifies group and film-set authoring: group presentations carry a badge scale,
 /// model bounds and per-object ownership link item sources; media content keeps a
 /// provider identity and schema version.
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v30";
+/// v31 把业务呈现改为场景级通用原语（任务 4.3）：`previewCards` / `ownershipLinks` /
+/// `runFeedback` / `managedItemGroups` 与动画播放内的 `managedItemMotion`；扩展私有数据只能
+/// 经版本化 `payload` 信封透传，Rust 不再读取片场 id/字段名。
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v31";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 /// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。

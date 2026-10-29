@@ -584,7 +584,8 @@ mod tests {
             composite_asset: None,
             history_strip: None,
             aggregate_run: None,
-            shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
         }
     }
 
@@ -620,12 +621,7 @@ mod tests {
     fn ring_gate_excludes_aggregate_and_group() {
         // 复合资产（片场）用运行遮罩而非进度环。
         let mut film = kind_node("model", 260.0, 195.0, true);
-        film.composite_asset = Some(crate::protocol::CompositeAssetPresentation {
-            empty_placeholder: None,
-            panel: None,
-            ownership_links: None,
-            root_placement: None,
-            content_extent: None,
+        film.composite_asset = Some(crate::protocol::CompositeAssetPresentation { empty_placeholder: None, panel: None, root_placement: None, content_extent: None,
             layout_aabb: None,
             geometry_quality: None,
             scope_shape: crate::protocol::CompositeAssetScopeShape::Rect,
@@ -634,7 +630,7 @@ mod tests {
             y: 0.0,
             width: 260.0,
             height: 195.0,
-            media: Vec::new(),
+            media_planes: Vec::new(),
             item_roots: std::collections::HashMap::new(),
             item_placements: std::collections::HashMap::new(),
         });
@@ -779,7 +775,8 @@ mod tests {
             composite_asset: None,
             history_strip: None,
             aggregate_run: None,
-            shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
         }
     }
 

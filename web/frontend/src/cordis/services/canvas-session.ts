@@ -146,6 +146,8 @@ function isBrowserOffline(): boolean {
 
 export type CreateCanvasSessionOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  /** 页面 scope 的内容 owner 注册表（change: 2026-10-28-generic-extension-content-ownership）。 */
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   canvasId?: string;
   /** Canvas 远端 adapter；会话在其上维护投影与写入门禁。 */
   remote: CanvasRemoteService;
@@ -324,7 +326,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       durationMs: elapsedMs(started), ...(errorCode ? { errorCode } : {}) });
   };
   /** 会话内 working projection：canonical + 有序 pending batches，仅内存。 */
-  const projection = new WorkingProjectionStore(options.lifecycle);
+  const projection = new WorkingProjectionStore(options.lifecycle, options.content);
   /**
    * 规范投影复用缓存（change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 8.1）。
    *

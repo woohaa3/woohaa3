@@ -171,7 +171,8 @@ function service(options: {
 const body = { requestId: "req-1", purpose: "export" as const, nodeId: "film", clipId: "clip", profileKey: "p" };
 
 async function settle() {
-  await new Promise(resolve => setTimeout(resolve, 25));
+  // 全量并行时事件循环可能被其它重负载测试占用；25ms 会让终态断言早于编排完成。
+  await new Promise(resolve => setTimeout(resolve, 200));
 }
 
 describe("cross-layer failure matrix", () => {

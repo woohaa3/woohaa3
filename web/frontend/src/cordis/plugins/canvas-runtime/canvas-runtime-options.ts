@@ -95,7 +95,7 @@ export type CanvasRuntimeOptions = {
    * 双击拍摄镜头预览卡片 → 进入所属片场并选择该镜头
    * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 5.4）。
    */
-  onShotPreviewEnterIntent?: (request: { previewNodeId: string; filmSetNodeId: string; clipId: string }) => void;
+  onShotPreviewEnterIntent?: (request: { previewNodeId: string; ownerNodeId: string; entityId: string }) => void;
   /** typed event 出口（Cordis `ctx.emit`）。 */
   emit: (
     name:

@@ -386,7 +386,7 @@ fn focused_references_only_expose_enabled_close_hits_in_css_coordinates() {
 #[test]
 fn hidden_shot_has_no_canvas_hit() {
     let mut shot = node("hidden", 100., 100., 240., 180.);
-    shot.shot_preview = Some(serde_json::from_value(serde_json::json!({"filmSetNodeId":"owner","clipId":"clip","kind":"static","name":"镜头","hidden":true,"aspect":1.7778,"duration":0,"state":"ready","coverCamera":{"azimuth":0,"elevation":0.4,"distance":4,"focusOffset":[0,0,0]}})).unwrap());
+    shot.preview_card = Some(serde_json::from_value(serde_json::json!({"nodeId":"hidden","ownerNodeId":"owner","entityId":"clip","animated":false,"title":"镜头","hidden":true,"aspect":1.7778,"duration":0,"state":"ready","coverCamera":{"azimuth":0,"elevation":0.4,"distance":4,"focusOffset":[0,0,0]}})).unwrap());
     let generation = accept_scene(&scene(vec![shot], vec![]));
     assert_eq!(point_query(generation, 200., 180., 1., None).hit, None);
 }

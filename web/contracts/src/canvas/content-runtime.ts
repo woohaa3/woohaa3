@@ -13,10 +13,18 @@
  */
 import type { ContentFrameRuntime } from "./content-frame.js";
 import type { ContentConversionRuntime } from "./content-conversion.js";
+import type { ContentContribution } from "./content-contribution.js";
 import type { ContentMcpRuntime } from "./film-set-mcp.js";
 import type { ContentRecordingRuntime } from "./content-recording.js";
 
 export type CanvasContentRuntime = {
+  /**
+   * 扩展共享的 nodeData owner 贡献（change: 2026-10-28-generic-extension-content-ownership，任务 1.3）。
+   *
+   * 与浏览器端 `CompositeAssetRegistry.contentContributions` 加载同一份模块；宿主把它注册到
+   * canvas-service 的 scope 注册表后才会接受该业务的写命令。
+   */
+  content?: readonly ContentContribution[];
   managedLifecycles?: readonly import("./managed-node-lifecycle.js").ManagedNodeLifecycleAdapter[];
   managedMigrations?: readonly import("./managed-node-lifecycle.js").ManagedNodeMigrationAdapter[];
   /** 预览/历史帧端口。 */

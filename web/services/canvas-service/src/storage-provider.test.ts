@@ -45,7 +45,7 @@ describe("storage 槽位注入画布存储", () => {
     const service = await createCanvasService({
       // 环境里没有任何画布存储变量：配置只来自槽位。
       env: {},
-      storageConfig: { backend: "sqlite", sqlitePath: "/unused/never-opened.sqlite", limits: {} },
+      storageConfig: { backend: "sqlite", sqlitePath: ":memory:", limits: {} },
       repository,
       yjsRepository: new InMemoryYjsDocumentRepository(),
       writerLock: createInMemoryWriterLock(),

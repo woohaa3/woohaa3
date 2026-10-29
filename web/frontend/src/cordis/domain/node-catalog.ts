@@ -19,13 +19,16 @@ import {
   findAgentNodeDescriptor,
   inferWoohaa3CanvasInputRole,
   defaultSelfContained3DNodeData,
+  createFilmSetGroupMarker,
+  defaultInitialShotCamera,
+  DIRECTOR_STUDIO_DEFAULT_TITLE,
   type AgentSemanticKind,
   type CanvasNodeData
 } from "@woohaa3/contracts";
 export { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
 
 /** 前端菜单项 id：共享语义 kind 加上扩展注册的自包含 3D 节点。 */
-export type CanvasNodeTemplateId = AgentSemanticKind | "model3d" | "composite-asset";
+export type CanvasNodeTemplateId = AgentSemanticKind | "model3d" | "composite-asset" | "film-set";
 
 export type CanvasNodeTemplate = {
   id: CanvasNodeTemplateId;
@@ -38,13 +41,20 @@ export type CanvasNodeTemplate = {
 };
 
 /** 节点菜单目录；空白右键与拉线创建共用，顺序与旧 Godot 菜单一致。 */
+const AGENT_TEMPLATES: CanvasNodeTemplate[] = AGENT_NODE_DESCRIPTORS.map((descriptor) => ({
+  id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
+  label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
+  nodeType: descriptor.canonicalType,
+  taskKind: descriptor.taskKind !== undefined
+}));
+
+const FILM_SET_TEMPLATE: CanvasNodeTemplate = { id: "film-set", label: "片场", nodeType: "group", taskKind: false };
+
 export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
-  ...AGENT_NODE_DESCRIPTORS.map((descriptor) => ({
-    id: (descriptor.kind === "model" ? "model3d" : descriptor.kind) as CanvasNodeTemplateId,
-    label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
-    nodeType: descriptor.canonicalType,
-    taskKind: descriptor.taskKind !== undefined
-  }))
+  ...AGENT_TEMPLATES.slice(0, AGENT_TEMPLATES.findIndex((entry) => entry.id === "model3d") + 1),
+  // 片场是扩展内容，不再进入 Agent 通用语义 kind；这里只保留浏览器菜单的新建入口。
+  FILM_SET_TEMPLATE,
+  ...AGENT_TEMPLATES.slice(AGENT_TEMPLATES.findIndex((entry) => entry.id === "model3d") + 1)
 ];
 
 /** model 语义别名与 model3d 菜单项返回同一份模板。 */
@@ -75,6 +85,12 @@ export function connectLabelFor(sourceNodeType: string, targetNodeType: string):
  * 不预填任何任务字段。
  */
 export function defaultNodeDataForType(nodeType: string): CanvasNodeData | undefined {
+  if (nodeType === "film-set") {
+    return {
+      title: DIRECTOR_STUDIO_DEFAULT_TITLE,
+      filmSetGroup: createFilmSetGroupMarker({ cameras: [{ id: "scene-camera", ...defaultInitialShotCamera() }] })
+    };
+  }
   const selfContained = defaultSelfContained3DNodeData(nodeType);
   if (selfContained) return selfContained;
   const descriptor = findAgentNodeDescriptor(nodeType);

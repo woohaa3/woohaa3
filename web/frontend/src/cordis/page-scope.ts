@@ -405,7 +405,8 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
         "agentConversationService",
         "canvasGroupRuns",
         "mediaContent",
-        "settingsOpen"
+        "settingsOpen",
+        "extensionReload"
       ]
     });
     // 面板从此刻起读实时装配状态（见上面的 assembledNow）。

@@ -34,7 +34,7 @@ export type FrontendEventPayloads = {
    * 画布输入层只发布**已校验归属**的目标身份；片场扩展负责进入聚焦、选择该 clipId 并在零点
    * 暂停。宿主不读取片场业务数据，也不猜默认镜头。
    */
-  "ui.shot-preview.enter-requested": { previewNodeId: string; filmSetNodeId: string; clipId: string };
+  "ui.shot-preview.enter-requested": { previewNodeId: string; ownerNodeId: string; entityId: string };
   "task.activity.started": TaskActivityStarted;
   "task.activity.updated": TaskActivityUpdated;
   "task.activity.finished": TaskActivityFinished;

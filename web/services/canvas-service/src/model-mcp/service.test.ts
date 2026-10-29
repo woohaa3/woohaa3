@@ -695,9 +695,9 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     // 组合 ops 含内部模型与地面（不止顶层空源码）。
-    const lastRequest = fake.calls.at(-1) as { ops: unknown[]; motion?: { objects: unknown[] } };
+    const lastRequest = fake.calls.at(-1) as { ops: unknown[]; motion?: { managedItemMotion: unknown[] } };
     expect(lastRequest.ops.length).toBeGreaterThanOrEqual(2);
-    expect(lastRequest.motion?.objects.length).toBeGreaterThanOrEqual(1);
+    expect(lastRequest.motion?.managedItemMotion.length).toBeGreaterThanOrEqual(1);
     // 媒体对象（无真实帧准备）明确失败，不用占位冒充。
     const mediaData = filmSetNodeDataFields(createFilmSetSnapshot({
       title: "媒体片场",

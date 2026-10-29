@@ -10,7 +10,8 @@ import { v2SceneAabb, type SceneV2Op } from "./scene-ir-v2.js";
 import { modelAnchor, modelLayoutAabbRelative, filmSetFitFactor, worldToCanvasPoint } from "./model-focus.js";
 import { filmSetMediaPlanesForNode } from "./render-scene/film-set-projection.js";
 import type { FilmSetContent } from "./film-set-content.js";
-import { COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID } from "./domain/core/composite-asset-identity.js";
+import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
+import { FILM_SET_EXTENSION_ID } from "./film-set-legacy-identity.js";
 import type { Vec3 } from "./model-transform.js";
 
 const box: SceneV2Op = { t: "box", id: "body", parent: null, position: [0, 1, 0], rotation: [0, 0, 0], scale: [1, 1, 1], material: null, color: "#ffaa33", size: [2, 2, 2] };
@@ -79,7 +80,7 @@ it("scene mapping publishes complete layout bounds while retaining the same mode
   const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops });
   const group = migrateFilmSetFixture(canvas, "film");
   const mapped = buildCanvasRenderScene({ canvas: group, modelResources: new Map([["film", resource]]) });
-  expect(mapped.filmSetGroups?.[0]?.bindings.map(binding => binding.transform.x)).toEqual(transforms.map(transform => transform.offset.x));
+  expect(mapped.managedItemGroups?.[0]?.items.map(item => item.transform.x)).toEqual(transforms.map(transform => transform.offset.x));
   expect(mapped.nodes.find(node => node.id === "film")?.compositeAsset).toBeUndefined();
   expect(mapped.nodes.find(node => node.id === "film")?.model?.resourceKey).toBe(resource.resourceKey);
 });

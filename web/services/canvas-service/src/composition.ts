@@ -1,4 +1,4 @@
-import { ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
+import { ContentContributionRegistry, ManagedNodeLifecycleRegistry } from "@woohaa3/contracts";
 import type { FilmSetConversionRegistry, MediaStorageScope, ServerCanvas } from "@woohaa3/contracts";
 import { MCP_INTERNAL_ACTOR_ID } from "@woohaa3/contracts";
 import { createFilmSetConversionProviderSet } from "@woohaa3/contracts";
@@ -124,6 +124,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   const env = options.env ?? (process.env as Record<string, string | undefined>);
   const managedLifecycles = new ManagedNodeLifecycleRegistry();
   for (const adapter of options.contentRuntime?.managedLifecycles ?? []) managedLifecycles.register(adapter);
+  // 内容 owner 注册表是 canvas-service 的进程作用域：扩展声明在 `canvasContent.content`
+  // 或共享 codec 里，宿主启动时一次性注册；重复/非法贡献直接让启动失败，不半注册。
+  const contentContributions = new ContentContributionRegistry();
+  for (const contribution of options.contentRuntime?.content ?? []) contentContributions.register(contribution);
   const log = options.logger ?? (() => undefined);
   const canvasEnabled =
     options.enableCanvasStorage ??
@@ -196,6 +200,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       }
       composition = await composeCanvasStorage({
         managedLifecycles,
+        content: contentContributions,
         env,
         ...(options.storageConfig ? { storageConfig: options.storageConfig } : {}),
         mediaStorage,
@@ -380,6 +385,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     const verifier = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
     syncHandler ??= createSyncUpgradeHandler({
       lifecycle: managedLifecycles,
+      content: contentContributions,
       ...(upstream ? { upstream } : {}),
       // 资源授权接管后，room 建立前的存在性判定改由下面的 principal read 判定负责；
       // 未注入认证（独立单元 / 本机单实例）时保留打开准入：本机有内容，或目录里是
@@ -810,6 +816,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   });
 
   return {
+    content: contentContributions,
     scenePackages,
     sync,
     runService,

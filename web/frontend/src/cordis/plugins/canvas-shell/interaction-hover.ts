@@ -10,12 +10,13 @@ import type { HitTarget } from "./hit-test.js";
 import type { InteractionQuery, InteractionState } from "./interaction-core.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { hoverNodeStore } from "../../services/hover-store.js";
-import { builtinNodeCapabilityResolver, type NodeCapabilityResolver, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver, resolveContentHoverPlaybackTarget, type ContentContributionResolver, type NodeCapabilityResolver } from "@woohaa3/contracts";
 import type { VideoFrameSessions } from "../canvas-runtime/video-frame-session.js";
 
 export type HoverTrackerDeps = {
   projectCanvas?: (canvas: import("@woohaa3/contracts").ServerCanvas | null) => import("@woohaa3/contracts").ServerCanvas | null;
   nodeCapabilities?: NodeCapabilityResolver;
+  content?: ContentContributionResolver;
   state: InteractionState;
   videoSessions?: VideoFrameSessions | null;
   modalActive: () => boolean;
@@ -70,13 +71,15 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
     if (!hit || hit.kind !== "shot-preview") return null;
     const canonical = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
     const canvas = deps.projectCanvas?.(canonical) ?? canonical;
-    const ownership = shotPreviewOwnershipOf(canvas?.nodeData?.[hit.nodeId]);
+    const node = canvas?.document.nodes.find((entry) => entry.id === hit.nodeId);
+    if (!node) return null;
+    const ownership = resolveContentHoverPlaybackTarget(deps.content, node.type, canvas?.nodeData?.[hit.nodeId]);
     if (!ownership) return null;
     return {
       kind: "shot-preview",
       previewNodeId: hit.nodeId,
-      filmSetNodeId: ownership.filmSetNodeId,
-      clipId: ownership.clipId
+      ownerNodeId: ownership.ownerNodeId,
+      entityId: ownership.entityId
     };
   };
   const publishPlaybackTarget = (hit: HitTarget | null) => {

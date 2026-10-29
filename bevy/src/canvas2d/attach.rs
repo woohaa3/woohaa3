@@ -345,7 +345,8 @@ mod tests {
             model_preview: None,
             ghost: false,
             card_label: None,
-            shot_preview: None,
+            preview_card: None,
+            run_feedback: None,
 
             id: id.into(),
             kind: "text".into(),

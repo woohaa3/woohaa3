@@ -248,6 +248,8 @@ export type MutateCamerasBatchOutcome =
   | { ok: false; code: string; message: string; failedIndex?: number };
 
 export type ModelMcpServiceDependencies = {
+  /** 内容 owner 注册表；MCP 批量写入必须与 HTTP/WS 使用同一份语义。 */
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   /** 媒体读取端口（宿主媒体服务）：内容扩展准备原生媒体帧时用。 */
   readMedia?: ContentMediaReader;
   /**

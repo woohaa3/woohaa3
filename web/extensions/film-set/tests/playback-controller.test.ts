@@ -121,7 +121,7 @@ describe("AnimationPlaybackController", () => {
     controller.select("a");
     controller.tick(1000);
     controller.tick(2000);
-    expect(published.at(-1)!.objects).toBe(published[0].objects);
+    expect(published.at(-1)!.managedItemMotion).toBe(published[0].managedItemMotion);
     expect(scheduled).toBe(1);
     controller.pause();
     expect(cancelled).toBe(1);
@@ -149,8 +149,8 @@ describe("AnimationPlaybackController", () => {
     expect(harness.controller.isPlaying()).toBe(true);
     const latest = harness.published.at(-1)!;
     expect(latest.nodeId).toBe("a");
-    expect(latest.objects).toHaveLength(1);
-    expect(latest.objects![0]!.modelMotion).toHaveLength(1);
+    expect(latest.managedItemMotion).toHaveLength(1);
+    expect(latest.managedItemMotion![0]!.modelMotion).toHaveLength(1);
     expect(latest.time).toBe(0);
   });
 

@@ -54,7 +54,8 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         composite_asset: None,
         history_strip: None,
         aggregate_run: None,
-        shot_preview: None,
+        preview_card: None,
+        run_feedback: None,
     }
 }
 
@@ -88,7 +89,6 @@ fn film_set(
         composite_asset: Some(match scope {
             Some((sx, sy, sw, sh)) => crate::protocol::CompositeAssetPresentation {
                 panel: None,
-                ownership_links: None,
                 root_placement: None,
                 content_extent: None,
                 layout_aabb: None,
@@ -105,13 +105,12 @@ fn film_set(
                 y: sy,
                 width: sw,
                 height: sh,
-                media: Vec::new(),
+                media_planes: Vec::new(),
                 item_roots: std::collections::HashMap::new(),
                 item_placements: std::collections::HashMap::new(),
             },
             None => crate::protocol::CompositeAssetPresentation {
                 panel: None,
-                ownership_links: None,
                 root_placement: None,
                 content_extent: None,
                 layout_aabb: None,
@@ -128,7 +127,7 @@ fn film_set(
                 y: 0.0,
                 width: w,
                 height: h,
-                media: Vec::new(),
+                media_planes: Vec::new(),
                 item_roots: std::collections::HashMap::new(),
                 item_placements: std::collections::HashMap::new(),
             },
@@ -143,7 +142,6 @@ fn rect_film_set(id: &str, x: f32, y: f32, w: f32, h: f32) -> GraphNode {
         kind: "model".into(),
         composite_asset: Some(crate::protocol::CompositeAssetPresentation {
             panel: None,
-            ownership_links: None,
             root_placement: None,
             content_extent: None,
             layout_aabb: None,
@@ -155,7 +153,7 @@ fn rect_film_set(id: &str, x: f32, y: f32, w: f32, h: f32) -> GraphNode {
             y,
             width: w,
             height: h,
-            media: Vec::new(),
+            media_planes: Vec::new(),
             item_roots: std::collections::HashMap::new(),
             item_placements: std::collections::HashMap::new(),
         }),
@@ -679,17 +677,17 @@ fn visible_aggregate_handles_are_queryable_and_removed_with_projection() {
 
 /// 拍摄镜头预览卡片节点（最小合法 `shotPreview` 呈现）。
 fn shot_preview_node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
-    GraphNode {
-        shot_preview: Some(
-            serde_json::from_str(
-                r#"{"filmSetNodeId":"film","clipId":"clip-1","kind":"dynamic","name":"镜头",
-                    "aspect":1.7777778,"duration":5,"state":"ready",
-                    "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}"#,
-            )
-            .unwrap(),
-        ),
-        ..node(id, x, y, width, height)
-    }
+    let mut card = node(id, x, y, width, height);
+    card.preview_card = Some(
+        serde_json::from_str(
+            r#"{"nodeId":"shot-preview:p","ownerNodeId":"film","entityId":"clip-1",
+                "animated":true,"title":"镜头","typeLabel":"动态镜头",
+                "aspect":1.7777778,"duration":5,"state":"ready",
+                "coverCamera":{"azimuth":0,"elevation":0.7,"distance":8,"focusOffset":[0,0,0]}}"#,
+        )
+        .unwrap(),
+    );
+    card
 }
 
 #[test]

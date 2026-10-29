@@ -87,6 +87,7 @@ export type CanvasRoomState =
 
 export type CanvasRoomOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   canvasId: string;
   repository: YjsDocumentRepository;
   mediaStorage?: MediaStorage;

@@ -14,6 +14,24 @@ import { createWoohaa3CanvasEdge } from "./domain/index.js";
 import { createFilmSetSnapshot } from "./animation-snapshot.js";
 import { canonicalFilmSetFields } from "./film-set-clip-view.js";
 import { defaultGroupAppearance } from "./group-appearance.js";
+import { ContentContributionRegistry } from "./content-contribution.js";
+
+/** 公开契约测试里的最小 owner codec：只验证注册表分派，不复制任何私有业务字段。 */
+function testContent(): ContentContributionRegistry {
+  const registry = new ContentContributionRegistry();
+  registry.register({
+    extensionId: "game-furnace",
+    nodeData: {
+      decode: (data) => ({ ok: true, value: data }),
+      validatePatch: () => null,
+      normalize: (data) => data,
+      sanitizeRuntime: (data) => data,
+      copy: (data) => ({ data, assetRefs: [], remap: {} }),
+      diff: (before, after) => ({ ok: true, forward: after, inverse: before })
+    }
+  });
+  return registry;
+}
 
 const NOW = "2026-09-26T00:00:00.000Z";
 
@@ -368,7 +386,7 @@ describe("通用复合资产节点（change: 2026-10-10-add-game-furnace-extensi
     const canvas = withExtension3d();
     const result = applyCanvasCommands(canvas, [
       { type: "nodeData.patch", nodeId: "ext", value: { modelScript: "scene.box({ id: 'b', size: [2,2,2] });" } }
-    ], { now: NOW });
+    ], { now: NOW, content: testContent() });
     expect(result.ok).toBe(true);
     if (result.ok) {
       const data = result.canvas.nodeData.ext as Record<string, unknown>;

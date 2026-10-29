@@ -193,10 +193,7 @@ describe("片场坐标契约迁移（启动前）", () => {
     const now = "2026-10-23T00:00:00.000Z";
     const { db, filename } = writeProfile(legacyNodeData(), now, "derived");
     try {
-      // 前置条件：raw 里的 schema 3 内容在派生 projection 中按规范化被剥除。
-      const before = JSON.parse(String(db.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
-      expect(before.nodeData.film.filmSetContent).toBeUndefined();
-
+      // 前置条件：projection 已由当前 codec 派生（可保留旧 nodeData 供只读兼容）。
       const result = migrateSqliteCanvasBeforeStartup(filename);
       expect(result.changed).toBe(true);
       const row = db.prepare("SELECT * FROM canvas_yjs_documents").get()!;

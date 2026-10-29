@@ -9,7 +9,7 @@ use std::collections::HashSet;
 /// 没有卡片可结算，按「未结算」处理，保持 `native-renderer` 单独可编译。
 #[cfg(feature = "canvas-core")]
 fn settled_shot_card(
-    preview: &crate::protocol::ShotPreviewPresentation,
+    preview: &crate::protocol::PreviewCard,
     node_id: &str,
     scene: &Scene,
 ) -> bool {
@@ -18,7 +18,7 @@ fn settled_shot_card(
 
 #[cfg(not(feature = "canvas-core"))]
 fn settled_shot_card(
-    _preview: &crate::protocol::ShotPreviewPresentation,
+    _preview: &crate::protocol::PreviewCard,
     _node_id: &str,
     _scene: &Scene,
 ) -> bool {
@@ -51,9 +51,9 @@ pub(crate) fn update(
         .nodes
         .iter()
         .filter_map(|node| {
-            node.shot_preview
+            node.preview_card
                 .as_ref()
-                .map(|preview| preview.film_set_node_id.as_str())
+                .map(|preview| preview.owner_node_id.as_str())
         })
         .collect();
     let visible_preview_sources: HashSet<&str> = scene
@@ -62,16 +62,16 @@ pub(crate) fn update(
         .filter(|node| {
             // 参考已就绪的卡片显示录制内容，不再需要源片场为它保留驻留
             // （2026-10-28 总览 draw call 优化）；正在播放的活动镜头仍然要。
-            !node.shot_preview.as_ref().is_some_and(|preview| {
+            !node.preview_card.as_ref().is_some_and(|preview| {
                 settled_shot_card(preview, &node.id, scene)
             }) && !crate::canvas_query::shot_preview::focuses_isolate(scene)
                 && !crate::canvas_query::shot_preview::hidden(node)
                 && near_viewport(node, scene, focus)
         })
         .filter_map(|node| {
-            node.shot_preview
+            node.preview_card
                 .as_ref()
-                .map(|preview| preview.film_set_node_id.as_str())
+                .map(|preview| preview.owner_node_id.as_str())
         })
         .collect();
     let mut warm: Vec<_> = models

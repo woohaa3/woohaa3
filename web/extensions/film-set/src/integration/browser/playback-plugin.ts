@@ -140,7 +140,7 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
           // key 含源片场/clip/预览节点、实际视觉内容身份、epoch 与 renderer generation：
           // 重命名与纯画布位置变化不重启，内容变化/目标切换/owner 释放重新等满延迟。
           const candidateKey = target && snapshotHash
-            ? JSON.stringify([target.filmSetNodeId, target.clipId, target.previewNodeId, snapshotHash, eligibility.epoch, runtime?.generation() ?? 0]) : null;
+            ? JSON.stringify([target.ownerNodeId, target.entityId, target.previewNodeId, snapshotHash, eligibility.epoch, runtime?.generation() ?? 0]) : null;
           const ready = delay.sync(candidateKey);
           if (!ready) {
             controller.select(null);
@@ -156,8 +156,8 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
           }
           // 明确 owner + clip：`shot-node-preview` 模式，输入为所属片场 nodeId + clipId，输出为
           // 该卡片；hover 强制循环但**不**写 defaultClipId 或保存的 timeline.loop（design D6）。
-          controller.select(latest.filmSetNodeId, candidates.get(latest.previewNodeId), {
-            clipId: latest.clipId,
+          controller.select(latest.ownerNodeId, candidates.get(latest.previewNodeId), {
+            clipId: latest.entityId,
             viewMode: "shot-node-preview",
             targetPreviewNodeId: latest.previewNodeId,
             forceLoop: true
@@ -173,7 +173,7 @@ export function animationPlaybackExtension(options: AnimationPlaybackExtensionOp
       // 镜头），随即进入预览并停在 T=0。`reconcile` 据此建立 focus-preview 会话（paused）。
       // 归属与聚焦门禁由宿主输入层/reconcile 校验，这里不重复读取业务数据。
       const offShotPreviewEnter = ctx.on("ui.shot-preview.enter-requested", (request) => {
-        ctx.filmSetPlayback.select(request.filmSetNodeId, request.clipId);
+        ctx.filmSetPlayback.select(request.ownerNodeId, request.entityId);
         ctx.filmSetPlayback.preview();
       });
       const onVisibility = () => {

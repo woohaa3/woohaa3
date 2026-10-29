@@ -82,7 +82,7 @@ export function pasteImportExtension(): Plugin.Function<void> {
           if (!writable() || disposed) return;
           const current = woohaa3CanvasStore.getState().canvas;
           if (!current || current.id !== canonical.id) return;
-          const plan = planCanvasPaste({ lifecycle: ctx.get("compositeAssets")?.managedLifecycles, canvas: current, payload: verified, anchor, viewport: controller.viewport() });
+          const plan = planCanvasPaste({ lifecycle: ctx.get("compositeAssets")?.managedLifecycles, content: ctx.get("compositeAssets")?.contentContributions, canvas: current, payload: verified, anchor, viewport: controller.viewport() });
           if (plan) void ctx.canvasEdit.record(plan.commands, plan.newNodeIds.length > 1 ? `粘贴 ${plan.newNodeIds.length} 个作品` : "粘贴作品");
         };
         const projects = payload.nodes.flatMap((node) => {

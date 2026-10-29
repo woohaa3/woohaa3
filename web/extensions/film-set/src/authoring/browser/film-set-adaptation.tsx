@@ -8,7 +8,7 @@
  */
 import { useState, useSyncExternalStore } from "react";
 import type { FilmSetHostContext as Context } from "../../state/browser/host-ports.js";
-import { readFilmSetAnimationProjection, filmSetAnimationsOf, filmSetClipPrecondition, filmSetItemAdapterHash, type FilmSetNodeData, type FilmSetAnimationClip, type FilmSetItem } from "@woohaa3/contracts";
+import { readFilmSetAnimationProjection, filmSetAnimationsOf, filmSetClipPatchCommand, filmSetClipPrecondition, filmSetItemAdapterHash, type FilmSetNodeData, type FilmSetAnimationClip, type FilmSetItem } from "@woohaa3/contracts";
 import { Button } from "@woohaa3/ui/primitives";
 
 export type AdaptationState = {
@@ -68,7 +68,7 @@ export function FilmSetAdaptationConfirm({
     setError(null);
     const op = { kind: "confirm-adaptation" as const, itemId: item.id, expectedAdapterHash: filmSetItemAdapterHash(item) };
     const result = ctx.canvasSession.submitCommands(
-      [{ type: "filmSet.clipPatch", nodeId, clipId: clip.id, op, expectedHash: filmSetClipPrecondition(clips, clip.id, op) }],
+      [filmSetClipPatchCommand({ nodeId, clipId: clip.id, op, expectedHash: filmSetClipPrecondition(clips, clip.id, op) })],
       `web-adapt-${crypto.randomUUID()}`
     );
     if (!result.ok) {

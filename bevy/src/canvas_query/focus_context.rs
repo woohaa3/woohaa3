@@ -43,15 +43,9 @@ pub(crate) fn node<'a>(scene: &Scene, original: &'a GraphNode) -> Cow<'a, GraphN
     .into();
     node.card_label = Some(
         original
-            .shot_preview
+            .preview_card
             .as_ref()
-            .map(|shot| {
-                if shot.kind == "dynamic" {
-                    "video"
-                } else {
-                    "image"
-                }
-            })
+            .map(|shot| if shot.animated { "video" } else { "image" })
             .unwrap_or(if original.composite_asset.is_some() {
                 "model"
             } else {
@@ -75,7 +69,7 @@ pub(crate) fn node<'a>(scene: &Scene, original: &'a GraphNode) -> Cow<'a, GraphN
     node.group = None;
     node.model = None;
     node.model_preview = None;
-    node.shot_preview = None;
+    node.preview_card = None;
     node.texture = false;
     node.busy = false;
     node.media_loading = false;
@@ -113,9 +107,12 @@ pub(crate) fn overlay(scene: &Scene) -> Cow<'_, Scene> {
             .selection
             .nodes
             .retain(|id| !hidden.contains(id.as_str()));
-        overlay
-            .shot_preview_links
-            .retain(|link| !hidden.contains(link.preview_node_id.as_str()));
+        overlay.ownership_links.retain(|link| {
+            !link
+                .target_node_ids
+                .iter()
+                .any(|id| hidden.contains(id.as_str()))
+        });
         return Cow::Owned(overlay);
     }
     let mut overlay = Scene::default();
@@ -211,7 +208,7 @@ mod tests {
         assert!(overlay.nodes.iter().all(|n| n.composite_asset.is_none()
             && n.model.is_none()
             && n.model_preview.is_none()
-            && n.shot_preview.is_none()
+            && n.preview_card.is_none()
             && !n.texture));
         assert_eq!(
             source.nodes[1]

@@ -11,7 +11,7 @@
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { createHighEntropyId, managedNodeRelationOf, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
+import { createHighEntropyId, managedNodeRelationOf, readCompositeAssetExtensionId, type ContentContributionResolver, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -35,6 +35,8 @@ export type PlanPasteOptions = {
   /** 当前规范画布（用于过滤失效入边）。 */
   canvas: ServerCanvas;
   lifecycle?: ManagedNodeLifecycleResolver;
+  /** 内容 owner 注册表：复制/粘贴必须使用同一份 codec 语义。 */
+  content?: ContentContributionResolver;
   payload: CanvasCopyPayload;
   anchor: PasteAnchor;
   /** 当前本地视口（视口是各浏览器本地状态，不在规范画布内）。 */
@@ -142,10 +144,32 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
       }
     }
   } catch { return null; }
+  // 内容 owner 的 copy：与复制端同一份 codec；粘贴时用真实新 id 重新映射外部实例。
+  if (options.content) {
+    for (const node of payload.nodes) {
+      if (remappedData.has(node.id)) continue;
+      const data = payload.nodeData[node.id];
+      if (!data || node.type !== "composite-asset") continue;
+      const extensionId = readCompositeAssetExtensionId(data);
+      const codec = extensionId ? options.content.resolve(extensionId)?.nodeData : null;
+      if (!codec) return null;
+      let copied: { data: unknown; remap: Readonly<Record<string, string>> };
+      try {
+        copied = codec.copy(data, { nodeIds: new Map(idMap), createId: makeId });
+      } catch { return null; }
+      if (typeof copied.data !== "object" || copied.data === null || Array.isArray(copied.data)) return null;
+      remappedData.set(node.id, copied.data as import("@woohaa3/contracts").CanvasNodeData);
+      for (const [from, to] of Object.entries(copied.remap)) {
+        if (!idMap.has(from) || typeof to !== "string" || to.length === 0) return null;
+        idMap.set(from, to);
+      }
+    }
+  }
   // Missing extension support is explicit: never create a partial owner closure.
   for (const node of payload.nodes) {
     const relation = managedNodeRelationOf(payload.nodeData[node.id]);
     if (relation && (!idMap.has(relation.ownerNodeId) || !remappedData.has(node.id))) return null;
+    if (node.type === "composite-asset" && options.content && !remappedData.has(node.id)) return null;
   }
   if (new Set(idMap.values()).size !== idMap.size) return null;
 

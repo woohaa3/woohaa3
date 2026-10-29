@@ -419,7 +419,7 @@ export function buildAnimationPlayback(input: {
     },
     cameraMotion: input.ir.cameraMotion,
     modelMotion: input.ir.modelMotion,
-    ...(objects.motions.length > 0 ? { objects: objects.motions } : {})
+    ...(objects.motions.length > 0 ? { managedItemMotion: objects.motions } : {})
   };
 }
 

@@ -31,15 +31,11 @@ pub(super) fn sync(commands: &mut Commands, models: &mut ModelVisuals, scene: &S
     // Group geometry is prepared under its owner. Edit the binding part root,
     // never the independently displayed source card root. Geometry and payload
     // identity remain stable for transform/visibility edits.
-    for group in &scene.film_set_groups {
-        let Some(root) = models.roots.get_mut(&group.owner_id) else {
-            continue;
-        };
-        for binding in &group.bindings {
-            let id = format!("{}:{}", binding.binding_id.len(), binding.binding_id);
-            let Some(entity) = root.part_entities.get(&id) else {
-                continue;
-            };
+    for group in &scene.managed_item_groups {
+        let Some(root) = models.roots.get_mut(&group.owner_node_id) else { continue; };
+        for binding in &group.items {
+            let id = format!("{}:{}", binding.item_id.len(), binding.item_id);
+            let Some(entity) = root.part_entities.get(&id) else { continue; };
             let base = Transform {
                 translation: Vec3::new(
                     binding.transform.x,

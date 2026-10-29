@@ -1,6 +1,6 @@
 /** Read-only playback/capture view derived from group-owned bindings and live cards. */
 import { decodeFilmSetNodeData } from "./canvas-node-model.js";
-import { isFilmSetNode } from "./domain/core/composite-asset-identity.js";
+import { isFilmSetNode } from "./film-set-legacy-identity.js";
 import { readFilmSetGroupMarker } from "./film-set-group.js";
 import { staticShotCameraMotion } from "./film-set-animations.js";
 import { DEFAULT_FILM_SET_LOCAL_TRANSFORM } from "./film-set-content.js";

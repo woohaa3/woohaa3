@@ -1,5 +1,5 @@
 import type { ServerCanvas, StoredAsset } from "./domain/types.js";
-import { isFilmSetNode } from "./domain/core/composite-asset-identity.js";
+import { isFilmSetNode } from "./film-set-legacy-identity.js";
 import { readFilmSetContent } from "./film-set-content.js";
 import { fnv1a64Hex } from "./content-hash.js";
 import { readFilmSetGroupMarker } from "./film-set-group.js";

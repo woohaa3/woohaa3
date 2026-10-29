@@ -14,6 +14,8 @@ import { EditJournal, type EditJournalSnapshot, type JournalEntry, type JournalP
 
 export type CanvasEditServiceOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
+  /** 页面 scope 的内容 owner 注册表；规划阶段与 reducer 使用同一份语义。 */
+  content?: import("@woohaa3/contracts").ContentContributionResolver;
   session: CanvasSession;
   /** 当前规范画布（working projection 的 committed 部分）。 */
   getCanvas: () => ServerCanvas | null;
@@ -71,6 +73,24 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   const listeners = new Set<(snapshot: CanvasEditSnapshot) => void>();
   let busy = false;
 
+  /** 通用结构操作 + owner 段按同一批次提交（任一步失败整批回滚）。 */
+  const plannedCommands = (edit: JournalPlannedEdit): CanvasCommand[] => {
+    const commands: CanvasCommand[] = [];
+    if (edit.operations.length > 0) {
+      commands.push({ type: "edit.apply", preconditions: edit.preconditions, operations: edit.operations });
+    }
+    for (const segment of edit.extensions ?? []) {
+      commands.push({
+        type: "extension.edit",
+        extensionId: segment.extensionId,
+        direction: segment.direction,
+        edit: segment.edit,
+        preconditions: segment.preconditions
+      });
+    }
+    return commands;
+  };
+
   const journal = new EditJournal({
     isWritable: () => options.session.isWritable(),
     hasNetChange: (commandId) => {
@@ -80,7 +100,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     },
     submitGuarded: (input) => {
       const result = options.session.submitCommands(
-        [{ type: "edit.apply", preconditions: input.edit.preconditions, operations: input.edit.operations }],
+        plannedCommands(input.edit),
         input.commandId
       );
       if (!result.ok) return { ok: false, reason: result.reason, code: result.code };
@@ -147,7 +167,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   const plan = (commands: readonly CanvasCommand[]): { ok: true } & EditPlan | { ok: false; reason: string } => {
     const canvas = options.getCanvas();
     if (!canvas) return { ok: false, reason: "画布尚未加载" };
-    const planned = planCanvasEdit(canvas, commands, { lifecycle: options.lifecycle });
+    const planned = planCanvasEdit(canvas, commands, { lifecycle: options.lifecycle, ...(options.content ? { content: options.content } : {}) });
     if (!planned.ok) return { ok: false, reason: planned.reason };
     return { ok: true, forward: planned.forward, inverse: planned.inverse };
   };
@@ -156,10 +176,7 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     edit: JournalPlannedEdit,
     commandId: string
   ): Promise<{ ok: true; committed: boolean } | { ok: false; reason: string }> => {
-    const result = options.session.submitCommands(
-      [{ type: "edit.apply", preconditions: edit.preconditions, operations: edit.operations }],
-      commandId
-    );
+    const result = options.session.submitCommands(plannedCommands(edit), commandId);
     if (!result.ok) return { ok: false, reason: result.reason };
     const settled = await result.handle.settled;
     if (settled.state === "rejected") return { ok: false, reason: settled.error ?? "操作被拒绝" };
@@ -202,8 +219,16 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
       try {
         const result = await journal.recordAndSubmit({
           label,
-          forward: { preconditions: planned.forward.preconditions, operations: planned.forward.operations },
-          inverse: { preconditions: planned.inverse.preconditions, operations: planned.inverse.operations }
+          forward: {
+            preconditions: planned.forward.preconditions,
+            operations: planned.forward.operations,
+            ...(planned.forward.extensions ? { extensions: planned.forward.extensions } : {})
+          },
+          inverse: {
+            preconditions: planned.inverse.preconditions,
+            operations: planned.inverse.operations,
+            ...(planned.inverse.extensions ? { extensions: planned.inverse.extensions } : {})
+          }
         });
         if (!result.ok) return { ok: false, reason: result.reason };
         return { ok: true, entry: result.entry };

@@ -15,7 +15,7 @@ import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { planDeleteNodes } from "../../../extension-api/command-planner.js";
 import type { InteractionCore } from "./interaction-core.js";
-import { managedNodeRelationOf, partitionManagedNodeDeletion } from "@woohaa3/contracts";
+import { decideContentAction, managedNodeRelationOf, partitionManagedNodeDeletion } from "@woohaa3/contracts";
 
 /** 页内剪贴板 fallback 的全局键。 */
 export const MEMORY_CLIPBOARD_KEY = "__canvasMemoryClipboard";
@@ -49,7 +49,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     const copyable = copyableSelection();
     if (!copyable) return null;
     // Payload includes the generic owner closure; standalone media is frozen below.
-    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others, options.compositeAssets?.contentContributions);
     if (!payload) return null;
     const text = serializeCanvasCopyPayload(payload);
     (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
@@ -59,7 +59,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
   const freezeClipboardText = async (): Promise<string | null> => {
     const copyable = copyableSelection();
     if (!copyable) return null;
-    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    const payload = buildCanvasCopyPayload(copyable.canvasState, copyable.others, options.compositeAssets?.contentContributions);
     if (!payload) return null;
     const included = new Set(payload.nodes.map(n => n.id));
     const liveIds = payload.nodes.filter(n => {
@@ -70,7 +70,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (!liveIds.length) return buildClipboardText();
     if (!options.mediaContent) throw Error("媒体内容 provider 未就绪，无法复制");
     const frozen = await options.mediaContent.freeze(copyable.canvasState, liveIds, crypto.randomUUID());
-    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others);
+    const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others, options.compositeAssets?.contentContributions);
     if (!frozenPayload) return null;
     const text = serializeCanvasCopyPayload(frozenPayload);
     (target as unknown as Record<string, unknown>)[MEMORY_CLIPBOARD_KEY] = text;
@@ -98,11 +98,17 @@ export function createKeyboardShortcuts(core: InteractionCore) {
       return;
     }
     const deletion = partitionManagedNodeDeletion(canvasState.document.nodes, canvasState.nodeData, snapshot.nodeIds);
-    const deletable = deletion.allowed;
+    const contentDenied = snapshot.nodeIds.filter((id) => {
+      const node = canvasState.document.nodes.find((entry) => entry.id === id);
+      return node && !decideContentAction(options.compositeAssets?.contentContributions, "delete", node.type, canvasState.nodeData[id]).allowed;
+    });
+    const deletable = deletion.allowed.filter((id) => !contentDenied.includes(id));
     if (deletable.length === 0) {
-      if (deletion.blocked.length > 0) notifyManagedRejected("托管节点需通过所属作品管理");
+      if (contentDenied.length > 0) notifyManagedRejected("受保护内容仅可只读，不能直接删除");
+      else if (deletion.blocked.length > 0) notifyManagedRejected("托管节点需通过所属作品管理");
       return;
     }
+    if (contentDenied.length > 0) notifyManagedRejected("已删除其余作品；受保护内容保持只读");
     if (!writable()) return;
     // 删除经页面编辑历史（可撤销）；回退直接提交（任务 1.5/1.7）。
     const label = deletable.length > 1 ? `删除 ${deletable.length} 个作品` : "删除作品";
@@ -291,7 +297,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     if (isEditableElement(event.target) || hasSelectedText(target)) return;
     const copyable = copyableSelection();
     if (!copyable) return;
-    const closure = buildCanvasCopyPayload(copyable.canvasState, copyable.others);
+    const closure = buildCanvasCopyPayload(copyable.canvasState, copyable.others, options.compositeAssets?.contentContributions);
     const included = new Set(closure?.nodes.map(n => n.id));
     if (closure?.nodes.some(n => {
       const data = copyable.canvasState.nodeData[n.id];

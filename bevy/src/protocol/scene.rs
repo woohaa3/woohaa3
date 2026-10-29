@@ -5,8 +5,11 @@ use serde::Deserialize;
 
 use super::image_focus::ImageFocus;
 use super::model::ModelReference;
+use super::primitives::{
+    ManagedItemGroup, MediaPlane, OwnershipLink, PreviewCard, RunFeedback,
+};
 use super::scene_instant::{
-    AggregateConnect, AnimationPlayback, CursorPoint, Draft, DragAttach, Marquee, ModelEditor,
+    AggregateConnect, AnimationPlayback, Draft, DragAttach, Marquee, ModelEditor,
     ModelFocus, NodeActions, NodeHover, SurfaceSize,
 };
 use super::theme::Theme;
@@ -72,241 +75,14 @@ pub(crate) struct GraphNode {
     /// 缺失或 `active=false` 时不绘制。
     #[serde(default, rename = "aggregateRun")]
     pub(crate) aggregate_run: Option<AggregateRunPresentation>,
-    /// 拍摄镜头预览卡片呈现
-    /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D2/D8）。
-    /// 仅预览节点携带；标题/类型/画幅/时长/状态都是源镜头的只读投影。缺失即不绘制预览内容。
-    #[serde(default, rename = "shotPreview")]
-    pub(crate) shot_preview: Option<ShotPreviewPresentation>,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct FilmSetGroupBinding {
-    pub(crate) binding_id: String,
-    pub(crate) source_node_id: String,
-    pub(crate) kind: String,
-    pub(crate) content_key: String,
-    #[serde(default)]
-    pub(crate) resource_key: Option<String>,
-    #[serde(default)]
-    pub(crate) signature: Option<String>,
-    pub(crate) transform: FilmSetGroupTransform,
-    #[serde(default = "default_group_binding_visible")]
-    pub(crate) visible: bool,
-    #[serde(default)]
-    pub(crate) diagnostic: Option<String>,
-    #[serde(default = "default_group_binding_aspect")]
-    pub(crate) aspect_ratio: f32,
-}
-
-#[derive(Clone, Deserialize)]
-pub(crate) struct FilmSetGroupTransform {
-    pub(crate) x: f32,
-    pub(crate) y: f32,
-    pub(crate) z: f32,
-    pub(crate) yaw: f32,
-    pub(crate) scale: f32,
-}
-
-#[derive(Clone, Deserialize)]
-pub(crate) struct FilmSetGroupGround {
-    #[serde(default)]
-    pub(crate) transform: Option<FilmSetGroupTransform>,
-    pub(crate) width: f32,
-    pub(crate) depth: f32,
-    #[serde(default)]
-    pub(crate) color: Option<String>,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct FilmSetGroupPreparation {
-    pub(crate) schema_version: String,
-    pub(crate) owner_id: String,
-    pub(crate) badge_origin: CursorPoint,
-    #[serde(default)]
-    pub(crate) scene_transform: Option<FilmSetGroupTransform>,
-    #[serde(default)]
-    pub(crate) bindings: Vec<FilmSetGroupBinding>,
-    #[serde(default)]
-    pub(crate) ground: Option<FilmSetGroupGround>,
-    #[serde(default)]
-    pub(crate) active_clip: Option<String>,
-}
-
-const FILM_SET_GROUP_RENDER_SCHEMA_VERSION: &str = "woohaa-film-set-group-render-v1";
-
-fn default_group_binding_aspect() -> f32 {
-    1.0
-}
-
-fn default_group_binding_visible() -> bool {
-    true
-}
-
-/// 节点下方独立历史条呈现（change: 2026-10-12-unify-generation-history-strip）。
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ShotPreviewPresentation {
-    /// Canvas presentation only; offscreen capture still resolves this target.
-    #[serde(default)]
-    pub(crate) hidden: bool,
-    /// 所属片场 canonical 节点 id（归属校验与双击导航）。
-    #[serde(rename = "filmSetNodeId")]
-    pub(crate) film_set_node_id: String,
-    /// 所属镜头稳定 clipId。
-    #[serde(rename = "clipId")]
-    pub(crate) clip_id: String,
-    /// 静态/动态类型（`static` / `dynamic`）。
-    pub(crate) kind: String,
-    /// 镜头名（卡片主标题）。
-    #[serde(default)]
-    pub(crate) name: String,
-    /// 画幅（宽/高数值）；内容完整保留该比例。
-    pub(crate) aspect: f32,
-    /// 时间线时长（秒）；静态为 0。
-    #[serde(default)]
-    pub(crate) duration: f32,
-    #[serde(default)]
-    pub(crate) backdrop: Option<String>,
-    /// 零点封面相机（静态与非活动动态卡片使用；design D7）。
-    #[serde(rename = "coverCamera")]
-    pub(crate) cover_camera: ShotCoverCamera,
-    /// 就绪/待更新/失败状态。
-    pub(crate) state: String,
-    /// 本地播放进度 0..1；仅动态活动预览携带（不参与 canonical）。
-    #[serde(default)]
-    pub(crate) progress: Option<f32>,
-    /// 是否正在本地播放（仅动态）。
-    #[serde(default)]
-    pub(crate) playing: Option<bool>,
-    /// 可理解诊断（`stale`/`error` 时）。
-    #[serde(default)]
-    pub(crate) diagnostic: Option<String>,
-}
-
-impl ShotPreviewPresentation {
-    /// 边界级防御校验：身份非空/长度、kind 枚举、状态枚举、有限画幅/时长/进度。
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
-        if self.film_set_node_id.is_empty()
-            || self.film_set_node_id.len() > 256
-            || self.clip_id.is_empty()
-            || self.clip_id.len() > 256
-        {
-            return Err("Invalid shot preview ownership");
-        }
-        if self.kind != "static" && self.kind != "dynamic" {
-            return Err("Invalid shot preview kind");
-        }
-        if !matches!(
-            self.state.as_str(),
-            "preparing" | "ready" | "stale" | "error"
-        ) {
-            return Err("Invalid shot preview state");
-        }
-        if !self.aspect.is_finite()
-            || self.aspect <= 0.0
-            || !self.duration.is_finite()
-            || self.duration < 0.0
-        {
-            return Err("Invalid shot preview framing");
-        }
-        if self
-            .progress
-            .is_some_and(|progress| !progress.is_finite() || !(0.0..=1.0).contains(&progress))
-        {
-            return Err("Invalid shot preview progress");
-        }
-        if self
-            .diagnostic
-            .as_ref()
-            .is_some_and(|text| text.len() > 1024)
-        {
-            return Err("Invalid shot preview diagnostic");
-        }
-        self.cover_camera.validate()?;
-        Ok(())
-    }
-}
-
-/// 拍摄镜头零点封面相机（change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
-///
-/// 静态与非活动动态卡片据此在世界包围球上派生相机姿态：不需要逐帧动作 IR、也不传像素。
-/// 活动动态卡片改用 `AnimationPlayback` 同一 T 的采样相机。
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ShotCoverCamera {
-    pub(crate) azimuth: f32,
-    pub(crate) elevation: f32,
-    pub(crate) distance: f32,
-    #[serde(default)]
-    pub(crate) focus_offset: [f32; 3],
-}
-
-impl ShotCoverCamera {
-    /// 有限输入、正距离与合法仰角；错误整体拒绝，不部分降级。
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
-        if ![self.azimuth, self.elevation, self.distance]
-            .iter()
-            .chain(self.focus_offset.iter())
-            .all(|value| value.is_finite())
-            || self.distance <= 0.0
-            || self.elevation.abs() >= std::f32::consts::FRAC_PI_2
-        {
-            return Err("Invalid shot cover camera");
-        }
-        Ok(())
-    }
-
-    /// 零点相机状态（与 `AnimationPlayback::initial_camera_state` 同构，供运动/shots 派生复用）。
-    pub(crate) fn camera_state(&self) -> crate::motion::InitialCameraState {
-        crate::motion::camera_state_from_arrays(
-            self.azimuth,
-            self.elevation,
-            self.distance,
-            self.focus_offset,
-        )
-    }
-}
-
-/// 拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
-///
-/// 从源镜头小相机世界姿态投影出的画布起点，连到预览卡片接口（左侧中点）。这是**派生呈现**：
-/// 不进入 `document.edges` 或 inputMapping，没有端口、删除按钮、断开或重连。
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ShotPreviewLink {
-    pub(crate) id: String,
-    /// 归属源片场 canonical 节点 id。
-    #[serde(rename = "ownerNodeId")]
-    pub(crate) owner_node_id: String,
-    /// 目标预览卡片 canonical 节点 id。
-    #[serde(rename = "previewNodeId")]
-    pub(crate) preview_node_id: String,
-    #[serde(rename = "clipId")]
-    pub(crate) clip_id: String,
-    /// 画布 2D 起点。
-    pub(crate) start: CursorPoint,
-}
-
-impl ShotPreviewLink {
-    /// 边界级防御校验：身份非空/长度、有限起点。
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
-        if self.id.is_empty()
-            || self.id.len() > 512
-            || self.owner_node_id.is_empty()
-            || self.owner_node_id.len() > 256
-            || self.preview_node_id.is_empty()
-            || self.preview_node_id.len() > 256
-            || self.clip_id.is_empty()
-            || self.clip_id.len() > 256
-            || !self.start.x.is_finite()
-            || !self.start.y.is_finite()
-        {
-            return Err("Invalid shot preview link");
-        }
-        Ok(())
-    }
+    /// 派生：由场景级 `preview_cards` 按 `nodeId` 关联的预览卡片原语（渲染/命中共用）。
+    ///
+    /// 不是 wire 字段：接受点从通用原语索引回来，保持查询/绘制只需节点即可取得同一份事实。
+    #[serde(skip)]
+    pub(crate) preview_card: Option<PreviewCard>,
+    /// 派生：由场景级 `run_feedback` 按 `nodeId` 关联的运行反馈原语。
+    #[serde(skip)]
+    pub(crate) run_feedback: Option<RunFeedback>,
 }
 
 /// 历史条圆点状态（change: 2026-10-12-unify-generation-history-strip）。
@@ -365,54 +141,17 @@ impl HistoryStripPresentation {
     }
 }
 
-/// 聚合节点运行遮罩呈现（change: 2026-10-12-unify-generation-history-strip）。
+/// 聚合节点运行遮罩呈现（change: 2026-10-12-unify-generation-history-strip；
+///  change: 2026-10-28-generic-extension-content-ownership 任务 4.3）。
+///
+/// 只保留通用布尔；阶段/文案来自场景级 `run_feedback` 原语（按 `nodeId` 关联）。
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AggregateRunPresentation {
     #[serde(default)]
-    pub(crate) film_set: Option<FilmSetRunFeedback>,
-    #[serde(default)]
     pub(crate) active: bool,
     #[serde(default, rename = "reduceMotion")]
     pub(crate) reduce_motion: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct FilmSetRunFeedback {
-    pub(crate) operation_key: String,
-    pub(crate) phase: String,
-    pub(crate) source: String,
-    pub(crate) label_code: String,
-}
-
-impl FilmSetRunFeedback {
-    fn validate(&self) -> Result<(), &'static str> {
-        if self.operation_key.is_empty()
-            || self.operation_key.len() > 2048
-            || !matches!(
-                self.phase.as_str(),
-                "submitting" | "queued" | "running" | "committing" | "verifying"
-            )
-            || !matches!(
-                self.source.as_str(),
-                "conversion" | "agent" | "operation" | "legacy" | "submission"
-            )
-            || !matches!(
-                self.label_code.as_str(),
-                "submitting"
-                    | "queued"
-                    | "generating"
-                    | "modifying"
-                    | "running"
-                    | "saving"
-                    | "verifying"
-            )
-        {
-            return Err("Invalid film set run feedback");
-        }
-        Ok(())
-    }
 }
 
 /// 复合资产范围形状（change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D3 修订）。
@@ -476,8 +215,6 @@ pub(crate) struct CompositeAssetPresentation {
     #[serde(default)]
     pub(crate) panel: Option<super::CompositeContainerPanel>,
     #[serde(default)]
-    pub(crate) ownership_links: Option<CompositeOwnershipLinks>,
-    #[serde(default)]
     pub(crate) root_placement: Option<super::ModelPlacement>,
     #[serde(default)]
     pub(crate) content_extent: Option<f32>,
@@ -499,64 +236,16 @@ pub(crate) struct CompositeAssetPresentation {
     pub(crate) width: f32,
     pub(crate) height: f32,
     /// 场内媒体平面（图片/视频）；缺失即无媒体平面
-    /// （change: 2026-10-08-make-film-set-model-only，design D5）。
-    #[serde(default)]
-    pub(crate) media: Vec<ModelMediaPlane>,
+    /// （change: 2026-10-08-make-film-set-model-only，design D5；
+    ///  change: 2026-10-28-generic-extension-content-ownership 任务 4.3：通用 `mediaPlanes`）。
+    #[serde(default, rename = "mediaPlanes")]
+    pub(crate) media_planes: Vec<MediaPlane>,
     /// 稳定 itemId → 组合作用域根 id（change: 2026-10-09-add-film-set-object-motion-and-editing）。
     /// 供对象模式 picking 按 item 分组派生 AABB。
     #[serde(default, rename = "itemRoots")]
     pub(crate) item_roots: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub(crate) item_placements: std::collections::HashMap<String, super::ModelPlacement>,
-}
-
-/// Trusted, derived ownership presentation, independent of editable edges.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CompositeOwnershipLinks {
-    pub(crate) anchor: [f32; 3],
-    pub(crate) target_node_ids: Vec<String>,
-    #[serde(default)]
-    pub(crate) target_item_ids: std::collections::HashMap<String, String>,
-}
-
-/// 片场媒体平面（change: 2026-10-08-make-film-set-model-only，design D5）。
-///
-/// 世界坐标由 Web 映射层派生（含片场 root、局部变换与竖直落地）；Rust 只据此放置真实平面
-/// 并复用主 renderer 的纹理通道。纹理由 `set_model_media_texture(planeId, ...)` 上传，键为
-/// 全局唯一的 `planeId`（`nodeId::itemId`）。
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ModelMediaPlane {
-    #[serde(default)]
-    pub(crate) item_id: String,
-    #[serde(default = "default_unit")]
-    pub(crate) unit: f32,
-    /// 全局唯一平面 id（`nodeId::itemId`）。
-    pub(crate) id: String,
-    /// `image` / `video`（语义，渲染一致）。
-    pub(crate) kind: String,
-    /// 平面世界中心（片场 root × 局部变换投影后）。
-    pub(crate) x: f32,
-    pub(crate) y: f32,
-    pub(crate) z: f32,
-    /// 平面世界尺寸（已含固有宽高比与局部缩放）。
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    /// 绕世界 Y 轴角度（弧度）。
-    #[serde(default)]
-    pub(crate) yaw: f32,
-    /// 是否已上传纹理（供渲染器决定是否等待）。
-    #[serde(default = "default_true")]
-    pub(crate) has_texture: bool,
-}
-
-fn default_unit() -> f32 {
-    1.0
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl CompositeAssetPresentation {
@@ -593,27 +282,11 @@ impl CompositeAssetPresentation {
         {
             return Err("Invalid film set item placement");
         }
-        for plane in &self.media {
-            if plane.id.is_empty()
-                || (plane.kind != "image" && plane.kind != "video")
-                || ![
-                    plane.x,
-                    plane.y,
-                    plane.z,
-                    plane.width,
-                    plane.height,
-                    plane.yaw,
-                ]
-                .iter()
-                .all(|v| v.is_finite())
-                || plane.width <= 0.0
-                || plane.height <= 0.0
-            {
-                return Err("Invalid film set media plane");
-            }
+        for plane in &self.media_planes {
+            plane.validate()?;
         }
-        if self.media.len() > 256 {
-            return Err("Too many film set media planes");
+        if self.media_planes.len() > 256 {
+            return Err("Too many media planes");
         }
         Ok(())
     }
@@ -736,15 +409,18 @@ pub(crate) struct Scene {
     #[serde(default, rename = "modelFocusContext")]
     pub(crate) model_focus_context: Vec<FocusContextNode>,
     pub(crate) edges: Vec<Edge>,
-    /// Canonical film-set group scene primitives. Legacy composite fields are
-    /// retained only for the read-only compatibility window.
-    #[serde(default, rename = "filmSetGroups")]
-    pub(crate) film_set_groups: Vec<FilmSetGroupPreparation>,
-    /// 派生拍摄镜头归属线集合
-    /// （change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）。
-    /// 独立于 `edges`：表示源镜头到预览卡片的永久归属，无端口/删除/重连，不进入普通边拓扑。
-    #[serde(default, rename = "shotPreviewLinks")]
-    pub(crate) shot_preview_links: Vec<ShotPreviewLink>,
+    /// 受管条目组原语（change: 2026-10-28-generic-extension-content-ownership 任务 4.3）。
+    #[serde(default, rename = "managedItemGroups")]
+    pub(crate) managed_item_groups: Vec<ManagedItemGroup>,
+    /// 预览卡片原语（任务 4.3）：同一 `nodeId` 至多一项。
+    #[serde(default, rename = "previewCards")]
+    pub(crate) preview_cards: Vec<PreviewCard>,
+    /// 归属线原语（任务 4.3）：派生呈现，独立于普通 `edges` 拓扑。
+    #[serde(default, rename = "ownershipLinks")]
+    pub(crate) ownership_links: Vec<OwnershipLink>,
+    /// 运行反馈原语（任务 4.3）：按 `nodeId` 关联到 owner 节点。
+    #[serde(default, rename = "runFeedback")]
+    pub(crate) run_feedback: Vec<RunFeedback>,
     #[serde(default)]
     pub(crate) selection: Selection,
     #[serde(default)]
@@ -871,13 +547,12 @@ impl Scene {
                     return Err("Invalid group model bounds");
                 }
             }
-            if let Some(run) = &node.aggregate_run {
-                if let Some(film) = &run.film_set {
-                    if !run.active || node.composite_asset.is_none() {
-                        return Err("Invalid film set run owner");
-                    }
-                    film.validate()?;
-                }
+            if node
+                .aggregate_run
+                .as_ref()
+                .is_some_and(|run| !run.active && node.run_feedback.is_none())
+            {
+                // `active=false` 与派生反馈互斥；反馈存在时由场景级原语驱动。
             }
             if let Some(view) = &node.model_preview {
                 if ![view.azimuth, view.elevation, view.distance_scale]
@@ -898,98 +573,61 @@ impl Scene {
             if let Some(strip) = &node.history_strip {
                 strip.validate()?;
             }
-            if let Some(shot_preview) = &node.shot_preview {
-                shot_preview.validate()?;
+            if let Some(feedback) = &node.run_feedback {
+                feedback.validate()?;
             }
         }
-        if self.film_set_groups.len() > 4096 {
-            return Err("Too many film set groups");
+        if self.managed_item_groups.len() > 4096 {
+            return Err("Too many managed item groups");
         }
-        let mut group_ids = std::collections::HashSet::new();
-        for group in &self.film_set_groups {
-            if group.schema_version != FILM_SET_GROUP_RENDER_SCHEMA_VERSION
-                || group.owner_id.is_empty()
-                || !group_ids.insert(&group.owner_id)
-                || !group.badge_origin.x.is_finite()
-                || !group.badge_origin.y.is_finite()
-                || !self
-                    .nodes
-                    .iter()
-                    .any(|node| node.id == group.owner_id && node.kind == "group")
-                || group.bindings.len() > 1024
+        let mut group_owners = std::collections::HashSet::new();
+        for group in &self.managed_item_groups {
+            if !group_owners.insert(&group.owner_node_id) {
+                return Err("Invalid managed item group");
+            }
+            group.validate(&self.nodes)?;
+        }
+        if self.preview_cards.len() > 4096 {
+            return Err("Too many preview cards");
+        }
+        let mut card_nodes = std::collections::HashSet::new();
+        for card in &self.preview_cards {
+            card.validate()?;
+            if !card_nodes.insert(&card.node_id)
+                || !self.nodes.iter().any(|node| node.id == card.node_id)
+                || !self.nodes.iter().any(|node| node.id == card.owner_node_id)
             {
-                return Err("Invalid film set group preparation");
-            }
-            let mut binding_ids = std::collections::HashSet::new();
-            for binding in &group.bindings {
-                if binding.binding_id.is_empty()
-                    || binding.source_node_id.is_empty()
-                    || !binding_ids.insert(&binding.binding_id)
-                    || !matches!(binding.kind.as_str(), "model3d" | "image" | "video")
-                    || binding.content_key.is_empty()
-                    || binding.content_key.len() > 2048
-                    || binding
-                        .resource_key
-                        .as_ref()
-                        .is_some_and(|value| value.is_empty() || value.len() > 512)
-                    || binding
-                        .signature
-                        .as_ref()
-                        .is_some_and(|value| value.is_empty() || value.len() > 512)
-                    || ![
-                        binding.transform.x,
-                        binding.transform.y,
-                        binding.transform.z,
-                        binding.transform.yaw,
-                        binding.transform.scale,
-                    ]
-                    .iter()
-                    .all(|value| value.is_finite())
-                    || binding.transform.scale <= 0.0
-                    || !binding.aspect_ratio.is_finite()
-                    || binding.aspect_ratio <= 0.0
-                    || binding
-                        .diagnostic
-                        .as_ref()
-                        .is_some_and(|message| message.len() > 1024)
-                {
-                    return Err("Invalid film set group binding");
-                }
-            }
-            if let Some(t) = &group.scene_transform {
-                if ![t.x, t.y, t.z, t.yaw, t.scale]
-                    .iter()
-                    .all(|n| n.is_finite())
-                    || t.scale <= 0.0
-                {
-                    return Err("Invalid film set scene transform");
-                }
-            }
-            if let Some(ground) = &group.ground {
-                if let Some(t) = &ground.transform {
-                    if ![t.x, t.y, t.z, t.yaw, t.scale]
-                        .iter()
-                        .all(|n| n.is_finite())
-                        || t.scale <= 0.0
-                    {
-                        return Err("Invalid film set ground transform");
-                    }
-                }
-                if !ground.width.is_finite()
-                    || !ground.depth.is_finite()
-                    || ground.width <= 0.0
-                    || ground.depth <= 0.0
-                    || ground.color.as_ref().is_some_and(|value| value.len() > 128)
-                {
-                    return Err("Invalid film set group ground");
-                }
+                return Err("Invalid preview card node");
             }
         }
-        if self.shot_preview_links.len() > 1024 {
-            return Err("Too many shot preview links");
+        if self.ownership_links.len() > 4096 {
+            return Err("Too many ownership links");
         }
-        for link in &self.shot_preview_links {
+        let mut link_ids = std::collections::HashSet::new();
+        for link in &self.ownership_links {
             link.validate()?;
+            if !link_ids.insert(&link.id)
+                || !self.nodes.iter().any(|node| node.id == link.owner_node_id)
+                || link.target_node_ids.is_empty()
+                || link
+                    .target_node_ids
+                    .iter()
+                    .any(|id| !self.nodes.iter().any(|node| &node.id == id) || id == &link.owner_node_id)
+            {
+                return Err("Invalid ownership link node");
+            }
+        }
+        if self.run_feedback.len() > 4096 {
+            return Err("Too many run feedback entries");
+        }
+        let mut feedback_nodes = std::collections::HashSet::new();
+        for feedback in &self.run_feedback {
+            feedback.validate()?;
+            if !feedback_nodes.insert(&feedback.node_id)
+                || !self.nodes.iter().any(|node| node.id == feedback.node_id)
+            {
+                return Err("Invalid run feedback node");
+            }
         }
         // 缩放区间必须与 contracts 的 `WOOHAA3_CANVAS_MIN_ZOOM` / `WOOHAA3_CANVAS_MAX_ZOOM`
         // 一致（0.1–12）；由 `render-scene.test.ts` 断言两边相同。此前这里是 0.2–2.0，
@@ -1048,30 +686,27 @@ impl Scene {
         for actions in self.node_actions.values() {
             actions.validate()?;
         }
-        for node in &self.nodes {
-            if let Some(links) = node
-                .composite_asset
-                .as_ref()
-                .and_then(|asset| asset.ownership_links.as_ref())
-            {
-                if !links.anchor.iter().all(|v| v.is_finite())
-                    || links.target_node_ids.len() > 4096
-                    || links
-                        .target_node_ids
-                        .iter()
-                        .any(|id| id.is_empty() || id.len() > 1024 || id == &node.id)
-                    || links.target_item_ids.len() > links.target_node_ids.len()
-                    || links.target_item_ids.iter().any(|(target, item)| {
-                        !links.target_node_ids.contains(target)
-                            || item.is_empty()
-                            || item.len() > 1024
-                    })
-                {
-                    return Err("Invalid composite ownership links");
-                }
-            }
-        }
         Ok(())
+    }
+
+    /// 把场景级通用原语按 `nodeId` 关联到节点派生字段。
+    ///
+    /// 只在接受点调用一次；渲染/命中随后只读节点即可取得同一份事实，避免各系统各查一遍。
+    pub(crate) fn index_primitives(&mut self) {
+        let cards: std::collections::HashMap<&str, &PreviewCard> = self
+            .preview_cards
+            .iter()
+            .map(|card| (card.node_id.as_str(), card))
+            .collect();
+        let feedback: std::collections::HashMap<&str, &RunFeedback> = self
+            .run_feedback
+            .iter()
+            .map(|entry| (entry.node_id.as_str(), entry))
+            .collect();
+        for node in &mut self.nodes {
+            node.preview_card = cards.get(node.id.as_str()).map(|card| (*card).clone());
+            node.run_feedback = feedback.get(node.id.as_str()).map(|entry| (*entry).clone());
+        }
     }
 
     /// 协议版本必须一致：旧 Frontend/WASM 组合按版本拒绝，不静默降级为缺模型画面。

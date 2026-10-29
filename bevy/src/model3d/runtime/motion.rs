@@ -85,13 +85,13 @@ fn apply_film_set_object_motion(
     plan: &super::super::motion_plan::MotionPlan,
     desired: &mut DesiredOpacity,
 ) {
-    if playback.objects.is_empty() {
+    if playback.managed_item_motion.is_empty() {
         return;
     }
     let Some(root) = models.roots.get_mut(&playback.node_id) else {
         return;
     };
-    for (object, motion) in playback.objects.iter().zip(&plan.objects) {
+    for (object, motion) in playback.managed_item_motion.iter().zip(&plan.objects) {
         let Some(local_time) = object.local_time(playback.time) else {
             continue;
         };

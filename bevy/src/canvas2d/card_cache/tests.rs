@@ -601,11 +601,17 @@ fn container_blocks_update_locally_and_keep_group_fill_out_of_overlays() {
 fn film_run_mask_covers_exact_scope_in_every_active_phase_and_clears_at_terminal() {
     use bevy::mesh::VertexAttributeValues;
     let mut world = world();
-    world.resource_mut::<CurrentScene>().0.nodes = serde_json::from_value(serde_json::json!([{
+    let mut state = world.resource_mut::<CurrentScene>();
+    state.0.nodes = serde_json::from_value(serde_json::json!([{
         "id":"film", "type":"model", "x":100,"y":100,"width":200,"height":160,
         "compositeAsset":{"x":100,"y":100,"width":200,"height":160,"scopeShape":"isometric-diamond"},
-        "aggregateRun":{"active":true,"filmSet":{"operationKey":"operation","phase":"running","source":"agent","labelCode":"generating"}}
+        "aggregateRun":{"active":true}
     }])).unwrap();
+    state.0.run_feedback = serde_json::from_value(serde_json::json!([{
+        "nodeId":"film","active":true,"operationKey":"operation","phase":"running","source":"agent","labelCode":"generating"
+    }])).unwrap();
+    state.0.index_primitives();
+    drop(state);
     let expected =
         crate::canvas_query::scope::node_scope(&world.resource::<CurrentScene>().0.nodes[0])
             .vertices;
@@ -631,10 +637,7 @@ fn film_run_mask_covers_exact_scope_in_every_active_phase_and_clears_at_terminal
     };
     for phase in ["submitting", "queued", "running", "committing", "verifying"] {
         world.resource_mut::<CurrentScene>().0.nodes[0]
-            .aggregate_run
-            .as_mut()
-            .unwrap()
-            .film_set
+            .run_feedback
             .as_mut()
             .unwrap()
             .phase = phase.into();

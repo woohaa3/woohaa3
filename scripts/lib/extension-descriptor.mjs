@@ -176,7 +176,7 @@ const KEBAB_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const CONTENT_FIELD_NAME = /^[A-Za-z][A-Za-z0-9]*$/;
 const CONTENT_TOOL_NAME = /^[a-z][a-z0-9_]*$/;
 const CONTENT_ROUTE_PREFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
-const CONTENT_KEYS = ["ownedFields", "ownedWireFields", "routePrefix", "mcpTools", "targetModes", "eventOwners"];
+const CONTENT_KEYS = ["ownedFields", "ownedWireFields", "routePrefix", "mcpTools", "targetModes", "eventOwners", "codec"];
 /** 只接受包内相对模块（`./backend` 这类子路径），拒绝 URL/绝对路径/脚本地址。 */
 const PACKAGE_SUBPATH = /^\.\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 /** 品牌图形允许的扩展名（与 contracts 的图标资产白名单一致）。 */
@@ -401,6 +401,23 @@ export function validateExtensionDescriptor(value) {
       validateContentNames(content.eventOwners, "content.eventOwners", KEBAB_ID, errors);
       if (content.routePrefix !== undefined && (typeof content.routePrefix !== "string" || !CONTENT_ROUTE_PREFIX.test(content.routePrefix))) {
         errors.push("content.routePrefix 必须是相对 kebab 路径");
+      }
+      // 共享 nodeData codec（change: 2026-10-28-generic-extension-content-ownership，任务 1.3）：
+      // 浏览器与服务端加载同一个包内模块；导出必须是工厂函数，由两端各自注册。
+      const codec = content.codec;
+      if (codec !== undefined) {
+        if (!isPlainObject(codec)) {
+          errors.push("content.codec 必须是对象");
+        } else {
+          for (const key of unknownKeys(codec, ["module", "factory", "order"])) errors.push(`content.codec 未知字段：${key}`);
+          if (typeof codec.module !== "string" || !PACKAGE_SUBPATH.test(codec.module)) {
+            errors.push("content.codec.module 必须是包内相对模块（如 ./content）");
+          }
+          if (typeof codec.factory !== "string" || !IDENTIFIER.test(codec.factory)) {
+            errors.push("content.codec.factory 必须是合法的导出标识符");
+          }
+          if (codec.order !== undefined && !Number.isFinite(codec.order)) errors.push("content.codec.order 必须是数字");
+        }
       }
     }
   }

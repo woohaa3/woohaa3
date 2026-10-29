@@ -1,12 +1,13 @@
 import http from "node:http";
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, filmSetNodeDataFields, type CanvasGroupAction } from "@woohaa3/contracts";
+import { ContentContributionRegistry, createEmptyWoohaa3ServerCanvas, createFilmSetSnapshot, filmSetContentContribution, filmSetNodeDataFields, type CanvasGroupAction } from "@woohaa3/contracts";
 import { filmSetMcpRuntime } from "../../../extensions/film-set/src/integration/backend/mcp-runtime.js";
 import { AgentCanvasAuthoringService, AgentCanvasInternalService, AgentDeltaJournal, CanvasRoom, InMemoryYjsDocumentRepository, ModelMcpService, canvasGroupEpoch, withCanvasGroupScope, type CanvasService } from "@woohaa3/canvas-service";
 import { createModelMcpHttpHandler } from "@woohaa3/mcp-service";
 import { agentCanvasServiceToClient, modelMcpServiceToClient } from "./mcp-adapters.js";
 import { groupScopedClient } from "./group-scoped-client.js";
 import { createInProcessAuthoringServices, createToolGrantRegistry } from "./authoring-adapters.js";
+import { migrateFilmSetCanvasFixture } from "../../../test-support/film-set-groups.js";
 
 describe("real HTTP group MCP boundary", () => {
   it("carries trusted owner through HTTP, projects reads, confines simple plans and revokes calls", async () => {
@@ -18,8 +19,10 @@ describe("real HTTP group MCP boundary", () => {
       { id: "outside", type: "text", position: { x: 2000, y: 0 } }
     ];
     canvas.nodeData = { manager: { retainWhenEmpty: true }, root: { retainWhenEmpty: true }, a: { prompt: "inside" }, outside: { prompt: "private-outside" } };
-    const room = new CanvasRoom({ canvasId: "c", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
-    await room.initialize({ canvas, roomEpoch: "epoch" });
+    const content = new ContentContributionRegistry();
+    content.register(filmSetContentContribution);
+    const room = new CanvasRoom({ canvasId: "c", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false, content });
+    await room.initialize({ canvas: migrateFilmSetCanvasFixture(canvas), roomEpoch: "epoch" });
     const principals: string[] = [];
     const internal = new AgentCanvasInternalService({
       resolveRoom: async id => id === "c" ? room : null,
@@ -66,12 +69,10 @@ describe("real HTTP group MCP boundary", () => {
       expect(actions.some(action => action.commandId)).toBe(true);
       const created = await call("create_canvas_node", { canvasId: "c", requestId: "new", kind: "image", prompt: "scene" });
       expect(created.structuredContent?.ok, JSON.stringify(created)).toBe(true);
-      const filmSet = await call("create_canvas_node", { canvasId: "c", requestId: "film-set", kind: "film-set", title: "片场" });
-      expect(filmSet.structuredContent?.ok, JSON.stringify(filmSet)).toBe(true);
+      const model = await call("create_canvas_node", { canvasId: "c", requestId: "model", kind: "model", title: "模型" });
+      expect(model.structuredContent?.ok, JSON.stringify(model)).toBe(true);
       const snapshot = room.exportCanvas();
       expect(snapshot.ok && snapshot.canvas.document.nodes.filter(n => !["manager", "root", "outside", "a"].includes(n.id)).every(n => n.parentId === "root")).toBe(true);
-      expect(snapshot.ok && snapshot.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBe("manager");
-      expect(snapshot.ok && snapshot.canvas.document.nodes.some(n => n.type === "composite-asset" && n.parentId === "root" && snapshot.canvas.nodeData[n.id]?.extensionId === "film-set")).toBe(true);
       expect(principals.every(owner => owner === "owner")).toBe(true);
       grants.revoke("turn", "owner");
       const denied = await call("get_canvas_graph", { canvasId: "c" });
@@ -81,7 +82,7 @@ describe("real HTTP group MCP boundary", () => {
     }
   });
 
-  it("accepts reducer-derived film-set object containers above a film set near the group origin", async () => {
+  it("rejects legacy film-set object writes after migration", async () => {
     const canvasId = "c-film-items";
     const snapshot = createFilmSetSnapshot({
       title: "片场",
@@ -95,8 +96,10 @@ describe("real HTTP group MCP boundary", () => {
       { id: "film", type: "composite-asset", parentId: "root", position: { x: 40, y: 40 } }
     ];
     canvas.nodeData = { root: { retainWhenEmpty: true }, film: filmSetNodeDataFields(snapshot) as never };
-    const room = new CanvasRoom({ canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
-    await room.initialize({ canvas, roomEpoch: "epoch" });
+    const content = new ContentContributionRegistry();
+  content.register(filmSetContentContribution);
+    const room = new CanvasRoom({ canvasId, repository: new InMemoryYjsDocumentRepository(), verifyAssets: false, content });
+    await room.initialize({ canvas: migrateFilmSetCanvasFixture(canvas), roomEpoch: "epoch" });
     const filmSet = filmSetMcpRuntime.createNodeService({ resolveRoom: async () => room });
     const withGroup = <T>(run: () => Promise<T>) => withCanvasGroupScope({
       owner: "owner", canvasId, rootGroupId: "root", scopeEpoch: canvasGroupEpoch(canvasId, "root"), valid: () => true
@@ -117,18 +120,13 @@ describe("real HTTP group MCP boundary", () => {
         }
       }
     }));
-    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    // 迁移后的 group 只接受来自资源卡片的新对象；旧 composite 的直接写入被稳定拒绝。
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.code).toBe("source-required");
     const exported = room.exportCanvas();
     expect(exported.ok).toBe(true);
     if (!exported.ok) return;
-    const container = exported.canvas.document.nodes.find(node => node.id.startsWith("film-object:"));
-    expect(container?.parentId).toBe("root");
-    // 对象容器位于片场上方的展示区：reducer 应把根组向上扩到能容纳它，并同步保持成员世界坐标。
-    expect(container!.position.y).toBeGreaterThanOrEqual(0);
-    const root = exported.canvas.document.nodes.find(node => node.id === "root")!;
-    const film = exported.canvas.document.nodes.find(node => node.id === "film")!;
-    expect(root.position.y).toBeLessThan(200);
-    expect(root.height).toBeGreaterThan(400);
-    expect(film.position.y + root.position.y).toBe(240);
+    expect(exported.canvas.document.nodes.some(node => node.id.startsWith("film-object:"))).toBe(false);
+    expect(exported.canvas.document.nodes.find(node => node.id === "root")?.position.y).toBe(200);
   });
 });

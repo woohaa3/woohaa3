@@ -1,16 +1,16 @@
-import { convertShotReferenceConsumers } from "./film-set-clip-commands.js";
 /**
- * 命令 reducer 的**片场对象类型化受保护编辑**（`edit.apply` 扩展）
- * （change: 2026-10-10-improve-film-set-editing-and-inspector，任务 3.1–3.2 / design D6）。
+ * 片场受保护编辑的 owner 执行器（change: 2026-10-28-generic-extension-content-ownership，任务 3.4）。
  *
- * 自 `command-reducer/edit-command.ts` 拆出以保持文件体积守卫。对象 transform/delete/restore
- * 用稳定 itemId / clipId 定位，复用共享 item/binding 解码与内容校验，绝不整体回写客户端数组。
- * 条件匹配与操作应用均为纯函数；写入仍经 `patchNodeData` 走 canonical 归一化与资产校验。
+ * 原 `command-reducer/edit-command-film-set.ts` 的业务条件与操作迁到这里：canonical
+ * `edit.apply` 不再分派 `film-set-*`，owner 通过 `extension.edit` 携带内部载荷。对象
+ * transform/delete/restore 与镜头定义仍按稳定 itemId / clipId 定位，绝不整体回写客户端数组。
+ *
+ * owner 直接写回片场 canonical 字段（不经过普通 `nodeData.patch`）：旧 composite 片场已只读，
+ * 受保护编辑仍需能撤销历史；写入复用与 `clipPatch` 相同的规范形态与内容身份。
  */
-import type { EditOperation, EditPrecondition } from "../edit-command.js";
+import type { CanvasNodeData, ServerCanvas } from "../domain/index.js";
 import { decodeFilmSetNodeData, type FilmSetNodeData } from "../canvas-node-model.js";
-import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
-import type { CanvasNodeData } from "../domain/index.js";
+import { isFilmSetNode } from "../film-set-legacy-identity.js";
 import {
   applyFilmSetItemEditRemove,
   applyFilmSetItemEditRestore,
@@ -22,35 +22,15 @@ import {
   filmSetItemEditHash
 } from "../film-set-item-edit.js";
 import { applyFilmSetClipEditRemove, applyFilmSetClipEditSet, filmSetClipStateHash } from "../film-set-clip-edit.js";
-import { patchNodeData } from "./node-commands.js";
+import { convertShotReferenceConsumers } from "../command-reducer/film-set-clip-commands.js";
 import { canonicalFilmSetFields, filmSetAnimationsOf, LEGACY_FILM_SET_ANIMATION_FIELDS, LEGACY_FILM_SET_TOP_MODEL_FIELDS } from "../film-set-clip-view.js";
 import { animationSnapshotHash } from "../animation-snapshot.js";
 import { shotPreviewNodeId } from "../film-set-shot-preview.js";
 import { shotReferenceOwnershipOf } from "../film-set-shot-reference.js";
 import { isShotPreviewNode } from "../domain/core/shot-preview-node.js";
-import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
-
-/** 片场对象相关条件种类（用于 edit-command 主分发）。 */
-const FILM_SET_PRECONDITION_KINDS: readonly EditPrecondition["kind"][] = [
-  "film-set-item-state",
-  "film-set-item-missing",
-  "film-set-clip-present",
-  "film-set-item-binding",
-  "film-set-item-binding-closure",
-  "film-set-clip-state",
-  "film-set-shot-preview-state"
-];
-
-export function isFilmSetPrecondition(kind: EditPrecondition["kind"]): boolean {
-  return FILM_SET_PRECONDITION_KINDS.includes(kind);
-}
-
-/** 片场对象/镜头操作子集（供主分发做类型收窄）。 */
-export type FilmSetEditOperation = Extract<EditOperation, { kind: `film-set-item-${string}` | `film-set-clip-${string}` }>;
-
-export function isFilmSetOperation(operation: EditOperation): operation is FilmSetEditOperation {
-  return operation.kind.startsWith("film-set-item-") || operation.kind.startsWith("film-set-clip-");
-}
+import { OK, reject, type CommandApplyResult, type WorkingState } from "../command-reducer/types.js";
+import { toWorkingState } from "../command-reducer/working-state.js";
+import type { FilmSetEditOperation, FilmSetEditPayload, FilmSetEditPrecondition } from "./edit-types.js";
 
 /** 读取节点片场数据；非片场业务 / 非法返回 null（调用方给出稳定原因）。 */
 function animationOf(work: WorkingState, nodeId: string): FilmSetNodeData | null {
@@ -60,18 +40,61 @@ function animationOf(work: WorkingState, nodeId: string): FilmSetNodeData | null
   return decoded.ok ? decoded.value : null;
 }
 
-/** 评估片场对象前置条件；返回非 null 表示整批拒绝。 */
-export function evaluateFilmSetPrecondition(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/** 严格解码 owner 载荷；非法返回 null，内核据此稳定拒绝而不执行任何操作。 */
+export function decodeFilmSetEditPayload(value: unknown): FilmSetEditPayload | null {
+  if (!isRecord(value) || !Array.isArray(value.operations)) return null;
+  if (value.operations.length === 0 || value.operations.length > 256) return null;
+  const operations: FilmSetEditOperation[] = [];
+  for (const raw of value.operations) {
+    if (!isRecord(raw) || !isNonEmptyString(raw.nodeId)) return null;
+    switch (raw.kind) {
+      case "film-set-item-transform":
+        if (!isNonEmptyString(raw.itemId) || !isRecord(raw.localTransform)) return null;
+        break;
+      case "film-set-item-set":
+        if (!isRecord(raw.item) || !isNonEmptyString(raw.item.id)) return null;
+        break;
+      case "film-set-item-remove":
+        if (!isNonEmptyString(raw.itemId)) return null;
+        break;
+      case "film-set-item-restore":
+        if (!isRecord(raw.item) || !isNonEmptyString(raw.item.id) || !isRecord(raw.orderAnchor) || !Array.isArray(raw.bindings)) return null;
+        break;
+      case "film-set-clip-set":
+        if (!isNonEmptyString(raw.clipId) || !isRecord(raw.clip) || raw.clip.id !== raw.clipId) return null;
+        if (raw.defaultClipId !== null && !isNonEmptyString(raw.defaultClipId)) return null;
+        break;
+      case "film-set-clip-remove":
+        if (!isNonEmptyString(raw.clipId)) return null;
+        if (raw.defaultClipId !== null && !isNonEmptyString(raw.defaultClipId)) return null;
+        break;
+      default:
+        return null;
+    }
+    operations.push(raw as FilmSetEditOperation);
+  }
+  return { operations };
+}
+
+/** 评估片场前置条件；返回非 null 表示整批拒绝。 */
+export function evaluateFilmSetEditPrecondition(
   work: WorkingState,
-  condition: EditPrecondition
+  condition: FilmSetEditPrecondition
 ): CommandApplyResult | null {
   switch (condition.kind) {
     case "film-set-item-state": {
       const animation = animationOf(work, condition.nodeId);
       if (!animation) return reject("edit-precondition-failed", `片场 ${condition.nodeId} 不存在或内容非法`);
-      const expected = condition.contentHash;
       const item = animation.filmSetContent.items.find((entry) => entry.id === condition.itemId);
-      if (!item || filmSetItemEditHash(item) !== expected) {
+      if (!item || filmSetItemEditHash(item) !== condition.contentHash) {
         return reject("edit-precondition-failed", `片场对象 ${condition.itemId} 已被并发修改，无法执行`);
       }
       return null;
@@ -131,16 +154,13 @@ export function evaluateFilmSetPrecondition(
   }
 }
 
-/**
- * 应用片场对象操作（transform / remove / restore），经 `patchNodeData` 走 canonical
- * 归一化与资产/来源校验，保持整批原子。
- */
-export function applyFilmSetOperation(work: WorkingState, operation: EditOperation): CommandApplyResult {
+/** 应用片场对象/镜头操作；任一失败整次回滚（工作副本调用方丢弃）。 */
+export function applyFilmSetEditOperation(work: WorkingState, operation: FilmSetEditOperation): CommandApplyResult {
   if (operation.kind === "film-set-item-set") {
     const animation = animationOf(work, operation.nodeId);
     if (!animation || !animation.filmSetContent.items.some(item => item.id === operation.item.id)) return reject("edit-operation-invalid", "被替换的片场对象不存在");
-    return patchNodeData(work, operation.nodeId, fromAnimation({ ...animation,
-      filmSetContent: { ...animation.filmSetContent, items: animation.filmSetContent.items.map(item => item.id === operation.item.id ? operation.item : item) } }));
+    return writeFilmSetAnimation(work, operation.nodeId, { ...animation,
+      filmSetContent: { ...animation.filmSetContent, items: animation.filmSetContent.items.map(item => item.id === operation.item.id ? operation.item : item) } });
   }
   if (operation.kind === "film-set-item-transform") {
     const animation = animationOf(work, operation.nodeId);
@@ -153,14 +173,14 @@ export function applyFilmSetOperation(work: WorkingState, operation: EditOperati
     });
     if (!result.ok) return reject("edit-operation-invalid", result.reason);
     if (!result.changed) return OK;
-    return patchNodeData(work, operation.nodeId, fromAnimation(result.value));
+    return writeFilmSetAnimation(work, operation.nodeId, result.value);
   }
   if (operation.kind === "film-set-item-remove") {
     const animation = animationOf(work, operation.nodeId);
     if (!animation) return reject("edit-operation-invalid", `片场 ${operation.nodeId} 不存在或内容非法`);
     const result = applyFilmSetItemEditRemove({ animation, itemId: operation.itemId });
     if (!result.ok) return reject("edit-operation-invalid", result.reason);
-    return patchNodeData(work, operation.nodeId, fromAnimation(result.value));
+    return writeFilmSetAnimation(work, operation.nodeId, result.value);
   }
   if (operation.kind === "film-set-item-restore") {
     const animation = animationOf(work, operation.nodeId);
@@ -172,7 +192,7 @@ export function applyFilmSetOperation(work: WorkingState, operation: EditOperati
       bindings: operation.bindings
     });
     if (!result.ok) return reject("edit-operation-invalid", result.reason);
-    return patchNodeData(work, operation.nodeId, fromAnimation(result.value));
+    return writeFilmSetAnimation(work, operation.nodeId, result.value);
   }
   if (operation.kind === "film-set-clip-set") {
     const animation = animationOf(work, operation.nodeId);
@@ -195,10 +215,10 @@ export function applyFilmSetOperation(work: WorkingState, operation: EditOperati
     if (!result.changed) return OK;
     return writeFilmSetAnimation(work, operation.nodeId, result.value);
   }
-  return reject("edit-operation-invalid", `不支持的对象操作`);
+  return reject("edit-operation-invalid", "不支持的对象操作");
 }
 
-/** 预览节点是否存在、类型正确、归属与派生 ID 完全匹配（并发布局/归属前置条件）。 */
+/** 预览节点是否存在、类型正确、归属与派生 ID 完全匹配。 */
 function shotPreviewBelongsTo(work: WorkingState, previewNodeId: string, filmSetNodeId: string, clipId: string): boolean {
   const node = work.nodes.find((entry) => entry.id === previewNodeId);
   if (!node || !isShotPreviewNode(node.type, work.nodeData[previewNodeId])) return false;
@@ -208,11 +228,8 @@ function shotPreviewBelongsTo(work: WorkingState, previewNodeId: string, filmSet
 }
 
 /**
- * 受保护编辑写回片场 nodeData：复用 canonical flat 字段（items-only + 片段集合），
- * 清除旧顶层动作字段并重算内容身份，保证与 `clipPatch` 写入同一规范形态。
- *
- * 刻意**不**走 `patchNodeData` 的通用合并：`patchNodeData` 会拒绝预览归属，而片场自身
- * 写入必须整份 canonical，避免残留旧字段被严格解码拒绝。
+ * 受保护编辑写回片场 nodeData：复用 canonical flat 字段，清除旧顶层动作字段并重算内容身份，
+ * 保证与 `clipPatch` 写入同一规范形态。
  */
 function writeFilmSetAnimation(work: WorkingState, nodeId: string, animation: FilmSetNodeData): CommandApplyResult {
   const next = { ...(work.nodeData[nodeId] ?? {}), ...canonicalFilmSetFields(animation) } as CanvasNodeData;
@@ -223,12 +240,36 @@ function writeFilmSetAnimation(work: WorkingState, nodeId: string, animation: Fi
   return OK;
 }
 
-/**
- * 把编辑后的动画视图转成 nodeData patch。`patchNodeData` 复用动画 canonical 归一化
- * （重算 identity / 预算 / 媒体资产），因此这里只声明受影响字段。
- *
- * 通过 `canonicalFilmSetFields` 同时升级/保留影片片段集合，避免 schema 1/2 与 3 混写。
- */
-function fromAnimation(next: FilmSetNodeData): CanvasNodeData {
-  return canonicalFilmSetFields(next) as CanvasNodeData;
+/** 把 owner 应用结果写回不可变画布。 */
+export function canvasFromWorkingState(canvas: ServerCanvas, work: WorkingState): ServerCanvas {
+  return {
+    ...canvas,
+    title: work.title,
+    document: {
+      ...canvas.document,
+      nodes: work.nodes.map((node) => ({ ...node, data: {} })),
+      edges: work.edges
+    },
+    nodeData: work.nodeData as Record<string, CanvasNodeData>,
+    assets: work.assets,
+    jobs: work.jobs
+  };
+}
+
+export function applyFilmSetEditPayload(
+  canvas: ServerCanvas,
+  payload: FilmSetEditPayload,
+  preconditions: readonly unknown[]
+): { ok: true; canvas: ServerCanvas } | { ok: false; code: string; reason: string } {
+  const work = toWorkingState(canvas);
+  for (const raw of preconditions) {
+    if (!isRecord(raw) || typeof raw.kind !== "string") return { ok: false, code: "edit-precondition-invalid", reason: "edit-precondition-invalid" };
+    const rejection = evaluateFilmSetEditPrecondition(work, raw as FilmSetEditPrecondition);
+    if (rejection && !rejection.ok) return { ok: false, code: rejection.rejection.code, reason: rejection.rejection.message };
+  }
+  for (const operation of payload.operations) {
+    const applied = applyFilmSetEditOperation(work, operation);
+    if (!applied.ok) return { ok: false, code: applied.rejection.code, reason: applied.rejection.message };
+  }
+  return { ok: true, canvas: canvasFromWorkingState(canvas, work) };
 }

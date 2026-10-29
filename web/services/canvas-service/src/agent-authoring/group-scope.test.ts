@@ -54,7 +54,7 @@ describe("group authority queue", () => {
     // 扩组不改变既有内容的世界坐标。
     expect(original.position.y + root.position.y).toBe(40);
   });
-  it("keeps a nested root group attached while creating content inside it", async () => {
+  it("flattens a nested root group while creating content inside it", async () => {
     const room = new CanvasRoom({ canvasId: "nested-scope", repository: new InMemoryYjsDocumentRepository(), verifyAssets: false });
     const canvas = createEmptyWoohaa3ServerCanvas("nested-scope", new Date().toISOString());
     canvas.document.nodes = [
@@ -75,7 +75,8 @@ describe("group authority queue", () => {
     const exported = room.exportCanvas();
     expect(exported.ok).toBe(true);
     if (!exported.ok) return;
-    expect(exported.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBe("manager");
+    expect(exported.canvas.document.nodes.find(n => n.id === "root")?.parentId).toBeUndefined();
+    expect(exported.canvas.document.nodes.some(n => n.id === "manager")).toBe(true);
     expect(exported.canvas.document.nodes.find(n => n.id === "a")?.parentId).toBe("root");
     expect(exported.canvas.document.nodes.some(n => n.type === "image" && n.parentId === "root")).toBe(true);
   });

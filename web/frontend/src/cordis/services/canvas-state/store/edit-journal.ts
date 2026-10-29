@@ -15,9 +15,18 @@
  */
 import type { EditOperation, EditPrecondition } from "@woohaa3/contracts";
 
+/** owner 专属编辑段：与通用结构操作在同一命令批次内原子提交。 */
+export type JournalOwnerEdit = {
+  extensionId: string;
+  direction: "forward" | "inverse";
+  edit: unknown;
+  preconditions: readonly unknown[];
+};
+
 export type JournalPlannedEdit = {
   preconditions: EditPrecondition[];
   operations: EditOperation[];
+  extensions?: readonly JournalOwnerEdit[];
 };
 
 export type JournalEntryKind = "canvas" | "parameter";

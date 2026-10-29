@@ -123,15 +123,14 @@ fn settle(world: &mut World, scene: &Scene, now: &mut f64, expected: Quality) {
 #[cfg(feature = "canvas-core")]
 fn visible_shot_card_keeps_source_resident_without_forcing_high() {
     let (mut scene, resources) = fixture(mixed_snapshot("shot-source", 3, 3), 0.05, 1.0);
-    scene.nodes.push(
-        serde_json::from_value(serde_json::json!({
-            "id":"shot","type":"film-set-shot-preview","x":0,"y":0,"width":240,"height":167,
-            "shotPreview":{"filmSetNodeId":"film","clipId":"clip","kind":"static","name":"shot",
-                "aspect":1.7777778,"duration":0,"state":"preparing",
-                "coverCamera":{"azimuth":0,"elevation":0.5,"distance":200,"focusOffset":[0,0,0]}}
-        }))
-        .unwrap(),
-    );
+    let shot: GraphNode = serde_json::from_value(serde_json::json!({
+        "id":"shot","type":"slot","x":0,"y":0,"width":240,"height":167
+    })).unwrap();
+    scene.nodes.push(with_preview_card(shot, serde_json::json!({
+        "nodeId":"shot","ownerNodeId":"film","entityId":"clip","animated":false,"title":"shot",
+        "aspect":1.7777778,"duration":0,"state":"preparing",
+        "coverCamera":{"azimuth":0,"elevation":0.5,"distance":200,"focusOffset":[0,0,0]}
+    })));
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let mut now = 1.0;

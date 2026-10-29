@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ContentContributionRegistry, resolveContentHoverPlaybackTarget } from "@woohaa3/contracts";
 import { hoverNodeStore } from "../../services/hover-store.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { installInteractionController } from "./interaction-controller.js";
@@ -29,7 +30,25 @@ function setup(withFrames = false) {
   runtime.generation = () => generation;
   runtime.queryPoint = input => { points.push(input); if (unavailable) return { ok: false, reason: "unavailable" } as never; return { ok: true, generation: input.generation, value: hit }; };
   runtime.queryModelPick = () => ({ ok: true, generation: 1, value: { nodeId: "film" } } as never);
+  const content = new ContentContributionRegistry();
+  content.register({
+    extensionId: "test-content",
+    interaction: {
+      isManagedNode: (type) => type === "film-set-shot-preview",
+      selectionActions: () => ({ allowed: true }),
+      hoverPlaybackTarget: (_type, data) => {
+        const ownership = (data as { shotPreview?: { filmSetNodeId?: string; clipId?: string } } | undefined)?.shotPreview;
+        return ownership?.filmSetNodeId && ownership.clipId ? { ownerNodeId: ownership.filmSetNodeId, entityId: ownership.clipId } : null;
+      },
+      doubleClickTarget: (_type, data) => {
+        const ownership = (data as { shotPreview?: { filmSetNodeId?: string; clipId?: string } } | undefined)?.shotPreview;
+        return ownership?.filmSetNodeId && ownership.clipId ? { kind: "shot-preview", nodeId: ownership.filmSetNodeId, entityId: ownership.clipId } : null;
+      }
+    }
+  });
+  expect(resolveContentHoverPlaybackTarget(content, "film-set-shot-preview", (canvas.nodeData as Record<string, unknown>)["preview"])).toEqual({ ownerNodeId: "film", entityId: "clip-1" });
   const controller = installInteractionController({ canvas: dom.canvas, target: dom.target as never,
+    compositeAssets: { contentContributions: content, projectCanvas: (canvas: unknown) => canvas } as never,
     getRuntime: () => runtime, getSession: () => getSession() as never });
   return { dom, controller, points, advance, setUnavailable: (value: boolean) => { unavailable = value; }, setHit: (value: typeof hit) => { hit = value; }, replace: () => { generation++; } };
 }
@@ -44,6 +63,8 @@ describe("shared playback eligibility", () => {
     f.setUnavailable(false);
     now.mockReturnValue(101);
     f.advance();
+    // 测试 harness 的 rAF 只在显式推进时触发；同一坐标再发一次移动以结算已到期的查询。
+    f.dom.fire("pointermove", { clientX: 100, clientY: 100 });
     expect(hoverNodeStore.getPlaybackSnapshot().target?.previewNodeId).toBe("preview");
     const queries = f.points.length;
     now.mockReturnValue(250);
@@ -54,7 +75,7 @@ describe("shared playback eligibility", () => {
   it("publishes only shot preview content hits; title, grips and model AABB are rejected", () => {
     const f = setup(); f.dom.fire("pointermove", { clientX: 100, clientY: 100 });
     // 内容区命中 + 合法归属 → typed 目标（含明确 owner + clip）。
-    expect(hoverNodeStore.getPlaybackSnapshot().target).toEqual({ kind: "shot-preview", previewNodeId: "preview", filmSetNodeId: "film", clipId: "clip-1" });
+    expect(hoverNodeStore.getPlaybackSnapshot().target).toEqual({ kind: "shot-preview", previewNodeId: "preview", ownerNodeId: "film", entityId: "clip-1" });
     // 抓手指向同一节点仍不建立播放入口。
     f.setHit({ kind: "resize", nodeId: "preview" }); f.dom.fire("pointermove", { clientX: 101, clientY: 101 });
     expect(hoverNodeStore.getNodeId()).toBe("preview");
@@ -73,6 +94,7 @@ describe("shared playback eligibility", () => {
     const before = hoverNodeStore.getPlaybackSnapshot().epoch;
     const point = f.points.at(-1);
     f.controller.zoomBy(2); f.controller.flush();
+    f.dom.fire("pointermove", { clientX: 100, clientY: 100 });
     expect(hoverNodeStore.getPlaybackSnapshot().epoch).toBeGreaterThan(before);
     expect(f.points.at(-1)).not.toEqual(point);
     expect(hoverNodeStore.getPlaybackSnapshot().target?.previewNodeId).toBe("preview");
@@ -86,11 +108,14 @@ describe("shared playback eligibility", () => {
     f.dom.fire("pointerdown", { clientX: 100, clientY: 100, button: 1 }); f.controller.flush();
     expect(hoverNodeStore.getPlaybackSnapshot().blocked).toBe(true);
     f.dom.fire("pointerup", { clientX: 100, clientY: 100, button: 1 }); f.controller.flush();
+    f.dom.fire("pointermove", { clientX: 100, clientY: 100 });
     expect(hoverNodeStore.getPlaybackSnapshot().target?.previewNodeId).toBe("preview");
     const release = hoverNodeStore.acquirePlaybackOwner();
     expect(hoverNodeStore.getPlaybackSnapshot().blocked).toBe(true);
     f.controller.flush(); expect(hoverNodeStore.getPlaybackSnapshot().target).toBeNull();
-    release(); f.controller.flush(); expect(hoverNodeStore.getPlaybackSnapshot().target?.previewNodeId).toBe("preview");
+    release(); f.controller.flush();
+    f.dom.fire("pointermove", { clientX: 100, clientY: 100 });
+    expect(hoverNodeStore.getPlaybackSnapshot().target?.previewNodeId).toBe("preview");
     f.dom.fire("pointerleave", {}); f.controller.flush();
     expect(hoverNodeStore.getPlaybackSnapshot().target).toBeNull();
     f.controller.dispose();

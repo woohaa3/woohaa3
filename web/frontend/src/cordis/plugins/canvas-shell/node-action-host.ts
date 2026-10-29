@@ -11,6 +11,7 @@
  * 宿主 MUST NOT import 任何具体扩展实现或按 film-set ID 分支：actionId 即贡献 id。
  */
 import type { BevyNodeAction, BevyNodeActionsPresentation } from "@woohaa3/contracts";
+import { decideContentAction } from "@woohaa3/contracts";
 import type {
   NodeActionActivation,
   NodeActionContext,
@@ -36,10 +37,33 @@ export type NodeActionDescription = {
   owners: Map<string, NodeActionContribution>;
 };
 
+const REJECTED = "__content-interaction-rejected";
+
+/** 读取 owner interaction 的门禁；没有声明动作或没有注册表时放行。 */
+function contentActionDenial(
+  contribution: { contentAction?: import("@woohaa3/contracts").ContentAction },
+  context: NodeActionContext | SelectionActionContext
+): string | null {
+  if (!contribution.contentAction || !context.content) return null;
+  if ("selectedNodeIds" in context) {
+    for (const id of context.selectedNodeIds) {
+      const node = context.nodes?.find((entry) => entry.id === id);
+      if (!node) continue;
+      const decision = decideContentAction(context.content, contribution.contentAction, node.type, context.nodeData?.[id]);
+      if (!decision.allowed) return decision.reason || REJECTED;
+    }
+    return null;
+  }
+  const decision = decideContentAction(context.content, contribution.contentAction, context.nodeType, context.nodeData);
+  if (decision.allowed) return null;
+  return decision.reason || REJECTED;
+}
+
 /** 供 `describeActions` 复用的最小贡献形状（单节点横条与多选横条同构）。 */
 export type ActionContributionLike<C> = {
   id: string;
   order: number;
+  contentAction?: import("@woohaa3/contracts").ContentAction;
   available?: (context: C) => boolean;
   describe: (context: C) => NodeActionDescriptor | null;
 };
@@ -69,6 +93,8 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
   for (const contribution of ordered) {
     const context = input.context;
     if (contribution.available && !safeAvailable(contribution.available, context)) continue;
+    const denied = contentActionDenial(contribution, context as NodeActionContext | SelectionActionContext);
+    if (denied === REJECTED) continue;
     let descriptor;
     try {
       descriptor = contribution.describe(context);
@@ -76,6 +102,9 @@ export function describeActions<C, T extends ActionContributionLike<C>>(input: {
       continue;
     }
     if (!descriptor) continue;
+    if (denied) {
+      descriptor = { ...descriptor, enabled: false, reason: denied };
+    }
     const menu = descriptor.menu === true;
     const icon = descriptor.icon === "download" || descriptor.icon === "collapse-groups" || descriptor.icon === "expand-groups"
       ? descriptor.icon
@@ -145,7 +174,7 @@ export function routeNodeActionHit(input: {
   openSettings: (state: NodeActionSettingsState) => void;
 }): void {
   const contribution = input.contributions.find((entry) => entry.id === input.hit.actionId);
-  if (!contribution) return;
+  if (!contribution || contentActionDenial(contribution, input.context)) return;
   const open = (): void => {
     if (!contribution.settings) return;
     input.openSettings({
@@ -185,7 +214,7 @@ export function routeSelectionActionHit(input: {
   contributions: ReadonlyArray<SelectionActionContribution>;
 }): void {
   const contribution = input.contributions.find((entry) => entry.id === input.hit.actionId);
-  if (!contribution) return;
+  if (!contribution || contentActionDenial(contribution, input.context)) return;
   try {
     contribution.activate({ ...input.context, menu: input.hit.menu });
   } catch {

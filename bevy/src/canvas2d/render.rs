@@ -335,7 +335,7 @@ pub(crate) fn sync_canvas_overlay(
     let scene = overlay.as_ref();
     let ownership_links = super::ownership_links::segments(source, &model_assets.0);
     let mut shared_key = super::shared_key::SharedKey::new(scene, &theme);
-    shared_key.ownership_links = ownership_links.clone();
+    shared_key.ownership_link_segments = ownership_links.clone();
     shared_key.focus_ownership_links = source.model_focus.is_some();
     if visuals.shared_key.as_ref() == Some(&shared_key) {
         flags.canvas_committed = true;
@@ -380,7 +380,6 @@ pub(crate) fn sync_canvas_overlay(
         },
     );
     super::render_edges::draw_draft(&mut geometry, scene, &theme, &layouts);
-    super::render_edges::draw_shot_preview_links(&mut geometry, scene, &theme, &layouts, overlay_z);
 
     // 单节点拖动粘连 overlay（change: add-drag-touch-connections）：绘制在普通边与节点之后、
     // 框选之前；只被动消费语义投影，不执行碰撞或创建命令。

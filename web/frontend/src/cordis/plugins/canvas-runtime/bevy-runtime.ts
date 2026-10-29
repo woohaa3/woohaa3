@@ -564,7 +564,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         afterPaint(revealWhenRendered);
       }
       textures.retain(new Set(scene.nodes.map(node => node.id)),
-        new Set(scene.nodes.flatMap(node => node.compositeAsset?.media?.map(plane => plane.id) ?? [])));
+        new Set(scene.nodes.flatMap(node => node.compositeAsset?.mediaPlanes?.map(plane => plane.id) ?? [])));
     },
     queryPoint: (input) =>
       guardGeneration(input.generation, () =>

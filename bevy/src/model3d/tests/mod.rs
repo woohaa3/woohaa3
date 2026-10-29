@@ -34,6 +34,12 @@ pub(super) fn scene_with(node: &GraphNode, model: Option<ModelReference>) -> Sce
     }
 }
 
+/// 把场景级 `PreviewCard` 原语附加到节点（任务 4.3：卡片不再内联在节点 wire 上）。
+pub(super) fn with_preview_card(mut node: GraphNode, card: serde_json::Value) -> GraphNode {
+    node.preview_card = Some(serde_json::from_value(card).expect("preview card"));
+    node
+}
+
 /// 由内容快照 + placement 构造节点模型引用（resource_key = sceneVersion:signature）。
 pub(super) fn reference_for(snapshot: &ModelSnapshot, placement: ModelPlacement) -> ModelReference {
     let scene_version = snapshot.scene_version.clone();

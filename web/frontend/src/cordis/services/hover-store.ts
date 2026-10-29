@@ -26,8 +26,8 @@ function samePlaybackTarget(
 ): boolean {
   if (a === null || b === null) return a === b;
   return a.previewNodeId === b.previewNodeId
-    && a.filmSetNodeId === b.filmSetNodeId
-    && a.clipId === b.clipId;
+    && a.ownerNodeId === b.ownerNodeId
+    && a.entityId === b.entityId;
 }
 
 export class HoverNodeStore {
