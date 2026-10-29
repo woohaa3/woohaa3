@@ -7,7 +7,12 @@
  */
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
-import type { CanvasCatalogService, SlotsService, ThemeService } from "@woohaa3/frontend/extension-api";
+import type {
+  CanvasCatalogService,
+  CanvasScopeService,
+  SlotsService,
+  ThemeService
+} from "@woohaa3/frontend/extension-api";
 import { SIXI_SPIKE_ID } from "../shared.js";
 import { SixiShell } from "../app/SixiShell.js";
 
@@ -33,11 +38,15 @@ export function sixiSpikeExtension(): Plugin.Function<void> {
           // 宿主主题与画布目录交给外壳：
           // - 主题让画布配色跟随四喜的亮 / 暗（见 app/hostTheme.ts）；
           // - 目录让四喜的「项目」就是宿主的画布（见 app/hostProjectSource.ts），
-          //   否则项目页显示的永远是它自己那三条 mock 种子。
+          //   否则项目页显示的永远是它自己那三条 mock 种子；
+          // - 当前画布 id 让「点项目卡」点到当前这张时不必跳页，直接进画布态。
           render: () => (
             <SixiShell
               theme={ctx.theme}
               canvasCatalog={ctx.get("canvasCatalog" as never) as CanvasCatalogService | undefined}
+              currentCanvasId={() =>
+                (ctx.get("canvasScope" as never) as CanvasScopeService | undefined)?.canvasId() ?? null
+              }
             />
           )
         })

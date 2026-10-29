@@ -13,8 +13,9 @@
 import '@/styles/global.css';
 // 模块求值即生效：抢在宿主画布首次绘制前把画布盖住（见 hostCanvasCurtain.ts）。
 import { setHostCanvasHidden } from './hostCanvasCurtain';
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { resolvePublicUrl } from '@woohaa3/frontend/extension-api';
 import type { CanvasCatalogService, ThemeService } from '@woohaa3/frontend/extension-api';
 import { SixiProviders, SixiRoutes } from '@/app/App';
 import { setProjectSource } from '@/api/projectSource';
@@ -110,19 +111,57 @@ function HostThemeSync({ theme }: { theme: ThemeService }) {
   return null;
 }
 
+/**
+ * 外壳重挂后要落在哪个路由。
+ *
+ * 点项目卡打开**另一张**画布是一次整页跳转（见 `HostProjectSource`），外壳会在新页面上重新挂载，
+ * MemoryRouter 回到初始位置（首页）。用户点的是"进这张画布"，落回首页就等于没反应。
+ * 所以跳转前记一笔，新外壳挂载时读走。
+ *
+ * 用 sessionStorage：整页跳转后模块变量不在了；只活在这个标签页里，换标签或关掉就丢，正合适。
+ */
+const PENDING_ENTRY_KEY = 'sixi-spike.entry';
+
+function readPendingEntry(): string | null {
+  try {
+    return sessionStorage.getItem(PENDING_ENTRY_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writePendingEntry(entry: string | null): void {
+  try {
+    if (entry) sessionStorage.setItem(PENDING_ENTRY_KEY, entry);
+    else sessionStorage.removeItem(PENDING_ENTRY_KEY);
+  } catch {
+    /* 存储不可用：落回首页，不影响跳转本身 */
+  }
+}
+
 export function SixiShell({
   theme,
   canvasCatalog,
+  currentCanvasId,
 }: {
   theme: ThemeService;
   /** 宿主画布目录；四喜的「项目」就是它（见 app/hostProjectSource.ts）。 */
   canvasCatalog?: CanvasCatalogService;
+  /** 当前打开的画布 id；点的就是它时不必切 scope，直接进画布态。 */
+  currentCanvasId: () => string | null;
 }) {
+  // 只在首次渲染读一次；清除放在 effect 里，避免渲染期副作用
+  const [initialEntry] = useState(() => readPendingEntry() ?? ROUTES.home);
+  useEffect(() => {
+    writePendingEntry(null);
+  }, []);
+
   return (
     <SixiProviders>
       <HostThemeSync theme={theme} />
-      <HostProjectSource catalog={canvasCatalog} />
-      <MemoryRouter initialEntries={[ROUTES.home]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter initialEntries={[initialEntry]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        {/* 放在 Router 里：打开当前画布时要用四喜自己的 navigate 切到画布态 */}
+        <HostProjectSource catalog={canvasCatalog} currentCanvasId={currentCanvasId} />
         <HostCanvasCurtain />
         <Routes>
           {/* 画布态单独一条：不套 AppLayout，四喜的侧栏与顶栏因此完全撤走。 */}
@@ -140,12 +179,36 @@ export function SixiShell({
  * 用 effect 而不是在模块顶层设置：卸载时要复位，否则扩展热重载后四喜会拿着上一份
  * 已经失效的 catalog 继续读（表现为列表一直空着、也不报错）。
  */
-function HostProjectSource({ catalog }: { catalog?: CanvasCatalogService }) {
+function HostProjectSource({
+  catalog,
+  currentCanvasId,
+}: {
+  catalog?: CanvasCatalogService;
+  currentCanvasId: () => string | null;
+}) {
+  const navigate = useNavigate();
   useEffect(() => {
     if (!catalog) return;
-    const reset = setProjectSource(createHostProjectSource(catalog));
+    const open = (canvasId: string) => {
+      // 就是当前这张：不用跳页，四喜自己切到画布态即可
+      if (canvasId === currentCanvasId()) {
+        navigate(ROUTES.create);
+        return;
+      }
+      /*
+       * 别的画布：**整页跳转**，不用 `appRouter.navigate` 做页内切换。
+       *
+       * 实测页内切换（宿主画布切换器同一个入口）后新画布的 Canvas page scope 没能起来：
+       * 地址里的 canvasId 变了，页面却整块空白（连宿主 `.app` 都没有），四喜外壳也就没机会重挂；
+       * 而同一个地址整页打开每次都正常。跳转前记下落点，新页面上外壳直接进画布态。
+       * 宿主侧的这个问题未查明（测试环境无 GPU，不排除是它引起的），查清后可以改回页内切换。
+       */
+      writePendingEntry(ROUTES.create);
+      window.location.assign(`${resolvePublicUrl('/')}?canvasId=${encodeURIComponent(canvasId)}`);
+    };
+    const reset = setProjectSource(createHostProjectSource(catalog, open));
     return reset;
-  }, [catalog]);
+  }, [catalog, currentCanvasId, navigate]);
   return null;
 }
 

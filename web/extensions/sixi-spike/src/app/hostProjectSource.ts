@@ -80,8 +80,13 @@ function matches(project: Project, keyword: string): boolean {
  *
  * `catalog` 是宿主的 App scope 目录服务；它自带缓存，`load()` 命中缓存会直接返回，
  * 所以列表前显式 `load(true)` —— 用户刚在宿主里建了画布，切回四喜就该看到。
+ *
+ * `open` 由外壳提供：打开一张画布要知道"当前是哪张"和"怎么切宿主路由"，这两件事都在外壳里。
  */
-export function createHostProjectSource(catalog: CanvasCatalogService): ProjectSource {
+export function createHostProjectSource(
+  catalog: CanvasCatalogService,
+  open: (canvasId: string) => void
+): ProjectSource {
   /** 取全部画布并转成项目。目录分页上限 100，超过时分批取。 */
   const allProjects = async (): Promise<Project[]> => {
     const first = await catalog.load(true);
@@ -99,6 +104,9 @@ export function createHostProjectSource(catalog: CanvasCatalogService): ProjectS
   };
 
   return {
+    // 一个项目 = 一张画布：打开项目就是进那张画布，不去四喜的详情页
+    open,
+
     async list(query: NormalizedProjectListQuery): Promise<ProjectListResult> {
       const projects = await allProjects();
       // 状态筛选：宿主侧一律 active，所以 'archived' 永远是空，'all' 全量。

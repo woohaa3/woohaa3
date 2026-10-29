@@ -24,7 +24,7 @@ import {
   type AppThemeTokens
 } from "@woohaa3/contracts";
 import type { ThemeMode } from "@/stores/uiStore";
-import { onPrimaryFor, themeTokensFor } from "@/app/theme";
+import { canvasBackdropFor, onPrimaryFor, themeTokensFor } from "@/app/theme";
 
 /** 四喜亮 / 暗对应的宿主 preset id。**不要**复用宿主的 `default` / `dark`（见文件头）。 */
 export const HOST_PRESET_ID: Record<ThemeMode, "sixi-light" | "sixi-dark"> = {
@@ -117,10 +117,10 @@ export function sixiHostPreset(mode: ThemeMode): HostPreset {
 
   const surface = opaque(t.colorBgContainer, t.colorBgLayout);
   /*
-   * 画布底：亮色比卡片低一档灰（白卡片落在白底上没有边界），暗色直接用页面底（纯黑），
-   * 卡片 `#141414` 浮在上面。两档都与四喜页面上「卡片 vs 底」的关系一致。
+   * 画布底取四喜那边的 `canvasBackdropFor`，不在这里从 antd token 推：
+   * 暗色要的是"比页面更深一档"的 `#111111`，antd 没有对应 token（页面底是 `colorBgLayout`）。
    */
-  const backdrop = mode === "light" ? opaque(t.colorFillTertiary, t.colorBgLayout) : opaque(t.colorBgLayout, t.colorBgLayout);
+  const backdrop = canvasBackdropFor(mode);
   const onSurface = (color: string) => opaque(color, surface);
   const onBackdrop = (color: string) => opaque(color, backdrop);
   const accentSoft = onSurface(t.colorPrimaryBg);
