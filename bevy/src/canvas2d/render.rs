@@ -8,22 +8,37 @@ use std::collections::HashMap;
 
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
-use crate::app::{CurrentScene, FrameFlags, ModelAssetTable, NodeIndex};
+use crate::app::{CurrentScene, FrameFlags, ModelAssetTable, NodeIndex, SurfaceState};
 use crate::canvas_ecs::components::{
     CanvasDepth, CanvasLabelRole, CanvasLayout, CanvasNodeId, CanvasSelection, CardPresentation,
-    FilmSetPresentation, GroupPresentation,
+    CardVisual, ContainerVisual, EdgeVisual, FilmSetPresentation, GroupPresentation,
 };
 use crate::canvas_ecs::{CanvasBatchWriter, SelectionOutlineBatch};
 use crate::protocol::GraphNode;
 use crate::theme::ThemeResource;
 
-use super::Visuals;
+use super::{CardBlockCache, CardDecorationCache, ContainerBlockCache, EdgeBlockCache, CanvasOverlayCache};
 use super::geometry::Geometry;
 use super::labels::{LabelRequests, LabelStyle};
 
 /// 静态 2D 场景只在 accepted scene/视口/主题变化时重建。
-pub(crate) fn canvas_render_requested(flags: Res<FrameFlags>) -> bool {
-    flags.changed
+pub(crate) fn canvas_render_requested(
+    flags: Res<FrameFlags>,
+    card_visuals: Query<(), Changed<CardVisual>>,
+    container_visuals: Query<(), Changed<ContainerVisual>>,
+    edge_visuals: Query<(), Changed<EdgeVisual>>,
+    theme: Res<ThemeResource>,
+    surface: Res<SurfaceState>,
+) -> bool {
+    flags.scene_received
+        || flags.positions_received
+        || flags.surface_changed
+        || flags.theme_changed
+        || !card_visuals.is_empty()
+        || !container_visuals.is_empty()
+        || !edge_visuals.is_empty()
+        || theme.is_changed()
+        || surface.is_changed()
 }
 
 /// 一个按文档顺序投影的节点：实体 + 完整绘制 DTO。
@@ -61,7 +76,8 @@ pub(crate) fn produce_card_geometry(
     scene: Res<CurrentScene>,
     index: Res<NodeIndex>,
     theme: Res<ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    mut visuals: ResMut<CardBlockCache>,
+    materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
     mut flags: ResMut<FrameFlags>,
@@ -96,6 +112,7 @@ pub(crate) fn produce_card_geometry(
         scene.0.nodes.len(),
         &scene.0,
         &theme,
+        &materials,
     );
 }
 
@@ -106,7 +123,8 @@ pub(crate) fn produce_card_hover(
     scene: Res<CurrentScene>,
     index: Res<NodeIndex>,
     theme: Res<ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    mut visuals: ResMut<CardDecorationCache>,
+    materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut flags: ResMut<FrameFlags>,
     nodes: Query<(
@@ -138,6 +156,7 @@ pub(crate) fn produce_card_hover(
         &scene.0,
         &theme,
         &projected,
+        &materials,
         scene.0.nodes.len(),
     );
 }
@@ -149,7 +168,8 @@ pub(crate) fn produce_container_geometry(
     scene: Res<CurrentScene>,
     index: Res<NodeIndex>,
     theme: Res<ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    mut visuals: ResMut<ContainerBlockCache>,
+    materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
     mut flags: ResMut<FrameFlags>,
@@ -184,6 +204,7 @@ pub(crate) fn produce_container_geometry(
         scene.0.nodes.len(),
         &scene.0,
         &theme,
+        &materials,
     );
 }
 
@@ -193,7 +214,8 @@ pub(crate) fn produce_edges(
     mut commands: Commands,
     scene: Res<CurrentScene>,
     theme: Res<ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    mut visuals: ResMut<EdgeBlockCache>,
+    materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
     mut flags: ResMut<FrameFlags>,
@@ -215,6 +237,7 @@ pub(crate) fn produce_edges(
         &theme,
         &layouts,
         overlay_z,
+        &materials,
     );
 }
 
@@ -301,7 +324,7 @@ pub(crate) fn sync_canvas_overlay(
     index: Res<NodeIndex>,
     model_assets: Res<ModelAssetTable>,
     theme: Res<ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    mut visuals: ResMut<CanvasOverlayCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
     mut flags: ResMut<FrameFlags>,
@@ -434,7 +457,7 @@ pub(crate) fn sync_canvas_overlay(
 fn replace_geometry(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    visuals: &mut Visuals,
+    visuals: &mut CanvasOverlayCache,
     blend: bool,
     built: Mesh,
 ) {

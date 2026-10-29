@@ -25,6 +25,20 @@ pub(crate) mod scope;
 pub(crate) mod shot_preview;
 mod position_basis;
 
+/// Shared visibility rule for the node action toolbar. Both the renderer and the interaction
+/// snapshot call this predicate so a hidden toolbar cannot remain clickable.
+pub(crate) fn action_bar_visible(scene: &crate::protocol::Scene, node: &crate::protocol::GraphNode) -> bool {
+    if scene.image_focus.is_some() || scene.video_focus.is_some() || scene.model_focus.is_some() {
+        return false;
+    }
+    if node.group.is_some() {
+        return false;
+    }
+    let projected = focus_context::overlay(scene);
+    projected.nodes.iter().any(|candidate| candidate.id == node.id)
+        && scene.node_actions.get(&node.id).is_some_and(|actions| !actions.actions.is_empty())
+}
+
 /// 记录一次合法 `set_scene` 并在同一接受点同步发布 interaction snapshot。
 #[cfg(feature = "canvas-core")]
 pub(crate) use interaction::accept_scene;

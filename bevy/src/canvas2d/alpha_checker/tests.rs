@@ -15,11 +15,7 @@ fn world() -> World {
     world.insert_resource(Assets::<Image>::default());
     world.insert_resource(FrameFlags::default());
     world.init_resource::<MediaAlphaCheckerTexture>();
-    world.insert_resource(super::Visuals {
-        texture_store: Default::default(),
-        card_blocks: Vec::new(),
-        card_decorations: Vec::new(),
-        container_blocks: Vec::new(),
+    world.insert_resource(super::CanvasOverlayCache {
         mesh: default(),
         material: default(),
         mesh_entity: None,
@@ -27,18 +23,7 @@ fn world() -> World {
         blend_material: default(),
         blend_mesh_entity: None,
         font: default(),
-        edge_blocks: default(),
         shared_key: None,
-        attach_probe_mesh: default(),
-        attach_probe_entity: None,
-        attach_probe_active: false,
-        media_alpha_checker: None,
-        node_action_mesh: default(),
-        node_action_entity: None,
-        node_action_active: false,
-        running_mesh: default(),
-        running_mesh_entity: None,
-        running_active: false,
     });
     world.insert_resource(CurrentScene(Scene {
         nodes: serde_json::from_value(serde_json::json!([

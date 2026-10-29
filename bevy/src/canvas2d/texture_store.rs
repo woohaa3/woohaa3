@@ -48,7 +48,7 @@ pub(crate) enum TextureAction {
 }
 
 /// 节点纹理的内容共享表。
-#[derive(Debug, Default)]
+#[derive(Resource, Debug, Default)]
 pub(crate) struct TextureStore {
     contents: HashMap<String, Content>,
     nodes: HashMap<String, Binding>,

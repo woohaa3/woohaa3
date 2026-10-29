@@ -12,7 +12,8 @@ use bevy::prelude::*;
 
 use super::components::{
     CanvasDepth, CanvasHover, CanvasLayout, CanvasNodeId, CanvasSelection, CanvasVisibility,
-    CardPresentation, CustomPresentation, FilmSetPresentation, GroupPresentation,
+    CardPresentation, CardVisual, ContainerVisual, CustomPresentation, FilmSetPresentation,
+    GroupPresentation, NodeActionBar,
 };
 use crate::app::{CurrentScene, FrameFlags};
 use crate::protocol::{GraphNode, Scene};
@@ -43,6 +44,11 @@ pub(crate) fn project_canvas_nodes(
     scene: Res<CurrentScene>,
     mut state: ResMut<CanvasProjectionState>,
     existing: Query<(Entity, &CanvasNodeId)>,
+    mut render_inputs: Query<(
+        Option<&mut CardVisual>,
+        Option<&mut ContainerVisual>,
+        Option<&mut NodeActionBar>,
+    )>,
 ) {
     let source = &scene.0;
     let overlay = crate::canvas_query::focus_context::overlay(source);
@@ -101,6 +107,7 @@ pub(crate) fn project_canvas_nodes(
             }
         };
         apply_presentation(&mut commands, entity, node);
+        apply_render_inputs(&mut commands, &mut render_inputs, entity, projected, node);
     }
     // 不再可呈现的节点连同派生子实体（标签/纹理/面板/细节）一起回收。
     for (_, entity) in live {
@@ -110,6 +117,78 @@ pub(crate) fn project_canvas_nodes(
     state.applied_revision = Some(projected.revision);
     state.nodes = projected.nodes.len();
     state.generation = state.generation.wrapping_add(1);
+}
+
+fn apply_render_inputs(
+    commands: &mut Commands,
+    render_inputs: &mut Query<(
+        Option<&mut CardVisual>,
+        Option<&mut ContainerVisual>,
+        Option<&mut NodeActionBar>,
+    )>,
+    entity: Entity,
+    scene: &Scene,
+    node: &GraphNode,
+) {
+    let desired_card = ContainerVisual::from_node(node).is_none().then(|| CardVisual::from_node(node));
+    let desired_container = ContainerVisual::from_node(node);
+    let desired_action = crate::canvas_query::action_bar_visible(scene, node)
+        .then(|| scene.node_actions.get(&node.id).cloned())
+        .flatten()
+        .map(|actions| NodeActionBar { summary: actions.summary.clone(), actions });
+    if let Ok((mut card, mut container, mut action)) = render_inputs.get_mut(entity) {
+        if let Some(desired) = desired_card {
+            if let Some(current) = card.as_deref_mut() {
+                if *current != desired {
+                    *current = desired;
+                }
+            } else {
+                commands.entity(entity).insert(desired);
+            }
+        } else if card.is_some() {
+            commands.entity(entity).remove::<CardVisual>();
+        }
+        if let Some(desired) = desired_container {
+            if let Some(current) = container.as_deref_mut() {
+                if *current != desired {
+                    *current = desired;
+                }
+            } else {
+                commands.entity(entity).insert(desired);
+            }
+        } else if container.is_some() {
+            commands.entity(entity).remove::<ContainerVisual>();
+        }
+        if let Some(desired) = desired_action {
+            if let Some(current) = action.as_deref_mut() {
+                if *current != desired {
+                    *current = desired;
+                }
+            } else {
+                commands.entity(entity).insert(desired);
+            }
+        } else if action.is_some() {
+            commands.entity(entity).remove::<NodeActionBar>();
+        }
+        return;
+    }
+    if let Some(container) = ContainerVisual::from_node(node) {
+        commands.entity(entity).insert(container);
+        commands.entity(entity).remove::<CardVisual>();
+    } else {
+        commands.entity(entity).insert(CardVisual::from_node(node));
+        commands.entity(entity).remove::<ContainerVisual>();
+    }
+    if crate::canvas_query::action_bar_visible(scene, node) {
+        if let Some(actions) = scene.node_actions.get(&node.id) {
+            commands.entity(entity).insert(NodeActionBar {
+                actions: actions.clone(),
+                summary: actions.summary.clone(),
+            });
+        }
+    } else {
+        commands.entity(entity).remove::<NodeActionBar>();
+    }
 }
 
 fn apply_presentation(commands: &mut Commands, entity: Entity, node: &GraphNode) {

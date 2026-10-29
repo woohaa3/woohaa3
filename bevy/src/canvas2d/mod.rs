@@ -1,4 +1,4 @@
-//! 2D 画布渲染域：`Visuals`、2D camera/font/material setup、纹理上传、label 生命周期
+//! 2D 画布渲染域：`CanvasOverlayCache`、2D camera/font/material setup、纹理上传、label 生命周期
 //! 与 2D scene 重建（change: refactor-bevy-runtime-modules，任务 3.3 / 3.4 / design D5；
 //! change: refactor-bevy-rust-file-size 拆分为 facade + 子模块）。
 //!
@@ -79,6 +79,24 @@ pub(crate) mod shot_preview {
 
 use bevy::prelude::*;
 
+/// Shared GPU material/font handles. Entity and layer ownership stays in components/queries;
+/// this resource only contains handles safe to share across producers.
+#[derive(Resource, Clone)]
+pub(crate) struct CanvasMaterials {
+    pub(crate) solid: Handle<ColorMaterial>,
+    pub(crate) blend: Handle<ColorMaterial>,
+    pub(crate) font: Handle<Font>,
+}
+
+/// Cache resource aliases used by producers while the cache fields are migrated independently.
+/// They keep system signatures explicit at the module boundary and preserve one ECS resource
+/// registration during the staged migration.
+pub(crate) use card_cache::CardBlockCache;
+pub(crate) use decoration_cache::CardDecorationCache;
+pub(crate) use container_cache::ContainerBlockCache;
+pub(crate) use edge_cache::EdgeBlockCache;
+pub(crate) use texture_store::TextureStore;
+
 pub(crate) use attach::sync_attach_probe;
 pub(crate) use camera::sync_camera;
 pub(crate) use alpha_checker::sync as sync_alpha_checker;
@@ -97,15 +115,13 @@ pub(crate) use render::{
 pub(crate) use labels::{sync_canvas_labels, LabelRequests};
 pub(crate) use textures::sync_textures;
 
-/// 2D 渲染的共享资源与生命周期状态：共享几何 mesh/material、font handle、纹理内容表与
-/// 批处理块。节点标签、纹理 Sprite 与选中描边由 ECS 组件/Query 拥有，不在此 Resource 中。
+/// 2D 渲染的共享材质、字体与主卡片块资源。装饰、容器、连线块和纹理内容表分别由
+/// `CardDecorationCache`、`ContainerBlockCache`、`EdgeBlockCache` 与 `TextureStore` 拥有；
+/// 节点标签、纹理 Sprite 与选中描边由 ECS 组件/Query 或专用批次拥有。
 ///
 /// 字段保持私有：仅有本模块的子孙（`init` / `textures` / `render` / `generation`）访问。
 #[derive(Resource)]
-pub(crate) struct Visuals {
-    card_blocks: Vec<card_cache::Block>,
-    card_decorations: Vec<decoration_cache::Block>,
-    container_blocks: Vec<container_cache::Block>,
+pub(crate) struct CanvasOverlayCache {
     mesh: Handle<Mesh>,
     material: Handle<ColorMaterial>,
     /// 共享 2D 几何实体；首个非空快照到达后才生成（避免 0 顶点 mesh 触发 wgpu panic）。
@@ -120,43 +136,14 @@ pub(crate) struct Visuals {
     blend_material: Handle<ColorMaterial>,
     blend_mesh_entity: Option<Entity>,
     font: Handle<Font>,
-    /// 纹理按内容身份 + 尺寸共享的引用表
-    /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
-    ///
-    /// `textures` 是「节点 → 展示实例」，本表是「内容 → GPU 图像」；删除节点只减引用，
-    /// 最后一个引用结束才移除 `Assets<Image>`。
-    texture_store: texture_store::TextureStore,
-    edge_blocks: Vec<edge_cache::Block>,
     shared_key: Option<shared_key::SharedKey>,
-    /// 拖动粘连触须的逐帧动画覆盖层（独立于主 card mesh，避免每帧重建整场几何）。
-    attach_probe_mesh: Handle<Mesh>,
-    attach_probe_entity: Option<Entity>,
-    /// 触须覆盖层当前是否含非空几何（用于从「有触须」到「无」时清空一次）。
-    attach_probe_active: bool,
-    /// 媒体聚焦透明棋盘格实体（A5：透明区域要显示棋盘格，而不是应用网格背景）。
-    media_alpha_checker: Option<Entity>,
-    /// 运行中节点的逐帧进度覆盖层（change: add-node-running-progress）：
-    /// 独立于主 card mesh，避免逐帧重建时影响边标签。
-    running_mesh: Handle<Mesh>,
-    running_mesh_entity: Option<Entity>,
-    /// 覆盖层当前是否含非空几何（用于从「有运行节点」到「无」时清空一次）。
-    running_active: bool,
-    /// 节点顶部操作横条覆盖层（change: 2026-10-13-add-node-to-film-set-shortcut）：
-    /// 逐帧重建，锚定节点上方并随位置/视口顶部碰撞变化，独立于主 card mesh 与标签池。
-    node_action_mesh: Handle<Mesh>,
-    node_action_entity: Option<Entity>,
-    /// 横条覆盖层当前是否含非空几何（用于从「有横条」到「无」时清空一次）。
-    node_action_active: bool,
 }
 
-impl Visuals {
-    /// 测试/无窗口宿主：空几何与默认句柄的 Visuals。
+impl CanvasOverlayCache {
+    /// 测试/无窗口宿主：空几何与默认句柄的 CanvasOverlayCache。
     #[cfg(test)]
     pub(crate) fn default_for_test() -> Self {
         Self {
-            card_blocks: Vec::new(),
-            card_decorations: Vec::new(),
-            container_blocks: Vec::new(),
             mesh: default(),
             material: default(),
             mesh_entity: None,
@@ -164,19 +151,7 @@ impl Visuals {
             blend_material: default(),
             blend_mesh_entity: None,
             font: default(),
-            texture_store: default(),
-            edge_blocks: default(),
             shared_key: None,
-            attach_probe_mesh: default(),
-            attach_probe_entity: None,
-            attach_probe_active: false,
-            media_alpha_checker: None,
-            running_mesh: default(),
-            running_mesh_entity: None,
-            running_active: false,
-            node_action_mesh: default(),
-            node_action_entity: None,
-            node_action_active: false,
         }
     }
 

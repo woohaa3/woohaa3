@@ -187,7 +187,7 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
     let nodes: Vec<SnapshotNode> = scene
         .nodes
         .iter()
-        .map(|node| snapshot_node(node, &scene.node_actions, viewport, scene.surface.as_ref()))
+        .map(|node| snapshot_node(scene, node, &scene.node_actions, viewport, scene.surface.as_ref()))
         .collect();
     let edges: Vec<SnapshotEdge> = scene
         .edges
@@ -264,7 +264,10 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
             .iter()
             .filter_map(|(id, actions)| {
                 let index = *node_index.get(id)?;
-                (!nodes[index].group).then(|| (index, actions.clone()))
+                let source = node_map.get(id.as_str())?;
+                (crate::canvas_query::action_bar_visible(scene, source)
+                    && !actions.actions.is_empty())
+                    .then(|| (index, actions.clone()))
             })
             .collect(),
         viewport,
@@ -291,6 +294,7 @@ pub(crate) fn build_snapshot(scene: &Scene, generation: u32) -> InteractionSnaps
 }
 
 fn snapshot_node(
+    scene: &Scene,
     node: &GraphNode,
     node_actions: &std::collections::HashMap<String, crate::protocol::NodeActions>,
     viewport: (f32, f32, f32),
@@ -340,9 +344,7 @@ fn snapshot_node(
         None => (node.x, node.y, node.width, node.height),
     };
     // 顶部操作横条：复合资产也可贡献操作，锚定其真实范围；group 使用独立横条。
-    let node_actions = if group {
-        None
-    } else {
+    let node_actions = if crate::canvas_query::action_bar_visible(scene, node) {
         node_actions.get(&node.id).and_then(|actions| {
             layout::node_action_toolbar(
                 node,
@@ -351,7 +353,7 @@ fn snapshot_node(
                 surface.map(|s| (s.width, s.height)),
             )
         })
-    };
+    } else { None };
     SnapshotNode {
         initial_position: Vec2::new(node.x, node.y),
         layout_bounds: (node.x, node.y, node.width, node.height),

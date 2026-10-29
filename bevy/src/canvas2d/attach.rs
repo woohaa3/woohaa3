@@ -13,9 +13,9 @@ use std::collections::HashMap;
 use bevy::{prelude::*, camera::visibility::NoFrustumCulling};
 
 use crate::protocol::{DragAttach, GraphNode};
+use crate::canvas_ecs::components::AttachProbeLayer;
 use crate::theme::ThemeResource;
 
-use super::Visuals;
 use super::geometry::Geometry;
 use super::layout::port;
 
@@ -230,29 +230,21 @@ pub(crate) fn draw_drag_attach_probe(
 /// 替换触须覆盖层共享 mesh；首个触须出现时创建实体（沿用运行进度覆盖层的模式）。
 pub(crate) fn replace_probe_mesh(
     commands: &mut Commands,
-    visuals: &mut Visuals,
     meshes: &mut Assets<Mesh>,
+    materials: &super::CanvasMaterials,
+    layers: &Query<(Entity, Option<&Mesh2d>), With<AttachProbeLayer>>,
     built: Mesh,
 ) {
     let handle = meshes.add(built);
-    match visuals.attach_probe_entity {
-        Some(entity) => {
-            let old = std::mem::replace(&mut visuals.attach_probe_mesh, handle.clone());
-            meshes.remove(&old);
+    match layers.iter().next() {
+        Some((entity, old_handle)) => {
+            if let Some(old) = old_handle { meshes.remove(old.0.id()); }
             if let Ok(mut entity_commands) = commands.get_entity(entity) {
                 entity_commands.insert(Mesh2d(handle));
             }
         }
         None => {
-            visuals.attach_probe_mesh = handle.clone();
-            let entity = commands
-                .spawn((
-                    Mesh2d(handle),
-                    MeshMaterial2d(visuals.blend_material.clone()),
-                    NoFrustumCulling,
-                ))
-                .id();
-            visuals.attach_probe_entity = Some(entity);
+            commands.spawn((AttachProbeLayer, Mesh2d(handle), MeshMaterial2d(materials.blend.clone()), NoFrustumCulling));
         }
     }
 }
@@ -260,21 +252,16 @@ pub(crate) fn replace_probe_mesh(
 /// 清空触须覆盖层（无活动触须时调用一次）。
 pub(crate) fn clear_probe_mesh(
     commands: &mut Commands,
-    visuals: &mut Visuals,
     meshes: &mut Assets<Mesh>,
+    layers: &Query<(Entity, Option<&Mesh2d>), With<AttachProbeLayer>>,
 ) {
-    if !visuals.attach_probe_active {
-        return;
-    }
-    if let Some(entity) = visuals.attach_probe_entity {
+    if let Some((entity, old_handle)) = layers.iter().next() {
         let handle = meshes.add(Geometry::default().build());
-        let old = std::mem::replace(&mut visuals.attach_probe_mesh, handle.clone());
-        meshes.remove(&old);
+        if let Some(old) = old_handle { meshes.remove(old.0.id()); }
         if let Ok(mut entity_commands) = commands.get_entity(entity) {
             entity_commands.insert(Mesh2d(handle));
         }
     }
-    visuals.attach_probe_active = false;
 }
 
 /// 逐帧推进粘连触须动画（change: add-drag-touch-connections，design D5）。
@@ -287,21 +274,22 @@ pub(crate) fn sync_attach_probe(
     scene: Res<crate::app::CurrentScene>,
     index: Res<crate::app::NodeIndex>,
     theme: Res<ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
+    layers: Query<(Entity, Option<&Mesh2d>), With<AttachProbeLayer>>,
 ) {
     // 图片/视频聚焦期间不绘制粘连触须
     // （change: 2026-10-08-...，任务 4.2；change: 2026-10-10-add-video-node-focus-workspace）。
     if super::image_focus::has_presented_media_focus(&scene.0) {
-        clear_probe_mesh(&mut commands, &mut visuals, &mut meshes);
+        clear_probe_mesh(&mut commands, &mut meshes, &layers);
         return;
     }
     let Some(attach) = scene.0.drag_attach.as_ref() else {
-        clear_probe_mesh(&mut commands, &mut visuals, &mut meshes);
+        clear_probe_mesh(&mut commands, &mut meshes, &layers);
         return;
     };
     let Some(owner) = index.node(&scene.0, &attach.node_id).map(|(_, node)| node) else {
-        clear_probe_mesh(&mut commands, &mut visuals, &mut meshes);
+        clear_probe_mesh(&mut commands, &mut meshes, &layers);
         return;
     };
     let contact = attach
@@ -320,10 +308,9 @@ pub(crate) fn sync_attach_probe(
         time.elapsed_secs(),
     );
     if drawn {
-        replace_probe_mesh(&mut commands, &mut visuals, &mut meshes, geometry.build());
-        visuals.attach_probe_active = true;
+        replace_probe_mesh(&mut commands, &mut meshes, &materials, &layers, geometry.build());
     } else {
-        clear_probe_mesh(&mut commands, &mut visuals, &mut meshes);
+        clear_probe_mesh(&mut commands, &mut meshes, &layers);
     }
 }
 

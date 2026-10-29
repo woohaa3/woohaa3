@@ -179,7 +179,7 @@ pub(crate) fn sync_images(
     nodes: Query<(Entity, &CanvasNodeId, &CanvasDepth)>,
     mut sprites: Query<(Entity, &mut Sprite, &mut Transform, &CompositePanelThumbnail)>,
 ) {
-    if !flags.changed && batch.0.is_empty() {
+    if !(flags.scene_received || flags.positions_received || flags.surface_changed || flags.theme_changed) && !scene.is_changed() && batch.0.is_empty() {
         return;
     }
     let desired = image_slots(&scene.0, &index, &nodes);

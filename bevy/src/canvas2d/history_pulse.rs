@@ -1,6 +1,6 @@
 //! Small dynamic mesh; time never participates in the static card cache key.
 use super::{
-    Visuals,
+    CanvasOverlayCache,
     geometry::Geometry,
     layout::{NODE_HISTORY_STRIP_DOT_RADIUS, history_strip_dot},
 };
@@ -66,7 +66,7 @@ pub(crate) fn sync(
     scene: Res<CurrentScene>,
     surface: Res<SurfaceState>,
     theme: Res<crate::theme::ThemeResource>,
-    visuals: Res<Visuals>,
+    visuals: Res<CanvasOverlayCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut layer: Local<PulseLayer>,
 ) {

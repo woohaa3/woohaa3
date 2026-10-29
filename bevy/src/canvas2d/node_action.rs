@@ -16,11 +16,10 @@ use std::collections::HashMap;
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use crate::app::{CurrentScene, NodeIndex};
-use crate::canvas_ecs::components::{CanvasLabelRole, CanvasNodeId};
+use crate::canvas_ecs::components::{CanvasDepth, CanvasLabelRole, CanvasLayout, CanvasNodeId, NodeActionBar, NodeActionLayer};
 use crate::protocol::{GraphNode, NodeActions};
 use crate::theme::ThemeResource;
 
-use super::Visuals;
 use super::geometry::Geometry;
 use super::labels::{Label, LabelRequests, LabelStyle};
 use super::layout::{
@@ -132,14 +131,13 @@ pub(crate) fn sync_node_action_bars(
     index: Res<NodeIndex>,
     surface: Res<crate::app::SurfaceState>,
     theme: Res<ThemeResource>,
-    mut visuals: ResMut<Visuals>,
+    materials: Res<super::CanvasMaterials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut requests: ResMut<LabelRequests>,
-    nodes: Query<(Entity, &CanvasNodeId)>,
+    nodes: Query<(Entity, &CanvasNodeId, &CanvasLayout, &CanvasDepth, &NodeActionBar)>,
+    layers: Query<(Entity, Option<&Mesh2d>), With<NodeActionLayer>>,
 ) {
     requests.begin(CanvasLabelRole::NodeAction);
-    // 图片/视频聚焦期间不绘制画布横条（横条只属于普通画布）。
-    let focused = super::image_focus::has_presented_media_focus(&scene.0) || scene.0.model_focus.is_some();
     let viewport = (
         scene.0.viewport.x,
         scene.0.viewport.y,
@@ -148,32 +146,32 @@ pub(crate) fn sync_node_action_bars(
     let surface_size = (surface.size.x, surface.size.y);
     let z = base_z(scene.0.nodes.len());
 
-    if focused {
-        clear_mesh(&mut commands, &mut visuals, &mut meshes);
-        return;
-    }
     let projected: Vec<(Entity, GraphNode)> = nodes
         .iter()
-        .filter_map(|(entity, id)| {
-            crate::canvas_ecs::node_for_draw(&scene.0, &index, &id.0)
-                .map(|node| (entity, node.into_owned()))
+        .filter_map(|(entity, id, _layout, _depth, _bar)| {
+            let (_, source) = index.node(&scene.0, &id.0)?;
+            Some((entity, crate::canvas_query::focus_context::node(&scene.0, source).into_owned()))
         })
         .collect();
+    let actions = nodes
+        .iter()
+        .map(|(_, id, _, _, bar)| (id.0.clone(), bar.actions.clone()))
+        .collect::<HashMap<_, _>>();
     let mut geometry = Geometry::default();
     let drawn = draw(
         &mut geometry,
         &theme,
         &projected,
-        &scene.0.node_actions,
+        &actions,
         Some(viewport),
         Some(surface_size),
         z,
     );
     if drawn.is_empty() {
-        clear_mesh(&mut commands, &mut visuals, &mut meshes);
+        clear_mesh(&mut commands, &mut meshes, &layers);
         return;
     }
-    replace_mesh(&mut commands, &mut visuals, &mut meshes, geometry.build());
+    replace_mesh(&mut commands, &mut meshes, &materials, &layers, geometry.build());
     for (owner, labels) in drawn {
         requests.push(
             CanvasLabelRole::NodeAction,
@@ -188,48 +186,42 @@ pub(crate) fn sync_node_action_bars(
 /// 替换横条覆盖层 mesh；实体缺失时按需创建（半透明 Blend 材质，避免写深度遮挡）。
 fn replace_mesh(
     commands: &mut Commands,
-    visuals: &mut Visuals,
     meshes: &mut Assets<Mesh>,
+    materials: &super::CanvasMaterials,
+    layers: &Query<(Entity, Option<&Mesh2d>), With<NodeActionLayer>>,
     built: Mesh,
 ) {
     let handle = meshes.add(built);
-    match visuals.node_action_entity {
-        Some(entity) => {
-            let old = std::mem::replace(&mut visuals.node_action_mesh, handle.clone());
-            meshes.remove(&old);
+    match layers.iter().next() {
+        Some((entity, old_handle)) => {
+            if let Some(old) = old_handle {
+                meshes.remove(old.0.id());
+            }
             if let Ok(mut entity_commands) = commands.get_entity(entity) {
                 entity_commands.insert(Mesh2d(handle));
             }
         }
         None => {
-            visuals.node_action_mesh = handle.clone();
-            let entity = commands
-                .spawn((
-                    Mesh2d(handle),
-                    MeshMaterial2d(visuals.blend_material.clone()),
-                    NoFrustumCulling,
-                ))
-                .id();
-            visuals.node_action_entity = Some(entity);
+            commands.spawn((NodeActionLayer, Mesh2d(handle), MeshMaterial2d(materials.blend.clone()), NoFrustumCulling));
         }
     }
-    visuals.node_action_active = true;
 }
 
 /// 清空横条覆盖层（无横条时调用一次）。
-fn clear_mesh(commands: &mut Commands, visuals: &mut Visuals, meshes: &mut Assets<Mesh>) {
-    if !visuals.node_action_active {
-        return;
-    }
-    if let Some(entity) = visuals.node_action_entity {
+fn clear_mesh(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    layers: &Query<(Entity, Option<&Mesh2d>), With<NodeActionLayer>>,
+) {
+    if let Some((entity, old_handle)) = layers.iter().next() {
         let handle = meshes.add(Geometry::default().build());
-        let old = std::mem::replace(&mut visuals.node_action_mesh, handle.clone());
-        meshes.remove(&old);
+        if let Some(old) = old_handle {
+            meshes.remove(old.0.id());
+        }
         if let Ok(mut entity_commands) = commands.get_entity(entity) {
             entity_commands.insert(Mesh2d(handle));
         }
     }
-    visuals.node_action_active = false;
 }
 
 #[cfg(test)]

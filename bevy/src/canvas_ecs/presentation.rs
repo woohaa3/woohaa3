@@ -9,7 +9,7 @@ use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
 use super::components::{CanvasDepth, CanvasLayout, CanvasNodeId, GroupPresentation};
 use crate::app::{CurrentScene, NodeIndex};
-use crate::canvas2d::Visuals;
+use crate::canvas2d::CanvasOverlayCache;
 use crate::theme::ThemeResource;
 
 const BLOCK_SIZE: usize = 16;
@@ -38,7 +38,7 @@ pub(crate) fn sync_group_panels(
     scene: Res<CurrentScene>,
     index: Res<NodeIndex>,
     theme: Res<ThemeResource>,
-    visuals: Res<Visuals>,
+    visuals: Res<CanvasOverlayCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     nodes: Query<(
         Entity,
@@ -162,7 +162,7 @@ mod tests {
         world.insert_resource(ThemeResource::default());
         world.init_resource::<Assets<Mesh>>();
         world.insert_resource(FrameFlags::default());
-        world.insert_resource(Visuals::default_for_test());
+        world.insert_resource(CanvasOverlayCache::default_for_test());
         world
     }
 

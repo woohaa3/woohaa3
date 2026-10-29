@@ -2,7 +2,7 @@
 //!
 //! 这里完全在测试模块内定义一个新的 presentation component 与 producer system，只复用公共
 //! `CanvasLayout` / `CanvasDepth` / `CanvasSelection` 和 `SelectionOutlineBatch` writer，
-//! 不修改任何既有系统源码。目标是证明：新增展示类型不需要中心 enum、trait 或 `Visuals` 注册。
+//! 不修改任何既有系统源码。目标是证明：新增展示类型不需要中心 enum、trait 或 `CanvasOverlayCache` 注册。
 use super::*;
 use crate::canvas_ecs::components::{CanvasDepth, CanvasLayout, CanvasSelection};
 use crate::canvas_ecs::{CanvasBatchWriter, flush_selection_outlines};
