@@ -52,10 +52,14 @@ impl ModelVisuals {
             for (_entity, base, geometry) in &root.geometries {
                 let count = 1;
                 #[cfg(feature = "explicit-instancing")]
-                let count = root.instance_parts.get(_entity).map_or(count, |ids| ids.len());
+                let count = root
+                    .instance_parts
+                    .get(_entity)
+                    .map_or(count, |ids| ids.len());
                 // 每几何有效档位：总览根的自定义 Mesh / Box 恒 High，按实际 handle 计数，
                 // 不按根 desired 枚举漏计（change: 2026-10-15-add-film-set-overview-lod，design D3/D6）。
-                let effective = super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
+                let effective =
+                    super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
                 if let Some(handle) = self.shared.lookup(base, geometry, effective) {
                     unique.insert(handle.id());
                     if let Some(mesh) = meshes.get(handle) {
@@ -204,11 +208,23 @@ impl ModelVisuals {
         });
         value["nativePreparation"] = preparation;
         #[cfg(feature = "explicit-instancing")]
-        let value = { let mut value = value;
-            let groups: usize = self.roots.values().map(|root| root.instance_parts.len()).sum();
-            let parts: usize = self.roots.values().flat_map(|root| root.instance_parts.values()).map(|ids| ids.len()).sum();
+        let value = {
+            let mut value = value;
+            let groups: usize = self
+                .roots
+                .values()
+                .map(|root| root.instance_parts.len())
+                .sum();
+            let parts: usize = self
+                .roots
+                .values()
+                .flat_map(|root| root.instance_parts.values())
+                .map(|ids| ids.len())
+                .sum();
             value["explicitInstances"] = serde_json::json!({"groups": groups, "parts": parts,
-                "cpuTransformBytes": parts * super::instancing::INSTANCE_STRIDE}); value };
+                "cpuTransformBytes": parts * super::instancing::INSTANCE_STRIDE});
+            value
+        };
         value.to_string()
     }
 }

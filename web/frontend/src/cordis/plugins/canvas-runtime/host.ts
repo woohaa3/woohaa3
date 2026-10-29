@@ -36,7 +36,8 @@ import { ImageFocusStore } from "./image-focus-store.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
 import { installPerfFrameWindow } from "./perf-frame-window.js";
-import { groupBadgeScreenRect } from "@woohaa3/contracts";
+import { getGroupLayoutSizes } from "@woohaa3/contracts";
+import { groupBadgePresentationScreenRect } from "./group-badge-screen-rect.js";
 import {
   applyFilmSetObjectAction,
   applyFilmSetObjectGesture,
@@ -562,12 +563,22 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
     // 普通 group 的执行面板跟随外部 3D 徽标，而不是跟随气泡主体。使用当前 screen rect
     // 保留拖动/缩放预览，再把同一份徽标几何投影到屏幕。
+    //
+    // 基准必须是**渲染矩形**而不是节点自身尺寸：Rust 把徽标画在渲染场景节点矩形的下缘，
+    // 而 group 的渲染矩形是成员包围后的布局尺寸（`getGroupLayoutSizes`，可比节点自身高得多）。
+    // 用节点尺寸推导会把徽标算高一整段，面板随之压回场景上。
     if (card && node?.type === "group" && this.controllerInstance) {
       const controller = this.controllerInstance;
-      const zoom = controller.viewport().zoom;
-      if (Number.isFinite(zoom) && zoom > 0) {
-        return groupBadgeScreenRect(card, zoom, canvas?.nodeData[nodeId]?.groupBadgeScale);
-      }
+      const data = canvas?.nodeData[nodeId];
+      const layout = canvas ? getGroupLayoutSizes(canvas.document.nodes).get(nodeId) ?? null : null;
+      return groupBadgePresentationScreenRect({
+        card,
+        zoom: controller.viewport().zoom,
+        node,
+        layout,
+        collapsed: data?.groupCollapsed === true,
+        scale: data?.groupBadgeScale
+      }) ?? card;
     }
     const scopes = this.controllerInstance?.queryCompositeAssetScopes();
     if (!scopes?.ok) return card;

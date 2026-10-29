@@ -10,6 +10,7 @@ import {
 } from "./plugin.js";
 import { shotReferenceTemplateItems } from "./shot-reference-menu.js";
 import { NODE_TEMPLATES } from "../../domain/node-catalog.js";
+import { createFilmSetGroupMarker } from "@woohaa3/contracts";
 
 const nodes: CanvasMenuNode[] = [
   { id: "g", type: "group" },
@@ -59,6 +60,17 @@ describe("nodeContextMenuItems（change: add-canvas-node-grouping）", () => {
     expect(ids(nodeContextMenuItems(nodes, ["g"], true))).toContain("run-group");
     expect(ids(nodeContextMenuItems(nodes, ["g", "b"], true))).not.toContain("run-group");
     expect(ids(nodeContextMenuItems(nodes, ["b"], true))).not.toContain("run-group");
+  });
+
+  it("片场组不提供整理、解组和批量执行", () => {
+    const filmSetNodes: CanvasMenuNode[] = [{ id: "film", type: "group" }, { id: "shot", type: "image", parentId: "film" }];
+    const items = ids(nodeContextMenuItems(filmSetNodes, ["film"], true, {
+      nodeData: { film: { filmSetGroup: createFilmSetGroupMarker() } }
+    }));
+    expect(items).not.toContain("tidy-group");
+    expect(items).not.toContain("run-group");
+    expect(items).not.toContain("ungroup-group");
+    expect(items).not.toContain("ungroup-selection");
   });
 
   it("多选时不提供整理", () => {

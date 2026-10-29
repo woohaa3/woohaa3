@@ -7,8 +7,7 @@
  * 宿主没有原生录制端口时立即返回 `recording-unavailable` 与具体原因，不驱动浏览器页面取帧。
  */
 import type { CanvasAuthority, CanvasRecordingPort, McpExportFilmSetClipOutcome, McpExportFilmSetClipRequest, McpGetFilmSetExportOutcome, McpGetFilmSetExportRequest, RecordingStatusView } from "@woohaa3/contracts";
-import { decodeFilmSetNodeData, filmSetAnimationsOf, filmSetContentHash } from "@woohaa3/contracts";
-import type { CanvasNodeData } from "@woohaa3/contracts";
+import { readFilmSetAnimationProjection, filmSetAnimationsOf, filmSetContentHash } from "@woohaa3/contracts";
 
 export type FilmSetExportServiceDependencies = {
   resolveRoom: (canvasId: string) => Promise<CanvasAuthority | null>;
@@ -40,14 +39,14 @@ export class FilmSetExportService {
     if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${canvasId} 不存在` };
     const exported = room.exportCanvas();
     if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
-    const animation = decodeFilmSetNodeData(exported.canvas.nodeData[nodeId] as CanvasNodeData | undefined);
-    if (!animation.ok) return { ok: false, code: "invalid-animation-node", message: animation.reason };
-    const clip = filmSetAnimationsOf(animation.value).clips.find(entry => entry.id === clipId);
+    const animation = readFilmSetAnimationProjection(exported.canvas, nodeId);
+    if (!animation) return { ok: false, code: "invalid-animation-node", message: "片场分组或资源无法解析" };
+    const clip = filmSetAnimationsOf(animation).clips.find(entry => entry.id === clipId);
     if (!clip) return { ok: false, code: "unknown-clip", message: `拍摄镜头 ${clipId} 不存在` };
     if (!(clip.timeline.duration > 0)) {
       return { ok: false, code: "recording-source-invalid", message: "该镜头没有可导出的正时长" };
     }
-    if (input.expectedContentHash && input.expectedContentHash !== filmSetContentHash(animation.value.filmSetContent)) {
+    if (input.expectedContentHash && input.expectedContentHash !== filmSetContentHash(animation.filmSetContent)) {
       return { ok: false, code: "stale-content", message: "片场内容已被并发修改，请重新读取后重试" };
     }
     const submission = await port.submit({

@@ -30,7 +30,7 @@ export const NODE_ACTION_TOOLBAR_FONT = 13;
 /** 模型名摘要与动作之间的水平间距（屏幕像素）。 */
 export const NODE_ACTION_TOOLBAR_SUMMARY_GAP = 8;
 /** 摘要最大宽度（超出省略，屏幕像素）。 */
-export const NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH = 140;
+export const NODE_ACTION_TOOLBAR_SUMMARY_MAX_WIDTH = 280;
 /** 顶部碰撞回退判定所用的视口安全边距（屏幕像素，仅用于「上方是否放得下」）。 */
 export const NODE_ACTION_TOOLBAR_VIEWPORT_MARGIN = 8;
 
@@ -48,7 +48,7 @@ export type ScreenRect = { left: number; top: number; width: number; height: num
 export type NodeActionToolbarAction = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download";
+  icon?: "download" | "collapse-groups" | "expand-groups";
   iconOnly?: boolean;
   /** 稳定动作 ID（命中回传，贡献据此派发）。 */
   id: string;
@@ -65,7 +65,7 @@ export type NodeActionToolbarLayoutInput = {
   node: { x: number; y: number; width: number; height: number };
   /** 按从左到右顺序排列的动作。 */
   actions: readonly NodeActionToolbarAction[];
-  /** 模型名摘要（可选，显示在动作右侧）。 */
+  /** 节点摘要（可选，显示在动作左侧）。 */
   summary?: string;
   /** 当前视口（世界→屏幕用于顶部碰撞判定）；缺省时始终置顶。 */
   viewport?: { x: number; y: number; zoom: number };
@@ -122,7 +122,7 @@ export function truncateNodeActionText(text: string, size: number, maxWidth: num
  *   同一间距；上下两侧都放不下时保持上方并把横条钳制在视口内（允许覆盖节点空白或成员，
  *   change: 2026-10-16-add-group-selection-toolbar design D2）；
  * - 目标完全移出视口时返回 null（不呈现也不保留吸附热区）；
- * - 动作从左到右排列，声明 `menu` 的动作后紧跟独立箭头；有摘要时排在最右；
+ * - 摘要排在左侧，动作从左到右排列，声明 `menu` 的动作后紧跟独立箭头；
  * - 无动作时返回 null（不呈现横条）。
  *
  * 缺省 viewport/surface 时不做可见性与回退判定（保持旧的「始终置顶」行为，供无视口的
@@ -193,6 +193,14 @@ export function nodeActionToolbarLayout(
   const bar: NodeActionToolbarRect = { x: barX, y: barY, width: barWidth, height: barHeight };
 
   let cursor = bar.x + NODE_ACTION_TOOLBAR_PAD;
+  let summary: { text: string; rect: NodeActionToolbarRect } | null = null;
+  if (summaryText) {
+    summary = {
+      text: summaryText,
+      rect: { x: cursor, y: bar.y + NODE_ACTION_TOOLBAR_PAD, width: summaryWidth, height }
+    };
+    cursor += summaryWidth + NODE_ACTION_TOOLBAR_SUMMARY_GAP;
+  }
   const actionRects: NodeActionToolbarRect[] = [];
   const menuRects: (NodeActionToolbarRect | null)[] = [];
   actions.forEach((action, index) => {
@@ -207,15 +215,6 @@ export function nodeActionToolbarLayout(
     }
     if (index < actions.length - 1) cursor += NODE_ACTION_TOOLBAR_SEPARATOR;
   });
-
-  let summary: { text: string; rect: NodeActionToolbarRect } | null = null;
-  if (summaryText) {
-    const x = cursor + NODE_ACTION_TOOLBAR_SUMMARY_GAP;
-    summary = {
-      text: summaryText,
-      rect: { x, y: bar.y + NODE_ACTION_TOOLBAR_PAD, width: summaryWidth, height }
-    };
-  }
 
   const world = (rect: NodeActionToolbarRect): NodeActionToolbarRect => ({ x: rect.x / zoom, y: rect.y / zoom, width: rect.width / zoom, height: rect.height / zoom });
   return { bar: world(bar), actions: actionRects.map(world), menus: menuRects.map(rect => rect ? world(rect) : null), summary: summary ? { text: summary.text, rect: world(summary.rect) } : null, placement };

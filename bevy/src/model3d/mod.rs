@@ -36,6 +36,7 @@ pub(crate) mod filmset_camera;
 pub(crate) mod focus;
 pub(crate) mod focus_transition;
 pub(crate) mod grid;
+mod group_runtime;
 pub(crate) mod media_geometry;
 pub(crate) mod pick;
 #[cfg(feature = "canvas-core")]

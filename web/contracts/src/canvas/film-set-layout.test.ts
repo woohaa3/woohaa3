@@ -1,3 +1,4 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
 import { expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "./domain/index.js";
 import { createModelSnapshot } from "./animation-snapshot.js";
@@ -76,7 +77,9 @@ it("scene mapping publishes complete layout bounds while retaining the same mode
   const saved: FilmSetContent = { ...content, items: content.items.map(item => ({ ...item, name: item.id, kind: "model", model: createModelSnapshot({ modelScript: "scene.box({id:'body'});", modelScriptVersion: "woohaa-model-js-v2" }) })) };
   canvas.nodeData.film = { extensionId: FILM_SET_EXTENSION_ID, filmSetContent: saved } as never;
   const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops });
-  const mapped = buildCanvasRenderScene({ canvas, modelResources: new Map([["film", resource]]) });
-  expect(mapped.nodes[0].compositeAsset?.layoutAabb).toEqual(filmSetLayoutBounds(ops, saved));
-  expect(mapped.nodes[0].model?.resourceKey).toBe(resource.resourceKey);
+  const group = migrateFilmSetFixture(canvas, "film");
+  const mapped = buildCanvasRenderScene({ canvas: group, modelResources: new Map([["film", resource]]) });
+  expect(mapped.filmSetGroups?.[0]?.bindings.map(binding => binding.transform.x)).toEqual(transforms.map(transform => transform.offset.x));
+  expect(mapped.nodes.find(node => node.id === "film")?.compositeAsset).toBeUndefined();
+  expect(mapped.nodes.find(node => node.id === "film")?.model?.resourceKey).toBe(resource.resourceKey);
 });

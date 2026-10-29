@@ -30,7 +30,7 @@ function controller() {
 }
 
 describe("createCanvasLocateService", () => {
-  it("定位收起组或隐藏后代时，使用可见紧凑组的中心", () => {
+  it("定位收起组或隐藏后代时，使用徽标中心", () => {
     const source = canvas();
     source.document.nodes = [
       {id:"g",type:"group",position:{x:100,y:100},width:600,height:400},
@@ -42,8 +42,8 @@ describe("createCanvasLocateService", () => {
     const service = createCanvasLocateService({getCanvas:()=>source,getController:()=>ctrl as never});
     expect(service.locateNodes(["member"]).ok).toBe(true);
     expect(ctrl.selected).toEqual(["g"]);
-    // 紧凑组 196×48 固定底边中点：视口按 48 高矩形的中心定位。
-    expect(ctrl.viewports[0]).toEqual({x:100,y:-76,zoom:1});
+    // 徽标顶在布局底边下 6，中心再下移 32。
+    expect(ctrl.viewports[0]).toEqual({x:100,y:-138,zoom:1});
     expect(service.locateNodes(["g"]).ok).toBe(true);
     expect(ctrl.viewports[1]).toEqual(ctrl.viewports[0]);
   });

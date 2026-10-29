@@ -1,5 +1,5 @@
 import type { CanvasNodeData, FilmSetAnimationClip, ManagedNodeRelation, ServerCanvas, Woohaa3CanvasNode } from "@woohaa3/contracts";
-import { decodeFilmSetNodeData, filmSetAnimationsOf, isFilmSetNode, managedNodeRelationOf, shotPreviewNodeId } from "@woohaa3/contracts";
+import { decodeFilmSetNodeData, filmSetAnimationsOf, isFilmSetNode, managedNodeRelationOf, shotPreviewNodeId, readFilmSetGroupMarker } from "@woohaa3/contracts";
 import { FILM_SET_EXTENSION_ID } from "./identity.js";
 
 /** Canonical media identity for a film-set clip. The host never decodes clip data. */
@@ -32,7 +32,10 @@ export function ownsShotMedia(canvas: ServerCanvas | null, nodeId: string): bool
   if (!node || (node.type !== "image" && node.type !== "video") || relation?.extensionId !== FILM_SET_EXTENSION_ID
     || node.id !== managedShotMediaNodeId(relation.ownerNodeId, relation.entityId)) return false;
   const owner = canvas.document.nodes.find(node => node.id === relation.ownerNodeId);
-  if (!owner || !isFilmSetNode(owner.type, canvas.nodeData[owner.id])) return false;
+  if (!owner) return false;
+  const group = owner.type === "group" ? readFilmSetGroupMarker(canvas.nodeData[owner.id]) : null;
+  if (group?.clips) return group.clips.some(clip => clip.id === relation.entityId && node.type === ((clip.duration ?? 0) > 0 ? "video" : "image"));
+  if (!isFilmSetNode(owner.type, canvas.nodeData[owner.id])) return false;
   const data = decodeFilmSetNodeData(canvas.nodeData[owner.id]);
   return data.ok && filmSetAnimationsOf(data.value).clips.some(clip => clip.id === relation.entityId && node.type === managedShotMediaType(clip));
 }

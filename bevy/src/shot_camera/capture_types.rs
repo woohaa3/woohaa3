@@ -194,7 +194,8 @@ impl ShotCaptureQueue {
 
 /// capture 完成 outbox（由系统写入，宿主/兼容 adapter 取走）。
 #[derive(Resource, Default)]
-pub struct ShotCaptureResults {    pub completed: Vec<ShotCaptureResult>,
+pub struct ShotCaptureResults {
+    pub completed: Vec<ShotCaptureResult>,
     pub failures: Vec<ShotCaptureFailure>,
     /// 全局单调 request id 生成器。
     pub next_request_id: u64,
@@ -275,9 +276,15 @@ mod tests {
             Some(CaptureRoute::PreviewCard(card))
         );
         // 卡片 rig 不存在（屏外被淘汰）→ 无路由，调用方立即以 camera-gone 结束请求。
-        assert_eq!(resolve_capture_route("preview-1", (Some(adapter), Some("film-1")), None), None);
+        assert_eq!(
+            resolve_capture_route("preview-1", (Some(adapter), Some("film-1")), None),
+            None
+        );
         // adapter 只有 node id 没有 rig 时同样不误用。
-        assert_eq!(resolve_capture_route("film-1", (None, Some("film-1")), None), None);
+        assert_eq!(
+            resolve_capture_route("film-1", (None, Some("film-1")), None),
+            None
+        );
     }
 
     #[test]

@@ -101,13 +101,17 @@ pub(crate) fn spawn_preview_root(
     PreviewRoot {
         entities: root.entities,
         meshes: root.mesh_handles.iter().map(|handle| handle.id()).collect(),
-        materials: root.material_handles.iter().map(|handle| handle.id()).collect(),
+        materials: root
+            .material_handles
+            .iter()
+            .map(|handle| handle.id())
+            .collect(),
     }
 }
 
 /// V2：建立真实 entity hierarchy；根 entity 承载 placement yaw 与单位缩放。
 #[allow(clippy::too_many_arguments)]
-fn spawn_v2(
+pub(super) fn spawn_v2(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -165,8 +169,16 @@ fn spawn_v2(
     let mut instance_parts = HashMap::new();
     #[cfg(feature = "explicit-instancing")]
     if batched && strategy == super::batch_strategy::BatchStrategy::Explicit {
-        for group in super::instancing::spawn_groups(commands, meshes, materials, shared,
-            &specs, &opaque, &material_specs, quality) {
+        for group in super::instancing::spawn_groups(
+            commands,
+            meshes,
+            materials,
+            shared,
+            &specs,
+            &opaque,
+            &material_specs,
+            quality,
+        ) {
             batched_parts.extend(group.indices);
             mesh_cache.insert(format!("instance:{:?}", group.entity), group.mesh);
             material_cache.insert(format!("instance:{:?}", group.entity), group.material);
@@ -275,7 +287,6 @@ fn spawn_v2(
                         MeshMaterial3d(material.clone()),
                         transform,
                         super::model_render_layers(),
-
                     ))
                     .id();
                 part_materials.insert(spec.id.clone(), material);
@@ -309,10 +320,23 @@ fn spawn_v2(
     let animation_entities = attach_animations(commands, &model.ops, &entities, &base_transforms);
 
     #[allow(unused_mut)]
-    let mut part_batches: HashMap<String, Entity> = batches.iter().flat_map(|batch| batch.ranges.iter().map(move |range| (range.id.clone(), batch.entity))).collect();
+    let mut part_batches: HashMap<String, Entity> = batches
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .ranges
+                .iter()
+                .map(move |range| (range.id.clone(), batch.entity))
+        })
+        .collect();
     #[cfg(feature = "explicit-instancing")]
-    for (entity, ids) in &instance_parts { for id in ids.iter() { part_batches.insert(id.clone(), *entity); } }
+    for (entity, ids) in &instance_parts {
+        for id in ids.iter() {
+            part_batches.insert(id.clone(), *entity);
+        }
+    }
     ModelRoot {
+        group_children: Default::default(),
         entities: spawned,
         content_signature: String::new(),
         resource: std::sync::Arc::new(ModelSnapshot::default()),

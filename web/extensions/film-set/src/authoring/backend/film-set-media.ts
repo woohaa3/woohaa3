@@ -19,9 +19,9 @@ import type {
 } from "@woohaa3/contracts";
 import {
   canonicalFilmSetFields,
-  decodeFilmSetNodeData,
+  readFilmSetAnimationProjection,
+  readFilmSetGroupMarker,
   filmSetContentHash,
-  isFilmSetNode
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 import { FilmSetImportService, type FilmSetImportRequestItem } from "./film-set-import.js";
@@ -75,9 +75,10 @@ export class FilmSetMediaService {
     if (!result.ok) return { ok: false, code: result.code, message: result.message };
     const latest = room.exportCanvas();
     if (!latest.ok) return { ok: false, code: "canvas-unavailable", message: latest.message };
-    const animation = decodeFilmSetNodeData(latest.canvas.nodeData[nodeId] as CanvasNodeData | undefined);
-    if (!animation.ok) return { ok: false, code: "invalid-animation-node", message: animation.reason };
-    const itemId = derivedItemId(animation.value, requestId, sourceNodeId);
+    const projection = readFilmSetAnimationProjection(latest.canvas, nodeId);
+    if (!projection) return { ok: false, code: "invalid-animation-node", message: "片场群组无法解析" };
+    const animation = { value: projection };
+    const itemId = input.itemId?.trim() || derivedItemId(animation.value, requestId, sourceNodeId);
     const item = animation.value.filmSetContent.items.find(entry => entry.id === itemId);
     if (!item || (item.kind !== "image" && item.kind !== "video")) {
       return { ok: false, code: "invalid-import", message: "媒体条目未能写入" };
@@ -105,11 +106,12 @@ export class FilmSetMediaService {
   ): { ok: true; commands: CanvasCommand[] } | { ok: false; code: string; message: string } {
     const node = canvas.document.nodes.find(entry => entry.id === nodeId);
     if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
-    if (!isFilmSetNode(node.type, canvas.nodeData[nodeId])) {
+    if (node.type !== "group" || !readFilmSetGroupMarker(canvas.nodeData[nodeId])) {
       return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是片场` };
     }
-    const animation = decodeFilmSetNodeData(canvas.nodeData[nodeId] as CanvasNodeData | undefined);
-    if (!animation.ok) return { ok: false, code: "invalid-animation-node", message: animation.reason };
+    const projection = readFilmSetAnimationProjection(canvas, nodeId);
+    if (!projection) return { ok: false, code: "invalid-animation-node", message: "片场群组无法解析" };
+    const animation = { value: projection };
     const currentHash = filmSetContentHash(animation.value.filmSetContent);
     if (input.expectedContentHash && input.expectedContentHash !== currentHash) {
       return { ok: false, code: "stale-content", message: "片场内容已被并发修改，请重新读取后重试" };

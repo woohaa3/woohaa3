@@ -37,7 +37,11 @@ impl SpatialGrid {
     /// 建立网格；`cell` 为世界单位边长，非有限/非正回落为 1。
     pub(super) fn new(cell: f32) -> Self {
         Self {
-            cell: if cell.is_finite() && cell >= 1.0 { cell } else { 1.0 },
+            cell: if cell.is_finite() && cell >= 1.0 {
+                cell
+            } else {
+                1.0
+            },
             cells: HashMap::new(),
             occupied: Vec::new(),
             oversized: Vec::new(),
@@ -70,7 +74,10 @@ impl SpatialGrid {
     }
 
     fn cell_of(&self, x: f32, y: f32) -> (i32, i32) {
-        ((x / self.cell).floor() as i32, (y / self.cell).floor() as i32)
+        (
+            (x / self.cell).floor() as i32,
+            (y / self.cell).floor() as i32,
+        )
     }
 
     /// 归一化矩形的 cell 闭区间；含非有限分量返回 `None`（该对象不参与索引）。
@@ -168,7 +175,11 @@ impl SpatialGrid {
     /// 候选数量（测试/诊断用）。
     #[cfg(test)]
     pub(super) fn indexed(&self) -> usize {
-        self.occupied.iter().filter(|cells| !cells.is_empty()).count() + self.oversized.len()
+        self.occupied
+            .iter()
+            .filter(|cells| !cells.is_empty())
+            .count()
+            + self.oversized.len()
     }
 }
 
@@ -197,7 +208,11 @@ mod tests {
         // 单点查询只取邻近 cell 的候选，不返回整份文档。
         let candidates = grid.candidates(rect(10.0, 10.0, 0.0, 0.0));
         assert!(!candidates.is_empty());
-        assert!(candidates.len() < 50, "候选应局部化，实际 {}", candidates.len());
+        assert!(
+            candidates.len() < 50,
+            "候选应局部化，实际 {}",
+            candidates.len()
+        );
         // 候选必须覆盖真正与查询相交的对象。
         for index in &candidates {
             assert!(contains(&candidates, *index));

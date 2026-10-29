@@ -39,15 +39,18 @@ pub(super) struct ResizeDebounce {
 impl ResizeDebounce {
     /// 输入包含内容框宽高、zoom、DPR；同档内的连续滚轮也会延后重建。
     pub(super) fn update(
-        &mut self, input: [f32; 4], requested: UVec2, current: UVec2, now: f64,
+        &mut self,
+        input: [f32; 4],
+        requested: UVec2,
+        current: UVec2,
+        now: f64,
     ) -> UVec2 {
         let input = input.map(f32::to_bits);
         if self.input != Some(input) {
             self.input = Some(input);
             self.changed_at = now;
         }
-        self.pending = requested != current
-            && now - self.changed_at + 1e-9 < RESIZE_SETTLE_SECONDS;
+        self.pending = requested != current && now - self.changed_at + 1e-9 < RESIZE_SETTLE_SECONDS;
         if self.pending { current } else { requested }
     }
 }
@@ -116,9 +119,8 @@ pub(super) struct Candidate {
 /// 活动目标优先（确定性按 id 排序，不依赖 HashMap 顺序）；否则排空等待最久的封面。
 /// 返回 `None` 表示本帧无需任何采样。首版全局每帧至多一个拍摄取景采样任务。
 pub(super) fn select(candidates: &[Candidate]) -> Option<&Candidate> {
-    let oldest = |a: &&Candidate, b: &&Candidate| {
-        (a.waiting_since, &a.id).cmp(&(b.waiting_since, &b.id))
-    };
+    let oldest =
+        |a: &&Candidate, b: &&Candidate| (a.waiting_since, &a.id).cmp(&(b.waiting_since, &b.id));
     candidates
         .iter()
         .filter(|candidate| candidate.live)
@@ -131,9 +133,8 @@ pub(super) fn bound_candidates(mut candidates: Vec<Candidate>) -> Vec<Candidate>
     if candidates.len() <= MAX_CANDIDATES {
         return candidates;
     }
-    candidates.sort_by(|a, b| {
-        (!a.live, a.waiting_since, &a.id).cmp(&(!b.live, b.waiting_since, &b.id))
-    });
+    candidates
+        .sort_by(|a, b| (!a.live, a.waiting_since, &a.id).cmp(&(!b.live, b.waiting_since, &b.id)));
     candidates.truncate(MAX_CANDIDATES);
     candidates
 }
@@ -159,7 +160,11 @@ pub(super) fn owner_layers_stale(
 /// 输入为 `(id, live, last_touched, pixels)`；返回要回收的 id 列表，顺序为「最先回收」。
 /// 单张卡片的像素已按 `fit_pixels` 收敛，因此淘汰到剩余预算为止。绝不淘汰活动目标，
 /// 除非只剩活动目标（此时保留最后一个，避免采不到任何画面）。
-pub(super) fn evictions(entries: &[(String, bool, u64, u64)], max_images: usize, max_pixels: u64) -> Vec<String> {
+pub(super) fn evictions(
+    entries: &[(String, bool, u64, u64)],
+    max_images: usize,
+    max_pixels: u64,
+) -> Vec<String> {
     // 只淘汰非活动目标；活动目标始终保留（宁可暂时超预算，也不丢活动画面）。
     let mut order: Vec<&(String, bool, u64, u64)> =
         entries.iter().filter(|entry| !entry.1).collect();
@@ -227,7 +232,11 @@ mod tests {
 
     #[test]
     fn fit_pixels_respects_budget_including_extreme_aspects() {
-        for size in [UVec2::new(1024, 1024), UVec2::new(1024, 1), UVec2::new(1, 1024)] {
+        for size in [
+            UVec2::new(1024, 1024),
+            UVec2::new(1024, 1),
+            UVec2::new(1, 1024),
+        ] {
             for pixels in [1u64, 4, 1000, MAX_PIXELS] {
                 let fit = fit_pixels(size, pixels).unwrap();
                 assert!(fit.x > 0 && fit.y > 0);
@@ -309,7 +318,6 @@ mod tests {
         assert!(!evicted.contains(&"c0".to_owned()));
     }
 }
-
 
 #[cfg(test)]
 mod capture_demand_tests {

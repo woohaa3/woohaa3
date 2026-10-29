@@ -30,6 +30,7 @@ export type CanvasCommandRejectionCode =
   | "invalid-model-cameras"
   | "invalid-image-edit"
   | "invalid-self-contained-node"
+  | "invalid-film-set-group"
   | "missing-edge-id"
   | "invalid-command"
   /** 拍摄镜头预览的归属/生命周期不变式被绕过（独立创建、删除、改归属或写媒体字段）。 */

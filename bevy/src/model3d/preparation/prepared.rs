@@ -117,9 +117,9 @@ pub(super) fn estimate(model: &ModelSnapshot) -> usize {
     let mut bytes = model.signature.len() + 4096;
     for op in &model.ops {
         bytes += match op {
-            crate::protocol::ModelOp::Mesh { vertices, faces, .. } => {
-                vertices.len() * 12 + faces.len() * 12 + 64
-            }
+            crate::protocol::ModelOp::Mesh {
+                vertices, faces, ..
+            } => vertices.len() * 12 + faces.len() * 12 + 64,
             _ => 96,
         };
     }
@@ -311,11 +311,7 @@ fn animation_kind(spec: &scene::ModelAnimationSpec) -> TransformAnimationKind {
             axis: *axis,
             speed: *speed,
         },
-        Spec::Move {
-            axis,
-            speed,
-            range,
-        } => TransformAnimationKind::LoopMove {
+        Spec::Move { axis, speed, range } => TransformAnimationKind::LoopMove {
             axis: *axis,
             speed: *speed,
             range: *range,

@@ -1,8 +1,9 @@
+import { pinFilmSetCapture } from "../../state/browser/capture-snapshot.js";
 import { createShotMediaProvider } from "../../authoring/browser/shot-media-provider.js";
 import "../../authoring/browser/styles.css";
 import { createElement } from "react";
 import { defineExtensionFrontend, defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_SHOT_PREVIEW_NODE_TYPE, MODEL_EDITOR_VERSION, decodeFilmSetNodeData, filmSetAnimationsOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, FILM_SET_SHOT_PREVIEW_NODE_TYPE, MODEL_EDITOR_VERSION, readFilmSetGroupMarker, readFilmSetAnimationProjection, filmSetAnimationsOf, shotPreviewOwnershipOf } from "@woohaa3/contracts";
 import { installShotImageReferences } from "../../authoring/browser/shot-image-reference.js";
 import { FILM_SET_EXTENSION_ID, FILM_SET_LABEL } from "../../state/shared/identity.js";
 import { FILM_SET_FRONTEND_METADATA } from "./metadata.js";
@@ -18,13 +19,9 @@ import { FilmSetInspector } from "../../authoring/browser/inspector.js";
 import { extendFilmSetDrop } from "./drop.js";
 import { installFilmSetConversionEntries } from "./film-set-conversion/registration.js";
 import type { FilmSetContext } from "./context.js";
-import { projectObjectPresentation } from "../../preview/browser/object-presentation.js";
 import { filmSetEditorCameras, sceneCameraWriter } from "../../authoring/browser/scene-camera.js";
 import { contributionLifetime } from "./contributions.js";
 import { createFilmSetNodeData } from "../../state/shared/node.js";
-import { installFilmSetObjectContainers } from "../../authoring/browser/object-containers.js";
-import { setFilmSetObjectContainerVisible } from "../../authoring/browser/object-container-commands.js";
-import { filmSetObjectOwnershipOf } from "@woohaa3/contracts";
 import { gizmoParentBasis } from "../../authoring/browser/gizmo-constraint.js";
 
 export function filmSetExtension() {
@@ -62,28 +59,26 @@ export function filmSetExtension() {
         previous = next;
       }));
       const objectFeedback = new Map<string, string>();
-      const adapter = createFilmSetModelAdapter(history, () => ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), id => objectFeedback.get(id));
+      const adapter = createFilmSetModelAdapter(history, () => ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), id => objectFeedback.get(id), ctx.compositeAssets);
       lifetime.own(ctx.compositeAssets.register({
         ...adapter,
         // 业务类型显示名：浮动名称面板据此标注聚合节点业务类型（change:
         // 2026-10-12-align-film-set-scope-with-isometric-grid）。范围形状仍是复合资产类别默认
         // （等距地面范围），无需按业务显式声明；通用宿主与 Rust 只消费声明，不按 film-set 业务 ID 分支。
         label: FILM_SET_LABEL,
-        closeChild(canvas, childNodeId) {
-          const object = filmSetObjectOwnershipOf(canvas.nodeData[childNodeId]);
-          const result = object ? setFilmSetObjectContainerVisible(ctx, object.filmSetNodeId, object.itemId, false) : null;
-          if (result) void result.then(outcome => {
-            if (!outcome.ok) ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法关闭容器", description: outcome.reason } });
-          }).catch(error => ctx.dialogs.open({ dialogId: "alert", payload: { title: "无法关闭容器", description: String(error) } }));
+        projectCanvas(current) {
+          const projected = adapter.projectCanvas!(current);
+          if (!preview.size) return projected;
+          const nodeData = { ...projected.nodeData };
+          for (const [nodeId, object] of preview) {
+            const marker = readFilmSetGroupMarker(nodeData[nodeId]);
+            if (!marker) continue;
+            const t = object.transform;
+            nodeData[nodeId] = { ...nodeData[nodeId], filmSetGroup: { ...marker, ...(object.itemId === "film-set-ground" && marker.ground ? { ground: { ...marker.ground, transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } } } : {}), sceneBindings: marker.sceneBindings.map(binding => binding.bindingId === object.itemId
+              ? { ...binding, transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } } : binding) } } as never;
+          }
+          return { ...projected, nodeData };
         },
-        projectPresentation(node, data, resource) {
-          projectObjectPresentation(preview)(node, data, resource);
-          if (!node.compositeAsset) return;
-          const owner = filmSetObjectOwnershipOf(data);
-          if (owner) { node.compositeAsset.itemPlacements = {}; return; }
-
-        },
-        objectPreview: nodeId => preview.get(nodeId) ?? null,
         blocksFocusInput: () => playback.getSnapshot().preview,
         keydown(event) {
           const state = playback.getSnapshot();
@@ -103,11 +98,12 @@ export function filmSetExtension() {
           const selected = playback.getSnapshot();
           return filmSetEditorCameras(data, selected.nodeId === nodeId ? selected.clipId : null);
         },
-        writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args), nodeId => (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId]),
+        writeCameras: sceneCameraWriter((...args) => ctx.canvasSession.submitCommands(...args), nodeId => (ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas())?.nodeData[nodeId], nodeId => readFilmSetAnimationProjection(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), nodeId)),
+        beginCapture: nodeId => pinFilmSetCapture(ctx, nodeId),
         captureEnabled: (nodeId, cameraId) => {
-          const data = decodeFilmSetNodeData(ctx.canvasState.getCanvas()?.nodeData[nodeId]);
-          if (!data.ok) return false;
-          const collection = filmSetAnimationsOf(data.value);
+          const data = readFilmSetAnimationProjection(ctx.canvasState.getCanvas(), nodeId);
+          if (!data) return false;
+          const collection = filmSetAnimationsOf(data);
           const selected = playback.getSnapshot();
           const clipId = cameraId?.startsWith("clip:") ? cameraId.slice(5) : selected.nodeId === nodeId ? selected.clipId : collection.defaultClipId;
           const clip = collection.clips.find(clip => clip.id === clipId);
@@ -117,12 +113,11 @@ export function filmSetExtension() {
         awaitCaptureReady: nodeId => ctx.canvasRuntime.compositeAssetMediaSessions?.()?.waitForTime(nodeId, ctx.canvasRuntime.animationPlaybackState()?.time ?? 0, 2500) ?? Promise.resolve(true)
       }));
       lifetime.own(ctx.slots.register("canvas.node-template", {
-        id: "film-set-node", owner: FILM_SET_EXTENSION_ID, nodeType: COMPOSITE_ASSET_NODE_TYPE,
+        id: "film-set-node", owner: FILM_SET_EXTENSION_ID, nodeType: "group",
         label: FILM_SET_LABEL, section: CANVAS_MENU_SECTION.creationTools, order: 0,
         createNodeData: () => createFilmSetNodeData() as never
       }));
       lifetime.own(extendFilmSetDrop(ctx));
-      lifetime.own(installFilmSetObjectContainers(ctx, objectFeedback));
       // 直接传递 Cordis `ctx`：它已注入 canvasScope/canvasRemote/canvasLocate/canvasRuntime。
       // MUST NOT 展开（`{ ...ctx }`）——展开只复制自有可枚举属性，会丢掉 ctx 的 service 访问器，
       // 使注册模块读到 undefined 的 canvasScope（此前导致 required film-set 启动失败 → 白屏）。

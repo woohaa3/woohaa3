@@ -48,10 +48,7 @@ pub(crate) fn point_segment_distance(point: Vec2, a: Vec2, b: Vec2) -> f32 {
 
 /// 线段轴对齐包围盒 `(min, max)`，用于命中 broad phase。
 pub(crate) fn segment_bounds(a: Vec2, b: Vec2) -> ([f32; 2], [f32; 2]) {
-    (
-        [a.x.min(b.x), a.y.min(b.y)],
-        [a.x.max(b.x), a.y.max(b.y)],
-    )
+    ([a.x.min(b.x), a.y.min(b.y)], [a.x.max(b.x), a.y.max(b.y)])
 }
 
 #[cfg(test)]

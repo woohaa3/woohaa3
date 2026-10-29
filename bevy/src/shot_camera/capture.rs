@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 
 use bevy::{
-    prelude::*,
     camera::RenderTarget,
+    prelude::*,
     render::view::window::screenshot::{Screenshot, ScreenshotCaptured},
 };
 
@@ -50,9 +50,14 @@ pub(crate) fn reconcile_capture_queue(
     rigs: Query<Entity>,
 ) {
     let mut dropped: Vec<ShotCaptureRequest> = Vec::new();
-    queue
-        .active
-        .retain(|request| if rigs.get(request.camera).is_ok() { true } else { dropped.push(*request); false });
+    queue.active.retain(|request| {
+        if rigs.get(request.camera).is_ok() {
+            true
+        } else {
+            dropped.push(*request);
+            false
+        }
+    });
     let mut kept = std::collections::VecDeque::new();
     while let Some(request) = queue.pending.pop_front() {
         if rigs.get(request.camera).is_ok() {
@@ -69,7 +74,9 @@ pub(crate) fn reconcile_capture_queue(
                 commands.entity(entity).try_despawn();
             }
         }
-        state.in_flight.remove(&(request.camera, request.request_id));
+        state
+            .in_flight
+            .remove(&(request.camera, request.request_id));
         // rig 已销毁，没有 observer 会再来消费这张离屏 Image，直接释放。
         if let Some(image) = state
             .capture_images
@@ -107,7 +114,13 @@ pub(crate) fn submit_pending_captures(
     mut queue: ResMut<ShotCaptureQueue>,
     mut state: ResMut<ShotCaptureState>,
     mut results: ResMut<ShotCaptureResults>,
-    rigs: Query<(&ShotCameraDerived, &ShotCameraLens, &ShotCameraViewMask, Option<&super::preview_readiness::ShotPreviewReadiness>, Option<&super::ShotCameraPreview>)>,
+    rigs: Query<(
+        &ShotCameraDerived,
+        &ShotCameraLens,
+        &ShotCameraViewMask,
+        Option<&super::preview_readiness::ShotPreviewReadiness>,
+        Option<&super::ShotCameraPreview>,
+    )>,
     ready: Res<super::preview_readiness::ShotPreviewReady>,
     waiting: Query<(Entity, &CaptureCamera, &AwaitCaptureReadback)>,
     clear: Res<super::ShotPreviewClearColor>,
@@ -118,7 +131,10 @@ pub(crate) fn submit_pending_captures(
         if ready.matches(entity, pending.0.generation)
             && queue.active.iter().any(|request| request == &pending.0)
         {
-            if let Some(image) = state.capture_images.get(&(camera.camera, camera.request_id)) {
+            if let Some(image) = state
+                .capture_images
+                .get(&(camera.camera, camera.request_id))
+            {
                 spawn_capture_observer(&mut commands, &pending.0, image.clone());
                 commands.entity(entity).remove::<AwaitCaptureReadback>();
                 ready.cancel(entity);
@@ -152,7 +168,9 @@ pub(crate) fn submit_pending_captures(
             lens,
             mask,
             target.clone(),
-            preview.and_then(|preview| preview.clear_color).unwrap_or(clear.0),
+            preview
+                .and_then(|preview| preview.clear_color)
+                .unwrap_or(clear.0),
             readiness,
         );
         submit.push((request, target));
@@ -161,10 +179,14 @@ pub(crate) fn submit_pending_captures(
         state
             .capture_images
             .insert((request.camera, request.request_id), image.clone());
-        state.in_flight.insert((request.camera, request.request_id), 0);
+        state
+            .in_flight
+            .insert((request.camera, request.request_id), 0);
     }
     for (request, code) in fail {
-        state.in_flight.remove(&(request.camera, request.request_id));
+        state
+            .in_flight
+            .remove(&(request.camera, request.request_id));
         queue.complete(&request);
         results.push_failure(ShotCaptureFailure {
             camera: request.camera,
@@ -188,36 +210,44 @@ fn spawn_offscreen_capture_camera(
 ) {
     let mut clear = clear;
     clear.set_alpha(1.0);
-    let entity = commands.spawn((
-        Camera3d::default(),
-        // Bevy's multidraw instance counts are private. The readiness gate
-        // checks every visible mesh against CPU-readable phase bins, so keep
-        // this short-lived readback view on direct drawing. Readiness-gated
-        // previews use the same policy; other views retain indirect drawing.
-        bevy::render::view::NoIndirectDrawing,
-        Camera {
-            clear_color: ClearColorConfig::Custom(clear),
-            order: 10,
-            ..default()
-        },
-        RenderTarget::Image(target.into()),
-        mask.0.clone().without(super::SHOT_GIZMO_LAYER),
-        Transform::from_translation(derived.position).looking_at(derived.focus, Vec3::Y),
-        lens.projection(),
-        bevy::render::view::Tonemapping::None,
-        bevy::render::view::DebandDither::Disabled,
-        CaptureCamera {
-            camera: request.camera,
-            request_id: request.request_id,
-        },
-        AwaitCaptureReadback(*request),
-    )).id();
-    commands.entity(entity).insert(super::preview_readiness::ShotPreviewView {
-        key: entity,
-        generation: request.generation,
-        meshes: readiness.map(|value| value.meshes.clone()).unwrap_or_default(),
-        materials: readiness.map(|value| value.materials.clone()).unwrap_or_default(),
-    });
+    let entity = commands
+        .spawn((
+            Camera3d::default(),
+            // Bevy's multidraw instance counts are private. The readiness gate
+            // checks every visible mesh against CPU-readable phase bins, so keep
+            // this short-lived readback view on direct drawing. Readiness-gated
+            // previews use the same policy; other views retain indirect drawing.
+            bevy::render::view::NoIndirectDrawing,
+            Camera {
+                clear_color: ClearColorConfig::Custom(clear),
+                order: 10,
+                ..default()
+            },
+            RenderTarget::Image(target.into()),
+            mask.0.clone().without(super::SHOT_GIZMO_LAYER),
+            Transform::from_translation(derived.position).looking_at(derived.focus, Vec3::Y),
+            lens.projection(),
+            bevy::render::view::Tonemapping::None,
+            bevy::render::view::DebandDither::Disabled,
+            CaptureCamera {
+                camera: request.camera,
+                request_id: request.request_id,
+            },
+            AwaitCaptureReadback(*request),
+        ))
+        .id();
+    commands
+        .entity(entity)
+        .insert(super::preview_readiness::ShotPreviewView {
+            key: entity,
+            generation: request.generation,
+            meshes: readiness
+                .map(|value| value.meshes.clone())
+                .unwrap_or_default(),
+            materials: readiness
+                .map(|value| value.materials.clone())
+                .unwrap_or_default(),
+        });
 }
 
 #[derive(Component)]
@@ -305,7 +335,14 @@ fn spawn_capture_observer(
                     commands.entity(entity).try_despawn();
                 }
             }
-            finish_capture(&request, trigger, &mut queue, &mut results, &mut state, &mut images);
+            finish_capture(
+                &request,
+                trigger,
+                &mut queue,
+                &mut results,
+                &mut state,
+                &mut images,
+            );
         },
     );
 }
@@ -319,7 +356,9 @@ fn finish_capture(
     state: &mut ShotCaptureState,
     images: &mut Assets<Image>,
 ) {
-    state.in_flight.remove(&(request.camera, request.request_id));
+    state
+        .in_flight
+        .remove(&(request.camera, request.request_id));
     if let Some(image) = state
         .capture_images
         .remove(&(request.camera, request.request_id))

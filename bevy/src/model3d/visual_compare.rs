@@ -66,7 +66,10 @@ pub(crate) fn compare_visual(
 
     let mean_diff = mean_abs_diff(a, b, width, height);
     if mean_diff > thresholds.max_mean_diff {
-        failures.push(format!("归一化像素差 {mean_diff:.3} 超过上限 {:.3}", thresholds.max_mean_diff));
+        failures.push(format!(
+            "归一化像素差 {mean_diff:.3} 超过上限 {:.3}",
+            thresholds.max_mean_diff
+        ));
     }
 
     let metrics_a = metrics(a, width, height);
@@ -105,7 +108,11 @@ pub(crate) fn compare_visual(
         failures.push(format!("主色差异 {color_distance:.3} 超限"));
     }
 
-    if failures.is_empty() { Ok(()) } else { Err(failures) }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures)
+    }
 }
 
 fn mean_abs_diff(a: &[u8], b: &[u8], width: u32, height: u32) -> f32 {
@@ -182,7 +189,11 @@ fn metrics(pixels: &[u8], width: u32, height: u32) -> VisualMetrics {
             ])
         },
         components,
-        largest_share: if coverage == 0 { 0.0 } else { largest as f32 / coverage as f32 },
+        largest_share: if coverage == 0 {
+            0.0
+        } else {
+            largest as f32 / coverage as f32
+        },
         dominant,
     }
 }
@@ -210,10 +221,18 @@ fn connected_components(mask: &[bool], width: usize, height: usize) -> (u32, u32
                     stack.push(neighbor);
                 }
             };
-            if x > 0 { push(current - 1, &mut stack, &mut visited); }
-            if x < width - 1 { push(current + 1, &mut stack, &mut visited); }
-            if y > 0 { push(current - width, &mut stack, &mut visited); }
-            if y < height - 1 { push(current + width, &mut stack, &mut visited); }
+            if x > 0 {
+                push(current - 1, &mut stack, &mut visited);
+            }
+            if x < width - 1 {
+                push(current + 1, &mut stack, &mut visited);
+            }
+            if y > 0 {
+                push(current - width, &mut stack, &mut visited);
+            }
+            if y < height - 1 {
+                push(current + width, &mut stack, &mut visited);
+            }
         }
         largest = largest.max(size);
     }
@@ -230,7 +249,11 @@ pub(crate) fn assert_renderable(pixels: &[u8], width: u32, height: u32) -> Resul
     if metrics.largest_share < 0.5 {
         failures.push("主要肢体未连通".to_owned());
     }
-    if failures.is_empty() { Ok(()) } else { Err(failures) }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures)
+    }
 }
 
 #[cfg(test)]

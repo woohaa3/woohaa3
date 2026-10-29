@@ -29,8 +29,8 @@ use bevy::{
 use crate::{
     app::PreviewLayerPool,
     bridge::{self, HistoryThumbnailOutcome, HistoryThumbnailRequest, HistoryThumbnailResult},
-    model3d::{self, PreviewRoot},
     model_preview::{PreviewView, Ready},
+    model3d::{self, PreviewRoot},
     protocol::ModelSnapshot,
     theme::ThemeResource,
 };
@@ -101,7 +101,14 @@ pub(crate) fn sync(
                 "thumbnail-readiness-timeout"
             };
             let job = state.job.take().expect("job checked above");
-            finish(&mut commands, &mut images, &mut pool, &ready, job, Err(code));
+            finish(
+                &mut commands,
+                &mut images,
+                &mut pool,
+                &ready,
+                job,
+                Err(code),
+            );
         }
     }
 
@@ -165,7 +172,8 @@ pub(crate) fn sync(
                 &mut pool,
                 &ready,
                 job,
-                rgba.map(|pixels| (pixels, width, height)).ok_or("thumbnail-empty-image"),
+                rgba.map(|pixels| (pixels, width, height))
+                    .ok_or("thumbnail-empty-image"),
             );
         },
     );

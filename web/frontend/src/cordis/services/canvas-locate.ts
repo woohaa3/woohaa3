@@ -58,7 +58,7 @@ export function createCanvasLocateService(options: CanvasLocateOptions): CanvasL
         return visible;
       });
       const rects: Rect[] = visibleNodes.map(node => groupPresentationRect(node,
-        canvas.nodeData[node.id]?.groupCollapsed === true, nodeWorldRect(node, byId)));
+        canvas.nodeData[node.id]?.groupCollapsed === true, nodeWorldRect(node, byId), canvas.nodeData[node.id]?.groupBadgeScale));
       const bounds = unionRects(rects);
       if (!bounds) return { ok: false, reason: "目标作品没有有效尺寸" };
       const hostSize = options.surface?.() ?? controller.surface();

@@ -265,9 +265,16 @@ fn explicit_resource_references_track_two_roots_and_frozen_capture_until_last_re
     use super::super::runtime::{CaptureRetention, ModelVisuals};
     let mut world = world_with_resources();
     let (resources, references) = table_for(&["shared-content"]);
-    let mut a = model_node(); a.id = "a".into(); a.model = Some(references[0].clone());
-    let mut b = a.clone(); b.id = "b".into(); b.x = 600.;
-    let mut scene = Scene { nodes: vec![a, b], ..Scene::default() };
+    let mut a = model_node();
+    a.id = "a".into();
+    a.model = Some(references[0].clone());
+    let mut b = a.clone();
+    b.id = "b".into();
+    b.x = 600.;
+    let mut scene = Scene {
+        nodes: vec![a, b],
+        ..Scene::default()
+    };
     run_sync(&mut world, &scene, &resources);
     let (mesh, material) = {
         let visuals = world.resource::<ModelVisuals>();
@@ -278,28 +285,77 @@ fn explicit_resource_references_track_two_roots_and_frozen_capture_until_last_re
         assert_eq!(visuals.material_references.count(&material.id()), 2);
         (mesh, material)
     };
-    world.resource_mut::<ModelVisuals>().capture_retention.insert(42, CaptureRetention {
-        meshes: vec![mesh.clone(), mesh.clone()],
-        materials: vec![material.clone(), material.clone()], bytes: 0,
-    });
+    world
+        .resource_mut::<ModelVisuals>()
+        .capture_retention
+        .insert(
+            42,
+            CaptureRetention {
+                meshes: vec![mesh.clone(), mesh.clone()],
+                materials: vec![material.clone(), material.clone()],
+                bytes: 0,
+            },
+        );
     run_sync(&mut world, &scene, &resources);
-    assert_eq!(world.resource::<ModelVisuals>().mesh_references.count(&mesh.id()), 3);
-    assert_eq!(world.resource::<ModelVisuals>().material_references.count(&material.id()), 3);
+    assert_eq!(
+        world
+            .resource::<ModelVisuals>()
+            .mesh_references
+            .count(&mesh.id()),
+        3
+    );
+    assert_eq!(
+        world
+            .resource::<ModelVisuals>()
+            .material_references
+            .count(&material.id()),
+        3
+    );
     scene.nodes.retain(|n| n.id == "b");
     run_sync(&mut world, &scene, &resources);
-    assert_eq!(world.resource::<ModelVisuals>().mesh_references.count(&mesh.id()), 2);
+    assert_eq!(
+        world
+            .resource::<ModelVisuals>()
+            .mesh_references
+            .count(&mesh.id()),
+        2
+    );
     assert!(world.resource::<Assets<Mesh>>().contains(mesh.id()));
-    scene.nodes.clear(); run_sync(&mut world, &scene, &resources);
-    assert_eq!(world.resource::<ModelVisuals>().mesh_references.count(&mesh.id()), 1);
-    assert_eq!(world.resource::<ModelVisuals>().material_references.count(&material.id()), 1);
+    scene.nodes.clear();
+    run_sync(&mut world, &scene, &resources);
+    assert_eq!(
+        world
+            .resource::<ModelVisuals>()
+            .mesh_references
+            .count(&mesh.id()),
+        1
+    );
+    assert_eq!(
+        world
+            .resource::<ModelVisuals>()
+            .material_references
+            .count(&material.id()),
+        1
+    );
     assert!(world.resource::<Assets<Mesh>>().contains(mesh.id()));
-    assert!(world.resource::<Assets<StandardMaterial>>().contains(material.id()));
-    let budget: serde_json::Value = serde_json::from_str(&world.resource::<ModelVisuals>().budget_json(
-        world.resource::<Assets<Mesh>>(), world.resource::<Assets<StandardMaterial>>())).unwrap();
+    assert!(
+        world
+            .resource::<Assets<StandardMaterial>>()
+            .contains(material.id())
+    );
+    let budget: serde_json::Value =
+        serde_json::from_str(&world.resource::<ModelVisuals>().budget_json(
+            world.resource::<Assets<Mesh>>(),
+            world.resource::<Assets<StandardMaterial>>(),
+        ))
+        .unwrap();
     assert_eq!(budget["resourceOwnership"]["consumers"], 1);
     assert_eq!(budget["resourceOwnership"]["meshReferences"], 1);
     assert_eq!(budget["resourceOwnership"]["materialReferences"], 1);
-    world.resource_mut::<ModelVisuals>().capture_retention.remove(&42);
+    world
+        .resource_mut::<ModelVisuals>()
+        .capture_retention
+        .remove(&42);
     run_sync(&mut world, &scene, &resources);
     let visuals = world.resource::<ModelVisuals>();
     assert_eq!(visuals.mesh_references.count(&mesh.id()), 0);
@@ -356,7 +412,10 @@ fn focus_visibility_writes_only_hierarchy_root_and_leaves_descendants_inherited(
         world.get::<Visibility>(target_root),
         Some(&Visibility::Inherited)
     );
-    assert_eq!(world.get::<Visibility>(other_root), Some(&Visibility::Hidden));
+    assert_eq!(
+        world.get::<Visibility>(other_root),
+        Some(&Visibility::Hidden)
+    );
     // 只写根：没有任何后代被写成 Hidden，全部保持默认 Inherited 交给传播。
     assert!(target_entities.len() > 1);
     for entity in target_entities.iter().chain(other_entities.iter()) {
@@ -403,5 +462,9 @@ fn unchanged_ownership_skips_reference_rebuild_but_keeps_counts() {
     );
     assert!(visuals.hot_path.resource_reference_skips >= 1);
     let mesh = visuals.roots[&scene.nodes[0].id].mesh_handles[0].id();
-    assert_eq!(visuals.mesh_references.count(&mesh), 1, "跳过重建后引用仍然有效");
+    assert_eq!(
+        visuals.mesh_references.count(&mesh),
+        1,
+        "跳过重建后引用仍然有效"
+    );
 }

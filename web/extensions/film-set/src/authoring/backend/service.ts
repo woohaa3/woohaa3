@@ -1,7 +1,8 @@
+import { readFilmSetGroupMarker, createFilmSetGroupMarker, migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { canonicalFilmSetFields, filmSetAnimationsOf, filmSetClipHash, filmSetClipPrecondition } from "@woohaa3/contracts";
 import type { CanvasAuthority } from "@woohaa3/contracts";
 import type { CanvasCommand, CanvasNodeData, ServerCanvas } from "@woohaa3/contracts";
-import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, decodeModel3DNodeData, defaultInitialShotCamera, importModelSnapshot, isFilmSetNode, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
+import { animationSnapshotHash, createFilmSetSnapshot, createModelSnapshot, decodeFilmSetNodeData, decodeModel3DNodeData, defaultInitialShotCamera, importModelSnapshot, COMPOSITE_ASSET_NODE_TYPE, FILM_SET_EXTENSION_ID, modelSourceHash, normalizeModelDefinition, isJsonObject, validateSelfContainedModel, type FilmSetNodeData, type AnimationTimeline, type InitialShotCamera, type ModelImportOrigin, type ModelPlacement, type SupportedModelScriptVersion } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
 import type { FilmSetNodeOutcome, ReadFilmSetOutcome } from "@woohaa3/contracts";
 
@@ -162,7 +163,7 @@ export class FilmSetNodeService {
         modelScriptVersion: input.modelScriptVersion,
         ...(input.placement ? { placement: input.placement } : {})
       });
-      return this.patchFilmSet(input, next, input.title);
+      return this.patchFilmSet(canvas, input, next, input.title);
     });
   }
 
@@ -257,7 +258,7 @@ export class FilmSetNodeService {
         const validity = validateSelfContainedModel(item.model.modelScript, item.model.modelScriptVersion);
         if (!validity.ok) return validity;
       }
-      return this.patchFilmSet(input, decoded.value, input.title);
+      return this.patchFilmSet(canvas, input, decoded.value, input.title);
     });
   }
 
@@ -301,28 +302,64 @@ export class FilmSetNodeService {
     if (canvas.document.nodes.some((node) => node.id === input.nodeId)) {
       return { ok: false, code: "duplicate-node", message: `节点 ${input.nodeId} 已存在` };
     }
-    // 来源只记录在 origin 中；不自动建立持久化连线（连线的增删不改变数据所有权）。
-    return {
-      ok: true,
-      commands: [{
-        type: "node.add",
-        node: { id: input.nodeId, type: COMPOSITE_ASSET_NODE_TYPE, position: { ...input.position } },
-        nodeData: { extensionId: FILM_SET_EXTENSION_ID, ...canonicalFilmSetFields(animation) } as CanvasNodeData
-      }]
-    };
+    if ("sourceNodeId" in input) {
+      animation = { ...animation, filmSetContent: { ...animation.filmSetContent, items: animation.filmSetContent.items.map(item => item.kind === "model" ? { ...item, origin: { ...item.origin, importedAt: item.origin?.importedAt ?? this.deps.now?.() ?? new Date().toISOString(), sourceNodeId: input.sourceNodeId } } : item) } };
+    }
+    const staged = structuredClone(canvas);
+    staged.document.nodes.push({ id: input.nodeId, type: COMPOSITE_ASSET_NODE_TYPE, position: { ...input.position } });
+    staged.nodeData[input.nodeId] = { extensionId: FILM_SET_EXTENSION_ID, ...canonicalFilmSetFields(animation) } as CanvasNodeData;
+    const migrated = migrateLegacyFilmSetToGroup(staged, input.nodeId, { commandId: input.requestId, groupId: input.nodeId });
+    if (!migrated.ok) return { ok: false, code: "invalid-film-set", message: migrated.reason };
+    const group = migrated.canvas.document.nodes.find(node => node.id === input.nodeId)!;
+    const groupData = migrated.canvas.nodeData[input.nodeId];
+    const commands: CanvasCommand[] = [{ type: "node.add", node: group, nodeData: { title: input.title ?? "片场", filmSetGroup: createFilmSetGroupMarker() } as CanvasNodeData }];
+    const existing = new Map(canvas.document.nodes.map(node => [node.id, node]));
+    for (const node of migrated.canvas.document.nodes) {
+      if (node.id === input.nodeId) continue;
+      const previous = existing.get(node.id);
+      if (!previous) commands.push({ type: "node.add", node, nodeData: migrated.canvas.nodeData[node.id] });
+      else if (previous.parentId !== node.parentId) {
+        // Existing source cards remain live and are adopted by the new group.
+        commands.push({ type: "node.update", nodeId: node.id, parentId: node.parentId });
+      }
+    }
+    commands.push({ type: "nodeData.patch", nodeId: input.nodeId, value: groupData });
+    return { ok: true, commands };
   }
 
   private patchFilmSet(
+    canvas: ServerCanvas,
     input: { nodeId: string },
     animation: FilmSetNodeData,
     title?: string
   ): { ok: true; commands: CanvasCommand[] } | { ok: false; code: string; message: string } {
-    const fields = canonicalFilmSetFields(animation);
-    if (title !== undefined) fields.title = title;
-    return {
-      ok: true,
-      commands: [{ type: "nodeData.patch", nodeId: input.nodeId, value: fields as CanvasNodeData }]
-    };
+    const group = readFilmSetGroupMarker(canvas.nodeData[input.nodeId]);
+    if (!group) return { ok: false, code: "migration-required", message: "旧片场只读，请先迁移为群组" };
+    const marker = createFilmSetGroupMarker(group);
+    const items = new Map(animation.filmSetContent.items.map(item => [item.id, item]));
+    if (animation.filmSetContent.items.some(item => item.kind !== "ground" && !group.sceneBindings.some(binding => binding.bindingId === item.id))) return { ok: false, code: "source-required", message: "新对象必须从资源卡片导入" };
+    const commands: CanvasCommand[] = [];
+    marker.sceneBindings = marker.sceneBindings.filter(binding => items.has(binding.bindingId)).map(binding => {
+      const item = items.get(binding.bindingId)!;
+      const t = item.localTransform;
+      if (item.kind === "model") {
+        const previous = readFilmSetAnimationProjection(canvas, input.nodeId)?.filmSetContent.items.find(entry => entry.id === item.id);
+        if (previous?.kind === "model" && JSON.stringify(previous.model) !== JSON.stringify(item.model)) {
+          const { contentVersion, placement, ...fields } = item.model;
+          commands.push({ type: "nodeData.patch", nodeId: binding.sourceNodeId, value: { ...fields, modelContentVersion: contentVersion, modelPlacement: placement } as CanvasNodeData });
+        }
+      }
+      return { ...binding, transform: { x: t.offset.x, y: t.offset.y, z: t.offset.z, yaw: t.yaw, scale: t.scale } };
+    });
+    marker.cameras = [];
+    marker.clips = filmSetAnimationsOf(animation).clips.map(clip => {
+      const cameraId = `camera:${clip.id}`;
+      marker.cameras!.push({ id: cameraId, name: clip.name, ...clip.initialCamera });
+      return { id: clip.id, name: clip.name, cameraId, duration: clip.timeline.duration, loop: clip.timeline.loop, cameraMotion: clip.cameraMotion, bindings: clip.bindings, ...(clip.backdrop ? { backdrop: clip.backdrop } : {}) };
+    });
+    marker.activeClip = filmSetAnimationsOf(animation).defaultClipId;
+    commands.push({ type: "nodeData.patch", nodeId: input.nodeId, value: { filmSetGroup: marker, ...(title === undefined ? {} : { title }) } as CanvasNodeData });
+    return { ok: true, commands };
   }
 
   private async resolve(
@@ -347,10 +384,10 @@ export function resolveNodeModelSource(
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return { ok: false, code: "unknown-node", message: `来源节点 ${nodeId} 不存在` };
   const data = canvas.nodeData[nodeId] as CanvasNodeData | undefined;
-  if (isFilmSetNode(node.type, data)) {
-    const decoded = decodeFilmSetNodeData(data);
-    if (!decoded.ok) return { ok: false, code: "invalid-model-node", message: decoded.reason };
-    const item = decoded.value.filmSetContent.items.find(entry => entry.kind === "model");
+  if (node.type === "group" && readFilmSetGroupMarker(data)) {
+    const projection = readFilmSetAnimationProjection(canvas, nodeId);
+    if (!projection) return { ok: false, code: "invalid-model-node", message: "片场资源无法解析" };
+    const item = projection.filmSetContent.items.find(entry => entry.kind === "model");
     if (!item || item.kind !== "model") {
       return { ok: false, code: "no-model-item", message: `片场节点 ${nodeId} 没有可复制的模型对象` };
     }
@@ -384,12 +421,9 @@ export function readFilmSet(
 ): { ok: true; value: FilmSetNodeData } | { ok: false; code: string; message: string } {
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
-  if (!isFilmSetNode(node.type, canvas.nodeData[nodeId])) {
-    return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是片场节点` };
-  }
-  const decoded = decodeFilmSetNodeData(canvas.nodeData[nodeId] as CanvasNodeData | undefined);
-  if (!decoded.ok) return { ok: false, code: "invalid-animation-node", message: decoded.reason };
-  return { ok: true, value: decoded.value };
+  const animation = readFilmSetAnimationProjection(canvas, nodeId);
+  if (!animation) return { ok: false, code: "invalid-animation-node", message: `节点 ${nodeId} 无法解析为片场` };
+  return { ok: true, value: animation };
 }
 
 /** 默认镜头导出（供前端创建入口预填，不写规范状态）。 */

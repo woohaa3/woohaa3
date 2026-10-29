@@ -5,8 +5,8 @@
 
 use serde::Deserialize;
 
-use super::model::{MODEL_ASSET_VERSION, ModelAabbDto, ModelOp};
 use super::canonical_signature;
+use super::model::{MODEL_ASSET_VERSION, ModelAabbDto, ModelOp};
 
 /// Geometry is transmitted once. Keep its raw JSON bytes for the canonical signature,
 /// and decode those same bytes for model preparation.
@@ -92,12 +92,17 @@ mod tests {
     #[test]
     fn preserves_geometry_bytes_for_signature_without_duplicate_payload() {
         let ops = r##"[{"t":"sphere","id":"球","parent":null,"position":[0.123456789012345,0,0],"rotation":[0,0,0],"scale":[1,1,1],"color":"#ffffff","radius":1e-7}]"##;
-        let json = format!(r#"{{"resourceVersion":"woohaa-prepared-model-resource-v1","sceneVersion":"woohaa-model-scene-ir-v2","ops":{ops}}}"#);
+        let json = format!(
+            r#"{{"resourceVersion":"woohaa-prepared-model-resource-v1","sceneVersion":"woohaa-model-scene-ir-v2","ops":{ops}}}"#
+        );
         let request: PreparedModelRequest = serde_json::from_str(&json).unwrap();
         assert!(request.validate().is_ok());
         assert_eq!(request.ops.len(), 1);
         assert_eq!(request.ops_json, ops);
-        assert_eq!(request.signature(), canonical_signature("woohaa-model-scene-ir-v2", ops));
+        assert_eq!(
+            request.signature(),
+            canonical_signature("woohaa-model-scene-ir-v2", ops)
+        );
     }
 
     #[test]

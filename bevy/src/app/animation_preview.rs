@@ -1,8 +1,11 @@
 //! Consume the sampled camera after rig derivation and before preview rendering.
-use bevy::prelude::*;
-use super::{AnimationCameraState, CurrentScene, ModelAssetTable, FrameFlags};
-use crate::model3d::{ModelVisuals, shot_adapter::{ShotAdapterState, focused_model_bounds, sampled_camera_pose}};
+use super::{AnimationCameraState, CurrentScene, FrameFlags, ModelAssetTable};
+use crate::model3d::{
+    ModelVisuals,
+    shot_adapter::{ShotAdapterState, focused_model_bounds, sampled_camera_pose},
+};
 use crate::shot_camera::ShotCameraDerived;
+use bevy::prelude::*;
 
 pub(super) fn apply_sampled_camera(
     scene: Res<CurrentScene>,
@@ -14,18 +17,40 @@ pub(super) fn apply_sampled_camera(
     flags: Res<FrameFlags>,
     mut last_sample: Local<Option<(u32, u32)>>,
 ) {
-    let Some(playback) = scene.0.animation_playback.as_ref().filter(|p| p.view_mode == "focus-preview") else { *last_sample = None; return; };
-    let (Some(camera), Some(entity), Some(bounds)) = (sampled.0, adapter.rig, focused_model_bounds(&scene.0, &models, &resources.0)) else { return; };
+    let Some(playback) = scene
+        .0
+        .animation_playback
+        .as_ref()
+        .filter(|p| p.view_mode == "focus-preview")
+    else {
+        *last_sample = None;
+        return;
+    };
+    let (Some(camera), Some(entity), Some(bounds)) = (
+        sampled.0,
+        adapter.rig,
+        focused_model_bounds(&scene.0, &models, &resources.0),
+    ) else {
+        return;
+    };
     // 与 overview 辅助实体共用同一 pose 派生（design D2），避免第二套取景公式。
     // 采样镜头是**场景单位**：这里按片场的显示变换映射为画布世界姿态
     // （change: 2026-10-23-isolate-film-set-camera-space，任务 2.2）。
     let display = adapter.node_id.as_deref().and_then(|node_id| {
         crate::model3d::shot_adapter::display_unit_for_node(&scene.0, &resources.0, node_id)
     });
-    let Some((focus, position)) = sampled_camera_pose(bounds, display, &camera) else { return; };
-    let Ok(mut derived) = rigs.get_mut(entity) else { return; };
+    let Some((focus, position)) = sampled_camera_pose(bounds, display, &camera) else {
+        return;
+    };
+    let Ok(mut derived) = rigs.get_mut(entity) else {
+        return;
+    };
     let key = (playback.generation, playback.time.to_bits());
-    if derived.focus != focus || derived.position != position || *last_sample != Some(key) || flags.film_set_media_changed {
+    if derived.focus != focus
+        || derived.position != position
+        || *last_sample != Some(key)
+        || flags.film_set_media_changed
+    {
         derived.focus = focus;
         derived.position = position;
         derived.generation = derived.generation.wrapping_add(1);

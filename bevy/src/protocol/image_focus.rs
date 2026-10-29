@@ -49,7 +49,9 @@ pub(crate) struct ImageFocus {
     pub(crate) document_view: Option<ImageFocusDocumentView>,
 }
 
-fn presentation_ready_default() -> bool { true }
+fn presentation_ready_default() -> bool {
+    true
+}
 
 impl ImageFocus {
     /// 边界级防御校验：版本、id 长度、有限取景与正源尺寸。
@@ -75,9 +77,18 @@ impl ImageFocus {
             return Err("Invalid image focus source size");
         }
         if let Some(view) = self.document_view {
-            if ![view.source_width, view.source_height, view.viewport.x, view.viewport.y, view.viewport.zoom]
-                .iter().all(|value| value.is_finite())
-                || view.source_width <= 0.0 || view.source_height <= 0.0 || view.viewport.zoom <= 0.0
+            if ![
+                view.source_width,
+                view.source_height,
+                view.viewport.x,
+                view.viewport.y,
+                view.viewport.zoom,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+                || view.source_width <= 0.0
+                || view.source_height <= 0.0
+                || view.viewport.zoom <= 0.0
             {
                 return Err("Invalid image focus document view");
             }
@@ -98,12 +109,30 @@ mod tests {
         assert!(old.validate().is_ok());
         let view = serde_json::json!({"sourceWidth":4000,"sourceHeight":3000,"viewport":{"x":10,"y":20,"zoom":0.25}});
         json["documentView"] = view.clone();
-        assert!(serde_json::from_value::<ImageFocus>(json.clone()).unwrap().validate().is_ok());
-        for (path, bad) in [("sourceWidth", -1.0), ("sourceHeight", 0.0), ("zoom", 0.0), ("x", 1e40)] {
+        assert!(
+            serde_json::from_value::<ImageFocus>(json.clone())
+                .unwrap()
+                .validate()
+                .is_ok()
+        );
+        for (path, bad) in [
+            ("sourceWidth", -1.0),
+            ("sourceHeight", 0.0),
+            ("zoom", 0.0),
+            ("x", 1e40),
+        ] {
             json["documentView"] = view.clone();
-            if path == "zoom" || path == "x" { json["documentView"]["viewport"][path] = serde_json::json!(bad); }
-            else { json["documentView"][path] = serde_json::json!(bad); }
-            assert_eq!(serde_json::from_value::<ImageFocus>(json.clone()).unwrap().validate(), Err("Invalid image focus document view"));
+            if path == "zoom" || path == "x" {
+                json["documentView"]["viewport"][path] = serde_json::json!(bad);
+            } else {
+                json["documentView"][path] = serde_json::json!(bad);
+            }
+            assert_eq!(
+                serde_json::from_value::<ImageFocus>(json.clone())
+                    .unwrap()
+                    .validate(),
+                Err("Invalid image focus document view")
+            );
         }
     }
 }

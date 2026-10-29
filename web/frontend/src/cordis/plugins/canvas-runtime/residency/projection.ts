@@ -1,4 +1,4 @@
-import { builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabilityResolver } from "@woohaa3/contracts";
+import { readFilmSetGroupMarker, contentKeyForFilmSetGroupSource, builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabilityResolver } from "@woohaa3/contracts";
 /**
  * 从 working 画布投影页面资源需求
  * （change: 2026-10-23-scale-canvas-media-residency，design D1/D7）。
@@ -12,7 +12,6 @@ import { builtinNodeCapabilityResolver, effectiveCanvasNodeSize, type NodeCapabi
  */
 import {
   getGroupLayoutSizes,
-  groupPresentationRect,
   hiddenByCollapsedGroups,
   groupBadgeRect
 } from "@woohaa3/contracts";
@@ -80,26 +79,48 @@ export function collectResidencyCandidates(
     if (!capabilities.resources) continue;
     const size = groupSizes.get(node.id) ?? effectiveCanvasNodeSize(node, undefined, capabilities);
     const key = contentKeyOf(node);
-    const rect = groupPresentationRect(node, canvas.nodeData[node.id]?.groupCollapsed === true, {
-      ...absolute(node),
-      ...size,
-    });
-    const badge = node.type === "group" ? groupBadgeRect(rect, canvas.nodeData[node.id]?.groupBadgeScale) : null;
+    const frame = { ...absolute(node), ...size };
+    const badge = node.type === "group" ? groupBadgeRect(frame, canvas.nodeData[node.id]?.groupBadgeScale) : null;
+    const collapsed = canvas.nodeData[node.id]?.groupCollapsed === true;
+    const rect = badge && collapsed ? badge : badge ? {
+      x: Math.min(frame.x, badge.x),
+      y: Math.min(frame.y, badge.y),
+      width: Math.max(frame.x + frame.width, badge.x + badge.width) - Math.min(frame.x, badge.x),
+      height: Math.max(frame.y + frame.height, badge.y + badge.height) - Math.min(frame.y, badge.y),
+    } : frame;
     candidates.push({
       nodeId: node.id,
       contentKey: key ?? "",
       x: rect.x,
       y: rect.y,
       width: rect.width,
-      // Use the same footer-expanded group rectangle as the accepted scene.
-      height: rect.height
-        + (badge ? Math.max(0, badge.y + badge.height - rect.y - rect.height) : 0),
+      height: rect.height,
       eligible: !hidden.has(node.id) && key !== null,
       hiddenByGroup: hidden.has(node.id),
       // 离屏预览相机只为模型/复合资产创建；图片与视频走卡片贴图，不占预览渲染槽。
       // 组模型直接绘制在画布世界（capability 声明 previewSlot: false）。
       previewSlot: capabilities.resources.previewSlot
     });
+    // A film-set group owns scene entities whose residency identity follows
+    // the source card. Keep one demand per binding so replacing a card version
+    // cannot reuse the previous `(sourceNodeId, contentKey)` resource.
+    const marker = node.type === "group" ? readFilmSetGroupMarker(canvas.nodeData[node.id]) : null;
+    if (marker) {
+      for (const binding of marker.sceneBindings) {
+        const key = contentKeyForFilmSetGroupSource(canvas, binding.sourceNodeId);
+        candidates.push({
+          nodeId: `${node.id}:${binding.bindingId}`,
+          contentKey: key ?? binding.contentKey,
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          eligible: !hidden.has(node.id) && key !== null,
+          hiddenByGroup: hidden.has(node.id),
+          previewSlot: false
+        });
+      }
+    }
   }
   return candidates;
 }

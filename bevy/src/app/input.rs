@@ -7,8 +7,8 @@ use bevy::{
 use crate::{bridge, canvas2d, theme::ThemeResource};
 
 use super::{
-    helpers::place_native_surface, CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable,
-    NodeIndex, SurfaceState, TextureBatch,
+    CurrentScene, FilmSetTextureBatch, FrameFlags, ModelAssetTable, NodeIndex, SurfaceState,
+    TextureBatch, helpers::place_native_surface,
 };
 
 /// 重置帧标记，取走最新 scene/texture batch；检测 theme-only 变化。

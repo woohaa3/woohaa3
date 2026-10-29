@@ -177,24 +177,28 @@ pub(super) fn sync(
             let node = &scene.nodes[key.index];
             let z = super::draw_order::render_z(&scene.nodes, key.index);
             let mut labels = if let Some(group) = &node.group {
-                let panel = meshes.add(super::group::draw_group_panel(theme, node, group));
-                let entity = commands
-                    .spawn((
-                        Mesh2d(panel.clone()),
-                        MeshMaterial2d(visuals.blend_material.clone()),
-                        Transform::from_xyz(0., 0., z),
-                        NoFrustumCulling,
-                    ))
-                    .id();
-                block.panels.push((entity, panel));
-                vec![super::group::draw_group(
-                    &mut geometry,
-                    theme,
-                    node,
-                    group,
-                    key.selected,
-                    z,
-                )]
+                if group.collapsed {
+                    Vec::new()
+                } else {
+                    let panel = meshes.add(super::group::draw_group_panel(theme, node, group));
+                    let entity = commands
+                        .spawn((
+                            Mesh2d(panel.clone()),
+                            MeshMaterial2d(visuals.blend_material.clone()),
+                            Transform::from_xyz(0., 0., z),
+                            NoFrustumCulling,
+                        ))
+                        .id();
+                    block.panels.push((entity, panel));
+                    vec![super::group::draw_group(
+                        &mut geometry,
+                        theme,
+                        node,
+                        group,
+                        key.selected,
+                        z,
+                    )]
+                }
             } else if key.panel.is_some() {
                 // 有模型内容的子容器同样走范围面板：它复用 3D 世界呈现链路，模型由 3D
                 // 相机（order 0）画在画布之下，2D 相机（order 1）只能透出未绘制区域。
@@ -211,7 +215,9 @@ pub(super) fn sync(
                 )
                 .unwrap_or_default()
             };
-            if let Some(label) = super::group::draw_run_status(&mut geometry, theme, node, z) {
+            if !node.group.as_ref().is_some_and(|group| group.collapsed)
+                && let Some(label) = super::group::draw_run_status(&mut geometry, theme, node, z)
+            {
                 labels.push(label);
             }
             // 聚合节点运行遮罩：覆盖整个范围（change: 2026-10-12-unify-generation-history-strip，

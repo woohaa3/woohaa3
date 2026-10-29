@@ -1,3 +1,4 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
 /**
  * 片场复制拖入规划测试
  * （change: 2026-10-08-make-film-set-model-only，任务 2.3/3.3/6.2；
@@ -55,7 +56,7 @@ function base(): ServerCanvas {
       metadata: { storageKey: `sha256-${"b".repeat(64)}`, checksum: "b".repeat(64), contentType: "video/mp4", size: 8 }
     }
   ] as ServerCanvas["assets"];
-  return canvas;
+  return migrateFilmSetFixture(canvas, "film");
 }
 
 describe("resolveFilmSetDrop", () => {
@@ -120,8 +121,10 @@ describe("planFilmSetImportCommand", () => {
     const plan = planFilmSetImportCommand({ canvas, target: resolved.target, now: NOW });
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
-    const patch = filmSetImportPatchValue(plan.value) as { filmSetContent: { items: { kind: string }[] } };
-    expect(patch.filmSetContent.items.map((item) => item.kind)).toEqual(["ground", "model"]);
+    const patch = filmSetImportPatchValue(plan.value);
+    expect(plan.value.ground).toMatchObject({ width: 8, depth: 8 });
+    expect(plan.value.sceneBindings.map(binding => binding.kind)).toEqual(["model3d"]);
+    expect(plan.commands).toContainEqual({ type: "node.update", nodeId: "model", parentId: "film" });
     expect(patch).not.toHaveProperty("position");
   });
 

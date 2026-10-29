@@ -1,3 +1,5 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
 import { applyCanvasCommands, planCanvasEdit } from "../../../test-support/managed-shot-commands.js";
 /**
  * 动态镜头参考协议测试
@@ -56,7 +58,7 @@ function withDynamicFilmSet(): ServerCanvas {
   });
   canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
   canvas.nodeData["video-1"] = { taskKind: "video-generation", taskStatus: "idle" } as never;
-  return canvas;
+  return migrateFilmSetFixture(canvas, "film");
 }
 
 function apply(canvas: ServerCanvas, commands: unknown[]) {
@@ -73,7 +75,7 @@ function materialize(canvas: ServerCanvas): ServerCanvas {
 }
 
 function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = "clip-1") {
-  const decoded = decodeFilmSetNodeData(canvas.nodeData.film);
+  const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
   if (!decoded.ok) throw new Error(decoded.reason);
   return {
     type: "filmSet.clipPatch",
@@ -86,7 +88,7 @@ function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = "clip-
 
 /** 追加一个静态镜头（clip-s）并返回新画布。 */
 function withExtraStaticClip(canvas: ServerCanvas): ServerCanvas {
-  const decoded = decodeFilmSetNodeData(canvas.nodeData.film);
+  const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
   if (!decoded.ok) throw new Error(decoded.reason);
   return expectOk(apply(canvas, [clipPatch(canvas, {
     kind: "create",
@@ -95,7 +97,7 @@ function withExtraStaticClip(canvas: ServerCanvas): ServerCanvas {
       name: "静态镜头",
       kind: "static",
       timeline: { duration: 0, loop: false },
-      initialCamera: (canvas.nodeData.film as { sceneCamera: unknown }).sceneCamera as never,
+      initialCamera: readFilmSetAnimationProjection(canvas, "film")!.sceneCamera as never,
       cameraMotion: {
         motionScript: "",
         motionScriptLanguage: "javascript",
@@ -166,7 +168,7 @@ describe("static image reference contracts", () => {
   });
   it("image identity excludes name/provenance/scene observation and includes saved camera, background, geometry and profile", () => {
     const canvas = connect(withExtraStaticClip(materialize(withDynamicFilmSet())));
-    const decoded = decodeFilmSetNodeData(canvas.nodeData.film); if (!decoded.ok) throw new Error(decoded.reason);
+    const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!)); if (!decoded.ok) throw new Error(decoded.reason);
     const animation = decoded.value;
     const identity = (background = "#ffffff") => shotImageReferenceIdentity({ animation, clipId: "clip-s", background, assets: [] })!;
     const before = identity();
@@ -321,7 +323,7 @@ describe("镜头参考协议（任务 8.1）", () => {
 
 describe("镜头参考内容身份（任务 8.1 / D9）", () => {
   function decodedAnimation(canvas: ServerCanvas) {
-    const decoded = decodeFilmSetNodeData(canvas.nodeData.film);
+    const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
     if (!decoded.ok) throw new Error(decoded.reason);
     return decoded.value;
   }

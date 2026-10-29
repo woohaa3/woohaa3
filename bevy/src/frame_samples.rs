@@ -33,7 +33,9 @@ mod tests {
     fn overflow_is_explicit_and_drain_clears() {
         let mut s = Samples::default();
         s.arm(true);
-        for i in 0..16_390 { s.push(i as f64, 1); }
+        for i in 0..16_390 {
+            s.push(i as f64, 1);
+        }
         let (rows, dropped) = s.drain();
         assert_eq!(rows.len(), 16_384);
         assert_eq!(dropped, 6);
@@ -48,13 +50,23 @@ impl Samples {
         self.rows.clear();
         self.dropped = 0;
     }
-    pub fn enabled(&self) -> bool { self.enabled }
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
     pub fn push(&mut self, at_ms: f64, generation: u32) {
-        if !self.enabled { return; }
-        if self.rows.len() < 16_384 { self.rows.push(Sample { at_ms, generation }); }
-        else { self.dropped += 1; }
+        if !self.enabled {
+            return;
+        }
+        if self.rows.len() < 16_384 {
+            self.rows.push(Sample { at_ms, generation });
+        } else {
+            self.dropped += 1;
+        }
     }
     pub fn drain(&mut self) -> (Vec<Sample>, usize) {
-        (std::mem::take(&mut self.rows), std::mem::take(&mut self.dropped))
+        (
+            std::mem::take(&mut self.rows),
+            std::mem::take(&mut self.dropped),
+        )
     }
 }

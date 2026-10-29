@@ -9,16 +9,19 @@
  * 起点世界相机姿态 → 画布 2D 的投影由调用方按当前观察相机完成（活动动态镜头用同一 T 的
  * 采样相机）；本模块只提供共享几何事实（卡片接口中点）与卡片投影，避免逐帧跨桥查询锚点。
  */
+import { MODEL_CAMERA_ASPECTS } from "../model-cameras.js";
 import type { FilmSetNodeData } from "../canvas-node-model.js";
 import {
   SHOT_PREVIEW_HEADER_HEIGHT,
   decodeShotPreviewData,
   shotPreviewContentHeight,
   shotPreviewNodeId,
+  shotAspectValue,
   shotPreviewTargetsForFilmSet
 } from "../film-set-shot-preview.js";
 import type { FilmSetShotPreviewData } from "../film-set-shot-preview.js";
 import type { BevyShotPreviewCardState, BevyShotPreviewLink, BevyShotPreviewPresentation } from "./wire-scene.js";
+import { readFilmSetGroupMarker } from "../film-set-group.js";
 
 /** 预览卡片接口（归属线终点）在卡片几何上的**左侧中点**（画布坐标）。 */
 export function shotPreviewCardAttachment(node: {
@@ -134,4 +137,54 @@ export function shotPreviewLinksForFilmSet(input: {
     });
   }
   return links;
+}
+
+/** Group-owner equivalent used during the composite → group compatibility window. */
+export function shotPreviewLinksForFilmSetGroup(input: {
+  groupNodeId: string;
+  groupData: unknown;
+  previewNodeById: (nodeId: string) => { x: number; y: number; width: number; height: number } | undefined;
+  cameraProjection: (clipId: string) => { x: number; y: number } | null;
+}): BevyShotPreviewLink[] {
+  const marker = readFilmSetGroupMarker(input.groupData);
+  if (!marker?.clips) return [];
+  const links: BevyShotPreviewLink[] = [];
+  for (const clip of marker.clips) {
+    const previewNodeId = shotPreviewNodeId(input.groupNodeId, clip.id);
+    if (!input.previewNodeById(previewNodeId)) continue;
+    const start = input.cameraProjection(clip.id);
+    if (!start) continue;
+    links.push({ id: shotPreviewLinkId(input.groupNodeId, clip.id), ownerNodeId: input.groupNodeId, previewNodeId, clipId: clip.id, start });
+  }
+  return links;
+}
+
+/** Read-only presentation for a group-owned clip during the migration window. */
+export function shotPreviewCardPresentationForFilmSetGroup(input: {
+  groupNodeId: string;
+  groupData: unknown;
+  clipId: string;
+  state?: BevyShotPreviewCardState;
+  progress?: number;
+  playing?: boolean;
+  diagnostic?: string;
+}): BevyShotPreviewPresentation | null {
+  const marker = readFilmSetGroupMarker(input.groupData);
+  const clip = marker?.clips?.find(entry => entry.id === input.clipId);
+  if (!clip) return null;
+  const camera = marker?.cameras?.find(entry => entry.id === clip.cameraId);
+  return {
+    filmSetNodeId: input.groupNodeId,
+    clipId: clip.id,
+    kind: (clip.duration ?? 0) > 0 ? "dynamic" : "static",
+    name: clip.name ?? clip.id,
+    aspect: shotAspectValue({ initialCamera: { azimuth: camera?.azimuth ?? 0, elevation: camera?.elevation ?? 0.35, distance: camera?.distance ?? 4, focusOffset: camera?.focusOffset ?? { x: 0, y: 0, z: 0 }, aspect: MODEL_CAMERA_ASPECTS.find(aspect => aspect === camera?.aspect) ?? "16:9" } }),
+    duration: clip.duration ?? 0,
+    coverCamera: { azimuth: camera?.azimuth ?? 0, elevation: camera?.elevation ?? 0.35, distance: camera?.distance ?? 4, focusOffset: camera ? [camera.focusOffset.x, camera.focusOffset.y, camera.focusOffset.z] : [0, 0, 0] },
+    ...(clip.backdrop ? { backdrop: clip.backdrop } : {}),
+    state: input.state ?? "ready",
+    ...((clip.duration ?? 0) > 0 && typeof input.progress === "number" && Number.isFinite(input.progress) ? { progress: Math.min(1, Math.max(0, input.progress)) } : {}),
+    ...((clip.duration ?? 0) > 0 && input.playing !== undefined ? { playing: input.playing } : {}),
+    ...(input.diagnostic ? { diagnostic: input.diagnostic } : {})
+  };
 }

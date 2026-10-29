@@ -24,6 +24,7 @@ import {
   YJS_SYNC_PROTOCOL_VERSION,
   type NodeGenerationHistoryEntry,
   type NodeHistoryMediaPayload,
+  type NodeHistoryModelPayload,
   type ServerCanvas
 } from "@woohaa3/contracts";
 import { CanvasStorageError } from "../errors.js";
@@ -127,6 +128,9 @@ export async function restoreNodeHistory(
     }
   }
 
+  if (entry.kind === "model" && (entry.payload as NodeHistoryModelPayload).animation?.schemaVersion === 3) {
+    return { ok: false, code: "unrecoverable", message: "旧片场历史须先完成离线迁移" };
+  }
   const alreadyCurrent = currentNode.identity !== null && entryMatchesCurrentIdentity(entry, currentNode);
   if (alreadyCurrent) {
     return { ok: true, revision: canvas.revision, entryId: entry.entryId, alreadyCurrent: true };

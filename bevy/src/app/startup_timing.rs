@@ -9,12 +9,17 @@ pub(super) struct StartupTiming {
 }
 pub(super) fn begin(mut timing: ResMut<StartupTiming>) {
     let now = Instant::now();
-    timing.gap_ms = timing.previous.map(|last| now.duration_since(last).as_secs_f64() * 1000.0);
+    timing.gap_ms = timing
+        .previous
+        .map(|last| now.duration_since(last).as_secs_f64() * 1000.0);
     timing.previous = Some(now);
     timing.started = Some(now);
 }
-pub(super) fn end(timing: Res<StartupTiming>, work: Res<crate::model_preview::render_work::RenderWork>) {
+pub(super) fn end(
+    timing: Res<StartupTiming>,
+    work: Res<crate::model_preview::render_work::RenderWork>,
+) {
     if let Some(start) = timing.started {
-        work.startup_main(start.elapsed().as_secs_f64()*1000.0, timing.gap_ms);
+        work.startup_main(start.elapsed().as_secs_f64() * 1000.0, timing.gap_ms);
     }
 }

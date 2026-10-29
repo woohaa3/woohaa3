@@ -23,7 +23,9 @@ use crate::renderer_protocol::{CaptureOptions, RenderErrorCode, RenderRequest};
 #[cfg(feature = "recording-gpu")]
 static ADAPTER_INFO: Mutex<Option<crate::recording_prepare::GpuAdapterInfo>> = Mutex::new(None);
 #[cfg(feature = "recording-gpu")]
-pub fn detected_adapter() -> Option<crate::recording_prepare::GpuAdapterInfo> { ADAPTER_INFO.lock().unwrap().clone() }
+pub fn detected_adapter() -> Option<crate::recording_prepare::GpuAdapterInfo> {
+    ADAPTER_INFO.lock().unwrap().clone()
+}
 
 const PREVIEW_DEPTH: f32 = 40.0;
 
@@ -60,10 +62,15 @@ pub(super) fn high_mesh(
     meshes: &mut Assets<Mesh>,
     geometry: &ModelGeometry,
 ) -> Option<Handle<Mesh>> {
-    let quality = super::super::quality::ViewPurpose::Export.select(
-        0.0, super::super::quality::Quality::High,
-    );
-    resources.mesh(meshes, &super::super::mesh::mesh_key(geometry), geometry, quality)
+    let quality = super::super::quality::ViewPurpose::Export
+        .select(0.0, super::super::quality::Quality::High);
+    resources
+        .mesh(
+            meshes,
+            &super::super::mesh::mesh_key(geometry),
+            geometry,
+            quality,
+        )
         .map(|(handle, _)| handle)
 }
 
@@ -95,10 +102,13 @@ fn spawn_model(
         let entity = match &spec.geometry {
             None => commands.spawn((transform, Visibility::default())).id(),
             Some(geometry) => {
-                let Some(mesh) = high_mesh(&mut resources, meshes, geometry) else { continue; };
-                let material = resources.material(materials, scene::standard_material_for(
-                    &spec.material_key, &material_specs,
-                ));
+                let Some(mesh) = high_mesh(&mut resources, meshes, geometry) else {
+                    continue;
+                };
+                let material = resources.material(
+                    materials,
+                    scene::standard_material_for(&spec.material_key, &material_specs),
+                );
                 part_materials.insert(spec.id.clone(), material.clone());
                 commands
                     .spawn((Mesh3d(mesh), MeshMaterial3d(material), transform))
@@ -157,7 +167,9 @@ fn apply_preview_opacity(
     };
     let mut instance = source;
     instance.alpha_mode = bevy::material::AlphaMode::Blend;
-    instance.base_color.set_alpha((static_alpha * opacity).clamp(0.0, 1.0));
+    instance
+        .base_color
+        .set_alpha((static_alpha * opacity).clamp(0.0, 1.0));
     let handle = materials.add(instance);
     commands.entity(entity).insert(MeshMaterial3d(handle));
 }
@@ -230,14 +242,14 @@ fn setup_animation_camera(
     // 用解析出的场景镜头状态求相机位置：distance 是场景单位，必须乘同一自然倍率后才与
     // 内容的世界位置同尺度（change: 2026-10-23-isolate-film-set-camera-space，design D4）。
     let state = camera.state();
-    let scale = if scene_scale.is_finite() && scene_scale > 0.0 { scene_scale } else { 1.0 };
+    let scale = if scene_scale.is_finite() && scene_scale > 0.0 {
+        scene_scale
+    } else {
+        1.0
+    };
     let distance = state.distance * scale;
-    let position = crate::shot_camera::shot_camera_position(
-        focus,
-        state.azimuth,
-        distance,
-        state.elevation,
-    );
+    let position =
+        crate::shot_camera::shot_camera_position(focus, state.azimuth, distance, state.elevation);
     let rotation = Transform::from_translation(position)
         .looking_at(focus, Vec3::Y)
         .rotation;
@@ -294,12 +306,16 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
 
     let mut app = App::new();
     #[cfg(feature = "recording-gpu")]
-    app.add_systems(Startup, |info: Res<bevy::render::renderer::RenderAdapterInfo>| {
-        *ADAPTER_INFO.lock().unwrap() = Some(crate::recording_prepare::GpuAdapterInfo {
-            name: info.name.clone(), backend: format!("{:?}", info.backend),
-            software: format!("{:?}", info.device_type) == "Cpu",
-        });
-    });
+    app.add_systems(
+        Startup,
+        |info: Res<bevy::render::renderer::RenderAdapterInfo>| {
+            *ADAPTER_INFO.lock().unwrap() = Some(crate::recording_prepare::GpuAdapterInfo {
+                name: info.name.clone(),
+                backend: format!("{:?}", info.backend),
+                software: format!("{:?}", info.device_type) == "Cpu",
+            });
+        },
+    );
     // 无窗口：native-renderer feature 不启用 bevy_winit（DefaultPlugins 不含 WinitPlugin）。
     // `primary_window: None` 不创建窗口，但保留 `bevy_window` 事件（render 的 camera_system
     // 依赖 WindowResized 事件）。ScheduleRunnerPlugin 提供替代 AppRunner，按固定节拍运行。
@@ -409,7 +425,8 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
             // 应用部件增量（旋转乘基础旋转，平移/缩放叠加）与透明度。
             // 透明度规则与可见播放同源：1 = 原透明模式、<1 = 专属材质 Blend、0 = 隐藏。
             if let Some((_, deltas)) = &sampled {
-                let mut opacities: std::collections::HashMap<Entity, f32> = std::collections::HashMap::new();
+                let mut opacities: std::collections::HashMap<Entity, f32> =
+                    std::collections::HashMap::new();
                 for (part_id, delta) in deltas {
                     let (Some(entity), Some(base)) = (entities.get(part_id), bases.get(part_id))
                     else {
@@ -426,7 +443,8 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                     {
                         // 对象根：该对象名下全部块一起变透明（不拆块）。
                         for (candidate, _) in &part_materials {
-                            if !super::super::part_id::belongs_to_item(candidate, item_root.item_id) {
+                            if !super::super::part_id::belongs_to_item(candidate, item_root.item_id)
+                            {
                                 continue;
                             }
                             if let Some(target) = entities.get(candidate).copied() {
@@ -454,9 +472,13 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                     let Some(item_root) = deltas
                         .iter()
                         .find(|(part_id, _)| {
-                            super::super::part_id::decode_part_id(part_id)
-                                .is_some_and(|decoded| decoded.part_id.is_empty()
-                                    && super::super::part_id::belongs_to_item(&plane.item_id, decoded.item_id))
+                            super::super::part_id::decode_part_id(part_id).is_some_and(|decoded| {
+                                decoded.part_id.is_empty()
+                                    && super::super::part_id::belongs_to_item(
+                                        &plane.item_id,
+                                        decoded.item_id,
+                                    )
+                            })
                         })
                         .map(|(_, delta)| delta.opacity)
                     else {
@@ -478,8 +500,14 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                     // 场景单位镜头 → 生产输出世界：距离与焦点偏移按同一自然倍率缩放、按内容根旋转，
                     // 保证成片构图与节点矩形/画布 zoom 无关（change:
                     // 2026-10-23-isolate-film-set-camera-space，任务 3.1 / design D4）。
-                    let scale = if root_transform.scale.x.is_finite() && root_transform.scale.x > 0.0 { root_transform.scale.x } else { 1.0 };
-                    let focus_offset = root_transform.rotation * (Vec3::from_array(camera.focus_offset) * scale);
+                    let scale =
+                        if root_transform.scale.x.is_finite() && root_transform.scale.x > 0.0 {
+                            root_transform.scale.x
+                        } else {
+                            1.0
+                        };
+                    let focus_offset =
+                        root_transform.rotation * (Vec3::from_array(camera.focus_offset) * scale);
                     setup_animation_camera(
                         &mut commands,
                         image.clone(),
@@ -499,8 +527,12 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                 ),
             }
 
-            super::readiness::enqueue_readback(&mut commands, image,
-                pixels_setup.clone(), capture_ready.clone());
+            super::readiness::enqueue_readback(
+                &mut commands,
+                image,
+                pixels_setup.clone(),
+                capture_ready.clone(),
+            );
         },
     );
 

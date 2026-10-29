@@ -20,10 +20,15 @@ pub(crate) fn selection_bounds(nodes: &[GraphNode], selected: &[String]) -> Opti
             continue;
         }
         found = true;
-        min_x = min_x.min(node.x);
-        min_y = min_y.min(node.y);
-        max_x = max_x.max(node.x + node.width);
-        max_y = max_y.max(node.y + node.height);
+        let rect = if node.group.as_ref().is_some_and(|group| group.collapsed) {
+            crate::canvas_query::group_model::badge_rect(node)
+        } else {
+            bevy::prelude::Vec4::new(node.x, node.y, node.width, node.height)
+        };
+        min_x = min_x.min(rect.x);
+        min_y = min_y.min(rect.y);
+        max_x = max_x.max(rect.x + rect.z);
+        max_y = max_y.max(rect.y + rect.w);
     }
     found.then_some([min_x, min_y, max_x - min_x, max_y - min_y])
 }

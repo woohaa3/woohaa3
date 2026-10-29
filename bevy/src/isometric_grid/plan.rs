@@ -36,11 +36,12 @@ pub fn canvas_camera_projection() -> OrthographicProjection {
 /// 普通画布正交相机投影：`scale = 1 / zoom`（viewport pan/zoom 由相机承担；design D3）。
 pub fn canvas_camera_projection_for_view(view: &IsometricGridView) -> OrthographicProjection {
     let mut projection = canvas_camera_projection();
-    projection.scale = 1.0 / if view.zoom.is_finite() && view.zoom > 0.0 {
-        view.zoom
-    } else {
-        1.0
-    };
+    projection.scale = 1.0
+        / if view.zoom.is_finite() && view.zoom > 0.0 {
+            view.zoom
+        } else {
+            1.0
+        };
     projection
 }
 
@@ -358,7 +359,10 @@ mod tests {
                 assert!((screen.x - (vp.x + vp.zoom * cx)).abs() < 1e-3);
                 assert!((screen.y - (vp.y + vp.zoom * cy)).abs() < 1e-3);
                 let back = screen_point_to_world(screen, depth, &vp);
-                assert!((back - world).length() < 2e-3, "roundtrip {back:?} vs {world:?}");
+                assert!(
+                    (back - world).length() < 2e-3,
+                    "roundtrip {back:?} vs {world:?}"
+                );
             }
         }
     }
@@ -376,7 +380,11 @@ mod tests {
                 );
             assert!((transform.translation - expected).length() < 1e-4);
             assert_eq!(transform.scale, Vec3::ONE);
-            assert!(transform.rotation.abs_diff_eq(canvas_camera_rotation(), 1e-6));
+            assert!(
+                transform
+                    .rotation
+                    .abs_diff_eq(canvas_camera_rotation(), 1e-6)
+            );
         }
     }
 }

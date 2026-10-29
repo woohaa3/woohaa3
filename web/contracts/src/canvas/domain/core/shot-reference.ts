@@ -95,7 +95,10 @@ function readOwnership(nodeData: Record<string, unknown> | undefined): { filmSet
 }
 
 function readClipKind(filmSetData: Record<string, unknown> | undefined, clipId: string): "static" | "dynamic" | null {
-  const animations = filmSetData?.filmSetAnimations;
+  const marker = filmSetData?.filmSetGroup;
+  const group = marker && typeof marker === "object" && !Array.isArray(marker) ? marker as Record<string, unknown> : null;
+  if (group && group.schemaVersion !== 1) return null;
+  const animations = group ?? filmSetData?.filmSetAnimations;
   if (!animations || typeof animations !== "object" || Array.isArray(animations)) return null;
   const clips = (animations as Record<string, unknown>).clips;
   if (!Array.isArray(clips)) return null;
@@ -103,6 +106,11 @@ function readClipKind(filmSetData: Record<string, unknown> | undefined, clipId: 
     if (!clip || typeof clip !== "object" || Array.isArray(clip)) continue;
     const record = clip as Record<string, unknown>;
     if (record.id !== clipId) continue;
+    if (group) {
+      const duration = record.duration ?? 0;
+      return typeof duration === "number" && Number.isFinite(duration) && duration >= 0
+        ? duration > 0 ? "dynamic" : "static" : null;
+    }
     return record.kind === "dynamic" ? "dynamic" : record.kind === "static" ? "static" : null;
   }
   return null;

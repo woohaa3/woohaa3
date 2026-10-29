@@ -44,7 +44,11 @@ struct SampleRef {
 
 impl NativeMediaDecoder {
     pub fn new(budget: DecodeBudget) -> Self {
-        Self { budget, indexes: BTreeMap::new(), decoded: BTreeMap::new() }
+        Self {
+            budget,
+            indexes: BTreeMap::new(),
+            decoded: BTreeMap::new(),
+        }
     }
 
     fn index_for(&mut self, source: &MediaSource) -> Result<&VideoIndex, DecodeFailure> {
@@ -52,7 +56,10 @@ impl NativeMediaDecoder {
             let index = read_video_index(&source.path, &self.budget)?;
             self.indexes.insert(source.resource_id.clone(), index);
         }
-        Ok(self.indexes.get(&source.resource_id).expect("index inserted"))
+        Ok(self
+            .indexes
+            .get(&source.resource_id)
+            .expect("index inserted"))
     }
 }
 
@@ -66,7 +73,11 @@ impl MediaDecoder for NativeMediaDecoder {
         Ok(index.duration_seconds)
     }
 
-    fn frame_at(&mut self, source: &MediaSource, local_seconds: f64) -> Result<DecodedFrame, DecodeFailure> {
+    fn frame_at(
+        &mut self,
+        source: &MediaSource,
+        local_seconds: f64,
+    ) -> Result<DecodedFrame, DecodeFailure> {
         crate::recording_media::validate_source_type(&source.content_type)?;
         if source.content_type.starts_with("image/") {
             return decode_image(&source.path, &self.budget);
@@ -75,7 +86,11 @@ impl MediaDecoder for NativeMediaDecoder {
         let index = self.index_for(source)?;
         let (width, height) = (index.width, index.height);
         // 选覆盖目标时刻的样本：最后一个 pts <= target 的样本。
-        let sample_index = match index.samples.iter().rposition(|sample| sample.pts_seconds <= local_seconds + 1e-9) {
+        let sample_index = match index
+            .samples
+            .iter()
+            .rposition(|sample| sample.pts_seconds <= local_seconds + 1e-9)
+        {
             Some(index) => index,
             // 目标早于第一个样本：用第一帧（与「尚未开始显示首帧」一致）。
             None => 0,
@@ -90,10 +105,18 @@ impl MediaDecoder for NativeMediaDecoder {
 
         // 从最近的关键帧/首个样本开始解到目标样本（样本之间是 P 帧依赖）。
         let bytes = std::fs::read(&source.path).map_err(|error| {
-            DecodeFailure::new(DecodeStage::Format, "recording-media-unreadable", error.to_string())
+            DecodeFailure::new(
+                DecodeStage::Format,
+                "recording-media-unreadable",
+                error.to_string(),
+            )
         })?;
         let mut decoder = openh264::decoder::Decoder::new().map_err(|error| {
-            DecodeFailure::new(DecodeStage::Decode, "recording-media-decoder-unavailable", error.to_string())
+            DecodeFailure::new(
+                DecodeStage::Decode,
+                "recording-media-decoder-unavailable",
+                error.to_string(),
+            )
         })?;
         // 参数集与首个样本一起送：只喂 SPS/PPS 的握手在部分构建上返回 `None`，
         // 与首个 IDR 一起送才稳定产出图像（与 `recording_openh264` 的自检路径一致）。
@@ -153,7 +176,14 @@ impl MediaDecoder for NativeMediaDecoder {
                     return Err(DecodeFailure::new(
                         DecodeStage::Decode,
                         "recording-media-sample-invalid",
-                        format!("第 {} 个样本解码失败：{error}", index.samples.iter().position(|entry| std::ptr::eq(entry, sample)).unwrap_or(0)),
+                        format!(
+                            "第 {} 个样本解码失败：{error}",
+                            index
+                                .samples
+                                .iter()
+                                .position(|entry| std::ptr::eq(entry, sample))
+                                .unwrap_or(0)
+                        ),
                     ));
                 }
             }
@@ -181,17 +211,38 @@ impl MediaDecoder for NativeMediaDecoder {
 /// 解码图片为 RGBA8（保留 alpha）。
 fn decode_image(path: &Path, budget: &DecodeBudget) -> Result<DecodedFrame, DecodeFailure> {
     let reader = image::ImageReader::open(path).map_err(|error| {
-        DecodeFailure::new(DecodeStage::Format, "recording-media-unreadable", error.to_string())
+        DecodeFailure::new(
+            DecodeStage::Format,
+            "recording-media-unreadable",
+            error.to_string(),
+        )
     })?;
     let image = reader
         .with_guessed_format()
-        .map_err(|error| DecodeFailure::new(DecodeStage::Format, "recording-media-format-unknown", error.to_string()))?
+        .map_err(|error| {
+            DecodeFailure::new(
+                DecodeStage::Format,
+                "recording-media-format-unknown",
+                error.to_string(),
+            )
+        })?
         .decode()
-        .map_err(|error| DecodeFailure::new(DecodeStage::Decode, "recording-media-decode-failed", error.to_string()))?;
+        .map_err(|error| {
+            DecodeFailure::new(
+                DecodeStage::Decode,
+                "recording-media-decode-failed",
+                error.to_string(),
+            )
+        })?;
     let rgba = image.to_rgba8();
     let (width, height) = (rgba.width(), rgba.height());
     budget.check_size(width, height)?;
-    Ok(DecodedFrame { width, height, rgba: rgba.into_raw(), pts_seconds: 0.0 })
+    Ok(DecodedFrame {
+        width,
+        height,
+        rgba: rgba.into_raw(),
+        pts_seconds: 0.0,
+    })
 }
 
 /// 读取 MP4 的样本索引。
@@ -199,9 +250,17 @@ fn decode_image(path: &Path, budget: &DecodeBudget) -> Result<DecodedFrame, Deco
 /// 只支持我们自己封装的 H.264 MP4（`avc1`/`avcC`、单 track、逐样本 chunk）。
 fn read_video_index(path: &Path, budget: &DecodeBudget) -> Result<VideoIndex, DecodeFailure> {
     let bytes = std::fs::read(path).map_err(|error| {
-        DecodeFailure::new(DecodeStage::Format, "recording-media-unreadable", error.to_string())
+        DecodeFailure::new(
+            DecodeStage::Format,
+            "recording-media-unreadable",
+            error.to_string(),
+        )
     })?;
-    let find = |needle: &[u8]| bytes.windows(needle.len()).position(|window| window == needle);
+    let find = |needle: &[u8]| {
+        bytes
+            .windows(needle.len())
+            .position(|window| window == needle)
+    };
     let moov = find(b"moov").ok_or_else(|| {
         DecodeFailure::new(DecodeStage::Format, "recording-media-not-mp4", "缺少 moov")
     })?;
@@ -209,7 +268,11 @@ fn read_video_index(path: &Path, budget: &DecodeBudget) -> Result<VideoIndex, De
         DecodeFailure::new(DecodeStage::Format, "recording-media-not-mp4", "缺少 mdat")
     })?;
     let avcc = find(b"avcC").ok_or_else(|| {
-        DecodeFailure::new(DecodeStage::Format, "recording-media-unsupported", "缺少 avcC（非 H.264）")
+        DecodeFailure::new(
+            DecodeStage::Format,
+            "recording-media-unsupported",
+            "缺少 avcC（非 H.264）",
+        )
     })?;
     let stsz = find(b"stsz").ok_or_else(|| {
         DecodeFailure::new(DecodeStage::Format, "recording-media-not-mp4", "缺少 stsz")
@@ -228,7 +291,12 @@ fn read_video_index(path: &Path, budget: &DecodeBudget) -> Result<VideoIndex, De
         if offset + 4 > bytes.len() {
             return 0;
         }
-        u32::from_be_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+        u32::from_be_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ])
     };
     // `find` 命中 box type，所以负载从 +4 开始。
     //
@@ -239,16 +307,28 @@ fn read_video_index(path: &Path, budget: &DecodeBudget) -> Result<VideoIndex, De
     // box 头 = size(4) + type(4)；`largesize`（size==1）时再加 8。
     let mdat_header = if mdat_size == 1 { 16 } else { 8 };
     let mdat_payload = mdat_box_start + mdat_header;
-    let mdat_end = if mdat_size >= mdat_header { mdat_box_start + mdat_size } else { bytes.len() };
+    let mdat_end = if mdat_size >= mdat_header {
+        mdat_box_start + mdat_size
+    } else {
+        bytes.len()
+    };
     let timescale = u32_at(mdhd + 4 + 12);
     let duration_units = u32_at(mdhd + 4 + 16);
     if timescale == 0 {
-        return Err(DecodeFailure::new(DecodeStage::Format, "recording-media-invalid-timescale", "timescale 为 0"));
+        return Err(DecodeFailure::new(
+            DecodeStage::Format,
+            "recording-media-invalid-timescale",
+            "timescale 为 0",
+        ));
     }
     // `stsz` 负载：version/flags(4) · sample_size(4) · sample_count(4)，负载从 type 之后 +4 开始。
     let sample_count = u32_at(stsz + 12) as usize;
     if sample_count == 0 {
-        return Err(DecodeFailure::new(DecodeStage::Selection, "recording-media-no-frames", "视频没有样本"));
+        return Err(DecodeFailure::new(
+            DecodeStage::Selection,
+            "recording-media-no-frames",
+            "视频没有样本",
+        ));
     }
     // tkhd：v0 时 width/height 在 box 末端 8 字节。
     let tkhd_size = u32_at(tkhd - 4) as usize;
@@ -323,7 +403,11 @@ fn read_video_index(path: &Path, budget: &DecodeBudget) -> Result<VideoIndex, De
         header_cursor += length + 1;
     }
     if headers.is_empty() {
-        return Err(DecodeFailure::new(DecodeStage::Format, "recording-media-headers-missing", "缺少 SPS/PPS"));
+        return Err(DecodeFailure::new(
+            DecodeStage::Format,
+            "recording-media-headers-missing",
+            "缺少 SPS/PPS",
+        ));
     }
 
     Ok(VideoIndex {
@@ -362,8 +446,12 @@ mod tests {
         let mut decoder = NativeMediaDecoder::new(DecodeBudget::default());
         let frame = decoder
             .frame_at(
-                &MediaSource { resource_id: "img".into(), path, content_type: "image/png".into() },
-                0.0
+                &MediaSource {
+                    resource_id: "img".into(),
+                    path,
+                    content_type: "image/png".into(),
+                },
+                0.0,
             )
             .expect("decode");
         assert_eq!((frame.width, frame.height), (2, 2));
@@ -378,16 +466,30 @@ mod tests {
         let dir = temp_dir("bad");
         let mut decoder = NativeMediaDecoder::new(DecodeBudget::default());
         let unsupported = decoder.frame_at(
-            &MediaSource { resource_id: "x".into(), path: dir.join("x.webm"), content_type: "video/webm".into() },
-            0.0
+            &MediaSource {
+                resource_id: "x".into(),
+                path: dir.join("x.webm"),
+                content_type: "video/webm".into(),
+            },
+            0.0,
         );
-        assert_eq!(unsupported.expect_err("unsupported").code, "recording-media-unsupported");
+        assert_eq!(
+            unsupported.expect_err("unsupported").code,
+            "recording-media-unsupported"
+        );
 
         let missing = decoder.frame_at(
-            &MediaSource { resource_id: "y".into(), path: dir.join("missing.png"), content_type: "image/png".into() },
-            0.0
+            &MediaSource {
+                resource_id: "y".into(),
+                path: dir.join("missing.png"),
+                content_type: "image/png".into(),
+            },
+            0.0,
         );
-        assert_eq!(missing.expect_err("missing").code, "recording-media-unreadable");
+        assert_eq!(
+            missing.expect_err("missing").code,
+            "recording-media-unreadable"
+        );
     }
 
     #[test]
@@ -426,7 +528,11 @@ mod tests {
 
         // 真正解码出像素，并且能按时间选到不同帧。
         let mut decoder = NativeMediaDecoder::new(DecodeBudget::default());
-        let source = MediaSource { resource_id: "clip".into(), path: output.clone(), content_type: "video/mp4".into() };
+        let source = MediaSource {
+            resource_id: "clip".into(),
+            path: output.clone(),
+            content_type: "video/mp4".into(),
+        };
         let first = decoder.frame_at(&source, 0.0).expect("first frame");
         assert_eq!((first.width, first.height), (64, 48));
         assert_eq!(first.rgba.len(), 64 * 48 * 4);
@@ -443,7 +549,13 @@ mod tests {
         let output = dir.join("clip.mp4");
         crate::recording_openh264::encode_solid_frames(
             &output,
-            crate::recording_encode::EncoderProfile { width: 64, height: 48, bitrate: 400_000, fps_numer: 30, fps_denom: 1 },
+            crate::recording_encode::EncoderProfile {
+                width: 64,
+                height: 48,
+                bitrate: 400_000,
+                fps_numer: 30,
+                fps_denom: 1,
+            },
             3,
             0.1,
             [1, 2, 3, 255],
@@ -455,14 +567,20 @@ mod tests {
         let mut decoder = NativeMediaDecoder::new(DecodeBudget::default());
         let error = decoder
             .frame_at(
-                &MediaSource { resource_id: "clip".into(), path: output, content_type: "video/mp4".into() },
-                0.05
+                &MediaSource {
+                    resource_id: "clip".into(),
+                    path: output,
+                    content_type: "video/mp4".into(),
+                },
+                0.05,
             )
             .expect_err("truncated");
         assert!(
             matches!(
                 error.code,
-                "recording-media-sample-truncated" | "recording-media-sample-invalid" | "recording-media-not-mp4"
+                "recording-media-sample-truncated"
+                    | "recording-media-sample-invalid"
+                    | "recording-media-not-mp4"
             ),
             "unexpected code {}",
             error.code
@@ -475,14 +593,24 @@ mod tests {
         let output = dir.join("clip.mp4");
         crate::recording_openh264::encode_solid_frames(
             &output,
-            crate::recording_encode::EncoderProfile { width: 32, height: 32, bitrate: 300_000, fps_numer: 30, fps_denom: 1 },
+            crate::recording_encode::EncoderProfile {
+                width: 32,
+                height: 32,
+                bitrate: 300_000,
+                fps_numer: 30,
+                fps_denom: 1,
+            },
             2,
             0.06,
             [9, 9, 9, 255],
         )
         .expect("encode");
         let mut decoder = NativeMediaDecoder::new(DecodeBudget::default());
-        let source = MediaSource { resource_id: "clip".into(), path: output, content_type: "video/mp4".into() };
+        let source = MediaSource {
+            resource_id: "clip".into(),
+            path: output,
+            content_type: "video/mp4".into(),
+        };
         decoder.frame_at(&source, 0.0).expect("frame");
         assert_eq!(decoder.indexes.len(), 1);
         decoder.release("clip");

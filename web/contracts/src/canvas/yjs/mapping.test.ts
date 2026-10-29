@@ -1,3 +1,4 @@
+import { createFilmSetGroupMarker } from "../film-set-group.js";
 import { applyCanvasCommands } from "../../../../test-support/managed-shot-commands.js";
 /**
  * `ServerCanvas` ⇄ Y.Doc 映射测试（任务 2.1）。
@@ -214,8 +215,8 @@ describe("非法状态与格式闸门（任务 2.1）", () => {
 
 it("空模型与空片场在保存/同步/复制/撤销后不注入几何", () => {
   const canvas = normalize(ALL_FIXTURES[0].build());
-  const created = applyCanvasCommands(canvas, ["model3d", "composite-asset"].map(type => ({
-    type: "node.add" as const, node: { id: type, type, position: { x: 0, y: 0 } }, nodeData: defaultSelfContained3DNodeData(type),
+  const created = applyCanvasCommands(canvas, ["model3d", "group"].map(type => ({
+    type: "node.add" as const, node: { id: type, type, position: { x: 0, y: 0 } }, nodeData: type === "group" ? { filmSetGroup: createFilmSetGroupMarker() } : defaultSelfContained3DNodeData(type),
   })));
   expect(created.ok).toBe(true);
   if (!created.ok) return;
@@ -226,7 +227,8 @@ it("空模型与空片场在保存/同步/复制/撤销后不注入几何", () =
   expect(restored.ok).toBe(true);
   if (!restored.ok) return;
   expect(restored.canvas.nodeData.model3d.modelScript).toBe("");
-  expect(restored.canvas.nodeData["composite-asset"].filmSetContent).toMatchObject({ items: [] });
+  expect(restored.canvas.nodeData.group.filmSetGroup).toMatchObject({ sceneBindings: [] });
+  expect(restored.canvas.nodeData.group.filmSetContent).toBeUndefined();
   const copied = applyCanvasCommands(restored.canvas, [{ type: "node.add", node: { id: "copy", type: "model3d", position: { x: 300, y: 0 } }, nodeData: structuredClone(restored.canvas.nodeData.model3d) }]);
   expect(copied.ok).toBe(true);
   if (!copied.ok) return;

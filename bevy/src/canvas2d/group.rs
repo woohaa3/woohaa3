@@ -60,6 +60,9 @@ pub(crate) fn draw_group_panel(
     presentation: &GroupPresentation,
 ) -> Mesh {
     let mut geometry = Geometry::default();
+    if presentation.collapsed {
+        return geometry.build();
+    }
     let color = theme.token_u32("canvasNodeSurface");
     panel(&mut geometry, node, 0., color, GROUP_FILL_ALPHA);
     if presentation.drop_target {
@@ -108,7 +111,17 @@ pub(crate) fn draw_group(
     z: f32,
 ) -> (String, Vec2, f32, u32) {
     let (x, y, width, height) = (node.x, node.y, node.width, node.height);
-    if selected && node.resizable { super::cards::draw_resize_grip(geometry, theme, node, z + 0.03); }
+    if presentation.collapsed {
+        return (
+            String::new(),
+            Vec2::ZERO,
+            0.,
+            theme.token_u32("canvasBodyText"),
+        );
+    }
+    if selected && node.resizable {
+        super::cards::draw_resize_grip(geometry, theme, node, z + 0.03);
+    }
     // 选中态用更强的虚线框颜色表达，而不是铺一层不透明选中底：容器铺底会盖住成员
     // （change: fix-group-and-marquee-preview）。
     let border = if presentation.drop_target {
@@ -220,13 +233,7 @@ pub(crate) fn draw_run_status(
     });
     geometry.rounded_rect(x, y, width, height, 6., z + 0.03, background);
     if !active {
-        geometry.circle(
-            Vec2::new(x + 10., y + height / 2.),
-            3.,
-            z + 0.04,
-            color,
-            16,
-        );
+        geometry.circle(Vec2::new(x + 10., y + height / 2.), 3., z + 0.04, color, 16);
     }
     Some((
         format!("{} ›", status.label),
@@ -244,8 +251,8 @@ pub(crate) fn group_label_color(value: u32) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use bevy::mesh::VertexAttributeValues;
     use super::*;
+    use bevy::mesh::VertexAttributeValues;
 
     fn node(width: f32, height: f32) -> crate::protocol::GraphNode {
         crate::protocol::GraphNode {
@@ -304,6 +311,57 @@ mod tests {
         assert_eq!(label, "镜头发散 · 3 项");
         assert_eq!(position, Vec2::new(12.0, 8.0));
         assert_eq!(size, 12.0);
+    }
+
+    #[test]
+    fn collapsed_group_does_not_draw_small_group_bubble() {
+        let theme = ThemeResource::default();
+        let mut geometry = Geometry::default();
+        let (label, position, size, _color) = draw_group(
+            &mut geometry,
+            &theme,
+            &node(400.0, 300.0),
+            &GroupPresentation {
+                collapsed: true,
+                badge_scale: 1.,
+                badge_resizable: false,
+                title: "镜头发散".into(),
+                member_count: 3,
+                output_capable_leaf_count: 2,
+                model_bounds: None,
+                run_status: None,
+                drop_target: false,
+            },
+            false,
+            GROUP_Z,
+        );
+        assert_eq!(
+            geometry
+                .build()
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+                .unwrap()
+                .len(),
+            3
+        );
+        assert!(label.is_empty());
+        assert_eq!(position, Vec2::ZERO);
+        assert_eq!(size, 0.);
+        let panel = draw_group_panel(
+            &theme,
+            &node(400.0, 300.0),
+            &GroupPresentation {
+                collapsed: true,
+                badge_scale: 1.,
+                badge_resizable: false,
+                title: String::new(),
+                member_count: 3,
+                output_capable_leaf_count: 0,
+                model_bounds: None,
+                run_status: None,
+                drop_target: false,
+            },
+        );
+        assert_eq!(panel.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len(), 3);
     }
 
     #[test]
@@ -384,7 +442,9 @@ mod tests {
                 drop_target: false,
             },
         );
-        let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
             panic!("ordinary groups need a transparent background panel");
         };
         // 圆角矩形的顶点只落在四段圆角弧上，因此不能断言「中间有顶点」；要断言它铺满整个组矩形。
@@ -392,9 +452,15 @@ mod tests {
         let max_x = points.iter().map(|point| point[0]).fold(f32::MIN, f32::max);
         let min_y = points.iter().map(|point| point[1]).fold(f32::MAX, f32::min);
         let max_y = points.iter().map(|point| point[1]).fold(f32::MIN, f32::max);
-        assert!((min_x - 0.).abs() < 0.01 && (max_x - 400.).abs() < 0.01, "panel must span the group width");
+        assert!(
+            (min_x - 0.).abs() < 0.01 && (max_x - 400.).abs() < 0.01,
+            "panel must span the group width"
+        );
         // 画布 y 轴向上、顶点写入时取反，因此组矩形映射为 [-height, 0]。
-        assert!((min_y + 300.).abs() < 0.01 && max_y.abs() < 0.01, "panel must span the group height");
+        assert!(
+            (min_y + 300.).abs() < 0.01 && max_y.abs() < 0.01,
+            "panel must span the group height"
+        );
         assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
     }
 
@@ -434,11 +500,17 @@ mod tests {
         else {
             panic!("panel must carry vertex colors");
         };
-        assert!(colors.iter().all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6));
+        assert!(
+            colors
+                .iter()
+                .all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6)
+        );
         // canvasNodeSurface 是白色；canvasNodeContent 偏灰，会暴露成另一种背板色。
-        assert!(colors
-            .iter()
-            .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
+        assert!(
+            colors
+                .iter()
+                .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999)
+        );
     }
 
     /// 带模型组与无模型组的 2D 底色必须来自同一 token/alpha；3D 相机只画气泡尾巴，
@@ -455,10 +527,16 @@ mod tests {
             else {
                 panic!("panel must carry vertex colors");
             };
-            assert!(colors.iter().all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6));
-            assert!(colors
-                .iter()
-                .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999));
+            assert!(
+                colors
+                    .iter()
+                    .all(|color| (color[3] - GROUP_FILL_ALPHA).abs() < 1e-6)
+            );
+            assert!(
+                colors
+                    .iter()
+                    .all(|color| color[0] > 0.999 && color[1] > 0.999 && color[2] > 0.999)
+            );
         }
     }
 
@@ -466,12 +544,9 @@ mod tests {
     #[test]
     fn model_group_panel_keeps_full_body_backplate() {
         let node = model_group(500., 300.);
-        let mesh = draw_group_panel(
-            &ThemeResource::default(),
-            &node,
-            &panel_presentation(false),
-        );
-        let Some(VertexAttributeValues::Float32x3(points)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        let mesh = draw_group_panel(&ThemeResource::default(), &node, &panel_presentation(false));
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
             panic!("panel needs positions");
         };
@@ -519,9 +594,7 @@ mod tests {
                 };
                 let layout = crate::canvas_query::group_model::for_node(&node).unwrap();
                 let badge = crate::canvas_query::group_model::badge_rect(&node);
-                assert!(points
-                    .iter()
-                    .all(|p| -p[1] <= badge.y + badge.w + 1.));
+                assert!(points.iter().all(|p| -p[1] <= badge.y + badge.w + 1.));
                 assert!(
                     !points
                         .iter()

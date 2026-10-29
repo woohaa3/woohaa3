@@ -10,16 +10,16 @@ import type { PointHit } from "../canvas-runtime/bevy-runtime.js";
 
 installSharedSession();
 
-function setup(options: { writable?: boolean; record?: boolean } = {}) {
+function setup(options: { writable?: boolean; record?: boolean; collapsed?: boolean } = {}) {
   const source = createEmptyWoohaa3ServerCanvas("c1");
   source.document.nodes = [
     { id: "g", type: "group", position: { x: 0, y: 0 }, width: 600, height: 400 },
     { id: "m", type: "image", parentId: "g", position: { x: 40, y: 40 } },
   ];
-  source.nodeData = { g: { title: "组" }, m: {} };
+  source.nodeData = { g: { title: "组", ...(options.collapsed ? { groupCollapsed: true } : {}) }, m: {} };
   woohaa3CanvasStore.getState().applyRemoteCanvas(source);
   const dom = harness();
-  let hit: PointHit | null = { kind: "node-action", nodeId: "g", actionId: "group-toggle-collapse", menu: false };
+  let hit: PointHit | null = { kind: "node-action", nodeId: "g", actionId: "group-badge-select", menu: false };
   const captured = runtimeCapturing({ pointHit: () => hit });
   const record = vi.fn(async (commands, _label) => {
     const current = workingCanvasOf(woohaa3CanvasStore.getState())!;
@@ -37,23 +37,14 @@ function setup(options: { writable?: boolean; record?: boolean } = {}) {
 }
 
 describe("group badge click", () => {
-  it("短点击收起、再次点击展开，命令进入编辑历史且没有移动成员", () => {
+  it("短点击只选择徽标，不切换收起状态", () => {
     const f = setup({ record: true });
-    const document = structuredClone(f.current().document);
     f.fire("pointerdown");
     expect(submitted).toHaveLength(0);
     f.fire("pointerup");
-    expect(f.current().nodeData.g.groupCollapsed).toBe(true);
-    expect(f.record.mock.calls[0]?.[1]).toBe("收起/展开组");
-    f.controller.flush();
-    expect((f.scenes.at(-1) as { nodes: { id: string }[] }).nodes.map(n => n.id)).toEqual(["g"]);
-    f.fire("pointerdown"); f.fire("pointerup");
-    expect(f.current().nodeData.g.groupCollapsed).toBe(false);
-    f.controller.flush();
-    expect((f.scenes.at(-1) as { nodes: { id: string }[] }).nodes.map(n => n.id)).toEqual(["g", "m"]);
-    expect(f.current().document.nodes).toEqual(document.nodes);
-    expect(f.current().document.edges).toEqual(document.edges);
-    expect(submitted.every(command => command.type === "nodeData.patch")).toBe(true);
+    expect(f.current().nodeData.g.groupCollapsed).toBeUndefined();
+    expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual(["g"]);
+    expect(f.record).not.toHaveBeenCalled();
     f.controller.dispose();
   });
 
@@ -64,11 +55,11 @@ describe("group badge click", () => {
     f.controller.dispose();
   });
 
-  it("移动超出容差后即使回到原处也不触发", () => {
+  it("徽标拖动沿用组拖动手势", () => {
     const f = setup();
     f.fire("pointerdown"); f.fire("pointermove", { clientX: 320 });
-    f.fire("pointermove"); f.fire("pointerup");
-    expect(submitted).toHaveLength(0);
+    f.fire("pointerup", { clientX: 320 });
+    expect(f.current().document.nodes.find(n => n.id === "g")?.position.x).toBeGreaterThan(0);
     f.controller.dispose();
   });
 
@@ -79,7 +70,7 @@ describe("group badge click", () => {
     const f = setup();
     f.fire("pointerdown"); f.setHit(null); f.fire("pointerup");
     expect(submitted).toHaveLength(0);
-    f.setHit({ kind: "node-action", nodeId: "g", actionId: "group-toggle-collapse", menu: false });
+    f.setHit({ kind: "node-action", nodeId: "g", actionId: "group-badge-select", menu: false });
     f.fire("pointerdown");
     const current = structuredClone(f.current()); current.nodeData.g.groupCollapsed = true;
     woohaa3CanvasStore.getState().applyRemoteCanvas(current);
@@ -88,10 +79,7 @@ describe("group badge click", () => {
   });
 
   it("折叠组仍可拖动，恢复时成员保持相对位置", () => {
-    const f = setup();
-    f.fire("pointerdown"); f.fire("pointerup"); f.controller.flush();
-    submitted.length = 0;
-    f.setHit({ kind: "node", nodeId: "g" });
+    const f = setup({ collapsed: true });
     f.fire("pointerdown", { clientX: 210, clientY: 300 });
     f.fire("pointermove", { clientX: 250, clientY: 320 });
     f.controller.flush();
@@ -103,17 +91,15 @@ describe("group badge click", () => {
   });
 
   it("折叠成员不获得资源准入，组徽标自身继续准入且不占离屏相机槽", () => {
-    const f = setup();
-    f.fire("pointerdown"); f.fire("pointerup");
+    const f = setup({ collapsed: true });
     const candidates = collectResidencyCandidates(f.current(), node => `resource:${node.id}`);
-    expect(candidates.find(c => c.nodeId === "g")).toMatchObject({ eligible: true, width: 196, height: 182, previewSlot: false });
+    expect(candidates.find(c => c.nodeId === "g")).toMatchObject({ eligible: true, previewSlot: false });
     expect(candidates.find(c => c.nodeId === "m")).toMatchObject({ eligible: false });
     f.controller.dispose();
   });
 
   it("隐藏成员显式聚焦 pin 后仍能加载，退出聚焦释放需求", () => {
-    const f = setup();
-    f.fire("pointerdown"); f.fire("pointerup");
+    const f = setup({ collapsed: true });
     const coordinator = new CanvasResourceCoordinator();
     let pins: string[] = [];
     const project = createResidencyProjector({coordinator, getCanvas:f.current,

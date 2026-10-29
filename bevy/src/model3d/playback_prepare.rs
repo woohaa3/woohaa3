@@ -74,7 +74,8 @@ pub(super) fn prepare(
             let base = super::mesh::mesh_key(geometry);
             // 每几何有效档位：总览根的自定义 Mesh / Box 恒 High，与 spawn/quality 一致
             // （change: 2026-10-15-add-film-set-overview-lod，design D3）。
-            let effective = super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
+            let effective =
+                super::mesh::effective_quality(geometry, root.quality, root.overview_lod);
             let Some((mesh, geometry)) = models.shared.mesh(meshes, &base, geometry, effective)
             else {
                 return;

@@ -1,3 +1,4 @@
+import { isFilmSetGroupNode } from "@woohaa3/contracts";
 /**
  * 模型 MCP 服务：脚本提交与通用命令
  * （自 `service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R03）。
@@ -59,6 +60,7 @@ export async function submitScript(
   if (!exported.ok) return { ok: false, code: "canvas-unavailable", message: exported.message };
   const node = exported.canvas.document.nodes.find((entry) => entry.id === nodeId);
   if (!node) return { ok: false, code: "unknown-node", message: `节点 ${nodeId} 不存在` };
+  if (isFilmSetGroupNode(node, exported.canvas.nodeData[nodeId])) return { ok: false, code: "film-set-top-level-model", message: "请编辑片场引用的模型资源卡片" };
   if (!isModelAuthoringNodeType(node.type)) {
     return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是可提交模型脚本的节点` };
   }

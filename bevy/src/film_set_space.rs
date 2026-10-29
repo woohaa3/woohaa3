@@ -80,7 +80,8 @@ pub fn display_camera(display: Option<DisplayUnit>, camera: &SceneCamera) -> Opt
         ),
         None => (camera.focus_offset, camera.distance, camera.azimuth),
     };
-    if !focus_offset.is_finite() || !distance.is_finite() || distance <= 0.0 || !azimuth.is_finite() {
+    if !focus_offset.is_finite() || !distance.is_finite() || distance <= 0.0 || !azimuth.is_finite()
+    {
         return None;
     }
     Some(SceneCamera {

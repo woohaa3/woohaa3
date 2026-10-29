@@ -238,6 +238,7 @@ export type ContentRecordingRuntime = {
     /** 稳定的权威画布快照（扩展不自己读 Y.Doc）。 */
     canvas: {
       revision: number;
+      sourceCanvas?: import("./domain/types.js").ServerCanvas;
       assets: readonly { id: string; storageKey?: string; checksum?: string; contentType?: string; size?: number; metadata?: unknown }[];
       /** 已解码的节点数据（由宿主提供，避免扩展依赖画布内部实现）。 */
       nodeData: unknown;
@@ -263,5 +264,5 @@ export type ContentRecordingRuntime = {
     input: ContentRecordingCommitRequest & { sourcePosition?: { x: number; y: number; width: number } | null }
   ): Promise<ContentRecordingCommitPlan>;
   /** 该用途/节点的展示标题（活动浮层与文件名用）。 */
-  describe(input: { nodeData: unknown; clipId: string }): { title: string; duration: number; aspect: string };
+  describe(input: { nodeData: unknown; clipId: string; nodeId?: string; sourceCanvas?: import("./domain/types.js").ServerCanvas }): { title: string; duration: number; aspect: string };
 };

@@ -13,7 +13,10 @@ use super::components::{
     FocusComponent, ShotCameraAxis, ShotCameraDerived, ShotCameraEditable, ShotCameraLens,
     ShotCameraPose, ShotCameraTarget,
 };
-use super::edit_types::{begin_edit, cancel_edit, commit_edit, reset_pose, update_distance, update_elevation, update_focus, update_orbit, ShotEditEvent, ShotEditSessions};
+use super::edit_types::{
+    ShotEditEvent, ShotEditSessions, begin_edit, cancel_edit, commit_edit, reset_pose,
+    update_distance, update_elevation, update_focus, update_orbit,
+};
 use super::{ShotCameraEditCommitted, ShotCameraPreviewChanged};
 
 /// 一次编辑命令（与 DOM/PointerEvent/CanvasCommand 无关）。
@@ -103,13 +106,7 @@ pub(crate) fn apply_edit_commands(
                     .map(|bounds| bounds.radius().max(1e-4))
                     .unwrap_or(1.0);
                 let fit = super::framing::shot_fit_distance(span, lens.aspect);
-                sessions.upsert(begin_edit(
-                    entity,
-                    axis,
-                    focus_component,
-                    *pose,
-                    fit,
-                ));
+                sessions.upsert(begin_edit(entity, axis, focus_component, *pose, fit));
             }
             ShotEditCommand::UpdateOrbit {
                 delta_x,
@@ -152,13 +149,11 @@ pub(crate) fn apply_edit_commands(
                 let Some(session) = sessions.remove(entity) else {
                     continue;
                 };
-                if let Some(ShotEditEvent::Committed { camera, pose: next }) = commit_edit(&session) {
+                if let Some(ShotEditEvent::Committed { camera, pose: next }) = commit_edit(&session)
+                {
                     *pose = next;
                     mark_dirty(&mut derived, &mut preview_changed, camera);
-                    committed.write(ShotCameraEditCommitted {
-                        camera,
-                        pose: next,
-                    });
+                    committed.write(ShotCameraEditCommitted { camera, pose: next });
                 }
             }
             ShotEditCommand::Cancel => {
@@ -375,7 +370,8 @@ fn hit_elevation_semicircle(
         horizontal
     } else {
         let distance = (derived.position - derived.focus).length();
-        (crate::shot_camera::framing::shot_view_half_height(distance, derived.fov) * 0.5).max(0.1) * 1.15
+        (crate::shot_camera::framing::shot_view_half_height(distance, derived.fov) * 0.5).max(0.1)
+            * 1.15
     };
     let radial = if horizontal > 1e-3 {
         Vec3::new(delta.x / horizontal, 0.0, delta.z / horizontal)
@@ -385,11 +381,10 @@ fn hit_elevation_semicircle(
     let segments = 32;
     let mut previous: Option<Vec2> = None;
     for index in 0..=segments {
-        let angle = -std::f32::consts::FRAC_PI_2
-            + (index as f32 / segments as f32) * std::f32::consts::PI;
-        let point = derived.focus
-            + radial * (angle.cos() * radius)
-            + Vec3::Y * (angle.sin() * radius);
+        let angle =
+            -std::f32::consts::FRAC_PI_2 + (index as f32 / segments as f32) * std::f32::consts::PI;
+        let point =
+            derived.focus + radial * (angle.cos() * radius) + Vec3::Y * (angle.sin() * radius);
         let Some(screen) = project(point) else {
             previous = None;
             continue;

@@ -37,8 +37,11 @@ impl ShotCaptureRouting {
     /// 卡片 rig 截图额外 pin **归属片场**：临时离屏相机渲染的是该片场在该层上的模型与媒体，
     /// 片场若被降档/回收，成片就会缺内容（change: 2026-10-15，任务 8.4）。
     pub(crate) fn pins(&self, scene: &crate::protocol::Scene) -> std::collections::HashSet<String> {
-        let mut pins: std::collections::HashSet<String> =
-            self.pending.iter().map(|p| p.bridge.node_id.clone()).collect();
+        let mut pins: std::collections::HashSet<String> = self
+            .pending
+            .iter()
+            .map(|p| p.bridge.node_id.clone())
+            .collect();
         pins.extend(self.pending.iter().filter_map(|p| p.pin_owner.clone()));
         if let Some(node_id) = crate::bridge::queued_shot_capture_node() {
             pins.insert(node_id);
@@ -81,16 +84,26 @@ pub(crate) fn route_capture_request(
     // slot 中由后续帧继续等待（既有 capture 超时与公平调度负责收尾），**不在**同步请求内
     // 强制创建或阻塞等后台任务。
     if let Some(node) = bridge::queued_shot_capture_node() {
-        let owner = scene.0.nodes.iter().find(|entry| entry.id == node)
+        let owner = scene
+            .0
+            .nodes
+            .iter()
+            .find(|entry| entry.id == node)
             .and_then(|entry| entry.shot_preview.as_ref())
-            .map(|preview| preview.film_set_node_id.as_str()).unwrap_or(&node);
+            .map(|preview| preview.film_set_node_id.as_str())
+            .unwrap_or(&node);
         if capture_must_wait(&models, owner) {
             return;
         }
         // Preview requests pin the owner at High even outside the viewport. Wait for that
         // representation and its GPU readiness, rather than capturing the last LOD cover.
-        if owner != node && (models.quality(owner) != super::quality::Quality::High
-            || preview_cards.cards.get(&node).is_none_or(|card| !card.confirmed)) {
+        if owner != node
+            && (models.quality(owner) != super::quality::Quality::High
+                || preview_cards
+                    .cards
+                    .get(&node)
+                    .is_none_or(|card| !card.confirmed))
+        {
             return;
         }
     }
@@ -102,7 +115,9 @@ pub(crate) fn route_capture_request(
             request_id: request.request_id,
             rig_generation: 0,
             bridge_generation: request.bridge_generation,
-            outcome: ShotCaptureBridgeOutcome::Failed { code: code.to_owned() },
+            outcome: ShotCaptureBridgeOutcome::Failed {
+                code: code.to_owned(),
+            },
         });
     };
     let adapter_rig = adapter
@@ -128,8 +143,12 @@ pub(crate) fn route_capture_request(
         &mut queue,
         &mut results,
         rig,
-        request.width.clamp(1, crate::shot_camera::MAX_CAPTURE_DIMENSION),
-        request.height.clamp(1, crate::shot_camera::MAX_CAPTURE_DIMENSION),
+        request
+            .width
+            .clamp(1, crate::shot_camera::MAX_CAPTURE_DIMENSION),
+        request
+            .height
+            .clamp(1, crate::shot_camera::MAX_CAPTURE_DIMENSION),
         rig_generation,
     );
     match outcome {
@@ -229,9 +248,12 @@ mod preparation_gate_tests {
             super::super::batch_strategy::BatchStrategy::Spatial,
             true,
         );
-        visuals
-            .preparation
-            .demand("film", key, snapshot, super::super::preparation::Priority::Visible);
+        visuals.preparation.demand(
+            "film",
+            key,
+            snapshot,
+            super::super::preparation::Priority::Visible,
+        );
         assert!(
             capture_must_wait(&visuals, "film"),
             "准备中不得把半场当结果"

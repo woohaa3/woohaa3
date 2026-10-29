@@ -14,12 +14,12 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
-use openh264::encoder::{Encoder, EncoderConfig, FrameType, Level};
 use crate::recording_encode::{
-    ArtifactFile, EncodedArtifact, EncodeFailure, EncodeStage, EncoderFrame, EncoderProfile,
+    ArtifactFile, EncodeFailure, EncodeStage, EncodedArtifact, EncoderFrame, EncoderProfile,
     MAX_ARTIFACT_BYTES, VideoEncoder, rgba_to_yuv420, sha256_hex, verify_mp4,
 };
 use crate::recording_mux::{EncodedSample, MuxOptions, append_sample, write_mp4};
+use openh264::encoder::{Encoder, EncoderConfig, FrameType, Level};
 
 /// 媒体时基（90 kHz，MPEG 标准）。见 `timescale` 的说明。
 pub const MEDIA_TIMESCALE: u32 = 90_000;
@@ -106,21 +106,37 @@ impl OpenH264Encoder {
             ));
         let encoder = Encoder::with_api_config(openh264::OpenH264API::from_source(), config)
             .map_err(|error| {
-                EncodeFailure::new(EncodeStage::Encode, "recording-encoder-unavailable", error.to_string())
+                EncodeFailure::new(
+                    EncodeStage::Encode,
+                    "recording-encoder-unavailable",
+                    error.to_string(),
+                )
             })?;
 
         if let Some(parent) = options.output.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
-                EncodeFailure::new(EncodeStage::Mux, "recording-artifact-directory-failed", error.to_string())
+                EncodeFailure::new(
+                    EncodeStage::Mux,
+                    "recording-artifact-directory-failed",
+                    error.to_string(),
+                )
             })?;
         }
         if let Some(parent) = options.spool.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
-                EncodeFailure::new(EncodeStage::Mux, "recording-artifact-directory-failed", error.to_string())
+                EncodeFailure::new(
+                    EncodeStage::Mux,
+                    "recording-artifact-directory-failed",
+                    error.to_string(),
+                )
             })?;
         }
         let spool_file = File::create(&options.spool).map_err(|error| {
-            EncodeFailure::new(EncodeStage::Mux, "recording-artifact-create-failed", error.to_string())
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-create-failed",
+                error.to_string(),
+            )
         })?;
         let artifact = ArtifactFile::create(
             options.output.parent().unwrap_or(Path::new(".")),
@@ -173,7 +189,9 @@ impl OpenH264Encoder {
         } else {
             return;
         };
-        let Some(&header) = nal.get(header_index) else { return };
+        let Some(&header) = nal.get(header_index) else {
+            return;
+        };
         let nal_type = header & 0x1f;
         // avcC 里的 `sequenceParameterSetNALUnit` 是**完整 NAL 单元**（含 NAL 头），
         // 但不含起始码；这里保留头部字节，否则解码器读到的是残缺 bitstream。
@@ -189,7 +207,10 @@ impl OpenH264Encoder {
 
     /// NAL 头是否为 SPS(7)/PPS(8)。
     fn is_parameter_set(nal_payload: &[u8]) -> bool {
-        matches!(nal_payload.first().map(|header| header & 0x1f), Some(7) | Some(8))
+        matches!(
+            nal_payload.first().map(|header| header & 0x1f),
+            Some(7) | Some(8)
+        )
     }
 
     /// 把 Annex-B NAL 拆成 AVCC 形式（去起始码），返回纯负载。
@@ -213,9 +234,8 @@ pub fn h264_level(profile: &EncoderProfile) -> Level {
     } else {
         f64::from(profile.fps_numer) / f64::from(profile.fps_denom)
     };
-    let mb_rate = f64::from(profile.width.div_ceil(16))
-        * f64::from(profile.height.div_ceil(16))
-        * fps;
+    let mb_rate =
+        f64::from(profile.width.div_ceil(16)) * f64::from(profile.height.div_ceil(16)) * fps;
     if mb_rate <= 108_000.0 {
         Level::Level_3_1
     } else if mb_rate <= 245_760.0 {
@@ -233,7 +253,11 @@ fn default_keyframe_interval(profile: &EncoderProfile) -> u32 {
 impl VideoEncoder for OpenH264Encoder {
     fn push(&mut self, frame: EncoderFrame) -> Result<(), EncodeFailure> {
         if self.cancelled {
-            return Err(EncodeFailure::new(EncodeStage::Encode, "recording-cancelled", "编码已取消"));
+            return Err(EncodeFailure::new(
+                EncodeStage::Encode,
+                "recording-cancelled",
+                "编码已取消",
+            ));
         }
         let profile = &self.options.profile;
         if frame.width != profile.width || frame.height != profile.height {
@@ -255,12 +279,21 @@ impl VideoEncoder for OpenH264Encoder {
         })?;
         // 直接以切片形式交给 OpenH264：三平面连续、stride 等于宽度。
         let dimensions = (frame.width as usize, frame.height as usize);
-        let strides = (frame.width as usize, (frame.width / 2) as usize, (frame.width / 2) as usize);
-        let slices = openh264::formats::YUVSlices::new((&yuv.y, &yuv.u, &yuv.v), dimensions, strides);
+        let strides = (
+            frame.width as usize,
+            (frame.width / 2) as usize,
+            (frame.width / 2) as usize,
+        );
+        let slices =
+            openh264::formats::YUVSlices::new((&yuv.y, &yuv.u, &yuv.v), dimensions, strides);
 
         let bitstream = self.encoder.encode(&slices).map_err(|error| {
-            EncodeFailure::new(EncodeStage::Encode, "recording-encode-failed", error.to_string())
-                .transient()
+            EncodeFailure::new(
+                EncodeStage::Encode,
+                "recording-encode-failed",
+                error.to_string(),
+            )
+            .transient()
         })?;
         let frame_type = bitstream.frame_type();
         if matches!(frame_type, FrameType::Invalid | FrameType::Skip) {
@@ -278,9 +311,13 @@ impl VideoEncoder for OpenH264Encoder {
         let mut parameter_sets: Vec<Vec<u8>> = Vec::new();
         let mut video_nals: Vec<Vec<u8>> = Vec::new();
         for layer_index in 0..bitstream.num_layers() {
-            let Some(layer) = bitstream.layer(layer_index) else { continue };
+            let Some(layer) = bitstream.layer(layer_index) else {
+                continue;
+            };
             for nal_index in 0..layer.nal_count() {
-                let Some(raw) = layer.nal_unit(nal_index) else { continue };
+                let Some(raw) = layer.nal_unit(nal_index) else {
+                    continue;
+                };
                 if layer.is_video() {
                     video_nals.push(raw.to_vec());
                 } else {
@@ -326,7 +363,8 @@ impl VideoEncoder for OpenH264Encoder {
         // PTS 由调用方给定，按 timescale 换算；用累计 elapsed 消除浮点漂移。
         // PTS/时长都按 90 kHz 换算；末帧的分数时长（如 1/60 秒 = 1500 单位）是精确值。
         let pts = (frame.pts_seconds.max(0.0) * f64::from(self.timescale)).round() as u64;
-        let duration_units = (frame.duration_seconds.max(0.0) * f64::from(self.timescale)).round() as u64;
+        let duration_units =
+            (frame.duration_seconds.max(0.0) * f64::from(self.timescale)).round() as u64;
         self.samples.push(EncodedSample {
             pts,
             duration: duration_units.max(if self.pushed_frames == 0 { 1 } else { 0 }),
@@ -340,10 +378,18 @@ impl VideoEncoder for OpenH264Encoder {
 
     fn finish(&mut self) -> Result<EncodedArtifact, EncodeFailure> {
         if self.cancelled {
-            return Err(EncodeFailure::new(EncodeStage::Encode, "recording-cancelled", "编码已取消"));
+            return Err(EncodeFailure::new(
+                EncodeStage::Encode,
+                "recording-cancelled",
+                "编码已取消",
+            ));
         }
         if self.samples.is_empty() {
-            return Err(EncodeFailure::new(EncodeStage::Mux, "recording-artifact-empty", "没有已编码的帧"));
+            return Err(EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-empty",
+                "没有已编码的帧",
+            ));
         }
         if self.sps.is_empty() || self.pps.is_empty() {
             return Err(EncodeFailure::new(
@@ -372,9 +418,13 @@ impl VideoEncoder for OpenH264Encoder {
                 ),
             ));
         }
-        self.spool
-            .flush()
-            .map_err(|error| EncodeFailure::new(EncodeStage::Mux, "recording-artifact-write-failed", error.to_string()))?;
+        self.spool.flush().map_err(|error| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-write-failed",
+                error.to_string(),
+            )
+        })?;
 
         let mux_options = MuxOptions {
             width: self.options.profile.width,
@@ -398,12 +448,13 @@ impl VideoEncoder for OpenH264Encoder {
             ));
         }
         let _ = std::fs::remove_file(&self.options.spool);
-        let artifact = self
-            .artifact
-            .take()
-            .ok_or_else(|| {
-                EncodeFailure::new(EncodeStage::Mux, "recording-artifact-missing", "临时产物已释放")
-            })?;
+        let artifact = self.artifact.take().ok_or_else(|| {
+            EncodeFailure::new(
+                EncodeStage::Mux,
+                "recording-artifact-missing",
+                "临时产物已释放",
+            )
+        })?;
         let path = artifact.keep();
         Ok(EncodedArtifact {
             path,
@@ -498,22 +549,46 @@ mod tests {
     fn h264_level_covers_1080p60_and_keeps_720p30_low() {
         // 720p30：80 × 45 × 30 = 108 000 → Level 3.1
         assert!(matches!(
-            h264_level(&EncoderProfile { width: 1280, height: 720, bitrate: 4_000_000, fps_numer: 30, fps_denom: 1 }),
+            h264_level(&EncoderProfile {
+                width: 1280,
+                height: 720,
+                bitrate: 4_000_000,
+                fps_numer: 30,
+                fps_denom: 1
+            }),
             Level::Level_3_1
         ));
         // 1080p30：120 × 68 × 30 = 244 800 → Level 4.0
         assert!(matches!(
-            h264_level(&EncoderProfile { width: 1920, height: 1080, bitrate: 8_000_000, fps_numer: 30, fps_denom: 1 }),
+            h264_level(&EncoderProfile {
+                width: 1920,
+                height: 1080,
+                bitrate: 8_000_000,
+                fps_numer: 30,
+                fps_denom: 1
+            }),
             Level::Level_4_0
         ));
         // 1080p60：489 600 → 必须 Level 4.2（D7）。
         assert!(matches!(
-            h264_level(&EncoderProfile { width: 1920, height: 1080, bitrate: 12_000_000, fps_numer: 60, fps_denom: 1 }),
+            h264_level(&EncoderProfile {
+                width: 1920,
+                height: 1080,
+                bitrate: 12_000_000,
+                fps_numer: 60,
+                fps_denom: 1
+            }),
             Level::Level_4_2
         ));
         // 竖屏 1080x1920@60 同样需要 4.2。
         assert!(matches!(
-            h264_level(&EncoderProfile { width: 1080, height: 1920, bitrate: 12_000_000, fps_numer: 60, fps_denom: 1 }),
+            h264_level(&EncoderProfile {
+                width: 1080,
+                height: 1920,
+                bitrate: 12_000_000,
+                fps_numer: 60,
+                fps_denom: 1
+            }),
             Level::Level_4_2
         ));
     }
@@ -522,8 +597,8 @@ mod tests {
     fn encodes_real_h264_mp4_with_fast_start() {
         let dir = temp_dir("solid");
         let output = dir.join("solid.mp4");
-        let artifact = encode_solid_frames(&output, profile(), 12, 0.4, [200, 40, 40, 255])
-            .expect("encode");
+        let artifact =
+            encode_solid_frames(&output, profile(), 12, 0.4, [200, 40, 40, 255]).expect("encode");
         assert_eq!(artifact.frame_count, 12);
         assert_eq!(artifact.width, 64);
         assert_eq!(artifact.height, 48);
@@ -587,7 +662,10 @@ mod tests {
                     use openh264::formats::YUVSource;
                     assert_eq!(image.dimensions(), (64, 48));
                     // 采样像素应与输入的红块一致（Y 平面中段非黑）。
-                    assert!(image.y().iter().any(|value| *value > 32), "解码结果不应是全黑");
+                    assert!(
+                        image.y().iter().any(|value| *value > 32),
+                        "解码结果不应是全黑"
+                    );
                     decoded_frames += 1;
                 }
                 Ok(None) | Err(_) => {}
@@ -645,7 +723,10 @@ mod tests {
             .expect("push");
         encoder.cancel().expect("cancel");
         assert!(!output.exists(), "取消后不得留下成片");
-        assert!(!dir.join("cancelled.spool").exists(), "取消后不得留下 spool");
+        assert!(
+            !dir.join("cancelled.spool").exists(),
+            "取消后不得留下 spool"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

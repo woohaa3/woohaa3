@@ -84,7 +84,11 @@ pub(crate) fn sync(
         .0
         .nodes
         .iter()
-        .filter(|node| group_model::has_badge(node) && scene.0.model_focus.is_none())
+        .filter(|node| {
+            group_model::has_badge(node)
+                && !node.group.as_ref().is_some_and(|group| group.collapsed)
+                && scene.0.model_focus.is_none()
+        })
         .collect();
     let ids: HashSet<_> = nodes.iter().map(|node| node.id.as_str()).collect();
     state.entries.retain(|id, surface| {

@@ -1,3 +1,6 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
+import { createFilmSetGroupMarker } from "./film-set-group.js";
 import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 拍摄镜头预览闭包的**全部权威写入口**回归测试
@@ -36,7 +39,7 @@ function reject(canvas: ServerCanvas, commands: unknown[]) {
 }
 
 function animation(canvas: ServerCanvas): FilmSetNodeData {
-  const decoded = decodeFilmSetNodeData(canvas.nodeData.film);
+  const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
   if (!decoded.ok) throw new Error(decoded.reason);
   return decoded.value;
 }
@@ -58,7 +61,7 @@ function staticClip(id: string, name: string): FilmSetAnimationClip {
 }
 
 function clipPatch(canvas: ServerCanvas, op: FilmSetClipPatchOp, clipId = CLIP_1) {
-  const decoded = decodeFilmSetNodeData(canvas.nodeData.film);
+  const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(canvas, "film")!));
   if (!decoded.ok) throw new Error(decoded.reason);
   return {
     type: "filmSet.clipPatch",
@@ -79,7 +82,7 @@ function withFilmSet(): ServerCanvas {
     timeline: { duration: 5, loop: false }
   });
   canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
-  return apply(canvas, []);
+  return apply(migrateFilmSetFixture(canvas, "film"), []);
 }
 
 describe("完整历史恢复（任务 2.6）", () => {
@@ -91,9 +94,9 @@ describe("完整历史恢复（任务 2.6）", () => {
     const customLayout = preview(custom, PREVIEW_1)!;
 
     // 历史版本：clip-1 改名，clip-2 仍存在。
-    const history = animation(custom);
-    history.filmSetAnimations!.clips.find((clip) => clip.id === CLIP_1)!.name = "历史名称";
-    const restoreValue = canonicalFilmSetFields(history);
+    const history = structuredClone(custom.nodeData.film.filmSetGroup!);
+    history.clips!.find(clip => clip.id === CLIP_1)!.name = "历史名称";
+    const restoreValue = { filmSetGroup: history };
 
     // 后来删除了 clip-2。
     const deleted = apply(custom, [clipPatch(custom, { kind: "delete" }, CLIP_2)]);
@@ -114,8 +117,7 @@ describe("完整历史恢复（任务 2.6）", () => {
   it("恢复旧版本时消失镜头的预览连同归属数据一同清理", () => {
     const base = withFilmSet();
     const twoClips = apply(base, [clipPatch(base, { kind: "create", clip: staticClip(CLIP_2, "第二镜头") }, CLIP_2)]);
-    const older = animation(base);
-    const restoreValue = canonicalFilmSetFields(older);
+    const restoreValue = { filmSetGroup: structuredClone(base.nodeData.film.filmSetGroup!) };
     const restored = apply(twoClips, [{ type: "nodeData.patch", nodeId: "film", value: restoreValue }]);
     expect(preview(restored, PREVIEW_2)).toBeUndefined();
     expect(restored.nodeData[PREVIEW_2]).toBeUndefined();
@@ -126,11 +128,11 @@ describe("完整历史恢复（任务 2.6）", () => {
 describe("转换占位成功写回（任务 2.6）", () => {
   it("占位片场无镜头无预览；成功写回完整定义后同批建立预览闭包", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("c1", NOW);
-    const placeholder = createFilmSetSnapshot({ title: "转换中", timeline: { duration: 0, loop: false } });
+    const placeholder = { title: "转换中", filmSetGroup: createFilmSetGroupMarker() };
     const created = apply(canvas, [{
       type: "node.add",
-      node: { id: "film", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 }, width: 320, height: 240 },
-      nodeData: canonicalFilmSetFields(placeholder)
+      node: { id: "film", type: "group", position: { x: 0, y: 0 }, width: 320, height: 240 },
+      nodeData: placeholder
     }]);
     expect(created.document.nodes.filter((node) => managedNodeRelationOf(created.nodeData[node.id])?.extensionId === "film-set")).toHaveLength(0);
 
@@ -143,7 +145,11 @@ describe("转换占位成功写回（任务 2.6）", () => {
     });
     const collection = full.filmSetAnimations!;
     collection.clips.push({ ...structuredClone(collection.clips[0]!), id: CLIP_2, name: "第二镜头" });
-    const patched = apply(created, [{ type: "nodeData.patch", nodeId: "film", value: canonicalFilmSetFields({ ...full, filmSetAnimations: collection }) }]);
+    const converted = migratedDefinition(full);
+    const patched = apply(created, [
+      ...converted.document.nodes.filter(node => node.id !== "film").map(node => ({ type: "node.add", node, nodeData: converted.nodeData[node.id] })),
+      { type: "nodeData.patch", nodeId: "film", value: { filmSetGroup: converted.nodeData.film.filmSetGroup } }
+    ]);
     expect(preview(patched, PREVIEW_1)).toBeDefined();
     expect(preview(patched, PREVIEW_2)).toBeDefined();
   });
@@ -162,10 +168,8 @@ describe("片场粘贴/导入批次（任务 2.6）", () => {
     remapped.filmSetAnimations!.clips[0]!.id = "clip-pasted";
     remapped.filmSetAnimations!.defaultClipId = "clip-pasted";
 
-    const pasted = apply(canvas, [
-      { type: "node.add", node: { id: "film", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 200, y: 120 }, width: 320, height: 240 } },
-      { type: "nodeData.patch", nodeId: "film", value: canonicalFilmSetFields(remapped) }
-    ]);
+    const converted = migratedDefinition(remapped);
+    const pasted = apply(canvas, converted.document.nodes.slice().sort((a, b) => Number(b.id === "film") - Number(a.id === "film")).map(node => ({ type: "node.add", node, nodeData: converted.nodeData[node.id] })));
     const pastedPreview = preview(pasted, shotPreviewNodeId("film", "clip-pasted"));
     expect(pastedPreview).toBeDefined();
     const ownership = pastedPreview ? pasted.nodeData[pastedPreview.id] : undefined;
@@ -183,3 +187,10 @@ describe("片场粘贴/导入批次（任务 2.6）", () => {
     if (!result.ok) expect(result.rejection.code).toBe("invalid-shot-preview");
   });
 });
+
+function migratedDefinition(animation: FilmSetNodeData): ServerCanvas {
+  const canvas = createEmptyWoohaa3ServerCanvas("c1", NOW);
+  canvas.document.nodes.push({ id: "film", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 200, y: 120 }, width: 320, height: 240 });
+  canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
+  return migrateFilmSetFixture(canvas, "film");
+}

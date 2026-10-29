@@ -14,8 +14,8 @@
 use std::path::{Path, PathBuf};
 
 use woohaa_bevy_canvas::recording_barrier::BarrierBudget;
-use woohaa_bevy_canvas::recording_encode::{EncoderProfile, verify_mp4, sha256_hex};
-use woohaa_bevy_canvas::recording_job::{run_job, JobOutcome, RecordingJobInput};
+use woohaa_bevy_canvas::recording_encode::{EncoderProfile, sha256_hex, verify_mp4};
+use woohaa_bevy_canvas::recording_job::{JobOutcome, RecordingJobInput, run_job};
 use woohaa_bevy_canvas::recording_media::{DecodeBudget, MediaDecoder, MediaSource, PlaybackMap};
 use woohaa_bevy_canvas::recording_media_native::NativeMediaDecoder;
 use woohaa_bevy_canvas::recording_openh264::{OpenH264Encoder, OpenH264EncoderOptions};
@@ -52,7 +52,13 @@ fn write_transparent_png(path: &Path, width: u32, height: u32) {
 fn write_video(path: &Path, width: u32, height: u32, frames: u32, colour: [u8; 4]) {
     woohaa_bevy_canvas::recording_openh264::encode_solid_frames(
         path,
-        EncoderProfile { width, height, bitrate: 400_000, fps_numer: 30, fps_denom: 1 },
+        EncoderProfile {
+            width,
+            height,
+            bitrate: 400_000,
+            fps_numer: 30,
+            fps_denom: 1,
+        },
         frames,
         frames as f32 / 30.0,
         colour,
@@ -104,7 +110,10 @@ fn scene_json() -> String {
 }
 
 fn adapter_is_software() -> bool {
-    matches!(std::env::var("WOOHAA3_GPU_SOFTWARE").ok().as_deref(), Some("1") | Some("true"))
+    matches!(
+        std::env::var("WOOHAA3_GPU_SOFTWARE").ok().as_deref(),
+        Some("1") | Some("true")
+    )
 }
 
 #[test]
@@ -162,16 +171,31 @@ fn records_multi_media_non_integer_duration_on_real_gpu() {
         path: transparent.clone(),
         content_type: "image/png".into(),
     };
-    let image_frame = decoder.frame_at(&image_source, 0.0).expect("transparent image");
-    let transparent_pixels = image_frame.rgba.chunks_exact(4).filter(|pixel| pixel[3] == 0).count();
-    assert!(transparent_pixels > 0, "透明像素的 alpha 必须保留（不能被填成不透明）");
+    let image_frame = decoder
+        .frame_at(&image_source, 0.0)
+        .expect("transparent image");
+    let transparent_pixels = image_frame
+        .rgba
+        .chunks_exact(4)
+        .filter(|pixel| pixel[3] == 0)
+        .count();
+    assert!(
+        transparent_pixels > 0,
+        "透明像素的 alpha 必须保留（不能被填成不透明）"
+    );
 
     let video_source = MediaSource {
         resource_id: "clip:short-video".into(),
         path: short_clip.clone(),
         content_type: "video/mp4".into(),
     };
-    let mapped = PlaybackMap { start_time: 0.4, duration: 0.8, time_scale: 1.5, looped: false, media_duration: 0.8 };
+    let mapped = PlaybackMap {
+        start_time: 0.4,
+        duration: 0.8,
+        time_scale: 1.5,
+        looped: false,
+        media_duration: 0.8,
+    };
     // T=1.0 → u = (1.0-0.4)*1.5 = 0.9 → clamp 到 0.8（尾帧保持）。
     let held = woohaa_bevy_canvas::recording_media::sample_media(
         &mut decoder,
@@ -181,36 +205,42 @@ fn records_multi_media_non_integer_duration_on_real_gpu() {
         1.0,
     )
     .expect("held tail frame");
-    assert!(held.pts_seconds <= 0.8 + 1e-6, "短视频超过自身时长后保持尾帧");
-    assert!(held.rgba.iter().any(|value| *value > 0), "尾帧必须有真实像素");
+    assert!(
+        held.pts_seconds <= 0.8 + 1e-6,
+        "短视频超过自身时长后保持尾帧"
+    );
+    assert!(
+        held.rgba.iter().any(|value| *value > 0),
+        "尾帧必须有真实像素"
+    );
 
     // 渲染 + 编码：把已解码的媒体帧挂到计划上（不依赖宿主资源流，直接注入）。
-    let mut plan = prepare_render_plan(
-        &scene_json(),
-        &motion_json(duration),
-        320,
-        180,
-        "#101418",
-    )
-    .expect("render plan");
-    plan.media_playback.push(woohaa_bevy_canvas::recording_probe_gpu::RecordingMediaPlayback {
-        resource_id: "clip:transparent-image".into(),
-        start_time: 0.0,
-        time_scale: 1.0,
-        looped: false,
-        end_time: 0.0,
-        media_duration: 0.0,
-    });
-    plan.media_content_types.insert("clip:transparent-image".into(), "image/png".into());
-    plan.media_playback.push(woohaa_bevy_canvas::recording_probe_gpu::RecordingMediaPlayback {
-        resource_id: "clip:short-video".into(),
-        start_time: 0.4,
-        time_scale: 1.5,
-        looped: false,
-        end_time: 0.8,
-        media_duration: 0.8,
-    });
-    plan.media_content_types.insert("clip:short-video".into(), "video/mp4".into());
+    let mut plan = prepare_render_plan(&scene_json(), &motion_json(duration), 320, 180, "#101418")
+        .expect("render plan");
+    plan.media_playback.push(
+        woohaa_bevy_canvas::recording_probe_gpu::RecordingMediaPlayback {
+            resource_id: "clip:transparent-image".into(),
+            start_time: 0.0,
+            time_scale: 1.0,
+            looped: false,
+            end_time: 0.0,
+            media_duration: 0.0,
+        },
+    );
+    plan.media_content_types
+        .insert("clip:transparent-image".into(), "image/png".into());
+    plan.media_playback.push(
+        woohaa_bevy_canvas::recording_probe_gpu::RecordingMediaPlayback {
+            resource_id: "clip:short-video".into(),
+            start_time: 0.4,
+            time_scale: 1.5,
+            looped: false,
+            end_time: 0.8,
+            media_duration: 0.8,
+        },
+    );
+    plan.media_content_types
+        .insert("clip:short-video".into(), "video/mp4".into());
 
     let mut probe = GpuFrameProbe::new(plan).expect("gpu probe");
     // 资源接收：把 fixture 落到 worker 期望的文件名，再走真实 adopt 路径。
@@ -243,14 +273,36 @@ fn records_multi_media_non_integer_duration_on_real_gpu() {
     let mut encoder = OpenH264Encoder::create(OpenH264EncoderOptions {
         output: output.clone(),
         spool: dir.join("e2e-multi-media.spool"),
-        profile: EncoderProfile { width: 320, height: 180, bitrate: 1_500_000, fps_numer: 30, fps_denom: 1 },
+        profile: EncoderProfile {
+            width: 320,
+            height: 180,
+            bitrate: 1_500_000,
+            fps_numer: 30,
+            fps_denom: 1,
+        },
         keyframe_interval_frames: None,
     })
     .expect("encoder");
 
-    let outcome = run_job(&job, &mut probe, &mut encoder, &|| false, BarrierBudget::default());
+    let outcome = run_job(
+        &job,
+        &mut probe,
+        &mut encoder,
+        &|| false,
+        BarrierBudget::default(),
+    );
     match outcome {
-        JobOutcome::Completed { artifact_path, size_bytes, frame_count, duration_numer, duration_denom, width, height, content_sha256, .. } => {
+        JobOutcome::Completed {
+            artifact_path,
+            size_bytes,
+            frame_count,
+            duration_numer,
+            duration_denom,
+            width,
+            height,
+            content_sha256,
+            ..
+        } => {
             eprintln!(
                 "e2e: {artifact_path:?} size={size_bytes} frames={frame_count} {width}x{height} duration={duration_numer}/{duration_denom}"
             );
@@ -303,8 +355,16 @@ fn records_multi_media_non_integer_duration_on_real_gpu() {
             )
             .expect("write probe");
         }
-        JobOutcome::Failed { stage, code, message, frame_index, sample_time } => {
-            panic!("e2e 录制失败：{stage} {code} {message} frame={frame_index:?} t={sample_time:?}");
+        JobOutcome::Failed {
+            stage,
+            code,
+            message,
+            frame_index,
+            sample_time,
+        } => {
+            panic!(
+                "e2e 录制失败：{stage} {code} {message} frame={frame_index:?} t={sample_time:?}"
+            );
         }
         JobOutcome::Cancelled { .. } => panic!("e2e 录制被取消"),
     }
@@ -319,8 +379,12 @@ fn submit_payload_rejects_unknown_resource_type() {
     let mut decoder = NativeMediaDecoder::new(DecodeBudget::default());
     let error = decoder
         .frame_at(
-            &MediaSource { resource_id: "x".into(), path: bogus, content_type: "video/webm".into() },
-            0.0
+            &MediaSource {
+                resource_id: "x".into(),
+                path: bogus,
+                content_type: "video/webm".into(),
+            },
+            0.0,
         )
         .expect_err("unsupported");
     assert_eq!(error.code, "recording-media-unsupported");

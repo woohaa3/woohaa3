@@ -25,8 +25,8 @@ fn scene(nodes: Vec<GraphNode>, edges: Vec<Edge>) -> Scene {
     }
 }
 
-mod group_model;
 mod film_set;
+mod group_model;
 mod node_action;
 mod spatial;
 
@@ -62,8 +62,8 @@ fn group(id: &str, x: f32, y: f32, w: f32, h: f32, leaves: u32) -> GraphNode {
     GraphNode {
         group: Some(GroupPresentation {
             collapsed: false,
-                badge_scale: 1.,
-                badge_resizable: false,
+            badge_scale: 1.,
+            badge_resizable: false,
             title: String::new(),
             member_count: 1,
             output_capable_leaf_count: leaves,
@@ -483,7 +483,8 @@ fn scope_geometry_query_returns_parallelogram_vertices_and_base() {
     assert!((entry.vertices[1][0] - right_x).abs() < 1e-3);
     assert!((entry.vertices[1][1] - right_y).abs() < 1e-3);
     assert!((entry.aabb[0] - blank_x).abs() < 1e-3);
-    let axis_ratio = crate::isometric_grid::plan::scope_axis_x() / crate::isometric_grid::plan::scope_axis_y();
+    let axis_ratio =
+        crate::isometric_grid::plan::scope_axis_x() / crate::isometric_grid::plan::scope_axis_y();
     assert!((entry.aabb[2] / entry.aabb[3] - axis_ratio).abs() < 1e-3);
     // 基准矩形是内容 fit 矩形，不是 AABB。
     assert_eq!(entry.base, [0.0, 0.0, 260.0, 195.0]);
@@ -811,14 +812,31 @@ fn group_resize_uses_accepted_capability_and_shared_rect_through_selection_and_p
     let mut snapshot = build_snapshot(&input, 2);
     apply_selection(&mut snapshot, &input.selection.nodes);
     let rect = crate::canvas_query::layout::resize_rect(0., 0., 400., 300.);
-    assert_eq!(snapshot.nodes[0].resize, Some(crate::canvas_query::scope::ScopeGrip::Rect(crate::canvas_query::scope::ScopeRect { x: rect.0, y: rect.1, width: rect.2, height: rect.3 })));
+    assert_eq!(
+        snapshot.nodes[0].resize,
+        Some(crate::canvas_query::scope::ScopeGrip::Rect(
+            crate::canvas_query::scope::ScopeRect {
+                x: rect.0,
+                y: rect.1,
+                width: rect.2,
+                height: rect.3
+            }
+        ))
+    );
     let generation = accept_scene(&input);
-    assert!(matches!(point_query(generation, 390., 290., 1., None).hit, Some(PointHit::Resize { .. })));
+    assert!(matches!(
+        point_query(generation, 390., 290., 1., None).hit,
+        Some(PointHit::Resize { .. })
+    ));
     apply_selection(&mut snapshot, &["g".into(), "other".into()]);
     assert!(snapshot.nodes[0].resize.is_none());
     apply_selection(&mut snapshot, &["g".into()]);
     assert!(snapshot.nodes[0].resize.is_some());
-    input.nodes[0].x = 100.; input.nodes[0].y = 50.;
+    input.nodes[0].x = 100.;
+    input.nodes[0].y = 50.;
     let generation = accept_scene(&input);
-    assert!(matches!(point_query(generation, 490., 340., 1., None).hit, Some(PointHit::Resize { .. })));
+    assert!(matches!(
+        point_query(generation, 490., 340., 1., None).hit,
+        Some(PointHit::Resize { .. })
+    ));
 }

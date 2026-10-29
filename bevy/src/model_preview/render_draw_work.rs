@@ -2,15 +2,25 @@
 //! Indirect GPU counts, shadow/prepass, 2D and driver submissions are not inferred.
 use bevy::{
     core_pipeline::core_3d::{AlphaMask3d, Opaque3d, Transparent3d},
-    ecs::{query::ROQueryItem, system::{SystemParamItem, lifetimeless::SRes}},
-    pbr::{DrawMaterial, SetMaterialBindGroup, SetMeshBindGroup,
-        SetMeshViewBindGroup, SetMeshViewBindingArrayBindGroup},
+    ecs::{
+        query::ROQueryItem,
+        system::{SystemParamItem, lifetimeless::SRes},
+    },
     pbr::Transmissive3d,
+    pbr::{
+        DrawMaterial, SetMaterialBindGroup, SetMeshBindGroup, SetMeshViewBindGroup,
+        SetMeshViewBindingArrayBindGroup,
+    },
     prelude::*,
-    render::render_phase::{CachedRenderPipelinePhaseItem, DrawFunctions, PhaseItem, PhaseItemExtraIndex,
-        RenderCommand, RenderCommandResult, RenderCommandState, SetItemPipeline, TrackedRenderPass},
+    render::render_phase::{
+        CachedRenderPipelinePhaseItem, DrawFunctions, PhaseItem, PhaseItemExtraIndex,
+        RenderCommand, RenderCommandResult, RenderCommandState, SetItemPipeline, TrackedRenderPass,
+    },
 };
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 #[derive(Default)]
 struct Counters {
@@ -24,7 +34,10 @@ struct Counters {
 pub(super) struct DrawWork(Arc<Counters>, bool);
 impl Default for DrawWork {
     fn default() -> Self {
-        Self(Arc::default(), option_env!("WOOHAA_RENDER_DRAW_DIAGNOSTICS") != Some("0"))
+        Self(
+            Arc::default(),
+            option_env!("WOOHAA_RENDER_DRAW_DIAGNOSTICS") != Some("0"),
+        )
     }
 }
 impl DrawWork {
@@ -59,11 +72,15 @@ impl DrawWork {
         match extra {
             PhaseItemExtraIndex::None | PhaseItemExtraIndex::DynamicOffset(_) => {
                 self.0.direct.fetch_add(1, Ordering::Relaxed);
-                self.0.direct_instances.fetch_add(instances, Ordering::Relaxed);
+                self.0
+                    .direct_instances
+                    .fetch_add(instances, Ordering::Relaxed);
             }
             PhaseItemExtraIndex::IndirectParametersIndex { range, .. } => {
                 self.0.indirect.fetch_add(1, Ordering::Relaxed);
-                self.0.indirect_slots.fetch_add(u64::from(range.end - range.start), Ordering::Relaxed);
+                self.0
+                    .indirect_slots
+                    .fetch_add(u64::from(range.end - range.start), Ordering::Relaxed);
             }
         }
     }
@@ -89,28 +106,44 @@ impl<P: PhaseItem> RenderCommand<P> for MeasuredDrawMesh {
         // draw_indexed or multi_draw_* recording. All early exits return Skip.
         let instances = u64::from(item.batch_range().end - item.batch_range().start);
         #[cfg(feature = "explicit-instancing")]
-        let instances = entity.flatten().map_or(instances, |buffer| buffer.count as u64);
+        let instances = entity
+            .flatten()
+            .map_or(instances, |buffer| buffer.count as u64);
         let result = MeshDraw::render(item, view, entity, params, pass);
-        work.record(item.extra_index(), instances,
-            matches!(result, RenderCommandResult::Success));
+        work.record(
+            item.extra_index(),
+            instances,
+            matches!(result, RenderCommandResult::Success),
+        );
         result
     }
 }
 type MeasuredDrawMaterial = (
-    SetItemPipeline, SetMeshViewBindGroup<0>, SetMeshViewBindingArrayBindGroup<1>,
-    SetMeshBindGroup<2>, SetMaterialBindGroup<3>, MeasuredDrawMesh,
+    SetItemPipeline,
+    SetMeshViewBindGroup<0>,
+    SetMeshViewBindingArrayBindGroup<1>,
+    SetMeshBindGroup<2>,
+    SetMaterialBindGroup<3>,
+    MeasuredDrawMesh,
 );
 
 fn install_phase<P: CachedRenderPipelinePhaseItem>(render: &mut SubApp) {
-    if !render.world().contains_resource::<DrawFunctions<P>>() { return; }
+    if !render.world().contains_resource::<DrawFunctions<P>>() {
+        return;
+    }
     let state = RenderCommandState::<P, MeasuredDrawMaterial>::new(render.world_mut());
     // Material preparation resolves DrawMaterial's type ID. Preserve all bind
     // commands and the original DrawMesh behavior, replacing only its counter.
-    render.world().resource::<DrawFunctions<P>>().write()
+    render
+        .world()
+        .resource::<DrawFunctions<P>>()
+        .write()
         .add_with::<DrawMaterial, _>(state);
 }
 pub(super) fn install(render: &mut SubApp, work: DrawWork) {
-    if !work.1 { return; }
+    if !work.1 {
+        return;
+    }
     render.insert_resource(work);
     install_phase::<Opaque3d>(render);
     install_phase::<AlphaMask3d>(render);
@@ -126,7 +159,10 @@ mod tests {
         let mut render = SubApp::new();
         render.init_resource::<DrawFunctions<Opaque3d>>();
         let original = RenderCommandState::<Opaque3d, DrawMaterial>::new(render.world_mut());
-        let old_id = render.world().resource::<DrawFunctions<Opaque3d>>().write()
+        let old_id = render
+            .world()
+            .resource::<DrawFunctions<Opaque3d>>()
+            .write()
             .add_with::<DrawMaterial, _>(original);
         install(&mut render, DrawWork::default());
         let functions = render.world().resource::<DrawFunctions<Opaque3d>>().read();
@@ -138,9 +174,14 @@ mod tests {
         let work = DrawWork::default();
         work.record(PhaseItemExtraIndex::None, 12, true);
         work.record(PhaseItemExtraIndex::None, 100, false);
-        work.record(PhaseItemExtraIndex::IndirectParametersIndex {
-            range: 0..40, batch_set_index: None,
-        }, 100, true);
+        work.record(
+            PhaseItemExtraIndex::IndirectParametersIndex {
+                range: 0..40,
+                batch_set_index: None,
+            },
+            100,
+            true,
+        );
         let value = work.snapshot();
         assert_eq!(value["directRecordingCalls"], 1);
         assert_eq!(value["directInstances"], 12);

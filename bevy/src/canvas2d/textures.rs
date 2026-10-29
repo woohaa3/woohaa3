@@ -15,8 +15,8 @@ use bevy::{
 
 use crate::app::TextureBatch;
 
-use super::texture_store::TextureAction;
 use super::Visuals;
+use super::texture_store::TextureAction;
 
 /// 消费本帧 keyed 纹理批次；即使 scene/surface 未变也必须执行。
 pub(crate) fn sync_textures(
@@ -93,7 +93,11 @@ pub(crate) fn sync_textures(
         let index = crate::canvas_query::focus_context::index(scene, &node.id, index);
         let overlay = crate::canvas_query::focus_context::overlay(scene);
         let shown = scene.model_focus.is_none();
-        let visibility = if shown { Visibility::Inherited } else { Visibility::Hidden };
+        let visibility = if shown {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
         let (custom_size, center, color, z) =
             super::image_focus::sprite_layout(&overlay, &display, texture_px, index);
         match visuals.textures.get(&id).cloned() {

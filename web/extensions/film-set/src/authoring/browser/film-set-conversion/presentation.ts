@@ -1,4 +1,4 @@
-import { readFilmSetConversionNodeStatus, type ServerCanvas } from "@woohaa3/contracts";
+import { isFilmSetGroupNode, readFilmSetConversionNodeStatus, type ServerCanvas } from "@woohaa3/contracts";
 /**
  * 「转为片场」动作的就近状态映射（纯函数）
  * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.6/3.8 / design D4/D7）。
@@ -207,7 +207,7 @@ export function summarizeFilmSetConversionModel(input: {
 export function resolveConversionNodeStatuses(canvas: ServerCanvas | null): { nodeId: string; status: FilmSetConversionStatus }[] {
   if (!canvas) return [];
   return canvas.document.nodes.flatMap(node => {
-    if (node.type !== "composite-asset") return [];
+    if (!isFilmSetGroupNode(node, canvas.nodeData[node.id])) return [];
     const status = readFilmSetConversionNodeStatus(canvas.nodeData[node.id]);
     return status ? [{ nodeId: node.id, status }] : [];
   });

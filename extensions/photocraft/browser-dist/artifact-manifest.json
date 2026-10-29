@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "artifactId": "f3a68b46fb15d2def0edde7959efba729cfc9aef9c1acadf1139e3c6cf1041b6",
+  "artifactId": "183297753243d4e617b099da32335af71d7baf0e0bf81f971d6d535c3c1e003c",
   "metadata": {
     "extensionId": "photocraft",
     "version": "0.1.0",
@@ -15,7 +15,7 @@
   "protocolVersion": 1,
   "sdkAbi": 1,
   "reactMajor": 18,
-  "entry": "entry-DDIPSM73.js",
+  "entry": "entry-FO5W44HR.js",
   "styles": [
     "entry-YBVFNOI2.css"
   ],
@@ -32,17 +32,17 @@
   ],
   "files": [
     {
-      "path": "entry-DDIPSM73.js",
+      "path": "entry-FO5W44HR.js",
       "bytes": 478,
       "gzipBytes": 359,
-      "sha256": "96b34913db15ae9cf9809e29aef1249b7310ef9ca508af5fc1f85b95b2fdd6a8",
+      "sha256": "f58746ccca984eafbb87f037d8db482aa79d12dd077122bd230adb1cbd2f59ca",
       "kind": "entry"
     },
     {
-      "path": "chunks/frontend-BZOUFZLO.js",
-      "bytes": 123554,
-      "gzipBytes": 37854,
-      "sha256": "3a5d937b16a368ec612c6fa847823def925cf5426d540783355e6ab23fcf5905",
+      "path": "chunks/frontend-YEEZWITG.js",
+      "bytes": 137574,
+      "gzipBytes": 41521,
+      "sha256": "272b278cac2822581a36a50fad51866993140f11d2a890832fe9b1c802481ac6",
       "kind": "private-chunk"
     },
     {
@@ -153,19 +153,19 @@
   ],
   "imports": [
     {
-      "from": "chunks/frontend-BZOUFZLO.js",
+      "from": "chunks/frontend-YEEZWITG.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-DDIPSM73.js",
+      "from": "entry-FO5W44HR.js",
       "specifier": "../browser-dist/chunks/chunk-JN2CHJ4H.js",
       "resolved": "chunks/chunk-JN2CHJ4H.js"
     },
     {
-      "from": "entry-DDIPSM73.js",
-      "specifier": "../browser-dist/chunks/frontend-BZOUFZLO.js",
-      "resolved": "chunks/frontend-BZOUFZLO.js"
+      "from": "entry-FO5W44HR.js",
+      "specifier": "../browser-dist/chunks/frontend-YEEZWITG.js",
+      "resolved": "chunks/frontend-YEEZWITG.js"
     }
   ]
 }

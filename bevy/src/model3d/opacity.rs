@@ -134,6 +134,19 @@ impl OpacityMaterials {
         }
     }
 
+    /// Reclaim only removed binding entities; unchanged objects keep their material instances.
+    pub(crate) fn remove_entities(
+        &mut self,
+        materials: &mut Assets<StandardMaterial>,
+        entities: &[Entity],
+    ) {
+        for entity in entities {
+            if let Some(record) = self.entries.remove(entity) {
+                materials.remove(&record.instance);
+            }
+        }
+    }
+
     /// 根释放时丢弃全部实例并从材质资产中回收（D2 的生命周期归属）。
     ///
     /// 克隆实例不进入共享材质缓存，只能由这里显式移除；否则反复播放会积累无人引用的

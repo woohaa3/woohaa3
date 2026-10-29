@@ -79,6 +79,20 @@ describe("ShotReferenceActivity（后台活动投影）", () => {
     expect(activity.records()[0]?.status).toBe("cancelled");
   });
 
+  it("进行中的 job 暂时离开 dirty 也不标取消；完成仍显示成功", () => {
+    const { activity } = fixture();
+    activity.syncQueued([job()]);
+    activity.start(job());
+    const key = "c1\u0000film\u0000clip-1";
+    // 成功发布资产后 job 先离开 dirty 集，但调度器仍把它算在 in-flight。
+    activity.syncQueued([], [key]);
+    expect(activity.records()[0]?.status).toBe("running");
+    activity.finish(job(), { ok: true });
+    expect(activity.records()[0]?.status).toBe("succeeded");
+    activity.syncQueued([], []);
+    expect(activity.records()[0]?.status).toBe("succeeded");
+  });
+
   it("类型变化清理在录活动，迟到成功不能复活", () => {
     const { activity } = fixture();
     activity.start(job());

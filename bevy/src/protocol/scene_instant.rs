@@ -213,7 +213,12 @@ impl NodeActions {
             return Err("Too many node actions");
         }
         for action in &self.actions {
-            if !matches!(action.tone.as_str(), "" | "primary" | "neutral") || action.icon.as_deref().is_some_and(|icon| icon != "download") || action.icon_only && action.icon.is_none() {
+            if !matches!(action.tone.as_str(), "" | "primary" | "neutral")
+                || action.icon.as_deref().is_some_and(|icon| {
+                    !matches!(icon, "download" | "collapse-groups" | "expand-groups")
+                })
+                || action.icon_only && action.icon.is_none()
+            {
                 return Err("Invalid node action presentation");
             }
             if action.id.is_empty() || action.id.len() > 128 || action.label.len() > 256 {
@@ -379,7 +384,8 @@ pub(crate) use super::animation_playback::{AnimationPlayback, PlaybackCamera};
 /// 边界级防御校验，权威列表仍在 Web contracts；这里用 `W:H` 形式解析而非硬编码比例，避免
 /// 新增画幅时两处漂移。
 pub(crate) const SUPPORTED_SHOT_ASPECTS: &[&str] = &[
-    "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "4:1", "1:4", "8:1", "1:8",
+    "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "4:1", "1:4", "8:1",
+    "1:8",
 ];
 
 /// 校验画幅字面量是否在受支持集合内。

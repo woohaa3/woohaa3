@@ -4,6 +4,7 @@
  * 自 `command-reducer.ts` 拆出（change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，
  * R12）。复用 domain 结构校验，语义与 edit.apply 的对应操作完全一致。
  */
+import { isFilmSetNode } from "../domain/core/composite-asset-identity.js";
 import { minimumNodeSizeFor } from "../node-dimensions.js";
 import {
   filmSetObjectContainerId,
@@ -11,7 +12,7 @@ import {
   isFilmSetObjectModelNode
 } from "../film-set-object-container.js";
 import type { CanvasCommand } from "../commands.js";
-import { isGroupBadgeScale } from "../group-badge.js";
+import { GROUP_BADGE_MIN_SCALE, isGroupBadgeScale } from "../group-badge.js";
 import {
   DEFAULT_NODE_DIMS,
   collectWoohaa3CanvasRemovalIds,
@@ -39,6 +40,8 @@ import {
   validateSelfContained3DNodePatch,
   validateVideoEditIntentsPatch
 } from "./node-data-validation.js";
+import { validateFilmSetGroupDataPatch, convertFilmSetGroupConsumers } from "./film-set-group-commands.js";
+import { isFilmSetGroupNode } from "../film-set-group.js";
 
 /**
  * 校验本次提交的 width/height 是否满足节点类别最小下限（change: add-node-resize, design D5）。
@@ -162,6 +165,9 @@ export function addNode(
   command: Extract<CanvasCommand, { type: "node.add" }>
 ): CommandApplyResult {
   const { node } = command;
+  if (isFilmSetNode(node.type, command.nodeData) || filmSetObjectOwnershipOf(command.nodeData)) {
+    return reject("invalid-self-contained-node", "旧 composite 片场与对象容器只允许迁移读取，请创建 film-set group");
+  }
   const managed = command.nodeData?.managedBy;
   if (managed !== undefined) {
     const decoded = decodeManagedNodeRelation(managed);
@@ -172,8 +178,12 @@ export function addNode(
   }
   if (command.nodeData?.retainWhenEmpty !== undefined && (node.type !== "group" || typeof command.nodeData.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
   if (command.nodeData?.groupCollapsed !== undefined && (node.type !== "group" || typeof command.nodeData.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
-  if (command.nodeData?.groupBadgeScale !== undefined && (node.type !== "group" || !isGroupBadgeScale(command.nodeData.groupBadgeScale))) return reject("invalid-group-config", "groupBadgeScale 只允许 group 的 0.5 至 2.5 倍率");
+  if (command.nodeData?.groupBadgeScale !== undefined && (node.type !== "group" || !isGroupBadgeScale(command.nodeData.groupBadgeScale))) return reject("invalid-group-config", `groupBadgeScale 只允许 group 的 ${GROUP_BADGE_MIN_SCALE} 倍率及以上的有限数`);
   if (command.nodeData?.groupAppearance !== undefined && node.type !== "group") return reject("invalid-group-appearance", "groupAppearance 只属于普通组节点");
+  if (command.nodeData?.filmSetGroup !== undefined) {
+    const markerRejection = validateFilmSetGroupDataPatch(work, node.id, command.nodeData, node.type);
+    if (markerRejection) return markerRejection;
+  }
   // 预览节点只能由源镜头生命周期派生（D3）：普通新建路径禁止预览类型；恢复路径（撤销删除
   // 镜头）允许重建，但必须携带合法归属、派生 ID 与存在的源片场，最终不变式仍会复核。
   if (node.type === FILM_SET_SHOT_PREVIEW_NODE_TYPE || hasShotPreviewOwnership(command.nodeData)) {
@@ -304,6 +314,35 @@ export function removeNodes(work: WorkingState, nodeIds: readonly string[]): Com
   // 受保护预览不能独立删除（D2）：合法级联（源片场同批删除）由 reconciliation 在同一批次
   // 维护闭包，因此这里直接拒绝任何直接命中的预览；只删受保护预览的原始 node.remove 明确拒绝。
   const removed = collectWoohaa3CanvasRemovalIds(work.nodes, nodeIds, work.nodeData);
+  // Deleting a film-set group only removes orchestration and managed previews.
+  // Its source cards remain usable on the canvas; move them to the former
+  // parent while preserving their world position in this same transaction.
+  for (const groupId of nodeIds) {
+    const group = work.nodes.find(node => node.id === groupId);
+    if (!group || !isFilmSetGroupNode(group, work.nodeData[groupId])) continue;
+    const byId = new Map(work.nodes.map(node => [node.id, node]));
+    const parent = group.parentId ? byId.get(group.parentId) : undefined;
+    const world = (node: typeof group) => {
+      let x = node.position.x, y = node.position.y, parentId = node.parentId;
+      const seen = new Set<string>();
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId);
+        const ancestor = byId.get(parentId);
+        if (!ancestor) break;
+        x += ancestor.position.x; y += ancestor.position.y; parentId = ancestor.parentId;
+      }
+      return { x, y };
+    };
+    const parentWorld = parent ? world(parent) : { x: 0, y: 0 };
+    for (const candidate of work.nodes) {
+      if (!removed.has(candidate.id) || candidate.id === groupId) continue;
+      if (!['model3d', 'image', 'video'].includes(candidate.type)) continue;
+      const position = world(candidate);
+      candidate.parentId = group.parentId;
+      candidate.position = { x: position.x - parentWorld.x, y: position.y - parentWorld.y };
+      removed.delete(candidate.id);
+    }
+  }
   const directManaged = nodeIds.find((id) => {
     const relation = managedNodeRelationOf(work.nodeData[id]);
     return relation && !removed.has(relation.ownerNodeId);
@@ -354,6 +393,9 @@ export function patchNodeData(
   value: CanvasNodeData | null
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === nodeId);
+  if (isFilmSetNode(node?.type, work.nodeData[nodeId]) || isFilmSetNode(node?.type, value)) {
+    return reject("invalid-self-contained-node", "旧 composite 片场只允许迁移读取，请编辑 film-set group");
+  }
   const currentManaged = managedNodeRelationOf(work.nodeData[nodeId]);
   const hasManagedField = !!work.nodeData[nodeId] && Object.prototype.hasOwnProperty.call(work.nodeData[nodeId], "managedBy");
   if (value && Object.prototype.hasOwnProperty.call(value, "managedBy")) {
@@ -379,7 +421,7 @@ export function patchNodeData(
   }
   if (value.retainWhenEmpty !== undefined && (work.nodes.find(node => node.id === nodeId)?.type !== "group" || typeof value.retainWhenEmpty !== "boolean")) return reject("invalid-group-config", "retainWhenEmpty 只允许 group 的布尔配置");
   if (value.groupCollapsed !== undefined && (node?.type !== "group" || typeof value.groupCollapsed !== "boolean")) return reject("invalid-group-config", "groupCollapsed 只允许 group 的布尔配置");
-  if (value.groupBadgeScale !== undefined && (node?.type !== "group" || !isGroupBadgeScale(value.groupBadgeScale))) return reject("invalid-group-config", "groupBadgeScale 只允许 group 的 0.5 至 2.5 倍率");
+  if (value.groupBadgeScale !== undefined && (node?.type !== "group" || !isGroupBadgeScale(value.groupBadgeScale))) return reject("invalid-group-config", `groupBadgeScale 只允许 group 的 ${GROUP_BADGE_MIN_SCALE} 倍率及以上的有限数`);
   if (!work.nodes.some((node) => node.id === nodeId)) {
     return reject("node-data-orphan", `节点业务数据指向不存在的节点 ${nodeId}`);
   }
@@ -395,6 +437,8 @@ export function patchNodeData(
   if (mediaRejection) return mediaRejection;
   const appearanceRejection = validateGroupAppearancePatch(work, nodeId, value);
   if (appearanceRejection) return appearanceRejection;
+  const filmSetGroupRejection = validateFilmSetGroupDataPatch(work, nodeId, value);
+  if (filmSetGroupRejection) return filmSetGroupRejection;
   const nodeRejection = validateSelfContained3DNodePatch(work, nodeId, value);
   if (nodeRejection) return nodeRejection;
   const merged = { ...(work.nodeData[nodeId] ?? {}), ...value };
@@ -406,6 +450,8 @@ export function patchNodeData(
     const normalized = normalizeSelfContained3D(work, nodeId, value, merged);
     if (normalized) return normalized;
   }
+  const conversion = convertFilmSetGroupConsumers(work, nodeId, value);
+  if (conversion) return conversion;
   work.nodeData[nodeId] = { ...(work.nodeData[nodeId] ?? {}), ...value };
   return OK;
 }

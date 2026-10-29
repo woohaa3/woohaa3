@@ -135,9 +135,10 @@ export class ShotReferenceRecordingQueue {
   /** 录制成功：记录该版本已 ready，并清除同版本 dirty。 */
   complete(job: ShotReferenceRecordingJob): void {
     const key = shotReferenceJobKey(job);
+    // 先结算 in-flight：内容在录制期间变了也要放行，否则该 key 永远无法重录。
+    this.inflight.delete(key);
     if (this.queued.get(key)?.contentIdentity !== job.contentIdentity) return;
     this.recorded.set(key, job.contentIdentity);
-    this.inflight.delete(key);
     if (this.queued.get(key)?.contentIdentity === job.contentIdentity) this.queued.delete(key);
   }
 
@@ -150,10 +151,10 @@ export class ShotReferenceRecordingQueue {
   markRecorded(job: { canvasId: string; filmSetNodeId: string; clipId: string; contentIdentity: string }): void {
     const key = shotReferenceJobKey(job);
     this.recorded.set(key, job.contentIdentity);
-    if (this.queued.get(key)?.contentIdentity === job.contentIdentity) {
-      this.queued.delete(key);
-      this.inflight.delete(key);
-    }
+    if (this.queued.get(key)?.contentIdentity === job.contentIdentity) this.queued.delete(key);
+    // **不**清 in-flight：录制成功后发布资产会让画布立刻回填缓存（正在录的就是这个 key），
+    // 此时清掉会让活动投影误判「已不在录」并显示取消，而录制其实正在成功收尾。
+    // in-flight 由 `complete` / `fail` 结算。
   }
 
   /** 某版本是否已 ready（已记录且不在 dirty/in-flight）。 */

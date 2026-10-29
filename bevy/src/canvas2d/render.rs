@@ -24,7 +24,15 @@ pub(crate) fn sync_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut flags: ResMut<FrameFlags>,
-    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
+    mut text_query: Query<
+        (
+            &mut Text2d,
+            &mut Transform,
+            &mut TextColor,
+            &mut LogicalText,
+        ),
+        Without<Sprite>,
+    >,
     mut sprites: Query<(&mut Sprite, &mut Transform), Without<Text2d>>,
 ) {
     if !flags.changed && !(flags.observer_changed && !scene.0.model_focus_context.is_empty()) {
@@ -36,26 +44,35 @@ pub(crate) fn sync_scene(
     // 先算要移除的节点，再统一解绑：`retain` 闭包里同时借用 `visuals` 与 `texture_store`
     // 会让借用检查器拒绝（两者都是 `visuals` 的字段）。
     let mut removed: Vec<(String, Entity)> = Vec::new();
-    visuals.textures.retain(|id, (entity, _handle, texture_px)| {
-        // 同代节点索引：保留判定按 id O(1) 定位，不再逐纹理扫描整份文档
-        // （change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 7.2）。
-        if let Some((original_index, original)) = index.node(source, id).filter(|(_, node)| node.texture) {
-            let shown = source.model_focus.is_none();
-            commands.entity(*entity).insert(if shown { Visibility::Inherited } else { Visibility::Hidden });
-            let node = crate::canvas_query::focus_context::node(source, original);
-            let index = crate::canvas_query::focus_context::index(source, id, original_index);
-            if let Ok((mut sprite, mut transform)) = sprites.get_mut(*entity) {
-                let (content, center, color, z) = super::image_focus::sprite_layout(scene, &node, *texture_px, index);
-                sprite.custom_size = Some(content);
-                sprite.color = color;
-                transform.translation = Vec3::new(center.x, -center.y, z);
+    visuals
+        .textures
+        .retain(|id, (entity, _handle, texture_px)| {
+            // 同代节点索引：保留判定按 id O(1) 定位，不再逐纹理扫描整份文档
+            // （change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 7.2）。
+            if let Some((original_index, original)) =
+                index.node(source, id).filter(|(_, node)| node.texture)
+            {
+                let shown = source.model_focus.is_none();
+                commands.entity(*entity).insert(if shown {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                });
+                let node = crate::canvas_query::focus_context::node(source, original);
+                let index = crate::canvas_query::focus_context::index(source, id, original_index);
+                if let Ok((mut sprite, mut transform)) = sprites.get_mut(*entity) {
+                    let (content, center, color, z) =
+                        super::image_focus::sprite_layout(scene, &node, *texture_px, index);
+                    sprite.custom_size = Some(content);
+                    sprite.color = color;
+                    transform.translation = Vec3::new(center.x, -center.y, z);
+                }
+                true
+            } else {
+                removed.push((id.clone(), *entity));
+                false
             }
-            true
-        } else {
-            removed.push((id.clone(), *entity));
-            false
-        }
-    });
+        });
     // 只解绑被移除的节点：同内容仍被其他节点使用时纹理保留
     // （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
     for (id, entity) in removed {
@@ -115,12 +132,27 @@ pub(crate) fn sync_scene(
         return;
     }
     visuals.shared_key = Some(shared_key);
-    super::ownership_links::draw(&mut geometry, &ownership_links, &theme, if source.model_focus.is_some() { super::ownership_links::FOCUS_LINK_OPACITY } else { 1. });
+    super::ownership_links::draw(
+        &mut geometry,
+        &ownership_links,
+        &theme,
+        if source.model_focus.is_some() {
+            super::ownership_links::FOCUS_LINK_OPACITY
+        } else {
+            1.
+        },
+    );
     super::render_edges::draw_draft(&mut geometry, scene, &theme, &node_map);
     // 拍摄镜头归属线（change: 2026-10-15-add-film-set-shooting-shot-previews，design D5）：
     // 派生呈现，不在 `document.edges` 里；起点由映射层按当前观察相机投影给出，终点复用卡片
     // 左侧中点（与命中共用 `canvas_query::shot_preview` 几何）。无端口/删除/重连命中。
-    super::render_edges::draw_shot_preview_links(&mut geometry, scene, &theme, &node_map, overlay_z);
+    super::render_edges::draw_shot_preview_links(
+        &mut geometry,
+        scene,
+        &theme,
+        &node_map,
+        overlay_z,
+    );
 
     // 单节点拖动粘连 overlay（change: add-drag-touch-connections）：绘制在普通边与节点之后、
     // 框选之前；只被动消费语义投影，不执行碰撞或创建命令。owner 已不在节点集合时清除标签。

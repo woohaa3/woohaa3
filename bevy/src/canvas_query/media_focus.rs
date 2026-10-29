@@ -35,7 +35,11 @@ pub(crate) fn media_focus(scene: &Scene) -> Option<MediaFocus<'_>> {
 
 /// 入场完成后切换画布呈现；相机始终读取 media_focus，不受此门禁影响。
 pub(crate) fn presented_media_focus(scene: &Scene) -> Option<MediaFocus<'_>> {
-    if scene.image_focus.as_ref().is_some_and(|focus| !focus.presentation_ready) {
+    if scene
+        .image_focus
+        .as_ref()
+        .is_some_and(|focus| !focus.presentation_ready)
+    {
         return None;
     }
     media_focus(scene)
@@ -48,7 +52,11 @@ pub(crate) fn has_presented_media_focus(scene: &Scene) -> bool {
 /// Document focus drives the shared camera; a captured viewport may have a separate sprite layout.
 pub(crate) fn camera_view(scene: &Scene) -> Option<(f32, f32, f32)> {
     let mut focus = media_focus(scene)?;
-    if let Some(view) = scene.image_focus.as_ref().and_then(|image| image.document_view) {
+    if let Some(view) = scene
+        .image_focus
+        .as_ref()
+        .and_then(|image| image.document_view)
+    {
         focus.viewport = view.viewport;
         focus.source_width = view.source_width;
         focus.source_height = view.source_height;
@@ -150,9 +158,12 @@ mod tests {
         let frame_viewport = scene.image_focus.as_ref().unwrap().viewport;
         let mut last = None;
         for (x, y, zoom) in [(38.0, -24.0, 0.6), (138.0, 76.0, 0.6), (138.0, 76.0, 1.2)] {
-            scene.image_focus.as_mut().unwrap().document_view = Some(serde_json::from_value(serde_json::json!({
-                "sourceWidth":1600,"sourceHeight":900,"viewport":{"x":x,"y":y,"zoom":zoom}
-            })).unwrap());
+            scene.image_focus.as_mut().unwrap().document_view = Some(
+                serde_json::from_value(serde_json::json!({
+                    "sourceWidth":1600,"sourceHeight":900,"viewport":{"x":x,"y":y,"zoom":zoom}
+                }))
+                .unwrap(),
+            );
             let camera = camera_view(&scene).unwrap();
             let grid = crate::model3d::grid::scene_view(&scene);
             assert_eq!((grid.x, grid.y, grid.zoom), camera);
@@ -161,9 +172,14 @@ mod tests {
             assert!((target.y * camera.2 + camera.1 - (440.0 + y)).abs() < 0.001);
             let other = content_center(&scene.nodes[1]);
             let screen = (other.x * camera.2 + camera.0, other.y * camera.2 + camera.1);
-            if let Some(previous) = last { assert_ne!(screen, previous); }
+            if let Some(previous) = last {
+                assert_ne!(screen, previous);
+            }
             last = Some(screen);
-            assert_eq!(scene.image_focus.as_ref().unwrap().viewport.x, frame_viewport.x);
+            assert_eq!(
+                scene.image_focus.as_ref().unwrap().viewport.x,
+                frame_viewport.x
+            );
         }
     }
 

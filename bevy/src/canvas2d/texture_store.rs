@@ -94,7 +94,9 @@ impl TextureStore {
             && previous.handle == handle
             && previous.shared == key
             && previous.size == size
-            && key.as_ref().is_none_or(|key| self.contents.contains_key(key))
+            && key
+                .as_ref()
+                .is_none_or(|key| self.contents.contains_key(key))
         {
             return Vec::new();
         }
@@ -183,7 +185,10 @@ mod tests {
     use super::*;
 
     fn handle(id: u128) -> Handle<Image> {
-        Handle::Uuid(bevy::asset::uuid::Uuid::from_u128(id), std::marker::PhantomData)
+        Handle::Uuid(
+            bevy::asset::uuid::Uuid::from_u128(id),
+            std::marker::PhantomData,
+        )
     }
 
     const SIZE: Vec2 = Vec2::new(64.0, 32.0);
@@ -195,7 +200,10 @@ mod tests {
         for index in 0..1000 {
             let node = format!("n{index}");
             if index == 0 {
-                assert!(matches!(store.resolve(Some("content"), SIZE), TextureAction::Fresh));
+                assert!(matches!(
+                    store.resolve(Some("content"), SIZE),
+                    TextureAction::Fresh
+                ));
             } else {
                 // 后续节点直接复用同一 handle：不再上传像素、不再建 GPU 纹理。
                 assert!(matches!(
@@ -203,7 +211,11 @@ mod tests {
                     TextureAction::Reused(_)
                 ));
             }
-            assert!(store.bind(&node, Some("content"), SIZE, shared.clone()).is_empty());
+            assert!(
+                store
+                    .bind(&node, Some("content"), SIZE, shared.clone())
+                    .is_empty()
+            );
             assert_eq!(store.shared("content", SIZE), Some(shared.clone()));
         }
         assert_eq!(store.content_count(), 1);
@@ -250,7 +262,10 @@ mod tests {
             store.resolve(Some("content"), Vec2::new(128.0, 64.0)),
             TextureAction::Fresh
         ));
-        assert!(matches!(store.resolve(Some("content"), SIZE), TextureAction::Reused(_)));
+        assert!(matches!(
+            store.resolve(Some("content"), SIZE),
+            TextureAction::Reused(_)
+        ));
     }
 
     #[test]

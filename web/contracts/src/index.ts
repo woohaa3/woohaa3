@@ -90,6 +90,8 @@ export * from "./canvas/gizmo.js";
 export * from "./canvas/canvas-node-model.js";
 export * from "./canvas/animation-snapshot.js";
 export * from "./canvas/film-set-content.js";
+export * from "./canvas/film-set-group.js";
+export * from "./canvas/film-set-group-member-layout.js";
 export * from "./canvas/film-set-animations.js";
 export * from "./canvas/film-set-clip-view.js";
 export * from "./canvas/film-set-clip-ops.js";
@@ -146,3 +148,6 @@ export * from "./canvas/group-badge.js";
 export * from "./canvas/ground-anchor.js";
 
 export type { MediaFormatValidator, MediaFormatRegistry } from "./extension/services/host/media-formats.js";
+
+export * from "./canvas/film-set-group-projection.js";
+export * from "./canvas/film-set-animation-projection.js";

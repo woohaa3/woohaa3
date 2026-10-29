@@ -35,7 +35,10 @@ impl Plugin for OrbitCameraInteractionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OrbitCameraPointerAdapter>()
             .init_resource::<OrbitCameraCommands>()
-            .add_systems(Update, (orbit_pointer_begin, orbit_pointer_motion, orbit_pointer_end).chain());
+            .add_systems(
+                Update,
+                (orbit_pointer_begin, orbit_pointer_motion, orbit_pointer_end).chain(),
+            );
     }
 }
 
@@ -100,4 +103,3 @@ fn orbit_pointer_end(
         adapter.active = None;
     }
 }
-

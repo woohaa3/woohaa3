@@ -116,6 +116,15 @@ pub(crate) fn ground_anchor(node: &GraphNode) -> f32 {
 
 /// 节点的可见外包框：复合资产把地面范围并入节点矩形（高模型/范围可能互不完全包含）。
 pub(crate) fn screen_bounds(node: &GraphNode) -> ScreenBounds {
+    if node.group.as_ref().is_some_and(|group| group.collapsed) {
+        let badge = crate::canvas_query::group_model::badge_rect(node);
+        return ScreenBounds {
+            x: badge.x,
+            y: badge.y,
+            width: badge.z,
+            height: badge.w,
+        };
+    }
     let rect = ScreenBounds {
         x: node.x,
         y: node.y,

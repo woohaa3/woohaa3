@@ -5,6 +5,7 @@
  * 辅助身份读取只复刻契约层内容身份公式，不复制 history 规则。
  */
 import {
+  fnv1a64Hex,
   decodeImageEditDocument,
   decodeModelCameras,
   decodeModelPlacement,
@@ -198,7 +199,7 @@ export function buildModelEditEntryFromCanvas(canvas: ServerCanvas, nodeId: stri
   if (language === "" || version === "") return null;
   const placement = decodeModelPlacement(data?.modelPlacement) ?? { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
   const modelCameras = readCameras(data);
-  const sourceHash = animation?.schemaVersion === 3 ? animationDefinitionSnapshotHash(animation) : hashModelScript(modelScript);
+  const sourceHash = animation?.schemaVersion === 4 ? fnv1a64Hex(JSON.stringify(animation.filmSetGroup)) : animation?.schemaVersion === 3 ? animationDefinitionSnapshotHash(animation) : hashModelScript(modelScript);
   // 片场用完整定义身份去重；普通模型保留规范镜头感知的摆放快照键（不改变既有身份语义）。
   const animationIdentity = animation ? animationDefinitionIdentityFromPayload(animation) : null;
   const identity = animationIdentity

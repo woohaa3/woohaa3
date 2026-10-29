@@ -1,3 +1,4 @@
+import { readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { filmSetTestMigrations } from "../../../../../test-support/managed-shot-commands.js";
 const migrateSqliteCanvasBeforeStartup = (filename: string) => migrateBeforeStartup(filename, { managedMigrations: filmSetTestMigrations });
 import { afterEach, expect, it } from "vitest";
@@ -50,8 +51,8 @@ it("backs up committed WAL, converts previews and animation, then skips repeat s
     expect(result.changed).toBe(true);
     const row = db.prepare("SELECT * FROM canvas_yjs_documents").get()!;
     const canvas = JSON.parse(String(row.projection_json));
-    expect(canvas.nodeData.film.filmSetAnimations.schemaVersion).toBe(3);
-    expect(canvas.nodeData.film.filmSetAnimations.clips[0].kind).toBe("dynamic");
+    expect(canvas.nodeData.film.filmSetGroup.schemaVersion).toBe(1);
+    expect(readFilmSetAnimationProjection(canvas, "film")!.filmSetAnimations!.clips[0]!.kind).toBe("dynamic");
     expect(canvas.document.nodes.filter((node: { type: string }) => node.type === "video")).toHaveLength(1);
     expect(row.room_epoch).not.toBe("epoch");
     const { DatabaseSync } = loadNodeSqlite();
@@ -112,7 +113,7 @@ it("normal service startup migrates before exposing the canvas service", async (
     const reader = new DatabaseSync(filename, { readOnly: true });
     try {
       const canvas = JSON.parse(String(reader.prepare("SELECT projection_json FROM canvas_yjs_documents").get()!.projection_json));
-      expect(canvas.nodeData.film.filmSetAnimations.schemaVersion).toBe(3);
+      expect(canvas.nodeData.film.filmSetGroup.schemaVersion).toBe(1);
     } finally { reader.close(); }
   } finally { await service.close(); }
 });

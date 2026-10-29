@@ -1,6 +1,7 @@
+import { createFilmSetGroupMarker } from "@woohaa3/contracts";
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
-import { canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields } from "@woohaa3/contracts";
 import { extendFilmSetDrop } from "../src/integration/browser/drop.js";
 import type { FilmSetContext } from "../src/integration/browser/context.js";
 
@@ -14,12 +15,12 @@ afterEach(() => { dispose?.(); dispose = undefined; document.body.innerHTML = ""
 function harness(writable: boolean, accepted: boolean) {
   const canvas = createEmptyWoohaa3ServerCanvas("drop-canvas");
   canvas.document.nodes = [
-    { id: "film", type: "composite-asset", position: { x: 0, y: 0 }, width: 260, height: 195 },
+    { id: "film", type: "group", position: { x: 0, y: 0 }, width: 260, height: 195 },
     { id: "model", type: "model3d", position: { x: 400, y: 0 } },
     { id: "image", type: "image", position: { x: 700, y: 0 } },
     { id: "text", type: "text", position: { x: 800, y: 0 } }
   ];
-  canvas.nodeData.film = canonicalFilmSetFields(createFilmSetSnapshot({ title: "", timeline: { duration: 0, loop: false } })) as never;
+  canvas.nodeData.film = { filmSetGroup: createFilmSetGroupMarker() };
   canvas.nodeData.model = model3DNodeDataFields(createModel3DNodeData({ title: "", model: { modelScript: "scene.box({id:'part'});", modelScriptVersion: "woohaa-model-js-v2" } })) as never;
   let target: Contribution | undefined;
   let submits = 0;

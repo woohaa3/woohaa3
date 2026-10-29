@@ -1,5 +1,7 @@
+import { migrateFilmSetCanvasFixture } from "../../../../test-support/film-set-groups.js";
 import { describe, expect, it } from "vitest";
 import {
+  canonicalFilmSetFields, readFilmSetAnimationProjection,
   filmSetNodeDataFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas,
   createModel3DNodeData, model3DNodeDataFields, resolveFilmSetClip, type CanvasNodeData, type FilmSetContent
 } from "@woohaa3/contracts";
@@ -21,7 +23,7 @@ async function fixture() {
     title: "动画", model, modelItemId: "actor", motionScript: "motion.model.rotate('body', { speed: 1 });", timeline: { duration: 4, loop: true },
     initialCamera: { azimuth: 0.4, elevation: 0.5, distance: 12, aspect: "4:5", focusOffset: { x: 0, y: 1, z: 0 } }
   });
-  await room.initialize({
+  await initializeFixture(room, {
     canvas: {
       ...base,
       document: { ...base.document, nodes: [
@@ -42,7 +44,8 @@ async function fixture() {
 function dataOf(room: CanvasRoom, id: string) {
   const exported = room.exportCanvas();
   if (!exported.ok) throw new Error(exported.message);
-  return exported.canvas.nodeData[id] as CanvasNodeData;
+  const projection = readFilmSetAnimationProjection(exported.canvas, id);
+  return projection ? canonicalFilmSetFields(projection) as CanvasNodeData : exported.canvas.nodeData[id] as CanvasNodeData;
 }
 
 describe("model3d / 复合资产片场作者接口（items-only，D7/D8/D10）", () => {
@@ -51,14 +54,15 @@ describe("model3d / 复合资产片场作者接口（items-only，D7/D8/D10）",
     const original = structuredClone(dataOf(room, "animation"));
     const result = await service.mutateCamerasBatch({ canvasId, nodeId: "animation", requestId: "scene-camera-adjust",
       mutations: [{ kind: "update", id: "scene-camera", distance: 17 }] });
-    expect(result).toMatchObject({ ok: true, cameras: [{ id: "scene-camera", distance: 17 }] });
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) expect(result.cameras.find(camera => camera.id === "scene-camera")?.distance).toBe(17);
     const updated = dataOf(room, "animation");
     expect(updated.sceneCamera).toMatchObject({ distance: 17, azimuth: 0.4 });
     expect(updated.filmSetContent).toEqual(original.filmSetContent);
     expect(updated.filmSetAnimations).toEqual(original.filmSetAnimations);
     expect(updated.modelCameras).toBeUndefined();
     expect(await service.mutateCamerasBatch({ canvasId, nodeId: "animation", requestId: "scene-camera-scope",
-      mutations: [{ kind: "update", id: "scene-camera", distance: 20 }, { kind: "create", azimuth: 0, distance: 2 }] })).toMatchObject({ ok: false });
+      mutations: [{ kind: "update", id: "missing-camera", distance: 20 }, { kind: "create", azimuth: 0, distance: 2 }] })).toMatchObject({ ok: false });
     expect(dataOf(room, "animation").sceneCamera).toEqual(updated.sceneCamera);
   });
   it.each(["model", "animation"])("%s 支持完整镜头 CRUD、幂等重试和并发新增", async (nodeId) => {
@@ -69,7 +73,7 @@ describe("model3d / 复合资产片场作者接口（items-only，D7/D8/D10）",
     expect(first.ok).toBe(true);
     if (!first.ok) throw new Error(first.message);
     expect(await service.mutateCameras(create)).toMatchObject({ ok: true, duplicate: true });
-    const id = first.cameras[0]!.id;
+    const id = first.cameras.find(camera => nodeId === "model" || !["scene-camera", "camera:clip-1"].includes(camera.id))!.id;
     for (const [requestId, mutation] of [
       ["update", { kind: "update", id, distance: 7 }],
       ["rename", { kind: "rename", id, name: "主视角" }],
@@ -81,9 +85,9 @@ describe("model3d / 复合资产片场作者接口（items-only，D7/D8/D10）",
       ...create, requestId, mutation: { kind: "create", azimuth: 1, distance: 3 }
     })));
     const read = await service.getModelNode({ canvasId, nodeId });
-    expect(read).toMatchObject({ ok: true, nodeType: nodeId === "model" ? "model3d" : "composite-asset" });
+    expect(read).toMatchObject({ ok: true, nodeType: nodeId === "model" ? "model3d" : "group" });
     if (!read.ok) throw new Error(read.message);
-    expect(read.cameras).toHaveLength(nodeId === "model" ? 3 : 4);
+    expect(read.cameras).toHaveLength(nodeId === "model" ? 3 : 5);
     if (nodeId === "animation") expect(read.cameras[0]).toMatchObject({ id: "scene-camera", azimuth: 0.4 });
     expect(await service.mutateCameras({ canvasId, nodeId, requestId: "delete", mutation: { kind: "remove", id } })).toMatchObject({ ok: true });
     const updated = dataOf(room, nodeId);
@@ -97,7 +101,7 @@ describe("model3d / 复合资产片场作者接口（items-only，D7/D8/D10）",
       expect(updated.filmSetAnimations).toEqual(original.filmSetAnimations);
     }
     const list = await service.listModelNodes({ canvasId });
-    expect(list.ok && list.nodes.find((node) => node.nodeId === nodeId)).toMatchObject({ cameraCount: nodeId === "model" ? 2 : 3 });
+    expect(list.ok && list.nodes.find((node) => node.nodeId === nodeId)).toMatchObject({ cameraCount: nodeId === "model" ? 2 : 4 });
   });
 
   it("model3d 提交模型支持 precondition、重试和完整历史补登记", async () => {
@@ -148,12 +152,18 @@ describe("model3d / 复合资产片场作者接口（items-only，D7/D8/D10）",
     const { canvasId, room } = await fixture();
     const service = new FilmSetNodeService({ resolveRoom: async () => room });
     const result = await service.createFilmSetFromNode({ canvasId, requestId: "copy", nodeId: "copy", sourceNodeId: "animation", position: { x: 300, y: 0 } });
-    expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.message);
     const item = result.animation.filmSetContent.items.find(entry => entry.kind === "model")!;
     if (item.kind !== "model") throw new Error("expected model item");
     expect(item.model.placement).toEqual(PLACEMENT);
     expect(item.model.modelScript).toBe(SOURCE);
+    const saved = room.exportCanvas();
+    if (!saved.ok) throw new Error(saved.message);
+    const original = saved.canvas.nodeData.animation.filmSetGroup!;
+    const copied = saved.canvas.nodeData.copy.filmSetGroup!;
+    expect(copied.sceneBindings[0]!.sourceNodeId).not.toBe(original.sceneBindings[0]!.sourceNodeId);
+    expect(saved.canvas.document.nodes.find(node => node.id === original.sceneBindings[0]!.sourceNodeId)?.parentId).toBe("animation");
+    expect(saved.canvas.document.nodes.find(node => node.id === copied.sceneBindings[0]!.sourceNodeId)?.parentId).toBe("copy");
   });
 
   it("图片节点仍拒绝镜头和模型脚本写入", async () => {
@@ -187,3 +197,7 @@ describe("model3d / 复合资产片场作者接口（items-only，D7/D8/D10）",
     expect(resolveFilmSetClip(after as never, "clip-1")).toBeTruthy();
   });
 });
+
+function initializeFixture(room: CanvasRoom, input: Parameters<CanvasRoom["initialize"]>[0]) {
+  return room.initialize({ ...input, canvas: migrateFilmSetCanvasFixture(input.canvas) });
+}

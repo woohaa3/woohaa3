@@ -1,6 +1,6 @@
 //! Shot capture JSON and result-buffer encoding behind the shared canvas facade.
-use crate::bridge;
 use crate::BoundaryError;
+use crate::bridge;
 
 pub(crate) fn request(json: &str) -> Result<(), BoundaryError> {
     #[derive(serde::Deserialize)]

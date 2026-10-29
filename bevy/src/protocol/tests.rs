@@ -37,10 +37,24 @@ fn composite_ownership_links_validate_geometry_and_identity() {
     ]))
     .unwrap();
     assert!(scene.validate().is_ok());
-    let links = scene.nodes[0].composite_asset.as_mut().unwrap().ownership_links.as_mut().unwrap();
-    links.target_item_ids.insert("foreign".into(), "object".into());
+    let links = scene.nodes[0]
+        .composite_asset
+        .as_mut()
+        .unwrap()
+        .ownership_links
+        .as_mut()
+        .unwrap();
+    links
+        .target_item_ids
+        .insert("foreign".into(), "object".into());
     assert_eq!(scene.validate(), Err("Invalid composite ownership links"));
-    let links = scene.nodes[0].composite_asset.as_mut().unwrap().ownership_links.as_mut().unwrap();
+    let links = scene.nodes[0]
+        .composite_asset
+        .as_mut()
+        .unwrap()
+        .ownership_links
+        .as_mut()
+        .unwrap();
     links.target_item_ids.clear();
     links.anchor[1] = f32::INFINITY;
     assert_eq!(scene.validate(), Err("Invalid composite ownership links"));
@@ -96,7 +110,7 @@ fn with_theme(json: &str) -> String {
 /// v5 起还必须携带 `version`；change: 2026-10-07-remove-residual-compatibility 起必须携带完整 theme。
 fn scene_json(body: &str) -> String {
     format!(
-        r#"{{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[]{},"theme":{}}}"#,
+        r#"{{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[]{},"theme":{}}}"#,
         body,
         theme_object()
     )
@@ -110,6 +124,22 @@ fn defaults_fill_missing_fields() {
     assert!(scene.surface.is_none());
     assert_eq!(scene.revision, 0);
     assert_eq!(scene.version, CANVAS_RENDER_SCENE_VERSION);
+}
+
+#[test]
+fn film_set_group_preparation_is_versioned_and_atomic() {
+    let mut scene = parse(&scene_json(""));
+    scene.nodes =
+        serde_json::from_value(serde_json::json!([{"id":"group","type":"group","x":0,"y":0}]))
+            .unwrap();
+    scene.film_set_groups = serde_json::from_value(serde_json::json!([{"schemaVersion":"woohaa-film-set-group-render-v1","ownerId":"group","badgeOrigin":{"x":1,"y":2},"bindings":[{"bindingId":"b","sourceNodeId":"model","kind":"model3d","contentKey":"model3d:v1","transform":{"x":0,"y":0,"z":0,"yaw":0,"scale":1},"visible":true}]}])).unwrap();
+    assert!(scene.validate().is_ok());
+    let mut unknown = scene;
+    unknown.film_set_groups[0].schema_version = "woohaa-film-set-group-render-v9".into();
+    assert_eq!(
+        unknown.validate(),
+        Err("Invalid film set group preparation")
+    );
 }
 
 #[test]
@@ -173,7 +203,7 @@ fn nodes_and_edges_are_required() {
 #[test]
 fn node_defaults_match_contracts() {
     let scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"a","type":"text","x":1.0,"y":2.0}],"edges":[]}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"a","type":"text","x":1.0,"y":2.0}],"edges":[]}"#,
     ));
     let node = &scene.nodes[0];
     assert_eq!(node.width, DEFAULT_NODE_WIDTH);
@@ -186,7 +216,7 @@ fn node_defaults_match_contracts() {
 #[test]
 fn parses_group_presentation() {
     let scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"g","type":"group","x":0.0,"y":0.0,"width":400.0,"height":300.0,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"g","type":"group","x":0.0,"y":0.0,"width":400.0,"height":300.0,
             "group":{"title":"镜头发散","memberCount":3,"outputCapableLeafCount":2}}],"edges":[]}"#,
     ));
     let group = scene.nodes[0].group.as_ref().expect("group presentation");
@@ -201,7 +231,7 @@ fn parses_film_set_presentation() {
     // 片场纯模型呈现：frontend 以 camelCase `compositeAsset` 下发，含媒体平面；必须被反序列化
     // （change: 2026-10-08-make-film-set-model-only）。回归此前的键名不匹配缺陷。
     let scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"fs","type":"model","x":10.0,"y":20.0,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"fs","type":"model","x":10.0,"y":20.0,
             "compositeAsset":{"x":1.0,"y":2.0,"width":3.0,"height":4.0,"media":[
               {"id":"fs::img","kind":"image","x":1.0,"y":2.0,"z":3.0,"width":10.0,"height":5.0,"yaw":0.0,"hasTexture":true}
             ]}}],"edges":[]}"#,
@@ -231,7 +261,7 @@ fn parses_film_set_scope_shape_and_rejects_unknown() {
     // 不得静默降级为与前端视觉不一致的矩形
     // （change: 2026-10-12-align-film-set-scope-with-isometric-grid，design D3/D8）。
     let diamond = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
             "compositeAsset":{"x":0.0,"y":0.0,"width":260.0,"height":195.0,"scopeShape":"isometric-diamond","scopeGround":{"cx":130.0,"cy":97.5,"hx":40.0,"hz":40.0}}}],"edges":[]}"#,
     ));
     let film_set = diamond.nodes[0].composite_asset.as_ref().expect("film set");
@@ -249,7 +279,7 @@ fn parses_film_set_scope_shape_and_rejects_unknown() {
     // 未知形状：反序列化失败（不是默认成 rect）。
     let unknown = std::panic::catch_unwind(|| {
         parse(
-            r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
+            r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
                 "compositeAsset":{"x":0.0,"y":0.0,"width":260.0,"height":195.0,"scopeShape":"hexagon"}}],"edges":[]}"#,
         )
     });
@@ -262,7 +292,7 @@ fn parses_film_set_geometry_quality_and_rejects_unknown() {
     // 不得静默忽略为 World 一律 High。缺失即 None，World 用途保持 High，普通内容不写入
     // （change: 2026-10-15-add-film-set-overview-lod，design D1）。
     let declared = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
             "compositeAsset":{"x":0.0,"y":0.0,"width":260.0,"height":195.0,"geometryQuality":"overview-primitives-v1"}}],"edges":[]}"#,
     ));
     let film_set = declared.nodes[0]
@@ -277,7 +307,7 @@ fn parses_film_set_geometry_quality_and_rejects_unknown() {
 
     // 未声明：None（World 用途保持 High）。
     let absent = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
             "compositeAsset":{"x":0.0,"y":0.0,"width":260.0,"height":195.0}}],"edges":[]}"#,
     ));
     assert!(
@@ -292,7 +322,7 @@ fn parses_film_set_geometry_quality_and_rejects_unknown() {
     // 未知策略：反序列化失败（不是默认成 None）。
     let unknown = std::panic::catch_unwind(|| {
         parse(
-            r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
+            r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"fs","type":"model","x":0.0,"y":0.0,
                 "compositeAsset":{"x":0.0,"y":0.0,"width":260.0,"height":195.0,"geometryQuality":"overview-primitives-v2"}}],"edges":[]}"#,
         )
     });
@@ -357,7 +387,7 @@ fn texture_length_is_checked() {
 /// V1 模型引用现在应被边界拒绝（change: 2026-10-07-remove-residual-compatibility）。
 #[test]
 fn rejects_v1_model_reference_version() {
-    let json = r##"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"g1","type":"model","x":0,"y":0,"model":{"sceneVersion":"woohaa-model-scene-ir-v1","resourceKey":"woohaa-model-scene-ir-v1:abc123","signature":"abc123","placement":{"offset":{"x":1,"y":0,"z":0},"scale":2,"yaw":0}}}],"edges":[]}"##;
+    let json = r##"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"g1","type":"model","x":0,"y":0,"model":{"sceneVersion":"woohaa-model-scene-ir-v1","resourceKey":"woohaa-model-scene-ir-v1:abc123","signature":"abc123","placement":{"offset":{"x":1,"y":0,"z":0},"scale":2,"yaw":0}}}],"edges":[]}"##;
     // 引用本身可反序列化（保留原始权威记录），但资源注册边界拒绝 V1 版本。
     let scene = parse(&with_theme(json));
     let model = scene.nodes[0].model.as_ref().expect("model");
@@ -454,7 +484,7 @@ fn theme_json() -> String {
 fn missing_theme_is_rejected_at_boundary() {
     // change: 2026-10-07-remove-residual-compatibility —— 不再回退 generated 默认；
     // 缺少 theme 的 scene 在接受点被拒绝（反序列化即失败）。
-    let json = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[]}"#;
+    let json = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[]}"#;
     assert!(serde_json::from_str::<Scene>(json).is_err());
 }
 
@@ -479,7 +509,7 @@ fn parses_full_theme_snapshot() {
 
 #[test]
 fn rejects_unknown_theme_version() {
-    let json = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"theme":{"id":"x","version":"woohaa-app-theme-v0","fingerprint":"00","tokens":{}}}"#;
+    let json = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"theme":{"id":"x","version":"woohaa-app-theme-v0","fingerprint":"00","tokens":{}}}"#;
     assert!(serde_json::from_str::<Scene>(json).is_err());
 }
 
@@ -492,7 +522,7 @@ fn rejects_malformed_or_injected_theme_colors() {
         "#fff",
         "red",
     ] {
-        let json = r##"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"theme":{"id":"x","version":"__V__","fingerprint":"00","tokens":{"interactionAccent":"__C__"}}}"##
+        let json = r##"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"theme":{"id":"x","version":"__V__","fingerprint":"00","tokens":{"interactionAccent":"__C__"}}}"##
             .replace("__V__", crate::theme_generated::APP_THEME_SCHEMA_VERSION)
             .replace("__C__", value);
         assert!(
@@ -504,7 +534,7 @@ fn rejects_malformed_or_injected_theme_colors() {
 
 #[test]
 fn rejects_unknown_theme_token() {
-    let json = r##"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"theme":{"id":"x","version":"__V__","fingerprint":"00","tokens":{"bogusToken":"#ffffff"}}}"##
+    let json = r##"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"theme":{"id":"x","version":"__V__","fingerprint":"00","tokens":{"bogusToken":"#ffffff"}}}"##
         .replace("__V__", crate::theme_generated::APP_THEME_SCHEMA_VERSION);
     assert!(serde_json::from_str::<Scene>(&json).is_err());
 }
@@ -520,7 +550,7 @@ fn theme_hex_parser_matches_contracts() {
 
 fn focus_json(extra: &str) -> String {
     format!(
-        r#"{{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelFocus":{{"version":"woohaa-model-focus-v1","nodeId":"n1","target":[0,1,0],"yaw":0.2,"pitch":-0.3,"distance":12.5,"fov":0.87{extra}}}}}"#
+        r#"{{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelFocus":{{"version":"woohaa-model-focus-v1","nodeId":"n1","target":[0,1,0],"yaw":0.2,"pitch":-0.3,"distance":12.5,"fov":0.87{extra}}}}}"#
     )
 }
 
@@ -535,11 +565,11 @@ fn parses_model_focus_projection() {
 #[test]
 fn rejects_invalid_model_focus() {
     // 未知版本：解析通过但校验失败（防御校验在 validate）。
-    let bad_version = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelFocus":{"version":"woohaa-model-focus-v0","nodeId":"n1","target":[0,1,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}}"#;
+    let bad_version = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelFocus":{"version":"woohaa-model-focus-v0","nodeId":"n1","target":[0,1,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}}"#;
     let parsed: Scene = parse(&with_theme(bad_version));
     assert!(parsed.validate().is_err());
     // 非有限 target。
-    let ok = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelFocus":{"version":"woohaa-model-focus-v1","nodeId":"n1","target":[0,1,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}}"#;
+    let ok = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelFocus":{"version":"woohaa-model-focus-v1","nodeId":"n1","target":[0,1,0],"yaw":0,"pitch":0,"distance":10,"fov":0.87}}"#;
     let mut parsed: Scene = parse(&with_theme(ok));
     parsed.model_focus.as_mut().unwrap().target[0] = f32::NAN;
     assert!(parsed.validate().is_err());
@@ -555,7 +585,7 @@ fn rejects_invalid_model_focus() {
 fn scene_without_model_focus_keeps_normal_canvas() {
     // 缺省字段：普通正交画布（不报错、无聚焦）。
     let scene: Scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[]}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[]}"#,
     ));
     assert!(scene.model_focus.is_none());
     assert!(scene.model_editor.is_none());
@@ -569,7 +599,7 @@ fn scene_without_model_focus_keeps_normal_canvas() {
 #[test]
 fn parses_marquee() {
     let scene: Scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"marquee":{"x":10.0,"y":20.0,"width":100.0,"height":-50.0}}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"marquee":{"x":10.0,"y":20.0,"width":100.0,"height":-50.0}}"#,
     ));
     let marquee = scene.marquee.as_ref().expect("marquee");
     assert_eq!((marquee.x, marquee.y), (10.0, 20.0));
@@ -579,7 +609,7 @@ fn parses_marquee() {
 
 #[test]
 fn parses_and_validates_model_editor() {
-    let json = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","cameraTool":"orbit","cameraId":"cam-a","focus":[0,1,0],"radius":2.0,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0.4,"elevation":0.785,"distance":5.0,"aspect":"1:1"}}}"#;
+    let json = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","cameraTool":"orbit","cameraId":"cam-a","focus":[0,1,0],"radius":2.0,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0.4,"elevation":0.785,"distance":5.0,"aspect":"1:1"}}}"#;
     let scene: Scene = parse(&with_theme(json));
     assert!(scene.validate().is_ok());
     let editor = scene.model_editor.as_ref().expect("editor");
@@ -587,7 +617,7 @@ fn parses_and_validates_model_editor() {
     assert_eq!(editor.camera_tool.as_deref(), Some("orbit"));
     assert_eq!(editor.shot.as_ref().unwrap().aspect, "1:1");
     // 缺省 aspect 兼容读取为 16:9。
-    let legacy = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2.0,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0.4,"elevation":0.785,"distance":5.0}}}"#;
+    let legacy = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2.0,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0.4,"elevation":0.785,"distance":5.0}}}"#;
     let scene: Scene = parse(&with_theme(legacy));
     assert!(scene.validate().is_ok());
     assert_eq!(
@@ -608,7 +638,7 @@ fn accepts_expanded_shot_aspects() {
     // 与 Web `MODEL_CAMERA_ASPECTS` 并集一致：每个画幅都能通过边界校验并解析出正比例。
     for &aspect in crate::protocol::SUPPORTED_SHOT_ASPECTS {
         let json = format!(
-            r#"{{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0,"elevation":0.785,"distance":5,"aspect":"{aspect}"}}}}}}"#
+            r#"{{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0,"elevation":0.785,"distance":5,"aspect":"{aspect}"}}}}}}"#
         );
         let scene: Scene = parse(&with_theme(&json));
         assert!(scene.validate().is_ok(), "aspect {aspect} 应通过校验");
@@ -621,27 +651,27 @@ fn accepts_expanded_shot_aspects() {
 #[test]
 fn rejects_invalid_model_editor() {
     // 未知版本。
-    let bad = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v0","nodeId":"m1","toolMode":"model","focus":[0,1,0],"radius":2}}"#;
+    let bad = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v0","nodeId":"m1","toolMode":"model","focus":[0,1,0],"radius":2}}"#;
     let parsed: Scene = parse(&with_theme(bad));
     assert!(parsed.validate().is_err());
     // 未知工具模式。
-    let bad_mode = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"scale","focus":[0,1,0],"radius":2}}"#;
+    let bad_mode = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"scale","focus":[0,1,0],"radius":2}}"#;
     let parsed: Scene = parse(&with_theme(bad_mode));
     assert!(parsed.validate().is_err());
     // 未知镜头工具 / 未知画幅。
-    let bad_tool = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","cameraTool":"roll","focus":[0,1,0],"radius":2}}"#;
+    let bad_tool = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","cameraTool":"roll","focus":[0,1,0],"radius":2}}"#;
     let parsed: Scene = parse(&with_theme(bad_tool));
     assert!(parsed.validate().is_err());
-    let bad_aspect = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0,"elevation":0.785,"distance":5,"aspect":"7:3"}}}"#;
+    let bad_aspect = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0.87,"azimuth":0,"elevation":0.785,"distance":5,"aspect":"7:3"}}}"#;
     let parsed: Scene = parse(&with_theme(bad_aspect));
     assert!(parsed.validate().is_err());
     // 非有限几何。
-    let ok = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"model","focus":[0,1,0],"radius":2}}"#;
+    let ok = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"model","focus":[0,1,0],"radius":2}}"#;
     let mut parsed: Scene = parse(&with_theme(ok));
     parsed.model_editor.as_mut().unwrap().focus[1] = f32::NAN;
     assert!(parsed.validate().is_err());
     // 非法 shot 尺寸。
-    let bad_shot = r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0,"azimuth":0,"elevation":0.785,"distance":5}}}"#;
+    let bad_shot = r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"modelEditor":{"version":"woohaa-model-editor-v2","nodeId":"m1","toolMode":"camera","focus":[0,1,0],"radius":2,"shot":{"position":[1,2,1],"focus":[0,1,0],"fov":0,"azimuth":0,"elevation":0.785,"distance":5}}}"#;
     let parsed: Scene = parse(&with_theme(bad_shot));
     assert!(parsed.validate().is_err());
 }
@@ -650,13 +680,13 @@ fn rejects_invalid_model_editor() {
 fn hover_defaults_to_absent_and_parses_when_present() {
     // 缺省：所有端点静止不绘制（change: add-node-endpoint-hover）。
     let scene: Scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[]}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[]}"#,
     ));
     assert!(scene.hover.is_none());
     assert!(scene.validate().is_ok());
     // 携带节点悬停但无端点侧：port 缺省为 None。
     let card: Scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"hover":{"nodeId":"n1"}}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"hover":{"nodeId":"n1"}}"#,
     ));
     let hover = card.hover.as_ref().expect("hover");
     assert_eq!(hover.node_id.as_deref(), Some("n1"));
@@ -665,7 +695,7 @@ fn hover_defaults_to_absent_and_parses_when_present() {
     assert!(card.validate().is_ok());
     // 携带端点侧。
     let port: Scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"hover":{"nodeId":"n1","port":"output"}}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"hover":{"nodeId":"n1","port":"output"}}"#,
     ));
     assert_eq!(
         port.hover.as_ref().and_then(|h| h.port.as_deref()),
@@ -674,7 +704,7 @@ fn hover_defaults_to_absent_and_parses_when_present() {
     assert!(port.validate().is_ok());
     // 连线悬停（change: add-edge-hover-delete）。
     let edge: Scene = parse(&with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[],"edges":[],"hover":{"edgeId":"e1"}}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[],"edges":[],"hover":{"edgeId":"e1"}}"#,
     ));
     let hover = edge.hover.as_ref().expect("hover");
     assert_eq!(hover.edge_id.as_deref(), Some("e1"));
@@ -688,12 +718,22 @@ fn capabilities_are_independent_of_palette_and_old_renderer_contract_is_rejected
     scene.nodes = serde_json::from_value(serde_json::json!([
         {"id":"new","type":"node","x":0,"y":0,
         "modelPreview":{"azimuth":0,"elevation":0.5,"distanceScale":1}}
-    ])).unwrap();
+    ]))
+    .unwrap();
     assert!(scene.validate().is_ok());
-    scene.nodes[0].model_preview.as_mut().unwrap().distance_scale = 0.;
+    scene.nodes[0]
+        .model_preview
+        .as_mut()
+        .unwrap()
+        .distance_scale = 0.;
     assert_eq!(scene.validate(), Err("Invalid model preview"));
-    scene.nodes[0].model_preview.as_mut().unwrap().distance_scale = 1.;
-    scene.nodes[0].group = Some(serde_json::from_value(serde_json::json!({"memberCount":0})).unwrap());
+    scene.nodes[0]
+        .model_preview
+        .as_mut()
+        .unwrap()
+        .distance_scale = 1.;
+    scene.nodes[0].group =
+        Some(serde_json::from_value(serde_json::json!({"memberCount":0})).unwrap());
     assert_eq!(scene.validate(), Err("Invalid model preview"));
     scene.nodes[0].group = None;
     scene.version = "woohaa-canvas-render-scene-v26".into();
@@ -703,7 +743,7 @@ fn capabilities_are_independent_of_palette_and_old_renderer_contract_is_rejected
 #[test]
 fn empty_placeholder_is_optional_strict_and_versioned() {
     let valid = with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"empty","type":"model","x":0,"y":0,"compositeAsset":{"x":0,"y":0,"width":200,"height":150,"emptyPlaceholder":"brand-plinth-v1"}}],"edges":[]}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"empty","type":"model","x":0,"y":0,"compositeAsset":{"x":0,"y":0,"width":200,"height":150,"emptyPlaceholder":"brand-plinth-v1"}}],"edges":[]}"#,
     );
     let accepted = parse(&valid);
     assert!(accepted.validate().is_ok());
@@ -730,7 +770,7 @@ fn empty_placeholder_is_optional_strict_and_versioned() {
             .is_none()
     );
     let old = parse(&valid.replace(
-        "woohaa-canvas-render-scene-v29",
+        "woohaa-canvas-render-scene-v30",
         "woohaa-canvas-render-scene-v26",
     ));
     assert!(old.validate().is_err());
@@ -740,13 +780,13 @@ fn empty_placeholder_is_optional_strict_and_versioned() {
 #[cfg(feature = "canvas-core")]
 fn rejected_placeholder_frame_retains_accepted_scene_and_generation() {
     let valid = with_theme(
-        r#"{"version":"woohaa-canvas-render-scene-v29","nodes":[{"id":"empty","type":"model","x":0,"y":0,"compositeAsset":{"x":0,"y":0,"width":200,"height":150,"emptyPlaceholder":"brand-plinth-v1"}}],"edges":[]}"#,
+        r#"{"version":"woohaa-canvas-render-scene-v30","nodes":[{"id":"empty","type":"model","x":0,"y":0,"compositeAsset":{"x":0,"y":0,"width":200,"height":150,"emptyPlaceholder":"brand-plinth-v1"}}],"edges":[]}"#,
     );
     let generation = crate::set_scene(&valid).unwrap();
     for invalid in [
         valid.replace("brand-plinth-v1", "unknown"),
         valid.replace(
-            "woohaa-canvas-render-scene-v29",
+            "woohaa-canvas-render-scene-v30",
             "woohaa-canvas-render-scene-v26",
         ),
         valid.replace("200", "1e40"),
@@ -778,28 +818,49 @@ fn group_model_bounds_are_validated_and_previous_scene_is_rejected() {
             "group":{"modelBounds":{"aabb":{"min":[-1,-1,-1],"max":[1,1,1]},"extent":2}}
         }]
     });
-    let validate_value = |value:&serde_json::Value| parse(&value.to_string()).validate();
+    let validate_value = |value: &serde_json::Value| parse(&value.to_string()).validate();
     assert!(validate_value(&valid).is_ok());
-    let mut bad=valid.clone();bad["nodes"][0]["group"]["modelBounds"]["extent"]=serde_json::json!(0);
-    assert_eq!(validate_value(&bad),Err("Invalid group model bounds"));
-    bad=valid.clone();bad["nodes"][0]["group"]["modelBounds"]["aabb"]["min"][0]=serde_json::json!(3);
-    assert_eq!(validate_value(&bad),Err("Invalid group model bounds"));
-    bad=valid.clone();bad["nodes"][0].as_object_mut().unwrap().remove("model");
-    assert_eq!(validate_value(&bad),Err("Invalid group model bounds"));
-    bad=valid;bad["version"]=serde_json::json!("woohaa-canvas-render-scene-v26");
-    assert_eq!(validate_value(&bad),Err("Unsupported canvas render scene version"));
+    let mut bad = valid.clone();
+    bad["nodes"][0]["group"]["modelBounds"]["extent"] = serde_json::json!(0);
+    assert_eq!(validate_value(&bad), Err("Invalid group model bounds"));
+    bad = valid.clone();
+    bad["nodes"][0]["group"]["modelBounds"]["aabb"]["min"][0] = serde_json::json!(3);
+    assert_eq!(validate_value(&bad), Err("Invalid group model bounds"));
+    bad = valid.clone();
+    bad["nodes"][0].as_object_mut().unwrap().remove("model");
+    assert_eq!(validate_value(&bad), Err("Invalid group model bounds"));
+    bad = valid;
+    bad["version"] = serde_json::json!("woohaa-canvas-render-scene-v26");
+    assert_eq!(
+        validate_value(&bad),
+        Err("Unsupported canvas render scene version")
+    );
 }
 
 #[test]
-fn badge_scale_is_bounded_and_previous_scene_is_rejected() {
+fn badge_scale_has_no_upper_bound_and_previous_scene_is_rejected() {
     let valid = serde_json::json!({"version":CANVAS_RENDER_SCENE_VERSION,"edges":[],"nodes":[
         {"id":"g","type":"group","x":0,"y":0,"group":{"badgeScale":2.,"badgeResizable":true}}
     ]});
     assert!(parse(&valid.to_string()).validate().is_ok());
-    for value in [0.49, 2.51] {
-        let mut bad=valid.clone(); bad["nodes"][0]["group"]["badgeScale"]=serde_json::json!(value);
-        assert_eq!(parse(&bad.to_string()).validate(), Err("Invalid group badge scale"));
+    // 只保底 0.5 倍、不设上限：片场场景要能放大到远大于承载它的组。
+    for value in [0.49, 0., -1.] {
+        let mut bad = valid.clone();
+        bad["nodes"][0]["group"]["badgeScale"] = serde_json::json!(value);
+        assert_eq!(
+            parse(&bad.to_string()).validate(),
+            Err("Invalid group badge scale")
+        );
     }
-    let mut old=valid; old["version"]=serde_json::json!("woohaa-canvas-render-scene-v28");
+    for value in [2.51, 3., 250., 1e6] {
+        let mut ok = valid.clone();
+        ok["nodes"][0]["group"]["badgeScale"] = serde_json::json!(value);
+        assert!(
+            parse(&ok.to_string()).validate().is_ok(),
+            "{value} 应被接受"
+        );
+    }
+    let mut old = valid;
+    old["version"] = serde_json::json!("woohaa-canvas-render-scene-v28");
     assert!(parse(&old.to_string()).validate().is_err());
 }

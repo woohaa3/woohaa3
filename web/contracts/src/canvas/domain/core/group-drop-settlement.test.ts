@@ -18,6 +18,16 @@ const group = (id: string, x: number, y: number, extra: Partial<Woohaa3CanvasNod
 const byId = (nodes: readonly Woohaa3CanvasNode[]) => new Map(nodes.map((node) => [node.id, node]));
 
 describe("frozen group drop geometry", () => {
+  it("collapsed backplates leave space free while scaled badges remain occupied", () => {
+    const nodes = [group("g", 0, 0), image("n", 600, 600)];
+    const options = { eligibleGroupIds: new Set<string>(), collapsedGroupIds: new Set(["g"]), groupBadgeScales: new Map([["g", 2]]) };
+    const free = settleDraggedNodeBoundaries(nodes, ["n"], new Map([["n", {x: 100, y: 130}]]), options);
+    expect(free.ok).toBe(true);
+    expect(free.nodes.find(node => node.id === "n")?.position).toEqual({x: 100, y: 130});
+    const occupied = settleDraggedNodeBoundaries(nodes, ["n"], new Map([["n", {x: 100, y: 280}]]), options);
+    expect(occupied.ok).toBe(true);
+    expect(occupied.nodes.find(node => node.id === "n")?.position).not.toEqual({x: 100, y: 280});
+  });
   it("clamps an in-frame center at the structural boundary without refitting", () => {
     const nodes = [group("g", 0, 0, { width: 300, height: 220 }), image("n", 600, 600)];
     const result = settleDraggedNodeBoundaries(nodes, ["n"], new Map([["n", { x: 200, y: 120 }]]), {

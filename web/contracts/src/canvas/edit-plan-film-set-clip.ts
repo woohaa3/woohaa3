@@ -1,3 +1,4 @@
+import { readFilmSetGroupMarker } from "./film-set-group.js";
 /**
  * 拍摄镜头净差异规划：源镜头定义 + 受影响预览的完整布局闭包
  * （change: 2026-10-15-add-film-set-shooting-shot-previews，任务 2.5 / design D3）。
@@ -42,6 +43,21 @@ export function planFilmSetClipDiffs(
 ): FilmSetClipPlanPiece {
   const piece: FilmSetClipPlanPiece = { forwardOps: [], inverseOps: [], forwardPre: [], inversePre: [] };
   for (const node of commonNodes) {
+    const beforeGroup = node.type === "group" ? readFilmSetGroupMarker(before.nodeData[node.id]) : null;
+    const afterGroup = node.type === "group" ? readFilmSetGroupMarker(after.nodeData[node.id]) : null;
+    if (beforeGroup && afterGroup) {
+      // Marker edits already have protected field snapshots. Preserve derived preview
+      // layouts on both replay directions without writing a legacy clip snapshot.
+      const beforeIds = new Set((beforeGroup.clips ?? []).map(clip => clip.id));
+      const afterIds = new Set((afterGroup.clips ?? []).map(clip => clip.id));
+      for (const id of afterIds) if (!beforeIds.has(id)) pushPreviewAdd(piece.forwardOps, piece.forwardPre, after, node.id, id);
+      for (const id of beforeIds) if (!afterIds.has(id)) {
+        pushPreviewAdd(piece.inverseOps, piece.inversePre, before, node.id, id);
+        const preview = existingPreview(before, node.id, id);
+        if (preview) piece.forwardPre.push({ kind: "film-set-shot-preview-state", previewNodeId: preview.id, filmSetNodeId: node.id, clipId: id });
+      }
+      continue;
+    }
     if (!isFilmSetNode(node.type, after.nodeData[node.id] ?? before.nodeData[node.id])) continue;
     const beforeAnimation = animationForPlan(before, node.id);
     const afterAnimation = animationForPlan(after, node.id);

@@ -10,20 +10,20 @@
 //! `canvas2d` 渲染模块复用同一套函数，确保「画在哪、点在哪」一致，且删除 48/64 段差异。
 #![cfg_attr(not(feature = "canvas-core"), allow(dead_code))]
 
-pub(crate) mod focus_context;
-pub(crate) mod group_model;
 pub(crate) mod aggregate;
 pub(crate) mod composite_panel;
 pub(crate) mod curve;
 pub(crate) mod film_set_pick;
+pub(crate) mod focus_context;
 pub(crate) mod gizmo;
+pub(crate) mod group_model;
 pub(crate) mod interaction;
 pub(crate) mod layout;
-pub(crate) mod model_pick;
 pub(crate) mod media_focus;
+pub(crate) mod model_pick;
+mod position_basis;
 pub(crate) mod scope;
 pub(crate) mod shot_preview;
-mod position_basis;
 
 /// 记录一次合法 `set_scene` 并在同一接受点同步发布 interaction snapshot。
 #[cfg(feature = "canvas-core")]

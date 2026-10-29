@@ -303,8 +303,8 @@ fn group_anchor_centers_model_inside_bottom_footer() {
         card_label: None,
         group: Some(crate::protocol::GroupPresentation {
             collapsed: false,
-                badge_scale: 1.,
-                badge_resizable: false,
+            badge_scale: 1.,
+            badge_resizable: false,
             title: String::new(),
             member_count: 0,
             output_capable_leaf_count: 0,

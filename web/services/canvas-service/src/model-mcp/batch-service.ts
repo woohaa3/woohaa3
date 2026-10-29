@@ -1,3 +1,4 @@
+import { isFilmSetGroupNode } from "@woohaa3/contracts";
 import {
   applyCanvasCommands,
   decodeModelContentVersion,
@@ -93,6 +94,9 @@ function checkTargets(
     if (!node) {
       code = "unknown-node";
       message = "节点不存在";
+    } else if (isFilmSetGroupNode(node, data)) {
+      code = "film-set-top-level-model";
+      message = "请编辑片场引用的模型资源卡片";
     } else if (!isModelAuthoringNodeType(node.type)) {
       code = "invalid-node-type";
       message = "目标不是模型节点";

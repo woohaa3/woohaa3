@@ -175,9 +175,13 @@ pub(super) fn build(
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_indices(Indices::U32(indices));
-    let source_buffer_bytes = source_meshes.values().flatten().map(|(_, mesh)| {
-        mesh.get_vertex_buffer_size() + mesh.indices().map_or(0, |indices| indices.len() * 4)
-    }).sum();
+    let source_buffer_bytes = source_meshes
+        .values()
+        .flatten()
+        .map(|(_, mesh)| {
+            mesh.get_vertex_buffer_size() + mesh.indices().map_or(0, |indices| indices.len() * 4)
+        })
+        .sum();
     Some(BuiltBatch {
         source_mesh_builds,
         source_buffer_bytes,
@@ -214,8 +218,8 @@ mod tests {
         let batch = build(&plans[0], &specs, Quality::High).unwrap();
         assert_eq!(batch.ranges.len(), 8);
         assert_eq!(batch.source_mesh_builds, 1);
-        let buffer_bytes = batch.mesh.get_vertex_buffer_size()
-            + batch.mesh.indices().unwrap().len() * 4;
+        let buffer_bytes =
+            batch.mesh.get_vertex_buffer_size() + batch.mesh.indices().unwrap().len() * 4;
         assert_eq!(buffer_bytes, batch.source_buffer_bytes * 8);
         assert_eq!(batch.min, Vec3::new(-1., -0.5, -0.25));
         assert_eq!(batch.max, Vec3::new(8., 0.5, 0.25));

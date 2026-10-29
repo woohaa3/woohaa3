@@ -97,7 +97,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
         const node = canvas?.document.nodes.find(entry => entry.id === nodeId);
         if (!node) return { ok: false, reason: "该作品已被删除，无法查看版本" };
-        return nodeHistoryKindForNodeType(node.type) ? { ok: true } : { ok: false, reason: "该类型暂不支持节点版本" };
+        return nodeHistoryKindForNodeType(node.type, canvas?.nodeData[node.id]) ? { ok: true } : { ok: false, reason: "该类型暂不支持节点版本" };
       };
       const openNodeVersion = (item: { nodeId: string; entryId: string }) => {
         // Revalidate after the center closes. Never restore or write content here.
@@ -154,7 +154,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
         const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
         if (!node) return;
-        const kind = nodeHistoryKindForNodeType(node.type);
+        const kind = nodeHistoryKindForNodeType(node.type, canvas?.nodeData[node.id]);
         if (!kind) return;
         if (kind === "model" || kind === "image" || kind === "video") openNodeHistoryEntry(nodeId, kind);
         else ctx.canvasNavigation.openPanel({ type: NODE_HISTORY_PANEL_TYPE, nodeId });
@@ -169,7 +169,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
           if (!state || state.nodeId !== route.nodeId) {
             const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
             const node = canvas?.document.nodes.find((entry) => entry.id === route.nodeId);
-            const kind = node ? nodeHistoryKindForNodeType(node.type) : null;
+            const kind = node ? nodeHistoryKindForNodeType(node.type, canvas?.nodeData[node.id]) : null;
             if (kind) {
               void controller.open({ canvasId, nodeId: route.nodeId, kind, writable: ctx.canvasSession.isWritable() }).then(() => {
                 syncOperations();
@@ -200,7 +200,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         if (route?.type !== NODE_HISTORY_PANEL_TYPE) return;
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
         const node = canvas?.document.nodes.find((entry) => entry.id === route.nodeId);
-        const kind = node ? nodeHistoryKindForNodeType(node.type) : null;
+        const kind = node ? nodeHistoryKindForNodeType(node.type, canvas?.nodeData[node.id]) : null;
         if ((kind === "model" || kind === "image" || kind === "video")
           && ctx.canvasNavigation.getSnapshot().mode.type === "node-focus") void ctx.canvasNavigation.requestCloseNodeHistory();
         else ctx.canvasNavigation.closePanel(NODE_HISTORY_PANEL_TYPE);
@@ -504,7 +504,7 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
       (globalThis as unknown as { __openNodeHistory?: unknown }).__openNodeHistory = (nodeId: string) => {
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
         const node = canvas?.document.nodes.find((entry) => entry.id === nodeId);
-        const kind = node ? nodeHistoryKindForNodeType(node.type) : null;
+        const kind = node ? nodeHistoryKindForNodeType(node.type, canvas?.nodeData[node.id]) : null;
         if (kind === "model" || kind === "image" || kind === "video") openNodeHistoryEntry(nodeId, kind);
         else ctx.canvasNavigation.openPanel({ type: NODE_HISTORY_PANEL_TYPE, nodeId });
       };

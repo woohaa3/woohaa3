@@ -18,6 +18,7 @@ export type CompositeAssetAdapter = {
   showEmptyPlaceholder?(nodeId: string, data: CanvasNodeData): boolean;
   extensionId: string;
   owner: string;
+  matchesNode?(node: ServerCanvas["document"]["nodes"][number], data: CanvasNodeData): boolean;
   /**
    * 业务类型显示名（如「片场」「游戏炼丹炉」）。
    *
@@ -67,6 +68,8 @@ export type CompositeAssetAdapter = {
   captureOrigin?(nodeId: string, cameraId: string): import("./model-workspace.js").ModelCaptureOrigin | null;
   awaitCaptureReady?(nodeId: string): Promise<boolean>;
   /** Business owner decides whether explicit frame capture is available for this target. */
+  /** Freeze extension content for one capture; caller releases after the final readback. */
+  beginCapture?(nodeId: string): () => void;
   captureEnabled?(nodeId: string, cameraId: string): boolean;
   /** Optional pure lifecycle planner for extension-owned managed media/entities. */
   managedLifecycle?: ManagedNodeLifecycleAdapter;
@@ -112,7 +115,9 @@ export class CompositeAssetRegistry {
   /** Resolve an actual node from this canvas without searching the document again. */
   resolveNode(canvas: ServerCanvas, node: ServerCanvas["document"]["nodes"][number]): CompositeAssetAdapter | null {
     const identity = canvas.nodeData[node.id]?.extensionId;
-    return node.type === "composite-asset" && typeof identity === "string" ? this.adapters.get(identity) ?? null : null;
+    for (const adapter of this.adapters.values()) if (adapter.matchesNode?.(node, canvas.nodeData[node.id])) return adapter;
+    const adapter = node.type === "composite-asset" && typeof identity === "string" ? this.adapters.get(identity) : null;
+    return adapter && !adapter.matchesNode ? adapter : null;
   }
   setProjection(nodeId: string, projection: CompositeAssetProjection | null, owner?: string): void {
     if (projection) { this.projections.set(nodeId, projection); if (owner) this.projectionOwners.set(nodeId, owner); }
@@ -277,7 +282,13 @@ export class CompositeAssetRegistry {
         ...(Object.keys(targetItemIds).length ? { targetItemIds } : {}) };
     }
     // Managed entities share the same ownership links as containers. Their media/shot renderer stays intact.
-    scene.shotPreviewLinks = scene.shotPreviewLinks?.filter(link => !children.has(link.previewNodeId)) ?? [];
+    //
+    // 只有**片场复合资产**（composite-asset）内部的预览卡片才不需要镜头归属线：它们与其它子对象
+    // 共用同一条 `ownershipLinks`，位置在复合场景里自洽。片场 group 是另一回事：预览卡片虽然
+    // 由 group 托管（出现在 `children()` 里），但它浮在画布上、与徽标相隔很远，归属线是唯一
+    // 的关联呈现——按子节点一律过滤会把 group 片场的归属线全部抹掉。
+    const compositeOwnerIds = new Set([...nodes.values()].filter(node => node.compositeAsset).map(node => node.id));
+    scene.shotPreviewLinks = scene.shotPreviewLinks?.filter(link => !(children.has(link.previewNodeId) && compositeOwnerIds.has(link.ownerNodeId))) ?? [];
   }
   blocksFocusInput(): boolean { return [...this.adapters.values()].some(adapter => adapter.blocksFocusInput?.()); }
   keydown(event: KeyboardEvent, canvas: ServerCanvas | null, nodeId: string | null): boolean { return nodeId ? this.resolve(canvas, nodeId)?.keydown?.(event, nodeId) ?? false : false; }

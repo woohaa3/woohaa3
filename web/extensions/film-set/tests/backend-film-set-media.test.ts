@@ -1,3 +1,4 @@
+import { type FilmSetContent, migrateLegacyFilmSetToGroup, readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 /**
  * 片场媒体条目受控导入（change: 2026-10-19-extend-film-set-for-motion-graphics，D5）。
@@ -11,12 +12,10 @@ import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
   createFilmSetSnapshot,
-  decodeFilmSetNodeData,
   filmSetContentHash,
   filmSetNodeDataFields,
   type CanvasAuthority,
   type CanvasNodeData,
-  type FilmSetContent,
   type ServerCanvas,
   type StoredAsset
 } from "@woohaa3/contracts";
@@ -84,7 +83,9 @@ function baseCanvas(assets: StoredAsset[] = [imageAsset(), videoAsset()]): Serve
 
 /** 进程内伪权威：命令走真实 reducer，保留幂等 commandId 语义。 */
 function authority(initial: ServerCanvas = baseCanvas()): CanvasAuthority & { canvas(): ServerCanvas } {
-  let current = initial;
+  const migrated = migrateLegacyFilmSetToGroup(initial, "film", { commandId: "fixture", groupId: "film" });
+  if (!migrated.ok) throw new Error(migrated.reason);
+  let current = migrated.canvas;
   const seen = new Set<string>();
   return {
     canvas: () => current,
@@ -113,8 +114,7 @@ function service(room: CanvasAuthority): FilmSetMediaService {
 }
 
 function contentOf(room: CanvasAuthority & { canvas(): ServerCanvas }): FilmSetContent {
-  const decoded = decodeFilmSetNodeData(room.canvas().nodeData.film);
-  if (!decoded.ok) throw new Error(decoded.reason);
+  const decoded = ({ ok: true as const, value: readFilmSetAnimationProjection(room.canvas(), "film")! });
   return decoded.value.filmSetContent;
 }
 
@@ -128,8 +128,8 @@ describe("add_film_set_media（D5）", () => {
     expect(outcome.itemKind).toBe("image");
     const item = contentOf(room).items.find(entry => entry.id === outcome.itemId);
     expect(item).toMatchObject({ kind: "image", assetId: "asset-image", aspectRatio: 1600 / 900 });
-    expect(item && "origin" in item ? item.origin?.sourceNodeId : undefined).toBe("img");
-    expect(room.canvas().document.nodes.find(node => node.id === "img")).toEqual(sourceBefore);
+    expect(room.canvas().nodeData.film.filmSetGroup?.sceneBindings.find(binding => binding.bindingId === outcome.itemId)?.sourceNodeId).toBe("img");
+    expect(room.canvas().document.nodes.find(node => node.id === "img")).toEqual({ ...sourceBefore, parentId: "film" });
   });
 
   it("imports a ready video and extends an existing dynamic timeline with its duration", async () => {
@@ -138,8 +138,7 @@ describe("add_film_set_media（D5）", () => {
     expect(outcome.ok, outcome.ok ? "" : outcome.message).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.itemKind).toBe("video");
-    const decoded = decodeFilmSetNodeData(room.canvas().nodeData.film);
-    if (!decoded.ok) throw new Error(decoded.reason);
+    const decoded = ({ ok: true as const, value: readFilmSetAnimationProjection(room.canvas(), "film")! });
     expect(decoded.value.filmSetAnimations?.clips[0]?.timeline.duration).toBeGreaterThanOrEqual(6);
   });
 

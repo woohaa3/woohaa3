@@ -30,11 +30,20 @@ pub enum ShotEditEvent {
         moved: bool,
     },
     /// Commit：发布一次最终结果（无净变化不发布）。
-    Committed { camera: Entity, pose: ShotCameraPose },
+    Committed {
+        camera: Entity,
+        pose: ShotCameraPose,
+    },
     /// Cancel：恢复起始 pose，不发布完成写入。
-    Cancelled { camera: Entity, pose: ShotCameraPose },
+    Cancelled {
+        camera: Entity,
+        pose: ShotCameraPose,
+    },
     /// Reset：回到给定默认 pose。
-    Reset { camera: Entity, pose: ShotCameraPose },
+    Reset {
+        camera: Entity,
+        pose: ShotCameraPose,
+    },
 }
 
 /// 开始一次编辑：冻结起始 pose。
@@ -149,7 +158,7 @@ pub fn cancel_edit(session: &ShotEditSession) -> ShotEditEvent {
     }
 }
 
-    /// reset：回到给定默认 pose（清空 focus offset，仰角回到全局默认值）。
+/// reset：回到给定默认 pose（清空 focus offset，仰角回到全局默认值）。
 pub fn reset_pose(azimuth: f32, distance: f32) -> ShotCameraPose {
     ShotCameraPose::new(azimuth, distance)
 }
@@ -178,7 +187,10 @@ impl ShotEditSessions {
     }
 
     pub fn remove(&mut self, camera: Entity) -> Option<ShotEditSession> {
-        let index = self.active.iter().position(|entry| entry.camera == camera)?;
+        let index = self
+            .active
+            .iter()
+            .position(|entry| entry.camera == camera)?;
         Some(self.active.remove(index))
     }
 }

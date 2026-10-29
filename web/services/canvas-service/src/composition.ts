@@ -743,7 +743,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
 
   const composedHandler = composeRequestHandler({
     prepareCompositeHistory: async ({ canvasId, nodeId, payload }) => {
-      if (payload.animation?.schemaVersion !== 3) throw new Error("历史复合资产定义非法");
+      if (payload.animation?.schemaVersion !== 3 && payload.animation?.schemaVersion !== 4) throw new Error("历史复合资产定义非法");
       const room = await activeSync?.registry.resolve(canvasId);
       const exported = room?.exportCanvas();
       const canvas = exported?.ok ? exported.canvas : await composition?.service.getCanvas(canvasId);
@@ -753,7 +753,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       // 历史帧素材属于**这张画布**：分立部署下 read 走内部 HTTP，必须带 canvasId 让服务端按
       // 画布作用域路由；远端画布的素材只在托管存储里。
       const mediaRead = mediaClient?.read;
-      return contentFrames.prepareHistoryFrame({ nodeId, payload: payload.animation, assets: canvas.assets, ...(mediaRead ? { read: (storageKey: string) => mediaRead(storageKey, canvasId) } : {}) });
+      return contentFrames.prepareHistoryFrame({ nodeId, payload: payload.animation, canvas, assets: canvas.assets, ...(mediaRead ? { read: (storageKey: string) => mediaRead(storageKey, canvasId) } : {}) });
     },
     env,
     canvasEnabled,

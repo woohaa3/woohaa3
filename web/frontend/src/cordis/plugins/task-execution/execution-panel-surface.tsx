@@ -16,6 +16,7 @@ import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
 import { layoutNodePanel, usableCanvasArea, type AnchoredPanel } from "./node-anchor-layout.js";
 import { FullscreenPanelHost } from "./execution-panel/fullscreen-panel-host.js";
+import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { panelKindForNodeType } from "./node-panel-registry.js";
 import type { ExecutionPanelPresentation } from "../../navigation/contracts.js";
 
@@ -61,8 +62,14 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       const canvas = document.getElementById("bevy-canvas");
       const fixtureArea = dock?.closest<HTMLElement>("[data-node-anchor-area]") ?? null;
       const areaElement = fixtureArea ?? canvas;
-      const badge = runtime.controller()?.groupBadgeScreenRect?.(nodeId);
-      const node = badge ?? runtime.nodePresentationScreenRect?.(nodeId) ?? runtime.nodeScreenRect(nodeId);
+      const state = woohaa3CanvasStore.getState();
+      const current = workingCanvasOf(state) ?? state.canvas;
+      const groupNode = current?.document.nodes.find(node => node.id === nodeId && node.type === "group");
+      // 组面板锚在外部 3D 徽标**下缘**：徽标矩形由运行时按渲染矩形（成员布局尺寸）与当前
+      // 视口倍率派生，与 Bevy 绘制同源。退回气泡主体会把面板压在徽标上。
+      const presentation = runtime.nodePresentationScreenRect?.(nodeId) ?? null;
+      const badge = groupNode ? presentation : null;
+      const node = presentation ?? runtime.nodeScreenRect(nodeId);
       if (!dock || !areaElement || !node) {
         if (dock) {
           dock.style.visibility = "hidden";

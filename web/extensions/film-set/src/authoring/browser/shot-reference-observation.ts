@@ -7,13 +7,15 @@
  * （`shotReferenceContentIdentity`）**共用同一份**算法，重命名/布局/缩放/hover 播放头都不进入
  * 身份，因此不会触发录制。
  */
-import { decodeFilmSetNodeData, filmSetAnimationsOf, isFilmSetNode, shotReferenceContentIdentity, shotReferenceProfileKey, DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, type FilmSetNodeData } from "@woohaa3/contracts";
+import { filmSetAnimationsOf, isFilmSetNode, readFilmSetGroupMarker, shotReferenceContentIdentity, shotReferenceProfileKey, DEFAULT_SHOT_REFERENCE_RECORD_PROFILE, type FilmSetNodeData, type StoredAsset } from "@woohaa3/contracts";
+import { readAnimation } from "../../state/browser/animation-projection.js";
 import type { ShotReferenceClipObservation, ShotReferenceFilmSetObservation, ShotReferenceRecordingJob } from "./shot-reference-recording-queue.js";
 
 /** 观察所需的画布最小形状（运行时画布与序列化画布都满足）。 */
 export type ShotReferenceCanvasLike = {
   document: { nodes: readonly { id: string; type: string }[] };
   nodeData: Record<string, unknown>;
+  assets?: readonly StoredAsset[];
 };
 
 /** 从画布读取某个片场的解码定义；非片场/解码失败返回 null。 */
@@ -21,11 +23,7 @@ export function readFilmSetForObservation(
   canvas: ShotReferenceCanvasLike | null | undefined,
   filmSetNodeId: string
 ): FilmSetNodeData | null {
-  if (!canvas) return null;
-  const node = canvas.document.nodes.find((entry) => entry.id === filmSetNodeId);
-  if (!node || !isFilmSetNode(node.type, canvas.nodeData[filmSetNodeId])) return null;
-  const decoded = decodeFilmSetNodeData(canvas.nodeData[filmSetNodeId]);
-  return decoded.ok ? decoded.value : null;
+  return readAnimation(canvas ?? null, filmSetNodeId);
 }
 
 /** 单个镜头的观察结果；定义缺失/片段缺失时 `contentIdentity` 为 `null`。 */
@@ -38,7 +36,7 @@ export function observeFilmSetClips(
   const profileKey = shotReferenceProfileKey(DEFAULT_SHOT_REFERENCE_RECORD_PROFILE);
   return filmSetAnimationsOf(animation).clips.map((clip) => ({
     clipId: clip.id,
-    contentIdentity: clip.kind === "dynamic" ? shotReferenceContentIdentity({ animation, clipId: clip.id }) : null,
+    contentIdentity: clip.kind === "dynamic" ? shotReferenceContentIdentity({ animation, clipId: clip.id, assets: canvas?.assets }) : null,
     profileKey
   }));
 }
@@ -54,7 +52,7 @@ export function observeFilmSets(
   if (!canvas) return [];
   const observations: ShotReferenceFilmSetObservation[] = [];
   for (const node of canvas.document.nodes) {
-    if (!isFilmSetNode(node.type, canvas.nodeData[node.id])) continue;
+    if (!isFilmSetNode(node.type, canvas.nodeData[node.id]) && !(node.type === "group" && readFilmSetGroupMarker(canvas.nodeData[node.id]))) continue;
     observations.push({
       filmSetNodeId: node.id,
       focused: node.id === focusedFilmSetId,

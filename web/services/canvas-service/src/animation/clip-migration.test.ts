@@ -1,3 +1,5 @@
+import { migrateFilmSetCanvasFixture } from "../../../../test-support/film-set-groups.js";
+import { readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { describe, expect, it } from "vitest";
 import { canonicalFilmSetFields, createEmptyWoohaa3ServerCanvas, filmSetClipPrecondition, hashModelScript, hashMotionScript, type CanvasCommand, decodeFilmSetNodeData, filmSetAnimationsOf } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
@@ -50,7 +52,7 @@ async function migratedRoom() {
   });
   if (!sceneSpace.ok) throw Error(sceneSpace.reason);
   canvas.nodeData.fs = canonicalFilmSetFields(sceneSpace.value) as never;
-  await room.initialize({ canvas, roomEpoch: "e", createdAt: now });
+  await room.initialize({ canvas: migrateFilmSetCanvasFixture(canvas), roomEpoch: "e", createdAt: now });
   return { room, repository };
 }
 
@@ -60,7 +62,7 @@ function commands(room: CanvasRoom, commandId: string, ops: CanvasCommand[]) {
 }
 function snapshot(room: CanvasRoom) { const read = room.exportCanvas(); if (!read.ok) throw Error(read.message); return read.canvas; }
 function rename(room: CanvasRoom, name: string): CanvasCommand {
-  const decoded = decodeFilmSetNodeData(snapshot(room).nodeData.fs); if (!decoded.ok) throw Error(decoded.reason);
+  const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(snapshot(room), "fs")!)); if (!decoded.ok) throw Error(decoded.reason);
   const op = { kind: "rename" as const, name };
   return { type: "filmSet.clipPatch", nodeId: "fs", clipId: "legacy-default", op, expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(decoded.value), "legacy-default", op) };
 }
@@ -85,7 +87,7 @@ describe("durable clip commands and explicit migration", () => {
   it("canonical 内容再读不改变身份、items 或 clips，也不写 room", async () => {
     const { room } = await migratedRoom();
     const before = JSON.stringify(snapshot(room));
-    const fields = snapshot(room).nodeData.fs;
+    const fields = canonicalFilmSetFields(readFilmSetAnimationProjection(snapshot(room), "fs")!);
     const read = readLegacyFilmSetNodeData(fields);
     expect(read.ok).toBe(true);
     if (!read.ok) throw new Error(read.reason);
@@ -105,7 +107,7 @@ describe("durable clip commands and explicit migration", () => {
     expect((await commands(room, "rename", [first])).ok).toBe(true);
     expect(await commands(room, "rename", [first])).toMatchObject({ ok: true, status: "duplicate" });
     expect((await commands(room, "stale", [first])).ok).toBe(false);
-    const decoded = decodeFilmSetNodeData(snapshot(room).nodeData.fs); if (!decoded.ok) throw Error(decoded.reason);
+    const decoded = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(snapshot(room), "fs")!)); if (!decoded.ok) throw Error(decoded.reason);
     const timeline = { kind: "timeline" as const, timeline: { duration: 8, loop: true } };
     const pending = { type: "filmSet.clipPatch" as const, nodeId: "fs", clipId: "legacy-default", op: timeline, expectedHash: filmSetClipPrecondition(filmSetAnimationsOf(decoded.value), "legacy-default", timeline) };
     await commands(room, "rename2", [rename(room, "其他名称")]);

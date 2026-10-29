@@ -1,5 +1,5 @@
 /** Film-set interpretation belongs to the extension; the host only resolves stable assets and decodes textures. */
-import { decodeFilmSetNodeData, filmSetAnimationsOf, type CanvasNodeData, type BevyAnimationPlayback, type FilmSetNodeDataDecodeResult } from "@woohaa3/contracts";
+import { readFilmSetAnimationProjection, readFilmSetGroupMarker, type ServerCanvas, decodeFilmSetNodeData, filmSetAnimationsOf, type CanvasNodeData, type BevyAnimationPlayback, type FilmSetNodeDataDecodeResult } from "@woohaa3/contracts";
 import type { CompositeAssetMediaSource } from "@woohaa3/frontend/extension-api";
 
 /**
@@ -21,8 +21,9 @@ function decodeFilmSetNodeDataOnce(data: CanvasNodeData): FilmSetNodeDataDecodeR
   return decoded;
 }
 
-export function filmSetMediaSources(nodeId: string, data: CanvasNodeData, playback: BevyAnimationPlayback | null): CompositeAssetMediaSource[] {
-  const decoded = decodeFilmSetNodeDataOnce(data);
+export function filmSetMediaSources(nodeId: string, data: CanvasNodeData, playback: BevyAnimationPlayback | null, canvas?: ServerCanvas | null): CompositeAssetMediaSource[] {
+  const projection = canvas && readFilmSetGroupMarker(data) ? readFilmSetAnimationProjection(canvas, nodeId) : null;
+  const decoded = projection ? { ok: true as const, value: projection } : decodeFilmSetNodeDataOnce(data);
   if (!decoded.ok) return [];
   const collection = filmSetAnimationsOf(decoded.value);
   const active = playback?.nodeId === nodeId ? playback : null;

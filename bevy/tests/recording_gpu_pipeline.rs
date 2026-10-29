@@ -17,13 +17,13 @@
 
 use std::path::PathBuf;
 
+use woohaa_bevy_canvas::recording_barrier::BarrierBudget;
 use woohaa_bevy_canvas::recording_encode::{EncoderProfile, MAX_ARTIFACT_BYTES};
-use woohaa_bevy_canvas::recording_job::{run_job, JobOutcome, RecordingJobInput};
+use woohaa_bevy_canvas::recording_job::{JobOutcome, RecordingJobInput, run_job};
 use woohaa_bevy_canvas::recording_openh264::{OpenH264Encoder, OpenH264EncoderOptions};
 use woohaa_bevy_canvas::recording_prepare::prepare_render_plan;
 use woohaa_bevy_canvas::recording_probe_gpu::GpuFrameProbe;
 use woohaa_bevy_canvas::recording_timeline::Rational;
-use woohaa_bevy_canvas::recording_barrier::BarrierBudget;
 
 /// 一个 2 秒、带相机运动的片场：足够覆盖「多帧 + 动态镜头」。
 const SCENE_JSON: &str = r##"{
@@ -62,7 +62,9 @@ fn output_directory() -> PathBuf {
 
 /// 解码首帧，判断像素是否近乎单一颜色（用于排除「空场景/全黑」）。
 fn pixels_are_uniform(bytes: &[u8]) -> bool {
-    let Some(rgb) = decode_first_frame_rgb(bytes) else { return true };
+    let Some(rgb) = decode_first_frame_rgb(bytes) else {
+        return true;
+    };
     if rgb.len() < 3 {
         return true;
     }
@@ -85,8 +87,14 @@ fn pixels_are_uniform(bytes: &[u8]) -> bool {
 /// 解码首帧为 RGB（失败返回 None）。
 fn decode_first_frame_rgb(bytes: &[u8]) -> Option<Vec<u8>> {
     use openh264::formats::YUVSource;
-    let avcc = bytes.windows(4).position(|window| window == b"avcC").map(|index| index + 4)?;
-    let mdat = bytes.windows(4).position(|window| window == b"mdat").map(|index| index + 4)?;
+    let avcc = bytes
+        .windows(4)
+        .position(|window| window == b"avcC")
+        .map(|index| index + 4)?;
+    let mdat = bytes
+        .windows(4)
+        .position(|window| window == b"mdat")
+        .map(|index| index + 4)?;
     let mut decoder = openh264::decoder::Decoder::new().ok()?;
     let mut cursor = avcc + 6;
     let mut headers = Vec::new();
@@ -107,7 +115,10 @@ fn decode_first_frame_rgb(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut cursor = mdat;
     while cursor + 4 <= bytes.len() {
         let length = u32::from_be_bytes([
-            bytes[cursor], bytes[cursor + 1], bytes[cursor + 2], bytes[cursor + 3],
+            bytes[cursor],
+            bytes[cursor + 1],
+            bytes[cursor + 2],
+            bytes[cursor + 3],
         ]) as usize;
         if length == 0 || cursor + 4 + length > bytes.len() {
             break;
@@ -127,13 +138,23 @@ fn decode_first_frame_rgb(bytes: &[u8]) -> Option<Vec<u8>> {
 
 /// 用 OpenH264 解码器验证成片里确有图像（结构正确但内容损坏会在这里暴露）。
 fn decode_first_frame(bytes: &[u8]) -> bool {
-    let Some(avcc) = bytes.windows(4).position(|window| window == b"avcC").map(|index| index + 4) else {
+    let Some(avcc) = bytes
+        .windows(4)
+        .position(|window| window == b"avcC")
+        .map(|index| index + 4)
+    else {
         return false;
     };
-    let Some(mdat) = bytes.windows(4).position(|window| window == b"mdat").map(|index| index + 4) else {
+    let Some(mdat) = bytes
+        .windows(4)
+        .position(|window| window == b"mdat")
+        .map(|index| index + 4)
+    else {
         return false;
     };
-    let Ok(mut decoder) = openh264::decoder::Decoder::new() else { return false };
+    let Ok(mut decoder) = openh264::decoder::Decoder::new() else {
+        return false;
+    };
     // avcC: version/profile/compat/level/lenSize/numSps/len/sps/numPps/len/pps
     let mut cursor = avcc + 6;
     let mut headers = Vec::new();
@@ -156,7 +177,10 @@ fn decode_first_frame(bytes: &[u8]) -> bool {
     let mut cursor = mdat;
     while cursor + 4 <= bytes.len() {
         let length = u32::from_be_bytes([
-            bytes[cursor], bytes[cursor + 1], bytes[cursor + 2], bytes[cursor + 3],
+            bytes[cursor],
+            bytes[cursor + 1],
+            bytes[cursor + 2],
+            bytes[cursor + 3],
         ]) as usize;
         if length == 0 || cursor + 4 + length > bytes.len() {
             break;
@@ -172,7 +196,13 @@ fn decode_first_frame(bytes: &[u8]) -> bool {
 }
 
 fn profile(width: u32, height: u32) -> EncoderProfile {
-    EncoderProfile { width, height, bitrate: 2_000_000, fps_numer: 30, fps_denom: 1 }
+    EncoderProfile {
+        width,
+        height,
+        bitrate: 2_000_000,
+        fps_numer: 30,
+        fps_denom: 1,
+    }
 }
 
 /// 检测到的 adapter 是否为软件渲染；是则本测试不作为验收证据。
@@ -181,7 +211,10 @@ fn adapter_is_software() -> bool {
     let adapter = woohaa_bevy_canvas::recording_prepare::detect_gpu_adapter();
     match adapter {
         Some(info) => {
-            eprintln!("adapter: {} / {} / software={}", info.name, info.backend, info.software);
+            eprintln!(
+                "adapter: {} / {} / software={}",
+                info.name, info.backend, info.software
+            );
             info.software
         }
         None => {
@@ -238,29 +271,60 @@ fn renders_and_encodes_a_real_multi_frame_clip_on_gpu() {
         output_name: "gpu-clip".into(),
     };
 
-    let outcome = run_job(&job, &mut probe, &mut encoder, &|| false, BarrierBudget::default());
+    let outcome = run_job(
+        &job,
+        &mut probe,
+        &mut encoder,
+        &|| false,
+        BarrierBudget::default(),
+    );
     match outcome {
-        JobOutcome::Completed { artifact_path, size_bytes, frame_count, duration_numer, duration_denom, width: w, height: h, .. } => {
-            eprintln!("成片: {artifact_path:?} size={size_bytes} frames={frame_count} {w}x{h} duration={duration_numer}/{duration_denom}");
+        JobOutcome::Completed {
+            artifact_path,
+            size_bytes,
+            frame_count,
+            duration_numer,
+            duration_denom,
+            width: w,
+            height: h,
+            ..
+        } => {
+            eprintln!(
+                "成片: {artifact_path:?} size={size_bytes} frames={frame_count} {w}x{h} duration={duration_numer}/{duration_denom}"
+            );
             assert_eq!(frame_count, 12);
             assert_eq!((w, h), (width, height));
             assert!(size_bytes > 0);
             let bytes = std::fs::read(&artifact_path).expect("artifact");
             assert!(bytes.len() as u64 <= MAX_ARTIFACT_BYTES);
             // 结构自校验（Fast Start / avc1 / avcC / 无音轨）。
-            let facts = woohaa_bevy_canvas::recording_encode::verify_mp4(&artifact_path, bytes.len() as u64)
-                .expect("artifact structure");
+            let facts = woohaa_bevy_canvas::recording_encode::verify_mp4(
+                &artifact_path,
+                bytes.len() as u64,
+            )
+            .expect("artifact structure");
             assert!(!facts.has_audio);
 
             // 画面不能是全黑/全透明：录制背景是 #101418，物体应在其上可见。
-            assert!(!pixels_are_uniform(&bytes), "成片画面不应是单一颜色（证明真的画了场景）");
+            assert!(
+                !pixels_are_uniform(&bytes),
+                "成片画面不应是单一颜色（证明真的画了场景）"
+            );
 
             // 成片必须包含可解码帧：从 avcC 取参数集、从 mdat 取样本，交给真实解码器。
             let decoded = decode_first_frame(&bytes);
             assert!(decoded, "成片应至少能解出一帧（尺寸 {}x{}）", width, height);
         }
-        JobOutcome::Failed { stage, code, message, frame_index, sample_time } => {
-            panic!("GPU 录制失败：{stage} {code} {message} frame={frame_index:?} t={sample_time:?}");
+        JobOutcome::Failed {
+            stage,
+            code,
+            message,
+            frame_index,
+            sample_time,
+        } => {
+            panic!(
+                "GPU 录制失败：{stage} {code} {message} frame={frame_index:?} t={sample_time:?}"
+            );
         }
         JobOutcome::Cancelled { frame_index } => panic!("意外取消于帧 {frame_index:?}"),
     }
@@ -275,6 +339,7 @@ fn timeline_of_the_gpu_fixture_is_exact() {
     )
     .expect("timeline");
     assert_eq!(slots.len(), 12);
-    let total = woohaa_bevy_canvas::recording_timeline::timeline_total_duration(&slots).expect("total");
+    let total =
+        woohaa_bevy_canvas::recording_timeline::timeline_total_duration(&slots).expect("total");
     assert!(total.eq_value(Rational::new(12, 30).expect("expected")));
 }

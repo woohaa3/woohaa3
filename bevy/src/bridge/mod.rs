@@ -21,7 +21,8 @@ pub(crate) use assets::{
     AssetRegistration, AssetRegistryStats, asset_registry_stats, declare_model_descriptor,
     declare_model_descriptor_dto, existing_model_metadata, lookup_model_asset,
     missing_model_descriptor, model_assets_snapshot, model_descriptor_declared,
-    queue_model_snapshot, resident_payload_keys, set_model_payload_leases, set_scene_descriptor_keys,
+    queue_model_snapshot, resident_payload_keys, set_model_payload_leases,
+    set_scene_descriptor_keys,
 };
 
 // 测试面：`bridge::tests` 通过 `super::*` 复用这些资源表 helper 与常量。
@@ -445,13 +446,7 @@ pub(crate) fn queue_positions(positions: Vec<NodePosition>, viewport: Option<Vie
 ///
 /// `content` 是稳定内容身份（同资产同档位共享同一 GPU 纹理）；`None` 表示独占纹理
 /// （例如上传中的本地幽灵预览）。内容身份**不含** nodeId。
-pub(crate) fn queue_texture(
-    id: &str,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-    content: Option<&str>,
-) {
+pub(crate) fn queue_texture(id: &str, width: u32, height: u32, rgba: &[u8], content: Option<&str>) {
     TEXTURES.with(|textures| {
         textures.borrow_mut().insert(
             id.to_owned(),
@@ -479,7 +474,7 @@ pub(crate) fn take_input() -> FrameInput {
     let film_set_textures =
         FILM_SET_TEXTURES.with(|textures| std::mem::take(&mut *textures.borrow_mut()));
     FrameInput {
-        focus_details: FOCUS_DETAILS.with(|slot|slot.borrow_mut().take()),
+        focus_details: FOCUS_DETAILS.with(|slot| slot.borrow_mut().take()),
         scene,
         positions,
         viewport,
@@ -489,8 +484,11 @@ pub(crate) fn take_input() -> FrameInput {
     }
 }
 
-pub(crate) fn queue_focus_details(frame:Option<crate::protocol::focus_details::FocusDetails>,bytes:&[u8])->Result<(),&'static str> {
-    FOCUS_DETAILS.with(|slot|slot.borrow_mut().queue(frame,bytes))
+pub(crate) fn queue_focus_details(
+    frame: Option<crate::protocol::focus_details::FocusDetails>,
+    bytes: &[u8],
+) -> Result<(), &'static str> {
+    FOCUS_DETAILS.with(|slot| slot.borrow_mut().queue(frame, bytes))
 }
 
 /// `start` 幂等闸门：首次返回 `false`，后续返回 `true`。

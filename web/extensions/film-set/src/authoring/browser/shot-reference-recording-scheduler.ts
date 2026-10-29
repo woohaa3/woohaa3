@@ -91,7 +91,7 @@ export class ShotReferenceRecordingScheduler {
     const canvasId = this.deps.canvasId();
     if (this.active) {
       const current = shotReferenceJobForClip(canvasId, this.deps.canvas(), this.active.job.filmSetNodeId, this.active.job.clipId);
-      if (!current || current.contentIdentity !== this.active.job.contentIdentity || canvasId !== this.active.job.canvasId) this.active.controller.abort();
+      if (!current || canvasId !== this.active.job.canvasId) this.active.controller.abort();
     }
     if (!canvasId) {
       this.queue.observe("", []);

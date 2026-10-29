@@ -88,9 +88,9 @@ export function getNodeBounds(nodes: Woohaa3CanvasNode[]) {
 }
 
 /** 计算节点绝对画布坐标（含 group parentId 偏移），供工具条包围盒定位使用 */
-export function getWoohaa3CanvasNodeAbsolutePosition(
-  node: Woohaa3CanvasNode,
-  nodeById: Map<string, Woohaa3CanvasNode>
+export function getWoohaa3CanvasNodeAbsolutePosition<T extends Pick<Woohaa3CanvasNode, "position" | "parentId">>(
+  node: T,
+  nodeById: ReadonlyMap<string, Pick<Woohaa3CanvasNode, "position" | "parentId">>
 ): { x: number; y: number } {
   let x = node.position.x;
   let y = node.position.y;

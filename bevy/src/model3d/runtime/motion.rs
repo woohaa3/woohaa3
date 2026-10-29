@@ -94,11 +94,15 @@ fn apply_film_set_object_motion(
         let Some(local_time) = object.local_time(playback.time) else {
             continue;
         };
-        let Some(motion) = motion else { continue; };
+        let Some(motion) = motion else {
+            continue;
+        };
         let (_camera, deltas) =
             crate::motion::evaluate(&motion, local_time, playback.initial_camera_state());
         for (target, delta) in &deltas {
-            let Some(runtime_id) = object.part_ids.get(target) else { continue; };
+            let Some(runtime_id) = object.part_ids.get(target) else {
+                continue;
+            };
             let Some(entity) = root.part_entities.get(runtime_id).copied() else {
                 continue;
             };
@@ -132,7 +136,8 @@ fn queue_opacity(
     let is_object_root = super::super::part_id::decode_part_id(target_id)
         .is_some_and(|decoded| decoded.part_id.is_empty());
     if is_object_root {
-        let item_id = super::super::part_id::decode_part_id(target_id).map(|decoded| decoded.item_id);
+        let item_id =
+            super::super::part_id::decode_part_id(target_id).map(|decoded| decoded.item_id);
         for (part_id, material) in &root.part_materials {
             if !item_id.is_some_and(|item| super::super::part_id::belongs_to_item(part_id, item)) {
                 continue;
@@ -170,10 +175,16 @@ fn reset_motion_parts(commands: &mut Commands, models: &mut ModelVisuals, node_i
     };
     // 透明度实例必须随姿态一起恢复，否则离开动画节点后画面会保持半透明。
     root.opacity.restore_all(commands);
-    let Some((id, targets)) = &models.motion_targets else { return; };
-    if id != node_id { return; }
+    let Some((id, targets)) = &models.motion_targets else {
+        return;
+    };
+    if id != node_id {
+        return;
+    }
     for part_id in targets.iter() {
-        let Some(entity) = root.part_entities.get(part_id) else { continue; };
+        let Some(entity) = root.part_entities.get(part_id) else {
+            continue;
+        };
         let Some(base) = root.part_bases.get(part_id).copied() else {
             continue;
         };

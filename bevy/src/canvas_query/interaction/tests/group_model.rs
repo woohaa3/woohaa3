@@ -24,7 +24,7 @@ fn footer_model_hits_group_and_keeps_member_controls_and_marquee_rectangular() {
         point_query(generation, center.x, center.y, 1., None).hit,
         Some(PointHit::NodeAction {
             node_id: "g".into(),
-            action_id: "group-toggle-collapse".into(),
+            action_id: "group-badge-select".into(),
             menu: false
         })
     );
@@ -63,6 +63,83 @@ fn footer_model_hits_group_and_keeps_member_controls_and_marquee_rectangular() {
 }
 
 #[test]
+fn collapsed_group_has_no_structural_hit_area_but_badge_remains_selectable() {
+    let mut group = appearance_group();
+    group.group.as_mut().unwrap().collapsed = true;
+    let badge = group_model::for_node(&group).unwrap();
+    let generation = accept_scene(&scene(vec![group.clone()], vec![]));
+
+    let assert_badge_only = |generation, dx, dy| {
+        for point in [
+            Vec2::new(40., 40.),
+            Vec2::new(group.width, group.height / 2.),
+        ] {
+            assert_eq!(
+                point_query(
+                    generation,
+                    group.x + point.x + dx,
+                    group.y + point.y + dy,
+                    1.,
+                    None
+                )
+                .hit,
+                None
+            );
+        }
+        assert!(
+            marquee_query(
+                generation,
+                group.x + dx,
+                group.y + dy,
+                group.width,
+                group.height
+            )
+            .node_ids
+            .is_empty()
+        );
+        assert_eq!(
+            marquee_query(
+                generation,
+                badge.center.x + dx - 4.,
+                badge.center.y + dy - 4.,
+                8.,
+                8.
+            )
+            .node_ids,
+            vec!["g"]
+        );
+        assert_eq!(
+            point_query(
+                generation,
+                badge.center.x + dx,
+                badge.center.y + dy,
+                1.,
+                None
+            )
+            .hit,
+            Some(PointHit::NodeAction {
+                node_id: "g".into(),
+                action_id: "group-badge-select".into(),
+                menu: false
+            })
+        );
+    };
+    assert_badge_only(generation, 0., 0.);
+    let (moved, _) = accept_positions(&crate::protocol::PositionUpdateRequest {
+        version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(),
+        base_scene_generation: generation,
+        viewport: None,
+        positions: vec![crate::protocol::NodePosition {
+            id: "g".into(),
+            x: 1000.,
+            y: 600.,
+        }],
+    })
+    .unwrap();
+    assert_badge_only(moved, 1000., 600.);
+}
+
+#[test]
 fn position_increment_moves_footer_and_spatial_grid_like_full_scene() {
     let group = appearance_group();
     let badge = group_model::for_node(&group).unwrap();
@@ -84,7 +161,7 @@ fn position_increment_moves_footer_and_spatial_grid_like_full_scene() {
         point_query(generation, center.x, center.y, 1., None).hit,
         Some(PointHit::NodeAction {
             node_id: "g".into(),
-            action_id: "group-toggle-collapse".into(),
+            action_id: "group-badge-select".into(),
             menu: false
         })
     );
@@ -100,7 +177,7 @@ fn position_increment_moves_footer_and_spatial_grid_like_full_scene() {
         point_query(rebuilt, center.x, center.y, 1., None).hit,
         Some(PointHit::NodeAction {
             node_id: "g".into(),
-            action_id: "group-toggle-collapse".into(),
+            action_id: "group-badge-select".into(),
             menu: false
         })
     );
@@ -126,7 +203,7 @@ fn short_group_footer_model_remains_in_the_group_hit_area() {
         point_query(generation, upper.x, upper.y, 1., None).hit,
         Some(PointHit::NodeAction {
             node_id: "g".into(),
-            action_id: "group-toggle-collapse".into(),
+            action_id: "group-badge-select".into(),
             menu: false
         })
     );
@@ -190,7 +267,7 @@ fn badge_lip_hits_group_but_does_not_expand_marquee_or_resize_bounds() {
         point_query(g, x, y, 1., None).hit,
         Some(PointHit::NodeAction {
             node_id: "g".into(),
-            action_id: "group-toggle-collapse".into(),
+            action_id: "group-badge-select".into(),
             menu: false
         })
     );
@@ -237,7 +314,7 @@ fn independent_badge_resize_handle_and_scaled_lip_follow_position_increments() {
         point_query(generation, lip.x, lip.y, 1., None).hit,
         Some(PointHit::NodeAction {
             node_id: "g".into(),
-            action_id: "group-toggle-collapse".into(),
+            action_id: "group-badge-select".into(),
             menu: false
         })
     );
@@ -270,5 +347,24 @@ fn independent_badge_resize_handle_and_scaled_lip_follow_position_increments() {
     assert!(
         !matches!(point_query(generation, handle.x, handle.y, 1., None).hit,
         Some(PointHit::NodeAction {action_id, ..}) if action_id == "group-resize-badge")
+    );
+}
+
+#[test]
+fn scaled_badge_lower_half_remains_a_spatial_hit_candidate() {
+    // The external badge can be much taller than the group card. Its lower cells must stay in
+    // the broad-phase index so the exact rounded-path test can receive the pointer event.
+    let mut group = appearance_group();
+    group.group.as_mut().unwrap().badge_scale = 12.;
+    let badge = group_model::badge_rect(&group);
+    let generation = accept_scene(&scene(vec![group], vec![]));
+    let point = Vec2::new(badge.x + badge.z / 2., badge.y + badge.w - 2.);
+    assert_eq!(
+        point_query(generation, point.x, point.y, 1., None).hit,
+        Some(PointHit::NodeAction {
+            node_id: "g".into(),
+            action_id: "group-badge-select".into(),
+            menu: false
+        })
     );
 }

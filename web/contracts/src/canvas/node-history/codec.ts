@@ -1,3 +1,4 @@
+import { decodeFilmSetGroupMarker } from "../film-set-group.js";
 import { decodeFilmSetAnimations } from "../film-set-animations.js";
 import { decodeFilmSetLocalTransform } from "../film-set-content.js";
 import { decodeInitialShotCamera } from "../canvas-node-model.js";
@@ -152,7 +153,7 @@ function decodePayload(
     // items-only 片场历史（schema 3）没有顶层 authored 模型：`modelScript` 允许为空，身份由完整
     // 片场定义承担（D8/D10）。这只放宽 schema-3 片场分支，普通 model3d 仍必须带真实脚本，
     // 也绝不造 placeholder 脚本冒充（change 2026-10-11-extract-film-set-extension）。
-    const filmSetAnimation = animation !== null && animation.schemaVersion === 3;
+    const filmSetAnimation = animation !== null && (animation.schemaVersion === 3 || animation.schemaVersion === 4);
     if (typeof modelScript !== "string" || (!filmSetAnimation && modelScript.length === 0)) return invalid("模型 payload 缺少脚本");
     if (typeof language !== "string" || typeof version !== "string") return invalid("模型 payload descriptor 非法");
     if (typeof sourceHash !== "string" || sourceHash.length === 0) return invalid("模型 payload 缺少 sourceHash");
@@ -248,6 +249,11 @@ export function decodeAnimationPayload(
   options: { acceptedContentVersions?: readonly number[] } = {}
 ): NodeHistoryAnimationPayload | null {
   if (!isJsonObject(input)) return null;
+  if (input.schemaVersion === 4) {
+    if (Object.keys(input).some(key => key !== "schemaVersion" && key !== "filmSetGroup")) return null;
+    const marker = decodeFilmSetGroupMarker(input.filmSetGroup);
+    return marker.ok ? { schemaVersion: 4, filmSetGroup: marker.value } : null;
+  }
   // 片场 items-only payload（布局版本 3）：独立根 + 共享 items + 全部 clips；不另存顶层模型。
   // 内部 `filmSetContent` 必须是当前 schema（场景单位）；旧坐标语义只由离线迁移转换
   // （change: 2026-10-23-isolate-film-set-camera-space，design D5）。

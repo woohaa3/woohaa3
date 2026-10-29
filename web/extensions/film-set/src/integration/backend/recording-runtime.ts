@@ -1,3 +1,4 @@
+import { canonicalFilmSetFields, readFilmSetAnimationProjection } from "@woohaa3/contracts";
 import { nativeFilmSetFrame } from "../../preview/backend/native-frame.js";
 import type { ContentRecordingCommitPlan, ContentRecordingCommitRequest, ContentRecordingFreezeResult, ContentRecordingRuntime, ContentRecordingSnapshot } from "@woohaa3/contracts";
 import { describeFilmSetRecording, freezeFilmSetRecording, matchesFilmSetRecording, planFilmSetRecordingCommit, validateRecordingResources } from "../../authoring/backend/recording-compile.js";
@@ -20,6 +21,7 @@ export function createFilmSetRecordingRuntime(options: FilmSetRecordingRuntimeOp
   return {
     matches: matchesFilmSetRecording,
     async freeze(input): Promise<ContentRecordingFreezeResult> {
+      const projection = input.canvas.sourceCanvas ? readFilmSetAnimationProjection(input.canvas.sourceCanvas, input.nodeId) : null;
       const result = freezeFilmSetRecording({ prepareFrame: nativeFilmSetFrame,
         request: {
           requestId: input.requestId,
@@ -30,7 +32,7 @@ export function createFilmSetRecordingRuntime(options: FilmSetRecordingRuntimeOp
           profileKey: input.profileKey,
           ...(input.profile === undefined ? {} : { profile: input.profile })
         },
-        nodeData: input.canvas.nodeData,
+        nodeData: input.canvas.sourceCanvas ? projection && canonicalFilmSetFields(projection) : input.canvas.nodeData,
         ...(input.canvas.node ? { node: input.canvas.node } : {}),
         ...(input.canvas.themeBackdrop === undefined ? {} : { themeBackdrop: input.canvas.themeBackdrop }),
         assets: input.canvas.assets as never,
@@ -60,7 +62,8 @@ export function createFilmSetRecordingRuntime(options: FilmSetRecordingRuntimeOp
       });
     },
     describe(input) {
-      return describeFilmSetRecording(input.nodeData, input.clipId);
+      const projection = input.sourceCanvas && input.nodeId ? readFilmSetAnimationProjection(input.sourceCanvas, input.nodeId) : null;
+      return describeFilmSetRecording(input.sourceCanvas && input.nodeId ? projection && canonicalFilmSetFields(projection) : input.nodeData, input.clipId);
     }
   };
 }

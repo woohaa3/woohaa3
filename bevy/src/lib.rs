@@ -9,40 +9,40 @@
 //! （`model3d::scene`）可在 native-renderer 下复用；
 //! 原生画布与浏览器通过 `canvas-core` 共用帧系统与 facade；WASM ABI 只在 `wasm` 下导出。
 
+mod frame_samples;
 #[cfg(feature = "canvas-core")]
 mod runtime_health;
-mod frame_samples;
 
 mod generation_progress;
-mod startup_trace;
 pub mod protocol;
+mod startup_trace;
 pub mod theme;
 mod theme_generated;
 
+/// 动画节点独立播放会话/时钟（change: 2026-10-05-bind-model-animation-to-shots）。
+pub mod animation_session;
+/// 通用相机过渡状态机（change: refactor-bevy-reusable-components）。
+pub mod camera_transition;
 /// 2D 共享纯几何与 interaction 查询（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
 /// 不依赖 Bevy/ECS/wasm，可在 native 下单独测试；`canvas2d` 渲染复用其布局与曲线函数。
 mod canvas_query;
 /// 画布级 3D 根逐像素深度的平局偏移：纯几何 + 线程本地已接受表
 /// （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D4）。
 mod depth_order;
-/// 预览渲染层/槽的统一分配与回收
-/// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.3）。
-pub mod preview_layers;
-/// 动画节点独立播放会话/时钟（change: 2026-10-05-bind-model-animation-to-shots）。
-pub mod animation_session;
-/// 通用相机过渡状态机（change: refactor-bevy-reusable-components）。
-pub mod camera_transition;
+pub mod gizmo_layout;
 /// 配置化等距网格（change: refactor-bevy-reusable-components）。
 pub mod isometric_grid;
 /// 动画节点运动 IR 求值器（change: 2026-10-05-bind-model-animation-to-shots）。
 pub mod motion;
 /// 独立目标轨道相机（change: refactor-bevy-reusable-components）。
 pub mod orbit_camera;
+/// 预览渲染层/槽的统一分配与回收
+/// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.3）。
+pub mod preview_layers;
 /// 通用 transform 动画插件（change: refactor-bevy-reusable-components）。
 pub mod transform_animation;
 /// 可复用 transform gizmo（change: refactor-bevy-reusable-components）。
 pub mod transform_gizmo;
-pub mod gizmo_layout;
 
 #[cfg(feature = "canvas-core")]
 mod app;
@@ -50,70 +50,70 @@ mod app;
 mod bridge;
 #[cfg(feature = "canvas-core")]
 mod canvas2d;
-#[cfg(feature = "canvas-core")]
-mod model_preview;
-/// 拍摄镜头卡片 GPU 预览（change: 2026-10-15-add-film-set-shooting-shot-previews）。
-/// 纯判定（`policy`/`plan`）在任何 feature 下编译并可单测；ECS 装配只在 `canvas-core` 下编译。
-mod shot_node_preview;
-#[cfg(feature = "canvas-core")]
-mod pick_index;
-#[cfg(feature = "canvas-core")]
-mod shot_capture_wire;
 /// 页面内模型历史缩略图：同一 Bevy App 内一次性离屏渲染
 /// （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
 #[cfg(feature = "canvas-core")]
 mod history_preview;
+#[cfg(feature = "canvas-core")]
+mod model_preview;
+#[cfg(feature = "canvas-core")]
+mod pick_index;
+#[cfg(feature = "canvas-core")]
+mod shot_capture_wire;
+/// 拍摄镜头卡片 GPU 预览（change: 2026-10-15-add-film-set-shooting-shot-previews）。
+/// 纯判定（`policy`/`plan`）在任何 feature 下编译并可单测；ECS 装配只在 `canvas-core` 下编译。
+mod shot_node_preview;
 
 #[cfg(feature = "native-renderer")]
 pub mod renderer_protocol;
 
-/// 本机录制执行器控制协议的 Rust 投影（change: 2026-10-17-add-native-offscreen-film-set-recording）。
-/// 契约的生成绑定是 `api/gen/es/woohaa/recording/v1alpha1/recording_pb.ts`；本模块不含 Bevy 依赖，任何 feature 下可编译。
-pub mod recording_protocol;
-/// 录制时间表：有理数采样时钟、末帧终点规则与帧数预算。
-/// 纯函数，不含 Bevy 依赖。
-pub mod recording_timeline;
 /// 录制帧屏障：applied → media → pipeline → rendered → readback 的身份与阶段状态机。
 /// 纯状态机，不含 Bevy/GPU 依赖。
 pub mod recording_barrier;
 /// 原生编码：RGBA→YUV420、有界写入、MP4/H.264 结构自校验与临时产物管理。
 /// 不依赖用户 PATH，也不含 Bevy 依赖。
 pub mod recording_encode;
-/// 最小 MP4 封装器（H.264 video-only、Fast Start）。纯字节操作，不含 Bevy 依赖。
-pub mod recording_mux;
-/// 录制输入资源的有界分块接收、checksum 校验与私有文件管理。
-pub mod recording_resources;
+/// 录制任务执行编排：时间表 → 帧屏障 → 编码 → 成片事实。
+/// 取帧通过 `FrameProbe` 注入，因此可无 GPU 测试。
+pub mod recording_job;
 /// 原生媒体解码与按 PTS 选帧（图片保留 alpha；视频按冻结映射取覆盖目标时刻的帧）。
 pub mod recording_media;
 /// 真实解码实现（`recording-media` feature）：图片用 `image`，视频用 OpenH264 + 自有 MP4 索引。
 #[cfg(feature = "recording-media")]
 pub mod recording_media_native;
-/// 录制任务执行编排：时间表 → 帧屏障 → 编码 → 成片事实。
-/// 取帧通过 `FrameProbe` 注入，因此可无 GPU 测试。
-pub mod recording_job;
-/// 真实 GPU 取帧探针（`recording-gpu` feature）：复用预览渲染入口。
-#[cfg(feature = "recording-gpu")]
-pub mod recording_probe_gpu;
-/// 冻结 IR → 渲染计划的装配与 GPU 适配器探测（`recording-gpu` feature）。
-#[cfg(feature = "recording-gpu")]
-pub mod recording_prepare;
-/// `submitJob` payload → 可执行任务的装配（`recording-worker` feature）。
-#[cfg(feature = "recording-worker")]
-pub mod recording_session;
-/// worker 控制帧写出与 `submitJob` 执行（`recording-worker` feature）。
-#[cfg(feature = "recording-worker")]
-pub mod recording_wire;
+/// 最小 MP4 封装器（H.264 video-only、Fast Start）。纯字节操作，不含 Bevy 依赖。
+pub mod recording_mux;
 /// OpenH264 软件编码后端与成片收尾（`recording-codec` feature）。
 /// 需要 C++ 工具链，但**不需要 GPU**：无 GPU 环境可跑真实编码回归。
 #[cfg(feature = "recording-codec")]
 pub mod recording_openh264;
+/// 冻结 IR → 渲染计划的装配与 GPU 适配器探测（`recording-gpu` feature）。
+#[cfg(feature = "recording-gpu")]
+pub mod recording_prepare;
+/// 真实 GPU 取帧探针（`recording-gpu` feature）：复用预览渲染入口。
+#[cfg(feature = "recording-gpu")]
+pub mod recording_probe_gpu;
+/// 本机录制执行器控制协议的 Rust 投影（change: 2026-10-17-add-native-offscreen-film-set-recording）。
+/// 契约的生成绑定是 `api/gen/es/woohaa/recording/v1alpha1/recording_pb.ts`；本模块不含 Bevy 依赖，任何 feature 下可编译。
+pub mod recording_protocol;
+/// 录制输入资源的有界分块接收、checksum 校验与私有文件管理。
+pub mod recording_resources;
+/// `submitJob` payload → 可执行任务的装配（`recording-worker` feature）。
+#[cfg(feature = "recording-worker")]
+pub mod recording_session;
+/// 录制时间表：有理数采样时钟、末帧终点规则与帧数预算。
+/// 纯函数，不含 Bevy 依赖。
+pub mod recording_timeline;
+/// worker 控制帧写出与 `submitJob` 执行（`recording-worker` feature）。
+#[cfg(feature = "recording-worker")]
+pub mod recording_wire;
 
 // `model3d` 的网格/相机依赖 bevy_render；其纯场景构建在 native-renderer 下也可复用。
+/// 片场场景空间 ↔ 画布呈现空间的纯数学（change: 2026-10-23-isolate-film-set-camera-space）。
+pub mod film_set_space;
 pub mod model3d;
 /// 可复用 shot camera ECS 模块（change: add-reusable-bevy-shot-camera）。
 pub mod shot_camera;
-/// 片场场景空间 ↔ 画布呈现空间的纯数学（change: 2026-10-23-isolate-film-set-camera-space）。
-pub mod film_set_space;
 
 /// 跨语言 golden 测试用的纯函数门面（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 7.2）。
 ///
@@ -169,40 +169,83 @@ pub mod golden_api {
 
     /// 复合资产范围几何 golden（change: 2026-10-12-align-film-set-scope-with-isometric-grid）：
     /// 由基准矩形、形状与地面矩形派生中心/半径/AABB/顶点/抓手 JSON。
-    pub fn scope_geometry_json(base: [f32; 4], shape: &str, ground: [f32; 4], min_half: f32) -> Result<String, String> {
+    pub fn scope_geometry_json(
+        base: [f32; 4],
+        shape: &str,
+        ground: [f32; 4],
+        min_half: f32,
+    ) -> Result<String, String> {
         let geometry = scope_geometry(base, shape, ground, min_half)?;
         Ok(format!(
             r#"{{"center":[{},{}],"radius":[{},{}],"aabb":[{},{},{},{}],"vertices":[[{},{}],[{},{}],[{},{}],[{},{}]],"handles":[[{},{}],[{},{}],[{},{}],[{},{}],[{},{}],[{},{}],[{},{}],[{},{}]]}}"#,
-            geometry.center.x, geometry.center.y,
-            geometry.radius_x, geometry.radius_y,
-            geometry.aabb.x, geometry.aabb.y, geometry.aabb.width, geometry.aabb.height,
-            geometry.vertices[0].x, geometry.vertices[0].y,
-            geometry.vertices[1].x, geometry.vertices[1].y,
-            geometry.vertices[2].x, geometry.vertices[2].y,
-            geometry.vertices[3].x, geometry.vertices[3].y,
-            geometry.handles[0].x, geometry.handles[0].y,
-            geometry.handles[1].x, geometry.handles[1].y,
-            geometry.handles[2].x, geometry.handles[2].y,
-            geometry.handles[3].x, geometry.handles[3].y,
-            geometry.handles[4].x, geometry.handles[4].y,
-            geometry.handles[5].x, geometry.handles[5].y,
-            geometry.handles[6].x, geometry.handles[6].y,
-            geometry.handles[7].x, geometry.handles[7].y,
+            geometry.center.x,
+            geometry.center.y,
+            geometry.radius_x,
+            geometry.radius_y,
+            geometry.aabb.x,
+            geometry.aabb.y,
+            geometry.aabb.width,
+            geometry.aabb.height,
+            geometry.vertices[0].x,
+            geometry.vertices[0].y,
+            geometry.vertices[1].x,
+            geometry.vertices[1].y,
+            geometry.vertices[2].x,
+            geometry.vertices[2].y,
+            geometry.vertices[3].x,
+            geometry.vertices[3].y,
+            geometry.handles[0].x,
+            geometry.handles[0].y,
+            geometry.handles[1].x,
+            geometry.handles[1].y,
+            geometry.handles[2].x,
+            geometry.handles[2].y,
+            geometry.handles[3].x,
+            geometry.handles[3].y,
+            geometry.handles[4].x,
+            geometry.handles[4].y,
+            geometry.handles[5].x,
+            geometry.handles[5].y,
+            geometry.handles[6].x,
+            geometry.handles[6].y,
+            geometry.handles[7].x,
+            geometry.handles[7].y,
         ))
     }
 
     /// 范围点包含 golden。
-    pub fn scope_contains(base: [f32; 4], shape: &str, ground: [f32; 4], min_half: f32, x: f32, y: f32) -> Result<bool, String> {
+    pub fn scope_contains(
+        base: [f32; 4],
+        shape: &str,
+        ground: [f32; 4],
+        min_half: f32,
+        x: f32,
+        y: f32,
+    ) -> Result<bool, String> {
         let geometry = scope_geometry(base, shape, ground, min_half)?;
-        Ok(crate::canvas_query::scope::contains(&geometry, bevy::prelude::Vec2::new(x, y)))
+        Ok(crate::canvas_query::scope::contains(
+            &geometry,
+            bevy::prelude::Vec2::new(x, y),
+        ))
     }
 
     /// 范围正面积框选相交 golden。
-    pub fn scope_intersects_rect(base: [f32; 4], shape: &str, ground: [f32; 4], min_half: f32, rect: [f32; 4]) -> Result<bool, String> {
+    pub fn scope_intersects_rect(
+        base: [f32; 4],
+        shape: &str,
+        ground: [f32; 4],
+        min_half: f32,
+        rect: [f32; 4],
+    ) -> Result<bool, String> {
         let geometry = scope_geometry(base, shape, ground, min_half)?;
         Ok(crate::canvas_query::scope::intersects_rect(
             &geometry,
-            crate::canvas_query::scope::ScopeRect { x: rect[0], y: rect[1], width: rect[2], height: rect[3] },
+            crate::canvas_query::scope::ScopeRect {
+                x: rect[0],
+                y: rect[1],
+                width: rect[2],
+                height: rect[3],
+            },
         ))
     }
 
@@ -224,7 +267,12 @@ pub mod golden_api {
             hz: ground[3],
         };
         Ok(crate::canvas_query::scope::geometry(
-            crate::canvas_query::scope::ScopeRect { x: base[0], y: base[1], width: base[2], height: base[3] },
+            crate::canvas_query::scope::ScopeRect {
+                x: base[0],
+                y: base[1],
+                width: base[2],
+                height: base[3],
+            },
             shape,
             Some(ground),
             min_half,
@@ -270,7 +318,9 @@ pub fn set_texture(
 ) -> Result<(), BoundaryError> {
     protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
     if content.len() > 4096 {
-        return Err(BoundaryError::from_str("Texture content identity too large"));
+        return Err(BoundaryError::from_str(
+            "Texture content identity too large",
+        ));
     }
     bridge::queue_texture(
         id,
@@ -285,14 +335,19 @@ pub fn set_texture(
 /// 原节点的源像素细节；整批校验成功才入队，空 JSON 显式清理。
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
-pub fn set_image_focus_details(manifest:&str,rgba:&[u8])->Result<(),BoundaryError> {
+pub fn set_image_focus_details(manifest: &str, rgba: &[u8]) -> Result<(), BoundaryError> {
     if manifest.is_empty() {
-        if !rgba.is_empty() {return Err(BoundaryError::from_str("Unexpected focus detail pixels"));}
-        return bridge::queue_focus_details(None,&[]).map_err(BoundaryError::from_str);
+        if !rgba.is_empty() {
+            return Err(BoundaryError::from_str("Unexpected focus detail pixels"));
+        }
+        return bridge::queue_focus_details(None, &[]).map_err(BoundaryError::from_str);
     }
-    if manifest.len()>16384 {return Err(BoundaryError::from_str("Focus detail manifest too large"));}
-    let frame:protocol::focus_details::FocusDetails=serde_json::from_str(manifest).map_err(|e|BoundaryError::from_str(&e.to_string()))?;
-    bridge::queue_focus_details(Some(frame),rgba).map_err(BoundaryError::from_str)
+    if manifest.len() > 16384 {
+        return Err(BoundaryError::from_str("Focus detail manifest too large"));
+    }
+    let frame: protocol::focus_details::FocusDetails =
+        serde_json::from_str(manifest).map_err(|e| BoundaryError::from_str(&e.to_string()))?;
+    bridge::queue_focus_details(Some(frame), rgba).map_err(BoundaryError::from_str)
 }
 
 /// 上传/更新一张片场媒体平面 RGBA 纹理（键为全局唯一 `planeId`，latest-wins）
@@ -353,7 +408,11 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
     // 节点，无目标/总览/非片场聚焦提前关闭（不做部件或媒体准备）
     // （change: 2026-10-14-scope-film-set-object-picking-to-focus，design D1/D2/D5）。
     let items = pick_index::film_set_items(&scene);
-    canvas_query::film_set_pick::accept_items(items.owner, items.candidates, items.part_bounds_evaluations);
+    canvas_query::film_set_pick::accept_items(
+        items.owner,
+        items.candidates,
+        items.part_bounds_evaluations,
+    );
     canvas_query::gizmo::accept_gizmo_scene(&scene);
     bridge::queue_scene(scene);
     Ok(generation)
@@ -398,11 +457,9 @@ pub fn set_observer(json: &str) -> Result<u32, BoundaryError> {
     let request: protocol::ObserverUpdateRequest =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
     request.validate().map_err(BoundaryError::from_str)?;
-    let generation = canvas_query::interaction::accept_observer(
-        request.base_scene_generation,
-        &request.node_id,
-    )
-    .map_err(BoundaryError::from_str)?;
+    let generation =
+        canvas_query::interaction::accept_observer(request.base_scene_generation, &request.node_id)
+            .map_err(BoundaryError::from_str)?;
     canvas_query::gizmo::accept_gizmo_observer(&request);
     bridge::queue_observer(request);
     Ok(generation)
@@ -556,7 +613,8 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
             extent,
             aabb,
         };
-        return serde_json::to_string(&metadata).map_err(|err| BoundaryError::from_str(&err.to_string()));
+        return serde_json::to_string(&metadata)
+            .map_err(|err| BoundaryError::from_str(&err.to_string()));
     }
     // 3. 一次层级/mesh 遍历得到 local AABB 与 extent，并写回注册快照
     //    （`model_unit` 以 `extent` 归一化模型尺寸，未写回会让模型巨大无比）。
@@ -616,7 +674,9 @@ pub fn prepare_and_register_model_resource(json: &str) -> Result<String, Boundar
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn declare_model_resource(json: &str) -> Result<String, BoundaryError> {
     if json.len() > 64 * 1024 {
-        return Err(BoundaryError::from_str("Model descriptor payload too large"));
+        return Err(BoundaryError::from_str(
+            "Model descriptor payload too large",
+        ));
     }
     let dto: protocol::ModelDescriptorDto =
         serde_json::from_str(json).map_err(|err| BoundaryError::from_str(&err.to_string()))?;
@@ -664,8 +724,9 @@ pub fn set_model_payload_leases(json: &str) -> Result<String, BoundaryError> {
         .filter(|key| !key.is_empty() && key.len() <= 256)
         .collect();
     let (retained, evicted) = bridge::set_model_payload_leases(keys);
-    let diagnostics: serde_json::Value = serde_json::from_str(&bridge::model_asset_diagnostics())
-        .map_err(|err| BoundaryError::from_str(&err.to_string()))?;
+    let diagnostics: serde_json::Value =
+        serde_json::from_str(&bridge::model_asset_diagnostics())
+            .map_err(|err| BoundaryError::from_str(&err.to_string()))?;
     serde_json::to_string(&serde_json::json!({
         "retained": retained,
         "evicted": evicted.len(),
@@ -817,7 +878,10 @@ pub use app::build_native_canvas_app;
 #[cfg(feature = "native-canvas")]
 pub fn native_startup_background() -> [u8; 4] {
     use bevy::color::ColorToPacked;
-    theme::ThemeResource::default().backdrop_color().to_srgba().to_u8_array()
+    theme::ThemeResource::default()
+        .backdrop_color()
+        .to_srgba()
+        .to_u8_array()
 }
 
 /// Avoid exposing an uninitialized native surface before its first scene.
@@ -827,4 +891,6 @@ pub fn native_frame_ready() -> bool {
 }
 
 #[cfg(feature = "canvas-core")]
-pub use runtime_health::{runtime_health, seed_runtime_generation, benchmark_frames, benchmark_media};
+pub use runtime_health::{
+    benchmark_frames, benchmark_media, runtime_health, seed_runtime_generation,
+};

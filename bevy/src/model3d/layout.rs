@@ -43,7 +43,9 @@ pub(crate) fn model_world_aabb_for_node(
 /// Subject-local box and world anchor stay separate so translation cannot round
 /// dimensions used by preview framing and LOD/cache selection.
 pub(crate) fn model_bounds_for_node(
-    model: &ModelSnapshot, placement: &ModelPlacement, node: &GraphNode,
+    model: &ModelSnapshot,
+    placement: &ModelPlacement,
+    node: &GraphNode,
 ) -> Option<(ModelAabb, Vec3)> {
     let unit = model_unit(node, model, placement);
     let local = layout_aabb(node, model, model_view_rotation(placement), unit)?;
@@ -100,13 +102,23 @@ fn root_depth(node: &GraphNode) -> f32 {
 }
 
 /// The accepted presentation and the model use one layout, including eccentric model origins.
-fn group_layout(node: &GraphNode, model: &ModelSnapshot, placement: &ModelPlacement) -> crate::canvas_query::group_model::GroupModelLayout {
+fn group_layout(
+    node: &GraphNode,
+    model: &ModelSnapshot,
+    placement: &ModelPlacement,
+) -> crate::canvas_query::group_model::GroupModelLayout {
     crate::canvas_query::group_model::for_node(node).unwrap_or_else(|| {
-        let local = scene::model_local_aabb(model).unwrap_or_else(|| ModelAabb::new([0.;3], [0.;3]));
+        let local =
+            scene::model_local_aabb(model).unwrap_or_else(|| ModelAabb::new([0.; 3], [0.; 3]));
         crate::canvas_query::group_model::derive(node, local, model.extent, placement)
     })
 }
-fn group_anchor(node: &GraphNode, model: &ModelSnapshot, placement: &ModelPlacement, _unit: f32) -> Vec3 {
+fn group_anchor(
+    node: &GraphNode,
+    model: &ModelSnapshot,
+    placement: &ModelPlacement,
+    _unit: f32,
+) -> Vec3 {
     let layout = group_layout(node, model, placement);
     canvas_world_position(layout.anchor.x, layout.anchor.y, root_depth(node))
 }

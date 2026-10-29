@@ -7,13 +7,17 @@
 import type { CanvasRoom } from "../sync/index.js";
 import type { CanvasNodeData, ModelContentVersion } from "@woohaa3/contracts";
 import {
+  canonicalFilmSetFields,
+  readFilmSetGroupMarker,
+  readFilmSetAnimationProjection,
+  MODEL_CAMERA_ASPECTS,
+  type ModelCameraAspect,
   readGroupAppearanceForNode,
   animationSnapshotHash,
   filmSetAnimationsOf,
   decodeFilmSetNodeData,
   decodeModelContentVersion,
   decodeModelPlacement,
-  isFilmSetNode,
   isModelAuthoringNodeType,
   readModelCameras,
   resolveModelReferenceInputs
@@ -22,6 +26,9 @@ import type { GetModelNodeInput, GetModelNodeOutcome, ListModelNodesOutcome, Mod
 
 /** The scene camera remains addressable even when a legacy saved-camera collection exists. */
 export function readAuthoringCameras(data: CanvasNodeData | undefined, nodeType: string) {
+  const marker = nodeType === "group" ? readFilmSetGroupMarker(data) : null;
+  if (marker) return (marker.cameras ?? []).map((camera, order) => ({ ...camera, name: camera.name ?? camera.id, order,
+    aspect: (MODEL_CAMERA_ASPECTS as readonly string[]).includes(camera.aspect ?? "") ? camera.aspect as ModelCameraAspect : "16:9" as const }));
   const saved = readModelCameras(data);
   const scene = nodeType === "composite-asset" ? decodeFilmSetNodeData(data) : null;
   return scene?.ok ? [{ ...scene.value.sceneCamera, id: "scene-camera", name: "Scene camera", order: 0,
@@ -106,16 +113,17 @@ export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanv
       modelContentVersion: model.contentVersion, placement: model.placement, title: String(data?.title ?? "组形象"),
       prompt: "", source: model.modelScript, language: model.modelScriptLanguage, version: model.modelScriptVersion, references: [], cameras: [] };
   }
-  if (!isModelAuthoringNodeType(node.type)) {
+  if (!isModelAuthoringNodeType(node.type) && !(node.type === "group" && readFilmSetGroupMarker(canvas.nodeData[nodeId]))) {
     return { ok: false, code: "invalid-node-type", message: `节点 ${nodeId} 不是模型节点，组形象必须显式指定 resource` };
   }
 
   const data = canvas.nodeData[nodeId] as CanvasNodeData | undefined;
   const references = resolveModelReferenceInputs(canvas, nodeId).references;
-  const animation = readAnimationDefinition(data);
+  const projected = readFilmSetAnimationProjection(canvas, nodeId);
+  const animation = projected ? readAnimationDefinition(canonicalFilmSetFields(projected) as CanvasNodeData) : undefined;
   const modelContentVersion = readModelContentVersion(data?.modelContentVersion);
   const placement = decodeModelPlacement(data?.modelPlacement);
-  const decodedAnimation = isFilmSetNode(node.type, data) ? decodeFilmSetNodeData(data) : null;
+  const decodedAnimation = projected ? { ok: true as const, value: projected } : null;
   return {
     ok: true,
     canvasId,
@@ -157,7 +165,7 @@ export async function listModelNodes(
 
   const nodes: ModelNodeSummary[] = [];
   for (const node of exported.canvas.document.nodes) {
-    if (!isModelAuthoringNodeType(node.type)) continue;
+    if (!isModelAuthoringNodeType(node.type) && !(node.type === "group" && readFilmSetGroupMarker(exported.canvas.nodeData[node.id]))) continue;
     const data = exported.canvas.nodeData[node.id] as CanvasNodeData | undefined;
     const hasScript = typeof data?.modelScript === "string" && data.modelScript !== "";
     const status = data?.modelScriptStatus;
@@ -173,7 +181,7 @@ export async function listModelNodes(
       references: resolveModelReferenceInputs(exported.canvas, node.id).references,
       hasScript,
       ...(status ? { status } : {}),
-      pending: !hasScript || status === "failed",
+      pending: node.type === "group" ? false : !hasScript || status === "failed",
       cameraCount: readAuthoringCameras(data, node.type).length
     });
   }

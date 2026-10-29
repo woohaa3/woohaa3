@@ -7,6 +7,10 @@
 import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
+  createFilmSetGroupMarker,
+  createModelSnapshot,
+  composeFilmSetScene,
+  prepareModelResource,
   type SceneV2Op,
   type ServerCanvas
 } from "@woohaa3/contracts";
@@ -88,6 +92,43 @@ describe("modelBounds 取景锚点（Rust 相机事实源）", () => {
     } as ServerCanvas;
     const bounds = modelBounds(targetFor(canvas))!;
     expect(bounds.aabb.min[1]).toBeLessThan(800 - 164);
+  });
+
+  it("uses absolute group coordinates and world-space bounds for nested film sets", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("nested");
+    canvas.document.nodes = [
+      { id: "parent", type: "group", position: { x: 300, y: 150 } },
+      { id: "film", type: "group", parentId: "parent", position: { x: 40, y: 20 }, width: 300, height: 200 }
+    ];
+    canvas.nodeData.film = { filmSetGroup: { schemaVersion: 1, sceneBindings: [] } };
+    const nested = modelBounds(targetFor(canvas, "film"))!;
+    const absolute = structuredClone(canvas);
+    absolute.document.nodes[1]!.parentId = undefined;
+    absolute.document.nodes[1]!.position = { x: 340, y: 170 };
+    expect(modelBounds(targetFor(absolute, "film"))).toEqual(nested);
+    expect(nested.aabb.max[0] - nested.aabb.min[0]).toBeCloseTo(nested.aabb.max[1] - nested.aabb.min[1]);
+    expect(nested.aabb.max[1] - nested.aabb.min[1]).toBeCloseTo(nested.aabb.max[2] - nested.aabb.min[2]);
+  });
+
+  it("frames live group binding and scene transforms without changing badge fit", () => {
+    const canvas = createEmptyWoohaa3ServerCanvas("live-group");
+    canvas.document.nodes = [{ id: "film", type: "group", position: { x: 0, y: 0 }, width: 300, height: 200 }, { id: "source", type: "model3d", parentId: "film", position: { x: 10, y: 10 } }];
+    const model = createModelSnapshot({ modelScript: "scene.box({id:'b'});", modelScriptVersion: "woohaa-model-js-v2" });
+    canvas.nodeData.source = { modelScript: model.modelScript, modelScriptVersion: model.modelScriptVersion, modelScriptLanguage: model.modelScriptLanguage, modelContentVersion: model.contentVersion };
+    canvas.nodeData.film = { filmSetGroup: createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "actor", sourceNodeId: "source", kind: "model3d", contentKey: "v1", visibility: true, transform: { x: 0, y: 0, z: 0, yaw: 0, scale: 1 } }] }) };
+    const ops = composeFilmSetScene({ models: [{ itemId: "actor", localTransform: { offset: { x: 0, y: 0, z: 0 }, yaw: 0, scale: 1 }, ops: [unitBox()] }] }).ops;
+    const resource = prepareModelResource({ sceneVersion: V2, ops });
+    const target = { ...targetFor(canvas, "film"), ops, aabb: resource.aabb, extent: resource.extent };
+    const before = modelBounds(target)!;
+    canvas.nodeData.film.filmSetGroup!.sceneBindings[0]!.transform.x = 4;
+    const moved = modelBounds(target)!;
+    expect(moved.center[0]).toBeGreaterThan(before.center[0]);
+    expect(moved.radius).toBeCloseTo(before.radius);
+    expect(moved.anchor).toEqual(before.anchor);
+    canvas.nodeData.film.filmSetGroup!.sceneTransform = { x: 2, y: 0, z: 0, yaw: 0, scale: 1 };
+    const shifted = modelBounds(target)!;
+    expect(shifted.center[0]).toBeGreaterThan(moved.center[0]);
+    expect(shifted.anchor).toEqual(before.anchor);
   });
 });
 

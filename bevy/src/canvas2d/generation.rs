@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use bevy::{prelude::*, camera::visibility::NoFrustumCulling, sprite::Anchor, text::LineBreak};
+use bevy::{camera::visibility::NoFrustumCulling, prelude::*, sprite::Anchor, text::LineBreak};
 
 use crate::app::CurrentScene;
 use crate::generation_progress::{display_percent, estimate_percent};
@@ -43,7 +43,15 @@ pub(crate) fn sync_generation(
     mut visuals: ResMut<Visuals>,
     mut clock: ResMut<GenerationClock>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut text_query: Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
+    mut text_query: Query<
+        (
+            &mut Text2d,
+            &mut Transform,
+            &mut TextColor,
+            &mut LogicalText,
+        ),
+        Without<Sprite>,
+    >,
 ) {
     // 图片/视频聚焦期间隐藏所有普通节点覆盖层
     // （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，任务 4.2；
@@ -163,7 +171,15 @@ pub(crate) fn sync_generation(
 fn update_label(
     commands: &mut Commands,
     visuals: &mut Visuals,
-    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
+    text_query: &mut Query<
+        (
+            &mut Text2d,
+            &mut Transform,
+            &mut TextColor,
+            &mut LogicalText,
+        ),
+        Without<Sprite>,
+    >,
     id: &str,
     label: String,
     position: Vec2,
@@ -171,7 +187,8 @@ fn update_label(
     color: u32,
 ) {
     if let Some(entity) = visuals.running_labels.get(id).copied() {
-        if let Ok((mut text, mut transform, mut text_color, mut meta)) = text_query.get_mut(entity) {
+        if let Ok((mut text, mut transform, mut text_color, mut meta)) = text_query.get_mut(entity)
+        {
             if text.0 != label {
                 text.0 = label;
             }

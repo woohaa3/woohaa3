@@ -80,7 +80,7 @@ export function projectMinimap(canvas: ServerCanvas | null): MinimapProjection {
       prompt: data.prompt
     }).displayName;
     const collapsed = node.type === "group" && data.groupCollapsed === true;
-    const rect = groupPresentationRect(node, collapsed, nodeWorldRect(node, byId));
+    const rect = groupPresentationRect(node, collapsed, nodeWorldRect(node, byId), data.groupBadgeScale);
     const kind = bevyKindForNodeType(node.type);
     nodes.push({
       id: node.id,

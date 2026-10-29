@@ -45,7 +45,9 @@ fn strip_comments(source: &str) -> String {
 }
 
 fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -85,8 +87,14 @@ fn recorder_binary_does_not_load_window_or_global_facade() {
         "worker 应通过录制任务编排执行，而不是自己拼时间表"
     );
     let wire = strip_comments(&read("src/recording_wire.rs"));
-    assert!(wire.contains("recording_job::run_job"), "执行必须走 recording_job::run_job");
-    assert!(wire.contains("recording_session::prepare_submit"), "快照装配必须走 recording_session");
+    assert!(
+        wire.contains("recording_job::run_job"),
+        "执行必须走 recording_job::run_job"
+    );
+    assert!(
+        wire.contains("recording_session::prepare_submit"),
+        "快照装配必须走 recording_session"
+    );
 }
 
 #[test]
@@ -191,7 +199,10 @@ fn recorder_binary_is_a_single_file() {
     collect_rs(&bevy_root().join("src/bin"), &mut bins);
     let recorder_bins: Vec<_> = bins
         .iter()
-        .filter(|path| path.file_name().is_some_and(|name| name == "shot-recorder.rs"))
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name == "shot-recorder.rs")
+        })
         .collect();
     assert_eq!(recorder_bins.len(), 1, "只应存在一个 shot-recorder 入口");
 }

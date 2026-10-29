@@ -11,7 +11,7 @@
 
 mod evaluate;
 mod keyframes;
-pub use keyframes::{MOTION_MAX_KEYFRAMES_PER_TRACK, RawModelKeyframe, RawKeyframeValue};
+pub use keyframes::{MOTION_MAX_KEYFRAMES_PER_TRACK, RawKeyframeValue, RawModelKeyframe};
 mod validate;
 
 pub use evaluate::{clamp_elevation, evaluate};

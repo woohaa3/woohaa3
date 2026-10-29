@@ -381,9 +381,9 @@ export function create2dInputFamily(core: InteractionCore) {
     // pointer 热路径只查询 Rust interaction snapshot，不扫描全场景或构建渲染快照。
     // 卡片外的片场模型 picking 仍驱动原有 hover 播放。
     const hitResult = core.queryPoint(world, core.activeViewport().zoom, state.hoveredEdgeId);
-    const badge = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-toggle-collapse" ? hitResult.value : null;
+    const badge = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-badge-select" ? hitResult.value : null;
     const badgeGrip = hitResult.ok && hitResult.value?.kind === "node-action" && hitResult.value.actionId === "group-resize-badge";
-    canvas.title = badgeGrip ? "拖拽等比缩放徽标" : badge ? (workingCanvasOf(woohaa3CanvasStore.getState())?.nodeData[badge.nodeId]?.groupCollapsed === true ? "点击展开组" : "点击收起组") : "";
+    canvas.title = badgeGrip ? "拖拽等比缩放徽标" : badge ? "选择并拖动组" : "";
     if (canvas.style) canvas.style.cursor = writable() ? badgeGrip ? "nwse-resize" : badge ? "pointer" : "" : "";
     core.settlePointerHover(
       hitResult,

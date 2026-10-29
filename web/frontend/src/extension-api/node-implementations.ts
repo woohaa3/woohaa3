@@ -1,6 +1,7 @@
 /** Trusted implementation bindings owned by a single page scope. */
 import {
   builtinNodeImplementations, savedCompositePreparation,
+  isFilmSetNode,
   type NodeCapabilities, type NodeCapabilityContext, type NodeCapabilityResolver,
   type ResolvedNodeCapabilities,
 } from '@woohaa3/contracts';
@@ -76,6 +77,7 @@ export function createNodeImplementationRegistry(composites: CompositeAssetRegis
     },
     prepare: async context => {
       const adapter = composites.resolve(context.canvas, context.node.id);
+      if (isFilmSetNode(context.node.type, context.data)) return { status: 'fail:compile:legacy-film-set-read-only' };
       const projection = adapter && context.data ? adapter.prepare(context.node.id, context.data) : null;
       if (!projection) return !adapter && context.data?.modelScript
         ? savedCompositePreparation.prepare(context)

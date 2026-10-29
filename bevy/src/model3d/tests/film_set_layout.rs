@@ -1,6 +1,5 @@
 use crate::model3d::{
-    film_set_content_bounds,
-    grid,
+    film_set_content_bounds, grid,
     layout::{model_anchor, model_unit},
     scene,
 };
@@ -9,11 +8,14 @@ use bevy::prelude::*;
 
 #[test]
 fn content_bounds_match_rendered_model_projection() {
-    let mut node: GraphNode = serde_json::from_str(r#"{
+    let mut node: GraphNode = serde_json::from_str(
+        r#"{
       "id":"film","type":"model","x":100,"y":200,"width":260,"height":195,
       "compositeAsset":{"x":100,"y":200,"width":260,"height":195,"contentExtent":2,
         "rootPlacement":{"offset":{"x":7,"y":-3,"z":0},"scale":1,"yaw":25}}
-    }"#).unwrap();
+    }"#,
+    )
+    .unwrap();
     let model: ModelSnapshot = serde_json::from_str(r#"{"signature":"model","extent":2,"ops":[
       {"t":"box","id":"a","parent":null,"position":[0,10,0],"rotation":[0,0,0],"scale":[1,1,1],"size":[6,20,6]}
     ]}"#).unwrap();

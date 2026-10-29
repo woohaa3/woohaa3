@@ -1,3 +1,5 @@
+import { readFilmSetGroupMarker } from "../film-set-group.js";
+import { fnv1a64Hex } from "../content-hash.js";
 /**
  * 节点生成历史：稳定身份、内容身份与哈希
  * （自 `node-history.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R06）。
@@ -18,7 +20,7 @@ import type {
  *
  * `model3d`/`composite-asset`（复合资产，含片场与炉体）承载模型脚本；非内容节点没有生成历史。
  */
-export function nodeHistoryKindForNodeType(type: string): "text" | "image" | "video" | "audio" | "model" | null {
+export function nodeHistoryKindForNodeType(type: string, data?: unknown): "text" | "image" | "video" | "audio" | "model" | null {
   switch (type) {
     case "text":
       return "text";
@@ -28,6 +30,8 @@ export function nodeHistoryKindForNodeType(type: string): "text" | "image" | "vi
       return "video";
     case "audio":
       return "audio";
+    case "group":
+      return readFilmSetGroupMarker(data) ? "model" : null;
     case "model3d":
     case COMPOSITE_ASSET_NODE_TYPE:
       return "model";
@@ -48,7 +52,7 @@ export function nodeTypesForHistoryKind(kind: "text" | "image" | "video" | "audi
     case "audio":
       return ["audio"];
     case "model":
-      return ["model3d", COMPOSITE_ASSET_NODE_TYPE];
+      return ["model3d", "group", COMPOSITE_ASSET_NODE_TYPE];
   }
 }
 
@@ -62,6 +66,7 @@ export function nodeHistoryContentIdentity(payload: NodeHistoryContentPayload): 
     case "text":
       return `text:${hashText(payload.text)}`;
     case "model":
+      if (payload.animation?.schemaVersion === 4) return `film-set-group:${fnv1a64Hex(JSON.stringify(payload.animation.filmSetGroup))}`;
       return modelContentIdentity(payload.sourceHash, payload.placement);
     case "image":
       // 图片编辑版本使用编辑身份（base/尺寸/shapes/输出），与纯媒体身份刻意分离；

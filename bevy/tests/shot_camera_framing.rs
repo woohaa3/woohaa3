@@ -191,13 +191,7 @@ fn rust_drag_math_matches_shared_fixture() {
                 expected
             );
         }
-        if let (
-            Some(start),
-            Some(delta),
-            Some(height),
-            Some(fit),
-            Some(expected),
-        ) = (
+        if let (Some(start), Some(delta), Some(height), Some(fit), Some(expected)) = (
             case.start_distance,
             case.delta_pixels,
             case.surface_height,

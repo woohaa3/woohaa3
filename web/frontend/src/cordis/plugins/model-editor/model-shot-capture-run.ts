@@ -28,7 +28,11 @@ export async function renderWithBevy(
   // 串行化：capture 通道是 latest-wins（新请求取消进行中的作业），因此截图与预览
   // 必须一次只发一个，否则后到的请求会让前一个超时（存量缺陷）。
   const release = await acquireCaptureLock();
+  let unpin: (() => void) | undefined;
   try {
+    const adapter = ctx.compositeAssets.resolve(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), input.nodeId);
+    unpin = adapter?.beginCapture?.(input.nodeId);
+    if (adapter?.awaitCaptureReady && !await adapter.awaitCaptureReady(input.nodeId)) return { ok: false, code: "media-not-ready", message: "镜头媒体尚未就绪" };
     const generation = captureGeneration++;
     const frame = await runtime.requestCapture({
       generation,
@@ -41,6 +45,7 @@ export async function renderWithBevy(
     if (!blob) return { ok: false, code: "encode-failed", message: "PNG 编码失败" };
     return { ok: true, blob };
   } finally {
+    unpin?.();
     release();
   }
 }

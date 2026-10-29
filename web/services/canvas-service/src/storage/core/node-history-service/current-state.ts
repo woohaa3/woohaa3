@@ -1,3 +1,4 @@
+import { readFilmSetGroupMarker, fnv1a64Hex, nodeHistoryKindForNodeType } from "@woohaa3/contracts";
 /**
  * 节点生成历史服务：当前生效状态读取与判定
  * （自 `node-history-service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R02）。
@@ -29,33 +30,20 @@ export type CurrentNodeState = {
  * （change: 2026-10-06，任务 2.1/R3）：`animation:<snapshotHash>`。非动画节点返回 null。
  */
 export function animationDefinitionIdentity(data: Record<string, unknown>): string | null {
+  const marker = readFilmSetGroupMarker(data);
+  if (marker) return `film-set-group:${fnv1a64Hex(JSON.stringify(marker))}`;
   const decoded = decodeFilmSetNodeData(data);
   return decoded.ok ? `animation:${animationSnapshotHash(decoded.value)}` : null;
 }
 
 /** 由历史动画 payload 计算同一完整定义身份（供登记去重与当前身份复用）。 */
 export function animationDefinitionIdentityFromPayload(animation: NodeHistoryAnimationPayload): string {
+  if (animation.schemaVersion === 4) return `film-set-group:${fnv1a64Hex(JSON.stringify(animation.filmSetGroup))}`;
   if (animation.schemaVersion !== 3) throw new Error("历史片场必须先完成离线迁移");
   return `animation:${animationDefinitionSnapshotHash({ scenePlacement: animation.scenePlacement, sceneCamera: animation.sceneCamera, filmSetContent: animation.filmSetContent, filmSetAnimations: animation.filmSetAnimations })}`;
 }
 
-export function historyKindForNodeType(type: string): NodeGenerationKind | null {
-  switch (type) {
-    case "text":
-      return "text";
-    case "image":
-      return "image";
-    case "video":
-      return "video";
-    case "audio":
-      return "audio";
-    case "model3d":
-    case "composite-asset":
-      return "model";
-    default:
-      return null;
-  }
-}
+export const historyKindForNodeType = nodeHistoryKindForNodeType;
 
 /**
  * 判定历史条目是否为节点当前版本（change: 模型编辑历史）。
@@ -163,7 +151,7 @@ export function currentStatesFor(
 
 export function entryKindForNode(canvas: ServerCanvas, nodeId: string): NodeGenerationKind | null {
   const node = canvas.document.nodes.find((candidate) => candidate.id === nodeId);
-  return node ? historyKindForNodeType(node.type) : null;
+  return node ? historyKindForNodeType(node.type, canvas.nodeData[nodeId]) : null;
 }
 
 /** 安全节点标题：优先节点用户可见标题。 */

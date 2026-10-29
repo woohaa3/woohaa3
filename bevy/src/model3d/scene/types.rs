@@ -31,10 +31,20 @@ pub(crate) struct ModelEntitySpec {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ModelGeometry {
     /// 盒：单位立方体 + scale（Bevy Cuboid 尺寸在构建时乘以单位）。
-    Box { size: [f32; 3] },
-    Cylinder { radius: f32, height: f32 },
-    Sphere { radius: f32 },
-    Capsule { radius: f32, height: f32 },
+    Box {
+        size: [f32; 3],
+    },
+    Cylinder {
+        radius: f32,
+        height: f32,
+    },
+    Sphere {
+        radius: f32,
+    },
+    Capsule {
+        radius: f32,
+        height: f32,
+    },
     Mesh {
         vertices: Vec<[f32; 3]>,
         faces: Vec<[u32; 3]>,
@@ -44,8 +54,15 @@ pub(crate) enum ModelGeometry {
 /// 与 ECS 无关的动画描述。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ModelAnimationSpec {
-    Rotate { axis: usize, speed: f32 },
-    Move { axis: usize, speed: f32, range: [f32; 2] },
+    Rotate {
+        axis: usize,
+        speed: f32,
+    },
+    Move {
+        axis: usize,
+        speed: f32,
+        range: [f32; 2],
+    },
     Oscillate {
         axis: usize,
         speed: f32,

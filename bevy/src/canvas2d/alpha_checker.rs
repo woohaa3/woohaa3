@@ -45,7 +45,11 @@ fn checker_texture() -> Image {
         }
     }
     Image::new(
-        Extent3d { width: side, height: side, depth_or_array_layers: 1 },
+        Extent3d {
+            width: side,
+            height: side,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         data,
         TextureFormat::Rgba8UnormSrgb,
@@ -71,7 +75,10 @@ pub(crate) fn sync(
     // Its alpha outside the document must reveal the actual canvas, not another
     // checker sized from the captured viewport's aspect ratio.
     let focus = presented_media_focus(scene).filter(|_| {
-        !scene.image_focus.as_ref().is_some_and(|image| image.document_view.is_some())
+        !scene
+            .image_focus
+            .as_ref()
+            .is_some_and(|image| image.document_view.is_some())
     });
     let node = focus
         .as_ref()
@@ -99,7 +106,11 @@ pub(crate) fn sync(
     };
     // 在聚焦素材正下方：素材本身仍是透明交互层，透明像素透出这层格子。
     let transform = Transform::from_xyz(center.x, -center.y, foreground_z(scene) - 0.5);
-    let image_mode = SpriteImageMode::Tiled { tile_x: true, tile_y: true, stretch_value: 1.0 };
+    let image_mode = SpriteImageMode::Tiled {
+        tile_x: true,
+        tile_y: true,
+        stretch_value: 1.0,
+    };
     if let Some(previous) = entity {
         if let Ok((mut sprite, mut placed)) = sprites.get_mut(previous) {
             sprite.image = handle;
@@ -113,7 +124,13 @@ pub(crate) fn sync(
         commands
             .spawn((
                 MediaAlphaChecker,
-                Sprite { image: handle, custom_size: Some(size), image_mode, color: Color::WHITE, ..Default::default() },
+                Sprite {
+                    image: handle,
+                    custom_size: Some(size),
+                    image_mode,
+                    color: Color::WHITE,
+                    ..Default::default()
+                },
                 transform,
             ))
             .id(),

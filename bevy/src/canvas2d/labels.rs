@@ -9,7 +9,11 @@
 //! 补建不足数量、回收多余数量，并在集合为空时删除池条目。只 zip 已存在实体会让
 //! 「先隐藏再显示」丢失文字，是本次修复的根因。
 
-use bevy::{prelude::*, sprite::Anchor, text::{LineBreak, TextBounds}};
+use bevy::{
+    prelude::*,
+    sprite::Anchor,
+    text::{LineBreak, TextBounds},
+};
 
 use super::Visuals;
 use super::layout::{hex, label_pool_plan};
@@ -34,7 +38,15 @@ const LABEL_BOUNDS: Vec2 = Vec2::new(600.0, 48.0);
 pub(crate) fn sync_labels(
     commands: &mut Commands,
     visuals: &mut Visuals,
-    text_query: &mut Query<(&mut Text2d, &mut Transform, &mut TextColor, &mut LogicalText), Without<Sprite>>,
+    text_query: &mut Query<
+        (
+            &mut Text2d,
+            &mut Transform,
+            &mut TextColor,
+            &mut LogicalText,
+        ),
+        Without<Sprite>,
+    >,
     node_id: &str,
     labels: Vec<Label>,
     z: f32,
@@ -50,7 +62,9 @@ pub(crate) fn sync_labels(
     }
     for (index, (label, position, size, color)) in labels.into_iter().enumerate() {
         if let Some(entity) = entities.get(index).copied() {
-            if let Ok((mut text, mut transform, mut text_color, mut meta)) = text_query.get_mut(entity) {
+            if let Ok((mut text, mut transform, mut text_color, mut meta)) =
+                text_query.get_mut(entity)
+            {
                 if text.0 != label {
                     text.0 = label;
                 }
@@ -127,25 +141,21 @@ mod tests {
     fn apply(
         mut commands: Commands,
         mut visuals: ResMut<Visuals>,
-        mut query: Query<(
-            &mut Text2d,
-            &mut Transform,
-            &mut TextColor,
-            &mut LogicalText,
-        ), Without<Sprite>>,
+        mut query: Query<
+            (
+                &mut Text2d,
+                &mut Transform,
+                &mut TextColor,
+                &mut LogicalText,
+            ),
+            Without<Sprite>,
+        >,
         mut pending: ResMut<Pending>,
     ) {
         let node_id = pending.node_id.clone();
         let z = pending.z;
         let labels = std::mem::take(&mut pending.labels);
-        sync_labels(
-            &mut commands,
-            &mut visuals,
-            &mut query,
-            &node_id,
-            labels,
-            z,
-        );
+        sync_labels(&mut commands, &mut visuals, &mut query, &node_id, labels, z);
     }
 
     fn world() -> World {
@@ -185,7 +195,7 @@ mod tests {
             attach_probe_mesh: default(),
             attach_probe_entity: None,
             attach_probe_active: false,
-        media_alpha_checker: None,
+            media_alpha_checker: None,
             running_mesh: default(),
             running_mesh_entity: None,
             running_labels: default(),
@@ -222,13 +232,19 @@ mod tests {
     #[test]
     fn reused_label_keeps_logical_font_size_and_lets_strategy_rasterize() {
         let mut world = world();
-        sync(&mut world, vec![("标题".to_owned(), Vec2::new(10.0, 20.0), 12.0, 0xFFFFFF)]);
+        sync(
+            &mut world,
+            vec![("标题".to_owned(), Vec2::new(10.0, 20.0), 12.0, 0xFFFFFF)],
+        );
         let entity = world.resource::<Visuals>().labels["n1"][0];
         world.run_system_once(text_presentation::sync).unwrap();
         let (font, scale) = glyph(&world, entity);
         assert!((font * scale - 12.0).abs() <= 1.0e-3, "100% 档显示逻辑字号");
 
-        sync(&mut world, vec![("新标题".to_owned(), Vec2::new(10.0, 20.0), 16.0, 0xFFFFFF)]);
+        sync(
+            &mut world,
+            vec![("新标题".to_owned(), Vec2::new(10.0, 20.0), 16.0, 0xFFFFFF)],
+        );
         assert_eq!(
             world.get::<LogicalText>(entity).unwrap().size,
             16.0,
@@ -241,7 +257,10 @@ mod tests {
 
         // 重复应用同一状态不累乘尺度。
         for _ in 0..3 {
-            sync(&mut world, vec![("新标题".to_owned(), Vec2::new(10.0, 20.0), 16.0, 0xFFFFFF)]);
+            sync(
+                &mut world,
+                vec![("新标题".to_owned(), Vec2::new(10.0, 20.0), 16.0, 0xFFFFFF)],
+            );
             world.run_system_once(text_presentation::sync).unwrap();
         }
         let after = glyph(&world, entity);
@@ -253,7 +272,10 @@ mod tests {
     #[test]
     fn hide_then_show_rebuilds_and_selects_current_step() {
         let mut world = world();
-        sync(&mut world, vec![("标题".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)]);
+        sync(
+            &mut world,
+            vec![("标题".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)],
+        );
         let first = world.resource::<Visuals>().labels["n1"][0];
         sync(&mut world, Vec::new());
         assert!(!world.resource::<Visuals>().labels.contains_key("n1"));
@@ -262,7 +284,10 @@ mod tests {
         // 隐藏期间改变倍率与 DPR。
         world.resource_mut::<CurrentScene>().0.viewport.zoom = 8.0;
         world.resource_mut::<SurfaceState>().pixel_ratio = 2.0;
-        sync(&mut world, vec![("标题".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)]);
+        sync(
+            &mut world,
+            vec![("标题".to_owned(), Vec2::ZERO, 12.0, 0xFFFFFF)],
+        );
         let second = world.resource::<Visuals>().labels["n1"][0];
         assert_ne!(second, first, "隐藏后必须新建实体");
         world.run_system_once(text_presentation::sync).unwrap();
@@ -276,8 +301,12 @@ mod tests {
     #[test]
     fn step_changes_keep_text_content_and_logical_layout() {
         let mut world = world();
-        let long = "这是一段会被业务逻辑截断的较长中文标题，用来验证栅格档位不影响文案与分行".to_owned();
-        sync(&mut world, vec![(long.clone(), Vec2::new(24.0, 56.0), 12.0, 0xFFFFFF)]);
+        let long =
+            "这是一段会被业务逻辑截断的较长中文标题，用来验证栅格档位不影响文案与分行".to_owned();
+        sync(
+            &mut world,
+            vec![(long.clone(), Vec2::new(24.0, 56.0), 12.0, 0xFFFFFF)],
+        );
         let entity = world.resource::<Visuals>().labels["n1"][0];
         world.run_system_once(text_presentation::sync).unwrap();
         let baseline_text = world.get::<Text2d>(entity).unwrap().0.clone();
@@ -285,18 +314,28 @@ mod tests {
         for zoom in [2.0, 4.0, 8.0, 12.0, 4.0, 1.0] {
             world.resource_mut::<CurrentScene>().0.viewport.zoom = zoom;
             world.run_system_once(text_presentation::sync).unwrap();
-            assert_eq!(world.get::<Text2d>(entity).unwrap().0, baseline_text, "zoom={zoom} 文案必须不变");
+            assert_eq!(
+                world.get::<Text2d>(entity).unwrap().0,
+                baseline_text,
+                "zoom={zoom} 文案必须不变"
+            );
             assert_eq!(
                 world.get::<Transform>(entity).unwrap().translation,
                 baseline_translation,
                 "zoom={zoom} 锚点必须不变"
             );
             let (font, scale) = glyph(&world, entity);
-            assert!((font * scale - 12.0).abs() <= 1.0e-3, "zoom={zoom} 逻辑字号必须不变");
+            assert!(
+                (font * scale - 12.0).abs() <= 1.0e-3,
+                "zoom={zoom} 逻辑字号必须不变"
+            );
             // 栅格 bounds 与字体同比例换算，逻辑宽度仍是 LABEL_BOUNDS。
             let bounds = world.get::<TextBounds>(entity).unwrap();
             let width = bounds.width.expect("标签有界");
-            assert!((width * scale - LABEL_BOUNDS.x).abs() <= 1.0e-3, "zoom={zoom} 逻辑 bounds 必须不变");
+            assert!(
+                (width * scale - LABEL_BOUNDS.x).abs() <= 1.0e-3,
+                "zoom={zoom} 逻辑 bounds 必须不变"
+            );
         }
     }
 

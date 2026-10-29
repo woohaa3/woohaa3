@@ -44,12 +44,7 @@ export const NODE_TEMPLATES: readonly CanvasNodeTemplate[] = [
     label: descriptor.kind === "model" ? "3D 模型" : descriptor.label,
     nodeType: descriptor.canonicalType,
     taskKind: descriptor.taskKind !== undefined
-  })),
-  // 自包含 3D 节点（change: 2026-10-05-bind-model-animation-to-shots）：直接创建即携带完整本地
-  // 模型定义，不从来源节点读取；模型内容再由聚焦编辑器或 MCP 编辑/导入。
-  // 复合资产节点（change: 2026-10-11-extract-film-set-extension，D1）：每类业务一个菜单项，
-  // 片场 defaultNodeData 带 extensionId="film-set"；炉体模板由其 extension 注册。
-  { id: "composite-asset", label: "导演场", nodeType: "composite-asset", taskKind: false }
+  }))
 ];
 
 /** model 语义别名与 model3d 菜单项返回同一份模板。 */
@@ -98,7 +93,7 @@ export function connectNodeDataFor(
   if (!base) return undefined;
   // 自包含 3D 节点不从来源节点取得运行数据：连线只作来源说明，不注入任务 inputMapping
   // （change: 2026-10-05-bind-model-animation-to-shots）；复合资产节点同理。
-  if (toNodeType === "model3d" || toNodeType === "composite-asset") return { ...base };
+  if (toNodeType === "model3d" || toNodeType === "composite-asset" || toNodeType === "film-set") return { ...base };
   const data: CanvasNodeData = { ...base };
   data.inputMapping = [
     {

@@ -11,7 +11,6 @@ import {
   decodeFilmSetContent,
   decodeFilmSetPartId,
   encodeFilmSetPartId,
-  filmSetItemById,
   filmSetItemAdapterHash,
   createFilmSetItemMotion,
   requiredFilmSetDuration,
@@ -147,60 +146,16 @@ describe("组合入口覆盖内部模型与地面（任务 3.1）", () => {
   });
 });
 
-describe("对象级命令经 reducer 原子生效（任务 2.3）", () => {
-  function animationNodeData() {
-    const snapshot = createFilmSetSnapshot({
-      title: "片场",
-      model: { modelScript: "", modelScriptVersion: "woohaa-model-js-v2" },
-      motionScript: "",
-      timeline: { duration: 0, loop: false },
-      filmSetContent: { schemaVersion: 4, items: [modelItem("a")] }
-    });
-    return filmSetNodeDataFields(snapshot) as Record<string, unknown>;
-  }
-
-  it("filmSet.itemPatch 更新目标对象且重算快照 hash", () => {
+describe("旧对象命令不再写入快照", () => {
+  it("新增旧 owner 与 itemPatch 均拒绝且输入不变", () => {
     const base = createEmptyWoohaa3ServerCanvas("c1");
-    const created = applyCanvasCommands(base, [
-      {
-        type: "node.add",
-        node: { id: "anim", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 }, width: 260, height: 195 },
-        nodeData: animationNodeData() as never
-      }
-    ]);
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    const before = created.canvas.nodeData.anim.animationSnapshotHash;
-    const moved = applyCanvasCommands(created.canvas, [
-      {
-        type: "filmSet.itemPatch",
-        nodeId: "anim",
-        itemId: "a",
-        op: { kind: "transform", localTransform: { offset: { x: 3, y: 0, z: 0 }, scale: 1, yaw: 0 } }
-      }
-    ]);
-    expect(moved.ok).toBe(true);
-    if (!moved.ok) return;
-    const content = moved.canvas.nodeData.anim.filmSetContent as FilmSetContent;
-    expect(filmSetItemById(content, "a")?.localTransform.offset.x).toBe(3);
-    expect(moved.canvas.nodeData.anim.animationSnapshotHash).not.toBe(before);
-  });
-
-  it("对象级命令目标不存在时整批拒绝", () => {
-    const base = createEmptyWoohaa3ServerCanvas("c1");
-    const created = applyCanvasCommands(base, [
-      {
-        type: "node.add",
-        node: { id: "anim", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 }, width: 260, height: 195 },
-        nodeData: animationNodeData() as never
-      }
-    ]);
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    const rejected = applyCanvasCommands(created.canvas, [
-      { type: "filmSet.itemPatch", nodeId: "anim", itemId: "missing", op: { kind: "delete" } }
-    ]);
-    expect(rejected.ok).toBe(false);
+    const data = filmSetNodeDataFields(createFilmSetSnapshot({ title: "片场", timeline: { duration: 0, loop: false }, filmSetContent: { schemaVersion: 4, items: [modelItem("a")] } }));
+    expect(applyCanvasCommands(base, [{ type: "node.add", node: { id: "anim", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 } }, nodeData: data as never }]).ok).toBe(false);
+    base.document.nodes.push({ id: "anim", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 } });
+    base.nodeData.anim = data as never;
+    const before = structuredClone(base);
+    expect(applyCanvasCommands(base, [{ type: "filmSet.itemPatch", nodeId: "anim", itemId: "a", op: { kind: "delete" } }]).ok).toBe(false);
+    expect(base).toEqual(before);
   });
 });
 

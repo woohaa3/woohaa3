@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use crate::protocol::{parse_theme_hex, Theme};
+use crate::protocol::{Theme, parse_theme_hex};
 
 /// 当前主题资源。缺省为 generated 默认主题（scene 未携带 theme 时的兼容行为）。
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
@@ -154,14 +154,35 @@ mod tests {
         let sentinel = ThemeResource(next);
 
         // node surface / border-selected / edge / progress / port / node kinds 均发生更新。
-        assert_ne!(sentinel.token_u32("canvasNodeSurface"), base.token_u32("canvasNodeSurface"));
-        assert_ne!(sentinel.token_u32("canvasNodeBorderSelected"), base.token_u32("canvasNodeBorderSelected"));
-        assert_ne!(sentinel.token_u32("canvasEdgeDefault"), base.token_u32("canvasEdgeDefault"));
-        assert_ne!(sentinel.token_u32("canvasEdgeSelected"), base.token_u32("canvasEdgeSelected"));
-        assert_ne!(sentinel.token_u32("canvasProgressFill"), base.token_u32("canvasProgressFill"));
-        assert_ne!(sentinel.token_u32("canvasPortDefault"), base.token_u32("canvasPortDefault"));
+        assert_ne!(
+            sentinel.token_u32("canvasNodeSurface"),
+            base.token_u32("canvasNodeSurface")
+        );
+        assert_ne!(
+            sentinel.token_u32("canvasNodeBorderSelected"),
+            base.token_u32("canvasNodeBorderSelected")
+        );
+        assert_ne!(
+            sentinel.token_u32("canvasEdgeDefault"),
+            base.token_u32("canvasEdgeDefault")
+        );
+        assert_ne!(
+            sentinel.token_u32("canvasEdgeSelected"),
+            base.token_u32("canvasEdgeSelected")
+        );
+        assert_ne!(
+            sentinel.token_u32("canvasProgressFill"),
+            base.token_u32("canvasProgressFill")
+        );
+        assert_ne!(
+            sentinel.token_u32("canvasPortDefault"),
+            base.token_u32("canvasPortDefault")
+        );
         assert_ne!(sentinel.node_palette("text").0, base.node_palette("text").0);
-        assert_ne!(sentinel.node_palette("image").0, base.node_palette("image").0);
+        assert_ne!(
+            sentinel.node_palette("image").0,
+            base.node_palette("image").0
+        );
         assert_ne!(sentinel.token_u32("gridMinor"), base.token_u32("gridMinor"));
         assert_ne!(sentinel.token_u32("gridMajor"), base.token_u32("gridMajor"));
     }
@@ -173,7 +194,8 @@ mod tests {
         let base = ThemeResource::default();
         let mut next = base.0.clone();
         next.fingerprint = "sentinel".to_owned();
-        next.tokens.insert("canvasNodeSurface".to_owned(), "#010101".to_owned());
+        next.tokens
+            .insert("canvasNodeSurface".to_owned(), "#010101".to_owned());
         let sentinel = ThemeResource(next);
         // 主题 token 变了，但主题并不承载 baseColor/emissive；模型色解析仍只读 Scene IR。
         assert_ne!(sentinel.fingerprint(), base.fingerprint());

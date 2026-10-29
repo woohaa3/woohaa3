@@ -1,3 +1,5 @@
+import { migrateFilmSetFixture } from "../../../test-support/film-set-groups.js";
+import { readFilmSetAnimationProjection } from "./film-set-animation-projection.js";
 import { applyCanvasCommands } from "../../../test-support/managed-shot-commands.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 
@@ -190,14 +192,16 @@ describe("independent film set clips", () => {
     const canvas = createEmptyWoohaa3ServerCanvas("c", "now");
     canvas.document.nodes.push({ id: "film", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 } });
     canvas.nodeData.film = canonicalFilmSetFields(animation) as never;
-    const before = JSON.parse(JSON.stringify(canvas.nodeData.film));
-    const result = applyCanvasCommands(canvas, [{ type: "filmSet.itemPatch", nodeId: "film", itemId: item.id, op: { kind: "delete" } }], { now: "later" });
+    const group = migrateFilmSetFixture(canvas, "film");
+    const before = structuredClone(group.nodeData.film);
+    const marker = before.filmSetGroup!;
+    const result = applyCanvasCommands(group, [{ type: "nodeData.patch", nodeId: "film", value: { filmSetGroup: { ...marker, sceneBindings: marker.sceneBindings.filter(binding => binding.bindingId !== item.id), clips: marker.clips!.map(clip => ({ ...clip, bindings: clip.bindings!.filter(binding => binding.itemId !== item.id) })) } } }], { now: "later" });
     expect(result.ok).toBe(true); if (!result.ok) return;
-    const after = decodeFilmSetNodeData(result.canvas.nodeData.film); expect(after.ok).toBe(true); if (!after.ok) return;
+    const after = decodeFilmSetNodeData(canonicalFilmSetFields(readFilmSetAnimationProjection(result.canvas, "film")!)); expect(after.ok).toBe(true); if (!after.ok) return;
     expect(after.value.filmSetContent.items.some(entry => entry.id === item.id)).toBe(false);
     expect(after.value.filmSetAnimations!.clips.every(clip => clip.bindings.length === 0)).toBe(true);
     const undo = applyCanvasCommands(result.canvas, [{ type: "nodeData.patch", nodeId: "film", value: before }], { now: "undo" });
-    expect(undo.ok).toBe(true); if (undo.ok) expect(undo.canvas.nodeData.film.filmSetAnimations).toEqual(before.filmSetAnimations);
+    expect(undo.ok).toBe(true); if (undo.ok) expect(undo.canvas.nodeData.film.filmSetGroup).toEqual(before.filmSetGroup);
   });
 
   it("requires explicit kind and enforces static/dynamic invariants", () => {

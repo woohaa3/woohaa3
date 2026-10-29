@@ -1,34 +1,29 @@
 import { afterEach, expect, it } from "vitest";
-import { canonicalFilmSetFields, createFilmSetSnapshot, createEmptyWoohaa3ServerCanvas, decodeFilmSetNodeData, filmSetAnimationsOf, type NodeGenerationHistoryDetail } from "@woohaa3/contracts";
+import { createFilmSetGroupMarker, createEmptyWoohaa3ServerCanvas, createModel3DNodeData, model3DNodeDataFields, readFilmSetAnimationProjection, type NodeGenerationHistoryDetail } from "@woohaa3/contracts";
 import { HistoryFilmSetSnapshots } from "../src/preview/browser/history-preview.js";
-const historyFilmSetSnapshots = new HistoryFilmSetSnapshots();
-afterEach(() => historyFilmSetSnapshots.clear("film"));
-it("history preview isolates the complete scene and clip collection, then restores the live view", () => {
-  const historical = createFilmSetSnapshot({ title: "old", model: { modelScript: "scene.box({id:'historic'});", modelScriptVersion: "woohaa-model-js-v2" }, modelItemId: "old-actor", motionScript: "motion.model.rotate('historic', { speed: 1 });", timeline: { duration: 7, loop: false } });
-  const collection = filmSetAnimationsOf(historical);
-  const detail: NodeGenerationHistoryDetail = {
-    entryId: "old", kind: "model", modelScript: "", language: "javascript", version: "woohaa-model-js-v2", sourceHash: "hist",
-    animation: { schemaVersion: 3, scenePlacement: historical.scenePlacement, sceneCamera: historical.sceneCamera, filmSetContent: historical.filmSetContent, filmSetAnimations: collection }
-  };
+const history = new HistoryFilmSetSnapshots();
+afterEach(() => history.clear("film"));
+it("history restores orchestration while resolving the current resource card", () => {
+  const marker = createFilmSetGroupMarker({ sceneBindings: [{ bindingId: "actor", sourceNodeId: "source", kind: "model3d", contentKey: "historic-key", visibility: true, transform: { x: 3, y: 0, z: 0, yaw: 0, scale: 1 } }] });
+  const detail: NodeGenerationHistoryDetail = { entryId: "old", kind: "model", modelScript: "", language: "javascript", version: "woohaa-model-js-v2", sourceHash: "hist", animation: { schemaVersion: 4, filmSetGroup: marker } };
   const canvas = createEmptyWoohaa3ServerCanvas("c", "now");
-  canvas.document.nodes.push({ id: "film", type: "composite-asset", position: { x: 0, y: 0 } });
-  canvas.nodeData.film = canonicalFilmSetFields(historical) as never;
+  canvas.document.nodes.push({ id: "film", type: "group", position: { x: 0, y: 0 } }, { id: "source", type: "model3d", parentId: "film", position: { x: 0, y: 0 } });
+  canvas.nodeData.film = { filmSetGroup: createFilmSetGroupMarker() };
+  canvas.nodeData.source = model3DNodeDataFields(createModel3DNodeData({ title: "current", model: { modelScript: "scene.box({id:'current'});", modelScriptVersion: "woohaa-model-js-v2" } })) as never;
   const before = JSON.stringify(canvas);
-  expect(historyFilmSetSnapshots.set("film", detail)).toBe(true);
-  const decoded = decodeFilmSetNodeData(historyFilmSetSnapshots.project(canvas)!.nodeData.film);
-  expect(decoded.ok).toBe(true);
-  if (!decoded.ok) return;
-  const historicItem = decoded.value.filmSetContent.items.find(item => item.id === "old-actor");
-  expect(historicItem && historicItem.kind === "model" ? historicItem.model.modelScript : "").toContain("historic");
-  expect(filmSetAnimationsOf(decoded.value)).toEqual(collection);
+  expect(history.set("film", detail)).toBe(true);
+  const projection = readFilmSetAnimationProjection(history.project(canvas), "film")!;
+  const actor = projection.filmSetContent.items.find(item => item.id === "actor");
+  expect(actor?.kind === "model" && actor.model.modelScript).toContain("current");
+  expect(actor?.localTransform.offset.x).toBe(3);
+  expect(history.get("film")?.sceneBindings[0].contentKey).toBe("historic-key");
   expect(JSON.stringify(canvas)).toBe(before);
-  const composition = historyFilmSetSnapshots.get("film")!.composition;
-  expect(historyFilmSetSnapshots.get("film")!.composition).toBe(composition);
-  historyFilmSetSnapshots.clear("film");
-  expect(historyFilmSetSnapshots.project(canvas)).toBe(canvas);
+  history.clear("film");
+  expect(history.project(canvas)).toBe(canvas);
 });
-it("invalid historical animation clears preview instead of mixing in current motion", () => {
-  const invalid = { entryId: "bad", kind: "model", modelScript: "", language: "javascript", version: "woohaa-model-js-v2", sourceHash: "bad", animation: { schemaVersion: 99 } };
-  expect(historyFilmSetSnapshots.set("film", invalid as unknown as NodeGenerationHistoryDetail)).toBe(false);
-  expect(historyFilmSetSnapshots.get("film")).toBeUndefined();
+it("legacy snapshots and unknown versions cannot become online history overrides", () => {
+  for (const schemaVersion of [3, 99]) {
+    expect(history.set("film", { kind: "model", animation: { schemaVersion } } as unknown as NodeGenerationHistoryDetail)).toBe(false);
+    expect(history.get("film")).toBeUndefined();
+  }
 });

@@ -15,7 +15,7 @@ import type { FilmSetHostContext as Context } from "../../state/browser/host-por
 import {
   clipConversionImpact,
   createMotionSnapshot,
-  decodeFilmSetNodeData,
+  readFilmSetAnimationProjection,
   filmSetAnimationsOf,
   filmSetBackdropIsCustom,
   filmSetClipPrecondition,
@@ -57,8 +57,7 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
   /** 镜头背景：跟随主题 / 自定义颜色（D6）。 */
   const [customBackdrop, setCustomBackdrop] = useState("#000000");
   const canvas = canvasState;
-  const decoded = decodeFilmSetNodeData(ctx.compositeAssets.projectCanvas(canvas)?.nodeData[nodeId]);
-  const animation = decoded.ok ? decoded.value : null;
+  const animation = readFilmSetAnimationProjection(ctx.compositeAssets.projectCanvas(canvas), nodeId);
   const collection = animation ? filmSetAnimationsOf(animation) : null;
   // 选择是本地状态：优先当前本地选中，其次持久默认，最后第一枚镜头（都不写 defaultClipId）。
   const chosen = playback.nodeId === nodeId ? playback.clipId : null;
@@ -72,7 +71,7 @@ export function FilmSetAnimationControls({ ctx, nodeId, writable, composition, c
   useEffect(() => {
     if (playback.nodeId !== nodeId || playback.clipId !== (shot?.id ?? null)) ctx.filmSetPlayback.select(nodeId, shot?.id ?? null);
   }, [nodeId, shot?.id, playback.nodeId, playback.clipId]);
-  if (!animation || !collection) return <p role="alert">片场数据无法读取：{decoded.ok ? "定义缺失" : decoded.reason}</p>;
+  if (!animation || !collection) return <p role="alert">片场资源无法读取，请检查来源卡片</p>;
 
   const mutate = async (op: FilmSetClipPatchOp, id = shot?.id): Promise<boolean> => {
     if (!writable || !id) return false;

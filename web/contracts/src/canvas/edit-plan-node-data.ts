@@ -7,7 +7,7 @@ export function planNodeDataFieldDiffs(before: ServerCanvas, after: ServerCanvas
   const forwardPre: EditPrecondition[] = [], inversePre: EditPrecondition[] = [];
   for (const node of nodes) {
     const previous = before.nodeData[node.id] ?? {}, next = after.nodeData[node.id] ?? {};
-    const changed = fields.filter(field => (field === "filmSetObjectContainersHidden" || field === "groupAppearance") ? JSON.stringify(previous[field]) !== JSON.stringify(next[field]) : previous[field] !== next[field]);
+    const changed = fields.filter(field => (field === "filmSetObjectContainersHidden" || field === "groupAppearance" || field === "filmSetGroup") ? JSON.stringify(previous[field]) !== JSON.stringify(next[field]) : previous[field] !== next[field]);
     if (!changed.length) continue;
     const snapshots = (data: CanvasNodeData): EditNodeDataFieldSnapshot[] => changed.map(field =>
       data[field] === undefined ? { field, present: false } : { field, present: true, value: data[field] });

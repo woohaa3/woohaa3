@@ -183,8 +183,11 @@ mod tests {
         let mesh = geometry.build();
         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
             .expect("positions")
-            .as_float3().expect("float3 positions")
-            .iter().filter(|p| p[0] > -1.0e5).count()
+            .as_float3()
+            .expect("float3 positions")
+            .iter()
+            .filter(|p| p[0] > -1.0e5)
+            .count()
     }
 
     #[test]

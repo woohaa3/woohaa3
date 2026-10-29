@@ -28,6 +28,7 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     const reports = createModelScriptReports(report => ctx.canvasRemote.reportModelScript(report));
     const schedule = options.schedule ?? queueMicrotask;
     let stopped = false, scheduled = false, running = false, rerun = false;
+    const readCanvas = () => ctx.compositeAssets.projectCanvas(ctx.canvasState.getCanvas());
     const identity = (canvas: ServerCanvas | null | undefined, node: ServerCanvas["document"]["nodes"][number] | undefined) => {
       if (!canvas || !node) return null;
       const context = { canvas, node, data: canvas.nodeData[node.id] };
@@ -45,13 +46,13 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     };
     const drain = async () => {
       let started = performance.now();
-      const canvas = ctx.canvasState.getCanvas();
+      const canvas = readCanvas();
       // This index belongs to one drain. Refresh on canonical snapshot replacement,
       // including after a browser yield or asynchronous preparation.
       let indexedCanvas = canvas;
       let nodes = new Map(canvas?.document.nodes.map(node => [node.id, node]) ?? []);
       const currentIdentity = (nodeId: string) => {
-        const latest = ctx.canvasState.getCanvas();
+        const latest = readCanvas();
         if (latest !== indexedCanvas) {
           indexedCanvas = latest;
           nodes = new Map(latest?.document.nodes.map(node => [node.id, node]) ?? []);
@@ -104,7 +105,7 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     const trigger = () => {
       if (stopped) return;
       const sources = new Map<string, string>();
-      const canvas = ctx.canvasState.getCanvas();
+      const canvas = readCanvas();
       for (const node of canvas?.document.nodes ?? []) {
         const current = identity(canvas, node);
         if (current) sources.set(node.id, current.key);

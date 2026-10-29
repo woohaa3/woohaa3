@@ -56,3 +56,35 @@ describe("layoutNodePanel", () => {
     expect(panel?.maxHeight).toBeLessThan(520);
   });
 });
+
+describe("组徽标锚点（below 策略）", () => {
+  const viewport = { left: 0, top: 0, width: 1440, height: 2000 };
+
+  it("面板整块落在徽标下缘之外，不盖住场景", () => {
+    const badge = { left: 100, top: 1000, width: 880, height: 640 };
+    const panel = layoutNodePanel(badge, viewport, { width: 760, height: 320 }, undefined, "below")!;
+    expect(panel.placement).toBe("below");
+    expect(panel.top).toBeCloseTo(badge.top + badge.height + 12, 5);
+    expect(panel.top).toBeGreaterThanOrEqual(badge.top + badge.height);
+  });
+
+  it("徽标探出视口底边时改贴侧面，而不是压回模型上", () => {
+    const badge = { left: 400, top: 600, width: 880, height: 640 };
+    const area = { left: 0, top: 0, width: 1440, height: 900 };
+    const panel = layoutNodePanel(badge, area, { width: 400, height: 320 }, undefined, "below")!;
+    expect(panel.placement).toBe("left");
+    // 完全不与徽标水平重叠 → 不遮挡模型。
+    expect(panel.left + panel.width).toBeLessThanOrEqual(badge.left);
+    expect(panel.top).toBeGreaterThanOrEqual(area.top);
+    expect(panel.top + Math.min(320, panel.maxHeight)).toBeLessThanOrEqual(area.top + area.height);
+  });
+
+  it("两侧都放不下时才退回视口底边（面板仍可见）", () => {
+    const badge = { left: 0, top: 600, width: 1440, height: 640 };
+    const area = { left: 0, top: 0, width: 1440, height: 900 };
+    const panel = layoutNodePanel(badge, area, { width: 760, height: 320 }, undefined, "below")!;
+    expect(panel.placement).toBe("edge");
+    expect(panel.top).toBeGreaterThanOrEqual(area.top);
+    expect(panel.top + Math.min(320, panel.maxHeight)).toBeLessThanOrEqual(area.top + area.height);
+  });
+});

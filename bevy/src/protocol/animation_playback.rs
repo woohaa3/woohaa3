@@ -38,7 +38,8 @@ pub(crate) struct AnimationPlayback {
     pub(crate) duration: f32,
     /// 是否循环。
     #[serde(default)]
-    #[allow(dead_code)] // 线格式字段：随 scene 下发；循环语义由 playback 时钟消费，Rust 侧暂不读取。
+    #[allow(dead_code)]
+    // 线格式字段：随 scene 下发；循环语义由 playback 时钟消费，Rust 侧暂不读取。
     pub(crate) looped: bool,
     /// 所播放镜头背景的具体色（`#rrggbb`）；缺省即跟随主题（change: 2026-10-19，D6）。
     #[serde(default)]
@@ -74,7 +75,9 @@ pub(crate) struct PlaybackCamera {
     pub(crate) focus_offset: [f32; 3],
 }
 
-fn default_playback_aspect() -> String { "16:9".to_owned() }
+fn default_playback_aspect() -> String {
+    "16:9".to_owned()
+}
 
 fn default_playback_elevation() -> f32 {
     crate::isometric_grid::CANVAS_CAMERA_PITCH
