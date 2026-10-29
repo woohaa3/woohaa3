@@ -191,7 +191,22 @@ fn pure_preparation_matches_sync_spawn_for_every_spec_kind() {
         true,
     )
     .expect("prepared");
-    let specs = super::super::scene::build_entity_specs(&snapshot);
+    // 参照侧必须做与 prepare 相同的总览平铺：只做平移的父级分组会被改写到根空间
+    // （`batching::apply_flatten`），漏掉这一步比较时每个子部件会差一个父级偏移。
+    let mut specs = super::super::scene::build_entity_specs(&snapshot);
+    let material_specs = super::super::scene::collect_materials(&snapshot);
+    let opaque: std::collections::HashSet<String> = specs
+        .iter()
+        .filter(|spec| {
+            super::super::scene::standard_material_for(&spec.material_key, &material_specs)
+                .alpha_mode
+                == bevy::material::AlphaMode::Opaque
+        })
+        .map(|spec| spec.material_key.clone())
+        .collect();
+    let planned =
+        super::super::batching::plan(&specs, &opaque, &Default::default(), true);
+    super::super::batching::apply_flatten(&mut specs, &planned.flatten);
     // 部件范围：批次合并的 + 未合并的 = 原始 specs（无需构建的部件除外）。
     assert_eq!(
         prepared.parts.len() + prepared.batched_part_count,
@@ -738,14 +753,19 @@ fn app_schedule_publishes_across_frames_without_exposing_staging() {
     let models = app.world().resource::<ModelVisuals>();
     assert_eq!(models.preparation_state("film"), RootState::Published);
     assert!(models.staging.is_empty(), "发布后 staging 必须清空");
-    // 软预算：只有单个不可抢占步骤可以跨过阈值，且必须被显式记录。
-    // 命令应用按实测耗时折算后并入同一帧工作量，因此允许极小的附加值。
+    // 软预算：**单个不可抢占步骤**允许跨过阈值，但必须被显式记录。
+    //
+    // 总览平铺后这 180 个球被合成一个批次，应用该批次是一步不可抢占的工作
+    // （代价 = 1 + 部件数，见 `Step::cost`），因此单帧峰值可以远超 64 单元 ——
+    // 这正是 `budget_overshoot` 存在的原因。这里不再假设「不可能超预算」，
+    // 而是断言超出的部分确实来自一个步骤，并且被记进了 overshoot。
+    let units_max = models.preparation.work.units_max;
+    let batch_bound = 1 + 180;
     assert!(
-        models.preparation.work.units_max <= MAX_UNITS_PER_FRAME + 8,
-        "单帧装配 {} 单元远超软预算",
-        models.preparation.work.units_max
+        units_max <= batch_bound + 8,
+        "单帧装配 {units_max} 单元超出单个批次的量级（{batch_bound}）"
     );
-    if models.preparation.work.units_max > MAX_UNITS_PER_FRAME {
+    if units_max > MAX_UNITS_PER_FRAME {
         assert!(
             models.preparation.work.budget_overshoot > 0,
             "超出软预算必须显式记录"

@@ -508,15 +508,16 @@ mod focus_offset_tests {
         let expected = ModelAabb::new([-3.0,-1.0,-2.0], [7.0,4.0,3.0]).transformed(&root);
         assert!(first.center.abs_diff_eq(expected.center(), 1e-4));
         assert!((first.radius - expected.radius()).abs() < 1e-4);
-        // Independent Web modelBounds/resolveShotCamera values for this rotated,
-        // media-containing layout; exercise the distance-clamp boundary as well.
-        assert!(first.center.abs_diff_eq(Vec3::new(429.70516, -261.13849, -135.98026), 1e-3));
-        assert!((first.radius - 272.36445).abs() < 1e-3);
+        // 该夹具在 `CANVAS_CAMERA_PITCH = 37°` 下的规范布局结果；同时覆盖距离 clamp 边界。
+        // 俯仰角改动会等比改变这里的 center/radius/position，改 `plan.rs` 的 pitch 时必须
+        // 一并重算 —— 30° 时代的值是 (429.70516, -261.13849, -135.98026) / 272.36445。
+        assert!(first.center.abs_diff_eq(Vec3::new(452.73526, -232.1526, -112.95019), 1e-3));
+        assert!((first.radius - 269.1553).abs() < 1e-3);
         let shot = crate::shot_camera::resolve_from_center_radius(
             first.center, first.radius, 0.6, 0.4, 0.1, 16.0 / 9.0, Vec3::new(4.0, 3.0, -2.0),
         );
-        assert!(shot.position.abs_diff_eq(Vec3::new(441.21295, -252.51680, -127.00615), 1e-3));
-        assert!((shot.distance - 14.43611).abs() < 1e-4);
+        assert!(shot.position.abs_diff_eq(Vec3::new(464.1546, -223.59715, -104.105385), 1e-3));
+        assert!((shot.distance - 14.266015).abs() < 1e-4);
         scene.nodes[0].composite_asset.as_mut().unwrap().media[0].width *= 5.0;
         let second = model_bounds_for_node(&scene, &models, &resources, "film").unwrap();
         assert_eq!(first.center, second.center);

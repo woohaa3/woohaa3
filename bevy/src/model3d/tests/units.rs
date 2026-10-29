@@ -345,8 +345,13 @@ fn group_anchor_centers_model_inside_bottom_footer() {
     let local = scene::model_world_aabb(&model, rotation, unit).expect("group model bounds");
     let center_y = -(anchor_canvas.y + (local.min[1] + local.max[1]) / 2.);
     let center_x = anchor_canvas.x + (local.min[0] + local.max[0]) / 2.0;
-    assert!((center_y - (node.y + node.height - 26.)).abs() < 0.5);
-    assert!((center_x - (node.x + node.width / 2.0)).abs() < 0.5);
+    // 组徽标挂在组框**下方**（`base_badge_rect` 从 `node.y + node.height + BADGE_OUTSET` 起算），
+    // 组形象在徽标内居中，锚点因此跟随徽标中心 —— 写死「组框底边内侧」的偏移会在
+    // 徽标改位后失效，这里直接取徽标矩形的中心作为事实源。
+    let badge = crate::canvas_query::group_model::badge_rect(&node);
+    let (badge_cx, badge_cy) = (badge.x + badge.z / 2., badge.y + badge.w / 2.);
+    assert!((center_y - badge_cy).abs() < 0.5, "center_y={center_y} badge_cy={badge_cy}");
+    assert!((center_x - badge_cx).abs() < 0.5, "center_x={center_x} badge_cx={badge_cx}");
     assert!(local.max[0] - local.min[0] <= node.width);
     assert!(local.max[1] - local.min[1] <= node.height);
     assert!(

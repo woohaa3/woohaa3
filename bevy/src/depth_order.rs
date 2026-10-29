@@ -430,9 +430,14 @@ mod tests {
 
     /// 片场锚点取**可见地面**底边：片场矩形底边更低时仍按地面菱形底角排序。
     ///
-    /// 几何取自用户画布里的重叠对（映射层真实派生的 `scopeGround`）：
-    /// 导演场矩形底边 3227.25、地面底角约 3059.39；小复合资产矩形底边 3110.75、
-    /// 地面底角约 3098.81。按矩形会把导演场排在前面，按可见地面则小复合资产在前。
+    /// 几何取用户画布里的重叠对（映射层真实派生的 `scopeGround`）。小复合资产的地面
+    /// 停在更靠下的地面坐标上，因此它的**可见地面底边**比导演场更低，而它的**矩形底边**
+    /// 更高：按矩形会把导演场排在前面，按可见地面则小复合资产在前。
+    ///
+    /// 注意 `ay` 由全局俯仰角派生（`scope_axis_y()`），导演场的地面范围更大，`ay` 变大时
+    /// 它的地面底边下降得更快 —— 原夹具（prop 地面中心 3038.47）在俯仰角调到 37° 后
+    /// 两者顺序会翻转、夹具失去意义。这里把 prop 的地面中心下移到 3200，让「小资产地面更低」
+    /// 这个前提在常见俯仰角区间内都成立，而不是绑定到某一个角度。
     #[cfg(feature = "canvas-core")]
     #[test]
     fn composite_asset_anchor_follows_visible_ground_not_content_rect() {
@@ -446,14 +451,21 @@ mod tests {
             .to_owned();
         let prop = r#"{"id":"prop","type":"composite-asset","x":-739.25,"y":2915.75,
             "width":260,"height":195,
-            "compositeAsset":{"x":-609.25,"y":3038.47,"width":260,"height":195,
+            "compositeAsset":{"x":-609.25,"y":3200.00,"width":260,"height":195,
               "scopeShape":"isometric-diamond",
-              "scopeGround":{"cx":-609.25,"cy":3038.47,"hx":95.47,"hz":75.20}},
+              "scopeGround":{"cx":-609.25,"cy":3200.00,"hx":95.47,"hz":75.20}},
             "model":{"resourceKey":"test:box","signature":"box"}}"#
             .to_owned();
+        let ground_bottom = |cy: f32, hx: f32, hz: f32| {
+            cy + crate::isometric_grid::plan::scope_axis_y() * (hx + hz)
+        };
+        let stage_rect = 2286.25 + 941.0;
+        let prop_rect = 2915.75 + 195.0;
+        let stage_ground = ground_bottom(2744.00, 510.61, 381.43);
+        let prop_ground = ground_bottom(3200.00, 95.47, 75.20);
         // 先确认矩形底边顺序确实与可见地面顺序相反，测试才有意义。
-        assert!(2286.25 + 941.0 > 2915.75 + 195.0);
-        assert!(3038.47 + 0.35355339 * (95.47 + 75.20) > 2744.00 + 0.35355339 * (510.61 + 381.43));
+        assert!(stage_rect > prop_rect, "按矩形应把导演场排在前面");
+        assert!(prop_ground > stage_ground, "按可见地面应把小复合资产排在前面");
         crate::set_scene(&test_scene_json(&[stage, prop])).expect("scene accepted");
         // 可见地面更靠下的小复合资产必须获得更大的观察深度（更靠近相机）。
         assert!(depth_of("prop") > depth_of("stage"));
