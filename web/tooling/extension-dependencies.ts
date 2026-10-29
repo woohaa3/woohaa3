@@ -2,10 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /** Parser is supplied by each extension's existing TypeScript dev dependency. */
-export function moduleSpecifiers(ts: typeof import("typescript"), text: string): string[] {
+export function moduleSpecifiers(ts: typeof import("typescript-legacy"), text: string): string[] {
   const file = ts.createSourceFile("module.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const result: string[] = [];
-  function visit(node: import("typescript").Node) {
+  function visit(node: import("typescript-legacy").Node) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) result.push(node.moduleSpecifier.text);
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) result.push(node.arguments[0].text);
     // import("module").Type is also an environment/dependency edge.
@@ -30,7 +30,7 @@ export function sourceModules(root: string): Map<string, string> {
 }
 
 /** Resolve actual module targets before checking responsibility, environment, cycles and entry closures. */
-export function checkExtensionDependencies(ts: typeof import("typescript"), modules: ReadonlyMap<string, string>, entries: readonly string[]): string[] {
+export function checkExtensionDependencies(ts: typeof import("typescript-legacy"), modules: ReadonlyMap<string, string>, entries: readonly string[]): string[] {
   const errors: string[] = [];
   const edges = new Map<string, string[]>();
   const roles = new Set(["state", "authoring", "preview", "integration"]);

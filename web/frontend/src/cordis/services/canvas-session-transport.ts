@@ -220,7 +220,7 @@ export function createCanvasSessionTransport(options: CanvasSessionTransportOpti
       // 先 flush 缓存帧，再触发各通道 open 握手。
       for (const frame of queued) {
         try {
-          socket.send(frame);
+          socket.send(asBufferSource(frame));
         } catch {
           // ignore
         }
@@ -317,11 +317,15 @@ export function createCanvasSessionTransport(options: CanvasSessionTransportOpti
     publish({ error: detail });
   };
 
+  // TS7 的 DOM lib 把 WebSocket.send 收紧为 BufferSource（ArrayBuffer 视图），
+  // 而协议帧是 lib0 产生的 Uint8Array<ArrayBufferLike>；帧底层始终是 ArrayBuffer，直接透传。
+  const asBufferSource = (frame: Uint8Array): BufferSource => frame as unknown as BufferSource;
+
   const sendFrame = (frame: Uint8Array) => {
     if (disposed) return;
     if (ws && state.status === "open" && ws.readyState === webSocketImpl.OPEN) {
       try {
-        ws.send(frame);
+        ws.send(asBufferSource(frame));
         return;
       } catch {
         // 落到队列重连后发送。

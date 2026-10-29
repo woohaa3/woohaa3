@@ -143,16 +143,20 @@ function shimSource(target, names) {
 let tsModulePromise = null;
 function loadTypescript(baseDir) {
   if (!tsModulePromise) {
-    // extension 包各自声明 typescript devDependency；回退到宿主目录解析。
-    const bases = [baseDir, path.join(WEB_DIR, "frontend"), WEB_DIR];
+    // TS7 的原生包不再提供 JS 编译器 API，构建脚本用 5.x 别名做 AST 依赖分析，
+    // 回退到宿主目录解析（旧环境仍可直接解析 typescript）。
+    const bases = [baseDir, path.join(WEB_DIR, "frontend"), path.join(WEB_DIR, "tooling"), WEB_DIR];
     let resolved = null;
-    for (const base of bases) {
-      try {
-        resolved = createRequire(path.join(base, "package.json")).resolve("typescript");
-        break;
-      } catch {
-        // 尝试下一个 base。
+    for (const name of ["typescript-legacy", "typescript"]) {
+      for (const base of bases) {
+        try {
+          resolved = createRequire(path.join(base, "package.json")).resolve(name);
+          break;
+        } catch {
+          // 尝试下一个 base。
+        }
       }
+      if (resolved) break;
     }
     if (!resolved) throw new Error("extension browser build 需要 typescript（AST 依赖分析）");
     tsModulePromise = import(pathToFileURL(resolved).href);

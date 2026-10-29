@@ -15,7 +15,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import ts from "typescript";
+import ts from "typescript-legacy";
 import { describe, expect, it } from "vitest";
 
 const EXTENSION_API_SPECIFIER = "@woohaa3/frontend/extension-api";

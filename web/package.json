@@ -14,7 +14,7 @@
     "build:backend": "pnpm --filter @woohaa3/backend run build && pnpm --filter @woohaa3/backend run server:build",
     "build:units": "pnpm run icons:sync && pnpm run build:contracts && pnpm run build:sdk && pnpm run build:plugins && pnpm run build:services && pnpm run build:backend",
     "extensions:check": "node ../scripts/extensions-preflight.mjs",
-    "typecheck": "pnpm -r --filter \"./ui\" --filter \"./contracts\" --filter \"./provider-sdk\" --filter \"./services/*\" --filter \"./backend\" --filter \"./extensions/*\" --filter \"../extensions/*\" --filter \"./frontend\" run typecheck",
+    "typecheck": "pnpm -r --parallel --filter \"./ui\" --filter \"./contracts\" --filter \"./provider-sdk\" --filter \"./services/*\" --filter \"./backend\" --filter \"./extensions/*\" --filter \"../extensions/*\" --filter \"./frontend\" run typecheck",
     "test": "pnpm run build:units && pnpm -r run test",
     "test:units": "pnpm -r --filter \"./ui\" --filter \"./contracts\" --filter \"./provider-sdk\" --filter \"./services/*\" --filter \"./backend\" --filter \"./extensions/*\" --filter \"../extensions/*\" --filter \"./frontend\" run test",
     "prepare": "node ../scripts/sync-bevy-assets.mjs && pnpm run build:contracts",
