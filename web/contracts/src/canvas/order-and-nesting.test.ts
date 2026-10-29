@@ -130,7 +130,7 @@ describe("2D container emission order", () => {
 
   it("orders film sets by visible ground bottom, not by the content fit rect", () => {
     // 用户画布里的重叠对：导演场矩形底边 3227.25、地面底角约 3070.25；
-    // 小复合资产矩形底边 3110.75、地面底角约 3078.25。按矩形大场在前，按地面小场在前。
+    // 小复合资产矩形底边 3110.75、地面底角约 3078.25。按矩形小场在前，按地面大场在前。
     const { ids } = scene([
       {
         id: "stage",
@@ -148,7 +148,7 @@ describe("2D container emission order", () => {
       },
     ]);
     expect(2286.25 + 941).toBeGreaterThan(2915.75 + 195);
-    expect(ids).toEqual(["prop", "stage"]);
+    expect(ids).toEqual(["stage", "prop"]);
   });
 
   it("keeps the container order stable when a group is collapsed", () => {

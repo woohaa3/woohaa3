@@ -19,7 +19,7 @@ pub const GRID_LINE_WIDTH: f32 = 1.4;
 /// 网格相对相机的深度。远在 3D 模型之后，避免遮挡；正交投影下深度不影响外观。
 pub const GRID_DEPTH: f32 = -20000.0;
 /// 普通画布相机俯仰角（弧度）。修改此处即可统一调整画布等距视角。
-pub const CANVAS_CAMERA_PITCH: f32 = 37.0 * PI / 180.0;
+pub const CANVAS_CAMERA_PITCH: f32 = 30.0 * PI / 180.0;
 /// 正交 3D 相机的远裁剪面。必须覆盖 `GRID_DEPTH`，否则网格会被裁掉。
 pub const MODEL_CAMERA_FAR: f32 = 100_000.0;
 

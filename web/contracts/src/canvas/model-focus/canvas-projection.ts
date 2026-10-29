@@ -9,7 +9,7 @@ import { eulerXyz } from "./math.js";
 import type { CanvasViewport } from "./types.js";
 
 /** 普通画布相机俯仰角；修改此处即可统一调整画布等距视角。 */
-export const CANVAS_CAMERA_PITCH = (37 * Math.PI) / 180;
+export const CANVAS_CAMERA_PITCH = (30 * Math.PI) / 180;
 
 /**
  * 等距视角（与 Rust `grid::view_rotation()` 逐位一致：EulerRot::XYZ, CANVAS_CAMERA_PITCH, -PI/4, 0）。
