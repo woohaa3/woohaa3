@@ -118,9 +118,16 @@ function HostThemeSync({ theme }: { theme: ThemeService }) {
  * MemoryRouter 回到初始位置（首页）。用户点的是"进这张画布"，落回首页就等于没反应。
  * 所以跳转前记一笔，新外壳挂载时读走。
  *
+ * 同一原因也适用于 sixi shell 因宿主画布进入 node-focus 工作区而被卸载、退出后重挂的情况：
+ * 重挂时也要落回原来那个路由（通常是 ROUTES.create），不能落回首页弹出四喜界面。
+ * 这里同时维护两个 key：
+ * - PENDING_ENTRY_KEY：整页跳转前写入，挂载后清除（一次性）
+ * - CURRENT_ROUTE_KEY：路由变化时持续同步，供 remount 时读取；挂载后**不清除**
+ *
  * 用 sessionStorage：整页跳转后模块变量不在了；只活在这个标签页里，换标签或关掉就丢，正合适。
  */
 const PENDING_ENTRY_KEY = 'sixi-spike.entry';
+const CURRENT_ROUTE_KEY = 'sixi-spike.current-route';
 
 function readPendingEntry(): string | null {
   try {
@@ -139,6 +146,22 @@ function writePendingEntry(entry: string | null): void {
   }
 }
 
+function readCurrentRoute(): string | null {
+  try {
+    return sessionStorage.getItem(CURRENT_ROUTE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeCurrentRoute(route: string): void {
+  try {
+    sessionStorage.setItem(CURRENT_ROUTE_KEY, route);
+  } catch {
+    /* 存储不可用：忽略 */
+  }
+}
+
 export function SixiShell({
   theme,
   canvasCatalog,
@@ -150,8 +173,10 @@ export function SixiShell({
   /** 当前打开的画布 id；点的就是它时不必切 scope，直接进画布态。 */
   currentCanvasId: () => string | null;
 }) {
-  // 只在首次渲染读一次；清除放在 effect 里，避免渲染期副作用
-  const [initialEntry] = useState(() => readPendingEntry() ?? ROUTES.home);
+  // 只在首次渲染读一次；pending 清除放在 effect 里，避免渲染期副作用。
+  // 优先 pendingEntry（整页跳转场景），其次 currentRoute（node-focus 卸载后 remount 场景），
+  // 最后才落回首页。
+  const [initialEntry] = useState(() => readPendingEntry() ?? readCurrentRoute() ?? ROUTES.home);
   useEffect(() => {
     writePendingEntry(null);
   }, []);
@@ -163,6 +188,8 @@ export function SixiShell({
         {/* 放在 Router 里：打开当前画布时要用四喜自己的 navigate 切到画布态 */}
         <HostProjectSource catalog={canvasCatalog} currentCanvasId={currentCanvasId} />
         <HostCanvasCurtain />
+        {/* 持续同步当前路由，供 shell 被卸载后 remount 时恢复位置（如 node-focus 卸载场景）。 */}
+        <RouteSync />
         <Routes>
           {/* 画布态单独一条：不套 AppLayout，四喜的侧栏与顶栏因此完全撤走。 */}
           <Route path={ROUTES.create} element={<CanvasMode />} />
@@ -209,6 +236,22 @@ function HostProjectSource({
     const reset = setProjectSource(createHostProjectSource(catalog, open));
     return reset;
   }, [catalog, currentCanvasId, navigate]);
+  return null;
+}
+
+/**
+ * 持续把当前路由同步到 sessionStorage，供 shell 被卸载后重挂时恢复位置。
+ *
+ * 宿主进入 node-focus 工作区时 `canvas.overlay` 的贡献（含 sixi shell）会被卸载；
+ * 退出聚焦后重挂，MemoryRouter 会重新走 `initialEntry`，如果不记录当前路由就会落回首页。
+ * RouteSync 在每次路由变化时写入 sessionStorage，remount 时 `SixiShell` 读走并作为
+ * `initialEntry`，于是恢复到离开前的位置（通常是 ROUTES.create）。
+ */
+function RouteSync() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    writeCurrentRoute(pathname);
+  }, [pathname]);
   return null;
 }
 

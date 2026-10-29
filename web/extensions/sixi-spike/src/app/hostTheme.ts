@@ -19,6 +19,7 @@
 import { theme as antdTheme } from "antd";
 import {
   APP_THEME_BUILTIN_PRESETS,
+  APP_THEME_SCHEMA_VERSION,
   compositeOver,
   themeHexToRgb,
   type AppThemeTokens
@@ -188,7 +189,7 @@ export function sixiHostPreset(mode: ThemeMode): HostPreset {
     gridSelection: onBackdrop(t.colorPrimary)
   };
 
-  const preset: HostPreset = { id, version: base.version, tokens: { ...base.tokens, ...overrides } };
+  const preset: HostPreset = { id, version: APP_THEME_SCHEMA_VERSION, tokens: { ...base.tokens, ...overrides } };
   presetCache.set(mode, preset);
   return preset;
 }
